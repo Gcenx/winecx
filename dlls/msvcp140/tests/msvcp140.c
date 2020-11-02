@@ -16,6 +16,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <errno.h>
 #include <stdio.h>
 
 #include "windef.h"
@@ -191,6 +192,8 @@ static WCHAR* (__cdecl *p_Temp_get)(WCHAR *);
 static int (__cdecl *p_To_byte)(const WCHAR *src, char *dst);
 static int (__cdecl *p_To_wide)(const char *src, WCHAR *dst);
 static int (__cdecl *p_Unlink)(WCHAR const*);
+static ULONG (__cdecl *p__Winerror_message)(ULONG, char*, ULONG);
+static int (__cdecl *p__Winerror_map)(int);
 
 static BOOLEAN (WINAPI *pCreateSymbolicLinkW)(const WCHAR *, const WCHAR *, DWORD);
 
@@ -211,6 +214,7 @@ static BOOL init(void)
     SET(p__Thrd_id, "_Thrd_id");
     SET(p__Task_impl_base__IsNonBlockingThread, "?_IsNonBlockingThread@_Task_impl_base@details@Concurrency@@SA_NXZ");
     SET(p__ContextCallback__IsCurrentOriginSTA, "?_IsCurrentOriginSTA@_ContextCallback@details@Concurrency@@CA_NXZ");
+    SET(p__Winerror_map, "?_Winerror_map@std@@YAHH@Z");
 
     if(sizeof(void*) == 8) { /* 64-bit initialization */
         SET(p_task_continuation_context_ctor, "??0task_continuation_context@Concurrency@@AEAA@XZ");
@@ -227,6 +231,7 @@ static BOOL init(void)
         SET(p__Schedule_chore, "?_Schedule_chore@details@Concurrency@@YAHPEAU_Threadpool_chore@12@@Z");
         SET(p__Reschedule_chore, "?_Reschedule_chore@details@Concurrency@@YAHPEBU_Threadpool_chore@12@@Z");
         SET(p__Release_chore, "?_Release_chore@details@Concurrency@@YAXPEAU_Threadpool_chore@12@@Z");
+        SET(p__Winerror_message, "?_Winerror_message@std@@YAKKPEADK@Z");
     } else {
 #ifdef __arm__
         SET(p_task_continuation_context_ctor, "??0task_continuation_context@Concurrency@@AAA@XZ");
@@ -256,6 +261,7 @@ static BOOL init(void)
         SET(p__Schedule_chore, "?_Schedule_chore@details@Concurrency@@YAHPAU_Threadpool_chore@12@@Z");
         SET(p__Reschedule_chore, "?_Reschedule_chore@details@Concurrency@@YAHPBU_Threadpool_chore@12@@Z");
         SET(p__Release_chore, "?_Release_chore@details@Concurrency@@YAXPAU_Threadpool_chore@12@@Z");
+        SET(p__Winerror_message, "?_Winerror_message@std@@YAKKPADK@Z");
     }
 
     SET(p_Close_dir, "_Close_dir");
@@ -874,13 +880,13 @@ static void test_Stat(void)
     ok(0777 == perms, "_Stat(): perms expect: 0777, got 0%o\n", perms);
 
     if(ret) {
-        todo_wine ok(DeleteFileW(test_f1_linkW), "expect tr2_test_dir/f1_link to exist\n");
-        todo_wine ok(RemoveDirectoryW(test_dir_linkW), "expect tr2_test_dir/dir_link to exist\n");
+        todo_wine ok(DeleteFileW(test_f1_linkW), "expect wine_test_dir/f1_link to exist\n");
+        todo_wine ok(RemoveDirectoryW(test_dir_linkW), "expect wine_test_dir/dir_link to exist\n");
     }
-    ok(DeleteFileW(test_f1W), "expect tr2_test_dir/f1 to exist\n");
+    ok(DeleteFileW(test_f1W), "expect wine_test_dir/f1 to exist\n");
     SetFileAttributesW(test_f2W, FILE_ATTRIBUTE_NORMAL);
-    ok(DeleteFileW(test_f2W), "expect tr2_test_dir/f2 to exist\n");
-    ok(RemoveDirectoryW(test_dirW), "expect tr2_test_dir to exist\n");
+    ok(DeleteFileW(test_f2W), "expect wine_test_dir/f2 to exist\n");
+    ok(RemoveDirectoryW(test_dirW), "expect wine_test_dir to exist\n");
 
     ok(SetCurrentDirectoryW(origin_path), "SetCurrentDirectoryW to origin_path failed\n");
 }
@@ -1145,7 +1151,7 @@ static void test_Rename(void)
     CloseHandle(file);
 
     ret = p_Rename(f1W, f1W);
-    todo_wine ok(ERROR_SUCCESS == ret, "_Rename(): expect: ERROR_SUCCESS, got %d\n", ret);
+    ok(ERROR_SUCCESS == ret, "_Rename(): expect: ERROR_SUCCESS, got %d\n", ret);
     for(i=0; i<ARRAY_SIZE(tests); i++) {
         errno = 0xdeadbeef;
         if(tests[i].val == ERROR_SUCCESS) {
@@ -1167,7 +1173,7 @@ static void test_Rename(void)
             CloseHandle(h2);
             ok(info1.nFileIndexHigh == info2.nFileIndexHigh
                     && info1.nFileIndexLow == info2.nFileIndexLow,
-                    "test_tr2_sys__Rename(): test %d expect two files equivalent\n", i+1);
+                    "_Rename(): test %d expect two files equivalent\n", i+1);
         }
     }
 
@@ -1181,7 +1187,7 @@ static void test_Rename(void)
     ok(ret == ERROR_ALREADY_EXISTS, "_Rename(): expect: ERROR_ALREADY_EXISTS, got %d\n", ret);
     ok(p_File_size(f1W) == 7, "_Rename(): expect: 7, got %s\n",
             wine_dbgstr_longlong(p_File_size(f1W)));
-    ok(p_File_size(f1_renameW) == 0, "test_tr2_sys__Rename(): expect: 0, got %s\n",
+    ok(p_File_size(f1_renameW) == 0, "_Rename(): expect: 0, got %s\n",
             wine_dbgstr_longlong(p_File_size(f1_renameW)));
 
     ok(DeleteFileW(f1_renameW), "expect f1_rename to exist\n");
@@ -1281,6 +1287,79 @@ static void test_Last_write_time(void)
     ok(SetCurrentDirectoryW(origin_path), "SetCurrentDirectoryW to origin_path failed\n");
 }
 
+static void test__Winerror_message(void)
+{
+    char buf[256], buf_fm[256];
+    ULONG ret, ret_fm;
+
+    ret_fm = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+            NULL, 0, 0, buf_fm, sizeof(buf_fm), NULL);
+
+    memset(buf, 'a', sizeof(buf));
+    ret = p__Winerror_message(0, buf, sizeof(buf));
+    ok(ret == ret_fm, "ret = %u, expected %u\n", ret, ret_fm);
+    ok(!strcmp(buf, buf_fm), "buf = %s, expected %s\n", buf, buf_fm);
+
+    memset(buf, 'a', sizeof(buf));
+    ret = p__Winerror_message(0, buf, 2);
+    ok(!ret, "ret = %u\n", ret);
+    ok(buf[0] == 'a', "buf = %s\n", buf);
+}
+
+static void test__Winerror_map(void)
+{
+    static struct {
+        int winerr, doserr;
+        BOOL broken;
+    } tests[] = {
+        {ERROR_INVALID_FUNCTION, ENOSYS}, {ERROR_FILE_NOT_FOUND, ENOENT},
+        {ERROR_PATH_NOT_FOUND, ENOENT}, {ERROR_TOO_MANY_OPEN_FILES, EMFILE},
+        {ERROR_ACCESS_DENIED, EACCES}, {ERROR_INVALID_HANDLE, EINVAL},
+        {ERROR_NOT_ENOUGH_MEMORY, ENOMEM}, {ERROR_INVALID_ACCESS, EACCES},
+        {ERROR_OUTOFMEMORY, ENOMEM}, {ERROR_INVALID_DRIVE, ENODEV},
+        {ERROR_CURRENT_DIRECTORY, EACCES}, {ERROR_NOT_SAME_DEVICE, EXDEV},
+        {ERROR_WRITE_PROTECT, EACCES}, {ERROR_BAD_UNIT, ENODEV},
+        {ERROR_NOT_READY, EAGAIN}, {ERROR_SEEK, EIO}, {ERROR_WRITE_FAULT, EIO},
+        {ERROR_READ_FAULT, EIO}, {ERROR_SHARING_VIOLATION, EACCES},
+        {ERROR_LOCK_VIOLATION, ENOLCK}, {ERROR_HANDLE_DISK_FULL, ENOSPC},
+        {ERROR_NOT_SUPPORTED, ENOTSUP, TRUE}, {ERROR_DEV_NOT_EXIST, ENODEV},
+        {ERROR_FILE_EXISTS, EEXIST}, {ERROR_CANNOT_MAKE, EACCES},
+        {ERROR_INVALID_PARAMETER, EINVAL, TRUE}, {ERROR_OPEN_FAILED, EIO},
+        {ERROR_BUFFER_OVERFLOW, ENAMETOOLONG}, {ERROR_DISK_FULL, ENOSPC},
+        {ERROR_INVALID_NAME, EINVAL}, {ERROR_NEGATIVE_SEEK, EINVAL},
+        {ERROR_BUSY_DRIVE, EBUSY}, {ERROR_DIR_NOT_EMPTY, ENOTEMPTY},
+        {ERROR_BUSY, EBUSY}, {ERROR_ALREADY_EXISTS, EEXIST},
+        {ERROR_LOCKED, ENOLCK}, {ERROR_DIRECTORY, EINVAL},
+        {ERROR_OPERATION_ABORTED, ECANCELED}, {ERROR_NOACCESS, EACCES},
+        {ERROR_CANTOPEN, EIO}, {ERROR_CANTREAD, EIO}, {ERROR_CANTWRITE, EIO},
+        {ERROR_RETRY, EAGAIN}, {ERROR_OPEN_FILES, EBUSY},
+        {ERROR_DEVICE_IN_USE, EBUSY}, {ERROR_REPARSE_TAG_INVALID, EINVAL, TRUE},
+        {WSAEINTR, EINTR}, {WSAEBADF, EBADF}, {WSAEACCES, EACCES},
+        {WSAEFAULT, EFAULT}, {WSAEINVAL, EINVAL}, {WSAEMFILE, EMFILE},
+        {WSAEWOULDBLOCK, EWOULDBLOCK}, {WSAEINPROGRESS, EINPROGRESS},
+        {WSAEALREADY, EALREADY}, {WSAENOTSOCK, ENOTSOCK},
+        {WSAEDESTADDRREQ, EDESTADDRREQ}, {WSAEMSGSIZE, EMSGSIZE},
+        {WSAEPROTOTYPE, EPROTOTYPE}, {WSAENOPROTOOPT, ENOPROTOOPT},
+        {WSAEPROTONOSUPPORT, EPROTONOSUPPORT}, {WSAEOPNOTSUPP, EOPNOTSUPP},
+        {WSAEAFNOSUPPORT, EAFNOSUPPORT}, {WSAEADDRINUSE, EADDRINUSE},
+        {WSAEADDRNOTAVAIL, EADDRNOTAVAIL}, {WSAENETDOWN, ENETDOWN},
+        {WSAENETUNREACH, ENETUNREACH}, {WSAENETRESET, ENETRESET},
+        {WSAECONNABORTED, ECONNABORTED}, {WSAECONNRESET, ECONNRESET},
+        {WSAENOBUFS, ENOBUFS}, {WSAEISCONN, EISCONN}, {WSAENOTCONN, ENOTCONN},
+        {WSAETIMEDOUT, ETIMEDOUT}, {WSAECONNREFUSED, ECONNREFUSED},
+        {WSAENAMETOOLONG, ENAMETOOLONG}, {WSAEHOSTUNREACH, EHOSTUNREACH}
+    };
+    int i, ret;
+
+    for(i=0; i<ARRAY_SIZE(tests); i++)
+    {
+        ret = p__Winerror_map(tests[i].winerr);
+        ok(ret == tests[i].doserr || broken(tests[i].broken && !ret),
+                "_Winerror_map(%d) returned %d, expected %d\n",
+                tests[i].winerr, ret, tests[i].doserr);
+    }
+}
+
 START_TEST(msvcp140)
 {
     if(!init()) return;
@@ -1302,5 +1381,7 @@ START_TEST(msvcp140)
     test_Temp_get();
     test_Rename();
     test_Last_write_time();
+    test__Winerror_message();
+    test__Winerror_map();
     FreeLibrary(msvcp);
 }

@@ -166,7 +166,7 @@ struct closed_fd
 {
     struct list entry;       /* entry in inode closed list */
     int         unix_fd;     /* the unix file descriptor */
-    int         unlink;      /* whether to unlink on close */
+    int         unlink;      /* whether to unlink on close: -1 - implicit FILE_DELETE_ON_CLOSE, 1 - explicit disposition */
     char       *unix_name;   /* name to unlink on close, points to parent fd unix_name */
 };
 
@@ -536,7 +536,7 @@ static inline void main_loop_epoll(void)
         if (!active_users) break;  /* last user removed by a timeout */
         if (epoll_fd == -1) break;  /* an error occurred with epoll */
 
-        ret = epoll_wait( epoll_fd, events, sizeof(events)/sizeof(events[0]), timeout );
+        ret = epoll_wait( epoll_fd, events, ARRAY_SIZE( events ), timeout );
         set_current_time();
 
         /* put the events into the pollfd array first, like poll does */
@@ -647,9 +647,9 @@ static inline void main_loop_epoll(void)
 
             ts.tv_sec = timeout / 1000;
             ts.tv_nsec = (timeout % 1000) * 1000000;
-            ret = kevent( kqueue_fd, NULL, 0, events, sizeof(events)/sizeof(events[0]), &ts );
+            ret = kevent( kqueue_fd, NULL, 0, events, ARRAY_SIZE( events ), &ts );
         }
-        else ret = kevent( kqueue_fd, NULL, 0, events, sizeof(events)/sizeof(events[0]), NULL );
+        else ret = kevent( kqueue_fd, NULL, 0, events, ARRAY_SIZE( events ), NULL );
 
         set_current_time();
 
@@ -751,9 +751,9 @@ static inline void main_loop_epoll(void)
 
             ts.tv_sec = timeout / 1000;
             ts.tv_nsec = (timeout % 1000) * 1000000;
-            ret = port_getn( port_fd, events, sizeof(events)/sizeof(events[0]), &nget, &ts );
+            ret = port_getn( port_fd, events, ARRAY_SIZE( events ), &nget, &ts );
         }
-        else ret = port_getn( port_fd, events, sizeof(events)/sizeof(events[0]), &nget, NULL );
+        else ret = port_getn( port_fd, events, ARRAY_SIZE( events ), &nget, NULL );
 
 	if (ret == -1) break;  /* an error occurred with event completion */
 
@@ -1869,7 +1869,7 @@ struct fd *open_fd( struct fd *root, const char *name, int flags, mode_t *mode, 
             goto error;
         }
 
-        fd->closed->unlink = (options & FILE_DELETE_ON_CLOSE) != 0;
+        fd->closed->unlink = (options & FILE_DELETE_ON_CLOSE) ? -1 : 0;
         if (flags & O_TRUNC)
         {
             if (S_ISDIR(st.st_mode))
@@ -1930,6 +1930,12 @@ unsigned int get_fd_options( struct fd *fd )
     return fd->options;
 }
 
+/* check if fd is in overlapped mode */
+int is_fd_overlapped( struct fd *fd )
+{
+    return !(fd->options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT));
+}
+
 /* retrieve the unix fd for an object */
 int get_unix_fd( struct fd *fd )
 {
@@ -1958,6 +1964,7 @@ int is_fd_removable( struct fd *fd )
 /* set or clear the fd signaled state */
 void set_fd_signaled( struct fd *fd, int signaled )
 {
+    if (fd->comp_flags & FILE_SKIP_SET_EVENT_ON_HANDLE) return;
     fd->signaled = signaled;
     if (signaled) wake_up( fd->user, 0 );
 }
@@ -2173,9 +2180,59 @@ int no_fd_flush( struct fd *fd, struct async *async )
 }
 
 /* default get_file_info() routine */
-void no_fd_get_file_info( struct fd *fd, unsigned int info_class )
+void no_fd_get_file_info( struct fd *fd, obj_handle_t handle, unsigned int info_class )
 {
     set_error( STATUS_OBJECT_TYPE_MISMATCH );
+}
+
+/* default get_file_info() routine */
+void default_fd_get_file_info( struct fd *fd, obj_handle_t handle, unsigned int info_class )
+{
+    switch (info_class)
+    {
+    case FileAccessInformation:
+        {
+            FILE_ACCESS_INFORMATION info;
+            if (get_reply_max_size() < sizeof(info))
+            {
+                set_error( STATUS_INFO_LENGTH_MISMATCH );
+                return;
+            }
+            info.AccessFlags = get_handle_access( current->process, handle );
+            set_reply_data( &info, sizeof(info) );
+            break;
+        }
+    case FileModeInformation:
+        {
+            FILE_MODE_INFORMATION info;
+            if (get_reply_max_size() < sizeof(info))
+            {
+                set_error( STATUS_INFO_LENGTH_MISMATCH );
+                return;
+            }
+            info.Mode = fd->options & ( FILE_WRITE_THROUGH
+                                      | FILE_SEQUENTIAL_ONLY
+                                      | FILE_NO_INTERMEDIATE_BUFFERING
+                                      | FILE_SYNCHRONOUS_IO_ALERT
+                                      | FILE_SYNCHRONOUS_IO_NONALERT );
+            set_reply_data( &info, sizeof(info) );
+            break;
+        }
+    case FileIoCompletionNotificationInformation:
+        {
+            FILE_IO_COMPLETION_NOTIFICATION_INFORMATION info;
+            if (get_reply_max_size() < sizeof(info))
+            {
+                set_error( STATUS_INFO_LENGTH_MISMATCH );
+                return;
+            }
+            info.Flags = fd->comp_flags;
+            set_reply_data( &info, sizeof(info) );
+            break;
+        }
+    default:
+        set_error( STATUS_NOT_IMPLEMENTED );
+    }
 }
 
 /* default get_volume_info() routine */
@@ -2250,14 +2307,16 @@ static void set_fd_disposition( struct fd *fd, int unlink )
         return;
     }
 
-    /* can't unlink files we don't have permission to access */
-    if (unlink && !(st.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)))
+    /* can't unlink files we don't have permission to write */
+    if (unlink && !(st.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)) && !S_ISDIR(st.st_mode))
     {
         set_error( STATUS_CANNOT_DELETE );
         return;
     }
 
-    fd->closed->unlink = unlink || (fd->options & FILE_DELETE_ON_CLOSE);
+    fd->closed->unlink = unlink ? 1 : 0;
+    if (fd->options & FILE_DELETE_ON_CLOSE)
+        fd->closed->unlink = -1;
 }
 
 /* set new name for the fd */
@@ -2382,7 +2441,7 @@ DECL_HANDLER(flush)
 
     if ((async = create_request_async( fd, fd->comp_flags, &req->async )))
     {
-        reply->event = async_handoff( async, fd->fd_ops->flush( fd, async ), NULL );
+        reply->event = async_handoff( async, fd->fd_ops->flush( fd, async ), NULL, 1 );
         release_object( async );
     }
     release_object( fd );
@@ -2395,7 +2454,7 @@ DECL_HANDLER(get_file_info)
 
     if (fd)
     {
-        fd->fd_ops->get_file_info( fd, req->info_class );
+        fd->fd_ops->get_file_info( fd, req->handle, req->info_class );
         release_object( fd );
     }
 }
@@ -2481,7 +2540,7 @@ DECL_HANDLER(read)
 
     if ((async = create_request_async( fd, fd->comp_flags, &req->async )))
     {
-        reply->wait    = async_handoff( async, fd->fd_ops->read( fd, async, req->pos ), NULL );
+        reply->wait    = async_handoff( async, fd->fd_ops->read( fd, async, req->pos ), NULL, 0 );
         reply->options = fd->options;
         release_object( async );
     }
@@ -2498,7 +2557,7 @@ DECL_HANDLER(write)
 
     if ((async = create_request_async( fd, fd->comp_flags, &req->async )))
     {
-        reply->wait    = async_handoff( async, fd->fd_ops->write( fd, async, req->pos ), &reply->size );
+        reply->wait    = async_handoff( async, fd->fd_ops->write( fd, async, req->pos ), &reply->size, 0 );
         reply->options = fd->options;
         release_object( async );
     }
@@ -2516,7 +2575,7 @@ DECL_HANDLER(ioctl)
 
     if ((async = create_request_async( fd, fd->comp_flags, &req->async )))
     {
-        reply->wait    = async_handoff( async, fd->fd_ops->ioctl( fd, req->code, async ), NULL );
+        reply->wait    = async_handoff( async, fd->fd_ops->ioctl( fd, req->code, async ), NULL, 0 );
         reply->options = fd->options;
         release_object( async );
     }
@@ -2561,7 +2620,7 @@ DECL_HANDLER(set_completion_info)
 
     if (fd)
     {
-        if (!(fd->options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT)) && !fd->completion)
+        if (is_fd_overlapped( fd ) && !fd->completion)
         {
             fd->completion = get_completion_obj( current->process, req->chandle, IO_COMPLETION_MODIFY_STATE );
             fd->comp_key = req->ckey;
@@ -2577,36 +2636,29 @@ DECL_HANDLER(add_fd_completion)
     struct fd *fd = get_handle_fd_obj( current->process, req->handle, 0 );
     if (fd)
     {
-        if (fd->completion && (!(fd->comp_flags & COMPLETION_SKIP_ON_SUCCESS) || req->status || req->force))
+        if (fd->completion && (req->async || !(fd->comp_flags & FILE_SKIP_COMPLETION_PORT_ON_SUCCESS)))
             add_completion( fd->completion, fd->comp_key, req->cvalue, req->status, req->information );
         release_object( fd );
     }
 }
 
 /* set fd completion information */
-DECL_HANDLER(set_fd_compl_info)
+DECL_HANDLER(set_fd_completion_mode)
 {
     struct fd *fd = get_handle_fd_obj( current->process, req->handle, 0 );
     if (fd)
     {
-        if (!(fd->options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT)))
+        if (is_fd_overlapped( fd ))
         {
-            /* removing COMPLETION_SKIP_ON_SUCCESS is not allowed */
-            fd->comp_flags |= req->flags;
+            if (req->flags & FILE_SKIP_SET_EVENT_ON_HANDLE)
+                set_fd_signaled( fd, 0 );
+            /* removing flags is not allowed */
+            fd->comp_flags |= req->flags & ( FILE_SKIP_COMPLETION_PORT_ON_SUCCESS
+                                           | FILE_SKIP_SET_EVENT_ON_HANDLE
+                                           | FILE_SKIP_SET_USER_EVENT_ON_FAST_IO );
         }
         else
             set_error( STATUS_INVALID_PARAMETER );
-        release_object( fd );
-    }
-}
-
-/* get fd completion information */
-DECL_HANDLER(get_fd_compl_info)
-{
-    struct fd *fd = get_handle_fd_obj( current->process, req->handle, 0 );
-    if (fd)
-    {
-        reply->flags = fd->comp_flags;
         release_object( fd );
     }
 }

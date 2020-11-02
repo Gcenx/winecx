@@ -179,6 +179,8 @@ if exist foo (type foo) else echo not supported
 echo --- redirections within IF statements
 if 1==1 echo foo1>bar
 type bar & del bar
+if 1==1 echo foo2>>bar
+type bar & del bar
 echo -----
 if 1==1 (echo foo2>bar) else echo baz2>bar
 type bar & del bar
@@ -525,6 +527,48 @@ rmdir "fol;der"
 rmdir folder
 PATH=%PATH_BACKUP%
 
+echo ------------ Testing 'choice' ------------
+
+rem Windows XP and Windows 2000 do not come with choice
+rem echo is used for @or_broken@ formatting
+choice /C:ABC /M "Example message" /D A /T:0
+if %ERRORLEVEL% EQU 9009 (
+  echo choice unavailable
+)
+echo %ERRORLEVEL%
+choice /C ABC "/M:Example message" /D:B /T 0
+if %ERRORLEVEL% EQU 9009 (
+  echo choice unavailable
+)
+echo %ERRORLEVEL%
+choice /C def /D:f /T:0
+if %ERRORLEVEL% EQU 9009 (
+  echo choice unavailable
+)
+echo %ERRORLEVEL%
+REM If a pipe fails due to a nonexistent command
+REM it will stop the whole program's execution
+if %ERRORLEVEL% NEQ 9009 (
+  echo Y | choice /C ABCXYZ /D A /T 2
+)
+if %ERRORLEVEL% EQU 9009 (
+  echo choice unavailable
+)
+echo %ERRORLEVEL%
+choice /C ABC /N /D A /T 0
+if %ERRORLEVEL% EQU 9009 (
+  echo choice unavailable
+)
+echo %ERRORLEVEL%
+choice /C abcABC /CS /D:A /T:0
+if %ERRORLEVEL% EQU 9009 (
+  echo choice unavailable
+)
+echo %ERRORLEVEL%
+rem intentional error
+choice /C abcABC /D:A /T:0 >NUL 2>NUL
+echo %ERRORLEVEL%
+
 echo ------------ Testing variable expansion ------------
 call :setError 0
 echo ~p0 should be path containing batch file
@@ -684,6 +728,15 @@ goto :eof
 echo '%~xs1'
 goto :eof
 :endEchoFuns
+
+echo ------------ Testing parameter zero ------------
+call :func parm1 parm2
+goto :endParm0
+:func
+echo %~0 %~1
+echo [%0] [%~d0] [%~p0] [%~n0] [%~x0] [%~s0]
+goto :EOF
+:endParm0
 
 echo ------------ Testing variable delayed expansion ------------
 rem NT4 doesn't support this
@@ -925,6 +978,13 @@ if %elseIF% == 1 (
 ) else (
   echo else if seems to be broken
 )
+if "x" == "a" (
+  echo broken1
+) else (
+  echo expected1
+  if "y" == "b" echo broken2
+  echo expected post-embedded if
+)
 echo --- case sensitivity with and without /i option
 if bar==BAR echo if does not default to case sensitivity
 if not bar==BAR echo if seems to default to case sensitivity
@@ -1036,6 +1096,26 @@ if exist idontexist\ba* (
    echo ERROR exist wildcard bad subdir broken
 ) else (
    echo exist wildcard bad subdir broken works
+)
+if exist subdir (
+   echo exist subdir ok
+) else (
+   echo ERROR exist subdir not working
+)
+if exist subdir\. (
+   echo exist subdir with . ok
+) else (
+   echo ERROR exist subdir with . not working
+)
+if exist subdir\ (
+   echo exist subdir with \ ok
+) else (
+   echo ERROR exist subdir with \ not working
+)
+if exist "subdir\" (
+   echo exist subdir with \ and quotes ok
+) else (
+   echo ERROR exist subdir with \ and quotes not working
 )
 del foo subdir\bar
 rd subdir
@@ -1389,6 +1469,12 @@ for /L %%i in (2,2,1) do (
   echo %%i
   echo FAILED
 )
+echo --- rems inside for loops
+for /f %%i IN ("hello") DO (
+   REM foo|echo ERROR unexpected execution 1
+   @REM foo|echo ERROR unexpected execution 2
+   @     REM foo|echo ERROR unexpected execution 3
+)
 echo --- ifs inside for loops
 for %%i in (test) do (
     echo a1
@@ -1664,7 +1750,10 @@ mkdir foobar & cd foobar
 echo ------ string argument
 rem NT4 does not support usebackq
 for /F %%i in ("a b c") do echo %%i
+for /F %%i in (  "a b c"    ) do echo X%%iX
 for /f usebackq %%i in ('a b c') do echo %%i>output_file
+if not exist output_file (echo no output) else (type output_file & del output_file)
+for /f usebackq %%i in (   'a b c'   ) do echo X%%iX>output_file
 if not exist output_file (echo no output) else (type output_file & del output_file)
 for /f %%i in ("a ") do echo %%i
 for /f usebackq %%i in ('a ') do echo %%i>output_file
@@ -1715,9 +1804,13 @@ if "%CD%"=="" goto :SkipFORFcmdNT4
 for /f %%i in ('echo.Passed1') do echo %%i
 for /f "usebackq" %%i in (`echo.Passed2`) do echo %%i
 for /f usebackq %%i in (`echo.Passed3`) do echo %%i
+for /f "usebackq" %%i in (`"c:\windows\system32\cmd.exe" /C echo Passed4`) do echo %%i
+for /f "usebackq" %%i in (`""c:\windows\system32\cmd.exe" /C echo Passed5"`) do echo %%i
+for /f %%i in (  'echo.Passed6'  ) do echo %%i
+for /f "usebackq" %%i in (   `echo.Passed7` ) do echo %%i
 goto :ContinueFORF
 :SkipFORFcmdNT4
-for /l %%i in (1,1,3) do echo Missing functionality - Broken%%i
+for /l %%i in (1,1,7) do echo Missing functionality - Broken%%i
 :ContinueFORF
 rem FIXME: Rest not testable right now in wine: not implemented and would need
 rem preliminary grep-like program implementation (e.g. like findstr or fc) even
@@ -1795,11 +1888,12 @@ for /f "tokens=1,2,3*" %%i in ("a b c d e f g") do echo h=%%h i=%%i j=%%j k=%%k 
 for /f "tokens=1,1,3*" %%i in ("a b c d e f g") do echo h=%%h i=%%i j=%%j k=%%k l=%%l m=%%m n=%%n o=%%o
 for /f "tokens=2,2,3*" %%i in ("a b c d e f g") do echo h=%%h i=%%i j=%%j k=%%k l=%%l m=%%m n=%%n o=%%o
 for /f "tokens=3,2,3*" %%i in ("a b c d e f g") do echo h=%%h i=%%i j=%%j k=%%k l=%%l m=%%m n=%%n o=%%o
-rem Special case tokens=*
+rem Special case tokens=* or tokens=n,*
 echo 3.14>testfile
 FOR /F "tokens=*"  %%A IN (testfile) DO @echo 1:%%A,%%B
 FOR /F "tokens=1*" %%A IN (testfile) DO @echo 2:%%A,%%B
 FOR /F "tokens=2*" %%A IN (testfile) DO @echo 3:%%A,%%B
+FOR /F "tokens=1,* delims=." %%A IN (testfile) DO @echo 4:%%A,%%B
 del testfile
 cd ..
 rd /s/q foobar

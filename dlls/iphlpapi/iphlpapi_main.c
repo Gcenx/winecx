@@ -2458,6 +2458,14 @@ DWORD WINAPI GetUdpTable(PMIB_UDPTABLE pUdpTable, PDWORD pdwSize, BOOL bOrder)
 }
 
 /******************************************************************
+ *    GetUdp6Table (IPHLPAPI.@)
+ */
+DWORD WINAPI GetUdp6Table(PMIB_UDP6TABLE pUdpTable, PDWORD pdwSize, BOOL bOrder)
+{
+    return GetExtendedUdpTable(pUdpTable, pdwSize, bOrder, WS_AF_INET6, UDP_TABLE_BASIC, 0);
+}
+
+/******************************************************************
  *    GetExtendedUdpTable (IPHLPAPI.@)
  */
 DWORD WINAPI GetExtendedUdpTable(PVOID pUdpTable, PDWORD pdwSize, BOOL bOrder,
@@ -2471,15 +2479,25 @@ DWORD WINAPI GetExtendedUdpTable(PVOID pUdpTable, PDWORD pdwSize, BOOL bOrder,
 
     if (!pdwSize) return ERROR_INVALID_PARAMETER;
 
-    if (ulAf != WS_AF_INET)
-    {
-        FIXME("ulAf = %u not supported\n", ulAf);
-        return ERROR_NOT_SUPPORTED;
-    }
     if (TableClass == UDP_TABLE_OWNER_MODULE)
         FIXME("UDP_TABLE_OWNER_MODULE not fully supported\n");
 
-    if ((ret = build_udp_table(TableClass, &table, bOrder, GetProcessHeap(), 0, &size)))
+    switch (ulAf)
+    {
+        case WS_AF_INET:
+            ret = build_udp_table(TableClass, &table, bOrder, GetProcessHeap(), 0, &size);
+            break;
+
+        case WS_AF_INET6:
+            ret = build_udp6_table(TableClass, &table, bOrder, GetProcessHeap(), 0, &size);
+            break;
+
+        default:
+            FIXME("ulAf = %u not supported\n", ulAf);
+            ret = ERROR_NOT_SUPPORTED;
+    }
+
+    if (ret)
         return ret;
 
     if (!pUdpTable || *pdwSize < size)
@@ -3288,5 +3306,25 @@ DWORD WINAPI GetIpForwardTable2(ADDRESS_FAMILY family, PMIB_IPFORWARD_TABLE2 *ta
     static int once;
 
     if (!once++) FIXME("(%u %p): stub\n", family, table);
+    return ERROR_NOT_SUPPORTED;
+}
+
+/******************************************************************
+ *    GetIpNetTable2 (IPHLPAPI.@)
+ */
+DWORD WINAPI GetIpNetTable2(ADDRESS_FAMILY family, PMIB_IPNET_TABLE2 *table)
+{
+    static int once;
+
+    if (!once++) FIXME("(%u %p): stub\n", family, table);
+    return ERROR_NOT_SUPPORTED;
+}
+
+/******************************************************************
+ *    GetIpInterfaceTable (IPHLPAPI.@)
+ */
+DWORD WINAPI GetIpInterfaceTable(ADDRESS_FAMILY family, PMIB_IPINTERFACE_TABLE *table)
+{
+    FIXME("(%u %p): stub\n", family, table);
     return ERROR_NOT_SUPPORTED;
 }

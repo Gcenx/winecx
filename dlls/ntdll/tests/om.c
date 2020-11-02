@@ -69,6 +69,11 @@ static NTSTATUS (WINAPI *pNtWaitForKeyedEvent)( HANDLE, const void *, BOOLEAN, c
 static NTSTATUS (WINAPI *pNtReleaseKeyedEvent)( HANDLE, const void *, BOOLEAN, const LARGE_INTEGER * );
 static NTSTATUS (WINAPI *pNtCreateIoCompletion)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, ULONG);
 static NTSTATUS (WINAPI *pNtOpenIoCompletion)( PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES );
+static NTSTATUS (WINAPI *pNtQueryInformationFile)(HANDLE, PIO_STATUS_BLOCK, void *, ULONG, FILE_INFORMATION_CLASS);
+static NTSTATUS (WINAPI *pNtQuerySystemTime)( LARGE_INTEGER * );
+static NTSTATUS (WINAPI *pRtlWaitOnAddress)( const void *, const void *, SIZE_T, const LARGE_INTEGER * );
+static void     (WINAPI *pRtlWakeAddressAll)( const void * );
+static void     (WINAPI *pRtlWakeAddressSingle)( const void * );
 
 #define KEYEDEVENT_WAIT       0x0001
 #define KEYEDEVENT_WAKE       0x0002
@@ -1270,6 +1275,47 @@ static void test_symboliclink(void)
     pNtClose(dir);
 }
 
+#define test_file_info(a) _test_file_info(__LINE__,a)
+static void _test_file_info(unsigned line, HANDLE handle)
+{
+    IO_STATUS_BLOCK io;
+    char buf[256];
+    NTSTATUS status;
+
+    status = pNtQueryInformationFile(handle, &io, buf, sizeof(buf), 0xdeadbeef);
+    ok_(__FILE__,line)(status == STATUS_INVALID_INFO_CLASS || status == STATUS_NOT_IMPLEMENTED,
+                       "expected STATUS_NOT_IMPLEMENTED, got %x\n", status);
+
+    status = pNtQueryInformationFile(handle, &io, buf, sizeof(buf), FileAccessInformation);
+    ok_(__FILE__,line)(status == STATUS_SUCCESS, "FileAccessInformation returned %x\n", status);
+
+    status = pNtQueryInformationFile(handle, &io, buf, sizeof(buf),
+                                    FileIoCompletionNotificationInformation);
+    ok_(__FILE__,line)(status == STATUS_SUCCESS || broken(status == STATUS_INVALID_INFO_CLASS),
+                       "FileIoCompletionNotificationInformation returned %x\n", status);
+}
+
+#define test_no_file_info(a) _test_no_file_info(__LINE__,a)
+static void _test_no_file_info(unsigned line, HANDLE handle)
+{
+    IO_STATUS_BLOCK io;
+    char buf[256];
+    NTSTATUS status;
+
+    status = pNtQueryInformationFile(handle, &io, buf, sizeof(buf), 0xdeadbeef);
+    ok_(__FILE__,line)(status == STATUS_INVALID_INFO_CLASS || status == STATUS_NOT_IMPLEMENTED,
+                       "expected STATUS_NOT_IMPLEMENTED, got %x\n", status);
+
+    status = pNtQueryInformationFile(handle, &io, buf, sizeof(buf), FileAccessInformation);
+    ok_(__FILE__,line)(status == STATUS_OBJECT_TYPE_MISMATCH,
+                       "FileAccessInformation returned %x\n", status);
+
+    status = pNtQueryInformationFile(handle, &io, buf, sizeof(buf),
+                                    FileIoCompletionNotificationInformation);
+    ok_(__FILE__,line)(status == STATUS_OBJECT_TYPE_MISMATCH || broken(status == STATUS_INVALID_INFO_CLASS),
+                       "FileIoCompletionNotificationInformation returned %x\n", status);
+}
+
 static void test_query_object(void)
 {
     static const WCHAR name[] = {'\\','B','a','s','e','N','a','m','e','d','O','b','j','e','c','t','s',
@@ -1279,7 +1325,7 @@ static void test_query_object(void)
     static const WCHAR type_iocompletion[] = {'I','o','C','o','m','p','l','e','t','i','o','n'};
     static const WCHAR type_directory[] = {'D','i','r','e','c','t','o','r','y'};
     static const WCHAR type_section[] = {'S','e','c','t','i','o','n'};
-    HANDLE handle;
+    HANDLE handle, client;
     char buffer[1024];
     NTSTATUS status;
     ULONG len, expected_len;
@@ -1351,6 +1397,7 @@ static void test_query_object(void)
     ok( status == STATUS_INFO_LENGTH_MISMATCH, "NtQueryObject failed %x\n", status );
     ok( len >= sizeof(OBJECT_TYPE_INFORMATION) + sizeof(type_event) + sizeof(WCHAR), "unexpected len %u\n", len );
 
+    test_no_file_info( handle );
     pNtClose( handle );
 
     handle = CreateEventA( NULL, FALSE, FALSE, NULL );
@@ -1361,6 +1408,7 @@ static void test_query_object(void)
     str = (UNICODE_STRING *)buffer;
     ok( str->Length == 0, "unexpected len %u\n", len );
     ok( str->Buffer == NULL, "unexpected ptr %p\n", str->Buffer );
+    test_no_file_info( handle );
     pNtClose( handle );
 
     GetWindowsDirectoryA( dir, MAX_PATH );
@@ -1401,6 +1449,7 @@ static void test_query_object(void)
     ok( len >= expected_len, "unexpected len %u\n", len );
     ok( str->Buffer && !memcmp( str->Buffer, type_file, sizeof(type_file) ),
                   "wrong/bad type name %s (%p)\n", wine_dbgstr_w(str->Buffer), str->Buffer );
+    test_file_info( handle );
 
     pNtClose( handle );
 
@@ -1418,6 +1467,7 @@ static void test_query_object(void)
     ok( str->Buffer && !memcmp( str->Buffer, type_file, sizeof(type_file) ),
                   "wrong/bad type name %s (%p)\n", wine_dbgstr_w(str->Buffer), str->Buffer );
     DeleteFileA( file1 );
+    test_file_info( handle );
     pNtClose( handle );
 
     status = pNtCreateIoCompletion( &handle, IO_COMPLETION_ALL_ACCESS, NULL, 0 );
@@ -1432,6 +1482,7 @@ static void test_query_object(void)
     ok( len >= expected_len, "unexpected len %u\n", len );
     ok( str->Buffer && !memcmp( str->Buffer, type_iocompletion, sizeof(type_iocompletion) ),
                   "wrong/bad type name %s (%p)\n", wine_dbgstr_w(str->Buffer), str->Buffer );
+    test_no_file_info( handle );
     pNtClose( handle );
 
     status = pNtCreateDirectoryObject( &handle, DIRECTORY_QUERY, NULL );
@@ -1446,6 +1497,7 @@ static void test_query_object(void)
     ok( len >= expected_len, "unexpected len %u\n", len );
     ok( str->Buffer && !memcmp( str->Buffer, type_directory, sizeof(type_directory) ),
                   "wrong/bad type name %s (%p)\n", wine_dbgstr_w(str->Buffer), str->Buffer );
+    test_no_file_info( handle );
     pNtClose( handle );
 
     size.u.LowPart = 256;
@@ -1462,6 +1514,7 @@ static void test_query_object(void)
     ok( len >= expected_len, "unexpected len %u\n", len );
     ok( str->Buffer && !memcmp( str->Buffer, type_section, sizeof(type_section) ),
                   "wrong/bad type name %s (%p)\n", wine_dbgstr_w(str->Buffer), str->Buffer );
+    test_no_file_info( handle );
     pNtClose( handle );
 
     handle = CreateMailslotA( "\\\\.\\mailslot\\test_mailslot", 100, 1000, NULL );
@@ -1478,6 +1531,7 @@ static void test_query_object(void)
     ok( len > sizeof(UNICODE_STRING) + sizeof("\\test_mailslot") * sizeof(WCHAR),
         "name too short %s\n", wine_dbgstr_w(str->Buffer) );
     trace( "got %s len %u\n", wine_dbgstr_w(str->Buffer), len );
+    test_file_info( handle );
     pNtClose( handle );
 
     handle = CreateNamedPipeA( "\\\\.\\pipe\\test_pipe", PIPE_ACCESS_DUPLEX, PIPE_READMODE_BYTE,
@@ -1498,6 +1552,34 @@ static void test_query_object(void)
     ok( len > sizeof(UNICODE_STRING) + sizeof("\\test_pipe") * sizeof(WCHAR),
         "name too short %s\n", wine_dbgstr_w(str->Buffer) );
     trace( "got %s len %u\n", wine_dbgstr_w(str->Buffer), len );
+
+    len = 0;
+    memset( buffer, 0, sizeof(buffer) );
+    status = pNtQueryObject( handle, ObjectTypeInformation, buffer, sizeof(buffer), &len );
+    ok( status == STATUS_SUCCESS, "NtQueryObject failed %x\n", status );
+    ok( len > sizeof(OBJECT_TYPE_INFORMATION), "unexpected len %u\n", len );
+    str = (UNICODE_STRING *)buffer;
+    ok( len >= sizeof(OBJECT_TYPE_INFORMATION) + str->Length + sizeof(WCHAR), "unexpected len %u\n", len );
+    ok( str->Buffer && !memcmp( str->Buffer, type_file, sizeof(type_file) ),
+                  "wrong/bad type name %s (%p)\n", wine_dbgstr_w(str->Buffer), str->Buffer );
+    test_file_info( handle );
+
+    client = CreateFileA( "\\\\.\\pipe\\test_pipe", GENERIC_READ | GENERIC_WRITE,
+                          0, NULL, OPEN_EXISTING, 0, 0 );
+    ok( client != INVALID_HANDLE_VALUE, "CreateFile failed (%d)\n", GetLastError() );
+
+    len = 0;
+    memset( buffer, 0, sizeof(buffer) );
+    status = pNtQueryObject( handle, ObjectTypeInformation, buffer, sizeof(buffer), &len );
+    ok( status == STATUS_SUCCESS, "NtQueryObject failed %x\n", status );
+    ok( len > sizeof(OBJECT_TYPE_INFORMATION), "unexpected len %u\n", len );
+    str = (UNICODE_STRING *)buffer;
+    ok( len >= sizeof(OBJECT_TYPE_INFORMATION) + str->Length + sizeof(WCHAR), "unexpected len %u\n", len );
+    ok( str->Buffer && !memcmp( str->Buffer, type_file, sizeof(type_file) ),
+                  "wrong/bad type name %s (%p)\n", wine_dbgstr_w(str->Buffer), str->Buffer );
+    test_file_info( client );
+
+    pNtClose( client );
     pNtClose( handle );
 
     pRtlCreateUnicodeStringFromAsciiz( &path, "\\REGISTRY\\Machine\\Software\\Classes" );
@@ -1676,6 +1758,13 @@ static void test_keyed_events(void)
     ok( status == STATUS_TIMEOUT, "NtWaitForKeyedEvent %x\n", status );
     status = pNtReleaseKeyedEvent( handle, NULL, 0, &timeout );
     ok( status == STATUS_TIMEOUT, "NtReleaseKeyedEvent %x\n", status );
+
+    status = pNtWaitForKeyedEvent( NULL, (void *)8, 0, &timeout );
+    ok( status == STATUS_TIMEOUT || broken(status == STATUS_INVALID_HANDLE), /* XP/2003 */
+        "NtWaitForKeyedEvent %x\n", status );
+    status = pNtReleaseKeyedEvent( NULL, (void *)8, 0, &timeout );
+    ok( status == STATUS_TIMEOUT || broken(status == STATUS_INVALID_HANDLE), /* XP/2003 */
+        "NtReleaseKeyedEvent %x\n", status );
 
     status = pNtWaitForKeyedEvent( (HANDLE)0xdeadbeef, (void *)9, 0, &timeout );
     ok( status == STATUS_INVALID_PARAMETER_1, "NtWaitForKeyedEvent %x\n", status );
@@ -1979,6 +2068,79 @@ static void test_mutant(void)
     NtClose( mutant );
 }
 
+static void test_wait_on_address(void)
+{
+    DWORD ticks;
+    SIZE_T size;
+    NTSTATUS status;
+    LARGE_INTEGER timeout;
+    LONG64 address, compare;
+
+    if (!pRtlWaitOnAddress)
+    {
+        win_skip("RtlWaitOnAddress not supported, skipping test\n");
+        return;
+    }
+
+    if (0) /* crash on Windows */
+    {
+        pRtlWaitOnAddress(&address, NULL, 8, NULL);
+        pRtlWaitOnAddress(NULL, &compare, 8, NULL);
+        pRtlWaitOnAddress(NULL, NULL, 8, NULL);
+    }
+
+    /* don't crash */
+    pRtlWakeAddressSingle(NULL);
+    pRtlWakeAddressAll(NULL);
+
+    /* invalid values */
+    address = 0;
+    compare = 0;
+    status = pRtlWaitOnAddress(&address, &compare, 5, NULL);
+    ok(status == STATUS_INVALID_PARAMETER, "got %x\n", status);
+
+    /* values match */
+    address = 0;
+    compare = 0;
+    pNtQuerySystemTime(&timeout);
+    timeout.QuadPart += 100*10000;
+    ticks = GetTickCount();
+    status = pRtlWaitOnAddress(&address, &compare, 8, &timeout);
+    ticks = GetTickCount() - ticks;
+    ok(status == STATUS_TIMEOUT, "got 0x%08x\n", status);
+    ok(ticks >= 100 && ticks <= 1000, "got %u\n", ticks);
+    ok(address == 0, "got %s\n", wine_dbgstr_longlong(address));
+    ok(compare == 0, "got %s\n", wine_dbgstr_longlong(compare));
+
+    /* different address size */
+    for (size = 1; size <= 4; size <<= 1)
+    {
+        compare = ~0;
+        compare <<= size * 8;
+
+        timeout.QuadPart = -100 * 10000;
+        ticks = GetTickCount();
+        status = pRtlWaitOnAddress(&address, &compare, size, &timeout);
+        ticks = GetTickCount() - ticks;
+        ok(status == STATUS_TIMEOUT, "got 0x%08x\n", status);
+        ok(ticks >= 100 && ticks <= 1000, "got %u\n", ticks);
+
+        status = pRtlWaitOnAddress(&address, &compare, size << 1, &timeout);
+        ok(!status, "got 0x%08x\n", status);
+    }
+    address = 0;
+    compare = 1;
+    status = pRtlWaitOnAddress(&address, &compare, 8, NULL);
+    ok(!status, "got 0x%08x\n", status);
+
+    /* no waiters */
+    address = 0;
+    pRtlWakeAddressSingle(&address);
+    ok(address == 0, "got %s\n", wine_dbgstr_longlong(address));
+    pRtlWakeAddressAll(&address);
+    ok(address == 0, "got %s\n", wine_dbgstr_longlong(address));
+}
+
 START_TEST(om)
 {
     HMODULE hntdll = GetModuleHandleA("ntdll.dll");
@@ -2031,6 +2193,11 @@ START_TEST(om)
     pNtReleaseKeyedEvent    =  (void *)GetProcAddress(hntdll, "NtReleaseKeyedEvent");
     pNtCreateIoCompletion   =  (void *)GetProcAddress(hntdll, "NtCreateIoCompletion");
     pNtOpenIoCompletion     =  (void *)GetProcAddress(hntdll, "NtOpenIoCompletion");
+    pNtQueryInformationFile =  (void *)GetProcAddress(hntdll, "NtQueryInformationFile");
+    pNtQuerySystemTime      =  (void *)GetProcAddress(hntdll, "NtQuerySystemTime");
+    pRtlWaitOnAddress       =  (void *)GetProcAddress(hntdll, "RtlWaitOnAddress");
+    pRtlWakeAddressAll      =  (void *)GetProcAddress(hntdll, "RtlWakeAddressAll");
+    pRtlWakeAddressSingle   =  (void *)GetProcAddress(hntdll, "RtlWakeAddressSingle");
 
     test_case_sensitive();
     test_namespace_pipe();
@@ -2044,4 +2211,5 @@ START_TEST(om)
     test_mutant();
     test_keyed_events();
     test_null_device();
+    test_wait_on_address();
 }

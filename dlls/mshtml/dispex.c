@@ -1594,6 +1594,12 @@ static HRESULT WINAPI DispatchEx_DeleteMemberByName(IDispatchEx *iface, BSTR bst
 
     TRACE("(%p)->(%s %x)\n", This, debugstr_w(bstrName), grfdex);
 
+    /* HACK: needed by Office; we shouldn't use IDispatchEx in this case */
+    if(dispex_compat_mode(This) >= COMPAT_MODE_IE9) {
+        FIXME("returning S_OK\n");
+        return S_OK;
+    }
+
     /* Not implemented by IE */
     return E_NOTIMPL;
 }

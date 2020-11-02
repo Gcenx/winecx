@@ -683,6 +683,57 @@ static inline void inc_window_paint_count( struct window *win, int incr )
     if (win->thread) inc_queue_paint_count( win->thread, incr );
 }
 
+/* map a point between different DPI scaling levels */
+static void map_dpi_point( struct window *win, int *x, int *y, unsigned int from, unsigned int to )
+{
+    if (!from) from = get_monitor_dpi( win );
+    if (!to) to = get_monitor_dpi( win );
+    if (from == to) return;
+    *x = scale_dpi( *x, from, to );
+    *y = scale_dpi( *y, from, to );
+}
+
+/* map a window rectangle between different DPI scaling levels */
+static void map_dpi_rect( struct window *win, rectangle_t *rect, unsigned int from, unsigned int to )
+{
+    if (!from) from = get_monitor_dpi( win );
+    if (!to) to = get_monitor_dpi( win );
+    if (from == to) return;
+    scale_dpi_rect( rect, from, to );
+}
+
+/* map a region between different DPI scaling levels */
+static void map_dpi_region( struct window *win, struct region *region, unsigned int from, unsigned int to )
+{
+    if (!from) from = get_monitor_dpi( win );
+    if (!to) to = get_monitor_dpi( win );
+    if (from == to) return;
+    scale_region( region, from, to );
+}
+
+/* convert coordinates from client to screen coords */
+static inline void client_to_screen( struct window *win, int *x, int *y )
+{
+    for ( ; win && !is_desktop_window(win); win = win->parent)
+    {
+        *x += win->client_rect.left;
+        *y += win->client_rect.top;
+    }
+}
+
+/* convert coordinates from screen to client coords and dpi */
+static void screen_to_client( struct window *win, int *x, int *y, unsigned int dpi )
+{
+    int offset_x = 0, offset_y = 0;
+
+    if (is_desktop_window( win )) return;
+
+    client_to_screen( win, &offset_x, &offset_y );
+    map_dpi_point( win, x, y, dpi, win->dpi );
+    *x -= offset_x;
+    *y -= offset_y;
+}
+
 /* check if window and all its ancestors are visible */
 static int is_visible( const struct window *win )
 {
@@ -711,18 +762,19 @@ int is_window_transparent( user_handle_t window )
     return (win->ex_style & (WS_EX_LAYERED|WS_EX_TRANSPARENT)) == (WS_EX_LAYERED|WS_EX_TRANSPARENT);
 }
 
-/* check if point is inside the window */
-static inline int is_point_in_window( struct window *win, int x, int y )
+/* check if point is inside the window, and map to window dpi */
+static int is_point_in_window( struct window *win, int *x, int *y, unsigned int dpi )
 {
     if (!(win->style & WS_VISIBLE)) return 0; /* not visible */
     if ((win->style & (WS_POPUP|WS_CHILD|WS_DISABLED)) == (WS_CHILD|WS_DISABLED))
         return 0;  /* disabled child */
     if ((win->ex_style & (WS_EX_LAYERED|WS_EX_TRANSPARENT)) == (WS_EX_LAYERED|WS_EX_TRANSPARENT))
         return 0;  /* transparent */
-    if (!point_in_rect( &win->visible_rect, x, y ))
+    map_dpi_point( win, x, y, dpi, win->dpi );
+    if (!point_in_rect( &win->visible_rect, *x, *y ))
         return 0;  /* not in window */
     if (win->win_region &&
-        !point_in_region( win->win_region, x - win->window_rect.left, y - win->window_rect.top ))
+        !point_in_region( win->win_region, *x - win->window_rect.left, *y - win->window_rect.top ))
         return 0;  /* not in window region */
     return 1;
 }
@@ -757,15 +809,18 @@ static struct window *child_window_from_point( struct window *parent, int x, int
 
     LIST_FOR_EACH_ENTRY( ptr, &parent->children, struct window, entry )
     {
-        if (!is_point_in_window( ptr, x, y )) continue;  /* skip it */
+        int x_child = x, y_child = y;
+
+        if (!is_point_in_window( ptr, &x_child, &y_child, parent->dpi )) continue;  /* skip it */
 
         /* if window is minimized or disabled, return at once */
         if (ptr->style & (WS_MINIMIZE|WS_DISABLED)) return ptr;
 
         /* if point is not in client area, return at once */
-        if (!point_in_rect( &ptr->client_rect, x, y )) return ptr;
+        if (!point_in_rect( &ptr->client_rect, x_child, y_child )) return ptr;
 
-        return child_window_from_point( ptr, x - ptr->client_rect.left, y - ptr->client_rect.top );
+        return child_window_from_point( ptr, x_child - ptr->client_rect.left,
+                                        y_child - ptr->client_rect.top );
     }
     return parent;  /* not found any child */
 }
@@ -778,13 +833,15 @@ static int get_window_children_from_point( struct window *parent, int x, int y,
 
     LIST_FOR_EACH_ENTRY( ptr, &parent->children, struct window, entry )
     {
-        if (!is_point_in_window( ptr, x, y )) continue;  /* skip it */
+        int x_child = x, y_child = y;
+
+        if (!is_point_in_window( ptr, &x_child, &y_child, parent->dpi )) continue;  /* skip it */
 
         /* if point is in client area, and window is not minimized or disabled, check children */
-        if (!(ptr->style & (WS_MINIMIZE|WS_DISABLED)) && point_in_rect( &ptr->client_rect, x, y ))
+        if (!(ptr->style & (WS_MINIMIZE|WS_DISABLED)) && point_in_rect( &ptr->client_rect, x_child, y_child ))
         {
-            if (!get_window_children_from_point( ptr, x - ptr->client_rect.left,
-                                                 y - ptr->client_rect.top, array ))
+            if (!get_window_children_from_point( ptr, x_child - ptr->client_rect.left,
+                                                 y_child - ptr->client_rect.top, array ))
                 return 0;
         }
 
@@ -803,7 +860,9 @@ user_handle_t shallow_window_from_point( struct desktop *desktop, int x, int y )
 
     LIST_FOR_EACH_ENTRY( ptr, &desktop->top_window->children, struct window, entry )
     {
-        if (!is_point_in_window( ptr, x, y )) continue;  /* skip it */
+        int x_child = x, y_child = y;
+
+        if (!is_point_in_window( ptr, &x_child, &y_child, 0 )) continue;  /* skip it */
         return ptr->handle;
     }
     return desktop->top_window->handle;
@@ -813,35 +872,26 @@ user_handle_t shallow_window_from_point( struct desktop *desktop, int x, int y )
 struct thread *window_thread_from_point( user_handle_t scope, int x, int y )
 {
     struct window *win = get_user_object( scope, USER_WINDOW );
-    struct window *ptr;
 
     if (!win) return NULL;
 
-    for (ptr = win; ptr && !is_desktop_window(ptr); ptr = ptr->parent)
-    {
-        x -= ptr->client_rect.left;
-        y -= ptr->client_rect.top;
-    }
-
-    ptr =  child_window_from_point( win, x, y );
-    if (!ptr->thread) return NULL;
-    return (struct thread *)grab_object( ptr->thread );
+    screen_to_client( win, &x, &y, 0 );
+    win = child_window_from_point( win, x, y );
+    if (!win->thread) return NULL;
+    return (struct thread *)grab_object( win->thread );
 }
 
 /* return list of all windows containing point (in absolute coords) */
-static int all_windows_from_point( struct window *top, int x, int y, struct user_handle_array *array )
+static int all_windows_from_point( struct window *top, int x, int y, unsigned int dpi,
+                                   struct user_handle_array *array )
 {
-    struct window *ptr;
-
-    /* make point relative to top window */
-    for (ptr = top->parent; ptr && !is_desktop_window(ptr); ptr = ptr->parent)
+    if (!is_desktop_window( top ) && !is_desktop_window( top->parent ))
     {
-        x -= ptr->client_rect.left;
-        y -= ptr->client_rect.top;
+        screen_to_client( top->parent, &x, &y, dpi );
+        dpi = top->parent->dpi;
     }
 
-    if (!is_point_in_window( top, x, y )) return 1;
-
+    if (!is_point_in_window( top, &x, &y, dpi )) return 1;
     /* if point is in client area, and window is not minimized or disabled, check children */
     if (!(top->style & (WS_MINIMIZE|WS_DISABLED)) && point_in_rect( &top->client_rect, x, y ))
     {
@@ -939,16 +989,6 @@ static struct region *intersect_window_region( struct region *region, struct win
     return region;
 }
 
-
-/* convert coordinates from client to screen coords */
-static inline void client_to_screen( struct window *win, int *x, int *y )
-{
-    for ( ; win && !is_desktop_window(win); win = win->parent)
-    {
-        *x += win->client_rect.left;
-        *y += win->client_rect.top;
-    }
-}
 
 /* convert coordinates from client to screen coords */
 static inline void client_to_screen_rect( struct window *win, rectangle_t *rect )
@@ -1423,7 +1463,7 @@ static void validate_parents( struct window *child )
 /* add/subtract a region (in client coordinates) to the update region of the window */
 static void redraw_window( struct window *win, struct region *region, int frame, unsigned int flags )
 {
-    struct region *tmp;
+    struct region *child_rgn, *tmp;
     struct window *child;
 
     if (flags & RDW_INVALIDATE)
@@ -1485,11 +1525,19 @@ static void redraw_window( struct window *win, struct region *region, int frame,
     LIST_FOR_EACH_ENTRY( child, &win->children, struct window, entry )
     {
         if (!(child->style & WS_VISIBLE)) continue;
-        if (!rect_in_region( tmp, &child->window_rect )) continue;
-        offset_region( tmp, -child->client_rect.left, -child->client_rect.top );
-        redraw_window( child, tmp, 1, flags );
-        offset_region( tmp, child->client_rect.left, child->client_rect.top );
+        if (!(child_rgn = create_empty_region())) continue;
+        if (copy_region( child_rgn, tmp ))
+        {
+            map_dpi_region( child, child_rgn, win->dpi, child->dpi );
+            if (rect_in_region( child_rgn, &child->window_rect ))
+            {
+                offset_region( child_rgn, -child->client_rect.left, -child->client_rect.top );
+                redraw_window( child, child_rgn, 1, flags );
+            }
+        }
+        free_region( child_rgn );
     }
+
     free_region( tmp );
 }
 
@@ -2346,7 +2394,7 @@ DECL_HANDLER(get_window_children_from_point)
     array.handles = NULL;
     array.count = 0;
     array.total = 0;
-    if (!all_windows_from_point( parent, req->x, req->y, &array )) return;
+    if (!all_windows_from_point( parent, req->x, req->y, req->dpi, &array )) return;
 
     reply->count = array.count;
     len = min( get_reply_max_size(), array.count * sizeof(user_handle_t) );
@@ -2512,6 +2560,8 @@ DECL_HANDLER(get_window_rectangles)
         set_error( STATUS_INVALID_PARAMETER );
         break;
     }
+    map_dpi_rect( win, &reply->window, win->dpi, req->dpi );
+    map_dpi_rect( win, &reply->client, win->dpi, req->dpi );
 }
 
 
@@ -2553,38 +2603,30 @@ DECL_HANDLER(set_window_text)
 DECL_HANDLER(get_windows_offset)
 {
     struct window *win;
-    int mirror_from = 0, mirror_to = 0;
+    int x, y, mirror_from = 0, mirror_to = 0;
 
     reply->x = reply->y = 0;
     if (req->from)
     {
         if (!(win = get_window( req->from ))) return;
-        if (win->ex_style & WS_EX_LAYOUTRTL)
-        {
-            mirror_from = 1;
-            reply->x += win->client_rect.right - win->client_rect.left;
-        }
-        while (win && !is_desktop_window(win))
-        {
-            reply->x += win->client_rect.left;
-            reply->y += win->client_rect.top;
-            win = win->parent;
-        }
+        if (win->ex_style & WS_EX_LAYOUTRTL) mirror_from = 1;
+        x = mirror_from ? win->client_rect.right - win->client_rect.left : 0;
+        y = 0;
+        client_to_screen( win, &x, &y );
+        map_dpi_point( win, &x, &y, win->dpi, req->dpi );
+        reply->x += x;
+        reply->y += y;
     }
     if (req->to)
     {
         if (!(win = get_window( req->to ))) return;
-        if (win->ex_style & WS_EX_LAYOUTRTL)
-        {
-            mirror_to = 1;
-            reply->x -= win->client_rect.right - win->client_rect.left;
-        }
-        while (win && !is_desktop_window(win))
-        {
-            reply->x -= win->client_rect.left;
-            reply->y -= win->client_rect.top;
-            win = win->parent;
-        }
+        if (win->ex_style & WS_EX_LAYOUTRTL) mirror_to = 1;
+        x = mirror_to ? win->client_rect.right - win->client_rect.left : 0;
+        y = 0;
+        client_to_screen( win, &x, &y );
+        map_dpi_point( win, &x, &y, win->dpi, req->dpi );
+        reply->x -= x;
+        reply->y -= y;
     }
     if (mirror_from) reply->x = -reply->x;
     reply->mirror = mirror_from ^ mirror_to;
@@ -2773,8 +2815,6 @@ DECL_HANDLER(update_window_zorder)
     struct window *ptr, *win = get_window( req->window );
 
     if (!win || !win->parent || !is_visible( win )) return;  /* nothing to do */
-    if (win->ex_style & WS_EX_LAYOUTRTL) mirror_rect( &win->client_rect, &rect );
-    offset_rect( &rect, win->client_rect.left, win->client_rect.top );
 
     LIST_FOR_EACH_ENTRY( ptr, &win->parent->children, struct window, entry )
     {
@@ -2782,10 +2822,11 @@ DECL_HANDLER(update_window_zorder)
         if (!(ptr->style & WS_VISIBLE)) continue;
         if (ptr->ex_style & WS_EX_TRANSPARENT) continue;
         if (ptr->is_layered && (ptr->layered_flags & LWA_COLORKEY)) continue;
-        if (!intersect_rect( &tmp, &ptr->visible_rect, &rect )) continue;
+        tmp = rect;
+        map_dpi_rect( win, &tmp, win->parent->dpi, win->dpi );
+        if (!intersect_rect( &tmp, &tmp, &ptr->visible_rect )) continue;
         if (ptr->win_region)
         {
-            tmp = rect;
             offset_rect( &tmp, -ptr->window_rect.left, -ptr->window_rect.top );
             if (!rect_in_region( ptr->win_region, &tmp )) continue;
         }

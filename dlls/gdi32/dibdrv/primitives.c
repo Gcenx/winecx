@@ -2393,7 +2393,7 @@ static void convert_to_8888(dib_info *dst, const dib_info *src, const RECT *src_
         BYTE *src_start = get_pixel_ptr_8(src, src_rect->left, src_rect->top), *src_pixel;
         DWORD dst_colors[256], i;
 
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = color_table[i].rgbRed << 16 | color_table[i].rgbGreen << 8 |
                 color_table[i].rgbBlue;
 
@@ -2417,7 +2417,7 @@ static void convert_to_8888(dib_info *dst, const dib_info *src, const RECT *src_
         BYTE *src_start = get_pixel_ptr_4(src, src_rect->left, src_rect->top), *src_pixel;
         DWORD dst_colors[16], i;
 
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = color_table[i].rgbRed << 16 | color_table[i].rgbGreen << 8 |
                 color_table[i].rgbBlue;
 
@@ -2445,7 +2445,7 @@ static void convert_to_8888(dib_info *dst, const dib_info *src, const RECT *src_
         BYTE *src_start = get_pixel_ptr_1(src, src_rect->left, src_rect->top);
         DWORD dst_colors[2], i;
 
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = color_table[i].rgbRed << 16 | color_table[i].rgbGreen << 8 |
                 color_table[i].rgbBlue;
 
@@ -2660,7 +2660,7 @@ static void convert_to_32(dib_info *dst, const dib_info *src, const RECT *src_re
         BYTE *src_start = get_pixel_ptr_8(src, src_rect->left, src_rect->top), *src_pixel;
         DWORD dst_colors[256], i;
 
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = rgbquad_to_pixel_masks(dst, color_table[i]);
 
         for(y = src_rect->top; y < src_rect->bottom; y++)
@@ -2683,7 +2683,7 @@ static void convert_to_32(dib_info *dst, const dib_info *src, const RECT *src_re
         BYTE *src_start = get_pixel_ptr_4(src, src_rect->left, src_rect->top), *src_pixel;
         DWORD dst_colors[16], i;
 
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = rgbquad_to_pixel_masks(dst, color_table[i]);
 
         for(y = src_rect->top; y < src_rect->bottom; y++)
@@ -2710,7 +2710,7 @@ static void convert_to_32(dib_info *dst, const dib_info *src, const RECT *src_re
         BYTE *src_start = get_pixel_ptr_1(src, src_rect->left, src_rect->top);
         DWORD dst_colors[2], i;
 
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = rgbquad_to_pixel_masks(dst, color_table[i]);
 
         for(y = src_rect->top; y < src_rect->bottom; y++)
@@ -3151,7 +3151,7 @@ static void convert_to_555(dib_info *dst, const dib_info *src, const RECT *src_r
         WORD dst_colors[256];
         int i;
 
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = ((color_table[i].rgbRed   << 7) & 0x7c00) |
                             ((color_table[i].rgbGreen << 2) & 0x03e0) |
                             ((color_table[i].rgbBlue  >> 3) & 0x001f);
@@ -3177,7 +3177,7 @@ static void convert_to_555(dib_info *dst, const dib_info *src, const RECT *src_r
         WORD dst_colors[16];
         int i;
 
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = ((color_table[i].rgbRed   << 7) & 0x7c00) |
                             ((color_table[i].rgbGreen << 2) & 0x03e0) |
                             ((color_table[i].rgbBlue  >> 3) & 0x001f);
@@ -3207,7 +3207,7 @@ static void convert_to_555(dib_info *dst, const dib_info *src, const RECT *src_r
         WORD dst_colors[2];
         int i;
 
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = ((color_table[i].rgbRed   << 7) & 0x7c00) |
                             ((color_table[i].rgbGreen << 2) & 0x03e0) |
                             ((color_table[i].rgbBlue  >> 3) & 0x001f);
@@ -3425,7 +3425,7 @@ static void convert_to_16(dib_info *dst, const dib_info *src, const RECT *src_re
         WORD dst_colors[256];
         int i;
 
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = rgbquad_to_pixel_masks(dst, color_table[i]);
 
         for(y = src_rect->top; y < src_rect->bottom; y++)
@@ -3449,7 +3449,7 @@ static void convert_to_16(dib_info *dst, const dib_info *src, const RECT *src_re
         WORD dst_colors[16];
         int i;
 
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = rgbquad_to_pixel_masks(dst, color_table[i]);
 
         for(y = src_rect->top; y < src_rect->bottom; y++)
@@ -3477,7 +3477,7 @@ static void convert_to_16(dib_info *dst, const dib_info *src, const RECT *src_re
         WORD dst_colors[2];
         int i;
 
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = rgbquad_to_pixel_masks(dst, color_table[i]);
 
         for(y = src_rect->top; y < src_rect->bottom; y++)
@@ -3710,7 +3710,7 @@ static void convert_to_8(dib_info *dst, const dib_info *src, const RECT *src_rec
             BYTE dst_colors[256];
             int i;
 
-            for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+            for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
                 dst_colors[i] = rgbquad_to_pixel_colortable(dst, color_table[i]);
 
             for(y = src_rect->top; y < src_rect->bottom; y++)
@@ -3735,7 +3735,7 @@ static void convert_to_8(dib_info *dst, const dib_info *src, const RECT *src_rec
         BYTE dst_colors[16];
         int i;
 
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = rgbquad_to_pixel_colortable(dst, color_table[i]);
 
         for(y = src_rect->top; y < src_rect->bottom; y++)
@@ -3763,7 +3763,7 @@ static void convert_to_8(dib_info *dst, const dib_info *src, const RECT *src_rec
         BYTE dst_colors[2];
         int i;
 
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = FILTER_DIBINDEX(color_table[i], rgbquad_to_pixel_colortable(dst, color_table[i]));
 
         for(y = src_rect->top; y < src_rect->bottom; y++)
@@ -4055,7 +4055,7 @@ static void convert_to_4(dib_info *dst, const dib_info *src, const RECT *src_rec
         BYTE dst_colors[256];
         int i;
 
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = rgbquad_to_pixel_colortable(dst, color_table[i]);
 
         for(y = src_rect->top; y < src_rect->bottom; y++)
@@ -4109,7 +4109,7 @@ static void convert_to_4(dib_info *dst, const dib_info *src, const RECT *src_rec
             BYTE dst_colors[16];
             int i;
 
-            for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+            for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
                 dst_colors[i] = rgbquad_to_pixel_colortable(dst, color_table[i]);
 
             for(y = src_rect->top; y < src_rect->bottom; y++)
@@ -4150,7 +4150,7 @@ static void convert_to_4(dib_info *dst, const dib_info *src, const RECT *src_rec
         BYTE dst_colors[2];
         int i;
 
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = FILTER_DIBINDEX(color_table[i], rgbquad_to_pixel_colortable(dst, color_table[i]));
 
         for(y = src_rect->top; y < src_rect->bottom; y++)
@@ -5394,7 +5394,7 @@ static void mask_rect_32( const dib_info *dst, const RECT *rc,
             dst_colors[i] = rgbquad_to_pixel_masks(dst, color_table[i]);
 
     /* Creating a BYTE-sized table so we don't need to mask the lsb of bit_val */
-    for (i = 2; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+    for (i = 2; i < ARRAY_SIZE(dst_colors); i++)
         dst_colors[i] = dst_colors[i & 1];
 
     /* Special case starting and finishing in same byte, neither on byte boundary */
@@ -5731,12 +5731,12 @@ static void mask_rect_16( const dib_info *dst, const RECT *rc,
     get_rop_codes( rop2, &codes );
 
     if (dst->funcs == &funcs_555)
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = ((color_table[i].rgbRed   << 7) & 0x7c00) |
                             ((color_table[i].rgbGreen << 2) & 0x03e0) |
                             ((color_table[i].rgbBlue  >> 3) & 0x001f);
     else
-        for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
             dst_colors[i] = rgbquad_to_pixel_masks(dst, color_table[i]);
 
     /* Special case starting and finishing in same byte, neither on byte boundary */
@@ -5872,7 +5872,7 @@ static void mask_rect_8( const dib_info *dst, const RECT *rc,
 
     get_rop_codes( rop2, &codes );
 
-    for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
         dst_colors[i] = FILTER_DIBINDEX(color_table[i], rgbquad_to_pixel_colortable(dst, color_table[i]));
 
     /* Special case starting and finishing in same byte, neither on byte boundary */
@@ -6010,7 +6010,7 @@ static void mask_rect_4( const dib_info *dst, const RECT *rc,
 
     get_rop_codes( rop2, &codes );
 
-    for (i = 0; i < sizeof(dst_colors) / sizeof(dst_colors[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(dst_colors); i++)
     {
         dst_colors[i] = FILTER_DIBINDEX(color_table[i],rgbquad_to_pixel_colortable(dst, color_table[i]));
         /* Set high nibble to match so we don't need to shift it later. */
@@ -6272,16 +6272,35 @@ static void draw_glyph_null( const dib_info *dib, const RECT *rect, const dib_in
 {
     return;
 }
-
-static inline DWORD blend_subpixel( BYTE r, BYTE g, BYTE b, DWORD text, DWORD alpha )
+static inline BYTE blend_color_gamma( BYTE dst, BYTE text, BYTE alpha,
+                                      const struct font_gamma_ramp *gamma_ramp )
 {
+    if (alpha == 0) return dst;
+    if (alpha == 255) return text;
+    if (dst == text) return dst;
+
+    return gamma_ramp->encode[ blend_color( gamma_ramp->decode[dst],
+                                            gamma_ramp->decode[text],
+                                            alpha ) ];
+}
+
+static inline DWORD blend_subpixel( BYTE r, BYTE g, BYTE b, DWORD text, DWORD alpha,
+                                    const struct font_gamma_ramp *gamma_ramp )
+{
+    if (gamma_ramp != NULL && gamma_ramp->gamma != 1000)
+    {
+        return blend_color_gamma( r, text >> 16, (BYTE)(alpha >> 16), gamma_ramp ) << 16 |
+               blend_color_gamma( g, text >> 8,  (BYTE)(alpha >> 8),  gamma_ramp ) << 8  |
+               blend_color_gamma( b, text,       (BYTE) alpha,        gamma_ramp );
+    }
     return blend_color( r, text >> 16, (BYTE)(alpha >> 16) ) << 16 |
            blend_color( g, text >> 8,  (BYTE)(alpha >> 8) )  << 8  |
            blend_color( b, text,       (BYTE) alpha );
 }
 
 static void draw_subpixel_glyph_8888( const dib_info *dib, const RECT *rect, const dib_info *glyph,
-                                      const POINT *origin, DWORD text_pixel )
+                                      const POINT *origin, DWORD text_pixel,
+                                      const struct font_gamma_ramp *gamma_ramp )
 {
     DWORD *dst_ptr = get_pixel_ptr_32( dib, rect->left, rect->top );
     const DWORD *glyph_ptr = get_pixel_ptr_32( glyph, origin->x, origin->y );
@@ -6292,7 +6311,8 @@ static void draw_subpixel_glyph_8888( const dib_info *dib, const RECT *rect, con
         for (x = 0; x < rect->right - rect->left; x++)
         {
             if (glyph_ptr[x] == 0) continue;
-            dst_ptr[x] = blend_subpixel( dst_ptr[x] >> 16, dst_ptr[x] >> 8, dst_ptr[x], text_pixel, glyph_ptr[x] );
+            dst_ptr[x] = blend_subpixel( dst_ptr[x] >> 16, dst_ptr[x] >> 8, dst_ptr[x],
+                                         text_pixel, glyph_ptr[x], gamma_ramp );
         }
         dst_ptr += dib->stride / 4;
         glyph_ptr += glyph->stride / 4;
@@ -6300,7 +6320,8 @@ static void draw_subpixel_glyph_8888( const dib_info *dib, const RECT *rect, con
 }
 
 static void draw_subpixel_glyph_32( const dib_info *dib, const RECT *rect, const dib_info *glyph,
-                                    const POINT *origin, DWORD text_pixel )
+                                    const POINT *origin, DWORD text_pixel,
+                                    const struct font_gamma_ramp *gamma_ramp )
 {
     DWORD *dst_ptr = get_pixel_ptr_32( dib, rect->left, rect->top );
     const DWORD *glyph_ptr = get_pixel_ptr_32( glyph, origin->x, origin->y );
@@ -6319,7 +6340,7 @@ static void draw_subpixel_glyph_32( const dib_info *dib, const RECT *rect, const
             val = blend_subpixel( get_field(dst_ptr[x], dib->red_shift,   dib->red_len),
                                   get_field(dst_ptr[x], dib->green_shift, dib->green_len),
                                   get_field(dst_ptr[x], dib->blue_shift,  dib->blue_len),
-                                  text, glyph_ptr[x] );
+                                  text, glyph_ptr[x], gamma_ramp );
             dst_ptr[x] = rgb_to_pixel_masks( dib, val >> 16, val >> 8, val );
         }
         dst_ptr += dib->stride / 4;
@@ -6328,7 +6349,8 @@ static void draw_subpixel_glyph_32( const dib_info *dib, const RECT *rect, const
 }
 
 static void draw_subpixel_glyph_24( const dib_info *dib, const RECT *rect, const dib_info *glyph,
-                                    const POINT *origin, DWORD text_pixel )
+                                    const POINT *origin, DWORD text_pixel,
+                                    const struct font_gamma_ramp *gamma_ramp )
 {
     BYTE *dst_ptr = get_pixel_ptr_24( dib, rect->left, rect->top );
     const DWORD *glyph_ptr = get_pixel_ptr_32( glyph, origin->x, origin->y );
@@ -6341,7 +6363,7 @@ static void draw_subpixel_glyph_24( const dib_info *dib, const RECT *rect, const
         {
             if (glyph_ptr[x] == 0) continue;
             val = blend_subpixel( dst_ptr[x * 3 + 2], dst_ptr[x * 3 + 1], dst_ptr[x * 3],
-                                  text_pixel, glyph_ptr[x] );
+                                  text_pixel, glyph_ptr[x], gamma_ramp );
             dst_ptr[x * 3]     = val;
             dst_ptr[x * 3 + 1] = val >> 8;
             dst_ptr[x * 3 + 2] = val >> 16;
@@ -6352,7 +6374,8 @@ static void draw_subpixel_glyph_24( const dib_info *dib, const RECT *rect, const
 }
 
 static void draw_subpixel_glyph_555( const dib_info *dib, const RECT *rect, const dib_info *glyph,
-                                     const POINT *origin, DWORD text_pixel )
+                                     const POINT *origin, DWORD text_pixel,
+                                     const struct font_gamma_ramp *gamma_ramp )
 {
     WORD *dst_ptr = get_pixel_ptr_16( dib, rect->left, rect->top );
     const DWORD *glyph_ptr = get_pixel_ptr_32( glyph, origin->x, origin->y );
@@ -6371,7 +6394,7 @@ static void draw_subpixel_glyph_555( const dib_info *dib, const RECT *rect, cons
             val = blend_subpixel( ((dst_ptr[x] >> 7) & 0xf8) | ((dst_ptr[x] >> 12) & 0x07),
                                   ((dst_ptr[x] >> 2) & 0xf8) | ((dst_ptr[x] >>  7) & 0x07),
                                   ((dst_ptr[x] << 3) & 0xf8) | ((dst_ptr[x] >>  2) & 0x07),
-                                  text, glyph_ptr[x] );
+                                  text, glyph_ptr[x], NULL );
             dst_ptr[x] = ((val >> 9) & 0x7c00) | ((val >> 6) & 0x03e0) | ((val >> 3) & 0x001f);
         }
         dst_ptr += dib->stride / 2;
@@ -6380,7 +6403,8 @@ static void draw_subpixel_glyph_555( const dib_info *dib, const RECT *rect, cons
 }
 
 static void draw_subpixel_glyph_16( const dib_info *dib, const RECT *rect, const dib_info *glyph,
-                                    const POINT *origin, DWORD text_pixel )
+                                    const POINT *origin, DWORD text_pixel,
+                                    const struct font_gamma_ramp *gamma_ramp )
 {
     WORD *dst_ptr = get_pixel_ptr_16( dib, rect->left, rect->top );
     const DWORD *glyph_ptr = get_pixel_ptr_32( glyph, origin->x, origin->y );
@@ -6399,7 +6423,7 @@ static void draw_subpixel_glyph_16( const dib_info *dib, const RECT *rect, const
             val = blend_subpixel( get_field(dst_ptr[x], dib->red_shift,   dib->red_len),
                                   get_field(dst_ptr[x], dib->green_shift, dib->green_len),
                                   get_field(dst_ptr[x], dib->blue_shift,  dib->blue_len),
-                                  text, glyph_ptr[x] );
+                                  text, glyph_ptr[x], NULL );
             dst_ptr[x] = rgb_to_pixel_masks( dib, val >> 16, val >> 8, val );
         }
         dst_ptr += dib->stride / 2;
@@ -6408,7 +6432,8 @@ static void draw_subpixel_glyph_16( const dib_info *dib, const RECT *rect, const
 }
 
 static void draw_subpixel_glyph_null( const dib_info *dib, const RECT *rect, const dib_info *glyph,
-                                      const POINT *origin, DWORD text_pixel )
+                                      const POINT *origin, DWORD text_pixel,
+                                      const struct font_gamma_ramp *gamma_ramp )
 {
     return;
 }

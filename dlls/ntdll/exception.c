@@ -59,6 +59,8 @@ static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
 };
 static RTL_CRITICAL_SECTION vectored_handlers_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
+static PRTL_EXCEPTION_FILTER unhandled_exception_filter;
+
 
 static VECTORED_HANDLER *add_vectored_handler( struct list *handler_list, ULONG first,
                                                PVECTORED_EXCEPTION_HANDLER func )
@@ -306,6 +308,25 @@ ULONG WINAPI RtlRemoveVectoredExceptionHandler( PVOID handler )
 }
 
 
+/*******************************************************************
+ *         RtlSetUnhandledExceptionFilter   (NTDLL.@)
+ */
+void WINAPI RtlSetUnhandledExceptionFilter( PRTL_EXCEPTION_FILTER filter )
+{
+    unhandled_exception_filter = filter;
+}
+
+
+/*******************************************************************
+ *         call_unhandled_exception_filter
+ */
+LONG WINAPI call_unhandled_exception_filter( PEXCEPTION_POINTERS eptr )
+{
+    if (!unhandled_exception_filter) return EXCEPTION_CONTINUE_SEARCH;
+    return unhandled_exception_filter( eptr );
+}
+
+
 /*********************************************************************
  *         NtContinue   (NTDLL.@)
  */
@@ -339,9 +360,4 @@ void __wine_spec_unimplemented_stub( const char *module, const char *function )
     record.ExceptionInformation[0] = (ULONG_PTR)module;
     record.ExceptionInformation[1] = (ULONG_PTR)function;
     for (;;) RtlRaiseException( &record );
-}
-
-void WINAPI RtlSetUnhandledExceptionFilter( void *handler )
-{
-    FIXME( "(%p) stub!\n", handler );
 }

@@ -1863,7 +1863,7 @@ static DWORD WINAPI ca_period_cb(void *user)
     UINT32 delay_ms = This->period_ms;
 
     while(!This->please_quit){
-        ULONGLONG now, now_frames;
+        UINT64 now, now_frames;
         INT32 adjust;
 
         Sleep(delay_ms);
@@ -1877,13 +1877,13 @@ static DWORD WINAPI ca_period_cb(void *user)
             now_frames = This->timing_frames + This->fmt->nSamplesPerSec * (now - This->timing_ms) / 1000;
 
             /* diff between expected and actual */
-            adjust = This->last_frames + This->period_frames - now_frames;
+            adjust = (This->last_frames - now_frames) + This->period_frames;
 
             /* cap adjustment to 1/4 period */
-            if(adjust > ((INT32)(This->period_frames / 4)))
+            if(adjust > (INT32)(This->period_frames / 4))
                 adjust = This->period_frames / 4;
-            else if(adjust < -((INT32)(This->period_frames / 4)))
-                adjust = -1 * This->period_frames / 4;
+            else if(adjust < -1 * (INT32)(This->period_frames / 4))
+                adjust = -1 * (INT32)(This->period_frames / 4);
 
             delay_ms = (This->period_frames + adjust) * 1000 / This->fmt->nSamplesPerSec;
 
@@ -1937,7 +1937,7 @@ static HRESULT WINAPI AudioClient_Start(IAudioClient *iface)
         return AUDCLNT_E_EVENTHANDLE_NOT_SET;
     }
 
-    if(This->event && !This->timer){
+    if(!This->timer){
         This->timer = CreateThread(NULL, 0, ca_period_cb, This, 0, NULL);
     }
 

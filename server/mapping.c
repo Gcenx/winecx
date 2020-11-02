@@ -587,8 +587,11 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
     if (size < sizeof(nt)) memset( (char *)&nt + size, 0, sizeof(nt) - size );
     if (nt.Signature != IMAGE_NT_SIGNATURE)
     {
-        if (*(WORD *)&nt.Signature == IMAGE_OS2_SIGNATURE) return STATUS_INVALID_IMAGE_NE_FORMAT;
-        return STATUS_INVALID_IMAGE_PROTECT;
+        IMAGE_OS2_HEADER *os2 = (IMAGE_OS2_HEADER *)&nt;
+        if (os2->ne_magic != IMAGE_OS2_SIGNATURE) return STATUS_INVALID_IMAGE_PROTECT;
+        if (os2->ne_exetyp == 2) return STATUS_INVALID_IMAGE_WIN_16;
+        if (os2->ne_exetyp == 5) return STATUS_INVALID_IMAGE_PROTECT;
+        return STATUS_INVALID_IMAGE_NE_FORMAT;
     }
 
     switch (nt.opt.hdr32.Magic)
@@ -597,14 +600,17 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
         switch (nt.FileHeader.Machine)
         {
         case IMAGE_FILE_MACHINE_I386:
+            mapping->image.cpu = CPU_x86;
             if (cpu_mask & (CPU_FLAG(CPU_x86) | CPU_FLAG(CPU_x86_64))) break;
             return STATUS_INVALID_IMAGE_FORMAT;
         case IMAGE_FILE_MACHINE_ARM:
         case IMAGE_FILE_MACHINE_THUMB:
         case IMAGE_FILE_MACHINE_ARMNT:
+            mapping->image.cpu = CPU_ARM;
             if (cpu_mask & (CPU_FLAG(CPU_ARM) | CPU_FLAG(CPU_ARM64))) break;
             return STATUS_INVALID_IMAGE_FORMAT;
         case IMAGE_FILE_MACHINE_POWERPC:
+            mapping->image.cpu = CPU_POWERPC;
             if (cpu_mask & CPU_FLAG(CPU_POWERPC)) break;
             return STATUS_INVALID_IMAGE_FORMAT;
         default:
@@ -640,9 +646,11 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
         switch (nt.FileHeader.Machine)
         {
         case IMAGE_FILE_MACHINE_AMD64:
+            mapping->image.cpu = CPU_x86_64;
             if (cpu_mask & (CPU_FLAG(CPU_x86) | CPU_FLAG(CPU_x86_64))) break;
             return STATUS_INVALID_IMAGE_FORMAT;
         case IMAGE_FILE_MACHINE_ARM64:
+            mapping->image.cpu = CPU_ARM64;
             if (cpu_mask & (CPU_FLAG(CPU_ARM) | CPU_FLAG(CPU_ARM64))) break;
             return STATUS_INVALID_IMAGE_FORMAT;
         default:
@@ -687,7 +695,7 @@ static unsigned int get_image_params( struct mapping *mapping, file_pos_t file_s
     /* load the section headers */
 
     pos += sizeof(nt.Signature) + sizeof(nt.FileHeader) + nt.FileHeader.SizeOfOptionalHeader;
-    if (nt.FileHeader.NumberOfSections > sizeof(sec)/sizeof(sec[0])) return STATUS_INVALID_IMAGE_FORMAT;
+    if (nt.FileHeader.NumberOfSections > ARRAY_SIZE( sec )) return STATUS_INVALID_IMAGE_FORMAT;
     size = sizeof(*sec) * nt.FileHeader.NumberOfSections;
     if (!mapping->size) mapping->size = mapping->image.map_size;
     else if (mapping->size > mapping->image.map_size) return STATUS_SECTION_TOO_BIG;

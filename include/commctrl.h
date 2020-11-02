@@ -1109,6 +1109,8 @@ typedef struct tagNMBCHOTITEM
   (BOOL)SNDMSG(button, BCM_GETTEXTMARGIN, 0, (LPARAM)(margin))
 #define Button_SetTextMargin(button, margin)  \
   (BOOL)SNDMSG(button, BCM_SETTEXTMARGIN, 0, (LPARAM)(margin))
+#define Button_GetIdealSize(button, size)  \
+  (BOOL)SNDMSG(button, BCM_GETIDEALSIZE, 0, (LPARAM)(size))
 
 /* Toolbar */
 
@@ -5220,6 +5222,11 @@ static const WCHAR WC_COMBOBOXW[] = { 'C','o','m','b','o','B','o','x',0 };
 #define CB_SETCUEBANNER           (CBM_FIRST + 3)
 #define CB_GETCUEBANNER           (CBM_FIRST + 4)
 
+#define ComboBox_GetMinVisible(hwnd) \
+        ((int)SendMessage((hwnd), CB_GETMINVISIBLE, 0, 0))
+#define ComboBox_SetMinVisible(hwnd, count) \
+        ((BOOL)SendMessage((hwnd), CB_SETMINVISIBLE, (WPARAM)(count), 0))
+
 /**************************************************************************
  * Edit control
  */
@@ -5251,6 +5258,13 @@ typedef struct _tagEDITBALLOONTIP
 #define EM_GETHILITE              (ECM_FIRST + 6)
 #define EM_NOSETFOCUS             (ECM_FIRST + 7)
 #define EM_TAKEFOCUS              (ECM_FIRST + 8)
+
+#define Edit_SetCueBannerText(hwnd, text) \
+        (BOOL)SNDMSG((hwnd), EM_SETCUEBANNER, 0, (LPARAM)(text))
+#define Edit_SetCueBannerTextFocused(hwnd, text, drawfocused) \
+        (BOOL)SNDMSG((hwnd), EM_SETCUEBANNER, (WPARAM)(drawfocused), (LPARAM)(text))
+#define Edit_GetCueBannerText(hwnd, buff, buff_size) \
+        (BOOL)SNDMSG((hwnd), EM_GETCUEBANNER, (WPARAM)(buff), (LPARAM)(buff_size))
 
 /**************************************************************************
  * Listbox control

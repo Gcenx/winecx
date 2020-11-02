@@ -458,6 +458,7 @@ struct MSVCRT__complex {
   double x;      /* Real part */
   double y;      /* Imaginary part */
 };
+typedef struct MSVCRT__complex _Dcomplex;
 
 typedef struct MSVCRT__div_t {
     int quot;  /* quotient */
@@ -1120,7 +1121,7 @@ int WINAPIV      _cprintf(const char*,...);
 int WINAPIV      _cwprintf(const MSVCRT_wchar_t*,...);
 char*** __cdecl  MSVCRT___p__environ(void);
 int*    __cdecl  __p___mb_cur_max(void);
-unsigned int*  __cdecl __p__fmode(void);
+int*    __cdecl  MSVCRT___p__fmode(void);
 MSVCRT_wchar_t* __cdecl MSVCRT__wcsdup(const MSVCRT_wchar_t*);
 MSVCRT_size_t __cdecl MSVCRT_strnlen(const char *,MSVCRT_size_t);
 MSVCRT_size_t __cdecl MSVCRT_wcsnlen(const MSVCRT_wchar_t*,MSVCRT_size_t);

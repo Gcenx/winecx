@@ -144,6 +144,20 @@ static void _test_pipe_info(unsigned line, HANDLE pipe, DWORD ex_flags, DWORD ex
     ok_(__FILE__,line)(max_instances == ex_max_instances, "max_instances = %x, expected %u\n", max_instances, ex_max_instances);
 }
 
+#define test_file_access(a,b) _test_file_access(__LINE__,a,b)
+static void _test_file_access(unsigned line, HANDLE handle, DWORD expected_access)
+{
+    FILE_ACCESS_INFORMATION info;
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+
+    memset(&info, 0x11, sizeof(info));
+    status = NtQueryInformationFile(handle, &io, &info, sizeof(info), FileAccessInformation);
+    ok_(__FILE__,line)(status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %08x\n", status);
+    ok_(__FILE__,line)(info.AccessFlags == expected_access, "got access %08x expected %08x\n",
+                       info.AccessFlags, expected_access);
+}
+
 static void test_CreateNamedPipe(int pipemode)
 {
     HANDLE hnp;
@@ -212,6 +226,10 @@ static void test_CreateNamedPipe(int pipemode)
         /* lpSecurityAttrib */ NULL);
     ok(hnp != INVALID_HANDLE_VALUE, "CreateNamedPipe failed\n");
     test_signaled(hnp);
+
+    test_file_access(hnp, SYNCHRONIZE | READ_CONTROL | FILE_WRITE_ATTRIBUTES
+                     | FILE_READ_ATTRIBUTES | FILE_WRITE_PROPERTIES | FILE_READ_PROPERTIES
+                     | FILE_APPEND_DATA | FILE_WRITE_DATA | FILE_READ_DATA);
 
     ret = PeekNamedPipe(hnp, NULL, 0, NULL, &readden, NULL);
     ok(!ret && GetLastError() == ERROR_BAD_PIPE, "PeekNamedPipe returned %x (%u)\n",
@@ -629,6 +647,31 @@ static void test_CreateNamedPipe(int pipemode)
     }
 
     ok(CloseHandle(hnp), "CloseHandle\n");
+
+    hnp = CreateNamedPipeA(PIPENAME, PIPE_ACCESS_INBOUND, pipemode | PIPE_WAIT,
+                           1, 1024, 1024, NMPWAIT_USE_DEFAULT_WAIT, NULL);
+    ok(hnp != INVALID_HANDLE_VALUE, "CreateNamedPipe failed\n");
+    test_signaled(hnp);
+
+    test_file_access(hnp, SYNCHRONIZE | READ_CONTROL | FILE_READ_ATTRIBUTES | FILE_READ_PROPERTIES
+                     | FILE_READ_DATA);
+
+    CloseHandle(hnp);
+
+    hnp = CreateNamedPipeA(PIPENAME, PIPE_ACCESS_OUTBOUND, pipemode | PIPE_WAIT,
+                           1, 1024, 1024, NMPWAIT_USE_DEFAULT_WAIT, NULL);
+    ok(hnp != INVALID_HANDLE_VALUE, "CreateNamedPipe failed\n");
+    test_signaled(hnp);
+
+    test_file_access(hnp, SYNCHRONIZE | READ_CONTROL | FILE_WRITE_ATTRIBUTES
+                     | FILE_WRITE_PROPERTIES | FILE_APPEND_DATA | FILE_WRITE_DATA);
+
+    hFile = CreateFileA(PIPENAME, 0, 0, NULL, OPEN_EXISTING, 0, 0);
+    ok(hFile != INVALID_HANDLE_VALUE, "CreateFile failed: %u\n", GetLastError());
+    test_file_access(hFile, SYNCHRONIZE | FILE_READ_ATTRIBUTES);
+    CloseHandle(hFile);
+
+    CloseHandle(hnp);
 
     if (winetest_debug > 1) trace("test_CreateNamedPipe returning\n");
 }
@@ -1463,7 +1506,6 @@ static int test_DisconnectNamedPipe(void)
         ok(ret == WAIT_TIMEOUT, "WaitForSingleObject returned %X\n", ret);
 
         ret = PeekNamedPipe(hFile, NULL, 0, NULL, &readden, NULL);
-        todo_wine
         ok(!ret && GetLastError() == ERROR_PIPE_NOT_CONNECTED, "PeekNamedPipe returned %x (%u)\n",
            ret, GetLastError());
         ret = PeekNamedPipe(hnp, NULL, 0, NULL, &readden, NULL);
@@ -1496,6 +1538,11 @@ static void test_CreatePipe(void)
     ok(CreatePipe(&piperead, &pipewrite, &pipe_attr, 0) != 0, "CreatePipe failed\n");
     test_pipe_info(piperead, FILE_PIPE_SERVER_END, 4096, 4096, 1);
     test_pipe_info(pipewrite, 0, 4096, 4096, 1);
+    test_file_access(piperead, SYNCHRONIZE | READ_CONTROL | FILE_WRITE_ATTRIBUTES
+                     | FILE_READ_ATTRIBUTES | FILE_READ_PROPERTIES | FILE_READ_DATA);
+    test_file_access(pipewrite, SYNCHRONIZE | READ_CONTROL | FILE_WRITE_ATTRIBUTES
+                     | FILE_READ_ATTRIBUTES | FILE_WRITE_PROPERTIES | FILE_APPEND_DATA
+                     | FILE_WRITE_DATA);
 
     ok(WriteFile(pipewrite,PIPENAME,sizeof(PIPENAME), &written, NULL), "Write to anonymous pipe failed\n");
     ok(written == sizeof(PIPENAME), "Write to anonymous pipe wrote %d bytes\n", written);
@@ -2673,7 +2720,7 @@ static void test_readfileex_pending(void)
 static void _test_peek_pipe(unsigned line, HANDLE pipe, DWORD expected_read, DWORD expected_avail, DWORD expected_message_length)
 {
     DWORD bytes_read = 0xdeadbeed, avail = 0xdeadbeef, left = 0xdeadbeed;
-    char buf[4000];
+    char buf[12000];
     FILE_PIPE_PEEK_BUFFER *peek_buf = (void*)buf;
     IO_STATUS_BLOCK io;
     NTSTATUS status;
@@ -2805,7 +2852,7 @@ static DWORD CALLBACK flush_proc(HANDLE pipe)
     if (expected_flush_error == ERROR_SUCCESS)
         ok(res, "FlushFileBuffers failed: %u\n", GetLastError());
     else
-        todo_wine ok(!res && GetLastError() == expected_flush_error, "FlushFileBuffers failed: %u\n", GetLastError());
+        ok(!res && GetLastError() == expected_flush_error, "FlushFileBuffers failed: %u\n", GetLastError());
     return 0;
 }
 
@@ -2891,39 +2938,53 @@ static void test_blocking_rw(HANDLE writer, HANDLE reader, DWORD buf_size, BOOL 
     /* write more data than needed for read */
     overlapped_write_sync(writer, buf, 4000);
     test_overlapped_result(reader, &read_overlapped, 1000, msg_read);
+    test_peek_pipe(reader, 3000, 3000, msg_mode ? 3000 : 0);
 
     /* test pending write with overlapped event */
     overlapped_write_async(writer, buf, buf_size, &write_overlapped);
+    test_peek_pipe(reader, 3000 + (msg_mode ? 0 : buf_size), 3000 + buf_size, msg_mode ? 3000 : 0);
 
     /* write one more byte */
     overlapped_write_async(writer, buf, 1, &write_overlapped2);
     flush_thread = test_flush_async(writer, ERROR_SUCCESS);
     test_not_signaled(write_overlapped.hEvent);
+    test_peek_pipe(reader, 3000 + (msg_mode ? 0 : buf_size + 1), 3000 + buf_size + 1,
+                   msg_mode ? 3000 : 0);
 
     /* empty write will not block */
     overlapped_write_sync(writer, buf, 0);
     test_not_signaled(write_overlapped.hEvent);
     test_not_signaled(write_overlapped2.hEvent);
+    test_peek_pipe(reader, 3000 + (msg_mode ? 0 : buf_size + 1), 3000 + buf_size + 1,
+                   msg_mode ? 3000 : 0);
 
     /* read remaining data from the first write */
     overlapped_read_sync(reader, read_buf, 3000, 3000, FALSE);
     test_overlapped_result(writer, &write_overlapped, buf_size, FALSE);
     test_not_signaled(write_overlapped2.hEvent);
     test_not_signaled(flush_thread);
+    test_peek_pipe(reader, buf_size + (msg_mode ? 0 : 1), buf_size + 1, msg_mode ? buf_size : 0);
 
     /* read one byte so that the next write fits the buffer */
     overlapped_read_sync(reader, read_buf, 1, 1, msg_read);
     test_overlapped_result(writer, &write_overlapped2, 1, FALSE);
+    test_peek_pipe(reader, buf_size + (msg_mode ? -1 : 0), buf_size, msg_mode ? buf_size - 1 : 0);
 
     /* read the whole buffer */
     overlapped_read_sync(reader, read_buf, buf_size, buf_size-msg_read, FALSE);
+    test_peek_pipe(reader, msg_read ? 1 : 0, msg_read ? 1 : 0, msg_read ? 1 : 0);
 
     if(msg_read)
+    {
         overlapped_read_sync(reader, read_buf, 1000, 1, FALSE);
+        test_peek_pipe(reader, 0, 0, 0);
+    }
 
-    if(msg_mode) {
+    if(msg_mode)
+    {
         /* we still have an empty message in queue */
         overlapped_read_sync(reader, read_buf, 1000, 0, FALSE);
+        test_peek_pipe(reader, 0, 0, 0);
     }
     test_flush_done(flush_thread);
 
@@ -2935,23 +2996,29 @@ static void test_blocking_rw(HANDLE writer, HANDLE reader, DWORD buf_size, BOOL 
     overlapped_write_sync(writer, buf, 1);
     test_overlapped_result(reader, &read_overlapped, 0, msg_read);
     test_overlapped_result(reader, &read_overlapped2, 1, FALSE);
+    test_peek_pipe(reader, 0, 0, 0);
 
     /* write a message larger than buffer */
     overlapped_write_async(writer, buf, buf_size+2000, &write_overlapped);
+    test_peek_pipe(reader, buf_size + 2000, buf_size + 2000, msg_mode ? buf_size + 2000 : 0);
 
     /* read so that pending write is still larger than the buffer */
     overlapped_read_sync(reader, read_buf, 1999, 1999, msg_read);
     test_not_signaled(write_overlapped.hEvent);
+    test_peek_pipe(reader, buf_size + 1, buf_size + 1, msg_mode ? buf_size + 1 : 0);
 
     /* read one more byte */
     overlapped_read_sync(reader, read_buf, 1, 1, msg_read);
     test_overlapped_result(writer, &write_overlapped, buf_size+2000, FALSE);
+    test_peek_pipe(reader, buf_size, buf_size, msg_mode ? buf_size : 0);
 
     /* read remaining data */
     overlapped_read_sync(reader, read_buf, buf_size+1, buf_size, FALSE);
+    test_peek_pipe(reader, 0, 0, 0);
 
     /* simple pass of empty message */
     overlapped_write_sync(writer, buf, 0);
+    test_peek_pipe(reader, 0, 0, 0);
     if(msg_mode)
         overlapped_read_sync(reader, read_buf, 1, 0, FALSE);
 
@@ -2996,24 +3063,33 @@ static void test_blocking_rw(HANDLE writer, HANDLE reader, DWORD buf_size, BOOL 
     /* make two async writes, cancel the first one and make sure that we read from the second one */
     overlapped_write_async(writer, buf, buf_size+2000, &write_overlapped);
     overlapped_write_async(writer, buf, 1, &write_overlapped2);
+    test_peek_pipe(reader, buf_size + 2000 + (msg_mode ? 0 : 1),
+                   buf_size + 2001, msg_mode ? buf_size + 2000 : 0);
     cancel_overlapped(writer, &write_overlapped);
+    test_peek_pipe(reader, 1, 1, msg_mode ? 1 : 0);
     overlapped_read_sync(reader, read_buf, 1000, 1, FALSE);
     test_overlapped_result(writer, &write_overlapped2, 1, FALSE);
+    test_peek_pipe(reader, 0, 0, 0);
 
     /* same as above, but parially read written data before canceling */
     overlapped_write_async(writer, buf, buf_size+2000, &write_overlapped);
     overlapped_write_async(writer, buf, 1, &write_overlapped2);
+    test_peek_pipe(reader, buf_size + 2000 + (msg_mode ? 0 : 1),
+                   buf_size + 2001, msg_mode ? buf_size + 2000 : 0);
     overlapped_read_sync(reader, read_buf, 10, 10, msg_read);
     test_not_signaled(write_overlapped.hEvent);
     cancel_overlapped(writer, &write_overlapped);
+    test_peek_pipe(reader, 1, 1, msg_mode ? 1 : 0);
     overlapped_read_sync(reader, read_buf, 1000, 1, FALSE);
     test_overlapped_result(writer, &write_overlapped2, 1, FALSE);
+    test_peek_pipe(reader, 0, 0, 0);
 
     /* empty queue by canceling write and make sure that flush is signaled */
     overlapped_write_async(writer, buf, buf_size+2000, &write_overlapped);
     flush_thread = test_flush_async(writer, ERROR_SUCCESS);
     test_not_signaled(flush_thread);
     cancel_overlapped(writer, &write_overlapped);
+    test_peek_pipe(reader, 0, 0, 0);
     test_flush_done(flush_thread);
 }
 
@@ -3139,6 +3215,7 @@ static void test_overlapped_transport(BOOL msg_mode, BOOL msg_read_mode)
     CloseHandle(server);
 
     /* close client with pending writes */
+    memset(buf, 0xaa, sizeof(buf));
     create_overlapped_pipe(create_flags, &client, &server);
     overlapped_write_async(server, buf, 7000, &overlapped);
     flush = test_flush_async(server, ERROR_BROKEN_PIPE);

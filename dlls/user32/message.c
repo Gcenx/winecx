@@ -280,6 +280,8 @@ struct send_message_info
     enum wm_char_mapping wm_char;
 };
 
+static const INPUT_MESSAGE_SOURCE msg_source_unavailable = { IMDT_UNAVAILABLE, IMO_UNAVAILABLE };
+
 
 /* Message class descriptor */
 static const WCHAR messageW[] = {'M','e','s','s','a','g','e',0};
@@ -2388,6 +2390,7 @@ static BOOL process_rawinput_message( MSG *msg, const struct hardware_msg_data *
     }
 
     msg->lParam = (LPARAM)rawinput;
+    msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
     return TRUE;
 }
 
@@ -2463,6 +2466,7 @@ static BOOL process_keyboard_message( MSG *msg, UINT hw_id, HWND hwnd_filter,
         return FALSE;
     }
     accept_hardware_message( hw_id, remove );
+    msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
 
     if ( remove && msg->message == WM_KEYDOWN )
         if (ImmProcessKey(msg->hwnd, GetKeyboardLayout(0), msg->wParam, msg->lParam, 0) )
@@ -2519,6 +2523,9 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
         accept_hardware_message( hw_id, TRUE );
         return FALSE;
     }
+
+    msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
+    SetThreadDpiAwarenessContext( GetWindowDpiAwarenessContext( msg->hwnd ));
 
     /* FIXME: is this really the right place for this hook? */
     event.message = msg->message;
@@ -2693,17 +2700,25 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
 static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardware_msg_data *msg_data,
                                       HWND hwnd_filter, UINT first, UINT last, BOOL remove )
 {
+    DPI_AWARENESS_CONTEXT context;
+    BOOL ret = FALSE;
+
+    get_user_thread_info()->msg_source.deviceType = msg_data->source.device;
+    get_user_thread_info()->msg_source.originId   = msg_data->source.origin;
+
+    /* hardware messages are always in physical coords */
+    context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
+
     if (msg->message == WM_INPUT)
-        return process_rawinput_message( msg, msg_data );
-
-    if (is_keyboard_message( msg->message ))
-        return process_keyboard_message( msg, hw_id, hwnd_filter, first, last, remove );
-
-    if (is_mouse_message( msg->message ))
-        return process_mouse_message( msg, hw_id, msg_data->info, hwnd_filter, first, last, remove );
-
-    ERR( "unknown message type %x\n", msg->message );
-    return FALSE;
+        ret = process_rawinput_message( msg, msg_data );
+    else if (is_keyboard_message( msg->message ))
+        ret = process_keyboard_message( msg, hw_id, hwnd_filter, first, last, remove );
+    else if (is_mouse_message( msg->message ))
+        ret = process_mouse_message( msg, hw_id, msg_data->info, hwnd_filter, first, last, remove );
+    else
+        ERR( "unknown message type %x\n", msg->message );
+    SetThreadDpiAwarenessContext( context );
+    return ret;
 }
 
 
@@ -2735,6 +2750,7 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
 {
     LRESULT result;
     struct user_thread_info *thread_info = get_user_thread_info();
+    INPUT_MESSAGE_SOURCE prev_source = thread_info->msg_source;
     struct received_message_info info, *old_info;
     unsigned int hw_id = 0;  /* id of previous hardware message */
     void *buffer;
@@ -2750,6 +2766,8 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
         NTSTATUS res;
         size_t size = 0;
         const message_data_t *msg_data = buffer;
+
+        thread_info->msg_source = prev_source;
 
         SERVER_START_REQ( get_message )
         {
@@ -2941,9 +2959,11 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
                     continue;  /* ignore it */
 	    }
             *msg = info.msg;
-            thread_info->GetMessagePosVal = MAKELONG( info.msg.pt.x, info.msg.pt.y );
+            msg->pt = point_phys_to_win_dpi( info.msg.hwnd, info.msg.pt );
+            thread_info->GetMessagePosVal = MAKELONG( msg->pt.x, msg->pt.y );
             thread_info->GetMessageTimeVal = info.msg.time;
             thread_info->GetMessageExtraInfoVal = 0;
+            thread_info->msg_source = msg_source_unavailable;
             HeapFree( GetProcessHeap(), 0, buffer );
             HOOK_CallHooks( WH_GETMESSAGE, HC_ACTION, flags & PM_REMOVE, (LPARAM)msg, TRUE );
             return TRUE;
@@ -2952,6 +2972,7 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
         /* if we get here, we have a sent message; call the window procedure */
         old_info = thread_info->receive_info;
         thread_info->receive_info = &info;
+        thread_info->msg_source = msg_source_unavailable;
         result = call_window_proc( info.msg.hwnd, info.msg.message, info.msg.wParam,
                                    info.msg.lParam, (info.type != MSG_ASCII), FALSE,
                                    WMCHAR_MAP_RECVMESSAGE );
@@ -3244,6 +3265,8 @@ static BOOL is_message_broadcastable(UINT msg)
  */
 static BOOL send_message( struct send_message_info *info, DWORD_PTR *res_ptr, BOOL unicode )
 {
+    struct user_thread_info *thread_info = get_user_thread_info();
+    INPUT_MESSAGE_SOURCE prev_source = thread_info->msg_source;
     DWORD dest_pid;
     BOOL ret;
     LRESULT result;
@@ -3260,6 +3283,7 @@ static BOOL send_message( struct send_message_info *info, DWORD_PTR *res_ptr, BO
 
     if (USER_IsExitingThread( info->dest_tid )) return FALSE;
 
+    thread_info->msg_source = msg_source_unavailable;
     SPY_EnterMessage( SPY_SENDMESSAGE, info->hwnd, info->msg, info->wparam, info->lparam );
 
     if (info->dest_tid == GetCurrentThreadId())
@@ -3285,6 +3309,7 @@ static BOOL send_message( struct send_message_info *info, DWORD_PTR *res_ptr, BO
     }
 
     SPY_ExitMessage( SPY_RESULT_OK, info->hwnd, info->msg, result, info->wparam, info->lparam );
+    thread_info->msg_source = prev_source;
     if (ret && res_ptr) *res_ptr = result;
     return ret;
 }
@@ -4120,6 +4145,16 @@ LPARAM WINAPI SetMessageExtraInfo(LPARAM lParam)
     LONG old_value = thread_info->GetMessageExtraInfoVal;
     thread_info->GetMessageExtraInfoVal = lParam;
     return old_value;
+}
+
+
+/***********************************************************************
+ *		GetCurrentInputMessageSource (USER32.@)
+ */
+BOOL WINAPI GetCurrentInputMessageSource( INPUT_MESSAGE_SOURCE *source )
+{
+    *source = get_user_thread_info()->msg_source;
+    return TRUE;
 }
 
 

@@ -71,8 +71,9 @@
  *
  *      Linker Options
  *          object-file-name  -llibrary -nostartfiles  -nodefaultlibs
- *          -nostdlib -s  -static  -static-libgcc  -shared  -shared-libgcc
- *          -symbolic -Wl,option  -Xlinker option -u symbol --image-base
+ *          -nostdlib -s  -static  -static-libgcc  -static-libstdc++
+ *          -shared  -shared-libgcc  -symbolic  -Wl,option
+ *          -Xlinker option -u symbol --image-base
  *
  *      Directory Options
  *          -Bprefix  -Idir  -I-  -Ldir  -specs=file
@@ -444,15 +445,35 @@ static int check_platform( struct options *opts, const char *file )
     return ret;
 }
 
+static const char *get_multiarch_dir( enum target_cpu cpu )
+{
+   switch(cpu)
+   {
+   case CPU_x86:     return "/i386-linux-gnu";
+   case CPU_x86_64:  return "/x86_64-linux-gnu";
+   case CPU_ARM:     return "/arm-linux-gnueabi";
+   case CPU_ARM64:   return "/aarch64-linux-gnu";
+   case CPU_POWERPC: return "/powerpc-linux-gnu";
+   default:
+       assert(0);
+       return NULL;
+   }
+}
+
 static char *get_lib_dir( struct options *opts )
 {
     static const char *stdlibpath[] = { LIBDIR, "/usr/lib", "/usr/local/lib", "/lib" };
     static const char libwine[] = "/libwine.so";
-    const char *bit_suffix, *other_bit_suffix;
+    const char *bit_suffix, *other_bit_suffix, *build_multiarch, *target_multiarch;
     unsigned int i;
+    size_t build_len, target_len;
 
     bit_suffix = opts->target_cpu == CPU_x86_64 || opts->target_cpu == CPU_ARM64 ? "64" : "32";
     other_bit_suffix = opts->target_cpu == CPU_x86_64 || opts->target_cpu == CPU_ARM64 ? "32" : "64";
+    build_multiarch = get_multiarch_dir( build_cpu );
+    target_multiarch = get_multiarch_dir( opts->target_cpu );
+    build_len = strlen( build_multiarch );
+    target_len = strlen( target_multiarch );
 
     for (i = 0; i < sizeof(stdlibpath)/sizeof(stdlibpath[0]); i++)
     {
@@ -471,16 +492,7 @@ static char *get_lib_dir( struct options *opts )
         strcpy( p, bit_suffix );
         strcat( p, libwine );
         if (check_platform( opts, buffer )) goto found;
-        switch(opts->target_cpu)
-        {
-        case CPU_x86:     strcpy( p, "/i386-linux-gnu" ); break;
-        case CPU_x86_64:  strcpy( p, "/x86_64-linux-gnu" ); break;
-        case CPU_ARM:     strcpy( p, "/arm-linux-gnueabi" ); break;
-        case CPU_ARM64:   strcpy( p, "/aarch64-linux-gnu" ); break;
-        case CPU_POWERPC: strcpy( p, "/powerpc-linux-gnu" ); break;
-        default:
-            assert(0);
-        }
+        strcpy( p, target_multiarch );
         strcat( p, libwine );
         if (check_platform( opts, buffer )) goto found;
 
@@ -495,6 +507,17 @@ static char *get_lib_dir( struct options *opts )
             p--;
             while (p > buffer && *p != '/') p--;
             if (*p != '/') break;
+
+            /* try s/$build_cpu/$target_cpu/ on multiarch */
+            if (build_cpu != opts->target_cpu && !memcmp( p, build_multiarch, build_len ) && p[build_len] == '/')
+            {
+                memmove( p + target_len, p + build_len, strlen( p + build_len ) + 1 );
+                memcpy( p, target_multiarch, target_len );
+                if (check_platform( opts, buffer )) goto found;
+                memmove( p + build_len, p + target_len, strlen( p + target_len ) + 1 );
+                memcpy( p, build_multiarch, build_len );
+            }
+
             if (memcmp( p + 1, "lib", 3 )) continue;
             if (p[4] == '/')
             {
@@ -507,6 +530,9 @@ static char *get_lib_dir( struct options *opts )
             {
                 memcpy( p + 4, bit_suffix, 2 );
                 if (check_platform( opts, buffer )) goto found;
+                memmove( p + 4, p + 6, strlen( p + 6 ) + 1 );
+                if (check_platform( opts, buffer )) goto found;
+                memmove( p + 6, p + 4, strlen( p + 4 ) + 1 );
                 memcpy( p + 4, other_bit_suffix, 2 );
             }
         }
@@ -669,10 +695,11 @@ no_compat_defines:
     {
         if (opts->use_msvcrt)
         {
-            strarray_add(comp_args, gcc_defs ? "-isystem" INCLUDEDIR "/msvcrt" : "-I" INCLUDEDIR "/msvcrt" );
+            strarray_add(comp_args, gcc_defs ? "-isystem" INCLUDEDIR "/wine/msvcrt" : "-I" INCLUDEDIR "/wine/msvcrt" );
             strarray_add(comp_args, "-D__MSVCRT__");
         }
-        strarray_add(comp_args, gcc_defs ? "-isystem" INCLUDEDIR "/windows" : "-I" INCLUDEDIR "/windows" );
+        strarray_add(comp_args, "-I" INCLUDEDIR );
+        strarray_add(comp_args, gcc_defs ? "-isystem" INCLUDEDIR "/wine/windows" : "-I" INCLUDEDIR "/wine/windows" );
     }
     else if (opts->wine_objdir)
         strarray_add(comp_args, strmake("-I%s/include", opts->wine_objdir) );
@@ -1262,8 +1289,9 @@ static int is_linker_arg(const char* arg)
 {
     static const char* link_switches[] = 
     {
-	"-nostdlib", "-s", "-static", "-static-libgcc", "-shared", "-shared-libgcc", "-symbolic",
-	"-framework", "--coverage", "-fprofile-generate", "-fprofile-use"
+	"-nostdlib", "-s", "-static", "-static-libgcc", "-static-libstdc++",
+	"-shared", "-shared-libgcc", "-symbolic", "-framework", "--coverage",
+	"-fprofile-generate", "-fprofile-use"
     };
     unsigned int j;
 
@@ -1577,6 +1605,7 @@ int main(int argc, char **argv)
 			raw_linker_arg = 1;
                     }
                     else if (!strncmp("-mcpu=", argv[i], 6) ||
+                             !strncmp("-mfpu=", argv[i], 6) ||
                              !strncmp("-march=", argv[i], 7) ||
                              !strncmp("-mfloat-abi=", argv[i], 12))
                         strarray_add(opts.winebuild_args, argv[i]);

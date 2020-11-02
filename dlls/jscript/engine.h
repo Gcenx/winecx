@@ -66,7 +66,7 @@
     X(new,        1, ARG_UINT,   0)        \
     X(new_obj,    1, 0,0)                  \
     X(null,       1, 0,0)                  \
-    X(obj_prop,   1, ARG_BSTR,   0)        \
+    X(obj_prop,   1, ARG_BSTR,   ARG_UINT) \
     X(or,         1, 0,0)                  \
     X(pop,        1, ARG_UINT,   0)        \
     X(pop_except, 0, ARG_ADDR,   0)        \
@@ -128,6 +128,12 @@ typedef struct {
         double dbl;
     } u;
 } instr_t;
+
+typedef enum {
+    PROPERTY_DEFINITION_VALUE,
+    PROPERTY_DEFINITION_GETTER,
+    PROPERTY_DEFINITION_SETTER
+} property_definition_type_t;
 
 typedef struct {
     BSTR name;

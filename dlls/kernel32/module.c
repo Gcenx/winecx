@@ -259,276 +259,6 @@ BOOL WINAPI DisableThreadLibraryCalls( HMODULE hModule )
 }
 
 
-/* Check whether a file is an OS/2 or a very old Windows executable
- * by testing on import of KERNEL.
- *
- * Reading the module imports is the only reasonable way of discerning
- * old Windows binaries from OS/2 ones.
- */
-static DWORD MODULE_Decide_OS2_OldWin(HANDLE hfile, const IMAGE_DOS_HEADER *mz, const IMAGE_OS2_HEADER *ne)
-{
-    DWORD currpos = SetFilePointer( hfile, 0, NULL, SEEK_CUR);
-    DWORD ret = BINARY_OS216;
-    LPWORD modtab = NULL;
-    LPSTR nametab = NULL;
-    DWORD len;
-    int i;
-
-    /* read modref table */
-    if ( (SetFilePointer( hfile, mz->e_lfanew + ne->ne_modtab, NULL, SEEK_SET ) == -1)
-      || (!(modtab = HeapAlloc( GetProcessHeap(), 0, ne->ne_cmod*sizeof(WORD))))
-      || (!(ReadFile(hfile, modtab, ne->ne_cmod*sizeof(WORD), &len, NULL)))
-      || (len != ne->ne_cmod*sizeof(WORD)) )
-	goto done;
-
-    /* read imported names table */
-    if ( (SetFilePointer( hfile, mz->e_lfanew + ne->ne_imptab, NULL, SEEK_SET ) == -1)
-      || (!(nametab = HeapAlloc( GetProcessHeap(), 0, ne->ne_enttab - ne->ne_imptab)))
-      || (!(ReadFile(hfile, nametab, ne->ne_enttab - ne->ne_imptab, &len, NULL)))
-      || (len != ne->ne_enttab - ne->ne_imptab) )
-	goto done;
-
-    for (i=0; i < ne->ne_cmod; i++)
-    {
-        LPSTR module = &nametab[modtab[i]];
-        TRACE("modref: %.*s\n", module[0], &module[1]);
-        if (!(strncmp(&module[1], "KERNEL", module[0])))
-        { /* very old Windows file */
-            MESSAGE("This seems to be a very old (pre-3.0) Windows executable. Expect crashes, especially if this is a real-mode binary !\n");
-            ret = BINARY_WIN16;
-            break;
-        }
-    }
-
-done:
-    HeapFree( GetProcessHeap(), 0, modtab);
-    HeapFree( GetProcessHeap(), 0, nametab);
-    SetFilePointer( hfile, currpos, NULL, SEEK_SET); /* restore filepos */
-    return ret;
-}
-
-/***********************************************************************
- *           MODULE_GetBinaryType
- */
-void MODULE_get_binary_info( HANDLE hfile, struct binary_info *info )
-{
-    union
-    {
-        struct
-        {
-            unsigned char magic[4];
-            unsigned char class;
-            unsigned char data;
-            unsigned char ignored1[10];
-            unsigned short type;
-            unsigned short machine;
-            unsigned char ignored2[8];
-            unsigned int phoff;
-            unsigned char ignored3[12];
-            unsigned short phnum;
-        } elf;
-        struct
-        {
-            unsigned char magic[4];
-            unsigned char class;
-            unsigned char data;
-            unsigned char ignored1[10];
-            unsigned short type;
-            unsigned short machine;
-            unsigned char ignored2[12];
-            unsigned __int64 phoff;
-            unsigned char ignored3[16];
-            unsigned short phnum;
-        } elf64;
-        struct
-        {
-            unsigned int magic;
-            unsigned int cputype;
-            unsigned int cpusubtype;
-            unsigned int filetype;
-        } macho;
-        IMAGE_DOS_HEADER mz;
-    } header;
-
-    DWORD len;
-
-    memset( info, 0, sizeof(*info) );
-
-    /* Seek to the start of the file and read the header information. */
-    if (SetFilePointer( hfile, 0, NULL, SEEK_SET ) == -1) return;
-    if (!ReadFile( hfile, &header, sizeof(header), &len, NULL ) || len != sizeof(header)) return;
-
-    if (!memcmp( header.elf.magic, "\177ELF", 4 ))
-    {
-#ifdef WORDS_BIGENDIAN
-        BOOL byteswap = (header.elf.data == 1);
-#else
-        BOOL byteswap = (header.elf.data == 2);
-#endif
-        if (header.elf.class == 2) info->flags |= BINARY_FLAG_64BIT;
-        if (byteswap)
-        {
-            header.elf.type = RtlUshortByteSwap( header.elf.type );
-            header.elf.machine = RtlUshortByteSwap( header.elf.machine );
-        }
-        switch(header.elf.type)
-        {
-        case 2:
-            info->type = BINARY_UNIX_EXE;
-            break;
-        case 3:
-        {
-            LARGE_INTEGER phoff;
-            unsigned short phnum;
-            unsigned int type;
-            if (header.elf.class == 2)
-            {
-                phoff.QuadPart = byteswap ? RtlUlonglongByteSwap( header.elf64.phoff ) : header.elf64.phoff;
-                phnum = byteswap ? RtlUshortByteSwap( header.elf64.phnum ) : header.elf64.phnum;
-            }
-            else
-            {
-                phoff.QuadPart = byteswap ? RtlUlongByteSwap( header.elf.phoff ) : header.elf.phoff;
-                phnum = byteswap ? RtlUshortByteSwap( header.elf.phnum ) : header.elf.phnum;
-            }
-            while (phnum--)
-            {
-                if (SetFilePointerEx( hfile, phoff, NULL, FILE_BEGIN ) == -1) return;
-                if (!ReadFile( hfile, &type, sizeof(type), &len, NULL ) || len < sizeof(type)) return;
-                if (byteswap) type = RtlUlongByteSwap( type );
-                if (type == 3)
-                {
-                    info->type = BINARY_UNIX_EXE;
-                    break;
-                }
-                phoff.QuadPart += (header.elf.class == 2) ? 56 : 32;
-            }
-            if (!info->type) info->type = BINARY_UNIX_LIB;
-            break;
-        }
-        default:
-            return;
-        }
-        switch(header.elf.machine)
-        {
-        case 3:   info->arch = IMAGE_FILE_MACHINE_I386; break;
-        case 20:  info->arch = IMAGE_FILE_MACHINE_POWERPC; break;
-        case 40:  info->arch = IMAGE_FILE_MACHINE_ARMNT; break;
-        case 50:  info->arch = IMAGE_FILE_MACHINE_IA64; break;
-        case 62:  info->arch = IMAGE_FILE_MACHINE_AMD64; break;
-        case 183: info->arch = IMAGE_FILE_MACHINE_ARM64; break;
-        }
-    }
-    /* Mach-o File with Endian set to Big Endian or Little Endian */
-    else if (header.macho.magic == 0xfeedface || header.macho.magic == 0xcefaedfe ||
-             header.macho.magic == 0xfeedfacf || header.macho.magic == 0xcffaedfe)
-    {
-        if ((header.macho.cputype >> 24) == 1) info->flags |= BINARY_FLAG_64BIT;
-        if (header.macho.magic == 0xcefaedfe || header.macho.magic == 0xcffaedfe)
-        {
-            header.macho.filetype = RtlUlongByteSwap( header.macho.filetype );
-            header.macho.cputype = RtlUlongByteSwap( header.macho.cputype );
-        }
-        switch(header.macho.filetype)
-        {
-        case 2: info->type = BINARY_UNIX_EXE; break;
-        case 8: info->type = BINARY_UNIX_LIB; break;
-        }
-        switch(header.macho.cputype)
-        {
-        case 0x00000007: info->arch = IMAGE_FILE_MACHINE_I386; break;
-        case 0x01000007: info->arch = IMAGE_FILE_MACHINE_AMD64; break;
-        case 0x0000000c: info->arch = IMAGE_FILE_MACHINE_ARMNT; break;
-        case 0x0100000c: info->arch = IMAGE_FILE_MACHINE_ARM64; break;
-        case 0x00000012: info->arch = IMAGE_FILE_MACHINE_POWERPC; break;
-        }
-    }
-    /* Not ELF, try DOS */
-    else if (header.mz.e_magic == IMAGE_DOS_SIGNATURE)
-    {
-        union
-        {
-            IMAGE_OS2_HEADER os2;
-            IMAGE_NT_HEADERS32 nt;
-            IMAGE_NT_HEADERS64 nt64;
-        } ext_header;
-
-        /* We do have a DOS image so we will now try to seek into
-         * the file by the amount indicated by the field
-         * "Offset to extended header" and read in the
-         * "magic" field information at that location.
-         * This will tell us if there is more header information
-         * to read or not.
-         */
-        info->type = BINARY_DOS;
-        info->arch = IMAGE_FILE_MACHINE_I386;
-        if (SetFilePointer( hfile, header.mz.e_lfanew, NULL, SEEK_SET ) == -1) return;
-        if (!ReadFile( hfile, &ext_header, sizeof(ext_header), &len, NULL ) || len < 4) return;
-
-        /* Reading the magic field succeeded so
-         * we will try to determine what type it is.
-         */
-        if (!memcmp( &ext_header.nt.Signature, "PE\0\0", 4 ))
-        {
-            if (len >= sizeof(ext_header.nt.FileHeader))
-            {
-                static const char fakedll_signature[] = "Wine placeholder DLL";
-                char buffer[sizeof(fakedll_signature)];
-
-                info->type = BINARY_PE;
-                info->arch = ext_header.nt.FileHeader.Machine;
-                if (ext_header.nt.FileHeader.Characteristics & IMAGE_FILE_DLL)
-                    info->flags |= BINARY_FLAG_DLL;
-                if (len < sizeof(ext_header))  /* clear remaining part of header if missing */
-                    memset( (char *)&ext_header + len, 0, sizeof(ext_header) - len );
-                switch (ext_header.nt.OptionalHeader.Magic)
-                {
-                case IMAGE_NT_OPTIONAL_HDR32_MAGIC:
-                    info->res_start = ext_header.nt.OptionalHeader.ImageBase;
-                    info->res_end = info->res_start + ext_header.nt.OptionalHeader.SizeOfImage;
-                    break;
-                case IMAGE_NT_OPTIONAL_HDR64_MAGIC:
-                    info->res_start = ext_header.nt64.OptionalHeader.ImageBase;
-                    info->res_end = info->res_start + ext_header.nt64.OptionalHeader.SizeOfImage;
-                    info->flags |= BINARY_FLAG_64BIT;
-                    break;
-                }
-
-                if (header.mz.e_lfanew >= sizeof(header.mz) + sizeof(fakedll_signature) &&
-                    SetFilePointer( hfile, sizeof(header.mz), NULL, SEEK_SET ) == sizeof(header.mz) &&
-                    ReadFile( hfile, buffer, sizeof(fakedll_signature), &len, NULL ) &&
-                    len == sizeof(fakedll_signature) &&
-                    !memcmp( buffer, fakedll_signature, sizeof(fakedll_signature) ))
-                {
-                    info->flags |= BINARY_FLAG_FAKEDLL;
-                }
-            }
-        }
-        else if (!memcmp( &ext_header.os2.ne_magic, "NE", 2 ))
-        {
-            /* This is a Windows executable (NE) header.  This can
-             * mean either a 16-bit OS/2 or a 16-bit Windows or even a
-             * DOS program (running under a DOS extender).  To decide
-             * which, we'll have to read the NE header.
-             */
-            if (len >= sizeof(ext_header.os2))
-            {
-                if (ext_header.os2.ne_flags & NE_FFLAGS_LIBMODULE) info->flags |= BINARY_FLAG_DLL;
-                switch ( ext_header.os2.ne_exetyp )
-                {
-                case 1:  info->type = BINARY_OS216; break; /* OS/2 */
-                case 2:  info->type = BINARY_WIN16; break; /* Windows */
-                case 3:  info->type = BINARY_DOS; break; /* European MS-DOS 4.x */
-                case 4:  info->type = BINARY_WIN16; break; /* Windows 386; FIXME: is this 32bit??? */
-                case 5:  info->type = BINARY_DOS; break; /* BOSS, Borland Operating System Services */
-                /* other types, e.g. 0 is: "unknown" */
-                default: info->type = MODULE_Decide_OS2_OldWin(hfile, &header.mz, &ext_header.os2); break;
-                }
-            }
-        }
-    }
-}
-
 /***********************************************************************
  *             GetBinaryTypeW                     [KERNEL32.@]
  *
@@ -563,76 +293,84 @@ void MODULE_get_binary_info( HANDLE hfile, struct binary_info *info )
  *  ".com" and ".pif" files are only recognized by their file name extension,
  *  as per native Windows.
  */
-BOOL WINAPI GetBinaryTypeW( LPCWSTR lpApplicationName, LPDWORD lpBinaryType )
+BOOL WINAPI GetBinaryTypeW( LPCWSTR name, LPDWORD type )
 {
-    BOOL ret = FALSE;
-    HANDLE hfile;
-    struct binary_info binary_info;
+    static const WCHAR comW[] = { '.','c','o','m',0 };
+    static const WCHAR pifW[] = { '.','p','i','f',0 };
+    HANDLE hfile, mapping;
+    NTSTATUS status;
+    const WCHAR *ptr;
 
-    TRACE("%s\n", debugstr_w(lpApplicationName) );
+    TRACE("%s\n", debugstr_w(name) );
 
-    /* Sanity check.
-     */
-    if ( lpApplicationName == NULL || lpBinaryType == NULL )
-        return FALSE;
+    if (type == NULL) return FALSE;
 
-    /* Open the file indicated by lpApplicationName for reading.
-     */
-    hfile = CreateFileW( lpApplicationName, GENERIC_READ, FILE_SHARE_READ,
-                         NULL, OPEN_EXISTING, 0, 0 );
+    hfile = CreateFileW( name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0 );
     if ( hfile == INVALID_HANDLE_VALUE )
         return FALSE;
 
-    /* Check binary type
-     */
-    MODULE_get_binary_info( hfile, &binary_info );
-    switch (binary_info.type)
-    {
-    case BINARY_UNKNOWN:
-    {
-        static const WCHAR comW[] = { '.','C','O','M',0 };
-        static const WCHAR pifW[] = { '.','P','I','F',0 };
-        const WCHAR *ptr;
-
-        /* try to determine from file name */
-        ptr = strrchrW( lpApplicationName, '.' );
-        if (!ptr) break;
-        if (!strcmpiW( ptr, comW ))
-        {
-            *lpBinaryType = SCS_DOS_BINARY;
-            ret = TRUE;
-        }
-        else if (!strcmpiW( ptr, pifW ))
-        {
-            *lpBinaryType = SCS_PIF_BINARY;
-            ret = TRUE;
-        }
-        break;
-    }
-    case BINARY_PE:
-        *lpBinaryType = (binary_info.flags & BINARY_FLAG_64BIT) ? SCS_64BIT_BINARY : SCS_32BIT_BINARY;
-        ret = TRUE;
-        break;
-    case BINARY_WIN16:
-        *lpBinaryType = SCS_WOW_BINARY;
-        ret = TRUE;
-        break;
-    case BINARY_OS216:
-        *lpBinaryType = SCS_OS216_BINARY;
-        ret = TRUE;
-        break;
-    case BINARY_DOS:
-        *lpBinaryType = SCS_DOS_BINARY;
-        ret = TRUE;
-        break;
-    case BINARY_UNIX_EXE:
-    case BINARY_UNIX_LIB:
-        ret = FALSE;
-        break;
-    }
-
+    status = NtCreateSection( &mapping, STANDARD_RIGHTS_REQUIRED | SECTION_QUERY,
+                              NULL, NULL, PAGE_READONLY, SEC_IMAGE, hfile );
     CloseHandle( hfile );
-    return ret;
+
+    switch (status)
+    {
+    case STATUS_SUCCESS:
+        {
+            SECTION_IMAGE_INFORMATION info;
+
+            status = NtQuerySection( mapping, SectionImageInformation, &info, sizeof(info), NULL );
+            CloseHandle( mapping );
+            if (status) return FALSE;
+            switch (info.Machine)
+            {
+            case IMAGE_FILE_MACHINE_I386:
+            case IMAGE_FILE_MACHINE_ARM:
+            case IMAGE_FILE_MACHINE_THUMB:
+            case IMAGE_FILE_MACHINE_ARMNT:
+            case IMAGE_FILE_MACHINE_POWERPC:
+                *type = SCS_32BIT_BINARY;
+                return TRUE;
+            case IMAGE_FILE_MACHINE_AMD64:
+            case IMAGE_FILE_MACHINE_ARM64:
+                *type = SCS_64BIT_BINARY;
+                return TRUE;
+            }
+            return FALSE;
+        }
+    case STATUS_INVALID_IMAGE_WIN_16:
+        *type = SCS_WOW_BINARY;
+        return TRUE;
+    case STATUS_INVALID_IMAGE_WIN_32:
+        *type = SCS_32BIT_BINARY;
+        return TRUE;
+    case STATUS_INVALID_IMAGE_WIN_64:
+        *type = SCS_64BIT_BINARY;
+        return TRUE;
+    case STATUS_INVALID_IMAGE_NE_FORMAT:
+        *type = SCS_OS216_BINARY;
+        return TRUE;
+    case STATUS_INVALID_IMAGE_PROTECT:
+        *type = SCS_DOS_BINARY;
+        return TRUE;
+    case STATUS_INVALID_IMAGE_NOT_MZ:
+        if ((ptr = strrchrW( name, '.' )))
+        {
+            if (!strcmpiW( ptr, comW ))
+            {
+                *type = SCS_DOS_BINARY;
+                return TRUE;
+            }
+            if (!strcmpiW( ptr, pifW ))
+            {
+                *type = SCS_PIF_BINARY;
+                return TRUE;
+            }
+        }
+        return FALSE;
+    default:
+        return FALSE;
+    }
 }
 
 /***********************************************************************

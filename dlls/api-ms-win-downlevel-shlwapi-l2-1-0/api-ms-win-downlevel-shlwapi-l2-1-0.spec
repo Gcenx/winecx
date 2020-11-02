@@ -5,7 +5,7 @@
 @ stdcall IStream_Size(ptr ptr) shlwapi.IStream_Size
 @ stdcall IStream_Write(ptr ptr long) shlwapi.IStream_Write
 @ stub IStream_WriteStr
-@ stdcall IUnknown_AtomicRelease(long) shlwapi.IUnknown_AtomicRelease
+@ stdcall IUnknown_AtomicRelease(ptr) shlwapi.IUnknown_AtomicRelease
 @ stdcall IUnknown_GetSite(ptr ptr ptr) shlwapi.IUnknown_GetSite
 @ stdcall IUnknown_QueryService(ptr ptr ptr ptr) shlwapi.IUnknown_QueryService
 @ stdcall IUnknown_Set(ptr ptr) shlwapi.IUnknown_Set
@@ -19,8 +19,8 @@
 @ stdcall SHCreateStreamOnFileEx(wstr long long long ptr ptr) shlwapi.SHCreateStreamOnFileEx
 @ stdcall SHCreateStreamOnFileW(wstr long ptr) shlwapi.SHCreateStreamOnFileW
 @ stdcall SHCreateThreadRef(ptr ptr) shlwapi.SHCreateThreadRef
-@ stdcall SHDeleteEmptyKeyA(long ptr) shlwapi.SHDeleteEmptyKeyA
-@ stdcall SHDeleteEmptyKeyW(long ptr) shlwapi.SHDeleteEmptyKeyW
+@ stdcall SHDeleteEmptyKeyA(long str) shlwapi.SHDeleteEmptyKeyA
+@ stdcall SHDeleteEmptyKeyW(long wstr) shlwapi.SHDeleteEmptyKeyW
 @ stdcall SHDeleteKeyA(long str) shlwapi.SHDeleteKeyA
 @ stdcall SHDeleteKeyW(long wstr) shlwapi.SHDeleteKeyW
 @ stdcall SHDeleteValueA(long  str  str) shlwapi.SHDeleteValueA

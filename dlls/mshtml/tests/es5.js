@@ -90,6 +90,35 @@ function test_indexOf() {
     next_test();
 }
 
+function test_array_forEach() {
+    ok(Array.prototype.forEach.length === 1, "forEach.length = " + Array.prototype.forEach.length);
+
+    function test(array, expect) {
+        var r = Array.prototype.forEach.call(array, function(value, index, arr) {
+            ok(arr === array, "unexpected array " + arr);
+            ok(index === expect[0][0], "index = " + index + " expected " + expect[0][0]);
+            ok(value === expect[0][1], "value = " + value + " expected " + expect[0][1]);
+            expect.shift();
+        });
+        ok(r === undefined, "forEach returned " + r);
+        ok(expect.length === 0, "too few forEach() calls, expected " + expect.length + " more");
+    }
+
+    test(["a",2,"c"], [[0,"a"],[1,2],[2,"c"]]);
+    test({length: 1000, 500: false, c: 30, 3: "x", 999: 1}, [[3,"x"],[500,false],[999,1]]);
+    test(new String("abc"), [[0,"a"],[1,"b"],[2,"c"]]);
+    test([], []);
+
+    [1,2].forEach(function() {
+        ok(this === window, "this != window");
+    });
+    [1,2].forEach(function() {
+        ok(this === window, "this != window");
+    }, undefined);
+
+    next_test();
+}
+
 function test_isArray() {
     function expect_array(a, exr) {
         var r = Array.isArray(a);
@@ -104,6 +133,57 @@ function test_isArray() {
     function C() {}
     C.prototype = Array.prototype;
     expect_array(new C(), false);
+
+    next_test();
+}
+
+function test_array_map() {
+    var calls, m, arr, ctx;
+
+    /* basic map call with context */
+    calls = "";
+    arr = [1,2,3];
+    ctx = {};
+    m = arr.map(function(x, i, a) {
+        ok(this === ctx, "this != ctx");
+        ok(i === x - 1, "i = " + i);
+        ok(a === arr, "a != arr");
+        calls += x + ",";
+        return x * 2;
+    }, ctx);
+    ok(calls === "1,2,3,", "calls = " + calls);
+    ok(m.join() === "2,4,6", "m = " + m);
+
+    /* non-array object as this argument */
+    calls = "";
+    arr = { 1: "one", 2: "two", 3: "three", length: 3 };
+    m = Array.prototype.map.call(arr, function(x, i) {
+        calls += i + ":" + x + ",";
+        return x + "!";
+    });
+    ok(calls === "1:one,2:two,", "calls = " + calls);
+    ok(m.join() === ",one!,two!", "m = " + m);
+    ok(!("0" in m), "0 is in m");
+
+    /* mutate array in callback */
+    calls = "";
+    arr = [1,2,3];
+    m = Array.prototype.map.call(arr, function(x, i) {
+        calls += i + ":" + x + ",";
+        for(var j = i; j < arr.length; j++)
+            arr[j]++;
+        arr.push(i * i);
+        return x - 1;
+    });
+    ok(calls === "0:1,1:3,2:5,", "calls = " + calls);
+    ok(m.join() === "0,2,4", "m = " + m);
+
+    [1,2].map(function() {
+        ok(this === window, "this != window");
+    });
+    [1,2].map(function() {
+        ok(this === window, "this != window");
+    }, undefined);
 
     next_test();
 }
@@ -149,7 +229,7 @@ function test_identifier_keywords() {
 }
 
 function test_own_data_prop_desc(obj, prop, expected_writable, expected_enumerable,
-                            expected_configurable) {
+                                 expected_configurable) {
     var desc = Object.getOwnPropertyDescriptor(obj, prop);
     ok("value" in desc, "value is not in desc");
     ok(desc.value === obj[prop], "desc.value = " + desc.value + " expected " + obj[prop]);
@@ -427,6 +507,71 @@ function test_defineProperty() {
     next_test();
 }
 
+function test_property_definitions() {
+    var obj, val, i, arr;
+
+    function test_accessor_prop_desc(obj, prop, have_getter, have_setter) {
+        var desc = Object.getOwnPropertyDescriptor(obj, prop);
+        ok(desc.enumerable === true, "desc.enumerable = " + desc.enumerable);
+        ok(desc.configurable === true, "desc.configurable = " + desc.configurable);
+
+        if(have_getter) {
+            ok(typeof(desc.get) === "function", "desc.get = " + desc.get);
+            ok(typeof(desc.get.prototype) === "object", "desc.get.prototype = " + desc.get.prototype);
+        }else {
+            ok(!("get" in obj), "desc.get = " + desc.get);
+        }
+
+        if(have_setter) {
+            ok(typeof(desc.set) === "function", "desc.set = " + desc.set);
+            ok(typeof(desc.set.prototype) === "object", "desc.set.prototype = " + desc.set.prototype);
+        }else {
+            ok(!("set" in obj), "desc.get = " + desc.get);
+        }
+    }
+
+    obj = {
+        get prop()  { return val + 1; },
+        set prop(v) { val = v; }
+    };
+    test_accessor_prop_desc(obj, "prop", true, true);
+    val = 0;
+    ok(obj.prop === 1, "obj.prop = " + obj.prop);
+    obj.prop = 3;
+    ok(val === 3, "val = " + val);
+    ok(obj.prop === 4, "obj.prop = " + obj.prop);
+
+    arr = [];
+    for(i in obj)
+        arr.push(i);
+    ok(arr.join() === "prop", "prop of obj = " + arr.join());
+
+    obj = {
+        set prop(v) { val = v; }
+    };
+    test_accessor_prop_desc(obj, "prop", false, true);
+    val = 1;
+    ok(obj.prop === undefined, "obj.prop = " + obj.prop);
+    obj.prop = 2;
+    ok(val === 2, "val = " + val);
+    ok(obj.prop === undefined, "obj.prop = " + obj.prop);
+
+    obj = {
+        get prop()  { return val + 1; },
+        get 0()     { return val + 2; }
+    };
+    test_accessor_prop_desc(obj, "prop", true, false);
+    val = 5;
+    ok(obj.prop === 6, "obj.prop = " + obj.prop);
+    obj.prop = 10;
+    ok(val === 5, "val = " + val);
+    ok(obj.prop === 6, "obj.prop = " + obj.prop);
+    test_accessor_prop_desc(obj, "0", true, false);
+    ok(obj[0] === 7, "obj.prop = " + obj[0]);
+
+    next_test();
+}
+
 function test_string_trim() {
     function test_trim(value, expected) {
         var r = String.prototype.trim.call(value);
@@ -460,14 +605,63 @@ function test_global_properties() {
     next_test();
 }
 
+function test_string_split() {
+    var r;
+
+    /* IE9 got this wrong*/
+    if("1undefined2".split(undefined).length != 1) {
+        win_skip("detected broken String.prototype.split implementation");
+        next_test();
+        return;
+    }
+
+    r = "1,2,3".split(undefined);
+    ok(typeof(r) === "object", "typeof(r) = " + typeof(r));
+    ok(r.length === 1, "r.length = " + r.length);
+    ok(r[0] === "1,2,3", "r[0] = " + r[0]);
+
+    r = "1,undefined2undefined,3".split(undefined);
+    ok(typeof(r) === "object", "typeof(r) = " + typeof(r));
+    ok(r.length === 1, "r.length = " + r.length);
+    ok(r[0] === "1,undefined2undefined,3", "r[0] = " + r[0]);
+
+    r = "1,undefined2undefined,3".split();
+    ok(typeof(r) === "object", "typeof(r) = " + typeof(r));
+    ok(r.length === 1, "r.length = " + r.length);
+    ok(r[0] === "1,undefined2undefined,3", "r[0] = " + r[0]);
+
+    /* note: spec violation, limit is ignored */
+    r = "1,undefined2undefined,3".split(undefined, 0);
+    ok(typeof(r) === "object", "typeof(r) = " + typeof(r));
+    ok(r.length === 1, "r.length = " + r.length);
+    ok(r[0] === "1,undefined2undefined,3", "r[0] = " + r[0]);
+
+    r = "1,undefined2null,3".split(null);
+    ok(typeof(r) === "object", "typeof(r) = " + typeof(r));
+    ok(r.length === 2, "r.length = " + r.length);
+    ok(r[0] === "1,undefined2", "r[0] = " + r[0]);
+    ok(r[1] === ",3", "r[1] = " + r[1]);
+
+    r = "".split();
+    ok(typeof(r) === "object", "typeof(r) = " + typeof(r));
+    ok(r.length === 1, "r.length = " + r.length);
+    ok(r[0] === "", "r[0] = " + r[0]);
+
+    next_test();
+}
+
 var tests = [
     test_date_now,
     test_toISOString,
     test_indexOf,
+    test_array_forEach,
     test_isArray,
+    test_array_map,
     test_identifier_keywords,
     test_getOwnPropertyDescriptor,
     test_defineProperty,
+    test_property_definitions,
     test_string_trim,
-    test_global_properties
+    test_global_properties,
+    test_string_split
 ];

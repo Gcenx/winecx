@@ -53,9 +53,11 @@ static const WORD PID_XBOX_CONTROLLERS[] =  {
     0x028f, /* Xbox360 Wireless Controller */
     0x02d1, /* Xbox One Controller */
     0x02dd, /* Xbox One Controller (Covert Forces/Firmware 2015) */
+    0x02e0, /* Xbox One X Controller */
     0x02e3, /* Xbox One Elite Controller */
     0x02e6, /* Wireless XBox Controller Dongle */
     0x02ea, /* Xbox One S Controller */
+    0x02fd, /* Xbox One S Controller (Firmware 2017) */
     0x0719, /* Xbox 360 Wireless Adapter */
 };
 
@@ -360,6 +362,57 @@ void bus_remove_hid_device(DEVICE_OBJECT *device)
     HeapFree(GetProcessHeap(), 0, pnp_device);
 }
 
+static NTSTATUS build_device_relations(DEVICE_RELATIONS **devices)
+{
+    int i;
+    struct pnp_device *ptr;
+
+    EnterCriticalSection(&device_list_cs);
+    *devices = HeapAlloc(GetProcessHeap(), 0, sizeof(DEVICE_RELATIONS) +
+        list_count(&pnp_devset) * sizeof (void *));
+
+    if (!*devices)
+    {
+        LeaveCriticalSection(&device_list_cs);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    i = 0;
+    LIST_FOR_EACH_ENTRY(ptr, &pnp_devset, struct pnp_device, entry)
+    {
+        (*devices)->Objects[i] = (DEVICE_OBJECT*)ptr->device;
+        i++;
+    }
+    LeaveCriticalSection(&device_list_cs);
+    (*devices)->Count = i;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS handle_IRP_MN_QUERY_DEVICE_RELATIONS(IRP *irp)
+{
+    NTSTATUS status = irp->IoStatus.u.Status;
+    IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation( irp );
+
+    TRACE("IRP_MN_QUERY_DEVICE_RELATIONS\n");
+    switch (irpsp->Parameters.QueryDeviceRelations.Type)
+    {
+        case EjectionRelations:
+        case RemovalRelations:
+        case TargetDeviceRelation:
+        case PowerRelations:
+            FIXME("Unhandled Device Relation %x\n",irpsp->Parameters.QueryDeviceRelations.Type);
+            break;
+        case BusRelations:
+            status = build_device_relations((DEVICE_RELATIONS**)&irp->IoStatus.Information);
+            break;
+        default:
+            FIXME("Unknown Device Relation %x\n",irpsp->Parameters.QueryDeviceRelations.Type);
+            break;
+    }
+
+    return status;
+}
+
 static NTSTATUS handle_IRP_MN_QUERY_ID(DEVICE_OBJECT *device, IRP *irp)
 {
     NTSTATUS status = irp->IoStatus.u.Status;
@@ -404,6 +457,8 @@ NTSTATUS WINAPI common_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
     {
         case IRP_MN_QUERY_DEVICE_RELATIONS:
             TRACE("IRP_MN_QUERY_DEVICE_RELATIONS\n");
+            status = handle_IRP_MN_QUERY_DEVICE_RELATIONS(irp);
+            irp->IoStatus.u.Status = status;
             break;
         case IRP_MN_QUERY_ID:
             TRACE("IRP_MN_QUERY_ID\n");
@@ -699,6 +754,13 @@ BOOL is_xbox_gamepad(WORD vid, WORD pid)
     return FALSE;
 }
 
+static void WINAPI driver_unload(DRIVER_OBJECT *driver)
+{
+    udev_driver_unload();
+    iohid_driver_unload();
+    sdl_driver_unload();
+}
+
 NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
 {
     static const WCHAR udevW[] = {'\\','D','r','i','v','e','r','\\','U','D','E','V',0};
@@ -719,6 +781,8 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
     }
     IoCreateDriver(&udev, udev_driver_init);
     IoCreateDriver(&iohid, iohid_driver_init);
+
+    driver->DriverUnload = driver_unload;
 
     return STATUS_SUCCESS;
 }

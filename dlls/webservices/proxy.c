@@ -48,14 +48,14 @@ struct proxy
     WS_SERVICE_PROXY_STATE  state;
     WS_CHANNEL             *channel;
     ULONG                   prop_count;
-    struct prop             prop[sizeof(proxy_props)/sizeof(proxy_props[0])];
+    struct prop             prop[ARRAY_SIZE( proxy_props )];
 };
 
 #define PROXY_MAGIC (('P' << 24) | ('R' << 16) | ('O' << 8) | 'X')
 
 static struct proxy *alloc_proxy(void)
 {
-    static const ULONG count = sizeof(proxy_props)/sizeof(proxy_props[0]);
+    static const ULONG count = ARRAY_SIZE( proxy_props );
     struct proxy *ret;
     ULONG size = sizeof(*ret) + prop_size( proxy_props, count );
 
@@ -63,7 +63,9 @@ static struct proxy *alloc_proxy(void)
 
     ret->magic      = PROXY_MAGIC;
     InitializeCriticalSection( &ret->cs );
+#ifndef __MINGW32__
     ret->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": proxy.cs");
+#endif
 
     prop_init( proxy_props, count, ret->prop, &ret[1] );
     ret->prop_count = count;
@@ -81,7 +83,9 @@ static void free_proxy( struct proxy *proxy )
     reset_proxy( proxy );
     WsFreeChannel( proxy->channel );
 
+#ifndef __MINGW32__
     proxy->cs.DebugInfo->Spare[0] = 0;
+#endif
     DeleteCriticalSection( &proxy->cs );
     heap_free( proxy );
 }
@@ -215,6 +219,7 @@ HRESULT WINAPI WsCreateServiceProxyFromTemplate( WS_CHANNEL_TYPE channel_type,
 HRESULT WINAPI WsResetServiceProxy( WS_SERVICE_PROXY *handle, WS_ERROR *error )
 {
     struct proxy *proxy = (struct proxy *)handle;
+    HRESULT hr = S_OK;
 
     TRACE( "%p %p\n", handle, error );
     if (error) FIXME( "ignoring error parameter\n" );
@@ -230,15 +235,13 @@ HRESULT WINAPI WsResetServiceProxy( WS_SERVICE_PROXY *handle, WS_ERROR *error )
     }
 
     if (proxy->state != WS_SERVICE_PROXY_STATE_CREATED && proxy->state != WS_SERVICE_PROXY_STATE_CLOSED)
-    {
-        LeaveCriticalSection( &proxy->cs );
-        return WS_E_INVALID_OPERATION;
-    }
-
-    reset_proxy( proxy );
+        hr = WS_E_INVALID_OPERATION;
+    else
+        reset_proxy( proxy );
 
     LeaveCriticalSection( &proxy->cs );
-    return S_OK;
+    TRACE( "returning %08x\n", hr );
+    return hr;
 }
 
 /**************************************************************************
@@ -300,6 +303,7 @@ HRESULT WINAPI WsGetServiceProxyProperty( WS_SERVICE_PROXY *handle, WS_PROXY_PRO
     }
 
     LeaveCriticalSection( &proxy->cs );
+    TRACE( "returning %08x\n", hr );
     return hr;
 }
 
@@ -330,6 +334,7 @@ HRESULT WINAPI WsOpenServiceProxy( WS_SERVICE_PROXY *handle, const WS_ENDPOINT_A
         proxy->state = WS_SERVICE_PROXY_STATE_OPEN;
 
     LeaveCriticalSection( &proxy->cs );
+    TRACE( "returning %08x\n", hr );
     return hr;
 }
 
@@ -359,6 +364,7 @@ HRESULT WINAPI WsCloseServiceProxy( WS_SERVICE_PROXY *handle, const WS_ASYNC_CON
         proxy->state = WS_SERVICE_PROXY_STATE_CLOSED;
 
     LeaveCriticalSection( &proxy->cs );
+    TRACE( "returning %08x\n", hr );
     return hr;
 }
 
@@ -540,5 +546,6 @@ HRESULT WINAPI WsCall( WS_SERVICE_PROXY *handle, const WS_OPERATION_DESCRIPTION 
 done:
     WsFreeMessage( msg );
     LeaveCriticalSection( &proxy->cs );
+    TRACE( "returning %08x\n", hr );
     return hr;
 }

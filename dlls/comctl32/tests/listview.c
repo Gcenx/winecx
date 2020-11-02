@@ -75,6 +75,8 @@ static BOOL g_disp_A_to_W;
 static NMLVDISPINFOA g_editbox_disp_info;
 /* when this is set focus will be tested on LVN_DELETEITEM */
 static BOOL g_focus_test_LVN_DELETEITEM;
+/* Whether to send WM_KILLFOCUS to the edit control during LVN_ENDLABELEDIT */
+static BOOL g_WM_KILLFOCUS_on_LVN_ENDLABELEDIT;
 
 static HWND subclass_editbox(HWND hwndListview);
 
@@ -445,6 +447,25 @@ static const struct message parent_list_cd_seq[] = {
     { 0 }
 };
 
+static const struct message listview_end_label_edit[] = {
+    { WM_NOTIFY,  sent|id, 0, 0, LVN_ENDLABELEDITA },
+    { WM_NOTIFY,  sent|id, 0, 0, LVN_ITEMCHANGING},
+    { WM_NOTIFY,  sent|id, 0, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY,  sent|id|optional, 0, 0, NM_CUSTOMDRAW }, /* XP */
+    { WM_NOTIFY,  sent|id, 0, 0, NM_SETFOCUS },
+    { 0 }
+};
+
+static const struct message listview_end_label_edit_kill_focus[] = {
+    { WM_NOTIFY,  sent|id, 0, 0, LVN_ENDLABELEDITA },
+    { WM_COMMAND, sent|id|optional, 0, 0, EN_KILLFOCUS }, /* todo: not sent by wine yet */
+    { WM_NOTIFY,  sent|id, 0, 0, LVN_ITEMCHANGING },
+    { WM_NOTIFY,  sent|id, 0, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY,  sent|id|optional, 0, 0, NM_CUSTOMDRAW }, /* XP */
+    { WM_NOTIFY,  sent|id, 0, 0, NM_SETFOCUS },
+    { 0 }
+};
+
 static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     static LONG defwndproc_counter = 0;
@@ -457,6 +478,7 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
     msg.wParam = wParam;
     msg.lParam = lParam;
     if (message == WM_NOTIFY && lParam) msg.id = ((NMHDR*)lParam)->code;
+    if (message == WM_COMMAND) msg.id = HIWORD(wParam);
 
     /* log system messages, except for painting */
     if (message < WM_USER &&
@@ -503,24 +525,17 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
               /* always accept new item text */
               NMLVDISPINFOA *di = (NMLVDISPINFOA*)lParam;
               g_editbox_disp_info = *di;
-              trace("LVN_ENDLABELEDIT: text=%s\n", di->item.pszText ? di->item.pszText : "(null)");
 
               /* edit control still available from this notification */
               edit = (HWND)SendMessageA(((NMHDR*)lParam)->hwndFrom, LVM_GETEDITCONTROL, 0, 0);
               ok(IsWindow(edit), "expected valid edit control handle\n");
               ok((GetWindowLongA(edit, GWL_STYLE) & ES_MULTILINE) == 0, "edit is multiline\n");
 
+              if (g_WM_KILLFOCUS_on_LVN_ENDLABELEDIT)
+                  SendMessageA(edit, WM_KILLFOCUS, 0, 0);
+
               return TRUE;
               }
-          case LVN_BEGINSCROLL:
-          case LVN_ENDSCROLL:
-              {
-              NMLVSCROLL *pScroll = (NMLVSCROLL*)lParam;
-
-              trace("LVN_%sSCROLL: (%d,%d)\n", pScroll->hdr.code == LVN_BEGINSCROLL ?
-                                               "BEGIN" : "END", pScroll->dx, pScroll->dy);
-              }
-              break;
           case LVN_ITEMCHANGING:
               {
                   NMLISTVIEW *nmlv = (NMLISTVIEW*)lParam;
@@ -6322,6 +6337,127 @@ static void test_LVSCW_AUTOSIZE(void)
     DestroyWindow(hwnd);
 }
 
+static void test_LVN_ENDLABELEDIT(void)
+{
+    WCHAR text[] = {'l','a','l','a',0};
+    HWND hwnd, hwndedit;
+    LVITEMW item = {0};
+    DWORD ret;
+
+    hwnd = create_listview_control(LVS_REPORT | LVS_EDITLABELS);
+
+    insert_column(hwnd, 0);
+
+    item.mask = LVIF_TEXT;
+    item.pszText = text;
+    SendMessageW(hwnd, LVM_INSERTITEMW, 0, (LPARAM)&item);
+
+    /* Test normal editing */
+    SetFocus(hwnd);
+    hwndedit = (HWND)SendMessageW(hwnd, LVM_EDITLABELW, 0, 0);
+    ok(hwndedit != NULL, "Failed to get edit control.\n");
+
+    ret = SendMessageA(hwndedit, WM_SETTEXT, 0, (LPARAM)"test");
+    ok(ret, "Failed to set edit text.\n");
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    ret = SendMessageA(hwndedit, WM_KEYDOWN, VK_RETURN, 0);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, listview_end_label_edit, "Label edit", FALSE);
+
+    /* Test editing with kill focus */
+    SetFocus(hwnd);
+    hwndedit = (HWND)SendMessageW(hwnd, LVM_EDITLABELW, 0, 0);
+    ok(hwndedit != NULL, "Failed to get edit control.\n");
+
+    ret = SendMessageA(hwndedit, WM_SETTEXT, 0, (LPARAM)"test2");
+    ok(ret, "Failed to set edit text.\n");
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    g_WM_KILLFOCUS_on_LVN_ENDLABELEDIT = TRUE;
+    ret = SendMessageA(hwndedit, WM_KEYDOWN, VK_RETURN, 0);
+    g_WM_KILLFOCUS_on_LVN_ENDLABELEDIT = FALSE;
+
+    ok_sequence(sequences, PARENT_SEQ_INDEX, listview_end_label_edit_kill_focus,
+            "Label edit, kill focus", FALSE);
+    ok(GetFocus() == hwnd, "Unexpected focused window.\n");
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    DestroyWindow(hwnd);
+}
+
+static LRESULT CALLBACK create_item_height_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (msg == WM_CREATE)
+        return 0;
+
+    return CallWindowProcA(listviewWndProc, hwnd, msg, wParam, lParam);
+}
+
+static void test_LVM_GETCOUNTPERPAGE(void)
+{
+    static const DWORD styles[] = { LVS_ICON, LVS_LIST, LVS_REPORT, LVS_SMALLICON };
+    unsigned int i, j;
+    WNDCLASSEXA cls;
+    ATOM class;
+    HWND hwnd;
+    BOOL ret;
+
+    cls.cbSize = sizeof(WNDCLASSEXA);
+    ret = GetClassInfoExA(GetModuleHandleA(NULL), WC_LISTVIEWA, &cls);
+    ok(ret, "Failed to get class info.\n");
+    listviewWndProc = cls.lpfnWndProc;
+    cls.lpfnWndProc = create_item_height_wndproc;
+    cls.lpszClassName = "CountPerPageClass";
+    class = RegisterClassExA(&cls);
+    ok(class, "Failed to register class.\n");
+
+    for (i = 0; i < ARRAY_SIZE(styles); i++)
+    {
+        static char text[] = "item text";
+        LVITEMA item = { 0 };
+        UINT count, count2;
+
+        hwnd = create_listview_control(styles[i]);
+        ok(hwnd != NULL, "Failed to create listview window.\n");
+
+        count = SendMessageA(hwnd, LVM_GETCOUNTPERPAGE, 0, 0);
+        if (styles[i] == LVS_LIST || styles[i] == LVS_REPORT)
+            ok(count > 0 || broken(styles[i] == LVS_LIST && count == 0), "%u: unexpected count %u.\n", i, count);
+        else
+            ok(count == 0, "%u: unexpected count %u.\n", i, count);
+
+        for (j = 0; j < 10; j++)
+        {
+            item.mask = LVIF_TEXT;
+            item.pszText = text;
+            SendMessageA(hwnd, LVM_INSERTITEMA, 0, (LPARAM)&item);
+        }
+
+        count2 = SendMessageA(hwnd, LVM_GETCOUNTPERPAGE, 0, 0);
+        if (styles[i] == LVS_LIST || styles[i] == LVS_REPORT)
+            ok(count == count2, "%u: unexpected count %u.\n", i, count2);
+        else
+            ok(count2 == 10, "%u: unexpected count %u.\n", i, count2);
+
+        DestroyWindow(hwnd);
+
+        hwnd = CreateWindowA("CountPerPageClass", "Test", WS_VISIBLE | styles[i], 0, 0, 100, 100, NULL, NULL,
+            GetModuleHandleA(NULL), 0);
+        ok(hwnd != NULL, "Failed to create a window.\n");
+
+        count = SendMessageA(hwnd, LVM_GETCOUNTPERPAGE, 0, 0);
+        ok(count == 0, "%u: unexpected count %u.\n", i, count);
+
+        DestroyWindow(hwnd);
+    }
+
+    ret = UnregisterClassA("CountPerPageClass", NULL);
+    ok(ret, "Failed to unregister test class.\n");
+}
+
 START_TEST(listview)
 {
     ULONG_PTR ctx_cookie;
@@ -6383,6 +6519,8 @@ START_TEST(listview)
     test_callback_mask();
     test_state_image();
     test_LVSCW_AUTOSIZE();
+    test_LVN_ENDLABELEDIT();
+    test_LVM_GETCOUNTPERPAGE();
 
     if (!load_v6_module(&ctx_cookie, &hCtx))
     {
@@ -6425,6 +6563,8 @@ START_TEST(listview)
     test_oneclickactivate();
     test_state_image();
     test_LVSCW_AUTOSIZE();
+    test_LVN_ENDLABELEDIT();
+    test_LVM_GETCOUNTPERPAGE();
 
     unload_v6_module(ctx_cookie, hCtx);
 

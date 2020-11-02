@@ -45,8 +45,6 @@ extern int do_regscript;
 extern int do_idfile;
 extern int do_dlldata;
 extern int old_names;
-extern int do_win32;
-extern int do_win64;
 extern int win32_packing;
 extern int win64_packing;
 extern int winrt_mode;
@@ -54,6 +52,7 @@ extern int use_abi_namespace;
 
 extern char *input_name;
 extern char *input_idl_name;
+extern char *acf_name;
 extern char *header_name;
 extern char *header_token;
 extern char *local_stubs_name;
@@ -75,6 +74,13 @@ extern time_t now;
 extern int line_number;
 extern int char_number;
 
+enum target_cpu
+{
+    CPU_x86, CPU_x86_64, CPU_POWERPC, CPU_ARM, CPU_ARM64, CPU_LAST = CPU_ARM64
+};
+
+extern enum target_cpu target_cpu;
+
 enum stub_mode
 {
     MODE_Os,  /* inline stubs */
@@ -89,6 +95,7 @@ extern void write_proxies(const statement_list_t *stmts);
 extern void write_client(const statement_list_t *stmts);
 extern void write_server(const statement_list_t *stmts);
 extern void write_regscript(const statement_list_t *stmts);
+extern void write_typelib_regscript(const statement_list_t *stmts);
 extern void output_typelib_regscript( const typelib_t *typelib );
 extern void write_local_stubs(const statement_list_t *stmts);
 extern void write_dlldata(const statement_list_t *stmts);

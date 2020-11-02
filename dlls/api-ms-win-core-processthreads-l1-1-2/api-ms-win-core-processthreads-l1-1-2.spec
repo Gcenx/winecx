@@ -1,5 +1,5 @@
 @ stdcall CreateProcessA(str str ptr ptr long long ptr str ptr ptr) kernel32.CreateProcessA
-@ stdcall CreateProcessAsUserW(long wstr wstr ptr ptr long long ptr wstr ptr ptr) advapi32.CreateProcessAsUserW
+@ stdcall CreateProcessAsUserW(long wstr wstr ptr ptr long long ptr wstr ptr ptr) kernel32.CreateProcessAsUserW
 @ stdcall CreateProcessW(wstr wstr ptr ptr long long ptr wstr ptr ptr) kernel32.CreateProcessW
 @ stdcall CreateRemoteThread(long ptr long ptr long long ptr) kernel32.CreateRemoteThread
 @ stdcall CreateRemoteThreadEx(long ptr long ptr ptr long ptr ptr) kernel32.CreateRemoteThreadEx
@@ -15,14 +15,14 @@
 @ stdcall GetCurrentProcessorNumberEx(ptr) kernel32.GetCurrentProcessorNumberEx
 @ stdcall -norelay GetCurrentThread() kernel32.GetCurrentThread
 @ stdcall -norelay GetCurrentThreadId() kernel32.GetCurrentThreadId
-@ stub GetCurrentThreadStackLimits
+@ stdcall GetCurrentThreadStackLimits(ptr ptr) kernel32.GetCurrentThreadStackLimits
 @ stdcall GetExitCodeProcess(long ptr) kernel32.GetExitCodeProcess
 @ stdcall GetExitCodeThread(long ptr) kernel32.GetExitCodeThread
 @ stdcall GetPriorityClass(long) kernel32.GetPriorityClass
 @ stdcall GetProcessHandleCount(long ptr) kernel32.GetProcessHandleCount
 @ stdcall GetProcessId(long) kernel32.GetProcessId
 @ stdcall GetProcessIdOfThread(long) kernel32.GetProcessIdOfThread
-@ stub GetProcessMitigationPolicy
+@ stdcall GetProcessMitigationPolicy(long long ptr long) kernel32.GetProcessMitigationPolicy
 @ stdcall GetProcessPriorityBoost(long ptr) kernel32.GetProcessPriorityBoost
 @ stdcall GetProcessTimes(long ptr ptr ptr ptr) kernel32.GetProcessTimes
 @ stdcall GetProcessVersion(long) kernel32.GetProcessVersion

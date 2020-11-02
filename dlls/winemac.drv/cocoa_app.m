@@ -299,6 +299,11 @@ static NSString* WineLocalizedString(unsigned int stringID)
             }
 #endif
 
+            /* CrossOver Hack #15388 */
+            static BOOL created_main_menu;
+            if (created_main_menu) return;
+            created_main_menu = TRUE;
+
             mainMenu = [[[NSMenu alloc] init] autorelease];
 
             // Application menu
@@ -1755,6 +1760,16 @@ static NSString* WineLocalizedString(unsigned int stringID)
             {
                 if (clippingCursor)
                     [self clipCursorLocation:&point];
+
+                /* CrossOver Hack #15388 */
+                if (quicken_signin_hack)
+                {
+                    NSRect rect = [targetWindow contentRectForFrameRect:targetWindow.frame];
+                    [self flipRect:&rect];
+                    point.x -= rect.origin.x;
+                    point.y -= rect.origin.y;
+                }
+
                 point = cgpoint_win_from_mac(point);
 
                 event = macdrv_create_event(MOUSE_MOVED_ABSOLUTE, targetWindow);
@@ -1897,6 +1912,15 @@ static NSString* WineLocalizedString(unsigned int stringID)
             if (process)
             {
                 macdrv_event* event;
+
+                /* CrossOver Hack #15388 */
+                if (quicken_signin_hack)
+                {
+                    NSRect rect = [window contentRectForFrameRect:window.frame];
+                    [self flipRect:&rect];
+                    pt.x -= rect.origin.x;
+                    pt.y -= rect.origin.y;
+                }
 
                 pt = cgpoint_win_from_mac(pt);
 
@@ -2151,7 +2175,7 @@ static NSString* WineLocalizedString(unsigned int stringID)
                     [window postKeyEvent:anEvent];
             }
         }
-        else if (type == NSAppKitDefined)
+        else if (type == NSAppKitDefined && !quicken_signin_hack) /* CrossOver Hack #15388 */
         {
             short subtype = [anEvent subtype];
 

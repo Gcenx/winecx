@@ -70,22 +70,16 @@ struct pipe_end
 
 struct pipe_server
 {
-    struct pipe_end      pipe_end;   /* common header for pipe_client and pipe_server */
+    struct pipe_end      pipe_end;   /* common header for both pipe ends */
     struct list          entry;      /* entry in named pipe servers list */
     unsigned int         options;    /* pipe options */
     struct async_queue   listen_q;   /* listen queue */
 };
 
-struct pipe_client
-{
-    struct pipe_end      pipe_end;   /* common header for pipe_client and pipe_server */
-    unsigned int         flags;      /* file flags */
-};
-
 struct named_pipe
 {
     struct object       obj;         /* object header */
-    unsigned int        flags;
+    int                 message_mode;
     unsigned int        sharing;
     unsigned int        maxinstances;
     unsigned int        outsize;
@@ -99,8 +93,14 @@ struct named_pipe
 struct named_pipe_device
 {
     struct object       obj;         /* object header */
-    struct fd          *fd;          /* pseudo-fd for ioctls */
     struct namespace   *pipes;       /* named pipe namespace */
+};
+
+struct named_pipe_device_file
+{
+    struct object             obj;         /* object header */
+    struct fd                *fd;          /* pseudo-fd for ioctls */
+    struct named_pipe_device *device;      /* named pipe device */
 };
 
 static void named_pipe_dump( struct object *obj, int verbose );
@@ -134,6 +134,7 @@ static const struct object_ops named_pipe_ops =
 
 /* common server and client pipe end functions */
 static void pipe_end_destroy( struct object *obj );
+static struct object_type *pipe_end_get_type( struct object *obj );
 static enum server_fd_type pipe_end_get_fd_type( struct fd *fd );
 static struct fd *pipe_end_get_fd( struct object *obj );
 static struct security_descriptor *pipe_end_get_sd( struct object *obj );
@@ -144,7 +145,7 @@ static int pipe_end_write( struct fd *fd, struct async *async_data, file_pos_t p
 static int pipe_end_flush( struct fd *fd, struct async *async );
 static void pipe_end_get_volume_info( struct fd *fd, unsigned int info_class );
 static void pipe_end_reselect_async( struct fd *fd, struct async_queue *queue );
-static void pipe_end_get_file_info( struct fd *fd, unsigned int info_class );
+static void pipe_end_get_file_info( struct fd *fd, obj_handle_t handle, unsigned int info_class );
 
 /* server end functions */
 static void pipe_server_dump( struct object *obj, int verbose );
@@ -155,7 +156,7 @@ static const struct object_ops pipe_server_ops =
 {
     sizeof(struct pipe_server),   /* size */
     pipe_server_dump,             /* dump */
-    no_get_type,                  /* get_type */
+    pipe_end_get_type,            /* get_type */
     add_queue,                    /* add_queue */
     remove_queue,                 /* remove_queue */
     default_fd_signaled,          /* signaled */
@@ -194,9 +195,9 @@ static int pipe_client_ioctl( struct fd *fd, ioctl_code_t code, struct async *as
 
 static const struct object_ops pipe_client_ops =
 {
-    sizeof(struct pipe_client),   /* size */
+    sizeof(struct pipe_end),      /* size */
     pipe_client_dump,             /* dump */
-    no_get_type,                  /* get_type */
+    pipe_end_get_type,            /* get_type */
     add_queue,                    /* add_queue */
     remove_queue,                 /* remove_queue */
     default_fd_signaled,          /* signaled */
@@ -231,14 +232,11 @@ static const struct fd_ops pipe_client_fd_ops =
 
 static void named_pipe_device_dump( struct object *obj, int verbose );
 static struct object_type *named_pipe_device_get_type( struct object *obj );
-static struct fd *named_pipe_device_get_fd( struct object *obj );
 static struct object *named_pipe_device_lookup_name( struct object *obj,
     struct unicode_str *name, unsigned int attr );
 static struct object *named_pipe_device_open_file( struct object *obj, unsigned int access,
                                                    unsigned int sharing, unsigned int options );
 static void named_pipe_device_destroy( struct object *obj );
-static enum server_fd_type named_pipe_device_get_fd_type( struct fd *fd );
-static int named_pipe_device_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
 
 static const struct object_ops named_pipe_device_ops =
 {
@@ -250,7 +248,7 @@ static const struct object_ops named_pipe_device_ops =
     NULL,                             /* signaled */
     no_satisfied,                     /* satisfied */
     no_signal,                        /* signal */
-    named_pipe_device_get_fd,         /* get_fd */
+    no_get_fd,                        /* get_fd */
     no_map_access,                    /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
@@ -258,23 +256,51 @@ static const struct object_ops named_pipe_device_ops =
     directory_link_name,              /* link_name */
     default_unlink_name,              /* unlink_name */
     named_pipe_device_open_file,      /* open_file */
-    fd_close_handle,                  /* close_handle */
+    no_close_handle,                  /* close_handle */
     named_pipe_device_destroy         /* destroy */
+};
+
+static void named_pipe_device_file_dump( struct object *obj, int verbose );
+static struct fd *named_pipe_device_file_get_fd( struct object *obj );
+static int named_pipe_device_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
+static enum server_fd_type named_pipe_device_file_get_fd_type( struct fd *fd );
+static void named_pipe_device_file_destroy( struct object *obj );
+
+static const struct object_ops named_pipe_device_file_ops =
+{
+    sizeof(struct named_pipe_device_file),   /* size */
+    named_pipe_device_file_dump,             /* dump */
+    no_get_type,                             /* get_type */
+    add_queue,                               /* add_queue */
+    remove_queue,                            /* remove_queue */
+    default_fd_signaled,                     /* signaled */
+    no_satisfied,                            /* satisfied */
+    no_signal,                               /* signal */
+    named_pipe_device_file_get_fd,           /* get_fd */
+    default_fd_map_access,                   /* map_access */
+    default_get_sd,                          /* get_sd */
+    default_set_sd,                          /* set_sd */
+    no_lookup_name,                          /* lookup_name */
+    no_link_name,                            /* link_name */
+    NULL,                                    /* unlink_name */
+    no_open_file,                            /* open_file */
+    fd_close_handle,                         /* close_handle */
+    named_pipe_device_file_destroy           /* destroy */
 };
 
 static const struct fd_ops named_pipe_device_fd_ops =
 {
-    default_fd_get_poll_events,       /* get_poll_events */
-    default_poll_event,               /* poll_event */
-    named_pipe_device_get_fd_type,    /* get_fd_type */
-    no_fd_read,                       /* read */
-    no_fd_write,                      /* write */
-    no_fd_flush,                      /* flush */
-    no_fd_get_file_info,              /* get_file_info */
-    no_fd_get_volume_info,            /* get_volume_info */
-    named_pipe_device_ioctl,          /* ioctl */
-    default_fd_queue_async,           /* queue_async */
-    default_fd_reselect_async         /* reselect_async */
+    default_fd_get_poll_events,              /* get_poll_events */
+    default_poll_event,                      /* poll_event */
+    named_pipe_device_file_get_fd_type,      /* get_fd_type */
+    no_fd_read,                              /* read */
+    no_fd_write,                             /* write */
+    no_fd_flush,                             /* flush */
+    default_fd_get_file_info,                /* get_file_info */
+    no_fd_get_volume_info,                   /* get_volume_info */
+    named_pipe_device_ioctl,                 /* ioctl */
+    default_fd_queue_async,                  /* queue_async */
+    default_fd_reselect_async                /* reselect_async */
 };
 
 static void named_pipe_dump( struct object *obj, int verbose )
@@ -301,9 +327,9 @@ static void pipe_server_dump( struct object *obj, int verbose )
 
 static void pipe_client_dump( struct object *obj, int verbose )
 {
-    struct pipe_client *client = (struct pipe_client *) obj;
+    struct pipe_end *client = (struct pipe_end *) obj;
     assert( obj->ops == &pipe_client_ops );
-    fprintf( stderr, "Named pipe client server=%p\n", client->pipe_end.connection );
+    fprintf( stderr, "Named pipe client server=%p\n", client->connection );
 }
 
 static void named_pipe_destroy( struct object *obj)
@@ -313,6 +339,13 @@ static void named_pipe_destroy( struct object *obj)
     assert( list_empty( &pipe->servers ) );
     assert( !pipe->instances );
     free_async_queue( &pipe->waiters );
+}
+
+static struct object_type *pipe_end_get_type( struct object *obj )
+{
+    static const WCHAR name[] = {'F','i','l','e'};
+    static const struct unicode_str str = { name, sizeof(name) };
+    return get_object_type( &str );
 }
 
 static struct fd *pipe_end_get_fd( struct object *obj )
@@ -429,12 +462,6 @@ static struct object_type *named_pipe_device_get_type( struct object *obj )
     return get_object_type( &str );
 }
 
-static struct fd *named_pipe_device_get_fd( struct object *obj )
-{
-    struct named_pipe_device *device = (struct named_pipe_device *)obj;
-    return (struct fd *)grab_object( device->fd );
-}
-
 static struct object *named_pipe_device_lookup_name( struct object *obj, struct unicode_str *name,
                                                      unsigned int attr )
 {
@@ -455,20 +482,24 @@ static struct object *named_pipe_device_lookup_name( struct object *obj, struct 
 static struct object *named_pipe_device_open_file( struct object *obj, unsigned int access,
                                                    unsigned int sharing, unsigned int options )
 {
-    return grab_object( obj );
+    struct named_pipe_device_file *file;
+
+    if (!(file = alloc_object( &named_pipe_device_file_ops ))) return NULL;
+    file->device = (struct named_pipe_device *)grab_object( obj );
+    if (!(file->fd = alloc_pseudo_fd( &named_pipe_device_fd_ops, obj, options )))
+    {
+        release_object( file );
+        return NULL;
+    }
+    allow_fd_caching( file->fd );
+    return &file->obj;
 }
 
 static void named_pipe_device_destroy( struct object *obj )
 {
     struct named_pipe_device *device = (struct named_pipe_device*)obj;
     assert( obj->ops == &named_pipe_device_ops );
-    if (device->fd) release_object( device->fd );
     free( device->pipes );
-}
-
-static enum server_fd_type named_pipe_device_get_fd_type( struct fd *fd )
-{
-    return FD_TYPE_DEVICE;
 }
 
 struct object *create_named_pipe_device( struct object *root, const struct unicode_str *name )
@@ -479,8 +510,7 @@ struct object *create_named_pipe_device( struct object *root, const struct unico
         get_error() != STATUS_OBJECT_NAME_EXISTS)
     {
         dev->pipes = NULL;
-        if (!(dev->fd = alloc_pseudo_fd( &named_pipe_device_fd_ops, &dev->obj, 0 )) ||
-            !(dev->pipes = create_namespace( 7 )))
+        if (!(dev->pipes = create_namespace( 7 )))
         {
             release_object( dev );
             dev = NULL;
@@ -489,9 +519,41 @@ struct object *create_named_pipe_device( struct object *root, const struct unico
     return &dev->obj;
 }
 
+static void named_pipe_device_file_dump( struct object *obj, int verbose )
+{
+    struct named_pipe_device_file *file = (struct named_pipe_device_file *)obj;
+
+    fprintf( stderr, "File on named pipe device %p\n", file->device );
+}
+
+static struct fd *named_pipe_device_file_get_fd( struct object *obj )
+{
+    struct named_pipe_device_file *file = (struct named_pipe_device_file *)obj;
+    return (struct fd *)grab_object( file->fd );
+}
+
+static enum server_fd_type named_pipe_device_file_get_fd_type( struct fd *fd )
+{
+    return FD_TYPE_DEVICE;
+}
+
+static void named_pipe_device_file_destroy( struct object *obj )
+{
+    struct named_pipe_device_file *file = (struct named_pipe_device_file*)obj;
+    assert( obj->ops == &named_pipe_device_file_ops );
+    if (file->fd) release_object( file->fd );
+    release_object( file->device );
+}
+
 static int pipe_end_flush( struct fd *fd, struct async *async )
 {
     struct pipe_end *pipe_end = get_fd_user( fd );
+
+    if (!pipe_end->pipe)
+    {
+        set_error( STATUS_PIPE_DISCONNECTED );
+        return 0;
+    }
 
     if (pipe_end->connection && !list_empty( &pipe_end->connection->message_queue ))
     {
@@ -501,16 +563,10 @@ static int pipe_end_flush( struct fd *fd, struct async *async )
     return 1;
 }
 
-static void pipe_end_get_file_info( struct fd *fd, unsigned int info_class )
+static void pipe_end_get_file_info( struct fd *fd, obj_handle_t handle, unsigned int info_class )
 {
     struct pipe_end *pipe_end = get_fd_user( fd );
     struct named_pipe *pipe = pipe_end->pipe;
-
-    if (!pipe)
-    {
-        set_error( STATUS_PIPE_DISCONNECTED );
-        return;
-    }
 
     switch (info_class)
     {
@@ -526,13 +582,13 @@ static void pipe_end_get_file_info( struct fd *fd, unsigned int info_class )
                 return;
             }
 
-            name = get_object_name( &pipe->obj, &name_len );
             /* FIXME: We should be able to return on unlinked pipe */
-            if (!name)
+            if (!pipe || !(name = get_object_name( &pipe->obj, &name_len )))
             {
                 set_error( STATUS_PIPE_DISCONNECTED );
                 return;
             }
+
             reply_size = offsetof( FILE_NAME_INFORMATION, FileName[name_len/sizeof(WCHAR) + 1] );
             if (reply_size > get_reply_max_size())
             {
@@ -547,8 +603,84 @@ static void pipe_end_get_file_info( struct fd *fd, unsigned int info_class )
             if (reply_size) memcpy( &name_info->FileName[1], name, reply_size );
             break;
         }
+    case FilePipeInformation:
+    {
+            FILE_PIPE_INFORMATION *pipe_info;
+
+            if (!(get_handle_access( current->process, handle) & FILE_READ_ATTRIBUTES))
+            {
+                set_error( STATUS_ACCESS_DENIED );
+                return;
+            }
+
+            if (get_reply_max_size() < sizeof(*pipe_info))
+            {
+                set_error( STATUS_INFO_LENGTH_MISMATCH );
+                return;
+            }
+
+            if (!pipe)
+            {
+                set_error( STATUS_PIPE_DISCONNECTED );
+                return;
+            }
+
+            if (!(pipe_info = set_reply_data_size( sizeof(*pipe_info) ))) return;
+            pipe_info->ReadMode       = (pipe_end->flags & NAMED_PIPE_MESSAGE_STREAM_READ)
+                ? FILE_PIPE_MESSAGE_MODE : FILE_PIPE_BYTE_STREAM_MODE;
+            pipe_info->CompletionMode = (pipe_end->flags & NAMED_PIPE_NONBLOCKING_MODE)
+                ? FILE_PIPE_COMPLETE_OPERATION : FILE_PIPE_QUEUE_OPERATION;
+            break;
+        }
+    case FilePipeLocalInformation:
+        {
+            FILE_PIPE_LOCAL_INFORMATION *pipe_info;
+
+            if (!(get_handle_access( current->process, handle) & FILE_READ_ATTRIBUTES))
+            {
+                set_error( STATUS_ACCESS_DENIED );
+                return;
+            }
+
+            if (get_reply_max_size() < sizeof(*pipe_info))
+            {
+                set_error( STATUS_INFO_LENGTH_MISMATCH );
+                return;
+            }
+
+            if (!pipe)
+            {
+                set_error( STATUS_PIPE_DISCONNECTED );
+                return;
+            }
+
+            if (!(pipe_info = set_reply_data_size( sizeof(*pipe_info) ))) return;
+            pipe_info->NamedPipeType = pipe->message_mode;
+            switch (pipe->sharing)
+            {
+            case FILE_SHARE_READ:
+                pipe_info->NamedPipeConfiguration = FILE_PIPE_OUTBOUND;
+                break;
+            case FILE_SHARE_WRITE:
+                pipe_info->NamedPipeConfiguration = FILE_PIPE_INBOUND;
+                break;
+            case FILE_SHARE_READ | FILE_SHARE_WRITE:
+                pipe_info->NamedPipeConfiguration = FILE_PIPE_FULL_DUPLEX;
+                break;
+            }
+            pipe_info->MaximumInstances    = pipe->maxinstances;
+            pipe_info->CurrentInstances    = pipe->instances;
+            pipe_info->InboundQuota        = pipe->insize;
+            pipe_info->ReadDataAvailable   = 0; /* FIXME */
+            pipe_info->OutboundQuota       = pipe->outsize;
+            pipe_info->WriteQuotaAvailable = 0; /* FIXME */
+            pipe_info->NamedPipeState      = pipe_end->state;
+            pipe_info->NamedPipeEnd        = pipe_end->obj.ops == &pipe_server_ops
+                ? FILE_PIPE_SERVER_END : FILE_PIPE_CLIENT_END;
+            break;
+        }
     default:
-        no_fd_get_file_info( fd, info_class );
+        default_fd_get_file_info( fd, handle, info_class );
     }
 }
 
@@ -761,7 +893,7 @@ static int pipe_end_write( struct fd *fd, struct async *async, file_pos_t pos )
         return 0;
     }
 
-    if (!(pipe_end->flags & NAMED_PIPE_MESSAGE_STREAM_WRITE) && !get_req_data_size()) return 1;
+    if (!pipe_end->pipe->message_mode && !get_req_data_size()) return 1;
 
     iosb = async_get_iosb( async );
     message = queue_message( pipe_end->connection, iosb );
@@ -816,7 +948,7 @@ static int pipe_end_peek( struct pipe_end *pipe_end )
         set_error( STATUS_PIPE_BROKEN );
         return 0;
     default:
-        set_error( STATUS_INVALID_PIPE_STATE );
+        set_error( pipe_end->pipe ? STATUS_INVALID_PIPE_STATE : STATUS_PIPE_DISCONNECTED );
         return 0;
     }
 
@@ -824,7 +956,7 @@ static int pipe_end_peek( struct pipe_end *pipe_end )
         avail += message->iosb->in_size - message->read_pos;
     reply_size = min( reply_size, avail );
 
-    if (avail && (pipe_end->flags & NAMED_PIPE_MESSAGE_STREAM_WRITE))
+    if (avail && pipe_end->pipe->message_mode)
     {
         message = LIST_ENTRY( list_head(&pipe_end->message_queue), struct pipe_message, entry );
         message_length = message->iosb->in_size - message->read_pos;
@@ -849,6 +981,7 @@ static int pipe_end_peek( struct pipe_end *pipe_end )
             if (write_pos == reply_size) break;
         }
     }
+    if (message_length > reply_size) set_error( STATUS_BUFFER_OVERFLOW );
     return 1;
 }
 
@@ -859,12 +992,11 @@ static int pipe_end_transceive( struct pipe_end *pipe_end, struct async *async )
 
     if (!pipe_end->connection)
     {
-        set_error( STATUS_INVALID_PIPE_STATE );
+        set_error( pipe_end->pipe ? STATUS_INVALID_PIPE_STATE : STATUS_PIPE_DISCONNECTED );
         return 0;
     }
 
-    if ((pipe_end->flags & (NAMED_PIPE_MESSAGE_STREAM_WRITE | NAMED_PIPE_MESSAGE_STREAM_READ))
-        != (NAMED_PIPE_MESSAGE_STREAM_WRITE | NAMED_PIPE_MESSAGE_STREAM_READ))
+    if (!(pipe_end->flags & NAMED_PIPE_MESSAGE_STREAM_READ))
     {
         set_error( STATUS_INVALID_READ_MODE );
         return 0;
@@ -997,7 +1129,7 @@ static int pipe_server_ioctl( struct fd *fd, ioctl_code_t code, struct async *as
 
 static int pipe_client_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
 {
-    struct pipe_client *client = get_fd_user( fd );
+    struct pipe_end *client = get_fd_user( fd );
 
     switch(code)
     {
@@ -1006,7 +1138,7 @@ static int pipe_client_ioctl( struct fd *fd, ioctl_code_t code, struct async *as
         return 0;
 
     default:
-        return pipe_end_ioctl( &client->pipe_end, code, async );
+        return pipe_end_ioctl( client, code, async );
     }
 }
 
@@ -1036,6 +1168,7 @@ static struct pipe_server *create_pipe_server( struct named_pipe *pipe, unsigned
     init_pipe_end( &server->pipe_end, pipe, pipe_flags, pipe->insize );
     server->pipe_end.state = FILE_PIPE_LISTENING_STATE;
     server->pipe_end.server_pid = get_process_id( current->process );
+    init_async_queue( &server->listen_q );
 
     list_add_head( &pipe->servers, &server->entry );
     if (!(server->pipe_end.fd = alloc_pseudo_fd( &pipe_server_fd_ops, &server->pipe_end.obj, options )))
@@ -1045,32 +1178,29 @@ static struct pipe_server *create_pipe_server( struct named_pipe *pipe, unsigned
     }
     allow_fd_caching( server->pipe_end.fd );
     set_fd_signaled( server->pipe_end.fd, 1 );
-    init_async_queue( &server->listen_q );
     return server;
 }
 
-static struct pipe_client *create_pipe_client( unsigned int flags, struct named_pipe *pipe,
-                                               data_size_t buffer_size, unsigned int options )
+static struct pipe_end *create_pipe_client( struct named_pipe *pipe, data_size_t buffer_size, unsigned int options )
 {
-    struct pipe_client *client;
+    struct pipe_end *client;
 
     client = alloc_object( &pipe_client_ops );
     if (!client)
         return NULL;
 
-    client->flags = flags;
-    init_pipe_end( &client->pipe_end, pipe, pipe->flags, buffer_size );
-    client->pipe_end.state = FILE_PIPE_CONNECTED_STATE;
-    client->pipe_end.client_pid = get_process_id( current->process );
+    init_pipe_end( client, pipe, 0, buffer_size );
+    client->state = FILE_PIPE_CONNECTED_STATE;
+    client->client_pid = get_process_id( current->process );
 
-    client->pipe_end.fd = alloc_pseudo_fd( &pipe_client_fd_ops, &client->pipe_end.obj, options );
-    if (!client->pipe_end.fd)
+    client->fd = alloc_pseudo_fd( &pipe_client_fd_ops, &client->obj, options );
+    if (!client->fd)
     {
         release_object( client );
         return NULL;
     }
-    allow_fd_caching( client->pipe_end.fd );
-    set_fd_signaled( client->pipe_end.fd, 1 );
+    allow_fd_caching( client->fd );
+    set_fd_signaled( client->fd, 1 );
 
     return client;
 }
@@ -1115,7 +1245,7 @@ static struct object *named_pipe_open_file( struct object *obj, unsigned int acc
 {
     struct named_pipe *pipe = (struct named_pipe *)obj;
     struct pipe_server *server;
-    struct pipe_client *client;
+    struct pipe_end *client;
     unsigned int pipe_sharing;
 
     if (!(server = find_available_server( pipe )))
@@ -1133,17 +1263,17 @@ static struct object *named_pipe_open_file( struct object *obj, unsigned int acc
         return NULL;
     }
 
-    if ((client = create_pipe_client( options, pipe, pipe->outsize, options )))
+    if ((client = create_pipe_client( pipe, pipe->outsize, options )))
     {
         async_wake_up( &server->listen_q, STATUS_SUCCESS );
         server->pipe_end.state = FILE_PIPE_CONNECTED_STATE;
-        server->pipe_end.connection = &client->pipe_end;
-        client->pipe_end.connection = &server->pipe_end;
-        server->pipe_end.client_pid = client->pipe_end.client_pid;
-        client->pipe_end.server_pid = server->pipe_end.server_pid;
+        server->pipe_end.connection = client;
+        client->connection = &server->pipe_end;
+        server->pipe_end.client_pid = client->client_pid;
+        client->server_pid = server->pipe_end.server_pid;
     }
     release_object( server );
-    return &client->pipe_end.obj;
+    return &client->obj;
 }
 
 static int named_pipe_device_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
@@ -1236,7 +1366,7 @@ DECL_HANDLER(create_named_pipe)
         pipe->outsize = req->outsize;
         pipe->maxinstances = req->maxinstances;
         pipe->timeout = req->timeout;
-        pipe->flags = req->flags & NAMED_PIPE_MESSAGE_STREAM_WRITE;
+        pipe->message_mode = (req->flags & NAMED_PIPE_MESSAGE_STREAM_WRITE) != 0;
         pipe->sharing = req->sharing;
         if (sd) default_set_sd( &pipe->obj, sd, OWNER_SECURITY_INFORMATION |
                                                 GROUP_SECURITY_INFORMATION |
@@ -1271,39 +1401,6 @@ DECL_HANDLER(create_named_pipe)
     release_object( pipe );
 }
 
-DECL_HANDLER(get_named_pipe_info)
-{
-    struct pipe_end *pipe_end;
-
-    pipe_end = (struct pipe_end *)get_handle_obj( current->process, req->handle,
-                                                  FILE_READ_ATTRIBUTES, &pipe_server_ops );
-    if (!pipe_end)
-    {
-        if (get_error() != STATUS_OBJECT_TYPE_MISMATCH)
-            return;
-
-        clear_error();
-        pipe_end = (struct pipe_end *)get_handle_obj( current->process, req->handle,
-                                                      0, &pipe_client_ops );
-        if (!pipe_end) return;
-    }
-
-    if (pipe_end->pipe)
-    {
-        reply->flags        = pipe_end->flags;
-        reply->sharing      = pipe_end->pipe->sharing;
-        reply->maxinstances = pipe_end->pipe->maxinstances;
-        reply->instances    = pipe_end->pipe->instances;
-        reply->insize       = pipe_end->pipe->insize;
-        reply->outsize      = pipe_end->pipe->outsize;
-
-        if (pipe_end->obj.ops == &pipe_server_ops) reply->flags |= NAMED_PIPE_SERVER_END;
-    }
-    else set_error( STATUS_PIPE_DISCONNECTED );
-
-    release_object( pipe_end );
-}
-
 DECL_HANDLER(set_named_pipe_info)
 {
     struct pipe_end *pipe_end;
@@ -1321,14 +1418,18 @@ DECL_HANDLER(set_named_pipe_info)
         if (!pipe_end) return;
     }
 
-    if ((req->flags & ~(NAMED_PIPE_MESSAGE_STREAM_READ | NAMED_PIPE_NONBLOCKING_MODE)) ||
-            ((req->flags & NAMED_PIPE_MESSAGE_STREAM_READ) && !(pipe_end->pipe->flags & NAMED_PIPE_MESSAGE_STREAM_WRITE)))
+    if (!pipe_end->pipe)
+    {
+        set_error( STATUS_PIPE_DISCONNECTED );
+    }
+    else if ((req->flags & ~(NAMED_PIPE_MESSAGE_STREAM_READ | NAMED_PIPE_NONBLOCKING_MODE)) ||
+            ((req->flags & NAMED_PIPE_MESSAGE_STREAM_READ) && !pipe_end->pipe->message_mode))
     {
         set_error( STATUS_INVALID_PARAMETER );
     }
     else
     {
-        pipe_end->flags = pipe_end->pipe->flags | req->flags;
+        pipe_end->flags = req->flags;
     }
 
     release_object( pipe_end );

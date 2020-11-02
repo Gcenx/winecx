@@ -396,6 +396,11 @@ xmlNodePtr xmldoc_unlink_xmldecl(xmlDocPtr doc)
     return node;
 }
 
+MSXML_VERSION xmldoc_version(xmlDocPtr doc)
+{
+    return properties_from_xmlDocPtr(doc)->version;
+}
+
 BOOL is_preserving_whitespace(xmlNodePtr node)
 {
     domdoc_properties* properties = NULL;
@@ -2287,8 +2292,8 @@ static HRESULT WINAPI domdoc_load(
 
     if ( filename )
     {
+        IUri *uri = NULL;
         IMoniker *mon;
-        IUri *uri;
 
         if (This->properties->uri)
         {
@@ -2305,14 +2310,18 @@ static HRESULT WINAPI domdoc_load(
             IMoniker_Release(mon);
         }
 
-        if ( FAILED(hr) )
-            This->error = E_FAIL;
-        else
+        if (SUCCEEDED(hr))
         {
             get_doc(This)->name = (char *)xmlchar_from_wcharn(filename, -1, TRUE);
             This->properties->uri = uri;
             hr = This->error = S_OK;
             *isSuccessful = VARIANT_TRUE;
+        }
+        else
+        {
+            if (uri)
+                IUri_Release(uri);
+            This->error = E_FAIL;
         }
     }
 

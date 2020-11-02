@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2017-12-31 19:18-0700\n"
+"PO-Revision-Date: 2018-12-17 21:33-0700\n"
 "Last-Translator: Alex Henrie <alexhenrie24@gmail.com>\n"
 "Language-Team: Catalan\n"
 "Language: ca\n"
@@ -13,7 +13,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"X-Generator: Poedit 2.0.5\n"
+"X-Generator: Poedit 2.2\n"
 
 #: appwiz.rc:58
 msgid "Install/Uninstall"
@@ -49,7 +49,7 @@ msgstr "Informació de &suport"
 msgid "&Modify..."
 msgstr "&Modifica..."
 
-#: appwiz.rc:69 appwiz.rc:45 cryptui.rc:346 msacm32.rc:40 winecfg.rc:200
+#: appwiz.rc:69 appwiz.rc:45 cryptui.rc:351 msacm32.rc:40 winecfg.rc:200
 #: winecfg.rc:237 wordpad.rc:256
 msgid "&Remove"
 msgstr "&Elimina"
@@ -60,9 +60,9 @@ msgstr "Informació de suport"
 
 #: appwiz.rc:78 avifil32.rc:54 comctl32.rc:71 comctl32.rc:55 comdlg32.rc:232
 #: comdlg32.rc:262 comdlg32.rc:305 comdlg32.rc:359 comdlg32.rc:398
-#: comdlg32.rc:452 credui.rc:52 cryptui.rc:263 cryptui.rc:275 cryptui.rc:365
-#: dinput.rc:46 ieframe.rc:96 localui.rc:44 localui.rc:57 mpr.rc:49
-#: msacm32.rc:53 mshtml.rc:47 mshtml.rc:57 msvfw32.rc:36 oledlg.rc:62
+#: comdlg32.rc:452 credui.rc:52 cryptui.rc:268 cryptui.rc:280 cryptui.rc:370
+#: cryptui.rc:462 dinput.rc:37 ieframe.rc:96 localui.rc:44 localui.rc:57
+#: mpr.rc:49 msacm32.rc:53 mshtml.rc:47 mshtml.rc:57 msvfw32.rc:36 oledlg.rc:62
 #: oledlg.rc:94 serialui.rc:41 setupapi.rc:59 shell32.rc:276 shell32.rc:300
 #: shell32.rc:322 shell32.rc:341 shlwapi.rc:44 twain.rc:32 user32.rc:83
 #: user32.rc:98 wininet.rc:51 wininet.rc:71 winspool.rc:42 net.rc:47
@@ -139,23 +139,24 @@ msgstr ""
 msgid "&Install"
 msgstr "&Instal·la"
 
-#: appwiz.rc:110 appwiz.rc:125 avifil32.rc:55 browseui.rc:40 comctl32.rc:72
+#: appwiz.rc:110 appwiz.rc:125 avifil32.rc:55 browseui.rc:45 comctl32.rc:72
 #: comctl32.rc:87 comctl32.rc:56 comdlg32.rc:171 comdlg32.rc:193
 #: comdlg32.rc:211 comdlg32.rc:233 comdlg32.rc:263 comdlg32.rc:306
 #: comdlg32.rc:328 comdlg32.rc:348 comdlg32.rc:360 comdlg32.rc:399
 #: comdlg32.rc:453 comdlg32.rc:478 comdlg32.rc:504 comdlg32.rc:527 credui.rc:53
-#: cryptui.rc:264 cryptui.rc:276 cryptui.rc:366 dinput.rc:47 ieframe.rc:97
-#: inetcpl.rc:81 localui.rc:45 localui.rc:58 mpr.rc:50 msacm32.rc:54
-#: mshtml.rc:48 mshtml.rc:58 msvfw32.rc:37 oledlg.rc:63 oledlg.rc:95
-#: serialui.rc:42 setupapi.rc:42 setupapi.rc:60 shell32.rc:277 shell32.rc:301
-#: shell32.rc:312 shell32.rc:342 shlwapi.rc:45 twain.rc:33 user32.rc:84
-#: user32.rc:99 wininet.rc:52 wininet.rc:72 winspool.rc:43 notepad.rc:118
-#: oleview.rc:162 oleview.rc:175 progman.rc:107 progman.rc:125 progman.rc:143
-#: progman.rc:159 progman.rc:181 progman.rc:200 progman.rc:217 regedit.rc:297
-#: regedit.rc:308 regedit.rc:321 regedit.rc:337 regedit.rc:350 regedit.rc:363
-#: taskmgr.rc:443 taskmgr.rc:518 wineboot.rc:34 winecfg.rc:215 winecfg.rc:225
-#: wineconsole.rc:136 winefile.rc:129 winefile.rc:152 winefile.rc:182
-#: winemine.rc:99 wordpad.rc:216 wordpad.rc:227 wordpad.rc:245 wordpad.rc:258
+#: cryptui.rc:269 cryptui.rc:281 cryptui.rc:371 cryptui.rc:463 dinput.rc:38
+#: ieframe.rc:97 inetcpl.rc:81 localui.rc:45 localui.rc:58 mpr.rc:50
+#: msacm32.rc:54 mshtml.rc:48 mshtml.rc:58 msvfw32.rc:37 oledlg.rc:63
+#: oledlg.rc:95 serialui.rc:42 setupapi.rc:42 setupapi.rc:60 shell32.rc:277
+#: shell32.rc:301 shell32.rc:312 shell32.rc:342 shlwapi.rc:45 twain.rc:33
+#: user32.rc:84 user32.rc:99 wininet.rc:52 wininet.rc:72 winspool.rc:43
+#: notepad.rc:118 oleview.rc:162 oleview.rc:175 progman.rc:107 progman.rc:125
+#: progman.rc:143 progman.rc:159 progman.rc:181 progman.rc:200 progman.rc:217
+#: regedit.rc:297 regedit.rc:308 regedit.rc:321 regedit.rc:337 regedit.rc:350
+#: regedit.rc:363 taskmgr.rc:443 taskmgr.rc:518 wineboot.rc:34 winecfg.rc:215
+#: winecfg.rc:225 wineconsole.rc:136 winefile.rc:129 winefile.rc:152
+#: winefile.rc:182 winemine.rc:99 wordpad.rc:216 wordpad.rc:227 wordpad.rc:245
+#: wordpad.rc:258
 msgid "Cancel"
 msgstr "Cancel·la"
 
@@ -310,6 +311,26 @@ msgstr "no comprimit"
 msgid "Canceling..."
 msgstr "S'està cancel·lant..."
 
+#: browseui.rc:29
+msgid "%1!u! %2 remaining"
+msgstr "resten %1!u! %2"
+
+#: browseui.rc:30
+msgid "%1!u! %2 and %3!u! %4 remaining"
+msgstr "resten %1!u! %2 i %3!u! %4"
+
+#: browseui.rc:31
+msgid "seconds"
+msgstr "segons"
+
+#: browseui.rc:32
+msgid "minutes"
+msgstr "minuts"
+
+#: browseui.rc:33
+msgid "hours"
+msgstr "hores"
+
 #: comctl32.rc:68 winefile.rc:157
 msgid "Properties for %s"
 msgstr "Propietats de %s"
@@ -342,7 +363,7 @@ msgstr "Acaba"
 msgid "Customize Toolbar"
 msgstr "Personalitza la barra d'eines"
 
-#: comctl32.rc:100 comctl32.rc:57 cryptui.rc:351 ieframe.rc:43 oleview.rc:83
+#: comctl32.rc:100 comctl32.rc:57 cryptui.rc:356 ieframe.rc:43 oleview.rc:83
 #: oleview.rc:187 oleview.rc:200 oleview.rc:212 taskmgr.rc:139
 msgid "&Close"
 msgstr "&Tanca"
@@ -407,18 +428,14 @@ msgid "&Retry"
 msgstr "&Reintenta"
 
 #: comctl32.rc:62
-#, fuzzy
-#| msgid "Hide &Tabs"
 msgid "Hide details"
-msgstr "Amaga &pestanyes"
+msgstr "Amaga els detalls"
 
 #: comctl32.rc:63
-#, fuzzy
-#| msgid "Details"
 msgid "See details"
-msgstr "Detalls"
+msgstr "Mostra els detalls"
 
-#: comctl32.rc:31 cryptui.rc:230 regedit.rc:286 taskmgr.rc:434 winedbg.rc:61
+#: comctl32.rc:31 cryptui.rc:235 regedit.rc:286 taskmgr.rc:434 winedbg.rc:61
 #: winedbg.rc:76 wordpad.rc:180
 msgid "Close"
 msgstr "Tanca"
@@ -889,7 +906,7 @@ msgstr "Crea una carpeta nova"
 msgid "List"
 msgstr "Llista"
 
-#: comdlg32.rc:48 cryptui.rc:196
+#: comdlg32.rc:48 cryptui.rc:201
 msgid "Details"
 msgstr "Detalls"
 
@@ -1015,7 +1032,7 @@ msgstr ""
 
 #: comdlg32.rc:67
 msgid "A printer error occurred."
-msgstr "S'ha produït un error d'impressora."
+msgstr "Ha ocorregut un error d'impressora."
 
 #: comdlg32.rc:68
 msgid "No default printer defined."
@@ -1203,7 +1220,7 @@ msgstr "mm"
 msgid "&User name:"
 msgstr "&Nom d'usuari:"
 
-#: credui.rc:48 cryptui.rc:397
+#: credui.rc:48 cryptui.rc:402
 msgid "&Password:"
 msgstr "&Contrasenya:"
 
@@ -2100,114 +2117,114 @@ msgstr "Número d'anunci="
 msgid "Notice Text="
 msgstr "Text d'anunci="
 
-#: cryptui.rc:180 cryptui.rc:235 inetcpl.rc:46 shell32.rc:348 shell32.rc:377
+#: cryptui.rc:185 cryptui.rc:240 inetcpl.rc:46 shell32.rc:348 shell32.rc:377
 msgid "General"
 msgstr "General"
 
-#: cryptui.rc:191
+#: cryptui.rc:196
 msgid "&Install Certificate..."
 msgstr "&Instal·la certificat..."
 
-#: cryptui.rc:192
+#: cryptui.rc:197
 msgid "Issuer &Statement"
 msgstr "&Declaració d'emissor"
 
-#: cryptui.rc:200
+#: cryptui.rc:205
 msgid "&Show:"
 msgstr "&Mostra:"
 
-#: cryptui.rc:205
+#: cryptui.rc:210
 msgid "&Edit Properties..."
 msgstr "&Edita les propietats..."
 
-#: cryptui.rc:206
+#: cryptui.rc:211
 msgid "&Copy to File..."
 msgstr "&Copia a un fitxer..."
 
-#: cryptui.rc:210
+#: cryptui.rc:215
 msgid "Certification Path"
 msgstr "Camí de certificació"
 
-#: cryptui.rc:214
+#: cryptui.rc:219
 msgid "Certification path"
 msgstr "Camí de certificació"
 
-#: cryptui.rc:217
+#: cryptui.rc:222 cryptui.rc:464
 msgid "&View Certificate"
 msgstr "&Visualitza certificat"
 
-#: cryptui.rc:218
+#: cryptui.rc:223
 msgid "Certificate &status:"
 msgstr "&Estat de certificat:"
 
-#: cryptui.rc:224
+#: cryptui.rc:229
 msgid "Disclaimer"
 msgstr "Renúncia"
 
-#: cryptui.rc:231
+#: cryptui.rc:236
 msgid "More &Info"
 msgstr "Més &informació"
 
-#: cryptui.rc:239
+#: cryptui.rc:244
 msgid "&Friendly name:"
 msgstr "Nom &amistós:"
 
-#: cryptui.rc:241 progman.rc:154 progman.rc:170
+#: cryptui.rc:246 progman.rc:154 progman.rc:170
 msgid "&Description:"
 msgstr "&Descripció:"
 
-#: cryptui.rc:243
+#: cryptui.rc:248
 msgid "Certificate purposes"
 msgstr "Finalitats de certificat"
 
-#: cryptui.rc:244
+#: cryptui.rc:249
 msgid "&Enable all purposes for this certificate"
 msgstr "&Habilita aquest certificat per a totes les finalitats"
 
-#: cryptui.rc:246
+#: cryptui.rc:251
 msgid "D&isable all purposes for this certificate"
 msgstr "&Inhabilita aquest certificat per a totes les finalitats"
 
-#: cryptui.rc:248
+#: cryptui.rc:253
 msgid "Enable &only the following purposes for this certificate:"
 msgstr "Habilita aquest certificat per a &només les finalitats següents:"
 
-#: cryptui.rc:253
+#: cryptui.rc:258
 msgid "Add &Purpose..."
 msgstr "Afegeix &finalitat..."
 
-#: cryptui.rc:257
+#: cryptui.rc:262
 msgid "Add Purpose"
 msgstr "Afegeix finalitat"
 
-#: cryptui.rc:260
+#: cryptui.rc:265
 msgid ""
 "Add the object identifier (OID) for the certificate purpose you wish to add:"
 msgstr ""
 "Afegiu l'identificador d'objecte (OID) de la finalitat de certificat que "
 "voleu afegir:"
 
-#: cryptui.rc:268 cryptui.rc:69
+#: cryptui.rc:273 cryptui.rc:69
 msgid "Select Certificate Store"
-msgstr "Seleccionar el magatzem de certificats"
+msgstr "Seleccioneu un magatzem de certificats"
 
-#: cryptui.rc:271
+#: cryptui.rc:276
 msgid "Select the certificate store you want to use:"
 msgstr "Seleccioneu el magatzem de certificats que voleu utilitzar:"
 
-#: cryptui.rc:274
+#: cryptui.rc:279
 msgid "&Show physical stores"
 msgstr "&Mostra els magatzems físics"
 
-#: cryptui.rc:280 cryptui.rc:291 cryptui.rc:308 cryptui.rc:322 cryptui.rc:71
+#: cryptui.rc:285 cryptui.rc:296 cryptui.rc:313 cryptui.rc:327 cryptui.rc:71
 msgid "Certificate Import Wizard"
 msgstr "Assistent d'Importació de Certificats"
 
-#: cryptui.rc:283
+#: cryptui.rc:288
 msgid "Welcome to the Certificate Import Wizard"
 msgstr "Benvingut a l'Assistent d'Importació de Certificats"
 
-#: cryptui.rc:286
+#: cryptui.rc:291
 msgid ""
 "This wizard helps you import certificates, certificate revocation lists, and "
 "certificate trust lists from a file to a certificate store.\n"
@@ -2231,15 +2248,15 @@ msgstr ""
 "\n"
 "Per a continuar, feu clic en Endavant."
 
-#: cryptui.rc:294 cryptui.rc:430
+#: cryptui.rc:299 cryptui.rc:435
 msgid "&File name:"
 msgstr "Nom de &fitxer:"
 
-#: cryptui.rc:296 cryptui.rc:318 cryptui.rc:432 winecfg.rc:313
+#: cryptui.rc:301 cryptui.rc:323 cryptui.rc:437 winecfg.rc:313
 msgid "B&rowse..."
 msgstr "&Navega..."
 
-#: cryptui.rc:297
+#: cryptui.rc:302
 msgid ""
 "Note: The following file formats may contain more than one certificate, "
 "certificate revocation list, or certificate trust list:"
@@ -2247,20 +2264,20 @@ msgstr ""
 "Nota: Els següents formats de fitxer poden contenir més d'un certificat, "
 "llista de revocació de certificats o llista de certificats de confiança:"
 
-#: cryptui.rc:299
+#: cryptui.rc:304
 msgid "Cryptographic Message Syntax Standard/PKCS #7 Messages (*.p7b)"
 msgstr ""
 "Estàndard de sintaxi de missatges criptogràfics/Missatges PKCS #7 (*.p7b)"
 
-#: cryptui.rc:301
+#: cryptui.rc:306
 msgid "Personal Information Exchange/PKCS #12 (*.pfx; *.p12)"
 msgstr "Intercanvi d'informació personal/PKCS #12 (*.pfx; *.p12)"
 
-#: cryptui.rc:303 cryptui.rc:81 cryptui.rc:162
+#: cryptui.rc:308 cryptui.rc:81 cryptui.rc:162
 msgid "Microsoft Serialized Certificate Store (*.sst)"
 msgstr "Magatzem de certificats serialitzat del Microsoft (*.sst)"
 
-#: cryptui.rc:311
+#: cryptui.rc:316
 msgid ""
 "Wine can automatically select the certificate store, or you can specify a "
 "location for the certificates."
@@ -2268,85 +2285,85 @@ msgstr ""
 "El Wine pot seleccionar automàticament el magatzem de certificats, o podeu "
 "especificar la ubicació dels certificats."
 
-#: cryptui.rc:313
+#: cryptui.rc:318
 msgid "&Automatically select certificate store"
 msgstr "Selecciona &automàticament el magatzem de certificats"
 
-#: cryptui.rc:315
+#: cryptui.rc:320
 msgid "&Place all certificates in the following store:"
 msgstr "&Col·loca tots els certificats en el magatzem següent:"
 
-#: cryptui.rc:325
+#: cryptui.rc:330
 msgid "Completing the Certificate Import Wizard"
 msgstr "S'està acabant l'Assistent d'Importació de Certificats"
 
-#: cryptui.rc:327
+#: cryptui.rc:332
 msgid "You have successfully completed the Certificate Import Wizard."
 msgstr "Heu acabat amb èxit l'Assistent d'Importació de Certificats."
 
-#: cryptui.rc:329 cryptui.rc:443
+#: cryptui.rc:334 cryptui.rc:448
 msgid "You have specified the following settings:"
 msgstr "Heu especificat la configuració següent:"
 
-#: cryptui.rc:337 cryptui.rc:122 inetcpl.rc:111
+#: cryptui.rc:342 cryptui.rc:122 inetcpl.rc:111
 msgid "Certificates"
 msgstr "Certificats"
 
-#: cryptui.rc:340
+#: cryptui.rc:345
 msgid "I&ntended purpose:"
 msgstr "&Finalitat prevista:"
 
-#: cryptui.rc:344
+#: cryptui.rc:349
 msgid "&Import..."
 msgstr "&Importa..."
 
-#: cryptui.rc:345 regedit.rc:91 regedit.rc:112
+#: cryptui.rc:350 regedit.rc:91 regedit.rc:112
 msgid "&Export..."
 msgstr "&Exporta..."
 
-#: cryptui.rc:347
+#: cryptui.rc:352
 msgid "&Advanced..."
 msgstr "&Avançat..."
 
-#: cryptui.rc:348
+#: cryptui.rc:353
 msgid "Certificate intended purposes"
 msgstr "Finalitats previstes del certificat"
 
-#: cryptui.rc:350 ieframe.rc:45 shell32.rc:43 shell32.rc:120 oleview.rc:59
+#: cryptui.rc:355 ieframe.rc:45 shell32.rc:43 shell32.rc:120 oleview.rc:59
 #: oleview.rc:61 oleview.rc:85 regedit.rc:64 taskmgr.rc:52 winefile.rc:48
 #: wordpad.rc:69
 msgid "&View"
 msgstr "&Visualitza"
 
-#: cryptui.rc:355
+#: cryptui.rc:360
 msgid "Advanced Options"
 msgstr "Opcions avançades"
 
-#: cryptui.rc:358
+#: cryptui.rc:363
 msgid "Certificate purpose"
 msgstr "Finalitat de certificat"
 
-#: cryptui.rc:359
+#: cryptui.rc:364
 msgid ""
 "Select one or more purposes to be listed when Advanced Purposes is selected."
 msgstr ""
 "Selecciona una o més finalitats per a allistar quan se seleccionen les "
 "finalitats avançades."
 
-#: cryptui.rc:361
+#: cryptui.rc:366
 msgid "&Certificate purposes:"
 msgstr "Finalitats de &certificat:"
 
-#: cryptui.rc:370 cryptui.rc:381 cryptui.rc:394 cryptui.rc:404 cryptui.rc:427
-#: cryptui.rc:436 cryptui.rc:150
+#: cryptui.rc:375 cryptui.rc:386 cryptui.rc:399 cryptui.rc:409 cryptui.rc:432
+#: cryptui.rc:441 cryptui.rc:150
 msgid "Certificate Export Wizard"
 msgstr "Assistent d'Exportació de Certificats"
 
-#: cryptui.rc:373
+#: cryptui.rc:378
 msgid "Welcome to the Certificate Export Wizard"
 msgstr "Benvingut a l'Assistent d'Exportació de Certificats"
 
-#: cryptui.rc:376
+#: cryptui.rc:381
 msgid ""
 "This wizard helps you export certificates, certificate revocation lists, and "
 "certificate trust lists from a certificate store to a file.\n"
@@ -2370,7 +2387,7 @@ msgstr ""
 "\n"
 "Per a continuar, feu clic en Endavant."
 
-#: cryptui.rc:384
+#: cryptui.rc:389
 msgid ""
 "If you choose to export the private key, you will be prompted for a password "
 "to protect the private key on a later page."
@@ -2378,66 +2395,74 @@ msgstr ""
 "Si trieu exportar la clau privada, se us demanarà una contrasenya per a "
 "protegir la clau privada en una pàgina posterior."
 
-#: cryptui.rc:385
+#: cryptui.rc:390
 msgid "Do you wish to export the private key?"
 msgstr "Voleu exportar la clau privada?"
 
-#: cryptui.rc:386
+#: cryptui.rc:391
 msgid "&Yes, export the private key"
 msgstr "&Sí, exporta la clau privada"
 
-#: cryptui.rc:388
+#: cryptui.rc:393
 msgid "N&o, do not export the private key"
 msgstr "&No, no exportis la clau privada"
 
-#: cryptui.rc:399
+#: cryptui.rc:404
 msgid "&Confirm password:"
 msgstr "&Confirmeu la contrasenya:"
 
-#: cryptui.rc:407
+#: cryptui.rc:412
 msgid "Select the format you want to use:"
 msgstr "Seleccioneu el format que voleu utilitzar:"
 
-#: cryptui.rc:408
+#: cryptui.rc:413
 msgid "&DER-encoded X.509 (*.cer)"
 msgstr "Codificat en &DER X.509 (*.cer)"
 
-#: cryptui.rc:410
+#: cryptui.rc:415
 msgid "Ba&se64-encoded X.509 (*.cer):"
 msgstr "Codificat en &base64 X.509 (*.cer):"
 
-#: cryptui.rc:412
+#: cryptui.rc:417
 msgid "&Cryptographic Message Syntax Standard/PKCS #7 Message (*.p7b)"
 msgstr ""
 "&Estàndard de sintaxi de missatges criptogràfics/Missatges PKCS #7 (*.p7b)"
 
-#: cryptui.rc:414
+#: cryptui.rc:419
 msgid "&Include all certificates in the certification path if possible"
 msgstr "&Inclou tots els certificats en el camí de certificat si és possible"
 
-#: cryptui.rc:416
+#: cryptui.rc:421
 msgid "&Personal Information Exchange/PKCS #12 (*.pfx)"
 msgstr "&Intercanvi d'informació personal/PKCS #12 (*.pfx)"
 
-#: cryptui.rc:418
+#: cryptui.rc:423
 msgid "Incl&ude all certificates in the certification path if possible"
 msgstr "Inclo&u tots els certificats en el camí de certificat si és possible"
 
-#: cryptui.rc:420
+#: cryptui.rc:425
 msgid "&Enable strong encryption"
 msgstr "&Habilita el xifratge fort"
 
-#: cryptui.rc:422
+#: cryptui.rc:427
 msgid "Delete the private &key if the export is successful"
 msgstr "&Suprimeix la clau privada si l'exportació té èxit"
 
-#: cryptui.rc:439
+#: cryptui.rc:444
 msgid "Completing the Certificate Export Wizard"
 msgstr "S'està acabant l'Assistent d'Exportació de Certificats"
 
-#: cryptui.rc:441
+#: cryptui.rc:446
 msgid "You have successfully completed the Certificate Export Wizard."
 msgstr "Heu acabat amb èxit l'Assistent d'Exportació de Certificats."
+
+#: cryptui.rc:456 cryptui.rc:179
+msgid "Select Certificate"
+msgstr "Seleccionar el certificat"
+
+#: cryptui.rc:459
+msgid "Select a certificate you want to use"
+msgstr "Seleccioneu el magatzem de certificats que voleu utilitzar"
 
 #: cryptui.rc:30 cryptui.rc:93
 msgid "Certificate"
@@ -2971,39 +2996,55 @@ msgstr "Nota: No s'ha pogut obrir la clau privada d'aquest certificat."
 msgid "Note: The private key for this certificate is not exportable."
 msgstr "Nota: La clau privada d'aquest certificat no és exportable."
 
-#: dinput.rc:43
+#: cryptui.rc:177
+msgid "Intended Use"
+msgstr "Finalitat prevista"
+
+#: cryptui.rc:178 shell32.rc:152
+msgid "Location"
+msgstr "Ubicació"
+
+#: cryptui.rc:180
+msgid "Select a certificate"
+msgstr "Seleccioneu un certificat"
+
+#: cryptui.rc:181 winefile.rc:102 winhlp32.rc:110 winhlp32.rc:85
+msgid "Not yet implemented"
+msgstr "Encara no implementat"
+
+#: dinput.rc:34
 msgid "Configure Devices"
 msgstr "Configura dispositius"
 
-#: dinput.rc:48
+#: dinput.rc:39
 msgid "Reset"
 msgstr "Reinicia"
 
-#: dinput.rc:51
+#: dinput.rc:42
 msgid "Player"
 msgstr "Reproductor"
 
-#: dinput.rc:52 winecfg.rc:89
+#: dinput.rc:43 winecfg.rc:89
 msgid "Device"
 msgstr "Dispositiu"
 
-#: dinput.rc:53
+#: dinput.rc:44
 msgid "Actions"
 msgstr "Accions"
 
-#: dinput.rc:54
+#: dinput.rc:45
 msgid "Mapping"
 msgstr "Mapatge"
 
-#: dinput.rc:56
+#: dinput.rc:47
 msgid "Show Assigned First"
 msgstr "Mostra els assignats primer"
 
-#: dinput.rc:37
+#: dinput.rc:28
 msgid "Action"
 msgstr "Acció"
 
-#: dinput.rc:38
+#: dinput.rc:29
 msgid "Object"
 msgstr "Objecte"
 
@@ -3459,46 +3500,36 @@ msgid "Publishers..."
 msgstr "Publicadors..."
 
 #: inetcpl.rc:123
-#, fuzzy
-#| msgid "LAN Connection"
 msgid "Connections"
-msgstr "Connexió LAN"
+msgstr "Connexions"
 
 #: inetcpl.rc:125
-#, fuzzy
-#| msgid "Wine configuration"
 msgid "Automatic configuration"
-msgstr "Configuració del Wine"
+msgstr "Configuració automàtica"
 
 #: inetcpl.rc:126
 msgid "Use Web Proxy Auto-Discovery (WPAD)"
-msgstr ""
+msgstr "Utilitza autodescobriment de servidor intermediari web (WPAD)"
 
 #: inetcpl.rc:127
 msgid "Use Proxy Auto-Config (PAC) script"
-msgstr ""
+msgstr "Utilitza script de autoconfiguració de servidor intermediari (PAC)"
 
 #: inetcpl.rc:128 inetcpl.rc:132
-#, fuzzy
-#| msgid "Address"
 msgid "Address:"
-msgstr "Adreça"
+msgstr "Adreça:"
 
 #: inetcpl.rc:130
-#, fuzzy
-#| msgid "&Local server"
 msgid "Proxy server"
-msgstr "Servidor &local"
+msgstr "Servidor intermediari"
 
 #: inetcpl.rc:131
 msgid "Use a proxy server"
-msgstr ""
+msgstr "Utilitza un servidor intermediari"
 
 #: inetcpl.rc:134
-#, fuzzy
-#| msgid "No Ports"
 msgid "Port:"
-msgstr "Cap port"
+msgstr "Port:"
 
 #: inetcpl.rc:31
 msgid "Internet Settings"
@@ -3761,18 +3792,20 @@ msgid ""
 "'writable' attribute on the property descriptor cannot be set to 'true' on "
 "this object"
 msgstr ""
+"no es pot establir l'atribut 'writable' en el descriptor de propietat com a "
+"'true' en aquest objecte"
 
 #: jscript.rc:70
 msgid "Cannot redefine non-configurable property '|'"
-msgstr ""
+msgstr "No es pot redefinir la propietat no configurable '|'"
 
 #: jscript.rc:71
 msgid "Cannot modify non-writable property '|'"
-msgstr ""
+msgstr "No es pot modificar la propietat no escrivible '|'"
 
 #: jscript.rc:72
 msgid "Property cannot have both accessors and a value"
-msgstr ""
+msgstr "La propietat no pot tenir ambdós mètodes d'accés i un valor"
 
 #: ../../include/wine/wine_common_ver.rc:129
 msgid "Wine kernel DLL"
@@ -6745,10 +6778,8 @@ msgid "Connection reset by peer.\n"
 msgstr "Un igual ha restablert la connexió.\n"
 
 #: winerror.mc:3760
-#, fuzzy
-#| msgid "Message 0x%1 not found in file %2.\n"
 msgid "No Signature found in file.\n"
-msgstr "No s'ha trobat el missatge 0x%1 en el fitxer %2.\n"
+msgstr "No s'ha trobat cap signatura en el fitxer.\n"
 
 #: localspl.rc:31 localui.rc:31 winspool.rc:30
 msgid "Local Port"
@@ -6970,393 +7001,397 @@ msgstr "característica de:"
 msgid "choose which folder contains %s"
 msgstr "trieu quina carpeta conté %s"
 
-#: msi.rc:90
+#: msi.rc:66 shell32.rc:238
+msgid "New Folder"
+msgstr "Carpeta nova"
+
+#: msi.rc:91
 msgid "Allocating registry space"
 msgstr "S'està assignant espai en el registre"
 
-#: msi.rc:91
+#: msi.rc:92
 msgid "Searching for installed applications"
 msgstr "S'estan cercant aplicacions instal·lades"
 
-#: msi.rc:92
+#: msi.rc:93
 msgid "Binding executables"
 msgstr "S'estan vinculant els executables"
 
-#: msi.rc:93 msi.rc:136
+#: msi.rc:94 msi.rc:137
 msgid "Searching for qualifying products"
 msgstr "S'estan cercant productes qualificants"
 
-#: msi.rc:94 msi.rc:95 msi.rc:100
+#: msi.rc:95 msi.rc:96 msi.rc:101
 msgid "Computing space requirements"
 msgstr "S'estan computant els requeriments d'espai"
 
-#: msi.rc:96
+#: msi.rc:97
 msgid "Creating folders"
 msgstr "S'estan creant carpetes"
 
-#: msi.rc:97
+#: msi.rc:98
 msgid "Creating shortcuts"
 msgstr "S'estan creant dreceres"
 
-#: msi.rc:98
+#: msi.rc:99
 msgid "Deleting services"
 msgstr "S'estan eliminant serveis"
 
-#: msi.rc:99
+#: msi.rc:100
 msgid "Creating duplicate files"
 msgstr "S'estan creant fitxers duplicats"
 
-#: msi.rc:101
+#: msi.rc:102
 msgid "Searching for related applications"
 msgstr "S'estan cercant aplicacions relacionades"
 
-#: msi.rc:102
+#: msi.rc:103
 msgid "Copying network install files"
 msgstr "S'estan copiant els fitxers d'instal·lació de xarxa"
 
-#: msi.rc:103
+#: msi.rc:104
 msgid "Copying new files"
 msgstr "S'estan copiant els fitxers nous"
 
-#: msi.rc:104
+#: msi.rc:105
 msgid "Installing ODBC components"
 msgstr "S'estan instal·lant components ODBC"
 
-#: msi.rc:105
+#: msi.rc:106
 msgid "Installing new services"
 msgstr "S'estan instal·lant els serveis nous"
 
-#: msi.rc:106
+#: msi.rc:107
 msgid "Installing system catalog"
 msgstr "S'està instal·lant el catàleg de sistema"
 
-#: msi.rc:107
+#: msi.rc:108
 msgid "Validating install"
 msgstr "S'està validant l'instal·lació"
 
-#: msi.rc:108
+#: msi.rc:109
 msgid "Evaluating launch conditions"
 msgstr "S'estan avaluant les condicions d'execució"
 
-#: msi.rc:109
+#: msi.rc:110
 msgid "Migrating feature states from related applications"
 msgstr ""
 "S'estan migrant els estats de les característiques des de les aplicacions "
 "relacionades"
 
-#: msi.rc:110
+#: msi.rc:111
 msgid "Moving files"
 msgstr "S'estan movent fixters"
 
-#: msi.rc:111
+#: msi.rc:112
 msgid "Publishing assembly information"
 msgstr "S'està publicant informació d'assemblatge"
 
-#: msi.rc:112
+#: msi.rc:113
 msgid "Unpublishing assembly information"
 msgstr "S'està despublicant la informació d'assemblatge"
 
-#: msi.rc:113
+#: msi.rc:114
 msgid "Patching files"
 msgstr "S'estan apedaçant fitxers"
 
-#: msi.rc:114
+#: msi.rc:115
 msgid "Updating component registration"
 msgstr "S'està actualitzant la registració de component"
 
-#: msi.rc:115
+#: msi.rc:116
 msgid "Publishing Qualified Components"
 msgstr "S'estan publicant els components qualificats"
 
-#: msi.rc:116
+#: msi.rc:117
 msgid "Publishing Product Features"
 msgstr "S'estan publicant les característiques de producte"
 
-#: msi.rc:117
+#: msi.rc:118
 msgid "Publishing product information"
 msgstr "S'està publicant la informació de producte"
 
-#: msi.rc:118
+#: msi.rc:119
 msgid "Registering Class servers"
 msgstr "S'estan registrant els servidors de classe"
 
-#: msi.rc:119
+#: msi.rc:120
 msgid "Registering COM+ Applications and Components"
 msgstr "S'estan registrant les aplicacions i els components COM+"
 
-#: msi.rc:120
+#: msi.rc:121
 msgid "Registering extension servers"
 msgstr "S'estan registrant els servidors d'extensió"
 
-#: msi.rc:121
+#: msi.rc:122
 msgid "Registering fonts"
 msgstr "S'estan registrant els tipus de lletra"
 
-#: msi.rc:122
+#: msi.rc:123
 msgid "Registering MIME info"
 msgstr "S'està registrant la informació MIME"
 
-#: msi.rc:123
+#: msi.rc:124
 msgid "Registering product"
 msgstr "S'està registrant el producte"
 
-#: msi.rc:124
+#: msi.rc:125
 msgid "Registering program identifiers"
 msgstr "S'estan registrant els identificadors de programa"
 
-#: msi.rc:125
+#: msi.rc:126
 msgid "Registering type libraries"
 msgstr "S'estan registrant les biblioteques de tipus"
 
-#: msi.rc:126
+#: msi.rc:127
 msgid "Registering user"
 msgstr "S'està registrant l'usuari"
 
-#: msi.rc:127
+#: msi.rc:128
 msgid "Removing duplicated files"
 msgstr "S'estan eliminant els fitxers duplicats"
 
-#: msi.rc:128 msi.rc:152
+#: msi.rc:129 msi.rc:153
 msgid "Updating environment strings"
 msgstr "S'estan actualitzant les cadenes d'entorn"
 
-#: msi.rc:129
+#: msi.rc:130
 msgid "Removing applications"
 msgstr "S'estan eliminant les aplicacions"
 
-#: msi.rc:130
+#: msi.rc:131
 msgid "Removing files"
 msgstr "S'estan eliminant els fitxers"
 
-#: msi.rc:131
+#: msi.rc:132
 msgid "Removing folders"
 msgstr "S'estan eliminant les carpetes"
 
-#: msi.rc:132
+#: msi.rc:133
 msgid "Removing INI files entries"
 msgstr "S'estan eliminant les entrades en els fitxers INI"
 
-#: msi.rc:133
+#: msi.rc:134
 msgid "Removing ODBC components"
 msgstr "S'estan eliminant els components ODBC"
 
-#: msi.rc:134
+#: msi.rc:135
 msgid "Removing system registry values"
 msgstr "S'estan eliminant els valors del registre de sistema"
 
-#: msi.rc:135
+#: msi.rc:136
 msgid "Removing shortcuts"
 msgstr "S'estan eliminant les dreceres"
 
-#: msi.rc:137
+#: msi.rc:138
 msgid "Registering modules"
 msgstr "S'estan registrant els mòduls"
 
-#: msi.rc:138
+#: msi.rc:139
 msgid "Unregistering modules"
 msgstr "S'estan desregistrant els mòduls"
 
-#: msi.rc:139
+#: msi.rc:140
 msgid "Initializing ODBC directories"
 msgstr "S'estan inicialitzant els directoris ODBC"
 
-#: msi.rc:140
+#: msi.rc:141
 msgid "Starting services"
 msgstr "S'estan iniciant serveis"
 
-#: msi.rc:141
+#: msi.rc:142
 msgid "Stopping services"
 msgstr "S'estan aturant els serveis"
 
-#: msi.rc:142
+#: msi.rc:143
 msgid "Unpublishing Qualified Components"
 msgstr "S'estan desregistrant els components qualificats"
 
-#: msi.rc:143
+#: msi.rc:144
 msgid "Unpublishing Product Features"
 msgstr "S'estan despublicant les característiques de producte"
 
-#: msi.rc:144
+#: msi.rc:145
 msgid "Unpublishing product information"
 msgstr "S'està despublicant la informació de producte"
 
-#: msi.rc:145
+#: msi.rc:146
 msgid "Unregister Class servers"
 msgstr "S'estan desregistrant els servidors de classe"
 
-#: msi.rc:146
+#: msi.rc:147
 msgid "Unregistering COM+ Applications and Components"
 msgstr "S'estan desregistrant les aplicacions i els components COM+"
 
-#: msi.rc:147
+#: msi.rc:148
 msgid "Unregistering extension servers"
 msgstr "S'estan desregistrant els servidors d'extensió"
 
-#: msi.rc:148
+#: msi.rc:149
 msgid "Unregistering fonts"
 msgstr "S'estan desregistrant els tipus de lletra"
 
-#: msi.rc:149
+#: msi.rc:150
 msgid "Unregistering MIME info"
 msgstr "S'està desregistrant la informació MIME"
 
-#: msi.rc:150
+#: msi.rc:151
 msgid "Unregistering program identifiers"
 msgstr "S'estan desregistrant els identificadors de programa"
 
-#: msi.rc:151
+#: msi.rc:152
 msgid "Unregistering type libraries"
 msgstr "S'estan desregistrant les biblioteques de tipus"
 
-#: msi.rc:153
+#: msi.rc:154
 msgid "Writing INI files values"
 msgstr "S'estan escrivint valors als fitxers INI"
 
-#: msi.rc:154
+#: msi.rc:155
 msgid "Writing system registry values"
 msgstr "S'estan escrivint valors al registre del sistema"
 
-#: msi.rc:160
+#: msi.rc:161
 msgid "Free space: [1]"
 msgstr "Espai lliure: [1]"
 
-#: msi.rc:161
+#: msi.rc:162
 msgid "Property: [1], Signature: [2]"
 msgstr "Propietat: [1], Signatura: [2]"
 
-#: msi.rc:162
+#: msi.rc:163
 msgid "File: [1]"
 msgstr "Fitxer: [1]"
 
-#: msi.rc:163 msi.rc:190
+#: msi.rc:164 msi.rc:191
 msgid "Folder: [1]"
 msgstr "Carpeta: [1]"
 
-#: msi.rc:164 msi.rc:193
+#: msi.rc:165 msi.rc:194
 msgid "Shortcut: [1]"
 msgstr "Drecera: [1]"
 
-#: msi.rc:165 msi.rc:196 msi.rc:197
+#: msi.rc:166 msi.rc:197 msi.rc:198
 msgid "Service: [1]"
 msgstr "Servei: [1]"
 
-#: msi.rc:166 msi.rc:169 msi.rc:173
+#: msi.rc:167 msi.rc:170 msi.rc:174
 msgid "File: [1],  Directory: [9],  Size: [6]"
 msgstr "Fitxer: [1]  Directori: [9],  Mida: [6]"
 
-#: msi.rc:167
+#: msi.rc:168
 msgid "Found application: [1]"
 msgstr "S'ha trobat una aplicació: [1]"
 
-#: msi.rc:168
+#: msi.rc:169
 msgid "File: [1], Directory: [9], Size: [6]"
 msgstr "Fitxer: [1] Directori: [9], Mida: [6]"
 
-#: msi.rc:170
+#: msi.rc:171
 msgid "Service: [2]"
 msgstr "Servei: [2]"
 
-#: msi.rc:171
+#: msi.rc:172
 msgid "File: [1],  Dependencies: [2]"
 msgstr "Fitxer: [1],  Dependències: [2]"
 
-#: msi.rc:172
+#: msi.rc:173
 msgid "Application: [1]"
 msgstr "Aplicació: [1]"
 
-#: msi.rc:174 msi.rc:175
+#: msi.rc:175 msi.rc:176
 msgid "Application Context:[1], Assembly Name:[2]"
 msgstr "Context d'aplicació:[1], Nom d'assemblatge:[2]"
 
-#: msi.rc:176
+#: msi.rc:177
 msgid "File: [1],  Directory: [2],  Size: [3]"
 msgstr "Fitxer: [1],  Directori: [2],  Mida: [3]"
 
-#: msi.rc:177 msi.rc:198
+#: msi.rc:178 msi.rc:199
 msgid "Component ID: [1], Qualifier: [2]"
 msgstr "ID de component: [1], Qualificador: [2]"
 
-#: msi.rc:178 msi.rc:199
+#: msi.rc:179 msi.rc:200
 msgid "Feature: [1]"
 msgstr "Característica: [1]"
 
-#: msi.rc:179 msi.rc:200
+#: msi.rc:180 msi.rc:201
 msgid "Class Id: [1]"
 msgstr "Id de classe: [1]"
 
-#: msi.rc:180
+#: msi.rc:181
 msgid "AppId: [1]{{, AppType: [2], Users: [3], RSN: [4]}}"
 msgstr "AppId: [1]{{, AppType: [2], Usuaris: [3], RSN: [4]}}"
 
-#: msi.rc:181 msi.rc:202
+#: msi.rc:182 msi.rc:203
 msgid "Extension: [1]"
 msgstr "Extensió: [1]"
 
-#: msi.rc:182 msi.rc:203
+#: msi.rc:183 msi.rc:204
 msgid "Font: [1]"
 msgstr "Tipus de lletra: [1]"
 
-#: msi.rc:183 msi.rc:204
+#: msi.rc:184 msi.rc:205
 msgid "MIME Content Type: [1], Extension: [2]"
 msgstr "Tipus de contingut MIME: [1], Extensió: [2]"
 
-#: msi.rc:184 msi.rc:205
+#: msi.rc:185 msi.rc:206
 msgid "ProgId: [1]"
 msgstr "ProgId: [1]"
 
-#: msi.rc:185 msi.rc:206
+#: msi.rc:186 msi.rc:207
 msgid "LibID: [1]"
 msgstr "LibID: [1]"
 
-#: msi.rc:186 msi.rc:189
+#: msi.rc:187 msi.rc:190
 msgid "File: [1], Directory: [9]"
 msgstr "Fitxer: [1], Directori: [9]"
 
-#: msi.rc:187 msi.rc:207
+#: msi.rc:188 msi.rc:208
 msgid "Name: [1], Value: [2], Action [3]"
 msgstr "Nom: [1], Valor: [2], Acció [3]"
 
-#: msi.rc:188
+#: msi.rc:189
 msgid "Application: [1], Command line: [2]"
 msgstr "Aplicació: [1], Línia d'ordres: [2]"
 
-#: msi.rc:191 msi.rc:208
+#: msi.rc:192 msi.rc:209
 msgid "File: [1],  Section: [2],  Key: [3], Value: [4]"
 msgstr "Fitxer: [1],  Secció: [2],  Clau: [3],  Valor: [4]"
 
-#: msi.rc:192
+#: msi.rc:193
 msgid "Key: [1], Name: [2]"
 msgstr "Clau: [1], Nom: [2]"
 
-#: msi.rc:194 msi.rc:195
+#: msi.rc:195 msi.rc:196
 msgid "File: [1], Folder: [2]"
 msgstr "Fitxer: [1], Carpeta: [2]"
 
-#: msi.rc:201
+#: msi.rc:202
 msgid "AppId: [1]{{, AppType: [2]}}"
 msgstr "AppId: [1]{{, AppType: [2]}}"
 
-#: msi.rc:209
+#: msi.rc:210
 msgid "Key: [1], Name: [2], Value: [3]"
 msgstr "Clau: [1], Nom: [2], Valor: [3]"
 
-#: msi.rc:71
+#: msi.rc:72
 msgid "{{Fatal error: }}"
 msgstr "{{Error fatal: }}"
 
-#: msi.rc:72
+#: msi.rc:73
 msgid "{{Error [1]. }}"
 msgstr "{{Error [1]. }}"
 
-#: msi.rc:73
+#: msi.rc:74
 msgid "Warning [1]."
 msgstr "Advertència [1]."
 
-#: msi.rc:74
+#: msi.rc:75
 msgid "Info [1]."
 msgstr "Informació [1]."
 
-#: msi.rc:75
+#: msi.rc:76
 msgid ""
 "The installer has encountered an unexpected error installing this package. "
 "This may indicate a problem with this package. The error code is [1]. {{The "
@@ -7366,35 +7401,35 @@ msgstr ""
 "paquet. Això pot indicar un problema amb aquest paquet. El codi d'error és "
 "[1]. {{Els arguments són: [2], [3], [4]}}"
 
-#: msi.rc:76
+#: msi.rc:77
 msgid "{{Disk full: }}"
 msgstr "{{Disc ple: }}"
 
-#: msi.rc:77
+#: msi.rc:78
 msgid "Action [Time]: [1]. [2]"
 msgstr "Acció [Time]: [1]. [2]"
 
-#: msi.rc:78
+#: msi.rc:79
 msgid "Message type: [1], Argument: [2]{, [3]}"
 msgstr "Tipus de missatge: [1], Argument: [2]{, [3]}"
 
-#: msi.rc:81
+#: msi.rc:82
 msgid "=== Logging started: [Date]  [Time] ==="
 msgstr "=== S'ha començat el registre: [Date]  [Time] ==="
 
-#: msi.rc:79
+#: msi.rc:80
 msgid "Action start [Time]: [1]."
 msgstr "Inici d'acció [Time]: [1]."
 
-#: msi.rc:80
+#: msi.rc:81
 msgid "Action ended [Time]: [1]. Return value [2]."
 msgstr "Fi d'acció [Time]: [1]. El valor retornat és [2]."
 
-#: msi.rc:83
+#: msi.rc:84
 msgid "Please insert the disk: [2]"
 msgstr "Si us plau, inseriu el disc: [2]"
 
-#: msi.rc:84
+#: msi.rc:85
 msgid ""
 "Source file not found{{(cabinet)}}: [2]. Verify that the file exists and "
 "that you can access it."
@@ -8592,10 +8627,8 @@ msgid "&Browse..."
 msgstr "&Navega..."
 
 #: shell32.rc:355 shell32.rc:384
-#, fuzzy
-#| msgid "File type"
 msgid "File type:"
-msgstr "Tipus de fitxer"
+msgstr "Tipus de fitxer:"
 
 #: shell32.rc:359 shell32.rc:392 urlmon.rc:37 explorer.rc:32
 msgid "Location:"
@@ -8606,16 +8639,12 @@ msgid "Size:"
 msgstr "Mida:"
 
 #: shell32.rc:365 shell32.rc:398
-#, fuzzy
-#| msgid "Creation date"
 msgid "Creation date:"
-msgstr "Data de creació"
+msgstr "Data de creació:"
 
 #: shell32.rc:369 shell32.rc:406
-#, fuzzy
-#| msgid "&Attributes:"
 msgid "Attributes:"
-msgstr "&Atributs:"
+msgstr "Atributs:"
 
 #: shell32.rc:371 shell32.rc:408 winefile.rc:174
 msgid "H&idden"
@@ -8626,28 +8655,20 @@ msgid "&Archive"
 msgstr "&Arxiu"
 
 #: shell32.rc:386
-#, fuzzy
-#| msgid "Open:"
 msgid "Open with:"
-msgstr "Obre:"
+msgstr "Obre amb:"
 
 #: shell32.rc:389
-#, fuzzy
-#| msgid "Change &Icon..."
 msgid "&Change..."
-msgstr "&Canvia d'icona..."
+msgstr "&Canvia..."
 
 #: shell32.rc:400
-#, fuzzy
-#| msgid "Modified"
 msgid "Last modified:"
-msgstr "Modificat"
+msgstr "Última modificació:"
 
 #: shell32.rc:402
-#, fuzzy
-#| msgid "Last Change:"
 msgid "Last accessed:"
-msgstr "Últim canvi:"
+msgstr "Últim accés:"
 
 #: shell32.rc:138 shell32.rc:142 winefile.rc:108
 msgid "Size"
@@ -8832,10 +8853,6 @@ msgstr "Llistes de reproducció"
 msgid "Status"
 msgstr "Estat"
 
-#: shell32.rc:152
-msgid "Location"
-msgstr "Ubicació"
-
 #: shell32.rc:153
 msgid "Model"
 msgstr "Model"
@@ -8946,10 +8963,6 @@ msgstr ""
 "Si els fitxers en la carpeta de destinació tenen els mateixos noms que els\n"
 "fitxers en la carpeta seleccionada, seran substituïts. Encara voleu\n"
 "desplaçar o copiar la carpeta?"
-
-#: shell32.rc:238
-msgid "New Folder"
-msgstr "Carpeta nova"
 
 #: shell32.rc:240
 msgid "Wine Control Panel"
@@ -9077,6 +9090,794 @@ msgstr " seg"
 #: twain.rc:29
 msgid "Select Source"
 msgstr "Seleccionar font"
+
+#: tzres.rc:82
+msgid "China Standard Time"
+msgstr "Hora estàndard de la Xina"
+
+#: tzres.rc:83
+msgid "China Daylight Time"
+msgstr "Hora d'estiu de la Xina"
+
+#: tzres.rc:160
+msgid "North Asia Standard Time"
+msgstr "Hora estàndard de l'Àsia del Nord"
+
+#: tzres.rc:161
+msgid "North Asia Daylight Time"
+msgstr "Hora d'estiu de l'Àsia del Nord"
+
+#: tzres.rc:104
+msgid "Georgian Standard Time"
+msgstr "Hora estàndard de Geòrgia"
+
+#: tzres.rc:105
+msgid "Georgian Daylight Time"
+msgstr "Hora d'estiu de Geòrgia"
+
+#: tzres.rc:152
+msgid "Nepal Standard Time"
+msgstr "Hora estàndard del Nepal"
+
+#: tzres.rc:153
+msgid "Nepal Daylight Time"
+msgstr "Hora d'estiu del Nepal"
+
+#: tzres.rc:60
+msgid "Cape Verde Standard Time"
+msgstr "Hora estàndard de Cap Verd"
+
+#: tzres.rc:61
+msgid "Cape Verde Daylight Time"
+msgstr "Hora d'estiu de Cap Verd"
+
+#: tzres.rc:74
+msgid "Central European Standard Time"
+msgstr "Hora estàndard de l'Europa Central"
+
+#: tzres.rc:75
+msgid "Central European Daylight Time"
+msgstr "Hora d'estiu de l'Europa Central"
+
+#: tzres.rc:140
+msgid "Morocco Standard Time"
+msgstr "Hora estàndard del Marroc"
+
+#: tzres.rc:141
+msgid "Morocco Daylight Time"
+msgstr "Hora d'estiu del Marroc"
+
+#: tzres.rc:72
+msgid "Central Europe Standard Time"
+msgstr "Hora estàndard de l'Europa Central"
+
+#: tzres.rc:73
+msgid "Central Europe Daylight Time"
+msgstr "Hora d'estiu de l'Europa Central"
+
+#: tzres.rc:118
+msgid "Iran Standard Time"
+msgstr "Hora estàndard d'Iran"
+
+#: tzres.rc:119
+msgid "Iran Daylight Time"
+msgstr "Hora d'estiu d'Iran"
+
+#: tzres.rc:150
+msgid "Namibia Standard Time"
+msgstr "Hora estàndard de Namíbia"
+
+#: tzres.rc:151
+msgid "Namibia Daylight Time"
+msgstr "Hora d'estiu de Namíbia"
+
+#: tzres.rc:200
+msgid "Tonga Standard Time"
+msgstr "Hora estàndard de Tonga"
+
+#: tzres.rc:201
+msgid "Tonga Daylight Time"
+msgstr "Hora d'estiu de Tonga"
+
+#: tzres.rc:144
+msgid "Mountain Standard Time (Mexico)"
+msgstr "Hora estàndard de les muntanyes (Mèxic)"
+
+#: tzres.rc:145
+msgid "Mountain Daylight Time (Mexico)"
+msgstr "Hora d'estiu de les muntanyes (Mèxic)"
+
+#: tzres.rc:106
+msgid "GMT Standard Time"
+msgstr "Hora estàndard GMT"
+
+#: tzres.rc:107
+msgid "GMT Daylight Time"
+msgstr "Hora d'estiu GMT"
+
+#: tzres.rc:68
+msgid "Central Asia Standard Time"
+msgstr "Hora estàndard de l'Àsia Central"
+
+#: tzres.rc:69
+msgid "Central Asia Daylight Time"
+msgstr "Hora d'estiu de l'Àsia Central"
+
+#: tzres.rc:38
+msgid "Arabic Standard Time"
+msgstr "Hora estàndard àrab"
+
+#: tzres.rc:39
+msgid "Arabic Daylight Time"
+msgstr "Hora d'estiu àrab"
+
+#: tzres.rc:132
+msgid "Magadan Standard Time"
+msgstr "Hora estàndard de Magadan"
+
+#: tzres.rc:133
+msgid "Magadan Daylight Time"
+msgstr "Hora d'estiu de Magadan"
+
+#: tzres.rc:156
+msgid "Newfoundland Standard Time"
+msgstr "Hora estàndard de Terranova"
+
+#: tzres.rc:157
+msgid "Newfoundland Daylight Time"
+msgstr "Hora d'estiu de Terranova"
+
+#: tzres.rc:224
+msgid "West Pacific Standard Time"
+msgstr "Hora estàndard del Pacífic Occidental"
+
+#: tzres.rc:225
+msgid "West Pacific Daylight Time"
+msgstr "Hora d'estiu del Pacífic Occidental"
+
+#: tzres.rc:164
+msgid "Pacific Standard Time"
+msgstr "Hora estàndard del Pacífic"
+
+#: tzres.rc:165
+msgid "Pacific Daylight Time"
+msgstr "Hora d'estiu del Pacífic"
+
+#: tzres.rc:48
+msgid "Azerbaijan Standard Time"
+msgstr "Hora estàndard de l'Azerbaidjan"
+
+#: tzres.rc:49
+msgid "Azerbaijan Daylight Time"
+msgstr "Hora d'estiu de l'Azerbaidjan"
+
+#: tzres.rc:182
+msgid "Samoa Standard Time"
+msgstr "Hora estàndard de Samoa"
+
+#: tzres.rc:183
+msgid "Samoa Daylight Time"
+msgstr "Hora d'estiu de Samoa"
+
+#: tzres.rc:124
+msgid "Kaliningrad Standard Time"
+msgstr "Hora estàndard de Kaliningrad"
+
+#: tzres.rc:125
+msgid "Kaliningrad Daylight Time"
+msgstr "Hora d'estiu de Kaliningrad"
+
+#: tzres.rc:166
+msgid "Pacific Standard Time (Mexico)"
+msgstr "Hora estàndard del Pacífic (Mèxic)"
+
+#: tzres.rc:167
+msgid "Pacific Daylight Time (Mexico)"
+msgstr "Hora d'estiu del Pacífic (Mèxic)"
+
+#: tzres.rc:136
+msgid "Middle East Standard Time"
+msgstr "Hora estàndard de l'Orient Mitjà"
+
+#: tzres.rc:137
+msgid "Middle East Daylight Time"
+msgstr "Hora d'estiu de l'Orient Mitjà"
+
+#: tzres.rc:198
+msgid "Tokyo Standard Time"
+msgstr "Hora estàndard de Tokyo"
+
+#: tzres.rc:199
+msgid "Tokyo Daylight Time"
+msgstr "Hora d'estiu de Tokyo"
+
+#: tzres.rc:130
+msgid "Line Islands Standard Time"
+msgstr "Hora estàndard de les Illes de la Línia"
+
+#: tzres.rc:131
+msgid "Line Islands Daylight Time"
+msgstr "Hora d'estiu de les Illes de la Línia"
+
+#: tzres.rc:122
+msgid "Jordan Standard Time"
+msgstr "Hora estàndard de Jordània"
+
+#: tzres.rc:123
+msgid "Jordan Daylight Time"
+msgstr "Hora d'estiu de Jordània"
+
+#: tzres.rc:78
+msgid "Central Standard Time"
+msgstr "Hora estàndard central"
+
+#: tzres.rc:79
+msgid "Central Daylight Time"
+msgstr "Hora d'estiu central"
+
+#: tzres.rc:50
+msgid "Azores Standard Time"
+msgstr "Hora estàndard dels Açores"
+
+#: tzres.rc:51
+msgid "Azores Daylight Time"
+msgstr "Hora d'estiu dels Açores"
+
+#: tzres.rc:158
+msgid "North Asia East Standard Time"
+msgstr "Hora estàndard de l'Àsia del Norest"
+
+#: tzres.rc:159
+msgid "North Asia East Daylight Time"
+msgstr "Hora d'estiu de l'Àsia del Norest"
+
+#: tzres.rc:40
+msgid "Argentina Standard Time"
+msgstr "Hora estàndard de l'Argentina"
+
+#: tzres.rc:41
+msgid "Argentina Daylight Time"
+msgstr "Hora d'estiu de l'Argentina"
+
+#: tzres.rc:146
+msgid "Myanmar Standard Time"
+msgstr "Hora estàndard de Birmània"
+
+#: tzres.rc:147
+msgid "Myanmar Daylight Time"
+msgstr "Hora d'estiu de Birmània"
+
+#: tzres.rc:210 tzres.rc:211
+msgid "Coordinated Universal Time"
+msgstr "Temps universal coordinat"
+
+#: tzres.rc:116
+msgid "India Standard Time"
+msgstr "Hora estàndard de l'Índia"
+
+#: tzres.rc:117
+msgid "India Daylight Time"
+msgstr "Hora d'estiu de l'Índia"
+
+#: tzres.rc:112
+msgid "GTB Standard Time"
+msgstr "Hora estàndard GTB"
+
+#: tzres.rc:113
+msgid "GTB Daylight Time"
+msgstr "Hora d'estiu GTB"
+
+#: tzres.rc:202
+msgid "Turkey Standard Time"
+msgstr "Hora estàndard de Turquia"
+
+#: tzres.rc:203
+msgid "Turkey Daylight Time"
+msgstr "Hora d'estiu de Turquia"
+
+#: tzres.rc:100
+msgid "Fiji Standard Time"
+msgstr "Hora estàndard de Fiji"
+
+#: tzres.rc:101
+msgid "Fiji Daylight Time"
+msgstr "Hora d'estiu de Fiji"
+
+#: tzres.rc:58
+msgid "Canada Central Standard Time"
+msgstr "Hora estàndard del Canadà Central"
+
+#: tzres.rc:59
+msgid "Canada Central Daylight Time"
+msgstr "Hora d'estiu del Canadà Central"
+
+#: tzres.rc:194
+msgid "Taipei Standard Time"
+msgstr "Hora estàndard de Taipei"
+
+#: tzres.rc:195
+msgid "Taipei Daylight Time"
+msgstr "Hora d'estiu de Taipei"
+
+#: tzres.rc:220
+msgid "W. Europe Standard Time"
+msgstr "Hora estàndard de l'Europa Occidental"
+
+#: tzres.rc:221
+msgid "W. Europe Daylight Time"
+msgstr "Hora d'estiu de l'Europa Occidental"
+
+#: tzres.rc:138
+msgid "Montevideo Standard Time"
+msgstr "Hora estàndard de Montevideo"
+
+#: tzres.rc:139
+msgid "Montevideo Daylight Time"
+msgstr "Hora d'estiu de Montevideo"
+
+#: tzres.rc:168
+msgid "Pakistan Standard Time"
+msgstr "Hora estàndard del Pakistan"
+
+#: tzres.rc:169
+msgid "Pakistan Daylight Time"
+msgstr "Hora d'estiu del Pakistan"
+
+#: tzres.rc:62
+msgid "Caucasus Standard Time"
+msgstr "Hora estàndard del Caucas"
+
+#: tzres.rc:63
+msgid "Caucasus Daylight Time"
+msgstr "Hora d'estiu del Caucas"
+
+#: tzres.rc:46
+msgid "AUS Eastern Standard Time"
+msgstr "Hora estàndard oriental AUS"
+
+#: tzres.rc:47
+msgid "AUS Eastern Daylight Time"
+msgstr "Hora d'estiu oriental AUS"
+
+#: tzres.rc:148
+msgid "N. Central Asia Standard Time"
+msgstr "Hora estàndard de l'Àsia del Centre-Nord"
+
+#: tzres.rc:149
+msgid "N. Central Asia Daylight Time"
+msgstr "Hora d'estiu de l'Àsia del Centre-Nord"
+
+#: tzres.rc:94
+msgid "Eastern Standard Time"
+msgstr "Hora estàndard oriental"
+
+#: tzres.rc:95
+msgid "Eastern Daylight Time"
+msgstr "Hora d'estiu oriental"
+
+#: tzres.rc:80
+msgid "Central Standard Time (Mexico)"
+msgstr "Hora estàndard central (Mèxic)"
+
+#: tzres.rc:81
+msgid "Central Daylight Time (Mexico)"
+msgstr "Hora d'estiu central (Mèxic)"
+
+#: tzres.rc:42
+msgid "Atlantic Standard Time"
+msgstr "Hora estàndard de l'Atlàntic"
+
+#: tzres.rc:43
+msgid "Atlantic Daylight Time"
+msgstr "Hora d'estiu de l'Atlàntic"
+
+#: tzres.rc:142
+msgid "Mountain Standard Time"
+msgstr "Hora estàndard de les muntanyes"
+
+#: tzres.rc:143
+msgid "Mountain Daylight Time"
+msgstr "Hora d'estiu de les muntanyes"
+
+#: tzres.rc:206
+msgid "US Eastern Standard Time"
+msgstr "Hora estàndard oriental EEUU"
+
+#: tzres.rc:207
+msgid "US Eastern Daylight Time"
+msgstr "Hora d'estiu oriental EEUU"
+
+#: tzres.rc:196
+msgid "Tasmania Standard Time"
+msgstr "Hora estàndard de Tasmània"
+
+#: tzres.rc:197
+msgid "Tasmania Daylight Time"
+msgstr "Hora d'estiu de Tasmània"
+
+#: tzres.rc:66
+msgid "Central America Standard Time"
+msgstr "Hora estàndard de l'Àmerica Central"
+
+#: tzres.rc:67
+msgid "Central America Daylight Time"
+msgstr "Hora d'estiu de l'Àmerica Central"
+
+#: tzres.rc:208
+msgid "US Mountain Standard Time"
+msgstr "Hora estàndard de les muntanyes EEUU"
+
+#: tzres.rc:209
+msgid "US Mountain Daylight Time"
+msgstr "Hora d'estiu de les muntanyes EEUU"
+
+#: tzres.rc:188
+msgid "South Africa Standard Time"
+msgstr "Hora estàndard de l'Àfrica del Sud"
+
+#: tzres.rc:189
+msgid "South Africa Daylight Time"
+msgstr "Hora d'estiu de l'Àfrica del Sud"
+
+#: tzres.rc:64
+msgid "Cen. Australia Standard Time"
+msgstr "Hora estàndard d'Austràlia Central"
+
+#: tzres.rc:65
+msgid "Cen. Australia Daylight Time"
+msgstr "Hora d'estiu d'Austràlia Central"
+
+#: tzres.rc:190
+msgid "Sri Lanka Standard Time"
+msgstr "Hora estàndard de Sri Lanka"
+
+#: tzres.rc:191
+msgid "Sri Lanka Daylight Time"
+msgstr "Hora d'estiu de Sri Lanka"
+
+#: tzres.rc:30
+msgid "Afghanistan Standard Time"
+msgstr "Hora estàndard de l'Afganistan"
+
+#: tzres.rc:31
+msgid "Afghanistan Daylight Time"
+msgstr "Hora d'estiu de l'Afganistan"
+
+#: tzres.rc:226
+msgid "Yakutsk Standard Time"
+msgstr "Hora estàndard de Iakutsk"
+
+#: tzres.rc:227
+msgid "Yakutsk Daylight Time"
+msgstr "Hora d'estiu de Iakutsk"
+
+#: tzres.rc:176
+msgid "SA Eastern Standard Time"
+msgstr "Hora estàndard de l'Àmerica del Sud-Est"
+
+#: tzres.rc:177
+msgid "SA Eastern Daylight Time"
+msgstr "Hora d'estiu de l'Àmerica del Sud-Est"
+
+#: tzres.rc:34
+msgid "Arab Standard Time"
+msgstr "Hora estàndard àrab"
+
+#: tzres.rc:35
+msgid "Arab Daylight Time"
+msgstr "Hora d'estiu àrab"
+
+#: tzres.rc:36
+msgid "Arabian Standard Time"
+msgstr "Hora estàndard de l'Àrabia"
+
+#: tzres.rc:37
+msgid "Arabian Daylight Time"
+msgstr "Hora d'estiu de l'Àrabia"
+
+#: tzres.rc:174
+msgid "Russian Standard Time"
+msgstr "Hora estàndard de Rússia"
+
+#: tzres.rc:175
+msgid "Russian Daylight Time"
+msgstr "Hora d'estiu de Rússia"
+
+#: tzres.rc:172
+msgid "Romance Standard Time"
+msgstr "Hora estàndard romànic"
+
+#: tzres.rc:173
+msgid "Romance Daylight Time"
+msgstr "Hora d'estiu romànic"
+
+#: tzres.rc:98
+msgid "Ekaterinburg Standard Time"
+msgstr "Hora estàndard d'Iekaterinburg"
+
+#: tzres.rc:99
+msgid "Ekaterinburg Daylight Time"
+msgstr "Hora d'estiu d'Iekaterinburg"
+
+#: tzres.rc:192
+msgid "Syria Standard Time"
+msgstr "Hora estàndard de Síria"
+
+#: tzres.rc:193
+msgid "Syria Daylight Time"
+msgstr "Hora d'estiu de Síria"
+
+#: tzres.rc:44
+msgid "AUS Central Standard Time"
+msgstr "Hora estàndard central AUS"
+
+#: tzres.rc:45
+msgid "AUS Central Daylight Time"
+msgstr "Hora d'estiu central AUS"
+
+#: tzres.rc:110
+msgid "Greenwich Standard Time"
+msgstr "Hora estàndard de Greenwich"
+
+#: tzres.rc:111
+msgid "Greenwich Daylight Time"
+msgstr "Hora d'estiu de Greenwich"
+
+#: tzres.rc:204
+msgid "Ulaanbaatar Standard Time"
+msgstr "Hora estàndard d'Ulan Bator"
+
+#: tzres.rc:205
+msgid "Ulaanbaatar Daylight Time"
+msgstr "Hora d'estiu d'Ulan Bator"
+
+#: tzres.rc:120
+msgid "Israel Standard Time"
+msgstr "Hora estàndard d'Israel"
+
+#: tzres.rc:121
+msgid "Israel Daylight Time"
+msgstr "Hora d'estiu d'Israel"
+
+#: tzres.rc:54
+msgid "Bangladesh Standard Time"
+msgstr "Hora estàndard de Bangla Desh"
+
+#: tzres.rc:55
+msgid "Bangladesh Daylight Time"
+msgstr "Hora d'estiu de Bangla Desh"
+
+#: tzres.rc:178
+msgid "SA Pacific Standard Time"
+msgstr "Hora estàndard del Pacífic de l'Amèrica del Sud"
+
+#: tzres.rc:179
+msgid "SA Pacific Daylight Time"
+msgstr "Hora d'estiu del Pacífic de l'Amèrica del Sud"
+
+#: tzres.rc:222
+msgid "West Asia Standard Time"
+msgstr "Hora estàndard de l'Àsia Occidental"
+
+#: tzres.rc:223
+msgid "West Asia Daylight Time"
+msgstr "Hora d'estiu de l'Àsia Occidental"
+
+#: tzres.rc:32
+msgid "Alaskan Standard Time"
+msgstr "Hora estàndard d'Alaska"
+
+#: tzres.rc:33
+msgid "Alaskan Daylight Time"
+msgstr "Hora d'estiu d'Alaska"
+
+#: tzres.rc:170
+msgid "Paraguay Standard Time"
+msgstr "Hora estàndard del Paraguai"
+
+#: tzres.rc:171
+msgid "Paraguay Daylight Time"
+msgstr "Hora d'estiu del Paraguai"
+
+#: tzres.rc:84
+msgid "Dateline Standard Time"
+msgstr "Hora estàndard de la línia de canvi de data"
+
+#: tzres.rc:85
+msgid "Dateline Daylight Time"
+msgstr "Hora d'estiu de la línia de canvi de data"
+
+#: tzres.rc:128
+msgid "Libya Standard Time"
+msgstr "Hora estàndard de Líbia"
+
+#: tzres.rc:129
+msgid "Libya Daylight Time"
+msgstr "Hora d'estiu de Líbia"
+
+#: tzres.rc:52
+msgid "Bahia Standard Time"
+msgstr "Hora estàndard de Bahia"
+
+#: tzres.rc:53
+msgid "Bahia Daylight Time"
+msgstr "Hora d'estiu de Bahia"
+
+#: tzres.rc:212
+msgid "Venezuela Standard Time"
+msgstr "Hora estàndard de Veneçuela"
+
+#: tzres.rc:213
+msgid "Venezuela Daylight Time"
+msgstr "Hora d'estiu de Veneçuela"
+
+#: tzres.rc:114
+msgid "Hawaiian Standard Time"
+msgstr "Hora estàndard de Hawaii"
+
+#: tzres.rc:115
+msgid "Hawaiian Daylight Time"
+msgstr "Hora d'estiu de Hawaii"
+
+#: tzres.rc:184
+msgid "SE Asia Standard Time"
+msgstr "Hora estàndard de l'Àsia del Sud-Est"
+
+#: tzres.rc:185
+msgid "SE Asia Daylight Time"
+msgstr "Hora d'estiu de l'Àsia del Sud-Est"
+
+#: tzres.rc:154
+msgid "New Zealand Standard Time"
+msgstr "Hora estàndard de Nova Zelanda"
+
+#: tzres.rc:155
+msgid "New Zealand Daylight Time"
+msgstr "Hora d'estiu de Nova Zelanda"
+
+#: tzres.rc:70
+msgid "Central Brazilian Standard Time"
+msgstr "Hora estàndard del Brasil Central"
+
+#: tzres.rc:71
+msgid "Central Brazilian Daylight Time"
+msgstr "Hora d'estiu del Brasil Central"
+
+#: tzres.rc:56
+msgid "Belarus Standard Time"
+msgstr "Hora estàndard de Bielorússia"
+
+#: tzres.rc:57
+msgid "Belarus Daylight Time"
+msgstr "Hora d'estiu de Bielorússia"
+
+#: tzres.rc:180
+msgid "SA Western Standard Time"
+msgstr "Hora estàndard de l'Àmerica del Sud-Oest"
+
+#: tzres.rc:181
+msgid "SA Western Daylight Time"
+msgstr "Hora d'estiu de l'Àmerica del Sud-Oest"
+
+#: tzres.rc:108
+msgid "Greenland Standard Time"
+msgstr "Hora estàndard de Groenlàndia"
+
+#: tzres.rc:109
+msgid "Greenland Daylight Time"
+msgstr "Hora d'estiu de Groenlàndia"
+
+#: tzres.rc:92
+msgid "Easter Island Standard Time"
+msgstr "Hora estàndard de l'Illa de Pasqua"
+
+#: tzres.rc:93
+msgid "Easter Island Daylight Time"
+msgstr "Hora d'estiu de l'Illa de Pasqua"
+
+#: tzres.rc:96
+msgid "Egypt Standard Time"
+msgstr "Hora estàndard d'Egipte"
+
+#: tzres.rc:97
+msgid "Egypt Daylight Time"
+msgstr "Hora d'estiu d'Egipte"
+
+#: tzres.rc:134
+msgid "Mauritius Standard Time"
+msgstr "Hora estàndard de Maurici"
+
+#: tzres.rc:135
+msgid "Mauritius Daylight Time"
+msgstr "Hora d'estiu de Maurici"
+
+#: tzres.rc:214
+msgid "Vladivostok Standard Time"
+msgstr "Hora estàndard de Vladivostok"
+
+#: tzres.rc:215
+msgid "Vladivostok Daylight Time"
+msgstr "Hora d'estiu de Vladivostok"
+
+#: tzres.rc:186
+msgid "Singapore Standard Time"
+msgstr "Hora estàndard de Singapur"
+
+#: tzres.rc:187
+msgid "Singapore Daylight Time"
+msgstr "Hora d'estiu de Singapur"
+
+#: tzres.rc:126
+msgid "Korea Standard Time"
+msgstr "Hora estàndard de Corea"
+
+#: tzres.rc:127
+msgid "Korea Daylight Time"
+msgstr "Hora d'estiu de Corea"
+
+#: tzres.rc:86
+msgid "E. Africa Standard Time"
+msgstr "Hora estàndard de l'Àfrica Oriental"
+
+#: tzres.rc:87
+msgid "E. Africa Daylight Time"
+msgstr "Hora d'estiu de l'Àfrica Oriental"
+
+#: tzres.rc:102
+msgid "FLE Standard Time"
+msgstr "Hora estàndard FLE"
+
+#: tzres.rc:103
+msgid "FLE Daylight Time"
+msgstr "Hora d'estiu FLE"
+
+#: tzres.rc:90
+msgid "E. South America Standard Time"
+msgstr "Hora estàndard de l'Àmerica del Sudest"
+
+#: tzres.rc:91
+msgid "E. South America Daylight Time"
+msgstr "Hora d'estiu de l'Àmerica del Sudest"
+
+#: tzres.rc:76
+msgid "Central Pacific Standard Time"
+msgstr "Hora estàndard del Pacífic Central"
+
+#: tzres.rc:77
+msgid "Central Pacific Daylight Time"
+msgstr "Hora d'estiu del Pacífic Central"
+
+#: tzres.rc:218
+msgid "W. Central Africa Standard Time"
+msgstr "Hora estàndard de l'Àfrica del Centre-Oest"
+
+#: tzres.rc:219
+msgid "W. Central Africa Daylight Time"
+msgstr "Hora d'estiu de l'Àfrica del Centre-Oest"
+
+#: tzres.rc:162
+msgid "Pacific SA Standard Time"
+msgstr "Hora estàndard del Pacífic de l'Amèrica del Sud"
+
+#: tzres.rc:163
+msgid "Pacific SA Daylight Time"
+msgstr "Hora d'estiu del Pacífic de l'Amèrica del Sud"
+
+#: tzres.rc:88
+msgid "E. Australia Standard Time"
+msgstr "Hora estàndard de l'Austràlia Oriental"
+
+#: tzres.rc:89
+msgid "E. Australia Daylight Time"
+msgstr "Hora d'estiu de l'Austràlia Oriental"
+
+#: tzres.rc:216
+msgid "W. Australia Standard Time"
+msgstr "Hora estàndard de l'Austràlia Occidental"
+
+#: tzres.rc:217
+msgid "W. Australia Daylight Time"
+msgstr "Hora d'estiu de l'Austràlia Occidental"
 
 #: urlmon.rc:32 wininet.rc:77
 msgid "Security Warning"
@@ -9267,70 +10068,61 @@ msgstr ""
 "Hi ha almenys un problema de seguretat no especificat amb aquest certificat."
 
 #: winineterror.mc:26
-#, fuzzy
-#| msgid "Service request timeout.\n"
 msgid "The request has timed out.\n"
-msgstr "S'ha superat el temps d'espera de sol·licitud de servei.\n"
+msgstr "S'ha superat el temps d'espera de la sol·licitud.\n"
 
 #: winineterror.mc:31
-#, fuzzy
-#| msgid "A printer error occurred."
 msgid "An internal error has occurred.\n"
-msgstr "S'ha produït un error d'impressora."
+msgstr "Ha ocorregut un error intern.\n"
 
 #: winineterror.mc:36
-#, fuzzy
-#| msgid "Path is invalid.\n"
 msgid "The URL is invalid.\n"
-msgstr "El camí no és vàlid.\n"
+msgstr "L'URL no és vàlid.\n"
 
 #: winineterror.mc:41
 msgid "The URL scheme could not be recognized or is not supported.\n"
-msgstr ""
+msgstr "No s'ha pogut reconèixer l'esquema URL o no és compatible.\n"
 
 #: winineterror.mc:46
-#, fuzzy
-#| msgid "The username could not be found.\n"
 msgid "The server name could not be resolved.\n"
-msgstr "No s'ha pogut trobar el nom d'usuari.\n"
+msgstr "No s'ha pogut resoldre el nom de servidor.\n"
 
 #: winineterror.mc:51
-#, fuzzy
-#| msgid "The user profile is invalid.\n"
 msgid "The requested operation is invalid.\n"
-msgstr "El perfil d'usuari no és vàlid.\n"
+msgstr "L'operació demanada no és vàlida.\n"
 
 #: winineterror.mc:56
 msgid ""
 "The operation was canceled, usually because the handle on which the request "
 "was operating was closed before the operation completed.\n"
 msgstr ""
+"S'ha cancel·lat l'operació, usualment perquè s'ha tancat l'identificador en "
+"el qual la sol·licitud s'estava operant abans que es completés l'operació.\n"
 
 #: winineterror.mc:61
-#, fuzzy
-#| msgid "The profile could not be added.\n"
 msgid "The requested item could not be located.\n"
-msgstr "No s'ha pogut afegir el perfil.\n"
+msgstr "No s'ha pogut ubicar l'element demanat.\n"
 
 #: winineterror.mc:66
-#, fuzzy
-#| msgid "Can't connect to the LDAP server"
 msgid "The attempt to connect to the server failed.\n"
-msgstr "No es pot connectar al servidor LDAP"
+msgstr "L'intent de connectar al servidor ha fallat.\n"
 
 #: winineterror.mc:71
 msgid "The connection with the server has been terminated.\n"
-msgstr ""
+msgstr "S'ha terminat la connexió amb el servidor.\n"
 
 #: winineterror.mc:76
 msgid ""
 "SSL certificate date that was received from the server is bad. The "
 "certificate is expired.\n"
 msgstr ""
+"La data del certificat SSL que s'ha rebut del servidor està malmesa. El "
+"certificat està caducat.\n"
 
 #: winineterror.mc:81
 msgid "SSL certificate common name (host name field) is incorrect.\n"
 msgstr ""
+"El nom comú del certificat SSL (camp de nom de màquina) és incorrecte.\n"
 
 #: winmm.rc:32
 msgid "The specified command was carried out."
@@ -9571,7 +10363,7 @@ msgstr "El controlador de dispositiu no està llest."
 #: winmm.rc:78
 msgid "A problem occurred in initializing MCI. Try restarting Windows."
 msgstr ""
-"Hi ha hagut un problema en inicialitzar l'MCI. Proveu reiniciar el Windows."
+"Ha ocorregut un problema en inicialitzar l'MCI. Proveu reiniciar el Windows."
 
 #: winmm.rc:79
 msgid ""
@@ -9591,7 +10383,7 @@ msgid ""
 "Errors occurred in more than one device. Specify each command and device "
 "separately to determine which devices caused the error."
 msgstr ""
-"S'han produït errors en més d'un dispositiu. Especifiqueu cada ordre i "
+"Han ocorregut errors en més d'un dispositiu. Especifiqueu cada ordre i "
 "dispositiu separadament per a determinar quins dispositius han causat "
 "l'error."
 
@@ -9905,7 +10697,7 @@ msgstr ""
 
 #: winmm.rc:130
 msgid "An error occurred with the specified port."
-msgstr "S'ha ocorregut un error amb el port especificat."
+msgstr "Ha ocorregut un error amb el port especificat."
 
 #: winmm.rc:133
 msgid ""
@@ -11182,6 +11974,10 @@ msgid "Error: Invalid option '%c'.\n"
 msgstr "Error: L'opció '%c' no és vàlida.\n"
 
 #: hostname.rc:32
+msgid "Error: Could not get hostname: %u.\n"
+msgstr "Error: No s'ha pogut obtenir el nom de màquina: %u.\n"
+
+#: hostname.rc:33
 msgid ""
 "Error: Setting the system hostname is not possible with the hostname "
 "utility.\n"
@@ -11380,7 +12176,7 @@ msgstr "Desconnectat"
 
 #: net.rc:50
 msgid "A network error occurred"
-msgstr "Hi ha hagut un error de xarxa"
+msgstr "Ha ocorregut un error de xarxa"
 
 #: net.rc:51
 msgid "Connection is being made"
@@ -12401,16 +13197,16 @@ msgid ""
 "reg: Unable to delete all registry values in '%1'. An unexpected error "
 "occurred.\n"
 msgstr ""
-"reg: No s'ha pogut suprimir tots els valors de registre en '%1'. Un error "
-"inesperat ha ocorregut.\n"
+"reg: No s'ha pogut suprimir tots els valors de registre en '%1'. Ha "
+"ocorregut un error inesperat.\n"
 
 #: reg.rc:59
 msgid ""
 "reg: Unable to complete the specified operation. An unexpected error "
 "occurred.\n"
 msgstr ""
-"reg: No s'ha pogut completar l'operació especificada. Un error inesperat ha "
-"ocorregut.\n"
+"reg: No s'ha pogut completar l'operació especificada. Ha ocorregut un error "
+"inesperat.\n"
 
 #: reg.rc:60
 msgid "Search complete. Number of matches found: %1!d!\n"
@@ -12987,10 +13783,8 @@ msgid "Confirm Value Delete"
 msgstr "Confirmar eliminació de valor"
 
 #: regedit.rc:210
-#, fuzzy
-#| msgid "Are you sure you want to delete the registry value '%1'?"
 msgid "Are you sure you want to delete the selected registry value?"
-msgstr "Esteu segur que voleu suprimir el valor de registre '%1'?"
+msgstr "Esteu segur que voleu suprimir el valor de registre seleccionat?"
 
 #: regedit.rc:216
 msgid "Search complete. The string '%1' was not found."
@@ -14371,11 +15165,11 @@ msgstr "Co&lor:"
 
 #: winecfg.rc:304
 msgid "MIME types"
-msgstr ""
+msgstr "Tipus MIME"
 
 #: winecfg.rc:305
 msgid "Manage file &associations"
-msgstr ""
+msgstr "Gestiona &associacions de fitxer"
 
 #: winecfg.rc:308
 msgid "Folders"
@@ -14993,6 +15787,8 @@ msgid ""
 "A program on your system has crashed, but WineDbg was unable to attach to "
 "the process to obtain a backtrace."
 msgstr ""
+"Un program en el vostre sistema ha tingut una pana, però el WineDbg no ha "
+"pogut enganxar-se al procès per a obtenir una traça inversa."
 
 #: winedbg.rc:41
 msgid "(unidentified)"
@@ -15174,10 +15970,6 @@ msgstr "fs d'unix"
 #: winefile.rc:101
 msgid "Shell"
 msgstr "Consola"
-
-#: winefile.rc:102 winhlp32.rc:110 winhlp32.rc:85
-msgid "Not yet implemented"
-msgstr "Encara no implementat"
 
 #: winefile.rc:109
 msgid "Creation date"
@@ -15856,41 +16648,6 @@ msgid "D"
 msgstr "D"
 
 #: xcopy.rc:81
-#, fuzzy
-#| msgid ""
-#| "XCOPY - Copies source files or directory trees to a destination.\n"
-#| "\n"
-#| "Syntax:\n"
-#| "XCOPY source [destination] [/I] [/S] [/Q] [/F] [/L] [/W] [/T] [/N] [/U]\n"
-#| "\t     [/R] [/H] [/C] [/P] [/A] [/M] [/E] [/D] [/Y] [/-Y]\n"
-#| "\n"
-#| "Where:\n"
-#| "\n"
-#| "[/I]  Assume directory if destination does not exist and copying two or\n"
-#| "\tmore files.\n"
-#| "[/S]  Copy directories and subdirectories.\n"
-#| "[/E]  Copy directories and subdirectories, including any empty ones.\n"
-#| "[/Q]  Do not list names during copy, that is be quiet.\n"
-#| "[/F]  Show full source and destination names during copy.\n"
-#| "[/L]  Simulate operation, showing names which would be copied.\n"
-#| "[/W]  Prompts before beginning the copy operation.\n"
-#| "[/T]  Creates empty directory structure but does not copy files.\n"
-#| "[/Y]  Suppress prompting when overwriting files.\n"
-#| "[/-Y] Enable prompting when overwriting files.\n"
-#| "[/P]  Prompts on each source file before copying.\n"
-#| "[/N]  Copy using short names.\n"
-#| "[/U]  Copy only files which already exist in destination.\n"
-#| "[/R]  Overwrite any read only files.\n"
-#| "[/H]  Include hidden and system files in the copy.\n"
-#| "[/C]  Continue even if an error occurs during the copy.\n"
-#| "[/A]  Only copy files with archive attribute set.\n"
-#| "[/M]  Only copy files with archive attribute set, removes the\n"
-#| "\tarchive attribute.\n"
-#| "[/D | /D:m-d-y] Copy new files or those modified after the supplied "
-#| "date.\n"
-#| "\t\tIf no date is supplied, only copy if destination is older\n"
-#| "\t\tthan source.\n"
-#| "\n"
 msgid ""
 "XCOPY - Copies source files or directory trees to a destination.\n"
 "\n"
@@ -15929,8 +16686,8 @@ msgstr ""
 "XCOPY - Copia fitxers o arbres de directori a una destinació.\n"
 "\n"
 "Sintaxi:\n"
-"XCOPY origen [destinació] [/I] [/S] [/Q] [/F] [/L] [/W] [/T] [/N] [/U] [/R]\n"
-"\t     [/H] [/C] [/P] [/A] [/M] [/E] [/D] [/Y] [/-Y]\n"
+"XCOPY origen [destinació] [/I] [/S] [/Q] [/F] [/L] [/W] [/T] [/N] [/U]\n"
+"\t     [/R] [/H] [/C] [/P] [/A] [/M] [/E] [/D] [/Y] [/-Y]\n"
 "\n"
 "On:\n"
 "\n"
@@ -15950,7 +16707,7 @@ msgstr ""
 "[/U]  Copia només els fitxers que ja existeixin a la destinació.\n"
 "[/R]  Sobreescriu qualsevol fitxer de només lectura.\n"
 "[/H]  Inclou els fitxers amagats i els fitxers de sistema en la còpia.\n"
-"[/C]  Continuar inclús si es produeix un error durant la còpia.\n"
+"[/C]  Continuar inclús si ocorr un error durant la còpia.\n"
 "[/A]  Només copiar els fitxers amb l'atribut d'arxiu establert.\n"
 "[/M]  Només copiar els fitxers amb l'atribut d'arxiu establert, elimina\n"
 "\tl'atribut d'arxiu.\n"

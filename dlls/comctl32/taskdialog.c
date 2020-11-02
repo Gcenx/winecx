@@ -84,6 +84,7 @@ struct taskdialog_info
     INT selected_radio_id;
     BOOL verification_checked;
     BOOL expanded;
+    BOOL has_cancel;
     WCHAR *expanded_text;
     WCHAR *collapsed_text;
 };
@@ -94,7 +95,8 @@ struct button_layout_info
     LONG line;
 };
 
-static void taskdialog_on_button_click(struct taskdialog_info *dialog_info, HWND hwnd);
+static HRESULT taskdialog_notify(struct taskdialog_info *dialog_info, UINT notification, WPARAM wparam, LPARAM lparam);
+static void taskdialog_on_button_click(struct taskdialog_info *dialog_info, HWND hwnd, WORD id);
 static void taskdialog_layout(struct taskdialog_info *dialog_info);
 
 static void taskdialog_du_to_px(struct taskdialog_info *dialog_info, LONG *width, LONG *height)
@@ -118,7 +120,7 @@ static unsigned int taskdialog_get_reference_rect(const TASKDIALOGCONFIG *taskco
     info.cbSize = sizeof(info);
     GetMonitorInfoW(monitor, &info);
 
-    if (taskconfig->dwFlags & TDF_POSITION_RELATIVE_TO_WINDOW && taskconfig->hwndParent)
+    if ((taskconfig->dwFlags & TDF_POSITION_RELATIVE_TO_WINDOW) && taskconfig->hwndParent)
         GetWindowRect(taskconfig->hwndParent, ret);
     else
         *ret = info.rcWork;
@@ -208,9 +210,7 @@ static void taskdialog_enable_button(const struct taskdialog_info *dialog_info, 
 
 static void taskdialog_click_button(struct taskdialog_info *dialog_info, INT id)
 {
-    HWND hwnd = taskdialog_find_button(dialog_info->command_links, dialog_info->command_link_count, id);
-    if (!hwnd) hwnd = taskdialog_find_button(dialog_info->buttons, dialog_info->button_count, id);
-    if (hwnd) taskdialog_on_button_click(dialog_info, hwnd);
+    if (taskdialog_notify(dialog_info, TDN_BUTTON_CLICKED, id, 0) == S_OK) EndDialog(dialog_info->hwnd, id);
 }
 
 static void taskdialog_button_set_shield(const struct taskdialog_info *dialog_info, INT id, BOOL elevate)
@@ -302,19 +302,22 @@ static void taskdialog_toggle_expando_control(struct taskdialog_info *dialog_inf
     }
 }
 
-static void taskdialog_on_button_click(struct taskdialog_info *dialog_info, HWND hwnd)
+static void taskdialog_on_button_click(struct taskdialog_info *dialog_info, HWND hwnd, WORD id)
 {
-    INT command_id = GetWindowLongW(hwnd, GWLP_ID);
-    HWND radio_button;
+    INT command_id;
+    HWND button, radio_button;
 
-    if (hwnd == dialog_info->expando_button)
+    /* Prefer the id from hwnd because the id from WM_COMMAND is truncated to WORD */
+    command_id = hwnd ? GetWindowLongW(hwnd, GWLP_ID) : id;
+
+    if (hwnd && hwnd == dialog_info->expando_button)
     {
         taskdialog_toggle_expando_control(dialog_info);
         taskdialog_notify(dialog_info, TDN_EXPANDO_BUTTON_CLICKED, dialog_info->expanded, 0);
         return;
     }
 
-    if (hwnd == dialog_info->verification_box)
+    if (hwnd && hwnd == dialog_info->verification_box)
     {
         dialog_info->verification_checked = !dialog_info->verification_checked;
         taskdialog_notify(dialog_info, TDN_VERIFICATION_CLICKED, dialog_info->verification_checked, 0);
@@ -329,7 +332,15 @@ static void taskdialog_on_button_click(struct taskdialog_info *dialog_info, HWND
         return;
     }
 
-    if (taskdialog_notify(dialog_info, TDN_BUTTON_CLICKED, command_id, 0) == S_OK)
+    button = taskdialog_find_button(dialog_info->command_links, dialog_info->command_link_count, command_id);
+    if (!button) button = taskdialog_find_button(dialog_info->buttons, dialog_info->button_count, command_id);
+    if (!button && command_id == IDOK)
+    {
+        button = dialog_info->command_link_count > 0 ? dialog_info->command_links[0] : dialog_info->buttons[0];
+        command_id = GetWindowLongW(button, GWLP_ID);
+    }
+
+    if (button && taskdialog_notify(dialog_info, TDN_BUTTON_CLICKED, command_id, 0) == S_OK)
         EndDialog(dialog_info->hwnd, command_id);
 }
 
@@ -581,7 +592,7 @@ static void taskdialog_check_default_radio_buttons(struct taskdialog_info *dialo
     if (default_button)
     {
         SendMessageW(default_button, BM_SETCHECK, BST_CHECKED, 0);
-        taskdialog_on_button_click(dialog_info, default_button);
+        taskdialog_on_button_click(dialog_info, default_button, 0);
     }
 }
 
@@ -666,7 +677,7 @@ static void taskdialog_add_radio_buttons(struct taskdialog_info *dialog_info)
         textW = taskdialog_gettext(dialog_info, TRUE, taskconfig->pRadioButtons[i].pszButtonText);
         dialog_info->radio_buttons[i] =
             CreateWindowW(WC_BUTTONW, textW, i == 0 ? style | WS_GROUP : style, 0, 0, 0, 0, dialog_info->hwnd,
-                          ULongToHandle(taskconfig->pRadioButtons[i].nButtonID), 0, NULL);
+                          LongToHandle(taskconfig->pRadioButtons[i].nButtonID), 0, NULL);
         SendMessageW(dialog_info->radio_buttons[i], WM_SETFONT, (WPARAM)dialog_info->font, 0);
         Free(textW);
     }
@@ -692,7 +703,7 @@ static void taskdialog_add_command_links(struct taskdialog_info *dialog_info)
         style = is_default ? default_style | BS_DEFCOMMANDLINK : default_style | BS_COMMANDLINK;
         textW = taskdialog_gettext(dialog_info, TRUE, taskconfig->pButtons[i].pszButtonText);
         dialog_info->command_links[i] = CreateWindowW(WC_BUTTONW, textW, style, 0, 0, 0, 0, dialog_info->hwnd,
-                                                      ULongToHandle(taskconfig->pButtons[i].nButtonID), 0, NULL);
+                                                      LongToHandle(taskconfig->pButtons[i].nButtonID), 0, NULL);
         SendMessageW(dialog_info->command_links[i], WM_SETFONT, (WPARAM)dialog_info->font, 0);
         Free(textW);
 
@@ -1197,6 +1208,13 @@ static void taskdialog_init(struct taskdialog_info *dialog_info, HWND hwnd)
     id = GetWindowLongW(dialog_info->default_button, GWLP_ID);
     SendMessageW(dialog_info->hwnd, DM_SETDEFID, id, 0);
 
+    dialog_info->has_cancel =
+        (taskconfig->dwFlags & TDF_ALLOW_DIALOG_CANCELLATION)
+        || taskdialog_find_button(dialog_info->command_links, dialog_info->command_link_count, IDCANCEL)
+        || taskdialog_find_button(dialog_info->buttons, dialog_info->button_count, IDCANCEL);
+
+    if (!dialog_info->has_cancel) DeleteMenu(GetSystemMenu(hwnd, FALSE), SC_CLOSE, MF_BYCOMMAND);
+
     taskdialog_layout(dialog_info);
 }
 
@@ -1324,7 +1342,7 @@ static INT_PTR CALLBACK taskdialog_proc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
         case WM_COMMAND:
             if (HIWORD(wParam) == BN_CLICKED)
             {
-                taskdialog_on_button_click(dialog_info, (HWND)lParam);
+                taskdialog_on_button_click(dialog_info, (HWND)lParam, LOWORD(wParam));
                 break;
             }
             return FALSE;
@@ -1369,6 +1387,15 @@ static INT_PTR CALLBACK taskdialog_proc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
             RemovePropW(hwnd, taskdialog_info_propnameW);
             taskdialog_destroy(dialog_info);
             break;
+        case WM_CLOSE:
+            if (dialog_info->has_cancel)
+            {
+                if(taskdialog_notify(dialog_info, TDN_BUTTON_CLICKED, IDCANCEL, 0) == S_OK)
+                    EndDialog(hwnd, IDCANCEL);
+                SetWindowLongPtrW(hwnd, DWLP_MSGRESULT, 0);
+                break;
+            }
+            return FALSE;
         default:
             return FALSE;
     }

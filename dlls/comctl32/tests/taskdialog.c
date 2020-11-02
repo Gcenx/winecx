@@ -229,6 +229,66 @@ static const struct message_info msg_return_press_negative_id_radio_button[] =
     { 0 }
 };
 
+static const struct message_info msg_send_all_common_button_click[] =
+{
+    { TDM_CLICK_BUTTON, IDOK, 0 },
+    { TDM_CLICK_BUTTON, IDYES, 0 },
+    { TDM_CLICK_BUTTON, IDNO, 0 },
+    { TDM_CLICK_BUTTON, IDCANCEL, 0 },
+    { TDM_CLICK_BUTTON, IDRETRY, 0 },
+    { TDM_CLICK_BUTTON, IDCLOSE, 0 },
+    { TDM_CLICK_BUTTON, ID_START_BUTTON + 99, 0 },
+    { 0 }
+};
+
+static const struct message_info msg_press_nonexistent_buttons[] =
+{
+    { TDN_CREATED, 0, 0, S_OK, msg_send_all_common_button_click },
+    { TDN_BUTTON_CLICKED, IDOK, 0, S_FALSE, NULL },
+    { TDN_BUTTON_CLICKED, IDYES, 0, S_FALSE, NULL },
+    { TDN_BUTTON_CLICKED, IDNO, 0, S_FALSE, NULL },
+    { TDN_BUTTON_CLICKED, IDCANCEL, 0, S_FALSE, NULL },
+    { TDN_BUTTON_CLICKED, IDRETRY, 0, S_FALSE, NULL },
+    { TDN_BUTTON_CLICKED, IDCLOSE, 0, S_FALSE, NULL },
+    { TDN_BUTTON_CLICKED, ID_START_BUTTON + 99, 0, S_OK, NULL },
+    { 0 }
+};
+
+static const struct message_info msg_send_all_common_button_click_with_command[] =
+{
+    { WM_COMMAND, MAKEWORD(IDOK, BN_CLICKED), 0 },
+    { WM_COMMAND, MAKEWORD(IDYES, BN_CLICKED), 0 },
+    { WM_COMMAND, MAKEWORD(IDNO, BN_CLICKED), 0 },
+    { WM_COMMAND, MAKEWORD(IDCANCEL, BN_CLICKED), 0 },
+    { WM_COMMAND, MAKEWORD(IDRETRY, BN_CLICKED), 0 },
+    { WM_COMMAND, MAKEWORD(IDCLOSE, BN_CLICKED), 0 },
+    { WM_COMMAND, MAKEWORD(ID_START_BUTTON + 99, BN_CLICKED), 0 },
+    { WM_COMMAND, MAKEWORD(IDOK, BN_CLICKED), 0 },
+    { 0 }
+};
+
+static const struct message_info msg_press_nonexistent_buttons_with_command[] =
+{
+    { TDN_CREATED, 0, 0, S_OK, msg_send_all_common_button_click_with_command },
+    { TDN_BUTTON_CLICKED, ID_START_BUTTON, 0, S_FALSE, NULL },
+    { TDN_BUTTON_CLICKED, ID_START_BUTTON, 0, S_OK, NULL },
+    { 0 }
+};
+
+static const struct message_info msg_send_nonexistent_radio_button_click[] =
+{
+    { TDM_CLICK_RADIO_BUTTON, ID_START_RADIO_BUTTON + 99, 0 },
+    { TDM_CLICK_BUTTON, IDOK, 0 },
+    { 0 }
+};
+
+static const struct message_info msg_press_nonexistent_radio_button[] =
+{
+    { TDN_CREATED, 0, 0, S_OK, msg_send_nonexistent_radio_button_click },
+    { TDN_BUTTON_CLICKED, IDOK, 0, S_OK, NULL },
+    { 0 }
+};
+
 static const struct message_info msg_return_default_verification_unchecked[] =
 {
     { TDN_CREATED, 0, 0, S_OK, msg_send_click_ok },
@@ -286,6 +346,34 @@ static const struct message_info msg_return_navigated_page[] =
     { TDN_DIALOG_CONSTRUCTED, 0, 0, S_OK, NULL },
     { TDN_RADIO_BUTTON_CLICKED, ID_START_RADIO_BUTTON, 0, S_OK, NULL },
     { TDN_NAVIGATED, 0, 0, S_OK, msg_send_click_ok },
+    { TDN_BUTTON_CLICKED, IDOK, 0, S_OK, NULL },
+    { 0 }
+};
+
+static const struct message_info msg_send_close[] =
+{
+    { WM_CLOSE, 0, 0, 0},
+    { 0 }
+};
+
+static const struct message_info msg_handle_wm_close[] =
+{
+    { TDN_CREATED, 0, 0, S_OK, msg_send_close },
+    { TDN_BUTTON_CLICKED, IDCANCEL, 0, S_FALSE, msg_send_close },
+    { TDN_BUTTON_CLICKED, IDCANCEL, 0, S_OK, NULL },
+    { 0 }
+};
+
+static const struct message_info msg_send_close_then_ok[] =
+{
+    { WM_CLOSE, 0, 0, 0},
+    { TDM_CLICK_BUTTON, IDOK, 0 },
+    { 0 }
+};
+
+static const struct message_info msg_handle_wm_close_without_cancel_button[] =
+{
+    { TDN_CREATED, 0, 0, S_OK, msg_send_close_then_ok },
     { TDN_BUTTON_CLICKED, IDOK, 0, S_OK, NULL },
     { 0 }
 };
@@ -540,6 +628,23 @@ static void test_buttons(void)
     info.dwFlags = TDF_NO_DEFAULT_RADIO_BUTTON;
     run_test(&info, IDOK, -2, FALSE, msg_return_press_negative_id_radio_button,
              "radio button: manually click radio button with negative id");
+
+    /* Test sending clicks to non-existent buttons. Notification of non-existent buttons will be sent */
+    info.cButtons = TEST_NUM_BUTTONS;
+    info.pButtons = custom_buttons;
+    info.cRadioButtons = TEST_NUM_RADIO_BUTTONS;
+    info.pRadioButtons = radio_buttons;
+    info.dwCommonButtons = 0;
+    info.dwFlags = TDF_NO_DEFAULT_RADIO_BUTTON;
+    run_test(&info, ID_START_BUTTON + 99, 0, FALSE, msg_press_nonexistent_buttons, "sends click to non-existent buttons");
+
+    /* Non-existent button clicks sent by WM_COMMAND won't generate TDN_BUTTON_CLICKED except IDOK.
+     * And will get the first existent button identifier instead of IDOK */
+    run_test(&info, ID_START_BUTTON, 0, FALSE, msg_press_nonexistent_buttons_with_command,
+             "sends click to non-existent buttons with WM_COMMAND");
+
+    /* Non-existent radio button won't get notifications */
+    run_test(&info, IDOK, 0, FALSE, msg_press_nonexistent_radio_button, "sends click to non-existent radio buttons");
 }
 
 static void test_help(void)
@@ -739,6 +844,26 @@ static void test_navigate_page(void)
     run_test(&info, IDOK, ID_START_RADIO_BUTTON, TRUE, msg_return_navigated_page, "navigate page: invalid taskconfig cbSize");
 }
 
+static void test_wm_close(void)
+{
+    TASKDIALOGCONFIG info = {0};
+
+    info.cbSize = sizeof(TASKDIALOGCONFIG);
+    info.pfCallback = taskdialog_callback_proc;
+    info.lpCallbackData = test_ref_data;
+
+    /* WM_CLOSE can end the dialog only when a cancel button is present or dwFlags has TDF_ALLOW_DIALOG_CANCELLATION */
+    info.dwCommonButtons = TDCBF_OK_BUTTON;
+    run_test(&info, IDOK, 0, FALSE, msg_handle_wm_close_without_cancel_button, "send WM_CLOSE without cancel button");
+
+    info.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION;
+    run_test(&info, IDCANCEL, 0, FALSE, msg_handle_wm_close, "send WM_CLOSE with TDF_ALLOW_DIALOG_CANCELLATION");
+
+    info.dwFlags = 0;
+    info.dwCommonButtons = TDCBF_CANCEL_BUTTON;
+    run_test(&info, IDCANCEL, 0, FALSE, msg_handle_wm_close, "send WM_CLOSE with a cancel button");
+}
+
 START_TEST(taskdialog)
 {
     ULONG_PTR ctx_cookie;
@@ -780,6 +905,7 @@ START_TEST(taskdialog)
     test_progress_bar();
     test_verification_box();
     test_navigate_page();
+    test_wm_close();
 
     unload_v6_module(ctx_cookie, hCtx);
 }

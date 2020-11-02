@@ -3509,6 +3509,27 @@ BOOLEAN CDECL RtlInstallFunctionTableCallback( DWORD64 table, DWORD64 base, DWOR
 }
 
 
+/*************************************************************************
+ *              RtlAddGrowableFunctionTable   (NTDLL.@)
+ */
+DWORD WINAPI RtlAddGrowableFunctionTable( void **table, RUNTIME_FUNCTION *functions, DWORD count, DWORD max_count,
+                                          ULONG_PTR base, ULONG_PTR end )
+{
+    FIXME( "(%p, %p, %d, %d, %ld, %ld) semi-stub!\n", table, functions, count, max_count, base, end );
+    if (table) *table = NULL;
+    return RtlAddFunctionTable(functions, count, base);
+}
+
+
+/*************************************************************************
+ *              RtlGrowFunctionTable   (NTDLL.@)
+ */
+void WINAPI RtlGrowFunctionTable( void *table, DWORD count )
+{
+    FIXME( "(%p, %d) stub!\n", table, count );
+}
+
+
 /**********************************************************************
  *              RtlDeleteFunctionTable   (NTDLL.@)
  */
@@ -4373,7 +4394,7 @@ static void WINAPI call_thread_func( LPTHREAD_START_ROUTINE entry, void *arg )
         TRACE_(relay)( "\1Starting thread proc %p (arg=%p)\n", entry, arg );
         RtlExitUserThread( entry( arg ));
     }
-    __EXCEPT(unhandled_exception_filter)
+    __EXCEPT(call_unhandled_exception_filter)
     {
         NtTerminateThread( GetCurrentThread(), GetExceptionCode() );
     }

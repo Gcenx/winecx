@@ -349,7 +349,7 @@ void server_leave_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sig
  *
  * Wait for a reply on the waiting pipe of the current thread.
  */
-static int wait_select_reply( void *cookie )
+int wait_select_reply( void *cookie )
 {
     int signaled;
     struct wake_up_reply reply;
@@ -386,7 +386,7 @@ static int wait_select_reply( void *cookie )
  *
  * Invoke a single APC. Return TRUE if a user APC has been run.
  */
-static BOOL invoke_apc( const apc_call_t *call, apc_result_t *result )
+BOOL invoke_apc( const apc_call_t *call, apc_result_t *result )
 {
     BOOL user_apc = FALSE;
     SIZE_T size;
@@ -1425,9 +1425,6 @@ void server_init_process(void)
                                "Or maybe the wrong wineserver is still running?\n",
                                version, SERVER_PROTOCOL_VERSION,
                                (version > SERVER_PROTOCOL_VERSION) ? "wine" : "wineserver" );
-#ifdef __APPLE__
-    send_server_task_port();
-#endif
 #if defined(__linux__) && defined(HAVE_PRCTL)
     /* work around Ubuntu's ptrace breakage */
     if (server_pid != -1) prctl( 0x59616d61 /* PR_SET_PTRACER */, server_pid );
@@ -1445,6 +1442,10 @@ void server_init_process_done(void)
     void *entry = (char *)peb->ImageBaseAddress + nt->OptionalHeader.AddressOfEntryPoint;
     NTSTATUS status;
     int suspend;
+
+#ifdef __APPLE__
+    send_server_task_port();
+#endif
 
     /* Install signal handlers; this cannot be done earlier, since we cannot
      * send exceptions to the debugger before the create process event that

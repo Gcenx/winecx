@@ -627,7 +627,6 @@ static void send_mouse_input( HWND hwnd, Window window, unsigned int state, INPU
     {
         RECT rect;
         SetRect( &rect, pt.x, pt.y, pt.x + 1, pt.y + 1 );
-        MapWindowPoints( 0, hwnd, (POINT *)&rect, 2 );
 
         SERVER_START_REQ( update_window_zorder )
         {
@@ -987,7 +986,7 @@ static int find_fallback_shape( const char *name )
 {
     struct cursor_font_fallback *fallback;
 
-    if ((fallback = bsearch( name, fallbacks, sizeof(fallbacks) / sizeof(fallbacks[0]),
+    if ((fallback = bsearch( name, fallbacks, ARRAY_SIZE( fallbacks ),
                              sizeof(*fallback), fallback_cmp )))
         return fallback->shape;
     return -1;
@@ -1039,9 +1038,9 @@ static Cursor create_xcursor_system_cursor( const ICONINFOEXW *info )
     if (info->szResName[0]) goto done;  /* only integer resources are supported here */
     if (!(module = GetModuleHandleW( info->szModName ))) goto done;
 
-    for (i = 0; i < sizeof(module_cursors)/sizeof(module_cursors[0]); i++)
+    for (i = 0; i < ARRAY_SIZE( module_cursors ); i++)
         if (GetModuleHandleW( module_cursors[i].name ) == module) break;
-    if (i == sizeof(module_cursors)/sizeof(module_cursors[0])) goto done;
+    if (i == ARRAY_SIZE( module_cursors )) goto done;
 
     cursors = module_cursors[i].cursors;
     for (i = 0; cursors[i].id; i++)

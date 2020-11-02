@@ -113,6 +113,7 @@ static inline void set_reply_data_ptr( void *data, data_size_t size )
 /* ### make_requests begin ### */
 
 DECL_HANDLER(new_process);
+DECL_HANDLER(exec_process);
 DECL_HANDLER(get_new_process_info);
 DECL_HANDLER(new_thread);
 DECL_HANDLER(get_startup_info);
@@ -269,7 +270,6 @@ DECL_HANDLER(write);
 DECL_HANDLER(ioctl);
 DECL_HANDLER(set_irp_result);
 DECL_HANDLER(create_named_pipe);
-DECL_HANDLER(get_named_pipe_info);
 DECL_HANDLER(set_named_pipe_info);
 DECL_HANDLER(create_window);
 DECL_HANDLER(destroy_window);
@@ -388,8 +388,7 @@ DECL_HANDLER(remove_completion);
 DECL_HANDLER(query_completion);
 DECL_HANDLER(set_completion_info);
 DECL_HANDLER(add_fd_completion);
-DECL_HANDLER(set_fd_compl_info);
-DECL_HANDLER(get_fd_compl_info);
+DECL_HANDLER(set_fd_completion_mode);
 DECL_HANDLER(set_fd_disp_info);
 DECL_HANDLER(set_fd_name_info);
 DECL_HANDLER(get_window_layered_info);
@@ -414,6 +413,7 @@ typedef void (*req_handler)( const void *req, void *reply );
 static const req_handler req_handlers[REQ_NB_REQUESTS] =
 {
     (req_handler)req_new_process,
+    (req_handler)req_exec_process,
     (req_handler)req_get_new_process_info,
     (req_handler)req_new_thread,
     (req_handler)req_get_startup_info,
@@ -570,7 +570,6 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_ioctl,
     (req_handler)req_set_irp_result,
     (req_handler)req_create_named_pipe,
-    (req_handler)req_get_named_pipe_info,
     (req_handler)req_set_named_pipe_info,
     (req_handler)req_create_window,
     (req_handler)req_destroy_window,
@@ -689,8 +688,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_query_completion,
     (req_handler)req_set_completion_info,
     (req_handler)req_add_fd_completion,
-    (req_handler)req_set_fd_compl_info,
-    (req_handler)req_get_fd_compl_info,
+    (req_handler)req_set_fd_completion_mode,
     (req_handler)req_set_fd_disp_info,
     (req_handler)req_set_fd_name_info,
     (req_handler)req_get_window_layered_info,
@@ -744,26 +742,25 @@ C_ASSERT( FIELD_OFFSET(struct new_process_request, inherit_all) == 12 );
 C_ASSERT( FIELD_OFFSET(struct new_process_request, create_flags) == 16 );
 C_ASSERT( FIELD_OFFSET(struct new_process_request, socket_fd) == 20 );
 C_ASSERT( FIELD_OFFSET(struct new_process_request, exe_file) == 24 );
-C_ASSERT( FIELD_OFFSET(struct new_process_request, process_access) == 28 );
-C_ASSERT( FIELD_OFFSET(struct new_process_request, process_attr) == 32 );
-C_ASSERT( FIELD_OFFSET(struct new_process_request, thread_access) == 36 );
-C_ASSERT( FIELD_OFFSET(struct new_process_request, thread_attr) == 40 );
-C_ASSERT( FIELD_OFFSET(struct new_process_request, cpu) == 44 );
-C_ASSERT( FIELD_OFFSET(struct new_process_request, info_size) == 48 );
-C_ASSERT( sizeof(struct new_process_request) == 56 );
+C_ASSERT( FIELD_OFFSET(struct new_process_request, access) == 28 );
+C_ASSERT( FIELD_OFFSET(struct new_process_request, cpu) == 32 );
+C_ASSERT( FIELD_OFFSET(struct new_process_request, info_size) == 36 );
+C_ASSERT( sizeof(struct new_process_request) == 40 );
 C_ASSERT( FIELD_OFFSET(struct new_process_reply, info) == 8 );
 C_ASSERT( FIELD_OFFSET(struct new_process_reply, pid) == 12 );
-C_ASSERT( FIELD_OFFSET(struct new_process_reply, phandle) == 16 );
-C_ASSERT( FIELD_OFFSET(struct new_process_reply, tid) == 20 );
-C_ASSERT( FIELD_OFFSET(struct new_process_reply, thandle) == 24 );
-C_ASSERT( sizeof(struct new_process_reply) == 32 );
+C_ASSERT( FIELD_OFFSET(struct new_process_reply, handle) == 16 );
+C_ASSERT( sizeof(struct new_process_reply) == 24 );
+C_ASSERT( FIELD_OFFSET(struct exec_process_request, socket_fd) == 12 );
+C_ASSERT( FIELD_OFFSET(struct exec_process_request, exe_file) == 16 );
+C_ASSERT( FIELD_OFFSET(struct exec_process_request, cpu) == 20 );
+C_ASSERT( sizeof(struct exec_process_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct get_new_process_info_request, info) == 12 );
 C_ASSERT( sizeof(struct get_new_process_info_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_new_process_info_reply, success) == 8 );
 C_ASSERT( FIELD_OFFSET(struct get_new_process_info_reply, exit_code) == 12 );
 C_ASSERT( sizeof(struct get_new_process_info_reply) == 16 );
-C_ASSERT( FIELD_OFFSET(struct new_thread_request, access) == 12 );
-C_ASSERT( FIELD_OFFSET(struct new_thread_request, attributes) == 16 );
+C_ASSERT( FIELD_OFFSET(struct new_thread_request, process) == 12 );
+C_ASSERT( FIELD_OFFSET(struct new_thread_request, access) == 16 );
 C_ASSERT( FIELD_OFFSET(struct new_thread_request, suspend) == 20 );
 C_ASSERT( FIELD_OFFSET(struct new_thread_request, request_fd) == 24 );
 C_ASSERT( sizeof(struct new_thread_request) == 32 );
@@ -771,8 +768,7 @@ C_ASSERT( FIELD_OFFSET(struct new_thread_reply, tid) == 8 );
 C_ASSERT( FIELD_OFFSET(struct new_thread_reply, handle) == 12 );
 C_ASSERT( sizeof(struct new_thread_reply) == 16 );
 C_ASSERT( sizeof(struct get_startup_info_request) == 16 );
-C_ASSERT( FIELD_OFFSET(struct get_startup_info_reply, exe_file) == 8 );
-C_ASSERT( FIELD_OFFSET(struct get_startup_info_reply, info_size) == 12 );
+C_ASSERT( FIELD_OFFSET(struct get_startup_info_reply, info_size) == 8 );
 C_ASSERT( sizeof(struct get_startup_info_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct init_process_done_request, gui) == 12 );
 C_ASSERT( FIELD_OFFSET(struct init_process_done_request, module) == 16 );
@@ -1663,15 +1659,6 @@ C_ASSERT( FIELD_OFFSET(struct create_named_pipe_request, flags) == 48 );
 C_ASSERT( sizeof(struct create_named_pipe_request) == 56 );
 C_ASSERT( FIELD_OFFSET(struct create_named_pipe_reply, handle) == 8 );
 C_ASSERT( sizeof(struct create_named_pipe_reply) == 16 );
-C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_request, handle) == 12 );
-C_ASSERT( sizeof(struct get_named_pipe_info_request) == 16 );
-C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_reply, flags) == 8 );
-C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_reply, sharing) == 12 );
-C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_reply, maxinstances) == 16 );
-C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_reply, instances) == 20 );
-C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_reply, outsize) == 24 );
-C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_reply, insize) == 28 );
-C_ASSERT( sizeof(struct get_named_pipe_info_reply) == 32 );
 C_ASSERT( FIELD_OFFSET(struct set_named_pipe_info_request, handle) == 12 );
 C_ASSERT( FIELD_OFFSET(struct set_named_pipe_info_request, flags) == 16 );
 C_ASSERT( sizeof(struct set_named_pipe_info_request) == 24 );
@@ -1755,7 +1742,8 @@ C_ASSERT( sizeof(struct get_window_children_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_window_children_from_point_request, parent) == 12 );
 C_ASSERT( FIELD_OFFSET(struct get_window_children_from_point_request, x) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_window_children_from_point_request, y) == 20 );
-C_ASSERT( sizeof(struct get_window_children_from_point_request) == 24 );
+C_ASSERT( FIELD_OFFSET(struct get_window_children_from_point_request, dpi) == 24 );
+C_ASSERT( sizeof(struct get_window_children_from_point_request) == 32 );
 C_ASSERT( FIELD_OFFSET(struct get_window_children_from_point_reply, count) == 8 );
 C_ASSERT( sizeof(struct get_window_children_from_point_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_window_tree_request, handle) == 12 );
@@ -1783,6 +1771,7 @@ C_ASSERT( FIELD_OFFSET(struct set_window_pos_reply, needs_update) == 20 );
 C_ASSERT( sizeof(struct set_window_pos_reply) == 24 );
 C_ASSERT( FIELD_OFFSET(struct get_window_rectangles_request, handle) == 12 );
 C_ASSERT( FIELD_OFFSET(struct get_window_rectangles_request, relative) == 16 );
+C_ASSERT( FIELD_OFFSET(struct get_window_rectangles_request, dpi) == 20 );
 C_ASSERT( sizeof(struct get_window_rectangles_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct get_window_rectangles_reply, window) == 8 );
 C_ASSERT( FIELD_OFFSET(struct get_window_rectangles_reply, client) == 24 );
@@ -1795,6 +1784,7 @@ C_ASSERT( FIELD_OFFSET(struct set_window_text_request, handle) == 12 );
 C_ASSERT( sizeof(struct set_window_text_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_windows_offset_request, from) == 12 );
 C_ASSERT( FIELD_OFFSET(struct get_windows_offset_request, to) == 16 );
+C_ASSERT( FIELD_OFFSET(struct get_windows_offset_request, dpi) == 20 );
 C_ASSERT( sizeof(struct get_windows_offset_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct get_windows_offset_reply, x) == 8 );
 C_ASSERT( FIELD_OFFSET(struct get_windows_offset_reply, y) == 12 );
@@ -2359,15 +2349,11 @@ C_ASSERT( FIELD_OFFSET(struct add_fd_completion_request, handle) == 12 );
 C_ASSERT( FIELD_OFFSET(struct add_fd_completion_request, cvalue) == 16 );
 C_ASSERT( FIELD_OFFSET(struct add_fd_completion_request, information) == 24 );
 C_ASSERT( FIELD_OFFSET(struct add_fd_completion_request, status) == 32 );
-C_ASSERT( FIELD_OFFSET(struct add_fd_completion_request, force) == 36 );
+C_ASSERT( FIELD_OFFSET(struct add_fd_completion_request, async) == 36 );
 C_ASSERT( sizeof(struct add_fd_completion_request) == 40 );
-C_ASSERT( FIELD_OFFSET(struct set_fd_compl_info_request, handle) == 12 );
-C_ASSERT( FIELD_OFFSET(struct set_fd_compl_info_request, flags) == 16 );
-C_ASSERT( sizeof(struct set_fd_compl_info_request) == 24 );
-C_ASSERT( FIELD_OFFSET(struct get_fd_compl_info_request, handle) == 12 );
-C_ASSERT( sizeof(struct get_fd_compl_info_request) == 16 );
-C_ASSERT( FIELD_OFFSET(struct get_fd_compl_info_reply, flags) == 8 );
-C_ASSERT( sizeof(struct get_fd_compl_info_reply) == 16 );
+C_ASSERT( FIELD_OFFSET(struct set_fd_completion_mode_request, handle) == 12 );
+C_ASSERT( FIELD_OFFSET(struct set_fd_completion_mode_request, flags) == 16 );
+C_ASSERT( sizeof(struct set_fd_completion_mode_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct set_fd_disp_info_request, handle) == 12 );
 C_ASSERT( FIELD_OFFSET(struct set_fd_disp_info_request, unlink) == 16 );
 C_ASSERT( sizeof(struct set_fd_disp_info_request) == 24 );

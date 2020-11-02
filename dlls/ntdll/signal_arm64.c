@@ -545,6 +545,9 @@ static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL f
     {
         DWORD c;
 
+        TRACE( "code=%x flags=%x addr=%p pc=%lx tid=%04x\n",
+               rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
+               context->Pc, GetCurrentThreadId() );
         for (c = 0; c < rec->NumberParameters; c++)
             TRACE( " info[%d]=%016lx\n", c, rec->ExceptionInformation[c] );
         if (rec->ExceptionCode == EXCEPTION_WINE_STUB)
@@ -560,7 +563,24 @@ static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL f
         }
         else
         {
-            /* FIXME: dump context */
+            TRACE(" x0=%016lx x1=%016lx x2=%016lx x3=%016lx\n",
+                  context->u.s.X0, context->u.s.X1, context->u.s.X2, context->u.s.X3 );
+            TRACE(" x4=%016lx x5=%016lx x6=%016lx x7=%016lx\n",
+                  context->u.s.X4, context->u.s.X5, context->u.s.X6, context->u.s.X7 );
+            TRACE(" x8=%016lx x9=%016lx x10=%016lx x11=%016lx\n",
+                  context->u.s.X8, context->u.s.X9, context->u.s.X10, context->u.s.X11 );
+            TRACE(" x12=%016lx x13=%016lx x14=%016lx x15=%016lx\n",
+                  context->u.s.X12, context->u.s.X13, context->u.s.X14, context->u.s.X15 );
+            TRACE(" x16=%016lx x17=%016lx x18=%016lx x19=%016lx\n",
+                  context->u.s.X16, context->u.s.X17, context->u.s.X18, context->u.s.X19 );
+            TRACE(" x20=%016lx x21=%016lx x22=%016lx x23=%016lx\n",
+                  context->u.s.X20, context->u.s.X21, context->u.s.X22, context->u.s.X23 );
+            TRACE(" x24=%016lx x25=%016lx x26=%016lx x27=%016lx\n",
+                  context->u.s.X24, context->u.s.X25, context->u.s.X26, context->u.s.X27 );
+            TRACE(" x28=%016lx fp=%016lx lr=%016lx sp=%016lx\n",
+                  context->u.s.X28, context->u.s.Fp, context->u.s.Lr, context->Sp );
+            TRACE(" pc=%016lx\n",
+                  context->Pc );
         }
 
         status = send_debug_event( rec, TRUE, context );
@@ -591,9 +611,9 @@ static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL f
     return STATUS_SUCCESS;
 }
 
-static inline DWORD is_write_fault( ucontext_t *context )
+static inline DWORD is_write_fault( DWORD *pc )
 {
-    DWORD inst = *(DWORD *)PC_sig(context);
+    DWORD inst = *pc;
     if ((inst & 0xbfff0000) == 0x0c000000   /* C3.3.1 */ ||
         (inst & 0xbfe00000) == 0x0c800000   /* C3.3.2 */ ||
         (inst & 0xbfdf0000) == 0x0d000000   /* C3.3.3 */ ||
@@ -617,6 +637,7 @@ static void segv_handler( int signal, siginfo_t *info, void *ucontext )
 {
     EXCEPTION_RECORD *rec;
     ucontext_t *context = ucontext;
+    DWORD *orig_pc = PC_sig(context);
 
     /* check for page fault inside the thread stack */
     if (signal == SIGSEGV &&
@@ -644,7 +665,7 @@ static void segv_handler( int signal, siginfo_t *info, void *ucontext )
     case SIGSEGV:  /* Segmentation fault */
         rec->ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
         rec->NumberParameters = 2;
-        rec->ExceptionInformation[0] = is_write_fault(context);
+        rec->ExceptionInformation[0] = is_write_fault(orig_pc);
         rec->ExceptionInformation[1] = (ULONG_PTR)info->si_addr;
         break;
     case SIGBUS:  /* Alignment check exception */
@@ -947,6 +968,46 @@ void signal_init_process(void)
 }
 
 
+/**********************************************************************
+ *              RtlAddFunctionTable   (NTDLL.@)
+ */
+BOOLEAN CDECL RtlAddFunctionTable( RUNTIME_FUNCTION *table, DWORD count, ULONG_PTR addr )
+{
+    FIXME( "%p %u %lx: stub\n", table, count, addr );
+    return TRUE;
+}
+
+
+/*************************************************************************
+ *              RtlAddGrowableFunctionTable   (NTDLL.@)
+ */
+DWORD WINAPI RtlAddGrowableFunctionTable( void **table, RUNTIME_FUNCTION *functions, DWORD count, DWORD max_count,
+                                          ULONG_PTR base, ULONG_PTR end )
+{
+    FIXME( "(%p, %p, %d, %d, %ld, %ld) stub!\n", table, functions, count, max_count, base, end );
+    if (table) *table = NULL;
+    return S_OK;
+}
+
+
+/*************************************************************************
+ *              RtlGrowFunctionTable   (NTDLL.@)
+ */
+void WINAPI RtlGrowFunctionTable( void *table, DWORD count )
+{
+    FIXME( "(%p, %d) stub!\n", table, count );
+}
+
+
+/**********************************************************************
+ *              RtlDeleteFunctionTable   (NTDLL.@)
+ */
+BOOLEAN CDECL RtlDeleteFunctionTable( RUNTIME_FUNCTION *table )
+{
+    FIXME( "%p: stub\n", table );
+    return TRUE;
+}
+
 /***********************************************************************
  *            RtlUnwind  (NTDLL.@)
  */
@@ -998,7 +1059,7 @@ static void WINAPI call_thread_entry_point( LPTHREAD_START_ROUTINE entry, void *
         TRACE_(relay)( "\1Starting thread proc %p (arg=%p)\n", entry, arg );
         RtlExitUserThread( entry( arg ));
     }
-    __EXCEPT(unhandled_exception_filter)
+    __EXCEPT(call_unhandled_exception_filter)
     {
         NtTerminateThread( GetCurrentThread(), GetExceptionCode() );
     }

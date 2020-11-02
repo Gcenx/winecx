@@ -264,25 +264,6 @@ static BOOL ANDROID_DeleteDC( PHYSDEV dev )
 
 
 /***********************************************************************
- *           ANDROID_GetDeviceCaps
- */
-static INT ANDROID_GetDeviceCaps( PHYSDEV dev, INT cap )
-{
-    switch(cap)
-    {
-    case HORZRES:        return screen_width;
-    case VERTRES:        return screen_height;
-    case DESKTOPHORZRES: return virtual_screen_rect.right - virtual_screen_rect.left;
-    case DESKTOPVERTRES: return virtual_screen_rect.bottom - virtual_screen_rect.top;
-    case BITSPIXEL:      return screen_bpp;
-    default:
-        dev = GET_NEXT_PHYSDEV( dev, pGetDeviceCaps );
-        return dev->funcs->pGetDeviceCaps( dev, cap );
-    }
-}
-
-
-/***********************************************************************
  *           ANDROID_ChangeDisplaySettingsEx
  */
 LONG CDECL ANDROID_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
@@ -317,30 +298,7 @@ BOOL CDECL ANDROID_GetMonitorInfo( HMONITOR handle, LPMONITORINFO info )
  */
 BOOL CDECL ANDROID_EnumDisplayMonitors( HDC hdc, LPRECT rect, MONITORENUMPROC proc, LPARAM lp )
 {
-    if (hdc)
-    {
-        POINT origin;
-        RECT limit, monrect;
-
-        if (!GetDCOrgEx( hdc, &origin )) return FALSE;
-        if (GetClipBox( hdc, &limit ) == ERROR) return FALSE;
-
-        if (rect && !IntersectRect( &limit, &limit, rect )) return TRUE;
-
-        monrect = default_monitor.rcMonitor;
-        OffsetRect( &monrect, -origin.x, -origin.y );
-        if (IntersectRect( &monrect, &monrect, &limit ))
-            if (!proc( (HMONITOR)1, hdc, &monrect, lp ))
-                return FALSE;
-    }
-    else
-    {
-        RECT unused;
-        if (!rect || IntersectRect( &unused, &default_monitor.rcMonitor, rect ))
-            if (!proc( (HMONITOR)1, 0, &default_monitor.rcMonitor, lp ))
-                return FALSE;
-    }
-    return TRUE;
+    return proc( (HMONITOR)1, 0, &default_monitor.rcMonitor, lp );
 }
 
 
@@ -438,7 +396,7 @@ static const struct gdi_dc_funcs android_drv_funcs =
     NULL,                               /* pGetCharABCWidths */
     NULL,                               /* pGetCharABCWidthsI */
     NULL,                               /* pGetCharWidth */
-    ANDROID_GetDeviceCaps,              /* pGetDeviceCaps */
+    NULL,                               /* pGetDeviceCaps */
     NULL,                               /* pGetDeviceGammaRamp */
     NULL,                               /* pGetFontData */
     NULL,                               /* pGetFontRealizationInfo */
@@ -664,8 +622,6 @@ void run_commandarray( JNIEnv *env, jobject obj, jobjectArray _cmdarray, jobject
     send_event( &data );
 }
 
-struct gralloc_module_t *gralloc_module = NULL;
-
 #ifndef DT_GNU_HASH
 #define DT_GNU_HASH 0x6ffffef5
 #endif
@@ -778,6 +734,7 @@ static int enum_libs( struct dl_phdr_info* info, size_t size, void* data )
 static void load_hardware_libs(void)
 {
     const struct hw_module_t *module;
+    int ret;
     void *libhardware;
     char error[256];
 
@@ -803,10 +760,13 @@ static void load_hardware_libs(void)
         }
     }
 
-    if (phw_get_module( GRALLOC_HARDWARE_MODULE_ID, &module ) == 0)
-        gralloc_module = (struct gralloc_module_t *)module;
-    else
-        ERR( "failed to load gralloc module\n" );
+    if ((ret = phw_get_module( GRALLOC_HARDWARE_MODULE_ID, &module )))
+    {
+        ERR( "failed to load gralloc module err %d\n", ret );
+        return;
+    }
+
+    init_gralloc( module );
 }
 
 static void load_android_libs(void)

@@ -79,6 +79,7 @@ static const WELLKNOWNSID WellKnownSids[] =
     { {0,0}, WinLocalSid, { SID_REVISION, 1, { SECURITY_LOCAL_SID_AUTHORITY }, { SECURITY_LOCAL_RID } } },
     { {'C','O'}, WinCreatorOwnerSid, { SID_REVISION, 1, { SECURITY_CREATOR_SID_AUTHORITY }, { SECURITY_CREATOR_OWNER_RID } } },
     { {'C','G'}, WinCreatorGroupSid, { SID_REVISION, 1, { SECURITY_CREATOR_SID_AUTHORITY }, { SECURITY_CREATOR_GROUP_RID } } },
+    { {'O','W'}, WinCreatorOwnerRightsSid, { SID_REVISION, 1, { SECURITY_CREATOR_SID_AUTHORITY }, { SECURITY_CREATOR_OWNER_RIGHTS_RID } } },
     { {0,0}, WinCreatorOwnerServerSid, { SID_REVISION, 1, { SECURITY_CREATOR_SID_AUTHORITY }, { SECURITY_CREATOR_OWNER_SERVER_RID } } },
     { {0,0}, WinCreatorGroupServerSid, { SID_REVISION, 1, { SECURITY_CREATOR_SID_AUTHORITY }, { SECURITY_CREATOR_GROUP_SERVER_RID } } },
     { {0,0}, WinNtAuthoritySid, { SID_REVISION, 0, { SECURITY_NT_AUTHORITY }, { SECURITY_NULL_RID } } },
@@ -127,7 +128,7 @@ static const WELLKNOWNSID WellKnownSids[] =
     { {'M','E'}, WinMediumLabelSid, { SID_REVISION, 1, { SECURITY_MANDATORY_LABEL_AUTHORITY}, { SECURITY_MANDATORY_MEDIUM_RID } } },
     { {'H','I'}, WinHighLabelSid, { SID_REVISION, 1, { SECURITY_MANDATORY_LABEL_AUTHORITY}, { SECURITY_MANDATORY_HIGH_RID } } },
     { {'S','I'}, WinSystemLabelSid, { SID_REVISION, 1, { SECURITY_MANDATORY_LABEL_AUTHORITY}, { SECURITY_MANDATORY_SYSTEM_RID } } },
-    { {0,0}, WinBuiltinAnyPackageSid, { SID_REVISION, 2, { SECURITY_APP_PACKAGE_AUTHORITY }, { SECURITY_APP_PACKAGE_BASE_RID, SECURITY_BUILTIN_PACKAGE_ANY_PACKAGE } } },
+    { {'A','C'}, WinBuiltinAnyPackageSid, { SID_REVISION, 2, { SECURITY_APP_PACKAGE_AUTHORITY }, { SECURITY_APP_PACKAGE_BASE_RID, SECURITY_BUILTIN_PACKAGE_ANY_PACKAGE } } },
 };
 
 /* these SIDs must be constructed as relative to some domain - only the RID is well-known */
@@ -439,10 +440,10 @@ static inline DWORD get_security_service( LPWSTR full_service_name, DWORD access
 /* helper function for SE_REGISTRY_KEY objects in [Get|Set]NamedSecurityInfo */
 static inline DWORD get_security_regkey( LPWSTR full_key_name, DWORD access, HANDLE *key )
 {
-    WCHAR classes_rootW[] = {'C','L','A','S','S','E','S','_','R','O','O','T',0};
-    WCHAR current_userW[] = {'C','U','R','R','E','N','T','_','U','S','E','R',0};
-    WCHAR machineW[] = {'M','A','C','H','I','N','E',0};
-    WCHAR usersW[] = {'U','S','E','R','S',0};
+    static const WCHAR classes_rootW[] = {'C','L','A','S','S','E','S','_','R','O','O','T',0};
+    static const WCHAR current_userW[] = {'C','U','R','R','E','N','T','_','U','S','E','R',0};
+    static const WCHAR machineW[] = {'M','A','C','H','I','N','E',0};
+    static const WCHAR usersW[] = {'U','S','E','R','S',0};
     LPWSTR p = strchrW(full_key_name, '\\');
     int len = p-full_key_name;
     HKEY hParent;
@@ -5040,9 +5041,9 @@ static void DumpString(LPCWSTR string, int cch, WCHAR **pwptr, ULONG *plen)
 
 static BOOL DumpSidNumeric(PSID psid, WCHAR **pwptr, ULONG *plen)
 {
+    static const WCHAR fmt[] = { 'S','-','%','u','-','%','d',0 };
+    static const WCHAR subauthfmt[] = { '-','%','u',0 };
     DWORD i;
-    WCHAR fmt[] = { 'S','-','%','u','-','%','d',0 };
-    WCHAR subauthfmt[] = { '-','%','u',0 };
     WCHAR buf[26];
     SID *pisid = psid;
 
@@ -5602,97 +5603,6 @@ BOOL WINAPI DestroyPrivateObjectSecurity( PSECURITY_DESCRIPTOR* ObjectDescriptor
     FIXME("%p - stub\n", ObjectDescriptor);
 
     heap_free( *ObjectDescriptor );
-    return TRUE;
-}
-
-BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessAsUserA(
-        HANDLE hToken,
-        LPCSTR lpApplicationName,
-        LPSTR lpCommandLine,
-        LPSECURITY_ATTRIBUTES lpProcessAttributes,
-        LPSECURITY_ATTRIBUTES lpThreadAttributes,
-        BOOL bInheritHandles,
-        DWORD dwCreationFlags,
-        LPVOID lpEnvironment,
-        LPCSTR lpCurrentDirectory,
-        LPSTARTUPINFOA lpStartupInfo,
-        LPPROCESS_INFORMATION lpProcessInformation )
-{
-    BOOL ret;
-    WCHAR *appW, *cmdlnW, *cwdW;
-    STARTUPINFOW sinfo;
-
-    TRACE("%p %s %s %p %p %d 0x%08x %p %s %p %p\n", hToken, debugstr_a(lpApplicationName),
-          debugstr_a(lpCommandLine), lpProcessAttributes, lpThreadAttributes, bInheritHandles,
-          dwCreationFlags, lpEnvironment, debugstr_a(lpCurrentDirectory), lpStartupInfo, lpProcessInformation);
-
-    appW = SERV_dup(lpApplicationName);
-    cmdlnW = SERV_dup(lpCommandLine);
-    cwdW = SERV_dup(lpCurrentDirectory);
-    sinfo.cb = sizeof(sinfo);
-    sinfo.lpReserved = SERV_dup(lpStartupInfo->lpReserved);
-    sinfo.lpDesktop = SERV_dup(lpStartupInfo->lpDesktop);
-    sinfo.lpTitle = SERV_dup(lpStartupInfo->lpTitle);
-    sinfo.dwX = lpStartupInfo->dwX;
-    sinfo.dwY = lpStartupInfo->dwY;
-    sinfo.dwXSize = lpStartupInfo->dwXSize;
-    sinfo.dwYSize = lpStartupInfo->dwYSize;
-    sinfo.dwXCountChars = lpStartupInfo->dwXCountChars;
-    sinfo.dwYCountChars = lpStartupInfo->dwYCountChars;
-    sinfo.dwFillAttribute = lpStartupInfo->dwFillAttribute;
-    sinfo.dwFlags = lpStartupInfo->dwFlags;
-    sinfo.wShowWindow = lpStartupInfo->wShowWindow;
-    sinfo.cbReserved2 = lpStartupInfo->cbReserved2;
-    sinfo.lpReserved2 = lpStartupInfo->lpReserved2;
-    sinfo.hStdInput = lpStartupInfo->hStdInput;
-    sinfo.hStdOutput = lpStartupInfo->hStdOutput;
-    sinfo.hStdError = lpStartupInfo->hStdError;
-    ret = CreateProcessAsUserW(hToken, appW, cmdlnW, lpProcessAttributes,
-            lpThreadAttributes, bInheritHandles, dwCreationFlags,
-            lpEnvironment, cwdW, &sinfo, lpProcessInformation);
-    heap_free(appW);
-    heap_free(cmdlnW);
-    heap_free(cwdW);
-    heap_free(sinfo.lpReserved);
-    heap_free(sinfo.lpDesktop);
-    heap_free(sinfo.lpTitle);
-
-    return ret;
-}
-
-BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessAsUserW(
-        HANDLE hToken,
-        LPCWSTR lpApplicationName,
-        LPWSTR lpCommandLine,
-        LPSECURITY_ATTRIBUTES lpProcessAttributes,
-        LPSECURITY_ATTRIBUTES lpThreadAttributes,
-        BOOL bInheritHandles,
-        DWORD dwCreationFlags,
-        LPVOID lpEnvironment,
-        LPCWSTR lpCurrentDirectory,
-        LPSTARTUPINFOW lpStartupInfo,
-        LPPROCESS_INFORMATION lpProcessInformation )
-{
-    FIXME("%p %s %s %p %p %d 0x%08x %p %s %p %p - semi-stub\n", hToken,
-          debugstr_w(lpApplicationName), debugstr_w(lpCommandLine), lpProcessAttributes,
-          lpThreadAttributes, bInheritHandles, dwCreationFlags, lpEnvironment, 
-          debugstr_w(lpCurrentDirectory), lpStartupInfo, lpProcessInformation);
-
-    /* We should create the process with a suspended main thread */
-    if (!CreateProcessW (lpApplicationName,
-                         lpCommandLine,
-                         lpProcessAttributes,
-                         lpThreadAttributes,
-                         bInheritHandles,
-                         dwCreationFlags, /* CREATE_SUSPENDED */
-                         lpEnvironment,
-                         lpCurrentDirectory,
-                         lpStartupInfo,
-                         lpProcessInformation))
-    {
-      return FALSE;
-    }
-
     return TRUE;
 }
 

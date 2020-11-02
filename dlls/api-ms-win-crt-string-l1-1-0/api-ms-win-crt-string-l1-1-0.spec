@@ -3,7 +3,7 @@
 @ cdecl __iscsymf(long) ucrtbase.__iscsymf
 @ stub __iswcsym
 @ stub __iswcsymf
-@ stub __strncnt
+@ cdecl __strncnt(str long) ucrtbase.__strncnt
 @ stub __wcsncnt
 @ cdecl _isalnum_l(long ptr) ucrtbase._isalnum_l
 @ cdecl _isalpha_l(long ptr) ucrtbase._isalpha_l
@@ -19,21 +19,21 @@
 @ stub _ispunct_l
 @ cdecl _isspace_l(long ptr) ucrtbase._isspace_l
 @ cdecl _isupper_l(long ptr) ucrtbase._isupper_l
-@ stub _iswalnum_l
+@ cdecl _iswalnum_l(long ptr) ucrtbase._iswalnum_l
 @ cdecl _iswalpha_l(long ptr) ucrtbase._iswalpha_l
 @ cdecl _iswblank_l(long ptr) ucrtbase._iswblank_l
-@ stub _iswcntrl_l
+@ cdecl _iswcntrl_l(long ptr) ucrtbase._iswcntrl_l
 @ stub _iswcsym_l
 @ stub _iswcsymf_l
 @ cdecl _iswctype_l(long long ptr) ucrtbase._iswctype_l
 @ cdecl _iswdigit_l(long ptr) ucrtbase._iswdigit_l
-@ stub _iswgraph_l
-@ stub _iswlower_l
-@ stub _iswprint_l
+@ cdecl _iswgraph_l(long ptr) ucrtbase._iswgraph_l
+@ cdecl _iswlower_l(long ptr) ucrtbase._iswlower_l
+@ cdecl _iswprint_l(long ptr) ucrtbase._iswprint_l
 @ cdecl _iswpunct_l(long ptr) ucrtbase._iswpunct_l
 @ cdecl _iswspace_l(long ptr) ucrtbase._iswspace_l
-@ stub _iswupper_l
-@ stub _iswxdigit_l
+@ cdecl _iswupper_l(long ptr) ucrtbase._iswupper_l
+@ cdecl _iswxdigit_l(long ptr) ucrtbase._iswxdigit_l
 @ cdecl _isxdigit_l(long ptr) ucrtbase._isxdigit_l
 @ cdecl _memccpy(ptr ptr long long) ucrtbase._memccpy
 @ cdecl _memicmp(str str long) ucrtbase._memicmp

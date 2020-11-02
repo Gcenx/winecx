@@ -421,40 +421,49 @@ PRTL_USER_PROCESS_PARAMETERS WINAPI RtlDeNormalizeProcessParams( RTL_USER_PROCES
 }
 
 
+#define ROUND_SIZE(size) (((size) + sizeof(void *) - 1) & ~(sizeof(void *) - 1))
+
 /* append a unicode string to the process params data; helper for RtlCreateProcessParameters */
 static void append_unicode_string( void **data, const UNICODE_STRING *src,
                                    UNICODE_STRING *dst )
 {
     dst->Length = src->Length;
     dst->MaximumLength = src->MaximumLength;
-    dst->Buffer = *data;
-    memcpy( dst->Buffer, src->Buffer, dst->MaximumLength );
-    *data = (char *)dst->Buffer + dst->MaximumLength;
+    if (dst->MaximumLength)
+    {
+        dst->Buffer = *data;
+        memcpy( dst->Buffer, src->Buffer, dst->Length );
+        *data = (char *)dst->Buffer + ROUND_SIZE( dst->MaximumLength );
+    }
+    else dst->Buffer = NULL;
 }
 
 
 /******************************************************************************
- *  RtlCreateProcessParameters  [NTDLL.@]
+ *  RtlCreateProcessParametersEx  [NTDLL.@]
  */
-NTSTATUS WINAPI RtlCreateProcessParameters( RTL_USER_PROCESS_PARAMETERS **result,
-                                            const UNICODE_STRING *ImagePathName,
-                                            const UNICODE_STRING *DllPath,
-                                            const UNICODE_STRING *CurrentDirectoryName,
-                                            const UNICODE_STRING *CommandLine,
-                                            PWSTR Environment,
-                                            const UNICODE_STRING *WindowTitle,
-                                            const UNICODE_STRING *Desktop,
-                                            const UNICODE_STRING *ShellInfo,
-                                            const UNICODE_STRING *RuntimeInfo )
+NTSTATUS WINAPI RtlCreateProcessParametersEx( RTL_USER_PROCESS_PARAMETERS **result,
+                                              const UNICODE_STRING *ImagePathName,
+                                              const UNICODE_STRING *DllPath,
+                                              const UNICODE_STRING *CurrentDirectoryName,
+                                              const UNICODE_STRING *CommandLine,
+                                              PWSTR Environment,
+                                              const UNICODE_STRING *WindowTitle,
+                                              const UNICODE_STRING *Desktop,
+                                              const UNICODE_STRING *ShellInfo,
+                                              const UNICODE_STRING *RuntimeInfo,
+                                              ULONG flags )
 {
     static WCHAR empty[] = {0};
     static const UNICODE_STRING empty_str = { 0, sizeof(empty), empty };
     static const UNICODE_STRING null_str = { 0, 0, NULL };
 
+    UNICODE_STRING curdir;
     const RTL_USER_PROCESS_PARAMETERS *cur_params;
-    SIZE_T size, total_size;
+    SIZE_T size, env_size;
     void *ptr;
-    NTSTATUS status;
+    const WCHAR *env;
+    NTSTATUS status = STATUS_SUCCESS;
 
     RtlAcquirePebLock();
     cur_params = NtCurrentTeb()->Peb->ProcessParameters;
@@ -462,10 +471,13 @@ NTSTATUS WINAPI RtlCreateProcessParameters( RTL_USER_PROCESS_PARAMETERS **result
     if (!CurrentDirectoryName)
     {
         if (NtCurrentTeb()->Tib.SubSystemTib)  /* FIXME: hack */
-            CurrentDirectoryName = &((WIN16_SUBSYSTEM_TIB *)NtCurrentTeb()->Tib.SubSystemTib)->curdir.DosPath;
+            curdir = ((WIN16_SUBSYSTEM_TIB *)NtCurrentTeb()->Tib.SubSystemTib)->curdir.DosPath;
         else
-            CurrentDirectoryName = &cur_params->CurrentDirectory.DosPath;
+            curdir = cur_params->CurrentDirectory.DosPath;
     }
+    else curdir = *CurrentDirectoryName;
+    curdir.MaximumLength = MAX_PATH * sizeof(WCHAR);
+
     if (!CommandLine) CommandLine = ImagePathName;
     if (!Environment) Environment = cur_params->Environment;
     if (!WindowTitle) WindowTitle = &empty_str;
@@ -473,31 +485,32 @@ NTSTATUS WINAPI RtlCreateProcessParameters( RTL_USER_PROCESS_PARAMETERS **result
     if (!ShellInfo) ShellInfo = &empty_str;
     if (!RuntimeInfo) RuntimeInfo = &null_str;
 
-    size = (sizeof(RTL_USER_PROCESS_PARAMETERS)
-            + ImagePathName->MaximumLength
-            + DllPath->MaximumLength
-            + CurrentDirectoryName->MaximumLength
-            + CommandLine->MaximumLength
-            + WindowTitle->MaximumLength
-            + Desktop->MaximumLength
-            + ShellInfo->MaximumLength
-            + RuntimeInfo->MaximumLength);
+    env = Environment;
+    while (*env) env += strlenW(env) + 1;
+    env++;
+    env_size = ROUND_SIZE( (env - Environment) * sizeof(WCHAR) );
 
-    total_size = size;
-    ptr = NULL;
-    if ((status = NtAllocateVirtualMemory( NtCurrentProcess(), &ptr, 0, &total_size,
-                                           MEM_COMMIT, PAGE_READWRITE )) == STATUS_SUCCESS)
+    size = (sizeof(RTL_USER_PROCESS_PARAMETERS)
+            + ROUND_SIZE( ImagePathName->MaximumLength )
+            + ROUND_SIZE( DllPath->MaximumLength )
+            + ROUND_SIZE( curdir.MaximumLength )
+            + ROUND_SIZE( CommandLine->MaximumLength )
+            + ROUND_SIZE( WindowTitle->MaximumLength )
+            + ROUND_SIZE( Desktop->MaximumLength )
+            + ROUND_SIZE( ShellInfo->MaximumLength )
+            + ROUND_SIZE( RuntimeInfo->MaximumLength ));
+
+    if ((ptr = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, size + env_size )))
     {
         RTL_USER_PROCESS_PARAMETERS *params = ptr;
-        params->AllocationSize = total_size;
+        params->AllocationSize = size;
         params->Size           = size;
         params->Flags          = PROCESS_PARAMS_FLAG_NORMALIZED;
         params->ConsoleFlags   = cur_params->ConsoleFlags;
-        params->Environment    = Environment;
         /* all other fields are zero */
 
         ptr = params + 1;
-        append_unicode_string( &ptr, CurrentDirectoryName, &params->CurrentDirectory.DosPath );
+        append_unicode_string( &ptr, &curdir, &params->CurrentDirectory.DosPath );
         append_unicode_string( &ptr, DllPath, &params->DllPath );
         append_unicode_string( &ptr, ImagePathName, &params->ImagePathName );
         append_unicode_string( &ptr, CommandLine, &params->CommandLine );
@@ -505,10 +518,34 @@ NTSTATUS WINAPI RtlCreateProcessParameters( RTL_USER_PROCESS_PARAMETERS **result
         append_unicode_string( &ptr, Desktop, &params->Desktop );
         append_unicode_string( &ptr, ShellInfo, &params->ShellInfo );
         append_unicode_string( &ptr, RuntimeInfo, &params->RuntimeInfo );
-        *result = RtlDeNormalizeProcessParams( params );
+        params->Environment = ptr;
+        memcpy( ptr, Environment, (env - Environment) * sizeof(WCHAR) );
+        *result = params;
+        if (!(flags & PROCESS_PARAMS_FLAG_NORMALIZED)) RtlDeNormalizeProcessParams( params );
     }
+    else status = STATUS_NO_MEMORY;
+
     RtlReleasePebLock();
     return status;
+}
+
+
+/******************************************************************************
+ *  RtlCreateProcessParameters  [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlCreateProcessParameters( RTL_USER_PROCESS_PARAMETERS **result,
+                                            const UNICODE_STRING *image,
+                                            const UNICODE_STRING *dllpath,
+                                            const UNICODE_STRING *curdir,
+                                            const UNICODE_STRING *cmdline,
+                                            PWSTR env,
+                                            const UNICODE_STRING *title,
+                                            const UNICODE_STRING *desktop,
+                                            const UNICODE_STRING *shellinfo,
+                                            const UNICODE_STRING *runtime )
+{
+    return RtlCreateProcessParametersEx( result, image, dllpath, curdir, cmdline,
+                                         env, title, desktop, shellinfo, runtime, 0 );
 }
 
 
@@ -517,7 +554,5 @@ NTSTATUS WINAPI RtlCreateProcessParameters( RTL_USER_PROCESS_PARAMETERS **result
  */
 void WINAPI RtlDestroyProcessParameters( RTL_USER_PROCESS_PARAMETERS *params )
 {
-    void *ptr = params;
-    SIZE_T size = 0;
-    NtFreeVirtualMemory( NtCurrentProcess(), &ptr, &size, MEM_RELEASE );
+    RtlFreeHeap( GetProcessHeap(), 0, params );
 }

@@ -85,10 +85,6 @@ static int   (WINAPI *pWSAEnumNameSpaceProvidersA)(LPDWORD,LPWSANAMESPACE_INFOA)
 static int   (WINAPI *pWSAEnumNameSpaceProvidersW)(LPDWORD,LPWSANAMESPACE_INFOW);
 static int   (WINAPI *pWSAPoll)(WSAPOLLFD *,ULONG,INT);
 
-/* Function pointers from ntdll */
-static NTSTATUS (WINAPI *pNtSetInformationFile)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, FILE_INFORMATION_CLASS);
-static NTSTATUS (WINAPI *pNtQueryInformationFile)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, FILE_INFORMATION_CLASS);
-
 /* Function pointers from iphlpapi */
 static DWORD (WINAPI *pGetAdaptersInfo)(PIP_ADAPTER_INFO,PULONG);
 static DWORD (WINAPI *pGetIpForwardTable)(PMIB_IPFORWARDTABLE,PULONG,BOOL);
@@ -1314,11 +1310,7 @@ static void Init (void)
 
     ntdll = LoadLibraryA("ntdll.dll");
     if (ntdll)
-    {
         pNtClose = (void *)GetProcAddress(ntdll, "NtClose");
-        pNtSetInformationFile = (void *)GetProcAddress(ntdll, "NtSetInformationFile");
-        pNtQueryInformationFile = (void *)GetProcAddress(ntdll, "NtQueryInformationFile");
-    }
 
     ok ( WSAStartup ( ver, &data ) == 0, "WSAStartup failed\n" );
     tls = TlsAlloc();
@@ -9633,13 +9625,10 @@ end:
 
 static void test_completion_port(void)
 {
-    FILE_IO_COMPLETION_NOTIFICATION_INFORMATION io_info;
     HANDLE previous_port, io_port;
     WSAOVERLAPPED ov, *olp;
     SOCKET src, dest, dup, connector = INVALID_SOCKET;
     WSAPROTOCOL_INFOA info;
-    IO_STATUS_BLOCK io;
-    NTSTATUS status;
     char buf[1024];
     WSABUF bufs;
     DWORD num_bytes, flags;
@@ -10251,16 +10240,6 @@ static void test_completion_port(void)
     io_port = CreateIoCompletionPort((HANDLE)dest, previous_port, 236, 0);
     ok(io_port != NULL, "failed to create completion port %u\n", GetLastError());
 
-    io_info.Flags = FILE_SKIP_COMPLETION_PORT_ON_SUCCESS;
-    status = pNtSetInformationFile((HANDLE)src, &io, &io_info, sizeof(io_info), FileIoCompletionNotificationInformation);
-    ok(status == STATUS_SUCCESS || broken(status == STATUS_INVALID_INFO_CLASS) /* XP */,
-       "expected STATUS_SUCCESS, got %08x\n", status);
-
-    io_info.Flags = FILE_SKIP_COMPLETION_PORT_ON_SUCCESS;
-    status = pNtSetInformationFile((HANDLE)dest, &io, &io_info, sizeof(io_info), FileIoCompletionNotificationInformation);
-    ok(status == STATUS_SUCCESS || broken(status == STATUS_INVALID_INFO_CLASS) /* XP */,
-       "expected STATUS_SUCCESS, got %08x\n", status);
-
     bret = pAcceptEx(src, dest, buf, sizeof(buf) - 2*(sizeof(struct sockaddr_in) + 16),
             sizeof(struct sockaddr_in) + 16, sizeof(struct sockaddr_in) + 16,
             &num_bytes, &ov);
@@ -10285,13 +10264,6 @@ static void test_completion_port(void)
     ok(num_bytes == 0, "Number of bytes transferred is %u\n", num_bytes);
     ok(olp == &ov, "Overlapped structure is at %p\n", olp);
     ok(olp && (olp->Internal == (ULONG)STATUS_SUCCESS), "Internal status is %lx\n", olp ? olp->Internal : 0);
-
-    io_info.Flags = 0;
-    status = pNtQueryInformationFile((HANDLE)dest, &io, &io_info, sizeof(io_info), FileIoCompletionNotificationInformation);
-    ok(status == STATUS_SUCCESS || broken(status == STATUS_INVALID_INFO_CLASS) /* XP */,
-       "expected STATUS_SUCCESS, got %08x\n", status);
-    if (status == STATUS_SUCCESS)
-        ok((io_info.Flags & FILE_SKIP_COMPLETION_PORT_ON_SUCCESS) != 0, "got %08x\n", io_info.Flags);
 
     SetLastError(0xdeadbeef);
     key = 0xdeadbeef;

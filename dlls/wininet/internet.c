@@ -777,7 +777,7 @@ static void dump_INTERNET_FLAGS(DWORD dwFlags)
 #undef FE
     unsigned int i;
 
-    for (i = 0; i < (sizeof(flag) / sizeof(flag[0])); i++) {
+    for (i = 0; i < ARRAY_SIZE(flag); i++) {
 	if (flag[i].val & dwFlags) {
 	    TRACE(" %s", flag[i].name);
 	    dwFlags &= ~flag[i].val;
@@ -1018,7 +1018,7 @@ HINTERNET WINAPI InternetOpenW(LPCWSTR lpszAgent, DWORD dwAccessType,
 	
 	TRACE("(%s, %i, %s, %s, %i)\n", debugstr_w(lpszAgent), dwAccessType,
 	      debugstr_w(lpszProxy), debugstr_w(lpszProxyBypass), dwFlags);
-	for (i = 0; i < (sizeof(access_type) / sizeof(access_type[0])); i++) {
+        for (i = 0; i < ARRAY_SIZE(access_type); i++) {
 	    if (access_type[i].val == dwAccessType) {
 		access_type_str = access_type[i].name;
 		break;
@@ -1623,7 +1623,7 @@ static INTERNET_SCHEME GetInternetSchemeW(LPCWSTR lpszScheme, DWORD nMaxCmp)
     if(lpszScheme==NULL)
         return INTERNET_SCHEME_UNKNOWN;
 
-    for (i = 0; i < sizeof(url_schemes)/sizeof(url_schemes[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(url_schemes); i++)
         if (!strncmpiW(lpszScheme, url_schemes[i], nMaxCmp))
             return INTERNET_SCHEME_FIRST + i;
 
@@ -1664,7 +1664,7 @@ BOOL WINAPI InternetCrackUrlW(const WCHAR *lpszUrl, DWORD dwUrlLength, DWORD dwF
 
     if (dwFlags & ICU_DECODE)
     {
-        WCHAR *url_tmp;
+        WCHAR *url_tmp, *buffer;
         DWORD len = dwUrlLength + 1;
         BOOL ret;
 
@@ -1673,9 +1673,24 @@ BOOL WINAPI InternetCrackUrlW(const WCHAR *lpszUrl, DWORD dwUrlLength, DWORD dwF
             SetLastError(ERROR_OUTOFMEMORY);
             return FALSE;
         }
-        ret = InternetCanonicalizeUrlW(url_tmp, url_tmp, &len, ICU_DECODE | ICU_NO_ENCODE);
+
+        buffer = url_tmp;
+        ret = InternetCanonicalizeUrlW(url_tmp, buffer, &len, ICU_DECODE | ICU_NO_ENCODE);
+        if (!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+        {
+            buffer = heap_alloc(len * sizeof(WCHAR));
+            if (!buffer)
+            {
+                SetLastError(ERROR_OUTOFMEMORY);
+                heap_free(url_tmp);
+                return FALSE;
+            }
+            ret = InternetCanonicalizeUrlW(url_tmp, buffer, &len, ICU_DECODE | ICU_NO_ENCODE);
+        }
         if (ret)
-            ret = InternetCrackUrlW(url_tmp, len, dwFlags & ~ICU_DECODE, lpUC);
+            ret = InternetCrackUrlW(buffer, len, dwFlags & ~ICU_DECODE, lpUC);
+
+        if (buffer != url_tmp) heap_free(buffer);
         heap_free(url_tmp);
         return ret;
     }
@@ -4051,7 +4066,7 @@ static LPCWSTR INTERNET_GetSchemeString(INTERNET_SCHEME scheme)
     if (scheme < INTERNET_SCHEME_FIRST)
         return NULL;
     index = scheme - INTERNET_SCHEME_FIRST;
-    if (index >= sizeof(url_schemes)/sizeof(url_schemes[0]))
+    if (index >= ARRAY_SIZE(url_schemes))
         return NULL;
     return (LPCWSTR)url_schemes[index];
 }
@@ -4328,7 +4343,7 @@ BOOL WINAPI InternetCreateUrlW(LPURL_COMPONENTSW lpUrlComponents, DWORD dwFlags,
     if (!scheme_is_opaque(nScheme) || lpUrlComponents->lpszHostName)
     {
         memcpy(lpszUrl, slashSlashW, sizeof(slashSlashW));
-        lpszUrl += sizeof(slashSlashW)/sizeof(slashSlashW[0]);
+        lpszUrl += ARRAY_SIZE(slashSlashW);
     }
 
     if (lpUrlComponents->lpszUserName)

@@ -241,7 +241,7 @@ void HID_find_gamepads(xinput_controller *devices)
 
     EnterCriticalSection(&hid_xinput_crit);
 
-    device_info_set = SetupDiGetClassDevsW(&hid_guid, NULL, NULL, DIGCF_DEVICEINTERFACE);
+    device_info_set = SetupDiGetClassDevsW(&hid_guid, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
 
     data = HeapAlloc(GetProcessHeap(), 0 , sizeof(*data) + detail_size);
     data->cbSize = sizeof(*data);
@@ -457,10 +457,9 @@ DWORD HID_set_state(xinput_controller* device, XINPUT_VIBRATION* state)
                 return ERROR_SUCCESS;
             return GetLastError();
         }
-        return ERROR_SUCCESS;
     }
 
-    return ERROR_NOT_SUPPORTED;
+    return ERROR_SUCCESS;
 }
 
 void HID_enable(xinput_controller* device, BOOL enable)

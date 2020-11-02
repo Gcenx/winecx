@@ -180,7 +180,7 @@
 #define IDI_SHELL_DRIVE              9
 #define IDI_SHELL_NETDRIVE          10
 #define IDI_SHELL_NETDRIVE2         11
-#define IDI_SHELL_CDROM             12
+#define IDI_SHELL_OPTICAL_DRIVE     12
 #define IDI_SHELL_RAMDISK           13
 #define IDI_SHELL_ENTIRE_NETWORK    14
 #define IDI_SHELL_NETWORK           15
@@ -189,26 +189,187 @@
 #define IDI_SHELL_MY_NETWORK_PLACES 18
 #define IDI_SHELL_COMPUTERS_NEAR_ME 19
 #define IDI_SHELL_FOLDER_SMALL_XP   20
+#define IDI_SHELL_RECENT_DOCUMENTS  21
+#define IDI_SHELL_SETTINGS          22
 #define IDI_SHELL_SEARCH            23
 #define IDI_SHELL_HELP              24
+#define IDI_SHELL_RUN               25
+#define IDI_SHELL_SLEEP             26
+#define IDI_SHELL_EJECT             27
+#define IDI_SHELL_SHUT_DOWN         28
 #define IDI_SHELL_FOLDER_OPEN_LARGE 29
 #define IDI_SHELL_SHORTCUT          30
 #define IDI_SHELL_FOLDER_OPEN_SMALL 31
 #define IDI_SHELL_EMPTY_RECYCLE_BIN 32
 #define IDI_SHELL_FULL_RECYCLE_BIN  33
+#define IDI_SHELL_MODEM_FOLDER      34
 #define IDI_SHELL_DESKTOP           35
 #define IDI_SHELL_CONTROL_PANEL     36
+#define IDI_SHELL_APP_FOLDER        37
 #define IDI_SHELL_PRINTERS_FOLDER   38
 #define IDI_SHELL_FONTS_FOLDER      39
+#define IDI_SHELL_START_MENU        40
+#define IDI_SHELL_MUSIC_CD          41
+#define IDI_SHELL_TREE              42
+#define IDI_SHELL_REMOTE_FOLDER     43
+#define IDI_SHELL_FAVORITES         44
+#define IDI_SHELL_LOG_OFF           45
+#define IDI_SHELL_SEARCH_FOLDER     46
+#define IDI_SHELL_UPDATE            47
+#define IDI_SHELL_SECURITY          48
+#define IDI_SHELL_CONFIRM_SHUTDOWN  49
+#define IDI_SHELL_BLANK1            50
+#define IDI_SHELL_BLANK2            51
+#define IDI_SHELL_BLANK3            52
+#define IDI_SHELL_BLANK4            53
+#define IDI_SHELL_UNKNOWN_DRIVE     54
+/* 55 - 132 not used on Windows */
+#define IDI_SHELL_FILES            133
+#define IDI_SHELL_FILE_SEARCH      134
+#define IDI_SHELL_SYSTEM_SEARCH    135
+/* 136 not used on Windows */
+#define IDI_SHELL_CONTROL_PANEL_XP 137
+#define IDI_SHELL_PRINTERS_FOLDER_XP       138
+#define IDI_SHELL_ADD_PRINTER      139
 #define IDI_SHELL_REMOTE_PRINTER   140
 #define IDI_SHELL_TO_FILE_PRINTER  141
 #define IDI_SHELL_TRASH_FILE       142
+#define IDI_SHELL_TRASH_FOLDER     143
+#define IDI_SHELL_TRASH_MIXED      144
+#define IDI_SHELL_FILE_OVERWRITE   145
+#define IDI_SHELL_FOLDER_OVERWRITE 146
+#define IDI_SHELL_FOLDER_RENAME    147
+#define IDI_SHELL_INSTALL          148
+/* 149 - 150 not used on Windows */
+#define IDI_SHELL_CONFIG_FILE      151
+#define IDI_SHELL_TEXT_FILE        152
+#define IDI_SHELL_BATCH_FILE       153
+#define IDI_SHELL_LIBRARY_FILE     154
+#define IDI_SHELL_SYSTEM_FONT      155
+#define IDI_SHELL_TRUETYPE_FONT    156
+#define IDI_SHELL_POSTSCRIPT_FONT  157
+/* 158 - 159 not used on Windows */
+#define IDI_SHELL_RUN2             160
 #define IDI_SHELL_CONFIRM_DELETE   161
+/* 162 - 164 not used on Windows */
+#define IDI_SHELL_BACKUP           165
+#define IDI_SHELL_DISK_CHECK       166
+#define IDI_SHELL_DEFRAGMENT       167
 #define IDI_SHELL_DEFAULT_PRINTER  168
 #define IDI_SHELL_DEFAULT_REMOTE_PRINTER   169
 #define IDI_SHELL_DEFAULT_TO_FILE_PRINTER  170
+#define IDI_SHELL_TREEVIEW         171
+#define IDI_SHELL_NETWORK_FOLDER   172
+#define IDI_SHELL_FAVORITES_FOLDER 173
+#define IDI_SHELL_CHECKLIST_FOLDER 174
+#define IDI_SHELL_NET_CONNECTIONS  175
+#define IDI_SHELL_NEW_WEB_FOLDER   176
+#define IDI_SHELL_VISUAL_SETTINGS  177
+#define IDI_SHELL_NEW_WEB_PAGE     178
+#define IDI_SHELL_REMOTE_CONNECTION        179
+#define IDI_SHELL_WINDOW_ON_MONITOR        180
+#define IDI_SHELL_DESKTOP_ON_MONITOR       181
+#define IDI_SHELL_WINDOW_WITH_SIDEBAR      182
+#define IDI_SHELL_WINDOW_WITHOUT_SIDEBAR   183
+#define IDI_SHELL_MAXIMIZED_WINDOW         184
+#define IDI_SHELL_FLOATING_WINDOWS         185
+#define IDI_SHELL_ONE_CLICK_OPEN   186
+#define IDI_SHELL_TWO_CLICK_OPEN   187
+/* 188 - 190 not used on Windows */
+#define IDI_SHELL_EMPTY_RECYCLE_BIN_95     191
+#define IDI_SHELL_FULL_RECYCLE_BIN_95      192
+#define IDI_SHELL_WEB_FOLDERS      193
+#define IDI_SHELL_PASSWORDS        194
+/* 195 not used on Windows */
+#define IDI_SHELL_FAX              196
+#define IDI_SHELL_DEFAULT_FAX      197
+#define IDI_SHELL_DEFAULT_NETWORK_FAX      198
+#define IDI_SHELL_NETWORK_FAX      199
+#define IDI_SHELL_RESTRICTED       200
+/* 201 - 209 not used on Windows */
+#define IDI_SHELL_DEFAULT_FOLDER   210
+/* 211 - 219 not used on Windows */
+#define IDI_SHELL_USERS            220
+#define IDI_SHELL_POWER_OFF        221
+#define IDI_SHELL_DVD              222
+#define IDI_SHELL_DOCUMENTS        223
+#define IDI_SHELL_VIDEO_FILE       224
+#define IDI_SHELL_AUDIO_FILE       225
+#define IDI_SHELL_IMAGE_FILE       226
+#define IDI_SHELL_MULTIMEDIA_FILE  227
+#define IDI_SHELL_MUSIC_CD_95      228
+#define IDI_SHELL_CARD_READER      229
+#define IDI_SHELL_ZIP_DRIVE        230
+#define IDI_SHELL_DOWNLOAD         231
+#define IDI_SHELL_DOWNLOAD_EMBLEM  232
+#define IDI_SHELL_REMOVABLE_DISK   233
+#define IDI_SHELL_BAD_REMOVABLE_DISK       234
 #define IDI_SHELL_MY_DOCUMENTS     235
-#define IDI_SHELL_FAVORITES        319
+#define IDI_SHELL_MY_PICTURES      236
+#define IDI_SHELL_MY_MUSIC         237
+#define IDI_SHELL_MY_VIDEOS        238
+#define IDI_SHELL_MSN              239
+#define IDI_SHELL_DELETE           240
+#define IDI_SHELL_MOVE             241
+#define IDI_SHELL_RENAME           242
+#define IDI_SHELL_COPY             243
+#define IDI_SHELL_UPLOAD           244
+#define IDI_SHELL_PRINT            245
+#define IDI_SHELL_PLAY             246
+#define IDI_SHELL_INTERNET_RADIO   247
+#define IDI_SHELL_UPLOAD_PHOTO     251
+#define IDI_SHELL_PRINT_PHOTO      252
+#define IDI_SHELL_EMPTY_RECYCLE_BIN2       254
+#define IDI_SHELL_NEW_NETWORK_FOLDER       258
+#define IDI_SHELL_WRITE_DISC       260
+#define IDI_SHELL_DELETE_FILE      261
+#define IDI_SHELL_ERASE_DISC       262
+#define IDI_SHELL_HELP2            263
+#define IDI_SHELL_TO_FOLDER        264
+#define IDI_SHELL_BURN_DISC        266
+#define IDI_SHELL_SHARED_FOLDER    267
+#define IDI_SHELL_USERS_XP         269
+#define IDI_SHELL_INSTALL_XP       271
+#define IDI_SHELL_MULTIFUNCTION_PRINTER    272
+#define IDI_SHELL_INTERNET         273
+#define IDI_SHELL_WEB_CALENDAR     276
+#define IDI_SHELL_USERS_XP2        279
+/* 280 not used on Windows */
+#define IDI_SHELL_SEARCH_WINDOW    281
+/* 285 - 288 not used on Windows */
+#define IDI_SHELL_HELP_FILE        289
+#define IDI_SHELL_DVD_DRIVE        291
+#define IDI_SHELL_HYBRID_CD        292
+#define IDI_SHELL_UNKNOWN_DISC     293
+#define IDI_SHELL_CD_ROM           294
+#define IDI_SHELL_CD_R             295
+#define IDI_SHELL_CD_RW            296
+#define IDI_SHELL_DVD_RAM          297
+#define IDI_SHELL_DVD_R            298
+#define IDI_SHELL_OPTICAL_DISC     302
+#define IDI_SHELL_DVD_ROM          304
+#define IDI_SHELL_INTERNET_PRINTER 311
+#define IDI_SHELL_JAZ_DRIVE        312
+#define IDI_SHELL_ZIP_DRIVE2       313
+#define IDI_SHELL_DVD_RW           318
+#define IDI_SHELL_NEW_FOLDER       319
+#define IDI_SHELL_BURN_DISC2       320
+#define IDI_SHELL_CONTROL_PANEL_XP2        321
+#define IDI_SHELL_FAVORITES_SMALL  322
+#define IDI_SHELL_SEARCH_SMALL     323
+#define IDI_SHELL_HELP_SMALL       324
+#define IDI_SHELL_LOG_OFF_SMALL    325
+#define IDI_SHELL_APP_FOLDER_SMALL 326
+#define IDI_SHELL_RECENT_SMALL     327
+#define IDI_SHELL_RUN_SMALL        328
+#define IDI_SHELL_POWER_OFF_SMALL  329
+#define IDI_SHELL_CONTROL_PANEL_SMALL      330
+#define IDI_SHELL_EJECT_SMALL      331
+/* 332 - 336 not used on Windows */
+#define IDI_SHELL_SEARCH_DIRECTORY 337
+#define IDI_SHELL_RESTRICTED2      338
+/* 339 - 511 not used on Windows */
+#define IDI_SHELL_WEB_BROWSER      512
 
 /* 
 AVI resources, windows shell32 has 14 of them: 150-152 and 160-170
@@ -263,6 +424,9 @@ FIXME: Need to add them, but for now just let them use the same: searching.avi
 #define IDC_FPROP_ARCHIVE           13021
 
 /* bitmaps */
+#define IDB_SORT_INCR           133
+#define IDB_SORT_DECR           134
+
 /* explorer toolbar icons
  * FIXME: images are hacky and should be re-drawn; also dark and light bitmaps are same for now
  */

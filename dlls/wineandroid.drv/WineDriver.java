@@ -1,7 +1,21 @@
 /*
  * WineDriver class
  *
- * Copyright 2013 Alexandre Julliard
+ * Copyright 2013-2017 Alexandre Julliard
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
 package org.winehq.wine;
@@ -79,6 +93,8 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 {
     private native String wine_init( String[] cmdline, String[] env );
 
+    private final String LOGTAG = "wine";
+
     protected Activity activity;
     protected Context context;
     private TextView progressStatusText;
@@ -153,7 +169,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
         String binPath = new File( wineEnv.get( "WINELOADER" ) ).getParentFile().getAbsolutePath();
         String wineserver = binPath + "/wineserver";
-        Log.i( "wine", "New explorer process: shutting down prefix " + wineEnv.get( "WINEPREFIX" ) );
+        Log.i( LOGTAG, "New explorer process: shutting down prefix " + wineEnv.get( "WINEPREFIX" ) );
         try
         {
             ProcessBuilder pb = new ProcessBuilder( wineserver, "-k" );
@@ -164,7 +180,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         }
         catch (Exception e)
         {
-            Log.i( "wine", "Prefix shutdown failed: " + e );
+            Log.i( LOGTAG, "Prefix shutdown failed: " + e );
         }
 
         prefix = new File( wineEnv.get( "WINEPREFIX" ) );
@@ -186,10 +202,10 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
         String cmd_str = "";
         for (String s : cmd) cmd_str += " " + s;
-        Log.i( "wine", "Running startup program:" + cmd_str );
+        Log.i( LOGTAG, "Running startup program:" + cmd_str );
 
         String err = wine_init( cmd, env );
-        Log.e( "wine", err );
+        Log.e( LOGTAG, err );
     }
 
     public void setStartupDpi( int dpi )
@@ -201,7 +217,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
     {
         firstRun = !(new File ( wineEnv.get( "WINEPREFIX" ) ).exists());
         String existing = firstRun ? "new" : "existing";
-        Log.i( "wine", "Initializing wine in " + existing + " prefix " + wineEnv.get( "WINEPREFIX" ) );
+        Log.i( LOGTAG, "Initializing wine in " + existing + " prefix " + wineEnv.get( "WINEPREFIX" ) );
         Runnable main_thread = new Runnable() { public void run() { runWine( libwine, wineEnv, cmdline ); } };
         new Thread( main_thread ).start();
     }
@@ -213,7 +229,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
             if (desktopReady)
             {
                 String[] env = null;
-                Log.i( "wine", "Running command line: " + cmdline );
+                Log.i( LOGTAG, "Running command line: " + cmdline );
                 if (cmdline == null) return;
 
                 if (envMap != null)
@@ -231,7 +247,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
             }
             else
             {
-                Log.i( "wine", "Desktop not yet ready: queueing cmdline " + cmdline );
+                Log.i( LOGTAG, "Desktop not yet ready: queueing cmdline " + cmdline );
                 queuedCmdlines.add( new WineCmdLine( cmdline, envMap ) );
             }
         }
@@ -248,7 +264,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
             if (desktopReady)
             {
-                Log.i( "wine", "Running command array: " + sb.toString() );
+                Log.i( LOGTAG, "Running command array: " + sb.toString() );
                 if (cmdarray == null) return;
 
                 if (envMap != null)
@@ -266,7 +282,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
             }
             else
             {
-                Log.i( "wine", "Desktop not yet ready: queueing cmdarray " + sb.toString());
+                Log.i( LOGTAG, "Desktop not yet ready: queueing cmdarray " + sb.toString());
                 queuedCmdarrays.add( new WineCmdArray( cmdarray, envMap ) );
             }
         }
@@ -346,32 +362,32 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
         public boolean beginBatchEdit()
         {
-            Log.i("wine", "beginBatchEdit");
+            Log.i(LOGTAG, "beginBatchEdit");
             return true;
         }
 
         public boolean clearMetaKeyStates (int states)
         {
-            Log.i("wine", "clearMetaKeyStates");
+            Log.i(LOGTAG, "clearMetaKeyStates");
             wine_clear_meta_key_states( states );
             return super.clearMetaKeyStates (states);
         }
 
         public boolean commitCompletion (CompletionInfo text)
         {
-            Log.i("wine", "commitCompletion");
+            Log.i(LOGTAG, "commitCompletion");
             return super.commitCompletion (text);
         }
 
         public boolean commitCorrection (CorrectionInfo correctionInfo)
         {
-            Log.i("wine", "commitCorrection");
+            Log.i(LOGTAG, "commitCorrection");
             return super.commitCorrection (correctionInfo);
         }
 
         public boolean commitText (CharSequence text, int newCursorPosition)
         {
-            Log.i("wine", "commitText: '"+text.toString()+"'");
+            Log.i(LOGTAG, "commitText: '"+text.toString()+"'");
 
             super.commitText (text, newCursorPosition);
 
@@ -415,20 +431,20 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
         public boolean deleteSurroundingText (int beforeLength, int afterLength)
         {
-            Log.i("wine", "deleteSurroundingText :"+beforeLength+","+afterLength);
+            Log.i(LOGTAG, "deleteSurroundingText :"+beforeLength+","+afterLength);
             super.deleteSurroundingText (beforeLength, afterLength);
             return true;
         }
 
         public boolean endBatchEdit ()
         {
-            Log.i("wine", "endBatchEdit");
+            Log.i(LOGTAG, "endBatchEdit");
             return true;
         }
 
         public boolean finishComposingText ()
         {
-            Log.i("wine", "finishComposingText");
+            Log.i(LOGTAG, "finishComposingText");
             wine_ime_finishtext();
             Editable content = getEditable();
             if (content != null)
@@ -438,82 +454,82 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
         public int getCursorCapsMode (int reqModes)
         {
-            Log.i("wine", "getCursorCapsMode");
+            Log.i(LOGTAG, "getCursorCapsMode");
             return super.getCursorCapsMode (reqModes);
         }
 
         public Editable getEditable ()
         {
-            Log.i("wine", "getEditable");
+            Log.i(LOGTAG, "getEditable");
             return super.getEditable ();
         }
 
         public ExtractedText getExtractedText (ExtractedTextRequest request, int flags)
         {
-            Log.i("wine", "getExtractedText");
+            Log.i(LOGTAG, "getExtractedText");
             super.getExtractedText (request, flags);
             return null;
         }
 
         public CharSequence getSelectedText (int flags)
         {
-            Log.i("wine", "getSelectedText");
+            Log.i(LOGTAG, "getSelectedText");
             super.getSelectedText (flags);
             return null;
         }
 
         public CharSequence getTextAfterCursor (int length, int flags)
         {
-            Log.i("wine", "getTextAfterCursor");
+            Log.i(LOGTAG, "getTextAfterCursor");
             return super.getTextAfterCursor (length, flags);
         }
 
         public CharSequence getTextBeforeCursor (int length, int flags)
         {
-            Log.i("wine", "getTextBeforeCursor");
+            Log.i(LOGTAG, "getTextBeforeCursor");
             return super.getTextBeforeCursor (length, flags);
         }
 
         public boolean performContextMenuAction (int id)
         {
-            Log.i("wine", "performContextMenuAction");
+            Log.i(LOGTAG, "performContextMenuAction");
             return super.performContextMenuAction (id);
         }
 
         public boolean performEditorAction (int actionCode)
         {
-            Log.i("wine", "performEditorAction");
+            Log.i(LOGTAG, "performEditorAction");
             return super.performEditorAction (actionCode);
         }
 
         public boolean performPrivateCommand (String action, Bundle data)
         {
-            Log.i("wine", "performPrivateCommand");
+            Log.i(LOGTAG, "performPrivateCommand");
             return super.performPrivateCommand (action, data);
         }
 
         public boolean reportFullscreenMode (boolean enabled)
         {
-            Log.i("wine", "reportFullscreenMode");
+            Log.i(LOGTAG, "reportFullscreenMode");
             return super.reportFullscreenMode (enabled);
         }
 
         public boolean sendKeyEvent (KeyEvent event)
         {
-            Log.i("wine", "sendKeyEvent");
+            Log.i(LOGTAG, "sendKeyEvent");
             return super.sendKeyEvent (event);
         }
 
         public boolean setComposingRegion (int start, int end)
         {
-            Log.i("wine", "setComposingRegion");
+            Log.i(LOGTAG, "setComposingRegion");
             return super.setComposingRegion (start, end);
         }
 
         public boolean setComposingText (CharSequence text, int newCursorPosition)
         {
-            Log.i("wine", "setComposingText");
-            Log.i("wine", "composeText: "+text.toString());
+            Log.i(LOGTAG, "setComposingText");
+            Log.i(LOGTAG, "composeText: "+text.toString());
             wine_ime_start();
             wine_ime_settext( text.toString(), text.length(), newCursorPosition );
             return super.setComposingText (text, newCursorPosition);
@@ -521,7 +537,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
         public boolean setSelection (int start, int end)
         {
-            Log.i("wine", "setSelection");
+            Log.i(LOGTAG, "setSelection");
             return super.setSelection (start, end);
         }
     }
@@ -548,7 +564,6 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
     protected class WineWindow extends Object
     {
-        static protected final int CLR_INVALID = 0xffffffff;
         static protected final int HWND_TOP = 0;
         static protected final int HWND_BOTTOM = 1;
         static protected final int HWND_TOPMOST = 0xffffffff;
@@ -566,10 +581,10 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         protected int hwnd;
         protected int owner;
         protected int style;
+        protected float scale;
         protected boolean visible;
         protected boolean minimized;
         protected boolean topmost;
-        protected boolean has_alpha;
         protected boolean use_gl;
         protected Rect visible_rect;
         protected Rect client_rect;
@@ -584,18 +599,18 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         protected WineWindowGroup window_group;
         protected WineWindowGroup client_group;
 
-        public WineWindow( int w, WineWindow parent )
+        public WineWindow( int w, WineWindow parent, float scale )
         {
-            Log.i( "wine", String.format( "create hwnd %08x parent %08x", w, parent != null ? parent.hwnd : 0 ));
+            Log.i( LOGTAG, String.format( "create hwnd %08x parent %08x", w, parent != null ? parent.hwnd : 0 ));
             hwnd = w;
             owner = 0;
             style = 0;
             visible = false;
             minimized = false;
-            has_alpha = false;
             use_gl = false;
             visible_rect = client_rect = new Rect( 0, 0, 0, 0 );
             this.parent = parent;
+            this.scale = scale;
             children = new ArrayList<WineWindow>();
             win_map.put( w, this );
             if (parent != null) parent.children.add( this );
@@ -603,7 +618,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
         public void destroy()
         {
-            Log.i( "wine", String.format( "destroy hwnd %08x", hwnd ));
+            Log.i( LOGTAG, String.format( "destroy hwnd %08x", hwnd ));
             visible = false;
             win_map.remove( this );
             win_zorder.remove( this );
@@ -617,13 +632,16 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
             window_group = new WineWindowGroup( this, act );
             client_group = new WineWindowGroup( this, act );
             window_group.addView( client_group );
-            client_group.set_layout( client_rect.left - visible_rect.left, client_rect.top - visible_rect.top,
-                                     client_rect.right - visible_rect.left, client_rect.bottom - visible_rect.top );
+            client_group.set_layout( client_rect.left - visible_rect.left,
+                                     client_rect.top - visible_rect.top,
+                                     client_rect.right - visible_rect.left,
+                                     client_rect.bottom - visible_rect.top );
             if (parent != null)
             {
                 parent.create_window_groups( act );
                 if (visible) add_view_to_parent();
-                window_group.set_layout( visible_rect.left, visible_rect.top, visible_rect.right, visible_rect.bottom );
+                window_group.set_layout( visible_rect.left, visible_rect.top,
+                                         visible_rect.right, visible_rect.bottom );
             }
             return client_group;
         }
@@ -648,7 +666,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         public void create_client_view()
         {
             if (client_group == null) return; // no window groups yet
-            Log.i( "wine", String.format( "creating client view %08x %s", hwnd, client_rect ));
+            Log.i( LOGTAG, String.format( "creating client view %08x %s", hwnd, client_rect ));
             View view = client_group.create_view( true );
             client_group.set_layout( 0, 0, 1, 1 ); // make sure the surface gets created
         }
@@ -681,7 +699,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
                 if (child_view == parent.client_group.get_content_view()) str = " (content)" + str;
                 else str = String.format( " %08x", ((WineWindowGroup)child_view).get_window().hwnd ) + str;
             }
-            Log.i( "wine", String.format( "after adding %08x at %d new views z-order in parent %08x:%s", hwnd, pos + 1, parent.hwnd, str ));
+            Log.i( LOGTAG, String.format( "after adding %08x at %d new views z-order in parent %08x:%s", hwnd, pos + 1, parent.hwnd, str ));
         }
 
         protected void remove_view_from_parent()
@@ -700,7 +718,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
             String str = String.format( "new z-order in parent %08x:", parent.hwnd );
             for (WineWindow child : parent.children.toArray( new WineWindow[0] ))
                 str += String.format( child.visible ? " %08x" : " (%08x)", child.hwnd );
-            Log.i( "wine", str );
+            Log.i( LOGTAG, str );
         }
 
         protected void sync_views_zorder()
@@ -729,7 +747,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
                 if (child_view == parent.client_group.get_content_view()) str = " (content)" + str;
                 else str = String.format( " %08x", ((WineWindowGroup)child_view).get_window().hwnd ) + str;
             }
-            Log.i( "wine", String.format( "new views z-order in parent %08x:%s", parent.hwnd, str ));
+            Log.i( LOGTAG, String.format( "new views z-order in parent %08x:%s", parent.hwnd, str ));
         }
 
         public void pos_changed( int flags, int insert_after, int owner, int style,
@@ -743,22 +761,25 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
             visible = (style & WS_VISIBLE) != 0;
             minimized = (style & WS_MINIMIZE) != 0;
 
-            Log.i( "wine", String.format( "pos changed hwnd %08x after %08x owner %08x style %08x win %s client %s visible %s flags %08x",
+            Log.i( LOGTAG, String.format( "pos changed hwnd %08x after %08x owner %08x style %08x win %s client %s visible %s flags %08x",
                                           hwnd, insert_after, owner, style, window_rect, client_rect, visible_rect, flags ));
 
             if ((flags & SWP_NOZORDER) == 0 && parent != null) set_zorder( get_window( insert_after ));
 
             if (parent != null && window_group != null)
             {
-                window_group.set_layout( visible_rect.left, visible_rect.top, visible_rect.right, visible_rect.bottom );
+                window_group.set_layout( visible_rect.left, visible_rect.top,
+                                         visible_rect.right, visible_rect.bottom );
                 if (!was_visible && (style & WS_VISIBLE) != 0) add_view_to_parent();
                 else if (was_visible && (style & WS_VISIBLE) == 0) remove_view_from_parent();
                 else if (visible && (flags & SWP_NOZORDER) == 0) sync_views_zorder();
             }
 
             if (client_group != null)
-                client_group.set_layout( client_rect.left - visible_rect.left, client_rect.top - visible_rect.top,
-                                         client_rect.right - visible_rect.left, client_rect.bottom  - visible_rect.top );
+                client_group.set_layout( client_rect.left - visible_rect.left,
+                                         client_rect.top - visible_rect.top,
+                                         client_rect.right - visible_rect.left,
+                                         client_rect.bottom  - visible_rect.top );
 
             if (parent == null && (flags & SWP_NOZORDER) == 0)
             {
@@ -810,7 +831,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
                     win_zorder.add( win_zorder.indexOf( prev_window ) + 1, this );
                 }
 
-                Log.i( "wine", "z-order:" );
+                Log.i( LOGTAG, "z-order:" );
                 for (WineWindow win : win_zorder)
                 {
                     String attr = "";
@@ -820,20 +841,22 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
                         attr = attr + " (minimized)";
                     if (win.topmost)
                         attr = attr + " (topmost)";
-                    Log.i( "wine", String.format( "  %08x %s%s", win.hwnd, win.text, attr ) );
+                    Log.i( LOGTAG, String.format( "  %08x %s%s", win.hwnd, win.text, attr ) );
                 }
             }
         }
 
-        public void set_parent( WineWindow new_parent )
+        public void set_parent( WineWindow new_parent, float scale )
         {
-            Log.i( "wine", String.format( "set parent hwnd %08x parent %08x -> %08x",
+            Log.i( LOGTAG, String.format( "set parent hwnd %08x parent %08x -> %08x",
                                           hwnd, parent.hwnd, new_parent.hwnd ));
+            this.scale = scale;
             if (window_group != null)
             {
                 if (visible) remove_view_from_parent();
                 new_parent.create_window_groups( window_group.get_activity() );
-                window_group.set_layout( visible_rect.left, visible_rect.top, visible_rect.right, visible_rect.bottom );
+                window_group.set_layout( visible_rect.left, visible_rect.top,
+                                         visible_rect.right, visible_rect.bottom );
             }
             parent.children.remove( this );
             parent = new_parent;
@@ -841,15 +864,15 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
             if (visible && window_group != null) add_view_to_parent();
         }
 
-        public void move_children_to_new_parent( WineWindow new_parent )
+        public void move_children_to_new_parent( WineWindow new_parent, float scale )
         {
             for (WineWindow child : new ArrayList<WineWindow>( children ))
-                child.set_parent( new_parent );
+                child.set_parent( new_parent, scale );
         }
 
         public void focus()
         {
-            Log.i( "wine", String.format( "focus hwnd %08x", hwnd ));
+            Log.i( LOGTAG, String.format( "focus hwnd %08x", hwnd ));
         }
 
         public int get_hwnd()
@@ -896,20 +919,14 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
         public void set_text( String str )
         {
-            Log.i( "wine", String.format( "set text hwnd %08x '%s'", hwnd, str ));
+            Log.i( LOGTAG, String.format( "set text hwnd %08x '%s'", hwnd, str ));
             text = str;
         }
 
         public void set_icon( BitmapDrawable bmp )
         {
-            Log.i( "wine", String.format( "set icon hwnd %08x", hwnd ));
+            Log.i( LOGTAG, String.format( "set icon hwnd %08x", hwnd ));
             icon = bmp;
-        }
-
-        public void set_alpha( boolean a )
-        {
-            Log.i( "wine", String.format( "set alpha hwnd %08x %b", hwnd, a ));
-            has_alpha = a;
         }
 
         public void on_start()
@@ -923,16 +940,16 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
             if (window_group != null) window_group.setVisibility( View.INVISIBLE );
         }
 
-        public void update_surface( boolean is_client )
+        private void update_surface( boolean is_client )
         {
             if (is_client)
             {
-                Log.i( "wine", String.format( "set client surface hwnd %08x", hwnd ));
+                Log.i( LOGTAG, String.format( "set client surface hwnd %08x %s", hwnd, client_surface ));
                 if (client_surface != null) wine_surface_changed( hwnd, client_surface, true );
             }
             else
             {
-                Log.i( "wine", String.format( "set window surface hwnd %08x", hwnd ));
+                Log.i( LOGTAG, String.format( "set window surface hwnd %08x %s", hwnd, window_surface ));
                 if (window_surface != null) wine_surface_changed( hwnd, window_surface, false );
             }
         }
@@ -965,7 +982,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
         public void start_opengl()
         {
-            Log.i( "wine", String.format( "start opengl hwnd %08x", hwnd ));
+            Log.i( LOGTAG, String.format( "start opengl hwnd %08x", hwnd ));
             use_gl = true;
             create_client_view();
         }
@@ -1046,9 +1063,9 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
     protected class WineWindowView extends WineWindow
     {
-        public WineWindowView( Activity activity, int w )
+        public WineWindowView( Activity activity, int w, float scale )
         {
-            super( w, null );
+            super( w, null, scale );
             create_whole_view( activity );
             if (top_view != null) top_view.addView( window_group );
         }
@@ -1116,18 +1133,12 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
             top_view.update_action_bar();
         }
 
-        public void set_alpha( boolean has_alpha )
-        {
-            super.set_alpha( has_alpha );
-            window_group.get_content_view().setOpaque( !has_alpha );
-        }
-
         public void set_surface( SurfaceTexture surftex, boolean is_client )
         {
             // move it off-screen if we got a surface while not visible
             if (!is_client && !visible && window_surface == null && surftex != null)
             {
-                Log.i("wine",String.format("hwnd %08x not visible, moving offscreen", hwnd));
+                Log.i(LOGTAG,String.format("hwnd %08x not visible, moving offscreen", hwnd));
                 window_group.layout( visible_rect.left - visible_rect.right, visible_rect.top - visible_rect.bottom, 0, 0 );
             }
             super.set_surface( surftex, is_client );
@@ -1140,10 +1151,10 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         }
     }
 
+    // View used for all Wine windows, backed by a TextureView
+
     protected class WineView extends TextureView implements TextureView.SurfaceTextureListener
     {
-        static final int CLR_INVALID = 0xffffffff;
-
         private WineWindow window;
         private boolean is_client;
 
@@ -1158,18 +1169,19 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
             window = win;
             is_client = client;
             setSurfaceTextureListener( this );
-            setVisibility( View.VISIBLE );
+            setVisibility( VISIBLE );
+            setOpaque( false );
         }
 
         public void onAttachedToWindow()
         {
-            Log.i( "wine", String.format( "view %08x attached to window", window.hwnd ));
+            Log.i( LOGTAG, String.format( "view %08x attached to window", window.hwnd ));
             if (!is_client) window.viewAttachedToWindow();
         }
 
         public void onVisibilityChanged( View changed, int visibility )
         {
-            Log.i( "wine", String.format( "%08x visibility changed %d", window.hwnd, visibility ));
+            Log.i( LOGTAG, String.format( "%08x visibility changed %d", window.hwnd, visibility ));
             if (visibility == View.VISIBLE) window.update_surface( is_client );
         }
 
@@ -1201,15 +1213,47 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
             return window;
         }
 
-        public boolean onGenericMotionEvent(MotionEvent event)
+        public void onSurfaceTextureAvailable( SurfaceTexture surftex, int width, int height )
+        {
+            Log.i( LOGTAG, String.format( "onSurfaceTextureAvailable win %08x %dx%d %s",
+                                          window.hwnd, width, height, is_client ? "client" : "whole" ));
+            window.set_surface( surftex, is_client );
+        }
+
+        public void onSurfaceTextureSizeChanged( SurfaceTexture surftex, int width, int height )
+        {
+            Log.i( LOGTAG, String.format( "onSurfaceTextureSizeChanged win %08x %dx%d %s",
+                                          window.hwnd, width, height, is_client ? "client" : "whole" ));
+            window.set_surface( surftex, is_client);
+        }
+
+        public boolean onSurfaceTextureDestroyed( SurfaceTexture surftex )
+        {
+            Log.i( LOGTAG, String.format( "onSurfaceTextureDestroyed win %08x %s",
+                                          window.hwnd, is_client ? "client" : "whole" ));
+            window.set_surface( null, is_client );
+            return false;  // hold on to the texture since the app may still be using it
+        }
+
+        public void onSurfaceTextureUpdated(SurfaceTexture surftex)
+        {
+        }
+
+        @TargetApi(24)
+        public PointerIcon onResolvePointerIcon( MotionEvent event, int index )
+        {
+            return current_cursor;
+        }
+
+        public boolean onGenericMotionEvent( MotionEvent event )
         {
             if (is_client || window.parent != null) return false;
-            Log.i("wine", "view generic motion event");
+            Log.i(LOGTAG, "view generic motion event");
             if ((event.getSource() & InputDevice.SOURCE_JOYSTICK) ==
                 InputDevice.SOURCE_JOYSTICK &&
                 event.getAction() == MotionEvent.ACTION_MOVE)
                 {
-                    Log.i("wine", "Joystick Motion");
+                    Log.i(LOGTAG, "Joystick Motion");
                     InputDevice mDevice = event.getDevice();
                     float[] axis;
 
@@ -1239,7 +1283,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
                 int hscroll = (int)event.getAxisValue(MotionEvent.AXIS_HSCROLL);
                 int vscroll = (int)event.getAxisValue(MotionEvent.AXIS_VSCROLL);
                 window.get_event_pos( event, pos );
-                Log.i("wine", String.format( "view scroll event win %08x action %d pos %d,%d buttons %04x view %d,%d scroll %d,%d",
+                Log.i(LOGTAG, String.format( "view scroll event win %08x action %d pos %d,%d buttons %04x view %d,%d scroll %d,%d",
                                              window.hwnd, event.getAction(), pos[0], pos[1], event.getButtonState(), getLeft(), getTop(), hscroll, vscroll ));
 
                 if (vscroll != 0)
@@ -1255,21 +1299,22 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
             {
                 int[] pos = new int[2];
                 window.get_event_pos( event, pos );
-                Log.i("wine", String.format( "view motion event win %08x action %d pos %d,%d buttons %04x view %d,%d",
-                                             window.hwnd, event.getAction(), pos[0], pos[1], event.getButtonState(), getLeft(), getTop() ));
-
-                return wine_motion_event( window.hwnd, event.getAction(), pos[0], pos[1], event.getButtonState(), 0 );
+                Log.i( LOGTAG, String.format( "view motion event win %08x action %d pos %d,%d buttons %04x view %d,%d",
+                                              window.hwnd, event.getAction(), pos[0], pos[1],
+                                              event.getButtonState(), getLeft(), getTop() ));
+                return wine_motion_event( window.hwnd, event.getAction(), pos[0], pos[1],
+                                          event.getButtonState(), 0 );
             }
             return super.onGenericMotionEvent(event);
         }
 
         public boolean onKeyDown(int keyCode, KeyEvent event)
         {
-            Log.i("wine", "Keydown");
+            Log.i(LOGTAG, "Keydown");
             if ((event.getSource() & InputDevice.SOURCE_GAMEPAD)
                 == InputDevice.SOURCE_GAMEPAD)
             {
-                    Log.i("wine", "Is Gamepad "+keyCode);
+                    Log.i(LOGTAG, "Is Gamepad "+keyCode);
                     wine_send_gamepad_button(event.getDeviceId(), keyCode, 0xff);
                     return true;
             }
@@ -1278,11 +1323,11 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
         public boolean onKeyUp(int keyCode, KeyEvent event)
         {
-            Log.i("wine", "KeyUp");
+            Log.i(LOGTAG, "KeyUp");
             if ((event.getSource() & InputDevice.SOURCE_GAMEPAD)
                 == InputDevice.SOURCE_GAMEPAD)
             {
-                    Log.i("wine", "Is Gamepad: "+keyCode);
+                    Log.i(LOGTAG, "Is Gamepad: "+keyCode);
                     wine_send_gamepad_button(event.getDeviceId(), keyCode, 0x0);
                     return true;
             }
@@ -1294,12 +1339,13 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
             if (is_client || window.parent != null) return false;
             int[] pos = new int[2];
             window.get_event_pos( event, pos );
-            Log.i("wine", String.format( "view touch event win %08x action %d pos %d,%d buttons %04x view %d,%d",
-                                         window.hwnd, event.getAction(), pos[0], pos[1], event.getButtonState(), getLeft(), getTop() ));
+            Log.i( LOGTAG, String.format( "view touch event win %08x action %d pos %d,%d buttons %04x view %d,%d",
+                                          window.hwnd, event.getAction(), pos[0], pos[1],
+                                          event.getButtonState(), getLeft(), getTop() ));
             if ((event.getSource() & InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE &&
                 event.getButtonState() == 0 && event.getActionMasked() == MotionEvent.ACTION_DOWN)
             {
-                Log.i( "wine", "view begin touchpad scroll" );
+                Log.i( LOGTAG, "view begin touchpad scroll" );
 
                 scroll_active = true;
                 scroll_device = event.getDeviceId();
@@ -1323,92 +1369,66 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
                     if (hscroll != 0)
                     {
-                        Log.i( "wine", String.format( "view touchpad hscroll %d", hscroll ) );
+                        Log.i( LOGTAG, String.format( "view touchpad hscroll %d", hscroll ) );
                         wine_motion_event( window.hwnd, MotionEvent.ACTION_SCROLL | 0x10000, scroll_origin_x, scroll_origin_y, event.getButtonState(), hscroll );
                     }
                     if (vscroll != 0)
                     {
-                        Log.i( "wine", String.format( "view touchpad vscroll %d", vscroll ) );
+                        Log.i( LOGTAG, String.format( "view touchpad vscroll %d", vscroll ) );
                         wine_motion_event( window.hwnd, MotionEvent.ACTION_SCROLL, scroll_origin_x, scroll_origin_y, event.getButtonState(), vscroll );
                     }
                     return true;
                 }
                 else if (event.getActionMasked() == MotionEvent.ACTION_UP)
                 {
-                    Log.i( "wine", "view end touchpad scroll" );
+                    Log.i( LOGTAG, "view end touchpad scroll" );
                     scroll_active = false;
                     /* There was no button down, so prevent the button up */
                     return wine_motion_event( window.hwnd, MotionEvent.ACTION_HOVER_MOVE, scroll_origin_x, scroll_origin_y, event.getButtonState(), 0 );
                 }
                 else if (event.getActionMasked() == MotionEvent.ACTION_CANCEL)
                 {
-                    Log.i( "wine", "view cancel touchpad scroll" );
+                    Log.i( LOGTAG, "view cancel touchpad scroll" );
                     int hscroll = scroll_last_x - scroll_origin_x;
                     int vscroll = scroll_origin_y - scroll_last_y;
                     scroll_active = false;
                     if (hscroll != 0)
                     {
-                        Log.i( "wine", String.format( "view touchpad hscroll %d", hscroll ) );
+                        Log.i( LOGTAG, String.format( "view touchpad hscroll %d", hscroll ) );
                         wine_motion_event( window.hwnd, MotionEvent.ACTION_SCROLL | 0x10000, scroll_origin_x, scroll_origin_y, event.getButtonState(), hscroll );
                     }
                     if (vscroll != 0)
                     {
-                        Log.i( "wine", String.format( "view touchpad vscroll %d", vscroll ) );
+                        Log.i( LOGTAG, String.format( "view touchpad vscroll %d", vscroll ) );
                         wine_motion_event( window.hwnd, MotionEvent.ACTION_SCROLL, scroll_origin_x, scroll_origin_y, event.getButtonState(), vscroll );
                     }
                     return wine_motion_event( window.hwnd, MotionEvent.ACTION_HOVER_MOVE, scroll_origin_x, scroll_origin_y, event.getButtonState(), 0 );
                 }
             }
-            return wine_motion_event( window.hwnd, event.getAction(), pos[0], pos[1], event.getButtonState(), 0 );
+            return wine_motion_event( window.hwnd, event.getAction(), pos[0], pos[1],
+                                      event.getButtonState(), 0 );
         }
 
-        public boolean dispatchKeyEvent(KeyEvent event)
+        public boolean dispatchKeyEvent( KeyEvent event )
         {
-            Log.i("wine", String.format( "view dispatchKeyEvent win %08x action %d keycode %d (%s)",
-                                         window.hwnd, event.getAction(), event.getKeyCode(), event.keyCodeToString( event.getKeyCode() )));;
-            boolean ret = wine_keyboard_event( window.hwnd, event.getAction(), event.getKeyCode(), event.getMetaState() );
+            Log.i( LOGTAG, String.format( "view key event win %08x action %d keycode %d (%s)",
+                                          window.hwnd, event.getAction(), event.getKeyCode(),
+                                          KeyEvent.keyCodeToString( event.getKeyCode() )));;
+            boolean ret = wine_keyboard_event( window.hwnd, event.getAction(), event.getKeyCode(),
+                                               event.getMetaState() );
             if (!ret) ret = super.dispatchKeyEvent(event);
             return ret;
         }
 
-        public void onSurfaceTextureAvailable(SurfaceTexture surftex, int width, int height)
-        {
-            Log.i("wine", String.format( "onSurfaceTextureAvailable win %08x %dx%d %s", window.hwnd, width, height, is_client ? "client" : "whole" ));
-            window.set_surface( surftex, is_client );
-        }
-
-        public void onSurfaceTextureSizeChanged(SurfaceTexture surftex, int width, int height)
-        {
-            Log.i("wine", String.format( "onSurfaceTextureSizeChanged win %08x %dx%d %s", window.hwnd, width, height, is_client ? "client" : "whole" ));
-            window.set_surface( surftex, is_client );
-        }
-
-        public boolean onSurfaceTextureDestroyed(SurfaceTexture surftex)
-        {
-            Log.i("wine", String.format( "onSurfaceTextureDestroyed win %08x %s", window.hwnd, is_client ? "client" : "whole" ));
-            window.set_surface( null, is_client );
-            return false;  // hold on to the texture since the app may still be using it
-        }
-
-        public void onSurfaceTextureUpdated(SurfaceTexture surftex)
-        {
-        }
-
-        @TargetApi(24)
-        public PointerIcon onResolvePointerIcon( MotionEvent event, int index )
-        {
-            return current_cursor;
-        }
-
         public boolean onCheckIsTextEditor()
         {
-            Log.i("wine", "onCheckIsTextEditor");
+            Log.i(LOGTAG, "onCheckIsTextEditor");
             return true;
         }
 
         public InputConnection onCreateInputConnection( EditorInfo outAttrs )
         {
-            Log.i("wine", "onCreateInputConnection");
+            Log.i(LOGTAG, "onCreateInputConnection");
             outAttrs.inputType = InputType.TYPE_NULL;
             outAttrs.imeOptions = EditorInfo.IME_NULL;
             /* Disable voice for now. It double inputs until we can
@@ -1420,22 +1440,22 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
     protected class TopView extends ViewGroup
     {
-        protected WineWindow desktop_win;
+        protected WineWindow desktop_window;
         protected WineView desktop_view;
 
         public TopView( int hwnd )
         {
             super( context );
-            desktop_win = new WineWindow( hwnd, null );
-            desktop_view = new WineView( context, desktop_win, false );
-            desktop_win.visible = true;
+            desktop_window = new WineWindow( hwnd, null, 1.0f );
+            desktop_view = new WineView( context, desktop_window, false );
+            desktop_window.visible = true;
             addView( desktop_view );
         }
 
         @Override
         protected void onSizeChanged( int width, int height, int old_width, int old_height )
         {
-            Log.i("wine", "desktop size " + width + "x" + height );
+            Log.i(LOGTAG, "desktop size " + width + "x" + height );
             desktop_view.layout( 0, 0, width, height );
             wine_desktop_changed( (int)(width / dpi_scale), (int)(height / dpi_scale) );
         }
@@ -1443,7 +1463,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         @Override
         protected void onLayout( boolean changed, int left, int top, int right, int bottom )
         {
-            /* nothing to do */
+            // nothing to do
         }
 
         @Override
@@ -1497,7 +1517,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
                 if (v instanceof WineWindowGroup)
                 {
                     WineWindow win = ((WineWindowGroup)v).get_window();
-                    Log.i( "wine", String.format( "%d: %08x %s", i, win.hwnd, win.text ));
+                    Log.i( LOGTAG, String.format( "%d: %08x %s", i, win.hwnd, win.text ));
                     if (win.owner != 0) continue;
                     if (!win.visible) continue;
                     if (win.text == null) continue;
@@ -1544,14 +1564,14 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         }
         catch( Exception e )
         {
-            Log.i( "wine", "Exception creating y: drive for prefix " + prefix.getAbsolutePath() + " : " + e );
+            Log.i( LOGTAG, "Exception creating y: drive for prefix " + prefix.getAbsolutePath() + " : " + e );
         }
     }
 
     public void create_desktop_window( int hwnd, int scaling )
     {
-        Log.i( "wine", String.format( "create desktop %08x scale %d", hwnd, scaling ));
-        create_window( WineWindow.HWND_MESSAGE, false, 0, 0, null );
+        Log.i( LOGTAG, String.format( "create desktop %08x scale %d", hwnd, scaling ));
+        create_window( WineWindow.HWND_MESSAGE, false, 0, 1.0f, 0, null );
         top_view = new TopView( hwnd );
         if (startupDpi == 0)
             startupDpi = context.getResources().getConfiguration().densityDpi;
@@ -1584,17 +1604,20 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         }
     }
 
-    public void create_window( int hwnd, boolean opengl, int parent, int pid, String wingroup )
+    public void create_window( int hwnd, boolean opengl, int parent, float scale, int pid, String wingroup )
     {
         WineWindow win = get_window( hwnd );
         if (win == null)
         {
             if (parent != 0 || hwnd == WineWindow.HWND_MESSAGE)
             {
-                win = new WineWindow( hwnd, get_window( parent ));
+                win = new WineWindow( hwnd, get_window( parent ), scale );
                 win.create_window_groups( activity );
             }
-            else win = new WineWindowView( activity, hwnd );
+            else
+            {
+                win = new WineWindowView( activity, hwnd, scale );
+            }
         }
         else if (opengl) win.start_opengl();
     }
@@ -1610,24 +1633,24 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         if (hwnd != 0) wine_send_window_close( hwnd );
     }
 
-    public void set_window_parent( int hwnd, int parent, int pid )
+    public void set_window_parent( int hwnd, int parent, float scale, int pid )
     {
         WineWindow win = get_window( hwnd );
         if (win == null) return;
         if (win.parent == null)  // top-level -> child
         {
-            WineWindow new_win = new WineWindow( hwnd, get_window( parent ));
+            WineWindow new_win = new WineWindow( hwnd, get_window( parent ), scale );
             new_win.create_window_groups( activity );
-            win.move_children_to_new_parent( new_win );
+            win.move_children_to_new_parent( new_win, scale );
             win.destroy();
         }
         else if (parent == 0)  // child -> top_level
         {
-            WineWindow new_win = new WineWindowView( activity, hwnd );
-            win.move_children_to_new_parent( new_win );
+            WineWindow new_win = new WineWindowView( activity, hwnd, scale );
+            win.move_children_to_new_parent( new_win, scale );
             win.destroy();
         }
-        else win.set_parent( get_window( parent ));
+        else win.set_parent( get_window( parent ), scale );
     }
 
     public void focus_window( int hwnd )
@@ -1649,7 +1672,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
     @TargetApi(24)
     public void set_cursor( int id, int width, int height, int hotspotx, int hotspoty, int bits[] )
     {
-        Log.i( "wine", String.format( "set_cursor id %d size %dx%d hotspot %dx%d", id, width, height, hotspotx, hotspoty ));
+        Log.i( LOGTAG, String.format( "set_cursor id %d size %dx%d hotspot %dx%d", id, width, height, hotspotx, hotspoty ));
         if (bits != null)
         {
             Bitmap bitmap = Bitmap.createBitmap( bits, width, height, Bitmap.Config.ARGB_8888 );
@@ -1668,13 +1691,8 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
                                     Rect window_rect, Rect client_rect, Rect visible_rect )
     {
         WineWindow win = get_window( hwnd );
-        if (win != null) win.pos_changed( flags, insert_after, owner, style, window_rect, client_rect, visible_rect );
-    }
-
-    public void set_window_alpha( int hwnd, boolean has_alpha )
-    {
-        WineWindow win = get_window( hwnd );
-        if (win != null) win.set_alpha( has_alpha );
+        if (win != null)
+            win.pos_changed( flags, insert_after, owner, style, window_rect, client_rect, visible_rect );
     }
 
     private Uri get_clipboard_uri()
@@ -1794,9 +1812,9 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         runOnUiThread( new Runnable() { public void run() { create_desktop_window( hwnd, scaling ); }} );
     }
 
-    public void createWindow( final int hwnd, final boolean opengl, final int parent, final int pid, final String wingroup )
+    public void createWindow( final int hwnd, final boolean opengl, final int parent, final float scale, final int pid, final String wingroup )
     {
-        runOnUiThread( new Runnable() { public void run() { create_window( hwnd, opengl, parent, pid, wingroup ); }} );
+        runOnUiThread( new Runnable() { public void run() { create_window( hwnd, opengl, parent, scale, pid, wingroup ); }} );
     }
 
     public void destroyWindow( final int hwnd )
@@ -1809,9 +1827,9 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         runOnUiThread( new Runnable() { public void run() { close_window( hwnd ); }} );
     }
 
-    public void setParent( final int hwnd, final int parent, final int pid )
+    public void setParent( final int hwnd, final int parent, final float scale, final int pid )
     {
-        runOnUiThread( new Runnable() { public void run() { set_window_parent( hwnd, parent, pid ); }} );
+        runOnUiThread( new Runnable() { public void run() { set_window_parent( hwnd, parent, scale, pid ); }} );
     }
 
     public void setFocus( final int hwnd )
@@ -1838,9 +1856,12 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
     public void windowPosChanged( final int hwnd, final int flags, final int insert_after,
                                   final int owner, final int style,
-                                  final int window_left, final int window_top, final int window_right, final int window_bottom,
-                                  final int client_left, final int client_top, final int client_right, final int client_bottom,
-                                  final int visible_left, final int visible_top, final int visible_right, final int visible_bottom )
+                                  final int window_left, final int window_top,
+                                  final int window_right, final int window_bottom,
+                                  final int client_left, final int client_top,
+                                  final int client_right, final int client_bottom,
+                                  final int visible_left, final int visible_top,
+                                  final int visible_right, final int visible_bottom )
     {
         final Rect window_rect = new Rect( window_left, window_top, window_right, window_bottom );
         final Rect client_rect = new Rect( client_left, client_top, client_right, client_bottom );
@@ -1848,11 +1869,6 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         runOnUiThread( new Runnable() {
             public void run() { window_pos_changed( hwnd, flags, insert_after, owner, style,
                                                     window_rect, client_rect, visible_rect ); }} );
-    }
-
-    public void setWindowAlpha( final int hwnd, final boolean has_alpha )
-    {
-        runOnUiThread( new Runnable() { public void run() { set_window_alpha( hwnd, has_alpha ); }} );
     }
 
     public void pollClipdata()

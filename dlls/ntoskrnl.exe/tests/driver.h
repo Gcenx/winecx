@@ -24,6 +24,7 @@
 /* All custom IOCTLs need to have a function value >= 0x800. */
 #define IOCTL_WINETEST_BASIC_IOCTL      CTL_CODE(FILE_DEVICE_UNKNOWN, 0x800, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_WINETEST_MAIN_TEST        CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_WINETEST_LOAD_DRIVER      CTL_CODE(FILE_DEVICE_UNKNOWN, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
 static const char teststr[] = "Wine is not an emulator";
 
@@ -34,3 +35,10 @@ struct test_input
     int winetest_debug;
     WCHAR path[1];
 };
+
+static inline char *drv_strrchr( const char *str, char ch )
+{
+    char *ret = NULL;
+    do { if (*str == ch) ret = (char *)(ULONG_PTR)str; } while (*str++);
+    return ret;
+}

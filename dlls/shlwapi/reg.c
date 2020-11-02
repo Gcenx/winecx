@@ -134,7 +134,7 @@ LONG WINAPI SHRegOpenUSKeyW(LPCWSTR Path, REGSAM AccessType, HUSKEY hRelativeUSK
 
     /* Create internal HUSKEY */
     hKey = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*hKey));
-    lstrcpynW(hKey->lpszPath, Path, sizeof(hKey->lpszPath)/sizeof(WCHAR));
+    lstrcpynW(hKey->lpszPath, Path, ARRAY_SIZE(hKey->lpszPath));
 
     if (hRelativeUSKey)
     {
@@ -275,7 +275,7 @@ LONG WINAPI SHRegCreateUSKeyW(LPCWSTR path, REGSAM samDesired, HUSKEY relative_k
     }
 
     ret_key = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ret_key));
-    lstrcpynW(ret_key->lpszPath, path, sizeof(ret_key->lpszPath)/sizeof(WCHAR));
+    lstrcpynW(ret_key->lpszPath, path, ARRAY_SIZE(ret_key->lpszPath));
 
     if (relative_key)
     {
@@ -1514,151 +1514,6 @@ DWORD WINAPI SHQueryValueExW(HKEY hKey, LPCWSTR lpszValue,
 }
 
 /*************************************************************************
- * SHDeleteKeyA   [SHLWAPI.@]
- *
- * Delete a registry key and any sub keys/values present
- *
- * This function forwards to the unicode version directly, to avoid
- * handling subkeys that are not representable in ASCII.
- *
- * PARAMS
- *   hKey       [I] Handle to registry key
- *   lpszSubKey [I] Name of sub key to delete
- *
- * RETURNS
- *   Success: ERROR_SUCCESS. The key is deleted.
- *   Failure: An error code from RegOpenKeyExA(), RegQueryInfoKeyA(),
- *            RegEnumKeyExA() or RegDeleteKeyA().
- */
-DWORD WINAPI SHDeleteKeyA(HKEY hKey, LPCSTR lpszSubKey)
-{
-  WCHAR subkeyW[MAX_PATH];
-
-  MultiByteToWideChar (CP_ACP, 0, lpszSubKey, -1, subkeyW, sizeof(subkeyW)/sizeof(WCHAR));
-  return SHDeleteKeyW(hKey, subkeyW);
-}
-
-/*************************************************************************
- * SHDeleteKeyW   [SHLWAPI.@]
- *
- * See SHDeleteKeyA.
- */
-DWORD WINAPI SHDeleteKeyW(HKEY hKey, LPCWSTR lpszSubKey)
-{
-  DWORD dwRet, dwMaxSubkeyLen = 0, dwSize;
-  WCHAR szNameBuf[MAX_PATH], *lpszName = szNameBuf;
-  HKEY hSubKey = 0;
-
-  TRACE("(hkey=%p,%s)\n", hKey, debugstr_w(lpszSubKey));
-
-  dwRet = RegOpenKeyExW(hKey, lpszSubKey, 0, KEY_READ, &hSubKey);
-  if(!dwRet)
-  {
-    /* Find the maximum subkey length so that we can allocate a buffer */
-    dwRet = RegQueryInfoKeyW(hSubKey, NULL, NULL, NULL, NULL,
-                             &dwMaxSubkeyLen, NULL, NULL, NULL, NULL, NULL, NULL);
-    if(!dwRet)
-    {
-      dwMaxSubkeyLen++;
-      if (dwMaxSubkeyLen > sizeof(szNameBuf)/sizeof(WCHAR))
-        /* Name too big: alloc a buffer for it */
-        lpszName = HeapAlloc(GetProcessHeap(), 0, dwMaxSubkeyLen*sizeof(WCHAR));
-
-      if(!lpszName)
-        dwRet = ERROR_NOT_ENOUGH_MEMORY;
-      else
-      {
-        while (dwRet == ERROR_SUCCESS)
-        {
-          dwSize = dwMaxSubkeyLen;
-          dwRet = RegEnumKeyExW(hSubKey, 0, lpszName, &dwSize, NULL, NULL, NULL, NULL);
-          if (dwRet == ERROR_SUCCESS || dwRet == ERROR_MORE_DATA)
-            dwRet = SHDeleteKeyW(hSubKey, lpszName);
-        }
-        if (dwRet == ERROR_NO_MORE_ITEMS)
-          dwRet = ERROR_SUCCESS;
-    
-        if (lpszName != szNameBuf)
-          HeapFree(GetProcessHeap(), 0, lpszName); /* Free buffer if allocated */
-      }
-    }
-
-    RegCloseKey(hSubKey);
-    if(!dwRet)
-      dwRet = RegDeleteKeyW(hKey, lpszSubKey);
-  }
-  return dwRet;
-}
-
-/*************************************************************************
- * SHDeleteEmptyKeyA   [SHLWAPI.@]
- *
- * Delete a registry key with no sub keys.
- *
- * PARAMS
- *   hKey       [I] Handle to registry key
- *   lpszSubKey [I] Name of sub key to delete
- *
- * RETURNS
- *   Success: ERROR_SUCCESS. The key is deleted.
- *   Failure: If the key is not empty, returns ERROR_KEY_HAS_CHILDREN. Otherwise
- *            returns an error code from RegOpenKeyExA(), RegQueryInfoKeyA() or
- *            RegDeleteKeyA().
- */
-DWORD WINAPI SHDeleteEmptyKeyA(HKEY hKey, LPCSTR lpszSubKey)
-{
-  DWORD dwRet, dwKeyCount = 0;
-  HKEY hSubKey = 0;
-
-  TRACE("(hkey=%p,%s)\n", hKey, debugstr_a(lpszSubKey));
-
-  dwRet = RegOpenKeyExA(hKey, lpszSubKey, 0, KEY_READ, &hSubKey);
-  if(!dwRet)
-  {
-    dwRet = RegQueryInfoKeyA(hSubKey, NULL, NULL, NULL, &dwKeyCount,
-                             NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-    RegCloseKey(hSubKey);
-    if(!dwRet)
-    {
-      if (!dwKeyCount)
-        dwRet = RegDeleteKeyA(hKey, lpszSubKey);
-      else
-        dwRet = ERROR_KEY_HAS_CHILDREN;
-    }
-  }
-  return dwRet;
-}
-
-/*************************************************************************
- * SHDeleteEmptyKeyW   [SHLWAPI.@]
- *
- * See SHDeleteEmptyKeyA.
- */
-DWORD WINAPI SHDeleteEmptyKeyW(HKEY hKey, LPCWSTR lpszSubKey)
-{
-  DWORD dwRet, dwKeyCount = 0;
-  HKEY hSubKey = 0;
-
-  TRACE("(hkey=%p, %s)\n", hKey, debugstr_w(lpszSubKey));
-
-  dwRet = RegOpenKeyExW(hKey, lpszSubKey, 0, KEY_READ, &hSubKey);
-  if(!dwRet)
-  {
-    dwRet = RegQueryInfoKeyW(hSubKey, NULL, NULL, NULL, &dwKeyCount,
-                             NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-    RegCloseKey(hSubKey);
-    if(!dwRet)
-    {
-      if (!dwKeyCount)
-        dwRet = RegDeleteKeyW(hKey, lpszSubKey);
-      else
-        dwRet = ERROR_KEY_HAS_CHILDREN;
-    }
-  }
-  return dwRet;
-}
-
-/*************************************************************************
  * SHDeleteOrphanKeyA   [SHLWAPI.@]
  *
  * Delete a registry key with no sub keys or values.
@@ -1773,87 +1628,6 @@ DWORD WINAPI SHDeleteValueW(HKEY hKey, LPCWSTR lpszSubKey, LPCWSTR lpszValue)
     RegCloseKey(hSubKey);
   }
   return dwRet;
-}
-
-/*************************************************************************
- * SHEnumKeyExA   [SHLWAPI.@]
- *
- * Enumerate sub keys in a registry key.
- *
- * PARAMS
- *   hKey       [I] Handle to registry key
- *   dwIndex    [I] Index of key to enumerate
- *   lpszSubKey [O] Pointer updated with the subkey name
- *   pwLen      [O] Pointer updated with the subkey length
- *
- * RETURNS
- *   Success: ERROR_SUCCESS. lpszSubKey and pwLen are updated.
- *   Failure: An error code from RegEnumKeyExA().
- */
-LONG WINAPI SHEnumKeyExA(HKEY hKey, DWORD dwIndex, LPSTR lpszSubKey,
-                         LPDWORD pwLen)
-{
-  TRACE("(hkey=%p,%d,%s,%p)\n", hKey, dwIndex, debugstr_a(lpszSubKey), pwLen);
-
-  return RegEnumKeyExA(hKey, dwIndex, lpszSubKey, pwLen, NULL, NULL, NULL, NULL);
-}
-
-/*************************************************************************
- * SHEnumKeyExW   [SHLWAPI.@]
- *
- * See SHEnumKeyExA.
- */
-LONG WINAPI SHEnumKeyExW(HKEY hKey, DWORD dwIndex, LPWSTR lpszSubKey,
-                         LPDWORD pwLen)
-{
-  TRACE("(hkey=%p,%d,%s,%p)\n", hKey, dwIndex, debugstr_w(lpszSubKey), pwLen);
-
-  return RegEnumKeyExW(hKey, dwIndex, lpszSubKey, pwLen, NULL, NULL, NULL, NULL);
-}
-
-/*************************************************************************
- * SHEnumValueA   [SHLWAPI.@]
- *
- * Enumerate values in a registry key.
- *
- * PARAMS
- *   hKey      [I] Handle to registry key
- *   dwIndex   [I] Index of key to enumerate
- *   lpszValue [O] Pointer updated with the values name
- *   pwLen     [O] Pointer updated with the values length
- *   pwType    [O] Pointer updated with the values type
- *   pvData    [O] Pointer updated with the values data
- *   pcbData   [O] Pointer updated with the values size
- *
- * RETURNS
- *   Success: ERROR_SUCCESS. Output parameters are updated.
- *   Failure: An error code from RegEnumValueA().
- */
-LONG WINAPI SHEnumValueA(HKEY hKey, DWORD dwIndex, LPSTR lpszValue,
-                         LPDWORD pwLen, LPDWORD pwType,
-                         LPVOID pvData, LPDWORD pcbData)
-{
-  TRACE("(hkey=%p,%d,%s,%p,%p,%p,%p)\n", hKey, dwIndex,
-        debugstr_a(lpszValue), pwLen, pwType, pvData, pcbData);
-
-  return RegEnumValueA(hKey, dwIndex, lpszValue, pwLen, NULL,
-                       pwType, pvData, pcbData);
-}
-
-/*************************************************************************
- * SHEnumValueW   [SHLWAPI.@]
- *
- * See SHEnumValueA.
- */
-LONG WINAPI SHEnumValueW(HKEY hKey, DWORD dwIndex, LPWSTR lpszValue,
-                         LPDWORD pwLen, LPDWORD pwType,
-                         LPVOID pvData, LPDWORD pcbData)
-{
-  TRACE("(hkey=%p,%d,%s,%p,%p,%p,%p)\n", hKey, dwIndex,
-        debugstr_w(lpszValue), pwLen, pwType, pvData, pcbData);
-
-  return RegEnumValueW(hKey, dwIndex, lpszValue, pwLen, NULL,
-                       pwType, pvData, pcbData);
 }
 
 /*************************************************************************
@@ -2220,173 +1994,9 @@ HKEY WINAPI SHRegDuplicateHKey(HKEY hKey)
     return newKey;
 }
 
-
-/*************************************************************************
- * SHCopyKeyA	[SHLWAPI.@]
- *
- * Copy a key and its values/sub keys to another location.
- *
- * PARAMS
- *  hKeySrc    [I] Source key to copy from
- *  lpszSrcSubKey [I] Sub key under hKeySrc, or NULL to use hKeySrc directly
- *  hKeyDst    [I] Destination key
- *  dwReserved [I] Reserved, must be 0
- *
- * RETURNS
- *  Success: ERROR_SUCCESS. The key is copied to the destination key.
- *  Failure: A standard windows error code.
- *
- * NOTES
- *  If hKeyDst is a key under hKeySrc, this function will misbehave
- *  (It will loop until out of stack, or the registry is full). This
- *  bug is present in Win32 also.
- */
-DWORD WINAPI SHCopyKeyA(HKEY hKeySrc, LPCSTR lpszSrcSubKey, HKEY hKeyDst, DWORD dwReserved)
-{
-  WCHAR szSubKeyW[MAX_PATH];
-
-  TRACE("(hkey=%p,%s,%p08x,%d)\n", hKeySrc, debugstr_a(lpszSrcSubKey), hKeyDst, dwReserved);
-
-  if (lpszSrcSubKey)
-    MultiByteToWideChar(CP_ACP, 0, lpszSrcSubKey, -1, szSubKeyW, MAX_PATH);
-
-  return SHCopyKeyW(hKeySrc, lpszSrcSubKey ? szSubKeyW : NULL, hKeyDst, dwReserved);
-}
-
-/*************************************************************************
- * SHCopyKeyW	[SHLWAPI.@]
- *
- * See SHCopyKeyA.
- */
-DWORD WINAPI SHCopyKeyW(HKEY hKeySrc, LPCWSTR lpszSrcSubKey, HKEY hKeyDst, DWORD dwReserved)
-{
-  DWORD dwKeyCount = 0, dwValueCount = 0, dwMaxKeyLen = 0;
-  DWORD  dwMaxValueLen = 0, dwMaxDataLen = 0, i;
-  BYTE buff[1024];
-  LPVOID lpBuff = buff;
-  WCHAR szName[MAX_PATH], *lpszName = szName;
-  DWORD dwRet = S_OK;
-
-  TRACE("hkey=%p,%s,%p08x,%d)\n", hKeySrc, debugstr_w(lpszSrcSubKey), hKeyDst, dwReserved);
-
-  if(!hKeyDst || !hKeySrc)
-    dwRet = ERROR_INVALID_PARAMETER;
-  else
-  {
-    /* Open source key */
-    if(lpszSrcSubKey)
-      dwRet = RegOpenKeyExW(hKeySrc, lpszSrcSubKey, 0, KEY_ALL_ACCESS, &hKeySrc);
-
-    if(dwRet)
-      hKeyDst = NULL; /* Don't close this key since we didn't open it */
-    else
-    {
-      /* Get details about sub keys and values */
-      dwRet = RegQueryInfoKeyW(hKeySrc, NULL, NULL, NULL, &dwKeyCount, &dwMaxKeyLen,
-                               NULL, &dwValueCount, &dwMaxValueLen, &dwMaxDataLen,
-                               NULL, NULL);
-      if(!dwRet)
-      {
-        if (dwMaxValueLen > dwMaxKeyLen)
-          dwMaxKeyLen = dwMaxValueLen; /* Get max size for key/value names */
-
-        if (dwMaxKeyLen++ > MAX_PATH - 1)
-          lpszName = HeapAlloc(GetProcessHeap(), 0, dwMaxKeyLen * sizeof(WCHAR));
-
-        if (dwMaxDataLen > sizeof(buff))
-          lpBuff = HeapAlloc(GetProcessHeap(), 0, dwMaxDataLen);
-
-        if (!lpszName || !lpBuff)
-          dwRet = ERROR_NOT_ENOUGH_MEMORY;
-      }
-    }
-  }
-
-  /* Copy all the sub keys */
-  for(i = 0; i < dwKeyCount && !dwRet; i++)
-  {
-    HKEY hSubKeySrc, hSubKeyDst;
-    DWORD dwSize = dwMaxKeyLen;
-
-    dwRet = RegEnumKeyExW(hKeySrc, i, lpszName, &dwSize, NULL, NULL, NULL, NULL);
-
-    if(!dwRet)
-    {
-      /* Open source sub key */
-      dwRet = RegOpenKeyExW(hKeySrc, lpszName, 0, KEY_READ, &hSubKeySrc);
-
-      if(!dwRet)
-      {
-        /* Create destination sub key */
-        dwRet = RegCreateKeyW(hKeyDst, lpszName, &hSubKeyDst);
-
-        if(!dwRet)
-        {
-          /* Recursively copy keys and values from the sub key */
-          dwRet = SHCopyKeyW(hSubKeySrc, NULL, hSubKeyDst, 0);
-          RegCloseKey(hSubKeyDst);
-        }
-      }
-      RegCloseKey(hSubKeySrc);
-    }
-  }
-
-  /* Copy all the values in this key */
-  for (i = 0; i < dwValueCount && !dwRet; i++)
-  {
-    DWORD dwNameSize = dwMaxKeyLen, dwType, dwLen = dwMaxDataLen;
-
-    dwRet = RegEnumValueW(hKeySrc, i, lpszName, &dwNameSize, NULL, &dwType, lpBuff, &dwLen);
-
-    if (!dwRet)
-      dwRet = SHSetValueW(hKeyDst, NULL, lpszName, dwType, lpBuff, dwLen);
-  }
-
-  /* Free buffers if allocated */
-  if (lpszName != szName)
-    HeapFree(GetProcessHeap(), 0, lpszName);
-  if (lpBuff != buff)
-    HeapFree(GetProcessHeap(), 0, lpBuff);
-
-  if (lpszSrcSubKey && hKeyDst)
-    RegCloseKey(hKeyDst);
-  return dwRet;
-}
-
 /*
  * The following functions are ORDINAL ONLY:
  */
-
-/*************************************************************************
- *      @     [SHLWAPI.280]
- *
- * Read an integer value from the registry, falling back to a default.
- *
- * PARAMS
- *  hKey      [I] Registry key to read from
- *  lpszValue [I] Value name to read
- *  iDefault  [I] Default value to return
- *
- * RETURNS
- *  The value contained in the given registry value if present, otherwise
- *  iDefault.
- */
-int WINAPI SHRegGetIntW(HKEY hKey, LPCWSTR lpszValue, int iDefault)
-{
-  TRACE("(%p,%s,%d)\n", hKey, debugstr_w(lpszValue), iDefault);
-
-  if (hKey)
-  {
-    WCHAR szBuff[32];
-    DWORD dwSize = sizeof(szBuff);
-    szBuff[0] = '\0';
-    SHQueryValueExW(hKey, lpszValue, 0, 0, szBuff, &dwSize);
-
-    if(*szBuff >= '0' && *szBuff <= '9')
-      return StrToIntW(szBuff);
-  }
-  return iDefault;
-}
 
 /*************************************************************************
  *      @	[SHLWAPI.343]
@@ -2409,7 +2019,7 @@ HRESULT WINAPI SHRegGetCLSIDKeyA(REFGUID guid, LPCSTR lpszValue, BOOL bUseHKCU, 
   WCHAR szValue[MAX_PATH];
 
   if (lpszValue)
-    MultiByteToWideChar(CP_ACP, 0, lpszValue, -1, szValue, sizeof(szValue)/sizeof(WCHAR));
+    MultiByteToWideChar(CP_ACP, 0, lpszValue, -1, szValue, ARRAY_SIZE(szValue));
 
   return SHRegGetCLSIDKeyW(guid, lpszValue ? szValue : NULL, bUseHKCU, bCreate, phKey);
 }
@@ -2426,19 +2036,18 @@ HRESULT WINAPI SHRegGetCLSIDKeyW(REFGUID guid, LPCWSTR lpszValue, BOOL bUseHKCU,
     'M','i','c','r','o','s','o','f','t','\\','W','i','n','d','o','w','s','\\',
     'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
     'E','x','p','l','o','r','e','r','\\','C','L','S','I','D','\\' };
-#define szClassIdKeyLen (sizeof(szClassIdKey)/sizeof(WCHAR))
   WCHAR szKey[MAX_PATH];
   DWORD dwRet;
   HKEY hkey;
 
   /* Create the key string */
   memcpy(szKey, szClassIdKey, sizeof(szClassIdKey));
-  SHStringFromGUIDW(guid, szKey + szClassIdKeyLen, 39); /* Append guid */
+  SHStringFromGUIDW(guid, szKey + ARRAY_SIZE(szClassIdKey), 39); /* Append guid */
 
   if(lpszValue)
   {
-    szKey[szClassIdKeyLen + 39] = '\\';
-    strcpyW(szKey + szClassIdKeyLen + 40, lpszValue); /* Append value name */
+    szKey[ARRAY_SIZE(szClassIdKey) + 39] = '\\';
+    strcpyW(szKey + ARRAY_SIZE(szClassIdKey) + 40, lpszValue); /* Append value name */
   }
 
   hkey = bUseHKCU ? HKEY_CURRENT_USER : HKEY_CLASSES_ROOT;

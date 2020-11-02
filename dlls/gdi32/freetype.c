@@ -173,18 +173,24 @@ static FT_Error (*pFT_Library_SetLcdFilter)(FT_Library, FT_LcdFilter);
 #ifdef SONAME_LIBFONTCONFIG
 #include <fontconfig/fontconfig.h>
 MAKE_FUNCPTR(FcConfigSubstitute);
+MAKE_FUNCPTR(FcDefaultSubstitute);
 MAKE_FUNCPTR(FcFontList);
+MAKE_FUNCPTR(FcFontMatch);
 MAKE_FUNCPTR(FcFontSetDestroy);
 MAKE_FUNCPTR(FcInit);
-MAKE_FUNCPTR(FcObjectSetAdd);
-MAKE_FUNCPTR(FcObjectSetCreate);
-MAKE_FUNCPTR(FcObjectSetDestroy);
+MAKE_FUNCPTR(FcPatternAddString);
 MAKE_FUNCPTR(FcPatternCreate);
 MAKE_FUNCPTR(FcPatternDestroy);
 MAKE_FUNCPTR(FcPatternGetBool);
 MAKE_FUNCPTR(FcPatternGetInteger);
 MAKE_FUNCPTR(FcPatternGetString);
+#ifndef FC_NAMELANG
+#define FC_NAMELANG "namelang"
 #endif
+#ifndef FC_PRGNAME
+#define FC_PRGNAME "prgname"
+#endif
+#endif /* SONAME_LIBFONTCONFIG */
 
 #undef MAKE_FUNCPTR
 
@@ -476,10 +482,6 @@ static inline struct freetype_physdev *get_freetype_dev( PHYSDEV dev )
 
 static const struct gdi_dc_funcs freetype_funcs;
 
-static const WCHAR defSerif[] = {'T','i','m','e','s',' ','N','e','w',' ','R','o','m','a','n','\0'};
-static const WCHAR defSans[] = {'A','r','i','a','l','\0'};
-static const WCHAR defFixed[] = {'C','o','u','r','i','e','r',' ','N','e','w','\0'};
-
 static const WCHAR fontsW[] = {'\\','f','o','n','t','s','\0'};
 static const WCHAR win9x_font_reg_key[] = {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
                                            'W','i','n','d','o','w','s','\\',
@@ -550,6 +552,10 @@ static const WCHAR *default_sans_list[] =
     bitstream_vera_sans,
     NULL
 };
+
+static const WCHAR *default_serif = times_new_roman;
+static const WCHAR *default_fixed = courier_new;
+static const WCHAR *default_sans = arial;
 
 typedef struct {
     WCHAR *name;
@@ -997,18 +1003,22 @@ static BOOL is_hinting_enabled(void)
 
 static BOOL is_subpixel_rendering_enabled( void )
 {
-#ifdef FT_LCD_FILTER_H
     static int enabled = -1;
     if (enabled == -1)
     {
-        enabled = (pFT_Library_SetLcdFilter &&
-                   pFT_Library_SetLcdFilter( NULL, 0 ) != FT_Err_Unimplemented_Feature);
+        /* FreeType >= 2.8.1 offers LCD-optimezed rendering without lcd filters. */
+        if (FT_SimpleVersion >= ((2 << 16) | (8 << 8) | (1 << 0)))
+            enabled = TRUE;
+#ifdef FT_LCD_FILTER_H
+        else if (pFT_Library_SetLcdFilter &&
+                 pFT_Library_SetLcdFilter( NULL, 0 ) != FT_Err_Unimplemented_Feature)
+            enabled = TRUE;
+#endif
+        else enabled = FALSE;
+
         TRACE("subpixel rendering is %senabled\n", enabled ? "" : "NOT ");
     }
     return enabled;
-#else
-    return FALSE;
-#endif
 }
 
 
@@ -1389,7 +1399,7 @@ static int match_name_table_language( const FT_SfntName *name, LANGID lang )
         break;
     case TT_PLATFORM_MACINTOSH:
         if (!IsValidCodePage( get_mac_code_page( name ))) return 0;
-        if (name->language_id >= sizeof(mac_langid_table)/sizeof(mac_langid_table[0])) return 0;
+        if (name->language_id >= ARRAY_SIZE( mac_langid_table )) return 0;
         name_lang = mac_langid_table[name->language_id];
         break;
     case TT_PLATFORM_APPLE_UNICODE:
@@ -1399,7 +1409,7 @@ static int match_name_table_language( const FT_SfntName *name, LANGID lang )
         case TT_APPLE_ID_DEFAULT:
         case TT_APPLE_ID_ISO_10646:
         case TT_APPLE_ID_UNICODE_2_0:
-            if (name->language_id >= sizeof(mac_langid_table)/sizeof(mac_langid_table[0])) return 0;
+            if (name->language_id >= ARRAY_SIZE( mac_langid_table )) return 0;
             name_lang = mac_langid_table[name->language_id];
             break;
         default:
@@ -2014,7 +2024,6 @@ static inline void get_bitmap_size( FT_Face ft_face, Bitmap_Size *face_size )
 static inline void get_fontsig( FT_Face ft_face, FONTSIGNATURE *fs )
 {
     TT_OS2 *os2;
-    FT_UInt dummy;
     CHARSETINFO csi;
     FT_WinFNT_HeaderRec winfnt_header;
     int i;
@@ -2031,10 +2040,10 @@ static inline void get_fontsig( FT_Face ft_face, FONTSIGNATURE *fs )
 
         if (os2->version == 0)
         {
-            if (pFT_Get_First_Char( ft_face, &dummy ) < 0x100)
-                fs->fsCsb[0] = FS_LATIN1;
-            else
+            if (os2->usFirstCharIndex >= 0xf000 && os2->usFirstCharIndex < 0xf100)
                 fs->fsCsb[0] = FS_SYMBOL;
+            else
+                fs->fsCsb[0] = FS_LATIN1;
         }
         else
         {
@@ -2773,14 +2782,14 @@ static BOOL init_system_links(void)
         goto skip_internal;
     }
 
-    for (i = 0; i < sizeof(font_links_defaults_list)/sizeof(font_links_defaults_list[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(font_links_defaults_list); i++)
     {
         const FontSubst *psub2;
         psub2 = get_font_subst(&font_subst_list, font_links_defaults_list[i].shelldlg, -1);
 
         if ((!strcmpiW(font_links_defaults_list[i].shelldlg, psub->to.name) || (psub2 && !strcmpiW(psub2->to.name,psub->to.name))))
         {
-            for (j = 0; j < sizeof(font_links_list)/sizeof(font_links_list[0]); j++)
+            for (j = 0; j < ARRAY_SIZE(font_links_list); j++)
                 populate_system_links(font_links_list[j], font_links_defaults_list[i].substitutes);
 
             if (!strcmpiW(psub->to.name, font_links_defaults_list[i].substitutes[0]))
@@ -2896,7 +2905,7 @@ static UINT parse_aa_pattern( FcPattern *pattern )
         case FC_RGBA_BGR:  aa_flags = WINE_GGO_HBGR_BITMAP; break;
         case FC_RGBA_VRGB: aa_flags = WINE_GGO_VRGB_BITMAP; break;
         case FC_RGBA_VBGR: aa_flags = WINE_GGO_VBGR_BITMAP; break;
-        case FC_RGBA_NONE: aa_flags = GGO_GRAY4_BITMAP; break;
+        case FC_RGBA_NONE: aa_flags = aa_flags ? aa_flags : GGO_GRAY4_BITMAP; break;
         }
     }
     return aa_flags;
@@ -2914,12 +2923,12 @@ static void init_fontconfig(void)
 
 #define LOAD_FUNCPTR(f) if((p##f = wine_dlsym(fc_handle, #f, NULL, 0)) == NULL){WARN("Can't find symbol %s\n", #f); return;}
     LOAD_FUNCPTR(FcConfigSubstitute);
+    LOAD_FUNCPTR(FcDefaultSubstitute);
     LOAD_FUNCPTR(FcFontList);
+    LOAD_FUNCPTR(FcFontMatch);
     LOAD_FUNCPTR(FcFontSetDestroy);
     LOAD_FUNCPTR(FcInit);
-    LOAD_FUNCPTR(FcObjectSetAdd);
-    LOAD_FUNCPTR(FcObjectSetCreate);
-    LOAD_FUNCPTR(FcObjectSetDestroy);
+    LOAD_FUNCPTR(FcPatternAddString);
     LOAD_FUNCPTR(FcPatternCreate);
     LOAD_FUNCPTR(FcPatternDestroy);
     LOAD_FUNCPTR(FcPatternGetBool);
@@ -2933,6 +2942,15 @@ static void init_fontconfig(void)
         pFcConfigSubstitute( NULL, pattern, FcMatchFont );
         default_aa_flags = parse_aa_pattern( pattern );
         pFcPatternDestroy( pattern );
+
+        if (!default_aa_flags)
+        {
+            FcPattern *pattern = pFcPatternCreate();
+            pFcConfigSubstitute( NULL, pattern, FcMatchPattern );
+            default_aa_flags = parse_aa_pattern( pattern );
+            pFcPatternDestroy( pattern );
+        }
+
         TRACE( "enabled, default flags = %x\n", default_aa_flags );
         fontconfig_enabled = TRUE;
     }
@@ -2941,7 +2959,6 @@ static void init_fontconfig(void)
 static void load_fontconfig_fonts(void)
 {
     FcPattern *pat;
-    FcObjectSet *os;
     FcFontSet *fontset;
     int i, len;
     char *file;
@@ -2954,13 +2971,15 @@ static void load_fontconfig_fonts(void)
     if(GetEnvironmentVariableW(cx_hack_var, env_buf, sizeof(env_buf)/sizeof(WCHAR))) return;
 
     pat = pFcPatternCreate();
-    os = pFcObjectSetCreate();
-    pFcObjectSetAdd(os, FC_FILE);
-    pFcObjectSetAdd(os, FC_SCALABLE);
-    pFcObjectSetAdd(os, FC_ANTIALIAS);
-    pFcObjectSetAdd(os, FC_RGBA);
-    fontset = pFcFontList(NULL, pat, os);
-    if(!fontset) return;
+    if (!pat) return;
+
+    fontset = pFcFontList(NULL, pat, NULL);
+    if (!fontset)
+    {
+        pFcPatternDestroy(pat);
+        return;
+    }
+
     for(i = 0; i < fontset->nfont; i++) {
         FcBool scalable;
         DWORD aa_flags;
@@ -2991,7 +3010,6 @@ static void load_fontconfig_fonts(void)
                           ADDFONT_EXTERNAL_FONT | ADDFONT_ADD_TO_CACHE | ADDFONT_AA_FLAGS(aa_flags) );
     }
     pFcFontSetDestroy(fontset);
-    pFcObjectSetDestroy(os);
     pFcPatternDestroy(pat);
 }
 
@@ -3181,7 +3199,7 @@ static char *get_winfonts_dir_path(LPCWSTR file)
     static const WCHAR slashW[] = {'\\','\0'};
     WCHAR windowsdir[MAX_PATH];
 
-    GetWindowsDirectoryW(windowsdir, sizeof(windowsdir) / sizeof(WCHAR));
+    GetWindowsDirectoryW(windowsdir, ARRAY_SIZE(windowsdir));
     strcatW(windowsdir, fontsW);
     strcatW(windowsdir, slashW);
     strcatW(windowsdir, file);
@@ -3198,7 +3216,7 @@ static void load_system_fonts(void)
     char *unixname;
 
     if(RegOpenKeyW(HKEY_CURRENT_CONFIG, system_fonts_reg_key, &hkey) == ERROR_SUCCESS) {
-        GetWindowsDirectoryW(windowsdir, sizeof(windowsdir) / sizeof(WCHAR));
+        GetWindowsDirectoryW(windowsdir, ARRAY_SIZE(windowsdir));
         strcatW(windowsdir, fontsW);
         for(value = SystemFontValues; *value; value++) { 
             dlen = sizeof(data);
@@ -3267,7 +3285,7 @@ static void update_reg_entries(void)
 
             len = strlenW(name) + 1;
             if (face->scalable)
-                len += sizeof(TrueType) / sizeof(WCHAR);
+                len += ARRAY_SIZE(TrueType);
 
             valueW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
             strcpyW(valueW, name);
@@ -4154,7 +4172,7 @@ static void update_font_info(void)
     RegSetValueExW(hkey, logpixels, 0, REG_DWORD, (const BYTE *)&screen_dpi, sizeof(screen_dpi));
     RegCloseKey(hkey);
 
-    for (i = 0; i < sizeof(nls_update_font_list)/sizeof(nls_update_font_list[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(nls_update_font_list); i++)
     {
         HKEY hkey;
 
@@ -4327,7 +4345,7 @@ static void init_font_list(void)
     load_system_fonts();
 
     /* load in the fonts from %WINDOWSDIR%\\Fonts first of all */
-    GetWindowsDirectoryW(windowsdir, sizeof(windowsdir) / sizeof(WCHAR));
+    GetWindowsDirectoryW(windowsdir, ARRAY_SIZE(windowsdir));
     strcatW(windowsdir, fontsW);
     if((unixname = wine_get_unix_file_name(windowsdir)))
     {
@@ -4476,22 +4494,24 @@ static BOOL move_to_front(const WCHAR *name)
     return FALSE;
 }
 
-static BOOL set_default(const WCHAR **name_list)
+static const WCHAR *set_default(const WCHAR **name_list)
 {
-    while (*name_list)
+    const WCHAR **entry = name_list;
+
+    while (*entry)
     {
-        if (move_to_front(*name_list)) return TRUE;
-        name_list++;
+        if (move_to_front(*entry)) return *entry;
+        entry++;
     }
 
-    return FALSE;
+    return *name_list;
 }
 
 static void reorder_font_list(void)
 {
-    set_default( default_serif_list );
-    set_default( default_fixed_list );
-    set_default( default_sans_list );
+    default_serif = set_default( default_serif_list );
+    default_fixed = set_default( default_fixed_list );
+    default_sans = set_default( default_sans_list );
 }
 
 /*************************************************************
@@ -5347,6 +5367,82 @@ done:
     return ret;
 }
 
+#ifdef SONAME_LIBFONTCONFIG
+static Family* get_fontconfig_family(DWORD pitch_and_family, const CHARSETINFO *csi)
+{
+    const char *name;
+    WCHAR nameW[LF_FACESIZE];
+    FcChar8 *str;
+    FcPattern *pat = NULL, *best = NULL;
+    FcResult result;
+    FcBool r;
+    int ret, i;
+    Family *family = NULL;
+
+    if (!csi->fs.fsCsb[0]) return NULL;
+
+    if((pitch_and_family & FIXED_PITCH) ||
+       (pitch_and_family & 0xF0) == FF_MODERN)
+        name = "monospace";
+    else if((pitch_and_family & 0xF0) == FF_ROMAN)
+        name = "serif";
+    else
+        name = "sans-serif";
+
+    pat = pFcPatternCreate();
+    if (!pat) return NULL;
+    r = pFcPatternAddString(pat, FC_FAMILY, (const FcChar8 *)name);
+    if (!r) goto end;
+    r = pFcPatternAddString(pat, FC_NAMELANG, (const FcChar8 *)"en-us");
+    if (!r) goto end;
+    r = pFcPatternAddString(pat, FC_PRGNAME, (const FcChar8 *)"wine");
+    if (!r) goto end;
+    r = pFcConfigSubstitute(NULL, pat, FcMatchPattern);
+    if (!r) goto end;
+    pFcDefaultSubstitute(pat);
+
+    best = pFcFontMatch(NULL, pat, &result);
+    if (!best || result != FcResultMatch) goto end;
+
+    for (i = 0;
+         !family && pFcPatternGetString(best, FC_FAMILY, i, &str) == FcResultMatch;
+         i++)
+    {
+        Face *face;
+        const SYSTEM_LINKS *font_link;
+        const struct list *face_list;
+
+        ret = MultiByteToWideChar(CP_UTF8, 0, (const char*)str, -1,
+                                  nameW, ARRAY_SIZE(nameW));
+        if (!ret) continue;
+        family = find_family_from_any_name(nameW);
+        if (!family) continue;
+
+        font_link = find_font_link(family->FamilyName);
+        face_list = get_face_list_from_family(family);
+        LIST_FOR_EACH_ENTRY( face, face_list, Face, entry ) {
+            if (!face->scalable)
+                continue;
+            if (csi->fs.fsCsb[0] & face->fs.fsCsb[0])
+                goto found;
+            if (font_link != NULL &&
+                csi->fs.fsCsb[0] & font_link->fs.fsCsb[0])
+                goto found;
+        }
+        family = NULL;
+    }
+
+found:
+    if (family)
+        TRACE("got %s\n", wine_dbgstr_w(nameW));
+
+end:
+    pFcPatternDestroy(pat);
+    pFcPatternDestroy(best);
+    return family;
+}
+#endif
+
 static const GSUB_Script* GSUB_get_script_table( const GSUB_Header* header, const char* tag)
 {
     const GSUB_ScriptList *script;
@@ -5713,13 +5809,13 @@ static HFONT freetype_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
 
     if((lf.lfPitchAndFamily & FIXED_PITCH) ||
        (lf.lfPitchAndFamily & 0xF0) == FF_MODERN)
-        strcpyW(lf.lfFaceName, defFixed);
+        strcpyW(lf.lfFaceName, default_fixed);
     else if((lf.lfPitchAndFamily & 0xF0) == FF_ROMAN)
-        strcpyW(lf.lfFaceName, defSerif);
+        strcpyW(lf.lfFaceName, default_serif);
     else if((lf.lfPitchAndFamily & 0xF0) == FF_SWISS)
-        strcpyW(lf.lfFaceName, defSans);
+        strcpyW(lf.lfFaceName, default_sans);
     else
-        strcpyW(lf.lfFaceName, defSans);
+        strcpyW(lf.lfFaceName, default_sans);
     LIST_FOR_EACH_ENTRY( family, &font_list, Family, entry ) {
         if(!strncmpiW(family->FamilyName, lf.lfFaceName, LF_FACESIZE - 1)) {
             font_link = find_font_link(family->FamilyName);
@@ -5734,6 +5830,12 @@ static HFONT freetype_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
             }
         }
     }
+
+#ifdef SONAME_LIBFONTCONFIG
+    /* Try FontConfig substitutions if the face isn't found */
+    family = get_fontconfig_family(lf.lfPitchAndFamily, &csi);
+    if (family) goto found;
+#endif
 
     last_resort_family = NULL;
     LIST_FOR_EACH_ENTRY( family, &font_list, Family, entry ) {
@@ -6953,6 +7055,37 @@ static unsigned int get_bezier_glyph_outline(FT_Outline *outline, unsigned int b
     return needed;
 }
 
+static FT_Int get_load_flags( UINT format )
+{
+    FT_Int load_flags = FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH;
+
+    if (format & GGO_UNHINTED)
+        return load_flags | FT_LOAD_NO_HINTING;
+
+    switch (format & ~GGO_GLYPH_INDEX)
+    {
+    case GGO_BITMAP:
+        load_flags |= FT_LOAD_TARGET_MONO;
+        break;
+    case GGO_GRAY2_BITMAP:
+    case GGO_GRAY4_BITMAP:
+    case GGO_GRAY8_BITMAP:
+    case WINE_GGO_GRAY16_BITMAP:
+        load_flags |= FT_LOAD_TARGET_NORMAL;
+        break;
+    case WINE_GGO_HRGB_BITMAP:
+    case WINE_GGO_HBGR_BITMAP:
+        load_flags |= FT_LOAD_TARGET_LCD;
+        break;
+    case WINE_GGO_VRGB_BITMAP:
+    case WINE_GGO_VBGR_BITMAP:
+        load_flags |= FT_LOAD_TARGET_LCD_V;
+        break;
+    }
+
+    return load_flags;
+}
+
 static const BYTE masks[8] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
 
 static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
@@ -6972,7 +7105,7 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
     FT_Vector adv;
     INT origin_x = 0, origin_y = 0;
     FT_Angle angle = 0;
-    FT_Int load_flags = FT_LOAD_DEFAULT | FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH;
+    FT_Int load_flags = get_load_flags(format);
     double widthRatio = 1.0;
     FT_Matrix transMat = identityMat;
     FT_Matrix transMatUnrotated;
@@ -7011,10 +7144,7 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
             tategaki = check_unicode_tategaki(glyph);
     }
 
-    if(format & GGO_UNHINTED) {
-        load_flags |= FT_LOAD_NO_HINTING;
-        format &= ~GGO_UNHINTED;
-    }
+    format &= ~GGO_UNHINTED;
 
     if(original_index >= font->gmsize * GM_BLOCK_SIZE) {
 	font->gmsize = (original_index / GM_BLOCK_SIZE + 1);
@@ -7460,7 +7590,6 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
     case WINE_GGO_HBGR_BITMAP:
     case WINE_GGO_VRGB_BITMAP:
     case WINE_GGO_VBGR_BITMAP:
-#ifdef FT_LCD_FILTER_H
       {
         switch (ft_face->glyph->format)
         {
@@ -7506,7 +7635,9 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
             BYTE *src;
             INT x, src_pitch, src_width, src_height, rgb_interval, hmul, vmul;
             INT x_shift, y_shift;
-            BOOL rgb;
+            const INT *sub_order;
+            const INT rgb_order[3] = { 0, 1, 2 };
+            const INT bgr_order[3] = { 2, 1, 0 };
             FT_Render_Mode render_mode =
                 (format == WINE_GGO_HRGB_BITMAP || format == WINE_GGO_HBGR_BITMAP)?
                     FT_RENDER_MODE_LCD: FT_RENDER_MODE_LCD_V;
@@ -7541,13 +7672,14 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
 
             memset(buf, 0, buflen);
             dst = buf;
-            rgb = (format == WINE_GGO_HRGB_BITMAP || format == WINE_GGO_VRGB_BITMAP);
 
             if ( needsTransform )
                 pFT_Outline_Transform (&ft_face->glyph->outline, &transMatTategaki);
 
+#ifdef FT_LCD_FILTER_H
             if ( pFT_Library_SetLcdFilter )
                 pFT_Library_SetLcdFilter( library, FT_LCD_FILTER_DEFAULT );
+#endif
             pFT_Render_Glyph (ft_face->glyph, render_mode);
 
             src = ft_face->glyph->bitmap.buffer;
@@ -7595,24 +7727,16 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
             width = min( width, src_width / hmul );
             height = min( height, src_height / vmul );
 
+            sub_order = (format == WINE_GGO_HRGB_BITMAP || format == WINE_GGO_VRGB_BITMAP)?
+                        rgb_order : bgr_order;
+
             while ( height-- )
             {
                 for ( x = 0; x < width; x++ )
                 {
-                    if ( rgb )
-                    {
-                        dst[x] = ((unsigned int)src[hmul * x + rgb_interval * 0] << 16) |
-                                 ((unsigned int)src[hmul * x + rgb_interval * 1] <<  8) |
-                                 ((unsigned int)src[hmul * x + rgb_interval * 2] <<  0) |
-                                 ((unsigned int)src[hmul * x + rgb_interval * 1] << 24) ;
-                    }
-                    else
-                    {
-                        dst[x] = ((unsigned int)src[hmul * x + rgb_interval * 2] << 16) |
-                                 ((unsigned int)src[hmul * x + rgb_interval * 1] <<  8) |
-                                 ((unsigned int)src[hmul * x + rgb_interval * 0] <<  0) |
-                                 ((unsigned int)src[hmul * x + rgb_interval * 1] << 24) ;
-                    }
+                    dst[x] = ((unsigned int)src[hmul * x + rgb_interval * sub_order[0]] << 16) |
+                             ((unsigned int)src[hmul * x + rgb_interval * sub_order[1]] << 8) |
+                             ((unsigned int)src[hmul * x + rgb_interval * sub_order[2]]);
                 }
                 src += src_pitch * vmul;
                 dst += pitch / sizeof(*dst);
@@ -7628,9 +7752,6 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
 
         break;
       }
-#else
-      return GDI_ERROR;
-#endif
 
     case GGO_NATIVE:
       {
@@ -7909,7 +8030,7 @@ static BOOL get_outline_text_metrics(GdiFont *font)
     full_nameW = get_face_name( ft_face, TT_NAME_ID_UNIQUE_ID, GetSystemDefaultLangID() );
     if (!full_nameW)
     {
-        WCHAR fake_nameW[] = {'f','a','k','e',' ','n','a','m','e', 0};
+        static const WCHAR fake_nameW[] = {'f','a','k','e',' ','n','a','m','e', 0};
         FIXME("failed to read full_nameW for font %s!\n", wine_dbgstr_w(font->name));
         full_nameW = strdupW(fake_nameW);
     }
@@ -8276,8 +8397,30 @@ static UINT freetype_GetOutlineTextMetrics( PHYSDEV dev, UINT cbSize, OUTLINETEX
 
 static BOOL load_child_font(GdiFont *font, CHILD_FONT *child)
 {
+    const struct list *face_list;
+    Face *child_face = NULL, *best_face = NULL;
+    UINT penalty = 0, new_penalty = 0;
+    BOOL bold, italic, bd, it;
+
+    italic = font->font_desc.lf.lfItalic ? TRUE : FALSE;
+    bold = font->font_desc.lf.lfWeight > FW_MEDIUM ? TRUE : FALSE;
+
+    face_list = get_face_list_from_family( child->face->family );
+    LIST_FOR_EACH_ENTRY( child_face, face_list, Face, entry )
+    {
+        it = child_face->ntmFlags & NTM_ITALIC ? TRUE : FALSE;
+        bd = child_face->ntmFlags & NTM_BOLD ? TRUE : FALSE;
+        new_penalty = ( it ^ italic ) + ( bd ^ bold );
+        if (!best_face || new_penalty < penalty)
+        {
+            penalty = new_penalty;
+            best_face = child_face;
+        }
+    }
+    child_face = best_face ? best_face : child->face;
+
     child->font = alloc_font();
-    child->font->ft_face = OpenFontFace(child->font, child->face, 0, -font->ppem);
+    child->font->ft_face = OpenFontFace( child->font, child_face, 0, -font->ppem );
     if(!child->font->ft_face)
     {
         free_font(child->font);
@@ -8285,11 +8428,13 @@ static BOOL load_child_font(GdiFont *font, CHILD_FONT *child)
         return FALSE;
     }
 
+    child->font->fake_italic = italic && !( child_face->ntmFlags & NTM_ITALIC );
+    child->font->fake_bold = bold && !( child_face->ntmFlags & NTM_BOLD );
     child->font->font_desc = font->font_desc;
-    child->font->ntmFlags = child->face->ntmFlags;
+    child->font->ntmFlags = child_face->ntmFlags;
     child->font->orientation = font->orientation;
     child->font->scale_y = font->scale_y;
-    child->font->name = strdupW(child->face->family->FamilyName);
+    child->font->name = strdupW( child_face->family->FamilyName );
     child->font->base_font = font;
     TRACE("created child font %p for base %p\n", child->font, font);
     return TRUE;
@@ -9216,7 +9361,7 @@ BOOL WINAPI GetFontFileData( DWORD instance_id, DWORD unknown, UINT64 offset, vo
 /*************************************************************************
  *             GetFontFileInfo   (GDI32.@)
  */
-BOOL WINAPI GetFontFileInfo( DWORD instance_id, DWORD unknown, struct font_fileinfo *info, DWORD size, DWORD *needed)
+BOOL WINAPI GetFontFileInfo( DWORD instance_id, DWORD unknown, struct font_fileinfo *info, SIZE_T size, SIZE_T *needed)
 {
     *needed = 0;
     return FALSE;

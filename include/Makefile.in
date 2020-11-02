@@ -22,6 +22,7 @@ SOURCES = \
 	atlbase.h \
 	atlcom.h \
 	atliface.idl \
+	atlthunk.h \
 	atlwin.h \
 	audevcod.h \
 	audioclient.idl \
@@ -80,6 +81,7 @@ SOURCES = \
 	cvconst.h \
 	d2d1.idl \
 	d2d1_1.idl \
+	d2d1_2.idl \
 	d2dbasetypes.h \
 	d2derr.h \
 	d3d.h \
@@ -95,6 +97,7 @@ SOURCES = \
 	d3d11_2.idl \
 	d3d11_3.idl \
 	d3d11_4.idl \
+	d3d11on12.idl \
 	d3d11sdklayers.idl \
 	d3d11shader.h \
 	d3d12.idl \
@@ -453,6 +456,7 @@ SOURCES = \
 	msxmldid.h \
 	mtxdm.h \
 	multimon.h \
+	natupnp.idl \
 	nb30.h \
 	ncrypt.h \
 	ndrtypes.h \
@@ -469,6 +473,7 @@ SOURCES = \
 	ntddndis.h \
 	ntddscsi.h \
 	ntddstor.h \
+	ntddvdeo.h \
 	ntdef.h \
 	ntdsapi.h \
 	ntlsa.h \
@@ -524,6 +529,7 @@ SOURCES = \
 	pshpack8.h \
 	pstore.idl \
 	qedit.idl \
+	qos2.h \
 	ras.h \
 	rasdlg.h \
 	raserror.h \
@@ -553,6 +559,7 @@ SOURCES = \
 	rstloc.idl \
 	rstnot.idl \
 	rtutils.h \
+	sal.h \
 	sapi.idl \
 	sapiddk.idl \
 	scarderr.h \
@@ -600,6 +607,7 @@ SOURCES = \
 	strsafe.h \
 	structuredquerycondition.idl \
 	svrapi.h \
+	synchapi.h \
 	t2embapi.h \
 	tapi.h \
 	taskschd.idl \
@@ -636,6 +644,7 @@ SOURCES = \
 	verrsrc.h \
 	vfw.h \
 	vfwmsgs.h \
+	virtdisk.h \
 	vmr9.idl \
 	vmrender.idl \
 	vss.idl \
@@ -738,6 +747,7 @@ SOURCES = \
 	wtypes.idl \
 	wuapi.idl \
 	x3daudio.h \
+	xact3.idl \
 	xapo.idl \
 	xapofx.h \
 	xaudio2.idl \

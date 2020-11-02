@@ -374,7 +374,7 @@ todo_wine
     ok(!key, "key = %p\n", key);
     if (status == STATUS_SUCCESS) NtClose(key);
 
-    /* Calling without parent key requres full registry path. */
+    /* Calling without parent key requires full registry path. */
     pRtlCreateUnicodeStringFromAsciiz( &str, "Machine" );
     InitializeObjectAttributes(&attr, &str, 0, 0, 0);
     key = (HANDLE)0xdeadbeef;
@@ -2008,6 +2008,8 @@ static void test_RtlCreateRegistryKey(void)
 
     status = pRtlCreateRegistryKey((RTL_REGISTRY_USER+1) | RTL_REGISTRY_OPTIONAL, NULL);
     ok(status == STATUS_INVALID_PARAMETER, "RtlCreateRegistryKey unexpected return value: %08x, expected %08x\n", status, STATUS_INVALID_PARAMETER);
+
+    pRtlFreeUnicodeString(&str);
 }
 
 START_TEST(reg)

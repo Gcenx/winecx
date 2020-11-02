@@ -683,8 +683,8 @@ static inline void get_text_bkgnd_masks( DC *dc, const dib_info *dib, rop_mask *
 
 static void draw_glyph( dib_info *dib, int x, int y, const GLYPHMETRICS *metrics,
                         const dib_info *glyph_dib, DWORD text_color,
-                        const struct intensity_range *ranges, const struct clipped_rects *clipped_rects,
-                        RECT *bounds )
+                        const struct font_intensities *intensity,
+                        const struct clipped_rects *clipped_rects, RECT *bounds )
 {
     int i;
     RECT rect, clipped_rect;
@@ -705,10 +705,10 @@ static void draw_glyph( dib_info *dib, int x, int y, const GLYPHMETRICS *metrics
 
             if (glyph_dib->bit_count == 32)
                 dib->funcs->draw_subpixel_glyph( dib, &clipped_rect, glyph_dib, &src_origin,
-                                                 text_color );
+                                                 text_color, intensity->gamma_ramp );
             else
                 dib->funcs->draw_glyph( dib, &clipped_rect, glyph_dib, &src_origin,
-                                        text_color, ranges );
+                                        text_color, intensity->ranges );
         }
     }
 }
@@ -759,7 +759,7 @@ static struct cached_glyph *cache_glyph_bitmap( DC *dc, struct cached_font *font
 
     if (flags & ETO_GLYPH_INDEX) ggo_flags |= GGO_GLYPH_INDEX;
     indices[0] = index;
-    for (i = 0; i < sizeof(indices) / sizeof(indices[0]); i++)
+    for (i = 0; i < ARRAY_SIZE( indices ); i++)
     {
         index = indices[i];
         ret = GetGlyphOutlineW( dc->hSelf, index, ggo_flags, &metrics, 0, NULL, &identity );
@@ -816,7 +816,7 @@ static void render_string( DC *dc, dib_info *dib, struct cached_font *font, INT 
     struct cached_glyph *glyph;
     dib_info glyph_dib;
     DWORD text_color;
-    struct intensity_range ranges[17];
+    struct font_intensities intensity;
 
     glyph_dib.bit_count    = get_glyph_depth( font->aa_flags );
     glyph_dib.rect.left    = 0;
@@ -826,8 +826,10 @@ static void render_string( DC *dc, dib_info *dib, struct cached_font *font, INT 
 
     text_color = get_pixel_color( dc, dib, dc->textColor, TRUE );
 
-    if (glyph_dib.bit_count == 8)
-        get_aa_ranges( dib->funcs->pixel_to_colorref( dib, text_color ), ranges );
+    if (glyph_dib.bit_count == 32)
+        intensity.gamma_ramp = dc->font_gamma_ramp;
+    else
+        get_aa_ranges( dib->funcs->pixel_to_colorref( dib, text_color ), intensity.ranges );
 
     for (i = 0; i < count; i++)
     {
@@ -841,7 +843,7 @@ static void render_string( DC *dc, dib_info *dib, struct cached_font *font, INT 
         glyph_dib.stride      = get_dib_stride( glyph->metrics.gmBlackBoxX, glyph_dib.bit_count );
         glyph_dib.bits.ptr    = glyph->bits;
 
-        draw_glyph( dib, x, y, &glyph->metrics, &glyph_dib, text_color, ranges, clipped_rects, bounds );
+        draw_glyph( dib, x, y, &glyph->metrics, &glyph_dib, text_color, &intensity, clipped_rects, bounds );
 
         if (dx)
         {
@@ -1260,7 +1262,7 @@ BOOL dibdrv_PolyPolygon( PHYSDEV dev, const POINT *pt, const INT *counts, DWORD 
         total += counts[i];
     }
 
-    if (total > sizeof(pt_buf) / sizeof(pt_buf[0]))
+    if (total > ARRAY_SIZE( pt_buf ))
     {
         points = HeapAlloc( GetProcessHeap(), 0, total * sizeof(*pt) );
         if (!points) return FALSE;
@@ -1330,7 +1332,7 @@ BOOL dibdrv_PolyPolyline( PHYSDEV dev, const POINT* pt, const DWORD* counts, DWO
         total += counts[i];
     }
 
-    if (total > sizeof(pt_buf) / sizeof(pt_buf[0]))
+    if (total > ARRAY_SIZE( pt_buf ))
     {
         points = HeapAlloc( GetProcessHeap(), 0, total * sizeof(*pt) );
         if (!points) return FALSE;

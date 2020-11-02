@@ -91,5 +91,11 @@ LRESULT WINAPI UiaReturnRawElementProvider(HWND hwnd, WPARAM wParam,
 HRESULT WINAPI UiaRaiseAutomationEvent(IRawElementProviderSimple *provider, EVENTID id)
 {
     FIXME("(%p, %d): stub\n", provider, id);
+    return S_OK;
+}
+
+HRESULT WINAPI UiaHostProviderFromHwnd(HWND hwnd, IRawElementProviderSimple **provider)
+{
+    FIXME("(%p, %p): stub\n", hwnd, provider);
     return E_NOTIMPL;
 }

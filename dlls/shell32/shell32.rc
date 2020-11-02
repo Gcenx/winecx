@@ -419,122 +419,689 @@ BEGIN
 END
 
 /* FIXME: Following resource is not yet added */
-/* @makedep: document.ico */
-IDI_SHELL_FILE ICON document.ico
+/* @makedep: resources/document.ico */
+IDI_SHELL_FILE ICON resources/document.ico
 
-/* @makedep: document.ico */
-IDI_SHELL_DOCUMENT ICON document.ico
+/* @makedep: resources/document.ico */
+IDI_SHELL_DOCUMENT ICON resources/document.ico
 
-/* @makedep: window.ico */
-IDI_SHELL_WINDOW ICON window.ico
+/* @makedep: resources/window.ico */
+IDI_SHELL_WINDOW ICON resources/window.ico
 
-/* @makedep: folder.ico */
-IDI_SHELL_FOLDER ICON folder.ico
+/* @makedep: resources/folder.ico */
+IDI_SHELL_FOLDER ICON resources/folder.ico
 
-/* @makedep: folder_open.ico */
-IDI_SHELL_FOLDER_OPEN ICON folder_open.ico
+/* @makedep: resources/folder_open.ico */
+IDI_SHELL_FOLDER_OPEN ICON resources/folder_open.ico
 
 /* FIXME: Following three resources are not yet added */
-/* @makedep: folder_open.ico */
-IDI_SHELL_FOLDER_OPEN_SMALL ICON folder_open.ico
-/* @makedep: folder_open.ico */
-IDI_SHELL_FOLDER_OPEN_LARGE ICON folder_open.ico
-/* @makedep: folder_open.ico */
-IDI_SHELL_FOLDER_SMALL_XP ICON folder_open.ico
+/* @makedep: resources/folder_open.ico */
+IDI_SHELL_FOLDER_OPEN_SMALL ICON resources/folder_open.ico
+/* @makedep: resources/folder_open.ico */
+IDI_SHELL_FOLDER_OPEN_LARGE ICON resources/folder_open.ico
+/* @makedep: resources/folder_open.ico */
+IDI_SHELL_FOLDER_SMALL_XP ICON resources/folder_open.ico
 
 /* FIXME: Following resource is not yet added */
-/* @makedep: floppy.ico */
-IDI_SHELL_5_12_FLOPPY ICON floppy.ico
+/* @makedep: resources/disk_drive.ico */
+IDI_SHELL_5_12_FLOPPY ICON resources/disk_drive.ico
 
 /* FIXME: Following resource is not yet added */
-/* @makedep: floppy.ico */
-IDI_SHELL_3_14_FLOPPY ICON floppy.ico
+/* @makedep: resources/disk_drive.ico */
+IDI_SHELL_3_14_FLOPPY ICON resources/disk_drive.ico
 
-/* @makedep: floppy.ico */
-IDI_SHELL_FLOPPY ICON floppy.ico
+/* @makedep: resources/disk_drive.ico */
+IDI_SHELL_FLOPPY ICON resources/disk_drive.ico
 
-/* @makedep: drive.ico */
-IDI_SHELL_DRIVE ICON drive.ico
+/* @makedep: resources/drive.ico */
+IDI_SHELL_DRIVE ICON resources/drive.ico
 
-/* @makedep: netdrive.ico */
-IDI_SHELL_NETDRIVE ICON netdrive.ico
+/* @makedep: resources/netdrive.ico */
+IDI_SHELL_NETDRIVE ICON resources/netdrive.ico
 
-/* @makedep: netdrive2.ico */
-IDI_SHELL_NETDRIVE2 ICON netdrive2.ico
+/* @makedep: resources/netdrive2.ico */
+IDI_SHELL_NETDRIVE2 ICON resources/netdrive2.ico
 
-/* @makedep: cdrom.ico */
-IDI_SHELL_CDROM ICON cdrom.ico
+/* @makedep: resources/optical_drive.ico */
+IDI_SHELL_OPTICAL_DRIVE ICON resources/optical_drive.ico
 
-/* @makedep: ramdisk.ico */
-IDI_SHELL_RAMDISK ICON ramdisk.ico
+/* @makedep: resources/ramdisk.ico */
+IDI_SHELL_RAMDISK ICON resources/ramdisk.ico
 
-/* @makedep: mycomputer.ico */
-IDI_SHELL_MY_COMPUTER ICON mycomputer.ico
+/* @makedep: resources/internet.ico */
+IDI_SHELL_ENTIRE_NETWORK ICON resources/internet.ico
 
-/* @makedep: printer.ico */
-IDI_SHELL_PRINTER ICON printer.ico
+/* @makedep: resources/network.ico */
+IDI_SHELL_NETWORK ICON resources/network.ico
 
-/* @makedep: shortcut.ico */
-IDI_SHELL_SHORTCUT ICON shortcut.ico
+/* @makedep: resources/mycomputer.ico */
+IDI_SHELL_MY_COMPUTER ICON resources/mycomputer.ico
 
-/* @makedep: desktop.ico */
-IDI_SHELL_DESKTOP ICON desktop.ico
+/* @makedep: resources/printer.ico */
+IDI_SHELL_PRINTER ICON resources/printer.ico
 
-/* @makedep: control.ico */
-IDI_SHELL_CONTROL_PANEL ICON control.ico
+/* @makedep: resources/network.ico */
+IDI_SHELL_MY_NETWORK_PLACES ICON resources/network.ico
 
-/* @makedep: trash_file.ico */
-IDI_SHELL_FULL_RECYCLE_BIN ICON trash_file.ico
+/* @makedep: resources/network.ico */
+IDI_SHELL_COMPUTERS_NEAR_ME ICON resources/network.ico
 
-/* @makedep: trash_file.ico */
-IDI_SHELL_TRASH_FILE ICON trash_file.ico
+/* @makedep: resources/recent.ico */
+IDI_SHELL_RECENT_DOCUMENTS ICON resources/recent.ico
 
-/* @makedep: delete.ico */
-IDI_SHELL_CONFIRM_DELETE ICON delete.ico
+/* @makedep: resources/control.ico */
+IDI_SHELL_SETTINGS ICON resources/control.ico
 
-/* @makedep: mydocs.ico */
-IDI_SHELL_MY_DOCUMENTS ICON mydocs.ico
+/* @makedep: resources/search.ico */
+IDI_SHELL_SEARCH ICON resources/search.ico
+
+/* @makedep: resources/help.ico */
+IDI_SHELL_HELP ICON resources/help.ico
+
+/* @makedep: resources/window.ico */
+IDI_SHELL_RUN ICON resources/window.ico
+
+/* @makedep: resources/sleep.ico */
+IDI_SHELL_SLEEP ICON resources/sleep.ico
+
+/* @makedep: resources/eject.ico */
+IDI_SHELL_EJECT ICON resources/eject.ico
+
+/* @makedep: resources/shut_down.ico */
+IDI_SHELL_SHUT_DOWN ICON resources/shut_down.ico
+
+/* @makedep: resources/shortcut.ico */
+IDI_SHELL_SHORTCUT ICON resources/shortcut.ico
+
+/* @makedep: resources/trash_full.ico */
+IDI_SHELL_FULL_RECYCLE_BIN ICON resources/trash_full.ico
 
 /* FIXME: Following resource is not yet added */
-/* @makedep: mydocs.ico */
-IDI_SHELL_MY_NETWORK_PLACES ICON mydocs.ico
+/* @makedep: resources/folder.ico */
+IDI_SHELL_MODEM_FOLDER ICON resources/folder.ico
+
+/* @makedep: resources/desktop.ico */
+IDI_SHELL_DESKTOP ICON resources/desktop.ico
+
+/* @makedep: resources/control.ico */
+IDI_SHELL_CONTROL_PANEL ICON resources/control.ico
 
 /* FIXME: Following resource is not yet added */
-/* @makedep: mydocs.ico */
-IDI_SHELL_FAVORITES ICON mydocs.ico
+/* @makedep: resources/folder.ico */
+IDI_SHELL_APP_FOLDER ICON resources/folder.ico
 
-/* @makedep: idb_tb_large.bmp */
-IDB_TB_LARGE_LIGHT BITMAP idb_tb_large.bmp
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/folder.ico */
+IDI_SHELL_PRINTERS_FOLDER ICON resources/folder.ico
 
-/* @makedep: idb_tb_large.bmp */
-IDB_TB_LARGE_DARK BITMAP idb_tb_large.bmp
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/folder.ico */
+IDI_SHELL_FONTS_FOLDER ICON resources/folder.ico
 
-/* @makedep: idb_tb_small.bmp */
-IDB_TB_SMALL_LIGHT BITMAP idb_tb_small.bmp
+/* @makedep: resources/menu.ico */
+IDI_SHELL_START_MENU ICON resources/menu.ico
 
-/* @makedep: idb_tb_small.bmp */
-IDB_TB_SMALL_DARK BITMAP idb_tb_small.bmp
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/optical_disc.ico */
+IDI_SHELL_MUSIC_CD ICON resources/optical_disc.ico
 
-/* @makedep: searching.avi */
-IDR_AVI_SEARCHING AVI searching.avi
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/menu.ico */
+IDI_SHELL_TREE ICON resources/menu.ico
 
-/* @makedep: searching.avi */
-IDR_AVI_SEARCH AVI searching.avi
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/folder.ico */
+IDI_SHELL_REMOTE_FOLDER ICON resources/folder.ico
 
-/* @makedep: searching.avi */
-IDR_AVI_FILEMOVE AVI searching.avi
+/* @makedep: resources/favorites.ico */
+IDI_SHELL_FAVORITES ICON resources/favorites.ico
 
-/* @makedep: searching.avi */
-IDR_AVI_FILECOPY AVI searching.avi
+/* @makedep: resources/log_off.ico */
+IDI_SHELL_LOG_OFF ICON resources/log_off.ico
 
-/* @makedep: searching.avi */
-IDR_AVI_FINDCOMPUTER AVI searching.avi
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/search.ico */
+IDI_SHELL_SEARCH_FOLDER ICON resources/search.ico
 
-/* @makedep: searching.avi */
-IDR_AVI_FILENUKE AVI searching.avi
+/* @makedep: resources/update.ico */
+IDI_SHELL_UPDATE ICON resources/update.ico
 
-/* @makedep: searching.avi */
-IDR_AVI_FILEDELETE AVI searching.avi
+/* @makedep: resources/security.ico */
+IDI_SHELL_SECURITY ICON resources/security.ico
+
+/* @makedep: resources/shut_down.ico */
+IDI_SHELL_CONFIRM_SHUTDOWN ICON resources/shut_down.ico
+
+/* @makedep: resources/blank.ico */
+IDI_SHELL_BLANK1 ICON resources/blank.ico
+
+/* @makedep: resources/blank.ico */
+IDI_SHELL_BLANK2 ICON resources/blank.ico
+
+/* @makedep: resources/blank.ico */
+IDI_SHELL_BLANK3 ICON resources/blank.ico
+
+/* @makedep: resources/blank.ico */
+IDI_SHELL_BLANK4 ICON resources/blank.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/drive.ico */
+IDI_SHELL_UNKNOWN_DRIVE ICON resources/drive.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/document.ico */
+IDI_SHELL_FILES ICON resources/document.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/search.ico */
+IDI_SHELL_FILE_SEARCH ICON resources/search.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/search.ico */
+IDI_SHELL_SYSTEM_SEARCH ICON resources/search.ico
+
+/* @makedep: resources/control.ico */
+IDI_SHELL_OPTIONS ICON resources/control.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/folder.ico */
+IDI_SHELL_PRINTERS_FOLDER_XP ICON resources/folder.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/printer.ico */
+IDI_SHELL_ADD_PRINTER ICON resources/printer.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/printer.ico */
+IDI_SHELL_REMOTE_PRINTER ICON resources/printer.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/printer.ico */
+IDI_SHELL_TO_FILE_PRINTER ICON resources/printer.ico
+
+/* @makedep: resources/trash_file.ico */
+IDI_SHELL_TRASH_FILE ICON resources/trash_file.ico
+
+/* @makedep: resources/trash_file.ico */
+IDI_SHELL_TRASH_FOLDER ICON resources/trash_file.ico
+
+/* @makedep: resources/trash_file.ico */
+IDI_SHELL_TRASH_MIXED ICON resources/trash_file.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/delete.ico */
+IDI_SHELL_FILE_OVERWRITE ICON resources/delete.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/delete.ico */
+IDI_SHELL_FOLDER_OVERWRITE ICON resources/delete.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/rename.ico */
+IDI_SHELL_RENAME_FOLDER ICON resources/rename.ico
+
+/* @makedep: resources/update.ico */
+IDI_SHELL_INSTALL ICON resources/update.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/document.ico */
+IDI_SHELL_CONFIG_FILE ICON resources/document.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/document.ico */
+IDI_SHELL_TEXT_FILE ICON resources/document.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/window.ico */
+IDI_SHELL_BATCH_FILE ICON resources/window.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/document.ico */
+IDI_SHELL_LIBRARY_FILE ICON resources/document.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/document.ico */
+IDI_SHELL_SYSTEM_FONT ICON resources/document.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/document.ico */
+IDI_SHELL_TRUETYPE_FONT ICON resources/document.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/document.ico */
+IDI_SHELL_POSTSCRIPT_FONT ICON resources/document.ico
+
+/* @makedep: resources/window.ico */
+IDI_SHELL_RUN2 ICON resources/window.ico
+
+/* @makedep: resources/delete.ico */
+IDI_SHELL_CONFIRM_DELETE ICON resources/delete.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/copy.ico */
+IDI_SHELL_BACKUP ICON resources/copy.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/drive.ico */
+IDI_SHELL_DISK_CHECK ICON resources/drive.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/drive.ico */
+IDI_SHELL_DEFRAGMENT ICON resources/drive.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/menu.ico */
+IDI_SHELL_TREEVIEW ICON resources/menu.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/folder.ico */
+IDI_SHELL_NETWORK_FOLDER ICON resources/folder.ico
+
+/* @makedep: resources/favorites.ico */
+IDI_SHELL_FAVORITES_FOLDER ICON resources/favorites.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/folder.ico */
+IDI_SHELL_CHECKLIST_FOLDER ICON resources/folder.ico
+
+/* @makedep: resources/network.ico */
+IDI_SHELL_NET_CONNECTIONS ICON resources/network.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/folder.ico */
+IDI_SHELL_NEW_WEB_FOLDER ICON resources/folder.ico
+
+/* @makedep: resources/control.ico */
+IDI_SHELL_VISUAL_SETTINGS ICON resources/control.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/document.ico */
+IDI_SHELL_NEW_WEB_PAGE ICON resources/document.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/internet.ico */
+IDI_SHELL_REMOTE_CONNECTION ICON resources/internet.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/mycomputer.ico */
+IDI_SHELL_WINDOW_ON_MONITOR ICON resources/mycomputer.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/mycomputer.ico */
+IDI_SHELL_DESKTOP_ON_MONITOR ICON resources/mycomputer.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/window.ico */
+IDI_SHELL_WINDOW_WITH_SIDEBAR ICON resources/window.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/window.ico */
+IDI_SHELL_WINDOW_WITHOUT_SIDEBAR ICON resources/window.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/window.ico */
+IDI_SHELL_MAXIMIZED_WINDOW ICON resources/window.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/window.ico */
+IDI_SHELL_FLOATING_WINDOWS ICON resources/window.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/folder_open.ico */
+IDI_SHELL_ONE_CLICK_OPEN ICON resources/folder_open.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/folder_open.ico */
+IDI_SHELL_TWO_CLICK_OPEN ICON resources/folder_open.ico
+
+/* @makedep: resources/trash_file.ico */
+IDI_SHELL_EMPTY_RECYCLE_BIN_95 ICON resources/trash_file.ico
+
+/* @makedep: resources/trash_full.ico */
+IDI_SHELL_FULL_RECYCLE_BIN_95 ICON resources/trash_full.ico
+
+/* @makedep: resources/internet.ico */
+IDI_SHELL_WEB_FOLDERS ICON resources/internet.ico
+
+/* @makedep: resources/security.ico */
+IDI_SHELL_PASSWORDS ICON resources/security.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/printer.ico */
+IDI_SHELL_FAX ICON resources/printer.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/printer.ico */
+IDI_SHELL_DEFAULT_FAX ICON resources/printer.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/printer.ico */
+IDI_SHELL_DEFAULT_NETWORK_FAX ICON resources/printer.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/printer.ico */
+IDI_SHELL_NETWORK_FAX ICON resources/printer.ico
+
+/* @makedep: resources/restricted.ico */
+IDI_SHELL_RESTRICTED ICON resources/restricted.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/folder.ico */
+IDI_SHELL_DEFAULT_FOLDER ICON resources/folder.ico
+
+/* @makedep: resources/users.ico */
+IDI_SHELL_USERS ICON resources/users.ico
+
+/* @makedep: resources/shut_down.ico */
+IDI_SHELL_POWER_OFF ICON resources/shut_down.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/optical_disc.ico */
+IDI_SHELL_DVD ICON resources/optical_disc.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/document.ico */
+IDI_SHELL_DOCUMENTS ICON resources/document.ico
+
+/* @makedep: resources/video.ico */
+IDI_SHELL_VIDEO_FILE ICON resources/video.ico
+
+/* @makedep: resources/audio.ico */
+IDI_SHELL_AUDIO_FILE ICON resources/audio.ico
+
+/* @makedep: resources/image.ico */
+IDI_SHELL_IMAGE_FILE ICON resources/image.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/video.ico */
+IDI_SHELL_MULTIMEDIA_FILE ICON resources/video.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/optical_disc.ico */
+IDI_SHELL_MUSIC_CD_95 ICON resources/optical_disc.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/disk_drive.ico */
+IDI_SHELL_CARD_READER ICON resources/disk_drive.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/disk_drive.ico */
+IDI_SHELL_ZIP_DRIVE ICON resources/disk_drive.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/blank.ico */
+IDI_SHELL_DOWNLOAD ICON resources/blank.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/blank.ico */
+IDI_SHELL_DOWNLOAD_EMBLEM ICON resources/blank.ico
+
+/* @makedep: resources/disk_drive.ico */
+IDI_SHELL_REMOVABLE_DISK ICON resources/disk_drive.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/disk_drive.ico */
+IDI_SHELL_BAD_REMOVABLE_DISK ICON resources/disk_drive.ico
+
+/* @makedep: resources/mydocs.ico */
+IDI_SHELL_MY_DOCUMENTS ICON resources/mydocs.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/mydocs.ico */
+IDI_SHELL_MY_PICTURES ICON resources/mydocs.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/mydocs.ico */
+IDI_SHELL_MY_MUSIC ICON resources/mydocs.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/mydocs.ico */
+IDI_SHELL_MY_VIDEOS ICON resources/mydocs.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/internet.ico */
+IDI_SHELL_MSN ICON resources/internet.ico
+
+/* @makedep: resources/delete.ico */
+IDI_SHELL_DELETE ICON resources/delete.ico
+
+/* @makedep: resources/move.ico */
+IDI_SHELL_MOVE ICON resources/move.ico
+
+/* @makedep: resources/rename.ico */
+IDI_SHELL_RENAME ICON resources/rename.ico
+
+/* @makedep: resources/copy.ico */
+IDI_SHELL_COPY ICON resources/copy.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/internet.ico */
+IDI_SHELL_UPLOAD ICON resources/internet.ico
+
+/* @makedep: resources/printer.ico */
+IDI_SHELL_PRINT ICON resources/printer.ico
+
+/* @makedep: resources/play.ico */
+IDI_SHELL_PLAY ICON resources/play.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/internet.ico */
+IDI_SHELL_INTERNET_RADIO ICON resources/internet.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/internet.ico */
+IDI_SHELL_UPLOAD_PHOTO ICON resources/internet.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/printer.ico */
+IDI_SHELL_PRINT_PHOTO ICON resources/printer.ico
+
+/* @makedep: resources/trash_file.ico */
+IDI_SHELL_EMPTY_RECYCLE_BIN2 ICON resources/trash_file.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/folder.ico */
+IDI_SHELL_NEW_NETWORK_FOLDER ICON resources/folder.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/optical_disc.ico */
+IDI_SHELL_WRITE_DISC ICON resources/optical_disc.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/delete.ico */
+IDI_SHELL_DELETE_FILE ICON resources/delete.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/delete.ico */
+IDI_SHELL_ERASE_DISC ICON resources/delete.ico
+
+/* @makedep: resources/help.ico */
+IDI_SHELL_HELP2 ICON resources/help.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/folder.ico */
+IDI_SHELL_TO_FOLDER ICON resources/folder.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/optical_disc.ico */
+IDI_SHELL_BURN_DISC ICON resources/optical_disc.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/folder.ico */
+IDI_SHELL_SHARED_FOLDER ICON resources/folder.ico
+
+/* @makedep: resources/users.ico */
+IDI_SHELL_USERS_XP ICON resources/users.ico
+
+/* @makedep: resources/update.ico */
+IDI_SHELL_INSTALL_XP ICON resources/update.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/printer.ico */
+IDI_SHELL_MULTIFUNCTION_PRINTER ICON resources/printer.ico
+
+/* @makedep: resources/internet.ico */
+IDI_SHELL_INTERNET ICON resources/internet.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/internet.ico */
+IDI_SHELL_WEB_CALENDAR ICON resources/internet.ico
+
+/* @makedep: resources/users.ico */
+IDI_SHELL_USERS_XP2 ICON resources/users.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/search.ico */
+IDI_SHELL_SEARCH_WINDOW ICON resources/search.ico
+
+/* @makedep: resources/help.ico */
+IDI_SHELL_HELP_FILE ICON resources/help.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/optical_drive.ico */
+IDI_SHELL_DVD_DRIVE ICON resources/optical_drive.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/optical_disc.ico */
+IDI_SHELL_HYBRID_CD ICON resources/optical_disc.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/optical_disc.ico */
+IDI_SHELL_UNKNOWN_DISC ICON resources/optical_disc.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/optical_disc.ico */
+IDI_SHELL_CD_ROM ICON resources/optical_disc.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/optical_disc.ico */
+IDI_SHELL_CD_R ICON resources/optical_disc.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/optical_disc.ico */
+IDI_SHELL_CD_RW ICON resources/optical_disc.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/optical_disc.ico */
+IDI_SHELL_DVD_RAM ICON resources/optical_disc.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/optical_disc.ico */
+IDI_SHELL_DVD_R ICON resources/optical_disc.ico
+
+/* @makedep: resources/optical_disc.ico */
+IDI_SHELL_OPTICAL_DISC ICON resources/optical_disc.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/optical_disc.ico */
+IDI_SHELL_DVD_ROM ICON resources/optical_disc.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/printer.ico */
+IDI_SHELL_INTERNET_PRINTER ICON resources/printer.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/disk_drive.ico */
+IDI_SHELL_JAZ_DRIVE ICON resources/disk_drive.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/disk_drive.ico */
+IDI_SHELL_ZIP_DRIVE2 ICON resources/disk_drive.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/optical_disc.ico */
+IDI_SHELL_DVD_RW ICON resources/optical_disc.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/folder.ico */
+IDI_SHELL_NEW_FOLDER ICON resources/folder.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/optical_disc.ico */
+IDI_SHELL_BURN_DISC2 ICON resources/optical_disc.ico
+
+/* @makedep: resources/control.ico */
+IDI_SHELL_CONTROL_PANEL_XP2 ICON resources/control.ico
+
+/* @makedep: resources/favorites.ico */
+IDI_SHELL_FAVORITES_SMALL ICON resources/favorites.ico
+
+/* @makedep: resources/search.ico */
+IDI_SHELL_SEARCH_SMALL ICON resources/search.ico
+
+/* @makedep: resources/help.ico */
+IDI_SHELL_HELP_SMALL ICON resources/help.ico
+
+/* @makedep: resources/log_off.ico */
+IDI_SHELL_LOG_OFF_SMALL ICON resources/log_off.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/folder.ico */
+IDI_SHELL_APP_FOLDER_SMALL ICON resources/folder.ico
+
+/* @makedep: resources/recent.ico */
+IDI_SHELL_RECENT_SMALL ICON resources/recent.ico
+
+/* @makedep: resources/window.ico */
+IDI_SHELL_RUN_SMALL ICON resources/window.ico
+
+/* @makedep: resources/shut_down.ico */
+IDI_SHELL_POWER_OFF_SMALL ICON resources/shut_down.ico
+
+/* @makedep: resources/control.ico */
+IDI_SHELL_CONTROL_PANEL_SMALL ICON resources/control.ico
+
+/* @makedep: resources/eject.ico */
+IDI_SHELL_EJECT_SMALL ICON resources/eject.ico
+
+/* FIXME: Following resource is not yet added */
+/* @makedep: resources/search.ico */
+IDI_SHELL_SEARCH_DIRECTORY ICON resources/search.ico
+
+/* @makedep: resources/restricted.ico */
+IDI_SHELL_RESTRICTED2 ICON resources/restricted.ico
+
+/* @makedep: resources/internet.ico */
+IDI_SHELL_WEB_BROWSER ICON resources/internet.ico
+
+/* @makedep: resources/idb_sort_incr.bmp */
+IDB_SORT_INCR BITMAP resources/idb_sort_incr.bmp
+
+/* @makedep: resources/idb_sort_decr.bmp */
+IDB_SORT_DECR BITMAP resources/idb_sort_decr.bmp
+
+/* @makedep: resources/idb_tb_large.bmp */
+IDB_TB_LARGE_LIGHT BITMAP resources/idb_tb_large.bmp
+
+/* @makedep: resources/idb_tb_large.bmp */
+IDB_TB_LARGE_DARK BITMAP resources/idb_tb_large.bmp
+
+/* @makedep: resources/idb_tb_small.bmp */
+IDB_TB_SMALL_LIGHT BITMAP resources/idb_tb_small.bmp
+
+/* @makedep: resources/idb_tb_small.bmp */
+IDB_TB_SMALL_DARK BITMAP resources/idb_tb_small.bmp
+
+/* @makedep: resources/searching.avi */
+IDR_AVI_SEARCHING AVI resources/searching.avi
+
+/* @makedep: resources/searching.avi */
+IDR_AVI_SEARCH AVI resources/searching.avi
+
+/* @makedep: resources/searching.avi */
+IDR_AVI_FILEMOVE AVI resources/searching.avi
+
+/* @makedep: resources/searching.avi */
+IDR_AVI_FILECOPY AVI resources/searching.avi
+
+/* @makedep: resources/searching.avi */
+IDR_AVI_FINDCOMPUTER AVI resources/searching.avi
+
+/* @makedep: resources/searching.avi */
+IDR_AVI_FILENUKE AVI resources/searching.avi
+
+/* @makedep: resources/searching.avi */
+IDR_AVI_FILEDELETE AVI resources/searching.avi
 
 /* @makedep: AUTHORS */
 AUTHORS RCDATA AUTHORS

@@ -244,10 +244,10 @@ DOS_PATHNAME_TYPE WINAPI RtlDetermineDosPathNameType_U( PCWSTR path )
     if (IS_SEPARATOR(path[0]))
     {
         if (!IS_SEPARATOR(path[1])) return ABSOLUTE_PATH;       /* "/foo" */
-        if (path[2] != '.') return UNC_PATH;                    /* "//foo" */
-        if (IS_SEPARATOR(path[3])) return DEVICE_PATH;          /* "//./foo" */
-        if (path[3]) return UNC_PATH;                           /* "//.foo" */
-        return UNC_DOT_PATH;                                    /* "//." */
+        if (path[2] != '.' && path[2] != '?') return UNC_PATH;  /* "//foo" */
+        if (IS_SEPARATOR(path[3])) return DEVICE_PATH;          /* "//./foo" or "//?/foo" */
+        if (path[3]) return UNC_PATH;                           /* "//.foo" or "//?foo" */
+        return UNC_DOT_PATH;                                    /* "//." or "//?" */
     }
     else
     {
@@ -340,7 +340,8 @@ ULONG WINAPI RtlIsDosDeviceName_U( PCWSTR dos_name )
 NTSTATUS WINAPI RtlDosPathNameToNtPathName_U_WithStatus(const WCHAR *dos_path, UNICODE_STRING *ntpath,
     WCHAR **file_part, CURDIR *cd)
 {
-    static const WCHAR LongFileNamePfxW[] = {'\\','\\','?','\\'};
+    static const WCHAR global_prefix[] = {'\\','\\','?','\\'};
+    static const WCHAR global_prefix2[] = {'\\','?','?','\\'};
     ULONG sz, offset;
     WCHAR local[MAX_PATH];
     LPWSTR ptr;
@@ -356,7 +357,8 @@ NTSTATUS WINAPI RtlDosPathNameToNtPathName_U_WithStatus(const WCHAR *dos_path, U
     if (!dos_path || !*dos_path)
         return STATUS_OBJECT_NAME_INVALID;
 
-    if (!strncmpW(dos_path, LongFileNamePfxW, 4))
+    if (!memcmp(dos_path, global_prefix, sizeof(global_prefix)) ||
+        (!memcmp(dos_path, global_prefix2, sizeof(global_prefix2)) && dos_path[4]))
     {
         ntpath->Length = strlenW(dos_path) * sizeof(WCHAR);
         ntpath->MaximumLength = ntpath->Length + sizeof(WCHAR);
@@ -1045,6 +1047,14 @@ NTSTATUS WINAPI RtlSetCurrentDirectory_U(const UNICODE_STRING* dir)
     ptr += 4;  /* skip \??\ prefix */
     size -= 4;
     if (size && ptr[size - 1] != '\\') ptr[size++] = '\\';
+
+    /* convert \??\UNC\ path to \\ prefix */
+    if (size >= 4 && !strncmpiW(ptr, UncPfxW, 4))
+    {
+        ptr += 2;
+        size -= 2;
+        *ptr = '\\';
+    }
 
     memcpy( curdir->DosPath.Buffer, ptr, size * sizeof(WCHAR));
     curdir->DosPath.Buffer[size] = 0;

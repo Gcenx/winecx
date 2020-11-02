@@ -128,6 +128,33 @@ function test_xhr_props() {
     next_test();
 }
 
+function test_style_props() {
+    var style = document.body.style;
+
+    function test_exposed(prop, expect) {
+        if(expect)
+            ok(prop in style, prop + " not found in style object.");
+        else
+            ok(!(prop in style), prop + " found in style object.");
+    }
+
+    var v = document.documentMode;
+
+    test_exposed("removeAttribute", true);
+    test_exposed("zIndex", true);
+    test_exposed("z-index", true);
+    test_exposed("filter", true);
+    test_exposed("pixelTop", true);
+    test_exposed("float", true);
+    test_exposed("css-float", false);
+    test_exposed("style-float", false);
+    test_exposed("setProperty", v >= 9);
+    test_exposed("removeProperty", v >= 9);
+    test_exposed("background-clip", v >= 9);
+
+    next_test();
+}
+
 function test_javascript() {
     var g = window;
 
@@ -160,8 +187,10 @@ function test_javascript() {
     test_exposed("now", Date, true);
     test_exposed("toISOString", Date.prototype, v >= 9);
     test_exposed("isArray", Array, v >= 9);
+    test_exposed("forEach", Array.prototype, v >= 9);
     test_exposed("indexOf", Array.prototype, v >= 9);
     test_exposed("trim", String.prototype, v >= 9);
+    test_exposed("map", Array.prototype, v >= 9);
 
     /* FIXME: IE8 implements weird semi-functional property descriptors. */
     if(v != 8) {
@@ -270,6 +299,7 @@ var tests = [
     test_window_props,
     test_javascript,
     test_xhr_props,
+    test_style_props,
     test_elem_by_id,
     test_conditional_comments
 ];

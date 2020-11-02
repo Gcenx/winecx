@@ -9,11 +9,11 @@
 9   stdcall -ordinal SHUnlockShared(ptr)
 10  stdcall -ordinal SHFreeShared(long long)
 11  stdcall -noname SHMapHandle(long long long long long)
-12  stdcall -ordinal SHCreateMemStream(ptr long)
+12  stdcall -ordinal SHCreateMemStream(ptr long) shcore.SHCreateMemStream
 13  stdcall -noname RegisterDefaultAcceptHeaders(ptr ptr)
 14  stdcall -ordinal GetAcceptLanguagesA(ptr ptr)
 15  stdcall -ordinal GetAcceptLanguagesW(ptr ptr)
-16  stdcall -ordinal SHCreateThread(ptr ptr long ptr)
+16  stdcall -ordinal SHCreateThread(ptr ptr long ptr) shcore.SHCreateThread
 17  stdcall -noname SHWriteDataBlockList(ptr ptr)
 18  stdcall -noname SHReadDataBlockList(ptr ptr)
 19  stdcall -noname SHFreeDataBlockList(ptr)
@@ -166,14 +166,14 @@
 166 stdcall -noname SHIsEmptyStream(ptr)
 167 stdcall -noname SHSetParentHwnd(long ptr)
 168 stdcall -ordinal ConnectToConnectionPoint(ptr ptr long ptr ptr ptr)
-169 stdcall -ordinal IUnknown_AtomicRelease(long)
+169 stdcall -ordinal IUnknown_AtomicRelease(ptr) shcore.IUnknown_AtomicRelease
 170 stdcall -noname PathSkipLeadingSlashesA(str)
 171 stdcall -noname SHIsSameObject(ptr ptr)
 172 stdcall -ordinal IUnknown_GetWindow(ptr ptr)
 173 stdcall -noname IUnknown_SetOwner(ptr ptr)
-174 stdcall -ordinal IUnknown_SetSite(ptr ptr)
+174 stdcall -ordinal IUnknown_SetSite(ptr ptr) shcore.IUnknown_SetSite
 175 stdcall -noname IUnknown_GetClassID(ptr ptr)
-176 stdcall -ordinal IUnknown_QueryService(ptr ptr ptr ptr)
+176 stdcall -ordinal IUnknown_QueryService(ptr ptr ptr ptr) shcore.IUnknown_QueryService
 177 stdcall -noname SHLoadMenuPopup(ptr wstr)
 178 stdcall -noname SHPropagateMessage(ptr long long long long)
 179 stdcall -noname SHMenuIndexFromID(long long)
@@ -181,7 +181,7 @@
 181 stdcall -noname SHEnableMenuItem(long long long)
 182 stdcall -noname SHCheckMenuItem(long long long)
 183 stdcall -noname SHRegisterClassA(ptr)
-184 stdcall -ordinal IStream_Read(ptr ptr long) SHIStream_Read
+184 stdcall -ordinal IStream_Read(ptr ptr long) shcore.IStream_Read
 185 stdcall -ordinal SHMessageBoxCheckA(ptr str str long long str)
 186 stdcall -noname SHSimulateDrop(ptr ptr long ptr ptr)
 187 stdcall -noname SHLoadFromPropertyBag(ptr ptr)
@@ -196,7 +196,7 @@
 196 stdcall -noname SHVerbExistsNA(str ptr ptr long)
 197 stdcall -noname SHFillRectClr(long ptr long)
 198 stdcall -noname SHSearchMapInt(ptr ptr long long)
-199 stdcall -ordinal IUnknown_Set(ptr ptr)
+199 stdcall -ordinal IUnknown_Set(ptr ptr) shcore.IUnknown_Set
 200 stdcall -noname MayQSForward(ptr ptr ptr long ptr ptr)
 201 stdcall -noname MayExecForward(ptr long ptr long long ptr ptr)
 202 stdcall -noname IsQSForward(ptr long ptr)
@@ -209,9 +209,9 @@
 209 stdcall -noname FDSA_Destroy(ptr)
 210 stdcall -noname FDSA_InsertItem(ptr long ptr)
 211 stdcall -noname FDSA_DeleteItem(ptr long)
-212 stdcall -ordinal IStream_Write(ptr ptr long) SHIStream_Write
-213 stdcall -ordinal IStream_Reset(ptr)
-214 stdcall -ordinal IStream_Size(ptr ptr)
+212 stdcall -ordinal IStream_Write(ptr ptr long) shcore.IStream_Write
+213 stdcall -ordinal IStream_Reset(ptr) shcore.IStream_Reset
+214 stdcall -ordinal IStream_Size(ptr ptr) shcore.IStream_Size
 215 stdcall -ordinal SHAnsiToUnicode(str ptr long)
 216 stdcall -noname SHAnsiToUnicodeCP(long str ptr long)
 217 stdcall -ordinal SHUnicodeToAnsi(wstr ptr ptr)
@@ -253,7 +253,7 @@
 253 stub -noname StopWatchExA
 254 stub -noname StopWatchExW
 255 stub -noname EventTraceHandler
-256 stdcall -ordinal IUnknown_GetSite(ptr ptr ptr)
+256 stdcall -ordinal IUnknown_GetSite(ptr ptr ptr) shcore.IUnknown_GetSite
 257 stdcall -noname SHCreateWorkerWindowA(ptr ptr long long ptr long)
 258 stub -noname SHRegisterWaitForSingleObject
 259 stub -noname SHUnregisterWait
@@ -277,7 +277,7 @@
 277 stub -noname SHDialogBox
 278 stdcall -noname SHCreateWorkerWindowW(ptr ptr long long ptr long)
 279 stdcall -noname SHInvokeDefaultCommand(ptr ptr ptr)
-280 stdcall -ordinal SHRegGetIntW(ptr wstr long)
+280 stdcall -ordinal SHRegGetIntW(ptr wstr long) shcore.SHRegGetIntW
 281 stdcall -noname SHPackDispParamsV(ptr ptr long ptr)
 282 varargs -noname SHPackDispParams(ptr ptr long)
 283 stdcall -noname IConnectionPoint_InvokeWithCancel(ptr long long long long)
@@ -342,8 +342,8 @@
 342 stdcall -noname SHInterlockedCompareExchange(ptr ptr ptr)
 343 stdcall -noname SHRegGetCLSIDKeyA(ptr str long long ptr)
 344 stdcall -noname SHRegGetCLSIDKeyW(ptr wstr long long ptr)
-345 stdcall -ordinal SHAnsiToAnsi(str ptr long)
-346 stdcall -ordinal SHUnicodeToUnicode(wstr ptr long)
+345 stdcall -ordinal SHAnsiToAnsi(str ptr long) shcore.SHAnsiToAnsi
+346 stdcall -ordinal SHUnicodeToUnicode(wstr ptr long) shcore.SHUnicodeToUnicode
 347 stdcall -noname RegDeleteValueWrapW(long wstr) advapi32.RegDeleteValueW
 348 stub -noname SHGetFileDescriptionW
 349 stub -noname SHGetFileDescriptionA
@@ -434,7 +434,7 @@
 434 stdcall -noname SendMessageTimeoutWrapW(long long long long long long ptr) user32.SendMessageTimeoutW
 435 stdcall -noname CLSIDFromProgIDWrap(wstr ptr) ole32.CLSIDFromProgID
 436 stdcall -noname CLSIDFromStringWrap(wstr ptr)
-437 stdcall -ordinal IsOS(long)
+437 stdcall -ordinal IsOS(long) shcore.IsOS
 438 stub -noname SHLoadRegUIStringA
 439 stdcall -noname SHLoadRegUIStringW(ptr wstr ptr long)
 440 stdcall -noname SHGetWebFolderFilePathA(str ptr long)
@@ -680,35 +680,35 @@
 @ stdcall PathUnquoteSpacesA (str)
 @ stdcall PathUnquoteSpacesW (wstr)
 @ stdcall SHAutoComplete(ptr long)
-@ stdcall SHCopyKeyA(long str long long)
-@ stdcall SHCopyKeyW(long wstr long long)
+@ stdcall SHCopyKeyA(long str long long) shcore.SHCopyKeyA
+@ stdcall SHCopyKeyW(long wstr long long) shcore.SHCopyKeyW
 @ stdcall SHCreateShellPalette(long)
-@ stdcall SHCreateStreamOnFileA(str long ptr)
-@ stdcall SHCreateStreamOnFileEx(wstr long long long ptr ptr)
-@ stdcall SHCreateStreamOnFileW(wstr long ptr)
+@ stdcall SHCreateStreamOnFileA(str long ptr) shcore.SHCreateStreamOnFileA
+@ stdcall SHCreateStreamOnFileEx(wstr long long long ptr ptr) shcore.SHCreateStreamOnFileEx
+@ stdcall SHCreateStreamOnFileW(wstr long ptr) shcore.SHCreateStreamOnFileW
 @ stdcall SHCreateStreamWrapper(ptr ptr long ptr)
-@ stdcall SHCreateThreadRef(ptr ptr)
-@ stdcall SHDeleteEmptyKeyA(long ptr)
-@ stdcall SHDeleteEmptyKeyW(long ptr)
-@ stdcall SHDeleteKeyA(long str)
-@ stdcall SHDeleteKeyW(long wstr)
+@ stdcall SHCreateThreadRef(ptr ptr) shcore.SHCreateThreadRef
+@ stdcall SHDeleteEmptyKeyA(long str) shcore.SHDeleteEmptyKeyA
+@ stdcall SHDeleteEmptyKeyW(long wstr) shcore.SHDeleteEmptyKeyW
+@ stdcall SHDeleteKeyA(long str) shcore.SHDeleteKeyA
+@ stdcall SHDeleteKeyW(long wstr) shcore.SHDeleteKeyW
 @ stdcall SHDeleteOrphanKeyA(long str)
 @ stdcall SHDeleteOrphanKeyW(long wstr)
 @ stdcall SHDeleteValueA(long  str  str)
 @ stdcall SHDeleteValueW(long wstr wstr)
-@ stdcall SHEnumKeyExA(long long str ptr)
-@ stdcall SHEnumKeyExW(long long wstr ptr)
-@ stdcall SHEnumValueA(long long str ptr ptr ptr ptr)
-@ stdcall SHEnumValueW(long long wstr ptr ptr ptr ptr)
+@ stdcall SHEnumKeyExA(long long str ptr) shcore.SHEnumKeyExA
+@ stdcall SHEnumKeyExW(long long wstr ptr) shcore.SHEnumKeyExW
+@ stdcall SHEnumValueA(long long str ptr ptr ptr ptr) shcore.SHEnumValueA
+@ stdcall SHEnumValueW(long long wstr ptr ptr ptr ptr) shcore.SHEnumValueW
 @ stdcall SHGetInverseCMAP ( ptr long )
-@ stdcall SHGetThreadRef (ptr)
+@ stdcall SHGetThreadRef(ptr) shcore.SHGetThreadRef
 @ stdcall SHGetValueA ( long str str ptr ptr ptr )
 @ stdcall SHGetValueW ( long wstr wstr ptr ptr ptr )
 @ stdcall SHIsLowMemoryMachine(long)
-@ stdcall SHOpenRegStream2A(long str str long)
-@ stdcall SHOpenRegStream2W(long wstr wstr long)
-@ stdcall SHOpenRegStreamA(long str str long)
-@ stdcall SHOpenRegStreamW(long wstr wstr long)
+@ stdcall SHOpenRegStream2A(long str str long) shcore.SHOpenRegStream2A
+@ stdcall SHOpenRegStream2W(long wstr wstr long) shcore.SHOpenRegStream2W
+@ stdcall SHOpenRegStreamA(long str str long) shcore.SHOpenRegStreamA
+@ stdcall SHOpenRegStreamW(long wstr wstr long) shcore.SHOpenRegStreamW
 @ stdcall SHQueryInfoKeyA(long ptr ptr ptr ptr)
 @ stdcall SHQueryInfoKeyW(long ptr ptr ptr ptr)
 @ stdcall SHQueryValueExA(long str ptr ptr ptr ptr)
@@ -746,8 +746,8 @@
 @ stdcall SHRegWriteUSValueA (long str long ptr long long)
 @ stdcall SHRegWriteUSValueW (long wstr long ptr long long)
 @ stdcall SHRegisterValidateTemplate(wstr long)
-@ stdcall SHReleaseThreadRef()
-@ stdcall SHSetThreadRef (ptr)
+@ stdcall SHReleaseThreadRef() shcore.SHReleaseThreadRef
+@ stdcall SHSetThreadRef(ptr) shcore.SHSetThreadRef
 @ stdcall SHSetValueA (long  str  str long ptr long)
 @ stdcall SHSetValueW (long wstr wstr long ptr long)
 @ stdcall SHSkipJunction(ptr ptr)

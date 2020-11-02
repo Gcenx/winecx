@@ -33,7 +33,7 @@ int MSVCRT___argc = 0;
 static int argc_expand;
 static int wargc_expand;
 unsigned int MSVCRT__commode = 0;
-unsigned int MSVCRT__fmode = 0;
+int MSVCRT__fmode = 0;
 unsigned int MSVCRT__osver = 0;
 unsigned int MSVCRT__osplatform = 0;
 unsigned int MSVCRT__winmajor = 0;
@@ -73,7 +73,8 @@ char ** msvcrt_SnapshotOfEnvironmentA(char **blk)
 
   for (ptr = environ_strings; *ptr; ptr += strlen(ptr) + 1)
   {
-    count++;
+    /* Don't count environment variables starting with '=' which are command shell specific */
+    if (*ptr != '=') count++;
     len += strlen(ptr) + 1;
   }
   if (blk)
@@ -88,7 +89,8 @@ char ** msvcrt_SnapshotOfEnvironmentA(char **blk)
 	  memcpy(&blk[count],environ_strings,len);
 	  for (ptr = (char*) &blk[count]; *ptr; ptr += strlen(ptr) + 1)
 	    {
-	      blk[i++] = ptr;
+	      /* Skip special environment strings set by the command shell */
+	      if (*ptr != '=') blk[i++] = ptr;
 	    }
 	}
       blk[i] = NULL;
@@ -105,7 +107,8 @@ MSVCRT_wchar_t ** msvcrt_SnapshotOfEnvironmentW(MSVCRT_wchar_t **wblk)
 
   for (wptr = wenviron_strings; *wptr; wptr += strlenW(wptr) + 1)
   {
-    count++;
+    /* Don't count environment variables starting with '=' which are command shell specific */
+    if (*wptr != '=') count++;
     len += strlenW(wptr) + 1;
   }
   if (wblk)
@@ -119,7 +122,8 @@ MSVCRT_wchar_t ** msvcrt_SnapshotOfEnvironmentW(MSVCRT_wchar_t **wblk)
 	  memcpy(&wblk[count],wenviron_strings,len * sizeof(MSVCRT_wchar_t));
 	  for (wptr = (MSVCRT_wchar_t*)&wblk[count]; *wptr; wptr += strlenW(wptr) + 1)
 	    {
-	      wblk[i++] = wptr;
+	      /* Skip special environment strings set by the command shell */
+	      if (*wptr != '=') wblk[i++] = wptr;
 	    }
 	}
       wblk[i] = NULL;
@@ -176,7 +180,7 @@ int CDECL _get_wpgmptr(WCHAR** p)
 /***********************************************************************
  *		__p__fmode (MSVCRT.@)
  */
-unsigned int* CDECL __p__fmode(void) { return &MSVCRT__fmode; }
+int* CDECL MSVCRT___p__fmode(void) { return &MSVCRT__fmode; }
 
 /***********************************************************************
  *              _set_fmode (MSVCRT.@)
@@ -226,12 +230,12 @@ unsigned int* CDECL __p__winver(void) { return &MSVCRT__winver; }
 /*********************************************************************
  *		__p__acmdln (MSVCRT.@)
  */
-char** CDECL __p__acmdln(void) { return &MSVCRT__acmdln; }
+char** CDECL MSVCRT___p__acmdln(void) { return &MSVCRT__acmdln; }
 
 /*********************************************************************
  *		__p__wcmdln (MSVCRT.@)
  */
-MSVCRT_wchar_t** CDECL __p__wcmdln(void) { return &MSVCRT__wcmdln; }
+MSVCRT_wchar_t** CDECL MSVCRT___p__wcmdln(void) { return &MSVCRT__wcmdln; }
 
 /*********************************************************************
  *		__p___argv (MSVCRT.@)

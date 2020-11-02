@@ -1531,6 +1531,7 @@ BOOL WINAPI PeekNamedPipe( HANDLE hPipe, LPVOID lpvBuffer, DWORD cbBuffer,
 
     status = NtFsControlFile( hPipe, 0, NULL, NULL, &io, FSCTL_PIPE_PEEK, NULL, 0,
                               buffer, FIELD_OFFSET( FILE_PIPE_PEEK_BUFFER, Data[cbBuffer] ) );
+    if (status == STATUS_BUFFER_OVERFLOW) status = STATUS_SUCCESS;
     if (!status)
     {
         ULONG read_size = io.Information - FIELD_OFFSET( FILE_PIPE_PEEK_BUFFER, Data );
@@ -1680,6 +1681,11 @@ BOOL WINAPI ConnectNamedPipe(HANDLE hPipe, LPOVERLAPPED overlapped)
     status = NtFsControlFile(hPipe, overlapped ? overlapped->hEvent : NULL, NULL, cvalue,
                              overlapped ? (IO_STATUS_BLOCK *)overlapped : &status_block,
                              FSCTL_PIPE_LISTEN, NULL, 0, NULL, 0);
+    if (status == STATUS_PENDING && !overlapped)
+    {
+        WaitForSingleObject(hPipe, INFINITE);
+        status = status_block.u.Status;
+    }
 
     if (status == STATUS_SUCCESS) return TRUE;
     SetLastError( RtlNtStatusToDosError(status) );
@@ -1740,6 +1746,11 @@ BOOL WINAPI TransactNamedPipe(
 
     status = NtFsControlFile(handle, event, NULL, cvalue, iosb, FSCTL_PIPE_TRANSCEIVE,
                              write_buf, write_size, read_buf, read_size);
+    if (status == STATUS_PENDING && !overlapped)
+    {
+        WaitForSingleObject(handle, INFINITE);
+        status = iosb->u.Status;
+    }
 
     if (bytes_read) *bytes_read = overlapped && status ? 0 : iosb->Information;
 
@@ -2085,8 +2096,8 @@ BOOL WINAPI CreatePipe( PHANDLE hReadPipe, PHANDLE hWritePipe,
 
         snprintfW(name, ARRAY_SIZE(name), nameFmt, GetCurrentProcessId(), ++index);
         RtlInitUnicodeString(&nt_name, name);
-        status = NtCreateNamedPipeFile(&hr, GENERIC_READ | SYNCHRONIZE, &attr, &iosb,
-                                       FILE_SHARE_WRITE, FILE_OVERWRITE_IF,
+        status = NtCreateNamedPipeFile(&hr, GENERIC_READ | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE,
+                                       &attr, &iosb, FILE_SHARE_WRITE, FILE_OVERWRITE_IF,
                                        FILE_SYNCHRONOUS_IO_NONALERT,
                                        FALSE, FALSE, FALSE, 
                                        1, size, size, &timeout);
@@ -2099,7 +2110,7 @@ BOOL WINAPI CreatePipe( PHANDLE hReadPipe, PHANDLE hWritePipe,
     /* from completion sakeness, I think system resources might be exhausted before this happens !! */
     if (hr == INVALID_HANDLE_VALUE) return FALSE;
 
-    status = NtOpenFile(&hw, GENERIC_WRITE | SYNCHRONIZE, &attr, &iosb, 0,
+    status = NtOpenFile(&hw, GENERIC_WRITE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, &attr, &iosb, 0,
                         FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE);
 
     if (status) 
@@ -2377,6 +2388,25 @@ BOOL WINAPI GetQueuedCompletionStatus( HANDLE CompletionPort, LPDWORD lpNumberOf
     return FALSE;
 }
 
+/******************************************************************************
+ *              GetQueuedCompletionStatusEx (KERNEL32.@)
+ */
+BOOL WINAPI GetQueuedCompletionStatusEx( HANDLE port, OVERLAPPED_ENTRY *entries, ULONG count,
+                                         ULONG *written, DWORD timeout, BOOL alertable )
+{
+    LARGE_INTEGER time;
+    NTSTATUS ret;
+
+    TRACE("%p %p %u %p %u %u\n", port, entries, count, written, timeout, alertable);
+
+    ret = NtRemoveIoCompletionEx( port, (FILE_IO_COMPLETION_INFORMATION *)entries, count,
+                                  written, get_nt_timeout( &time, timeout ), alertable );
+    if (ret == STATUS_SUCCESS) return TRUE;
+    else if (ret == STATUS_TIMEOUT) SetLastError( WAIT_TIMEOUT );
+    else if (ret == STATUS_USER_APC) SetLastError( WAIT_IO_COMPLETION );
+    else SetLastError( RtlNtStatusToDosError(ret) );
+    return FALSE;
+}
 
 /******************************************************************************
  *		PostQueuedCompletionStatus (KERNEL32.@)

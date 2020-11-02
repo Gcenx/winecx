@@ -311,6 +311,7 @@ struct drawcall_entry {
     WCHAR string[10]; /* only meaningful for DrawGlyphRun() */
     WCHAR locale[LOCALE_NAME_MAX_LENGTH];
     UINT32 glyphcount; /* only meaningful for DrawGlyphRun() */
+    UINT32 bidilevel;
 };
 
 struct drawcall_sequence
@@ -432,6 +433,17 @@ static void ok_sequence_(struct drawcall_sequence **seq, int sequence_index,
                 ok_(file, line) (expected->glyphcount == actual->glyphcount,
                     "%s: wrong glyph count, %u was expected, but got %u instead\n",
                     context, expected->glyphcount, actual->glyphcount);
+
+            if (expected->bidilevel != actual->bidilevel && todo) {
+                failcount++;
+            todo_wine
+                ok_(file, line) (0, "%s: wrong bidi level, %u was expected, but got %u instead\n",
+                    context, expected->bidilevel, actual->bidilevel);
+            }
+            else
+                ok_(file, line) (expected->bidilevel == actual->bidilevel,
+                    "%s: wrong bidi level, %u was expected, but got %u instead\n",
+                    context, expected->bidilevel, actual->bidilevel);
         }
         else if ((expected->kind & DRAW_KINDS_MASK) == DRAW_UNDERLINE) {
             int cmp = lstrcmpW(expected->locale, actual->locale);
@@ -606,6 +618,7 @@ static HRESULT WINAPI testrenderer_DrawGlyphRun(IDWriteTextRenderer *iface,
     ok(lstrlenW(descr->localeName) < LOCALE_NAME_MAX_LENGTH, "unexpectedly long locale name\n");
     lstrcpyW(entry.locale, descr->localeName);
     entry.glyphcount = run->glyphCount;
+    entry.bidilevel = run->bidiLevel;
     add_call(sequences, RENDERER_ID, &entry);
     return S_OK;
 }
@@ -1681,11 +1694,19 @@ static const struct drawcall_entry draw_single_run_seq[] = {
     { DRAW_LAST_KIND }
 };
 
-static const struct drawcall_entry draw_reordered_run_seq[] = {
+static const struct drawcall_entry draw_ltr_reordered_run_seq[] = {
     { DRAW_GLYPHRUN, {'1','2','3','-','5','2',0}, {'r','u',0}, 6 },
-    { DRAW_GLYPHRUN, {0x64a,0x64f,0x633,0x627,0x648,0x650,0x64a,0}, {'r','u',0}, 7 },
-    { DRAW_GLYPHRUN, {'7','1',0}, {'r','u',0}, 2 },
+    { DRAW_GLYPHRUN, {0x64a,0x64f,0x633,0x627,0x648,0x650,0x64a,0}, {'r','u',0}, 7, 1 },
+    { DRAW_GLYPHRUN, {'7','1',0}, {'r','u',0}, 2, 2 },
     { DRAW_GLYPHRUN, {'.',0}, {'r','u',0}, 1 },
+    { DRAW_LAST_KIND }
+};
+
+static const struct drawcall_entry draw_rtl_reordered_run_seq[] = {
+    { DRAW_GLYPHRUN, {'1','2','3','-','5','2',0}, {'r','u',0}, 6, 2 },
+    { DRAW_GLYPHRUN, {0x64a,0x64f,0x633,0x627,0x648,0x650,0x64a,0}, {'r','u',0}, 7, 1 },
+    { DRAW_GLYPHRUN, {'7','1',0}, {'r','u',0}, 2, 2 },
+    { DRAW_GLYPHRUN, {'.',0}, {'r','u',0}, 1, 1 },
     { DRAW_LAST_KIND }
 };
 
@@ -1887,10 +1908,21 @@ todo_wine
     ctxt.use_gdi_natural = FALSE;
     ctxt.snapping_disabled = TRUE;
 
+    hr = IDWriteTextLayout_SetReadingDirection(layout, DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
+    ok(hr == S_OK, "Failed to set reading direction, hr %#x.\n", hr);
+
     flush_sequence(sequences, RENDERER_ID);
     hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0f, 0.0f);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok_sequence(sequences, RENDERER_ID, draw_reordered_run_seq, "draw test 11", FALSE);
+    ok_sequence(sequences, RENDERER_ID, draw_ltr_reordered_run_seq, "draw test 11", FALSE);
+
+    hr = IDWriteTextLayout_SetReadingDirection(layout, DWRITE_READING_DIRECTION_RIGHT_TO_LEFT);
+    ok(hr == S_OK, "Failed to set reading direction, hr %#x.\n", hr);
+
+    flush_sequence(sequences, RENDERER_ID);
+    hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0f, 0.0f);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok_sequence(sequences, RENDERER_ID, draw_rtl_reordered_run_seq, "draw test 12", FALSE);
 
     IDWriteTextLayout_Release(layout);
 
@@ -2673,83 +2705,6 @@ static void test_SetVerticalGlyphOrientation(void)
     hr = IDWriteTextLayout2_SetVerticalGlyphOrientation(layout2, DWRITE_VERTICAL_GLYPH_ORIENTATION_STACKED+1);
     ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
 
-    IDWriteTextLayout2_Release(layout2);
-    IDWriteFactory_Release(factory);
-}
-
-static void test_fallback(void)
-{
-    static const WCHAR strW[] = {'a','b','c','d',0};
-    IDWriteFontFallback *fallback, *fallback2;
-    IDWriteTextLayout2 *layout2;
-    IDWriteTextFormat1 *format1;
-    IDWriteTextFormat *format;
-    IDWriteTextLayout *layout;
-    IDWriteFactory2 *factory2;
-    IDWriteFactory *factory;
-    HRESULT hr;
-
-    factory = create_factory();
-
-    hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL, 10.0, enusW, &format);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-
-    hr = IDWriteFactory_CreateTextLayout(factory, strW, 4, format, 1000.0, 1000.0, &layout);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    IDWriteTextFormat_Release(format);
-
-    hr = IDWriteTextLayout_QueryInterface(layout, &IID_IDWriteTextLayout2, (void**)&layout2);
-    IDWriteTextLayout_Release(layout);
-
-    if (hr != S_OK) {
-        win_skip("GetFontFallback() is not supported.\n");
-        IDWriteFactory_Release(factory);
-        return;
-    }
-
-    if (0) /* crashes on native */
-        hr = IDWriteTextLayout2_GetFontFallback(layout2, NULL);
-
-    fallback = (void*)0xdeadbeef;
-    hr = IDWriteTextLayout2_GetFontFallback(layout2, &fallback);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(fallback == NULL, "got %p\n", fallback);
-
-    hr = IDWriteTextLayout2_QueryInterface(layout2, &IID_IDWriteTextFormat1, (void**)&format1);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-
-    fallback = (void*)0xdeadbeef;
-    hr = IDWriteTextFormat1_GetFontFallback(format1, &fallback);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(fallback == NULL, "got %p\n", fallback);
-
-    hr = IDWriteFactory_QueryInterface(factory, &IID_IDWriteFactory2, (void**)&factory2);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-
-    fallback = NULL;
-    hr = IDWriteFactory2_GetSystemFontFallback(factory2, &fallback);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(fallback != NULL, "got %p\n", fallback);
-
-    hr = IDWriteTextFormat1_SetFontFallback(format1, fallback);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-
-    fallback2 = (void*)0xdeadbeef;
-    hr = IDWriteTextLayout2_GetFontFallback(layout2, &fallback2);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(fallback2 == fallback, "got %p\n", fallback2);
-
-    hr = IDWriteTextLayout2_SetFontFallback(layout2, NULL);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-
-    fallback2 = (void*)0xdeadbeef;
-    hr = IDWriteTextFormat1_GetFontFallback(format1, &fallback2);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(fallback2 == NULL, "got %p\n", fallback2);
-
-    IDWriteFontFallback_Release(fallback);
-    IDWriteTextFormat1_Release(format1);
     IDWriteTextLayout2_Release(layout2);
     IDWriteFactory_Release(factory);
 }
@@ -4939,6 +4894,116 @@ todo_wine {
     ok(ref == 0, "Factory is not released, ref %u.\n", ref);
 }
 
+static void test_fallback(void)
+{
+    static const WCHAR strW[] = {'a','b','c','d',0};
+    IDWriteFontFallback *fallback, *fallback2;
+    DWRITE_CLUSTER_METRICS clusters[4];
+    DWRITE_TEXT_METRICS metrics;
+    IDWriteTextLayout2 *layout2;
+    IDWriteTextFormat1 *format1;
+    IDWriteTextFormat *format;
+    IDWriteTextLayout *layout;
+    IDWriteFactory2 *factory2;
+    IDWriteFactory *factory;
+    UINT32 count, i;
+    FLOAT width;
+    HRESULT hr;
+
+    factory = create_factory();
+
+    /* Font does not exist in system collection. */
+    hr = IDWriteFactory_CreateTextFormat(factory, g_blahfontW, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, 10.0, enusW, &format);
+    ok(hr == S_OK, "Failed to create text format, hr %#x.\n", hr);
+
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 4, format, 1000.0, 1000.0, &layout);
+    ok(hr == S_OK, "Failed to create text layout, hr %#x.\n", hr);
+
+    count = 0;
+    hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, 4, &count);
+todo_wine {
+    ok(hr == S_OK, "Failed to get cluster metrics, hr %#x.\n", hr);
+    ok(count == 4, "Unexpected count %u.\n", count);
+}
+    for (i = 0, width = 0.0; i < count; i++)
+        width += clusters[i].width;
+
+    memset(&metrics, 0xcc, sizeof(metrics));
+    hr = IDWriteTextLayout_GetMetrics(layout, &metrics);
+    ok(hr == S_OK, "Failed to get layout metrics, hr %#x.\n", hr);
+todo_wine {
+    ok(metrics.width > 0.0 && metrics.width == width, "Unexpected width %.2f, expected %.2f.\n", metrics.width, width);
+    ok(metrics.height > 0.0, "Unexpected height %.2f.\n", metrics.height);
+    ok(metrics.lineCount == 1, "Unexpected line count %u.\n", metrics.lineCount);
+}
+    IDWriteTextLayout_Release(layout);
+    IDWriteTextFormat_Release(format);
+
+    hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, 10.0, enusW, &format);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* Existing font. */
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 4, format, 1000.0, 1000.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    IDWriteTextFormat_Release(format);
+
+    hr = IDWriteTextLayout_QueryInterface(layout, &IID_IDWriteTextLayout2, (void**)&layout2);
+    IDWriteTextLayout_Release(layout);
+
+    if (hr != S_OK) {
+        win_skip("GetFontFallback() is not supported.\n");
+        IDWriteFactory_Release(factory);
+        return;
+    }
+
+    if (0) /* crashes on native */
+        hr = IDWriteTextLayout2_GetFontFallback(layout2, NULL);
+
+    fallback = (void*)0xdeadbeef;
+    hr = IDWriteTextLayout2_GetFontFallback(layout2, &fallback);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(fallback == NULL, "got %p\n", fallback);
+
+    hr = IDWriteTextLayout2_QueryInterface(layout2, &IID_IDWriteTextFormat1, (void**)&format1);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    fallback = (void*)0xdeadbeef;
+    hr = IDWriteTextFormat1_GetFontFallback(format1, &fallback);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(fallback == NULL, "got %p\n", fallback);
+
+    hr = IDWriteFactory_QueryInterface(factory, &IID_IDWriteFactory2, (void**)&factory2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    fallback = NULL;
+    hr = IDWriteFactory2_GetSystemFontFallback(factory2, &fallback);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(fallback != NULL, "got %p\n", fallback);
+
+    hr = IDWriteTextFormat1_SetFontFallback(format1, fallback);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    fallback2 = (void*)0xdeadbeef;
+    hr = IDWriteTextLayout2_GetFontFallback(layout2, &fallback2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(fallback2 == fallback, "got %p\n", fallback2);
+
+    hr = IDWriteTextLayout2_SetFontFallback(layout2, NULL);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    fallback2 = (void*)0xdeadbeef;
+    hr = IDWriteTextFormat1_GetFontFallback(format1, &fallback2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(fallback2 == NULL, "got %p\n", fallback2);
+
+    IDWriteFontFallback_Release(fallback);
+    IDWriteTextFormat1_Release(format1);
+    IDWriteTextLayout2_Release(layout2);
+    IDWriteFactory_Release(factory);
+}
+
 static void test_SetTypography(void)
 {
     static const WCHAR strW[] = {'a','f','i','b',0};
@@ -5565,6 +5630,90 @@ static void test_GetOverhangMetrics(void)
     IDWriteFactory_Release(factory);
 }
 
+static void test_tab_stops(void)
+{
+    static const WCHAR strW[] = {'\t','a','\t','b'};
+    DWRITE_CLUSTER_METRICS clusters[4];
+    IDWriteTextLayout *layout;
+    IDWriteTextFormat *format;
+    IDWriteFactory *factory;
+    DWRITE_TEXT_RANGE range;
+    FLOAT tabstop, size;
+    ULONG count;
+    HRESULT hr;
+
+    factory = create_factory();
+
+    /* Default tab stop value. */
+    for (size = 1.0f; size < 25.0f; size += 5.0f)
+    {
+        hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size, enusW, &format);
+        ok(hr == S_OK, "Failed to create text format, hr %#x.\n", hr);
+
+        tabstop = IDWriteTextFormat_GetIncrementalTabStop(format);
+        ok(tabstop == 4.0f * size, "Unexpected tab stop %f.\n", tabstop);
+
+        IDWriteTextFormat_Release(format);
+    }
+
+    hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 10.0f, enusW, &format);
+    ok(hr == S_OK, "Failed to create text format, hr %#x.\n", hr);
+
+    hr = IDWriteTextFormat_SetIncrementalTabStop(format, 0.0f);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+
+    hr = IDWriteTextFormat_SetIncrementalTabStop(format, -10.0f);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+
+    tabstop = IDWriteTextFormat_GetIncrementalTabStop(format);
+    ok(tabstop == 40.0f, "Unexpected tab stop %f.\n", tabstop);
+
+    hr = IDWriteTextFormat_SetIncrementalTabStop(format, 100.0f);
+    ok(hr == S_OK, "Failed to set tab stop value, hr %#x.\n", hr);
+
+    tabstop = IDWriteTextFormat_GetIncrementalTabStop(format);
+    ok(tabstop == 100.0f, "Unexpected tab stop %f.\n", tabstop);
+
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 4, format, 1000.0f, 1000.0f, &layout);
+    ok(hr == S_OK, "Failed to create text layout, hr %x.\n", hr);
+
+    hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, 4, &count);
+    ok(hr == S_OK, "Failed to get cluster metrics, hr %#x.\n", hr);
+    ok(clusters[0].isWhitespace, "Unexpected isWhitespace.\n");
+    ok(!clusters[1].isWhitespace, "Unexpected isWhitespace.\n");
+    ok(clusters[2].isWhitespace, "Unexpected isWhitespace.\n");
+    ok(!clusters[3].isWhitespace, "Unexpected isWhitespace.\n");
+todo_wine {
+    ok(clusters[0].width == tabstop, "Unexpected tab width.\n");
+    ok(clusters[1].width + clusters[2].width == tabstop, "Unexpected tab width.\n");
+}
+    range.startPosition = 0;
+    range.length = ~0u;
+    hr = IDWriteTextLayout_SetFontSize(layout, 20.0f, range);
+    ok(hr == S_OK, "Failed to set font size, hr %#x.\n", hr);
+
+    tabstop = IDWriteTextLayout_GetIncrementalTabStop(layout);
+    ok(tabstop == 100.0f, "Unexpected tab stop %f.\n", tabstop);
+
+    hr = IDWriteTextLayout_GetClusterMetrics(layout, clusters, 4, &count);
+    ok(hr == S_OK, "Failed to get cluster metrics, hr %#x.\n", hr);
+    ok(clusters[0].isWhitespace, "Unexpected isWhitespace.\n");
+    ok(!clusters[1].isWhitespace, "Unexpected isWhitespace.\n");
+    ok(clusters[2].isWhitespace, "Unexpected isWhitespace.\n");
+    ok(!clusters[3].isWhitespace, "Unexpected isWhitespace.\n");
+todo_wine {
+    ok(clusters[0].width == tabstop, "Unexpected tab width.\n");
+    ok(clusters[1].width + clusters[2].width == tabstop, "Unexpected tab width.\n");
+}
+    IDWriteTextLayout_Release(layout);
+
+    IDWriteTextFormat_Release(format);
+
+    IDWriteFactory_Release(factory);
+}
+
 START_TEST(layout)
 {
     IDWriteFactory *factory;
@@ -5615,6 +5764,7 @@ START_TEST(layout)
     test_InvalidateLayout();
     test_line_spacing();
     test_GetOverhangMetrics();
+    test_tab_stops();
 
     IDWriteFactory_Release(factory);
 }

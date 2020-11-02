@@ -54,8 +54,6 @@
 
 #define DEFAULT_NCACN_HTTP_TIMEOUT (60 * 1000)
 
-#define ARRAYSIZE(a) (sizeof((a)) / sizeof((a)[0]))
-
 WINE_DEFAULT_DEBUG_CHANNEL(rpc);
 
 static RpcConnection *rpcrt4_spawn_connection(RpcConnection *old_connection);
@@ -1932,9 +1930,9 @@ static RPC_STATUS rpcrt4_http_internet_connect(RpcConnection_http *httpc)
         static const WCHAR wszRpcProxy[] = {'R','p','c','P','r','o','x','y','=',0};
         static const WCHAR wszHttpProxy[] = {'H','t','t','p','P','r','o','x','y','=',0};
 
-        if (!strncmpiW(option, wszRpcProxy, sizeof(wszRpcProxy)/sizeof(wszRpcProxy[0])-1))
+        if (!strncmpiW(option, wszRpcProxy, ARRAY_SIZE(wszRpcProxy)-1))
         {
-            const WCHAR *value_start = option + sizeof(wszRpcProxy)/sizeof(wszRpcProxy[0])-1;
+            const WCHAR *value_start = option + ARRAY_SIZE(wszRpcProxy)-1;
             const WCHAR *value_end;
             const WCHAR *p;
 
@@ -1951,9 +1949,9 @@ static RPC_STATUS rpcrt4_http_internet_connect(RpcConnection_http *httpc)
             TRACE("RpcProxy value is %s\n", debugstr_wn(value_start, value_end-value_start));
             servername = RPCRT4_strndupW(value_start, value_end-value_start);
         }
-        else if (!strncmpiW(option, wszHttpProxy, sizeof(wszHttpProxy)/sizeof(wszHttpProxy[0])-1))
+        else if (!strncmpiW(option, wszHttpProxy, ARRAY_SIZE(wszHttpProxy)-1))
         {
-            const WCHAR *value_start = option + sizeof(wszHttpProxy)/sizeof(wszHttpProxy[0])-1;
+            const WCHAR *value_start = option + ARRAY_SIZE(wszHttpProxy)-1;
             const WCHAR *value_end;
 
             value_end = strchrW(option, ',');
@@ -2081,7 +2079,7 @@ static RPC_STATUS insert_content_length_header(HINTERNET request, DWORD len)
 {
     static const WCHAR fmtW[] =
         {'C','o','n','t','e','n','t','-','L','e','n','g','t','h',':',' ','%','u','\r','\n',0};
-    WCHAR header[sizeof(fmtW) / sizeof(fmtW[0]) + 10];
+    WCHAR header[ARRAY_SIZE(fmtW) + 10];
 
     sprintfW(header, fmtW, len);
     if ((HttpAddRequestHeadersW(request, header, -1, HTTP_ADDREQ_FLAG_REPLACE | HTTP_ADDREQ_FLAG_ADD))) return RPC_S_OK;
@@ -2410,18 +2408,17 @@ static const struct
 }
 auth_schemes[] =
 {
-    { basicW,     ARRAYSIZE(basicW) - 1,     RPC_C_HTTP_AUTHN_SCHEME_BASIC },
-    { ntlmW,      ARRAYSIZE(ntlmW) - 1,      RPC_C_HTTP_AUTHN_SCHEME_NTLM },
-    { passportW,  ARRAYSIZE(passportW) - 1,  RPC_C_HTTP_AUTHN_SCHEME_PASSPORT },
-    { digestW,    ARRAYSIZE(digestW) - 1,    RPC_C_HTTP_AUTHN_SCHEME_DIGEST },
-    { negotiateW, ARRAYSIZE(negotiateW) - 1, RPC_C_HTTP_AUTHN_SCHEME_NEGOTIATE }
+    { basicW,     ARRAY_SIZE(basicW) - 1,     RPC_C_HTTP_AUTHN_SCHEME_BASIC },
+    { ntlmW,      ARRAY_SIZE(ntlmW) - 1,      RPC_C_HTTP_AUTHN_SCHEME_NTLM },
+    { passportW,  ARRAY_SIZE(passportW) - 1,  RPC_C_HTTP_AUTHN_SCHEME_PASSPORT },
+    { digestW,    ARRAY_SIZE(digestW) - 1,    RPC_C_HTTP_AUTHN_SCHEME_DIGEST },
+    { negotiateW, ARRAY_SIZE(negotiateW) - 1, RPC_C_HTTP_AUTHN_SCHEME_NEGOTIATE }
 };
-static const unsigned int num_auth_schemes = sizeof(auth_schemes)/sizeof(auth_schemes[0]);
 
 static DWORD auth_scheme_from_header( const WCHAR *header )
 {
     unsigned int i;
-    for (i = 0; i < num_auth_schemes; i++)
+    for (i = 0; i < ARRAY_SIZE(auth_schemes); i++)
     {
         if (!strncmpiW( header, auth_schemes[i].str, auth_schemes[i].len ) &&
             (header[auth_schemes[i].len] == ' ' || !header[auth_schemes[i].len])) return auth_schemes[i].scheme;
@@ -2595,7 +2592,7 @@ static RPC_STATUS insert_authorization_header(HINTERNET request, ULONG scheme, c
     static const WCHAR basicW[] = {'B','a','s','i','c',' '};
     static const WCHAR negotiateW[] = {'N','e','g','o','t','i','a','t','e',' '};
     static const WCHAR ntlmW[] = {'N','T','L','M',' '};
-    int scheme_len, auth_len = sizeof(authW) / sizeof(authW[0]), len = ((data_len + 2) * 4) / 3;
+    int scheme_len, auth_len = ARRAY_SIZE(authW), len = ((data_len + 2) * 4) / 3;
     const WCHAR *scheme_str;
     WCHAR *header, *ptr;
     RPC_STATUS status = RPC_S_SERVER_UNAVAILABLE;
@@ -2604,15 +2601,15 @@ static RPC_STATUS insert_authorization_header(HINTERNET request, ULONG scheme, c
     {
     case RPC_C_HTTP_AUTHN_SCHEME_BASIC:
         scheme_str = basicW;
-        scheme_len = sizeof(basicW) / sizeof(basicW[0]);
+        scheme_len = ARRAY_SIZE(basicW);
         break;
     case RPC_C_HTTP_AUTHN_SCHEME_NEGOTIATE:
         scheme_str = negotiateW;
-        scheme_len = sizeof(negotiateW) / sizeof(negotiateW[0]);
+        scheme_len = ARRAY_SIZE(negotiateW);
         break;
     case RPC_C_HTTP_AUTHN_SCHEME_NTLM:
         scheme_str = ntlmW;
-        scheme_len = sizeof(ntlmW) / sizeof(ntlmW[0]);
+        scheme_len = ARRAY_SIZE(ntlmW);
         break;
     default:
         ERR("unknown scheme %u\n", scheme);
@@ -2793,7 +2790,8 @@ static RPC_STATUS rpcrt4_ncacn_http_open(RpcConnection* Connection)
     if (!url)
         return RPC_S_OUT_OF_MEMORY;
     memcpy(url, wszRpcProxyPrefix, sizeof(wszRpcProxyPrefix));
-    MultiByteToWideChar(CP_ACP, 0, Connection->NetworkAddr, -1, url+sizeof(wszRpcProxyPrefix)/sizeof(wszRpcProxyPrefix[0])-1, strlen(Connection->NetworkAddr)+1);
+    MultiByteToWideChar(CP_ACP, 0, Connection->NetworkAddr, -1, url+ARRAY_SIZE(wszRpcProxyPrefix)-1,
+                        strlen(Connection->NetworkAddr)+1);
     strcatW(url, wszColon);
     MultiByteToWideChar(CP_ACP, 0, Connection->Endpoint, -1, url+strlenW(url), strlen(Connection->Endpoint)+1);
 
@@ -3273,7 +3271,7 @@ static const struct protseq_ops protseq_list[] =
 const struct protseq_ops *rpcrt4_get_protseq_ops(const char *protseq)
 {
   unsigned int i;
-  for(i=0; i<ARRAYSIZE(protseq_list); i++)
+  for(i = 0; i < ARRAY_SIZE(protseq_list); i++)
     if (!strcmp(protseq_list[i].name, protseq))
       return &protseq_list[i];
   return NULL;
@@ -3282,7 +3280,7 @@ const struct protseq_ops *rpcrt4_get_protseq_ops(const char *protseq)
 static const struct connection_ops *rpcrt4_get_conn_protseq_ops(const char *protseq)
 {
     unsigned int i;
-    for(i=0; i<ARRAYSIZE(conn_protseq_list); i++)
+    for(i = 0; i < ARRAY_SIZE(conn_protseq_list); i++)
         if (!strcmp(conn_protseq_list[i].name, protseq))
             return &conn_protseq_list[i];
     return NULL;
@@ -3432,6 +3430,7 @@ void RPCRT4_ReleaseConnection(RpcConnection *connection)
 
         /* server-only */
         if (connection->server_binding) RPCRT4_ReleaseBinding(connection->server_binding);
+        else if (connection->assoc) RpcAssoc_ConnectionReleased(connection->assoc);
 
         if (connection->wait_release) SetEvent(connection->wait_release);
 
@@ -3519,7 +3518,7 @@ RPC_STATUS RpcTransport_ParseTopOfTower(const unsigned char *tower_data,
         (floor4->count_lhs != sizeof(floor4->protid)))
         return EPT_S_NOT_REGISTERED;
 
-    for(i = 0; i < ARRAYSIZE(conn_protseq_list); i++)
+    for(i = 0; i < ARRAY_SIZE(conn_protseq_list); i++)
         if ((protocol_floor->protid == conn_protseq_list[i].epm_protocols[0]) &&
             (floor4->protid == conn_protseq_list[i].epm_protocols[1]))
         {
@@ -3625,12 +3624,12 @@ RPC_STATUS WINAPI RpcNetworkInqProtseqsW( RPC_PROTSEQ_VECTORW** protseqs )
 
   TRACE("(%p)\n", protseqs);
 
-  *protseqs = HeapAlloc(GetProcessHeap(), 0, sizeof(RPC_PROTSEQ_VECTORW)+(sizeof(unsigned short*)*ARRAYSIZE(protseq_list)));
+  *protseqs = HeapAlloc(GetProcessHeap(), 0, sizeof(RPC_PROTSEQ_VECTORW)+(sizeof(unsigned short*)*ARRAY_SIZE(protseq_list)));
   if (!*protseqs)
     goto end;
   pvector = *protseqs;
   pvector->Count = 0;
-  for (i = 0; i < ARRAYSIZE(protseq_list); i++)
+  for (i = 0; i < ARRAY_SIZE(protseq_list); i++)
   {
     pvector->Protseq[i] = HeapAlloc(GetProcessHeap(), 0, (strlen(protseq_list[i].name)+1)*sizeof(unsigned short));
     if (pvector->Protseq[i] == NULL)
@@ -3658,12 +3657,12 @@ RPC_STATUS WINAPI RpcNetworkInqProtseqsA(RPC_PROTSEQ_VECTORA** protseqs)
 
   TRACE("(%p)\n", protseqs);
 
-  *protseqs = HeapAlloc(GetProcessHeap(), 0, sizeof(RPC_PROTSEQ_VECTORW)+(sizeof(unsigned char*)*ARRAYSIZE(protseq_list)));
+  *protseqs = HeapAlloc(GetProcessHeap(), 0, sizeof(RPC_PROTSEQ_VECTORW)+(sizeof(unsigned char*)*ARRAY_SIZE(protseq_list)));
   if (!*protseqs)
     goto end;
   pvector = *protseqs;
   pvector->Count = 0;
-  for (i = 0; i < ARRAYSIZE(protseq_list); i++)
+  for (i = 0; i < ARRAY_SIZE(protseq_list); i++)
   {
     pvector->Protseq[i] = HeapAlloc(GetProcessHeap(), 0, strlen(protseq_list[i].name)+1);
     if (pvector->Protseq[i] == NULL)

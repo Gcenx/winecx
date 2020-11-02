@@ -108,6 +108,19 @@ static inline void align_pointer_clear( unsigned char **ptr, unsigned int align 
     *ptr = (unsigned char *)(((ULONG_PTR)*ptr + mask) & ~mask);
 }
 
+static inline void align_pointer_offset( unsigned char **ptr, unsigned char *base, unsigned int align )
+{
+    ULONG_PTR mask = align - 1;
+    *ptr = base + (((ULONG_PTR)(*ptr - base) + mask) & ~mask);
+}
+
+static inline void align_pointer_offset_clear( unsigned char **ptr, unsigned char *base, unsigned int align )
+{
+    ULONG_PTR mask = align - 1;
+    memset( *ptr, 0, (align - (ULONG_PTR)(*ptr - base)) & mask );
+    *ptr = base + (((ULONG_PTR)(*ptr - base) + mask) & ~mask);
+}
+
 #define STD_OVERFLOW_CHECK(_Msg) do { \
     TRACE("buffer=%d/%d\n", (ULONG)(_Msg->Buffer - (unsigned char *)_Msg->RpcMsg->Buffer), _Msg->BufferLength); \
     if (_Msg->Buffer > (unsigned char *)_Msg->RpcMsg->Buffer + _Msg->BufferLength) \
@@ -434,6 +447,13 @@ void * WINAPI NdrAllocate(MIDL_STUB_MESSAGE *pStubMsg, SIZE_T len)
 
     TRACE("-- %p\n", p);
     return p;
+}
+
+static void *NdrAllocateZero(MIDL_STUB_MESSAGE *stubmsg, SIZE_T len)
+{
+    void *mem = NdrAllocate(stubmsg, len);
+    memset(mem, 0, len);
+    return mem;
 }
 
 static void NdrFree(MIDL_STUB_MESSAGE *pStubMsg, unsigned char *Pointer)
@@ -856,9 +876,13 @@ static void PointerMarshall(PMIDL_STUB_MESSAGE pStubMsg,
   STD_OVERFLOW_CHECK(pStubMsg);
 }
 
-/***********************************************************************
- *           PointerUnmarshall [internal]
- */
+/* pPointer is the pointer that we will unmarshal into; pSrcPointer is the
+ * pointer to memory which we may attempt to reuse if non-NULL. Usually these
+ * are the same; for the case when they aren't, see EmbeddedPointerUnmarshall().
+ *
+ * fMustAlloc seems to determine whether we can allocate from the buffer (if we
+ * are on the server side). It's ignored here, since we can't allocate a pointer
+ * from the buffer. */
 static void PointerUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
                               unsigned char *Buffer,
                               unsigned char **pPointer,
@@ -870,7 +894,7 @@ static void PointerUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
   PFORMAT_STRING desc;
   NDR_UNMARSHALL m;
   DWORD pointer_id = 0;
-  BOOL pointer_needs_unmarshaling;
+  BOOL pointer_needs_unmarshaling, need_alloc = FALSE, inner_must_alloc = FALSE;
 
   TRACE("(%p,%p,%p,%p,%p,%d)\n", pStubMsg, Buffer, pPointer, pSrcPointer, pFormat, fMustAlloc);
   TRACE("type=0x%x, attr=", type); dump_pointer_attr(attr);
@@ -895,11 +919,13 @@ static void PointerUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
   case FC_OP: /* object pointer - we must free data before overwriting it */
     pointer_id = NDR_LOCAL_UINT32_READ(Buffer);
     TRACE("pointer_id is 0x%08x\n", pointer_id);
-    if (!fMustAlloc && pSrcPointer)
-    {
+
+    /* An object pointer always allocates new memory (it cannot point to the
+     * buffer). */
+    inner_must_alloc = TRUE;
+
+    if (pSrcPointer)
         FIXME("free object pointer %p\n", pSrcPointer);
-        fMustAlloc = TRUE;
-    }
     if (pointer_id)
       pointer_needs_unmarshaling = TRUE;
     else
@@ -924,47 +950,48 @@ static void PointerUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
     unsigned char **current_ptr = pPointer;
     if (pStubMsg->IsClient) {
       TRACE("client\n");
-      /* if we aren't forcing allocation of memory then try to use the existing
-       * (source) pointer to unmarshall the data into so that [in,out]
-       * parameters behave correctly. it doesn't matter if the parameter is
-       * [out] only since in that case the pointer will be NULL. we force
-       * allocation when the source pointer is NULL here instead of in the type
-       * unmarshalling routine for the benefit of the deref code below */
-      if (!fMustAlloc) {
-        if (pSrcPointer) {
-          TRACE("setting *pPointer to %p\n", pSrcPointer);
-          *pPointer = pSrcPointer;
-        } else
-          fMustAlloc = TRUE;
+      /* Try to use the existing (source) pointer to unmarshall the data into
+       * so that [in, out] or [out, ref] parameters behave correctly. If the
+       * source pointer is NULL and we are not dereferencing, we must force the
+       * inner marshalling routine to allocate, since otherwise it will crash. */
+      if (pSrcPointer)
+      {
+        TRACE("setting *pPointer to %p\n", pSrcPointer);
+        *pPointer = pSrcPointer;
       }
+      else
+        need_alloc = inner_must_alloc = TRUE;
     } else {
       TRACE("server\n");
-      /* the memory in a stub is never initialised, so we have to work out here
-       * whether we have to initialise it so we can use the optimisation of
-       * setting the pointer to the buffer, if possible, or set fMustAlloc to
-       * TRUE. */
-      if (attr & FC_POINTER_DEREF) {
-        fMustAlloc = TRUE;
-      } else {
-        *current_ptr = NULL;
+      /* We can use an existing source pointer here only if it is on-stack,
+       * probably since otherwise NdrPointerFree() might later try to free a
+       * pointer we don't know the provenance of. Otherwise we must always
+       * allocate if we are dereferencing. We never need to force the inner
+       * routine to allocate here, since it will either write into an existing
+       * pointer, or use a pointer to the buffer. */
+      if (attr & FC_POINTER_DEREF)
+      {
+        if (pSrcPointer && (attr & FC_ALLOCED_ON_STACK))
+          *pPointer = pSrcPointer;
+        else
+          need_alloc = TRUE;
       }
+      else
+        *pPointer = NULL;
     }
 
     if (attr & FC_ALLOCATE_ALL_NODES)
         FIXME("FC_ALLOCATE_ALL_NODES not implemented\n");
 
     if (attr & FC_POINTER_DEREF) {
-      if (fMustAlloc) {
-        unsigned char *base_ptr_val = NdrAllocate(pStubMsg, sizeof(void *));
-        *pPointer = base_ptr_val;
-        current_ptr = (unsigned char **)base_ptr_val;
-      } else
-        current_ptr = *(unsigned char***)current_ptr;
+      if (need_alloc)
+        *pPointer = NdrAllocateZero(pStubMsg, sizeof(void *));
+
+      current_ptr = *(unsigned char***)current_ptr;
       TRACE("deref => %p\n", current_ptr);
-      if (!fMustAlloc && !*current_ptr) fMustAlloc = TRUE;
     }
     m = NdrUnmarshaller[*desc & NDR_TABLE_MASK];
-    if (m) m(pStubMsg, current_ptr, desc, fMustAlloc);
+    if (m) m(pStubMsg, current_ptr, desc, inner_must_alloc);
     else FIXME("no unmarshaller for data type=%02x\n", *desc);
 
     if (type == FC_FP)
@@ -1225,9 +1252,14 @@ static unsigned char * EmbeddedPointerMarshall(PMIDL_STUB_MESSAGE pStubMsg,
   return NULL;
 }
 
-/***********************************************************************
- *           EmbeddedPointerUnmarshall
- */
+/* rpcrt4 does something bizarre with embedded pointers: instead of copying the
+ * struct/array/union from the buffer to memory and then unmarshalling pointers
+ * into it, it unmarshals pointers into the buffer itself and then copies it to
+ * memory. However, it will still attempt to use a user-supplied pointer where
+ * appropriate (i.e. one on stack). Therefore we need to pass both pointers to
+ * this function and to PointerUnmarshall: the pointer (to the buffer) that we
+ * will actually unmarshal into (pDstBuffer), and the pointer (to memory) that
+ * we will attempt to use for storage if possible (pSrcMemoryPtrs). */
 static unsigned char * EmbeddedPointerUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
                                                  unsigned char *pDstBuffer,
                                                  unsigned char *pSrcMemoryPtrs,
@@ -1744,7 +1776,7 @@ unsigned char * WINAPI NdrSimpleStructUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
   align_pointer(&pStubMsg->Buffer, pFormat[1] + 1);
 
   if (fMustAlloc)
-    *ppMemory = NdrAllocate(pStubMsg, size);
+    *ppMemory = NdrAllocateZero(pStubMsg, size);
   else
   {
     if (!pStubMsg->IsClient && !*ppMemory)
@@ -2135,7 +2167,7 @@ static inline ULONG array_read_variance_and_unmarshall(
     if (fUnmarshall)
     {
       if (fMustAlloc)
-        *ppMemory = NdrAllocate(pStubMsg, memsize);
+        *ppMemory = NdrAllocateZero(pStubMsg, memsize);
       else
       {
         if (fUseBufferMemoryServer && !pStubMsg->IsClient && !*ppMemory)
@@ -2174,7 +2206,7 @@ static inline ULONG array_read_variance_and_unmarshall(
       if (!fMustAlloc && !*ppMemory)
         fMustAlloc = TRUE;
       if (fMustAlloc)
-        *ppMemory = NdrAllocate(pStubMsg, memsize);
+        *ppMemory = NdrAllocateZero(pStubMsg, memsize);
       saved_buffer = pStubMsg->Buffer;
       safe_buffer_increment(pStubMsg, bufsize);
 
@@ -2251,7 +2283,7 @@ static inline ULONG array_read_variance_and_unmarshall(
     if (!fMustAlloc && !*ppMemory)
       fMustAlloc = TRUE;
     if (fMustAlloc)
-      *ppMemory = NdrAllocate(pStubMsg, memsize);
+      *ppMemory = NdrAllocateZero(pStubMsg, memsize);
 
     align_pointer(&pStubMsg->Buffer, alignment);
     saved_buffer = pStubMsg->Buffer;
@@ -2746,6 +2778,9 @@ static ULONG EmbeddedComplexSize(MIDL_STUB_MESSAGE *pStubMsg,
   case FC_SMVARRAY:
   case FC_CSTRING:
     return *(const WORD*)&pFormat[2];
+  case FC_LGFARRAY:
+  case FC_LGVARRAY:
+    return *(const ULONG*)&pFormat[2];
   case FC_USER_MARSHAL:
     return *(const WORD*)&pFormat[4];
   case FC_RANGE: {
@@ -2762,8 +2797,6 @@ static ULONG EmbeddedComplexSize(MIDL_STUB_MESSAGE *pStubMsg,
     case FC_LONG:
     case FC_ULONG:
     case FC_ENUM32:
-    case FC_INT3264:
-    case FC_UINT3264:
         return sizeof(ULONG);
     case FC_FLOAT:
         return sizeof(float);
@@ -2814,6 +2847,7 @@ static unsigned char * ComplexMarshall(PMIDL_STUB_MESSAGE pStubMsg,
                                        PFORMAT_STRING pFormat,
                                        PFORMAT_STRING pPointer)
 {
+  unsigned char *mem_base = pMemory;
   PFORMAT_STRING desc;
   NDR_MARSHALL m;
   ULONG size;
@@ -2917,13 +2951,13 @@ static unsigned char * ComplexMarshall(PMIDL_STUB_MESSAGE pStubMsg,
       break;
     }
     case FC_ALIGNM2:
-      align_pointer(&pMemory, 2);
+      align_pointer_offset(&pMemory, mem_base, 2);
       break;
     case FC_ALIGNM4:
-      align_pointer(&pMemory, 4);
+      align_pointer_offset(&pMemory, mem_base, 4);
       break;
     case FC_ALIGNM8:
-      align_pointer(&pMemory, 8);
+      align_pointer_offset(&pMemory, mem_base, 8);
       break;
     case FC_STRUCTPAD1:
     case FC_STRUCTPAD2:
@@ -2973,6 +3007,7 @@ static unsigned char * ComplexUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
                                          PFORMAT_STRING pPointer,
                                          unsigned char fMustAlloc)
 {
+  unsigned char *mem_base = pMemory;
   PFORMAT_STRING desc;
   NDR_UNMARSHALL m;
   ULONG size;
@@ -3085,13 +3120,13 @@ static unsigned char * ComplexUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
       break;
     }
     case FC_ALIGNM2:
-      align_pointer_clear(&pMemory, 2);
+      align_pointer_offset_clear(&pMemory, mem_base, 2);
       break;
     case FC_ALIGNM4:
-      align_pointer_clear(&pMemory, 4);
+      align_pointer_offset_clear(&pMemory, mem_base, 4);
       break;
     case FC_ALIGNM8:
-      align_pointer_clear(&pMemory, 8);
+      align_pointer_offset_clear(&pMemory, mem_base, 8);
       break;
     case FC_STRUCTPAD1:
     case FC_STRUCTPAD2:
@@ -3148,6 +3183,7 @@ static unsigned char * ComplexBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
                                          PFORMAT_STRING pFormat,
                                          PFORMAT_STRING pPointer)
 {
+  unsigned char *mem_base = pMemory;
   PFORMAT_STRING desc;
   NDR_BUFFERSIZE m;
   ULONG size;
@@ -3218,13 +3254,13 @@ static unsigned char * ComplexBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
       pMemory += sizeof(void*);
       break;
     case FC_ALIGNM2:
-      align_pointer(&pMemory, 2);
+      align_pointer_offset(&pMemory, mem_base, 2);
       break;
     case FC_ALIGNM4:
-      align_pointer(&pMemory, 4);
+      align_pointer_offset(&pMemory, mem_base, 4);
       break;
     case FC_ALIGNM8:
-      align_pointer(&pMemory, 8);
+      align_pointer_offset(&pMemory, mem_base, 8);
       break;
     case FC_STRUCTPAD1:
     case FC_STRUCTPAD2:
@@ -3272,6 +3308,7 @@ static unsigned char * ComplexFree(PMIDL_STUB_MESSAGE pStubMsg,
                                    PFORMAT_STRING pFormat,
                                    PFORMAT_STRING pPointer)
 {
+  unsigned char *mem_base = pMemory;
   PFORMAT_STRING desc;
   NDR_FREE m;
   ULONG size;
@@ -3319,13 +3356,13 @@ static unsigned char * ComplexFree(PMIDL_STUB_MESSAGE pStubMsg,
       pMemory += sizeof(void *);
       break;
     case FC_ALIGNM2:
-      align_pointer(&pMemory, 2);
+      align_pointer_offset(&pMemory, mem_base, 2);
       break;
     case FC_ALIGNM4:
-      align_pointer(&pMemory, 4);
+      align_pointer_offset(&pMemory, mem_base, 4);
       break;
     case FC_ALIGNM8:
-      align_pointer(&pMemory, 8);
+      align_pointer_offset(&pMemory, mem_base, 8);
       break;
     case FC_STRUCTPAD1:
     case FC_STRUCTPAD2:
@@ -3710,7 +3747,7 @@ unsigned char * WINAPI NdrComplexStructUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
   if (!fMustAlloc && !*ppMemory)
     fMustAlloc = TRUE;
   if (fMustAlloc)
-    *ppMemory = NdrAllocate(pStubMsg, size);
+    *ppMemory = NdrAllocateZero(pStubMsg, size);
 
   pMemory = ComplexUnmarshall(pStubMsg, *ppMemory, pFormat, pointer_desc, fMustAlloc);
 
@@ -4768,7 +4805,7 @@ unsigned char *  WINAPI NdrConformantStructUnmarshall(PMIDL_STUB_MESSAGE pStubMs
     if (fMustAlloc)
     {
         SIZE_T size = pCStructFormat->memory_size + bufsize;
-        *ppMemory = NdrAllocate(pStubMsg, size);
+        *ppMemory = NdrAllocateZero(pStubMsg, size);
     }
     else
     {
@@ -4969,7 +5006,7 @@ unsigned char *  WINAPI NdrConformantVaryingStructUnmarshall(PMIDL_STUB_MESSAGE 
     if (fMustAlloc)
     {
         SIZE_T size = pCVStructFormat->memory_size + memsize;
-        *ppMemory = NdrAllocate(pStubMsg, size);
+        *ppMemory = NdrAllocateZero(pStubMsg, size);
     }
 
     /* mark the start of the constant data */
@@ -5210,7 +5247,7 @@ unsigned char *  WINAPI NdrFixedArrayUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
     }
 
     if (fMustAlloc)
-        *ppMemory = NdrAllocate(pStubMsg, total_size);
+        *ppMemory = NdrAllocateZero(pStubMsg, total_size);
     else
     {
         if (!pStubMsg->IsClient && !*ppMemory)
@@ -5456,7 +5493,7 @@ unsigned char *  WINAPI NdrVaryingArrayUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
     if (!fMustAlloc && !*ppMemory)
         fMustAlloc = TRUE;
     if (fMustAlloc)
-        *ppMemory = NdrAllocate(pStubMsg, size);
+        *ppMemory = NdrAllocateZero(pStubMsg, size);
     saved_buffer = pStubMsg->BufferMark = pStubMsg->Buffer;
     safe_buffer_increment(pStubMsg, bufsize);
 
@@ -5642,9 +5679,6 @@ static ULONG get_discriminant(unsigned char fc, const unsigned char *pMemory)
     case FC_ULONG:
     case FC_ENUM32:
         return *(const ULONG *)pMemory;
-    case FC_INT3264:
-    case FC_UINT3264:
-        return *(const ULONG_PTR *)pMemory;
     default:
         FIXME("Unhandled base type: 0x%02x\n", fc);
         return 0;

@@ -1004,10 +1004,10 @@ static void test_bitmap_font_metrics(void)
             memset(&gm, 0, sizeof(gm));
             SetLastError(0xdeadbeef);
             ret = GetGlyphOutlineA(hdc, 'A', GGO_METRICS, &gm, 0, NULL, &mat);
-            todo_wine {
+            todo_wine
             ok(ret == GDI_ERROR, "GetGlyphOutline should fail for a bitmap font\n");
-            ok(GetLastError() == ERROR_CAN_NOT_COMPLETE, "expected ERROR_CAN_NOT_COMPLETE, got %u\n", GetLastError());
-            }
+            ret = GetLastError();
+            ok(ret == ERROR_CAN_NOT_COMPLETE || ret == 0xdeadbeef /* Win10 */, "Unexpected error %d.\n", ret);
 
             bRet = GetTextMetricsA(hdc, &tm);
             ok(bRet, "GetTextMetrics error %d\n", GetLastError());
@@ -6340,7 +6340,7 @@ static void test_stock_fonts(void)
         int charset, weight, height, height_pixels, dpi;
         const char face_name[LF_FACESIZE];
         WORD lang_id;
-    } td[][12] =
+    } td[][17] =
     {
         { /* ANSI_FIXED_FONT */
             { ANSI_CHARSET, FW_NORMAL, 12, 12, 96, "Courier", LANG_ARABIC },
@@ -6374,10 +6374,15 @@ static void test_stock_fonts(void)
         },
         { /* DEFAULT_GUI_FONT */
             { SHIFTJIS_CHARSET, FW_NORMAL, -11, 13, 96, "MS Shell Dlg" },
+            { SHIFTJIS_CHARSET, FW_NORMAL, -13, 16, 120, "MS Shell Dlg" },
             { SHIFTJIS_CHARSET, FW_NORMAL, -12, 15, 96, "?MS UI Gothic" },
             { SHIFTJIS_CHARSET, FW_NORMAL, -15, 18, 120, "?MS UI Gothic" },
+            { HANGEUL_CHARSET, FW_NORMAL, -11, 13, 96, "MS Shell Dlg" },
+            { HANGEUL_CHARSET, FW_NORMAL, -13, 16, 120, "MS Shell Dlg" },
             { HANGEUL_CHARSET, FW_NORMAL, -12, 15, 96, "?Gulim" },
             { HANGEUL_CHARSET, FW_NORMAL, -15, 18, 120, "?Gulim" },
+            { GB2312_CHARSET, FW_NORMAL, -11, 13, 96, "MS Shell Dlg" },
+            { GB2312_CHARSET, FW_NORMAL, -13, 16, 120, "MS Shell Dlg" },
             { GB2312_CHARSET, FW_NORMAL, -12, 15, 96, "?SimHei" },
             { GB2312_CHARSET, FW_NORMAL, -15, 18, 120, "?SimHei" },
             { CHINESEBIG5_CHARSET, FW_NORMAL, -12, 15, 96, "?MingLiU" },

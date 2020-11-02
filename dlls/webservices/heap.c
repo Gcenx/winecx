@@ -46,7 +46,7 @@ struct heap
     SIZE_T           max_size;
     SIZE_T           allocated;
     ULONG            prop_count;
-    struct prop      prop[sizeof(heap_props)/sizeof(heap_props[0])];
+    struct prop      prop[ARRAY_SIZE( heap_props )];
 };
 
 #define HEAP_MAGIC (('H' << 24) | ('E' << 16) | ('A' << 8) | 'P')
@@ -177,7 +177,7 @@ HRESULT WINAPI WsAlloc( WS_HEAP *handle, SIZE_T size, void **ptr, WS_ERROR *erro
 
 static struct heap *alloc_heap(void)
 {
-    static const ULONG count = sizeof(heap_props)/sizeof(heap_props[0]);
+    static const ULONG count = ARRAY_SIZE( heap_props );
     struct heap *ret;
     ULONG size = sizeof(*ret) + prop_size( heap_props, count );
 
@@ -185,7 +185,9 @@ static struct heap *alloc_heap(void)
 
     ret->magic      = HEAP_MAGIC;
     InitializeCriticalSection( &ret->cs );
+#ifndef __MINGW32__
     ret->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": heap.cs");
+#endif
 
     prop_init( heap_props, count, ret->prop, &ret[1] );
     ret->prop_count = count;
@@ -245,7 +247,9 @@ void WINAPI WsFreeHeap( WS_HEAP *handle )
 
     LeaveCriticalSection( &heap->cs );
 
+#ifndef __MINGW32__
     heap->cs.DebugInfo->Spare[0] = 0;
+#endif
     DeleteCriticalSection( &heap->cs );
     heap_free( heap );
 }
@@ -256,6 +260,7 @@ void WINAPI WsFreeHeap( WS_HEAP *handle )
 HRESULT WINAPI WsResetHeap( WS_HEAP *handle, WS_ERROR *error )
 {
     struct heap *heap = (struct heap *)handle;
+    HRESULT hr = S_OK;
 
     TRACE( "%p %p\n", handle, error );
     if (error) FIXME( "ignoring error parameter\n" );
@@ -273,7 +278,8 @@ HRESULT WINAPI WsResetHeap( WS_HEAP *handle, WS_ERROR *error )
     reset_heap( heap );
 
     LeaveCriticalSection( &heap->cs );
-    return S_OK;
+    TRACE( "returning %08x\n", hr );
+    return hr;
 }
 
 /**************************************************************************
@@ -313,6 +319,7 @@ HRESULT WINAPI WsGetHeapProperty( WS_HEAP *handle, WS_HEAP_PROPERTY_ID id, void 
     }
 
     LeaveCriticalSection( &heap->cs );
+    TRACE( "returning %08x\n", hr );
     return hr;
 }
 

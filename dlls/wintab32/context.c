@@ -156,16 +156,15 @@ static inline BOOL LoadTablet(void)
 
     if (loaded == TI_START)
     {
-        TRACE("Initializing the tablet to hwnd %p\n",hwndDefault);
-
         if (pLoadTabletInfo && pLoadTabletInfo(hwndDefault))
         {
+            TRACE("Initialized the tablet to hwnd %p\n", hwndDefault);
             loaded = TI_OK;
         }
         else
         {
+            TRACE("Failed to initialize the tablet to hwnd %p\n", hwndDefault);
             loaded = TI_FAIL;
-            ERR("LoadTabletInfo(%p) failed\n", hwndDefault);
         }
     }
 
@@ -457,7 +456,7 @@ UINT WINAPI WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
 }
 
 /***********************************************************************
- *		WTOpenW (WINTAB32.2021)
+ *		WTOpenW (WINTAB32.1021)
  */
 HCTX WINAPI WTOpenW(HWND hWnd, LPLOGCONTEXTW lpLogCtx, BOOL fEnable)
 {
@@ -750,7 +749,7 @@ BOOL WINAPI WTOverlap(HCTX hCtx, BOOL fToTop)
 }
 
 /***********************************************************************
- *		WTConfig (WINTAB32.61)
+ *		WTConfig (WINTAB32.60)
  */
 BOOL WINAPI WTConfig(HCTX hCtx, HWND hWnd)
 {

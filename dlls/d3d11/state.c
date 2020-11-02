@@ -328,12 +328,24 @@ HRESULT d3d_blend_state_create(struct d3d_device *device, const D3D11_BLEND_DESC
     {
         j = desc->IndependentBlendEnable ? i : 0;
         tmp_desc.RenderTarget[i].BlendEnable = desc->RenderTarget[j].BlendEnable;
-        tmp_desc.RenderTarget[i].SrcBlend = desc->RenderTarget[j].SrcBlend;
-        tmp_desc.RenderTarget[i].DestBlend = desc->RenderTarget[j].DestBlend;
-        tmp_desc.RenderTarget[i].BlendOp = desc->RenderTarget[j].BlendOp;
-        tmp_desc.RenderTarget[i].SrcBlendAlpha = desc->RenderTarget[j].SrcBlendAlpha;
-        tmp_desc.RenderTarget[i].DestBlendAlpha = desc->RenderTarget[j].DestBlendAlpha;
-        tmp_desc.RenderTarget[i].BlendOpAlpha = desc->RenderTarget[j].BlendOpAlpha;
+        if (tmp_desc.RenderTarget[i].BlendEnable)
+        {
+            tmp_desc.RenderTarget[i].SrcBlend = desc->RenderTarget[j].SrcBlend;
+            tmp_desc.RenderTarget[i].DestBlend = desc->RenderTarget[j].DestBlend;
+            tmp_desc.RenderTarget[i].BlendOp = desc->RenderTarget[j].BlendOp;
+            tmp_desc.RenderTarget[i].SrcBlendAlpha = desc->RenderTarget[j].SrcBlendAlpha;
+            tmp_desc.RenderTarget[i].DestBlendAlpha = desc->RenderTarget[j].DestBlendAlpha;
+            tmp_desc.RenderTarget[i].BlendOpAlpha = desc->RenderTarget[j].BlendOpAlpha;
+        }
+        else
+        {
+            tmp_desc.RenderTarget[i].SrcBlend = D3D11_BLEND_ONE;
+            tmp_desc.RenderTarget[i].DestBlend = D3D11_BLEND_ZERO;
+            tmp_desc.RenderTarget[i].BlendOp = D3D11_BLEND_OP_ADD;
+            tmp_desc.RenderTarget[i].SrcBlendAlpha = D3D11_BLEND_ONE;
+            tmp_desc.RenderTarget[i].DestBlendAlpha = D3D11_BLEND_ZERO;
+            tmp_desc.RenderTarget[i].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+        }
         tmp_desc.RenderTarget[i].RenderTargetWriteMask = desc->RenderTarget[j].RenderTargetWriteMask;
 
         if (i > 3 && tmp_desc.RenderTarget[i].RenderTargetWriteMask != D3D11_COLOR_WRITE_ENABLE_ALL)
@@ -750,7 +762,7 @@ HRESULT d3d_depthstencil_state_create(struct d3d_device *device, const D3D11_DEP
         return hr;
     }
 
-    if (wine_rb_put(&device->depthstencil_states, desc, &object->entry) == -1)
+    if (wine_rb_put(&device->depthstencil_states, &tmp_desc, &object->entry) == -1)
     {
         ERR("Failed to insert depthstencil state entry.\n");
         d3d_depthstencil_state_cleanup(object);
@@ -1069,6 +1081,7 @@ static HRESULT d3d_rasterizer_state_init(struct d3d_rasterizer_state *state, str
 
     wined3d_desc.front_ccw = desc->FrontCounterClockwise;
     wined3d_desc.depth_clip = desc->DepthClipEnable;
+    wined3d_desc.depth_bias_clamp = desc->DepthBiasClamp;
 
     /* We cannot fail after creating a wined3d_rasterizer_state object. It
      * would lead to double free. */

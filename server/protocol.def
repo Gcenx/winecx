@@ -280,11 +280,18 @@ typedef struct
 
 /* structures for extra message data */
 
+struct hw_msg_source
+{
+    unsigned int    device;        /* source device (IMDT_* values) */
+    unsigned int    origin;        /* source origin (IMO_* values) */
+};
+
 struct hardware_msg_data
 {
-    lparam_t        info;      /* extra info */
-    unsigned int    hw_id;     /* unique id */
-    unsigned int    flags;     /* hook flags */
+    lparam_t             info;      /* extra info */
+    unsigned int         hw_id;     /* unique id */
+    unsigned int         flags;     /* hook flags */
+    struct hw_msg_source source;    /* message source */
     union
     {
         int type;
@@ -716,6 +723,7 @@ typedef struct
     unsigned int   header_size;
     unsigned int   file_size;
     unsigned int   checksum;
+    cpu_type_t     cpu;
 } pe_image_info_t;
 #define IMAGE_FLAGS_ComPlusNativeReady        0x01
 #define IMAGE_FLAGS_ComPlusILOnly             0x02
@@ -740,20 +748,24 @@ struct rawinput_device
     unsigned int create_flags;   /* creation flags */
     int          socket_fd;      /* file descriptor for process socket */
     obj_handle_t exe_file;       /* file handle for main exe */
-    unsigned int process_access; /* access rights for process object */
-    unsigned int process_attr;   /* attributes for process object */
-    unsigned int thread_access;  /* access rights for thread object */
-    unsigned int thread_attr;    /* attributes for thread object */
+    unsigned int access;         /* access rights for process object */
     cpu_type_t   cpu;            /* CPU that the new process will use */
     data_size_t  info_size;      /* size of startup info */
+    VARARG(objattr,object_attributes);   /* object attributes */
     VARARG(info,startup_info,info_size); /* startup information */
     VARARG(env,unicode_str);     /* environment for new process */
 @REPLY
     obj_handle_t info;           /* new process info handle */
     process_id_t pid;            /* process id */
-    obj_handle_t phandle;        /* process handle (in the current process) */
-    thread_id_t  tid;            /* thread id */
-    obj_handle_t thandle;        /* thread handle (in the current process) */
+    obj_handle_t handle;         /* process handle (in the current process) */
+@END
+
+
+/* Execute a process, replacing the current one */
+@REQ(exec_process)
+    int          socket_fd;      /* file descriptor for process socket */
+    obj_handle_t exe_file;       /* file handle for main exe */
+    cpu_type_t   cpu;            /* CPU that the new process will use */
 @END
 
 
@@ -766,12 +778,13 @@ struct rawinput_device
 @END
 
 
-/* Create a new thread from the context of the parent */
+/* Create a new thread */
 @REQ(new_thread)
+    obj_handle_t process;      /* process in which to create thread */
     unsigned int access;       /* wanted access rights */
-    unsigned int attributes;   /* object attributes */
     int          suspend;      /* new thread should be suspended on creation */
     int          request_fd;   /* fd for request pipe */
+    VARARG(objattr,object_attributes); /* object attributes */
 @REPLY
     thread_id_t  tid;          /* thread id */
     obj_handle_t handle;       /* thread handle (in the current process) */
@@ -781,7 +794,6 @@ struct rawinput_device
 /* Retrieve the new process startup info */
 @REQ(get_startup_info)
 @REPLY
-    obj_handle_t exe_file;     /* file handle for main exe */
     data_size_t  info_size;    /* size of startup info */
     VARARG(info,startup_info,info_size); /* startup information */
     VARARG(env,unicode_str);   /* environment */
@@ -1413,27 +1425,27 @@ struct console_renderer_event
     short event;
     union
     {
-        struct update
+        struct
         {
             short top;
             short bottom;
         } update;
-        struct resize
+        struct
         {
             short width;
             short height;
         } resize;
-        struct cursor_pos
+        struct
         {
             short x;
             short y;
         } cursor_pos;
-        struct cursor_geom
+        struct
         {
             short visible;
             short size;
         } cursor_geom;
-        struct display
+        struct
         {
             short left;
             short top;
@@ -2463,18 +2475,6 @@ enum message_type
 #define NAMED_PIPE_NONBLOCKING_MODE     0x0004
 #define NAMED_PIPE_SERVER_END           0x8000
 
-/* Get named pipe information by handle */
-@REQ(get_named_pipe_info)
-    obj_handle_t   handle;
-@REPLY
-    unsigned int   flags;
-    unsigned int   sharing;
-    unsigned int   maxinstances;
-    unsigned int   instances;
-    unsigned int   outsize;
-    unsigned int   insize;
-@END
-
 /* Set named pipe information by handle */
 @REQ(set_named_pipe_info)
     obj_handle_t   handle;
@@ -2610,6 +2610,7 @@ enum message_type
     user_handle_t  parent;        /* parent window */
     int            x;             /* point in parent coordinates */
     int            y;
+    int            dpi;           /* dpi for the point coordinates */
 @REPLY
     int            count;         /* total count of children */
     VARARG(children,user_handles); /* children handles */
@@ -2652,6 +2653,7 @@ enum message_type
 @REQ(get_window_rectangles)
     user_handle_t  handle;        /* handle to the window */
     int            relative;      /* coords relative to (see below) */
+    int            dpi;           /* DPI to map to, or zero for per-monitor DPI */
 @REPLY
     rectangle_t    window;        /* window rectangle */
     rectangle_t    client;        /* client rectangle */
@@ -2685,6 +2687,7 @@ enum coords_relative
 @REQ(get_windows_offset)
     user_handle_t  from;          /* handle to the first window */
     user_handle_t  to;            /* handle to the second window */
+    int            dpi;           /* DPI to map to, or zero for per-monitor DPI */
 @REPLY
     int            x;             /* x coordinate offset */
     int            y;             /* y coordinate offset */
@@ -3726,23 +3729,14 @@ struct handle_info
     apc_param_t    cvalue;        /* completion value */
     apc_param_t    information;   /* IO_STATUS_BLOCK Information */
     unsigned int   status;        /* completion status */
-    int            force;         /* don't check if skip-on-success is set */
+    int            async;         /* completion is an async result */
 @END
 
 
 /* set fd completion information */
-@REQ(set_fd_compl_info)
+@REQ(set_fd_completion_mode)
     obj_handle_t handle;          /* handle to a file or directory */
-    int          flags;           /* completion flags (see below) */
-@END
-#define COMPLETION_SKIP_ON_SUCCESS 0x01
-
-
-/* get fd completion information */
-@REQ(get_fd_compl_info)
-    obj_handle_t handle;          /* handle to a file or directory */
-@REPLY
-    int          flags;           /* completion flags (see below) */
+    unsigned int flags;           /* completion notification flags */
 @END
 
 

@@ -60,7 +60,6 @@ static const WCHAR default_windirW[] = {'C',':','\\','w','i','n','d','o','w','s'
 
 extern void DECLSPEC_NORETURN __wine_syscall_dispatcher( void );
 
-PUNHANDLED_EXCEPTION_FILTER unhandled_exception_filter = NULL;
 void (WINAPI *kernel32_start_process)(LPTHREAD_START_ROUTINE,void*) = NULL;
 
 /* info passed to a starting thread */
@@ -74,7 +73,7 @@ struct startup_info
 static PEB *peb;
 static PEB_LDR_DATA ldr;
 static RTL_USER_PROCESS_PARAMETERS params;  /* default parameters if no parent */
-static WCHAR current_dir[MAX_NT_PATH_LENGTH];
+static WCHAR current_dir[MAX_PATH];
 static RTL_BITMAP tls_bitmap;
 static RTL_BITMAP tls_expansion_bitmap;
 static RTL_BITMAP fls_bitmap;
@@ -110,7 +109,7 @@ static inline void get_unicode_string( UNICODE_STRING *str, WCHAR **src, WCHAR *
  *
  * Fill the RTL_USER_PROCESS_PARAMETERS structure from the server.
  */
-static NTSTATUS init_user_process_params( SIZE_T data_size, HANDLE *exe_file )
+static NTSTATUS init_user_process_params( SIZE_T data_size )
 {
     void *ptr;
     WCHAR *src, *dst;
@@ -130,14 +129,13 @@ static NTSTATUS init_user_process_params( SIZE_T data_size, HANDLE *exe_file )
             data_size = wine_server_reply_size( reply );
             info_size = reply->info_size;
             env_size  = data_size - info_size;
-            *exe_file = wine_server_ptr_handle( reply->exe_file );
         }
     }
     SERVER_END_REQ;
     if (status != STATUS_SUCCESS) goto done;
 
     size = sizeof(*params);
-    size += MAX_NT_PATH_LENGTH * sizeof(WCHAR);
+    size += sizeof(current_dir);
     size += info->dllpath_len + sizeof(WCHAR);
     size += info->imagepath_len + sizeof(WCHAR);
     size += info->cmdline_len + sizeof(WCHAR);
@@ -176,8 +174,8 @@ static NTSTATUS init_user_process_params( SIZE_T data_size, HANDLE *exe_file )
 
     /* current directory needs more space */
     get_unicode_string( &params->CurrentDirectory.DosPath, &src, &dst, info->curdir_len );
-    params->CurrentDirectory.DosPath.MaximumLength = MAX_NT_PATH_LENGTH * sizeof(WCHAR);
-    dst = (WCHAR *)(params + 1) + MAX_NT_PATH_LENGTH;
+    params->CurrentDirectory.DosPath.MaximumLength = sizeof(current_dir);
+    dst = (WCHAR *)(params + 1) + ARRAY_SIZE(current_dir);
 
     get_unicode_string( &params->DllPath, &src, &dst, info->dllpath_len );
     get_unicode_string( &params->ImagePathName, &src, &dst, info->imagepath_len );
@@ -351,13 +349,12 @@ void create_user_shared_data_thread(void)
  *
  * NOTES: The first allocated TEB on NT is at 0x7ffde000.
  */
-HANDLE thread_init(void)
+void thread_init(void)
 {
     TEB *teb;
     void *addr;
     BOOL suspend;
     SIZE_T size, info_size;
-    HANDLE exe_file = 0;
     NTSTATUS status;
     struct ntdll_thread_data *thread_data;
     static struct debug_info debug_info;  /* debug info for initial thread */
@@ -460,7 +457,7 @@ HANDLE thread_init(void)
     /* allocate user parameters */
     if (info_size)
     {
-        init_user_process_params( info_size, &exe_file );
+        init_user_process_params( info_size );
     }
     else
     {
@@ -479,8 +476,6 @@ HANDLE thread_init(void)
     fill_cpu_info();
 
     NtCreateKeyedEvent( &keyed_event, GENERIC_READ | GENERIC_WRITE, NULL, 0 );
-
-    return exe_file;
 }
 
 
@@ -602,7 +597,7 @@ static void start_thread( struct startup_info *info )
 /***********************************************************************
  *              NtCreateThreadEx   (NTDLL.@)
  */
-NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle_ptr, ACCESS_MASK access, OBJECT_ATTRIBUTES *obj_attr,
+NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle_ptr, ACCESS_MASK access, OBJECT_ATTRIBUTES *thread_attr,
                                   HANDLE process, LPTHREAD_START_ROUTINE start, void *param,
                                   ULONG flags, ULONG zero_bits, ULONG stack_commit,
                                   ULONG stack_reserve, PPS_ATTRIBUTE_LIST ps_attr_list )
@@ -620,9 +615,11 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle_ptr, ACCESS_MASK access, OBJECT
     int request_pipe[2];
     NTSTATUS status;
     SIZE_T extra_stack = PTHREAD_STACK_MIN;
+    data_size_t len = 0;
+    struct object_attributes *objattr = NULL;
 
     TRACE("(%p, %d, %p, %p, %p, %p, %u, %u, %u, %u, %p)\n",
-          handle_ptr, access, obj_attr, process, start, param, flags,
+          handle_ptr, access, thread_attr, process, start, param, flags,
           zero_bits, stack_commit, stack_reserve, ps_attr_list);
 
     if (ps_attr_list != NULL)
@@ -673,15 +670,22 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle_ptr, ACCESS_MASK access, OBJECT
         return result.create_thread.status;
     }
 
-    if (server_pipe( request_pipe ) == -1) return STATUS_TOO_MANY_OPENED_FILES;
+    if ((status = alloc_object_attributes( thread_attr, &objattr, &len ))) return status;
+
+    if (server_pipe( request_pipe ) == -1)
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, objattr );
+        return STATUS_TOO_MANY_OPENED_FILES;
+    }
     wine_server_send_fd( request_pipe[0] );
 
     SERVER_START_REQ( new_thread )
     {
+        req->process    = wine_server_obj_handle( process );
         req->access     = access;
-        req->attributes = 0;  /* FIXME */
         req->suspend    = suspended;
         req->request_fd = request_pipe[0];
+        wine_server_add_data( req, objattr, len );
         if (!(status = wine_server_call( req )))
         {
             handle = wine_server_ptr_handle( reply->handle );
@@ -691,6 +695,7 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle_ptr, ACCESS_MASK access, OBJECT
     }
     SERVER_END_REQ;
 
+    RtlFreeHeap( GetProcessHeap(), 0, objattr );
     if (status)
     {
         close( request_pipe[1] );
@@ -814,14 +819,14 @@ NTSTATUS WINAPI __syscall_NtCreateThreadEx( HANDLE *handle_ptr, ACCESS_MASK acce
 /***********************************************************************
  *              RtlCreateUserThread   (NTDLL.@)
  */
-NTSTATUS WINAPI RtlCreateUserThread( HANDLE process, const SECURITY_DESCRIPTOR *descr,
+NTSTATUS WINAPI RtlCreateUserThread( HANDLE process, SECURITY_DESCRIPTOR *descr,
                                      BOOLEAN suspended, void *stack_addr,
                                      SIZE_T stack_reserve, SIZE_T stack_commit,
                                      PRTL_THREAD_START_ROUTINE entry, void *arg,
                                      HANDLE *handle_ptr, CLIENT_ID *id )
 {
-    if (descr)
-        FIXME("descr != NULL is unimplemented\n");
+    OBJECT_ATTRIBUTES thread_attr;
+    InitializeObjectAttributes( &thread_attr, NULL, 0, NULL, descr );
     if (stack_addr)
         FIXME("stack_addr != NULL is unimplemented\n");
 
@@ -854,9 +859,9 @@ NTSTATUS WINAPI RtlCreateUserThread( HANDLE process, const SECURITY_DESCRIPTOR *
 #endif
 
 #if defined(__i386__) || defined(__x86_64__)
-        return __syscall_NtCreateThread(handle_ptr, (ACCESS_MASK)0, NULL, process, id, &context, NULL, suspended);
+        return __syscall_NtCreateThread(handle_ptr, (ACCESS_MASK)0, &thread_attr, process, id, &context, NULL, suspended);
 #else
-        return NtCreateThread(handle_ptr, (ACCESS_MASK)0, NULL, process, id, &context, NULL, suspended);
+        return NtCreateThread(handle_ptr, (ACCESS_MASK)0, &thread_attr, process, id, &context, NULL, suspended);
 #endif
     }
     else
@@ -876,9 +881,9 @@ NTSTATUS WINAPI RtlCreateUserThread( HANDLE process, const SECURITY_DESCRIPTOR *
         }
 
 #if defined(__i386__) || defined(__x86_64__)
-        return __syscall_NtCreateThreadEx(handle_ptr, (ACCESS_MASK)0, NULL, process, (LPTHREAD_START_ROUTINE)entry, arg, flags, 0, stack_commit, stack_reserve, pattr_list);
+        return __syscall_NtCreateThreadEx(handle_ptr, (ACCESS_MASK)0, &thread_attr, process, (LPTHREAD_START_ROUTINE)entry, arg, flags, 0, stack_commit, stack_reserve, pattr_list);
 #else
-        return NtCreateThreadEx(handle_ptr, (ACCESS_MASK)0, NULL, process, (LPTHREAD_START_ROUTINE)entry, arg, flags, 0, stack_commit, stack_reserve, pattr_list);
+        return NtCreateThreadEx(handle_ptr, (ACCESS_MASK)0, &thread_attr, process, (LPTHREAD_START_ROUTINE)entry, arg, flags, 0, stack_commit, stack_reserve, pattr_list);
 #endif
     }
 }
@@ -1493,10 +1498,9 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
             ULONG_PTR req_aff;
 
             if (length != sizeof(ULONG_PTR)) return STATUS_INVALID_PARAMETER;
-            req_aff = *(const ULONG_PTR *)data;
-            if ((ULONG)req_aff == ~0u) req_aff = affinity_mask;
-            else if (req_aff & ~affinity_mask) return STATUS_INVALID_PARAMETER;
-            else if (!req_aff) return STATUS_INVALID_PARAMETER;
+            req_aff = *(const ULONG_PTR *)data & affinity_mask;
+            if (!req_aff) return STATUS_INVALID_PARAMETER;
+
             SERVER_START_REQ( set_thread_info )
             {
                 req->handle   = wine_server_obj_handle( handle );

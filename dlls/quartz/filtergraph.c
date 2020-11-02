@@ -36,6 +36,8 @@
 #include "strmif.h"
 #include "vfwmsgs.h"
 #include "evcode.h"
+#include "wine/heap.h"
+#include "wine/list.h"
 #include "wine/unicode.h"
 
 
@@ -148,6 +150,13 @@ typedef struct _ITF_CACHE_ENTRY {
    IUnknown* iface;
 } ITF_CACHE_ENTRY;
 
+struct filter
+{
+    struct list entry;
+    IBaseFilter *filter;
+    WCHAR *name;
+};
+
 typedef struct _IFilterGraphImpl {
     IUnknown IUnknown_inner;
     IFilterGraph2 IFilterGraph2_iface;
@@ -176,10 +185,7 @@ typedef struct _IFilterGraphImpl {
     IUnknown *outer_unk;
     LONG ref;
     IUnknown *punkFilterMapper2;
-    IBaseFilter ** ppFiltersInGraph;
-    LPWSTR * pFilterNames;
-    ULONG nFilters;
-    int filterCapacity;
+    struct list filters;
     LONG nameIndex;
     IReferenceClock *refClock;
     IBaseFilter *refClockProvider;
@@ -205,6 +211,163 @@ typedef struct _IFilterGraphImpl {
     IUnknown *pSite;
     LONG version;
 } IFilterGraphImpl;
+
+struct enum_filters
+{
+    IEnumFilters IEnumFilters_iface;
+    LONG ref;
+    IFilterGraphImpl *graph;
+    LONG version;
+    struct list *cursor;
+};
+
+static HRESULT create_enum_filters(IFilterGraphImpl *graph, struct list *cursor, IEnumFilters **out);
+
+static inline struct enum_filters *impl_from_IEnumFilters(IEnumFilters *iface)
+{
+    return CONTAINING_RECORD(iface, struct enum_filters, IEnumFilters_iface);
+}
+
+static HRESULT WINAPI EnumFilters_QueryInterface(IEnumFilters *iface, REFIID iid, void **out)
+{
+    struct enum_filters *enum_filters = impl_from_IEnumFilters(iface);
+    TRACE("enum_filters %p, iid %s, out %p.\n", enum_filters, qzdebugstr_guid(iid), out);
+
+    if (IsEqualGUID(iid, &IID_IUnknown) || IsEqualGUID(iid, &IID_IEnumFilters))
+    {
+        IEnumFilters_AddRef(*out = iface);
+        return S_OK;
+    }
+
+    WARN("%s not implemented, returning E_NOINTERFACE.\n", qzdebugstr_guid(iid));
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI EnumFilters_AddRef(IEnumFilters *iface)
+{
+    struct enum_filters *enum_filters = impl_from_IEnumFilters(iface);
+    ULONG ref = InterlockedIncrement(&enum_filters->ref);
+
+    TRACE("%p increasing refcount to %u.\n", enum_filters, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI EnumFilters_Release(IEnumFilters *iface)
+{
+    struct enum_filters *enum_filters = impl_from_IEnumFilters(iface);
+    ULONG ref = InterlockedDecrement(&enum_filters->ref);
+
+    TRACE("%p decreasing refcount to %u.\n", enum_filters, ref);
+
+    if (!ref)
+    {
+        IUnknown_Release(enum_filters->graph->outer_unk);
+        heap_free(enum_filters);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI EnumFilters_Next(IEnumFilters *iface, ULONG count,
+        IBaseFilter **filters, ULONG *fetched)
+{
+    struct enum_filters *enum_filters = impl_from_IEnumFilters(iface);
+    unsigned int i = 0;
+
+    TRACE("enum_filters %p, count %u, filters %p, fetched %p.\n",
+            enum_filters, count, filters, fetched);
+
+    if (enum_filters->version != enum_filters->graph->version)
+        return VFW_E_ENUM_OUT_OF_SYNC;
+
+    if (!filters)
+        return E_POINTER;
+
+    for (i = 0; i < count; ++i)
+    {
+        struct filter *filter = LIST_ENTRY(enum_filters->cursor, struct filter, entry);
+
+        if (!enum_filters->cursor)
+            break;
+
+        IBaseFilter_AddRef(filters[i] = filter->filter);
+        enum_filters->cursor = list_next(&enum_filters->graph->filters, enum_filters->cursor);
+    }
+
+    if (fetched)
+        *fetched = i;
+
+    return (i == count) ? S_OK : S_FALSE;
+}
+
+static HRESULT WINAPI EnumFilters_Skip(IEnumFilters *iface, ULONG count)
+{
+    struct enum_filters *enum_filters = impl_from_IEnumFilters(iface);
+
+    TRACE("enum_filters %p, count %u.\n", enum_filters, count);
+
+    if (!enum_filters->cursor)
+        return S_FALSE;
+
+    while (count--)
+    {
+        if (!(enum_filters->cursor = list_next(&enum_filters->graph->filters, enum_filters->cursor)))
+            return S_FALSE;
+    }
+
+    return S_OK;
+}
+
+static HRESULT WINAPI EnumFilters_Reset(IEnumFilters *iface)
+{
+    struct enum_filters *enum_filters = impl_from_IEnumFilters(iface);
+
+    TRACE("enum_filters %p.\n", enum_filters);
+
+    enum_filters->cursor = list_head(&enum_filters->graph->filters);
+    enum_filters->version = enum_filters->graph->version;
+    return S_OK;
+}
+
+static HRESULT WINAPI EnumFilters_Clone(IEnumFilters *iface, IEnumFilters **out)
+{
+    struct enum_filters *enum_filters = impl_from_IEnumFilters(iface);
+
+    TRACE("enum_filters %p, out %p.\n", enum_filters, out);
+
+    return create_enum_filters(enum_filters->graph, enum_filters->cursor, out);
+}
+
+static const IEnumFiltersVtbl EnumFilters_vtbl =
+{
+    EnumFilters_QueryInterface,
+    EnumFilters_AddRef,
+    EnumFilters_Release,
+    EnumFilters_Next,
+    EnumFilters_Skip,
+    EnumFilters_Reset,
+    EnumFilters_Clone,
+};
+
+static HRESULT create_enum_filters(IFilterGraphImpl *graph, struct list *cursor, IEnumFilters **out)
+{
+    struct enum_filters *enum_filters;
+
+    if (!(enum_filters = heap_alloc(sizeof(*enum_filters))))
+        return E_OUTOFMEMORY;
+
+    enum_filters->IEnumFilters_iface.lpVtbl = &EnumFilters_vtbl;
+    enum_filters->ref = 1;
+    enum_filters->cursor = cursor;
+    enum_filters->graph = graph;
+    IUnknown_AddRef(graph->outer_unk);
+    enum_filters->version = graph->version;
+
+    *out = &enum_filters->IEnumFilters_iface;
+    return S_OK;
+}
 
 static inline IFilterGraphImpl *impl_from_IUnknown(IUnknown *iface)
 {
@@ -270,8 +433,8 @@ static HRESULT WINAPI FilterGraphInner_QueryInterface(IUnknown *iface, REFIID ri
         TRACE("   returning IFilterMapper3 interface from aggregated filtermapper (%p)\n", *ppvObj);
         return IUnknown_QueryInterface(This->punkFilterMapper2, riid, ppvObj);
     } else if (IsEqualGUID(&IID_IGraphVersion, riid)) {
-        *ppvObj = &This->IGraphConfig_iface;
-        TRACE("   returning IGraphConfig interface (%p)\n", *ppvObj);
+        *ppvObj = &This->IGraphVersion_iface;
+        TRACE("   returning IGraphVersion interface (%p)\n", *ppvObj);
     } else {
         *ppvObj = NULL;
 	FIXME("unknown interface %s\n", debugstr_guid(riid));
@@ -296,6 +459,7 @@ static ULONG WINAPI FilterGraphInner_Release(IUnknown *iface)
 {
     IFilterGraphImpl *This = impl_from_IUnknown(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
+    struct filter *filter, *next;
 
     TRACE("(%p)->(): new ref = %d\n", This, ref);
 
@@ -306,8 +470,10 @@ static ULONG WINAPI FilterGraphInner_Release(IUnknown *iface)
 
         IMediaControl_Stop(&This->IMediaControl_iface);
 
-        while (This->nFilters)
-            IFilterGraph2_RemoveFilter(&This->IFilterGraph2_iface, This->ppFiltersInGraph[0]);
+        LIST_FOR_EACH_ENTRY_SAFE(filter, next, &This->filters, struct filter, entry)
+        {
+            IFilterGraph2_RemoveFilter(&This->IFilterGraph2_iface, filter->filter);
+        }
 
         if (This->refClock)
             IReferenceClock_Release(This->refClock);
@@ -326,8 +492,6 @@ static ULONG WINAPI FilterGraphInner_Release(IUnknown *iface)
 	EventsQueue_Destroy(&This->evqueue);
         This->cs.DebugInfo->Spare[0] = 0;
 	DeleteCriticalSection(&This->cs);
-	CoTaskMemFree(This->ppFiltersInGraph);
-	CoTaskMemFree(This->pFilterNames);
 	CoTaskMemFree(This);
     }
     return ref;
@@ -365,13 +529,27 @@ static ULONG WINAPI FilterGraph2_Release(IFilterGraph2 *iface)
     return IUnknown_Release(This->outer_unk);
 }
 
+static IBaseFilter *find_filter_by_name(IFilterGraphImpl *graph, const WCHAR *name)
+{
+    struct filter *filter;
+
+    LIST_FOR_EACH_ENTRY(filter, &graph->filters, struct filter, entry)
+    {
+        if (!strcmpW(filter->name, name))
+            return filter->filter;
+    }
+
+    return NULL;
+}
+
 /*** IFilterGraph methods ***/
 static HRESULT WINAPI FilterGraph2_AddFilter(IFilterGraph2 *iface, IBaseFilter *pFilter,
         LPCWSTR pName)
 {
     IFilterGraphImpl *This = impl_from_IFilterGraph2(iface);
+    struct filter *entry;
     HRESULT hr;
-    int i,j;
+    int j;
     WCHAR* wszFilterName = NULL;
     BOOL duplicate_name = FALSE;
 
@@ -382,16 +560,8 @@ static HRESULT WINAPI FilterGraph2_AddFilter(IFilterGraph2 *iface, IBaseFilter *
 
     wszFilterName = CoTaskMemAlloc( (pName ? strlenW(pName) + 6 : 5) * sizeof(WCHAR) );
 
-    if (pName)
-    {
-	/* Check if name already exists */
-        for(i = 0; i < This->nFilters; i++)
-	    if (!strcmpW(This->pFilterNames[i], pName))
-	    {
-		duplicate_name = TRUE;
-		break;
-	    }
-    }
+    if (pName && find_filter_by_name(This, pName))
+        duplicate_name = TRUE;
 
     /* If no name given or name already existing, generate one */
     if (!pName || duplicate_name)
@@ -408,16 +578,11 @@ static HRESULT WINAPI FilterGraph2_AddFilter(IFilterGraph2 *iface, IBaseFilter *
 		sprintfW(wszFilterName, wszFmt2, This->nameIndex);
 	    TRACE("Generated name %s\n", debugstr_w(wszFilterName));
 
-	    /* Check if the generated name already exists */
-	    for(i = 0; i < This->nFilters; i++)
-	    	if (!strcmpW(This->pFilterNames[i], wszFilterName))
-		    break;
-
-	    /* Compute next index and exit if generated name is suitable */
 	    if (This->nameIndex++ == 10000)
 		This->nameIndex = 1;
-	    if (i == This->nFilters)
-		break;
+
+            if (!find_filter_by_name(This, wszFilterName))
+                break;
 	}
 	/* Unable to find a suitable name */
 	if (j == 10000)
@@ -429,46 +594,31 @@ static HRESULT WINAPI FilterGraph2_AddFilter(IFilterGraph2 *iface, IBaseFilter *
     else
 	memcpy(wszFilterName, pName, (strlenW(pName) + 1) * sizeof(WCHAR));
 
-    if (This->nFilters + 1 > This->filterCapacity)
-    {
-        int newCapacity = This->filterCapacity ? 2 * This->filterCapacity : 1;
-        IBaseFilter ** ppNewFilters = CoTaskMemAlloc(newCapacity * sizeof(IBaseFilter*));
-        LPWSTR * pNewNames = CoTaskMemAlloc(newCapacity * sizeof(LPWSTR));
-        memcpy(ppNewFilters, This->ppFiltersInGraph, This->nFilters * sizeof(IBaseFilter*));
-        memcpy(pNewNames, This->pFilterNames, This->nFilters * sizeof(LPWSTR));
-        if (This->filterCapacity)
-        {
-            CoTaskMemFree(This->ppFiltersInGraph);
-            CoTaskMemFree(This->pFilterNames);
-        }
-        This->ppFiltersInGraph = ppNewFilters;
-        This->pFilterNames = pNewNames;
-        This->filterCapacity = newCapacity;
-    }
-
     hr = IBaseFilter_JoinFilterGraph(pFilter, (IFilterGraph *)&This->IFilterGraph2_iface, wszFilterName);
-
-    if (SUCCEEDED(hr))
+    if (FAILED(hr))
     {
-        IBaseFilter_AddRef(pFilter);
-        This->ppFiltersInGraph[This->nFilters] = pFilter;
-        This->pFilterNames[This->nFilters] = wszFilterName;
-        This->nFilters++;
-        This->version++;
-        IBaseFilter_SetSyncSource(pFilter, This->refClock);
-    }
-    else
         CoTaskMemFree(wszFilterName);
+        return hr;
+    }
 
-    if (SUCCEEDED(hr) && duplicate_name)
-        return VFW_S_DUPLICATE_NAME;
+    if (!(entry = heap_alloc(sizeof(*entry))))
+    {
+        CoTaskMemFree(wszFilterName);
+        return E_OUTOFMEMORY;
+    }
 
-    return hr;
+    IBaseFilter_AddRef(entry->filter = pFilter);
+    entry->name = wszFilterName;
+    list_add_head(&This->filters, &entry->entry);
+    This->version++;
+
+    return duplicate_name ? VFW_S_DUPLICATE_NAME : hr;
 }
 
 static HRESULT WINAPI FilterGraph2_RemoveFilter(IFilterGraph2 *iface, IBaseFilter *pFilter)
 {
     IFilterGraphImpl *This = impl_from_IFilterGraph2(iface);
+    struct filter *entry;
     int i;
     HRESULT hr = E_FAIL;
 
@@ -476,9 +626,9 @@ static HRESULT WINAPI FilterGraph2_RemoveFilter(IFilterGraph2 *iface, IBaseFilte
 
     /* FIXME: check graph is stopped */
 
-    for (i = 0; i < This->nFilters; i++)
+    LIST_FOR_EACH_ENTRY(entry, &This->filters, struct filter, entry)
     {
-        if (This->ppFiltersInGraph[i] == pFilter)
+        if (entry->filter == pFilter)
         {
             IEnumPins *penumpins = NULL;
             FILTER_STATE state;
@@ -489,7 +639,7 @@ static HRESULT WINAPI FilterGraph2_RemoveFilter(IFilterGraph2 *iface, IBaseFilte
                 This->defaultclock = TRUE;
             }
 
-            TRACE("Removing filter %s\n", debugstr_w(This->pFilterNames[i]));
+            TRACE("Removing filter %s.\n", debugstr_w(entry->name));
             IBaseFilter_GetState(pFilter, 0, &state);
             if (state == State_Running)
                 IBaseFilter_Pause(pFilter);
@@ -531,15 +681,14 @@ static HRESULT WINAPI FilterGraph2_RemoveFilter(IFilterGraph2 *iface, IBaseFilte
                 IEnumPins_Release(penumpins);
             }
 
-            hr = IBaseFilter_JoinFilterGraph(pFilter, NULL, This->pFilterNames[i]);
+            hr = IBaseFilter_JoinFilterGraph(pFilter, NULL, NULL);
             if (SUCCEEDED(hr))
             {
                 IBaseFilter_SetSyncSource(pFilter, NULL);
                 IBaseFilter_Release(pFilter);
-                CoTaskMemFree(This->pFilterNames[i]);
-                memmove(This->ppFiltersInGraph+i, This->ppFiltersInGraph+i+1, sizeof(IBaseFilter*)*(This->nFilters - 1 - i));
-                memmove(This->pFilterNames+i, This->pFilterNames+i+1, sizeof(LPWSTR)*(This->nFilters - 1 - i));
-                This->nFilters--;
+                list_remove(&entry->entry);
+                CoTaskMemFree(entry->name);
+                heap_free(entry);
                 This->version++;
                 /* Invalidate interfaces in the cache */
                 for (i = 0; i < This->nItfCacheEntries; i++)
@@ -558,37 +707,31 @@ static HRESULT WINAPI FilterGraph2_RemoveFilter(IFilterGraph2 *iface, IBaseFilte
     return hr; /* FIXME: check this error code */
 }
 
-static HRESULT WINAPI FilterGraph2_EnumFilters(IFilterGraph2 *iface, IEnumFilters **ppEnum)
+static HRESULT WINAPI FilterGraph2_EnumFilters(IFilterGraph2 *iface, IEnumFilters **out)
 {
-    IFilterGraphImpl *This = impl_from_IFilterGraph2(iface);
+    IFilterGraphImpl *graph = impl_from_IFilterGraph2(iface);
 
-    TRACE("(%p/%p)->(%p)\n", This, iface, ppEnum);
+    TRACE("graph %p, out %p.\n", graph, out);
 
-    return IEnumFiltersImpl_Construct(&This->IGraphVersion_iface, &This->ppFiltersInGraph, &This->nFilters, ppEnum);
+    return create_enum_filters(graph, list_head(&graph->filters), out);
 }
 
-static HRESULT WINAPI FilterGraph2_FindFilterByName(IFilterGraph2 *iface, LPCWSTR pName,
-        IBaseFilter **ppFilter)
+static HRESULT WINAPI FilterGraph2_FindFilterByName(IFilterGraph2 *iface,
+        const WCHAR *name, IBaseFilter **filter)
 {
-    IFilterGraphImpl *This = impl_from_IFilterGraph2(iface);
-    int i;
+    IFilterGraphImpl *graph = impl_from_IFilterGraph2(iface);
 
-    TRACE("(%p/%p)->(%s (%p), %p)\n", This, iface, debugstr_w(pName), pName, ppFilter);
+    TRACE("graph %p, name %s, filter %p.\n", graph, debugstr_w(name), filter);
 
-    if (!ppFilter)
+    if (!filter)
         return E_POINTER;
 
-    for (i = 0; i < This->nFilters; i++)
+    if ((*filter = find_filter_by_name(graph, name)))
     {
-        if (!strcmpW(pName, This->pFilterNames[i]))
-        {
-            *ppFilter = This->ppFiltersInGraph[i];
-            IBaseFilter_AddRef(*ppFilter);
-            return S_OK;
-        }
+        IBaseFilter_AddRef(*filter);
+        return S_OK;
     }
 
-    *ppFilter = NULL;
     return VFW_E_NOT_FOUND;
 }
 
@@ -766,24 +909,24 @@ static HRESULT WINAPI FilterGraph2_SetDefaultSyncSource(IFilterGraph2 *iface)
 {
     IFilterGraphImpl *This = impl_from_IFilterGraph2(iface);
     IReferenceClock *pClock = NULL;
+    struct filter *filter;
     HRESULT hr = S_OK;
-    int i;
 
     TRACE("(%p/%p)->() live sources not handled properly!\n", This, iface);
 
     EnterCriticalSection(&This->cs);
 
-    for (i = 0; i < This->nFilters; ++i)
+    LIST_FOR_EACH_ENTRY(filter, &This->filters, struct filter, entry)
     {
         DWORD miscflags;
         IAMFilterMiscFlags *flags = NULL;
-        IBaseFilter_QueryInterface(This->ppFiltersInGraph[i], &IID_IAMFilterMiscFlags, (void**)&flags);
+        IBaseFilter_QueryInterface(filter->filter, &IID_IAMFilterMiscFlags, (void **)&flags);
         if (!flags)
             continue;
         miscflags = IAMFilterMiscFlags_GetMiscFlags(flags);
         IAMFilterMiscFlags_Release(flags);
         if (miscflags == AM_FILTER_MISC_FLAGS_IS_RENDERER)
-            IBaseFilter_QueryInterface(This->ppFiltersInGraph[i], &IID_IReferenceClock, (void**)&pClock);
+            IBaseFilter_QueryInterface(filter->filter, &IID_IReferenceClock, (void **)&pClock);
         if (pClock)
             break;
     }
@@ -794,7 +937,10 @@ static HRESULT WINAPI FilterGraph2_SetDefaultSyncSource(IFilterGraph2 *iface)
         This->refClockProvider = NULL;
     }
     else
-        This->refClockProvider = This->ppFiltersInGraph[i];
+    {
+        filter = LIST_ENTRY(list_tail(&This->filters), struct filter, entry);
+        This->refClockProvider = filter->filter;
+    }
 
     if (SUCCEEDED(hr))
     {
@@ -829,86 +975,62 @@ static HRESULT GetFilterInfo(IMoniker* pMoniker, VARIANT* pvar)
     return hr;
 }
 
-static HRESULT GetInternalConnections(IBaseFilter* pfilter, IPin* pinputpin, IPin*** pppins, ULONG* pnb)
+/* Attempt to connect one of the output pins on filter to sink. Helper for
+ * FilterGraph2_Connect(). */
+static HRESULT connect_output_pin(IFilterGraphImpl *graph, IBaseFilter *filter, IPin *sink)
 {
+    IEnumPins *enumpins;
+    PIN_INFO info;
     HRESULT hr;
-    ULONG nb = 0;
+    IPin *pin;
 
-    TRACE("(%p, %p, %p, %p)\n", pfilter, pinputpin, pppins, pnb);
-    hr = IPin_QueryInternalConnections(pinputpin, NULL, &nb);
-    if (hr == S_OK) {
-        /* Rendered input */
-    } else if (hr == S_FALSE) {
-        *pppins = CoTaskMemAlloc(sizeof(IPin*)*nb);
-        hr = IPin_QueryInternalConnections(pinputpin, *pppins, &nb);
-        if (hr != S_OK) {
-            WARN("Error (%x)\n", hr);
-        }
-    } else if (hr == E_NOTIMPL) {
-        /* Input connected to all outputs */
-        IEnumPins* penumpins;
-        IPin* ppin;
-        int i = 0;
-        TRACE("E_NOTIMPL\n");
-        hr = IBaseFilter_EnumPins(pfilter, &penumpins);
-        if (FAILED(hr)) {
-            WARN("filter Enumpins failed (%x)\n", hr);
-            return hr;
-        }
-        i = 0;
-        /* Count output pins */
-        while(IEnumPins_Next(penumpins, 1, &ppin, &nb) == S_OK) {
-            PIN_DIRECTION pindir;
-            IPin_QueryDirection(ppin, &pindir);
-            if (pindir == PINDIR_OUTPUT)
-                i++;
-            IPin_Release(ppin);
-        }
-        *pppins = CoTaskMemAlloc(sizeof(IPin*)*i);
-        /* Retrieve output pins */
-        IEnumPins_Reset(penumpins);
-        i = 0;
-        while(IEnumPins_Next(penumpins, 1, &ppin, &nb) == S_OK) {
-            PIN_DIRECTION pindir;
-            IPin_QueryDirection(ppin, &pindir);
-            if (pindir == PINDIR_OUTPUT)
-                (*pppins)[i++] = ppin;
-            else
-                IPin_Release(ppin);
-        }
-        IEnumPins_Release(penumpins);
-        nb = i;
-        if (FAILED(hr)) {
-            WARN("Next failed (%x)\n", hr);
-            return hr;
-        }
-    } else if (FAILED(hr)) {
-        WARN("Cannot get internal connection (%x)\n", hr);
+    hr = IBaseFilter_EnumPins(filter, &enumpins);
+    if (FAILED(hr))
         return hr;
+
+    while (IEnumPins_Next(enumpins, 1, &pin, NULL) == S_OK)
+    {
+        IPin_QueryPinInfo(pin, &info);
+        IBaseFilter_Release(info.pFilter);
+        if (info.dir == PINDIR_OUTPUT)
+        {
+            if (info.achName[0] == '~')
+            {
+                TRACE("Skipping non-rendered pin %s.\n", debugstr_w(info.achName));
+                IPin_Release(pin);
+                continue;
+            }
+
+            if (SUCCEEDED(IFilterGraph2_Connect(&graph->IFilterGraph2_iface, pin, sink)))
+            {
+                IPin_Release(pin);
+                IEnumPins_Release(enumpins);
+                return S_OK;
+            }
+        }
+        IPin_Release(pin);
     }
 
-    *pnb = nb;
-    return S_OK;
+    IEnumPins_Release(enumpins);
+    return VFW_E_CANNOT_CONNECT;
 }
 
 /*** IGraphBuilder methods ***/
 static HRESULT WINAPI FilterGraph2_Connect(IFilterGraph2 *iface, IPin *ppinOut, IPin *ppinIn)
 {
     IFilterGraphImpl *This = impl_from_IFilterGraph2(iface);
+    struct filter *filter;
     HRESULT hr;
+    IPin *pin;
     AM_MEDIA_TYPE* mt = NULL;
     IEnumMediaTypes* penummt = NULL;
     ULONG nbmt;
     IEnumPins* penumpins;
     IEnumMoniker* pEnumMoniker;
     GUID tab[2];
-    ULONG nb = 0;
     IMoniker* pMoniker;
-    ULONG pin;
     PIN_INFO PinInfo;
-    CLSID FilterCLSID;
     PIN_DIRECTION dir;
-    unsigned int i = 0;
     IFilterMapper2 *pFilterMapper2 = NULL;
 
     TRACE("(%p/%p)->(%p, %p)\n", This, iface, ppinOut, ppinIn);
@@ -963,19 +1085,42 @@ static HRESULT WINAPI FilterGraph2_Connect(IFilterGraph2 *iface, IPin *ppinOut, 
 
     /* Try direct connection first */
     hr = IPin_Connect(ppinOut, ppinIn, NULL);
-    if (SUCCEEDED(hr))
+
+    /* If direct connection succeeded, we should propagate that return value.
+     * If it returned VFW_E_NOT_CONNECTED or VFW_E_NO_AUDIO_HARDWARE, then don't
+     * even bother trying intermediate filters, since they won't succeed. */
+    if (SUCCEEDED(hr) || hr == VFW_E_NOT_CONNECTED || hr == VFW_E_NO_AUDIO_HARDWARE)
         goto out;
 
     TRACE("Direct connection failed, trying to render using extra filters\n");
 
-    hr = IPin_QueryPinInfo(ppinIn, &PinInfo);
-    if (FAILED(hr))
-        goto out;
+    LIST_FOR_EACH_ENTRY(filter, &This->filters, struct filter, entry)
+    {
+        hr = IBaseFilter_EnumPins(filter->filter, &penumpins);
+        if (FAILED(hr))
+            goto out;
 
-    hr = IBaseFilter_GetClassID(PinInfo.pFilter, &FilterCLSID);
-    IBaseFilter_Release(PinInfo.pFilter);
-    if (FAILED(hr))
-        goto out;
+        while (IEnumPins_Next(penumpins, 1, &pin, NULL) == S_OK)
+        {
+            IPin_QueryDirection(pin, &dir);
+            if (dir == PINDIR_INPUT && SUCCEEDED(IFilterGraph2_ConnectDirect(iface,
+                    ppinOut, pin, NULL)))
+            {
+                if (SUCCEEDED(hr = connect_output_pin(This, filter->filter, ppinIn)))
+                {
+                    IPin_Release(pin);
+                    IEnumPins_Release(penumpins);
+                    goto out;
+                }
+
+                IFilterGraph2_Disconnect(iface, pin);
+                IFilterGraph2_Disconnect(iface, ppinOut);
+            }
+            IPin_Release(pin);
+        }
+
+        IEnumPins_Release(penumpins);
+    }
 
     /* Find the appropriate transform filter than can transform the minor media type of output pin of the upstream 
      * filter to the minor mediatype of input pin of the renderer */
@@ -1017,11 +1162,9 @@ static HRESULT WINAPI FilterGraph2_Connect(IFilterGraph2 *iface, IPin *ppinOut, 
     }
 
     hr = VFW_E_CANNOT_RENDER;
-    while(IEnumMoniker_Next(pEnumMoniker, 1, &pMoniker, &nb) == S_OK)
+    while (IEnumMoniker_Next(pEnumMoniker, 1, &pMoniker, NULL) == S_OK)
     {
         VARIANT var;
-        GUID clsid;
-        IPin** ppins = NULL;
         IPin* ppinfilter = NULL;
         IBaseFilter* pfilter = NULL;
         IAMGraphBuilderCallback *callback = NULL;
@@ -1036,20 +1179,6 @@ static HRESULT WINAPI FilterGraph2_Connect(IFilterGraph2 *iface, IPin *ppinOut, 
         IMoniker_Release(pMoniker);
         if (FAILED(hr)) {
             WARN("Unable to create filter (%x), trying next one\n", hr);
-            goto error;
-        }
-
-        hr = IBaseFilter_GetClassID(pfilter, &clsid);
-        if (FAILED(hr))
-        {
-            IBaseFilter_Release(pfilter);
-            goto error;
-	}
-
-        if (IsEqualGUID(&clsid, &FilterCLSID)) {
-            /* Skip filter (same as the one the output pin belongs to) */
-            IBaseFilter_Release(pfilter);
-            pfilter = NULL;
             goto error;
         }
 
@@ -1099,14 +1228,14 @@ static HRESULT WINAPI FilterGraph2_Connect(IFilterGraph2 *iface, IPin *ppinOut, 
             goto error;
         }
 
-        hr = IEnumPins_Next(penumpins, 1, &ppinfilter, &pin);
+        hr = IEnumPins_Next(penumpins, 1, &ppinfilter, NULL);
         IEnumPins_Release(penumpins);
 
         if (FAILED(hr)) {
             WARN("Obtaining next pin: (%x)\n", hr);
             goto error;
         }
-        if (pin == 0) {
+        if (hr == S_FALSE) {
             WARN("Cannot use this filter: no pins\n");
             goto error;
         }
@@ -1118,52 +1247,10 @@ static HRESULT WINAPI FilterGraph2_Connect(IFilterGraph2 *iface, IPin *ppinOut, 
         }
         TRACE("Successfully connected to filter, follow chain...\n");
 
-        /* Render all output pins of the filter by calling IFilterGraph2_Connect on each of them */
-        hr = GetInternalConnections(pfilter, ppinfilter, &ppins, &nb);
-
-        if (SUCCEEDED(hr)) {
-            if (nb == 0) {
-                IPin_Disconnect(ppinfilter);
-                IPin_Disconnect(ppinOut);
-                goto error;
-            }
-            TRACE("pins to consider: %d\n", nb);
-            for(i = 0; i < nb; i++)
-            {
-                LPWSTR pinname = NULL;
-
-                TRACE("Processing pin %u\n", i);
-
-                hr = IPin_QueryId(ppins[i], &pinname);
-                if (SUCCEEDED(hr))
-                {
-                    if (pinname[0] == '~')
-                    {
-                        TRACE("Pinname=%s, skipping\n", debugstr_w(pinname));
-                        hr = E_FAIL;
-                    }
-                    else
-                        hr = IFilterGraph2_Connect(iface, ppins[i], ppinIn);
-                    CoTaskMemFree(pinname);
-                }
-
-                if (FAILED(hr)) {
-                   TRACE("Cannot connect pin %p (%x)\n", ppinfilter, hr);
-                }
-                IPin_Release(ppins[i]);
-                if (SUCCEEDED(hr)) break;
-            }
-            while (++i < nb) IPin_Release(ppins[i]);
-            CoTaskMemFree(ppins);
+        if (SUCCEEDED(hr = connect_output_pin(This, pfilter, ppinIn)))
+        {
             IPin_Release(ppinfilter);
             IBaseFilter_Release(pfilter);
-            if (FAILED(hr))
-            {
-                IPin_Disconnect(ppinfilter);
-                IPin_Disconnect(ppinOut);
-                IFilterGraph2_RemoveFilter(iface, pfilter);
-                continue;
-            }
             break;
         }
 
@@ -1174,9 +1261,10 @@ error:
             IFilterGraph2_RemoveFilter(iface, pfilter);
             IBaseFilter_Release(pfilter);
         }
-        while (++i < nb) IPin_Release(ppins[i]);
-        CoTaskMemFree(ppins);
     }
+
+    if (FAILED(hr))
+        hr = VFW_E_CANNOT_CONNECT;
 
     IEnumMoniker_Release(pEnumMoniker);
 
@@ -1190,50 +1278,46 @@ out:
     --This->recursioncount;
     LeaveCriticalSection(&This->cs);
     TRACE("--> %08x\n", hr);
-    return SUCCEEDED(hr) ? S_OK : hr;
+    return hr;
 }
 
-static HRESULT FilterGraph2_RenderRecurse(IFilterGraphImpl *This, IPin *ppinOut)
+/* Render all output pins of the given filter. Helper for FilterGraph2_Render(). */
+static HRESULT render_output_pins(IFilterGraphImpl *graph, IBaseFilter *filter)
 {
-    /* This pin has been connected now, try to call render on all pins that aren't connected */
-    IPin *to = NULL;
-    PIN_INFO info;
-    IEnumPins *enumpins = NULL;
     BOOL renderany = FALSE;
     BOOL renderall = TRUE;
+    IEnumPins *enumpins;
+    IPin *pin, *peer;
+    PIN_INFO info;
 
-    IPin_QueryPinInfo(ppinOut, &info);
-
-    IBaseFilter_EnumPins(info.pFilter, &enumpins);
-    /* Don't need to hold a reference, IEnumPins does */
-    IBaseFilter_Release(info.pFilter);
-
-    IEnumPins_Reset(enumpins);
-    while (IEnumPins_Next(enumpins, 1, &to, NULL) == S_OK)
+    IBaseFilter_EnumPins(filter, &enumpins);
+    while (IEnumPins_Next(enumpins, 1, &pin, NULL) == S_OK)
     {
-        PIN_DIRECTION dir = PINDIR_INPUT;
-
-        IPin_QueryDirection(to, &dir);
-
-        if (dir == PINDIR_OUTPUT)
+        IPin_QueryPinInfo(pin, &info);
+        IBaseFilter_Release(info.pFilter);
+        if (info.dir == PINDIR_OUTPUT)
         {
-            IPin *out = NULL;
+            if (info.achName[0] == '~')
+            {
+                TRACE("Skipping non-rendered pin %s.\n", debugstr_w(info.achName));
+                IPin_Release(pin);
+                continue;
+            }
 
-            IPin_ConnectedTo(to, &out);
-            if (!out)
+            if (IPin_ConnectedTo(pin, &peer) == VFW_E_NOT_CONNECTED)
             {
                 HRESULT hr;
-                hr = IFilterGraph2_Render(&This->IFilterGraph2_iface, to);
+                hr = IFilterGraph2_Render(&graph->IFilterGraph2_iface, pin);
                 if (SUCCEEDED(hr))
                     renderany = TRUE;
                 else
                     renderall = FALSE;
             }
             else
-                IPin_Release(out);
+                IPin_Release(peer);
         }
 
-        IPin_Release(to);
+        IPin_Release(pin);
     }
 
     IEnumPins_Release(enumpins);
@@ -1269,6 +1353,7 @@ static HRESULT WINAPI FilterGraph2_Render(IFilterGraph2 *iface, IPin *ppinOut)
 {
     IFilterGraphImpl *This = impl_from_IFilterGraph2(iface);
     IEnumMediaTypes* penummt;
+    struct filter *filter;
     AM_MEDIA_TYPE* mt;
     ULONG nbmt;
     HRESULT hr;
@@ -1277,7 +1362,6 @@ static HRESULT WINAPI FilterGraph2_Render(IFilterGraph2 *iface, IPin *ppinOut)
     GUID tab[4];
     ULONG nb;
     IMoniker* pMoniker;
-    INT x;
     IFilterMapper2 *pFilterMapper2 = NULL;
 
     TRACE("(%p/%p)->(%p)\n", This, iface, ppinOut);
@@ -1297,12 +1381,12 @@ static HRESULT WINAPI FilterGraph2_Render(IFilterGraph2 *iface, IPin *ppinOut)
     /* Try to find out if there is a renderer for the specified subtype already, and use that
      */
     EnterCriticalSection(&This->cs);
-    for (x = 0; x < This->nFilters; ++x)
+    LIST_FOR_EACH_ENTRY(filter, &This->filters, struct filter, entry)
     {
         IEnumPins *enumpins = NULL;
         IPin *pin = NULL;
 
-        hr = IBaseFilter_EnumPins(This->ppFiltersInGraph[x], &enumpins);
+        hr = IBaseFilter_EnumPins(filter->filter, &enumpins);
 
         if (FAILED(hr) || !enumpins)
             continue;
@@ -1329,7 +1413,7 @@ static HRESULT WINAPI FilterGraph2_Render(IFilterGraph2 *iface, IPin *ppinOut)
                     TRACE("Connected successfully %p/%p, %08x look if we should render more!\n", ppinOut, pin, hr);
                     IPin_Release(pin);
 
-                    hr = FilterGraph2_RenderRecurse(This, pin);
+                    hr = render_output_pins(This, filter->filter);
                     if (FAILED(hr))
                     {
                         IPin_Disconnect(ppinOut);
@@ -1479,7 +1563,7 @@ static HRESULT WINAPI FilterGraph2_Render(IFilterGraph2 *iface, IPin *ppinOut)
 
                 VariantClear(&var);
 
-                hr = FilterGraph2_RenderRecurse(This, ppinfilter);
+                hr = render_output_pins(This, pfilter);
                 if (FAILED(hr)) {
                     WARN("Unable to connect recursively (%x)\n", hr);
                     goto error;
@@ -1530,6 +1614,7 @@ static HRESULT WINAPI FilterGraph2_RenderFile(IFilterGraph2 *iface, LPCWSTR lpcw
     IBaseFilter* preader = NULL;
     IPin* ppinreader = NULL;
     IEnumPins* penumpins = NULL;
+    struct filter *filter;
     HRESULT hr;
     BOOL partial = FALSE;
     BOOL any = FALSE;
@@ -1553,13 +1638,11 @@ static HRESULT WINAPI FilterGraph2_RenderFile(IFilterGraph2 *iface, LPCWSTR lpcw
             IPin_QueryDirection(ppinreader, &dir);
             if (dir == PINDIR_OUTPUT)
             {
-                INT i;
-
                 hr = IFilterGraph2_Render(iface, ppinreader);
-                TRACE("Render %08x\n", hr);
 
-                for (i = 0; i < This->nFilters; ++i)
-                    TRACE("Filters in chain: %s\n", debugstr_w(This->pFilterNames[i]));
+                TRACE("Filters in chain:\n");
+                LIST_FOR_EACH_ENTRY(filter, &This->filters, struct filter, entry)
+                    TRACE("- %s.\n", debugstr_w(filter->name));
 
                 if (SUCCEEDED(hr))
                     any = TRUE;
@@ -1718,6 +1801,9 @@ static HRESULT WINAPI FilterGraph2_AddSourceFilter(IFilterGraph2 *iface, LPCWSTR
     TRACE("File %s\n", debugstr_w(filename));
     TRACE("MajorType %s\n", debugstr_guid(&mt.majortype));
     TRACE("SubType %s\n", debugstr_guid(&mt.subtype));
+
+    CoTaskMemFree(filename);
+    FreeMediaType(&mt);
 
     if (ppFilter)
         *ppFilter = preader;
@@ -1915,14 +2001,40 @@ static HRESULT WINAPI MediaControl_Invoke(IMediaControl *iface, DISPID dispIdMem
 
 typedef HRESULT(WINAPI *fnFoundFilter)(IBaseFilter *, DWORD_PTR data);
 
+static BOOL has_output_pins(IBaseFilter *filter)
+{
+    IEnumPins *enumpins;
+    PIN_DIRECTION dir;
+    IPin *pin;
+
+    if (FAILED(IBaseFilter_EnumPins(filter, &enumpins)))
+        return FALSE;
+
+    while (IEnumPins_Next(enumpins, 1, &pin, NULL) == S_OK)
+    {
+        IPin_QueryDirection(pin, &dir);
+        IPin_Release(pin);
+        if (dir == PINDIR_OUTPUT)
+        {
+            IEnumPins_Release(enumpins);
+            return TRUE;
+        }
+    }
+
+    IEnumPins_Release(enumpins);
+    return FALSE;
+}
+
 static HRESULT ExploreGraph(IFilterGraphImpl* pGraph, IPin* pOutputPin, fnFoundFilter FoundFilter, DWORD_PTR data)
 {
+    IAMFilterMiscFlags *flags;
+    IMediaSeeking *seeking;
+    IEnumPins *enumpins;
+    PIN_DIRECTION dir;
     HRESULT hr;
     IPin* pInputPin;
-    IPin** ppPins;
-    ULONG nb;
-    ULONG i;
     PIN_INFO PinInfo;
+    IPin *pin;
 
     TRACE("%p %p\n", pGraph, pOutputPin);
     PinInfo.pFilter = NULL;
@@ -1932,33 +2044,39 @@ static HRESULT ExploreGraph(IFilterGraphImpl* pGraph, IPin* pOutputPin, fnFoundF
     if (SUCCEEDED(hr))
     {
         hr = IPin_QueryPinInfo(pInputPin, &PinInfo);
-        if (SUCCEEDED(hr))
-            hr = GetInternalConnections(PinInfo.pFilter, pInputPin, &ppPins, &nb);
         IPin_Release(pInputPin);
     }
 
     if (SUCCEEDED(hr))
-    {
-        if (nb == 0)
-        {
-            TRACE("Reached a renderer\n");
-            /* Count renderers for end of stream notification */
-            pGraph->nRenderers++;
-        }
-        else
-        {
-            for(i = 0; i < nb; i++)
-            {
-                /* Explore the graph downstream from this pin
-                 * FIXME: We should prevent exploring from a pin more than once. This can happens when
-                 * several input pins are connected to the same output (a MUX for instance). */
-                ExploreGraph(pGraph, ppPins[i], FoundFilter, data);
-                IPin_Release(ppPins[i]);
-            }
+        hr = IBaseFilter_EnumPins(PinInfo.pFilter, &enumpins);
 
-            CoTaskMemFree(ppPins);
+    if (SUCCEEDED(hr))
+    {
+        while (IEnumPins_Next(enumpins, 1, &pin, NULL) == S_OK)
+        {
+            IPin_QueryDirection(pin, &dir);
+            if (dir == PINDIR_OUTPUT)
+                ExploreGraph(pGraph, pin, FoundFilter, data);
+            IPin_Release(pin);
         }
+
+        IEnumPins_Release(enumpins);
         TRACE("Doing stuff with filter %p\n", PinInfo.pFilter);
+
+        if (SUCCEEDED(IBaseFilter_QueryInterface(PinInfo.pFilter,
+                &IID_IAMFilterMiscFlags, (void **)&flags)))
+        {
+            if (IAMFilterMiscFlags_GetMiscFlags(flags) & AM_FILTER_MISC_FLAGS_IS_RENDERER)
+                pGraph->nRenderers++;
+            IAMFilterMiscFlags_Release(flags);
+        }
+        else if (SUCCEEDED(IBaseFilter_QueryInterface(PinInfo.pFilter,
+                &IID_IMediaSeeking, (void **)&seeking)))
+        {
+            if (!has_output_pins(PinInfo.pFilter))
+                pGraph->nRenderers++;
+            IMediaSeeking_Release(seeking);
+        }
 
         FoundFilter(PinInfo.pFilter, data);
     }
@@ -2007,8 +2125,7 @@ static HRESULT WINAPI SendGetState(IBaseFilter *pFilter, DWORD_PTR data)
 
 static HRESULT SendFilterMessage(IFilterGraphImpl *This, fnFoundFilter FoundFilter, DWORD_PTR data)
 {
-    int i;
-    IBaseFilter* pfilter;
+    struct filter *filter;
     IEnumPins* pEnum;
     HRESULT hr;
     IPin* pPin;
@@ -2022,11 +2139,10 @@ static HRESULT SendFilterMessage(IFilterGraphImpl *This, fnFoundFilter FoundFilt
     This->nRenderers = 0;
     ResetEvent(This->hEventCompletion);
 
-    for(i = 0; i < This->nFilters; i++)
+    LIST_FOR_EACH_ENTRY(filter, &This->filters, struct filter, entry)
     {
         BOOL source = TRUE;
-        pfilter = This->ppFiltersInGraph[i];
-        hr = IBaseFilter_EnumPins(pfilter, &pEnum);
+        hr = IBaseFilter_EnumPins(filter->filter, &pEnum);
         if (hr != S_OK)
         {
             WARN("Enum pins failed %x\n", hr);
@@ -2045,7 +2161,7 @@ static HRESULT SendFilterMessage(IFilterGraphImpl *This, fnFoundFilter FoundFilt
         }
         if (source)
         {
-            TRACE("Found a source filter %p\n", pfilter);
+            TRACE("Found source filter %p.\n", filter->filter);
             IEnumPins_Reset(pEnum);
             while(IEnumPins_Next(pEnum, 1, &pPin, &dummy) == S_OK)
             {
@@ -2053,7 +2169,7 @@ static HRESULT SendFilterMessage(IFilterGraphImpl *This, fnFoundFilter FoundFilt
                 ExploreGraph(This, pPin, FoundFilter, data);
                 IPin_Release(pPin);
             }
-            FoundFilter(pfilter, data);
+            FoundFilter(filter->filter, data);
         }
         IEnumPins_Release(pEnum);
     }
@@ -2061,111 +2177,34 @@ static HRESULT SendFilterMessage(IFilterGraphImpl *This, fnFoundFilter FoundFilt
     return S_FALSE;
 }
 
-/*** IMediaControl methods ***/
 static HRESULT WINAPI MediaControl_Run(IMediaControl *iface)
 {
-    IFilterGraphImpl *This = impl_from_IMediaControl(iface);
+    IFilterGraphImpl *graph = impl_from_IMediaControl(iface);
 
-    TRACE("(%p/%p)->()\n", This, iface);
-
-    EnterCriticalSection(&This->cs);
-    if (This->state == State_Running)
-        goto out;
-    This->EcCompleteCount = 0;
-
-    if (This->defaultclock && !This->refClock)
-        IFilterGraph2_SetDefaultSyncSource(&This->IFilterGraph2_iface);
-
-    if (This->refClock)
-    {
-        REFERENCE_TIME now;
-        IReferenceClock_GetTime(This->refClock, &now);
-        if (This->state == State_Stopped)
-            This->start_time = now + 500000;
-        else if (This->pause_time >= 0)
-            This->start_time += now - This->pause_time;
-        else
-            This->start_time = now;
-    }
-    else This->start_time = 0;
-
-    SendFilterMessage(This, SendRun, (DWORD_PTR)&This->start_time);
-    This->state = State_Running;
-out:
-    LeaveCriticalSection(&This->cs);
-    return S_FALSE;
+    return IMediaFilter_Run(&graph->IMediaFilter_iface, 0);
 }
 
 static HRESULT WINAPI MediaControl_Pause(IMediaControl *iface)
 {
-    IFilterGraphImpl *This = impl_from_IMediaControl(iface);
+    IFilterGraphImpl *graph = impl_from_IMediaControl(iface);
 
-    TRACE("(%p/%p)->()\n", This, iface);
-
-    EnterCriticalSection(&This->cs);
-    if (This->state == State_Paused)
-        goto out;
-
-    if (This->state == State_Running && This->refClock && This->start_time >= 0)
-        IReferenceClock_GetTime(This->refClock, &This->pause_time);
-    else
-        This->pause_time = -1;
-
-    SendFilterMessage(This, SendPause, 0);
-    This->state = State_Paused;
-out:
-    LeaveCriticalSection(&This->cs);
-    return S_FALSE;
+    return IMediaFilter_Pause(&graph->IMediaFilter_iface);
 }
 
 static HRESULT WINAPI MediaControl_Stop(IMediaControl *iface)
 {
-    IFilterGraphImpl *This = impl_from_IMediaControl(iface);
+    IFilterGraphImpl *graph = impl_from_IMediaControl(iface);
 
-    TRACE("(%p/%p)->()\n", This, iface);
-
-    if (This->state == State_Stopped) return S_OK;
-
-    EnterCriticalSection(&This->cs);
-    if (This->state == State_Running) SendFilterMessage(This, SendPause, 0);
-    SendFilterMessage(This, SendStop, 0);
-    This->state = State_Stopped;
-    LeaveCriticalSection(&This->cs);
-    return S_OK;
+    return IMediaFilter_Stop(&graph->IMediaFilter_iface);
 }
 
-static HRESULT WINAPI MediaControl_GetState(IMediaControl *iface, LONG msTimeout,
-        OAFilterState *pfs)
+static HRESULT WINAPI MediaControl_GetState(IMediaControl *iface, LONG timeout, OAFilterState *state)
 {
-    IFilterGraphImpl *This = impl_from_IMediaControl(iface);
-    DWORD end;
+    IFilterGraphImpl *graph = impl_from_IMediaControl(iface);
 
-    TRACE("(%p/%p)->(%d, %p)\n", This, iface, msTimeout, pfs);
+    if (timeout < 0) timeout = INFINITE;
 
-    if (!pfs)
-        return E_POINTER;
-
-    EnterCriticalSection(&This->cs);
-
-    *pfs = This->state;
-    if (msTimeout > 0)
-    {
-        end = GetTickCount() + msTimeout;
-    }
-    else if (msTimeout < 0)
-    {
-        end = INFINITE;
-    }
-    else
-    {
-        end = 0;
-    }
-    if (end)
-        SendFilterMessage(This, SendGetState, end);
-
-    LeaveCriticalSection(&This->cs);
-
-    return S_OK;
+    return IMediaFilter_GetState(&graph->IMediaFilter_iface, timeout, (FILTER_STATE *)state);
 }
 
 static HRESULT WINAPI MediaControl_RenderFile(IMediaControl *iface, BSTR strFilename)
@@ -2271,19 +2310,18 @@ typedef HRESULT (WINAPI *fnFoundSeek)(IFilterGraphImpl *This, IMediaSeeking*, DW
 
 static HRESULT all_renderers_seek(IFilterGraphImpl *This, fnFoundSeek FoundSeek, DWORD_PTR arg) {
     BOOL allnotimpl = TRUE;
-    int i;
     HRESULT hr, hr_return = S_OK;
+    struct filter *filter;
 
     TRACE("(%p)->(%p %08lx)\n", This, FoundSeek, arg);
     /* Send a message to all renderers, they are responsible for broadcasting it further */
 
-    for(i = 0; i < This->nFilters; i++)
+    LIST_FOR_EACH_ENTRY(filter, &This->filters, struct filter, entry)
     {
         IMediaSeeking *seek = NULL;
-        IBaseFilter* pfilter = This->ppFiltersInGraph[i];
         IAMFilterMiscFlags *flags = NULL;
         ULONG filterflags;
-        IBaseFilter_QueryInterface(pfilter, &IID_IAMFilterMiscFlags, (void**)&flags);
+        IBaseFilter_QueryInterface(filter->filter, &IID_IAMFilterMiscFlags, (void **)&flags);
         if (!flags)
             continue;
         filterflags = IAMFilterMiscFlags_GetMiscFlags(flags);
@@ -2291,7 +2329,7 @@ static HRESULT all_renderers_seek(IFilterGraphImpl *This, fnFoundSeek FoundSeek,
         if (filterflags != AM_FILTER_MISC_FLAGS_IS_RENDERER)
             continue;
 
-        IBaseFilter_QueryInterface(pfilter, &IID_IMediaSeeking, (void**)&seek);
+        IBaseFilter_QueryInterface(filter->filter, &IID_IMediaSeeking, (void **)&seek);
         if (!seek)
             continue;
         hr = FoundSeek(This, seek, arg);
@@ -2963,8 +3001,8 @@ static const IObjectWithSiteVtbl IObjectWithSite_VTable =
 
 static HRESULT GetTargetInterface(IFilterGraphImpl* pGraph, REFIID riid, LPVOID* ppvObj)
 {
-    HRESULT hr = E_NOINTERFACE;
-    int i;
+    struct filter *filter;
+    HRESULT hr;
     int entry;
 
     /* Check if the interface type is already registered */
@@ -2987,13 +3025,13 @@ static HRESULT GetTargetInterface(IFilterGraphImpl* pGraph, REFIID riid, LPVOID*
     }
 
     /* Find a filter supporting the requested interface */
-    for (i = 0; i < pGraph->nFilters; i++)
+    LIST_FOR_EACH_ENTRY(filter, &pGraph->filters, struct filter, entry)
     {
-        hr = IBaseFilter_QueryInterface(pGraph->ppFiltersInGraph[i], riid, ppvObj);
+        hr = IBaseFilter_QueryInterface(filter->filter, riid, ppvObj);
         if (hr == S_OK)
         {
             pGraph->ItfCacheEntries[entry].riid = riid;
-            pGraph->ItfCacheEntries[entry].filter = pGraph->ppFiltersInGraph[i];
+            pGraph->ItfCacheEntries[entry].filter = filter->filter;
             pGraph->ItfCacheEntries[entry].iface = *ppvObj;
             if (entry >= pGraph->nItfCacheEntries)
                 pGraph->nItfCacheEntries++;
@@ -3003,7 +3041,7 @@ static HRESULT GetTargetInterface(IFilterGraphImpl* pGraph, REFIID riid, LPVOID*
             return hr;
     }
 
-    return hr;
+    return IsEqualGUID(riid, &IID_IBasicAudio) ? E_NOTIMPL : E_NOINTERFACE;
 }
 
 static inline IFilterGraphImpl *impl_from_IBasicAudio(IBasicAudio *iface)
@@ -5285,57 +5323,142 @@ static HRESULT WINAPI MediaFilter_GetClassID(IMediaFilter *iface, CLSID * pClass
 
 static HRESULT WINAPI MediaFilter_Stop(IMediaFilter *iface)
 {
-    IFilterGraphImpl *This = impl_from_IMediaFilter(iface);
+    IFilterGraphImpl *graph = impl_from_IMediaFilter(iface);
 
-    return MediaControl_Stop(&This->IMediaControl_iface);
+    TRACE("graph %p.\n", graph);
+
+    EnterCriticalSection(&graph->cs);
+
+    if (graph->state == State_Stopped)
+    {
+        LeaveCriticalSection(&graph->cs);
+        return S_OK;
+    }
+
+    if (graph->state == State_Running)
+        SendFilterMessage(graph, SendPause, 0);
+    SendFilterMessage(graph, SendStop, 0);
+    graph->state = State_Stopped;
+
+    LeaveCriticalSection(&graph->cs);
+    return S_OK;
 }
 
 static HRESULT WINAPI MediaFilter_Pause(IMediaFilter *iface)
 {
-    IFilterGraphImpl *This = impl_from_IMediaFilter(iface);
+    IFilterGraphImpl *graph = impl_from_IMediaFilter(iface);
 
-    return MediaControl_Pause(&This->IMediaControl_iface);
+    TRACE("graph %p.\n", graph);
+
+    EnterCriticalSection(&graph->cs);
+
+    if (graph->state == State_Paused)
+    {
+        LeaveCriticalSection(&graph->cs);
+        return S_OK;
+    }
+
+    if (graph->defaultclock && !graph->refClock)
+        IFilterGraph2_SetDefaultSyncSource(&graph->IFilterGraph2_iface);
+
+    if (graph->state == State_Running && graph->refClock && graph->start_time >= 0)
+        IReferenceClock_GetTime(graph->refClock, &graph->pause_time);
+    else
+        graph->pause_time = -1;
+
+    SendFilterMessage(graph, SendPause, 0);
+    graph->state = State_Paused;
+
+    LeaveCriticalSection(&graph->cs);
+    return S_FALSE;
 }
 
-static HRESULT WINAPI MediaFilter_Run(IMediaFilter *iface, REFERENCE_TIME tStart)
+static HRESULT WINAPI MediaFilter_Run(IMediaFilter *iface, REFERENCE_TIME start)
 {
-    IFilterGraphImpl *This = impl_from_IMediaFilter(iface);
+    IFilterGraphImpl *graph = impl_from_IMediaFilter(iface);
 
-    if (tStart)
-        FIXME("Run called with non-null tStart: %s\n", wine_dbgstr_longlong(tStart));
+    TRACE("graph %p, start %s.\n", graph, wine_dbgstr_longlong(start));
 
-    return MediaControl_Run(&This->IMediaControl_iface);
+    EnterCriticalSection(&graph->cs);
+
+    if (graph->state == State_Running)
+    {
+        LeaveCriticalSection(&graph->cs);
+        return S_OK;
+    }
+    graph->EcCompleteCount = 0;
+
+    if (graph->defaultclock && !graph->refClock)
+        IFilterGraph2_SetDefaultSyncSource(&graph->IFilterGraph2_iface);
+
+    if (!start && graph->refClock)
+    {
+        REFERENCE_TIME now;
+        IReferenceClock_GetTime(graph->refClock, &now);
+        if (graph->state == State_Stopped)
+            graph->start_time = now + 500000;
+        else if (graph->pause_time >= 0)
+            graph->start_time += now - graph->pause_time;
+        else
+            graph->start_time = now;
+    }
+    else
+        graph->start_time = start;
+
+    SendFilterMessage(graph, SendRun, (DWORD_PTR)&graph->start_time);
+    graph->state = State_Running;
+
+    LeaveCriticalSection(&graph->cs);
+    return S_FALSE;
 }
 
-static HRESULT WINAPI MediaFilter_GetState(IMediaFilter *iface, DWORD dwMsTimeout,
-        FILTER_STATE *pState)
+static HRESULT WINAPI MediaFilter_GetState(IMediaFilter *iface, DWORD timeout, FILTER_STATE *state)
 {
-    IFilterGraphImpl *This = impl_from_IMediaFilter(iface);
+    IFilterGraphImpl *graph = impl_from_IMediaFilter(iface);
+    DWORD end;
 
-    return MediaControl_GetState(&This->IMediaControl_iface, dwMsTimeout, (OAFilterState*)pState);
+    TRACE("graph %p, timeout %u, state %p.\n", graph, timeout, state);
+
+    if (!state)
+        return E_POINTER;
+
+    EnterCriticalSection(&graph->cs);
+
+    *state = graph->state;
+    if (timeout > 0)
+        end = GetTickCount() + timeout;
+    else if (timeout == INFINITE)
+        end = INFINITE;
+    else
+        end = 0;
+    if (end)
+        SendFilterMessage(graph, SendGetState, end);
+
+    LeaveCriticalSection(&graph->cs);
+    return S_OK;
 }
 
 static HRESULT WINAPI MediaFilter_SetSyncSource(IMediaFilter *iface, IReferenceClock *pClock)
 {
     IFilterGraphImpl *This = impl_from_IMediaFilter(iface);
+    struct filter *filter;
     HRESULT hr = S_OK;
-    int i;
 
     TRACE("(%p/%p)->(%p)\n", This, iface, pClock);
 
     EnterCriticalSection(&This->cs);
     {
-        for (i = 0;i < This->nFilters;i++)
+        LIST_FOR_EACH_ENTRY(filter, &This->filters, struct filter, entry)
         {
-            hr = IBaseFilter_SetSyncSource(This->ppFiltersInGraph[i], pClock);
+            hr = IBaseFilter_SetSyncSource(filter->filter, pClock);
             if (FAILED(hr))
                 break;
         }
 
         if (FAILED(hr))
         {
-            for(;i >= 0;i--)
-                IBaseFilter_SetSyncSource(This->ppFiltersInGraph[i], This->refClock);
+            LIST_FOR_EACH_ENTRY(filter, &This->filters, struct filter, entry)
+                IBaseFilter_SetSyncSource(filter->filter, This->refClock);
         }
         else
         {
@@ -5712,10 +5835,7 @@ HRESULT FilterGraph_create(IUnknown *pUnkOuter, LPVOID *ppObj)
     fimpl->IObjectWithSite_iface.lpVtbl = &IObjectWithSite_VTable;
     fimpl->IGraphVersion_iface.lpVtbl = &IGraphVersion_VTable;
     fimpl->ref = 1;
-    fimpl->ppFiltersInGraph = NULL;
-    fimpl->pFilterNames = NULL;
-    fimpl->nFilters = 0;
-    fimpl->filterCapacity = 0;
+    list_init(&fimpl->filters);
     fimpl->nameIndex = 1;
     fimpl->refClock = NULL;
     fimpl->hEventCompletion = CreateEventW(0, TRUE, FALSE, 0);

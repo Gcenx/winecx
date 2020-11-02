@@ -107,6 +107,7 @@ static INT (WINAPI *pFindNLSStringEx)(LPCWSTR, DWORD, LPCWSTR, INT, LPCWSTR, INT
 static LANGID (WINAPI *pSetThreadUILanguage)(LANGID);
 static LANGID (WINAPI *pGetThreadUILanguage)(VOID);
 static INT (WINAPI *pNormalizeString)(NORM_FORM, LPCWSTR, INT, LPWSTR, INT);
+static INT (WINAPI *pFindStringOrdinal)(DWORD, LPCWSTR lpStringSource, INT, LPCWSTR, INT, BOOL);
 
 static void InitFunctionPointers(void)
 {
@@ -143,6 +144,7 @@ static void InitFunctionPointers(void)
   X(SetThreadUILanguage);
   X(GetThreadUILanguage);
   X(NormalizeString);
+  X(FindStringOrdinal);
 
   mod = GetModuleHandleA("ntdll");
   X(RtlUpcaseUnicodeChar);
@@ -2420,20 +2422,29 @@ typedef INT (*lcmapstring_wrapper)(DWORD, LPCWSTR, INT, LPWSTR, INT);
 static void test_lcmapstring_unicode(lcmapstring_wrapper func_ptr, const char *func_name)
 {
     const static WCHAR japanese_text[] = {
-        0x3044, 0x309d, 0x3084, 0x3001, 0x30a4, 0x30fc, 0x30cf,
-        0x30c8, 0x30fc, 0x30f4, 0x30a9, 0x306e, 0x2026, 0
+        0x3044, 0x309d, 0x3084, 0x3001, 0x30a4, 0x30fc, 0x30cf, 0x30c8,
+        0x30fc, 0x30f4, 0x30a9, 0x306e, 0x91ce, 0x539f, 0x306f, 0x5e83,
+        0x3044, 0x3093, 0x3060, 0x3088, 0x3002, 0
     };
     const static WCHAR hiragana_text[] = {
-        0x3044, 0x309d, 0x3084, 0x3001, 0x3044, 0x30fc, 0x306f,
-        0x3068, 0x30fc, 0x3094, 0x3049, 0x306e, 0x2026, 0
+        0x3044, 0x309d, 0x3084, 0x3001, 0x3044, 0x30fc, 0x306f, 0x3068,
+        0x30fc, 0x3094, 0x3049, 0x306e, 0x91ce, 0x539f, 0x306f, 0x5e83,
+        0x3044, 0x3093, 0x3060, 0x3088, 0x3002, 0
     };
     const static WCHAR katakana_text[] = {
-        0x30a4, 0x30fd, 0x30e4, 0x3001, 0x30a4, 0x30fc, 0x30cf,
-        0x30c8, 0x30fc, 0x30f4, 0x30a9, 0x30ce, 0x2026, 0
+        0x30a4, 0x30fd, 0x30e4, 0x3001, 0x30a4, 0x30fc, 0x30cf, 0x30c8,
+        0x30fc, 0x30f4, 0x30a9, 0x30ce, 0x91ce, 0x539f, 0x30cf, 0x5e83,
+        0x30a4, 0x30f3, 0x30c0, 0x30e8, 0x3002, 0
     };
     const static WCHAR halfwidth_text[] = {
-        0x3044, 0x309d, 0x3084, 0xff64, 0xff72, 0xff70, 0xff8a,
-        0xff84, 0xff70, 0xff73, 0xff9e, 0xff6b, 0x306e, 0x2026, 0
+        0x3044, 0x309d, 0x3084, 0xff64, 0xff72, 0xff70, 0xff8a, 0xff84,
+        0xff70, 0xff73, 0xff9e, 0xff6b, 0x306e, 0x91ce, 0x539f, 0x306f,
+        0x5e83, 0x3044, 0x3093, 0x3060, 0x3088, 0xff61, 0
+    };
+    const static WCHAR halfwidth_text2[] = {
+        0xff72, 0x30fd, 0xff94, 0xff64, 0xff72, 0xff70, 0xff8a, 0xff84,
+        0xff70, 0xff73, 0xff9e, 0xff6b, 0xff89, 0x91ce, 0x539f, 0xff8a,
+        0x5e83, 0xff72, 0xff9d, 0xff80, 0xff9e, 0xff96, 0xff61, 0
     };
     int ret, ret2, i;
     WCHAR buf[256], buf2[256];
@@ -2518,6 +2529,16 @@ static void test_lcmapstring_unicode(lcmapstring_wrapper func_ptr, const char *f
     ok(!lstrcmpW(buf, halfwidth_text), "%s string compare mismatch\n", func_name);
 
     ret2 = func_ptr(LCMAP_HALFWIDTH, japanese_text, -1, NULL, 0);
+    ok(ret == ret2, "%s ret %d, expected value %d\n", func_name, ret, ret2);
+
+    /* test LCMAP_HALFWIDTH | LCMAP_KATAKANA
+       (hiragana character is converted into half-width katakana) */
+    ret = func_ptr(LCMAP_HALFWIDTH | LCMAP_KATAKANA, japanese_text, -1, buf, ARRAY_SIZE(buf));
+    ok(ret == lstrlenW(halfwidth_text2) + 1, "%s ret %d, error %d, expected value %d\n", func_name,
+       ret, GetLastError(), lstrlenW(halfwidth_text2) + 1);
+    ok(!lstrcmpW(buf, halfwidth_text2), "%s string compare mismatch\n", func_name);
+
+    ret2 = func_ptr(LCMAP_HALFWIDTH | LCMAP_KATAKANA, japanese_text, -1, NULL, 0);
     ok(ret == ret2, "%s ret %d, expected value %d\n", func_name, ret, ret2);
 
     /* test buffer overflow */
@@ -3741,6 +3762,14 @@ static void test_EnumUILanguageA(void)
   SetLastError(ERROR_SUCCESS);
   ret = pEnumUILanguagesA(luilocale_proc2A, 0, 0);
   ok(ret, "Expected ret != 0, got %d, error %d\n", ret, GetLastError());
+  ok(enumCount == 1, "enumCount = %u\n", enumCount);
+
+  enumCount = 0;
+  SetLastError(ERROR_SUCCESS);
+  ret = pEnumUILanguagesA(luilocale_proc2A, MUI_LANGUAGE_ID, 0);
+  ok(ret || broken(!ret && GetLastError() == ERROR_INVALID_FLAGS), /* winxp */
+     "Expected ret != 0, got %d, error %d\n", ret, GetLastError());
+  if (ret) ok(enumCount == 1, "enumCount = %u\n", enumCount);
 
   SetLastError(ERROR_SUCCESS);
   ret = pEnumUILanguagesA(NULL, 0, 0);
@@ -5477,6 +5506,73 @@ static void test_FindNLSStringEx(void)
     }
 }
 
+static void test_FindStringOrdinal(void)
+{
+    static const WCHAR abc123aBcW[] = {'a', 'b', 'c', '1', '2', '3', 'a', 'B', 'c', 0};
+    static const WCHAR abcW[] = {'a', 'b', 'c', 0};
+    static const WCHAR aBcW[] = {'a', 'B', 'c', 0};
+    static const WCHAR aaaW[] = {'a', 'a', 'a', 0};
+    static const struct
+    {
+        DWORD flag;
+        const WCHAR *src;
+        INT src_size;
+        const WCHAR *val;
+        INT val_size;
+        BOOL ignore_case;
+        INT ret;
+        DWORD err;
+    }
+    tests[] =
+    {
+        /* Invalid */
+        {1, abc123aBcW, ARRAY_SIZE(abc123aBcW) - 1, abcW, ARRAY_SIZE(abcW) - 1, FALSE, -1, ERROR_INVALID_FLAGS},
+        {FIND_FROMSTART, NULL, ARRAY_SIZE(abc123aBcW) - 1, abcW, ARRAY_SIZE(abcW) - 1, FALSE, -1,
+         ERROR_INVALID_PARAMETER},
+        {FIND_FROMSTART, abc123aBcW, ARRAY_SIZE(abc123aBcW) - 1, NULL, ARRAY_SIZE(abcW) - 1, FALSE, -1,
+         ERROR_INVALID_PARAMETER},
+        {FIND_FROMSTART, abc123aBcW, ARRAY_SIZE(abc123aBcW) - 1, NULL, 0, FALSE, -1, ERROR_INVALID_PARAMETER},
+        {FIND_FROMSTART, NULL, 0, abcW, ARRAY_SIZE(abcW) - 1, FALSE, -1, ERROR_INVALID_PARAMETER},
+        {FIND_FROMSTART, NULL, 0, NULL, 0, FALSE, -1, ERROR_INVALID_PARAMETER},
+        /* Case-insensitive */
+        {FIND_FROMSTART, abc123aBcW, ARRAY_SIZE(abc123aBcW) - 1, abcW, ARRAY_SIZE(abcW) - 1, FALSE, 0, NO_ERROR},
+        {FIND_FROMEND, abc123aBcW, ARRAY_SIZE(abc123aBcW) - 1, abcW, ARRAY_SIZE(abcW) - 1, FALSE, 0, NO_ERROR},
+        {FIND_STARTSWITH, abc123aBcW, ARRAY_SIZE(abc123aBcW) - 1, abcW, ARRAY_SIZE(abcW) - 1, FALSE, 0, NO_ERROR},
+        {FIND_ENDSWITH, abc123aBcW, ARRAY_SIZE(abc123aBcW) - 1, abcW, ARRAY_SIZE(abcW) - 1, FALSE, -1, NO_ERROR},
+        /* Case-sensitive */
+        {FIND_FROMSTART, abc123aBcW, ARRAY_SIZE(abc123aBcW) - 1, aBcW, ARRAY_SIZE(aBcW) - 1, TRUE, 0, NO_ERROR},
+        {FIND_FROMEND, abc123aBcW, ARRAY_SIZE(abc123aBcW) - 1, aBcW, ARRAY_SIZE(aBcW) - 1, TRUE, 6, NO_ERROR},
+        {FIND_STARTSWITH, abc123aBcW, ARRAY_SIZE(abc123aBcW) - 1, aBcW, ARRAY_SIZE(aBcW) - 1, TRUE, 0, NO_ERROR},
+        {FIND_ENDSWITH, abc123aBcW, ARRAY_SIZE(abc123aBcW) - 1, aBcW, ARRAY_SIZE(aBcW) - 1, TRUE, 6, NO_ERROR},
+        /* Other */
+        {FIND_FROMSTART, abc123aBcW, ARRAY_SIZE(abc123aBcW) - 1, aaaW, ARRAY_SIZE(aaaW) - 1, FALSE, -1, NO_ERROR},
+        {FIND_FROMSTART, abc123aBcW, -1, abcW, ARRAY_SIZE(abcW) - 1, FALSE, 0, NO_ERROR},
+        {FIND_FROMSTART, abc123aBcW, ARRAY_SIZE(abc123aBcW) - 1, abcW, -1, FALSE, 0, NO_ERROR},
+        {FIND_FROMSTART, abc123aBcW, 0, abcW, ARRAY_SIZE(abcW) - 1, FALSE, -1, NO_ERROR},
+        {FIND_FROMSTART, abc123aBcW, ARRAY_SIZE(abc123aBcW) - 1, abcW, 0, FALSE, 0, NO_ERROR},
+        {FIND_FROMSTART, abc123aBcW, 0, abcW, 0, FALSE, 0, NO_ERROR},
+    };
+    INT ret;
+    DWORD err;
+    INT i;
+
+    if (!pFindStringOrdinal)
+    {
+        win_skip("FindStringOrdinal is not available.\n");
+        return;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
+    {
+        SetLastError(0xdeadbeef);
+        ret = pFindStringOrdinal(tests[i].flag, tests[i].src, tests[i].src_size, tests[i].val, tests[i].val_size,
+                                 tests[i].ignore_case);
+        err = GetLastError();
+        ok(ret == tests[i].ret, "Item %d expected %d, got %d\n", i, tests[i].ret, ret);
+        ok(err == tests[i].err, "Item %d expected %#x, got %#x\n", i, tests[i].err, err);
+    }
+}
+
 static void test_SetThreadUILanguage(void)
 {
     LANGID res;
@@ -5727,6 +5823,7 @@ START_TEST(locale)
   test_GetThreadPreferredUILanguages();
   test_GetUserPreferredUILanguages();
   test_FindNLSStringEx();
+  test_FindStringOrdinal();
   test_SetThreadUILanguage();
   test_NormalizeString();
   /* this requires collation table patch to make it MS compatible */

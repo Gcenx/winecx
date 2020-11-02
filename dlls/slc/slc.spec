@@ -16,7 +16,7 @@
 @ stub SLGetLicense
 @ stub SLGetLicenseFileId
 @ stub SLGetLicenseInformation
-@ stub SLGetLicensingStatusInformation
+@ stdcall SLGetLicensingStatusInformation(ptr ptr ptr wstr ptr ptr)
 @ stub SLGetPKeyId
 @ stub SLGetPKeyInformation
 @ stub SLGetPolicyInformation
@@ -30,7 +30,7 @@
 @ stub SLInstallLicense
 @ stub SLInstallProofOfPurchase
 @ stub SLInstallSAMLicense
-@ stub SLOpen
+@ stdcall SLOpen(ptr)
 @ stub SLReArmWindows
 @ stub SLRegisterEvent
 @ stub SLRegisterWindowsEvent

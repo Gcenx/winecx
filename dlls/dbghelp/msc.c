@@ -2067,29 +2067,32 @@ static BOOL codeview_snarf_public(const struct msc_debug_info* msc_dbg, const BY
 
         switch (sym->generic.id)
         {
-	case S_PUB_V1: /* FIXME is this really a 'data_v1' structure ?? */
+        case S_PUB_V1:
             if (!(dbghelp_options & SYMOPT_NO_PUBLICS))
             {
                 symt_new_public(msc_dbg->module, compiland,
-                                terminate_string(&sym->data_v1.p_name),
-                                codeview_get_address(msc_dbg, sym->data_v1.segment, sym->data_v1.offset), 1);
+                                terminate_string(&sym->public_v1.p_name),
+                                sym->public_v1.symtype == SYMTYPE_FUNCTION,
+                                codeview_get_address(msc_dbg, sym->public_v1.segment, sym->public_v1.offset), 1);
             }
             break;
-	case S_PUB_V2: /* FIXME is this really a 'data_v2' structure ?? */
+        case S_PUB_V2:
             if (!(dbghelp_options & SYMOPT_NO_PUBLICS))
             {
                 symt_new_public(msc_dbg->module, compiland,
-                                terminate_string(&sym->data_v2.p_name),
-                                codeview_get_address(msc_dbg, sym->data_v2.segment, sym->data_v2.offset), 1);
+                                terminate_string(&sym->public_v2.p_name),
+                                sym->public_v2.symtype == SYMTYPE_FUNCTION,
+                                codeview_get_address(msc_dbg, sym->public_v2.segment, sym->public_v2.offset), 1);
             }
-	    break;
+            break;
 
         case S_PUB_V3:
             if (!(dbghelp_options & SYMOPT_NO_PUBLICS))
             {
                 symt_new_public(msc_dbg->module, compiland,
-                                sym->data_v3.name,
-                                codeview_get_address(msc_dbg, sym->data_v3.segment, sym->data_v3.offset), 1);
+                                sym->public_v3.name,
+                                sym->public_v3.symtype == SYMTYPE_FUNCTION,
+                                codeview_get_address(msc_dbg, sym->public_v3.segment, sym->public_v3.offset), 1);
             }
             break;
         case S_PUB_FUNC1_V3:
@@ -2444,17 +2447,17 @@ static HANDLE map_pdb_file(const struct process* pcs,
                            struct module* module)
 {
     HANDLE      hFile, hMap = NULL;
-    char        dbg_file_path[MAX_PATH];
+    WCHAR       dbg_file_path[MAX_PATH];
     BOOL        ret = FALSE;
 
     switch (lookup->kind)
     {
     case PDB_JG:
-        ret = path_find_symbol_file(pcs, lookup->filename, NULL, lookup->timestamp,
+        ret = path_find_symbol_file(pcs, module, lookup->filename, NULL, lookup->timestamp,
                                     lookup->age, dbg_file_path, &module->module.PdbUnmatched);
         break;
     case PDB_DS:
-        ret = path_find_symbol_file(pcs, lookup->filename, &lookup->guid, 0,
+        ret = path_find_symbol_file(pcs, module, lookup->filename, &lookup->guid, 0,
                                     lookup->age, dbg_file_path, &module->module.PdbUnmatched);
         break;
     }
@@ -2463,7 +2466,7 @@ static HANDLE map_pdb_file(const struct process* pcs,
         WARN("\tCouldn't find %s\n", lookup->filename);
         return NULL;
     }
-    if ((hFile = CreateFileA(dbg_file_path, GENERIC_READ, FILE_SHARE_READ, NULL,
+    if ((hFile = CreateFileW(dbg_file_path, GENERIC_READ, FILE_SHARE_READ, NULL,
                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL)) != INVALID_HANDLE_VALUE)
     {
         hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
@@ -2885,7 +2888,7 @@ static BOOL pdb_process_file(const struct process* pcs,
     if (ret)
     {
         struct pdb_module_info*     pdb_info = msc_dbg->module->format_info[DFI_PDB]->u.pdb_info;
-        msc_dbg->module->module.SymType = SymCv;
+        msc_dbg->module->module.SymType = SymPdb;
         if (pdb_info->pdb_files[0].kind == PDB_JG)
             msc_dbg->module->module.PdbSig = pdb_info->pdb_files[0].u.jg.timestamp;
         else

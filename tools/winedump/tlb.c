@@ -1000,7 +1000,7 @@ static void dump_msft_segdir(void)
 
     print_begin_block("SegDir");
 
-    for(i=0; i < sizeof(segdir)/sizeof(segdir[0]); i++)
+    for(i=0; i < ARRAY_SIZE(segdir); i++)
         dump_msft_seg(segdir+i);
 
     print_end_block();
@@ -1010,7 +1010,7 @@ static BOOL dump_offset(void)
 {
     int i;
 
-    for(i=0; i < sizeof(segdir)/sizeof(segdir[0]); i++)
+    for(i=0; i < ARRAY_SIZE(segdir); i++)
         if(segdir[i].offset == offset)
             return segdir[i].func(segdir+i);
 
@@ -1165,7 +1165,7 @@ static const char *lookup_code(const BYTE *table, DWORD table_size, struct bitst
 
     if (p + 1 < table + table_size && *(p + 1))
     {
-        /* FIXME: Whats the meaning of *p? */
+        /* FIXME: What is the meaning of *p? */
         const BYTE *q = p + 1;
         while (q < table + table_size && *q) q++;
         return (q < table + table_size) ? (const char *)(p + 1) : NULL;

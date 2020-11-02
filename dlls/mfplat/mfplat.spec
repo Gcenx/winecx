@@ -35,7 +35,7 @@
 @ stub MFConvertColorInfoToDXVA
 @ stub MFConvertFromFP16Array
 @ stub MFConvertToFP16Array
-@ stub MFCopyImage
+@ stdcall MFCopyImage(ptr long ptr long long long)
 @ stub MFCreateAMMediaTypeFromMFMediaType
 @ stub MFCreateAlignedMemoryBuffer
 @ stub MFCreateAsyncResult
@@ -43,19 +43,19 @@
 @ stub MFCreateAudioMediaType
 @ stub MFCreateCollection
 @ stdcall MFCreateEventQueue(ptr)
-@ stub MFCreateFile
+@ stdcall MFCreateFile(long long long wstr ptr)
 @ stub MFCreateLegacyMediaBufferOnMFMediaBuffer
-@ stub MFCreateMFByteStreamOnStream
+@ stdcall MFCreateMFByteStreamOnStream(ptr ptr)
 @ stub MFCreateMFVideoFormatFromMFMediaType
 @ stub MFCreateMediaBufferWrapper
-@ stub MFCreateMediaEvent
+@ stdcall MFCreateMediaEvent(long ptr long ptr ptr)
 @ stdcall MFCreateMediaType(ptr)
 @ stub MFCreateMediaTypeFromRepresentation
-@ stub MFCreateMemoryBuffer
+@ stdcall MFCreateMemoryBuffer(long ptr)
 @ stub MFCreateMemoryStream
 @ stub MFCreatePathFromURL
 @ stub MFCreatePresentationDescriptor
-@ stub MFCreateSample
+@ stdcall MFCreateSample(ptr)
 @ stub MFCreateSocket
 @ stub MFCreateSocketListener
 @ stdcall MFCreateSourceResolver(ptr)
@@ -138,10 +138,10 @@
 @ stdcall MFTEnumEx(int128 long ptr ptr ptr ptr)
 @ stub MFTGetInfo
 @ stdcall MFTRegister(int128 int128 wstr long long ptr long ptr ptr)
-@ stub MFTRegisterLocal
+@ stdcall MFTRegisterLocal(ptr ptr wstr long long  ptr long ptr)
 @ stub MFTRegisterLocalByCLSID
 @ stdcall MFTUnregister(int128)
-@ stub MFTUnregisterLocal
+@ stdcall MFTUnregisterLocal(ptr)
 @ stub MFTUnregisterLocalByCLSID
 @ stub MFTraceError
 @ stub MFTraceFuncEnter

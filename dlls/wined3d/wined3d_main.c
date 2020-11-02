@@ -73,8 +73,6 @@ static CRITICAL_SECTION wined3d_wndproc_cs = {&wined3d_wndproc_cs_debug, -1, 0, 
 struct wined3d_settings wined3d_settings =
 {
     TRUE,           /* Multithreaded CS by default. */
-    GLES_AUTO,      /* Try desktop GL first, fallback to ES by default. */
-    FALSE,          /* explicit_gl_version */
     MAKEDWORD_VERSION(4, 4), /* Default to OpenGL 4.4 */
     TRUE,           /* Use of GLSL enabled by default */
     ORM_FBO,        /* Use FBOs to do offscreen rendering */
@@ -92,11 +90,6 @@ struct wined3d_settings wined3d_settings =
     ~0U,            /* No PS shader model limit by default. */
     ~0u,            /* No CS shader model limit by default. */
     FALSE,          /* 3D support enabled by default. */
-#ifdef _WIN64
-    TRUE,           /* CSMT texture maps optimization enabled by default on 64 bits. */
-#else
-    FALSE,          /* CSMT texture maps optimization disabled by default on 32 bits. */
-#endif
 };
 
 /* CXGames hacks, not in the main wined3d configuration settings */
@@ -237,37 +230,10 @@ static BOOL wined3d_dll_init(HINSTANCE hInstDLL)
             wined3d_settings.cs_multithreaded = 0;
             ERR_(winediag)("Disabling multithreaded command stream.\n");
         }
-        if (!get_config_key(hkey, appkey, "CSMTTextureOptimization", buffer, size))
-        {
-            if (wined3d_settings.cs_texture_optimization && !strcmp(buffer, "disabled"))
-            {
-                TRACE("Disabling CSMT texture maps optimization.\n");
-                wined3d_settings.cs_texture_optimization = FALSE;
-            }
-            if (!wined3d_settings.cs_texture_optimization && !strcmp(buffer, "enabled"))
-            {
-                TRACE("Enabling CSMT texture maps optimization.\n");
-                wined3d_settings.cs_texture_optimization = TRUE;
-            }
-        }
-        if (!get_config_key( hkey, appkey, "UseGLES", buffer, size))
-        {
-            if (!strcmp(buffer, "disabled"))
-            {
-                TRACE("Use of OpenGL ES disabled by registry.\n");
-                wined3d_settings.use_gles = GLES_DISABLED;
-            }
-            if (!strcmp(buffer, "enabled"))
-            {
-                TRACE("Use of OpenGL ES enabled by registry.\n");
-                wined3d_settings.use_gles = GLES_ENABLED;
-            }
-        }
         if (!get_config_key_dword(hkey, appkey, "MaxVersionGL", &tmpvalue))
         {
             ERR_(winediag)("Setting maximum allowed wined3d GL version to %u.%u.\n",
                     tmpvalue >> 16, tmpvalue & 0xffff);
-            wined3d_settings.explicit_gl_version = TRUE;
             wined3d_settings.max_gl_version = tmpvalue;
         }
         if ( !get_config_key( hkey, appkey, "UseGLSL", buffer, size) )
@@ -398,7 +364,8 @@ static BOOL wined3d_dll_init(HINSTANCE hInstDLL)
             TRACE("Limiting PS shader model to %u.\n", wined3d_settings.max_sm_ps);
         if (!get_config_key_dword(hkey, appkey, "MaxShaderModelCS", &wined3d_settings.max_sm_cs))
             TRACE("Limiting CS shader model to %u.\n", wined3d_settings.max_sm_cs);
-        if (!get_config_key(hkey, appkey, "DirectDrawRenderer", buffer, size)
+        if ((!get_config_key(hkey, appkey, "renderer", buffer, size)
+                || !get_config_key(hkey, appkey, "DirectDrawRenderer", buffer, size))
                 && !strcmp(buffer, "gdi"))
         {
             TRACE("Disabling 3D support.\n");

@@ -5754,6 +5754,30 @@ static DWORD CALLBACK test_EM_STREAMIN_esCallback_UTF8Split(DWORD_PTR dwCookie,
     return 0;
 }
 
+static DWORD CALLBACK test_EM_STREAMIN_null_bytes(DWORD_PTR cookie, BYTE *buf, LONG size, LONG *written)
+{
+    DWORD *phase = (DWORD *)cookie;
+
+    if (*phase == 0)
+    {
+        static const char first[] = "{\\rtf1\\ansi{Th\0is";
+        *written = sizeof(first);
+        memcpy(buf, first, *written);
+    }
+    else if (*phase == 1)
+    {
+        static const char second[] = " is a test}}";
+        *written = sizeof(second);
+        memcpy(buf, second, *written);
+    }
+    else
+        *written = 0;
+
+    ++*phase;
+
+    return 0;
+}
+
 struct StringWithLength {
     int length;
     char *buffer;
@@ -6040,6 +6064,17 @@ static void test_EM_STREAMIN(void)
   result = SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
   ok (!strcmp(buffer, "line1"),
       "EM_STREAMIN: Unexpected text '%s'\n", buffer);
+
+  /* Test 0-bytes inside text */
+  hwndRichEdit = new_richedit_with_style(NULL, 0);
+  phase = 0;
+  es.dwCookie = (DWORD_PTR)&phase;
+  es.dwError = 0;
+  es.pfnCallback = test_EM_STREAMIN_null_bytes;
+  result = SendMessageA(hwndRichEdit, EM_STREAMIN, SF_RTF, (LPARAM)&es);
+  ok(result == 16, "got %ld, expected %d\n", result, 16);
+  result = SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
+  ok (!strcmp(buffer, "Th is  is a test"), "EM_STREAMIN: Unexpected text '%s'\n", buffer);
 }
 
 static void test_EM_StreamIn_Undo(void)
@@ -8224,12 +8259,21 @@ static void test_EM_FINDWORDBREAK_A(void)
     DestroyWindow(hwndRichEdit);
 }
 
+static void format_test_result(char *target, const char *src)
+{
+    int i;
+    for (i = 0; i < strlen(src); i++)
+        sprintf(target + 2*i, "%02x", src[i] & 0xFF);
+    target[2*i] = 0;
+}
+
 /*
  * This test attempts to show the effect of enter on a richedit
  * control v1.0 inserts CRLF whereas for higher versions it only
  * inserts CR. If shows that EM_GETTEXTEX with GT_USECRLF == WM_GETTEXT
  * and also shows that GT_USECRLF has no effect in richedit 1.0, but
  * does for higher. The same test is cloned in riched32 and riched20.
+ * Also shows the difference between WM_CHAR/WM_KEYDOWN in v1.0 and higher versions
  */
 static void test_enter(void)
 {
@@ -8250,15 +8294,14 @@ static void test_enter(void)
   char expectedbuf[1024];
   char resultbuf[1024];
   HWND hwndRichEdit = new_richedit(NULL);
-  UINT i,j;
+  UINT i;
+  char buf[1024] = {0};
+  GETTEXTEX getText = {sizeof(buf)};
+  LRESULT result;
+  const char *expected;
 
-  for (i = 0; i < ARRAY_SIZE(testenteritems); i++) {
-
-    char buf[1024] = {0};
-    LRESULT result;
-    GETTEXTEX getText;
-    const char *expected;
-
+  for (i = 0; i < ARRAY_SIZE(testenteritems); i++)
+  {
     /* Set the text to the initial text */
     result = SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)testenteritems[i].initialtext);
     ok (result == 1, "[%d] WM_SETTEXT returned %ld instead of 1\n", i, result);
@@ -8272,12 +8315,8 @@ static void test_enter(void)
     result = SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buf);
     expected = testenteritems[i].expectedwmtext;
 
-    resultbuf[0]=0x00;
-    for (j = 0; j < (UINT)result; j++)
-      sprintf(resultbuf+strlen(resultbuf), "%02x", buf[j] & 0xFF);
-    expectedbuf[0] = '\0';
-    for (j = 0; j < strlen(expected); j++)
-      sprintf(expectedbuf+strlen(expectedbuf), "%02x", expected[j] & 0xFF);
+    format_test_result(resultbuf, buf);
+    format_test_result(expectedbuf, expected);
 
     result = strcmp(expected, buf);
     ok (result == 0,
@@ -8285,21 +8324,14 @@ static void test_enter(void)
         i, resultbuf, expectedbuf);
 
     /* 2. Retrieve with EM_GETTEXTEX, GT_DEFAULT */
-    getText.cb = sizeof(buf);
     getText.flags = GT_DEFAULT;
-    getText.codepage      = CP_ACP;
-    getText.lpDefaultChar = NULL;
-    getText.lpUsedDefChar = NULL;
+    getText.codepage = CP_ACP;
     buf[0] = 0x00;
     result = SendMessageA(hwndRichEdit, EM_GETTEXTEX, (WPARAM)&getText, (LPARAM)buf);
     expected = testenteritems[i].expectedemtext;
 
-    resultbuf[0]=0x00;
-    for (j = 0; j < (UINT)result; j++)
-      sprintf(resultbuf+strlen(resultbuf), "%02x", buf[j] & 0xFF);
-    expectedbuf[0] = '\0';
-    for (j = 0; j < strlen(expected); j++)
-      sprintf(expectedbuf+strlen(expectedbuf), "%02x", expected[j] & 0xFF);
+    format_test_result(resultbuf, buf);
+    format_test_result(expectedbuf, expected);
 
     result = strcmp(expected, buf);
     ok (result == 0,
@@ -8307,27 +8339,48 @@ static void test_enter(void)
         i, resultbuf, expectedbuf);
 
     /* 3. Retrieve with EM_GETTEXTEX, GT_USECRLF */
-    getText.cb = sizeof(buf);
     getText.flags = GT_USECRLF;
-    getText.codepage      = CP_ACP;
-    getText.lpDefaultChar = NULL;
-    getText.lpUsedDefChar = NULL;
+    getText.codepage = CP_ACP;
     buf[0] = 0x00;
     result = SendMessageA(hwndRichEdit, EM_GETTEXTEX, (WPARAM)&getText, (LPARAM)buf);
     expected = testenteritems[i].expectedemtextcrlf;
 
-    resultbuf[0]=0x00;
-    for (j = 0; j < (UINT)result; j++)
-      sprintf(resultbuf+strlen(resultbuf), "%02x", buf[j] & 0xFF);
-    expectedbuf[0] = '\0';
-    for (j = 0; j < strlen(expected); j++)
-      sprintf(expectedbuf+strlen(expectedbuf), "%02x", expected[j] & 0xFF);
+    format_test_result(resultbuf, buf);
+    format_test_result(expectedbuf, expected);
 
     result = strcmp(expected, buf);
     ok (result == 0,
         "[%d] EM_GETTEXTEX, GT_USECRLF unexpected '%s', expected '%s'\n",
         i, resultbuf, expectedbuf);
   }
+
+  /* Show that WM_CHAR is handled differently from WM_KEYDOWN */
+  getText.flags    = GT_DEFAULT;
+  getText.codepage = CP_ACP;
+
+  result = SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"");
+  ok (result == 1, "[%d] WM_SETTEXT returned %ld instead of 1\n", i, result);
+  SendMessageW(hwndRichEdit, WM_CHAR, 'T', 0);
+  SendMessageW(hwndRichEdit, WM_KEYDOWN, VK_RETURN, 0);
+
+  result = SendMessageA(hwndRichEdit, EM_GETTEXTEX, (WPARAM)&getText, (LPARAM)buf);
+  ok(result == 2, "Got %d\n", (int)result);
+  format_test_result(resultbuf, buf);
+  format_test_result(expectedbuf, "T\r");
+  result = strcmp(resultbuf, expectedbuf);
+  ok (result == 0, "[%d] EM_GETTEXTEX, GT_DEFAULT unexpected '%s', expected '%s'\n", i, resultbuf, expectedbuf);
+
+  result = SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"");
+  ok (result == 1, "[%d] WM_SETTEXT returned %ld instead of 1\n", i, result);
+  SendMessageW(hwndRichEdit, WM_CHAR, 'T', 0);
+  SendMessageW(hwndRichEdit, WM_CHAR, '\r', 0);
+
+  result = SendMessageA(hwndRichEdit, EM_GETTEXTEX, (WPARAM)&getText, (LPARAM)buf);
+  ok(result == 1, "Got %d\n", (int)result);
+  format_test_result(resultbuf, buf);
+  format_test_result(expectedbuf, "T");
+  result = strcmp(resultbuf, expectedbuf);
+  ok (result == 0, "[%d] EM_GETTEXTEX, GT_DEFAULT unexpected '%s', expected '%s'\n", i, resultbuf, expectedbuf);
 
   DestroyWindow(hwndRichEdit);
 }

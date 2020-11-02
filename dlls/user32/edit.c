@@ -1799,9 +1799,14 @@ static LRESULT EDIT_EM_Scroll(EDITSTATE *es, INT action)
 static void EDIT_SetCaretPos(EDITSTATE *es, INT pos,
 			     BOOL after_wrap)
 {
-	LRESULT res = EDIT_EM_PosFromChar(es, pos, after_wrap);
-	TRACE("%d - %dx%d\n", pos, (short)LOWORD(res), (short)HIWORD(res));
-	SetCaretPos((short)LOWORD(res), (short)HIWORD(res));
+	LRESULT res;
+
+	if (es->flags & EF_FOCUSED)
+	{
+		res = EDIT_EM_PosFromChar(es, pos, after_wrap);
+		TRACE("%d - %dx%d\n", pos, (short)LOWORD(res), (short)HIWORD(res));
+		SetCaretPos((short)LOWORD(res), (short)HIWORD(res));
+	}
 }
 
 
@@ -1870,7 +1875,6 @@ static void EDIT_EM_ScrollCaret(EDITSTATE *es)
 		}
 	}
 
-    if(es->flags & EF_FOCUSED)
 	EDIT_SetCaretPos(es, es->selection_end, es->flags & EF_AFTER_WRAP);
 }
 
@@ -3474,22 +3478,17 @@ static LRESULT EDIT_WM_KeyDown(EDITSTATE *es, INT key)
 				else
 					EDIT_WM_Clear(es);
 			} else {
-				if (shift) {
+				EDIT_EM_SetSel(es, ~0u, 0, FALSE);
+				if (shift)
 					/* delete character left of caret */
-					EDIT_EM_SetSel(es, (UINT)-1, 0, FALSE);
 					EDIT_MoveBackward(es, TRUE);
-					EDIT_WM_Clear(es);
-				} else if (control) {
+				else if (control)
 					/* delete to end of line */
-					EDIT_EM_SetSel(es, (UINT)-1, 0, FALSE);
 					EDIT_MoveEnd(es, TRUE, FALSE);
-					EDIT_WM_Clear(es);
-				} else {
+				else
 					/* delete character right of caret */
-					EDIT_EM_SetSel(es, (UINT)-1, 0, FALSE);
 					EDIT_MoveForward(es, TRUE);
-					EDIT_WM_Clear(es);
-				}
+				EDIT_WM_Clear(es);
 			}
 		}
 		break;

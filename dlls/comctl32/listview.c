@@ -211,6 +211,13 @@ typedef struct tagDELAYED_ITEM_EDIT
   INT iItem;
 } DELAYED_ITEM_EDIT;
 
+enum notification_mask
+{
+  NOTIFY_MASK_ITEM_CHANGE = 0x1,
+  NOTIFY_MASK_END_LABEL_EDIT = 0x2,
+  NOTIFY_MASK_UNMASK_ALL = 0xffffffff
+};
+
 typedef struct tagLISTVIEW_INFO
 {
   /* control window */
@@ -225,7 +232,7 @@ typedef struct tagLISTVIEW_INFO
   /* notification window */
   SHORT notifyFormat;
   HWND hwndNotify;
-  BOOL bDoChangeNotify;         /* send change notification messages? */
+  DWORD notify_mask;
   UINT uCallbackMask;
 
   /* tooltips */
@@ -1308,21 +1315,19 @@ static inline void iterator_destroy(const ITERATOR *i)
 /***
  * Create an empty iterator.
  */
-static inline BOOL iterator_empty(ITERATOR* i)
+static inline void iterator_empty(ITERATOR* i)
 {
     ZeroMemory(i, sizeof(*i));
     i->nItem = i->nSpecial = i->range.lower = i->range.upper = -1;
-    return TRUE;
 }
 
 /***
  * Create an iterator over a range.
  */
-static inline BOOL iterator_rangeitems(ITERATOR* i, RANGE range)
+static inline void iterator_rangeitems(ITERATOR* i, RANGE range)
 {
     iterator_empty(i);
     i->range = range;
-    return TRUE;
 }
 
 /***
@@ -1330,11 +1335,10 @@ static inline BOOL iterator_rangeitems(ITERATOR* i, RANGE range)
  * Please note that the iterator will take ownership of the ranges,
  * and will free them upon destruction.
  */
-static inline BOOL iterator_rangesitems(ITERATOR* i, RANGES ranges)
+static inline void iterator_rangesitems(ITERATOR* i, RANGES ranges)
 {
     iterator_empty(i);
     i->ranges = ranges;
-    return TRUE;
 }
 
 /***
@@ -1344,11 +1348,15 @@ static inline BOOL iterator_rangesitems(ITERATOR* i, RANGES ranges)
 static BOOL iterator_frameditems_absolute(ITERATOR* i, const LISTVIEW_INFO* infoPtr, const RECT *frame)
 {
     RECT rcItem, rcTemp;
-    
-    /* in case we fail, we want to return an empty iterator */
-    if (!iterator_empty(i)) return FALSE;
+    RANGES ranges;
 
     TRACE("(frame=%s)\n", wine_dbgstr_rect(frame));
+
+    /* in case we fail, we want to return an empty iterator */
+    iterator_empty(i);
+
+    if (infoPtr->nItemCount == 0)
+        return TRUE;
 
     if (infoPtr->uView == LV_VIEW_ICON || infoPtr->uView == LV_VIEW_SMALLICON)
     {
@@ -1360,7 +1368,8 @@ static BOOL iterator_frameditems_absolute(ITERATOR* i, const LISTVIEW_INFO* info
 	    if (IntersectRect(&rcTemp, &rcItem, frame))
 		i->nSpecial = infoPtr->nFocusedItem;
 	}
-	if (!(iterator_rangesitems(i, ranges_create(50)))) return FALSE;
+	if (!(ranges = ranges_create(50))) return FALSE;
+	iterator_rangesitems(i, ranges);
 	/* to do better here, we need to have PosX, and PosY sorted */
 	TRACE("building icon ranges:\n");
 	for (nItem = 0; nItem < infoPtr->nItemCount; nItem++)
@@ -1384,7 +1393,7 @@ static BOOL iterator_frameditems_absolute(ITERATOR* i, const LISTVIEW_INFO* info
 	range.lower = max(frame->top / infoPtr->nItemHeight, 0);
 	range.upper = min((frame->bottom - 1) / infoPtr->nItemHeight, infoPtr->nItemCount - 1) + 1;
 	if (range.upper <= range.lower) return TRUE;
-	if (!iterator_rangeitems(i, range)) return FALSE;
+	iterator_rangeitems(i, range);
 	TRACE("    report=%s\n", debugrange(&i->range));
     }
     else
@@ -1416,7 +1425,8 @@ static BOOL iterator_frameditems_absolute(ITERATOR* i, const LISTVIEW_INFO* info
 	
 	if (nLastCol < nFirstCol || nLastRow < nFirstRow) return TRUE;
 
-	if (!(iterator_rangesitems(i, ranges_create(nLastCol - nFirstCol + 1)))) return FALSE;
+	if (!(ranges = ranges_create(nLastCol - nFirstCol + 1))) return FALSE;
+	iterator_rangesitems(i, ranges);
 	TRACE("building list ranges:\n");
 	for (nCol = nFirstCol; nCol <= nLastCol; nCol++)
 	{
@@ -1457,7 +1467,11 @@ static BOOL iterator_visibleitems(ITERATOR *i, const LISTVIEW_INFO *infoPtr, HDC
     INT rgntype;
     
     rgntype = GetClipBox(hdc, &rcClip);
-    if (rgntype == NULLREGION) return iterator_empty(i);
+    if (rgntype == NULLREGION)
+    {
+        iterator_empty(i);
+        return TRUE;
+    }
     if (!iterator_frameditems(i, infoPtr, &rcClip)) return FALSE;
     if (rgntype == SIMPLEREGION) return TRUE;
 
@@ -1746,7 +1760,7 @@ static inline void LISTVIEW_InvalidateSubItem(const LISTVIEW_INFO *infoPtr, INT 
     LISTVIEW_GetHeaderRect(infoPtr, nSubItem, &rcBox);
     rcBox.top = 0;
     rcBox.bottom = infoPtr->nItemHeight;
-    OffsetRect(&rcBox, Origin.x + Position.x, Origin.y + Position.y);
+    OffsetRect(&rcBox, Origin.x, Origin.y + Position.y);
     LISTVIEW_InvalidateRect(infoPtr, &rcBox);
 }
 
@@ -1798,7 +1812,7 @@ static inline INT LISTVIEW_GetCountPerColumn(const LISTVIEW_INFO *infoPtr)
 {
     INT nListHeight = infoPtr->rcList.bottom - infoPtr->rcList.top;
 
-    return max(nListHeight / infoPtr->nItemHeight, 1);
+    return infoPtr->nItemHeight ? max(nListHeight / infoPtr->nItemHeight, 1) : 0;
 }
 
 
@@ -3507,13 +3521,13 @@ Parameters:
 */
 static void LISTVIEW_ShiftFocus(LISTVIEW_INFO *infoPtr, INT focus, INT item, INT direction)
 {
-    BOOL old_change = infoPtr->bDoChangeNotify;
+    DWORD old_mask = infoPtr->notify_mask & NOTIFY_MASK_ITEM_CHANGE;
 
-    infoPtr->bDoChangeNotify = FALSE;
+    infoPtr->notify_mask &= ~NOTIFY_MASK_ITEM_CHANGE;
     focus = shift_item(infoPtr, focus, item, direction);
     if (focus != infoPtr->nFocusedItem)
         LISTVIEW_SetItemFocus(infoPtr, focus);
-    infoPtr->bDoChangeNotify = old_change;
+    infoPtr->notify_mask |= old_mask;
 }
 
 /**
@@ -3556,8 +3570,8 @@ static BOOL LISTVIEW_AddGroupSelection(LISTVIEW_INFO *infoPtr, INT nItem)
     INT nLast = max(infoPtr->nSelectionMark, nItem);
     HWND hwndSelf = infoPtr->hwndSelf;
     NMLVODSTATECHANGE nmlv;
+    DWORD old_mask;
     LVITEMW item;
-    BOOL bOldChange;
     INT i;
 
     /* Temporarily disable change notification
@@ -3565,8 +3579,9 @@ static BOOL LISTVIEW_AddGroupSelection(LISTVIEW_INFO *infoPtr, INT nItem)
      * only one LVN_ODSTATECHANGED notification.
      * See MSDN documentation for LVN_ITEMCHANGED.
      */
-    bOldChange = infoPtr->bDoChangeNotify;
-    if (infoPtr->dwStyle & LVS_OWNERDATA) infoPtr->bDoChangeNotify = FALSE;
+    old_mask = infoPtr->notify_mask & NOTIFY_MASK_ITEM_CHANGE;
+    if (infoPtr->dwStyle & LVS_OWNERDATA)
+        infoPtr->notify_mask &= ~NOTIFY_MASK_ITEM_CHANGE;
 
     if (nFirst == -1) nFirst = nItem;
 
@@ -3585,7 +3600,7 @@ static BOOL LISTVIEW_AddGroupSelection(LISTVIEW_INFO *infoPtr, INT nItem)
     notify_hdr(infoPtr, LVN_ODSTATECHANGED, (LPNMHDR)&nmlv);
     if (!IsWindow(hwndSelf))
         return FALSE;
-    infoPtr->bDoChangeNotify = bOldChange;
+    infoPtr->notify_mask |= old_mask;
     return TRUE;
 }
 
@@ -3604,9 +3619,9 @@ static BOOL LISTVIEW_AddGroupSelection(LISTVIEW_INFO *infoPtr, INT nItem)
 static void LISTVIEW_SetGroupSelection(LISTVIEW_INFO *infoPtr, INT nItem)
 {
     RANGES selection;
+    DWORD old_mask;
     LVITEMW item;
     ITERATOR i;
-    BOOL bOldChange;
 
     if (!(selection = ranges_create(100))) return;
 
@@ -3656,8 +3671,9 @@ static void LISTVIEW_SetGroupSelection(LISTVIEW_INFO *infoPtr, INT nItem)
 
     /* disable per item notifications on LVS_OWNERDATA style
        FIXME: single LVN_ODSTATECHANGED should be used */
-    bOldChange = infoPtr->bDoChangeNotify;
-    if (infoPtr->dwStyle & LVS_OWNERDATA) infoPtr->bDoChangeNotify = FALSE;
+    old_mask = infoPtr->notify_mask & NOTIFY_MASK_ITEM_CHANGE;
+    if (infoPtr->dwStyle & LVS_OWNERDATA)
+        infoPtr->notify_mask &= ~NOTIFY_MASK_ITEM_CHANGE;
 
     LISTVIEW_DeselectAllSkipItems(infoPtr, selection);
 
@@ -3668,8 +3684,7 @@ static void LISTVIEW_SetGroupSelection(LISTVIEW_INFO *infoPtr, INT nItem)
     /* this will also destroy the selection */
     iterator_destroy(&i);
 
-    infoPtr->bDoChangeNotify = bOldChange;
-    
+    infoPtr->notify_mask |= old_mask;
     LISTVIEW_SetItemFocus(infoPtr, nItem);
 }
 
@@ -4257,7 +4272,7 @@ static BOOL set_main_item(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem, BOOL 
        and we are _NOT_ virtual (LVS_OWNERDATA), and change notifications
        are enabled. Even nothing really changed we still need to send this,
        in this case uChanged mask is just set to passed item mask. */
-    if(lpItem && !isNew && infoPtr->bDoChangeNotify)
+    if (lpItem && !isNew && (infoPtr->notify_mask & NOTIFY_MASK_ITEM_CHANGE))
     {
       HWND hwndSelf = infoPtr->hwndSelf;
 
@@ -4350,7 +4365,8 @@ static BOOL set_main_item(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem, BOOL 
 
     /* send LVN_ITEMCHANGED notification */
     if (lpLVItem->mask & LVIF_PARAM) nmlv.lParam = lpLVItem->lParam;
-    if (infoPtr->bDoChangeNotify) notify_listview(infoPtr, LVN_ITEMCHANGED, &nmlv);
+    if (infoPtr->notify_mask & NOTIFY_MASK_ITEM_CHANGE)
+        notify_listview(infoPtr, LVN_ITEMCHANGED, &nmlv);
 
     return TRUE;
 }
@@ -5914,8 +5930,12 @@ static BOOL LISTVIEW_EndEditLabelT(LISTVIEW_INFO *infoPtr, BOOL storeText, BOOL 
     dispInfo.item.pszText = same ? NULL : pszText;
     dispInfo.item.cchTextMax = textlenT(dispInfo.item.pszText, isW);
 
+    infoPtr->notify_mask &= ~NOTIFY_MASK_END_LABEL_EDIT;
+
     /* Do we need to update the Item Text */
     res = notify_dispinfoT(infoPtr, LVN_ENDLABELEDITW, &dispInfo, isW);
+
+    infoPtr->notify_mask |= NOTIFY_MASK_END_LABEL_EDIT;
 
     infoPtr->nEditLabelItem = -1;
     infoPtr->hwndEdit = 0;
@@ -8973,7 +8993,7 @@ static BOOL LISTVIEW_SetItemState(LISTVIEW_INFO *infoPtr, INT nItem, const LVITE
     if (nItem == -1)
     {
         UINT oldstate = 0;
-        BOOL notify;
+        DWORD old_mask;
 
         /* special case optimization for recurring attempt to deselect all */
         if (lvItem.state == 0 && lvItem.stateMask == LVIS_SELECTED && !LISTVIEW_GetSelectedCount(infoPtr))
@@ -8986,10 +9006,10 @@ static BOOL LISTVIEW_SetItemState(LISTVIEW_INFO *infoPtr, INT nItem, const LVITE
 	/* focus all isn't allowed */
 	if (lvItem.state & lvItem.stateMask & LVIS_FOCUSED) return FALSE;
 
-        notify = infoPtr->bDoChangeNotify;
+        old_mask = infoPtr->notify_mask & NOTIFY_MASK_ITEM_CHANGE;
         if (infoPtr->dwStyle & LVS_OWNERDATA)
         {
-            infoPtr->bDoChangeNotify = FALSE;
+            infoPtr->notify_mask &= ~NOTIFY_MASK_ITEM_CHANGE;
             if (!(lvItem.state & LVIS_SELECTED) && LISTVIEW_GetSelectedCount(infoPtr))
                 oldstate |= LVIS_SELECTED;
             if (infoPtr->nFocusedItem != -1) oldstate |= LVIS_FOCUSED;
@@ -9003,7 +9023,7 @@ static BOOL LISTVIEW_SetItemState(LISTVIEW_INFO *infoPtr, INT nItem, const LVITE
         {
             NMLISTVIEW nmlv;
 
-            infoPtr->bDoChangeNotify = notify;
+            infoPtr->notify_mask |= old_mask;
 
             nmlv.iItem = -1;
             nmlv.iSubItem = 0;
@@ -9484,7 +9504,7 @@ static LRESULT LISTVIEW_NCCreate(HWND hwnd, WPARAM wParam, const CREATESTRUCTW *
   infoPtr->nHotItem = -1;
   infoPtr->redraw = TRUE;
   infoPtr->bNoItemMetrics = TRUE;
-  infoPtr->bDoChangeNotify = TRUE;
+  infoPtr->notify_mask = NOTIFY_MASK_UNMASK_ALL;
   infoPtr->autoSpacing = TRUE;
   infoPtr->iconSpacing.cx = GetSystemMetrics(SM_CXICONSPACING) - GetSystemMetrics(SM_CXICON);
   infoPtr->iconSpacing.cy = GetSystemMetrics(SM_CYICONSPACING) - GetSystemMetrics(SM_CYICON);
@@ -10218,7 +10238,9 @@ static LRESULT LISTVIEW_LButtonDown(LISTVIEW_INFO *infoPtr, WORD wKey, INT x, IN
   {
     if ((infoPtr->dwLvExStyle & LVS_EX_CHECKBOXES) && (lvHitTestInfo.flags & LVHT_ONITEMSTATEICON))
     {
+        notify_click(infoPtr, NM_CLICK, &lvHitTestInfo);
         toggle_checkbox_state(infoPtr, nItem);
+        infoPtr->bLButtonDown = FALSE;
         return 0;
     }
 
@@ -11906,8 +11928,9 @@ static LRESULT LISTVIEW_Command(LISTVIEW_INFO *infoPtr, WPARAM wParam, LPARAM lP
 	}
 	case EN_KILLFOCUS:
 	{
-	    LISTVIEW_CancelEditLabel(infoPtr);
-	    break;
+            if (infoPtr->notify_mask & NOTIFY_MASK_END_LABEL_EDIT)
+                LISTVIEW_CancelEditLabel(infoPtr);
+            break;
 	}
 
 	default:

@@ -21,6 +21,7 @@ import "mftransform.idl";
 
 typedef unsigned __int64 TOPOID;
 typedef LONGLONG  MFTIME;
+typedef DWORD MFSequencerElementId;
 
 typedef enum MF_TOPOLOGY_TYPE
 {
@@ -250,10 +251,101 @@ interface IMFGetService : IUnknown
     );
 }
 
+[
+    object,
+    uuid(03cb2711-24d7-4db6-a17f-f3a7a479a536),
+]
+interface IMFPresentationDescriptor : IMFAttributes
+{
+    HRESULT GetStreamDescriptorCount(
+        [out] DWORD *count );
+
+    HRESULT GetStreamDescriptorByIndex(
+        [in] DWORD index,
+        [out] BOOL *selected,
+        [out] IMFStreamDescriptor **descriptor );
+
+    HRESULT SelectStream(
+        [in] DWORD index );
+
+    HRESULT DeselectStream(
+        [in] DWORD index );
+
+    HRESULT Clone(
+        [out] IMFPresentationDescriptor **descriptor );
+}
+
+[
+    object,
+    uuid(197cd219-19cb-4de1-a64c-acf2edcbe59e),
+    local
+]
+interface IMFSequencerSource : IUnknown
+{
+    HRESULT AppendTopology(
+        [in] IMFTopology *topology,
+        [in] DWORD flags,
+        [out] MFSequencerElementId *element );
+
+    HRESULT DeleteTopology(
+        [in] MFSequencerElementId element);
+
+    HRESULT GetPresentationContext(
+        [in] IMFPresentationDescriptor *pd,
+        [out, optional] MFSequencerElementId *id,
+        [out, optional] IMFTopology **topology );
+
+    HRESULT UpdateTopology(
+        [in] MFSequencerElementId od,
+        [in] IMFTopology *topology);
+
+    HRESULT UpdateTopologyFlags(
+        [in] MFSequencerElementId id,
+        [in] DWORD flags );
+
+};
+
 cpp_quote("HRESULT WINAPI MFCreateMediaSession(IMFAttributes *config, IMFMediaSession **session);")
+cpp_quote("HRESULT WINAPI MFCreateMFByteStreamOnStream(IStream *stream, IMFByteStream **bytestream);" )
 cpp_quote("HRESULT WINAPI MFCreateSourceResolver(IMFSourceResolver **resolver);")
 cpp_quote("HRESULT WINAPI MFCreateStreamDescriptor(DWORD identifier, DWORD cMediaTypes,")
 cpp_quote("     IMFMediaType **types, IMFStreamDescriptor **descriptor);")
 cpp_quote("HRESULT WINAPI MFCreateTopology(IMFTopology **topology);")
 cpp_quote("HRESULT WINAPI MFGetSupportedMimeTypes(PROPVARIANT *array);")
 cpp_quote("HRESULT WINAPI MFGetService(IUnknown *object, REFGUID service, REFIID iid, void **obj);")
+
+[
+    object,
+    uuid(279a808d-aec7-40c8-9c6b-a6b492c78a66),
+]
+interface IMFMediaSource : IMFMediaEventGenerator
+{
+    HRESULT GetCharacteristics(
+        [out] DWORD *characteristics );
+
+    [local]
+    HRESULT CreatePresentationDescriptor(
+        [out] IMFPresentationDescriptor **descriptor );
+    [call_as(CreatePresentationDescriptor)]
+    HRESULT RemoteCreatePresentationDescriptor(
+        [out] DWORD *count,
+        [out, size_is(,*count)] BYTE **data,
+        [out] IMFPresentationDescriptor **descriptor );
+
+    HRESULT Start(
+        [in] IMFPresentationDescriptor *descriptor,
+        [in, unique] const GUID *time_format,
+        [in, unique] const PROPVARIANT *start_position );
+
+    HRESULT Stop();
+    HRESULT Pause();
+    HRESULT Shutdown();
+}
+
+cpp_quote("#define MF_RESOLUTION_MEDIASOURCE                                           0x00000001")
+cpp_quote("#define MF_RESOLUTION_BYTESTREAM                                            0x00000002")
+cpp_quote("#define MF_RESOLUTION_CONTENT_DOES_NOT_HAVE_TO_MATCH_EXTENSION_OR_MIME_TYPE 0x00000010")
+cpp_quote("#define MF_RESOLUTION_KEEP_BYTE_STREAM_ALIVE_ON_FAIL                        0x00000020")
+cpp_quote("#define MF_RESOLUTION_READ                                                  0x00010000")
+cpp_quote("#define MF_RESOLUTION_WRITE                                                 0x00020000")
+cpp_quote("#define MF_RESOLUTION_DISABLE_LOCAL_PLUGINS                                 0x00000040")

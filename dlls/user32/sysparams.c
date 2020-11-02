@@ -324,6 +324,7 @@ struct sysparam_font_entry
     struct sysparam_entry hdr;
     UINT                  weight;
     LOGFONTW              val;
+    WCHAR                 fullname[LF_FACESIZE];
 };
 
 struct sysparam_pref_entry
@@ -661,15 +662,18 @@ static int map_to_dpi( int val, UINT dpi )
 static INT CALLBACK real_fontname_proc(const LOGFONTW *lf, const TEXTMETRICW *ntm, DWORD type, LPARAM lparam)
 {
     const ENUMLOGFONTW *elf = (const ENUMLOGFONTW *)lf;
-    LOGFONTW *lfW = (LOGFONTW *)lparam;
+    WCHAR *fullname = (WCHAR *)lparam;
 
-    lstrcpynW(lfW->lfFaceName, elf->elfFullName, LF_FACESIZE);
+    lstrcpynW( fullname, elf->elfFullName, LF_FACESIZE );
     return 0;
 }
 
-static void get_real_fontname( HDC hdc, LOGFONTW *lf )
+static void get_real_fontname( LOGFONTW *lf, WCHAR fullname[LF_FACESIZE] )
 {
-    EnumFontFamiliesExW(hdc, lf, real_fontname_proc, (LPARAM)lf, 0);
+    HDC hdc = get_display_dc();
+    strcpyW( fullname, lf->lfFaceName );
+    EnumFontFamiliesExW( hdc, lf, real_fontname_proc, (LPARAM)fullname, 0 );
+    release_display_dc( hdc );
 }
 
 /* adjust some of the raw values found in the registry */
@@ -686,16 +690,10 @@ static void normalize_nonclientmetrics( NONCLIENTMETRICSW *pncm)
     /* adjust some heights to the corresponding font */
     get_text_metr_size( hdc, &pncm->lfMenuFont, &tm, NULL);
     pncm->iMenuHeight = max( pncm->iMenuHeight, 2 + tm.tmHeight + tm.tmExternalLeading );
-    get_real_fontname( hdc, &pncm->lfMenuFont );
     get_text_metr_size( hdc, &pncm->lfCaptionFont, &tm, NULL);
     pncm->iCaptionHeight = max( pncm->iCaptionHeight, 2 + tm.tmHeight);
-    get_real_fontname( hdc, &pncm->lfCaptionFont );
     get_text_metr_size( hdc, &pncm->lfSmCaptionFont, &tm, NULL);
     pncm->iSmCaptionHeight = max( pncm->iSmCaptionHeight, 2 + tm.tmHeight);
-    get_real_fontname( hdc, &pncm->lfSmCaptionFont );
-
-    get_real_fontname( hdc, &pncm->lfStatusFont );
-    get_real_fontname( hdc, &pncm->lfMessageFont );
     release_display_dc( hdc );
 }
 
@@ -1004,10 +1002,12 @@ static BOOL get_font_entry( union sysparam_all_entry *entry, UINT int_param, voi
             entry->font.val = font;
             break;
         }
+        get_real_fontname( &entry->font.val, entry->font.fullname );
         entry->hdr.loaded = TRUE;
     }
     font = entry->font.val;
     font.lfHeight = map_to_dpi( font.lfHeight, dpi );
+    strcpyW( font.lfFaceName, entry->font.fullname );
     *(LOGFONTW *)ptr_param = font;
     return TRUE;
 }
@@ -1026,6 +1026,7 @@ static BOOL set_font_entry( union sysparam_all_entry *entry, UINT int_param, voi
 
     if (!save_entry( &entry->hdr, &font, sizeof(font), REG_BINARY, flags )) return FALSE;
     entry->font.val = font;
+    get_real_fontname( &entry->font.val, entry->font.fullname );
     entry->hdr.loaded = TRUE;
     return TRUE;
 }
@@ -1036,6 +1037,7 @@ static BOOL init_font_entry( union sysparam_all_entry *entry )
     GetObjectW( GetStockObject( DEFAULT_GUI_FONT ), sizeof(entry->font.val), &entry->font.val );
     entry->font.val.lfHeight = map_from_system_dpi( entry->font.val.lfHeight );
     entry->font.val.lfWeight = entry->font.weight;
+    get_real_fontname( &entry->font.val, entry->font.fullname );
     return init_entry( &entry->hdr, &entry->font.val, sizeof(entry->font.val), REG_BINARY );
 }
 
@@ -1460,7 +1462,11 @@ void SYSPARAMS_Init(void)
 
     /* FIXME: what do the DpiScalingVer flags mean? */
     get_dword_entry( (union sysparam_all_entry *)&entry_DPISCALINGVER, 0, &dpi_scaling, 0 );
-    if (!dpi_scaling) default_awareness = DPI_AWARENESS_PER_MONITOR_AWARE;
+    if (!dpi_scaling)
+    {
+        default_awareness = DPI_AWARENESS_PER_MONITOR_AWARE;
+        dpi_awareness = 0x10 | default_awareness;
+    }
 
     if (volatile_base_key && dispos == REG_CREATED_NEW_KEY)  /* first process, initialize entries */
     {
@@ -3209,6 +3215,103 @@ UINT get_win_monitor_dpi( HWND hwnd )
 }
 
 /**********************************************************************
+ *              get_thread_dpi
+ */
+UINT get_thread_dpi(void)
+{
+    switch (GetAwarenessFromDpiAwarenessContext( GetThreadDpiAwarenessContext() ))
+    {
+    case DPI_AWARENESS_UNAWARE:      return USER_DEFAULT_SCREEN_DPI;
+    case DPI_AWARENESS_SYSTEM_AWARE: return system_dpi;
+    default:                         return 0;  /* no scaling */
+    }
+}
+
+/**********************************************************************
+ *              map_dpi_point
+ */
+POINT map_dpi_point( POINT pt, UINT dpi_from, UINT dpi_to )
+{
+    if (dpi_from && dpi_to && dpi_from != dpi_to)
+    {
+        pt.x = MulDiv( pt.x, dpi_to, dpi_from );
+        pt.y = MulDiv( pt.y, dpi_to, dpi_from );
+    }
+    return pt;
+}
+
+/**********************************************************************
+ *              point_win_to_phys_dpi
+ */
+POINT point_win_to_phys_dpi( HWND hwnd, POINT pt )
+{
+    return map_dpi_point( pt, GetDpiForWindow( hwnd ), get_win_monitor_dpi( hwnd ) );
+}
+
+/**********************************************************************
+ *              point_phys_to_win_dpi
+ */
+POINT point_phys_to_win_dpi( HWND hwnd, POINT pt )
+{
+    return map_dpi_point( pt, get_win_monitor_dpi( hwnd ), GetDpiForWindow( hwnd ));
+}
+
+/**********************************************************************
+ *              point_win_to_thread_dpi
+ */
+POINT point_win_to_thread_dpi( HWND hwnd, POINT pt )
+{
+    UINT dpi = get_thread_dpi();
+    if (!dpi) dpi = get_win_monitor_dpi( hwnd );
+    return map_dpi_point( pt, GetDpiForWindow( hwnd ), dpi );
+}
+
+/**********************************************************************
+ *              point_thread_to_win_dpi
+ */
+POINT point_thread_to_win_dpi( HWND hwnd, POINT pt )
+{
+    UINT dpi = get_thread_dpi();
+    if (!dpi) dpi = get_win_monitor_dpi( hwnd );
+    return map_dpi_point( pt, dpi, GetDpiForWindow( hwnd ));
+}
+
+/**********************************************************************
+ *              map_dpi_rect
+ */
+RECT map_dpi_rect( RECT rect, UINT dpi_from, UINT dpi_to )
+{
+    if (dpi_from && dpi_to && dpi_from != dpi_to)
+    {
+        rect.left   = MulDiv( rect.left, dpi_to, dpi_from );
+        rect.top    = MulDiv( rect.top, dpi_to, dpi_from );
+        rect.right  = MulDiv( rect.right, dpi_to, dpi_from );
+        rect.bottom = MulDiv( rect.bottom, dpi_to, dpi_from );
+    }
+    return rect;
+}
+
+/**********************************************************************
+ *              rect_win_to_thread_dpi
+ */
+RECT rect_win_to_thread_dpi( HWND hwnd, RECT rect )
+{
+    UINT dpi = get_thread_dpi();
+    if (!dpi) dpi = get_win_monitor_dpi( hwnd );
+    return map_dpi_rect( rect, GetDpiForWindow( hwnd ), dpi );
+}
+
+/**********************************************************************
+ *              rect_thread_to_win_dpi
+ */
+RECT rect_thread_to_win_dpi( HWND hwnd, RECT rect )
+{
+    UINT dpi = get_thread_dpi();
+    if (!dpi) dpi = get_win_monitor_dpi( hwnd );
+    return map_dpi_rect( rect, dpi, GetDpiForWindow( hwnd ) );
+}
+
+/**********************************************************************
  *              SetProcessDpiAwarenessContext   (USER32.@)
  */
 BOOL WINAPI SetProcessDpiAwarenessContext( DPI_AWARENESS_CONTEXT context )
@@ -3394,13 +3497,11 @@ DPI_AWARENESS_CONTEXT WINAPI SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT
  */
 BOOL WINAPI LogicalToPhysicalPointForPerMonitorDPI( HWND hwnd, POINT *pt )
 {
-    UINT dpi = GetDpiForWindow( hwnd );
     RECT rect;
 
-    GetWindowRect( hwnd, &rect );
+    if (!GetWindowRect( hwnd, &rect )) return FALSE;
     if (pt->x < rect.left || pt->y < rect.top || pt->x > rect.right || pt->y > rect.bottom) return FALSE;
-    pt->x = MulDiv( pt->x, system_dpi, dpi );
-    pt->y = MulDiv( pt->y, system_dpi, dpi );
+    *pt = point_win_to_phys_dpi( hwnd, *pt );
     return TRUE;
 }
 
@@ -3410,18 +3511,18 @@ BOOL WINAPI LogicalToPhysicalPointForPerMonitorDPI( HWND hwnd, POINT *pt )
 BOOL WINAPI PhysicalToLogicalPointForPerMonitorDPI( HWND hwnd, POINT *pt )
 {
     DPI_AWARENESS_CONTEXT context;
-    UINT dpi = GetDpiForWindow( hwnd );
     RECT rect;
+    BOOL ret = FALSE;
 
-    /* get window rect in physical coords */
     context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
-    GetWindowRect( hwnd, &rect );
+    if (GetWindowRect( hwnd, &rect ) &&
+        pt->x >= rect.left && pt->y >= rect.top && pt->x <= rect.right && pt->y <= rect.bottom)
+    {
+        *pt = point_phys_to_win_dpi( hwnd, *pt );
+        ret = TRUE;
+    }
     SetThreadDpiAwarenessContext( context );
-
-    if (pt->x < rect.left || pt->y < rect.top || pt->x > rect.right || pt->y > rect.bottom) return FALSE;
-    pt->x = MulDiv( pt->x, dpi, system_dpi );
-    pt->y = MulDiv( pt->y, dpi, system_dpi );
-    return TRUE;
+    return ret;
 }
 
 struct monitor_enum_info
@@ -3573,13 +3674,22 @@ BOOL WINAPI GetMonitorInfoA( HMONITOR monitor, LPMONITORINFO info )
 BOOL WINAPI GetMonitorInfoW( HMONITOR monitor, LPMONITORINFO info )
 {
     BOOL ret;
+    UINT dpi_from, dpi_to;
 
     if (info->cbSize != sizeof(MONITORINFOEXW) && info->cbSize != sizeof(MONITORINFO)) return FALSE;
 
     ret = USER_Driver->pGetMonitorInfo( monitor, info );
     if (ret)
+    {
+        if ((dpi_to = get_thread_dpi()))
+        {
+            dpi_from = get_monitor_dpi( monitor );
+            info->rcMonitor = map_dpi_rect( info->rcMonitor, dpi_from, dpi_to );
+            info->rcWork = map_dpi_rect( info->rcWork, dpi_from, dpi_to );
+        }
         TRACE( "flags %04x, monitor %s, work %s\n", info->dwFlags,
                wine_dbgstr_rect(&info->rcMonitor), wine_dbgstr_rect(&info->rcWork));
+    }
     return ret;
 }
 
@@ -3621,7 +3731,7 @@ __ASM_GLOBAL_FUNC( enum_mon_callback_wrapper,
 static BOOL CALLBACK enum_mon_callback( HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM lp )
 {
     struct enum_mon_data *data = (struct enum_mon_data *)lp;
-    RECT monrect = *rect;
+    RECT monrect = map_dpi_rect( *rect, get_monitor_dpi( monitor ), get_thread_dpi() );
 
     OffsetRect( &monrect, -data->origin.x, -data->origin.y );
     if (!IntersectRect( &monrect, &monrect, &data->limit )) return TRUE;

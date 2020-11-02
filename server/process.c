@@ -105,7 +105,6 @@ static const struct fd_ops process_fd_ops =
 struct startup_info
 {
     struct object       obj;          /* object header */
-    struct file        *exe_file;     /* file handle for main exe */
     struct process     *process;      /* created process */
     data_size_t         info_size;    /* size of startup info */
     data_size_t         data_size;    /* size of whole startup data */
@@ -232,16 +231,6 @@ static void add_job_completion( struct job *job, apc_param_t msg, apc_param_t pi
 
 static void add_job_process( struct job *job, struct process *process )
 {
-    if (!process->running_threads)
-    {
-        set_error( STATUS_PROCESS_IS_TERMINATING );
-        return;
-    }
-    if (process->job)
-    {
-        set_error( STATUS_ACCESS_DENIED );
-        return;
-    }
     process->job = (struct job *)grab_object( job );
     list_add_tail( &job->process_list, &process->job_entry );
     job->num_processes++;
@@ -553,13 +542,12 @@ static void start_sigkill_timer( struct process *process )
         process_died( process );
 }
 
-/* create a new process and its main thread */
+/* create a new process */
 /* if the function fails the fd is closed */
-struct thread *create_process( int fd, struct thread *parent_thread, int inherit_all )
+struct process *create_process( int fd, struct process *parent, int inherit_all,
+                                const struct security_descriptor *sd )
 {
     struct process *process;
-    struct thread *thread = NULL;
-    int request_pipe[2];
 
     if (!(process = alloc_object( &process_ops )))
     {
@@ -584,6 +572,7 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
     process->startup_state   = STARTUP_IN_PROGRESS;
     process->startup_info    = NULL;
     process->idle_event      = NULL;
+    process->exe_file        = NULL;
     process->peb             = 0;
     process->ldt_copy        = 0;
     process->dir_cache       = NULL;
@@ -605,6 +594,12 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
     process->end_time = 0;
     list_add_tail( &process_list, &process->entry );
 
+    if (sd && !default_set_sd( &process->obj, sd, OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION |
+                               DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION ))
+    {
+        close( fd );
+        goto error;
+    }
     if (!(process->id = process->group_id = alloc_ptid( process )))
     {
         close( fd );
@@ -613,7 +608,7 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
     if (!(process->msg_fd = create_anonymous_fd( &process_fd_ops, fd, &process->obj, 0 ))) goto error;
 
     /* create the handle table */
-    if (!parent_thread)
+    if (!parent)
     {
         process->handles = alloc_handle_table( process, 0 );
         process->token = token_create_admin();
@@ -621,7 +616,6 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
     }
     else
     {
-        struct process *parent = parent_thread->process;
         process->parent_id = parent->id;
         process->handles = inherit_all ? copy_handle_table( process, parent )
                                        : alloc_handle_table( process, 0 );
@@ -638,24 +632,8 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
     if (!token_assign_label( process->token, security_high_label_sid ))
         goto error;
 
-    /* create the main thread */
-    if (pipe( request_pipe ) == -1)
-    {
-        file_set_error();
-        goto error;
-    }
-    if (send_client_fd( process, request_pipe[1], SERVER_PROTOCOL_VERSION ) == -1)
-    {
-        close( request_pipe[0] );
-        close( request_pipe[1] );
-        goto error;
-    }
-    close( request_pipe[1] );
-    if (!(thread = create_thread( request_pipe[0], process ))) goto error;
-
     set_fd_events( process->msg_fd, POLLIN );  /* start listening to events */
-    release_object( process );
-    return thread;
+    return process;
 
  error:
     if (process) release_object( process );
@@ -670,7 +648,6 @@ data_size_t init_process( struct thread *thread )
     struct process *process = thread->process;
     struct startup_info *info = process->startup_info;
 
-    init_process_tracing( process );
     if (!info) return 0;
     return info->data_size;
 }
@@ -699,6 +676,7 @@ static void process_destroy( struct object *obj )
     if (process->msg_fd) release_object( process->msg_fd );
     list_remove( &process->entry );
     if (process->idle_event) release_object( process->idle_event );
+    if (process->exe_file) release_object( process->exe_file );
     if (process->id) free_ptid( process->id );
     if (process->token) release_object( process->token );
     free( process->dir_cache );
@@ -747,7 +725,6 @@ static void startup_info_destroy( struct object *obj )
     struct startup_info *info = (struct startup_info *)obj;
     assert( obj->ops == &startup_info_ops );
     free( info->data );
-    if (info->exe_file) release_object( info->exe_file );
     if (info->process) release_object( info->process );
 }
 
@@ -905,11 +882,10 @@ static void process_killed( struct process *process )
     process->desktop = 0;
     close_process_handles( process );
     cancel_process_asyncs( process );
-    if (process->idle_event)
-    {
-        release_object( process->idle_event );
-        process->idle_event = NULL;
-    }
+    if (process->idle_event) release_object( process->idle_event );
+    if (process->exe_file) release_object( process->exe_file );
+    process->idle_event = NULL;
+    process->exe_file = NULL;
 
     /* close the console attached to this process, if any */
     free_console( process );
@@ -1154,14 +1130,23 @@ struct process_snapshot *process_snap( int *count )
 DECL_HANDLER(new_process)
 {
     struct startup_info *info;
-    struct thread *thread;
-    struct process *process;
+    const void *info_ptr;
+    struct unicode_str name;
+    const struct security_descriptor *sd;
+    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name, NULL );
+    struct process *process = NULL;
     struct process *parent = current->process;
     int socket_fd = thread_get_inflight_fd( current, req->socket_fd );
 
     if (socket_fd == -1)
     {
         set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (!objattr)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        close( socket_fd );
         return;
     }
     if (fcntl( socket_fd, F_SETFL, O_NONBLOCK ) == -1)
@@ -1190,30 +1175,16 @@ DECL_HANDLER(new_process)
         return;
     }
 
-    if (!req->info_size)  /* create an orphaned process */
-    {
-        create_process( socket_fd, NULL, 0 );
-        return;
-    }
-
     /* build the startup info for a new process */
     if (!(info = alloc_object( &startup_info_ops )))
     {
         close( socket_fd );
         return;
     }
-    info->exe_file = NULL;
     info->process  = NULL;
     info->data     = NULL;
 
-    if (req->exe_file &&
-        !(info->exe_file = get_file_obj( current->process, req->exe_file, FILE_READ_DATA )))
-    {
-        close( socket_fd );
-        goto done;
-    }
-
-    info->data_size = get_req_data_size();
+    info_ptr = get_req_data_after_objattr( objattr, &info->data_size );
     info->info_size = min( req->info_size, info->data_size );
 
     if (req->info_size < sizeof(*info->data))
@@ -1227,9 +1198,9 @@ DECL_HANDLER(new_process)
             close( socket_fd );
             goto done;
         }
-        memcpy( info->data, get_req_data(), info_size );
+        memcpy( info->data, info_ptr, info_size );
         memset( (char *)info->data + info_size, 0, sizeof(*info->data) - info_size );
-        memcpy( info->data + 1, (const char *)get_req_data() + req->info_size, env_size );
+        memcpy( info->data + 1, (const char *)info_ptr + req->info_size, env_size );
         info->info_size = sizeof(startup_info_t);
         info->data_size = info->info_size + env_size;
     }
@@ -1237,7 +1208,7 @@ DECL_HANDLER(new_process)
     {
         data_size_t pos = sizeof(*info->data);
 
-        if (!(info->data = memdup( get_req_data(), info->data_size )))
+        if (!(info->data = memdup( info_ptr, info->data_size )))
         {
             close( socket_fd );
             goto done;
@@ -1254,9 +1225,13 @@ DECL_HANDLER(new_process)
 #undef FIXUP_LEN
     }
 
-    if (!(thread = create_process( socket_fd, current, req->inherit_all ))) goto done;
-    process = thread->process;
+    if (!(process = create_process( socket_fd, parent, req->inherit_all, sd ))) goto done;
+
     process->startup_info = (struct startup_info *)grab_object( info );
+
+    if (req->exe_file &&
+        !(process->exe_file = get_file_obj( current->process, req->exe_file, FILE_READ_DATA )))
+        goto done;
 
     if (parent->job
        && !(req->create_flags & CREATE_BREAKAWAY_FROM_JOB)
@@ -1267,9 +1242,6 @@ DECL_HANDLER(new_process)
 
     /* connect to the window station */
     connect_process_winstation( process, current );
-
-    /* thread will be actually suspended in init_done */
-    if (req->create_flags & CREATE_SUSPENDED) thread->suspend++;
 
     /* set the process console */
     if (!(req->create_flags & (DETACHED_PROCESS | CREATE_NEW_CONSOLE)))
@@ -1312,12 +1284,44 @@ DECL_HANDLER(new_process)
     info->process = (struct process *)grab_object( process );
     reply->info = alloc_handle( current->process, info, SYNCHRONIZE, 0 );
     reply->pid = get_process_id( process );
-    reply->tid = get_thread_id( thread );
-    reply->phandle = alloc_handle( parent, process, req->process_access, req->process_attr );
-    reply->thandle = alloc_handle( parent, thread, req->thread_access, req->thread_attr );
+    reply->handle = alloc_handle_no_access_check( parent, process, req->access, objattr->attributes );
 
  done:
+    if (process) release_object( process );
     release_object( info );
+}
+
+/* execute a new process, replacing the existing one */
+DECL_HANDLER(exec_process)
+{
+    struct process *process;
+    int socket_fd = thread_get_inflight_fd( current, req->socket_fd );
+
+    if (socket_fd == -1)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    if (fcntl( socket_fd, F_SETFL, O_NONBLOCK ) == -1)
+    {
+        set_error( STATUS_INVALID_HANDLE );
+        close( socket_fd );
+        return;
+    }
+    if (shutdown_stage)
+    {
+        set_error( STATUS_SHUTDOWN_IN_PROGRESS );
+        close( socket_fd );
+        return;
+    }
+    if (!is_cpu_supported( req->cpu ))
+    {
+        close( socket_fd );
+        return;
+    }
+    if (!(process = create_process( socket_fd, NULL, 0, NULL ))) return;
+    create_thread( -1, process, NULL );
+    release_object( process );
 }
 
 /* Retrieve information about a newly started process */
@@ -1342,9 +1346,6 @@ DECL_HANDLER(get_startup_info)
     data_size_t size;
 
     if (!info) return;
-
-    if (info->exe_file &&
-        !(reply->exe_file = alloc_handle( process, info->exe_file, GENERIC_READ, 0 ))) return;
 
     /* we return the data directly without making a copy so this can only be called once */
     reply->info_size = info->info_size;
@@ -1379,7 +1380,10 @@ DECL_HANDLER(init_process_done)
     process->ldt_copy = req->ldt_copy;
     process->start_time = current_time;
     current->entry_point = req->entry;
+    if (process->exe_file) release_object( process->exe_file );
+    process->exe_file = NULL;
 
+    init_process_tracing( process );
     generate_startup_debug_events( process, req->entry );
     set_process_startup_state( process, STARTUP_DONE );
 
@@ -1683,7 +1687,12 @@ DECL_HANDLER(assign_job)
 
     if ((process = get_process_from_handle( req->process, PROCESS_SET_QUOTA | PROCESS_TERMINATE )))
     {
-        add_job_process( job, process );
+        if (!process->running_threads)
+            set_error( STATUS_PROCESS_IS_TERMINATING );
+        else if (process->job)
+            set_error( STATUS_ACCESS_DENIED );
+        else
+            add_job_process( job, process );
         release_object( process );
     }
     release_object( job );

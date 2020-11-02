@@ -32,14 +32,30 @@ static INT notify_format;
 static BOOL notify_query_received;
 static WCHAR test_w[] = {'t', 'e', 's', 't', 0};
 static CHAR test_a[] = {'t', 'e', 's', 't', 0};
+/* Double zero so that it's safe to cast it to WCHAR * */
+static CHAR te_a[] = {'t', 'e', 0, 0};
 static WCHAR empty_w[] = {0};
 static CHAR empty_a[] = {0};
 static CHAR large_a[] = "You should have received a copy of the GNU Lesser General Public License along with this ...";
+static WCHAR large_w[] =
+{
+    'Y', 'o', 'u', ' ', 's', 'h', 'o', 'u', 'l', 'd', ' ', 'h', 'a', 'v', 'e', ' ', 'r', 'e', 'c', 'e', 'i', 'v', 'e',
+    'd', ' ', 'a', ' ', 'c', 'o', 'p', 'y', ' ', 'o', 'f', ' ', 't', 'h', 'e', ' ', 'G', 'N', 'U', ' ', 'L', 'e', 's',
+    's', 'e', 'r', ' ', 'G', 'e', 'n', 'e', 'r', 'a', 'l', ' ', 'P', 'u', 'b', 'l', 'i', 'c', ' ', 'L', 'i', 'c', 'e',
+    'n', 's', 'e', ' ', 'a', 'l', 'o', 'n', 'g', ' ', 'w', 'i', 't', 'h', ' ', 't', 'h', 'i', 's', ' ', '.', '.', '.', 0
+};
 static WCHAR large_truncated_65_w[65] =
 {
     'Y', 'o', 'u', ' ', 's', 'h', 'o', 'u', 'l', 'd', ' ', 'h', 'a', 'v', 'e', ' ', 'r', 'e', 'c', 'e', 'i', 'v',
     'e', 'd', ' ', 'a', ' ', 'c', 'o', 'p', 'y', ' ', 'o', 'f', ' ', 't', 'h', 'e', ' ', 'G', 'N', 'U', ' ', 'L',
     'e', 's', 's', 'e', 'r', ' ', 'G', 'e', 'n', 'e', 'r', 'a', 'l', ' ', 'P', 'u', 'b', 'l', 'i', 'c', 0
+};
+static WCHAR large_truncated_80_w[80] =
+{
+    'Y', 'o', 'u', ' ', 's', 'h', 'o', 'u', 'l', 'd', ' ', 'h', 'a', 'v', 'e', ' ', 'r', 'e', 'c', 'e',
+    'i', 'v', 'e', 'd', ' ', 'a', ' ', 'c', 'o', 'p', 'y', ' ', 'o', 'f', ' ', 't', 'h', 'e', ' ', 'G',
+    'N', 'U', ' ', 'L', 'e', 's', 's', 'e', 'r', ' ', 'G', 'e', 'n', 'e', 'r', 'a', 'l', ' ', 'P', 'u',
+    'b', 'l', 'i', 'c', ' ', 'L', 'i', 'c', 'e', 'n', 's', 'e', ' ', 'a', 'l', 'o', 'n', 'g', ' ', 'w'
 };
 static WCHAR buffer[64];
 
@@ -51,7 +67,15 @@ enum test_conversion_flags
     CONVERT_RECEIVE = 0x04,
     DONT_CONVERT_RECEIVE = 0x08,
     SEND_EMPTY_IF_NULL = 0x10,
-    DONT_SEND_EMPTY_IF_NULL = 0x20
+    DONT_SEND_EMPTY_IF_NULL = 0x20,
+    SET_NULL_IF_NO_MASK = 0x40,
+    ZERO_SEND = 0x80
+};
+
+enum handler_ids
+{
+    TVITEM_NEW_HANDLER,
+    TVITEM_OLD_HANDLER
 };
 
 static struct notify_test_info
@@ -64,6 +88,7 @@ static struct notify_test_info
     BOOL received;
     UINT test_id;
     UINT sub_test_id;
+    UINT handler_id;
     /* Text field conversion test behavior flag */
     DWORD flags;
 } notify_test_info;
@@ -105,6 +130,7 @@ struct generic_text_helper_para
     UINT code_unicode;
     UINT code_ansi;
     DWORD flags;
+    UINT handler_id;
 };
 
 static const struct notify_test_send test_convert_send_data[] =
@@ -130,6 +156,61 @@ static const struct notify_test_receive test_dont_convert_receive_data[] =
 {
     {empty_w, sizeof(empty_w), ARRAY_SIZE(buffer), NULL, test_a, sizeof(test_a), -1, test_a, ARRAY_SIZE(buffer)},
     {empty_w, sizeof(empty_w), ARRAY_SIZE(buffer), test_a, NULL, 0, -1, test_a, ARRAY_SIZE(buffer)},
+};
+
+static const struct notify_test_tooltip
+{
+    /* Data for parent to write */
+    CHAR *write_sztext;
+    INT write_sztext_size;
+    CHAR *write_lpsztext;
+    HMODULE write_hinst;
+    /* Data when message returned */
+    WCHAR *return_sztext;
+    INT return_sztext_size;
+    WCHAR *return_lpsztext;
+    HMODULE return_hinst;
+    /* Data expected by parent */
+    CHAR *expect_sztext;
+    /* Data send to parent */
+    WCHAR *send_sztext;
+    INT send_sztext_size;
+    WCHAR *send_lpsztext;
+} test_tooltip_data[] =
+{
+    {NULL, 0, NULL, NULL, empty_w, -1, empty_w},
+    {test_a, sizeof(test_a), NULL, NULL, test_w, -1, test_w},
+    {test_a, sizeof(test_a), test_a, NULL, test_w, -1, test_w},
+    {test_a, sizeof(test_a), (CHAR *)1, (HMODULE)0xdeadbeef, empty_w, -1, (WCHAR *)1, (HMODULE)0xdeadbeef},
+    {test_a, sizeof(test_a), test_a, (HMODULE)0xdeadbeef, test_w, -1, test_w, (HMODULE)0xdeadbeef},
+    {NULL, 0, test_a, NULL, test_w, -1, test_w},
+    {test_a, 2, test_a, NULL, test_w, -1, test_w},
+    {NULL, 0, NULL, NULL, test_w, -1, test_w, NULL, test_a, test_w, sizeof(test_w)},
+    {NULL, 0, NULL, NULL, empty_w, -1, empty_w, NULL, empty_a, NULL, 0, test_w},
+    {NULL, 0, large_a, NULL, large_truncated_80_w, sizeof(large_truncated_80_w), large_w}
+};
+
+static const struct notify_test_datetime_format
+{
+    /* Data send to parent */
+    WCHAR *send_pszformat;
+    /* Data expected by parent */
+    CHAR *expect_pszformat;
+    /* Data for parent to write */
+    CHAR *write_szdisplay;
+    INT write_szdisplay_size;
+    CHAR *write_pszdisplay;
+    /* Data when message returned */
+    WCHAR *return_szdisplay;
+    INT return_szdisplay_size;
+    WCHAR *return_pszdisplay;
+} test_datetime_format_data[] =
+{
+    {test_w, test_a},
+    {NULL, NULL, NULL, 0, test_a, empty_w, -1, test_w},
+    {NULL, NULL, test_a, sizeof(test_a), NULL, test_w, -1, test_w},
+    {NULL, NULL, test_a, 2, test_a, (WCHAR *)te_a, -1, test_w},
+    {NULL, NULL, NULL, 0, large_a, NULL, 0, large_w}
 };
 
 #define CHILD1_ID 1
@@ -200,6 +281,14 @@ static const struct message set_pos_empty_seq[] = {
     { PGM_SETPOS, sent },
     { 0 }
 };
+
+static CHAR *heap_strdup(const CHAR *str)
+{
+    int len = lstrlenA(str) + 1;
+    CHAR *ret = heap_alloc(len * sizeof(CHAR));
+    lstrcpyA(ret, str);
+    return ret;
+}
 
 static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -532,7 +621,10 @@ static void notify_generic_text_handler(CHAR **text, INT *text_max)
     {
         send_data = (notify_test_info.test_id == CONVERT_SEND ? test_convert_send_data : test_dont_convert_send_data)
                     + notify_test_info.sub_test_id;
-        if (notify_test_info.flags & CONVERT_SEND)
+        if (notify_test_info.flags & ZERO_SEND)
+            ok(!lstrcmpA(*text, empty_a), "Code 0x%08x test 0x%08x sub test %d expect empty text, got %s\n",
+               notify_test_info.unicode, notify_test_info.test_id, notify_test_info.sub_test_id, *text);
+        else if (notify_test_info.flags & CONVERT_SEND)
             ok(!lstrcmpA(send_data->expect_text, *text), "Code 0x%08x test 0x%08x sub test %d expect %s, got %s\n",
                notify_test_info.unicode, notify_test_info.test_id, notify_test_info.sub_test_id,
                (CHAR *)send_data->expect_text, *text);
@@ -559,6 +651,10 @@ static void notify_generic_text_handler(CHAR **text, INT *text_max)
 
         if (receive_data->write_text)
             memcpy(*text, receive_data->write_text, receive_data->write_text_size);
+        /* 64bit Windows will try to free the text pointer even if it's application provided when handling
+         * HDN_GETDISPINFOW. Deliberate leak here. */
+        else if(notify_test_info.unicode == HDN_GETDISPINFOW)
+            *text = heap_strdup(receive_data->write_pointer);
         else
             *text = receive_data->write_pointer;
         if (text_max && receive_data->write_text_max != -1) *text_max = receive_data->write_text_max;
@@ -573,6 +669,31 @@ static void notify_generic_text_handler(CHAR **text, INT *text_max)
            notify_test_info.test_id, notify_test_info.sub_test_id);
         break;
     }
+}
+
+static void notify_tooltip_handler(NMTTDISPINFOA *nm)
+{
+    const struct notify_test_tooltip *data = test_tooltip_data + notify_test_info.sub_test_id;
+    ok(nm->lpszText == nm->szText, "Sub test %d expect %p, got %p\n", notify_test_info.sub_test_id, nm->szText,
+       nm->lpszText);
+    if (data->expect_sztext)
+        ok(!lstrcmpA(data->expect_sztext, nm->szText), "Sub test %d expect %s, got %s\n", notify_test_info.sub_test_id,
+           data->expect_sztext, nm->szText);
+    if (data->write_sztext) memcpy(nm->szText, data->write_sztext, data->write_sztext_size);
+    if (data->write_lpsztext) nm->lpszText = data->write_lpsztext;
+    if (data->write_hinst) nm->hinst = data->write_hinst;
+}
+
+static void notify_datetime_handler(NMDATETIMEFORMATA *nm)
+{
+    const struct notify_test_datetime_format *data = test_datetime_format_data + notify_test_info.sub_test_id;
+    if (data->expect_pszformat)
+        ok(!lstrcmpA(data->expect_pszformat, nm->pszFormat), "Sub test %d expect %s, got %s\n",
+           notify_test_info.sub_test_id, data->expect_pszformat, nm->pszFormat);
+    ok(nm->pszDisplay == nm->szDisplay, "Test %d expect %p, got %p\n", notify_test_info.sub_test_id, nm->szDisplay,
+       nm->pszDisplay);
+    if (data->write_szdisplay) memcpy(nm->szDisplay, data->write_szdisplay, data->write_szdisplay_size);
+    if (data->write_pszdisplay) nm->pszDisplay = data->write_pszdisplay;
 }
 
 static LRESULT WINAPI test_notify_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -600,6 +721,118 @@ static LRESULT WINAPI test_notify_proc(HWND hwnd, UINT message, WPARAM wParam, L
         }
         switch (hdr->code)
         {
+        /* ComboBoxEx */
+        case CBEN_INSERTITEM:
+        case CBEN_DELETEITEM:
+        {
+            NMCOMBOBOXEXW *nmcbe = (NMCOMBOBOXEXW *)hdr;
+            notify_generic_text_handler((CHAR **)&nmcbe->ceItem.pszText, NULL);
+            break;
+        }
+        case CBEN_DRAGBEGINA:
+        {
+            NMCBEDRAGBEGINA *nmcbedb = (NMCBEDRAGBEGINA *)hdr;
+            ok(!lstrcmpA(nmcbedb->szText, test_a), "Expect %s, got %s\n", nmcbedb->szText, test_a);
+            break;
+        }
+        case CBEN_ENDEDITA:
+        {
+            NMCBEENDEDITA *nmcbeed = (NMCBEENDEDITA *)hdr;
+            ok(!lstrcmpA(nmcbeed->szText, test_a), "Expect %s, got %s\n", nmcbeed->szText, test_a);
+            break;
+        }
+        case CBEN_GETDISPINFOA:
+        {
+            NMCOMBOBOXEXA *nmcbe = (NMCOMBOBOXEXA *)hdr;
+            notify_generic_text_handler(&nmcbe->ceItem.pszText, &nmcbe->ceItem.cchTextMax);
+            break;
+        }
+        /* Date and Time Picker */
+        case DTN_FORMATA:
+        {
+            notify_datetime_handler((NMDATETIMEFORMATA *)hdr);
+            break;
+        }
+        case DTN_FORMATQUERYA:
+        {
+            NMDATETIMEFORMATQUERYA *nmdtfq = (NMDATETIMEFORMATQUERYA *)hdr;
+            notify_generic_text_handler((CHAR **)&nmdtfq->pszFormat, NULL);
+            break;
+        }
+        case DTN_WMKEYDOWNA:
+        {
+            NMDATETIMEWMKEYDOWNA *nmdtkd = (NMDATETIMEWMKEYDOWNA *)hdr;
+            notify_generic_text_handler((CHAR **)&nmdtkd->pszFormat, NULL);
+            break;
+        }
+        case DTN_USERSTRINGA:
+        {
+            NMDATETIMESTRINGA *nmdts = (NMDATETIMESTRINGA *)hdr;
+            notify_generic_text_handler((CHAR **)&nmdts->pszUserString, NULL);
+            break;
+        }
+        /* Header */
+        case HDN_BEGINDRAG:
+        case HDN_ENDDRAG:
+        case HDN_BEGINFILTEREDIT:
+        case HDN_ENDFILTEREDIT:
+        case HDN_DROPDOWN:
+        case HDN_FILTERCHANGE:
+        case HDN_ITEMKEYDOWN:
+        case HDN_ITEMSTATEICONCLICK:
+        case HDN_OVERFLOWCLICK:
+        {
+            NMHEADERW *nmhd = (NMHEADERW *)hdr;
+            ok(!lstrcmpW(nmhd->pitem->pszText, test_w), "Expect %s, got %s\n", wine_dbgstr_w(test_w),
+               wine_dbgstr_w(nmhd->pitem->pszText));
+            ok(!lstrcmpW(((HD_TEXTFILTERW *)nmhd->pitem->pvFilter)->pszText, test_w), "Expect %s, got %s\n",
+               wine_dbgstr_w(test_w), wine_dbgstr_w(((HD_TEXTFILTERW *)nmhd->pitem->pvFilter)->pszText));
+            break;
+        }
+        case HDN_BEGINTRACKA:
+        case HDN_DIVIDERDBLCLICKA:
+        case HDN_ENDTRACKA:
+        case HDN_ITEMCHANGEDA:
+        case HDN_ITEMCHANGINGA:
+        case HDN_ITEMCLICKA:
+        case HDN_ITEMDBLCLICKA:
+        case HDN_TRACKA:
+        {
+            NMHEADERA *nmhd = (NMHEADERA *)hdr;
+            ok(!lstrcmpA(nmhd->pitem->pszText, test_a), "Expect %s, got %s\n", test_a, nmhd->pitem->pszText);
+            ok(!lstrcmpA(((HD_TEXTFILTERA *)nmhd->pitem->pvFilter)->pszText, test_a), "Expect %s, got %s\n", test_a,
+               ((HD_TEXTFILTERA *)nmhd->pitem->pvFilter)->pszText);
+            break;
+        }
+        case HDN_GETDISPINFOA:
+        {
+            NMHDDISPINFOA *nmhddi = (NMHDDISPINFOA *)hdr;
+            notify_generic_text_handler(&nmhddi->pszText, &nmhddi->cchTextMax);
+            break;
+        }
+        /* List View */
+        case LVN_BEGINLABELEDITA:
+        case LVN_ENDLABELEDITA:
+        case LVN_GETDISPINFOA:
+        case LVN_SETDISPINFOA:
+        {
+            NMLVDISPINFOA *nmlvdi = (NMLVDISPINFOA *)hdr;
+            notify_generic_text_handler(&nmlvdi->item.pszText, &nmlvdi->item.cchTextMax);
+            break;
+        }
+        case LVN_GETINFOTIPA:
+        {
+            NMLVGETINFOTIPA *nmlvgit = (NMLVGETINFOTIPA *)hdr;
+            notify_generic_text_handler(&nmlvgit->pszText, &nmlvgit->cchTextMax);
+            break;
+        }
+        case LVN_INCREMENTALSEARCHA:
+        case LVN_ODFINDITEMA:
+        {
+            NMLVFINDITEMA *nmlvfi = (NMLVFINDITEMA *)hdr;
+            notify_generic_text_handler((CHAR **)&nmlvfi->lvfi.psz, NULL);
+            break;
+        }
         /* Toolbar */
         case TBN_SAVE:
         {
@@ -631,6 +864,45 @@ static LRESULT WINAPI test_notify_proc(HWND hwnd, UINT message, WPARAM wParam, L
             notify_generic_text_handler(&nmtbgit->pszText, &nmtbgit->cchTextMax);
             break;
         }
+        /* Tooltip */
+        case TTN_GETDISPINFOA:
+        {
+            notify_tooltip_handler((NMTTDISPINFOA *)hdr);
+            break;
+        }
+        /* Tree View */
+        case TVN_BEGINLABELEDITA:
+        case TVN_ENDLABELEDITA:
+        case TVN_GETDISPINFOA:
+        case TVN_SETDISPINFOA:
+        {
+            NMTVDISPINFOA *nmtvdi = (NMTVDISPINFOA *)hdr;
+            notify_generic_text_handler(&nmtvdi->item.pszText, &nmtvdi->item.cchTextMax);
+            break;
+        }
+        case TVN_GETINFOTIPA:
+        {
+            NMTVGETINFOTIPA *nmtvgit = (NMTVGETINFOTIPA *)hdr;
+            notify_generic_text_handler(&nmtvgit->pszText, &nmtvgit->cchTextMax);
+            break;
+        }
+        case TVN_SINGLEEXPAND:
+        case TVN_BEGINDRAGA:
+        case TVN_BEGINRDRAGA:
+        case TVN_ITEMEXPANDEDA:
+        case TVN_ITEMEXPANDINGA:
+        case TVN_DELETEITEMA:
+        case TVN_SELCHANGINGA:
+        case TVN_SELCHANGEDA:
+        {
+            NMTREEVIEWA *nmtv = (NMTREEVIEWA *)hdr;
+            if (notify_test_info.handler_id == TVITEM_NEW_HANDLER)
+                notify_generic_text_handler((CHAR **)&nmtv->itemNew.pszText, &nmtv->itemNew.cchTextMax);
+            else
+                notify_generic_text_handler((CHAR **)&nmtv->itemOld.pszText, &nmtv->itemOld.cchTextMax);
+            break;
+        }
+
         default:
             ok(0, "Unexpected message 0x%08x\n", hdr->code);
         }
@@ -685,6 +957,7 @@ static void test_notify_generic_text_helper(HWND pager, const struct generic_tex
     INT i;
 
     notify_test_info.flags = para->flags;
+    notify_test_info.handler_id = para->handler_id;
 
     if (para->flags & (CONVERT_SEND | DONT_CONVERT_SEND))
     {
@@ -771,20 +1044,187 @@ static void test_notify_generic_text_helper(HWND pager, const struct generic_tex
     else
         notify_test_info.test_id = DONT_SEND_EMPTY_IF_NULL;
     send_notify(pager, para->code_unicode, para->code_ansi, (LPARAM)para->ptr, TRUE);
+
+    notify_test_info.test_id = SET_NULL_IF_NO_MASK;
+    memset(para->ptr, 0, para->size);
+    memset(buffer, 0, sizeof(buffer));
+    *para->text = buffer;
+    if (para->text_max) *para->text_max = ARRAY_SIZE(buffer);
+    send_notify(pager, para->code_unicode, para->code_ansi, (LPARAM)para->ptr, TRUE);
+    if(para->flags & SET_NULL_IF_NO_MASK)
+        ok(!*para->text, "Expect null text\n");
+}
+
+static void test_wm_notify_comboboxex(HWND pager)
+{
+    static NMCBEDRAGBEGINW nmcbedb;
+    static NMCBEENDEDITW nmcbeed;
+
+    /* CBEN_DRAGBEGIN */
+    memset(&nmcbedb, 0, sizeof(nmcbedb));
+    memcpy(nmcbedb.szText, test_w, sizeof(test_w));
+    send_notify(pager, CBEN_DRAGBEGINW, CBEN_DRAGBEGINA, (LPARAM)&nmcbedb, FALSE);
+    ok(!lstrcmpW(nmcbedb.szText, test_w), "Expect %s, got %s\n", wine_dbgstr_w(test_w), wine_dbgstr_w(nmcbedb.szText));
+
+    /* CBEN_ENDEDIT */
+    memset(&nmcbeed, 0, sizeof(nmcbeed));
+    memcpy(nmcbeed.szText, test_w, sizeof(test_w));
+    send_notify(pager, CBEN_ENDEDITW, CBEN_ENDEDITA, (LPARAM)&nmcbeed, FALSE);
+    ok(!lstrcmpW(nmcbeed.szText, test_w), "Expect %s, got %s\n", wine_dbgstr_w(test_w), wine_dbgstr_w(nmcbeed.szText));
+}
+
+static void test_wm_notify_datetime(HWND pager)
+{
+    const struct notify_test_datetime_format *data;
+    NMDATETIMEFORMATW nmdtf;
+    INT i;
+
+    for (i = 0; i < ARRAY_SIZE(test_datetime_format_data); i++)
+    {
+        data = test_datetime_format_data + i;
+        notify_test_info.sub_test_id = i;
+
+        memset(&nmdtf, 0, sizeof(nmdtf));
+        if(data->send_pszformat) nmdtf.pszFormat = data->send_pszformat;
+        nmdtf.pszDisplay = nmdtf.szDisplay;
+        send_notify(pager, DTN_FORMATW, DTN_FORMATA, (LPARAM)&nmdtf, TRUE);
+        if (data->return_szdisplay)
+            ok(!lstrcmpW(nmdtf.szDisplay, data->return_szdisplay), "Sub test %d expect %s, got %s\n", i,
+               wine_dbgstr_w(data->return_szdisplay), wine_dbgstr_w(nmdtf.szDisplay));
+        if (data->return_pszdisplay)
+            ok(!lstrcmpW(nmdtf.pszDisplay, data->return_pszdisplay), "Sub test %d expect %s, got %s\n", i,
+               wine_dbgstr_w(data->return_pszdisplay), wine_dbgstr_w(nmdtf.pszDisplay));
+    }
+}
+
+static void test_wm_notify_header(HWND pager)
+{
+    NMHEADERW nmh = {{0}};
+    HDITEMW hdi = {0};
+    HD_TEXTFILTERW hdtf = {0};
+
+    hdi.mask = HDI_TEXT | HDI_FILTER;
+    hdi.pszText = test_w;
+    hdtf.pszText = test_w;
+    nmh.pitem = &hdi;
+    nmh.pitem->pvFilter = &hdtf;
+    send_notify(pager, HDN_BEGINDRAG, HDN_BEGINDRAG, (LPARAM)&nmh, TRUE);
+    send_notify(pager, HDN_ENDDRAG, HDN_ENDDRAG, (LPARAM)&nmh, TRUE);
+    send_notify(pager, HDN_BEGINFILTEREDIT, HDN_BEGINFILTEREDIT, (LPARAM)&nmh, TRUE);
+    send_notify(pager, HDN_ENDFILTEREDIT, HDN_ENDFILTEREDIT, (LPARAM)&nmh, TRUE);
+    send_notify(pager, HDN_DROPDOWN, HDN_DROPDOWN, (LPARAM)&nmh, TRUE);
+    send_notify(pager, HDN_FILTERCHANGE, HDN_FILTERCHANGE, (LPARAM)&nmh, TRUE);
+    send_notify(pager, HDN_ITEMKEYDOWN, HDN_ITEMKEYDOWN, (LPARAM)&nmh, TRUE);
+    send_notify(pager, HDN_ITEMSTATEICONCLICK, HDN_ITEMSTATEICONCLICK, (LPARAM)&nmh, TRUE);
+    send_notify(pager, HDN_OVERFLOWCLICK, HDN_OVERFLOWCLICK, (LPARAM)&nmh, TRUE);
+    send_notify(pager, HDN_BEGINTRACKW, HDN_BEGINTRACKA, (LPARAM)&nmh, TRUE);
+    send_notify(pager, HDN_DIVIDERDBLCLICKW, HDN_DIVIDERDBLCLICKA, (LPARAM)&nmh, TRUE);
+    send_notify(pager, HDN_ENDTRACKW, HDN_ENDTRACKA, (LPARAM)&nmh, TRUE);
+    send_notify(pager, HDN_ITEMCHANGEDW, HDN_ITEMCHANGEDA, (LPARAM)&nmh, TRUE);
+    send_notify(pager, HDN_ITEMCHANGINGW, HDN_ITEMCHANGINGA, (LPARAM)&nmh, TRUE);
+    send_notify(pager, HDN_ITEMCLICKW, HDN_ITEMCLICKA, (LPARAM)&nmh, TRUE);
+    send_notify(pager, HDN_ITEMDBLCLICKW, HDN_ITEMDBLCLICKA, (LPARAM)&nmh, TRUE);
+    send_notify(pager, HDN_TRACKW, HDN_TRACKA, (LPARAM)&nmh, TRUE);
+}
+
+static void test_wm_notify_tooltip(HWND pager)
+{
+    NMTTDISPINFOW nmttdi;
+    const struct notify_test_tooltip *data;
+    INT i;
+
+    for (i = 0; i < ARRAY_SIZE(test_tooltip_data); i++)
+    {
+        data = test_tooltip_data + i;
+        notify_test_info.sub_test_id = i;
+
+        memset(&nmttdi, 0, sizeof(nmttdi));
+        if (data->send_sztext) memcpy(nmttdi.szText, data->send_sztext, data->send_sztext_size);
+        if (data->send_lpsztext) nmttdi.lpszText = data->send_lpsztext;
+        send_notify(pager, TTN_GETDISPINFOW, TTN_GETDISPINFOA, (LPARAM)&nmttdi, FALSE);
+        if (data->return_sztext)
+        {
+            if (data->return_sztext_size == -1)
+                ok(!lstrcmpW(nmttdi.szText, data->return_sztext), "Sub test %d expect %s, got %s\n", i,
+                   wine_dbgstr_w(data->return_sztext), wine_dbgstr_w(nmttdi.szText));
+            else
+                ok(!memcmp(nmttdi.szText, data->return_sztext, data->return_sztext_size), "Wrong szText content\n");
+        }
+        if (data->return_lpsztext)
+        {
+            if (IS_INTRESOURCE(data->return_lpsztext))
+                ok(nmttdi.lpszText == data->return_lpsztext, "Sub test %d expect %s, got %s\n", i,
+                   wine_dbgstr_w(data->return_lpsztext), wine_dbgstr_w(nmttdi.lpszText));
+            else
+                ok(!lstrcmpW(nmttdi.lpszText, data->return_lpsztext), "Test %d expect %s, got %s\n", i,
+                   wine_dbgstr_w(data->return_lpsztext), wine_dbgstr_w(nmttdi.lpszText));
+        }
+        if (data->return_hinst)
+            ok(nmttdi.hinst == data->return_hinst, "Sub test %d expect %p, got %p\n", i, data->return_hinst,
+               nmttdi.hinst);
+    }
 }
 
 static void test_wm_notify(void)
 {
     static const CHAR *class = "Pager notify class";
     HWND parent, pager;
+    /* Combo Box Ex */
+    static NMCOMBOBOXEXW nmcbe;
+    /* Date and Time Picker */
+    static NMDATETIMEFORMATQUERYW nmdtfq;
+    static NMDATETIMEWMKEYDOWNW nmdtkd;
+    static NMDATETIMESTRINGW nmdts;
+    /* Header */
+    static NMHDDISPINFOW nmhddi;
+    /* List View */
+    static NMLVDISPINFOW nmlvdi;
+    static NMLVGETINFOTIPW nmlvgit;
+    static NMLVFINDITEMW nmlvfi;
     /* Tool Bar */
     static NMTBRESTORE nmtbr;
     static NMTBSAVE nmtbs;
     static NMTOOLBARW nmtb;
     static NMTBDISPINFOW nmtbdi;
     static NMTBGETINFOTIPW nmtbgit;
+    /* Tree View */
+    static NMTVDISPINFOW nmtvdi;
+    static NMTVGETINFOTIPW nmtvgit;
+    static NMTREEVIEWW nmtv;
     static const struct generic_text_helper_para paras[] =
     {
+        /* Combo Box Ex */
+        {&nmcbe, sizeof(nmcbe), &nmcbe.ceItem.mask, CBEIF_TEXT, &nmcbe.ceItem.pszText, &nmcbe.ceItem.cchTextMax,
+         CBEN_INSERTITEM, CBEN_INSERTITEM, DONT_CONVERT_SEND | DONT_CONVERT_RECEIVE},
+        {&nmcbe, sizeof(nmcbe), &nmcbe.ceItem.mask, CBEIF_TEXT, &nmcbe.ceItem.pszText, &nmcbe.ceItem.cchTextMax,
+         CBEN_DELETEITEM, CBEN_DELETEITEM, DONT_CONVERT_SEND | DONT_CONVERT_RECEIVE},
+        {&nmcbe, sizeof(nmcbe), &nmcbe.ceItem.mask, CBEIF_TEXT, &nmcbe.ceItem.pszText, &nmcbe.ceItem.cchTextMax,
+         CBEN_GETDISPINFOW, CBEN_GETDISPINFOA, ZERO_SEND | SET_NULL_IF_NO_MASK | DONT_CONVERT_SEND | CONVERT_RECEIVE},
+        /* Date and Time Picker */
+        {&nmdtfq, sizeof(nmdtfq), NULL, 0, (WCHAR **)&nmdtfq.pszFormat, NULL, DTN_FORMATQUERYW, DTN_FORMATQUERYA,
+         CONVERT_SEND},
+        {&nmdtkd, sizeof(nmdtkd), NULL, 0, (WCHAR **)&nmdtkd.pszFormat, NULL, DTN_WMKEYDOWNW, DTN_WMKEYDOWNA,
+         CONVERT_SEND},
+        {&nmdts, sizeof(nmdts), NULL, 0, (WCHAR **)&nmdts.pszUserString, NULL, DTN_USERSTRINGW, DTN_USERSTRINGA,
+         CONVERT_SEND},
+        /* Header */
+        {&nmhddi, sizeof(nmhddi), &nmhddi.mask, HDI_TEXT, &nmhddi.pszText, &nmhddi.cchTextMax, HDN_GETDISPINFOW,
+         HDN_GETDISPINFOA, SEND_EMPTY_IF_NULL | CONVERT_SEND | CONVERT_RECEIVE},
+        /* List View */
+        {&nmlvfi, sizeof(nmlvfi), &nmlvfi.lvfi.flags, LVFI_STRING, (WCHAR **)&nmlvfi.lvfi.psz, NULL,
+         LVN_INCREMENTALSEARCHW, LVN_INCREMENTALSEARCHA, CONVERT_SEND},
+        {&nmlvfi, sizeof(nmlvfi), &nmlvfi.lvfi.flags, LVFI_SUBSTRING, (WCHAR **)&nmlvfi.lvfi.psz, NULL, LVN_ODFINDITEMW,
+         LVN_ODFINDITEMA, CONVERT_SEND},
+        {&nmlvdi, sizeof(nmlvdi), &nmlvdi.item.mask, LVIF_TEXT, &nmlvdi.item.pszText, &nmlvdi.item.cchTextMax,
+         LVN_BEGINLABELEDITW, LVN_BEGINLABELEDITA, SET_NULL_IF_NO_MASK | CONVERT_SEND | CONVERT_RECEIVE},
+        {&nmlvdi, sizeof(nmlvdi), &nmlvdi.item.mask, LVIF_TEXT, &nmlvdi.item.pszText, &nmlvdi.item.cchTextMax,
+         LVN_ENDLABELEDITW, LVN_ENDLABELEDITA, SET_NULL_IF_NO_MASK | CONVERT_SEND | CONVERT_RECEIVE},
+        {&nmlvdi, sizeof(nmlvdi), &nmlvdi.item.mask, LVIF_TEXT, &nmlvdi.item.pszText, &nmlvdi.item.cchTextMax,
+         LVN_GETDISPINFOW, LVN_GETDISPINFOA, DONT_CONVERT_SEND | CONVERT_RECEIVE},
+        {&nmlvdi, sizeof(nmlvdi), &nmlvdi.item.mask, LVIF_TEXT, &nmlvdi.item.pszText, &nmlvdi.item.cchTextMax,
+         LVN_SETDISPINFOW, LVN_SETDISPINFOA, SET_NULL_IF_NO_MASK | CONVERT_SEND | CONVERT_RECEIVE},
+        {&nmlvgit, sizeof(nmlvgit), NULL, 0, &nmlvgit.pszText, &nmlvgit.cchTextMax, LVN_GETINFOTIPW, LVN_GETINFOTIPA,
+         CONVERT_SEND | CONVERT_RECEIVE},
         /* Tool Bar */
         {&nmtbs, sizeof(nmtbs), NULL, 0, (WCHAR **)&nmtbs.tbButton.iString, NULL, TBN_SAVE, TBN_SAVE,
          DONT_CONVERT_SEND | DONT_CONVERT_RECEIVE},
@@ -795,7 +1235,50 @@ static void test_wm_notify(void)
         {&nmtb, sizeof(nmtb), NULL, 0, &nmtb.pszText, &nmtb.cchText, TBN_GETBUTTONINFOW, TBN_GETBUTTONINFOA,
          SEND_EMPTY_IF_NULL | CONVERT_SEND | CONVERT_RECEIVE},
         {&nmtbgit, sizeof(nmtbgit), NULL, 0, &nmtbgit.pszText, &nmtbgit.cchTextMax, TBN_GETINFOTIPW, TBN_GETINFOTIPA,
-         DONT_CONVERT_SEND | CONVERT_RECEIVE}
+         DONT_CONVERT_SEND | CONVERT_RECEIVE},
+        /* Tree View */
+        {&nmtvdi, sizeof(nmtvdi), &nmtvdi.item.mask, TVIF_TEXT, &nmtvdi.item.pszText, &nmtvdi.item.cchTextMax,
+         TVN_BEGINLABELEDITW, TVN_BEGINLABELEDITA, SET_NULL_IF_NO_MASK | CONVERT_SEND | CONVERT_RECEIVE},
+        {&nmtvdi, sizeof(nmtvdi), &nmtvdi.item.mask, TVIF_TEXT, &nmtvdi.item.pszText, &nmtvdi.item.cchTextMax,
+         TVN_ENDLABELEDITW, TVN_ENDLABELEDITA, SET_NULL_IF_NO_MASK | CONVERT_SEND | CONVERT_RECEIVE},
+        {&nmtvdi, sizeof(nmtvdi), &nmtvdi.item.mask, TVIF_TEXT, &nmtvdi.item.pszText, &nmtvdi.item.cchTextMax,
+         TVN_GETDISPINFOW, TVN_GETDISPINFOA, ZERO_SEND | DONT_CONVERT_SEND| CONVERT_RECEIVE},
+        {&nmtvdi, sizeof(nmtvdi), &nmtvdi.item.mask, TVIF_TEXT, &nmtvdi.item.pszText, &nmtvdi.item.cchTextMax,
+         TVN_SETDISPINFOW, TVN_SETDISPINFOA, SET_NULL_IF_NO_MASK | CONVERT_SEND | CONVERT_RECEIVE},
+        {&nmtvgit, sizeof(nmtvgit), NULL, 0, &nmtvgit.pszText, &nmtvgit.cchTextMax, TVN_GETINFOTIPW, TVN_GETINFOTIPA,
+         DONT_CONVERT_SEND | CONVERT_RECEIVE},
+        {&nmtv, sizeof(nmtv), &nmtv.itemNew.mask, TVIF_TEXT, &nmtv.itemNew.pszText, &nmtv.itemNew.cchTextMax,
+         TVN_SINGLEEXPAND, TVN_SINGLEEXPAND, DONT_CONVERT_SEND | DONT_CONVERT_RECEIVE, TVITEM_NEW_HANDLER},
+        {&nmtv, sizeof(nmtv), &nmtv.itemOld.mask, TVIF_TEXT, &nmtv.itemOld.pszText, &nmtv.itemOld.cchTextMax,
+         TVN_SINGLEEXPAND, TVN_SINGLEEXPAND, DONT_CONVERT_SEND | DONT_CONVERT_RECEIVE, TVITEM_OLD_HANDLER},
+        {&nmtv, sizeof(nmtv), &nmtv.itemNew.mask, TVIF_TEXT, &nmtv.itemNew.pszText, &nmtv.itemNew.cchTextMax,
+         TVN_BEGINDRAGW, TVN_BEGINDRAGA, CONVERT_SEND, TVITEM_NEW_HANDLER},
+        {&nmtv, sizeof(nmtv), &nmtv.itemOld.mask, TVIF_TEXT, &nmtv.itemOld.pszText, &nmtv.itemOld.cchTextMax,
+         TVN_BEGINDRAGW, TVN_BEGINDRAGA, DONT_CONVERT_SEND, TVITEM_OLD_HANDLER},
+        {&nmtv, sizeof(nmtv), &nmtv.itemNew.mask, TVIF_TEXT, &nmtv.itemNew.pszText, &nmtv.itemNew.cchTextMax,
+         TVN_BEGINRDRAGW, TVN_BEGINRDRAGA, CONVERT_SEND, TVITEM_NEW_HANDLER},
+        {&nmtv, sizeof(nmtv), &nmtv.itemOld.mask, TVIF_TEXT, &nmtv.itemOld.pszText, &nmtv.itemOld.cchTextMax,
+         TVN_BEGINRDRAGW, TVN_BEGINRDRAGA, DONT_CONVERT_SEND, TVITEM_OLD_HANDLER},
+        {&nmtv, sizeof(nmtv), &nmtv.itemNew.mask, TVIF_TEXT, &nmtv.itemNew.pszText, &nmtv.itemNew.cchTextMax,
+         TVN_ITEMEXPANDEDW, TVN_ITEMEXPANDEDA, CONVERT_SEND, TVITEM_NEW_HANDLER},
+        {&nmtv, sizeof(nmtv), &nmtv.itemOld.mask, TVIF_TEXT, &nmtv.itemOld.pszText, &nmtv.itemOld.cchTextMax,
+         TVN_ITEMEXPANDEDW, TVN_ITEMEXPANDEDA, DONT_CONVERT_SEND, TVITEM_OLD_HANDLER},
+        {&nmtv, sizeof(nmtv), &nmtv.itemNew.mask, TVIF_TEXT, &nmtv.itemNew.pszText, &nmtv.itemNew.cchTextMax,
+         TVN_ITEMEXPANDINGW, TVN_ITEMEXPANDINGA, CONVERT_SEND, TVITEM_NEW_HANDLER},
+        {&nmtv, sizeof(nmtv), &nmtv.itemOld.mask, TVIF_TEXT, &nmtv.itemOld.pszText, &nmtv.itemOld.cchTextMax,
+         TVN_ITEMEXPANDINGW, TVN_ITEMEXPANDINGA, DONT_CONVERT_SEND, TVITEM_OLD_HANDLER},
+        {&nmtv, sizeof(nmtv), &nmtv.itemNew.mask, TVIF_TEXT, &nmtv.itemNew.pszText, &nmtv.itemNew.cchTextMax,
+         TVN_DELETEITEMW, TVN_DELETEITEMA, DONT_CONVERT_SEND, TVITEM_NEW_HANDLER},
+        {&nmtv, sizeof(nmtv), &nmtv.itemOld.mask, TVIF_TEXT, &nmtv.itemOld.pszText, &nmtv.itemOld.cchTextMax,
+         TVN_DELETEITEMW, TVN_DELETEITEMA, CONVERT_SEND, TVITEM_OLD_HANDLER},
+        {&nmtv, sizeof(nmtv), &nmtv.itemNew.mask, TVIF_TEXT, &nmtv.itemNew.pszText, &nmtv.itemNew.cchTextMax,
+         TVN_SELCHANGINGW, TVN_SELCHANGINGA, CONVERT_SEND, TVITEM_NEW_HANDLER},
+        {&nmtv, sizeof(nmtv), &nmtv.itemOld.mask, TVIF_TEXT, &nmtv.itemOld.pszText, &nmtv.itemOld.cchTextMax,
+         TVN_SELCHANGINGW, TVN_SELCHANGINGA, CONVERT_SEND, TVITEM_OLD_HANDLER},
+        {&nmtv, sizeof(nmtv), &nmtv.itemNew.mask, TVIF_TEXT, &nmtv.itemNew.pszText, &nmtv.itemNew.cchTextMax,
+         TVN_SELCHANGEDW, TVN_SELCHANGEDA, CONVERT_SEND, TVITEM_NEW_HANDLER},
+        {&nmtv, sizeof(nmtv), &nmtv.itemOld.mask, TVIF_TEXT, &nmtv.itemOld.pszText, &nmtv.itemOld.cchTextMax,
+         TVN_SELCHANGEDW, TVN_SELCHANGEDA, CONVERT_SEND, TVITEM_OLD_HANDLER}
     };
     INT i;
 
@@ -811,6 +1294,12 @@ static void test_wm_notify(void)
 
     for (i = 0; i < ARRAY_SIZE(paras); i++)
         test_notify_generic_text_helper(pager, paras + i);
+
+    /* Tests for those that can't be covered by generic text test helper */
+    test_wm_notify_comboboxex(pager);
+    test_wm_notify_datetime(pager);
+    test_wm_notify_header(pager);
+    test_wm_notify_tooltip(pager);
 
     DestroyWindow(parent);
     UnregisterClassA(class, GetModuleHandleA(NULL));

@@ -302,7 +302,7 @@ static HRESULT process_received_message(listener_thread_params *params, char *me
     int msg_type;
     HRESULT ret;
 
-    ret = read_message(message, message_len, &msg, &msg_type);
+    ret = read_message(params->impl, message, message_len, &msg, &msg_type);
     if (FAILED(ret)) return ret;
 
     switch (msg_type)
@@ -556,6 +556,38 @@ static BOOL start_listening_on_all_addresses(IWSDiscoveryPublisherImpl *impl, UL
 cleanup:
     heap_free(adapter_addresses);
     return (ret == ERROR_SUCCESS) && (valid_listeners > 0);
+}
+
+HRESULT send_udp_unicast(char *data, int length, IWSDUdpAddress *remote_addr, int max_initial_delay)
+{
+    SOCKADDR_STORAGE address;
+    HRESULT ret;
+    SOCKET s;
+
+    ZeroMemory(&address, sizeof(SOCKADDR_STORAGE));
+
+    ret = IWSDUdpAddress_GetSockaddr(remote_addr, &address);
+
+    if (FAILED(ret))
+    {
+        WARN("No sockaddr specified in send_udp_unicast\n");
+        return ret;
+    }
+
+    /* Create a socket and bind to the adapter address */
+    s = socket(address.ss_family, SOCK_DGRAM, IPPROTO_UDP);
+
+    if (s == INVALID_SOCKET)
+    {
+        int error = WSAGetLastError();
+        WARN("Unable to create socket: %d\n", error);
+        return HRESULT_FROM_WIN32(error);
+    }
+
+    send_message(s, data, length, &address, max_initial_delay, UNICAST_UDP_REPEAT);
+    closesocket(s);
+
+    return S_OK;
 }
 
 void terminate_networking(IWSDiscoveryPublisherImpl *impl)

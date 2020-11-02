@@ -48,7 +48,7 @@ struct PROCESS_BASIC_INFORMATION_PRIVATE
 };
 
 static LONG *child_failures;
-static WORD cb_count;
+static WORD cb_count, cb_count_sys;
 static DWORD page_size;
 static BOOL is_win64 = sizeof(void *) > sizeof(int);
 static BOOL is_wow64;
@@ -70,7 +70,8 @@ static NTSTATUS (WINAPI *pLdrUnlockLoaderLock)(ULONG, ULONG_PTR);
 static void (WINAPI *pRtlAcquirePebLock)(void);
 static void (WINAPI *pRtlReleasePebLock)(void);
 static PVOID    (WINAPI *pResolveDelayLoadedAPI)(PVOID, PCIMAGE_DELAYLOAD_DESCRIPTOR,
-                                                 PDELAYLOAD_FAILURE_DLL_CALLBACK, PVOID,
+                                                 PDELAYLOAD_FAILURE_DLL_CALLBACK,
+                                                 PDELAYLOAD_FAILURE_SYSTEM_ROUTINE,
                                                  PIMAGE_THUNK_DATA ThunkAddress,ULONG);
 static PVOID (WINAPI *pRtlImageDirectoryEntryToData)(HMODULE,BOOL,WORD,ULONG *);
 static DWORD (WINAPI *pFlsAlloc)(PFLS_CALLBACK_FUNCTION);
@@ -972,6 +973,24 @@ static void test_Loader(void)
     nt_header.Signature = IMAGE_OS2_SIGNATURE;
     status = map_image_section( &nt_header, &section, section_data, __LINE__ );
     ok( status == STATUS_INVALID_IMAGE_NE_FORMAT, "NtCreateSection error %08x\n", status );
+    for (i = 0; i < 16; i++)
+    {
+        ((IMAGE_OS2_HEADER *)&nt_header)->ne_exetyp = i;
+        status = map_image_section( &nt_header, &section, section_data, __LINE__ );
+        switch (i)
+        {
+        case 2:
+            ok( status == STATUS_INVALID_IMAGE_WIN_16, "NtCreateSection %u error %08x\n", i, status );
+            break;
+        case 5:
+            ok( status == STATUS_INVALID_IMAGE_PROTECT, "NtCreateSection %u error %08x\n", i, status );
+            break;
+        default:
+            ok( status == STATUS_INVALID_IMAGE_NE_FORMAT, "NtCreateSection %u error %08x\n", i, status );
+            break;
+        }
+    }
+    ((IMAGE_OS2_HEADER *)&nt_header)->ne_exetyp = ((IMAGE_OS2_HEADER *)&nt_header_template)->ne_exetyp;
 
     nt_header.Signature = 0xdeadbeef;
     status = map_image_section( &nt_header, &section, section_data, __LINE__ );
@@ -3257,7 +3276,8 @@ todo_wine
     if (!ret)
         ok(GetLastError() == ERROR_INVALID_PARAMETER ||
            GetLastError() == ERROR_GEN_FAILURE /* win7 64-bit */ ||
-           GetLastError() == ERROR_INVALID_FUNCTION /* vista 64-bit */,
+           GetLastError() == ERROR_INVALID_FUNCTION /* vista 64-bit */ ||
+           GetLastError() == ERROR_ACCESS_DENIED /* Win10 32-bit */,
            "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
     SetLastError(0xdeadbeef);
     ctx.ContextFlags = CONTEXT_INTEGER;
@@ -3280,7 +3300,8 @@ todo_wine
     if (!ret)
         ok(GetLastError() == ERROR_INVALID_PARAMETER ||
            GetLastError() == ERROR_GEN_FAILURE /* win7 64-bit */ ||
-           GetLastError() == ERROR_INVALID_FUNCTION /* vista 64-bit */,
+           GetLastError() == ERROR_INVALID_FUNCTION /* vista 64-bit */ ||
+           GetLastError() == ERROR_ACCESS_DENIED /* Win10 32-bit */,
            "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
     SetLastError(0xdeadbeef);
     ctx.ContextFlags = CONTEXT_INTEGER;
@@ -3411,6 +3432,14 @@ static PVOID WINAPI failuredllhook(ULONG ul, DELAYLOAD_INFO* pd)
     }
     cb_count++;
     return (void*)0xdeadbeef;
+}
+
+static PVOID WINAPI failuresyshook(const char *dll, const char *function)
+{
+    ok(!strcmp(dll, "secur32.dll"), "wrong dll: %s\n", dll);
+    ok(!((ULONG_PTR)function >> 16), "expected ordinal, got %p\n", function);
+    cb_count_sys++;
+    return (void*)0x12345678;
 }
 
 static void test_ResolveDelayLoadedAPI(void)
@@ -3647,8 +3676,9 @@ static void test_ResolveDelayLoadedAPI(void)
                 load = (void *)GetProcAddress(htarget, (char*)iibn->Name);
             }
 
-            cb_count = 0;
-            ret = pResolveDelayLoadedAPI(hlib, delaydir, failuredllhook, NULL, &itda[i], 0);
+            /* test without failure dll callback */
+            cb_count = cb_count_sys = 0;
+            ret = pResolveDelayLoadedAPI(hlib, delaydir, NULL, failuresyshook, &itda[i], 0);
             if (td[i].succeeds)
             {
                 ok(ret != NULL, "Test %u: ResolveDelayLoadedAPI failed\n", i);
@@ -3656,11 +3686,42 @@ static void test_ResolveDelayLoadedAPI(void)
                 ok(ret == (void*)itda[i].u1.AddressOfData, "Test %u: expected %p, got %p\n",
                    i, ret, (void*)itda[i].u1.AddressOfData);
                 ok(!cb_count, "Test %u: Wrong callback count: %d\n", i, cb_count);
+                ok(!cb_count_sys, "Test %u: Wrong sys callback count: %d\n", i, cb_count_sys);
             }
             else
             {
-                ok(ret == (void*)0xdeadbeef, "Test %u: ResolveDelayLoadedAPI succeeded with %p\n", i, ret);
-                ok(cb_count, "Test %u: Wrong callback count: %d\n", i, cb_count);
+                ok(ret == (void*)0x12345678, "Test %u: ResolveDelayLoadedAPI succeeded with %p\n", i, ret);
+                ok(!cb_count, "Test %u: Wrong callback count: %d\n", i, cb_count);
+                ok(cb_count_sys == 1, "Test %u: Wrong sys callback count: %d\n", i, cb_count_sys);
+            }
+
+            /* test with failure dll callback */
+            cb_count = cb_count_sys = 0;
+            ret = pResolveDelayLoadedAPI(hlib, delaydir, failuredllhook, failuresyshook, &itda[i], 0);
+            if (td[i].succeeds)
+            {
+                ok(ret != NULL, "Test %u: ResolveDelayLoadedAPI failed\n", i);
+                ok(ret == load, "Test %u: expected %p, got %p\n", i, load, ret);
+                ok(ret == (void*)itda[i].u1.AddressOfData, "Test %u: expected %p, got %p\n",
+                   i, ret, (void*)itda[i].u1.AddressOfData);
+                ok(!cb_count, "Test %u: Wrong callback count: %d\n", i, cb_count);
+                ok(!cb_count_sys, "Test %u: Wrong sys callback count: %d\n", i, cb_count_sys);
+            }
+            else
+            {
+                if (ret == (void*)0x12345678)
+                {
+                    /* Win10+ sometimes buffers the address of the stub function */
+                    ok(!cb_count, "Test %u: Wrong callback count: %d\n", i, cb_count);
+                    ok(!cb_count_sys, "Test %u: Wrong sys callback count: %d\n", i, cb_count_sys);
+                }
+                else if (ret == (void*)0xdeadbeef)
+                {
+                    ok(cb_count == 1, "Test %u: Wrong callback count: %d\n", i, cb_count);
+                    ok(!cb_count_sys, "Test %u: Wrong sys callback count: %d\n", i, cb_count_sys);
+                }
+                else
+                    ok(0, "Test %u: ResolveDelayLoadedAPI succeeded with %p\n", i, ret);
             }
         }
         delaydir++;

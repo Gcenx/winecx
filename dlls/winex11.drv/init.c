@@ -162,26 +162,6 @@ static INT X11DRV_GetDeviceCaps( PHYSDEV dev, INT cap )
 {
     switch(cap)
     {
-    case HORZRES:
-    {
-        RECT primary_rect = get_primary_monitor_rect();
-        return primary_rect.right - primary_rect.left;
-    }
-    case VERTRES:
-    {
-        RECT primary_rect = get_primary_monitor_rect();
-        return primary_rect.bottom - primary_rect.top;
-    }
-    case DESKTOPHORZRES:
-    {
-        RECT virtual_rect = get_virtual_screen_rect();
-        return virtual_rect.right - virtual_rect.left;
-    }
-    case DESKTOPVERTRES:
-    {
-        RECT virtual_rect = get_virtual_screen_rect();
-        return virtual_rect.bottom - virtual_rect.top;
-    }
     case BITSPIXEL:
         return screen_bpp;
     case SIZEPALETTE:
@@ -338,7 +318,7 @@ static struct opengl_funcs * X11DRV_wine_get_wgl_driver( PHYSDEV dev, UINT versi
 {
     struct opengl_funcs *ret;
 
-    if (!(ret = get_wgl_driver( version )))
+    if (!(ret = get_glx_driver( version )))
     {
         dev = GET_NEXT_PHYSDEV( dev, wine_get_wgl_driver );
         ret = dev->funcs->wine_get_wgl_driver( dev, version );

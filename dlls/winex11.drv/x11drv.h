@@ -224,7 +224,7 @@ extern BOOL client_side_with_render DECLSPEC_HIDDEN;
 extern BOOL shape_layered_windows DECLSPEC_HIDDEN;
 extern const struct gdi_dc_funcs *X11DRV_XRender_Init(void) DECLSPEC_HIDDEN;
 
-extern struct opengl_funcs *get_wgl_driver(UINT) DECLSPEC_HIDDEN;
+extern struct opengl_funcs *get_glx_driver(UINT) DECLSPEC_HIDDEN;
 extern const struct vulkan_funcs *get_vulkan_driver(UINT) DECLSPEC_HIDDEN;
 
 /* IME support */
@@ -400,8 +400,6 @@ extern BOOL private_color_map DECLSPEC_HIDDEN;
 extern int primary_monitor DECLSPEC_HIDDEN;
 extern int copy_default_colors DECLSPEC_HIDDEN;
 extern int alloc_system_colors DECLSPEC_HIDDEN;
-extern BOOL use_egl DECLSPEC_HIDDEN;
-
 extern int xrender_error_base DECLSPEC_HIDDEN;
 extern HMODULE x11drv_module DECLSPEC_HIDDEN;
 extern char *process_name DECLSPEC_HIDDEN;
@@ -637,7 +635,7 @@ typedef int (*x11drv_error_callback)( Display *display, XErrorEvent *event, void
 
 extern void X11DRV_expect_error( Display *display, x11drv_error_callback callback, void *arg ) DECLSPEC_HIDDEN;
 extern int X11DRV_check_error(void) DECLSPEC_HIDDEN;
-extern void X11DRV_X_to_window_rect( struct x11drv_win_data *data, RECT *rect ) DECLSPEC_HIDDEN;
+extern void X11DRV_X_to_window_rect( struct x11drv_win_data *data, RECT *rect, int x, int y, int cx, int cy ) DECLSPEC_HIDDEN;
 extern POINT virtual_screen_to_root( INT x, INT y ) DECLSPEC_HIDDEN;
 extern POINT root_to_virtual_screen( INT x, INT y ) DECLSPEC_HIDDEN;
 extern RECT get_virtual_screen_rect(void) DECLSPEC_HIDDEN;

@@ -25,7 +25,6 @@ static VkResult create_instance(uint32_t extension_count,
         const char * const *enabled_extensions, VkInstance *vk_instance)
 {
     VkInstanceCreateInfo create_info;
-    VkResult vr;
 
     create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     create_info.pNext = NULL;
@@ -36,22 +35,32 @@ static VkResult create_instance(uint32_t extension_count,
     create_info.enabledExtensionCount = extension_count;
     create_info.ppEnabledExtensionNames = enabled_extensions;
 
-    if ((vr = vkCreateInstance(&create_info, NULL, vk_instance)) >= 0)
+    return vkCreateInstance(&create_info, NULL, vk_instance);
+}
+
+#define create_instance_skip(a, b, c) create_instance_skip_(__LINE__, a, b, c)
+static VkResult create_instance_skip_(unsigned int line, uint32_t extension_count,
+        const char * const *enabled_extensions, VkInstance *vk_instance)
+{
+    VkResult vr;
+
+    if ((vr = create_instance(extension_count, enabled_extensions, vk_instance)) >= 0)
         return vr;
 
     switch (vr)
     {
         case VK_ERROR_EXTENSION_NOT_PRESENT:
             if (extension_count == 1)
-                skip("Instance extension '%s' not supported.\n", enabled_extensions[0]);
+                skip_(__FILE__, line)("Instance extension '%s' not supported.\n", enabled_extensions[0]);
             else
-                skip("Instance extensions not supported.\n");
+                skip_(__FILE__, line)("Instance extensions not supported.\n");
             break;
 
         default:
-            skip("Failed to create Vulkan instance, vr %d.\n", vr);
+            skip_(__FILE__, line)("Failed to create Vulkan instance, vr %d.\n", vr);
             break;
     }
+
     return vr;
 }
 
@@ -149,6 +158,69 @@ static void enumerate_physical_device(VkPhysicalDevice vk_physical_device)
             VK_VERSION_PATCH(properties.apiVersion));
 }
 
+static void test_enumerate_physical_device2(void)
+{
+    static const char *procs[] = {"vkGetPhysicalDeviceProperties2", "vkGetPhysicalDeviceProperties2KHR"};
+    static const char *extensions[] = {VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
+    PFN_vkGetPhysicalDeviceProperties2 pfn_vkGetPhysicalDeviceProperties2;
+    VkPhysicalDeviceProperties2 properties2;
+    VkPhysicalDevice *vk_physical_devices;
+    VkPhysicalDeviceIDProperties id;
+    VkInstance vk_instance;
+    unsigned int i, j;
+    const LUID *luid;
+    uint32_t count;
+    VkResult vr;
+
+    if ((vr = create_instance_skip(ARRAY_SIZE(extensions), extensions, &vk_instance)) < 0)
+        return;
+    ok(vr == VK_SUCCESS, "Got unexpected VkResult %d.\n", vr);
+
+    vr = vkEnumeratePhysicalDevices(vk_instance, &count, NULL);
+    ok(vr == VK_SUCCESS, "Got unexpected VkResult %d.\n", vr);
+    if (!count)
+    {
+        skip("No physical devices.\n");
+        vkDestroyInstance(vk_instance, NULL);
+        return;
+    }
+
+    vk_physical_devices = heap_calloc(count, sizeof(*vk_physical_devices));
+    ok(!!vk_physical_devices, "Failed to allocate memory.\n");
+    vr = vkEnumeratePhysicalDevices(vk_instance, &count, vk_physical_devices);
+    ok(vr == VK_SUCCESS, "Got unexpected VkResult %d.\n", vr);
+
+    for (i = 0; i < ARRAY_SIZE(procs); ++i)
+    {
+        pfn_vkGetPhysicalDeviceProperties2
+                = (PFN_vkGetPhysicalDeviceProperties2)vkGetInstanceProcAddr(vk_instance, procs[i]);
+        if (!pfn_vkGetPhysicalDeviceProperties2)
+        {
+            skip("%s is not available.\n", procs[i]);
+            continue;
+        }
+
+        for (j = 0; j < count; ++j)
+        {
+            properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+            properties2.pNext = &id;
+
+            memset(&id, 0, sizeof(id));
+            id.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
+
+            pfn_vkGetPhysicalDeviceProperties2(vk_physical_devices[j], &properties2);
+            luid = (const LUID *)id.deviceLUID;
+            trace("Device '%s', device UUID: %s, driver UUID: %s, device LUID: %08x:%08x.\n",
+                  properties2.properties.deviceName, wine_dbgstr_guid((const GUID *)id.deviceUUID),
+                  wine_dbgstr_guid((const GUID *)id.driverUUID), luid->HighPart, luid->LowPart);
+            todo_wine ok(id.deviceLUIDValid == VK_TRUE, "Expected valid device LUID.\n");
+        }
+    }
+
+    heap_free(vk_physical_devices);
+    vkDestroyInstance(vk_instance, NULL);
+}
+
 static void enumerate_device_queues(VkPhysicalDevice vk_physical_device)
 {
     VkPhysicalDeviceProperties device_properties;
@@ -186,7 +258,7 @@ static void test_physical_device_groups(void)
         VK_KHR_DEVICE_GROUP_CREATION_EXTENSION_NAME,
     };
 
-    if ((vr = create_instance(ARRAY_SIZE(extensions), extensions, &vk_instance)) < 0)
+    if ((vr = create_instance_skip(ARRAY_SIZE(extensions), extensions, &vk_instance)) < 0)
         return;
     ok(vr == VK_SUCCESS, "Got unexpected VkResult %d.\n", vr);
 
@@ -232,6 +304,86 @@ static void test_physical_device_groups(void)
     vkDestroyInstance(vk_instance, NULL);
 }
 
+static void test_destroy_command_pool(VkPhysicalDevice vk_physical_device)
+{
+    VkCommandBufferAllocateInfo allocate_info;
+    VkCommandPoolCreateInfo pool_info;
+    VkCommandBuffer vk_cmd_buffers[4];
+    uint32_t queue_family_index;
+    VkCommandPool vk_cmd_pool;
+    VkDevice vk_device;
+    VkResult vr;
+
+    if ((vr = create_device(vk_physical_device, 0, NULL, NULL, &vk_device)) < 0)
+    {
+        skip("Failed to create device, vr %d.\n", vr);
+        return;
+    }
+
+    find_queue_family(vk_physical_device, VK_QUEUE_GRAPHICS_BIT, &queue_family_index);
+
+    pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pool_info.pNext = NULL;
+    pool_info.flags = 0;
+    pool_info.queueFamilyIndex = queue_family_index;
+    vr = vkCreateCommandPool(vk_device, &pool_info, NULL, &vk_cmd_pool);
+    ok(vr == VK_SUCCESS, "Got unexpected VkResult %d.\n", vr);
+
+    allocate_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocate_info.pNext = NULL;
+    allocate_info.commandPool = vk_cmd_pool;
+    allocate_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocate_info.commandBufferCount = ARRAY_SIZE(vk_cmd_buffers);
+    vr = vkAllocateCommandBuffers(vk_device, &allocate_info, vk_cmd_buffers);
+    ok(vr == VK_SUCCESS, "Got unexpected VkResult %d.\n", vr);
+
+    vkDestroyCommandPool(vk_device, vk_cmd_pool, NULL);
+    vkDestroyCommandPool(vk_device, VK_NULL_HANDLE, NULL);
+
+    vkDestroyDevice(vk_device, NULL);
+}
+
+static void test_unsupported_instance_extensions(void)
+{
+    VkInstance vk_instance;
+    unsigned int i;
+    VkResult vr;
+
+    static const char *extensions[] =
+    {
+        "VK_KHR_xcb_surface",
+        "VK_KHR_xlib_surface",
+    };
+
+    for (i = 0; i < ARRAY_SIZE(extensions); ++i)
+    {
+        vr = create_instance(1, &extensions[i], &vk_instance);
+        ok(vr == VK_ERROR_EXTENSION_NOT_PRESENT,
+                "Got VkResult %d for extension %s.\n", vr, extensions[i]);
+    }
+}
+
+static void test_unsupported_device_extensions(VkPhysicalDevice vk_physical_device)
+{
+    VkDevice vk_device;
+    unsigned int i;
+    VkResult vr;
+
+    static const char *extensions[] =
+    {
+        "VK_KHR_external_fence_fd",
+        "VK_KHR_external_memory_fd",
+        "VK_KHR_external_semaphore_fd",
+    };
+
+    for (i = 0; i < ARRAY_SIZE(extensions); ++i)
+    {
+        vr = create_device(vk_physical_device, 1, &extensions[i], NULL, &vk_device);
+        ok(vr == VK_ERROR_EXTENSION_NOT_PRESENT,
+                "Got VkResult %d for extension %s.\n", vr, extensions[i]);
+    }
+}
+
 static void for_each_device(void (*test_func)(VkPhysicalDevice))
 {
     VkPhysicalDevice *vk_physical_devices;
@@ -240,7 +392,7 @@ static void for_each_device(void (*test_func)(VkPhysicalDevice))
     uint32_t count;
     VkResult vr;
 
-    if ((vr = create_instance(0, NULL, &vk_instance)) < 0)
+    if ((vr = create_instance_skip(0, NULL, &vk_instance)) < 0)
         return;
     ok(vr == VK_SUCCESS, "Got unexpected VkResult %d.\n", vr);
 
@@ -270,6 +422,10 @@ START_TEST(vulkan)
 {
     test_instance_version();
     for_each_device(enumerate_physical_device);
+    test_enumerate_physical_device2();
     for_each_device(enumerate_device_queues);
     test_physical_device_groups();
+    for_each_device(test_destroy_command_pool);
+    test_unsupported_instance_extensions();
+    for_each_device(test_unsupported_device_extensions);
 }

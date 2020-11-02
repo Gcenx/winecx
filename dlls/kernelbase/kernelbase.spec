@@ -206,10 +206,10 @@
 @ stdcall CreatePrivateObjectSecurityEx(ptr ptr ptr ptr long long long ptr) advapi32.CreatePrivateObjectSecurityEx
 @ stdcall CreatePrivateObjectSecurityWithMultipleInheritance(ptr ptr ptr ptr long long long long ptr) advapi32.CreatePrivateObjectSecurityWithMultipleInheritance
 @ stdcall CreateProcessA(str str ptr ptr long long ptr str ptr ptr) kernel32.CreateProcessA
-@ stdcall CreateProcessAsUserA(long str str ptr ptr long long ptr str ptr ptr) advapi32.CreateProcessAsUserA
-@ stdcall CreateProcessAsUserW(long wstr wstr ptr ptr long long ptr wstr ptr ptr) advapi32.CreateProcessAsUserW
-# @ stub CreateProcessInternalA
-# @ stub CreateProcessInternalW
+@ stdcall CreateProcessAsUserA(long str str ptr ptr long long ptr str ptr ptr) kernel32.CreateProcessAsUserA
+@ stdcall CreateProcessAsUserW(long wstr wstr ptr ptr long long ptr wstr ptr ptr) kernel32.CreateProcessAsUserW
+@ stdcall CreateProcessInternalA(long str str ptr ptr long long ptr str ptr ptr ptr) kernel32.CreateProcessInternalA
+@ stdcall CreateProcessInternalW(long wstr wstr ptr ptr long long ptr wstr ptr ptr ptr) kernel32.CreateProcessInternalW
 @ stdcall CreateProcessW(wstr wstr ptr ptr long long ptr wstr ptr ptr) kernel32.CreateProcessW
 @ stdcall CreateRemoteThread(long ptr long ptr long long ptr) kernel32.CreateRemoteThread
 @ stdcall CreateRemoteThreadEx(long ptr long ptr ptr long ptr ptr) kernel32.CreateRemoteThreadEx
@@ -373,7 +373,7 @@
 # @ stub FindPackagesByPackageFamily
 @ stdcall FindResourceExW(long wstr wstr long) kernel32.FindResourceExW
 @ stdcall FindResourceW(long wstr wstr) kernel32.FindResourceW
-@ stub FindStringOrdinal
+@ stdcall FindStringOrdinal(long wstr long wstr long long) kernel32.FindStringOrdinal
 @ stdcall FindVolumeClose(ptr) kernel32.FindVolumeClose
 @ stdcall FlsAlloc(ptr) kernel32.FlsAlloc
 @ stdcall FlsFree(long) kernel32.FlsFree
@@ -414,7 +414,7 @@
 # @ stub GetAppDataFolder
 # @ stub GetAppModelVersion
 # @ stub GetApplicationRecoveryCallback
-# @ stub GetApplicationRestartSettings
+@ stdcall GetApplicationRestartSettings(long ptr ptr ptr) kernel32.GetApplicationRestartSettings
 # @ stub GetApplicationUserModelId
 # @ stub GetApplicationUserModelIdFromToken
 # @ stub GetAppliedGPOListInternalA
@@ -471,7 +471,7 @@
 # @ stub GetCurrentTargetPlatformContext
 @ stdcall -norelay GetCurrentThread() kernel32.GetCurrentThread
 @ stdcall -norelay GetCurrentThreadId() kernel32.GetCurrentThreadId
-# @ stub GetCurrentThreadStackLimits
+@ stdcall GetCurrentThreadStackLimits(ptr ptr) kernel32.GetCurrentThreadStackLimits
 @ stdcall GetDateFormatA(long long ptr str ptr long) kernel32.GetDateFormatA
 @ stdcall GetDateFormatEx(wstr long ptr wstr ptr long wstr) kernel32.GetDateFormatEx
 @ stdcall GetDateFormatW(long long ptr wstr ptr long) kernel32.GetDateFormatW
@@ -631,7 +631,7 @@
 # @ stub GetProcessImageFileNameW
 # @ stub GetProcessInformation
 # @ stub GetProcessMemoryInfo
-# @ stub GetProcessMitigationPolicy
+@ stdcall GetProcessMitigationPolicy(long long ptr long) kernel32.GetProcessMitigationPolicy
 @ stub GetProcessPreferredUILanguages
 @ stdcall GetProcessPriorityBoost(long ptr) kernel32.GetProcessPriorityBoost
 @ stdcall GetProcessShutdownParameters(ptr ptr) kernel32.GetProcessShutdownParameters
@@ -645,7 +645,7 @@
 # @ stub GetPublisherCacheFolder
 # @ stub GetPublisherRootFolder
 @ stdcall GetQueuedCompletionStatus(long ptr ptr ptr long) kernel32.GetQueuedCompletionStatus
-@ stub GetQueuedCompletionStatusEx
+@ stdcall GetQueuedCompletionStatusEx(ptr ptr long ptr long long) kernel32.GetQueuedCompletionStatusEx
 # @ stub GetRegistryExtensionFlags
 # @ stub GetRoamingLastObservedChangeTime
 @ stdcall GetSecurityDescriptorControl(ptr ptr ptr) advapi32.GetSecurityDescriptorControl
@@ -1023,31 +1023,31 @@
 @ stdcall PathAddBackslashW(wstr) shlwapi.PathAddBackslashW
 @ stdcall PathAddExtensionA(str str) shlwapi.PathAddExtensionA
 @ stdcall PathAddExtensionW(wstr wstr) shlwapi.PathAddExtensionW
-# @ stub PathAllocCanonicalize
-# @ stub PathAllocCombine
+@ stdcall PathAllocCanonicalize(wstr long ptr)
+@ stdcall PathAllocCombine(wstr wstr long ptr)
 @ stdcall PathAppendA(str str) shlwapi.PathAppendA
 @ stdcall PathAppendW(wstr wstr) shlwapi.PathAppendW
 @ stdcall PathCanonicalizeA(ptr str) shlwapi.PathCanonicalizeA
 @ stdcall PathCanonicalizeW(ptr wstr) shlwapi.PathCanonicalizeW
 @ stdcall PathCchAddBackslash(wstr long)
 @ stdcall PathCchAddBackslashEx(wstr long ptr ptr)
-# @ stub PathCchAddExtension
-# @ stub PathCchAppend
-# @ stub PathCchAppendEx
-# @ stub PathCchCanonicalize
-# @ stub PathCchCanonicalizeEx
-# @ stub PathCchCombine
-# @ stub PathCchCombineEx
-# @ stub PathCchFindExtension
-# @ stub PathCchIsRoot
-# @ stub PathCchRemoveBackslash
-# @ stub PathCchRemoveBackslashEx
-# @ stub PathCchRemoveExtension
-# @ stub PathCchRemoveFileSpec
-# @ stub PathCchRenameExtension
-# @ stub PathCchSkipRoot
-# @ stub PathCchStripPrefix
-# @ stub PathCchStripToRoot
+@ stdcall PathCchAddExtension(wstr long wstr)
+@ stdcall PathCchAppend(wstr long wstr)
+@ stdcall PathCchAppendEx(wstr long wstr long)
+@ stdcall PathCchCanonicalize(ptr long wstr)
+@ stdcall PathCchCanonicalizeEx(ptr long wstr long)
+@ stdcall PathCchCombine(ptr long wstr wstr)
+@ stdcall PathCchCombineEx(ptr long wstr wstr long)
+@ stdcall PathCchFindExtension(wstr long ptr)
+@ stdcall PathCchIsRoot(wstr)
+@ stdcall PathCchRemoveBackslash(wstr long)
+@ stdcall PathCchRemoveBackslashEx(wstr long ptr ptr)
+@ stdcall PathCchRemoveExtension(wstr long)
+@ stdcall PathCchRemoveFileSpec(wstr long)
+@ stdcall PathCchRenameExtension(wstr long wstr)
+@ stdcall PathCchSkipRoot(wstr ptr)
+@ stdcall PathCchStripPrefix(wstr long)
+@ stdcall PathCchStripToRoot(wstr long)
 @ stdcall PathCombineA(ptr str str) shlwapi.PathCombineA
 @ stdcall PathCombineW(ptr wstr wstr) shlwapi.PathCombineW
 @ stdcall PathCommonPrefixA(str str ptr) shlwapi.PathCommonPrefixA
@@ -1082,7 +1082,7 @@
 @ stdcall PathIsSameRootA(str str) shlwapi.PathIsSameRootA
 @ stdcall PathIsSameRootW(wstr wstr) shlwapi.PathIsSameRootW
 @ stdcall PathIsUNCA(str) shlwapi.PathIsUNCA
-# @ stub PathIsUNCEx
+@ stdcall PathIsUNCEx(wstr ptr)
 @ stdcall PathIsUNCServerA(str) shlwapi.PathIsUNCServerA
 @ stdcall PathIsUNCServerShareA(str) shlwapi.PathIsUNCServerShareA
 @ stdcall PathIsUNCServerShareW(wstr) shlwapi.PathIsUNCServerShareW
@@ -1461,7 +1461,7 @@
 @ stdcall SetProcessPriorityBoost(long long) kernel32.SetProcessPriorityBoost
 @ stdcall SetProcessShutdownParameters(long long) kernel32.SetProcessShutdownParameters
 # @ stub SetProcessValidCallTargets
-# @ stub SetProcessWorkingSetSizeEx
+@ stdcall SetProcessWorkingSetSizeEx(long long long long) kernel32.SetProcessWorkingSetSizeEx
 # @ stub SetProtectedPolicy
 # @ stub SetRoamingLastObservedChangeTime
 @ stub SetSecurityAccessMask
@@ -1696,10 +1696,10 @@
 @ stdcall WaitForThreadpoolWorkCallbacks(ptr long) kernel32.WaitForThreadpoolWorkCallbacks
 # @ stub WaitForUserPolicyForegroundProcessingInternal
 @ stdcall WaitNamedPipeW(wstr long) kernel32.WaitNamedPipeW
-# @ stub WaitOnAddress
+@ stdcall WaitOnAddress(ptr ptr long long)
 @ stdcall WakeAllConditionVariable(ptr) kernel32.WakeAllConditionVariable
-# @ stub WakeByAddressAll
-# @ stub WakeByAddressSingle
+@ stdcall WakeByAddressAll(ptr) ntdll.RtlWakeAddressAll
+@ stdcall WakeByAddressSingle(ptr) ntdll.RtlWakeAddressSingle
 @ stdcall WakeConditionVariable(ptr) kernel32.WakeConditionVariable
 # @ stub WerGetFlags
 @ stdcall WerRegisterFile(wstr long long) kernel32.WerRegisterFile

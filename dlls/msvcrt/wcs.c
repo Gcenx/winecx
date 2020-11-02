@@ -151,7 +151,8 @@ int CDECL MSVCRT__wcsnicoll_l(const MSVCRT_wchar_t* str1, const MSVCRT_wchar_t* 
     if(!locinfo->lc_handle[MSVCRT_LC_COLLATE])
         return strncmpiW(str1, str2, count);
     return CompareStringW(locinfo->lc_handle[MSVCRT_LC_COLLATE], NORM_IGNORECASE,
-			  str1, count, str2, count)-CSTR_EQUAL;
+			  str1, MSVCRT_wcsnlen(str1, count),
+                          str2, MSVCRT_wcsnlen(str2, count))-CSTR_EQUAL;
 }
 
 /*********************************************************************
@@ -267,6 +268,14 @@ MSVCRT_wchar_t* CDECL MSVCRT__wcsupr_l( MSVCRT_wchar_t *str, MSVCRT__locale_t lo
 }
 
 /******************************************************************
+ *              _wcsupr (MSVCRT.@)
+ */
+MSVCRT_wchar_t* CDECL MSVCRT__wcsupr( MSVCRT_wchar_t *str )
+{
+    return MSVCRT__wcsupr_l(str, NULL);
+}
+
+/******************************************************************
  *		_wcslwr_s_l (MSVCRT.@)
  */
 int CDECL MSVCRT__wcslwr_s_l( MSVCRT_wchar_t* str, MSVCRT_size_t n, MSVCRT__locale_t locale )
@@ -335,7 +344,9 @@ int CDECL MSVCRT__wcsncoll_l(const MSVCRT_wchar_t* str1, const MSVCRT_wchar_t* s
 
     if(!locinfo->lc_handle[MSVCRT_LC_COLLATE])
         return strncmpW(str1, str2, count);
-    return CompareStringW(locinfo->lc_handle[MSVCRT_LC_COLLATE], 0, str1, count, str2, count)-CSTR_EQUAL;
+    return CompareStringW(locinfo->lc_handle[MSVCRT_LC_COLLATE], 0,
+              str1, MSVCRT_wcsnlen(str1, count),
+              str2, MSVCRT_wcsnlen(str2, count))-CSTR_EQUAL;
 }
 
 /*********************************************************************
@@ -1003,6 +1014,15 @@ int CDECL MSVCRT_vsprintf_s( char *str, MSVCRT_size_t num, const char *format, _
 int CDECL MSVCRT__vscprintf( const char *format, __ms_va_list valist )
 {
     return MSVCRT_vsnprintf( NULL, INT_MAX, format, valist );
+}
+
+/*********************************************************************
+ *              _vscprintf_l (MSVCRT.@)
+ */
+int CDECL MSVCRT__vscprintf_l(const char *format,
+        MSVCRT__locale_t locale, __ms_va_list valist)
+{
+    return MSVCRT_vsnprintf_l(NULL, INT_MAX, format, locale, valist);
 }
 
 /*********************************************************************
@@ -1796,6 +1816,14 @@ INT CDECL MSVCRT_iswalnum( MSVCRT_wchar_t wc )
 }
 
 /*********************************************************************
+ *		_iswalnum_l (MSVCRT.@)
+ */
+int CDECL MSVCRT__iswalnum_l( MSVCRT_wchar_t wc, MSVCRT__locale_t locale )
+{
+    return isalnumW( wc );
+}
+
+/*********************************************************************
  *		iswalpha (MSVCRT.@)
  */
 INT CDECL MSVCRT_iswalpha( MSVCRT_wchar_t wc )
@@ -1815,6 +1843,14 @@ INT CDECL MSVCRT__iswalpha_l( MSVCRT_wchar_t wc, MSVCRT__locale_t locale )
  *		iswcntrl (MSVCRT.@)
  */
 INT CDECL MSVCRT_iswcntrl( MSVCRT_wchar_t wc )
+{
+    return iscntrlW( wc );
+}
+
+/*********************************************************************
+ *		_iswcntrl_l (MSVCRT.@)
+ */
+int CDECL MSVCRT__iswcntrl_l( MSVCRT_wchar_t wc, MSVCRT__locale_t locale )
 {
     return iscntrlW( wc );
 }
@@ -1844,6 +1880,14 @@ INT CDECL MSVCRT_iswgraph( MSVCRT_wchar_t wc )
 }
 
 /*********************************************************************
+ *		_iswgraph_l (MSVCRT.@)
+ */
+int CDECL MSVCRT__iswgraph_l( MSVCRT_wchar_t wc, MSVCRT__locale_t locale )
+{
+    return isgraphW( wc );
+}
+
+/*********************************************************************
  *		iswlower (MSVCRT.@)
  */
 INT CDECL MSVCRT_iswlower( MSVCRT_wchar_t wc )
@@ -1852,9 +1896,25 @@ INT CDECL MSVCRT_iswlower( MSVCRT_wchar_t wc )
 }
 
 /*********************************************************************
+ *		_iswlower_l (MSVCRT.@)
+ */
+int CDECL MSVCRT__iswlower_l( MSVCRT_wchar_t wc, MSVCRT__locale_t locale )
+{
+    return islowerW( wc );
+}
+
+/*********************************************************************
  *		iswprint (MSVCRT.@)
  */
 INT CDECL MSVCRT_iswprint( MSVCRT_wchar_t wc )
+{
+    return isprintW( wc );
+}
+
+/*********************************************************************
+ *		_iswprint_l (MSVCRT.@)
+ */
+int CDECL MSVCRT__iswprint_l( MSVCRT_wchar_t wc, MSVCRT__locale_t locale )
 {
     return isprintW( wc );
 }
@@ -1900,9 +1960,25 @@ INT CDECL MSVCRT_iswupper( MSVCRT_wchar_t wc )
 }
 
 /*********************************************************************
+ *		_iswupper_l (MSVCRT.@)
+ */
+int CDECL MSVCRT__iswupper_l( MSVCRT_wchar_t wc, MSVCRT__locale_t locale )
+{
+    return isupperW( wc );
+}
+
+/*********************************************************************
  *		iswxdigit (MSVCRT.@)
  */
 INT CDECL MSVCRT_iswxdigit( MSVCRT_wchar_t wc )
+{
+    return isxdigitW( wc );
+}
+
+/*********************************************************************
+ *		_iswxdigit_l (MSVCRT.@)
+ */
+int CDECL MSVCRT__iswxdigit_l( MSVCRT_wchar_t wc, MSVCRT__locale_t locale )
 {
     return isxdigitW( wc );
 }
@@ -2214,6 +2290,15 @@ MSVCRT_long CDECL MSVCRT__wcstol_l(const MSVCRT_wchar_t *s,
 }
 
 /*********************************************************************
+ *  wcstol (MSVCRT.@)
+ */
+MSVCRT_long CDECL MSVCRT_wcstol(const MSVCRT_wchar_t *s,
+        MSVCRT_wchar_t **end, int base)
+{
+    return MSVCRT__wcstol_l(s, end, base, NULL);
+}
+
+/*********************************************************************
  *  _wtoi_l (MSVCRT.@)
  */
 int __cdecl MSVCRT__wtoi_l(const MSVCRT_wchar_t *str, MSVCRT__locale_t locale)
@@ -2428,6 +2513,14 @@ MSVCRT_wchar_t* CDECL MSVCRT_wcschr(const MSVCRT_wchar_t *str, MSVCRT_wchar_t ch
     return strchrW(str, ch);
 }
 
+/*********************************************************************
+ *              wcsrchr (MSVCRT.@)
+ */
+MSVCRT_wchar_t* CDECL MSVCRT_wcsrchr(const MSVCRT_wchar_t *str, MSVCRT_wchar_t ch)
+{
+    return strrchrW(str, ch);
+}
+
 /***********************************************************************
  *              wcslen (MSVCRT.@)
  */
@@ -2543,4 +2636,12 @@ MSVCRT_size_t CDECL MSVCRT_wcsxfrm(MSVCRT_wchar_t *dest,
         const MSVCRT_wchar_t *src, MSVCRT_size_t len)
 {
     return MSVCRT__wcsxfrm_l(dest, src, len, NULL);
+}
+
+/*********************************************************************
+ *              wcscmp (MSVCRT.@)
+ */
+int CDECL MSVCRT_wcscmp(const MSVCRT_wchar_t *str1, const MSVCRT_wchar_t *str2)
+{
+    return strcmpW(str1, str2);
 }

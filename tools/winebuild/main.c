@@ -88,6 +88,7 @@ struct strarray cc_command = { 0 };
 struct strarray ld_command = { 0 };
 struct strarray nm_command = { 0 };
 char *cpu_option = NULL;
+char *fpu_option = NULL;
 char *arch_option = NULL;
 #ifdef __SOFTFP__
 const char *float_abi_option = "soft";
@@ -163,7 +164,7 @@ static void init_dll_name( DLLSPEC *spec )
         spec->dll_name = xstrdup( spec->file_name );
         if ((p = strrchr( spec->dll_name, '.' ))) *p = 0;
     }
-    spec->c_name = make_c_identifier( spec->dll_name );
+    if (spec->dll_name) spec->c_name = make_c_identifier( spec->dll_name );
 }
 
 /* set the dll subsystem */
@@ -412,6 +413,7 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
             else if (!strcmp( optarg, "arm" )) thumb_mode = 0;
             else if (!strcmp( optarg, "thumb" )) thumb_mode = 1;
             else if (!strncmp( optarg, "cpu=", 4 )) cpu_option = xstrdup( optarg + 4 );
+            else if (!strncmp( optarg, "fpu=", 4 )) fpu_option = xstrdup( optarg + 4 );
             else if (!strncmp( optarg, "arch=", 5 )) arch_option = xstrdup( optarg + 5 );
             else if (!strncmp( optarg, "float-abi=", 10 )) float_abi_option = xstrdup( optarg + 10 );
             else fatal_error( "Unknown -m option '%s'\n", optarg );

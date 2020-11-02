@@ -1103,7 +1103,6 @@ BOOL WINAPI SetFileInformationByHandle( HANDLE file, FILE_INFO_BY_HANDLE_CLASS c
     case FileStreamInfo:
     case FileIdBothDirectoryInfo:
     case FileIdBothDirectoryRestartInfo:
-    case FileIoPriorityHintInfo:
     case FileFullDirectoryInfo:
     case FileFullDirectoryRestartInfo:
     case FileStorageInfo:
@@ -1118,7 +1117,9 @@ BOOL WINAPI SetFileInformationByHandle( HANDLE file, FILE_INFO_BY_HANDLE_CLASS c
     case FileDispositionInfo:
         status = NtSetInformationFile( file, &io, info, size, FileDispositionInformation );
         break;
-
+    case FileIoPriorityHintInfo:
+        status = NtSetInformationFile( file, &io, info, size, FileIoPriorityHintInformation );
+        break;
     case FileStandardInfo:
     case FileCompressionInfo:
     case FileAttributeTagInfo:
@@ -1589,8 +1590,8 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
 
     if (sa && sa->bInheritHandle) attr.Attributes |= OBJ_INHERIT;
 
-    status = NtCreateFile( &ret, access | SYNCHRONIZE, &attr, &io, NULL, attributes,
-                           sharing, nt_disposition[creation - CREATE_NEW],
+    status = NtCreateFile( &ret, access | SYNCHRONIZE | FILE_READ_ATTRIBUTES, &attr, &io,
+                           NULL, attributes, sharing, nt_disposition[creation - CREATE_NEW],
                            options, NULL, 0 );
     if (status)
     {

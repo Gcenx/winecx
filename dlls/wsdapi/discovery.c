@@ -78,6 +78,7 @@ static ULONG WINAPI IWSDiscoveryPublisherImpl_Release(IWSDiscoveryPublisher *ifa
     IWSDiscoveryPublisherImpl *This = impl_from_IWSDiscoveryPublisher(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
     struct notificationSink *sink, *cursor;
+    struct message_id *msg_id, *msg_id_cursor;
 
     TRACE("(%p) ref=%d\n", This, ref);
 
@@ -98,6 +99,15 @@ static ULONG WINAPI IWSDiscoveryPublisherImpl_Release(IWSDiscoveryPublisher *ifa
         }
 
         DeleteCriticalSection(&This->notification_sink_critical_section);
+
+        LIST_FOR_EACH_ENTRY_SAFE(msg_id, msg_id_cursor, &This->message_ids, struct message_id, entry)
+        {
+            heap_free(msg_id->id);
+            list_remove(&msg_id->entry);
+            heap_free(msg_id);
+        }
+
+        DeleteCriticalSection(&This->message_ids_critical_section);
         HeapFree(GetProcessHeap(), 0, This);
     }
 
@@ -223,11 +233,13 @@ static HRESULT WINAPI IWSDiscoveryPublisherImpl_MatchProbe(IWSDiscoveryPublisher
                                                            const WSD_NAME_LIST *pTypesList, const WSD_URI_LIST *pScopesList,
                                                            const WSD_URI_LIST *pXAddrsList)
 {
-    FIXME("(%p, %p, %p, %s, %s, %s, %s, %s, %p, %p, %p)\n", This, pProbeMessage, pMessageParameters, debugstr_w(pszId),
+    TRACE("(%p, %p, %p, %s, %s, %s, %s, %s, %p, %p, %p)\n", This, pProbeMessage, pMessageParameters, debugstr_w(pszId),
         wine_dbgstr_longlong(ullMetadataVersion), wine_dbgstr_longlong(ullInstanceId), wine_dbgstr_longlong(ullMessageNumber), debugstr_w(pszSessionId),
         pTypesList, pScopesList, pXAddrsList);
 
-    return E_NOTIMPL;
+    return IWSDiscoveryPublisher_MatchProbeEx(This, pProbeMessage, pMessageParameters, pszId, ullMetadataVersion,
+        ullInstanceId, ullMessageNumber, pszSessionId, pTypesList, pScopesList, pXAddrsList, NULL, NULL, NULL, NULL,
+        NULL);
 }
 
 static HRESULT WINAPI IWSDiscoveryPublisherImpl_MatchResolve(IWSDiscoveryPublisher *This, const WSD_SOAP_MESSAGE *pResolveMessage,
@@ -266,6 +278,24 @@ static HRESULT WINAPI IWSDiscoveryPublisherImpl_PublishEx(IWSDiscoveryPublisher 
         pTypesList, pScopesList, pXAddrsList, pHeaderAny, pReferenceParameterAny, pEndpointReferenceAny, pAny);
 }
 
+static BOOL is_name_in_list(WSDXML_NAME *name, const WSD_NAME_LIST *list)
+{
+    const WSD_NAME_LIST *next = list;
+
+    while (next != NULL)
+    {
+        if ((lstrcmpW(next->Element->LocalName, name->LocalName) == 0) &&
+            (lstrcmpW(next->Element->Space->PreferredPrefix, name->Space->PreferredPrefix) == 0))
+        {
+            return TRUE;
+        }
+
+        next = next->Next;
+    }
+
+    return FALSE;
+}
+
 static HRESULT WINAPI IWSDiscoveryPublisherImpl_MatchProbeEx(IWSDiscoveryPublisher *This, const WSD_SOAP_MESSAGE *pProbeMessage,
                                                              IWSDMessageParameters *pMessageParameters, LPCWSTR pszId, ULONGLONG ullMetadataVersion,
                                                              ULONGLONG ullInstanceId, ULONGLONG ullMessageNumber, LPCWSTR pszSessionId,
@@ -274,11 +304,41 @@ static HRESULT WINAPI IWSDiscoveryPublisherImpl_MatchProbeEx(IWSDiscoveryPublish
                                                              const WSDXML_ELEMENT *pReferenceParameterAny, const WSDXML_ELEMENT *pPolicyAny,
                                                              const WSDXML_ELEMENT *pEndpointReferenceAny, const WSDXML_ELEMENT *pAny)
 {
-    FIXME("(%p, %p, %p, %s, %s, %s, %s, %s, %p, %p, %p, %p, %p, %p, %p, %p)\n", This, pProbeMessage, pMessageParameters, debugstr_w(pszId),
+    IWSDiscoveryPublisherImpl *impl = impl_from_IWSDiscoveryPublisher(This);
+    WSD_NAME_LIST *next_name;
+    WSD_PROBE *probe_msg;
+
+    TRACE("(%p, %p, %p, %s, %s, %s, %s, %s, %p, %p, %p, %p, %p, %p, %p, %p)\n", This, pProbeMessage, pMessageParameters, debugstr_w(pszId),
         wine_dbgstr_longlong(ullMetadataVersion), wine_dbgstr_longlong(ullInstanceId), wine_dbgstr_longlong(ullMessageNumber), debugstr_w(pszSessionId),
         pTypesList, pScopesList, pXAddrsList, pHeaderAny, pReferenceParameterAny, pPolicyAny, pEndpointReferenceAny, pAny);
 
-    return E_NOTIMPL;
+    if (!impl->publisherStarted) return E_ABORT;
+
+    if ((pszId == NULL) || (lstrlenW(pszId) > WSD_MAX_TEXT_LENGTH) ||
+        ((pszSessionId != NULL) && (lstrlenW(pszSessionId) > WSD_MAX_TEXT_LENGTH)) || (pProbeMessage == NULL) ||
+        (pProbeMessage->Body == NULL))
+    {
+        return E_INVALIDARG;
+    }
+
+    probe_msg = (WSD_PROBE *) pProbeMessage->Body;
+    next_name = probe_msg->Types;
+
+    /* Verify that all names in the probe message are present in the types list */
+    while (next_name != NULL)
+    {
+        /* If a name isn't present, return success; we simply don't send a Probe Match message */
+        if (!is_name_in_list(next_name->Element, pTypesList)) return S_OK;
+
+        next_name = next_name->Next;
+    }
+
+    if ((probe_msg->Scopes != NULL) && (probe_msg->Scopes->Scopes != NULL))
+        FIXME("Scopes matching currently unimplemented\n");
+
+    return send_probe_matches_message(impl, pProbeMessage, pMessageParameters, pszId, ullMetadataVersion, ullInstanceId,
+        ullMessageNumber, pszSessionId, pTypesList, pScopesList, pXAddrsList, pHeaderAny, pReferenceParameterAny,
+        pEndpointReferenceAny, pAny);
 }
 
 static HRESULT WINAPI IWSDiscoveryPublisherImpl_MatchResolveEx(IWSDiscoveryPublisher *This, const WSD_SOAP_MESSAGE *pResolveMessage,
@@ -401,6 +461,9 @@ HRESULT WINAPI WSDCreateDiscoveryPublisher(IWSDXMLContext *pContext, IWSDiscover
 
     InitializeCriticalSection(&obj->notification_sink_critical_section);
     list_init(&obj->notificationSinks);
+
+    InitializeCriticalSection(&obj->message_ids_critical_section);
+    list_init(&obj->message_ids);
 
     *ppPublisher = &obj->IWSDiscoveryPublisher_iface;
     TRACE("Returning iface %p\n", *ppPublisher);

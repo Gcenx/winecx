@@ -63,7 +63,7 @@ struct fd_ops
     /* flush the object buffers */
     int (*flush)(struct fd *, struct async *);
     /* query file info */
-    void (*get_file_info)( struct fd *, unsigned int );
+    void (*get_file_info)( struct fd *, obj_handle_t, unsigned int );
     /* query volume info */
     void (*get_volume_info)( struct fd *, unsigned int );
     /* perform an ioctl on the file */
@@ -88,6 +88,7 @@ extern struct fd *get_fd_object_for_mapping( struct fd *fd, unsigned int access,
 extern void *get_fd_user( struct fd *fd );
 extern void set_fd_user( struct fd *fd, const struct fd_ops *ops, struct object *user );
 extern unsigned int get_fd_options( struct fd *fd );
+extern int is_fd_overlapped( struct fd *fd );
 extern int get_unix_fd( struct fd *fd );
 extern int is_same_file_fd( struct fd *fd1, struct fd *fd2 );
 extern int is_fd_removable( struct fd *fd );
@@ -111,7 +112,8 @@ extern void fd_reselect_async( struct fd *fd, struct async_queue *queue );
 extern int no_fd_read( struct fd *fd, struct async *async, file_pos_t pos );
 extern int no_fd_write( struct fd *fd, struct async *async, file_pos_t pos );
 extern int no_fd_flush( struct fd *fd, struct async *async );
-extern void no_fd_get_file_info( struct fd *fd, unsigned int info_class );
+extern void no_fd_get_file_info( struct fd *fd, obj_handle_t handle, unsigned int info_class );
+extern void default_fd_get_file_info( struct fd *fd, obj_handle_t handle, unsigned int info_class );
 extern void no_fd_get_volume_info( struct fd *fd, unsigned int info_class );
 extern int no_fd_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
 extern int default_fd_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
@@ -189,7 +191,7 @@ extern struct object *create_serial( struct fd *fd );
 extern void free_async_queue( struct async_queue *queue );
 extern struct async *create_async( struct fd *fd, struct thread *thread, const async_data_t *data, struct iosb *iosb );
 extern struct async *create_request_async( struct fd *fd, unsigned int comp_flags, const async_data_t *data );
-extern obj_handle_t async_handoff( struct async *async, int success, data_size_t *result );
+extern obj_handle_t async_handoff( struct async *async, int success, data_size_t *result, int force_blocking );
 extern void queue_async( struct async_queue *queue, struct async *async );
 extern void async_set_timeout( struct async *async, timeout_t timeout, unsigned int status );
 extern void async_set_result( struct object *obj, unsigned int status, apc_param_t total );

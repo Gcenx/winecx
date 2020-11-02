@@ -346,7 +346,7 @@ static const  printenv_t * validate_envW(LPCWSTR env)
     TRACE("testing %s\n", debugstr_w(env));
     if (env && env[0])
     {
-        for (i = 0; i < sizeof(all_printenv)/sizeof(all_printenv[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(all_printenv); i++)
         {
             if (lstrcmpiW(env, all_printenv[i]->envname) == 0)
             {
@@ -608,7 +608,7 @@ static BOOL add_printer_driver(const WCHAR *name, WCHAR *ppd)
     di3.pConfigFile      = driver_nt;
     di3.pDefaultDataType = rawW;
 
-    for (i = 0; i < sizeof(all_printenv)/sizeof(all_printenv[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(all_printenv); i++)
     {
         di3.pEnvironment = (WCHAR *) all_printenv[i]->envname;
         if (all_printenv[i]->envname == envname_win40W)
@@ -766,7 +766,7 @@ static WCHAR *get_ppd_dir( void )
     WCHAR *dir, tmp_path[MAX_PATH];
     BOOL res;
 
-    len = GetTempPathW( sizeof(tmp_path) / sizeof(tmp_path[0]), tmp_path );
+    len = GetTempPathW( ARRAY_SIZE( tmp_path ), tmp_path );
     if (!len) return NULL;
     dir = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) + sizeof(wine_ppds) ) ;
     if (!dir) return NULL;
@@ -800,11 +800,11 @@ static void *cupshandle;
     DO_FUNC(cupsFreeOptions); \
     DO_FUNC(cupsGetDests); \
     DO_FUNC(cupsGetOption); \
-    DO_FUNC(cupsGetPPD); \
     DO_FUNC(cupsParseOptions); \
     DO_FUNC(cupsPrintFile)
 #define CUPS_OPT_FUNCS \
     DO_FUNC(cupsGetNamedDest); \
+    DO_FUNC(cupsGetPPD); \
     DO_FUNC(cupsGetPPD3); \
     DO_FUNC(cupsLastErrorString)
 
@@ -812,6 +812,7 @@ static void *cupshandle;
 CUPS_FUNCS;
 #undef DO_FUNC
 static cups_dest_t * (*pcupsGetNamedDest)(http_t *, const char *, const char *);
+static const char *  (*pcupsGetPPD)(const char *);
 static http_status_t (*pcupsGetPPD3)(http_t *, const char *, time_t *, char *, size_t);
 static const char *  (*pcupsLastErrorString)(void);
 
@@ -941,7 +942,7 @@ static BOOL CUPS_LoadPrinters(void)
     nrofdests = pcupsGetDests(&dests);
     TRACE("Found %d CUPS %s:\n", nrofdests, (nrofdests == 1) ? "printer" : "printers");
     for (i=0;i<nrofdests;i++) {
-        MultiByteToWideChar(CP_UNIXCP, 0, dests[i].name, -1, nameW, sizeof(nameW) / sizeof(WCHAR));
+        MultiByteToWideChar(CP_UNIXCP, 0, dests[i].name, -1, nameW, ARRAY_SIZE(nameW));
         printer_type = get_cups_printer_type( dests + i );
 
         TRACE( "Printer %d: %s. printer_type %x\n", i, debugstr_w(nameW), printer_type );
@@ -1024,7 +1025,7 @@ static BOOL CUPS_LoadPrinters(void)
     }
 
     if (hadprinter && !haddefault) {
-        MultiByteToWideChar(CP_UNIXCP, 0, dests[0].name, -1, nameW, sizeof(nameW) / sizeof(WCHAR));
+        MultiByteToWideChar(CP_UNIXCP, 0, dests[0].name, -1, nameW, ARRAY_SIZE(nameW));
         SetDefaultPrinterW(nameW);
     }
     pcupsFreeDests(nrofdests, dests);
@@ -1051,13 +1052,13 @@ static char *get_queue_name( HANDLE printer, BOOL *cups )
     if (!port) goto end;
     RegQueryValueExW( key, PortW, 0, &type, (BYTE*)port, &needed );
 
-    if (!strncmpW( port, CUPS_Port, sizeof(CUPS_Port) / sizeof(WCHAR) -1 ))
+    if (!strncmpW( port, CUPS_Port, ARRAY_SIZE( CUPS_Port ) -1 ))
     {
-        name = port + sizeof(CUPS_Port) / sizeof(WCHAR) - 1;
+        name = port + ARRAY_SIZE( CUPS_Port ) - 1;
         *cups = TRUE;
     }
-    else if (!strncmpW( port, LPR_Port, sizeof(LPR_Port) / sizeof(WCHAR) -1 ))
-        name = port + sizeof(LPR_Port) / sizeof(WCHAR) - 1;
+    else if (!strncmpW( port, LPR_Port, ARRAY_SIZE( LPR_Port ) -1 ))
+        name = port + ARRAY_SIZE( LPR_Port ) - 1;
     if (name)
     {
         needed = WideCharToMultiByte( CP_UNIXCP, 0, name, -1, NULL, 0, NULL, NULL );
@@ -1236,7 +1237,7 @@ static BOOL PRINTCAP_ParseEntry( const char *pent, BOOL isfirst )
         goto end;
     }
 
-    MultiByteToWideChar(CP_ACP, 0, devname, -1, devnameW, sizeof(devnameW) / sizeof(WCHAR));
+    MultiByteToWideChar(CP_ACP, 0, devname, -1, devnameW, ARRAY_SIZE(devnameW));
 
     if(RegOpenKeyA(hkeyPrinters, devname, &hkeyPrinter) == ERROR_SUCCESS) {
         DWORD status = get_dword_from_reg( hkeyPrinter, StatusW );
@@ -1405,7 +1406,7 @@ static LPWSTR get_servername_from_name(LPCWSTR name)
 
     TRACE("found %s\n", debugstr_w(server));
 
-    len = sizeof(buffer)/sizeof(buffer[0]);
+    len = ARRAY_SIZE(buffer);
     if (GetComputerNameW(buffer, &len)) {
         if (lstrcmpW(buffer, server) == 0) {
             /* The requested Servername is our computername */
@@ -1586,6 +1587,8 @@ static void old_printer_check( BOOL delete_phase )
     EnumPrintersW( PRINTER_ENUM_LOCAL, NULL, 5, (LPBYTE)pi, needed, &needed, &num );
     for (i = 0; i < num; i++)
     {
+        if (!pi[i].pPortName) continue;
+
         if (strncmpW( pi[i].pPortName, CUPS_Port, strlenW(CUPS_Port) ) &&
             strncmpW( pi[i].pPortName, LPR_Port, strlenW(LPR_Port) ))
             continue;
@@ -1655,7 +1658,7 @@ void WINSPOOL_LoadSystemPrinters(void)
         if(RegQueryInfoKeyW(hkeyPrinters, NULL, NULL, NULL, &num, NULL, NULL,
                             NULL, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) {
             for(i = 0; i < num; i++) {
-                if(RegEnumKeyW(hkeyPrinters, i, PrinterName, sizeof(PrinterName)/sizeof(PrinterName[0])) == ERROR_SUCCESS) {
+                if(RegEnumKeyW(hkeyPrinters, i, PrinterName, ARRAY_SIZE(PrinterName)) == ERROR_SUCCESS) {
                     if(RegOpenKeyW(hkeyPrinters, PrinterName, &hkey) == ERROR_SUCCESS) {
                         if(RegQueryValueExW(hkey, NameW, 0, 0, 0, &needed) == ERROR_FILE_NOT_FOUND) {
                             set_reg_szW(hkey, NameW, PrinterName);
@@ -2955,7 +2958,7 @@ BOOL WINAPI AddJobW(HANDLE hPrinter, DWORD Level, LPBYTE pData, DWORD cbBuf, LPD
 
     job->job_id = InterlockedIncrement(&next_job_id);
 
-    len = GetSystemDirectoryW(path, sizeof(path) / sizeof(WCHAR));
+    len = GetSystemDirectoryW(path, ARRAY_SIZE(path));
     if(path[len - 1] != '\\')
         path[len++] = '\\';
     memcpy(path + len, spool_path, sizeof(spool_path));    
@@ -3398,7 +3401,7 @@ BOOL WINAPI DeletePrinter(HANDLE hPrinter)
     LPCWSTR lpNameW = get_opened_printer_name(hPrinter);
     HKEY hkeyPrinters, hkey;
     WCHAR def[MAX_PATH];
-    DWORD size = sizeof( def ) / sizeof( def[0] );
+    DWORD size = ARRAY_SIZE(def);
 
     if(!lpNameW) {
         SetLastError(ERROR_INVALID_HANDLE);
@@ -4681,8 +4684,7 @@ static BOOL WINSPOOL_EnumPrintersW(DWORD dwType, LPWSTR lpszName,
     pi = (used <= cbBuf) ? lpbPrinters : NULL;
 
     for(i = 0; i < number; i++) {
-        if(RegEnumKeyW(hkeyPrinters, i, PrinterName, sizeof(PrinterName)/sizeof(PrinterName[0])) !=
-	   ERROR_SUCCESS) {
+        if(RegEnumKeyW(hkeyPrinters, i, PrinterName, ARRAY_SIZE(PrinterName)) != ERROR_SUCCESS) {
 	    ERR("Can't enum key number %d\n", i);
 	    RegCloseKey(hkeyPrinters);
 	    return FALSE;
@@ -5522,8 +5524,7 @@ static BOOL WINSPOOL_EnumPrinterDrivers(LPWSTR pName, LPCWSTR pEnvironment,
         PBYTE data_ptr = NULL;
         DWORD needed = 0;
 
-        if(RegEnumKeyW(hkeyDrivers, i, DriverNameW, sizeof(DriverNameW)/sizeof(DriverNameW[0]))
-                       != ERROR_SUCCESS) {
+        if(RegEnumKeyW(hkeyDrivers, i, DriverNameW, ARRAY_SIZE(DriverNameW)) != ERROR_SUCCESS) {
             ERR("Can't enum key number %d\n", i);
             RegCloseKey(hkeyDrivers);
             return FALSE;
@@ -5599,7 +5600,7 @@ BOOL WINAPI EnumPrinterDriversW(LPWSTR pName, LPWSTR pEnvironment, DWORD Level,
 
         /* Precompute the overall total; we need this to know
            where pointers end and data begins (i.e. data_offset) */
-        for (i = 0; i < sizeof(all_printenv)/sizeof(all_printenv[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(all_printenv); i++)
         {
             needed = found = 0;
             ret = WINSPOOL_EnumPrinterDrivers(pName, all_printenv[i]->envname, Level,
@@ -5613,7 +5614,7 @@ BOOL WINAPI EnumPrinterDriversW(LPWSTR pName, LPWSTR pEnvironment, DWORD Level,
         *pcReturned = 0;
         *pcbNeeded = 0;
         total_found = 0;
-        for (i = 0; i < sizeof(all_printenv)/sizeof(all_printenv[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(all_printenv); i++)
         {
             needed = found = 0;
             ret = WINSPOOL_EnumPrinterDrivers(pName, all_printenv[i]->envname, Level,
@@ -5977,7 +5978,7 @@ BOOL WINAPI SetDefaultPrinterW(LPCWSTR pszPrinter)
     if ((pszPrinter == NULL) || (pszPrinter[0] == '\0')) {
 
         default_printer[0] = '\0';
-        size = sizeof(default_printer)/sizeof(WCHAR);
+        size = ARRAY_SIZE(default_printer);
 
         /* if we have a default Printer, do nothing. */
         if (GetDefaultPrinterW(default_printer, &size))
@@ -5988,7 +5989,7 @@ BOOL WINAPI SetDefaultPrinterW(LPCWSTR pszPrinter)
         if (!RegOpenKeyExW(HKEY_LOCAL_MACHINE, PrintersW, 0, KEY_READ, &hreg)) {
 
             default_printer[0] = '\0';
-            size = sizeof(default_printer)/sizeof(WCHAR);
+            size = ARRAY_SIZE(default_printer);
             if (!RegEnumKeyExW(hreg, 0, default_printer, &size, NULL, NULL, NULL, NULL)) {
 
                 pszPrinter = default_printer;
@@ -8241,8 +8242,8 @@ end:
  */
 static BOOL schedule_lpr(LPCWSTR printer_name, LPCWSTR filename)
 {
+    static const WCHAR fmtW[] = {'l','p','r',' ','-','P','\'','%','s','\'',0};
     WCHAR *cmd;
-    const WCHAR fmtW[] = {'l','p','r',' ','-','P','\'','%','s','\'',0};
     BOOL r;
 
     cmd = HeapAlloc(GetProcessHeap(), 0, strlenW(printer_name) * sizeof(WCHAR) + sizeof(fmtW));
@@ -8565,8 +8566,8 @@ static INT_PTR CALLBACK file_dlg_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
                     WCHAR caption[200], message[200];
                     int mb_ret;
 
-                    LoadStringW(WINSPOOL_hInstance, IDS_CAPTION, caption, sizeof(caption) / sizeof(WCHAR));
-                    LoadStringW(WINSPOOL_hInstance, IDS_FILE_EXISTS, message, sizeof(message) / sizeof(WCHAR));
+                    LoadStringW(WINSPOOL_hInstance, IDS_CAPTION, caption, ARRAY_SIZE(caption));
+                    LoadStringW(WINSPOOL_hInstance, IDS_FILE_EXISTS, message, ARRAY_SIZE(message));
                     mb_ret = MessageBoxW(hwnd, message, caption, MB_OKCANCEL | MB_ICONEXCLAMATION);
                     if(mb_ret == IDCANCEL)
                     {
@@ -8579,8 +8580,8 @@ static INT_PTR CALLBACK file_dlg_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
                 {
                     WCHAR caption[200], message[200];
 
-                    LoadStringW(WINSPOOL_hInstance, IDS_CAPTION, caption, sizeof(caption) / sizeof(WCHAR));
-                    LoadStringW(WINSPOOL_hInstance, IDS_CANNOT_OPEN, message, sizeof(message) / sizeof(WCHAR));
+                    LoadStringW(WINSPOOL_hInstance, IDS_CAPTION, caption, ARRAY_SIZE(caption));
+                    LoadStringW(WINSPOOL_hInstance, IDS_CANNOT_OPEN, message, ARRAY_SIZE(message));
                     MessageBoxW(hwnd, message, caption, MB_OK | MB_ICONEXCLAMATION);
                     HeapFree(GetProcessHeap(), 0, filename);
                     return TRUE;

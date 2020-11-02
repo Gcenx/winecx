@@ -352,7 +352,7 @@ NTSTATUS WINAPI NtQueryInformationToken(
         0,    /* TokenHasRestrictions */
         0,    /* TokenAccessInformation */
         0,    /* TokenVirtualizationAllowed */
-        0,    /* TokenVirtualizationEnabled */
+        sizeof(DWORD), /* TokenVirtualizationEnabled */
         sizeof(TOKEN_MANDATORY_LABEL) + sizeof(SID), /* TokenIntegrityLevel [sizeof(SID) includes one SubAuthority] */
         0,    /* TokenUIAccess */
         0,    /* TokenMandatoryPolicy */
@@ -625,6 +625,12 @@ NTSTATUS WINAPI NtQueryInformationToken(
         {
             *((DWORD*)tokeninfo) = 0;
             FIXME("QueryInformationToken( ..., TokenSessionId, ...) semi-stub\n");
+        }
+        break;
+    case TokenVirtualizationEnabled:
+        {
+            *(DWORD *)tokeninfo = 0;
+            TRACE("QueryInformationToken( ..., TokenVirtualizationEnabled, ...) semi-stub\n");
         }
         break;
     case TokenIntegrityLevel:
@@ -980,52 +986,55 @@ static  SYSTEM_CPU_INFORMATION cached_sci;
 #define INEI	0x49656e69	/* "ineI" */
 #define NTEL	0x6c65746e	/* "ntel" */
 
-/* Calls cpuid with an eax of 'ax' and returns the 16 bytes in *p
- * We are compiled with -fPIC, so we can't clobber ebx.
- */
-static inline void do_cpuid(unsigned int ax, unsigned int *p)
-{
-#ifdef __i386__
-	__asm__("pushl %%ebx\n\t"
-                "cpuid\n\t"
-                "movl %%ebx, %%esi\n\t"
-                "popl %%ebx"
-                : "=a" (p[0]), "=S" (p[1]), "=c" (p[2]), "=d" (p[3])
-                :  "0" (ax));
-#elif defined(__x86_64__)
-	__asm__("push %%rbx\n\t"
-                "cpuid\n\t"
-                "movq %%rbx, %%rsi\n\t"
-                "pop %%rbx"
-                : "=a" (p[0]), "=S" (p[1]), "=c" (p[2]), "=d" (p[3])
-                :  "0" (ax));
-#endif
-}
+extern void do_cpuid(unsigned int ax, unsigned int *p);
 
-/* From xf86info havecpuid.c 1.11 */
-static inline BOOL have_cpuid(void)
-{
 #ifdef __i386__
-	unsigned int f1, f2;
-	__asm__("pushfl\n\t"
-                "pushfl\n\t"
-                "popl %0\n\t"
-                "movl %0,%1\n\t"
-                "xorl %2,%0\n\t"
-                "pushl %0\n\t"
-                "popfl\n\t"
-                "pushfl\n\t"
-                "popl %0\n\t"
-                "popfl"
-                : "=&r" (f1), "=&r" (f2)
-                : "ir" (0x00200000));
-	return ((f1^f2) & 0x00200000) != 0;
-#elif defined(__x86_64__)
-        return TRUE;
+__ASM_GLOBAL_FUNC( do_cpuid,
+                   "pushl %esi\n\t"
+                   "pushl %ebx\n\t"
+                   "movl 12(%esp),%eax\n\t"
+                   "movl 16(%esp),%esi\n\t"
+                   "cpuid\n\t"
+                   "movl %eax,(%esi)\n\t"
+                   "movl %ebx,4(%esi)\n\t"
+                   "movl %ecx,8(%esi)\n\t"
+                   "movl %edx,12(%esi)\n\t"
+                   "popl %ebx\n\t"
+                   "popl %esi\n\t"
+                   "ret" )
 #else
-        return FALSE;
+__ASM_GLOBAL_FUNC( do_cpuid,
+                   "pushq %rbx\n\t"
+                   "movl %edi,%eax\n\t"
+                   "cpuid\n\t"
+                   "movl %eax,(%rsi)\n\t"
+                   "movl %ebx,4(%rsi)\n\t"
+                   "movl %ecx,8(%rsi)\n\t"
+                   "movl %edx,12(%rsi)\n\t"
+                   "popq %rbx\n\t"
+                   "ret" )
 #endif
+
+#ifdef __i386__
+extern int have_cpuid(void);
+__ASM_GLOBAL_FUNC( have_cpuid,
+                   "pushfl\n\t"
+                   "pushfl\n\t"
+                   "movl (%esp),%ecx\n\t"
+                   "xorl $0x00200000,(%esp)\n\t"
+                   "popfl\n\t"
+                   "pushfl\n\t"
+                   "popl %eax\n\t"
+                   "popfl\n\t"
+                   "xorl %ecx,%eax\n\t"
+                   "andl $0x00200000,%eax\n\t"
+                   "ret" )
+#else
+static int have_cpuid(void)
+{
+    return 1;
 }
+#endif
 
 /* Detect if a SSE2 processor is capable of Denormals Are Zero (DAZ) mode.
  *
@@ -1637,6 +1646,74 @@ static inline BOOL logical_proc_info_add_group(SYSTEM_LOGICAL_PROCESSOR_INFORMAT
 }
 
 #ifdef linux
+/* Helper function for counting bitmap values as commonly used by the Linux kernel
+ * for storing CPU masks in sysfs. The format is comma separated lists of hex values
+ * each max 32-bit e.g. "00ff" or even "00,00000000,0000ffff".
+ *
+ * Example files include:
+ * - /sys/devices/system/cpu/cpu0/cache/index0/shared_cpu_map
+ * - /sys/devices/system/cpu/cpu0/topology/thread_siblings
+ */
+static BOOL sysfs_parse_bitmap(const char *filename, ULONG_PTR * const mask)
+{
+    FILE *f;
+    DWORD r;
+
+    f = fopen(filename, "r");
+    if (!f)
+        return FALSE;
+
+    while (!feof(f))
+    {
+        char op;
+        if (!fscanf(f, "%x%c ", &r, &op))
+            break;
+
+        *mask = (sizeof(ULONG_PTR)>sizeof(int) ? *mask<<(8*sizeof(DWORD)) : 0) + r;
+    }
+
+    fclose(f);
+    return TRUE;
+}
+
+/* Helper function for counting number of elements in interval lists as used by
+ * the Linux kernel. The format is comma separated list of intervals of which
+ * each interval has the format of "begin-end" where begin and end are decimal
+ * numbers. E.g. "0-7", "0-7,16-23"
+ *
+ * Example files include:
+ * - /sys/devices/system/cpu/online
+ * - /sys/devices/system/cpu/cpu0/cache/index0/shared_cpu_list
+ * - /sys/devices/system/cpu/cpu0/topology/thread_siblings_list.
+ */
+static BOOL sysfs_count_list_elements(const char *filename, DWORD *result)
+{
+    FILE *f;
+
+    f = fopen(filename, "r");
+    if (!f)
+        return FALSE;
+
+    while (!feof(f))
+    {
+        char op;
+        DWORD beg, end;
+
+        if (!fscanf(f, "%u%c ", &beg, &op))
+            break;
+
+        if(op == '-')
+            fscanf(f, "%u%c ", &end, &op);
+        else
+            end = beg;
+
+        *result += end - beg + 1;
+    }
+
+    fclose(f);
+    return TRUE;
+}
+
 /* for 'data', max_len is the array count. for 'dataex', max_len is in bytes */
 static NTSTATUS create_logical_proc_info(SYSTEM_LOGICAL_PROCESSOR_INFORMATION **data,
         SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX **dataex, DWORD *max_len)
@@ -1646,9 +1723,23 @@ static NTSTATUS create_logical_proc_info(SYSTEM_LOGICAL_PROCESSOR_INFORMATION **
     static const char numa_info[] = "/sys/devices/system/node/node%u/cpumap";
 
     FILE *fcpu_list, *fnuma_list, *f;
-    DWORD len = 0, beg, end, i, j, r, num_cpus = 0;
+    DWORD len = 0, beg, end, i, j, r, num_cpus = 0, max_cpus = 0;
     char op, name[MAX_PATH];
     ULONG_PTR all_cpus_mask = 0;
+
+    /* On systems with a large number of CPU cores (32 or 64 depending on 32-bit or 64-bit),
+     * we have issues parsing processor information:
+     * - ULONG_PTR masks as used in data structures can't hold all cores. Requires splitting
+     *   data appropriately into "processor groups". We are hard coding 1.
+     * - Thread affinity code in wineserver and our CPU parsing code here work independently.
+     *   So far the Windows mask applied directly to Linux, but process groups break that.
+     *   (NUMA systems you may have multiple non-full groups.)
+     */
+    if(sysfs_count_list_elements("/sys/devices/system/cpu/present", &max_cpus) && max_cpus > MAXIMUM_PROCESSORS)
+    {
+        FIXME("Improve CPU info reporting: system supports %u logical cores, but only %u supported!\n",
+                max_cpus, MAXIMUM_PROCESSORS);
+    }
 
     fcpu_list = fopen("/sys/devices/system/cpu/online", "r");
     if(!fcpu_list)
@@ -1707,13 +1798,8 @@ static NTSTATUS create_logical_proc_info(SYSTEM_LOGICAL_PROCESSOR_INFORMATION **
 
             /* Mask of logical threads sharing same physical core in kernel core numbering. */
             sprintf(name, core_info, i, "thread_siblings");
-            f = fopen(name, "r");
-            if(f)
-            {
-                fscanf(f, "%lx", &thread_mask);
-                fclose(f);
-            }
-            else thread_mask = 1<<i;
+            if(!sysfs_parse_bitmap(name, &thread_mask))
+                thread_mask = 1<<i;
             if(!logical_proc_info_add_by_id(data, dataex, &len, max_len, RelationProcessorCore, phys_core, thread_mask))
             {
                 fclose(fcpu_list);
@@ -1726,15 +1812,7 @@ static NTSTATUS create_logical_proc_info(SYSTEM_LOGICAL_PROCESSOR_INFORMATION **
                 ULONG_PTR mask = 0;
 
                 sprintf(name, cache_info, i, j, "shared_cpu_map");
-                f = fopen(name, "r");
-                if(!f) continue;
-                while(!feof(f))
-                {
-                    if(!fscanf(f, "%x%c ", &r, &op))
-                        break;
-                    mask = (sizeof(ULONG_PTR)>sizeof(int) ? mask<<(8*sizeof(DWORD)) : 0) + r;
-                }
-                fclose(f);
+                if(!sysfs_parse_bitmap(name, &mask)) continue;
 
                 sprintf(name, cache_info, i, j, "level");
                 f = fopen(name, "r");

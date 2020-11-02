@@ -68,8 +68,14 @@ void viewport_activate(struct d3d_viewport *This, BOOL ignore_lights)
         }
     }
 
+    if (This->version == DDRAW_VIEWPORT_VERSION_NONE)
+    {
+        TRACE("Viewport data was not set.\n");
+        return;
+    }
+
     /* And copy the values in the structure used by the device */
-    if (This->use_vp2)
+    if (This->version == DDRAW_VIEWPORT_VERSION_2)
     {
         vp.dwX = This->viewports.vp2.dwX;
         vp.dwY = This->viewports.vp2.dwY;
@@ -259,10 +265,16 @@ static HRESULT WINAPI d3d_viewport_GetViewport(IDirect3DViewport3 *iface, D3DVIE
     if (!vp)
         return DDERR_INVALIDPARAMS;
 
+    if (viewport->version == DDRAW_VIEWPORT_VERSION_NONE)
+    {
+        WARN("Viewport data was not set.\n");
+        return D3DERR_VIEWPORTDATANOTSET;
+    }
+
     wined3d_mutex_lock();
 
     size = vp->dwSize;
-    if (!viewport->use_vp2)
+    if (viewport->version == DDRAW_VIEWPORT_VERSION_1)
     {
         memcpy(vp, &viewport->viewports.vp1, size);
     }
@@ -275,10 +287,10 @@ static HRESULT WINAPI d3d_viewport_GetViewport(IDirect3DViewport3 *iface, D3DVIE
         vp1.dwY = viewport->viewports.vp2.dwY;
         vp1.dwWidth = viewport->viewports.vp2.dwWidth;
         vp1.dwHeight = viewport->viewports.vp2.dwHeight;
-        vp1.dvMaxX = 0.0;
-        vp1.dvMaxY = 0.0;
-        vp1.dvScaleX = 0.0;
-        vp1.dvScaleY = 0.0;
+        vp1.dvMaxX = 0.0f;
+        vp1.dvMaxY = 0.0f;
+        vp1.dvScaleX = 0.0f;
+        vp1.dvScaleY = 0.0f;
         vp1.dvMinZ = viewport->viewports.vp2.dvMinZ;
         vp1.dvMaxZ = viewport->viewports.vp2.dvMaxZ;
         memcpy(vp, &vp1, size);
@@ -308,6 +320,12 @@ static HRESULT WINAPI d3d_viewport_SetViewport(IDirect3DViewport3 *iface, D3DVIE
 
     if (!vp)
         return DDERR_INVALIDPARAMS;
+
+    if (vp->dwSize != sizeof(*vp))
+    {
+        WARN("Invalid D3DVIEWPORT size %u.\n", vp->dwSize);
+        return DDERR_INVALIDPARAMS;
+    }
 
     if (TRACE_ON(ddraw))
     {
@@ -342,14 +360,13 @@ static HRESULT WINAPI d3d_viewport_SetViewport(IDirect3DViewport3 *iface, D3DVIE
         }
     }
 
-    viewport->use_vp2 = 0;
-    memset(&viewport->viewports.vp1, 0, sizeof(viewport->viewports.vp1));
-    memcpy(&viewport->viewports.vp1, vp, vp->dwSize);
+    viewport->version = DDRAW_VIEWPORT_VERSION_1;
+    viewport->viewports.vp1 = *vp;
 
     /* Empirical testing on a couple of d3d1 games showed that these values
      * should be ignored. */
-    viewport->viewports.vp1.dvMinZ = 0.0;
-    viewport->viewports.vp1.dvMaxZ = 1.0;
+    viewport->viewports.vp1.dvMinZ = 0.0f;
+    viewport->viewports.vp1.dvMaxZ = 1.0f;
 
     if (SUCCEEDED(IDirect3DDevice3_GetCurrentViewport(&device->IDirect3DDevice3_iface, &current_viewport)))
     {
@@ -901,9 +918,15 @@ static HRESULT WINAPI d3d_viewport_GetViewport2(IDirect3DViewport3 *iface, D3DVI
     if (!vp)
         return DDERR_INVALIDPARAMS;
 
+    if (viewport->version == DDRAW_VIEWPORT_VERSION_NONE)
+    {
+        WARN("Viewport data was not set.\n");
+        return D3DERR_VIEWPORTDATANOTSET;
+    }
+
     wined3d_mutex_lock();
     size = vp->dwSize;
-    if (viewport->use_vp2)
+    if (viewport->version == DDRAW_VIEWPORT_VERSION_2)
     {
         memcpy(vp, &viewport->viewports.vp2, size);
     }
@@ -916,10 +939,10 @@ static HRESULT WINAPI d3d_viewport_GetViewport2(IDirect3DViewport3 *iface, D3DVI
         vp2.dwY = viewport->viewports.vp1.dwY;
         vp2.dwWidth = viewport->viewports.vp1.dwWidth;
         vp2.dwHeight = viewport->viewports.vp1.dwHeight;
-        vp2.dvClipX = 0.0;
-        vp2.dvClipY = 0.0;
-        vp2.dvClipWidth = 0.0;
-        vp2.dvClipHeight = 0.0;
+        vp2.dvClipX = 0.0f;
+        vp2.dvClipY = 0.0f;
+        vp2.dvClipWidth = 0.0f;
+        vp2.dvClipHeight = 0.0f;
         vp2.dvMinZ = viewport->viewports.vp1.dvMinZ;
         vp2.dvMaxZ = viewport->viewports.vp1.dvMaxZ;
         memcpy(vp, &vp2, size);
@@ -949,6 +972,12 @@ static HRESULT WINAPI d3d_viewport_SetViewport2(IDirect3DViewport3 *iface, D3DVI
 
     if (!vp)
         return DDERR_INVALIDPARAMS;
+
+    if (vp->dwSize != sizeof(*vp))
+    {
+        WARN("Invalid D3DVIEWPORT2 size %u.\n", vp->dwSize);
+        return DDERR_INVALIDPARAMS;
+    }
 
     if (TRACE_ON(ddraw))
     {
@@ -983,9 +1012,8 @@ static HRESULT WINAPI d3d_viewport_SetViewport2(IDirect3DViewport3 *iface, D3DVI
         }
     }
 
-    viewport->use_vp2 = 1;
-    memset(&viewport->viewports.vp2, 0, sizeof(viewport->viewports.vp2));
-    memcpy(&viewport->viewports.vp2, vp, vp->dwSize);
+    viewport->version = DDRAW_VIEWPORT_VERSION_2;
+    viewport->viewports.vp2 = *vp;
 
     if (SUCCEEDED(IDirect3DDevice3_GetCurrentViewport(&device->IDirect3DDevice3_iface, &current_viewport)))
     {
@@ -1165,6 +1193,6 @@ void d3d_viewport_init(struct d3d_viewport *viewport, struct ddraw *ddraw)
     viewport->IDirect3DViewport3_iface.lpVtbl = &d3d_viewport_vtbl;
     viewport->ref = 1;
     viewport->ddraw = ddraw;
-    viewport->use_vp2 = 0xff;
+    viewport->version = DDRAW_VIEWPORT_VERSION_NONE;
     list_init(&viewport->light_list);
 }

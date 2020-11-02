@@ -788,7 +788,7 @@ static BOOL X11DRV_FocusIn( HWND hwnd, XEvent *xev )
 /**********************************************************************
  *              focus_out
  */
- static void focus_out( Display *display , HWND hwnd )
+static void focus_out( Display *display , HWND hwnd )
  {
     HWND hwnd_tmp;
     Window focus_win;
@@ -860,7 +860,7 @@ static BOOL X11DRV_FocusOut( HWND hwnd, XEvent *xev )
 static BOOL X11DRV_Expose( HWND hwnd, XEvent *xev )
 {
     XExposeEvent *event = &xev->xexpose;
-    RECT rect;
+    RECT rect, abs_rect;
     POINT pos;
     struct x11drv_win_data *data;
     HRGN surface_region = 0;
@@ -903,14 +903,16 @@ static BOOL X11DRV_Expose( HWND hwnd, XEvent *xev )
     {
         if (GetWindowLongW( data->hwnd, GWL_EXSTYLE ) & WS_EX_LAYOUTRTL)
             mirror_rect( &data->client_rect, &rect );
+        abs_rect = rect;
+        MapWindowPoints( hwnd, 0, (POINT *)&abs_rect, 2 );
 
         SERVER_START_REQ( update_window_zorder )
         {
             req->window      = wine_server_user_handle( hwnd );
-            req->rect.left   = rect.left;
-            req->rect.top    = rect.top;
-            req->rect.right  = rect.right;
-            req->rect.bottom = rect.bottom;
+            req->rect.left   = abs_rect.left;
+            req->rect.top    = abs_rect.top;
+            req->rect.right  = abs_rect.right;
+            req->rect.bottom = abs_rect.bottom;
             wine_server_call( req );
         }
         SERVER_END_REQ;
@@ -1079,16 +1081,12 @@ static BOOL X11DRV_ConfigureNotify( HWND hwnd, XEvent *xev )
     }
     else pos = root_to_virtual_screen( x, y );
 
-    rect.left   = pos.x;
-    rect.top    = pos.y;
-    rect.right  = pos.x + event->width;
-    rect.bottom = pos.y + event->height;
+    X11DRV_X_to_window_rect( data, &rect, pos.x, pos.y, event->width, event->height );
+    if (root_coords) MapWindowPoints( 0, parent, (POINT *)&rect, 2 );
+
     TRACE( "win %p/%lx new X rect %d,%d,%dx%d (event %d,%d,%dx%d)\n",
            hwnd, data->whole_window, rect.left, rect.top, rect.right-rect.left, rect.bottom-rect.top,
            event->x, event->y, event->width, event->height );
-
-    X11DRV_X_to_window_rect( data, &rect );
-    if (root_coords) MapWindowPoints( 0, parent, (POINT *)&rect, 2 );
 
     /* Compare what has changed */
 
@@ -1157,7 +1155,8 @@ static BOOL X11DRV_GravityNotify( HWND hwnd, XEvent *xev )
 {
     XGravityEvent *event = &xev->xgravity;
     struct x11drv_win_data *data = get_win_data( hwnd );
-    RECT rect, window_rect;
+    RECT window_rect;
+    int x, y;
 
     if (!data) return FALSE;
 
@@ -1167,22 +1166,18 @@ static BOOL X11DRV_GravityNotify( HWND hwnd, XEvent *xev )
         return FALSE;
     }
 
-    rect.left   = event->x;
-    rect.top    = event->y;
-    rect.right  = rect.left + data->whole_rect.right - data->whole_rect.left;
-    rect.bottom = rect.top + data->whole_rect.bottom - data->whole_rect.top;
+    x = event->x + data->window_rect.left - data->whole_rect.left;
+    y = event->y + data->window_rect.top - data->whole_rect.top;
 
-    TRACE( "win %p/%lx new X rect %d,%d,%dx%d (event %d,%d)\n",
-           hwnd, data->whole_window, rect.left, rect.top, rect.right-rect.left, rect.bottom-rect.top,
-           event->x, event->y );
+    TRACE( "win %p/%lx new X pos %d,%d (event %d,%d)\n",
+           hwnd, data->whole_window, x, y, event->x, event->y );
 
-    X11DRV_X_to_window_rect( data, &rect );
     window_rect = data->window_rect;
     release_win_data( data );
 
-    if (window_rect.left != rect.left || window_rect.top != rect.top)
-        SetWindowPos( hwnd, 0, rect.left, rect.top, 0, 0,
-                      SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS );
+    if (window_rect.left != x || window_rect.top != y)
+        SetWindowPos( hwnd, 0, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS );
+
     return TRUE;
 }
 
@@ -1757,7 +1752,7 @@ static BOOL X11DRV_ClientMessage( HWND hwnd, XEvent *xev )
         return FALSE;
     }
 
-    for (i = 0; i < sizeof(client_messages)/sizeof(client_messages[0]); i++)
+    for (i = 0; i < ARRAY_SIZE( client_messages ); i++)
     {
         if (event->message_type == X11DRV_Atoms[client_messages[i].atom - FIRST_XATOM])
         {

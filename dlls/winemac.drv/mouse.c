@@ -144,19 +144,14 @@ static void send_mouse_input(HWND hwnd, macdrv_window cocoa_window, UINT flags, 
     if ((flags & MOUSEEVENTF_MOVE) && (flags & MOUSEEVENTF_ABSOLUTE) && !drag &&
         cocoa_window != macdrv_thread_data()->capture_window)
     {
-        RECT rect;
-
         /* update the wine server Z-order */
-        SetRect(&rect, x, y, x + 1, y + 1);
-        MapWindowPoints(0, top_level_hwnd, (POINT *)&rect, 2);
-
         SERVER_START_REQ(update_window_zorder)
         {
             req->window      = wine_server_user_handle(top_level_hwnd);
-            req->rect.left   = rect.left;
-            req->rect.top    = rect.top;
-            req->rect.right  = rect.right;
-            req->rect.bottom = rect.bottom;
+            req->rect.left   = x;
+            req->rect.top    = y;
+            req->rect.right  = x + 1;
+            req->rect.bottom = y + 1;
             wine_server_call(req);
         }
         SERVER_END_REQ;
@@ -838,11 +833,18 @@ void macdrv_mouse_button(HWND hwnd, const macdrv_event *event)
 {
     UINT flags = 0;
     WORD data = 0;
+    POINT pt;
 
     TRACE("win %p button %d %s at (%d,%d) time %lu (%lu ticks ago)\n", hwnd, event->mouse_button.button,
           (event->mouse_button.pressed ? "pressed" : "released"),
           event->mouse_button.x, event->mouse_button.y,
           event->mouse_button.time_ms, (GetTickCount() - event->mouse_button.time_ms));
+
+    /* CrossOver Hack #15388 */
+    pt.x = event->mouse_button.x;
+    pt.y = event->mouse_button.y;
+    if (quicken_signin_hack)
+        MapWindowPoints(hwnd, 0, &pt, 1);
 
     if (event->mouse_button.pressed)
     {
@@ -872,7 +874,7 @@ void macdrv_mouse_button(HWND hwnd, const macdrv_event *event)
     }
 
     send_mouse_input(hwnd, event->window, flags | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE,
-                     event->mouse_button.x, event->mouse_button.y,
+                     pt.x, pt.y,
                      data, FALSE, event->mouse_button.time_ms);
 }
 
@@ -885,16 +887,26 @@ void macdrv_mouse_button(HWND hwnd, const macdrv_event *event)
 void macdrv_mouse_moved(HWND hwnd, const macdrv_event *event)
 {
     UINT flags = MOUSEEVENTF_MOVE;
+    POINT pt;
 
     TRACE("win %p/%p %s (%d,%d) drag %d time %lu (%lu ticks ago)\n", hwnd, event->window,
           (event->type == MOUSE_MOVED) ? "relative" : "absolute",
           event->mouse_moved.x, event->mouse_moved.y, event->mouse_moved.drag,
           event->mouse_moved.time_ms, (GetTickCount() - event->mouse_moved.time_ms));
 
+    pt.x = event->mouse_moved.x;
+    pt.y = event->mouse_moved.y;
+
     if (event->type == MOUSE_MOVED_ABSOLUTE)
+    {
         flags |= MOUSEEVENTF_ABSOLUTE;
 
-    send_mouse_input(hwnd, event->window, flags, event->mouse_moved.x, event->mouse_moved.y,
+        /* CrossOver Hack #15388 */
+        if (quicken_signin_hack)
+            MapWindowPoints(hwnd, 0, &pt, 1);
+    }
+
+    send_mouse_input(hwnd, event->window, flags, pt.x, pt.y,
                      0, event->mouse_moved.drag, event->mouse_moved.time_ms);
 }
 

@@ -33,12 +33,6 @@
 
 #include "wine/test.h"
 
-#include "initguid.h"
-
-DEFINE_GUID(CLSID_Picture_Metafile,0x315,0,0,0xc0,0,0,0,0,0,0,0x46);
-DEFINE_GUID(CLSID_Picture_Dib,0x316,0,0,0xc0,0,0,0,0,0,0,0x46);
-DEFINE_GUID(CLSID_Picture_EnhMetafile,0x319,0,0,0xc0,0,0,0,0,0,0,0x46);
-
 #define ok_ole_success(hr, func) ok(hr == S_OK, func " failed with error 0x%08x\n", hr)
 
 #define DEFINE_EXPECT(func) \
@@ -4097,6 +4091,8 @@ static void check_storage_contents(IStorage *stg, const struct storage_def *stg_
 
         *enumerated_streams += 1;
     }
+
+    IEnumSTATSTG_Release(enumstg);
 }
 
 static HRESULT stgmedium_cmp(const STGMEDIUM *med1, STGMEDIUM *med2)
@@ -4620,7 +4616,7 @@ static void test_OleCreateStaticFromData(void)
     IOleObject *ole_obj = NULL;
     IStorage *storage;
     ILockBytes *ilb;
-    IPersist *presist;
+    IPersist *persist;
     CLSID clsid;
     STATSTG statstg;
     int enumerated_streams, matched_streams;
@@ -4699,9 +4695,9 @@ static void test_OleCreateStaticFromData(void)
     hr = OleCreateStaticFromData(&DataObject, &IID_IOleObject, OLERENDER_FORMAT,
                                  dib_fmt, NULL, storage, (void **)&ole_obj);
     ok(hr == S_OK, "OleCreateStaticFromData failed: 0x%08x.\n", hr);
-    hr = IOleObject_QueryInterface(ole_obj, &IID_IPersist, (void **)&presist);
+    hr = IOleObject_QueryInterface(ole_obj, &IID_IPersist, (void **)&persist);
     ok(hr == S_OK, "IOleObject_QueryInterface failed: 0x%08x.\n", hr);
-    hr = IPersist_GetClassID(presist, &clsid);
+    hr = IPersist_GetClassID(persist, &clsid);
     ok(hr == S_OK, "IPersist_GetClassID failed: 0x%08x.\n", hr);
     ok(IsEqualCLSID(&clsid, &CLSID_Picture_Dib), "Got wrong clsid: %s, expected: %s.\n",
        wine_dbgstr_guid(&clsid), wine_dbgstr_guid(&CLSID_Picture_Dib));
@@ -4717,7 +4713,7 @@ static void test_OleCreateStaticFromData(void)
     ok(enumerated_streams == stg_def_dib.stream_count, "created %d != def streams %d\n",
        enumerated_streams, stg_def_dib.stream_count);
     ReleaseStgMedium(&stgmed);
-    IPersist_Release(presist);
+    IPersist_Release(persist);
     IStorage_Release(storage);
     IOleObject_Release(ole_obj);
 
@@ -4733,9 +4729,9 @@ static void test_OleCreateStaticFromData(void)
     hr = OleCreateStaticFromData(&DataObject, &IID_IOleObject, OLERENDER_FORMAT,
                                  emf_fmt, NULL, storage, (void **)&ole_obj);
     ok(hr == S_OK, "OleCreateStaticFromData failed: 0x%08x.\n", hr);
-    hr = IOleObject_QueryInterface(ole_obj, &IID_IPersist, (void **)&presist);
+    hr = IOleObject_QueryInterface(ole_obj, &IID_IPersist, (void **)&persist);
     ok(hr == S_OK, "IOleObject_QueryInterface failed: 0x%08x.\n", hr);
-    hr = IPersist_GetClassID(presist, &clsid);
+    hr = IPersist_GetClassID(persist, &clsid);
     ok(hr == S_OK, "IPersist_GetClassID failed: 0x%08x.\n", hr);
     ok(IsEqualCLSID(&clsid, &CLSID_Picture_EnhMetafile), "Got wrong clsid: %s, expected: %s.\n",
        wine_dbgstr_guid(&clsid), wine_dbgstr_guid(&CLSID_Picture_EnhMetafile));
@@ -4751,7 +4747,7 @@ static void test_OleCreateStaticFromData(void)
     ok(enumerated_streams == stg_def_emf.stream_count, "created %d != def streams %d\n",
        enumerated_streams, stg_def_emf.stream_count);
     ReleaseStgMedium(&stgmed);
-    IPersist_Release(presist);
+    IPersist_Release(persist);
     IStorage_Release(storage);
     IOleObject_Release(ole_obj);
 

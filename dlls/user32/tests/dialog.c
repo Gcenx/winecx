@@ -544,6 +544,26 @@ static LRESULT CALLBACK testDlgWinProc (HWND hwnd, UINT uiMsg, WPARAM wParam,
     return DefDlgProcA (hwnd, uiMsg, wParam, lParam);
 }
 
+static LRESULT CALLBACK test_control_procA(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    switch(msg)
+    {
+        case WM_CREATE:
+        {
+            static const short sample[] = { 10,1,2,3,4,5 };
+            CREATESTRUCTA *cs = (CREATESTRUCTA *)lparam;
+            short *data = cs->lpCreateParams;
+            ok(!memcmp(data, sample, sizeof(sample)), "data mismatch: %d,%d,%d,%d,%d\n", data[0], data[1], data[2], data[3], data[4]);
+        }
+        return 0;
+
+    default:
+        break;
+    }
+
+    return DefWindowProcA(hwnd, msg, wparam, lparam);
+}
+
 static BOOL RegisterWindowClasses (void)
 {
     WNDCLASSA cls;
@@ -563,7 +583,10 @@ static BOOL RegisterWindowClasses (void)
 
     cls.lpfnWndProc = main_window_procA;
     cls.lpszClassName = "IsDialogMessageWindowClass";
+    if (!RegisterClassA (&cls)) return FALSE;
 
+    cls.lpfnWndProc = test_control_procA;
+    cls.lpszClassName = "TESTCONTROL";
     if (!RegisterClassA (&cls)) return FALSE;
 
     GetClassInfoA(0, "#32770", &cls);
@@ -884,6 +907,56 @@ static INT_PTR CALLBACK focusDlgWinProc (HWND hDlg, UINT uiMsg, WPARAM wParam,
     return FALSE;
 }
 
+static INT_PTR CALLBACK EmptyProcUserTemplate(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch(uMsg) {
+    case WM_INITDIALOG:
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static INT_PTR CALLBACK focusChildDlgWinProc (HWND hwnd, UINT uiMsg, WPARAM wParam,
+        LPARAM lParam)
+{
+    static HWND hChildDlg;
+
+    switch (uiMsg)
+    {
+    case WM_INITDIALOG:
+    {
+        RECT rectHwnd;
+        struct  {
+            DLGTEMPLATE tmplate;
+            WORD menu,class,title;
+        } temp;
+
+        SetFocus( GetDlgItem(hwnd, 200) );
+
+        GetClientRect(hwnd,&rectHwnd);
+        temp.tmplate.style = WS_CHILD | WS_CLIPSIBLINGS | WS_VISIBLE | DS_CONTROL | DS_3DLOOK;
+        temp.tmplate.dwExtendedStyle = 0;
+        temp.tmplate.cdit = 0;
+        temp.tmplate.x = 0;
+        temp.tmplate.y = 0;
+        temp.tmplate.cx = 0;
+        temp.tmplate.cy = 0;
+        temp.menu = temp.class = temp.title = 0;
+
+        hChildDlg = CreateDialogIndirectParamA(g_hinst, &temp.tmplate,
+                  hwnd, (DLGPROC)EmptyProcUserTemplate, 0);
+        ok(hChildDlg != 0, "Failed to create test dialog.\n");
+
+        return FALSE;
+    }
+    case WM_CLOSE:
+        DestroyWindow(hChildDlg);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 /* Helper for InitialFocusTest */
 static const char * GetHwndString(HWND hw)
 {
@@ -1067,6 +1140,29 @@ static void test_focus(void)
         ok(selectionStart == 0 && selectionEnd == 11,
                 "Text selection after WM_SETFOCUS is [%i, %i) expected [0, 11)\n",
                 selectionStart, selectionEnd);
+
+        DestroyWindow(hDlg);
+    }
+
+    /* Test 6:
+     * Select textbox's text on creation when WM_INITDIALOG creates a child dialog. */
+    {
+        HWND hDlg;
+        HRSRC hResource;
+        HANDLE hTemplate;
+        DLGTEMPLATE* pTemplate;
+        HWND edit;
+
+        hResource = FindResourceA(g_hinst,"FOCUS_TEST_DIALOG_3", (LPCSTR)RT_DIALOG);
+        hTemplate = LoadResource(g_hinst, hResource);
+        pTemplate = LockResource(hTemplate);
+
+        hDlg = CreateDialogIndirectParamA(g_hinst, pTemplate, NULL, focusChildDlgWinProc, 0);
+        ok(hDlg != 0, "Failed to create test dialog.\n");
+        edit = GetDlgItem(hDlg, 200);
+
+        ok(GetFocus() == edit, "Focus not set to edit, focus=%p, dialog=%p, edit=%p\n",
+                GetFocus(), hDlg, edit);
 
         DestroyWindow(hDlg);
     }
@@ -2048,12 +2144,26 @@ static void test_MessageBox(void)
     UnhookWindowsHookEx(hook);
 }
 
+static INT_PTR CALLBACK custom_test_dialog_proc(HWND hdlg, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    if (msg == WM_INITDIALOG)
+        EndDialog(hdlg, 0);
+
+    return FALSE;
+}
+
+static void test_dialog_custom_data(void)
+{
+    DialogBoxA(g_hinst, "CUSTOM_TEST_DIALOG", NULL, custom_test_dialog_proc);
+}
+
 START_TEST(dialog)
 {
     g_hinst = GetModuleHandleA (0);
 
     if (!RegisterWindowClasses()) assert(0);
 
+    test_dialog_custom_data();
     test_GetNextDlgItem();
     test_IsDialogMessage();
     test_WM_NEXTDLGCTL();

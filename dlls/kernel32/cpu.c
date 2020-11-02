@@ -157,6 +157,9 @@ VOID WINAPI GetSystemInfo(
         default: si->dwProcessorType = PROCESSOR_ARM920;
         }
         break;
+    case PROCESSOR_ARCHITECTURE_ARM64:
+        si->dwProcessorType = 0;
+        break;
     default:
         FIXME("Unknown processor architecture %x\n", sci.Architecture);
         si->dwProcessorType = 0;
@@ -329,12 +332,35 @@ DWORD WINAPI GetActiveProcessorCount(WORD group)
 }
 
 /***********************************************************************
+ *           GetMaximumProcessorCount (KERNEL32.@)
+ */
+DWORD WINAPI GetMaximumProcessorCount(WORD group)
+{
+    SYSTEM_INFO si;
+    DWORD cpus;
+
+    GetSystemInfo( &si );
+    cpus = si.dwNumberOfProcessors;
+
+    FIXME("semi-stub, returning %u\n", cpus);
+    return cpus;
+}
+
+/***********************************************************************
  *           GetEnabledXStateFeatures (KERNEL32.@)
  */
 DWORD64 WINAPI GetEnabledXStateFeatures(void)
 {
     FIXME("\n");
     return 0;
+}
+
+static BOOL is_osppsvc(void)
+{
+    static const WCHAR osppsvc[] = {'o','s','p','p','s','v','c','.','e','x','e',0};
+    WCHAR path[MAX_PATH];
+    DWORD len = ARRAY_SIZE(osppsvc) - 1, len2 = GetModuleFileNameW( NULL, path, MAX_PATH );
+    return (len <= len2 && !strcmpiW( path + len2 - len, osppsvc ));
 }
 
 /***********************************************************************
@@ -346,6 +372,23 @@ UINT WINAPI GetSystemFirmwareTable(DWORD provider, DWORD id, void *buffer, DWORD
     SYSTEM_FIRMWARE_TABLE_INFORMATION *sfti = HeapAlloc(GetProcessHeap(), 0, buffer_size);
     NTSTATUS status;
 
+    if (is_osppsvc()) /* CrossOver hack for bug 16403 */
+    {
+        HANDLE handle = CreateFileA("c:\\", GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
+        if (handle != INVALID_HANDLE_VALUE)
+        {
+            FILETIME bottle = {0}, release18 = {779059200, 30696675}; /* October 16, 2018 */
+
+            GetFileTime(handle, &bottle, NULL, NULL);
+            CloseHandle(handle);
+            if (CompareFileTime(&bottle, &release18) < 0) /* revert to stub if bottle was created before 18 release */
+            {
+                FIXME("(%u, %u, %p, %u) stub\n", provider, id, buffer, size);
+                SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+                return 0;
+            }
+        }
+    }
     TRACE("(0x%08x, 0x%08x, %p, %d)\n", provider, id, buffer, size);
 
     if (!sfti)

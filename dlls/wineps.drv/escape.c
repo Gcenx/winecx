@@ -44,10 +44,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
 
-static const char psbegindocument[] =
-"%%BeginDocument: Wine passthrough\n";
-
-
 DWORD write_spool( PHYSDEV dev, const void *data, DWORD num )
 {
     PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
@@ -269,11 +265,8 @@ INT PSDRV_ExtEscape( PHYSDEV dev, INT nEscape, INT cbInput, LPCVOID in_data,
              * length of the string, rather than 2 more.  So we'll use the WORD at
              * in_data[0] instead.
              */
-            if(!physDev->job.in_passthrough) {
-                write_spool(dev, psbegindocument, sizeof(psbegindocument)-1);
-                physDev->job.in_passthrough = TRUE;
-            }
-            return write_spool(dev,((char*)in_data)+2,*(const WORD*)in_data);
+            passthrough_enter(dev);
+            return write_spool(dev, ((char*)in_data) + 2, *(const WORD*)in_data);
         }
 
     case POSTSCRIPT_IGNORE:
@@ -391,6 +384,8 @@ INT PSDRV_EndPage( PHYSDEV dev )
         FIXME("Already ended a page?\n");
 	return 1;
     }
+
+    passthrough_leave(dev);
     if(!PSDRV_WriteEndPage( dev ))
         return 0;
     PSDRV_EmptyDownloadList(dev, FALSE);
@@ -451,8 +446,7 @@ INT PSDRV_StartDoc( PHYSDEV dev, const DOCINFOW *doc )
     physDev->job.OutOfPage = TRUE;
     physDev->job.PageNo = 0;
     physDev->job.quiet = FALSE;
-    physDev->job.in_passthrough = FALSE;
-    physDev->job.had_passthrough_rect = FALSE;
+    physDev->job.passthrough_state = passthrough_none;
     physDev->job.doc_name = strdupW( doc->lpszDocName );
 
     return physDev->job.id;

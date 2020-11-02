@@ -53,9 +53,9 @@
 @ cdecl -arch=arm ??0_Scheduler@details@Concurrency@@QAA@PAVScheduler@2@@Z(ptr ptr) _Scheduler_ctor_sched
 @ thiscall -arch=i386 ??0_Scheduler@details@Concurrency@@QAE@PAVScheduler@2@@Z(ptr ptr) _Scheduler_ctor_sched
 @ cdecl -arch=win64 ??0_Scheduler@details@Concurrency@@QEAA@PEAVScheduler@2@@Z(ptr ptr) _Scheduler_ctor_sched
-@ stub -arch=arm ??0_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QAA@AAV123@@Z
-@ stub -arch=i386 ??0_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QAE@AAV123@@Z
-@ stub -arch=win64 ??0_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QEAA@AEAV123@@Z
+@ cdecl -arch=arm ??0_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QAA@AAV123@@Z(ptr) _NonReentrantPPLLock__Scoped_lock_ctor
+@ thiscall -arch=i386 ??0_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QAE@AAV123@@Z(ptr) _NonReentrantPPLLock__Scoped_lock_ctor
+@ cdecl -arch=win64 ??0_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QEAA@AEAV123@@Z(ptr) _NonReentrantPPLLock__Scoped_lock_ctor
 @ cdecl -arch=arm ??0_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAA@AAV123@@Z(ptr ptr) _ReentrantPPLLock__Scoped_lock_ctor
 @ thiscall -arch=i386 ??0_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAE@AAV123@@Z(ptr ptr) _ReentrantPPLLock__Scoped_lock_ctor
 @ cdecl -arch=win64 ??0_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QEAA@AEAV123@@Z(ptr ptr) _ReentrantPPLLock__Scoped_lock_ctor
@@ -287,9 +287,9 @@
 @ cdecl -arch=arm ??1_ReentrantBlockingLock@details@Concurrency@@QAA@XZ(ptr) _ReentrantBlockingLock_dtor
 @ thiscall -arch=i386 ??1_ReentrantBlockingLock@details@Concurrency@@QAE@XZ(ptr) _ReentrantBlockingLock_dtor
 @ cdecl -arch=win64 ??1_ReentrantBlockingLock@details@Concurrency@@QEAA@XZ(ptr) _ReentrantBlockingLock_dtor
-@ stub -arch=arm ??1_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QAA@XZ
-@ stub -arch=i386 ??1_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QAE@XZ
-@ stub -arch=win64 ??1_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QEAA@XZ
+@ cdecl -arch=arm ??1_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QAA@XZ(ptr) _NonReentrantPPLLock__Scoped_lock_dtor
+@ thiscall -arch=i386 ??1_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QAE@XZ(ptr) _NonReentrantPPLLock__Scoped_lock_dtor
+@ cdecl -arch=win64 ??1_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QEAA@XZ(ptr) _NonReentrantPPLLock__Scoped_lock_dtor
 @ cdecl -arch=arm ??1_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAA@XZ(ptr) _ReentrantPPLLock__Scoped_lock_dtor
 @ thiscall -arch=i386 ??1_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAE@XZ(ptr) _ReentrantPPLLock__Scoped_lock_dtor
 @ cdecl -arch=win64 ??1_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QEAA@XZ(ptr) _ReentrantPPLLock__Scoped_lock_dtor
@@ -808,7 +808,7 @@
 @ thiscall -arch=win32 ?unlock@reader_writer_lock@Concurrency@@QAEXXZ(ptr) reader_writer_lock_unlock
 @ cdecl -arch=win64 ?unlock@reader_writer_lock@Concurrency@@QEAAXXZ(ptr) reader_writer_lock_unlock
 @ cdecl ?vswprintf@@YAHPA_WIPB_WPAD@Z(ptr long wstr ptr) MSVCRT_vsnwprintf
-@ stub ?wait@Concurrency@@YAXI@Z
+@ cdecl ?wait@Concurrency@@YAXI@Z(long) Concurrency_wait
 @ cdecl -arch=arm ?wait@_Condition_variable@details@Concurrency@@QAAXAAVcritical_section@3@@Z(ptr ptr) _Condition_variable_wait
 @ thiscall -arch=i386 ?wait@_Condition_variable@details@Concurrency@@QAEXAAVcritical_section@3@@Z(ptr ptr) _Condition_variable_wait
 @ cdecl -arch=win64 ?wait@_Condition_variable@details@Concurrency@@QEAAXAEAVcritical_section@3@@Z(ptr ptr) _Condition_variable_wait
@@ -979,12 +979,12 @@
 @ cdecl __p___mb_cur_max()
 @ cdecl __p___wargv() MSVCRT___p___wargv
 @ cdecl __p___winitenv()
-@ cdecl __p__acmdln()
+@ cdecl __p__acmdln() MSVCRT___p__acmdln
 @ cdecl __p__commode()
 @ cdecl __p__daylight() MSVCRT___p__daylight
 @ cdecl __p__dstbias() MSVCRT___p__dstbias
 @ cdecl __p__environ() MSVCRT___p__environ
-@ cdecl __p__fmode()
+@ cdecl __p__fmode() MSVCRT___p__fmode
 @ cdecl __p__iob() MSVCRT___iob_func
 @ stub __p__mbcasemap()
 @ cdecl __p__mbctype()
@@ -993,7 +993,7 @@
 @ stub __p__pwctype()
 @ cdecl __p__timezone() MSVCRT___p__timezone
 @ cdecl __p__tzname()
-@ cdecl __p__wcmdln()
+@ cdecl __p__wcmdln() MSVCRT___p__wcmdln
 @ cdecl __p__wenviron() MSVCRT___p__wenviron
 @ cdecl __p__wpgmptr() MSVCRT___p__wpgmptr
 @ cdecl __pctype_func() MSVCRT___pctype_func
@@ -1004,7 +1004,7 @@
 @ cdecl __set_app_type(long) MSVCRT___set_app_type
 @ extern __setlc_active MSVCRT___setlc_active
 @ cdecl __setusermatherr(ptr) MSVCRT___setusermatherr
-@ stub __strncnt
+@ cdecl __strncnt(str long) MSVCRT___strncnt
 @ varargs  __swprintf_l(ptr wstr ptr) MSVCRT___swprintf_l
 @ cdecl __sys_errlist()
 @ cdecl __sys_nerr()
@@ -1044,8 +1044,8 @@
 @ cdecl _atof_l(str ptr) MSVCRT__atof_l
 @ cdecl _atoflt(ptr str) MSVCRT__atoflt
 @ cdecl _atoflt_l(ptr str ptr) MSVCRT__atoflt_l
-@ cdecl -ret64 _atoi64(str) ntdll._atoi64
-@ cdecl _atoi64_l(str ptr) MSVCRT__atoi64_l
+@ cdecl -ret64 _atoi64(str) MSVCRT__atoi64
+@ cdecl -ret64 _atoi64_l(str ptr) MSVCRT__atoi64_l
 @ cdecl _atoi_l(str ptr) MSVCRT__atoi_l
 @ cdecl _atol_l(str ptr) MSVCRT__atol_l
 @ cdecl _atoldbl(ptr str) MSVCRT__atoldbl
@@ -1362,20 +1362,20 @@
 @ stub _ispunct_l
 @ cdecl _isspace_l(long ptr) MSVCRT__isspace_l
 @ cdecl _isupper_l(long ptr) MSVCRT__isupper_l
-@ stub _iswalnum_l
+@ cdecl _iswalnum_l(long ptr) MSVCRT__iswalnum_l
 @ cdecl _iswalpha_l(long ptr) MSVCRT__iswalpha_l
-@ stub _iswcntrl_l
+@ cdecl _iswcntrl_l(long ptr) MSVCRT__iswcntrl_l
 @ stub _iswcsym_l
 @ stub _iswcsymf_l
 @ cdecl _iswctype_l(long long ptr) MSVCRT__iswctype_l
 @ cdecl _iswdigit_l(long ptr) MSVCRT__iswdigit_l
-@ stub _iswgraph_l
-@ stub _iswlower_l
-@ stub _iswprint_l
+@ cdecl _iswgraph_l(long ptr) MSVCRT__iswgraph_l
+@ cdecl _iswlower_l(long ptr) MSVCRT__iswlower_l
+@ cdecl _iswprint_l(long ptr) MSVCRT__iswprint_l
 @ cdecl _iswpunct_l(long ptr) MSVCRT__iswpunct_l
 @ cdecl _iswspace_l(long ptr) MSVCRT__iswspace_l
-@ stub _iswupper_l
-@ stub _iswxdigit_l
+@ cdecl _iswupper_l(long ptr) MSVCRT__iswupper_l
+@ cdecl _iswxdigit_l(long ptr) MSVCRT__iswxdigit_l
 @ cdecl _isxdigit_l(long ptr) MSVCRT__isxdigit_l
 @ cdecl _itoa(long ptr long) MSVCRT__itoa
 @ cdecl _itoa_s(long ptr long long) MSVCRT__itoa_s
@@ -1803,7 +1803,7 @@
 @ stub _vprintf_p_l
 @ stub _vprintf_s_l
 @ cdecl _vscprintf(str ptr) MSVCRT__vscprintf
-@ stub _vscprintf_l
+@ cdecl _vscprintf_l(str ptr ptr) MSVCRT__vscprintf_l
 @ cdecl _vscprintf_p(str ptr) MSVCRT__vscprintf_p
 @ cdecl _vscprintf_p_l(str ptr ptr) MSVCRT__vscprintf_p_l
 @ cdecl _vscwprintf(wstr ptr) MSVCRT__vscwprintf
@@ -1878,7 +1878,7 @@
 @ cdecl -ret64 _wcstoui64(wstr ptr long) MSVCRT__wcstoui64
 @ cdecl -ret64 _wcstoui64_l(wstr ptr long ptr) MSVCRT__wcstoui64_l
 @ cdecl _wcstoul_l(wstr ptr long ptr) MSVCRT__wcstoul_l
-@ cdecl _wcsupr(wstr) ntdll._wcsupr
+@ cdecl _wcsupr(wstr) MSVCRT__wcsupr
 @ cdecl _wcsupr_l(wstr ptr) MSVCRT__wcsupr_l
 @ cdecl _wcsupr_s(wstr long) MSVCRT__wcsupr_s
 @ cdecl _wcsupr_s_l(wstr long ptr) MSVCRT__wcsupr_s_l
@@ -1996,7 +1996,7 @@
 @ cdecl -private atexit(ptr) MSVCRT_atexit  # not imported to avoid conflicts with Mingw
 @ cdecl atof(str) MSVCRT_atof
 @ cdecl atoi(str) MSVCRT_atoi
-@ cdecl atol(str) ntdll.atol
+@ cdecl atol(str) MSVCRT_atol
 @ cdecl bsearch(ptr ptr long long ptr) MSVCRT_bsearch
 @ cdecl bsearch_s(ptr ptr long long ptr ptr) MSVCRT_bsearch_s
 @ cdecl btowc(long) MSVCRT_btowc
@@ -2160,7 +2160,7 @@
 @ cdecl strcoll(str str) MSVCRT_strcoll
 @ cdecl strcpy(ptr str) MSVCRT_strcpy
 @ cdecl strcpy_s(ptr long str) MSVCRT_strcpy_s
-@ cdecl strcspn(str str) ntdll.strcspn
+@ cdecl strcspn(str str) MSVCRT_strcspn
 @ cdecl strerror(long) MSVCRT_strerror
 @ cdecl strerror_s(ptr long long) MSVCRT_strerror_s
 @ cdecl strftime(ptr long str ptr) MSVCRT_strftime
@@ -2171,7 +2171,7 @@
 @ cdecl strncpy(ptr str long) MSVCRT_strncpy
 @ cdecl strncpy_s(ptr long str long) MSVCRT_strncpy_s
 @ cdecl strnlen(str long) MSVCRT_strnlen
-@ cdecl strpbrk(str str) ntdll.strpbrk
+@ cdecl strpbrk(str str) MSVCRT_strpbrk
 @ cdecl strrchr(str long) MSVCRT_strrchr
 @ cdecl strspn(str str) ntdll.strspn
 @ cdecl strstr(str str) MSVCRT_strstr
@@ -2215,7 +2215,7 @@
 @ cdecl wcscat(wstr wstr) ntdll.wcscat
 @ cdecl wcscat_s(wstr long wstr) MSVCRT_wcscat_s
 @ cdecl wcschr(wstr long) MSVCRT_wcschr
-@ cdecl wcscmp(wstr wstr) ntdll.wcscmp
+@ cdecl wcscmp(wstr wstr) MSVCRT_wcscmp
 @ cdecl wcscoll(wstr wstr) MSVCRT_wcscoll
 @ cdecl wcscpy(ptr wstr) ntdll.wcscpy
 @ cdecl wcscpy_s(ptr long wstr) MSVCRT_wcscpy_s
@@ -2229,7 +2229,7 @@
 @ cdecl wcsncpy_s(ptr long wstr long) MSVCRT_wcsncpy_s
 @ cdecl wcsnlen(wstr long) MSVCRT_wcsnlen
 @ cdecl wcspbrk(wstr wstr) MSVCRT_wcspbrk
-@ cdecl wcsrchr(wstr long) ntdll.wcsrchr
+@ cdecl wcsrchr(wstr long) MSVCRT_wcsrchr
 @ cdecl wcsrtombs(ptr ptr long ptr) MSVCRT_wcsrtombs
 @ cdecl wcsrtombs_s(ptr ptr long ptr long ptr) MSVCRT_wcsrtombs_s
 @ cdecl wcsspn(wstr wstr) ntdll.wcsspn
@@ -2237,7 +2237,7 @@
 @ cdecl wcstod(wstr ptr) MSVCRT_wcstod
 @ cdecl wcstok(wstr wstr) MSVCRT_wcstok
 @ cdecl wcstok_s(ptr wstr ptr) MSVCRT_wcstok_s
-@ cdecl wcstol(wstr ptr long) ntdll.wcstol
+@ cdecl wcstol(wstr ptr long) MSVCRT_wcstol
 @ cdecl wcstombs(ptr ptr long) MSVCRT_wcstombs
 @ cdecl wcstombs_s(ptr ptr long wstr long) MSVCRT_wcstombs_s
 @ cdecl wcstoul(wstr ptr long) MSVCRT_wcstoul

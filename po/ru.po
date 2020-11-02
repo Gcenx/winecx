@@ -5,14 +5,14 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2018-07-20 09:26+0300\n"
+"PO-Revision-Date: 2018-12-11 15:59+0300\n"
 "Last-Translator: Nikolay Sivov <nsivov@codeweavers.com>\n"
 "Language-Team: Russian\n"
 "Language: ru\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"X-Generator: Poedit 2.0.9\n"
+"X-Generator: Poedit 2.2\n"
 
 #: appwiz.rc:58
 msgid "Install/Uninstall"
@@ -48,7 +48,7 @@ msgstr "&Сведения о поддержке"
 msgid "&Modify..."
 msgstr "&Изменить..."
 
-#: appwiz.rc:69 appwiz.rc:45 cryptui.rc:346 msacm32.rc:40 winecfg.rc:200
+#: appwiz.rc:69 appwiz.rc:45 cryptui.rc:351 msacm32.rc:40 winecfg.rc:200
 #: winecfg.rc:237 wordpad.rc:256
 msgid "&Remove"
 msgstr "&Удалить"
@@ -59,9 +59,9 @@ msgstr "Сведения о поддержке"
 
 #: appwiz.rc:78 avifil32.rc:54 comctl32.rc:71 comctl32.rc:55 comdlg32.rc:232
 #: comdlg32.rc:262 comdlg32.rc:305 comdlg32.rc:359 comdlg32.rc:398
-#: comdlg32.rc:452 credui.rc:52 cryptui.rc:263 cryptui.rc:275 cryptui.rc:365
-#: dinput.rc:46 ieframe.rc:96 localui.rc:44 localui.rc:57 mpr.rc:49
-#: msacm32.rc:53 mshtml.rc:47 mshtml.rc:57 msvfw32.rc:36 oledlg.rc:62
+#: comdlg32.rc:452 credui.rc:52 cryptui.rc:268 cryptui.rc:280 cryptui.rc:370
+#: cryptui.rc:462 dinput.rc:37 ieframe.rc:96 localui.rc:44 localui.rc:57
+#: mpr.rc:49 msacm32.rc:53 mshtml.rc:47 mshtml.rc:57 msvfw32.rc:36 oledlg.rc:62
 #: oledlg.rc:94 serialui.rc:41 setupapi.rc:59 shell32.rc:276 shell32.rc:300
 #: shell32.rc:322 shell32.rc:341 shlwapi.rc:44 twain.rc:32 user32.rc:83
 #: user32.rc:98 wininet.rc:51 wininet.rc:71 winspool.rc:42 net.rc:47
@@ -139,23 +139,24 @@ msgstr ""
 msgid "&Install"
 msgstr "&Установить"
 
-#: appwiz.rc:110 appwiz.rc:125 avifil32.rc:55 browseui.rc:40 comctl32.rc:72
+#: appwiz.rc:110 appwiz.rc:125 avifil32.rc:55 browseui.rc:45 comctl32.rc:72
 #: comctl32.rc:87 comctl32.rc:56 comdlg32.rc:171 comdlg32.rc:193
 #: comdlg32.rc:211 comdlg32.rc:233 comdlg32.rc:263 comdlg32.rc:306
 #: comdlg32.rc:328 comdlg32.rc:348 comdlg32.rc:360 comdlg32.rc:399
 #: comdlg32.rc:453 comdlg32.rc:478 comdlg32.rc:504 comdlg32.rc:527 credui.rc:53
-#: cryptui.rc:264 cryptui.rc:276 cryptui.rc:366 dinput.rc:47 ieframe.rc:97
-#: inetcpl.rc:81 localui.rc:45 localui.rc:58 mpr.rc:50 msacm32.rc:54
-#: mshtml.rc:48 mshtml.rc:58 msvfw32.rc:37 oledlg.rc:63 oledlg.rc:95
-#: serialui.rc:42 setupapi.rc:42 setupapi.rc:60 shell32.rc:277 shell32.rc:301
-#: shell32.rc:312 shell32.rc:342 shlwapi.rc:45 twain.rc:33 user32.rc:84
-#: user32.rc:99 wininet.rc:52 wininet.rc:72 winspool.rc:43 notepad.rc:118
-#: oleview.rc:162 oleview.rc:175 progman.rc:107 progman.rc:125 progman.rc:143
-#: progman.rc:159 progman.rc:181 progman.rc:200 progman.rc:217 regedit.rc:297
-#: regedit.rc:308 regedit.rc:321 regedit.rc:337 regedit.rc:350 regedit.rc:363
-#: taskmgr.rc:443 taskmgr.rc:518 wineboot.rc:34 winecfg.rc:215 winecfg.rc:225
-#: wineconsole.rc:136 winefile.rc:129 winefile.rc:152 winefile.rc:182
-#: winemine.rc:99 wordpad.rc:216 wordpad.rc:227 wordpad.rc:245 wordpad.rc:258
+#: cryptui.rc:269 cryptui.rc:281 cryptui.rc:371 cryptui.rc:463 dinput.rc:38
+#: ieframe.rc:97 inetcpl.rc:81 localui.rc:45 localui.rc:58 mpr.rc:50
+#: msacm32.rc:54 mshtml.rc:48 mshtml.rc:58 msvfw32.rc:37 oledlg.rc:63
+#: oledlg.rc:95 serialui.rc:42 setupapi.rc:42 setupapi.rc:60 shell32.rc:277
+#: shell32.rc:301 shell32.rc:312 shell32.rc:342 shlwapi.rc:45 twain.rc:33
+#: user32.rc:84 user32.rc:99 wininet.rc:52 wininet.rc:72 winspool.rc:43
+#: notepad.rc:118 oleview.rc:162 oleview.rc:175 progman.rc:107 progman.rc:125
+#: progman.rc:143 progman.rc:159 progman.rc:181 progman.rc:200 progman.rc:217
+#: regedit.rc:297 regedit.rc:308 regedit.rc:321 regedit.rc:337 regedit.rc:350
+#: regedit.rc:363 taskmgr.rc:443 taskmgr.rc:518 wineboot.rc:34 winecfg.rc:215
+#: winecfg.rc:225 wineconsole.rc:136 winefile.rc:129 winefile.rc:152
+#: winefile.rc:182 winemine.rc:99 wordpad.rc:216 wordpad.rc:227 wordpad.rc:245
+#: wordpad.rc:258
 msgid "Cancel"
 msgstr "Отмена"
 
@@ -309,6 +310,26 @@ msgstr "без сжатия"
 msgid "Canceling..."
 msgstr "Отмена..."
 
+#: browseui.rc:29
+msgid "%1!u! %2 remaining"
+msgstr "Осталось %1!u! %2"
+
+#: browseui.rc:30
+msgid "%1!u! %2 and %3!u! %4 remaining"
+msgstr "Осталось %1!u! %2 и %3!u! %4"
+
+#: browseui.rc:31
+msgid "seconds"
+msgstr "сек."
+
+#: browseui.rc:32
+msgid "minutes"
+msgstr "мин."
+
+#: browseui.rc:33
+msgid "hours"
+msgstr "ч."
+
 #: comctl32.rc:68 winefile.rc:157
 msgid "Properties for %s"
 msgstr "Свойства %s"
@@ -341,7 +362,7 @@ msgstr "Готово"
 msgid "Customize Toolbar"
 msgstr "Настройка панели инструментов"
 
-#: comctl32.rc:100 comctl32.rc:57 cryptui.rc:351 ieframe.rc:43 oleview.rc:83
+#: comctl32.rc:100 comctl32.rc:57 cryptui.rc:356 ieframe.rc:43 oleview.rc:83
 #: oleview.rc:187 oleview.rc:200 oleview.rc:212 taskmgr.rc:139
 msgid "&Close"
 msgstr "&Закрыть"
@@ -413,7 +434,7 @@ msgstr "Скрыть подробности"
 msgid "See details"
 msgstr "Показать подробности"
 
-#: comctl32.rc:31 cryptui.rc:230 regedit.rc:286 taskmgr.rc:434 winedbg.rc:61
+#: comctl32.rc:31 cryptui.rc:235 regedit.rc:286 taskmgr.rc:434 winedbg.rc:61
 #: winedbg.rc:76 wordpad.rc:180
 msgid "Close"
 msgstr "Закрыть"
@@ -884,7 +905,7 @@ msgstr "Создать новую папку"
 msgid "List"
 msgstr "Список"
 
-#: comdlg32.rc:48 cryptui.rc:196
+#: comdlg32.rc:48 cryptui.rc:201
 msgid "Details"
 msgstr "Подробности"
 
@@ -1197,7 +1218,7 @@ msgstr "мм"
 msgid "&User name:"
 msgstr "По&льзователь:"
 
-#: credui.rc:48 cryptui.rc:397
+#: credui.rc:48 cryptui.rc:402
 msgid "&Password:"
 msgstr "&Пароль:"
 
@@ -2092,112 +2113,112 @@ msgstr "Номер уведомления="
 msgid "Notice Text="
 msgstr "Текст уведомления="
 
-#: cryptui.rc:180 cryptui.rc:235 inetcpl.rc:46 shell32.rc:348 shell32.rc:377
+#: cryptui.rc:185 cryptui.rc:240 inetcpl.rc:46 shell32.rc:348 shell32.rc:377
 msgid "General"
 msgstr "Общие"
 
-#: cryptui.rc:191
+#: cryptui.rc:196
 msgid "&Install Certificate..."
 msgstr "&Установить сертификат..."
 
-#: cryptui.rc:192
+#: cryptui.rc:197
 msgid "Issuer &Statement"
 msgstr "&Уведомление поставщика"
 
-#: cryptui.rc:200
+#: cryptui.rc:205
 msgid "&Show:"
 msgstr "&Показать:"
 
-#: cryptui.rc:205
+#: cryptui.rc:210
 msgid "&Edit Properties..."
 msgstr "&Свойства..."
 
-#: cryptui.rc:206
+#: cryptui.rc:211
 msgid "&Copy to File..."
 msgstr "&Экспортировать..."
 
-#: cryptui.rc:210
+#: cryptui.rc:215
 msgid "Certification Path"
 msgstr "Путь сертификации"
 
-#: cryptui.rc:214
+#: cryptui.rc:219
 msgid "Certification path"
 msgstr "Путь сертификации"
 
-#: cryptui.rc:217
+#: cryptui.rc:222 cryptui.rc:464
 msgid "&View Certificate"
 msgstr "&Просмотр сертификата"
 
-#: cryptui.rc:218
+#: cryptui.rc:223
 msgid "Certificate &status:"
 msgstr "&Состояние сертификата:"
 
-#: cryptui.rc:224
+#: cryptui.rc:229
 msgid "Disclaimer"
 msgstr "Уведомление"
 
-#: cryptui.rc:231
+#: cryptui.rc:236
 msgid "More &Info"
 msgstr "&Дополнительно"
 
-#: cryptui.rc:239
+#: cryptui.rc:244
 msgid "&Friendly name:"
 msgstr "&Понятное имя:"
 
-#: cryptui.rc:241 progman.rc:154 progman.rc:170
+#: cryptui.rc:246 progman.rc:154 progman.rc:170
 msgid "&Description:"
 msgstr "&Описание:"
 
-#: cryptui.rc:243
+#: cryptui.rc:248
 msgid "Certificate purposes"
 msgstr "Назначения"
 
-#: cryptui.rc:244
+#: cryptui.rc:249
 msgid "&Enable all purposes for this certificate"
 msgstr "&Разрешить все назначения для этого сертификата"
 
-#: cryptui.rc:246
+#: cryptui.rc:251
 msgid "D&isable all purposes for this certificate"
 msgstr "&Запретить все назначения для этого сертификата"
 
-#: cryptui.rc:248
+#: cryptui.rc:253
 msgid "Enable &only the following purposes for this certificate:"
 msgstr "Р&азрешить только следующие назначения:"
 
-#: cryptui.rc:253
+#: cryptui.rc:258
 msgid "Add &Purpose..."
 msgstr "&Добавить..."
 
-#: cryptui.rc:257
+#: cryptui.rc:262
 msgid "Add Purpose"
 msgstr "Добавление назначения"
 
-#: cryptui.rc:260
+#: cryptui.rc:265
 msgid ""
 "Add the object identifier (OID) for the certificate purpose you wish to add:"
 msgstr "Введите OID назначения сертификата, которое вы хотите добавить:"
 
-#: cryptui.rc:268 cryptui.rc:69
+#: cryptui.rc:273 cryptui.rc:69
 msgid "Select Certificate Store"
 msgstr "Выбор хранилища сертификатов"
 
-#: cryptui.rc:271
+#: cryptui.rc:276
 msgid "Select the certificate store you want to use:"
 msgstr "Выберите хранилище для импорта сертификата:"
 
-#: cryptui.rc:274
+#: cryptui.rc:279
 msgid "&Show physical stores"
 msgstr "&Показывать физические хранилища"
 
-#: cryptui.rc:280 cryptui.rc:291 cryptui.rc:308 cryptui.rc:322 cryptui.rc:71
+#: cryptui.rc:285 cryptui.rc:296 cryptui.rc:313 cryptui.rc:327 cryptui.rc:71
 msgid "Certificate Import Wizard"
 msgstr "Мастер импорта сертификатов"
 
-#: cryptui.rc:283
+#: cryptui.rc:288
 msgid "Welcome to the Certificate Import Wizard"
 msgstr "Вас приветствует мастер импорта сертификатов"
 
-#: cryptui.rc:286
+#: cryptui.rc:291
 msgid ""
 "This wizard helps you import certificates, certificate revocation lists, and "
 "certificate trust lists from a file to a certificate store.\n"
@@ -2221,15 +2242,15 @@ msgstr ""
 "\n"
 "Для продолжения нажмите Далее."
 
-#: cryptui.rc:294 cryptui.rc:430
+#: cryptui.rc:299 cryptui.rc:435
 msgid "&File name:"
 msgstr "Имя &файла:"
 
-#: cryptui.rc:296 cryptui.rc:318 cryptui.rc:432 winecfg.rc:313
+#: cryptui.rc:301 cryptui.rc:323 cryptui.rc:437 winecfg.rc:313
 msgid "B&rowse..."
 msgstr "&Обзор..."
 
-#: cryptui.rc:297
+#: cryptui.rc:302
 msgid ""
 "Note: The following file formats may contain more than one certificate, "
 "certificate revocation list, or certificate trust list:"
@@ -2237,19 +2258,19 @@ msgstr ""
 "Примечание: сертификаты, список отзыва и список доверия сертификатов могут "
 "содержаться в файлах следующих форматов:"
 
-#: cryptui.rc:299
+#: cryptui.rc:304
 msgid "Cryptographic Message Syntax Standard/PKCS #7 Messages (*.p7b)"
 msgstr "Сообщения CMS/PKCS #7 (*.p7b)"
 
-#: cryptui.rc:301
+#: cryptui.rc:306
 msgid "Personal Information Exchange/PKCS #12 (*.pfx; *.p12)"
 msgstr "Формат обмена личной информацией/PKCS #12 (*.pfx, *.p12)"
 
-#: cryptui.rc:303 cryptui.rc:81 cryptui.rc:162
+#: cryptui.rc:308 cryptui.rc:81 cryptui.rc:162
 msgid "Microsoft Serialized Certificate Store (*.sst)"
 msgstr "Хранилище сериализованных сертификатов Microsoft (*.sst)"
 
-#: cryptui.rc:311
+#: cryptui.rc:316
 msgid ""
 "Wine can automatically select the certificate store, or you can specify a "
 "location for the certificates."
@@ -2257,85 +2278,85 @@ msgstr ""
 "Wine может автоматически выбрать хранилище сертификатов, либо вы можете сами "
 "указать его."
 
-#: cryptui.rc:313
+#: cryptui.rc:318
 msgid "&Automatically select certificate store"
 msgstr "&Выбрать хранилище сертификатов автоматически"
 
-#: cryptui.rc:315
+#: cryptui.rc:320
 msgid "&Place all certificates in the following store:"
 msgstr "&Поместить все сертификаты в следующее хранилище:"
 
-#: cryptui.rc:325
+#: cryptui.rc:330
 msgid "Completing the Certificate Import Wizard"
 msgstr "Завершение работы мастера импорта сертификатов"
 
-#: cryptui.rc:327
+#: cryptui.rc:332
 msgid "You have successfully completed the Certificate Import Wizard."
 msgstr ""
 "Мастер импорта сертификатов успешно собрал все данные, необходимые для "
 "выполнения импорта."
 
-#: cryptui.rc:329 cryptui.rc:443
+#: cryptui.rc:334 cryptui.rc:448
 msgid "You have specified the following settings:"
 msgstr "Вы определили следующие параметры импорта:"
 
-#: cryptui.rc:337 cryptui.rc:122 inetcpl.rc:111
+#: cryptui.rc:342 cryptui.rc:122 inetcpl.rc:111
 msgid "Certificates"
 msgstr "Сертификаты"
 
-#: cryptui.rc:340
+#: cryptui.rc:345
 msgid "I&ntended purpose:"
 msgstr "&Назначения:"
 
-#: cryptui.rc:344
+#: cryptui.rc:349
 msgid "&Import..."
 msgstr "&Импорт..."
 
-#: cryptui.rc:345 regedit.rc:91 regedit.rc:112
+#: cryptui.rc:350 regedit.rc:91 regedit.rc:112
 msgid "&Export..."
 msgstr "&Экспортировать..."
 
-#: cryptui.rc:347
+#: cryptui.rc:352
 msgid "&Advanced..."
 msgstr "&Параметры..."
 
-#: cryptui.rc:348
+#: cryptui.rc:353
 msgid "Certificate intended purposes"
 msgstr "Назначения сертификата"
 
-#: cryptui.rc:350 ieframe.rc:45 shell32.rc:43 shell32.rc:120 oleview.rc:59
+#: cryptui.rc:355 ieframe.rc:45 shell32.rc:43 shell32.rc:120 oleview.rc:59
 #: oleview.rc:61 oleview.rc:85 regedit.rc:64 taskmgr.rc:52 winefile.rc:48
 #: wordpad.rc:69
 msgid "&View"
 msgstr "&Вид"
 
-#: cryptui.rc:355
+#: cryptui.rc:360
 msgid "Advanced Options"
 msgstr "Дополнительные параметры"
 
-#: cryptui.rc:358
+#: cryptui.rc:363
 msgid "Certificate purpose"
 msgstr "Назначения сертификатов"
 
-#: cryptui.rc:359
+#: cryptui.rc:364
 msgid ""
 "Select one or more purposes to be listed when Advanced Purposes is selected."
 msgstr "Выберите назначения, которые будут включены в Определяемый набор."
 
-#: cryptui.rc:361
+#: cryptui.rc:366
 msgid "&Certificate purposes:"
 msgstr "&Назначения:"
 
-#: cryptui.rc:370 cryptui.rc:381 cryptui.rc:394 cryptui.rc:404 cryptui.rc:427
-#: cryptui.rc:436 cryptui.rc:150
+#: cryptui.rc:375 cryptui.rc:386 cryptui.rc:399 cryptui.rc:409 cryptui.rc:432
+#: cryptui.rc:441 cryptui.rc:150
 msgid "Certificate Export Wizard"
 msgstr "Мастер экспорта сертификатов"
 
-#: cryptui.rc:373
+#: cryptui.rc:378
 msgid "Welcome to the Certificate Export Wizard"
 msgstr "Вас приветствует мастер экспорта"
 
-#: cryptui.rc:376
+#: cryptui.rc:381
 msgid ""
 "This wizard helps you export certificates, certificate revocation lists, and "
 "certificate trust lists from a certificate store to a file.\n"
@@ -2359,7 +2380,7 @@ msgstr ""
 "\n"
 "Для продолжения нажмите Далее."
 
-#: cryptui.rc:384
+#: cryptui.rc:389
 msgid ""
 "If you choose to export the private key, you will be prompted for a password "
 "to protect the private key on a later page."
@@ -2367,67 +2388,75 @@ msgstr ""
 "Если вы решите экспортировать закрытый ключ, позже вам будет предложено "
 "задать пароль для защиты ключа."
 
-#: cryptui.rc:385
+#: cryptui.rc:390
 msgid "Do you wish to export the private key?"
 msgstr "Вы хотите экспортировать закрытый ключ?"
 
-#: cryptui.rc:386
+#: cryptui.rc:391
 msgid "&Yes, export the private key"
 msgstr "&Да, экспортировать"
 
-#: cryptui.rc:388
+#: cryptui.rc:393
 msgid "N&o, do not export the private key"
 msgstr "&Нет, не экспортировать"
 
-#: cryptui.rc:399
+#: cryptui.rc:404
 msgid "&Confirm password:"
 msgstr "П&одтверждение:"
 
-#: cryptui.rc:407
+#: cryptui.rc:412
 msgid "Select the format you want to use:"
 msgstr "Выберите формат для экспорта:"
 
-#: cryptui.rc:408
+#: cryptui.rc:413
 msgid "&DER-encoded X.509 (*.cer)"
 msgstr "X.509 в кодировке &DER (*.cer)"
 
-#: cryptui.rc:410
+#: cryptui.rc:415
 msgid "Ba&se64-encoded X.509 (*.cer):"
 msgstr "X.509 в кодировке Ba&se64 (*.cer):"
 
-#: cryptui.rc:412
+#: cryptui.rc:417
 msgid "&Cryptographic Message Syntax Standard/PKCS #7 Message (*.p7b)"
 msgstr "Сообщение &CMS/PKCS #7 (*.p7b)"
 
-#: cryptui.rc:414
+#: cryptui.rc:419
 msgid "&Include all certificates in the certification path if possible"
 msgstr "&По возможности включить все сертификаты в путь сертификации"
 
-#: cryptui.rc:416
+#: cryptui.rc:421
 msgid "&Personal Information Exchange/PKCS #12 (*.pfx)"
 msgstr "&Формат обмена личной информацией/PKCS #12 (*.pfx)"
 
-#: cryptui.rc:418
+#: cryptui.rc:423
 msgid "Incl&ude all certificates in the certification path if possible"
 msgstr "По &возможности включить все сертификаты в путь сертификации"
 
-#: cryptui.rc:420
+#: cryptui.rc:425
 msgid "&Enable strong encryption"
 msgstr "Использовать &сильное шифрование"
 
-#: cryptui.rc:422
+#: cryptui.rc:427
 msgid "Delete the private &key if the export is successful"
 msgstr "Удалить закрытый &ключ после успешного экспорта"
 
-#: cryptui.rc:439
+#: cryptui.rc:444
 msgid "Completing the Certificate Export Wizard"
 msgstr "Завершение работы мастера экспорта сертификатов"
 
-#: cryptui.rc:441
+#: cryptui.rc:446
 msgid "You have successfully completed the Certificate Export Wizard."
 msgstr ""
 "Мастер импорта сертификатов успешно собрал все данные, необходимые для "
 "выполнения экспорта."
+
+#: cryptui.rc:456 cryptui.rc:179
+msgid "Select Certificate"
+msgstr "Выбор сертификата"
+
+#: cryptui.rc:459
+msgid "Select a certificate you want to use"
+msgstr "Выберите сертификат, который хотите использовать"
 
 #: cryptui.rc:30 cryptui.rc:93
 msgid "Certificate"
@@ -2956,39 +2985,55 @@ msgstr "Примечание: открыть закрытый ключ этог�
 msgid "Note: The private key for this certificate is not exportable."
 msgstr "Примечание: закрытый ключ этого сертификата не экспортируемый."
 
-#: dinput.rc:43
+#: cryptui.rc:177
+msgid "Intended Use"
+msgstr "Предназначение"
+
+#: cryptui.rc:178 shell32.rc:152
+msgid "Location"
+msgstr "Размещение"
+
+#: cryptui.rc:180
+msgid "Select a certificate"
+msgstr "Выберите сертификат"
+
+#: cryptui.rc:181 winefile.rc:102 winhlp32.rc:110 winhlp32.rc:85
+msgid "Not yet implemented"
+msgstr "Ещё не реализовано"
+
+#: dinput.rc:34
 msgid "Configure Devices"
 msgstr "Настроить устройства"
 
-#: dinput.rc:48
+#: dinput.rc:39
 msgid "Reset"
 msgstr "Сброс"
 
-#: dinput.rc:51
+#: dinput.rc:42
 msgid "Player"
 msgstr "Адаптер"
 
-#: dinput.rc:52 winecfg.rc:89
+#: dinput.rc:43 winecfg.rc:89
 msgid "Device"
 msgstr "Устройство"
 
-#: dinput.rc:53
+#: dinput.rc:44
 msgid "Actions"
 msgstr "Действия"
 
-#: dinput.rc:54
+#: dinput.rc:45
 msgid "Mapping"
 msgstr "Привязка"
 
-#: dinput.rc:56
+#: dinput.rc:47
 msgid "Show Assigned First"
 msgstr "Показывать назначенные первыми"
 
-#: dinput.rc:37
+#: dinput.rc:28
 msgid "Action"
 msgstr "Действие"
 
-#: dinput.rc:38
+#: dinput.rc:29
 msgid "Object"
 msgstr "Объект"
 
@@ -6942,391 +6987,395 @@ msgstr "функции из:"
 msgid "choose which folder contains %s"
 msgstr "выберите каталог, содержащий %s"
 
-#: msi.rc:90
+#: msi.rc:66 shell32.rc:238
+msgid "New Folder"
+msgstr "Новая папка"
+
+#: msi.rc:91
 msgid "Allocating registry space"
 msgstr "Выделение места под данные реестра"
 
-#: msi.rc:91
+#: msi.rc:92
 msgid "Searching for installed applications"
 msgstr "Поиск установленных приложений"
 
-#: msi.rc:92
+#: msi.rc:93
 msgid "Binding executables"
 msgstr "Связывание исполняемых файлов"
 
-#: msi.rc:93 msi.rc:136
+#: msi.rc:94 msi.rc:137
 msgid "Searching for qualifying products"
 msgstr "Поиск подходящих продуктов"
 
-#: msi.rc:94 msi.rc:95 msi.rc:100
+#: msi.rc:95 msi.rc:96 msi.rc:101
 msgid "Computing space requirements"
 msgstr "Оценка требуемого места на диске"
 
-#: msi.rc:96
+#: msi.rc:97
 msgid "Creating folders"
 msgstr "Создание папок"
 
-#: msi.rc:97
+#: msi.rc:98
 msgid "Creating shortcuts"
 msgstr "Создание ярлыков"
 
-#: msi.rc:98
+#: msi.rc:99
 msgid "Deleting services"
 msgstr "Удаление сервисов"
 
-#: msi.rc:99
+#: msi.rc:100
 msgid "Creating duplicate files"
 msgstr "Создание дупликатов"
 
-#: msi.rc:101
+#: msi.rc:102
 msgid "Searching for related applications"
 msgstr "Поиск связанных приложений"
 
-#: msi.rc:102
+#: msi.rc:103
 msgid "Copying network install files"
 msgstr "Копирование файлов сетевой установки"
 
-#: msi.rc:103
+#: msi.rc:104
 msgid "Copying new files"
 msgstr "Копирование новых файлов"
 
-#: msi.rc:104
+#: msi.rc:105
 msgid "Installing ODBC components"
 msgstr "Установка компонентов ODBC"
 
-#: msi.rc:105
+#: msi.rc:106
 msgid "Installing new services"
 msgstr "Установка новых сервисов"
 
-#: msi.rc:106
+#: msi.rc:107
 msgid "Installing system catalog"
 msgstr "Установка системного каталога"
 
-#: msi.rc:107
+#: msi.rc:108
 msgid "Validating install"
 msgstr "Проверка установки"
 
-#: msi.rc:108
+#: msi.rc:109
 msgid "Evaluating launch conditions"
 msgstr "Вычисление условий запуска"
 
-#: msi.rc:109
+#: msi.rc:110
 msgid "Migrating feature states from related applications"
 msgstr "Миграция состояний компонентов"
 
-#: msi.rc:110
+#: msi.rc:111
 msgid "Moving files"
 msgstr "Перемещение файлов"
 
-#: msi.rc:111
+#: msi.rc:112
 msgid "Publishing assembly information"
 msgstr "Публикация информации о сборках"
 
-#: msi.rc:112
+#: msi.rc:113
 msgid "Unpublishing assembly information"
 msgstr "Удаление информации о сборке"
 
-#: msi.rc:113
+#: msi.rc:114
 msgid "Patching files"
 msgstr "Применение патчей"
 
-#: msi.rc:114
+#: msi.rc:115
 msgid "Updating component registration"
 msgstr "Обновление данных регистрации компонентов"
 
-#: msi.rc:115
+#: msi.rc:116
 msgid "Publishing Qualified Components"
 msgstr "Публикация компонентов"
 
-#: msi.rc:116
+#: msi.rc:117
 msgid "Publishing Product Features"
 msgstr "Публикация компонентов продукта"
 
-#: msi.rc:117
+#: msi.rc:118
 msgid "Publishing product information"
 msgstr "Публикация информации о продукте"
 
-#: msi.rc:118
+#: msi.rc:119
 msgid "Registering Class servers"
 msgstr "Регистрация серверов"
 
-#: msi.rc:119
+#: msi.rc:120
 msgid "Registering COM+ Applications and Components"
 msgstr "Регистрация приложений и компонентов COM+"
 
-#: msi.rc:120
+#: msi.rc:121
 msgid "Registering extension servers"
 msgstr "Регистрация серверов расширений"
 
-#: msi.rc:121
+#: msi.rc:122
 msgid "Registering fonts"
 msgstr "Установка шрифтов"
 
-#: msi.rc:122
+#: msi.rc:123
 msgid "Registering MIME info"
 msgstr "Регистрация MIME"
 
-#: msi.rc:123
+#: msi.rc:124
 msgid "Registering product"
 msgstr "Регистрация продукта"
 
-#: msi.rc:124
+#: msi.rc:125
 msgid "Registering program identifiers"
 msgstr "Регистрация идентификаторов программ"
 
-#: msi.rc:125
+#: msi.rc:126
 msgid "Registering type libraries"
 msgstr "Регистрация библиотек типов"
 
-#: msi.rc:126
+#: msi.rc:127
 msgid "Registering user"
 msgstr "Регистрация пользователя"
 
-#: msi.rc:127
+#: msi.rc:128
 msgid "Removing duplicated files"
 msgstr "Удаление дубликатов файлов"
 
-#: msi.rc:128 msi.rc:152
+#: msi.rc:129 msi.rc:153
 msgid "Updating environment strings"
 msgstr "Обновление переменных окружения"
 
-#: msi.rc:129
+#: msi.rc:130
 msgid "Removing applications"
 msgstr "Удаление приложений"
 
-#: msi.rc:130
+#: msi.rc:131
 msgid "Removing files"
 msgstr "Удаление файлов"
 
-#: msi.rc:131
+#: msi.rc:132
 msgid "Removing folders"
 msgstr "Удаление папок"
 
-#: msi.rc:132
+#: msi.rc:133
 msgid "Removing INI files entries"
 msgstr "Удаление записей в INI файлах"
 
-#: msi.rc:133
+#: msi.rc:134
 msgid "Removing ODBC components"
 msgstr "Удаление компонентов ODBC"
 
-#: msi.rc:134
+#: msi.rc:135
 msgid "Removing system registry values"
 msgstr "Удаление параметров реестра"
 
-#: msi.rc:135
+#: msi.rc:136
 msgid "Removing shortcuts"
 msgstr "Удаление ярлыков"
 
-#: msi.rc:137
+#: msi.rc:138
 msgid "Registering modules"
 msgstr "Регистрация модулей"
 
-#: msi.rc:138
+#: msi.rc:139
 msgid "Unregistering modules"
 msgstr "Удаление регистрационных данных модулей"
 
-#: msi.rc:139
+#: msi.rc:140
 msgid "Initializing ODBC directories"
 msgstr "Инициализация директорий ODBC"
 
-#: msi.rc:140
+#: msi.rc:141
 msgid "Starting services"
 msgstr "Запуск сервисов"
 
-#: msi.rc:141
+#: msi.rc:142
 msgid "Stopping services"
 msgstr "Остановка сервисов"
 
-#: msi.rc:142
+#: msi.rc:143
 msgid "Unpublishing Qualified Components"
 msgstr "Удаление информации об опубликованных компонентах"
 
-#: msi.rc:143
+#: msi.rc:144
 msgid "Unpublishing Product Features"
 msgstr "Удаление информации об опубликованных компонентах продукта"
 
-#: msi.rc:144
+#: msi.rc:145
 msgid "Unpublishing product information"
 msgstr "Удаление информации об опубликованном продукте"
 
-#: msi.rc:145
+#: msi.rc:146
 msgid "Unregister Class servers"
 msgstr "Удаление регистрационных данных серверов"
 
-#: msi.rc:146
+#: msi.rc:147
 msgid "Unregistering COM+ Applications and Components"
 msgstr "Удаление регистрационных данных приложений и компонентов COM+"
 
-#: msi.rc:147
+#: msi.rc:148
 msgid "Unregistering extension servers"
 msgstr "Удаление регистрационных данных серверов расширений"
 
-#: msi.rc:148
+#: msi.rc:149
 msgid "Unregistering fonts"
 msgstr "Удаление шрифтов"
 
-#: msi.rc:149
+#: msi.rc:150
 msgid "Unregistering MIME info"
 msgstr "Удаление данных MIME"
 
-#: msi.rc:150
+#: msi.rc:151
 msgid "Unregistering program identifiers"
 msgstr "Удаление идентификаторов программ"
 
-#: msi.rc:151
+#: msi.rc:152
 msgid "Unregistering type libraries"
 msgstr "Удаление регистрационных данных библиотек типов"
 
-#: msi.rc:153
+#: msi.rc:154
 msgid "Writing INI files values"
 msgstr "Запись данных в INI файлы"
 
-#: msi.rc:154
+#: msi.rc:155
 msgid "Writing system registry values"
 msgstr "Запись параметров реестра"
 
-#: msi.rc:160
+#: msi.rc:161
 msgid "Free space: [1]"
 msgstr "Свободное место: [1]"
 
-#: msi.rc:161
+#: msi.rc:162
 msgid "Property: [1], Signature: [2]"
 msgstr "Свойство: [1], Подпись: [2]"
 
-#: msi.rc:162
+#: msi.rc:163
 msgid "File: [1]"
 msgstr "Файл: [1]"
 
-#: msi.rc:163 msi.rc:190
+#: msi.rc:164 msi.rc:191
 msgid "Folder: [1]"
 msgstr "Папка: [1]"
 
-#: msi.rc:164 msi.rc:193
+#: msi.rc:165 msi.rc:194
 msgid "Shortcut: [1]"
 msgstr "Ярлык: [1]"
 
-#: msi.rc:165 msi.rc:196 msi.rc:197
+#: msi.rc:166 msi.rc:197 msi.rc:198
 msgid "Service: [1]"
 msgstr "Сервис: [1]"
 
-#: msi.rc:166 msi.rc:169 msi.rc:173
+#: msi.rc:167 msi.rc:170 msi.rc:174
 msgid "File: [1],  Directory: [9],  Size: [6]"
 msgstr "Файл: [1], Директория: [9], Размер: [6]"
 
-#: msi.rc:167
+#: msi.rc:168
 msgid "Found application: [1]"
 msgstr "Найдено приложение: [1]"
 
-#: msi.rc:168
+#: msi.rc:169
 msgid "File: [1], Directory: [9], Size: [6]"
 msgstr "Файл: [1], Директория: [9], Размер: [6]"
 
-#: msi.rc:170
+#: msi.rc:171
 msgid "Service: [2]"
 msgstr "Сервис: [2]"
 
-#: msi.rc:171
+#: msi.rc:172
 msgid "File: [1],  Dependencies: [2]"
 msgstr "Файл: [1],  Зависимости: [2]"
 
-#: msi.rc:172
+#: msi.rc:173
 msgid "Application: [1]"
 msgstr "Приложение: [1]"
 
-#: msi.rc:174 msi.rc:175
+#: msi.rc:175 msi.rc:176
 msgid "Application Context:[1], Assembly Name:[2]"
 msgstr "Контекст:[1], Имя сборки:[2]"
 
-#: msi.rc:176
+#: msi.rc:177
 msgid "File: [1],  Directory: [2],  Size: [3]"
 msgstr "Файл: [1],  Директория: [2],  Размер: [3]"
 
-#: msi.rc:177 msi.rc:198
+#: msi.rc:178 msi.rc:199
 msgid "Component ID: [1], Qualifier: [2]"
 msgstr "Код компонента: [1], Квалификатор: [2]"
 
-#: msi.rc:178 msi.rc:199
+#: msi.rc:179 msi.rc:200
 msgid "Feature: [1]"
 msgstr "Компонент: [1]"
 
-#: msi.rc:179 msi.rc:200
+#: msi.rc:180 msi.rc:201
 msgid "Class Id: [1]"
 msgstr "Class Id: [1]"
 
-#: msi.rc:180
+#: msi.rc:181
 msgid "AppId: [1]{{, AppType: [2], Users: [3], RSN: [4]}}"
 msgstr "AppId: [1]{{, AppType: [2], Пользователи: [3], RSN: [4]}}"
 
-#: msi.rc:181 msi.rc:202
+#: msi.rc:182 msi.rc:203
 msgid "Extension: [1]"
 msgstr "Расширение: [1]"
 
-#: msi.rc:182 msi.rc:203
+#: msi.rc:183 msi.rc:204
 msgid "Font: [1]"
 msgstr "Шрифт: [1]"
 
-#: msi.rc:183 msi.rc:204
+#: msi.rc:184 msi.rc:205
 msgid "MIME Content Type: [1], Extension: [2]"
 msgstr "Тип MIME: [1], Расширение: [2]"
 
-#: msi.rc:184 msi.rc:205
+#: msi.rc:185 msi.rc:206
 msgid "ProgId: [1]"
 msgstr "ProgId: [1]"
 
-#: msi.rc:185 msi.rc:206
+#: msi.rc:186 msi.rc:207
 msgid "LibID: [1]"
 msgstr "LibID: [1]"
 
-#: msi.rc:186 msi.rc:189
+#: msi.rc:187 msi.rc:190
 msgid "File: [1], Directory: [9]"
 msgstr "Файл: [1], Директория: [9]"
 
-#: msi.rc:187 msi.rc:207
+#: msi.rc:188 msi.rc:208
 msgid "Name: [1], Value: [2], Action [3]"
 msgstr "Имя: [1], Значение: [2], Действие [3]"
 
-#: msi.rc:188
+#: msi.rc:189
 msgid "Application: [1], Command line: [2]"
 msgstr "Приложение: [1], Командная строка: [2]"
 
-#: msi.rc:191 msi.rc:208
+#: msi.rc:192 msi.rc:209
 msgid "File: [1],  Section: [2],  Key: [3], Value: [4]"
 msgstr "Файл: [1],  Секция: [2],  Ключ: [3], Значение: [4]"
 
-#: msi.rc:192
+#: msi.rc:193
 msgid "Key: [1], Name: [2]"
 msgstr "Ключ: [1], Имя: [2]"
 
-#: msi.rc:194 msi.rc:195
+#: msi.rc:195 msi.rc:196
 msgid "File: [1], Folder: [2]"
 msgstr "Файл: [1], Папка: [2]"
 
-#: msi.rc:201
+#: msi.rc:202
 msgid "AppId: [1]{{, AppType: [2]}}"
 msgstr "AppId: [1]{{, AppType: [2]}}"
 
-#: msi.rc:209
+#: msi.rc:210
 msgid "Key: [1], Name: [2], Value: [3]"
 msgstr "Ключ: [1], Имя: [2], Значение: [3]"
 
-#: msi.rc:71
+#: msi.rc:72
 msgid "{{Fatal error: }}"
 msgstr "{{Критическая ошибка: }}"
 
-#: msi.rc:72
+#: msi.rc:73
 msgid "{{Error [1]. }}"
 msgstr "{{Ошибка [1]. }}"
 
-#: msi.rc:73
+#: msi.rc:74
 msgid "Warning [1]."
 msgstr "Предупреждение [1]."
 
-#: msi.rc:74
+#: msi.rc:75
 msgid "Info [1]."
 msgstr "Инфо [1]."
 
-#: msi.rc:75
+#: msi.rc:76
 msgid ""
 "The installer has encountered an unexpected error installing this package. "
 "This may indicate a problem with this package. The error code is [1]. {{The "
@@ -7335,35 +7384,35 @@ msgstr ""
 "Произошла непредвиденная ошибка при установке пакета. Возможно проблема в "
 "самом пакете. Код ошибки [1]. {{Аргументы: [2], [3], [4]}}"
 
-#: msi.rc:76
+#: msi.rc:77
 msgid "{{Disk full: }}"
 msgstr "{{Диск полон: }}"
 
-#: msi.rc:77
+#: msi.rc:78
 msgid "Action [Time]: [1]. [2]"
 msgstr "Действие [Time]: [1]. [2]"
 
-#: msi.rc:78
+#: msi.rc:79
 msgid "Message type: [1], Argument: [2]{, [3]}"
 msgstr "Тип сообщения: [1], Аргумент: [2]{, [3]}"
 
-#: msi.rc:81
+#: msi.rc:82
 msgid "=== Logging started: [Date]  [Time] ==="
 msgstr "=== Протоколирование запущено: [Date]  [Time] ==="
 
-#: msi.rc:79
+#: msi.rc:80
 msgid "Action start [Time]: [1]."
 msgstr "Запуск действия [Time]: [1]."
 
-#: msi.rc:80
+#: msi.rc:81
 msgid "Action ended [Time]: [1]. Return value [2]."
 msgstr "Действие завершилось [Time]: [1]. Код возврата [2]."
 
-#: msi.rc:83
+#: msi.rc:84
 msgid "Please insert the disk: [2]"
 msgstr "Вставьте диск: [2]"
 
-#: msi.rc:84
+#: msi.rc:85
 msgid ""
 "Source file not found{{(cabinet)}}: [2]. Verify that the file exists and "
 "that you can access it."
@@ -8777,10 +8826,6 @@ msgstr "Списки воспроизведения"
 msgid "Status"
 msgstr "Состояние"
 
-#: shell32.rc:152
-msgid "Location"
-msgstr "Размещение"
-
 #: shell32.rc:153
 msgid "Model"
 msgstr "Модель"
@@ -8889,10 +8934,6 @@ msgstr ""
 "Если файлы в конечной папке имеют те же имена, что и файлы в выбранной\n"
 "папке, они будут заменены. Вы всё ещё хотите переместить или скопировать\n"
 "папку?"
-
-#: shell32.rc:238
-msgid "New Folder"
-msgstr "Новая папка"
 
 #: shell32.rc:240
 msgid "Wine Control Panel"
@@ -9017,6 +9058,814 @@ msgstr " сек"
 #: twain.rc:29
 msgid "Select Source"
 msgstr "Выберите источник"
+
+#: tzres.rc:82
+msgid "China Standard Time"
+msgstr ""
+
+#: tzres.rc:83
+msgid "China Daylight Time"
+msgstr ""
+
+#: tzres.rc:160
+msgid "North Asia Standard Time"
+msgstr ""
+
+#: tzres.rc:161
+msgid "North Asia Daylight Time"
+msgstr ""
+
+#: tzres.rc:104
+msgid "Georgian Standard Time"
+msgstr ""
+
+#: tzres.rc:105
+msgid "Georgian Daylight Time"
+msgstr ""
+
+#: tzres.rc:152
+msgid "Nepal Standard Time"
+msgstr ""
+
+#: tzres.rc:153
+msgid "Nepal Daylight Time"
+msgstr ""
+
+#: tzres.rc:60
+msgid "Cape Verde Standard Time"
+msgstr ""
+
+#: tzres.rc:61
+msgid "Cape Verde Daylight Time"
+msgstr ""
+
+#: tzres.rc:74
+#, fuzzy
+#| msgid "Central European"
+msgid "Central European Standard Time"
+msgstr "Центральноевропейский"
+
+#: tzres.rc:75
+#, fuzzy
+#| msgid "Central European"
+msgid "Central European Daylight Time"
+msgstr "Центральноевропейский"
+
+#: tzres.rc:140
+msgid "Morocco Standard Time"
+msgstr ""
+
+#: tzres.rc:141
+msgid "Morocco Daylight Time"
+msgstr ""
+
+#: tzres.rc:72
+#, fuzzy
+#| msgid "Central European"
+msgid "Central Europe Standard Time"
+msgstr "Центральноевропейский"
+
+#: tzres.rc:73
+#, fuzzy
+#| msgid "Central European"
+msgid "Central Europe Daylight Time"
+msgstr "Центральноевропейский"
+
+#: tzres.rc:118
+msgid "Iran Standard Time"
+msgstr ""
+
+#: tzres.rc:119
+msgid "Iran Daylight Time"
+msgstr ""
+
+#: tzres.rc:150
+msgid "Namibia Standard Time"
+msgstr ""
+
+#: tzres.rc:151
+msgid "Namibia Daylight Time"
+msgstr ""
+
+#: tzres.rc:200
+msgid "Tonga Standard Time"
+msgstr ""
+
+#: tzres.rc:201
+msgid "Tonga Daylight Time"
+msgstr ""
+
+#: tzres.rc:144
+msgid "Mountain Standard Time (Mexico)"
+msgstr ""
+
+#: tzres.rc:145
+msgid "Mountain Daylight Time (Mexico)"
+msgstr ""
+
+#: tzres.rc:106
+#, fuzzy
+#| msgid "&Standard bar"
+msgid "GMT Standard Time"
+msgstr "&Стандартная панель"
+
+#: tzres.rc:107
+msgid "GMT Daylight Time"
+msgstr ""
+
+#: tzres.rc:68
+msgid "Central Asia Standard Time"
+msgstr ""
+
+#: tzres.rc:69
+msgid "Central Asia Daylight Time"
+msgstr ""
+
+#: tzres.rc:38
+msgid "Arabic Standard Time"
+msgstr ""
+
+#: tzres.rc:39
+msgid "Arabic Daylight Time"
+msgstr ""
+
+#: tzres.rc:132
+msgid "Magadan Standard Time"
+msgstr ""
+
+#: tzres.rc:133
+msgid "Magadan Daylight Time"
+msgstr ""
+
+#: tzres.rc:156
+msgid "Newfoundland Standard Time"
+msgstr ""
+
+#: tzres.rc:157
+msgid "Newfoundland Daylight Time"
+msgstr ""
+
+#: tzres.rc:224
+msgid "West Pacific Standard Time"
+msgstr ""
+
+#: tzres.rc:225
+msgid "West Pacific Daylight Time"
+msgstr ""
+
+#: tzres.rc:164
+msgid "Pacific Standard Time"
+msgstr ""
+
+#: tzres.rc:165
+msgid "Pacific Daylight Time"
+msgstr ""
+
+#: tzres.rc:48
+msgid "Azerbaijan Standard Time"
+msgstr ""
+
+#: tzres.rc:49
+msgid "Azerbaijan Daylight Time"
+msgstr ""
+
+#: tzres.rc:182
+msgid "Samoa Standard Time"
+msgstr ""
+
+#: tzres.rc:183
+msgid "Samoa Daylight Time"
+msgstr ""
+
+#: tzres.rc:124
+msgid "Kaliningrad Standard Time"
+msgstr ""
+
+#: tzres.rc:125
+msgid "Kaliningrad Daylight Time"
+msgstr ""
+
+#: tzres.rc:166
+msgid "Pacific Standard Time (Mexico)"
+msgstr ""
+
+#: tzres.rc:167
+msgid "Pacific Daylight Time (Mexico)"
+msgstr ""
+
+#: tzres.rc:136
+msgid "Middle East Standard Time"
+msgstr ""
+
+#: tzres.rc:137
+msgid "Middle East Daylight Time"
+msgstr ""
+
+#: tzres.rc:198
+msgid "Tokyo Standard Time"
+msgstr ""
+
+#: tzres.rc:199
+msgid "Tokyo Daylight Time"
+msgstr ""
+
+#: tzres.rc:130
+msgid "Line Islands Standard Time"
+msgstr ""
+
+#: tzres.rc:131
+msgid "Line Islands Daylight Time"
+msgstr ""
+
+#: tzres.rc:122
+msgid "Jordan Standard Time"
+msgstr ""
+
+#: tzres.rc:123
+msgid "Jordan Daylight Time"
+msgstr ""
+
+#: tzres.rc:78
+msgid "Central Standard Time"
+msgstr ""
+
+#: tzres.rc:79
+msgid "Central Daylight Time"
+msgstr ""
+
+#: tzres.rc:50
+msgid "Azores Standard Time"
+msgstr ""
+
+#: tzres.rc:51
+msgid "Azores Daylight Time"
+msgstr ""
+
+#: tzres.rc:158
+msgid "North Asia East Standard Time"
+msgstr ""
+
+#: tzres.rc:159
+msgid "North Asia East Daylight Time"
+msgstr ""
+
+#: tzres.rc:40
+msgid "Argentina Standard Time"
+msgstr ""
+
+#: tzres.rc:41
+msgid "Argentina Daylight Time"
+msgstr ""
+
+#: tzres.rc:146
+msgid "Myanmar Standard Time"
+msgstr ""
+
+#: tzres.rc:147
+msgid "Myanmar Daylight Time"
+msgstr ""
+
+#: tzres.rc:210 tzres.rc:211
+msgid "Coordinated Universal Time"
+msgstr ""
+
+#: tzres.rc:116
+msgid "India Standard Time"
+msgstr ""
+
+#: tzres.rc:117
+msgid "India Daylight Time"
+msgstr ""
+
+#: tzres.rc:112
+#, fuzzy
+#| msgid "&Standard bar"
+msgid "GTB Standard Time"
+msgstr "&Стандартная панель"
+
+#: tzres.rc:113
+msgid "GTB Daylight Time"
+msgstr ""
+
+#: tzres.rc:202
+msgid "Turkey Standard Time"
+msgstr ""
+
+#: tzres.rc:203
+msgid "Turkey Daylight Time"
+msgstr ""
+
+#: tzres.rc:100
+msgid "Fiji Standard Time"
+msgstr ""
+
+#: tzres.rc:101
+msgid "Fiji Daylight Time"
+msgstr ""
+
+#: tzres.rc:58
+msgid "Canada Central Standard Time"
+msgstr ""
+
+#: tzres.rc:59
+msgid "Canada Central Daylight Time"
+msgstr ""
+
+#: tzres.rc:194
+msgid "Taipei Standard Time"
+msgstr ""
+
+#: tzres.rc:195
+msgid "Taipei Daylight Time"
+msgstr ""
+
+#: tzres.rc:220
+msgid "W. Europe Standard Time"
+msgstr ""
+
+#: tzres.rc:221
+msgid "W. Europe Daylight Time"
+msgstr ""
+
+#: tzres.rc:138
+msgid "Montevideo Standard Time"
+msgstr ""
+
+#: tzres.rc:139
+msgid "Montevideo Daylight Time"
+msgstr ""
+
+#: tzres.rc:168
+msgid "Pakistan Standard Time"
+msgstr ""
+
+#: tzres.rc:169
+msgid "Pakistan Daylight Time"
+msgstr ""
+
+#: tzres.rc:62
+msgid "Caucasus Standard Time"
+msgstr ""
+
+#: tzres.rc:63
+msgid "Caucasus Daylight Time"
+msgstr ""
+
+#: tzres.rc:46
+msgid "AUS Eastern Standard Time"
+msgstr ""
+
+#: tzres.rc:47
+msgid "AUS Eastern Daylight Time"
+msgstr ""
+
+#: tzres.rc:148
+msgid "N. Central Asia Standard Time"
+msgstr ""
+
+#: tzres.rc:149
+msgid "N. Central Asia Daylight Time"
+msgstr ""
+
+#: tzres.rc:94
+msgid "Eastern Standard Time"
+msgstr ""
+
+#: tzres.rc:95
+msgid "Eastern Daylight Time"
+msgstr ""
+
+#: tzres.rc:80
+msgid "Central Standard Time (Mexico)"
+msgstr ""
+
+#: tzres.rc:81
+msgid "Central Daylight Time (Mexico)"
+msgstr ""
+
+#: tzres.rc:42
+msgid "Atlantic Standard Time"
+msgstr ""
+
+#: tzres.rc:43
+msgid "Atlantic Daylight Time"
+msgstr ""
+
+#: tzres.rc:142
+msgid "Mountain Standard Time"
+msgstr ""
+
+#: tzres.rc:143
+msgid "Mountain Daylight Time"
+msgstr ""
+
+#: tzres.rc:206
+msgid "US Eastern Standard Time"
+msgstr ""
+
+#: tzres.rc:207
+msgid "US Eastern Daylight Time"
+msgstr ""
+
+#: tzres.rc:196
+msgid "Tasmania Standard Time"
+msgstr ""
+
+#: tzres.rc:197
+msgid "Tasmania Daylight Time"
+msgstr ""
+
+#: tzres.rc:66
+msgid "Central America Standard Time"
+msgstr ""
+
+#: tzres.rc:67
+msgid "Central America Daylight Time"
+msgstr ""
+
+#: tzres.rc:208
+msgid "US Mountain Standard Time"
+msgstr ""
+
+#: tzres.rc:209
+msgid "US Mountain Daylight Time"
+msgstr ""
+
+#: tzres.rc:188
+msgid "South Africa Standard Time"
+msgstr ""
+
+#: tzres.rc:189
+msgid "South Africa Daylight Time"
+msgstr ""
+
+#: tzres.rc:64
+msgid "Cen. Australia Standard Time"
+msgstr ""
+
+#: tzres.rc:65
+msgid "Cen. Australia Daylight Time"
+msgstr ""
+
+#: tzres.rc:190
+msgid "Sri Lanka Standard Time"
+msgstr ""
+
+#: tzres.rc:191
+msgid "Sri Lanka Daylight Time"
+msgstr ""
+
+#: tzres.rc:30
+msgid "Afghanistan Standard Time"
+msgstr ""
+
+#: tzres.rc:31
+msgid "Afghanistan Daylight Time"
+msgstr ""
+
+#: tzres.rc:226
+msgid "Yakutsk Standard Time"
+msgstr ""
+
+#: tzres.rc:227
+msgid "Yakutsk Daylight Time"
+msgstr ""
+
+#: tzres.rc:176
+msgid "SA Eastern Standard Time"
+msgstr ""
+
+#: tzres.rc:177
+msgid "SA Eastern Daylight Time"
+msgstr ""
+
+#: tzres.rc:34
+msgid "Arab Standard Time"
+msgstr ""
+
+#: tzres.rc:35
+msgid "Arab Daylight Time"
+msgstr ""
+
+#: tzres.rc:36
+msgid "Arabian Standard Time"
+msgstr ""
+
+#: tzres.rc:37
+msgid "Arabian Daylight Time"
+msgstr ""
+
+#: tzres.rc:174
+msgid "Russian Standard Time"
+msgstr ""
+
+#: tzres.rc:175
+msgid "Russian Daylight Time"
+msgstr ""
+
+#: tzres.rc:172
+msgid "Romance Standard Time"
+msgstr ""
+
+#: tzres.rc:173
+msgid "Romance Daylight Time"
+msgstr ""
+
+#: tzres.rc:98
+msgid "Ekaterinburg Standard Time"
+msgstr ""
+
+#: tzres.rc:99
+msgid "Ekaterinburg Daylight Time"
+msgstr ""
+
+#: tzres.rc:192
+msgid "Syria Standard Time"
+msgstr ""
+
+#: tzres.rc:193
+msgid "Syria Daylight Time"
+msgstr ""
+
+#: tzres.rc:44
+msgid "AUS Central Standard Time"
+msgstr ""
+
+#: tzres.rc:45
+msgid "AUS Central Daylight Time"
+msgstr ""
+
+#: tzres.rc:110
+msgid "Greenwich Standard Time"
+msgstr ""
+
+#: tzres.rc:111
+msgid "Greenwich Daylight Time"
+msgstr ""
+
+#: tzres.rc:204
+msgid "Ulaanbaatar Standard Time"
+msgstr ""
+
+#: tzres.rc:205
+msgid "Ulaanbaatar Daylight Time"
+msgstr ""
+
+#: tzres.rc:120
+msgid "Israel Standard Time"
+msgstr ""
+
+#: tzres.rc:121
+msgid "Israel Daylight Time"
+msgstr ""
+
+#: tzres.rc:54
+msgid "Bangladesh Standard Time"
+msgstr ""
+
+#: tzres.rc:55
+msgid "Bangladesh Daylight Time"
+msgstr ""
+
+#: tzres.rc:178
+msgid "SA Pacific Standard Time"
+msgstr ""
+
+#: tzres.rc:179
+msgid "SA Pacific Daylight Time"
+msgstr ""
+
+#: tzres.rc:222
+msgid "West Asia Standard Time"
+msgstr ""
+
+#: tzres.rc:223
+msgid "West Asia Daylight Time"
+msgstr ""
+
+#: tzres.rc:32
+msgid "Alaskan Standard Time"
+msgstr ""
+
+#: tzres.rc:33
+msgid "Alaskan Daylight Time"
+msgstr ""
+
+#: tzres.rc:170
+msgid "Paraguay Standard Time"
+msgstr ""
+
+#: tzres.rc:171
+msgid "Paraguay Daylight Time"
+msgstr ""
+
+#: tzres.rc:84
+#, fuzzy
+#| msgid "Date and time"
+msgid "Dateline Standard Time"
+msgstr "Дата и время"
+
+#: tzres.rc:85
+msgid "Dateline Daylight Time"
+msgstr ""
+
+#: tzres.rc:128
+msgid "Libya Standard Time"
+msgstr ""
+
+#: tzres.rc:129
+msgid "Libya Daylight Time"
+msgstr ""
+
+#: tzres.rc:52
+msgid "Bahia Standard Time"
+msgstr ""
+
+#: tzres.rc:53
+msgid "Bahia Daylight Time"
+msgstr ""
+
+#: tzres.rc:212
+msgid "Venezuela Standard Time"
+msgstr ""
+
+#: tzres.rc:213
+msgid "Venezuela Daylight Time"
+msgstr ""
+
+#: tzres.rc:114
+msgid "Hawaiian Standard Time"
+msgstr ""
+
+#: tzres.rc:115
+msgid "Hawaiian Daylight Time"
+msgstr ""
+
+#: tzres.rc:184
+msgid "SE Asia Standard Time"
+msgstr ""
+
+#: tzres.rc:185
+msgid "SE Asia Daylight Time"
+msgstr ""
+
+#: tzres.rc:154
+msgid "New Zealand Standard Time"
+msgstr ""
+
+#: tzres.rc:155
+msgid "New Zealand Daylight Time"
+msgstr ""
+
+#: tzres.rc:70
+msgid "Central Brazilian Standard Time"
+msgstr ""
+
+#: tzres.rc:71
+msgid "Central Brazilian Daylight Time"
+msgstr ""
+
+#: tzres.rc:56
+msgid "Belarus Standard Time"
+msgstr ""
+
+#: tzres.rc:57
+msgid "Belarus Daylight Time"
+msgstr ""
+
+#: tzres.rc:180
+msgid "SA Western Standard Time"
+msgstr ""
+
+#: tzres.rc:181
+msgid "SA Western Daylight Time"
+msgstr ""
+
+#: tzres.rc:108
+msgid "Greenland Standard Time"
+msgstr ""
+
+#: tzres.rc:109
+msgid "Greenland Daylight Time"
+msgstr ""
+
+#: tzres.rc:92
+#, fuzzy
+#| msgid "Date and time"
+msgid "Easter Island Standard Time"
+msgstr "Дата и время"
+
+#: tzres.rc:93
+#, fuzzy
+#| msgid "Date and time"
+msgid "Easter Island Daylight Time"
+msgstr "Дата и время"
+
+#: tzres.rc:96
+msgid "Egypt Standard Time"
+msgstr ""
+
+#: tzres.rc:97
+msgid "Egypt Daylight Time"
+msgstr ""
+
+#: tzres.rc:134
+msgid "Mauritius Standard Time"
+msgstr ""
+
+#: tzres.rc:135
+msgid "Mauritius Daylight Time"
+msgstr ""
+
+#: tzres.rc:214
+msgid "Vladivostok Standard Time"
+msgstr ""
+
+#: tzres.rc:215
+msgid "Vladivostok Daylight Time"
+msgstr ""
+
+#: tzres.rc:186
+msgid "Singapore Standard Time"
+msgstr ""
+
+#: tzres.rc:187
+msgid "Singapore Daylight Time"
+msgstr ""
+
+#: tzres.rc:126
+msgid "Korea Standard Time"
+msgstr ""
+
+#: tzres.rc:127
+msgid "Korea Daylight Time"
+msgstr ""
+
+#: tzres.rc:86
+msgid "E. Africa Standard Time"
+msgstr ""
+
+#: tzres.rc:87
+msgid "E. Africa Daylight Time"
+msgstr ""
+
+#: tzres.rc:102
+#, fuzzy
+#| msgid "&Standard bar"
+msgid "FLE Standard Time"
+msgstr "&Стандартная панель"
+
+#: tzres.rc:103
+msgid "FLE Daylight Time"
+msgstr ""
+
+#: tzres.rc:90
+msgid "E. South America Standard Time"
+msgstr ""
+
+#: tzres.rc:91
+msgid "E. South America Daylight Time"
+msgstr ""
+
+#: tzres.rc:76
+msgid "Central Pacific Standard Time"
+msgstr ""
+
+#: tzres.rc:77
+msgid "Central Pacific Daylight Time"
+msgstr ""
+
+#: tzres.rc:218
+msgid "W. Central Africa Standard Time"
+msgstr ""
+
+#: tzres.rc:219
+msgid "W. Central Africa Daylight Time"
+msgstr ""
+
+#: tzres.rc:162
+msgid "Pacific SA Standard Time"
+msgstr ""
+
+#: tzres.rc:163
+msgid "Pacific SA Daylight Time"
+msgstr ""
+
+#: tzres.rc:88
+msgid "E. Australia Standard Time"
+msgstr ""
+
+#: tzres.rc:89
+msgid "E. Australia Daylight Time"
+msgstr ""
+
+#: tzres.rc:216
+msgid "W. Australia Standard Time"
+msgstr ""
+
+#: tzres.rc:217
+msgid "W. Australia Daylight Time"
+msgstr ""
 
 #: urlmon.rc:32 wininet.rc:77
 msgid "Security Warning"
@@ -11055,6 +11904,10 @@ msgid "Error: Invalid option '%c'.\n"
 msgstr "Ошибка: неверная опция «%c».\n"
 
 #: hostname.rc:32
+msgid "Error: Could not get hostname: %u.\n"
+msgstr "Ошибка: не удалось получить имя хоста: %u.\n"
+
+#: hostname.rc:33
 msgid ""
 "Error: Setting the system hostname is not possible with the hostname "
 "utility.\n"
@@ -12250,7 +13103,7 @@ msgstr "Вы точно хотите удалить параметр реест�
 
 #: reg.rc:55
 msgid "Are you sure you want to delete all registry values in '%1'?"
-msgstr "Вы точно хотите удалить все параметры реестра из «%s»?"
+msgstr "Вы точно хотите удалить все параметры реестра из «%1»?"
 
 #: reg.rc:56
 msgid "Are you sure you want to delete the registry key '%1'?"
@@ -14205,11 +15058,11 @@ msgstr "Цвет:"
 
 #: winecfg.rc:304
 msgid "MIME types"
-msgstr ""
+msgstr "Типы MIME"
 
 #: winecfg.rc:305
 msgid "Manage file &associations"
-msgstr ""
+msgstr "Управлять &ассоциациями файлов"
 
 #: winecfg.rc:308
 msgid "Folders"
@@ -15007,10 +15860,6 @@ msgstr "Основная файловая система"
 #: winefile.rc:101
 msgid "Shell"
 msgstr "Shell"
-
-#: winefile.rc:102 winhlp32.rc:110 winhlp32.rc:85
-msgid "Not yet implemented"
-msgstr "Ещё не реализовано"
 
 #: winefile.rc:109
 msgid "Creation date"

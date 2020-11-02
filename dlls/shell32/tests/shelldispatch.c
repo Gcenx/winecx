@@ -1030,10 +1030,9 @@ static void test_ShellWindows(void)
     if (hr != S_OK)
         return;
 
-if (0) /* NULL out argument - currently crashes on Wine */ {
     hr = IShellWindows_Register(shellwindows, NULL, 0, SWC_EXPLORER, NULL);
     ok(hr == HRESULT_FROM_WIN32(RPC_X_NULL_REF_POINTER), "got 0x%08x\n", hr);
-}
+
     hr = IShellWindows_Register(shellwindows, NULL, 0, SWC_EXPLORER, &cookie);
 todo_wine
     ok(hr == E_POINTER, "got 0x%08x\n", hr);
@@ -1111,9 +1110,6 @@ todo_wine {
         IUnknown *unk;
 
         ok(disp != NULL, "got %p\n", disp);
-
-        if (disp == NULL) goto skip_disp_tests;
-
         ok(ret != HandleToUlong(hwnd), "got %d\n", ret);
 
         /* IDispatch-related tests */
@@ -1191,7 +1187,6 @@ if (hr == S_OK) {
         IServiceProvider_Release(sp);
         IDispatch_Release(disp);
     }
-skip_disp_tests:
 
     disp = (void*)0xdeadbeef;
     ret = 0xdead;

@@ -64,7 +64,7 @@ from enum import Enum
 LOGGER = logging.Logger("vulkan")
 LOGGER.addHandler(logging.StreamHandler())
 
-VK_XML_VERSION = "1.1.76"
+VK_XML_VERSION = "1.1.94"
 WINE_VK_VERSION = (1, 0)
 
 # Filenames to create.
@@ -94,15 +94,18 @@ SUPPORTED_INSTANCE_EXTENSIONS = [
 ]
 
 BLACKLISTED_EXTENSIONS = [
+    "VK_AMD_memory_overallocation_behavior",
     # Handling of VK_EXT_debug_report requires some consideration. The win32
     # loader already provides it for us and it is somewhat usable. If we add
     # plumbing down to the native layer, we will get each message twice as we
     # use 2 loaders (win32+native), but we may get output from the driver.
     # In any case callback conversion is required.
+    "VK_EXT_calibrated_timestamps",
     "VK_EXT_debug_report",
     "VK_EXT_display_control", # Requires VK_EXT_display_surface_counter
     "VK_EXT_external_memory_dma_buf", # Linux specific
     "VK_EXT_hdr_metadata", # Needs WSI work.
+    "VK_EXT_image_drm_format_modifier",
     "VK_GOOGLE_display_timing",
     "VK_KHR_display", # Needs WSI work.
     "VK_KHR_external_fence",
@@ -157,11 +160,13 @@ FUNCTION_OVERRIDES = {
     # Device functions
     "vkAllocateCommandBuffers" : {"dispatch" : True, "driver" : False, "thunk" : False},
     "vkCmdExecuteCommands" : {"dispatch" : True, "driver" : False, "thunk" : False},
+    "vkCreateCommandPool" : {"dispatch": True, "driver" : False, "thunk" : False},
+    "vkDestroyCommandPool" : {"dispatch": True, "driver" : False, "thunk" : False},
     "vkDestroyDevice" : {"dispatch" : True, "driver" : False, "thunk" : False},
     "vkFreeCommandBuffers" : {"dispatch" : True, "driver" : False, "thunk" : False},
     "vkGetDeviceProcAddr" : {"dispatch" : False, "driver" : True, "thunk" : False},
     "vkGetDeviceQueue" : {"dispatch": True, "driver" : False, "thunk" : False},
-    "vkGetDeviceQueue2" : {"dispatch": False, "driver" : False, "thunk" : False},
+    "vkGetDeviceQueue2" : {"dispatch": True, "driver" : False, "thunk" : False},
     "vkQueueSubmit" : {"dispatch": True, "driver" : False, "thunk" : False},
 
     # VK_KHR_surface
@@ -320,22 +325,26 @@ class VkEnum(object):
         for v in enum.findall("enum"):
             # Value is either a value or a bitpos, only one can exist.
             value = v.attrib.get("value")
-            if value is None:
-                # bitmask
-                value = 1 << int(v.attrib.get("bitpos"))
-                values.append(VkEnumValue(v.attrib.get("name"), value, hex=True))
-            else:
+            alias_name = v.attrib.get("alias")
+            if alias_name:
+                alias = next(x for x in values if x.name == alias_name)
+                values.append(VkEnumValue(v.attrib.get("name"), alias.value, alias.hex))
+            elif value:
                 # Some values are in hex form. We want to preserve the hex representation
                 # at least when we convert back to a string. Internally we want to use int.
                 if "0x" in value:
                     values.append(VkEnumValue(v.attrib.get("name"), int(value, 0), hex=True))
                 else:
                     values.append(VkEnumValue(v.attrib.get("name"), int(value, 0)))
+            else:
+                # bitmask
+                value = 1 << int(v.attrib.get("bitpos"))
+                values.append(VkEnumValue(v.attrib.get("name"), value, hex=True))
 
         # vulkan.h contains a *_MAX_ENUM value set to 32-bit at the time of writing,
         # which is to prepare for extensions as they can add values and hence affect
         # the size definition.
-        max_name = re.sub(r'([0-9a-z_])([A-Z0-9])',r'\1_\2',name).upper() + "_MAX_ENUM"
+        max_name = re.sub(r'([0-9a-z_])([A-Z0-9])',r'\1_\2', name).upper() + "_MAX_ENUM"
         values.append(VkEnumValue(max_name, 0x7fffffff, hex=True))
 
         return VkEnum(name, values)
@@ -838,32 +847,36 @@ class VkHandle(object):
     def is_required(self):
         return self.required
 
-    def native_handle(self):
-        """ Provide access to the native handle of a dispatchable object.
+    def native_handle(self, name):
+        """ Provide access to the native handle of a wrapped object. """
 
-        Dispatchable objects wrap an underlying 'native' object.
-        This method provides access to the native object.
-        """
-        if not self.is_dispatchable():
-            return None
+        if self.name == "VkCommandPool":
+            return "wine_cmd_pool_from_handle({0})->command_pool".format(name)
+
+        native_handle_name = None
 
         if self.name == "VkCommandBuffer":
-            return "command_buffer"
-        elif self.name == "VkDevice":
-            return "device"
-        elif self.name == "VkInstance":
-            return "instance"
-        elif self.name == "VkPhysicalDevice":
-            return "phys_dev"
-        elif self.name == "VkQueue":
-            return "queue"
-        else:
+            native_handle_name = "command_buffer"
+        if self.name == "VkDevice":
+            native_handle_name = "device"
+        if self.name == "VkInstance":
+            native_handle_name = "instance"
+        if self.name == "VkPhysicalDevice":
+            native_handle_name = "phys_dev"
+        if self.name == "VkQueue":
+            native_handle_name = "queue"
+
+        if native_handle_name:
+            return "{0}->{1}".format(name, native_handle_name)
+
+        if self.is_dispatchable():
             LOGGER.error("Unhandled native handle for: {0}".format(self.name))
+        return None
 
 
 class VkMember(object):
     def __init__(self, const=False, struct_fwd_decl=False,_type=None, pointer=None, name=None, array_len=None,
-            dyn_array_len=None, optional=False, extension_structs=None):
+            dyn_array_len=None, optional=False):
         self.const = const
         self.struct_fwd_decl = struct_fwd_decl
         self.name = name
@@ -873,7 +886,6 @@ class VkMember(object):
         self.array_len = array_len
         self.dyn_array_len = dyn_array_len
         self.optional = optional
-        self.extension_structs = extension_structs
 
     def __eq__(self, other):
         """ Compare member based on name against a string.
@@ -921,12 +933,7 @@ class VkMember(object):
 
         # Name of other member within, which stores the number of
         # elements pointed to be by this member.
-        dyn_array_len = member.get("len", None)
-
-        if "validextensionstructs" in member.attrib:
-            extension_structs = member.get("validextensionstructs").split(",")
-        else:
-            extension_structs = None
+        dyn_array_len = member.get("len")
 
         # Some members are optional, which is important for conversion code e.g. not dereference NULL pointer.
         optional = True if member.get("optional") else False
@@ -950,7 +957,7 @@ class VkMember(object):
                 array_len = name_elem.tail.strip("[]")
 
         return VkMember(const=const, struct_fwd_decl=struct_fwd_decl, _type=member_type, pointer=pointer, name=name_elem.text,
-                array_len=array_len, dyn_array_len=dyn_array_len, optional=optional, extension_structs=extension_structs)
+                array_len=array_len, dyn_array_len=dyn_array_len, optional=optional)
 
     def copy(self, input, output, direction):
         """ Helper method for use by conversion logic to generate a C-code statement to copy this member. """
@@ -1028,8 +1035,11 @@ class VkMember(object):
         # Collect any conversion for any member structs.
         struct = self.type_info["data"]
         for m in struct:
+            m.needs_struct_extensions_conversion()
             if m.needs_conversion():
                 conversions.extend(m.get_conversions())
+
+        struct.needs_struct_extensions_conversion()
 
         struct = self.type_info["data"]
         direction = Direction.OUTPUT if struct.returnedonly else Direction.INPUT
@@ -1119,6 +1129,13 @@ class VkMember(object):
         # though none of this type have been encountered yet.
         return False
 
+    def needs_struct_extensions_conversion(self):
+        if not self.is_struct():
+            return False
+
+        struct = self.type_info["data"]
+        return struct.needs_struct_extensions_conversion()
+
     def set_type_info(self, type_info):
         """ Helper function to set type information from the type registry.
         This is needed, because not all type data is available at time of
@@ -1146,7 +1163,7 @@ class VkParam(object):
         self._set_conversions()
 
     def __repr__(self):
-        return "{0} {1} {2} {3} {4}".format(self.const, self.type, self.pointer, self.name, self.array_len, self.dyn_array_len)
+        return "{0} {1} {2} {3} {4} {5}".format(self.const, self.type, self.pointer, self.name, self.array_len, self.dyn_array_len)
 
     @staticmethod
     def from_xml(param, types):
@@ -1318,9 +1335,6 @@ class VkParam(object):
 
         return self._direction
 
-    def format_string(self):
-        return self.format_str
-
     def dispatch_table(self):
         """ Return functions dispatch table pointer for dispatchable objects. """
 
@@ -1355,6 +1369,10 @@ class VkParam(object):
 
         if not self.is_struct():
             return None
+
+        self.struct.needs_struct_extensions_conversion()
+        for m in self.struct:
+            m.needs_struct_extensions_conversion()
 
         if not self.needs_conversion():
             return None
@@ -1471,30 +1489,30 @@ class VkParam(object):
             LOGGER.debug("TODO: setting NULL VkAllocationCallbacks for {0}".format(self.name))
             return "NULL"
 
-        # Dispatchable objects wrap the native handle. For thunk generation we
-        # need to pass the native handle to the native Vulkan calls.
-        if self.is_dispatchable():
-            return "{0}->{1}".format(self.name, self.handle.native_handle())
-        elif conv and self.needs_conversion():
+        if conv and self.needs_conversion():
             if self.is_dynamic_array():
                 return "{0}_host".format(self.name)
             else:
                 return "&{0}_host".format(self.name)
         else:
-            return self.name
+            # We need to pass the native handle to the native Vulkan calls.
+            native_handle = self.handle.native_handle(self.name) if self.is_handle() else None
+            return native_handle if native_handle else self.name
 
 
 class VkStruct(Sequence):
     """ Class which represents the type union and struct. """
 
-    def __init__(self, name, members, returnedonly, alias=None, union=False):
+    def __init__(self, name, members, returnedonly, structextends, alias=None, union=False):
         self.name = name
         self.members = members
         self.returnedonly = returnedonly
+        self.structextends = structextends
         self.required = False
         self.alias = alias
         self.union = union
         self.type_info = None # To be set later.
+        self.struct_extensions = []
 
     def __getitem__(self, i):
         return self.members[i]
@@ -1505,7 +1523,7 @@ class VkStruct(Sequence):
     @staticmethod
     def from_alias(struct, alias):
         name = struct.attrib.get("name")
-        return VkStruct(name, alias.members, alias.returnedonly, alias=alias)
+        return VkStruct(name, alias.members, alias.returnedonly, alias.structextends, alias=alias)
 
     @staticmethod
     def from_xml(struct):
@@ -1513,18 +1531,21 @@ class VkStruct(Sequence):
         # know which one we are dealing with later on for code generation.
         union = True if struct.attrib["category"] == "union" else False
 
-        name = struct.attrib.get("name", None)
+        name = struct.attrib.get("name")
 
         # 'Output' structures for which data is filled in by the API are
         # marked as 'returnedonly'.
         returnedonly = True if struct.attrib.get("returnedonly") else False
+
+        structextends = struct.attrib.get("structextends")
+        structextends = structextends.split(",") if structextends else []
 
         members = []
         for member in struct.findall("member"):
             vk_member = VkMember.from_xml(member)
             members.append(vk_member)
 
-        return VkStruct(name, members, returnedonly, union=union)
+        return VkStruct(name, members, returnedonly, structextends, union=union)
 
     @staticmethod
     def decouple_structs(structs):
@@ -1650,6 +1671,17 @@ class VkStruct(Sequence):
 
         return False
 
+    def needs_struct_extensions_conversion(self):
+        """ Checks if structure extensions in pNext chain need conversion. """
+        ret = False
+
+        for e in self.struct_extensions:
+            if e.required and e.needs_conversion():
+                LOGGER.error("Unhandled pNext chain conversion for {0}".format(e.name))
+                ret = True
+
+        return ret
+
     def set_type_info(self, types):
         """ Helper function to set type information from the type registry.
         This is needed, because not all type data is available at time of
@@ -1747,10 +1779,8 @@ class ConversionFunction(object):
 
         if self.direction == Direction.OUTPUT:
             params = ["const {0}_host *in".format(self.type), "{0} *out".format(self.type), "uint32_t count"]
-            return_type = self.type
         else:
             params = ["const {0} *in".format(self.type), "{0} *out_host".format(self.type), "uint32_t count"]
-            return_type = "{0}_host".format(self.type)
 
         # Generate function prototype.
         body = "static inline void {0}(".format(self.name)
@@ -2165,7 +2195,7 @@ class VkGenerator(object):
             f.write(define.definition())
 
         for handle in self.registry.handles:
-            # For backwards compatiblity also create definitions for aliases.
+            # For backward compatibility also create definitions for aliases.
             # These types normally don't get pulled in as we use the new types
             # even in legacy functions if they are aliases.
             if handle.is_required() or handle.is_alias():
@@ -2757,6 +2787,10 @@ class VkRegistry(object):
         # the data now.
         for struct in structs:
             struct.set_type_info(self.types)
+
+            for structextend in struct.structextends:
+                s = self.types[structextend]["data"]
+                s.struct_extensions.append(struct)
 
         # Guarantee everything is sorted, so code generation doesn't have
         # to deal with this.

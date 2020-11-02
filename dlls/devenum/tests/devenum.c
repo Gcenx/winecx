@@ -95,6 +95,7 @@ static void test_devenum(IBindCtx *bind_ctx)
         if (winetest_debug > 1)
             trace("%s %s:\n", wine_dbgstr_guid(&cat_guid), wine_dbgstr_w(V_BSTR(&var)));
 
+        VariantClear(&var);
         IPropertyBag_Release(prop_bag);
         IMoniker_Release(moniker);
 
@@ -129,6 +130,7 @@ static void test_devenum(IBindCtx *bind_ctx)
                 hr = IMoniker_BindToObject(moniker, bind_ctx, NULL, &IID_IUnknown, NULL);
                 ok(hr == E_POINTER, "got %#x\n", hr);
 
+                VariantClear(&var);
                 CoTaskMemFree(displayname);
                 IPropertyBag_Release(prop_bag);
                 IMoniker_Release(moniker);
@@ -137,6 +139,7 @@ static void test_devenum(IBindCtx *bind_ctx)
         }
     }
 
+    IEnumMoniker_Release(enum_cat);
     ICreateDevEnum_Release(create_devenum);
 }
 
@@ -466,6 +469,7 @@ static void test_codec(void)
      * enumerating them will destroy the key */
     ok(!find_moniker(&CLSID_AudioRendererCategory, mon), "codec should not be registered\n");
 
+    VariantClear(&var);
     hr = IPropertyBag_Read(prop_bag, friendly_name, &var, NULL);
     ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "got %#x\n", hr);
 
@@ -589,6 +593,7 @@ static void test_legacy_filter(void)
     ok(!lstrcmpW(buffer, V_BSTR(&var)), "expected %s, got %s\n",
         wine_dbgstr_w(buffer), wine_dbgstr_w(V_BSTR(&var)));
 
+    VariantClear(&var);
     IPropertyBag_Release(prop_bag);
 
     hr = IFilterMapper_UnregisterFilter(mapper, CLSID_TestFilter);
@@ -684,6 +689,7 @@ static BOOL CALLBACK test_dsound(GUID *guid, const WCHAR *desc, const WCHAR *mod
     ok(!lstrcmpW(buffer, V_BSTR(&var)), "expected %s, got %s\n",
         wine_dbgstr_w(buffer), wine_dbgstr_w(V_BSTR(&var)));
 
+    VariantClear(&var);
     IPropertyBag_Release(prop_bag);
     IMoniker_Release(mon);
     IParseDisplayName_Release(parser);
@@ -999,6 +1005,7 @@ static void test_vfw(void)
         ok(!lstrcmpW(name, V_BSTR(&var)), "expected %s, got %s\n",
             wine_dbgstr_w(name), wine_dbgstr_w(V_BSTR(&var)));
 
+        VariantClear(&var);
         IPropertyBag_Release(prop_bag);
         IMoniker_Release(mon);
     }

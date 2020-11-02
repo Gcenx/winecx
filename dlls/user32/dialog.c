@@ -197,7 +197,7 @@ static const WORD *DIALOG_GetControl32( const WORD *p, DLG_CONTROL_INFO *info,
             TRACE("\n");
             TRACE("  END\n" );
         }
-        info->data = p + 1;
+        info->data = p;
         p += GET_WORD(p) / sizeof(WORD);
     }
     else info->data = NULL;
@@ -690,6 +690,11 @@ static HWND DIALOG_CreateIndirect( HINSTANCE hInst, LPCVOID dlgTemplate,
                     if (SendMessageW( focus, WM_GETDLGCODE, 0, 0 ) & DLGC_HASSETSEL)
                         SendMessageW( focus, EM_SETSEL, 0, MAXLONG );
                     SetFocus( focus );
+                }
+                else
+                {
+                    if (!(template.style & WS_CHILD))
+                        SetFocus( hwnd );
                 }
             }
         }
@@ -1237,8 +1242,16 @@ BOOL WINAPI IsDialogMessageW( HWND hwndDlg, LPMSG msg )
             if (!(dlgCode & DLGC_WANTARROWS))
             {
                 BOOL fPrevious = (msg->wParam == VK_LEFT || msg->wParam == VK_UP);
-                HWND hwndNext = GetNextDlgGroupItem (hwndDlg, GetFocus(), fPrevious );
-                SendMessageW( hwndDlg, WM_NEXTDLGCTL, (WPARAM)hwndNext, 1 );
+                HWND hwndNext = GetNextDlgGroupItem( hwndDlg, msg->hwnd, fPrevious );
+                if (hwndNext && SendMessageW( hwndNext, WM_GETDLGCODE, msg->wParam, (LPARAM)msg ) == (DLGC_BUTTON | DLGC_RADIOBUTTON))
+                {
+                    SetFocus( hwndNext );
+                    if ((GetWindowLongW( hwndNext, GWL_STYLE ) & BS_TYPEMASK) == BS_AUTORADIOBUTTON &&
+                        SendMessageW( hwndNext, BM_GETCHECK, 0, 0 ) != BST_CHECKED)
+                        SendMessageW( hwndNext, BM_CLICK, 1, 0 );
+                }
+                else
+                    SendMessageW( hwndDlg, WM_NEXTDLGCTL, (WPARAM)hwndNext, 1 );
                 return TRUE;
             }
             break;
@@ -1505,22 +1518,22 @@ BOOL WINAPI CheckRadioButton( HWND hwndDlg, int firstID,
  */
 DWORD WINAPI GetDialogBaseUnits(void)
 {
-    static DWORD units;
+    static LONG cx, cy;
 
-    if (!units)
+    if (!cx)
     {
         HDC hdc;
-        SIZE size;
 
         if ((hdc = GetDC(0)))
         {
-            size.cx = GdiGetCharDimensions( hdc, NULL, &size.cy );
-            if (size.cx) units = MAKELONG( size.cx, size.cy );
+            cx = GdiGetCharDimensions( hdc, NULL, &cy );
             ReleaseDC( 0, hdc );
         }
-        TRACE("base units = %d,%d\n", LOWORD(units), HIWORD(units) );
+        TRACE( "base units = %d,%d\n", cx, cy );
     }
-    return units;
+
+    return MAKELONG( MulDiv( cx, GetDpiForSystem(), USER_DEFAULT_SCREEN_DPI ),
+                     MulDiv( cy, GetDpiForSystem(), USER_DEFAULT_SCREEN_DPI ));
 }
 
 

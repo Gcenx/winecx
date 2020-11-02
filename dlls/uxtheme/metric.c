@@ -165,9 +165,7 @@ HRESULT WINAPI GetThemeSysInt(HTHEME hTheme, int iIntID, int *piValue)
  */
 int WINAPI GetThemeSysSize(HTHEME hTheme, int iSizeID)
 {
-    PTHEME_PROPERTY tp;
-    int i, id = -1;
-    int metricMap[] = {
+    static const int metricMap[] = {
         SM_CXVSCROLL, TMT_SCROLLBARWIDTH,
         SM_CYHSCROLL, TMT_SCROLLBARHEIGHT,
         SM_CXSIZE, TMT_CAPTIONBARWIDTH,
@@ -179,9 +177,11 @@ int WINAPI GetThemeSysSize(HTHEME hTheme, int iSizeID)
         SM_CXMENUSIZE, TMT_MENUBARWIDTH,
         SM_CYMENUSIZE, TMT_MENUBARHEIGHT
     };
+    PTHEME_PROPERTY tp;
+    int i, id = -1;
 
     if(hTheme) {
-        for(i=0; i<sizeof(metricMap)/sizeof(metricMap[0]); i+=2) {
+        for(i=0; i<ARRAY_SIZE(metricMap); i+=2) {
             if(metricMap[i] == iSizeID) {
                 id = metricMap[i+1];
                 break;

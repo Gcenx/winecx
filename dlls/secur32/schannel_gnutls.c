@@ -23,6 +23,7 @@
 #include "wine/port.h"
 
 #include <stdarg.h>
+#include <stdio.h>
 #ifdef SONAME_LIBGNUTLS
 #include <gnutls/gnutls.h>
 #include <gnutls/crypto.h>
@@ -150,6 +151,7 @@ static const struct {
     DWORD enable_flag;
     const char *gnutls_flag;
 } protocol_priority_flags[] = {
+    {SP_PROT_TLS1_3_CLIENT, "VERS-TLS1.3"},
     {SP_PROT_TLS1_2_CLIENT, "VERS-TLS1.2"},
     {SP_PROT_TLS1_1_CLIENT, "VERS-TLS1.1"},
     {SP_PROT_TLS1_0_CLIENT, "VERS-TLS1.0"},
@@ -157,16 +159,48 @@ static const struct {
     /* {SP_PROT_SSL2_CLIENT} is not supported by GnuTLS */
 };
 
+static DWORD supported_protocols;
+
+static void check_supported_protocols(void)
+{
+    gnutls_session_t session;
+    char priority[64];
+    unsigned i;
+    int err;
+
+    err = pgnutls_init(&session, GNUTLS_CLIENT);
+    if (err != GNUTLS_E_SUCCESS)
+    {
+        pgnutls_perror(err);
+        return;
+    }
+
+    for(i = 0; i < ARRAY_SIZE(protocol_priority_flags); i++)
+    {
+        sprintf(priority, "NORMAL:-%s", protocol_priority_flags[i].gnutls_flag);
+        err = pgnutls_priority_set_direct(session, priority, NULL);
+        if (err == GNUTLS_E_SUCCESS)
+        {
+            TRACE("%s is supported\n", protocol_priority_flags[i].gnutls_flag);
+            supported_protocols |= protocol_priority_flags[i].enable_flag;
+        }
+        else
+            TRACE("%s is not supported\n", protocol_priority_flags[i].gnutls_flag);
+    }
+
+    pgnutls_deinit(session);
+}
+
 DWORD schan_imp_enabled_protocols(void)
 {
-    /* NOTE: No support for SSL 2.0 */
-    return SP_PROT_SSL3_CLIENT | SP_PROT_TLS1_0_CLIENT | SP_PROT_TLS1_1_CLIENT | SP_PROT_TLS1_2_CLIENT;
+    return supported_protocols;
 }
 
 BOOL schan_imp_create_session(schan_imp_session *session, schan_credentials *cred)
 {
     gnutls_session_t *s = (gnutls_session_t*)session;
     char priority[128] = "NORMAL:%LATEST_RECORD_VERSION", *p;
+    BOOL using_vers_all = FALSE, disabled;
     unsigned i;
 
     int err = pgnutls_init(s, cred->credential_use == SECPKG_CRED_INBOUND ? GNUTLS_SERVER : GNUTLS_CLIENT);
@@ -180,9 +214,26 @@ BOOL schan_imp_create_session(schan_imp_session *session, schan_credentials *cre
     if (pgnutls_cipher_get_block_size == compat_cipher_get_block_size) strcpy(priority, "NORMAL");
 
     p = priority + strlen(priority);
-    for(i = 0; i < ARRAY_SIZE(protocol_priority_flags); i++) {
+
+    /* VERS-ALL is nice to use for forward compatibility. It was introduced before support for TLS1.3,
+     * so if TLS1.3 is supported, we may safely use it. Otherwise explicitly disable all known
+     * disabled protocols. */
+    if (supported_protocols & SP_PROT_TLS1_3_CLIENT)
+    {
+        strcpy(p, ":-VERS-ALL");
+        p += strlen(p);
+        using_vers_all = TRUE;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(protocol_priority_flags); i++)
+    {
+        if (!(supported_protocols & protocol_priority_flags[i].enable_flag)) continue;
+
+        disabled = !(cred->enabled_protocols & protocol_priority_flags[i].enable_flag);
+        if (using_vers_all && disabled) continue;
+
         *p++ = ':';
-        *p++ = (cred->enabled_protocols & protocol_priority_flags[i].enable_flag) ? '+' : '-';
+        *p++ = disabled ? '-' : '+';
         strcpy(p, protocol_priority_flags[i].gnutls_flag);
         p += strlen(p);
     }
@@ -607,6 +658,7 @@ else
         pgnutls_global_set_log_function(schan_gnutls_log);
     }
 
+    check_supported_protocols();
     return TRUE;
 
 fail:

@@ -109,7 +109,7 @@ int _RTFGetChar(RTF_Info *info)
 	}
 	ch = (unsigned char)stream->buffer[stream->dwUsed++];
 	if (!ch)
-		 return EOF;
+		 return ' ';
 	return ch;
 }
 
@@ -2596,13 +2596,13 @@ RTFPutUnicodeString(RTF_Info *info, const WCHAR *string, int length)
                 RTFFlushCPOutputBuffer(info);
         while (length)
         {
-                int fit = min(length, sizeof(info->OutputBuffer) / sizeof(WCHAR) - info->dwOutputCount);
+                int fit = min(length, ARRAY_SIZE(info->OutputBuffer) - info->dwOutputCount);
 
                 memmove(info->OutputBuffer + info->dwOutputCount, string, fit * sizeof(WCHAR));
                 info->dwOutputCount += fit;
                 length -= fit;
                 string += fit;
-                if (sizeof(info->OutputBuffer) / sizeof(WCHAR) == info->dwOutputCount)
+                if (ARRAY_SIZE(info->OutputBuffer) == info->dwOutputCount)
                         RTFFlushUnicodeOutputBuffer(info);
         }
 }

@@ -163,6 +163,12 @@ typedef struct
     unsigned int status;
 } fenv_t;
 
+typedef struct
+{
+    double r;
+    double i;
+} _Dcomplex;
+
 static char* (CDECL *p_setlocale)(int category, const char* locale);
 static struct MSVCRT_lconv* (CDECL *p_localeconv)(void);
 static size_t (CDECL *p_wcstombs_s)(size_t *ret, char* dest, size_t sz, const wchar_t* src, size_t max);
@@ -184,6 +190,8 @@ static _locale_t (__cdecl *p_wcreate_locale)(int, const wchar_t *);
 static void (__cdecl *p_free_locale)(_locale_t);
 static unsigned short (__cdecl *p_wctype)(const char*);
 static int (__cdecl *p_vsscanf)(const char*, const char *, __ms_va_list valist);
+static _Dcomplex* (__cdecl *p__Cbuild)(_Dcomplex*, double, double);
+static double (__cdecl *p_creal)(_Dcomplex);
 
 /* make sure we use the correct errno */
 #undef errno
@@ -242,6 +250,8 @@ static BOOL init(void)
     SET(p_fegetenv, "fegetenv");
     SET(p__clearfp, "_clearfp");
     SET(p_vsscanf, "vsscanf");
+    SET(p__Cbuild, "_Cbuild");
+    SET(p_creal, "creal");
     if(sizeof(void*) == 8) { /* 64-bit initialization */
         SET(p_critical_section_ctor,
                 "??0critical_section@Concurrency@@QEAA@XZ");
@@ -935,6 +945,25 @@ static void test_vsscanf(void)
     ok(v == 10, "got %d.\n", v);
 }
 
+static void test__Cbuild(void)
+{
+    _Dcomplex c;
+    double d;
+
+    memset(&c, 0, sizeof(c));
+    p__Cbuild(&c, 1.0, 2.0);
+    ok(c.r == 1.0, "c.r = %lf\n", c.r);
+    ok(c.i == 2.0, "c.i = %lf\n", c.i);
+    d = p_creal(c);
+    ok(d == 1.0, "creal returned %lf\n", d);
+
+    p__Cbuild(&c, 3.0, NAN);
+    ok(c.r == 3.0, "c.r = %lf\n", c.r);
+    ok(_isnan(c.i), "c.i = %lf\n", c.i);
+    d = p_creal(c);
+    ok(d == 3.0, "creal returned %lf\n", d);
+}
+
 START_TEST(msvcr120)
 {
     if (!init()) return;
@@ -953,4 +982,5 @@ START_TEST(msvcr120)
     test__Condition_variable();
     test_wctype();
     test_vsscanf();
+    test__Cbuild();
 }

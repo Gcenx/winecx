@@ -666,7 +666,9 @@ int CDECL MSVCRT__strncoll_l( const char* str1, const char* str2, MSVCRT_size_t 
 
     if(!locinfo->lc_handle[MSVCRT_LC_COLLATE])
         return strncmp(str1, str2, count);
-    return CompareStringA(locinfo->lc_handle[MSVCRT_LC_COLLATE], 0, str1, count, str2, count)-CSTR_EQUAL;
+    return CompareStringA(locinfo->lc_handle[MSVCRT_LC_COLLATE], 0,
+              str1, MSVCRT_strnlen(str1, count),
+              str2, MSVCRT_strnlen(str2, count))-CSTR_EQUAL;
 }
 
 /*********************************************************************
@@ -692,7 +694,8 @@ int CDECL MSVCRT__strnicoll_l( const char* str1, const char* str2, MSVCRT_size_t
     if(!locinfo->lc_handle[MSVCRT_LC_COLLATE])
         return strncasecmp(str1, str2, count);
     return CompareStringA(locinfo->lc_handle[MSVCRT_LC_COLLATE], NORM_IGNORECASE,
-            str1, count, str2, count)-CSTR_EQUAL;
+            str1, MSVCRT_strnlen(str1, count),
+            str2, MSVCRT_strnlen(str2, count))-CSTR_EQUAL;
 }
 
 /*********************************************************************
@@ -1077,6 +1080,14 @@ __int64 CDECL MSVCRT__atoi64_l(const char *str, MSVCRT__locale_t locale)
 }
 
 /******************************************************************
+ *      _atoi64 (MSVCRT.@)
+ */
+__int64 CDECL MSVCRT__atoi64(const char *str)
+{
+    return MSVCRT_strtoi64_l(str, NULL, 10, NULL);
+}
+
+/******************************************************************
  *      _atol_l (MSVCRT.@)
  */
 MSVCRT_long CDECL MSVCRT__atol_l(const char *str, MSVCRT__locale_t locale)
@@ -1091,6 +1102,14 @@ MSVCRT_long CDECL MSVCRT__atol_l(const char *str, MSVCRT__locale_t locale)
         *MSVCRT__errno() = MSVCRT_ERANGE;
     }
     return ret;
+}
+
+/******************************************************************
+ *      atol (MSVCRT.@)
+ */
+MSVCRT_long CDECL MSVCRT_atol(const char *str)
+{
+    return MSVCRT__atol_l(str, NULL);
 }
 
 #if _MSVCR_VER>=120
@@ -2024,4 +2043,39 @@ int __cdecl MSVCRT__memicmp_l(const char *s1, const char *s2, MSVCRT_size_t len,
 int __cdecl MSVCRT__memicmp(const char *s1, const char *s2, MSVCRT_size_t len)
 {
     return MSVCRT__memicmp_l(s1, s2, len, NULL);
+}
+
+/*********************************************************************
+ *                  strcspn   (MSVCRT.@)
+ */
+MSVCRT_size_t __cdecl MSVCRT_strcspn(const char *str, const char *reject)
+{
+    return strcspn( str, reject );
+}
+
+/*********************************************************************
+ *                  strpbrk   (MSVCRT.@)
+ */
+char* __cdecl MSVCRT_strpbrk(const char *str, const char *accept)
+{
+    return strpbrk(str, accept);
+}
+
+/*********************************************************************
+ *                  __strncnt   (MSVCRT.@)
+ */
+MSVCRT_size_t __cdecl MSVCRT___strncnt(const char *str, MSVCRT_size_t size)
+{
+    MSVCRT_size_t ret = 0;
+
+#if _MSVCR_VER >= 140
+    while (*str++ && size--)
+#else
+    while (size-- && *str++)
+#endif
+    {
+        ret++;
+    }
+
+    return ret;
 }

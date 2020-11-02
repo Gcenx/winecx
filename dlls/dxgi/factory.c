@@ -250,9 +250,8 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_CreateSwapChainForHwnd(IWineDXGIFa
         const DXGI_SWAP_CHAIN_FULLSCREEN_DESC *fullscreen_desc,
         IDXGIOutput *output, IDXGISwapChain1 **swapchain)
 {
+    IWineDXGISwapChainFactory *swapchain_factory;
     ID3D12CommandQueue *command_queue;
-    unsigned int min_buffer_count;
-    IWineDXGIDevice *dxgi_device;
     HRESULT hr;
 
     TRACE("iface %p, device %p, window %p, desc %p, fullscreen_desc %p, output %p, swapchain %p.\n",
@@ -270,43 +269,17 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_CreateSwapChainForHwnd(IWineDXGIFa
         return DXGI_ERROR_UNSUPPORTED;
     }
 
-    switch (desc->SwapEffect)
-    {
-        case DXGI_SWAP_EFFECT_DISCARD:
-        case DXGI_SWAP_EFFECT_SEQUENTIAL:
-            min_buffer_count = 1;
-            break;
-
-        case DXGI_SWAP_EFFECT_FLIP_DISCARD:
-        case DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL:
-            min_buffer_count = 2;
-
-            if (desc->SampleDesc.Count != 1 || desc->SampleDesc.Quality)
-            {
-                WARN("Invalid sample desc %u, %u for swap effect %#x.\n",
-                        desc->SampleDesc.Count, desc->SampleDesc.Quality, desc->SwapEffect);
-                return DXGI_ERROR_INVALID_CALL;
-            }
-            break;
-
-        default:
-            WARN("Invalid swap effect %u used.\n", desc->SwapEffect);
-            return DXGI_ERROR_INVALID_CALL;
-    }
-
-    if (desc->BufferCount < min_buffer_count || desc->BufferCount > DXGI_MAX_SWAP_CHAIN_BUFFERS)
-    {
-        WARN("BufferCount is %u.\n", desc->BufferCount);
+    if (!dxgi_validate_swapchain_desc(desc))
         return DXGI_ERROR_INVALID_CALL;
-    }
 
     if (output)
         FIXME("Ignoring output %p.\n", output);
 
-    if (SUCCEEDED(IUnknown_QueryInterface(device, &IID_IWineDXGIDevice, (void **)&dxgi_device)))
+    if (SUCCEEDED(IUnknown_QueryInterface(device, &IID_IWineDXGISwapChainFactory, (void **)&swapchain_factory)))
     {
-        hr = d3d11_swapchain_create(dxgi_device, window, desc, fullscreen_desc, swapchain);
-        IWineDXGIDevice_Release(dxgi_device);
+        hr = IWineDXGISwapChainFactory_create_swapchain(swapchain_factory,
+                (IDXGIFactory *)iface, window, desc, fullscreen_desc, output, swapchain);
+        IWineDXGISwapChainFactory_Release(swapchain_factory);
         return hr;
     }
 

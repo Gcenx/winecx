@@ -65,8 +65,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(appwizcpl);
 #define GECKO_SHA "???"
 #endif
 
-#define MONO_VERSION "4.7.3"
-#define MONO_SHA "d24a8017371c7e8224a1778bb43a113ed7ed9720efd9d0cda175d42db6106d3a"
+#define MONO_VERSION "4.7.5"
+#define MONO_SHA "154d68d476cdedef56f159d837fbb5eef9358a9f85de89f86c189ec4da004b3f"
 
 typedef struct {
     const char *version;
@@ -513,7 +513,7 @@ static HRESULT WINAPI InstallCallback_OnStopBinding(IBindStatusCallback *iface,
 
         cache_file_name = get_cache_file_name(TRUE);
         if(cache_file_name) {
-            MoveFileW(msi_file, cache_file_name);
+            CopyFileW(msi_file, cache_file_name, FALSE);
             heap_free(cache_file_name);
         }
     }else {
@@ -636,14 +636,14 @@ static void append_url_params( WCHAR *url )
     DWORD len = strlenW(url);
 
     memcpy(url+len, arch_formatW, sizeof(arch_formatW));
-    len += sizeof(arch_formatW)/sizeof(WCHAR);
+    len += ARRAY_SIZE(arch_formatW);
     len += MultiByteToWideChar(CP_ACP, 0, ARCH_STRING, sizeof(ARCH_STRING),
                                url+len, size/sizeof(WCHAR)-len)-1;
     memcpy(url+len, v_formatW, sizeof(v_formatW));
-    len += sizeof(v_formatW)/sizeof(WCHAR);
+    len += ARRAY_SIZE(v_formatW);
     len += MultiByteToWideChar(CP_ACP, 0, addon->version, -1, url+len, size/sizeof(WCHAR)-len)-1;
     memcpy(url+len, winevW, sizeof(winevW));
-    len += sizeof(winevW)/sizeof(WCHAR);
+    len += ARRAY_SIZE(winevW);
     MultiByteToWideChar(CP_ACP, 0, PACKAGE_VERSION, -1, url+len, size/sizeof(WCHAR)-len);
 }
 
@@ -717,9 +717,9 @@ static void run_winebrowser(const WCHAR *url)
 
     url_len = strlenW(url);
 
-    len = GetSystemDirectoryW(app, MAX_PATH-sizeof(winebrowserW)/sizeof(WCHAR));
+    len = GetSystemDirectoryW(app, MAX_PATH - ARRAY_SIZE(winebrowserW));
     memcpy(app+len, winebrowserW, sizeof(winebrowserW));
-    len += sizeof(winebrowserW)/sizeof(WCHAR) -1;
+    len += ARRAY_SIZE(winebrowserW) - 1;
 
     args = heap_alloc((len+1+url_len)*sizeof(WCHAR));
     if(!args)

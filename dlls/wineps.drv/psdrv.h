@@ -343,6 +343,13 @@ typedef struct {
     BOOL		set;
 } PSPEN;
 
+enum passthrough
+{
+    passthrough_none,
+    passthrough_active,
+    passthrough_had_rect,  /* See the comment in PSDRV_Rectangle */
+};
+
 typedef struct {
     DWORD		id;             /* Job id */
     HANDLE              hprinter;       /* Printer handle */
@@ -352,8 +359,7 @@ typedef struct {
     BOOL		OutOfPage;      /* Page header not sent yet */
     INT			PageNo;
     BOOL                quiet;          /* Don't actually output anything */
-    BOOL                in_passthrough; /* In PASSTHROUGH mode */
-    BOOL                had_passthrough_rect; /* See the comment in PSDRV_Rectangle */
+    enum passthrough    passthrough_state;
 } JOB;
 
 typedef struct
@@ -571,6 +577,9 @@ extern void T42_free(TYPE42 *t42) DECLSPEC_HIDDEN;
 
 extern DWORD RLE_encode(BYTE *in_buf, DWORD len, BYTE *out_buf) DECLSPEC_HIDDEN;
 extern DWORD ASCII85_encode(BYTE *in_buf, DWORD len, BYTE *out_buf) DECLSPEC_HIDDEN;
+
+extern void passthrough_enter(PHYSDEV dev) DECLSPEC_HIDDEN;
+extern void passthrough_leave(PHYSDEV dev) DECLSPEC_HIDDEN;
 
 #define push_lc_numeric(x) do {					\
 	const char *tmplocale = setlocale(LC_NUMERIC,NULL);	\

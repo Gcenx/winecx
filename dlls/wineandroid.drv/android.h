@@ -63,22 +63,21 @@ extern struct opengl_funcs *get_wgl_driver( UINT version ) DECLSPEC_HIDDEN;
 
 extern void start_android_device(void) DECLSPEC_HIDDEN;
 extern void register_native_window( HWND hwnd, struct ANativeWindow *win, BOOL client ) DECLSPEC_HIDDEN;
-extern struct ANativeWindow *create_ioctl_window( HWND hwnd, BOOL opengl ) DECLSPEC_HIDDEN;
+extern struct ANativeWindow *create_ioctl_window( HWND hwnd, BOOL opengl, float scale ) DECLSPEC_HIDDEN;
 extern struct ANativeWindow *grab_ioctl_window( struct ANativeWindow *window ) DECLSPEC_HIDDEN;
 extern void release_ioctl_window( struct ANativeWindow *window ) DECLSPEC_HIDDEN;
 extern void destroy_ioctl_window( HWND hwnd, BOOL opengl ) DECLSPEC_HIDDEN;
 extern int ioctl_window_pos_changed( HWND hwnd, const RECT *window_rect, const RECT *client_rect,
                                      const RECT *visible_rect, UINT style, UINT flags,
                                      HWND after, HWND owner ) DECLSPEC_HIDDEN;
-extern int ioctl_set_window_parent( HWND hwnd, HWND parent ) DECLSPEC_HIDDEN;
+extern int ioctl_set_window_parent( HWND hwnd, HWND parent, float scale ) DECLSPEC_HIDDEN;
 extern int ioctl_set_window_focus( HWND hwnd ) DECLSPEC_HIDDEN;
 extern int ioctl_set_window_text( HWND hwnd, const WCHAR *text ) DECLSPEC_HIDDEN;
 extern int ioctl_set_window_icon( HWND hwnd, int width, int height,
                                   const unsigned int *bits ) DECLSPEC_HIDDEN;
+extern int ioctl_set_capture( HWND hwnd ) DECLSPEC_HIDDEN;
 extern int ioctl_set_cursor( int id, int width, int height,
                              int hotspotx, int hotspoty, const unsigned int *bits ) DECLSPEC_HIDDEN;
-extern int ioctl_set_window_alpha( HWND hwnd, BOOL has_alpha ) DECLSPEC_HIDDEN;
-extern int ioctl_set_capture( HWND hwnd ) DECLSPEC_HIDDEN;
 extern int ioctl_gamepad_query( int index, int device, void* data) DECLSPEC_HIDDEN;
 extern int ioctl_imeText( int target, int *cursor, int *length, WCHAR* string ) DECLSPEC_HIDDEN;
 extern int ioctl_imeFinish( int target ) DECLSPEC_HIDDEN;
@@ -105,6 +104,7 @@ enum android_window_messages
     WM_ANDROID_SET_FOCUS,
 };
 
+extern void init_gralloc( const struct hw_module_t *module ) DECLSPEC_HIDDEN;
 extern HWND get_capture_window(void) DECLSPEC_HIDDEN;
 extern void init_monitors( int width, int height ) DECLSPEC_HIDDEN;
 extern void set_screen_dpi( DWORD dpi ) DECLSPEC_HIDDEN;
@@ -292,8 +292,6 @@ int send_event( const union event_data *data ) DECLSPEC_HIDDEN;
 extern JavaVM *wine_get_java_vm(void);
 extern jobject wine_get_java_object(void);
 
-extern struct gralloc_module_t *gralloc_module;
-
 typedef struct _s_ime_text {
     WCHAR *text;
     INT    length;
@@ -303,6 +301,5 @@ typedef struct _s_ime_text {
 extern s_ime_text **java_ime_text;
 extern INT java_ime_active_target;
 extern INT java_ime_count;
-
 
 #endif  /* __WINE_ANDROID_H */

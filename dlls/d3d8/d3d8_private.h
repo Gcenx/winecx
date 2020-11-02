@@ -39,8 +39,13 @@
 
 #define D3DPRESENTFLAGS_MASK 0x00000fffu
 
+#define D3D8_MAX_VERTEX_SHADER_CONSTANTF 256
+#define D3D8_MAX_STREAMS 16
+
 /* CreateVertexShader can return > 0xFFFF */
 #define VS_HIGHESTFIXEDFXF 0xF0000000
+
+extern const struct wined3d_parent_ops d3d8_null_wined3d_parent_ops DECLSPEC_HIDDEN;
 
 void d3dcaps_from_wined3dcaps(D3DCAPS8 *caps, const struct wined3d_caps *wined3d_caps) DECLSPEC_HIDDEN;
 
@@ -118,8 +123,11 @@ struct d3d8_device
     UINT                   index_buffer_pos;
 
     LONG device_state;
-    /* Avoids recursion with nested ReleaseRef to 0 */
-    BOOL                    inDestruction;
+    DWORD sysmem_vb : 16; /* D3D8_MAX_STREAMS */
+    DWORD sysmem_ib : 1;
+    DWORD in_destruction : 1;
+    DWORD recording : 1;
+    DWORD padding : 13;
 
     /* The d3d8 API supports only one implicit swapchain (no D3DCREATE_ADAPTERGROUP_DEVICE,
      * no GetSwapchain, GetBackBuffer doesn't accept a swapchain number). */
@@ -199,6 +207,7 @@ struct d3d8_vertexbuffer
     struct d3d8_resource resource;
     struct wined3d_buffer *wined3d_buffer;
     IDirect3DDevice8 *parent_device;
+    struct wined3d_buffer *draw_buffer;
     DWORD fvf;
 };
 
@@ -212,6 +221,7 @@ struct d3d8_indexbuffer
     struct d3d8_resource resource;
     struct wined3d_buffer *wined3d_buffer;
     IDirect3DDevice8 *parent_device;
+    struct wined3d_buffer *draw_buffer;
     enum wined3d_format_id format;
 };
 
@@ -260,8 +270,6 @@ void d3d8_vertex_shader_destroy(struct d3d8_vertex_shader *shader) DECLSPEC_HIDD
 HRESULT d3d8_vertex_shader_init(struct d3d8_vertex_shader *shader, struct d3d8_device *device,
         const DWORD *declaration, const DWORD *byte_code, DWORD shader_handle, DWORD usage) DECLSPEC_HIDDEN;
 
-#define D3D8_MAX_VERTEX_SHADER_CONSTANTF 256
-
 struct d3d8_pixel_shader
 {
     DWORD handle;
@@ -278,9 +286,14 @@ unsigned int wined3dmapflags_from_d3dmapflags(unsigned int flags) DECLSPEC_HIDDE
 void load_local_constants(const DWORD *d3d8_elements, struct wined3d_shader *wined3d_vertex_shader) DECLSPEC_HIDDEN;
 size_t parse_token(const DWORD *pToken) DECLSPEC_HIDDEN;
 
-static inline DWORD d3dusage_from_wined3dusage(unsigned int usage)
+static inline DWORD d3dusage_from_wined3dusage(unsigned int wined3d_usage, unsigned int bind_flags)
 {
-    return usage & WINED3DUSAGE_MASK;
+    DWORD usage = wined3d_usage & WINED3DUSAGE_MASK;
+    if (bind_flags & WINED3D_BIND_RENDER_TARGET)
+        usage |= D3DUSAGE_RENDERTARGET;
+    if (bind_flags & WINED3D_BIND_DEPTH_STENCIL)
+        usage |= D3DUSAGE_DEPTHSTENCIL;
+    return usage;
 }
 
 static inline D3DPOOL d3dpool_from_wined3daccess(unsigned int access, unsigned int usage)
@@ -316,6 +329,18 @@ static inline unsigned int wined3daccess_from_d3dpool(D3DPOOL pool, unsigned int
         default:
             return 0;
     }
+}
+
+static inline unsigned int wined3d_bind_flags_from_d3d8_usage(DWORD usage)
+{
+    unsigned int bind_flags = 0;
+
+    if (usage & D3DUSAGE_RENDERTARGET)
+        bind_flags |= WINED3D_BIND_RENDER_TARGET;
+    if (usage & D3DUSAGE_DEPTHSTENCIL)
+        bind_flags |= WINED3D_BIND_DEPTH_STENCIL;
+
+    return bind_flags;
 }
 
 #endif /* __WINE_D3DX8_PRIVATE_H */

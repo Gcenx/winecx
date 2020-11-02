@@ -60,6 +60,9 @@ static void *wine_vk_get_global_proc_addr(const char *name);
 static const struct vulkan_funcs *vk_funcs;
 static VkResult (*p_vkEnumerateInstanceVersion)(uint32_t *version);
 
+void WINAPI wine_vkGetPhysicalDeviceProperties(VkPhysicalDevice physical_device,
+        VkPhysicalDeviceProperties *properties);
+
 static void wine_vk_physical_device_free(struct VkPhysicalDevice_T *phys_dev)
 {
     if (!phys_dev)
@@ -151,9 +154,8 @@ err:
     return NULL;
 }
 
-/* Helper function to release command buffers. */
-static void wine_vk_command_buffers_free(struct VkDevice_T *device, VkCommandPool pool,
-        uint32_t count, const VkCommandBuffer *buffers)
+static void wine_vk_free_command_buffers(struct VkDevice_T *device,
+        struct wine_cmd_pool *pool, uint32_t count, const VkCommandBuffer *buffers)
 {
     unsigned int i;
 
@@ -162,15 +164,16 @@ static void wine_vk_command_buffers_free(struct VkDevice_T *device, VkCommandPoo
         if (!buffers[i])
             continue;
 
-        device->funcs.p_vkFreeCommandBuffers(device->device, pool, 1, &buffers[i]->command_buffer);
+        device->funcs.p_vkFreeCommandBuffers(device->device, pool->command_pool, 1, &buffers[i]->command_buffer);
+        list_remove(&buffers[i]->pool_link);
         heap_free(buffers[i]);
     }
 }
 
-/* Helper function to create queues for a given family index. */
 static struct VkQueue_T *wine_vk_device_alloc_queues(struct VkDevice_T *device,
         uint32_t family_index, uint32_t queue_count, VkDeviceQueueCreateFlags flags)
 {
+    VkDeviceQueueInfo2 queue_info;
     struct VkQueue_T *queues;
     unsigned int i;
 
@@ -188,10 +191,24 @@ static struct VkQueue_T *wine_vk_device_alloc_queues(struct VkDevice_T *device,
         queue->device = device;
         queue->flags = flags;
 
-        /* The native device was already allocated with the required number of queues,
-         * so just fetch them from there.
+        /* The Vulkan spec says:
+         *
+         * "vkGetDeviceQueue must only be used to get queues that were created
+         * with the flags parameter of VkDeviceQueueCreateInfo set to zero."
          */
-        device->funcs.p_vkGetDeviceQueue(device->device, family_index, i, &queue->queue);
+        if (flags && device->funcs.p_vkGetDeviceQueue2)
+        {
+            queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2;
+            queue_info.pNext = NULL;
+            queue_info.flags = flags;
+            queue_info.queueFamilyIndex = family_index;
+            queue_info.queueIndex = i;
+            device->funcs.p_vkGetDeviceQueue2(device->device, &queue_info, &queue->queue);
+        }
+        else
+        {
+            device->funcs.p_vkGetDeviceQueue(device->device, family_index, i, &queue->queue);
+        }
     }
 
     return queues;
@@ -261,10 +278,16 @@ static VkResult wine_vk_device_convert_create_info(const VkDeviceCreateInfo *src
     dst->enabledLayerCount = 0;
     dst->ppEnabledLayerNames = NULL;
 
-    TRACE("Enabled extensions: %u.\n", dst->enabledExtensionCount);
+    TRACE("Enabled %u extensions.\n", dst->enabledExtensionCount);
     for (i = 0; i < dst->enabledExtensionCount; i++)
     {
-        TRACE("Extension %u: %s.\n", i, debugstr_a(dst->ppEnabledExtensionNames[i]));
+        const char *extension_name = dst->ppEnabledExtensionNames[i];
+        TRACE("Extension %u: %s.\n", i, debugstr_a(extension_name));
+        if (!wine_vk_device_extension_supported(extension_name))
+        {
+            WARN("Extension %s is not supported.\n", debugstr_a(extension_name));
+            return VK_ERROR_EXTENSION_NOT_PRESENT;
+        }
     }
 
     return VK_SUCCESS;
@@ -332,22 +355,12 @@ static BOOL wine_vk_init(void)
  * This function takes care of extensions handled at winevulkan layer, a Wine graphics
  * driver is responsible for handling e.g. surface extensions.
  */
-static void wine_vk_instance_convert_create_info(const VkInstanceCreateInfo *src,
+static VkResult wine_vk_instance_convert_create_info(const VkInstanceCreateInfo *src,
         VkInstanceCreateInfo *dst)
 {
     unsigned int i;
 
     *dst = *src;
-
-    if (dst->pApplicationInfo)
-    {
-        const VkApplicationInfo *app_info = dst->pApplicationInfo;
-        TRACE("Application name %s, application version %#x\n",
-                debugstr_a(app_info->pApplicationName), app_info->applicationVersion);
-        TRACE("Engine name %s, engine version %#x\n", debugstr_a(app_info->pEngineName),
-                app_info->engineVersion);
-        TRACE("API version %#x\n", app_info->apiVersion);
-    }
 
     /* Application and loader can pass in a chain of extensions through pNext.
      * We can't blindly pass these through as often these contain callbacks or
@@ -383,11 +396,19 @@ static void wine_vk_instance_convert_create_info(const VkInstanceCreateInfo *src
     dst->enabledLayerCount = 0;
     dst->ppEnabledLayerNames = NULL;
 
-    TRACE("Enabled extensions: %u\n", dst->enabledExtensionCount);
+    TRACE("Enabled %u instance extensions.\n", dst->enabledExtensionCount);
     for (i = 0; i < dst->enabledExtensionCount; i++)
     {
-        TRACE("Extension %u: %s\n", i, debugstr_a(dst->ppEnabledExtensionNames[i]));
+        const char *extension_name = dst->ppEnabledExtensionNames[i];
+        TRACE("Extension %u: %s.\n", i, debugstr_a(extension_name));
+        if (!wine_vk_instance_extension_supported(extension_name))
+        {
+            WARN("Extension %s is not supported.\n", debugstr_a(extension_name));
+            return VK_ERROR_EXTENSION_NOT_PRESENT;
+        }
     }
+
+    return VK_SUCCESS;
 }
 
 /* Helper function which stores wrapped physical devices in the instance object. */
@@ -488,10 +509,13 @@ static void wine_vk_instance_free(struct VkInstance_T *instance)
 VkResult WINAPI wine_vkAllocateCommandBuffers(VkDevice device,
         const VkCommandBufferAllocateInfo *allocate_info, VkCommandBuffer *buffers)
 {
+    struct wine_cmd_pool *pool;
     VkResult res = VK_SUCCESS;
     unsigned int i;
 
-    TRACE("%p %p %p\n", device, allocate_info, buffers);
+    TRACE("%p, %p, %p\n", device, allocate_info, buffers);
+
+    pool = wine_cmd_pool_from_handle(allocate_info->commandPool);
 
     memset(buffers, 0, allocate_info->commandBufferCount * sizeof(*buffers));
 
@@ -505,13 +529,12 @@ VkResult WINAPI wine_vkAllocateCommandBuffers(VkDevice device,
         /* TODO: future extensions (none yet) may require pNext conversion. */
         allocate_info_host.pNext = allocate_info->pNext;
         allocate_info_host.sType = allocate_info->sType;
-        allocate_info_host.commandPool = allocate_info->commandPool;
+        allocate_info_host.commandPool = pool->command_pool;
         allocate_info_host.level = allocate_info->level;
         allocate_info_host.commandBufferCount = 1;
 
-        TRACE("Creating command buffer %u, pool 0x%s, level %#x\n", i,
-                wine_dbgstr_longlong(allocate_info_host.commandPool),
-                allocate_info_host.level);
+        TRACE("Allocating command buffer %u from pool 0x%s.\n",
+                i, wine_dbgstr_longlong(allocate_info_host.commandPool));
 
         if (!(buffers[i] = heap_alloc_zero(sizeof(**buffers))))
         {
@@ -521,23 +544,24 @@ VkResult WINAPI wine_vkAllocateCommandBuffers(VkDevice device,
 
         buffers[i]->base.loader_magic = VULKAN_ICD_MAGIC_VALUE;
         buffers[i]->device = device;
+        list_add_tail(&pool->command_buffers, &buffers[i]->pool_link);
         res = device->funcs.p_vkAllocateCommandBuffers(device->device,
                 &allocate_info_host, &buffers[i]->command_buffer);
         if (res != VK_SUCCESS)
         {
-            ERR("Failed to allocate command buffer, res=%d\n", res);
+            ERR("Failed to allocate command buffer, res=%d.\n", res);
+            buffers[i]->command_buffer = VK_NULL_HANDLE;
             break;
         }
     }
 
     if (res != VK_SUCCESS)
     {
-        wine_vk_command_buffers_free(device, allocate_info->commandPool, i, buffers);
+        wine_vk_free_command_buffers(device, pool, i + 1, buffers);
         memset(buffers, 0, allocate_info->commandBufferCount * sizeof(*buffers));
-        return res;
     }
 
-    return VK_SUCCESS;
+    return res;
 }
 
 void WINAPI wine_vkCmdExecuteCommands(VkCommandBuffer buffer, uint32_t count,
@@ -585,6 +609,17 @@ VkResult WINAPI wine_vkCreateDevice(VkPhysicalDevice phys_dev,
     if (allocator)
         FIXME("Support for allocation callbacks not implemented yet\n");
 
+    if (TRACE_ON(vulkan))
+    {
+        VkPhysicalDeviceProperties properties;
+
+        wine_vkGetPhysicalDeviceProperties(phys_dev, &properties);
+
+        TRACE("Device name: %s.\n", debugstr_a(properties.deviceName));
+        TRACE("Vendor ID: %#x, Device ID: %#x.\n", properties.vendorID, properties.deviceID);
+        TRACE("Driver version: %#x.\n", properties.driverVersion);
+    }
+
     if (!(object = heap_alloc_zero(sizeof(*object))))
         return VK_ERROR_OUT_OF_HOST_MEMORY;
 
@@ -593,7 +628,8 @@ VkResult WINAPI wine_vkCreateDevice(VkPhysicalDevice phys_dev,
     res = wine_vk_device_convert_create_info(create_info, &create_info_host);
     if (res != VK_SUCCESS)
     {
-        ERR("Failed to convert VkDeviceCreateInfo, res=%d.\n", res);
+        if (res != VK_ERROR_EXTENSION_NOT_PRESENT)
+            ERR("Failed to convert VkDeviceCreateInfo, res=%d.\n", res);
         wine_vk_device_free(object);
         return res;
     }
@@ -679,7 +715,12 @@ VkResult WINAPI wine_vkCreateInstance(const VkInstanceCreateInfo *create_info,
     }
     object->base.loader_magic = VULKAN_ICD_MAGIC_VALUE;
 
-    wine_vk_instance_convert_create_info(create_info, &create_info_host);
+    res = wine_vk_instance_convert_create_info(create_info, &create_info_host);
+    if (res != VK_SUCCESS)
+    {
+        wine_vk_instance_free(object);
+        return res;
+    }
 
     res = vk_funcs->p_vkCreateInstance(&create_info_host, NULL /* allocator */, &object->instance);
     if (res != VK_SUCCESS)
@@ -711,10 +752,15 @@ VkResult WINAPI wine_vkCreateInstance(const VkInstanceCreateInfo *create_info,
         return res;
     }
 
-    if ((app_info = create_info->pApplicationInfo) && app_info->pApplicationName)
+    if ((app_info = create_info->pApplicationInfo))
     {
-        if (!strcmp(app_info->pApplicationName, "DOOM")
-                || !strcmp(app_info->pApplicationName, "Wolfenstein II The New Colossus"))
+        TRACE("Application name %s, application version %#x.\n",
+                debugstr_a(app_info->pApplicationName), app_info->applicationVersion);
+        TRACE("Engine name %s, engine version %#x.\n", debugstr_a(app_info->pEngineName),
+                app_info->engineVersion);
+        TRACE("API version %#x.\n", app_info->apiVersion);
+
+        if (app_info->pEngineName && !strcmp(app_info->pEngineName, "idTech"))
             object->quirks |= WINEVULKAN_QUIRK_GET_DEVICE_PROC_ADDR;
     }
 
@@ -891,12 +937,14 @@ VkResult WINAPI wine_vkEnumeratePhysicalDevices(VkInstance instance, uint32_t *c
     return *count < instance->phys_dev_count ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
-void WINAPI wine_vkFreeCommandBuffers(VkDevice device, VkCommandPool pool, uint32_t count,
-        const VkCommandBuffer *buffers)
+void WINAPI wine_vkFreeCommandBuffers(VkDevice device, VkCommandPool pool_handle,
+        uint32_t count, const VkCommandBuffer *buffers)
 {
-    TRACE("%p 0x%s %u %p\n", device, wine_dbgstr_longlong(pool), count, buffers);
+    struct wine_cmd_pool *pool = wine_cmd_pool_from_handle(pool_handle);
 
-    wine_vk_command_buffers_free(device, pool, count, buffers);
+    TRACE("%p, 0x%s, %u, %p\n", device, wine_dbgstr_longlong(pool_handle), count, buffers);
+
+    wine_vk_free_command_buffers(device, pool, count, buffers);
 }
 
 PFN_vkVoidFunction WINAPI wine_vkGetDeviceProcAddr(VkDevice device, const char *name)
@@ -1084,6 +1132,59 @@ err:
 
     TRACE("Returning %d\n", res);
     return res;
+}
+
+VkResult WINAPI wine_vkCreateCommandPool(VkDevice device, const VkCommandPoolCreateInfo *info,
+        const VkAllocationCallbacks *allocator, VkCommandPool *command_pool)
+{
+    struct wine_cmd_pool *object;
+    VkResult res;
+
+    TRACE("%p, %p, %p, %p\n", device, info, allocator, command_pool);
+
+    if (allocator)
+        FIXME("Support for allocation callbacks not implemented yet\n");
+
+    if (!(object = heap_alloc_zero(sizeof(*object))))
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+    list_init(&object->command_buffers);
+
+    res = device->funcs.p_vkCreateCommandPool(device->device, info, NULL, &object->command_pool);
+
+    if (res == VK_SUCCESS)
+        *command_pool = wine_cmd_pool_to_handle(object);
+    else
+        heap_free(object);
+
+    return res;
+}
+
+void WINAPI wine_vkDestroyCommandPool(VkDevice device, VkCommandPool handle,
+        const VkAllocationCallbacks *allocator)
+{
+    struct wine_cmd_pool *pool = wine_cmd_pool_from_handle(handle);
+    struct VkCommandBuffer_T *buffer, *cursor;
+
+    TRACE("%p, 0x%s, %p\n", device, wine_dbgstr_longlong(handle), allocator);
+
+    if (!handle)
+        return;
+
+    if (allocator)
+        FIXME("Support for allocation callbacks not implemented yet\n");
+
+    /* The Vulkan spec says:
+     *
+     * "When a pool is destroyed, all command buffers allocated from the pool are freed."
+     */
+    LIST_FOR_EACH_ENTRY_SAFE(buffer, cursor, &pool->command_buffers, struct VkCommandBuffer_T, pool_link)
+    {
+        heap_free(buffer);
+    }
+
+    device->funcs.p_vkDestroyCommandPool(device->device, pool->command_pool, NULL);
+    heap_free(pool);
 }
 
 static VkResult wine_vk_enumerate_physical_device_groups(struct VkInstance_T *instance,

@@ -398,7 +398,7 @@ static void test_Win32_Bios( IWbemServices *services )
     SysFreeString( wql );
 }
 
-static void test_Win32_Process( IWbemServices *services )
+static void test_Win32_Process( IWbemServices *services, BOOL use_full_path )
 {
     static const WCHAR returnvalueW[] = {'R','e','t','u','r','n','V','a','l','u','e',0};
     static const WCHAR getownerW[] = {'G','e','t','O','w','n','e','r',0};
@@ -408,18 +408,33 @@ static void test_Win32_Process( IWbemServices *services )
     static const WCHAR idW[] = {'I','D',0};
     static const WCHAR fmtW[] = {'W','i','n','3','2','_','P','r','o','c','e','s','s','.',
         'H','a','n','d','l','e','=','"','%','u','"',0};
+    static const WCHAR full_path_fmt[] =
+        {'\\','\\','%','s','\\','R','O','O','T','\\','C','I','M','V','2',':',0};
     static const LONG expected_flavor = WBEM_FLAVOR_FLAG_PROPAGATE_TO_INSTANCE |
                                         WBEM_FLAVOR_NOT_OVERRIDABLE |
                                         WBEM_FLAVOR_ORIGIN_PROPAGATED;
+    WCHAR full_path[MAX_COMPUTERNAME_LENGTH + ARRAY_SIZE(full_path_fmt)];
     BSTR class, method;
-    IWbemClassObject *process, *out;
+    IWbemClassObject *process, *sig_in, *out;
     IWbemQualifierSet *qualifiers;
     VARIANT user, domain, retval, val;
+    DWORD full_path_len = 0;
     LONG flavor;
     CIMTYPE type;
     HRESULT hr;
 
-    class = SysAllocString( processW );
+    if (use_full_path)
+    {
+        WCHAR server[MAX_COMPUTERNAME_LENGTH+1];
+
+        full_path_len = ARRAY_SIZE(server);
+        ok( GetComputerNameW(server, &full_path_len), "GetComputerName failed\n" );
+        full_path_len = wsprintfW(full_path, full_path_fmt, server);
+    }
+
+    class = SysAllocStringLen( NULL, full_path_len + ARRAY_SIZE( processW ) );
+    memcpy( class, full_path, full_path_len * sizeof(WCHAR) );
+    memcpy( class + full_path_len, processW, sizeof(processW) );
     hr = IWbemServices_GetObject( services, class, 0, NULL, &process, NULL );
     SysFreeString( class );
     if (hr != S_OK)
@@ -427,14 +442,17 @@ static void test_Win32_Process( IWbemServices *services )
         win_skip( "Win32_Process not available\n" );
         return;
     }
-    hr = IWbemClassObject_GetMethod( process, getownerW, 0, NULL, NULL );
+    sig_in = (void*)0xdeadbeef;
+    hr = IWbemClassObject_GetMethod( process, getownerW, 0, &sig_in, NULL );
     ok( hr == S_OK, "failed to get GetOwner method %08x\n", hr );
+    ok( !sig_in, "sig_in != NULL\n");
     IWbemClassObject_Release( process );
 
     out = NULL;
     method = SysAllocString( getownerW );
-    class = SysAllocStringLen( NULL, ARRAY_SIZE( fmtW ) + 10 );
-    wsprintfW( class, fmtW, GetCurrentProcessId() );
+    class = SysAllocStringLen( NULL, full_path_len + ARRAY_SIZE( fmtW ) + 10 );
+    memcpy( class, full_path, full_path_len * sizeof(WCHAR) );
+    wsprintfW( class + full_path_len, fmtW, GetCurrentProcessId() );
     hr = IWbemServices_ExecMethod( services, class, method, 0, NULL, NULL, &out, NULL );
     ok( hr == S_OK, "failed to execute method %08x\n", hr );
     SysFreeString( method );
@@ -704,6 +722,7 @@ static void test_Win32_SystemEnclosure( IWbemServices *services )
 
 static void test_StdRegProv( IWbemServices *services )
 {
+    static const WCHAR createkeyW[] = {'C','r','e','a','t','e','K','e','y',0};
     static const WCHAR enumkeyW[] = {'E','n','u','m','K','e','y',0};
     static const WCHAR enumvaluesW[] = {'E','n','u','m','V','a','l','u','e','s',0};
     static const WCHAR getstringvalueW[] = {'G','e','t','S','t','r','i','n','g','V','a','l','u','e',0};
@@ -719,11 +738,14 @@ static void test_StdRegProv( IWbemServices *services )
     static const WCHAR windowsW[] =
         {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
          'W','i','n','d','o','w','s','\\','C','u','r','r','e','n','t','V','e','r','s','i','o','n',0};
-    BSTR class = SysAllocString( stdregprovW ), method;
-    IWbemClassObject *reg, *sig_in, *in, *out;
+    static const WCHAR regtestW[] =
+        {'S','o','f','t','w','a','r','e','\\','S','t','d','R','e','g','P','r','o','v','T','e','s','t',0};
+    BSTR class = SysAllocString( stdregprovW ), method, name;
+    IWbemClassObject *reg, *sig_in, *sig_out, *in, *out;
     VARIANT defkey, subkey, retval, names, types, value, valuename;
     CIMTYPE type;
     HRESULT hr;
+    LONG res;
 
     hr = IWbemServices_GetObject( services, class, 0, NULL, &reg, NULL );
     if (hr != S_OK)
@@ -731,6 +753,67 @@ static void test_StdRegProv( IWbemServices *services )
         win_skip( "StdRegProv not available\n" );
         return;
     }
+
+    hr = IWbemClassObject_BeginMethodEnumeration( reg, 0 );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    while (IWbemClassObject_NextMethod( reg, 0, &name, &sig_in, &sig_out ) == S_OK)
+    {
+        SysFreeString( name );
+        IWbemClassObject_Release( sig_in );
+        IWbemClassObject_Release( sig_out );
+    }
+
+    hr = IWbemClassObject_EndMethodEnumeration( reg );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = IWbemClassObject_BeginEnumeration( reg, 0 );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    while (IWbemClassObject_Next( reg, 0, &name, NULL, NULL, NULL ) == S_OK)
+        SysFreeString( name );
+
+    hr = IWbemClassObject_EndEnumeration( reg );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = IWbemClassObject_GetMethod( reg, createkeyW, 0, &sig_in, NULL );
+    ok( hr == S_OK, "failed to get CreateKey method %08x\n", hr );
+
+    hr = IWbemClassObject_SpawnInstance( sig_in, 0, &in );
+    ok( hr == S_OK, "failed to spawn instance %08x\n", hr );
+
+    V_VT( &defkey ) = VT_I4;
+    V_I4( &defkey ) = 0x80000001;
+    hr = IWbemClassObject_Put( in, defkeyW, 0, &defkey, 0 );
+    ok( hr == S_OK, "failed to set root %08x\n", hr );
+
+    V_VT( &subkey ) = VT_BSTR;
+    V_BSTR( &subkey ) = SysAllocString( regtestW );
+    hr = IWbemClassObject_Put( in, subkeynameW, 0, &subkey, 0 );
+    ok( hr == S_OK, "failed to set subkey %08x\n", hr );
+
+    out = NULL;
+    method = SysAllocString( createkeyW );
+    hr = IWbemServices_ExecMethod( services, class, method, 0, NULL, in, &out, NULL );
+    ok( hr == S_OK, "failed to execute method %08x\n", hr );
+    SysFreeString( method );
+
+    type = 0xdeadbeef;
+    VariantInit( &retval );
+    hr = IWbemClassObject_Get( out, returnvalueW, 0, &retval, &type, NULL );
+    ok( hr == S_OK, "failed to get return value %08x\n", hr );
+    ok( V_VT( &retval ) == VT_I4, "unexpected variant type 0x%x\n", V_VT( &retval ) );
+    ok( !V_I4( &retval ), "unexpected error %u\n", V_UI4( &retval ) );
+    ok( type == CIM_UINT32, "unexpected type 0x%x\n", type );
+
+    res = RegDeleteKeyW( HKEY_CURRENT_USER, regtestW );
+    ok( !res, "got %d\n", res );
+
+    VariantClear( &subkey );
+    IWbemClassObject_Release( in );
+    IWbemClassObject_Release( out );
+    IWbemClassObject_Release( sig_in );
+
     hr = IWbemClassObject_GetMethod( reg, enumkeyW, 0, &sig_in, NULL );
     ok( hr == S_OK, "failed to get EnumKey method %08x\n", hr );
 
@@ -1126,6 +1209,14 @@ static void test_Win32_OperatingSystem( IWbemServices *services )
     hr = IEnumWbemClassObject_Next( result, 10000, 1, &obj, &count );
     ok( hr == S_OK, "IEnumWbemClassObject_Next failed %08x\n", hr );
 
+    hr = IWbemClassObject_BeginEnumeration( obj, 0 );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    while (IWbemClassObject_Next( obj, 0, NULL, NULL, NULL, NULL ) == S_OK) {}
+
+    hr = IWbemClassObject_EndEnumeration( obj );
+    ok( hr == S_OK, "got %08x\n", hr );
+
     type = 0xdeadbeef;
     VariantInit( &val );
     hr = IWbemClassObject_Get( obj, buildnumberW, 0, &val, &type, NULL );
@@ -1453,6 +1544,7 @@ static void test_Win32_IP4RouteTable( IWbemServices *services )
         IWbemClassObject_Release( obj );
     }
 
+    IEnumWbemClassObject_Release( result );
     SysFreeString( query );
     SysFreeString( wql );
 }
@@ -1565,6 +1657,7 @@ static void test_Win32_Processor( IWbemServices *services )
         IWbemClassObject_Release( obj );
     }
 
+    IEnumWbemClassObject_Release( result );
     SysFreeString( query );
     SysFreeString( wql );
 }
@@ -1640,6 +1733,7 @@ static void test_Win32_VideoController( IWbemServices *services )
         IWbemClassObject_Release( obj );
     }
 
+    IEnumWbemClassObject_Release( result );
     SysFreeString( query );
     SysFreeString( wql );
 }
@@ -1705,6 +1799,7 @@ static void test_Win32_Printer( IWbemServices *services )
         IWbemClassObject_Release( obj );
     }
 
+    IEnumWbemClassObject_Release( result );
     SysFreeString( query );
     SysFreeString( wql );
 }
@@ -1787,7 +1882,8 @@ START_TEST(query)
     test_select( services );
     test_associators( services );
     test_Win32_Bios( services );
-    test_Win32_Process( services );
+    test_Win32_Process( services, FALSE );
+    test_Win32_Process( services, TRUE );
     test_Win32_Service( services );
     test_Win32_ComputerSystem( services );
     test_Win32_SystemEnclosure( services );

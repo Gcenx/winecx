@@ -342,6 +342,14 @@ NTSTATUS WINAPI WinSqmEndSession(HANDLE session)
 }
 
 /*********************************************************************
+ *          WinSqmIncrementDWORD (NTDLL.@)
+ */
+void WINAPI WinSqmIncrementDWORD(DWORD unk1, DWORD unk2, DWORD unk3)
+{
+    FIXME("(%d, %d, %d): stub\n", unk1, unk2, unk3);
+}
+
+/*********************************************************************
  *                  WinSqmIsOptedIn   (NTDLL.@)
  */
 BOOL WINAPI WinSqmIsOptedIn(void)
@@ -503,4 +511,16 @@ NTSTATUS WINAPI NtCreateLowBoxToken(HANDLE *token_handle, HANDLE existing_token_
     /* We need to return a NULL handle since later it will be passed to CloseHandle and that must not fail */
     *token_handle = NULL;
     return STATUS_SUCCESS;
+}
+
+/*********************************************************************
+ *                  ApiSetQueryApiSetPresence   (NTDLL.@)
+ */
+BOOL WINAPI ApiSetQueryApiSetPresence(const UNICODE_STRING *namespace, BOOLEAN *present)
+{
+    FIXME("(%s, %p) stub!\n", debugstr_us(namespace), present);
+
+    if(present)
+        *present = TRUE;
+    return TRUE;
 }

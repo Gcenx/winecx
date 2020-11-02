@@ -139,14 +139,6 @@ static HMODULE hmod;
 static int     myARGC;
 static char**  myARGV;
 
-struct strsid_entry
-{
-    const char *str;
-    DWORD flags;
-};
-#define STRSID_OK     0
-#define STRSID_OPT    1
-
 #define SID_SLOTS 4
 static char debugsid_str[SID_SLOTS][256];
 static int debugsid_index = 0;
@@ -307,23 +299,61 @@ static void test_sid(void)
      { { {0x00,0x00,0x00,0x00,0x00,0x02} }, "S-1-2-1"         },
      { { {0x00,0x00,0x00,0x00,0x00,0x0c} }, "S-1-12-1"        },
     };
-    struct strsid_entry strsid_table[] = {
-        {"AO", STRSID_OK},  {"RU", STRSID_OK},  {"AN", STRSID_OK},  {"AU", STRSID_OK},
-        {"BA", STRSID_OK},  {"BG", STRSID_OK},  {"BO", STRSID_OK},  {"BU", STRSID_OK},
-        {"CA", STRSID_OPT}, {"CG", STRSID_OK},  {"CO", STRSID_OK},  {"DA", STRSID_OPT},
-        {"DC", STRSID_OPT}, {"DD", STRSID_OPT}, {"DG", STRSID_OPT}, {"DU", STRSID_OPT},
-        {"EA", STRSID_OPT}, {"ED", STRSID_OK},  {"WD", STRSID_OK},  {"PA", STRSID_OPT},
-        {"IU", STRSID_OK},  {"LA", STRSID_OK},  {"LG", STRSID_OK},  {"LS", STRSID_OK},
-        {"SY", STRSID_OK},  {"NU", STRSID_OK},  {"NO", STRSID_OK},  {"NS", STRSID_OK},
-        {"PO", STRSID_OK},  {"PS", STRSID_OK},  {"PU", STRSID_OK},  {"RS", STRSID_OPT},
-        {"RD", STRSID_OK},  {"RE", STRSID_OK},  {"RC", STRSID_OK},  {"SA", STRSID_OPT},
-        {"SO", STRSID_OK},  {"SU", STRSID_OK}};
+    static const struct
+    {
+        const char *name;
+        const char *sid;
+        unsigned int optional;
+    }
+    str_to_sid_tests[] =
+    {
+        { "WD", "S-1-1-0" },
+        { "CO", "S-1-3-0" },
+        { "CG", "S-1-3-1" },
+        { "OW", "S-1-3-4", 1 }, /* Vista+ */
+        { "NU", "S-1-5-2" },
+        { "IU", "S-1-5-4" },
+        { "SU", "S-1-5-6" },
+        { "AN", "S-1-5-7" },
+        { "ED", "S-1-5-9" },
+        { "PS", "S-1-5-10" },
+        { "AU", "S-1-5-11" },
+        { "RC", "S-1-5-12" },
+        { "SY", "S-1-5-18" },
+        { "LS", "S-1-5-19" },
+        { "NS", "S-1-5-20" },
+        { "LA", "S-1-5-21-*-*-*-500" },
+        { "LG", "S-1-5-21-*-*-*-501" },
+        { "BO", "S-1-5-32-551" },
+        { "BA", "S-1-5-32-544" },
+        { "BU", "S-1-5-32-545" },
+        { "BG", "S-1-5-32-546" },
+        { "PU", "S-1-5-32-547" },
+        { "AO", "S-1-5-32-548" },
+        { "SO", "S-1-5-32-549" },
+        { "PO", "S-1-5-32-550" },
+        { "RE", "S-1-5-32-552" },
+        { "RU", "S-1-5-32-554" },
+        { "RD", "S-1-5-32-555" },
+        { "NO", "S-1-5-32-556" },
+        { "AC", "S-1-15-2-1", 1 }, /* Win8+ */
+        { "CA", "", 1 },
+        { "DA", "", 1 },
+        { "DC", "", 1 },
+        { "DD", "", 1 },
+        { "DG", "", 1 },
+        { "DU", "", 1 },
+        { "EA", "", 1 },
+        { "PA", "", 1 },
+        { "RS", "", 1 },
+        { "SA", "", 1 },
+    };
 
     const char noSubAuthStr[] = "S-1-5";
     unsigned int i;
     PSID psid = NULL;
     SID *pisid;
-    BOOL r;
+    BOOL r, ret;
     LPSTR str = NULL;
 
     if( !pConvertStringSidToSidA )
@@ -403,43 +433,30 @@ static void test_sid(void)
             LocalFree( psid );
     }
 
-    /* string constant format not supported before XP */
-    r = pConvertStringSidToSidA(strsid_table[0].str, &psid);
-    if(!r)
+    for (i = 0; i < ARRAY_SIZE(str_to_sid_tests); i++)
     {
-        win_skip("String constant format not supported\n");
-        return;
-    }
-    LocalFree(psid);
+        char *str;
 
-    for(i = 0; i < ARRAY_SIZE(strsid_table); i++)
-    {
-        char *temp;
-
-        SetLastError(0xdeadbeef);
-        r = pConvertStringSidToSidA(strsid_table[i].str, &psid);
-
-        if (!(strsid_table[i].flags & STRSID_OPT))
+        ret = ConvertStringSidToSidA(str_to_sid_tests[i].name, &psid);
+        if (!ret && str_to_sid_tests[i].optional)
         {
-            ok(r, "%s: got %u\n", strsid_table[i].str, GetLastError());
+            skip("%u: failed to convert %s.\n", i, str_to_sid_tests[i].name);
+            continue;
         }
+        ok(ret, "%u: failed to convert string to sid.\n", i);
 
-        if (r)
+        if (str_to_sid_tests[i].optional || !strcmp(str_to_sid_tests[i].name, "LA") ||
+            !strcmp(str_to_sid_tests[i].name, "LG"))
         {
-            if ((winetest_debug > 1) && (ConvertSidToStringSidA(psid, &temp)))
-            {
-                trace(" %s: %s\n", strsid_table[i].str, temp);
-                LocalFree(temp);
-            }
             LocalFree(psid);
+            continue;
         }
-        else
-        {
-            if (GetLastError() != ERROR_INVALID_SID)
-                trace(" %s: couldn't be converted, returned %d\n", strsid_table[i].str, GetLastError());
-            else
-                trace(" %s: couldn't be converted\n", strsid_table[i].str);
-        }
+
+        ret = ConvertSidToStringSidA(psid, &str);
+        ok(ret, "%u: failed to convert SID to string.\n", i);
+        ok(!strcmp(str, str_to_sid_tests[i].sid), "%u: unexpected sid %s.\n", i, str);
+        LocalFree(psid);
+        LocalFree(str);
     }
 }
 
@@ -2862,12 +2879,12 @@ static void test_process_security(void)
     PTOKEN_OWNER owner;
     PTOKEN_PRIMARY_GROUP group;
     PSID AdminSid = NULL, UsersSid = NULL;
-    PACL Acl = NULL;
-    SECURITY_DESCRIPTOR *SecurityDescriptor = NULL;
+    PACL Acl = NULL, ThreadAcl = NULL;
+    SECURITY_DESCRIPTOR *SecurityDescriptor = NULL, *ThreadSecurityDescriptor = NULL;
     char buffer[MAX_PATH];
     PROCESS_INFORMATION info;
     STARTUPINFOA startup;
-    SECURITY_ATTRIBUTES psa;
+    SECURITY_ATTRIBUTES psa, tsa;
     HANDLE token, event;
     DWORD size;
     SID_IDENTIFIER_AUTHORITY SIDAuthWorld = { SECURITY_WORLD_SID_AUTHORITY };
@@ -2988,10 +3005,35 @@ static void test_process_security(void)
     psa.lpSecurityDescriptor = SecurityDescriptor;
     psa.bInheritHandle = TRUE;
 
+    ThreadSecurityDescriptor = HeapAlloc( GetProcessHeap(), 0, SECURITY_DESCRIPTOR_MIN_LENGTH );
+    res = InitializeSecurityDescriptor( ThreadSecurityDescriptor, SECURITY_DESCRIPTOR_REVISION );
+    ok(res, "InitializeSecurityDescriptor failed with error %d\n", GetLastError());
+
+    ThreadAcl = HeapAlloc( GetProcessHeap(), 0, 256 );
+    res = InitializeAcl( ThreadAcl, 256, ACL_REVISION );
+    ok(res, "InitializeAcl failed with error %d\n", GetLastError());
+    res = AddAccessDeniedAce( ThreadAcl, ACL_REVISION, THREAD_SET_THREAD_TOKEN, AdminSid );
+    ok(res, "AddAccessDeniedAce failed with error %d\n", GetLastError() );
+    res = AddAccessAllowedAce( ThreadAcl, ACL_REVISION, THREAD_ALL_ACCESS, AdminSid );
+    ok(res, "AddAccessAllowedAce failed with error %d\n", GetLastError());
+
+    res = SetSecurityDescriptorOwner( ThreadSecurityDescriptor, AdminSid, FALSE );
+    ok(res, "SetSecurityDescriptorOwner failed with error %d\n", GetLastError());
+    res = SetSecurityDescriptorGroup( ThreadSecurityDescriptor, UsersSid, FALSE );
+    ok(res, "SetSecurityDescriptorGroup failed with error %d\n", GetLastError());
+    res = SetSecurityDescriptorDacl( ThreadSecurityDescriptor, TRUE, ThreadAcl, FALSE );
+    ok(res, "SetSecurityDescriptorDacl failed with error %d\n", GetLastError());
+
+    tsa.nLength = sizeof(tsa);
+    tsa.lpSecurityDescriptor = ThreadSecurityDescriptor;
+    tsa.bInheritHandle = TRUE;
+
     /* Doesn't matter what ACL say we should get full access for ourselves */
-    res = CreateProcessA( NULL, buffer, &psa, NULL, FALSE, 0, NULL, NULL, &startup, &info );
+    res = CreateProcessA( NULL, buffer, &psa, &tsa, FALSE, 0, NULL, NULL, &startup, &info );
     ok(res, "CreateProcess with err:%d\n", GetLastError());
     TEST_GRANTED_ACCESS2( info.hProcess, PROCESS_ALL_ACCESS_NT4,
+                          STANDARD_RIGHTS_ALL | SPECIFIC_RIGHTS_ALL );
+    TEST_GRANTED_ACCESS2( info.hThread, THREAD_ALL_ACCESS_NT4,
                           STANDARD_RIGHTS_ALL | SPECIFIC_RIGHTS_ALL );
     winetest_wait_child_process( info.hProcess );
 
@@ -3003,6 +3045,8 @@ static void test_process_security(void)
     HeapFree(GetProcessHeap(), 0, owner);
     HeapFree(GetProcessHeap(), 0, Acl);
     HeapFree(GetProcessHeap(), 0, SecurityDescriptor);
+    HeapFree(GetProcessHeap(), 0, ThreadAcl);
+    HeapFree(GetProcessHeap(), 0, ThreadSecurityDescriptor);
 }
 
 static void test_process_security_child(void)
@@ -3026,7 +3070,6 @@ static void test_process_security_child(void)
     ret = DuplicateHandle( GetCurrentProcess(), handle, GetCurrentProcess(),
                            &handle1, PROCESS_ALL_ACCESS, TRUE, 0 );
     err = GetLastError();
-    todo_wine
     ok(!ret && err == ERROR_ACCESS_DENIED, "duplicating handle should have failed "
        "with STATUS_ACCESS_DENIED, instead of err:%d\n", err);
 
@@ -3034,10 +3077,8 @@ static void test_process_security_child(void)
 
     /* These two should fail - they are denied by ACL */
     handle = OpenProcess( PROCESS_VM_READ, FALSE, GetCurrentProcessId() );
-    todo_wine
     ok(handle == NULL, "OpenProcess(PROCESS_VM_READ) should have failed\n");
     handle = OpenProcess( PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId() );
-    todo_wine
     ok(handle == NULL, "OpenProcess(PROCESS_ALL_ACCESS) should have failed\n");
 
     /* Documented privilege elevation */
@@ -3061,6 +3102,15 @@ static void test_process_security_child(void)
     TEST_GRANTED_ACCESS( handle1, PROCESS_VM_READ );
     CloseHandle( handle1 );
     CloseHandle( handle );
+
+    /* Test thread security */
+    handle = OpenThread( THREAD_TERMINATE, FALSE, GetCurrentThreadId() );
+    ok(handle != NULL, "OpenThread(THREAD_TERMINATE) with err:%d\n", GetLastError());
+    TEST_GRANTED_ACCESS( handle, PROCESS_TERMINATE );
+    CloseHandle( handle );
+
+    handle = OpenThread( THREAD_SET_THREAD_TOKEN, FALSE, GetCurrentThreadId() );
+    ok(handle == NULL, "OpenThread(THREAD_SET_THREAD_TOKEN) should have failed\n");
 }
 
 static void test_impersonation_level(void)
@@ -3149,8 +3199,8 @@ static void test_impersonation_level(void)
     /* can't perform access check when opening object against an identification impersonation token */
     error = RegOpenKeyExA(HKEY_CURRENT_USER, "Software", 0, KEY_READ, &hkey);
     todo_wine {
-    ok(error == ERROR_INVALID_HANDLE || error == ERROR_BAD_IMPERSONATION_LEVEL,
-       "RegOpenKeyEx should have failed with ERROR_INVALID_HANDLE or ERROR_BAD_IMPERSONATION_LEVEL instead of %d\n", error);
+    ok(error == ERROR_INVALID_HANDLE || error == ERROR_BAD_IMPERSONATION_LEVEL || error == ERROR_ACCESS_DENIED,
+       "RegOpenKeyEx should have failed with ERROR_INVALID_HANDLE, ERROR_BAD_IMPERSONATION_LEVEL or ERROR_ACCESS_DENIED instead of %d\n", error);
     }
     ret = PrivilegeCheck(Token, PrivilegeSet, &AccessGranted);
     ok(ret, "PrivilegeCheck for SecurityIdentification failed with error %d\n", GetLastError());
@@ -5473,14 +5523,14 @@ static void test_named_pipe_security(HANDLE token)
                                 STANDARD_RIGHTS_ALL | FILE_ALL_ACCESS };
     static const struct
     {
-        int todo, generic, mapped;
+        int generic, mapped;
     } map[] =
     {
-        { 0, 0, 0 },
-        { 1, GENERIC_READ, FILE_GENERIC_READ },
-        { 1, GENERIC_WRITE, FILE_GENERIC_WRITE },
-        { 1, GENERIC_EXECUTE, FILE_GENERIC_EXECUTE },
-        { 1, GENERIC_ALL, STANDARD_RIGHTS_ALL | FILE_ALL_ACCESS }
+        { 0, 0 },
+        { GENERIC_READ, FILE_GENERIC_READ },
+        { GENERIC_WRITE, FILE_GENERIC_WRITE },
+        { GENERIC_EXECUTE, FILE_GENERIC_EXECUTE },
+        { GENERIC_ALL, STANDARD_RIGHTS_ALL | FILE_ALL_ACCESS }
     };
     static const struct
     {
@@ -5560,9 +5610,7 @@ static void test_named_pipe_security(HANDLE token)
             ok(ret, "DuplicateHandle error %d\n", GetLastError());
 
             access = get_obj_access(dup);
-            todo_wine_if (map[i].todo)
-                ok(access == map[i].mapped, "%d: expected %#x, got %#x\n", i, map[i].mapped, access);
-
+            ok(access == map[i].mapped, "%d: expected %#x, got %#x\n", i, map[i].mapped, access);
             CloseHandle(dup);
         }
     }
@@ -5620,7 +5668,6 @@ static void test_file_security(HANDLE token)
     ok(file != INVALID_HANDLE_VALUE, "CreateFile error %d\n", GetLastError());
 
     access = get_obj_access(file);
-todo_wine
     ok(access == (FILE_READ_ATTRIBUTES | SYNCHRONIZE), "expected FILE_READ_ATTRIBUTES | SYNCHRONIZE, got %#x\n", access);
 
     bytes = 0xdeadbeef;
@@ -5637,7 +5684,6 @@ todo_wine
     ok(file != INVALID_HANDLE_VALUE, "CreateFile error %d\n", GetLastError());
 
     access = get_obj_access(file);
-todo_wine
     ok(access == (FILE_GENERIC_WRITE | FILE_READ_ATTRIBUTES), "expected FILE_GENERIC_WRITE | FILE_READ_ATTRIBUTES, got %#x\n", access);
 
     bytes = 0xdeadbeef;
@@ -5678,7 +5724,6 @@ todo_wine
     ok(file != INVALID_HANDLE_VALUE, "CreateFile error %d\n", GetLastError());
 
     access = get_obj_access(file);
-todo_wine
     ok(access == (FILE_READ_ATTRIBUTES | SYNCHRONIZE), "expected FILE_READ_ATTRIBUTES | SYNCHRONIZE, got %#x\n", access);
 
     CloseHandle(file);
@@ -5688,7 +5733,6 @@ todo_wine
     ok(file != INVALID_HANDLE_VALUE, "CreateFile error %d\n", GetLastError());
 
     access = get_obj_access(file);
-todo_wine
     ok(access == (FILE_GENERIC_WRITE | FILE_READ_ATTRIBUTES), "expected FILE_GENERIC_WRITE | FILE_READ_ATTRIBUTES, got %#x\n", access);
 
     CloseHandle(file);
@@ -6570,7 +6614,7 @@ static void test_system_security_access(void)
 
     /* privilege is checked on access */
     err = GetSecurityInfo( hkey, SE_REGISTRY_KEY, SACL_SECURITY_INFORMATION, NULL, NULL, NULL, &sacl, &sd );
-    todo_wine ok( err == ERROR_PRIVILEGE_NOT_HELD, "got %u\n", err );
+    todo_wine ok( err == ERROR_PRIVILEGE_NOT_HELD || err == ERROR_ACCESS_DENIED, "got %u\n", err );
     if (err == ERROR_SUCCESS)
         LocalFree( sd );
 
@@ -6607,7 +6651,7 @@ static void test_system_security_access(void)
     ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     err = GetSecurityInfo( hkey, SE_REGISTRY_KEY, SACL_SECURITY_INFORMATION, NULL, NULL, NULL, &sacl, &sd );
-    todo_wine ok( err == ERROR_PRIVILEGE_NOT_HELD, "got %u\n", err );
+    ok( err == ERROR_PRIVILEGE_NOT_HELD || err == ERROR_ACCESS_DENIED, "got %u\n", err );
     RegCloseKey( hkey );
 
     res = RegDeleteKeyW( HKEY_LOCAL_MACHINE, testkeyW );

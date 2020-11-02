@@ -18,6 +18,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
 #include <time.h>
 
 #define NONAMELESSUNION
@@ -542,43 +543,44 @@ static  unsigned        dump_modules(struct dump_context* dc, BOOL dump_elf)
     return sz;
 }
 
-/* Calls cpuid with an eax of 'ax' and returns the 16 bytes in *p
- * We are compiled with -fPIC, so we can't clobber ebx.
- */
-static inline void do_x86cpuid(unsigned int ax, unsigned int *p)
+#ifdef __i386__
+extern void do_x86cpuid(unsigned int ax, unsigned int *p);
+__ASM_GLOBAL_FUNC( do_x86cpuid,
+                   "pushl %esi\n\t"
+                   "pushl %ebx\n\t"
+                   "movl 12(%esp),%eax\n\t"
+                   "movl 16(%esp),%esi\n\t"
+                   "cpuid\n\t"
+                   "movl %eax,(%esi)\n\t"
+                   "movl %ebx,4(%esi)\n\t"
+                   "movl %ecx,8(%esi)\n\t"
+                   "movl %edx,12(%esi)\n\t"
+                   "popl %ebx\n\t"
+                   "popl %esi\n\t"
+                   "ret" )
+extern int have_x86cpuid(void);
+__ASM_GLOBAL_FUNC( have_x86cpuid,
+                   "pushfl\n\t"
+                   "pushfl\n\t"
+                   "movl (%esp),%ecx\n\t"
+                   "xorl $0x00200000,(%esp)\n\t"
+                   "popfl\n\t"
+                   "pushfl\n\t"
+                   "popl %eax\n\t"
+                   "popfl\n\t"
+                   "xorl %ecx,%eax\n\t"
+                   "andl $0x00200000,%eax\n\t"
+                   "ret" )
+#else
+static void do_x86cpuid(unsigned int ax, unsigned int *p)
 {
-#if defined(__GNUC__) && defined(__i386__)
-    __asm__("pushl %%ebx\n\t"
-            "cpuid\n\t"
-            "movl %%ebx, %%esi\n\t"
-            "popl %%ebx"
-            : "=a" (p[0]), "=S" (p[1]), "=c" (p[2]), "=d" (p[3])
-            :  "0" (ax));
-#endif
 }
 
-/* From xf86info havecpuid.c 1.11 */
-static inline int have_x86cpuid(void)
+static int have_x86cpuid(void)
 {
-#if defined(__GNUC__) && defined(__i386__)
-    unsigned int f1, f2;
-    __asm__("pushfl\n\t"
-            "pushfl\n\t"
-            "popl %0\n\t"
-            "movl %0,%1\n\t"
-            "xorl %2,%0\n\t"
-            "pushl %0\n\t"
-            "popfl\n\t"
-            "pushfl\n\t"
-            "popl %0\n\t"
-            "popfl"
-            : "=&r" (f1), "=&r" (f2)
-            : "ir" (0x00200000));
-    return ((f1^f2) & 0x00200000) != 0;
-#else
     return 0;
-#endif
 }
+#endif
 
 /******************************************************************
  *		dump_system_info
@@ -670,7 +672,7 @@ static  unsigned        dump_system_info(struct dump_context* dc)
     /* write Wine specific system information just behind the structure, and before any string */
     if (wine_extra)
     {
-        char code[] = {'W','I','N','E'};
+        static const char code[] = {'W','I','N','E'};
 
         WriteFile(dc->hFile, code, 4, &written, NULL);
         /* number of sub-info, so that we can extend structure if needed */

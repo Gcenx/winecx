@@ -214,6 +214,7 @@ NTSTATUS WINAPI BCryptCloseAlgorithmProvider( BCRYPT_ALG_HANDLE handle, DWORD fl
     TRACE( "%p, %08x\n", handle, flags );
 
     if (!alg || alg->hdr.magic != MAGIC_ALG) return STATUS_INVALID_HANDLE;
+    alg->hdr.magic = 0;
     heap_free( alg );
     return STATUS_SUCCESS;
 }
@@ -413,6 +414,63 @@ static NTSTATUS generic_alg_property( enum alg_id id, const WCHAR *prop, UCHAR *
     return STATUS_NOT_IMPLEMENTED;
 }
 
+static NTSTATUS get_aes_property( enum mode_id mode, const WCHAR *prop, UCHAR *buf, ULONG size, ULONG *ret_size )
+{
+    if (!strcmpW( prop, BCRYPT_BLOCK_LENGTH ))
+    {
+        *ret_size = sizeof(ULONG);
+        if (size < sizeof(ULONG)) return STATUS_BUFFER_TOO_SMALL;
+        if (buf) *(ULONG *)buf = BLOCK_LENGTH_AES;
+        return STATUS_SUCCESS;
+    }
+    if (!strcmpW( prop, BCRYPT_CHAINING_MODE ))
+    {
+        const WCHAR *str;
+        switch (mode)
+        {
+        case MODE_ID_ECB: str = BCRYPT_CHAIN_MODE_ECB; break;
+        case MODE_ID_CBC: str = BCRYPT_CHAIN_MODE_CBC; break;
+        case MODE_ID_GCM: str = BCRYPT_CHAIN_MODE_GCM; break;
+        default: return STATUS_NOT_IMPLEMENTED;
+        }
+
+        *ret_size = 64;
+        if (size < *ret_size) return STATUS_BUFFER_TOO_SMALL;
+        memcpy( buf, str, (strlenW(str) + 1) * sizeof(WCHAR) );
+        return STATUS_SUCCESS;
+    }
+    if (!strcmpW( prop, BCRYPT_KEY_LENGTHS ))
+    {
+        BCRYPT_KEY_LENGTHS_STRUCT *key_lengths = (void *)buf;
+        *ret_size = sizeof(*key_lengths);
+        if (key_lengths && size < *ret_size) return STATUS_BUFFER_TOO_SMALL;
+        if (key_lengths)
+        {
+            key_lengths->dwMinLength = 128;
+            key_lengths->dwMaxLength = 256;
+            key_lengths->dwIncrement = 64;
+        }
+        return STATUS_SUCCESS;
+    }
+    if (!strcmpW( prop, BCRYPT_AUTH_TAG_LENGTH ))
+    {
+        BCRYPT_AUTH_TAG_LENGTHS_STRUCT *tag_length = (void *)buf;
+        if (mode != MODE_ID_GCM) return STATUS_NOT_SUPPORTED;
+        *ret_size = sizeof(*tag_length);
+        if (tag_length && size < *ret_size) return STATUS_BUFFER_TOO_SMALL;
+        if (tag_length)
+        {
+            tag_length->dwMinLength = 12;
+            tag_length->dwMaxLength = 16;
+            tag_length->dwIncrement =  1;
+        }
+        return STATUS_SUCCESS;
+    }
+
+    FIXME( "unsupported property %s\n", debugstr_w(prop) );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
 NTSTATUS get_alg_property( const struct algorithm *alg, const WCHAR *prop, UCHAR *buf, ULONG size, ULONG *ret_size )
 {
     NTSTATUS status;
@@ -424,59 +482,7 @@ NTSTATUS get_alg_property( const struct algorithm *alg, const WCHAR *prop, UCHAR
     switch (alg->id)
     {
     case ALG_ID_AES:
-        if (!strcmpW( prop, BCRYPT_BLOCK_LENGTH ))
-        {
-            *ret_size = sizeof(ULONG);
-            if (size < sizeof(ULONG))
-                return STATUS_BUFFER_TOO_SMALL;
-            if (buf)
-                *(ULONG *)buf = BLOCK_LENGTH_AES;
-            return STATUS_SUCCESS;
-        }
-        if (!strcmpW( prop, BCRYPT_CHAINING_MODE ))
-        {
-            const WCHAR *mode;
-            switch (alg->mode)
-            {
-            case MODE_ID_ECB: mode = BCRYPT_CHAIN_MODE_ECB; break;
-            case MODE_ID_CBC: mode = BCRYPT_CHAIN_MODE_CBC; break;
-            case MODE_ID_GCM: mode = BCRYPT_CHAIN_MODE_GCM; break;
-            default: return STATUS_NOT_IMPLEMENTED;
-            }
-
-            *ret_size = 64;
-            if (size < *ret_size) return STATUS_BUFFER_TOO_SMALL;
-            memcpy( buf, mode, (strlenW(mode) + 1) * sizeof(WCHAR) );
-            return STATUS_SUCCESS;
-        }
-        if (!strcmpW( prop, BCRYPT_KEY_LENGTHS ))
-        {
-            BCRYPT_KEY_LENGTHS_STRUCT *key_lengths = (void *)buf;
-            *ret_size = sizeof(*key_lengths);
-            if (key_lengths && size < *ret_size) return STATUS_BUFFER_TOO_SMALL;
-            if (key_lengths)
-            {
-                key_lengths->dwMinLength = 128;
-                key_lengths->dwMaxLength = 256;
-                key_lengths->dwIncrement = 64;
-            }
-            return STATUS_SUCCESS;
-        }
-        if (!strcmpW( prop, BCRYPT_AUTH_TAG_LENGTH ))
-        {
-            BCRYPT_AUTH_TAG_LENGTHS_STRUCT *tag_length = (void *)buf;
-            if (alg->mode != MODE_ID_GCM) return STATUS_NOT_SUPPORTED;
-            *ret_size = sizeof(*tag_length);
-            if (tag_length && size < *ret_size) return STATUS_BUFFER_TOO_SMALL;
-            if (tag_length)
-            {
-                tag_length->dwMinLength = 12;
-                tag_length->dwMaxLength = 16;
-                tag_length->dwIncrement =  1;
-            }
-            return STATUS_SUCCESS;
-        }
-        break;
+        return get_aes_property( alg->mode, prop, buf, size, ret_size );
 
     default:
         break;
@@ -533,6 +539,20 @@ static NTSTATUS get_hash_property( const struct hash *hash, const WCHAR *prop, U
     return status;
 }
 
+static NTSTATUS get_key_property( const struct key *key, const WCHAR *prop, UCHAR *buf, ULONG size, ULONG *ret_size )
+{
+    switch (key->alg_id)
+    {
+    case ALG_ID_AES:
+        if (!strcmpW( prop, BCRYPT_AUTH_TAG_LENGTH )) return STATUS_NOT_SUPPORTED;
+        return get_aes_property( key->u.s.mode, prop, buf, size, ret_size );
+
+    default:
+        FIXME( "unsupported algorithm %u\n", key->alg_id );
+        return STATUS_NOT_IMPLEMENTED;
+    }
+}
+
 NTSTATUS WINAPI BCryptGetProperty( BCRYPT_HANDLE handle, LPCWSTR prop, UCHAR *buffer, ULONG count, ULONG *res, ULONG flags )
 {
     struct object *object = handle;
@@ -548,6 +568,11 @@ NTSTATUS WINAPI BCryptGetProperty( BCRYPT_HANDLE handle, LPCWSTR prop, UCHAR *bu
     {
         const struct algorithm *alg = (const struct algorithm *)object;
         return get_alg_property( alg, prop, buffer, count, res );
+    }
+    case MAGIC_KEY:
+    {
+        const struct key *key = (const struct key *)object;
+        return get_key_property( key, prop, buffer, count, res );
     }
     case MAGIC_HASH:
     {
@@ -648,7 +673,8 @@ NTSTATUS WINAPI BCryptDestroyHash( BCRYPT_HASH_HANDLE handle )
 
     TRACE( "%p\n", handle );
 
-    if (!hash || hash->hdr.magic != MAGIC_HASH) return STATUS_INVALID_HANDLE;
+    if (!hash || hash->hdr.magic != MAGIC_HASH) return STATUS_INVALID_PARAMETER;
+    hash->hdr.magic = 0;
     heap_free( hash );
     return STATUS_SUCCESS;
 }
@@ -1241,6 +1267,7 @@ NTSTATUS WINAPI BCryptDestroyKey( BCRYPT_KEY_HANDLE handle )
     TRACE( "%p\n", handle );
 
     if (!key || key->hdr.magic != MAGIC_KEY) return STATUS_INVALID_HANDLE;
+    key->hdr.magic = 0;
     return key_destroy( key );
 }
 

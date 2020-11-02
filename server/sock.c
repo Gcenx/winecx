@@ -109,7 +109,7 @@ struct sock
     user_handle_t       window;      /* window to send the message to */
     unsigned int        message;     /* message to send */
     obj_handle_t        wparam;      /* message wparam (socket handle) */
-    int                 errors[FD_MAX_EVENTS]; /* event errors */
+    unsigned int        errors[FD_MAX_EVENTS]; /* event errors */
     timeout_t           connect_time;/* time the socket was connected */
     struct sock        *deferred;    /* socket that waits for a deferred accept */
     struct async_queue  read_q;      /* queue for asynchronous reads */
@@ -134,8 +134,7 @@ static void sock_queue_async( struct fd *fd, struct async *async, int type, int 
 static void sock_reselect_async( struct fd *fd, struct async_queue *queue );
 
 static int sock_get_ntstatus( int err );
-static int sock_get_error( int err );
-static void sock_set_error(void);
+static unsigned int sock_get_error( int err );
 
 static const struct object_ops sock_ops =
 {
@@ -167,7 +166,7 @@ static const struct fd_ops sock_fd_ops =
     no_fd_read,                   /* read */
     no_fd_write,                  /* write */
     no_fd_flush,                  /* flush */
-    no_fd_get_file_info,          /* get_file_info */
+    default_fd_get_file_info,     /* get_file_info */
     no_fd_get_volume_info,        /* get_volume_info */
     sock_ioctl,                   /* ioctl */
     sock_queue_async,             /* queue_async */
@@ -292,7 +291,7 @@ static void sock_wake_up( struct sock *sock )
             int event = event_bitorder[i];
             if (sock->pmask & (1 << event))
             {
-                lparam_t lparam = (1 << event) | (sock_get_error(sock->errors[event]) << 16);
+                lparam_t lparam = (1 << event) | (sock->errors[event] << 16);
                 post_message( sock->window, sock->message, sock->wparam, lparam );
             }
         }
@@ -345,14 +344,14 @@ static void sock_dispatch_events( struct sock *sock, int prevstate, int event, i
     {
         sock->pmask |= FD_CONNECT;
         sock->hmask |= FD_CONNECT;
-        sock->errors[FD_CONNECT_BIT] = error;
+        sock->errors[FD_CONNECT_BIT] = sock_get_error( error );
         goto end;
     }
     if (prevstate & FD_WINE_LISTENING)
     {
         sock->pmask |= FD_ACCEPT;
         sock->hmask |= FD_ACCEPT;
-        sock->errors[FD_ACCEPT_BIT] = error;
+        sock->errors[FD_ACCEPT_BIT] = sock_get_error( error );
         goto end;
     }
 
@@ -381,7 +380,7 @@ static void sock_dispatch_events( struct sock *sock, int prevstate, int event, i
     {
         sock->pmask |= FD_CLOSE;
         sock->hmask |= FD_CLOSE;
-        sock->errors[FD_CLOSE_BIT] = error;
+        sock->errors[FD_CLOSE_BIT] = sock_get_error( error );
     }
 end:
     sock_wake_up( sock );
@@ -547,7 +546,7 @@ static int sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
     case WS_SIO_ADDRESS_LIST_CHANGE:
         if ((sock->state & FD_WINE_NONBLOCKING) && async_is_blocking( async ))
         {
-            set_error( STATUS_CANT_WAIT );
+            set_win32_error( WSAEWOULDBLOCK );
             return 0;
         }
         if (!sock_get_ifchange( sock )) return 0;
@@ -661,11 +660,10 @@ static struct object *create_socket( int family, int type, int protocol, unsigne
     int sockfd;
 
     sockfd = socket( family, type, protocol );
-    if (debug_level)
-        fprintf(stderr,"socket(%d,%d,%d)=%d\n",family,type,protocol,sockfd);
     if (sockfd == -1)
     {
-        sock_set_error();
+        if (errno == EINVAL) set_win32_error( WSAESOCKTNOSUPPORT );
+        else set_win32_error( sock_get_error( errno ));
         return NULL;
     }
     fcntl(sockfd, F_SETFL, O_NONBLOCK); /* make socket nonblocking */
@@ -700,17 +698,13 @@ static int accept_new_fd( struct sock *sock )
      * or that accept() is allowed on it. In those cases we will get -1/errno
      * return.
      */
-    int acceptfd;
     struct sockaddr saddr;
     socklen_t slen = sizeof(saddr);
-    acceptfd = accept( get_unix_fd(sock->fd), &saddr, &slen);
-    if (acceptfd == -1)
-    {
-        sock_set_error();
-        return acceptfd;
-    }
-
-    fcntl(acceptfd, F_SETFL, O_NONBLOCK); /* make socket nonblocking */
+    int acceptfd = accept( get_unix_fd(sock->fd), &saddr, &slen );
+    if (acceptfd != -1)
+        fcntl( acceptfd, F_SETFL, O_NONBLOCK );
+    else
+        set_win32_error( sock_get_error( errno ));
     return acceptfd;
 }
 
@@ -823,7 +817,7 @@ static int accept_into_socket( struct sock *sock, struct sock *acceptsock )
 }
 
 /* return an errno value mapped to a WSA error */
-static int sock_get_error( int err )
+static unsigned int sock_get_error( int err )
 {
     switch (err)
     {
@@ -935,12 +929,6 @@ static int sock_get_ntstatus( int err )
             perror("wineserver: sock_get_ntstatus() can't map error");
             return STATUS_UNSUCCESSFUL;
     }
-}
-
-/* set the last error depending on errno */
-static void sock_set_error(void)
-{
-    set_error( sock_get_ntstatus( errno ) );
 }
 
 #ifdef HAVE_LINUX_RTNETLINK_H
@@ -1098,7 +1086,7 @@ static void ifchange_poll_event( struct fd *fd, int event )
     unix_fd = socket( PF_NETLINK, SOCK_RAW, NETLINK_ROUTE );
     if (unix_fd == -1)
     {
-        sock_set_error();
+        set_win32_error( sock_get_error( errno ));
         return NULL;
     }
     fcntl( unix_fd, F_SETFL, O_NONBLOCK ); /* make socket nonblocking */
@@ -1109,7 +1097,7 @@ static void ifchange_poll_event( struct fd *fd, int event )
     if (bind( unix_fd, (struct sockaddr *)&addr, sizeof(addr) ) == -1)
     {
         close( unix_fd );
-        sock_set_error();
+        set_win32_error( sock_get_error( errno ));
         return NULL;
     }
     if (!(ifchange = alloc_object( &ifchange_ops )))
@@ -1265,24 +1253,13 @@ DECL_HANDLER(set_socket_event)
 DECL_HANDLER(get_socket_event)
 {
     struct sock *sock;
-    int i;
-    int errors[FD_MAX_EVENTS];
 
-    sock = (struct sock *)get_handle_obj( current->process, req->handle, FILE_READ_ATTRIBUTES, &sock_ops );
-    if (!sock)
-    {
-        reply->mask  = 0;
-        reply->pmask = 0;
-        reply->state = 0;
-        return;
-    }
+    if (!(sock = (struct sock *)get_handle_obj( current->process, req->handle,
+                                                FILE_READ_ATTRIBUTES, &sock_ops ))) return;
     reply->mask  = sock->mask;
     reply->pmask = sock->pmask;
     reply->state = sock->state;
-    for (i = 0; i < FD_MAX_EVENTS; i++)
-        errors[i] = sock_get_ntstatus(sock->errors[i]);
-
-    set_reply_data( errors, min( get_reply_max_size(), sizeof(errors) ));
+    set_reply_data( sock->errors, min( get_reply_max_size(), sizeof(sock->errors) ));
 
     if (req->service)
     {

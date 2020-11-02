@@ -424,7 +424,7 @@ static void fill_filename_from_selection(FileDialogImpl *This)
                 (!(This->options & FOS_PICKFOLDERS) &&  (attr & SFGAO_FOLDER))))
                 continue;
 
-            hr = IShellItem_GetDisplayName(psi, SIGDN_PARENTRELATIVEPARSING, &names[valid_count]);
+            hr = IShellItem_GetDisplayName(psi, (This->options & FOS_PICKFOLDERS) ? SIGDN_FILESYSPATH : SIGDN_PARENTRELATIVEPARSING, &names[valid_count]);
             if(SUCCEEDED(hr))
             {
                 len_total += lstrlenW(names[valid_count]) + 3;
@@ -2504,6 +2504,16 @@ static HRESULT WINAPI IFileDialog2_fnSetOptions(IFileDialog2 *iface, FILEOPENDIA
 {
     FileDialogImpl *This = impl_from_IFileDialog2(iface);
     TRACE("%p (0x%x)\n", This, fos);
+
+    if (fos & ~(FOS_OVERWRITEPROMPT | FOS_STRICTFILETYPES | FOS_NOCHANGEDIR | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM
+            | FOS_ALLNONSTORAGEITEMS | FOS_NOVALIDATE | FOS_ALLOWMULTISELECT | FOS_PATHMUSTEXIST | FOS_FILEMUSTEXIST
+            | FOS_CREATEPROMPT | FOS_SHAREAWARE | FOS_NOREADONLYRETURN | FOS_NOTESTFILECREATE | FOS_HIDEMRUPLACES
+            | FOS_HIDEPINNEDPLACES | FOS_NODEREFERENCELINKS | FOS_DONTADDTORECENT | FOS_FORCESHOWHIDDEN
+            | FOS_DEFAULTNOMINIMODE | FOS_FORCEPREVIEWPANEON | FOS_SUPPORTSTREAMABLEITEMS))
+    {
+        WARN("Invalid option %#x\n", fos);
+        return E_INVALIDARG;
+    }
 
     if( !(This->options & FOS_PICKFOLDERS) && (fos & FOS_PICKFOLDERS) )
     {

@@ -156,8 +156,7 @@ static DWORD calc_arg_size(MIDL_STUB_MESSAGE *pStubMsg, PFORMAT_STRING pFormat)
     case FC_RP:
         if (pFormat[1] & FC_SIMPLE_POINTER)
         {
-            FIXME("Simple reference pointer (type %#x).\n", pFormat[2]);
-            size = sizeof(void *);
+            size = 0;
             break;
         }
         size = calc_arg_size(pStubMsg, &pFormat[2] + *(const SHORT*)&pFormat[2]);
@@ -216,6 +215,9 @@ static DWORD calc_arg_size(MIDL_STUB_MESSAGE *pStubMsg, PFORMAT_STRING pFormat)
     default:
         FIXME("Unhandled type %02x\n", *pFormat);
         /* fallthrough */
+    case FC_UP:
+    case FC_OP:
+    case FC_FP:
     case FC_IP:
         size = sizeof(void *);
         break;
@@ -420,6 +422,50 @@ static void client_free_handle(
     }
 }
 
+static inline BOOL param_needs_alloc( PARAM_ATTRIBUTES attr )
+{
+    return attr.IsOut && !attr.IsIn && !attr.IsBasetype && !attr.IsByValue;
+}
+
+static inline BOOL param_is_out_basetype( PARAM_ATTRIBUTES attr )
+{
+    return attr.IsOut && !attr.IsIn && attr.IsBasetype && attr.IsSimpleRef;
+}
+
+static size_t basetype_arg_size( unsigned char fc )
+{
+    switch (fc)
+    {
+    case FC_BYTE:
+    case FC_CHAR:
+    case FC_SMALL:
+    case FC_USMALL:
+        return sizeof(char);
+    case FC_WCHAR:
+    case FC_SHORT:
+    case FC_USHORT:
+        return sizeof(short);
+    case FC_LONG:
+    case FC_ULONG:
+    case FC_ENUM16:
+    case FC_ENUM32:
+    case FC_ERROR_STATUS_T:
+        return sizeof(int);
+    case FC_FLOAT:
+        return sizeof(float);
+    case FC_HYPER:
+        return sizeof(LONGLONG);
+    case FC_DOUBLE:
+        return sizeof(double);
+    case FC_INT3264:
+    case FC_UINT3264:
+        return sizeof(INT_PTR);
+    default:
+        FIXME("Unhandled basetype %#x.\n", fc);
+        return 0;
+    }
+}
+
 void client_do_args( PMIDL_STUB_MESSAGE pStubMsg, PFORMAT_STRING pFormat, enum stubless_phase phase,
                      void **fpu_args, unsigned short number_of_params, unsigned char *pRetVal )
 {
@@ -451,10 +497,12 @@ void client_do_args( PMIDL_STUB_MESSAGE pStubMsg, PFORMAT_STRING pFormat, enum s
         switch (phase)
         {
         case STUBLESS_INITOUT:
-            if (!params[i].attr.IsBasetype && params[i].attr.IsOut &&
-                !params[i].attr.IsIn && !params[i].attr.IsByValue)
+            if (*(unsigned char **)pArg)
             {
-                memset( *(unsigned char **)pArg, 0, calc_arg_size( pStubMsg, pTypeFormat ));
+                if (param_needs_alloc(params[i].attr))
+                    memset( *(unsigned char **)pArg, 0, calc_arg_size( pStubMsg, pTypeFormat ));
+                else if (param_is_out_basetype(params[i].attr))
+                    memset( *(unsigned char **)pArg, 0, basetype_arg_size( params[i].u.type_format_char ));
             }
             break;
         case STUBLESS_CALCSIZE:
@@ -1135,11 +1183,6 @@ LONG_PTR __cdecl call_server_func(SERVER_ROUTINE func, unsigned char * args, uns
     return 0;
 }
 #endif
-
-static inline BOOL param_needs_alloc( PARAM_ATTRIBUTES attr )
-{
-    return attr.IsOut && !attr.IsIn && !attr.IsBasetype && !attr.IsByValue;
-}
 
 static LONG_PTR *stub_do_args(MIDL_STUB_MESSAGE *pStubMsg,
                               PFORMAT_STRING pFormat, enum stubless_phase phase,

@@ -29,6 +29,7 @@
 #include "winbase.h"
 #include "winreg.h"
 #include "winnls.h"
+#include "sqlext.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
 #include "wine/heap.h"
@@ -1514,34 +1515,44 @@ BOOL WINAPI SQLSetConfigMode(UWORD wConfigMode)
 
 BOOL WINAPI SQLValidDSNW(LPCWSTR lpszDSN)
 {
+    static const WCHAR invalid[] = {'[',']','{','}','(',')',',',';','?','*','=','!','@','\\',0};
     clear_errors();
-    FIXME("%s\n", debugstr_w(lpszDSN));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    TRACE("%s\n", debugstr_w(lpszDSN));
+
+    if(strlenW(lpszDSN) > SQL_MAX_DSN_LENGTH || strpbrkW(lpszDSN, invalid) != NULL)
+    {
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 BOOL WINAPI SQLValidDSN(LPCSTR lpszDSN)
 {
+    static const char *invalid = "[]{}(),;?*=!@\\";
     clear_errors();
-    FIXME("%s\n", debugstr_a(lpszDSN));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    TRACE("%s\n", debugstr_a(lpszDSN));
+
+    if(strlen(lpszDSN) > SQL_MAX_DSN_LENGTH || strpbrk(lpszDSN, invalid) != NULL)
+    {
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 BOOL WINAPI SQLWriteDSNToIniW(LPCWSTR lpszDSN, LPCWSTR lpszDriver)
 {
     clear_errors();
     FIXME("%s %s\n", debugstr_w(lpszDSN), debugstr_w(lpszDriver));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    return TRUE;
 }
 
 BOOL WINAPI SQLWriteDSNToIni(LPCSTR lpszDSN, LPCSTR lpszDriver)
 {
     clear_errors();
     FIXME("%s %s\n", debugstr_a(lpszDSN), debugstr_a(lpszDriver));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    return TRUE;
 }
 
 BOOL WINAPI SQLWriteFileDSNW(LPCWSTR lpszFileName, LPCWSTR lpszAppName,

@@ -710,11 +710,11 @@ static void STDMETHODCALLTYPE d3d11_immediate_context_OMSetBlendState(ID3D11Devi
         blend_factor = default_blend_factor;
 
     wined3d_mutex_lock();
-    memcpy(device->blend_factor, blend_factor, 4 * sizeof(*blend_factor));
     wined3d_device_set_render_state(device->wined3d_device, WINED3D_RS_MULTISAMPLEMASK, sample_mask);
     if (!(blend_state_impl = unsafe_impl_from_ID3D11BlendState(blend_state)))
     {
-        wined3d_device_set_blend_state(device->wined3d_device, NULL);
+        wined3d_device_set_blend_state(device->wined3d_device, NULL,
+                (const struct wined3d_color *)blend_factor);
         wined3d_device_set_render_state(device->wined3d_device, WINED3D_RS_ALPHABLENDENABLE, FALSE);
         wined3d_device_set_render_state(device->wined3d_device,
                 WINED3D_RS_COLORWRITEENABLE, D3D11_COLOR_WRITE_ENABLE_ALL);
@@ -728,7 +728,8 @@ static void STDMETHODCALLTYPE d3d11_immediate_context_OMSetBlendState(ID3D11Devi
         return;
     }
 
-    wined3d_device_set_blend_state(device->wined3d_device, blend_state_impl->wined3d_state);
+    wined3d_device_set_blend_state(device->wined3d_device, blend_state_impl->wined3d_state,
+            (const struct wined3d_color *)blend_factor);
     desc = &blend_state_impl->desc;
     wined3d_device_set_render_state(device->wined3d_device, WINED3D_RS_ALPHABLENDENABLE,
             desc->RenderTarget[0].BlendEnable);
@@ -743,13 +744,6 @@ static void STDMETHODCALLTYPE d3d11_immediate_context_OMSetBlendState(ID3D11Devi
         wined3d_device_set_render_state(device->wined3d_device, WINED3D_RS_SRCBLENDALPHA, d->SrcBlendAlpha);
         wined3d_device_set_render_state(device->wined3d_device, WINED3D_RS_DESTBLENDALPHA, d->DestBlendAlpha);
         wined3d_device_set_render_state(device->wined3d_device, WINED3D_RS_BLENDOPALPHA, d->BlendOpAlpha);
-
-        if (memcmp(blend_factor, default_blend_factor, sizeof(default_blend_factor))
-                && (d->SrcBlend == D3D11_BLEND_BLEND_FACTOR || d->SrcBlend == D3D11_BLEND_INV_BLEND_FACTOR
-                || d->DestBlend == D3D11_BLEND_BLEND_FACTOR || d->DestBlend == D3D11_BLEND_INV_BLEND_FACTOR
-                || d->SrcBlendAlpha == D3D11_BLEND_BLEND_FACTOR || d->SrcBlendAlpha == D3D11_BLEND_INV_BLEND_FACTOR
-                || d->DestBlendAlpha == D3D11_BLEND_BLEND_FACTOR || d->DestBlendAlpha == D3D11_BLEND_INV_BLEND_FACTOR))
-            FIXME("Ignoring blend factor %s.\n", debug_float4(blend_factor));
     }
     wined3d_device_set_render_state(device->wined3d_device,
             WINED3D_RS_COLORWRITEENABLE, desc->RenderTarget[0].RenderTargetWriteMask);
@@ -1942,7 +1936,8 @@ static void STDMETHODCALLTYPE d3d11_immediate_context_OMGetBlendState(ID3D11Devi
             iface, blend_state, blend_factor, sample_mask);
 
     wined3d_mutex_lock();
-    if ((wined3d_state = wined3d_device_get_blend_state(device->wined3d_device)))
+    if ((wined3d_state = wined3d_device_get_blend_state(device->wined3d_device,
+            (struct wined3d_color *)blend_factor)))
     {
         blend_state_impl = wined3d_blend_state_get_parent(wined3d_state);
         ID3D11BlendState_AddRef(*blend_state = &blend_state_impl->ID3D11BlendState_iface);
@@ -1951,7 +1946,6 @@ static void STDMETHODCALLTYPE d3d11_immediate_context_OMGetBlendState(ID3D11Devi
     {
         *blend_state = NULL;
     }
-    memcpy(blend_factor, device->blend_factor, 4 * sizeof(*blend_factor));
     *sample_mask = wined3d_device_get_render_state(device->wined3d_device, WINED3D_RS_MULTISAMPLEMASK);
     wined3d_mutex_unlock();
 }
@@ -3303,15 +3297,15 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CheckFormatSupport(ID3D11Device2 *
     static const struct
     {
         enum wined3d_resource_type rtype;
-        unsigned int usage;
+        unsigned int bind_flags;
         D3D11_FORMAT_SUPPORT flag;
     }
     flag_mapping[] =
     {
-        {WINED3D_RTYPE_TEXTURE_2D, WINED3DUSAGE_TEXTURE,      D3D11_FORMAT_SUPPORT_TEXTURE2D},
-        {WINED3D_RTYPE_TEXTURE_3D, WINED3DUSAGE_TEXTURE,      D3D11_FORMAT_SUPPORT_TEXTURE3D},
-        {WINED3D_RTYPE_NONE,       WINED3DUSAGE_RENDERTARGET, D3D11_FORMAT_SUPPORT_RENDER_TARGET},
-        {WINED3D_RTYPE_NONE,       WINED3DUSAGE_DEPTHSTENCIL, D3D11_FORMAT_SUPPORT_DEPTH_STENCIL},
+        {WINED3D_RTYPE_TEXTURE_2D, WINED3D_BIND_SHADER_RESOURCE, D3D11_FORMAT_SUPPORT_TEXTURE2D},
+        {WINED3D_RTYPE_TEXTURE_3D, WINED3D_BIND_SHADER_RESOURCE, D3D11_FORMAT_SUPPORT_TEXTURE3D},
+        {WINED3D_RTYPE_NONE,       WINED3D_BIND_RENDER_TARGET,   D3D11_FORMAT_SUPPORT_RENDER_TARGET},
+        {WINED3D_RTYPE_NONE,       WINED3D_BIND_DEPTH_STENCIL,   D3D11_FORMAT_SUPPORT_DEPTH_STENCIL},
     };
     HRESULT hr;
 
@@ -3333,7 +3327,7 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CheckFormatSupport(ID3D11Device2 *
     for (i = 0; i < ARRAY_SIZE(flag_mapping); ++i)
     {
         hr = wined3d_check_device_format(wined3d, params.adapter_idx, params.device_type,
-                WINED3DFMT_UNKNOWN, flag_mapping[i].usage, flag_mapping[i].rtype, wined3d_format);
+                WINED3DFMT_UNKNOWN, 0, flag_mapping[i].bind_flags, flag_mapping[i].rtype, wined3d_format);
         if (hr == WINED3DERR_NOTAVAILABLE || hr == WINED3DOK_NOMIPGEN)
             continue;
         if (hr != WINED3D_OK)
@@ -3512,6 +3506,29 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CheckFeatureSupport(ID3D11Device2 
             options->MinMaxFiltering = FALSE;
             options->ClearViewAlsoSupportsDepthOnlyFormats = FALSE;
             options->MapOnDefaultBuffers = FALSE;
+            return S_OK;
+        }
+
+        case D3D11_FEATURE_D3D11_OPTIONS3:
+        {
+            D3D11_FEATURE_DATA_D3D11_OPTIONS3 *options = feature_support_data;
+            if (feature_support_data_size != sizeof(*options))
+            {
+                WARN("Invalid data size.\n");
+                return E_INVALIDARG;
+            }
+
+            wined3d_mutex_lock();
+            hr = wined3d_device_get_device_caps(device->wined3d_device, &wined3d_caps);
+            wined3d_mutex_unlock();
+            if (FAILED(hr))
+            {
+                WARN("Failed to get device caps, hr %#x.\n", hr);
+                return hr;
+            }
+
+            options->VPAndRTArrayIndexFromAnyShaderFeedingRasterizer
+                    = wined3d_caps.viewport_array_index_any_shader;
             return S_OK;
         }
 
@@ -6004,6 +6021,8 @@ static void CDECL device_parent_wined3d_device_created(struct wined3d_device_par
     wined3d_device_incref(wined3d_device);
     device->wined3d_device = wined3d_device;
 
+    device->feature_level = wined3d_device_get_feature_level(wined3d_device);
+
     set_default_depth_stencil_state(wined3d_device);
 }
 
@@ -6051,7 +6070,7 @@ static HRESULT CDECL device_parent_create_swapchain_texture(struct wined3d_devic
     desc.SampleDesc.Count = wined3d_desc->multisample_type ? wined3d_desc->multisample_type : 1;
     desc.SampleDesc.Quality = wined3d_desc->multisample_quality;
     desc.Usage = D3D11_USAGE_DEFAULT;
-    desc.BindFlags = d3d11_bind_flags_from_wined3d_usage(wined3d_desc->usage);
+    desc.BindFlags = d3d11_bind_flags_from_wined3d(wined3d_desc->bind_flags);
     desc.CPUAccessFlags = 0;
     desc.MiscFlags = 0;
 
@@ -6164,11 +6183,6 @@ void d3d_device_init(struct d3d_device *device, void *outer_unknown)
 
     d3d11_immediate_context_init(&device->immediate_context, device);
     ID3D11DeviceContext1_Release(&device->immediate_context.ID3D11DeviceContext1_iface);
-
-    device->blend_factor[0] = 1.0f;
-    device->blend_factor[1] = 1.0f;
-    device->blend_factor[2] = 1.0f;
-    device->blend_factor[3] = 1.0f;
 
     wine_rb_init(&device->blend_states, d3d_blend_state_compare);
     wine_rb_init(&device->depthstencil_states, d3d_depthstencil_state_compare);

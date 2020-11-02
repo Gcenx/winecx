@@ -55,6 +55,8 @@ BOOL allow_set_gamma = TRUE;
 int mac_edit_menu = MAC_EDIT_MENU_BY_KEY;
 int left_option_is_alt = 0;
 int right_option_is_alt = 0;
+int left_command_is_ctrl = 0;
+int right_command_is_ctrl = 0;
 BOOL allow_software_rendering = FALSE;
 BOOL disable_window_decorations = FALSE;
 int allow_immovable_windows = TRUE;
@@ -187,6 +189,16 @@ static void setup_options(void)
         left_option_is_alt = IS_OPTION_TRUE(buffer[0]);
     if (!get_config_key(hkey, appkey, "RightOptionIsAlt", buffer, sizeof(buffer)))
         right_option_is_alt = IS_OPTION_TRUE(buffer[0]);
+
+    if (!get_config_key(hkey, appkey, "LeftCommandIsCtrl", buffer, sizeof(buffer)))
+        left_command_is_ctrl = IS_OPTION_TRUE(buffer[0]);
+    if (!get_config_key(hkey, appkey, "RightCommandIsCtrl", buffer, sizeof(buffer)))
+        right_command_is_ctrl = IS_OPTION_TRUE(buffer[0]);
+
+    if (left_command_is_ctrl && right_command_is_ctrl && !left_option_is_alt && !right_option_is_alt)
+        WARN("Both Command keys have been mapped to Control. There is no way to "
+             "send an Alt key to Windows applications. Consider enabling "
+             "LeftOptionIsAlt or RightOptionIsAlt.\n");
 
     if (!get_config_key(hkey, appkey, "AllowSoftwareRendering", buffer, sizeof(buffer)))
         allow_software_rendering = IS_OPTION_TRUE(buffer[0]);

@@ -297,9 +297,22 @@ static void STDMETHODCALLTYPE dxgi_output_ReleaseOwnership(IDXGIOutput4 *iface)
 static HRESULT STDMETHODCALLTYPE dxgi_output_GetGammaControlCapabilities(IDXGIOutput4 *iface,
         DXGI_GAMMA_CONTROL_CAPABILITIES *gamma_caps)
 {
-    FIXME("iface %p, gamma_caps %p stub!\n", iface, gamma_caps);
+    unsigned int i;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, gamma_caps %p.\n", iface, gamma_caps);
+
+    if (!gamma_caps)
+        return E_INVALIDARG;
+
+    gamma_caps->ScaleAndOffsetSupported = FALSE;
+    gamma_caps->MaxConvertedValue = 1.0f;
+    gamma_caps->MinConvertedValue = 0.0f;
+    gamma_caps->NumGammaControlPoints = 256;
+
+    for (i = 0; i < gamma_caps->NumGammaControlPoints; ++i)
+        gamma_caps->ControlPointPositions[i] = i / 255.0f;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE dxgi_output_SetGammaControl(IDXGIOutput4 *iface,
@@ -307,10 +320,11 @@ static HRESULT STDMETHODCALLTYPE dxgi_output_SetGammaControl(IDXGIOutput4 *iface
 {
     FIXME("iface %p, gamma_control %p stub!\n", iface, gamma_control);
 
-    return E_NOTIMPL;
+    return S_OK;
 }
 
-static HRESULT STDMETHODCALLTYPE dxgi_output_GetGammaControl(IDXGIOutput4 *iface, DXGI_GAMMA_CONTROL *gamma_control)
+static HRESULT STDMETHODCALLTYPE dxgi_output_GetGammaControl(IDXGIOutput4 *iface,
+        DXGI_GAMMA_CONTROL *gamma_control)
 {
     FIXME("iface %p, gamma_control %p stub!\n", iface, gamma_control);
 

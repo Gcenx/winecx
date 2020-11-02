@@ -28,6 +28,8 @@
 #include "winuser.h"
 #include "winreg.h"
 #include "winternl.h"
+#include "wine/heap.h"
+#include "wine/unicode.h"
 
 #define GET_WORD(ptr)  (*(const WORD *)(ptr))
 #define GET_DWORD(ptr) (*(const DWORD *)(ptr))
@@ -167,21 +169,22 @@ struct wm_char_mapping_data
 /* no attempt is made to keep the layout compatible with the Windows one */
 struct user_thread_info
 {
-    DPI_AWARENESS                 dpi_awareness;          /* DPI awareness */
     HANDLE                        server_queue;           /* Handle to server-side queue */
     DWORD                         wake_mask;              /* Current queue wake mask */
     DWORD                         changed_mask;           /* Current queue changed mask */
     WORD                          recursion_count;        /* SendMessage recursion counter */
     WORD                          message_count;          /* Get/PeekMessage loop counter */
     WORD                          hook_call_depth;        /* Number of recursively called hook procs */
-    BOOL                          hook_unicode;           /* Is current hook unicode? */
+    WORD                          hook_unicode;           /* Is current hook unicode? */
     HHOOK                         hook;                   /* Current hook */
+    UINT                          active_hooks;           /* Bitmap of active hooks */
+    DPI_AWARENESS                 dpi_awareness;          /* DPI awareness */
+    INPUT_MESSAGE_SOURCE          msg_source;             /* Message source for current message */
     struct received_message_info *receive_info;           /* Message being currently received */
     struct wm_char_mapping_data  *wmchar_data;            /* Data for WM_CHAR mappings */
     DWORD                         GetMessageTimeVal;      /* Value for GetMessageTime */
     DWORD                         GetMessagePosVal;       /* Value for GetMessagePos */
     ULONG_PTR                     GetMessageExtraInfoVal; /* Value for GetMessageExtraInfo */
-    UINT                          active_hooks;           /* Bitmap of active hooks */
     struct user_key_state_info   *key_state;              /* Cache of global key state */
     HWND                          top_window;             /* Desktop window */
     HWND                          msg_window;             /* HWND_MESSAGE parent window */
@@ -355,5 +358,15 @@ extern BOOL MENU_send_window_menubar_to_macapp( HWND hwnd );
 #undef assert
 #define assert(expr) ((void)0)
 #endif
+
+static inline WCHAR *heap_strdupW(const WCHAR *src)
+{
+    WCHAR *dst;
+    unsigned len;
+    if (!src) return NULL;
+    len = (strlenW(src) + 1) * sizeof(WCHAR);
+    if ((dst = heap_alloc(len))) memcpy(dst, src, len);
+    return dst;
+}
 
 #endif /* __WINE_USER_PRIVATE_H */

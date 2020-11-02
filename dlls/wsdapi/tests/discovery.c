@@ -706,7 +706,7 @@ static HRESULT WINAPI IWSDiscoveryPublisherNotifyImpl_ProbeHandler(IWSDiscoveryP
                 rc = IWSDiscoveryPublisher_MatchProbeEx(publisher_instance, pSoap, pMessageParameters, publisherIdW, 1, 1, 1,
                     sequenceIdW, probe_msg->Types, NULL, NULL, header_any_element, ref_param_any_element, NULL,
                     endpoint_any_element, body_any_element);
-                todo_wine ok(rc == S_OK, "IWSDiscoveryPublisher_MatchProbe failed with %08x\n", rc);
+                ok(rc == S_OK, "IWSDiscoveryPublisher_MatchProbeEx failed with %08x\n", rc);
 
                 WSDFreeLinkedMemory(header_any_element);
                 WSDFreeLinkedMemory(body_any_element);
@@ -729,7 +729,7 @@ static HRESULT WINAPI IWSDiscoveryPublisherNotifyImpl_ProbeHandler(IWSDiscoveryP
                 DeleteCriticalSection(&msg_storage->criticalSection);
 
                 /* Verify we've received a message */
-                todo_wine ok(msg_storage->messageCount >= 1, "No messages received\n");
+                ok(msg_storage->messageCount >= 1, "No messages received\n");
 
                 sprintf(endpoint_reference_string, "<wsa:EndpointReference><wsa:Address>%s</wsa:Address>"
                     "<wsa:ReferenceParameters><wine:Beer>RefPTest</wine:Beer></wsa:ReferenceParameters>"
@@ -767,16 +767,16 @@ static HRESULT WINAPI IWSDiscoveryPublisherNotifyImpl_ProbeHandler(IWSDiscoveryP
                     heap_free(msg_storage->messages[i]);
                 }
 
-                todo_wine ok(probe_matches_message_seen == TRUE, "Probe matches message not received\n");
-                todo_wine ok(endpoint_reference_seen == TRUE, "EndpointReference not received\n");
-                todo_wine ok(app_sequence_seen == TRUE, "AppSequence not received\n");
-                todo_wine ok(metadata_version_seen == TRUE, "MetadataVersion not received\n");
-                todo_wine ok(message_ok == TRUE, "ProbeMatches message metadata not received\n");
-                todo_wine ok(any_header_seen == TRUE, "Custom header not received\n");
-                todo_wine ok(wine_ns_seen == TRUE, "Wine namespace not received\n");
-                todo_wine ok(body_probe_matches_seen == TRUE, "Body and Probe Matches elements not received\n");
-                todo_wine ok(any_body_seen == TRUE, "Custom body element not received\n");
-                todo_wine ok(types_seen == TRUE, "Types not received\n");
+                ok(probe_matches_message_seen == TRUE, "Probe matches message not received\n");
+                ok(endpoint_reference_seen == TRUE, "EndpointReference not received\n");
+                ok(app_sequence_seen == TRUE, "AppSequence not received\n");
+                ok(metadata_version_seen == TRUE, "MetadataVersion not received\n");
+                ok(message_ok == TRUE, "ProbeMatches message metadata not received\n");
+                ok(any_header_seen == TRUE, "Custom header not received\n");
+                ok(wine_ns_seen == TRUE, "Wine namespace not received\n");
+                ok(body_probe_matches_seen == TRUE, "Body and Probe Matches elements not received\n");
+                ok(any_body_seen == TRUE, "Custom body element not received\n");
+                ok(types_seen == TRUE, "Types not received\n");
 
 after_matchprobe_test:
                 heap_free(publisherIdW);
@@ -1029,20 +1029,20 @@ static void Publish_tests(void)
     another_name.LocalName = (WCHAR *) name_cider;
     another_name.Space = &ns2;
 
-    types_list.Next = malloc(sizeof(WSD_NAME_LIST));
+    types_list.Next = heap_alloc(sizeof(WSD_NAME_LIST));
     types_list.Element = &another_name;
 
     types_list.Next->Next = NULL;
     types_list.Next->Element = &header_any_name;
 
     /* Create scopes and xaddrs lists */
-    scopes_list.Next = malloc(sizeof(WSD_URI_LIST));
+    scopes_list.Next = heap_alloc(sizeof(WSD_URI_LIST));
     scopes_list.Element = uri;
 
     scopes_list.Next->Next = NULL;
     scopes_list.Next->Element = uri_more_tests;
 
-    xaddrs_list.Next = malloc(sizeof(WSD_URI_LIST));
+    xaddrs_list.Next = heap_alloc(sizeof(WSD_URI_LIST));
     xaddrs_list.Element = uri_more_tests;
 
     xaddrs_list.Next->Next = NULL;
@@ -1056,9 +1056,9 @@ static void Publish_tests(void)
     WSDFreeLinkedMemory(body_any_element);
     WSDFreeLinkedMemory(endpoint_any_element);
     WSDFreeLinkedMemory(ref_param_any_element);
-    free(types_list.Next);
-    free(scopes_list.Next);
-    free(xaddrs_list.Next);
+    heap_free(types_list.Next);
+    heap_free(scopes_list.Next);
+    heap_free(xaddrs_list.Next);
 
     ok(rc == S_OK, "Publish failed: %08x\n", rc);
 

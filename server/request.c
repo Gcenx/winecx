@@ -166,12 +166,13 @@ void *set_reply_data_size( data_size_t size )
     return current->reply_data;
 }
 
+static const struct object_attributes empty_attributes;
+
 /* return object attributes from the current request */
 const struct object_attributes *get_req_object_attributes( const struct security_descriptor **sd,
                                                            struct unicode_str *name,
                                                            struct object **root )
 {
-    static const struct object_attributes empty_attributes;
     const struct object_attributes *attr = get_req_data();
     data_size_t size = get_req_data_size();
 
@@ -213,10 +214,15 @@ const struct object_attributes *get_req_object_attributes( const struct security
 /* return a pointer to the request data following an object attributes structure */
 const void *get_req_data_after_objattr( const struct object_attributes *attr, data_size_t *len )
 {
-    const void *ptr = (const WCHAR *)((const struct object_attributes *)get_req_data() + 1) +
-                       attr->sd_len / sizeof(WCHAR) + attr->name_len / sizeof(WCHAR);
-    *len = get_req_data_size() - ((const char *)ptr - (const char *)get_req_data());
-    return ptr;
+    data_size_t size = (sizeof(*attr) + (attr->sd_len & ~1) + (attr->name_len & ~1) + 3) & ~3;
+
+    if (attr == &empty_attributes || size >= get_req_data_size())
+    {
+        *len = 0;
+        return NULL;
+    }
+    *len = get_req_data_size() - size;
+    return (const char *)get_req_data() + size;
 }
 
 /* write the remaining part of the reply */
@@ -565,12 +571,17 @@ static void master_socket_poll_event( struct fd *fd, int event )
     }
     else if (event & POLLIN)
     {
+        struct process *process;
         struct sockaddr_un dummy;
         socklen_t len = sizeof(dummy);
         int client = accept( get_unix_fd( master_socket->fd ), (struct sockaddr *) &dummy, &len );
         if (client == -1) return;
         fcntl( client, F_SETFL, O_NONBLOCK );
-        create_process( client, NULL, 0 );
+        if ((process = create_process( client, NULL, 0, NULL )))
+        {
+            create_thread( -1, process, NULL );
+            release_object( process );
+        }
     }
 }
 

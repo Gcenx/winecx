@@ -39,19 +39,19 @@ static const WCHAR netpipe[] = {'n','e','t','.','p','i','p','e'};
 
 static WS_URL_SCHEME_TYPE scheme_type( const WCHAR *str, ULONG len )
 {
-    if (len == sizeof(http)/sizeof(http[0]) && !memicmpW( str, http, sizeof(http)/sizeof(http[0]) ))
+    if (len == ARRAY_SIZE( http ) && !memicmpW( str, http, ARRAY_SIZE( http )))
         return WS_URL_HTTP_SCHEME_TYPE;
 
-    if (len == sizeof(https)/sizeof(https[0]) && !memicmpW( str, https, sizeof(https)/sizeof(https[0]) ))
+    if (len == ARRAY_SIZE( https ) && !memicmpW( str, https, ARRAY_SIZE( https )))
         return WS_URL_HTTPS_SCHEME_TYPE;
 
-    if (len == sizeof(nettcp)/sizeof(nettcp[0]) && !memicmpW( str, nettcp, sizeof(nettcp)/sizeof(nettcp[0]) ))
+    if (len == ARRAY_SIZE( nettcp ) && !memicmpW( str, nettcp, ARRAY_SIZE( nettcp )))
         return WS_URL_NETTCP_SCHEME_TYPE;
 
-    if (len == sizeof(soapudp)/sizeof(soapudp[0]) && !memicmpW( str, soapudp, sizeof(soapudp)/sizeof(soapudp[0]) ))
+    if (len == ARRAY_SIZE( soapudp ) && !memicmpW( str, soapudp, ARRAY_SIZE( soapudp )))
         return WS_URL_SOAPUDP_SCHEME_TYPE;
 
-    if (len == sizeof(netpipe)/sizeof(netpipe[0]) && !memicmpW( str, netpipe, sizeof(netpipe)/sizeof(netpipe[0]) ))
+    if (len == ARRAY_SIZE( netpipe ) && !memicmpW( str, netpipe, ARRAY_SIZE( netpipe )))
         return WS_URL_NETPIPE_SCHEME_TYPE;
 
     return ~0u;
@@ -192,22 +192,22 @@ HRESULT WINAPI WsDecodeUrl( const WS_STRING *str, ULONG flags, WS_HEAP *heap, WS
         return E_NOTIMPL;
     }
     if (!(decoded = url_decode( str->chars, str->length, heap, &len_decoded )) ||
-        !(url = ws_alloc( heap, sizeof(*url) ))) goto error;
+        !(url = ws_alloc( heap, sizeof(*url) ))) goto done;
 
     hr = WS_E_INVALID_FORMAT;
 
     p = q = decoded;
     len = len_decoded;
     while (len && *q != ':') { q++; len--; };
-    if (*q != ':') goto error;
-    if ((url->url.scheme = scheme_type( p, q - p )) == ~0u) goto error;
+    if (*q != ':') goto done;
+    if ((url->url.scheme = scheme_type( p, q - p )) == ~0u) goto done;
 
-    if (!--len || *++q != '/') goto error;
-    if (!--len || *++q != '/') goto error;
+    if (!--len || *++q != '/') goto done;
+    if (!--len || *++q != '/') goto done;
 
     p = ++q; len--;
     while (len && *q != '/' && *q != ':' && *q != '?' && *q != '#') { q++; len--; };
-    if (q == p) goto error;
+    if (q == p) goto done;
     url->host.length = q - p;
     url->host.chars  = p;
 
@@ -216,7 +216,7 @@ HRESULT WINAPI WsDecodeUrl( const WS_STRING *str, ULONG flags, WS_HEAP *heap, WS
         p = ++q; len--;
         while (len && isdigitW( *q ))
         {
-            if ((port = port * 10 + *q - '0') > 65535) goto error;
+            if ((port = port * 10 + *q - '0') > 65535) goto done;
             q++; len--;
         };
         url->port = port;
@@ -258,11 +258,15 @@ HRESULT WINAPI WsDecodeUrl( const WS_STRING *str, ULONG flags, WS_HEAP *heap, WS
     else url->fragment.length = 0;
 
     *ret = (WS_URL *)url;
-    return S_OK;
+    hr = S_OK;
 
-error:
-    if (decoded != str->chars) ws_free( heap, decoded, len_decoded );
-    ws_free( heap, url, sizeof(*url) );
+done:
+    if (hr != S_OK)
+    {
+        if (decoded != str->chars) ws_free( heap, decoded, len_decoded );
+        ws_free( heap, url, sizeof(*url) );
+    }
+    TRACE( "returning %08x\n", hr );
     return hr;
 }
 
@@ -271,23 +275,23 @@ static const WCHAR *scheme_str( WS_URL_SCHEME_TYPE scheme, ULONG *len )
     switch (scheme)
     {
     case WS_URL_HTTP_SCHEME_TYPE:
-        *len = sizeof(http)/sizeof(http[0]);
+        *len = ARRAY_SIZE( http );
         return http;
 
     case WS_URL_HTTPS_SCHEME_TYPE:
-        *len = sizeof(https)/sizeof(https[0]);
+        *len = ARRAY_SIZE( https );
         return https;
 
     case WS_URL_NETTCP_SCHEME_TYPE:
-        *len = sizeof(nettcp)/sizeof(nettcp[0]);
+        *len = ARRAY_SIZE( nettcp );
         return nettcp;
 
     case WS_URL_SOAPUDP_SCHEME_TYPE:
-        *len = sizeof(soapudp)/sizeof(soapudp[0]);
+        *len = ARRAY_SIZE( soapudp );
         return soapudp;
 
     case WS_URL_NETPIPE_SCHEME_TYPE:
-        *len = sizeof(netpipe)/sizeof(netpipe[0]);
+        *len = ARRAY_SIZE( netpipe );
         return netpipe;
 
     default:
@@ -420,12 +424,12 @@ HRESULT WINAPI WsEncodeUrl( const WS_URL *base, ULONG flags, WS_HEAP *heap, WS_S
                             WS_ERROR *error )
 {
     static const WCHAR fmtW[] = {':','%','u',0};
-    ULONG len = 0, len_scheme, len_enc, ret_size;
+    ULONG len = 0, len_scheme, len_enc, ret_size = 0;
     const WS_HTTP_URL *url = (const WS_HTTP_URL *)base;
     const WCHAR *scheme;
-    WCHAR *str, *p, *q;
+    WCHAR *str = NULL, *p, *q;
     ULONG port = 0;
-    HRESULT hr;
+    HRESULT hr = WS_E_INVALID_FORMAT;
 
     TRACE( "%p %08x %p %p %p\n", base, flags, heap, ret, error );
     if (error) FIXME( "ignoring error parameter\n" );
@@ -436,28 +440,32 @@ HRESULT WINAPI WsEncodeUrl( const WS_URL *base, ULONG flags, WS_HEAP *heap, WS_S
         FIXME( "unimplemented flags %08x\n", flags );
         return E_NOTIMPL;
     }
-    if (!(scheme = scheme_str( url->url.scheme, &len_scheme ))) return WS_E_INVALID_FORMAT;
+    if (!(scheme = scheme_str( url->url.scheme, &len_scheme ))) goto done;
     len = len_scheme + 3; /* '://' */
     len += 6; /* ':65535' */
 
     if ((hr = url_encode_size( url->host.chars, url->host.length, "", &len_enc )) != S_OK)
-        return hr;
+        goto done;
     len += len_enc;
 
     if ((hr = url_encode_size( url->path.chars, url->path.length, "/", &len_enc )) != S_OK)
-        return hr;
+        goto done;
     len += len_enc;
 
     if ((hr = url_encode_size( url->query.chars, url->query.length, "/?", &len_enc )) != S_OK)
-        return hr;
+        goto done;
     len += len_enc + 1; /* '?' */
 
     if ((hr = url_encode_size( url->fragment.chars, url->fragment.length, "/?", &len_enc )) != S_OK)
-        return hr;
+        goto done;
     len += len_enc + 1; /* '#' */
 
     ret_size = len * sizeof(WCHAR);
-    if (!(str = ws_alloc( heap, ret_size ))) return WS_E_QUOTA_EXCEEDED;
+    if (!(str = ws_alloc( heap, ret_size )))
+    {
+        hr = WS_E_QUOTA_EXCEEDED;
+        goto done;
+    }
 
     memcpy( str, scheme, len_scheme * sizeof(WCHAR) );
     p = str + len_scheme;
@@ -466,7 +474,7 @@ HRESULT WINAPI WsEncodeUrl( const WS_URL *base, ULONG flags, WS_HEAP *heap, WS_S
     p += 3;
 
     if ((hr = url_encode( url->host.chars, url->host.length, p, "", &len_enc )) != S_OK)
-        goto error;
+        goto done;
     p += len_enc;
 
     if (url->portAsString.length)
@@ -478,14 +486,14 @@ HRESULT WINAPI WsEncodeUrl( const WS_URL *base, ULONG flags, WS_HEAP *heap, WS_S
             if ((port = port * 10 + *q - '0') > 65535)
             {
                 hr = WS_E_INVALID_FORMAT;
-                goto error;
+                goto done;
             }
             q++; len--;
         }
         if (url->port && port != url->port)
         {
             hr = E_INVALIDARG;
-            goto error;
+            goto done;
         }
     } else port = url->port;
 
@@ -499,14 +507,14 @@ HRESULT WINAPI WsEncodeUrl( const WS_URL *base, ULONG flags, WS_HEAP *heap, WS_S
     }
 
     if ((hr = url_encode( url->path.chars, url->path.length, p, "/", &len_enc )) != S_OK)
-        goto error;
+        goto done;
     p += len_enc;
 
     if (url->query.length)
     {
         *p++ = '?';
         if ((hr = url_encode( url->query.chars, url->query.length, p, "/?", &len_enc )) != S_OK)
-            goto error;
+            goto done;
         p += len_enc;
     }
 
@@ -514,15 +522,16 @@ HRESULT WINAPI WsEncodeUrl( const WS_URL *base, ULONG flags, WS_HEAP *heap, WS_S
     {
         *p++ = '#';
         if ((hr = url_encode( url->fragment.chars, url->fragment.length, p, "/?", &len_enc )) != S_OK)
-            goto error;
+            goto done;
         p += len_enc;
     }
 
     ret->length = p - str;
     ret->chars  = str;
-    return S_OK;
+    hr = S_OK;
 
-error:
-    ws_free( heap, str, ret_size );
+done:
+    if (hr != S_OK) ws_free( heap, str, ret_size );
+    TRACE( "returning %08x\n", hr );
     return hr;
 }

@@ -113,14 +113,14 @@ struct listener
         } udp;
     } u;
     ULONG                   prop_count;
-    struct prop             prop[sizeof(listener_props)/sizeof(listener_props[0])];
+    struct prop             prop[ARRAY_SIZE( listener_props )];
 };
 
 #define LISTENER_MAGIC (('L' << 24) | ('I' << 16) | ('S' << 8) | 'T')
 
 static struct listener *alloc_listener(void)
 {
-    static const ULONG count = sizeof(listener_props)/sizeof(listener_props[0]);
+    static const ULONG count = ARRAY_SIZE( listener_props );
     struct listener *ret;
     ULONG size = sizeof(*ret) + prop_size( listener_props, count );
 
@@ -139,7 +139,9 @@ static struct listener *alloc_listener(void)
         return NULL;
     }
     InitializeCriticalSection( &ret->cs );
+#ifndef __MINGW32__
     ret->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": listener.cs");
+#endif
 
     prop_init( listener_props, count, ret->prop, &ret[1] );
     ret->prop_count = count;
@@ -175,7 +177,9 @@ static void free_listener( struct listener *listener )
     CloseHandle( listener->wait );
     CloseHandle( listener->cancel );
 
+#ifndef __MINGW32__
     listener->cs.DebugInfo->Spare[0] = 0;
+#endif
     DeleteCriticalSection( &listener->cs );
     heap_free( listener );
 }
@@ -465,15 +469,11 @@ HRESULT WINAPI WsOpenListener( WS_LISTENER *handle, WS_STRING *url, const WS_ASY
         return E_INVALIDARG;
     }
 
-    if (listener->state != WS_LISTENER_STATE_CREATED)
-    {
-        LeaveCriticalSection( &listener->cs );
-        return WS_E_INVALID_OPERATION;
-    }
-
-    hr = open_listener( listener, url );
+    if (listener->state != WS_LISTENER_STATE_CREATED) hr = WS_E_INVALID_OPERATION;
+    else hr = open_listener( listener, url );
 
     LeaveCriticalSection( &listener->cs );
+    TRACE( "returning %08x\n", hr );
     return hr;
 }
 
@@ -489,6 +489,7 @@ static void close_listener( struct listener *listener )
 HRESULT WINAPI WsCloseListener( WS_LISTENER *handle, const WS_ASYNC_CONTEXT *ctx, WS_ERROR *error )
 {
     struct listener *listener = (struct listener *)handle;
+    HRESULT hr = S_OK;
 
     TRACE( "%p %p %p\n", handle, ctx, error );
     if (error) FIXME( "ignoring error parameter\n" );
@@ -507,7 +508,8 @@ HRESULT WINAPI WsCloseListener( WS_LISTENER *handle, const WS_ASYNC_CONTEXT *ctx
     close_listener( listener );
 
     LeaveCriticalSection( &listener->cs );
-    return S_OK;
+    TRACE( "returning %08x\n", hr );
+    return hr;
 }
 
 /**************************************************************************
@@ -516,6 +518,7 @@ HRESULT WINAPI WsCloseListener( WS_LISTENER *handle, const WS_ASYNC_CONTEXT *ctx
 HRESULT WINAPI WsResetListener( WS_LISTENER *handle, WS_ERROR *error )
 {
     struct listener *listener = (struct listener *)handle;
+    HRESULT hr = S_OK;
 
     TRACE( "%p %p\n", handle, error );
     if (error) FIXME( "ignoring error parameter\n" );
@@ -531,15 +534,13 @@ HRESULT WINAPI WsResetListener( WS_LISTENER *handle, WS_ERROR *error )
     }
 
     if (listener->state != WS_LISTENER_STATE_CREATED && listener->state != WS_LISTENER_STATE_CLOSED)
-    {
-        LeaveCriticalSection( &listener->cs );
-        return WS_E_INVALID_OPERATION;
-    }
-
-    reset_listener( listener );
+        hr = WS_E_INVALID_OPERATION;
+    else
+        reset_listener( listener );
 
     LeaveCriticalSection( &listener->cs );
-    return S_OK;
+    TRACE( "returning %08x\n", hr );
+    return hr;
 }
 
 /**************************************************************************
@@ -586,6 +587,7 @@ HRESULT WINAPI WsGetListenerProperty( WS_LISTENER *handle, WS_LISTENER_PROPERTY_
     }
 
     LeaveCriticalSection( &listener->cs );
+    TRACE( "returning %08x\n", hr );
     return hr;
 }
 
@@ -614,6 +616,7 @@ HRESULT WINAPI WsSetListenerProperty( WS_LISTENER *handle, WS_LISTENER_PROPERTY_
     hr = prop_set( listener->prop, listener->prop_count, id, value, size );
 
     LeaveCriticalSection( &listener->cs );
+    TRACE( "returning %08x\n", hr );
     return hr;
 }
 
@@ -641,37 +644,43 @@ HRESULT WINAPI WsAcceptChannel( WS_LISTENER *handle, WS_CHANNEL *channel_handle,
         return E_INVALIDARG;
     }
 
-    if (listener->state != WS_LISTENER_STATE_OPEN || listener->channel)
+    if (listener->state != WS_LISTENER_STATE_OPEN || (listener->channel && listener->channel != channel_handle))
     {
-        LeaveCriticalSection( &listener->cs );
-        return WS_E_INVALID_OPERATION;
+        hr = WS_E_INVALID_OPERATION;
     }
-
-    wait = listener->wait;
-    cancel = listener->cancel;
-    listener->channel = channel_handle;
-
-    switch (listener->binding)
+    else
     {
-    case WS_TCP_CHANNEL_BINDING:
-    {
-        SOCKET socket = listener->u.tcp.socket;
+        wait = listener->wait;
+        cancel = listener->cancel;
+        listener->channel = channel_handle;
 
-        LeaveCriticalSection( &listener->cs );
-        return channel_accept_tcp( socket, wait, cancel, channel_handle );
-    }
-    case WS_UDP_CHANNEL_BINDING:
-    {
-        SOCKET socket = listener->u.udp.socket;
+        switch (listener->binding)
+        {
+        case WS_TCP_CHANNEL_BINDING:
+        {
+            SOCKET socket = listener->u.tcp.socket;
 
-        LeaveCriticalSection( &listener->cs );
-        return channel_accept_udp( socket, wait, cancel, channel_handle );
-    }
-    default:
-        FIXME( "listener binding %u not supported\n", listener->binding );
-        break;
+            LeaveCriticalSection( &listener->cs );
+            hr = channel_accept_tcp( socket, wait, cancel, channel_handle );
+            TRACE( "returning %08x\n", hr );
+            return hr;
+        }
+        case WS_UDP_CHANNEL_BINDING:
+        {
+            SOCKET socket = listener->u.udp.socket;
+
+            LeaveCriticalSection( &listener->cs );
+            hr = channel_accept_udp( socket, wait, cancel, channel_handle );
+            TRACE( "returning %08x\n", hr );
+            return hr;
+        }
+        default:
+            FIXME( "listener binding %u not supported\n", listener->binding );
+            break;
+        }
     }
 
     LeaveCriticalSection( &listener->cs );
+    TRACE( "returning %08x\n", hr );
     return hr;
 }

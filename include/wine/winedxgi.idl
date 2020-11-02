@@ -18,7 +18,24 @@
 
 #pragma makedep header
 
-import "dxgi1_5.idl";
+import "dxgi1_6.idl";
+
+[
+    object,
+    local,
+    uuid(53cb4ff0-c25a-4164-a891-0e83db0a7aac)
+]
+interface IWineDXGISwapChainFactory : IUnknown
+{
+    HRESULT create_swapchain(
+        [in] IDXGIFactory *factory,
+        [in] HWND window,
+        [in] const DXGI_SWAP_CHAIN_DESC1 *desc,
+        [in] const DXGI_SWAP_CHAIN_FULLSCREEN_DESC *fullscreen_desc,
+        [in] IDXGIOutput *output,
+        [out] IDXGISwapChain1 **swapchain
+    );
+}
 
 [
     object,
@@ -56,7 +73,7 @@ interface IWineDXGIDeviceParent : IUnknown
     local,
     uuid(17399d75-964e-4c03-99f8-9d4fd196dd62)
 ]
-interface IWineDXGIAdapter : IDXGIAdapter3
+interface IWineDXGIAdapter : IDXGIAdapter4
 {
 }
 

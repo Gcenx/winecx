@@ -404,6 +404,7 @@ sub assign_sources_to_makefiles(@)
         my $parent = get_parent_makefile( $file );
         next unless $parent;
         preserve_shared_source_files( $makefiles{$file}, $makefiles{$parent}, "C_SRCS" );
+        preserve_shared_source_files( $makefiles{$file}, $makefiles{$parent}, "RC_SRCS" );
         preserve_shared_source_files( $makefiles{$file}, $makefiles{$parent}, "IDL_SRCS" );
         preserve_shared_source_files( $makefiles{$file}, $makefiles{$parent}, "LEX_SRCS" );
         preserve_shared_source_files( $makefiles{$file}, $makefiles{$parent}, "BISON_SRCS" );
@@ -463,11 +464,6 @@ sub update_makefiles(@)
             die "APPMODE should not be defined in $file" if defined $make{"APPMODE"};
             die "STATICLIB should not be defined in $file" if defined $make{"STATICLIB"};
             $args = ",,[test \"x\$enable_tools\" = xno]";
-        }
-        elsif (($dir eq "fonts") || ($dir eq "server"))
-        {
-            # these are created as symlinks for wow64 builds
-            $args = ",,[test -n \"\$with_wine64\"]";
         }
         push @lines, "WINE_CONFIG_MAKEFILE($dir$args)\n";
     }

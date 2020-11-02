@@ -108,7 +108,7 @@ static BOOL is_wow6432node( const UNICODE_STRING *name )
     static const WCHAR wow6432nodeW[] = {'W','o','w','6','4','3','2','N','o','d','e'};
 
     return (name->Length == sizeof(wow6432nodeW) &&
-            !memicmpW( name->Buffer, wow6432nodeW, sizeof(wow6432nodeW)/sizeof(WCHAR) ));
+            !memicmpW( name->Buffer, wow6432nodeW, ARRAY_SIZE( wow6432nodeW )));
 }
 
 /* open the Wow6432Node subkey of the specified key */
@@ -148,9 +148,9 @@ static NTSTATUS create_key( HKEY *retkey, ACCESS_MASK access, OBJECT_ATTRIBUTES 
         UNICODE_STRING str;
 
         /* don't try to create registry root */
-        if (!attr->RootDirectory && len > sizeof(registry_root)/sizeof(WCHAR) &&
-            !memicmpW( buffer, registry_root, sizeof(registry_root)/sizeof(WCHAR)))
-            i += sizeof(registry_root)/sizeof(WCHAR);
+        if (!attr->RootDirectory && len > ARRAY_SIZE( registry_root ) &&
+            !memicmpW( buffer, registry_root, ARRAY_SIZE( registry_root )))
+            i += ARRAY_SIZE( registry_root );
 
         while (i < len && buffer[i] != '\\') i++;
         if (i == len && !force_wow32) return status;
@@ -363,7 +363,7 @@ LSTATUS WINAPI RegOverridePredefKey( HKEY hkey, HKEY override )
  *
  * See RegCreateKeyExA.
  */
-LSTATUS WINAPI RegCreateKeyExW( HKEY hkey, LPCWSTR name, DWORD reserved, LPWSTR class,
+LSTATUS WINAPI DECLSPEC_HOTPATCH RegCreateKeyExW( HKEY hkey, LPCWSTR name, DWORD reserved, LPWSTR class,
                              DWORD options, REGSAM access, SECURITY_ATTRIBUTES *sa,
                              PHKEY retkey, LPDWORD dispos )
 {
@@ -410,7 +410,7 @@ LSTATUS WINAPI RegCreateKeyExW( HKEY hkey, LPCWSTR name, DWORD reserved, LPWSTR 
  * FIXME
  *  MAXIMUM_ALLOWED in access mask not supported by server
  */
-LSTATUS WINAPI RegCreateKeyExA( HKEY hkey, LPCSTR name, DWORD reserved, LPSTR class,
+LSTATUS WINAPI DECLSPEC_HOTPATCH RegCreateKeyExA( HKEY hkey, LPCSTR name, DWORD reserved, LPSTR class,
                              DWORD options, REGSAM access, SECURITY_ATTRIBUTES *sa,
                              PHKEY retkey, LPDWORD dispos )
 {
@@ -516,7 +516,7 @@ LSTATUS WINAPI RegCreateKeyTransactedA( HKEY hkey, LPCSTR name, DWORD reserved, 
  * 
  * See RegOpenKeyExA.
  */
-LSTATUS WINAPI RegOpenKeyExW( HKEY hkey, LPCWSTR name, DWORD options, REGSAM access, PHKEY retkey )
+LSTATUS WINAPI DECLSPEC_HOTPATCH RegOpenKeyExW( HKEY hkey, LPCWSTR name, DWORD options, REGSAM access, PHKEY retkey )
 {
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW;
@@ -1194,6 +1194,15 @@ LSTATUS WINAPI RegQueryInfoKeyA( HKEY hkey, LPSTR class, LPDWORD class_len, LPDW
     return RtlNtStatusToDosError( status );
 }
 
+/******************************************************************************
+ * RegQueryReflectionKey   [ADVAPI32.@]
+ */
+LONG WINAPI RegQueryReflectionKey( HKEY hkey, BOOL *is_reflection_disabled )
+{
+    FIXME( "%p, %p stub\n", hkey, is_reflection_disabled );
+    *is_reflection_disabled = TRUE;
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
 
 /******************************************************************************
  * RegCloseKey   [ADVAPI32.@]
@@ -1324,7 +1333,7 @@ LSTATUS WINAPI RegDeleteKeyA( HKEY hkey, LPCSTR name )
  *  Success: ERROR_SUCCESS
  *  Failure: Error code
  */
-LSTATUS WINAPI RegSetValueExW( HKEY hkey, LPCWSTR name, DWORD reserved,
+LSTATUS WINAPI DECLSPEC_HOTPATCH RegSetValueExW( HKEY hkey, LPCWSTR name, DWORD reserved,
                             DWORD type, const BYTE *data, DWORD count )
 {
     UNICODE_STRING nameW;
@@ -1356,7 +1365,7 @@ LSTATUS WINAPI RegSetValueExW( HKEY hkey, LPCWSTR name, DWORD reserved,
  *  win95 does not care about count for REG_SZ and finds out the len by itself (js)
  *  NT does definitely care (aj)
  */
-LSTATUS WINAPI RegSetValueExA( HKEY hkey, LPCSTR name, DWORD reserved, DWORD type,
+LSTATUS WINAPI DECLSPEC_HOTPATCH RegSetValueExA( HKEY hkey, LPCSTR name, DWORD reserved, DWORD type,
                             const BYTE *data, DWORD count )
 {
     ANSI_STRING nameA;
@@ -1750,7 +1759,7 @@ static DWORD query_perf_data(const WCHAR *query, DWORD *type, void *data, DWORD 
  *
  * See RegQueryValueExA.
  */
-LSTATUS WINAPI RegQueryValueExW( HKEY hkey, LPCWSTR name, LPDWORD reserved, LPDWORD type,
+LSTATUS WINAPI DECLSPEC_HOTPATCH RegQueryValueExW( HKEY hkey, LPCWSTR name, LPDWORD reserved, LPDWORD type,
                               LPBYTE data, LPDWORD count )
 {
     NTSTATUS status;
@@ -3231,7 +3240,8 @@ LSTATUS WINAPI RegLoadMUIStringW(HKEY hKey, LPCWSTR pwszValue, LPWSTR pwszBuffer
         uiStringId = atoiW(pComma+2);
         *pComma = '\0';
 
-        hModule = LoadLibraryW(pwszExpandedBuffer + 1);
+        hModule = LoadLibraryExW(pwszExpandedBuffer + 1, NULL,
+                                 LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
         if (!hModule || !load_string(hModule, uiStringId, pwszBuffer, cbBuffer/sizeof(WCHAR)))
             result = ERROR_BADKEY;
         FreeLibrary(hModule);

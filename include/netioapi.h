@@ -140,6 +140,12 @@ typedef struct _MIB_IPINTERFACE_ROW
     BOOLEAN DisableDefaultRoutes;
 } MIB_IPINTERFACE_ROW, *PMIB_IPINTERFACE_ROW;
 
+typedef struct _MIB_IPINTERFACE_TABLE
+{
+    ULONG NumEntries;
+    MIB_IPINTERFACE_ROW Table[ANY_SIZE];
+} MIB_IPINTERFACE_TABLE, *PMIB_IPINTERFACE_TABLE;
+
 typedef struct _MIB_UNICASTIPADDRESS_ROW
 {
     SOCKADDR_INET       Address;
@@ -193,6 +199,38 @@ typedef struct _MIB_IPFORWARD_TABLE2
     MIB_IPFORWARD_ROW2 Table[ANY_SIZE];
 } MIB_IPFORWARD_TABLE2, *PMIB_IPFORWARD_TABLE2;
 
+typedef struct _MIB_IPNET_ROW2
+{
+    SOCKADDR_INET Address;
+    NET_IFINDEX InterfaceIndex;
+    NET_LUID InterfaceLuid;
+    UCHAR PhysicalAddress[IF_MAX_PHYS_ADDRESS_LENGTH];
+    ULONG PhysicalAddressLength;
+    NL_NEIGHBOR_STATE State;
+
+    union
+    {
+        struct
+        {
+            BOOLEAN IsRouter : 1;
+            BOOLEAN IsUnreachable : 1;
+        } DUMMYSTRUCTNAME;
+        UCHAR Flags;
+    } DUMMYUNIONNAME;
+
+    union
+    {
+        ULONG LastReachable;
+        ULONG LastUnreachable;
+    } ReachabilityTime;
+} MIB_IPNET_ROW2, *PMIB_IPNET_ROW2;
+
+typedef struct _MIB_IPNET_TABLE2
+{
+    ULONG NumEntries;
+    MIB_IPNET_ROW2 Table[ANY_SIZE];
+} MIB_IPNET_TABLE2, *PMIB_IPNET_TABLE2;
+
 typedef VOID (WINAPI *PIPINTERFACE_CHANGE_CALLBACK)(PVOID, PMIB_IPINTERFACE_ROW,
                                                     MIB_NOTIFICATION_TYPE);
 typedef VOID (WINAPI *PUNICAST_IPADDRESS_CHANGE_CALLBACK)(PVOID, PMIB_UNICASTIPADDRESS_ROW,
@@ -210,6 +248,7 @@ DWORD WINAPI ConvertLengthToIpv4Mask(ULONG,ULONG*);
 void WINAPI FreeMibTable(void*);
 DWORD WINAPI GetIfEntry2(MIB_IF_ROW2*);
 DWORD WINAPI GetIfTable2(MIB_IF_TABLE2**);
+DWORD WINAPI GetIpInterfaceTable(ADDRESS_FAMILY,MIB_IPINTERFACE_TABLE**);
 DWORD WINAPI GetUnicastIpAddressEntry(MIB_UNICASTIPADDRESS_ROW*);
 PCHAR WINAPI if_indextoname(NET_IFINDEX,PCHAR);
 NET_IFINDEX WINAPI if_nametoindex(PCSTR);

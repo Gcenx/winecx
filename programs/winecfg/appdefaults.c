@@ -48,7 +48,7 @@ static const struct
     const char *szProductType;
 } win_versions[] =
 {
-    { "win10",       "Windows 10",       10,  0, 0x3AD7,VER_PLATFORM_WIN32_NT, "", 0, 0, "WinNT"},
+    { "win10",       "Windows 10",       10,  0, 0x42EE,VER_PLATFORM_WIN32_NT, "", 0, 0, "WinNT"},
     { "win81",       "Windows 8.1",       6,  3, 0x2580,VER_PLATFORM_WIN32_NT, "", 0, 0, "WinNT"},
     { "win8",        "Windows 8",         6,  2, 0x23F0,VER_PLATFORM_WIN32_NT, "", 0, 0, "WinNT"},
     { "win2008r2",   "Windows 2008 R2",   6,  1, 0x1DB1,VER_PLATFORM_WIN32_NT, "Service Pack 1", 1, 0, "ServerNT"},
@@ -431,6 +431,7 @@ static void on_winver_change(HWND dialog)
 
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CSDVersion", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CurrentVersion", NULL);
+            set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CurrentBuild", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CurrentBuildNumber", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "ProductName", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyProdNT, "ProductType", NULL);
@@ -445,6 +446,7 @@ static void on_winver_change(HWND dialog)
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CurrentVersion", Buffer);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CSDVersion", win_versions[selection].szCSDVersion);
             snprintf(Buffer, sizeof(Buffer), "%d", win_versions[selection].dwBuildNumber);
+            set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CurrentBuild", Buffer);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CurrentBuildNumber", Buffer);
             snprintf(Buffer, sizeof(Buffer), "Microsoft %s", win_versions[selection].szDescription);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "ProductName", Buffer);
@@ -463,6 +465,7 @@ static void on_winver_change(HWND dialog)
         case VER_PLATFORM_WIN32s:
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CSDVersion", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CurrentVersion", NULL);
+            set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CurrentBuild", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CurrentBuildNumber", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "ProductName", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyProdNT, "ProductType", NULL);

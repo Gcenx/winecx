@@ -177,6 +177,8 @@ extern int capture_displays_for_fullscreen DECLSPEC_HIDDEN;
 extern int mac_edit_menu DECLSPEC_HIDDEN;
 extern int left_option_is_alt DECLSPEC_HIDDEN;
 extern int right_option_is_alt DECLSPEC_HIDDEN;
+extern int left_command_is_ctrl DECLSPEC_HIDDEN;
+extern int right_command_is_ctrl DECLSPEC_HIDDEN;
 extern int allow_immovable_windows DECLSPEC_HIDDEN;
 extern int cursor_clipping_locks_windows DECLSPEC_HIDDEN;
 extern int use_precise_scrolling DECLSPEC_HIDDEN;
@@ -602,5 +604,8 @@ extern macdrv_status_item macdrv_create_status_item(macdrv_event_queue q) DECLSP
 extern void macdrv_destroy_status_item(macdrv_status_item s) DECLSPEC_HIDDEN;
 extern void macdrv_set_status_item_image(macdrv_status_item s, CGImageRef cgimage) DECLSPEC_HIDDEN;
 extern void macdrv_set_status_item_tooltip(macdrv_status_item s, CFStringRef cftip) DECLSPEC_HIDDEN;
+
+/* CrossOver Hack #15388 */
+extern int quicken_signin_hack;
 
 #endif  /* __WINE_MACDRV_COCOA_H */

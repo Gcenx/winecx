@@ -21,6 +21,7 @@
 #define WIN32_LEAN_AND_MEAN
 
 #include <stdarg.h>
+#include <assert.h>
 #include <windows.h>
 #include <winsvc.h>
 #include <rpc.h>
@@ -114,6 +115,7 @@ DWORD service_create(LPCWSTR name, struct service_entry **entry)
     if (!*entry)
         return ERROR_NOT_ENOUGH_SERVER_MEMORY;
     (*entry)->name = strdupW(name);
+    list_init(&(*entry)->handles);
     if (!(*entry)->name)
     {
         HeapFree(GetProcessHeap(), 0, *entry);
@@ -136,6 +138,7 @@ DWORD service_create(LPCWSTR name, struct service_entry **entry)
 
 void free_service_entry(struct service_entry *entry)
 {
+    assert(list_empty(&entry->handles));
     CloseHandle(entry->status_changed_event);
     HeapFree(GetProcessHeap(), 0, entry->name);
     HeapFree(GetProcessHeap(), 0, entry->config.lpBinaryPathName);
@@ -664,7 +667,7 @@ static LPWSTR service_get_pipe_name(void)
 {
     static const WCHAR format[] = { '\\','\\','.','\\','p','i','p','e','\\',
         'n','e','t','\\','N','t','C','o','n','t','r','o','l','P','i','p','e','%','u',0};
-    static WCHAR name[sizeof(format)/sizeof(WCHAR) + 10]; /* strlenW("4294967295") */
+    static WCHAR name[ARRAY_SIZE(format) + 10]; /* strlenW("4294967295") */
     static DWORD service_current = 0;
     DWORD len, value = -1;
     LONG ret;
@@ -776,7 +779,7 @@ static DWORD add_winedevice_service(const struct service_entry *service, WCHAR *
                                     struct service_entry **entry)
 {
     static const WCHAR format[] = {'W','i','n','e','d','e','v','i','c','e','%','u',0};
-    static WCHAR name[sizeof(format)/sizeof(WCHAR) + 10]; /* strlenW("4294967295") */
+    static WCHAR name[ARRAY_SIZE(format) + 10]; /* strlenW("4294967295") */
     static DWORD current = 0;
     struct scmdatabase *db = service->db;
     DWORD err;

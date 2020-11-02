@@ -1119,8 +1119,7 @@ static void dump_varargs_object_attributes( const char *prefix, data_size_t size
         fprintf( stderr, ",name=L\"" );
         dump_strW( str, objattr->name_len / sizeof(WCHAR), stderr, "\"\"" );
         fputc( '\"', stderr );
-        remove_data( ((sizeof(*objattr) + objattr->sd_len) / sizeof(WCHAR)) * sizeof(WCHAR) +
-                     (objattr->name_len / sizeof(WCHAR)) * sizeof(WCHAR) );
+        remove_data( (sizeof(*objattr) + (objattr->sd_len & ~1) + (objattr->name_len & ~1) + 3) & ~3 );
     }
     fputc( '}', stderr );
 }
@@ -1146,7 +1145,7 @@ static void dump_varargs_filesystem_event( const char *prefix, data_size_t size 
         data_size_t len = (offsetof( struct filesystem_event, name[event->len] ) + sizeof(int)-1)
                            / sizeof(int) * sizeof(int);
         if (size < len) break;
-        if (event->action < sizeof(actions)/sizeof(actions[0]) && actions[event->action])
+        if (event->action < ARRAY_SIZE( actions ) && actions[event->action])
             fprintf( stderr, "{action=%s", actions[event->action] );
         else
             fprintf( stderr, "{action=%u", event->action );
@@ -1178,10 +1177,12 @@ static void dump_varargs_pe_image_info( const char *prefix, data_size_t size )
     dump_uint64( ",stack_commit=", &info.stack_commit );
     fprintf( stderr, ",zerobits=%08x,subsystem=%08x,subsystem_low=%04x,subsystem_high=%04x,gp=%08x"
              ",image_charact=%04x,dll_charact=%04x,machine=%04x,contains_code=%u,image_flags=%02x"
-             ",loader_flags=%08x,header_size=%08x,file_size=%08x,checksum=%08x}",
+             ",loader_flags=%08x,header_size=%08x,file_size=%08x,checksum=%08x",
              info.zerobits, info.subsystem, info.subsystem_low, info.subsystem_high, info.gp,
              info.image_charact, info.dll_charact, info.machine, info.contains_code, info.image_flags,
              info.loader_flags, info.header_size, info.file_size, info.checksum );
+    dump_cpu_type( ",cpu=", &info.cpu );
+    fputc( '}', stderr );
     remove_data( size );
 }
 
@@ -1230,12 +1231,10 @@ static void dump_new_process_request( const struct new_process_request *req )
     fprintf( stderr, ", create_flags=%08x", req->create_flags );
     fprintf( stderr, ", socket_fd=%d", req->socket_fd );
     fprintf( stderr, ", exe_file=%04x", req->exe_file );
-    fprintf( stderr, ", process_access=%08x", req->process_access );
-    fprintf( stderr, ", process_attr=%08x", req->process_attr );
-    fprintf( stderr, ", thread_access=%08x", req->thread_access );
-    fprintf( stderr, ", thread_attr=%08x", req->thread_attr );
+    fprintf( stderr, ", access=%08x", req->access );
     dump_cpu_type( ", cpu=", &req->cpu );
     fprintf( stderr, ", info_size=%u", req->info_size );
+    dump_varargs_object_attributes( ", objattr=", cur_size );
     dump_varargs_startup_info( ", info=", min(cur_size,req->info_size) );
     dump_varargs_unicode_str( ", env=", cur_size );
 }
@@ -1244,9 +1243,14 @@ static void dump_new_process_reply( const struct new_process_reply *req )
 {
     fprintf( stderr, " info=%04x", req->info );
     fprintf( stderr, ", pid=%04x", req->pid );
-    fprintf( stderr, ", phandle=%04x", req->phandle );
-    fprintf( stderr, ", tid=%04x", req->tid );
-    fprintf( stderr, ", thandle=%04x", req->thandle );
+    fprintf( stderr, ", handle=%04x", req->handle );
+}
+
+static void dump_exec_process_request( const struct exec_process_request *req )
+{
+    fprintf( stderr, " socket_fd=%d", req->socket_fd );
+    fprintf( stderr, ", exe_file=%04x", req->exe_file );
+    dump_cpu_type( ", cpu=", &req->cpu );
 }
 
 static void dump_get_new_process_info_request( const struct get_new_process_info_request *req )
@@ -1262,10 +1266,11 @@ static void dump_get_new_process_info_reply( const struct get_new_process_info_r
 
 static void dump_new_thread_request( const struct new_thread_request *req )
 {
-    fprintf( stderr, " access=%08x", req->access );
-    fprintf( stderr, ", attributes=%08x", req->attributes );
+    fprintf( stderr, " process=%04x", req->process );
+    fprintf( stderr, ", access=%08x", req->access );
     fprintf( stderr, ", suspend=%d", req->suspend );
     fprintf( stderr, ", request_fd=%d", req->request_fd );
+    dump_varargs_object_attributes( ", objattr=", cur_size );
 }
 
 static void dump_new_thread_reply( const struct new_thread_reply *req )
@@ -1280,8 +1285,7 @@ static void dump_get_startup_info_request( const struct get_startup_info_request
 
 static void dump_get_startup_info_reply( const struct get_startup_info_reply *req )
 {
-    fprintf( stderr, " exe_file=%04x", req->exe_file );
-    fprintf( stderr, ", info_size=%u", req->info_size );
+    fprintf( stderr, " info_size=%u", req->info_size );
     dump_varargs_startup_info( ", info=", min(cur_size,req->info_size) );
     dump_varargs_unicode_str( ", env=", cur_size );
 }
@@ -3023,21 +3027,6 @@ static void dump_create_named_pipe_reply( const struct create_named_pipe_reply *
     fprintf( stderr, " handle=%04x", req->handle );
 }
 
-static void dump_get_named_pipe_info_request( const struct get_named_pipe_info_request *req )
-{
-    fprintf( stderr, " handle=%04x", req->handle );
-}
-
-static void dump_get_named_pipe_info_reply( const struct get_named_pipe_info_reply *req )
-{
-    fprintf( stderr, " flags=%08x", req->flags );
-    fprintf( stderr, ", sharing=%08x", req->sharing );
-    fprintf( stderr, ", maxinstances=%08x", req->maxinstances );
-    fprintf( stderr, ", instances=%08x", req->instances );
-    fprintf( stderr, ", outsize=%08x", req->outsize );
-    fprintf( stderr, ", insize=%08x", req->insize );
-}
-
 static void dump_set_named_pipe_info_request( const struct set_named_pipe_info_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -3181,6 +3170,7 @@ static void dump_get_window_children_from_point_request( const struct get_window
     fprintf( stderr, " parent=%08x", req->parent );
     fprintf( stderr, ", x=%d", req->x );
     fprintf( stderr, ", y=%d", req->y );
+    fprintf( stderr, ", dpi=%d", req->dpi );
 }
 
 static void dump_get_window_children_from_point_reply( const struct get_window_children_from_point_reply *req )
@@ -3229,6 +3219,7 @@ static void dump_get_window_rectangles_request( const struct get_window_rectangl
 {
     fprintf( stderr, " handle=%08x", req->handle );
     fprintf( stderr, ", relative=%d", req->relative );
+    fprintf( stderr, ", dpi=%d", req->dpi );
 }
 
 static void dump_get_window_rectangles_reply( const struct get_window_rectangles_reply *req )
@@ -3258,6 +3249,7 @@ static void dump_get_windows_offset_request( const struct get_windows_offset_req
 {
     fprintf( stderr, " from=%08x", req->from );
     fprintf( stderr, ", to=%08x", req->to );
+    fprintf( stderr, ", dpi=%d", req->dpi );
 }
 
 static void dump_get_windows_offset_reply( const struct get_windows_offset_reply *req )
@@ -4419,23 +4411,13 @@ static void dump_add_fd_completion_request( const struct add_fd_completion_reque
     dump_uint64( ", cvalue=", &req->cvalue );
     dump_uint64( ", information=", &req->information );
     fprintf( stderr, ", status=%08x", req->status );
-    fprintf( stderr, ", force=%d", req->force );
+    fprintf( stderr, ", async=%d", req->async );
 }
 
-static void dump_set_fd_compl_info_request( const struct set_fd_compl_info_request *req )
+static void dump_set_fd_completion_mode_request( const struct set_fd_completion_mode_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
-    fprintf( stderr, ", flags=%d", req->flags );
-}
-
-static void dump_get_fd_compl_info_request( const struct get_fd_compl_info_request *req )
-{
-    fprintf( stderr, " handle=%04x", req->handle );
-}
-
-static void dump_get_fd_compl_info_reply( const struct get_fd_compl_info_reply *req )
-{
-    fprintf( stderr, " flags=%d", req->flags );
+    fprintf( stderr, ", flags=%08x", req->flags );
 }
 
 static void dump_set_fd_disp_info_request( const struct set_fd_disp_info_request *req )
@@ -4585,6 +4567,7 @@ static void dump_terminate_job_request( const struct terminate_job_request *req 
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_new_process_request,
+    (dump_func)dump_exec_process_request,
     (dump_func)dump_get_new_process_info_request,
     (dump_func)dump_new_thread_request,
     (dump_func)dump_get_startup_info_request,
@@ -4741,7 +4724,6 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_ioctl_request,
     (dump_func)dump_set_irp_result_request,
     (dump_func)dump_create_named_pipe_request,
-    (dump_func)dump_get_named_pipe_info_request,
     (dump_func)dump_set_named_pipe_info_request,
     (dump_func)dump_create_window_request,
     (dump_func)dump_destroy_window_request,
@@ -4860,8 +4842,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_query_completion_request,
     (dump_func)dump_set_completion_info_request,
     (dump_func)dump_add_fd_completion_request,
-    (dump_func)dump_set_fd_compl_info_request,
-    (dump_func)dump_get_fd_compl_info_request,
+    (dump_func)dump_set_fd_completion_mode_request,
     (dump_func)dump_set_fd_disp_info_request,
     (dump_func)dump_set_fd_name_info_request,
     (dump_func)dump_get_window_layered_info_request,
@@ -4883,6 +4864,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_new_process_reply,
+    NULL,
     (dump_func)dump_get_new_process_info_reply,
     (dump_func)dump_new_thread_reply,
     (dump_func)dump_get_startup_info_reply,
@@ -5039,7 +5021,6 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_ioctl_reply,
     NULL,
     (dump_func)dump_create_named_pipe_reply,
-    (dump_func)dump_get_named_pipe_info_reply,
     NULL,
     (dump_func)dump_create_window_reply,
     NULL,
@@ -5159,7 +5140,6 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     NULL,
     NULL,
-    (dump_func)dump_get_fd_compl_info_reply,
     NULL,
     NULL,
     (dump_func)dump_get_window_layered_info_reply,
@@ -5181,6 +5161,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
 
 static const char * const req_names[REQ_NB_REQUESTS] = {
     "new_process",
+    "exec_process",
     "get_new_process_info",
     "new_thread",
     "get_startup_info",
@@ -5337,7 +5318,6 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "ioctl",
     "set_irp_result",
     "create_named_pipe",
-    "get_named_pipe_info",
     "set_named_pipe_info",
     "create_window",
     "destroy_window",
@@ -5456,8 +5436,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "query_completion",
     "set_completion_info",
     "add_fd_completion",
-    "set_fd_compl_info",
-    "get_fd_compl_info",
+    "set_fd_completion_mode",
     "set_fd_disp_info",
     "set_fd_name_info",
     "get_window_layered_info",
@@ -5539,6 +5518,7 @@ static const struct
     { "INVALID_IMAGE_NE_FORMAT",     STATUS_INVALID_IMAGE_NE_FORMAT },
     { "INVALID_IMAGE_NOT_MZ",        STATUS_INVALID_IMAGE_NOT_MZ },
     { "INVALID_IMAGE_PROTECT",       STATUS_INVALID_IMAGE_PROTECT },
+    { "INVALID_IMAGE_WIN_16",        STATUS_INVALID_IMAGE_WIN_16 },
     { "INVALID_IMAGE_WIN_64",        STATUS_INVALID_IMAGE_WIN_64 },
     { "INVALID_LOCK_SEQUENCE",       STATUS_INVALID_LOCK_SEQUENCE },
     { "INVALID_OWNER",               STATUS_INVALID_OWNER },
@@ -5603,6 +5583,49 @@ static const struct
     { "USER_MAPPED_FILE",            STATUS_USER_MAPPED_FILE },
     { "VOLUME_DISMOUNTED",           STATUS_VOLUME_DISMOUNTED },
     { "WAS_LOCKED",                  STATUS_WAS_LOCKED },
+    { "WSAEACCES",                   0xc0010000 | WSAEACCES },
+    { "WSAEADDRINUSE",               0xc0010000 | WSAEADDRINUSE },
+    { "WSAEADDRNOTAVAIL",            0xc0010000 | WSAEADDRNOTAVAIL },
+    { "WSAEAFNOSUPPORT",             0xc0010000 | WSAEAFNOSUPPORT },
+    { "WSAEALREADY",                 0xc0010000 | WSAEALREADY },
+    { "WSAEBADF",                    0xc0010000 | WSAEBADF },
+    { "WSAECONNABORTED",             0xc0010000 | WSAECONNABORTED },
+    { "WSAECONNREFUSED",             0xc0010000 | WSAECONNREFUSED },
+    { "WSAECONNRESET",               0xc0010000 | WSAECONNRESET },
+    { "WSAEDESTADDRREQ",             0xc0010000 | WSAEDESTADDRREQ },
+    { "WSAEDQUOT",                   0xc0010000 | WSAEDQUOT },
+    { "WSAEFAULT",                   0xc0010000 | WSAEFAULT },
+    { "WSAEHOSTDOWN",                0xc0010000 | WSAEHOSTDOWN },
+    { "WSAEHOSTUNREACH",             0xc0010000 | WSAEHOSTUNREACH },
+    { "WSAEINPROGRESS",              0xc0010000 | WSAEINPROGRESS },
+    { "WSAEINTR",                    0xc0010000 | WSAEINTR },
+    { "WSAEINVAL",                   0xc0010000 | WSAEINVAL },
+    { "WSAEISCONN",                  0xc0010000 | WSAEISCONN },
+    { "WSAELOOP",                    0xc0010000 | WSAELOOP },
+    { "WSAEMFILE",                   0xc0010000 | WSAEMFILE },
+    { "WSAEMSGSIZE",                 0xc0010000 | WSAEMSGSIZE },
+    { "WSAENAMETOOLONG",             0xc0010000 | WSAENAMETOOLONG },
+    { "WSAENETDOWN",                 0xc0010000 | WSAENETDOWN },
+    { "WSAENETRESET",                0xc0010000 | WSAENETRESET },
+    { "WSAENETUNREACH",              0xc0010000 | WSAENETUNREACH },
+    { "WSAENOBUFS",                  0xc0010000 | WSAENOBUFS },
+    { "WSAENOPROTOOPT",              0xc0010000 | WSAENOPROTOOPT },
+    { "WSAENOTCONN",                 0xc0010000 | WSAENOTCONN },
+    { "WSAENOTEMPTY",                0xc0010000 | WSAENOTEMPTY },
+    { "WSAENOTSOCK",                 0xc0010000 | WSAENOTSOCK },
+    { "WSAEOPNOTSUPP",               0xc0010000 | WSAEOPNOTSUPP },
+    { "WSAEPFNOSUPPORT",             0xc0010000 | WSAEPFNOSUPPORT },
+    { "WSAEPROCLIM",                 0xc0010000 | WSAEPROCLIM },
+    { "WSAEPROTONOSUPPORT",          0xc0010000 | WSAEPROTONOSUPPORT },
+    { "WSAEPROTOTYPE",               0xc0010000 | WSAEPROTOTYPE },
+    { "WSAEREMOTE",                  0xc0010000 | WSAEREMOTE },
+    { "WSAESHUTDOWN",                0xc0010000 | WSAESHUTDOWN },
+    { "WSAESOCKTNOSUPPORT",          0xc0010000 | WSAESOCKTNOSUPPORT },
+    { "WSAESTALE",                   0xc0010000 | WSAESTALE },
+    { "WSAETIMEDOUT",                0xc0010000 | WSAETIMEDOUT },
+    { "WSAETOOMANYREFS",             0xc0010000 | WSAETOOMANYREFS },
+    { "WSAEUSERS",                   0xc0010000 | WSAEUSERS },
+    { "WSAEWOULDBLOCK",              0xc0010000 | WSAEWOULDBLOCK },
     { NULL, 0 }
 };
 

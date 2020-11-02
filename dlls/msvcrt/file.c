@@ -786,7 +786,6 @@ MSVCRT_FILE * CDECL MSVCRT___iob_func(void)
  return &MSVCRT__iob[0];
 }
 
-#if _MSVCR_VER >= 140
 /*********************************************************************
  *		__acrt_iob_func(UCRTBASE.@)
  */
@@ -794,7 +793,6 @@ MSVCRT_FILE * CDECL MSVCRT___acrt_iob_func(unsigned idx)
 {
  return &MSVCRT__iob[idx];
 }
-#endif
 
 /*********************************************************************
  *		_access (MSVCRT.@)
@@ -2099,7 +2097,7 @@ static unsigned split_oflags(unsigned oflags)
     else if (oflags & MSVCRT__O_WTEXT)          wxflags |= WX_TEXT;
     else if (oflags & MSVCRT__O_U16TEXT)        wxflags |= WX_TEXT;
     else if (oflags & MSVCRT__O_U8TEXT)         wxflags |= WX_TEXT;
-    else if (*__p__fmode() & MSVCRT__O_BINARY)  {/* Nothing to do */}
+    else if (*MSVCRT___p__fmode() & MSVCRT__O_BINARY)  {/* Nothing to do */}
     else                                        wxflags |= WX_TEXT; /* default to TEXT*/
     if (oflags & MSVCRT__O_NOINHERIT)           wxflags |= WX_DONTINHERIT;
 

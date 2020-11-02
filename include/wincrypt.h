@@ -2345,6 +2345,7 @@ static const WCHAR CERT_TRUST_PUB_AUTHENTICODE_FLAGS_VALUE_NAME[] =
 #define CRYPT_OID_IMPORT_PRIVATE_KEY_INFO_FUNC "CryptDllImportPrivateKeyInfoEx"
 #define CRYPT_OID_VERIFY_CERTIFICATE_CHAIN_POLICY_FUNC \
  "CertDllVerifyCertificateChainPolicy"
+#define CRYPT_OID_CONVERT_PUBLIC_KEY_INFO_FUNC "CryptDllConvertPublicKeyInfo"
 #define URL_OID_GET_OBJECT_URL_FUNC    "UrlDllGetObjectUrl"
 #define TIME_VALID_OID_GET_OBJECT_FUNC "TimeValidDllGetObject"
 #define CMSG_OID_GEN_CONTENT_ENCRYPT_KEY_FUNC "CryptMsgDllGenContentEncryptKey"
@@ -2374,6 +2375,7 @@ static const WCHAR CRYPT_OID_REG_FLAGS_VALUE_NAME[] =
 #define CRYPT_DEFAULT_OID                    "DEFAULT"
 
 #define CRYPT_INSTALL_OID_FUNC_BEFORE_FLAG 1
+#define CRYPT_INSTALL_OID_INFO_BEFORE_FLAG 1
 
 #define CRYPT_GET_INSTALLED_OID_FUNC_FLAG  0x1
 
@@ -2539,7 +2541,7 @@ static const WCHAR CERT_PHYSICAL_STORE_AUTH_ROOT_NAME[] =
 #define CERT_SIGNATURE_HASH_PROP_ID                15
 #define CERT_SMART_CARD_DATA_PROP_ID               16
 #define CERT_EFS_PROP_ID                           17
-#define CERT_FORTEZZA_DATA_PROP                    18
+#define CERT_FORTEZZA_DATA_PROP_ID                 18
 #define CERT_ARCHIVED_PROP_ID                      19
 #define CERT_KEY_IDENTIFIER_PROP_ID                20
 #define CERT_AUTO_ENROLL_PROP_ID                   21
@@ -2831,6 +2833,12 @@ typedef struct _CTL_FIND_SUBJECT_PARA
 #define CRYPT_STRING_BASE64X509CRLHEADER 0x00000009
 #define CRYPT_STRING_HEXADDR             0x0000000a
 #define CRYPT_STRING_HEXASCIIADDR        0x0000000b
+#define CRYPT_STRING_HEXRAW              0x0000000c
+#define CRYPT_STRING_BASE64URI           0x0000000d
+
+#define CRYPT_STRING_PERCENTESCAPE       0x08000000
+#define CRYPT_STRING_HASHDATA            0x10000000
+#define CRYPT_STRING_STRICT              0x20000000
 #define CRYPT_STRING_NOCRLF              0x40000000
 #define CRYPT_STRING_NOCR                0x80000000
 

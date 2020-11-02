@@ -417,6 +417,9 @@ sub needs_wrapper($$)
     my %funcs =
         (
          "glDebugEntry" => 1,
+         "glDebugMessageCallback" => 1,
+         "glDebugMessageCallbackAMD" => 1,
+         "glDebugMessageCallbackARB" => 1,
          "glGetIntegerv" => 1,
          "glGetString" => 1,
          "glGetStringi" => 1,
@@ -665,9 +668,6 @@ print HEADER "#define __WINE_WGL_H\n\n";
 print HEADER "#ifndef GLAPIENTRY\n";
 print HEADER "#define GLAPIENTRY __stdcall\n";
 print HEADER "#endif\n\n";
-
-print HEADER "#undef near\n";
-print HEADER "#undef far\n\n";
 
 foreach (@gl_types)
 {

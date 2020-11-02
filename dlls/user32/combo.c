@@ -1029,14 +1029,6 @@ static void CBDropDown( LPHEADCOMBO lphc )
 
       if (nHeight < nDroppedHeight - COMBO_YBORDERSIZE())
          nDroppedHeight = nHeight + COMBO_YBORDERSIZE();
-
-      if (nDroppedHeight < nHeight)
-      {
-            if (nItems < 5)
-                nDroppedHeight = (nItems+1)*nIHeight;
-            else if (nDroppedHeight < 6*nIHeight)
-                nDroppedHeight = 6*nIHeight;
-      }
    }
 
    r.left = rect.left;
@@ -1544,7 +1536,7 @@ static void COMBO_Size( LPHEADCOMBO lphc )
 		  &lphc->buttonRect,
 		  &lphc->droppedRect);
 
-  CBResetPos( lphc, &lphc->textRect, &lphc->droppedRect, TRUE );
+  CBResetPos( lphc, &lphc->textRect, &lphc->droppedRect, FALSE );
 }
 
 

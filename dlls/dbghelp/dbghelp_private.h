@@ -227,6 +227,7 @@ struct symt_public
     struct symt                 symt;
     struct hash_table_elt       hash_elt;
     struct symt*                container;      /* compiland */
+    BOOL is_function;
     unsigned long               address;
     unsigned long               size;
 };
@@ -657,9 +658,9 @@ extern BOOL pdb_virtual_unwind(struct cpu_stack_walk *csw, DWORD_PTR ip,
     union ctx *context, struct pdb_cmd_pair *cpair) DECLSPEC_HIDDEN;
 
 /* path.c */
-extern BOOL         path_find_symbol_file(const struct process* pcs, PCSTR full_path,
-                                          const GUID* guid, DWORD dw1, DWORD dw2, PSTR buffer,
-                                          BOOL* is_unmatched) DECLSPEC_HIDDEN;
+extern BOOL         path_find_symbol_file(const struct process* pcs, const struct module* module,
+                                          PCSTR full_path, const GUID* guid, DWORD dw1, DWORD dw2,
+                                          WCHAR *buffer, BOOL* is_unmatched) DECLSPEC_HIDDEN;
 
 /* pe_module.c */
 extern BOOL         pe_load_nt_header(HANDLE hProc, DWORD64 base, IMAGE_NT_HEADERS* nth) DECLSPEC_HIDDEN;
@@ -716,7 +717,9 @@ extern struct symt_public*
                     symt_new_public(struct module* module, 
                                     struct symt_compiland* parent, 
                                     const char* typename,
-                                    unsigned long address, unsigned size) DECLSPEC_HIDDEN;
+                                    BOOL is_function,
+                                    unsigned long address,
+                                    unsigned size) DECLSPEC_HIDDEN;
 extern struct symt_data*
                     symt_new_global_variable(struct module* module, 
                                              struct symt_compiland* parent,

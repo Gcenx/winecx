@@ -257,7 +257,7 @@ WCHAR *WCMD_fgets(WCHAR *buf, DWORD noChars, HANDLE h)
       const char *p;
 
       cp = GetConsoleCP();
-      bufA = heap_alloc(noChars);
+      bufA = heap_xalloc(noChars);
 
       /* Save current file position */
       filepos.QuadPart = 0;
@@ -399,6 +399,7 @@ void WCMD_HandleTildaModifiers(WCHAR **start, BOOL atExecute)
   WCHAR  finaloutput[MAX_PATH];
   WCHAR  fullfilename[MAX_PATH];
   WCHAR  thisoutput[MAX_PATH];
+  WCHAR  *filepart       = NULL;
   WCHAR  *pos            = *start+1;
   WCHAR  *firstModifier  = pos;
   WCHAR  *lastModifier   = NULL;
@@ -459,10 +460,19 @@ void WCMD_HandleTildaModifiers(WCHAR **start, BOOL atExecute)
   }
   if (lastModifier == firstModifier) return; /* Invalid syntax */
 
-  /* Extract the parameter to play with */
-  if (*lastModifier == '0') {
+  /* So now, firstModifier points to beginning of modifiers, lastModifier
+     points to the variable just after the modifiers. Process modifiers
+     in a specific order, remembering there could be duplicates           */
+  modifierLen = lastModifier - firstModifier;
+  finaloutput[0] = 0x00;
+
+  /* Extract the parameter to play with
+     Special case param 0 - With %~0 you get the batch label which was called
+     whereas if you start applying other modifiers to it, you get the filename
+     the batch label is in                                                     */
+  if (*lastModifier == '0' && modifierLen > 1) {
     strcpyW(outputparam, context->batchfileW);
-  } else if ((*lastModifier >= '1' && *lastModifier <= '9')) {
+  } else if ((*lastModifier >= '0' && *lastModifier <= '9')) {
     strcpyW(outputparam,
             WCMD_parameter (context -> command,
                             *lastModifier-'0' + context -> shift_count[*lastModifier-'0'],
@@ -471,12 +481,6 @@ void WCMD_HandleTildaModifiers(WCHAR **start, BOOL atExecute)
     int foridx = FOR_VAR_IDX(*lastModifier);
     strcpyW(outputparam, forloopcontext.variable[foridx]);
   }
-
-  /* So now, firstModifier points to beginning of modifiers, lastModifier
-     points to the variable just after the modifiers. Process modifiers
-     in a specific order, remembering there could be duplicates           */
-  modifierLen = lastModifier - firstModifier;
-  finaloutput[0] = 0x00;
 
   /* 1. Handle '~' : Strip surrounding quotes */
   if (outputparam[0]=='"' &&
@@ -504,7 +508,7 @@ void WCMD_HandleTildaModifiers(WCHAR **start, BOOL atExecute)
 
     size = GetEnvironmentVariableW(env, NULL, 0);
     if (size > 0) {
-      WCHAR *fullpath = heap_alloc(size * sizeof(WCHAR));
+      WCHAR *fullpath = heap_xalloc(size * sizeof(WCHAR));
       if (!fullpath || (GetEnvironmentVariableW(env, fullpath, size) == 0) ||
           (SearchPathW(fullpath, outputparam, NULL, MAX_PATH, outputparam, NULL) == 0))
           size = 0;
@@ -522,7 +526,7 @@ void WCMD_HandleTildaModifiers(WCHAR **start, BOOL atExecute)
   /* After this, we need full information on the file,
     which is valid not to exist.  */
   if (!skipFileParsing) {
-    if (GetFullPathNameW(outputparam, MAX_PATH, fullfilename, NULL) == 0) {
+    if (GetFullPathNameW(outputparam, MAX_PATH, fullfilename, &filepart) == 0) {
       exists = FALSE;
       fullfilename[0] = 0x00;
     } else {
@@ -598,8 +602,16 @@ void WCMD_HandleTildaModifiers(WCHAR **start, BOOL atExecute)
     /* 4. Handle 's' : Use short paths (File doesn't have to exist) */
     if (memchrW(firstModifier, 's', modifierLen) != NULL) {
       if (finaloutput[0] != 0x00) strcatW(finaloutput, spaceW);
-      /* Don't flag as doneModifier - %~s on its own is processed later */
-      GetShortPathNameW(outputparam, outputparam, sizeof(outputparam)/sizeof(outputparam[0]));
+
+      /* Convert fullfilename's path to a short path - Save filename away as
+         only path is valid, name may not exist which causes GetShortPathName
+         to fail if it is provided                                            */
+      if (filepart) {
+        strcpyW(thisoutput, filepart);
+        *filepart = 0x00;
+        GetShortPathNameW(fullfilename, fullfilename, ARRAY_SIZE(fullfilename));
+        strcatW(fullfilename, thisoutput);
+      }
     }
 
     /* 5. Handle 'f' : Fully qualified path (File doesn't have to exist) */
@@ -673,7 +685,7 @@ void WCMD_HandleTildaModifiers(WCHAR **start, BOOL atExecute)
           memchrW(firstModifier, 's', modifierLen) != NULL) {
         doneModifier = TRUE;
         if (finaloutput[0] != 0x00) strcatW(finaloutput, spaceW);
-        strcatW(finaloutput, outputparam);
+        strcatW(finaloutput, fullfilename);
       }
     }
   }
@@ -719,7 +731,7 @@ void WCMD_call (WCHAR *command) {
       li.QuadPart = 0;
       li.u.LowPart = SetFilePointer(context -> h, li.u.LowPart,
                      &li.u.HighPart, FILE_CURRENT);
-      WCMD_batch (param1, command, TRUE, gotoLabel, context->h);
+      WCMD_batch (context->batchfileW, command, TRUE, gotoLabel, context->h);
       SetFilePointer(context -> h, li.u.LowPart,
                      &li.u.HighPart, FILE_BEGIN);
 

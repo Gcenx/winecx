@@ -446,13 +446,16 @@ static void send_parent_notify( HWND hwnd, UINT msg )
  */
 static void update_window_state( HWND hwnd )
 {
+    DPI_AWARENESS_CONTEXT context;
     RECT window_rect, client_rect, valid_rects[2];
 
+    context = SetThreadDpiAwarenessContext( GetWindowDpiAwarenessContext( hwnd ));
     WIN_GetRectangles( hwnd, COORDS_PARENT, &window_rect, &client_rect );
     valid_rects[0] = valid_rects[1] = client_rect;
     set_window_pos( hwnd, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOCLIENTSIZE | SWP_NOCLIENTMOVE |
                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW,
                     &window_rect, &client_rect, valid_rects );
+    SetThreadDpiAwarenessContext( context );
 }
 
 
@@ -844,6 +847,7 @@ BOOL WIN_GetRectangles( HWND hwnd, enum coords_relative relative, RECT *rectWind
         {
             rect.right  = 100;
             rect.bottom = 100;
+            rect = rect_win_to_thread_dpi( hwnd, rect );
         }
         else
         {
@@ -921,8 +925,8 @@ BOOL WIN_GetRectangles( HWND hwnd, enum coords_relative relative, RECT *rectWind
             }
             break;
         }
-        if (rectWindow) *rectWindow = window_rect;
-        if (rectClient) *rectClient = client_rect;
+        if (rectWindow) *rectWindow = rect_win_to_thread_dpi( hwnd, window_rect );
+        if (rectClient) *rectClient = rect_win_to_thread_dpi( hwnd, client_rect );
         WIN_ReleasePtr( win );
         return TRUE;
     }
@@ -932,6 +936,7 @@ other_process:
     {
         req->handle = wine_server_user_handle( hwnd );
         req->relative = relative;
+        req->dpi = get_thread_dpi();
         if ((ret = !wine_server_call_err( req )))
         {
             if (rectWindow)
@@ -1305,6 +1310,25 @@ static void dump_window_styles( DWORD style, DWORD exstyle )
 #undef DUMPED_EX_STYLES
 }
 
+/***********************************************************************
+ *           map_dpi_create_struct
+ */
+static void map_dpi_create_struct( CREATESTRUCTW *cs, UINT dpi_from, UINT dpi_to )
+{
+    if (!dpi_from && !dpi_to) return;
+    if (!dpi_from || !dpi_to)
+    {
+        POINT pt = { cs->x, cs->y };
+        UINT mon_dpi = get_monitor_dpi( MonitorFromPoint( pt, MONITOR_DEFAULTTONEAREST ));
+        if (!dpi_from) dpi_from = mon_dpi;
+        else dpi_to = mon_dpi;
+    }
+    if (dpi_from == dpi_to) return;
+    cs->x = MulDiv( cs->x, dpi_to, dpi_from );
+    cs->y = MulDiv( cs->y, dpi_to, dpi_from );
+    cs->cx = MulDiv( cs->cx, dpi_to, dpi_from );
+    cs->cy = MulDiv( cs->cy, dpi_to, dpi_from );
+}
 
 /***********************************************************************
  *           WIN_CreateWindowEx
@@ -1319,6 +1343,8 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
     WND *wndPtr;
     HWND hwnd, parent, owner, top_child = 0;
     const WCHAR *p = className;
+    UINT win_dpi, thread_dpi = get_thread_dpi();
+    DPI_AWARENESS_CONTEXT context;
     MDICREATESTRUCTW mdi_cs;
     CBT_CREATEWNDW cbtc;
     CREATESTRUCTW cbcs;
@@ -1573,6 +1599,14 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
     }
     else SetWindowLongPtrW( hwnd, GWLP_ID, (ULONG_PTR)cs->hMenu );
 
+    style = wndPtr->dwStyle;
+    win_dpi = wndPtr->dpi;
+    WIN_ReleasePtr( wndPtr );
+
+    if (parent) map_dpi_create_struct( cs, thread_dpi, win_dpi );
+
+    context = SetThreadDpiAwarenessContext( GetWindowDpiAwarenessContext( hwnd ));
+
     /* call the WH_CBT hook */
 
     /* the window style passed to the hook must be the real window style,
@@ -1580,10 +1614,9 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
      * passed in, so we have to copy the original CREATESTRUCT and get the
      * the real style. */
     cbcs = *cs;
-    cbcs.style = wndPtr->dwStyle;
+    cbcs.style = style;
     cbtc.lpcs = &cbcs;
     cbtc.hwndInsertAfter = HWND_TOP;
-    WIN_ReleasePtr( wndPtr );
     if (HOOK_CallHooks( WH_CBT, HCBT_CREATEWND, (WPARAM)hwnd, (LPARAM)&cbtc, unicode )) goto failed;
 
     /* send the WM_GETMINMAXINFO message and fix the size if needed */
@@ -1601,13 +1634,13 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
     if (cy < 0) cy = 0;
     SetRect( &rect, cs->x, cs->y, cs->x + cx, cs->y + cy );
     /* check for wraparound */
-    if (cs->x + cx < cs->x) rect.right = 0x7fffffff;
-    if (cs->y + cy < cs->y) rect.bottom = 0x7fffffff;
+    if (cs->x > 0x7fffffff - cx) rect.right = 0x7fffffff;
+    if (cs->y > 0x7fffffff - cy) rect.bottom = 0x7fffffff;
     if (!set_window_pos( hwnd, 0, SWP_NOZORDER | SWP_NOACTIVATE, &rect, &rect, NULL )) goto failed;
 
     /* send WM_NCCREATE */
 
-    TRACE( "hwnd %p cs %d,%d %dx%d\n", hwnd, cs->x, cs->y, cx, cy );
+    TRACE( "hwnd %p cs %d,%d %dx%d %s\n", hwnd, cs->x, cs->y, cs->cx, cs->cy, wine_dbgstr_rect(&rect) );
     if (unicode)
         result = SendMessageW( hwnd, WM_NCCREATE, 0, (LPARAM)cs );
     else
@@ -1641,7 +1674,7 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
         MapWindowPoints( 0, parent, (POINT *)&client_rect, 2 );
         set_window_pos( hwnd, insert_after, SWP_NOACTIVATE, &rect, &client_rect, NULL );
     }
-    else return 0;
+    else goto failed;
 
     /* send WM_CREATE */
 
@@ -1685,7 +1718,11 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
     /* Notify the parent window only */
 
     send_parent_notify( hwnd, WM_CREATE );
-    if (!IsWindow( hwnd )) return 0;
+    if (!IsWindow( hwnd ))
+    {
+        SetThreadDpiAwarenessContext( context );
+        return 0;
+    }
 
     if (parent == GetDesktopWindow())
         PostMessageW( parent, WM_PARENTNOTIFY, WM_CREATE, (LPARAM)hwnd );
@@ -1712,10 +1749,12 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
         HOOK_CallHooks( WH_SHELL, HSHELL_WINDOWCREATED, (WPARAM)hwnd, 0, TRUE );
 
     TRACE("created window %p\n", hwnd);
+    SetThreadDpiAwarenessContext( context );
     return hwnd;
 
 failed:
     WIN_DestroyWindow( hwnd );
+    SetThreadDpiAwarenessContext( context );
     return 0;
 }
 
@@ -3135,6 +3174,7 @@ HWND WINAPI SetParent( HWND hwnd, HWND parent )
     BOOL was_visible;
     WND *wndPtr;
     BOOL ret;
+    DPI_AWARENESS_CONTEXT context;
     RECT window_rect, old_screen_rect, new_screen_rect;
 
     TRACE("(%p %p)\n", hwnd, parent);
@@ -3178,8 +3218,11 @@ HWND WINAPI SetParent( HWND hwnd, HWND parent )
     wndPtr = WIN_GetPtr( hwnd );
     if (!wndPtr || wndPtr == WND_OTHER_PROCESS || wndPtr == WND_DESKTOP) return 0;
 
+    context = SetThreadDpiAwarenessContext( GetWindowDpiAwarenessContext( hwnd ));
     WIN_GetRectangles( hwnd, COORDS_PARENT, &window_rect, NULL );
+    SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
     WIN_GetRectangles( hwnd, COORDS_SCREEN, &old_screen_rect, NULL );
+    SetThreadDpiAwarenessContext( context );
 
     SERVER_START_REQ( set_parent )
     {
@@ -3198,6 +3241,10 @@ HWND WINAPI SetParent( HWND hwnd, HWND parent )
     WIN_ReleasePtr( wndPtr );
     if (!ret) return 0;
 
+    context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
+    WIN_GetRectangles( hwnd, COORDS_SCREEN, &new_screen_rect, NULL );
+    SetThreadDpiAwarenessContext( GetWindowDpiAwarenessContext( hwnd ));
+
     USER_Driver->pSetParent( full_handle, parent, old_parent );
 
     winpos.hwnd = hwnd;
@@ -3208,12 +3255,12 @@ HWND WINAPI SetParent( HWND hwnd, HWND parent )
     winpos.cy = 0;
     winpos.flags = SWP_NOSIZE;
 
-    WIN_GetRectangles( hwnd, COORDS_SCREEN, &new_screen_rect, NULL );
     USER_SetWindowPos( &winpos, new_screen_rect.left - old_screen_rect.left,
                        new_screen_rect.top - old_screen_rect.top );
 
     if (was_visible) ShowWindow( hwnd, SW_SHOW );
 
+    SetThreadDpiAwarenessContext( context );
     return old_parent;
 }
 
@@ -4202,5 +4249,15 @@ BOOL WINAPI SetWindowDisplayAffinity(HWND hwnd, DWORD affinity)
     }
 
     SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+    return FALSE;
+}
+
+/**********************************************************************
+ *              SetWindowCompositionAttribute (USER32.@)
+ */
+BOOL WINAPI SetWindowCompositionAttribute(HWND hwnd, void *data)
+{
+    FIXME("(%p, %p): stub\n", hwnd, data);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }

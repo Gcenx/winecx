@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2018-07-10 14:47+0200\n"
+"PO-Revision-Date: 2019-01-09 14:31+0100\n"
 "Last-Translator: Julian Rüger\n"
 "Language-Team: German\n"
 "Language: de\n"
@@ -48,7 +48,7 @@ msgstr "&Supportinformationen"
 msgid "&Modify..."
 msgstr "&Ändern..."
 
-#: appwiz.rc:69 appwiz.rc:45 cryptui.rc:346 msacm32.rc:40 winecfg.rc:200
+#: appwiz.rc:69 appwiz.rc:45 cryptui.rc:351 msacm32.rc:40 winecfg.rc:200
 #: winecfg.rc:237 wordpad.rc:256
 msgid "&Remove"
 msgstr "&Entfernen"
@@ -59,9 +59,9 @@ msgstr "Informationen"
 
 #: appwiz.rc:78 avifil32.rc:54 comctl32.rc:71 comctl32.rc:55 comdlg32.rc:232
 #: comdlg32.rc:262 comdlg32.rc:305 comdlg32.rc:359 comdlg32.rc:398
-#: comdlg32.rc:452 credui.rc:52 cryptui.rc:263 cryptui.rc:275 cryptui.rc:365
-#: dinput.rc:46 ieframe.rc:96 localui.rc:44 localui.rc:57 mpr.rc:49
-#: msacm32.rc:53 mshtml.rc:47 mshtml.rc:57 msvfw32.rc:36 oledlg.rc:62
+#: comdlg32.rc:452 credui.rc:52 cryptui.rc:268 cryptui.rc:280 cryptui.rc:370
+#: cryptui.rc:462 dinput.rc:37 ieframe.rc:96 localui.rc:44 localui.rc:57
+#: mpr.rc:49 msacm32.rc:53 mshtml.rc:47 mshtml.rc:57 msvfw32.rc:36 oledlg.rc:62
 #: oledlg.rc:94 serialui.rc:41 setupapi.rc:59 shell32.rc:276 shell32.rc:300
 #: shell32.rc:322 shell32.rc:341 shlwapi.rc:44 twain.rc:32 user32.rc:83
 #: user32.rc:98 wininet.rc:51 wininet.rc:71 winspool.rc:42 net.rc:47
@@ -139,23 +139,24 @@ msgstr ""
 msgid "&Install"
 msgstr "&Installieren"
 
-#: appwiz.rc:110 appwiz.rc:125 avifil32.rc:55 browseui.rc:40 comctl32.rc:72
+#: appwiz.rc:110 appwiz.rc:125 avifil32.rc:55 browseui.rc:45 comctl32.rc:72
 #: comctl32.rc:87 comctl32.rc:56 comdlg32.rc:171 comdlg32.rc:193
 #: comdlg32.rc:211 comdlg32.rc:233 comdlg32.rc:263 comdlg32.rc:306
 #: comdlg32.rc:328 comdlg32.rc:348 comdlg32.rc:360 comdlg32.rc:399
 #: comdlg32.rc:453 comdlg32.rc:478 comdlg32.rc:504 comdlg32.rc:527 credui.rc:53
-#: cryptui.rc:264 cryptui.rc:276 cryptui.rc:366 dinput.rc:47 ieframe.rc:97
-#: inetcpl.rc:81 localui.rc:45 localui.rc:58 mpr.rc:50 msacm32.rc:54
-#: mshtml.rc:48 mshtml.rc:58 msvfw32.rc:37 oledlg.rc:63 oledlg.rc:95
-#: serialui.rc:42 setupapi.rc:42 setupapi.rc:60 shell32.rc:277 shell32.rc:301
-#: shell32.rc:312 shell32.rc:342 shlwapi.rc:45 twain.rc:33 user32.rc:84
-#: user32.rc:99 wininet.rc:52 wininet.rc:72 winspool.rc:43 notepad.rc:118
-#: oleview.rc:162 oleview.rc:175 progman.rc:107 progman.rc:125 progman.rc:143
-#: progman.rc:159 progman.rc:181 progman.rc:200 progman.rc:217 regedit.rc:297
-#: regedit.rc:308 regedit.rc:321 regedit.rc:337 regedit.rc:350 regedit.rc:363
-#: taskmgr.rc:443 taskmgr.rc:518 wineboot.rc:34 winecfg.rc:215 winecfg.rc:225
-#: wineconsole.rc:136 winefile.rc:129 winefile.rc:152 winefile.rc:182
-#: winemine.rc:99 wordpad.rc:216 wordpad.rc:227 wordpad.rc:245 wordpad.rc:258
+#: cryptui.rc:269 cryptui.rc:281 cryptui.rc:371 cryptui.rc:463 dinput.rc:38
+#: ieframe.rc:97 inetcpl.rc:81 localui.rc:45 localui.rc:58 mpr.rc:50
+#: msacm32.rc:54 mshtml.rc:48 mshtml.rc:58 msvfw32.rc:37 oledlg.rc:63
+#: oledlg.rc:95 serialui.rc:42 setupapi.rc:42 setupapi.rc:60 shell32.rc:277
+#: shell32.rc:301 shell32.rc:312 shell32.rc:342 shlwapi.rc:45 twain.rc:33
+#: user32.rc:84 user32.rc:99 wininet.rc:52 wininet.rc:72 winspool.rc:43
+#: notepad.rc:118 oleview.rc:162 oleview.rc:175 progman.rc:107 progman.rc:125
+#: progman.rc:143 progman.rc:159 progman.rc:181 progman.rc:200 progman.rc:217
+#: regedit.rc:297 regedit.rc:308 regedit.rc:321 regedit.rc:337 regedit.rc:350
+#: regedit.rc:363 taskmgr.rc:443 taskmgr.rc:518 wineboot.rc:34 winecfg.rc:215
+#: winecfg.rc:225 wineconsole.rc:136 winefile.rc:129 winefile.rc:152
+#: winefile.rc:182 winemine.rc:99 wordpad.rc:216 wordpad.rc:227 wordpad.rc:245
+#: wordpad.rc:258
 msgid "Cancel"
 msgstr "Abbrechen"
 
@@ -308,6 +309,26 @@ msgstr "Unkomprimiert"
 msgid "Canceling..."
 msgstr "Abbrechen..."
 
+#: browseui.rc:29
+msgid "%1!u! %2 remaining"
+msgstr "%1!u! %2 verbleibend"
+
+#: browseui.rc:30
+msgid "%1!u! %2 and %3!u! %4 remaining"
+msgstr "%1!u! %2 und %3!u! %4 verbleibend"
+
+#: browseui.rc:31
+msgid "seconds"
+msgstr "Sekunden"
+
+#: browseui.rc:32
+msgid "minutes"
+msgstr "Minuten"
+
+#: browseui.rc:33
+msgid "hours"
+msgstr "Stunden"
+
 #: comctl32.rc:68 winefile.rc:157
 msgid "Properties for %s"
 msgstr "Eigenschaften für %s"
@@ -340,7 +361,7 @@ msgstr "&Fertig"
 msgid "Customize Toolbar"
 msgstr "Symbolleiste einrichten"
 
-#: comctl32.rc:100 comctl32.rc:57 cryptui.rc:351 ieframe.rc:43 oleview.rc:83
+#: comctl32.rc:100 comctl32.rc:57 cryptui.rc:356 ieframe.rc:43 oleview.rc:83
 #: oleview.rc:187 oleview.rc:200 oleview.rc:212 taskmgr.rc:139
 msgid "&Close"
 msgstr "&Schließen"
@@ -405,18 +426,14 @@ msgid "&Retry"
 msgstr "&Wiederholen"
 
 #: comctl32.rc:62
-#, fuzzy
-#| msgid "Hide &Tabs"
 msgid "Hide details"
-msgstr "&Tabs verbergen"
+msgstr "Details ausblenden"
 
 #: comctl32.rc:63
-#, fuzzy
-#| msgid "Details"
 msgid "See details"
-msgstr "Details"
+msgstr "Details anzeigen"
 
-#: comctl32.rc:31 cryptui.rc:230 regedit.rc:286 taskmgr.rc:434 winedbg.rc:61
+#: comctl32.rc:31 cryptui.rc:235 regedit.rc:286 taskmgr.rc:434 winedbg.rc:61
 #: winedbg.rc:76 wordpad.rc:180
 msgid "Close"
 msgstr "Schließen"
@@ -887,7 +904,7 @@ msgstr "Neuen Ordner anlegen"
 msgid "List"
 msgstr "Liste"
 
-#: comdlg32.rc:48 cryptui.rc:196
+#: comdlg32.rc:48 cryptui.rc:201
 msgid "Details"
 msgstr "Details"
 
@@ -1201,7 +1218,7 @@ msgstr "mm"
 msgid "&User name:"
 msgstr "&Benutzername:"
 
-#: credui.rc:48 cryptui.rc:397
+#: credui.rc:48 cryptui.rc:402
 msgid "&Password:"
 msgstr "&Kennwort:"
 
@@ -2096,114 +2113,114 @@ msgstr "Seriennummer des Zertifikats="
 msgid "Notice Text="
 msgstr "Benachrichtigungstext="
 
-#: cryptui.rc:180 cryptui.rc:235 inetcpl.rc:46 shell32.rc:348 shell32.rc:377
+#: cryptui.rc:185 cryptui.rc:240 inetcpl.rc:46 shell32.rc:348 shell32.rc:377
 msgid "General"
 msgstr "Allgemein"
 
-#: cryptui.rc:191
+#: cryptui.rc:196
 msgid "&Install Certificate..."
 msgstr "&Zertifikat installieren..."
 
-#: cryptui.rc:192
+#: cryptui.rc:197
 msgid "Issuer &Statement"
 msgstr "Au&sstellererklärung"
 
-#: cryptui.rc:200
+#: cryptui.rc:205
 msgid "&Show:"
 msgstr "&Anzeigen:"
 
-#: cryptui.rc:205
+#: cryptui.rc:210
 msgid "&Edit Properties..."
 msgstr "&Eigenschaften bearbeiten..."
 
-#: cryptui.rc:206
+#: cryptui.rc:211
 msgid "&Copy to File..."
 msgstr "In &Datei kopieren..."
 
-#: cryptui.rc:210
+#: cryptui.rc:215
 msgid "Certification Path"
 msgstr "Zertifizierungspfad"
 
-#: cryptui.rc:214
+#: cryptui.rc:219
 msgid "Certification path"
 msgstr "Zertifizierungspfad"
 
-#: cryptui.rc:217
+#: cryptui.rc:222 cryptui.rc:464
 msgid "&View Certificate"
 msgstr "&Zertifikat anzeigen"
 
-#: cryptui.rc:218
+#: cryptui.rc:223
 msgid "Certificate &status:"
 msgstr "Zertifikats&status:"
 
-#: cryptui.rc:224
+#: cryptui.rc:229
 msgid "Disclaimer"
 msgstr "Haftungsausschluss"
 
-#: cryptui.rc:231
+#: cryptui.rc:236
 msgid "More &Info"
 msgstr "weitere &Informationen"
 
-#: cryptui.rc:239
+#: cryptui.rc:244
 msgid "&Friendly name:"
 msgstr "&Name:"
 
-#: cryptui.rc:241 progman.rc:154 progman.rc:170
+#: cryptui.rc:246 progman.rc:154 progman.rc:170
 msgid "&Description:"
 msgstr "&Beschreibung:"
 
-#: cryptui.rc:243
+#: cryptui.rc:248
 msgid "Certificate purposes"
 msgstr "Zertifikatszwecke"
 
-#: cryptui.rc:244
+#: cryptui.rc:249
 msgid "&Enable all purposes for this certificate"
 msgstr "&Alle Zwecke für dieses Zertifikat aktivieren"
 
-#: cryptui.rc:246
+#: cryptui.rc:251
 msgid "D&isable all purposes for this certificate"
 msgstr "A&lle Zwecke für dieses Zertifikat deaktivieren"
 
-#: cryptui.rc:248
+#: cryptui.rc:253
 msgid "Enable &only the following purposes for this certificate:"
 msgstr "Nur &folgende Zwecke aktivieren:"
 
-#: cryptui.rc:253
+#: cryptui.rc:258
 msgid "Add &Purpose..."
 msgstr "&Zweck hinzufügen..."
 
-#: cryptui.rc:257
+#: cryptui.rc:262
 msgid "Add Purpose"
 msgstr "Zweck hinzufügen"
 
-#: cryptui.rc:260
+#: cryptui.rc:265
 msgid ""
 "Add the object identifier (OID) for the certificate purpose you wish to add:"
 msgstr ""
 "Geben Sie die Objekt-ID (OID) für den Zertifikatszweck an, den Sie "
 "hinzufügen möchten:"
 
-#: cryptui.rc:268 cryptui.rc:69
+#: cryptui.rc:273 cryptui.rc:69
 msgid "Select Certificate Store"
 msgstr "Zertifikatsspeicher wählen"
 
-#: cryptui.rc:271
+#: cryptui.rc:276
 msgid "Select the certificate store you want to use:"
 msgstr "Zertifikatsspeicher wählen den Sie benutzen möchten:"
 
-#: cryptui.rc:274
+#: cryptui.rc:279
 msgid "&Show physical stores"
 msgstr "&Physikalischen Speicher anzeigen"
 
-#: cryptui.rc:280 cryptui.rc:291 cryptui.rc:308 cryptui.rc:322 cryptui.rc:71
+#: cryptui.rc:285 cryptui.rc:296 cryptui.rc:313 cryptui.rc:327 cryptui.rc:71
 msgid "Certificate Import Wizard"
 msgstr "Zertifikat-Importassistent"
 
-#: cryptui.rc:283
+#: cryptui.rc:288
 msgid "Welcome to the Certificate Import Wizard"
 msgstr "Willkommen beim Zertifikat-Importassistent"
 
-#: cryptui.rc:286
+#: cryptui.rc:291
 msgid ""
 "This wizard helps you import certificates, certificate revocation lists, and "
 "certificate trust lists from a file to a certificate store.\n"
@@ -2225,15 +2242,15 @@ msgstr ""
 "\n"
 "Klicken Sie Weiter um fortzufahren."
 
-#: cryptui.rc:294 cryptui.rc:430
+#: cryptui.rc:299 cryptui.rc:435
 msgid "&File name:"
 msgstr "&Dateiname:"
 
-#: cryptui.rc:296 cryptui.rc:318 cryptui.rc:432 winecfg.rc:313
+#: cryptui.rc:301 cryptui.rc:323 cryptui.rc:437 winecfg.rc:313
 msgid "B&rowse..."
 msgstr "&Wählen..."
 
-#: cryptui.rc:297
+#: cryptui.rc:302
 msgid ""
 "Note: The following file formats may contain more than one certificate, "
 "certificate revocation list, or certificate trust list:"
@@ -2241,19 +2258,19 @@ msgstr ""
 "Hinweis: Es können mehrere Zertifikate, Zertifikatssperr- oder "
 "Vertrauenslisten in einer Datei folgender Formate gespeichert werden:"
 
-#: cryptui.rc:299
+#: cryptui.rc:304
 msgid "Cryptographic Message Syntax Standard/PKCS #7 Messages (*.p7b)"
 msgstr "Syntaxstandard kryptografischer Nachrichten/PKCS #7 Messages (*.p7b)"
 
-#: cryptui.rc:301
+#: cryptui.rc:306
 msgid "Personal Information Exchange/PKCS #12 (*.pfx; *.p12)"
 msgstr "Privater Informationsaustausch/PKCS #12 (*.pfx; *.p12)"
 
-#: cryptui.rc:303 cryptui.rc:81 cryptui.rc:162
+#: cryptui.rc:308 cryptui.rc:81 cryptui.rc:162
 msgid "Microsoft Serialized Certificate Store (*.sst)"
 msgstr "Microsoft-Speicher serieller Zertifikate (*.sst)"
 
-#: cryptui.rc:311
+#: cryptui.rc:316
 msgid ""
 "Wine can automatically select the certificate store, or you can specify a "
 "location for the certificates."
@@ -2261,84 +2278,84 @@ msgstr ""
 "Wine kann automatisch einen Zertifikatsspeicher wählen, oder Sie wählen "
 "einen aus."
 
-#: cryptui.rc:313
+#: cryptui.rc:318
 msgid "&Automatically select certificate store"
 msgstr "A&utomatisch einen Zertifikatsspeicher wählen"
 
-#: cryptui.rc:315
+#: cryptui.rc:320
 msgid "&Place all certificates in the following store:"
 msgstr "&Alle Zertifikate im folgendem Zertifikatsspeicher speichern:"
 
-#: cryptui.rc:325
+#: cryptui.rc:330
 msgid "Completing the Certificate Import Wizard"
 msgstr "Fertigstellung des Zertifikat-Importassistenten"
 
-#: cryptui.rc:327
+#: cryptui.rc:332
 msgid "You have successfully completed the Certificate Import Wizard."
 msgstr "Importvorgang ordnungsgemäß abgeschlossen."
 
-#: cryptui.rc:329 cryptui.rc:443
+#: cryptui.rc:334 cryptui.rc:448
 msgid "You have specified the following settings:"
 msgstr "Sie haben folgende Einstellungen gewählt:"
 
-#: cryptui.rc:337 cryptui.rc:122 inetcpl.rc:111
+#: cryptui.rc:342 cryptui.rc:122 inetcpl.rc:111
 msgid "Certificates"
 msgstr "Zertifikate"
 
-#: cryptui.rc:340
+#: cryptui.rc:345
 msgid "I&ntended purpose:"
 msgstr "&Geplanter Zweck:"
 
-#: cryptui.rc:344
+#: cryptui.rc:349
 msgid "&Import..."
 msgstr "&Importieren..."
 
-#: cryptui.rc:345 regedit.rc:91 regedit.rc:112
+#: cryptui.rc:350 regedit.rc:91 regedit.rc:112
 msgid "&Export..."
 msgstr "&Exportieren..."
 
-#: cryptui.rc:347
+#: cryptui.rc:352
 msgid "&Advanced..."
 msgstr "&Erweitert..."
 
-#: cryptui.rc:348
+#: cryptui.rc:353
 msgid "Certificate intended purposes"
 msgstr "Beabsichtigte Zwecke des Zertifikats"
 
-#: cryptui.rc:350 ieframe.rc:45 shell32.rc:43 shell32.rc:120 oleview.rc:59
+#: cryptui.rc:355 ieframe.rc:45 shell32.rc:43 shell32.rc:120 oleview.rc:59
 #: oleview.rc:61 oleview.rc:85 regedit.rc:64 taskmgr.rc:52 winefile.rc:48
 #: wordpad.rc:69
 msgid "&View"
 msgstr "&Ansicht"
 
-#: cryptui.rc:355
+#: cryptui.rc:360
 msgid "Advanced Options"
 msgstr "Erweiterte Optionen"
 
-#: cryptui.rc:358
+#: cryptui.rc:363
 msgid "Certificate purpose"
 msgstr "Zertifikatszweck"
 
-#: cryptui.rc:359
+#: cryptui.rc:364
 msgid ""
 "Select one or more purposes to be listed when Advanced Purposes is selected."
 msgstr ""
 "Wählen Sie mindestens einen Zweck, der als Erweitert aufgeführt werden soll."
 
-#: cryptui.rc:361
+#: cryptui.rc:366
 msgid "&Certificate purposes:"
 msgstr "&Zertifikatszwecke:"
 
-#: cryptui.rc:370 cryptui.rc:381 cryptui.rc:394 cryptui.rc:404 cryptui.rc:427
-#: cryptui.rc:436 cryptui.rc:150
+#: cryptui.rc:375 cryptui.rc:386 cryptui.rc:399 cryptui.rc:409 cryptui.rc:432
+#: cryptui.rc:441 cryptui.rc:150
 msgid "Certificate Export Wizard"
 msgstr "Zertifikat-Exportassistent"
 
-#: cryptui.rc:373
+#: cryptui.rc:378
 msgid "Welcome to the Certificate Export Wizard"
 msgstr "Willkommen beim Zertifikat-Exportassistent"
 
-#: cryptui.rc:376
+#: cryptui.rc:381
 msgid ""
 "This wizard helps you export certificates, certificate revocation lists, and "
 "certificate trust lists from a certificate store to a file.\n"
@@ -2360,7 +2377,7 @@ msgstr ""
 "\n"
 "Klicken Sie Weiter um fortzufahren."
 
-#: cryptui.rc:384
+#: cryptui.rc:389
 msgid ""
 "If you choose to export the private key, you will be prompted for a password "
 "to protect the private key on a later page."
@@ -2368,65 +2385,73 @@ msgstr ""
 "Wenn Sie sich entscheiden, den privaten Schlüssel zu exportieren, werden Sie "
 "später nach einem Kennwort gefragt."
 
-#: cryptui.rc:385
+#: cryptui.rc:390
 msgid "Do you wish to export the private key?"
 msgstr "Privaten Schlüssel exportieren?"
 
-#: cryptui.rc:386
+#: cryptui.rc:391
 msgid "&Yes, export the private key"
 msgstr "&Ja, privaten Schlüssel exportieren"
 
-#: cryptui.rc:388
+#: cryptui.rc:393
 msgid "N&o, do not export the private key"
 msgstr "&Nein, privaten Schlüssel nicht exportieren"
 
-#: cryptui.rc:399
+#: cryptui.rc:404
 msgid "&Confirm password:"
 msgstr "Passwort &bestätigen:"
 
-#: cryptui.rc:407
+#: cryptui.rc:412
 msgid "Select the format you want to use:"
 msgstr "Wählen Sie das gewünschte Format:"
 
-#: cryptui.rc:408
+#: cryptui.rc:413
 msgid "&DER-encoded X.509 (*.cer)"
 msgstr "&DER-kodiertes X.509 (*.cer)"
 
-#: cryptui.rc:410
+#: cryptui.rc:415
 msgid "Ba&se64-encoded X.509 (*.cer):"
 msgstr "B&ase64-kodiertes X.509 (*.cer):"
 
-#: cryptui.rc:412
+#: cryptui.rc:417
 msgid "&Cryptographic Message Syntax Standard/PKCS #7 Message (*.p7b)"
 msgstr "&Syntaxstandard kryptografischer Nachrichten/PKCS #7-Nachricht (*.p7b)"
 
-#: cryptui.rc:414
+#: cryptui.rc:419
 msgid "&Include all certificates in the certification path if possible"
 msgstr "&Wenn möglich alle Zertifikate im Zertifizierungspfad einbeziehen"
 
-#: cryptui.rc:416
+#: cryptui.rc:421
 msgid "&Personal Information Exchange/PKCS #12 (*.pfx)"
 msgstr "&Privater Informationsaustausch/PKCS #12 (*.pfx)"
 
-#: cryptui.rc:418
+#: cryptui.rc:423
 msgid "Incl&ude all certificates in the certification path if possible"
 msgstr "W&enn möglich alle Zertifikate im Zertifizierungspfad einbeziehen"
 
-#: cryptui.rc:420
+#: cryptui.rc:425
 msgid "&Enable strong encryption"
 msgstr "&Verstärkte Sicherheit aktivieren"
 
-#: cryptui.rc:422
+#: cryptui.rc:427
 msgid "Delete the private &key if the export is successful"
 msgstr "Priva&ten Schlüssel löschen wenn der Export erfolgreich war"
 
-#: cryptui.rc:439
+#: cryptui.rc:444
 msgid "Completing the Certificate Export Wizard"
 msgstr "Fertigstellung des Zertifikat-Exportassistenten"
 
-#: cryptui.rc:441
+#: cryptui.rc:446
 msgid "You have successfully completed the Certificate Export Wizard."
 msgstr "Exportvorgang ordnungsgemäß abgeschlossen."
+
+#: cryptui.rc:456 cryptui.rc:179
+msgid "Select Certificate"
+msgstr "Zertifikat auswählen"
+
+#: cryptui.rc:459
+msgid "Select a certificate you want to use"
+msgstr "Wählen Sie ein Zertifikat, das Sie verwenden möchten"
 
 #: cryptui.rc:30 cryptui.rc:93
 msgid "Certificate"
@@ -2960,39 +2985,55 @@ msgid "Note: The private key for this certificate is not exportable."
 msgstr ""
 "Hinweis: Der private Schlüssel des Zertifikats kann nicht exportiert werden."
 
-#: dinput.rc:43
+#: cryptui.rc:177
+msgid "Intended Use"
+msgstr "Geplanter Zweck"
+
+#: cryptui.rc:178 shell32.rc:152
+msgid "Location"
+msgstr "Ort"
+
+#: cryptui.rc:180
+msgid "Select a certificate"
+msgstr "Wählen Sie ein Zertifikat"
+
+#: cryptui.rc:181 winefile.rc:102 winhlp32.rc:110 winhlp32.rc:85
+msgid "Not yet implemented"
+msgstr "Noch nicht implementiert"
+
+#: dinput.rc:34
 msgid "Configure Devices"
 msgstr "Geräte konfigurieren"
 
-#: dinput.rc:48
+#: dinput.rc:39
 msgid "Reset"
 msgstr "Reset"
 
-#: dinput.rc:51
+#: dinput.rc:42
 msgid "Player"
 msgstr "Player"
 
-#: dinput.rc:52 winecfg.rc:89
+#: dinput.rc:43 winecfg.rc:89
 msgid "Device"
 msgstr "Gerät"
 
-#: dinput.rc:53
+#: dinput.rc:44
 msgid "Actions"
 msgstr "Aktionen"
 
-#: dinput.rc:54
+#: dinput.rc:45
 msgid "Mapping"
 msgstr "Zuordnung"
 
-#: dinput.rc:56
+#: dinput.rc:47
 msgid "Show Assigned First"
 msgstr "Zugewiesene zuerst anzeigen"
 
-#: dinput.rc:37
+#: dinput.rc:28
 msgid "Action"
 msgstr "Aktion"
 
-#: dinput.rc:38
+#: dinput.rc:29
 msgid "Object"
 msgstr "Objekt"
 
@@ -3453,18 +3494,16 @@ msgid "Connections"
 msgstr "Verbindungen"
 
 #: inetcpl.rc:125
-#, fuzzy
-#| msgid "Wine configuration"
 msgid "Automatic configuration"
-msgstr "Wine-Konfiguration"
+msgstr "Automatische Konfiguration"
 
 #: inetcpl.rc:126
 msgid "Use Web Proxy Auto-Discovery (WPAD)"
-msgstr ""
+msgstr "Web-Proxy-Auto-Discovery (WPAD) verwenden"
 
 #: inetcpl.rc:127
 msgid "Use Proxy Auto-Config (PAC) script"
-msgstr ""
+msgstr "Proxy-Autokonfigurationsskript (PAC) verwenden"
 
 #: inetcpl.rc:128 inetcpl.rc:132
 msgid "Address:"
@@ -6954,391 +6993,395 @@ msgstr "Feature von:"
 msgid "choose which folder contains %s"
 msgstr "Wählen Sie das Verzeichnis aus, das %s enthält"
 
-#: msi.rc:90
+#: msi.rc:66 shell32.rc:238
+msgid "New Folder"
+msgstr "Neuer Ordner"
+
+#: msi.rc:91
 msgid "Allocating registry space"
 msgstr "Reservierung von Registrierungsspeicher"
 
-#: msi.rc:91
+#: msi.rc:92
 msgid "Searching for installed applications"
 msgstr "Suche nach installierten Anwendungen"
 
-#: msi.rc:92
+#: msi.rc:93
 msgid "Binding executables"
 msgstr "Anbindung von ausführbaren Dateien"
 
-#: msi.rc:93 msi.rc:136
+#: msi.rc:94 msi.rc:137
 msgid "Searching for qualifying products"
 msgstr "Suche nach qualifizierenden Produkten"
 
-#: msi.rc:94 msi.rc:95 msi.rc:100
+#: msi.rc:95 msi.rc:96 msi.rc:101
 msgid "Computing space requirements"
 msgstr "Berechnung des Speicherbedarfs"
 
-#: msi.rc:96
+#: msi.rc:97
 msgid "Creating folders"
 msgstr "Anlegen von Verzeichnissen"
 
-#: msi.rc:97
+#: msi.rc:98
 msgid "Creating shortcuts"
 msgstr "Anlegen von Verknüpfungen"
 
-#: msi.rc:98
+#: msi.rc:99
 msgid "Deleting services"
 msgstr "Löschen von Diensten"
 
-#: msi.rc:99
+#: msi.rc:100
 msgid "Creating duplicate files"
 msgstr "Anlegen von Dateiduplikaten"
 
-#: msi.rc:101
+#: msi.rc:102
 msgid "Searching for related applications"
 msgstr "Suche nach zugehörigen Anwendungen"
 
-#: msi.rc:102
+#: msi.rc:103
 msgid "Copying network install files"
 msgstr "Kopieren von Netzwerkinstallationsdateien"
 
-#: msi.rc:103
+#: msi.rc:104
 msgid "Copying new files"
 msgstr "Kopieren neuer Dateien"
 
-#: msi.rc:104
+#: msi.rc:105
 msgid "Installing ODBC components"
 msgstr "Installation von ODBC-Komponenten"
 
-#: msi.rc:105
+#: msi.rc:106
 msgid "Installing new services"
 msgstr "Installation neuer Dienste"
 
-#: msi.rc:106
+#: msi.rc:107
 msgid "Installing system catalog"
 msgstr "Installation des Systemkatalogs"
 
-#: msi.rc:107
+#: msi.rc:108
 msgid "Validating install"
 msgstr "Validierung der Installation"
 
-#: msi.rc:108
+#: msi.rc:109
 msgid "Evaluating launch conditions"
 msgstr "Auswertung der Startbedingungen"
 
-#: msi.rc:109
+#: msi.rc:110
 msgid "Migrating feature states from related applications"
 msgstr "Migration der Featurezustände zugehöriger Anwendungen"
 
-#: msi.rc:110
+#: msi.rc:111
 msgid "Moving files"
 msgstr "Verschieben von Dateien"
 
-#: msi.rc:111
+#: msi.rc:112
 msgid "Publishing assembly information"
 msgstr "Veröffentlichung von Assembly-Informationen"
 
-#: msi.rc:112
+#: msi.rc:113
 msgid "Unpublishing assembly information"
 msgstr "Zurückziehen veröffentlichter Assembly-Informationen"
 
-#: msi.rc:113
+#: msi.rc:114
 msgid "Patching files"
 msgstr "Patchen von Dateien"
 
-#: msi.rc:114
+#: msi.rc:115
 msgid "Updating component registration"
 msgstr "Aktualisierung der Komponentenregistrierung"
 
-#: msi.rc:115
+#: msi.rc:116
 msgid "Publishing Qualified Components"
 msgstr "Veröffentlichung qualifizierter Komponenten"
 
-#: msi.rc:116
+#: msi.rc:117
 msgid "Publishing Product Features"
 msgstr "Veröffentlichung von Produktfeatures"
 
-#: msi.rc:117
+#: msi.rc:118
 msgid "Publishing product information"
 msgstr "Veröffentlichung von Produktinformationen"
 
-#: msi.rc:118
+#: msi.rc:119
 msgid "Registering Class servers"
 msgstr "Registrierung von Klassenservern"
 
-#: msi.rc:119
+#: msi.rc:120
 msgid "Registering COM+ Applications and Components"
 msgstr "Registrierung von COM+ Anwendungen und Komponenten"
 
-#: msi.rc:120
+#: msi.rc:121
 msgid "Registering extension servers"
 msgstr "Registrierung von Erweiterungsservern"
 
-#: msi.rc:121
+#: msi.rc:122
 msgid "Registering fonts"
 msgstr "Registrierung von Schriftarten"
 
-#: msi.rc:122
+#: msi.rc:123
 msgid "Registering MIME info"
 msgstr "Registrierung von MIME-Informationen"
 
-#: msi.rc:123
+#: msi.rc:124
 msgid "Registering product"
 msgstr "Registrierung des Produktes"
 
-#: msi.rc:124
+#: msi.rc:125
 msgid "Registering program identifiers"
 msgstr "Registrierung von Programmidentifikatoren"
 
-#: msi.rc:125
+#: msi.rc:126
 msgid "Registering type libraries"
 msgstr "Registrierung von Typbibliotheken"
 
-#: msi.rc:126
+#: msi.rc:127
 msgid "Registering user"
 msgstr "Registrierung des Benutzers"
 
-#: msi.rc:127
+#: msi.rc:128
 msgid "Removing duplicated files"
 msgstr "Entfernen von Dateiduplikaten"
 
-#: msi.rc:128 msi.rc:152
+#: msi.rc:129 msi.rc:153
 msgid "Updating environment strings"
 msgstr "Aktualisierung von Umgebungsvariablen"
 
-#: msi.rc:129
+#: msi.rc:130
 msgid "Removing applications"
 msgstr "Entfernen der Anwendungen"
 
-#: msi.rc:130
+#: msi.rc:131
 msgid "Removing files"
 msgstr "Entfernen von Dateien"
 
-#: msi.rc:131
+#: msi.rc:132
 msgid "Removing folders"
 msgstr "Entfernen von Verzeichnissen"
 
-#: msi.rc:132
+#: msi.rc:133
 msgid "Removing INI files entries"
 msgstr "Entfernen von INI-Dateieinträgen"
 
-#: msi.rc:133
+#: msi.rc:134
 msgid "Removing ODBC components"
 msgstr "Entfernen von ODBC-Komponenten"
 
-#: msi.rc:134
+#: msi.rc:135
 msgid "Removing system registry values"
 msgstr "Entfernen von Systemregistrierungswerten"
 
-#: msi.rc:135
+#: msi.rc:136
 msgid "Removing shortcuts"
 msgstr "Entfernen von Verknüpfungen"
 
-#: msi.rc:137
+#: msi.rc:138
 msgid "Registering modules"
 msgstr "Registrierung von Modulen"
 
-#: msi.rc:138
+#: msi.rc:139
 msgid "Unregistering modules"
 msgstr "Deregistrierung von Modulen"
 
-#: msi.rc:139
+#: msi.rc:140
 msgid "Initializing ODBC directories"
 msgstr "Initialisierung von ODBC-Verzeichnissen"
 
-#: msi.rc:140
+#: msi.rc:141
 msgid "Starting services"
 msgstr "Starten von Diensten"
 
-#: msi.rc:141
+#: msi.rc:142
 msgid "Stopping services"
 msgstr "Stoppen von Diensten"
 
-#: msi.rc:142
+#: msi.rc:143
 msgid "Unpublishing Qualified Components"
 msgstr "Zurückziehen von veröffentlichten qualifizierten Komponenten"
 
-#: msi.rc:143
+#: msi.rc:144
 msgid "Unpublishing Product Features"
 msgstr "Zurückziehen von veröffentlichten Produktfeatures"
 
-#: msi.rc:144
+#: msi.rc:145
 msgid "Unpublishing product information"
 msgstr "Zurückziehen von veröffentlichten Produktinformationen"
 
-#: msi.rc:145
+#: msi.rc:146
 msgid "Unregister Class servers"
 msgstr "Deregistrierung von Klassenservern"
 
-#: msi.rc:146
+#: msi.rc:147
 msgid "Unregistering COM+ Applications and Components"
 msgstr "Deregistrierung von COM+ Anwendungen und Komponenten"
 
-#: msi.rc:147
+#: msi.rc:148
 msgid "Unregistering extension servers"
 msgstr "Deregistrierung von Erweiterungsservern"
 
-#: msi.rc:148
+#: msi.rc:149
 msgid "Unregistering fonts"
 msgstr "Deregistrierung von Schriftarten"
 
-#: msi.rc:149
+#: msi.rc:150
 msgid "Unregistering MIME info"
 msgstr "Deregistrierung von MIME-Informationen"
 
-#: msi.rc:150
+#: msi.rc:151
 msgid "Unregistering program identifiers"
 msgstr "Deregistrierung von Programmidentifikatoren"
 
-#: msi.rc:151
+#: msi.rc:152
 msgid "Unregistering type libraries"
 msgstr "Deregistrierung von Typbibliotheken"
 
-#: msi.rc:153
+#: msi.rc:154
 msgid "Writing INI files values"
 msgstr "Schreiben von INI-Dateiwerten"
 
-#: msi.rc:154
+#: msi.rc:155
 msgid "Writing system registry values"
 msgstr "Schreiben von Systemregistrierungswerten"
 
-#: msi.rc:160
+#: msi.rc:161
 msgid "Free space: [1]"
 msgstr "Freier Speicher: [1]"
 
-#: msi.rc:161
+#: msi.rc:162
 msgid "Property: [1], Signature: [2]"
 msgstr "Eigenschaft: [1], Signatur: [2]"
 
-#: msi.rc:162
+#: msi.rc:163
 msgid "File: [1]"
 msgstr "Datei: [1]"
 
-#: msi.rc:163 msi.rc:190
+#: msi.rc:164 msi.rc:191
 msgid "Folder: [1]"
 msgstr "Verzeichnis: [1]"
 
-#: msi.rc:164 msi.rc:193
+#: msi.rc:165 msi.rc:194
 msgid "Shortcut: [1]"
 msgstr "Verknüpfung: [1]"
 
-#: msi.rc:165 msi.rc:196 msi.rc:197
+#: msi.rc:166 msi.rc:197 msi.rc:198
 msgid "Service: [1]"
 msgstr "Dienst: [1]"
 
-#: msi.rc:166 msi.rc:169 msi.rc:173
+#: msi.rc:167 msi.rc:170 msi.rc:174
 msgid "File: [1],  Directory: [9],  Size: [6]"
 msgstr "Datei: [1], Verzeichnis: [9], Größe: [6]"
 
-#: msi.rc:167
+#: msi.rc:168
 msgid "Found application: [1]"
 msgstr "Gefundene Anwendung: [1]"
 
-#: msi.rc:168
+#: msi.rc:169
 msgid "File: [1], Directory: [9], Size: [6]"
 msgstr "Datei: [1], Verzeichnis: [9], Größe: [6]"
 
-#: msi.rc:170
+#: msi.rc:171
 msgid "Service: [2]"
 msgstr "Dienst: [2]"
 
-#: msi.rc:171
+#: msi.rc:172
 msgid "File: [1],  Dependencies: [2]"
 msgstr "Datei: [1], Abhängigkeiten: [2]"
 
-#: msi.rc:172
+#: msi.rc:173
 msgid "Application: [1]"
 msgstr "Anwendung: [1]"
 
-#: msi.rc:174 msi.rc:175
+#: msi.rc:175 msi.rc:176
 msgid "Application Context:[1], Assembly Name:[2]"
 msgstr "Anwendungskontext: [1], Assembly-Name: [2]"
 
-#: msi.rc:176
+#: msi.rc:177
 msgid "File: [1],  Directory: [2],  Size: [3]"
 msgstr "Datei: [1], Verzeichnis: [2], Größe: [3]"
 
-#: msi.rc:177 msi.rc:198
+#: msi.rc:178 msi.rc:199
 msgid "Component ID: [1], Qualifier: [2]"
 msgstr "Komponenten-ID: [1], Bezeichner: [2]"
 
-#: msi.rc:178 msi.rc:199
+#: msi.rc:179 msi.rc:200
 msgid "Feature: [1]"
 msgstr "Feature: [1]"
 
-#: msi.rc:179 msi.rc:200
+#: msi.rc:180 msi.rc:201
 msgid "Class Id: [1]"
 msgstr "Klassen-ID: [1]"
 
-#: msi.rc:180
+#: msi.rc:181
 msgid "AppId: [1]{{, AppType: [2], Users: [3], RSN: [4]}}"
 msgstr "AppID: [1]{{, AppTyp: [2], Benutzer: [3], RSN: [4]}}"
 
-#: msi.rc:181 msi.rc:202
+#: msi.rc:182 msi.rc:203
 msgid "Extension: [1]"
 msgstr "Erweiterung: [1]"
 
-#: msi.rc:182 msi.rc:203
+#: msi.rc:183 msi.rc:204
 msgid "Font: [1]"
 msgstr "Schriftart: [1]"
 
-#: msi.rc:183 msi.rc:204
+#: msi.rc:184 msi.rc:205
 msgid "MIME Content Type: [1], Extension: [2]"
 msgstr "MIME-Inhaltstyp: [1], Erweiterung: [2]"
 
-#: msi.rc:184 msi.rc:205
+#: msi.rc:185 msi.rc:206
 msgid "ProgId: [1]"
 msgstr "ProgID: [1]"
 
-#: msi.rc:185 msi.rc:206
+#: msi.rc:186 msi.rc:207
 msgid "LibID: [1]"
 msgstr "LibID: [1]"
 
-#: msi.rc:186 msi.rc:189
+#: msi.rc:187 msi.rc:190
 msgid "File: [1], Directory: [9]"
 msgstr "Datei: [1], Verzeichnis: [9]"
 
-#: msi.rc:187 msi.rc:207
+#: msi.rc:188 msi.rc:208
 msgid "Name: [1], Value: [2], Action [3]"
 msgstr "Name: [1], Wert: [2], Aktion: [3]"
 
-#: msi.rc:188
+#: msi.rc:189
 msgid "Application: [1], Command line: [2]"
 msgstr "Anwendung: [1], Befehlszeile: [2]"
 
-#: msi.rc:191 msi.rc:208
+#: msi.rc:192 msi.rc:209
 msgid "File: [1],  Section: [2],  Key: [3], Value: [4]"
 msgstr "Datei: [1], Sektion: [2], Schlüssel: [3], Wert: [4]"
 
-#: msi.rc:192
+#: msi.rc:193
 msgid "Key: [1], Name: [2]"
 msgstr "Schlüssel: [1], Name: [2]"
 
-#: msi.rc:194 msi.rc:195
+#: msi.rc:195 msi.rc:196
 msgid "File: [1], Folder: [2]"
 msgstr "Datei: [1], Verzeichnis: [2]"
 
-#: msi.rc:201
+#: msi.rc:202
 msgid "AppId: [1]{{, AppType: [2]}}"
 msgstr "AppID: [1]{{, AppTyp: [2]}}"
 
-#: msi.rc:209
+#: msi.rc:210
 msgid "Key: [1], Name: [2], Value: [3]"
 msgstr "Schlüssel: [1], Name: [2], Wert: [3]"
 
-#: msi.rc:71
+#: msi.rc:72
 msgid "{{Fatal error: }}"
 msgstr "{{Schwerer Fehler: }}"
 
-#: msi.rc:72
+#: msi.rc:73
 msgid "{{Error [1]. }}"
 msgstr "{{Fehler [1]. }}"
 
-#: msi.rc:73
+#: msi.rc:74
 msgid "Warning [1]."
 msgstr "Warnung [1]."
 
-#: msi.rc:74
+#: msi.rc:75
 msgid "Info [1]."
 msgstr "Info [1]."
 
-#: msi.rc:75
+#: msi.rc:76
 msgid ""
 "The installer has encountered an unexpected error installing this package. "
 "This may indicate a problem with this package. The error code is [1]. {{The "
@@ -7348,35 +7391,35 @@ msgstr ""
 "aufgetreten. Das könnte auf ein Problem mit dem Paket hinweisen. Der "
 "Fehlercode ist [1]. {{Argumente: [2], [3], [4]}}"
 
-#: msi.rc:76
+#: msi.rc:77
 msgid "{{Disk full: }}"
 msgstr "{{Datenträger voll: }}"
 
-#: msi.rc:77
+#: msi.rc:78
 msgid "Action [Time]: [1]. [2]"
 msgstr "Aktion [Time]: [1]. [2]"
 
-#: msi.rc:78
+#: msi.rc:79
 msgid "Message type: [1], Argument: [2]{, [3]}"
 msgstr "Nachrichtentyp: [1], Argument: [2]{, [3]}"
 
-#: msi.rc:81
+#: msi.rc:82
 msgid "=== Logging started: [Date]  [Time] ==="
 msgstr "=== Logging gestartet: [Date]  [Time] ==="
 
-#: msi.rc:79
+#: msi.rc:80
 msgid "Action start [Time]: [1]."
 msgstr "Beginn der Aktion [Time]: [1]."
 
-#: msi.rc:80
+#: msi.rc:81
 msgid "Action ended [Time]: [1]. Return value [2]."
 msgstr "Ende der Aktion [Time]: [1]. Rückgabewert [2]."
 
-#: msi.rc:83
+#: msi.rc:84
 msgid "Please insert the disk: [2]"
 msgstr "Bitte legen Sie folgenden Datenträger ein: [2]"
 
-#: msi.rc:84
+#: msi.rc:85
 msgid ""
 "Source file not found{{(cabinet)}}: [2]. Verify that the file exists and "
 "that you can access it."
@@ -8792,10 +8835,6 @@ msgstr "Wiedergabelisten"
 msgid "Status"
 msgstr "Status"
 
-#: shell32.rc:152
-msgid "Location"
-msgstr "Ort"
-
 #: shell32.rc:153
 msgid "Model"
 msgstr "Modell"
@@ -8911,10 +8950,6 @@ msgstr ""
 "Wenn Dateien im Zielordner die gleichen Namen haben,\n"
 "werden diese durch Inhalte des Quellordners ersetzt.\n"
 "Möchten Sie trotzdem fortfahren?"
-
-#: shell32.rc:238
-msgid "New Folder"
-msgstr "Neuer Ordner"
 
 #: shell32.rc:240
 msgid "Wine Control Panel"
@@ -9041,6 +9076,794 @@ msgstr " Sek"
 #: twain.rc:29
 msgid "Select Source"
 msgstr "Quelle auswählen"
+
+#: tzres.rc:82
+msgid "China Standard Time"
+msgstr "China Normalzeit"
+
+#: tzres.rc:83
+msgid "China Daylight Time"
+msgstr "China Sommerzeit"
+
+#: tzres.rc:160
+msgid "North Asia Standard Time"
+msgstr "Nordasien Normalzeit"
+
+#: tzres.rc:161
+msgid "North Asia Daylight Time"
+msgstr "Nordasien Sommerzeit"
+
+#: tzres.rc:104
+msgid "Georgian Standard Time"
+msgstr "Georgische Normalzeit"
+
+#: tzres.rc:105
+msgid "Georgian Daylight Time"
+msgstr "Georgische Sommerzeit"
+
+#: tzres.rc:152
+msgid "Nepal Standard Time"
+msgstr "Nepal Normalzeit"
+
+#: tzres.rc:153
+msgid "Nepal Daylight Time"
+msgstr "Nepal Sommerzeit"
+
+#: tzres.rc:60
+msgid "Cape Verde Standard Time"
+msgstr "Kap Verde Normalzeit"
+
+#: tzres.rc:61
+msgid "Cape Verde Daylight Time"
+msgstr "Kap Verde Sommerzeit"
+
+#: tzres.rc:74
+msgid "Central European Standard Time"
+msgstr "Mitteleuropäische Zeit"
+
+#: tzres.rc:75
+msgid "Central European Daylight Time"
+msgstr "Mitteleuropäische Sommerzeit"
+
+#: tzres.rc:140
+msgid "Morocco Standard Time"
+msgstr "Marokko Normalzeit"
+
+#: tzres.rc:141
+msgid "Morocco Daylight Time"
+msgstr "Marokko Sommerzeit"
+
+#: tzres.rc:72
+msgid "Central Europe Standard Time"
+msgstr "Mitteleuropäische Zeit"
+
+#: tzres.rc:73
+msgid "Central Europe Daylight Time"
+msgstr "Mitteleuropäische Sommerzeit"
+
+#: tzres.rc:118
+msgid "Iran Standard Time"
+msgstr "Iran Normalzeit"
+
+#: tzres.rc:119
+msgid "Iran Daylight Time"
+msgstr "Iran Sommerzeit"
+
+#: tzres.rc:150
+msgid "Namibia Standard Time"
+msgstr "Namibia Normalzeit"
+
+#: tzres.rc:151
+msgid "Namibia Daylight Time"
+msgstr "Namibia Sommerzeit"
+
+#: tzres.rc:200
+msgid "Tonga Standard Time"
+msgstr "Tonga Normalzeit"
+
+#: tzres.rc:201
+msgid "Tonga Daylight Time"
+msgstr "Tonga Sommerzeit"
+
+#: tzres.rc:144
+msgid "Mountain Standard Time (Mexico)"
+msgstr "Mountain Normalzeit (Mexiko)"
+
+#: tzres.rc:145
+msgid "Mountain Daylight Time (Mexico)"
+msgstr "Mountain Sommerzeit (Mexiko)"
+
+#: tzres.rc:106
+msgid "GMT Standard Time"
+msgstr "GMT Normalzeit"
+
+#: tzres.rc:107
+msgid "GMT Daylight Time"
+msgstr "GMT Sommerzeit"
+
+#: tzres.rc:68
+msgid "Central Asia Standard Time"
+msgstr "Zentralasien Normalzeit"
+
+#: tzres.rc:69
+msgid "Central Asia Daylight Time"
+msgstr "Zentralasien Sommerzeit"
+
+#: tzres.rc:38
+msgid "Arabic Standard Time"
+msgstr "Arabische Normalzeit"
+
+#: tzres.rc:39
+msgid "Arabic Daylight Time"
+msgstr "Arabische Sommerzeit"
+
+#: tzres.rc:132
+msgid "Magadan Standard Time"
+msgstr "Magadan Normalzeit"
+
+#: tzres.rc:133
+msgid "Magadan Daylight Time"
+msgstr "Magadan Sommerzeit"
+
+#: tzres.rc:156
+msgid "Newfoundland Standard Time"
+msgstr "Neufundland Normalzeit"
+
+#: tzres.rc:157
+msgid "Newfoundland Daylight Time"
+msgstr "Neufundland Sommerzeit"
+
+#: tzres.rc:224
+msgid "West Pacific Standard Time"
+msgstr "Westpazifische Normalzeit"
+
+#: tzres.rc:225
+msgid "West Pacific Daylight Time"
+msgstr "Westpazifische Sommerzeit"
+
+#: tzres.rc:164
+msgid "Pacific Standard Time"
+msgstr "Pazifische Normalzeit"
+
+#: tzres.rc:165
+msgid "Pacific Daylight Time"
+msgstr "Pazifische Sommerzeit"
+
+#: tzres.rc:48
+msgid "Azerbaijan Standard Time"
+msgstr "Aserbaidschan Normalzeit"
+
+#: tzres.rc:49
+msgid "Azerbaijan Daylight Time"
+msgstr "Aserbaidschan Sommerzeit"
+
+#: tzres.rc:182
+msgid "Samoa Standard Time"
+msgstr "Samoa Normalzeit"
+
+#: tzres.rc:183
+msgid "Samoa Daylight Time"
+msgstr "Samoa Sommerzeit"
+
+#: tzres.rc:124
+msgid "Kaliningrad Standard Time"
+msgstr "Kaliningrad Normalzeit"
+
+#: tzres.rc:125
+msgid "Kaliningrad Daylight Time"
+msgstr "Kaliningrad Sommerzeit"
+
+#: tzres.rc:166
+msgid "Pacific Standard Time (Mexico)"
+msgstr "Pazifische Normalzeit (Mexiko)"
+
+#: tzres.rc:167
+msgid "Pacific Daylight Time (Mexico)"
+msgstr "Pazifische Sommerzeit (Mexiko)"
+
+#: tzres.rc:136
+msgid "Middle East Standard Time"
+msgstr "Mittlerer Osten Normalzeit"
+
+#: tzres.rc:137
+msgid "Middle East Daylight Time"
+msgstr "Mittlerer Osten Sommerzeit"
+
+#: tzres.rc:198
+msgid "Tokyo Standard Time"
+msgstr "Tokyo Normalzeit"
+
+#: tzres.rc:199
+msgid "Tokyo Daylight Time"
+msgstr "Tokyo Sommerzeit"
+
+#: tzres.rc:130
+msgid "Line Islands Standard Time"
+msgstr "Linieninseln Normalzeit"
+
+#: tzres.rc:131
+msgid "Line Islands Daylight Time"
+msgstr "Linieninseln Sommerzeit"
+
+#: tzres.rc:122
+msgid "Jordan Standard Time"
+msgstr "Jordanien Normalzeit"
+
+#: tzres.rc:123
+msgid "Jordan Daylight Time"
+msgstr "Jordanien Sommerzeit"
+
+#: tzres.rc:78
+msgid "Central Standard Time"
+msgstr "Central Normalzeit"
+
+#: tzres.rc:79
+msgid "Central Daylight Time"
+msgstr "Central Sommerzeit"
+
+#: tzres.rc:50
+msgid "Azores Standard Time"
+msgstr "Azoren Normalzeit"
+
+#: tzres.rc:51
+msgid "Azores Daylight Time"
+msgstr "Azoren Sommerzeit"
+
+#: tzres.rc:158
+msgid "North Asia East Standard Time"
+msgstr "Ost-Nordasiatische Normalzeit"
+
+#: tzres.rc:159
+msgid "North Asia East Daylight Time"
+msgstr "Ost-Nordasiatische Sommerzeit"
+
+#: tzres.rc:40
+msgid "Argentina Standard Time"
+msgstr "Argentinien Normalzeit"
+
+#: tzres.rc:41
+msgid "Argentina Daylight Time"
+msgstr "Argentinien Sommerzeit"
+
+#: tzres.rc:146
+msgid "Myanmar Standard Time"
+msgstr "Myanmar Normalzeit"
+
+#: tzres.rc:147
+msgid "Myanmar Daylight Time"
+msgstr "Myanmar Sommerzeit"
+
+#: tzres.rc:210 tzres.rc:211
+msgid "Coordinated Universal Time"
+msgstr "Koordinierte Weltzeit"
+
+#: tzres.rc:116
+msgid "India Standard Time"
+msgstr "Indien Normalzeit"
+
+#: tzres.rc:117
+msgid "India Daylight Time"
+msgstr "Indien Sommerzeit"
+
+#: tzres.rc:112
+msgid "GTB Standard Time"
+msgstr "Osteuropäische Zeit"
+
+#: tzres.rc:113
+msgid "GTB Daylight Time"
+msgstr "Osteuropäische Sommerzeit"
+
+#: tzres.rc:202
+msgid "Turkey Standard Time"
+msgstr "Türkei Normalzeit"
+
+#: tzres.rc:203
+msgid "Turkey Daylight Time"
+msgstr "Türkei Sommerzeit"
+
+#: tzres.rc:100
+msgid "Fiji Standard Time"
+msgstr "Fidschi Normalzeit"
+
+#: tzres.rc:101
+msgid "Fiji Daylight Time"
+msgstr "Fidschi Sommerzeit"
+
+#: tzres.rc:58
+msgid "Canada Central Standard Time"
+msgstr "Central Normalzeit (Kanada)"
+
+#: tzres.rc:59
+msgid "Canada Central Daylight Time"
+msgstr "Central Sommerzeit (Kanada)"
+
+#: tzres.rc:194
+msgid "Taipei Standard Time"
+msgstr "Taipeh Normalzeit"
+
+#: tzres.rc:195
+msgid "Taipei Daylight Time"
+msgstr "Taipeh Sommerzeit"
+
+#: tzres.rc:220
+msgid "W. Europe Standard Time"
+msgstr "Mitteleuropäische Zeit"
+
+#: tzres.rc:221
+msgid "W. Europe Daylight Time"
+msgstr "Mitteleuropäische Sommerzeit"
+
+#: tzres.rc:138
+msgid "Montevideo Standard Time"
+msgstr "Montevideo Normalzeit"
+
+#: tzres.rc:139
+msgid "Montevideo Daylight Time"
+msgstr "Montevideo Sommerzeit"
+
+#: tzres.rc:168
+msgid "Pakistan Standard Time"
+msgstr "Pakistan Normalzeit"
+
+#: tzres.rc:169
+msgid "Pakistan Daylight Time"
+msgstr "Pakistan Sommerzeit"
+
+#: tzres.rc:62
+msgid "Caucasus Standard Time"
+msgstr "Kaukasische Normalzeit"
+
+#: tzres.rc:63
+msgid "Caucasus Daylight Time"
+msgstr "Kaukasische Sommerzeit"
+
+#: tzres.rc:46
+msgid "AUS Eastern Standard Time"
+msgstr "Ostaustralische Normalzeit"
+
+#: tzres.rc:47
+msgid "AUS Eastern Daylight Time"
+msgstr "Ostaustralische Sommerzeit"
+
+#: tzres.rc:148
+msgid "N. Central Asia Standard Time"
+msgstr "Nordzentralasien Normalzeit"
+
+#: tzres.rc:149
+msgid "N. Central Asia Daylight Time"
+msgstr "Nordzentralasien Sommerzeit"
+
+#: tzres.rc:94
+msgid "Eastern Standard Time"
+msgstr "Eastern Normalzeit"
+
+#: tzres.rc:95
+msgid "Eastern Daylight Time"
+msgstr "Eastern Sommerzeit"
+
+#: tzres.rc:80
+msgid "Central Standard Time (Mexico)"
+msgstr "Central Normalzeit (Mexiko)"
+
+#: tzres.rc:81
+msgid "Central Daylight Time (Mexico)"
+msgstr "Central Sommerzeit (Mexiko)"
+
+#: tzres.rc:42
+msgid "Atlantic Standard Time"
+msgstr "Atlantic Normalzeit"
+
+#: tzres.rc:43
+msgid "Atlantic Daylight Time"
+msgstr "Atlantic Sommerzeit"
+
+#: tzres.rc:142
+msgid "Mountain Standard Time"
+msgstr "Mountain Normalzeit"
+
+#: tzres.rc:143
+msgid "Mountain Daylight Time"
+msgstr "Mountain Sommerzeit"
+
+#: tzres.rc:206
+msgid "US Eastern Standard Time"
+msgstr "US Eastern Normalzeit"
+
+#: tzres.rc:207
+msgid "US Eastern Daylight Time"
+msgstr "US Eastern Sommerzeit"
+
+#: tzres.rc:196
+msgid "Tasmania Standard Time"
+msgstr "Tasmanien Normalzeit"
+
+#: tzres.rc:197
+msgid "Tasmania Daylight Time"
+msgstr "Tasmanien Sommerzeit"
+
+#: tzres.rc:66
+msgid "Central America Standard Time"
+msgstr "Mittelamerikanische Normalzeit"
+
+#: tzres.rc:67
+msgid "Central America Daylight Time"
+msgstr "Mittelamerikanische Sommerzeit"
+
+#: tzres.rc:208
+msgid "US Mountain Standard Time"
+msgstr "US Mountain Normalzeit"
+
+#: tzres.rc:209
+msgid "US Mountain Daylight Time"
+msgstr "US Mountain Sommerzeit"
+
+#: tzres.rc:188
+msgid "South Africa Standard Time"
+msgstr "Südafrika Normalzeit"
+
+#: tzres.rc:189
+msgid "South Africa Daylight Time"
+msgstr "Südafrika Sommerzeit"
+
+#: tzres.rc:64
+msgid "Cen. Australia Standard Time"
+msgstr "Zentralaustralische Normalzeit"
+
+#: tzres.rc:65
+msgid "Cen. Australia Daylight Time"
+msgstr "Zentralaustralische Sommerzeit"
+
+#: tzres.rc:190
+msgid "Sri Lanka Standard Time"
+msgstr "Sri Lanka Normalzeit"
+
+#: tzres.rc:191
+msgid "Sri Lanka Daylight Time"
+msgstr "Sri Lanka Sommerzeit"
+
+#: tzres.rc:30
+msgid "Afghanistan Standard Time"
+msgstr "Afghanistan Normalzeit"
+
+#: tzres.rc:31
+msgid "Afghanistan Daylight Time"
+msgstr "Afghanistan Sommerzeit"
+
+#: tzres.rc:226
+msgid "Yakutsk Standard Time"
+msgstr "Yakutsk Normalzeit"
+
+#: tzres.rc:227
+msgid "Yakutsk Daylight Time"
+msgstr "Yakutsk Sommerzeit"
+
+#: tzres.rc:176
+msgid "SA Eastern Standard Time"
+msgstr "Östl. Südamerika Normalzeit"
+
+#: tzres.rc:177
+msgid "SA Eastern Daylight Time"
+msgstr "Östl. Südamerika Sommerzeit"
+
+#: tzres.rc:34
+msgid "Arab Standard Time"
+msgstr "Arabische Normalzeit"
+
+#: tzres.rc:35
+msgid "Arab Daylight Time"
+msgstr "Arabische Sommerzeit"
+
+#: tzres.rc:36
+msgid "Arabian Standard Time"
+msgstr "Arabische Normalzeit"
+
+#: tzres.rc:37
+msgid "Arabian Daylight Time"
+msgstr "Arabische Sommerzeit"
+
+#: tzres.rc:174
+msgid "Russian Standard Time"
+msgstr "Russische Normalzeit"
+
+#: tzres.rc:175
+msgid "Russian Daylight Time"
+msgstr "Russische Sommerzeit"
+
+#: tzres.rc:172
+msgid "Romance Standard Time"
+msgstr "Romanische Normalzeit"
+
+#: tzres.rc:173
+msgid "Romance Daylight Time"
+msgstr "Romanische Sommerzeit"
+
+#: tzres.rc:98
+msgid "Ekaterinburg Standard Time"
+msgstr "Jekaterinburg Normalzeit"
+
+#: tzres.rc:99
+msgid "Ekaterinburg Daylight Time"
+msgstr "Jekaterinburg Sommerzeit"
+
+#: tzres.rc:192
+msgid "Syria Standard Time"
+msgstr "Syrien Normalzeit"
+
+#: tzres.rc:193
+msgid "Syria Daylight Time"
+msgstr "Syrien Sommerzeit"
+
+#: tzres.rc:44
+msgid "AUS Central Standard Time"
+msgstr "Zentralaustralische Normalzeit"
+
+#: tzres.rc:45
+msgid "AUS Central Daylight Time"
+msgstr "Zentralaustralische Sommerzeit"
+
+#: tzres.rc:110
+msgid "Greenwich Standard Time"
+msgstr "Westafrikanische Normalzeit"
+
+#: tzres.rc:111
+msgid "Greenwich Daylight Time"
+msgstr "Westafrikanische Sommerzeit"
+
+#: tzres.rc:204
+msgid "Ulaanbaatar Standard Time"
+msgstr "Ulan-Bator Normalzeit"
+
+#: tzres.rc:205
+msgid "Ulaanbaatar Daylight Time"
+msgstr "Ulan-Bator Sommerzeit"
+
+#: tzres.rc:120
+msgid "Israel Standard Time"
+msgstr "Israel Normalzeit"
+
+#: tzres.rc:121
+msgid "Israel Daylight Time"
+msgstr "Israel Sommerzeit"
+
+#: tzres.rc:54
+msgid "Bangladesh Standard Time"
+msgstr "Bangladesch Normalzeit"
+
+#: tzres.rc:55
+msgid "Bangladesh Daylight Time"
+msgstr "Bangladesch Sommerzeit"
+
+#: tzres.rc:178
+msgid "SA Pacific Standard Time"
+msgstr "Westl. Südamerika Normalzeit"
+
+#: tzres.rc:179
+msgid "SA Pacific Daylight Time"
+msgstr "Westl. Südamerika Sommerzeit"
+
+#: tzres.rc:222
+msgid "West Asia Standard Time"
+msgstr "Westasien Normalzeit"
+
+#: tzres.rc:223
+msgid "West Asia Daylight Time"
+msgstr "Westasien Sommerzeit"
+
+#: tzres.rc:32
+msgid "Alaskan Standard Time"
+msgstr "Alaska Normalzeit"
+
+#: tzres.rc:33
+msgid "Alaskan Daylight Time"
+msgstr "Alaska Sommerzeit"
+
+#: tzres.rc:170
+msgid "Paraguay Standard Time"
+msgstr "Paraguay Normalzeit"
+
+#: tzres.rc:171
+msgid "Paraguay Daylight Time"
+msgstr "Paraguay Sommerzeit"
+
+#: tzres.rc:84
+msgid "Dateline Standard Time"
+msgstr "Datumsgrenze Normalzeit"
+
+#: tzres.rc:85
+msgid "Dateline Daylight Time"
+msgstr "Datumsgrenze Sommerzeit"
+
+#: tzres.rc:128
+msgid "Libya Standard Time"
+msgstr "Libyen Normalzeit"
+
+#: tzres.rc:129
+msgid "Libya Daylight Time"
+msgstr "Libyen Sommerzeit"
+
+#: tzres.rc:52
+msgid "Bahia Standard Time"
+msgstr "Bahia Normalzeit"
+
+#: tzres.rc:53
+msgid "Bahia Daylight Time"
+msgstr "Bahia Sommerzeit"
+
+#: tzres.rc:212
+msgid "Venezuela Standard Time"
+msgstr "Venezuela Normalzeit"
+
+#: tzres.rc:213
+msgid "Venezuela Daylight Time"
+msgstr "Venezuela Sommerzeit"
+
+#: tzres.rc:114
+msgid "Hawaiian Standard Time"
+msgstr "Hawaii Normalzeit"
+
+#: tzres.rc:115
+msgid "Hawaiian Daylight Time"
+msgstr "Hawaii Sommerzeit"
+
+#: tzres.rc:184
+msgid "SE Asia Standard Time"
+msgstr "Südostasiatische Normalzeit"
+
+#: tzres.rc:185
+msgid "SE Asia Daylight Time"
+msgstr "Südostasiatische Sommerzeit"
+
+#: tzres.rc:154
+msgid "New Zealand Standard Time"
+msgstr "Neuseeland Normalzeit"
+
+#: tzres.rc:155
+msgid "New Zealand Daylight Time"
+msgstr "Neuseeland Sommerzeit"
+
+#: tzres.rc:70
+msgid "Central Brazilian Standard Time"
+msgstr "Zentalbrasilianische Normalzeit"
+
+#: tzres.rc:71
+msgid "Central Brazilian Daylight Time"
+msgstr "Zentalbrasilianische Sommerzeit"
+
+#: tzres.rc:56
+msgid "Belarus Standard Time"
+msgstr "Belarus Normalzeit"
+
+#: tzres.rc:57
+msgid "Belarus Daylight Time"
+msgstr "Belarus Sommerzeit"
+
+#: tzres.rc:180
+msgid "SA Western Standard Time"
+msgstr "Mittl. Südamerika Normalzeit"
+
+#: tzres.rc:181
+msgid "SA Western Daylight Time"
+msgstr "Mittl. Südamerika Sommerzeit"
+
+#: tzres.rc:108
+msgid "Greenland Standard Time"
+msgstr "Grönland Normalzeit"
+
+#: tzres.rc:109
+msgid "Greenland Daylight Time"
+msgstr "Grönland Sommerzeit"
+
+#: tzres.rc:92
+msgid "Easter Island Standard Time"
+msgstr "Osterinsel Normalzeit"
+
+#: tzres.rc:93
+msgid "Easter Island Daylight Time"
+msgstr "Osterinsel Sommerzeit"
+
+#: tzres.rc:96
+msgid "Egypt Standard Time"
+msgstr "Ägypten Normalzeit"
+
+#: tzres.rc:97
+msgid "Egypt Daylight Time"
+msgstr "Ägypten Sommerzeit"
+
+#: tzres.rc:134
+msgid "Mauritius Standard Time"
+msgstr "Mauritius Normalzeit"
+
+#: tzres.rc:135
+msgid "Mauritius Daylight Time"
+msgstr "Mauritius Sommerzeit"
+
+#: tzres.rc:214
+msgid "Vladivostok Standard Time"
+msgstr "Wladiwostok Normalzeit"
+
+#: tzres.rc:215
+msgid "Vladivostok Daylight Time"
+msgstr "Wladiwostok Sommerzeit"
+
+#: tzres.rc:186
+msgid "Singapore Standard Time"
+msgstr "Singapur Normalzeit"
+
+#: tzres.rc:187
+msgid "Singapore Daylight Time"
+msgstr "Singapur Sommerzeit"
+
+#: tzres.rc:126
+msgid "Korea Standard Time"
+msgstr "Koreanische Normalzeit"
+
+#: tzres.rc:127
+msgid "Korea Daylight Time"
+msgstr "Koreanische Sommerzeit"
+
+#: tzres.rc:86
+msgid "E. Africa Standard Time"
+msgstr "Ostafrikanische Normalzeit"
+
+#: tzres.rc:87
+msgid "E. Africa Daylight Time"
+msgstr "Ostafrikanische Sommerzeit"
+
+#: tzres.rc:102
+msgid "FLE Standard Time"
+msgstr "Osteuropäische Zeit"
+
+#: tzres.rc:103
+msgid "FLE Daylight Time"
+msgstr "Osteuropäische Sommerzeit"
+
+#: tzres.rc:90
+msgid "E. South America Standard Time"
+msgstr "Östl. Südamerika Normalzeit"
+
+#: tzres.rc:91
+msgid "E. South America Daylight Time"
+msgstr "Östl. Südamerika Sommerzeit"
+
+#: tzres.rc:76
+msgid "Central Pacific Standard Time"
+msgstr "Zentralpazifische Normalzeit"
+
+#: tzres.rc:77
+msgid "Central Pacific Daylight Time"
+msgstr "Zentralpazifische Sommerzeit"
+
+#: tzres.rc:218
+msgid "W. Central Africa Standard Time"
+msgstr "West-Zentralafrika Normalzeit"
+
+#: tzres.rc:219
+msgid "W. Central Africa Daylight Time"
+msgstr "West-Zentralafrika Sommerzeit"
+
+#: tzres.rc:162
+msgid "Pacific SA Standard Time"
+msgstr "Chilenische Normalzeit"
+
+#: tzres.rc:163
+msgid "Pacific SA Daylight Time"
+msgstr "Chilenische Sommerzeit"
+
+#: tzres.rc:88
+msgid "E. Australia Standard Time"
+msgstr "Ostaustralische Normalzeit"
+
+#: tzres.rc:89
+msgid "E. Australia Daylight Time"
+msgstr "Ostaustralische Sommerzeit"
+
+#: tzres.rc:216
+msgid "W. Australia Standard Time"
+msgstr "Westaustralische Normalzeit"
+
+#: tzres.rc:217
+msgid "W. Australia Daylight Time"
+msgstr "Westaustralische Sommerzeit"
 
 #: urlmon.rc:32 wininet.rc:77
 msgid "Security Warning"
@@ -11135,6 +11958,10 @@ msgid "Error: Invalid option '%c'.\n"
 msgstr "Fehler: Ungültige Option '%c'.\n"
 
 #: hostname.rc:32
+msgid "Error: Could not get hostname: %u.\n"
+msgstr "Fehler: Hostname nicht gefunden: %u.\n"
+
+#: hostname.rc:33
 msgid ""
 "Error: Setting the system hostname is not possible with the hostname "
 "utility.\n"
@@ -14315,11 +15142,11 @@ msgstr "F&arbe:"
 
 #: winecfg.rc:304
 msgid "MIME types"
-msgstr ""
+msgstr "MIME-Typen"
 
 #: winecfg.rc:305
 msgid "Manage file &associations"
-msgstr ""
+msgstr "Datei&zuordnungen verwalten"
 
 #: winecfg.rc:308
 msgid "Folders"
@@ -14327,7 +15154,7 @@ msgstr "Ordner"
 
 #: winecfg.rc:311
 msgid "&Link to:"
-msgstr "&Verknüpfe:"
+msgstr "&Verknüpfen mit:"
 
 #: winecfg.rc:34
 msgid "Libraries"
@@ -15121,10 +15948,6 @@ msgstr "unixfs"
 #: winefile.rc:101
 msgid "Shell"
 msgstr "Shell"
-
-#: winefile.rc:102 winhlp32.rc:110 winhlp32.rc:85
-msgid "Not yet implemented"
-msgstr "Noch nicht implementiert"
 
 #: winefile.rc:109
 msgid "Creation date"

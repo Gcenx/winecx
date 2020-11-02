@@ -82,7 +82,7 @@ HRESULT WINAPI DwmExtendFrameIntoClientArea(HWND hwnd, const MARGINS* margins)
 {
     FIXME("(%p, %p) stub\n", hwnd, margins);
 
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 /**********************************************************************
@@ -286,3 +286,12 @@ HRESULT WINAPI DwmSetIconicThumbnail(HWND hwnd, HBITMAP hbmp, DWORD flags)
     FIXME("(%p %p %x) stub\n", hwnd, hbmp, flags);
     return S_OK;
 };
+
+/**********************************************************************
+ *           DwmpGetColorizationParameters         (DWMAPI.@)
+ */
+HRESULT WINAPI DwmpGetColorizationParameters(void *params)
+{
+    FIXME("(%p) stub\n", params);
+    return E_NOTIMPL;
+}

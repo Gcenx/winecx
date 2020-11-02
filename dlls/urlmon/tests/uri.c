@@ -8366,6 +8366,7 @@ static void test_IUri_GetPropertyLength(void) {
                 /* Value may be unicode encoded */
                 expectedValueW = a2w(prop.value);
                 expectedLen = lstrlenW(expectedValueW);
+                heap_free(expectedValueW);
 
                 /* This won't be necessary once GetPropertyLength is implemented. */
                 receivedLen = -1;
@@ -8515,7 +8516,225 @@ static void test_IUri_HasProperty(void) {
     }
 }
 
+struct custom_uri {
+    IUri IUri_iface;
+    IUri *uri;
+};
+
+static inline struct custom_uri* impl_from_IUri(IUri *iface)
+{
+    return CONTAINING_RECORD(iface, struct custom_uri, IUri_iface);
+}
+
+static HRESULT WINAPI custom_uri_QueryInterface(IUri *iface, REFIID iid, void **out)
+{
+    if (IsEqualIID(iid, &IID_IUri) || IsEqualIID(iid, &IID_IUnknown))
+    {
+       *out = iface;
+       IUri_AddRef(iface);
+       return S_OK;
+    }
+
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI custom_uri_AddRef(IUri *iface)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_AddRef(uri->uri);
+}
+
+static ULONG WINAPI custom_uri_Release(IUri *iface)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_Release(uri->uri);
+}
+
+static HRESULT WINAPI custom_uri_GetPropertyBSTR(IUri *iface, Uri_PROPERTY property, BSTR *value, DWORD flags)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetPropertyBSTR(uri->uri, property, value, flags);
+}
+
+static HRESULT WINAPI custom_uri_GetPropertyLength(IUri *iface, Uri_PROPERTY property, DWORD *length, DWORD flags)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetPropertyLength(uri->uri, property, length, flags);
+}
+
+static HRESULT WINAPI custom_uri_GetPropertyDWORD(IUri *iface, Uri_PROPERTY property, DWORD *value, DWORD flags)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetPropertyDWORD(uri->uri, property, value, flags);
+}
+
+static HRESULT WINAPI custom_uri_HasProperty(IUri *iface, Uri_PROPERTY property, BOOL *has_property)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_HasProperty(uri->uri, property, has_property);
+}
+
+static HRESULT WINAPI custom_uri_GetAbsoluteUri(IUri *iface, BSTR *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetAbsoluteUri(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetAuthority(IUri *iface, BSTR *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetAbsoluteUri(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetDisplayUri(IUri *iface, BSTR *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetAbsoluteUri(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetDomain(IUri *iface, BSTR *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetAbsoluteUri(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetExtension(IUri *iface, BSTR *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetAbsoluteUri(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetFragment(IUri *iface, BSTR *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetAbsoluteUri(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetHost(IUri *iface, BSTR *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetAbsoluteUri(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetPassword(IUri *iface, BSTR *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetAbsoluteUri(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetPath(IUri *iface, BSTR *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetAbsoluteUri(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetPathAndQuery(IUri *iface, BSTR *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetAbsoluteUri(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetQuery(IUri *iface, BSTR *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetAbsoluteUri(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetRawUri(IUri *iface, BSTR *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetAbsoluteUri(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetSchemeName(IUri *iface, BSTR *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetSchemeName(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetUserInfo(IUri *iface, BSTR *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetUserInfo(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetUserName(IUri *iface, BSTR *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetUserName(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetHostType(IUri *iface, DWORD *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetHostType(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetPort(IUri *iface, DWORD *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetPort(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetScheme(IUri *iface, DWORD *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetScheme(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetZone(IUri *iface, DWORD *value)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetZone(uri->uri, value);
+}
+
+static HRESULT WINAPI custom_uri_GetProperties(IUri *iface, DWORD *flags)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_GetProperties(uri->uri, flags);
+}
+
+static HRESULT WINAPI custom_uri_IsEqual(IUri *iface, IUri *pUri, BOOL *is_equal)
+{
+    struct custom_uri *uri = impl_from_IUri(iface);
+    return IUri_IsEqual(uri->uri, pUri, is_equal);
+}
+
+static const IUriVtbl custom_uri_vtbl =
+{
+    custom_uri_QueryInterface,
+    custom_uri_AddRef,
+    custom_uri_Release,
+    custom_uri_GetPropertyBSTR,
+    custom_uri_GetPropertyLength,
+    custom_uri_GetPropertyDWORD,
+    custom_uri_HasProperty,
+    custom_uri_GetAbsoluteUri,
+    custom_uri_GetAuthority,
+    custom_uri_GetDisplayUri,
+    custom_uri_GetDomain,
+    custom_uri_GetExtension,
+    custom_uri_GetFragment,
+    custom_uri_GetHost,
+    custom_uri_GetPassword,
+    custom_uri_GetPath,
+    custom_uri_GetPathAndQuery,
+    custom_uri_GetQuery,
+    custom_uri_GetRawUri,
+    custom_uri_GetSchemeName,
+    custom_uri_GetUserInfo,
+    custom_uri_GetUserName,
+    custom_uri_GetHostType,
+    custom_uri_GetPort,
+    custom_uri_GetScheme,
+    custom_uri_GetZone,
+    custom_uri_GetProperties,
+    custom_uri_IsEqual,
+};
+
 static void test_IUri_IsEqual(void) {
+    struct custom_uri custom_uri;
     IUri *uriA, *uriB;
     BOOL equal;
     HRESULT hres;
@@ -8537,8 +8756,20 @@ static void test_IUri_IsEqual(void) {
     hres = IUri_IsEqual(uriA, uriB, NULL);
     ok(hres == E_POINTER, "Error: IsEqual returned 0x%08x, expected 0x%08x.\n", hres, E_POINTER);
 
+    equal = FALSE;
+    hres = IUri_IsEqual(uriA, uriA, &equal);
+    ok(hres == S_OK, "Error: IsEqual returned 0x%08x, expected 0x%08x.\n", hres, S_OK);
+    ok(equal, "Error: Expected equal URIs.\n");
+
+    equal = FALSE;
+    hres = IUri_IsEqual(uriA, uriB, &equal);
+    ok(hres == S_OK, "Error: IsEqual returned 0x%08x, expected 0x%08x.\n", hres, S_OK);
+    ok(equal, "Error: Expected equal URIs.\n");
+
     IUri_Release(uriA);
     IUri_Release(uriB);
+
+    custom_uri.IUri_iface.lpVtbl = &custom_uri_vtbl;
 
     for(i = 0; i < ARRAY_SIZE(equality_tests); ++i) {
         uri_equality test = equality_tests[i];
@@ -8561,6 +8792,16 @@ static void test_IUri_IsEqual(void) {
             ok(hres == S_OK, "Error: IsEqual returned 0x%08x, expected 0x%08x on equality_tests[%d].\n", hres, S_OK, i);
             ok(equal == test.equal, "Error: Expected the comparison to be %d on equality_tests[%d].\n", test.equal, i);
         }
+
+        custom_uri.uri = uriB;
+
+        equal = -1;
+        hres = IUri_IsEqual(uriA, &custom_uri.IUri_iface, &equal);
+        todo_wine {
+            ok(hres == S_OK, "Error: IsEqual returned 0x%08x, expected 0x%08x on equality_tests[%d].\n", hres, S_OK, i);
+            ok(equal == test.equal, "Error: Expected the comparison to be %d on equality_tests[%d].\n", test.equal, i);
+        }
+
         if(uriA) IUri_Release(uriA);
         if(uriB) IUri_Release(uriB);
 
@@ -10288,7 +10529,7 @@ static void test_IUriBuilderFactory(void) {
                 ok(hr == S_OK, "Error: GetIUri return 0x%08x, expected 0x%08x.\n",
                     hr, S_OK);
                 ok(tmp == uri, "Error: Expected tmp to be %p, but was %p.\n", uri, tmp);
-                if(uri) IUri_Release(uri);
+                if(tmp) IUri_Release(tmp);
             }
             if(builder) IUriBuilder_Release(builder);
         }
@@ -11298,6 +11539,7 @@ static void test_IPersistStream(void)
         ok(hr == S_OK, "%d) Error creating uninitialized Uri: 0x%08x.\n", i, hr);
         hr = IUri_QueryInterface(uri, &IID_IMarshal, (void**)&marshal);
         ok(hr == S_OK, "%d) QueryInterface failed 0x%08x, expected S_OK.\n", i, hr);
+        IUri_Release(uri);
         hr = IMarshal_UnmarshalInterface(marshal, stream, &IID_IUri, (void**)&uri);
         ok(hr == S_OK, "%d) UnmarshalInterface failed 0x%08x, expected S_OK.\n", i, hr);
         hr = IUri_GetRawUri(uri, &raw_uri);

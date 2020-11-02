@@ -20,10 +20,12 @@
 
 package org.winehq.wine;
 
+import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.os.Build;
@@ -33,6 +35,7 @@ import android.util.Log;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.PointerIcon;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
@@ -63,6 +66,7 @@ public class WineActivity extends Activity
 
     protected WineWindow desktop_window;
     protected WineWindow message_window;
+    private PointerIcon current_cursor;
 
     @Override
     public void onCreate(Bundle savedInstanceState)
@@ -74,17 +78,37 @@ public class WineActivity extends Activity
         new Thread( new Runnable() { public void run() { loadWine( null ); }} ).start();
     }
 
+    @TargetApi(21)
+    @SuppressWarnings("deprecation")
+    private String[] get_supported_abis()
+    {
+        if (Build.VERSION.SDK_INT >= 21) return Build.SUPPORTED_ABIS;
+        return new String[]{ Build.CPU_ABI };
+    }
+
+    private String get_wine_abi()
+    {
+        for (String abi : get_supported_abis())
+        {
+            File server = new File( getFilesDir(), abi + "/bin/wineserver" );
+            if (server.canExecute()) return abi;
+        }
+        Log.e( LOGTAG, "could not find a supported ABI" );
+        return null;
+    }
+
     private void loadWine( String cmdline )
     {
-        File bindir = new File( getFilesDir(), Build.CPU_ABI + "/bin" );
-        File libdir = new File( getFilesDir(), Build.CPU_ABI + "/lib" );
+        copyAssetFiles();
+
+        String wine_abi = get_wine_abi();
+        File bindir = new File( getFilesDir(), wine_abi + "/bin" );
+        File libdir = new File( getFilesDir(), wine_abi + "/lib" );
         File dlldir = new File( libdir, "wine" );
         File prefix = new File( getFilesDir(), "prefix" );
         File loader = new File( bindir, "wine" );
         String locale = Locale.getDefault().getLanguage() + "_" +
             Locale.getDefault().getCountry() + ".UTF-8";
-
-        copyAssetFiles();
 
         HashMap<String,String> env = new HashMap<String,String>();
         env.put( "WINELOADER", loader.toString() );
@@ -166,15 +190,18 @@ public class WineActivity extends Activity
     {
         if (name.equals( "files.sum" )) return true;
         if (name.startsWith( "share/" )) return true;
-        if (name.startsWith( Build.CPU_ABI + "/system/" )) return false;
-        if (name.startsWith( Build.CPU_ABI + "/" )) return true;
+        for (String abi : get_supported_abis())
+        {
+            if (name.startsWith( abi + "/system/" )) return false;
+            if (name.startsWith( abi + "/" )) return true;
+        }
         if (name.startsWith( "x86/" )) return true;
         return false;
     }
 
     private final boolean isFileExecutable( String name )
     {
-        return name.startsWith( Build.CPU_ABI + "/" ) || name.startsWith( "x86/" );
+        return !name.equals( "files.sum" ) && !name.startsWith( "share/" );
     }
 
     private final HashMap<String,String> readMapFromInputStream( InputStream in )
@@ -308,6 +335,7 @@ public class WineActivity extends Activity
         protected int hwnd;
         protected int owner;
         protected int style;
+        protected float scale;
         protected boolean visible;
         protected Rect visible_rect;
         protected Rect client_rect;
@@ -320,7 +348,7 @@ public class WineActivity extends Activity
         protected WineWindowGroup window_group;
         protected WineWindowGroup client_group;
 
-        public WineWindow( int w, WineWindow parent )
+        public WineWindow( int w, WineWindow parent, float scale )
         {
             Log.i( LOGTAG, String.format( "create hwnd %08x", w ));
             hwnd = w;
@@ -329,6 +357,7 @@ public class WineActivity extends Activity
             visible = false;
             visible_rect = client_rect = new Rect( 0, 0, 0, 0 );
             this.parent = parent;
+            this.scale = scale;
             children = new ArrayList<WineWindow>();
             win_map.put( w, this );
             if (parent != null) parent.children.add( this );
@@ -378,8 +407,10 @@ public class WineActivity extends Activity
         public View create_whole_view()
         {
             if (window_group == null) create_window_groups();
-            window_group.create_view( false ).layout( 0, 0, visible_rect.right - visible_rect.left,
-                                                      visible_rect.bottom - visible_rect.top );
+            window_group.create_view( false ).layout( 0, 0,
+                                                      Math.round( (visible_rect.right - visible_rect.left) * scale ),
+                                                      Math.round( (visible_rect.bottom - visible_rect.top) * scale ));
+            window_group.set_scale( scale );
             return window_group;
         }
 
@@ -476,10 +507,11 @@ public class WineActivity extends Activity
                                          client_rect.bottom  - visible_rect.top );
         }
 
-        public void set_parent( WineWindow new_parent )
+        public void set_parent( WineWindow new_parent, float scale )
         {
             Log.i( LOGTAG, String.format( "set parent hwnd %08x parent %08x -> %08x",
                                           hwnd, parent.hwnd, new_parent.hwnd ));
+            this.scale = scale;
             if (window_group != null)
             {
                 if (visible) remove_view_from_parent();
@@ -498,6 +530,20 @@ public class WineActivity extends Activity
             return hwnd;
         }
 
+        private void update_surface( boolean is_client )
+        {
+            if (is_client)
+            {
+                Log.i( LOGTAG, String.format( "set client surface hwnd %08x %s", hwnd, client_surface ));
+                if (client_surface != null) wine_surface_changed( hwnd, client_surface, true );
+            }
+            else
+            {
+                Log.i( LOGTAG, String.format( "set window surface hwnd %08x %s", hwnd, window_surface ));
+                if (window_surface != null) wine_surface_changed( hwnd, window_surface, false );
+            }
+        }
+
         public void set_surface( SurfaceTexture surftex, boolean is_client )
         {
             if (is_client)
@@ -508,8 +554,6 @@ public class WineActivity extends Activity
                     client_surftex = surftex;
                     client_surface = new Surface( surftex );
                 }
-                Log.i( LOGTAG, String.format( "set client surface hwnd %08x %s", hwnd, client_surface ));
-                wine_surface_changed( hwnd, client_surface, true );
             }
             else
             {
@@ -519,15 +563,14 @@ public class WineActivity extends Activity
                     window_surftex = surftex;
                     window_surface = new Surface( surftex );
                 }
-                Log.i( LOGTAG, String.format( "set window surface hwnd %08x %s", hwnd, window_surface ));
-                wine_surface_changed( hwnd, window_surface, false );
             }
+            update_surface( is_client );
         }
 
         public void get_event_pos( MotionEvent event, int[] pos )
         {
-            pos[0] = Math.round( event.getX() + window_group.getLeft() );
-            pos[1] = Math.round( event.getY() + window_group.getTop() );
+            pos[0] = Math.round( event.getX() * scale + window_group.getLeft() );
+            pos[1] = Math.round( event.getY() * scale + window_group.getTop() );
         }
     }
 
@@ -550,6 +593,10 @@ public class WineActivity extends Activity
         /* wrapper for layout() making sure that the view is not empty */
         public void set_layout( int left, int top, int right, int bottom )
         {
+            left   *= win.scale;
+            top    *= win.scale;
+            right  *= win.scale;
+            bottom *= win.scale;
             if (right <= left + 1) right = left + 2;
             if (bottom <= top + 1) bottom = top + 2;
             layout( left, top, right, bottom );
@@ -559,6 +606,15 @@ public class WineActivity extends Activity
         protected void onLayout( boolean changed, int left, int top, int right, int bottom )
         {
             if (content_view != null) content_view.layout( 0, 0, right - left, bottom - top );
+        }
+
+        public void set_scale( float scale )
+        {
+            if (content_view == null) return;
+            content_view.setPivotX( 0 );
+            content_view.setPivotY( 0 );
+            content_view.setScaleX( scale );
+            content_view.setScaleY( scale );
         }
 
         public WineView create_view( boolean is_client )
@@ -642,6 +698,12 @@ public class WineActivity extends Activity
         {
         }
 
+        @TargetApi(24)
+        public PointerIcon onResolvePointerIcon( MotionEvent event, int index )
+        {
+            return current_cursor;
+        }
+
         public boolean onGenericMotionEvent( MotionEvent event )
         {
             if (is_client) return false;  // let the whole window handle it
@@ -678,7 +740,7 @@ public class WineActivity extends Activity
         {
             Log.i( LOGTAG, String.format( "view key event win %08x action %d keycode %d (%s)",
                                           window.hwnd, event.getAction(), event.getKeyCode(),
-                                          event.keyCodeToString( event.getKeyCode() )));;
+                                          KeyEvent.keyCodeToString( event.getKeyCode() )));;
             boolean ret = wine_keyboard_event( window.hwnd, event.getAction(), event.getKeyCode(),
                                                event.getMetaState() );
             if (!ret) ret = super.dispatchKeyEvent(event);
@@ -693,11 +755,11 @@ public class WineActivity extends Activity
         public TopView( Context context, int hwnd )
         {
             super( context );
-            desktop_window = new WineWindow( hwnd, null );
+            desktop_window = new WineWindow( hwnd, null, 1.0f );
             addView( desktop_window.create_whole_view() );
             desktop_window.client_group.bringToFront();
 
-            message_window = new WineWindow( WineWindow.HWND_MESSAGE, null );
+            message_window = new WineWindow( WineWindow.HWND_MESSAGE, null, 1.0f );
             message_window.create_window_groups();
         }
 
@@ -730,12 +792,12 @@ public class WineActivity extends Activity
         wine_config_changed( getResources().getConfiguration().densityDpi );
     }
 
-    public void create_window( int hwnd, boolean opengl, int parent, int pid )
+    public void create_window( int hwnd, boolean opengl, int parent, float scale, int pid )
     {
         WineWindow win = get_window( hwnd );
         if (win == null)
         {
-            win = new WineWindow( hwnd, get_window( parent ));
+            win = new WineWindow( hwnd, get_window( parent ), scale );
             win.create_window_groups();
             if (win.parent == desktop_window) win.create_whole_view();
         }
@@ -748,12 +810,24 @@ public class WineActivity extends Activity
         if (win != null) win.destroy();
     }
 
-    public void set_window_parent( int hwnd, int parent, int pid )
+    public void set_window_parent( int hwnd, int parent, float scale, int pid )
     {
         WineWindow win = get_window( hwnd );
         if (win == null) return;
-        win.set_parent( get_window( parent ));
+        win.set_parent( get_window( parent ), scale );
         if (win.parent == desktop_window) win.create_whole_view();
+    }
+
+    @TargetApi(24)
+    public void set_cursor( int id, int width, int height, int hotspotx, int hotspoty, int bits[] )
+    {
+        Log.i( LOGTAG, String.format( "set_cursor id %d size %dx%d hotspot %dx%d", id, width, height, hotspotx, hotspoty ));
+        if (bits != null)
+        {
+            Bitmap bitmap = Bitmap.createBitmap( bits, width, height, Bitmap.Config.ARGB_8888 );
+            current_cursor = PointerIcon.create( bitmap, hotspotx, hotspoty );
+        }
+        else current_cursor = PointerIcon.getSystemIcon( this, id );
     }
 
     public void window_pos_changed( int hwnd, int flags, int insert_after, int owner, int style,
@@ -769,9 +843,9 @@ public class WineActivity extends Activity
         runOnUiThread( new Runnable() { public void run() { create_desktop_window( hwnd ); }} );
     }
 
-    public void createWindow( final int hwnd, final boolean opengl, final int parent, final int pid )
+    public void createWindow( final int hwnd, final boolean opengl, final int parent, final float scale, final int pid )
     {
-        runOnUiThread( new Runnable() { public void run() { create_window( hwnd, opengl, parent, pid ); }} );
+        runOnUiThread( new Runnable() { public void run() { create_window( hwnd, opengl, parent, scale, pid ); }} );
     }
 
     public void destroyWindow( final int hwnd )
@@ -779,9 +853,16 @@ public class WineActivity extends Activity
         runOnUiThread( new Runnable() { public void run() { destroy_window( hwnd ); }} );
     }
 
-    public void setParent( final int hwnd, final int parent, final int pid )
+    public void setParent( final int hwnd, final int parent, final float scale, final int pid )
     {
-        runOnUiThread( new Runnable() { public void run() { set_window_parent( hwnd, parent, pid ); }} );
+        runOnUiThread( new Runnable() { public void run() { set_window_parent( hwnd, parent, scale, pid ); }} );
+    }
+
+    public void setCursor( final int id, final int width, final int height,
+                           final int hotspotx, final int hotspoty, final int bits[] )
+    {
+        if (Build.VERSION.SDK_INT < 24) return;
+        runOnUiThread( new Runnable() { public void run() { set_cursor( id, width, height, hotspotx, hotspoty, bits ); }} );
     }
 
     public void windowPosChanged( final int hwnd, final int flags, final int insert_after,

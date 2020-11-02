@@ -628,6 +628,9 @@ void set_thread_context( struct thread *thread, const context_t *context, unsign
 
     if (!suspend_for_ptrace( thread )) return;
 
+    /* force all breakpoint lengths to 1, workaround for kernel bug 200965 */
+    ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(7), 0x11110055 );
+
     switch (context->cpu)
     {
     case CPU_x86:
@@ -720,6 +723,13 @@ void get_thread_context( struct thread *thread, context_t *context, unsigned int
         context->debug.i386_regs.dr3 = DBREG_DRX((&dbregs), 3);
         context->debug.i386_regs.dr6 = DBREG_DRX((&dbregs), 6);
         context->debug.i386_regs.dr7 = DBREG_DRX((&dbregs), 7);
+#elif defined(__NetBSD__)
+        context->debug.i386_regs.dr0 = dbregs.dr[0];
+        context->debug.i386_regs.dr1 = dbregs.dr[1];
+        context->debug.i386_regs.dr2 = dbregs.dr[2];
+        context->debug.i386_regs.dr3 = dbregs.dr[3];
+        context->debug.i386_regs.dr6 = dbregs.dr[6];
+        context->debug.i386_regs.dr7 = dbregs.dr[7];
 #else
         context->debug.i386_regs.dr0 = dbregs.dr0;
         context->debug.i386_regs.dr1 = dbregs.dr1;
@@ -754,6 +764,15 @@ void set_thread_context( struct thread *thread, const context_t *context, unsign
     DBREG_DRX((&dbregs), 5) = 0;
     DBREG_DRX((&dbregs), 6) = context->debug.i386_regs.dr6;
     DBREG_DRX((&dbregs), 7) = context->debug.i386_regs.dr7;
+#elif defined(__NetBSD__)
+    dbregs.dr[0] = context->debug.i386_regs.dr0;
+    dbregs.dr[1] = context->debug.i386_regs.dr1;
+    dbregs.dr[2] = context->debug.i386_regs.dr2;
+    dbregs.dr[3] = context->debug.i386_regs.dr3;
+    dbregs.dr[4] = 0;
+    dbregs.dr[5] = 0;
+    dbregs.dr[6] = context->debug.i386_regs.dr6;
+    dbregs.dr[7] = context->debug.i386_regs.dr7;
 #else
     dbregs.dr0 = context->debug.i386_regs.dr0;
     dbregs.dr1 = context->debug.i386_regs.dr1;

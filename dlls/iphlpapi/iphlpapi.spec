@@ -105,10 +105,10 @@
 @ stdcall GetIpForwardTable2( long ptr )
 @ stub GetIpForwardTableFromStack
 #@ stub GetIpInterfaceEntry
-#@ stub GetIpInterfaceTable
+@ stdcall GetIpInterfaceTable( long ptr )
 #@ stub GetIpNetEntry2
 @ stdcall GetIpNetTable( ptr ptr long )
-#@ stub GetIpNetTable2
+@ stdcall GetIpNetTable2( long ptr )
 @ stub GetIpNetTableFromStack
 #@ stub GetIpPathEntry
 #@ stub GetIpPathTable
@@ -141,7 +141,7 @@
 @ stdcall GetTcpTable2( ptr ptr long )
 @ stub GetTcpTableFromStack
 #@ stub GetTeredoPort
-#@ stub GetUdp6Table
+@ stdcall GetUdp6Table( ptr ptr long )
 @ stdcall GetUdpStatisticsEx( ptr long )
 @ stdcall GetUdpStatistics( ptr )
 @ stub GetUdpStatsFromStack

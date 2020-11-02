@@ -37,6 +37,7 @@
 #ifdef __MINGW32__
 # include "winsock2.h"
 # include "ws2tcpip.h"
+# define WS_AF_INET AF_INET
 # define WS_AF_UNSPEC AF_UNSPEC
 # define WS_NI_MAXHOST NI_MAXHOST
 # define WS_NI_NAMEREQD NI_NAMEREQD
@@ -114,6 +115,8 @@ static const WCHAR class_process_getowner_outW[] =
      'N','E','R','_','O','U','T',0};
 static const WCHAR class_processorW[] =
     {'W','i','n','3','2','_','P','r','o','c','e','s','s','o','r',0};
+static const WCHAR class_serverfeatureW[] =
+    {'W','i','n','3','2','_','S','e','r','v','e','r','F','e','a','t','u','r','e',0};
 static const WCHAR class_processor2W[] =
     {'C','I','M','_','P','r','o','c','e','s','s','o','r',0};
 static const WCHAR class_qualifiersW[] =
@@ -319,6 +322,8 @@ static const WCHAR prop_ostypeW[] =
     {'O','S','T','y','p','e',0};
 static const WCHAR prop_parameterW[] =
     {'P','a','r','a','m','e','t','e','r',0};
+static const WCHAR prop_parentidW[] =
+    {'P','a','r','e','n','t','I','D',0};
 static const WCHAR prop_physicaladapterW[] =
     {'P','h','y','s','i','c','a','l','A','d','a','p','t','e','r',0};
 static const WCHAR prop_pixelsperxlogicalinchW[] =
@@ -711,6 +716,7 @@ static const struct column col_sounddevice[] =
 };
 static const struct column col_stdregprov[] =
 {
+    { method_createkeyW,      CIM_FLAG_ARRAY|COL_FLAG_METHOD },
     { method_enumkeyW,        CIM_FLAG_ARRAY|COL_FLAG_METHOD },
     { method_enumvaluesW,     CIM_FLAG_ARRAY|COL_FLAG_METHOD },
     { method_getstringvalueW, CIM_FLAG_ARRAY|COL_FLAG_METHOD }
@@ -754,6 +760,12 @@ static const struct column col_videocontroller[] =
     { prop_videomemorytypeW,        CIM_UINT16, VT_I4 },
     { prop_videomodedescriptionW,   CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_videoprocessorW,         CIM_STRING|COL_FLAG_DYNAMIC },
+};
+static const struct column col_serverfeature[] =
+{
+    { prop_idW,       CIM_UINT32|COL_FLAG_KEY },
+    { prop_parentidW, CIM_UINT32 },
+    { prop_nameW,     CIM_STRING },
 };
 
 static const WCHAR baseboard_manufacturerW[] =
@@ -852,6 +864,8 @@ static const WCHAR videocontroller_driverversionW[] =
     {'1','.','0',0};
 static const WCHAR videocontroller_statusW[] =
     {'O','K',0};
+static const WCHAR desktop_experienceW[] =
+    {'D','e','s','k','t','o','p',' ','E','x','p','e','r','i','e','n','c','e',0};
 
 #include "pshpack1.h"
 struct record_baseboard
@@ -1134,6 +1148,7 @@ struct record_sounddevice
 };
 struct record_stdregprov
 {
+    class_method *createkey;
     class_method *enumkey;
     class_method *enumvalues;
     class_method *getstringvalue;
@@ -1178,6 +1193,12 @@ struct record_videocontroller
     const WCHAR *videomodedescription;
     const WCHAR *videoprocessor;
 };
+struct record_serverfeature
+{
+    UINT32       id;
+    UINT32       parentid;
+    const WCHAR *name;
+};
 #include "poppack.h"
 
 static const struct record_baseboard data_baseboard[] =
@@ -1198,6 +1219,9 @@ static const struct record_param data_param[] =
     { class_serviceW, method_resumeserviceW, -1, param_returnvalueW, CIM_UINT32, VT_I4 },
     { class_serviceW, method_startserviceW, -1, param_returnvalueW, CIM_UINT32, VT_I4 },
     { class_serviceW, method_stopserviceW, -1, param_returnvalueW, CIM_UINT32, VT_I4 },
+    { class_stdregprovW, method_createkeyW, 1, param_defkeyW, CIM_SINT32, 0, 0x80000002 },
+    { class_stdregprovW, method_createkeyW, 1, param_subkeynameW, CIM_STRING },
+    { class_stdregprovW, method_createkeyW, -1, param_returnvalueW, CIM_UINT32, VT_I4 },
     { class_stdregprovW, method_enumkeyW, 1, param_defkeyW, CIM_SINT32, 0, 0x80000002 },
     { class_stdregprovW, method_enumkeyW, 1, param_subkeynameW, CIM_STRING },
     { class_stdregprovW, method_enumkeyW, -1, param_returnvalueW, CIM_UINT32, VT_I4 },
@@ -1236,7 +1260,7 @@ static const struct record_sounddevice data_sounddevice[] =
 };
 static const struct record_stdregprov data_stdregprov[] =
 {
-    { reg_enum_key, reg_enum_values, reg_get_stringvalue }
+    { reg_create_key, reg_enum_key, reg_enum_values, reg_get_stringvalue }
 };
 static UINT16 systemenclosure_chassistypes[] =
 {
@@ -1244,7 +1268,7 @@ static UINT16 systemenclosure_chassistypes[] =
 };
 static const struct array systemenclosure_chassistypes_array =
 {
-    SIZEOF(systemenclosure_chassistypes),
+    ARRAY_SIZE(systemenclosure_chassistypes),
     &systemenclosure_chassistypes
 };
 static const struct record_systemenclosure data_systemenclosure[] =
@@ -1262,6 +1286,10 @@ static const struct record_systemenclosure data_systemenclosure[] =
 static const struct record_systemsecurity data_systemsecurity[] =
 {
     { security_get_sd, security_set_sd }
+};
+static const struct record_serverfeature data_serverfeatures[] =
+{
+    { 35, 0, desktop_experienceW },
 };
 
 /* check if row matches condition and update status */
@@ -1781,7 +1809,7 @@ static WCHAR *get_file_version( const WCHAR *filename )
     void *block;
     WCHAR *ret;
 
-    if (!(ret = heap_alloc( (4 * 5 + sizeof(fmtW) / sizeof(fmtW[0])) * sizeof(WCHAR) ))) return NULL;
+    if (!(ret = heap_alloc( (4 * 5 + ARRAY_SIZE( fmtW )) * sizeof(WCHAR) ))) return NULL;
     if (!(size = GetFileVersionInfoSizeW( filename, NULL )) || !(block = heap_alloc( size )))
     {
         heap_free( ret );
@@ -2040,7 +2068,7 @@ static enum fill_status fill_diskdrive( struct table *table, const struct expr *
 {
     static const WCHAR fmtW[] =
         {'\\','\\','\\','\\','.','\\','\\','P','H','Y','S','I','C','A','L','D','R','I','V','E','%','u',0};
-    WCHAR device_id[sizeof(fmtW)/sizeof(fmtW[0]) + 10], root[] = {'A',':','\\',0};
+    WCHAR device_id[ARRAY_SIZE( fmtW ) + 10], root[] = {'A',':','\\',0};
     struct record_diskdrive *rec;
     UINT i, row = 0, offset = 0, index = 0, type;
     UINT64 size = 1024 * 1024 * 1024;
@@ -2207,7 +2235,7 @@ static enum fill_status fill_ip4routetable( struct table *table, const struct ex
 static WCHAR *get_volumename( const WCHAR *root )
 {
     WCHAR buf[MAX_PATH + 1] = {0};
-    GetVolumeInformationW( root, buf, sizeof(buf)/sizeof(buf[0]), NULL, NULL, NULL, NULL, 0 );
+    GetVolumeInformationW( root, buf, ARRAY_SIZE( buf ), NULL, NULL, NULL, NULL, 0 );
     return heap_strdupW( buf );
 }
 static WCHAR *get_volumeserialnumber( const WCHAR *root )
@@ -2377,7 +2405,7 @@ static WCHAR *get_dnshostname( IP_ADAPTER_UNICAST_ADDRESS *addr )
     WCHAR buf[WS_NI_MAXHOST];
 
     if (!addr) return NULL;
-    if (GetNameInfoW( sa->lpSockaddr, sa->iSockaddrLength, buf, sizeof(buf)/sizeof(buf[0]), NULL,
+    if (GetNameInfoW( sa->lpSockaddr, sa->iSockaddrLength, buf, ARRAY_SIZE( buf ), NULL,
                       0, WS_NI_NAMEREQD )) return NULL;
     return heap_strdupW( buf );
 }
@@ -2399,7 +2427,7 @@ static struct array *get_defaultipgateway( IP_ADAPTER_GATEWAY_ADDRESS *list )
     }
     for (gateway = list; gateway; gateway = gateway->Next)
     {
-        buflen = sizeof(buf)/sizeof(buf[0]);
+        buflen = ARRAY_SIZE( buf );
         if (WSAAddressToStringW( gateway->Address.lpSockaddr, gateway->Address.iSockaddrLength,
                                  NULL, buf, &buflen) || !(ptr[i++] = heap_strdupW( buf )))
         {
@@ -2431,7 +2459,7 @@ static struct array *get_dnsserversearchorder( IP_ADAPTER_DNS_SERVER_ADDRESS *li
     }
     for (server = list; server; server = server->Next)
     {
-        buflen = sizeof(buf)/sizeof(buf[0]);
+        buflen = ARRAY_SIZE( buf );
         if (WSAAddressToStringW( server->Address.lpSockaddr, server->Address.iSockaddrLength,
                                  NULL, buf, &buflen) || !(ptr[i++] = heap_strdupW( buf )))
         {
@@ -2464,7 +2492,7 @@ static struct array *get_ipaddress( IP_ADAPTER_UNICAST_ADDRESS_LH *list )
     }
     for (address = list; address; address = address->Next)
     {
-        buflen = sizeof(buf)/sizeof(buf[0]);
+        buflen = ARRAY_SIZE( buf );
         if (WSAAddressToStringW( address->Address.lpSockaddr, address->Address.iSockaddrLength,
                                  NULL, buf, &buflen) || !(ptr[i++] = heap_strdupW( buf )))
         {
@@ -2496,14 +2524,14 @@ static struct array *get_ipsubnet( IP_ADAPTER_UNICAST_ADDRESS_LH *list )
     }
     for (address = list; address; address = address->Next)
     {
-        if (address->Address.lpSockaddr->sa_family == AF_INET)
+        if (address->Address.lpSockaddr->sa_family == WS_AF_INET)
         {
             WCHAR buf[INET_ADDRSTRLEN];
             SOCKADDR_IN addr;
-            ULONG buflen = sizeof(buf)/sizeof(buf[0]);
+            ULONG buflen = ARRAY_SIZE( buf );
 
             memset( &addr, 0, sizeof(addr) );
-            addr.sin_family = AF_INET;
+            addr.sin_family = WS_AF_INET;
             if (ConvertLengthToIpv4Mask( address->OnLinkPrefixLength, &addr.sin_addr.S_un.S_addr ) != NO_ERROR
                     || WSAAddressToStringW( (SOCKADDR*)&addr, sizeof(addr), NULL, buf, &buflen))
                 ptr[i] = NULL;
@@ -3057,7 +3085,7 @@ static WCHAR *get_oscaption( OSVERSIONINFOEXW *ver )
         {'8','.','1',' ','P','r','o',0};
     static const WCHAR win10W[] =
         {'1','0',' ','P','r','o',0};
-    int len = sizeof(windowsW)/sizeof(windowsW[0]);
+    int len = ARRAY_SIZE( windowsW );
     WCHAR *ret;
 
     if (!(ret = heap_alloc( len * sizeof(WCHAR) + sizeof(win2003W) ))) return NULL;
@@ -3239,7 +3267,7 @@ static enum fill_status fill_service( struct table *table, const struct expr *co
     ENUM_SERVICE_STATUS_PROCESSW *tmp, *services = NULL;
     SERVICE_STATUS_PROCESS *status;
     WCHAR sysnameW[MAX_COMPUTERNAME_LENGTH + 1];
-    DWORD len = sizeof(sysnameW) / sizeof(sysnameW[0]);
+    DWORD len = ARRAY_SIZE( sysnameW );
     UINT i, row = 0, offset = 0, size = 256, needed, count;
     enum fill_status fill_status = FILL_STATUS_FAILED;
     BOOL ret;
@@ -3516,45 +3544,67 @@ done:
 
 static struct table builtin_classes[] =
 {
-    { class_baseboardW, SIZEOF(col_baseboard), col_baseboard, SIZEOF(data_baseboard), 0, (BYTE *)data_baseboard },
-    { class_biosW, SIZEOF(col_bios), col_bios, SIZEOF(data_bios), 0, (BYTE *)data_bios },
-    { class_cdromdriveW, SIZEOF(col_cdromdrive), col_cdromdrive, 0, 0, NULL, fill_cdromdrive },
-    { class_compsysW, SIZEOF(col_compsys), col_compsys, 0, 0, NULL, fill_compsys },
-    { class_compsysproductW, SIZEOF(col_compsysproduct), col_compsysproduct, 0, 0, NULL, fill_compsysproduct },
-    { class_datafileW, SIZEOF(col_datafile), col_datafile, 0, 0, NULL, fill_datafile },
-    { class_desktopmonitorW, SIZEOF(col_desktopmonitor), col_desktopmonitor, 0, 0, NULL, fill_desktopmonitor },
-    { class_directoryW, SIZEOF(col_directory), col_directory, 0, 0, NULL, fill_directory },
-    { class_diskdriveW, SIZEOF(col_diskdrive), col_diskdrive, 0, 0, NULL, fill_diskdrive },
-    { class_diskpartitionW, SIZEOF(col_diskpartition), col_diskpartition, 0, 0, NULL, fill_diskpartition },
-    { class_ip4routetableW, SIZEOF(col_ip4routetable), col_ip4routetable, 0, 0, NULL, fill_ip4routetable },
-    { class_logicaldiskW, SIZEOF(col_logicaldisk), col_logicaldisk, 0, 0, NULL, fill_logicaldisk },
-    { class_logicaldisk2W, SIZEOF(col_logicaldisk), col_logicaldisk, 0, 0, NULL, fill_logicaldisk },
-    { class_networkadapterW, SIZEOF(col_networkadapter), col_networkadapter, 0, 0, NULL, fill_networkadapter },
-    { class_networkadapterconfigW, SIZEOF(col_networkadapterconfig), col_networkadapterconfig, 0, 0, NULL, fill_networkadapterconfig },
-    { class_osW, SIZEOF(col_os), col_os, 0, 0, NULL, fill_os },
-    { class_paramsW, SIZEOF(col_param), col_param, SIZEOF(data_param), 0, (BYTE *)data_param },
-    { class_physicalmediaW, SIZEOF(col_physicalmedia), col_physicalmedia, SIZEOF(data_physicalmedia), 0, (BYTE *)data_physicalmedia },
-    { class_physicalmemoryW, SIZEOF(col_physicalmemory), col_physicalmemory, 0, 0, NULL, fill_physicalmemory },
-    { class_pnpentityW, SIZEOF(col_pnpentity), col_pnpentity, 0, 0, NULL, fill_pnpentity },
-    { class_printerW, SIZEOF(col_printer), col_printer, 0, 0, NULL, fill_printer },
-    { class_processW, SIZEOF(col_process), col_process, 0, 0, NULL, fill_process },
-    { class_processorW, SIZEOF(col_processor), col_processor, 0, 0, NULL, fill_processor },
-    { class_processor2W, SIZEOF(col_processor), col_processor, 0, 0, NULL, fill_processor },
-    { class_qualifiersW, SIZEOF(col_qualifier), col_qualifier, SIZEOF(data_qualifier), 0, (BYTE *)data_qualifier },
-    { class_serviceW, SIZEOF(col_service), col_service, 0, 0, NULL, fill_service },
-    { class_sidW, SIZEOF(col_sid), col_sid, 0, 0, NULL, fill_sid },
-    { class_sounddeviceW, SIZEOF(col_sounddevice), col_sounddevice, SIZEOF(data_sounddevice), 0, (BYTE *)data_sounddevice },
-    { class_stdregprovW, SIZEOF(col_stdregprov), col_stdregprov, SIZEOF(data_stdregprov), 0, (BYTE *)data_stdregprov },
-    { class_systemsecurityW, SIZEOF(col_systemsecurity), col_systemsecurity, SIZEOF(data_systemsecurity), 0, (BYTE *)data_systemsecurity },
-    { class_systemenclosureW, SIZEOF(col_systemenclosure), col_systemenclosure, SIZEOF(data_systemenclosure), 0, (BYTE *)data_systemenclosure },
-    { class_videocontrollerW, SIZEOF(col_videocontroller), col_videocontroller, 0, 0, NULL, fill_videocontroller }
+    { class_baseboardW, ARRAY_SIZE(col_baseboard), col_baseboard, ARRAY_SIZE(data_baseboard), 0, (BYTE *)data_baseboard },
+    { class_biosW, ARRAY_SIZE(col_bios), col_bios, ARRAY_SIZE(data_bios), 0, (BYTE *)data_bios },
+    { class_cdromdriveW, ARRAY_SIZE(col_cdromdrive), col_cdromdrive, 0, 0, NULL, fill_cdromdrive },
+    { class_compsysW, ARRAY_SIZE(col_compsys), col_compsys, 0, 0, NULL, fill_compsys },
+    { class_compsysproductW, ARRAY_SIZE(col_compsysproduct), col_compsysproduct, 0, 0, NULL, fill_compsysproduct },
+    { class_datafileW, ARRAY_SIZE(col_datafile), col_datafile, 0, 0, NULL, fill_datafile },
+    { class_desktopmonitorW, ARRAY_SIZE(col_desktopmonitor), col_desktopmonitor, 0, 0, NULL, fill_desktopmonitor },
+    { class_directoryW, ARRAY_SIZE(col_directory), col_directory, 0, 0, NULL, fill_directory },
+    { class_diskdriveW, ARRAY_SIZE(col_diskdrive), col_diskdrive, 0, 0, NULL, fill_diskdrive },
+    { class_diskpartitionW, ARRAY_SIZE(col_diskpartition), col_diskpartition, 0, 0, NULL, fill_diskpartition },
+    { class_ip4routetableW, ARRAY_SIZE(col_ip4routetable), col_ip4routetable, 0, 0, NULL, fill_ip4routetable },
+    { class_logicaldiskW, ARRAY_SIZE(col_logicaldisk), col_logicaldisk, 0, 0, NULL, fill_logicaldisk },
+    { class_logicaldisk2W, ARRAY_SIZE(col_logicaldisk), col_logicaldisk, 0, 0, NULL, fill_logicaldisk },
+    { class_networkadapterW, ARRAY_SIZE(col_networkadapter), col_networkadapter, 0, 0, NULL, fill_networkadapter },
+    { class_networkadapterconfigW, ARRAY_SIZE(col_networkadapterconfig), col_networkadapterconfig, 0, 0, NULL, fill_networkadapterconfig },
+    { class_osW, ARRAY_SIZE(col_os), col_os, 0, 0, NULL, fill_os },
+    { class_paramsW, ARRAY_SIZE(col_param), col_param, ARRAY_SIZE(data_param), 0, (BYTE *)data_param },
+    { class_physicalmediaW, ARRAY_SIZE(col_physicalmedia), col_physicalmedia, ARRAY_SIZE(data_physicalmedia), 0, (BYTE *)data_physicalmedia },
+    { class_physicalmemoryW, ARRAY_SIZE(col_physicalmemory), col_physicalmemory, 0, 0, NULL, fill_physicalmemory },
+    { class_pnpentityW, ARRAY_SIZE(col_pnpentity), col_pnpentity, 0, 0, NULL, fill_pnpentity },
+    { class_printerW, ARRAY_SIZE(col_printer), col_printer, 0, 0, NULL, fill_printer },
+    { class_processW, ARRAY_SIZE(col_process), col_process, 0, 0, NULL, fill_process },
+    { class_processorW, ARRAY_SIZE(col_processor), col_processor, 0, 0, NULL, fill_processor },
+    { class_processor2W, ARRAY_SIZE(col_processor), col_processor, 0, 0, NULL, fill_processor },
+    { class_qualifiersW, ARRAY_SIZE(col_qualifier), col_qualifier, ARRAY_SIZE(data_qualifier), 0, (BYTE *)data_qualifier },
+    { class_serviceW, ARRAY_SIZE(col_service), col_service, 0, 0, NULL, fill_service },
+    { class_sidW, ARRAY_SIZE(col_sid), col_sid, 0, 0, NULL, fill_sid },
+    { class_sounddeviceW, ARRAY_SIZE(col_sounddevice), col_sounddevice, ARRAY_SIZE(data_sounddevice), 0, (BYTE *)data_sounddevice },
+    { class_stdregprovW, ARRAY_SIZE(col_stdregprov), col_stdregprov, ARRAY_SIZE(data_stdregprov), 0, (BYTE *)data_stdregprov },
+    { class_systemsecurityW, ARRAY_SIZE(col_systemsecurity), col_systemsecurity, ARRAY_SIZE(data_systemsecurity), 0, (BYTE *)data_systemsecurity },
+    { class_systemenclosureW, ARRAY_SIZE(col_systemenclosure), col_systemenclosure, ARRAY_SIZE(data_systemenclosure), 0, (BYTE *)data_systemenclosure },
+    { class_videocontrollerW, ARRAY_SIZE(col_videocontroller), col_videocontroller, 0, 0, NULL, fill_videocontroller }
 };
+
+static struct table server_feature[] =
+{
+    { class_serverfeatureW, ARRAY_SIZE(col_serverfeature), col_serverfeature, ARRAY_SIZE(data_serverfeatures), 0, (BYTE *)data_serverfeatures },
+};
+
+static BOOL is_onenote(void)
+{
+    static const char *onenote = "ONENOTE.EXE";
+    char name[MAX_PATH], *ptr;
+
+    if (!GetModuleFileNameA(NULL, name, sizeof(name)))
+        return FALSE;
+
+    ptr = strstr(name, onenote);
+    return ptr && !ptr[strlen(onenote)];
+}
 
 void init_table_list( void )
 {
     static struct list tables = LIST_INIT( tables );
     UINT i;
 
-    for (i = 0; i < SIZEOF(builtin_classes); i++) list_add_tail( &tables, &builtin_classes[i].entry );
+    for (i = 0; i < ARRAY_SIZE(builtin_classes); i++) list_add_tail( &tables, &builtin_classes[i].entry );
+
+    /* CXHACK: 16057 - Client system do not support this class, for some reason OneNote asks for it anyway. */
+    if (is_onenote())
+        list_add_tail( &tables, &server_feature[0].entry );
+
     table_list = &tables;
 }

@@ -377,6 +377,7 @@ static int is_valid_bitfield_type(const type_t *type)
         case TYPE_BASIC_INT64:
         case TYPE_BASIC_INT:
         case TYPE_BASIC_INT3264:
+        case TYPE_BASIC_LONG:
         case TYPE_BASIC_CHAR:
         case TYPE_BASIC_HYPER:
         case TYPE_BASIC_BYTE:
@@ -443,6 +444,7 @@ void type_interface_define(type_t *iface, type_t *inherit, statement_list_t *stm
     iface->details.iface->stmts = stmts;
     iface->details.iface->inherit = inherit;
     iface->details.iface->disp_inherit = NULL;
+    iface->details.iface->async_iface = NULL;
     iface->defined = TRUE;
     compute_method_indexes(iface);
 }
@@ -456,6 +458,7 @@ void type_dispinterface_define(type_t *iface, var_list_t *props, var_list_t *met
     iface->details.iface->inherit = find_type("IDispatch", NULL, 0);
     if (!iface->details.iface->inherit) error_loc("IDispatch is undefined\n");
     iface->details.iface->disp_inherit = NULL;
+    iface->details.iface->async_iface = NULL;
     iface->defined = TRUE;
     compute_method_indexes(iface);
 }
@@ -469,6 +472,7 @@ void type_dispinterface_define_from_iface(type_t *dispiface, type_t *iface)
     dispiface->details.iface->inherit = find_type("IDispatch", NULL, 0);
     if (!dispiface->details.iface->inherit) error_loc("IDispatch is undefined\n");
     dispiface->details.iface->disp_inherit = iface;
+    dispiface->details.iface->async_iface = NULL;
     dispiface->defined = TRUE;
     compute_method_indexes(dispiface);
 }

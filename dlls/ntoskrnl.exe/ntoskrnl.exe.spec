@@ -9,7 +9,7 @@
 @ stdcall -norelay ExInterlockedPushEntrySList (ptr ptr ptr) NTOSKRNL_ExInterlockedPushEntrySList
 @ stub ExReInitializeRundownProtection
 @ stdcall -norelay ExReleaseFastMutexUnsafe(ptr)
-@ stub ExReleaseResourceLite
+@ stdcall ExReleaseResourceLite(ptr)
 @ stub ExReleaseRundownProtection
 @ stub ExReleaseRundownProtectionEx
 @ stub ExRundownCompleted
@@ -111,7 +111,7 @@
 @ varargs DbgPrintEx(long long str)
 @ stub DbgPrintReturnControlC
 @ stub DbgPrompt
-@ stub DbgQueryDebugFilterState
+@ stdcall DbgQueryDebugFilterState(long long)
 @ stub DbgSetDebugFilterState
 @ stdcall ExAcquireResourceExclusiveLite(ptr long)
 @ stub ExAcquireResourceSharedLite
@@ -234,7 +234,7 @@
 @ stub FsRtlIsDbcsInExpression
 @ stub FsRtlIsFatDbcsLegal
 @ stub FsRtlIsHpfsDbcsLegal
-@ stub FsRtlIsNameInExpression
+@ stdcall FsRtlIsNameInExpression(ptr ptr long ptr)
 @ stub FsRtlIsNtstatusExpected
 @ stub FsRtlIsPagingFile
 @ stub FsRtlIsTotalDeviceFailure
@@ -428,7 +428,7 @@
 @ stub IoReadPartitionTableEx
 @ stub IoReadTransferCount
 @ stub IoRegisterBootDriverReinitialization
-@ stub IoRegisterDeviceInterface
+@ stdcall IoRegisterDeviceInterface(ptr ptr ptr ptr)
 @ stdcall IoRegisterDriverReinitialization(ptr ptr ptr)
 @ stdcall IoRegisterFileSystem(ptr)
 @ stub IoRegisterFsRegistrationChange
@@ -517,7 +517,7 @@
 @ stub KeAttachProcess
 @ stub KeBugCheck
 @ stub KeBugCheckEx
-@ stub KeCancelTimer
+@ stdcall KeCancelTimer(ptr)
 @ stub KeCapturePersistentThreadState
 @ stdcall KeClearEvent(ptr)
 @ stub KeConnectInterrupt
@@ -620,7 +620,7 @@
 @ stdcall KeSetPriorityThread(ptr long)
 @ stub KeSetProfileIrql
 @ stdcall KeSetSystemAffinityThread(long)
-@ stub KeSetTargetProcessorDpc
+@ stdcall KeSetTargetProcessorDpc(ptr long)
 @ stub KeSetTimeIncrement
 @ stub KeSetTimer
 @ stdcall KeSetTimerEx(ptr int64 long ptr)
@@ -668,8 +668,9 @@
 @ stub MmBuildMdlForNonPagedPool
 @ stub MmCanFileBeTruncated
 @ stub MmCommitSessionMappedView
+@ stdcall MmCopyVirtualMemory(ptr ptr ptr ptr long long ptr)
 @ stub MmCreateMdl
-@ stub MmCreateSection
+@ stdcall MmCreateSection(ptr long ptr ptr long long long ptr)
 @ stub MmDisableModifiedWriteOfSection
 @ stub MmFlushImageSection
 @ stub MmForceSectionClosed
@@ -886,6 +887,7 @@
 @ stub PsGetProcessSessionId
 @ stub PsGetProcessWin32Process
 @ stub PsGetProcessWin32WindowStation
+@ stdcall -arch=x86_64 PsGetProcessWow64Process(ptr)
 @ stub PsGetThreadFreezeCount
 @ stub PsGetThreadHardErrorsAreDisabled
 @ stub PsGetThreadId
@@ -1144,7 +1146,7 @@
 @ stdcall RtlQueryTimeZoneInformation(ptr)
 @ stdcall -norelay RtlRaiseException(ptr)
 @ stdcall RtlRandom(ptr)
-@ stub RtlRandomEx
+@ stdcall RtlRandomEx(ptr)
 @ stub RtlRealPredecessor
 @ stub RtlRealSuccessor
 @ stub RtlRemoveUnicodePrefix
@@ -1402,7 +1404,7 @@
 @ stdcall -private ZwUnloadKey(ptr) NtUnloadKey
 @ stdcall -private ZwUnmapViewOfSection(long ptr) NtUnmapViewOfSection
 @ stdcall -private ZwWaitForMultipleObjects(long ptr long long ptr) NtWaitForMultipleObjects
-@ stdcall -private ZwWaitForSingleObject(long long ptr) NtWaitForSingleObject
+@ stdcall ZwWaitForSingleObject(long long ptr) NtWaitForSingleObject
 @ stdcall ZwWriteFile(long long ptr ptr ptr ptr long ptr ptr) NtWriteFile
 @ stdcall -private ZwYieldExecution() NtYieldExecution
 @ stdcall -private -arch=arm,x86_64 -norelay __chkstk()
