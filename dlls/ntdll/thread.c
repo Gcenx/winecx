@@ -218,6 +218,11 @@ void thread_init(void)
                          sizeof(peb->TlsExpansionBitmapBits) * 8 );
     RtlInitializeBitMap( &fls_bitmap, peb->FlsBitmapBits, sizeof(peb->FlsBitmapBits) * 8 );
     RtlSetBits( peb->TlsBitmap, 0, 1 ); /* TLS index 0 is reserved and should be initialized to NULL. */
+
+#if defined(__APPLE__) && defined(__x86_64__) && !defined(__i386_on_x86_64__)
+    while (RtlFindClearBitsAndSet( peb->TlsBitmap, 1, 1 ) != ~0U);
+#endif
+
     RtlSetBits( peb->FlsBitmap, 0, 1 );
     InitializeListHead( &peb->FlsListHead );
     InitializeListHead( &ldr.InLoadOrderModuleList );

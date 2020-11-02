@@ -3826,6 +3826,11 @@ DWORD WINAPI TlsAlloc( void )
                 !(NtCurrentTeb()->TlsExpansionSlots = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY,
                                          8 * sizeof(peb->TlsExpansionBitmapBits) * sizeof(void*) )))
             {
+#if defined(__APPLE__) && defined(__x86_64__) && !defined(__i386_on_x86_64__)
+    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1"
+                      :
+                      : "r" (NtCurrentTeb()->TlsExpansionSlots), "n" (FIELD_OFFSET(TEB, TlsExpansionSlots)));
+#endif
                 RtlClearBits( peb->TlsExpansionBitmap, index, 1 );
                 index = ~0U;
                 SetLastError( ERROR_NOT_ENOUGH_MEMORY );
@@ -3947,6 +3952,11 @@ BOOL WINAPI TlsSetValue( DWORD index, LPVOID value )
             SetLastError( ERROR_NOT_ENOUGH_MEMORY );
             return FALSE;
         }
+#if defined(__APPLE__) && defined(__x86_64__) && !defined(__i386_on_x86_64__)
+    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1"
+                      :
+                      : "r" (NtCurrentTeb()->TlsExpansionSlots), "n" (FIELD_OFFSET(TEB, TlsExpansionSlots)));
+#endif
         NtCurrentTeb()->TlsExpansionSlots[index] = value;
     }
     return TRUE;
