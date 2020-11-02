@@ -875,8 +875,11 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
 {
     void *ptr;
     int prot = VIRTUAL_GetUnixProt( vprot | VPROT_COMMITTED /* make sure it is accessible */ );
+#ifdef __APPLE__
     unsigned int flags = MAP_FIXED | ((vprot & VPROT_WRITECOPY) ? MAP_PRIVATE : MAP_SHARED);
-
+#else
+    unsigned int flags = MAP_FIXED | ((vprot & VPROT_WRITE) ? MAP_SHARED : MAP_PRIVATE);
+#endif
     assert( start < view->size );
     assert( start + size <= view->size );
 

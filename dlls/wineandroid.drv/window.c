@@ -283,10 +283,17 @@ jboolean motion_event( JNIEnv *env, jobject obj, jint win, jint action, jint x, 
 
     if (!( mask == AMOTION_EVENT_ACTION_DOWN ||
            mask == AMOTION_EVENT_ACTION_UP ||
+           mask == AMOTION_EVENT_ACTION_CANCEL ||
            mask == AMOTION_EVENT_ACTION_SCROLL ||
            mask == AMOTION_EVENT_ACTION_MOVE ||
-           mask == AMOTION_EVENT_ACTION_HOVER_MOVE ))
+           mask == AMOTION_EVENT_ACTION_HOVER_MOVE ||
+           mask == AMOTION_EVENT_ACTION_BUTTON_PRESS ||
+           mask == AMOTION_EVENT_ACTION_BUTTON_RELEASE ))
         return JNI_FALSE;
+
+    /* make sure a subsequent AMOTION_EVENT_ACTION_UP is not treated as a touch event */
+    if (mask == AMOTION_EVENT_ACTION_BUTTON_PRESS || mask == AMOTION_EVENT_ACTION_BUTTON_RELEASE)
+        state |= 0x80000000;
 
     prev_state = InterlockedExchange( &button_state, state );
 
@@ -302,6 +309,7 @@ jboolean motion_event( JNIEnv *env, jobject obj, jint win, jint action, jint x, 
     switch (action & AMOTION_EVENT_ACTION_MASK)
     {
     case AMOTION_EVENT_ACTION_DOWN:
+    case AMOTION_EVENT_ACTION_BUTTON_PRESS:
         if ((state & ~prev_state) & AMOTION_EVENT_BUTTON_PRIMARY)
             data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
         if ((state & ~prev_state) & AMOTION_EVENT_BUTTON_SECONDARY)
@@ -312,6 +320,8 @@ jboolean motion_event( JNIEnv *env, jobject obj, jint win, jint action, jint x, 
             data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
         break;
     case AMOTION_EVENT_ACTION_UP:
+    case AMOTION_EVENT_ACTION_CANCEL:
+    case AMOTION_EVENT_ACTION_BUTTON_RELEASE:
         if ((prev_state & ~state) & AMOTION_EVENT_BUTTON_PRIMARY)
             data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_LEFTUP;
         if ((prev_state & ~state) & AMOTION_EVENT_BUTTON_SECONDARY)

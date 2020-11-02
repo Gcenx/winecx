@@ -4453,6 +4453,31 @@ static BOOL COM_PeekMessage(struct apartment *apt, MSG *msg)
            PeekMessageW(msg, NULL, 0, 0, PM_QS_PAINT|PM_QS_SENDMESSAGE|PM_REMOVE|PM_NOYIELD);
 }
 
+static BOOL stop_msgs_on_quit = TRUE;
+
+/*
+ * CXHACK 15706:
+ * Fix backported to cxoffice-17 is disabled by default and may be enabled in registry.
+ */
+static BOOL WINAPI read_quit_config(INIT_ONCE *once, void *param, void **context)
+{
+    HKEY key;
+    DWORD res;
+    static const WCHAR enable_keyW[] =
+        {'S','o','f','t','w','a','r','e',
+         '\\','W','i','n','e',
+         '\\','E','n','a','b','l','e','O','L','E','Q','u','i','t','F','i','x',0};
+
+    res = RegOpenKeyW(HKEY_CURRENT_USER, enable_keyW, &key);
+    if(res != ERROR_SUCCESS)
+        return TRUE;
+
+    RegCloseKey(key);
+    FIXME("CXHACK: Enabling WM_QUIT fix.");
+    stop_msgs_on_quit = FALSE;
+    return TRUE;
+}
+
 /***********************************************************************
  *           CoWaitForMultipleHandles [OLE32.@]
  *
@@ -4486,6 +4511,8 @@ HRESULT WINAPI CoWaitForMultipleHandles(DWORD dwFlags, DWORD dwTimeout,
     APARTMENT *apt = COM_CurrentApt();
     BOOL message_loop = apt && !apt->multi_threaded;
     BOOL check_apc = (dwFlags & COWAIT_ALERTABLE) != 0;
+    BOOL post_quit = FALSE;
+    UINT exit_code;
 
     TRACE("(0x%08x, 0x%08x, %d, %p, %p)\n", dwFlags, dwTimeout, cHandles,
         pHandles, lpdwindex);
@@ -4570,16 +4597,29 @@ HRESULT WINAPI CoWaitForMultipleHandles(DWORD dwFlags, DWORD dwTimeout,
                  * so after processing 100 messages we go back to checking the wait handles */
                 while (count++ < 100 && COM_PeekMessage(apt, &msg))
                 {
-                    TRACE("received message whilst waiting for RPC: 0x%04x\n", msg.message);
-                    TranslateMessage(&msg);
-                    DispatchMessageW(&msg);
                     if (msg.message == WM_QUIT)
                     {
-                        TRACE("resending WM_QUIT to outer message loop\n");
-                        PostQuitMessage(msg.wParam);
-                        /* no longer need to process messages */
-                        message_loop = FALSE;
-                        break;
+                        static INIT_ONCE init_once = INIT_ONCE_STATIC_INIT;
+                        InitOnceExecuteOnce(&init_once, read_quit_config, NULL, NULL);
+
+                        TRACE("received WM_QUIT message\n");
+
+                        if (stop_msgs_on_quit)
+                        {
+                            TranslateMessage(&msg);
+                            DispatchMessageW(&msg);
+                            PostQuitMessage(msg.wParam);
+                            message_loop = FALSE;
+                            break;
+                        }
+                        post_quit = TRUE;
+                        exit_code = msg.wParam;
+                    }
+                    else
+                    {
+                        TRACE("received message whilst waiting for RPC: 0x%04x\n", msg.message);
+                        TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
                     }
                 }
                 continue;
@@ -4608,6 +4648,7 @@ HRESULT WINAPI CoWaitForMultipleHandles(DWORD dwFlags, DWORD dwTimeout,
         }
         break;
     }
+    if (post_quit) PostQuitMessage(exit_code);
     TRACE("-- 0x%08x\n", hr);
     return hr;
 }

@@ -822,6 +822,10 @@ static char **expand_mac_font(const char *path)
         unsigned int size, max_size;
     } ret;
 
+    /* CrossOver HACK #15526.  High Sierra can block when using the FSRef api, so ignore
+       suitcase fonts. */
+    return NULL;
+
     TRACE("path %s\n", path);
 
     s = FSPathMakeRef((unsigned char*)path, &ref, FALSE);

@@ -890,7 +890,6 @@ todo_wine
     ok(vbool == VARIANT_FALSE, "expected VARIANT_FALSE, got %d\n", vbool);
 
     hr = IRegisteredTask_put_Enabled(task1, VARIANT_TRUE);
-todo_wine
     ok(hr == S_OK, "put_Enabled error %#x\n", hr);
     hr = IRegisteredTask_get_State(task1, &state);
     ok(hr == S_OK, "get_State error %#x\n", hr);
@@ -1095,6 +1094,9 @@ static void change_settings(ITaskDefinition *taskdef, struct settings *test)
 {
     HRESULT hr;
     ITaskSettings *set;
+    ITriggerCollection *triggers;
+    IPrincipal *principal;
+    IActionCollection *actions;
 
     hr = ITaskDefinition_get_Settings(taskdef, &set);
     ok(hr == S_OK, "get_Settings error %#x\n", hr);
@@ -1103,14 +1105,7 @@ static void change_settings(ITaskDefinition *taskdef, struct settings *test)
         hr = ITaskSettings_put_RestartInterval(set, NULL);
     else
         hr = ITaskSettings_put_RestartInterval(set, test->restart_interval);
-todo_wine
     ok(hr == S_OK, "expected S_OK, got %#x\n", hr);
-    /* FIXME: Remove once implemented */
-    if (hr != S_OK)
-    {
-        ITaskSettings_Release(set);
-        return;
-    }
 
     hr = ITaskSettings_put_RestartCount(set, test->restart_count);
     ok(hr == S_OK, "expected S_OK, got %#x\n", hr);
@@ -1166,6 +1161,33 @@ todo_wine
     hr = ITaskSettings_put_AllowDemandStart(set, test->allow_on_demand_start);
     ok(hr == S_OK, "expected S_OK, got %#x\n", hr);
 
+    triggers = NULL;
+    hr = ITaskDefinition_get_Triggers(taskdef, &triggers);
+    ok(hr == S_OK, "expected S_OK, got %#x\n", hr);
+    ok(triggers != NULL, "triggers not set\n");
+
+    hr = ITaskDefinition_put_Triggers(taskdef, triggers);
+    ok(hr == S_OK, "expected S_OK, got %#x\n", hr);
+    if (triggers) ITriggerCollection_Release(triggers);
+
+    principal = NULL;
+    hr = ITaskDefinition_get_Principal(taskdef, &principal);
+    ok(hr == S_OK, "expected S_OK, got %#x\n", hr);
+    ok(principal != NULL, "principal not set\n");
+
+    hr = ITaskDefinition_put_Principal(taskdef, principal);
+    ok(hr == S_OK, "expected S_OK, got %#x\n", hr);
+    if (principal) IPrincipal_Release(principal);
+
+    actions = NULL;
+    hr = ITaskDefinition_get_Actions(taskdef, &actions);
+    ok(hr == S_OK, "expected S_OK, got %#x\n", hr);
+    ok(actions != NULL, "actions not set\n");
+
+    hr = ITaskDefinition_put_Actions(taskdef, actions);
+    ok(hr == S_OK, "expected S_OK, got %#x\n", hr);
+    if (actions) IActionCollection_Release(actions);
+
     /* FIXME: set IIdleSettings and INetworkSettings */
 
     ITaskSettings_Release(set);
@@ -1173,9 +1195,38 @@ todo_wine
 
 static void test_daily_trigger(ITrigger *trigger)
 {
+    static const WCHAR startW[] =
+        {'2','0','0','4','-','0','1','-','0','1','T','0','0',':','0','0',':','0','0',0};
+    static const WCHAR start2W[] =
+        {'2','0','0','4','-','0','1','-','0','1','T','0','0',':','0','0',':','0','0','Z',0};
+    static const WCHAR start3W[] =
+        {'2','0','0','4','-','0','1','-','0','1','T','0','0',':','0','0',':','0','0','+','0','1',':','0','0',0};
+    static const WCHAR start4W[] =
+        {'2','0','0','4','.','0','1','.','0','1','T','0','0','.','0','0','.','0','0',0};
+    static const WCHAR start5W[] =
+        {'9','9','9','9','-','9','9','-','9','9','T','9','9',':','9','9',':','9','9',0};
+    static const WCHAR start6W[] =
+        {'i','n','v','a','l','i','d',0};
+    static const struct
+    {
+        const WCHAR *str;
+        HRESULT      hr;
+    }
+    start_test[] =
+    {
+        {startW, S_OK},
+        {start2W, S_OK},
+        {start3W, S_OK},
+        {start4W, S_OK},
+        {start5W, S_OK},
+        {start6W, S_OK},
+    };
     IDailyTrigger *daily_trigger;
+    BSTR start_boundary;
+    VARIANT_BOOL enabled;
     short interval;
     HRESULT hr;
+    ULONG i;
 
     hr = ITrigger_QueryInterface(trigger, &IID_IDailyTrigger, (void**)&daily_trigger);
     ok(hr == S_OK, "Could not get IDailyTrigger iface: %08x\n", hr);
@@ -1203,6 +1254,50 @@ static void test_daily_trigger(ITrigger *trigger)
     ok(hr == S_OK, "get_DaysInterval failed: %08x\n", hr);
     ok(interval == 2, "interval = %d\n", interval);
 
+    hr = IDailyTrigger_get_StartBoundary(daily_trigger, NULL);
+    ok(hr == E_POINTER, "get_StartBoundary failed: %08x\n", hr);
+
+    start_boundary = (BSTR)0xdeadbeef;
+    hr = IDailyTrigger_get_StartBoundary(daily_trigger, &start_boundary);
+    ok(hr == S_OK, "get_StartBoundary failed: %08x\n", hr);
+    ok(start_boundary == NULL, "start_boundary not set\n");
+
+    for (i = 0; i < sizeof(start_test)/sizeof(start_test[0]); i++)
+    {
+        start_boundary = SysAllocString(start_test[i].str);
+        hr = IDailyTrigger_put_StartBoundary(daily_trigger, start_boundary);
+        ok(hr == start_test[i].hr, "%u: got %08x expected %08x\n", i, hr, start_test[i].hr);
+        SysFreeString(start_boundary);
+        if (hr == S_OK)
+        {
+            start_boundary = NULL;
+            hr = IDailyTrigger_get_StartBoundary(daily_trigger, &start_boundary);
+            ok(hr == S_OK, "%u: got %08x\n", i, hr);
+            ok(start_boundary != NULL, "start_boundary not set\n");
+            ok(!lstrcmpW(start_boundary, start_test[i].str), "%u: got %s\n", i, wine_dbgstr_w(start_boundary));
+            SysFreeString(start_boundary);
+        }
+    }
+
+    hr = IDailyTrigger_put_StartBoundary(daily_trigger, NULL);
+    ok(hr == S_OK, "put_StartBoundary failed: %08x\n", hr);
+
+    hr = IDailyTrigger_get_Enabled(daily_trigger, NULL);
+    ok(hr == E_POINTER, "get_Enabled failed: %08x\n", hr);
+
+    enabled = VARIANT_FALSE;
+    hr = IDailyTrigger_get_Enabled(daily_trigger, &enabled);
+    ok(hr == S_OK, "get_Enabled failed: %08x\n", hr);
+    ok(enabled == VARIANT_TRUE, "got %d\n", enabled);
+
+    hr = IDailyTrigger_put_Enabled(daily_trigger, VARIANT_FALSE);
+    ok(hr == S_OK, "put_Enabled failed: %08x\n", hr);
+
+    enabled = VARIANT_TRUE;
+    hr = IDailyTrigger_get_Enabled(daily_trigger, &enabled);
+    ok(hr == S_OK, "get_Enabled failed: %08x\n", hr);
+    ok(enabled == VARIANT_FALSE, "got %d\n", enabled);
+
     IDailyTrigger_Release(daily_trigger);
 }
 
@@ -1213,12 +1308,11 @@ static void create_action(ITaskDefinition *taskdef)
     IActionCollection *actions;
     IAction *action;
     IExecAction *exec_action;
+    TASK_ACTION_TYPE type;
+    BSTR path;
 
     hr = ITaskDefinition_get_Actions(taskdef, &actions);
-todo_wine
     ok(hr == S_OK, "get_Actions error %#x\n", hr);
-    /* FIXME: Remove once implemented */
-    if (hr != S_OK) return;
 
     hr = IActionCollection_Create(actions, TASK_ACTION_EXEC, &action);
     ok(hr == S_OK, "Create action error %#x\n", hr);
@@ -1226,8 +1320,25 @@ todo_wine
     hr = IAction_QueryInterface(action, &IID_IExecAction, (void **)&exec_action);
     ok(hr == S_OK, "QueryInterface error %#x\n", hr);
 
+    type = 0xdeadbeef;
+    hr = IExecAction_get_Type(exec_action, &type);
+    ok(hr == S_OK, "get_Type error %#x\n", hr);
+    ok(type == TASK_ACTION_EXEC, "got %u\n", type );
+
+    path = (BSTR)0xdeadbeef;
+    hr = IExecAction_get_Path(exec_action, &path);
+    ok(hr == S_OK, "get_Path error %#x\n", hr);
+    ok(path == NULL, "path not set\n");
+
     hr = IExecAction_put_Path(exec_action, task1_exe);
     ok(hr == S_OK, "put_Path error %#x\n", hr);
+
+    path = NULL;
+    hr = IExecAction_get_Path(exec_action, &path);
+    ok(hr == S_OK, "get_Path error %#x\n", hr);
+    ok(path != NULL, "path not set\n");
+    ok(!lstrcmpW(path, task1_exe), "wrong path\n" );
+    SysFreeString(path);
 
     IExecAction_Release(exec_action);
     IAction_Release(action);
