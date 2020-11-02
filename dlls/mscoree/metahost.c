@@ -93,12 +93,12 @@ MonoClass* (CDECL *mono_class_from_mono_type)(MonoType *type);
 MonoClass* (CDECL *mono_class_from_name)(MonoImage *image, const char* name_space, const char *name);
 MonoMethod* (CDECL *mono_class_get_method_from_name)(MonoClass *klass, const char *name, int param_count);
 static void (CDECL *mono_config_parse)(const char *filename);
-MonoAssembly* (CDECL *mono_domain_assembly_open)(MonoDomain *domain, const char *name);
 MonoDomain* (CDECL *mono_domain_get)(void);
 MonoDomain* (CDECL *mono_domain_get_by_id)(int id);
 BOOL (CDECL *mono_domain_set)(MonoDomain *domain,BOOL force);
 void (CDECL *mono_domain_set_config)(MonoDomain *domain,const char *base_dir,const char *config_file_name);
 static void (CDECL *mono_free)(void *);
+MonoImage* (CDECL *mono_get_corlib)(void);
 static MonoImage* (CDECL *mono_image_open)(const char *fname, MonoImageOpenStatus *status);
 MonoImage* (CDECL *mono_image_open_from_module_handle)(HMODULE module_handle, char* fname, UINT has_entry_point, MonoImageOpenStatus* status);
 static void (CDECL *mono_install_assembly_preload_hook)(MonoAssemblyPreLoadFunc func, void *user_data);
@@ -198,12 +198,12 @@ static HRESULT load_mono(LPCWSTR mono_path)
         LOAD_MONO_FUNCTION(mono_class_from_mono_type);
         LOAD_MONO_FUNCTION(mono_class_from_name);
         LOAD_MONO_FUNCTION(mono_class_get_method_from_name);
-        LOAD_MONO_FUNCTION(mono_domain_assembly_open);
         LOAD_MONO_FUNCTION(mono_domain_get);
         LOAD_MONO_FUNCTION(mono_domain_get_by_id);
         LOAD_MONO_FUNCTION(mono_domain_set);
         LOAD_MONO_FUNCTION(mono_domain_set_config);
         LOAD_MONO_FUNCTION(mono_free);
+        LOAD_MONO_FUNCTION(mono_get_corlib);
         LOAD_MONO_FUNCTION(mono_image_open);
         LOAD_MONO_FUNCTION(mono_install_assembly_preload_hook);
         LOAD_MONO_FUNCTION(mono_jit_exec);
@@ -296,6 +296,28 @@ fail:
     FreeLibrary(mono_handle);
     mono_handle = NULL;
     return E_FAIL;
+}
+
+MonoDomain* get_root_domain(void)
+{
+    static MonoDomain* root_domain;
+
+    if (root_domain != NULL)
+        return root_domain;
+
+    EnterCriticalSection(&runtime_list_cs);
+
+    if (root_domain == NULL)
+    {
+        /* FIXME: Use exe filename to name the domain? */
+        root_domain = mono_jit_init_version("mscorlib.dll", "v4.0.30319");
+
+        is_mono_started = TRUE;
+    }
+
+    LeaveCriticalSection(&runtime_list_cs);
+
+    return root_domain;
 }
 
 static void CDECL mono_shutdown_callback_fn(MonoProfiler *prof)
@@ -711,7 +733,7 @@ static BOOL get_mono_path_registry(LPWSTR path)
 static BOOL get_mono_path_dos(const WCHAR *dir, LPWSTR path)
 {
     static const WCHAR unix_prefix[] = {'\\','\\','?','\\','u','n','i','x','\\'};
-    static const char basedir[] = "\\wine-mono-" WINE_MONO_VERSION;
+    static const WCHAR basedir[] = L"\\wine-mono-" WINE_MONO_VERSION;
     LPWSTR dos_dir;
     WCHAR mono_dll_path[MAX_PATH];
     DWORD len;
@@ -720,10 +742,10 @@ static BOOL get_mono_path_dos(const WCHAR *dir, LPWSTR path)
     if (memcmp(dir, unix_prefix, sizeof(unix_prefix)) == 0)
         return FALSE;  /* No drive letter for this directory */
 
-    len = lstrlenW( dir ) + MultiByteToWideChar( CP_UNIXCP, 0, basedir, -1, NULL, 0 );
+    len = lstrlenW( dir ) + lstrlenW( basedir ) + 1;
     if (!(dos_dir = heap_alloc( len * sizeof(WCHAR) ))) return FALSE;
     lstrcpyW( dos_dir, dir );
-    MultiByteToWideChar( CP_UNIXCP, 0, basedir, -1, dos_dir + lstrlenW(dos_dir), len - lstrlenW(dos_dir));
+    lstrcatW( dos_dir, basedir );
 
     ret = find_mono_dll(dos_dir, mono_dll_path);
     if (ret)
@@ -1610,20 +1632,56 @@ static MonoAssembly* CDECL mono_assembly_preload_hook_fn(MonoAssemblyName *aname
     HRESULT hr;
     MonoAssembly *result=NULL;
     char *stringname=NULL;
+    const char *assemblyname;
     LPWSTR stringnameW;
     int stringnameW_size;
     WCHAR path[MAX_PATH];
     char *pathA;
     MonoImageOpenStatus stat;
     DWORD search_flags;
+    int i;
+    static const WCHAR dotdllW[] = {'.','d','l','l',0};
+    static const WCHAR slashW[] = {'\\',0};
 
     stringname = mono_stringify_assembly_name(aname);
+    assemblyname = mono_assembly_name_get_name(aname);
 
     TRACE("%s\n", debugstr_a(stringname));
 
-    if (!stringname) return NULL;
+    if (!stringname || !assemblyname) return NULL;
 
     search_flags = get_assembly_search_flags(aname);
+    if (private_path)
+    {
+        stringnameW_size = MultiByteToWideChar(CP_UTF8, 0, assemblyname, -1, NULL, 0);
+        stringnameW = HeapAlloc(GetProcessHeap(), 0, stringnameW_size * sizeof(WCHAR));
+        if (stringnameW)
+        {
+            MultiByteToWideChar(CP_UTF8, 0, assemblyname, -1, stringnameW, stringnameW_size);
+            for (i = 0; private_path[i] != NULL; i++)
+            {
+                wcscpy(path, private_path[i]);
+                wcscat(path, slashW);
+                wcscat(path, stringnameW);
+                wcscat(path, dotdllW);
+                pathA = WtoA(path);
+                if (pathA)
+                {
+                    result = mono_assembly_open(pathA, &stat);
+                    if (result)
+                    {
+                        TRACE("found: %s\n", debugstr_w(path));
+                        HeapFree(GetProcessHeap(), 0, pathA);
+                        HeapFree(GetProcessHeap(), 0, stringnameW);
+                        mono_free(stringname);
+                        return result;
+                    }
+                    HeapFree(GetProcessHeap(), 0, pathA);
+                }
+            }
+            HeapFree(GetProcessHeap(), 0, stringnameW);
+        }
+    }
 
     /* FIXME: We should search the given paths before the GAC. */
 

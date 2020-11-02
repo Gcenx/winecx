@@ -10,7 +10,7 @@
 
 #include "wine/winheader_enter.h"
 
-#include <crtdefs.h>
+#include <corecrt.h>
 #include <stdint.h>
 #define __need_wchar_t
 #include <stddef.h>

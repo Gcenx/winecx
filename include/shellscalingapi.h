@@ -21,6 +21,8 @@
 
 #include "wine/winheader_enter.h"
 
+#include <shtypes.h>
+
 typedef enum MONITOR_DPI_TYPE
 {
     MDT_EFFECTIVE_DPI   = 0,
@@ -38,6 +40,7 @@ typedef enum PROCESS_DPI_AWARENESS
 
 HRESULT WINAPI GetDpiForMonitor(HMONITOR,MONITOR_DPI_TYPE,UINT*,UINT*);
 HRESULT WINAPI GetProcessDpiAwareness(HANDLE,PROCESS_DPI_AWARENESS*);
+HRESULT WINAPI GetScaleFactorForMonitor(HMONITOR,DEVICE_SCALE_FACTOR*);
 HRESULT WINAPI SetProcessDpiAwareness(PROCESS_DPI_AWARENESS);
 
 #include "wine/winheader_exit.h"

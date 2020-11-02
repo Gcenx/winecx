@@ -128,7 +128,7 @@ int CDECL MSVCRT__set_FMA3_enable(int flag)
 }
 #endif
 
-#if (defined(__x86_64__) && !defined(__i386_on_x86_64__)) || defined(__arm__) || defined(__aarch64__) || _MSVCR_VER>=120
+#if !(defined(__i386__) || defined(__i386_on_x86_64__)) || _MSVCR_VER>=120
 
 /*********************************************************************
  *      _chgsignf (MSVCRT.@)
@@ -170,7 +170,8 @@ float CDECL MSVCRT__logbf( float num )
 }
 
 #endif
-#if (defined(__x86_64__) && !defined(__i386_on_x86_64__)) || defined(__arm__) || defined(__aarch64__)
+
+#if !defined(__i386__) && !defined(__i386_on_x86_64__)
 
 /*********************************************************************
  *      _finitef (MSVCRT.@)
@@ -385,22 +386,6 @@ float CDECL MSVCRT_fabsf( float x )
 float CDECL MSVCRT_floorf( float x )
 {
   return floorf(x);
-}
-
-/*********************************************************************
- *      fmaf (MSVCRT.@)
- */
-float CDECL MSVCRT_fmaf( float x, float y, float z )
-{
-#ifdef HAVE_FMAF
-  float w = fmaf(x, y, z);
-#else
-  float w = x * y + z;
-#endif
-  if ((isinf(x) && y == 0) || (x == 0 && isinf(y))) *MSVCRT__errno() = MSVCRT_EDOM;
-  else if (isinf(x) && isinf(z) && x != z) *MSVCRT__errno() = MSVCRT_EDOM;
-  else if (isinf(y) && isinf(z) && y != z) *MSVCRT__errno() = MSVCRT_EDOM;
-  return w;
 }
 
 /*********************************************************************
@@ -996,6 +981,22 @@ double CDECL MSVCRT_fma( double x, double y, double z )
 }
 
 /*********************************************************************
+ *      fmaf (MSVCRT.@)
+ */
+float CDECL MSVCRT_fmaf( float x, float y, float z )
+{
+#ifdef HAVE_FMAF
+  float w = fmaf(x, y, z);
+#else
+  float w = x * y + z;
+#endif
+  if ((isinf(x) && y == 0) || (x == 0 && isinf(y))) *MSVCRT__errno() = MSVCRT_EDOM;
+  else if (isinf(x) && isinf(z) && x != z) *MSVCRT__errno() = MSVCRT_EDOM;
+  else if (isinf(y) && isinf(z) && y != z) *MSVCRT__errno() = MSVCRT_EDOM;
+  return w;
+}
+
+/*********************************************************************
  *		fabs (MSVCRT.@)
  */
 double CDECL MSVCRT_fabs( double x )
@@ -1070,16 +1071,27 @@ void CDECL _statusfp2( unsigned int *x86_sw, unsigned int *sse2_sw )
  */
 unsigned int CDECL _statusfp(void)
 {
+    unsigned int flags = 0;
 #if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
     unsigned int x86_sw, sse2_sw;
 
     _statusfp2( &x86_sw, &sse2_sw );
     /* FIXME: there's no definition for ambiguous status, just return all status bits for now */
-    return x86_sw | sse2_sw;
+    flags = x86_sw | sse2_sw;
+#elif defined(__aarch64__)
+    unsigned long fpsr;
+
+    __asm__ __volatile__( "mrs %0, fpsr" : "=r" (fpsr) );
+    if (fpsr & 0x1)  flags |= MSVCRT__SW_INVALID;
+    if (fpsr & 0x2)  flags |= MSVCRT__SW_ZERODIVIDE;
+    if (fpsr & 0x4)  flags |= MSVCRT__SW_OVERFLOW;
+    if (fpsr & 0x8)  flags |= MSVCRT__SW_UNDERFLOW;
+    if (fpsr & 0x10) flags |= MSVCRT__SW_INEXACT;
+    if (fpsr & 0x80) flags |= MSVCRT__SW_DENORMAL;
 #else
     FIXME( "not implemented\n" );
-    return 0;
 #endif
+    return flags;
 }
 
 /*********************************************************************
@@ -1111,6 +1123,18 @@ unsigned int CDECL _clearfp(void)
         fpword &= ~0x3f;
         __asm__ __volatile__( "ldmxcsr %0" : : "m" (fpword) );
     }
+#elif defined(__aarch64__)
+    unsigned long fpsr;
+
+    __asm__ __volatile__( "mrs %0, fpsr" : "=r" (fpsr) );
+    if (fpsr & 0x1)  flags |= MSVCRT__SW_INVALID;
+    if (fpsr & 0x2)  flags |= MSVCRT__SW_ZERODIVIDE;
+    if (fpsr & 0x4)  flags |= MSVCRT__SW_OVERFLOW;
+    if (fpsr & 0x8)  flags |= MSVCRT__SW_UNDERFLOW;
+    if (fpsr & 0x10) flags |= MSVCRT__SW_INEXACT;
+    if (fpsr & 0x80) flags |= MSVCRT__SW_DENORMAL;
+    fpsr &= ~0x9f;
+    __asm__ __volatile__( "msr fpsr, %0" :: "r" (fpsr) );
 #else
     FIXME( "not implemented\n" );
 #endif
@@ -1163,7 +1187,7 @@ double CDECL MSVCRT__chgsign(double num)
  *
  * Not exported by native msvcrt, added in msvcr80.
  */
-#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 int CDECL __control87_2( unsigned int newval, unsigned int mask,
                          unsigned int *x86_cw, unsigned int *sse2_cw )
 {
@@ -1300,17 +1324,91 @@ int CDECL __control87_2( unsigned int newval, unsigned int mask,
  */
 unsigned int CDECL _control87(unsigned int newval, unsigned int mask)
 {
-#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
-    unsigned int x86_cw, sse2_cw;
+    unsigned int flags = 0;
+#if defined(__i386__) || defined(__i386_on_x86_64__)
+    unsigned int sse2_cw;
 
-    __control87_2( newval, mask, &x86_cw, &sse2_cw );
+    __control87_2( newval, mask, &flags, &sse2_cw );
 
-    if ((x86_cw ^ sse2_cw) & (MSVCRT__MCW_EM | MSVCRT__MCW_RC)) x86_cw |= MSVCRT__EM_AMBIGUOUS;
-    return x86_cw;
+    if ((flags ^ sse2_cw) & (MSVCRT__MCW_EM | MSVCRT__MCW_RC)) flags |= MSVCRT__EM_AMBIGUOUS;
+#elif defined(__x86_64__)
+    unsigned long fpword;
+
+    __asm__ __volatile__( "stmxcsr %0" : "=m" (fpword) );
+    if (fpword & 0x80)   flags |= MSVCRT__EM_INVALID;
+    if (fpword & 0x100)  flags |= MSVCRT__EM_DENORMAL;
+    if (fpword & 0x200)  flags |= MSVCRT__EM_ZERODIVIDE;
+    if (fpword & 0x400)  flags |= MSVCRT__EM_OVERFLOW;
+    if (fpword & 0x800)  flags |= MSVCRT__EM_UNDERFLOW;
+    if (fpword & 0x1000) flags |= MSVCRT__EM_INEXACT;
+    switch (fpword & 0x6000)
+    {
+    case 0x6000: flags |= MSVCRT__RC_CHOP; break;
+    case 0x4000: flags |= MSVCRT__RC_UP; break;
+    case 0x2000: flags |= MSVCRT__RC_DOWN; break;
+    }
+    switch (fpword & 0x8040)
+    {
+    case 0x0040: flags |= MSVCRT__DN_FLUSH_OPERANDS_SAVE_RESULTS; break;
+    case 0x8000: flags |= MSVCRT__DN_SAVE_OPERANDS_FLUSH_RESULTS; break;
+    case 0x8040: flags |= MSVCRT__DN_FLUSH; break;
+    }
+    flags = (flags & ~mask) | (newval & mask);
+    fpword = 0;
+    if (flags & MSVCRT__EM_INVALID)    fpword |= 0x80;
+    if (flags & MSVCRT__EM_DENORMAL)   fpword |= 0x100;
+    if (flags & MSVCRT__EM_ZERODIVIDE) fpword |= 0x200;
+    if (flags & MSVCRT__EM_OVERFLOW)   fpword |= 0x400;
+    if (flags & MSVCRT__EM_UNDERFLOW)  fpword |= 0x800;
+    if (flags & MSVCRT__EM_INEXACT)    fpword |= 0x1000;
+    switch (flags & MSVCRT__MCW_RC)
+    {
+    case MSVCRT__RC_CHOP: fpword |= 0x6000; break;
+    case MSVCRT__RC_UP:   fpword |= 0x4000; break;
+    case MSVCRT__RC_DOWN: fpword |= 0x2000; break;
+    }
+    switch (flags & MSVCRT__MCW_DN)
+    {
+    case MSVCRT__DN_FLUSH_OPERANDS_SAVE_RESULTS: fpword |= 0x0040; break;
+    case MSVCRT__DN_SAVE_OPERANDS_FLUSH_RESULTS: fpword |= 0x8000; break;
+    case MSVCRT__DN_FLUSH:                       fpword |= 0x8040; break;
+    }
+    __asm__ __volatile__( "ldmxcsr %0" :: "m" (fpword) );
+#elif defined(__aarch64__)
+    unsigned long fpcr;
+
+    __asm__ __volatile__( "mrs %0, fpcr" : "=r" (fpcr) );
+    if (!(fpcr & 0x100))  flags |= MSVCRT__EM_INVALID;
+    if (!(fpcr & 0x200))  flags |= MSVCRT__EM_ZERODIVIDE;
+    if (!(fpcr & 0x400))  flags |= MSVCRT__EM_OVERFLOW;
+    if (!(fpcr & 0x800))  flags |= MSVCRT__EM_UNDERFLOW;
+    if (!(fpcr & 0x1000)) flags |= MSVCRT__EM_INEXACT;
+    if (!(fpcr & 0x8000)) flags |= MSVCRT__EM_DENORMAL;
+    switch (fpcr & 0xc00000)
+    {
+    case 0x400000: flags |= MSVCRT__RC_UP; break;
+    case 0x800000: flags |= MSVCRT__RC_DOWN; break;
+    case 0xc00000: flags |= MSVCRT__RC_CHOP; break;
+    }
+    flags = (flags & ~mask) | (newval & mask);
+    fpcr &= ~0xc09f00ul;
+    if (!(flags & MSVCRT__EM_INVALID)) fpcr |= 0x100;
+    if (!(flags & MSVCRT__EM_ZERODIVIDE)) fpcr |= 0x200;
+    if (!(flags & MSVCRT__EM_OVERFLOW)) fpcr |= 0x400;
+    if (!(flags & MSVCRT__EM_UNDERFLOW)) fpcr |= 0x800;
+    if (!(flags & MSVCRT__EM_INEXACT)) fpcr |= 0x1000;
+    if (!(flags & MSVCRT__EM_DENORMAL)) fpcr |= 0x8000;
+    switch (flags & MSVCRT__MCW_RC)
+    {
+    case MSVCRT__RC_CHOP: fpcr |= 0xc00000; break;
+    case MSVCRT__RC_UP:   fpcr |= 0x400000; break;
+    case MSVCRT__RC_DOWN: fpcr |= 0x800000; break;
+    }
+    __asm__ __volatile__( "msr fpcr, %0" :: "r" (fpcr) );
 #else
     FIXME( "not implemented\n" );
-    return 0;
 #endif
+    return flags;
 }
 
 /*********************************************************************
@@ -1374,13 +1472,8 @@ int CDECL __fpe_flt_rounds(void)
     switch(fpc) {
         case MSVCRT__RC_CHOP: return 0;
         case MSVCRT__RC_NEAR: return 1;
-#ifdef _WIN64
-        case MSVCRT__RC_UP: return 3;
-        default: return 2;
-#else
         case MSVCRT__RC_UP: return 2;
         default: return 3;
-#endif
     }
 }
 #endif
@@ -3124,6 +3217,30 @@ double CDECL MSVCR120_fmax(double x, double y)
 }
 
 /*********************************************************************
+ *      fdimf (MSVCR120.@)
+ */
+float CDECL MSVCR120_fdimf(float x, float y)
+{
+    if(isnan(x))
+        return x;
+    if(isnan(y))
+        return y;
+    return x>y ? x-y : 0;
+}
+
+/*********************************************************************
+ *      fdim (MSVCR120.@)
+ */
+double CDECL MSVCR120_fdim(double x, double y)
+{
+    if(isnan(x))
+        return x;
+    if(isnan(y))
+        return y;
+    return x>y ? x-y : 0;
+}
+
+/*********************************************************************
  *      _fdsign (MSVCR120.@)
  */
 int CDECL MSVCR120__fdsign(float x)
@@ -3478,6 +3595,44 @@ float CDECL MSVCR120_lgammaf(float x)
 LDOUBLE CDECL MSVCR120_lgammal(LDOUBLE x)
 {
     return MSVCR120_lgamma(x);
+}
+
+/*********************************************************************
+ *      tgamma (MSVCR120.@)
+ */
+double CDECL MSVCR120_tgamma(double x)
+{
+#ifdef HAVE_TGAMMA
+    if(x==0.0) *MSVCRT__errno() = MSVCRT_ERANGE;
+    if(x<0.0f) {
+      double integral;
+      if (modf(x, &integral) == 0)
+        *MSVCRT__errno() = MSVCRT_EDOM;
+    }
+    return tgamma(x);
+#else
+    FIXME( "not implemented\n" );
+    return 0.0;
+#endif
+}
+
+/*********************************************************************
+ *      tgammaf (MSVCR120.@)
+ */
+float CDECL MSVCR120_tgammaf(float x)
+{
+#ifdef HAVE_TGAMMAF
+    if(x==0.0f) *MSVCRT__errno() = MSVCRT_ERANGE;
+    if(x<0.0f) {
+      float integral;
+      if (modff(x, &integral) == 0)
+        *MSVCRT__errno() = MSVCRT_EDOM;
+    }
+    return tgammaf(x);
+#else
+    FIXME( "not implemented\n" );
+    return 0.0f;
+#endif
 }
 
 /*********************************************************************

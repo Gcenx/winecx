@@ -39,6 +39,8 @@
 #include "oaidl.h"
 #include <wine/list.h>
 
+#include <wine/winheader_enter.h>
+
 #define ADDRSIZE        (dbg_curr_process->be_cpu->pointer_size)
 #define ADDRWIDTH       (ADDRSIZE * 2)
 
@@ -252,8 +254,8 @@ struct dbg_process
 struct be_process_io
 {
     BOOL        (*close_process)(struct dbg_process*, BOOL);
-    BOOL        (*read)(HANDLE, const void*, void*, SIZE_T, SIZE_T*);
-    BOOL        (*write)(HANDLE, void*, const void*, SIZE_T, SIZE_T*);
+    BOOL        (*read)(HANDLE, const void* HOSTPTR, void*, SIZE_T, SIZE_T* HOSTPTR);
+    BOOL        (*write)(HANDLE, void* HOSTPTR, const void*, SIZE_T, SIZE_T*);
     BOOL        (*get_selector)(HANDLE, DWORD, LDT_ENTRY*);
 };
 
@@ -427,6 +429,7 @@ extern enum sym_get_lval symbol_picker_scoped(const char* name, const struct sgv
 extern void             dbg_run_debuggee(const char* args);
 extern void             dbg_wait_next_exception(DWORD cont, int count, int mode);
 extern enum dbg_start   dbg_active_attach(int argc, char* argv[]);
+extern BOOL             dbg_set_curr_thread(DWORD tid);
 extern enum dbg_start   dbg_active_launch(int argc, char* argv[]);
 extern enum dbg_start   dbg_active_auto(int argc, char* argv[]);
 extern enum dbg_start   dbg_active_minidump(int argc, char* argv[]);
@@ -517,5 +520,7 @@ enum debug_int_var
 
 /* include CPU dependent bits */
 #include "be_cpu.h"
+
+#include <wine/winheader_exit.h>
 
 #endif  /* __WINE_DEBUGGER_H */

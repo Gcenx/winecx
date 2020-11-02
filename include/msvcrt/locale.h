@@ -22,7 +22,7 @@
 
 #include "wine/winheader_enter.h"
 
-#include <crtdefs.h>
+#include <corecrt.h>
 
 #define LC_ALL                 0
 #define LC_COLLATE             1

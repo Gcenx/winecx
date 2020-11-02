@@ -70,7 +70,10 @@
 #include "audioclient.h"
 #include "audiopolicy.h"
 
+#include "coreaudio_cocoa.h"
+
 WINE_DEFAULT_DEBUG_CHANNEL(coreaudio);
+WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 #ifndef HAVE_AUDIOUNIT_AUDIOCOMPONENT_H
 /* Define new AudioComponent Manager functions for OSX 10.5 */
@@ -209,6 +212,15 @@ static CRITICAL_SECTION_DEBUG g_sessions_lock_debug =
 static CRITICAL_SECTION g_sessions_lock = { &g_sessions_lock_debug, -1, 0, 0, 0, 0 };
 static struct list g_sessions = LIST_INIT(g_sessions);
 
+static CRITICAL_SECTION g_authorization_lock;
+static CRITICAL_SECTION_DEBUG g_authorization_lock_debug =
+{
+    0, 0, &g_authorization_lock,
+    { &g_authorization_lock_debug.ProcessLocksList, &g_authorization_lock_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": g_authorization_lock") }
+};
+static CRITICAL_SECTION g_authorization_lock = { &g_authorization_lock_debug, -1, 0, 0, 0, 0 };
+
 static AudioSessionWrapper *AudioSessionWrapper_Create(ACImpl *client);
 static HRESULT ca_setvol(ACImpl *This, UINT32 index);
 
@@ -275,6 +287,7 @@ BOOL WINAPI DllMain(HINSTANCE dll, DWORD reason, void *reserved)
     case DLL_PROCESS_DETACH:
         if (reserved) break;
         DeleteCriticalSection(&g_sessions_lock);
+        DeleteCriticalSection(&g_authorization_lock);
         break;
     }
     return TRUE;
@@ -315,7 +328,7 @@ static void set_device_guid(EDataFlow flow, HKEY drv_key, const WCHAR *key_name,
 
     if(!drv_key){
         lr = RegCreateKeyExW(HKEY_CURRENT_USER, drv_key_devicesW, 0, NULL, 0, KEY_WRITE,
-                    NULL, &drv_key, NULL);
+                    NULL, ADDRSPACECAST(HKEY*, &drv_key), NULL);
         if(lr != ERROR_SUCCESS){
             ERR("RegCreateKeyEx(drv_key) failed: %u\n", lr);
             return;
@@ -324,7 +337,7 @@ static void set_device_guid(EDataFlow flow, HKEY drv_key, const WCHAR *key_name,
     }
 
     lr = RegCreateKeyExW(drv_key, key_name, 0, NULL, 0, KEY_WRITE,
-                NULL, &key, NULL);
+                NULL, ADDRSPACECAST(HKEY*, &key), NULL);
     if(lr != ERROR_SUCCESS){
         ERR("RegCreateKeyEx(%s) failed: %u\n", wine_dbgstr_w(key_name), lr);
         goto exit;
@@ -357,10 +370,10 @@ static void get_device_guid(EDataFlow flow, AudioDeviceID device, GUID *guid)
 
     sprintfW(key_name + 2, key_fmt, device);
 
-    if(RegOpenKeyExW(HKEY_CURRENT_USER, drv_key_devicesW, 0, KEY_WRITE|KEY_READ, &key) == ERROR_SUCCESS){
-        if(RegOpenKeyExW(key, key_name, 0, KEY_READ, &dev_key) == ERROR_SUCCESS){
-            if(RegQueryValueExW(dev_key, guidW, 0, &type,
-                        (BYTE*)guid, &size) == ERROR_SUCCESS){
+    if(RegOpenKeyExW(HKEY_CURRENT_USER, drv_key_devicesW, 0, KEY_WRITE|KEY_READ, ADDRSPACECAST(HKEY*, &key)) == ERROR_SUCCESS){
+        if(RegOpenKeyExW(key, ADDRSPACECAST(WCHAR*, key_name), 0, KEY_READ, ADDRSPACECAST(HKEY*, &dev_key)) == ERROR_SUCCESS){
+            if(RegQueryValueExW(dev_key, guidW, 0, ADDRSPACECAST(DWORD*, &type),
+                        (BYTE*)guid, ADDRSPACECAST(DWORD*, &size)) == ERROR_SUCCESS){
                 if(type == REG_BINARY){
                     RegCloseKey(dev_key);
                     RegCloseKey(key);
@@ -375,7 +388,7 @@ static void get_device_guid(EDataFlow flow, AudioDeviceID device, GUID *guid)
 
     CoCreateGuid(guid);
 
-    set_device_guid(flow, key, key_name, guid);
+    set_device_guid(flow, key, ADDRSPACECAST(WCHAR*, key_name), guid);
 
     if(key)
         RegCloseKey(key);
@@ -541,14 +554,14 @@ HRESULT WINAPI AUDDRV_GetEndpointIDs(EDataFlow flow, WCHAR ***ids,
     return S_OK;
 }
 
-static BOOL get_deviceid_by_guid(GUID *guid, AudioDeviceID *id, EDataFlow *flow)
+static BOOL get_deviceid_by_guid(GUID *guid, AudioDeviceID *id, EDataFlow * HOSTPTR flow)
 {
     HKEY devices_key;
     UINT i = 0;
     WCHAR key_name[256];
     DWORD key_name_size;
 
-    if(RegOpenKeyExW(HKEY_CURRENT_USER, drv_key_devicesW, 0, KEY_READ, &devices_key) != ERROR_SUCCESS){
+    if(RegOpenKeyExW(HKEY_CURRENT_USER, drv_key_devicesW, 0, KEY_READ, ADDRSPACECAST(HKEY*, &devices_key)) != ERROR_SUCCESS){
         ERR("No devices in registry?\n");
         return FALSE;
     }
@@ -559,18 +572,18 @@ static BOOL get_deviceid_by_guid(GUID *guid, AudioDeviceID *id, EDataFlow *flow)
         GUID reg_guid;
 
         key_name_size = sizeof(key_name);
-        if(RegEnumKeyExW(devices_key, i++, key_name, &key_name_size, NULL,
+        if(RegEnumKeyExW(devices_key, i++, ADDRSPACECAST(WCHAR*, key_name), ADDRSPACECAST(DWORD*, &key_name_size), NULL,
                 NULL, NULL, NULL) != ERROR_SUCCESS)
             break;
 
-        if(RegOpenKeyExW(devices_key, key_name, 0, KEY_READ, &key) != ERROR_SUCCESS){
+        if(RegOpenKeyExW(devices_key, ADDRSPACECAST(WCHAR*, key_name), 0, KEY_READ, ADDRSPACECAST(HKEY*, &key)) != ERROR_SUCCESS){
             WARN("Couldn't open key: %s\n", wine_dbgstr_w(key_name));
             continue;
         }
 
         size = sizeof(reg_guid);
-        if(RegQueryValueExW(key, guidW, 0, &type,
-                    (BYTE*)&reg_guid, &size) == ERROR_SUCCESS){
+        if(RegQueryValueExW(key, guidW, 0, ADDRSPACECAST(DWORD*, &type),
+                    ADDRSPACECAST(BYTE*, &reg_guid), ADDRSPACECAST(DWORD*, &size)) == ERROR_SUCCESS){
             if(IsEqualGUID(&reg_guid, guid)){
                 RegCloseKey(key);
                 RegCloseKey(devices_key);
@@ -959,7 +972,7 @@ static AudioSession *create_session(const GUID *guid, IMMDevice *device,
 /* if channels == 0, then this will return or create a session with
  * matching dataflow and GUID. otherwise, channels must also match */
 static HRESULT get_audio_session(const GUID *sessionguid,
-        IMMDevice *device, UINT channels, AudioSession **out)
+        IMMDevice *device, UINT channels, AudioSession ** HOSTPTR out)
 {
     AudioSession *session;
 
@@ -1314,7 +1327,7 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient *iface,
     dump_fmt(fmt);
 
     if(mode != AUDCLNT_SHAREMODE_SHARED && mode != AUDCLNT_SHAREMODE_EXCLUSIVE)
-        return AUDCLNT_E_NOT_INITIALIZED;
+        return E_INVALIDARG;
 
     if(flags & ~(AUDCLNT_STREAMFLAGS_CROSSPROCESS |
                 AUDCLNT_STREAMFLAGS_LOOPBACK |
@@ -1386,6 +1399,7 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient *iface,
 
     if(This->dataflow == eCapture){
         AURenderCallbackStruct input;
+        int authstatus;
 
         memset(&input, 0, sizeof(input));
         input.inputProc = &ca_capture_cb;
@@ -1402,6 +1416,24 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient *iface,
             OSSpinLockUnlock(&This->lock);
             return osstatus_to_hresult(sc);
         }
+
+        /* On 10.14 and later:
+         * Check the audio capture/microphone authorization status, and explicitly
+         * request it if the user hasn't previously granted or denied permission.
+         */
+        EnterCriticalSection(&g_authorization_lock);
+
+        authstatus = CoreAudio_get_capture_authorization_status();
+        TRACE("Audio capture authorization status: %d\n", authstatus);
+
+        if (authstatus == NOT_DETERMINED)
+            authstatus = CoreAudio_request_capture_authorization();
+
+        if (authstatus != AUTHORIZED)
+            ERR_(winediag)("Microphone/audio capture permission was denied. "
+                           "This can be enabled under Security & Privacy in System Preferences.\n");
+
+        LeaveCriticalSection(&g_authorization_lock);
     }else{
         AURenderCallbackStruct input;
 
@@ -1736,6 +1768,122 @@ unsupported:
     return AUDCLNT_E_UNSUPPORTED_FORMAT;
 }
 
+static DWORD ca_channel_layout_to_channel_mask(const AudioChannelLayout *layout)
+{
+    int i;
+    DWORD mask = 0;
+
+    for (i = 0; i < layout->mNumberChannelDescriptions; ++i) {
+        switch (layout->mChannelDescriptions[i].mChannelLabel) {
+            default: FIXME("Unhandled channel 0x%x\n", layout->mChannelDescriptions[i].mChannelLabel); break;
+            case kAudioChannelLabel_Left: mask |= SPEAKER_FRONT_LEFT; break;
+            case kAudioChannelLabel_Mono:
+            case kAudioChannelLabel_Center: mask |= SPEAKER_FRONT_CENTER; break;
+            case kAudioChannelLabel_Right: mask |= SPEAKER_FRONT_RIGHT; break;
+            case kAudioChannelLabel_LeftSurround: mask |= SPEAKER_BACK_LEFT; break;
+            case kAudioChannelLabel_CenterSurround: mask |= SPEAKER_BACK_CENTER; break;
+            case kAudioChannelLabel_RightSurround: mask |= SPEAKER_BACK_RIGHT; break;
+            case kAudioChannelLabel_LFEScreen: mask |= SPEAKER_LOW_FREQUENCY; break;
+            case kAudioChannelLabel_LeftSurroundDirect: mask |= SPEAKER_SIDE_LEFT; break;
+            case kAudioChannelLabel_RightSurroundDirect: mask |= SPEAKER_SIDE_RIGHT; break;
+            case kAudioChannelLabel_TopCenterSurround: mask |= SPEAKER_TOP_CENTER; break;
+            case kAudioChannelLabel_VerticalHeightLeft: mask |= SPEAKER_TOP_FRONT_LEFT; break;
+            case kAudioChannelLabel_VerticalHeightCenter: mask |= SPEAKER_TOP_FRONT_CENTER; break;
+            case kAudioChannelLabel_VerticalHeightRight: mask |= SPEAKER_TOP_FRONT_RIGHT; break;
+            case kAudioChannelLabel_TopBackLeft: mask |= SPEAKER_TOP_BACK_LEFT; break;
+            case kAudioChannelLabel_TopBackCenter: mask |= SPEAKER_TOP_BACK_CENTER; break;
+            case kAudioChannelLabel_TopBackRight: mask |= SPEAKER_TOP_BACK_RIGHT; break;
+            case kAudioChannelLabel_LeftCenter: mask |= SPEAKER_FRONT_LEFT_OF_CENTER; break;
+            case kAudioChannelLabel_RightCenter: mask |= SPEAKER_FRONT_RIGHT_OF_CENTER; break;
+        }
+    }
+
+    return mask;
+}
+
+/* For most hardware on Windows, users must choose a configuration with an even
+ * number of channels (stereo, quad, 5.1, 7.1). Users can then disable
+ * channels, but those channels are still reported to applications from
+ * GetMixFormat! Some applications behave badly if given an odd number of
+ * channels (e.g. 2.1).  Here, we find the nearest configuration that Windows
+ * would report for a given channel layout. */
+static void convert_channel_layout(const AudioChannelLayout *ca_layout, WAVEFORMATEXTENSIBLE *fmt)
+{
+    DWORD ca_mask = ca_channel_layout_to_channel_mask(ca_layout);
+
+    TRACE("Got channel mask for CA: 0x%x\n", ca_mask);
+
+    if (ca_layout->mNumberChannelDescriptions == 1)
+    {
+        fmt->Format.nChannels = 1;
+        fmt->dwChannelMask = ca_mask;
+        return;
+    }
+
+    /* compare against known configurations and find smallest configuration
+     * which is a superset of the given speakers */
+
+    if (ca_layout->mNumberChannelDescriptions <= 2 &&
+            (ca_mask & ~KSAUDIO_SPEAKER_STEREO) == 0)
+    {
+        fmt->Format.nChannels = 2;
+        fmt->dwChannelMask = KSAUDIO_SPEAKER_STEREO;
+        return;
+    }
+
+    if (ca_layout->mNumberChannelDescriptions <= 4 &&
+            (ca_mask & ~KSAUDIO_SPEAKER_QUAD) == 0)
+    {
+        fmt->Format.nChannels = 4;
+        fmt->dwChannelMask = KSAUDIO_SPEAKER_QUAD;
+        return;
+    }
+
+    if (ca_layout->mNumberChannelDescriptions <= 4 &&
+            (ca_mask & ~KSAUDIO_SPEAKER_SURROUND) == 0)
+    {
+        fmt->Format.nChannels = 4;
+        fmt->dwChannelMask = KSAUDIO_SPEAKER_SURROUND;
+        return;
+    }
+
+    if (ca_layout->mNumberChannelDescriptions <= 6 &&
+            (ca_mask & ~KSAUDIO_SPEAKER_5POINT1) == 0)
+    {
+        fmt->Format.nChannels = 6;
+        fmt->dwChannelMask = KSAUDIO_SPEAKER_5POINT1;
+        return;
+    }
+
+    if (ca_layout->mNumberChannelDescriptions <= 6 &&
+            (ca_mask & ~KSAUDIO_SPEAKER_5POINT1_SURROUND) == 0)
+    {
+        fmt->Format.nChannels = 6;
+        fmt->dwChannelMask = KSAUDIO_SPEAKER_5POINT1_SURROUND;
+        return;
+    }
+
+    if (ca_layout->mNumberChannelDescriptions <= 8 &&
+            (ca_mask & ~KSAUDIO_SPEAKER_7POINT1) == 0)
+    {
+        fmt->Format.nChannels = 8;
+        fmt->dwChannelMask = KSAUDIO_SPEAKER_7POINT1;
+        return;
+    }
+
+    if (ca_layout->mNumberChannelDescriptions <= 8 &&
+            (ca_mask & ~KSAUDIO_SPEAKER_7POINT1_SURROUND) == 0)
+    {
+        fmt->Format.nChannels = 8;
+        fmt->dwChannelMask = KSAUDIO_SPEAKER_7POINT1_SURROUND;
+        return;
+    }
+
+    /* oddball format, report truthfully */
+    fmt->Format.nChannels = ca_layout->mNumberChannelDescriptions;
+    fmt->dwChannelMask = ca_mask;
+}
+
 static HRESULT WINAPI AudioClient_GetMixFormat(IAudioClient *iface,
         WAVEFORMATEX **pwfx)
 {
@@ -1745,6 +1893,7 @@ static HRESULT WINAPI AudioClient_GetMixFormat(IAudioClient *iface,
     UInt32 size;
     Float64 rate;
     AudioBufferList * WIN32PTR buffers;
+    AudioChannelLayout * WIN32PTR layout;
     AudioObjectPropertyAddress addr;
     int i;
 
@@ -1762,37 +1911,69 @@ static HRESULT WINAPI AudioClient_GetMixFormat(IAudioClient *iface,
 
     addr.mScope = This->scope;
     addr.mElement = 0;
-    addr.mSelector = kAudioDevicePropertyStreamConfiguration;
+    addr.mSelector = kAudioDevicePropertyPreferredChannelLayout;
 
     sc = AudioObjectGetPropertyDataSize(This->adevid, &addr, 0, NULL, &size);
-    if(sc != noErr){
-        CoTaskMemFree(fmt);
-        WARN("Unable to get size for _StreamConfiguration property: %x\n", (int)sc);
-        return osstatus_to_hresult(sc);
+    if(sc == noErr){
+        layout = HeapAlloc(GetProcessHeap(), 0, size);
+
+        sc = AudioObjectGetPropertyData(This->adevid, &addr, 0, NULL, &size, layout);
+        if(sc == noErr){
+            TRACE("Got channel layout: {tag: 0x%x, bitmap: 0x%x, num_descs: %u}\n",
+                    layout->mChannelLayoutTag, layout->mChannelBitmap, layout->mNumberChannelDescriptions);
+
+            if(layout->mChannelLayoutTag == kAudioChannelLayoutTag_UseChannelDescriptions){
+                convert_channel_layout(layout, fmt);
+            }else{
+                WARN("Haven't implemented support for this layout tag: 0x%x, guessing at layout\n", layout->mChannelLayoutTag);
+                fmt->Format.nChannels = 0;
+            }
+        }else{
+            TRACE("Unable to get _PreferredChannelLayout property: %x, guessing at layout\n", (int)sc);
+            fmt->Format.nChannels = 0;
+        }
+
+        HeapFree(GetProcessHeap(), 0, layout);
+    }else{
+        TRACE("Unable to get size for _PreferredChannelLayout property: %x, guessing at layout\n", (int)sc);
+        fmt->Format.nChannels = 0;
     }
 
-    buffers = HeapAlloc(GetProcessHeap(), 0, size);
-    if(!buffers){
-        CoTaskMemFree(fmt);
-        return E_OUTOFMEMORY;
-    }
+    if(fmt->Format.nChannels == 0){
+        addr.mScope = This->scope;
+        addr.mElement = 0;
+        addr.mSelector = kAudioDevicePropertyStreamConfiguration;
 
-    sc = AudioObjectGetPropertyData(This->adevid, &addr, 0, NULL,
-            &size, buffers);
-    if(sc != noErr){
-        CoTaskMemFree(fmt);
+        sc = AudioObjectGetPropertyDataSize(This->adevid, &addr, 0, NULL, &size);
+        if(sc != noErr){
+            CoTaskMemFree(fmt);
+            WARN("Unable to get size for _StreamConfiguration property: %x\n", (int)sc);
+            return osstatus_to_hresult(sc);
+        }
+
+        buffers = HeapAlloc(GetProcessHeap(), 0, size);
+        if(!buffers){
+            CoTaskMemFree(fmt);
+            return E_OUTOFMEMORY;
+        }
+
+        sc = AudioObjectGetPropertyData(This->adevid, &addr, 0, NULL,
+                &size, buffers);
+        if(sc != noErr){
+            CoTaskMemFree(fmt);
+            HeapFree(GetProcessHeap(), 0, buffers);
+            WARN("Unable to get _StreamConfiguration property: %x\n", (int)sc);
+            return osstatus_to_hresult(sc);
+        }
+
+        fmt->Format.nChannels = 0;
+        for(i = 0; i < buffers->mNumberBuffers; ++i)
+            fmt->Format.nChannels += buffers->mBuffers[i].mNumberChannels;
+
         HeapFree(GetProcessHeap(), 0, buffers);
-        WARN("Unable to get _StreamConfiguration property: %x\n", (int)sc);
-        return osstatus_to_hresult(sc);
+
+        fmt->dwChannelMask = get_channel_mask(fmt->Format.nChannels);
     }
-
-    fmt->Format.nChannels = 0;
-    for(i = 0; i < buffers->mNumberBuffers; ++i)
-        fmt->Format.nChannels += buffers->mBuffers[i].mNumberChannels;
-
-    HeapFree(GetProcessHeap(), 0, buffers);
-
-    fmt->dwChannelMask = get_channel_mask(fmt->Format.nChannels);
 
     addr.mSelector = kAudioDevicePropertyNominalSampleRate;
     size = sizeof(Float64);
@@ -2151,7 +2332,7 @@ static HRESULT WINAPI AudioRenderClient_GetBuffer(IAudioRenderClient *iface,
         return S_OK;
     }
 
-    hr = AudioClient_GetCurrentPadding_nolock(This, &pad);
+    hr = AudioClient_GetCurrentPadding_nolock(This, ADDRSPACECAST(UINT32*, &pad));
     if(FAILED(hr)){
         OSSpinLockUnlock(&This->lock);
         return hr;
@@ -2293,7 +2474,12 @@ static HRESULT WINAPI AudioCaptureClient_GetBuffer(IAudioCaptureClient *iface,
     TRACE("(%p)->(%p, %p, %p, %p, %p)\n", This, data, frames, flags,
             devpos, qpcpos);
 
-    if(!data || !frames || !flags)
+    if(!data)
+        return E_POINTER;
+
+    *data = NULL;
+
+    if(!frames || !flags)
         return E_POINTER;
 
     OSSpinLockLock(&This->lock);
@@ -2330,8 +2516,8 @@ static HRESULT WINAPI AudioCaptureClient_GetBuffer(IAudioCaptureClient *iface,
         *devpos = This->written_frames;
     if(qpcpos){ /* fixme: qpc of recording time */
         LARGE_INTEGER stamp, freq;
-        QueryPerformanceCounter(&stamp);
-        QueryPerformanceFrequency(&freq);
+        QueryPerformanceCounter(ADDRSPACECAST(LARGE_INTEGER*, &stamp));
+        QueryPerformanceFrequency(ADDRSPACECAST(LARGE_INTEGER*, &freq));
         *qpcpos = (stamp.QuadPart * (INT64)10000000) / freq.QuadPart;
     }
 
@@ -2470,8 +2656,8 @@ static HRESULT AudioClock_GetPosition_nolock(ACImpl *This,
 
     if(qpctime){
         LARGE_INTEGER stamp, freq;
-        QueryPerformanceCounter(&stamp);
-        QueryPerformanceFrequency(&freq);
+        QueryPerformanceCounter(ADDRSPACECAST(LARGE_INTEGER*, &stamp));
+        QueryPerformanceFrequency(ADDRSPACECAST(LARGE_INTEGER*, &freq));
         *qpctime = (stamp.QuadPart * (INT64)10000000) / freq.QuadPart;
     }
 

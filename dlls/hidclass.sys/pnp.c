@@ -123,6 +123,7 @@ NTSTATUS WINAPI PNP_AddDevice(DRIVER_OBJECT *driver, DEVICE_OBJECT *PDO)
     {
         ERR("Minidriver AddDevice failed (%x)\n",status);
         HID_DeleteDevice(device);
+        HeapFree(GetProcessHeap(), 0, hiddev);
         return status;
     }
 
@@ -133,6 +134,7 @@ NTSTATUS WINAPI PNP_AddDevice(DRIVER_OBJECT *driver, DEVICE_OBJECT *PDO)
     {
         ERR("Minidriver failed to get Attributes(%x)\n",status);
         HID_DeleteDevice(device);
+        HeapFree(GetProcessHeap(), 0, hiddev);
         return status;
     }
 
@@ -147,6 +149,7 @@ NTSTATUS WINAPI PNP_AddDevice(DRIVER_OBJECT *driver, DEVICE_OBJECT *PDO)
     {
         ERR("Cannot get Device Descriptor(%x)\n",status);
         HID_DeleteDevice(device);
+        HeapFree(GetProcessHeap(), 0, hiddev);
         return status;
     }
     for (i = 0; i < descriptor.bNumDescriptors; i++)
@@ -157,6 +160,7 @@ NTSTATUS WINAPI PNP_AddDevice(DRIVER_OBJECT *driver, DEVICE_OBJECT *PDO)
     {
         ERR("No Report Descriptor found in reply\n");
         HID_DeleteDevice(device);
+        HeapFree(GetProcessHeap(), 0, hiddev);
         return status;
     }
 
@@ -168,6 +172,7 @@ NTSTATUS WINAPI PNP_AddDevice(DRIVER_OBJECT *driver, DEVICE_OBJECT *PDO)
         ERR("Cannot get Report Descriptor(%x)\n",status);
         HID_DeleteDevice(device);
         HeapFree(GetProcessHeap(), 0, reportDescriptor);
+        HeapFree(GetProcessHeap(), 0, hiddev);
         return status;
     }
 
@@ -178,6 +183,7 @@ NTSTATUS WINAPI PNP_AddDevice(DRIVER_OBJECT *driver, DEVICE_OBJECT *PDO)
     {
         ERR("Cannot parse Report Descriptor\n");
         HID_DeleteDevice(device);
+        HeapFree(GetProcessHeap(), 0, hiddev);
         return STATUS_NOT_SUPPORTED;
     }
 
@@ -285,7 +291,7 @@ NTSTATUS WINAPI HID_PNP_Dispatch(DEVICE_OBJECT *device, IRP *irp)
                     break;
                 case BusQueryDeviceSerialNumber:
                     FIXME("BusQueryDeviceSerialNumber not implemented\n");
-                    HeapFree(GetProcessHeap(), 0, id);
+                    ExFreePool(id);
                     break;
             }
             break;

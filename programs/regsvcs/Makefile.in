@@ -1,7 +1,6 @@
 MODULE    = regsvcs.exe
 
-# CrossOver HACK for bug 16893 - build as .so so .NET 2 installs can override
-EXTRADLLFLAGS = -mconsole -municode
+EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
 
 C_SRCS = \
 	main.c

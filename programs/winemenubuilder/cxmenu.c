@@ -193,7 +193,7 @@ static void cx_dump_menu(LPCWSTR linkW, int is_desktop, LPCWSTR rootW,
     static const WCHAR zeroW[] = {'0',0};
     static const WCHAR oneW[] = {'1',0};
 
-    WCHAR *icon_nameW, *descriptionW, *archW;
+    WCHAR *icon_nameW = NULL, *descriptionW = NULL, *archW = NULL;
     const char *s = "/menuItems.txt";
     char *fname = HeapAlloc( GetProcessHeap(), 0, strlen(xdg_data_dir) + strlen(s) + 1 );
     sprintf(fname, "%s%s", xdg_data_dir, s);
@@ -218,9 +218,9 @@ static void cx_dump_menu(LPCWSTR linkW, int is_desktop, LPCWSTR rootW,
             cx_menu_file = stdout;
     }
 
-    icon_nameW = utf8_chars_to_wchars(icon_name);
-    descriptionW = utf8_chars_to_wchars(description);
-    archW = utf8_chars_to_wchars(arch);
+    if (icon_name) icon_nameW = utf8_chars_to_wchars(icon_name);
+    if (description) descriptionW = utf8_chars_to_wchars(description);
+    if (arch) archW = utf8_chars_to_wchars(arch);
 
     if (cx_menu_file == stdout)
     {
@@ -257,9 +257,9 @@ static void cx_dump_menu(LPCWSTR linkW, int is_desktop, LPCWSTR rootW,
         cx_write_profile_value(fname, linkW, ArchW, archW);
     }
 
-    HeapFree(GetProcessHeap(), 0, icon_nameW);
-    HeapFree(GetProcessHeap(), 0, descriptionW);
-    HeapFree(GetProcessHeap(), 0, archW);
+    if (icon_nameW) HeapFree(GetProcessHeap(), 0, icon_nameW);
+    if (descriptionW) HeapFree(GetProcessHeap(), 0, descriptionW);
+    if (archW) HeapFree(GetProcessHeap(), 0, archW);
     HeapFree(GetProcessHeap(), 0, fname);
 }
 

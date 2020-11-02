@@ -1,5 +1,5 @@
 # CrossOver Hack 13438: Don't link against CoreFoundation or CoreServices
-EXTRALIBS = $(DL_LIBS)
+EXTRALIBS = $(DL_LIBS) $(I386_LIBS)
 
 C_SRCS = \
 	config.c \

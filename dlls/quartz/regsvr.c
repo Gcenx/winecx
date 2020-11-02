@@ -36,7 +36,6 @@
 #include "strmif.h"
 
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
@@ -179,50 +178,6 @@ static HRESULT unregister_filters(struct regsvr_filter const *list)
  */
 
 static struct regsvr_filter const filter_list[] = {
-    {   &CLSID_AviSplitter,
-	&CLSID_LegacyAmFilterCategory,
-	{'A','V','I',' ','S','p','l','i','t','t','e','r',0},
-	0x5ffff0,
-	{   {   0,
-		{   { &MEDIATYPE_Stream, &MEDIASUBTYPE_Avi },
-		    { NULL }
-		},
-	    },
-	    {   REG_PINFLAG_B_OUTPUT,
-		{   { &MEDIATYPE_Video, &GUID_NULL },
-		    { NULL }
-		},
-	    },
-	    { 0xFFFFFFFF },
-	}
-    },
-    {   &CLSID_MPEG1Splitter,
-        &CLSID_LegacyAmFilterCategory,
-        {'M','P','E','G','-','I',' ','S','t','r','e','a','m',' ','S','p','l','i','t','t','e','r',0},
-        0x5ffff0,
-        {   {   0,
-                {   { &MEDIATYPE_Stream, &MEDIASUBTYPE_MPEG1Audio },
-                    { &MEDIATYPE_Stream, &MEDIASUBTYPE_MPEG1Video },
-                    { &MEDIATYPE_Stream, &MEDIASUBTYPE_MPEG1System },
-                    { &MEDIATYPE_Stream, &MEDIASUBTYPE_MPEG1VideoCD },
-                    { NULL }
-                },
-            },
-            {   REG_PINFLAG_B_OUTPUT,
-                {   { &MEDIATYPE_Audio, &MEDIASUBTYPE_MPEG1Packet },
-                    { &MEDIATYPE_Audio, &MEDIASUBTYPE_MPEG1AudioPayload },
-                    { NULL }
-                },
-            },
-            {   REG_PINFLAG_B_OUTPUT,
-                {   { &MEDIATYPE_Video, &MEDIASUBTYPE_MPEG1Packet },
-                    { &MEDIATYPE_Video, &MEDIASUBTYPE_MPEG1Payload },
-                    { NULL }
-                },
-            },
-            { 0xFFFFFFFF },
-        }
-    },
     {   &CLSID_NullRenderer,
         &CLSID_LegacyAmFilterCategory,
         {'N','u','l','l',' ','R','e','n','d','e','r','e','r',0},
@@ -344,25 +299,6 @@ static struct regsvr_filter const filter_list[] = {
 	0x5ffff0,
 	{   {   0,
 		{   { &MEDIATYPE_Audio, &GUID_NULL },
-		    { NULL }
-		},
-	    },
-	    {   REG_PINFLAG_B_OUTPUT,
-		{   { &MEDIATYPE_Audio, &GUID_NULL },
-		    { NULL }
-		},
-	    },
-	    { 0xFFFFFFFF },
-	}
-    },
-    {   &CLSID_WAVEParser,
-	&CLSID_LegacyAmFilterCategory,
-	{'W','a','v','e',' ','P','a','r','s','e','r',0},
-	0x400000,
-	{   {   0,
-		{   { &MEDIATYPE_Stream, &MEDIASUBTYPE_WAVE },
-		    { &MEDIATYPE_Stream, &MEDIASUBTYPE_AU },
-		    { &MEDIATYPE_Stream, &MEDIASUBTYPE_AIFF },
 		    { NULL }
 		},
 	    },

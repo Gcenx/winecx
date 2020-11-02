@@ -83,15 +83,6 @@ static BOOL get_open_object_attributes( OBJECT_ATTRIBUTES *attr, UNICODE_STRING 
     return TRUE;
 }
 
-/***********************************************************************
- *		SwitchToThread (KERNEL32.@)
- */
-BOOL WINAPI SwitchToThread(void)
-{
-    return (NtYieldExecution() != STATUS_NO_YIELD_PERFORMED);
-}
-
-
 static HANDLE normalize_handle_if_console(HANDLE handle)
 {
     if ((handle == (HANDLE)STD_INPUT_HANDLE) ||
@@ -389,26 +380,6 @@ BOOL WINAPI AssignProcessToJobObject( HANDLE job, HANDLE process )
     NTSTATUS status = NtAssignProcessToJobObject( job, process );
     if (status) SetLastError( RtlNtStatusToDosError(status) );
     return !status;
-}
-
-/******************************************************************************
- *		IsProcessInJob (KERNEL32.@)
- */
-BOOL WINAPI IsProcessInJob( HANDLE process, HANDLE job, PBOOL result )
-{
-    NTSTATUS status = NtIsProcessInJob( process, job );
-    switch(status)
-    {
-    case STATUS_PROCESS_IN_JOB:
-        *result = TRUE;
-        return TRUE;
-    case STATUS_PROCESS_NOT_IN_JOB:
-        *result = FALSE;
-        return TRUE;
-    default:
-        SetLastError( RtlNtStatusToDosError(status) );
-        return FALSE;
-    }
 }
 
 
@@ -748,75 +719,6 @@ BOOL WINAPI CallNamedPipeA(
     return ret;
 }
 
-/******************************************************************
- *		CreatePipe (KERNEL32.@)
- *
- */
-BOOL WINAPI CreatePipe( PHANDLE hReadPipe, PHANDLE hWritePipe,
-                        LPSECURITY_ATTRIBUTES sa, DWORD size )
-{
-    static unsigned     index /* = 0 */;
-    WCHAR               name[64];
-    HANDLE              hr, hw;
-    unsigned            in_index = index;
-    UNICODE_STRING      nt_name;
-    OBJECT_ATTRIBUTES   attr;
-    NTSTATUS            status;
-    IO_STATUS_BLOCK     iosb;
-    LARGE_INTEGER       timeout;
-
-    *hReadPipe = *hWritePipe = INVALID_HANDLE_VALUE;
-
-    attr.Length                   = sizeof(attr);
-    attr.RootDirectory            = 0;
-    attr.ObjectName               = &nt_name;
-    attr.Attributes               = OBJ_CASE_INSENSITIVE |
-                                    ((sa && sa->bInheritHandle) ? OBJ_INHERIT : 0);
-    attr.SecurityDescriptor       = sa ? sa->lpSecurityDescriptor : NULL;
-    attr.SecurityQualityOfService = NULL;
-
-    if (!size) size = 4096;
-
-    timeout.QuadPart = (ULONGLONG)NMPWAIT_USE_DEFAULT_WAIT * -10000;
-    /* generate a unique pipe name (system wide) */
-    do
-    {
-        static const WCHAR nameFmt[] = { '\\','?','?','\\','p','i','p','e',
-         '\\','W','i','n','3','2','.','P','i','p','e','s','.','%','0','8','l',
-         'u','.','%','0','8','u','\0' };
-
-        snprintfW(name, ARRAY_SIZE(name), nameFmt, GetCurrentProcessId(), ++index);
-        RtlInitUnicodeString(&nt_name, name);
-        status = NtCreateNamedPipeFile(&hr, GENERIC_READ | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE,
-                                       &attr, &iosb, FILE_SHARE_WRITE, FILE_OVERWRITE_IF,
-                                       FILE_SYNCHRONOUS_IO_NONALERT,
-                                       FALSE, FALSE, FALSE, 
-                                       1, size, size, &timeout);
-        if (status)
-        {
-            SetLastError( RtlNtStatusToDosError(status) );
-            hr = INVALID_HANDLE_VALUE;
-        }
-    } while (hr == INVALID_HANDLE_VALUE && index != in_index);
-    /* from completion sakeness, I think system resources might be exhausted before this happens !! */
-    if (hr == INVALID_HANDLE_VALUE) return FALSE;
-
-    status = NtOpenFile(&hw, GENERIC_WRITE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, &attr, &iosb, 0,
-                        FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE);
-
-    if (status) 
-    {
-        SetLastError( RtlNtStatusToDosError(status) );
-        NtClose(hr);
-        return FALSE;
-    }
-
-    *hReadPipe = hr;
-    *hWritePipe = hw;
-    return TRUE;
-}
-
-
 /******************************************************************************
  * CreateMailslotA [KERNEL32.@]
  *
@@ -1017,97 +919,6 @@ BOOL WINAPI BindIoCompletionCallback( HANDLE FileHandle, LPOVERLAPPED_COMPLETION
     return FALSE;
 }
 
-
-/***********************************************************************
- *           CreateMemoryResourceNotification   (KERNEL32.@)
- */
-HANDLE WINAPI CreateMemoryResourceNotification(MEMORY_RESOURCE_NOTIFICATION_TYPE type)
-{
-    static const WCHAR lowmemW[] =
-        {'\\','K','e','r','n','e','l','O','b','j','e','c','t','s',
-         '\\','L','o','w','M','e','m','o','r','y','C','o','n','d','i','t','i','o','n',0};
-    static const WCHAR highmemW[] =
-        {'\\','K','e','r','n','e','l','O','b','j','e','c','t','s',
-         '\\','H','i','g','h','M','e','m','o','r','y','C','o','n','d','i','t','i','o','n',0};
-    HANDLE ret;
-    UNICODE_STRING nameW;
-    OBJECT_ATTRIBUTES attr;
-    NTSTATUS status;
-
-    switch (type)
-    {
-    case LowMemoryResourceNotification:
-        RtlInitUnicodeString( &nameW, lowmemW );
-        break;
-    case HighMemoryResourceNotification:
-        RtlInitUnicodeString( &nameW, highmemW );
-        break;
-    default:
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return 0;
-    }
-
-    attr.Length                   = sizeof(attr);
-    attr.RootDirectory            = 0;
-    attr.ObjectName               = &nameW;
-    attr.Attributes               = 0;
-    attr.SecurityDescriptor       = NULL;
-    attr.SecurityQualityOfService = NULL;
-    status = NtOpenEvent( &ret, EVENT_ALL_ACCESS, &attr );
-    if (status != STATUS_SUCCESS)
-    {
-        SetLastError( RtlNtStatusToDosError(status) );
-        return 0;
-    }
-    return ret;
-}
-
-/***********************************************************************
- *          QueryMemoryResourceNotification   (KERNEL32.@)
- */
-BOOL WINAPI QueryMemoryResourceNotification(HANDLE handle, PBOOL state)
-{
-    switch (WaitForSingleObject( handle, 0 ))
-    {
-    case WAIT_OBJECT_0:
-        *state = TRUE;
-        return TRUE;
-    case WAIT_TIMEOUT:
-        *state = FALSE;
-        return TRUE;
-    }
-    SetLastError( ERROR_INVALID_PARAMETER );
-    return FALSE;
-}
-
-/***********************************************************************
- *           InitOnceBeginInitialize    (KERNEL32.@)
- */
-BOOL WINAPI InitOnceBeginInitialize( INIT_ONCE *once, DWORD flags, BOOL *pending, void **context )
-{
-    NTSTATUS status = RtlRunOnceBeginInitialize( once, flags, context );
-    if (status >= 0) *pending = (status == STATUS_PENDING);
-    else SetLastError( RtlNtStatusToDosError(status) );
-    return status >= 0;
-}
-
-/***********************************************************************
- *           InitOnceComplete    (KERNEL32.@)
- */
-BOOL WINAPI InitOnceComplete( INIT_ONCE *once, DWORD flags, void *context )
-{
-    NTSTATUS status = RtlRunOnceComplete( once, flags, context );
-    if (status != STATUS_SUCCESS) SetLastError( RtlNtStatusToDosError(status) );
-    return !status;
-}
-
-/***********************************************************************
- *           InitOnceExecuteOnce    (KERNEL32.@)
- */
-BOOL WINAPI InitOnceExecuteOnce( INIT_ONCE *once, PINIT_ONCE_FN func, void *param, void **context )
-{
-    return !RtlRunOnceExecuteOnce( once, (PRTL_RUN_ONCE_INIT_FN)func, param, context );
-}
 
 #ifdef __i386__
 

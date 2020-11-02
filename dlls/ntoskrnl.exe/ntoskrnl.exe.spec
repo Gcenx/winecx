@@ -1,4 +1,4 @@
-@ stdcall -arch=arm,arm64,x86_64 ExAcquireFastMutex(ptr)
+@ stdcall -arch=!i386 ExAcquireFastMutex(ptr)
 @ stdcall -fastcall ExAcquireFastMutexUnsafe(ptr)
 @ stub ExAcquireRundownProtection
 @ stub ExAcquireRundownProtectionEx
@@ -9,7 +9,7 @@
 @ stdcall -fastcall -arch=i386 ExInterlockedPopEntrySList(ptr ptr) NTOSKRNL_ExInterlockedPopEntrySList
 @ stdcall -fastcall -arch=i386 ExInterlockedPushEntrySList (ptr ptr ptr) NTOSKRNL_ExInterlockedPushEntrySList
 @ stub ExReInitializeRundownProtection
-@ stdcall -arch=arm,arm64,x86_64 ExReleaseFastMutex(ptr)
+@ stdcall -arch=!i386 ExReleaseFastMutex(ptr)
 @ stdcall -fastcall ExReleaseFastMutexUnsafe(ptr)
 @ stdcall -fastcall ExReleaseResourceLite(ptr)
 @ stub ExReleaseRundownProtection
@@ -33,6 +33,7 @@
 @ stdcall -arch=win64 ExpInterlockedPopEntrySList(ptr) RtlInterlockedPopEntrySList
 @ stdcall -arch=win64 ExpInterlockedPushEntrySList(ptr ptr) RtlInterlockedPushEntrySList
 @ stub HalExamineMBR
+@ stdcall -arch=!i386 InitializeSListHead(ptr) RtlInitializeSListHead
 @ stdcall -fastcall InterlockedCompareExchange(ptr long long) NTOSKRNL_InterlockedCompareExchange
 @ stdcall -fastcall InterlockedDecrement(ptr) NTOSKRNL_InterlockedDecrement
 @ stdcall -fastcall InterlockedExchange(ptr long) NTOSKRNL_InterlockedExchange
@@ -47,13 +48,13 @@
 @ stub IoWritePartitionTable
 @ stdcall -fastcall IofCallDriver(ptr ptr)
 @ stdcall -fastcall IofCompleteRequest(ptr long)
-@ stdcall -arch=arm,arm64,x86_64 KeAcquireInStackQueuedSpinLock(ptr ptr)
+@ stdcall -arch=!i386 KeAcquireInStackQueuedSpinLock(ptr ptr)
 @ stdcall -fastcall KeAcquireInStackQueuedSpinLockAtDpcLevel(ptr ptr)
 @ stdcall KeEnterGuardedRegion()
 @ stdcall KeExpandKernelStackAndCallout(ptr ptr long)
 @ stdcall KeExpandKernelStackAndCalloutEx(ptr ptr long long ptr)
 @ stdcall KeLeaveGuardedRegion()
-@ stdcall -arch=arm,arm64,x86_64 KeReleaseInStackQueuedSpinLock(ptr)
+@ stdcall -arch=!i386 KeReleaseInStackQueuedSpinLock(ptr)
 @ stdcall -fastcall KeReleaseInStackQueuedSpinLockFromDpcLevel(ptr)
 @ stub KeSetTimeUpdateNotifyRoutine
 @ stub KefAcquireSpinLockAtDpcLevel
@@ -360,7 +361,7 @@
 @ stub IoCreateStreamFileObjectLite
 @ stdcall IoCreateSymbolicLink(ptr ptr)
 @ stdcall IoCreateSynchronizationEvent(ptr ptr)
-@ stub IoCreateUnprotectedSymbolicLink
+@ stdcall IoCreateUnprotectedSymbolicLink(ptr ptr)
 @ stdcall IoCsqInitialize(ptr ptr ptr ptr ptr ptr ptr)
 @ stub IoCsqInsertIrp
 @ stub IoCsqRemoveIrp
@@ -405,7 +406,7 @@
 @ stub IoGetInitialStack
 @ stub IoGetLowerDeviceObject
 @ stdcall IoGetRelatedDeviceObject(ptr)
-@ stub IoGetRequestorProcess
+@ stdcall IoGetRequestorProcess(ptr)
 @ stub IoGetRequestorProcessId
 @ stub IoGetRequestorSessionId
 @ stdcall IoGetStackLimits(ptr ptr)
@@ -437,7 +438,7 @@
 @ stub IoReadOperationCount
 @ stub IoReadPartitionTableEx
 @ stub IoReadTransferCount
-@ stub IoRegisterBootDriverReinitialization
+@ stdcall IoRegisterBootDriverReinitialization(ptr ptr ptr)
 @ stdcall IoRegisterDeviceInterface(ptr ptr ptr ptr)
 @ stdcall IoRegisterDriverReinitialization(ptr ptr ptr)
 @ stdcall IoRegisterFileSystem(ptr)
@@ -447,7 +448,7 @@
 @ stdcall IoRegisterShutdownNotification(ptr)
 @ stdcall IoReleaseCancelSpinLock(long)
 @ stdcall IoReleaseRemoveLockAndWaitEx(ptr ptr long)
-@ stub IoReleaseRemoveLockEx
+@ stdcall IoReleaseRemoveLockEx(ptr ptr long)
 @ stub IoReleaseVpbSpinLock
 @ stub IoRemoveShareAccess
 @ stub IoReportDetectedDevice
@@ -521,7 +522,7 @@
 @ stdcall Ke386SetIoAccessMap(long ptr)
 @ stub KeAcquireInterruptSpinLock
 @ stdcall KeAcquireSpinLockAtDpcLevel(ptr)
-@ stdcall -arch=arm,arm64,x86_64 KeAcquireSpinLockRaiseToDpc(ptr)
+@ stdcall -arch=!i386 KeAcquireSpinLockRaiseToDpc(ptr)
 @ stub KeAddSystemServiceTable
 @ stdcall KeAreApcsDisabled()
 @ stub KeAttachProcess
@@ -603,7 +604,7 @@
 @ stub KeReleaseMutant
 @ stdcall KeReleaseMutex(ptr long)
 @ stdcall KeReleaseSemaphore(ptr long long long)
-@ stdcall -arch=arm,arm64,x86_64 KeReleaseSpinLock(ptr long)
+@ stdcall -arch=!i386 KeReleaseSpinLock(ptr long)
 @ stdcall KeReleaseSpinLockFromDpcLevel(ptr)
 @ stub KeRemoveByKeyDeviceQueue
 @ stub KeRemoveByKeyDeviceQueueIfBusy
@@ -625,7 +626,7 @@
 @ stdcall KeSetEvent(ptr long long)
 @ stub KeSetEventBoostPriority
 @ stub KeSetIdealProcessorThread
-@ stub KeSetImportanceDpc
+@ stdcall KeSetImportanceDpc(ptr long)
 @ stub KeSetKernelStackSwapEnable
 @ stdcall KeSetPriorityThread(ptr long)
 @ stub KeSetProfileIrql
@@ -699,7 +700,7 @@
 @ stub MmIsDriverVerifying
 @ stub MmIsNonPagedSystemAddressValid
 @ stub MmIsRecursiveIoFault
-@ stub MmIsThisAnNtAsSystem
+@ stdcall MmIsThisAnNtAsSystem()
 @ stub MmIsVerifierEnabled
 @ stub MmLockPagableDataSection
 @ stub MmLockPagableImageSection
@@ -1002,7 +1003,7 @@
 @ stdcall RtlCreateSecurityDescriptor(ptr long)
 @ stub RtlCreateSystemVolumeInformationFolder
 @ stdcall RtlCreateUnicodeString(ptr wstr)
-@ stub RtlCustomCPToUnicodeN
+@ stdcall RtlCustomCPToUnicodeN(ptr ptr long ptr str long) ntdll.RtlCustomCPToUnicodeN
 @ stdcall RtlDecompressBuffer(long ptr long ptr long ptr)
 @ stub RtlDecompressChunks
 @ stdcall RtlDecompressFragment(long ptr long ptr long long ptr ptr)
@@ -1078,7 +1079,7 @@
 @ stdcall RtlImageDirectoryEntryToData(long long long ptr)
 @ stdcall RtlImageNtHeader(long)
 @ stdcall RtlInitAnsiString(ptr str)
-@ stub RtlInitCodePageTable
+@ stdcall RtlInitCodePageTable(ptr ptr) ntdll.RtlInitCodePageTable
 @ stdcall RtlInitString(ptr str)
 @ stdcall RtlInitUnicodeString(ptr wstr)
 @ stdcall RtlInitializeBitMap(ptr ptr long)
@@ -1101,8 +1102,8 @@
 @ stdcall RtlIpv4AddressToStringExA(ptr long ptr ptr)
 @ stdcall RtlIpv4AddressToStringExW(ptr long ptr ptr)
 @ stdcall RtlIpv4AddressToStringW(ptr ptr)
-@ stub RtlIpv4StringToAddressA
-@ stub RtlIpv4StringToAddressExA
+@ stdcall RtlIpv4StringToAddressA(str long ptr ptr) ntdll.RtlIpv4StringToAddressA
+@ stdcall RtlIpv4StringToAddressExA(str long ptr ptr) ntdll.RtlIpv4StringToAddressExA
 @ stdcall RtlIpv4StringToAddressExW(wstr long ptr ptr)
 @ stdcall RtlIpv4StringToAddressW(wstr long ptr ptr)
 @ stub RtlIpv6AddressToStringA
@@ -1203,19 +1204,19 @@
 @ stdcall RtlUnicodeStringToInteger(ptr long ptr)
 @ stdcall RtlUnicodeStringToOemSize(ptr)
 @ stdcall RtlUnicodeStringToOemString(ptr ptr long)
-@ stub RtlUnicodeToCustomCPN
+@ stdcall RtlUnicodeToCustomCPN(ptr ptr long ptr wstr long) ntdll.RtlUnicodeToCustomCPN
 @ stdcall RtlUnicodeToMultiByteN(ptr long ptr ptr long)
 @ stdcall RtlUnicodeToMultiByteSize(ptr ptr long)
 @ stdcall RtlUnicodeToOemN(ptr long ptr ptr long)
 @ stub RtlUnlockBootStatusData
 @ stdcall -norelay RtlUnwind(ptr ptr ptr ptr)
-@ stdcall -arch=x86_64 RtlUnwindEx(ptr ptr ptr ptr ptr ptr)
+@ stdcall -arch=arm64,x86_64 RtlUnwindEx(ptr ptr ptr ptr ptr ptr)
 @ stdcall RtlUpcaseUnicodeChar(long)
 @ stdcall RtlUpcaseUnicodeString(ptr ptr long)
 @ stdcall RtlUpcaseUnicodeStringToAnsiString(ptr ptr long)
 @ stdcall RtlUpcaseUnicodeStringToCountedOemString(ptr ptr long)
 @ stdcall RtlUpcaseUnicodeStringToOemString(ptr ptr long)
-@ stub RtlUpcaseUnicodeToCustomCPN
+@ stdcall RtlUpcaseUnicodeToCustomCPN(ptr ptr long ptr wstr long) ntdll.RtlUpcaseUnicodeToCustomCPN
 @ stdcall RtlUpcaseUnicodeToMultiByteN(ptr long ptr ptr long)
 @ stdcall RtlUpcaseUnicodeToOemN(ptr long ptr ptr long)
 @ stdcall RtlUpperChar(long)
@@ -1257,11 +1258,12 @@
 @ stub SeFreePrivileges
 @ stub SeImpersonateClient
 @ stub SeImpersonateClientEx
+@ stdcall SeLocateProcessImageName(ptr ptr)
 @ stub SeLockSubjectContext
 @ stub SeMarkLogonSessionForTerminationNotification
 @ stub SeOpenObjectAuditAlarm
 @ stub SeOpenObjectForDeleteAuditAlarm
-@ stub SePrivilegeCheck
+@ stdcall SePrivilegeCheck(ptr ptr long)
 @ stub SePrivilegeObjectAuditAlarm
 @ stub SePublicDefaultDacl
 @ stub SeQueryAuthenticationIdToken
@@ -1455,7 +1457,7 @@
 @ cdecl _strrev(str)
 @ cdecl _strset(str long)
 @ cdecl _strupr(str)
-@ cdecl _vsnprintf(ptr long str ptr)
+@ cdecl -norelay _vsnprintf(ptr long str ptr)
 @ cdecl _vsnwprintf(ptr long wstr ptr)
 @ cdecl _wcsicmp(wstr wstr)
 @ cdecl _wcslwr(wstr)

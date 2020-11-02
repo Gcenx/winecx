@@ -25,7 +25,7 @@
 #define WINVER 0x0602 /* for CURSOR_SUPPRESSED */
 #define COBJMACROS
 #include <d3d9.h>
-#include "wine/test.h"
+#include "utils.h"
 
 struct vec3
 {
@@ -3048,19 +3048,12 @@ static void test_draw_primitive(void)
 
     hr = IDirect3DDevice9_GetStreamSource(device, 0, &current_vb, &offset, &stride);
     ok(SUCCEEDED(hr), "GetStreamSource failed, hr %#x.\n", hr);
-todo_wine
     ok(!current_vb, "Unexpected vb %p.\n", current_vb);
     ok(!offset, "Unexpected offset %u.\n", offset);
-todo_wine
     ok(!stride, "Unexpected stride %u.\n", stride);
-    if (current_vb)
-        IDirect3DVertexBuffer9_Release(current_vb);
     hr = IDirect3DDevice9_GetIndices(device, &current_ib);
     ok(SUCCEEDED(hr), "GetIndices failed, hr %#x.\n", hr);
-todo_wine
     ok(!current_ib, "Unexpected index buffer %p.\n", current_ib);
-    if (current_ib)
-        IDirect3DIndexBuffer9_Release(current_ib);
 
     hr = IDirect3DStateBlock9_Capture(stateblock);
     ok(SUCCEEDED(hr), "Capture failed, hr %#x.\n", hr);
@@ -4015,7 +4008,7 @@ static void test_wndproc(void)
         ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
         ok(ret, "Failed to get display mode.\n");
         ok(devmode.dmPelsWidth == registry_mode.dmPelsWidth
-                && devmode.dmPelsHeight == registry_mode.dmPelsHeight, "Got unexpect screen size %ux%u.\n",
+                && devmode.dmPelsHeight == registry_mode.dmPelsHeight, "Got unexpected screen size %ux%u.\n",
                 devmode.dmPelsWidth, devmode.dmPelsHeight);
 
         /* This is needed on native with D3DCREATE_NOWINDOWCHANGES, and it needs to be
@@ -4050,7 +4043,7 @@ static void test_wndproc(void)
         ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
         ok(ret, "Failed to get display mode.\n");
         ok(devmode.dmPelsWidth == registry_mode.dmPelsWidth
-                && devmode.dmPelsHeight == registry_mode.dmPelsHeight, "Got unexpect screen size %ux%u.\n",
+                && devmode.dmPelsHeight == registry_mode.dmPelsHeight, "Got unexpected screen size %ux%u.\n",
                 devmode.dmPelsWidth, devmode.dmPelsHeight);
 
         hr = reset_device(device, &device_desc);
@@ -4074,8 +4067,8 @@ static void test_wndproc(void)
 
         ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
         ok(ret, "Failed to get display mode.\n");
-        ok(devmode.dmPelsWidth == registry_mode.dmPelsWidth, "Got unexpect width %u.\n", devmode.dmPelsWidth);
-        ok(devmode.dmPelsHeight == registry_mode.dmPelsHeight, "Got unexpect height %u.\n", devmode.dmPelsHeight);
+        ok(devmode.dmPelsWidth == registry_mode.dmPelsWidth, "Got unexpected width %u.\n", devmode.dmPelsWidth);
+        ok(devmode.dmPelsHeight == registry_mode.dmPelsHeight, "Got unexpected height %u.\n", devmode.dmPelsHeight);
 
         /* SW_SHOWMINNOACTIVE is needed to make FVWM happy. SW_SHOWNOACTIVATE is needed to make windows
          * send SIZE_RESTORED after ShowWindow(SW_SHOWMINNOACTIVE). */
@@ -5947,13 +5940,8 @@ static void test_occlusion_query(void)
 
     hr = IDirect3DQuery9_Issue(query, D3DISSUE_END);
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
-    for (i = 0; i < 500; ++i)
-    {
-        if ((hr = IDirect3DQuery9_GetData(query, NULL, 0, D3DGETDATA_FLUSH)) != S_FALSE)
-            break;
-        Sleep(10);
-    }
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    wait_query(query);
 
     memset(&data, 0xff, sizeof(data));
     hr = IDirect3DQuery9_GetData(query, &data, data_size, D3DGETDATA_FLUSH);
@@ -6012,6 +6000,26 @@ static void test_occlusion_query(void)
     if (broken_occlusion)
         goto done;
 
+    hr = IDirect3DDevice9_BeginScene(device);
+    ok(hr == D3D_OK, "Failed to begin scene, hr %#x.\n", hr);
+    for (i = 0; i < 50000; ++i)
+    {
+        hr = IDirect3DQuery9_Issue(query, D3DISSUE_BEGIN);
+        ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+        hr = IDirect3DQuery9_Issue(query, D3DISSUE_END);
+        ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    }
+    hr = IDirect3DDevice9_EndScene(device);
+    ok(hr == D3D_OK, "Failed to end scene, hr %#x.\n", hr);
+
+    wait_query(query);
+
+    memset(&data, 0xff, sizeof(data));
+    hr = IDirect3DQuery9_GetData(query, &data, sizeof(data), D3DGETDATA_FLUSH);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(data.dword[0] == 0 && data.dword[1] == 0,
+            "Got unexpected query result 0x%08x%08x.\n", data.dword[1], data.dword[0]);
+
     hr = IDirect3DDevice9_GetDeviceCaps(device, &caps);
     ok(SUCCEEDED(hr), "Failed to get device caps, hr %#x.\n", hr);
 
@@ -6057,13 +6065,7 @@ static void test_occlusion_query(void)
     hr = IDirect3DQuery9_Issue(query, D3DISSUE_END);
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
 
-    for (i = 0; i < 500; ++i)
-    {
-        if ((hr = IDirect3DQuery9_GetData(query, NULL, 0, D3DGETDATA_FLUSH)) != S_FALSE)
-            break;
-        Sleep(10);
-    }
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    wait_query(query);
 
     memset(&data, 0xff, sizeof(data));
     hr = IDirect3DQuery9_GetData(query, &data, sizeof(data), D3DGETDATA_FLUSH);
@@ -6071,32 +6073,6 @@ static void test_occlusion_query(void)
     ok((data.dword[0] == expected.dword[0] && data.dword[1] == expected.dword[1])
             || (data.dword[0] == 0xffffffff && !data.dword[1])
             || broken(data.dword[0] < 0xffffffff && !data.dword[1]),
-            "Got unexpected query result 0x%08x%08x.\n", data.dword[1], data.dword[0]);
-
-    hr = IDirect3DDevice9_BeginScene(device);
-    ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
-    for (i = 0; i < 50000; ++i)
-    {
-        hr = IDirect3DQuery9_Issue(query, D3DISSUE_BEGIN);
-        ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
-        hr = IDirect3DQuery9_Issue(query, D3DISSUE_END);
-        ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
-    }
-    hr = IDirect3DDevice9_EndScene(device);
-    ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
-
-    for (i = 0; i < 500; ++i)
-    {
-        if ((hr = IDirect3DQuery9_GetData(query, NULL, 0, D3DGETDATA_FLUSH)) == S_OK)
-            break;
-        Sleep(10);
-    }
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-
-    memset(&data, 0xff, sizeof(data));
-    hr = IDirect3DQuery9_GetData(query, &data, sizeof(data), D3DGETDATA_FLUSH);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-    ok(data.dword[0] == 0 && data.dword[1] == 0,
             "Got unexpected query result 0x%08x%08x.\n", data.dword[1], data.dword[0]);
 
     IDirect3DSurface9_Release(rt);
@@ -6119,8 +6095,8 @@ static void test_timestamp_query(void)
          1.0f, -1.0f, 0.0f,
     };
     IDirect3DQuery9 *query, *disjoint_query, *freq_query;
-    unsigned int data_size, i;
     IDirect3DDevice9 *device;
+    unsigned int data_size;
     IDirect3D9 *d3d9;
     ULONG refcount;
     HWND window;
@@ -6183,14 +6159,8 @@ static void test_timestamp_query(void)
     ok(data_size == sizeof(UINT64), "Query data size is %u, 8 expected.\n", data_size);
 
     hr = IDirect3DQuery9_Issue(freq_query, D3DISSUE_END);
-    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
-    for (i = 0; i < 500; ++i)
-    {
-        if ((hr = IDirect3DQuery9_GetData(freq_query, NULL, 0, D3DGETDATA_FLUSH)) != S_FALSE)
-            break;
-        Sleep(10);
-    }
-    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    wait_query(freq_query);
 
     memset(freq, 0xff, sizeof(freq));
     hr = IDirect3DQuery9_GetData(freq_query, freq, sizeof(DWORD), D3DGETDATA_FLUSH);
@@ -6235,13 +6205,8 @@ static void test_timestamp_query(void)
 
     hr = IDirect3DQuery9_Issue(query, D3DISSUE_END);
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
-    for (i = 0; i < 500; ++i)
-    {
-        if ((hr = IDirect3DQuery9_GetData(query, NULL, 0, D3DGETDATA_FLUSH)) != S_FALSE)
-            break;
-        Sleep(10);
-    }
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    wait_query(query);
 
     memset(timestamp, 0xff, sizeof(timestamp));
     hr = IDirect3DQuery9_GetData(query, timestamp, sizeof(DWORD), D3DGETDATA_FLUSH);
@@ -6259,13 +6224,8 @@ static void test_timestamp_query(void)
 
     hr = IDirect3DQuery9_Issue(disjoint_query, D3DISSUE_END);
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
-    for (i = 0; i < 500; ++i)
-    {
-        if ((hr = IDirect3DQuery9_GetData(disjoint_query, NULL, 0, D3DGETDATA_FLUSH)) != S_FALSE)
-            break;
-        Sleep(10);
-    }
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    wait_query(disjoint_query);
 
     memset(disjoint, 0xff, sizeof(disjoint));
     hr = IDirect3DQuery9_GetData(disjoint_query, disjoint, sizeof(WORD), D3DGETDATA_FLUSH);
@@ -6287,13 +6247,9 @@ static void test_timestamp_query(void)
 
     hr = IDirect3DQuery9_Issue(query, D3DISSUE_END);
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
-    for (i = 0; i < 500; ++i)
-    {
-        if ((hr = IDirect3DQuery9_GetData(query, NULL, 0, D3DGETDATA_FLUSH)) != S_FALSE)
-            break;
-        Sleep(10);
-    }
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    wait_query(query);
+
     hr = IDirect3DQuery9_GetData(query, timestamp, sizeof(timestamp), D3DGETDATA_FLUSH);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
 
@@ -12644,13 +12600,14 @@ static void test_device_caps(void)
             | D3DPMISCCAPS_MRTPOSTPIXELSHADERBLENDING | D3DPMISCCAPS_FOGVERTEXCLAMPED
             | D3DPMISCCAPS_POSTBLENDSRGBCONVERT)),
             "PrimitiveMiscCaps field has unexpected flags %#x.\n", caps.PrimitiveMiscCaps);
-    ok(!(caps.RasterCaps & ~(D3DPRASTERCAPS_DITHER | D3DPRASTERCAPS_PAT | D3DPRASTERCAPS_ZTEST
-            | D3DPRASTERCAPS_FOGVERTEX | D3DPRASTERCAPS_FOGTABLE | D3DPRASTERCAPS_ANTIALIASEDGES
-            | D3DPRASTERCAPS_MIPMAPLODBIAS | D3DPRASTERCAPS_ZBIAS | D3DPRASTERCAPS_ZBUFFERLESSHSR
+    ok(!(caps.RasterCaps & ~(D3DPRASTERCAPS_DITHER | D3DPRASTERCAPS_ZTEST
+            | D3DPRASTERCAPS_FOGVERTEX | D3DPRASTERCAPS_FOGTABLE
+            | D3DPRASTERCAPS_MIPMAPLODBIAS | D3DPRASTERCAPS_ZBUFFERLESSHSR
             | D3DPRASTERCAPS_FOGRANGE | D3DPRASTERCAPS_ANISOTROPY | D3DPRASTERCAPS_WBUFFER
             | D3DPRASTERCAPS_WFOG | D3DPRASTERCAPS_ZFOG | D3DPRASTERCAPS_COLORPERSPECTIVE
             | D3DPRASTERCAPS_SCISSORTEST | D3DPRASTERCAPS_SLOPESCALEDEPTHBIAS
-            | D3DPRASTERCAPS_DEPTHBIAS | D3DPRASTERCAPS_MULTISAMPLE_TOGGLE)),
+            | D3DPRASTERCAPS_DEPTHBIAS | D3DPRASTERCAPS_MULTISAMPLE_TOGGLE))
+            || broken(!(caps.RasterCaps & ~0x0f736191)),
             "RasterCaps field has unexpected flags %#x.\n", caps.RasterCaps);
     /* D3DPBLENDCAPS_SRCCOLOR2 and D3DPBLENDCAPS_INVSRCCOLOR2 are only
      * advertised on the reference rasterizer and WARP. */

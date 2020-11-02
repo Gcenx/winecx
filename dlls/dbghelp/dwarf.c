@@ -1116,7 +1116,7 @@ static BOOL dwarf2_read_one_debug_info(dwarf2_parse_context_t* ctx,
 
     if (abbrev->num_attr)
     {
-        di->data = pool_alloc(&ctx->pool, abbrev->num_attr * sizeof(const char*));
+        di->data = pool_alloc(&ctx->pool, abbrev->num_attr * sizeof(di->data[0]));
         for (i = 0, attr = abbrev->attrs; attr; i++, attr = attr->next)
         {
             di->data[i] = traverse->data;
@@ -1246,7 +1246,7 @@ static struct symt* dwarf2_parse_pointer_type(dwarf2_parse_context_t* ctx,
 
     TRACE("%s, for %s\n", dwarf2_debug_ctx(ctx), dwarf2_debug_di(di)); 
 
-    if (!dwarf2_find_attribute(ctx, di, DW_AT_byte_size, &size)) size.u.uvalue = sizeof(void *);
+    if (!dwarf2_find_attribute(ctx, di, DW_AT_byte_size, &size)) size.u.uvalue = sizeof(void * HOSTPTR);
     if (!(ref_type = dwarf2_lookup_type(ctx, di)))
     {
         ref_type = ctx->symt_cache[sc_void];
@@ -1358,7 +1358,7 @@ static struct symt* dwarf2_parse_unspecified_type(dwarf2_parse_context_t* ctx,
 
     if (!dwarf2_find_attribute(ctx, di, DW_AT_name, &name))
         name.u.string = "void";
-    size.u.uvalue = sizeof(void *);
+    size.u.uvalue = sizeof(void * HOSTPTR);
 
     basic = symt_new_basic(ctx->module, btVoid, name.u.string, size.u.uvalue);
     di->symt = &basic->symt;
@@ -1381,7 +1381,7 @@ static struct symt* dwarf2_parse_reference_type(dwarf2_parse_context_t* ctx,
 
     ref_type = dwarf2_lookup_type(ctx, di);
     /* FIXME: for now, we hard-wire C++ references to pointers */
-    di->symt = &symt_new_pointer(ctx->module, ref_type, sizeof(void *))->symt;
+    di->symt = &symt_new_pointer(ctx->module, ref_type, sizeof(void * HOSTPTR))->symt;
 
     if (dwarf2_get_di_children(ctx, di)) FIXME("Unsupported children\n");
 
@@ -2228,7 +2228,7 @@ static BOOL dwarf2_parse_line_numbers(const dwarf2_section_t* sections,
     opcode_len = traverse.data;
     traverse.data += opcode_base - 1;
 
-    vector_init(&dirs, sizeof(const char*), 4);
+    vector_init(&dirs, sizeof(const char* HOSTPTR), 4);
     p = vector_add(&dirs, &ctx->pool);
     *p = compile_dir ? compile_dir : ".";
     while (*traverse.data)
@@ -3517,7 +3517,9 @@ BOOL dwarf2_parse(struct module* module, unsigned long load_offset,
     BOOL                ret = TRUE;
     struct module_format* dwarf2_modfmt;
 
-    dwarf2_init_section(&eh_frame,                fmap, ".eh_frame",     NULL,             &eh_frame_sect);
+    if (!dwarf2_init_section(&eh_frame,                fmap, ".eh_frame",     NULL,             &eh_frame_sect))
+        /* lld produces .eh_fram to avoid generating a long name */
+        dwarf2_init_section(&eh_frame,                fmap, ".eh_fram",      NULL,             &eh_frame_sect);
     dwarf2_init_section(&section[section_debug],  fmap, ".debug_info",   ".zdebug_info",   &debug_sect);
     dwarf2_init_section(&section[section_abbrev], fmap, ".debug_abbrev", ".zdebug_abbrev", &debug_abbrev_sect);
     dwarf2_init_section(&section[section_string], fmap, ".debug_str",    ".zdebug_str",    &debug_str_sect);

@@ -134,11 +134,9 @@ static inline void close_semaphore( RTL_CRITICAL_SECTION *crit )
 
 #elif defined(__APPLE__)
 
-#define cpu_type_t mach_cpu_type_t
 #include <mach/mach.h>
 #include <mach/task.h>
 #include <mach/semaphore.h>
-#undef cpu_type_t
 
 static inline semaphore_t get_mach_semaphore( RTL_CRITICAL_SECTION *crit )
 {
@@ -239,12 +237,9 @@ static inline NTSTATUS wait_semaphore( RTL_CRITICAL_SECTION *crit, int timeout )
     {
         HANDLE sem = get_semaphore( crit );
         LARGE_INTEGER time;
-        select_op_t select_op;
 
         time.QuadPart = timeout * (LONGLONG)-10000000;
-        select_op.wait.op = SELECT_WAIT;
-        select_op.wait.handles[0] = wine_server_obj_handle( sem );
-        ret = server_select( &select_op, offsetof( select_op_t, wait.handles[1] ), 0, &time );
+        ret = NtWaitForSingleObject( sem, FALSE, &time );
     }
     return ret;
 }

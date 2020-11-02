@@ -3271,13 +3271,25 @@ static void clean_sxs_info(sxs_info *info)
     if (info->handle_context)
         ReleaseActCtx(info->handle_context);
     if (*info->path_dll)
-        ok(DeleteFileA(info->path_dll), "DeleteFileA failed for %s: %d\n", info->path_dll, GetLastError());
+    {
+        BOOL ret = DeleteFileA(info->path_dll);
+        ok(ret, "DeleteFileA failed for %s: %d\n", info->path_dll, GetLastError());
+    }
     if (*info->path_manifest_exe)
-        ok(DeleteFileA(info->path_manifest_exe), "DeleteFileA failed for %s: %d\n", info->path_manifest_exe, GetLastError());
+    {
+        BOOL ret = DeleteFileA(info->path_manifest_exe);
+        ok(ret, "DeleteFileA failed for %s: %d\n", info->path_manifest_exe, GetLastError());
+    }
     if (*info->path_manifest_dll)
-        ok(DeleteFileA(info->path_manifest_dll), "DeleteFileA failed for %s: %d\n", info->path_manifest_dll, GetLastError());
+    {
+        BOOL ret = DeleteFileA(info->path_manifest_dll);
+        ok(ret, "DeleteFileA failed for %s: %d\n", info->path_manifest_dll, GetLastError());
+    }
     if (*info->path_tmp)
-        ok(RemoveDirectoryA(info->path_tmp), "RemoveDirectoryA failed for %s: %d\n", info->path_tmp, GetLastError());
+    {
+        BOOL ret = RemoveDirectoryA(info->path_tmp);
+        ok(ret, "RemoveDirectoryA failed for %s: %d\n", info->path_tmp, GetLastError());
+    }
 }
 
 static void get_application_directory(char *buffer, int buffer_size)
@@ -3296,9 +3308,9 @@ static void test_two_dlls_at_same_time(void)
     char path1[MAX_PATH], path2[MAX_PATH];
 
     if (!fill_sxs_info(&dll_1, "1", "dummy.dll", two_dll_manifest_exe, two_dll_manifest_dll, TRUE))
-        goto cleanup;
+        goto cleanup1;
     if (!fill_sxs_info(&dll_2, "2", "dummy.dll", two_dll_manifest_exe, two_dll_manifest_dll, TRUE))
-        goto cleanup;
+        goto cleanup2;
 
     ok(dll_1.module != dll_2.module, "Libraries are the same\n");
     dll_1.get_path(path1, sizeof(path1));
@@ -3306,13 +3318,14 @@ static void test_two_dlls_at_same_time(void)
     dll_2.get_path(path2, sizeof(path2));
     ok(strcmp(path2, dll_2.path_dll) == 0, "Got '%s', expected '%s'\n", path2, dll_2.path_dll);
 
-cleanup:
-    if (dll_1.module)
-        FreeLibrary(dll_1.module);
+cleanup2:
     if (dll_2.module)
         FreeLibrary(dll_2.module);
-    clean_sxs_info(&dll_1);
     clean_sxs_info(&dll_2);
+cleanup1:
+    if (dll_1.module)
+        FreeLibrary(dll_1.module);
+    clean_sxs_info(&dll_1);
 }
 
 /* Test loading a normal dll and then a sxs dll with the same name */
@@ -3348,7 +3361,10 @@ cleanup:
     if (dll.module)
         FreeLibrary(dll.module);
     if (*path_dll_local)
-        ok(DeleteFileA(path_dll_local), "DeleteFileA failed for %s: %d\n", path_dll_local, GetLastError());
+    {
+        BOOL success = DeleteFileA(path_dll_local);
+        ok(success, "DeleteFileA failed for %s: %d\n", path_dll_local, GetLastError());
+    }
     clean_sxs_info(&dll);
 }
 
@@ -3385,7 +3401,10 @@ cleanup:
     if (dll.module)
         FreeLibrary(dll.module);
     if (*path_dll_local)
-        ok(DeleteFileA(path_dll_local), "DeleteFileA failed for %s: %d\n", path_dll_local, GetLastError());
+    {
+        BOOL success = DeleteFileA(path_dll_local);
+        ok(success, "DeleteFileA failed for %s: %d\n", path_dll_local, GetLastError());
+    }
     clean_sxs_info(&dll);
 }
 
@@ -3423,7 +3442,10 @@ cleanup:
     if (dll.module)
         FreeLibrary(dll.module);
     if (*path_dll_local)
-        ok(DeleteFileA(path_dll_local), "DeleteFileA failed for %s: %d\n", path_dll_local, GetLastError());
+    {
+        success = DeleteFileA(path_dll_local);
+        ok(success, "DeleteFileA failed for %s: %d\n", path_dll_local, GetLastError());
+    }
     clean_sxs_info(&dll);
 }
 
@@ -3486,7 +3508,10 @@ cleanup:
     if (module_msvcr)
         FreeLibrary(module_msvcr);
     if (*path_manifest)
-        ok(DeleteFileA(path_manifest), "DeleteFileA failed for %s: %d\n", path_manifest, GetLastError());
+    {
+        success = DeleteFileA(path_manifest);
+        ok(success, "DeleteFileA failed for %s: %d\n", path_manifest, GetLastError());
+    }
 }
 
 static void run_sxs_test(int run)

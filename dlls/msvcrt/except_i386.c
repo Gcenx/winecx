@@ -96,11 +96,21 @@ typedef struct __cxx_function_descr
     UINT                 flags;          /* flags when magic >= VC8 */
 } cxx_function_descr;
 
+/* exception frame for nested exceptions in catch block */
+typedef struct
+{
+    EXCEPTION_REGISTRATION_RECORD frame;     /* standard exception frame */
+    cxx_exception_frame          *cxx_frame; /* frame of parent exception */
+    const cxx_function_descr     *descr;     /* descriptor of parent exception */
+    int                           trylevel;  /* current try level */
+    cxx_frame_info                frame_info;
+} catch_func_nested_frame;
+
 typedef struct
 {
     cxx_exception_frame *frame;
     const cxx_function_descr *descr;
-    EXCEPTION_REGISTRATION_RECORD *nested_frame;
+    catch_func_nested_frame *nested_frame;
 } se_translator_ctx;
 
 typedef struct _SCOPETABLE
@@ -135,7 +145,7 @@ typedef struct
 DWORD CDECL cxx_frame_handler( PEXCEPTION_RECORD rec, cxx_exception_frame* frame,
                                PCONTEXT context, EXCEPTION_REGISTRATION_RECORD** dispatch,
                                const cxx_function_descr *descr,
-                               EXCEPTION_REGISTRATION_RECORD* nested_frame, int nested_trylevel ) DECLSPEC_HIDDEN;
+                               catch_func_nested_frame* nested_frame ) DECLSPEC_HIDDEN;
 
 #ifdef __i386_on_x86_64__
 /* call a copy constructor */
@@ -390,21 +400,11 @@ static void cxx_local_unwind( cxx_exception_frame* frame, const cxx_function_des
     frame->trylevel = last_level;
 }
 
-/* exception frame for nested exceptions in catch block */
-struct catch_func_nested_frame
-{
-    EXCEPTION_REGISTRATION_RECORD frame;     /* standard exception frame */
-    cxx_exception_frame          *cxx_frame; /* frame of parent exception */
-    const cxx_function_descr     *descr;     /* descriptor of parent exception */
-    int                           trylevel;  /* current try level */
-    cxx_frame_info                frame_info;
-};
-
 /* handler for exceptions happening while calling a catch function */
 static DWORD CDECL catch_function_nested_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
                                                   CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
 {
-    struct catch_func_nested_frame *nested_frame = (struct catch_func_nested_frame *)frame;
+    catch_func_nested_frame *nested_frame = (catch_func_nested_frame *)frame;
 
     if (rec->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND))
     {
@@ -429,7 +429,7 @@ static DWORD CDECL catch_function_nested_handler( EXCEPTION_RECORD *rec, EXCEPTI
             if(TRACE_ON(seh)) {
                 TRACE("detect rethrow: exception code: %x\n", rec->ExceptionCode);
                 if(rec->ExceptionCode == CXX_EXCEPTION)
-                    TRACE("re-propage: obj: %lx, type: %lx\n",
+                    TRACE("re-propagate: obj: %lx, type: %lx\n",
                             rec->ExceptionInformation[1], rec->ExceptionInformation[2]);
             }
         }
@@ -440,22 +440,21 @@ static DWORD CDECL catch_function_nested_handler( EXCEPTION_RECORD *rec, EXCEPTI
     }
 
     return cxx_frame_handler( rec, nested_frame->cxx_frame, context,
-                              NULL, nested_frame->descr, &nested_frame->frame,
-                              nested_frame->trylevel );
+                              NULL, nested_frame->descr, nested_frame );
 }
 
 /* find and call the appropriate catch block for an exception */
 /* returns the address to continue execution to after the catch block was called */
 static inline void call_catch_block( PEXCEPTION_RECORD rec, CONTEXT *context,
                                      cxx_exception_frame *frame,
-                                     const cxx_function_descr *descr, int nested_trylevel,
-                                     EXCEPTION_REGISTRATION_RECORD *catch_frame,
+                                     const cxx_function_descr *descr,
+                                     catch_func_nested_frame *catch_frame,
                                      cxx_exception_type *info )
 {
     UINT i;
     int j;
     void *addr, *object = (void *)rec->ExceptionInformation[1];
-    struct catch_func_nested_frame nested_frame;
+    catch_func_nested_frame nested_frame;
     int trylevel = frame->trylevel;
     DWORD save_esp = ((DWORD*)frame)[-1];
     thread_data_t *data = msvcrt_get_thread_data();
@@ -466,7 +465,7 @@ static inline void call_catch_block( PEXCEPTION_RECORD rec, CONTEXT *context,
         const tryblock_info *tryblock = &descr->tryblock[i];
 
         /* only handle try blocks inside current catch block */
-        if (catch_frame && nested_trylevel > tryblock->start_level) continue;
+        if (catch_frame && catch_frame->trylevel > tryblock->start_level) continue;
 
         if (trylevel < tryblock->start_level) continue;
         if (trylevel > tryblock->end_level) continue;
@@ -499,7 +498,7 @@ static inline void call_catch_block( PEXCEPTION_RECORD rec, CONTEXT *context,
                     (void*)rec->ExceptionInformation[1]);
 
             /* unwind the stack */
-            RtlUnwind( catch_frame ? catch_frame : &frame->frame, 0, rec, 0 );
+            RtlUnwind( catch_frame ? &catch_frame->frame : &frame->frame, 0, rec, 0 );
             cxx_local_unwind( frame, descr, tryblock->start_level );
             frame->trylevel = tryblock->end_level + 1;
 
@@ -517,7 +516,7 @@ static inline void call_catch_block( PEXCEPTION_RECORD rec, CONTEXT *context,
             nested_frame.frame.Handler = catch_function_nested_handler;
             nested_frame.cxx_frame = frame;
             nested_frame.descr     = descr;
-            nested_frame.trylevel  = nested_trylevel + 1;
+            nested_frame.trylevel  = tryblock->end_level + 1;
 
             __wine_push_frame( &nested_frame.frame );
             addr = call_handler( catchblock->handler, &frame->ebp );
@@ -604,7 +603,7 @@ static LONG CALLBACK se_translation_filter( EXCEPTION_POINTERS *ep, void *c )
 
     exc_type = (cxx_exception_type *)rec->ExceptionInformation[2];
     call_catch_block( rec, ep->ContextRecord, ctx->frame, ctx->descr,
-            ctx->frame->trylevel, ctx->nested_frame, exc_type );
+            ctx->nested_frame, exc_type );
 
     __DestructExceptionObject( rec );
     return ExceptionContinueSearch;
@@ -618,8 +617,7 @@ static LONG CALLBACK se_translation_filter( EXCEPTION_POINTERS *ep, void *c )
 DWORD CDECL cxx_frame_handler( PEXCEPTION_RECORD rec, cxx_exception_frame* frame,
                                PCONTEXT context, EXCEPTION_REGISTRATION_RECORD** dispatch,
                                const cxx_function_descr *descr,
-                               EXCEPTION_REGISTRATION_RECORD* nested_frame,
-                               int nested_trylevel )
+                               catch_func_nested_frame* nested_frame )
 {
     cxx_exception_type *exc_type;
 
@@ -635,7 +633,7 @@ DWORD CDECL cxx_frame_handler( PEXCEPTION_RECORD rec, cxx_exception_frame* frame
 
     if (rec->ExceptionFlags & (EH_UNWINDING|EH_EXIT_UNWIND))
     {
-        if (descr->unwind_count && !nested_trylevel) cxx_local_unwind( frame, descr, -1 );
+        if (descr->unwind_count && !nested_frame) cxx_local_unwind( frame, descr, -1 );
         return ExceptionContinueSearch;
     }
     if (!descr->tryblock_count) return ExceptionContinueSearch;
@@ -648,7 +646,7 @@ DWORD CDECL cxx_frame_handler( PEXCEPTION_RECORD rec, cxx_exception_frame* frame
         if(TRACE_ON(seh)) {
             TRACE("detect rethrow: exception code: %x\n", rec->ExceptionCode);
             if(rec->ExceptionCode == CXX_EXCEPTION)
-                TRACE("re-propage: obj: %lx, type: %lx\n",
+                TRACE("re-propagate: obj: %lx, type: %lx\n",
                         rec->ExceptionInformation[1], rec->ExceptionInformation[2]);
         }
     }
@@ -660,8 +658,9 @@ DWORD CDECL cxx_frame_handler( PEXCEPTION_RECORD rec, cxx_exception_frame* frame
         if (rec->ExceptionInformation[0] > CXX_FRAME_MAGIC_VC8 &&
                 exc_type->custom_handler)
         {
-            return exc_type->custom_handler( rec, frame, context, dispatch,
-                                         descr, nested_trylevel, nested_frame, 0 );
+            return exc_type->custom_handler( rec, frame, context, dispatch, descr,
+                                         nested_frame ? nested_frame->trylevel : 0,
+                                         nested_frame ? &nested_frame->frame : NULL, 0 );
         }
 
         if (TRACE_ON(seh))
@@ -701,7 +700,7 @@ DWORD CDECL cxx_frame_handler( PEXCEPTION_RECORD rec, cxx_exception_frame* frame
     }
 
     call_catch_block( rec, context, frame, descr,
-            frame->trylevel, nested_frame, exc_type );
+            nested_frame, exc_type );
     return ExceptionContinueSearch;
 }
 
@@ -713,43 +712,39 @@ extern DWORD CDECL __CxxFrameHandler( PEXCEPTION_RECORD rec, EXCEPTION_REGISTRAT
                                       PCONTEXT context, EXCEPTION_REGISTRATION_RECORD** dispatch );
 #ifdef __i386_on_x86_64__
 __ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(__CxxFrameHandler),
-                     "pushl $0\n\t"        /* nested_trylevel */
-                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
                      "pushl $0\n\t"        /* nested_frame */
                      __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
                      "pushl %eax\n\t"      /* descr */
                      __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                     "pushl 28(%esp)\n\t"  /* dispatch */
+                     "pushl 24(%esp)\n\t"  /* dispatch */
                      __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                     "pushl 28(%esp)\n\t"  /* context */
+                     "pushl 24(%esp)\n\t"  /* context */
                      __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                     "pushl 28(%esp)\n\t"  /* frame */
+                     "pushl 24(%esp)\n\t"  /* frame */
                      __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                     "pushl 28(%esp)\n\t"  /* rec */
+                     "pushl 24(%esp)\n\t"  /* rec */
                      __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
                      "call " __ASM_THUNK_SYMBOL("cxx_frame_handler") "\n\t"
-                     "add $28,%esp\n\t"
-                     __ASM_CFI(".cfi_adjust_cfa_offset -28\n\t")
+                     "add $24,%esp\n\t"
+                     __ASM_CFI(".cfi_adjust_cfa_offset -24\n\t")
                      "ret" )
 #else
 __ASM_GLOBAL_FUNC( __CxxFrameHandler,
-                   "pushl $0\n\t"        /* nested_trylevel */
-                   __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
                    "pushl $0\n\t"        /* nested_frame */
                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
                    "pushl %eax\n\t"      /* descr */
                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                   "pushl 28(%esp)\n\t"  /* dispatch */
+                   "pushl 24(%esp)\n\t"  /* dispatch */
                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                   "pushl 28(%esp)\n\t"  /* context */
+                   "pushl 24(%esp)\n\t"  /* context */
                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                   "pushl 28(%esp)\n\t"  /* frame */
+                   "pushl 24(%esp)\n\t"  /* frame */
                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                   "pushl 28(%esp)\n\t"  /* rec */
+                   "pushl 24(%esp)\n\t"  /* rec */
                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
                    "call " __ASM_NAME("cxx_frame_handler") "\n\t"
-                   "add $28,%esp\n\t"
-                   __ASM_CFI(".cfi_adjust_cfa_offset -28\n\t")
+                   "add $24,%esp\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset -24\n\t")
                    "ret" )
 #endif
 

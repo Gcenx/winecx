@@ -125,7 +125,7 @@ static void test_EnumProcessModules(void)
     ret = CreateProcessA(NULL, buffer, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
     ok(ret, "CreateProcess failed: %u\n", GetLastError());
 
-    ret = WaitForInputIdle(pi.hProcess, 1000);
+    ret = WaitForInputIdle(pi.hProcess, 5000);
     ok(!ret, "wait timed out\n");
 
     SetLastError(0xdeadbeef);
@@ -146,7 +146,7 @@ static void test_EnumProcessModules(void)
         ret = CreateProcessA(NULL, buffer, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
         ok(ret, "CreateProcess failed: %u\n", GetLastError());
 
-        ret = WaitForInputIdle(pi.hProcess, 1000);
+        ret = WaitForInputIdle(pi.hProcess, 5000);
         ok(!ret, "wait timed out\n");
 
         SetLastError(0xdeadbeef);
@@ -180,7 +180,7 @@ todo_wine
         pWow64RevertWow64FsRedirection(cookie);
         ok(ret, "CreateProcess failed: %u\n", GetLastError());
 
-        ret = WaitForInputIdle(pi.hProcess, 1000);
+        ret = WaitForInputIdle(pi.hProcess, 5000);
         ok(!ret, "wait timed out\n");
 
         SetLastError(0xdeadbeef);
@@ -271,7 +271,7 @@ static void test_GetPerformanceInfo(void)
         ok(ret, "GetPerformanceInfo failed with %d\n", GetLastError());
         ok(info.cb == sizeof(PERFORMANCE_INFORMATION), "got %d\n", info.cb);
 
-        ok(check_with_margin(info.CommitTotal,          sys_performance_info->TotalCommittedPages,  288),
+        ok(check_with_margin(info.CommitTotal,          sys_performance_info->TotalCommittedPages,  2048),
            "expected approximately %ld but got %d\n", info.CommitTotal, sys_performance_info->TotalCommittedPages);
 
         ok(check_with_margin(info.CommitLimit,          sys_performance_info->TotalCommitLimit,     32),
@@ -280,7 +280,7 @@ static void test_GetPerformanceInfo(void)
         ok(check_with_margin(info.CommitPeak,           sys_performance_info->PeakCommitment,       32),
            "expected approximately %ld but got %d\n", info.CommitPeak, sys_performance_info->PeakCommitment);
 
-        ok(check_with_margin(info.PhysicalAvailable,    sys_performance_info->AvailablePages,       512),
+        ok(check_with_margin(info.PhysicalAvailable,    sys_performance_info->AvailablePages,       2048),
            "expected approximately %ld but got %d\n", info.PhysicalAvailable, sys_performance_info->AvailablePages);
 
         /* TODO: info.SystemCache not checked yet - to which field(s) does this value correspond to? */
@@ -334,7 +334,7 @@ static void test_GetPerformanceInfo(void)
         }
         HeapFree(GetProcessHeap(), 0, sys_process_info);
 
-        ok(check_with_margin(info.HandleCount,  handle_count,  256),
+        ok(check_with_margin(info.HandleCount,  handle_count,  512),
            "expected approximately %d but got %d\n", info.HandleCount, handle_count);
 
         ok(check_with_margin(info.ProcessCount, process_count, 4),
@@ -736,7 +736,6 @@ static void test_GetModuleBaseName(void)
 static void test_ws_functions(void)
 {
     PSAPI_WS_WATCH_INFORMATION wswi[4096];
-    ULONG_PTR pages[4096];
     HANDLE ws_handle;
     char *addr;
     unsigned int i;
@@ -785,22 +784,6 @@ static void test_ws_functions(void)
         goto free_page;
     }
 
-    SetLastError(0xdeadbeef);
-    ret = QueryWorkingSet(hpQI, pages, 4096 * sizeof(ULONG_PTR));
-    todo_wine ok(ret == 1, "failed with %d\n", GetLastError());
-    if(ret == 1)
-    {
-       for(i = 0; i < pages[0]; i++)
-           if((pages[i+1] & ~0xfffL) == (ULONG_PTR)addr)
-	   {
-	       todo_wine ok(ret == 1, "QueryWorkingSet found our page\n");
-	       goto test_gwsc;
-	   }
-       
-       todo_wine ok(0, "QueryWorkingSet didn't find our page\n");
-    }
-
-test_gwsc:
     SetLastError(0xdeadbeef);
     ret = GetWsChanges(hpQI, wswi, sizeof(wswi));
     todo_wine ok(ret == 1, "failed with %d\n", GetLastError());

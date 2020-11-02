@@ -22,7 +22,7 @@
 
 #include "wine/winheader_enter.h"
 
-#include <crtdefs.h>
+#include <corecrt.h>
 
 #include <pshpack8.h>
 

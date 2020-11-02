@@ -139,7 +139,7 @@ struct shader_glsl_priv
     UINT next_constant_version;
 
     const struct wined3d_vertex_pipe_ops *vertex_pipe;
-    const struct fragment_pipeline *fragment_pipe;
+    const struct wined3d_fragment_pipe_ops *fragment_pipe;
     struct wine_rb_tree ffp_vertex_shaders;
     struct wine_rb_tree ffp_fragment_shaders;
     BOOL ffp_proj_control;
@@ -355,7 +355,7 @@ struct glsl_ffp_fragment_shader
 struct glsl_ffp_destroy_ctx
 {
     struct shader_glsl_priv *priv;
-    const struct wined3d_context *context;
+    const struct wined3d_context_gl *context_gl;
 };
 
 static void shader_glsl_generate_shader_epilogue(const struct wined3d_shader_context *ctx);
@@ -421,6 +421,14 @@ static void shader_glsl_add_version_declaration(struct wined3d_string_buffer *bu
         const struct wined3d_gl_info *gl_info)
 {
     shader_addline(buffer, "#version %u\n", shader_glsl_get_version(gl_info));
+}
+
+unsigned int shader_glsl_full_ffp_varyings(const struct wined3d_gl_info *gl_info)
+{
+    /* On core profile we have to also count diffuse and specular colours and
+     * the fog coordinate. */
+    return gl_info->limits.glsl_varyings >= (gl_info->supported[WINED3D_GL_LEGACY_CONTEXT]
+            ? WINED3D_MAX_TEXTURES * 4 : (WINED3D_MAX_TEXTURES + 2) * 4 + 1);
 }
 
 static void shader_glsl_append_imm_vec(struct wined3d_string_buffer *buffer,
@@ -742,7 +750,7 @@ static void shader_glsl_load_samplers(const struct wined3d_context *context,
         struct shader_glsl_priv *priv, GLuint program_id, const struct wined3d_shader_reg_maps *reg_maps)
 {
     const struct wined3d_context_gl *context_gl = wined3d_context_gl_const(context);
-    const struct wined3d_gl_info *gl_info = context->gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     const struct wined3d_shader_version *shader_version;
     const unsigned int *tex_unit_map;
     unsigned int base, count;
@@ -813,8 +821,8 @@ static void shader_glsl_load_program_resources(const struct wined3d_context_gl *
 {
     const struct wined3d_shader_reg_maps *reg_maps = &shader->reg_maps;
 
-    shader_glsl_init_uniform_block_bindings(context_gl->c.gl_info, priv, program_id, reg_maps);
-    shader_glsl_load_icb(context_gl->c.gl_info, priv, program_id, reg_maps);
+    shader_glsl_init_uniform_block_bindings(context_gl->gl_info, priv, program_id, reg_maps);
+    shader_glsl_load_icb(context_gl->gl_info, priv, program_id, reg_maps);
     /* Texture unit mapping is set up to be the same each time the shader
      * program is used so we can hardcode the sampler uniform values. */
     shader_glsl_load_samplers(&context_gl->c, priv, program_id, reg_maps);
@@ -951,7 +959,7 @@ static void shader_glsl_init_transform_feedback(const struct wined3d_context_gl 
         struct shader_glsl_priv *priv, GLuint program_id, struct wined3d_shader *shader)
 {
     const struct wined3d_stream_output_desc *so_desc = &shader->u.gs.so_desc;
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_string_buffer *buffer;
     unsigned int i, count, length;
     const char *WINED3DPTR *varyings;
@@ -1320,7 +1328,7 @@ static void transpose_matrix(struct wined3d_matrix *out, const struct wined3d_ma
 static void shader_glsl_ffp_vertex_normalmatrix_uniform(const struct wined3d_context_gl *context_gl,
         const struct wined3d_state *state, struct glsl_shader_prog_link *prog)
 {
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_matrix mv;
     float mat[3 * 3];
 
@@ -1337,7 +1345,7 @@ static void shader_glsl_ffp_vertex_normalmatrix_uniform(const struct wined3d_con
 static void shader_glsl_ffp_vertex_texmatrix_uniform(const struct wined3d_context_gl *context_gl,
         const struct wined3d_state *state, unsigned int tex, struct glsl_shader_prog_link *prog)
 {
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_matrix mat;
 
     if (tex >= WINED3D_MAX_TEXTURES)
@@ -1353,7 +1361,7 @@ static void shader_glsl_ffp_vertex_texmatrix_uniform(const struct wined3d_contex
 static void shader_glsl_ffp_vertex_material_uniform(const struct wined3d_context_gl *context_gl,
         const struct wined3d_state *state, struct glsl_shader_prog_link *prog)
 {
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
 
     if (state->render_states[WINED3D_RS_SPECULARENABLE])
     {
@@ -1375,7 +1383,7 @@ static void shader_glsl_ffp_vertex_material_uniform(const struct wined3d_context
 static void shader_glsl_ffp_vertex_lightambient_uniform(const struct wined3d_context_gl *context_gl,
         const struct wined3d_state *state, struct glsl_shader_prog_link *prog)
 {
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_color color;
 
     wined3d_color_from_d3dcolor(&color, state->render_states[WINED3D_RS_AMBIENT]);
@@ -1388,7 +1396,7 @@ static void shader_glsl_ffp_vertex_light_uniform(const struct wined3d_context_gl
         struct glsl_shader_prog_link *prog)
 {
     const struct wined3d_matrix *view = &state->transforms[WINED3D_TS_VIEW];
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_vec4 vec4;
 
     GL_EXTCALL(glUniform4fv(prog->vs.light_location[light].diffuse, 1, &light_info->OriginalParms.diffuse.r));
@@ -1441,9 +1449,9 @@ static void shader_glsl_ffp_vertex_light_uniform(const struct wined3d_context_gl
 static void shader_glsl_pointsize_uniform(const struct wined3d_context_gl *context_gl,
         const struct wined3d_state *state, struct glsl_shader_prog_link *prog)
 {
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
-    float min, max;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     float size, att[3];
+    float min, max;
 
     get_pointsize_minmax(&context_gl->c, state, &min, &max);
 
@@ -1467,7 +1475,7 @@ static void shader_glsl_pointsize_uniform(const struct wined3d_context_gl *conte
 static void shader_glsl_load_fog_uniform(const struct wined3d_context_gl *context_gl,
         const struct wined3d_state *state, struct glsl_shader_prog_link *prog)
 {
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_color color;
     float start, end, scale;
     union
@@ -1490,7 +1498,7 @@ static void shader_glsl_load_fog_uniform(const struct wined3d_context_gl *contex
 static void shader_glsl_clip_plane_uniform(const struct wined3d_context_gl *context_gl,
         const struct wined3d_state *state, unsigned int index, struct glsl_shader_prog_link *prog)
 {
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_matrix matrix;
     struct wined3d_vec4 plane;
 
@@ -1538,7 +1546,7 @@ static void shader_glsl_load_constants(void *shader_priv, struct wined3d_context
     const struct glsl_context_data *ctx_data = context->shader_backend_data;
     struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
     struct glsl_shader_prog_link *prog = ctx_data->glsl_program;
-    const struct wined3d_gl_info *gl_info = context->gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     float position_fixup[4 * WINED3D_MAX_VIEWPORTS];
     struct shader_glsl_priv *priv = shader_priv;
     unsigned int constant_version;
@@ -1999,6 +2007,14 @@ static void shader_glsl_declare_shader_inputs(const struct wined3d_gl_info *gl_i
     }
 }
 
+static BOOL needs_interpolation_qualifiers_for_shader_outputs(const struct wined3d_gl_info *gl_info)
+{
+    /* In GLSL 4.40+ it is fine to specify interpolation qualifiers only in
+     * fragment shaders. In older GLSL versions interpolation qualifiers must
+     * match between shader stages. */
+    return gl_info->glsl_version < MAKEDWORD_VERSION(4, 40);
+}
+
 static void shader_glsl_declare_shader_outputs(const struct wined3d_gl_info *gl_info,
         struct wined3d_string_buffer *buffer, unsigned int element_count, BOOL rasterizer_setup,
         const DWORD *interpolation_mode)
@@ -2034,9 +2050,17 @@ static void shader_glsl_declare_shader_outputs(const struct wined3d_gl_info *gl_
     }
 }
 
+static BOOL use_legacy_fragment_output(const struct wined3d_gl_info *gl_info)
+{
+    /* Technically 1.30 does support user-defined fragment shader outputs but
+     * we might not have glBindFragDataLocation() available (i.e. GL version
+     * might be < 3.0). */
+    return gl_info->glsl_version <= MAKEDWORD_VERSION(1, 30);
+}
+
 static const char *get_fragment_output(const struct wined3d_gl_info *gl_info)
 {
-    return needs_legacy_glsl_syntax(gl_info) ? "gl_FragData" : "ps_out";
+    return use_legacy_fragment_output(gl_info) ? "gl_FragData" : "ps_out";
 }
 
 static const char *glsl_primitive_type_from_d3d(enum wined3d_primitive_type primitive_type)
@@ -2161,7 +2185,7 @@ static void shader_generate_glsl_declarations(const struct wined3d_context_gl *c
     const struct wined3d_shader_version *version = &reg_maps->shader_version;
     const struct vs_compile_args *vs_args = ctx_priv->cur_vs_args;
     const struct ps_compile_args *ps_args = ctx_priv->cur_ps_args;
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     const struct wined3d_shader_indexable_temp *idx_temp_reg;
     unsigned int uniform_block_base, uniform_block_count;
     enum wined3d_shader_resource_type resource_type;
@@ -6038,7 +6062,7 @@ static void shader_glsl_sample(const struct wined3d_shader_instruction *ins)
  * comparison for array textures and cube textures. We use textureGrad*()
  * to implement sample_c_lz.
  */
-static void shader_glsl_gen_sample_c_lz(const struct wined3d_shader_instruction *ins,
+static void shader_glsl_gen_sample_c_lz_emulation(const struct wined3d_shader_instruction *ins,
         unsigned int sampler_bind_idx, const struct glsl_sample_function *sample_function,
         unsigned int coord_size, const char *coord_param, const char *ref_param)
 {
@@ -6067,6 +6091,7 @@ static void shader_glsl_gen_sample_c_lz(const struct wined3d_shader_instruction 
 
 static void shader_glsl_sample_c(const struct wined3d_shader_instruction *ins)
 {
+    const struct wined3d_gl_info *gl_info = ins->ctx->gl_info;
     unsigned int resource_idx, sampler_idx, sampler_bind_idx;
     const struct wined3d_shader_resource_info *resource_info;
     struct glsl_src_param coord_param, compare_param;
@@ -6095,10 +6120,11 @@ static void shader_glsl_sample_c(const struct wined3d_shader_instruction *ins)
     shader_glsl_add_src_param(ins, &ins->src[3], WINED3DSP_WRITEMASK_0, &compare_param);
     sampler_bind_idx = shader_glsl_find_sampler(&ins->ctx->reg_maps->sampler_map, resource_idx, sampler_idx);
     if (ins->handler_idx == WINED3DSIH_SAMPLE_C_LZ
+            && !gl_info->supported[EXT_TEXTURE_SHADOW_LOD]
             && (resource_info->type == WINED3D_SHADER_RESOURCE_TEXTURE_2DARRAY
             || resource_info->type == WINED3D_SHADER_RESOURCE_TEXTURE_CUBE))
     {
-        shader_glsl_gen_sample_c_lz(ins, sampler_bind_idx, &sample_function,
+        shader_glsl_gen_sample_c_lz_emulation(ins, sampler_bind_idx, &sample_function,
                 coord_size, coord_param.param_str, compare_param.param_str);
     }
     else
@@ -6778,24 +6804,6 @@ static void shader_glsl_input_pack(const struct wined3d_shader *shader, struct w
     }
 }
 
-static DWORD find_clipplanes(const struct wined3d_context *context,
-                             const struct wined3d_state *state,
-                             const struct wined3d_gl_info *gl_info,
-                             const struct wined3d_d3d_info *d3d_info )
-{
-    /* If HW clipping is used, no clipplane emulation */
-    if (!(gl_info->quirks & WINED3D_CX_QUIRK_GLSL_CLIP_BROKEN)) return 0;
-    /* If clipping is disabled, no clipplanes are needed */
-    if (!state->render_states[WINED3D_RS_CLIPPING]) return 0;
-    /* With pixelshaders, emulate all enabled clipplanes(disabled per shader
-     * if no free texcoord is found. */
-    if (use_ps(state)) return state->render_states[WINED3D_RS_CLIPPLANEENABLE];
-    /* With FFP, if all texcoords are used, don't emulate clipplanes */
-    if (context->lowest_disabled_stage >= d3d_info->limits.ffp_blend_stages) return 0;
-    /* Otherwise(FFP with highest texcoord free) emulate all enabled planes */
-    return state->render_states[WINED3D_RS_CLIPPLANEENABLE];
-}
-
 static void add_glsl_program_entry(struct shader_glsl_priv *priv, struct glsl_shader_prog_link *entry)
 {
     struct glsl_program_key key;
@@ -6951,11 +6959,11 @@ static void shader_glsl_setup_vs3_output(struct shader_glsl_priv *priv,
 
 static void glsl_gen_clipplane_emul(const struct wined3d_shader *ps, struct wined3d_string_buffer *buffer,
         const struct wined3d_gl_info *gl_info, const struct wined3d_d3d_info *d3d_info,
-        DWORD enabled_clipplanes)
+        DWORD enabled_clipplanes, const char *clip_pos)
 {
     BOOL legacy_context = gl_info->supported[WINED3D_GL_LEGACY_CONTEXT];
     const char *clip_varying = legacy_context ? "gl_TexCoord" : !ps || ps->reg_maps.shader_version.major < 3
-            ? "ffp_varying_texcoord" : "ps_link";
+            ? "ffp_varying_texcoord" : "shader_out.reg";
     DWORD clip_coord = 0;
 
     /* Generate a clipplane emulation texcoord if native clipplanes are broken */
@@ -6977,7 +6985,7 @@ static void glsl_gen_clipplane_emul(const struct wined3d_shader *ps, struct wine
         shader_addline(buffer, "%s[%u] = vec4(1.0);\n", clip_varying, clip_coord - 1);
         if(enabled_clipplanes)
         {
-            shader_addline(buffer, "vec4 ClipCoord = gl_Position;\n");
+            shader_addline(buffer, "vec4 ClipCoord = %s;\n", clip_pos);
             shader_addline(buffer, "ClipCoord.xy += pos_fixup.zw * ClipCoord.ww;\n");
             for(i = 0; i < gl_info->limits.user_clip_distances; i++)
             {
@@ -7127,7 +7135,7 @@ static void shader_glsl_setup_sm3_rasterizer_input(struct shader_glsl_priv *priv
 static GLuint shader_glsl_generate_vs3_rasterizer_input_setup(struct shader_glsl_priv *priv,
         const struct wined3d_shader *vs, const struct wined3d_shader *ps,
         BOOL per_vertex_point_size, BOOL flatshading, const struct wined3d_gl_info *gl_info,
-        const struct wined3d_d3d_info *d3d_info, DWORD enabled_clipplanes)
+        const struct wined3d_d3d_info *d3d_info, DWORD emulated_clipplanes)
 {
     const BOOL legacy_syntax = needs_legacy_glsl_syntax(gl_info);
     DWORD ps_major = ps ? ps->reg_maps.shader_version.major : 0;
@@ -7163,7 +7171,7 @@ static GLuint shader_glsl_generate_vs3_rasterizer_input_setup(struct shader_glsl
             declare_out_varying(gl_info, buffer, FALSE, "float ffp_varying_fogcoord;\n");
         }
 
-        if (enabled_clipplanes)
+        if (emulated_clipplanes)
         {
             shader_addline(buffer, "uniform vec4 clip_planes[%u];\n", gl_info->limits.user_clip_distances);
             shader_addline(buffer, "uniform vec4 pos_fixup;\n");
@@ -7244,8 +7252,7 @@ static GLuint shader_glsl_generate_vs3_rasterizer_input_setup(struct shader_glsl
 
             if (texcoords_written_mask[i] != WINED3DSP_WRITEMASK_ALL)
             {
-                if (gl_info->limits.glsl_varyings < wined3d_max_compat_varyings(gl_info)
-                        && !texcoords_written_mask[i])
+                if (!shader_glsl_full_ffp_varyings(gl_info) && !texcoords_written_mask[i])
                     continue;
 
                 shader_glsl_write_mask_to_str(~texcoords_written_mask[i] & WINED3DSP_WRITEMASK_ALL, reg_mask);
@@ -7254,14 +7261,14 @@ static GLuint shader_glsl_generate_vs3_rasterizer_input_setup(struct shader_glsl
             }
         }
 
-        glsl_gen_clipplane_emul(ps, buffer, gl_info, d3d_info, enabled_clipplanes);
+        glsl_gen_clipplane_emul(ps, buffer, gl_info, d3d_info, emulated_clipplanes, "gl_Position");
     }
     else
     {
         unsigned int in_count = min(vec4_varyings(ps_major, gl_info), ps->limits->packed_input);
 
         shader_glsl_declare_shader_outputs(gl_info, buffer, in_count, FALSE, NULL);
-        if (enabled_clipplanes)
+        if (emulated_clipplanes)
         {
             shader_addline(buffer, "uniform vec4 clip_planes[%u];\n", gl_info->limits.user_clip_distances);
             shader_addline(buffer, "uniform vec4 pos_fixup;\n");
@@ -7270,7 +7277,7 @@ static GLuint shader_glsl_generate_vs3_rasterizer_input_setup(struct shader_glsl
         shader_glsl_setup_sm3_rasterizer_input(priv, gl_info, ps->u.ps.input_reg_map, &ps->input_signature,
                 &ps->reg_maps, 0, &vs->output_signature, &vs->reg_maps, per_vertex_point_size);
 
-        glsl_gen_clipplane_emul(ps, buffer, gl_info, d3d_info, enabled_clipplanes);
+        glsl_gen_clipplane_emul(ps, buffer, gl_info, d3d_info, emulated_clipplanes, "gl_Position");
     }
 
     shader_addline(buffer, "}\n");
@@ -7570,6 +7577,8 @@ static void shader_glsl_enable_extensions(struct wined3d_string_buffer *buffer,
         shader_addline(buffer, "#extension GL_EXT_gpu_shader4 : enable\n");
     if (gl_info->supported[EXT_TEXTURE_ARRAY])
         shader_addline(buffer, "#extension GL_EXT_texture_array : enable\n");
+    if (gl_info->supported[EXT_TEXTURE_SHADOW_LOD])
+        shader_addline(buffer, "#extension GL_EXT_texture_shadow_lod : enable\n");
 }
 
 static void shader_glsl_generate_color_output(struct wined3d_string_buffer *buffer,
@@ -7659,7 +7668,7 @@ static void shader_glsl_generate_ps_epilogue(const struct wined3d_gl_info *gl_in
     if (reg_maps->sample_mask)
         shader_addline(buffer, "gl_SampleMask[0] = floatBitsToInt(sample_mask);\n");
 
-    if (!needs_legacy_glsl_syntax(gl_info))
+    if (!use_legacy_fragment_output(gl_info))
         shader_glsl_generate_color_output(buffer, gl_info, shader, args, string_buffers);
 }
 
@@ -7671,9 +7680,9 @@ static GLuint shader_glsl_generate_fragment_shader(const struct wined3d_context_
 {
     const struct wined3d_shader_reg_maps *reg_maps = &shader->reg_maps;
     const struct wined3d_shader_version *version = &reg_maps->shader_version;
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
-    const BOOL legacy_syntax = needs_legacy_glsl_syntax(gl_info);
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     const char *prefix = shader_glsl_get_prefix(version->type);
+    BOOL legacy_syntax = needs_legacy_glsl_syntax(gl_info);
     unsigned int i, extra_constants_needed = 0;
     struct shader_glsl_ctx_priv priv_ctx;
     GLuint shader_id;
@@ -7765,7 +7774,7 @@ static GLuint shader_glsl_generate_fragment_shader(const struct wined3d_context_
         shader_addline(buffer, "    float scale;\n");
         shader_addline(buffer, "} ffp_fog;\n");
 
-        if (needs_legacy_glsl_syntax(gl_info))
+        if (legacy_syntax)
         {
             if (glsl_is_color_reg_read(shader, 0))
                 shader_addline(buffer, "vec4 ffp_varying_diffuse;\n");
@@ -7816,10 +7825,10 @@ static GLuint shader_glsl_generate_fragment_shader(const struct wined3d_context_
     if (args->srgb_correction)
     {
         shader_addline(buffer, "const vec4 srgb_const0 = ");
-        shader_glsl_append_imm_vec(buffer, wined3d_srgb_const0, 4, gl_info);
+        shader_glsl_append_imm_vec(buffer, &wined3d_srgb_const[0].x, 4, gl_info);
         shader_addline(buffer, ";\n");
         shader_addline(buffer, "const vec4 srgb_const1 = ");
-        shader_glsl_append_imm_vec(buffer, wined3d_srgb_const1, 4, gl_info);
+        shader_glsl_append_imm_vec(buffer, &wined3d_srgb_const[1].x, 4, gl_info);
         shader_addline(buffer, ";\n");
     }
     if (reg_maps->vpos || reg_maps->usesdsy)
@@ -7846,7 +7855,7 @@ static GLuint shader_glsl_generate_fragment_shader(const struct wined3d_context_
     if (args->alpha_test_func + 1 != WINED3D_CMP_ALWAYS)
         shader_addline(buffer, "uniform float alpha_test_ref;\n");
 
-    if (!needs_legacy_glsl_syntax(gl_info))
+    if (!use_legacy_fragment_output(gl_info))
     {
         const struct wined3d_shader_signature *output_signature = &shader->output_signature;
 
@@ -8012,7 +8021,7 @@ static void shader_glsl_generate_vs_epilogue(const struct wined3d_gl_info *gl_in
     }
 
     /* We always store the clipplanes without y inversion. */
-    if (args->clip_enabled)
+    if (args->clip_enabled && !args->emulated_clipplanes)
     {
         if (legacy_syntax)
             shader_addline(buffer, "gl_ClipVertex = gl_Position;\n");
@@ -8035,7 +8044,7 @@ static GLuint shader_glsl_generate_vertex_shader(const struct wined3d_context_gl
     struct wined3d_string_buffer_list *string_buffers = &priv->string_buffers;
     const struct wined3d_shader_reg_maps *reg_maps = &shader->reg_maps;
     const struct wined3d_shader_version *version = &reg_maps->shader_version;
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_string_buffer *buffer = &priv->shader_buffer;
     struct shader_glsl_ctx_priv priv_ctx;
     GLuint shader_id;
@@ -8177,7 +8186,7 @@ static GLuint shader_glsl_generate_hull_shader(const struct wined3d_context_gl *
 {
     struct wined3d_string_buffer_list *string_buffers = &priv->string_buffers;
     const struct wined3d_shader_reg_maps *reg_maps = &shader->reg_maps;
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_string_buffer *buffer = &priv->shader_buffer;
     const struct wined3d_hull_shader *hs = &shader->u.hs;
     const struct wined3d_shader_phase *phase;
@@ -8273,7 +8282,7 @@ static GLuint shader_glsl_generate_domain_shader(const struct wined3d_context_gl
 {
     struct wined3d_string_buffer_list *string_buffers = &priv->string_buffers;
     const struct wined3d_shader_reg_maps *reg_maps = &shader->reg_maps;
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_string_buffer *buffer = &priv->shader_buffer;
     struct shader_glsl_ctx_priv priv_ctx;
     GLuint shader_id;
@@ -8367,7 +8376,7 @@ static GLuint shader_glsl_generate_geometry_shader(const struct wined3d_context_
 {
     struct wined3d_string_buffer_list *string_buffers = &priv->string_buffers;
     const struct wined3d_shader_reg_maps *reg_maps = &shader->reg_maps;
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_string_buffer *buffer = &priv->shader_buffer;
     const struct wined3d_shader_signature_element *output;
     enum wined3d_primitive_type primitive_type;
@@ -8498,7 +8507,7 @@ static GLuint shader_glsl_generate_compute_shader(const struct wined3d_context_g
 {
     const struct wined3d_shader_thread_group_size *thread_group_size = &shader->u.cs.thread_group_size;
     const struct wined3d_shader_reg_maps *reg_maps = &shader->reg_maps;
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct shader_glsl_ctx_priv priv_ctx;
     GLuint shader_id;
     unsigned int i;
@@ -8633,6 +8642,8 @@ static inline BOOL vs_args_equal(const struct vs_compile_args *stored, const str
     if (stored->next_shader_input_count != new->next_shader_input_count)
         return FALSE;
     if (stored->fog_src != new->fog_src)
+        return FALSE;
+    if (stored->emulated_clipplanes != new->emulated_clipplanes)
         return FALSE;
     return !memcmp(stored->interpolation_mode, new->interpolation_mode, sizeof(new->interpolation_mode));
 }
@@ -9010,7 +9021,7 @@ static void shader_glsl_ffp_vertex_lighting(struct wined3d_string_buffer *buffer
 
 /* Context activation is done by the caller. */
 static GLuint shader_glsl_generate_ffp_vertex_shader(struct shader_glsl_priv *priv,
-        const struct wined3d_ffp_vs_settings *settings, const struct wined3d_gl_info *gl_info)
+        const struct wined3d_ffp_vs_settings *settings, const struct wined3d_context_gl *context_gl)
 {
     static const struct attrib_info
     {
@@ -9028,6 +9039,8 @@ static GLuint shader_glsl_generate_ffp_vertex_shader(struct shader_glsl_priv *pr
         {"vec4", "ffp_attrib_diffuse"},         /* WINED3D_FFP_DIFFUSE */
         {"vec4", "ffp_attrib_specular"},        /* WINED3D_FFP_SPECULAR */
     };
+    const struct wined3d_d3d_info *d3d_info = context_gl->c.d3d_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     const BOOL legacy_syntax = needs_legacy_glsl_syntax(gl_info);
     struct wined3d_string_buffer *buffer = &priv->shader_buffer;
     BOOL output_legacy_fogcoord = legacy_syntax;
@@ -9103,7 +9116,11 @@ static GLuint shader_glsl_generate_ffp_vertex_shader(struct shader_glsl_priv *pr
     else
     {
         if (settings->clipping)
+        {
             shader_addline(buffer, "uniform vec4 clip_planes[%u];\n", gl_info->limits.user_clip_distances);
+            if (settings->emulated_clipplanes)
+                shader_addline(buffer, "uniform vec4 pos_fixup;\n");
+        }
 
         declare_out_varying(gl_info, buffer, settings->flatshading, "vec4 ffp_varying_diffuse;\n");
         declare_out_varying(gl_info, buffer, settings->flatshading, "vec4 ffp_varying_specular;\n");
@@ -9149,7 +9166,9 @@ static GLuint shader_glsl_generate_ffp_vertex_shader(struct shader_glsl_priv *pr
         shader_addline(buffer, "gl_Position = ffp_projection_matrix * ec_pos;\n");
         if (settings->clipping)
         {
-            if (legacy_syntax)
+            if (settings->emulated_clipplanes)
+                glsl_gen_clipplane_emul(NULL, buffer, gl_info, d3d_info, settings->emulated_clipplanes, "ec_pos");
+            else if (legacy_syntax)
                 shader_addline(buffer, "gl_ClipVertex = ec_pos;\n");
             else
                 for (i = 0; i < gl_info->limits.user_clip_distances; ++i)
@@ -9191,13 +9210,16 @@ static GLuint shader_glsl_generate_ffp_vertex_shader(struct shader_glsl_priv *pr
     {
         BOOL output_legacy_texcoord = legacy_syntax;
 
+        if (settings->emulated_clipplanes && i == d3d_info->limits.ffp_blend_stages - 1)
+            continue;
+
         switch (settings->texgen[i] & 0xffff0000)
         {
             case WINED3DTSS_TCI_PASSTHRU:
                 if (settings->texcoords & (1u << i))
                     shader_addline(buffer, "ffp_varying_texcoord[%u] = ffp_texture_matrix[%u] * ffp_attrib_texcoord%u;\n",
                             i, i, i);
-                else if (gl_info->limits.glsl_varyings >= wined3d_max_compat_varyings(gl_info))
+                else if (shader_glsl_full_ffp_varyings(gl_info))
                     shader_addline(buffer, "ffp_varying_texcoord[%u] = vec4(0.0);\n", i);
                 else
                     output_legacy_texcoord = FALSE;
@@ -9535,7 +9557,7 @@ static GLuint shader_glsl_generate_ffp_fragment_shader(struct shader_glsl_priv *
     enum wined3d_cmp_func alpha_test_func = settings->alpha_test_func + 1;
     struct wined3d_string_buffer *buffer = &priv->shader_buffer;
     BYTE lum_map = 0, bump_map = 0, tex_map = 0, tss_const_map = 0;
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     const BOOL legacy_syntax = needs_legacy_glsl_syntax(gl_info);
     BOOL tempreg_used = FALSE, tfactor_used = FALSE;
     UINT lowest_disabled_stage;
@@ -9615,7 +9637,7 @@ static GLuint shader_glsl_generate_ffp_fragment_shader(struct shader_glsl_priv *
     if (gl_info->supported[ARB_TEXTURE_RECTANGLE])
         shader_addline(buffer, "#extension GL_ARB_texture_rectangle : enable\n");
 
-    if (!needs_legacy_glsl_syntax(gl_info))
+    if (!use_legacy_fragment_output(gl_info))
     {
         shader_addline(buffer, "vec4 ps_out[1];\n");
         if (shader_glsl_use_explicit_attrib_location(gl_info))
@@ -9688,10 +9710,10 @@ static GLuint shader_glsl_generate_ffp_fragment_shader(struct shader_glsl_priv *
     if (settings->sRGB_write)
     {
         shader_addline(buffer, "const vec4 srgb_const0 = ");
-        shader_glsl_append_imm_vec(buffer, wined3d_srgb_const0, 4, gl_info);
+        shader_glsl_append_imm_vec(buffer, &wined3d_srgb_const[0].x, 4, gl_info);
         shader_addline(buffer, ";\n");
         shader_addline(buffer, "const vec4 srgb_const1 = ");
-        shader_glsl_append_imm_vec(buffer, wined3d_srgb_const1, 4, gl_info);
+        shader_glsl_append_imm_vec(buffer, &wined3d_srgb_const[1].x, 4, gl_info);
         shader_addline(buffer, ";\n");
     }
 
@@ -9743,15 +9765,15 @@ static GLuint shader_glsl_generate_ffp_fragment_shader(struct shader_glsl_priv *
                 shader_addline(buffer, "ffp_texcoord[%u] = vec4(0.0);\n", stage);
         }
     }
-    if (settings->emul_clipplanes)
+    if (lowest_disabled_stage < 7 && settings->emul_clipplanes)
+    {
         shader_addline(buffer, "ffp_texcoord[7] = %s[7];\n",
                 legacy_syntax ? "gl_TexCoord" : "ffp_varying_texcoord");
+        shader_addline(buffer, "if (any(lessThan(ffp_texcoord[7], vec4(0.0)))) discard;\n");
+    }
 
     if (legacy_syntax && settings->fog != WINED3D_FFP_PS_FOG_OFF)
         shader_addline(buffer, "ffp_varying_fogcoord = gl_FogFragCoord;\n");
-
-    if (lowest_disabled_stage < 7 && settings->emul_clipplanes)
-        shader_addline(buffer, "if (any(lessThan(ffp_texcoord[7], vec4(0.0)))) discard;\n");
 
     /* Generate texture sampling instructions */
     for (stage = 0; stage < WINED3D_MAX_TEXTURES && settings->op[stage].cop != WINED3D_TOP_DISABLE; ++stage)
@@ -9929,7 +9951,7 @@ static GLuint shader_glsl_generate_ffp_fragment_shader(struct shader_glsl_priv *
     shader_glsl_generate_fog_code(buffer, gl_info, settings->fog);
 
     shader_glsl_generate_alpha_test(buffer, gl_info, alpha_test_func);
-    if (!needs_legacy_glsl_syntax(gl_info))
+    if (!use_legacy_fragment_output(gl_info))
         shader_addline(buffer, "color_out0 = ps_out[0];\n");
 
     shader_addline(buffer, "}\n");
@@ -9942,7 +9964,7 @@ static GLuint shader_glsl_generate_ffp_fragment_shader(struct shader_glsl_priv *
 }
 
 static struct glsl_ffp_vertex_shader *shader_glsl_find_ffp_vertex_shader(struct shader_glsl_priv *priv,
-        const struct wined3d_gl_info *gl_info, const struct wined3d_ffp_vs_settings *settings)
+        const struct wined3d_context_gl *context_gl, const struct wined3d_ffp_vs_settings *settings)
 {
     struct glsl_ffp_vertex_shader *shader;
     const struct wine_rb_entry *entry;
@@ -9954,7 +9976,7 @@ static struct glsl_ffp_vertex_shader *shader_glsl_find_ffp_vertex_shader(struct 
         return NULL;
 
     shader->desc.settings = *settings;
-    shader->id = shader_glsl_generate_ffp_vertex_shader(priv, settings, gl_info);
+    shader->id = shader_glsl_generate_ffp_vertex_shader(priv, settings, context_gl);
     list_init(&shader->linked_programs);
     if (wine_rb_put(&priv->ffp_vertex_shaders, &shader->desc.settings, &shader->desc.entry) == -1)
         ERR("Failed to insert ffp vertex shader.\n");
@@ -10137,7 +10159,7 @@ static HRESULT shader_glsl_compile_compute_shader(struct shader_glsl_priv *priv,
         const struct wined3d_context_gl *context_gl, struct wined3d_shader *shader)
 {
     struct glsl_context_data *ctx_data = context_gl->c.shader_backend_data;
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_string_buffer *buffer = &priv->shader_buffer;
     struct glsl_cs_compiled_shader *gl_shaders;
     struct glsl_shader_private *shader_data;
@@ -10157,7 +10179,6 @@ static HRESULT shader_glsl_compile_compute_shader(struct shader_glsl_priv *priv,
         return E_OUTOFMEMORY;
     }
     shader_data = shader->backend_data;
-    gl_shaders = shader_data->gl_shaders.cs;
 
     if (!(shader_data->gl_shaders.cs = heap_alloc(sizeof(*gl_shaders))))
     {
@@ -10263,7 +10284,7 @@ static void set_glsl_shader_program(const struct wined3d_context_gl *context_gl,
         struct shader_glsl_priv *priv, struct glsl_context_data *ctx_data)
 {
     const struct wined3d_d3d_info *d3d_info = context_gl->c.d3d_info;
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     const struct wined3d_shader *pre_rasterization_shader;
     const struct ps_np2fixup_info *np2fixup_info = NULL;
     struct wined3d_shader *hshader, *dshader, *gshader;
@@ -10308,7 +10329,7 @@ static void set_glsl_shader_program(const struct wined3d_context_gl *context_gl,
         struct wined3d_ffp_vs_settings settings;
 
         wined3d_ffp_get_vs_settings(&context_gl->c, state, &settings);
-        ffp_shader = shader_glsl_find_ffp_vertex_shader(priv, gl_info, &settings);
+        ffp_shader = shader_glsl_find_ffp_vertex_shader(priv, context_gl, &settings);
         vs_id = ffp_shader->id;
         vs_list = &ffp_shader->linked_programs;
     }
@@ -10387,7 +10408,7 @@ static void set_glsl_shader_program(const struct wined3d_context_gl *context_gl,
     key.gs_id = gs_id;
     key.ps_id = ps_id;
     key.cs_id = 0;
-    key.clipplanes = find_clipplanes(&context_gl->c, state, gl_info, d3d_info);
+    key.clipplanes = find_emulated_clipplanes(&context_gl->c, state);
     if ((!vs_id && !hs_id && !ds_id && !gs_id && !ps_id) || (entry = get_glsl_program_entry(priv, &key)))
     {
         ctx_data->glsl_program = entry;
@@ -10410,7 +10431,7 @@ static void set_glsl_shader_program(const struct wined3d_context_gl *context_gl,
     entry->constant_version = 0;
     entry->shader_controlled_clip_distances = 0;
     entry->ps.np2_fixup_info = np2fixup_info;
-    entry->clipplanes = find_clipplanes(&context_gl->c, state, gl_info, d3d_info);
+    entry->clipplanes = find_emulated_clipplanes(&context_gl->c, state);
     /* Add the hash table entry */
     add_glsl_program_entry(priv, entry);
 
@@ -10429,7 +10450,7 @@ static void set_glsl_shader_program(const struct wined3d_context_gl *context_gl,
 
     if (vshader)
     {
-        DWORD clip = find_clipplanes(&context_gl->c, state, gl_info, d3d_info);
+        DWORD emulated_clipplanes = find_emulated_clipplanes(&context_gl->c, state);
 
         attribs_map = vshader->reg_maps.input_registers;
         if (vshader->reg_maps.shader_version.major < 4)
@@ -10437,7 +10458,7 @@ static void set_glsl_shader_program(const struct wined3d_context_gl *context_gl,
             reorder_shader_id = shader_glsl_generate_vs3_rasterizer_input_setup(priv, vshader, pshader,
                     state->gl_primitive_type == GL_POINTS && vshader->reg_maps.point_size,
                     d3d_info->emulated_flatshading
-                    && state->render_states[WINED3D_RS_SHADEMODE] == WINED3D_SHADE_FLAT, gl_info, d3d_info, clip);
+                    && state->render_states[WINED3D_RS_SHADEMODE] == WINED3D_SHADE_FLAT, gl_info, d3d_info, emulated_clipplanes);
             TRACE("Attaching GLSL shader object %u to program %u.\n", reorder_shader_id, program_id);
             GL_EXTCALL(glAttachShader(program_id, reorder_shader_id));
             checkGLcall("glAttachShader");
@@ -10480,7 +10501,7 @@ static void set_glsl_shader_program(const struct wined3d_context_gl *context_gl,
         }
         checkGLcall("glBindAttribLocation");
 
-        if (!needs_legacy_glsl_syntax(gl_info))
+        if (!use_legacy_fragment_output(gl_info))
         {
             for (i = 0; i < MAX_RENDER_TARGET_VIEWS; ++i)
             {
@@ -10716,14 +10737,14 @@ static void shader_glsl_select(void *shader_priv, struct wined3d_context *contex
 {
     struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
     struct glsl_context_data *ctx_data = context->shader_backend_data;
-    const struct wined3d_gl_info *gl_info = context->gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct shader_glsl_priv *priv = shader_priv;
     struct glsl_shader_prog_link *glsl_program;
     GLenum current_vertex_color_clamp;
     GLuint program_id, prev_id;
 
-    priv->vertex_pipe->vp_enable(gl_info, !use_vs(state));
-    priv->fragment_pipe->enable_extension(gl_info, !use_ps(state));
+    priv->vertex_pipe->vp_enable(context, !use_vs(state));
+    priv->fragment_pipe->fp_enable(context, !use_ps(state));
 
     prev_id = ctx_data->glsl_program ? ctx_data->glsl_program->id : 0;
     set_glsl_shader_program(context_gl, state, priv, ctx_data);
@@ -10776,7 +10797,7 @@ static void shader_glsl_select_compute(void *shader_priv, struct wined3d_context
 {
     struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
     struct glsl_context_data *ctx_data = context->shader_backend_data;
-    const struct wined3d_gl_info *gl_info = context->gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct shader_glsl_priv *priv = shader_priv;
     GLuint program_id, prev_id;
 
@@ -10816,16 +10837,17 @@ static void shader_glsl_invalidate_current_program(struct wined3d_context *conte
 /* Context activation is done by the caller. */
 static void shader_glsl_disable(void *shader_priv, struct wined3d_context *context)
 {
+    struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
     struct glsl_context_data *ctx_data = context->shader_backend_data;
-    const struct wined3d_gl_info *gl_info = context->gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct shader_glsl_priv *priv = shader_priv;
 
     shader_glsl_invalidate_current_program(context);
     GL_EXTCALL(glUseProgram(0));
     checkGLcall("glUseProgram");
 
-    priv->vertex_pipe->vp_enable(gl_info, FALSE);
-    priv->fragment_pipe->enable_extension(gl_info, FALSE);
+    priv->vertex_pipe->vp_enable(context, FALSE);
+    priv->fragment_pipe->fp_enable(context, FALSE);
 
     if (needs_legacy_glsl_syntax(gl_info) && gl_info->supported[ARB_COLOR_BUFFER_FLOAT])
     {
@@ -10869,7 +10891,7 @@ static void shader_glsl_destroy(struct wined3d_shader *shader)
     }
 
     context = context_acquire(device, NULL, 0);
-    gl_info = context->gl_info;
+    gl_info = wined3d_context_gl(context)->gl_info;
 
     TRACE("Deleting linked programs.\n");
     linked_programs = &shader->linked_programs;
@@ -11082,7 +11104,7 @@ static void constant_heap_free(struct constant_heap *heap)
 }
 
 static HRESULT shader_glsl_alloc(struct wined3d_device *device, const struct wined3d_vertex_pipe_ops *vertex_pipe,
-        const struct fragment_pipeline *fragment_pipe)
+        const struct wined3d_fragment_pipe_ops *fragment_pipe)
 {
     SIZE_T stack_size = wined3d_log2i(max(WINED3D_MAX_VS_CONSTS_F, WINED3D_MAX_PS_CONSTS_F)) + 1;
     struct fragment_caps fragment_caps;
@@ -11195,7 +11217,8 @@ static void shader_glsl_free_context_data(struct wined3d_context *context)
 
 static void shader_glsl_init_context_state(struct wined3d_context *context)
 {
-    const struct wined3d_gl_info *gl_info = context->gl_info;
+    struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
 
     gl_info->gl_ops.gl.p_glEnable(GL_PROGRAM_POINT_SIZE);
     checkGLcall("GL_PROGRAM_POINT_SIZE");
@@ -11282,6 +11305,11 @@ static void shader_glsl_get_caps(const struct wined3d_adapter *adapter, struct s
      * shader_glsl_alloc(). */
     caps->wined3d_caps = WINED3D_SHADER_CAP_VS_CLIPPING
             | WINED3D_SHADER_CAP_SRGB_WRITE;
+
+    if (needs_interpolation_qualifiers_for_shader_outputs(gl_info))
+        caps->wined3d_caps |= WINED3D_SHADER_CAP_OUTPUT_INTERPOLATION;
+    if (shader_glsl_full_ffp_varyings(gl_info))
+        caps->wined3d_caps |= WINED3D_SHADER_CAP_FULL_FFP_VARYINGS;
 
     /* Do not advertise VS clipping if the no vs clipping quirk is set. On a
      * proper GL driver this should not matter, but on a proper GL driver we
@@ -11592,7 +11620,7 @@ const struct wined3d_shader_backend_ops glsl_shader_backend =
     shader_glsl_has_ffp_proj_control,
 };
 
-static void glsl_vertex_pipe_vp_enable(const struct wined3d_gl_info *gl_info, BOOL enable) {}
+static void glsl_vertex_pipe_vp_enable(const struct wined3d_context *context, BOOL enable) {}
 
 static void glsl_vertex_pipe_vp_get_caps(const struct wined3d_adapter *adapter, struct wined3d_vertex_caps *caps)
 {
@@ -11645,8 +11673,9 @@ static void shader_glsl_free_ffp_vertex_shader(struct wine_rb_entry *entry, void
             struct glsl_ffp_vertex_shader, desc.entry);
     struct glsl_shader_prog_link *program, *program2;
     struct glsl_ffp_destroy_ctx *ctx = param;
-    const struct wined3d_gl_info *gl_info = ctx->context->gl_info;
+    const struct wined3d_gl_info *gl_info;
 
+    gl_info = ctx->context_gl->gl_info;
     LIST_FOR_EACH_ENTRY_SAFE(program, program2, &shader->linked_programs,
             struct glsl_shader_prog_link, vs.shader_entry)
     {
@@ -11659,11 +11688,12 @@ static void shader_glsl_free_ffp_vertex_shader(struct wine_rb_entry *entry, void
 /* Context activation is done by the caller. */
 static void glsl_vertex_pipe_vp_free(struct wined3d_device *device, struct wined3d_context *context)
 {
+    struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
     struct shader_glsl_priv *priv = device->vertex_priv;
     struct glsl_ffp_destroy_ctx ctx;
 
     ctx.priv = priv;
-    ctx.context = context;
+    ctx.context_gl = context_gl;
     wine_rb_destroy(&priv->ffp_vertex_shaders, shader_glsl_free_ffp_vertex_shader, &ctx);
 }
 
@@ -11679,7 +11709,8 @@ static void glsl_vertex_pipe_shader(struct wined3d_context *context,
 static void glsl_vertex_pipe_vdecl(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id)
 {
-    const struct wined3d_gl_info *gl_info = context->gl_info;
+    struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     BOOL specular = !!(context->stream_info.use_map & (1u << WINED3D_FFP_SPECULAR));
     BOOL diffuse = !!(context->stream_info.use_map & (1u << WINED3D_FFP_DIFFUSE));
     BOOL normal = !!(context->stream_info.use_map & (1u << WINED3D_FFP_NORMAL));
@@ -11719,8 +11750,7 @@ static void glsl_vertex_pipe_vdecl(struct wined3d_context *context,
          * Likewise, we have to invalidate the shader when using per-vertex
          * colours and diffuse/specular attribute presence changes, or when
          * normal presence changes. */
-        if (gl_info->limits.glsl_varyings < wined3d_max_compat_varyings(gl_info)
-                || (state->render_states[WINED3D_RS_COLORVERTEX]
+        if (!shader_glsl_full_ffp_varyings(gl_info) || (state->render_states[WINED3D_RS_COLORVERTEX]
                 && (diffuse != context->last_was_diffuse || specular != context->last_was_specular))
                 || normal != context->last_was_normal)
             context->shader_update_mask |= 1u << WINED3D_SHADER_TYPE_VERTEX;
@@ -11814,7 +11844,8 @@ static void glsl_vertex_pipe_vertexblend(struct wined3d_context *context,
 
 static void glsl_vertex_pipe_view(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
-    const struct wined3d_gl_info *gl_info = context->gl_info;
+    struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     unsigned int k;
 
     context->constant_update_mask |= WINED3D_SHADER_CONST_FFP_MODELVIEW
@@ -11930,7 +11961,8 @@ static void glsl_vertex_pipe_shademode(struct wined3d_context *context,
 static void glsl_vertex_pipe_clip_plane(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id)
 {
-    const struct wined3d_gl_info *gl_info = context->gl_info;
+    struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     UINT index = state_id - STATE_CLIPPLANE(0);
 
     if (index >= gl_info->limits.user_clip_distances)
@@ -12083,7 +12115,7 @@ const struct wined3d_vertex_pipe_ops glsl_vertex_pipe =
     glsl_vertex_pipe_vp_states,
 };
 
-static void glsl_fragment_pipe_enable(const struct wined3d_gl_info *gl_info, BOOL enable)
+static void glsl_fragment_pipe_enable(const struct wined3d_context *context, BOOL enable)
 {
     /* Nothing to do. */
 }
@@ -12155,8 +12187,9 @@ static void shader_glsl_free_ffp_fragment_shader(struct wine_rb_entry *entry, vo
             struct glsl_ffp_fragment_shader, entry.entry);
     struct glsl_shader_prog_link *program, *program2;
     struct glsl_ffp_destroy_ctx *ctx = param;
-    const struct wined3d_gl_info *gl_info = ctx->context->gl_info;
+    const struct wined3d_gl_info *gl_info;
 
+    gl_info = ctx->context_gl->gl_info;
     LIST_FOR_EACH_ENTRY_SAFE(program, program2, &shader->linked_programs,
             struct glsl_shader_prog_link, ps.shader_entry)
     {
@@ -12169,11 +12202,12 @@ static void shader_glsl_free_ffp_fragment_shader(struct wine_rb_entry *entry, vo
 /* Context activation is done by the caller. */
 static void glsl_fragment_pipe_free(struct wined3d_device *device, struct wined3d_context *context)
 {
+    struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
     struct shader_glsl_priv *priv = device->fragment_priv;
     struct glsl_ffp_destroy_ctx ctx;
 
     ctx.priv = priv;
-    ctx.context = context;
+    ctx.context_gl = context_gl;
     wine_rb_destroy(&priv->ffp_fragment_shaders, shader_glsl_free_ffp_fragment_shader, &ctx);
 }
 
@@ -12228,8 +12262,10 @@ static void glsl_fragment_pipe_fog(struct wined3d_context *context,
 static void glsl_fragment_pipe_vdecl(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id)
 {
+    const struct wined3d_gl_info *gl_info = wined3d_context_gl(context)->gl_info;
+
     /* Because of settings->texcoords_initialized and args->texcoords_initialized. */
-    if (context->gl_info->limits.glsl_varyings < wined3d_max_compat_varyings(context->gl_info))
+    if (!shader_glsl_full_ffp_varyings(gl_info))
         context->shader_update_mask |= 1u << WINED3D_SHADER_TYPE_PIXEL;
 
     if (!isStateDirty(context, STATE_RENDER(WINED3D_RS_FOGENABLE)))
@@ -12239,8 +12275,10 @@ static void glsl_fragment_pipe_vdecl(struct wined3d_context *context,
 static void glsl_fragment_pipe_vs(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id)
 {
+    const struct wined3d_gl_info *gl_info = wined3d_context_gl(context)->gl_info;
+
     /* Because of settings->texcoords_initialized and args->texcoords_initialized. */
-    if (context->gl_info->limits.glsl_varyings < wined3d_max_compat_varyings(context->gl_info))
+    if (!shader_glsl_full_ffp_varyings(gl_info))
         context->shader_update_mask |= 1u << WINED3D_SHADER_TYPE_PIXEL;
 }
 
@@ -12259,7 +12297,7 @@ static void glsl_fragment_pipe_invalidate_constants(struct wined3d_context *cont
 static void glsl_fragment_pipe_alpha_test_func(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id)
 {
-    const struct wined3d_gl_info *gl_info = context->gl_info;
+    const struct wined3d_gl_info *gl_info = wined3d_context_gl(context)->gl_info;
     GLint func = wined3d_gl_compare_func(state->render_states[WINED3D_RS_ALPHAFUNC]);
     float ref = wined3d_alpha_ref(state);
 
@@ -12279,7 +12317,7 @@ static void glsl_fragment_pipe_core_alpha_test(struct wined3d_context *context,
 static void glsl_fragment_pipe_alpha_test(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id)
 {
-    const struct wined3d_gl_info *gl_info = context->gl_info;
+    const struct wined3d_gl_info *gl_info = wined3d_context_gl(context)->gl_info;
 
     if (state->render_states[WINED3D_RS_ALPHATESTENABLE])
     {
@@ -12440,7 +12478,7 @@ static void glsl_fragment_pipe_free_context_data(struct wined3d_context *context
 {
 }
 
-const struct fragment_pipeline glsl_fragment_pipe =
+const struct wined3d_fragment_pipe_ops glsl_fragment_pipe =
 {
     glsl_fragment_pipe_enable,
     glsl_fragment_pipe_get_caps,
@@ -12487,9 +12525,10 @@ static int glsl_blitter_args_compare(const void *key, const struct wine_rb_entry
 static void glsl_free_blitter_program(struct wine_rb_entry *entry, void *ctx)
 {
     struct glsl_blitter_program *program = WINE_RB_ENTRY_VALUE(entry, struct glsl_blitter_program, entry);
-    struct wined3d_context *context = ctx;
-    const struct wined3d_gl_info *gl_info = context->gl_info;
+    struct wined3d_context_gl *context_gl = ctx;
+    const struct wined3d_gl_info *gl_info;
 
+    gl_info = context_gl->gl_info;
     GL_EXTCALL(glDeleteProgram(program->id));
     checkGLcall("glDeleteProgram()");
     heap_free(program);
@@ -12498,7 +12537,8 @@ static void glsl_free_blitter_program(struct wine_rb_entry *entry, void *ctx)
 /* Context activation is done by the caller. */
 static void glsl_blitter_destroy(struct wined3d_blitter *blitter, struct wined3d_context *context)
 {
-    const struct wined3d_gl_info *gl_info = context->gl_info;
+    struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_glsl_blitter *glsl_blitter;
     struct wined3d_blitter *next;
 
@@ -12510,7 +12550,7 @@ static void glsl_blitter_destroy(struct wined3d_blitter *blitter, struct wined3d
     if (glsl_blitter->palette_texture)
         gl_info->gl_ops.gl.p_glDeleteTextures(1, &glsl_blitter->palette_texture);
 
-    wine_rb_destroy(&glsl_blitter->programs, glsl_free_blitter_program, context);
+    wine_rb_destroy(&glsl_blitter->programs, glsl_free_blitter_program, context_gl);
     string_buffer_list_cleanup(&glsl_blitter->string_buffers);
 
     heap_free(glsl_blitter);
@@ -12920,7 +12960,7 @@ static GLuint glsl_blitter_generate_program(struct wined3d_glsl_blitter *blitter
     declare_in_varying(gl_info, buffer, FALSE, "vec3 out_texcoord;\n");
     /* TODO: Declare the out variable with the correct type (and put it in the
      * blitter args). */
-    if (!needs_legacy_glsl_syntax(gl_info))
+    if (!use_legacy_fragment_output(gl_info))
         shader_addline(buffer, "out vec4 ps_out[1];\n");
 
     output = string_buffer_get(&blitter->string_buffers);
@@ -12952,7 +12992,7 @@ static GLuint glsl_blitter_generate_program(struct wined3d_glsl_blitter *blitter
     GL_EXTCALL(glBindAttribLocation(program, 0, "pos"));
     GL_EXTCALL(glBindAttribLocation(program, 1, "texcoord"));
 
-    if (!needs_legacy_glsl_syntax(gl_info))
+    if (!use_legacy_fragment_output(gl_info))
         GL_EXTCALL(glBindFragDataLocation(program, 0, "ps_out"));
 
     GL_EXTCALL(glCompileShader(vshader_id));
@@ -12978,7 +13018,7 @@ static GLuint glsl_blitter_generate_program(struct wined3d_glsl_blitter *blitter
 static void glsl_blitter_upload_palette(struct wined3d_glsl_blitter *blitter,
         struct wined3d_context_gl *context_gl, const struct wined3d_texture_gl *texture_gl)
 {
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     const struct wined3d_palette *palette;
 
     palette = texture_gl->t.swapchain ? texture_gl->t.swapchain->palette : NULL;
@@ -13013,7 +13053,7 @@ static void glsl_blitter_upload_palette(struct wined3d_glsl_blitter *blitter,
 static struct glsl_blitter_program *glsl_blitter_get_program(struct wined3d_glsl_blitter *blitter,
         struct wined3d_context_gl *context_gl, const struct wined3d_texture_gl *texture_gl, BOOL use_colour_key)
 {
-    const struct wined3d_gl_info *gl_info = context_gl->c.gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct glsl_blitter_program *program;
     struct glsl_blitter_args args;
     struct wine_rb_entry *entry;
@@ -13086,14 +13126,20 @@ static BOOL glsl_blitter_supported(enum wined3d_blit_op blit_op, const struct wi
         return FALSE;
     }
 
+    if (!(dst_resource->access & WINED3D_RESOURCE_ACCESS_GPU))
+    {
+        TRACE("Destination resource does not have GPU access.\n");
+        return FALSE;
+    }
+
     /* We don't necessarily want to blit from resources without
      * WINED3D_RESOURCE_ACCESS_GPU, but that may be the only way to decompress
      * compressed textures. */
     decompress = (src_format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_COMPRESSED)
             && !(dst_format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_COMPRESSED);
-    if (!decompress && !(src_resource->access & dst_resource->access & WINED3D_RESOURCE_ACCESS_GPU))
+    if (!decompress && !(src_resource->access & WINED3D_RESOURCE_ACCESS_GPU))
     {
-        TRACE("Source or destination resource does not have GPU access.\n");
+        TRACE("Source resource does not have GPU access.\n");
         return FALSE;
     }
 
@@ -13126,7 +13172,7 @@ static DWORD glsl_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_bli
     struct wined3d_texture_gl *dst_texture_gl = wined3d_texture_gl(dst_texture);
     struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
     struct wined3d_device *device = dst_texture->resource.device;
-    const struct wined3d_gl_info *gl_info = context->gl_info;
+    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_texture *staging_texture = NULL;
     struct wined3d_glsl_blitter *glsl_blitter;
     struct wined3d_color_key alpha_test_key;

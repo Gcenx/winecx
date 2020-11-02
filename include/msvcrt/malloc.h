@@ -22,7 +22,7 @@
 
 #include "wine/winheader_enter.h"
 
-#include <crtdefs.h>
+#include <corecrt.h>
 
 /* heap function constants */
 #define _HEAPEMPTY    -1

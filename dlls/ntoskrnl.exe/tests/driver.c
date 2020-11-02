@@ -56,11 +56,11 @@ static int running_under_wine;
 static int winetest_debug;
 static int winetest_report_success;
 
-static POBJECT_TYPE *pExEventObjectType, *pIoFileObjectType, *pPsThreadType;
+static POBJECT_TYPE *pExEventObjectType, *pIoFileObjectType, *pPsThreadType, *pIoDriverObjectType;
 static PEPROCESS *pPsInitialSystemProcess;
 static void *create_caller_thread;
 
-void WINAPI ObfReferenceObject( void *obj );
+static PETHREAD create_irp_thread;
 
 NTSTATUS WINAPI ZwQueryInformationProcess(HANDLE,PROCESSINFOCLASS,void*,ULONG,ULONG*);
 
@@ -209,6 +209,7 @@ static void *get_proc_address(const char *name)
 }
 
 static FILE_OBJECT *last_created_file;
+static unsigned int create_count, close_count;
 
 static void test_irp_struct(IRP *irp, DEVICE_OBJECT *device)
 {
@@ -222,6 +223,8 @@ static void test_irp_struct(IRP *irp, DEVICE_OBJECT *device)
     ok(!irp->UserEvent, "UserEvent = %p\n", irp->UserEvent);
     ok(irp->Tail.Overlay.Thread == (PETHREAD)KeGetCurrentThread(),
        "IRP thread is not the current thread\n");
+
+    ok(IoGetRequestorProcess(irp) == IoGetCurrentProcess(), "processes didn't match\n");
 }
 
 static void test_mdl_map(void)
@@ -341,7 +344,10 @@ static void test_current_thread(BOOL is_system)
     ok(PsGetThreadId((PETHREAD)KeGetCurrentThread()) == PsGetCurrentThreadId(), "thread IDs don't match\n");
     ok(PsIsSystemThread((PETHREAD)KeGetCurrentThread()) == is_system, "unexpected system thread\n");
     if (!is_system)
+    {
         ok(create_caller_thread == KeGetCurrentThread(), "thread is not create caller thread\n");
+        ok(create_irp_thread == (PETHREAD)KeGetCurrentThread(), "thread of create request is not current thread\n");
+    }
 
     ret = ObOpenObjectByPointer(current, OBJ_KERNEL_HANDLE, NULL, PROCESS_QUERY_INFORMATION, NULL, KernelMode, &process_handle);
     ok(!ret, "ObOpenObjectByPointer failed: %#x\n", ret);
@@ -426,16 +432,33 @@ static void WINAPI mutex_thread(void *arg)
     PsTerminateSystemThread(STATUS_SUCCESS);
 }
 
+static KEVENT remove_lock_ready;
+
+static void WINAPI remove_lock_thread(void *arg)
+{
+    IO_REMOVE_LOCK *lock = arg;
+    NTSTATUS ret;
+
+    ret = IoAcquireRemoveLockEx(lock, NULL, "", 1, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
+    ok(ret == STATUS_SUCCESS, "got %#x\n", ret);
+    KeSetEvent(&remove_lock_ready, 0, FALSE);
+
+    IoReleaseRemoveLockAndWaitEx(lock, NULL, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
+    PsTerminateSystemThread(STATUS_SUCCESS);
+}
+
 static void test_sync(void)
 {
+    static const ULONG wine_tag = 0x454e4957; /* WINE */
     KSEMAPHORE semaphore, semaphore2;
     KEVENT manual_event, auto_event, *event;
     KTIMER timer;
+    IO_REMOVE_LOCK remove_lock;
     LARGE_INTEGER timeout;
     OBJECT_ATTRIBUTES attr;
+    HANDLE handle, thread;
     void *objs[2];
     NTSTATUS ret;
-    HANDLE handle;
     int i;
 
     KeInitializeEvent(&manual_event, NotificationEvent, FALSE);
@@ -718,6 +741,42 @@ static void test_sync(void)
     ok(ret == 0, "got %#x\n", ret);
 
     KeCancelTimer(&timer);
+
+    /* remove locks */
+
+    IoInitializeRemoveLockEx(&remove_lock, wine_tag, 0, 0, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
+
+    ret = IoAcquireRemoveLockEx(&remove_lock, NULL, "", 1, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
+    ok(ret == STATUS_SUCCESS, "got %#x\n", ret);
+
+    IoReleaseRemoveLockEx(&remove_lock, NULL, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
+
+    ret = IoAcquireRemoveLockEx(&remove_lock, NULL, "", 1, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
+    ok(ret == STATUS_SUCCESS, "got %#x\n", ret);
+
+    ret = IoAcquireRemoveLockEx(&remove_lock, NULL, "", 1, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
+    ok(ret == STATUS_SUCCESS, "got %#x\n", ret);
+
+    KeInitializeEvent(&remove_lock_ready, SynchronizationEvent, FALSE);
+    thread = create_thread(remove_lock_thread, &remove_lock);
+    ret = wait_single(&remove_lock_ready, -1000 * 10000);
+    ok(!ret, "got %#x\n", ret);
+    ret = wait_single_handle(thread, -50 * 10000);
+    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+
+    ret = IoAcquireRemoveLockEx(&remove_lock, NULL, "", 1, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
+    ok(ret == STATUS_DELETE_PENDING, "got %#x\n", ret);
+
+    IoReleaseRemoveLockEx(&remove_lock, NULL, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
+    ret = wait_single_handle(thread, 0);
+    ok(ret == STATUS_TIMEOUT, "got %#x\n", ret);
+
+    IoReleaseRemoveLockEx(&remove_lock, NULL, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
+    ret = wait_single_handle(thread, -10000 * 10000);
+    ok(ret == STATUS_SUCCESS, "got %#x\n", ret);
+
+    ret = IoAcquireRemoveLockEx(&remove_lock, NULL, "", 1, sizeof(IO_REMOVE_LOCK_COMMON_BLOCK));
+    ok(ret == STATUS_DELETE_PENDING, "got %#x\n", ret);
 }
 
 static void test_call_driver(DEVICE_OBJECT *device)
@@ -741,7 +800,7 @@ static void test_call_driver(DEVICE_OBJECT *device)
     ok(irpsp->MajorFunction == IRP_MJ_FLUSH_BUFFERS, "MajorFunction = %u\n", irpsp->MajorFunction);
     ok(!irpsp->DeviceObject, "DeviceObject = %u\n", irpsp->DeviceObject);
     ok(!irpsp->FileObject, "FileObject = %u\n", irpsp->FileObject);
-    ok(!irpsp->CompletionRoutine, "CompletionRouptine = %p\n", irpsp->CompletionRoutine);
+    ok(!irpsp->CompletionRoutine, "CompletionRoutine = %p\n", irpsp->CompletionRoutine);
 
     status = IoCallDriver(device, irp);
     ok(status == STATUS_PENDING, "IoCallDriver returned %#x\n", status);
@@ -765,7 +824,7 @@ static void test_call_driver(DEVICE_OBJECT *device)
     ok(irpsp->MajorFunction == IRP_MJ_FLUSH_BUFFERS, "MajorFunction = %u\n", irpsp->MajorFunction);
     ok(!irpsp->DeviceObject, "DeviceObject = %u\n", irpsp->DeviceObject);
     ok(!irpsp->FileObject, "FileObject = %u\n", irpsp->FileObject);
-    ok(!irpsp->CompletionRoutine, "CompletionRouptine = %p\n", irpsp->CompletionRoutine);
+    ok(!irpsp->CompletionRoutine, "CompletionRoutine = %p\n", irpsp->CompletionRoutine);
 
     status = wait_single(&event, 0);
     ok(status == STATUS_TIMEOUT, "got %#x\n", status);
@@ -1523,6 +1582,82 @@ static void test_IoAttachDeviceToDeviceStack(void)
     IoDeleteDevice(dev3);
 }
 
+static void test_object_name(void)
+{
+    static const WCHAR event_nameW[] = L"\\wine_test_event";
+    static const WCHAR device_nameW[] = L"\\Device\\WineTestDriver";
+    char buffer[1024];
+    OBJECT_NAME_INFORMATION *name = (OBJECT_NAME_INFORMATION *)buffer;
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING string;
+    ULONG ret_size;
+    HANDLE handle;
+    KEVENT *event;
+    NTSTATUS ret;
+
+    ret_size = 0;
+    ret = ObQueryNameString(lower_device, name, 0, &ret_size);
+    ok(ret == STATUS_INFO_LENGTH_MISMATCH, "got status %#x\n", ret);
+    ok(ret_size == sizeof(*name) + sizeof(device_nameW), "got size %u\n", ret_size);
+
+    ret_size = 0;
+    ret = ObQueryNameString(lower_device, name, sizeof(buffer), &ret_size);
+    ok(!ret, "got status %#x\n", ret);
+    ok(!wcscmp(name->Name.Buffer, device_nameW), "got name %ls\n", name->Name.Buffer);
+    ok(ret_size == sizeof(*name) + sizeof(device_nameW), "got size %u\n", ret_size);
+    ok(name->Name.Length == wcslen(device_nameW) * sizeof(WCHAR), "got length %u\n", name->Name.Length);
+    ok(name->Name.MaximumLength == sizeof(device_nameW), "got maximum length %u\n", name->Name.MaximumLength);
+
+    event = IoCreateSynchronizationEvent(NULL, &handle);
+    ok(!!event, "failed to create event\n");
+
+    ret_size = 0;
+    ret = ObQueryNameString(event, name, sizeof(buffer), &ret_size);
+    ok(!ret, "got status %#x\n", ret);
+    ok(!name->Name.Buffer, "got name %ls\n", name->Name.Buffer);
+    ok(ret_size == sizeof(*name), "got size %u\n", ret_size);
+    ok(!name->Name.Length, "got length %u\n", name->Name.Length);
+    ok(!name->Name.MaximumLength, "got maximum length %u\n", name->Name.MaximumLength);
+
+    ret = ZwClose(handle);
+    ok(!ret, "got status %#x\n", ret);
+
+    RtlInitUnicodeString(&string, event_nameW);
+    InitializeObjectAttributes(&attr, &string, OBJ_KERNEL_HANDLE, NULL, NULL);
+    ret = ZwCreateEvent(&handle, 0, &attr, NotificationEvent, TRUE);
+    ok(!ret, "got status %#x\n", ret);
+    ret = ObReferenceObjectByHandle(handle, 0, *pExEventObjectType, KernelMode, (void **)&event, NULL);
+    ok(!ret, "got status %#x\n", ret);
+
+    ret_size = 0;
+    ret = ObQueryNameString(event, name, sizeof(buffer), &ret_size);
+    ok(!ret, "got status %#x\n", ret);
+    ok(!wcscmp(name->Name.Buffer, event_nameW), "got name %ls\n", name->Name.Buffer);
+    ok(ret_size == sizeof(*name) + sizeof(event_nameW), "got size %u\n", ret_size);
+    ok(name->Name.Length == wcslen(event_nameW) * sizeof(WCHAR), "got length %u\n", name->Name.Length);
+    ok(name->Name.MaximumLength == sizeof(event_nameW), "got maximum length %u\n", name->Name.MaximumLength);
+
+    ObDereferenceObject(event);
+    ret = ZwClose(handle);
+    ok(!ret, "got status %#x\n", ret);
+
+    ret_size = 0;
+    ret = ObQueryNameString(KeGetCurrentThread(), name, sizeof(buffer), &ret_size);
+    ok(!ret, "got status %#x\n", ret);
+    ok(!name->Name.Buffer, "got name %ls\n", name->Name.Buffer);
+    ok(ret_size == sizeof(*name), "got size %u\n", ret_size);
+    ok(!name->Name.Length, "got length %u\n", name->Name.Length);
+    ok(!name->Name.MaximumLength, "got maximum length %u\n", name->Name.MaximumLength);
+
+    ret_size = 0;
+    ret = ObQueryNameString(IoGetCurrentProcess(), name, sizeof(buffer), &ret_size);
+    ok(!ret, "got status %#x\n", ret);
+    ok(!name->Name.Buffer, "got name %ls\n", name->Name.Buffer);
+    ok(ret_size == sizeof(*name), "got size %u\n", ret_size);
+    ok(!name->Name.Length, "got length %u\n", name->Name.Length);
+    ok(!name->Name.MaximumLength, "got maximum length %u\n", name->Name.MaximumLength);
+}
+
 static PIO_WORKITEM main_test_work_item;
 
 static void WINAPI main_test_task(DEVICE_OBJECT *device, void *context)
@@ -1554,6 +1689,26 @@ static void WINAPI main_test_task(DEVICE_OBJECT *device, void *context)
     irp->IoStatus.Information = sizeof(failures);
     IoCompleteRequest(irp, IO_NO_INCREMENT);
 }
+
+#if defined(__i386__) || defined(__x86_64__)
+static void test_executable_pool(void)
+{
+    static const unsigned char bytes[] =
+            { 0xb8, 0xef, 0xbe, 0xad, 0xde, 0xc3 }; /* mov $0xdeadbeef,%eax ; ret */
+    static const ULONG tag = 0x74736574; /* test */
+    int (*func)(void);
+    int ret;
+
+    func = ExAllocatePoolWithTag(NonPagedPool, sizeof(bytes), tag);
+    ok(!!func, "Got NULL memory.\n");
+
+    memcpy(func, bytes, sizeof(bytes));
+    ret = func();
+    ok(ret == 0xdeadbeef, "Got %#x.\n", ret);
+
+    ExFreePoolWithTag(func, tag);
+}
+#endif
 
 static NTSTATUS main_test(DEVICE_OBJECT *device, IRP *irp, IO_STACK_LOCATION *stack)
 {
@@ -1604,6 +1759,10 @@ static NTSTATUS main_test(DEVICE_OBJECT *device, IRP *irp, IO_STACK_LOCATION *st
     test_resource();
     test_lookup_thread();
     test_IoAttachDeviceToDeviceStack();
+    test_object_name();
+#if defined(__i386__) || defined(__x86_64__)
+    test_executable_pool();
+#endif
 
     if (main_test_work_item) return STATUS_UNEXPECTED_IO_ERROR;
 
@@ -1616,22 +1775,19 @@ static NTSTATUS main_test(DEVICE_OBJECT *device, IRP *irp, IO_STACK_LOCATION *st
 
 static NTSTATUS test_basic_ioctl(IRP *irp, IO_STACK_LOCATION *stack, ULONG_PTR *info)
 {
-    ULONG length = stack->Parameters.DeviceIoControl.OutputBufferLength;
+    ULONG length = min(stack->Parameters.DeviceIoControl.OutputBufferLength, sizeof(teststr));
     char *buffer = irp->AssociatedIrp.SystemBuffer;
 
     if (!buffer)
         return STATUS_ACCESS_VIOLATION;
 
-    if (length < sizeof(teststr))
-        return STATUS_BUFFER_TOO_SMALL;
-
-    memcpy(buffer, teststr, sizeof(teststr));
-    *info = sizeof(teststr);
+    memcpy(buffer, teststr, length);
+    *info = length;
 
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS get_cancel_count(IRP *irp, IO_STACK_LOCATION *stack, ULONG_PTR *info)
+static NTSTATUS get_dword(IRP *irp, IO_STACK_LOCATION *stack, ULONG_PTR *info, DWORD value)
 {
     ULONG length = stack->Parameters.DeviceIoControl.OutputBufferLength;
     char *buffer = irp->AssociatedIrp.SystemBuffer;
@@ -1642,9 +1798,44 @@ static NTSTATUS get_cancel_count(IRP *irp, IO_STACK_LOCATION *stack, ULONG_PTR *
     if (length < sizeof(DWORD))
         return STATUS_BUFFER_TOO_SMALL;
 
-    *(DWORD*)buffer = cancel_cnt;
+    *(DWORD*)buffer = value;
     *info = sizeof(DWORD);
     return STATUS_SUCCESS;
+}
+
+static NTSTATUS get_fscontext(IRP *irp, IO_STACK_LOCATION *stack, ULONG_PTR *info)
+{
+    ULONG length = stack->Parameters.DeviceIoControl.OutputBufferLength;
+    char *buffer = irp->AssociatedIrp.SystemBuffer;
+    DWORD *context = stack->FileObject->FsContext;
+
+    if (!buffer || !context)
+        return STATUS_ACCESS_VIOLATION;
+
+    if (length < sizeof(DWORD))
+        return STATUS_BUFFER_TOO_SMALL;
+
+    *(DWORD*)buffer = *context;
+    *info = sizeof(DWORD);
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS return_status(IRP *irp, IO_STACK_LOCATION *stack, ULONG_PTR *info)
+{
+    char *buffer = irp->AssociatedIrp.SystemBuffer;
+    NTSTATUS ret;
+
+    if (!buffer)
+        return STATUS_ACCESS_VIOLATION;
+
+    if (stack->Parameters.DeviceIoControl.InputBufferLength < sizeof(DWORD)
+            || stack->Parameters.DeviceIoControl.OutputBufferLength < 3)
+        return STATUS_BUFFER_TOO_SMALL;
+
+    ret = *(DWORD *)irp->AssociatedIrp.SystemBuffer;
+    memcpy(buffer, "ghi", 3);
+    *info = 3;
+    return ret;
 }
 
 static NTSTATUS test_load_driver_ioctl(IRP *irp, IO_STACK_LOCATION *stack, ULONG_PTR *info)
@@ -1664,12 +1855,46 @@ static NTSTATUS test_load_driver_ioctl(IRP *irp, IO_STACK_LOCATION *stack, ULONG
         return ZwUnloadDriver(&name);
 }
 
+static NTSTATUS test_mismatched_status_ioctl(IRP *irp, IO_STACK_LOCATION *stack, ULONG_PTR *info)
+{
+    ULONG length = stack->Parameters.DeviceIoControl.OutputBufferLength;
+    char *buffer = irp->UserBuffer;
+
+    if (!buffer)
+    {
+        irp->IoStatus.Status = STATUS_ACCESS_VIOLATION;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+        return STATUS_ACCESS_VIOLATION;
+    }
+
+    if (length < sizeof(teststr))
+    {
+        irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    memcpy(buffer, teststr, sizeof(teststr));
+
+    /* This is deliberate; some broken drivers do this */
+    *info = 0;
+    irp->IoStatus.Status = STATUS_UNSUCCESSFUL;
+    IoCompleteRequest(irp, IO_NO_INCREMENT);
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS WINAPI driver_Create(DEVICE_OBJECT *device, IRP *irp)
 {
     IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation( irp );
+    DWORD *context = ExAllocatePool(PagedPool, sizeof(*context));
 
     last_created_file = irpsp->FileObject;
+    ++create_count;
+    if (context)
+        *context = create_count;
+    irpsp->FileObject->FsContext = context;
     create_caller_thread = KeGetCurrentThread();
+    create_irp_thread = irp->Tail.Overlay.Thread;
 
     irp->IoStatus.Status = STATUS_SUCCESS;
     IoCompleteRequest(irp, IO_NO_INCREMENT);
@@ -1701,12 +1926,26 @@ static NTSTATUS WINAPI driver_IoControl(DEVICE_OBJECT *device, IRP *irp)
             IoMarkIrpPending(irp);
             return STATUS_PENDING;
         case IOCTL_WINETEST_GET_CANCEL_COUNT:
-            status = get_cancel_count(irp, stack, &irp->IoStatus.Information);
+            status = get_dword(irp, stack, &irp->IoStatus.Information, cancel_cnt);
+            break;
+        case IOCTL_WINETEST_GET_CREATE_COUNT:
+            status = get_dword(irp, stack, &irp->IoStatus.Information, create_count);
+            break;
+        case IOCTL_WINETEST_GET_CLOSE_COUNT:
+            status = get_dword(irp, stack, &irp->IoStatus.Information, close_count);
+            break;
+        case IOCTL_WINETEST_GET_FSCONTEXT:
+            status = get_fscontext(irp, stack, &irp->IoStatus.Information);
+            break;
+        case IOCTL_WINETEST_RETURN_STATUS:
+            status = return_status(irp, stack, &irp->IoStatus.Information);
             break;
         case IOCTL_WINETEST_DETACH:
             IoDetachDevice(lower_device);
             status = STATUS_SUCCESS;
             break;
+        case IOCTL_WINETEST_MISMATCHED_STATUS:
+            return test_mismatched_status_ioctl(irp, stack, &irp->IoStatus.Information);
         default:
             break;
     }
@@ -1733,6 +1972,10 @@ static NTSTATUS WINAPI driver_FlushBuffers(DEVICE_OBJECT *device, IRP *irp)
 
 static NTSTATUS WINAPI driver_Close(DEVICE_OBJECT *device, IRP *irp)
 {
+    IO_STACK_LOCATION *stack = IoGetCurrentIrpStackLocation(irp);
+    ++close_count;
+    if (stack->FileObject->FsContext)
+        ExFreePool(stack->FileObject->FsContext);
     irp->IoStatus.Status = STATUS_SUCCESS;
     IoCompleteRequest(irp, IO_NO_INCREMENT);
     return STATUS_SUCCESS;
@@ -1753,8 +1996,12 @@ static VOID WINAPI driver_Unload(DRIVER_OBJECT *driver)
 
 NTSTATUS WINAPI DriverEntry(DRIVER_OBJECT *driver, PUNICODE_STRING registry)
 {
+    static const WCHAR IoDriverObjectTypeW[] = {'I','o','D','r','i','v','e','r','O','b','j','e','c','t','T','y','p','e',0};
+    static const WCHAR driver_nameW[] = {'\\','D','r','i','v','e','r',
+            '\\','W','i','n','e','T','e','s','t','D','r','i','v','e','r',0};
     UNICODE_STRING nameW, linkW;
     NTSTATUS status;
+    void *obj;
 
     DbgPrint("loading driver\n");
 
@@ -1768,6 +2015,19 @@ NTSTATUS WINAPI DriverEntry(DRIVER_OBJECT *driver, PUNICODE_STRING registry)
     driver->MajorFunction[IRP_MJ_DEVICE_CONTROL]    = driver_IoControl;
     driver->MajorFunction[IRP_MJ_FLUSH_BUFFERS]     = driver_FlushBuffers;
     driver->MajorFunction[IRP_MJ_CLOSE]             = driver_Close;
+
+    RtlInitUnicodeString(&nameW, IoDriverObjectTypeW);
+    pIoDriverObjectType = MmGetSystemRoutineAddress(&nameW);
+
+    RtlInitUnicodeString(&nameW, driver_nameW);
+    if ((status = ObReferenceObjectByName(&nameW, 0, NULL, 0, *pIoDriverObjectType, KernelMode, NULL, &obj)))
+        return status;
+    if (obj != driver)
+    {
+        ObDereferenceObject(obj);
+        return STATUS_UNSUCCESSFUL;
+    }
+    ObDereferenceObject(obj);
 
     RtlInitUnicodeString(&nameW, device_name);
     RtlInitUnicodeString(&linkW, driver_link);

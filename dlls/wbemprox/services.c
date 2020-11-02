@@ -320,15 +320,7 @@ static HRESULT WINAPI wbem_services_QueryObjectSink(
     return WBEM_E_FAILED;
 }
 
-struct path
-{
-    WCHAR *class;
-    UINT   class_len;
-    WCHAR *filter;
-    UINT   filter_len;
-};
-
-static HRESULT parse_path( const WCHAR *str, struct path **ret )
+HRESULT parse_path( const WCHAR *str, struct path **ret )
 {
     struct path *path;
     const WCHAR *p = str, *q;
@@ -338,31 +330,47 @@ static HRESULT parse_path( const WCHAR *str, struct path **ret )
 
     if (*p == '\\')
     {
-        static const WCHAR cimv2W[] = {'R','O','O','T','\\','C','I','M','V','2'};
-
+        static const WCHAR cimv2W[] = {'R','O','O','T','\\','C','I','M','V','2',0};
         WCHAR server[MAX_COMPUTERNAME_LENGTH+1];
         DWORD server_len = ARRAY_SIZE(server);
 
         p++;
-        if (*p != '\\') return WBEM_E_INVALID_OBJECT_PATH;
+        if (*p != '\\')
+        {
+            heap_free( path );
+            return WBEM_E_INVALID_OBJECT_PATH;
+        }
         p++;
 
         q = p;
         while (*p && *p != '\\') p++;
-        if (!*p) return WBEM_E_INVALID_OBJECT_PATH;
+        if (!*p)
+        {
+            heap_free( path );
+            return WBEM_E_INVALID_OBJECT_PATH;
+        }
 
         len = p - q;
-        if (!GetComputerNameW( server, &server_len ) || server_len != len
-                || memcmp( q, server, server_len * sizeof(WCHAR) ))
+        if (!GetComputerNameW( server, &server_len ) || server_len != len || wcsnicmp( q, server, server_len ))
+        {
+            heap_free( path );
             return WBEM_E_NOT_SUPPORTED;
+        }
 
         q = ++p;
         while (*p && *p != ':') p++;
-        if (!*p) return WBEM_E_INVALID_OBJECT_PATH;
+        if (!*p)
+        {
+            heap_free( path );
+            return WBEM_E_INVALID_OBJECT_PATH;
+        }
 
         len = p - q;
-        if (len != ARRAY_SIZE(cimv2W) || memcmp( q, cimv2W, sizeof(cimv2W) ))
+        if (len != ARRAY_SIZE(cimv2W) - 1 || wcsnicmp( q, cimv2W, ARRAY_SIZE(cimv2W) - 1 ))
+        {
+            heap_free( path );
             return WBEM_E_INVALID_NAMESPACE;
+        }
         p++;
     }
 
@@ -399,14 +407,15 @@ static HRESULT parse_path( const WCHAR *str, struct path **ret )
     return S_OK;
 }
 
-static void free_path( struct path *path )
+void free_path( struct path *path )
 {
+    if (!path) return;
     heap_free( path->class );
     heap_free( path->filter );
     heap_free( path );
 }
 
-static WCHAR *query_from_path( const struct path *path )
+WCHAR *query_from_path( const struct path *path )
 {
     static const WCHAR selectW[] =
         {'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ','%','s',' ',
@@ -821,6 +830,7 @@ static HRESULT WINAPI wbem_services_ExecMethod(
     struct path *path;
     WCHAR *str;
     class_method *func;
+    struct table *table;
     HRESULT hr;
 
     TRACE("%p, %s, %s, %08x, %p, %p, %p, %p\n", iface, debugstr_w(strObjectPath),
@@ -848,10 +858,11 @@ static HRESULT WINAPI wbem_services_ExecMethod(
     hr = EnumWbemClassObject_create( query, (void **)&result );
     if (hr != S_OK) goto done;
 
-    hr = create_class_object( query->view->table->name, result, 0, NULL, &obj );
+    table = get_view_table( query->view, 0 );
+    hr = create_class_object( table->name, result, 0, NULL, &obj );
     if (hr != S_OK) goto done;
 
-    hr = get_method( query->view->table, strMethodName, &func );
+    hr = get_method( table, strMethodName, &func );
     if (hr != S_OK) goto done;
 
     hr = func( obj, pInParams, ppOutParams );

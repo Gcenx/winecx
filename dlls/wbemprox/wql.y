@@ -103,6 +103,12 @@ static WCHAR *get_path( struct parser *parser, const struct string *str )
     int len = str->len;
     WCHAR *ret;
 
+    if (p[0] == '{' && p[len - 1] == '}')
+    {
+        p++;
+        len -= 2;
+    }
+
     if (!(ret = alloc_mem( parser, (len + 1) * sizeof(WCHAR) ))) return NULL;
     memcpy( ret, p, len * sizeof(WCHAR) );
     ret[len] = 0;
@@ -210,7 +216,7 @@ static int wql_lex( void *val, struct parser *parser );
 %lex-param { struct parser *ctx }
 %parse-param { struct parser *ctx }
 %define parse.error verbose
-%pure-parser
+%define api.pure
 
 %union
 {
@@ -283,7 +289,7 @@ associatorsof:
             struct parser *parser = ctx;
             struct view *view;
 
-            hr = create_view( $3, NULL, NULL, NULL, NULL, &view );
+            hr = create_view( VIEW_TYPE_ASSOCIATORS, $3, NULL, NULL, NULL, NULL, &view );
             if (hr != S_OK)
                 YYABORT;
 
@@ -295,7 +301,7 @@ associatorsof:
             struct parser *parser = ctx;
             struct view *view;
 
-            hr = create_view( $3, $5, NULL, NULL, NULL, &view );
+            hr = create_view( VIEW_TYPE_ASSOCIATORS, $3, $5, NULL, NULL, NULL, &view );
             if (hr != S_OK)
                 YYABORT;
 
@@ -310,7 +316,7 @@ select:
             struct parser *parser = ctx;
             struct view *view;
 
-            hr = create_view( NULL, NULL, $3, NULL, NULL, &view );
+            hr = create_view( VIEW_TYPE_SELECT, NULL, NULL, $3, NULL, NULL, &view );
             if (hr != S_OK)
                 YYABORT;
 
@@ -322,7 +328,7 @@ select:
             struct parser *parser = ctx;
             struct view *view;
 
-            hr = create_view( NULL, NULL, $4, $2, NULL, &view );
+            hr = create_view( VIEW_TYPE_SELECT, NULL, NULL, $4, $2, NULL, &view );
             if (hr != S_OK)
                 YYABORT;
 
@@ -334,7 +340,7 @@ select:
             struct parser *parser = ctx;
             struct view *view;
 
-            hr = create_view( NULL, NULL, $4, $2, $6, &view );
+            hr = create_view( VIEW_TYPE_SELECT, NULL, NULL, $4, $2, $6, &view );
             if (hr != S_OK)
                 YYABORT;
 

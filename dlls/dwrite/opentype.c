@@ -1935,10 +1935,9 @@ static BOOL opentype_decode_namerecord(const TT_NAME_V0 *header, BYTE *storage_a
 
 static HRESULT opentype_get_font_strings_from_id(const void *table_data, enum OPENTYPE_STRING_ID id, IDWriteLocalizedStrings **strings)
 {
+    int i, count, candidate_mac, candidate_unicode;
     const TT_NAME_V0 *header;
     BYTE *storage_area = 0;
-    USHORT count = 0;
-    int i, candidate;
     WORD format;
     BOOL exists;
     HRESULT hr;
@@ -1964,7 +1963,7 @@ static HRESULT opentype_get_font_strings_from_id(const void *table_data, enum OP
     count = GET_BE_WORD(header->count);
 
     exists = FALSE;
-    candidate = -1;
+    candidate_unicode = candidate_mac = -1;
     for (i = 0; i < count; i++) {
         const TT_NameRecord *record = &header->nameRecord[i];
         USHORT platform;
@@ -1972,38 +1971,47 @@ static HRESULT opentype_get_font_strings_from_id(const void *table_data, enum OP
         if (GET_BE_WORD(record->nameID) != id)
             continue;
 
-        /* Right now only accept unicode and windows encoded fonts */
         platform = GET_BE_WORD(record->platformID);
-        if (platform != OPENTYPE_PLATFORM_UNICODE &&
-            platform != OPENTYPE_PLATFORM_MAC &&
-            platform != OPENTYPE_PLATFORM_WIN)
+        switch (platform)
         {
-            FIXME("platform %i not supported\n", platform);
-            continue;
+            /* Skip Unicode or Mac entries for now, fonts tend to duplicate those
+               strings as WIN platform entries. If font does not have WIN entry for
+               this id, we will use Mac or Unicode platform entry while assuming
+               en-US locale. */
+            case OPENTYPE_PLATFORM_UNICODE:
+                if (candidate_unicode == -1)
+                    candidate_unicode = i;
+                break;
+            case OPENTYPE_PLATFORM_MAC:
+                if (candidate_mac == -1)
+                    candidate_mac = i;
+                break;
+            case OPENTYPE_PLATFORM_WIN:
+                if (opentype_decode_namerecord(header, storage_area, i, *strings))
+                    exists = TRUE;
+                break;
+            default:
+                FIXME("platform %i not supported\n", platform);
+                break;
         }
-
-        /* Skip such entries for now, fonts tend to duplicate those strings as
-           WIN platform entries. If font does not have WIN or MAC entry for this id, we will
-           use this Unicode platform entry while assuming en-US locale. */
-        if (platform == OPENTYPE_PLATFORM_UNICODE) {
-            candidate = i;
-            continue;
-        }
-
-        if (!opentype_decode_namerecord(header, storage_area, i, *strings))
-            continue;
-
-        exists = TRUE;
     }
 
-    if (!exists) {
-        if (candidate != -1)
-            exists = opentype_decode_namerecord(header, storage_area, candidate, *strings);
-        else {
+    if (!exists)
+    {
+        if (candidate_mac != -1)
+            exists = opentype_decode_namerecord(header, storage_area, candidate_mac, *strings);
+        if (!exists && candidate_unicode != -1)
+            exists = opentype_decode_namerecord(header, storage_area, candidate_unicode, *strings);
+
+        if (!exists)
+        {
             IDWriteLocalizedStrings_Release(*strings);
             *strings = NULL;
         }
     }
+
+    if (*strings)
+        sort_localizedstrings(*strings);
 
     return exists ? S_OK : E_FAIL;
 }
@@ -2432,7 +2440,7 @@ void opentype_colr_next_glyph(const struct dwrite_fonttable *colr, struct dwrite
     }
 }
 
-BOOL opentype_has_vertical_variants(IDWriteFontFace4 *fontface)
+BOOL opentype_has_vertical_variants(IDWriteFontFace5 *fontface)
 {
     const struct gpos_gsub_header *header;
     const struct ot_feature_list *featurelist;
@@ -2444,7 +2452,7 @@ BOOL opentype_has_vertical_variants(IDWriteFontFace4 *fontface)
     UINT32 size;
     HRESULT hr;
 
-    hr = IDWriteFontFace4_TryGetFontTable(fontface, MS_GSUB_TAG, &data, &size, &context, &exists);
+    hr = IDWriteFontFace5_TryGetFontTable(fontface, MS_GSUB_TAG, &data, &size, &context, &exists);
     if (FAILED(hr) || !exists)
         return FALSE;
 
@@ -2502,12 +2510,12 @@ BOOL opentype_has_vertical_variants(IDWriteFontFace4 *fontface)
         }
     }
 
-    IDWriteFontFace4_ReleaseFontTable(fontface, context);
+    IDWriteFontFace5_ReleaseFontTable(fontface, context);
 
     return ret;
 }
 
-static BOOL opentype_has_font_table(IDWriteFontFace4 *fontface, UINT32 tag)
+static BOOL opentype_has_font_table(IDWriteFontFace5 *fontface, UINT32 tag)
 {
     BOOL exists = FALSE;
     const void *data;
@@ -2515,17 +2523,17 @@ static BOOL opentype_has_font_table(IDWriteFontFace4 *fontface, UINT32 tag)
     UINT32 size;
     HRESULT hr;
 
-    hr = IDWriteFontFace4_TryGetFontTable(fontface, tag, &data, &size, &context, &exists);
+    hr = IDWriteFontFace5_TryGetFontTable(fontface, tag, &data, &size, &context, &exists);
     if (FAILED(hr))
         return FALSE;
 
     if (exists)
-        IDWriteFontFace4_ReleaseFontTable(fontface, context);
+        IDWriteFontFace5_ReleaseFontTable(fontface, context);
 
     return exists;
 }
 
-static unsigned int opentype_get_sbix_formats(IDWriteFontFace4 *fontface)
+static unsigned int opentype_get_sbix_formats(IDWriteFontFace5 *fontface)
 {
     unsigned int num_strikes, num_glyphs, i, j, ret = 0;
     const struct sbix_header *sbix_header;
@@ -2539,7 +2547,7 @@ static unsigned int opentype_get_sbix_formats(IDWriteFontFace4 *fontface)
 
     num_glyphs = table_read_be_word(&table, FIELD_OFFSET(struct maxp, num_glyphs));
 
-    IDWriteFontFace4_ReleaseFontTable(fontface, table.context);
+    IDWriteFontFace5_ReleaseFontTable(fontface, table.context);
 
     memset(&table, 0, sizeof(table));
     table.exists = TRUE;
@@ -2592,12 +2600,12 @@ static unsigned int opentype_get_sbix_formats(IDWriteFontFace4 *fontface)
         }
     }
 
-    IDWriteFontFace4_ReleaseFontTable(fontface, table.context);
+    IDWriteFontFace5_ReleaseFontTable(fontface, table.context);
 
     return ret;
 }
 
-static unsigned int opentype_get_cblc_formats(IDWriteFontFace4 *fontface)
+static unsigned int opentype_get_cblc_formats(IDWriteFontFace5 *fontface)
 {
     const unsigned int format_mask = DWRITE_GLYPH_IMAGE_FORMATS_PNG |
             DWRITE_GLYPH_IMAGE_FORMATS_PREMULTIPLIED_B8G8R8A8;
@@ -2629,12 +2637,12 @@ static unsigned int opentype_get_cblc_formats(IDWriteFontFace4 *fontface)
         }
     }
 
-    IDWriteFontFace4_ReleaseFontTable(fontface, cblc.context);
+    IDWriteFontFace5_ReleaseFontTable(fontface, cblc.context);
 
     return ret;
 }
 
-UINT32 opentype_get_glyph_image_formats(IDWriteFontFace4 *fontface)
+UINT32 opentype_get_glyph_image_formats(IDWriteFontFace5 *fontface)
 {
     UINT32 ret = DWRITE_GLYPH_IMAGE_FORMATS_NONE;
 

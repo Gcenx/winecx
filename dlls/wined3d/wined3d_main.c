@@ -36,6 +36,7 @@ struct wined3d_wndproc
     struct wined3d *wined3d;
     HWND window;
     BOOL unicode;
+    BOOL filter;
     WNDPROC proc;
     struct wined3d_device *device;
     uint32_t flags;
@@ -571,11 +572,32 @@ static struct wined3d_wndproc *wined3d_find_wndproc(HWND window, struct wined3d 
     return NULL;
 }
 
+BOOL wined3d_filter_messages(HWND window, BOOL filter)
+{
+    struct wined3d_wndproc *entry;
+    BOOL ret;
+
+    wined3d_wndproc_mutex_lock();
+
+    if (!(entry = wined3d_find_wndproc(window, NULL)))
+    {
+        wined3d_wndproc_mutex_unlock();
+        return FALSE;
+    }
+
+    ret = entry->filter;
+    entry->filter = filter;
+
+    wined3d_wndproc_mutex_unlock();
+
+    return ret;
+}
+
 static LRESULT CALLBACK wined3d_wndproc(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
 {
     struct wined3d_wndproc *entry;
     struct wined3d_device *device;
-    BOOL unicode;
+    BOOL unicode, filter;
     WNDPROC proc;
 
     wined3d_wndproc_mutex_lock();
@@ -589,11 +611,24 @@ static LRESULT CALLBACK wined3d_wndproc(HWND window, UINT message, WPARAM wparam
 
     device = entry->device;
     unicode = entry->unicode;
+    filter = entry->filter;
     proc = entry->proc;
     wined3d_wndproc_mutex_unlock();
 
     if (device)
+    {
+        if (filter && message != WM_DISPLAYCHANGE)
+        {
+            TRACE("Filtering message: window %p, message %#x, wparam %#lx, lparam %#lx.\n",
+                    window, message, wparam, lparam);
+
+            if (unicode)
+                return DefWindowProcW(window, message, wparam, lparam);
+            return DefWindowProcA(window, message, wparam, lparam);
+        }
+
         return device_process_message(device, window, unicode, message, wparam, lparam, proc);
+    }
     if (unicode)
         return CallWindowProcW(proc, window, message, wparam, lparam);
     return CallWindowProcA(proc, window, message, wparam, lparam);
@@ -617,7 +652,7 @@ static LRESULT CALLBACK wined3d_hook_proc(int code, WPARAM wparam, LPARAM lparam
         {
             swapchain = hook_table.swapchains[i].swapchain;
 
-            if (swapchain->device_window != msg->hwnd)
+            if (swapchain->state.device_window != msg->hwnd)
                 continue;
 
             if ((entry = wined3d_find_wndproc(msg->hwnd, swapchain->device->wined3d))
@@ -627,7 +662,8 @@ static LRESULT CALLBACK wined3d_hook_proc(int code, WPARAM wparam, LPARAM lparam
 
             wined3d_swapchain_get_desc(swapchain, &swapchain_desc);
             swapchain_desc.windowed = !swapchain_desc.windowed;
-            wined3d_swapchain_set_fullscreen(swapchain, &swapchain_desc, NULL);
+            wined3d_swapchain_state_set_fullscreen(&swapchain->state, &swapchain_desc,
+                    swapchain->device->wined3d, swapchain->device->adapter->ordinal, NULL);
 
             wined3d_wndproc_mutex_unlock();
 
@@ -809,7 +845,7 @@ void wined3d_hook_swapchain(struct wined3d_swapchain *swapchain)
 
     swapchain_entry = &hook_table.swapchains[hook_table.swapchain_count++];
     swapchain_entry->swapchain = swapchain;
-    swapchain_entry->thread_id = GetWindowThreadProcessId(swapchain->device_window, NULL);
+    swapchain_entry->thread_id = GetWindowThreadProcessId(swapchain->state.device_window, NULL);
 
     if ((hook = wined3d_find_hook(swapchain_entry->thread_id)))
     {
@@ -881,7 +917,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
             break;
 
         case DLL_THREAD_DETACH:
-            if (!context_set_current(NULL))
+            if (!wined3d_context_gl_set_current(NULL))
             {
                 ERR("Failed to clear current context.\n");
             }

@@ -445,10 +445,16 @@ static void send_parent_notify( HWND hwnd, UINT msg )
  *
  * Trigger an update of the window's driver state and surface.
  */
-static void update_window_state( HWND hwnd )
+void update_window_state( HWND hwnd )
 {
     DPI_AWARENESS_CONTEXT context;
     RECT window_rect, client_rect, valid_rects[2];
+
+    if (!WIN_IsCurrentThread( hwnd ))
+    {
+        PostMessageW( hwnd, WM_WINE_UPDATEWINDOWSTATE, 0, 0 );
+        return;
+    }
 
     context = SetThreadDpiAwarenessContext( GetWindowDpiAwarenessContext( hwnd ));
     WIN_GetRectangles( hwnd, COORDS_PARENT, &window_rect, &client_rect );
@@ -3895,9 +3901,13 @@ UINT WINAPI GetWindowModuleFileNameW( HWND hwnd, LPWSTR module, UINT size )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetWindowInfo( HWND hwnd, PWINDOWINFO pwi)
 {
-    if (!pwi) return FALSE;
-    if (!WIN_GetRectangles( hwnd, COORDS_SCREEN, &pwi->rcWindow, &pwi->rcClient )) return FALSE;
+    RECT rcWindow, rcClient;
 
+    if (!WIN_GetRectangles( hwnd, COORDS_SCREEN, &rcWindow, &rcClient )) return FALSE;
+    if (!pwi) return FALSE;
+
+    pwi->rcWindow = rcWindow;
+    pwi->rcClient = rcClient;
     pwi->dwStyle = GetWindowLongW(hwnd, GWL_STYLE);
     pwi->dwExStyle = GetWindowLongW(hwnd, GWL_EXSTYLE);
     pwi->dwWindowStatus = ((GetActiveWindow() == hwnd) ? WS_ACTIVECAPTION : 0);

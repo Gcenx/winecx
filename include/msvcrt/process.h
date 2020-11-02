@@ -10,7 +10,7 @@
 
 #include "wine/winheader_enter.h"
 
-#include <crtdefs.h>
+#include <corecrt.h>
 
 /* Process creation flags */
 #define _P_WAIT    0

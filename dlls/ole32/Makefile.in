@@ -17,7 +17,6 @@ C_SRCS = \
 	datacache.c \
 	defaulthandler.c \
 	dictionary.c \
-	enumx.c \
 	errorinfo.c \
 	filelockbytes.c \
 	filemoniker.c \
@@ -48,6 +47,7 @@ RC_SRCS = ole32res.rc
 IDL_SRCS = \
 	dcom.idl \
 	irot.idl \
+	irpcss.idl \
 	ole32_objidl.idl \
 	ole32_oleidl.idl \
 	ole32_unknwn.idl

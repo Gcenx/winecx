@@ -27,16 +27,8 @@
 #include <stdio.h>
 
 static HMODULE hdll;
-static LONG (WINAPI *pChangeDisplaySettingsExA)(LPCSTR, LPDEVMODEA, HWND, DWORD, LPVOID);
-static LONG (WINAPI *pChangeDisplaySettingsExW)(LPCWSTR, LPDEVMODEW, HWND, DWORD, LPVOID);
-static BOOL (WINAPI *pEnumDisplayDevicesA)(LPCSTR,DWORD,LPDISPLAY_DEVICEA,DWORD);
-static BOOL (WINAPI *pEnumDisplayMonitors)(HDC,LPRECT,MONITORENUMPROC,LPARAM);
-static BOOL (WINAPI *pGetMonitorInfoA)(HMONITOR,LPMONITORINFO);
-static BOOL (WINAPI *pGetMonitorInfoW)(HMONITOR,LPMONITORINFO);
-static HMONITOR (WINAPI *pMonitorFromPoint)(POINT,DWORD);
-static HMONITOR (WINAPI *pMonitorFromRect)(LPCRECT,DWORD);
-static HMONITOR (WINAPI *pMonitorFromWindow)(HWND,DWORD);
 static LONG (WINAPI *pGetDisplayConfigBufferSizes)(UINT32,UINT32*,UINT32*);
+static DPI_AWARENESS_CONTEXT (WINAPI *pSetThreadDpiAwarenessContext)(DPI_AWARENESS_CONTEXT);
 
 static void init_function_pointers(void)
 {
@@ -47,16 +39,8 @@ static void init_function_pointers(void)
     if(!p ## func) \
       trace("GetProcAddress(%s) failed\n", #func);
 
-    GET_PROC(ChangeDisplaySettingsExA)
-    GET_PROC(ChangeDisplaySettingsExW)
-    GET_PROC(EnumDisplayDevicesA)
-    GET_PROC(EnumDisplayMonitors)
     GET_PROC(GetDisplayConfigBufferSizes)
-    GET_PROC(GetMonitorInfoA)
-    GET_PROC(GetMonitorInfoW)
-    GET_PROC(MonitorFromPoint)
-    GET_PROC(MonitorFromRect)
-    GET_PROC(MonitorFromWindow)
+    GET_PROC(SetThreadDpiAwarenessContext)
 
 #undef GET_PROC
 }
@@ -69,7 +53,7 @@ static BOOL CALLBACK monitor_enum_proc(HMONITOR hmon, HDC hdc, LPRECT lprc,
 
     mi.cbSize = sizeof(mi);
 
-    ok(pGetMonitorInfoA(hmon, (MONITORINFO*)&mi), "GetMonitorInfo failed\n");
+    ok(GetMonitorInfoA(hmon, (MONITORINFO*)&mi), "GetMonitorInfo failed\n");
     if (mi.dwFlags & MONITORINFOF_PRIMARY)
         strcpy(primary, mi.szDevice);
 
@@ -81,19 +65,13 @@ static int monitor_count = 0;
 
 static void test_enumdisplaydevices_adapter(int index, const DISPLAY_DEVICEA *device, DWORD flags)
 {
-    char video_name[32];
-    char video_value[128];
     char buffer[128];
     int number;
     int vendor_id;
     int device_id;
     int subsys_id;
     int revision_id;
-    size_t length;
-    HKEY hkey;
     HDC hdc;
-    DWORD size;
-    LSTATUS ls;
 
     adapter_count++;
 
@@ -102,30 +80,14 @@ static void test_enumdisplaydevices_adapter(int index, const DISPLAY_DEVICEA *de
        device->DeviceName);
 
     /* DeviceKey */
-    /* win7 is the only OS version where \Device\Video? value in HLKM\HARDWARE\DEVICEMAP\VIDEO are not in order with adapter index. */
-    if (GetVersion() != 0x1db10106 || !strcmp(winetest_platform, "wine"))
-    {
-        sprintf(video_name, "\\Device\\Video%d", index);
-        ls = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DEVICEMAP\\VIDEO", 0, KEY_READ, &hkey);
-        ok(!ls, "#%d: failed to open registry, error: %#x\n", index, ls);
-        if (!ls)
-        {
-            memset(video_value, 0, sizeof(video_value));
-            size = sizeof(video_value);
-            ls = RegQueryValueExA(hkey, video_name, NULL, NULL, (unsigned char *)video_value, &size);
-            ok(!ls, "#%d: failed to get registry value, error: %#x\n", index, ls);
-            RegCloseKey(hkey);
-            ok(!strcmp(video_value, device->DeviceKey), "#%d: wrong DeviceKey: %s\n", index, device->DeviceKey);
-        }
-    }
-    else
-        ok(sscanf(device->DeviceKey, "\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Video\\%[^\\]\\%04d", buffer, &number) == 2,
-           "#%d: wrong DeviceKey %s\n", index, device->DeviceKey);
+    /* \Device\Video? value in HLKM\HARDWARE\DEVICEMAP\VIDEO are not necessarily in order with adapter index.
+     * Check format only */
+    ok(sscanf(device->DeviceKey, "\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Video\\%[^\\]\\%04d", buffer, &number) == 2,
+       "#%d: wrong DeviceKey %s\n", index, device->DeviceKey);
 
     /* DeviceString */
-    length = strlen(device->DeviceString);
-    ok(broken(length == 0) || /* XP on Testbot will return an empty string, whereas XP on real machine doesn't. Probably a bug in virtual adapter driver */
-       length > 0, "#%d: expect DeviceString not empty\n", index);
+    ok(broken(!*device->DeviceString) || /* XP on Testbot will return an empty string, whereas XP on real machine doesn't. Probably a bug in virtual adapter driver */
+       *device->DeviceString, "#%d: expect DeviceString not empty\n", index);
 
     /* StateFlags */
     if (index == 0)
@@ -159,9 +121,8 @@ static void test_enumdisplaydevices_adapter(int index, const DISPLAY_DEVICEA *de
 }
 
 static void test_enumdisplaydevices_monitor(int adapter_index, int monitor_index, const char *adapter_name,
-                                            const DISPLAY_DEVICEA *device, DWORD flags)
+                                            DISPLAY_DEVICEA *device, DWORD flags)
 {
-    static const char device_id_prefix[] = "MONITOR\\Default_Monitor\\{4d36e96e-e325-11ce-bfc1-08002be10318}\\";
     static const char device_key_prefix[] = "\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Class"
                                             "\\{4d36e96e-e325-11ce-bfc1-08002be10318}\\";
     char monitor_name[32];
@@ -176,7 +137,7 @@ static void test_enumdisplaydevices_monitor(int adapter_index, int monitor_index
     ok(!strcmp(monitor_name, device->DeviceName), "#%d: expect %s, got %s\n", monitor_index, monitor_name, device->DeviceName);
 
     /* DeviceString */
-    ok(strlen(device->DeviceString) > 0, "#%d: expect DeviceString not empty\n", monitor_index);
+    ok(*device->DeviceString, "#%d: expect DeviceString not empty\n", monitor_index);
 
     /* StateFlags */
     if (adapter_index == 0 && monitor_index == 0)
@@ -186,24 +147,22 @@ static void test_enumdisplaydevices_monitor(int adapter_index, int monitor_index
            device->StateFlags);
 
     /* DeviceID */
-    lstrcpynA(buffer, device->DeviceID, sizeof(device_id_prefix));
+    CharLowerA(device->DeviceID);
     if (flags & EDD_GET_DEVICE_INTERFACE_NAME)
-    {   /* HKLM\SYSTEM\CurrentControlSet\Enum\DISPLAY\Default_Monitor\4&2abfaa30&0&UID0 GUID_DEVINTERFACE_MONITOR
-         *                                                   ^                ^                     ^
-         * Expect format                  \\?\DISPLAY#Default_Monitor#4&2abfaa30&0&UID0#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7} */
+    {   /* HKLM\SYSTEM\CurrentControlSet\Enum\DISPLAY\[monitor name]\[instance id] GUID_DEVINTERFACE_MONITOR
+         *                                                  ^             ^                     ^
+         * Expect format                  \\?\DISPLAY#[monitor name]#[instance id]#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7} */
         ok(strlen(device->DeviceID) == 0 || /* vista ~ win7 */
-            sscanf(device->DeviceID, "\\\\?\\DISPLAY#Default_Monitor#%[^#]#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}", buffer) == 1 || /* win8+ */
-            (!lstrcmpiA(buffer, device_id_prefix) &&
-             sscanf(device->DeviceID + sizeof(device_id_prefix) - 1, "%04d", &number) == 1), /* XP/2003 ignores EDD_GET_DEVICE_INTERFACE_NAME */
-            "#%d: wrong DeviceID : %s\n", monitor_index, device->DeviceID);
+           sscanf(device->DeviceID, "\\\\?\\display#%[^#]#%[^#]#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}", buffer, buffer) == 2 || /* win8+ */
+           sscanf(device->DeviceID, "monitor\\%[^\\]\\{4d36e96e-e325-11ce-bfc1-08002be10318}\\%04d", buffer, &number) == 2, /* XP/2003 ignores EDD_GET_DEVICE_INTERFACE_NAME */
+           "#%d: wrong DeviceID : %s\n", monitor_index, device->DeviceID);
     }
     else
     {
-        /* Expect HarewareID value data + Driver value data in HKLM\SYSTEM\CurrentControlSet\Enum\DISPLAY\Default_Monitor\{Instance} */
+        /* Expect HarewareID value data + Driver value data in HKLM\SYSTEM\CurrentControlSet\Enum\DISPLAY\[monitor name]\{instance} */
         /* But we don't know which monitor instance this belongs to, so check format instead */
-        ok(!lstrcmpiA(buffer, device_id_prefix), "#%d wrong DeviceID : %s\n", monitor_index, device->DeviceID);
-        ok(sscanf(device->DeviceID + sizeof(device_id_prefix) - 1, "%04d", &number) == 1,
-           "#%d wrong DeviceID : %s\n", monitor_index, device->DeviceID);
+        ok(sscanf(device->DeviceID, "monitor\\%[^\\]\\{4d36e96e-e325-11ce-bfc1-08002be10318}\\%04d", buffer, &number) == 2,
+           "#%d: wrong DeviceID : %s\n", monitor_index, device->DeviceID);
     }
 
     /* DeviceKey */
@@ -226,20 +185,14 @@ static void test_enumdisplaydevices(void)
     int monitor_index;
     BOOL ret;
 
-    if (!pEnumDisplayDevicesA)
-    {
-        win_skip("EnumDisplayDevicesA is not available\n");
-        return;
-    }
-
     /* Doesn't accept \\.\DISPLAY */
     dd.cb = sizeof(dd);
-    ret = pEnumDisplayDevicesA("\\\\.\\DISPLAY", 0, &dd, 0);
+    ret = EnumDisplayDevicesA("\\\\.\\DISPLAY", 0, &dd, 0);
     ok(!ret, "Expect failure\n");
 
     /* Enumeration */
     for (flag_index = 0; flag_index < ARRAY_SIZE(flags); flag_index++)
-        for (adapter_index = 0; pEnumDisplayDevicesA(NULL, adapter_index, &dd, flags[flag_index]); adapter_index++)
+        for (adapter_index = 0; EnumDisplayDevicesA(NULL, adapter_index, &dd, flags[flag_index]); adapter_index++)
         {
             lstrcpyA(adapter_name, dd.DeviceName);
 
@@ -251,7 +204,7 @@ static void test_enumdisplaydevices(void)
 
             test_enumdisplaydevices_adapter(adapter_index, &dd, flags[flag_index]);
 
-            for (monitor_index = 0; pEnumDisplayDevicesA(adapter_name, monitor_index, &dd, flags[flag_index]);
+            for (monitor_index = 0; EnumDisplayDevicesA(adapter_name, monitor_index, &dd, flags[flag_index]);
                  monitor_index++)
                 test_enumdisplaydevices_monitor(adapter_index, monitor_index, adapter_name, &dd, flags[flag_index]);
         }
@@ -260,18 +213,12 @@ static void test_enumdisplaydevices(void)
     /* XP on Testbot doesn't report a monitor, whereas XP on real machine does */
     ok(broken(monitor_count == 0) || monitor_count > 0, "Expect at least one monitor found\n");
 
-    if (!pEnumDisplayMonitors || !pGetMonitorInfoA)
-    {
-        win_skip("EnumDisplayMonitors or GetMonitorInfoA are not available\n");
-        return;
-    }
-
-    ret = pEnumDisplayDevicesA(NULL, 0, &dd, 0);
+    ret = EnumDisplayDevicesA(NULL, 0, &dd, 0);
     ok(ret, "Expect success\n");
     lstrcpyA(primary_device_name, dd.DeviceName);
 
     primary_monitor_device_name[0] = 0;
-    ret = pEnumDisplayMonitors(NULL, NULL, monitor_enum_proc, (LPARAM)primary_monitor_device_name);
+    ret = EnumDisplayMonitors(NULL, NULL, monitor_enum_proc, (LPARAM)primary_monitor_device_name);
     ok(ret, "EnumDisplayMonitors failed\n");
     ok(!strcmp(primary_monitor_device_name, primary_device_name),
        "monitor device name %s, device name %s\n", primary_monitor_device_name,
@@ -285,20 +232,20 @@ struct vid_mode
 };
 
 static const struct vid_mode vid_modes_test[] = {
-    {640, 480, 0, 0, DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL | DM_DISPLAYFREQUENCY, 0},
-    {640, 480, 0, 0, DM_PELSWIDTH | DM_PELSHEIGHT |                 DM_DISPLAYFREQUENCY, 1},
-    {640, 480, 0, 0, DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL                      , 0},
-    {640, 480, 0, 0, DM_PELSWIDTH | DM_PELSHEIGHT                                      , 1},
-    {640, 480, 0, 0,                                DM_BITSPERPEL                      , 0},
-    {640, 480, 0, 0,                                                DM_DISPLAYFREQUENCY, 0},
+    {1024, 768, 0, 0, DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL | DM_DISPLAYFREQUENCY, 0},
+    {1024, 768, 0, 0, DM_PELSWIDTH | DM_PELSHEIGHT |                 DM_DISPLAYFREQUENCY, 1},
+    {1024, 768, 0, 0, DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL                      , 0},
+    {1024, 768, 0, 0, DM_PELSWIDTH | DM_PELSHEIGHT                                      , 1},
+    {1024, 768, 0, 0,                                DM_BITSPERPEL                      , 0},
+    {1024, 768, 0, 0,                                                DM_DISPLAYFREQUENCY, 0},
 
     {0, 0, 0, 0, DM_PELSWIDTH, 0},
     {0, 0, 0, 0, DM_PELSHEIGHT, 0},
 
-    {640, 480, 0, 0, DM_PELSWIDTH, 0},
-    {640, 480, 0, 0, DM_PELSHEIGHT, 0},
-    {  0, 480, 0, 0, DM_PELSWIDTH | DM_PELSHEIGHT, 0},
-    {640,   0, 0, 0, DM_PELSWIDTH | DM_PELSHEIGHT, 0},
+    {1024, 768, 0, 0, DM_PELSWIDTH, 0},
+    {1024, 768, 0, 0, DM_PELSHEIGHT, 0},
+    {   0, 768, 0, 0, DM_PELSWIDTH | DM_PELSHEIGHT, 0},
+    {1024,   0, 0, 0, DM_PELSWIDTH | DM_PELSHEIGHT, 0},
 
     /* the following test succeeds under XP SP3
     {0, 0, 0, 0, DM_DISPLAYFREQUENCY, 0}
@@ -307,17 +254,12 @@ static const struct vid_mode vid_modes_test[] = {
 
 static void test_ChangeDisplaySettingsEx(void)
 {
+    DPI_AWARENESS_CONTEXT context = NULL;
     DEVMODEA dm;
     DEVMODEW dmW;
     DWORD width;
     LONG res;
     int i;
-
-    if (!pChangeDisplaySettingsExA)
-    {
-        win_skip("ChangeDisplaySettingsExA is not available\n");
-        return;
-    }
 
     SetLastError(0xdeadbeef);
     res = EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &dm);
@@ -334,7 +276,7 @@ static void test_ChangeDisplaySettingsEx(void)
 
     /* crashes under XP SP3 for large dmDriverExtra values */
     dm.dmDriverExtra = 1;
-    res = pChangeDisplaySettingsExA(NULL, &dm, NULL, CDS_TEST, NULL);
+    res = ChangeDisplaySettingsExA(NULL, &dm, NULL, CDS_TEST, NULL);
     ok(res == DISP_CHANGE_SUCCESSFUL,
        "ChangeDisplaySettingsExW returned %d, expected DISP_CHANGE_SUCCESSFUL\n", res);
     ok(dm.dmDriverExtra == 1, "ChangeDisplaySettingsExA shouldn't reset dmDriverExtra to 0\n");
@@ -356,7 +298,7 @@ static void test_ChangeDisplaySettingsEx(void)
 
     /* Apparently XP treats dmDriverExtra being != 0 as an error */
     dmW.dmDriverExtra = 1;
-    res = pChangeDisplaySettingsExW(NULL, &dmW, NULL, CDS_TEST, NULL);
+    res = ChangeDisplaySettingsExW(NULL, &dmW, NULL, CDS_TEST, NULL);
     if (GetLastError() != ERROR_CALL_NOT_IMPLEMENTED)
     {
         ok(res == DISP_CHANGE_SUCCESSFUL,
@@ -370,7 +312,7 @@ static void test_ChangeDisplaySettingsEx(void)
     memset(&dm, 0, sizeof(dm));
     dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
     dm.dmPelsWidth = width;
-    res = pChangeDisplaySettingsExA(NULL, &dm, NULL, CDS_TEST, NULL);
+    res = ChangeDisplaySettingsExA(NULL, &dm, NULL, CDS_TEST, NULL);
     ok(res == DISP_CHANGE_SUCCESSFUL ||
        res == DISP_CHANGE_BADMODE || /* Win98, WinMe */
        res == DISP_CHANGE_FAILED, /* NT4 */
@@ -380,13 +322,18 @@ static void test_ChangeDisplaySettingsEx(void)
     dmW.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
     dmW.dmPelsWidth = width;
     SetLastError(0xdeadbeef);
-    res = pChangeDisplaySettingsExW(NULL, &dmW, NULL, CDS_TEST, NULL);
+    res = ChangeDisplaySettingsExW(NULL, &dmW, NULL, CDS_TEST, NULL);
     if (GetLastError() != ERROR_CALL_NOT_IMPLEMENTED)
         ok(res == DISP_CHANGE_FAILED ||
            res == DISP_CHANGE_BADPARAM ||  /* NT4 */
            res == DISP_CHANGE_BADMODE /* XP SP3 */,
            "ChangeDisplaySettingsExW returned %d\n", res);
 
+    /* Test clip rectangle after resolution changes */
+    /* GetClipCursor always returns result in physical pixels but GetSystemMetrics(SM_CX/CYVIRTUALSCREEN) are not.
+     * Set per-monitor aware context so that virtual screen rectangles are in physical pixels */
+    if (pSetThreadDpiAwarenessContext)
+        context = pSetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE);
     memset(&dm, 0, sizeof(dm));
     dm.dmSize = sizeof(dm);
 
@@ -397,7 +344,7 @@ static void test_ChangeDisplaySettingsEx(void)
         dm.dmBitsPerPel       = vid_modes_test[i].bpp;
         dm.dmDisplayFrequency = vid_modes_test[i].freq;
         dm.dmFields           = vid_modes_test[i].fields;
-        res = pChangeDisplaySettingsExA(NULL, &dm, NULL, CDS_TEST, NULL);
+        res = ChangeDisplaySettingsExA(NULL, &dm, NULL, CDS_TEST, NULL);
         ok(vid_modes_test[i].must_succeed ?
            (res == DISP_CHANGE_SUCCESSFUL || res == DISP_CHANGE_RESTART) :
            (res == DISP_CHANGE_SUCCESSFUL || res == DISP_CHANGE_RESTART ||
@@ -443,7 +390,9 @@ static void test_ChangeDisplaySettingsEx(void)
             ClipCursor(&virt);
         }
     }
-    res = pChangeDisplaySettingsExA(NULL, NULL, NULL, CDS_RESET, NULL);
+    if (pSetThreadDpiAwarenessContext && context)
+        pSetThreadDpiAwarenessContext(context);
+    res = ChangeDisplaySettingsExA(NULL, NULL, NULL, CDS_RESET, NULL);
     ok(res == DISP_CHANGE_SUCCESSFUL, "Failed to reset default resolution: %d\n", res);
 }
 
@@ -487,76 +436,64 @@ static void test_monitors(void)
         {0xdeadbeef, FALSE},
     };
 
-    if (!pMonitorFromPoint || !pMonitorFromWindow || !pMonitorFromRect)
-    {
-        win_skip("MonitorFromPoint, MonitorFromWindow, or MonitorFromRect is not available\n");
-        return;
-    }
-
     pt.x = pt.y = 0;
-    primary = pMonitorFromPoint( pt, MONITOR_DEFAULTTOPRIMARY );
+    primary = MonitorFromPoint( pt, MONITOR_DEFAULTTOPRIMARY );
     ok( primary != 0, "couldn't get primary monitor\n" );
 
-    monitor = pMonitorFromWindow( 0, MONITOR_DEFAULTTONULL );
+    monitor = MonitorFromWindow( 0, MONITOR_DEFAULTTONULL );
     ok( !monitor, "got %p, should not get a monitor for an invalid window\n", monitor );
-    monitor = pMonitorFromWindow( 0, MONITOR_DEFAULTTOPRIMARY );
+    monitor = MonitorFromWindow( 0, MONITOR_DEFAULTTOPRIMARY );
     ok( monitor == primary, "got %p, should get primary %p for MONITOR_DEFAULTTOPRIMARY\n", monitor, primary );
-    monitor = pMonitorFromWindow( 0, MONITOR_DEFAULTTONEAREST );
+    monitor = MonitorFromWindow( 0, MONITOR_DEFAULTTONEAREST );
     ok( monitor == primary, "got %p, should get primary %p for MONITOR_DEFAULTTONEAREST\n", monitor, primary );
 
     SetRect( &rc, 0, 0, 1, 1 );
-    monitor = pMonitorFromRect( &rc, MONITOR_DEFAULTTONULL );
+    monitor = MonitorFromRect( &rc, MONITOR_DEFAULTTONULL );
     ok( monitor == primary, "got %p, should get primary %p\n", monitor, primary );
 
-    monitor = pMonitorFromRect( &rc, MONITOR_DEFAULTTOPRIMARY );
+    monitor = MonitorFromRect( &rc, MONITOR_DEFAULTTOPRIMARY );
     ok( monitor == primary, "got %p, should get primary %p\n", monitor, primary );
 
-    monitor = pMonitorFromRect( &rc, MONITOR_DEFAULTTONEAREST );
+    monitor = MonitorFromRect( &rc, MONITOR_DEFAULTTONEAREST );
     ok( monitor == primary, "got %p, should get primary %p\n", monitor, primary );
 
     /* Empty rect at 0,0 is considered inside the primary monitor */
     SetRect( &rc, 0, 0, -1, -1 );
-    monitor = pMonitorFromRect( &rc, MONITOR_DEFAULTTONULL );
+    monitor = MonitorFromRect( &rc, MONITOR_DEFAULTTONULL );
     ok( monitor == primary, "got %p, should get primary %p\n", monitor, primary );
 
     /* Even if there is a monitor left of the primary, the primary will have the most overlapping area */
     SetRect( &rc, -1, 0, 2, 1 );
-    monitor = pMonitorFromRect( &rc, MONITOR_DEFAULTTONULL );
+    monitor = MonitorFromRect( &rc, MONITOR_DEFAULTTONULL );
     ok( monitor == primary, "got %p, should get primary %p\n", monitor, primary );
 
     /* But the width of the rect doesn't matter if it's empty. */
     SetRect( &rc, -1, 0, 2, -1 );
-    monitor = pMonitorFromRect( &rc, MONITOR_DEFAULTTONULL );
+    monitor = MonitorFromRect( &rc, MONITOR_DEFAULTTONULL );
     ok( monitor != primary, "got primary %p\n", monitor );
-
-    if (!pGetMonitorInfoA)
-    {
-        win_skip("GetMonitorInfoA is not available\n");
-        return;
-    }
 
     /* Search for a monitor that has no others equally near to (left, top-1) */
     SetRect( &rc, -1, -2, 2, 0 );
-    monitor = pMonitorFromRect( &rc, MONITOR_DEFAULTTONULL );
+    monitor = MonitorFromRect( &rc, MONITOR_DEFAULTTONULL );
     nearest = primary;
     while (monitor != NULL)
     {
         ok( monitor != primary, "got primary %p\n", monitor );
         nearest = monitor;
         mi.cbSize = sizeof(mi);
-        ret = pGetMonitorInfoA( monitor, &mi );
+        ret = GetMonitorInfoA( monitor, &mi );
         ok( ret, "GetMonitorInfo failed\n" );
         SetRect( &rc, mi.rcMonitor.left-1, mi.rcMonitor.top-2, mi.rcMonitor.left+2, mi.rcMonitor.top );
-        monitor = pMonitorFromRect( &rc, MONITOR_DEFAULTTONULL );
+        monitor = MonitorFromRect( &rc, MONITOR_DEFAULTTONULL );
     }
 
     /* tests for cbSize in MONITORINFO */
-    monitor = pMonitorFromWindow( 0, MONITOR_DEFAULTTOPRIMARY );
+    monitor = MonitorFromWindow( 0, MONITOR_DEFAULTTOPRIMARY );
     for (i = 0; i < ARRAY_SIZE(testdatami); i++)
     {
         memset( &mi, 0, sizeof(mi) );
         mi.cbSize = testdatami[i].cbSize;
-        ret = pGetMonitorInfoA( monitor, &mi );
+        ret = GetMonitorInfoA( monitor, &mi );
         ok( ret == testdatami[i].ret, "GetMonitorInfo returned wrong value\n" );
         if (ret)
             ok( (mi.dwFlags & MONITORINFOF_PRIMARY), "MONITORINFOF_PRIMARY flag isn't set\n" );
@@ -565,7 +502,7 @@ static void test_monitors(void)
 
         memset( &miexw, 0, sizeof(miexw) );
         miexw.cbSize = testdatamiexw[i].cbSize;
-        ret = pGetMonitorInfoW( monitor, (LPMONITORINFO)&miexw );
+        ret = GetMonitorInfoW( monitor, (LPMONITORINFO)&miexw );
         ok( ret == testdatamiexw[i].ret, "GetMonitorInfo returned wrong value\n" );
         if (ret)
             ok( (miexw.dwFlags & MONITORINFOF_PRIMARY), "MONITORINFOF_PRIMARY flag isn't set\n" );
@@ -578,7 +515,7 @@ static void test_monitors(void)
     {
         memset( &miexa, 0, sizeof(miexa) );
         miexa.cbSize = testdatamiexa[i].cbSize;
-        ret = pGetMonitorInfoA( monitor, (LPMONITORINFO)&miexa );
+        ret = GetMonitorInfoA( monitor, (LPMONITORINFO)&miexa );
         ok( ret == testdatamiexa[i].ret, "GetMonitorInfo returned wrong value\n" );
         if (ret)
             ok( (miexa.dwFlags & MONITORINFOF_PRIMARY), "MONITORINFOF_PRIMARY flag isn't set\n" );
@@ -591,7 +528,7 @@ static void test_monitors(void)
     {
         memset( &miexw, 0, sizeof(miexw) );
         miexw.cbSize = testdatamiexw[i].cbSize;
-        ret = pGetMonitorInfoW( monitor, (LPMONITORINFO)&miexw );
+        ret = GetMonitorInfoW( monitor, (LPMONITORINFO)&miexw );
         ok( ret == testdatamiexw[i].ret, "GetMonitorInfo returned wrong value\n" );
         if (ret)
             ok( (miexw.dwFlags & MONITORINFOF_PRIMARY), "MONITORINFOF_PRIMARY flag isn't set\n" );
@@ -601,13 +538,13 @@ static void test_monitors(void)
 
     SetRect( &rc, rc.left+1, rc.top+1, rc.left+2, rc.top+2 );
 
-    monitor = pMonitorFromRect( &rc, MONITOR_DEFAULTTONULL );
+    monitor = MonitorFromRect( &rc, MONITOR_DEFAULTTONULL );
     ok( monitor == NULL, "got %p\n", monitor );
 
-    monitor = pMonitorFromRect( &rc, MONITOR_DEFAULTTOPRIMARY );
+    monitor = MonitorFromRect( &rc, MONITOR_DEFAULTTOPRIMARY );
     ok( monitor == primary, "got %p, should get primary %p\n", monitor, primary );
 
-    monitor = pMonitorFromRect( &rc, MONITOR_DEFAULTTONEAREST );
+    monitor = MonitorFromRect( &rc, MONITOR_DEFAULTTONEAREST );
     ok( monitor == nearest, "got %p, should get nearest %p\n", monitor, nearest );
 }
 
@@ -617,7 +554,7 @@ static BOOL CALLBACK find_primary_mon(HMONITOR hmon, HDC hdc, LPRECT rc, LPARAM 
     BOOL ret;
 
     mi.cbSize = sizeof(mi);
-    ret = pGetMonitorInfoA(hmon, &mi);
+    ret = GetMonitorInfoA(hmon, &mi);
     ok(ret, "GetMonitorInfo failed\n");
     if (mi.dwFlags & MONITORINFOF_PRIMARY)
     {
@@ -636,19 +573,13 @@ static void test_work_area(void)
     WINDOWPLACEMENT wp;
     BOOL ret;
 
-    if (!pEnumDisplayMonitors || !pGetMonitorInfoA)
-    {
-        win_skip("EnumDisplayMonitors or GetMonitorInfoA are not available\n");
-        return;
-    }
-
     hmon = 0;
-    ret = pEnumDisplayMonitors(NULL, NULL, find_primary_mon, (LPARAM)&hmon);
+    ret = EnumDisplayMonitors(NULL, NULL, find_primary_mon, (LPARAM)&hmon);
     ok(!ret && hmon != 0, "Failed to find primary monitor\n");
 
     mi.cbSize = sizeof(mi);
     SetLastError(0xdeadbeef);
-    ret = pGetMonitorInfoA(hmon, &mi);
+    ret = GetMonitorInfoA(hmon, &mi);
     ok(ret, "GetMonitorInfo error %u\n", GetLastError());
     ok(mi.dwFlags & MONITORINFOF_PRIMARY, "not a primary monitor\n");
     trace("primary monitor %s\n", wine_dbgstr_rect(&mi.rcMonitor));

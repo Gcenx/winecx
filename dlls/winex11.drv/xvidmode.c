@@ -210,7 +210,7 @@ void X11DRV_XF86VM_Init(void)
 #endif /* X_XF86VidModeSetGammaRamp */
 
   /* retrieve modes */
-  if (usexvidmode && root_window == DefaultRootWindow( gdi_display ))
+  if (usexvidmode && !is_virtual_desktop())
   {
       X11DRV_expect_error(gdi_display, XVidModeErrorHandler, NULL);
       ok = pXF86VidModeGetAllModeLines(gdi_display, DefaultScreen(gdi_display), &nmodes, &real_xf86vm_modes);
@@ -416,8 +416,12 @@ static BOOL xf86vm_set_gamma_ramp(struct x11drv_gamma_ramp *ramp)
                                ramp->red, ramp->green, ramp->blue, GAMMA_RAMP_SIZE);
     }
 
+    X11DRV_expect_error(gdi_display, XVidModeErrorHandler, NULL);
     ret = pXF86VidModeSetGammaRamp(gdi_display, DefaultScreen(gdi_display),
                                    xf86vm_gammaramp_size, red, green, blue);
+    if (ret) XSync( gdi_display, FALSE );
+    if (X11DRV_check_error()) ret = FALSE;
+
     if (red != ramp->red)
         heap_free(red);
     return ret;

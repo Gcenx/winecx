@@ -142,6 +142,10 @@ typedef struct
 # define O_DIRECTORY 0200000 /* must be directory */
 #endif
 
+#ifndef AT_NO_AUTOMOUNT
+#define AT_NO_AUTOMOUNT 0x800
+#endif
+
 #endif  /* linux */
 
 #define IS_OPTION_TRUE(ch) ((ch) == 'y' || (ch) == 'Y' || (ch) == 't' || (ch) == 'T' || (ch) == '1')
@@ -2752,19 +2756,20 @@ static NTSTATUS lookup_unix_name( const WCHAR *name, int name_len, char **buffer
 
     /* try a shortcut first */
 
-    ret = ntdll_wcstoumbs( 0, name, name_len, unix_name + pos, unix_len - pos - 1,
-                           NULL, &used_default );
-
     while (name_len && IS_SEPARATOR(*name))
     {
         name++;
         name_len--;
     }
 
+    unix_name[pos] = '/';
+    ret = ntdll_wcstoumbs( 0, name, name_len, unix_name + pos + 1, unix_len - pos - 2,
+                           NULL, &used_default );
+
     if (ret >= 0 && !used_default)  /* if we used the default char the name didn't convert properly */
     {
         char *p;
-        unix_name[pos + ret] = 0;
+        unix_name[pos + 1 + ret] = 0;
         for (p = unix_name + pos ; *p; p++) if (*p == '\\') *p = '/';
         if (!name_len || !redirect || (!strstr( unix_name, "/windows/") && strncmp( unix_name, "windows/", 8 )))
         {

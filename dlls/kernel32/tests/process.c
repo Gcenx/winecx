@@ -36,6 +36,7 @@
 #include "tlhelp32.h"
 
 #include "wine/test.h"
+#include "wine/heap.h"
 
 /* PROCESS_ALL_ACCESS in Vista+ PSDKs is incompatible with older Windows versions */
 #define PROCESS_ALL_ACCESS_NT4 (PROCESS_ALL_ACCESS & ~0xf000)
@@ -281,7 +282,7 @@ static void     get_file_name(char* buf)
  *		static void     childPrintf
  *
  */
-static void WINAPIV WINETEST_PRINTF_ATTR(2,3) childPrintf(HANDLE h, const char* fmt, ...)
+static void WINAPIV __WINE_PRINTF_ATTR(2,3) childPrintf(HANDLE h, const char* fmt, ...)
 {
     __ms_va_list valist;
     char        buffer[1024+4*MAX_LISTED_ENV_VAR];
@@ -1978,6 +1979,7 @@ static void test_QueryFullProcessImageNameW(void)
     WCHAR deviceW[] = {'\\','D', 'e','v','i','c','e',0};
     WCHAR buf[1024];
     DWORD size, len;
+    DWORD flags;
 
     if (!pQueryFullProcessImageNameW)
     {
@@ -2031,6 +2033,33 @@ static void test_QueryFullProcessImageNameW(void)
     expect_eq_d(ERROR_INSUFFICIENT_BUFFER, GetLastError());
     expect_eq_ws_i(module_name, buf);  /* buffer not changed */
 
+    /* Invalid flags - a few arbitrary values only */
+    for (flags = 2; flags <= 15; ++flags)
+    {
+        size = ARRAY_SIZE(buf);
+        SetLastError(0xdeadbeef);
+        *(DWORD*)buf = 0x13579acf;
+        todo_wine
+        {
+        expect_eq_d(FALSE, pQueryFullProcessImageNameW(hSelf, flags, buf, &size));
+        expect_eq_d((DWORD)ARRAY_SIZE(buf), size);  /* size not changed */
+        expect_eq_d(ERROR_INVALID_PARAMETER, GetLastError());
+        expect_eq_d(0x13579acf, *(DWORD*)buf);  /* buffer not changed */
+        }
+    }
+    for (flags = 16; flags != 0; flags <<= 1)
+    {
+        size = ARRAY_SIZE(buf);
+        SetLastError(0xdeadbeef);
+        *(DWORD*)buf = 0x13579acf;
+        todo_wine
+        {
+        expect_eq_d(FALSE, pQueryFullProcessImageNameW(hSelf, flags, buf, &size));
+        expect_eq_d((DWORD)ARRAY_SIZE(buf), size);  /* size not changed */
+        expect_eq_d(ERROR_INVALID_PARAMETER, GetLastError());
+        expect_eq_d(0x13579acf, *(DWORD*)buf);  /* buffer not changed */
+        }
+    }
 
     /* native path */
     size = ARRAY_SIZE(buf);
@@ -2424,11 +2453,6 @@ static void test_IsProcessInJob(void)
 
     out = TRUE;
     ret = pIsProcessInJob(pi.hProcess, job2, &out);
-    ok(ret, "IsProcessInJob error %u\n", GetLastError());
-    ok(!out, "IsProcessInJob returned out=%u\n", out);
-
-    out = TRUE;
-    ret = pIsProcessInJob(pi.hProcess, NULL, &out);
     ok(ret, "IsProcessInJob error %u\n", GetLastError());
     ok(!out, "IsProcessInJob returned out=%u\n", out);
 
@@ -3785,6 +3809,203 @@ static void test_ProcThreadAttributeList(void)
     pDeleteProcThreadAttributeList(&list);
 }
 
+/* level 0: Main test process
+ * level 1: Process created by level 0 process without handle inheritance
+ * level 2: Process created by level 1 process with handle inheritance and level 0
+ *          process parent substitute.
+ * level 255: Process created by level 1 process during invalid parent handles testing. */
+void test_parent_process_attribute(unsigned int level, HANDLE read_pipe)
+{
+    PROCESS_BASIC_INFORMATION pbi;
+    char buffer[MAX_PATH + 64];
+    HANDLE write_pipe = NULL;
+    PROCESS_INFORMATION info;
+    SECURITY_ATTRIBUTES sa;
+    STARTUPINFOEXA si;
+    DWORD parent_id;
+    NTSTATUS status;
+    ULONG pbi_size;
+    HANDLE parent;
+    DWORD size;
+    BOOL ret;
+
+    struct
+    {
+        HANDLE parent;
+        DWORD parent_id;
+    }
+    parent_data;
+
+    if (level == 255)
+        return;
+
+    if (!pInitializeProcThreadAttributeList)
+    {
+        win_skip("No support for ProcThreadAttributeList.\n");
+        return;
+    }
+
+    memset(&sa, 0, sizeof(sa));
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+
+    if (!level)
+    {
+        ret = CreatePipe(&read_pipe, &write_pipe, &sa, 0);
+        ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+
+        parent_data.parent = OpenProcess(PROCESS_CREATE_PROCESS | PROCESS_QUERY_INFORMATION, TRUE, GetCurrentProcessId());
+        parent_data.parent_id = GetCurrentProcessId();
+    }
+    else
+    {
+        status = NtQueryInformationProcess(GetCurrentProcess(), ProcessBasicInformation, &pbi, sizeof(pbi), &pbi_size);
+        ok(status == STATUS_SUCCESS, "Got unexpected status %#x.\n", status);
+        parent_id = pbi.InheritedFromUniqueProcessId;
+
+        memset(&parent_data, 0, sizeof(parent_data));
+        ret = ReadFile(read_pipe, &parent_data, sizeof(parent_data), &size, NULL);
+        ok((level == 2 && ret) || (level == 1 && !ret && GetLastError() == ERROR_INVALID_HANDLE),
+                "Got unexpected ret %#x, level %u, GetLastError() %u.\n",
+                ret, level, GetLastError());
+    }
+
+    if (level == 2)
+    {
+        ok(parent_id == parent_data.parent_id, "Got parent id %u, parent_data.parent_id %u.\n",
+                parent_id, parent_data.parent_id);
+        return;
+    }
+
+    memset(&si, 0, sizeof(si));
+    si.StartupInfo.cb = sizeof(si.StartupInfo);
+
+    if (level)
+    {
+        HANDLE handle;
+        SIZE_T size;
+
+        ret = pInitializeProcThreadAttributeList(NULL, 1, 0, &size);
+        ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+                "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+
+        sprintf(buffer, "\"%s\" tests/process.c parent %u %p", selfname, 255, read_pipe);
+
+#if 0
+        /* Crashes on some Windows installations, otherwise successfully creates process. */
+        ret = CreateProcessA(NULL, buffer, NULL, NULL, FALSE, EXTENDED_STARTUPINFO_PRESENT,
+                NULL, NULL, (STARTUPINFOA *)&si, &info);
+        ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+        ok(WaitForSingleObject(info.hProcess, 30000) == WAIT_OBJECT_0, "Child process termination\n");
+        CloseHandle(info.hThread);
+        CloseHandle(info.hProcess);
+#endif
+        si.lpAttributeList = heap_alloc(size);
+        ret = pInitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &size);
+        ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+        handle = OpenProcess(PROCESS_CREATE_PROCESS, TRUE, GetCurrentProcessId());
+        ret = pUpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
+                &handle, sizeof(handle), NULL, NULL);
+        ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+        ret = CreateProcessA(NULL, buffer, NULL, NULL, TRUE, EXTENDED_STARTUPINFO_PRESENT,
+                NULL, NULL, (STARTUPINFOA *)&si, &info);
+        ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+        ok(WaitForSingleObject(info.hProcess, 30000) == WAIT_OBJECT_0, "Child process termination\n");
+        CloseHandle(info.hThread);
+        CloseHandle(info.hProcess);
+        CloseHandle(handle);
+        pDeleteProcThreadAttributeList(si.lpAttributeList);
+        heap_free(si.lpAttributeList);
+
+        si.lpAttributeList = heap_alloc(size);
+        ret = pInitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &size);
+        ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+        handle = (HANDLE)0xdeadbeef;
+        ret = pUpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
+                &handle, sizeof(handle), NULL, NULL);
+        ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+        ret = CreateProcessA(NULL, buffer, NULL, NULL, TRUE, EXTENDED_STARTUPINFO_PRESENT,
+                NULL, NULL, (STARTUPINFOA *)&si, &info);
+        ok(!ret && GetLastError() == ERROR_INVALID_HANDLE, "Got unexpected ret %#x, GetLastError() %u.\n",
+                ret, GetLastError());
+        pDeleteProcThreadAttributeList(si.lpAttributeList);
+        heap_free(si.lpAttributeList);
+
+        si.lpAttributeList = heap_alloc(size);
+        ret = pInitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &size);
+        ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+        handle = NULL;
+        ret = pUpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
+                &handle, sizeof(handle), NULL, NULL);
+        ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+        ret = CreateProcessA(NULL, buffer, NULL, NULL, TRUE, EXTENDED_STARTUPINFO_PRESENT,
+                NULL, NULL, (STARTUPINFOA *)&si, &info);
+        ok(!ret && GetLastError() == ERROR_INVALID_HANDLE, "Got unexpected ret %#x, GetLastError() %u.\n",
+                ret, GetLastError());
+        pDeleteProcThreadAttributeList(si.lpAttributeList);
+        heap_free(si.lpAttributeList);
+
+        si.lpAttributeList = heap_alloc(size);
+        ret = pInitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &size);
+        ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+        handle = GetCurrentProcess();
+        ret = pUpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
+                &handle, sizeof(handle), NULL, NULL);
+        ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+        ret = CreateProcessA(NULL, buffer, NULL, NULL, TRUE, EXTENDED_STARTUPINFO_PRESENT,
+                NULL, NULL, (STARTUPINFOA *)&si, &info);
+        /* Broken on Vista / w7 / w10. */
+        ok(ret || broken(!ret && GetLastError() == ERROR_INVALID_HANDLE),
+                "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+        if (ret)
+        {
+            ok(WaitForSingleObject(info.hProcess, 30000) == WAIT_OBJECT_0, "Child process termination\n");
+            CloseHandle(info.hThread);
+            CloseHandle(info.hProcess);
+        }
+        pDeleteProcThreadAttributeList(si.lpAttributeList);
+        heap_free(si.lpAttributeList);
+
+        si.lpAttributeList = heap_alloc(size);
+        ret = pInitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &size);
+        ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+
+        parent = OpenProcess(PROCESS_CREATE_PROCESS, FALSE, parent_id);
+
+        ret = pUpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
+                &parent, sizeof(parent), NULL, NULL);
+        ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+    }
+
+    sprintf(buffer, "\"%s\" tests/process.c parent %u %p", selfname, level + 1, read_pipe);
+    ret = CreateProcessA(NULL, buffer, NULL, NULL, level == 1, level == 1 ? EXTENDED_STARTUPINFO_PRESENT : 0,
+            NULL, NULL, (STARTUPINFOA *)&si, &info);
+    ok(ret, "Got unexpected ret %#x, GetLastError() %u.\n", ret, GetLastError());
+
+    if (level)
+    {
+        pDeleteProcThreadAttributeList(si.lpAttributeList);
+        heap_free(si.lpAttributeList);
+        CloseHandle(parent);
+    }
+    else
+    {
+        ret = WriteFile(write_pipe, &parent_data, sizeof(parent_data), &size, NULL);
+    }
+
+    /* wait for child to terminate */
+    ok(WaitForSingleObject(info.hProcess, 30000) == WAIT_OBJECT_0, "Child process termination\n");
+    CloseHandle(info.hThread);
+    CloseHandle(info.hProcess);
+
+    if (!level)
+    {
+        CloseHandle(read_pipe);
+        CloseHandle(write_pipe);
+        CloseHandle(parent_data.parent);
+    }
+}
+
 START_TEST(process)
 {
     HANDLE job;
@@ -3828,11 +4049,18 @@ START_TEST(process)
             CloseHandle(info.hThread);
             return;
         }
+        else if (!strcmp(myARGV[2], "parent") && myARGC >= 5)
+        {
+            HANDLE h;
+
+            sscanf(myARGV[4], "%p", &h);
+            test_parent_process_attribute(atoi(myARGV[3]), h);
+            return;
+        }
 
         ok(0, "Unexpected command %s\n", myARGV[2]);
         return;
     }
-
     hproc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, GetCurrentProcessId());
     if (hproc)
     {
@@ -3842,7 +4070,6 @@ START_TEST(process)
     else
         win_skip("PROCESS_QUERY_LIMITED_INFORMATION is not supported on this platform\n");
     test_process_info(GetCurrentProcess());
-
     test_TerminateProcess();
     test_Startup();
     test_CommandLine();
@@ -3896,4 +4123,5 @@ START_TEST(process)
     test_jobInheritance(job);
     test_BreakawayOk(job);
     CloseHandle(job);
+    test_parent_process_attribute(0, NULL);
 }

@@ -54,8 +54,9 @@ struct thread
     struct process        *process;
     thread_id_t            id;            /* thread id */
     struct list            mutex_list;    /* list of currently owned mutexes */
+    struct esync_fd       *esync_fd;      /* esync file descriptor (signalled on exit) */
+    struct esync_fd       *esync_apc_fd;  /* esync apc fd (signalled when APCs are present) */
     struct debug_ctx      *debug_ctx;     /* debugger context if this thread is a debugger */
-    struct debug_event    *debug_event;   /* debug event being sent to debugger */
     unsigned int           system_regs;   /* which system regs have been set */
     struct msg_queue      *queue;         /* message queue */
     struct thread_wait    *wait;          /* current wait condition if sleeping */
@@ -89,6 +90,8 @@ struct thread
     timeout_t              exit_time;     /* Thread exit time */
     struct token          *token;         /* security token associated with this thread */
     struct list            kernel_object; /* list of kernel object pointers */
+    data_size_t            desc_len;      /* thread description length in bytes */
+    WCHAR                 *desc;          /* thread description string */
 };
 
 struct thread_snapshot

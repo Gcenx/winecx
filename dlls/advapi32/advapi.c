@@ -88,8 +88,8 @@ GetUserNameW( LPWSTR lpszName, LPDWORD lpSize )
     /* CrossOver Hack 12735: Use a consistent username */
     const char * HOSTPTR report_real_username = getenv( "CX_REPORT_REAL_USERNAME" );
     const char * HOSTPTR name;
-    LPWSTR backslash;
     DWORD i, len;
+    LPWSTR backslash;
 
     if (!report_real_username)
         name = "crossover";

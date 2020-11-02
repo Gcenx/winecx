@@ -461,8 +461,8 @@ static struct gdi_path *PATH_FlattenPath(const struct gdi_path *pPath)
 static void PATH_ScaleNormalizedPoint(FLOAT_POINT corners[], double x,
    double y, POINT *pPoint)
 {
-    pPoint->x=GDI_ROUND( (double)corners[0].x + (double)(corners[1].x-corners[0].x)*0.5*(x+1.0) );
-    pPoint->y=GDI_ROUND( (double)corners[0].y + (double)(corners[1].y-corners[0].y)*0.5*(y+1.0) );
+    pPoint->x = GDI_ROUND( corners[0].x + (corners[1].x-corners[0].x)*0.5*(x+1.0) );
+    pPoint->y = GDI_ROUND( corners[0].y + (corners[1].y-corners[0].y)*0.5*(y+1.0) );
 }
 
 /* PATH_NormalizePoint
@@ -474,8 +474,8 @@ static void PATH_NormalizePoint(FLOAT_POINT corners[],
    const FLOAT_POINT *pPoint,
    double *pX, double *pY)
 {
-    *pX=(double)(pPoint->x-corners[0].x)/(double)(corners[1].x-corners[0].x) * 2.0 - 1.0;
-    *pY=(double)(pPoint->y-corners[0].y)/(double)(corners[1].y-corners[0].y) * 2.0 - 1.0;
+    *pX = (pPoint->x-corners[0].x)/(corners[1].x-corners[0].x) * 2.0 - 1.0;
+    *pY = (pPoint->y-corners[0].y)/(corners[1].y-corners[0].y) * 2.0 - 1.0;
 }
 
 /* PATH_DoArcPart
@@ -2248,6 +2248,8 @@ const struct gdi_dc_funcs path_driver =
     NULL,                               /* pStrokePath */
     NULL,                               /* pUnrealizePalette */
     NULL,                               /* pWidenPath */
+    NULL,                               /* pD3DKMTCheckVidPnExclusiveOwnership */
+    NULL,                               /* pD3DKMTSetVidPnSourceOwner */
     NULL,                               /* wine_get_wgl_driver */
     NULL,                               /* wine_get_vulkan_driver */
     GDI_PRIORITY_PATH_DRV               /* priority */

@@ -1266,18 +1266,19 @@ static ULONG get_refcount(IUnknown *test_iface)
 
 static void test_viewport_object(void)
 {
-    IDirectDraw *ddraw;
-    IDirect3D *d3d;
-    HRESULT hr;
-    ULONG ref;
-    D3DVIEWPORT vp;
     IDirect3DViewport *viewport, *another_vp;
+    IDirectDrawGammaControl *gamma;
     IDirect3DViewport2 *viewport2;
     IDirect3DViewport3 *viewport3;
-    IDirectDrawGammaControl *gamma;
-    IUnknown *unknown;
     IDirect3DDevice *device;
+    IUnknown *unknown;
+    IDirectDraw *ddraw;
+    D3DVIEWPORT2 vp2;
+    D3DVIEWPORT vp;
+    IDirect3D *d3d;
     HWND window;
+    HRESULT hr;
+    ULONG ref;
     union
     {
         D3DVIEWPORT vp1;
@@ -1296,12 +1297,12 @@ static void test_viewport_object(void)
     }
 
     hr = IDirectDraw_QueryInterface(ddraw, &IID_IDirect3D, (void **)&d3d);
-    ok(SUCCEEDED(hr), "Failed to get d3d interface, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     ref = get_refcount((IUnknown *) d3d);
     ok(ref == 2, "Got unexpected refcount %u.\n", ref);
 
     hr = IDirect3D_CreateViewport(d3d, &viewport, NULL);
-    ok(SUCCEEDED(hr), "Failed to create viewport, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     ref = get_refcount((IUnknown *)viewport);
     ok(ref == 1, "Got unexpected refcount %u.\n", ref);
     ref = get_refcount((IUnknown *)d3d);
@@ -1328,55 +1329,45 @@ static void test_viewport_object(void)
     hr = IDirect3DViewport_QueryInterface(viewport, &IID_IDirectDrawGammaControl, (void **)&gamma);
     ok(hr == E_NOINTERFACE || broken(hr == E_FAIL), "Got unexpected hr %#x.\n", hr);
     ok(gamma == NULL, "Interface not set to NULL by failed QI call: %p\n", gamma);
-    if (SUCCEEDED(hr)) IDirectDrawGammaControl_Release(gamma);
-    /* NULL iid: Segfaults */
 
     hr = IDirect3DViewport_QueryInterface(viewport, &IID_IDirect3DViewport2, (void **)&viewport2);
-    ok(SUCCEEDED(hr) || hr == E_NOINTERFACE || broken(hr == E_FAIL),
-            "Failed to QI IDirect3DViewport2, hr %#x.\n", hr);
-    if (viewport2)
-    {
-        ref = get_refcount((IUnknown *)viewport);
-        ok(ref == 2, "Got unexpected refcount %u.\n", ref);
-        ref = get_refcount((IUnknown *)viewport2);
-        ok(ref == 2, "Got unexpected refcount %u.\n", ref);
-        IDirect3DViewport2_Release(viewport2);
-        viewport2 = NULL;
-    }
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
 
-    hr = IDirect3DViewport_QueryInterface(viewport, &IID_IDirect3DViewport3, (void **)&viewport3);
-    ok(SUCCEEDED(hr) || hr == E_NOINTERFACE || broken(hr == E_FAIL),
-            "Failed to QI IDirect3DViewport3, hr %#x.\n", hr);
-    if (viewport3)
-    {
-        ref = get_refcount((IUnknown *)viewport);
-        ok(ref == 2, "Got unexpected refcount %u.\n", ref);
-        ref = get_refcount((IUnknown *)viewport3);
-        ok(ref == 2, "Got unexpected refcount %u.\n", ref);
-        IDirect3DViewport3_Release(viewport3);
-    }
-
-    hr = IDirect3DViewport_QueryInterface(viewport, &IID_IUnknown, (void **)&unknown);
-    ok(SUCCEEDED(hr), "Failed to QI IUnknown, hr %#x.\n", hr);
     ref = get_refcount((IUnknown *)viewport);
     ok(ref == 2, "Got unexpected refcount %u.\n", ref);
-    ref = get_refcount(unknown);
+    ref = get_refcount((IUnknown *)viewport2);
     ok(ref == 2, "Got unexpected refcount %u.\n", ref);
+
+    hr = IDirect3DViewport_QueryInterface(viewport, &IID_IDirect3DViewport3, (void **)&viewport3);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+    ref = get_refcount((IUnknown *)viewport);
+    ok(ref == 3, "Got unexpected refcount %u.\n", ref);
+    ref = get_refcount((IUnknown *)viewport3);
+    ok(ref == 3, "Got unexpected refcount %u.\n", ref);
+    IDirect3DViewport3_Release(viewport3);
+
+    hr = IDirect3DViewport_QueryInterface(viewport, &IID_IUnknown, (void **)&unknown);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    ref = get_refcount((IUnknown *)viewport);
+    ok(ref == 3, "Got unexpected refcount %u.\n", ref);
+    ref = get_refcount(unknown);
+    ok(ref == 3, "Got unexpected refcount %u.\n", ref);
     IUnknown_Release(unknown);
 
     hr = IDirect3DDevice_DeleteViewport(device, NULL);
     ok(hr == DDERR_INVALIDPARAMS, "Got unexpected hr %#x.\n", hr);
 
     hr = IDirect3D_CreateViewport(d3d, &another_vp, NULL);
-    ok(SUCCEEDED(hr), "Failed to create viewport, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
 
     /* AddViewport(NULL): Segfault */
     hr = IDirect3DDevice_AddViewport(device, viewport);
-    ok(SUCCEEDED(hr), "Failed to add viewport to device, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     ref = get_refcount((IUnknown *) viewport);
-    ok(ref == 2, "Got unexpected refcount %u.\n", ref);
+    ok(ref == 3, "Got unexpected refcount %u.\n", ref);
     hr = IDirect3DDevice_AddViewport(device, another_vp);
-    ok(SUCCEEDED(hr), "Failed to add viewport to device, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     ref = get_refcount((IUnknown *) another_vp);
     ok(ref == 2, "Got unexpected refcount %u.\n", ref);
 
@@ -1396,10 +1387,88 @@ static void test_viewport_object(void)
 
     vp.dwSize = sizeof(vp);
     hr = IDirect3DViewport_SetViewport(viewport, &vp);
-    ok(SUCCEEDED(hr), "Failed to set viewport data, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+    vp2.dwSize = sizeof(vp2);
+    vp2.dwX = 160;
+    vp2.dwY = 120;
+    vp2.dwWidth = 640 - vp2.dwX;
+    vp2.dwHeight = 480 - vp2.dwY;
+    vp2.dvClipX = 2.0f;
+    vp2.dvClipY = -1.75f;
+    vp2.dvClipWidth = 2.5f;
+    vp2.dvClipHeight = -1.5f;
+    vp2.dvMinZ = 0.5f;
+    vp2.dvMaxZ = 2.0f;
+    hr = IDirect3DViewport2_SetViewport2(viewport2, &vp2);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+    memset(&vp, 0xff, sizeof(vp));
+    vp.dwSize = sizeof(vp);
+    hr = IDirect3DViewport2_GetViewport(viewport2, &vp);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    ok(vp.dvMaxX == 4.5f && vp.dvMaxY == -1.75f && vp.dvScaleX == 192.0f
+            && vp.dvScaleY == -240.0f && vp.dvMinZ == 0.0f && vp.dvMaxZ == 1.0f,
+            "Got unexpected values %g, %g, %g, %g, %g, %g.\n",
+            vp.dvMaxX, vp.dvMaxY, vp.dvScaleX, vp.dvScaleY, vp.dvMinZ, vp.dvMaxZ);
+
+    vp2.dvClipX = -1.5f;
+    vp2.dvClipY = 1.75f;
+    vp2.dvClipWidth = -1.5f;
+    vp2.dvClipHeight = 2.0f;
+    vp2.dvMinZ = 2.0f;
+    vp2.dvMaxZ = 0.5f;
+
+    hr = IDirect3DViewport2_SetViewport2(viewport2, &vp2);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+    memset(&vp, 0xff, sizeof(vp));
+    vp.dwSize = sizeof(vp);
+    hr = IDirect3DViewport2_GetViewport(viewport2, &vp);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    ok(vp.dvMaxX == -3.0f && vp.dvMaxY == 1.75f && vp.dvScaleX == -320.0f
+            && vp.dvScaleY == 180.0f && vp.dvMinZ == 0.0f && vp.dvMaxZ == 1.0f,
+            "Got unexpected values %g, %g, %g, %g, %g, %g.\n",
+            vp.dvMaxX, vp.dvMaxY, vp.dvScaleX, vp.dvScaleY, vp.dvMinZ, vp.dvMaxZ);
+
+    vp.dwSize = sizeof(vp);
+    vp.dvMinZ = 0.5f;
+    vp.dvMaxZ = 2.0f;
+    hr = IDirect3DViewport2_SetViewport(viewport2, &vp);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+    memset(&vp2, 0xff, sizeof(vp2));
+    vp2.dwSize = sizeof(vp2);
+    hr = IDirect3DViewport2_GetViewport2(viewport2, &vp2);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    ok(vp2.dvClipX == 0.75f && vp2.dvClipY == 1.0f && vp2.dvClipWidth == -1.5f
+            && vp2.dvClipHeight == 2.0f && vp2.dvMinZ == 0.0f && vp2.dvMaxZ == 1.0f,
+            "Got unexpected values %g, %g, %g, %g, %g, %g.\n",
+            vp2.dvClipX, vp2.dvClipY, vp2.dvClipWidth, vp2.dvClipHeight, vp2.dvMinZ, vp2.dvMaxZ);
+
+    vp.dvMaxX = 4.5f;
+    vp.dvMaxY = -1.75f;
+    vp.dvScaleX = 192.0f;
+    vp.dvScaleY = -240.0f;
+    vp.dvMinZ = 2.0f;
+    vp.dvMaxZ = 0.5f;
+
+    hr = IDirect3DViewport3_SetViewport(viewport3, &vp);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+    memset(&vp2, 0xff, sizeof(vp2));
+    vp2.dwSize = sizeof(vp2);
+    hr = IDirect3DViewport2_GetViewport2(viewport2, &vp2);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    ok(vp2.dvClipX == -1.25f && vp2.dvClipY == -0.75f && vp2.dvClipWidth == 2.5f
+            && vp2.dvClipHeight == -1.5f && vp2.dvMinZ == 0.0f && vp2.dvMaxZ == 1.0f,
+            "Got unexpected values %g, %g, %g, %g, %g, %g.\n",
+            vp2.dvClipX, vp2.dvClipY, vp2.dvClipWidth, vp2.dvClipHeight, vp2.dvMinZ, vp2.dvMaxZ);
+
+    IDirect3DViewport2_Release(viewport2);
 
     hr = IDirect3DDevice_DeleteViewport(device, another_vp);
-    ok(SUCCEEDED(hr), "Failed to delete viewport from device, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     ref = get_refcount((IUnknown *) another_vp);
     ok(ref == 1, "Got unexpected refcount %u.\n", ref);
 
@@ -2745,7 +2814,7 @@ static void test_coop_level_mode_set(void)
     ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
     ok(ret, "Failed to get display mode.\n");
     ok(devmode.dmPelsWidth == registry_mode.dmPelsWidth
-            && devmode.dmPelsHeight == registry_mode.dmPelsHeight, "Got unexpect screen size %ux%u.\n",
+            && devmode.dmPelsHeight == registry_mode.dmPelsHeight, "Got unexpected screen size %ux%u.\n",
             devmode.dmPelsWidth, devmode.dmPelsHeight);
 
     expect_messages = exclusive_focus_restore_messages;
@@ -2758,7 +2827,7 @@ static void test_coop_level_mode_set(void)
     ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
     ok(ret, "Failed to get display mode.\n");
     ok(devmode.dmPelsWidth == param.ddraw_width
-            && devmode.dmPelsHeight == param.ddraw_height, "Got unexpect screen size %ux%u.\n",
+            && devmode.dmPelsHeight == param.ddraw_height, "Got unexpected screen size %ux%u.\n",
             devmode.dmPelsWidth, devmode.dmPelsHeight);
 
     hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
@@ -5083,7 +5152,7 @@ static void test_surface_attachment(void)
     hr = IDirectDrawSurface_AddAttachedSurface(surface1, surface2);
     todo_wine ok(hr == DDERR_CANNOTATTACHSURFACE, "Got unexpected hr %#x.\n", hr);
     if (SUCCEEDED(hr))
-        IDirectDrawSurface_DeleteAttachedSurface(surface1, 0, surface3);
+        IDirectDrawSurface_DeleteAttachedSurface(surface1, 0, surface2);
     hr = IDirectDrawSurface_AddAttachedSurface(surface1, surface3);
     ok(hr == D3D_OK, "Failed to attach depth buffer, hr %#x.\n", hr);
     hr = IDirectDrawSurface_DeleteAttachedSurface(surface1, 0, surface3);
@@ -7166,11 +7235,12 @@ static void test_palette_alpha(void)
 
 static void test_lost_device(void)
 {
-    IDirectDrawSurface *surface;
+    IDirectDrawSurface *surface, *back_buffer;
     DDSURFACEDESC surface_desc;
     HWND window1, window2;
     IDirectDraw *ddraw;
     ULONG refcount;
+    DDSCAPS caps;
     HRESULT hr;
     BOOL ret;
 
@@ -7307,6 +7377,19 @@ static void test_lost_device(void)
     ok(hr == DDERR_SURFACELOST, "Got unexpected hr %#x.\n", hr);
     hr = IDirectDrawSurface_Flip(surface, NULL, DDFLIP_WAIT);
     ok(hr == DDERR_SURFACELOST, "Got unexpected hr %#x.\n", hr);
+
+    memset(&caps, 0, sizeof(caps));
+    caps.dwCaps = DDSCAPS_FLIP;
+
+    hr = IDirectDrawSurface_GetAttachedSurface(surface, &caps, &back_buffer);
+    ok(hr == DDERR_SURFACELOST, "Got unexpected hr %#x.\n", hr);
+    hr = IDirectDrawSurface_Restore(surface);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirectDrawSurface_GetAttachedSurface(surface, &caps, &back_buffer);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirectDrawSurface_IsLost(back_buffer);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    IDirectDrawSurface_Release(back_buffer);
 
     IDirectDrawSurface_Release(surface);
     refcount = IDirectDraw_Release(ddraw);
@@ -12876,9 +12959,44 @@ static void test_clipper_refcount(void)
 
 static void test_caps(void)
 {
+    DWORD caps_never, caps_always, caps_hal;
     DDCAPS hal_caps, hel_caps;
     IDirectDraw *ddraw;
     HRESULT hr;
+    BOOL no3d;
+
+    caps_never = DDSCAPS_RESERVED1
+            | DDSCAPS_ALPHA
+            | DDSCAPS_PRIMARYSURFACELEFT
+            | DDSCAPS_SYSTEMMEMORY
+            | DDSCAPS_VISIBLE
+            | DDSCAPS_WRITEONLY
+            | DDSCAPS_LIVEVIDEO
+            | DDSCAPS_HWCODEC
+            | DDSCAPS_MODEX
+            | DDSCAPS_RESERVED2
+            | 0x01000000u
+            | 0x02000000u
+            | DDSCAPS_ALLOCONLOAD
+            | DDSCAPS_VIDEOPORT
+            | DDSCAPS_STANDARDVGAMODE
+            | DDSCAPS_OPTIMIZED;
+
+    caps_always = DDSCAPS_FLIP
+            | DDSCAPS_OFFSCREENPLAIN
+            | DDSCAPS_PRIMARYSURFACE
+            | DDSCAPS_TEXTURE
+            | DDSCAPS_ZBUFFER
+            | DDSCAPS_MIPMAP;
+
+    caps_hal = DDSCAPS_BACKBUFFER
+            | DDSCAPS_COMPLEX
+            | DDSCAPS_FRONTBUFFER
+            | DDSCAPS_3DDEVICE
+            | DDSCAPS_VIDEOMEMORY
+            | DDSCAPS_OWNDC
+            | DDSCAPS_LOCALVIDMEM
+            | DDSCAPS_NONLOCALVIDMEM;
 
     ddraw = create_ddraw();
     ok(!!ddraw, "Failed to create a ddraw object.\n");
@@ -12896,7 +13014,83 @@ static void test_caps(void)
             "Got unexpected caps %#x, expected %#x.\n",
             hel_caps.ddsOldCaps.dwCaps, hel_caps.ddsCaps.dwCaps);
 
+    no3d = !(hal_caps.ddsCaps.dwCaps & DDSCAPS_3DDEVICE);
+    if (hal_caps.ddsCaps.dwCaps)
+    {
+        ok(!(hal_caps.ddsCaps.dwCaps & caps_never), "Got unexpected caps %#x.\n", hal_caps.ddsCaps.dwCaps);
+        ok(!(~hal_caps.ddsCaps.dwCaps & caps_always), "Got unexpected caps %#x.\n", hal_caps.ddsCaps.dwCaps);
+        todo_wine_if(no3d) ok(!(~hal_caps.ddsCaps.dwCaps & caps_hal),
+                "Got unexpected caps %#x.\n", hal_caps.ddsCaps.dwCaps);
+    }
+    ok(!(hel_caps.ddsCaps.dwCaps & caps_never), "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
+    ok(!(~hel_caps.ddsCaps.dwCaps & caps_always), "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
+    todo_wine_if(!no3d) ok(!(hel_caps.ddsCaps.dwCaps & caps_hal),
+            "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
+
     IDirectDraw_Release(ddraw);
+
+    if (hal_caps.ddsCaps.dwCaps)
+    {
+        hr = DirectDrawCreate((GUID *)DDCREATE_HARDWAREONLY, &ddraw, NULL);
+        ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+        memset(&hal_caps, 0, sizeof(hal_caps));
+        memset(&hel_caps, 0, sizeof(hel_caps));
+        hal_caps.dwSize = sizeof(hal_caps);
+        hel_caps.dwSize = sizeof(hel_caps);
+        hr = IDirectDraw_GetCaps(ddraw, &hal_caps, &hel_caps);
+        ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+        ok(hal_caps.ddsOldCaps.dwCaps == hal_caps.ddsCaps.dwCaps,
+                "Got unexpected caps %#x, expected %#x.\n",
+                hal_caps.ddsOldCaps.dwCaps, hal_caps.ddsCaps.dwCaps);
+        ok(hel_caps.ddsOldCaps.dwCaps == hel_caps.ddsCaps.dwCaps,
+                "Got unexpected caps %#x, expected %#x.\n",
+                hel_caps.ddsOldCaps.dwCaps, hel_caps.ddsCaps.dwCaps);
+
+        ok(!(hal_caps.ddsCaps.dwCaps & caps_never), "Got unexpected caps %#x.\n", hal_caps.ddsCaps.dwCaps);
+        ok(!(~hal_caps.ddsCaps.dwCaps & caps_always), "Got unexpected caps %#x.\n", hal_caps.ddsCaps.dwCaps);
+        todo_wine_if(no3d) ok(!(~hal_caps.ddsCaps.dwCaps & caps_hal),
+                "Got unexpected caps %#x.\n", hal_caps.ddsCaps.dwCaps);
+        if (is_ddraw64)
+        {
+            ok(!(hel_caps.ddsCaps.dwCaps & caps_never), "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
+            ok(!(~hel_caps.ddsCaps.dwCaps & caps_always), "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
+            todo_wine_if(!no3d) ok(!(hel_caps.ddsCaps.dwCaps & caps_hal),
+                    "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
+        }
+        else
+        {
+            todo_wine ok(!hel_caps.ddsCaps.dwCaps, "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
+        }
+
+        IDirectDraw_Release(ddraw);
+    }
+
+    hr = DirectDrawCreate((GUID *)DDCREATE_EMULATIONONLY, &ddraw, NULL);
+    ok(hr == DD_OK || (is_ddraw64 && hr == E_FAIL), "Got unexpected hr %#x.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        memset(&hal_caps, 0, sizeof(hal_caps));
+        memset(&hel_caps, 0, sizeof(hel_caps));
+        hal_caps.dwSize = sizeof(hal_caps);
+        hel_caps.dwSize = sizeof(hel_caps);
+        hr = IDirectDraw_GetCaps(ddraw, &hal_caps, &hel_caps);
+        ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+        ok(hal_caps.ddsOldCaps.dwCaps == hal_caps.ddsCaps.dwCaps,
+                "Got unexpected caps %#x, expected %#x.\n",
+                hal_caps.ddsOldCaps.dwCaps, hal_caps.ddsCaps.dwCaps);
+        ok(hel_caps.ddsOldCaps.dwCaps == hel_caps.ddsCaps.dwCaps,
+                "Got unexpected caps %#x, expected %#x.\n",
+                hel_caps.ddsOldCaps.dwCaps, hel_caps.ddsCaps.dwCaps);
+
+        todo_wine ok(!hal_caps.ddsCaps.dwCaps, "Got unexpected caps %#x.\n", hal_caps.ddsCaps.dwCaps);
+        ok(!(hel_caps.ddsCaps.dwCaps & caps_never), "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
+        ok(!(~hel_caps.ddsCaps.dwCaps & caps_always), "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
+        todo_wine_if(!no3d) ok(!(hel_caps.ddsCaps.dwCaps & caps_hal),
+                "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
+
+        IDirectDraw_Release(ddraw);
+    }
 }
 
 static void test_d32_support(void)

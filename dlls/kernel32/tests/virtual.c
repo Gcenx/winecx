@@ -44,7 +44,7 @@ static UINT   (WINAPI *pResetWriteWatch)(LPVOID,SIZE_T);
 static NTSTATUS (WINAPI *pNtAreMappedFilesTheSame)(PVOID,PVOID);
 static NTSTATUS (WINAPI *pNtCreateSection)(HANDLE *, ACCESS_MASK, const OBJECT_ATTRIBUTES *,
                                            const LARGE_INTEGER *, ULONG, ULONG, HANDLE );
-static NTSTATUS (WINAPI *pNtMapViewOfSection)(HANDLE, HANDLE, PVOID *, ULONG, SIZE_T, const LARGE_INTEGER *, SIZE_T *, ULONG, ULONG, ULONG);
+static NTSTATUS (WINAPI *pNtMapViewOfSection)(HANDLE, HANDLE, PVOID *, ULONG_PTR, SIZE_T, const LARGE_INTEGER *, SIZE_T *, ULONG, ULONG, ULONG);
 static DWORD (WINAPI *pNtUnmapViewOfSection)(HANDLE, PVOID);
 static NTSTATUS (WINAPI *pNtQuerySection)(HANDLE, SECTION_INFORMATION_CLASS, void *, SIZE_T, SIZE_T *);
 static PVOID  (WINAPI *pRtlAddVectoredExceptionHandler)(ULONG, PVECTORED_EXCEPTION_HANDLER);
@@ -122,8 +122,11 @@ static void test_VirtualAllocEx(void)
     ok( bytes_written == 0, "%lu bytes written\n", bytes_written );
     b = ReadProcessMemory(hProcess, addr1, src, alloc_size, &bytes_read);
     ok( !b, "ReadProcessMemory succeeded\n" );
-    ok( GetLastError() == ERROR_NOACCESS, "wrong error %u\n", GetLastError() );
-    ok( bytes_read == 0, "%lu bytes written\n", bytes_read );
+    ok( GetLastError() == ERROR_NOACCESS ||
+        GetLastError() == ERROR_PARTIAL_COPY, /* win10 v1607+ */
+        "wrong error %u\n", GetLastError() );
+    if (GetLastError() == ERROR_NOACCESS)
+        ok( bytes_read == 0, "%lu bytes written\n", bytes_read );
 
     b = VirtualProtect( src, 0x2000, PAGE_NOACCESS, &old_prot );
     ok( b, "VirtualProtect failed error %u\n", GetLastError() );
@@ -135,8 +138,11 @@ static void test_VirtualAllocEx(void)
     ok( bytes_written == 0, "%lu bytes written\n", bytes_written );
     b = ReadProcessMemory(hProcess, addr1, src, alloc_size, &bytes_read);
     ok( !b, "ReadProcessMemory succeeded\n" );
-    ok( GetLastError() == ERROR_NOACCESS, "wrong error %u\n", GetLastError() );
-    ok( bytes_read == 0, "%lu bytes written\n", bytes_read );
+    ok( GetLastError() == ERROR_NOACCESS ||
+        GetLastError() == ERROR_PARTIAL_COPY, /* win10 v1607+ */
+        "wrong error %u\n", GetLastError() );
+    if (GetLastError() == ERROR_NOACCESS)
+        ok( bytes_read == 0, "%lu bytes written\n", bytes_read );
 
     b = pVirtualFreeEx(hProcess, addr1, 0, MEM_RELEASE);
     ok(b != 0, "VirtualFreeEx, error %u\n", GetLastError());
@@ -1527,6 +1533,12 @@ static void test_IsBadReadPtr(void)
 
     ret = IsBadReadPtr(&stackvar, sizeof(char));
     ok(ret == FALSE, "Expected IsBadReadPtr to return FALSE, got %d\n", ret);
+
+    ret = IsBadReadPtr((char *)NtCurrentTeb()->DeallocationStack + 4096, sizeof(DWORD));
+    ok(ret == TRUE, "Expected IsBadReadPtr to return TRUE, got %d\n", ret);
+
+    ret = IsBadReadPtr((char *)NtCurrentTeb()->DeallocationStack + 4096, sizeof(DWORD));
+    ok(ret == TRUE, "Expected IsBadReadPtr to return TRUE, got %d\n", ret);
 }
 
 static void test_IsBadWritePtr(void)
@@ -1552,6 +1564,12 @@ static void test_IsBadWritePtr(void)
 
     ret = IsBadWritePtr(&stackval, sizeof(char));
     ok(ret == FALSE, "Expected IsBadWritePtr to return FALSE, got %d\n", ret);
+
+    ret = IsBadWritePtr((char *)NtCurrentTeb()->DeallocationStack + 4096, sizeof(DWORD));
+    ok(ret == TRUE, "Expected IsBadWritePtr to return TRUE, got %d\n", ret);
+
+    ret = IsBadWritePtr((char *)NtCurrentTeb()->DeallocationStack + 4096, sizeof(DWORD));
+    ok(ret == TRUE, "Expected IsBadWritePtr to return TRUE, got %d\n", ret);
 }
 
 static void test_IsBadCodePtr(void)
@@ -1602,7 +1620,7 @@ static void test_write_watch(void)
     DWORD ret, size, old_prot, num_bytes;
     MEMORY_BASIC_INFORMATION info;
     HANDLE readpipe, writepipe, file;
-    OVERLAPPED overlapped;
+    OVERLAPPED overlapped, *overlapped2;
     void *results[64];
     ULONG_PTR count;
     ULONG i, pagesize;
@@ -1905,6 +1923,67 @@ static void test_write_watch(void)
     ret = pGetWriteWatch( WRITE_WATCH_FLAG_RESET, base, size, results, &count, &pagesize );
     ok( !ret, "GetWriteWatch failed %u\n", GetLastError() );
     ok( count == 0, "wrong count %lu\n", count );
+
+    /* OVERLAPPED structure write watch */
+    memset( &overlapped, 0, sizeof(overlapped) );
+    overlapped.hEvent = CreateEventA( NULL, TRUE, FALSE, NULL );
+
+    readpipe = CreateNamedPipeA( pipename, FILE_FLAG_OVERLAPPED | PIPE_ACCESS_INBOUND,
+                                 PIPE_TYPE_MESSAGE | PIPE_WAIT, 1, 1024, 1024,
+                                 NMPWAIT_USE_DEFAULT_WAIT, NULL );
+    ok( readpipe != INVALID_HANDLE_VALUE, "CreateNamedPipeA failed %u\n", GetLastError() );
+
+    success = ConnectNamedPipe( readpipe, &overlapped );
+    ok( !success, "ConnectNamedPipe unexpectedly succeeded\n" );
+    ok( GetLastError() == ERROR_IO_PENDING, "expected ERROR_IO_PENDING, got %u\n", GetLastError() );
+
+    writepipe = CreateFileA( pipename, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL );
+    ok( writepipe != INVALID_HANDLE_VALUE, "CreateFileA failed %u\n", GetLastError() );
+
+    ret = WaitForSingleObject( overlapped.hEvent, 1000 );
+    ok( ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %u\n", ret );
+
+    memset( base, 0, size );
+    overlapped2 = (OVERLAPPED*)(base + size - sizeof(*overlapped2));
+    overlapped2->hEvent = CreateEventA( NULL, TRUE, FALSE, NULL );
+
+    count = 64;
+    ret = pGetWriteWatch( WRITE_WATCH_FLAG_RESET, base, size, results, &count, &pagesize );
+    ok( !ret, "GetWriteWatch failed %u\n", GetLastError() );
+    ok( count == 16, "wrong count %lu\n", count );
+
+    success = ReadFile( readpipe, base, sizeof(testdata), NULL, overlapped2 );
+    ok( !success, "ReadFile unexpectedly succeeded\n" );
+    ok( GetLastError() == ERROR_IO_PENDING, "expected ERROR_IO_PENDING, got %u\n", GetLastError() );
+    overlapped2->Internal = 0xdeadbeef;
+
+    count = 64;
+    ret = pGetWriteWatch( WRITE_WATCH_FLAG_RESET, base, size, results, &count, &pagesize );
+    ok( !ret, "GetWriteWatch failed %u\n", GetLastError() );
+    ok( count == 2, "wrong count %lu\n", count );
+
+    num_bytes = 0;
+    success = WriteFile( writepipe, testdata, sizeof(testdata), &num_bytes, NULL );
+    ok( success, "WriteFile failed %u\n", GetLastError() );
+    ok( num_bytes == sizeof(testdata), "wrong number of bytes written %u\n", num_bytes );
+
+    num_bytes = 0;
+    success = GetOverlappedResult( readpipe, overlapped2, &num_bytes, TRUE );
+    ok( success, "GetOverlappedResult failed %u\n", GetLastError() );
+    ok( num_bytes == sizeof(testdata), "wrong number of bytes read %u\n", num_bytes );
+    ok( !memcmp( base, testdata, sizeof(testdata)), "didn't receive expected data\n" );
+
+    count = 64;
+    memset( results, 0, sizeof(results) );
+    ret = pGetWriteWatch( WRITE_WATCH_FLAG_RESET, base, size, results, &count, &pagesize );
+    ok( !ret, "GetWriteWatch failed %u\n", GetLastError() );
+    ok( count == 2, "wrong count %lu\n", count );
+    ok( results[0] == base, "wrong result %p\n", results[0] );
+
+    CloseHandle( readpipe );
+    CloseHandle( writepipe );
+    CloseHandle( overlapped.hEvent );
+    CloseHandle( overlapped2->hEvent );
 
     /* some invalid parameter tests */
 
@@ -2540,7 +2619,8 @@ static void test_atl_thunk_emulation( ULONG dep_flags )
     if (old_flags != dep_flags)
     {
         ret = NtSetInformationProcess( GetCurrentProcess(), ProcessExecuteFlags, &dep_flags, sizeof(dep_flags) );
-        if (ret == STATUS_INVALID_INFO_CLASS) /* Windows 2000 */
+        if (ret == STATUS_INVALID_INFO_CLASS /* Windows 2000 */ ||
+            ret == STATUS_ACCESS_DENIED)
         {
             win_skip( "Skipping DEP tests with ProcessExecuteFlags = %d\n", dep_flags );
             return;

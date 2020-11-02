@@ -476,10 +476,9 @@ static void rpcrt4_conn_np_cancel_call(RpcConnection *conn)
     CancelIoEx(connection->pipe, NULL);
 }
 
-static int rpcrt4_conn_np_wait_for_incoming_data(RpcConnection *Connection)
+static int rpcrt4_conn_np_wait_for_incoming_data(RpcConnection *conn)
 {
-    /* FIXME: implement when named pipe writes use overlapped I/O */
-    return -1;
+    return rpcrt4_conn_np_read(conn, NULL, 0);
 }
 
 static size_t rpcrt4_ncacn_np_get_top_of_tower(unsigned char *tower_data,

@@ -314,18 +314,6 @@ static int pcap_conv_datalinks(int * HOSTPTR src, int count, int **dest)
 #define IFNAMSIZ 256 /* libpcap sets 8192 if undefined but that is excessive */
 #endif
 
-static char *pcap_conv_devname(const char * HOSTPTR device)
-{
-    static char pcap_device_ret[IFNAMSIZ + 1];
-
-    if (device)
-    {
-        memccpy(pcap_device_ret, device, 0, sizeof(pcap_device_ret) - 1);
-        return pcap_device_ret;
-    }
-    return NULL;
-}
-
 #else
 
 typedef pcap_t wine_pcap_t;
@@ -392,11 +380,6 @@ static inline int pcap_conv_datalinks(int * HOSTPTR src, int count, int **dest)
 {
     *dest = src;
     return count;
-}
-
-static char *pcap_conv_devname(char * HOSTPTR device)
-{
-    return device;
 }
 
 #endif
@@ -565,8 +548,18 @@ int CDECL wine_pcap_list_datalinks(wine_pcap_t *p, int **dlt_buffer)
 
 char* CDECL wine_pcap_lookupdev(char *errbuf)
 {
+    static char *ret;
+    pcap_if_t *devs;
+
     TRACE("(%p)\n", errbuf);
-    return pcap_conv_devname(pcap_lookupdev(errbuf));
+    if (!ret)
+    {
+        if (pcap_findalldevs( &devs, errbuf ) == -1) return NULL;
+        if (!devs) return NULL;
+        if ((ret = heap_alloc( strlen(devs->name) + 1 ))) strcpy( ret, devs->name );
+        pcap_freealldevs( devs );
+    }
+    return ret;
 }
 
 int CDECL wine_pcap_lookupnet(const char *device, unsigned int *netp, unsigned int *maskp,

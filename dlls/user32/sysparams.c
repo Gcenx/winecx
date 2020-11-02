@@ -736,6 +736,18 @@ static void release_display_device_init_mutex( HANDLE mutex )
     CloseHandle( mutex );
 }
 
+/* Wait until graphics driver is loaded by explorer */
+static void wait_graphics_driver_ready(void)
+{
+    static BOOL ready = FALSE;
+
+    if (!ready)
+    {
+        SendMessageW( GetDesktopWindow(), WM_NULL, 0, 0 );
+        ready = TRUE;
+    }
+}
+
 /* map value from system dpi to standard 96 dpi for storing in the registry */
 static int map_from_system_dpi( int val )
 {
@@ -2121,7 +2133,7 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
 	/* Tell it "disabled" */
 	if (lpAnimInfo && lpAnimInfo->cbSize == sizeof(ANIMATIONINFO))
         {
-	    lpAnimInfo->iMinAnimate = 0; /* Minimise and restore animation is disabled (nonzero == enabled) */
+	    lpAnimInfo->iMinAnimate = 0; /* Minimize and restore animation is disabled (nonzero == enabled) */
             ret = TRUE;
         }
 	break;
@@ -2646,9 +2658,8 @@ INT WINAPI GetSystemMetrics( INT index )
     {
     case SM_CXVSCROLL:
     case SM_CYHSCROLL:
-        ncm.cbSize = sizeof(ncm);
-        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
-        return ncm.iScrollWidth;
+        get_entry( &entry_SCROLLWIDTH, 0, &ret );
+        return max( ret, 8 );
     case SM_CYCAPTION:
         ncm.cbSize = sizeof(ncm);
         SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
@@ -2664,9 +2675,8 @@ INT WINAPI GetSystemMetrics( INT index )
     case SM_CXHTHUMB:
     case SM_CYVSCROLL:
     case SM_CXHSCROLL:
-        ncm.cbSize = sizeof(ncm);
-        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
-        return ncm.iScrollHeight;
+        get_entry( &entry_SCROLLHEIGHT, 0, &ret );
+        return max( ret, 8 );
     case SM_CXICON:
     case SM_CYICON:
         return map_to_dpi( 32, GetDpiForSystem() );
@@ -2712,21 +2722,20 @@ INT WINAPI GetSystemMetrics( INT index )
     case SM_CYMIN:
         return GetSystemMetrics( SM_CYCAPTION) + 2 * GetSystemMetrics( SM_CYFRAME);
     case SM_CXSIZE:
-        ncm.cbSize = sizeof(ncm);
-        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
-        return ncm.iCaptionWidth;
+        get_entry( &entry_CAPTIONWIDTH, 0, &ret );
+        return max( ret, 8 );
     case SM_CYSIZE:
         ncm.cbSize = sizeof(ncm);
         SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
         return ncm.iCaptionHeight;
     case SM_CXFRAME:
-        ncm.cbSize = sizeof(ncm);
-        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
-        return GetSystemMetrics(SM_CXDLGFRAME) + ncm.iBorderWidth;
+        get_entry( &entry_BORDER, 0, &ret );
+        ret = max( ret, 1 );
+        return GetSystemMetrics(SM_CXDLGFRAME) + ret;
     case SM_CYFRAME:
-        ncm.cbSize = sizeof(ncm);
-        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
-        return GetSystemMetrics(SM_CYDLGFRAME) + ncm.iBorderWidth;
+        get_entry( &entry_BORDER, 0, &ret );
+        ret = max( ret, 1 );
+        return GetSystemMetrics(SM_CYDLGFRAME) + ret;
     case SM_CXMINTRACK:
         return GetSystemMetrics(SM_CXMIN);
     case SM_CYMINTRACK:
@@ -2780,17 +2789,15 @@ INT WINAPI GetSystemMetrics( INT index )
         SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
         return ncm.iSmCaptionHeight + 1;
     case SM_CXSMSIZE:
-        ncm.cbSize = sizeof(ncm);
-        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
-        return ncm.iSmCaptionWidth;
+        get_entry( &entry_SMCAPTIONWIDTH, 0, &ret );
+        return ret;
     case SM_CYSMSIZE:
         ncm.cbSize = sizeof(ncm);
         SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
         return ncm.iSmCaptionHeight;
     case SM_CXMENUSIZE:
-        ncm.cbSize = sizeof(ncm);
-        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
-        return ncm.iMenuWidth;
+        get_entry( &entry_MENUWIDTH, 0, &ret );
+        return ret;
     case SM_CYMENUSIZE:
         ncm.cbSize = sizeof(ncm);
         SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
@@ -2901,9 +2908,8 @@ INT WINAPI GetSystemMetricsForDpi( INT index, UINT dpi )
     {
     case SM_CXVSCROLL:
     case SM_CYHSCROLL:
-        ncm.cbSize = sizeof(ncm);
-        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
-        return ncm.iScrollWidth;
+        get_entry_dpi( &entry_SCROLLWIDTH, 0, &ret, dpi );
+        return max( ret, 8 );
     case SM_CYCAPTION:
         ncm.cbSize = sizeof(ncm);
         SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
@@ -2912,9 +2918,8 @@ INT WINAPI GetSystemMetricsForDpi( INT index, UINT dpi )
     case SM_CXHTHUMB:
     case SM_CYVSCROLL:
     case SM_CXHSCROLL:
-        ncm.cbSize = sizeof(ncm);
-        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
-        return ncm.iScrollHeight;
+        get_entry_dpi( &entry_SCROLLHEIGHT, 0, &ret, dpi );
+        return max( ret, 8 );
     case SM_CXICON:
     case SM_CYICON:
         return map_to_dpi( 32, dpi );
@@ -2929,21 +2934,20 @@ INT WINAPI GetSystemMetricsForDpi( INT index, UINT dpi )
         SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
         return ncm.iMenuHeight + 1;
     case SM_CXSIZE:
-        ncm.cbSize = sizeof(ncm);
-        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
-        return ncm.iCaptionWidth;
+        get_entry_dpi( &entry_CAPTIONWIDTH, 0, &ret, dpi );
+        return max( ret, 8 );
     case SM_CYSIZE:
         ncm.cbSize = sizeof(ncm);
         SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
         return ncm.iCaptionHeight;
     case SM_CXFRAME:
-        ncm.cbSize = sizeof(ncm);
-        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
-        return GetSystemMetricsForDpi( SM_CXDLGFRAME, dpi ) + ncm.iBorderWidth;
+        get_entry_dpi( &entry_BORDER, 0, &ret, dpi );
+        ret = max( ret, 1 );
+        return GetSystemMetricsForDpi( SM_CXDLGFRAME, dpi ) + ret;
     case SM_CYFRAME:
-        ncm.cbSize = sizeof(ncm);
-        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
-        return GetSystemMetricsForDpi( SM_CYDLGFRAME, dpi ) + ncm.iBorderWidth;
+        get_entry_dpi( &entry_BORDER, 0, &ret, dpi );
+        ret = max( ret, 1 );
+        return GetSystemMetricsForDpi( SM_CYDLGFRAME, dpi ) + ret;
     case SM_CXICONSPACING:
         im.cbSize = sizeof(im);
         SystemParametersInfoForDpi( SPI_GETICONMETRICS, sizeof(im), &im, 0, dpi );
@@ -2960,17 +2964,15 @@ INT WINAPI GetSystemMetricsForDpi( INT index, UINT dpi )
         SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
         return ncm.iSmCaptionHeight + 1;
     case SM_CXSMSIZE:
-        ncm.cbSize = sizeof(ncm);
-        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
-        return ncm.iSmCaptionWidth;
+        get_entry_dpi( &entry_SMCAPTIONWIDTH, 0, &ret, dpi );
+        return ret;
     case SM_CYSMSIZE:
         ncm.cbSize = sizeof(ncm);
         SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
         return ncm.iSmCaptionHeight;
     case SM_CXMENUSIZE:
-        ncm.cbSize = sizeof(ncm);
-        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
-        return ncm.iMenuWidth;
+        get_entry_dpi( &entry_MENUWIDTH, 0, &ret, dpi );
+        return ret;
     case SM_CYMENUSIZE:
         ncm.cbSize = sizeof(ncm);
         SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
@@ -3748,7 +3750,8 @@ static BOOL update_monitor_cache(void)
     HANDLE mutex = NULL;
     DWORD state_flags;
     BOOL ret = FALSE;
-    DWORD i = 0;
+    BOOL mirrored_slave;
+    DWORD i = 0, j;
     DWORD type;
 
     /* Update monitor cache from SetupAPI if it's outdated */
@@ -3792,6 +3795,20 @@ static BOOL update_monitor_cache(void)
         if (!SetupDiGetDevicePropertyW( devinfo, &device_data, &WINE_DEVPROPKEY_MONITOR_RCMONITOR, &type,
                                         (BYTE *)&monitors[monitor_count].rcMonitor, sizeof(RECT), NULL, 0 ))
             goto fail;
+
+        /* Mirrored slave monitors also don't get enumerated */
+        mirrored_slave = FALSE;
+        for (j = 0; j < monitor_count; j++)
+        {
+            if (EqualRect(&monitors[j].rcMonitor, &monitors[monitor_count].rcMonitor))
+            {
+                mirrored_slave = TRUE;
+                break;
+            }
+        }
+        if (mirrored_slave)
+            continue;
+
         if (!SetupDiGetDevicePropertyW( devinfo, &device_data, &WINE_DEVPROPKEY_MONITOR_RCWORK, &type,
                                         (BYTE *)&monitors[monitor_count].rcWork, sizeof(RECT), NULL, 0 ))
             goto fail;
@@ -4087,6 +4104,7 @@ BOOL WINAPI EnumDisplayDevicesW( LPCWSTR device, DWORD index, DISPLAY_DEVICEW *i
 
     TRACE("%s %d %p %#x\n", debugstr_w( device ), index, info, flags);
 
+    wait_graphics_driver_ready();
     mutex = get_display_device_init_mutex();
 
     /* Find adapter */

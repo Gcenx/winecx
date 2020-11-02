@@ -93,9 +93,6 @@ static BOOL run_winemenubuilder( const WCHAR *args )
     WCHAR app[MAX_PATH];
     void *redir;
 
-    if (getenv("CX_NO_WINESHELLLINK"))
-        return TRUE;
-
     GetSystemDirectoryW( app, MAX_PATH - ARRAY_SIZE( menubuilder ));
     lstrcatW( app, menubuilder );
 

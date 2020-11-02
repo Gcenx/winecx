@@ -29,6 +29,8 @@
 
 
 static NSString* const WineAppWaitQueryResponseMode = @"WineAppWaitQueryResponseMode";
+static NSString* const WineWillShowPermissionDialogNotification = @"WineWillShowPermissionDialogNotification";
+static NSString* const WineDidShowPermissionDialogNotification = @"WineDidShowPermissionDialogNotification";
 
 
 int macdrv_err_on;
@@ -118,7 +120,7 @@ static NSString* WineLocalizedString(unsigned int stringID)
 
 @implementation WineApplicationController
 
-    @synthesize keyboardType, lastFlagsChanged;
+    @synthesize keyboardType, lastFlagsChanged, displaysTemporarilyUncapturedForDialog;
     @synthesize applicationIcon;
     @synthesize cursorFrames, cursorTimer, cursor;
     @synthesize mouseCaptureWindow;
@@ -852,9 +854,9 @@ static NSString* WineLocalizedString(unsigned int stringID)
         if (CGDisplayModeGetHeight(mode1) != CGDisplayModeGetHeight(mode2)) return FALSE;
 
 #if defined(MAC_OS_X_VERSION_10_8) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_8
-        if (CGDisplayModeGetPixelWidth != NULL &&
+        if (&CGDisplayModeGetPixelWidth != NULL &&
             CGDisplayModeGetPixelWidth(mode1) != CGDisplayModeGetPixelWidth(mode2)) return FALSE;
-        if (CGDisplayModeGetPixelHeight != NULL &&
+        if (&CGDisplayModeGetPixelHeight != NULL &&
             CGDisplayModeGetPixelHeight(mode1) != CGDisplayModeGetPixelHeight(mode2)) return FALSE;
 #endif
 
@@ -884,9 +886,8 @@ static NSString* WineLocalizedString(unsigned int stringID)
         NSDictionary* options = nil;
 
 #if defined(MAC_OS_X_VERSION_10_8) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_8
-        if (&kCGDisplayShowDuplicateLowResolutionModes != NULL)
-            options = [NSDictionary dictionaryWithObject:[NSNumber numberWithBool:TRUE]
-                                                  forKey:(NSString*)kCGDisplayShowDuplicateLowResolutionModes];
+        options = [NSDictionary dictionaryWithObject:[NSNumber numberWithBool:TRUE]
+                                              forKey:(NSString*)kCGDisplayShowDuplicateLowResolutionModes];
 #endif
 
         NSArray *modes = [(NSArray*)CGDisplayCopyAllDisplayModes(displayID, (CFDictionaryRef)options) autorelease];
@@ -2317,6 +2318,50 @@ static NSString* WineLocalizedString(unsigned int stringID)
                 selector:@selector(enabledKeyboardInputSourcesChanged)
                     name:(NSString*)kTISNotifyEnabledKeyboardInputSourcesChanged
                   object:nil];
+
+        [nc addObserverForName:WineWillShowPermissionDialogNotification
+                        object:nil
+                         queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(NSNotification *note){
+            /* A system-wide permission dialog is about to be displayed which the
+             * user needs to respond to.
+             * If displays are captured for full-screen, they need to be temporarily
+             * uncaptured. Some events also need to be ignored during this change, to
+             * prevent the app from thinking it's been switched away from and
+             * minimizing itself.
+             */
+            if ([NSApp isActive])
+            {
+                if ([originalDisplayModes count] || displaysCapturedForFullscreen)
+                {
+                    NSNumber* displayID;
+                    for (displayID in originalDisplayModes)
+                    {
+                        CGDisplayModeRef mode = CGDisplayCopyDisplayMode([displayID unsignedIntValue]);
+                        [latentDisplayModes setObject:(id)mode forKey:displayID];
+                        CGDisplayModeRelease(mode);
+                    }
+
+                    CGRestorePermanentDisplayConfiguration();
+                    CGReleaseAllDisplays();
+                    [originalDisplayModes removeAllObjects];
+                    displaysCapturedForFullscreen = FALSE;
+                    displaysTemporarilyUncapturedForDialog = TRUE;
+                }
+            }
+        }];
+
+        [nc addObserverForName:WineDidShowPermissionDialogNotification
+                        object:nil
+                         queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(NSNotification *note){
+            if (displaysTemporarilyUncapturedForDialog)
+            {
+                [self applicationDidBecomeActive:nil];
+
+                displaysTemporarilyUncapturedForDialog = FALSE;
+            }
+        }];
     }
 
     - (BOOL) inputSourceIsInputMethod
@@ -2457,14 +2502,17 @@ static NSString* WineLocalizedString(unsigned int stringID)
 
         [self invalidateGotFocusEvents];
 
-        event = macdrv_create_event(APP_DEACTIVATED, nil);
+        if (!displaysTemporarilyUncapturedForDialog)
+        {
+            event = macdrv_create_event(APP_DEACTIVATED, nil);
 
-        [eventQueuesLock lock];
-        for (queue in eventQueues)
-            [queue postEvent:event];
-        [eventQueuesLock unlock];
+            [eventQueuesLock lock];
+            for (queue in eventQueues)
+                [queue postEvent:event];
+            [eventQueuesLock unlock];
 
-        macdrv_release_event(event);
+            macdrv_release_event(event);
+        }
 
         [self releaseMouseCapture];
     }

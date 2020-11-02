@@ -36,8 +36,9 @@
 #include "winuser.h"
 #include "winnls.h"
 #include "winternl.h"
-#include "lzexpand.h"
 #include "winerror.h"
+
+#include "kernelbase.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ver);
@@ -206,58 +207,32 @@ static const IMAGE_RESOURCE_DIRECTORY *find_entry_language( const IMAGE_RESOURCE
 }
 
 
-/***********************************************************************
- *           read_xx_header         [internal]
- */
-static int read_xx_header( HFILE lzfd )
+static DWORD read_data( HANDLE handle, DWORD offset, void *data, DWORD len )
 {
-    IMAGE_DOS_HEADER mzh;
-    char magic[3];
+    DWORD res;
 
-    LZSeek( lzfd, 0, SEEK_SET );
-    if ( sizeof(mzh) != LZRead( lzfd, (LPSTR)&mzh, sizeof(mzh) ) )
-        return 0;
-    if ( mzh.e_magic != IMAGE_DOS_SIGNATURE )
-    {
-        if (!memcmp( &mzh, "\177ELF", 4 )) return 1;  /* ELF */
-        if (*(UINT *)&mzh == 0xfeedface || *(UINT *)&mzh == 0xcefaedfe) return 1;  /* Mach-O */
-        return 0;
-    }
-
-    LZSeek( lzfd, mzh.e_lfanew, SEEK_SET );
-    if ( 2 != LZRead( lzfd, magic, 2 ) )
-        return 0;
-
-    LZSeek( lzfd, mzh.e_lfanew, SEEK_SET );
-
-    if ( magic[0] == 'N' && magic[1] == 'E' )
-        return IMAGE_OS2_SIGNATURE;
-    if ( magic[0] == 'P' && magic[1] == 'E' )
-        return IMAGE_NT_SIGNATURE;
-
-    magic[2] = '\0';
-    WARN("Can't handle %s files.\n", magic );
-    return 0;
+    SetFilePointer( handle, offset, NULL, FILE_BEGIN );
+    if (!ReadFile( handle, data, len, &res, NULL )) res = 0;
+    return res;
 }
 
 /***********************************************************************
  *           find_ne_resource         [internal]
  */
-static BOOL find_ne_resource( HFILE lzfd, DWORD *resLen, DWORD *resOff )
+static BOOL find_ne_resource( HANDLE handle, DWORD *resLen, DWORD *resOff )
 {
     const WORD typeid = VS_FILE_INFO | 0x8000;
     const WORD resid = VS_VERSION_INFO | 0x8000;
     IMAGE_OS2_HEADER nehd;
     NE_TYPEINFO *typeInfo;
     NE_NAMEINFO *nameInfo;
-    DWORD nehdoffset;
+    DWORD nehdoffset = *resOff;
     LPBYTE resTab;
     DWORD resTabSize;
     int count;
 
     /* Read in NE header */
-    nehdoffset = LZSeek( lzfd, 0, SEEK_CUR );
-    if ( sizeof(nehd) != LZRead( lzfd, (LPSTR)&nehd, sizeof(nehd) ) ) return FALSE;
+    if (read_data( handle, nehdoffset, &nehd, sizeof(nehd) ) != sizeof(nehd)) return FALSE;
 
     resTabSize = nehd.ne_restab - nehd.ne_rsrctab;
     if ( !resTabSize )
@@ -270,8 +245,7 @@ static BOOL find_ne_resource( HFILE lzfd, DWORD *resLen, DWORD *resOff )
     resTab = HeapAlloc( GetProcessHeap(), 0, resTabSize );
     if ( !resTab ) return FALSE;
 
-    LZSeek( lzfd, nehd.ne_rsrctab + nehdoffset, SEEK_SET );
-    if ( resTabSize != LZRead( lzfd, (char*)resTab, resTabSize ) )
+    if (read_data( handle, nehd.ne_rsrctab + nehdoffset, resTab, resTabSize ) != resTabSize)
     {
         HeapFree( GetProcessHeap(), 0, resTab );
         return FALSE;
@@ -301,8 +275,8 @@ static BOOL find_ne_resource( HFILE lzfd, DWORD *resLen, DWORD *resOff )
 
  found_name:
     /* Return resource data */
-    if ( resLen ) *resLen = nameInfo->length << *(WORD *)resTab;
-    if ( resOff ) *resOff = nameInfo->offset << *(WORD *)resTab;
+    *resLen = nameInfo->length << *(WORD *)resTab;
+    *resOff = nameInfo->offset << *(WORD *)resTab;
 
     HeapFree( GetProcessHeap(), 0, resTab );
     return TRUE;
@@ -311,27 +285,26 @@ static BOOL find_ne_resource( HFILE lzfd, DWORD *resLen, DWORD *resOff )
 /***********************************************************************
  *           find_pe_resource         [internal]
  */
-static BOOL find_pe_resource( HFILE lzfd, DWORD *resLen, DWORD *resOff, DWORD flags )
+static BOOL find_pe_resource( HANDLE handle, DWORD *resLen, DWORD *resOff, DWORD flags )
 {
     union
     {
         IMAGE_NT_HEADERS32 nt32;
         IMAGE_NT_HEADERS64 nt64;
     } pehd;
-    DWORD pehdoffset;
+    DWORD pehdoffset = *resOff;
     PIMAGE_DATA_DIRECTORY resDataDir;
     PIMAGE_SECTION_HEADER sections;
     LPBYTE resSection;
-    DWORD section_size, data_size;
+    DWORD len, section_size, data_size;
     const void *resDir;
     const IMAGE_RESOURCE_DIRECTORY *resPtr;
     const IMAGE_RESOURCE_DATA_ENTRY *resData;
-    int i, len, nSections;
+    int i, nSections;
     BOOL ret = FALSE;
 
     /* Read in PE header */
-    pehdoffset = LZSeek( lzfd, 0, SEEK_CUR );
-    len = LZRead( lzfd, (LPSTR)&pehd, sizeof(pehd) );
+    len = read_data( handle, pehdoffset, &pehd, sizeof(pehd) );
     if (len < sizeof(pehd.nt32.FileHeader)) return FALSE;
     if (len < sizeof(pehd)) memset( (char *)&pehd + len, 0, sizeof(pehd) - len );
 
@@ -360,10 +333,8 @@ static BOOL find_pe_resource( HFILE lzfd, DWORD *resLen, DWORD *resOff, DWORD fl
     if ( !sections ) return FALSE;
 
     len = FIELD_OFFSET( IMAGE_NT_HEADERS32, OptionalHeader ) + pehd.nt32.FileHeader.SizeOfOptionalHeader;
-    LZSeek( lzfd, pehdoffset + len, SEEK_SET );
-
-    if ( nSections * sizeof(IMAGE_SECTION_HEADER) !=
-         LZRead( lzfd, (LPSTR)sections, nSections * sizeof(IMAGE_SECTION_HEADER) ) )
+    if (read_data( handle, pehdoffset + len, sections, nSections * sizeof(IMAGE_SECTION_HEADER) ) !=
+        nSections * sizeof(IMAGE_SECTION_HEADER))
     {
         HeapFree( GetProcessHeap(), 0, sections );
         return FALSE;
@@ -393,8 +364,7 @@ static BOOL find_pe_resource( HFILE lzfd, DWORD *resLen, DWORD *resOff, DWORD fl
         return FALSE;
     }
 
-    LZSeek( lzfd, sections[i].PointerToRawData, SEEK_SET );
-    if (data_size != LZRead( lzfd, (char*)resSection, data_size )) goto done;
+    if (read_data( handle, sections[i].PointerToRawData, resSection, data_size ) != data_size) goto done;
     if (data_size < section_size) memset( (char *)resSection + data_size, 0, section_size - data_size );
 
     /* Find resource */
@@ -435,9 +405,8 @@ static BOOL find_pe_resource( HFILE lzfd, DWORD *resLen, DWORD *resOff, DWORD fl
     }
 
     /* Return resource data */
-    if ( resLen ) *resLen = resData->Size;
-    if ( resOff ) *resOff = resData->OffsetToData - sections[i].VirtualAddress
-                            + sections[i].PointerToRawData;
+    *resLen = resData->Size;
+    *resOff = resData->OffsetToData - sections[i].VirtualAddress + sections[i].PointerToRawData;
     ret = TRUE;
 
  done:
@@ -450,19 +419,27 @@ static BOOL find_pe_resource( HFILE lzfd, DWORD *resLen, DWORD *resOff, DWORD fl
 /***********************************************************************
  *           find_version_resource         [internal]
  */
-static DWORD find_version_resource( HFILE lzfd, DWORD *reslen, DWORD *offset, DWORD flags )
+static DWORD find_version_resource( HANDLE handle, DWORD *reslen, DWORD *offset, DWORD flags )
 {
-    DWORD magic = read_xx_header( lzfd );
+    IMAGE_DOS_HEADER mzh;
+    WORD magic;
+
+    if (read_data( handle, 0, &mzh, sizeof(mzh) ) != sizeof(mzh)) return 0;
+    if (mzh.e_magic != IMAGE_DOS_SIGNATURE) return 0;
+
+    if (read_data( handle, mzh.e_lfanew, &magic, sizeof(magic) ) != sizeof(magic)) return 0;
+    *offset = mzh.e_lfanew;
 
     switch (magic)
     {
     case IMAGE_OS2_SIGNATURE:
-        if (!find_ne_resource( lzfd, reslen, offset )) magic = 0;
+        if (!find_ne_resource( handle, reslen, offset )) magic = 0;
         break;
     case IMAGE_NT_SIGNATURE:
-        if (!find_pe_resource( lzfd, reslen, offset, flags )) magic = 0;
+        if (!find_pe_resource( handle, reslen, offset, flags )) magic = 0;
         break;
     }
+    WARN( "Can't handle %04x files.\n", magic );
     return magic;
 }
 
@@ -618,16 +595,14 @@ DWORD WINAPI GetFileVersionInfoSizeA( LPCSTR filename, LPDWORD handle )
 /******************************************************************************
  *           GetFileVersionInfoSizeExW       (kernelbase.@)
  */
-DWORD WINAPI GetFileVersionInfoSizeExW( DWORD flags, LPCWSTR filename, LPDWORD handle )
+DWORD WINAPI GetFileVersionInfoSizeExW( DWORD flags, LPCWSTR filename, LPDWORD ret_handle )
 {
     DWORD len, offset, magic = 1;
-    HFILE lzfd;
     HMODULE hModule;
-    OFSTRUCT ofs;
 
-    TRACE("(0x%x,%s,%p)\n", flags, debugstr_w(filename), handle );
+    TRACE("(0x%x,%s,%p)\n", flags, debugstr_w(filename), ret_handle );
 
-    if (handle) *handle = 0;
+    if (ret_handle) *ret_handle = 0;
 
     if (!filename)
     {
@@ -642,13 +617,7 @@ DWORD WINAPI GetFileVersionInfoSizeExW( DWORD flags, LPCWSTR filename, LPDWORD h
     if (flags & ~FILE_VER_GET_LOCALISED)
         FIXME("flags 0x%x ignored\n", flags & ~FILE_VER_GET_LOCALISED);
 
-    if ((lzfd = LZOpenFileW( (LPWSTR)filename, &ofs, OF_READ )) != HFILE_ERROR)
-    {
-        magic = find_version_resource( lzfd, &len, &offset, flags );
-        LZClose( lzfd );
-    }
-
-    if ((magic == 1) && (hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_DATAFILE )))
+    if ((hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_DATAFILE )))
     {
         HRSRC hRsrc = NULL;
         if (!(flags & FILE_VER_GET_LOCALISED))
@@ -666,6 +635,15 @@ DWORD WINAPI GetFileVersionInfoSizeExW( DWORD flags, LPCWSTR filename, LPDWORD h
             len = SizeofResource( hModule, hRsrc );
         }
         FreeLibrary( hModule );
+    }
+
+    if (magic == 1)
+    {
+        HANDLE handle = CreateFileW( filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                     NULL, OPEN_EXISTING, 0, 0 );
+        if (handle == INVALID_HANDLE_VALUE) return 0;
+        magic = find_version_resource( handle, &len, &offset, flags );
+        CloseHandle( handle );
     }
 
     switch (magic)
@@ -694,9 +672,7 @@ DWORD WINAPI GetFileVersionInfoSizeExW( DWORD flags, LPCWSTR filename, LPDWORD h
         return (len * 2) + 4;
 
     default:
-        if (lzfd == HFILE_ERROR)
-            SetLastError(ofs.nErrCode);
-        else if (GetVersion() & 0x80000000) /* Windows 95/98 */
+        if (GetVersion() & 0x80000000) /* Windows 95/98 */
             SetLastError(ERROR_FILE_NOT_FOUND);
         else
             SetLastError(ERROR_RESOURCE_DATA_NOT_FOUND);
@@ -729,17 +705,15 @@ DWORD WINAPI GetFileVersionInfoSizeExA( DWORD flags, LPCSTR filename, LPDWORD ha
 /***********************************************************************
  *           GetFileVersionInfoExW           (kernelbase.@)
  */
-BOOL WINAPI GetFileVersionInfoExW( DWORD flags, LPCWSTR filename, DWORD handle, DWORD datasize, LPVOID data )
+BOOL WINAPI GetFileVersionInfoExW( DWORD flags, LPCWSTR filename, DWORD ignored, DWORD datasize, LPVOID data )
 {
     static const char signature[4] = "FE2X";
     DWORD len, offset, magic = 1;
-    HFILE lzfd;
-    OFSTRUCT ofs;
     HMODULE hModule;
     VS_VERSION_INFO_STRUCT32* vvis = data;
 
     TRACE("(0x%x,%s,%d,size=%d,data=%p)\n",
-          flags, debugstr_w(filename), handle, datasize, data );
+          flags, debugstr_w(filename), ignored, datasize, data );
 
     if (!data)
     {
@@ -749,17 +723,7 @@ BOOL WINAPI GetFileVersionInfoExW( DWORD flags, LPCWSTR filename, DWORD handle, 
     if (flags & ~FILE_VER_GET_LOCALISED)
         FIXME("flags 0x%x ignored\n", flags & ~FILE_VER_GET_LOCALISED);
 
-    if ((lzfd = LZOpenFileW( (LPWSTR)filename, &ofs, OF_READ )) != HFILE_ERROR)
-    {
-        if ((magic = find_version_resource( lzfd, &len, &offset, flags )) > 1)
-        {
-            LZSeek( lzfd, offset, 0 /* SEEK_SET */ );
-            len = LZRead( lzfd, data, min( len, datasize ) );
-        }
-        LZClose( lzfd );
-    }
-
-    if ((magic == 1) && (hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_DATAFILE )))
+    if ((hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_DATAFILE )))
     {
         HRSRC hRsrc = NULL;
         if (!(flags & FILE_VER_GET_LOCALISED))
@@ -780,6 +744,16 @@ BOOL WINAPI GetFileVersionInfoExW( DWORD flags, LPCWSTR filename, DWORD handle, 
             FreeResource( hMem );
         }
         FreeLibrary( hModule );
+    }
+
+    if (magic == 1)
+    {
+        HANDLE handle = CreateFileW( filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                     NULL, OPEN_EXISTING, 0, 0 );
+        if (handle == INVALID_HANDLE_VALUE) return 0;
+        if ((magic = find_version_resource( handle, &len, &offset, flags )))
+            len = read_data( handle, offset, data, min( len, datasize ));
+        CloseHandle( handle );
     }
 
     switch (magic)
@@ -805,7 +779,7 @@ BOOL WINAPI GetFileVersionInfoExW( DWORD flags, LPCWSTR filename, DWORD handle, 
         return TRUE;
 
     default:
-        SetLastError( lzfd == HFILE_ERROR ? ofs.nErrCode : ERROR_RESOURCE_DATA_NOT_FOUND );
+        SetLastError( ERROR_RESOURCE_DATA_NOT_FOUND );
         return FALSE;
     }
 }
@@ -1102,34 +1076,24 @@ BOOL WINAPI VerQueryValueW( LPCVOID pBlock, LPCWSTR lpSubBlock,
  */
 static BOOL file_existsA( char const * path, char const * file, BOOL excl )
 {
-    char  filename[1024];
-    int  filenamelen;
-    OFSTRUCT  fileinfo;
-
-    fileinfo.cBytes = sizeof(OFSTRUCT);
+    DWORD sharing = excl ? 0 : FILE_SHARE_READ | FILE_SHARE_WRITE;
+    char filename[MAX_PATH];
+    int len;
+    HANDLE handle;
 
     if (path)
     {
-        strcpy(filename, path);
-        filenamelen = strlen(filename);
-
-        /* Add a trailing \ if necessary */
-        if(filenamelen)
-        {
-            if(filename[filenamelen - 1] != '\\')
-                strcat(filename, "\\");
-        }
-        else /* specify the current directory */
-            strcpy(filename, ".\\");
+        strcpy( filename, path );
+        len = strlen(filename);
+        if (len && filename[len - 1] != '\\') strcat( filename, "\\" );
+        strcat( filename, file );
     }
-    else
-        filename[0] = 0;
+    else if (!SearchPathA( NULL, file, NULL, MAX_PATH, filename, NULL )) return FALSE;
 
-    /* Create the full pathname */
-    strcat(filename, file);
-
-    return (OpenFile(filename, &fileinfo,
-                     OF_EXIST | (excl ? OF_SHARE_EXCLUSIVE : 0)) != HFILE_ERROR);
+    handle = CreateFileA( filename, 0, sharing, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0 );
+    if (handle == INVALID_HANDLE_VALUE) return FALSE;
+    CloseHandle( handle );
+    return TRUE;
 }
 
 /******************************************************************************
@@ -1137,32 +1101,24 @@ static BOOL file_existsA( char const * path, char const * file, BOOL excl )
  */
 static BOOL file_existsW( const WCHAR *path, const WCHAR *file, BOOL excl )
 {
-    char *filename;
-    DWORD pathlen, filelen;
-    int ret;
-    OFSTRUCT fileinfo;
+    DWORD sharing = excl ? 0 : FILE_SHARE_READ | FILE_SHARE_WRITE;
+    WCHAR filename[MAX_PATH];
+    int len;
+    HANDLE handle;
 
-    fileinfo.cBytes = sizeof(OFSTRUCT);
-
-    pathlen = WideCharToMultiByte( CP_ACP, 0, path, -1, NULL, 0, NULL, NULL );
-    filelen = WideCharToMultiByte( CP_ACP, 0, file, -1, NULL, 0, NULL, NULL );
-    filename = HeapAlloc( GetProcessHeap(), 0, pathlen+filelen+2 );
-
-    WideCharToMultiByte( CP_ACP, 0, path, -1, filename, pathlen, NULL, NULL );
-    /* Add a trailing \ if necessary */
-    if (pathlen > 1)
+    if (path)
     {
-        if (filename[pathlen-2] != '\\') strcpy( &filename[pathlen-1], "\\" );
+        lstrcpyW( filename, path );
+        len = lstrlenW(filename);
+        if (len && filename[len - 1] != '\\') lstrcatW( filename, L"\\" );
+        lstrcatW( filename, file );
     }
-    else /* specify the current directory */
-        strcpy(filename, ".\\");
+    else if (!SearchPathW( NULL, file, NULL, MAX_PATH, filename, NULL )) return FALSE;
 
-    WideCharToMultiByte( CP_ACP, 0, file, -1, filename+strlen(filename), filelen, NULL, NULL );
-
-    ret = (OpenFile(filename, &fileinfo,
-                    OF_EXIST | (excl ? OF_SHARE_EXCLUSIVE : 0)) != HFILE_ERROR);
-    HeapFree( GetProcessHeap(), 0, filename );
-    return ret;
+    handle = CreateFileW( filename, 0, sharing, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0 );
+    if (handle == INVALID_HANDLE_VALUE) return FALSE;
+    CloseHandle( handle );
+    return TRUE;
 }
 
 /*****************************************************************************
@@ -1267,7 +1223,6 @@ DWORD WINAPI VerFindFileW( DWORD flags, LPCWSTR filename, LPCWSTR win_dir, LPCWS
     DWORD retval = 0;
     const WCHAR *curDir;
     const WCHAR *destDir;
-    WCHAR winDir[MAX_PATH], systemDir[MAX_PATH];
 
     TRACE("flags = %x filename=%s windir=%s appdir=%s curdirlen=%p(%u) destdirlen=%p(%u)\n",
           flags, debugstr_w(filename), debugstr_w(win_dir), debugstr_w(app_dir),
@@ -1276,12 +1231,11 @@ DWORD WINAPI VerFindFileW( DWORD flags, LPCWSTR filename, LPCWSTR win_dir, LPCWS
     /* Figure out where the file should go; shared files default to the
        system directory */
 
-    GetSystemDirectoryW(systemDir, ARRAY_SIZE(systemDir));
     curDir = &emptyW;
 
     if(flags & VFFF_ISSHAREDFILE)
     {
-        destDir = systemDir;
+        destDir = system_dir;
         /* Were we given a filename?  If so, try to find the file. */
         if(filename)
         {
@@ -1298,16 +1252,15 @@ DWORD WINAPI VerFindFileW( DWORD flags, LPCWSTR filename, LPCWSTR win_dir, LPCWS
         destDir = app_dir ? app_dir : &emptyW;
         if(filename)
         {
-            GetWindowsDirectoryW( winDir, MAX_PATH );
             if(file_existsW(destDir, filename, FALSE)) curDir = destDir;
-            else if(file_existsW(winDir, filename, FALSE))
+            else if(file_existsW(windows_dir, filename, FALSE))
             {
-                curDir = winDir;
+                curDir = windows_dir;
                 retval |= VFF_CURNEDEST;
             }
-            else if(file_existsW(systemDir, filename, FALSE))
+            else if (file_existsW(system_dir, filename, FALSE))
             {
-                curDir = systemDir;
+                curDir = system_dir;
                 retval |= VFF_CURNEDEST;
             }
         }
@@ -1337,4 +1290,80 @@ DWORD WINAPI VerFindFileW( DWORD flags, LPCWSTR filename, LPCWSTR win_dir, LPCWS
           (retval & VFF_BUFFTOOSMALL) ? "VFF_BUFFTOOSMALL " : "",
           debugstr_w(cur_dir), debugstr_w(dest));
     return retval;
+}
+
+
+/***********************************************************************
+ *         GetProductInfo   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH GetProductInfo( DWORD os_major, DWORD os_minor,
+                                              DWORD sp_major, DWORD sp_minor, DWORD *type )
+{
+    return RtlGetProductInfo( os_major, os_minor, sp_major, sp_minor, type );
+}
+
+
+/***********************************************************************
+ *         GetVersion   (kernelbase.@)
+ */
+DWORD WINAPI GetVersion(void)
+{
+    DWORD result = MAKELONG( MAKEWORD( NtCurrentTeb()->Peb->OSMajorVersion,
+                                       NtCurrentTeb()->Peb->OSMinorVersion ),
+                             (NtCurrentTeb()->Peb->OSPlatformId ^ 2) << 14 );
+    if (NtCurrentTeb()->Peb->OSPlatformId == VER_PLATFORM_WIN32_NT)
+        result |= LOWORD(NtCurrentTeb()->Peb->OSBuildNumber) << 16;
+    return result;
+}
+
+
+/***********************************************************************
+ *         GetVersionExA   (kernelbase.@)
+ */
+BOOL WINAPI GetVersionExA( OSVERSIONINFOA *info )
+{
+    RTL_OSVERSIONINFOEXW infoW;
+
+    if (info->dwOSVersionInfoSize != sizeof(OSVERSIONINFOA) &&
+        info->dwOSVersionInfoSize != sizeof(OSVERSIONINFOEXA))
+    {
+        WARN( "wrong OSVERSIONINFO size from app (got: %d)\n", info->dwOSVersionInfoSize );
+        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        return FALSE;
+    }
+
+    infoW.dwOSVersionInfoSize = sizeof(infoW);
+    if (!set_ntstatus( RtlGetVersion( &infoW ))) return FALSE;
+
+    info->dwMajorVersion = infoW.dwMajorVersion;
+    info->dwMinorVersion = infoW.dwMinorVersion;
+    info->dwBuildNumber  = infoW.dwBuildNumber;
+    info->dwPlatformId   = infoW.dwPlatformId;
+    WideCharToMultiByte( CP_ACP, 0, infoW.szCSDVersion, -1,
+                         info->szCSDVersion, sizeof(info->szCSDVersion), NULL, NULL );
+
+    if (info->dwOSVersionInfoSize == sizeof(OSVERSIONINFOEXA))
+    {
+        OSVERSIONINFOEXA *vex = (OSVERSIONINFOEXA *)info;
+        vex->wServicePackMajor = infoW.wServicePackMajor;
+        vex->wServicePackMinor = infoW.wServicePackMinor;
+        vex->wSuiteMask        = infoW.wSuiteMask;
+        vex->wProductType      = infoW.wProductType;
+    }
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *         GetVersionExW   (kernelbase.@)
+ */
+BOOL WINAPI GetVersionExW( OSVERSIONINFOW *info )
+{
+    if (info->dwOSVersionInfoSize != sizeof(OSVERSIONINFOW) &&
+        info->dwOSVersionInfoSize != sizeof(OSVERSIONINFOEXW))
+    {
+        WARN( "wrong OSVERSIONINFO size from app (got: %d)\n", info->dwOSVersionInfoSize );
+        return FALSE;
+    }
+    return set_ntstatus( RtlGetVersion( (RTL_OSVERSIONINFOEXW *)info ));
 }

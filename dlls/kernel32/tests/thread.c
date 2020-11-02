@@ -24,6 +24,7 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <float.h>
 
 /* the tests intentionally pass invalid pointers and need an exception handler */
 #define WINE_NO_INLINE_STRING
@@ -82,6 +83,7 @@ static HANDLE (WINAPI *pOpenThread)(DWORD,BOOL,DWORD);
 static BOOL (WINAPI *pQueueUserWorkItem)(LPTHREAD_START_ROUTINE,PVOID,ULONG);
 static DWORD (WINAPI *pSetThreadIdealProcessor)(HANDLE,DWORD);
 static BOOL (WINAPI *pSetThreadPriorityBoost)(HANDLE,BOOL);
+static BOOL (WINAPI *pSetThreadStackGuarantee)(ULONG*);
 static BOOL (WINAPI *pRegisterWaitForSingleObject)(PHANDLE,HANDLE,WAITORTIMERCALLBACK,PVOID,ULONG,ULONG);
 static BOOL (WINAPI *pUnregisterWait)(HANDLE);
 static BOOL (WINAPI *pIsWow64Process)(HANDLE,PBOOL);
@@ -103,6 +105,8 @@ static NTSTATUS (WINAPI *pNtQueryInformationThread)(HANDLE,THREADINFOCLASS,PVOID
 static BOOL (WINAPI *pGetThreadGroupAffinity)(HANDLE,GROUP_AFFINITY*);
 static BOOL (WINAPI *pSetThreadGroupAffinity)(HANDLE,const GROUP_AFFINITY*,GROUP_AFFINITY*);
 static NTSTATUS (WINAPI *pNtSetInformationThread)(HANDLE,THREADINFOCLASS,LPCVOID,ULONG);
+static HRESULT (WINAPI *pSetThreadDescription)(HANDLE,const WCHAR *);
+static HRESULT (WINAPI *pGetThreadDescription)(HANDLE,WCHAR **);
 
 static HANDLE create_target_process(const char *arg)
 {
@@ -1016,6 +1020,61 @@ static VOID test_GetCurrentThreadStackLimits(void)
     ok(high == (ULONG_PTR)NtCurrentTeb()->Tib.StackBase, "expected %p, got %lx\n", NtCurrentTeb()->Tib.StackBase, high);
 }
 
+static void test_SetThreadStackGuarantee(void)
+{
+    ULONG size;
+    BOOL ret;
+
+    if (!pSetThreadStackGuarantee)
+    {
+        win_skip("SetThreadStackGuarantee not available.\n");
+        return;
+    }
+    size = 0;
+    ret = pSetThreadStackGuarantee( &size );
+    ok( ret, "failed err %u\n", GetLastError() );
+    ok( size == 0, "wrong size %u\n", size );
+    ok( NtCurrentTeb()->GuaranteedStackBytes == 0, "wrong teb %u\n",
+        NtCurrentTeb()->GuaranteedStackBytes );
+    size = 0xdeadbef;
+    ret = pSetThreadStackGuarantee( &size );
+    ok( !ret, "succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == ERROR_INVALID_ADDRESS,
+        "wrong error %u\n", GetLastError());
+    ok( size == 0, "wrong size %u\n", size );
+    ok( NtCurrentTeb()->GuaranteedStackBytes == 0, "wrong teb %u\n",
+        NtCurrentTeb()->GuaranteedStackBytes );
+    size = 200;
+    ret = pSetThreadStackGuarantee( &size );
+    ok( ret, "failed err %u\n", GetLastError() );
+    ok( size == 0, "wrong size %u\n", size );
+    ok( NtCurrentTeb()->GuaranteedStackBytes == 4096 * sizeof(void *) / 4, "wrong teb %u\n",
+        NtCurrentTeb()->GuaranteedStackBytes );
+    size = 5000;
+    ret = pSetThreadStackGuarantee( &size );
+    ok( ret, "failed err %u\n", GetLastError() );
+    ok( size == 4096 * sizeof(void *) / 4, "wrong size %u\n", size );
+    ok( NtCurrentTeb()->GuaranteedStackBytes == 8192, "wrong teb %u\n",
+        NtCurrentTeb()->GuaranteedStackBytes );
+    size = 2000;
+    ret = pSetThreadStackGuarantee( &size );
+    ok( ret, "failed err %u\n", GetLastError() );
+    ok( size == 8192, "wrong size %u\n", size );
+    ok( NtCurrentTeb()->GuaranteedStackBytes == 8192, "wrong teb %u\n",
+        NtCurrentTeb()->GuaranteedStackBytes );
+    size = 10000;
+    ret = pSetThreadStackGuarantee( &size );
+    ok( ret, "failed err %u\n", GetLastError() );
+    ok( size == 8192, "wrong size %u\n", size );
+    ok( NtCurrentTeb()->GuaranteedStackBytes == 12288, "wrong teb %u\n",
+        NtCurrentTeb()->GuaranteedStackBytes );
+    ret = pSetThreadStackGuarantee( &size );
+    ok( ret, "failed err %u\n", GetLastError() );
+    ok( size == 12288, "wrong size %u\n", size );
+    ok( NtCurrentTeb()->GuaranteedStackBytes == 12288, "wrong teb %u\n",
+        NtCurrentTeb()->GuaranteedStackBytes );
+}
+
 static VOID test_GetThreadExitCode(void)
 {
     DWORD exitCode, threadid;
@@ -1618,40 +1677,42 @@ static void test_ThreadErrorMode(void)
     pSetThreadErrorMode(oldmode, NULL);
 }
 
-#if (defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))) || (defined(_MSC_VER) && defined(__i386__))
-static inline void set_fpu_cw(WORD cw)
-{
-#ifdef _MSC_VER
-    __asm { fnclex }
-    __asm { fldcw [cw] }
-#else
-    __asm__ volatile ("fnclex; fldcw %0" : : "m" (cw));
-#endif
-}
-
-static inline WORD get_fpu_cw(void)
-{
-    WORD cw = 0;
-#ifdef _MSC_VER
-    __asm { fnstcw [cw] }
-#else
-    __asm__ volatile ("fnstcw %0" : "=m" (cw));
-#endif
-    return cw;
-}
-
 struct fpu_thread_ctx
 {
-    WORD cw;
+    unsigned int cw;
+    unsigned long fpu_cw;
     HANDLE finished;
 };
+
+static inline unsigned long get_fpu_cw(void)
+{
+#if defined(__i386__) || defined(__x86_64__)
+    WORD cw = 0;
+    unsigned int sse = 0;
+#ifdef _MSC_VER
+    __asm { fnstcw [cw] }
+    __asm { stmxcsr [sse] }
+#else
+    __asm__ volatile ("fnstcw %0" : "=m" (cw));
+    __asm__ volatile ("stmxcsr %0" : "=m" (sse));
+#endif
+    return MAKELONG( cw, sse );
+#elif defined(__aarch64__)
+    unsigned long cw;
+    __asm__ __volatile__( "mrs %0, fpcr" : "=r" (cw) );
+    return cw;
+#else
+    return 0;
+#endif
+}
 
 static DWORD WINAPI fpu_thread(void *param)
 {
     struct fpu_thread_ctx *ctx = param;
     BOOL ret;
 
-    ctx->cw = get_fpu_cw();
+    ctx->cw = _control87( 0, 0 );
+    ctx->fpu_cw = get_fpu_cw();
 
     ret = SetEvent(ctx->finished);
     ok(ret, "SetEvent failed, last error %#x.\n", GetLastError());
@@ -1659,7 +1720,7 @@ static DWORD WINAPI fpu_thread(void *param)
     return 0;
 }
 
-static WORD get_thread_fpu_cw(void)
+static unsigned int get_thread_fpu_cw( unsigned long *fpu_cw )
 {
     struct fpu_thread_ctx ctx;
     DWORD tid, res;
@@ -1678,34 +1739,78 @@ static WORD get_thread_fpu_cw(void)
     ok(!!res, "Failed to close event handle, last error %#x.\n", GetLastError());
 
     CloseHandle(thread);
+    *fpu_cw = ctx.fpu_cw;
     return ctx.cw;
 }
 
 static void test_thread_fpu_cw(void)
 {
-    WORD initial_cw, cw;
-
-    initial_cw = get_fpu_cw();
-    ok(initial_cw == 0x27f, "Expected FPU control word 0x27f, got %#x.\n", initial_cw);
-
-    cw = get_thread_fpu_cw();
-    ok(cw == 0x27f, "Expected FPU control word 0x27f, got %#x.\n", cw);
-
-    set_fpu_cw(0xf60);
-    cw = get_fpu_cw();
-    ok(cw == 0xf60, "Expected FPU control word 0xf60, got %#x.\n", cw);
-
-    cw = get_thread_fpu_cw();
-    ok(cw == 0x27f, "Expected FPU control word 0x27f, got %#x.\n", cw);
-
-    cw = get_fpu_cw();
-    ok(cw == 0xf60, "Expected FPU control word 0xf60, got %#x.\n", cw);
-
-    set_fpu_cw(initial_cw);
-    cw = get_fpu_cw();
-    ok(cw == initial_cw, "Expected FPU control word %#x, got %#x.\n", initial_cw, cw);
-}
+    static const struct {
+        unsigned int cw; unsigned long fpu_cw; unsigned long fpu_cw_broken;
+    } expected_cw[6] =
+    {
+#ifdef __i386__
+        { _MCW_EM | _PC_53, MAKELONG( 0x27f, 0x1f80 ) },
+        { _MCW_EM | _PC_53, MAKELONG( 0x27f, 0x1f80 ) },
+        { _EM_INEXACT | _RC_CHOP | _PC_24, MAKELONG( 0xc60, 0x7000 ), MAKELONG( 0xc60, 0x1f80 ) },
+        { _MCW_EM | _PC_53, MAKELONG( 0x27f, 0x1f80 ) },
+        { _EM_INEXACT | _RC_CHOP | _PC_24, MAKELONG( 0xc60, 0x7000 ), MAKELONG( 0xc60, 0x1f80 ) },
+        { _MCW_EM | _PC_53, MAKELONG( 0x27f, 0x1f80 ) }
+#elif defined(__x86_64__)
+        { _MCW_EM | _PC_64, MAKELONG( 0x27f, 0x1f80 ) },
+        { _MCW_EM | _PC_64, MAKELONG( 0x27f, 0x1f80 ) },
+        { _EM_INEXACT | _RC_CHOP | _PC_64, MAKELONG( 0x27f, 0x7000 ) },
+        { _MCW_EM | _PC_64, MAKELONG( 0x27f, 0x1f80 ) },
+        { _EM_INEXACT | _RC_CHOP | _PC_64, MAKELONG( 0x27f, 0x7000 ) },
+        { _MCW_EM | _PC_64, MAKELONG( 0x27f, 0x1f80 ) }
+#elif defined(__aarch64__)
+        { _MCW_EM | _PC_64, 0 },
+        { _MCW_EM | _PC_64, 0 },
+        { _EM_INEXACT | _RC_CHOP | _PC_64, 0xc08f00 },
+        { _MCW_EM | _PC_64, 0 },
+        { _EM_INEXACT | _RC_CHOP | _PC_64, 0xc08f00 },
+        { _MCW_EM | _PC_64, 0 }
+#else
+        { 0xdeadbeef, 0xdeadbeef }
 #endif
+    };
+    unsigned int initial_cw, cw;
+    unsigned long fpu_cw;
+
+    fpu_cw = get_fpu_cw();
+    initial_cw = _control87( 0, 0 );
+    ok(initial_cw == expected_cw[0].cw, "expected %#x got %#x\n", expected_cw[0].cw, initial_cw);
+    ok(fpu_cw == expected_cw[0].fpu_cw, "expected %#lx got %#lx\n", expected_cw[0].fpu_cw, fpu_cw);
+
+    cw = get_thread_fpu_cw( &fpu_cw );
+    ok(cw == expected_cw[1].cw, "expected %#x got %#x\n", expected_cw[1].cw, cw);
+    ok(fpu_cw == expected_cw[1].fpu_cw, "expected %#lx got %#lx\n", expected_cw[1].fpu_cw, fpu_cw);
+
+    _control87( _EM_INEXACT | _RC_CHOP | _PC_24, _MCW_EM | _MCW_RC | _MCW_PC );
+    cw = _control87( 0, 0 );
+    fpu_cw = get_fpu_cw();
+    ok(cw == expected_cw[2].cw, "expected %#x got %#x\n", expected_cw[2].cw, cw);
+    ok(fpu_cw == expected_cw[2].fpu_cw ||
+            broken(expected_cw[2].fpu_cw_broken && fpu_cw == expected_cw[2].fpu_cw_broken),
+        "expected %#lx got %#lx\n", expected_cw[2].fpu_cw, fpu_cw);
+
+    cw = get_thread_fpu_cw( &fpu_cw );
+    ok(cw == expected_cw[3].cw, "expected %#x got %#x\n", expected_cw[3].cw, cw);
+    ok(fpu_cw == expected_cw[3].fpu_cw, "expected %#lx got %#lx\n", expected_cw[3].fpu_cw, fpu_cw);
+
+    cw = _control87( 0, 0 );
+    fpu_cw = get_fpu_cw();
+    ok(cw == expected_cw[4].cw, "expected %#x got %#x\n", expected_cw[4].cw, cw);
+    ok(fpu_cw == expected_cw[4].fpu_cw ||
+            broken(expected_cw[4].fpu_cw_broken && fpu_cw == expected_cw[4].fpu_cw_broken),
+        "expected %#lx got %#lx\n", expected_cw[4].fpu_cw, fpu_cw);
+
+    _control87( initial_cw, _MCW_EM | _MCW_RC | _MCW_PC );
+    cw = _control87( 0, 0 );
+    fpu_cw = get_fpu_cw();
+    ok(cw == expected_cw[5].cw, "expected %#x got %#x\n", expected_cw[5].cw, cw);
+    ok(fpu_cw == expected_cw[5].fpu_cw, "expected %#lx got %#lx\n", expected_cw[5].fpu_cw, fpu_cw);
+}
 
 static const char manifest_dep[] =
 "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
@@ -2014,6 +2119,133 @@ todo_wine
     CloseHandle(thread);
 }
 
+static void test_thread_description(void)
+{
+    THREAD_DESCRIPTION_INFORMATION *thread_desc;
+    static const WCHAR *desc = L"thread_desc";
+    ULONG len, len2, desc_len;
+    NTSTATUS status;
+    char buff[128];
+    WCHAR *ptr;
+    HRESULT hr;
+
+    if (!pGetThreadDescription)
+    {
+        win_skip("Thread description API is not supported.\n");
+        return;
+    }
+
+    desc_len = lstrlenW(desc) * sizeof(*desc);
+    thread_desc = (THREAD_DESCRIPTION_INFORMATION *)buff;
+
+    /* Initial description. */
+    ptr = NULL;
+    hr = pGetThreadDescription(GetCurrentThread(), &ptr);
+    ok(hr == HRESULT_FROM_NT(STATUS_SUCCESS), "Failed to get thread description, hr %#x.\n", hr);
+    ok(!lstrcmpW(ptr, L""), "Unexpected description %s.\n", wine_dbgstr_w(ptr));
+    LocalFree(ptr);
+
+    len = 0;
+    status = pNtQueryInformationThread(GetCurrentThread(), ThreadDescription, NULL, 0, &len);
+    ok(status == STATUS_BUFFER_TOO_SMALL, "Unexpected status %#x.\n", status);
+    ok(len == sizeof(*thread_desc), "Unexpected structure length %u.\n", len);
+
+    len2 = 0;
+    thread_desc->Description.Length = 1;
+    thread_desc->Description.MaximumLength = 0;
+    thread_desc->Description.Buffer = (WCHAR *)thread_desc;
+    status = pNtQueryInformationThread(GetCurrentThread(), ThreadDescription, thread_desc, len, &len2);
+    ok(!status, "Failed to get thread info, status %#x.\n", status);
+    ok(len2 == sizeof(*thread_desc), "Unexpected structure length %u.\n", len);
+    ok(!thread_desc->Description.Length, "Unexpected description length %#x.\n", thread_desc->Description.Length);
+    ok(thread_desc->Description.Buffer == (WCHAR *)(thread_desc + 1),
+            "Unexpected description string pointer %p, %p.\n", thread_desc->Description.Buffer, thread_desc);
+
+    hr = pSetThreadDescription(GetCurrentThread(), NULL);
+    ok(hr == HRESULT_FROM_NT(STATUS_SUCCESS), "Failed to set thread description, hr %#x.\n", hr);
+
+    hr = pSetThreadDescription(GetCurrentThread(), desc);
+    ok(hr == HRESULT_FROM_NT(STATUS_SUCCESS), "Failed to set thread description, hr %#x.\n", hr);
+
+    ptr = NULL;
+    hr = pGetThreadDescription(GetCurrentThread(), &ptr);
+    ok(hr == HRESULT_FROM_NT(STATUS_SUCCESS), "Failed to get thread description, hr %#x.\n", hr);
+    ok(!lstrcmpW(ptr, desc), "Unexpected description %s.\n", wine_dbgstr_w(ptr));
+    LocalFree(ptr);
+
+    len = 0;
+    status = pNtQueryInformationThread(GetCurrentThread(), ThreadDescription, NULL, 0, &len);
+    ok(status == STATUS_BUFFER_TOO_SMALL, "Failed to get thread info, status %#x.\n", status);
+    ok(len == sizeof(*thread_desc) + desc_len, "Unexpected structure length %u.\n", len);
+
+    len = 0;
+    status = pNtQueryInformationThread(GetCurrentThread(), ThreadDescription, buff, sizeof(buff), &len);
+    ok(!status, "Failed to get thread info.\n");
+    ok(len == sizeof(*thread_desc) + desc_len, "Unexpected structure length %u.\n", len);
+
+    ok(thread_desc->Description.Length == desc_len && thread_desc->Description.MaximumLength == desc_len,
+            "Unexpected description length %u.\n", thread_desc->Description.Length);
+    ok(thread_desc->Description.Buffer == (WCHAR *)(thread_desc + 1),
+            "Unexpected description string pointer %p, %p.\n", thread_desc->Description.Buffer, thread_desc);
+    ok(!memcmp(thread_desc->Description.Buffer, desc, desc_len), "Unexpected description string.\n");
+
+    /* Partial results. */
+    len = 0;
+    status = pNtQueryInformationThread(GetCurrentThread(), ThreadDescription, NULL, 0, &len);
+    ok(status == STATUS_BUFFER_TOO_SMALL, "Unexpected status %#x.\n", status);
+    ok(len == sizeof(*thread_desc) + desc_len, "Unexpected structure length %u.\n", len);
+
+    status = pNtQueryInformationThread(GetCurrentThread(), ThreadDescription, buff, len - sizeof(WCHAR), &len);
+    ok(status == STATUS_BUFFER_TOO_SMALL, "Unexpected status %#x.\n", status);
+    ok(len == sizeof(*thread_desc) + desc_len, "Unexpected structure length %u.\n", len);
+
+    /* Change description. */
+    thread_desc->Description.Length = thread_desc->Description.MaximumLength = 8;
+    lstrcpyW((WCHAR *)(thread_desc + 1), L"desc");
+
+    status = pNtSetInformationThread(GetCurrentThread(), ThreadDescription, thread_desc, sizeof(*thread_desc));
+    ok(status == STATUS_SUCCESS, "Failed to set thread description, status %#x.\n", status);
+
+    ptr = NULL;
+    hr = pGetThreadDescription(GetCurrentThread(), &ptr);
+    ok(hr == HRESULT_FROM_NT(STATUS_SUCCESS), "Failed to get thread description, hr %#x.\n", hr);
+    ok(!lstrcmpW(ptr, L"desc"), "Unexpected description %s.\n", wine_dbgstr_w(ptr));
+    LocalFree(ptr);
+
+    status = pNtSetInformationThread(GetCurrentThread(), ThreadDescription, thread_desc, sizeof(*thread_desc) - 1);
+    ok(status == STATUS_INFO_LENGTH_MISMATCH, "Unexpected status %#x.\n", status);
+
+    status = NtSetInformationThread(GetCurrentThread(), ThreadDescription, NULL, sizeof(*thread_desc));
+    ok(status == STATUS_ACCESS_VIOLATION, "Unexpected status %#x.\n", status);
+
+    thread_desc->Description.Buffer = NULL;
+    status = pNtSetInformationThread(GetCurrentThread(), ThreadDescription, thread_desc, sizeof(*thread_desc));
+    ok(status == STATUS_ACCESS_VIOLATION, "Unexpected status %#x.\n", status);
+
+    hr = pSetThreadDescription(GetCurrentThread(), NULL);
+    ok(hr == HRESULT_FROM_NT(STATUS_SUCCESS), "Failed to set thread description, hr %#x.\n", hr);
+
+    ptr = NULL;
+    hr = pGetThreadDescription(GetCurrentThread(), &ptr);
+    ok(hr == HRESULT_FROM_NT(STATUS_SUCCESS), "Failed to get thread description, hr %#x.\n", hr);
+    ok(!lstrcmpW(ptr, L""), "Unexpected description %s.\n", wine_dbgstr_w(ptr));
+    LocalFree(ptr);
+
+    /* Set with 0 length/NULL pointer. */
+    hr = pSetThreadDescription(GetCurrentThread(), L"123");
+    ok(hr == HRESULT_FROM_NT(STATUS_SUCCESS), "Failed to set thread description, hr %#x.\n", hr);
+
+    memset(thread_desc, 0, sizeof(*thread_desc));
+    status = pNtSetInformationThread(GetCurrentThread(), ThreadDescription, thread_desc, sizeof(*thread_desc));
+    ok(!status, "Failed to set thread description, status %#x.\n", status);
+
+    ptr = NULL;
+    hr = pGetThreadDescription(GetCurrentThread(), &ptr);
+    ok(hr == HRESULT_FROM_NT(STATUS_SUCCESS), "Failed to get thread description, hr %#x.\n", hr);
+    ok(!lstrcmpW(ptr, L""), "Unexpected description %s.\n", wine_dbgstr_w(ptr));
+    LocalFree(ptr);
+}
+
 static void init_funcs(void)
 {
     HMODULE hKernel32 = GetModuleHandleA("kernel32.dll");
@@ -2029,6 +2261,7 @@ static void init_funcs(void)
     X(QueueUserWorkItem);
     X(SetThreadIdealProcessor);
     X(SetThreadPriorityBoost);
+    X(SetThreadStackGuarantee);
     X(RegisterWaitForSingleObject);
     X(UnregisterWait);
     X(IsWow64Process);
@@ -2049,6 +2282,8 @@ static void init_funcs(void)
 
     X(GetThreadGroupAffinity);
     X(SetThreadGroupAffinity);
+    X(SetThreadDescription);
+    X(GetThreadDescription);
 
     X(FlsAlloc);
     X(FlsFree);
@@ -2110,6 +2345,7 @@ START_TEST(thread)
    test_CreateThread_stack();
    test_thread_priority();
    test_GetCurrentThreadStackLimits();
+   test_SetThreadStackGuarantee();
    test_GetThreadTimes();
    test_thread_processor();
    test_GetThreadExitCode();
@@ -2122,10 +2358,9 @@ START_TEST(thread)
    test_TLS();
    test_FLS();
    test_ThreadErrorMode();
-#if (defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))) || (defined(_MSC_VER) && defined(__i386__))
    test_thread_fpu_cw();
-#endif
    test_thread_actctx();
+   test_thread_description();
 
    test_threadpool();
 }

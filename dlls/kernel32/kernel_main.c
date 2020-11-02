@@ -29,6 +29,7 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "winnls.h"
 #include "wincon.h"
 #include "winternl.h"
 
@@ -36,6 +37,7 @@
 #include "kernel_private.h"
 #include "console_private.h"
 #include "wine/debug.h"
+#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(process);
 
@@ -83,13 +85,10 @@ static BOOL process_attach( HMODULE module )
 {
     RTL_USER_PROCESS_PARAMETERS *params = NtCurrentTeb()->Peb->ProcessParameters;
 
+    kernel32_handle = module;
+    RtlSetUnhandledExceptionFilter( UnhandledExceptionFilter );
+
     NtQuerySystemInformation( SystemBasicInformation, &system_info, sizeof(system_info), NULL );
-
-    /* Setup registry locale information */
-    LOCALE_InitRegistry();
-
-    /* Setup registry timezone information */
-    TIMEZONE_InitRegistry();
 
     /* Setup computer name */
     COMPUTERNAME_Init();
@@ -128,6 +127,38 @@ static BOOL process_attach( HMODULE module )
      * 2/ create std handles, if handles are not inherited
      * TBD when not using wineserver handles for console handles
      */
+
+    /* CROSSOVER HACK: bug 3853 */
+    {
+        static const WCHAR explorerexeW[] = {'e','x','p','l','o','r','e','r','.','e','x','e',0};
+        const char * HOSTPTR child_pipe = getenv("WINE_WAIT_CHILD_PIPE");
+        const char * HOSTPTR ignore_child = getenv("WINE_WAIT_CHILD_PIPE_IGNORE");
+        WCHAR *p;
+        if (child_pipe)
+        {
+            WCHAR module[MAX_PATH];
+            GetModuleFileNameW( NULL, module, MAX_PATH );
+            if ((p = strrchrW( module, '\\' ))) p++;
+            else p = module;
+            if (!strcmpiW( p, explorerexeW ))
+            {
+                int fd = atoi(child_pipe);
+                if (fd) close( fd );
+                unsetenv("WINE_WAIT_CHILD_PIPE");
+            }
+            else if (ignore_child)
+            {
+                WCHAR ignore[MAX_PATH];
+                MultiByteToWideChar( CP_UNIXCP, 0, ignore_child, -1, ignore, MAX_PATH );
+                if (!strcmpiW( p, ignore ))
+                {
+                    int fd = atoi(child_pipe);
+                    if (fd) close( fd );
+                    unsetenv("WINE_WAIT_CHILD_PIPE");
+                }
+            }
+        }
+    }
 
     return TRUE;
 }

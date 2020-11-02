@@ -205,7 +205,7 @@ GstFlowReturn got_data(GstPad *pad, GstObject *parent, GstBuffer *buf)
     IMediaSample_SetSyncPoint(sample, !GST_BUFFER_FLAG_IS_SET(buf, GST_BUFFER_FLAG_DELTA_UNIT));
     IMediaSample_SetActualDataLength(sample, gst_buffer_get_size(buf));
 
-    hr = BaseOutputPinImpl_Deliver(&This->tf.source, sample);
+    hr = IMemInputPin_Receive(This->tf.source.pMemInputPin, sample);
     IMediaSample_Release(sample);
     gst_buffer_unref(buf);
     if (FAILED(hr))
@@ -227,7 +227,6 @@ static HRESULT WINAPI Gstreamer_transform_ProcessData(TransformFilter *iface, IM
 
     mark_wine_thread();
 
-    EnterCriticalSection(&This->tf.csReceive);
     IMediaSample_GetPointer(sample, &data);
 
     IMediaSample_AddRef(sample);
@@ -235,7 +234,6 @@ static HRESULT WINAPI Gstreamer_transform_ProcessData(TransformFilter *iface, IM
     buf = gst_buffer_new_wrapped_full(0, data, bufsize, 0, bufsize, sample, release_sample_wrapper);
     if (!buf) {
         IMediaSample_Release(sample);
-        LeaveCriticalSection(&This->tf.csReceive);
         return S_OK;
     }
 
@@ -259,7 +257,6 @@ static HRESULT WINAPI Gstreamer_transform_ProcessData(TransformFilter *iface, IM
         GST_BUFFER_FLAG_SET(buf, GST_BUFFER_FLAG_LIVE);
     if (IMediaSample_IsSyncPoint(sample) != S_OK)
         GST_BUFFER_FLAG_SET(buf, GST_BUFFER_FLAG_DELTA_UNIT);
-    LeaveCriticalSection(&This->tf.csReceive);
     ret = gst_pad_push(This->my_src, buf);
     if (ret)
         WARN("Sending returned: %i\n", ret);
@@ -275,9 +272,7 @@ static HRESULT WINAPI Gstreamer_transform_ProcessEnd(TransformFilter *iface)
 
     mark_wine_thread();
 
-    LeaveCriticalSection(&This->tf.csReceive);
     ret = gst_element_set_state(This->filter, GST_STATE_READY);
-    EnterCriticalSection(&This->tf.csReceive);
     TRACE("Returned: %i\n", ret);
     return S_OK;
 }
@@ -509,7 +504,6 @@ static HRESULT WINAPI Gstreamer_Mp3_QueryConnect(TransformFilter *iface, const A
 {
     GstTfImpl *This = (GstTfImpl*)iface;
     TRACE("%p %p\n", This, amt);
-    dump_AM_MEDIA_TYPE(amt);
 
     if ( (!IsEqualGUID(&amt->majortype, &MEDIATYPE_Audio) &&
           !IsEqualGUID(&amt->majortype, &MEDIATYPE_Stream)) ||
@@ -522,7 +516,7 @@ static HRESULT WINAPI Gstreamer_Mp3_QueryConnect(TransformFilter *iface, const A
     return S_OK;
 }
 
-static HRESULT WINAPI Gstreamer_Mp3_SetMediaType(TransformFilter *tf, PIN_DIRECTION dir, const AM_MEDIA_TYPE *amt)
+static HRESULT mp3_decoder_connect_sink(TransformFilter *tf, const AM_MEDIA_TYPE *amt)
 {
     GstTfImpl *This = (GstTfImpl*)tf;
     GstCaps *capsin, *capsout;
@@ -531,12 +525,7 @@ static HRESULT WINAPI Gstreamer_Mp3_SetMediaType(TransformFilter *tf, PIN_DIRECT
     HRESULT hr;
     int layer;
 
-    TRACE("%p 0x%x %p\n", This, dir, amt);
-
     mark_wine_thread();
-
-    if (dir != PINDIR_INPUT)
-        return S_OK;
 
     if (Gstreamer_Mp3_QueryConnect(&This->tf, amt) == S_FALSE || !amt->pbFormat)
         return VFW_E_TYPE_NOT_ACCEPTED;
@@ -594,26 +583,19 @@ static HRESULT WINAPI Gstreamer_Mp3_SetMediaType(TransformFilter *tf, PIN_DIRECT
     return hr;
 }
 
-static HRESULT WINAPI Gstreamer_Mp3_ConnectInput(TransformFilter *tf, PIN_DIRECTION dir, IPin *pin)
-{
-    TRACE("%p 0x%x %p\n", tf, dir, pin);
-    return S_OK;
-}
-
 static const TransformFilterFuncTable Gstreamer_Mp3_vtbl = {
-    Gstreamer_transform_DecideBufferSize,
-    Gstreamer_transform_ProcessBegin,
-    Gstreamer_transform_ProcessData,
-    Gstreamer_transform_ProcessEnd,
-    Gstreamer_Mp3_QueryConnect,
-    Gstreamer_Mp3_SetMediaType,
-    Gstreamer_Mp3_ConnectInput,
-    Gstreamer_transform_Cleanup,
-    Gstreamer_transform_EndOfStream,
-    Gstreamer_transform_BeginFlush,
-    Gstreamer_transform_EndFlush,
-    Gstreamer_transform_NewSegment,
-    Gstreamer_transform_QOS
+    .pfnDecideBufferSize = Gstreamer_transform_DecideBufferSize,
+    .pfnStartStreaming = Gstreamer_transform_ProcessBegin,
+    .pfnReceive = Gstreamer_transform_ProcessData,
+    .pfnStopStreaming = Gstreamer_transform_ProcessEnd,
+    .pfnCheckInputType = Gstreamer_Mp3_QueryConnect,
+    .transform_connect_sink = mp3_decoder_connect_sink,
+    .pfnBreakConnect = Gstreamer_transform_Cleanup,
+    .pfnEndOfStream = Gstreamer_transform_EndOfStream,
+    .pfnBeginFlush = Gstreamer_transform_BeginFlush,
+    .pfnEndFlush = Gstreamer_transform_EndFlush,
+    .pfnNewSegment = Gstreamer_transform_NewSegment,
+    .pfnNotify = Gstreamer_transform_QOS,
 };
 
 IUnknown * CALLBACK Gstreamer_Mp3_create(IUnknown *punkouter, HRESULT *phr)
@@ -649,7 +631,6 @@ static HRESULT WINAPI Gstreamer_YUV_QueryConnect(TransformFilter *iface, const A
 {
     GstTfImpl *This = (GstTfImpl*)iface;
     TRACE("%p %p\n", This, amt);
-    dump_AM_MEDIA_TYPE(amt);
 
     if (!IsEqualGUID(&amt->majortype, &MEDIATYPE_Video) ||
         (!IsEqualGUID(&amt->formattype, &FORMAT_VideoInfo) &&
@@ -671,13 +652,7 @@ static HRESULT WINAPI Gstreamer_YUV_QueryConnect(TransformFilter *iface, const A
     }
 }
 
-static HRESULT WINAPI Gstreamer_YUV_ConnectInput(TransformFilter *tf, PIN_DIRECTION dir, IPin *pin)
-{
-    TRACE("%p 0x%x %p\n", tf, dir, pin);
-    return S_OK;
-}
-
-static HRESULT WINAPI Gstreamer_YUV2RGB_SetMediaType(TransformFilter *tf, PIN_DIRECTION dir,  const AM_MEDIA_TYPE *amt)
+static HRESULT yuv_to_rgb_connect_sink(TransformFilter *tf, const AM_MEDIA_TYPE *amt)
 {
     GstTfImpl *This = (GstTfImpl*)tf;
     GstCaps *capsin, *capsout;
@@ -686,12 +661,7 @@ static HRESULT WINAPI Gstreamer_YUV2RGB_SetMediaType(TransformFilter *tf, PIN_DI
     int avgtime;
     LONG width, height;
 
-    TRACE("%p 0x%x %p\n", This, dir, amt);
-
     mark_wine_thread();
-
-    if (dir != PINDIR_INPUT)
-        return S_OK;
 
     if (Gstreamer_YUV_QueryConnect(&This->tf, amt) == S_FALSE || !amt->pbFormat)
         return E_FAIL;
@@ -745,19 +715,18 @@ static HRESULT WINAPI Gstreamer_YUV2RGB_SetMediaType(TransformFilter *tf, PIN_DI
 }
 
 static const TransformFilterFuncTable Gstreamer_YUV2RGB_vtbl = {
-    Gstreamer_transform_DecideBufferSize,
-    Gstreamer_transform_ProcessBegin,
-    Gstreamer_transform_ProcessData,
-    Gstreamer_transform_ProcessEnd,
-    Gstreamer_YUV_QueryConnect,
-    Gstreamer_YUV2RGB_SetMediaType,
-    Gstreamer_YUV_ConnectInput,
-    Gstreamer_transform_Cleanup,
-    Gstreamer_transform_EndOfStream,
-    Gstreamer_transform_BeginFlush,
-    Gstreamer_transform_EndFlush,
-    Gstreamer_transform_NewSegment,
-    Gstreamer_transform_QOS
+    .pfnDecideBufferSize = Gstreamer_transform_DecideBufferSize,
+    .pfnStartStreaming = Gstreamer_transform_ProcessBegin,
+    .pfnReceive = Gstreamer_transform_ProcessData,
+    .pfnStopStreaming = Gstreamer_transform_ProcessEnd,
+    .pfnCheckInputType = Gstreamer_YUV_QueryConnect,
+    .transform_connect_sink = yuv_to_rgb_connect_sink,
+    .pfnBreakConnect = Gstreamer_transform_Cleanup,
+    .pfnEndOfStream = Gstreamer_transform_EndOfStream,
+    .pfnBeginFlush = Gstreamer_transform_BeginFlush,
+    .pfnEndFlush = Gstreamer_transform_EndFlush,
+    .pfnNewSegment = Gstreamer_transform_NewSegment,
+    .pfnNotify = Gstreamer_transform_QOS,
 };
 
 IUnknown * CALLBACK Gstreamer_YUV2RGB_create(IUnknown *punkouter, HRESULT *phr)
@@ -779,7 +748,7 @@ IUnknown * CALLBACK Gstreamer_YUV2RGB_create(IUnknown *punkouter, HRESULT *phr)
     return obj;
 }
 
-static HRESULT WINAPI Gstreamer_YUV2ARGB_SetMediaType(TransformFilter *tf, PIN_DIRECTION dir,  const AM_MEDIA_TYPE *amt)
+static HRESULT yuv_to_argb_connect_sink(TransformFilter *tf, const AM_MEDIA_TYPE *amt)
 {
     GstTfImpl *This = (GstTfImpl*)tf;
     GstCaps *capsin, *capsout;
@@ -788,12 +757,7 @@ static HRESULT WINAPI Gstreamer_YUV2ARGB_SetMediaType(TransformFilter *tf, PIN_D
     int avgtime;
     LONG width, height;
 
-    TRACE("%p 0x%x %p\n", This, dir, amt);
-
     mark_wine_thread();
-
-    if (dir != PINDIR_INPUT)
-        return S_OK;
 
     if (Gstreamer_YUV_QueryConnect(&This->tf, amt) == S_FALSE || !amt->pbFormat)
         return E_FAIL;
@@ -847,19 +811,18 @@ static HRESULT WINAPI Gstreamer_YUV2ARGB_SetMediaType(TransformFilter *tf, PIN_D
 }
 
 static const TransformFilterFuncTable Gstreamer_YUV2ARGB_vtbl = {
-    Gstreamer_transform_DecideBufferSize,
-    Gstreamer_transform_ProcessBegin,
-    Gstreamer_transform_ProcessData,
-    Gstreamer_transform_ProcessEnd,
-    Gstreamer_YUV_QueryConnect,
-    Gstreamer_YUV2ARGB_SetMediaType,
-    Gstreamer_YUV_ConnectInput,
-    Gstreamer_transform_Cleanup,
-    Gstreamer_transform_EndOfStream,
-    Gstreamer_transform_BeginFlush,
-    Gstreamer_transform_EndFlush,
-    Gstreamer_transform_NewSegment,
-    Gstreamer_transform_QOS
+    .pfnDecideBufferSize = Gstreamer_transform_DecideBufferSize,
+    .pfnStartStreaming = Gstreamer_transform_ProcessBegin,
+    .pfnReceive = Gstreamer_transform_ProcessData,
+    .pfnStopStreaming = Gstreamer_transform_ProcessEnd,
+    .pfnCheckInputType = Gstreamer_YUV_QueryConnect,
+    .transform_connect_sink = yuv_to_argb_connect_sink,
+    .pfnBreakConnect = Gstreamer_transform_Cleanup,
+    .pfnEndOfStream = Gstreamer_transform_EndOfStream,
+    .pfnBeginFlush = Gstreamer_transform_BeginFlush,
+    .pfnEndFlush = Gstreamer_transform_EndFlush,
+    .pfnNewSegment = Gstreamer_transform_NewSegment,
+    .pfnNotify = Gstreamer_transform_QOS,
 };
 
 IUnknown * CALLBACK Gstreamer_YUV2ARGB_create(IUnknown *punkouter, HRESULT *phr)
@@ -885,7 +848,6 @@ static HRESULT WINAPI Gstreamer_AudioConvert_QueryConnect(TransformFilter *iface
 {
     GstTfImpl *This = (GstTfImpl*)iface;
     TRACE("%p %p\n", This, amt);
-    dump_AM_MEDIA_TYPE(amt);
 
     if (!IsEqualGUID(&amt->majortype, &MEDIATYPE_Audio) ||
         !IsEqualGUID(&amt->subtype, &MEDIASUBTYPE_PCM) ||
@@ -894,13 +856,7 @@ static HRESULT WINAPI Gstreamer_AudioConvert_QueryConnect(TransformFilter *iface
     return S_OK;
 }
 
-static HRESULT WINAPI Gstreamer_AudioConvert_ConnectInput(TransformFilter *tf, PIN_DIRECTION dir, IPin *pin)
-{
-    TRACE("%p 0x%x %p\n", tf, dir, pin);
-    return S_OK;
-}
-
-static HRESULT WINAPI Gstreamer_AudioConvert_SetMediaType(TransformFilter *tf, PIN_DIRECTION dir, const AM_MEDIA_TYPE *amt)
+static HRESULT audio_converter_connect_sink(TransformFilter *tf, const AM_MEDIA_TYPE *amt)
 {
     GstTfImpl *This = (GstTfImpl*)tf;
     GstCaps *capsin, *capsout;
@@ -913,12 +869,7 @@ static HRESULT WINAPI Gstreamer_AudioConvert_SetMediaType(TransformFilter *tf, P
     BOOL inisfloat = FALSE;
     int indepth;
 
-    TRACE("%p 0x%x %p\n", This, dir, amt);
-
     mark_wine_thread();
-
-    if (dir != PINDIR_INPUT)
-        return S_OK;
 
     if (Gstreamer_AudioConvert_QueryConnect(&This->tf, amt) == S_FALSE || !amt->pbFormat)
         return E_FAIL;
@@ -980,19 +931,18 @@ static HRESULT WINAPI Gstreamer_AudioConvert_SetMediaType(TransformFilter *tf, P
 }
 
 static const TransformFilterFuncTable Gstreamer_AudioConvert_vtbl = {
-    Gstreamer_transform_DecideBufferSize,
-    Gstreamer_transform_ProcessBegin,
-    Gstreamer_transform_ProcessData,
-    Gstreamer_transform_ProcessEnd,
-    Gstreamer_AudioConvert_QueryConnect,
-    Gstreamer_AudioConvert_SetMediaType,
-    Gstreamer_AudioConvert_ConnectInput,
-    Gstreamer_transform_Cleanup,
-    Gstreamer_transform_EndOfStream,
-    Gstreamer_transform_BeginFlush,
-    Gstreamer_transform_EndFlush,
-    Gstreamer_transform_NewSegment,
-    Gstreamer_transform_QOS
+    .pfnDecideBufferSize = Gstreamer_transform_DecideBufferSize,
+    .pfnStartStreaming = Gstreamer_transform_ProcessBegin,
+    .pfnReceive = Gstreamer_transform_ProcessData,
+    .pfnStopStreaming = Gstreamer_transform_ProcessEnd,
+    .pfnCheckInputType = Gstreamer_AudioConvert_QueryConnect,
+    .transform_connect_sink = audio_converter_connect_sink,
+    .pfnBreakConnect = Gstreamer_transform_Cleanup,
+    .pfnEndOfStream = Gstreamer_transform_EndOfStream,
+    .pfnBeginFlush = Gstreamer_transform_BeginFlush,
+    .pfnEndFlush = Gstreamer_transform_EndFlush,
+    .pfnNewSegment = Gstreamer_transform_NewSegment,
+    .pfnNotify = Gstreamer_transform_QOS,
 };
 
 IUnknown * CALLBACK Gstreamer_AudioConvert_create(IUnknown *punkouter, HRESULT *phr)

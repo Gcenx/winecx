@@ -1,6 +1,7 @@
 /* Test Key event to Key message translation
  *
  * Copyright 2003 Rein Klazes
+ * Copyright 2019 Remi Bernon for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -54,6 +55,7 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "winnls.h"
+#include "ddk/hidsdi.h"
 
 #include "wine/test.h"
 
@@ -284,6 +286,13 @@ static BOOL TestASet( HWND hWnd, int nrkev, const KEV kevdwn[], const KEV kevup[
     int i,j,k,l,m,n;
     static int count=0;
     KEV kbuf[MAXKEYEVENTS];
+    BOOL us_kbd = (GetKeyboardLayout(0) == (HKL)(ULONG_PTR)0x04090409);
+    if (!us_kbd)
+    {
+        win_skip( "skipping test with inconsistent results on non-us keyboard\n" );
+        return TRUE;
+    }
+
     assert( nrkev==2 || nrkev==3);
     for(i=0;i<MAXKEYEVENTS;i++) kbuf[i]=0;
     /* two keys involved gives 4 test cases */
@@ -1184,6 +1193,12 @@ static void test_Input_unicode(void)
     HHOOK hook;
     HMODULE hModuleImm32;
     BOOL (WINAPI *pImmDisableIME)(DWORD);
+    BOOL us_kbd = (GetKeyboardLayout(0) == (HKL)(ULONG_PTR)0x04090409);
+    if (!us_kbd)
+    {
+        win_skip( "skipping test with inconsistent results on non-us keyboard\n" );
+        return;
+    }
 
     wclass.lpszClassName = classNameW;
     wclass.style         = CS_HREDRAW | CS_VREDRAW;
@@ -1409,7 +1424,9 @@ static void test_mouse_ll_hook(void)
     ok(pt_old.x == 149 && pt_old.y == 149, "Wrong new pos: (%d,%d)\n", pt_old.x, pt_old.y);
     mouse_event(MOUSEEVENTF_MOVE, 0, 0, 0, 0);
     GetCursorPos(&pt_old);
-    ok(pt_old.x == 150 && pt_old.y == 150, "Wrong new pos: (%d,%d)\n", pt_old.x, pt_old.y);
+    ok((pt_old.x == 150 && pt_old.y == 150) ||
+       broken(pt_old.x == 149 && pt_old.y == 149) /* w1064v1809 */,
+       "Wrong new pos: (%d,%d)\n", pt_old.x, pt_old.y);
     mouse_event(MOUSEEVENTF_MOVE, 0, 0, 0, 0);
     GetCursorPos(&pt_old);
     todo_wine
@@ -1589,6 +1606,7 @@ static void test_GetRawInputDeviceList(void)
     RAWINPUTDEVICELIST devices[32];
     UINT ret, oret, devcount, odevcount, i;
     DWORD err;
+    BOOLEAN br;
 
     SetLastError(0xdeadbeef);
     ret = pGetRawInputDeviceList(NULL, NULL, 0);
@@ -1626,6 +1644,7 @@ static void test_GetRawInputDeviceList(void)
         UINT sz, len;
         RID_DEVICE_INFO info;
         HANDLE file;
+        char *ppd;
 
         /* get required buffer size */
         name[0] = '\0';
@@ -1672,6 +1691,44 @@ static void test_GetRawInputDeviceList(void)
         file = CreateFileW(name, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
         todo_wine_if(info.dwType != RIM_TYPEHID)
             ok(file != INVALID_HANDLE_VALUE, "Failed to open %s, error %u\n", wine_dbgstr_w(name), GetLastError());
+
+        sz = 0;
+        ret = pGetRawInputDeviceInfoW(devices[i].hDevice, RIDI_PREPARSEDDATA, NULL, &sz);
+        ok(ret == 0, "GetRawInputDeviceInfo gave wrong return: %u\n", ret);
+        ok((info.dwType == RIM_TYPEHID && sz != 0) ||
+                (info.dwType != RIM_TYPEHID && sz == 0),
+                "Got wrong PPD size for type 0x%x: %u\n", info.dwType, sz);
+
+        ppd = HeapAlloc(GetProcessHeap(), 0, sz);
+        ret = pGetRawInputDeviceInfoW(devices[i].hDevice, RIDI_PREPARSEDDATA, ppd, &sz);
+        ok(ret == sz, "GetRawInputDeviceInfo gave wrong return: %u, should be %u\n", ret, sz);
+
+        if (file != INVALID_HANDLE_VALUE && ret == sz)
+        {
+            PHIDP_PREPARSED_DATA preparsed;
+
+            if (info.dwType == RIM_TYPEHID)
+            {
+                br = HidD_GetPreparsedData(file, &preparsed);
+                ok(br == TRUE, "HidD_GetPreparsedData failed\n");
+
+                if (br)
+                    ok(!memcmp(preparsed, ppd, sz), "Expected to get same preparsed data\n");
+            }
+            else
+            {
+                /* succeeds on hardware, fails in some VMs */
+                br = HidD_GetPreparsedData(file, &preparsed);
+                todo_wine
+                    ok(br == TRUE || broken(br == FALSE), "HidD_GetPreparsedData failed\n");
+            }
+
+            if (br)
+                HidD_FreePreparsedData(preparsed);
+        }
+
+        HeapFree(GetProcessHeap(), 0, ppd);
+
         CloseHandle(file);
     }
 
@@ -1695,6 +1752,75 @@ static void test_GetRawInputData(void)
     /* Null raw input handle */
     ret = GetRawInputData(NULL, RID_INPUT, NULL, &size, sizeof(RAWINPUTHEADER));
     ok(ret == ~0U, "Expect ret %u, got %u\n", ~0U, ret);
+}
+
+static void test_RegisterRawInputDevices(void)
+{
+    HWND hwnd;
+    RAWINPUTDEVICE raw_devices[1];
+    BOOL res;
+
+    raw_devices[0].usUsagePage = 0x01;
+    raw_devices[0].usUsage = 0x05;
+
+    hwnd = CreateWindowExA(WS_EX_TOPMOST, "static", "dinput", WS_POPUP | WS_VISIBLE, 0, 0, 100, 100, NULL, NULL, NULL, NULL);
+    ok(hwnd != NULL, "CreateWindowExA failed\n");
+
+
+    res = RegisterRawInputDevices(NULL, 0, 0);
+    ok(res == FALSE, "RegisterRawInputDevices succeeded\n");
+
+
+    raw_devices[0].dwFlags = 0;
+    raw_devices[0].hwndTarget = 0;
+
+    SetLastError(0xdeadbeef);
+    res = RegisterRawInputDevices(raw_devices, ARRAY_SIZE(raw_devices), 0);
+    ok(res == FALSE, "RegisterRawInputDevices succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "RegisterRawInputDevices returned %08x\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    res = RegisterRawInputDevices(raw_devices, ARRAY_SIZE(raw_devices), sizeof(RAWINPUTDEVICE));
+    ok(res == TRUE, "RegisterRawInputDevices failed\n");
+    ok(GetLastError() == 0xdeadbeef, "RegisterRawInputDevices returned %08x\n", GetLastError());
+
+
+    /* RIDEV_REMOVE requires hwndTarget == NULL */
+    raw_devices[0].dwFlags = RIDEV_REMOVE;
+    raw_devices[0].hwndTarget = hwnd;
+
+    SetLastError(0xdeadbeef);
+    res = RegisterRawInputDevices(raw_devices, ARRAY_SIZE(raw_devices), sizeof(RAWINPUTDEVICE));
+    ok(res == FALSE, "RegisterRawInputDevices succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "RegisterRawInputDevices returned %08x\n", GetLastError());
+
+    raw_devices[0].hwndTarget = 0;
+
+    SetLastError(0xdeadbeef);
+    res = RegisterRawInputDevices(raw_devices, ARRAY_SIZE(raw_devices), sizeof(RAWINPUTDEVICE));
+    ok(res == TRUE, "RegisterRawInputDevices failed\n");
+    ok(GetLastError() == 0xdeadbeef, "RegisterRawInputDevices returned %08x\n", GetLastError());
+
+
+    /* RIDEV_INPUTSINK requires hwndTarget != NULL */
+    raw_devices[0].dwFlags = RIDEV_INPUTSINK;
+    raw_devices[0].hwndTarget = 0;
+
+    SetLastError(0xdeadbeef);
+    res = RegisterRawInputDevices(raw_devices, ARRAY_SIZE(raw_devices), sizeof(RAWINPUTDEVICE));
+    todo_wine
+    ok(res == FALSE, "RegisterRawInputDevices failed\n");
+    todo_wine
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "RegisterRawInputDevices returned %08x\n", GetLastError());
+
+    raw_devices[0].hwndTarget = hwnd;
+
+    SetLastError(0xdeadbeef);
+    res = RegisterRawInputDevices(raw_devices, ARRAY_SIZE(raw_devices), sizeof(RAWINPUTDEVICE));
+    ok(res == TRUE, "RegisterRawInputDevices succeeded\n");
+    ok(GetLastError() == 0xdeadbeef, "RegisterRawInputDevices returned %08x\n", GetLastError());
+
+    DestroyWindow(hwnd);
 }
 
 static void test_key_map(void)
@@ -1747,6 +1873,16 @@ static void test_key_map(void)
                vkey, numpad_scan);
         }
     }
+
+    /* test the scan code prefixes of the right variant of a keys */
+    s = MapVirtualKeyExA(VK_RCONTROL, MAPVK_VK_TO_VSC, kl);
+    ok(s >> 8 == 0x00, "Scan code prefixes should not be returned when not using MAPVK_VK_TO_VSC_EX %#1x\n", s >> 8);
+    s = MapVirtualKeyExA(VK_RCONTROL, MAPVK_VK_TO_VSC_EX, kl);
+    ok(s >> 8 == 0xE0 || broken(s == 0), "Scan code prefix for VK_RCONTROL should be 0xE0 when MAPVK_VK_TO_VSC_EX is set, was %#1x\n", s >> 8);
+    s = MapVirtualKeyExA(VK_RMENU, MAPVK_VK_TO_VSC_EX, kl);
+    ok(s >> 8 == 0xE0 || broken(s == 0), "Scan code prefix for VK_RMENU should be 0xE0 when MAPVK_VK_TO_VSC_EX is set, was %#1x\n", s >> 8);
+    s = MapVirtualKeyExA(VK_RSHIFT, MAPVK_VK_TO_VSC_EX, kl);
+    ok(s >> 8 == 0x00 || broken(s == 0), "The scan code shouldn't have a prefix, got %#1x\n", s >> 8);
 }
 
 #define shift 1
@@ -1761,15 +1897,16 @@ static const struct tounicode_tests
     WCHAR expect_buf[4];
 } utests[] =
 {
-    { 'A', 0, 0, 1, {'a',0}},
-    { 'A', ctrl, 0, 1, {1, 0}},
-    { 'A', shift|ctrl, 0, 1, {1, 0}},
+    { 0, 0, 'a', 1, {'a',0}},
+    { 0, shift, 'a', 1, {'A',0}},
+    { 0, ctrl, 'a', 1, {1, 0}},
+    { 0, shift|ctrl, 'a', 1, {1, 0}},
     { VK_TAB, ctrl, 0, 0, {}},
     { VK_TAB, shift|ctrl, 0, 0, {}},
     { VK_RETURN, ctrl, 0, 1, {'\n', 0}},
     { VK_RETURN, shift|ctrl, 0, 0, {}},
-    { '4', ctrl, 0, 0, {}},
-    { '4', shift|ctrl, 0, 0, {}},
+    { 0, ctrl, '4', 0, {}},
+    { 0, shift|ctrl, '4', 0, {}},
     { 0, ctrl, '!', 0, {}},
     { 0, ctrl, '\"', 0, {}},
     { 0, ctrl, '#', 0, {}},
@@ -1882,6 +2019,7 @@ static void test_ToAscii(void)
     const BYTE SC_RETURN = 0x1c, SC_A = 0x1e;
     const BYTE HIGHEST_BIT = 0x80;
     int ret;
+    BOOL us_kbd = (GetKeyboardLayout(0) == (HKL)(ULONG_PTR)0x04090409);
 
     memset(state, 0, sizeof(state));
 
@@ -1893,7 +2031,7 @@ static void test_ToAscii(void)
     character = 0;
     ret = ToAscii('A', SC_A, state, &character, 0);
     ok(ret == 1, "ToAscii for character 'A' didn't return 1 (was %i)\n", ret);
-    ok(character == 'a', "ToAscii for character 'A' was %i (expected %i)\n", character, 'a');
+    if (us_kbd) ok(character == 'a', "ToAscii for character 'A' was %i (expected %i)\n", character, 'a');
 
     state[VK_CONTROL] |= HIGHEST_BIT;
     state[VK_LCONTROL] |= HIGHEST_BIT;
@@ -2068,6 +2206,7 @@ static DWORD WINAPI create_static_win(void *arg)
 {
     struct thread_data *thread_data = arg;
     HWND win;
+    MSG msg;
 
     win = CreateWindowA("static", "static", WS_VISIBLE | WS_POPUP,
             100, 100, 100, 100, 0, NULL, NULL, NULL);
@@ -2076,6 +2215,7 @@ static DWORD WINAPI create_static_win(void *arg)
             GWLP_WNDPROC, (LONG_PTR)static_hook_proc);
     thread_data->win = win;
 
+    while (wait_for_message(&msg)) DispatchMessageA(&msg);
     SetEvent(thread_data->start_event);
     wait_for_event(thread_data->end_event, 5000);
     return 0;
@@ -2885,6 +3025,7 @@ START_TEST(input)
     test_GetKeyState();
     test_OemKeyScan();
     test_GetRawInputData();
+    test_RegisterRawInputDevices();
 
     if(pGetMouseMovePointsEx)
         test_GetMouseMovePointsEx();

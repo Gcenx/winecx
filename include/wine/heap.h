@@ -51,19 +51,24 @@ static inline void * __WINE_ALLOC_SIZE(2) heap_realloc(void * HOSTPTR mem, SIZE_
     return HeapReAlloc(GetProcessHeap(), 0, ADDRSPACECAST(void*, mem), len);
 }
 
+static inline void heap_free(void *mem)
+{
+    HeapFree(GetProcessHeap(), 0, mem);
+}
+
+#ifdef __i386_on_x86_64__
 /* Calling heap_free() on a non-NULL pointer implies that the pointer was
    allocated by HeapAlloc() and so can be safely cast to a WIN32PTR. */
-static inline void heap_free(void * HOSTPTR mem)
+static inline void heap_free(void * HOSTPTR mem) __attribute__((overloadable))
 {
-#ifdef __i386_on_x86_64__
     /* If it's out of range make it work like any other attempt to free a
        pointer that wasn't allocated.  In particular, don't let truncating
        to 32 bits turn an invalid pointer into a potentially valid one. */
     if ((ULONGLONG)mem >= 0x100000000)
         mem = (void * HOSTPTR)0xdeadbeef;
-#endif
     HeapFree(GetProcessHeap(), 0, ADDRSPACECAST(void*, mem));
 }
+#endif
 
 static inline void *heap_calloc(SIZE_T count, SIZE_T size)
 {

@@ -40,6 +40,14 @@ static BOOL n_format_enabled = TRUE;
 #define PRINTF_WIDE
 #include "printf.h"
 #undef PRINTF_WIDE
+#ifdef __i386_on_x86_64__
+#define PRINTF_HOSTPTR
+#include "printf.h"
+#define PRINTF_WIDE
+#include "printf.h"
+#undef PRINTF_WIDE
+#undef PRINTF_HOSTPTR
+#endif
 
 #if _MSVCR_VER>=80
 
@@ -382,6 +390,19 @@ int CDECL MSVCRT__wcsncoll(const MSVCRT_wchar_t* str1, const MSVCRT_wchar_t* str
     return MSVCRT__wcsncoll_l(str1, str2, count, NULL);
 }
 
+static MSVCRT_wchar_t strtod_wstr_get(void *ctx)
+{
+    const MSVCRT_wchar_t **p = ctx;
+    if (!**p) return MSVCRT_WEOF;
+    return *(*p)++;
+}
+
+static void strtod_wstr_unget(void *ctx)
+{
+    const MSVCRT_wchar_t **p = ctx;
+    (*p)--;
+}
+
 /*********************************************************************
  *		_wcstod_l (MSVCRT.@)
  */
@@ -389,116 +410,26 @@ double CDECL MSVCRT__wcstod_l(const MSVCRT_wchar_t* str, MSVCRT_wchar_t** end,
         MSVCRT__locale_t locale)
 {
     MSVCRT_pthreadlocinfo locinfo;
-    unsigned __int64 d=0, hlp;
-    unsigned fpcontrol;
-    int exp=0, sign=1;
-    const MSVCRT_wchar_t *p;
+    const MSVCRT_wchar_t *beg, *p;
     double ret;
-    long double lret=1, expcnt = 10;
-    BOOL found_digit = FALSE, negexp;
 
-    if (!MSVCRT_CHECK_PMT(str != NULL)) return 0;
+    if (!MSVCRT_CHECK_PMT(str != NULL)) {
+        if (end) *end = NULL;
+        return 0;
+    }
 
-    if(!locale)
+    if (!locale)
         locinfo = get_locinfo();
     else
         locinfo = locale->locinfo;
 
     p = str;
-    while(isspaceW(*p))
+    while(MSVCRT__iswspace_l(*p, locale))
         p++;
+    beg = p;
 
-    if(*p == '-') {
-        sign = -1;
-        p++;
-    } else  if(*p == '+')
-        p++;
-
-    while(*p>='0' && *p<='9') {
-        found_digit = TRUE;
-        hlp = d*10+*(p++)-'0';
-        if(d>MSVCRT_UI64_MAX/10 || hlp<d) {
-            exp++;
-            break;
-        } else
-            d = hlp;
-    }
-    while(*p>='0' && *p<='9') {
-        exp++;
-        p++;
-    }
-    if(*p == *locinfo->lconv->decimal_point)
-        p++;
-
-    while(*p>='0' && *p<='9') {
-        found_digit = TRUE;
-        hlp = d*10+*(p++)-'0';
-        if(d>MSVCRT_UI64_MAX/10 || hlp<d)
-            break;
-
-        d = hlp;
-        exp--;
-    }
-    while(*p>='0' && *p<='9')
-        p++;
-
-    if(!found_digit) {
-        if(end)
-            *end = (MSVCRT_wchar_t*)str;
-        return 0.0;
-    }
-
-    if(*p=='e' || *p=='E' || *p=='d' || *p=='D') {
-        int e=0, s=1;
-
-        p++;
-        if(*p == '-') {
-            s = -1;
-            p++;
-        } else if(*p == '+')
-            p++;
-
-        if(*p>='0' && *p<='9') {
-            while(*p>='0' && *p<='9') {
-                if(e>INT_MAX/10 || (e=e*10+*p-'0')<0)
-                    e = INT_MAX;
-                p++;
-            }
-            e *= s;
-
-            if(exp<0 && e<0 && exp+e>=0) exp = INT_MIN;
-            else if(exp>0 && e>0 && exp+e<0) exp = INT_MAX;
-            else exp += e;
-        } else {
-            if(*p=='-' || *p=='+')
-                p--;
-            p--;
-        }
-    }
-
-    fpcontrol = _control87(0, 0);
-    _control87(MSVCRT__EM_DENORMAL|MSVCRT__EM_INVALID|MSVCRT__EM_ZERODIVIDE
-            |MSVCRT__EM_OVERFLOW|MSVCRT__EM_UNDERFLOW|MSVCRT__EM_INEXACT, 0xffffffff);
-
-    negexp = (exp < 0);
-    if(negexp)
-        exp = -exp;
-    while(exp) {
-        if(exp & 1)
-            lret *= expcnt;
-        exp /= 2;
-        expcnt = expcnt*expcnt;
-    }
-    ret = (long double)sign * (negexp ? d/lret : d*lret);
-
-    _control87(fpcontrol, 0xffffffff);
-
-    if((d && ret==0.0) || isinf(ret))
-        *MSVCRT__errno() = MSVCRT_ERANGE;
-
-    if(end)
-        *end = (MSVCRT_wchar_t*)p;
-
+    ret = parse_double(strtod_wstr_get, strtod_wstr_unget, &p, locinfo, NULL);
+    if (end) *end = (p == beg ? (MSVCRT_wchar_t*)str : (MSVCRT_wchar_t*)p);
     return ret;
 }
 
@@ -772,6 +703,23 @@ int CDECL MSVCRT_vsnprintf( char *str, MSVCRT_size_t len,
     return ret;
 }
 
+#ifdef __i386_on_x86_64__
+int CDECL MSVCRT_vsnprintf( char * HOSTPTR str, MSVCRT_size_t len,
+                            const char * HOSTPTR format, __ms_va_list valist ) __attribute__((overloadable)) asm(__ASM_NAME("MSVCRT_vsnprintf_HOSTPTR"));
+int CDECL MSVCRT_vsnprintf( char * HOSTPTR str, MSVCRT_size_t len,
+                            const char * HOSTPTR format, __ms_va_list valist ) __attribute__((overloadable))
+{
+    static const char nullbyte = '\0';
+    struct _str_ctx_a_HOSTPTR ctx = {len, str};
+    int ret;
+
+    ret = pf_printf_a_HOSTPTR(puts_clbk_str_a_HOSTPTR, &ctx, format, NULL, 0,
+            arg_clbk_valist, NULL, &valist);
+    puts_clbk_str_a_HOSTPTR(&ctx, 1, &nullbyte);
+    return ret;
+}
+#endif
+
 #if _MSVCR_VER>=140
 
 static int puts_clbk_str_c99_a(void *ctx, int len, const char *str)
@@ -782,13 +730,13 @@ static int puts_clbk_str_c99_a(void *ctx, int len, const char *str)
         return len;
 
     if(out->len < len) {
-        memcpy(out->buf, str, out->len);
+        memmove(out->buf, str, out->len);
         out->buf += out->len;
         out->len = 0;
         return len;
     }
 
-    memcpy(out->buf, str, len);
+    memmove(out->buf, str, len);
     out->buf += len;
     out->len -= len;
     return len;
@@ -1716,8 +1664,24 @@ MSVCRT_wchar_t * CDECL MSVCRT_wcstok( MSVCRT_wchar_t *str, const MSVCRT_wchar_t 
 /*********************************************************************
  *		_wctomb_s_l (MSVCRT.@)
  */
+#ifdef __i386_on_x86_64__
+int CDECL MSVCRT__wctomb_s_l(int *len, char *mbchar, MSVCRT_size_t size,
+        MSVCRT_wchar_t wch, MSVCRT__locale_t locale);
+static int CDECL MSVCRT__wctomb_s_l(int *len, char * HOSTPTR mbchar, MSVCRT_size_t size,
+        MSVCRT_wchar_t wch, MSVCRT__locale_t locale) __attribute__((overloadable));
+
 int CDECL MSVCRT__wctomb_s_l(int *len, char *mbchar, MSVCRT_size_t size,
         MSVCRT_wchar_t wch, MSVCRT__locale_t locale)
+{
+    return MSVCRT__wctomb_s_l(len, (char * HOSTPTR)mbchar, size, wch, locale);
+}
+
+static int CDECL MSVCRT__wctomb_s_l(int *len, char * HOSTPTR mbchar, MSVCRT_size_t size,
+        MSVCRT_wchar_t wch, MSVCRT__locale_t locale) __attribute__((overloadable))
+#else
+int CDECL MSVCRT__wctomb_s_l(int *len, char *mbchar, MSVCRT_size_t size,
+        MSVCRT_wchar_t wch, MSVCRT__locale_t locale)
+#endif
 {
     MSVCRT_pthreadlocinfo locinfo;
     BOOL error;
@@ -1787,7 +1751,16 @@ int CDECL MSVCRT_wctomb_s(int *len, char *mbchar, MSVCRT_size_t size, MSVCRT_wch
 /*********************************************************************
  *              _wctomb_l (MSVCRT.@)
  */
+#ifdef __i386_on_x86_64__
 int CDECL MSVCRT__wctomb_l(char *dst, MSVCRT_wchar_t ch, MSVCRT__locale_t locale)
+{
+    return MSVCRT__wctomb_l((char * HOSTPTR)dst, ch, locale);
+}
+
+int CDECL MSVCRT__wctomb_l(char * HOSTPTR dst, MSVCRT_wchar_t ch, MSVCRT__locale_t locale) __attribute__((overloadable))
+#else
+int CDECL MSVCRT__wctomb_l(char *dst, MSVCRT_wchar_t ch, MSVCRT__locale_t locale)
+#endif
 {
     int len;
 
@@ -1820,6 +1793,20 @@ INT CDECL MSVCRT_wctob( MSVCRT_wint_t wchar )
     } else if(WideCharToMultiByte( codepage, 0, &wchar, 1, &out, 1, NULL, &error ) && !error)
         return (INT)out;
     return MSVCRT_EOF;
+}
+
+/*********************************************************************
+ *              wcrtomb_s (MSVCRT.@)
+ */
+INT CDECL MSVCRT_wcrtomb_s(MSVCRT_size_t *len, char *mbchar,
+        MSVCRT_size_t size, MSVCRT_wchar_t wch, MSVCRT_mbstate_t *s)
+{
+    int ilen, ret;
+
+    if (s) *s = 0;
+    ret = MSVCRT_wctomb_s(&ilen, mbchar, size, wch);
+    if (len) *len = ilen;
+    return ret;
 }
 
 /*********************************************************************
@@ -2474,10 +2461,13 @@ unsigned __int64 CDECL MSVCRT__wcstoui64(const MSVCRT_wchar_t *nptr,
 MSVCRT_ulong __cdecl MSVCRT__wcstoul_l(const MSVCRT_wchar_t *s,
         MSVCRT_wchar_t **end, int base, MSVCRT__locale_t locale)
 {
-    __int64 ret = MSVCRT__wcstoui64_l(s, end, base, locale);
+    __int64 ret = MSVCRT__wcstoi64_l(s, end, base, locale);
 
     if(ret > MSVCRT_ULONG_MAX) {
         ret = MSVCRT_ULONG_MAX;
+        *MSVCRT__errno() = MSVCRT_ERANGE;
+    }else if(ret < -(__int64)MSVCRT_ULONG_MAX) {
+        ret = 1;
         *MSVCRT__errno() = MSVCRT_ERANGE;
     }
     return ret;
@@ -2494,7 +2484,16 @@ MSVCRT_ulong __cdecl MSVCRT_wcstoul(const MSVCRT_wchar_t *s, MSVCRT_wchar_t **en
 /******************************************************************
  *  wcsnlen (MSVCRT.@)
  */
+#ifdef __i386_on_x86_64__
 MSVCRT_size_t CDECL MSVCRT_wcsnlen(const MSVCRT_wchar_t *s, MSVCRT_size_t maxlen)
+{
+    return MSVCRT_wcsnlen((const MSVCRT_wchar_t * HOSTPTR)s, maxlen);
+}
+
+MSVCRT_size_t CDECL MSVCRT_wcsnlen(const MSVCRT_wchar_t * HOSTPTR s, MSVCRT_size_t maxlen) __attribute__((overloadable))
+#else
+MSVCRT_size_t CDECL MSVCRT_wcsnlen(const MSVCRT_wchar_t *s, MSVCRT_size_t maxlen)
+#endif
 {
     MSVCRT_size_t i;
 

@@ -2078,7 +2078,7 @@ static void test_smart_tee_filter(void)
     if (FAILED(hr))
         goto end;
 
-    ok(lstrlenW(filterInfo.achName) == 0,
+    ok(!*filterInfo.achName,
             "filter's name is meant to be empty but it's %s\n", wine_dbgstr_w(filterInfo.achName));
 
     hr = IBaseFilter_EnumPins(smartTeeFilter, &enumPins);
@@ -2152,6 +2152,63 @@ end:
         IMemInputPin_Release(memInputPin);
     if (enumMediaTypes)
         IEnumMediaTypes_Release(enumMediaTypes);
+}
+
+static void test_unconnected_filter_state(void)
+{
+    IBaseFilter *filter = create_smart_tee();
+    FILTER_STATE state;
+    HRESULT hr;
+    ULONG ref;
+
+    hr = IBaseFilter_GetState(filter, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(state == State_Stopped, "Got state %u.\n", state);
+
+    hr = IBaseFilter_Pause(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_GetState(filter, 0, &state);
+    todo_wine ok(hr == VFW_S_CANT_CUE, "Got hr %#x.\n", hr);
+    ok(state == State_Paused, "Got state %u.\n", state);
+
+    hr = IBaseFilter_Run(filter, 0);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_GetState(filter, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(state == State_Running, "Got state %u.\n", state);
+
+    hr = IBaseFilter_Pause(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_GetState(filter, 0, &state);
+    todo_wine ok(hr == VFW_S_CANT_CUE, "Got hr %#x.\n", hr);
+    ok(state == State_Paused, "Got state %u.\n", state);
+
+    hr = IBaseFilter_Stop(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_GetState(filter, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(state == State_Stopped, "Got state %u.\n", state);
+
+    hr = IBaseFilter_Run(filter, 0);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_GetState(filter, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(state == State_Running, "Got state %u.\n", state);
+
+    hr = IBaseFilter_Stop(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_GetState(filter, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(state == State_Stopped, "Got state %u.\n", state);
+
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
 }
 
 static void test_smart_tee_filter_aggregation(void)
@@ -2381,6 +2438,7 @@ START_TEST(smartteefilter)
     test_find_pin();
     test_pin_info();
     test_enum_media_types();
+    test_unconnected_filter_state();
 
     test_smart_tee_filter_aggregation();
     test_smart_tee_filter();

@@ -30,13 +30,13 @@
 
 static struct be_process_io be_process_module_io;
 
-static BOOL tgt_process_module_read(HANDLE hProcess, const void* addr,
-                                    void* buffer, SIZE_T len, SIZE_T* rlen)
+static BOOL tgt_process_module_read(HANDLE hProcess, const void* HOSTPTR addr,
+                                    void* buffer, SIZE_T len, SIZE_T* HOSTPTR rlen)
 {
     return FALSE;
 }
 
-static BOOL tgt_process_module_write(HANDLE hProcess, void* addr,
+static BOOL tgt_process_module_write(HANDLE hProcess, void* HOSTPTR addr,
                                      const void* buffer, SIZE_T len, SIZE_T* wlen)
 {
     return FALSE;

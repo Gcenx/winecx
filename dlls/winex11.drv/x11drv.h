@@ -149,6 +149,8 @@ extern BOOL CDECL X11DRV_Arc( PHYSDEV dev, INT left, INT top, INT right,
                               INT bottom, INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
 extern BOOL CDECL X11DRV_Chord( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
                                 INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
+extern NTSTATUS CDECL X11DRV_D3DKMTCheckVidPnExclusiveOwnership( const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *desc ) DECLSPEC_HIDDEN;
+extern NTSTATUS CDECL X11DRV_D3DKMTSetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNER *desc ) DECLSPEC_HIDDEN;
 extern BOOL CDECL X11DRV_Ellipse( PHYSDEV dev, INT left, INT top, INT right, INT bottom ) DECLSPEC_HIDDEN;
 extern INT CDECL X11DRV_EnumICMProfiles( PHYSDEV dev, ICMENUMPROCW proc, LPARAM lparam ) DECLSPEC_HIDDEN;
 extern BOOL CDECL X11DRV_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT fillType ) DECLSPEC_HIDDEN;
@@ -273,6 +275,7 @@ extern BOOL X11DRV_IsSolidColor(COLORREF color) DECLSPEC_HIDDEN;
 extern COLORREF X11DRV_PALETTE_ToLogical(X11DRV_PDEVICE *physDev, int pixel) DECLSPEC_HIDDEN;
 extern int X11DRV_PALETTE_ToPhysical(X11DRV_PDEVICE *physDev, COLORREF color) DECLSPEC_HIDDEN;
 extern COLORREF X11DRV_PALETTE_GetColor( X11DRV_PDEVICE *physDev, COLORREF color ) DECLSPEC_HIDDEN;
+extern int *get_window_surface_mapping( int bpp, int *mapping ) DECLSPEC_HIDDEN;
 
 /* GDI escapes */
 
@@ -382,6 +385,7 @@ extern Colormap default_colormap DECLSPEC_HIDDEN;
 extern XPixmapFormatValues **pixmap_formats DECLSPEC_HIDDEN;
 extern Window root_window DECLSPEC_HIDDEN;
 extern BOOL clipping_cursor DECLSPEC_HIDDEN;
+extern BOOL keyboard_grabbed DECLSPEC_HIDDEN;
 extern unsigned int screen_bpp DECLSPEC_HIDDEN;
 extern BOOL use_xkb DECLSPEC_HIDDEN;
 extern BOOL usexrandr DECLSPEC_HIDDEN;
@@ -460,6 +464,7 @@ enum x11drv_atoms
     XATOM__NET_WM_WINDOW_TYPE_NORMAL,
     XATOM__NET_WM_WINDOW_TYPE_UTILITY,
     XATOM__NET_WORKAREA,
+    XATOM__GTK_WORKAREAS_D0,
     XATOM__XEMBED,
     XATOM__XEMBED_INFO,
     XATOM_XdndAware,
@@ -554,7 +559,8 @@ struct x11drv_win_data
 {
     Display    *display;        /* display connection for the thread owning the window */
     XVisualInfo vis;            /* X visual used by this window */
-    Colormap    colormap;       /* colormap if non-default visual */
+    Colormap    whole_colormap; /* colormap if non-default visual */
+    Colormap    client_colormap; /* colormap for the client window */
     HWND        hwnd;           /* hwnd that this private data belongs to */
     Window      whole_window;   /* X window for the complete window */
     Window      client_window;  /* X window for the client area */
@@ -622,9 +628,10 @@ extern void X11DRV_InitClipboard(void) DECLSPEC_HIDDEN;
 extern void CDECL X11DRV_SetFocus( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void set_window_cursor( Window window, HCURSOR handle ) DECLSPEC_HIDDEN;
 extern void sync_window_cursor( Window window ) DECLSPEC_HIDDEN;
-extern LRESULT clip_cursor_notify( HWND hwnd, HWND new_clip_hwnd ) DECLSPEC_HIDDEN;
+extern LRESULT clip_cursor_notify( HWND hwnd, HWND prev_clip_hwnd, HWND new_clip_hwnd ) DECLSPEC_HIDDEN;
 extern void ungrab_clipping_window(void) DECLSPEC_HIDDEN;
 extern void reset_clipping_window(void) DECLSPEC_HIDDEN;
+extern void retry_grab_clipping_window(void) DECLSPEC_HIDDEN;
 extern BOOL clip_fullscreen_window( HWND hwnd, BOOL reset ) DECLSPEC_HIDDEN;
 extern void move_resize_window( HWND hwnd, int dir ) DECLSPEC_HIDDEN;
 extern void X11DRV_InitKeyboard( Display *display ) DECLSPEC_HIDDEN;
@@ -640,6 +647,8 @@ extern POINT virtual_screen_to_root( INT x, INT y ) DECLSPEC_HIDDEN;
 extern POINT root_to_virtual_screen( INT x, INT y ) DECLSPEC_HIDDEN;
 extern RECT get_virtual_screen_rect(void) DECLSPEC_HIDDEN;
 extern RECT get_primary_monitor_rect(void) DECLSPEC_HIDDEN;
+extern RECT get_host_primary_monitor_rect(void) DECLSPEC_HIDDEN;
+extern HRGN query_work_area(void) DECLSPEC_HIDDEN;
 extern void xinerama_init( unsigned int width, unsigned int height ) DECLSPEC_HIDDEN;
 
 struct x11drv_mode_info
@@ -652,6 +661,7 @@ struct x11drv_mode_info
 
 extern void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height ) DECLSPEC_HIDDEN;
 extern void X11DRV_resize_desktop(unsigned int width, unsigned int height) DECLSPEC_HIDDEN;
+extern BOOL is_virtual_desktop(void) DECLSPEC_HIDDEN;
 extern BOOL is_desktop_fullscreen(void) DECLSPEC_HIDDEN;
 extern BOOL create_desktop_win_data( Window win ) DECLSPEC_HIDDEN;
 extern void X11DRV_Settings_AddDepthModes(void) DECLSPEC_HIDDEN;
@@ -711,38 +721,45 @@ struct x11drv_display_device_handler
     /* A name to tell what host driver is used */
     const char *name;
 
-    /* Higher priority can override handlers with lower proprity */
+    /* Higher priority can override handlers with lower priority */
     INT priority;
 
-    /* pGetGpus will be called to get a list of GPUs. First GPU has to be where the primary adapter is.
+    /* get_gpus will be called to get a list of GPUs. First GPU has to be where the primary adapter is.
      *
      * Return FALSE on failure with parameters unchanged */
-    BOOL (*pGetGpus)(struct x11drv_gpu **gpus, int *count);
+    BOOL (*get_gpus)(struct x11drv_gpu **gpus, int *count);
 
-    /* pGetAdapters will be called to get a list of adapters in EnumDisplayDevices context under a GPU.
+    /* get_adapters will be called to get a list of adapters in EnumDisplayDevices context under a GPU.
      * The first adapter has to be primary if GPU is primary.
      *
      * Return FALSE on failure with parameters unchanged */
-    BOOL (*pGetAdapters)(ULONG_PTR gpu_id, struct x11drv_adapter **adapters, int *count);
+    BOOL (*get_adapters)(ULONG_PTR gpu_id, struct x11drv_adapter **adapters, int *count);
 
-    /* pGetMonitors will be called to get a list of monitors in EnumDisplayDevices context under an adapter.
+    /* get_monitors will be called to get a list of monitors in EnumDisplayDevices context under an adapter.
      * The first monitor has to be primary if adapter is primary.
      *
      * Return FALSE on failure with parameters unchanged */
-    BOOL (*pGetMonitors)(ULONG_PTR adapter_id, struct x11drv_monitor **monitors, int *count);
+    BOOL (*get_monitors)(ULONG_PTR adapter_id, struct x11drv_monitor **monitors, int *count);
 
-    /* pFreeGpus will be called to free a GPU list from pGetGpus */
-    void (*pFreeGpus)(struct x11drv_gpu *gpus);
+    /* free_gpus will be called to free a GPU list from get_gpus */
+    void (*free_gpus)(struct x11drv_gpu *gpus);
 
-    /* pFreeAdapters will be called to free an adapter list from pGetAdapters */
-    void (*pFreeAdapters)(struct x11drv_adapter *adapters);
+    /* free_adapters will be called to free an adapter list from get_adapters */
+    void (*free_adapters)(struct x11drv_adapter *adapters);
 
-    /* pFreeMonitors will be called to free a monitor list from pGetMonitors */
-    void (*pFreeMonitors)(struct x11drv_monitor *monitors);
+    /* free_monitors will be called to free a monitor list from get_monitors */
+    void (*free_monitors)(struct x11drv_monitor *monitors);
+
+    /* register_event_handlers will be called to register event handlers.
+     * This function pointer is optional and can be NULL when driver doesn't support it */
+    void (*register_event_handlers)(void);
 };
 
 extern void X11DRV_DisplayDevices_SetHandler(const struct x11drv_display_device_handler *handler) DECLSPEC_HIDDEN;
 extern void X11DRV_DisplayDevices_Init(BOOL force) DECLSPEC_HIDDEN;
+extern void X11DRV_DisplayDevices_RegisterEventHandlers(void) DECLSPEC_HIDDEN;
+/* Display device handler used in virtual desktop mode */
+extern struct x11drv_display_device_handler desktop_handler DECLSPEC_HIDDEN;
 
 /* XIM support */
 extern BOOL X11DRV_InitXIM( const char *input_style ) DECLSPEC_HIDDEN;
@@ -769,5 +786,7 @@ static inline BOOL is_window_rect_fullscreen( const RECT *rect )
     return (rect->left <= primary_rect.left && rect->right >= primary_rect.right &&
             rect->top <= primary_rect.top && rect->bottom >= primary_rect.bottom);
 }
+
+extern BOOL enable_shm_surface DECLSPEC_HIDDEN;
 
 #endif  /* __WINE_X11DRV_H */

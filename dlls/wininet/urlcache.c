@@ -28,9 +28,6 @@
 #include "ws2tcpip.h"
 
 #include <stdarg.h>
-#ifndef _VA_LIST_T /* Clang's stdarg.h guards with _VA_LIST, while Xcode's uses _VA_LIST_T */
-#define _VA_LIST_T
-#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,8 +45,6 @@
 #include "shellapi.h"
 
 #include "internet.h"
-
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wininet);
@@ -489,8 +484,8 @@ static DWORD cache_container_set_size(cache_container *container, HANDLE file, D
     urlcache_create_hash_table(header, NULL, &hashtable_entry);
 
     /* Last step - create the directories */
-    strcpyW(dir_path, container->path);
-    dir_name = dir_path + strlenW(dir_path);
+    lstrcpyW(dir_path, container->path);
+    dir_name = dir_path + lstrlenW(dir_path);
     dir_name[8] = 0;
 
     GetSystemTimeAsFileTime(&ft);
@@ -614,8 +609,8 @@ static DWORD cache_container_open_index(cache_container *container, DWORD blocks
         return ERROR_SUCCESS;
     }
 
-    strcpyW(index_path, container->path);
-    strcatW(index_path, index_dat);
+    lstrcpyW(index_path, container->path);
+    lstrcatW(index_path, index_dat);
 
     file = CreateFileW(index_path, GENERIC_READ|GENERIC_WRITE, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, 0, NULL);
     if(file == INVALID_HANDLE_VALUE) {
@@ -782,8 +777,8 @@ static void cache_containers_init(void)
             ERR("Couldn't get path for default container %u\n", i);
             continue;
         }
-        path_len = strlenW(wszCachePath);
-        suffix_len = strlenW(DefaultContainerData[i].shpath_suffix);
+        path_len = lstrlenW(wszCachePath);
+        suffix_len = lstrlenW(DefaultContainerData[i].shpath_suffix);
 
         if (path_len + suffix_len + 2 > MAX_PATH)
         {
@@ -794,7 +789,7 @@ static void cache_containers_init(void)
         wszCachePath[path_len] = '\\';
         wszCachePath[path_len+1] = 0;
 
-        strcpyW(wszMutexName, wszCachePath);
+        lstrcpyW(wszMutexName, wszCachePath);
         
         if (suffix_len)
         {
@@ -987,7 +982,7 @@ static BOOL urlcache_create_file_pathW(
     BOOL trunc_name)
 {
     LONG nRequired;
-    int path_len = strlenW(pContainer->path);
+    int path_len = lstrlenW(pContainer->path);
     int file_name_len = MultiByteToWideChar(CP_ACP, 0, szLocalFileName, -1, NULL, 0);
     if (Directory!=CACHE_CONTAINER_NO_SUBDIR && Directory>=pHeader->dirs_no)
     {
@@ -1725,10 +1720,10 @@ static BOOL cache_container_delete_dir(LPCWSTR lpszPath)
     SHFILEOPSTRUCTW shfos;
     int ret;
 
-    path_len = strlenW(lpszPath);
+    path_len = lstrlenW(lpszPath);
     if (path_len >= MAX_PATH)
         return FALSE;
-    strcpyW(path, lpszPath);
+    lstrcpyW(path, lpszPath);
     path[path_len + 1] = 0;  /* double-NUL-terminate path */
 
     shfos.hwnd = NULL;
@@ -2334,9 +2329,9 @@ static DWORD urlcache_rate_entry(entry_url *url_entry, FILETIME *cur_time)
     return rating;
 }
 
-static int dword_cmp(const void * HOSTPTR p1, const void * HOSTPTR p2)
+static int __cdecl dword_cmp(const void *p1, const void *p2)
 {
-    return *(const DWORD* HOSTPTR)p1 - *(const DWORD* HOSTPTR)p2;
+    return *(const DWORD*)p1 - *(const DWORD*)p2;
 }
 
 /***********************************************************************
@@ -2370,7 +2365,7 @@ BOOL WINAPI FreeUrlCacheSpaceW(LPCWSTR cache_path, DWORD size, DWORD filter)
     }
 
     if(cache_path) {
-        path_len = strlenW(cache_path);
+        path_len = lstrlenW(cache_path);
         if(cache_path[path_len-1] == '\\')
             path_len--;
     }else {
@@ -2382,7 +2377,7 @@ BOOL WINAPI FreeUrlCacheSpaceW(LPCWSTR cache_path, DWORD size, DWORD filter)
         {
             /* When cache_path==NULL only clean Temporary Internet Files */
             if((!path_len && container->cache_prefix[0]==0) ||
-                    (path_len && !strncmpiW(container->path, cache_path, path_len) &&
+                    (path_len && !wcsnicmp(container->path, cache_path, path_len) &&
                      (container->path[path_len]=='\0' || container->path[path_len]=='\\')))
             {
                 BOOL ret_del;
@@ -2415,7 +2410,7 @@ BOOL WINAPI FreeUrlCacheSpaceW(LPCWSTR cache_path, DWORD size, DWORD filter)
         FILETIME cur_time;
 
         if((path_len || container->cache_prefix[0]!=0) &&
-                (!path_len || strncmpiW(container->path, cache_path, path_len) ||
+                (!path_len || wcsnicmp(container->path, cache_path, path_len) ||
                  (container->path[path_len]!='\0' && container->path[path_len]!='\\')))
             continue;
 
@@ -2750,7 +2745,7 @@ static BOOL urlcache_entry_create(const char *url, const char *ext, WCHAR *full_
 
     /* Try to generate random name */
     GetSystemTimeAsFileTime(&ft);
-    strcpyW(full_path+full_path_len+8, extW);
+    lstrcpyW(full_path+full_path_len+8, extW);
 
     for(i=0; i<255; i++) {
         int j;
@@ -2906,7 +2901,7 @@ static BOOL urlcache_entry_commit(const char *url, const WCHAR *file_name,
     if(file_name) {
         BOOL bFound = FALSE;
 
-        if(strncmpW(file_name, container->path, lstrlenW(container->path))) {
+        if(wcsncmp(file_name, container->path, lstrlenW(container->path))) {
             ERR("path %s must begin with cache content path %s\n", debugstr_w(file_name), debugstr_w(container->path));
             cache_container_unlock_index(container, header);
             SetLastError(ERROR_INVALID_PARAMETER);
@@ -3136,7 +3131,7 @@ BOOL WINAPI ReadUrlCacheEntryStream(
         return FALSE;
     }
 
-    if (IsBadReadPtr(pStream, sizeof(*pStream)) || IsBadStringPtrA(pStream->url, (UINT_PTR)INTERNET_MAX_URL_LENGTH))
+    if (IsBadReadPtr(pStream, sizeof(*pStream)) || IsBadStringPtrA(pStream->url, INTERNET_MAX_URL_LENGTH))
     {
         SetLastError(ERROR_INVALID_HANDLE);
         return FALSE;
@@ -3264,7 +3259,7 @@ BOOL WINAPI UnlockUrlCacheEntryStream(
         return FALSE;
     }
 
-    if (IsBadReadPtr(pStream, sizeof(*pStream)) || IsBadStringPtrA(pStream->url, (UINT_PTR)INTERNET_MAX_URL_LENGTH))
+    if (IsBadReadPtr(pStream, sizeof(*pStream)) || IsBadStringPtrA(pStream->url, INTERNET_MAX_URL_LENGTH))
     {
         SetLastError(ERROR_INVALID_HANDLE);
         return FALSE;

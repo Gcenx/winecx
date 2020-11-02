@@ -105,10 +105,12 @@ static void _dump_DSBCAPS(DWORD xmask) {
         FE(DSBCAPS_CTRLPAN)
         FE(DSBCAPS_CTRLVOLUME)
         FE(DSBCAPS_CTRLPOSITIONNOTIFY)
+        FE(DSBCAPS_CTRLFX)
         FE(DSBCAPS_STICKYFOCUS)
         FE(DSBCAPS_GLOBALFOCUS)
         FE(DSBCAPS_GETCURRENTPOSITION2)
         FE(DSBCAPS_MUTE3DATMAXDISTANCE)
+        FE(DSBCAPS_LOCDEFER)
 #undef FE
     };
     unsigned int     i;
@@ -446,6 +448,12 @@ static HRESULT DirectSoundDevice_CreateSoundBuffer(
         if (dsbd->lpwfxFormat != NULL) {
             WARN("invalid parameter: dsbd->lpwfxFormat must be NULL for "
                  "primary buffer\n");
+            return DSERR_INVALIDPARAM;
+        }
+
+        if (dsbd->dwFlags & DSBCAPS_CTRLFX)
+        {
+            WARN("Invalid parameter DSBCAPS_CTRLFX\n");
             return DSERR_INVALIDPARAM;
         }
 

@@ -669,11 +669,6 @@ static inline void ldap_unwrap( WLDAP32_LDAP *ld )
     (void)ld;
 }
 
-static inline struct WLDAP32_berval *bvconvert_h2w( struct berval *bv )
-{
-    return (struct WLDAP32_berval *)bv;
-}
-
 static inline ULONG bvconvert_and_free( ULONG ret, struct berval *bv, struct WLDAP32_berval **ptr )
 {
     *ptr = (struct WLDAP32_berval *)bv;
@@ -688,11 +683,6 @@ static inline struct WLDAP32_berval **bvlenconvert_and_free( struct berval **val
 static inline struct WLDAP32_berval **bvecconvert_and_free( struct berval **bvec )
 {
     return (struct WLDAP32_berval **)bvec;
-}
-
-static inline struct berval *bvconvert_w2h( struct WLDAP32_berval *bv )
-{
-    return (struct berval *)bv;
 }
 
 static inline struct berval **bvarrayconvert( struct WLDAP32_berval **bv )

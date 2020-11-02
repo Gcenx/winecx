@@ -151,7 +151,7 @@ static void test_interfaces(void)
     check_interface(pin, &IID_IKsPropertySet, FALSE);
     check_interface(pin, &IID_IMemInputPin, FALSE);
     check_interface(pin, &IID_IMediaPosition, FALSE);
-    todo_wine check_interface(pin, &IID_IMediaSeeking, FALSE);
+    check_interface(pin, &IID_IMediaSeeking, FALSE);
 
     IPin_Release(pin);
 
@@ -160,6 +160,7 @@ static void test_interfaces(void)
     todo_wine check_interface(pin, &IID_IMediaPosition, TRUE);
     check_interface(pin, &IID_IMediaSeeking, TRUE);
     check_interface(pin, &IID_IPin, TRUE);
+    check_interface(pin, &IID_IQualityControl, TRUE);
     check_interface(pin, &IID_IUnknown, TRUE);
 
     check_interface(pin, &IID_IAsyncReader, FALSE);
@@ -1014,9 +1015,76 @@ fail:
     DeleteFileW(filename);
 }
 
+static void test_unconnected_filter_state(void)
+{
+    IBaseFilter *filter = create_avi_splitter();
+    FILTER_STATE state;
+    HRESULT hr;
+    ULONG ref;
+
+    hr = IBaseFilter_GetState(filter, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(state == State_Stopped, "Got state %u.\n", state);
+
+    hr = IBaseFilter_Pause(filter);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_GetState(filter, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    todo_wine ok(state == State_Paused, "Got state %u.\n", state);
+
+    hr = IBaseFilter_Run(filter, 0);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_GetState(filter, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    todo_wine ok(state == State_Running, "Got state %u.\n", state);
+
+    hr = IBaseFilter_Pause(filter);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_GetState(filter, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    todo_wine ok(state == State_Paused, "Got state %u.\n", state);
+
+    hr = IBaseFilter_Stop(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_GetState(filter, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(state == State_Stopped, "Got state %u.\n", state);
+
+    hr = IBaseFilter_Run(filter, 0);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_GetState(filter, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    todo_wine ok(state == State_Running, "Got state %u.\n", state);
+
+    hr = IBaseFilter_Stop(filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_GetState(filter, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(state == State_Stopped, "Got state %u.\n", state);
+
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+}
+
 START_TEST(avisplit)
 {
+    IBaseFilter *filter;
+
     CoInitialize(NULL);
+
+    if (FAILED(CoCreateInstance(&CLSID_AviSplitter, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IBaseFilter, (void **)&filter)))
+    {
+        skip("Failed to create AVI splitter.\n");
+        return;
+    }
+    IBaseFilter_Release(filter);
 
     test_interfaces();
     test_aggregation();
@@ -1025,6 +1093,7 @@ START_TEST(avisplit)
     test_pin_info();
     test_media_types();
     test_enum_media_types();
+    test_unconnected_filter_state();
     test_filter_graph();
 
     CoUninitialize();

@@ -34,10 +34,6 @@
 
 #include <wine/winheader_enter.h>
 
-#ifdef __WINE_WINE_TEST_H
-#error This file should not be used in Wine tests
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -411,7 +407,7 @@ static inline const char *wine_dbgstr_vt( VARTYPE vt )
     return wine_dbg_sprintf( "vt(invalid %x)", vt );
 }
 
-static inline const char *wine_dbgstr_variant( const VARIANT * HOSTPTR v )
+static inline const char *wine_dbgstr_variant( const VARIANT *v )
 {
     if (!v)
         return "(null)";
@@ -526,7 +522,7 @@ static inline const char *debugstr_w( const WCHAR * HOSTPTR s ) { return wine_db
 
 #if defined(__oaidl_h__) && defined(V_VT)
 static inline const char *debugstr_vt( VARTYPE vt ) { return wine_dbgstr_vt( vt ); }
-static inline const char *debugstr_variant( const VARIANT * HOSTPTR v ) { return wine_dbgstr_variant( v ); }
+static inline const char *debugstr_variant( const VARIANT *v ) { return wine_dbgstr_variant( v ); }
 #endif
 
 #define TRACE                      WINE_TRACE

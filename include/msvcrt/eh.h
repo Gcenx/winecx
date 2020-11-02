@@ -22,7 +22,7 @@
 
 #include "wine/winheader_enter.h"
 
-#include <crtdefs.h>
+#include <corecrt.h>
 
 #if !defined(__cplusplus) && !defined(__WINE_MSVCRT_TEST)
 #error "eh.h is meant only for C++ applications"

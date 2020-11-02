@@ -1672,7 +1672,7 @@ static ULONG WINAPI OleContainer_Release(IOleContainer *iface)
 }
 
 static HRESULT WINAPI OleContainer_ParseDisplayName(IOleContainer *iface, IBindCtx *pbc,
-        LPOLESTR pszDiaplayName, ULONG *pchEaten, IMoniker **ppmkOut)
+        LPOLESTR pszDisplayName, ULONG *pchEaten, IMoniker **ppmkOut)
 {
     ok(0, "unexpected call\n");
     return E_NOTIMPL;
@@ -2879,7 +2879,7 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
                 readystate_set_interactive = (load_state != LD_INTERACTIVE);
                 break;
             default:
-                ok(0, "unexpevted V_I4(pvaIn)=%d\n", V_I4(pvaIn));
+                ok(0, "unexpected V_I4(pvaIn)=%d\n", V_I4(pvaIn));
             }
 
             return S_OK;
@@ -5133,7 +5133,7 @@ static HRESULT WINAPI ServiceProvider_QueryService(IServiceProvider *iface, REFG
      * STopLevelBrowser
      * IHTMLWindow2
      * IInternetProtocol
-     * UrlHostory
+     * UrlHistory
      * IHTMLEditHost
      * IHlinkFrame
      */

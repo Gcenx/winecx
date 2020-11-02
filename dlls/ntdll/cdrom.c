@@ -79,7 +79,6 @@
 #endif
 
 #ifdef HAVE_IOKIT_IOKITLIB_H
-# define cpu_type_t mach_cpu_type_t
 # include <libkern/OSByteOrder.h>
 # include <sys/disk.h>
 # include <IOKit/IOKitLib.h>
@@ -88,7 +87,6 @@
 # include <IOKit/storage/IODVDMediaBSDClient.h>
 # include <IOKit/scsi/SCSITask.h>
 # include <IOKit/scsi/SCSICmds_REQUEST_SENSE_Defs.h>
-# undef cpu_type_t
 # define SENSEBUFLEN kSenseDefaultSize
 
 typedef struct

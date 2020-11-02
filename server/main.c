@@ -36,7 +36,7 @@
 #include "file.h"
 #include "thread.h"
 #include "request.h"
-#include "wine/library.h"
+#include "esync.h"
 
 /* command-line options */
 int debug_level = 0;
@@ -108,7 +108,7 @@ static void parse_args( int argc, char *argv[] )
                     master_socket_timeout = TIMEOUT_INFINITE;
                 break;
             case 'v':
-                fprintf( stderr, "%s\n", wine_get_build_id());
+                fprintf( stderr, "%s\n", PACKAGE_STRING );
                 exit(0);
             case 'w':
                 wait_for_lock();
@@ -140,6 +140,9 @@ int main( int argc, char *argv[] )
 
     sock_init();
     open_master_socket();
+
+    if (do_esync())
+        esync_init();
 
     if (debug_level) fprintf( stderr, "wineserver: starting (pid=%ld)\n", (long) getpid() );
     init_signals();

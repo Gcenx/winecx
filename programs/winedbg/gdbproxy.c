@@ -96,13 +96,13 @@ struct gdb_context
     unsigned long               wine_segs[3];   /* load addresses of the ELF wine exec segments (text, bss and data) */
 };
 
-static BOOL tgt_process_gdbproxy_read(HANDLE hProcess, const void* addr,
-                                      void* buffer, SIZE_T len, SIZE_T* rlen)
+static BOOL tgt_process_gdbproxy_read(HANDLE hProcess, const void* HOSTPTR addr,
+                                      void* buffer, SIZE_T len, SIZE_T* HOSTPTR rlen)
 {
     return ReadProcessMemory( hProcess, addr, buffer, len, rlen );
 }
 
-static BOOL tgt_process_gdbproxy_write(HANDLE hProcess, void* addr,
+static BOOL tgt_process_gdbproxy_write(HANDLE hProcess, void* HOSTPTR addr,
                                        const void* buffer, SIZE_T len, SIZE_T* wlen)
 {
     return WriteProcessMemory( hProcess, addr, buffer, len, wlen );
@@ -136,7 +136,7 @@ static inline unsigned char hex_to0(int x)
     return "0123456789abcdef"[x];
 }
 
-static int hex_to_int(const char* src, size_t len)
+static int hex_to_int(const char* HOSTPTR src, size_t len)
 {
     unsigned int returnval = 0;
     while (len--)
@@ -147,9 +147,9 @@ static int hex_to_int(const char* src, size_t len)
     return returnval;
 }
 
-static void hex_from(void* dst, const char* src, size_t len)
+static void hex_from(void* HOSTPTR dst, const char* HOSTPTR src, size_t len)
 {
-    unsigned char *p = dst;
+    unsigned char * HOSTPTR p = dst;
     while (len--)
     {
         *p++ = (hex_from0(src[0]) << 4) | hex_from0(src[1]);
@@ -157,9 +157,9 @@ static void hex_from(void* dst, const char* src, size_t len)
     }
 }
 
-static void hex_to(char* dst, const void* src, size_t len)
+static void hex_to(char* HOSTPTR dst, const void* HOSTPTR src, size_t len)
 {
-    const unsigned char *p = src;
+    const unsigned char * HOSTPTR p = src;
     while (len--)
     {
         *dst++ = hex_to0(*p >> 4);
@@ -168,7 +168,7 @@ static void hex_to(char* dst, const void* src, size_t len)
     }
 }
 
-static unsigned char checksum(const char* ptr, int len)
+static unsigned char checksum(const char* HOSTPTR ptr, int len)
 {
     unsigned cksum = 0;
 
@@ -236,7 +236,7 @@ static inline DWORD64 cpu_register(struct gdb_context *gdbctx,
 }
 
 static inline void cpu_register_hex_from(struct gdb_context *gdbctx,
-    dbg_ctx_t* ctx, unsigned idx, const char **phex)
+    dbg_ctx_t* ctx, unsigned idx, const char *HOSTPTR *phex)
 {
     const struct gdb_register *cpu_register_map = gdbctx->process->be_cpu->gdb_register_map;
 
@@ -569,7 +569,7 @@ static void    wait_for_debuggee(struct gdb_context* gdbctx)
 			{
 				if (check_for_interrupt(gdbctx)) {
 					if (!DebugBreakProcess(gdbctx->process->handle)) {
-						ERR("Failed to break into debugee\n");
+						ERR("Failed to break into debuggee\n");
 						break;
 					}
 					WaitForDebugEvent(&de, INFINITE);	
@@ -624,7 +624,7 @@ static void get_process_info(struct gdb_context* gdbctx, char* buffer, size_t le
     case ABOVE_NORMAL_PRIORITY_CLASS:   strcat(buffer, ", above normal priority");      break;
 #endif
 #ifdef BELOW_NORMAL_PRIORITY_CLASS
-    case BELOW_NORMAL_PRIORITY_CLASS:   strcat(buffer, ", below normal priotity");      break;
+    case BELOW_NORMAL_PRIORITY_CLASS:   strcat(buffer, ", below normal priority");      break;
 #endif
     case HIGH_PRIORITY_CLASS:           strcat(buffer, ", high priority");              break;
     case IDLE_PRIORITY_CLASS:           strcat(buffer, ", idle priority");              break;
@@ -1126,7 +1126,7 @@ static enum packet_return packet_write_registers(struct gdb_context* gdbctx)
     unsigned    i;
     dbg_ctx_t ctx;
     dbg_ctx_t *pctx = &gdbctx->context;
-    const char* ptr;
+    const char* HOSTPTR ptr;
 
     assert(gdbctx->in_trap);
     if (dbg_curr_thread != gdbctx->other_thread && gdbctx->other_thread)
@@ -1165,7 +1165,7 @@ static enum packet_return packet_kill(struct gdb_context* gdbctx)
 
 static enum packet_return packet_thread(struct gdb_context* gdbctx)
 {
-    char* end;
+    char* HOSTPTR end;
     unsigned thread;
 
     switch (gdbctx->in_packet[0])
@@ -1195,7 +1195,7 @@ static enum packet_return packet_thread(struct gdb_context* gdbctx)
 
 static enum packet_return packet_read_memory(struct gdb_context* gdbctx)
 {
-    char               *addr;
+    char * HOSTPTR      addr;
     unsigned int        len, blk_len, nread;
     char                buffer[32];
     SIZE_T              r = 0;
@@ -1225,7 +1225,7 @@ static enum packet_return packet_read_memory(struct gdb_context* gdbctx)
 
 static enum packet_return packet_write_memory(struct gdb_context* gdbctx)
 {
-    char*               addr;
+    char* HOSTPTR       addr;
     unsigned int        len, blk_len;
     char*               ptr;
     char                buffer[32];
@@ -1296,7 +1296,7 @@ static enum packet_return packet_read_register(struct gdb_context* gdbctx)
 static enum packet_return packet_write_register(struct gdb_context* gdbctx)
 {
     unsigned            reg;
-    char*               ptr;
+    char* HOSTPTR       ptr;
     dbg_ctx_t ctx;
     dbg_ctx_t *pctx = &gdbctx->context;
 
@@ -1322,7 +1322,7 @@ static enum packet_return packet_write_register(struct gdb_context* gdbctx)
             return packet_error;
     }
 
-    cpu_register_hex_from(gdbctx, pctx, reg, (const char**)&ptr);
+    cpu_register_hex_from(gdbctx, pctx, reg, (const char* HOSTPTR *)&ptr);
     if (pctx != &gdbctx->context &&
         !gdbctx->process->be_cpu->set_context(gdbctx->other_thread->handle, pctx))
     {
@@ -1615,7 +1615,7 @@ static enum packet_return packet_query(struct gdb_context* gdbctx)
             return packet_ok;
         if (strncmp(gdbctx->in_packet, "Supported", 9) == 0)
         {
-            if (strlen(target_xml))
+            if (*target_xml)
                 return packet_reply(gdbctx, "PacketSize=400;qXfer:features:read+");
             else
             {
@@ -1632,7 +1632,7 @@ static enum packet_return packet_query(struct gdb_context* gdbctx)
             gdbctx->in_packet[15] == ',')
         {
             unsigned    tid;
-            char*       end;
+            char* HOSTPTR end;
             char        result[128];
 
             tid = strtol(gdbctx->in_packet + 16, &end, 16);
@@ -1652,7 +1652,7 @@ static enum packet_return packet_query(struct gdb_context* gdbctx)
         }
         break;
     case 'X':
-        if (strlen(target_xml) && strncmp(gdbctx->in_packet, "Xfer:features:read:target.xml", 29) == 0)
+        if (*target_xml && strncmp(gdbctx->in_packet, "Xfer:features:read:target.xml", 29) == 0)
             return packet_reply(gdbctx, target_xml);
         break;
     }
@@ -1699,7 +1699,7 @@ static enum packet_return packet_step_signal(struct gdb_context* gdbctx)
 
 static enum packet_return packet_thread_alive(struct gdb_context* gdbctx)
 {
-    char*       end;
+    char* HOSTPTR end;
     unsigned    tid;
 
     tid = strtol(gdbctx->in_packet, &end, 16);
@@ -1864,7 +1864,7 @@ static BOOL gdb_exec(const char* wine_path, unsigned port, unsigned flags)
 {
     char            buf[MAX_PATH];
     int             fd;
-    const char      *gdb_path, *tmp_path;
+    const char * HOSTPTR gdb_path, * HOSTPTR tmp_path;
     FILE*           f;
 
     if (!(gdb_path = getenv("WINE_GDB"))) gdb_path = "gdb";
@@ -2075,7 +2075,7 @@ int gdb_main(int argc, char* argv[])
 {
 #ifdef HAVE_POLL
     unsigned gdb_flags = 0, port = 0;
-    char *port_end;
+    char * HOSTPTR port_end;
 
     argc--; argv++;
     while (argc > 0 && argv[0][0] == '-')

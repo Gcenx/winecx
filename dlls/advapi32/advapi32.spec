@@ -281,7 +281,7 @@
 @ stdcall EnumServicesStatusW (long long long ptr long ptr ptr ptr)
 @ stdcall EnumerateTraceGuids(ptr long ptr)
 # @ stub EnumerateTraceGuidsEx
-# @ stub EqualDomainSid
+@ stdcall -import EqualDomainSid(ptr ptr ptr)
 @ stdcall -import EqualPrefixSid(ptr ptr)
 @ stdcall -import EqualSid(ptr ptr)
 # @ stub EventAccessControl
@@ -297,7 +297,7 @@
 # @ stub EventWriteEndScenario
 # @ stub EventWriteEx
 # @ stub EventWriteStartScenario
-# @ stub EventWriteString
+@ stdcall EventWriteString(int64 long int64 ptr) ntdll.EtwEventWriteString
 @ stdcall EventWriteTransfer(int64 ptr ptr ptr long ptr) ntdll.EtwEventWriteTransfer
 @ stdcall FileEncryptionStatusA(str ptr)
 @ stdcall FileEncryptionStatusW(wstr ptr)
@@ -749,7 +749,7 @@
 # @ stub SetNamedSecurityInfoExW
 @ stdcall SetNamedSecurityInfoW(wstr long long ptr ptr ptr ptr)
 @ stdcall -import SetPrivateObjectSecurity(long ptr ptr ptr long)
-# @ stub SetPrivateObjectSecurityEx
+@ stdcall -import SetPrivateObjectSecurityEx(long ptr ptr long ptr long)
 # @ stub SetSecurityAccessMask
 @ stdcall -import SetSecurityDescriptorControl(ptr long long)
 @ stdcall -import SetSecurityDescriptorDacl(ptr long ptr long)

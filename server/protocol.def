@@ -172,7 +172,7 @@ typedef struct
         struct { struct { unsigned __int64 low, high; } fpregs[32]; } x86_64_regs;
         struct { double fpr[32], fpscr; } powerpc_regs;
         struct { unsigned __int64 d[32]; unsigned int fpscr; } arm_regs;
-        struct { unsigned __int64 d[64]; unsigned int fpcr, fpsr; } arm64_regs;
+        struct { struct { unsigned __int64 low, high; } q[32]; unsigned int fpcr, fpsr; } arm64_regs;
     } fp;  /* selected by SERVER_CTX_FLOATING_POINT */
     union
     {
@@ -496,12 +496,12 @@ typedef union
     } async_io;
     struct
     {
-        enum apc_type    type;      /* APC_VIRTUAL_ALLOC */
-        unsigned int     op_type;   /* type of operation */
-        client_ptr_t     addr;      /* requested address */
-        mem_size_t       size;      /* allocation size */
-        unsigned int     zero_bits; /* allocation alignment */
-        unsigned int     prot;      /* memory protection flags */
+        enum apc_type    type;         /* APC_VIRTUAL_ALLOC */
+        unsigned int     op_type;      /* type of operation */
+        client_ptr_t     addr;         /* requested address */
+        mem_size_t       size;         /* allocation size */
+        unsigned int     zero_bits_64; /* number of zero high bits */
+        unsigned int     prot;         /* memory protection flags */
     } virtual_alloc;
     struct
     {
@@ -546,14 +546,14 @@ typedef union
     } virtual_unlock;
     struct
     {
-        enum apc_type    type;      /* APC_MAP_VIEW */
-        obj_handle_t     handle;    /* mapping handle */
-        client_ptr_t     addr;      /* requested address */
-        mem_size_t       size;      /* allocation size */
-        file_pos_t       offset;    /* file offset */
-        unsigned int     alloc_type;/* allocation type */
-        unsigned short   zero_bits; /* allocation alignment */
-        unsigned short   prot;      /* memory protection flags */
+        enum apc_type    type;         /* APC_MAP_VIEW */
+        obj_handle_t     handle;       /* mapping handle */
+        client_ptr_t     addr;         /* requested address */
+        mem_size_t       size;         /* allocation size */
+        file_pos_t       offset;       /* file offset */
+        unsigned int     alloc_type;   /* allocation type */
+        unsigned short   zero_bits_64; /* number of zero high bits */
+        unsigned short   prot;         /* memory protection flags */
     } map_view;
     struct
     {
@@ -783,6 +783,7 @@ struct rawinput_device
 
 /* Create a new process from the context of the parent */
 @REQ(new_process)
+    obj_handle_t parent_process; /* parent process */
     int          inherit_all;    /* inherit all handles from parent */
     unsigned int create_flags;   /* creation flags */
     int          socket_fd;      /* file descriptor for process socket */
@@ -803,7 +804,6 @@ struct rawinput_device
 /* Execute a process, replacing the current one */
 @REQ(exec_process)
     int          socket_fd;      /* file descriptor for process socket */
-    obj_handle_t exe_file;       /* file handle for main exe */
     client_cpu_t cpu;            /* CPU that the new process will use */
 @END
 
@@ -945,6 +945,9 @@ struct rawinput_device
     int          exit_code;     /* thread exit code */
     int          priority;      /* thread priority level */
     int          last;          /* last thread in process */
+    int          suspend_count; /* thread suspend count */
+    data_size_t  desc_len;      /* description length in bytes */
+    VARARG(desc,unicode_str);   /* description string */
 @END
 
 
@@ -965,11 +968,13 @@ struct rawinput_device
     affinity_t   affinity;     /* affinity mask */
     client_ptr_t entry_point;  /* thread entry point */
     obj_handle_t token;        /* impersonation token */
+    VARARG(desc,unicode_str);  /* description string */
 @END
-#define SET_THREAD_INFO_PRIORITY   0x01
-#define SET_THREAD_INFO_AFFINITY   0x02
-#define SET_THREAD_INFO_TOKEN      0x04
-#define SET_THREAD_INFO_ENTRYPOINT 0x08
+#define SET_THREAD_INFO_PRIORITY    0x01
+#define SET_THREAD_INFO_AFFINITY    0x02
+#define SET_THREAD_INFO_TOKEN       0x04
+#define SET_THREAD_INFO_ENTRYPOINT  0x08
+#define SET_THREAD_INFO_DESCRIPTION 0x10
 
 
 /* Retrieve information about a module */
@@ -1528,8 +1533,9 @@ struct console_renderer_event
 
 /* Get the input queue wait event */
 @REQ(get_console_wait_event)
+    obj_handle_t handle;        /* handle to the console */
 @REPLY
-    obj_handle_t handle;
+    obj_handle_t event;
 @END
 
 /* Get a console mode (input or output) */
@@ -1634,7 +1640,10 @@ struct console_renderer_event
     short int    max_height;
     short int    font_width;    /* font size (width x height) */
     short int    font_height;
-    VARARG(colors,uints);       /* color table */
+    short int    font_weight;   /* font weight */
+    short int    font_pitch_family; /* font pitch & family */
+    VARARG(colors,uints,64);    /* color table */
+    VARARG(face_name,unicode_str);  /* font face name */
 @END
 #define SET_CONSOLE_OUTPUT_INFO_CURSOR_GEOM     0x0001
 #define SET_CONSOLE_OUTPUT_INFO_CURSOR_POS      0x0002
@@ -1667,7 +1676,10 @@ struct console_renderer_event
     short int    max_height;
     short int    font_width;    /* font size (width x height) */
     short int    font_height;
-    VARARG(colors,uints);       /* color table */
+    short int    font_weight;   /* font weight */
+    short int    font_pitch_family; /* font pitch & family */
+    VARARG(colors,uints,64);    /* color table */
+    VARARG(face_name,unicode_str);  /* font face name */
 @END
 
 /* Add input records to a console input queue */
@@ -3969,3 +3981,63 @@ struct handle_info
 @REQ(resume_process)
     obj_handle_t handle;       /* process handle */
 @END
+
+/* Create a new eventfd-based synchronization object */
+@REQ(create_esync)
+    unsigned int access;        /* wanted access rights */
+    int          initval;       /* initial value */
+    int          type;          /* type of esync object (see below) */
+    int          max;           /* maximum count on a semaphore */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;        /* handle to the object */
+    int          type;          /* type of esync object (see below) */
+    unsigned int shm_idx;       /* this object's index into the shm section */
+@END
+
+/* Open an esync object */
+@REQ(open_esync)
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    obj_handle_t rootdir;       /* root directory */
+    int          type;          /* type of esync object (above) */
+    VARARG(name,unicode_str);   /* object name */
+@REPLY
+    obj_handle_t handle;        /* handle to the event */
+    int          type;          /* type of esync object (above) */
+    unsigned int shm_idx;       /* this object's index into the shm section */
+@END
+
+/* Retrieve the esync read fd for an object. */
+@REQ(get_esync_read_fd)
+    obj_handle_t handle;        /* handle to the object */
+@REPLY
+    int          type;          /* esync type (defined below) */
+    unsigned int shm_idx;       /* this object's index into the shm section */
+@END
+
+/* Retrieve the esync write fd for an object. */
+@REQ(get_esync_write_fd)
+    obj_handle_t handle;        /* handle to the object */
+@REPLY
+@END
+
+/* Retrieve the fd to wait on for user APCs. */
+@REQ(get_esync_apc_fd)
+@END
+
+/* Notify the server that we are doing a message wait (or done with one). */
+@REQ(esync_msgwait)
+    int          in_msgwait;    /* are we in a message wait? */
+@END
+
+enum esync_type
+{
+    ESYNC_SEMAPHORE = 1,
+    ESYNC_AUTO_EVENT,
+    ESYNC_MANUAL_EVENT,
+    ESYNC_MUTEX,
+    ESYNC_AUTO_SERVER,
+    ESYNC_MANUAL_SERVER,
+    ESYNC_QUEUE,
+};

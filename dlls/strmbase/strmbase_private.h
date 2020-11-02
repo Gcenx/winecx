@@ -31,17 +31,32 @@
 #include "wine/heap.h"
 #include "wine/list.h"
 #include "wine/strmbase.h"
-#include "wine/unicode.h"
+
+static inline const char *debugstr_time(REFERENCE_TIME time)
+{
+    unsigned int i = 0, j = 0;
+    char buffer[22], rev[22];
+
+    while (time || i <= 8)
+    {
+        buffer[i++] = '0' + (time % 10);
+        time /= 10;
+        if (i == 7) buffer[i++] = '.';
+    }
+
+    while (i--) rev[j++] = buffer[i];
+    rev[j] = 0;
+
+    return wine_dbg_sprintf("%s", rev);
+}
 
 /* Quality Control */
 typedef struct QualityControlImpl {
     IQualityControl IQualityControl_iface;
-    IPin *input;
-    IBaseFilter *self;
+    struct strmbase_pin *pin;
     IQualityControl *tonotify;
 
     /* Render stuff */
-    IReferenceClock *clock;
     REFERENCE_TIME last_in_time, last_left, avg_duration, avg_pt, avg_render, start, stop;
     REFERENCE_TIME current_jitter, current_rstart, current_rstop, clockstart;
     double avg_rate;
@@ -49,7 +64,7 @@ typedef struct QualityControlImpl {
     BOOL qos_handled, is_dropped;
 } QualityControlImpl;
 
-HRESULT QualityControlImpl_Create(IPin *input, IBaseFilter *self, QualityControlImpl **ppv);
+HRESULT QualityControlImpl_Create(struct strmbase_pin *pin, QualityControlImpl **out);
 void QualityControlImpl_Destroy(QualityControlImpl *This);
 HRESULT WINAPI QualityControlImpl_QueryInterface(IQualityControl *iface, REFIID riid, void **ppv);
 ULONG WINAPI QualityControlImpl_AddRef(IQualityControl *iface);
@@ -58,12 +73,12 @@ HRESULT WINAPI QualityControlImpl_Notify(IQualityControl *iface, IBaseFilter *se
 HRESULT WINAPI QualityControlImpl_SetSink(IQualityControl *iface, IQualityControl *tonotify);
 
 void QualityControlRender_Start(QualityControlImpl *This, REFERENCE_TIME tStart);
-void QualityControlRender_SetClock(QualityControlImpl *This, IReferenceClock *clock);
 void QualityControlRender_DoQOS(QualityControlImpl *priv);
 void QualityControlRender_BeginRender(QualityControlImpl *This, REFERENCE_TIME start, REFERENCE_TIME stop);
 void QualityControlRender_EndRender(QualityControlImpl *This);
 
-HRESULT enum_pins_create(BaseFilter *base, IEnumPins **enum_pins);
+HRESULT enum_pins_create(struct strmbase_filter *filter, IEnumPins **enum_pins);
+HRESULT enum_media_types_create(struct strmbase_pin *pin, IEnumMediaTypes **enum_media_types) DECLSPEC_HIDDEN;
 
 HRESULT WINAPI RendererPosPassThru_RegisterMediaTime(IUnknown *iface, REFERENCE_TIME start);
 HRESULT WINAPI RendererPosPassThru_ResetMediaTime(IUnknown *iface);

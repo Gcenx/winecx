@@ -230,6 +230,7 @@ static void init_load_order(void)
 {
     const char * HOSTPTR order = getenv( "WINEDLLOVERRIDES" );
     WCHAR *entry, *next;
+    int len;
 
     init_done = TRUE;
     if (!order) return;
@@ -248,7 +249,13 @@ static void init_load_order(void)
         exit(0);
     }
 
-    if (ntdll_ambstowcs( &entry, order ) <= 0) return;
+    if ((len = ntdll_umbstowcs( 0, order, strlen(order) + 1, NULL, 0 )) <= 0 ||
+        !(entry = RtlAllocateHeap( GetProcessHeap(), 0, len * sizeof(*entry) ))) return;
+    if (ntdll_umbstowcs( 0, order, strlen(order) + 1, entry, len ) <= 0)
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, entry );
+        return;
+    }
     while (*entry)
     {
         while (*entry == ';') entry++;

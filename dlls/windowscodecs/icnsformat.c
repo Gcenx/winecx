@@ -87,6 +87,7 @@
 
 #include "wine/debug.h"
 #include "wine/library.h"
+#include "wine/objidl_helpers.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wincodecs);
 

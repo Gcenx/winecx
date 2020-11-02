@@ -61,6 +61,9 @@
 /* Define to 1 if you have the `AUGraphAddNode' function. */
 #undef HAVE_AUGRAPHADDNODE
 
+/* Define to 1 if you have the <AVFoundation/AVFoundation.h> header file. */
+#undef HAVE_AVFOUNDATION_AVFOUNDATION_H
+
 /* Define to 1 if you have the <capi20.h> header file. */
 #undef HAVE_CAPI20_H
 
@@ -407,14 +410,8 @@
 /* Define to 1 if you have the `gettextpo' library (-lgettextpo). */
 #undef HAVE_LIBGETTEXTPO
 
-/* Define to 1 if you have the `i386' library (-li386). */
-#undef HAVE_LIBI386
-
 /* Define to 1 if you have the `kstat' library (-lkstat). */
 #undef HAVE_LIBKSTAT
-
-/* Define to 1 if you have the `ossaudio' library (-lossaudio). */
-#undef HAVE_LIBOSSAUDIO
 
 /* Define to 1 if you have the `procstat' library (-lprocstat). */
 #undef HAVE_LIBPROCSTAT
@@ -428,8 +425,8 @@
 /* Define to 1 if you have the <libudev.h> header file. */
 #undef HAVE_LIBUDEV_H
 
-/* Define to 1 if you have the <libunwind.h> header file. */
-#undef HAVE_LIBUNWIND_H
+/* Define to 1 if you have the `unwind' library (-lunwind). */
+#undef HAVE_LIBUNWIND
 
 /* Define if you have the libxml2 library */
 #undef HAVE_LIBXML2
@@ -569,14 +566,14 @@
 /* Define to 1 if you have the <machine/sysarch.h> header file. */
 #undef HAVE_MACHINE_SYSARCH_H
 
+/* Define to 1 if you have the `mach_continuous_time' function. */
+#undef HAVE_MACH_CONTINUOUS_TIME
+
 /* Define to 1 if you have the <mach/machine.h> header file. */
 #undef HAVE_MACH_MACHINE_H
 
 /* Define to 1 if you have the <mach/mach.h> header file. */
 #undef HAVE_MACH_MACH_H
-
-/* Define to 1 if you have the <mach-o/dyld_images.h> header file. */
-#undef HAVE_MACH_O_DYLD_IMAGES_H
 
 /* Define to 1 if you have the <mach-o/loader.h> header file. */
 #undef HAVE_MACH_O_LOADER_H
@@ -598,6 +595,9 @@
 
 /* Define to 1 if you have the <mpg123.h> header file. */
 #undef HAVE_MPG123_H
+
+/* Define if MTLDevice protocol has registryID property. */
+#undef HAVE_MTLDEVICE_REGISTRYID
 
 /* Define to 1 if you have the <ncurses.h> header file. */
 #undef HAVE_NCURSES_H
@@ -722,6 +722,9 @@
 /* Define if we can use ppdev.h for parallel port access */
 #undef HAVE_PPDEV
 
+/* Define to 1 if you have the `ppoll' function. */
+#undef HAVE_PPOLL
+
 /* Define to 1 if you have the `prctl' function. */
 #undef HAVE_PRCTL
 
@@ -830,11 +833,11 @@
 /* Define to 1 if you have the `settimeofday' function. */
 #undef HAVE_SETTIMEOFDAY
 
-/* Define to 1 if you have the `shm_open' function. */
-#undef HAVE_SHM_OPEN
-
 /* Define to 1 if `interface_id' is a member of `sg_io_hdr_t'. */
 #undef HAVE_SG_IO_HDR_T_INTERFACE_ID
+
+/* Define to 1 if you have the `shm_open' function. */
+#undef HAVE_SHM_OPEN
 
 /* Define if sigaddset is supported */
 #undef HAVE_SIGADDSET
@@ -1016,6 +1019,14 @@
 /* Define to 1 if you have the `sysinfo' function. */
 #undef HAVE_SYSINFO
 
+/* Define to 1 if you have the
+   <SystemConfiguration/SCDynamicStoreCopyDHCPInfo.h> header file. */
+#undef HAVE_SYSTEMCONFIGURATION_SCDYNAMICSTORECOPYDHCPINFO_H
+
+/* Define to 1 if you have the <SystemConfiguration/SCNetworkConfiguration.h>
+   header file. */
+#undef HAVE_SYSTEMCONFIGURATION_SCNETWORKCONFIGURATION_H
+
 /* Define to 1 if you have the <sys/attr.h> header file. */
 #undef HAVE_SYS_ATTR_H
 
@@ -1030,6 +1041,9 @@
 
 /* Define to 1 if you have the <sys/epoll.h> header file. */
 #undef HAVE_SYS_EPOLL_H
+
+/* Define to 1 if you have the <sys/eventfd.h> header file. */
+#undef HAVE_SYS_EVENTFD_H
 
 /* Define to 1 if you have the <sys/event.h> header file. */
 #undef HAVE_SYS_EVENT_H
@@ -1178,6 +1192,12 @@
 /* Define to 1 if you have the <termios.h> header file. */
 #undef HAVE_TERMIOS_H
 
+/* Define to 1 if you have the `tgamma' function. */
+#undef HAVE_TGAMMA
+
+/* Define to 1 if you have the `tgammaf' function. */
+#undef HAVE_TGAMMAF
+
 /* Define to 1 if you have the `thr_kill2' function. */
 #undef HAVE_THR_KILL2
 
@@ -1289,6 +1309,9 @@
 /* Define if Xrender has the XRenderSetPictureTransform function */
 #undef HAVE_XRENDERSETPICTURETRANSFORM
 
+/* Define if Xrandr has the XRRGetProviderResources function */
+#undef HAVE_XRRGETPROVIDERRESOURCES
+
 /* Define if Xrandr has the XRRGetScreenResources function */
 #undef HAVE_XRRGETSCREENRESOURCES
 
@@ -1309,9 +1332,6 @@
 
 /* Define to 1 if you have the `_spawnvp' function. */
 #undef HAVE__SPAWNVP
-
-/* Define to 1 if you have the `__builtin_clz' built-in function. */
-#undef HAVE___BUILTIN_CLZ
 
 /* Define to 1 if you have the `__builtin_popcount' built-in function. */
 #undef HAVE___BUILTIN_POPCOUNT

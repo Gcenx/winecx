@@ -862,6 +862,8 @@ static HRESULT WINAPI sample_grabber_sink_GetCharacteristics(IMFMediaSink *iface
         return MF_E_SHUTDOWN;
 
     *flags = MEDIASINK_FIXED_STREAMS;
+    if (grabber->ignore_clock)
+        *flags |= MEDIASINK_RATELESS;
 
     return S_OK;
 }
@@ -1038,7 +1040,7 @@ static HRESULT WINAPI sample_grabber_sink_Shutdown(IMFMediaSink *iface)
         IMFStreamSink_Release(&grabber->stream->IMFStreamSink_iface);
         grabber->stream = NULL;
     }
-    EnterCriticalSection(&grabber->cs);
+    LeaveCriticalSection(&grabber->cs);
 
     return hr;
 }

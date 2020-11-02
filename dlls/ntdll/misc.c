@@ -439,6 +439,8 @@ ULONG WINAPI EtwEventRegister( LPCGUID provider, PENABLECALLBACK callback, PVOID
 {
     FIXME("(%s, %p, %p, %p) stub.\n", debugstr_guid(provider), callback, context, handle);
 
+    if (!handle) return ERROR_INVALID_PARAMETER;
+
     *handle = 0xdeadbeef;
     return ERROR_SUCCESS;
 }
@@ -459,6 +461,16 @@ ULONG WINAPI EtwEventSetInformation( REGHANDLE handle, EVENT_INFO_CLASS class, v
                                      ULONG length )
 {
     FIXME("(%s, %u, %p, %u) stub\n", wine_dbgstr_longlong(handle), class, info, length);
+    return ERROR_SUCCESS;
+}
+
+/******************************************************************************
+ *                  EtwEventWriteString   (NTDLL.@)
+ */
+ULONG WINAPI EtwEventWriteString( REGHANDLE handle, UCHAR level, ULONGLONG keyword, PCWSTR string )
+{
+    FIXME("%s, %u, %s, %s: stub\n", wine_dbgstr_longlong(handle), level,
+          wine_dbgstr_longlong(keyword), debugstr_w(string));
     return ERROR_SUCCESS;
 }
 

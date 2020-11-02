@@ -422,6 +422,7 @@ static void ddraw_destroy(struct ddraw *This)
 
     if (This->wined3d_swapchain)
         ddraw_destroy_swapchain(This);
+    wined3d_stateblock_decref(This->state);
     wined3d_device_decref(This->wined3d_device);
     wined3d_decref(This->wined3d);
 
@@ -891,21 +892,6 @@ static HRESULT ddraw_set_cooperative_level(struct ddraw *ddraw, HWND window,
         ddraw->focuswindow = NULL;
     }
 
-    if ((cooplevel & DDSCL_FULLSCREEN) != (ddraw->cooperative_level & DDSCL_FULLSCREEN) || window != ddraw->dest_window)
-    {
-        if (ddraw->cooperative_level & DDSCL_FULLSCREEN)
-            wined3d_device_restore_fullscreen_window(ddraw->wined3d_device, ddraw->dest_window, NULL);
-
-        if (cooplevel & DDSCL_FULLSCREEN)
-        {
-            struct wined3d_display_mode display_mode;
-
-            wined3d_get_adapter_display_mode(ddraw->wined3d, WINED3DADAPTER_DEFAULT, &display_mode, NULL);
-            wined3d_device_setup_fullscreen_window(ddraw->wined3d_device, window,
-                    display_mode.width, display_mode.height);
-        }
-    }
-
     if ((cooplevel & DDSCL_EXCLUSIVE) && exclusive_window != window)
     {
         ddraw->device_state = DDRAW_DEVICE_STATE_NOT_RESTORED;
@@ -921,7 +907,8 @@ static HRESULT ddraw_set_cooperative_level(struct ddraw *ddraw, HWND window,
         {
             restore_state = TRUE;
 
-            if (FAILED(hr = wined3d_stateblock_create(ddraw->wined3d_device, WINED3D_SBT_ALL, &stateblock)))
+            if (FAILED(hr = wined3d_stateblock_create(ddraw->wined3d_device,
+                    ddraw->state, WINED3D_SBT_ALL, &stateblock)))
             {
                 ERR("Failed to create stateblock, hr %#x.\n", hr);
                 goto done;
@@ -958,7 +945,7 @@ static HRESULT ddraw_set_cooperative_level(struct ddraw *ddraw, HWND window,
             wined3d_rendertarget_view_decref(rtv);
         }
 
-        wined3d_stateblock_apply(stateblock);
+        wined3d_stateblock_apply(stateblock, ddraw->state);
         wined3d_stateblock_decref(stateblock);
     }
 
@@ -5046,6 +5033,14 @@ HRESULT ddraw_init(struct ddraw *ddraw, DWORD flags, enum wined3d_device_type de
     }
 
     list_init(&ddraw->surface_list);
+
+    if (FAILED(hr = wined3d_stateblock_create(ddraw->wined3d_device, NULL, WINED3D_SBT_PRIMARY, &ddraw->state)))
+    {
+        ERR("Failed to create the primary stateblock, hr %#x.\n", hr);
+        wined3d_device_decref(ddraw->wined3d_device);
+        wined3d_decref(ddraw->wined3d);
+        return hr;
+    }
 
     return DD_OK;
 }

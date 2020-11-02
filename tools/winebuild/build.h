@@ -318,7 +318,7 @@ extern void output_resources( DLLSPEC *spec );
 extern void output_bin_resources( DLLSPEC *spec, unsigned int start_rva );
 extern void output_spec32_file( DLLSPEC *spec );
 extern void output_fake_module( DLLSPEC *spec );
-extern void output_def_file( DLLSPEC *spec, int include_stubs );
+extern void output_def_file( DLLSPEC *spec, int import_only );
 extern void load_res16_file( const char *name, DLLSPEC *spec );
 extern void output_res16_data( DLLSPEC *spec );
 extern void output_bin_res16_data( DLLSPEC *spec );
@@ -328,6 +328,7 @@ extern void output_spec16_file( DLLSPEC *spec );
 extern void output_fake_module16( DLLSPEC *spec16 );
 extern void output_res_o_file( DLLSPEC *spec );
 extern void output_asm_relays16(void);
+extern void make_builtin_files( char *argv[] );
 
 extern void add_16bit_exports( DLLSPEC *spec32, DLLSPEC *spec16 );
 extern int parse_spec_file( FILE *file, DLLSPEC *spec );
@@ -386,6 +387,7 @@ extern FILE *output_file;
 extern const char *output_file_name;
 
 extern struct strarray lib_path;
+extern struct strarray tools_path;
 extern struct strarray as_command;
 extern struct strarray cc_command;
 extern struct strarray ld_command;

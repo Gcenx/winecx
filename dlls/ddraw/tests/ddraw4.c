@@ -1117,6 +1117,19 @@ static void test_coop_level_d3d_state(void)
     HWND window;
     HRESULT hr;
 
+    static struct
+    {
+        struct vec3 position;
+        DWORD diffuse;
+    }
+    quad[] =
+    {
+        {{-1.0f, -1.0f, 0.0f}, 0x800000ff},
+        {{-1.0f,  1.0f, 0.0f}, 0x800000ff},
+        {{ 1.0f, -1.0f, 0.0f}, 0x800000ff},
+        {{ 1.0f,  1.0f, 0.0f}, 0x800000ff},
+    };
+
     window = create_window();
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
@@ -1126,6 +1139,11 @@ static void test_coop_level_d3d_state(void)
     }
 
     viewport = create_viewport(device, 0, 0, 640, 480);
+
+    hr = IDirect3DDevice3_SetRenderState(device, D3DRENDERSTATE_SRCBLEND, D3DBLEND_SRCALPHA);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice3_SetRenderState(device, D3DRENDERSTATE_DESTBLEND, D3DBLEND_DESTALPHA);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
 
     hr = IDirect3DDevice3_GetRenderTarget(device, &rt);
     ok(SUCCEEDED(hr), "Failed to get render target, hr %#x.\n", hr);
@@ -1164,10 +1182,22 @@ static void test_coop_level_d3d_state(void)
     hr = IDirect3DDevice3_GetRenderState(device, D3DRENDERSTATE_ALPHABLENDENABLE, &value);
     ok(SUCCEEDED(hr), "Failed to get render state, hr %#x.\n", hr);
     ok(!!value, "Got unexpected alpha blend enable state %#x.\n", value);
-    hr = IDirect3DViewport3_Clear2(viewport, 1, &clear_rect, D3DCLEAR_TARGET, 0xff00ff00, 0.0f, 0);
+    hr = IDirect3DViewport3_Clear2(viewport, 1, &clear_rect, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0xff00ff00, 1.0f, 0);
     ok(SUCCEEDED(hr), "Failed to clear viewport, hr %#x.\n", hr);
     color = get_surface_color(rt, 320, 240);
     ok(compare_color(color, 0x0000ff00, 1), "Got unexpected color 0x%08x.\n", color);
+
+    hr = IDirect3DDevice3_SetCurrentViewport(device, viewport);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice3_BeginScene(device);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice3_DrawPrimitive(device, D3DPT_TRIANGLESTRIP,
+            D3DFVF_XYZ | D3DFVF_DIFFUSE, quad, ARRAY_SIZE(quad), 0);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice3_EndScene(device);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    color = get_surface_color(rt, 320, 240);
+    ok(compare_color(color, 0x0000ff80, 1), "Got unexpected color 0x%08x.\n", color);
 
     destroy_viewport(device, viewport);
     IDirectDrawSurface4_Release(surface);
@@ -1561,19 +1591,19 @@ static ULONG get_refcount(IUnknown *test_iface)
 
 static void test_viewport_object(void)
 {
-    IDirectDraw4 *ddraw;
-    IDirect3D3 *d3d;
-    HRESULT hr, old_d3d_ref;
-    ULONG ref;
-    D3DVIEWPORT vp;
-    D3DVIEWPORT2 vp2;
-    IDirect3DViewport *viewport;
-    IDirect3DViewport2 *viewport2;
     IDirect3DViewport3 *viewport3, *another_vp, *test_vp;
     IDirectDrawGammaControl *gamma;
-    IUnknown *unknown;
-    HWND window;
+    IDirect3DViewport2 *viewport2;
+    IDirect3DViewport *viewport;
     IDirect3DDevice3 *device;
+    HRESULT hr, old_d3d_ref;
+    IDirectDraw4 *ddraw;
+    IUnknown *unknown;
+    D3DVIEWPORT2 vp2;
+    IDirect3D3 *d3d;
+    D3DVIEWPORT vp;
+    HWND window;
+    ULONG ref;
     union
     {
         D3DVIEWPORT2 vp2;
@@ -1589,13 +1619,13 @@ static void test_viewport_object(void)
         return;
     }
     hr = IDirect3DDevice3_GetDirect3D(device, &d3d);
-    ok(SUCCEEDED(hr), "Failed to get Direct3D3 interface, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     hr = IDirect3D3_QueryInterface(d3d, &IID_IDirectDraw4, (void **)&ddraw);
-    ok(SUCCEEDED(hr), "Failed to get DirectDraw4 interface, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     old_d3d_ref = get_refcount((IUnknown *) d3d);
 
     hr = IDirect3D3_CreateViewport(d3d, &viewport3, NULL);
-    ok(SUCCEEDED(hr), "Failed to create viewport, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     ref = get_refcount((IUnknown *)viewport3);
     ok(ref == 1, "Got unexpected refcount %u.\n", ref);
     ref = get_refcount((IUnknown *)d3d);
@@ -1624,11 +1654,11 @@ static void test_viewport_object(void)
     gamma = (IDirectDrawGammaControl *)0xdeadbeef;
     hr = IDirect3DViewport2_QueryInterface(viewport3, &IID_IDirectDrawGammaControl, (void **)&gamma);
     ok(hr == E_NOINTERFACE, "Got unexpected hr %#x.\n", hr);
-    ok(!gamma, "Interface not set to NULL by failed QI call: %p\n", gamma);
+    ok(!gamma, "Interface not set to NULL by failed QI call: %p.\n", gamma);
     /* NULL iid: Segfaults */
 
     hr = IDirect3DViewport3_QueryInterface(viewport3, &IID_IDirect3DViewport, (void **)&viewport);
-    ok(SUCCEEDED(hr), "Failed to QI IDirect3DViewport, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     ref = get_refcount((IUnknown *)viewport);
     ok(ref == 2, "Got unexpected refcount %u.\n", ref);
     ref = get_refcount((IUnknown *)viewport3);
@@ -1637,7 +1667,7 @@ static void test_viewport_object(void)
     viewport = NULL;
 
     hr = IDirect3DViewport3_QueryInterface(viewport3, &IID_IDirect3DViewport3, (void **)&viewport2);
-    ok(SUCCEEDED(hr), "Failed to QI IDirect3DViewport3, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     ref = get_refcount((IUnknown *)viewport2);
     ok(ref == 2, "Got unexpected refcount %u.\n", ref);
     ref = get_refcount((IUnknown *)viewport3);
@@ -1645,7 +1675,7 @@ static void test_viewport_object(void)
     IDirect3DViewport3_Release(viewport2);
 
     hr = IDirect3DViewport3_QueryInterface(viewport3, &IID_IUnknown, (void **)&unknown);
-    ok(SUCCEEDED(hr), "Failed to QI IUnknown, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     ref = get_refcount((IUnknown *)viewport3);
     ok(ref == 2, "Got unexpected refcount %u.\n", ref);
     ref = get_refcount(unknown);
@@ -1658,7 +1688,7 @@ static void test_viewport_object(void)
     ok(hr == D3DERR_NOCURRENTVIEWPORT, "Got unexpected hr %#x.\n", hr);
 
     hr = IDirect3D3_CreateViewport(d3d, &another_vp, NULL);
-    ok(SUCCEEDED(hr), "Failed to create viewport, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
 
     /* Setting a viewport not in the viewport list fails */
     hr = IDirect3DDevice3_SetCurrentViewport(device, another_vp);
@@ -1666,21 +1696,21 @@ static void test_viewport_object(void)
 
     /* AddViewport(NULL): Segfault */
     hr = IDirect3DDevice3_AddViewport(device, viewport3);
-    ok(SUCCEEDED(hr), "Failed to add viewport to device, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     ref = get_refcount((IUnknown *) viewport3);
     ok(ref == 2, "Got unexpected refcount %u.\n", ref);
     hr = IDirect3DDevice3_AddViewport(device, another_vp);
-    ok(SUCCEEDED(hr), "Failed to add viewport to device, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     ref = get_refcount((IUnknown *) another_vp);
     ok(ref == 2, "Got unexpected refcount %u.\n", ref);
 
     test_vp = (IDirect3DViewport3 *) 0xbaadc0de;
     hr = IDirect3DDevice3_GetCurrentViewport(device, &test_vp);
     ok(hr == D3DERR_NOCURRENTVIEWPORT, "Got unexpected hr %#x.\n", hr);
-    ok(test_vp == (IDirect3DViewport3 *) 0xbaadc0de, "Got unexpected pointer %p\n", test_vp);
+    ok(test_vp == (IDirect3DViewport3 *) 0xbaadc0de, "Got unexpected pointer %p.\n", test_vp);
 
     hr = IDirect3DDevice3_SetCurrentViewport(device, viewport3);
-    ok(SUCCEEDED(hr), "Failed to set current viewport, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     ref = get_refcount((IUnknown *) viewport3);
     ok(ref == 3, "Got unexpected refcount %u.\n", ref);
     ref = get_refcount((IUnknown *) device);
@@ -1688,8 +1718,8 @@ static void test_viewport_object(void)
 
     test_vp = NULL;
     hr = IDirect3DDevice3_GetCurrentViewport(device, &test_vp);
-    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
-    ok(test_vp == viewport3, "Got unexpected viewport %p\n", test_vp);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    ok(test_vp == viewport3, "Got unexpected viewport %p.\n", test_vp);
     ref = get_refcount((IUnknown *) viewport3);
     ok(ref == 4, "Got unexpected refcount %u.\n", ref);
     if (test_vp)
@@ -1699,17 +1729,17 @@ static void test_viewport_object(void)
 
     /* Cannot set the viewport to NULL */
     hr = IDirect3DDevice3_SetCurrentViewport(device, NULL);
-    ok(hr == DDERR_INVALIDPARAMS, "Failed to set viewport to NULL, hr %#x.\n", hr);
+    ok(hr == DDERR_INVALIDPARAMS, "Got unexpected hr %#x.\n", hr);
     test_vp = NULL;
     hr = IDirect3DDevice3_GetCurrentViewport(device, &test_vp);
-    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
-    ok(test_vp == viewport3, "Got unexpected viewport %p\n", test_vp);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    ok(test_vp == viewport3, "Got unexpected viewport %p.\n", test_vp);
     if (test_vp)
         IDirect3DViewport3_Release(test_vp);
 
     /* SetCurrentViewport properly releases the old viewport's reference */
     hr = IDirect3DDevice3_SetCurrentViewport(device, another_vp);
-    ok(SUCCEEDED(hr), "Failed to set current viewport, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     ref = get_refcount((IUnknown *) viewport3);
     ok(ref == 2, "Got unexpected refcount %u.\n", ref);
     ref = get_refcount((IUnknown *) another_vp);
@@ -1718,7 +1748,7 @@ static void test_viewport_object(void)
     /* Unlike device2::DeleteViewport, device3::DeleteViewport releases the
      * reference held by SetCurrentViewport */
     hr = IDirect3DDevice3_DeleteViewport(device, another_vp);
-    ok(SUCCEEDED(hr), "Failed to delete viewport from device, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     ref = get_refcount((IUnknown *) another_vp);
     ok(ref == 1, "Got unexpected refcount %u.\n", ref);
 
@@ -1726,11 +1756,11 @@ static void test_viewport_object(void)
     test_vp = NULL;
     hr = IDirect3DDevice3_GetCurrentViewport(device, &test_vp);
     ok(hr == D3DERR_NOCURRENTVIEWPORT, "Got unexpected hr %#x.\n", hr);
-    ok(!test_vp, "Got unexpected viewport %p\n", test_vp);
+    ok(!test_vp, "Got unexpected viewport %p.\n", test_vp);
 
     /* Setting a different viewport doesn't have any surprises now */
     hr = IDirect3DDevice3_SetCurrentViewport(device, viewport3);
-    ok(SUCCEEDED(hr), "Failed to set current viewport, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     ref = get_refcount((IUnknown *) viewport3);
     ok(ref == 3, "Got unexpected refcount %u.\n", ref);
     ref = get_refcount((IUnknown *) another_vp);
@@ -1760,15 +1790,100 @@ static void test_viewport_object(void)
 
     vp.dwSize = sizeof(vp);
     hr = IDirect3DViewport3_SetViewport(viewport3, &vp);
-    ok(SUCCEEDED(hr), "Failed to set viewport data, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     vp2.dwSize = sizeof(vp2);
     hr = IDirect3DViewport3_SetViewport2(viewport3, &vp2);
-    ok(SUCCEEDED(hr), "Failed to set viewport data, hr %#x.\n", hr);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+    vp2.dwSize = sizeof(vp2);
+    vp2.dwX = 160;
+    vp2.dwY = 120;
+    vp2.dwWidth = 640 - vp2.dwX;
+    vp2.dwHeight = 480 - vp2.dwY;
+    vp2.dvClipX = 2.0f;
+    vp2.dvClipY = -1.75f;
+    vp2.dvClipWidth = 2.5f;
+    vp2.dvClipHeight = -1.5f;
+    vp2.dvMinZ = 0.5f;
+    vp2.dvMaxZ = 2.0f;
+    hr = IDirect3DViewport3_SetViewport2(viewport3, &vp2);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+    memset(&vp, 0xff, sizeof(vp));
+    vp.dwSize = sizeof(vp);
+    hr = IDirect3DViewport3_GetViewport(viewport3, &vp);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    ok(vp.dvMaxX == 4.5f && vp.dvMaxY == -1.75f && vp.dvScaleX == 192.0f
+            && vp.dvScaleY == -240.0f && vp.dvMinZ == 0.0f && vp.dvMaxZ == 1.0f,
+            "Got unexpected values %g, %g, %g, %g, %g, %g.\n",
+            vp.dvMaxX, vp.dvMaxY, vp.dvScaleX, vp.dvScaleY, vp.dvMinZ, vp.dvMaxZ);
+
+    vp2.dvClipX = -1.5f;
+    vp2.dvClipY = 1.75f;
+    vp2.dvClipWidth = -1.5f;
+    vp2.dvClipHeight = 2.0f;
+    vp2.dvMinZ = 2.0f;
+    vp2.dvMaxZ = 0.5f;
+
+    hr = IDirect3DViewport3_SetViewport2(viewport3, &vp2);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+    memset(&vp, 0xff, sizeof(vp));
+    vp.dwSize = sizeof(vp);
+    hr = IDirect3DViewport3_GetViewport(viewport3, &vp);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    ok(vp.dvMaxX == -3.0f && vp.dvMaxY == 1.75f && vp.dvScaleX == -320.0f
+            && vp.dvScaleY == 180.0f && vp.dvMinZ == 0.0f && vp.dvMaxZ == 1.0f,
+            "Got unexpected values %g, %g, %g, %g, %g, %g.\n",
+            vp.dvMaxX, vp.dvMaxY, vp.dvScaleX, vp.dvScaleY, vp.dvMinZ, vp.dvMaxZ);
+
+    vp.dwSize = sizeof(vp);
+    vp.dvMinZ = 0.5f;
+    vp.dvMaxZ = 2.0f;
+    hr = IDirect3DViewport3_SetViewport(viewport3, &vp);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+    memset(&vp2, 0xff, sizeof(vp2));
+    vp2.dwSize = sizeof(vp2);
+    hr = IDirect3DViewport3_GetViewport2(viewport3, &vp2);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    ok(vp2.dvClipX == 0.75f && vp2.dvClipY == 1.0f && vp2.dvClipWidth == -1.5f
+            && vp2.dvClipHeight == 2.0f && vp2.dvMinZ == 0.0f && vp2.dvMaxZ == 1.0f,
+            "Got unexpected values %g, %g, %g, %g, %g, %g.\n",
+            vp2.dvClipX, vp2.dvClipY, vp2.dvClipWidth, vp2.dvClipHeight, vp2.dvMinZ, vp2.dvMaxZ);
+
+    vp.dvMaxX = 4.5f;
+    vp.dvMaxY = -1.75f;
+    vp.dvScaleX = 192.0f;
+    vp.dvScaleY = -240.0f;
+    vp.dvMinZ = 2.0f;
+    vp.dvMaxZ = 0.5f;
+
+    hr = IDirect3DViewport3_SetViewport(viewport3, &vp);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+    memset(&vp2, 0xff, sizeof(vp2));
+    vp2.dwSize = sizeof(vp2);
+    hr = IDirect3DViewport3_GetViewport2(viewport3, &vp2);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    ok(vp2.dvClipX == -1.25f && vp2.dvClipY == -0.75f && vp2.dvClipWidth == 2.5f
+            && vp2.dvClipHeight == -1.5f && vp2.dvMinZ == 0.0f && vp2.dvMaxZ == 1.0f,
+            "Got unexpected values %g, %g, %g, %g, %g, %g.\n",
+            vp2.dvClipX, vp2.dvClipY, vp2.dvClipWidth, vp2.dvClipHeight, vp2.dvMinZ, vp2.dvMaxZ);
 
     /* Destroying the device removes the viewport and releases the reference */
     IDirect3DDevice3_Release(device);
     ref = get_refcount((IUnknown *) viewport3);
     ok(ref == 1, "Got unexpected refcount %u.\n", ref);
+
+    memset(&vp2, 0xff, sizeof(vp2));
+    vp2.dwSize = sizeof(vp2);
+    hr = IDirect3DViewport3_GetViewport2(viewport3, &vp2);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    ok(vp2.dvClipX == -1.25f && vp2.dvClipY == -0.75f && vp2.dvClipWidth == 2.5f
+            && vp2.dvClipHeight == -1.5f && vp2.dvMinZ == 0.0f && vp2.dvMaxZ == 1.0f,
+            "Got unexpected values %g, %g, %g, %g, %g, %g.\n",
+            vp2.dvClipX, vp2.dvClipY, vp2.dvClipWidth, vp2.dvClipHeight, vp2.dvMinZ, vp2.dvMaxZ);
 
     vp.dwSize = sizeof(vp);
     hr = IDirect3DViewport3_SetViewport(viewport3, &vp);
@@ -3010,7 +3125,7 @@ static void test_coop_level_mode_set(void)
     ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
     ok(ret, "Failed to get display mode.\n");
     ok(devmode.dmPelsWidth == registry_mode.dmPelsWidth
-            && devmode.dmPelsHeight == registry_mode.dmPelsHeight, "Got unexpect screen size %ux%u.\n",
+            && devmode.dmPelsHeight == registry_mode.dmPelsHeight, "Got unexpected screen size %ux%u.\n",
             devmode.dmPelsWidth, devmode.dmPelsHeight);
 
     expect_messages = exclusive_focus_restore_messages;
@@ -3023,7 +3138,7 @@ static void test_coop_level_mode_set(void)
     ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
     ok(ret, "Failed to get display mode.\n");
     ok(devmode.dmPelsWidth == param.ddraw_width
-            && devmode.dmPelsHeight == param.ddraw_height, "Got unexpect screen size %ux%u.\n",
+            && devmode.dmPelsHeight == param.ddraw_height, "Got unexpected screen size %ux%u.\n",
             devmode.dmPelsWidth, devmode.dmPelsHeight);
 
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
@@ -7594,7 +7709,7 @@ static void test_surface_attachment(void)
     hr = IDirectDrawSurface_AddAttachedSurface(surface1, surface2);
     todo_wine ok(hr == DDERR_CANNOTATTACHSURFACE, "Got unexpected hr %#x.\n", hr);
     if (SUCCEEDED(hr))
-        IDirectDrawSurface4_DeleteAttachedSurface(surface1, 0, surface3);
+        IDirectDrawSurface4_DeleteAttachedSurface(surface1, 0, surface2);
     hr = IDirectDrawSurface_AddAttachedSurface(surface1, surface3);
     ok(hr == D3D_OK, "Failed to attach depth buffer, hr %#x.\n", hr);
     hr = IDirectDrawSurface4_DeleteAttachedSurface(surface1, 0, surface3);
@@ -9255,11 +9370,12 @@ static void test_vb_writeonly(void)
 
 static void test_lost_device(void)
 {
-    IDirectDrawSurface4 *surface;
+    IDirectDrawSurface4 *surface, *back_buffer;
     DDSURFACEDESC2 surface_desc;
     HWND window1, window2;
     IDirectDraw4 *ddraw;
     ULONG refcount;
+    DDSCAPS2 caps;
     HRESULT hr;
     BOOL ret;
 
@@ -9426,8 +9542,22 @@ static void test_lost_device(void)
     ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     hr = IDirectDrawSurface4_IsLost(surface);
     ok(hr == DDERR_SURFACELOST, "Got unexpected hr %#x.\n", hr);
+
     hr = IDirectDrawSurface4_Flip(surface, NULL, DDFLIP_WAIT);
     ok(hr == DDERR_SURFACELOST, "Got unexpected hr %#x.\n", hr);
+
+    memset(&caps, 0, sizeof(caps));
+    caps.dwCaps = DDSCAPS_FLIP;
+
+    hr = IDirectDrawSurface4_GetAttachedSurface(surface, &caps, &back_buffer);
+    ok(hr == DDERR_SURFACELOST, "Got unexpected hr %#x.\n", hr);
+    hr = IDirectDrawSurface4_Restore(surface);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirectDrawSurface4_GetAttachedSurface(surface, &caps, &back_buffer);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirectDrawSurface4_IsLost(back_buffer);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    IDirectDrawSurface4_Release(back_buffer);
 
     IDirectDrawSurface4_Release(surface);
     refcount = IDirectDraw4_Release(ddraw);
@@ -16312,9 +16442,45 @@ static void test_clipper_refcount(void)
 
 static void test_caps(void)
 {
+    DWORD caps_never, caps_always, caps_hal;
     DDCAPS hal_caps, hel_caps;
     IDirectDraw4 *ddraw;
+    IDirectDraw *ddraw1;
     HRESULT hr;
+    BOOL no3d;
+
+    caps_never = DDSCAPS_RESERVED1
+            | DDSCAPS_ALPHA
+            | DDSCAPS_PRIMARYSURFACELEFT
+            | DDSCAPS_SYSTEMMEMORY
+            | DDSCAPS_VISIBLE
+            | DDSCAPS_WRITEONLY
+            | DDSCAPS_LIVEVIDEO
+            | DDSCAPS_HWCODEC
+            | DDSCAPS_MODEX
+            | DDSCAPS_RESERVED2
+            | 0x01000000u
+            | 0x02000000u
+            | DDSCAPS_ALLOCONLOAD
+            | DDSCAPS_VIDEOPORT
+            | DDSCAPS_STANDARDVGAMODE
+            | DDSCAPS_OPTIMIZED;
+
+    caps_always = DDSCAPS_FLIP
+            | DDSCAPS_OFFSCREENPLAIN
+            | DDSCAPS_PRIMARYSURFACE
+            | DDSCAPS_TEXTURE
+            | DDSCAPS_ZBUFFER
+            | DDSCAPS_MIPMAP;
+
+    caps_hal = DDSCAPS_BACKBUFFER
+            | DDSCAPS_COMPLEX
+            | DDSCAPS_FRONTBUFFER
+            | DDSCAPS_3DDEVICE
+            | DDSCAPS_VIDEOMEMORY
+            | DDSCAPS_OWNDC
+            | DDSCAPS_LOCALVIDMEM
+            | DDSCAPS_NONLOCALVIDMEM;
 
     ddraw = create_ddraw();
     ok(!!ddraw, "Failed to create a ddraw object.\n");
@@ -16331,6 +16497,76 @@ static void test_caps(void)
     ok(hel_caps.ddsOldCaps.dwCaps == hel_caps.ddsCaps.dwCaps,
             "Got unexpected caps %#x, expected %#x.\n",
             hel_caps.ddsOldCaps.dwCaps, hel_caps.ddsCaps.dwCaps);
+
+    no3d = !(hal_caps.ddsCaps.dwCaps & DDSCAPS_3DDEVICE);
+    if (hal_caps.ddsCaps.dwCaps)
+    {
+        ok(!(hal_caps.ddsCaps.dwCaps & caps_never), "Got unexpected caps %#x.\n", hal_caps.ddsCaps.dwCaps);
+        ok(!(~hal_caps.ddsCaps.dwCaps & caps_always), "Got unexpected caps %#x.\n", hal_caps.ddsCaps.dwCaps);
+        todo_wine_if(no3d) ok(!(~hal_caps.ddsCaps.dwCaps & caps_hal),
+                "Got unexpected caps %#x.\n", hal_caps.ddsCaps.dwCaps);
+    }
+    ok(!(hel_caps.ddsCaps.dwCaps & caps_never), "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
+    ok(!(~hel_caps.ddsCaps.dwCaps & caps_always), "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
+    todo_wine_if(!no3d) ok(!(hel_caps.ddsCaps.dwCaps & caps_hal),
+            "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
+
+    IDirectDraw4_Release(ddraw);
+
+    if (hal_caps.ddsCaps.dwCaps)
+    {
+        hr = DirectDrawCreate((GUID *)DDCREATE_HARDWAREONLY, &ddraw1, NULL);
+        ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+        hr = IDirectDraw_QueryInterface(ddraw1, &IID_IDirectDraw4, (void **)&ddraw);
+        ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+        IDirectDraw_Release(ddraw1);
+
+        memset(&hal_caps, 0, sizeof(hal_caps));
+        memset(&hel_caps, 0, sizeof(hel_caps));
+        hal_caps.dwSize = sizeof(hal_caps);
+        hel_caps.dwSize = sizeof(hel_caps);
+        hr = IDirectDraw4_GetCaps(ddraw, &hal_caps, &hel_caps);
+        ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+        ok(hal_caps.ddsOldCaps.dwCaps == hal_caps.ddsCaps.dwCaps,
+                "Got unexpected caps %#x, expected %#x.\n",
+                hal_caps.ddsOldCaps.dwCaps, hal_caps.ddsCaps.dwCaps);
+        ok(hel_caps.ddsOldCaps.dwCaps == hel_caps.ddsCaps.dwCaps,
+                "Got unexpected caps %#x, expected %#x.\n",
+                hel_caps.ddsOldCaps.dwCaps, hel_caps.ddsCaps.dwCaps);
+
+        ok(!(hal_caps.ddsCaps.dwCaps & caps_never), "Got unexpected caps %#x.\n", hal_caps.ddsCaps.dwCaps);
+        ok(!(~hal_caps.ddsCaps.dwCaps & caps_always), "Got unexpected caps %#x.\n", hal_caps.ddsCaps.dwCaps);
+        todo_wine_if(no3d) ok(!(~hal_caps.ddsCaps.dwCaps & caps_hal),
+                "Got unexpected caps %#x.\n", hal_caps.ddsCaps.dwCaps);
+        todo_wine ok(!hel_caps.ddsCaps.dwCaps, "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
+
+        IDirectDraw4_Release(ddraw);
+    }
+
+    hr = DirectDrawCreate((GUID *)DDCREATE_EMULATIONONLY, &ddraw1, NULL);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirectDraw_QueryInterface(ddraw1, &IID_IDirectDraw4, (void **)&ddraw);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    IDirectDraw_Release(ddraw1);
+
+    memset(&hal_caps, 0, sizeof(hal_caps));
+    memset(&hel_caps, 0, sizeof(hel_caps));
+    hal_caps.dwSize = sizeof(hal_caps);
+    hel_caps.dwSize = sizeof(hel_caps);
+    hr = IDirectDraw4_GetCaps(ddraw, &hal_caps, &hel_caps);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hal_caps.ddsOldCaps.dwCaps == hal_caps.ddsCaps.dwCaps,
+            "Got unexpected caps %#x, expected %#x.\n",
+            hal_caps.ddsOldCaps.dwCaps, hal_caps.ddsCaps.dwCaps);
+    ok(hel_caps.ddsOldCaps.dwCaps == hel_caps.ddsCaps.dwCaps,
+            "Got unexpected caps %#x, expected %#x.\n",
+            hel_caps.ddsOldCaps.dwCaps, hel_caps.ddsCaps.dwCaps);
+
+    todo_wine ok(!hal_caps.ddsCaps.dwCaps, "Got unexpected caps %#x.\n", hal_caps.ddsCaps.dwCaps);
+    ok(!(hel_caps.ddsCaps.dwCaps & caps_never), "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
+    ok(!(~hel_caps.ddsCaps.dwCaps & caps_always), "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
+    todo_wine_if(!no3d) ok(!(hel_caps.ddsCaps.dwCaps & caps_hal),
+            "Got unexpected caps %#x.\n", hel_caps.ddsCaps.dwCaps);
 
     IDirectDraw4_Release(ddraw);
 }
@@ -16378,6 +16614,321 @@ static void test_d32_support(void)
             "Got unexpected surface caps %#x.\n", surface_desc.ddsCaps.dwCaps);
     IDirectDrawSurface4_Release(surface);
 
+    refcount = IDirectDraw4_Release(ddraw);
+    ok(!refcount, "%u references left.\n", refcount);
+    DestroyWindow(window);
+}
+
+static void test_surface_format_conversion_alpha(void)
+{
+    static const unsigned int rgba_data[4 * 4] =
+    {
+        0xff00ff00, 0xff0000ff, 0xff0000ff, 0xff0000ff,
+        0xff0000ff, 0xff00ff00, 0xff0000ff, 0xff0000ff,
+        0xff00ff00, 0xff0000ff, 0xff00ff00, 0xff0000ff,
+        0xff00ff00, 0xff0000ff, 0xff0000ff, 0xff00ff00,
+    };
+    static const unsigned int rgbx_data[4 * 4] =
+    {
+        0x0000ff00, 0x000000ff, 0x000000ff, 0x000000ff,
+        0x000000ff, 0x0000ff00, 0x000000ff, 0x000000ff,
+        0x0000ff00, 0x000000ff, 0x0000ff00, 0x000000ff,
+        0x0000ff00, 0x000000ff, 0x000000ff, 0x0000ff00,
+    };
+    static const unsigned short int r5g6b5_data[4 * 4] =
+    {
+        0x07e0, 0x001f, 0x001f, 0x001f,
+        0x001f, 0x07e0, 0x001f, 0x001f,
+        0x07e0, 0x001f, 0x07e0, 0x001f,
+        0x07e0, 0x001f, 0x001f, 0x07e0,
+    };
+    static const unsigned short int r5g5b5x1_data[4 * 4] =
+    {
+        0x03e0, 0x001f, 0x001f, 0x001f,
+        0x001f, 0x03e0, 0x001f, 0x001f,
+        0x03e0, 0x001f, 0x03e0, 0x001f,
+        0x03e0, 0x001f, 0x001f, 0x03e0,
+    };
+    static const unsigned short int r5g5b5a1_data[4 * 4] =
+    {
+        0x83e0, 0x801f, 0x801f, 0x801f,
+        0x801f, 0x83e0, 0x801f, 0x801f,
+        0x83e0, 0x801f, 0x83e0, 0x801f,
+        0x83e0, 0x801f, 0x801f, 0x83e0,
+    };
+    static const unsigned int dxt1_data[8] =
+    {
+        0x001f07e0, 0x14445154,
+    };
+    static const unsigned int dxt2_data[16] =
+    {
+        0xffffffff, 0xffffffff, 0x001f07e0, 0x14445154,
+    };
+
+    enum test_format_id
+    {
+        FMT_RGBA,
+        FMT_RGBX,
+        FMT_R5G6B5,
+        FMT_R5G5B5X1,
+        FMT_R5G5B5A1,
+        FMT_DXT1,
+        FMT_DXT2,
+        FMT_DXT3,
+    };
+
+    static const struct test_format
+    {
+        DDPIXELFORMAT fmt;
+        const char *name;
+        unsigned int block_size, x_blocks, y_blocks;
+        DWORD support_flag;
+        BOOL broken_software_blit;
+    }
+    formats[] =
+    {
+        {
+            {
+                sizeof(DDPIXELFORMAT), DDPF_RGB | DDPF_ALPHAPIXELS, 0,
+                {32}, {0x00ff0000}, {0x0000ff00}, {0x000000ff}, {0xff000000}
+            },
+            "RGBA", 4, 4, 4,
+        },
+        {
+            {
+                sizeof(DDPIXELFORMAT), DDPF_RGB, 0,
+                {32}, {0x00ff0000}, {0x0000ff00}, {0x000000ff}, {0x00000000}
+            },
+            "RGBX", 4, 4, 4,
+        },
+        {
+            {
+                sizeof(DDPIXELFORMAT), DDPF_RGB, 0,
+                {16}, {0x0000f800}, {0x000007e0}, {0x0000001f}, {0x00000000}
+            },
+            "R5G6B5", 2, 4, 4, 0, TRUE,
+            /* Looks broken for sysmem texture conversions on Windows (at
+             * least with hardware device), the result is either error from
+             * _Blt() or a copy of the source data without any conversion. */
+        },
+        {
+            {
+                sizeof(DDPIXELFORMAT), DDPF_RGB, 0,
+                {16}, {0x00007c00}, {0x000003e0}, {0x0000001f}, {0x00000000}
+            },
+            "R5G5B5X1", 2, 4, 4,
+        },
+        {
+            {
+                sizeof(DDPIXELFORMAT), DDPF_RGB | DDPF_ALPHAPIXELS, 0,
+                {16}, {0x00007c00}, {0x000003e0}, {0x0000001f}, {0x00008000}
+            },
+            "R5G5B5A1", 2, 4, 4,
+        },
+        {
+            {
+                sizeof(DDPIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '1'),
+                {0}, {0}, {0}, {0}, {0}
+            },
+            "DXT1", 8, 1, 1, SUPPORT_DXT1,
+        },
+        {
+            {
+                sizeof(DDPIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '2'),
+                {0}, {0}, {0}, {0}, {0}
+            },
+            "DXT2", 16, 1, 1, SUPPORT_DXT2,
+        },
+        {
+            {
+                sizeof(DDPIXELFORMAT), DDPF_FOURCC, MAKEFOURCC('D', 'X', 'T', '3'),
+                {0}, {0}, {0}, {0}, {0}
+            },
+            "DXT3", 16, 1, 1, SUPPORT_DXT3,
+        },
+    };
+
+    static const struct
+    {
+        DWORD src_caps, dst_caps;
+    }
+    test_caps[] =
+    {
+        {DDSCAPS_TEXTURE | DDSCAPS_VIDEOMEMORY,  DDSCAPS_TEXTURE | DDSCAPS_VIDEOMEMORY},
+        {DDSCAPS_TEXTURE | DDSCAPS_SYSTEMMEMORY, DDSCAPS_TEXTURE | DDSCAPS_SYSTEMMEMORY},
+        {DDSCAPS_TEXTURE | DDSCAPS_SYSTEMMEMORY, DDSCAPS_TEXTURE | DDSCAPS_VIDEOMEMORY},
+        {DDSCAPS_TEXTURE | DDSCAPS_VIDEOMEMORY,  DDSCAPS_TEXTURE | DDSCAPS_SYSTEMMEMORY},
+    };
+
+    static const struct
+    {
+        enum test_format_id src_format;
+        const void *src_data;
+        enum test_format_id dst_format;
+        const void *expected_data;
+        BOOL todo;
+    }
+    tests[] =
+    {
+#if 0
+        /* The following 3 tests give different results on AMD and NVIDIA on Windows, disabling. */
+        {FMT_RGBX,     rgbx_data,     FMT_RGBA,     rgba_data},
+        {FMT_RGBA,     rgba_data,     FMT_RGBX,     rgbx_data},
+        {FMT_R5G5B5X1, r5g5b5x1_data, FMT_RGBA,     rgba_data},
+#endif
+        {FMT_R5G6B5,   r5g6b5_data,   FMT_RGBA,     rgba_data},
+        {FMT_R5G6B5,   r5g6b5_data,   FMT_R5G5B5A1, r5g5b5a1_data},
+        {FMT_R5G5B5X1, r5g5b5x1_data, FMT_R5G5B5A1, r5g5b5x1_data, TRUE},
+        {FMT_R5G5B5A1, r5g5b5a1_data, FMT_R5G6B5,   r5g6b5_data},
+        {FMT_RGBA,     rgba_data,     FMT_DXT1,     dxt1_data},
+        {FMT_RGBX,     rgbx_data,     FMT_DXT1,     dxt1_data},
+        {FMT_RGBA,     rgba_data,     FMT_DXT2,     dxt2_data},
+        {FMT_RGBX,     rgbx_data,     FMT_DXT2,     dxt2_data},
+        {FMT_RGBA,     rgba_data,     FMT_DXT3,     dxt2_data},
+        {FMT_RGBX,     rgbx_data,     FMT_DXT3,     dxt2_data},
+        {FMT_DXT1,     dxt1_data,     FMT_DXT2,     dxt2_data},
+        {FMT_DXT1,     dxt1_data,     FMT_RGBA,     rgba_data},
+        {FMT_DXT1,     dxt1_data,     FMT_RGBX,     rgba_data},
+        {FMT_DXT3,     dxt2_data,     FMT_RGBA,     rgba_data},
+        {FMT_DXT3,     dxt2_data,     FMT_RGBX,     rgba_data},
+    };
+
+    const struct test_format *src_format, *dst_format;
+    IDirectDrawSurface4 *src_surf, *dst_surf;
+    DDSURFACEDESC2 surface_desc, lock;
+    unsigned int i, j, x, y, pitch;
+    IDirect3DDevice3 *device;
+    DWORD supported_fmts;
+    IDirectDraw4 *ddraw;
+    ULONG refcount;
+    BOOL is_wine;
+    HWND window;
+    BOOL passed;
+    HRESULT hr;
+
+    window = create_window();
+    if (!(device = create_device(window, DDSCL_NORMAL)))
+    {
+        skip("Failed to create a 3D device, skipping test.\n");
+        DestroyWindow(window);
+        return;
+    }
+
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice3_EnumTextureFormats(device, test_block_formats_creation_cb,
+            &supported_fmts);
+    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+    is_wine = !strcmp(winetest_platform, "wine");
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
+    surface_desc.dwWidth = 4;
+    surface_desc.dwHeight = 4;
+
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
+    {
+        src_format = &formats[tests[i].src_format];
+        dst_format = &formats[tests[i].dst_format];
+
+        if (~supported_fmts & dst_format->support_flag)
+        {
+            skip("%s format is not supported, skipping test %u.\n", dst_format->name, i);
+            continue;
+        }
+        if (~supported_fmts & src_format->support_flag)
+        {
+            skip("%s format is not supported, skipping test %u.\n", src_format->name, i);
+            continue;
+        }
+
+        for (j = 0; j < ARRAY_SIZE(test_caps); ++j)
+        {
+            if (!is_wine && ((test_caps[j].src_caps | test_caps[j].dst_caps) & DDSCAPS_SYSTEMMEMORY)
+                    && (src_format->broken_software_blit || dst_format->broken_software_blit))
+                continue;
+
+            U4(surface_desc).ddpfPixelFormat = src_format->fmt;
+            surface_desc.ddsCaps.dwCaps = test_caps[j].src_caps;
+            hr = IDirectDraw4_CreateSurface(ddraw, &surface_desc, &src_surf, NULL);
+            ok(hr == DD_OK, "Test (%u, %u), got unexpected hr %#x.\n", j, i, hr);
+
+            U4(surface_desc).ddpfPixelFormat = dst_format->fmt;
+            surface_desc.ddsCaps.dwCaps = test_caps[j].dst_caps;
+            hr = IDirectDraw4_CreateSurface(ddraw, &surface_desc, &dst_surf, NULL);
+            ok(hr == DD_OK, "Test (%u, %u), got unexpected hr %#x.\n", j, i, hr);
+
+            memset(&lock, 0, sizeof(lock));
+            lock.dwSize = sizeof(lock);
+            hr = IDirectDrawSurface4_Lock(src_surf, NULL, &lock, 0, NULL);
+            ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+            pitch = U1(lock).lPitch;
+            for (y = 0; y < src_format->y_blocks; ++y)
+            {
+                memcpy((BYTE *)lock.lpSurface + y * pitch,
+                        (BYTE *)tests[i].src_data + y * src_format->x_blocks * src_format->block_size,
+                        src_format->block_size * src_format->x_blocks);
+            }
+            hr = IDirectDrawSurface4_Unlock(src_surf, NULL);
+            ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+            hr = IDirectDrawSurface4_Blt(dst_surf, NULL, src_surf, NULL, DDBLT_WAIT, NULL);
+            if (!is_wine && FAILED(hr))
+            {
+                /* Some software blits are rejected on Windows. */
+                IDirectDrawSurface4_Release(dst_surf);
+                IDirectDrawSurface4_Release(src_surf);
+                skip("Skipping test (%u, %u), cannot blit %s -> %s, hr %#x.\n", j, i,
+                        src_format->name, dst_format->name, hr);
+                continue;
+            }
+            ok(hr == DD_OK, "Test (%u, %s -> %s), got unexpected hr %#x.\n", j,
+                    src_format->name, dst_format->name, hr);
+
+            memset(&lock, 0, sizeof(lock));
+            lock.dwSize = sizeof(lock);
+            hr = IDirectDrawSurface4_Lock(dst_surf, NULL, &lock, 0, NULL);
+            ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+            pitch = U1(lock).lPitch;
+
+            for (y = 0; y < dst_format->y_blocks; ++y)
+            {
+                const void *expected_data = tests[i].expected_data;
+
+                passed = !memcmp((BYTE*)lock.lpSurface + y * pitch,
+                        (BYTE *)expected_data + y * dst_format->x_blocks * dst_format->block_size,
+                        dst_format->block_size * dst_format->x_blocks);
+                todo_wine_if(tests[i].todo)
+                ok(passed, "Test (%u, %s -> %s), row %u, unexpected surface data.\n", j,
+                        src_format->name, dst_format->name, y);
+
+                if (!passed && !(is_wine && tests[i].todo))
+                {
+                    for (x = 0; x < dst_format->x_blocks * dst_format->block_size / 4; ++x)
+                    {
+                        trace("Test (%u, %u), x %u, y %u, got 0x%08x, expected 0x%08x.\n", j, i, x, y,
+                                *(unsigned int *)((BYTE *)lock.lpSurface + y * pitch + x * 4),
+                                *(unsigned int *)((BYTE *)expected_data + y * dst_format->x_blocks
+                                * dst_format->block_size + x * 4));
+                    }
+                }
+                if (!passed)
+                    break;
+            }
+            hr = IDirectDrawSurface4_Unlock(dst_surf, NULL);
+            ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+            IDirectDrawSurface4_Release(dst_surf);
+            IDirectDrawSurface4_Release(src_surf);
+        }
+    }
+
+    IDirect3DDevice3_Release(device);
     refcount = IDirectDraw4_Release(ddraw);
     ok(!refcount, "%u references left.\n", refcount);
     DestroyWindow(window);
@@ -16517,4 +17068,5 @@ START_TEST(ddraw4)
     test_clipper_refcount();
     test_caps();
     test_d32_support();
+    test_surface_format_conversion_alpha();
 }

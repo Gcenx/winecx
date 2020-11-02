@@ -39,28 +39,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
 
-struct _DISPATCHER_CONTEXT;
-
-typedef LONG (WINAPI *PC_LANGUAGE_EXCEPTION_HANDLER)( EXCEPTION_POINTERS *ptrs, ULONG64 frame );
-typedef EXCEPTION_DISPOSITION (WINAPI *PEXCEPTION_ROUTINE)( EXCEPTION_RECORD *rec,
-                                                            ULONG64 frame,
-                                                            CONTEXT *context,
-                                                            struct _DISPATCHER_CONTEXT *dispatch );
-
-typedef struct _DISPATCHER_CONTEXT
-{
-    ULONG64               ControlPc;
-    ULONG64               ImageBase;
-    PRUNTIME_FUNCTION     FunctionEntry;
-    ULONG64               EstablisherFrame;
-    ULONG64               TargetIp;
-    PCONTEXT              ContextRecord;
-    PEXCEPTION_ROUTINE    LanguageHandler;
-    PVOID                 HandlerData;
-    PUNWIND_HISTORY_TABLE HistoryTable;
-    ULONG                 ScopeIndex;
-} DISPATCHER_CONTEXT;
-
 typedef struct
 {
     int  prev;
@@ -754,9 +732,6 @@ void __cdecl get_prev_context(CONTEXT *ctx, DWORD64 rip)
 
     TRACE("(%p)\n", ctx);
 
-    ctx->Rip = rip;
-    ctx->Rsp += 3*8; /* Rip, Rcx, return address */
-
     rf = RtlLookupFunctionEntry(ctx->Rip, &image_base, NULL);
     if(!rf) {
         FIXME("RtlLookupFunctionEntry failed\n");
@@ -768,16 +743,14 @@ void __cdecl get_prev_context(CONTEXT *ctx, DWORD64 rip)
 }
 
 __ASM_GLOBAL_FUNC( __crtCapturePreviousContext,
-        "pushq (%rsp)\n\t" /* save Rip */
-        __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t")
-        "pushq %rcx\n\t"
-        __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t")
-        "call " __ASM_NAME("RtlCaptureContext") "\n\t"
-        "popq %rcx\n\t"
-        __ASM_CFI(".cfi_adjust_cfa_offset -8\n\t")
-        "popq %rdx\n\t"
-        __ASM_CFI(".cfi_adjust_cfa_offset -8\n\t")
-        "jmp " __ASM_NAME("get_prev_context") );
+                   "movq %rcx,8(%rsp)\n\t"
+                   "call " __ASM_NAME("RtlCaptureContext") "\n\t"
+                   "movq 8(%rsp),%rcx\n\t"     /* context */
+                   "leaq 8(%rsp),%rax\n\t"
+                   "movq %rax,0x98(%rcx)\n\t"  /* context->Rsp */
+                   "movq (%rsp),%rax\n\t"
+                   "movq %rax,0xf8(%rcx)\n\t"  /* context->Rip */
+                   "jmp " __ASM_NAME("get_prev_context") )
 #endif
 
 #endif  /* __x86_64__ */

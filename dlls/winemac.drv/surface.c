@@ -429,9 +429,9 @@ void surface_clip_to_visible_rect(struct window_surface *window_surface, const R
         HRGN region;
 
         rect = *visible_rect;
-        OffsetRect(&rect, -rect.left, -rect.top);
+        OffsetRect(TRUNCCAST(RECT * WIN32PTR, &rect), -rect.left, -rect.top);
 
-        if ((region = CreateRectRgnIndirect(&rect)))
+        if ((region = CreateRectRgnIndirect(TRUNCCAST(RECT * WIN32PTR, &rect))))
         {
             CombineRgn(surface->drawn, surface->drawn, region, RGN_AND);
             DeleteObject(region);

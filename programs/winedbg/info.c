@@ -66,7 +66,7 @@ void print_help(void)
             "  show dir                               dir <path>",
             "  set <reg> = <expr>                     set *<addr> = <expr>",
             "  pass                                   whatis",
-            "  info (see 'help info' for options)",
+            "  info (see 'help info' for options)     thread <tid>",
 
             "The 'x' command accepts repeat counts and formats (including 'i') in the",
             "same way that gdb does.\n",
@@ -166,10 +166,10 @@ static void module_print_info(const struct info_module *module, BOOL is_embedded
                is_embedded ? "\\" : get_symtype_str(&module->mi), module->name);
 }
 
-static int      module_compare(const void* p1, const void* p2)
+static int      module_compare(const void* HOSTPTR p1, const void* HOSTPTR p2)
 {
-    struct info_module *left = (struct info_module *)p1;
-    struct info_module *right = (struct info_module *)p2;
+    const struct info_module * HOSTPTR left = p1;
+    const struct info_module * HOSTPTR right = p2;
     LONGLONG val = left->mi.BaseOfImage - right->mi.BaseOfImage;
 
     if (val < 0) return -1;

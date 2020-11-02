@@ -270,7 +270,7 @@ typedef struct tagINPUT_RECORD
 
 #define CONSOLE_TEXTMODE_BUFFER  1
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#if (defined(__i386__) || defined(__i386_on_x86_64__)) && !defined(__MINGW32__)
 /* Note: this should return a COORD, but calling convention for returning
  * structures is different between Windows and gcc on i386. */
 

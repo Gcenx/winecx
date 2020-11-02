@@ -34,6 +34,32 @@ typedef LONG SECURITY_STATUS;
 #define __SECSTATUS_DEFINED__
 #endif
 
+typedef struct _NCryptAlgorithmName {
+    LPWSTR pszName;
+    DWORD dwClass;
+    DWORD dwAlgOperations;
+    DWORD dwFlags;
+} NCryptAlgorithmName;
+
+typedef struct _NCryptBuffer {
+    ULONG cbBuffer;
+    ULONG BufferType;
+    PVOID pvBuffer;
+} NCryptBuffer, *PNCryptBuffer;
+
+typedef struct _NCryptBufferDesc {
+    ULONG ulVersion;
+    ULONG cBuffers;
+    PNCryptBuffer pBuffers;
+} NCryptBufferDesc, *PNCryptBufferDesc;
+
+typedef struct NCryptKeyName {
+    LPWSTR pszName;
+    LPWSTR pszAlgid;
+    DWORD dwLegacyKeySpec;
+    DWORD dwFlags;
+} NCryptKeyName;
+
 typedef ULONG_PTR NCRYPT_HANDLE;
 typedef ULONG_PTR NCRYPT_PROV_HANDLE;
 typedef ULONG_PTR NCRYPT_KEY_HANDLE;

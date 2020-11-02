@@ -10,7 +10,7 @@
 
 #include "wine/winheader_enter.h"
 
-#include <crtdefs.h>
+#include <corecrt.h>
 #include <wine/asm.h>
 
 #ifndef _NLSCMP_DEFINED
@@ -66,6 +66,7 @@ char* __cdecl _strnset(char*,int,size_t);
 char* __cdecl _strrev(char*);
 char* __cdecl _strset(char*,int);
 char* __cdecl _strupr(char*);
+errno_t __cdecl _strupr_s(char *, size_t);
 
 void*   __cdecl memmove(void*,const void*,size_t);
 errno_t __cdecl memmove_s(void*,size_t,const void*,size_t);
@@ -103,16 +104,19 @@ int      __cdecl _wcsicmp(const wchar_t*,const wchar_t*);
 int      __cdecl _wcsicoll(const wchar_t*,const wchar_t*);
 int      __cdecl _wcsicoll_l(const wchar_t*, const wchar_t*, _locale_t);
 wchar_t* __cdecl _wcslwr(wchar_t*);
+errno_t  __cdecl _wcslwr_s(wchar_t*, size_t);
 int      __cdecl _wcscoll_l(const wchar_t*, const wchar_t*, _locale_t);
 int      __cdecl _wcsncoll(const wchar_t*, const wchar_t*, size_t);
 int      __cdecl _wcsncoll_l(const wchar_t*, const wchar_t*, size_t, _locale_t);
 int      __cdecl _wcsnicmp(const wchar_t*,const wchar_t*,size_t);
 int      __cdecl _wcsnicoll(const wchar_t*,const wchar_t*,size_t);
 int      __cdecl _wcsnicoll_l(const wchar_t*, const wchar_t*, size_t, _locale_t);
+size_t   __cdecl _wcsnlen(const wchar_t*,size_t);
 wchar_t* __cdecl _wcsnset(wchar_t*,wchar_t,size_t);
 wchar_t* __cdecl _wcsrev(wchar_t*);
 wchar_t* __cdecl _wcsset(wchar_t*,wchar_t);
 wchar_t* __cdecl _wcsupr(wchar_t*);
+errno_t  __cdecl _wcsupr_s(wchar_t*, size_t);
 
 wchar_t* __cdecl wcscat(wchar_t*,const wchar_t*);
 errno_t  __cdecl wcscat_s(wchar_t*,size_t,const wchar_t*);
@@ -127,6 +131,7 @@ wchar_t* __cdecl wcsncat(wchar_t*,const wchar_t*,size_t);
 int      __cdecl wcsncmp(const wchar_t*,const wchar_t*,size_t);
 wchar_t* __cdecl wcsncpy(wchar_t*,const wchar_t*,size_t);
 errno_t  __cdecl wcsncpy_s(wchar_t*,size_t,const wchar_t*,size_t);
+size_t   __cdecl wcsnlen(const wchar_t*,size_t);
 wchar_t* __cdecl wcspbrk(const wchar_t*,const wchar_t*);
 wchar_t* __cdecl wcsrchr(const wchar_t*,wchar_t wcFor);
 size_t   __cdecl wcsspn(const wchar_t*,const wchar_t*);

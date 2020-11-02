@@ -110,7 +110,7 @@ extern void wine_ldt_free_fs( unsigned short sel );
 extern struct __wine_ldt_copy
 {
     void *WIN32PTR base[8192];  /* base address or 0 if entry is free   */
-    unsigned long limit[8192]; /* limit in bytes or 0 if entry is free */
+    unsigned int  limit[8192]; /* limit in bytes or 0 if entry is free */
     unsigned char flags[8192]; /* flags (defined below) */
 } wine_ldt_copy;
 

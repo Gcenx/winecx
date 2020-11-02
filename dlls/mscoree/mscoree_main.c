@@ -30,6 +30,7 @@
 #include "ole2.h"
 #include "ocidl.h"
 #include "shellapi.h"
+#include "strongname.h"
 
 #include "initguid.h"
 #include "msxml2.h"
@@ -318,6 +319,13 @@ HRESULT WINAPI CorIsLatestSvc(int *unk1, int *unk2)
     return S_OK;
 }
 
+HRESULT WINAPI CorGetSvc(void *unk)
+{
+    ERR_(winediag)("If this function is called, it is likely the result of a broken .NET installation\n");
+
+    return E_NOTIMPL;
+}
+
 HRESULT WINAPI GetRequestedRuntimeInfo(LPCWSTR pExe, LPCWSTR pwszVersion, LPCWSTR pConfigurationFile,
     DWORD startupFlags, DWORD runtimeInfoFlags, LPWSTR pDirectory, DWORD dwDirectory, DWORD *dwDirectoryLength,
     LPWSTR pVersion, DWORD cchBuffer, DWORD *dwlength)
@@ -548,16 +556,17 @@ STDAPI ClrCreateManagedInstance(LPCWSTR pTypeName, REFIID riid, void **ppObject)
     return ret;
 }
 
-BOOL WINAPI StrongNameSignatureVerification(LPCWSTR filename, DWORD inFlags, DWORD* pOutFlags)
+BOOLEAN WINAPI StrongNameSignatureVerification(LPCWSTR filename, DWORD inFlags, DWORD *pOutFlags)
 {
     FIXME("(%s, 0x%X, %p): stub\n", debugstr_w(filename), inFlags, pOutFlags);
     return FALSE;
 }
 
-BOOL WINAPI StrongNameSignatureVerificationEx(LPCWSTR filename, BOOL forceVerification, BOOL* pVerified)
+BOOLEAN WINAPI StrongNameSignatureVerificationEx(LPCWSTR filename, BOOLEAN forceVerification, BOOLEAN *pVerified)
 {
     FIXME("(%s, %u, %p): stub\n", debugstr_w(filename), forceVerification, pVerified);
-    return FALSE;
+    *pVerified = TRUE;
+    return TRUE;
 }
 
 HRESULT WINAPI CreateDebuggingInterfaceFromVersion(int nDebugVersion, LPCWSTR version, IUnknown **ppv)

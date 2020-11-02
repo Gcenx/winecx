@@ -167,6 +167,7 @@ static const char *dlltool;
 static const char *msgfmt;
 static const char *ln_s;
 static const char *sed_cmd;
+static const char *delay_load_flag;
 static const char *libwine;
 
 struct makefile
@@ -599,6 +600,19 @@ static char *get_extension( char *filename )
     char *ext = strrchr( filename, '.' );
     if (ext && strchr( ext, '/' )) ext = NULL;
     return ext;
+}
+
+
+/*******************************************************************
+ *         get_base_name
+ */
+static const char *get_base_name( const char *name )
+{
+    char *base;
+    if (!strchr( name, '.' )) return name;
+    base = strdup( name );
+    *strrchr( base, '.' ) = 0;
+    return base;
 }
 
 
@@ -2149,14 +2163,17 @@ static struct makefile *get_parent_makefile( struct makefile *make )
  */
 static int needs_cross_lib( const struct makefile *make )
 {
+    const char *name;
     if (!crosstarget) return 0;
-    if (make->importlib) return strarray_exists( &cross_import_libs, make->importlib );
-    if (make->staticlib)
+    if (make->importlib) name = make->importlib;
+    else if (make->staticlib)
     {
-        const char *name = replace_extension( make->staticlib, ".a", "" );
+        name = replace_extension( make->staticlib, ".a", "" );
         if (!strncmp( name, "lib", 3 )) name += 3;
-        return strarray_exists( &cross_import_libs, name );
     }
+    else return 0;
+    if (strarray_exists( &cross_import_libs, name )) return 1;
+    if (delay_load_flag && strarray_exists( &delay_import_libs, name )) return 1;
     return 0;
 }
 
@@ -2166,6 +2183,7 @@ static int needs_cross_lib( const struct makefile *make )
  */
 static int needs_delay_lib( const struct makefile *make )
 {
+    if (delay_load_flag) return 0;
     if (*dll_ext && !crosstarget) return 0;
     if (!make->importlib) return 0;
     return strarray_exists( &delay_import_libs, make->importlib );
@@ -2224,7 +2242,7 @@ static struct strarray add_import_libs( const struct makefile *make, struct stra
 
     for (i = 0; i < imports.count; i++)
     {
-        const char *name = imports.str[i];
+        const char *name = get_base_name( imports.str[i] );
         const char *lib = NULL;
 
         for (j = 0; j < top_makefile->subdirs.count; j++)
@@ -2246,7 +2264,7 @@ static struct strarray add_import_libs( const struct makefile *make, struct stra
 
         if (lib)
         {
-            if (delay) lib = replace_extension( lib, ".a", ".delay.a" );
+            if (delay && !delay_load_flag) lib = replace_extension( lib, ".a", ".delay.a" );
             else if (make->is_cross) lib = replace_extension( lib, ".a", ".cross.a" );
             lib = top_obj_dir_path( make, lib );
             strarray_add( deps, lib );
@@ -2387,8 +2405,13 @@ static struct strarray get_source_defines( struct makefile *make, struct incl_fi
 static void output_winegcc_command( struct makefile *make )
 {
     output( "\t%s -o $@", tools_path( make, "winegcc" ));
-    output_filename( strmake( "-B%s", tools_dir_path( make, "winebuild" )));
-    if (tools_dir) output_filename( strmake( "--sysroot=%s", top_obj_dir_path( make, "" )));
+    output_filename( "--wine-objdir" );
+    output_filename( top_obj_dir_path( make, "" ));
+    if (tools_dir)
+    {
+        output_filename( "--winebuild" );
+        output_filename( tools_path( make, "winebuild" ));
+    }
     if (make->is_cross)
     {
         output_filename( "-b" );
@@ -2430,6 +2453,24 @@ static void output_symlink_rule( const char *src_name, const char *link_name )
 
 
 /*******************************************************************
+ *         output_srcdir_symlink
+ *
+ * Output rule to create a symlink back to the source directory, for source files
+ * that are needed at run-time.
+ */
+static void output_srcdir_symlink( struct makefile *make, const char *obj )
+{
+    char *src_file;
+
+    if (!make->src_dir) return;
+    src_file = src_dir_path( make, obj );
+    output( "%s: %s\n", obj, src_file );
+    output_symlink_rule( src_file, obj );
+    strarray_add( &make->all_targets, obj );
+}
+
+
+/*******************************************************************
  *         output_install_commands
  */
 static void output_install_commands( struct makefile *make, const struct makefile *submake,
@@ -2449,6 +2490,7 @@ static void output_install_commands( struct makefile *make, const struct makefil
         case 'c':  /* cross-compiled program */
             output( "\tSTRIPPROG=%s-strip %s -m 644 $(INSTALL_PROGRAM_FLAGS) %s %s\n",
                     crosstarget, install_sh, obj_dir_path( make, file ), dest );
+            output( "\t%s --builtin %s\n", tools_path( make, "winebuild" ), dest );
             break;
         case 'd':  /* data file */
             output( "\t%s -m 644 $(INSTALL_DATA_FLAGS) %s %s\n",
@@ -2847,6 +2889,7 @@ static void output_source_idl( struct makefile *make, struct incl_file *source, 
     output( ": %s\n", tools_path( make, "widl" ));
     output( "\t%s -o $@", tools_path( make, "widl" ) );
     output_filenames( widl_flags );
+    output_filename( "--nostdinc" );
     output_includes_defines( defines, 1 );
     output_filenames( get_expanded_make_var_array( make, "EXTRAIDLFLAGS" ));
     output_filenames( get_expanded_file_local_var( make, obj, "EXTRAIDLFLAGS" ));
@@ -2904,7 +2947,10 @@ static void output_source_sfd( struct makefile *make, struct incl_file *source, 
         if (!(source->file->flags & FLAG_SFD_FONTS)) output( "all: %s\n", ttf_file );
     }
     if (source->file->flags & FLAG_INSTALL)
+    {
         add_install_rule( make, source->name, ttf_obj, strmake( "D$(fontdir)/%s", ttf_obj ));
+        output_srcdir_symlink( make, ttf_obj );
+    }
 
     if (source->file->flags & FLAG_SFD_FONTS)
     {
@@ -2955,6 +3001,7 @@ static void output_source_nls( struct makefile *make, struct incl_file *source, 
 {
     add_install_rule( make, source->name, source->name,
                       strmake( "D$(datadir)/wine/%s", source->name ));
+    output_srcdir_symlink( make, strmake( "%s.nls", obj ));
 }
 
 
@@ -3116,6 +3163,7 @@ static void output_source_default( struct makefile *make, struct incl_file *sour
         output( "\t$(CROSSCC) -c -o $@ %s", source->filename );
         output_includes_defines( defines, 1 );
         output_filenames( extra_cross_cflags );
+        if (source->file->flags & FLAG_C_IMPLIB) output_filename( "-fno-builtin" );
         output_filenames( cpp_flags );
         output_filename( "$(CROSSCFLAGS)" );
         output( "\n" );
@@ -3262,6 +3310,12 @@ static void output_module( struct makefile *make )
 
     if (make->is_cross)
     {
+        if (delay_load_flag)
+        {
+            for (i = 0; i < make->delayimports.count; i++)
+                strarray_add( &all_libs, strmake( "%s%s%s", delay_load_flag, make->delayimports.str[i],
+                                                  strchr( make->delayimports.str[i], '.' ) ? "" : ".dll" ));
+        }
         strarray_add( &make->all_targets, strmake( "%s", make->module ));
         add_install_rule( make, make->module, strmake( "%s", make->module ),
                           strmake( "c$(dlldir)/%s", make->module ));
@@ -3274,7 +3328,8 @@ static void output_module( struct makefile *make )
         if (*dll_ext)
         {
             for (i = 0; i < make->delayimports.count; i++)
-                strarray_add( &all_libs, strmake( "-Wb,-d%s", make->delayimports.str[i] ));
+                strarray_add( &all_libs, strmake( "-Wl,-delayload,%s%s", make->delayimports.str[i],
+                                                  strchr( make->delayimports.str[i], '.' ) ? "" : ".dll" ));
             strarray_add( &make->all_targets, strmake( "%s%s", make->module, dll_ext ));
             strarray_add( &make->all_targets, strmake( "%s.fake", make->module ));
             add_install_rule( make, make->module, strmake( "%s%s", make->module, dll_ext ),
@@ -3379,7 +3434,7 @@ static void output_module( struct makefile *make )
 
     if (spec_file)
         output_man_pages( make );
-    else if (*dll_ext && !make->is_win16)
+    else if (*dll_ext && !make->is_win16 && strendswith( make->module, ".exe" ))
     {
         char *binary = replace_extension( make->module, ".exe", "" );
         add_install_rule( make, binary, "wineapploader", strmake( "t$(bindir)/%s", binary ));
@@ -4230,7 +4285,9 @@ static void load_sources( struct makefile *make )
     make->extra_targets = get_expanded_make_var_array( make, "EXTRA_TARGETS" );
 
     if (make->module && strendswith( make->module, ".a" )) make->staticlib = make->module;
-    if (make->testdll) strarray_add( &make->extradllflags, "-mno-cygwin" );
+
+    if ((make->module && make->staticlib) || make->testdll)
+        strarray_add( &make->extradllflags, "-mno-cygwin" );
 
     strarray_addall( &make->extradllflags, get_expanded_make_var_array( make, "APPMODE" ));
     make->disabled   = make->base_dir && strarray_exists( &disabled_dirs, make->base_dir );
@@ -4326,7 +4383,7 @@ static void load_sources( struct makefile *make )
 
     if (!*dll_ext || make->is_cross)
         for (i = 0; i < make->delayimports.count; i++)
-            strarray_add_uniq( &delay_import_libs, make->delayimports.str[i] );
+            strarray_add_uniq( &delay_import_libs, get_base_name( make->delayimports.str[i] ));
 }
 
 
@@ -4436,6 +4493,7 @@ int main( int argc, char *argv[] )
     lddll_flags  = get_expanded_make_var_array( top_makefile, "LDDLLFLAGS" );
     libs         = get_expanded_make_var_array( top_makefile, "LIBS" );
     enable_tests = get_expanded_make_var_array( top_makefile, "ENABLE_TESTS" );
+    delay_load_flag = get_expanded_make_variable( top_makefile, "DELAYLOADFLAG" );
     top_install_lib = get_expanded_make_var_array( top_makefile, "TOP_INSTALL_LIB" );
     top_install_dev = get_expanded_make_var_array( top_makefile, "TOP_INSTALL_DEV" );
 

@@ -374,7 +374,7 @@ void add_import_dll( const char *name, const char *filename )
     imp->dll_name = spec->file_name ? spec->file_name : dll_name;
     imp->c_name = make_c_identifier( imp->dll_name );
 
-    if (is_delayed_import( dll_name ))
+    if (is_delayed_import( imp->dll_name ))
         list_add_tail( &dll_delayed, &imp->entry );
     else
         list_add_tail( &dll_imports, &imp->entry );
@@ -568,7 +568,6 @@ static void check_undefined_forwards( DLLSPEC *spec )
 /* flag the dll exports that link to an undefined symbol */
 static void check_undefined_exports( DLLSPEC *spec )
 {
-    const char *name;
     int i;
     const char *check_name;
 
@@ -577,11 +576,11 @@ static void check_undefined_exports( DLLSPEC *spec )
         ORDDEF *odp = &spec->entry_points[i];
         if (odp->type == TYPE_STUB || odp->type == TYPE_ABS || odp->type == TYPE_VARIABLE) continue;
         if (odp->flags & FLAG_FORWARD) continue;
-        name = odp->impl_name ? odp->impl_name : odp->link_name;
+        check_name = odp->impl_name ? odp->impl_name : odp->link_name;
         if (target_cpu == CPU_x86_32on64 && odp->type != TYPE_EXTERN)
-            check_name = thunk32_name( name );
+            check_name = thunk32_name( check_name );
         else
-            check_name = name;
+            check_name = check_name;
         if (find_name( check_name, &undef_symbols ))
         {
             switch(odp->type)
@@ -593,14 +592,14 @@ static void check_undefined_exports( DLLSPEC *spec )
                 if (link_ext_symbols)
                 {
                     odp->flags |= FLAG_EXT_LINK;
-                    strarray_add( &ext_link_imports, name, NULL );
+                    strarray_add( &ext_link_imports, check_name, NULL );
                 }
                 else error( "%s:%d: function '%s' not defined\n",
-                            spec->src_name, odp->lineno, name );
+                            spec->src_name, odp->lineno, check_name );
                 break;
             default:
                 error( "%s:%d: external symbol '%s' is not a function\n",
-                       spec->src_name, odp->lineno, name );
+                       spec->src_name, odp->lineno, check_name );
                 break;
             }
         }
@@ -1717,7 +1716,7 @@ static void build_windows_import_lib( DLLSPEC *spec )
     const char *as_flags, *m_flag;
 
     def_file = open_temp_output_file( ".def" );
-    output_def_file( spec, 0 );
+    output_def_file( spec, 1 );
     fclose( output_file );
 
     args = find_tool( "dlltool", NULL );

@@ -11,6 +11,7 @@ C_SRCS = \
 	debugger.c \
 	device.c \
 	directory.c \
+	esync.c \
 	event.c \
 	fd.c \
 	file.c \
@@ -50,4 +51,4 @@ MANPAGES = \
 	wineserver.fr.UTF-8.man.in \
 	wineserver.man.in
 
-EXTRALIBS = $(LDEXECFLAGS) -l$(LIBWINE_NAME) $(POLL_LIBS) $(RT_LIBS) $(INOTIFY_LIBS)
+EXTRALIBS = $(LDEXECFLAGS) $(POLL_LIBS) $(RT_LIBS) $(INOTIFY_LIBS)

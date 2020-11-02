@@ -2081,9 +2081,9 @@ static void test_condition(void)
     ok( r == MSICONDITION_TRUE, "wrong return val (%d)\n", r);
     r = MsiEvaluateConditionA(hpkg, "!nofeature=\"\"");
     ok( r == MSICONDITION_TRUE, "wrong return val (%d)\n", r);
-    MsiEvaluateConditionA(hpkg, "$nocomponent=\"\"");
+    r = MsiEvaluateConditionA(hpkg, "$nocomponent=\"\"");
     ok( r == MSICONDITION_TRUE, "wrong return val (%d)\n", r);
-    MsiEvaluateConditionA(hpkg, "?nocomponent=\"\"");
+    r = MsiEvaluateConditionA(hpkg, "?nocomponent=\"\"");
     ok( r == MSICONDITION_TRUE, "wrong return val (%d)\n", r);
 
     MsiSetPropertyA(hpkg, "A", "2");
@@ -4054,7 +4054,16 @@ static void test_appsearch(void)
 
     r = RegCreateKeyExA(HKEY_LOCAL_MACHINE, "Software\\Winetest_msi", 0, NULL, 0, KEY_ALL_ACCESS|KEY_WOW64_32KEY,
                         NULL, &hkey, NULL);
+    if (r == ERROR_ACCESS_DENIED)
+    {
+        skip("insufficient rights\n");
+        RegDeleteKeyA(HKEY_CURRENT_USER, "Software\\Winetest_msi");
+        MsiCloseHandle(hdb);
+        DeleteFileA(msifile);
+        return;
+    }
     ok( r == ERROR_SUCCESS, "Could not create key: %d.\n", r );
+
     r = RegSetValueExA(hkey, NULL, 0, REG_SZ, (const BYTE *)"c:\\windows\\system32\\notepad.exe",
                        sizeof("c:\\windows\\system32\\notepad.exe"));
     ok( r == ERROR_SUCCESS, "Could not set key value: %d.\n", r);
@@ -9631,15 +9640,25 @@ static void test_top_level_action(void)
 
 START_TEST(package)
 {
+    char temp_path[MAX_PATH], prev_path[MAX_PATH];
     STATEMGRSTATUS status;
     BOOL ret = FALSE;
+    DWORD len;
 
     init_functionpointers();
 
     if (pIsWow64Process)
         pIsWow64Process(GetCurrentProcess(), &is_wow64);
 
-    GetCurrentDirectoryA(MAX_PATH, CURR_DIR);
+    GetCurrentDirectoryA(MAX_PATH, prev_path);
+    GetTempPathA(MAX_PATH, temp_path);
+    SetCurrentDirectoryA(temp_path);
+
+    lstrcpyA(CURR_DIR, temp_path);
+    len = lstrlenA(CURR_DIR);
+
+    if (len && (CURR_DIR[len - 1] == '\\'))
+        CURR_DIR[len - 1] = 0;
 
     /* Create a restore point ourselves so we circumvent the multitude of restore points
      * that would have been created by all the installation and removal tests.
@@ -9697,4 +9716,6 @@ START_TEST(package)
         if (ret)
             remove_restore_point(status.llSequenceNumber);
     }
+
+    SetCurrentDirectoryA(prev_path);
 }

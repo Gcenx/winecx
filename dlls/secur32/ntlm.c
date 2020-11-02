@@ -26,6 +26,7 @@
 #include "winbase.h"
 #include "winnls.h"
 #include "wincred.h"
+#include "winternl.h"
 #include "rpc.h"
 #include "sspi.h"
 #include "lm.h"
@@ -1639,10 +1640,7 @@ static SECURITY_STATUS ntlm_CreateSignature(PNegoHelper helper, PSecBufferDesc p
         for(i=0; i < pMessage->cBuffers; ++i)
         {
             if(pMessage->pBuffers[i].BufferType & SECBUFFER_DATA)
-            {
-                crc = ComputeCrc32(pMessage->pBuffers[i].pvBuffer,
-                    pMessage->pBuffers[i].cbBuffer, crc);
-            }
+                crc = RtlComputeCrc32(crc, pMessage->pBuffers[i].pvBuffer, pMessage->pBuffers[i].cbBuffer);
         }
 
         sig[ 0] = (sign_version >>  0) & 0xff;

@@ -58,6 +58,8 @@ static HANDLE dll_fixup_heap; /* using a separate heap so we can have execute pe
 
 static struct list dll_fixups;
 
+WCHAR **private_path = NULL;
+
 struct dll_fixup
 {
     struct list entry;
@@ -125,54 +127,19 @@ static void domain_restore(MonoDomain *prev_domain)
         mono_domain_set(prev_domain, FALSE);
 }
 
-static HRESULT RuntimeHost_AddDefaultDomain(RuntimeHost *This, MonoDomain **result)
-{
-    struct DomainEntry *entry;
-    HRESULT res=S_OK;
-
-    EnterCriticalSection(&This->lock);
-
-    entry = HeapAlloc(GetProcessHeap(), 0, sizeof(*entry));
-    if (!entry)
-    {
-        res = E_OUTOFMEMORY;
-        goto end;
-    }
-
-    /* FIXME: Use exe filename to name the domain? */
-    entry->domain = mono_jit_init_version("mscorlib.dll", "v4.0.30319");
-
-    if (!entry->domain)
-    {
-        HeapFree(GetProcessHeap(), 0, entry);
-        res = E_FAIL;
-        goto end;
-    }
-
-    is_mono_started = TRUE;
-
-    list_add_tail(&This->domains, &entry->entry);
-
-    *result = entry->domain;
-
-end:
-    LeaveCriticalSection(&This->lock);
-
-    return res;
-}
-
 static HRESULT RuntimeHost_GetDefaultDomain(RuntimeHost *This, const WCHAR *config_path, MonoDomain **result)
 {
     WCHAR config_dir[MAX_PATH];
     WCHAR base_dir[MAX_PATH];
     char *base_dirA, *config_pathA, *slash;
     HRESULT res=S_OK;
+    static BOOL configured_domain;
+
+    *result = get_root_domain();
 
     EnterCriticalSection(&This->lock);
 
-    if (This->default_domain) goto end;
-
-    res = RuntimeHost_AddDefaultDomain(This, &This->default_domain);
+    if (configured_domain) goto end;
 
     if (!config_path)
     {
@@ -211,38 +178,18 @@ static HRESULT RuntimeHost_GetDefaultDomain(RuntimeHost *This, const WCHAR *conf
         *(slash + 1) = 0;
 
     TRACE("setting base_dir: %s, config_path: %s\n", base_dirA, config_pathA);
-    mono_domain_set_config(This->default_domain, base_dirA, config_pathA);
+    mono_domain_set_config(*result, base_dirA, config_pathA);
 
     HeapFree(GetProcessHeap(), 0, config_pathA);
     HeapFree(GetProcessHeap(), 0, base_dirA);
 
 end:
-    *result = This->default_domain;
+
+    configured_domain = TRUE;
 
     LeaveCriticalSection(&This->lock);
 
     return res;
-}
-
-static void RuntimeHost_DeleteDomain(RuntimeHost *This, MonoDomain *domain)
-{
-    struct DomainEntry *entry;
-
-    EnterCriticalSection(&This->lock);
-
-    LIST_FOR_EACH_ENTRY(entry, &This->domains, struct DomainEntry, entry)
-    {
-        if (entry->domain == domain)
-        {
-            list_remove(&entry->entry);
-            if (This->default_domain == domain)
-                This->default_domain = NULL;
-            HeapFree(GetProcessHeap(), 0, entry);
-            break;
-        }
-    }
-
-    LeaveCriticalSection(&This->lock);
 }
 
 static BOOL RuntimeHost_GetMethod(MonoDomain *domain, const char *assemblyname,
@@ -253,18 +200,26 @@ static BOOL RuntimeHost_GetMethod(MonoDomain *domain, const char *assemblyname,
     MonoImage *image;
     MonoClass *klass;
 
-    assembly = mono_domain_assembly_open(domain, assemblyname);
-    if (!assembly)
+    if (!assemblyname)
     {
-        ERR("Cannot load assembly %s\n", assemblyname);
-        return FALSE;
+        image = mono_get_corlib();
     }
-
-    image = mono_assembly_get_image(assembly);
-    if (!image)
+    else
     {
-        ERR("Couldn't get assembly image for %s\n", assemblyname);
-        return FALSE;
+        MonoImageOpenStatus status;
+        assembly = mono_assembly_open(assemblyname, &status);
+        if (!assembly)
+        {
+            ERR("Cannot load assembly %s, status=%i\n", assemblyname, status);
+            return FALSE;
+        }
+
+        image = mono_assembly_get_image(assembly);
+        if (!image)
+        {
+            ERR("Couldn't get assembly image for %s\n", assemblyname);
+            return FALSE;
+        }
     }
 
     klass = mono_class_from_name(image, namespace, typename);
@@ -303,7 +258,7 @@ static HRESULT RuntimeHost_DoInvoke(RuntimeHost *This, MonoDomain *domain,
         if (methodname != get_hresult)
         {
             /* Map the exception to an HRESULT. */
-            hr = RuntimeHost_Invoke(This, domain, "mscorlib", "System", "Exception", get_hresult,
+            hr = RuntimeHost_Invoke(This, domain, NULL, "System", "Exception", get_hresult,
                 exc, NULL, 0, &hr_object);
             if (SUCCEEDED(hr))
                 hr = *(HRESULT*)mono_object_unbox(hr_object);
@@ -401,7 +356,7 @@ static HRESULT RuntimeHost_GetObjectForIUnknown(RuntimeHost *This, MonoDomain *d
     MonoObject *result;
 
     args[0] = &unk;
-    hr = RuntimeHost_Invoke(This, domain, "mscorlib", "System.Runtime.InteropServices", "Marshal", "GetObjectForIUnknown",
+    hr = RuntimeHost_Invoke(This, domain, NULL, "System.Runtime.InteropServices", "Marshal", "GetObjectForIUnknown",
         NULL, args, 1, &result);
 
     if (SUCCEEDED(hr))
@@ -466,7 +421,7 @@ static HRESULT RuntimeHost_AddDomain(RuntimeHost *This, const WCHAR *name, IUnkn
         args[2] = NULL;
     }
 
-    res = RuntimeHost_Invoke(This, domain, "mscorlib", "System", "AppDomain", "CreateDomain",
+    res = RuntimeHost_Invoke(This, domain, NULL, "System", "AppDomain", "CreateDomain",
         NULL, args, 3, &new_domain);
 
     if (FAILED(res))
@@ -480,7 +435,7 @@ static HRESULT RuntimeHost_AddDomain(RuntimeHost *This, const WCHAR *name, IUnkn
      * Instead, do a vcall.
      */
 
-    res = RuntimeHost_VirtualInvoke(This, domain, "mscorlib", "System", "AppDomain", "get_Id",
+    res = RuntimeHost_VirtualInvoke(This, domain, NULL, "System", "AppDomain", "get_Id",
         new_domain, NULL, 0, &id);
 
     if (FAILED(res))
@@ -501,7 +456,7 @@ static HRESULT RuntimeHost_GetIUnknownForDomain(RuntimeHost *This, MonoDomain *d
     MonoObject *appdomain_object;
     IUnknown *unk;
 
-    hr = RuntimeHost_Invoke(This, domain, "mscorlib", "System", "AppDomain", "get_CurrentDomain",
+    hr = RuntimeHost_Invoke(This, domain, NULL, "System", "AppDomain", "get_CurrentDomain",
         NULL, NULL, 0, &appdomain_object);
 
     if (SUCCEEDED(hr))
@@ -533,7 +488,7 @@ void RuntimeHost_ExitProcess(RuntimeHost *This, INT exitcode)
 
     args[0] = &exitcode;
     args[1] = NULL;
-    RuntimeHost_Invoke(This, domain, "mscorlib", "System", "Environment", "Exit",
+    RuntimeHost_Invoke(This, domain, NULL, "System", "Environment", "Exit",
         NULL, args, 1, &dummy);
 
     ERR("Process should have exited\n");
@@ -1101,7 +1056,7 @@ HRESULT RuntimeHost_GetIUnknownForObject(RuntimeHost *This, MonoObject *obj,
 
     domain = mono_object_get_domain(obj);
 
-    hr = RuntimeHost_Invoke(This, domain, "mscorlib", "System.Runtime.InteropServices", "Marshal", "GetIUnknownForObject",
+    hr = RuntimeHost_Invoke(This, domain, NULL, "System.Runtime.InteropServices", "Marshal", "GetIUnknownForObject",
         NULL, (void**)&obj, 1, &result);
 
     if (SUCCEEDED(hr))
@@ -1436,6 +1391,8 @@ static void FixupVTable(HMODULE hmodule)
 
 __int32 WINAPI _CorExeMain(void)
 {
+    static const WCHAR dotconfig[] = {'.','c','o','n','f','i','g',0};
+    static const WCHAR scW[] = {';',0};
     int exit_code;
     int argc;
     char **argv;
@@ -1443,12 +1400,14 @@ __int32 WINAPI _CorExeMain(void)
     MonoImage *image;
     MonoImageOpenStatus status;
     MonoAssembly *assembly=NULL;
-    WCHAR filename[MAX_PATH];
+    WCHAR filename[MAX_PATH], config_file[MAX_PATH], *temp, **priv_path;
+    SIZE_T config_file_dir_size;
     char *filenameA;
     ICLRRuntimeInfo *info;
     RuntimeHost *host;
+    parsed_config_file parsed_config;
     HRESULT hr;
-    int i;
+    int i, number_of_private_paths = 0;
 
     get_utf8_args(&argc, &argv);
 
@@ -1468,6 +1427,33 @@ __int32 WINAPI _CorExeMain(void)
 
     FixupVTable(GetModuleHandleW(NULL));
 
+    wcscpy(config_file, filename);
+    wcscat(config_file, dotconfig);
+
+    hr = parse_config_file(config_file, &parsed_config);
+    if (SUCCEEDED(hr) && parsed_config.private_path && parsed_config.private_path[0])
+    {
+        for(i = 0; parsed_config.private_path[i] != 0; i++)
+            if (parsed_config.private_path[i] == ';') number_of_private_paths++;
+        if (parsed_config.private_path[wcslen(parsed_config.private_path) - 1] != ';') number_of_private_paths++;
+        config_file_dir_size = (wcsrchr(config_file, '\\') - config_file) + 1;
+        priv_path = HeapAlloc(GetProcessHeap(), 0, (number_of_private_paths + 1) * sizeof(WCHAR *));
+        /* wcstok ignores trailing semicolons */
+        temp = wcstok(parsed_config.private_path, scW);
+        for (i = 0; i < number_of_private_paths; i++)
+        {
+            priv_path[i] = HeapAlloc(GetProcessHeap(), 0, (config_file_dir_size + wcslen(temp) + 1) * sizeof(WCHAR));
+            memcpy(priv_path[i], config_file, config_file_dir_size * sizeof(WCHAR));
+            wcscpy(priv_path[i] + config_file_dir_size, temp);
+            temp = wcstok(NULL, scW);
+        }
+        priv_path[number_of_private_paths] = NULL;
+        if (InterlockedCompareExchangePointer((void **)&private_path, priv_path, NULL))
+            ERR("private_path was already set\n");
+    }
+
+    free_parsed_config_file(&parsed_config);
+
     hr = get_runtime_info(filename, NULL, NULL, NULL, 0, 0, FALSE, &info);
 
     if (SUCCEEDED(hr))
@@ -1475,15 +1461,7 @@ __int32 WINAPI _CorExeMain(void)
         hr = ICLRRuntimeInfo_GetRuntimeHost(info, &host);
 
         if (SUCCEEDED(hr))
-        {
-            WCHAR config_file[MAX_PATH];
-            static const WCHAR dotconfig[] = {'.','c','o','n','f','i','g',0};
-
-            lstrcpyW(config_file, filename);
-            lstrcatW(config_file, dotconfig);
-
             hr = RuntimeHost_GetDefaultDomain(host, config_file, &domain);
-        }
 
         if (SUCCEEDED(hr))
         {
@@ -1504,8 +1482,6 @@ __int32 WINAPI _CorExeMain(void)
                 ERR("couldn't load %s, status=%d\n", debugstr_w(filename), status);
                 exit_code = -1;
             }
-
-            RuntimeHost_DeleteDomain(host, domain);
         }
         else
             exit_code = -1;
@@ -1591,8 +1567,6 @@ HRESULT RuntimeHost_Construct(CLRRuntimeInfo *runtime_version, RuntimeHost** res
 
     This->ref = 1;
     This->version = runtime_version;
-    list_init(&This->domains);
-    This->default_domain = NULL;
     InitializeCriticalSection(&This->lock);
     This->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": RuntimeHost.lock");
 
@@ -1845,6 +1819,7 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
             MonoClass *klass;
             MonoObject *result;
             MonoDomain *prev_domain;
+            MonoImageOpenStatus status;
             IUnknown *unk = NULL;
             char *filenameA, *ns;
             char *classA;
@@ -1854,11 +1829,11 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
             prev_domain = domain_attach(domain);
 
             filenameA = WtoA(filename);
-            assembly = mono_domain_assembly_open(domain, filenameA);
+            assembly = mono_assembly_open(filenameA, &status);
             HeapFree(GetProcessHeap(), 0, filenameA);
             if (!assembly)
             {
-                ERR("Cannot open assembly %s\n", filenameA);
+                ERR("Cannot open assembly %s, status=%i\n", filenameA, status);
                 domain_restore(prev_domain);
                 goto cleanup;
             }

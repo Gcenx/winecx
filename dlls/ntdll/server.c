@@ -81,6 +81,7 @@
 #include "wine/server.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
+#include "esync.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(server);
 
@@ -119,14 +120,14 @@ sigset_t server_block_set;  /* signals to block during server calls */
 static int fd_socket = -1;  /* socket to exchange file descriptors with the server */
 static pid_t server_pid;
 
-static RTL_CRITICAL_SECTION fd_cache_section;
+RTL_CRITICAL_SECTION fd_cache_section;
 static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
 {
     0, 0, &fd_cache_section,
     { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
       0, 0, { (DWORD_PTR)(__FILE__ ": fd_cache_section") }
 };
-static RTL_CRITICAL_SECTION fd_cache_section = { &critsect_debug, -1, 0, 0, 0, 0 };
+RTL_CRITICAL_SECTION fd_cache_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 /* atomically exchange a 64-bit value */
 static inline LONG64 interlocked_xchg64( LONG64 * HOSTPTR dest, LONG64 val )
@@ -391,6 +392,7 @@ BOOL invoke_apc( const apc_call_t *call, apc_result_t *result )
     BOOL user_apc = FALSE;
     SIZE_T size;
     void *addr;
+    pe_image_info_t image_info;
 
     memset( result, 0, sizeof(*result) );
 
@@ -429,10 +431,11 @@ BOOL invoke_apc( const apc_call_t *call, apc_result_t *result )
         size = call->virtual_alloc.size;
         if ((ULONG_PTR)addr == call->virtual_alloc.addr && size == call->virtual_alloc.size)
         {
-            result->virtual_alloc.status = NtAllocateVirtualMemory( NtCurrentProcess(), &addr,
-                                                                    call->virtual_alloc.zero_bits, &size,
-                                                                    call->virtual_alloc.op_type,
-                                                                    call->virtual_alloc.prot );
+            result->virtual_alloc.status = virtual_alloc_aligned( &addr,
+                                                                  call->virtual_alloc.zero_bits_64, &size,
+                                                                  call->virtual_alloc.op_type,
+                                                                  call->virtual_alloc.prot,
+                                                                  0 );
             result->virtual_alloc.addr = wine_server_client_ptr( addr );
             result->virtual_alloc.size = size;
         }
@@ -534,11 +537,12 @@ BOOL invoke_apc( const apc_call_t *call, apc_result_t *result )
         {
             LARGE_INTEGER offset;
             offset.QuadPart = call->map_view.offset;
-            result->map_view.status = NtMapViewOfSection( wine_server_ptr_handle(call->map_view.handle),
-                                                          NtCurrentProcess(), &addr,
-                                                          call->map_view.zero_bits, 0,
-                                                          &offset, &size, ViewShare,
-                                                          call->map_view.alloc_type, call->map_view.prot );
+            result->map_view.status = virtual_map_section( wine_server_ptr_handle(call->map_view.handle),
+                                                           &addr,
+                                                           call->map_view.zero_bits_64, 0,
+                                                           &offset, &size,
+                                                           call->map_view.alloc_type, call->map_view.prot,
+                                                           &image_info );
             result->map_view.addr = wine_server_client_ptr( addr );
             result->map_view.size = size;
         }
@@ -757,7 +761,7 @@ void CDECL wine_server_send_fd( int fd )
  *
  * Receive a file descriptor passed from the server.
  */
-static int receive_fd( obj_handle_t *handle )
+int receive_fd( obj_handle_t *handle )
 {
     struct iovec vec;
     struct msghdr msghdr;
@@ -1140,7 +1144,7 @@ static int setup_config_dir(void)
 
     if (chdir( config_dir ) == -1)
     {
-        if (errno != ENOENT) fatal_perror( "chdir to %s\n", config_dir );
+        if (errno != ENOENT) fatal_perror( "chdir to %s", config_dir );
 
         if ((p = strrchr( config_dir, '/' )) && p != config_dir)
         {
@@ -1157,7 +1161,7 @@ static int setup_config_dir(void)
         }
 
         mkdir( config_dir, 0777 );
-        if (chdir( config_dir ) == -1) fatal_perror( "chdir to %s\n", config_dir );
+        if (chdir( config_dir ) == -1) fatal_perror( "chdir to %s", config_dir );
 
         MESSAGE( "wine: created the configuration directory '%s'\n", config_dir );
     }
@@ -1165,7 +1169,7 @@ static int setup_config_dir(void)
     if (mkdir( "dosdevices", 0777 ) == -1)
     {
         if (errno == EEXIST) goto done;
-        fatal_perror( "cannot create %s/dosdevices\n", config_dir );
+        fatal_perror( "cannot create %s/dosdevices", config_dir );
     }
 
     /* create the drive symlinks */
@@ -1304,11 +1308,9 @@ static int server_connect(void)
 
 
 #ifdef __APPLE__
-#define cpu_type_t mach_cpu_type_t
 #include <mach/mach.h>
 #include <mach/mach_error.h>
 #include <servers/bootstrap.h>
-#undef cpu_type_t
 
 /* send our task port to the server */
 static void send_server_task_port(void)

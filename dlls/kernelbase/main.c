@@ -25,12 +25,31 @@
 #include "appmodel.h"
 #include "shlwapi.h"
 #include "perflib.h"
-
-#include "wine/debug.h"
-#include "wine/heap.h"
 #include "winternl.h"
 
+#include "wine/debug.h"
+#include "kernelbase.h"
+#include "wine/heap.h"
+
 WINE_DEFAULT_DEBUG_CHANNEL(kernelbase);
+
+
+BOOL is_wow64 = FALSE;
+
+/***********************************************************************
+ *           DllMain
+ */
+BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
+{
+    if (reason == DLL_PROCESS_ATTACH)
+    {
+        DisableThreadLibraryCalls( hinst );
+        IsWow64Process( GetCurrentProcess(), &is_wow64 );
+        init_locale();
+        init_startup_info( NtCurrentTeb()->Peb->ProcessParameters );
+    }
+    return TRUE;
+}
 
 
 /*************************************************************
@@ -38,7 +57,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(kernelbase);
  */
 BOOL WINAPI DllMainCRTStartup( HANDLE inst, DWORD reason, LPVOID reserved )
 {
-    return TRUE;
+    return DllMain( inst, reason, reserved );
 }
 
 
@@ -187,23 +206,13 @@ BOOL WINAPI QuirkIsEnabled3(void *unk1, void *unk2)
 BOOL WINAPI WaitOnAddress(volatile void *addr, void *cmp, SIZE_T size, DWORD timeout)
 {
     LARGE_INTEGER to;
-    NTSTATUS status;
 
     if (timeout != INFINITE)
     {
         to.QuadPart = -(LONGLONG)timeout * 10000;
-        status = RtlWaitOnAddress((const void *)addr, cmp, size, &to);
+        return set_ntstatus( RtlWaitOnAddress( (const void *)addr, cmp, size, &to ));
     }
-    else
-        status = RtlWaitOnAddress((const void *)addr, cmp, size, NULL);
-
-    if (status != STATUS_SUCCESS)
-    {
-        SetLastError( RtlNtStatusToDosError(status) );
-        return FALSE;
-    }
-
-    return TRUE;
+    return set_ntstatus( RtlWaitOnAddress( (const void *)addr, cmp, size, NULL ));
 }
 
 HRESULT WINAPI QISearch(void *base, const QITAB *table, REFIID riid, void **obj)

@@ -25,6 +25,7 @@
 #include "dbghelp_private.h"
 #include "wine/winbase16.h"
 #include "winternl.h"
+#include "wine/library.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
@@ -42,7 +43,11 @@ static ADDRESS_MODE get_selector_type(HANDLE hThread, const CONTEXT* ctx, WORD s
     /* null or system selector */
     if (!(sel & 4) || ((sel >> 3) < 17)) return AddrModeFlat;
     if (hThread && GetThreadSelectorEntry(hThread, sel, &le))
+    {
+        if (wine_ldt_get_base(&le) == 0 && wine_ldt_get_limit(&le) == 0xffffffff)
+            return AddrModeFlat;
         return le.HighWord.Bits.Default_Big ? AddrMode1632 : AddrMode1616;
+    }
     /* selector doesn't exist */
     return -1;
 }

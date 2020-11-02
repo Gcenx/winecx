@@ -39,7 +39,9 @@
 #include "shlwapi.h"
 #include "sddl.h"
 
+#include "kernelbase.h"
 #include "wine/debug.h"
+#include "wine/exception.h"
 #include "wine/heap.h"
 #include "wine/list.h"
 
@@ -107,7 +109,7 @@ static struct list reg_mui_cache = LIST_INIT(reg_mui_cache); /* MRU */
 static unsigned int reg_mui_cache_count;
 #define REG_MUI_CACHE_SIZE 8
 
-static const BOOL is_win64 = (sizeof(void *) > sizeof(int));
+#define IS_OPTION_TRUE(ch) ((ch) == 'y' || (ch) == 'Y' || (ch) == 't' || (ch) == 'T' || (ch) == '1')
 
 /* check if value type needs string conversion (Ansi<->Unicode) */
 static inline BOOL is_string( DWORD type )
@@ -916,7 +918,7 @@ LSTATUS WINAPI RegQueryInfoKeyA( HKEY hkey, LPSTR class, LPDWORD class_len, LPDW
     NTSTATUS status;
     char buffer[256], *buf_ptr = buffer;
     KEY_FULL_INFORMATION *info = (KEY_FULL_INFORMATION *)buffer;
-    DWORD total_size, len;
+    DWORD total_size;
 
     TRACE( "(%p,%p,%d,%p,%p,%p,%p,%p,%p,%p,%p)\n", hkey, class, class_len ? *class_len : 0,
            reserved, subkeys, max_subkey, values, max_value, max_data, security, modif );
@@ -941,19 +943,21 @@ LSTATUS WINAPI RegQueryInfoKeyA( HKEY hkey, LPSTR class, LPDWORD class_len, LPDW
 
         if (status) goto done;
 
-        len = 0;
-        if (class && class_len) len = *class_len;
-        RtlUnicodeToMultiByteN( class, len, class_len,
-                                (WCHAR *)(buf_ptr + info->ClassOffset), info->ClassLength );
-        if (len)
+        if (class && class_len && *class_len)
         {
-            if (*class_len + 1 > len)
+            DWORD len = *class_len;
+            RtlUnicodeToMultiByteN( class, len, class_len,
+                                    (WCHAR *)(buf_ptr + info->ClassOffset), info->ClassLength );
+            if (*class_len == len)
             {
                 status = STATUS_BUFFER_OVERFLOW;
                 *class_len -= 1;
             }
             class[*class_len] = 0;
         }
+        else if (class_len)
+            RtlUnicodeToMultiByteSize( class_len,
+                                       (WCHAR *)(buf_ptr + info->ClassOffset), info->ClassLength );
     }
     else status = STATUS_SUCCESS;
 
@@ -1367,13 +1371,12 @@ static DWORD query_perf_data(const WCHAR *query, DWORD *type, void *data, DWORD 
     pdb->HeaderLength = sizeof(*pdb);
     pdb->NumObjectTypes = 0;
     pdb->DefaultObject = 0;
-    QueryPerformanceCounter(&pdb->PerfTime);
-    QueryPerformanceFrequency(&pdb->PerfFreq);
+    NtQueryPerformanceCounter( &pdb->PerfTime, &pdb->PerfFreq );
 
     data = pdb + 1;
     pdb->SystemNameOffset = sizeof(*pdb);
     pdb->SystemNameLength = (data_size - sizeof(*pdb)) / sizeof(WCHAR);
-    if (!GetComputerNameW(data, &pdb->SystemNameLength))
+    if (!GetComputerNameExW(ComputerNameNetBIOS, data, &pdb->SystemNameLength))
         return ERROR_MORE_DATA;
 
     pdb->SystemNameLength++;
@@ -2262,12 +2265,10 @@ LSTATUS WINAPI RegLoadKeyA( HKEY hkey, LPCSTR subkey, LPCSTR filename )
  */
 LSTATUS WINAPI RegSaveKeyExW( HKEY hkey, LPCWSTR file, SECURITY_ATTRIBUTES *sa, DWORD flags )
 {
-    static const WCHAR format[] =
-        {'r','e','g','%','0','4','x','.','t','m','p',0};
-    WCHAR buffer[MAX_PATH];
-    int count = 0;
-    LPWSTR nameW;
-    DWORD ret, err;
+    UNICODE_STRING nameW;
+    OBJECT_ATTRIBUTES attr;
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
     HANDLE handle;
 
     TRACE( "(%p,%s,%p)\n", hkey, debugstr_w(file), sa );
@@ -2275,39 +2276,20 @@ LSTATUS WINAPI RegSaveKeyExW( HKEY hkey, LPCWSTR file, SECURITY_ATTRIBUTES *sa, 
     if (!file || !*file) return ERROR_INVALID_PARAMETER;
     if (!(hkey = get_special_root_hkey( hkey, 0 ))) return ERROR_INVALID_HANDLE;
 
-    err = GetLastError();
-    GetFullPathNameW( file, ARRAY_SIZE( buffer ), buffer, &nameW );
+    if ((status = RtlDosPathNameToNtPathName_U_WithStatus( file, &nameW, NULL, NULL )))
+        return RtlNtStatusToDosError( status );
 
-    for (;;)
+    InitializeObjectAttributes( &attr, &nameW, OBJ_CASE_INSENSITIVE, 0, sa );
+    status = NtCreateFile( &handle, GENERIC_WRITE | SYNCHRONIZE, &attr, &io, NULL, FILE_NON_DIRECTORY_FILE,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OVERWRITE_IF,
+                           FILE_SYNCHRONOUS_IO_NONALERT, NULL, 0 );
+    RtlFreeUnicodeString( &nameW );
+    if (!status)
     {
-        swprintf( nameW, 16, format, count++ );
-        handle = CreateFileW( buffer, GENERIC_WRITE, 0, NULL,
-                            CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0 );
-        if (handle != INVALID_HANDLE_VALUE) break;
-        if ((ret = GetLastError()) != ERROR_FILE_EXISTS) goto done;
-
-        /* Something gone haywire ? Please report if this happens abnormally */
-        if (count >= 100)
-            MESSAGE("Wow, we are already fiddling with a temp file %s with an ordinal as high as %d !\nYou might want to delete all corresponding temp files in that directory.\n", debugstr_w(buffer), count);
+        status = NtSaveKey( hkey, handle );
+        CloseHandle( handle );
     }
-
-    ret = RtlNtStatusToDosError(NtSaveKey(hkey, handle));
-
-    CloseHandle( handle );
-    if (!ret)
-    {
-        if (!MoveFileExW( buffer, file, MOVEFILE_REPLACE_EXISTING ))
-        {
-            ERR( "Failed to move %s to %s\n", debugstr_w(buffer),
-	        debugstr_w(file) );
-            ret = GetLastError();
-        }
-    }
-    if (ret) DeleteFileW( buffer );
-
-done:
-    SetLastError( err );  /* restore last error code */
-    return ret;
+    return RtlNtStatusToDosError( status );
 }
 
 
@@ -2687,10 +2669,10 @@ static LONG load_mui_string(const WCHAR *file_name, UINT res_id, WCHAR *buffer, 
         return ERROR_NOT_ENOUGH_MEMORY;
     GetFullPathNameW(file_name, size, full_name, NULL);
 
-    EnterCriticalSection(&reg_mui_cs);
+    RtlEnterCriticalSection(&reg_mui_cs);
     size = reg_mui_cache_get(full_name, res_id, &string);
     if (!size) {
-        LeaveCriticalSection(&reg_mui_cs);
+        RtlLeaveCriticalSection(&reg_mui_cs);
 
         /* Load the file */
         hModule = LoadLibraryExW(full_name, NULL,
@@ -2705,9 +2687,9 @@ static LONG load_mui_string(const WCHAR *file_name, UINT res_id, WCHAR *buffer, 
             goto cleanup;
         }
 
-        EnterCriticalSection(&reg_mui_cs);
+        RtlEnterCriticalSection(&reg_mui_cs);
         reg_mui_cache_put(full_name, res_id, string, size);
-        LeaveCriticalSection(&reg_mui_cs);
+        RtlLeaveCriticalSection(&reg_mui_cs);
     }
     *req_chars = size + 1;
 
@@ -2739,7 +2721,7 @@ cleanup:
     if (hModule)
         FreeLibrary(hModule);
     else
-        LeaveCriticalSection(&reg_mui_cs);
+        RtlLeaveCriticalSection(&reg_mui_cs);
     heap_free(full_name);
     return result;
 }
@@ -3065,71 +3047,252 @@ LSTATUS WINAPI RegLoadAppKeyW(const WCHAR *file, HKEY *result, REGSAM sam, DWORD
     return ERROR_SUCCESS;
 }
 
-/******************************************************************************
- *           EnumDynamicTimeZoneInformation   (kernelbase.@)
+
+/***********************************************************************
+ * DnsHostnameToComputerNameExW   (kernelbase.@)
+ *
+ * FIXME: how is this different from the non-Ex function?
  */
-DWORD WINAPI EnumDynamicTimeZoneInformation(const DWORD index,
-    DYNAMIC_TIME_ZONE_INFORMATION *dtzi)
+BOOL WINAPI DECLSPEC_HOTPATCH DnsHostnameToComputerNameExW( const WCHAR *hostname, WCHAR *computername,
+                                                            DWORD *size )
 {
-    static const WCHAR mui_stdW[] = { 'M','U','I','_','S','t','d',0 };
-    static const WCHAR mui_dltW[] = { 'M','U','I','_','D','l','t',0 };
-    WCHAR keyname[ARRAY_SIZE(dtzi->TimeZoneKeyName)];
-    HKEY time_zones_key, sub_key;
-    WCHAR sysdir[MAX_PATH];
-    LSTATUS ret;
-    DWORD size;
-    struct tz_reg_data
+    static const WCHAR allowed[] = L"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&')(-_{}";
+    WCHAR buffer[MAX_COMPUTERNAME_LENGTH + 1];
+    DWORD i, len;
+
+    lstrcpynW( buffer, hostname, MAX_COMPUTERNAME_LENGTH + 1 );
+    len = lstrlenW( buffer );
+    if (*size < len + 1)
     {
-        LONG bias;
-        LONG std_bias;
-        LONG dlt_bias;
-        SYSTEMTIME std_date;
-        SYSTEMTIME dlt_date;
-    } tz_data;
+        *size = len;
+        SetLastError( ERROR_MORE_DATA );
+        return FALSE;
+    }
+    *size = len;
+    if (!computername) return FALSE;
+    for (i = 0; i < len; i++)
+    {
+        if (buffer[i] >= 'a' && buffer[i] <= 'z') computername[i] = buffer[i] + 'A' - 'a';
+        else computername[i] = wcschr( allowed, buffer[i] ) ? buffer[i] : '_';
+    }
+    computername[len] = 0;
+    return TRUE;
+}
 
-    if (!dtzi)
-        return ERROR_INVALID_PARAMETER;
 
-    ret = RegOpenKeyExA( HKEY_LOCAL_MACHINE,
-                "Software\\Microsoft\\Windows NT\\CurrentVersion\\Time Zones", 0,
-                KEY_ENUMERATE_SUB_KEYS|KEY_QUERY_VALUE, &time_zones_key );
-    if (ret) return ret;
+/***********************************************************************
+ * GetComputerNameExA   (kernelbase.@)
+ */
+BOOL WINAPI GetComputerNameExA( COMPUTER_NAME_FORMAT type, char *name, DWORD *len )
+{
+    BOOL ret = FALSE;
+    DWORD lenA, lenW = 0;
+    WCHAR *buffer;
 
-    sub_key = NULL;
-    size = ARRAY_SIZE(keyname);
-    ret = RegEnumKeyExW( time_zones_key, index, keyname, &size, NULL, NULL, NULL, NULL );
-    if (ret) goto cleanup;
+    GetComputerNameExW( type, NULL, &lenW );
+    if (GetLastError() != ERROR_MORE_DATA) return FALSE;
 
-    ret = RegOpenKeyExW( time_zones_key, keyname, 0, KEY_QUERY_VALUE, &sub_key );
-    if (ret) goto cleanup;
-
-    GetSystemDirectoryW(sysdir, ARRAY_SIZE(sysdir));
-    size = sizeof(dtzi->StandardName);
-    ret = RegLoadMUIStringW( sub_key, mui_stdW, dtzi->StandardName, size, NULL, 0, sysdir );
-    if (ret) goto cleanup;
-
-    size = sizeof(dtzi->DaylightName);
-    ret = RegLoadMUIStringW( sub_key, mui_dltW, dtzi->DaylightName, size, NULL, 0, sysdir );
-    if (ret) goto cleanup;
-
-    size = sizeof(tz_data);
-    ret = RegQueryValueExA( sub_key, "TZI", NULL, NULL, (BYTE*)&tz_data, &size );
-    if (ret) goto cleanup;
-
-    dtzi->Bias = tz_data.bias;
-    dtzi->StandardBias = tz_data.std_bias;
-    dtzi->DaylightBias = tz_data.dlt_bias;
-    memcpy( &dtzi->StandardDate, &tz_data.std_date, sizeof(tz_data.std_date) );
-    memcpy( &dtzi->DaylightDate, &tz_data.dlt_date, sizeof(tz_data.dlt_date) );
-    lstrcpyW( dtzi->TimeZoneKeyName, keyname );
-    dtzi->DynamicDaylightTimeDisabled = FALSE;
-
-cleanup:
-    if (sub_key) RegCloseKey( sub_key );
-    RegCloseKey( time_zones_key );
+    if (!(buffer = HeapAlloc( GetProcessHeap(), 0, lenW * sizeof(WCHAR) )))
+    {
+        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        return FALSE;
+    }
+    if (GetComputerNameExW( type, buffer, &lenW ))
+    {
+        lenA = WideCharToMultiByte( CP_ACP, 0, buffer, -1, NULL, 0, NULL, NULL );
+        if (lenA > *len)
+        {
+            *len = lenA;
+            SetLastError( ERROR_MORE_DATA );
+        }
+        else
+        {
+            WideCharToMultiByte( CP_ACP, 0, buffer, -1, name, *len, NULL, NULL );
+            *len = lenA - 1;
+            ret = TRUE;
+        }
+    }
+    HeapFree( GetProcessHeap(), 0, buffer );
     return ret;
 }
 
+
+/***********************************************************************
+ * GetComputerNameExW   (kernelbase.@)
+ */
+BOOL WINAPI GetComputerNameExW( COMPUTER_NAME_FORMAT type, WCHAR *name, DWORD *len )
+{
+    const WCHAR *keyname, *valuename;
+    LRESULT ret;
+    HKEY key;
+
+    switch (type)
+    {
+    case ComputerNameNetBIOS:
+    case ComputerNamePhysicalNetBIOS:
+        keyname = L"System\\CurrentControlSet\\Control\\ComputerName\\ActiveComputerName";
+        valuename = L"ComputerName";
+        break;
+    case ComputerNameDnsHostname:
+    case ComputerNamePhysicalDnsHostname:
+        keyname = L"System\\CurrentControlSet\\Services\\Tcpip\\Parameters";
+        valuename = L"Hostname";
+        break;
+    case ComputerNameDnsDomain:
+    case ComputerNamePhysicalDnsDomain:
+        keyname = L"System\\CurrentControlSet\\Services\\Tcpip\\Parameters";
+        valuename = L"Domain";
+        break;
+    case ComputerNameDnsFullyQualified:
+    case ComputerNamePhysicalDnsFullyQualified:
+    {
+        WCHAR *domain, buffer[256];
+        DWORD size = ARRAY_SIZE(buffer) - 1;
+
+        if (!GetComputerNameExW( ComputerNameDnsHostname, buffer, &size )) return FALSE;
+        domain = buffer + lstrlenW(buffer);
+        *domain++ = '.';
+        size = ARRAY_SIZE(buffer) - (domain - buffer);
+        if (!GetComputerNameExW( ComputerNameDnsDomain, domain, &size )) return FALSE;
+        if (!*domain) domain[-1] = 0;
+        size = lstrlenW(buffer);
+        if (name && size < *len)
+        {
+            if (name) lstrcpyW( name, buffer );
+            *len = size;
+            return TRUE;
+        }
+        *len = size + 1;
+        SetLastError( ERROR_MORE_DATA );
+        return FALSE;
+    }
+    default:
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    if (!(ret = RegOpenKeyExW( HKEY_LOCAL_MACHINE, keyname, 0, KEY_READ, &key )))
+    {
+        DWORD size = *len * sizeof(WCHAR);
+        ret = RegQueryValueExW( key, valuename, NULL, NULL, (BYTE *)name, &size );
+        if (!name) ret = ERROR_MORE_DATA;
+        else if (!ret) size -= sizeof(WCHAR);
+        *len = size / sizeof(WCHAR);
+        RegCloseKey( key );
+    }
+    TRACE("-> %lu %s\n", ret, debugstr_w(name) );
+    if (ret) SetLastError( ret );
+    return !ret;
+}
+
+
+/***********************************************************************
+ * SetComputerNameA   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH SetComputerNameA( const char *name )
+{
+    BOOL ret;
+    DWORD len = MultiByteToWideChar( CP_ACP, 0, name, -1, NULL, 0 );
+    WCHAR *nameW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+
+    MultiByteToWideChar( CP_ACP, 0, name, -1, nameW, len );
+    ret = SetComputerNameExW( ComputerNamePhysicalNetBIOS, nameW );
+    HeapFree( GetProcessHeap(), 0, nameW );
+    return ret;
+}
+
+
+/***********************************************************************
+ * SetComputerNameW   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH SetComputerNameW( const WCHAR *name )
+{
+    return SetComputerNameExW( ComputerNamePhysicalNetBIOS, name );
+}
+
+
+/***********************************************************************
+ * SetComputerNameExA   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH SetComputerNameExA( COMPUTER_NAME_FORMAT type, const char *name )
+{
+    BOOL ret;
+    DWORD len = MultiByteToWideChar( CP_ACP, 0, name, -1, NULL, 0 );
+    WCHAR *nameW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+
+    MultiByteToWideChar( CP_ACP, 0, name, -1, nameW, len );
+    ret = SetComputerNameExW( type, nameW );
+    HeapFree( GetProcessHeap(), 0, nameW );
+    return ret;
+}
+
+
+/***********************************************************************
+ * SetComputerNameExW   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH SetComputerNameExW( COMPUTER_NAME_FORMAT type, const WCHAR *name )
+{
+    WCHAR buffer[MAX_COMPUTERNAME_LENGTH + 1];
+    DWORD size;
+    HKEY key;
+    LRESULT ret;
+
+    TRACE( "%u %s\n", type, debugstr_w( name ));
+
+    switch (type)
+    {
+    case ComputerNameDnsHostname:
+    case ComputerNamePhysicalDnsHostname:
+        ret = RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\Tcpip\\Parameters",
+                               0, NULL, 0, KEY_ALL_ACCESS, NULL, &key, NULL );
+        if (ret) break;
+        ret = RegSetValueExW( key, L"Hostname", 0, REG_SZ,
+                              (BYTE *)name, (lstrlenW(name) + 1) * sizeof(WCHAR) );
+        RegCloseKey( key );
+        /* fall through */
+
+    case ComputerNameNetBIOS:
+    case ComputerNamePhysicalNetBIOS:
+        /* @@ Wine registry key: HKCU\Software\Wine\Network */
+        if (!RegOpenKeyExW( HKEY_CURRENT_USER, L"Software\\Wine\\Network", 0, KEY_READ, &key ))
+        {
+            BOOL use_dns = TRUE;
+            size = sizeof(buffer);
+            if (!RegQueryValueExW( key, L"UseDnsComputerName", NULL, NULL, (BYTE *)buffer, &size ))
+                use_dns = IS_OPTION_TRUE( buffer[0] );
+            RegCloseKey( key );
+            if (!use_dns)
+            {
+                ret = ERROR_ACCESS_DENIED;
+                break;
+            }
+        }
+        size = ARRAY_SIZE( buffer );
+        if (!DnsHostnameToComputerNameExW( name, buffer, &size )) return FALSE;
+        ret = RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Control\\ComputerName\\ComputerName",
+                               0, NULL, 0, KEY_ALL_ACCESS, NULL, &key, NULL );
+        if (ret) break;
+        ret = RegSetValueExW( key, L"ComputerName", 0, REG_SZ,
+                              (BYTE *)buffer, (lstrlenW(buffer) + 1) * sizeof(WCHAR) );
+        RegCloseKey( key );
+        break;
+
+    case ComputerNameDnsDomain:
+    case ComputerNamePhysicalDnsDomain:
+        ret = RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"System\\CurrentControlSet\\Services\\Tcpip\\Parameters",
+                               0, NULL, 0, KEY_ALL_ACCESS, NULL, &key, NULL );
+        if (ret) break;
+        ret = RegSetValueExW( key, L"Domain", 0, REG_SZ,
+                              (BYTE *)name, (lstrlenW(name) + 1) * sizeof(WCHAR) );
+        RegCloseKey( key );
+        break;
+    default:
+        ret = ERROR_INVALID_PARAMETER;
+        break;
+    }
+    if (ret) SetLastError( ret );
+    return !ret;
+}
 
 struct USKEY
 {
@@ -3434,8 +3597,16 @@ LONG WINAPI SHRegWriteUSValueW(HUSKEY hUSKey, const WCHAR *value, DWORD type, vo
 
     TRACE("%p, %s, %d, %p, %d, %#x\n", hUSKey, debugstr_w(value), type, data, data_len, flags);
 
-    if (!hUSKey || IsBadWritePtr(hUSKey, sizeof(struct USKEY)) || !(flags & (SHREGSET_FORCE_HKCU|SHREGSET_FORCE_HKLM)))
+    __TRY
+    {
+        dummy = hKey->HKCUkey || hKey->HKLMkey;
+    }
+    __EXCEPT_PAGE_FAULT
+    {
         return ERROR_INVALID_PARAMETER;
+    }
+    __ENDTRY
+    if (!(flags & (SHREGSET_FORCE_HKCU|SHREGSET_FORCE_HKLM))) return ERROR_INVALID_PARAMETER;
 
     if (flags & (SHREGSET_FORCE_HKCU | SHREGSET_HKCU))
     {

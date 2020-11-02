@@ -3041,7 +3041,7 @@ TOOLBAR_AutoSize (TOOLBAR_INFO *infoPtr)
 
     if (!(infoPtr->dwStyle & CCS_NORESIZE))
     {
-        RECT window_rect, parent_rect;
+        RECT window_rect, client_rect, parent_rect, border;
         UINT uPosFlags = SWP_NOZORDER | SWP_NOACTIVATE;
         HWND parent;
         INT  x, y, cx, cy;
@@ -3050,6 +3050,13 @@ TOOLBAR_AutoSize (TOOLBAR_INFO *infoPtr)
 
         if (!parent || !infoPtr->bDoRedraw)
             return 0;
+
+        GetWindowRect(infoPtr->hwndSelf, &window_rect);
+        GetClientRect(infoPtr->hwndSelf, &client_rect);
+        border = window_rect;
+        MapWindowPoints(0, infoPtr->hwndSelf, (POINT *)&border, 2);
+        border.right -= border.left + client_rect.right - client_rect.left;
+        border.bottom -= border.top + client_rect.bottom - client_rect.top;
 
         GetClientRect(parent, &parent_rect);
 
@@ -3061,27 +3068,22 @@ TOOLBAR_AutoSize (TOOLBAR_INFO *infoPtr)
 
         if ((infoPtr->dwStyle & CCS_BOTTOM) == CCS_NOMOVEY)
         {
-            GetWindowRect(infoPtr->hwndSelf, &window_rect);
             MapWindowPoints( 0, parent, (POINT *)&window_rect, 2 );
             y = window_rect.top;
         }
         if ((infoPtr->dwStyle & CCS_BOTTOM) == CCS_BOTTOM)
-        {
-            GetWindowRect(infoPtr->hwndSelf, &window_rect);
             y = parent_rect.bottom - ( window_rect.bottom - window_rect.top);
-        }
 
         if (infoPtr->dwStyle & CCS_NOPARENTALIGN)
             uPosFlags |= SWP_NOMOVE;
-    
-        if (!(infoPtr->dwStyle & CCS_NODIVIDER))
-            cy += GetSystemMetrics(SM_CYEDGE);
 
-        if (infoPtr->dwStyle & WS_BORDER)
-        {
-            cx += 2 * GetSystemMetrics(SM_CXBORDER);
-            cy += 2 * GetSystemMetrics(SM_CYBORDER);
-        }
+        if (!(infoPtr->dwStyle & CCS_NOMOVEY) && !(infoPtr->dwStyle & CCS_NODIVIDER))
+            y += GetSystemMetrics(SM_CYEDGE);
+
+        x += border.left;
+        y += border.top;
+        cx += border.right;
+        cy += border.bottom;
 
         SetWindowPos(infoPtr->hwndSelf, NULL, x, y, cx, cy, uPosFlags);
     }
@@ -5691,7 +5693,7 @@ TOOLBAR_LButtonUp (TOOLBAR_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
 
             if (nButton == infoPtr->nButtonDrag)
             {
-                /* if the button is moved sightly left and we have a
+                /* if the button is moved slightly left and we have a
                  * separator there then remove it */
                 if (pt.x < (btnPtr->rect.left + (btnPtr->rect.right - btnPtr->rect.left)/2))
                 {
@@ -6149,7 +6151,7 @@ static LRESULT TOOLBAR_TTGetDispInfo (TOOLBAR_INFO *infoPtr, NMTTDISPINFOW *lpnm
 
         TRACE("TBN_GETINFOTIPW - got string %s\n", debugstr_w(tbgit.pszText));
 
-        len = lstrlenW(tbgit.pszText);
+        len = tbgit.pszText ? lstrlenW(tbgit.pszText) : 0;
         if (len > ARRAY_SIZE(lpnmtdi->szText) - 1)
         {
             /* need to allocate temporary buffer in infoPtr as there

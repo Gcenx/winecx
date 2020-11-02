@@ -22,7 +22,7 @@
 
 #include "wine/winheader_enter.h"
 
-#include <crtdefs.h>
+#include <corecrt.h>
 
 /* The debug API is not implemented in Winelib.
  * Redirect everything to the regular APIs.

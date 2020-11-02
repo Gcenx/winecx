@@ -34,14 +34,14 @@
 # include <machine/cpu.h>
 #endif
 #ifdef HAVE_MACH_MACHINE_H
-# define cpu_type_t mach_cpu_type_t
 # include <mach/machine.h>
-# undef cpu_type_t
 #endif
 #ifdef HAVE_IOKIT_IOKITLIB_H
-# define cpu_type_t mach_cpu_type_t
+# include <CoreFoundation/CoreFoundation.h>
 # include <IOKit/IOKitLib.h>
-# undef cpu_type_t
+# include <IOKit/pwr_mgt/IOPM.h>
+# include <IOKit/pwr_mgt/IOPMLib.h>
+# include <IOKit/ps/IOPowerSources.h>
 #endif
 
 #include <ctype.h>
@@ -53,6 +53,19 @@
 # include <sys/time.h>
 #endif
 #include <time.h>
+
+#ifdef sun
+/* FIXME:  Unfortunately swapctl can't be used with largefile.... */
+# undef _FILE_OFFSET_BITS
+# define _FILE_OFFSET_BITS 32
+# ifdef HAVE_SYS_RESOURCE_H
+#  include <sys/resource.h>
+# endif
+# ifdef HAVE_SYS_STAT_H
+#  include <sys/stat.h>
+# endif
+# include <sys/swap.h>
+#endif
 
 #define NONAMELESSUNION
 #include "ntstatus.h"
@@ -66,6 +79,7 @@
 #include "ddk/wdm.h"
 
 #ifdef __APPLE__
+#include <mach/mach.h>
 #include <mach/mach_init.h>
 #include <mach/mach_host.h>
 #include <mach/vm_map.h>
@@ -119,7 +133,7 @@ struct smbios_board {
 struct smbios_chassis {
     struct smbios_header hdr;
     BYTE vendor;
-    BYTE shape;
+    BYTE type;
     BYTE version;
     BYTE serial;
     BYTE asset_tag;
@@ -1721,7 +1735,7 @@ static BOOL sysfs_count_list_elements(const char *filename, DWORD *result)
 
 /* for 'data', max_len is the array count. for 'dataex', max_len is in bytes */
 static NTSTATUS create_logical_proc_info(SYSTEM_LOGICAL_PROCESSOR_INFORMATION **data,
-        SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX **dataex, DWORD *max_len)
+        SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX **dataex, DWORD *max_len, DWORD relation)
 {
     static const char core_info[] = "/sys/devices/system/cpu/cpu%u/topology/%s";
     static const char cache_info[] = "/sys/devices/system/cpu/cpu%u/cache/index%u/%s";
@@ -1768,18 +1782,21 @@ static NTSTATUS create_logical_proc_info(SYSTEM_LOGICAL_PROCESSOR_INFORMATION **
                 continue;
             }
 
-            sprintf(name, core_info, i, "physical_package_id");
-            f = fopen(name, "r");
-            if(f)
+            if(relation == RelationAll || relation == RelationProcessorPackage)
             {
-                fscanf(f, "%u", &r);
-                fclose(f);
-            }
-            else r = 0;
-            if(!logical_proc_info_add_by_id(data, dataex, &len, max_len, RelationProcessorPackage, r, (ULONG_PTR)1 << i))
-            {
-                fclose(fcpu_list);
-                return STATUS_NO_MEMORY;
+                sprintf(name, core_info, i, "physical_package_id");
+                f = fopen(name, "r");
+                if(f)
+                {
+                    fscanf(f, "%u", &r);
+                    fclose(f);
+                }
+                else r = 0;
+                if(!logical_proc_info_add_by_id(data, dataex, &len, max_len, RelationProcessorPackage, r, (ULONG_PTR)1 << i))
+                {
+                    fclose(fcpu_list);
+                    return STATUS_NO_MEMORY;
+                }
             }
 
             /* Sysfs enumerates logical cores (and not physical cores), but Windows enumerates
@@ -1792,143 +1809,145 @@ static NTSTATUS create_logical_proc_info(SYSTEM_LOGICAL_PROCESSOR_INFORMATION **
              * on kernel cpu core numbering as opposed to a hardware core ID like provided through
              * 'core_id', so are suitable as a unique ID.
              */
-            sprintf(name, core_info, i, "thread_siblings_list");
-            f = fopen(name, "r");
-            if(f)
+            if(relation == RelationAll || relation == RelationProcessorCore ||
+               relation == RelationNumaNode || relation == RelationGroup)
             {
-                fscanf(f, "%d%c", &phys_core, &op);
-                fclose(f);
-            }
-            else phys_core = i;
+                /* Mask of logical threads sharing same physical core in kernel core numbering. */
+                sprintf(name, core_info, i, "thread_siblings");
+                if(!sysfs_parse_bitmap(name, &thread_mask))
+                    thread_mask = 1<<i;
 
-            /* Mask of logical threads sharing same physical core in kernel core numbering. */
-            sprintf(name, core_info, i, "thread_siblings");
-            if(!sysfs_parse_bitmap(name, &thread_mask))
-                thread_mask = 1<<i;
-            if(!logical_proc_info_add_by_id(data, dataex, &len, max_len, RelationProcessorCore, phys_core, thread_mask))
-            {
-                fclose(fcpu_list);
-                return STATUS_NO_MEMORY;
-            }
+                /* Needed later for NumaNode and Group. */
+                all_cpus_mask |= thread_mask;
 
-            for(j=0; j<4; j++)
-            {
-                CACHE_DESCRIPTOR cache;
-                ULONG_PTR mask = 0;
-
-                sprintf(name, cache_info, i, j, "shared_cpu_map");
-                if(!sysfs_parse_bitmap(name, &mask)) continue;
-
-                sprintf(name, cache_info, i, j, "level");
-                f = fopen(name, "r");
-                if(!f) continue;
-                fscanf(f, "%u", &r);
-                fclose(f);
-                cache.Level = r;
-
-                sprintf(name, cache_info, i, j, "ways_of_associativity");
-                f = fopen(name, "r");
-                if(!f) continue;
-                fscanf(f, "%u", &r);
-                fclose(f);
-                cache.Associativity = r;
-
-                sprintf(name, cache_info, i, j, "coherency_line_size");
-                f = fopen(name, "r");
-                if(!f) continue;
-                fscanf(f, "%u", &r);
-                fclose(f);
-                cache.LineSize = r;
-
-                sprintf(name, cache_info, i, j, "size");
-                f = fopen(name, "r");
-                if(!f) continue;
-                fscanf(f, "%u%c", &r, &op);
-                fclose(f);
-                if(op != 'K')
-                    WARN("unknown cache size %u%c\n", r, op);
-                cache.Size = (op=='K' ? r*1024 : r);
-
-                sprintf(name, cache_info, i, j, "type");
-                f = fopen(name, "r");
-                if(!f) continue;
-                fscanf(f, "%s", name);
-                fclose(f);
-                if(!memcmp(name, "Data", 5))
-                    cache.Type = CacheData;
-                else if(!memcmp(name, "Instruction", 11))
-                    cache.Type = CacheInstruction;
-                else
-                    cache.Type = CacheUnified;
-
-                if(!logical_proc_info_add_cache(data, dataex, &len, max_len, mask, &cache))
+                if(relation == RelationAll || relation == RelationProcessorCore)
                 {
-                    fclose(fcpu_list);
-                    return STATUS_NO_MEMORY;
+                    sprintf(name, core_info, i, "thread_siblings_list");
+                    f = fopen(name, "r");
+                    if(f)
+                    {
+                        fscanf(f, "%d%c", &phys_core, &op);
+                        fclose(f);
+                    }
+                    else phys_core = i;
+
+                    if(!logical_proc_info_add_by_id(data, dataex, &len, max_len, RelationProcessorCore, phys_core, thread_mask))
+                    {
+                        fclose(fcpu_list);
+                        return STATUS_NO_MEMORY;
+                    }
+                }
+            }
+
+            if (relation == RelationAll || relation == RelationCache)
+            {
+                for(j=0; j<4; j++)
+                {
+                    CACHE_DESCRIPTOR cache;
+                    ULONG_PTR mask = 0;
+
+                    sprintf(name, cache_info, i, j, "shared_cpu_map");
+                    if(!sysfs_parse_bitmap(name, &mask)) continue;
+
+                    sprintf(name, cache_info, i, j, "level");
+                    f = fopen(name, "r");
+                    if(!f) continue;
+                    fscanf(f, "%u", &r);
+                    fclose(f);
+                    cache.Level = r;
+
+                    sprintf(name, cache_info, i, j, "ways_of_associativity");
+                    f = fopen(name, "r");
+                    if(!f) continue;
+                    fscanf(f, "%u", &r);
+                    fclose(f);
+                    cache.Associativity = r;
+
+                    sprintf(name, cache_info, i, j, "coherency_line_size");
+                    f = fopen(name, "r");
+                    if(!f) continue;
+                    fscanf(f, "%u", &r);
+                    fclose(f);
+                    cache.LineSize = r;
+
+                    sprintf(name, cache_info, i, j, "size");
+                    f = fopen(name, "r");
+                    if(!f) continue;
+                    fscanf(f, "%u%c", &r, &op);
+                    fclose(f);
+                    if(op != 'K')
+                        WARN("unknown cache size %u%c\n", r, op);
+                    cache.Size = (op=='K' ? r*1024 : r);
+
+                    sprintf(name, cache_info, i, j, "type");
+                    f = fopen(name, "r");
+                    if(!f) continue;
+                    fscanf(f, "%s", name);
+                    fclose(f);
+                    if(!memcmp(name, "Data", 5))
+                        cache.Type = CacheData;
+                    else if(!memcmp(name, "Instruction", 11))
+                        cache.Type = CacheInstruction;
+                    else
+                        cache.Type = CacheUnified;
+
+                    if(!logical_proc_info_add_cache(data, dataex, &len, max_len, mask, &cache))
+                    {
+                        fclose(fcpu_list);
+                        return STATUS_NO_MEMORY;
+                    }
                 }
             }
         }
     }
     fclose(fcpu_list);
 
-    if(data){
-        for(i=0; i<len; i++){
-            if((*data)[i].Relationship == RelationProcessorCore){
-                all_cpus_mask |= (*data)[i].ProcessorMask;
-            }
-        }
-    }else{
-        for(i = 0; i < len; ){
-            SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *infoex = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)(((char *)*dataex) + i);
-            if(infoex->Relationship == RelationProcessorCore){
-                all_cpus_mask |= infoex->u.Processor.GroupMask[0].Mask;
-            }
-            i += infoex->Size;
-        }
-    }
     num_cpus = count_bits(all_cpus_mask);
 
-    fnuma_list = fopen("/sys/devices/system/node/online", "r");
-    if(!fnuma_list)
+    if(relation == RelationAll || relation == RelationNumaNode)
     {
-        if(!logical_proc_info_add_numa_node(data, dataex, &len, max_len, all_cpus_mask, 0))
-            return STATUS_NO_MEMORY;
-    }
-    else
-    {
-        while(!feof(fnuma_list))
+        fnuma_list = fopen("/sys/devices/system/node/online", "r");
+        if(!fnuma_list)
         {
-            if(!fscanf(fnuma_list, "%u%c ", &beg, &op))
-                break;
-            if(op == '-') fscanf(fnuma_list, "%u%c ", &end, &op);
-            else end = beg;
-
-            for(i=beg; i<=end; i++)
+            if(!logical_proc_info_add_numa_node(data, dataex, &len, max_len, all_cpus_mask, 0))
+                return STATUS_NO_MEMORY;
+        }
+        else
+        {
+            while(!feof(fnuma_list))
             {
-                ULONG_PTR mask = 0;
+                if(!fscanf(fnuma_list, "%u%c ", &beg, &op))
+                    break;
+                if(op == '-') fscanf(fnuma_list, "%u%c ", &end, &op);
+                else end = beg;
 
-                sprintf(name, numa_info, i);
-                f = fopen(name, "r");
-                if(!f) continue;
-                while(!feof(f))
+                for(i=beg; i<=end; i++)
                 {
-                    if(!fscanf(f, "%x%c ", &r, &op))
-                        break;
-                    mask = (sizeof(ULONG_PTR)>sizeof(int) ? mask<<(8*sizeof(DWORD)) : 0) + r;
-                }
-                fclose(f);
+                    ULONG_PTR mask = 0;
 
-                if(!logical_proc_info_add_numa_node(data, dataex, &len, max_len, mask, i))
-                {
-                    fclose(fnuma_list);
-                    return STATUS_NO_MEMORY;
+                    sprintf(name, numa_info, i);
+                    f = fopen(name, "r");
+                    if(!f) continue;
+                    while(!feof(f))
+                    {
+                        if(!fscanf(f, "%x%c ", &r, &op))
+                            break;
+                        mask = (sizeof(ULONG_PTR)>sizeof(int) ? mask<<(8*sizeof(DWORD)) : 0) + r;
+                    }
+                    fclose(f);
+
+                    if(!logical_proc_info_add_numa_node(data, dataex, &len, max_len, mask, i))
+                    {
+                        fclose(fnuma_list);
+                        return STATUS_NO_MEMORY;
+                    }
                 }
             }
+            fclose(fnuma_list);
         }
-        fclose(fnuma_list);
     }
 
-    if(dataex)
+    if(dataex && (relation == RelationAll || relation == RelationGroup))
         logical_proc_info_add_group(dataex, &len, max_len, num_cpus, all_cpus_mask);
 
     if(data)
@@ -1941,7 +1960,7 @@ static NTSTATUS create_logical_proc_info(SYSTEM_LOGICAL_PROCESSOR_INFORMATION **
 #elif defined(__APPLE__)
 /* for 'data', max_len is the array count. for 'dataex', max_len is in bytes */
 static NTSTATUS create_logical_proc_info(SYSTEM_LOGICAL_PROCESSOR_INFORMATION **data,
-        SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX **dataex, DWORD *max_len)
+        SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX **dataex, DWORD *max_len, DWORD relation)
 {
     DWORD pkgs_no, cores_no, lcpu_no, lcpu_per_core, cores_per_package, assoc, len = 0;
     DWORD cache_ctrs[10] = {0};
@@ -1950,6 +1969,9 @@ static NTSTATUS create_logical_proc_info(SYSTEM_LOGICAL_PROCESSOR_INFORMATION **
     LONGLONG cache_size, cache_line_size, cache_sharing[10];
     size_t size;
     DWORD p,i,j,k;
+
+    if (relation != RelationAll)
+        FIXME("Relationship filtering not implemented: 0x%x\n", relation);
 
     lcpu_no = NtCurrentTeb()->Peb->NumberOfProcessors;
 
@@ -2076,7 +2098,7 @@ static NTSTATUS create_logical_proc_info(SYSTEM_LOGICAL_PROCESSOR_INFORMATION **
 }
 #else
 static NTSTATUS create_logical_proc_info(SYSTEM_LOGICAL_PROCESSOR_INFORMATION **data,
-        SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX **dataex, DWORD *max_len)
+        SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX **dataex, DWORD *max_len, DWORD relation)
 {
     FIXME("stub\n");
     return STATUS_NOT_IMPLEMENTED;
@@ -2163,6 +2185,7 @@ static NTSTATUS get_firmware_info(SYSTEM_FIRMWARE_TABLE_INFORMATION *sfti, ULONG
             char board_vendor[128], board_product[128], board_version[128], board_serial[128];
             size_t board_vendor_len, board_product_len, board_version_len, board_serial_len;
             char chassis_vendor[128], chassis_version[128], chassis_serial[128], chassis_asset_tag[128];
+            char chassis_type[11] = "2"; /* unknown */
             size_t chassis_vendor_len, chassis_version_len, chassis_serial_len, chassis_asset_tag_len;
             char *buffer = (char*)sfti->TableBuffer;
             BYTE string_count;
@@ -2188,6 +2211,7 @@ static NTSTATUS get_firmware_info(SYSTEM_FIRMWARE_TABLE_INFORMATION *sfti, ULONG
             chassis_version_len = get_smbios_string("/sys/class/dmi/id/chassis_version", S(chassis_version));
             chassis_serial_len = get_smbios_string("/sys/class/dmi/id/chassis_serial", S(chassis_serial));
             chassis_asset_tag_len = get_smbios_string("/sys/class/dmi/id/chassis_tag", S(chassis_asset_tag));
+            get_smbios_string("/sys/class/dmi/id/chassis_type", S(chassis_type));
 #undef S
 
             *required_len = sizeof(struct smbios_prologue);
@@ -2283,7 +2307,7 @@ static NTSTATUS get_firmware_info(SYSTEM_FIRMWARE_TABLE_INFORMATION *sfti, ULONG
             chassis->hdr.length = sizeof(struct smbios_chassis);
             chassis->hdr.handle = 0;
             chassis->vendor = chassis_vendor_len ? ++string_count : 0;
-            chassis->shape = 0x2; /* unknown */
+            chassis->type = atoi(chassis_type);
             chassis->version = chassis_version_len ? ++string_count : 0;
             chassis->serial = chassis_serial_len ? ++string_count : 0;
             chassis->asset_tag = chassis_asset_tag_len ? ++string_count : 0;
@@ -2391,6 +2415,139 @@ static NTSTATUS get_firmware_info(SYSTEM_FIRMWARE_TABLE_INFORMATION *sfti, ULONG
 
 #endif
 
+static void get_performance_info( SYSTEM_PERFORMANCE_INFORMATION *info )
+{
+    unsigned long long totalram = 0, freeram = 0, totalswap = 0, freeswap = 0;
+    FILE *fp;
+
+    memset( info, 0, sizeof(*info) );
+
+    if ((fp = fopen("/proc/uptime", "r")))
+    {
+        double uptime, idle_time;
+
+        fscanf(fp, "%lf %lf", &uptime, &idle_time);
+        fclose(fp);
+        info->IdleTime.QuadPart = 10000000 * idle_time;
+    }
+    else
+    {
+        static ULONGLONG idle;
+        /* many programs expect IdleTime to change so fake change */
+        info->IdleTime.QuadPart = ++idle;
+    }
+
+#ifdef linux
+    if ((fp = fopen("/proc/meminfo", "r")))
+    {
+        unsigned long long value;
+        char line[64];
+
+        while (fgets(line, sizeof(line), fp))
+        {
+            if(sscanf(line, "MemTotal: %llu kB", &value) == 1)
+                totalram += value * 1024;
+            else if(sscanf(line, "MemFree: %llu kB", &value) == 1)
+                freeram += value * 1024;
+            else if(sscanf(line, "SwapTotal: %llu kB", &value) == 1)
+                totalswap += value * 1024;
+            else if(sscanf(line, "SwapFree: %llu kB", &value) == 1)
+                freeswap += value * 1024;
+            else if (sscanf(line, "Buffers: %llu", &value))
+                freeram += value * 1024;
+            else if (sscanf(line, "Cached: %llu", &value))
+                freeram += value * 1024;
+        }
+        fclose(fp);
+    }
+#elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__) || \
+    defined(__OpenBSD__) || defined(__DragonFly__) || defined(__APPLE__)
+    {
+#ifdef __APPLE__
+        unsigned int val;
+#else
+        unsigned long val;
+#endif
+        int mib[2];
+        size_t size_sys;
+
+        mib[0] = CTL_HW;
+#ifdef HW_MEMSIZE
+        {
+            uint64_t val64;
+            mib[1] = HW_MEMSIZE;
+            size_sys = sizeof(val64);
+            if (!sysctl(mib, 2, &val64, &size_sys, NULL, 0) && size_sys == sizeof(val64)) totalram = val64;
+        }
+#endif
+
+#ifdef HAVE_MACH_MACH_H
+        {
+            host_name_port_t host = mach_host_self();
+            mach_msg_type_number_t count;
+#ifdef HOST_VM_INFO64_COUNT
+            vm_statistics64_data_t vm_stat;
+
+            count = HOST_VM_INFO64_COUNT;
+            if (host_statistics64(host, HOST_VM_INFO64, (host_info64_t)&vm_stat, &count) == KERN_SUCCESS)
+                freeram = (vm_stat.free_count + vm_stat.inactive_count) * (ULONGLONG)page_size;
+#endif
+            if (!totalram)
+            {
+                host_basic_info_data_t info;
+                count = HOST_BASIC_INFO_COUNT;
+                if (host_info(host, HOST_BASIC_INFO, (host_info_t)&info, &count) == KERN_SUCCESS)
+                    totalram = info.max_mem;
+            }
+            mach_port_deallocate(mach_task_self(), host);
+        }
+#endif
+
+        if (!totalram)
+        {
+            mib[1] = HW_PHYSMEM;
+            size_sys = sizeof(val);
+            if (!sysctl(mib, 2, &val, &size_sys, NULL, 0) && size_sys == sizeof(val)) totalram = val;
+        }
+        if (!freeram)
+        {
+            mib[1] = HW_USERMEM;
+            size_sys = sizeof(val);
+            if (!sysctl(mib, 2, &val, &size_sys, NULL, 0) && size_sys == sizeof(val)) freeram = val;
+        }
+#ifdef VM_SWAPUSAGE
+        {
+            struct xsw_usage swap;
+            mib[0] = CTL_VM;
+            mib[1] = VM_SWAPUSAGE;
+            size_sys = sizeof(swap);
+            if (!sysctl(mib, 2, &swap, &size_sys, NULL, 0) && size_sys == sizeof(swap))
+            {
+                totalswap = swap.xsu_total;
+                freeswap = swap.xsu_avail;
+            }
+        }
+#endif
+    }
+#elif defined( sun )
+    {
+        struct anoninfo swapinf;
+        int rval;
+        totalram = sysconf(_SC_PHYS_PAGES) * (ULONGLONG)page_size;
+        freeram = sysconf(_SC_AVPHYS_PAGES) * (ULONGLONG)page_size;
+        rval = swapctl(SC_AINFO, &swapinf);
+        if (rval > -1)
+        {
+            totalswap = swapinf.ani_max * (ULONGLONG)page_size;
+            freeswap = swapinf.ani_free * (ULONGLONG)page_size;
+        }
+    }
+#endif
+    info->AvailablePages      = freeram / page_size;
+    info->TotalCommittedPages = (totalram + totalswap - freeram - freeswap) / page_size;
+    info->TotalCommitLimit    = (totalram + totalswap) / page_size;
+}
+
 /***********************************************************************
  * RtlIsProcessorFeaturePresent [NTDLL.@]
  */
@@ -2410,14 +2567,14 @@ static void get_ntdll_system_module(SYSTEM_MODULE *sm)
     entry = NtCurrentTeb()->Peb->LdrData->InLoadOrderModuleList.Flink;
     mod = CONTAINING_RECORD(entry, LDR_MODULE, InLoadOrderModuleList);
 
-    sm->Reserved1 = 0;
-    sm->Reserved2 = 0;
+    sm->Section = 0;
+    sm->MappedBaseAddress = 0;
     sm->ImageBaseAddress = mod->BaseAddress;
     sm->ImageSize = mod->SizeOfImage;
     sm->Flags = mod->Flags;
-    sm->Id = 0;
-    sm->Rank = 0;
-    sm->Unknown = 0;
+    sm->LoadOrderIndex = 0;
+    sm->InitOrderIndex = 0;
+    sm->LoadCount = 0;
     str.Length = 0;
     str.MaximumLength = MAXIMUM_FILENAME_LENGTH;
     str.Buffer = (char*)sm->Name;
@@ -2486,58 +2643,9 @@ NTSTATUS WINAPI NtQuerySystemInformation(
         {
             SYSTEM_PERFORMANCE_INFORMATION spi;
             static BOOL fixme_written = FALSE;
-            FILE *fp;
 
-            memset(&spi, 0 , sizeof(spi));
+            get_performance_info( &spi );
             len = sizeof(spi);
-
-            spi.Reserved3 = 0x7fffffff; /* Available paged pool memory? */
-
-            if ((fp = fopen("/proc/uptime", "r")))
-            {
-                double uptime, idle_time;
-
-                fscanf(fp, "%lf %lf", &uptime, &idle_time);
-                fclose(fp);
-                spi.IdleTime.QuadPart = 10000000 * idle_time;
-            }
-            else
-            {
-                static ULONGLONG idle;
-                /* many programs expect IdleTime to change so fake change */
-                spi.IdleTime.QuadPart = ++idle;
-            }
-
-            if ((fp = fopen("/proc/meminfo", "r")))
-            {
-                unsigned long long totalram, freeram, totalswap, freeswap;
-                char line[64];
-                while (fgets(line, sizeof(line), fp))
-                {
-                   if(sscanf(line, "MemTotal: %llu kB", &totalram) == 1)
-                   {
-                       totalram *= 1024;
-                   }
-                   else if(sscanf(line, "MemFree: %llu kB", &freeram) == 1)
-                   {
-                       freeram *= 1024;
-                   }
-                   else if(sscanf(line, "SwapTotal: %llu kB", &totalswap) == 1)
-                   {
-                       totalswap *= 1024;
-                   }
-                   else if(sscanf(line, "SwapFree: %llu kB", &freeswap) == 1)
-                   {
-                       freeswap *= 1024;
-                       break;
-                   }
-                }
-                fclose(fp);
-
-                spi.AvailablePages      = freeram / page_size;
-                spi.TotalCommittedPages = (totalram + totalswap - freeram - freeswap) / page_size;
-                spi.TotalCommitLimit    = (totalram + totalswap) / page_size;
-            }
 
             if (Length >= len)
             {
@@ -2973,7 +3081,7 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                 break;
             }
 
-            ret = create_logical_proc_info(&buf, NULL, &len);
+            ret = create_logical_proc_info(&buf, NULL, &len, RelationAll);
             if( ret != STATUS_SUCCESS )
             {
                 RtlFreeHeap(GetProcessHeap(), 0, buf);
@@ -3062,9 +3170,6 @@ NTSTATUS WINAPI NtQuerySystemInformationEx(SYSTEM_INFORMATION_CLASS SystemInform
                 break;
             }
 
-            if (*(DWORD*)Query != RelationAll)
-                FIXME("Relationship filtering not implemented: 0x%x\n", *(DWORD*)Query);
-
             len = 3 * sizeof(*buf);
             buf = RtlAllocateHeap(GetProcessHeap(), 0, len);
             if (!buf)
@@ -3073,7 +3178,7 @@ NTSTATUS WINAPI NtQuerySystemInformationEx(SYSTEM_INFORMATION_CLASS SystemInform
                 break;
             }
 
-            ret = create_logical_proc_info(NULL, &buf, &len);
+            ret = create_logical_proc_info(NULL, &buf, &len, *(DWORD*)Query);
             if (ret != STATUS_SUCCESS)
             {
                 RtlFreeHeap(GetProcessHeap(), 0, buf);
@@ -3085,7 +3190,7 @@ NTSTATUS WINAPI NtQuerySystemInformationEx(SYSTEM_INFORMATION_CLASS SystemInform
                 if (!SystemInformation)
                     ret = STATUS_ACCESS_VIOLATION;
                 else
-                    memcpy( SystemInformation, buf, len);
+                    memcpy(SystemInformation, buf, len);
             }
             else
                 ret = STATUS_INFO_LENGTH_MISMATCH;
@@ -3163,6 +3268,56 @@ NTSTATUS WINAPI NtInitiatePowerAction(
         return STATUS_NOT_IMPLEMENTED;
 }
 
+/******************************************************************************
+ *  NtSetThreadExecutionState                   [NTDLL.@]
+ *
+ */
+NTSTATUS WINAPI NtSetThreadExecutionState( EXECUTION_STATE new_state, EXECUTION_STATE *old_state )
+{
+    static EXECUTION_STATE current =
+        ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED | ES_USER_PRESENT;
+    *old_state = current;
+
+    WARN( "(0x%x, %p): stub, harmless.\n", new_state, old_state );
+
+    if (!(current & ES_CONTINUOUS) || (new_state & ES_CONTINUOUS))
+        current = new_state;
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ *  NtCreatePowerRequest                        [NTDLL.@]
+ *
+ */
+NTSTATUS WINAPI NtCreatePowerRequest( HANDLE *handle, COUNTED_REASON_CONTEXT *context )
+{
+    FIXME( "(%p, %p): stub\n", handle, context );
+
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
+ *  NtSetPowerRequest                           [NTDLL.@]
+ *
+ */
+NTSTATUS WINAPI NtSetPowerRequest( HANDLE handle, POWER_REQUEST_TYPE type )
+{
+    FIXME( "(%p, %u): stub\n", handle, type );
+
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
+ *  NtClearPowerRequest                         [NTDLL.@]
+ *
+ */
+NTSTATUS WINAPI NtClearPowerRequest( HANDLE handle, POWER_REQUEST_TYPE type )
+{
+    FIXME( "(%p, %u): stub\n", handle, type );
+
+    return STATUS_NOT_IMPLEMENTED;
+}
+
 #ifdef linux
 /* Fallback using /proc/cpuinfo for Linux systems without cpufreq. For
  * most distributions on recent enough hardware, this is only likely to
@@ -3190,6 +3345,140 @@ static ULONG mhz_from_cpuinfo(void)
     }
     return cmz;
 }
+#endif
+
+#ifdef linux
+
+static const char * get_sys_str(const char *path)
+{
+	static char s[16];
+	FILE *f = fopen(path, "r");
+	const char *ret = NULL;
+	if (f)
+	{
+		if (fgets(s, sizeof(s), f))
+			ret = s;
+		fclose(f);
+	}
+	return ret;
+}
+
+static int get_sys_int(const char *path, int def)
+{
+	const char *s = get_sys_str(path);
+	return s ? atoi(s) : def;
+}
+
+static NTSTATUS fill_battery_state(SYSTEM_BATTERY_STATE *bs)
+{
+	char path[64];
+	const char *s;
+	unsigned int i = 0;
+	LONG64 voltage; /* microvolts */
+
+	bs->AcOnLine = get_sys_int("/sys/class/power_supply/AC/online", 1);
+
+	for (;;)
+	{
+		sprintf(path, "/sys/class/power_supply/BAT%u/status", i);
+		s = get_sys_str(path);
+		if (!s) break;
+		bs->Charging |= (strcmp(s, "Charging\n") == 0);
+		bs->Discharging |= (strcmp(s, "Discharging\n") == 0);
+		bs->BatteryPresent = TRUE;
+		i++;
+	}
+
+	if (bs->BatteryPresent)
+	{
+		voltage = get_sys_int("/sys/class/power_supply/BAT0/voltage_now", 0);
+		bs->MaxCapacity = get_sys_int("/sys/class/power_supply/BAT0/charge_full", 0) * voltage / 1e9;
+		bs->RemainingCapacity = get_sys_int("/sys/class/power_supply/BAT0/charge_now", 0) * voltage / 1e9;
+		bs->Rate = -get_sys_int("/sys/class/power_supply/BAT0/current_now", 0) * voltage / 1e9;
+		if (!bs->Charging && (LONG)bs->Rate < 0)
+			bs->EstimatedTime = 3600 * bs->RemainingCapacity / -(LONG)bs->Rate;
+		else
+			bs->EstimatedTime = ~0u;
+	}
+
+	return STATUS_SUCCESS;
+}
+
+#elif defined(HAVE_IOKIT_IOKITLIB_H)
+
+static NTSTATUS fill_battery_state(SYSTEM_BATTERY_STATE *bs)
+{
+	CFArrayRef batteries;
+	CFDictionaryRef battery;
+	CFNumberRef prop;
+	uint32_t value, voltage;
+	CFTimeInterval remain;
+
+	if (IOPMCopyBatteryInfo( kIOMasterPortDefault, &batteries ) != kIOReturnSuccess)
+		return STATUS_ACCESS_DENIED;
+
+	if (CFArrayGetCount( batteries ) == 0)
+	{
+		/* Just assume we're on AC with no battery. */
+		bs->AcOnLine = TRUE;
+		return STATUS_SUCCESS;
+	}
+	/* Just use the first battery. */
+	battery = CFArrayGetValueAtIndex( batteries, 0 );
+
+	prop = CFDictionaryGetValue( battery, CFSTR(kIOBatteryFlagsKey) );
+	CFNumberGetValue( prop, kCFNumberSInt32Type, &value );
+
+	if (value & kIOBatteryInstalled)
+		bs->BatteryPresent = TRUE;
+	else
+		/* Since we are executing code, we must have AC power. */
+		bs->AcOnLine = TRUE;
+	if (value & kIOBatteryChargerConnect)
+	{
+		bs->AcOnLine = TRUE;
+		if (value & kIOBatteryCharge)
+			bs->Charging = TRUE;
+	}
+	else
+		bs->Discharging = TRUE;
+
+	/* We'll need the voltage to be able to interpret the other values. */
+	prop = CFDictionaryGetValue( battery, CFSTR(kIOBatteryVoltageKey) );
+	CFNumberGetValue( prop, kCFNumberSInt32Type, &voltage );
+
+	prop = CFDictionaryGetValue( battery, CFSTR(kIOBatteryCapacityKey) );
+	CFNumberGetValue( prop, kCFNumberSInt32Type, &value );
+	bs->MaxCapacity = value * voltage;
+	/* Apple uses "estimated time < 10:00" and "22%" for these, but we'll follow
+	 * Windows for now (5% and 33%). */
+	bs->DefaultAlert1 = bs->MaxCapacity / 20;
+	bs->DefaultAlert2 = bs->MaxCapacity / 3;
+
+	prop = CFDictionaryGetValue( battery, CFSTR(kIOBatteryCurrentChargeKey) );
+	CFNumberGetValue( prop, kCFNumberSInt32Type, &value );
+	bs->RemainingCapacity = value * voltage;
+
+	prop = CFDictionaryGetValue( battery, CFSTR(kIOBatteryAmperageKey) );
+	CFNumberGetValue( prop, kCFNumberSInt32Type, &value );
+	bs->Rate = value * voltage;
+
+	remain = IOPSGetTimeRemainingEstimate();
+	if (remain != kIOPSTimeRemainingUnknown && remain != kIOPSTimeRemainingUnlimited)
+		bs->EstimatedTime = (ULONG)remain;
+
+	CFRelease( batteries );
+	return STATUS_SUCCESS;
+}
+
+#else
+
+static NTSTATUS fill_battery_state(SYSTEM_BATTERY_STATE *bs)
+{
+	FIXME("SystemBatteryState not implemented on this platform\n");
+	return STATUS_NOT_IMPLEMENTED;
+}
+
 #endif
 
 /******************************************************************************
@@ -3244,6 +3533,12 @@ NTSTATUS WINAPI NtPowerInformation(
 			PowerCaps->MinDeviceWakeState = PowerSystemUnspecified;
 			PowerCaps->DefaultLowLatencyWake = PowerSystemUnspecified;
 			return STATUS_SUCCESS;
+		}
+		case SystemBatteryState: {
+			if (nOutputBufferSize < sizeof(SYSTEM_BATTERY_STATE))
+				return STATUS_BUFFER_TOO_SMALL;
+			memset(lpOutputBuffer, 0, sizeof(SYSTEM_BATTERY_STATE));
+			return fill_battery_state(lpOutputBuffer);
 		}
 		case SystemExecutionState: {
 			PULONG ExecutionState = lpOutputBuffer;

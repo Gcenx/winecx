@@ -65,6 +65,7 @@ static const struct object_ops winstation_ops =
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
+    NULL,                         /* get_esync_fd */
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
@@ -89,6 +90,7 @@ static const struct object_ops desktop_ops =
     no_add_queue,                 /* add_queue */
     NULL,                         /* remove_queue */
     NULL,                         /* signaled */
+    NULL,                         /* get_esync_fd */
     NULL,                         /* satisfied */
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
@@ -372,7 +374,8 @@ void set_process_default_desktop( struct process *process, struct desktop *deskt
 }
 
 /* connect a process to its window station */
-void connect_process_winstation( struct process *process, struct thread *parent )
+void connect_process_winstation( struct process *process, struct thread *parent_thread,
+                                 struct process *parent_process )
 {
     struct winstation *winstation = NULL;
     struct desktop *desktop = NULL;
@@ -383,9 +386,9 @@ void connect_process_winstation( struct process *process, struct thread *parent 
     {
         winstation = (struct winstation *)get_handle_obj( process, handle, 0, &winstation_ops );
     }
-    else if (parent && parent->process->winstation)
+    else if (parent_process->winstation)
     {
-        handle = duplicate_handle( parent->process, parent->process->winstation,
+        handle = duplicate_handle( parent_process, parent_process->winstation,
                                    process, 0, 0, DUP_HANDLE_SAME_ACCESS );
         winstation = (struct winstation *)get_handle_obj( process, handle, 0, &winstation_ops );
     }
@@ -397,14 +400,21 @@ void connect_process_winstation( struct process *process, struct thread *parent 
         desktop = get_desktop_obj( process, handle, 0 );
         if (!desktop || desktop->winstation != winstation) goto done;
     }
-    else if (parent && parent->desktop)
+    else
     {
-        desktop = get_desktop_obj( parent->process, parent->desktop, 0 );
-        if (!desktop || desktop->winstation != winstation) goto done;
-        handle = duplicate_handle( parent->process, parent->desktop,
-                                   process, 0, 0, DUP_HANDLE_SAME_ACCESS );
-    }
+        if (parent_thread && parent_thread->desktop)
+            handle = parent_thread->desktop;
+        else if (parent_process->desktop)
+            handle = parent_process->desktop;
+        else
+            goto done;
 
+        desktop = get_desktop_obj( parent_process, handle, 0 );
+
+        if (!desktop || desktop->winstation != winstation) goto done;
+
+        handle = duplicate_handle( parent_process, handle, process, 0, 0, DUP_HANDLE_SAME_ACCESS );
+    }
     if (handle) set_process_default_desktop( process, desktop, handle );
 
 done:

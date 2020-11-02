@@ -45,7 +45,7 @@ extern HRESULT assembly_get_runtime_version(ASSEMBLY *assembly, LPSTR *version) 
 extern HRESULT assembly_get_vtable_fixups(ASSEMBLY *assembly, VTableFixup **fixups, DWORD *count) DECLSPEC_HIDDEN;
 extern HRESULT assembly_get_native_entrypoint(ASSEMBLY *assembly, NativeEntryPointFunc *func) DECLSPEC_HIDDEN;
 
-#define WINE_MONO_VERSION "4.9.0"
+#define WINE_MONO_VERSION "4.9.4"
 
 /* Mono embedding */
 typedef struct _MonoDomain MonoDomain;
@@ -76,8 +76,6 @@ struct RuntimeHost
     ICorRuntimeHost ICorRuntimeHost_iface;
     ICLRRuntimeHost ICLRRuntimeHost_iface;
     CLRRuntimeInfo *version;
-    struct list domains;
-    MonoDomain *default_domain;
     CRITICAL_SECTION lock;
     LONG ref;
 };
@@ -110,6 +108,8 @@ extern HRESULT get_runtime_info(LPCWSTR exefile, LPCWSTR version, LPCWSTR config
 
 extern BOOL get_mono_path(LPWSTR path, BOOL skip_local) DECLSPEC_HIDDEN;
 
+extern MonoDomain* get_root_domain(void);
+
 extern HRESULT ICLRRuntimeInfo_GetRuntimeHost(ICLRRuntimeInfo *iface, RuntimeHost **result) DECLSPEC_HIDDEN;
 
 extern HRESULT MetaDataDispenser_CreateInstance(IUnknown **ppUnk) DECLSPEC_HIDDEN;
@@ -117,6 +117,7 @@ extern HRESULT MetaDataDispenser_CreateInstance(IUnknown **ppUnk) DECLSPEC_HIDDE
 typedef struct parsed_config_file
 {
     struct list supported_runtimes;
+    LPWSTR private_path;
 } parsed_config_file;
 
 typedef struct supported_runtime
@@ -124,6 +125,8 @@ typedef struct supported_runtime
     struct list entry;
     LPWSTR version;
 } supported_runtime;
+
+extern WCHAR **private_path;
 
 extern HRESULT parse_config_file(LPCWSTR filename, parsed_config_file *result) DECLSPEC_HIDDEN;
 
@@ -154,11 +157,11 @@ extern void (CDECL *mono_callspec_set_assembly)(MonoAssembly *assembly) DECLSPEC
 extern MonoClass* (CDECL *mono_class_from_mono_type)(MonoType *type) DECLSPEC_HIDDEN;
 extern MonoClass* (CDECL *mono_class_from_name)(MonoImage *image, const char* name_space, const char *name) DECLSPEC_HIDDEN;
 extern MonoMethod* (CDECL *mono_class_get_method_from_name)(MonoClass *klass, const char *name, int param_count) DECLSPEC_HIDDEN;
-extern MonoAssembly* (CDECL *mono_domain_assembly_open)(MonoDomain *domain, const char *name) DECLSPEC_HIDDEN;
 extern MonoDomain* (CDECL *mono_domain_get)(void) DECLSPEC_HIDDEN;
 extern MonoDomain* (CDECL *mono_domain_get_by_id)(int id) DECLSPEC_HIDDEN;
 extern BOOL (CDECL *mono_domain_set)(MonoDomain *domain, BOOL force) DECLSPEC_HIDDEN;
 extern void (CDECL *mono_domain_set_config)(MonoDomain *domain,const char *base_dir,const char *config_file_name) DECLSPEC_HIDDEN;
+extern MonoImage* (CDECL *mono_get_corlib)(void) DECLSPEC_HIDDEN;
 extern int (CDECL *mono_jit_exec)(MonoDomain *domain, MonoAssembly *assembly, int argc, char *argv[]) DECLSPEC_HIDDEN;
 extern MonoDomain* (CDECL *mono_jit_init_version)(const char *domain_name, const char *runtime_version) DECLSPEC_HIDDEN;
 extern MonoImage* (CDECL *mono_image_open_from_module_handle)(HMODULE module_handle, char* fname, UINT has_entry_point, MonoImageOpenStatus* status) DECLSPEC_HIDDEN;

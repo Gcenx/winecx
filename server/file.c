@@ -86,6 +86,7 @@ static const struct object_ops file_ops =
     add_queue,                    /* add_queue */
     remove_queue,                 /* remove_queue */
     default_fd_signaled,          /* signaled */
+    NULL,                         /* get_esync_fd */
     no_satisfied,                 /* satisfied */
     no_signal,                    /* signal */
     file_get_fd,                  /* get_fd */
@@ -678,6 +679,7 @@ void file_set_error(void)
     case ENODEV:    set_error( STATUS_NO_SUCH_DEVICE ); break;
     case ENXIO:     set_error( STATUS_NO_SUCH_DEVICE ); break;
     case EXDEV:     set_error( STATUS_NOT_SAME_DEVICE ); break;
+    case ELOOP:     set_error( STATUS_REPARSE_POINT_NOT_RESOLVED ); break;
 #ifdef EOVERFLOW
     case EOVERFLOW: set_error( STATUS_INVALID_PARAMETER ); break;
 #endif

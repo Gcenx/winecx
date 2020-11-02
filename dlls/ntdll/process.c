@@ -27,6 +27,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <time.h>
 #ifdef HAVE_SYS_SOCKET_H
@@ -36,8 +37,15 @@
 #ifdef HAVE_SYS_WAIT_H
 # include <sys/wait.h>
 #endif
+#ifdef HAVE_SYS_UN_H
+# include <sys/un.h>
+#endif
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
+#endif
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+#include <pthread.h>
 #endif
 
 #include "ntstatus.h"
@@ -46,19 +54,25 @@
 #include "windef.h"
 #include "winternl.h"
 #include "ntdll_misc.h"
+#include "wine/exception.h"
 #include "wine/library.h"
 #include "wine/server.h"
 #include "wine/unicode.h"
 
 #ifdef HAVE_MACH_MACH_H
-#define cpu_type_t mach_cpu_type_t
 #include <mach/mach.h>
-#undef cpu_type_t
 #endif
 
 WINE_DEFAULT_DEBUG_CHANNEL(process);
 
-static ULONG execute_flags = MEM_EXECUTE_OPTION_DISABLE;
+static ULONG execute_flags = MEM_EXECUTE_OPTION_DISABLE | (
+#ifdef __i386_on_x86_64__
+                                                           0 ?
+#else
+                                                           sizeof(void *) > sizeof(int) ?
+#endif
+                                                           MEM_EXECUTE_OPTION_DISABLE_THUNK_EMULATION |
+                                                           MEM_EXECUTE_OPTION_PERMANENT : 0);
 
 static const char * const cpu_names[] = { "x86", "x86_64", "PowerPC", "ARM", "ARM64" };
 
@@ -66,6 +80,366 @@ static inline BOOL is_64bit_arch( client_cpu_t cpu )
 {
     return (cpu == CPU_x86_64 || cpu == CPU_ARM64);
 }
+
+/* CrossOver Hack 10523: shunt the loading to CrossOver */
+enum { /* must match definitions in Mac app code (WineLoader.m) */
+    REQUEST_LOAD_WINE = 0x52c17355,
+    RESPONSE_SUCCESS,
+    REQUEST_LOAD_WINE_64BIT,
+};
+
+#ifdef __APPLE__
+extern char * HOSTPTR * HOSTPTR __wine_get_main_environment(void);
+#else
+extern char * HOSTPTR * HOSTPTR __wine_main_environ;
+static char * HOSTPTR * HOSTPTR __wine_get_main_environment(void) { return __wine_main_environ; }
+#endif
+
+static BOOL write_data(int sock, const void * HOSTPTR buffer, size_t length)
+{
+    const char* HOSTPTR p = buffer;
+    while (length)
+    {
+        ssize_t rc = write(sock, p, length);
+        if (rc > 0)
+        {
+            p += rc;
+            length -= rc;
+        }
+        else if (errno != EINTR)
+        {
+            WARN("failed to write data; errno %d\n", errno);
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+}
+
+static BOOL write_length_prefixed_buffer(int sock, const void *buffer, uint64_t length)
+{
+    if (!write_data(sock, &length, sizeof(length)))
+        return FALSE;
+
+    if (!write_data(sock, buffer, length))
+        return FALSE;
+
+    return TRUE;
+}
+
+static BOOL read_data(int sock, void *buffer, size_t length)
+{
+    char* p = buffer;
+    while (length > 0)
+    {
+        int rc = read(sock, p, length);
+        if (rc > 0)
+        {
+            p += rc;
+            length -= rc;
+        }
+        else if (rc == 0 || errno != EINTR)
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
+static BOOL send_to_cx_loader(const char *loader, char * HOSTPTR * HOSTPTR argv, const RTL_USER_PROCESS_PARAMETERS *params,
+                              int wineserversocket, int stdin_fd, int stdout_fd, const char *unixdir, char *winedebug,
+                              const pe_image_info_t *pe_info, const char* wineloader)
+{
+    /* HKCU\Software\CrossOver\SuppressAltLoader */
+    static const WCHAR suppress_key[] = {'S','o','f','t','w','a','r','e','\\',
+                                         'C','r','o','s','s','O','v','e','r','\\',
+                                         'S','u','p','p','r','e','s','s','A','l','t','L','o','a','d','e','r',0};
+    static const WCHAR use_key[] = {'S','o','f','t','w','a','r','e','\\',
+                                    'C','r','o','s','s','O','v','e','r','\\',
+                                    'U','s','e','A','l','t','L','o','a','d','e','r',0};
+    BOOL ret = FALSE;
+    const char * HOSTPTR socket_path;
+    int sock = -1;
+    struct sockaddr_un sa;
+    ssize_t rc;
+    uint32_t request_type;
+    char * HOSTPTR * HOSTPTR elem;
+    uint64_t length;
+    uint8_t dummy;
+    struct iovec iov;
+    struct msghdr msg;
+    struct {
+        struct cmsghdr hdr;
+        int fds[5]; // standard in, out, and error, wineserver socket, and WINE_WAIT_CHILD_PIPE
+    } cmsg;
+    int nullfd = -1;
+    const char* HOSTPTR wait_child_pipe;
+    uint32_t response;
+
+    TRACE("loader %s wineserversocket %d stdin_fd %d stdout_fd %d unixdir %s winedebug %s wineloader %s\n",
+          debugstr_a(loader), wineserversocket, stdin_fd, stdout_fd, debugstr_a(unixdir), debugstr_a(winedebug),
+          debugstr_a(wineloader));
+
+    socket_path = getenv("CX_ALT_LOADER_SOCKET");
+    if (!socket_path)
+    {
+        TRACE("CX_ALT_LOADER_SOCKET is not set; nothing to do\n");
+        goto failed;
+    }
+
+    TRACE("socket path %s\n", debugstr_a(socket_path));
+
+    if (argv[1])
+    {
+        OBJECT_ATTRIBUTES attr;
+
+        attr.Length = sizeof(attr);
+        attr.Attributes = 0;
+        attr.SecurityDescriptor = NULL;
+        attr.SecurityQualityOfService = NULL;
+
+        if (RtlOpenCurrentUser(KEY_READ, &attr.RootDirectory) == STATUS_SUCCESS)
+        {
+            UNICODE_STRING name;
+            HANDLE hkey;
+            const char * HOSTPTR exename, * HOSTPTR p;
+            int len;
+            WCHAR *exenameW;
+
+            exename = argv[1];
+            if ((p = strrchr(exename, '/'))) exename = p + 1;
+            if ((p = strrchr(exename, '\\'))) exename = p + 1;
+            if (!(p = strrchr(exename, '.'))) p = exename + strlen(exename);
+
+            len = ntdll_umbstowcs(0, exename, p - exename, NULL, 0);
+            exenameW = RtlAllocateHeap(GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR));
+            ntdll_umbstowcs(0, exename, p - exename, exenameW, len);
+            exenameW[len] = 0;
+
+            attr.ObjectName = &name;
+
+            RtlInitUnicodeString(&name, use_key);
+            if (NtOpenKey(&hkey, KEY_READ, &attr) == STATUS_SUCCESS)
+            {
+                KEY_VALUE_BASIC_INFORMATION info;
+                DWORD size;
+                NTSTATUS status;
+                BOOL use;
+
+                RtlInitUnicodeString(&name, exenameW);
+                status = NtQueryValueKey(hkey, &name, KeyValueBasicInformation, &info, sizeof(info), &size);
+                use = (status == STATUS_SUCCESS || status == STATUS_BUFFER_OVERFLOW);
+
+                NtClose(hkey);
+
+                if (!use)
+                {
+                    TRACE("alternative loader skipped because exe name %s is not in whitelist (argv[1] %s)\n", debugstr_w(exenameW), debugstr_a(argv[1]));
+                    RtlFreeHeap(GetProcessHeap(), 0, exenameW);
+                    goto failed;
+                }
+            }
+            else
+            {
+                /* no whitelist, so try blacklist */
+                RtlInitUnicodeString(&name, suppress_key);
+
+                if (NtOpenKey(&hkey, KEY_READ, &attr) == STATUS_SUCCESS)
+                {
+                    KEY_VALUE_BASIC_INFORMATION info;
+                    DWORD size;
+                    NTSTATUS status;
+                    BOOL suppress;
+
+                    RtlInitUnicodeString(&name, exenameW);
+                    status = NtQueryValueKey(hkey, &name, KeyValueBasicInformation, &info, sizeof(info), &size);
+                    suppress = (status == STATUS_SUCCESS || status == STATUS_BUFFER_OVERFLOW);
+
+                    NtClose(hkey);
+
+                    if (suppress)
+                    {
+                        TRACE("alternative loader suppressed for exe name %s (argv[1] %s)\n", debugstr_w(exenameW), debugstr_a(argv[1]));
+                        RtlFreeHeap(GetProcessHeap(), 0, exenameW);
+                        goto failed;
+                    }
+                }
+            }
+
+            RtlFreeHeap(GetProcessHeap(), 0, exenameW);
+        }
+    }
+
+    sa.sun_family = AF_UNIX;
+    if (strlen(socket_path) >= sizeof(sa.sun_path))
+    {
+        WARN("socket path %s is too long for sockaddr_un\n", debugstr_a(socket_path));
+        goto failed;
+    }
+    lstrcpynA(sa.sun_path, socket_path, sizeof(sa.sun_path));
+#ifdef HAVE_STRUCT_SOCKADDR_UN_SUN_LEN
+    sa.sun_len = SUN_LEN(&sa) + 1;
+#endif
+
+    unsetenv("CX_ALT_LOADER_SOCKET");
+    socket_path = NULL;
+
+    sock = socket(PF_LOCAL, SOCK_STREAM, 0);
+    if (sock == -1)
+    {
+        WARN("failed to create socket; errno %d\n", errno);
+        goto failed;
+    }
+
+    if (fcntl(sock, F_SETFD, FD_CLOEXEC))
+        WARN("failed to set socket close-on-exec; proceeding anyway\n");
+
+    do
+    {
+        rc = connect(sock, (struct sockaddr*)&sa, sizeof(sa));
+    } while (rc == -1 && errno == EINTR);
+    if (rc)
+    {
+        WARN("failed to connect; errno %d\n", errno);
+        goto failed;
+    }
+
+    if (is_64bit_arch( pe_info->cpu ))
+        request_type = REQUEST_LOAD_WINE_64BIT;
+    else
+        request_type = REQUEST_LOAD_WINE;
+    if (!write_data(sock, &request_type, sizeof(request_type)))
+    {
+        WARN("failed to write request type\n");
+        goto failed;
+    }
+
+    if (!write_length_prefixed_buffer(sock, unixdir, unixdir ? strlen(unixdir) + 1 : 0))
+    {
+        WARN("failed to write working directory\n");
+        goto failed;
+    }
+
+    length = 0;
+    for (elem = __wine_get_main_environment(); *elem; elem++)
+        length += strlen(*elem) + 1;
+    if (winedebug) length += strlen(winedebug) + 1;
+    if (wineloader) length += strlen(wineloader) + 1;
+
+    if (!write_data(sock, &length, sizeof(length)))
+    {
+        WARN("failed to write environment length\n");
+        goto failed;
+    }
+
+    for (elem = __wine_get_main_environment(); *elem; elem++)
+    {
+        if (!write_data(sock, *elem, strlen(*elem) + 1))
+        {
+            WARN("failed to write environment variable\n");
+            goto failed;
+        }
+    }
+    if (winedebug && !write_data(sock, winedebug, strlen(winedebug) + 1))
+    {
+        WARN("failed to write environment variable\n");
+        goto failed;
+    }
+    if (wineloader && !write_data(sock, wineloader, strlen(wineloader) + 1))
+    {
+        WARN("failed to write environment variable\n");
+        goto failed;
+    }
+
+    length = 0;
+    if (!loader) loader = ""; /* use empty string as placeholder */
+    length += strlen(loader) + 1;
+    for (elem = &argv[1]; *elem; elem++)
+    {
+        TRACE("argv[%d] %s\n", elem - argv, debugstr_a(*elem));
+        length += strlen(*elem) + 1;
+    }
+
+    if (!write_data(sock, &length, sizeof(length)))
+    {
+        WARN("failed to write args length\n");
+        goto failed;
+    }
+
+    if (!write_data(sock, loader, strlen(loader) + 1))
+    {
+        WARN("failed to write argv[0]\n");
+        goto failed;
+    }
+    for (elem = &argv[1]; *elem; elem++)
+    {
+        if (!write_data(sock, *elem, strlen(*elem) + 1))
+        {
+            WARN("failed to write argument\n");
+            goto failed;
+        }
+    }
+
+    if (params->ConsoleFlags || params->ConsoleHandle == (HANDLE)1 ||
+        (params->hStdInput == INVALID_HANDLE_VALUE && params->hStdOutput == INVALID_HANDLE_VALUE))
+    {
+        nullfd = open("/dev/null", O_RDWR);
+        stdin_fd = nullfd;
+        stdout_fd = nullfd;
+    }
+
+    iov.iov_base = &dummy;
+    iov.iov_len = sizeof(dummy);
+
+    cmsg.hdr.cmsg_level = SOL_SOCKET;
+    cmsg.hdr.cmsg_type = SCM_RIGHTS;
+    cmsg.fds[0] = stdin_fd == -1 ? 0 : stdin_fd;
+    cmsg.fds[1] = stdout_fd == -1 ? 1 : stdout_fd;
+    cmsg.fds[2] = 2;
+    cmsg.fds[3] = wineserversocket;
+    if ((wait_child_pipe = getenv("WINE_WAIT_CHILD_PIPE")) &&
+        (cmsg.fds[4] = atoi(wait_child_pipe)))
+        cmsg.hdr.cmsg_len = (char*)&cmsg.fds[5] - (char*)&cmsg;
+    else
+        cmsg.hdr.cmsg_len = (char*)&cmsg.fds[4] - (char*)&cmsg;
+
+    msg.msg_name = NULL;
+    msg.msg_namelen = 0;
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = &cmsg;
+    msg.msg_controllen = cmsg.hdr.cmsg_len;
+    msg.msg_flags = 0;
+
+    do
+    {
+        rc = sendmsg(sock, &msg, 0);
+    } while (rc == -1 && errno == EINTR);
+    if (rc != 1)
+    {
+        WARN("failed to send file descriptors; errno %d\n", errno);
+        goto failed;
+    }
+
+    if (shutdown(sock, SHUT_WR))
+    {
+        WARN("failed to shutdown socket for writing; errno %d\n", errno);
+        goto failed;
+    }
+
+    if (!read_data(sock, &response, sizeof(response)))
+    {
+        WARN("failed to read response; errno %d\n", errno);
+        goto failed;
+    }
+
+    ret = (response == RESPONSE_SUCCESS);
+
+failed:
+    if (sock != -1) close(sock);
+    if (nullfd != -1) close(nullfd);
+    return ret;
+}
+
 
 /*
  *	Process object
@@ -690,7 +1064,7 @@ NTSTATUS WINAPI NtSetInformationProcess(
         break;
 
     case ProcessExecuteFlags:
-        if (ProcessInformationLength != sizeof(ULONG))
+        if (wine_is_64bit() || ProcessInformationLength != sizeof(ULONG))
             return STATUS_INVALID_PARAMETER;
         else if (execute_flags & MEM_EXECUTE_OPTION_PERMANENT)
             return STATUS_ACCESS_DENIED;
@@ -972,6 +1346,7 @@ static startup_info_t *create_startup_info( const RTL_USER_PROCESS_PARAMETERS *p
 
     if (!(info = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, size ))) return NULL;
 
+    info->debug_flags   = params->DebugFlags;
     info->console_flags = params->ConsoleFlags;
     info->console       = wine_server_obj_handle( params->ConsoleHandle );
     info->hstdin        = wine_server_obj_handle( params->hStdInput );
@@ -1049,6 +1424,55 @@ static const char *get_alternate_loader( char **ret_env )
 }
 
 
+#ifdef __APPLE__
+/***********************************************************************
+ *           terminate_main_thread
+ *
+ * On some versions of Mac OS X, the execve system call fails with
+ * ENOTSUP if the process has multiple threads.  Wine is always multi-
+ * threaded on Mac OS X because it specifically reserves the main thread
+ * for use by the system frameworks (see apple_main_thread() in
+ * libs/wine/loader.c).  So, when we need to exec without first forking,
+ * we need to terminate the main thread first.  We do this by installing
+ * a custom run loop source onto the main run loop and signaling it.
+ * The source's "perform" callback is pthread_exit and it will be
+ * executed on the main thread, terminating it.
+ *
+ * Returns TRUE if there's still hope the main thread has terminated or
+ * will soon.  Return FALSE if we've given up.
+ */
+static BOOL terminate_main_thread(void)
+{
+    static int delayms;
+
+    if (!delayms)
+    {
+        CFRunLoopSourceContext source_context = { 0 };
+        CFRunLoopSourceRef source;
+
+        source_context.perform = pthread_exit;
+        if (!(source = CFRunLoopSourceCreate( NULL, 0, &source_context )))
+            return FALSE;
+
+        CFRunLoopAddSource( CFRunLoopGetMain(), source, kCFRunLoopCommonModes );
+        CFRunLoopSourceSignal( source );
+        CFRunLoopWakeUp( CFRunLoopGetMain() );
+        CFRelease( source );
+
+        delayms = 20;
+    }
+
+    if (delayms > 1000)
+        return FALSE;
+
+    usleep(delayms * 1000);
+    delayms *= 2;
+
+    return TRUE;
+}
+#endif
+
+
 /***********************************************************************
  *           set_stdio_fd
  */
@@ -1090,6 +1514,11 @@ static NTSTATUS spawn_loader( const RTL_USER_PROCESS_PARAMETERS *params, int soc
     wine_server_handle_to_fd( params->hStdInput, FILE_READ_DATA, &stdin_fd, NULL );
     wine_server_handle_to_fd( params->hStdOutput, FILE_WRITE_DATA, &stdout_fd, NULL );
 
+    /* CrossOver Hack 10523: shunt the loading to CrossOver */
+    if (send_to_cx_loader(loader, argv, params, socketfd, stdin_fd, stdout_fd,
+                          unixdir, winedebug, pe_info, wineloader))
+        goto done;
+
     if (!(pid = fork()))  /* child */
     {
         if (!(pid = fork()))  /* grandchild */
@@ -1130,7 +1559,7 @@ static NTSTATUS spawn_loader( const RTL_USER_PROCESS_PARAMETERS *params, int soc
         _exit(pid == -1);
     }
 
-    if (pid != -1)
+    if (pid && pid != -1)
     {
         /* reap child */
         pid_t wret;
@@ -1140,11 +1569,216 @@ static NTSTATUS spawn_loader( const RTL_USER_PROCESS_PARAMETERS *params, int soc
     }
     else status = FILE_GetNtStatus();
 
+done: /* CrossOver Hack 10523 */
     if (stdin_fd != -1) close( stdin_fd );
     if (stdout_fd != -1) close( stdout_fd );
     RtlFreeHeap( GetProcessHeap(), 0, wineloader );
     RtlFreeHeap( GetProcessHeap(), 0, argv );
     return status;
+}
+
+
+/***********************************************************************
+ *           exec_loader
+ */
+static NTSTATUS exec_loader( const UNICODE_STRING *cmdline, int socketfd, const pe_image_info_t *pe_info )
+{
+    char *wineloader = NULL;
+    const char *loader = NULL;
+    char * HOSTPTR *argv;
+    char preloader_reserve[64], socket_env[64];
+    ULONGLONG res_start = pe_info->base;
+    ULONGLONG res_end   = pe_info->base + pe_info->map_size;
+
+    if (!(argv = build_argv( cmdline, 1 ))) return STATUS_NO_MEMORY;
+
+    if (!wine_is_64bit() ^ !is_64bit_arch( pe_info->cpu ))
+        loader = get_alternate_loader( &wineloader );
+
+    /* Reset signals that we previously set to SIG_IGN */
+    signal( SIGPIPE, SIG_DFL );
+
+    sprintf( socket_env, "WINESERVERSOCKET=%u", socketfd );
+    sprintf( preloader_reserve, "WINEPRELOADRESERVE=%x%08x-%x%08x",
+             (ULONG)(res_start >> 32), (ULONG)res_start, (ULONG)(res_end >> 32), (ULONG)res_end );
+
+    putenv( preloader_reserve );
+    putenv( socket_env );
+    if (wineloader) putenv( wineloader );
+
+    do
+    {
+        wine_exec_wine_binary( loader, argv, getenv("WINELOADER") );
+    }
+#ifdef __APPLE__
+    while (errno == ENOTSUP && terminate_main_thread());
+#else
+    while (0);
+#endif
+
+    RtlFreeHeap( GetProcessHeap(), 0, wineloader );
+    RtlFreeHeap( GetProcessHeap(), 0, argv );
+    return STATUS_INVALID_IMAGE_FORMAT;
+}
+
+
+/***************************************************************************
+ *	is_builtin_path
+ */
+static BOOL is_builtin_path( UNICODE_STRING *path, BOOL *is_64bit )
+{
+    static const WCHAR systemW[] = {'\\','?','?','\\','c',':','\\','w','i','n','d','o','w','s','\\',
+                                    's','y','s','t','e','m','3','2','\\'};
+    static const WCHAR wow64W[] = {'\\','?','?','\\','c',':','\\','w','i','n','d','o','w','s','\\',
+                                   's','y','s','w','o','w','6','4'};
+
+    *is_64bit = wine_is_64bit();
+    if (path->Length > sizeof(systemW) && !strncmpiW( path->Buffer, systemW, ARRAY_SIZE(systemW) ))
+    {
+        if (is_wow64 && !ntdll_get_thread_data()->wow64_redir) *is_64bit = TRUE;
+        return TRUE;
+    }
+    if ((wine_is_64bit() || is_wow64) && path->Length > sizeof(wow64W) &&
+        !strncmpiW( path->Buffer, wow64W, ARRAY_SIZE(wow64W) ))
+    {
+        *is_64bit = FALSE;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+
+/***********************************************************************
+ *           get_so_file_info
+ */
+static BOOL get_so_file_info( HANDLE handle, pe_image_info_t *info )
+{
+    union
+    {
+        struct
+        {
+            unsigned char magic[4];
+            unsigned char class;
+            unsigned char data;
+            unsigned char version;
+            unsigned char ignored1[9];
+            unsigned short type;
+            unsigned short machine;
+            unsigned char ignored2[8];
+            unsigned int phoff;
+            unsigned char ignored3[12];
+            unsigned short phnum;
+        } elf;
+        struct
+        {
+            unsigned char magic[4];
+            unsigned char class;
+            unsigned char data;
+            unsigned char ignored1[10];
+            unsigned short type;
+            unsigned short machine;
+            unsigned char ignored2[12];
+            unsigned __int64 phoff;
+            unsigned char ignored3[16];
+            unsigned short phnum;
+        } elf64;
+        struct
+        {
+            unsigned int magic;
+            unsigned int cputype;
+            unsigned int cpusubtype;
+            unsigned int filetype;
+            unsigned int ncmds;
+            unsigned int sizeofcmds;
+            unsigned int flags;
+            unsigned int reserved;
+        } macho;
+        IMAGE_DOS_HEADER mz;
+    } header;
+
+    IO_STATUS_BLOCK io;
+    LARGE_INTEGER offset;
+
+    offset.QuadPart = 0;
+    if (NtReadFile( handle, 0, NULL, NULL, &io, &header, sizeof(header), &offset, 0 )) return FALSE;
+    if (io.Information != sizeof(header)) return FALSE;
+
+    if (!memcmp( header.elf.magic, "\177ELF", 4 ))
+    {
+        unsigned int type;
+        unsigned short phnum;
+
+        if (header.elf.version != 1 /* EV_CURRENT */) return FALSE;
+#ifdef WORDS_BIGENDIAN
+        if (header.elf.data != 2 /* ELFDATA2MSB */) return FALSE;
+#else
+        if (header.elf.data != 1 /* ELFDATA2LSB */) return FALSE;
+#endif
+        switch (header.elf.machine)
+        {
+        case 3:   info->cpu = CPU_x86; break;
+        case 20:  info->cpu = CPU_POWERPC; break;
+        case 40:  info->cpu = CPU_ARM; break;
+        case 62:  info->cpu = CPU_x86_64; break;
+        case 183: info->cpu = CPU_ARM64; break;
+        }
+        if (header.elf.type != 3 /* ET_DYN */) return FALSE;
+        if (header.elf.class == 2 /* ELFCLASS64 */)
+        {
+            offset.QuadPart = header.elf64.phoff;
+            phnum = header.elf64.phnum;
+        }
+        else
+        {
+            offset.QuadPart = header.elf.phoff;
+            phnum = header.elf.phnum;
+        }
+        while (phnum--)
+        {
+            if (NtReadFile( handle, 0, NULL, NULL, &io, &type, sizeof(type), &offset, 0 )) return FALSE;
+            if (io.Information < sizeof(type)) return FALSE;
+            if (type == 3 /* PT_INTERP */) return FALSE;
+            offset.QuadPart += (header.elf.class == 2) ? 56 : 32;
+        }
+        return TRUE;
+    }
+    else if (header.macho.magic == 0xfeedface || header.macho.magic == 0xfeedfacf)
+    {
+        switch (header.macho.cputype)
+        {
+        case 0x00000007: info->cpu = CPU_x86; break;
+        case 0x01000007: info->cpu = CPU_x86_64; break;
+        case 0x0000000c: info->cpu = CPU_ARM; break;
+        case 0x0100000c: info->cpu = CPU_ARM64; break;
+        case 0x00000012: info->cpu = CPU_POWERPC; break;
+        }
+        if (header.macho.magic == 0xfeedfacf && info->cpu == CPU_x86_64)
+        {
+            struct segment_command_64
+            {
+                unsigned int    cmd;
+                unsigned int    cmdsize;
+                char            segname[16];
+            } seg;
+
+            offset.QuadPart = sizeof(header.macho);
+
+            while (header.macho.ncmds--)
+            {
+                if (NtReadFile( handle, 0, NULL, NULL, &io, &seg, sizeof(seg), &offset, 0 ) ||
+                    io.Information < sizeof(seg))
+                    break;
+                if (seg.cmd == 0x19 /*LC_SEGMENT_64*/ && !strcmp(seg.segname, "WINE_32on64"))
+                {
+                    info->cpu = CPU_x86;
+                    break;
+                }
+                offset.QuadPart += seg.cmdsize;
+            }
+        }
+        if (header.macho.filetype == 8) return TRUE;
+    }
+    return FALSE;
 }
 
 
@@ -1159,9 +1793,31 @@ static NTSTATUS get_pe_file_info( UNICODE_STRING *path, ULONG attributes,
     OBJECT_ATTRIBUTES attr;
     IO_STATUS_BLOCK io;
 
+    memset( info, 0, sizeof(*info) );
     InitializeObjectAttributes( &attr, path, attributes, 0, 0 );
     if ((status = NtOpenFile( handle, GENERIC_READ, &attr, &io,
-                              FILE_SHARE_READ | FILE_SHARE_DELETE, 0 ))) return status;
+                              FILE_SHARE_READ | FILE_SHARE_DELETE, FILE_SYNCHRONOUS_IO_NONALERT )))
+    {
+        BOOL is_64bit;
+
+        if (is_builtin_path( path, &is_64bit ))
+        {
+            TRACE( "assuming %u-bit builtin for %s\n", is_64bit ? 64 : 32, debugstr_us(path));
+            /* assume current arch */
+#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
+            info->cpu = is_64bit ? CPU_x86_64 : CPU_x86;
+#elif defined(__powerpc__)
+            info->cpu = CPU_POWERPC;
+#elif defined(__arm__)
+            info->cpu = CPU_ARM;
+#elif defined(__aarch64__)
+            info->cpu = CPU_ARM64;
+#endif
+            *handle = 0;
+            return STATUS_SUCCESS;
+        }
+        return status;
+    }
 
     if (!(status = NtCreateSection( &mapping, STANDARD_RIGHTS_REQUIRED | SECTION_QUERY |
                                     SECTION_MAP_READ | SECTION_MAP_EXECUTE,
@@ -1176,6 +1832,10 @@ static NTSTATUS get_pe_file_info( UNICODE_STRING *path, ULONG attributes,
         }
         SERVER_END_REQ;
         NtClose( mapping );
+    }
+    else if (status == STATUS_INVALID_IMAGE_NOT_MZ)
+    {
+        if (get_so_file_info( *handle, info )) return STATUS_SUCCESS;
     }
     return status;
 }
@@ -1222,6 +1882,183 @@ static char *get_unix_curdir( const RTL_USER_PROCESS_PARAMETERS *params )
 }
 
 
+/***********************************************************************
+ *           fork_and_exec
+ *
+ * Fork and exec a new Unix binary, checking for errors.
+ */
+static NTSTATUS fork_and_exec( UNICODE_STRING *path, const RTL_USER_PROCESS_PARAMETERS *params )
+{
+    pid_t pid;
+    int fd[2], stdin_fd = -1, stdout_fd = -1;
+    char * HOSTPTR *argv, * HOSTPTR *envp;
+    char *unixdir;
+    ANSI_STRING unix_name;
+    NTSTATUS status;
+
+    status = wine_nt_to_unix_file_name( path, &unix_name, FILE_OPEN, FALSE );
+    if (status) return status;
+
+#ifdef HAVE_PIPE2
+    if (pipe2( fd, O_CLOEXEC ) == -1)
+#endif
+    {
+        if (pipe(fd) == -1)
+        {
+            RtlFreeAnsiString( &unix_name );
+            return STATUS_TOO_MANY_OPENED_FILES;
+        }
+        fcntl( fd[0], F_SETFD, FD_CLOEXEC );
+        fcntl( fd[1], F_SETFD, FD_CLOEXEC );
+    }
+
+    wine_server_handle_to_fd( params->hStdInput, FILE_READ_DATA, &stdin_fd, NULL );
+    wine_server_handle_to_fd( params->hStdOutput, FILE_WRITE_DATA, &stdout_fd, NULL );
+
+    argv = build_argv( &params->CommandLine, 0 );
+    envp = build_envp( params->Environment );
+    unixdir = get_unix_curdir( params );
+
+    if (!(pid = fork()))  /* child */
+    {
+        if (!(pid = fork()))  /* grandchild */
+        {
+            close( fd[0] );
+
+            if (params->ConsoleFlags ||
+                params->ConsoleHandle == (HANDLE)1 /* KERNEL32_CONSOLE_ALLOC */ ||
+                (params->hStdInput == INVALID_HANDLE_VALUE && params->hStdOutput == INVALID_HANDLE_VALUE))
+            {
+                setsid();
+                set_stdio_fd( -1, -1 );  /* close stdin and stdout */
+            }
+            else set_stdio_fd( stdin_fd, stdout_fd );
+
+            if (stdin_fd != -1) close( stdin_fd );
+            if (stdout_fd != -1) close( stdout_fd );
+
+            /* Reset signals that we previously set to SIG_IGN */
+            signal( SIGPIPE, SIG_DFL );
+
+            if (unixdir) chdir( unixdir );
+
+            if (argv && envp) execve( unix_name.Buffer, argv, envp );
+        }
+
+        if (pid <= 0)  /* grandchild if exec failed or child if fork failed */
+        {
+            status = FILE_GetNtStatus();
+            write( fd[1], &status, sizeof(status) );
+            _exit(1);
+        }
+
+        _exit(0); /* child if fork succeeded */
+    }
+    close( fd[1] );
+
+    if (pid != -1)
+    {
+        /* reap child */
+        pid_t wret;
+        do {
+            wret = waitpid(pid, NULL, 0);
+        } while (wret < 0 && errno == EINTR);
+        read( fd[0], &status, sizeof(status) );  /* if we read something, exec or second fork failed */
+    }
+    else status = FILE_GetNtStatus();
+
+    close( fd[0] );
+    if (stdin_fd != -1) close( stdin_fd );
+    if (stdout_fd != -1) close( stdout_fd );
+    RtlFreeHeap( GetProcessHeap(), 0, argv );
+    RtlFreeHeap( GetProcessHeap(), 0, envp );
+    RtlFreeAnsiString( &unix_name );
+    return status;
+}
+
+
+/***********************************************************************
+ *           restart_process
+ */
+NTSTATUS restart_process( RTL_USER_PROCESS_PARAMETERS *params, NTSTATUS status )
+{
+    static const WCHAR argsW[] = {'%','s','%','s',' ','-','-','a','p','p','-','n','a','m','e',' ','"','%','s','"',' ','%','s',0};
+    static const WCHAR winevdm[] = {'w','i','n','e','v','d','m','.','e','x','e',0};
+    static const WCHAR comW[] = {'.','c','o','m',0};
+    static const WCHAR pifW[] = {'.','p','i','f',0};
+
+    int socketfd[2];
+    WCHAR *p, *cmdline;
+    UNICODE_STRING strW;
+    pe_image_info_t pe_info;
+    HANDLE handle;
+
+    /* check for .com or .pif extension */
+    if (status == STATUS_INVALID_IMAGE_NOT_MZ &&
+        (p = strrchrW( params->ImagePathName.Buffer, '.' )) &&
+        (!strcmpiW( p, comW ) || !strcmpiW( p, pifW )))
+        status = STATUS_INVALID_IMAGE_WIN_16;
+
+    switch (status)
+    {
+    case STATUS_CONFLICTING_ADDRESSES:
+    case STATUS_NO_MEMORY:
+    case STATUS_INVALID_IMAGE_FORMAT:
+    case STATUS_INVALID_IMAGE_NOT_MZ:
+        if (getenv( "WINEPRELOADRESERVE" ))
+            return status;
+        if ((status = RtlDosPathNameToNtPathName_U_WithStatus( params->ImagePathName.Buffer, &strW,
+                                                               NULL, NULL )))
+            return status;
+        if ((status = get_pe_file_info( &strW, OBJ_CASE_INSENSITIVE, &handle, &pe_info )))
+            return status;
+        strW = params->CommandLine;
+        break;
+    case STATUS_INVALID_IMAGE_WIN_16:
+    case STATUS_INVALID_IMAGE_NE_FORMAT:
+    case STATUS_INVALID_IMAGE_PROTECT:
+        cmdline = RtlAllocateHeap( GetProcessHeap(), 0,
+                                   (strlenW(system_dir) + strlenW(winevdm) + 16 +
+                                    strlenW(params->ImagePathName.Buffer) +
+                                    strlenW(params->CommandLine.Buffer)) * sizeof(WCHAR));
+        if (!cmdline) return STATUS_NO_MEMORY;
+        sprintfW( cmdline, argsW, (wine_is_64bit() || is_wow64) ? syswow64_dir : system_dir,
+                  winevdm, params->ImagePathName.Buffer, params->CommandLine.Buffer );
+        RtlInitUnicodeString( &strW, cmdline );
+        memset( &pe_info, 0, sizeof(pe_info) );
+        pe_info.cpu = CPU_x86;
+        break;
+    default:
+        return status;
+    }
+
+    /* exec the new process */
+
+    if (socketpair( PF_UNIX, SOCK_STREAM, 0, socketfd ) == -1) return STATUS_TOO_MANY_OPENED_FILES;
+#ifdef SO_PASSCRED
+    else
+    {
+        int enable = 1;
+        setsockopt( socketfd[0], SOL_SOCKET, SO_PASSCRED, &enable, sizeof(enable) );
+    }
+#endif
+    wine_server_send_fd( socketfd[1] );
+    close( socketfd[1] );
+
+    SERVER_START_REQ( exec_process )
+    {
+        req->socket_fd = socketfd[1];
+        req->cpu       = pe_info.cpu;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+
+    if (!status) status = exec_loader( &strW, socketfd[0], &pe_info );
+    close( socketfd[0] );
+    return status;
+}
+
+
 /**********************************************************************
  *           RtlCreateUserProcess  (NTDLL.@)
  */
@@ -1241,7 +2078,7 @@ NTSTATUS WINAPI RtlCreateUserProcess( UNICODE_STRING *path, ULONG attributes,
     char *unixdir = NULL, *winedebug = NULL;
     startup_info_t *startup_info = NULL;
     ULONG startup_info_size, env_size;
-    int err, socketfd[2] = { -1, -1 };
+    int socketfd[2] = { -1, -1 };
     OBJECT_ATTRIBUTES attr;
     pe_image_info_t pe_info;
 
@@ -1250,7 +2087,15 @@ NTSTATUS WINAPI RtlCreateUserProcess( UNICODE_STRING *path, ULONG attributes,
     TRACE( "%s image %s cmdline %s\n", debugstr_us( path ),
            debugstr_us( &params->ImagePathName ), debugstr_us( &params->CommandLine ));
 
-    if ((status = get_pe_file_info( path, attributes, &file_handle, &pe_info ))) goto done;
+    if ((status = get_pe_file_info( path, attributes, &file_handle, &pe_info )))
+    {
+        if (status == STATUS_INVALID_IMAGE_NOT_MZ && !fork_and_exec( path, params ))
+        {
+            memset( info, 0, sizeof(*info) );
+            return STATUS_SUCCESS;
+        }
+        goto done;
+    }
     if (!(startup_info = create_startup_info( params, &startup_info_size ))) goto done;
     env_size = get_env_size( params, &winedebug );
     unixdir = get_unix_curdir( params );
@@ -1281,8 +2126,9 @@ NTSTATUS WINAPI RtlCreateUserProcess( UNICODE_STRING *path, ULONG attributes,
 
     SERVER_START_REQ( new_process )
     {
+        req->parent_process = wine_server_obj_handle(parent);
         req->inherit_all    = inherit;
-        req->create_flags   = 0;
+        req->create_flags   = params->DebugFlags; /* hack: creation flags stored in DebugFlags for now */
         req->socket_fd      = socketfd[1];
         req->exe_file       = wine_server_obj_handle( file_handle );
         req->access         = PROCESS_ALL_ACCESS;
@@ -1306,12 +2152,11 @@ NTSTATUS WINAPI RtlCreateUserProcess( UNICODE_STRING *path, ULONG attributes,
         switch (status)
         {
         case STATUS_INVALID_IMAGE_WIN_64:
-            ERR( "64-bit application %s not supported in 32-bit prefix\n",
-                 debugstr_us( &params->ImagePathName ));
+            ERR( "64-bit application %s not supported in 32-bit prefix\n", debugstr_us(path) );
             break;
         case STATUS_INVALID_IMAGE_FORMAT:
             ERR( "%s not supported on this installation (%s binary)\n",
-                 debugstr_us( &params->ImagePathName ), cpu_names[pe_info.cpu] );
+                 debugstr_us(path), cpu_names[pe_info.cpu] );
             break;
         }
         goto done;
@@ -1352,7 +2197,7 @@ NTSTATUS WINAPI RtlCreateUserProcess( UNICODE_STRING *path, ULONG attributes,
         req->info = wine_server_obj_handle( process_info );
         wine_server_call( req );
         success = reply->success;
-        err = reply->exit_code;
+        status = reply->exit_code;
     }
     SERVER_END_REQ;
 
@@ -1368,10 +2213,10 @@ NTSTATUS WINAPI RtlCreateUserProcess( UNICODE_STRING *path, ULONG attributes,
         process_handle = thread_handle = 0;
         status = STATUS_SUCCESS;
     }
-    else status = err ? err : ERROR_INTERNAL_ERROR;
+    else if (!status) status = STATUS_INTERNAL_ERROR;
 
 done:
-    NtClose( file_handle );
+    if (file_handle) NtClose( file_handle );
     if (process_info) NtClose( process_info );
     if (process_handle) NtClose( process_handle );
     if (thread_handle) NtClose( thread_handle );
@@ -1388,7 +2233,18 @@ done:
 void WINAPI DbgUiRemoteBreakin( void *arg )
 {
     TRACE( "\n" );
-    if (NtCurrentTeb()->Peb->BeingDebugged) DbgBreakPoint();
+    if (NtCurrentTeb()->Peb->BeingDebugged)
+    {
+        __TRY
+        {
+            DbgBreakPoint();
+        }
+        __EXCEPT_ALL
+        {
+            /* do nothing */
+        }
+        __ENDTRY
+    }
     RtlExitUserThread( STATUS_SUCCESS );
 }
 

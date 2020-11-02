@@ -158,7 +158,7 @@ typedef struct
         struct { struct { unsigned __int64 low, high; } fpregs[32]; } x86_64_regs;
         struct { double fpr[32], fpscr; } powerpc_regs;
         struct { unsigned __int64 d[32]; unsigned int fpscr; } arm_regs;
-        struct { unsigned __int64 d[64]; unsigned int fpcr, fpsr; } arm64_regs;
+        struct { struct { unsigned __int64 low, high; } q[32]; unsigned int fpcr, fpsr; } arm64_regs;
     } fp;
     union
     {
@@ -486,7 +486,7 @@ typedef union
         unsigned int     op_type;
         client_ptr_t     addr;
         mem_size_t       size;
-        unsigned int     zero_bits;
+        unsigned int     zero_bits_64;
         unsigned int     prot;
     } virtual_alloc;
     struct
@@ -538,7 +538,7 @@ typedef union
         mem_size_t       size;
         file_pos_t       offset;
         unsigned int     alloc_type;
-        unsigned short   zero_bits;
+        unsigned short   zero_bits_64;
         unsigned short   prot;
     } map_view;
     struct
@@ -771,6 +771,7 @@ struct rawinput_device
 struct new_process_request
 {
     struct request_header __header;
+    obj_handle_t parent_process;
     int          inherit_all;
     unsigned int create_flags;
     int          socket_fd;
@@ -781,6 +782,7 @@ struct new_process_request
     /* VARARG(objattr,object_attributes); */
     /* VARARG(info,startup_info,info_size); */
     /* VARARG(env,unicode_str); */
+    char __pad_44[4];
 };
 struct new_process_reply
 {
@@ -797,8 +799,8 @@ struct exec_process_request
 {
     struct request_header __header;
     int          socket_fd;
-    obj_handle_t exe_file;
     client_cpu_t cpu;
+    char __pad_20[4];
 };
 struct exec_process_reply
 {
@@ -1008,7 +1010,10 @@ struct get_thread_info_reply
     int          exit_code;
     int          priority;
     int          last;
-    char __pad_52[4];
+    int          suspend_count;
+    data_size_t  desc_len;
+    /* VARARG(desc,unicode_str); */
+    char __pad_60[4];
 };
 
 
@@ -1036,16 +1041,18 @@ struct set_thread_info_request
     affinity_t   affinity;
     client_ptr_t entry_point;
     obj_handle_t token;
+    /* VARARG(desc,unicode_str); */
     char __pad_44[4];
 };
 struct set_thread_info_reply
 {
     struct reply_header __header;
 };
-#define SET_THREAD_INFO_PRIORITY   0x01
-#define SET_THREAD_INFO_AFFINITY   0x02
-#define SET_THREAD_INFO_TOKEN      0x04
-#define SET_THREAD_INFO_ENTRYPOINT 0x08
+#define SET_THREAD_INFO_PRIORITY    0x01
+#define SET_THREAD_INFO_AFFINITY    0x02
+#define SET_THREAD_INFO_TOKEN       0x04
+#define SET_THREAD_INFO_ENTRYPOINT  0x08
+#define SET_THREAD_INFO_DESCRIPTION 0x10
 
 
 
@@ -1919,12 +1926,12 @@ struct attach_console_reply
 struct get_console_wait_event_request
 {
     struct request_header __header;
-    char __pad_12[4];
+    obj_handle_t handle;
 };
 struct get_console_wait_event_reply
 {
     struct reply_header __header;
-    obj_handle_t handle;
+    obj_handle_t event;
     char __pad_12[4];
 };
 
@@ -2076,8 +2083,10 @@ struct set_console_output_info_request
     short int    max_height;
     short int    font_width;
     short int    font_height;
-    /* VARARG(colors,uints); */
-    char __pad_52[4];
+    short int    font_weight;
+    short int    font_pitch_family;
+    /* VARARG(colors,uints,64); */
+    /* VARARG(face_name,unicode_str); */
 };
 struct set_console_output_info_reply
 {
@@ -2119,7 +2128,11 @@ struct get_console_output_info_reply
     short int    max_height;
     short int    font_width;
     short int    font_height;
-    /* VARARG(colors,uints); */
+    short int    font_weight;
+    short int    font_pitch_family;
+    /* VARARG(colors,uints,64); */
+    /* VARARG(face_name,unicode_str); */
+    char __pad_44[4];
 };
 
 
@@ -5830,6 +5843,103 @@ struct resume_process_reply
 };
 
 
+struct create_esync_request
+{
+    struct request_header __header;
+    unsigned int access;
+    int          initval;
+    int          type;
+    int          max;
+    /* VARARG(objattr,object_attributes); */
+    char __pad_28[4];
+};
+struct create_esync_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    int          type;
+    unsigned int shm_idx;
+    char __pad_20[4];
+};
+
+
+struct open_esync_request
+{
+    struct request_header __header;
+    unsigned int access;
+    unsigned int attributes;
+    obj_handle_t rootdir;
+    int          type;
+    /* VARARG(name,unicode_str); */
+    char __pad_28[4];
+};
+struct open_esync_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    int          type;
+    unsigned int shm_idx;
+    char __pad_20[4];
+};
+
+
+struct get_esync_read_fd_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct get_esync_read_fd_reply
+{
+    struct reply_header __header;
+    int          type;
+    unsigned int shm_idx;
+};
+
+
+struct get_esync_write_fd_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct get_esync_write_fd_reply
+{
+    struct reply_header __header;
+};
+
+
+struct get_esync_apc_fd_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct get_esync_apc_fd_reply
+{
+    struct reply_header __header;
+};
+
+
+struct esync_msgwait_request
+{
+    struct request_header __header;
+    int          in_msgwait;
+};
+struct esync_msgwait_reply
+{
+    struct reply_header __header;
+};
+
+enum esync_type
+{
+    ESYNC_SEMAPHORE = 1,
+    ESYNC_AUTO_EVENT,
+    ESYNC_MANUAL_EVENT,
+    ESYNC_MUTEX,
+    ESYNC_AUTO_SERVER,
+    ESYNC_MANUAL_SERVER,
+    ESYNC_QUEUE,
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -6132,6 +6242,12 @@ enum request
     REQ_terminate_job,
     REQ_suspend_process,
     REQ_resume_process,
+    REQ_create_esync,
+    REQ_open_esync,
+    REQ_get_esync_read_fd,
+    REQ_get_esync_write_fd,
+    REQ_get_esync_apc_fd,
+    REQ_esync_msgwait,
     REQ_NB_REQUESTS
 };
 
@@ -6439,6 +6555,12 @@ union generic_request
     struct terminate_job_request terminate_job_request;
     struct suspend_process_request suspend_process_request;
     struct resume_process_request resume_process_request;
+    struct create_esync_request create_esync_request;
+    struct open_esync_request open_esync_request;
+    struct get_esync_read_fd_request get_esync_read_fd_request;
+    struct get_esync_write_fd_request get_esync_write_fd_request;
+    struct get_esync_apc_fd_request get_esync_apc_fd_request;
+    struct esync_msgwait_request esync_msgwait_request;
 };
 union generic_reply
 {
@@ -6744,9 +6866,15 @@ union generic_reply
     struct terminate_job_reply terminate_job_reply;
     struct suspend_process_reply suspend_process_reply;
     struct resume_process_reply resume_process_reply;
+    struct create_esync_reply create_esync_reply;
+    struct open_esync_reply open_esync_reply;
+    struct get_esync_read_fd_reply get_esync_read_fd_reply;
+    struct get_esync_write_fd_reply get_esync_write_fd_reply;
+    struct get_esync_apc_fd_reply get_esync_apc_fd_reply;
+    struct esync_msgwait_reply esync_msgwait_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 589
+#define SERVER_PROTOCOL_VERSION 597
 
 #include <wine/winheader_exit.h>
 

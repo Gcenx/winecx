@@ -39,7 +39,7 @@
 
 #undef YY_INPUT
 
-static char** local_lexemes /* = NULL */;
+static char* WIN32PTR * WIN32PTR local_lexemes /* = NULL */;
 static int next_lexeme /* = 0 */;
 static int alloc_lexeme /* = 0 */;
 
@@ -67,16 +67,16 @@ void lexeme_flush(void)
     next_lexeme = 0;
 }
 
-static size_t read_input(const char* pfx, char* buf, int size)
+static size_t read_input(const char* WIN32PTR pfx, char* buf, int size)
 {
     int len;
-    static char*  last_line = NULL;
+    static char* WIN32PTR last_line = NULL;
     static size_t last_line_idx = 0;
 
     /* try first to fetch the remaining of an existing line */
     if (last_line_idx == 0)
     {
-        char* tmp = NULL;
+        char* WIN32PTR tmp = NULL;
         /* no remaining chars to be read from last line, grab a brand new line up to '\n' */
         lexeme_flush();
         len = input_fetch_entire_line(pfx, &tmp);
@@ -161,11 +161,11 @@ STRING     \"[^\n"]+\"
 "["					{ return *yytext; }
 "]"					{ return *yytext; }
 
-"0x"{HEXDIGIT}+      			{ sscanf(yytext, "%lx", &dbg_lval.integer); return tNUM; }
-{DIGIT}+             			{ sscanf(yytext, "%ld", &dbg_lval.integer); return tNUM; }
+"0x"{HEXDIGIT}+      			{ unsigned long temp; sscanf(yytext, "%lx", &temp); dbg_lval.integer = temp; return tNUM; }
+{DIGIT}+             			{ long temp; sscanf(yytext, "%ld", &temp); dbg_lval.integer = temp; return tNUM; }
 "'\\''"                                 { dbg_lval.integer = '\''; return tNUM;}
-"'\\0"{OCTDIGIT}*"'"                    { sscanf(yytext + 3, "%lo", &dbg_lval.integer); return tNUM;}
-"'\\x"{HEXDIGIT}+"'"                    { sscanf(yytext + 3, "%lx", &dbg_lval.integer); return tNUM;}
+"'\\0"{OCTDIGIT}*"'"                    { unsigned long temp; sscanf(yytext + 3, "%lo", &temp); dbg_lval.integer = temp; return tNUM;}
+"'\\x"{HEXDIGIT}+"'"                    { unsigned long temp; sscanf(yytext + 3, "%lx", &temp); dbg_lval.integer = temp; return tNUM;}
 "'\\"[a-z]"'"                           { dbg_lval.integer = yytext[2] - 'a'; return tNUM;}
 "'"."'"                                 { dbg_lval.integer = yytext[1]; return tNUM;}
 
@@ -193,6 +193,7 @@ STRING     \"[^\n"]+\"
 <INFO_CMD,BD_CMD>display|displa|displ|disp|dis|di|d	{ BEGIN(NOCMD); return tDISPLAY; }
 <INITIAL>undisplay|undispla|undispl|undisp|undis|undi|und	{ BEGIN(NOCMD); return tUNDISPLAY; }
 <INITIAL>delete|delet|dele|del		{ BEGIN(BD_CMD); return tDELETE; }
+<INITIAL>thread|threa|thre|thr|th	{ BEGIN(NOCMD); return tTHREAD; }
 <INITIAL,NOPROCESS>quit|qui|qu|q	{ BEGIN(NOCMD); return tQUIT; }
 <INITIAL>set|se				{ BEGIN(NOCMD); return tSET; }
 <INITIAL>x				{ BEGIN(FORMAT_EXPECTED); return tEXAM; }

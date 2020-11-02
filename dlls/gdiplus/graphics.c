@@ -372,6 +372,9 @@ static GpStatus alpha_blend_bmp_pixels(GpGraphics *graphics, INT dst_x, INT dst_
 {
     GpBitmap *dst_bitmap = (GpBitmap*)graphics->image;
     INT x, y;
+    CompositingMode comp_mode;
+
+    GdipGetCompositingMode(graphics, &comp_mode);
 
     for (y=0; y<src_height; y++)
     {
@@ -380,14 +383,19 @@ static GpStatus alpha_blend_bmp_pixels(GpGraphics *graphics, INT dst_x, INT dst_
             ARGB dst_color, src_color;
             src_color = ((ARGB*)(src + src_stride * y))[x];
 
-            if (!(src_color & 0xff000000))
-                continue;
-
-            GdipBitmapGetPixel(dst_bitmap, x+dst_x, y+dst_y, &dst_color);
-            if (fmt & PixelFormatPAlpha)
-                GdipBitmapSetPixel(dst_bitmap, x+dst_x, y+dst_y, color_over_fgpremult(dst_color, src_color));
+            if (comp_mode == CompositingModeSourceCopy)
+                GdipBitmapSetPixel(dst_bitmap, x+dst_x, y+dst_y, src_color);
             else
-                GdipBitmapSetPixel(dst_bitmap, x+dst_x, y+dst_y, color_over(dst_color, src_color));
+            {
+                if (!(src_color & 0xff000000))
+                    continue;
+
+                GdipBitmapGetPixel(dst_bitmap, x+dst_x, y+dst_y, &dst_color);
+                if (fmt & PixelFormatPAlpha)
+                    GdipBitmapSetPixel(dst_bitmap, x+dst_x, y+dst_y, color_over_fgpremult(dst_color, src_color));
+                else
+                    GdipBitmapSetPixel(dst_bitmap, x+dst_x, y+dst_y, color_over(dst_color, src_color));
+            }
         }
     }
 
@@ -2477,6 +2485,12 @@ GpStatus WINGDIPAPI GdipDeleteGraphics(GpGraphics *graphics)
         stat = METAFILE_GraphicsDeleted((GpMetafile*)graphics->image);
         if (stat != Ok)
             return stat;
+    }
+
+    if (graphics->temp_hdc)
+    {
+        DeleteDC(graphics->temp_hdc);
+        graphics->temp_hdc = NULL;
     }
 
     if(graphics->owndc)
@@ -4941,6 +4955,7 @@ GpStatus WINGDIPAPI GdipGraphicsClear(GpGraphics *graphics, ARGB color)
     GpSolidFill *brush;
     GpStatus stat;
     GpRectF wnd_rect;
+    CompositingMode prev_comp_mode;
 
     TRACE("(%p, %x)\n", graphics, color);
 
@@ -4961,8 +4976,11 @@ GpStatus WINGDIPAPI GdipGraphicsClear(GpGraphics *graphics, ARGB color)
         return stat;
     }
 
+    GdipGetCompositingMode(graphics, &prev_comp_mode);
+    GdipSetCompositingMode(graphics, CompositingModeSourceCopy);
     GdipFillRectangle(graphics, (GpBrush*)brush, wnd_rect.X, wnd_rect.Y,
                                                  wnd_rect.Width, wnd_rect.Height);
+    GdipSetCompositingMode(graphics, prev_comp_mode);
 
     GdipDeleteBrush((GpBrush*)brush);
 
@@ -6592,7 +6610,15 @@ GpStatus WINGDIPAPI GdipGetDC(GpGraphics *graphics, HDC *hdc)
         if (!hbitmap)
             return GenericError;
 
-        temp_hdc = CreateCompatibleDC(0);
+        if (!graphics->temp_hdc)
+        {
+            temp_hdc = CreateCompatibleDC(0);
+        }
+        else
+        {
+            temp_hdc = graphics->temp_hdc;
+        }
+
         if (!temp_hdc)
         {
             DeleteObject(hbitmap);
@@ -6653,9 +6679,7 @@ GpStatus WINGDIPAPI GdipReleaseDC(GpGraphics *graphics, HDC hdc)
             graphics->temp_hbitmap_width * 4, PixelFormat32bppARGB);
 
         /* Clean up. */
-        DeleteDC(graphics->temp_hdc);
         DeleteObject(graphics->temp_hbitmap);
-        graphics->temp_hdc = NULL;
         graphics->temp_hbitmap = NULL;
     }
     else if (hdc != graphics->hdc)
@@ -6707,6 +6731,7 @@ GpStatus gdi_transform_acquire(GpGraphics *graphics)
     if (graphics->gdi_transform_acquire_count == 0 && graphics->hdc)
     {
         graphics->gdi_transform_save = SaveDC(graphics->hdc);
+        ModifyWorldTransform(graphics->hdc, NULL, MWT_IDENTITY);
         SetGraphicsMode(graphics->hdc, GM_COMPATIBLE);
         SetMapMode(graphics->hdc, MM_TEXT);
         SetWindowOrgEx(graphics->hdc, 0, 0, NULL);

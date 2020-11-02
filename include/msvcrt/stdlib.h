@@ -10,7 +10,7 @@
 
 #include "wine/winheader_enter.h"
 
-#include <crtdefs.h>
+#include <corecrt.h>
 
 #include <pshpack8.h>
 
@@ -161,10 +161,13 @@ char*         __cdecl _ecvt(double,int,int*,int*);
 char*         __cdecl _fcvt(double,int,int*,int*);
 char*         __cdecl _fullpath(char*,const char*,size_t);
 char*         __cdecl _gcvt(double,int,char*);
+errno_t       __cdecl _gcvt_s(char*, size_t, double, int);
 char*         __cdecl _i64toa(__int64,char*,int);
+errno_t       __cdecl _i64toa_s(__int64, char*, size_t, int);
 char*         __cdecl _itoa(int,char*,int);
 errno_t       __cdecl _itoa_s(int,char*,size_t,int);
 char*         __cdecl _ltoa(__msvcrt_long,char*,int);
+errno_t       __cdecl _ltoa_s(__msvcrt_long, char*, size_t, int);
 __msvcrt_ulong __cdecl _lrotl(__msvcrt_ulong,int);
 __msvcrt_ulong __cdecl _lrotr(__msvcrt_ulong,int);
 void          __cdecl _makepath(char*,const char*,const char*,const char*,const char*);
@@ -219,9 +222,7 @@ double        __cdecl strtod(const char*,char**);
 double        __cdecl strtold(const char*,char**);
 __msvcrt_long __cdecl strtol(const char*,char**,int);
 __msvcrt_ulong __cdecl strtoul(const char*,char**,int);
-__int64       __cdecl strtoll(const char*,char**,int);
 __int64       __cdecl strtoll_l(const char*,char**,int,_locale_t);
-unsigned __int64 __cdecl strtoull(const char*,char**,int);
 unsigned __int64 __cdecl strtoull_l(const char*,char**,int,_locale_t);
 __int64       __cdecl _strtoi64(const char*,char**,int);
 __int64       __cdecl _strtoi64_l(const char*,char**,int,_locale_t);
@@ -234,10 +235,15 @@ void          __cdecl qsort(void*,size_t,size_t,int (__cdecl *)(const void*,cons
 #ifndef _WSTDLIB_DEFINED
 #define _WSTDLIB_DEFINED
 wchar_t*      __cdecl _itow(int,wchar_t*,int);
+errno_t       __cdecl _itow_s(int,wchar_t*,int, int);
 wchar_t*      __cdecl _i64tow(__int64,wchar_t*,int);
+errno_t       __cdecl _i64tow_s(__int64, wchar_t*, size_t, int);
 wchar_t*      __cdecl _ltow(__msvcrt_long,wchar_t*,int);
+errno_t       __cdecl _ltow_s(__msvcrt_long,wchar_t*,int,int);
 wchar_t*      __cdecl _ui64tow(unsigned __int64,wchar_t*,int);
+errno_t       __cdecl _ui64tow_s(unsigned __int64, wchar_t*, size_t, int);
 wchar_t*      __cdecl _ultow(__msvcrt_ulong,wchar_t*,int);
+errno_t       __cdecl _ultow_s(__msvcrt_ulong, wchar_t*, size_t, int);
 wchar_t*      __cdecl _wfullpath(wchar_t*,const wchar_t*,size_t);
 wchar_t*      __cdecl _wgetenv(const wchar_t*);
 void          __cdecl _wmakepath(wchar_t*,const wchar_t*,const wchar_t*,const wchar_t*,const wchar_t*);
@@ -291,6 +297,8 @@ static inline char* itoa(int value, char* str, int radix) { return _itoa(value, 
 static inline char* ltoa(__msvcrt_long value, char* str, int radix) { return _ltoa(value, str, radix); }
 static inline _onexit_t onexit(_onexit_t func) { return _onexit(func); }
 static inline int putenv(const char* str) { return _putenv(str); }
+static inline __int64 strtoll(const char *ptr, char **endptr, int base) { return _strtoi64(ptr, endptr, base); }
+static inline unsigned __int64 __cdecl strtoull(const char *ptr, char **endptr, int base) { return _strtoui64(ptr, endptr, base); }
 static inline void swab(char* src, char* dst, int len) { _swab(src, dst, len); }
 static inline char* ultoa(__msvcrt_ulong value, char* str, int radix) { return _ultoa(value, str, radix); }
 

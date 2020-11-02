@@ -106,7 +106,7 @@ typedef enum _CONFIGURATION_TYPE
     DockingInformation,
     RealModeIrqRoutingTable,
     RealModePCIEnumeration,
-    MaximunType
+    MaximumType
 } CONFIGURATION_TYPE, *PCONFIGURATION_TYPE;
 
 typedef struct _IMAGE_INFO
@@ -216,6 +216,7 @@ typedef GUID UUID;
 NTSTATUS  WINAPI ExUuidCreate(UUID*);
 NTSTATUS  WINAPI IoQueryDeviceDescription(PINTERFACE_TYPE,PULONG,PCONFIGURATION_TYPE,PULONG,
                                   PCONFIGURATION_TYPE,PULONG,PIO_QUERY_DEVICE_ROUTINE,PVOID);
+void      WINAPI IoRegisterBootDriverReinitialization(DRIVER_OBJECT*,PDRIVER_REINITIALIZE,void*);
 void      WINAPI IoRegisterDriverReinitialization(PDRIVER_OBJECT,PDRIVER_REINITIALIZE,PVOID);
 NTSTATUS  WINAPI IoRegisterShutdownNotification(PDEVICE_OBJECT);
 BOOLEAN   WINAPI KeAreApcsDisabled(void);

@@ -948,23 +948,29 @@ DWORD WINAPI GetIpStatisticsEx(PMIB_IPSTATS stats, DWORD family)
             return ERROR_NOT_SUPPORTED;
         }
 
-        stats->u.dwForwarding = ip_forwarding;
+        /* ip.forwarding is 0 or 1 on BSD */
+        stats->u.dwForwarding = ip_forwarding+1;
         stats->dwDefaultTTL = ip_ttl;
-        stats->dwInDelivers = ip_stat.ips_delivered;
-        stats->dwInHdrErrors = ip_stat.ips_badhlen + ip_stat.ips_badsum + ip_stat.ips_tooshort + ip_stat.ips_badlen;
-        stats->dwInAddrErrors = ip_stat.ips_cantforward;
         stats->dwInReceives = ip_stat.ips_total;
+        stats->dwInHdrErrors = ip_stat.ips_badhlen + ip_stat.ips_badsum + ip_stat.ips_tooshort + ip_stat.ips_badlen +
+                               ip_stat.ips_badvers + ip_stat.ips_badoptions;
+        /* ips_badaddr also includes outgoing packets with a bad address, but we can't account for that right now */
+        stats->dwInAddrErrors = ip_stat.ips_cantforward + ip_stat.ips_badaddr + ip_stat.ips_notmember;
         stats->dwForwDatagrams = ip_stat.ips_forward;
         stats->dwInUnknownProtos = ip_stat.ips_noproto;
         stats->dwInDiscards = ip_stat.ips_fragdropped;
+        stats->dwInDelivers = ip_stat.ips_delivered;
+        stats->dwOutRequests = ip_stat.ips_localout;
+        /*stats->dwRoutingDiscards = 0;*/ /* FIXME */
         stats->dwOutDiscards = ip_stat.ips_odropped;
+        stats->dwOutNoRoutes = ip_stat.ips_noroute;
+        stats->dwReasmTimeout = ip_stat.ips_fragtimeout;
+        stats->dwReasmReqds = ip_stat.ips_fragments;
         stats->dwReasmOks = ip_stat.ips_reassembled;
+        stats->dwReasmFails = ip_stat.ips_fragments - ip_stat.ips_reassembled;
         stats->dwFragOks = ip_stat.ips_fragmented;
         stats->dwFragFails = ip_stat.ips_cantfrag;
-        stats->dwReasmTimeout = ip_stat.ips_fragtimeout;
-        stats->dwOutNoRoutes = ip_stat.ips_noroute;
-        stats->dwOutRequests = ip_stat.ips_localout;
-        stats->dwReasmReqds = ip_stat.ips_fragments;
+        stats->dwFragCreates = ip_stat.ips_ofragments;
         ret = NO_ERROR;
     }
 #else
@@ -2226,13 +2232,15 @@ DWORD build_tcp_table( TCP_TABLE_CLASS class, void **tablep, BOOL order, HANDLE 
              pXIG->xig_len > sizeof (struct xinpgen);
              pXIG = (struct xinpgen * WIN32PTR)((char *)pXIG + pXIG->xig_len))
         {
-            struct tcpcb *pTCPData = NULL;
-            struct inpcb *pINData;
-            struct xsocket *pSockData;
-
-            pTCPData = &((struct xtcpcb *)pXIG)->xt_tp;
-            pINData = &((struct xtcpcb *)pXIG)->xt_inp;
-            pSockData = &((struct xtcpcb *)pXIG)->xt_socket;
+#if __FreeBSD_version >= 1200026
+            struct xtcpcb *pTCPData = (struct xtcpcb *)pXIG;
+            struct xinpcb *pINData = &pTCPData->xt_inp;
+            struct xsocket *pSockData = &pINData->xi_socket;
+#else
+            struct tcpcb *pTCPData = &((struct xtcpcb *)pXIG)->xt_tp;
+            struct inpcb *pINData = &((struct xtcpcb *)pXIG)->xt_inp;
+            struct xsocket *pSockData = &((struct xtcpcb *)pXIG)->xt_socket;
+#endif
 
             /* Ignore sockets for other protocols */
             if (pSockData->xso_protocol != IPPROTO_TCP)
@@ -2538,11 +2546,13 @@ DWORD build_udp_table( UDP_TABLE_CLASS class, void **tablep, BOOL order, HANDLE 
              pXIG->xig_len > sizeof (struct xinpgen);
              pXIG = (struct xinpgen * WIN32PTR)((char *)pXIG + pXIG->xig_len))
         {
-            struct inpcb *pINData;
-            struct xsocket *pSockData;
-
-            pINData = &((struct xinpcb *)pXIG)->xi_inp;
-            pSockData = &((struct xinpcb *)pXIG)->xi_socket;
+#if __FreeBSD_version >= 1200026
+            struct xinpcb *pINData = (struct xinpcb *)pXIG;
+            struct xsocket *pSockData = &pINData->xi_socket;
+#else
+            struct inpcb *pINData = &((struct xinpcb *)pXIG)->xi_inp;
+            struct xsocket *pSockData = &((struct xinpcb *)pXIG)->xi_socket;
+#endif
 
             /* Ignore sockets for other protocols */
             if (pSockData->xso_protocol != IPPROTO_UDP)
@@ -2571,6 +2581,7 @@ DWORD build_udp_table( UDP_TABLE_CLASS class, void **tablep, BOOL order, HANDLE 
             {
                 row.liCreateTimestamp.QuadPart = 0; /* FIXME */
                 row.u.dwFlags = 0;
+                row.u.SpecificPortBind = !(pINData->inp_flags & INP_ANONPORT);
                 memset( &row.OwningModuleInfo, 0, sizeof(row.OwningModuleInfo) );
             }
             if (!(table = append_udp_row( class, heap, flags, table, &count, &row, row_size ))) break;

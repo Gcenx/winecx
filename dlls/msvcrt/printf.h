@@ -16,6 +16,24 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if defined(__i386_on_x86_64__) && defined(PRINTF_HOSTPTR)
+
+#ifdef PRINTF_WIDE
+#define APICHAR MSVCRT_wchar_t
+#define CONVCHAR char
+#define FUNC_NAME(func) func ## _w_HOSTPTR
+#else
+#define APICHAR char
+#define CONVCHAR MSVCRT_wchar_t
+#define FUNC_NAME(func) func ## _a_HOSTPTR
+#endif
+#include "wine/hostptraddrspace_enter.h"
+#define PFPTR HOSTPTR
+#define debugstr_a_HOSTPTR debugstr_a
+#define debugstr_w_HOSTPTR debugstr_w
+
+#else
+
 #ifdef PRINTF_WIDE
 #define APICHAR MSVCRT_wchar_t
 #define CONVCHAR char
@@ -24,6 +42,9 @@
 #define APICHAR char
 #define CONVCHAR MSVCRT_wchar_t
 #define FUNC_NAME(func) func ## _a
+#endif
+#define PFPTR
+
 #endif
 
 #ifndef signbit
@@ -52,13 +73,13 @@ static int FUNC_NAME(puts_clbk_str)(void *ctx, int len, const APICHAR *str)
         return len;
 
     if(out->len < len) {
-        memcpy(out->buf, str, out->len*sizeof(APICHAR));
+        memmove(out->buf, str, out->len*sizeof(APICHAR));
         out->buf += out->len;
         out->len = 0;
         return -1;
     }
 
-    memcpy(out->buf, str, len*sizeof(APICHAR));
+    memmove(out->buf, str, len*sizeof(APICHAR));
     out->buf += len;
     out->len -= len;
     return len;
@@ -117,7 +138,7 @@ static inline int FUNC_NAME(pf_fill)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ct
 
 #ifndef PRINTF_HELPERS
 #define PRINTF_HELPERS
-static inline int wcstombs_len(char *mbstr, const MSVCRT_wchar_t *wcstr,
+static inline int wcstombs_len(char * HOSTPTR mbstr, const MSVCRT_wchar_t * HOSTPTR wcstr,
         int len, MSVCRT__locale_t locale)
 {
     char buf[MSVCRT_MB_LEN_MAX];
@@ -131,7 +152,7 @@ static inline int wcstombs_len(char *mbstr, const MSVCRT_wchar_t *wcstr,
     return mblen;
 }
 
-static inline int mbstowcs_len(MSVCRT_wchar_t *wcstr, const char *mbstr,
+static inline int mbstowcs_len(MSVCRT_wchar_t * HOSTPTR wcstr, const char * HOSTPTR mbstr,
         int len, MSVCRT__locale_t locale)
 {
     int i, r, wlen = 0;
@@ -147,7 +168,7 @@ static inline int mbstowcs_len(MSVCRT_wchar_t *wcstr, const char *mbstr,
 #endif
 
 static inline int FUNC_NAME(pf_output_wstr)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx,
-        const MSVCRT_wchar_t *str, int len, MSVCRT__locale_t locale)
+        const MSVCRT_wchar_t * PFPTR str, int len, MSVCRT__locale_t locale)
 {
 #ifdef PRINTF_WIDE
     return pf_puts(puts_ctx, len, str);
@@ -191,7 +212,7 @@ static inline int FUNC_NAME(pf_output_str)(FUNC_NAME(puts_clbk) pf_puts, void *p
 }
 
 static inline int FUNC_NAME(pf_output_format_wstr)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx,
-        const MSVCRT_wchar_t *str, int len, FUNC_NAME(pf_flags) *flags, MSVCRT__locale_t locale)
+        const MSVCRT_wchar_t * PFPTR str, int len, FUNC_NAME(pf_flags) *flags, MSVCRT__locale_t locale)
 {
     int r, ret;
 
@@ -385,9 +406,9 @@ static inline void FUNC_NAME(pf_fixup_exponent)(char *buf, BOOL three_digit_exp)
     }
 }
 
-int FUNC_NAME(pf_printf)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx, const APICHAR *fmt,
+int FUNC_NAME(pf_printf)(FUNC_NAME(puts_clbk) pf_puts, void * WIN32PTR puts_ctx, const APICHAR *fmt,
         MSVCRT__locale_t locale, DWORD options,
-        args_clbk pf_args, void *args_ctx, __ms_va_list *valist)
+        args_clbk pf_args, void * WIN32PTR args_ctx, __ms_va_list * WIN32PTR valist)
 {
     const APICHAR *q, *p = fmt;
     APICHAR buf[32];
@@ -509,15 +530,21 @@ int FUNC_NAME(pf_printf)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx, const API
                     p += 3;
                 } else if(*(p+1)=='3' && *(p+2)=='2')
                     p += 3;
-                else if(isdigit(*(p+1)) || !*(p+1))
-                    break;
-                else
+                else if(p[1] && strchr("diouxX", p[1]))
                     flags.IntegerNative = *p++;
+                else
+                    break;
             } else if(*p == 'w')
                 flags.WideString = *p++;
-#if _MSVCR_VER >= 140
-            else if(*p == 'z')
+#if _MSVCR_VER == 0 || _MSVCR_VER >= 140
+            else if((*p == 'z' || *p == 't') && p[1] && strchr("diouxX", p[1]))
                 flags.IntegerNative = *p++;
+            else if(*p == 'j') {
+                flags.IntegerDouble++;
+                p++;
+            }
+#endif
+#if _MSVCR_VER >= 140
             else if(*p == 'T')
                 flags.NaturalString = *p++;
 #endif
@@ -597,7 +624,7 @@ int FUNC_NAME(pf_printf)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx, const API
             i = FUNC_NAME(pf_output_format_str)(pf_puts, puts_ctx, tmp, -1, &flags, locale);
 #endif
             if(tmp != buf)
-                HeapFree(GetProcessHeap(), 0, tmp);
+                HeapFree(GetProcessHeap(), 0, ADDRSPACECAST(LPVOID, tmp));
         } else if(flags.Format && strchr("aeEfFgG", flags.Format)) {
             char float_fmt[20], buf_a[32], *tmp = buf_a, *decimal_point;
             int len = flags.Precision + 10;
@@ -715,7 +742,7 @@ int FUNC_NAME(pf_printf)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx, const API
                 return r;
             i += r;
             if(tmp != buf_a)
-                HeapFree(GetProcessHeap(), 0, tmp);
+                HeapFree(GetProcessHeap(), 0, ADDRSPACECAST(LPVOID, tmp));
             r = FUNC_NAME(pf_fill)(pf_puts, puts_ctx, len, &flags, FALSE);
             if(r < 0)
                 return r;
@@ -739,7 +766,7 @@ int FUNC_NAME(pf_printf)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx, const API
     return written;
 }
 
-#ifndef PRINTF_WIDE
+#if !defined(PRINTF_WIDE) && !defined(PRINTF_HOSTPTR)
 enum types_clbk_flags {
     TYPE_CLBK_VA_LIST = 1,
     TYPE_CLBK_POSITIONAL = 2,
@@ -770,10 +797,11 @@ static printf_arg arg_clbk_type(void *ctx, int pos, int type, __ms_va_list *vali
 }
 #endif
 
+#ifndef PRINTF_HOSTPTR
 int FUNC_NAME(create_positional_ctx)(void *args_ctx, const APICHAR *format, __ms_va_list valist)
 {
     struct FUNC_NAME(_str_ctx) puts_ctx = {INT_MAX, NULL};
-    printf_arg *args = args_ctx;
+    printf_arg *args = ADDRSPACECAST(printf_arg *, args_ctx);
     int i, j;
 
     i = FUNC_NAME(pf_printf)(FUNC_NAME(puts_clbk_str), &puts_ctx, format, NULL,
@@ -811,7 +839,15 @@ int FUNC_NAME(create_positional_ctx)(void *args_ctx, const APICHAR *format, __ms
 
     return j;
 }
+#endif
 
 #undef APICHAR
 #undef CONVCHAR
 #undef FUNC_NAME
+#undef PFPTR
+
+#if defined(__i386_on_x86_64__) && defined(PRINTF_HOSTPTR)
+#include "wine/hostptraddrspace_exit.h"
+#undef debugstr_a_HOSTPTR
+#undef debugstr_w_HOSTPTR
+#endif

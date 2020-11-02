@@ -53,6 +53,76 @@ BOOL initial_locale = TRUE;
 #define MSVCRT_LEADBYTE  0x8000
 #define MSVCRT_C1_DEFINED 0x200
 
+static const MSVCRT_wchar_t sun[] = {'S','u','n',0};
+static const MSVCRT_wchar_t mon[] = {'M','o','n',0};
+static const MSVCRT_wchar_t tue[] = {'T','u','e',0};
+static const MSVCRT_wchar_t wed[] = {'W','e','d',0};
+static const MSVCRT_wchar_t thu[] = {'T','h','u',0};
+static const MSVCRT_wchar_t fri[] = {'F','r','i',0};
+static const MSVCRT_wchar_t sat[] = {'S','a','t',0};
+static const MSVCRT_wchar_t sunday[] = {'S','u','n','d','a','y',0};
+static const MSVCRT_wchar_t monday[] = {'M','o','n','d','a','y',0};
+static const MSVCRT_wchar_t tuesday[] = {'T','u','e','s','d','a','y',0};
+static const MSVCRT_wchar_t wednesday[] = {'W','e','d','n','e','s','d','a','y',0};
+static const MSVCRT_wchar_t thursday[] = {'T','h','u','r','s','d','a','y',0};
+static const MSVCRT_wchar_t friday[] = {'F','r','i','d','a','y',0};
+static const MSVCRT_wchar_t saturday[] = {'S','a','t','u','r','d','a','y',0};
+static const MSVCRT_wchar_t jan[] = {'J','a','n',0};
+static const MSVCRT_wchar_t feb[] = {'F','e','b',0};
+static const MSVCRT_wchar_t mar[] = {'M','a','r',0};
+static const MSVCRT_wchar_t apr[] = {'A','p','r',0};
+static const MSVCRT_wchar_t may[] = {'M','a','y',0};
+static const MSVCRT_wchar_t jun[] = {'J','u','n',0};
+static const MSVCRT_wchar_t jul[] = {'J','u','l',0};
+static const MSVCRT_wchar_t aug[] = {'A','u','g',0};
+static const MSVCRT_wchar_t sep[] = {'S','e','p',0};
+static const MSVCRT_wchar_t oct[] = {'O','c','t',0};
+static const MSVCRT_wchar_t nov[] = {'N','o','v',0};
+static const MSVCRT_wchar_t dec[] = {'D','e','c',0};
+static const MSVCRT_wchar_t january[] = {'J','a','n','u','a','r','y',0};
+static const MSVCRT_wchar_t february[] = {'F','e','b','r','u','a','r','y',0};
+static const MSVCRT_wchar_t march[] = {'M','a','r','c','h',0};
+static const MSVCRT_wchar_t april[] = {'A','p','r','i','l',0};
+static const MSVCRT_wchar_t june[] = {'J','u','n','e',0};
+static const MSVCRT_wchar_t july[] = {'J','u','l','y',0};
+static const MSVCRT_wchar_t august[] = {'A','u','g','u','s','t',0};
+static const MSVCRT_wchar_t september[] = {'S','e','p','t','e','m','b','e','r',0};
+static const MSVCRT_wchar_t october[] = {'O','c','t','o','b','e','r',0};
+static const MSVCRT_wchar_t november[] = {'N','o','v','e','m','b','e','r',0};
+static const MSVCRT_wchar_t december[] = {'D','e','c','e','m','b','e','r',0};
+static const MSVCRT_wchar_t am[] = {'A','M',0};
+static const MSVCRT_wchar_t pm[] = {'P','M',0};
+static const MSVCRT_wchar_t cloc_short_date[] = {'M','M','/','d','d','/','y','y',0};
+static const MSVCRT_wchar_t cloc_date[] = {'d','d','d','d',',',' ','M','M','M','M',' ','d','d',',',' ','y','y','y','y',0};
+static const MSVCRT_wchar_t cloc_time[] = {'H','H',':','m','m',':','s','s',0};
+
+#if _MSVCR_VER >= 110
+static const MSVCRT_wchar_t en_us[] = {'e','n','-','U','S',0};
+#endif
+
+MSVCRT___lc_time_data cloc_time_data =
+{
+    {{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat",
+      "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+      "January", "February", "March", "April", "May", "June", "July",
+      "August", "September", "October", "November", "December",
+      "AM", "PM", "MM/dd/yy", "dddd, MMMM dd, yyyy", "HH:mm:ss"}},
+#if _MSVCR_VER < 110
+    MAKELCID(LANG_ENGLISH, SORT_DEFAULT),
+#endif
+    {1, 0},
+    {{sun, mon, tue, wed, thu, fri, sat,
+      sunday, monday, tuesday, wednesday, thursday, friday, saturday,
+      jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec,
+      january, february, march, april, may, june, july,
+      august, september, october, november, december,
+      am, pm, cloc_short_date, cloc_date, cloc_time}},
+#if _MSVCR_VER >= 110
+    en_us,
+#endif
+};
+
 /* Friendly country strings & language names abbreviations. */
 static const char * const _country_synonyms[] =
 {
@@ -456,12 +526,15 @@ static inline char* construct_lc_all(MSVCRT_pthreadlocinfo locinfo) {
 char* CDECL _Getdays(void)
 {
     MSVCRT___lc_time_data *cur = get_locinfo()->lc_time_curr;
-    int i, len, size;
+    int i, len, size = 0;
     char *out;
 
     TRACE("\n");
 
-    size = cur->str.names.short_mon[0]-cur->str.names.short_wday[0];
+    for(i=0; i<7; i++) {
+        size += strlen(cur->str.names.short_wday[i]) + 1;
+        size += strlen(cur->str.names.wday[i]) + 1;
+    }
     out = MSVCRT_malloc(size+1);
     if(!out)
         return NULL;
@@ -491,11 +564,14 @@ MSVCRT_wchar_t* CDECL _W_Getdays(void)
 {
     MSVCRT___lc_time_data *cur = get_locinfo()->lc_time_curr;
     MSVCRT_wchar_t *out;
-    int i, len, size;
+    int i, len, size = 0;
 
     TRACE("\n");
 
-    size = cur->wstr.names.short_mon[0]-cur->wstr.names.short_wday[0];
+    for(i=0; i<7; i++) {
+        size += strlenW(cur->wstr.names.short_wday[i]) + 1;
+        size += strlenW(cur->wstr.names.wday[i]) + 1;
+    }
     out = MSVCRT_malloc((size+1)*sizeof(*out));
     if(!out)
         return NULL;
@@ -524,12 +600,15 @@ MSVCRT_wchar_t* CDECL _W_Getdays(void)
 char* CDECL _Getmonths(void)
 {
     MSVCRT___lc_time_data *cur = get_locinfo()->lc_time_curr;
-    int i, len, size;
+    int i, len, size = 0;
     char *out;
 
     TRACE("\n");
 
-    size = cur->str.names.am-cur->str.names.short_mon[0];
+    for(i=0; i<12; i++) {
+        size += strlen(cur->str.names.short_mon[i]) + 1;
+        size += strlen(cur->str.names.mon[i]) + 1;
+    }
     out = MSVCRT_malloc(size+1);
     if(!out)
         return NULL;
@@ -559,11 +638,14 @@ MSVCRT_wchar_t* CDECL _W_Getmonths(void)
 {
     MSVCRT___lc_time_data *cur = get_locinfo()->lc_time_curr;
     MSVCRT_wchar_t *out;
-    int i, len, size;
+    int i, len, size = 0;
 
     TRACE("\n");
 
-    size = cur->wstr.names.am-cur->wstr.names.short_mon[0];
+    for(i=0; i<12; i++) {
+        size += strlenW(cur->wstr.names.short_mon[i]) + 1;
+        size += strlenW(cur->wstr.names.mon[i]) + 1;
+    }
     out = MSVCRT_malloc((size+1)*sizeof(*out));
     if(!out)
         return NULL;
@@ -592,7 +674,7 @@ MSVCRT_wchar_t* CDECL _W_Getmonths(void)
 void* CDECL _Gettnames(void)
 {
     MSVCRT___lc_time_data *ret, *cur = get_locinfo()->lc_time_curr;
-    unsigned int i, size = sizeof(MSVCRT___lc_time_data);
+    unsigned int i, len, size = sizeof(MSVCRT___lc_time_data);
 
     TRACE("\n");
 
@@ -602,12 +684,14 @@ void* CDECL _Gettnames(void)
     ret = MSVCRT_malloc(size);
     if(!ret)
         return NULL;
-    memcpy(ret, cur, size);
+    memcpy(ret, cur, sizeof(*ret));
 
     size = 0;
     for(i=0; i<ARRAY_SIZE(cur->str.str); i++) {
+        len = strlen(cur->str.str[i])+1;
+        memcpy(&ret->data[size], cur->str.str[i], len);
         ret->str.str[i] = &ret->data[size];
-        size += strlen(&ret->data[size])+1;
+        size += len;
     }
 
     return ret;
@@ -829,7 +913,8 @@ void free_locinfo(MSVCRT_pthreadlocinfo locinfo)
     MSVCRT_free(locinfo->pclmap);
     MSVCRT_free(locinfo->pcumap);
 
-    MSVCRT_free(locinfo->lc_time_curr);
+    if(locinfo->lc_time_curr != &cloc_time_data)
+        MSVCRT_free(locinfo->lc_time_curr);
 
     MSVCRT_free(locinfo);
 }
@@ -910,8 +995,7 @@ static inline BOOL category_needs_update(int cat, int user_cat,
     return lcid!=locinfo->lc_handle[cat] || cp!=locinfo->lc_id[cat].wCodePage;
 }
 
-static MSVCRT_pthreadlocinfo create_locinfo(int category,
-        const char *locale, MSVCRT_pthreadlocinfo old_locinfo)
+static MSVCRT___lc_time_data* create_time_data(LCID lcid)
 {
     static const DWORD time_data[] = {
         LOCALE_SABBREVDAYNAME7, LOCALE_SABBREVDAYNAME1, LOCALE_SABBREVDAYNAME2,
@@ -930,20 +1014,61 @@ static MSVCRT_pthreadlocinfo create_locinfo(int category,
         LOCALE_SSHORTDATE, LOCALE_SLONGDATE,
         LOCALE_STIMEFORMAT
     };
+
+    MSVCRT___lc_time_data *cur;
+    int i, ret, size;
+
+    size = sizeof(MSVCRT___lc_time_data);
+    for(i=0; i<ARRAY_SIZE(time_data); i++) {
+        ret = GetLocaleInfoA(lcid, time_data[i], NULL, 0);
+        if(!ret)
+            return NULL;
+        size += ret;
+
+        ret = GetLocaleInfoW(lcid, time_data[i], NULL, 0);
+        if(!ret)
+            return NULL;
+        size += ret*sizeof(MSVCRT_wchar_t);
+    }
+#if _MSVCR_VER >= 110
+    size += LCIDToLocaleName(lcid, NULL, 0, 0)*sizeof(MSVCRT_wchar_t);
+#endif
+
+    cur = MSVCRT_malloc(size);
+    if(!cur)
+        return NULL;
+
+    ret = 0;
+    for(i=0; i<ARRAY_SIZE(time_data); i++) {
+        cur->str.str[i] = &cur->data[ret];
+        ret += GetLocaleInfoA(lcid, time_data[i], &cur->data[ret], size-ret);
+    }
+    for(i=0; i<ARRAY_SIZE(time_data); i++) {
+        cur->wstr.wstr[i] = (MSVCRT_wchar_t*)&cur->data[ret];
+        ret += GetLocaleInfoW(lcid, time_data[i],
+                (MSVCRT_wchar_t*)&cur->data[ret], size-ret)*sizeof(MSVCRT_wchar_t);
+    }
+#if _MSVCR_VER >= 110
+    cur->locname = (MSVCRT_wchar_t*)&cur->data[ret];
+    LCIDToLocaleName(lcid, (MSVCRT_wchar_t*)&cur->data[ret], (size-ret)/sizeof(MSVCRT_wchar_t), 0);
+#else
+    cur->lcid = lcid;
+#endif
+
+    return cur;
+}
+
+static MSVCRT_pthreadlocinfo create_locinfo(int category,
+        const char *locale, MSVCRT_pthreadlocinfo old_locinfo)
+{
     static const char collate[] = "COLLATE=";
     static const char ctype[] = "CTYPE=";
     static const char monetary[] = "MONETARY=";
     static const char numeric[] = "NUMERIC=";
     static const char time[] = "TIME=";
-    static const char cloc_short_date[] = "MM/dd/yy";
-    static const MSVCRT_wchar_t cloc_short_dateW[] = {'M','M','/','d','d','/','y','y',0};
-    static const char cloc_long_date[] = "dddd, MMMM dd, yyyy";
-    static const MSVCRT_wchar_t cloc_long_dateW[] = {'d','d','d','d',',',' ','M','M','M','M',' ','d','d',',',' ','y','y','y','y',0};
-    static const char cloc_time[] = "HH:mm:ss";
-    static const MSVCRT_wchar_t cloc_timeW[] = {'H','H',':','m','m',':','s','s',0};
 
     MSVCRT_pthreadlocinfo locinfo;
-    LCID lcid[6] = { 0 }, lcid_tmp;
+    LCID lcid[6] = { 0 };
     unsigned short cp[6] = { 0 };
     const char *locale_name[6] = { 0 };
     int locale_len[6] = { 0 };
@@ -952,7 +1077,7 @@ static MSVCRT_pthreadlocinfo create_locinfo(int category,
 #if _MSVCR_VER >= 100
     MSVCRT_wchar_t wbuf[256];
 #endif
-    int i, ret, size;
+    int i;
 
     TRACE("(%d %s)\n", category, locale);
 
@@ -1587,96 +1712,26 @@ static MSVCRT_pthreadlocinfo create_locinfo(int category,
                 lcid[MSVCRT_LC_TIME], cp[MSVCRT_LC_TIME])) {
         locinfo->lc_handle[MSVCRT_LC_TIME] = old_locinfo->lc_handle[MSVCRT_LC_TIME];
         locinfo->lc_id[MSVCRT_LC_TIME].wCodePage = old_locinfo->lc_id[MSVCRT_LC_TIME].wCodePage;
-    } else {
-        DWORD flags = lcid[MSVCRT_LC_TIME] ? 0 : LOCALE_NOUSEROVERRIDE;
-
-        if(lcid[MSVCRT_LC_TIME] && (category==MSVCRT_LC_ALL || category==MSVCRT_LC_TIME)) {
-            if(!update_threadlocinfo_category(lcid[MSVCRT_LC_TIME],
-                        cp[MSVCRT_LC_TIME], locinfo, MSVCRT_LC_TIME)) {
-                free_locinfo(locinfo);
-                return NULL;
-            }
-
-            if(!set_lc_locale_name(locinfo, MSVCRT_LC_TIME)) {
-                free_locinfo(locinfo);
-                return NULL;
-            }
-        } else
-            locinfo->lc_category[MSVCRT_LC_TIME].locale = MSVCRT__strdup("C");
-
-        size = sizeof(MSVCRT___lc_time_data);
-        lcid_tmp = lcid[MSVCRT_LC_TIME] ? lcid[MSVCRT_LC_TIME] : MAKELCID(LANG_ENGLISH, SORT_DEFAULT);
-        for(i=0; i<ARRAY_SIZE(time_data); i++) {
-            if(time_data[i]==LOCALE_SSHORTDATE && !lcid[MSVCRT_LC_TIME]) {
-                size += sizeof(cloc_short_date) + sizeof(cloc_short_dateW);
-            }else if(time_data[i]==LOCALE_SLONGDATE && !lcid[MSVCRT_LC_TIME]) {
-                size += sizeof(cloc_long_date) + sizeof(cloc_long_dateW);
-            }else {
-                ret = GetLocaleInfoA(lcid_tmp, time_data[i]|flags, NULL, 0);
-                if(!ret) {
-                    free_locinfo(locinfo);
-                    return NULL;
-                }
-                size += ret;
-
-                ret = GetLocaleInfoW(lcid_tmp, time_data[i]|flags, NULL, 0);
-                if(!ret) {
-                    free_locinfo(locinfo);
-                    return NULL;
-                }
-                size += ret*sizeof(MSVCRT_wchar_t);
-            }
-        }
-#if _MSVCR_VER >= 110
-        size += LCIDToLocaleName(lcid[MSVCRT_LC_TIME], NULL, 0, 0)*sizeof(MSVCRT_wchar_t);
-#endif
-
-        locinfo->lc_time_curr = MSVCRT_malloc(size);
-        if(!locinfo->lc_time_curr) {
+    } else if(lcid[MSVCRT_LC_TIME] && (category==MSVCRT_LC_ALL || category==MSVCRT_LC_TIME)) {
+        if(!update_threadlocinfo_category(lcid[MSVCRT_LC_TIME],
+                    cp[MSVCRT_LC_TIME], locinfo, MSVCRT_LC_TIME)) {
             free_locinfo(locinfo);
             return NULL;
         }
 
-        ret = 0;
-        for(i=0; i<ARRAY_SIZE(time_data); i++) {
-            locinfo->lc_time_curr->str.str[i] = &locinfo->lc_time_curr->data[ret];
-            if(time_data[i]==LOCALE_SSHORTDATE && !lcid[MSVCRT_LC_TIME]) {
-                memcpy(&locinfo->lc_time_curr->data[ret], cloc_short_date, sizeof(cloc_short_date));
-                ret += sizeof(cloc_short_date);
-            }else if(time_data[i]==LOCALE_SLONGDATE && !lcid[MSVCRT_LC_TIME]) {
-                memcpy(&locinfo->lc_time_curr->data[ret], cloc_long_date, sizeof(cloc_long_date));
-                ret += sizeof(cloc_long_date);
-            }else if(time_data[i]==LOCALE_STIMEFORMAT && !lcid[MSVCRT_LC_TIME]) {
-                memcpy(&locinfo->lc_time_curr->data[ret], cloc_time, sizeof(cloc_time));
-                ret += sizeof(cloc_time);
-            }else {
-                ret += GetLocaleInfoA(lcid_tmp, time_data[i]|flags,
-                    &locinfo->lc_time_curr->data[ret], size-ret);
-            }
+        if(!set_lc_locale_name(locinfo, MSVCRT_LC_TIME)) {
+            free_locinfo(locinfo);
+            return NULL;
         }
-        for(i=0; i<ARRAY_SIZE(time_data); i++) {
-            locinfo->lc_time_curr->wstr.wstr[i] = (MSVCRT_wchar_t*)&locinfo->lc_time_curr->data[ret];
-            if(time_data[i]==LOCALE_SSHORTDATE && !lcid[MSVCRT_LC_TIME]) {
-                memcpy(&locinfo->lc_time_curr->data[ret], cloc_short_dateW, sizeof(cloc_short_dateW));
-                ret += sizeof(cloc_short_dateW);
-            }else if(time_data[i]==LOCALE_SLONGDATE && !lcid[MSVCRT_LC_TIME]) {
-                memcpy(&locinfo->lc_time_curr->data[ret], cloc_long_dateW, sizeof(cloc_long_dateW));
-                ret += sizeof(cloc_long_dateW);
-            }else if(time_data[i]==LOCALE_STIMEFORMAT && !lcid[MSVCRT_LC_TIME]) {
-                memcpy(&locinfo->lc_time_curr->data[ret], cloc_timeW, sizeof(cloc_timeW));
-                ret += sizeof(cloc_timeW);
-            }else {
-                ret += GetLocaleInfoW(lcid_tmp, time_data[i]|flags,
-                        (MSVCRT_wchar_t*)&locinfo->lc_time_curr->data[ret], size-ret)*sizeof(MSVCRT_wchar_t);
-            }
+
+        locinfo->lc_time_curr = create_time_data(lcid[MSVCRT_LC_TIME]);
+        if(!locinfo->lc_time_curr) {
+            free_locinfo(locinfo);
+            return NULL;
         }
-#if _MSVCR_VER >= 110
-        locinfo->lc_time_curr->locname = (MSVCRT_wchar_t*)&locinfo->lc_time_curr->data[ret];
-        LCIDToLocaleName(lcid[MSVCRT_LC_TIME], locinfo->lc_time_curr->locname,
-                (size-ret)/sizeof(MSVCRT_wchar_t), 0);
-#else
-        locinfo->lc_time_curr->lcid = lcid[MSVCRT_LC_TIME];
-#endif
+    } else {
+        locinfo->lc_category[MSVCRT_LC_TIME].locale = MSVCRT__strdup("C");
+        locinfo->lc_time_curr = &cloc_time_data;
     }
 
     return locinfo;

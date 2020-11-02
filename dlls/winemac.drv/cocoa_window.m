@@ -1291,7 +1291,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
                     }
                     else
                     {
-                        [self setStyleMask:(([self styleMask] | NSMiniaturizableWindowMask))];
+                        [self setStyleMask:([self styleMask] | NSMiniaturizableWindowMask)];
                         [super miniaturize:nil];
                         discard |= event_mask_for_type(WINDOW_BROUGHT_FORWARD) |
                                    event_mask_for_type(WINDOW_GOT_FOCUS) |
@@ -1766,7 +1766,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 
             if (pendingMinimize)
             {
-                [self setStyleMask:(([self styleMask] | NSMiniaturizableWindowMask))];
+                [self setStyleMask:([self styleMask] | NSMiniaturizableWindowMask)];
                 [super miniaturize:nil];
                 pendingMinimize = FALSE;
             }
@@ -2975,6 +2975,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         macdrv_event* event;
 
         if (causing_becomeKeyWindow) return;
+        if ([[WineApplicationController sharedController] displaysTemporarilyUncapturedForDialog]) return;
 
         event = macdrv_create_event(WINDOW_LOST_FOCUS, self);
         [queue postEvent:event];
@@ -3879,6 +3880,18 @@ macdrv_metal_view macdrv_view_create_metal_view(macdrv_view v, macdrv_metal_devi
     });
 
     return (macdrv_metal_view)metalView;
+}
+
+macdrv_metal_layer macdrv_view_get_metal_layer(macdrv_metal_view v)
+{
+    WineMetalView* view = (WineMetalView*)v;
+    __block CAMetalLayer* layer;
+
+    OnMainThread(^{
+        layer = (CAMetalLayer*)view.layer;
+    });
+
+    return (macdrv_metal_layer)layer;
 }
 
 void macdrv_view_release_metal_view(macdrv_metal_view v)

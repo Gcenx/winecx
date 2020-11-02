@@ -19,8 +19,6 @@
  *
  */
 
-#define WINE_RBTREE_HOSTADDRSPACE
-
 #include "config.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -39,11 +37,11 @@ struct source_rb
     unsigned                    source;
 };
 
-int source_rb_compare(const void *key, const struct wine_rb_entry *entry)
+int source_rb_compare(const void * HOSTPTR key, const struct wine_rb_entry *entry)
 {
     const struct source_rb *t = WINE_RB_ENTRY_VALUE(entry, const struct source_rb, entry);
 
-    return strcmp((const char*)key, rb_module->sources + t->source);
+    return strcmp((const char* HOSTPTR)key, rb_module->sources + t->source);
 }
 
 /******************************************************************

@@ -48,6 +48,7 @@
 #include "request.h"
 #include "user.h"
 #include "security.h"
+#include "esync.h"
 
 /* process structure */
 
@@ -67,6 +68,7 @@ static struct security_descriptor *process_get_sd( struct object *obj );
 static void process_poll_event( struct fd *fd, int event );
 static struct list *process_get_kernel_obj_list( struct object *obj );
 static void process_destroy( struct object *obj );
+static struct esync_fd *process_get_esync_fd( struct object *obj, enum esync_type *type );
 static void terminate_process( struct process *process, struct thread *skip, int exit_code );
 
 static const struct object_ops process_ops =
@@ -77,6 +79,7 @@ static const struct object_ops process_ops =
     add_queue,                   /* add_queue */
     remove_queue,                /* remove_queue */
     process_signaled,            /* signaled */
+    process_get_esync_fd,        /* get_esync_fd */
     no_satisfied,                /* satisfied */
     no_signal,                   /* signal */
     no_get_fd,                   /* get_fd */
@@ -127,6 +130,7 @@ static const struct object_ops startup_info_ops =
     add_queue,                     /* add_queue */
     remove_queue,                  /* remove_queue */
     startup_info_signaled,         /* signaled */
+    NULL,                          /* get_esync_fd */
     no_satisfied,                  /* satisfied */
     no_signal,                     /* signal */
     no_get_fd,                     /* get_fd */
@@ -171,6 +175,7 @@ static const struct object_ops job_ops =
     add_queue,                     /* add_queue */
     remove_queue,                  /* remove_queue */
     job_signaled,                  /* signaled */
+    NULL,                          /* get_esync_fd */
     no_satisfied,                  /* satisfied */
     no_signal,                     /* signal */
     no_get_fd,                     /* get_fd */
@@ -368,7 +373,7 @@ static void log_process_event( struct process *process, const char *fmt, ... )
     if (!bottle_inode)
     {
         struct stat st;
-        if (!stat( wine_get_config_dir(), &st ))
+        if (!fstat( config_dir_fd, &st ))
             bottle_inode = st.st_ino;
     }
 
@@ -562,6 +567,7 @@ struct process *create_process( int fd, struct process *parent, int inherit_all,
     }
     process->parent_id       = 0;
     process->debugger        = NULL;
+    process->debug_event     = NULL;
     process->handles         = NULL;
     process->msg_fd          = NULL;
     process->sigkill_timeout = NULL;
@@ -588,6 +594,7 @@ struct process *create_process( int fd, struct process *parent, int inherit_all,
     process->trace_data      = 0;
     process->rawinput_mouse  = NULL;
     process->rawinput_kbd    = NULL;
+    process->esync_fd        = NULL;
     list_init( &process->kernel_object );
     list_init( &process->thread_list );
     list_init( &process->locks );
@@ -639,6 +646,9 @@ struct process *create_process( int fd, struct process *parent, int inherit_all,
     if (!token_assign_label( process->token, security_high_label_sid ))
         goto error;
 
+    if (do_esync())
+        process->esync_fd = esync_create_fd( 0, 0 );
+
     set_fd_events( process->msg_fd, POLLIN );  /* start listening to events */
     return process;
 
@@ -687,6 +697,9 @@ static void process_destroy( struct object *obj )
     if (process->id) free_ptid( process->id );
     if (process->token) release_object( process->token );
     free( process->dir_cache );
+
+    if (do_esync())
+        esync_close_fd( process->esync_fd );
 }
 
 /* dump a process on stdout for debugging purposes */
@@ -709,6 +722,13 @@ static int process_signaled( struct object *obj, struct wait_queue_entry *entry 
 {
     struct process *process = (struct process *)obj;
     return !process->running_threads;
+}
+
+static struct esync_fd *process_get_esync_fd( struct object *obj, enum esync_type *type )
+{
+    struct process *process = (struct process *)obj;
+    *type = ESYNC_MANUAL_SERVER;
+    return process->esync_fd;
 }
 
 static unsigned int process_map_access( struct object *obj, unsigned int access )
@@ -1180,7 +1200,8 @@ DECL_HANDLER(new_process)
     const struct security_descriptor *sd;
     const struct object_attributes *objattr = get_req_object_attributes( &sd, &name, NULL );
     struct process *process = NULL;
-    struct process *parent = current->process;
+    struct process *parent;
+    struct thread *parent_thread = current;
     int socket_fd = thread_get_inflight_fd( current, req->socket_fd );
 
     if (socket_fd == -1)
@@ -1212,11 +1233,23 @@ DECL_HANDLER(new_process)
         return;
     }
 
+    if (req->parent_process)
+    {
+        if (!(parent = get_process_from_handle( req->parent_process, PROCESS_CREATE_PROCESS)))
+        {
+            close( socket_fd );
+            return;
+        }
+        parent_thread = NULL;
+    }
+    else parent = (struct process *)grab_object( current->process );
+
     if (parent->job && (req->create_flags & CREATE_BREAKAWAY_FROM_JOB) &&
         !(parent->job->limit_flags & (JOB_OBJECT_LIMIT_BREAKAWAY_OK | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK)))
     {
         set_error( STATUS_ACCESS_DENIED );
         close( socket_fd );
+        release_object( parent );
         return;
     }
 
@@ -1224,6 +1257,7 @@ DECL_HANDLER(new_process)
     if (!(info = alloc_object( &startup_info_ops )))
     {
         close( socket_fd );
+        release_object( parent );
         return;
     }
     info->process  = NULL;
@@ -1286,7 +1320,7 @@ DECL_HANDLER(new_process)
     }
 
     /* connect to the window station */
-    connect_process_winstation( process, current );
+    connect_process_winstation( process, parent_thread, parent );
 
     /* set the process console */
     if (!(req->create_flags & (DETACHED_PROCESS | CREATE_NEW_CONSOLE)))
@@ -1295,7 +1329,7 @@ DECL_HANDLER(new_process)
          * like if hConOut and hConIn are console handles, then they should be on the same
          * physical console
          */
-        inherit_console( current, process, req->inherit_all ? info->data->hstdin : 0 );
+        inherit_console( parent_thread, parent, process, req->inherit_all ? info->data->hstdin : 0 );
     }
 
     if (!req->inherit_all && !(req->create_flags & CREATE_NEW_CONSOLE))
@@ -1310,16 +1344,15 @@ DECL_HANDLER(new_process)
         if (get_error() == STATUS_INVALID_HANDLE ||
             get_error() == STATUS_OBJECT_TYPE_MISMATCH) clear_error();
     }
-
     /* attach to the debugger if requested */
     if (req->create_flags & (DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS))
     {
         set_process_debugger( process, current );
         process->debug_children = !(req->create_flags & DEBUG_ONLY_THIS_PROCESS);
     }
-    else if (parent->debugger && parent->debug_children)
+    else if (current->process->debugger && current->process->debug_children)
     {
-        set_process_debugger( process, parent->debugger );
+        set_process_debugger( process, current->process->debugger );
         /* debug_children is set to 1 by default */
     }
 
@@ -1329,10 +1362,11 @@ DECL_HANDLER(new_process)
     info->process = (struct process *)grab_object( process );
     reply->info = alloc_handle( current->process, info, SYNCHRONIZE, 0 );
     reply->pid = get_process_id( process );
-    reply->handle = alloc_handle_no_access_check( parent, process, req->access, objattr->attributes );
+    reply->handle = alloc_handle_no_access_check( current->process, process, req->access, objattr->attributes );
 
  done:
     if (process) release_object( process );
+    release_object( parent );
     release_object( info );
 }
 

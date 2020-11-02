@@ -579,7 +579,7 @@ static void process_IOService_Device(io_object_t object)
     if (is_xbox_gamepad(vid,pid))
     {
         device = bus_create_hid_device(busidW, vid, pid, -1, 1, uid, serial_string,
-                                       1, &DEVCLASS, &xbox_vtbl, sizeof(struct platform_private));
+                                       1, &xbox_vtbl, sizeof(struct platform_private));
     }
     else
     {

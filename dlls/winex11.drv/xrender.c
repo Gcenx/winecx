@@ -1472,12 +1472,10 @@ static void xrender_blit( int op, Picture src_pict, Picture mask_pict, Picture d
     if (width_src < 0)
     {
         x_src += width_src + 1;
-        width_src = -width_src;
     }
     if (height_src < 0)
     {
         y_src += height_src + 1;
-        height_src = -height_src;
     }
     if (width_dst < 0)
     {
@@ -2284,6 +2282,8 @@ static const struct gdi_dc_funcs xrender_funcs =
     NULL,                               /* pStrokePath */
     NULL,                               /* pUnrealizePalette */
     NULL,                               /* pWidenPath */
+    NULL,                               /* pD3DKMTCheckVidPnExclusiveOwnership */
+    NULL,                               /* pD3DKMTSetVidPnSourceOwner */
     NULL,                               /* wine_get_wgl_driver */
     NULL,                               /* wine_get_vulkan_driver */
     GDI_PRIORITY_GRAPHICS_DRV + 10      /* priority */

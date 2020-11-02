@@ -432,7 +432,7 @@ int xmlnode_get_inst_cnt(xmlnode *node)
 }
 
 /* _private field holds a number of COM instances spawned from this libxml2 node
- * most significant bits are used to store information about ignorrable whitespace nodes */
+ * most significant bits are used to store information about ignorable whitespace nodes */
 void xmlnode_add_ref(xmlNodePtr node)
 {
     if (node->type == XML_DOCUMENT_NODE) return;
@@ -1298,7 +1298,7 @@ static HRESULT node_transform_write_to_bstr(xsltStylesheetPtr style, xmlDocPtr r
 #endif
         /* UTF-16 encoder places UTF-16 bom, we don't need it for BSTR */
         content += sizeof(WCHAR);
-        *str = SysAllocStringLen((WCHAR* HOSTPTR)content, len/sizeof(WCHAR) - 1);
+        *str = SysAllocStringLen(ADDRSPACECAST(WCHAR*, content), len/sizeof(WCHAR) - 1);
         xmlOutputBufferClose(output);
     }
 

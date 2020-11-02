@@ -757,38 +757,47 @@ static ULONG WINAPI d3d_texture1_Release(IDirect3DTexture *iface)
  *
  *****************************************************************************/
 static HRESULT WINAPI ddraw_surface7_GetAttachedSurface(IDirectDrawSurface7 *iface,
-        DDSCAPS2 *Caps, IDirectDrawSurface7 **Surface)
+        DDSCAPS2 *caps, IDirectDrawSurface7 **surface)
 {
-    struct ddraw_surface *This = impl_from_IDirectDrawSurface7(iface);
+    struct ddraw_surface *head_surface = impl_from_IDirectDrawSurface7(iface);
     struct ddraw_surface *surf;
     DDSCAPS2 our_caps;
     int i;
 
-    TRACE("iface %p, caps %p, attachment %p.\n", iface, Caps, Surface);
+    TRACE("iface %p, caps %p, attachment %p.\n", iface, caps, surface);
+
+    if (IDirectDrawSurface7_IsLost(&head_surface->IDirectDrawSurface7_iface) != DD_OK)
+    {
+        WARN("Surface %p is lost.\n", head_surface);
+
+        *surface = NULL;
+        return DDERR_SURFACELOST;
+    }
 
     wined3d_mutex_lock();
 
-    if(This->version < 7)
+    if(head_surface->version < 7)
     {
         /* Earlier dx apps put garbage into these members, clear them */
-        our_caps.dwCaps = Caps->dwCaps;
+        our_caps.dwCaps = caps->dwCaps;
         our_caps.dwCaps2 = 0;
         our_caps.dwCaps3 = 0;
         our_caps.u1.dwCaps4 = 0;
     }
     else
     {
-        our_caps = *Caps;
+        our_caps = *caps;
     }
 
-    TRACE("(%p): Looking for caps: %x,%x,%x,%x\n", This, our_caps.dwCaps, our_caps.dwCaps2, our_caps.dwCaps3, our_caps.u1.dwCaps4); /* FIXME: Better debugging */
+    TRACE("head_surface %p, looking for caps %#x, %#x, %#x, %#x.\n", head_surface, our_caps.dwCaps,
+            our_caps.dwCaps2, our_caps.dwCaps3, our_caps.u1.dwCaps4); /* FIXME: Better debugging */
 
     for(i = 0; i < MAX_COMPLEX_ATTACHED; i++)
     {
-        surf = This->complex_array[i];
+        surf = head_surface->complex_array[i];
         if(!surf) break;
 
-        TRACE("Surface: (%p) caps: %#x, %#x, %#x, %#x.\n", surf,
+        TRACE("Surface %p, caps %#x, %#x, %#x, %#x.\n", surf,
                 surf->surface_desc.ddsCaps.dwCaps,
                 surf->surface_desc.ddsCaps.dwCaps2,
                 surf->surface_desc.ddsCaps.dwCaps3,
@@ -803,9 +812,9 @@ static HRESULT WINAPI ddraw_surface7_GetAttachedSurface(IDirectDrawSurface7 *ifa
              * Not sure how to test this.
              */
 
-            TRACE("(%p): Returning surface %p\n", This, surf);
-            *Surface = &surf->IDirectDrawSurface7_iface;
-            ddraw_surface7_AddRef(*Surface);
+            TRACE("head_surface %p, returning surface %p.\n", head_surface, surf);
+            *surface = &surf->IDirectDrawSurface7_iface;
+            ddraw_surface7_AddRef(*surface);
             wined3d_mutex_unlock();
 
             return DD_OK;
@@ -813,11 +822,11 @@ static HRESULT WINAPI ddraw_surface7_GetAttachedSurface(IDirectDrawSurface7 *ifa
     }
 
     /* Next, look at the attachment chain */
-    surf = This;
+    surf = head_surface;
 
     while( (surf = surf->next_attached) )
     {
-        TRACE("Surface: (%p) caps: %#x, %#x, %#x, %#x.\n", surf,
+        TRACE("Surface %p, caps %#x, %#x, %#x, %#x.\n", surf,
                 surf->surface_desc.ddsCaps.dwCaps,
                 surf->surface_desc.ddsCaps.dwCaps2,
                 surf->surface_desc.ddsCaps.dwCaps3,
@@ -826,19 +835,19 @@ static HRESULT WINAPI ddraw_surface7_GetAttachedSurface(IDirectDrawSurface7 *ifa
         if (((surf->surface_desc.ddsCaps.dwCaps & our_caps.dwCaps) == our_caps.dwCaps) &&
             ((surf->surface_desc.ddsCaps.dwCaps2 & our_caps.dwCaps2) == our_caps.dwCaps2)) {
 
-            TRACE("(%p): Returning surface %p\n", This, surf);
-            *Surface = &surf->IDirectDrawSurface7_iface;
-            ddraw_surface7_AddRef(*Surface);
+            TRACE("head_surface %p, returning surface %p.\n", head_surface, surf);
+            *surface = &surf->IDirectDrawSurface7_iface;
+            ddraw_surface7_AddRef(*surface);
             wined3d_mutex_unlock();
             return DD_OK;
         }
     }
 
-    TRACE("(%p) Didn't find a valid surface\n", This);
+    TRACE("head_surface %p, didn't find a valid surface.\n", head_surface);
 
     wined3d_mutex_unlock();
 
-    *Surface = NULL;
+    *surface = NULL;
     return DDERR_NOTFOUND;
 }
 
@@ -1733,6 +1742,7 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH ddraw_surface7_Blt(IDirectDrawSurface7 *
                 && ((ULONG)src_rect->left >= src_rect->right || src_rect->right > src_impl->surface_desc.dwWidth
                 || (ULONG)src_rect->top >= src_rect->bottom || src_rect->bottom > src_impl->surface_desc.dwHeight))
         {
+            wined3d_mutex_unlock();
             WARN("Invalid source rectangle.\n");
             return DDERR_INVALIDRECT;
         }
@@ -1770,6 +1780,7 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH ddraw_surface7_Blt(IDirectDrawSurface7 *
     if (!(flags & (DDBLT_COLORFILL | DDBLT_DEPTHFILL)) && !src_impl)
     {
         WARN("No source surface.\n");
+        wined3d_mutex_unlock();
         return DDERR_INVALIDPARAMS;
     }
 
@@ -3723,6 +3734,7 @@ static HRESULT WINAPI ddraw_surface1_IsLost(IDirectDrawSurface *iface)
 static HRESULT WINAPI ddraw_surface7_Restore(IDirectDrawSurface7 *iface)
 {
     struct ddraw_surface *surface = impl_from_IDirectDrawSurface7(iface);
+    unsigned int i;
 
     TRACE("iface %p.\n", iface);
 
@@ -3762,6 +3774,12 @@ static HRESULT WINAPI ddraw_surface7_Restore(IDirectDrawSurface7 *iface)
 
     ddraw_update_lost_surfaces(surface->ddraw);
     surface->is_lost = FALSE;
+
+    for(i = 0; i < MAX_COMPLEX_ATTACHED; i++)
+    {
+        if (surface->complex_array[i])
+            surface->complex_array[i]->is_lost = FALSE;
+    }
 
     return DD_OK;
 }
@@ -6050,6 +6068,15 @@ HRESULT ddraw_surface_create(struct ddraw *ddraw, const DDSURFACEDESC2 *surface_
             swapchain_desc.backbuffer_height = mode.height;
             swapchain_desc.backbuffer_format = mode.format_id;
 
+            if (ddraw->d3ddevice)
+            {
+                if (ddraw->d3ddevice->recording)
+                    wined3d_stateblock_decref(ddraw->d3ddevice->recording);
+                ddraw->d3ddevice->recording = NULL;
+                ddraw->d3ddevice->update_state = ddraw->d3ddevice->state;
+            }
+            wined3d_stateblock_reset(ddraw->state);
+
             if (FAILED(hr = wined3d_device_reset(ddraw->wined3d_device,
                     &swapchain_desc, NULL, ddraw_reset_enum_callback, TRUE)))
             {
@@ -6058,6 +6085,8 @@ HRESULT ddraw_surface_create(struct ddraw *ddraw, const DDSURFACEDESC2 *surface_
                 return hr_ddraw_from_wined3d(hr);
             }
 
+            wined3d_stateblock_set_render_state(ddraw->state, WINED3D_RS_ZENABLE,
+                    !!swapchain_desc.enable_auto_depth_stencil);
             wined3d_device_set_render_state(ddraw->wined3d_device, WINED3D_RS_ZENABLE,
                     !!swapchain_desc.enable_auto_depth_stencil);
         }

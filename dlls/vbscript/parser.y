@@ -28,6 +28,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(vbscript);
 static int parser_error(parser_ctx_t *,const char*);
 
 static void parse_complete(parser_ctx_t*,BOOL);
+static void handle_isexpression_script(parser_ctx_t *ctx, expression_t *expr);
 
 static void source_add_statement(parser_ctx_t*,statement_t*);
 static void source_add_class(parser_ctx_t*,class_decl_t*);
@@ -42,12 +43,15 @@ static expression_t *new_binary_expression(parser_ctx_t*,expression_type_t,expre
 static expression_t *new_new_expression(parser_ctx_t*,const WCHAR*);
 
 static member_expression_t *new_member_expression(parser_ctx_t*,expression_t*,const WCHAR*);
+static call_expression_t *new_call_expression(parser_ctx_t*,expression_t*,expression_t*);
+static call_expression_t *make_call_expression(parser_ctx_t*,expression_t*,expression_t*);
 
 static void *new_statement(parser_ctx_t*,statement_type_t,size_t);
-static statement_t *new_call_statement(parser_ctx_t*,BOOL,member_expression_t*);
-static statement_t *new_assign_statement(parser_ctx_t*,member_expression_t*,expression_t*);
-static statement_t *new_set_statement(parser_ctx_t*,member_expression_t*,expression_t*);
+static statement_t *new_call_statement(parser_ctx_t*,BOOL,expression_t*);
+static statement_t *new_assign_statement(parser_ctx_t*,expression_t*,expression_t*);
+static statement_t *new_set_statement(parser_ctx_t*,member_expression_t*,expression_t*,expression_t*);
 static statement_t *new_dim_statement(parser_ctx_t*,dim_decl_t*);
+static statement_t *new_redim_statement(parser_ctx_t*,const WCHAR*,BOOL,expression_t*);
 static statement_t *new_while_statement(parser_ctx_t*,statement_type_t,expression_t*,statement_t*);
 static statement_t *new_forto_statement(parser_ctx_t*,const WCHAR*,expression_t*,expression_t*,expression_t*,statement_t*);
 static statement_t *new_foreach_statement(parser_ctx_t*,const WCHAR*,expression_t*,statement_t*);
@@ -56,6 +60,7 @@ static statement_t *new_function_statement(parser_ctx_t*,function_decl_t*);
 static statement_t *new_onerror_statement(parser_ctx_t*,BOOL);
 static statement_t *new_const_statement(parser_ctx_t*,const_decl_t*);
 static statement_t *new_select_statement(parser_ctx_t*,expression_t*,case_clausule_t*);
+static statement_t *new_with_statement(parser_ctx_t*,expression_t*,statement_t*);
 
 static dim_decl_t *new_dim_decl(parser_ctx_t*,const WCHAR*,BOOL,dim_list_t*);
 static dim_list_t *new_dim(parser_ctx_t*,unsigned,dim_list_t*);
@@ -80,7 +85,7 @@ static statement_t *link_statements(statement_t*,statement_t*);
 
 %lex-param { parser_ctx_t *ctx }
 %parse-param { parser_ctx_t *ctx }
-%pure-parser
+%define api.pure
 %start Program
 
 %union {
@@ -97,21 +102,22 @@ static statement_t *link_statements(statement_t*,statement_t*);
     const_decl_t *const_decl;
     case_clausule_t *case_clausule;
     unsigned uint;
-    LONG lng;
+    LONG integer;
     BOOL boolean;
     double dbl;
 }
 
-%token tEOF tNL tEMPTYBRACKETS
+%token tEXPRESSION tEOF tNL tEMPTYBRACKETS tEXPRLBRACKET
 %token tLTEQ tGTEQ tNEQ
-%token tSTOP tME tREM
+%token tSTOP tME tREM tDOT
 %token <string> tTRUE tFALSE
 %token <string> tNOT tAND tOR tXOR tEQV tIMP
 %token <string> tIS tMOD
-%token <string> tCALL tDIM tSUB tFUNCTION tGET tLET tCONST
+%token <string> tCALL tSUB tFUNCTION tGET tLET tCONST
+%token <string> tDIM tREDIM tPRESERVE
 %token <string> tIF tELSE tELSEIF tEND tTHEN tEXIT
 %token <string> tWHILE tWEND tDO tLOOP tUNTIL tFOR tTO tEACH tIN
-%token <string> tSELECT tCASE
+%token <string> tSELECT tCASE tWITH
 %token <string> tBYREF tBYVAL
 %token <string> tOPTION
 %token <string> tNOTHING tEMPTY tNULL
@@ -119,17 +125,17 @@ static statement_t *link_statements(statement_t*,statement_t*);
 %token <string> tNEXT tON tRESUME tGOTO
 %token <string> tIdentifier tString
 %token <string> tDEFAULT tERROR tEXPLICIT tPROPERTY tSTEP
-%token <lng> tLong tShort
+%token <integer> tInt
 %token <dbl> tDouble
 
-%type <statement> Statement SimpleStatement StatementNl StatementsNl StatementsNl_opt IfStatement Else_opt
-%type <expression> Expression LiteralExpression PrimaryExpression EqualityExpression CallExpression
+%type <statement> Statement SimpleStatement StatementNl StatementsNl StatementsNl_opt BodyStatements IfStatement Else_opt
+%type <expression> Expression LiteralExpression PrimaryExpression EqualityExpression CallExpression ExpressionNl_opt
 %type <expression> ConcatExpression AdditiveExpression ModExpression IntdivExpression MultiplicativeExpression ExpExpression
-%type <expression> NotExpression UnaryExpression AndExpression OrExpression XorExpression EqvExpression
+%type <expression> NotExpression UnaryExpression AndExpression OrExpression XorExpression EqvExpression SignExpression
 %type <expression> ConstExpression NumericLiteralExpression
 %type <member> MemberExpression
-%type <expression> Arguments_opt ArgumentList ArgumentList_opt Step_opt ExpressionList
-%type <boolean> OptionExplicit_opt DoType
+%type <expression> Arguments Arguments_opt ArgumentList ArgumentList_opt Step_opt ExpressionList
+%type <boolean> OptionExplicit_opt DoType Preserve_opt
 %type <arg_decl> ArgumentsDecl_opt ArgumentDeclList ArgumentDecl
 %type <func_decl> FunctionDecl PropertyDecl
 %type <elseif> ElseIfs_opt ElseIfs ElseIf
@@ -138,13 +144,14 @@ static statement_t *link_statements(statement_t*,statement_t*);
 %type <dim_decl> DimDeclList DimDecl
 %type <dim_list> DimList
 %type <const_decl> ConstDecl ConstDeclList
-%type <string> Identifier DotIdentifier
+%type <string> Identifier
 %type <case_clausule> CaseClausules
 
 %%
 
 Program
     : OptionExplicit_opt SourceElements tEOF    { parse_complete(ctx, $1); }
+    | tEXPRESSION ExpressionNl_opt tEOF         { handle_isexpression_script(ctx, $2); }
 
 OptionExplicit_opt
     : /* empty */                { $$ = FALSE; }
@@ -154,6 +161,15 @@ SourceElements
     : /* empty */
     | SourceElements StatementNl            { source_add_statement(ctx, $2); }
     | SourceElements ClassDeclaration       { source_add_class(ctx, $2); }
+
+ExpressionNl_opt
+    : /* empty */                           { $$ = NULL; }
+    | Expression tNL                        { $$ = $1; }
+
+BodyStatements
+    : /* empty */                           { $$ = NULL; }
+    | Statement                             { $$ = $1; }
+    | StatementNl BodyStatements            { $$ = link_statements($1, $2); }
 
 StatementsNl_opt
     : /* empty */                           { $$ = NULL; }
@@ -174,11 +190,14 @@ Statement
     | SimpleStatement ':'                   { $$ = $1; }
 
 SimpleStatement
-    : MemberExpression ArgumentList_opt     { $1->args = $2; $$ = new_call_statement(ctx, FALSE, $1); CHECK_ERROR; }
-    | tCALL MemberExpression Arguments_opt  { $2->args = $3; $$ = new_call_statement(ctx, TRUE, $2); CHECK_ERROR; }
-    | MemberExpression Arguments_opt '=' Expression
-                                            { $1->args = $2; $$ = new_assign_statement(ctx, $1, $4); CHECK_ERROR; }
+    : CallExpression ArgumentList_opt       { call_expression_t *call_expr = make_call_expression(ctx, $1, $2); CHECK_ERROR;
+                                              $$ = new_call_statement(ctx, FALSE, &call_expr->expr); CHECK_ERROR; };
+    | tCALL UnaryExpression                 { $$ = new_call_statement(ctx, TRUE, $2); CHECK_ERROR; }
+    | CallExpression '=' Expression
+                                            { $$ = new_assign_statement(ctx, $1, $3); CHECK_ERROR; }
     | tDIM DimDeclList                      { $$ = new_dim_statement(ctx, $2); CHECK_ERROR; }
+    | tREDIM Preserve_opt tIdentifier '(' ArgumentList ')'
+                                            { $$ = new_redim_statement(ctx, $3, $2, $5); CHECK_ERROR; }
     | IfStatement                           { $$ = $1; }
     | tWHILE Expression StSep StatementsNl_opt tWEND
                                             { $$ = new_while_statement(ctx, STAT_WHILE, $2, $4); CHECK_ERROR; }
@@ -196,7 +215,7 @@ SimpleStatement
     | tEXIT tPROPERTY                       { $$ = new_statement(ctx, STAT_EXITPROP, 0); CHECK_ERROR; }
     | tEXIT tSUB                            { $$ = new_statement(ctx, STAT_EXITSUB, 0); CHECK_ERROR; }
     | tSET MemberExpression Arguments_opt '=' Expression
-                                            { $2->args = $3; $$ = new_set_statement(ctx, $2, $5); CHECK_ERROR; }
+                                            { $$ = new_set_statement(ctx, $2, $3, $5); CHECK_ERROR; }
     | tSTOP                                 { $$ = new_statement(ctx, STAT_STOP, 0); CHECK_ERROR; }
     | tON tERROR tRESUME tNEXT              { $$ = new_onerror_statement(ctx, TRUE); CHECK_ERROR; }
     | tON tERROR tGOTO '0'                  { $$ = new_onerror_statement(ctx, FALSE); CHECK_ERROR; }
@@ -207,10 +226,18 @@ SimpleStatement
                                             { $$ = new_foreach_statement(ctx, $3, $5, $7); }
     | tSELECT tCASE Expression StSep CaseClausules tEND tSELECT
                                             { $$ = new_select_statement(ctx, $3, $5); }
+    | tWITH Expression StSep StatementsNl_opt tEND tWITH
+                                            { $$ = new_with_statement(ctx, $2, $4); }
 
 MemberExpression
     : Identifier                            { $$ = new_member_expression(ctx, NULL, $1); CHECK_ERROR; }
-    | CallExpression '.' DotIdentifier      { $$ = new_member_expression(ctx, $1, $3); CHECK_ERROR; }
+    | CallExpression '.' tIdentifier        { $$ = new_member_expression(ctx, $1, $3); CHECK_ERROR; }
+    | tDOT tIdentifier                      { expression_t *dot_expr = new_expression(ctx, EXPR_DOT, sizeof(*dot_expr)); CHECK_ERROR;
+                                              $$ = new_member_expression(ctx, dot_expr, $2); CHECK_ERROR; }
+
+Preserve_opt
+    : /* empty */                           { $$ = FALSE; }
+    | tPRESERVE                             { $$ = TRUE; }
 
 DimDeclList
     : DimDecl                               { $$ = $1; }
@@ -277,12 +304,16 @@ CaseClausules
     | tCASE ExpressionList StSep StatementsNl_opt CaseClausules
                                            { $$ = new_case_clausule(ctx, $2, $4, $5); }
 
-Arguments_opt
-    : EmptyBrackets_opt             { $$ = NULL; }
+Arguments
+    : tEMPTYBRACKETS                { $$ = NULL; }
     | '(' ArgumentList ')'          { $$ = $2; }
 
+Arguments_opt
+    : /* empty */                   { $$ = NULL; }
+    | Arguments                     { $$ = $1; }
+
 ArgumentList_opt
-    : EmptyBrackets_opt             { $$ = NULL; }
+    : /* empty */                   { $$ = NULL; }
     | ArgumentList                  { $$ = $1; }
 
 ArgumentList
@@ -358,18 +389,24 @@ MultiplicativeExpression
                                                 { $$ = new_binary_expression(ctx, EXPR_DIV, $1, $3); CHECK_ERROR; }
 
 ExpExpression
-    : UnaryExpression                           { $$ = $1; }
-    | ExpExpression '^' UnaryExpression         { $$ = new_binary_expression(ctx, EXPR_EXP, $1, $3); CHECK_ERROR; }
+    : SignExpression                            { $$ = $1; }
+    | ExpExpression '^' SignExpression          { $$ = new_binary_expression(ctx, EXPR_EXP, $1, $3); CHECK_ERROR; }
+
+SignExpression
+    : UnaryExpression               { $$ = $1; }
+    | '-' SignExpression            { $$ = new_unary_expression(ctx, EXPR_NEG, $2); CHECK_ERROR; }
+    | '+' SignExpression            { $$ = $2; }
 
 UnaryExpression
     : LiteralExpression             { $$ = $1; }
     | CallExpression                { $$ = $1; }
     | tNEW Identifier               { $$ = new_new_expression(ctx, $2); CHECK_ERROR; }
-    | '-' UnaryExpression           { $$ = new_unary_expression(ctx, EXPR_NEG, $2); CHECK_ERROR; }
 
 CallExpression
-    : PrimaryExpression                 { $$ = $1; }
-    | MemberExpression Arguments_opt    { $1->args = $2; $$ = &$1->expr; }
+    : PrimaryExpression             { $$ = $1; }
+    | MemberExpression              { $$ = &$1->expr; }
+    | CallExpression Arguments      { call_expression_t *expr = new_call_expression(ctx, $1, $2); CHECK_ERROR;
+                                      $$ = &expr->expr; }
 
 LiteralExpression
     : tTRUE                         { $$ = new_bool_expression(ctx, VARIANT_TRUE); CHECK_ERROR; }
@@ -381,18 +418,16 @@ LiteralExpression
     | tNOTHING                      { $$ = new_expression(ctx, EXPR_NOTHING, 0); CHECK_ERROR; }
 
 NumericLiteralExpression
-    : tShort                        { $$ = new_long_expression(ctx, EXPR_USHORT, $1); CHECK_ERROR; }
-    | '0'                           { $$ = new_long_expression(ctx, EXPR_USHORT, 0); CHECK_ERROR; }
-    | tLong                         { $$ = new_long_expression(ctx, EXPR_ULONG, $1); CHECK_ERROR; }
+    : '0'                           { $$ = new_long_expression(ctx, EXPR_INT, 0); CHECK_ERROR; }
+    | tInt                          { $$ = new_long_expression(ctx, EXPR_INT, $1); CHECK_ERROR; }
     | tDouble                       { $$ = new_double_expression(ctx, $1); CHECK_ERROR; }
 
 IntegerValue
-    : tShort                        { $$ = $1; }
-    | '0'                           { $$ = 0; }
-    | tLong                         { $$ = $1; }
+    : '0'                           { $$ = 0; }
+    | tInt                          { $$ = $1; }
 
 PrimaryExpression
-    : '(' Expression ')'            { $$ = new_unary_expression(ctx, EXPR_BRACKETS, $2); }
+    : tEXPRLBRACKET Expression ')'            { $$ = new_unary_expression(ctx, EXPR_BRACKETS, $2); }
     | tME                           { $$ = new_expression(ctx, EXPR_ME, 0); CHECK_ERROR; }
 
 ClassDeclaration
@@ -400,25 +435,30 @@ ClassDeclaration
 
 ClassBody
     : /* empty */                                 { $$ = new_class_decl(ctx); }
+    | FunctionDecl                                { $$ = add_class_function(ctx, new_class_decl(ctx), $1); CHECK_ERROR; }
     | FunctionDecl StSep ClassBody                { $$ = add_class_function(ctx, $3, $1); CHECK_ERROR; }
     /* FIXME: We should use DimDecl here to support arrays, but that conflicts with PropertyDecl. */
+    | Storage tIdentifier                         { dim_decl_t *dim_decl = new_dim_decl(ctx, $2, FALSE, NULL); CHECK_ERROR;
+                                                  $$ = add_dim_prop(ctx, new_class_decl(ctx), dim_decl, $1); CHECK_ERROR; }
     | Storage tIdentifier StSep ClassBody         { dim_decl_t *dim_decl = new_dim_decl(ctx, $2, FALSE, NULL); CHECK_ERROR;
                                                   $$ = add_dim_prop(ctx, $4, dim_decl, $1); CHECK_ERROR; }
+    | tDIM DimDecl                                { $$ = add_dim_prop(ctx, new_class_decl(ctx), $2, 0); CHECK_ERROR; }
     | tDIM DimDecl StSep ClassBody                { $$ = add_dim_prop(ctx, $4, $2, 0); CHECK_ERROR; }
+    | PropertyDecl                                { $$ = add_class_function(ctx, new_class_decl(ctx), $1); CHECK_ERROR; }
     | PropertyDecl StSep ClassBody                { $$ = add_class_function(ctx, $3, $1); CHECK_ERROR; }
 
 PropertyDecl
-    : Storage_opt tPROPERTY tGET tIdentifier ArgumentsDecl_opt StSep StatementsNl_opt tEND tPROPERTY
+    : Storage_opt tPROPERTY tGET tIdentifier ArgumentsDecl_opt StSep BodyStatements tEND tPROPERTY
                                     { $$ = new_function_decl(ctx, $4, FUNC_PROPGET, $1, $5, $7); CHECK_ERROR; }
-    | Storage_opt tPROPERTY tLET tIdentifier '(' ArgumentDecl ')' StSep StatementsNl_opt tEND tPROPERTY
+    | Storage_opt tPROPERTY tLET tIdentifier '(' ArgumentDecl ')' StSep BodyStatements tEND tPROPERTY
                                     { $$ = new_function_decl(ctx, $4, FUNC_PROPLET, $1, $6, $9); CHECK_ERROR; }
-    | Storage_opt tPROPERTY tSET tIdentifier '(' ArgumentDecl ')' StSep StatementsNl_opt tEND tPROPERTY
+    | Storage_opt tPROPERTY tSET tIdentifier '(' ArgumentDecl ')' StSep BodyStatements tEND tPROPERTY
                                     { $$ = new_function_decl(ctx, $4, FUNC_PROPSET, $1, $6, $9); CHECK_ERROR; }
 
 FunctionDecl
-    : Storage_opt tSUB Identifier ArgumentsDecl_opt StSep StatementsNl_opt tEND tSUB
+    : Storage_opt tSUB Identifier ArgumentsDecl_opt StSep BodyStatements tEND tSUB
                                     { $$ = new_function_decl(ctx, $3, FUNC_SUB, $1, $4, $6); CHECK_ERROR; }
-    | Storage_opt tFUNCTION Identifier ArgumentsDecl_opt StSep StatementsNl_opt tEND tFUNCTION
+    | Storage_opt tFUNCTION Identifier ArgumentsDecl_opt StSep BodyStatements tEND tFUNCTION
                                     { $$ = new_function_decl(ctx, $3, FUNC_FUNCTION, $1, $4, $6); CHECK_ERROR; }
 
 Storage_opt
@@ -451,59 +491,6 @@ Identifier
     | tEXPLICIT      { $$ = $1; }
     | tPROPERTY      { $$ = $1; }
     | tSTEP          { $$ = $1; }
-
-/* most keywords can be an identifier after a dot */
-DotIdentifier
-    : Identifier     { $$ = $1; }
-    | tTRUE          { $$ = $1; }
-    | tFALSE         { $$ = $1; }
-    | tNOT           { $$ = $1; }
-    | tAND           { $$ = $1; }
-    | tOR            { $$ = $1; }
-    | tXOR           { $$ = $1; }
-    | tEQV           { $$ = $1; }
-    | tIMP           { $$ = $1; }
-    | tIS            { $$ = $1; }
-    | tMOD           { $$ = $1; }
-    | tCALL          { $$ = $1; }
-    | tDIM           { $$ = $1; }
-    | tSUB           { $$ = $1; }
-    | tFUNCTION      { $$ = $1; }
-    | tGET           { $$ = $1; }
-    | tLET           { $$ = $1; }
-    | tCONST         { $$ = $1; }
-    | tIF            { $$ = $1; }
-    | tELSE          { $$ = $1; }
-    | tELSEIF        { $$ = $1; }
-    | tEND           { $$ = $1; }
-    | tTHEN          { $$ = $1; }
-    | tEXIT          { $$ = $1; }
-    | tWHILE         { $$ = $1; }
-    | tWEND          { $$ = $1; }
-    | tDO            { $$ = $1; }
-    | tLOOP          { $$ = $1; }
-    | tUNTIL         { $$ = $1; }
-    | tFOR           { $$ = $1; }
-    | tTO            { $$ = $1; }
-    | tEACH          { $$ = $1; }
-    | tIN            { $$ = $1; }
-    | tSELECT        { $$ = $1; }
-    | tCASE          { $$ = $1; }
-    | tBYREF         { $$ = $1; }
-    | tBYVAL         { $$ = $1; }
-    | tOPTION        { $$ = $1; }
-    | tNOTHING       { $$ = $1; }
-    | tEMPTY         { $$ = $1; }
-    | tNULL          { $$ = $1; }
-    | tCLASS         { $$ = $1; }
-    | tSET           { $$ = $1; }
-    | tNEW           { $$ = $1; }
-    | tPUBLIC        { $$ = $1; }
-    | tPRIVATE       { $$ = $1; }
-    | tNEXT          { $$ = $1; }
-    | tON            { $$ = $1; }
-    | tRESUME        { $$ = $1; }
-    | tGOTO          { $$ = $1; }
 
 /* Most statements accept both new line and ':' as separators */
 StSep
@@ -542,6 +529,22 @@ static void parse_complete(parser_ctx_t *ctx, BOOL option_explicit)
 {
     ctx->parse_complete = TRUE;
     ctx->option_explicit = option_explicit;
+}
+
+static void handle_isexpression_script(parser_ctx_t *ctx, expression_t *expr)
+{
+    retval_statement_t *stat;
+
+    ctx->parse_complete = TRUE;
+    if(!expr)
+        return;
+
+    stat = new_statement(ctx, STAT_RETVAL, sizeof(*stat));
+    if(!stat)
+        return;
+
+    stat->expr = expr;
+    ctx->stats = &stat->stat;
 }
 
 static void *new_expression(parser_ctx_t *ctx, expression_type_t type, size_t size)
@@ -640,8 +643,59 @@ static member_expression_t *new_member_expression(parser_ctx_t *ctx, expression_
 
     expr->obj_expr = obj_expr;
     expr->identifier = identifier;
-    expr->args = NULL;
     return expr;
+}
+
+static call_expression_t *new_call_expression(parser_ctx_t *ctx, expression_t *expr, expression_t *arguments)
+{
+    call_expression_t *call_expr;
+
+    call_expr = new_expression(ctx, EXPR_CALL, sizeof(*call_expr));
+    if(!call_expr)
+        return NULL;
+
+    call_expr->call_expr = expr;
+    call_expr->args = arguments;
+    return call_expr;
+}
+
+static call_expression_t *make_call_expression(parser_ctx_t *ctx, expression_t *callee_expr, expression_t *arguments)
+{
+    call_expression_t *call_expr;
+
+    if(callee_expr->type == EXPR_MEMBER)
+        return new_call_expression(ctx, callee_expr, arguments);
+    if(callee_expr->type != EXPR_CALL) {
+        FIXME("Unhandled for expr type %u\n", callee_expr->type);
+        ctx->hres = E_FAIL;
+        return NULL;
+    }
+    call_expr = (call_expression_t*)callee_expr;
+    if(!call_expr->args) {
+        call_expr->args = arguments;
+        return call_expr;
+    }
+
+    if(call_expr->args->next) {
+        FIXME("Invalid syntax: invalid use of parentheses for arguments\n");
+        ctx->hres = E_FAIL;
+        return NULL;
+    }
+
+    call_expr->args = new_unary_expression(ctx, EXPR_BRACKETS, call_expr->args);
+    if(!call_expr->args)
+        return NULL;
+    if(!arguments)
+        return call_expr;
+
+    if(arguments->type != EXPR_NOARG) {
+        FIXME("Invalid syntax: missing comma\n");
+        ctx->hres = E_FAIL;
+        return NULL;
+    }
+
+    call_expr->args->next = arguments->next;
+    return call_expr;
 }
 
 static expression_t *new_new_expression(parser_ctx_t *ctx, const WCHAR *identifier)
@@ -669,20 +723,35 @@ static void *new_statement(parser_ctx_t *ctx, statement_type_t type, size_t size
     return stat;
 }
 
-static statement_t *new_call_statement(parser_ctx_t *ctx, BOOL is_strict, member_expression_t *expr)
+static statement_t *new_call_statement(parser_ctx_t *ctx, BOOL is_strict, expression_t *expr)
 {
+    call_expression_t *call_expr = NULL;
     call_statement_t *stat;
 
     stat = new_statement(ctx, STAT_CALL, sizeof(*stat));
     if(!stat)
         return NULL;
 
-    stat->expr = expr;
+    switch(expr->type) {
+    case EXPR_MEMBER:
+        call_expr = new_call_expression(ctx, expr, NULL);
+        break;
+    case EXPR_CALL:
+        call_expr = (call_expression_t*)expr;
+        break;
+    default:
+        FIXME("Unsupported expr type %u\n", expr->type);
+        ctx->hres = E_NOTIMPL;
+    }
+    if(!call_expr)
+        return NULL;
+
+    stat->expr = call_expr;
     stat->is_strict = is_strict;
     return &stat->stat;
 }
 
-static statement_t *new_assign_statement(parser_ctx_t *ctx, member_expression_t *left, expression_t *right)
+static statement_t *new_assign_statement(parser_ctx_t *ctx, expression_t *left, expression_t *right)
 {
     assign_statement_t *stat;
 
@@ -690,12 +759,20 @@ static statement_t *new_assign_statement(parser_ctx_t *ctx, member_expression_t 
     if(!stat)
         return NULL;
 
-    stat->member_expr = left;
     stat->value_expr = right;
+
+    if(left->type == EXPR_CALL) {
+        stat->left_expr = (call_expression_t*)left;
+    }else {
+        stat->left_expr = new_call_expression(ctx, left, NULL);
+        if(!stat->left_expr)
+            return NULL;
+    }
+
     return &stat->stat;
 }
 
-static statement_t *new_set_statement(parser_ctx_t *ctx, member_expression_t *left, expression_t *right)
+static statement_t *new_set_statement(parser_ctx_t *ctx, member_expression_t *left, expression_t *arguments, expression_t *right)
 {
     assign_statement_t *stat;
 
@@ -703,8 +780,11 @@ static statement_t *new_set_statement(parser_ctx_t *ctx, member_expression_t *le
     if(!stat)
         return NULL;
 
-    stat->member_expr = left;
     stat->value_expr = right;
+    stat->left_expr = new_call_expression(ctx, &left->expr, arguments);
+    if(!stat->left_expr)
+        return NULL;
+
     return &stat->stat;
 }
 
@@ -745,6 +825,20 @@ static statement_t *new_dim_statement(parser_ctx_t *ctx, dim_decl_t *decls)
         return NULL;
 
     stat->dim_decls = decls;
+    return &stat->stat;
+}
+
+static statement_t *new_redim_statement(parser_ctx_t *ctx, const WCHAR *identifier, BOOL preserve, expression_t *dims)
+{
+    redim_statement_t *stat;
+
+    stat = new_statement(ctx, STAT_REDIM, sizeof(*stat));
+    if(!stat)
+        return NULL;
+
+    stat->identifier = identifier;
+    stat->preserve = preserve;
+    stat->dims = dims;
     return &stat->stat;
 }
 
@@ -833,6 +927,19 @@ static statement_t *new_select_statement(parser_ctx_t *ctx, expression_t *expr, 
 
     stat->expr = expr;
     stat->case_clausules = case_clausules;
+    return &stat->stat;
+}
+
+static statement_t *new_with_statement(parser_ctx_t *ctx, expression_t *expr, statement_t *body)
+{
+    with_statement_t *stat;
+
+    stat = new_statement(ctx, STAT_WITH, sizeof(*stat));
+    if(!stat)
+        return NULL;
+
+    stat->expr = expr;
+    stat->body = body;
     return &stat->stat;
 }
 
@@ -1024,7 +1131,7 @@ void *parser_alloc(parser_ctx_t *ctx, size_t size)
     return ret;
 }
 
-HRESULT parse_script(parser_ctx_t *ctx, const WCHAR *code, const WCHAR *delimiter)
+HRESULT parse_script(parser_ctx_t *ctx, const WCHAR *code, const WCHAR *delimiter, DWORD flags)
 {
     static const WCHAR html_delimiterW[] = {'<','/','s','c','r','i','p','t','>',0};
 
@@ -1042,6 +1149,9 @@ HRESULT parse_script(parser_ctx_t *ctx, const WCHAR *code, const WCHAR *delimite
     ctx->class_decls = NULL;
     ctx->option_explicit = FALSE;
     ctx->is_html = delimiter && !wcsicmp(delimiter, html_delimiterW);
+
+    if(flags & SCRIPTTEXT_ISEXPRESSION)
+        ctx->last_token = tEXPRESSION;
 
     parser_parse(ctx);
 

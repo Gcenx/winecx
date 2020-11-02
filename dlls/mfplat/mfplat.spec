@@ -10,7 +10,7 @@
 @ stub ValidateWaveFormat
 @ stub CopyPropVariant
 @ stub CreatePropVariant
-@ stub CreatePropertyStore
+@ stdcall CreatePropertyStore(ptr)
 @ stub DestroyPropVariant
 @ stub GetAMSubtypeFromD3DFormat
 @ stub GetD3DFormatFromMFSubtype
@@ -42,6 +42,7 @@
 @ stdcall MFCreateAttributes(ptr long)
 @ stub MFCreateAudioMediaType
 @ stdcall MFCreateCollection(ptr)
+@ stdcall MFCreateDXGIDeviceManager(ptr ptr)
 @ stdcall MFCreateEventQueue(ptr)
 @ stdcall MFCreateFile(long long long wstr ptr)
 @ stub MFCreateLegacyMediaBufferOnMFMediaBuffer
@@ -146,7 +147,7 @@
 @ stub MFTGetInfo
 @ stdcall MFTRegister(int128 int128 wstr long long ptr long ptr ptr)
 @ stdcall MFTRegisterLocal(ptr ptr wstr long long  ptr long ptr)
-@ stub MFTRegisterLocalByCLSID
+@ stdcall MFTRegisterLocalByCLSID(ptr ptr wstr long long ptr long ptr)
 @ stdcall MFTUnregister(int128)
 @ stdcall MFTUnregisterLocal(ptr)
 @ stub MFTUnregisterLocalByCLSID

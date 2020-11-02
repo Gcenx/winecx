@@ -31,6 +31,7 @@ static unsigned int page_size;
 static NTSTATUS (WINAPI *pRtlCreateUserStack)(SIZE_T, SIZE_T, ULONG, SIZE_T, SIZE_T, INITIAL_TEB *);
 static NTSTATUS (WINAPI *pRtlFreeUserStack)(void *);
 static BOOL (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
+static const BOOL is_win64 = sizeof(void*) != sizeof(int);
 
 static HANDLE create_target_process(const char *arg)
 {
@@ -59,9 +60,21 @@ static UINT_PTR get_zero_bits(UINT_PTR p)
         return (~(UINT_PTR)0) >> get_zero_bits(p >> 32);
 #endif
 
-    if (p == 0) return 32;
+    if (p == 0) return 0;
     while ((p >> (31 - z)) != 1) z++;
     return z;
+}
+
+static UINT_PTR get_zero_bits_mask(ULONG_PTR z)
+{
+    if (z >= 32)
+    {
+        z = get_zero_bits(z);
+#ifdef _WIN64
+        if (z >= 32) return z;
+#endif
+    }
+    return (~(UINT32)0) >> z;
 }
 
 static void test_NtAllocateVirtualMemory(void)
@@ -69,8 +82,10 @@ static void test_NtAllocateVirtualMemory(void)
     void *addr1, *addr2;
     NTSTATUS status;
     SIZE_T size;
-    ULONG zero_bits;
+    ULONG_PTR zero_bits;
     BOOL is_wow64;
+
+    if (!pIsWow64Process || !pIsWow64Process(NtCurrentProcess(), &is_wow64)) is_wow64 = FALSE;
 
     /* simple allocation should success */
     size = 0x1000;
@@ -98,7 +113,8 @@ static void test_NtAllocateVirtualMemory(void)
     addr2 = NULL;
     zero_bits = 1;
     status = NtAllocateVirtualMemory(NtCurrentProcess(), &addr2, zero_bits, &size,
-                                     MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+                                     MEM_RESERVE | MEM_COMMIT | MEM_TOP_DOWN,
+                                     PAGE_READWRITE);
     ok(status == STATUS_SUCCESS || status == STATUS_NO_MEMORY ||
        broken(status == STATUS_INVALID_PARAMETER_3) /* winxp */,
        "NtAllocateVirtualMemory returned %08x\n", status);
@@ -117,15 +133,15 @@ static void test_NtAllocateVirtualMemory(void)
         size = 0x1000;
         addr2 = NULL;
         status = NtAllocateVirtualMemory(NtCurrentProcess(), &addr2, zero_bits, &size,
-                                         MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+                                         MEM_RESERVE | MEM_COMMIT | MEM_TOP_DOWN,
+                                         PAGE_READWRITE);
         ok(status == STATUS_SUCCESS || status == STATUS_NO_MEMORY ||
            broken(zero_bits == 20 && status == STATUS_CONFLICTING_ADDRESSES) /* w1064v1809 */,
-           "NtAllocateVirtualMemory with %d zero_bits returned %08x\n", zero_bits, status);
+           "NtAllocateVirtualMemory with %d zero_bits returned %08x\n", (int)zero_bits, status);
         if (status == STATUS_SUCCESS)
         {
-            todo_wine_if((UINT_PTR)addr2 >> (32 - zero_bits))
             ok(((UINT_PTR)addr2 >> (32 - zero_bits)) == 0,
-               "NtAllocateVirtualMemory with %d zero_bits returned address %p\n", zero_bits, addr2);
+               "NtAllocateVirtualMemory with %d zero_bits returned address %p\n", (int)zero_bits, addr2);
 
             size = 0;
             status = NtFreeVirtualMemory(NtCurrentProcess(), &addr2, &size, MEM_RELEASE);
@@ -138,7 +154,6 @@ static void test_NtAllocateVirtualMemory(void)
     addr2 = NULL;
     status = NtAllocateVirtualMemory(NtCurrentProcess(), &addr2, 21, &size,
                                      MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
-    todo_wine
     ok(status == STATUS_NO_MEMORY || status == STATUS_INVALID_PARAMETER,
        "NtAllocateVirtualMemory returned %08x\n", status);
     if (status == STATUS_SUCCESS)
@@ -156,15 +171,15 @@ static void test_NtAllocateVirtualMemory(void)
     ok(status == STATUS_INVALID_PARAMETER_3 || status == STATUS_INVALID_PARAMETER,
        "NtAllocateVirtualMemory returned %08x\n", status);
 
-    /* zero bits > 31 should be considered as bitmask on 64bit and WoW64 */
+    /* zero bits > 31 should be considered as a leading zeroes bitmask on 64bit and WoW64 */
     size = 0x1000;
     addr2 = NULL;
-    zero_bits = 0x1fffffff;
+    zero_bits = 0x1aaaaaaa;
     status = NtAllocateVirtualMemory(NtCurrentProcess(), &addr2, zero_bits, &size,
-                                      MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+                                      MEM_RESERVE | MEM_COMMIT | MEM_TOP_DOWN,
+                                      PAGE_READWRITE);
 
-    if (sizeof(void *) == sizeof(int) && (!pIsWow64Process ||
-        !pIsWow64Process(NtCurrentProcess(), &is_wow64) || !is_wow64))
+    if (!is_win64 && !is_wow64)
     {
         ok(status == STATUS_INVALID_PARAMETER_3, "NtAllocateVirtualMemory returned %08x\n", status);
     }
@@ -174,8 +189,8 @@ static void test_NtAllocateVirtualMemory(void)
            "NtAllocateVirtualMemory returned %08x\n", status);
         if (status == STATUS_SUCCESS)
         {
-            todo_wine_if((UINT_PTR)addr2 & ~zero_bits)
-            ok(((UINT_PTR)addr2 & ~zero_bits) == 0,
+            ok(((UINT_PTR)addr2 & ~get_zero_bits_mask(zero_bits)) == 0 &&
+               ((UINT_PTR)addr2 & ~zero_bits) != 0, /* only the leading zeroes matter */
                "NtAllocateVirtualMemory returned address %p\n", addr2);
 
             size = 0;
@@ -271,7 +286,9 @@ static void test_NtMapViewOfSection(void)
     DWORD status, written;
     SIZE_T size, result;
     LARGE_INTEGER offset;
-    ULONG zero_bits;
+    ULONG_PTR zero_bits;
+
+    if (!pIsWow64Process || !pIsWow64Process(NtCurrentProcess(), &is_wow64)) is_wow64 = FALSE;
 
     file = CreateFileA(testfile, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
     ok(file != INVALID_HANDLE_VALUE, "Failed to create test file\n");
@@ -304,12 +321,11 @@ static void test_NtMapViewOfSection(void)
     size = 0;
     zero_bits = 1;
     offset.QuadPart = 0;
-    status = NtMapViewOfSection(mapping, process, &ptr2, zero_bits, 0, &offset, &size, 1, 0, PAGE_READWRITE);
+    status = NtMapViewOfSection(mapping, process, &ptr2, zero_bits, 0, &offset, &size, 1, MEM_TOP_DOWN, PAGE_READWRITE);
     ok(status == STATUS_SUCCESS || status == STATUS_NO_MEMORY,
        "NtMapViewOfSection returned %08x\n", status);
     if (status == STATUS_SUCCESS)
     {
-        todo_wine_if((UINT_PTR)ptr2 >> (32 - zero_bits))
         ok(((UINT_PTR)ptr2 >> (32 - zero_bits)) == 0,
            "NtMapViewOfSection returned address: %p\n", ptr2);
 
@@ -322,14 +338,13 @@ static void test_NtMapViewOfSection(void)
         ptr2 = NULL;
         size = 0;
         offset.QuadPart = 0;
-        status = NtMapViewOfSection(mapping, process, &ptr2, zero_bits, 0, &offset, &size, 1, 0, PAGE_READWRITE);
+        status = NtMapViewOfSection(mapping, process, &ptr2, zero_bits, 0, &offset, &size, 1, MEM_TOP_DOWN, PAGE_READWRITE);
         ok(status == STATUS_SUCCESS || status == STATUS_NO_MEMORY,
-           "NtMapViewOfSection with %d zero_bits returned %08x\n", zero_bits, status);
+           "NtMapViewOfSection with %d zero_bits returned %08x\n", (int)zero_bits, status);
         if (status == STATUS_SUCCESS)
         {
-            todo_wine_if((UINT_PTR)ptr2 >> (32 - zero_bits))
             ok(((UINT_PTR)ptr2 >> (32 - zero_bits)) == 0,
-               "NtMapViewOfSection with %d zero_bits returned address %p\n", zero_bits, ptr2);
+               "NtMapViewOfSection with %d zero_bits returned address %p\n", (int)zero_bits, ptr2);
 
             status = NtUnmapViewOfSection(process, ptr2);
             ok(status == STATUS_SUCCESS, "NtUnmapViewOfSection returned %08x\n", status);
@@ -341,7 +356,6 @@ static void test_NtMapViewOfSection(void)
     size = 0;
     offset.QuadPart = 0;
     status = NtMapViewOfSection(mapping, process, &ptr2, 21, 0, &offset, &size, 1, 0, PAGE_READWRITE);
-    todo_wine
     ok(status == STATUS_NO_MEMORY || status == STATUS_INVALID_PARAMETER,
        "NtMapViewOfSection returned %08x\n", status);
 
@@ -353,15 +367,14 @@ static void test_NtMapViewOfSection(void)
     ok(status == STATUS_INVALID_PARAMETER_4 || status == STATUS_INVALID_PARAMETER,
        "NtMapViewOfSection returned %08x\n", status);
 
-    /* zero bits > 31 should be considered as bitmask on 64bit and WoW64 */
+    /* zero bits > 31 should be considered as a leading zeroes bitmask on 64bit and WoW64 */
     ptr2 = NULL;
     size = 0;
-    zero_bits = 0x1fffffff;
+    zero_bits = 0x1aaaaaaa;
     offset.QuadPart = 0;
-    status = NtMapViewOfSection(mapping, process, &ptr2, zero_bits, 0, &offset, &size, 1, 0, PAGE_READWRITE);
+    status = NtMapViewOfSection(mapping, process, &ptr2, zero_bits, 0, &offset, &size, 1, MEM_TOP_DOWN, PAGE_READWRITE);
 
-    if (sizeof(void *) == sizeof(int) && (!pIsWow64Process ||
-        !pIsWow64Process(NtCurrentProcess(), &is_wow64) || !is_wow64))
+    if (!is_win64 && !is_wow64)
     {
         ok(status == STATUS_INVALID_PARAMETER_4, "NtMapViewOfSection returned %08x\n", status);
     }
@@ -371,8 +384,8 @@ static void test_NtMapViewOfSection(void)
            "NtMapViewOfSection returned %08x\n", status);
         if (status == STATUS_SUCCESS)
         {
-            todo_wine_if((UINT_PTR)ptr2 & ~zero_bits)
-            ok(((UINT_PTR)ptr2 & ~zero_bits) == 0,
+            ok(((UINT_PTR)ptr2 & ~get_zero_bits_mask(zero_bits)) == 0 &&
+               ((UINT_PTR)ptr2 & ~zero_bits) != 0, /* only the leading zeroes matter */
                "NtMapViewOfSection returned address %p\n", ptr2);
 
             status = NtUnmapViewOfSection(process, ptr2);
@@ -424,8 +437,7 @@ static void test_NtMapViewOfSection(void)
     status = NtMapViewOfSection(mapping, process, &ptr2, zero_bits, 0, &offset, &size, 1, 0, PAGE_READWRITE);
     ok(status == STATUS_MAPPED_ALIGNMENT, "NtMapViewOfSection returned %08x\n", status);
 
-    if (sizeof(void *) == sizeof(int) && (!pIsWow64Process ||
-        !pIsWow64Process(NtCurrentProcess(), &is_wow64) || !is_wow64))
+    if (!is_win64 && !is_wow64)
     {
         /* new memory region conflicts with previous mapping */
         ptr2 = ptr;

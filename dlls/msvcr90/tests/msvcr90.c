@@ -135,6 +135,7 @@ static int (__cdecl *p__memicmp)(const char*, const char*, size_t);
 static int (__cdecl *p__memicmp_l)(const char*, const char*, size_t, _locale_t);
 static int (__cdecl *p__vsnwprintf)(wchar_t *buffer,size_t count, const wchar_t *format, __ms_va_list valist);
 static size_t (__cdecl *p___strncnt)(const char *str, size_t count);
+static int (__cdecl *p_swscanf)(const wchar_t *str, const wchar_t* format, ...);
 
 /* make sure we use the correct errno */
 #undef errno
@@ -232,11 +233,6 @@ static void* (WINAPI *pEncodePointer)(void *);
 static int cb_called[4];
 static int g_qsort_s_context_counter;
 static int g_bsearch_s_context_counter;
-
-static inline int almost_equal_f(float f1, float f2)
-{
-    return f1-f2 > -1e-30 && f1-f2 < 1e-30;
-}
 
 /* ########## */
 
@@ -405,6 +401,7 @@ static BOOL init(void)
     SET(p__memicmp_l, "_memicmp_l");
     SET(p__vsnwprintf, "_vsnwprintf");
     SET(p___strncnt, "__strncnt");
+    SET(p_swscanf, "swscanf");
 
     if (sizeof(void *) == 8)
     {
@@ -1007,7 +1004,7 @@ if (0)
             _atoflt_testdata[i].ret, _atoflt_testdata[i].str);
 
         if (ret == 0)
-          ok(almost_equal_f(flt.f, _atoflt_testdata[i].flt), "got %f, expected %f, for %s\n", flt.f,
+          ok(flt.f == _atoflt_testdata[i].flt, "got %f, expected %f, for %s\n", flt.f,
               _atoflt_testdata[i].flt, _atoflt_testdata[i].str);
 
         i++;
@@ -1473,9 +1470,12 @@ static void test_is_exception_typeof(void)
 
 static void test__AdjustPointer(void)
 {
-    int off = 0xf0;
-    void *obj1 = &off;
-    void *obj2 = (char*)&off - 2;
+    struct {
+        int vbase;
+        int off;
+    } obj = { 0, 0xf0 };
+    void *obj1 = &obj.off;
+    void *obj2 = &obj;
     struct test_data {
         void *ptr;
         void *ret;
@@ -1488,10 +1488,10 @@ static void test__AdjustPointer(void)
         {NULL, NULL, {0, -1, 0}},
         {(void*)0xbeef, (void*)0xbef0, {1, -1, 1}},
         {(void*)0xbeef, (void*)0xbeee, {-1, -1, 0}},
-        {&obj1, (char*)&obj1 + off, {0, 0, 0}},
-        {(char*)&obj1 - 5, (char*)&obj1 + off, {0, 5, 0}},
-        {(char*)&obj1 - 3, (char*)&obj1 + off + 24, {24, 3, 0}},
-        {(char*)&obj2 - 17, (char*)&obj2 + off + 4, {4, 17, 2}}
+        {&obj1, (char*)&obj1 + obj.off, {0, 0, 0}},
+        {(char*)&obj1 - 5, (char*)&obj1 + obj.off, {0, 5, 0}},
+        {(char*)&obj1 - 3, (char*)&obj1 + obj.off + 24, {24, 3, 0}},
+        {(char*)&obj2 - 17, (char*)&obj2 + obj.off + 4, {4, 17, sizeof(int)}}
     };
     void *ret;
     int i;
@@ -1925,6 +1925,17 @@ static void test___strncnt(void)
     }
 }
 
+static void test_swscanf(void)
+{
+
+    wchar_t buffer[100];
+    int ret;
+
+    /* check WEOF */
+    ret = p_swscanf(L" \t\n\n", L"%s", buffer);
+    ok( ret == (short)WEOF, "ret = %d\n", ret );
+}
+
 START_TEST(msvcr90)
 {
     if(!init())
@@ -1963,4 +1974,5 @@ START_TEST(msvcr90)
     test__fpieee_flt();
 #endif
     test___strncnt();
+    test_swscanf();
 }

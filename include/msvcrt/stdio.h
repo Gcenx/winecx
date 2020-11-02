@@ -10,7 +10,7 @@
 
 #include "wine/winheader_enter.h"
 
-#include <crtdefs.h>
+#include <corecrt.h>
 
 #ifndef RC_INVOKED
 #include <stdarg.h>
@@ -92,9 +92,11 @@ FILE* __cdecl __iob_func(void);
 # endif
 #endif /* _STDIO_DEFINED */
 
-#define stdin              (_iob+STDIN_FILENO)
-#define stdout             (_iob+STDOUT_FILENO)
-#define stderr             (_iob+STDERR_FILENO)
+FILE *__cdecl __acrt_iob_func(unsigned index);
+
+#define stdin  (__acrt_iob_func(0))
+#define stdout (__acrt_iob_func(1))
+#define stderr (__acrt_iob_func(2))
 
 /* return value for _get_output_format */
 #define _TWO_DIGIT_EXPONENT 0x1
@@ -126,6 +128,9 @@ int    __cdecl _unlink(const char*);
 int    WINAPIV _scprintf(const char*,...);
 int    __cdecl _vscprintf(const char*,__ms_va_list);
 int    __cdecl _vsnprintf(char*,size_t,const char*,__ms_va_list);
+#ifdef __i386_on_x86_64__
+int    __cdecl _vsnprintf(char* HOSTPTR,size_t,const char* HOSTPTR,__ms_va_list) __attribute__((overloadable)) asm(__ASM_NAME("wine__vsnprintf_HOSTPTR"));
+#endif
 int    __cdecl _vsnprintf_s(char*,size_t,size_t,const char*,__ms_va_list);
 int    __cdecl _vsprintf_p_l(char*,size_t,const char*,_locale_t,__ms_va_list);
 
@@ -191,6 +196,7 @@ int    WINAPIV sprintf_s(char*,size_t,const char*,...);
 int    WINAPIV _scprintf(const char *, ...);
 int    WINAPIV sscanf(const char*,const char*,...);
 int    WINAPIV sscanf_s(const char*,const char*,...);
+int    WINAPIV _snscanf_l(const char*,size_t,const char*,_locale_t,...);
 FILE*  __cdecl tmpfile(void);
 char*  __cdecl tmpnam(char*);
 int    __cdecl ungetc(int,FILE*);
@@ -300,6 +306,12 @@ static inline int unlink(const char* path) { return _unlink(path); }
 #define _UNLINK_DEFINED
 #endif
 static inline int vsnprintf(char *buffer, size_t size, const char *format, __ms_va_list args) { return _vsnprintf(buffer,size,format,args); }
+#ifdef __i386_on_x86_64__
+static inline int vsnprintf(char * HOSTPTR buffer, size_t size, const char * HOSTPTR format, __ms_va_list args) __attribute__((overloadable))
+{
+    return _vsnprintf(buffer,size,format,args);
+}
+#endif
 #define snprintf _snprintf
 
 static inline wint_t fgetwchar(void) { return _fgetwchar(); }

@@ -24,8 +24,6 @@
 #include "quartz_private.h"
 
 #include "wine/debug.h"
-#include "wine/unicode.h"
-#include "pin.h"
 #include "uuids.h"
 #include "vfwmsgs.h"
 #include "winbase.h"
@@ -59,10 +57,10 @@ typedef struct DATAREQUEST
 
 typedef struct AsyncReader
 {
-    BaseFilter filter;
+    struct strmbase_filter filter;
     IFileSourceFilter IFileSourceFilter_iface;
 
-    BaseOutputPin source;
+    struct strmbase_source source;
     IAsyncReader IAsyncReader_iface;
 
     LPOLESTR pszFileName;
@@ -79,10 +77,9 @@ typedef struct AsyncReader
     HANDLE *handle_list;
 } AsyncReader;
 
-static const IPinVtbl FileAsyncReaderPin_Vtbl;
-static const BaseOutputPinFuncTable output_BaseOutputFuncTable;
+static const struct strmbase_source_ops source_ops;
 
-static inline AsyncReader *impl_from_BaseFilter(BaseFilter *iface)
+static inline AsyncReader *impl_from_strmbase_filter(struct strmbase_filter *iface)
 {
     return CONTAINING_RECORD(iface, AsyncReader, filter);
 }
@@ -92,7 +89,6 @@ static inline AsyncReader *impl_from_IFileSourceFilter(IFileSourceFilter *iface)
     return CONTAINING_RECORD(iface, AsyncReader, IFileSourceFilter_iface);
 }
 
-static const IBaseFilterVtbl AsyncReader_Vtbl;
 static const IFileSourceFilterVtbl FileSource_Vtbl;
 static const IAsyncReaderVtbl FileAsyncReader_Vtbl;
 
@@ -103,61 +99,9 @@ static const WCHAR subtype_name[] = {
 static const WCHAR source_filter_name[] = {
     'S','o','u','r','c','e',' ','F','i','l','t','e','r',0};
 
-static HRESULT process_extensions(HKEY hkeyExtensions, LPCOLESTR pszFileName, GUID * majorType, GUID * minorType, GUID * sourceFilter)
-{
-    WCHAR *extension;
-    LONG l;
-    HKEY hsub;
-    WCHAR keying[39];
-    DWORD size;
-
-    if (!pszFileName)
-        return E_POINTER;
-
-    /* Get the part of the name that matters */
-    if (!(extension = strrchrW(pszFileName, '.')))
-        return E_FAIL;
-
-    l = RegOpenKeyExW(hkeyExtensions, extension, 0, KEY_READ, &hsub);
-    if (l)
-        return E_FAIL;
-
-    if (majorType)
-    {
-        size = sizeof(keying);
-        l = RegQueryValueExW(hsub, mediatype_name, NULL, NULL, (LPBYTE)keying, &size);
-        if (!l)
-            CLSIDFromString(keying, majorType);
-    }
-
-    if (minorType)
-    {
-        size = sizeof(keying);
-        if (!l)
-            l = RegQueryValueExW(hsub, subtype_name, NULL, NULL, (LPBYTE)keying, &size);
-        if (!l)
-            CLSIDFromString(keying, minorType);
-    }
-
-    if (sourceFilter)
-    {
-        size = sizeof(keying);
-        if (!l)
-            l = RegQueryValueExW(hsub, source_filter_name, NULL, NULL, (LPBYTE)keying, &size);
-        if (!l)
-            CLSIDFromString(keying, sourceFilter);
-    }
-
-    RegCloseKey(hsub);
-
-    if (!l)
-        return S_OK;
-    return E_FAIL;
-}
-
 static unsigned char byte_from_hex_char(WCHAR wHex)
 {
-    switch (tolowerW(wHex))
+    switch (towlower(wHex))
     {
     case '0':
     case '1':
@@ -182,250 +126,238 @@ static unsigned char byte_from_hex_char(WCHAR wHex)
     }
 }
 
-static HRESULT process_pattern_string(LPCWSTR wszPatternString, IAsyncReader * pReader)
+static BOOL process_pattern_string(const WCHAR *pattern, HANDLE file)
 {
-    ULONG ulOffset;
-    ULONG ulBytes;
-    BYTE * pbMask;
-    BYTE * pbValue;
-    BYTE * pbFile;
-    HRESULT hr = S_OK;
-    ULONG strpos;
+    ULONG size, offset, i, ret_size;
+    BYTE *mask, *expect, *actual;
+    BOOL ret = TRUE;
 
-    TRACE("\t\tPattern string: %s\n", debugstr_w(wszPatternString));
-    
-    /* format: "offset, bytestocompare, mask, value" */
+    /* format: "offset, size, mask, value" */
 
-    ulOffset = strtolW(wszPatternString, NULL, 10);
+    offset = wcstol(pattern, NULL, 10);
 
-    if (!(wszPatternString = strchrW(wszPatternString, ',')))
-        return E_INVALIDARG;
+    if (!(pattern = wcschr(pattern, ',')))
+        return FALSE;
+    pattern++;
 
-    wszPatternString++; /* skip ',' */
+    size = wcstol(pattern, NULL, 10);
+    mask = heap_alloc(size);
+    expect = heap_alloc(size);
+    memset(mask, 0xff, size);
 
-    ulBytes = strtolW(wszPatternString, NULL, 10);
-
-    pbMask = HeapAlloc(GetProcessHeap(), 0, ulBytes);
-    pbValue = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, ulBytes);
-    pbFile = HeapAlloc(GetProcessHeap(), 0, ulBytes);
-
-    /* default mask is match everything */
-    memset(pbMask, 0xFF, ulBytes);
-
-    if (!(wszPatternString = strchrW(wszPatternString, ',')))
-        hr = E_INVALIDARG;
-
-    if (hr == S_OK)
+    if (!(pattern = wcschr(pattern, ',')))
     {
-        wszPatternString++; /* skip ',' */
-        while (!isxdigitW(*wszPatternString) && (*wszPatternString != ',')) wszPatternString++;
+        heap_free(mask);
+        heap_free(expect);
+        return FALSE;
+    }
+    pattern++;
+    while (!iswxdigit(*pattern) && (*pattern != ','))
+        pattern++;
 
-        for (strpos = 0; isxdigitW(*wszPatternString) && (strpos/2 < ulBytes); wszPatternString++, strpos++)
-        {
-            if ((strpos % 2) == 1) /* odd numbered position */
-                pbMask[strpos / 2] |= byte_from_hex_char(*wszPatternString);
-            else
-                pbMask[strpos / 2] = byte_from_hex_char(*wszPatternString) << 4;
-        }
-
-        if (!(wszPatternString = strchrW(wszPatternString, ',')))
-            hr = E_INVALIDARG;
+    for (i = 0; iswxdigit(*pattern) && (i/2 < size); pattern++, i++)
+    {
+        if (i % 2)
+            mask[i / 2] |= byte_from_hex_char(*pattern);
         else
-            wszPatternString++; /* skip ',' */
+            mask[i / 2] = byte_from_hex_char(*pattern) << 4;
     }
 
-    if (hr == S_OK)
+    if (!(pattern = wcschr(pattern, ',')))
     {
-        for ( ; !isxdigitW(*wszPatternString) && (*wszPatternString != ','); wszPatternString++)
-            ;
+        heap_free(mask);
+        heap_free(expect);
+        return FALSE;
+    }
+    pattern++;
+    while (!iswxdigit(*pattern) && (*pattern != ','))
+        pattern++;
 
-        for (strpos = 0; isxdigitW(*wszPatternString) && (strpos/2 < ulBytes); wszPatternString++, strpos++)
+    for (i = 0; iswxdigit(*pattern) && (i/2 < size); pattern++, i++)
+    {
+        if (i % 2)
+            expect[i / 2] |= byte_from_hex_char(*pattern);
+        else
+            expect[i / 2] = byte_from_hex_char(*pattern) << 4;
+    }
+
+    actual = heap_alloc(size);
+    SetFilePointer(file, offset, NULL, FILE_BEGIN);
+    if (!ReadFile(file, actual, size, &ret_size, NULL) || ret_size != size)
+    {
+        heap_free(actual);
+        heap_free(expect);
+        heap_free(mask);
+        return FALSE;
+    }
+
+    for (i = 0; i < size; ++i)
+    {
+        if ((actual[i] & mask[i]) != expect[i])
         {
-            if ((strpos % 2) == 1) /* odd numbered position */
-                pbValue[strpos / 2] |= byte_from_hex_char(*wszPatternString);
-            else
-                pbValue[strpos / 2] = byte_from_hex_char(*wszPatternString) << 4;
+            ret = FALSE;
+            break;
         }
     }
 
-    if (hr == S_OK)
-        hr = IAsyncReader_SyncRead(pReader, ulOffset, ulBytes, pbFile);
+    heap_free(actual);
+    heap_free(expect);
+    heap_free(mask);
 
-    if (hr == S_OK)
-    {
-        ULONG i;
-        for (i = 0; i < ulBytes; i++)
-            if ((pbFile[i] & pbMask[i]) != pbValue[i])
-            {
-                hr = S_FALSE;
-                break;
-            }
-    }
+    /* If there is a following tuple, then we must match that as well. */
+    if (ret && (pattern = wcschr(pattern, ',')))
+        return process_pattern_string(pattern + 1, file);
 
-    HeapFree(GetProcessHeap(), 0, pbMask);
-    HeapFree(GetProcessHeap(), 0, pbValue);
-    HeapFree(GetProcessHeap(), 0, pbFile);
-
-    /* if we encountered no errors with this string, and there is a following tuple, then we
-     * have to match that as well to succeed */
-    if ((hr == S_OK) && (wszPatternString = strchrW(wszPatternString, ',')))
-        return process_pattern_string(wszPatternString + 1, pReader);
-    else
-        return hr;
+    return ret;
 }
 
-HRESULT GetClassMediaFile(IAsyncReader * pReader, LPCOLESTR pszFileName, GUID * majorType, GUID * minorType, GUID * sourceFilter)
+BOOL get_media_type(const WCHAR *filename, GUID *majortype, GUID *subtype, GUID *source_clsid)
 {
-    HKEY hkeyMediaType = NULL;
-    LONG lRet;
-    HRESULT hr = S_OK;
-    BOOL bFound = FALSE;
+    WCHAR extensions_path[278] = {'M','e','d','i','a',' ','T','y','p','e','\\','E','x','t','e','n','s','i','o','n','s','\\',0};
+    static const WCHAR wszExtensions[] = {'E','x','t','e','n','s','i','o','n','s',0};
     static const WCHAR wszMediaType[] = {'M','e','d','i','a',' ','T','y','p','e',0};
+    DWORD majortype_idx, size;
+    const WCHAR *ext;
+    HKEY parent_key;
+    HANDLE file;
 
-    TRACE("(%p, %s, %p, %p)\n", pReader, debugstr_w(pszFileName), majorType, minorType);
-
-    if(majorType)
-        *majorType = GUID_NULL;
-    if(minorType)
-        *minorType = GUID_NULL;
-    if(sourceFilter)
-        *sourceFilter = GUID_NULL;
-
-    lRet = RegOpenKeyExW(HKEY_CLASSES_ROOT, wszMediaType, 0, KEY_READ, &hkeyMediaType);
-    hr = HRESULT_FROM_WIN32(lRet);
-
-    if (SUCCEEDED(hr))
+    if ((ext = wcsrchr(filename, '.')))
     {
-        DWORD indexMajor;
+        WCHAR guidstr[39];
+        HKEY key;
 
-        for (indexMajor = 0; !bFound; indexMajor++)
+        wcscat(extensions_path, ext);
+        if (!RegOpenKeyExW(HKEY_CLASSES_ROOT, extensions_path, 0, KEY_READ, &key))
         {
-            HKEY hkeyMajor;
-            WCHAR wszMajorKeyName[CHARS_IN_GUID];
-            DWORD dwKeyNameLength = ARRAY_SIZE(wszMajorKeyName);
-            static const WCHAR wszExtensions[] = {'E','x','t','e','n','s','i','o','n','s',0};
+            size = sizeof(guidstr);
+            if (majortype && !RegQueryValueExW(key, mediatype_name, NULL, NULL, (BYTE *)guidstr, &size))
+                CLSIDFromString(guidstr, majortype);
 
-            if (RegEnumKeyExW(hkeyMediaType, indexMajor, wszMajorKeyName, &dwKeyNameLength, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
-                break;
-            if (RegOpenKeyExW(hkeyMediaType, wszMajorKeyName, 0, KEY_READ, &hkeyMajor) != ERROR_SUCCESS)
-                break;
-            TRACE("%s\n", debugstr_w(wszMajorKeyName));
-            if (!strcmpW(wszExtensions, wszMajorKeyName))
-            {
-                if (process_extensions(hkeyMajor, pszFileName, majorType, minorType, sourceFilter) == S_OK)
-                    bFound = TRUE;
-            }
-            /* We need a reader interface to check bytes */
-            else if (pReader)
-            {
-                DWORD indexMinor;
+            size = sizeof(guidstr);
+            if (subtype && !RegQueryValueExW(key, subtype_name, NULL, NULL, (BYTE *)guidstr, &size))
+                CLSIDFromString(guidstr, subtype);
 
-                for (indexMinor = 0; !bFound; indexMinor++)
-                {
-                    HKEY hkeyMinor;
-                    WCHAR wszMinorKeyName[CHARS_IN_GUID];
-                    DWORD dwMinorKeyNameLen = ARRAY_SIZE(wszMinorKeyName);
-                    WCHAR wszSourceFilterKeyName[CHARS_IN_GUID];
-                    DWORD dwSourceFilterKeyNameLen = sizeof(wszSourceFilterKeyName);
-                    DWORD maxValueLen;
-                    DWORD indexValue;
+            size = sizeof(guidstr);
+            if (source_clsid && !RegQueryValueExW(key, source_filter_name, NULL, NULL, (BYTE *)guidstr, &size))
+                CLSIDFromString(guidstr, source_clsid);
 
-                    if (RegEnumKeyExW(hkeyMajor, indexMinor, wszMinorKeyName, &dwMinorKeyNameLen, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
-                        break;
-
-                    if (RegOpenKeyExW(hkeyMajor, wszMinorKeyName, 0, KEY_READ, &hkeyMinor) != ERROR_SUCCESS)
-                        break;
-
-                    TRACE("\t%s\n", debugstr_w(wszMinorKeyName));
-        
-                    if (RegQueryInfoKeyW(hkeyMinor, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &maxValueLen, NULL, NULL) != ERROR_SUCCESS)
-                        break;
-
-                    for (indexValue = 0; !bFound; indexValue++)
-                    {
-                        DWORD dwType;
-                        WCHAR wszValueName[14]; /* longest name we should encounter will be "Source Filter" */
-                        LPWSTR wszPatternString = HeapAlloc(GetProcessHeap(), 0, maxValueLen);
-                        DWORD dwValueNameLen = ARRAY_SIZE(wszValueName);
-                        DWORD dwDataLen = maxValueLen; /* remember this is in bytes */
-
-                        if (RegEnumValueW(hkeyMinor, indexValue, wszValueName, &dwValueNameLen, NULL, &dwType, (LPBYTE)wszPatternString, &dwDataLen) != ERROR_SUCCESS)
-                        {
-                            HeapFree(GetProcessHeap(), 0, wszPatternString);
-                            break;
-                        }
-
-                        if (strcmpW(wszValueName, source_filter_name)==0) {
-                            HeapFree(GetProcessHeap(), 0, wszPatternString);
-                            continue;
-                        }
-
-                        /* if it is not the source filter value */
-                        if (process_pattern_string(wszPatternString, pReader) == S_OK)
-                        {
-                            HeapFree(GetProcessHeap(), 0, wszPatternString);
-                            if (majorType && FAILED(CLSIDFromString(wszMajorKeyName, majorType)))
-                                break;
-                            if (minorType && FAILED(CLSIDFromString(wszMinorKeyName, minorType)))
-                                break;
-                            if (sourceFilter)
-                            {
-                                /* Look up the source filter key */
-                                if (RegQueryValueExW(hkeyMinor, source_filter_name, NULL, NULL, (LPBYTE)wszSourceFilterKeyName, &dwSourceFilterKeyNameLen))
-                                    break;
-                                if (FAILED(CLSIDFromString(wszSourceFilterKeyName, sourceFilter)))
-                                    break;
-                            }
-                            bFound = TRUE;
-                        } else
-                            HeapFree(GetProcessHeap(), 0, wszPatternString);
-                    }
-                    CloseHandle(hkeyMinor);
-                }
-            }
-            CloseHandle(hkeyMajor);
+            RegCloseKey(key);
+            return FALSE;
         }
     }
-    CloseHandle(hkeyMediaType);
 
-    if (SUCCEEDED(hr) && !bFound)
+    if ((file = CreateFileW(filename, GENERIC_READ, FILE_SHARE_READ, NULL,
+            OPEN_EXISTING, 0, NULL)) == INVALID_HANDLE_VALUE)
     {
-        ERR("Media class not found\n");
-        hr = E_FAIL;
-    }
-    else if (bFound)
-    {
-        TRACE("Found file's class:\n");
-	if(majorType)
-		TRACE("\tmajor = %s\n", qzdebugstr_guid(majorType));
-	if(minorType)
-		TRACE("\tsubtype = %s\n", qzdebugstr_guid(minorType));
-	if(sourceFilter)
-		TRACE("\tsource filter = %s\n", qzdebugstr_guid(sourceFilter));
+        WARN("Failed to open file %s, error %u.\n", debugstr_w(filename), GetLastError());
+        return FALSE;
     }
 
-    return hr;
+    if (RegOpenKeyExW(HKEY_CLASSES_ROOT, wszMediaType, 0, KEY_READ, &parent_key))
+    {
+        CloseHandle(file);
+        return FALSE;
+    }
+
+    for (majortype_idx = 0; ; ++majortype_idx)
+    {
+        WCHAR majortype_str[39];
+        HKEY majortype_key;
+        DWORD subtype_idx;
+
+        size = ARRAY_SIZE(majortype_str);
+        if (RegEnumKeyExW(parent_key, majortype_idx, majortype_str, &size, NULL, NULL, NULL, NULL))
+            break;
+
+        if (!wcscmp(majortype_str, wszExtensions))
+            continue;
+
+        if (RegOpenKeyExW(parent_key, majortype_str, 0, KEY_READ, &majortype_key))
+            continue;
+
+        for (subtype_idx = 0; ; ++subtype_idx)
+        {
+            WCHAR subtype_str[39], *pattern;
+            DWORD value_idx, max_size;
+            HKEY subtype_key;
+
+            size = ARRAY_SIZE(subtype_str);
+            if (RegEnumKeyExW(majortype_key, subtype_idx, subtype_str, &size, NULL, NULL, NULL, NULL))
+                break;
+
+            if (RegOpenKeyExW(majortype_key, subtype_str, 0, KEY_READ, &subtype_key))
+                continue;
+
+            if (RegQueryInfoKeyW(subtype_key, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &max_size, NULL, NULL))
+                continue;
+
+            pattern = heap_alloc(max_size);
+
+            for (value_idx = 0; ; ++value_idx)
+            {
+                /* The longest name we should encounter is "Source Filter". */
+                WCHAR value_name[14], source_clsid_str[39];
+                DWORD value_len = ARRAY_SIZE(value_name);
+
+                size = max_size;
+                if (RegEnumValueW(subtype_key, value_idx, value_name, &value_len,
+                        NULL, NULL, (BYTE *)pattern, &max_size))
+                    break;
+
+                if (!wcscmp(value_name, source_filter_name))
+                    continue;
+
+                if (!process_pattern_string(pattern, file))
+                    continue;
+
+                if (majortype)
+                    CLSIDFromString(majortype_str, majortype);
+                if (subtype)
+                    CLSIDFromString(subtype_str, subtype);
+                size = sizeof(source_clsid_str);
+                if (source_clsid && !RegQueryValueExW(subtype_key, source_filter_name,
+                        NULL, NULL, (BYTE *)source_clsid_str, &size))
+                    CLSIDFromString(source_clsid_str, source_clsid);
+
+                heap_free(pattern);
+                RegCloseKey(subtype_key);
+                RegCloseKey(majortype_key);
+                RegCloseKey(parent_key);
+                CloseHandle(file);
+                return TRUE;
+            }
+
+            heap_free(pattern);
+            RegCloseKey(subtype_key);
+        }
+
+        RegCloseKey(majortype_key);
+    }
+
+    RegCloseKey(parent_key);
+    CloseHandle(file);
+    return FALSE;
 }
 
-static IPin *async_reader_get_pin(BaseFilter *iface, unsigned int index)
+static struct strmbase_pin *async_reader_get_pin(struct strmbase_filter *iface, unsigned int index)
 {
-    AsyncReader *filter = impl_from_BaseFilter(iface);
+    AsyncReader *filter = impl_from_strmbase_filter(iface);
 
     if (!index && filter->pszFileName)
-        return &filter->source.pin.IPin_iface;
+        return &filter->source.pin;
     return NULL;
 }
 
-static void async_reader_destroy(BaseFilter *iface)
+static void async_reader_destroy(struct strmbase_filter *iface)
 {
-    AsyncReader *filter = impl_from_BaseFilter(iface);
+    AsyncReader *filter = impl_from_strmbase_filter(iface);
 
     if (filter->pszFileName)
     {
         unsigned int i;
 
-        if (filter->source.pin.pConnectedTo)
-            IPin_Disconnect(filter->source.pin.pConnectedTo);
+        if (filter->source.pin.peer)
+            IPin_Disconnect(filter->source.pin.peer);
 
         IPin_Disconnect(&filter->source.pin.IPin_iface);
 
@@ -448,9 +380,9 @@ static void async_reader_destroy(BaseFilter *iface)
     CoTaskMemFree(filter);
 }
 
-static HRESULT async_reader_query_interface(BaseFilter *iface, REFIID iid, void **out)
+static HRESULT async_reader_query_interface(struct strmbase_filter *iface, REFIID iid, void **out)
 {
-    AsyncReader *filter = impl_from_BaseFilter(iface);
+    AsyncReader *filter = impl_from_strmbase_filter(iface);
 
     if (IsEqualGUID(iid, &IID_IFileSourceFilter))
     {
@@ -462,7 +394,7 @@ static HRESULT async_reader_query_interface(BaseFilter *iface, REFIID iid, void 
     return E_NOINTERFACE;
 }
 
-static const BaseFilterFuncTable BaseFuncTable =
+static const struct strmbase_filter_ops filter_ops =
 {
     .filter_get_pin = async_reader_get_pin,
     .filter_destroy = async_reader_destroy,
@@ -478,8 +410,7 @@ HRESULT AsyncReader_create(IUnknown *outer, void **out)
     if (!pAsyncRead)
         return E_OUTOFMEMORY;
 
-    strmbase_filter_init(&pAsyncRead->filter, &AsyncReader_Vtbl, outer, &CLSID_AsyncReader,
-            (DWORD_PTR)(__FILE__ ": AsyncReader.csFilter"), &BaseFuncTable);
+    strmbase_filter_init(&pAsyncRead->filter, outer, &CLSID_AsyncReader, &filter_ops);
 
     pAsyncRead->IFileSourceFilter_iface.lpVtbl = &FileSource_Vtbl;
 
@@ -494,25 +425,6 @@ HRESULT AsyncReader_create(IUnknown *outer, void **out)
 
     return S_OK;
 }
-
-static const IBaseFilterVtbl AsyncReader_Vtbl =
-{
-    BaseFilterImpl_QueryInterface,
-    BaseFilterImpl_AddRef,
-    BaseFilterImpl_Release,
-    BaseFilterImpl_GetClassID,
-    BaseFilterImpl_Stop,
-    BaseFilterImpl_Pause,
-    BaseFilterImpl_Run,
-    BaseFilterImpl_GetState,
-    BaseFilterImpl_SetSyncSource,
-    BaseFilterImpl_GetSyncSource,
-    BaseFilterImpl_EnumPins,
-    BaseFilterImpl_FindPin,
-    BaseFilterImpl_QueryFilterInfo,
-    BaseFilterImpl_JoinFilterGraph,
-    BaseFilterImpl_QueryVendorInfo
-};
 
 static HRESULT WINAPI FileSource_QueryInterface(IFileSourceFilter * iface, REFIID riid, LPVOID * ppv)
 {
@@ -539,9 +451,9 @@ static HRESULT WINAPI FileSource_Load(IFileSourceFilter * iface, LPCOLESTR pszFi
 {
     HANDLE hFile;
     AsyncReader *This = impl_from_IFileSourceFilter(iface);
-    PIN_INFO pin_info;
 
     TRACE("%p->(%s, %p)\n", This, debugstr_w(pszFileName), pmt);
+    strmbase_dump_media_type(pmt);
 
     if (!pszFileName)
         return E_POINTER;
@@ -555,12 +467,7 @@ static HRESULT WINAPI FileSource_Load(IFileSourceFilter * iface, LPCOLESTR pszFi
         return HRESULT_FROM_WIN32(GetLastError());
     }
 
-    /* create pin */
-    pin_info.dir = PINDIR_OUTPUT;
-    pin_info.pFilter = &This->filter.IBaseFilter_iface;
-    strcpyW(pin_info.achName, wszOutputPinName);
-    strmbase_source_init(&This->source, &FileAsyncReaderPin_Vtbl, &pin_info,
-            &output_BaseOutputFuncTable, &This->filter.csFilter);
+    strmbase_source_init(&This->source, &This->filter, wszOutputPinName, &source_ops);
     BaseFilterImpl_IncrementPinVersion(&This->filter);
 
     This->file = hFile;
@@ -575,17 +482,17 @@ static HRESULT WINAPI FileSource_Load(IFileSourceFilter * iface, LPCOLESTR pszFi
     if (This->pmt)
         DeleteMediaType(This->pmt);
 
-    This->pszFileName = CoTaskMemAlloc((strlenW(pszFileName) + 1) * sizeof(WCHAR));
-    strcpyW(This->pszFileName, pszFileName);
+    This->pszFileName = CoTaskMemAlloc((lstrlenW(pszFileName) + 1) * sizeof(WCHAR));
+    lstrcpyW(This->pszFileName, pszFileName);
 
     This->pmt = CoTaskMemAlloc(sizeof(AM_MEDIA_TYPE));
     if (!pmt)
     {
         CopyMediaType(This->pmt, &default_mt);
-        if (FAILED(GetClassMediaFile(&This->IAsyncReader_iface, pszFileName, &This->pmt->majortype, &This->pmt->subtype, NULL)))
+        if (get_media_type(pszFileName, &This->pmt->majortype, &This->pmt->subtype, NULL))
         {
-            This->pmt->majortype = MEDIATYPE_Stream;
-            This->pmt->subtype = MEDIASUBTYPE_NULL;
+            TRACE("Found major type %s, subtype %s.\n",
+                    debugstr_guid(&This->pmt->majortype), debugstr_guid(&This->pmt->subtype));
         }
     }
     else
@@ -606,8 +513,8 @@ static HRESULT WINAPI FileSource_GetCurFile(IFileSourceFilter * iface, LPOLESTR 
     /* copy file name & media type if available, otherwise clear the outputs */
     if (This->pszFileName)
     {
-        *ppszFileName = CoTaskMemAlloc((strlenW(This->pszFileName) + 1) * sizeof(WCHAR));
-        strcpyW(*ppszFileName, This->pszFileName);
+        *ppszFileName = CoTaskMemAlloc((lstrlenW(This->pszFileName) + 1) * sizeof(WCHAR));
+        lstrcpyW(*ppszFileName, This->pszFileName);
     }
     else
         *ppszFileName = NULL;
@@ -632,17 +539,12 @@ static const IFileSourceFilterVtbl FileSource_Vtbl =
     FileSource_GetCurFile
 };
 
-static inline AsyncReader *impl_from_IPin(IPin *iface)
-{
-    return CONTAINING_RECORD(iface, AsyncReader, source.pin.IPin_iface);
-}
-
-static inline AsyncReader *impl_from_BasePin(BasePin *iface)
+static inline AsyncReader *impl_from_strmbase_pin(struct strmbase_pin *iface)
 {
     return CONTAINING_RECORD(iface, AsyncReader, source.pin);
 }
 
-static inline AsyncReader *impl_from_BaseOutputPin(BaseOutputPin *iface)
+static inline AsyncReader *impl_from_strmbase_source(struct strmbase_source *iface)
 {
     return CONTAINING_RECORD(iface, AsyncReader, source);
 }
@@ -652,9 +554,9 @@ static inline AsyncReader *impl_from_IAsyncReader(IAsyncReader *iface)
     return CONTAINING_RECORD(iface, AsyncReader, IAsyncReader_iface);
 }
 
-static HRESULT WINAPI FileAsyncReaderPin_CheckMediaType(BasePin *iface, const AM_MEDIA_TYPE *pmt)
+static HRESULT source_query_accept(struct strmbase_pin *iface, const AM_MEDIA_TYPE *pmt)
 {
-    AsyncReader *filter = impl_from_BasePin(iface);
+    AsyncReader *filter = impl_from_strmbase_pin(iface);
 
     if (IsEqualGUID(&pmt->majortype, &filter->pmt->majortype) &&
         IsEqualGUID(&pmt->subtype, &filter->pmt->subtype))
@@ -663,13 +565,11 @@ static HRESULT WINAPI FileAsyncReaderPin_CheckMediaType(BasePin *iface, const AM
     return S_FALSE;
 }
 
-static HRESULT WINAPI FileAsyncReaderPin_GetMediaType(BasePin *iface, int index, AM_MEDIA_TYPE *mt)
+static HRESULT source_get_media_type(struct strmbase_pin *iface, unsigned int index, AM_MEDIA_TYPE *mt)
 {
-    AsyncReader *filter = impl_from_BasePin(iface);
+    AsyncReader *filter = impl_from_strmbase_pin(iface);
 
-    if (index < 0)
-        return E_INVALIDARG;
-    else if (index > 1)
+    if (index > 1)
         return VFW_S_NO_MORE_ITEMS;
 
     if (index == 0)
@@ -679,85 +579,53 @@ static HRESULT WINAPI FileAsyncReaderPin_GetMediaType(BasePin *iface, int index,
     return S_OK;
 }
 
-/* overridden pin functions */
-
-static HRESULT WINAPI FileAsyncReaderPin_QueryInterface(IPin *iface, REFIID iid, void **out)
+static HRESULT source_query_interface(struct strmbase_pin *iface, REFIID iid, void **out)
 {
-    AsyncReader *filter = impl_from_IPin(iface);
+    AsyncReader *filter = impl_from_strmbase_pin(iface);
 
-    TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
-
-    if (IsEqualGUID(iid, &IID_IUnknown) || IsEqualGUID(iid, &IID_IPin))
-        *out = &filter->source.pin.IPin_iface;
-    else if (IsEqualIID(iid, &IID_IAsyncReader))
+    if (IsEqualGUID(iid, &IID_IAsyncReader))
         *out = &filter->IAsyncReader_iface;
     else
-    {
-        WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
-        *out = NULL;
         return E_NOINTERFACE;
-    }
 
     IUnknown_AddRef((IUnknown *)*out);
     return S_OK;
 }
 
-static const IPinVtbl FileAsyncReaderPin_Vtbl = 
-{
-    FileAsyncReaderPin_QueryInterface,
-    BasePinImpl_AddRef,
-    BasePinImpl_Release,
-    BaseOutputPinImpl_Connect,
-    BaseOutputPinImpl_ReceiveConnection,
-    BasePinImpl_Disconnect,
-    BasePinImpl_ConnectedTo,
-    BasePinImpl_ConnectionMediaType,
-    BasePinImpl_QueryPinInfo,
-    BasePinImpl_QueryDirection,
-    BasePinImpl_QueryId,
-    BasePinImpl_QueryAccept,
-    BasePinImpl_EnumMediaTypes,
-    BasePinImpl_QueryInternalConnections,
-    BaseOutputPinImpl_EndOfStream,
-    BaseOutputPinImpl_BeginFlush,
-    BaseOutputPinImpl_EndFlush,
-    BasePinImpl_NewSegment
-};
-
 /* Function called as a helper to IPin_Connect */
 /* specific AM_MEDIA_TYPE - it cannot be NULL */
 /* this differs from standard OutputPin_AttemptConnection only in that it
  * doesn't need the IMemInputPin interface on the receiving pin */
-static HRESULT WINAPI FileAsyncReaderPin_AttemptConnection(BaseOutputPin *This,
+static HRESULT WINAPI FileAsyncReaderPin_AttemptConnection(struct strmbase_source *This,
         IPin *pReceivePin, const AM_MEDIA_TYPE *pmt)
 {
     HRESULT hr;
 
     TRACE("%p->(%p, %p)\n", This, pReceivePin, pmt);
-    dump_AM_MEDIA_TYPE(pmt);
 
     /* FIXME: call queryacceptproc */
 
-    This->pin.pConnectedTo = pReceivePin;
+    This->pin.peer = pReceivePin;
     IPin_AddRef(pReceivePin);
-    CopyMediaType(&This->pin.mtCurrent, pmt);
+    CopyMediaType(&This->pin.mt, pmt);
 
     hr = IPin_ReceiveConnection(pReceivePin, &This->pin.IPin_iface, pmt);
 
     if (FAILED(hr))
     {
-        IPin_Release(This->pin.pConnectedTo);
-        This->pin.pConnectedTo = NULL;
-        FreeMediaType(&This->pin.mtCurrent);
+        IPin_Release(This->pin.peer);
+        This->pin.peer = NULL;
+        FreeMediaType(&This->pin.mt);
     }
 
     TRACE(" -- %x\n", hr);
     return hr;
 }
 
-static HRESULT WINAPI FileAsyncReaderPin_DecideBufferSize(BaseOutputPin *iface, IMemAllocator *pAlloc, ALLOCATOR_PROPERTIES *ppropInputRequest)
+static HRESULT WINAPI FileAsyncReaderPin_DecideBufferSize(struct strmbase_source *iface,
+        IMemAllocator *pAlloc, ALLOCATOR_PROPERTIES *ppropInputRequest)
 {
-    AsyncReader *This = impl_from_BaseOutputPin(iface);
+    AsyncReader *This = impl_from_strmbase_source(iface);
     ALLOCATOR_PROPERTIES actual;
 
     if (ppropInputRequest->cbAlign && ppropInputRequest->cbAlign != This->allocProps.cbAlign)
@@ -772,14 +640,14 @@ static HRESULT WINAPI FileAsyncReaderPin_DecideBufferSize(BaseOutputPin *iface, 
     return IMemAllocator_SetProperties(pAlloc, &This->allocProps, &actual);
 }
 
-static const BaseOutputPinFuncTable output_BaseOutputFuncTable = {
-    {
-        FileAsyncReaderPin_CheckMediaType,
-        FileAsyncReaderPin_GetMediaType
-    },
-    FileAsyncReaderPin_AttemptConnection,
-    FileAsyncReaderPin_DecideBufferSize,
-    BaseOutputPinImpl_DecideAllocator,
+static const struct strmbase_source_ops source_ops =
+{
+    .base.pin_query_accept = source_query_accept,
+    .base.pin_get_media_type = source_get_media_type,
+    .base.pin_query_interface = source_query_interface,
+    .pfnAttemptConnection = FileAsyncReaderPin_AttemptConnection,
+    .pfnDecideBufferSize = FileAsyncReaderPin_DecideBufferSize,
+    .pfnDecideAllocator = BaseOutputPinImpl_DecideAllocator,
 };
 
 static HRESULT WINAPI FileAsyncReader_QueryInterface(IAsyncReader *iface, REFIID iid, void **out)
@@ -903,7 +771,7 @@ static HRESULT WINAPI FileAsyncReader_Request(IAsyncReader * iface, IMediaSample
     REFERENCE_TIME Stop;
     LPBYTE pBuffer = NULL;
 
-    TRACE("%p->(%p, %lx)\n", This, pSample, (unsigned long)dwUser);
+    TRACE("%p->(%p, %lx)\n", This, pSample, dwUser);
 
     if (!pSample)
         return E_POINTER;

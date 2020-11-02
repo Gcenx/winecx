@@ -24,6 +24,4 @@ C_SRCS = \
 	symbol.c \
 	tlb.c
 
-EXTRADEFS = $(HOSTSTACK_CFLAGS)
-
 INSTALL_DEV = $(PROGRAMS) $(SCRIPTS)

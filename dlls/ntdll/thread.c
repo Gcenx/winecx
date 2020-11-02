@@ -28,6 +28,9 @@
 #ifdef HAVE_SYS_MMAN_H
 #include <sys/mman.h>
 #endif
+#ifdef HAVE_SYS_PRCTL_H
+# include <sys/prctl.h>
+#endif
 #ifdef HAVE_SYS_TIMES_H
 #include <sys/times.h>
 #endif
@@ -112,9 +115,9 @@ static unsigned long getauxval( unsigned long id )
 }
 #endif
 
-static ULONG_PTR get_image_addr(void)
+static ULONG_HOSTPTR get_image_addr(void)
 {
-    ULONG_PTR size, num, phdr_addr = getauxval( AT_PHDR );
+    ULONG_HOSTPTR size, num, phdr_addr = getauxval( AT_PHDR );
     ElfW(Phdr) *phdr;
 
     if (!phdr_addr) return 0;
@@ -130,14 +133,12 @@ static ULONG_PTR get_image_addr(void)
 }
 
 #elif defined(__APPLE__)
-#define cpu_type_t mach_cpu_type_t
 #include <mach/mach.h>
 #include <mach/mach_error.h>
-#undef cpu_type_t
 
-static ULONG_PTR get_image_addr(void)
+static ULONG_HOSTPTR get_image_addr(void)
 {
-    ULONG_PTR ret = 0;
+    ULONG_HOSTPTR ret = 0;
 #ifdef TASK_DYLD_INFO
     struct task_dyld_info dyld_info;
     mach_msg_type_number_t size = TASK_DYLD_INFO_COUNT;
@@ -157,9 +158,115 @@ static ULONG_PTR get_image_addr(void)
 }
 
 #else
-static ULONG_PTR get_image_addr(void)
+static ULONG_HOSTPTR get_image_addr(void)
 {
     return 0;
+}
+#endif
+
+
+/***********************************************************************
+ *           set_process_name
+ *
+ * Change the process name in the ps output.
+ */
+static void set_process_name( int argc, char * HOSTPTR * HOSTPTR argv )
+{
+    BOOL shift_strings;
+    char * HOSTPTR p, * HOSTPTR name;
+    int i;
+
+#ifdef HAVE_SETPROCTITLE
+    setproctitle("-%s", argv[1]);
+    shift_strings = FALSE;
+#else
+    p = argv[0];
+
+    shift_strings = (argc >= 2);
+    for (i = 1; i < argc; i++)
+    {
+        p += strlen(p) + 1;
+        if (p != argv[i])
+        {
+            shift_strings = FALSE;
+            break;
+        }
+    }
+#endif
+
+    if (shift_strings)
+    {
+        int offset = argv[1] - argv[0];
+        char * HOSTPTR end = argv[argc-1] + strlen(argv[argc-1]) + 1;
+        memmove( argv[0], argv[1], end - argv[1] );
+        memset( end - offset, 0, offset );
+        for (i = 1; i < argc; i++)
+            argv[i-1] = argv[i] - offset;
+        argv[i-1] = NULL;
+    }
+    else
+    {
+        /* remove argv[0] */
+        memmove( argv, argv + 1, argc * sizeof(argv[0]) );
+    }
+
+    name = argv[0];
+    if ((p = strrchr( name, '\\' ))) name = p + 1;
+    if ((p = strrchr( name, '/' ))) name = p + 1;
+
+#if defined(HAVE_SETPROGNAME)
+    setprogname( name );
+#endif
+
+#ifdef HAVE_PRCTL
+#ifndef PR_SET_NAME
+# define PR_SET_NAME 15
+#endif
+    prctl( PR_SET_NAME, name );
+#endif  /* HAVE_PRCTL */
+}
+
+
+#if defined(__APPLE__) && defined(__x86_64__) && !defined(__i386_on_x86_64__)
+static __thread struct tm localtime_tls;
+struct tm *my_localtime(const time_t *timep)
+{
+    return localtime_r(timep, &localtime_tls);
+}
+
+static void hook(void *to_hook, const void *replace)
+{
+    size_t offset;
+    int ret;
+
+    struct hooked_function
+    {
+        char jmp[8];
+        const void *dst;
+    } *hooked_function = to_hook;
+    ULONG_PTR intval = (ULONG_HOSTPTR)to_hook;
+
+    intval -= (intval % 4096);
+    ret = mprotect((void *)intval, 0x2000, PROT_EXEC | PROT_READ | PROT_WRITE);
+
+    /* The offset is from the end of the jmp instruction (6 bytes) to the start of the destination. */
+    offset = offsetof(struct hooked_function, dst) - offsetof(struct hooked_function, jmp) - 0x6;
+
+    /* jmp *(rip + offset) */
+    hooked_function->jmp[0] = 0xff;
+    hooked_function->jmp[1] = 0x25;
+    hooked_function->jmp[2] = offset;
+    hooked_function->jmp[3] = 0x00;
+    hooked_function->jmp[4] = 0x00;
+    hooked_function->jmp[5] = 0x00;
+    /* Filler */
+    hooked_function->jmp[6] = 0xcc;
+    hooked_function->jmp[7] = 0xcc;
+    /* Dest address absolute */
+    hooked_function->dst = replace;
+
+    //size = sizeof(*hooked_function);
+    //NtProtectVirtualMemory(proc, (void **)hooked_function, &size, old_protect, &old_protect);
 }
 #endif
 
@@ -170,16 +277,20 @@ static ULONG_PTR get_image_addr(void)
  *
  * NOTES: The first allocated TEB on NT is at 0x7ffde000.
  */
-void thread_init(void)
+TEB *thread_init(void)
 {
     TEB *teb;
     void *addr;
-    BOOL suspend;
-    SIZE_T size, info_size;
+    SIZE_T size;
     NTSTATUS status;
     struct ntdll_thread_data *thread_data;
 
     virtual_init();
+#if defined(__APPLE__) && defined(__x86_64__) && !defined(__i386_on_x86_64__)
+    /* This is necessary because we poke PEB into pthread TLS at offset 0x60. It is normally in use by
+     * localtime(), which is called a lot by system libraries. Make localtime() go away. */
+    hook(localtime, my_localtime);
+#endif
 
     /* reserve space for shared user data */
 
@@ -228,10 +339,10 @@ void thread_init(void)
     InitializeListHead( &ldr.InLoadOrderModuleList );
     InitializeListHead( &ldr.InMemoryOrderModuleList );
     InitializeListHead( &ldr.InInitializationOrderModuleList );
-    *(ULONG_PTR *)peb->Reserved = get_image_addr();
+    *(ULONG_HOSTPTR *)peb->Reserved = get_image_addr();
 
 #if defined(__APPLE__) && defined(__x86_64__) && !defined(__i386_on_x86_64__)
-    *((DWORD*)((char*)user_shared_data_external + 0x1000)) = __wine_syscall_dispatcher;
+    *((DWORD*)((char*)user_shared_data_external + 0x1000)) = (DWORD)__wine_syscall_dispatcher;
 #endif
     /* Pretend we don't support the SYSCALL instruction on x86-64. Needed for
      * Chromium; see output_syscall_thunks_x64() in winebuild. */
@@ -258,30 +369,19 @@ void thread_init(void)
     thread_data->reply_fd   = -1;
     thread_data->wait_fd[0] = -1;
     thread_data->wait_fd[1] = -1;
+    thread_data->esync_queue_fd = -1;
+    thread_data->esync_apc_fd = -1;
 
     signal_init_thread( teb );
     virtual_init_threading();
     debug_init();
-
-    /* setup the server connection */
-    server_init_process();
-    info_size = server_init_thread( peb, &suspend );
-
-    /* create the process heap */
-    if (!(peb->ProcessHeap = RtlCreateHeap( HEAP_GROWABLE, NULL, 0, 0, NULL, NULL )))
-    {
-        MESSAGE( "wine: failed to create the process heap\n" );
-        exit(1);
-    }
-
-    init_directories();
-    init_user_process_params( info_size );
+    set_process_name( __wine_main_argc, __wine_main_argv );
 
 	/* initialize user_shared_data */
     __wine_user_shared_data();
     fill_cpu_info();
 
-    NtCreateKeyedEvent( &keyed_event, GENERIC_READ | GENERIC_WRITE, NULL, 0 );
+    return teb;
 }
 
 
@@ -400,6 +500,16 @@ void exit_thread( int status )
     close( ntdll_get_thread_data()->wait_fd[1] );
     close( ntdll_get_thread_data()->reply_fd );
     close( ntdll_get_thread_data()->request_fd );
+
+#if defined(__APPLE__) && defined(__x86_64__) && !defined(__i386_on_x86_64__)
+    /* Remove the PEB from the localtime field in %gs, or MacOS might try
+     * to free() the pointer and crash. That happens for processes that are
+     * using the alt loader for dock integration. */
+    __asm__ volatile (".byte 0x65\n\tmovq %q0,%c1"
+                      :
+                      : "r" (NULL), "n" (FIELD_OFFSET(TEB, Peb)));
+#endif
+
     pthread_exit( UIntToPtr(status) );
 }
 
@@ -623,10 +733,13 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle_ptr, ACCESS_MASK access, OBJECT
     thread_data->wait_fd[0]  = -1;
     thread_data->wait_fd[1]  = -1;
     thread_data->start_stack = (char *)teb->Tib.StackBase;
+    thread_data->esync_queue_fd = -1;
+    thread_data->esync_apc_fd = -1;
 
     pthread_attr_init( &pthread_attr );
     pthread_attr_setstack( &pthread_attr, teb->DeallocationStack,
                          (char *)teb->Tib.StackBase + extra_stack - (char *)teb->DeallocationStack );
+    pthread_attr_setguardsize( &pthread_attr, 0 );
     pthread_attr_setscope( &pthread_attr, PTHREAD_SCOPE_SYSTEM ); /* force creating a kernel thread */
     interlocked_xchg_add( &nb_threads, 1 );
     if (pthread_create( &pthread_id, &pthread_attr, (void * HOSTPTR (* HOSTPTR)(void * HOSTPTR))start_thread, info ))
@@ -741,7 +854,7 @@ NTSTATUS WINAPI RtlCreateUserThread( HANDLE process, SECURITY_DESCRIPTOR *descr,
         context.Gpr4 = (DWORD)arg;
 #endif
 
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
         return SYSCALL(NtCreateThread)(handle_ptr, (ACCESS_MASK)0, &thread_attr, process, id, &context, NULL, suspended);
 #else
         return NtCreateThread(handle_ptr, (ACCESS_MASK)0, &thread_attr, process, id, &context, NULL, suspended);
@@ -763,7 +876,7 @@ NTSTATUS WINAPI RtlCreateUserThread( HANDLE process, SECURITY_DESCRIPTOR *descr,
             pattr_list = &attr_list;
         }
 
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
         return SYSCALL(NtCreateThreadEx)(handle_ptr, (ACCESS_MASK)0, &thread_attr, process, (LPTHREAD_START_ROUTINE)entry, arg, flags, 0, stack_commit, stack_reserve, pattr_list);
 #else
         return NtCreateThreadEx(handle_ptr, (ACCESS_MASK)0, &thread_attr, process, (LPTHREAD_START_ROUTINE)entry, arg, flags, 0, stack_commit, stack_reserve, pattr_list);
@@ -1283,6 +1396,57 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
         *(BOOL*)data = FALSE;
         if (ret_len) *ret_len = sizeof(BOOL);
         return STATUS_SUCCESS;
+    case ThreadSuspendCount:
+        {
+            ULONG count = 0;
+
+            if (length != sizeof(ULONG)) return STATUS_INFO_LENGTH_MISMATCH;
+            if (!data) return STATUS_ACCESS_VIOLATION;
+
+            SERVER_START_REQ( get_thread_info )
+            {
+                req->handle = wine_server_obj_handle( handle );
+                req->tid_in = 0;
+                if (!(status = wine_server_call( req )))
+                    count = reply->suspend_count;
+            }
+            SERVER_END_REQ;
+
+            if (!status)
+                *(ULONG *)data = count;
+
+            return status;
+        }
+    case ThreadDescription:
+        {
+            THREAD_DESCRIPTION_INFORMATION *info = data;
+            data_size_t len, desc_len = 0;
+            WCHAR *ptr;
+
+            len = length >= sizeof(*info) ? length - sizeof(*info) : 0;
+            ptr = info ? (WCHAR *)(info + 1) : NULL;
+
+            SERVER_START_REQ( get_thread_info )
+            {
+                req->handle = wine_server_obj_handle( handle );
+                if (ptr) wine_server_set_reply( req, ptr, len );
+                status = wine_server_call( req );
+                desc_len = reply->desc_len;
+            }
+            SERVER_END_REQ;
+
+            if (!info)
+                status = STATUS_BUFFER_TOO_SMALL;
+            else if (status == STATUS_SUCCESS)
+            {
+                info->Description.Length = info->Description.MaximumLength = desc_len;
+                info->Description.Buffer = ptr;
+            }
+
+            if (ret_len && (status == STATUS_SUCCESS || status == STATUS_BUFFER_TOO_SMALL))
+                *ret_len = sizeof(*info) + desc_len;
+        }
+        return status;
     case ThreadPriority:
     case ThreadBasePriority:
     case ThreadImpersonationToken:
@@ -1433,6 +1597,26 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
                 req->handle   = wine_server_obj_handle( handle );
                 req->affinity = req_aff->Mask;
                 req->mask     = SET_THREAD_INFO_AFFINITY;
+                status = wine_server_call( req );
+            }
+            SERVER_END_REQ;
+        }
+        return status;
+    case ThreadDescription:
+        {
+            const THREAD_DESCRIPTION_INFORMATION *info = data;
+
+            if (length != sizeof(*info)) return STATUS_INFO_LENGTH_MISMATCH;
+            if (!info) return STATUS_ACCESS_VIOLATION;
+
+            if (info->Description.Length != info->Description.MaximumLength) return STATUS_INVALID_PARAMETER;
+            if (info->Description.Length && !info->Description.Buffer) return STATUS_ACCESS_VIOLATION;
+
+            SERVER_START_REQ( set_thread_info )
+            {
+                req->handle = wine_server_obj_handle( handle );
+                req->mask   = SET_THREAD_INFO_DESCRIPTION;
+                wine_server_add_data( req, info->Description.Buffer, info->Description.Length );
                 status = wine_server_call( req );
             }
             SERVER_END_REQ;

@@ -23,7 +23,7 @@ use strict;
 
 # base URLs for www.unicode.org files
 my $MAPPINGS = "http://www.unicode.org/Public/MAPPINGS";
-my $UNIDATA = "http://www.unicode.org/Public/12.0.0/ucd";
+my $UNIDATA = "http://www.unicode.org/Public/12.1.0/ucd";
 my $REPORTS = "http://www.unicode.org/reports";
 my $RFCS = "http://www.rfc-editor.org/rfc";
 
@@ -109,6 +109,7 @@ my @allfiles =
     [ 28598, "ISO8859/8859-8.TXT",                0, "ISO 8859-8 Hebrew", 0xf79c ],
     [ 28599, "ISO8859/8859-9.TXT",                0, "ISO 8859-9 Latin 5 (Turkish)" ],
     [ 28600, "ISO8859/8859-10.TXT",               0, "ISO 8859-10 Latin 6 (Nordic)" ],
+    [ 28601, "ISO8859/8859-11.TXT",               0, "ISO 8859-11 Latin (Thai)" ],
     [ 28603, "ISO8859/8859-13.TXT",               0, "ISO 8859-13 Latin 7 (Baltic)" ],
     [ 28604, "ISO8859/8859-14.TXT",               0, "ISO 8859-14 Latin 8 (Celtic)" ],
     [ 28605, "ISO8859/8859-15.TXT",               0, "ISO 8859-15 Latin 9 (Euro)" ],
@@ -629,6 +630,7 @@ sub READ_DEFAULTS($)
 sub add_lead_byte($)
 {
     my $ch = shift;
+    return if defined $cp2uni[$ch];
     push @lead_bytes, $ch;
     $cp2uni[$ch] = 0;
 }
@@ -640,10 +642,7 @@ sub add_mapping($$)
     my ($cp, $uni) = @_;
     $cp2uni[$cp] = $uni unless defined($cp2uni[$cp]);
     $uni2cp[$uni] = $cp unless defined($uni2cp[$uni]);
-    if ($cp > 0xff && !defined($cp2uni[$cp >> 8]))
-    {
-        add_lead_byte( $cp >> 8 );
-    }
+    if ($cp > 0xff) { add_lead_byte( $cp >> 8 ); }
 }
 
 ################################################################
@@ -1547,6 +1546,14 @@ my %scripts =
     "Nushu"                  => 139,
     "Soyombo"                => 140,
     "Zanabazar_Square"       => 141,
+    # Win10 1903
+    "Dogra"                  => 142,
+    "Gunjala_Gondi"          => 143,
+    "Hanifi_Rohingya"        => 144,
+    "Makasar"                => 145,
+    "Medefaidrin"            => 146,
+    "Old_Sogdian"            => 147,
+    "Sogdian"                => 148,
 );
 
 ################################################################
@@ -1801,9 +1808,9 @@ sub dump_vertical($)
 
 ################################################################
 # dump the digit folding tables
-sub dump_digit_folding($)
+sub dump_digit_folding($$)
 {
-    my $filename = shift;
+    my ($filename, $compat) = @_;
     open OUTPUT,">$filename.new" or die "Cannot create $filename";
     print "Building $filename\n";
     print OUTPUT "/* Unicode digit folding mappings */\n";
@@ -1812,8 +1819,11 @@ sub dump_digit_folding($)
     print OUTPUT "#include \"windef.h\"\n\n";
 
     dump_case_table( "DECLSPEC_HIDDEN wine_digitmap",  @digitmap_table );
-    print OUTPUT "\n";
-    dump_case_table( "DECLSPEC_HIDDEN wine_compatmap", @compatmap_table );
+    if ($compat)
+    {
+        print OUTPUT "\n";
+        dump_case_table( "DECLSPEC_HIDDEN wine_compatmap", @compatmap_table );
+    }
     close OUTPUT;
     save_file($filename);
 }
@@ -2492,16 +2502,16 @@ sub dump_full_compat_table()
 
 ################################################################
 # dump the char decomposition table
-sub dump_decompose_table($)
+sub dump_decompose_table($$)
 {
-    my $filename = shift;
+    my ($filename, $compat) = @_;
 
     open OUTPUT,">$filename.new" or die "Cannot create $filename";
     print "Building $filename\n";
     print OUTPUT "/* Unicode char composition */\n";
     print OUTPUT "/* generated from $UNIDATA/UnicodeData.txt */\n";
     print OUTPUT "/* DO NOT EDIT!! */\n\n";
-    print OUTPUT "#include \"wine/unicode.h\"\n\n";
+    print OUTPUT "#include \"windef.h\"\n\n";
 
     # first determine all the 16-char subsets that contain something
 
@@ -2577,11 +2587,13 @@ sub dump_decompose_table($)
         printf OUTPUT "%s", DUMP_ARRAY( "0x%04x", 0, @table );
     }
 
-    printf OUTPUT "\n};\n\n";
+    print OUTPUT "\n};\n\n";
+    if ($compat)
+    {
+        dump_full_compat_table();
+        print OUTPUT <<"EOF";
+#include "wine/unicode.h"
 
-    dump_full_compat_table();
-
-    print OUTPUT <<"EOF";
 static const WCHAR *get_compatmap_entry( WCHAR ch, unsigned int *len )
 {
     unsigned short offset_offs = compatmap_table[compatmap_table[ch >> 8] + ((ch >> 4) & 0xf)] + (ch & 0xf);
@@ -2625,6 +2637,29 @@ unsigned int DECLSPEC_HIDDEN wine_decompose( int flags, WCHAR ch, WCHAR *dst, un
     return dst_pos;
 }
 EOF
+    }
+    else
+    {
+            print OUTPUT <<"EOF";
+unsigned int DECLSPEC_HIDDEN wine_decompose( int flags, WCHAR ch, WCHAR *dst, unsigned int dstlen )
+{
+    const WCHAR *ptr = table + table[table[ch >> 8] + ((ch >> 4) & 0x0f)] + 2 * (ch & 0xf);
+    unsigned int res, len, dst_pos = 0;
+
+    *dst = ch;
+    if (!*ptr) return 1;
+    len = ptr[1] ? 2 : 1;
+    if (dstlen < len) return 0;
+    /* apply the decomposition recursively */
+    while (len--)
+    {
+        if (!(res = wine_decompose( flags, *ptr++, dst + dst_pos, dstlen - dst_pos - len ))) return 0;
+        dst_pos += res;
+    }
+    return dst_pos;
+}
+EOF
+    }
     close OUTPUT;
     save_file($filename);
 }
@@ -2877,14 +2912,18 @@ chdir ".." if -f "./make_unicode";
 READ_DEFAULTS( $DEFAULTS );
 dump_case_mappings( "libs/port/casemap.c" );
 dump_sortkeys( "libs/port/collation.c", READ_SORTKEYS_FILE() );
+dump_sortkeys( "dlls/kernelbase/collation.c", READ_SORTKEYS_FILE() );
 dump_compose_table( "libs/port/compose.c" );
-dump_decompose_table( "libs/port/decompose.c" );
+dump_compose_table( "dlls/kernelbase/compose.c" );
+dump_decompose_table( "libs/port/decompose.c", 1 );
+dump_decompose_table( "dlls/kernelbase/decompose.c", 0 );
 dump_ctype_tables( "libs/port/wctype.c" );
 dump_bidi_dir_table( "dlls/gdi32/direction.c" );
 dump_bidi_dir_table( "dlls/usp10/direction.c" );
 dump_bidi_dir_table( "dlls/dwrite/direction.c" );
-dump_string_type_table( "dlls/kernel32/wctype.c" );
-dump_digit_folding( "libs/port/digitmap.c" );
+dump_string_type_table( "dlls/kernelbase/wctype.c" );
+dump_digit_folding( "libs/port/digitmap.c", 1 );
+dump_digit_folding( "dlls/kernelbase/digitmap.c", 0 );
 dump_combining_class( "libs/port/combclass.c" );
 dump_mirroring( "dlls/usp10/mirror.c" );
 dump_mirroring( "dlls/dwrite/mirror.c" );

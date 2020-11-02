@@ -43,10 +43,6 @@ ULONG WINAPI OaBuildVersion(void);
 BSTR WINAPI SysAllocString(const OLECHAR*);
 BSTR WINAPI SysAllocStringByteLen(LPCSTR,UINT);
 BSTR WINAPI SysAllocStringLen(const OLECHAR*,UINT);
-#ifdef __i386_on_x86_64__
-BSTR WINAPI SysAllocStringByteLen(const CHAR* HOSTPTR,UINT) __attribute__((overloadable)) asm(__ASM_NAME("wine_SysAllocStringByteLen_HOSTPTR"));
-BSTR WINAPI SysAllocStringLen(const OLECHAR* HOSTPTR,UINT) __attribute__((overloadable)) asm(__ASM_NAME("wine_SysAllocStringLen_HOSTPTR"));
-#endif
 void WINAPI SysFreeString(BSTR);
 INT  WINAPI SysReAllocString(LPBSTR,const OLECHAR*);
 int  WINAPI SysReAllocStringLen(BSTR*,const OLECHAR*,UINT);
@@ -758,7 +754,7 @@ HRESULT WINAPI LoadRegTypeLib(REFGUID,WORD,WORD,LCID,ITypeLib**);
 HRESULT WINAPI LoadTypeLib(const OLECHAR*,ITypeLib**);
 HRESULT WINAPI LoadTypeLibEx(LPCOLESTR,REGKIND,ITypeLib**);
 HRESULT WINAPI QueryPathOfRegTypeLib(REFGUID,WORD,WORD,LCID,LPBSTR);
-HRESULT WINAPI RegisterTypeLib(ITypeLib*,OLECHAR*,OLECHAR*);
+HRESULT WINAPI RegisterTypeLib(ITypeLib*,LPCOLESTR,LPCOLESTR);
 HRESULT WINAPI UnRegisterTypeLib(REFGUID,WORD,WORD,LCID,SYSKIND);
 HRESULT WINAPI RegisterTypeLibForUser(ITypeLib*,OLECHAR*,OLECHAR*);
 HRESULT WINAPI UnRegisterTypeLibForUser(REFGUID,WORD,WORD,LCID,SYSKIND);

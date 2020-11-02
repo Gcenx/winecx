@@ -21,8 +21,10 @@ typedef enum {
     EXPR_AND,
     EXPR_BOOL,
     EXPR_BRACKETS,
+    EXPR_CALL,
     EXPR_CONCAT,
     EXPR_DIV,
+    EXPR_DOT,
     EXPR_DOUBLE,
     EXPR_EMPTY,
     EXPR_EQUAL,
@@ -32,6 +34,7 @@ typedef enum {
     EXPR_GTEQ,
     EXPR_IDIV,
     EXPR_IMP,
+    EXPR_INT,
     EXPR_IS,
     EXPR_LT,
     EXPR_LTEQ,
@@ -49,8 +52,6 @@ typedef enum {
     EXPR_OR,
     EXPR_STRING,
     EXPR_SUB,
-    EXPR_ULONG,
-    EXPR_USHORT,
     EXPR_XOR
 } expression_type_t;
 
@@ -94,8 +95,13 @@ typedef struct {
     expression_t expr;
     expression_t *obj_expr;
     const WCHAR *identifier;
-    expression_t *args;
 } member_expression_t;
+
+typedef struct {
+    expression_t expr;
+    expression_t *call_expr;
+    expression_t *args;
+} call_expression_t;
 
 typedef enum {
     STAT_ASSIGN,
@@ -114,12 +120,15 @@ typedef enum {
     STAT_FUNC,
     STAT_IF,
     STAT_ONERROR,
+    STAT_REDIM,
     STAT_SELECT,
     STAT_SET,
     STAT_STOP,
     STAT_UNTIL,
     STAT_WHILE,
-    STAT_WHILELOOP
+    STAT_WHILELOOP,
+    STAT_WITH,
+    STAT_RETVAL
 } statement_type_t;
 
 typedef struct _statement_t {
@@ -129,13 +138,13 @@ typedef struct _statement_t {
 
 typedef struct {
     statement_t stat;
-    member_expression_t *expr;
+    call_expression_t *expr;
     BOOL is_strict;
 } call_statement_t;
 
 typedef struct {
     statement_t stat;
-    member_expression_t *member_expr;
+    call_expression_t *left_expr;
     expression_t *value_expr;
 } assign_statement_t;
 
@@ -156,6 +165,13 @@ typedef struct _dim_statement_t {
     statement_t stat;
     dim_decl_t *dim_decls;
 } dim_statement_t;
+
+typedef struct {
+    statement_t stat;
+    const WCHAR *identifier;
+    BOOL preserve;
+    expression_t *dims;
+} redim_statement_t;
 
 typedef struct _arg_decl_t {
     const WCHAR *name;
@@ -250,6 +266,17 @@ typedef struct {
 } select_statement_t;
 
 typedef struct {
+    statement_t stat;
+    expression_t *expr;
+    statement_t *body;
+} with_statement_t;
+
+typedef struct {
+    statement_t stat;
+    expression_t *expr;
+} retval_statement_t;
+
+typedef struct {
     const WCHAR *code;
     const WCHAR *ptr;
     const WCHAR *end;
@@ -269,7 +296,7 @@ typedef struct {
     heap_pool_t heap;
 } parser_ctx_t;
 
-HRESULT parse_script(parser_ctx_t*,const WCHAR*,const WCHAR*) DECLSPEC_HIDDEN;
+HRESULT parse_script(parser_ctx_t*,const WCHAR*,const WCHAR*,DWORD) DECLSPEC_HIDDEN;
 void parser_release(parser_ctx_t*) DECLSPEC_HIDDEN;
 int parser_lex(void*,parser_ctx_t*) DECLSPEC_HIDDEN;
 void *parser_alloc(parser_ctx_t*,size_t) DECLSPEC_HIDDEN;

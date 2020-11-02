@@ -20,7 +20,7 @@
 
 #include "wine/winheader_enter.h"
 
-#include <crtdefs.h>
+#include <corecrt.h>
 
 #ifdef  __cplusplus
 extern "C" {

@@ -30,7 +30,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
 int MSVCRT___argc = 0;
-static int argc_expand;
 static int wargc_expand;
 unsigned int MSVCRT__commode = 0;
 int MSVCRT__fmode = 0;
@@ -50,8 +49,6 @@ unsigned int MSVCRT___setlc_active = 0;
 unsigned int MSVCRT___unguarded_readlc_active = 0;
 double MSVCRT__HUGE = 0;
 char **MSVCRT___argv = NULL;
-static char **argv_WIN32PTR = NULL;
-static char **argv_expand;
 MSVCRT_wchar_t **MSVCRT___wargv = NULL;
 static MSVCRT_wchar_t **wargv_expand;
 char *MSVCRT__acmdln = NULL;
@@ -138,6 +135,28 @@ MSVCRT_wchar_t ** msvcrt_SnapshotOfEnvironmentW(MSVCRT_wchar_t **wblk)
     }
   FreeEnvironmentStringsW(wenviron_strings);
   return wblk;
+}
+
+static char **build_argv( WCHAR **wargv )
+{
+    int argc;
+    char *p, **argv;
+    DWORD total = 0;
+
+    for (argc = 0; wargv[argc]; argc++)
+        total += WideCharToMultiByte( CP_ACP, 0, wargv[argc], -1, NULL, 0, NULL, NULL );
+
+    argv = HeapAlloc( GetProcessHeap(), 0, total + (argc + 1) * sizeof(*argv) );
+    p = (char *)(argv + argc + 1);
+    for (argc = 0; wargv[argc]; argc++)
+    {
+        DWORD reslen = WideCharToMultiByte( CP_ACP, 0, wargv[argc], -1, p, total, NULL, NULL );
+        argv[argc] = p;
+        p += reslen;
+        total -= reslen;
+    }
+    argv[argc] = NULL;
+    return argv;
 }
 
 typedef void (CDECL *_INITTERMFUN)(void);
@@ -328,28 +347,10 @@ void msvcrt_init_args(void)
   OSVERSIONINFOW osvi;
 
   MSVCRT__acmdln = MSVCRT__strdup( GetCommandLineA() );
-  MSVCRT__wcmdln = msvcrt_wstrdupa(MSVCRT__acmdln);
+  MSVCRT__wcmdln = MSVCRT__wcsdup( GetCommandLineW() );
   MSVCRT___argc = __wine_main_argc;
-#ifdef __i386_on_x86_64__
-  {
-    char *p;
-    size_t len = 0;
-    for (int i = 0; i < __wine_main_argc; ++i)
-      len += strlen(__wine_main_argv[i]) + 1;
-    argv_WIN32PTR = HeapAlloc(GetProcessHeap(), 0, (__wine_main_argc + 1) * sizeof(*argv_WIN32PTR) + len);
-    p = (char*)argv_WIN32PTR + (__wine_main_argc + 1) * sizeof(*argv_WIN32PTR);
-    for (int i = 0; i < __wine_main_argc; ++i)
-    {
-      argv_WIN32PTR[i] = p;
-      p = stpcpy(p, __wine_main_argv[i]) + 1;
-    }
-    argv_WIN32PTR[__wine_main_argc] = NULL;
-  }
-#else
-  argv_WIN32PTR = __wine_main_argv;
-#endif
-  MSVCRT___argv = argv_WIN32PTR;
   MSVCRT___wargv = __wine_main_wargv;
+  MSVCRT___argv = build_argv( MSVCRT___wargv );
 
   TRACE("got %s, wide = %s argc=%d\n", debugstr_a(MSVCRT__acmdln),
         debugstr_w(MSVCRT__wcmdln),MSVCRT___argc);
@@ -401,126 +402,15 @@ void msvcrt_init_args(void)
 void msvcrt_free_args(void)
 {
   /* FIXME: more things to free */
+  HeapFree(GetProcessHeap(), 0, MSVCRT___argv);
   HeapFree(GetProcessHeap(), 0, MSVCRT___initenv);
   HeapFree(GetProcessHeap(), 0, MSVCRT___winitenv);
   HeapFree(GetProcessHeap(), 0, MSVCRT__environ);
   HeapFree(GetProcessHeap(), 0, MSVCRT__wenviron);
   HeapFree(GetProcessHeap(), 0, MSVCRT__pgmptr);
   HeapFree(GetProcessHeap(), 0, MSVCRT__wpgmptr);
-  HeapFree(GetProcessHeap(), 0, argv_expand);
   HeapFree(GetProcessHeap(), 0, wargv_expand);
-  if (argv_WIN32PTR != __wine_main_argv)
-    HeapFree(GetProcessHeap(), 0, argv_WIN32PTR);
 }
-
-static int build_expanded_argv(int *argc, char **argv)
-{
-    int i, size=0, args_no=0, path_len;
-    BOOL is_expandable;
-    HANDLE h;
-
-    args_no = 0;
-    for(i=0; i<__wine_main_argc; i++) {
-        WIN32_FIND_DATAA data;
-        int len = 0;
-
-        is_expandable = FALSE;
-        for(path_len = strlen(argv_WIN32PTR[i])-1; path_len>=0; path_len--) {
-            if(argv_WIN32PTR[i][path_len]=='*' || argv_WIN32PTR[i][path_len]=='?')
-                is_expandable = TRUE;
-            else if(argv_WIN32PTR[i][path_len]=='\\' || argv_WIN32PTR[i][path_len]=='/')
-                break;
-        }
-        path_len++;
-
-        if(is_expandable)
-            h = FindFirstFileA(argv_WIN32PTR[i], &data);
-        else
-            h = INVALID_HANDLE_VALUE;
-
-        if(h != INVALID_HANDLE_VALUE) {
-            do {
-                if(data.cFileName[0]=='.' && (data.cFileName[1]=='\0' ||
-                            (data.cFileName[1]=='.' && data.cFileName[2]=='\0')))
-                    continue;
-
-                len = strlen(data.cFileName)+1;
-                if(argv) {
-                    argv[args_no] = (char*)(argv+*argc+1)+size;
-                    memcpy(argv[args_no], argv_WIN32PTR[i], path_len*sizeof(char));
-                    memcpy(argv[args_no]+path_len, data.cFileName, len*sizeof(char));
-                }
-                args_no++;
-                size += len+path_len;
-            }while(FindNextFileA(h, &data));
-            FindClose(h);
-        }
-
-        if(!len) {
-            len = strlen(argv_WIN32PTR[i])+1;
-            if(argv) {
-                argv[args_no] = (char*)(argv+*argc+1)+size;
-                memcpy(argv[args_no], argv_WIN32PTR[i], len*sizeof(char));
-            }
-            args_no++;
-            size += len;
-        }
-    }
-
-    if(argv)
-        argv[args_no] = NULL;
-    size += (args_no+1)*sizeof(char*);
-    *argc = args_no;
-    return size;
-}
-
-/*********************************************************************
- *		__getmainargs (MSVCRT.@)
- */
-int CDECL __getmainargs(int *argc, char** *argv, char** *envp,
-                         int expand_wildcards, int *new_mode)
-{
-    TRACE("(%p,%p,%p,%d,%p).\n", argc, argv, envp, expand_wildcards, new_mode);
-
-    if (expand_wildcards) {
-        HeapFree(GetProcessHeap(), 0, argv_expand);
-        argv_expand = NULL;
-
-        argv_expand = HeapAlloc(GetProcessHeap(), 0,
-                build_expanded_argv(&argc_expand, NULL));
-        if (argv_expand) {
-            build_expanded_argv(&argc_expand, argv_expand);
-
-            MSVCRT___argc = argc_expand;
-            MSVCRT___argv = argv_expand;
-        }else {
-            expand_wildcards = 0;
-        }
-    }
-    if (!expand_wildcards) {
-        MSVCRT___argc = __wine_main_argc;
-        MSVCRT___argv = argv_WIN32PTR;
-    }
-
-    *argc = MSVCRT___argc;
-    *argv = MSVCRT___argv;
-    *envp = MSVCRT___initenv;
-
-    if (new_mode)
-        MSVCRT__set_new_mode( *new_mode );
-    return 0;
-}
-
-#ifdef _CRTDLL
-/*********************************************************************
- *                  __GetMainArgs  (CRTDLL.@)
- */
-void CDECL __GetMainArgs( int *argc, char ***argv, char ***envp, int expand_wildcards )
-{
-    int new_mode = 0;
-    __getmainargs( argc, argv, envp, expand_wildcards, &new_mode );
-}
-#endif
 
 static int build_expanded_wargv(int *argc, MSVCRT_wchar_t **argv)
 {
@@ -594,8 +484,6 @@ int CDECL __wgetmainargs(int *argc, MSVCRT_wchar_t** *wargv, MSVCRT_wchar_t** *w
 
     if (expand_wildcards) {
         HeapFree(GetProcessHeap(), 0, wargv_expand);
-        wargv_expand = NULL;
-
         wargv_expand = HeapAlloc(GetProcessHeap(), 0,
                 build_expanded_wargv(&wargc_expand, NULL));
         if (wargv_expand) {
@@ -622,6 +510,52 @@ int CDECL __wgetmainargs(int *argc, MSVCRT_wchar_t** *wargv, MSVCRT_wchar_t** *w
         MSVCRT__set_new_mode( *new_mode );
     return 0;
 }
+
+/*********************************************************************
+ *		__getmainargs (MSVCRT.@)
+ */
+int CDECL __getmainargs(int *argc, char** *argv, char** *envp,
+                         int expand_wildcards, int *new_mode)
+{
+    TRACE("(%p,%p,%p,%d,%p).\n", argc, argv, envp, expand_wildcards, new_mode);
+
+    if (expand_wildcards) {
+        HeapFree(GetProcessHeap(), 0, wargv_expand);
+        wargv_expand = HeapAlloc(GetProcessHeap(), 0,
+                build_expanded_wargv(&wargc_expand, NULL));
+        if (wargv_expand) {
+            build_expanded_wargv(&wargc_expand, wargv_expand);
+
+            MSVCRT___argc = wargc_expand;
+            MSVCRT___argv = build_argv( wargv_expand );
+        }else {
+            expand_wildcards = 0;
+        }
+    }
+    if (!expand_wildcards) {
+        MSVCRT___argc = __wine_main_argc;
+        MSVCRT___argv = build_argv( __wine_main_wargv );
+    }
+
+    *argc = MSVCRT___argc;
+    *argv = MSVCRT___argv;
+    *envp = MSVCRT___initenv;
+
+    if (new_mode)
+        MSVCRT__set_new_mode( *new_mode );
+    return 0;
+}
+
+#ifdef _CRTDLL
+/*********************************************************************
+ *                  __GetMainArgs  (CRTDLL.@)
+ */
+void CDECL __GetMainArgs( int *argc, char ***argv, char ***envp, int expand_wildcards )
+{
+    int new_mode = 0;
+    __getmainargs( argc, argv, envp, expand_wildcards, &new_mode );
+}
+#endif
 
 /*********************************************************************
  *		_initterm (MSVCRT.@)

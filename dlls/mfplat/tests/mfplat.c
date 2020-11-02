@@ -27,19 +27,7 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "winreg.h"
-
-#include "initguid.h"
 #include "ole2.h"
-
-DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
-DEFINE_GUID(DUMMY_CLSID, 0x12345678,0x1234,0x1234,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19);
-DEFINE_GUID(DUMMY_GUID1, 0x12345678,0x1234,0x1234,0x21,0x21,0x21,0x21,0x21,0x21,0x21,0x21);
-DEFINE_GUID(DUMMY_GUID2, 0x12345678,0x1234,0x1234,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22);
-DEFINE_GUID(DUMMY_GUID3, 0x12345678,0x1234,0x1234,0x23,0x23,0x23,0x23,0x23,0x23,0x23,0x23);
-DEFINE_GUID(CLSID_FileSchemeHandler, 0x477ec299, 0x1421, 0x4bdd, 0x97, 0x1f, 0x7c, 0xcb, 0x93, 0x3f, 0x21, 0xad);
-
-#undef INITGUID
-#include <guiddef.h>
 #include "mfapi.h"
 #include "mfidl.h"
 #include "mferror.h"
@@ -49,6 +37,16 @@ DEFINE_GUID(CLSID_FileSchemeHandler, 0x477ec299, 0x1421, 0x4bdd, 0x97, 0x1f, 0x7
 
 #include "wine/test.h"
 #include "wine/heap.h"
+
+#define D3D11_INIT_GUID
+#include "initguid.h"
+#include "d3d11_4.h"
+
+DEFINE_GUID(DUMMY_CLSID, 0x12345678,0x1234,0x1234,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19);
+DEFINE_GUID(DUMMY_GUID1, 0x12345678,0x1234,0x1234,0x21,0x21,0x21,0x21,0x21,0x21,0x21,0x21);
+DEFINE_GUID(DUMMY_GUID2, 0x12345678,0x1234,0x1234,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22);
+DEFINE_GUID(DUMMY_GUID3, 0x12345678,0x1234,0x1234,0x23,0x23,0x23,0x23,0x23,0x23,0x23,0x23);
+DEFINE_GUID(CLSID_FileSchemeHandler, 0x477ec299, 0x1421, 0x4bdd, 0x97, 0x1f, 0x7c, 0xcb, 0x93, 0x3f, 0x21, 0xad);
 
 static BOOL is_win8_plus;
 
@@ -61,8 +59,13 @@ static void _expect_ref(IUnknown *obj, ULONG ref, int line)
     ok_(__FILE__,line)(rc == ref, "Unexpected refcount %d, expected %d.\n", rc, ref);
 }
 
+static HRESULT (WINAPI *pD3D11CreateDevice)(IDXGIAdapter *adapter, D3D_DRIVER_TYPE driver_type, HMODULE swrast, UINT flags,
+        const D3D_FEATURE_LEVEL *feature_levels, UINT levels, UINT sdk_version, ID3D11Device **device_out,
+        D3D_FEATURE_LEVEL *obtained_feature_level, ID3D11DeviceContext **immediate_context);
+
 static HRESULT (WINAPI *pMFCopyImage)(BYTE *dest, LONG deststride, const BYTE *src, LONG srcstride,
         DWORD width, DWORD lines);
+static HRESULT (WINAPI *pMFCreateDXGIDeviceManager)(UINT *token, IMFDXGIDeviceManager **manager);
 static HRESULT (WINAPI *pMFCreateSourceResolver)(IMFSourceResolver **resolver);
 static HRESULT (WINAPI *pMFCreateMFByteStreamOnStream)(IStream *stream, IMFByteStream **bytestream);
 static void*   (WINAPI *pMFHeapAlloc)(SIZE_T size, ULONG flags, char *file, int line, EAllocationType type);
@@ -515,6 +518,7 @@ static void init_functions(void)
     X(MFAddPeriodicCallback);
     X(MFAllocateSerialWorkQueue);
     X(MFCopyImage);
+    X(MFCreateDXGIDeviceManager);
     X(MFCreateSourceResolver);
     X(MFCreateMFByteStreamOnStream);
     X(MFHeapAlloc);
@@ -524,6 +528,11 @@ static void init_functions(void)
     X(MFRegisterLocalSchemeHandler);
     X(MFRemovePeriodicCallback);
 #undef X
+
+    if ((mod = LoadLibraryA("d3d11.dll")))
+    {
+        pD3D11CreateDevice = (void *)GetProcAddress(mod, "D3D11CreateDevice");
+    }
 
     is_win8_plus = pMFPutWaitingWorkItem != NULL;
 }
@@ -1499,7 +1508,7 @@ static void test_system_memory_buffer(void)
     ok(length == 10, "got %u\n", length);
     ok(max == 1024, "got %u\n", max);
 
-    /* Attempt to lock the bufer twice */
+    /* Attempt to lock the buffer twice */
     hr = IMFMediaBuffer_Lock(buffer, &data2, &max, &length);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(data == data2, "got 0x%08x\n", hr);
@@ -1711,6 +1720,8 @@ todo_wine
     ok(hr == S_OK, "Failed to get buffer count, hr %#x.\n", hr);
 todo_wine
     ok(count == 1, "Unexpected buffer count %u.\n", count);
+
+    IMFMediaBuffer_Release(buffer);
 
     IMFSample_Release(sample);
 }
@@ -3608,6 +3619,186 @@ static void test_local_handlers(void)
     ok(hr == S_OK, "Failed to register stream handler, hr %#x.\n", hr);
 }
 
+static void test_create_property_store(void)
+{
+    static const PROPERTYKEY test_pkey = {{0x12345678}, 9};
+    IPropertyStore *store, *store2;
+    PROPVARIANT value = {0};
+    PROPERTYKEY key;
+    ULONG refcount;
+    IUnknown *unk;
+    DWORD count;
+    HRESULT hr;
+
+    hr = CreatePropertyStore(NULL);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+
+    hr = CreatePropertyStore(&store);
+    ok(hr == S_OK, "Failed to create property store, hr %#x.\n", hr);
+
+    hr = CreatePropertyStore(&store2);
+    ok(hr == S_OK, "Failed to create property store, hr %#x.\n", hr);
+    ok(store2 != store, "Expected different store objects.\n");
+    IPropertyStore_Release(store2);
+
+    hr = IPropertyStore_QueryInterface(store, &IID_IPropertyStoreCache, (void **)&unk);
+    ok(hr == E_NOINTERFACE, "Unexpected hr %#x.\n", hr);
+    hr = IPropertyStore_QueryInterface(store, &IID_IPersistSerializedPropStorage, (void **)&unk);
+    ok(hr == E_NOINTERFACE, "Unexpected hr %#x.\n", hr);
+
+    hr = IPropertyStore_GetCount(store, NULL);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+
+    count = 0xdeadbeef;
+    hr = IPropertyStore_GetCount(store, &count);
+    ok(hr == S_OK, "Failed to get count, hr %#x.\n", hr);
+    ok(!count, "Unexpected count %u.\n", count);
+
+    hr = IPropertyStore_Commit(store);
+    ok(hr == E_NOTIMPL, "Unexpected hr %#x.\n", hr);
+
+    hr = IPropertyStore_GetAt(store, 0, &key);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+
+    hr = IPropertyStore_GetValue(store, NULL, &value);
+    ok(hr == S_FALSE, "Unexpected hr %#x.\n", hr);
+
+    hr = IPropertyStore_GetValue(store, &test_pkey, NULL);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+
+    hr = IPropertyStore_GetValue(store, &test_pkey, &value);
+    ok(hr == S_FALSE, "Unexpected hr %#x.\n", hr);
+
+    memset(&value, 0, sizeof(PROPVARIANT));
+    value.vt = VT_I4;
+    value.lVal = 0xdeadbeef;
+    hr = IPropertyStore_SetValue(store, &test_pkey, &value);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+if (0)
+{
+    /* crashes on Windows */
+    hr = IPropertyStore_SetValue(store, NULL, &value);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+}
+
+    hr = IPropertyStore_GetCount(store, &count);
+    ok(hr == S_OK, "Failed to get count, hr %#x.\n", hr);
+    ok(count == 1, "Unexpected count %u.\n", count);
+
+    hr = IPropertyStore_Commit(store);
+    ok(hr == E_NOTIMPL, "Unexpected hr %#x.\n", hr);
+
+    hr = IPropertyStore_GetAt(store, 0, &key);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!memcmp(&key, &test_pkey, sizeof(PROPERTYKEY)), "Keys didn't match.\n");
+
+    hr = IPropertyStore_GetAt(store, 1, &key);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+
+    memset(&value, 0xcc, sizeof(PROPVARIANT));
+    hr = IPropertyStore_GetValue(store, &test_pkey, &value);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(value.vt == VT_I4, "Unexpected type %u.\n", value.vt);
+    ok(value.lVal == 0xdeadbeef, "Unexpected value %#x.\n", value.lVal);
+
+    memset(&value, 0, sizeof(PROPVARIANT));
+    hr = IPropertyStore_SetValue(store, &test_pkey, &value);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = IPropertyStore_GetCount(store, &count);
+    ok(hr == S_OK, "Failed to get count, hr %#x.\n", hr);
+    ok(count == 1, "Unexpected count %u.\n", count);
+
+    memset(&value, 0xcc, sizeof(PROPVARIANT));
+    hr = IPropertyStore_GetValue(store, &test_pkey, &value);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(value.vt == VT_EMPTY, "Unexpected type %u.\n", value.vt);
+    ok(!value.lVal, "Unexpected value %#x.\n", value.lVal);
+
+    refcount = IPropertyStore_Release(store);
+    ok(!refcount, "Unexpected refcount %u.\n", refcount);
+}
+
+static void test_dxgi_device_manager(void)
+{
+    IMFDXGIDeviceManager *manager, *manager2;
+    ID3D11Device *d3d11_dev, *d3d11_dev2;
+    UINT token, token2;
+    HRESULT hr;
+
+    if (!pMFCreateDXGIDeviceManager)
+    {
+        win_skip("MFCreateDXGIDeviceManager not found.\n");
+        return;
+    }
+
+    hr = pMFCreateDXGIDeviceManager(NULL, &manager);
+    ok(hr == E_POINTER, "MFCreateDXGIDeviceManager should failed: %#x.\n", hr);
+
+    token = 0;
+    hr = pMFCreateDXGIDeviceManager(&token, NULL);
+    ok(hr == E_POINTER, "MFCreateDXGIDeviceManager should failed: %#x.\n", hr);
+    ok(!token, "got wrong token: %u.\n", token);
+
+    hr = pMFCreateDXGIDeviceManager(&token, &manager);
+    ok(hr == S_OK, "MFCreateDXGIDeviceManager failed: %#x.\n", hr);
+    EXPECT_REF(manager, 1);
+    ok(!!token, "got wrong token: %u.\n", token);
+
+    Sleep(50);
+    token2 = 0;
+    hr = pMFCreateDXGIDeviceManager(&token2, &manager2);
+    ok(hr == S_OK, "MFCreateDXGIDeviceManager failed: %#x.\n", hr);
+    EXPECT_REF(manager2, 1);
+    ok(token2 && token2 != token, "got wrong token: %u, %u.\n", token2, token);
+    ok(manager != manager2, "got wrong pointer: %p.\n", manager2);
+    EXPECT_REF(manager, 1);
+
+    hr = pD3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+                           NULL, 0, D3D11_SDK_VERSION, &d3d11_dev, NULL, NULL);
+    ok(hr == S_OK, "D3D11CreateDevice failed: %#x.\n", hr);
+    EXPECT_REF(d3d11_dev, 1);
+
+    hr = IMFDXGIDeviceManager_ResetDevice(manager, (IUnknown *)d3d11_dev, token - 1);
+    ok(hr == E_INVALIDARG, "IMFDXGIDeviceManager_ResetDevice should failed: %#x.\n", hr);
+    EXPECT_REF(d3d11_dev, 1);
+
+    hr = IMFDXGIDeviceManager_ResetDevice(manager, NULL, token);
+    ok(hr == E_INVALIDARG, "IMFDXGIDeviceManager_ResetDevice should failed: %#x.\n", hr);
+
+    hr = IMFDXGIDeviceManager_ResetDevice(manager, (IUnknown *)d3d11_dev, token);
+    ok(hr == S_OK, "IMFDXGIDeviceManager_ResetDevice failed: %#x.\n", hr);
+    EXPECT_REF(manager, 1);
+    EXPECT_REF(d3d11_dev, 2);
+
+    hr = IMFDXGIDeviceManager_ResetDevice(manager, (IUnknown *)manager2, token);
+    ok(hr == E_INVALIDARG, "IMFDXGIDeviceManager_ResetDevice should failed: %#x.\n", hr);
+    EXPECT_REF(manager2, 1);
+    EXPECT_REF(d3d11_dev, 2);
+
+    hr = IMFDXGIDeviceManager_ResetDevice(manager, (IUnknown *)d3d11_dev, token);
+    ok(hr == S_OK, "IMFDXGIDeviceManager_ResetDevice failed: %#x.\n", hr);
+    EXPECT_REF(manager, 1);
+    EXPECT_REF(d3d11_dev, 2);
+
+    hr = pD3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, 0,
+                           NULL, 0, D3D11_SDK_VERSION, &d3d11_dev2, NULL, NULL);
+    ok(hr == S_OK, "D3D11CreateDevice failed: %#x.\n", hr);
+    EXPECT_REF(d3d11_dev2, 1);
+    hr = IMFDXGIDeviceManager_ResetDevice(manager, (IUnknown *)d3d11_dev2, token);
+    ok(hr == S_OK, "IMFDXGIDeviceManager_ResetDevice failed: %#x.\n", hr);
+    EXPECT_REF(manager, 1);
+    EXPECT_REF(d3d11_dev2, 2);
+    EXPECT_REF(d3d11_dev, 1);
+
+    IMFDXGIDeviceManager_Release(manager);
+    EXPECT_REF(d3d11_dev2, 1);
+    ID3D11Device_Release(d3d11_dev);
+    ID3D11Device_Release(d3d11_dev2);
+    IMFDXGIDeviceManager_Release(manager2);
+}
+
 START_TEST(mfplat)
 {
     CoInitialize(NULL);
@@ -3644,6 +3835,8 @@ START_TEST(mfplat)
     test_MFCreateWaveFormatExFromMFMediaType();
     test_async_create_file();
     test_local_handlers();
+    test_create_property_store();
+    test_dxgi_device_manager();
 
     CoUninitialize();
 }

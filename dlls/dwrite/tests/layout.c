@@ -901,8 +901,10 @@ static IUnknown *create_test_effect(void)
 static void test_CreateTextLayout(void)
 {
     static const WCHAR strW[] = {'s','t','r','i','n','g',0};
-    IDWriteTextLayout2 *layout2;
+    IDWriteTextLayout4 *layout4;
+    IDWriteTextLayout2 *layout2 = NULL;
     IDWriteTextLayout *layout;
+    IDWriteTextFormat3 *format3;
     IDWriteTextFormat *format;
     IDWriteFactory *factory;
     HRESULT hr;
@@ -991,11 +993,21 @@ static void test_CreateTextLayout(void)
 
         IDWriteTextFormat1_Release(format1);
         IDWriteTextFormat_Release(format);
-        IDWriteTextLayout2_Release(layout2);
     }
     else
         win_skip("IDWriteTextLayout2 is not supported.\n");
 
+    if (layout2 && SUCCEEDED(IDWriteTextLayout2_QueryInterface(layout2, &IID_IDWriteTextLayout4, (void **)&layout4)))
+    {
+        hr = IDWriteTextLayout4_QueryInterface(layout4, &IID_IDWriteTextFormat3, (void **)&format3);
+        ok(hr == S_OK, "Failed to get text format, hr %#x.\n", hr);
+        IDWriteTextFormat3_Release(format3);
+    }
+    else
+        win_skip("IDWriteTextLayout4 is not supported.\n");
+
+    if (layout2)
+        IDWriteTextLayout2_Release(layout2);
     IDWriteTextLayout_Release(layout);
     IDWriteTextFormat_Release(format);
     IDWriteFactory_Release(factory);
@@ -1702,14 +1714,6 @@ static const struct drawcall_entry draw_ltr_reordered_run_seq[] = {
     { DRAW_LAST_KIND }
 };
 
-static const struct drawcall_entry draw_rtl_reordered_run_seq[] = {
-    { DRAW_GLYPHRUN, {'1','2','3','-','5','2',0}, {'r','u',0}, 6, 2 },
-    { DRAW_GLYPHRUN, {0x64a,0x64f,0x633,0x627,0x648,0x650,0x64a,0}, {'r','u',0}, 7, 1 },
-    { DRAW_GLYPHRUN, {'7','1',0}, {'r','u',0}, 2, 2 },
-    { DRAW_GLYPHRUN, {'.',0}, {'r','u',0}, 1, 1 },
-    { DRAW_LAST_KIND }
-};
-
 static void test_Draw(void)
 {
     static const WCHAR str3W[] = {'1','2','3','-','5','2',0x64a,0x64f,0x633,0x627,0x648,0x650,
@@ -1915,14 +1919,6 @@ todo_wine
     hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0f, 0.0f);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok_sequence(sequences, RENDERER_ID, draw_ltr_reordered_run_seq, "draw test 11", FALSE);
-
-    hr = IDWriteTextLayout_SetReadingDirection(layout, DWRITE_READING_DIRECTION_RIGHT_TO_LEFT);
-    ok(hr == S_OK, "Failed to set reading direction, hr %#x.\n", hr);
-
-    flush_sequence(sequences, RENDERER_ID);
-    hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0f, 0.0f);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok_sequence(sequences, RENDERER_ID, draw_rtl_reordered_run_seq, "draw test 12", FALSE);
 
     IDWriteTextLayout_Release(layout);
 
@@ -4720,6 +4716,7 @@ static void test_FontFallbackBuilder(void)
     static const WCHAR strW[] = {'A',0};
     IDWriteFontFallback *fallback, *fallback2;
     IDWriteFontFallbackBuilder *builder;
+    IDWriteFontFallback1 *fallback1;
     DWRITE_UNICODE_RANGE range;
     IDWriteFactory2 *factory2;
     IDWriteFactory *factory;
@@ -4907,6 +4904,13 @@ todo_wine {
     if (font)
         IDWriteFont_Release(font);
 
+    if (SUCCEEDED(IDWriteFontFallback_QueryInterface(fallback, &IID_IDWriteFontFallback1, (void **)&fallback1)))
+    {
+        IDWriteFontFallback1_Release(fallback1);
+    }
+    else
+        win_skip("IDWriteFontFallback1 is not supported.\n");
+
     IDWriteFontFallback_Release(fallback);
 
     IDWriteFontFallbackBuilder_Release(builder);
@@ -4918,6 +4922,7 @@ static void test_fallback(void)
 {
     static const WCHAR strW[] = {'a','b','c','d',0};
     IDWriteFontFallback *fallback, *fallback2;
+    IDWriteFontFallback1 *fallback1;
     DWRITE_CLUSTER_METRICS clusters[4];
     DWRITE_TEXT_METRICS metrics;
     IDWriteTextLayout2 *layout2;
@@ -5017,6 +5022,13 @@ todo_wine {
     hr = IDWriteTextFormat1_GetFontFallback(format1, &fallback2);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(fallback2 == NULL, "got %p\n", fallback2);
+
+    if (SUCCEEDED(IDWriteFontFallback_QueryInterface(fallback, &IID_IDWriteFontFallback1, (void **)&fallback1)))
+    {
+        IDWriteFontFallback1_Release(fallback1);
+    }
+    else
+        win_skip("IDWriteFontFallback1 is not supported.\n");
 
     IDWriteFontFallback_Release(fallback);
     IDWriteTextFormat1_Release(format1);
@@ -5334,14 +5346,17 @@ todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
     count = IDWriteFontCollection_GetFontFamilyCount(syscollection);
 
-    for (i = 0; i < count; i++) {
+    for (i = 0; i < count; ++i)
+    {
         DWRITE_FONT_METRICS fontmetrics;
         IDWriteLocalizedStrings *names;
         struct renderer_context ctxt;
         IDWriteFontFamily *family;
         IDWriteFontFace *fontface;
+        WCHAR nameW[256], str[1];
         IDWriteFont *font;
-        WCHAR nameW[256];
+        UINT32 codepoint;
+        UINT16 glyph;
         BOOL exists;
 
         format = NULL;
@@ -5402,19 +5417,38 @@ todo_wine
             DWRITE_FONT_STRETCH_NORMAL, fontmetrics.designUnitsPerEm, enusW, &format);
         ok(hr == S_OK, "got 0x%08x\n", hr);
 
-        hr = IDWriteFactory_CreateTextLayout(factory, strW, 2, format, 30000.0f, 100.0f, &layout);
-        ok(hr == S_OK, "got 0x%08x\n", hr);
+        /* Look for first supported character to avoid triggering fallback path. With fallback it's harder to test
+           DrawUnderline() metrics, because actual resolved fontface is not passed to it. Grabbing fontface instance
+           from corresponding DrawGlyphRun() call is not straightforward. */
+        for (codepoint = ' '; codepoint < 0xffff; ++codepoint)
+        {
+            glyph = 0;
+            hr = IDWriteFontFace_GetGlyphIndices(fontface, &codepoint, 1, &glyph);
+            ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+            if (glyph)
+                break;
+        }
+
+        if (!glyph)
+        {
+            skip("Couldn't find reasonable test string.\n");
+            goto cleanup;
+        }
+
+        str[0] = codepoint;
+        hr = IDWriteFactory_CreateTextLayout(factory, str, 1, format, 30000.0f, 100.0f, &layout);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
         range.startPosition = 0;
         range.length = 2;
         hr = IDWriteTextLayout_SetUnderline(layout, TRUE, range);
-        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
         memset(&ctxt, 0, sizeof(ctxt));
         ctxt.format = format;
         ctxt.familyW = nameW;
         hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0f, 0.0f);
-        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
     cleanup:
         if (layout)

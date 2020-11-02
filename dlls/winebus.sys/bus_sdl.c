@@ -66,9 +66,6 @@ static const WCHAR sdl_busidW[] = {'S','D','L','J','O','Y',0};
 
 static DWORD map_controllers = 0;
 
-#include "initguid.h"
-DEFINE_GUID(GUID_DEVCLASS_SDL, 0x463d60b5,0x802b,0x4bb2,0x8f,0xdb,0x7d,0xa9,0xb9,0x96,0x04,0xd8);
-
 static void * HOSTPTR sdl_handle = NULL;
 static HANDLE deviceloop_handle;
 static UINT quit_event = -1;
@@ -748,17 +745,21 @@ static const platform_vtbl sdl_vtbl =
     set_feature_report,
 };
 
+static int compare_joystick_id(DEVICE_OBJECT *device, void* context)
+{
+    return impl_from_DEVICE_OBJECT(device)->id - PtrToUlong(context);
+}
+
 static BOOL set_report_from_event(SDL_Event *event)
 {
     DEVICE_OBJECT *device;
     struct platform_private *private;
     /* All the events coming in will have 'which' as a 3rd field */
-    SDL_JoystickID index = ((SDL_JoyButtonEvent*)event)->which;
-
-    device = bus_find_hid_device(&sdl_vtbl, ULongToPtr(index));
+    SDL_JoystickID id = ((SDL_JoyButtonEvent*)event)->which;
+    device = bus_enumerate_hid_devices(&sdl_vtbl, compare_joystick_id, ULongToPtr(id));
     if (!device)
     {
-        ERR("Failed to find device at index %i\n",index);
+        ERR("Failed to find device at index %i\n",id);
         return FALSE;
     }
     private = impl_from_DEVICE_OBJECT(device);
@@ -818,11 +819,11 @@ static BOOL set_mapped_report_from_event(SDL_Event *event)
     DEVICE_OBJECT *device;
     struct platform_private *private;
     /* All the events coming in will have 'which' as a 3rd field */
-    int index = ((SDL_ControllerButtonEvent*)event)->which;
-    device = bus_find_hid_device(&sdl_vtbl, ULongToPtr(index));
+    SDL_JoystickID id = ((SDL_ControllerButtonEvent*)event)->which;
+    device = bus_enumerate_hid_devices(&sdl_vtbl, compare_joystick_id, ULongToPtr(id));
     if (!device)
     {
-        ERR("Failed to find device at index %i\n",index);
+        ERR("Failed to find device at index %i\n",id);
         return FALSE;
     }
     private = impl_from_DEVICE_OBJECT(device);
@@ -882,7 +883,7 @@ static BOOL set_mapped_report_from_event(SDL_Event *event)
     return FALSE;
 }
 
-static void try_remove_device(SDL_JoystickID index)
+static void try_remove_device(SDL_JoystickID id)
 {
     DEVICE_OBJECT *device = NULL;
     struct platform_private *private;
@@ -890,7 +891,7 @@ static void try_remove_device(SDL_JoystickID index)
     SDL_GameController *sdl_controller;
     SDL_Haptic *sdl_haptic;
 
-    device = bus_find_hid_device(&sdl_vtbl, ULongToPtr(index));
+    device = bus_enumerate_hid_devices(&sdl_vtbl, compare_joystick_id, ULongToPtr(id));
     if (!device) return;
 
     private = impl_from_DEVICE_OBJECT(device);
@@ -898,7 +899,8 @@ static void try_remove_device(SDL_JoystickID index)
     sdl_controller = private->sdl_controller;
     sdl_haptic = private->sdl_haptic;
 
-    IoInvalidateDeviceRelations(device, RemovalRelations);
+    bus_unlink_hid_device(device);
+    IoInvalidateDeviceRelations(bus_pdo, BusRelations);
 
     bus_remove_hid_device(device);
 
@@ -909,7 +911,7 @@ static void try_remove_device(SDL_JoystickID index)
         pSDL_HapticClose(sdl_haptic);
 }
 
-static void try_add_device(SDL_JoystickID index)
+static void try_add_device(unsigned int index)
 {
     DWORD vid = 0, pid = 0, version = 0;
     DEVICE_OBJECT *device = NULL;
@@ -970,9 +972,8 @@ static void try_add_device(SDL_JoystickID index)
     if (is_xbox_gamepad)
         input = 0;
 
-    device = bus_create_hid_device(sdl_busidW, vid, pid,
-            input, version, id, serial, is_xbox_gamepad, &GUID_DEVCLASS_SDL,
-            &sdl_vtbl, sizeof(struct platform_private));
+    device = bus_create_hid_device(sdl_busidW, vid, pid, input, version, index,
+            serial, is_xbox_gamepad, &sdl_vtbl, sizeof(struct platform_private));
 
     if (device)
     {
@@ -988,11 +989,12 @@ static void try_add_device(SDL_JoystickID index)
         if (!rc)
         {
             ERR("Building report descriptor failed, removing device\n");
+            bus_unlink_hid_device(device);
             bus_remove_hid_device(device);
             HeapFree(GetProcessHeap(), 0, serial);
             return;
         }
-        IoInvalidateDeviceRelations(device, BusRelations);
+        IoInvalidateDeviceRelations(bus_pdo, BusRelations);
     }
     else
     {
@@ -1175,9 +1177,13 @@ NTSTATUS sdl_driver_init(void)
     map_controllers = check_bus_option(&controller_mode, 1);
 
     if (!(events[0] = CreateEventW(NULL, TRUE, FALSE, NULL)))
+    {
+        WARN("CreateEvent failed\n");
         return STATUS_UNSUCCESSFUL;
+    }
     if (!(events[1] = CreateThread(NULL, 0, deviceloop_thread, events[0], 0, NULL)))
     {
+        WARN("CreateThread failed\n");
         CloseHandle(events[0]);
         return STATUS_UNSUCCESSFUL;
     }
@@ -1202,7 +1208,6 @@ sym_not_found:
 
 NTSTATUS sdl_driver_init(void)
 {
-    WARN("compiled without SDL support\n");
     return STATUS_NOT_IMPLEMENTED;
 }
 

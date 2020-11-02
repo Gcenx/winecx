@@ -60,6 +60,7 @@ SOURCES = \
 	cmdtxt.idl \
 	cmnquery.idl \
 	colinf.idl \
+	colordlg.h \
 	comcat.idl \
 	commctrl.h \
 	commctrl.rh \
@@ -199,6 +200,7 @@ SOURCES = \
 	dimm.idl \
 	dinput.h \
 	dinputd.h \
+	directmanipulation.idl \
 	dispdib.h \
 	dispex.idl \
 	dlgs.h \
@@ -249,6 +251,7 @@ SOURCES = \
 	dxgi1_5.idl \
 	dxgi1_6.idl \
 	dxgicommon.idl \
+	dxgidebug.idl \
 	dxgiformat.idl \
 	dxgitype.idl \
 	dxva.h \
@@ -268,6 +271,7 @@ SOURCES = \
 	fci.h \
 	fdi.h \
 	fileapi.h \
+	filter.idl \
 	fltdefs.h \
 	fontsub.h \
 	fusion.idl \
@@ -322,6 +326,7 @@ SOURCES = \
 	inspectable.idl \
 	interactioncontext.h \
 	intshcut.h \
+	ip2string.h \
 	ipexport.h \
 	iphlpapi.h \
 	ipifcons.h \
@@ -370,6 +375,7 @@ SOURCES = \
 	mfapi.h \
 	mferror.h \
 	mfidl.idl \
+	mfmediaengine.idl \
 	mfobjects.idl \
 	mfplay.idl \
 	mfreadwrite.idl \
@@ -390,6 +396,7 @@ SOURCES = \
 	msacm.h \
 	msacmdlg.h \
 	msacmdrv.h \
+	msado15_backcompat.idl \
 	msasn1.h \
 	mscat.h \
 	mscoree.idl \
@@ -413,6 +420,7 @@ SOURCES = \
 	mstcpip.h \
 	msvcrt/assert.h \
 	msvcrt/conio.h \
+	msvcrt/corecrt.h \
 	msvcrt/crtdbg.h \
 	msvcrt/crtdefs.h \
 	msvcrt/ctype.h \
@@ -450,6 +458,7 @@ SOURCES = \
 	msvcrt/sys/unistd.h \
 	msvcrt/sys/utime.h \
 	msvcrt/time.h \
+	msvcrt/uchar.h \
 	msvcrt/unistd.h \
 	msvcrt/wchar.h \
 	msvcrt/wctype.h \
@@ -544,11 +553,13 @@ SOURCES = \
 	reason.h \
 	regstr.h \
 	restartmanager.h \
+	restrictederrorinfo.idl \
 	richedit.h \
 	richole.idl \
 	rmxfguid.h \
 	rmxftmpl.x \
 	roapi.h \
+	roerrorapi.h \
 	roparameterizediid.idl \
 	row.idl \
 	rowchg.idl \
@@ -569,6 +580,7 @@ SOURCES = \
 	rtutils.h \
 	sal.h \
 	sapi.idl \
+	sapiaut.idl \
 	sapiddk.idl \
 	scarderr.h \
 	schannel.h \
@@ -612,6 +624,7 @@ SOURCES = \
 	sti.h \
 	storage.h \
 	strmif.idl \
+	strongname.h \
 	strsafe.h \
 	structuredquerycondition.idl \
 	svrapi.h \
@@ -624,11 +637,14 @@ SOURCES = \
 	tcpmib.h \
 	textserv.h \
 	textstor.idl \
+	threadpoolapiset.h \
+	thumbcache.idl \
 	timezoneapi.h \
 	tlhelp32.h \
 	tlogstg.idl \
 	tmschema.h \
 	tom.idl \
+	tpcshrd.h \
 	traffic.h \
 	transact.idl \
 	twain.h \

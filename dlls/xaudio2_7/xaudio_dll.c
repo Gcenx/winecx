@@ -882,7 +882,35 @@ static HRESULT WINAPI XA2SRC_SubmitSourceBuffer(IXAudio2SourceVoice *iface,
 
     TRACE("%p, %p, %p\n", This, pBuffer, pBufferWMA);
 
+#ifdef __i386_on_x86_64__
+    {
+        FAudioBuffer fbuffer;
+        FAudioBufferWMA fbufferWMA;
+
+        if (pBuffer)
+        {
+            fbuffer.Flags = pBuffer->Flags;
+            fbuffer.AudioBytes = pBuffer->AudioBytes;
+            fbuffer.pAudioData = pBuffer->pAudioData;
+            fbuffer.PlayBegin = pBuffer->PlayBegin;
+            fbuffer.PlayLength = pBuffer->PlayLength;
+            fbuffer.LoopBegin = pBuffer->LoopBegin;
+            fbuffer.LoopLength = pBuffer->LoopLength;
+            fbuffer.LoopCount = pBuffer->LoopCount;
+            fbuffer.pContext = pBuffer->pContext;
+        }
+
+        if (pBufferWMA)
+        {
+            fbufferWMA.pDecodedPacketCumulativeBytes = pBufferWMA->pDecodedPacketCumulativeBytes;
+            fbufferWMA.PacketCount = pBufferWMA->PacketCount;
+        }
+
+        return FAudioSourceVoice_SubmitSourceBuffer(This->faudio_voice, pBuffer ? &fbuffer : NULL, pBufferWMA ? &fbufferWMA : NULL);
+    }
+#else
     return FAudioSourceVoice_SubmitSourceBuffer(This->faudio_voice, (FAudioBuffer*)pBuffer, (FAudioBufferWMA*)pBufferWMA);
+#endif
 }
 
 static HRESULT WINAPI XA2SRC_FlushSourceBuffers(IXAudio2SourceVoice *iface)
@@ -919,7 +947,23 @@ static void WINAPI XA2SRC_GetState(IXAudio2SourceVoice *iface,
 
     TRACE("%p, %p, 0x%x\n", This, pVoiceState, Flags);
 
+#ifdef __i386_on_x86_64__
+    /* CrossOver hack 17940 */
+    struct {
+        uint32_t pCurrentBufferContext;
+        uint32_t BuffersQueued;
+        uint64_t SamplesPlayed;
+    } *pVoiceState32 = (void *)pVoiceState;
+
+    FAudioVoiceState VoiceState64;
+    FAudioSourceVoice_GetState(This->faudio_voice, &VoiceState64, Flags);
+
+    pVoiceState32->pCurrentBufferContext = (uint32_t)(uint64_t)VoiceState64.pCurrentBufferContext;
+    pVoiceState32->BuffersQueued = VoiceState64.BuffersQueued;
+    pVoiceState32->SamplesPlayed = VoiceState64.SamplesPlayed;
+#else
     return FAudioSourceVoice_GetState(This->faudio_voice, (FAudioVoiceState*)pVoiceState, Flags);
+#endif
 }
 
 static HRESULT WINAPI XA2SRC_SetFrequencyRatio(IXAudio2SourceVoice *iface,

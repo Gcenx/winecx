@@ -98,6 +98,29 @@ static unsigned dbg_fetch_context(void)
     return TRUE;
 }
 
+BOOL dbg_set_curr_thread(DWORD tid)
+{
+    struct dbg_thread* thread;
+
+    if (!dbg_curr_process)
+    {
+        dbg_printf("No process loaded\n");
+        return FALSE;
+    }
+
+    thread = dbg_get_thread(dbg_curr_process, tid);
+    if (thread)
+    {
+        dbg_curr_thread = thread;
+        dbg_fetch_context();
+        stack_fetch_frames(&dbg_context);
+        dbg_curr_tid = tid;
+        return TRUE;
+    }
+    dbg_printf("No such thread\n");
+    return thread != NULL;
+}
+
 /***********************************************************************
  *              dbg_exception_prolog
  *
@@ -651,9 +674,9 @@ void	dbg_run_debuggee(const char* args)
     }
 }
 
-static BOOL str2int(const char* str, DWORD_PTR* val)
+static BOOL str2int(const char* HOSTPTR str, DWORD_PTR* val)
 {
-    char*   ptr;
+    char* HOSTPTR ptr;
 
     *val = strtol(str, &ptr, 10);
     return str < ptr && !*ptr;
@@ -1004,13 +1027,13 @@ static BOOL tgt_process_active_close_process(struct dbg_process* pcs, BOOL kill)
     return TRUE;
 }
 
-static BOOL tgt_process_active_read(HANDLE hProcess, const void* addr,
-                                    void* buffer, SIZE_T len, SIZE_T* rlen)
+static BOOL tgt_process_active_read(HANDLE hProcess, const void* HOSTPTR addr,
+                                    void* buffer, SIZE_T len, SIZE_T* HOSTPTR rlen)
 {
     return ReadProcessMemory( hProcess, addr, buffer, len, rlen );
 }
 
-static BOOL tgt_process_active_write(HANDLE hProcess, void* addr,
+static BOOL tgt_process_active_write(HANDLE hProcess, void* HOSTPTR addr,
                                      const void* buffer, SIZE_T len, SIZE_T* wlen)
 {
     return WriteProcessMemory( hProcess, addr, buffer, len, wlen );

@@ -1212,12 +1212,23 @@ static struct
     { "1",                      STATUS_SUCCESS,            1, {   0,   0,   0,   1 }, strict_diff_4,
                                 STATUS_INVALID_PARAMETER,  1, { -1 } },
     { "-1",                     STATUS_INVALID_PARAMETER,  0, { -1 } },
+    { "1.2",                    STATUS_SUCCESS,            3, {   1,   0,   0,   2 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  3, { -1 } },
+    { "1000.2000",              STATUS_INVALID_PARAMETER,  9, { -1 } },
+    { "1.2.",                   STATUS_INVALID_PARAMETER,  4, { -1 } },
+    { "1..2",                   STATUS_INVALID_PARAMETER,  3, { -1 } },
+    { "1...2",                  STATUS_INVALID_PARAMETER,  3, { -1 } },
+    { "1.2.3",                  STATUS_SUCCESS,            5, {   1,   2,   0,   3 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  5, { -1 } },
+    { "1.2.3.",                 STATUS_INVALID_PARAMETER,  6, { -1 } },
     { "203569230",              STATUS_SUCCESS,            9, {  12,  34,  56,  78 }, strict_diff_4,
                                 STATUS_INVALID_PARAMETER,  9, { -1 } },
     { "1.223756",               STATUS_SUCCESS,            8, {   1,   3, 106,  12 }, strict_diff_4,
                                 STATUS_INVALID_PARAMETER,  8, { -1 } },
     { "3.4.756",                STATUS_SUCCESS,            7, {   3,   4,   2, 244 }, strict_diff_4,
                                 STATUS_INVALID_PARAMETER,  7, { -1 } },
+    { "756.3.4",                STATUS_INVALID_PARAMETER,  7, { -1 } },
+    { "3.756.4",                STATUS_INVALID_PARAMETER,  7, { -1 } },
     { "3.4.756.1",              STATUS_INVALID_PARAMETER,  9, { -1 } },
     { "3.4.65536",              STATUS_INVALID_PARAMETER,  9, { -1 } },
     { "3.4.5.6.7",              STATUS_INVALID_PARAMETER,  7, { -1 } },
@@ -1233,9 +1244,27 @@ static struct
     { ".1",                     STATUS_INVALID_PARAMETER,  1, { -1 } },
     { ".1.",                    STATUS_INVALID_PARAMETER,  1, { -1 } },
     { ".1.2.3",                 STATUS_INVALID_PARAMETER,  1, { -1 } },
+    { ".1.2.3.4",               STATUS_INVALID_PARAMETER,  1, { -1 } },
     { "0.1.2.3",                STATUS_SUCCESS,            7, {   0,   1,   2,   3 } },
     { "0.1.2.3.",               STATUS_INVALID_PARAMETER,  7, { -1 } },
     { "[0.1.2.3]",              STATUS_INVALID_PARAMETER,  0, { -1 } },
+    { "0x00010203",             STATUS_SUCCESS,           10, {   0,   1,   2,   3 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  2, { -1 } },
+    { "0X00010203",             STATUS_SUCCESS,           10, {   0,   1,   2,   3 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  2, { -1 } },
+    { "0x1234",                 STATUS_SUCCESS,            6, {   0,   0,  18,  52 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  2, { -1 } },
+    { "0x123456789",            STATUS_SUCCESS,           11, {  35,  69, 103, 137 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  2, { -1 } },
+    { "0x00010Q03",             STATUS_SUCCESS,            7, {   0,   0,   0,  16 }, strict_diff_4 | ex_fail_4,
+                                STATUS_INVALID_PARAMETER,  2, { -1 } },
+    { "x00010203",              STATUS_INVALID_PARAMETER,  0, { -1 } },
+    { "1234BEEF",               STATUS_SUCCESS,            4, {   0,   0,   4, 210 }, strict_diff_4 | ex_fail_4,
+                                STATUS_INVALID_PARAMETER,  4, { -1 } },
+    { "017700000001",           STATUS_SUCCESS,           12, { 127,   0,   0,   1 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  1, { -1 } },
+    { "0777",                   STATUS_SUCCESS,            4, {   0,   0,   1, 255 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  1, { -1 } },
     { "::1",                    STATUS_INVALID_PARAMETER,  0, { -1 } },
     { ":1",                     STATUS_INVALID_PARAMETER,  0, { -1 } },
 };
@@ -1458,7 +1487,7 @@ static const struct
     NTSTATUS res;
     int terminator_offset;
     int ip[8];
-    /* win_broken: older versions of windows do not handle this correctly
+    /* win_broken: XP and Vista do not handle this correctly
         ex_fail: Ex function does need the string to be terminated, non-Ex does not.
         ex_skip: test doesn't make sense for Ex (f.e. it's invalid for non-Ex but valid for Ex) */
     enum { normal_6, win_broken_6 = 1, ex_fail_6 = 2, ex_skip_6 = 4 } flags;
@@ -1472,7 +1501,7 @@ static const struct
             { 0, 0, 0, 0, 0, 0, 0, 0 } },
     { "0:0:0:0:0:0:0:1",                                STATUS_SUCCESS,             15,
             { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
-    { "0:0:0:0:0:0:0::",                                STATUS_SUCCESS,             13,
+    { "0:0:0:0:0:0:0::",                                STATUS_SUCCESS,             15,
             { 0, 0, 0, 0, 0, 0, 0, 0 }, win_broken_6 },
     { "0:0:0:0:0:0:13.1.68.3",                          STATUS_SUCCESS,             21,
             { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 } },
@@ -1488,7 +1517,7 @@ static const struct
             { 0, 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0x700 } },
     { "1080:0:0:0:8:800:200c:417a",                     STATUS_SUCCESS,             26,
             { 0x8010, 0, 0, 0, 0x800, 0x8, 0x0c20, 0x7a41 } },
-    { "0:a:b:c:d:e:f::",                                STATUS_SUCCESS,             13,
+    { "0:a:b:c:d:e:f::",                                STATUS_SUCCESS,             15,
             { 0, 0xa00, 0xb00, 0xc00, 0xd00, 0xe00, 0xf00, 0 }, win_broken_6 },
     { "1111:2222:3333:4444:5555:6666:123.123.123.123",  STATUS_SUCCESS,             45,
             { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
@@ -1502,7 +1531,7 @@ static const struct
             { 0x1111, 0x2222, 0x3333, 0x4444, 0xabab, 0xabab, 0xabab, 0xabab } },
     { "1111:2222:3333:4444:r5555:6666:7777:8888",       STATUS_INVALID_PARAMETER,   20,
             { 0x1111, 0x2222, 0x3333, 0x4444, 0xabab, 0xabab, 0xabab, 0xabab } },
-    { "1111:2222:3333:4444:5555:6666:7777::",           STATUS_SUCCESS,             34,
+    { "1111:2222:3333:4444:5555:6666:7777::",           STATUS_SUCCESS,             36,
             { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0 }, win_broken_6 },
     { "1111:2222:3333:4444:5555:6666::",                STATUS_SUCCESS,             31,
             { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0, 0 } },
@@ -2082,13 +2111,6 @@ static void test_RtlIpv6StringToAddress(void)
             ok(terminator == (void *)0xdeadbeef,
                "[%s] terminator = %p, expected it not to change\n",
                ipv6_tests[i].address, terminator);
-        }
-        else if (ipv6_tests[i].flags & win_broken_6)
-        {
-            PCSTR expected = ipv6_tests[i].address + ipv6_tests[i].terminator_offset;
-            ok(terminator == expected || broken(terminator == expected + 2),
-               "[%s] terminator = %p, expected %p\n",
-               ipv6_tests[i].address, terminator, expected);
         }
         else
         {

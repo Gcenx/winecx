@@ -35,8 +35,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 
-static RECT virtual_screen_rect;
-
 static MONITORINFOEXW default_monitor =
 {
     sizeof(default_monitor),    /* cbSize */
@@ -60,7 +58,7 @@ static inline MONITORINFOEXW *get_primary(void)
 
 /* CodeWeavers Hack bug 5752: Converted to return a region and to query
  * the _CX_WORKAREA property of the root window in preference to _NET_WORKAREA. */
-static HRGN query_work_area(void)
+HRGN query_work_area(void)
 {
     Atom type;
     int format;
@@ -92,6 +90,33 @@ static HRGN query_work_area(void)
         XFree( work_area );
     }
 
+    /* Try _GTK_WORKAREAS first as _NET_WORKAREA may be incorrect on multi-monitor systems */
+    if (!XGetWindowProperty( gdi_display, DefaultRootWindow(gdi_display),
+                             x11drv_atom(_GTK_WORKAREAS_D0), 0, ~0, False, XA_CARDINAL, &type,
+                             &format, &count, &remaining, (unsigned char **)&work_area ))
+    {
+        if (type == XA_CARDINAL && format == 32 && count >= 4)
+        {
+            int i;
+            HRGN temp = CreateRectRgn( 0, 0, 0, 0 );
+
+            region = CreateRectRgn( 0, 0, 0, 0 );
+            for (i = 0; i + 3 < count; i += 4)
+            {
+                SetRectRgn( temp, work_area[i+0], work_area[i+1],
+                            work_area[i+0] + work_area[i+2], work_area[i+1] + work_area[i+3] );
+                CombineRgn( region, region, temp, RGN_OR );
+            }
+
+            DeleteObject( temp );
+            XFree( work_area );
+            return region;
+        }
+        XFree(work_area);
+    }
+
+    WARN("_GTK_WORKAREAS is not supported, fallback to _NET_WORKAREA. "
+         "Work areas may be incorrect on multi-monitor systems.\n");
     if (!XGetWindowProperty( gdi_display, DefaultRootWindow(gdi_display), x11drv_atom(_NET_WORKAREA), 0,
                              ~0, False, XA_CARDINAL, &type, &format, &count,
                              &remaining, (unsigned char **)&work_area ))
@@ -105,20 +130,6 @@ static HRGN query_work_area(void)
     }
 
     return region;
-}
-
-static void query_desktop_work_area( RECT *rc_work )
-{
-    static const WCHAR trayW[] = {'S','h','e','l','l','_','T','r','a','y','W','n','d',0};
-    RECT rect;
-    HWND hwnd = FindWindowW( trayW, NULL );
-
-    if (!hwnd || !IsWindowVisible( hwnd )) return;
-    if (!GetWindowRect( hwnd, &rect )) return;
-    if (rect.top) rc_work->bottom = rect.top;
-    else rc_work->top = rect.bottom;
-    TRACE( "found tray %p %s work area %s\n", hwnd,
-           wine_dbgstr_rect( &rect ), wine_dbgstr_rect( rc_work ));
 }
 
 #ifdef SONAME_LIBXINERAMA
@@ -210,32 +221,6 @@ static inline int query_screens(void)
 }
 
 #endif  /* SONAME_LIBXINERAMA */
-
-POINT virtual_screen_to_root( INT x, INT y )
-{
-    POINT pt;
-    pt.x = x - virtual_screen_rect.left;
-    pt.y = y - virtual_screen_rect.top;
-    return pt;
-}
-
-POINT root_to_virtual_screen( INT x, INT y )
-{
-    POINT pt;
-    pt.x = x + virtual_screen_rect.left;
-    pt.y = y + virtual_screen_rect.top;
-    return pt;
-}
-
-RECT get_virtual_screen_rect(void)
-{
-    return virtual_screen_rect;
-}
-
-RECT get_primary_monitor_rect(void)
-{
-    return get_primary()->rcMonitor;
-}
 
 static BOOL xinerama_get_gpus( struct x11drv_gpu **new_gpus, int *count )
 {
@@ -385,31 +370,27 @@ void xinerama_init( unsigned int width, unsigned int height )
     int i;
     RECT rect;
 
-    SetRect( &rect, 0, 0, width, height );
+    if (is_virtual_desktop())
+        return;
 
-    if (root_window != DefaultRootWindow( gdi_display ) || !query_screens())
+    SetRect( &rect, 0, 0, width, height );
+    if (!query_screens())
     {
         /* CodeWeavers Hack bug 5752: made query_work_area return a region */
         HRGN workarea, temp;
 
         default_monitor.rcWork = default_monitor.rcMonitor = rect;
-        if (root_window == DefaultRootWindow( gdi_display ))
-        {
-            workarea = query_work_area();
-            if ((temp = CreateRectRgnIndirect( &default_monitor.rcWork )) &&
-                CombineRgn( temp, temp, workarea, RGN_AND ) != ERROR)
-                GetRgnBox( temp, &default_monitor.rcWork );
-            DeleteObject( temp );
-            DeleteObject( workarea );
-        }
-        else
-            query_desktop_work_area( &default_monitor.rcWork );
+        workarea = query_work_area();
+        if ((temp = CreateRectRgnIndirect( &default_monitor.rcWork )) &&
+            CombineRgn( temp, temp, workarea, RGN_AND ) != ERROR)
+            GetRgnBox( temp, &default_monitor.rcWork );
+        DeleteObject( temp );
+        DeleteObject( workarea );
         nb_monitors = 1;
         monitors = &default_monitor;
     }
 
     primary = get_primary();
-    SetRectEmpty( &virtual_screen_rect );
 
     /* coordinates (0,0) have to point to the primary monitor origin */
     OffsetRect( &rect, -primary->rcMonitor.left, -primary->rcMonitor.top );
@@ -417,7 +398,6 @@ void xinerama_init( unsigned int width, unsigned int height )
     {
         OffsetRect( &monitors[i].rcMonitor, rect.left, rect.top );
         OffsetRect( &monitors[i].rcWork, rect.left, rect.top );
-        UnionRect( &virtual_screen_rect, &virtual_screen_rect, &monitors[i].rcMonitor );
         TRACE( "monitor 0x%x: %s work %s%s\n",
                i, wine_dbgstr_rect(&monitors[i].rcMonitor),
                wine_dbgstr_rect(&monitors[i].rcWork),
@@ -426,14 +406,12 @@ void xinerama_init( unsigned int width, unsigned int height )
 
     handler.name = "Xinerama";
     handler.priority = 100;
-    handler.pGetGpus = xinerama_get_gpus;
-    handler.pGetAdapters = xinerama_get_adapters;
-    handler.pGetMonitors = xinerama_get_monitors;
-    handler.pFreeGpus = xinerama_free_gpus;
-    handler.pFreeAdapters = xinerama_free_adapters;
-    handler.pFreeMonitors = xinerama_free_monitors;
+    handler.get_gpus = xinerama_get_gpus;
+    handler.get_adapters = xinerama_get_adapters;
+    handler.get_monitors = xinerama_get_monitors;
+    handler.free_gpus = xinerama_free_gpus;
+    handler.free_adapters = xinerama_free_adapters;
+    handler.free_monitors = xinerama_free_monitors;
+    handler.register_event_handlers = NULL;
     X11DRV_DisplayDevices_SetHandler( &handler );
-
-    TRACE( "virtual size: %s primary: %s\n",
-           wine_dbgstr_rect(&virtual_screen_rect), wine_dbgstr_rect(&primary->rcMonitor) );
 }

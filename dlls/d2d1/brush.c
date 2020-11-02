@@ -131,11 +131,11 @@ HRESULT d2d_gradient_create(ID2D1Factory *factory, ID3D10Device *device, const D
         UINT32 stop_count, D2D1_GAMMA gamma, D2D1_EXTEND_MODE extend_mode, struct d2d_gradient **gradient)
 {
     D3D10_SHADER_RESOURCE_VIEW_DESC srv_desc;
-    D3D10_SUBRESOURCE_DATA buffer_data;
+    D3D10_SUBRESOURCE_DATA texture_data;
     ID3D10ShaderResourceView *view;
-    D3D10_BUFFER_DESC buffer_desc;
+    D3D10_TEXTURE2D_DESC texture_desc;
     struct d2d_vec4 *data;
-    ID3D10Buffer *buffer;
+    ID3D10Texture2D *texture;
     unsigned int i;
     HRESULT hr;
 
@@ -154,31 +154,37 @@ HRESULT d2d_gradient_create(ID2D1Factory *factory, ID3D10Device *device, const D
         data[i * 2 + 1].w = stops[i].color.a;
     }
 
-    buffer_desc.ByteWidth = 2 * stop_count * sizeof(*data);
-    buffer_desc.Usage = D3D10_USAGE_DEFAULT;
-    buffer_desc.BindFlags = D3D10_BIND_SHADER_RESOURCE;
-    buffer_desc.CPUAccessFlags = 0;
-    buffer_desc.MiscFlags = 0;
+    texture_desc.Width = 2 * stop_count;
+    texture_desc.Height = 1;
+    texture_desc.MipLevels = 1;
+    texture_desc.ArraySize = 1;
+    texture_desc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+    texture_desc.SampleDesc.Count = 1;
+    texture_desc.SampleDesc.Quality = 0;
+    texture_desc.Usage = D3D10_USAGE_DEFAULT;
+    texture_desc.BindFlags = D3D10_BIND_SHADER_RESOURCE;
+    texture_desc.CPUAccessFlags = 0;
+    texture_desc.MiscFlags = 0;
 
-    buffer_data.pSysMem = data;
-    buffer_data.SysMemPitch = 0;
-    buffer_data.SysMemSlicePitch = 0;
+    texture_data.pSysMem = data;
+    texture_data.SysMemPitch = 0;
+    texture_data.SysMemSlicePitch = 0;
 
-    hr = ID3D10Device_CreateBuffer(device, &buffer_desc, &buffer_data, &buffer);
+    hr = ID3D10Device_CreateTexture2D(device, &texture_desc, &texture_data, &texture);
     heap_free(data);
     if (FAILED(hr))
     {
-        ERR("Failed to create buffer, hr %#x.\n", hr);
+        ERR("Failed to create texture, hr %#x.\n", hr);
         return hr;
     }
 
     srv_desc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
-    srv_desc.ViewDimension = D3D10_SRV_DIMENSION_BUFFER;
-    srv_desc.Buffer.ElementOffset = 0;
-    srv_desc.Buffer.ElementWidth = 2 * stop_count;
+    srv_desc.ViewDimension = D3D10_SRV_DIMENSION_TEXTURE2D;
+    srv_desc.Texture2D.MostDetailedMip = 0;
+    srv_desc.Texture2D.MipLevels = 1;
 
-    hr = ID3D10Device_CreateShaderResourceView(device, (ID3D10Resource *)buffer, &srv_desc, &view);
-    ID3D10Buffer_Release(buffer);
+    hr = ID3D10Device_CreateShaderResourceView(device, (ID3D10Resource *)texture, &srv_desc, &view);
+    ID3D10Texture2D_Release(texture);
     if (FAILED(hr))
     {
         ERR("Failed to create view, hr %#x.\n", hr);
@@ -1295,7 +1301,7 @@ static void d2d_brush_bind_bitmap(struct d2d_brush *brush, ID3D10Device *device,
 {
     HRESULT hr;
 
-    ID3D10Device_PSSetShaderResources(device, brush_idx, 1, &brush->u.bitmap.bitmap->view);
+    ID3D10Device_PSSetShaderResources(device, brush_idx, 1, &brush->u.bitmap.bitmap->srv);
     if (!brush->u.bitmap.sampler_state)
     {
         D3D10_SAMPLER_DESC sampler_desc;

@@ -19,40 +19,42 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "windows.h"
+#include <windows.h>
 #define COBJMACROS
-#include "initguid.h"
-#include "msxml.h"
-#include "wusa.h"
+#include <initguid.h>
+#include <msxml.h>
+
 #include "wine/debug.h"
+#include "wine/list.h"
+#include "wusa.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wusa);
 
 static struct dependency_entry *alloc_dependency(void)
 {
     struct dependency_entry *entry = heap_alloc_zero(sizeof(*entry));
-    if (!entry) WINE_ERR("failed to allocate memory for dependency\n");
+    if (!entry) ERR("Failed to allocate memory for dependency\n");
     return entry;
 }
 
 static struct fileop_entry *alloc_fileop(void)
 {
     struct fileop_entry *entry = heap_alloc_zero(sizeof(*entry));
-    if (!entry) WINE_ERR("failed to allocate memory for fileop\n");
+    if (!entry) ERR("Failed to allocate memory for fileop\n");
     return entry;
 }
 
 static struct registrykv_entry *alloc_registrykv(void)
 {
     struct registrykv_entry *entry = heap_alloc_zero(sizeof(*entry));
-    if (!entry) WINE_ERR("failed to allocate memory for registrykv\n");
+    if (!entry) ERR("Failed to allocate memory for registrykv\n");
     return entry;
 }
 
 static struct registryop_entry *alloc_registryop(void)
 {
     struct registryop_entry *entry = heap_alloc_zero(sizeof(*entry));
-    if (!entry) WINE_ERR("failed to allocate memory for registryop\n");
+    if (!entry) ERR("Failed to allocate memory for registryop\n");
     else
     {
         list_init(&entry->keyvalues);
@@ -63,7 +65,7 @@ static struct registryop_entry *alloc_registryop(void)
 static struct assembly_entry *alloc_assembly(void)
 {
     struct assembly_entry *entry = heap_alloc_zero(sizeof(*entry));
-    if (!entry) WINE_ERR("failed to allocate memory for assembly\n");
+    if (!entry) ERR("Failed to allocate memory for assembly\n");
     else
     {
         list_init(&entry->dependencies);
@@ -158,7 +160,7 @@ static WCHAR *get_xml_attribute(IXMLDOMElement *root, const WCHAR *name)
         VariantInit(&var);
         if (SUCCEEDED(IXMLDOMElement_getAttribute(root, bstr, &var)))
         {
-            ret = (V_VT(&var) == VT_BSTR) ? wcsdup(V_BSTR(&var)) : NULL;
+            ret = (V_VT(&var) == VT_BSTR) ? strdupW(V_BSTR(&var)) : NULL;
             VariantClear(&var);
         }
         SysFreeString(bstr);
@@ -174,7 +176,7 @@ static BOOL check_xml_tagname(IXMLDOMElement *root, const WCHAR *tagname)
 
     if (SUCCEEDED(IXMLDOMElement_get_tagName(root, &bstr)))
     {
-        ret = !lstrcmpW(bstr, tagname);
+        ret = !wcscmp(bstr, tagname);
         SysFreeString(bstr);
     }
 
@@ -238,7 +240,7 @@ static IXMLDOMElement *load_xml(const WCHAR *filename)
     VARIANT variant;
     BSTR bstr;
 
-    WINE_TRACE("Loading XML from %s\n", debugstr_w(filename));
+    TRACE("Loading XML from %s\n", debugstr_w(filename));
 
     if (!(bstr = SysAllocString(filename)))
         return FALSE;
@@ -263,18 +265,12 @@ static IXMLDOMElement *load_xml(const WCHAR *filename)
 
 static BOOL read_identity(IXMLDOMElement *root, struct assembly_identity *identity)
 {
-    static const WCHAR nameW[] = {'n','a','m','e',0};
-    static const WCHAR versionW[] = {'v','e','r','s','i','o','n',0};
-    static const WCHAR processorArchitectureW[] = {'p','r','o','c','e','s','s','o','r','A','r','c','h','i','t','e','c','t','u','r','e',0};
-    static const WCHAR languageW[] = {'l','a','n','g','u','a','g','e',0};
-    static const WCHAR publicKeyTokenW[] = {'p','u','b','l','i','c','K','e','y','T','o','k','e','n',0};
-
     memset(identity, 0, sizeof(*identity));
-    if (!(identity->name            = get_xml_attribute(root, nameW))) goto error;
-    if (!(identity->version         = get_xml_attribute(root, versionW))) goto error;
-    if (!(identity->architecture    = get_xml_attribute(root, processorArchitectureW))) goto error;
-    if (!(identity->language        = get_xml_attribute(root, languageW))) goto error;
-    if (!(identity->pubkey_token    = get_xml_attribute(root, publicKeyTokenW))) goto error;
+    if (!(identity->name            = get_xml_attribute(root, L"name"))) goto error;
+    if (!(identity->version         = get_xml_attribute(root, L"version"))) goto error;
+    if (!(identity->architecture    = get_xml_attribute(root, L"processorArchitecture"))) goto error;
+    if (!(identity->language        = get_xml_attribute(root, L"language"))) goto error;
+    if (!(identity->pubkey_token    = get_xml_attribute(root, L"publicKeyToken"))) goto error;
     return TRUE;
 
 error:
@@ -285,26 +281,22 @@ error:
 /* <assembly><dependency><dependentAssembly> */
 static BOOL read_dependent_assembly(IXMLDOMElement *root, struct assembly_identity *identity)
 {
-    static const WCHAR dependencyTypeW[] = {'d','e','p','e','n','d','e','n','c','y','T','y','p','e',0};
-    static const WCHAR installW[] = {'i','n','s','t','a','l','l',0};
-    static const WCHAR select_assemblyIdentityW[] = {'.','/','/','a','s','s','e','m','b','l','y','I','d','e','n','t','i','t','y',0};
     IXMLDOMElement *child = NULL;
     WCHAR *dependency_type;
     BOOL ret = FALSE;
 
-    if (!(dependency_type = get_xml_attribute(root, dependencyTypeW)))
+    if (!(dependency_type = get_xml_attribute(root, L"dependencyType")))
     {
-        WINE_ERR("Failed to get dependency type\n");
-        return FALSE;
+        WARN("Failed to get dependency type, assuming install\n");
     }
-    if (lstrcmpW(dependency_type, installW))
+    if (dependency_type && wcscmp(dependency_type, L"install") && wcscmp(dependency_type, L"prerequisite"))
     {
-        WINE_FIXME("Unimplemented dependency type %s\n", debugstr_w(dependency_type));
+        FIXME("Unimplemented dependency type %s\n", debugstr_w(dependency_type));
         goto error;
     }
-    if (!(child = select_xml_node(root, select_assemblyIdentityW)))
+    if (!(child = select_xml_node(root, L".//assemblyIdentity")))
     {
-        WINE_FIXME("Failed to find assemblyIdentity child node\n");
+        FIXME("Failed to find assemblyIdentity child node\n");
         goto error;
     }
 
@@ -319,13 +311,12 @@ error:
 /* <assembly><dependency> */
 static BOOL read_dependency(IXMLDOMElement *child, WCHAR *tagname, void *context)
 {
-    static const WCHAR dependentAssemblyW[] = {'d','e','p','e','n','d','e','n','t','A','s','s','e','m','b','l','y',0};
     struct assembly_entry *assembly = context;
     struct dependency_entry *entry;
 
-    if (lstrcmpW(tagname, dependentAssemblyW))
+    if (wcscmp(tagname, L"dependentAssembly"))
     {
-        WINE_FIXME("Don't know how to handle dependency tag %s\n", debugstr_w(tagname));
+        FIXME("Don't know how to handle dependency tag %s\n", debugstr_w(tagname));
         return FALSE;
     }
 
@@ -333,7 +324,7 @@ static BOOL read_dependency(IXMLDOMElement *child, WCHAR *tagname, void *context
     {
         if (read_dependent_assembly(child, &entry->identity))
         {
-            WINE_TRACE("Found dependency %s\n", debugstr_w(entry->identity.name));
+            TRACE("Found dependency %s\n", debugstr_w(entry->identity.name));
             list_add_tail(&assembly->dependencies, &entry->entry);
             return TRUE;
         }
@@ -342,6 +333,7 @@ static BOOL read_dependency(IXMLDOMElement *child, WCHAR *tagname, void *context
 
     return FALSE;
 }
+
 static BOOL iter_dependency(IXMLDOMElement *root, struct assembly_entry *assembly)
 {
     return call_xml_callbacks(root, read_dependency, assembly);
@@ -351,13 +343,12 @@ static BOOL iter_dependency(IXMLDOMElement *root, struct assembly_entry *assembl
 /* <assembly><package><update><package> */
 static BOOL read_components(IXMLDOMElement *child, WCHAR *tagname, void *context)
 {
-    static const WCHAR assemblyIdentityW[] = {'a','s','s','e','m','b','l','y','I','d','e','n','t','i','t','y',0};
     struct assembly_entry *assembly = context;
     struct dependency_entry *entry;
 
-    if (lstrcmpW(tagname, assemblyIdentityW))
+    if (wcscmp(tagname, L"assemblyIdentity"))
     {
-        WINE_FIXME("Ignoring unexpected tag %s\n", debugstr_w(tagname));
+        FIXME("Ignoring unexpected tag %s\n", debugstr_w(tagname));
         return TRUE;
     }
 
@@ -365,7 +356,7 @@ static BOOL read_components(IXMLDOMElement *child, WCHAR *tagname, void *context
     {
         if (read_identity(child, &entry->identity))
         {
-            WINE_TRACE("Found identity %s\n", debugstr_w(entry->identity.name));
+            TRACE("Found identity %s\n", debugstr_w(entry->identity.name));
             list_add_tail(&assembly->dependencies, &entry->entry);
             return TRUE;
         }
@@ -374,6 +365,7 @@ static BOOL read_components(IXMLDOMElement *child, WCHAR *tagname, void *context
 
     return FALSE;
 }
+
 static BOOL iter_components(IXMLDOMElement *root, struct assembly_entry *assembly)
 {
     return call_xml_callbacks(root, read_components, assembly);
@@ -382,21 +374,19 @@ static BOOL iter_components(IXMLDOMElement *root, struct assembly_entry *assembl
 /* <assembly><package><update> */
 static BOOL read_update(IXMLDOMElement *child, WCHAR *tagname, void *context)
 {
-    static const WCHAR applicableW[] = {'a','p','p','l','i','c','a','b','l','e',0};
-    static const WCHAR componentW[] = {'c','o','m','p','o','n','e','n','t',0};
-    static const WCHAR packageW[] = {'p','a','c','k','a','g','e',0};
     struct assembly_entry *assembly = context;
 
-    if (!lstrcmpW(tagname, componentW))
+    if (!wcscmp(tagname, L"component"))
         return iter_components(child, assembly);
-    if (!lstrcmpW(tagname, packageW))
+    if (!wcscmp(tagname, L"package"))
         return iter_components(child, assembly);
-    if (!lstrcmpW(tagname, applicableW))
+    if (!wcscmp(tagname, L"applicable"))
         return TRUE;
 
-    WINE_FIXME("Ignoring unexpected tag %s\n", debugstr_w(tagname));
+    FIXME("Ignoring unexpected tag %s\n", debugstr_w(tagname));
     return FALSE;
 }
+
 static BOOL iter_update(IXMLDOMElement *root, struct assembly_entry *assembly)
 {
     return call_xml_callbacks(root, read_update, assembly);
@@ -405,18 +395,17 @@ static BOOL iter_update(IXMLDOMElement *root, struct assembly_entry *assembly)
 /* <assembly><package> */
 static BOOL read_package(IXMLDOMElement *child, WCHAR *tagname, void *context)
 {
-    static const WCHAR updateW[] = {'u','p','d','a','t','e',0};
-    static const WCHAR parentW[] = {'p','a','r','e','n','t',0};
     struct assembly_entry *assembly = context;
 
-    if (!lstrcmpW(tagname, updateW))
+    if (!wcscmp(tagname, L"update"))
         return iter_update(child, assembly);
-    if (!lstrcmpW(tagname, parentW))
+    if (!wcscmp(tagname, L"parent"))
         return TRUE;
 
-    WINE_FIXME("Ignoring unexpected tag %s\n", debugstr_w(tagname));
+    FIXME("Ignoring unexpected tag %s\n", debugstr_w(tagname));
     return TRUE;
 }
+
 static BOOL iter_package(IXMLDOMElement *root, struct assembly_entry *assembly)
 {
     return call_xml_callbacks(root, read_package, assembly);
@@ -425,17 +414,15 @@ static BOOL iter_package(IXMLDOMElement *root, struct assembly_entry *assembly)
 /* <assembly><file> */
 static BOOL read_file(IXMLDOMElement *root, struct assembly_entry *assembly)
 {
-    static const WCHAR sourceNameW[] = {'s','o','u','r','c','e','N','a','m','e',0};
-    static const WCHAR destinationPathW[] = {'d','e','s','t','i','n','a','t','i','o','n','P','a','t','h',0};
     struct fileop_entry *entry;
 
     if (!(entry = alloc_fileop()))
         return FALSE;
 
-    if (!(entry->source = get_xml_attribute(root, sourceNameW))) goto error;
-    if (!(entry->target = get_xml_attribute(root, destinationPathW))) goto error;
+    if (!(entry->source = get_xml_attribute(root, L"sourceName"))) goto error;
+    if (!(entry->target = get_xml_attribute(root, L"destinationPath"))) goto error;
 
-    WINE_TRACE("Found fileop %s -> %s\n", debugstr_w(entry->source), debugstr_w(entry->target));
+    TRACE("Found fileop %s -> %s\n", debugstr_w(entry->source), debugstr_w(entry->target));
     list_add_tail(&assembly->fileops, &entry->entry);
     return TRUE;
 
@@ -447,31 +434,25 @@ error:
 /* <assembly><registryKeys><registryKey> */
 static BOOL read_registry_key(IXMLDOMElement *child, WCHAR *tagname, void *context)
 {
-    static const WCHAR securityDescriptorW[] = {'s','e','c','u','r','i','t','y','D','e','s','c','r','i','p','t','o','r',0};
-    static const WCHAR systemProtectionW[] = {'s','y','s','t','e','m','P','r','o','t','e','c','t','i','o','n',0};
-    static const WCHAR registryValueW[] = {'r','e','g','i','s','t','r','y','V','a','l','u','e',0};
-    static const WCHAR nameW[] = {'n','a','m','e',0};
-    static const WCHAR valueTypeW[] = {'v','a','l','u','e','T','y','p','e',0};
-    static const WCHAR valueW[] = {'v','a','l','u','e',0};
     struct registryop_entry *registryop = context;
     struct registrykv_entry *entry;
 
-    if (!lstrcmpW(tagname, securityDescriptorW)) return TRUE;
-    if (!lstrcmpW(tagname, systemProtectionW)) return TRUE;
-    if (lstrcmpW(tagname, registryValueW))
+    if (!wcscmp(tagname, L"securityDescriptor")) return TRUE;
+    if (!wcscmp(tagname, L"systemProtection")) return TRUE;
+    if (wcscmp(tagname, L"registryValue"))
     {
-        WINE_FIXME("Ignoring unexpected tag %s\n", debugstr_w(tagname));
+        FIXME("Ignoring unexpected tag %s\n", debugstr_w(tagname));
         return TRUE;
     }
 
     if (!(entry = alloc_registrykv()))
         return FALSE;
 
-    if (!(entry->value_type = get_xml_attribute(child, valueTypeW))) goto error;
-    entry->name = get_xml_attribute(child, nameW);      /* optional */
-    entry->value = get_xml_attribute(child, valueW);    /* optional */
+    if (!(entry->value_type = get_xml_attribute(child, L"valueType"))) goto error;
+    entry->name = get_xml_attribute(child, L"name");      /* optional */
+    entry->value = get_xml_attribute(child, L"value");    /* optional */
 
-    WINE_TRACE("Found registry %s -> %s\n", debugstr_w(entry->name), debugstr_w(entry->value));
+    TRACE("Found registry %s -> %s\n", debugstr_w(entry->name), debugstr_w(entry->value));
     list_add_tail(&registryop->keyvalues, &entry->entry);
     return TRUE;
 
@@ -479,6 +460,7 @@ error:
     free_registrykv(entry);
     return FALSE;
 }
+
 static BOOL iter_registry_key(IXMLDOMElement *root, struct registryop_entry *registryop)
 {
     return call_xml_callbacks(root, read_registry_key, registryop);
@@ -487,21 +469,19 @@ static BOOL iter_registry_key(IXMLDOMElement *root, struct registryop_entry *reg
 /* <assembly><registryKeys> */
 static BOOL read_registry_keys(IXMLDOMElement *child, WCHAR *tagname, void *context)
 {
-    static const WCHAR registryKeyW[] = {'r','e','g','i','s','t','r','y','K','e','y',0};
-    static const WCHAR keyNameW[] = {'k','e','y','N','a','m','e',0};
     struct assembly_entry *assembly = context;
     struct registryop_entry *entry;
     WCHAR *keyname;
 
-    if (lstrcmpW(tagname, registryKeyW))
+    if (wcscmp(tagname, L"registryKey"))
     {
-        WINE_FIXME("Ignoring unexpected tag %s\n", debugstr_w(tagname));
+        FIXME("Ignoring unexpected tag %s\n", debugstr_w(tagname));
         return TRUE;
     }
 
-    if (!(keyname = get_xml_attribute(child, keyNameW)))
+    if (!(keyname = get_xml_attribute(child, L"keyName")))
     {
-        WINE_FIXME("RegistryKey tag doesn't specify keyName\n");
+        FIXME("RegistryKey tag doesn't specify keyName\n");
         return FALSE;
     }
 
@@ -511,7 +491,7 @@ static BOOL read_registry_keys(IXMLDOMElement *child, WCHAR *tagname, void *cont
         if (iter_registry_key(child, entry))
         {
             entry->key = keyname;
-            WINE_TRACE("Found registryop %s\n", debugstr_w(entry->key));
+            TRACE("Found registryop %s\n", debugstr_w(entry->key));
             list_add_tail(&assembly->registryops, &entry->entry);
             return TRUE;
         }
@@ -521,6 +501,7 @@ static BOOL read_registry_keys(IXMLDOMElement *child, WCHAR *tagname, void *cont
     heap_free(keyname);
     return FALSE;
 }
+
 static BOOL iter_registry_keys(IXMLDOMElement *root, struct assembly_entry *assembly)
 {
     return call_xml_callbacks(root, read_registry_keys, assembly);
@@ -529,36 +510,29 @@ static BOOL iter_registry_keys(IXMLDOMElement *root, struct assembly_entry *asse
 /* <assembly> */
 static BOOL read_assembly(IXMLDOMElement *child, WCHAR *tagname, void *context)
 {
-    static const WCHAR assemblyIdentityW[] = {'a','s','s','e','m','b','l','y','I','d','e','n','t','i','t','y',0};
-    static const WCHAR dependencyW[] = {'d','e','p','e','n','d','e','n','c','y',0};
-    static const WCHAR packageW[] = {'p','a','c','k','a','g','e',0};
-    static const WCHAR fileW[] = {'f','i','l','e',0};
-    static const WCHAR registryKeysW[] = {'r','e','g','i','s','t','r','y','K','e','y','s',0};
-    static const WCHAR trustInfoW[] = {'t','r','u','s','t','I','n','f','o',0};
-    static const WCHAR configurationW[] = {'c','o','n','f','i','g','u','r','a','t','i','o','n',0};
-    static const WCHAR deploymentW[] = {'d','e','p','l','o','y','m','e','n','t',0};
     struct assembly_entry *assembly = context;
 
-    if (!lstrcmpW(tagname, assemblyIdentityW) && !assembly->identity.name)
+    if (!wcscmp(tagname, L"assemblyIdentity") && !assembly->identity.name)
         return read_identity(child, &assembly->identity);
-    if (!lstrcmpW(tagname, dependencyW))
+    if (!wcscmp(tagname, L"dependency"))
         return iter_dependency(child, assembly);
-    if (!lstrcmpW(tagname, packageW))
+    if (!wcscmp(tagname, L"package"))
         return iter_package(child, assembly);
-    if (!lstrcmpW(tagname, fileW))
+    if (!wcscmp(tagname, L"file"))
         return read_file(child, assembly);
-    if (!lstrcmpW(tagname, registryKeysW))
+    if (!wcscmp(tagname, L"registryKeys"))
         return iter_registry_keys(child, assembly);
-    if (!lstrcmpW(tagname, trustInfoW))
+    if (!wcscmp(tagname, L"trustInfo"))
         return TRUE;
-    if (!lstrcmpW(tagname, configurationW))
+    if (!wcscmp(tagname, L"configuration"))
         return TRUE;
-    if (!lstrcmpW(tagname, deploymentW))
+    if (!wcscmp(tagname, L"deployment"))
         return TRUE;
 
-    WINE_FIXME("Ignoring unexpected tag %s\n", debugstr_w(tagname));
+    FIXME("Ignoring unexpected tag %s\n", debugstr_w(tagname));
     return TRUE;
 }
+
 static BOOL iter_assembly(IXMLDOMElement *root, struct assembly_entry *assembly)
 {
     return call_xml_callbacks(root, read_assembly, assembly);
@@ -566,24 +540,22 @@ static BOOL iter_assembly(IXMLDOMElement *root, struct assembly_entry *assembly)
 
 struct assembly_entry *load_manifest(const WCHAR *filename)
 {
-    static const WCHAR assemblyW[] = {'a','s','s','e','m','b','l','y',0};
-    static const WCHAR displaynameW[] = {'d','i','s','p','l','a','y','N','a','m','e',0};
     struct assembly_entry *entry = NULL;
     IXMLDOMElement *root = NULL;
 
-    WINE_TRACE("Loading manifest %s\n", debugstr_w(filename));
+    TRACE("Loading manifest %s\n", debugstr_w(filename));
 
     if (!(root = load_xml(filename))) return NULL;
-    if (!check_xml_tagname(root, assemblyW))
+    if (!check_xml_tagname(root, L"assembly"))
     {
-        WINE_FIXME("Didn't find assembly root node?\n");
+        FIXME("Didn't find assembly root node?\n");
         goto done;
     }
 
     if ((entry = alloc_assembly()))
     {
-        entry->filename = wcsdup(filename);
-        entry->displayname = get_xml_attribute(root, displaynameW);
+        entry->filename = strdupW(filename);
+        entry->displayname = get_xml_attribute(root, L"displayName");
         if (iter_assembly(root, entry)) goto done;
         free_assembly(entry);
         entry = NULL;
@@ -597,15 +569,13 @@ done:
 /* <unattend><servicing><package> */
 static BOOL read_update_package(IXMLDOMElement *child, WCHAR *tagname, void *context)
 {
-    static const WCHAR sourceW[] = {'s','o','u','r','c','e',0};
-    static const WCHAR assemblyIdentityW[] = {'a','s','s','e','m','b','l','y','I','d','e','n','t','i','t','y',0};
     struct dependency_entry *entry;
     struct list *update_list = context;
 
-    if (!lstrcmpW(tagname, sourceW)) return TRUE;
-    if (lstrcmpW(tagname, assemblyIdentityW))
+    if (!wcscmp(tagname, L"source")) return TRUE;
+    if (wcscmp(tagname, L"assemblyIdentity"))
     {
-        WINE_TRACE("Ignoring unexpected tag %s\n", debugstr_w(tagname));
+        TRACE("Ignoring unexpected tag %s\n", debugstr_w(tagname));
         return TRUE;
     }
 
@@ -613,7 +583,7 @@ static BOOL read_update_package(IXMLDOMElement *child, WCHAR *tagname, void *con
     {
         if (read_identity(child, &entry->identity))
         {
-            WINE_TRACE("Found update %s\n", debugstr_w(entry->identity.name));
+            TRACE("Found update %s\n", debugstr_w(entry->identity.name));
             list_add_tail(update_list, &entry->entry);
             return TRUE;
         }
@@ -622,6 +592,7 @@ static BOOL read_update_package(IXMLDOMElement *child, WCHAR *tagname, void *con
 
     return FALSE;
 }
+
 static BOOL iter_update_package(IXMLDOMElement *root, struct list *update_list)
 {
     return call_xml_callbacks(root, read_update_package, update_list);
@@ -630,33 +601,31 @@ static BOOL iter_update_package(IXMLDOMElement *root, struct list *update_list)
 /* <unattend><servicing> */
 static BOOL read_servicing(IXMLDOMElement *child, WCHAR *tagname, void *context)
 {
-    static const WCHAR packageW[] = {'p','a','c','k','a','g','e',0};
-    static const WCHAR installW[] = {'i','n','s','t','a','l','l',0};
-    static const WCHAR actionW[] = {'a','c','t','i','o','n',0};
     struct list *update_list = context;
     WCHAR *action;
     BOOL ret = TRUE;
 
-    if (lstrcmpW(tagname, packageW))
+    if (wcscmp(tagname, L"package"))
     {
-        WINE_FIXME("Ignoring unexpected tag %s\n", debugstr_w(tagname));
+        FIXME("Ignoring unexpected tag %s\n", debugstr_w(tagname));
         return TRUE;
     }
 
-    if (!(action = get_xml_attribute(child, actionW)))
+    if (!(action = get_xml_attribute(child, L"action")))
     {
-        WINE_FIXME("Servicing tag doesn't specify action\n");
+        FIXME("Servicing tag doesn't specify action\n");
         return FALSE;
     }
 
-    if (!lstrcmpW(action, installW))
+    if (!wcscmp(action, L"install"))
         ret = iter_update_package(child, update_list);
     else
-        WINE_FIXME("action %s not supported\n", debugstr_w(action));
+        FIXME("action %s not supported\n", debugstr_w(action));
 
     heap_free(action);
     return ret;
 }
+
 static BOOL iter_servicing(IXMLDOMElement *root, struct list *update_list)
 {
     return call_xml_callbacks(root, read_servicing, update_list);
@@ -665,18 +634,18 @@ static BOOL iter_servicing(IXMLDOMElement *root, struct list *update_list)
 /* <unattend> */
 static BOOL read_unattend(IXMLDOMElement *child, WCHAR *tagname, void *context)
 {
-    static const WCHAR servicingW[] = {'s','e','r','v','i','c','i','n','g',0};
     struct list *update_list = context;
 
-    if (lstrcmpW(tagname, servicingW))
+    if (wcscmp(tagname, L"servicing"))
     {
-        WINE_FIXME("Ignoring unexpected tag %s\n", debugstr_w(tagname));
+        FIXME("Ignoring unexpected tag %s\n", debugstr_w(tagname));
         return TRUE;
     }
 
     return iter_servicing(child, update_list);
 
 }
+
 static BOOL iter_unattend(IXMLDOMElement *root, struct list *update_list)
 {
     return call_xml_callbacks(root, read_unattend, update_list);
@@ -684,16 +653,15 @@ static BOOL iter_unattend(IXMLDOMElement *root, struct list *update_list)
 
 BOOL load_update(const WCHAR *filename, struct list *update_list)
 {
-    static const WCHAR unattendW[] = {'u','n','a','t','t','e','n','d',0};
     IXMLDOMElement *root = NULL;
     BOOL ret = FALSE;
 
-    WINE_TRACE("Reading update %s\n", debugstr_w(filename));
+    TRACE("Reading update %s\n", debugstr_w(filename));
 
     if (!(root = load_xml(filename))) return FALSE;
-    if (!check_xml_tagname(root, unattendW))
+    if (!check_xml_tagname(root, L"unattend"))
     {
-        WINE_FIXME("Didn't find unattend root node?\n");
+        FIXME("Didn't find unattend root node?\n");
         goto done;
     }
 
@@ -702,26 +670,4 @@ BOOL load_update(const WCHAR *filename, struct list *update_list)
 done:
     IXMLDOMElement_Release(root);
     return ret;
-}
-
-BOOL queue_update(struct assembly_entry *assembly, struct list *update_list)
-{
-    struct dependency_entry *entry;
-
-    if (!(entry = alloc_dependency()))
-        return FALSE;
-
-    if (!(entry->identity.name          = wcsdup(assembly->identity.name))) goto error;
-    if (!(entry->identity.version       = wcsdup(assembly->identity.version))) goto error;
-    if (!(entry->identity.architecture  = wcsdup(assembly->identity.architecture))) goto error;
-    if (!(entry->identity.language      = wcsdup(assembly->identity.language))) goto error;
-    if (!(entry->identity.pubkey_token  = wcsdup(assembly->identity.pubkey_token))) goto error;
-
-    WINE_TRACE("Queued update %s\n", debugstr_w(entry->identity.name));
-    list_add_tail(update_list, &entry->entry);
-    return TRUE;
-
-error:
-    free_dependency(entry);
-    return FALSE;
 }

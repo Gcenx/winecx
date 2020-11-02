@@ -121,12 +121,12 @@ static void encodeAndCompareBase64_A(const BYTE *toEncode, DWORD toEncodeLen,
     strLen2 = strLen;
     ret = CryptBinaryToStringA(toEncode, toEncodeLen, format, NULL, &strLen2);
     ok(ret, "CryptBinaryToStringA failed: %d\n", GetLastError());
-    ok(strLen == strLen2, "Unexpected required length.\n");
+    ok(strLen == strLen2, "Unexpected required length %u, expected %u.\n", strLen2, strLen);
 
     strLen2 = strLen - 1;
     ret = CryptBinaryToStringA(toEncode, toEncodeLen, format, NULL, &strLen2);
     ok(ret, "CryptBinaryToStringA failed: %d\n", GetLastError());
-    ok(strLen == strLen2, "Unexpected required length.\n");
+    ok(strLen == strLen2, "Unexpected required length %u, expected %u.\n", strLen2, strLen);
 
     str = heap_alloc(strLen);
 
@@ -134,20 +134,17 @@ static void encodeAndCompareBase64_A(const BYTE *toEncode, DWORD toEncodeLen,
     strLen2 = strLen - 1;
     str[0] = 0x12;
     ret = CryptBinaryToStringA(toEncode, toEncodeLen, format, str, &strLen2);
-todo_wine
     ok((!ret && GetLastError() == ERROR_MORE_DATA) || broken(ret) /* XP */, "CryptBinaryToStringA failed %d, error %d.\n",
         ret, GetLastError());
-    ok(strLen2 == strLen || broken(strLen2 == strLen - 1), "Expected length %d, got %d\n", strLen - 1, strLen);
-todo_wine {
+    ok(strLen2 == strLen || broken(strLen2 == strLen - 1), "Expected length %d, got %d\n", strLen, strLen2);
     if (header)
         ok(str[0] == header[0], "Unexpected buffer contents %#x.\n", str[0]);
     else
         ok(str[0] == expected[0], "Unexpected buffer contents %#x.\n", str[0]);
-}
     strLen2 = strLen;
     ret = CryptBinaryToStringA(toEncode, toEncodeLen, format, str, &strLen2);
     ok(ret, "CryptBinaryToStringA failed: %d\n", GetLastError());
-    ok(strLen2 == strLen - 1, "Expected length %d, got %d\n", strLen - 1, strLen);
+    ok(strLen2 == strLen - 1, "Expected length %d, got %d\n", strLen - 1, strLen2);
 
     ptr = str;
     if (header)
@@ -207,7 +204,6 @@ static void encode_compare_base64_W(const BYTE *toEncode, DWORD toEncodeLen, DWO
     strLen2 = strLen - 1;
     strW[0] = 0x1234;
     ret = CryptBinaryToStringW(toEncode, toEncodeLen, format, strW, &strLen2);
-todo_wine
     ok((!ret && GetLastError() == ERROR_MORE_DATA) || broken(ret) /* XP */, "CryptBinaryToStringW failed, %d, error %d\n",
         ret, GetLastError());
     if (headerW)

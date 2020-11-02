@@ -27,6 +27,7 @@
 #include "winuser.h"
 #include "winreg.h"
 #include "initguid.h"
+#include "devguid.h"
 #include "devpkey.h"
 #include "setupapi.h"
 #include "cfgmgr32.h"
@@ -1445,7 +1446,7 @@ static void test_register_device_iface(void)
      'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
      'E','n','u','m','\\','R','o','o','t','\\',
      'L','E','G','A','C','Y','_','B','O','G','U','S',0};
-    SP_DEVICE_INTERFACE_DATA iface = {sizeof(iface)}, ret_iface = {sizeof(ret_iface)};
+    SP_DEVICE_INTERFACE_DATA iface = {sizeof(iface)};
     SP_DEVINFO_DATA device = {sizeof(device)};
     HDEVINFO set, set2;
     BOOL ret;
@@ -1496,7 +1497,7 @@ static void test_registry_property_a(void)
 {
     static const CHAR bogus[] = "System\\CurrentControlSet\\Enum\\Root\\LEGACY_BOGUS";
     SP_DEVINFO_DATA device = {sizeof(device)};
-    CHAR buf[6] = "";
+    CHAR buf[64] = "";
     DWORD size, type;
     HDEVINFO set;
     BOOL ret;
@@ -1590,13 +1591,69 @@ todo_wine {
 
     res = RegOpenKeyA(HKEY_LOCAL_MACHINE, bogus, &key);
     ok(res == ERROR_FILE_NOT_FOUND, "Key should not exist.\n");
+
+    /* Test existing registry properties right after device creation */
+    set = SetupDiCreateDeviceInfoList(&guid, NULL);
+    ok(set != INVALID_HANDLE_VALUE, "Failed to create device list, error %#x.\n", GetLastError());
+
+    /* Create device from a not registered class without device name */
+    ret = SetupDiCreateDeviceInfoA(set, "LEGACY_BOGUS", &guid, NULL, NULL, DICD_GENERATE_ID, &device);
+    ok(ret, "Failed to create device, error %#x.\n", GetLastError());
+
+    /* No SPDRP_DEVICEDESC property */
+    SetLastError(0xdeadbeef);
+    ret = SetupDiGetDeviceRegistryPropertyA(set, &device, SPDRP_DEVICEDESC, NULL, (BYTE *)buf, sizeof(buf), NULL);
+    ok(!ret, "Expected failure.\n");
+    ok(GetLastError() == ERROR_INVALID_DATA, "Got unexpected error %#x.\n", GetLastError());
+
+    /* No SPDRP_CLASS property */
+    SetLastError(0xdeadbeef);
+    ret = SetupDiGetDeviceRegistryPropertyA(set, &device, SPDRP_CLASS, NULL, (BYTE *)buf, sizeof(buf), NULL);
+    ok(!ret, "Expected failure.\n");
+    ok(GetLastError() == ERROR_INVALID_DATA, "Got unexpected error %#x.\n", GetLastError());
+
+    /* Have SPDRP_CLASSGUID property */
+    memset(buf, 0, sizeof(buf));
+    ret = SetupDiGetDeviceRegistryPropertyA(set, &device, SPDRP_CLASSGUID, NULL, (BYTE *)buf, sizeof(buf), NULL);
+    ok(ret, "Failed to get property, error %#x.\n", GetLastError());
+    ok(!lstrcmpiA(buf, "{6a55b5a4-3f65-11db-b704-0011955c2bdb}"), "Got unexpected value %s.\n", buf);
+
+    ret = SetupDiDeleteDeviceInfo(set, &device);
+    ok(ret, "Failed to delete device, error %#x.\n", GetLastError());
+
+    /* Create device from a not registered class with a device name */
+    ret = SetupDiCreateDeviceInfoA(set, "LEGACY_BOGUS", &guid, "device_name", NULL, DICD_GENERATE_ID, &device);
+    ok(ret, "Failed to create device, error %#x.\n", GetLastError());
+
+    /* Have SPDRP_DEVICEDESC property */
+    memset(buf, 0, sizeof(buf));
+    ret = SetupDiGetDeviceRegistryPropertyA(set, &device, SPDRP_DEVICEDESC, NULL, (BYTE *)buf, sizeof(buf), NULL);
+    ok(ret, "Failed to get property, error %#x.\n", GetLastError());
+    ok(!lstrcmpA(buf, "device_name"), "Got unexpected value %s.\n", buf);
+
+    SetupDiDestroyDeviceInfoList(set);
+
+    /* Create device from a registered class */
+    set = SetupDiCreateDeviceInfoList(&GUID_DEVCLASS_DISPLAY, NULL);
+    ok(set != INVALID_HANDLE_VALUE, "Failed to create device list, error %#x.\n", GetLastError());
+
+    ret = SetupDiCreateDeviceInfoA(set, "display", &GUID_DEVCLASS_DISPLAY, NULL, NULL, DICD_GENERATE_ID, &device);
+    ok(ret, "Failed to create device, error %#x.\n", GetLastError());
+
+    /* Have SPDRP_CLASS property */
+    memset(buf, 0, sizeof(buf));
+    ret = SetupDiGetDeviceRegistryPropertyA(set, &device, SPDRP_CLASS, NULL, (BYTE *)buf, sizeof(buf), NULL);
+    ok(ret, "Failed to get property, error %#x.\n", GetLastError());
+    ok(!lstrcmpA(buf, "Display"), "Got unexpected value %s.\n", buf);
+
+    SetupDiDestroyDeviceInfoList(set);
 }
 
 static void test_registry_property_w(void)
 {
     WCHAR friendly_name[] = {'B','o','g','u','s',0};
     SP_DEVINFO_DATA device = {sizeof(device)};
-    WCHAR buf[6] = {0};
+    WCHAR buf[64] = {0};
     DWORD size, type;
     HDEVINFO set;
     BOOL ret;
@@ -1694,6 +1751,62 @@ todo_wine {
 
     res = RegOpenKeyW(HKEY_LOCAL_MACHINE, bogus, &key);
     ok(res == ERROR_FILE_NOT_FOUND, "Key should not exist.\n");
+
+    /* Test existing registry properties right after device creation */
+    set = SetupDiCreateDeviceInfoList(&guid, NULL);
+    ok(set != INVALID_HANDLE_VALUE, "Failed to create device list, error %#x.\n", GetLastError());
+
+    /* Create device from a not registered class without device name */
+    ret = SetupDiCreateDeviceInfoW(set, L"LEGACY_BOGUS", &guid, NULL, NULL, DICD_GENERATE_ID, &device);
+    ok(ret, "Failed to create device, error %#x.\n", GetLastError());
+
+    /* No SPDRP_DEVICEDESC property */
+    SetLastError(0xdeadbeef);
+    ret = SetupDiGetDeviceRegistryPropertyW(set, &device, SPDRP_DEVICEDESC, NULL, (BYTE *)buf, sizeof(buf), NULL);
+    ok(!ret, "Expected failure.\n");
+    ok(GetLastError() == ERROR_INVALID_DATA, "Got unexpected error %#x.\n", GetLastError());
+
+    /* No SPDRP_CLASS property */
+    SetLastError(0xdeadbeef);
+    ret = SetupDiGetDeviceRegistryPropertyW(set, &device, SPDRP_CLASS, NULL, (BYTE *)buf, sizeof(buf), NULL);
+    ok(!ret, "Expected failure.\n");
+    ok(GetLastError() == ERROR_INVALID_DATA, "Got unexpected error %#x.\n", GetLastError());
+
+    /* Have SPDRP_CLASSGUID property */
+    memset(buf, 0, sizeof(buf));
+    ret = SetupDiGetDeviceRegistryPropertyW(set, &device, SPDRP_CLASSGUID, NULL, (BYTE *)buf, sizeof(buf), NULL);
+    ok(ret, "Failed to get property, error %#x.\n", GetLastError());
+    ok(!lstrcmpiW(buf, L"{6a55b5a4-3f65-11db-b704-0011955c2bdb}"), "Got unexpected value %s.\n", wine_dbgstr_w(buf));
+
+    ret = SetupDiDeleteDeviceInfo(set, &device);
+    ok(ret, "Failed to delete device, error %#x.\n", GetLastError());
+
+    /* Create device from a not registered class with a device name */
+    ret = SetupDiCreateDeviceInfoW(set, L"LEGACY_BOGUS", &guid, L"device_name", NULL, DICD_GENERATE_ID, &device);
+    ok(ret, "Failed to create device, error %#x.\n", GetLastError());
+
+    /* Have SPDRP_DEVICEDESC property */
+    memset(buf, 0, sizeof(buf));
+    ret = SetupDiGetDeviceRegistryPropertyW(set, &device, SPDRP_DEVICEDESC, NULL, (BYTE *)buf, sizeof(buf), NULL);
+    ok(ret, "Failed to get property, error %#x.\n", GetLastError());
+    ok(!lstrcmpW(buf, L"device_name"), "Got unexpected value %s.\n", wine_dbgstr_w(buf));
+
+    SetupDiDestroyDeviceInfoList(set);
+
+    /* Create device from a registered class */
+    set = SetupDiCreateDeviceInfoList(&GUID_DEVCLASS_DISPLAY, NULL);
+    ok(set != INVALID_HANDLE_VALUE, "Failed to create device list, error %#x.\n", GetLastError());
+
+    ret = SetupDiCreateDeviceInfoW(set, L"display", &GUID_DEVCLASS_DISPLAY, NULL, NULL, DICD_GENERATE_ID, &device);
+    ok(ret, "Failed to create device, error %#x.\n", GetLastError());
+
+    /* Have SPDRP_CLASS property */
+    memset(buf, 0, sizeof(buf));
+    ret = SetupDiGetDeviceRegistryPropertyW(set, &device, SPDRP_CLASS, NULL, (BYTE *)buf, sizeof(buf), NULL);
+    ok(ret, "Failed to get property, error %#x.\n", GetLastError());
+    ok(!lstrcmpW(buf, L"Display"), "Got unexpected value %s.\n", wine_dbgstr_w(buf));
+
+    SetupDiDestroyDeviceInfoList(set);
 }
 
 static void test_get_inf_class(void)
@@ -2066,12 +2179,6 @@ static void test_get_actual_section(void)
     ok(size == 9, "Got size %u.\n", size);
 
     extptr = section;
-    ret = SetupDiGetActualSectionToInstallA(hinf, "section1", section, ARRAY_SIZE(section), NULL, &extptr);
-    ok(ret, "Failed to get section, error %#x.\n", GetLastError());
-    ok(!strcasecmp(section, "section1"), "Got unexpected section %s.\n", section);
-    ok(!extptr || !*extptr /* Windows 10 1809 */, "Got extension %s.\n", extptr);
-
-    extptr = section;
     ret = SetupDiGetActualSectionToInstallA(hinf, "section2", section, ARRAY_SIZE(section), NULL, &extptr);
     ok(ret, "Failed to get section, error %#x.\n", GetLastError());
     ok(!strcasecmp(section, "section2.NT"), "Got unexpected section %s.\n", section);
@@ -2102,24 +2209,6 @@ static void test_get_actual_section(void)
     ok(extptr == section + 8, "Got extension %s.\n", extptr);
 
     extptr = section;
-    ret = SetupDiGetActualSectionToInstallA(hinf, "section7", section, ARRAY_SIZE(section), NULL, &extptr);
-    ok(ret, "Failed to get section, error %#x.\n", GetLastError());
-    ok(!strcasecmp(section, "section7"), "Got unexpected section %s.\n", section);
-    ok(!extptr || !*extptr /* Windows 10 1809 */, "Got extension %s.\n", extptr);
-
-    extptr = section;
-    ret = SetupDiGetActualSectionToInstallA(hinf, "section8", section, ARRAY_SIZE(section), NULL, &extptr);
-    ok(ret, "Failed to get section, error %#x.\n", GetLastError());
-    ok(!strcasecmp(section, "section8"), "Got unexpected section %s.\n", section);
-    ok(!extptr || !*extptr /* Windows 10 1809 */, "Got extension %s.\n", extptr);
-
-    extptr = section;
-    ret = SetupDiGetActualSectionToInstallA(hinf, "nonexistent", section, ARRAY_SIZE(section), NULL, &extptr);
-    ok(ret, "Failed to get section, error %#x.\n", GetLastError());
-    ok(!strcasecmp(section, "nonexistent"), "Got unexpected section %s.\n", section);
-    ok(!extptr || !*extptr /* Windows 10 1809 */, "Got extension %s.\n", extptr);
-
-    extptr = section;
     ret = SetupDiGetActualSectionToInstallA(hinf, "section9", section, ARRAY_SIZE(section), NULL, &extptr);
     ok(ret, "Failed to get section, error %#x.\n", GetLastError());
     ok(!strcasecmp(section, "section9.NT" MYEXT), "Got unexpected section %s.\n", section);
@@ -2127,7 +2216,31 @@ static void test_get_actual_section(void)
 
     if (0)
     {
-        /* For some reason, this call hangs on Windows 10 1809. */
+        /* For some reason, these calls hang on Windows 10 1809+. */
+        extptr = section;
+        ret = SetupDiGetActualSectionToInstallA(hinf, "section1", section, ARRAY_SIZE(section), NULL, &extptr);
+        ok(ret, "Failed to get section, error %#x.\n", GetLastError());
+        ok(!strcasecmp(section, "section1"), "Got unexpected section %s.\n", section);
+        ok(!extptr || !*extptr /* Windows 10 1809 */, "Got extension %s.\n", extptr);
+
+        extptr = section;
+        ret = SetupDiGetActualSectionToInstallA(hinf, "section7", section, ARRAY_SIZE(section), NULL, &extptr);
+        ok(ret, "Failed to get section, error %#x.\n", GetLastError());
+        ok(!strcasecmp(section, "section7"), "Got unexpected section %s.\n", section);
+        ok(!extptr || !*extptr /* Windows 10 1809 */, "Got extension %s.\n", extptr);
+
+        extptr = section;
+        ret = SetupDiGetActualSectionToInstallA(hinf, "section8", section, ARRAY_SIZE(section), NULL, &extptr);
+        ok(ret, "Failed to get section, error %#x.\n", GetLastError());
+        ok(!strcasecmp(section, "section8"), "Got unexpected section %s.\n", section);
+        ok(!extptr || !*extptr /* Windows 10 1809 */, "Got extension %s.\n", extptr);
+
+        extptr = section;
+        ret = SetupDiGetActualSectionToInstallA(hinf, "nonexistent", section, ARRAY_SIZE(section), NULL, &extptr);
+        ok(ret, "Failed to get section, error %#x.\n", GetLastError());
+        ok(!strcasecmp(section, "nonexistent"), "Got unexpected section %s.\n", section);
+        ok(!extptr || !*extptr /* Windows 10 1809 */, "Got extension %s.\n", extptr);
+
         extptr = section;
         ret = SetupDiGetActualSectionToInstallA(hinf, "section10", section, ARRAY_SIZE(section), NULL, &extptr);
         ok(ret, "Failed to get section, error %#x.\n", GetLastError());
@@ -2823,11 +2936,9 @@ static void test_get_class_devs(void)
     set = SetupDiGetClassDevsA(NULL, "ROOT\\LEGACY_BOGUS", NULL, DIGCF_ALLCLASSES);
     ok(set != INVALID_HANDLE_VALUE, "Failed to create device list, error %#x.\n", GetLastError());
     check_device_list(set, &GUID_NULL);
-todo_wine {
     check_device_info(set, 0, &guid2, "ROOT\\LEGACY_BOGUS\\BAR");
     check_device_info(set, 1, &guid, "ROOT\\LEGACY_BOGUS\\FOO");
     check_device_info(set, 2, &guid, "ROOT\\LEGACY_BOGUS\\QUX");
-}
     check_device_info(set, 3, NULL, NULL);
     check_device_iface(set, NULL, &iface_guid, 0, 0, NULL);
     ret = SetupDiDestroyDeviceInfoList(set);
@@ -2836,10 +2947,8 @@ todo_wine {
     set = SetupDiGetClassDevsA(&guid, "ROOT\\LEGACY_BOGUS", NULL, 0);
     ok(set != INVALID_HANDLE_VALUE, "Failed to create device list, error %#x.\n", GetLastError());
     check_device_list(set, &guid);
-todo_wine {
     check_device_info(set, 0, &guid, "ROOT\\LEGACY_BOGUS\\FOO");
     check_device_info(set, 1, &guid, "ROOT\\LEGACY_BOGUS\\QUX");
-}
     check_device_info(set, 2, NULL, NULL);
     check_device_iface(set, NULL, &iface_guid, 0, 0, NULL);
     ret = SetupDiDestroyDeviceInfoList(set);
@@ -2848,11 +2957,9 @@ todo_wine {
     set = SetupDiGetClassDevsA(&guid, "ROOT\\LEGACY_BOGUS", NULL, DIGCF_ALLCLASSES);
     ok(set != INVALID_HANDLE_VALUE, "Failed to create device list, error %#x.\n", GetLastError());
     check_device_list(set, &GUID_NULL);
-todo_wine {
     check_device_info(set, 0, &guid2, "ROOT\\LEGACY_BOGUS\\BAR");
     check_device_info(set, 1, &guid, "ROOT\\LEGACY_BOGUS\\FOO");
     check_device_info(set, 2, &guid, "ROOT\\LEGACY_BOGUS\\QUX");
-}
     check_device_info(set, 3, NULL, NULL);
     check_device_iface(set, NULL, &iface_guid, 0, 0, NULL);
     ret = SetupDiDestroyDeviceInfoList(set);

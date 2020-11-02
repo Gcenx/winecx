@@ -24,6 +24,7 @@
 #include "shlwapi.h"
 #include "winternl.h"
 
+#include "kernelbase.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
 
@@ -32,13 +33,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(string);
 #define isxdigit(ch) (((ch) >= '0' && (ch) <= '9') || \
                       ((ch) >= 'A' && (ch) <= 'F') || \
                       ((ch) >= 'a' && (ch) <= 'f'))
-
-static WORD get_char_type(WCHAR ch)
-{
-    WORD type = 0;
-    GetStringTypeW(CT_CTYPE1, &ch, 1, &type);
-    return type;
-}
 
 static BOOL char_compare(WORD ch1, WORD ch2, DWORD flags)
 {
@@ -217,90 +211,6 @@ DWORD WINAPI StrCmpNICA(const char *str, const char *cmp, DWORD len)
 DWORD WINAPI StrCmpNICW(const WCHAR *str, const WCHAR *cmp, DWORD len)
 {
     return StrCmpNIW(str, cmp, len);
-}
-
-BOOL WINAPI IsCharBlankW(WCHAR wc)
-{
-    return !!(get_char_type(wc) & C1_BLANK);
-}
-
-BOOL WINAPI IsCharCntrlW(WCHAR wc)
-{
-    return !!(get_char_type(wc) & C1_CNTRL);
-}
-
-BOOL WINAPI IsCharDigitW(WCHAR wc)
-{
-    return !!(get_char_type(wc) & C1_DIGIT);
-}
-
-BOOL WINAPI IsCharPunctW(WCHAR wc)
-{
-    return !!(get_char_type(wc) & C1_PUNCT);
-}
-
-BOOL WINAPI IsCharSpaceA(CHAR c)
-{
-    WORD type;
-    return GetStringTypeA(GetSystemDefaultLCID(), CT_CTYPE1, &c, 1, &type) && (type & C1_SPACE);
-}
-
-BOOL WINAPI IsCharSpaceW(WCHAR wc)
-{
-    return !!(get_char_type(wc) & C1_SPACE);
-}
-
-BOOL WINAPI IsCharXDigitW(WCHAR wc)
-{
-    return !!(get_char_type(wc) & C1_XDIGIT);
-}
-
-BOOL WINAPI IsCharAlphaA(CHAR x)
-{
-    WCHAR wch;
-    MultiByteToWideChar(CP_ACP, 0, &x, 1, &wch, 1);
-    return IsCharAlphaW(wch);
-}
-
-BOOL WINAPI IsCharAlphaW(WCHAR ch)
-{
-    return !!(get_char_type(ch) & C1_ALPHA);
-}
-
-BOOL WINAPI IsCharLowerA(CHAR x)
-{
-    WCHAR wch;
-    MultiByteToWideChar(CP_ACP, 0, &x, 1, &wch, 1);
-    return IsCharLowerW(wch);
-}
-
-BOOL WINAPI IsCharLowerW(WCHAR ch)
-{
-    return !!(get_char_type(ch) & C1_LOWER);
-}
-
-BOOL WINAPI IsCharAlphaNumericA(CHAR x)
-{
-    WCHAR wch;
-    MultiByteToWideChar(CP_ACP, 0, &x, 1, &wch, 1);
-    return IsCharAlphaNumericW(wch);
-}
-
-BOOL WINAPI IsCharAlphaNumericW(WCHAR ch)
-{
-    return !!(get_char_type(ch) & (C1_ALPHA | C1_DIGIT));
-}
-
-BOOL WINAPI IsCharUpperA(CHAR x)
-{
-    WCHAR wch;
-    MultiByteToWideChar(CP_ACP, 0, &x, 1, &wch, 1);
-    return IsCharUpperW(wch);
-}
-
-BOOL WINAPI IsCharUpperW(WCHAR ch)
-{
-    return !!(get_char_type(ch) & C1_UPPER);
 }
 
 char * WINAPI StrChrA(const char *str, WORD ch)
@@ -1382,8 +1292,7 @@ INT WINAPI DECLSPEC_HOTPATCH LoadStringA(HINSTANCE instance, UINT resource_id, L
 
         while (id--) p += *p + 1;
 
-        if (buflen != 1)
-            RtlUnicodeToMultiByteN(buffer, buflen - 1, &retval, p + 1, *p * sizeof(WCHAR));
+        RtlUnicodeToMultiByteN(buffer, buflen - 1, &retval, p + 1, *p * sizeof(WCHAR));
     }
     buffer[retval] = 0;
     TRACE("returning %s\n", debugstr_a(buffer));

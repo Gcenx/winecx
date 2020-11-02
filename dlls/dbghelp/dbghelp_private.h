@@ -31,6 +31,7 @@
 #include "winnls.h"
 #include "wine/list.h"
 #include "wine/unicode.h"
+#define WINE_RBTREE_HOSTADDRSPACE
 #include "wine/rbtree.h"
 #include "wine/winheader_enter.h"
 
@@ -589,8 +590,6 @@ extern BOOL         pcs_callback(const struct process* pcs, ULONG action, void* 
 extern void*        fetch_buffer(struct process* pcs, unsigned size) DECLSPEC_HIDDEN;
 extern const char*  HOSTPTR wine_dbgstr_addr(const ADDRESS64* addr) DECLSPEC_HIDDEN;
 extern struct cpu*  cpu_find(DWORD) DECLSPEC_HIDDEN;
-
-/* crc32.c */
 extern DWORD calc_crc32(int fd) DECLSPEC_HIDDEN;
 
 typedef BOOL (*enum_modules_cb)(const WCHAR*, unsigned long addr, void* user);
@@ -687,7 +686,7 @@ extern const char*  pe_map_directory(struct module* module, int dirno, DWORD* si
 /* source.c */
 extern unsigned     source_new(struct module* module, const char* HOSTPTR basedir, const char* HOSTPTR source) DECLSPEC_HIDDEN;
 extern const char*  source_get(const struct module* module, unsigned idx) DECLSPEC_HIDDEN;
-extern int          source_rb_compare(const void *key, const struct wine_rb_entry *entry) DECLSPEC_HIDDEN;
+extern int          source_rb_compare(const void * HOSTPTR key, const struct wine_rb_entry *entry) DECLSPEC_HIDDEN;
 
 /* stabs.c */
 typedef void (*stabs_def_cb)(struct module* module, unsigned long load_offset,

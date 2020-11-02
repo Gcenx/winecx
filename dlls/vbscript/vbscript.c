@@ -51,13 +51,25 @@ struct VBScript {
 
     LONG ref;
 
-    DWORD safeopt;
     SCRIPTSTATE state;
-    IActiveScriptSite *site;
     script_ctx_t *ctx;
     LONG thread_id;
-    LCID lcid;
+    BOOL is_initialized;
 };
+
+typedef struct {
+    IActiveScriptError IActiveScriptError_iface;
+    LONG ref;
+    EXCEPINFO ei;
+} VBScriptError;
+
+static inline WCHAR *heap_pool_strdup(heap_pool_t *heap, const WCHAR *str)
+{
+    size_t size = (lstrlenW(str) + 1) * sizeof(WCHAR);
+    WCHAR *ret = heap_pool_alloc(heap, size);
+    if (ret) memcpy(ret, str, size);
+    return ret;
+}
 
 static void change_state(VBScript *This, SCRIPTSTATE state)
 {
@@ -65,8 +77,8 @@ static void change_state(VBScript *This, SCRIPTSTATE state)
         return;
 
     This->state = state;
-    if(This->site)
-        IActiveScriptSite_OnStateChange(This->site, state);
+    if(This->ctx->site)
+        IActiveScriptSite_OnStateChange(This->ctx->site, state);
 }
 
 static inline BOOL is_started(VBScript *This)
@@ -76,17 +88,92 @@ static inline BOOL is_started(VBScript *This)
         || This->state == SCRIPTSTATE_DISCONNECTED;
 }
 
-static HRESULT exec_global_code(script_ctx_t *ctx, vbscode_t *code)
+static HRESULT exec_global_code(script_ctx_t *ctx, vbscode_t *code, VARIANT *res)
 {
-    HRESULT hres;
+    ScriptDisp *obj = ctx->script_obj;
+    function_t *func_iter, **new_funcs;
+    dynamic_var_t *var, **new_vars;
+    size_t cnt, i;
+
+    cnt = obj->global_vars_cnt + code->main_code.var_cnt;
+    if (cnt > obj->global_vars_size)
+    {
+        if (obj->global_vars)
+            new_vars = heap_realloc(obj->global_vars, cnt * sizeof(*new_vars));
+        else
+            new_vars = heap_alloc(cnt * sizeof(*new_vars));
+        if (!new_vars)
+            return E_OUTOFMEMORY;
+        obj->global_vars = new_vars;
+        obj->global_vars_size = cnt;
+    }
+
+    cnt = obj->global_funcs_cnt;
+    for (func_iter = code->funcs; func_iter; func_iter = func_iter->next)
+        cnt++;
+    if (cnt > obj->global_funcs_size)
+    {
+        if (obj->global_funcs)
+            new_funcs = heap_realloc(obj->global_funcs, cnt * sizeof(*new_funcs));
+        else
+            new_funcs = heap_alloc(cnt * sizeof(*new_funcs));
+        if (!new_funcs)
+            return E_OUTOFMEMORY;
+        obj->global_funcs = new_funcs;
+        obj->global_funcs_size = cnt;
+    }
+
+    for (i = 0; i < code->main_code.var_cnt; i++)
+    {
+        if (!(var = heap_pool_alloc(&obj->heap, sizeof(*var))))
+            return E_OUTOFMEMORY;
+
+        var->name = heap_pool_strdup(&obj->heap, code->main_code.vars[i].name);
+        if (!var->name)
+            return E_OUTOFMEMORY;
+        V_VT(&var->v) = VT_EMPTY;
+        var->is_const = FALSE;
+        var->array = NULL;
+
+        obj->global_vars[obj->global_vars_cnt + i] = var;
+    }
+
+    obj->global_vars_cnt += code->main_code.var_cnt;
+
+    for (func_iter = code->funcs; func_iter; func_iter = func_iter->next)
+    {
+        for (i = 0; i < obj->global_funcs_cnt; i++)
+        {
+            if (!wcsicmp(obj->global_funcs[i]->name, func_iter->name))
+            {
+                /* global function already exists, replace it */
+                obj->global_funcs[i] = func_iter;
+                break;
+            }
+        }
+        if (i == obj->global_funcs_cnt)
+            obj->global_funcs[obj->global_funcs_cnt++] = func_iter;
+    }
+
+    if (code->classes)
+    {
+        class_desc_t *class = code->classes;
+
+        while (1)
+        {
+            class->ctx = ctx;
+            if (!class->next)
+                break;
+            class = class->next;
+        }
+
+        class->next = obj->classes;
+        obj->classes = code->classes;
+        code->last_class = class;
+    }
 
     code->pending_exec = FALSE;
-
-    IActiveScriptSite_OnEnterScript(ctx->site);
-    hres = exec_script(ctx, &code->main_code, NULL, NULL, NULL);
-    IActiveScriptSite_OnLeaveScript(ctx->site);
-
-    return hres;
+    return exec_script(ctx, TRUE, &code->main_code, NULL, NULL, res);
 }
 
 static void exec_queued_code(script_ctx_t *ctx)
@@ -95,7 +182,7 @@ static void exec_queued_code(script_ctx_t *ctx)
 
     LIST_FOR_EACH_ENTRY(iter, &ctx->code_list, vbscode_t, entry) {
         if(iter->pending_exec)
-            exec_global_code(ctx, iter);
+            exec_global_code(ctx, iter, NULL);
     }
 }
 
@@ -131,31 +218,26 @@ IDispatch *lookup_named_item(script_ctx_t *ctx, const WCHAR *name, unsigned flag
     return NULL;
 }
 
-static HRESULT set_ctx_site(VBScript *This)
-{
-    HRESULT hres;
-
-    This->ctx->lcid = This->lcid;
-
-    hres = init_global(This->ctx);
-    if(FAILED(hres))
-        return hres;
-
-    IActiveScriptSite_AddRef(This->site);
-    This->ctx->site = This->site;
-
-    change_state(This, SCRIPTSTATE_INITIALIZED);
-    return S_OK;
-}
-
 static void release_script(script_ctx_t *ctx)
 {
-    class_desc_t *class_desc;
+    vbscode_t *code, *code_next;
 
     collect_objects(ctx);
+    clear_ei(&ctx->ei);
 
-    release_dynamic_vars(ctx->global_vars);
-    ctx->global_vars = NULL;
+    LIST_FOR_EACH_ENTRY_SAFE(code, code_next, &ctx->code_list, vbscode_t, entry)
+    {
+        if(code->is_persistent)
+        {
+            code->pending_exec = TRUE;
+            if(code->last_class) code->last_class->next = NULL;
+        }
+        else
+        {
+            list_remove(&code->entry);
+            release_vbscode(code);
+        }
+    }
 
     while(!list_empty(&ctx->named_items)) {
         named_item_t *iter = LIST_ENTRY(list_head(&ctx->named_items), named_item_t, entry);
@@ -165,13 +247,6 @@ static void release_script(script_ctx_t *ctx)
             IDispatch_Release(iter->disp);
         heap_free(iter->name);
         heap_free(iter);
-    }
-
-    while(ctx->procs) {
-        class_desc = ctx->procs;
-        ctx->procs = class_desc->next;
-
-        heap_free(class_desc);
     }
 
     if(ctx->host_global) {
@@ -189,16 +264,6 @@ static void release_script(script_ctx_t *ctx)
         ctx->site = NULL;
     }
 
-    if(ctx->err_obj) {
-        IDispatchEx_Release(&ctx->err_obj->IDispatchEx_iface);
-        ctx->err_obj = NULL;
-    }
-
-    if(ctx->global_obj) {
-        IDispatchEx_Release(&ctx->global_obj->IDispatchEx_iface);
-        ctx->global_obj = NULL;
-    }
-
     if(ctx->script_obj) {
         ScriptDisp *script_obj = ctx->script_obj;
 
@@ -206,18 +271,16 @@ static void release_script(script_ctx_t *ctx)
         script_obj->ctx = NULL;
         IDispatchEx_Release(&script_obj->IDispatchEx_iface);
     }
-
-    heap_pool_free(&ctx->heap);
-    heap_pool_init(&ctx->heap);
 }
 
-static void destroy_script(script_ctx_t *ctx)
+static void release_code_list(script_ctx_t *ctx)
 {
-    while(!list_empty(&ctx->code_list))
-        release_vbscode(LIST_ENTRY(list_head(&ctx->code_list), vbscode_t, entry));
+    while(!list_empty(&ctx->code_list)) {
+        vbscode_t *iter = LIST_ENTRY(list_head(&ctx->code_list), vbscode_t, entry);
 
-    release_script(ctx);
-    heap_free(ctx);
+        list_remove(&iter->entry);
+        release_vbscode(iter);
+    }
 }
 
 static void decrease_state(VBScript *This, SCRIPTSTATE state)
@@ -230,29 +293,134 @@ static void decrease_state(VBScript *This, SCRIPTSTATE state)
         /* FALLTHROUGH */
     case SCRIPTSTATE_STARTED:
     case SCRIPTSTATE_DISCONNECTED:
-        if(This->state == SCRIPTSTATE_DISCONNECTED)
-            change_state(This, SCRIPTSTATE_INITIALIZED);
-        if(state == SCRIPTSTATE_INITIALIZED)
-            break;
+        change_state(This, SCRIPTSTATE_INITIALIZED);
         /* FALLTHROUGH */
     case SCRIPTSTATE_INITIALIZED:
     case SCRIPTSTATE_UNINITIALIZED:
         change_state(This, state);
-
-        if(This->site) {
-            IActiveScriptSite_Release(This->site);
-            This->site = NULL;
-        }
-
-        if(This->ctx)
-            release_script(This->ctx);
-
+        if(state == SCRIPTSTATE_INITIALIZED)
+            break;
+        release_script(This->ctx);
         This->thread_id = 0;
+        if(state == SCRIPTSTATE_CLOSED)
+            release_code_list(This->ctx);
         break;
     case SCRIPTSTATE_CLOSED:
         break;
     DEFAULT_UNREACHABLE;
     }
+}
+
+static inline VBScriptError *impl_from_IActiveScriptError(IActiveScriptError *iface)
+{
+    return CONTAINING_RECORD(iface, VBScriptError, IActiveScriptError_iface);
+}
+
+static HRESULT WINAPI VBScriptError_QueryInterface(IActiveScriptError *iface, REFIID riid, void **ppv)
+{
+    VBScriptError *This = impl_from_IActiveScriptError(iface);
+
+    if(IsEqualGUID(riid, &IID_IUnknown)) {
+        TRACE("(%p)->(IID_IUnknown %p)\n", This, ppv);
+        *ppv = &This->IActiveScriptError_iface;
+    }else if(IsEqualGUID(riid, &IID_IActiveScriptError)) {
+        TRACE("(%p)->(IID_IActiveScriptError %p)\n", This, ppv);
+        *ppv = &This->IActiveScriptError_iface;
+    }else {
+        FIXME("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppv);
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI VBScriptError_AddRef(IActiveScriptError *iface)
+{
+    VBScriptError *This = impl_from_IActiveScriptError(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI VBScriptError_Release(IActiveScriptError *iface)
+{
+    VBScriptError *This = impl_from_IActiveScriptError(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    if(!ref) {
+        heap_free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI VBScriptError_GetExceptionInfo(IActiveScriptError *iface, EXCEPINFO *excepinfo)
+{
+    VBScriptError *This = impl_from_IActiveScriptError(iface);
+
+    TRACE("(%p)->(%p)\n", This, excepinfo);
+
+    *excepinfo = This->ei;
+    excepinfo->bstrSource = SysAllocString(This->ei.bstrSource);
+    excepinfo->bstrDescription = SysAllocString(This->ei.bstrDescription);
+    excepinfo->bstrHelpFile = SysAllocString(This->ei.bstrHelpFile);
+    return S_OK;
+}
+
+static HRESULT WINAPI VBScriptError_GetSourcePosition(IActiveScriptError *iface, DWORD *source_context, ULONG *line, LONG *character)
+{
+    VBScriptError *This = impl_from_IActiveScriptError(iface);
+
+    FIXME("(%p)->(%p %p %p)\n", This, source_context, line, character);
+
+    if(source_context)
+        *source_context = 0;
+    if(line)
+        *line = 0;
+    if(character)
+        *character = 0;
+    return S_OK;
+}
+
+static HRESULT WINAPI VBScriptError_GetSourceLineText(IActiveScriptError *iface, BSTR *source)
+{
+    VBScriptError *This = impl_from_IActiveScriptError(iface);
+    FIXME("(%p)->(%p)\n", This, source);
+    return E_NOTIMPL;
+}
+
+static const IActiveScriptErrorVtbl VBScriptErrorVtbl = {
+    VBScriptError_QueryInterface,
+    VBScriptError_AddRef,
+    VBScriptError_Release,
+    VBScriptError_GetExceptionInfo,
+    VBScriptError_GetSourcePosition,
+    VBScriptError_GetSourceLineText
+};
+
+HRESULT report_script_error(script_ctx_t *ctx)
+{
+    VBScriptError *error;
+    HRESULT hres, result;
+
+    if(!(error = heap_alloc(sizeof(*error))))
+        return E_OUTOFMEMORY;
+    error->IActiveScriptError_iface.lpVtbl = &VBScriptErrorVtbl;
+
+    error->ref = 1;
+    error->ei = ctx->ei;
+    memset(&ctx->ei, 0, sizeof(ctx->ei));
+    result = error->ei.scode;
+
+    hres = IActiveScriptSite_OnScriptError(ctx->site, &error->IActiveScriptError_iface);
+    IActiveScriptError_Release(&error->IActiveScriptError_iface);
+    return hres == S_OK ? SCRIPT_E_REPORTED : result;
 }
 
 static inline VBScript *impl_from_IActiveScript(IActiveScript *iface)
@@ -310,13 +478,9 @@ static ULONG WINAPI VBScript_Release(IActiveScript *iface)
     TRACE("(%p) ref=%d\n", iface, ref);
 
     if(!ref) {
-        if(This->ctx) {
-            decrease_state(This, SCRIPTSTATE_CLOSED);
-            destroy_script(This->ctx);
-            This->ctx = NULL;
-        }
-        if(This->site)
-            IActiveScriptSite_Release(This->site);
+        decrease_state(This, SCRIPTSTATE_CLOSED);
+        detach_global_objects(This->ctx);
+        heap_free(This->ctx);
         heap_free(This);
     }
 
@@ -334,20 +498,26 @@ static HRESULT WINAPI VBScript_SetScriptSite(IActiveScript *iface, IActiveScript
     if(!pass)
         return E_POINTER;
 
-    if(This->site)
+    if(This->ctx->site)
         return E_UNEXPECTED;
 
     if(InterlockedCompareExchange(&This->thread_id, GetCurrentThreadId(), 0))
         return E_UNEXPECTED;
 
-    This->site = pass;
-    IActiveScriptSite_AddRef(This->site);
+    hres = create_script_disp(This->ctx, &This->ctx->script_obj);
+    if(FAILED(hres))
+        return hres;
 
-    hres = IActiveScriptSite_GetLCID(This->site, &lcid);
+    This->ctx->site = pass;
+    IActiveScriptSite_AddRef(This->ctx->site);
+
+    hres = IActiveScriptSite_GetLCID(This->ctx->site, &lcid);
     if(hres == S_OK)
-        This->lcid = lcid;
+        This->ctx->lcid = lcid;
 
-    return This->ctx ? set_ctx_site(This) : S_OK;
+    if(This->is_initialized)
+        change_state(This, SCRIPTSTATE_INITIALIZED);
+    return S_OK;
 }
 
 static HRESULT WINAPI VBScript_GetScriptSite(IActiveScript *iface, REFIID riid,
@@ -375,7 +545,7 @@ static HRESULT WINAPI VBScript_SetScriptState(IActiveScript *iface, SCRIPTSTATE 
         return S_OK;
     }
 
-    if(!This->ctx)
+    if(!This->is_initialized || !This->ctx->site)
         return E_UNEXPECTED;
 
     switch(ss) {
@@ -387,7 +557,7 @@ static HRESULT WINAPI VBScript_SetScriptState(IActiveScript *iface, SCRIPTSTATE 
         exec_queued_code(This->ctx);
         break;
     case SCRIPTSTATE_INITIALIZED:
-        FIXME("unimplemented SCRIPTSTATE_INITIALIZED\n");
+        decrease_state(This, SCRIPTSTATE_INITIALIZED);
         return S_OK;
     case SCRIPTSTATE_DISCONNECTED:
         FIXME("unimplemented SCRIPTSTATE_DISCONNECTED\n");
@@ -439,13 +609,13 @@ static HRESULT WINAPI VBScript_AddNamedItem(IActiveScript *iface, LPCOLESTR pstr
 
     TRACE("(%p)->(%s %x)\n", This, debugstr_w(pstrName), dwFlags);
 
-    if(This->thread_id != GetCurrentThreadId() || !This->ctx || This->state == SCRIPTSTATE_CLOSED)
+    if(This->thread_id != GetCurrentThreadId() || !This->ctx->site)
         return E_UNEXPECTED;
 
     if(dwFlags & SCRIPTITEM_GLOBALMEMBERS) {
         IUnknown *unk;
 
-        hres = IActiveScriptSite_GetItemInfo(This->site, pstrName, SCRIPTINFO_IUNKNOWN, &unk, NULL);
+        hres = IActiveScriptSite_GetItemInfo(This->ctx->site, pstrName, SCRIPTINFO_IUNKNOWN, &unk, NULL);
         if(FAILED(hres)) {
             WARN("GetItemInfo failed: %08x\n", hres);
             return hres;
@@ -497,12 +667,12 @@ static HRESULT WINAPI VBScript_GetScriptDispatch(IActiveScript *iface, LPCOLESTR
 {
     VBScript *This = impl_from_IActiveScript(iface);
 
-    TRACE("(%p)->(%p)\n", This, ppdisp);
+    TRACE("(%p)->(%s %p)\n", This, debugstr_w(pstrItemName), ppdisp);
 
     if(!ppdisp)
         return E_POINTER;
 
-    if(This->thread_id != GetCurrentThreadId() || !This->ctx || !This->ctx->script_obj) {
+    if(This->thread_id != GetCurrentThreadId() || !This->ctx->script_obj) {
         *ppdisp = NULL;
         return E_UNEXPECTED;
     }
@@ -654,30 +824,16 @@ static ULONG WINAPI VBScriptParse_Release(IActiveScriptParse *iface)
 static HRESULT WINAPI VBScriptParse_InitNew(IActiveScriptParse *iface)
 {
     VBScript *This = impl_from_IActiveScriptParse(iface);
-    script_ctx_t *ctx, *old_ctx;
 
     TRACE("(%p)\n", This);
 
-    if(This->ctx)
+    if(This->is_initialized)
         return E_UNEXPECTED;
+    This->is_initialized = TRUE;
 
-    ctx = heap_alloc_zero(sizeof(script_ctx_t));
-    if(!ctx)
-        return E_OUTOFMEMORY;
-
-    ctx->safeopt = This->safeopt;
-    heap_pool_init(&ctx->heap);
-    list_init(&ctx->objects);
-    list_init(&ctx->code_list);
-    list_init(&ctx->named_items);
-
-    old_ctx = InterlockedCompareExchangePointer((void**)&This->ctx, ctx, NULL);
-    if(old_ctx) {
-        destroy_script(ctx);
-        return E_UNEXPECTED;
-    }
-
-    return This->site ? set_ctx_site(This) : S_OK;
+    if(This->ctx->site)
+        change_state(This, SCRIPTSTATE_INITIALIZED);
+    return S_OK;
 }
 
 static HRESULT WINAPI VBScriptParse_AddScriptlet(IActiveScriptParse *iface,
@@ -719,19 +875,19 @@ static HRESULT WINAPI VBScriptParse_ParseScriptText(IActiveScriptParse *iface,
         }
     }
 
-    hres = compile_script(This->ctx, pstrCode, pstrDelimiter, &code);
+    hres = compile_script(This->ctx, pstrCode, pstrDelimiter, dwFlags, &code);
     if(FAILED(hres))
         return hres;
 
     if(context)
         IDispatch_AddRef(code->context = context);
 
-    if(!is_started(This)) {
+    if(!(dwFlags & SCRIPTTEXT_ISEXPRESSION) && !is_started(This)) {
         code->pending_exec = TRUE;
         return S_OK;
     }
 
-    return exec_global_code(This->ctx, code);
+    return exec_global_code(This->ctx, code, pvarResult);
 }
 
 static const IActiveScriptParseVtbl VBScriptParseVtbl = {
@@ -772,7 +928,8 @@ static HRESULT WINAPI VBScriptParseProcedure_ParseProcedureText(IActiveScriptPar
         CTXARG_T dwSourceContextCookie, ULONG ulStartingLineNumber, DWORD dwFlags, IDispatch **ppdisp)
 {
     VBScript *This = impl_from_IActiveScriptParseProcedure2(iface);
-    vbscode_t *code;
+    class_desc_t *desc;
+    vbdisp_t *vbdisp;
     HRESULT hres;
 
     TRACE("(%p)->(%s %s %s %s %p %s %s %u %x %p)\n", This, debugstr_w(pstrCode), debugstr_w(pstrFormalParams),
@@ -782,11 +939,16 @@ static HRESULT WINAPI VBScriptParseProcedure_ParseProcedureText(IActiveScriptPar
     if(This->thread_id != GetCurrentThreadId() || This->state == SCRIPTSTATE_CLOSED)
         return E_UNEXPECTED;
 
-    hres = compile_script(This->ctx, pstrCode, pstrDelimiter, &code);
+    hres = compile_procedure(This->ctx, pstrCode, pstrDelimiter, dwFlags, &desc);
     if(FAILED(hres))
         return hres;
 
-    return create_procedure_disp(This->ctx, code, ppdisp);
+    hres = create_vbdisp(desc, &vbdisp);
+    if(FAILED(hres))
+        return hres;
+
+    *ppdisp = (IDispatch*)&vbdisp->IDispatchEx_iface;
+    return S_OK;
 }
 
 static const IActiveScriptParseProcedure2Vtbl VBScriptParseProcedureVtbl = {
@@ -832,7 +994,7 @@ static HRESULT WINAPI VBScriptSafety_GetInterfaceSafetyOptions(IObjectSafety *if
         return E_POINTER;
 
     *pdwSupportedOptions = SUPPORTED_OPTIONS;
-    *pdwEnabledOptions = This->safeopt;
+    *pdwEnabledOptions = This->ctx->safeopt;
     return S_OK;
 }
 
@@ -846,7 +1008,7 @@ static HRESULT WINAPI VBScriptSafety_SetInterfaceSafetyOptions(IObjectSafety *if
     if(dwOptionSetMask & ~SUPPORTED_OPTIONS)
         return E_FAIL;
 
-    This->safeopt = (dwEnabledOptions & dwOptionSetMask) | (This->safeopt & ~dwOptionSetMask) | INTERFACE_USES_DISPEX;
+    This->ctx->safeopt = (dwEnabledOptions & dwOptionSetMask) | (This->ctx->safeopt & ~dwOptionSetMask) | INTERFACE_USES_DISPEX;
     return S_OK;
 }
 
@@ -860,6 +1022,7 @@ static const IObjectSafetyVtbl VBScriptSafetyVtbl = {
 
 HRESULT WINAPI VBScriptFactory_CreateInstance(IClassFactory *iface, IUnknown *pUnkOuter, REFIID riid, void **ppv)
 {
+    script_ctx_t *ctx;
     VBScript *ret;
     HRESULT hres;
 
@@ -877,7 +1040,23 @@ HRESULT WINAPI VBScriptFactory_CreateInstance(IClassFactory *iface, IUnknown *pU
 
     ret->ref = 1;
     ret->state = SCRIPTSTATE_UNINITIALIZED;
-    ret->safeopt = INTERFACE_USES_DISPEX;
+
+    ctx = ret->ctx = heap_alloc_zero(sizeof(*ctx));
+    if(!ctx) {
+        heap_free(ret);
+        return E_OUTOFMEMORY;
+    }
+
+    ctx->safeopt = INTERFACE_USES_DISPEX;
+    list_init(&ctx->objects);
+    list_init(&ctx->code_list);
+    list_init(&ctx->named_items);
+
+    hres = init_global(ctx);
+    if(FAILED(hres)) {
+        IActiveScript_Release(&ret->IActiveScript_iface);
+        return hres;
+    }
 
     hres = IActiveScript_QueryInterface(&ret->IActiveScript_iface, riid, ppv);
     IActiveScript_Release(&ret->IActiveScript_iface);

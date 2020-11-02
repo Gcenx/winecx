@@ -347,8 +347,15 @@ static HRESULT parse_probing(ConfigFileHandler *This, ISAXAttributes *pAttr)
 
     hr = ISAXAttributes_getValueFromName(pAttr, empty, 0, privatePath, lstrlenW(privatePath), &value, &value_size);
     if (SUCCEEDED(hr))
-        FIXME("privatePath=%s not implemented\n", debugstr_wn(value, value_size));
-    hr = S_OK;
+    {
+        TRACE("%s\n", debugstr_wn(value, value_size));
+
+        This->result->private_path = HeapAlloc(GetProcessHeap(), 0, (value_size + 1) * sizeof(WCHAR));
+        if (This->result->private_path)
+            wcscpy(This->result->private_path, value);
+        else
+            hr = E_OUTOFMEMORY;
+    }
 
     return hr;
 }
@@ -482,7 +489,7 @@ static HRESULT WINAPI ConfigFileHandler_startElement(ISAXContentHandler *iface,
     return hr;
 
 unknown:
-    FIXME("Unknown element %s in state %u\n", debugstr_wn(pLocalName,nLocalName),
+    TRACE("Unknown element %s in state %u\n", debugstr_wn(pLocalName,nLocalName),
         This->states[This->statenum]);
 
     This->states[++This->statenum] = STATE_UNKNOWN;
@@ -698,4 +705,6 @@ void free_parsed_config_file(parsed_config_file *file)
         list_remove(&cursor->entry);
         HeapFree(GetProcessHeap(), 0, cursor);
     }
+
+    HeapFree(GetProcessHeap(), 0, file->private_path);
 }

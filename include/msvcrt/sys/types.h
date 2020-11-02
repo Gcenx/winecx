@@ -22,7 +22,7 @@
 
 #include "wine/winheader_enter.h"
 
-#include <crtdefs.h>
+#include <corecrt.h>
 
 #ifndef _DEV_T_DEFINED
 typedef unsigned int   _dev_t;

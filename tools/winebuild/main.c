@@ -85,6 +85,7 @@ const char *output_file_name = NULL;
 static int fake_module;
 
 struct strarray lib_path = { 0 };
+struct strarray tools_path = { 0 };
 struct strarray as_command = { 0 };
 struct strarray cc_command = { 0 };
 struct strarray ld_command = { 0 };
@@ -114,6 +115,7 @@ enum exec_mode_values
     MODE_EXE,
     MODE_DEF,
     MODE_IMPLIB,
+    MODE_BUILTIN,
     MODE_RESOURCES
 };
 
@@ -259,6 +261,7 @@ static const char usage_str[] =
 "Options:\n"
 "       --as-cmd=AS           Command to use for assembling (default: as)\n"
 "   -b, --target=TARGET       Specify target CPU and platform for cross-compiling\n"
+"   -B PREFIX                 Look for build tools in the PREFIX directory\n"
 "       --cc-cmd=CC           C compiler to use for assembling (default: fall back to --as-cmd)\n"
 "   -d, --delay-lib=LIB       Import the specified library in delayed mode\n"
 "   -D SYM                    Ignored for C flags compatibility\n"
@@ -292,11 +295,12 @@ static const char usage_str[] =
 "       --version             Print the version and exit\n"
 "   -w, --warnings            Turn on warnings\n"
 "\nMode options:\n"
-"       --dll                 Build a .c file from a .spec or .def file\n"
+"       --dll                 Build a library from a .spec file and object files\n"
 "       --def                 Build a .def file from a .spec file\n"
-"       --exe                 Build a .c file for an executable\n"
+"       --exe                 Build an executable from object files\n"
 "       --implib              Build an import library\n"
-"       --resources           Build a .o file for the resource files\n\n"
+"       --builtin             Mark a library as a Wine builtin\n"
+"       --resources           Build a .o or .res file for the resource files\n\n"
 "The mode options are mutually exclusive; you must specify one and only one.\n\n";
 
 enum long_options_values
@@ -305,6 +309,7 @@ enum long_options_values
     LONG_OPT_DEF,
     LONG_OPT_EXE,
     LONG_OPT_IMPLIB,
+    LONG_OPT_BUILTIN,
     LONG_OPT_ASCMD,
     LONG_OPT_CCCMD,
     LONG_OPT_EXTERNAL_SYMS,
@@ -319,7 +324,7 @@ enum long_options_values
     LONG_OPT_VERSION
 };
 
-static const char short_options[] = "C:D:E:F:H:I:K:L:M:N:b:d:e:f:hkl:m:o:r:u:vw";
+static const char short_options[] = "B:C:D:E:F:H:I:K:L:M:N:b:d:e:f:hkl:m:o:r:u:vw";
 
 static const struct option long_options[] =
 {
@@ -327,6 +332,7 @@ static const struct option long_options[] =
     { "def",           0, 0, LONG_OPT_DEF },
     { "exe",           0, 0, LONG_OPT_EXE },
     { "implib",        0, 0, LONG_OPT_IMPLIB },
+    { "builtin",       0, 0, LONG_OPT_BUILTIN },
     { "as-cmd",        1, 0, LONG_OPT_ASCMD },
     { "cc-cmd",        1, 0, LONG_OPT_CCCMD },
     { "external-symbols", 0, 0, LONG_OPT_EXTERNAL_SYMS },
@@ -392,6 +398,9 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
     {
         switch(optc)
         {
+        case 'B':
+            strarray_add( &tools_path, xstrdup( optarg ), NULL );
+            break;
         case 'D':
             /* ignored */
             break;
@@ -492,6 +501,9 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
             break;
         case LONG_OPT_IMPLIB:
             set_exec_mode( MODE_IMPLIB );
+            break;
+        case LONG_OPT_BUILTIN:
+            set_exec_mode( MODE_BUILTIN );
             break;
         case LONG_OPT_ASCMD:
             as_command = strarray_fromstring( optarg, " " );
@@ -670,13 +682,17 @@ int main(int argc, char **argv)
         if (!spec_file_name) fatal_error( "missing .spec file\n" );
         if (!parse_input_file( spec )) break;
         open_output_file();
-        output_def_file( spec, 1 );
+        output_def_file( spec, 0 );
         close_output_file();
         break;
     case MODE_IMPLIB:
         if (!spec_file_name) fatal_error( "missing .spec file\n" );
         if (!parse_input_file( spec )) break;
         output_import_lib( spec, argv );
+        break;
+    case MODE_BUILTIN:
+        if (!argv[0]) fatal_error( "missing file argument for --builtin option\n" );
+        make_builtin_files( argv );
         break;
     case MODE_RESOURCES:
         load_resources( argv, spec );

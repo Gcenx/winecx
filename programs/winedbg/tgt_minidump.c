@@ -100,8 +100,8 @@ static inline struct tgt_process_minidump_data* private_data(struct dbg_process*
     return pcs->pio_data;
 }
 
-static BOOL tgt_process_minidump_read(HANDLE hProcess, const void* addr,
-                                      void* buffer, SIZE_T len, SIZE_T* rlen)
+static BOOL tgt_process_minidump_read(HANDLE hProcess, const void* HOSTPTR addr,
+                                      void* buffer, SIZE_T len, SIZE_T* HOSTPTR rlen)
 {
     void*               stream;
 
@@ -121,11 +121,11 @@ static BOOL tgt_process_minidump_read(HANDLE hProcess, const void* addr,
          */
         for (i = 0; i < mml->NumberOfMemoryRanges; i++, mmd++)
         {
-            if (get_addr64(mmd->StartOfMemoryRange) <= (DWORD_PTR)addr &&
-                (DWORD_PTR)addr < get_addr64(mmd->StartOfMemoryRange) + mmd->Memory.DataSize)
+            if (get_addr64(mmd->StartOfMemoryRange) <= (ULONG_HOSTPTR)addr &&
+                (ULONG_HOSTPTR)addr < get_addr64(mmd->StartOfMemoryRange) + mmd->Memory.DataSize)
             {
                 ilen = min(len,
-                           get_addr64(mmd->StartOfMemoryRange) + mmd->Memory.DataSize - (DWORD_PTR)addr);
+                           get_addr64(mmd->StartOfMemoryRange) + mmd->Memory.DataSize - (ULONG_HOSTPTR)addr);
                 if (ilen == len) /* whole range is matched */
                 {
                     found = i;
@@ -143,7 +143,7 @@ static BOOL tgt_process_minidump_read(HANDLE hProcess, const void* addr,
         {
             mmd = &mml->MemoryRanges[found];
             memcpy(buffer,
-                   (char*)private_data(dbg_curr_process)->mapping + mmd->Memory.Rva + (DWORD_PTR)addr - get_addr64(mmd->StartOfMemoryRange),
+                   (char*)private_data(dbg_curr_process)->mapping + mmd->Memory.Rva + (ULONG_HOSTPTR)addr - get_addr64(mmd->StartOfMemoryRange),
                    prev_len);
             if (rlen) *rlen = prev_len;
             return TRUE;
@@ -153,7 +153,7 @@ static BOOL tgt_process_minidump_read(HANDLE hProcess, const void* addr,
      * However, we need to check who's to blame, this code or the current 
      * dbghelp!StackWalk implementation
      */
-    if ((DWORD_PTR)addr < 32)
+    if ((ULONG_HOSTPTR)addr < 32)
     {
         memset(buffer, 0, len); 
         if (rlen) *rlen = len;
@@ -162,7 +162,7 @@ static BOOL tgt_process_minidump_read(HANDLE hProcess, const void* addr,
     return FALSE;
 }
 
-static BOOL tgt_process_minidump_write(HANDLE hProcess, void* addr,
+static BOOL tgt_process_minidump_write(HANDLE hProcess, void* HOSTPTR addr,
                                        const void* buffer, SIZE_T len, SIZE_T* wlen)
 {
     return FALSE;

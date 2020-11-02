@@ -226,10 +226,12 @@ static void load_function_driver( DEVICE_OBJECT *device, HDEVINFO set, SP_DEVINF
         return;
     }
 
+    TRACE("Calling AddDevice routine %p.\n", driver_obj->DriverExtension->AddDevice);
     if (driver_obj->DriverExtension->AddDevice)
         status = driver_obj->DriverExtension->AddDevice( driver_obj, device );
     else
         status = STATUS_NOT_IMPLEMENTED;
+    TRACE("AddDevice routine %p returned %#x.\n", driver_obj->DriverExtension->AddDevice, status);
 
     ObDereferenceObject( driver_obj );
 
@@ -316,24 +318,17 @@ static void start_device( DEVICE_OBJECT *device, HDEVINFO set, SP_DEVINFO_DATA *
     }
 }
 
-static void handle_bus_relations( DEVICE_OBJECT *device )
+static void enumerate_new_device( DEVICE_OBJECT *device, HDEVINFO set )
 {
     static const WCHAR infpathW[] = {'I','n','f','P','a','t','h',0};
 
     SP_DEVINFO_DATA sp_device = {sizeof(sp_device)};
     WCHAR device_instance_id[MAX_DEVICE_ID_LEN];
     BOOL need_driver = TRUE;
-    HDEVINFO set;
     HKEY key;
-
-    /* We could (should?) do a full IRP_MN_QUERY_DEVICE_RELATIONS query,
-     * but we don't have to, we have the DEVICE_OBJECT of the new device
-     * so we can simply handle the process here */
 
     if (get_device_instance_id( device, device_instance_id ))
         return;
-
-    set = SetupDiCreateDeviceInfoList( NULL, NULL );
 
     if (!SetupDiCreateDeviceInfoW( set, device_instance_id, &GUID_NULL, NULL, NULL, 0, &sp_device )
             && !SetupDiOpenDeviceInfoW( set, device_instance_id, NULL, 0, &sp_device ))
@@ -362,17 +357,103 @@ static void handle_bus_relations( DEVICE_OBJECT *device )
     }
 
     start_device( device, set, &sp_device );
-
-    SetupDiDestroyDeviceInfoList( set );
 }
 
 static void remove_device( DEVICE_OBJECT *device )
 {
+    struct wine_device *wine_device = CONTAINING_RECORD(device, struct wine_device, device_obj);
+
     TRACE("Removing device %p.\n", device);
+
+    if (wine_device->children)
+    {
+        ULONG i;
+        for (i = 0; i < wine_device->children->Count; ++i)
+            remove_device( wine_device->children->Objects[i] );
+    }
 
     send_power_irp( device, PowerDeviceD3 );
     send_pnp_irp( device, IRP_MN_SURPRISE_REMOVAL );
     send_pnp_irp( device, IRP_MN_REMOVE_DEVICE );
+}
+
+static BOOL device_in_list( const DEVICE_RELATIONS *list, const DEVICE_OBJECT *device )
+{
+    ULONG i;
+    for (i = 0; i < list->Count; ++i)
+    {
+        if (list->Objects[i] == device)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static void handle_bus_relations( DEVICE_OBJECT *parent )
+{
+    struct wine_device *wine_parent = CONTAINING_RECORD(parent, struct wine_device, device_obj);
+    SP_DEVINFO_DATA sp_device = {sizeof(sp_device)};
+    DEVICE_RELATIONS *relations;
+    IO_STATUS_BLOCK irp_status;
+    IO_STACK_LOCATION *irpsp;
+    NTSTATUS status;
+    HDEVINFO set;
+    IRP *irp;
+    ULONG i;
+
+    TRACE( "(%p)\n", parent );
+
+    set = SetupDiCreateDeviceInfoList( NULL, NULL );
+
+    parent = IoGetAttachedDevice( parent );
+
+    if (!(irp = IoBuildSynchronousFsdRequest( IRP_MJ_PNP, parent, NULL, 0, NULL, NULL, &irp_status )))
+    {
+        SetupDiDestroyDeviceInfoList( set );
+        return;
+    }
+
+    irpsp = IoGetNextIrpStackLocation( irp );
+    irpsp->MinorFunction = IRP_MN_QUERY_DEVICE_RELATIONS;
+    irpsp->Parameters.QueryDeviceRelations.Type = BusRelations;
+    if ((status = send_device_irp( parent, irp, (ULONG_PTR *)&relations )))
+    {
+        ERR("Failed to enumerate child devices, status %#x.\n", status);
+        SetupDiDestroyDeviceInfoList( set );
+        return;
+    }
+
+    TRACE("Got %u devices.\n", relations->Count);
+
+    for (i = 0; i < relations->Count; ++i)
+    {
+        DEVICE_OBJECT *child = relations->Objects[i];
+
+        if (!wine_parent->children || !device_in_list( wine_parent->children, child ))
+        {
+            TRACE("Adding new device %p.\n", child);
+            enumerate_new_device( child, set );
+        }
+    }
+
+    if (wine_parent->children)
+    {
+        for (i = 0; i < wine_parent->children->Count; ++i)
+        {
+            DEVICE_OBJECT *child = wine_parent->children->Objects[i];
+
+            if (!device_in_list( relations, child ))
+            {
+                TRACE("Removing device %p.\n", child);
+                remove_device( child );
+            }
+            ObDereferenceObject( child );
+        }
+    }
+
+    ExFreePool( wine_parent->children );
+    wine_parent->children = relations;
+
+    SetupDiDestroyDeviceInfoList( set );
 }
 
 /***********************************************************************
@@ -387,9 +468,6 @@ void WINAPI IoInvalidateDeviceRelations( DEVICE_OBJECT *device_object, DEVICE_RE
         case BusRelations:
             handle_bus_relations( device_object );
             break;
-        case RemovalRelations:
-            remove_device( device_object );
-            break;
         default:
             FIXME("Unhandled relation %#x.\n", type);
             break;
@@ -402,7 +480,12 @@ void WINAPI IoInvalidateDeviceRelations( DEVICE_OBJECT *device_object, DEVICE_RE
 NTSTATUS WINAPI IoGetDeviceProperty( DEVICE_OBJECT *device, DEVICE_REGISTRY_PROPERTY property,
                                      ULONG length, void *buffer, ULONG *needed )
 {
-    NTSTATUS status = STATUS_NOT_IMPLEMENTED;
+    SP_DEVINFO_DATA sp_device = {sizeof(sp_device)};
+    WCHAR device_instance_id[MAX_DEVICE_ID_LEN];
+    DWORD sp_property = -1;
+    NTSTATUS status;
+    HDEVINFO set;
+
     TRACE("device %p, property %u, length %u, buffer %p, needed %p.\n",
             device, property, length, buffer, needed);
 
@@ -430,7 +513,7 @@ NTSTATUS WINAPI IoGetDeviceProperty( DEVICE_OBJECT *device, DEVICE_REGISTRY_PROP
                 status = STATUS_BUFFER_TOO_SMALL;
 
             ExFreePool( id );
-            break;
+            return status;
         }
         case DevicePropertyPhysicalDeviceObjectName:
         {
@@ -465,11 +548,81 @@ NTSTATUS WINAPI IoGetDeviceProperty( DEVICE_OBJECT *device, DEVICE_REGISTRY_PROP
                     *needed = 0;
             }
             HeapFree(GetProcessHeap(), 0, name);
-            break;
+            return status;
         }
+        case DevicePropertyDeviceDescription:
+            sp_property = SPDRP_DEVICEDESC;
+            break;
+        case DevicePropertyHardwareID:
+            sp_property = SPDRP_HARDWAREID;
+            break;
+        case DevicePropertyCompatibleIDs:
+            sp_property = SPDRP_COMPATIBLEIDS;
+            break;
+        case DevicePropertyClassName:
+            sp_property = SPDRP_CLASS;
+            break;
+        case DevicePropertyClassGuid:
+            sp_property = SPDRP_CLASSGUID;
+            break;
+        case DevicePropertyManufacturer:
+            sp_property = SPDRP_MFG;
+            break;
+        case DevicePropertyFriendlyName:
+            sp_property = SPDRP_FRIENDLYNAME;
+            break;
+        case DevicePropertyLocationInformation:
+            sp_property = SPDRP_LOCATION_INFORMATION;
+            break;
+        case DevicePropertyBusTypeGuid:
+            sp_property = SPDRP_BUSTYPEGUID;
+            break;
+        case DevicePropertyLegacyBusType:
+            sp_property = SPDRP_LEGACYBUSTYPE;
+            break;
+        case DevicePropertyBusNumber:
+            sp_property = SPDRP_BUSNUMBER;
+            break;
+        case DevicePropertyAddress:
+            sp_property = SPDRP_ADDRESS;
+            break;
+        case DevicePropertyUINumber:
+            sp_property = SPDRP_UI_NUMBER;
+            break;
+        case DevicePropertyInstallState:
+            sp_property = SPDRP_INSTALL_STATE;
+            break;
+        case DevicePropertyRemovalPolicy:
+            sp_property = SPDRP_REMOVAL_POLICY;
+            break;
         default:
             FIXME("Unhandled property %u.\n", property);
+            return STATUS_NOT_IMPLEMENTED;
     }
+
+    if ((status = get_device_instance_id( device, device_instance_id )))
+        return status;
+
+    if ((set = SetupDiCreateDeviceInfoList( &GUID_NULL, NULL )) == INVALID_HANDLE_VALUE)
+    {
+        ERR("Failed to create device list, error %#x.\n", GetLastError());
+        return GetLastError();
+    }
+
+    if (!SetupDiOpenDeviceInfoW( set, device_instance_id, NULL, 0, &sp_device))
+    {
+        ERR("Failed to open device, error %#x.\n", GetLastError());
+        SetupDiDestroyDeviceInfoList( set );
+        return GetLastError();
+    }
+
+    if (SetupDiGetDeviceRegistryPropertyW( set, &sp_device, sp_property, NULL, buffer, length, needed ))
+        status = STATUS_SUCCESS;
+    else
+        status = GetLastError();
+
+    SetupDiDestroyDeviceInfoList( set );
+
     return status;
 }
 
@@ -569,7 +722,7 @@ NTSTATUS WINAPI IoSetDeviceInterfaceState( UNICODE_STRING *name, BOOLEAN enable 
 
     attr.RootDirectory = iface_key;
     RtlInitUnicodeString( &string, controlW );
-    ret = NtCreateKey( &control_key, KEY_SET_VALUE, &attr, 0, NULL, 0, NULL );
+    ret = NtCreateKey( &control_key, KEY_SET_VALUE, &attr, 0, NULL, REG_OPTION_VOLATILE, NULL );
     NtClose( iface_key );
     if (ret)
         return ret;
@@ -622,7 +775,9 @@ NTSTATUS WINAPI IoRegisterDeviceInterface(DEVICE_OBJECT *device, const GUID *cla
     WCHAR device_instance_id[MAX_DEVICE_ID_LEN];
     SP_DEVICE_INTERFACE_DETAIL_DATA_W *data;
     NTSTATUS status = STATUS_SUCCESS;
+    UNICODE_STRING device_path;
     struct device_interface *iface;
+    struct wine_rb_entry *entry;
     DWORD required;
     HDEVINFO set;
 
@@ -660,18 +815,31 @@ NTSTATUS WINAPI IoRegisterDeviceInterface(DEVICE_OBJECT *device, const GUID *cla
 
     data->DevicePath[1] = '?';
     TRACE("Returning path %s.\n", debugstr_w(data->DevicePath));
+    RtlCreateUnicodeString( &device_path, data->DevicePath);
 
-    iface = heap_alloc_zero( sizeof(struct device_interface) );
+    entry = wine_rb_get( &device_interfaces, &device_path );
+    if (entry)
+    {
+        iface = WINE_RB_ENTRY_VALUE( entry, struct device_interface, entry );
+        if (iface->enabled)
+            ERR("Device interface %s is still enabled.\n", debugstr_us(&iface->symbolic_link));
+    }
+    else
+    {
+        iface = heap_alloc_zero( sizeof(struct device_interface) );
+        RtlCreateUnicodeString(&iface->symbolic_link, data->DevicePath);
+        if (wine_rb_put( &device_interfaces, &iface->symbolic_link, &iface->entry ))
+            ERR("Failed to insert interface %s into tree.\n", debugstr_us(&iface->symbolic_link));
+    }
+
     iface->device = device;
     iface->interface_class = *class_guid;
-    RtlCreateUnicodeString(&iface->symbolic_link, data->DevicePath);
     if (symbolic_link)
         RtlCreateUnicodeString( symbolic_link, data->DevicePath);
 
-    if (wine_rb_put( &device_interfaces, &iface->symbolic_link, &iface->entry ))
-        ERR("Failed to insert interface %s into tree.\n", debugstr_us(&iface->symbolic_link));
-
     HeapFree( GetProcessHeap(), 0, data );
+
+    RtlFreeUnicodeString( &device_path );
 
     return status;
 }
@@ -725,15 +893,22 @@ static NTSTATUS WINAPI pnp_manager_device_pnp( DEVICE_OBJECT *device, IRP *irp )
 {
     IO_STACK_LOCATION *stack = IoGetCurrentIrpStackLocation( irp );
     struct root_pnp_device *root_device = device->DeviceExtension;
+    NTSTATUS status;
 
     TRACE("device %p, irp %p, minor function %#x.\n", device, irp, stack->MinorFunction);
 
     switch (stack->MinorFunction)
     {
+    case IRP_MN_QUERY_DEVICE_RELATIONS:
+        /* The FDO above already handled this, so return the same status. */
+        break;
     case IRP_MN_START_DEVICE:
     case IRP_MN_SURPRISE_REMOVAL:
     case IRP_MN_REMOVE_DEVICE:
         /* Nothing to do. */
+        irp->IoStatus.u.Status = STATUS_SUCCESS;
+        break;
+    case IRP_MN_QUERY_CAPABILITIES:
         irp->IoStatus.u.Status = STATUS_SUCCESS;
         break;
     case IRP_MN_QUERY_ID:
@@ -783,8 +958,9 @@ static NTSTATUS WINAPI pnp_manager_device_pnp( DEVICE_OBJECT *device, IRP *irp )
         FIXME("Unhandled PnP request %#x.\n", stack->MinorFunction);
     }
 
+    status = irp->IoStatus.u.Status;
     IoCompleteRequest( irp, IO_NO_INCREMENT );
-    return irp->IoStatus.u.Status;
+    return status;
 }
 
 static NTSTATUS WINAPI pnp_manager_driver_entry( DRIVER_OBJECT *driver, UNICODE_STRING *keypath )
