@@ -1,0 +1,3 @@
+MODULE    = mshtml.tlb
+
+IDL_SRCS = mshtml_tlb.idl

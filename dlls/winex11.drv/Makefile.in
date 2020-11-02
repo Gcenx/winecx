@@ -1,0 +1,34 @@
+MODULE    = winex11.drv
+IMPORTS   = uuid user32 gdi32 advapi32
+DELAYIMPORTS = comctl32 ole32 shell32 imm32
+EXTRAINCL = $(X_CFLAGS)
+EXTRALIBS = $(X_LIBS) $(X_EXTRA_LIBS)
+
+C_SRCS = \
+	bitblt.c \
+	brush.c \
+	clipboard.c \
+	desktop.c \
+	event.c \
+	graphics.c \
+	ime.c \
+	init.c \
+	keyboard.c \
+	mac_xim.c \
+	mouse.c \
+	opengl.c \
+	palette.c \
+	pen.c \
+	settings.c \
+	systray.c \
+	window.c \
+	wintab.c \
+	x11drv_main.c \
+	xdnd.c \
+	xim.c \
+	xinerama.c \
+	xrandr.c \
+	xrender.c \
+	xvidmode.c
+
+RC_SRCS = version.rc

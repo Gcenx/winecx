@@ -1,0 +1,10 @@
+MODULE    = cabinet.dll
+IMPORTLIB = cabinet
+EXTRALIBS = $(Z_LIBS)
+
+C_SRCS = \
+	cabinet_main.c \
+	fci.c \
+	fdi.c
+
+RC_SRCS = cabinet.rc

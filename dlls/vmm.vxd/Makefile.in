@@ -1,0 +1,4 @@
+MODULE    = vmm.vxd
+
+C_SRCS = \
+	vmm.c

@@ -1,0 +1,1203 @@
+#!/usr/bin/perl -w
+use strict;
+use XML::Simple;
+
+# This script is called thus :
+#
+#   make_opengl [opengl_version]
+#
+#     - It needs files from the OpenGL extension registry:
+#
+#       https://cvs.khronos.org/svn/repos/ogl/trunk/doc/registry/public/api/gl.xml
+#       https://cvs.khronos.org/svn/repos/ogl/trunk/doc/registry/public/api/wgl.xml
+#
+#       If they are not found in the current directory the script will
+#       attempt to download them from there.
+#
+#     - opengl_version is the OpenGL version emulated by the library
+#       (can be 1.0 to 1.5). The default is 1.1.
+#
+# This script generates the three following files :
+#
+#     - opengl32.spec : the spec file giving all the exported functions
+#       of the OpenGL32.DLL library. These functions are the one an
+#       application can directly link to (and are all the functions
+#       defined in the OpenGL core for the version defined by
+#       'opengl_version').
+#
+#     - opengl_norm.c : this file contains the thunks for all OpenGL
+#       functions that are defined in 'opengl32.spec'. The corresponding
+#       functions NEED to be defined in Linux's libGL or the library
+#       won't be able to be linked in.
+#
+#     - opengl_ext.c : in this file are stored thunks for ALL possible
+#       OpenGL extensions (at least, all the extensions that are defined
+#       in the OpenGL extension registry). Contrary to 'opengl_norm.c',
+#       you do not need to have these extensions in your libGL to have
+#       OpenGL work (as they are resolved at run-time using
+#       glXGetProcAddressARB).
+#
+#     - include/wine/wgl_driver.h: definitions for the tables of OpenGL functions.
+#
+#
+# Copyright 2000 Lionel Ulmer
+# Copyright 2012 Alexandre Julliard
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+#
+
+#
+# Files to generate
+#
+my $spec_file = "opengl32.spec";
+my $norm_file = "opengl_norm.c";
+my $ext_file  = "opengl_ext.c";
+my $wgl_driver_file = "../../include/wine/wgl_driver.h";
+my $wgl_file = "../../include/wine/wgl.h";
+
+# Set to 0 for removing the ENTER / LEAVE GL calls
+my $gen_thread_safe = 0;
+# Prefix used for the local variables
+my $ext_prefix = "func_";
+# If set to 1, generate TRACEs for each OpenGL function
+my $gen_traces = 1;
+
+#
+# List of categories to put in the 'opengl_norm.c' file
+#
+my %cat_1_0 = ( "GL_VERSION_1_0" => 1 );
+my %cat_1_1 = ( %cat_1_0, "GL_VERSION_1_1" => 1 );
+my %cat_1_2 = ( %cat_1_1, "GL_VERSION_1_2" => 1 );
+my %cat_1_3 = ( %cat_1_2, "GL_VERSION_1_3" => 1 );
+my %cat_1_4 = ( %cat_1_3, "GL_VERSION_1_4" => 1 );
+my %cat_1_5 = ( %cat_1_4, "GL_VERSION_1_5" => 1 );
+
+my %norm_categories = ();
+
+#
+# This hash table gives the conversion between OpenGL types and what
+# is used by the TRACE printfs
+#
+my %debug_conv =
+    ("GLbitfield" => "%d",
+     "GLboolean" => "%d",
+     "GLbyte" => "%d",
+     "GLclampd" => "%f",
+     "GLclampf" => "%f",
+     "GLclampx" => "%d",
+     "GLdouble" => "%f",
+     "GLenum" => "%d",
+     "GLfloat" => "%f",
+     "GLfixed" => "%d",
+     "GLint" => "%d",
+     "GLshort" => "%d",
+     "GLsizei" => "%d",
+     "GLstring" => "%s",
+     "GLsync" => "%p",
+     "GLubyte" => "%d",
+     "GLuint" => "%d",
+     "GLushort" => "%d",
+     "GLhalfNV" => "%d",
+     "GLintptrARB" => "%ld",
+     "GLsizeiptrARB" => "%ld",
+     "GLintptr" => "%ld",
+     "GLsizeiptr" => "%ld",
+     "GLhandleARB" => "%d",
+     "GLcharARB" => "%c",
+     "GLuint64" => "%s,wine_dbgstr_longlong(%s)",
+     "GLint64" => "%s,wine_dbgstr_longlong(%s)",
+     "GLuint64EXT" => "%s,wine_dbgstr_longlong(%s)",
+     "GLint64EXT" => "%s,wine_dbgstr_longlong(%s)",
+     "GLvoid" => "(void)",
+     "_GLfuncptr" => "%p",
+     "GLDEBUGPROC" => "%p",
+     "GLDEBUGPROCARB" => "%p",
+     "GLDEBUGPROCAMD" => "%p",
+     "GLDEBUGPROCKHR" => "%p",
+     "GLvdpauSurfaceNV" => "%ld",
+     "int" => "%d",
+     "unsigned int" => "%u",
+     "UINT" => "%u",
+     "DWORD" => "%u",
+     "BOOL" => "%u",
+     "INT64" => "%s,wine_dbgstr_longlong(%s)",
+     "UINT64" => "%s,wine_dbgstr_longlong(%s)",
+     "LPVOID" => "%p",
+     "HANDLE" => "%p",
+     "HDC" => "%p",
+     "HGLRC" => "%p",
+     "HPBUFFERARB" => "%p",
+     "HPBUFFEREXT" => "%p",
+    );
+
+#
+# This hash table gives the conversion between OpenGL types and what
+# is used in the .spec and header files.
+#
+my %arg_conv =
+    ("GLbitfield" =>       [ "long", "unsigned int" ],
+     "GLboolean" =>        [ "long", "unsigned char" ],
+     "GLbyte" =>           [ "long", "signed char" ],
+     "GLchar" =>           [ "long", "char" ],
+     "GLclampd" =>         [ "double", "double" ],
+     "GLclampf" =>         [ "float", "float" ],
+     "GLclampx" =>         [ "long", "int" ],
+     "GLdouble" =>         [ "double", "double" ],
+     "GLenum" =>           [ "long", "unsigned int" ],
+     "GLfloat" =>          [ "float", "float" ],
+     "GLfixed" =>          [ "long", "int" ],
+     "GLint" =>            [ "long", "int" ],
+     "GLint64" =>          [ "int64", "INT64" ],
+     "GLint64EXT" =>       [ "int64", "INT64" ],
+     "GLintptr" =>         [ "long", "INT_PTR" ],
+     "GLshort" =>          [ "long", "short" ],
+     "GLsizei" =>          [ "long", "int" ],
+     "GLsizeiptr" =>       [ "long", "INT_PTR" ],
+     "GLstring" =>         [ "str", "const unsigned char *" ],
+     "GLsync" =>           [ "ptr", "struct __GLsync *" ],
+     "GLubyte" =>          [ "long", "unsigned char" ],
+     "GLuint" =>           [ "long", "unsigned int" ],
+     "GLuint64" =>         [ "int64", "UINT64" ],
+     "GLuint64EXT" =>      [ "int64", "UINT64" ],
+     "GLushort" =>         [ "long", "unsigned short" ],
+     "GLvoid" =>           [ "void", "void" ],
+     "GLcharARB" =>        [ "long", "char" ],
+     "GLhandleARB" =>      [ "long", "unsigned int" ],
+     "GLintptrARB" =>      [ "long", "INT_PTR" ],
+     "GLsizeiptrARB" =>    [ "long", "INT_PTR" ],
+     "GLhalfNV" =>         [ "long", "unsigned short" ],
+     "GLvdpauSurfaceNV" => [ "long", "INT_PTR" ]);
+
+#
+# Used to convert some types
+#
+sub ConvertType($)
+{
+    my ($type) = @_;
+
+    my %hash = (
+              "struct _cl_context" => "void",
+              "struct _cl_event" => "void",
+              "HGLRC" => "struct wgl_context *",
+              "GLDEBUGPROC" => "void *",
+              "GLDEBUGPROCARB" => "void *",
+              "GLDEBUGPROCAMD" => "void *",
+              "GLDEBUGPROCKHR" => "void *",
+              "HPBUFFERARB" => "struct wgl_pbuffer *",
+              "HPBUFFEREXT" => "struct wgl_pbuffer *",
+        );
+
+    foreach my $org (reverse sort keys %hash) {
+        if ($type =~ /^(.*)$org(.*)$/) {
+            return "$1$hash{$org}$2";
+        }
+    }
+    return $type;
+}
+
+#
+# Used to convert some variable names
+#
+sub ConvertVarName($)
+{
+    my ($type) = @_;
+
+    my %hash = ( "near" => "nearParam",
+                 "far"  => "farParam" );
+
+    foreach my $org (keys %hash) {
+        if ($type =~ /^(.*)$org(.*)$/) {
+            return "$1$hash{$org}$2";
+        }
+    }
+    return $type;
+}
+
+#
+# This functions generates the thunk for a given function.
+#
+sub GenerateThunk($$$$)
+{
+    my ($name, $func_ref, $comment, $prefix) = @_;
+    my $ret = "";
+    my $call_arg = "";
+    my $trace_call_arg = "";
+    my $trace_arg = "";
+
+    return "" if $name eq "glDebugEntry";
+    return "" if $name eq "glGetIntegerv";
+    return "" if $name eq "glGetString";
+    return "" if $func_ref->[2] && $func_ref->[2]->[0] =~ /WGL_/;
+
+    # If for opengl_norm.c, generate a nice heading otherwise Patrik won't be happy :-)
+    # Patrik says: Well I would be even happier if a (OPENGL32.@) was added as well. Done. :-)
+    if ($comment eq 1) {
+        $ret .= "/***********************************************************************\n";
+        $ret .= " *              $name (OPENGL32.\@)\n";
+        $ret .= " */\n";
+    }
+    $ret .= ConvertType($func_ref->[0]) . " WINAPI $name( ";
+    for (my $i = 0; $i < @{$func_ref->[1]}; $i++) {
+        my $type = $func_ref->[1]->[$i]->[0];
+        my $name = ConvertVarName($func_ref->[1]->[$i]->[1]);
+        my ($base_type, $type_specifier, $name_specifier) = ($type, $type, $name);
+        if ($type =~ /(.*) (.*)/) {
+            $base_type = $2;
+        } elsif ($type =~ /(.*)(\[.*)/) {
+            $base_type = $1;
+            $type_specifier = $1;
+            $name_specifier = $name . $2
+        }
+        $ret .= ConvertType($type_specifier) . " $name_specifier";
+        $call_arg .= $name;
+        if ($type =~ /\*/ || $type =~ /\[/) {
+            $trace_arg .= "%p";
+            $trace_call_arg .= $name;
+        } elsif (defined $debug_conv{$base_type}) {
+            if ($debug_conv{$base_type} =~ /(.*),(.*)/) {
+                $trace_arg .= $1;
+                $trace_call_arg .= sprintf $2, $name;
+            } else {
+                $trace_arg .= $debug_conv{$base_type};
+                $trace_call_arg .= $name;
+            }
+        }
+        else { printf "Unknown type %s\n", $type; }
+        if ($i+1 < @{$func_ref->[1]}) {
+            $ret .= ", ";
+            $call_arg .= ", ";
+            $trace_call_arg .= ", ";
+            $trace_arg .= ", ";
+        } else {
+            $ret .= " ";
+            $call_arg .= " ";
+            $trace_call_arg .= " ";
+        }
+    }
+    $ret .= 'void ' if (!@{$func_ref->[1]});
+    return "$ret) DECLSPEC_HIDDEN;\n" if $name eq "glGetStringi";
+    $ret .= ") {\n";
+    $ret .= "  const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;\n";
+    if ($func_ref->[0] ne "void" && $gen_thread_safe) {
+        $ret .= "  " . ConvertType($func_ref->[0]) . " ret_value;\n";
+    }
+    if ($gen_traces) {
+        $ret .= "  TRACE(\"($trace_arg)\\n\"";
+        if ($trace_arg ne "") {
+            $ret .= ", $trace_call_arg";
+        }
+        $ret .= ");\n";
+    }
+    if ($gen_thread_safe) {
+        $ret .= "  ENTER_GL();\n";
+        $ret .= "  ";
+        if ($func_ref->[0] ne "void") {
+            $ret .= "ret_value = ";
+        }
+        $ret .= "funcs->$prefix.p_$name( $call_arg);\n";
+        $ret .= "  LEAVE_GL();\n";
+        if ($func_ref->[0] ne "void") {
+            $ret .= "  return ret_value;\n"
+        }
+    }
+    else {
+        $ret .= "  ";
+        if ($func_ref->[0] ne "void") {
+            $ret .= "return ";
+        }
+        $ret .= "funcs->$prefix.p_$name( $call_arg);\n";
+    }
+    $ret .= "}\n";
+
+    # Return this string....
+    return $ret;
+}
+
+sub generate_null_func($$)
+{
+    my ($name, $func_ref) = @_;
+    my $ret;
+
+    return "" if $name eq "glDebugEntry";
+
+    $ret = "static " . ConvertType($func_ref->[0]) . " null_$name( ";
+    for (my $i = 0; $i < @{$func_ref->[1]}; $i++) {
+        my $type = $func_ref->[1]->[$i]->[0];
+        my $name = ConvertVarName($func_ref->[1]->[$i]->[1]);
+        my $base_type;
+        if ($type =~ /(.*)(\[.*)/) {
+            $base_type = $1;
+            $name .= $2;
+        } else {
+            $base_type = $type;
+        }
+        $ret .= ConvertType($base_type) . " $name";
+        $ret .= "," if ($i+1 < @{$func_ref->[1]});
+        $ret .= " ";
+    }
+    $ret .= 'void ' if (!@{$func_ref->[1]});
+    $ret .= ") {";
+    if ($name eq "glGetError")
+    {
+        $ret .= " return GL_INVALID_OPERATION;";
+    }
+    elsif ($func_ref->[0] ne "void")
+    {
+        $ret .= " return 0;";
+    }
+    $ret .= " }\n";
+    return $ret;
+}
+
+sub get_func_proto($$$)
+{
+    my ($format, $name, $func) = @_;
+    my $ret = sprintf "%-10s", ConvertType($func->[0]);
+    $ret .= " " . sprintf($format,$name) . "(";
+    for (my $i = 0; $i < @{$func->[1]}; $i++)
+    {
+        $ret .= ConvertType($func->[1]->[$i]->[0]);
+        $ret .= "," if ($i+1 < @{$func->[1]});
+    }
+    $ret .= "void" unless @{$func->[1]};
+    $ret .= ")";
+    return $ret;
+}
+
+#
+# Extract and checks the number of arguments
+#
+if (@ARGV > 1) {
+    my $name0=$0;
+    $name0=~s%^.*/%%;
+    die "Usage: $name0 [version]\n";
+}
+my $version = $ARGV[0] || "1.1";
+if ($version eq "1.0") {
+    %norm_categories = %cat_1_0;
+} elsif ($version eq "1.1") {
+    %norm_categories = %cat_1_1;
+} elsif ($version eq "1.2") {
+    %norm_categories = %cat_1_2;
+} elsif ($version eq "1.3") {
+    %norm_categories = %cat_1_3;
+} elsif ($version eq "1.4") {
+    %norm_categories = %cat_1_4;
+} elsif ($version eq "1.5") {
+    %norm_categories = %cat_1_5;
+} else {
+    die "Incorrect OpenGL version.\n";
+}
+
+#
+# Fetch the registry files
+#
+-f "gl.xml" || system "wget --no-check-certificate https://cvs.khronos.org/svn/repos/ogl/trunk/doc/registry/public/api/gl.xml" || die "cannot download gl.xml";
+-f "wgl.xml" || system "wget --no-check-certificate https://cvs.khronos.org/svn/repos/ogl/trunk/doc/registry/public/api/wgl.xml" || die "cannot download wgl.xml";
+
+
+#
+# Then, create the list of all OpenGL functions using the registry
+# files. This will create two hash-tables, one with all the function
+# whose category matches the one listed in '@norm_categories', the other
+# with all other functions.
+#
+# An element of the hash table is a reference to an array with these
+# elements :
+#
+#  - function name
+#
+#  - return type
+#
+#  - reference to an array giving the list of arguments (an empty array
+#    for a 'void' function).
+#
+# The list of arguments is itself an array of reference to arrays. Each
+# of these arrays represents the argument type and the argument name.
+#
+# An example :
+#
+# void glBitmap( GLsizei width, GLsizei height,
+#                GLfloat xorig, GLfloat yorig,
+#                GLfloat xmove, GLfloat ymove,
+#                const GLubyte *bitmap );
+#
+# Would give something like that :
+#
+# [ "glBitmap",
+#   "void",
+#   [ [ "GLsizei", "width" ],
+#     [ "GLsizei", "height" ],
+#     [ "GLfloat", "xorig" ],
+#     [ "GLfloat", "yorig" ],
+#     [ "GLfloat", "xmove" ],
+#     [ "GLfloat", "ymove" ],
+#     [ "GLubyte *", "bitmap"] ] ];
+#
+my %norm_functions = ( "glDebugEntry" => [ "GLint", [[ "GLint", "unknown1" ],
+                                                     [ "GLint", "unknown2" ]] ] );
+
+#
+# This stores various extensions NOT part of the GL extension registry but still
+# implemented by most OpenGL libraries out there...
+#
+
+my %ext_functions  =
+   (
+    "glDeleteBufferRegion" => [ "void", [ [ "GLenum", "region" ] ], [ "GL_KTX_buffer_region" ] ],
+    "glReadBufferRegion" => [ "void", [ [ "GLenum", "region" ],
+                                        [ "GLint", "x" ],
+                                        [ "GLint", "y" ],
+                                        [ "GLsizei", "width" ],
+                                        [ "GLsizei", "height" ] ], [ "GL_KTX_buffer_region" ] ],
+    "glDrawBufferRegion" => [ "void", [ [ "GLenum", "region" ],
+                                        [ "GLint", "x" ],
+                                        [ "GLint", "y" ],
+                                        [ "GLsizei", "width" ],
+                                        [ "GLsizei", "height" ],
+                                        [ "GLint", "xDest" ],
+                                        [ "GLint", "yDest" ] ], [ "GL_KTX_buffer_region" ] ],
+    "glBufferRegionEnabled" => [ "GLuint", [ ], [ "GL_KTX_buffer_region" ] ],
+    "glNewBufferRegion" => [ "GLuint", [ [ "GLenum", "type" ] ], [ "GL_KTX_buffer_region" ] ],
+    "glMTexCoord2fSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                       [ "GLfloat", "s" ],
+                                       [ "GLfloat", "t" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMTexCoord2fvSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                        [ "GLfloat *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord1dSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                           [ "GLdouble", "s" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord1dvSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                            [ "GLdouble *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord1fSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                           [ "GLfloat", "s" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord1fvSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                            [ "const GLfloat *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord1iSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                           [ "GLint", "s" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord1ivSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                            [ "GLint *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord1sSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                           [ "GLshort", "s" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord1svSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                            [ "GLshort *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord2dSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                           [ "GLdouble", "s"],
+                                           [ "GLdouble", "t" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord2dvSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                            [ "GLdouble *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord2fSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                           [ "GLfloat", "s" ],
+                                           [ "GLfloat", "t" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord2fvSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                            [ "GLfloat *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord2iSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                           [ "GLint", "s" ],
+                                           [ "GLint", "t" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord2ivSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                            [ "GLint *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord2sSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                           [ "GLshort", "s" ],
+                                           [ "GLshort", "t" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord2svSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                            [ "GLshort *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord3dSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                           [ "GLdouble", "s" ],
+                                           [ "GLdouble", "t" ],
+                                           [ "GLdouble", "r" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord3dvSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                            [ "GLdouble *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord3fSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                           [ "GLfloat", "s" ],
+                                           [ "GLfloat", "t" ],
+                                           [ "GLfloat", "r" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord3fvSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                            [ "GLfloat *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord3iSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                           [ "GLint", "s" ],
+                                           [ "GLint", "t" ],
+                                           [ "GLint", "r" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord3ivSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                            [ "GLint *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord3sSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                           [ "GLshort", "s" ],
+                                           [ "GLshort", "t" ],
+                                           [ "GLshort", "r" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord3svSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                            [ "GLshort *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord4dSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                           [ "GLdouble", "s" ],
+                                           [ "GLdouble", "t" ],
+                                           [ "GLdouble", "r" ],
+                                           [ "GLdouble", "q" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord4dvSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                            [ "GLdouble *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord4fSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                           [ "GLfloat", "s" ],
+                                           [ "GLfloat", "t" ],
+                                           [ "GLfloat", "r" ],
+                                           [ "GLfloat", "q" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord4fvSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                            [ "GLfloat *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord4iSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                           [ "GLint", "s" ],
+                                           [ "GLint", "t" ],
+                                           [ "GLint", "r" ],
+                                           [ "GLint", "q" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord4ivSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                            [ "GLint *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord4sSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                           [ "GLshort", "s" ],
+                                           [ "GLshort", "t" ],
+                                           [ "GLshort", "r" ],
+                                           [ "GLshort", "q" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoord4svSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                            [ "GLshort *", "v" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glMultiTexCoordPointerSGIS" => [ "void", [ [ "GLenum", "target" ],
+                                                [ "GLint", "size" ],
+                                                [ "GLenum", "type" ],
+                                                [ "GLsizei", "stride" ],
+                                                [ "GLvoid *", "pointer" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glSelectTextureSGIS" => [ "void", [ [ "GLenum", "target" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glSelectTextureCoordSetSGIS" => [ "void", [ [ "GLenum", "target" ] ], [ "GL_SGIS_multitexture" ] ],
+    "glDeleteObjectBufferATI" => [ "void", [ [ "GLuint", "buffer" ] ], [ "GL_ATI_vertex_array_object" ] ],
+    "wglSetPixelFormatWINE" => [ "BOOL", [ [ "HDC", "hdc" ],
+                                           [ "int", "format" ] ], [ "WGL_WINE_pixel_format_passthrough" ] ],
+    "wglQueryCurrentRendererIntegerWINE" => [ "BOOL", [ [ "GLenum", "attribute" ],
+                                                        [ "GLuint *", "value" ] ], [ "WGL_WINE_query_renderer" ] ],
+    "wglQueryCurrentRendererStringWINE" => [ "const GLchar *", [ [ "GLenum", "attribute" ] ],
+                                             [ "WGL_WINE_query_renderer" ] ],
+    "wglQueryRendererIntegerWINE" => [ "BOOL", [ [ "HDC", "dc" ],
+                                                 [ "GLint", "renderer" ],
+                                                 [ "GLenum", "attribute" ],
+                                                 [ "GLuint *", "value" ] ], [ "WGL_WINE_query_renderer" ] ],
+    "wglQueryRendererStringWINE" => [ "const GLchar *", [ [ "HDC", "dc" ],
+                                                          [ "GLint", "renderer" ],
+                                                          [ "GLenum", "attribute" ] ], [ "WGL_WINE_query_renderer" ] ],
+   );
+
+
+my %wgl_functions =
+   (
+    "wglCopyContext" => [ "BOOL", [ [ "struct wgl_context *", "src" ],
+                                    [ "struct wgl_context *", "dst" ],
+                                    [ "UINT", "mask" ] ] ],
+    "wglCreateContext" => [ "struct wgl_context *", [ [ "HDC", "hdc" ] ] ],
+    "wglDeleteContext" => [ "void", [ [ "struct wgl_context *", "context" ] ] ],
+    "wglDescribePixelFormat" => [ "INT", [ [ "HDC", "hdc" ],
+                                           [ "INT", "format" ],
+                                           [ "UINT", "size" ],
+                                           [ "PIXELFORMATDESCRIPTOR *", "descr" ] ] ],
+    "wglGetPixelFormat" => [ "INT", [ [ "HDC", "hdc" ] ] ],
+    "wglGetProcAddress" => [ "PROC", [ [ "LPCSTR", "name" ] ] ],
+    "wglMakeCurrent" => [ "BOOL", [ [ "HDC", "hdc" ],
+                                    [ "struct wgl_context *", "context" ] ] ],
+    "wglSetPixelFormat" => [ "BOOL", [ [ "HDC", "hdc" ],
+                                       [ "INT", "format" ],
+                                       [ "const PIXELFORMATDESCRIPTOR *", "descr" ] ] ],
+    "wglShareLists" => [ "BOOL", [ [ "struct wgl_context *", "org" ],
+                                   [ "struct wgl_context *", "dst" ] ] ],
+    "wglSwapBuffers" => [ "BOOL", [ [ "HDC", "hdc" ] ] ],
+   );
+
+# CrossOver Hack 10798
+my %glu_functions =
+   (
+    "gluBeginCurve" => [ "void", [ [ "void*", "nurb" ] ], "GLU" ],
+    "gluBeginPolygon" => [ "void", [ [ "void*", "tess" ] ], "GLU" ],
+    "gluBeginSurface" => [ "void", [ [ "void*", "nurb" ] ], "GLU" ],
+    "gluBeginTrim" => [ "void", [ [ "void*", "nurb" ] ], "GLU" ],
+    "gluBuild1DMipmaps" => [ "GLint", [ [ "GLenum", "target" ],
+                                        [ "GLint", "internalFormat" ],
+                                        [ "GLsizei", "width" ],
+                                        [ "GLenum", "format" ],
+                                        [ "GLenum", "type" ],
+                                        [ "const void *", "data" ] ], "GLU" ],
+    "gluBuild2DMipmaps" => [ "GLint", [ [ "GLenum", "target" ],
+                                        [ "GLint", "internalFormat" ],
+                                        [ "GLsizei", "width" ],
+                                        [ "GLsizei", "height" ],
+                                        [ "GLenum", "format" ],
+                                        [ "GLenum", "type" ],
+                                        [ "const void *", "data" ] ], "GLU" ],
+    "gluCylinder" => [ "void", [ [ "void*", "quad" ],
+                                 [ "GLdouble", "base" ],
+                                 [ "GLdouble", "top" ],
+                                 [ "GLdouble", "height" ],
+                                 [ "GLint", "slices" ],
+                                 [ "GLint", "stacks" ] ], "GLU" ],
+    "gluDeleteNurbsRenderer" => [ "void", [ [ "void*", "nurb" ] ], "GLU" ],
+    "gluDeleteQuadric" => [ "void", [ [ "void*", "quad" ] ], "GLU" ],
+    "gluDeleteTess" => [ "void", [ [ "void*", "tess" ] ], "GLU" ],
+    "gluDisk" => [ "void", [ [ "void*", "quad" ],
+                             [ "GLdouble", "inner" ],
+                             [ "GLdouble", "outer" ],
+                             [ "GLint", "slices" ],
+                             [ "GLint", "loops" ] ], "GLU" ],
+    "gluEndCurve" => [ "void", [ [ "void*", "nurb" ] ], "GLU" ],
+    "gluEndPolygon" => [ "void", [ [ "void*", "tess" ] ], "GLU" ],
+    "gluEndSurface" => [ "void", [ [ "void*", "nurb" ] ], "GLU" ],
+    "gluEndTrim" => [ "void", [ [ "void*", "nurb" ] ], "GLU" ],
+    "gluErrorString" => [ "const GLubyte *", [ [ "GLenum", "error" ] ], "GLU" ],
+    "gluGetNurbsProperty" => [ "void", [ [ "void*", "nurb" ],
+                                         [ "GLenum", "property" ],
+                                         [ "GLfloat*", "data" ] ], "GLU" ],
+    "gluGetString" => [ "const GLubyte *", [ [ "GLenum", "name" ] ], "GLU" ],
+    "gluGetTessProperty" => [ "void", [ [ "void*", "tess" ],
+                                        [ "GLenum", "which" ],
+                                        [ "GLdouble*", "data" ] ], "GLU" ],
+    "gluLoadSamplingMatrices" => [ "void", [ [ "void*", "nurb" ],
+                                             [ "const GLfloat *", "model" ],
+                                             [ "const GLfloat *", "perspective" ],
+                                             [ "const GLint *", "view" ] ], "GLU" ],
+    "gluLookAt" => [ "void", [ [ "GLdouble", "eyeX" ],
+                               [ "GLdouble", "eyeY" ],
+                               [ "GLdouble", "eyeZ" ],
+                               [ "GLdouble", "centerX" ],
+                               [ "GLdouble", "centerY" ],
+                               [ "GLdouble", "centerZ" ],
+                               [ "GLdouble", "upX" ],
+                               [ "GLdouble", "upY" ],
+                               [ "GLdouble", "upZ" ] ], "GLU" ],
+    "gluNewNurbsRenderer" => [ "void*", [ ], "GLU" ],
+    "gluNewQuadric" => [ "void*", [ ], "GLU" ],
+    "gluNewTess" => [ "void*", [ ], "GLU" ],
+    "gluNextContour" => [ "void", [ [ "void*", "tess" ],
+                                    [ "GLenum", "type" ] ], "GLU" ],
+    "gluNurbsCallback" => [ "void", [ [ "void*", "nurb" ],
+                                      [ "GLenum", "which" ],
+                                      [ "void *", "CallBackFunc" ] ], "GLU" ],
+    "gluNurbsCurve" => [ "void", [ [ "void*", "nurb" ],
+                                   [ "GLint", "knotCount" ],
+                                   [ "GLfloat *", "knots" ],
+                                   [ "GLint", "stride" ],
+                                   [ "GLfloat *", "control" ],
+                                   [ "GLint", "order" ],
+                                   [ "GLenum", "type" ] ], "GLU" ],
+    "gluNurbsProperty" => [ "void", [ [ "void*", "nurb" ],
+                                      [ "GLenum", "property" ],
+                                      [ "GLfloat", "value" ] ], "GLU" ],
+    "gluNurbsSurface" => [ "void", [ [ "void*", "nurb" ],
+                                     [ "GLint", "sKnotCount" ],
+                                     [ "GLfloat*", "sKnots" ],
+                                     [ "GLint", "tKnotCount" ],
+                                     [ "GLfloat*", "tKnots" ],
+                                     [ "GLint", "sStride" ],
+                                     [ "GLint", "tStride" ],
+                                     [ "GLfloat*", "control" ],
+                                     [ "GLint", "sOrder" ],
+                                     [ "GLint", "tOrder" ],
+                                     [ "GLenum", "type" ] ], "GLU" ],
+    "gluOrtho2D" => [ "void", [ [ "GLdouble", "left" ],
+                                [ "GLdouble", "right" ],
+                                [ "GLdouble", "bottom" ],
+                                [ "GLdouble", "top" ] ], "GLU" ],
+    "gluPartialDisk" => [ "void", [ [ "void*", "quad" ],
+                                    [ "GLdouble", "inner" ],
+                                    [ "GLdouble", "outer" ],
+                                    [ "GLint", "slices" ],
+                                    [ "GLint", "loops" ],
+                                    [ "GLdouble", "start" ],
+                                    [ "GLdouble", "sweep" ] ], "GLU" ],
+    "gluPerspective" => [ "void", [ [ "GLdouble", "fovy" ],
+                                    [ "GLdouble", "aspect" ],
+                                    [ "GLdouble", "zNear" ],
+                                    [ "GLdouble", "zFar" ] ], "GLU" ],
+    "gluPickMatrix" => [ "void", [ [ "GLdouble", "x" ],
+                                   [ "GLdouble", "y" ],
+                                   [ "GLdouble", "delX" ],
+                                   [ "GLdouble", "delY" ],
+                                   [ "GLint *", "viewport" ] ], "GLU" ],
+    "gluProject" => [ "GLint", [ [ "GLdouble", "objX" ],
+                                 [ "GLdouble", "objY" ],
+                                 [ "GLdouble", "objZ" ],
+                                 [ "const GLdouble *", "model" ],
+                                 [ "const GLdouble *", "proj" ],
+                                 [ "const GLint *", "view" ],
+                                 [ "GLdouble*", "winX" ],
+                                 [ "GLdouble*", "winY" ],
+                                 [ "GLdouble*", "winZ" ] ], "GLU" ],
+    "gluPwlCurve" => [ "void", [ [ "void*", "nurb" ],
+                                 [ "GLint", "count" ],
+                                 [ "GLfloat*", "data" ],
+                                 [ "GLint", "stride" ],
+                                 [ "GLenum", "type" ] ], "GLU" ],
+    "gluQuadricCallback" => [ "void", [ [ "void*", "quad" ],
+                                        [ "GLenum", "which" ],
+                                        [ "void *", "CallBackFunc" ] ], "GLU" ],
+    "gluQuadricDrawStyle" => [ "void", [ [ "void*", "quad" ],
+                                         [ "GLenum", "draw" ] ], "GLU" ],
+    "gluQuadricNormals" => [ "void", [ [ "void*", "quad" ],
+                                       [ "GLenum", "normal" ] ], "GLU" ],
+    "gluQuadricOrientation" => [ "void", [ [ "void*", "quad" ],
+                                           [ "GLenum", "orientation" ] ], "GLU" ],
+    "gluQuadricTexture" => [ "void", [ [ "void*", "quad" ],
+                                       [ "GLboolean", "texture" ] ], "GLU" ],
+    "gluScaleImage" => [ "GLint", [ [ "GLenum", "format" ],
+                                    [ "GLsizei", "wIn" ],
+                                    [ "GLsizei", "hIn" ],
+                                    [ "GLenum", "typeIn" ],
+                                    [ "const void *", "dataIn" ],
+                                    [ "GLsizei", "wOut" ],
+                                    [ "GLsizei", "hOut" ],
+                                    [ "GLenum", "typeOut" ],
+                                    [ "GLvoid*", "dataOut" ] ], "GLU" ],
+    "gluSphere" => [ "void", [ [ "void*", "quad" ],
+                               [ "GLdouble", "radius" ],
+                               [ "GLint", "slices" ],
+                               [ "GLint", "stacks" ] ], "GLU" ],
+    "gluTessBeginContour" => [ "void", [ [ "void*", "tess" ] ], "GLU" ],
+    "gluTessBeginPolygon" => [ "void", [ [ "void*", "tess" ],
+                                         [ "GLvoid*", "data" ] ], "GLU" ],
+    "gluTessCallback" => [ "void", [ [ "void*", "tess" ],
+                                     [ "GLenum", "which" ],
+                                     [ "void *", "CallBackFunc" ] ], "GLU" ],
+    "gluTessEndContour" => [ "void", [ [ "void*", "tess" ] ], "GLU" ],
+    "gluTessEndPolygon" => [ "void", [ [ "void*", "tess" ] ], "GLU" ],
+    "gluTessNormal" => [ "void", [ [ "void*", "tess" ],
+                                   [ "GLdouble", "valueX" ],
+                                   [ "GLdouble", "valueY" ],
+                                   [ "GLdouble", "valueZ" ] ], "GLU" ],
+    "gluTessProperty" => [ "void", [ [ "void*", "tess" ],
+                                     [ "GLenum", "which" ],
+                                     [ "GLdouble", "data" ] ], "GLU" ],
+    "gluTessVertex" => [ "void", [ [ "void*", "tess" ],
+                                   [ "GLdouble *", "location" ],
+                                   [ "GLvoid*", "data" ] ], "GLU" ],
+    "gluUnProject" => [ "GLint", [ [ "GLdouble", "winX" ],
+                                   [ "GLdouble", "winY" ],
+                                   [ "GLdouble", "winZ" ],
+                                   [ "const GLdouble *", "model" ],
+                                   [ "const GLdouble *", "proj" ],
+                                   [ "const GLint *", "view" ],
+                                   [ "GLdouble*", "objX" ],
+                                   [ "GLdouble*", "objY" ],
+                                   [ "GLdouble*", "objZ" ] ], "GLU" ],
+   );
+
+my %supported_wgl_extensions =
+   (
+    "WGL_ARB_create_context" => 1,
+    "WGL_ARB_extensions_string" => 1,
+    "WGL_ARB_make_current_read" => 1,
+    "WGL_ARB_pbuffer" => 1,
+    "WGL_ARB_pixel_format" => 1,
+    "WGL_ARB_render_texture" => 1,
+    "WGL_EXT_extensions_string" => 1,
+    "WGL_EXT_swap_control" => 1,
+    "WGL_NV_vertex_array_range" => 1,
+    "WGL_WINE_pixel_format_passthrough" => 1,
+   );
+
+my %enums =
+   (
+    "WGL_RENDERER_VENDOR_ID_WINE" => "0x8183",
+    "WGL_RENDERER_DEVICE_ID_WINE" => "0x8184",
+    "WGL_RENDERER_VERSION_WINE" => "0x8185",
+    "WGL_RENDERER_ACCELERATED_WINE" => "0x8186",
+    "WGL_RENDERER_VIDEO_MEMORY_WINE" => "0x8187",
+    "WGL_RENDERER_UNIFIED_MEMORY_ARCHITECTURE_WINE" => "0x8188",
+    "WGL_RENDERER_PREFERRED_PROFILE_WINE" => "0x8189",
+    "WGL_RENDERER_OPENGL_CORE_PROFILE_VERSION_WINE" => "0x818A",
+    "WGL_RENDERER_OPENGL_COMPATIBILITY_PROFILE_VERSION_WINE" => "0x818B",
+    "WGL_RENDERER_OPENGL_ES_PROFILE_VERSION_WINE" => "0x818C",
+    "WGL_RENDERER_OPENGL_ES2_PROFILE_VERSION_WINE" => "0x818D",
+    "WGL_RENDERER_ID_WINE" => "0x818E",
+   );
+
+sub parse_variable($)
+{
+    my $p = shift;
+    my $ptype = '';
+    my $pname = '';
+    my $pnamebefore = '';
+    my $pnameafter = '';
+
+    while (my ($k, $v) = each(%$p)){
+        if ($k eq 'ptype') {
+            $ptype = ${$v}[0];
+        } elsif ($k eq 'name') {
+            $pname = ${$v}[0];
+        } elsif ($k eq 'content') {
+            if (ref($v) eq 'ARRAY') {
+                my @n = @{$v};
+                $pnamebefore = $n[0];
+                $pnameafter = $n[1] if (@n > 0);
+            } elsif ($v eq 'const ') {
+                $pnamebefore = $v;
+            } else {
+                $pnameafter = $v;
+            }
+        }
+    }
+    $ptype = $pnamebefore . $ptype . $pnameafter;
+    $ptype =~ s/ \*/\*/g;
+    $ptype =~ s/ $//g;
+    return [ $ptype, $pname ];
+}
+
+sub parse_file($$)
+{
+    my ($file, $generate_enums) = @_;
+    my $xml = new XML::Simple;
+    my $data = $xml->XMLin($file, ForceArray => 1);
+    my %functions;
+
+    # save all functions
+    for my $command ( @{${$data->{commands}}[0]->{'command'}} ) {
+        my $name = '';
+        my $ret = '';
+        my $params = [];
+        my @alias = '';
+        while (my ($k, $v) = each(%$command)){
+            if ($k eq 'param') {
+                push(@$params, parse_variable($_)) for (@{$v});
+            } elsif ($k eq 'proto') {
+                ($ret, $name) = @{parse_variable(${$v}[0])};
+            }
+        }
+        $functions{$name} = [ $ret, $params ];
+    }
+
+    # save all enums (only GL)
+    if ($generate_enums) {
+        for my $enum ( @{$data->{'enums'}} ) {
+            if (ref($enum->{'enum'}) eq "HASH") {
+                while (my ($k, $v) = each(%{$enum->{'enum'}})){
+                    $enums{$k} = $v->{'value'};
+                }
+            }
+        }
+    }
+
+    # generate norm functions
+    while (my ($k, $v) = each(%{$data->{feature}})) {
+        if ($norm_categories{$k}) {
+            for my $req (@{$v->{require}}) {
+                for(keys %{$req->{command}}) {
+                    $norm_functions{$_} = $functions{$_};
+                }
+            }
+        }
+    }
+
+    # generate extension functions from norm functions, if they are newer than the category
+    my %features = %{$data->{feature}};
+    foreach (sort keys %features) {
+        my ($k, $v) = %features{$_};
+        if (!$norm_categories{$k} && $v->{api} =~ /^gl(\||$)/)
+        {
+            for my $req (@{$v->{require}}) {
+                for (keys %{$req->{command}}) {
+                    if (!$ext_functions{$_} && !$norm_functions{$_}) {
+                        $ext_functions{$_} = [ $functions{$_}[0], $functions{$_}[1], [ $k ] ];
+                    }
+                }
+            }
+        }
+    }
+
+    # generate extension functions
+    while (my ($k, $v) = each(%{${$data->{extensions}}[0]->{extension}})) {
+        if ($v->{supported} =~ /^gl(\||$)/) {
+            for my $req (@{$v->{require}}) {
+                if (!defined $req->{api} || $req->{api} =~ /^gl(\||$)/) {
+                    for (keys %{$req->{command}}) {
+                        if (!$ext_functions{$_} && !$norm_functions{$_}) {
+                            $ext_functions{$_} = [$functions{$_}[0], $functions{$_}[1], [ $k ]];
+                        }
+                        elsif ($ext_functions{$_}) {
+                            push @{$ext_functions{$_}->[2]}, $k;
+                        }
+                    }
+                }
+            }
+        }
+        elsif ($v->{supported} =~ /^wgl$/) {
+            for (keys %{${$v->{require}}[0]->{command}}) {
+                if (defined $supported_wgl_extensions{$k}) {
+                    $ext_functions{$_} = [ $functions{$_}[0], $functions{$_}[1], [ $k ] ];
+                }
+            }
+        }
+    }
+}
+
+parse_file( "gl.xml", 1 );
+parse_file( "wgl.xml", 0 );
+
+#
+# Get the current wgl_driver.h version
+#
+my $wgl_version = 0;
+open HEADER, "<$wgl_driver_file" or die "cannot open $wgl_driver_file";
+while (<HEADER>)
+{
+    next unless /^#define WINE_WGL_DRIVER_VERSION (\d+)/;
+    $wgl_version = $1;
+    last;
+}
+close HEADER;
+
+#
+# Generate the wgl_driver.h file
+#
+open HEADER, ">$wgl_driver_file" or die "cannot create $wgl_driver_file";
+print HEADER "/* Automatically generated from http://www.opengl.org/registry files; DO NOT EDIT! */\n\n";
+print HEADER "#ifndef __WINE_WGL_DRIVER_H\n";
+print HEADER "#define __WINE_WGL_DRIVER_H\n\n";
+print HEADER "#ifndef WINE_GLAPI\n";
+print HEADER "#define WINE_GLAPI\n";
+print HEADER "#endif\n\n";
+
+printf HEADER "#define WINE_WGL_DRIVER_VERSION %u\n\n", $wgl_version + 1;
+
+print HEADER "struct wgl_context;\n";
+print HEADER "struct wgl_pbuffer;\n\n";
+
+print HEADER "struct opengl_funcs\n{\n";
+print HEADER "    struct\n    {\n";
+foreach (sort keys %wgl_functions)
+{
+    printf HEADER "        %s;\n", get_func_proto("(WINE_GLAPI *p_%s)", $_, $wgl_functions{$_});
+}
+print HEADER "    } wgl;\n\n";
+
+print HEADER "    struct\n    {\n";
+foreach (sort keys %norm_functions)
+{
+    next if $_ eq "glDebugEntry";
+    printf HEADER "        %s;\n", get_func_proto("(WINE_GLAPI *p_%s)", $_, $norm_functions{$_});
+}
+print HEADER "    } gl;\n\n";
+
+print HEADER "    struct\n    {\n";
+foreach (sort keys %ext_functions)
+{
+    printf HEADER "        %s;\n", get_func_proto("(WINE_GLAPI *p_%s)", $_, $ext_functions{$_});
+}
+print HEADER "    } ext;\n";
+
+# CrossOver Hack 10798
+print HEADER "    struct\n    {\n";
+foreach (sort keys %glu_functions)
+{
+    printf HEADER "        %s;\n", get_func_proto("(WINE_GLAPI *p_%s)", $_, $glu_functions{$_});
+}
+print HEADER "    } glu;\n";
+print HEADER "};\n\n";
+
+print HEADER "#define ALL_WGL_FUNCS";
+foreach (sort keys %norm_functions)
+{
+    next if $_ eq "glDebugEntry";
+    printf HEADER " \\\n    USE_GL_FUNC(\%s)", $_;
+}
+print HEADER "\n\n";
+
+# CrossOver Hack 10798
+print HEADER "#define ALL_GLU_FUNCS";
+foreach (sort keys %glu_functions)
+{
+    printf HEADER " \\\n    USE_GL_FUNC(\%s)", $_;
+}
+print HEADER "\n\n";
+
+print HEADER "extern struct opengl_funcs * CDECL __wine_get_wgl_driver( HDC hdc, UINT version );\n";
+print HEADER "extern BOOL CDECL __wine_set_pixel_format( HWND hwnd, int format );\n\n";
+print HEADER "#endif /* __WINE_WGL_DRIVER_H */\n";
+close HEADER;
+
+#
+# Generate the wgl.h file
+#
+open HEADER, ">$wgl_file" or die "cannot create $wgl_file";
+print HEADER "/* Automatically generated from http://www.opengl.org/registry files; DO NOT EDIT! */\n\n";
+print HEADER "#ifndef __WINE_WGL_H\n";
+print HEADER "#define __WINE_WGL_H\n\n";
+
+print HEADER "#ifndef GLAPIENTRY\n";
+print HEADER "#define GLAPIENTRY __stdcall\n";
+print HEADER "#endif\n\n";
+
+foreach (sort keys %arg_conv)
+{
+    printf HEADER "typedef %-22s %s;\n", $arg_conv{$_}[1], $_;
+}
+print HEADER "\n";
+
+my $maxlen = 1;
+foreach (keys %enums) { $maxlen = length($_) if length($_) > $maxlen; }
+foreach (sort keys %enums)
+{
+    printf HEADER "#define %-*s %s\n", $maxlen, $_, $enums{$_};
+}
+print HEADER "\n";
+
+foreach (sort keys %norm_functions)
+{
+    printf HEADER "%s;\n", get_func_proto("GLAPIENTRY %s", $_, $norm_functions{$_});
+}
+
+print HEADER "\n#endif /* __WINE_WGL_H */\n";
+close HEADER;
+
+#
+# Now, generate the output files. First, the spec file.
+#
+open(SPEC, ">$spec_file") or die "cannot create $spec_file";
+
+foreach (sort keys %norm_functions) {
+    my $args=" ";
+    for (my $i = 0; $i < @{$norm_functions{$_}->[1]}; $i++) {
+        my $type = $norm_functions{$_}->[1]->[$i]->[0];
+        if ($type =~ /\*/) {
+            $args .= "ptr ";
+        } elsif (defined($arg_conv{$type})) {
+            $args .= "$@$arg_conv{$type}[0] ";
+        } else {
+            die "No conversion for GL type $type...\n";
+        }
+    }
+    $args = substr($args,1,-1);
+    print SPEC "@ stdcall $_($args)\n";
+}
+
+print SPEC "@ stdcall wglChoosePixelFormat(long ptr)
+@ stdcall wglCopyContext(long long long)
+@ stdcall wglCreateContext(long)
+@ stdcall wglCreateLayerContext(long long)
+@ stdcall wglDeleteContext(long)
+@ stdcall wglDescribeLayerPlane(long long long long ptr)
+@ stdcall wglDescribePixelFormat(long long long ptr)
+@ stdcall wglGetCurrentContext()
+@ stdcall wglGetCurrentDC()
+@ stub    wglGetDefaultProcAddress
+@ stdcall wglGetLayerPaletteEntries(long long long long ptr)
+@ stdcall wglGetPixelFormat(long)
+@ stdcall wglGetProcAddress(str)
+@ stdcall wglMakeCurrent(long long)
+@ stdcall wglRealizeLayerPalette(long long long)
+@ stdcall wglSetLayerPaletteEntries(long long long long ptr)
+@ stdcall wglSetPixelFormat(long long ptr)
+@ stdcall wglShareLists(long long)
+@ stdcall wglSwapBuffers(long)
+@ stdcall wglSwapLayerBuffers(long long)
+@ stdcall wglUseFontBitmapsA(long long long long)
+@ stdcall wglUseFontBitmapsW(long long long long)
+@ stdcall wglUseFontOutlinesA(long long long long long long long ptr)
+@ stdcall wglUseFontOutlinesW(long long long long long long long ptr)
+";
+
+close(SPEC);
+
+#
+# After the spec file, the opengl_norm.c file
+#
+open(NORM, ">$norm_file") or die "cannot create $norm_file";
+print NORM "
+/* Auto-generated file... Do not edit ! */
+
+#include \"config.h\"
+#include <stdarg.h>
+#include \"winternl.h\"
+#include \"wingdi.h\"
+#include \"wine/wgl.h\"
+#include \"wine/wgl_driver.h\"
+#include \"wine/debug.h\"
+
+WINE_DEFAULT_DEBUG_CHANNEL(opengl);
+";
+
+foreach (sort keys %norm_functions) {
+    my $string = GenerateThunk($_, $norm_functions{$_}, 1, "gl");
+    print NORM "\n$string" if $string;
+}
+
+foreach (sort keys %wgl_functions) {
+    print NORM generate_null_func($_, $wgl_functions{$_});
+}
+foreach (sort keys %norm_functions) {
+    print NORM generate_null_func($_, $norm_functions{$_});
+}
+foreach (sort keys %ext_functions) {
+    print NORM generate_null_func($_, $ext_functions{$_});
+}
+# CrossOver Hack 10798
+foreach (sort keys %glu_functions) {
+    print NORM generate_null_func($_, $glu_functions{$_});
+}
+
+print NORM "\nstruct opengl_funcs null_opengl_funcs =\n{\n    {\n";
+foreach (sort keys %wgl_functions) { print NORM "        null_$_,\n"; }
+print NORM "    },\n    {\n";
+foreach (sort keys %norm_functions) { print NORM "        null_$_,\n" unless $_ eq "glDebugEntry"; }
+print NORM "    },\n    {\n";
+foreach (sort keys %ext_functions) { print NORM "        null_$_,\n"; }
+# CrossOver Hack 10798
+print NORM "    },\n    {\n";
+foreach (sort keys %glu_functions) { print NORM "        null_$_,\n"; }
+print NORM "    }\n};\n";
+
+close(NORM);
+
+#
+# Finally, more complex, the opengl_ext.c file
+#
+open(EXT, ">$ext_file") or die "cannot create $ext_file";
+print EXT "
+/* Auto-generated file... Do not edit ! */
+
+#include \"config.h\"
+#include <stdarg.h>
+#include \"opengl_ext.h\"
+#include \"winternl.h\"
+#include \"wingdi.h\"
+#include \"wine/wgl.h\"
+#define WGL_WGLEXT_PROTOTYPES
+#include \"wine/wglext.h\"
+#include \"wine/wgl_driver.h\"
+#include \"wine/debug.h\"
+
+WINE_DEFAULT_DEBUG_CHANNEL(opengl);
+
+";
+
+# The thunks themselves....
+my $count = keys %ext_functions;
+print EXT "const int extension_registry_size = $count;\n";
+foreach (sort keys %ext_functions) {
+    my $string = GenerateThunk($_, $ext_functions{$_}, 0, "ext");
+    if ($string =~ /DECLSPEC_HIDDEN/) {
+        print EXT "\n$string";
+    } else {
+        print EXT "\nstatic $string" if $string;
+    }
+}
+
+# Then the table giving the string <-> function correspondence */
+print EXT "\nconst OpenGL_extension extension_registry[$count] = {\n";
+my $i = 0;
+foreach (sort keys %ext_functions) {
+    my $func_ref = $ext_functions{$_};
+    printf EXT "  { \"%s\", \"%s\", %s }", $_, join(" ", sort @{$func_ref->[2]}), $_;
+    if ($i != $count-1) {
+        print EXT ",";
+    }
+    $i++;
+    print EXT "\n";
+}
+print EXT "};\n";
+
+close(EXT);

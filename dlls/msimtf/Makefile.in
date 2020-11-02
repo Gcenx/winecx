@@ -1,0 +1,8 @@
+MODULE    = msimtf.dll
+IMPORTS   = uuid imm32
+
+C_SRCS = \
+	activeimmapp.c \
+	main.c
+
+IDL_SRCS = msimtf.idl

@@ -1,0 +1,5 @@
+MODULE    = iernonce.dll
+IMPORTS   = advapi32
+
+C_SRCS = \
+	iernonce.c

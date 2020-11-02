@@ -1,0 +1,7 @@
+MODULE    = mspatcha.dll
+IMPORTLIB = mspatcha
+
+C_SRCS = \
+	mspatcha_main.c
+
+RC_SRCS = version.rc

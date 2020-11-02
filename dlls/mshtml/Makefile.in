@@ -1,0 +1,82 @@
+MODULE    = mshtml.dll
+IMPORTLIB = mshtml
+IMPORTS   = strmiids uuid urlmon shlwapi shell32 ole32 oleaut32 user32 gdi32 advapi32
+DELAYIMPORTS = wininet inetcomm
+
+C_SRCS = \
+	conpoint.c \
+	dispex.c \
+	editor.c \
+	hlink.c \
+	htmlanchor.c \
+	htmlarea.c \
+	htmlattr.c \
+	htmlbody.c \
+	htmlcomment.c \
+	htmlcurstyle.c \
+	htmldoc.c \
+	htmlelem.c \
+	htmlelemcol.c \
+	htmlembed.c \
+	htmlevent.c \
+	htmlform.c \
+	htmlframe.c \
+	htmlframebase.c \
+	htmlgeneric.c \
+	htmlhead.c \
+	htmliframe.c \
+	htmlimg.c \
+	htmlinput.c \
+	htmllink.c \
+	htmllocation.c \
+	htmlmeta.c \
+	htmlnode.c \
+	htmlobject.c \
+	htmloption.c \
+	htmlscreen.c \
+	htmlscript.c \
+	htmlselect.c \
+	htmlstorage.c \
+	htmlstyle.c \
+	htmlstyleelem.c \
+	htmlstylesheet.c \
+	htmltable.c \
+	htmltablecell.c \
+	htmltablerow.c \
+	htmltextarea.c \
+	htmltextcont.c \
+	htmltextnode.c \
+	htmlwindow.c \
+	ifacewrap.c \
+	ipwindow.c \
+	loadopts.c \
+	main.c \
+	mutation.c \
+	navigate.c \
+	npplugin.c \
+	nsembed.c \
+	nsevents.c \
+	nsio.c \
+	nsservice.c \
+	olecmd.c \
+	oleobj.c \
+	olewnd.c \
+	omnavigator.c \
+	persist.c \
+	pluginhost.c \
+	propbag.c \
+	protocol.c \
+	script.c \
+	secmgr.c \
+	selection.c \
+	service.c \
+	task.c \
+	txtrange.c \
+	view.c \
+	xmlhttprequest.c
+
+RC_SRCS = mshtml.rc
+
+IDL_SRCS = \
+	mshtml_classes.idl \
+	nsiface.idl

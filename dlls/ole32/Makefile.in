@@ -1,0 +1,53 @@
+MODULE    = ole32.dll
+IMPORTLIB = ole32
+IMPORTS   = uuid advapi32 user32 gdi32 rpcrt4
+DELAYIMPORTS = oleaut32
+EXTRADEFS = -D_OLE32_
+
+C_SRCS = \
+	antimoniker.c \
+	bindctx.c \
+	classmoniker.c \
+	clipboard.c \
+	comcat.c \
+	compobj.c \
+	compositemoniker.c \
+	datacache.c \
+	defaulthandler.c \
+	dictionary.c \
+	enumx.c \
+	errorinfo.c \
+	filelockbytes.c \
+	filemoniker.c \
+	ftmarshal.c \
+	git.c \
+	hglobalstream.c \
+	ifs.c \
+	itemmoniker.c \
+	marshal.c \
+	memlockbytes.c \
+	moniker.c \
+	ole2.c \
+	ole2impl.c \
+	ole2stubs.c \
+	ole32_main.c \
+	oleobj.c \
+	oleproxy.c \
+	pointermoniker.c \
+	rpc.c \
+	stg_prop.c \
+	stg_stream.c \
+	storage32.c \
+	stubmanager.c \
+	usrmarshal.c
+
+RC_SRCS = ole32res.rc
+
+IDL_SRCS = \
+	dcom.idl \
+	irot.idl \
+	ole32_objidl.idl \
+	ole32_oleidl.idl \
+	ole32_unknwn.idl
+
+dlldata_EXTRADEFS = -DENTRY_PREFIX=OLE32_ -DPROXY_CLSID=CLSID_PSFactoryBuffer -DWINE_REGISTER_DLL

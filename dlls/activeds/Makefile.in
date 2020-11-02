@@ -1,0 +1,4 @@
+MODULE    = activeds.dll
+IMPORTLIB = activeds
+
+C_SRCS = activeds_main.c

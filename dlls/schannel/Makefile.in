@@ -1,0 +1,9 @@
+MODULE    = schannel.dll
+IMPORTS   = secur32
+
+C_SRCS = \
+	lsamode.c \
+	schannel_main.c \
+	usermode.c
+
+RC_SRCS = version.rc

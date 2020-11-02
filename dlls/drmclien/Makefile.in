@@ -1,0 +1,4 @@
+MODULE    = drmclien.dll
+
+C_SRCS = \
+	main.c

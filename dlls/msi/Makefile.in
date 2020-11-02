@@ -1,0 +1,53 @@
+MODULE    = msi.dll
+IMPORTLIB = msi
+IMPORTS   = uuid urlmon wininet comctl32 shell32 shlwapi cabinet oleaut32 ole32 version user32 gdi32 advapi32
+DELAYIMPORTS = odbccp32 wintrust crypt32 imagehlp mspatcha
+
+C_SRCS = \
+	action.c \
+	alter.c \
+	appsearch.c \
+	assembly.c \
+	automation.c \
+	classes.c \
+	create.c \
+	custom.c \
+	database.c \
+	delete.c \
+	dialog.c \
+	distinct.c \
+	drop.c \
+	files.c \
+	font.c \
+	format.c \
+	handle.c \
+	insert.c \
+	install.c \
+	media.c \
+	msi.c \
+	msi_main.c \
+	msiquery.c \
+	package.c \
+	patch.c \
+	record.c \
+	registry.c \
+	script.c \
+	select.c \
+	source.c \
+	storages.c \
+	streams.c \
+	string.c \
+	suminfo.c \
+	table.c \
+	tokenize.c \
+	update.c \
+	upgrade.c \
+	where.c
+
+IDL_SRCS = msiserver.idl
+
+BISON_SRCS = \
+	cond.y \
+	sql.y
+
+RC_SRCS = msi.rc

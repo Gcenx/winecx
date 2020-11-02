@@ -1,0 +1,11 @@
+EXTRADEFS = -DUSE_WS_PREFIX
+MODULE    = ws2_32.dll
+IMPORTLIB = ws2_32
+DELAYIMPORTS = iphlpapi user32
+EXTRALIBS = $(POLL_LIBS) $(RT_LIBS)
+
+C_SRCS = \
+	async.c \
+	socket.c
+
+RC_SRCS = version.rc

@@ -1,0 +1,7 @@
+MODULE    = ntprint.dll
+IMPORTS   = winspool
+
+C_SRCS = \
+	ntprint.c
+
+RC_SRCS = ntprint.rc

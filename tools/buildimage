@@ -1,0 +1,234 @@
+#! /usr/bin/perl -w
+#
+# Render SVG files containing one or more images into an ICO, BMP, or PNG.
+#
+# Copyright (C) 2010 Joel Holdsworth
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+
+use strict;
+use warnings;
+use XML::Parser;
+use MIME::Base64;
+use File::Copy;
+
+# Parse the parameters
+my $svgFileName = $ARGV[0];
+my $outFileName = $ARGV[1];
+my $optSize;
+
+die "Cannot open SVG file" unless defined($svgFileName);
+die "Cannot open output file" unless defined($outFileName);
+
+$outFileName =~ m/(.*)\.(.*)/;
+my $outName = $1;
+my $ext = lc($2);
+die "Only BMP, ICO, and PNG outputs are supported" unless $ext eq "bmp" or $ext eq "ico" or $ext eq "png";
+
+if (defined($ARGV[2]) && ($ARGV[2] eq "--size") && defined($ARGV[3]))
+{
+    $ARGV[3] =~ m/(\d+)/;
+    $optSize = $1;
+}
+
+die "You must specify a size with -s SIZE for PNG output." if ($ext eq "png" && !defined($optSize));
+
+my $renderedSVGFileName = "$svgFileName.png";
+my @pngFiles;
+my @pngFilesRaw;
+
+# Get the programs from the environment variables
+my $convert = $ENV{"CONVERT"} || "convert";
+my $rsvg = $ENV{"RSVG"} || "rsvg";
+my $icotool = $ENV{"ICOTOOL"} || "icotool";
+
+# Be ready to abort
+sub cleanup()
+{
+    unlink $renderedSVGFileName;
+    unlink $_ foreach(@pngFiles);
+    unlink $_ foreach(@pngFilesRaw);
+}
+
+$SIG{"INT"} = "cleanup";
+$SIG{"HUP"} = "cleanup";
+$SIG{"TERM"} = "cleanup";
+$SIG{"__DIE__"} = "cleanup";
+
+# run a shell command and die on error
+sub shell(@)
+{
+    my @args = @_;
+    system(@args) == 0 or die "@args failed: $?";
+}
+
+sub svg_element_start
+{
+    my($expat, $element, %attr) = @_;
+
+    # Parse the id for icon/bitmap render directives
+    my $id = $attr{'id'};
+    return unless defined($id);
+
+    my $size = 0;
+    my $depth = 0;
+    my $width = 0;
+    my $height = 0;
+
+    if($ext eq "ico" or $ext eq "png") {
+        return unless $id =~ /icon:(\d*)-(\d*)/;
+        $size = $1;
+        $depth = $2;
+    } elsif($ext eq "bmp") {
+        return unless $id =~ /bitmap:(\d*)-(\d*)/;
+        $size = $1;
+        $depth = $2;
+    }
+
+    return unless defined($size) and defined($depth);
+
+    warn "Unexpected icon depth" unless
+        $depth == 4 or $depth == 8 or $depth == 24 or $depth == 32;
+    my $pngFileName = "$outName-$size-$depth.png";
+
+    if($element eq "svg") {
+
+        # The whole file is tagged
+        copy($renderedSVGFileName, $pngFileName) or die "File could not be copied";
+
+    } elsif($element eq "rect") {
+
+        # Extract SVG vector images
+        my $x = $attr{'x'};
+        my $y = $attr{'y'};
+        $width = $attr{'width'};
+        $height = $attr{'height'};
+
+        if(defined($x) and defined($y)) {
+            if($x =~ /\d*/ and $y =~ /\d*/) {
+                shell $convert, $renderedSVGFileName, "-crop", "${width}x${height}+$x+$y", $pngFileName;
+            }
+        }
+
+    } elsif($element eq "image" ) {
+
+        # Extract Base64 encoded PNG data to files
+        my $xlinkHref = $attr{'xlink:href'};
+        if(defined($xlinkHref)) {
+            $xlinkHref =~ /data:image\/png;base64(.*)/;
+            my $imageEncodedData = $1;
+            if(defined $imageEncodedData) {
+                open(FILE, '>' . $pngFileName) or die "$!";
+                print FILE decode_base64($imageEncodedData);
+                close FILE;
+            }
+        }
+    } else {
+        return;
+    }
+
+    if ($width >= 128 && $height >= 128 && $ext ne "png")
+    {
+        push(@pngFilesRaw, $pngFileName);
+    }
+    else
+    {
+        push(@pngFiles, $pngFileName);
+    }
+}
+
+# Render the SVG image
+my @rsvgCmd;
+push(@rsvgCmd, $rsvg);
+push(@rsvgCmd, $svgFileName);
+push(@rsvgCmd, "-o") if ($rsvg eq "rsvg-convert");
+push(@rsvgCmd, $renderedSVGFileName);
+shell @rsvgCmd;
+
+# Render the images in the SVG
+my $parser = new XML::Parser(
+    Handlers => {Start => \&svg_element_start});
+$parser->parsefile("$svgFileName");
+
+# If no render directives were found, take the full image as-is
+unless (@pngFiles || @pngFilesRaw) {
+    my $pngFileName = "bmp$renderedSVGFileName";
+    copy($renderedSVGFileName, $pngFileName) or die "File could not be copied";
+    push(@pngFiles, $pngFileName);
+}
+
+# Combine the renderings into the output file
+if($ext eq "ico") {
+
+    # Place images into the ICO
+    shell $icotool, "-c", "-o", $outFileName, @pngFiles, map { "--raw=$_"; } @pngFilesRaw;
+
+} elsif($ext eq "bmp") {
+
+    # Only the first image becomes the final BMP
+    my $pngFile = $pngFiles[0];
+    $pngFile =~ /.*-\d*-(\d*)\.png/;
+    my $depth = $1;
+
+    # Convert it into a bmp
+    if($depth == 24) {
+        shell $convert, "png:$pngFile", "+matte", $outFileName;
+    } else {
+        shell $convert, "png:$pngFile", $outFileName;
+    }
+
+} elsif($ext eq "png") {
+
+    my $depth;
+    my $diff;
+    my $size;
+    my $bestFitDepth;
+    my $bestFitDiff;
+    my $bestFitFile;
+    my $bestFitSize = 0;
+
+    foreach my $file (@pngFiles) {
+        $file =~ /.*-(\d*)-(\d*)\.png/;
+        $size = $1;
+        $depth = $2;
+
+        $diff = abs($size - $optSize);
+
+        if (!defined($bestFitDiff) || $diff <= $bestFitDiff)
+        {
+            $bestFitDiff = $diff;
+
+            if($bestFitSize != $size)
+            {
+                $bestFitSize = $size;
+                $bestFitDepth = 0;
+            }
+
+            if ($depth > $bestFitDepth)
+            {
+                $bestFitDepth = $depth;
+                $bestFitFile = $file;
+            }
+        }
+    }
+    copy($bestFitFile, $outFileName) or die "Could not copy $bestFitFile to $outFileName";
+    if ($bestFitSize != $optSize)
+    {
+        warn "No $optSize x $optSize icon found in $svgFileName: using $bestFitSize x $bestFitSize instead.";
+    }
+}
+
+# Delete the intermediate images
+cleanup();

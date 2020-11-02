@@ -1,0 +1,7 @@
+MODULE    = start.exe
+APPMODE   = -mconsole -municode
+IMPORTS   = shell32 user32
+
+C_SRCS = start.c
+
+RC_SRCS = start.rc

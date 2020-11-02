@@ -1,0 +1,6 @@
+TESTDLL   = browseui.dll
+IMPORTS   = ole32
+
+C_SRCS = \
+	autocomplete.c \
+	progressdlg.c

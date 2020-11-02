@@ -1,0 +1,38 @@
+MODULE    = jscript.dll
+IMPORTS   = oleaut32 ole32 user32 advapi32
+
+C_SRCS = \
+	activex.c \
+	array.c \
+	bool.c \
+	compile.c \
+	date.c \
+	decode.c \
+	dispex.c \
+	engine.c \
+	error.c \
+	function.c \
+	global.c \
+	jscript.c \
+	jscript_main.c \
+	json.c \
+	jsregexp.c \
+	jsstr.c \
+	jsutils.c \
+	lex.c \
+	math.c \
+	number.c \
+	object.c \
+	regexp.c \
+	string.c \
+	vbarray.c
+
+RC_SRCS = jscript.rc
+
+IDL_SRCS = \
+	jscript_classes.idl \
+	jsglobal.idl
+
+BISON_SRCS = \
+	cc_parser.y \
+	parser.y

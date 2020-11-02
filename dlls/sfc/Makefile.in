@@ -1,0 +1,5 @@
+MODULE    = sfc.dll
+IMPORTLIB = sfc
+IMPORTS   = sfc_os
+
+C_SRCS = sfc_main.c

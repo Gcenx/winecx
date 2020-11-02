@@ -1,0 +1,18 @@
+MODULE    = winhttp.dll
+IMPORTLIB = winhttp
+IMPORTS   = uuid jsproxy user32 advapi32
+DELAYIMPORTS = oleaut32 ole32 crypt32 secur32
+EXTRALIBS = $(CORESERVICES_LIBS) $(SOCKET_LIBS)
+
+C_SRCS = \
+	cookie.c \
+	handle.c \
+	main.c \
+	net.c \
+	request.c \
+	session.c \
+	url.c
+
+IDL_SRCS = winhttp_tlb.idl
+
+RC_SRCS = rsrc.rc

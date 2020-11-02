@@ -1,0 +1,14 @@
+MODULE    = wineboot.exe
+APPMODE   = -mconsole
+IMPORTS   = uuid advapi32
+DELAYIMPORTS = shell32 shlwapi version user32
+
+C_SRCS = \
+	shutdown.c \
+	wineboot.c
+
+RC_SRCS = wineboot.rc
+
+MANPAGES = wineboot.man.in
+
+INSTALL_LIB = wineboot.exe wineboot

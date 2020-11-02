@@ -1,0 +1,4 @@
+MODULE    = itircl.dll
+
+C_SRCS = \
+	itircl_main.c

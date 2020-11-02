@@ -1,0 +1,30 @@
+TESTDLL   = user32.dll
+IMPORTS   = user32 gdi32 advapi32
+
+C_SRCS = \
+	broadcast.c \
+	class.c \
+	clipboard.c \
+	combo.c \
+	cursoricon.c \
+	dce.c \
+	dde.c \
+	dialog.c \
+	edit.c \
+	generated.c \
+	input.c \
+	listbox.c \
+	menu.c \
+	monitor.c \
+	msg.c \
+	resource.c \
+	scroll.c \
+	static.c \
+	sysparams.c \
+	text.c \
+	uitools.c \
+	win.c \
+	winstation.c \
+	wsprintf.c
+
+RC_SRCS = resource.rc

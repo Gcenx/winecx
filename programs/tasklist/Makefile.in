@@ -1,0 +1,6 @@
+MODULE    = tasklist.exe
+APPMODE   = -mconsole -municode
+
+C_SRCS = tasklist.c
+
+RC_SRCS = version.rc

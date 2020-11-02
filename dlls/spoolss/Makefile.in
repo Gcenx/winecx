@@ -1,0 +1,7 @@
+MODULE      = spoolss.dll
+IMPORTLIB   = spoolss
+IMPORTS     = winspool
+
+C_SRCS = \
+	router.c \
+	spoolss_main.c

@@ -1,0 +1,3818 @@
+/* -*- C -*-
+ *
+ * Wine server protocol definition
+ *
+ * Copyright (C) 2001 Alexandre Julliard
+ *
+ * This file is used by tools/make_requests to build the
+ * protocol structures in include/wine/server_protocol.h
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+@HEADER  /* start of C declarations */
+
+#include <stdarg.h>
+#include <stdlib.h>
+#include <time.h>
+
+#include <windef.h>
+#include <winbase.h>
+
+typedef unsigned int obj_handle_t;
+typedef unsigned int user_handle_t;
+typedef unsigned int atom_t;
+typedef unsigned int process_id_t;
+typedef unsigned int thread_id_t;
+typedef unsigned int data_size_t;
+typedef unsigned int ioctl_code_t;
+typedef unsigned __int64 lparam_t;
+typedef unsigned __int64 apc_param_t;
+typedef unsigned __int64 mem_size_t;
+typedef unsigned __int64 file_pos_t;
+typedef unsigned __int64 client_ptr_t;
+typedef unsigned __int64 affinity_t;
+typedef client_ptr_t mod_handle_t;
+
+struct request_header
+{
+    int          req;          /* request code */
+    data_size_t  request_size; /* request variable part size */
+    data_size_t  reply_size;   /* reply variable part maximum size */
+};
+
+struct reply_header
+{
+    unsigned int error;        /* error result */
+    data_size_t  reply_size;   /* reply variable part size */
+};
+
+/* placeholder structure for the maximum allowed request size */
+/* this is used to construct the generic_request union */
+struct request_max_size
+{
+    int pad[16]; /* the max request size is 16 ints */
+};
+
+#define FIRST_USER_HANDLE 0x0020  /* first possible value for low word of user handle */
+#define LAST_USER_HANDLE  0xffef  /* last possible value for low word of user handle */
+
+
+/* debug event data */
+typedef union
+{
+    int code;   /* event code */
+    struct
+    {
+        int              code;       /* EXCEPTION_DEBUG_EVENT */
+        int              first;      /* first chance exception? */
+        unsigned int     exc_code;   /* exception code */
+        unsigned int     flags;      /* exception flags */
+        client_ptr_t     record;     /* exception record */
+        client_ptr_t     address;    /* exception address */
+        int              nb_params;  /* number of parameters */
+        int              __pad;
+        client_ptr_t     params[15]; /* parameters */
+    } exception;
+    struct
+    {
+        int          code;       /* CREATE_THREAD_DEBUG_EVENT */
+        obj_handle_t handle;     /* handle to the new thread */
+        client_ptr_t teb;        /* thread teb (in debugged process address space) */
+        client_ptr_t start;      /* thread startup routine */
+    } create_thread;
+    struct
+    {
+        int          code;       /* CREATE_PROCESS_DEBUG_EVENT */
+        obj_handle_t file;       /* handle to the process exe file */
+        obj_handle_t process;    /* handle to the new process */
+        obj_handle_t thread;     /* handle to the new thread */
+        mod_handle_t base;       /* base of executable image */
+        int          dbg_offset; /* offset of debug info in file */
+        int          dbg_size;   /* size of debug info */
+        client_ptr_t teb;        /* thread teb (in debugged process address space) */
+        client_ptr_t start;      /* thread startup routine */
+        client_ptr_t name;       /* image name (optional) */
+        int          unicode;    /* is it Unicode? */
+    } create_process;
+    struct
+    {
+        int          code;       /* EXIT_THREAD_DEBUG_EVENT/EXIT_PROCESS_DEBUG_EVENT */
+        int          exit_code;  /* thread or process exit code */
+    } exit;
+    struct
+    {
+        int          code;       /* LOAD_DLL_DEBUG_EVENT */
+        obj_handle_t handle;     /* file handle for the dll */
+        mod_handle_t base;       /* base address of the dll */
+        int          dbg_offset; /* offset of debug info in file */
+        int          dbg_size;   /* size of debug info */
+        client_ptr_t name;       /* image name (optional) */
+        int          unicode;    /* is it Unicode? */
+    } load_dll;
+    struct
+    {
+        int          code;       /* UNLOAD_DLL_DEBUG_EVENT */
+        int          __pad;
+        mod_handle_t base;       /* base address of the dll */
+    } unload_dll;
+} debug_event_t;
+
+/* supported CPU types */
+enum cpu_type
+{
+    CPU_x86, CPU_x86_64, CPU_POWERPC, CPU_ARM, CPU_ARM64
+};
+typedef int cpu_type_t;
+
+/* context data */
+typedef struct
+{
+    cpu_type_t       cpu;        /* cpu type */
+    unsigned int     flags;      /* SERVER_CTX_* flags */
+    union
+    {
+        struct { unsigned int eip, ebp, esp, eflags, cs, ss; } i386_regs;
+        struct { unsigned __int64 rip, rbp, rsp;
+                 unsigned int cs, ss, flags, __pad; } x86_64_regs;
+        struct { unsigned int iar, msr, ctr, lr, dar, dsisr, trap, __pad; } powerpc_regs;
+        struct { unsigned int sp, lr, pc, cpsr; } arm_regs;
+        struct { unsigned __int64 sp, pc, pstate; } arm64_regs;
+    } ctl;  /* selected by SERVER_CTX_CONTROL */
+    union
+    {
+        struct { unsigned int eax, ebx, ecx, edx, esi, edi; } i386_regs;
+        struct { unsigned __int64 rax,rbx, rcx, rdx, rsi, rdi,
+                                  r8, r9, r10, r11, r12, r13, r14, r15; } x86_64_regs;
+        struct { unsigned int gpr[32], cr, xer; } powerpc_regs;
+        struct { unsigned int r[13]; } arm_regs;
+        struct { unsigned __int64 x[31]; } arm64_regs;
+    } integer;  /* selected by SERVER_CTX_INTEGER */
+    union
+    {
+        struct { unsigned int ds, es, fs, gs; } i386_regs;
+        struct { unsigned int ds, es, fs, gs; } x86_64_regs;
+    } seg;  /* selected by SERVER_CTX_SEGMENTS */
+    union
+    {
+        struct { unsigned int ctrl, status, tag, err_off, err_sel, data_off, data_sel, cr0npx;
+                 unsigned char regs[80]; } i386_regs;
+        struct { struct { unsigned __int64 low, high; } fpregs[32]; } x86_64_regs;
+        struct { double fpr[32], fpscr; } powerpc_regs;
+    } fp;  /* selected by SERVER_CTX_FLOATING_POINT */
+    union
+    {
+        struct { unsigned int dr0, dr1, dr2, dr3, dr6, dr7; } i386_regs;
+        struct { unsigned __int64 dr0, dr1, dr2, dr3, dr6, dr7; } x86_64_regs;
+        struct { unsigned int dr[8]; } powerpc_regs;
+    } debug;  /* selected by SERVER_CTX_DEBUG_REGISTERS */
+    union
+    {
+        unsigned char i386_regs[512];
+    } ext;                       /* selected by SERVER_CTX_EXTENDED_REGISTERS */
+} context_t;
+
+#define SERVER_CTX_CONTROL            0x01
+#define SERVER_CTX_INTEGER            0x02
+#define SERVER_CTX_SEGMENTS           0x04
+#define SERVER_CTX_FLOATING_POINT     0x08
+#define SERVER_CTX_DEBUG_REGISTERS    0x10
+#define SERVER_CTX_EXTENDED_REGISTERS 0x20
+
+/* structure used in sending an fd from client to server */
+struct send_fd
+{
+    thread_id_t tid;  /* thread id */
+    int         fd;   /* file descriptor on client-side */
+};
+
+/* structure sent by the server on the wait fifo */
+struct wake_up_reply
+{
+    client_ptr_t cookie;    /* magic cookie that was passed in select_request */
+    int          signaled;  /* wait result */
+    int          __pad;
+};
+
+/* NT-style timeout, in 100ns units, negative means relative timeout */
+typedef __int64 timeout_t;
+#define TIMEOUT_INFINITE (((timeout_t)0x7fffffff) << 32 | 0xffffffff)
+
+/* structure for process startup info */
+typedef struct
+{
+    unsigned int debug_flags;
+    unsigned int console_flags;
+    obj_handle_t console;
+    obj_handle_t hstdin;
+    obj_handle_t hstdout;
+    obj_handle_t hstderr;
+    unsigned int x;
+    unsigned int y;
+    unsigned int xsize;
+    unsigned int ysize;
+    unsigned int xchars;
+    unsigned int ychars;
+    unsigned int attribute;
+    unsigned int flags;
+    unsigned int show;
+    data_size_t  curdir_len;
+    data_size_t  dllpath_len;
+    data_size_t  imagepath_len;
+    data_size_t  cmdline_len;
+    data_size_t  title_len;
+    data_size_t  desktop_len;
+    data_size_t  shellinfo_len;
+    data_size_t  runtime_len;
+    /* VARARG(curdir,unicode_str,curdir_len); */
+    /* VARARG(dllpath,unicode_str,dllpath_len); */
+    /* VARARG(imagepath,unicode_str,imagepath_len); */
+    /* VARARG(cmdline,unicode_str,cmdline_len); */
+    /* VARARG(title,unicode_str,title_len); */
+    /* VARARG(desktop,unicode_str,desktop_len); */
+    /* VARARG(shellinfo,unicode_str,shellinfo_len); */
+    /* VARARG(runtime,unicode_str,runtime_len); */
+} startup_info_t;
+
+/* structure returned in the list of window properties */
+typedef struct
+{
+    atom_t         atom;     /* property atom */
+    int            string;   /* was atom a string originally? */
+    lparam_t       data;     /* data stored in property */
+} property_data_t;
+
+/* structure to specify window rectangles */
+typedef struct
+{
+    int  left;
+    int  top;
+    int  right;
+    int  bottom;
+} rectangle_t;
+
+/* structure for parameters of async I/O calls */
+typedef struct
+{
+    obj_handle_t    handle;        /* object to perform I/O on */
+    obj_handle_t    event;         /* event to signal when done */
+    client_ptr_t    iosb;          /* I/O status block in client addr space */
+    client_ptr_t    user;          /* opaque user data containing callback pointer and async-specific data */
+    client_ptr_t    apc;           /* user APC to call */
+    apc_param_t     apc_context;   /* user APC context or completion value */
+} async_data_t;
+
+/* structures for extra message data */
+
+struct hardware_msg_data
+{
+    lparam_t        info;      /* extra info */
+    unsigned int    hw_id;     /* unique id */
+    unsigned int    flags;     /* hook flags */
+    union
+    {
+        int type;
+        struct
+        {
+            int            type;    /* RIM_TYPEKEYBOARD */
+            unsigned int   message; /* message generated by this rawinput event */
+            unsigned short vkey;    /* virtual key code */
+            unsigned short scan;    /* scan code */
+        } kbd;
+        struct
+        {
+            int            type;    /* RIM_TYPEMOUSE */
+            int            x;       /* x coordinate */
+            int            y;       /* y coordinate */
+            unsigned int   data;    /* mouse data */
+        } mouse;
+    } rawinput;
+};
+
+struct callback_msg_data
+{
+    client_ptr_t    callback;   /* callback function */
+    lparam_t        data;       /* user data for callback */
+    lparam_t        result;     /* message result */
+};
+
+struct winevent_msg_data
+{
+    user_handle_t   hook;       /* hook handle */
+    thread_id_t     tid;        /* thread id */
+    client_ptr_t    hook_proc;  /* hook proc address */
+    /* followed by module name if any */
+};
+
+typedef union
+{
+    int type;
+    struct
+    {
+        int            type;    /* INPUT_KEYBOARD */
+        unsigned short vkey;    /* virtual key code */
+        unsigned short scan;    /* scan code */
+        unsigned int   flags;   /* event flags */
+        unsigned int   time;    /* event time */
+        lparam_t       info;    /* extra info */
+    } kbd;
+    struct
+    {
+        int            type;    /* INPUT_MOUSE */
+        int            x;       /* coordinates */
+        int            y;
+        unsigned int   data;    /* mouse data */
+        unsigned int   flags;   /* event flags */
+        unsigned int   time;    /* event time */
+        lparam_t       info;    /* extra info */
+    } mouse;
+    struct
+    {
+        int            type;    /* INPUT_HARDWARE */
+        unsigned int   msg;     /* message code */
+        lparam_t       lparam;  /* message param */
+    } hw;
+} hw_input_t;
+
+typedef union
+{
+    unsigned char            bytes[1];   /* raw data for sent messages */
+    struct hardware_msg_data hardware;
+    struct callback_msg_data callback;
+    struct winevent_msg_data winevent;
+} message_data_t;
+
+/* structure for console char/attribute info */
+typedef struct
+{
+    WCHAR          ch;
+    unsigned short attr;
+} char_info_t;
+
+/* structure returned in filesystem events */
+struct filesystem_event
+{
+    int         action;
+    data_size_t len;
+    char        name[1];
+};
+
+typedef struct
+{
+    unsigned int low_part;
+    int          high_part;
+} luid_t;
+
+#define MAX_ACL_LEN 65535
+
+struct security_descriptor
+{
+    unsigned int control;       /* SE_ flags */
+    data_size_t  owner_len;
+    data_size_t  group_len;
+    data_size_t  sacl_len;
+    data_size_t  dacl_len;
+    /* VARARG(owner,SID); */
+    /* VARARG(group,SID); */
+    /* VARARG(sacl,ACL); */
+    /* VARARG(dacl,ACL); */
+};
+
+struct object_attributes
+{
+    obj_handle_t rootdir;       /* root directory */
+    unsigned int attributes;    /* object attributes */
+    data_size_t  sd_len;        /* length of security_descriptor data. may be 0 */
+    data_size_t  name_len;      /* length of the name string. may be 0 */
+    /* VARARG(sd,security_descriptor); */
+    /* VARARG(name,unicode_str); */
+};
+
+struct token_groups
+{
+    unsigned int count;
+    /* unsigned int attributes[count]; */
+    /* VARARG(sids,SID); */
+};
+
+enum select_op
+{
+    SELECT_NONE,
+    SELECT_WAIT,
+    SELECT_WAIT_ALL,
+    SELECT_SIGNAL_AND_WAIT,
+    SELECT_KEYED_EVENT_WAIT,
+    SELECT_KEYED_EVENT_RELEASE
+};
+
+typedef union
+{
+    enum select_op op;
+    struct
+    {
+        enum select_op  op;      /* SELECT_WAIT or SELECT_WAIT_ALL */
+        obj_handle_t    handles[MAXIMUM_WAIT_OBJECTS];
+    } wait;
+    struct
+    {
+        enum select_op  op;      /* SELECT_SIGNAL_AND_WAIT */
+        obj_handle_t    wait;
+        obj_handle_t    signal;  /* must be last in the structure so we can remove it on retries */
+    } signal_and_wait;
+    struct
+    {
+        enum select_op  op;      /* SELECT_KEYED_EVENT_WAIT or SELECT_KEYED_EVENT_RELEASE */
+        obj_handle_t    handle;
+        client_ptr_t    key;
+    } keyed_event;
+} select_op_t;
+
+enum apc_type
+{
+    APC_NONE,
+    APC_USER,
+    APC_TIMER,
+    APC_ASYNC_IO,
+    APC_VIRTUAL_ALLOC,
+    APC_VIRTUAL_FREE,
+    APC_VIRTUAL_QUERY,
+    APC_VIRTUAL_PROTECT,
+    APC_VIRTUAL_FLUSH,
+    APC_VIRTUAL_LOCK,
+    APC_VIRTUAL_UNLOCK,
+    APC_MAP_VIEW,
+    APC_UNMAP_VIEW,
+    APC_CREATE_THREAD
+};
+
+typedef union
+{
+    enum apc_type type;
+    struct
+    {
+        enum apc_type    type;     /* APC_USER */
+        int              __pad;
+        client_ptr_t     func;     /* void (__stdcall *func)(ULONG_PTR,ULONG_PTR,ULONG_PTR); */
+        apc_param_t      args[3];  /* arguments for user function */
+    } user;
+    struct
+    {
+        enum apc_type    type;     /* APC_TIMER */
+        int              __pad;
+        client_ptr_t     func;     /* void (__stdcall *func)(void*, unsigned int, unsigned int); */
+        timeout_t        time;     /* absolute time of expiration */
+        client_ptr_t     arg;      /* user argument */
+    } timer;
+    struct
+    {
+        enum apc_type    type;     /* APC_ASYNC_IO */
+        unsigned int     status;   /* I/O status */
+        client_ptr_t     user;     /* user pointer */
+        client_ptr_t     sb;       /* status block */
+    } async_io;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_ALLOC */
+        unsigned int     op_type;   /* type of operation */
+        client_ptr_t     addr;      /* requested address */
+        mem_size_t       size;      /* allocation size */
+        unsigned int     zero_bits; /* allocation alignment */
+        unsigned int     prot;      /* memory protection flags */
+    } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_FREE */
+        unsigned int     op_type;   /* type of operation */
+        client_ptr_t     addr;      /* requested address */
+        mem_size_t       size;      /* allocation size */
+    } virtual_free;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_QUERY */
+        int              __pad;
+        client_ptr_t     addr;      /* requested address */
+    } virtual_query;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_PROTECT */
+        unsigned int     prot;      /* new protection flags */
+        client_ptr_t     addr;      /* requested address */
+        mem_size_t       size;      /* requested size */
+    } virtual_protect;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_FLUSH */
+        int              __pad;
+        client_ptr_t     addr;      /* requested address */
+        mem_size_t       size;      /* requested size */
+    } virtual_flush;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_LOCK */
+        int              __pad;
+        client_ptr_t     addr;      /* requested address */
+        mem_size_t       size;      /* requested size */
+    } virtual_lock;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_UNLOCK */
+        int              __pad;
+        client_ptr_t     addr;      /* requested address */
+        mem_size_t       size;      /* requested size */
+    } virtual_unlock;
+    struct
+    {
+        enum apc_type    type;      /* APC_MAP_VIEW */
+        obj_handle_t     handle;    /* mapping handle */
+        client_ptr_t     addr;      /* requested address */
+        mem_size_t       size;      /* allocation size */
+        file_pos_t       offset;    /* file offset */
+        unsigned int     alloc_type;/* allocation type */
+        unsigned short   zero_bits; /* allocation alignment */
+        unsigned short   prot;      /* memory protection flags */
+    } map_view;
+    struct
+    {
+        enum apc_type    type;      /* APC_UNMAP_VIEW */
+        int              __pad;
+        client_ptr_t     addr;      /* view address */
+    } unmap_view;
+    struct
+    {
+        enum apc_type    type;      /* APC_CREATE_THREAD */
+        int              suspend;   /* suspended thread? */
+        client_ptr_t     func;      /* void (__stdcall *func)(void*);  start function */
+        client_ptr_t     arg;       /* argument for start function */
+        mem_size_t       reserve;   /* reserve size for thread stack */
+        mem_size_t       commit;    /* commit size for thread stack */
+    } create_thread;
+} apc_call_t;
+
+typedef union
+{
+    enum apc_type type;
+    struct
+    {
+        enum apc_type    type;      /* APC_ASYNC_IO */
+        unsigned int     status;    /* new status of async operation */
+        unsigned int     total;     /* bytes transferred */
+    } async_io;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_ALLOC */
+        unsigned int     status;    /* status returned by call */
+        client_ptr_t     addr;      /* resulting address */
+        mem_size_t       size;      /* resulting size */
+    } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_FREE */
+        unsigned int     status;    /* status returned by call */
+        client_ptr_t     addr;      /* resulting address */
+        mem_size_t       size;      /* resulting size */
+    } virtual_free;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_QUERY */
+        unsigned int     status;    /* status returned by call */
+        client_ptr_t     base;      /* resulting base address */
+        client_ptr_t     alloc_base;/* resulting allocation base */
+        mem_size_t       size;      /* resulting region size */
+        unsigned short   state;     /* resulting region state */
+        unsigned short   prot;      /* resulting region protection */
+        unsigned short   alloc_prot;/* resulting allocation protection */
+        unsigned short   alloc_type;/* resulting region allocation type */
+    } virtual_query;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_PROTECT */
+        unsigned int     status;    /* status returned by call */
+        client_ptr_t     addr;      /* resulting address */
+        mem_size_t       size;      /* resulting size */
+        unsigned int     prot;      /* old protection flags */
+    } virtual_protect;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_FLUSH */
+        unsigned int     status;    /* status returned by call */
+        client_ptr_t     addr;      /* resulting address */
+        mem_size_t       size;      /* resulting size */
+    } virtual_flush;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_LOCK */
+        unsigned int     status;    /* status returned by call */
+        client_ptr_t     addr;      /* resulting address */
+        mem_size_t       size;      /* resulting size */
+    } virtual_lock;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_UNLOCK */
+        unsigned int     status;    /* status returned by call */
+        client_ptr_t     addr;      /* resulting address */
+        mem_size_t       size;      /* resulting size */
+    } virtual_unlock;
+    struct
+    {
+        enum apc_type    type;      /* APC_MAP_VIEW */
+        unsigned int     status;    /* status returned by call */
+        client_ptr_t     addr;      /* resulting address */
+        mem_size_t       size;      /* resulting size */
+    } map_view;
+    struct
+    {
+        enum apc_type    type;      /* APC_MAP_VIEW */
+        unsigned int     status;    /* status returned by call */
+    } unmap_view;
+    struct
+    {
+        enum apc_type    type;      /* APC_CREATE_THREAD */
+        unsigned int     status;    /* status returned by call */
+        thread_id_t      tid;       /* thread id */
+        obj_handle_t     handle;    /* handle to new thread */
+    } create_thread;
+} apc_result_t;
+
+typedef union
+{
+    unsigned int         major;     /* irp major function */
+    struct
+    {
+        unsigned int     major;     /* IRP_MJ_CREATE */
+        unsigned int     access;    /* access rights */
+        unsigned int     sharing;   /* sharing flags */
+        unsigned int     options;   /* file options */
+        client_ptr_t     device;    /* opaque ptr for the device */
+    } create;
+    struct
+    {
+        unsigned int     major;     /* IRP_MJ_CLOSE */
+        int              __pad;
+        client_ptr_t     file;      /* opaque ptr for the file object */
+    } close;
+    struct
+    {
+        unsigned int     major;     /* IRP_MJ_READ */
+        unsigned int     key;       /* driver key */
+        client_ptr_t     file;      /* opaque ptr for the file object */
+        file_pos_t       pos;       /* file position */
+    } read;
+    struct
+    {
+        unsigned int     major;     /* IRP_MJ_WRITE */
+        unsigned int     key;       /* driver key */
+        client_ptr_t     file;      /* opaque ptr for the file object */
+        file_pos_t       pos;       /* file position */
+    } write;
+    struct
+    {
+        unsigned int     major;     /* IRP_MJ_FLUSH_BUFFERS */
+        int              __pad;
+        client_ptr_t     file;      /* opaque ptr for the file object */
+    } flush;
+    struct
+    {
+        unsigned int     major;     /* IRP_MJ_DEVICE_CONTROL */
+        ioctl_code_t     code;      /* ioctl code */
+        client_ptr_t     file;      /* opaque ptr for the file object */
+    } ioctl;
+} irp_params_t;
+
+/* information about a PE image mapping, roughly equivalent to SECTION_IMAGE_INFORMATION */
+typedef struct
+{
+    client_ptr_t   base;
+    client_ptr_t   entry_point;
+    mem_size_t     map_size;
+    mem_size_t     stack_size;
+    mem_size_t     stack_commit;
+    unsigned int   zerobits;
+    unsigned int   subsystem;
+    unsigned short subsystem_low;
+    unsigned short subsystem_high;
+    unsigned int   gp;
+    unsigned short image_charact;
+    unsigned short dll_charact;
+    unsigned short machine;
+    unsigned char  contains_code;
+    unsigned char  image_flags;
+    unsigned int   loader_flags;
+    unsigned int   header_size;
+    unsigned int   file_size;
+    unsigned int   checksum;
+} pe_image_info_t;
+
+struct rawinput_device
+{
+    unsigned short usage_page;
+    unsigned short usage;
+    unsigned int   flags;
+    user_handle_t  target;
+};
+
+/****************************************************************/
+/* Request declarations */
+
+/* Create a new process from the context of the parent */
+@REQ(new_process)
+    int          inherit_all;    /* inherit all handles from parent */
+    unsigned int create_flags;   /* creation flags */
+    int          socket_fd;      /* file descriptor for process socket */
+    obj_handle_t exe_file;       /* file handle for main exe */
+    unsigned int process_access; /* access rights for process object */
+    unsigned int process_attr;   /* attributes for process object */
+    unsigned int thread_access;  /* access rights for thread object */
+    unsigned int thread_attr;    /* attributes for thread object */
+    cpu_type_t   cpu;            /* CPU that the new process will use */
+    data_size_t  info_size;      /* size of startup info */
+    VARARG(info,startup_info,info_size); /* startup information */
+    VARARG(env,unicode_str);     /* environment for new process */
+@REPLY
+    obj_handle_t info;           /* new process info handle */
+    process_id_t pid;            /* process id */
+    obj_handle_t phandle;        /* process handle (in the current process) */
+    thread_id_t  tid;            /* thread id */
+    obj_handle_t thandle;        /* thread handle (in the current process) */
+@END
+
+
+/* Retrieve information about a newly started process */
+@REQ(get_new_process_info)
+    obj_handle_t info;           /* info handle returned from new_process_request */
+@REPLY
+    int          success;      /* did the process start successfully? */
+    int          exit_code;    /* process exit code if failed */
+@END
+
+
+/* Create a new thread from the context of the parent */
+@REQ(new_thread)
+    unsigned int access;       /* wanted access rights */
+    unsigned int attributes;   /* object attributes */
+    int          suspend;      /* new thread should be suspended on creation */
+    int          request_fd;   /* fd for request pipe */
+@REPLY
+    thread_id_t  tid;          /* thread id */
+    obj_handle_t handle;       /* thread handle (in the current process) */
+@END
+
+
+/* Retrieve the new process startup info */
+@REQ(get_startup_info)
+@REPLY
+    obj_handle_t exe_file;     /* file handle for main exe */
+    data_size_t  info_size;    /* size of startup info */
+    VARARG(info,startup_info,info_size); /* startup information */
+    VARARG(env,unicode_str);   /* environment */
+@END
+
+
+/* Signal the end of the process initialization */
+@REQ(init_process_done)
+    int          gui;          /* is it a GUI process? */
+    mod_handle_t module;       /* main module base address */
+    client_ptr_t ldt_copy;     /* address of LDT copy (in thread address space) */
+    client_ptr_t entry;        /* process entry point */
+@END
+
+
+/* Initialize a thread; called from the child after fork()/clone() */
+@REQ(init_thread)
+    int          unix_pid;     /* Unix pid of new thread */
+    int          unix_tid;     /* Unix tid of new thread */
+    int          debug_level;  /* new debug level */
+    client_ptr_t teb;          /* TEB of new thread (in thread address space) */
+    client_ptr_t entry;        /* entry point or PEB if initial thread (in thread address space) */
+    int          reply_fd;     /* fd for reply pipe */
+    int          wait_fd;      /* fd for blocking calls pipe */
+    cpu_type_t   cpu;          /* CPU that this thread is running on */
+@REPLY
+    process_id_t pid;          /* process id of the new thread's process */
+    thread_id_t  tid;          /* thread id of the new thread */
+    timeout_t    server_start; /* server start time */
+    data_size_t  info_size;    /* total size of startup info */
+    int          version;      /* protocol version */
+    unsigned int all_cpus;     /* bitset of supported CPUs */
+@END
+
+
+/* Terminate a process */
+@REQ(terminate_process)
+    obj_handle_t handle;       /* process handle to terminate */
+    int          exit_code;    /* process exit code */
+@REPLY
+    int          self;         /* suicide? */
+@END
+
+
+/* Terminate a thread */
+@REQ(terminate_thread)
+    obj_handle_t handle;       /* thread handle to terminate */
+    int          exit_code;    /* thread exit code */
+@REPLY
+    int          self;         /* suicide? */
+    int          last;         /* last thread in this process? */
+@END
+
+
+/* Retrieve information about a process */
+@REQ(get_process_info)
+    obj_handle_t handle;           /* process handle */
+@REPLY
+    process_id_t pid;              /* server process id */
+    process_id_t ppid;             /* server process id of parent */
+    affinity_t   affinity;         /* process affinity mask */
+    client_ptr_t peb;              /* PEB address in process address space */
+    timeout_t    start_time;       /* process start time */
+    timeout_t    end_time;         /* process end time */
+    int          exit_code;        /* process exit code */
+    int          priority;         /* priority class */
+    cpu_type_t   cpu;              /* CPU that this process is running on */
+    short int    debugger_present; /* process is being debugged */
+    short int    debug_children;   /* inherit debugger to child processes */
+@END
+
+
+/* Retrieve information about a process memory usage */
+@REQ(get_process_vm_counters)
+    obj_handle_t handle;                        /* process handle */
+@REPLY
+    mem_size_t peak_virtual_size;               /* peak virtual memory in bytes */
+    mem_size_t virtual_size;                    /* virtual memory in bytes */
+    mem_size_t peak_working_set_size;           /* peak real memory in bytes */
+    mem_size_t working_set_size;                /* real memory in bytes */
+    mem_size_t pagefile_usage;                  /* swapped-out memory in bytes */
+    mem_size_t peak_pagefile_usage;             /* peak swapped-out memory in bytes */
+@END
+
+
+/* Set a process information */
+@REQ(set_process_info)
+    obj_handle_t handle;       /* process handle */
+    int          mask;         /* setting mask (see below) */
+    int          priority;     /* priority class */
+    affinity_t   affinity;     /* affinity mask */
+@END
+#define SET_PROCESS_INFO_PRIORITY 0x01
+#define SET_PROCESS_INFO_AFFINITY 0x02
+
+
+/* Retrieve information about a thread */
+@REQ(get_thread_info)
+    obj_handle_t handle;        /* thread handle */
+    thread_id_t  tid_in;        /* thread id (optional) */
+@REPLY
+    process_id_t pid;           /* server process id */
+    thread_id_t  tid;           /* server thread id */
+    client_ptr_t teb;           /* thread teb pointer */
+    client_ptr_t entry_point;   /* thread entry point */
+    affinity_t   affinity;      /* thread affinity mask */
+    int          exit_code;     /* thread exit code */
+    int          priority;      /* thread priority level */
+    int          last;          /* last thread in process */
+@END
+
+
+/* Retrieve information about thread times */
+@REQ(get_thread_times)
+    obj_handle_t handle;        /* thread handle */
+@REPLY
+    timeout_t    creation_time; /* thread creation time */
+    timeout_t    exit_time;     /* thread exit time */
+@END
+
+
+/* Set a thread information */
+@REQ(set_thread_info)
+    obj_handle_t handle;       /* thread handle */
+    int          mask;         /* setting mask (see below) */
+    int          priority;     /* priority class */
+    affinity_t   affinity;     /* affinity mask */
+    client_ptr_t entry_point;  /* thread entry point */
+    obj_handle_t token;        /* impersonation token */
+@END
+#define SET_THREAD_INFO_PRIORITY   0x01
+#define SET_THREAD_INFO_AFFINITY   0x02
+#define SET_THREAD_INFO_TOKEN      0x04
+#define SET_THREAD_INFO_ENTRYPOINT 0x08
+
+
+/* Retrieve information about a module */
+@REQ(get_dll_info)
+    obj_handle_t handle;       /* process handle */
+    mod_handle_t base_address; /* base address of module */
+@REPLY
+    client_ptr_t entry_point;
+    data_size_t  size;            /* module size */
+    data_size_t  filename_len;    /* buffer len in bytes required to store filename */
+    VARARG(filename,unicode_str); /* file name of module */
+@END
+
+
+/* Suspend a thread */
+@REQ(suspend_thread)
+    obj_handle_t handle;       /* thread handle */
+@REPLY
+    int          count;        /* new suspend count */
+@END
+
+
+/* Resume a thread */
+@REQ(resume_thread)
+    obj_handle_t handle;       /* thread handle */
+@REPLY
+    int          count;        /* new suspend count */
+@END
+
+
+/* Notify the server that a dll has been loaded */
+@REQ(load_dll)
+    obj_handle_t mapping;      /* file mapping handle */
+    mod_handle_t base;         /* base address */
+    client_ptr_t name;         /* ptr to ptr to name (in process addr space) */
+    data_size_t  size;         /* dll size */
+    int          dbg_offset;   /* debug info offset */
+    int          dbg_size;     /* debug info size */
+    VARARG(filename,unicode_str); /* file name of dll */
+@END
+
+
+/* Notify the server that a dll is being unloaded */
+@REQ(unload_dll)
+    mod_handle_t base;         /* base address */
+@END
+
+
+/* Queue an APC for a thread or process */
+@REQ(queue_apc)
+    obj_handle_t handle;       /* thread or process handle */
+    apc_call_t   call;         /* call arguments */
+@REPLY
+    obj_handle_t handle;       /* APC handle */
+    int          self;         /* run APC in caller itself? */
+@END
+
+
+/* Get the result of an APC call */
+@REQ(get_apc_result)
+    obj_handle_t handle;       /* handle to the APC */
+@REPLY
+    apc_result_t result;       /* result of the APC */
+@END
+
+
+/* Close a handle for the current process */
+@REQ(close_handle)
+    obj_handle_t handle;       /* handle to close */
+@END
+
+
+/* Set a handle information */
+@REQ(set_handle_info)
+    obj_handle_t handle;       /* handle we are interested in */
+    int          flags;        /* new handle flags */
+    int          mask;         /* mask for flags to set */
+@REPLY
+    int          old_flags;    /* old flag value */
+@END
+
+
+/* Duplicate a handle */
+@REQ(dup_handle)
+    obj_handle_t src_process;  /* src process handle */
+    obj_handle_t src_handle;   /* src handle to duplicate */
+    obj_handle_t dst_process;  /* dst process handle */
+    unsigned int access;       /* wanted access rights */
+    unsigned int attributes;   /* object attributes */
+    unsigned int options;      /* duplicate options (see below) */
+@REPLY
+    obj_handle_t handle;       /* duplicated handle in dst process */
+    int          self;         /* is the source the current process? */
+    int          closed;       /* whether the source handle has been closed */
+@END
+#define DUP_HANDLE_CLOSE_SOURCE  DUPLICATE_CLOSE_SOURCE
+#define DUP_HANDLE_SAME_ACCESS   DUPLICATE_SAME_ACCESS
+#define DUP_HANDLE_MAKE_GLOBAL   0x80000000  /* Not a Windows flag */
+
+
+/* Open a handle to a process */
+@REQ(open_process)
+    process_id_t pid;          /* process id to open */
+    unsigned int access;       /* wanted access rights */
+    unsigned int attributes;   /* object attributes */
+@REPLY
+    obj_handle_t handle;       /* handle to the process */
+@END
+
+
+/* Open a handle to a thread */
+@REQ(open_thread)
+    thread_id_t  tid;          /* thread id to open */
+    unsigned int access;       /* wanted access rights */
+    unsigned int attributes;   /* object attributes */
+@REPLY
+    obj_handle_t handle;       /* handle to the thread */
+@END
+
+
+/* Wait for handles */
+@REQ(select)
+    int          flags;        /* wait flags (see below) */
+    client_ptr_t cookie;       /* magic cookie to return to client */
+    timeout_t    timeout;      /* timeout */
+    obj_handle_t prev_apc;     /* handle to previous APC */
+    VARARG(result,apc_result); /* result of previous APC */
+    VARARG(data,select_op);    /* operation-specific data */
+@REPLY
+    timeout_t    timeout;      /* timeout converted to absolute */
+    apc_call_t   call;         /* APC call arguments */
+    obj_handle_t apc_handle;   /* handle to next APC */
+@END
+#define SELECT_ALERTABLE     1
+#define SELECT_INTERRUPTIBLE 2
+
+
+/* Create an event */
+@REQ(create_event)
+    unsigned int access;        /* wanted access rights */
+    int          manual_reset;  /* manual reset event */
+    int          initial_state; /* initial state of the event */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;        /* handle to the event */
+@END
+
+/* Event operation */
+@REQ(event_op)
+    obj_handle_t  handle;       /* handle to event */
+    int           op;           /* event operation (see below) */
+@END
+enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
+
+@REQ(query_event)
+    obj_handle_t  handle;       /* handle to event */
+@REPLY
+    int          manual_reset;  /* manual reset event */
+    int          state;         /* current state of the event */
+@END
+
+/* Open an event */
+@REQ(open_event)
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    obj_handle_t rootdir;       /* root directory */
+    VARARG(name,unicode_str);   /* object name */
+@REPLY
+    obj_handle_t handle;        /* handle to the event */
+@END
+
+
+/* Create a keyed event */
+@REQ(create_keyed_event)
+    unsigned int access;        /* wanted access rights */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;        /* handle to the event */
+@END
+
+/* Open a keyed event */
+@REQ(open_keyed_event)
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    obj_handle_t rootdir;       /* root directory */
+    VARARG(name,unicode_str);   /* object name */
+@REPLY
+    obj_handle_t handle;        /* handle to the event */
+@END
+
+
+/* Create a mutex */
+@REQ(create_mutex)
+    unsigned int access;        /* wanted access rights */
+    int          owned;         /* initially owned? */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;        /* handle to the mutex */
+@END
+
+
+/* Release a mutex */
+@REQ(release_mutex)
+    obj_handle_t handle;        /* handle to the mutex */
+@REPLY
+    unsigned int prev_count;    /* value of internal counter, before release */
+@END
+
+
+/* Open a mutex */
+@REQ(open_mutex)
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    obj_handle_t rootdir;       /* root directory */
+    VARARG(name,unicode_str);   /* object name */
+@REPLY
+    obj_handle_t handle;        /* handle to the mutex */
+@END
+
+
+/* Query a mutex */
+@REQ(query_mutex)
+    obj_handle_t  handle;       /* handle to mutex */
+@REPLY
+    unsigned int count;         /* current count of mutex */
+    int          owned;         /* true if owned by current thread */
+    int          abandoned;     /* true if abandoned */
+@END
+
+
+/* Create a semaphore */
+@REQ(create_semaphore)
+    unsigned int access;        /* wanted access rights */
+    unsigned int initial;       /* initial count */
+    unsigned int max;           /* maximum count */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;        /* handle to the semaphore */
+@END
+
+
+/* Release a semaphore */
+@REQ(release_semaphore)
+    obj_handle_t handle;        /* handle to the semaphore */
+    unsigned int count;         /* count to add to semaphore */
+@REPLY
+    unsigned int prev_count;    /* previous semaphore count */
+@END
+
+@REQ(query_semaphore)
+    obj_handle_t handle;       /* handle to the semaphore */
+@REPLY
+    unsigned int current;      /* current count */
+    unsigned int max;          /* maximum count */
+@END
+
+/* Open a semaphore */
+@REQ(open_semaphore)
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    obj_handle_t rootdir;       /* root directory */
+    VARARG(name,unicode_str);   /* object name */
+@REPLY
+    obj_handle_t handle;        /* handle to the semaphore */
+@END
+
+
+/* Create a file */
+@REQ(create_file)
+    unsigned int access;        /* wanted access rights */
+    unsigned int sharing;       /* sharing flags */
+    int          create;        /* file create action */
+    unsigned int options;       /* file options */
+    unsigned int attrs;         /* file attributes for creation */
+    VARARG(objattr,object_attributes); /* object attributes */
+    VARARG(filename,string);    /* file name */
+@REPLY
+    obj_handle_t handle;        /* handle to the file */
+@END
+
+
+/* Open a file object */
+@REQ(open_file_object)
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* open attributes */
+    obj_handle_t rootdir;       /* root directory */
+    unsigned int sharing;       /* sharing flags */
+    unsigned int options;       /* file options */
+    VARARG(filename,unicode_str); /* file name */
+@REPLY
+    obj_handle_t handle;        /* handle to the file */
+@END
+
+
+/* Allocate a file handle for a Unix fd */
+@REQ(alloc_file_handle)
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    int          fd;            /* file descriptor on the client side */
+@REPLY
+    obj_handle_t handle;        /* handle to the file */
+@END
+
+
+/* Get the Unix name from a file handle */
+@REQ(get_handle_unix_name)
+    obj_handle_t   handle;      /* file handle */
+@REPLY
+    data_size_t    name_len;    /* unix name length */
+    VARARG(name,string);        /* unix name */
+@END
+
+
+/* Get a Unix fd to access a file */
+@REQ(get_handle_fd)
+    obj_handle_t handle;        /* handle to the file */
+@REPLY
+    int          type;          /* file type (see below) */
+    int          cacheable;     /* can fd be cached in the client? */
+    unsigned int access;        /* file access rights */
+    unsigned int options;       /* file open options */
+@END
+enum server_fd_type
+{
+    FD_TYPE_INVALID,  /* invalid file (no associated fd) */
+    FD_TYPE_FILE,     /* regular file */
+    FD_TYPE_DIR,      /* directory */
+    FD_TYPE_SOCKET,   /* socket */
+    FD_TYPE_SERIAL,   /* serial port */
+    FD_TYPE_PIPE,     /* named pipe */
+    FD_TYPE_MAILSLOT, /* mailslot */
+    FD_TYPE_CHAR,     /* unspecified char device */
+    FD_TYPE_DEVICE,   /* Windows device file */
+    FD_TYPE_NB_TYPES
+};
+
+
+/* Retrieve (or allocate) the client-side directory cache entry */
+@REQ(get_directory_cache_entry)
+    obj_handle_t handle;        /* handle to the directory */
+@REPLY
+    int          entry;         /* cache entry on the client side */
+    VARARG(free,ints);          /* entries that can be freed */
+@END
+
+
+/* Flush a file buffers */
+@REQ(flush)
+    async_data_t   async;       /* async I/O parameters */
+@REPLY
+    obj_handle_t event;         /* event set when finished */
+@END
+
+
+/* Lock a region of a file */
+@REQ(lock_file)
+    obj_handle_t handle;        /* handle to the file */
+    file_pos_t   offset;        /* offset of start of lock */
+    file_pos_t   count;         /* count of bytes to lock */
+    int          shared;        /* shared or exclusive lock? */
+    int          wait;          /* do we want to wait? */
+@REPLY
+    obj_handle_t handle;        /* handle to wait on */
+    int          overlapped;    /* is it an overlapped I/O handle? */
+@END
+
+
+/* Unlock a region of a file */
+@REQ(unlock_file)
+    obj_handle_t handle;        /* handle to the file */
+    file_pos_t   offset;        /* offset of start of unlock */
+    file_pos_t   count;         /* count of bytes to unlock */
+@END
+
+
+/* Create a socket */
+@REQ(create_socket)
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    int          family;        /* family, see socket manpage */
+    int          type;          /* type, see socket manpage */
+    int          protocol;      /* protocol, see socket manpage */
+    unsigned int flags;         /* socket flags */
+@REPLY
+    obj_handle_t handle;        /* handle to the new socket */
+@END
+
+
+/* Accept a socket */
+@REQ(accept_socket)
+    obj_handle_t lhandle;       /* handle to the listening socket */
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+@REPLY
+    obj_handle_t handle;        /* handle to the new socket */
+@END
+
+
+/* Accept into an initialized socket */
+@REQ(accept_into_socket)
+    obj_handle_t lhandle;       /* handle to the listening socket */
+    obj_handle_t ahandle;       /* handle to the accepting socket */
+@END
+
+
+/* Set socket event parameters */
+@REQ(set_socket_event)
+    obj_handle_t  handle;        /* handle to the socket */
+    unsigned int  mask;          /* event mask */
+    obj_handle_t  event;         /* event object */
+    user_handle_t window;        /* window to send the message to */
+    unsigned int  msg;           /* message to send */
+@END
+
+
+/* Get socket event parameters */
+@REQ(get_socket_event)
+    obj_handle_t handle;        /* handle to the socket */
+    int          service;       /* clear pending? */
+    obj_handle_t c_event;       /* event to clear */
+@REPLY
+    unsigned int mask;          /* event mask */
+    unsigned int pmask;         /* pending events */
+    unsigned int state;         /* status bits */
+    VARARG(errors,ints);        /* event errors */
+@END
+
+
+/* Get socket info */
+@REQ(get_socket_info)
+    obj_handle_t handle;        /* handle to the socket */
+@REPLY
+    int family;                 /* family, see socket manpage */
+    int type;                   /* type, see socket manpage */
+    int protocol;               /* protocol, see socket manpage */
+@END
+
+
+/* Re-enable pending socket events */
+@REQ(enable_socket_event)
+    obj_handle_t handle;        /* handle to the socket */
+    unsigned int mask;          /* events to re-enable */
+    unsigned int sstate;        /* status bits to set */
+    unsigned int cstate;        /* status bits to clear */
+@END
+
+@REQ(set_socket_deferred)
+    obj_handle_t handle;        /* handle to the socket */
+    obj_handle_t deferred;      /* handle to the socket for which accept() is deferred */
+@END
+
+/* Allocate a console (only used by a console renderer) */
+@REQ(alloc_console)
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    process_id_t pid;           /* pid of process which shall be attached to the console */
+    int          input_fd;      /* if pid=-1 (bare console to current process), fd for input */
+@REPLY
+    obj_handle_t handle_in;     /* handle to console input */
+    obj_handle_t event;         /* handle to renderer events change notification */
+@END
+
+
+/* Free the console of the current process */
+@REQ(free_console)
+@END
+
+
+#define CONSOLE_RENDERER_NONE_EVENT        0x00
+#define CONSOLE_RENDERER_TITLE_EVENT       0x01
+#define CONSOLE_RENDERER_ACTIVE_SB_EVENT   0x02
+#define CONSOLE_RENDERER_SB_RESIZE_EVENT   0x03
+#define CONSOLE_RENDERER_UPDATE_EVENT      0x04
+#define CONSOLE_RENDERER_CURSOR_POS_EVENT  0x05
+#define CONSOLE_RENDERER_CURSOR_GEOM_EVENT 0x06
+#define CONSOLE_RENDERER_DISPLAY_EVENT     0x07
+#define CONSOLE_RENDERER_EXIT_EVENT        0x08
+struct console_renderer_event
+{
+    short event;
+    union
+    {
+        struct update
+        {
+            short top;
+            short bottom;
+        } update;
+        struct resize
+        {
+            short width;
+            short height;
+        } resize;
+        struct cursor_pos
+        {
+            short x;
+            short y;
+        } cursor_pos;
+        struct cursor_geom
+        {
+            short visible;
+            short size;
+        } cursor_geom;
+        struct display
+        {
+            short left;
+            short top;
+            short width;
+            short height;
+        } display;
+    } u;
+};
+
+/* retrieve console events for the renderer */
+@REQ(get_console_renderer_events)
+    obj_handle_t handle;        /* handle to console input events */
+@REPLY
+    VARARG(data,bytes);         /* the various console_renderer_events */
+@END
+
+
+/* Open a handle to the process console */
+@REQ(open_console)
+    obj_handle_t from;          /* 0 (resp 1) input (resp output) of current process console */
+                                /* otherwise console_in handle to get active screen buffer? */
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    int          share;         /* share mask (only for output handles) */
+@REPLY
+    obj_handle_t handle;        /* handle to the console */
+@END
+
+
+/* Get the input queue wait event */
+@REQ(get_console_wait_event)
+@REPLY
+    obj_handle_t handle;
+@END
+
+/* Get a console mode (input or output) */
+@REQ(get_console_mode)
+    obj_handle_t handle;        /* handle to the console */
+@REPLY
+    int          mode;          /* console mode */
+@END
+
+
+/* Set a console mode (input or output) */
+@REQ(set_console_mode)
+    obj_handle_t handle;        /* handle to the console */
+    int          mode;          /* console mode */
+@END
+
+
+/* Set info about a console (input only) */
+@REQ(set_console_input_info)
+    obj_handle_t  handle;        /* handle to console input, or 0 for process' console */
+    int           mask;          /* setting mask (see below) */
+    obj_handle_t  active_sb;     /* active screen buffer */
+    int           history_mode;  /* whether we duplicate lines in history */
+    int           history_size;  /* number of lines in history */
+    int           edition_mode;  /* index to the edition mode flavors */
+    int           input_cp;      /* console input codepage */
+    int           output_cp;     /* console output codepage */
+    user_handle_t win;           /* console window if backend supports it */
+    VARARG(title,unicode_str);   /* console title */
+@END
+#define SET_CONSOLE_INPUT_INFO_ACTIVE_SB        0x01
+#define SET_CONSOLE_INPUT_INFO_TITLE            0x02
+#define SET_CONSOLE_INPUT_INFO_HISTORY_MODE     0x04
+#define SET_CONSOLE_INPUT_INFO_HISTORY_SIZE     0x08
+#define SET_CONSOLE_INPUT_INFO_EDITION_MODE     0x10
+#define SET_CONSOLE_INPUT_INFO_INPUT_CODEPAGE   0x20
+#define SET_CONSOLE_INPUT_INFO_OUTPUT_CODEPAGE  0x40
+#define SET_CONSOLE_INPUT_INFO_WIN              0x80
+
+
+/* Get info about a console (input only) */
+@REQ(get_console_input_info)
+    obj_handle_t  handle;         /* handle to console input, or 0 for process' console */
+@REPLY
+    int           history_mode;   /* whether we duplicate lines in history */
+    int           history_size;   /* number of lines in history */
+    int           history_index;  /* number of used lines in history */
+    int           edition_mode;   /* index to the edition mode flavors */
+    int           input_cp;       /* console input codepage */
+    int           output_cp;      /* console output codepage */
+    user_handle_t win;            /* console window if backend supports it */
+    VARARG(title,unicode_str);    /* console title */
+@END
+
+
+/* appends a string to console's history */
+@REQ(append_console_input_history)
+    obj_handle_t handle;        /* handle to console input, or 0 for process' console */
+    VARARG(line,unicode_str);   /* line to add */
+@END
+
+
+/* appends a string to console's history */
+@REQ(get_console_input_history)
+    obj_handle_t handle;        /* handle to console input, or 0 for process' console */
+    int          index;         /* index to get line from */
+@REPLY
+    int          total;         /* total length of line in Unicode chars */
+    VARARG(line,unicode_str);   /* line to add */
+@END
+
+
+/* creates a new screen buffer on process' console */
+@REQ(create_console_output)
+    obj_handle_t handle_in;     /* handle to console input, or 0 for process' console */
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    unsigned int share;         /* sharing credentials */
+    int          fd;            /* for bare consoles, fd the screen-buffer is attached to */
+@REPLY
+    obj_handle_t handle_out;    /* handle to the screen buffer */
+@END
+
+
+/* Set info about a console (output only) */
+@REQ(set_console_output_info)
+    obj_handle_t handle;        /* handle to the console */
+    int          mask;          /* setting mask (see below) */
+    short int    cursor_size;   /* size of cursor (percentage filled) */
+    short int    cursor_visible;/* cursor visibility flag */
+    short int    cursor_x;      /* position of cursor (x, y) */
+    short int    cursor_y;
+    short int    width;         /* width of the screen buffer */
+    short int    height;        /* height of the screen buffer */
+    short int    attr;          /* default fill attributes (screen colors) */
+    short int    popup_attr;    /* pop-up color attributes */
+    short int    win_left;      /* window actually displayed by renderer */
+    short int    win_top;       /* the rect area is expressed within the */
+    short int    win_right;     /* boundaries of the screen buffer */
+    short int    win_bottom;
+    short int    max_width;     /* maximum size (width x height) for the window */
+    short int    max_height;
+    short int    font_width;    /* font size (width x height) */
+    short int    font_height;
+    VARARG(colors,uints);       /* color table */
+@END
+#define SET_CONSOLE_OUTPUT_INFO_CURSOR_GEOM     0x0001
+#define SET_CONSOLE_OUTPUT_INFO_CURSOR_POS      0x0002
+#define SET_CONSOLE_OUTPUT_INFO_SIZE            0x0004
+#define SET_CONSOLE_OUTPUT_INFO_ATTR            0x0008
+#define SET_CONSOLE_OUTPUT_INFO_DISPLAY_WINDOW  0x0010
+#define SET_CONSOLE_OUTPUT_INFO_MAX_SIZE        0x0020
+#define SET_CONSOLE_OUTPUT_INFO_FONT            0x0040
+#define SET_CONSOLE_OUTPUT_INFO_COLORTABLE      0x0080
+#define SET_CONSOLE_OUTPUT_INFO_POPUP_ATTR      0x0100
+
+
+/* Get info about a console (output only) */
+@REQ(get_console_output_info)
+    obj_handle_t handle;        /* handle to the console */
+@REPLY
+    short int    cursor_size;   /* size of cursor (percentage filled) */
+    short int    cursor_visible;/* cursor visibility flag */
+    short int    cursor_x;      /* position of cursor (x, y) */
+    short int    cursor_y;
+    short int    width;         /* width of the screen buffer */
+    short int    height;        /* height of the screen buffer */
+    short int    attr;          /* default fill attributes (screen colors) */
+    short int    popup_attr;    /* pop-up color attributes */
+    short int    win_left;      /* window actually displayed by renderer */
+    short int    win_top;       /* the rect area is expressed within the */
+    short int    win_right;     /* boundaries of the screen buffer */
+    short int    win_bottom;
+    short int    max_width;     /* maximum size (width x height) for the window */
+    short int    max_height;
+    short int    font_width;    /* font size (width x height) */
+    short int    font_height;
+    VARARG(colors,uints);       /* color table */
+@END
+
+/* Add input records to a console input queue */
+@REQ(write_console_input)
+    obj_handle_t handle;        /* handle to the console input */
+    VARARG(rec,input_records);  /* input records */
+@REPLY
+    int          written;       /* number of records written */
+@END
+
+
+/* Fetch input records from a console input queue */
+@REQ(read_console_input)
+    obj_handle_t handle;        /* handle to the console input */
+    int          flush;         /* flush the retrieved records from the queue? */
+@REPLY
+    int          read;          /* number of records read */
+    VARARG(rec,input_records);  /* input records */
+@END
+
+
+/* write data (chars and/or attributes) in a screen buffer */
+@REQ(write_console_output)
+    obj_handle_t handle;        /* handle to the console output */
+    int          x;             /* position where to start writing */
+    int          y;
+    int          mode;          /* char info (see below) */
+    int          wrap;          /* wrap around at end of line? */
+    VARARG(data,bytes);         /* info to write */
+@REPLY
+    int          written;       /* number of char infos actually written */
+    int          width;         /* width of screen buffer */
+    int          height;        /* height of screen buffer */
+@END
+enum char_info_mode
+{
+    CHAR_INFO_MODE_TEXT,        /* characters only */
+    CHAR_INFO_MODE_ATTR,        /* attributes only */
+    CHAR_INFO_MODE_TEXTATTR,    /* both characters and attributes */
+    CHAR_INFO_MODE_TEXTSTDATTR  /* characters but use standard attributes */
+};
+
+
+/* fill a screen buffer with constant data (chars and/or attributes) */
+@REQ(fill_console_output)
+    obj_handle_t handle;        /* handle to the console output */
+    int          x;             /* position where to start writing */
+    int          y;
+    int          mode;          /* char info mode */
+    int          count;         /* number to write */
+    int          wrap;          /* wrap around at end of line? */
+    char_info_t  data;          /* data to write */
+@REPLY
+    int          written;       /* number of char infos actually written */
+@END
+
+
+/* read data (chars and/or attributes) from a screen buffer */
+@REQ(read_console_output)
+    obj_handle_t handle;        /* handle to the console output */
+    int          x;             /* position (x,y) where to start reading */
+    int          y;
+    int          mode;          /* char info mode */
+    int          wrap;          /* wrap around at end of line? */
+@REPLY
+    int          width;         /* width of screen buffer */
+    int          height;        /* height of screen buffer */
+    VARARG(data,bytes);
+@END
+
+
+/* move a rect (of data) in screen buffer content */
+@REQ(move_console_output)
+    obj_handle_t handle;        /* handle to the console output */
+    short int    x_src;         /* position (x, y) of rect to start moving from */
+    short int    y_src;
+    short int    x_dst;         /* position (x, y) of rect to move to */
+    short int    y_dst;
+    short int    w;             /* size of the rect (width, height) to move */
+    short int    h;
+@END
+
+
+/* Sends a signal to a process group */
+@REQ(send_console_signal)
+    int          signal;        /* the signal to send */
+    process_id_t group_id;      /* the group to send the signal to */
+@END
+
+
+/* enable directory change notifications */
+@REQ(read_directory_changes)
+    unsigned int filter;        /* notification filter */
+    int          subtree;       /* watch the subtree? */
+    int          want_data;     /* flag indicating whether change data should be collected */
+    async_data_t async;         /* async I/O parameters */
+@END
+
+
+@REQ(read_change)
+    obj_handle_t handle;
+@REPLY
+    VARARG(events,filesystem_event);  /* collected filesystem events */
+@END
+
+
+/* Create a file mapping */
+@REQ(create_mapping)
+    unsigned int access;        /* wanted access rights */
+    unsigned int flags;         /* SEC_* flags */
+    unsigned int protect;       /* protection flags (see below) */
+    mem_size_t   size;          /* mapping size */
+    obj_handle_t file_handle;   /* file handle */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;        /* handle to the mapping */
+@END
+/* per-page protection flags */
+#define VPROT_READ       0x01
+#define VPROT_WRITE      0x02
+#define VPROT_EXEC       0x04
+#define VPROT_WRITECOPY  0x08
+#define VPROT_GUARD      0x10
+#define VPROT_NOCACHE    0x20
+#define VPROT_COMMITTED  0x40
+#define VPROT_WRITEWATCH 0x80
+/* per-mapping protection flags */
+#define VPROT_IMAGE      0x0100  /* mapping for an exe image */
+#define VPROT_SYSTEM     0x0200  /* system view (underlying mmap not under our control) */
+#define VPROT_VALLOC     0x0400  /* allocated by VirtualAlloc */
+#define VPROT_NOEXEC     0x0800  /* don't force exec permission */
+
+
+/* Open a mapping */
+@REQ(open_mapping)
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    obj_handle_t rootdir;       /* root directory */
+    VARARG(name,unicode_str);   /* object name */
+@REPLY
+    obj_handle_t handle;        /* handle to the mapping */
+@END
+
+
+/* Get information about a file mapping */
+@REQ(get_mapping_info)
+    obj_handle_t handle;        /* handle to the mapping */
+    unsigned int access;        /* wanted access rights */
+@REPLY
+    mem_size_t   size;          /* mapping size */
+    unsigned int flags;         /* SEC_* flags */
+    int          protect;       /* protection flags */
+    obj_handle_t mapping;       /* duplicate mapping handle unless removable */
+    obj_handle_t shared_file;   /* shared mapping file handle */
+    VARARG(image,pe_image_info);/* image info for SEC_IMAGE mappings */
+@END
+
+
+/* Get a range of committed pages in a file mapping */
+@REQ(get_mapping_committed_range)
+    obj_handle_t handle;        /* handle to the mapping */
+    file_pos_t   offset;        /* starting offset (page-aligned, in bytes) */
+@REPLY
+    mem_size_t   size;          /* size of range starting at offset (page-aligned, in bytes) */
+    int          committed;     /* whether it is a committed range */
+@END
+
+
+/* Add a range to the committed pages in a file mapping */
+@REQ(add_mapping_committed_range)
+    obj_handle_t handle;        /* handle to the mapping */
+    file_pos_t   offset;        /* starting offset (page-aligned, in bytes) */
+    mem_size_t   size;          /* size to set (page-aligned, in bytes) or 0 if only retrieving */
+@END
+
+
+#define SNAP_PROCESS    0x00000001
+#define SNAP_THREAD     0x00000002
+/* Create a snapshot */
+@REQ(create_snapshot)
+    unsigned int attributes;    /* object attributes */
+    unsigned int flags;         /* snapshot flags (SNAP_*) */
+@REPLY
+    obj_handle_t handle;        /* handle to the snapshot */
+@END
+
+
+/* Get the next process from a snapshot */
+@REQ(next_process)
+    obj_handle_t handle;        /* handle to the snapshot */
+    int          reset;         /* reset snapshot position? */
+@REPLY
+    int          count;         /* process usage count */
+    process_id_t pid;           /* process id */
+    process_id_t ppid;          /* parent process id */
+    int          threads;       /* number of threads */
+    int          priority;      /* process priority */
+    int          handles;       /* number of handles */
+    int          unix_pid;      /* Unix pid */
+    VARARG(filename,unicode_str); /* file name of main exe */
+@END
+
+
+/* Get the next thread from a snapshot */
+@REQ(next_thread)
+    obj_handle_t handle;        /* handle to the snapshot */
+    int          reset;         /* reset snapshot position? */
+@REPLY
+    int          count;         /* thread usage count */
+    process_id_t pid;           /* process id */
+    thread_id_t  tid;           /* thread id */
+    int          base_pri;      /* base priority */
+    int          delta_pri;     /* delta priority */
+@END
+
+
+/* Wait for a debug event */
+@REQ(wait_debug_event)
+    int           get_handle;  /* should we alloc a handle for waiting? */
+@REPLY
+    process_id_t  pid;         /* process id */
+    thread_id_t   tid;         /* thread id */
+    obj_handle_t  wait;        /* wait handle if no event ready */
+    VARARG(event,debug_event); /* debug event data */
+@END
+
+
+/* Queue an exception event */
+@REQ(queue_exception_event)
+    int           first;       /* first chance exception? */
+    unsigned int  code;        /* exception code */
+    unsigned int  flags;       /* exception flags */
+    client_ptr_t  record;      /* exception record */
+    client_ptr_t  address;     /* exception address */
+    data_size_t   len;         /* size of parameters */
+    VARARG(params,uints64,len);/* exception parameters */
+    VARARG(context,context);   /* thread context */
+@REPLY
+    obj_handle_t     handle;   /* handle to the queued event */
+@END
+
+
+/* Retrieve the status of an exception event */
+@REQ(get_exception_status)
+    obj_handle_t     handle;   /* handle to the queued event */
+@REPLY
+    VARARG(context,context);   /* modified thread context */
+@END
+
+
+/* Continue a debug event */
+@REQ(continue_debug_event)
+    process_id_t pid;          /* process id to continue */
+    thread_id_t  tid;          /* thread id to continue */
+    int          status;       /* continuation status */
+@END
+
+
+/* Start/stop debugging an existing process */
+@REQ(debug_process)
+    process_id_t pid;          /* id of the process to debug */
+    int          attach;       /* 1=attaching / 0=detaching from the process */
+@END
+
+
+/* Simulate a breakpoint in a process */
+@REQ(debug_break)
+    obj_handle_t handle;       /* process handle */
+@REPLY
+    int          self;         /* was it the caller itself? */
+@END
+
+
+/* Set debugger kill on exit flag */
+@REQ(set_debugger_kill_on_exit)
+    int          kill_on_exit;  /* 0=detach/1=kill debuggee when debugger dies */
+@END
+
+
+/* Read data from a process address space */
+@REQ(read_process_memory)
+    obj_handle_t handle;       /* process handle */
+    client_ptr_t addr;         /* addr to read from */
+@REPLY
+    VARARG(data,bytes);        /* result data */
+@END
+
+
+/* Write data to a process address space */
+@REQ(write_process_memory)
+    obj_handle_t handle;       /* process handle */
+    client_ptr_t addr;         /* addr to write to */
+    VARARG(data,bytes);        /* data to write */
+@END
+
+
+/* Create a registry key */
+@REQ(create_key)
+    unsigned int access;       /* desired access rights */
+    unsigned int options;      /* creation options */
+    VARARG(objattr,object_attributes); /* object attributes */
+    VARARG(class,unicode_str);         /* class name */
+@REPLY
+    obj_handle_t hkey;         /* handle to the created key */
+    int          created;      /* has it been newly created? */
+@END
+
+/* Open a registry key */
+@REQ(open_key)
+    obj_handle_t parent;       /* handle to the parent key */
+    unsigned int access;       /* desired access rights */
+    unsigned int attributes;   /* object attributes */
+    VARARG(name,unicode_str);  /* key name */
+@REPLY
+    obj_handle_t hkey;         /* handle to the open key */
+@END
+
+
+/* Delete a registry key */
+@REQ(delete_key)
+    obj_handle_t hkey;         /* handle to the key */
+@END
+
+
+/* Flush a registry key */
+@REQ(flush_key)
+    obj_handle_t hkey;         /* handle to the key */
+@END
+
+
+/* Enumerate registry subkeys */
+@REQ(enum_key)
+    obj_handle_t hkey;         /* handle to registry key */
+    int          index;        /* index of subkey (or -1 for current key) */
+    int          info_class;   /* requested information class */
+@REPLY
+    int          subkeys;      /* number of subkeys */
+    int          max_subkey;   /* longest subkey name */
+    int          max_class;    /* longest class name */
+    int          values;       /* number of values */
+    int          max_value;    /* longest value name */
+    int          max_data;     /* longest value data */
+    timeout_t    modif;        /* last modification time */
+    data_size_t  total;        /* total length needed for full name and class */
+    data_size_t  namelen;      /* length of key name in bytes */
+    VARARG(name,unicode_str,namelen);  /* key name */
+    VARARG(class,unicode_str);         /* class name */
+@END
+
+
+/* Set a value of a registry key */
+@REQ(set_key_value)
+    obj_handle_t hkey;         /* handle to registry key */
+    int          type;         /* value type */
+    data_size_t  namelen;      /* length of value name in bytes */
+    VARARG(name,unicode_str,namelen);  /* value name */
+    VARARG(data,bytes);                /* value data */
+@END
+
+
+/* Retrieve the value of a registry key */
+@REQ(get_key_value)
+    obj_handle_t hkey;         /* handle to registry key */
+    VARARG(name,unicode_str);  /* value name */
+@REPLY
+    int          type;         /* value type */
+    data_size_t  total;        /* total length needed for data */
+    VARARG(data,bytes);        /* value data */
+@END
+
+
+/* Enumerate a value of a registry key */
+@REQ(enum_key_value)
+    obj_handle_t hkey;         /* handle to registry key */
+    int          index;        /* value index */
+    int          info_class;   /* requested information class */
+@REPLY
+    int          type;         /* value type */
+    data_size_t  total;        /* total length needed for full name and data */
+    data_size_t  namelen;      /* length of value name in bytes */
+    VARARG(name,unicode_str,namelen);  /* value name */
+    VARARG(data,bytes);                /* value data */
+@END
+
+
+/* Delete a value of a registry key */
+@REQ(delete_key_value)
+    obj_handle_t hkey;         /* handle to registry key */
+    VARARG(name,unicode_str);  /* value name */
+@END
+
+
+/* Load a registry branch from a file */
+@REQ(load_registry)
+    obj_handle_t file;         /* file to load from */
+    VARARG(objattr,object_attributes); /* object attributes */
+@END
+
+
+/* UnLoad a registry branch from a file */
+@REQ(unload_registry)
+    obj_handle_t hkey;         /* root key to unload to */
+@END
+
+
+/* Save a registry branch to a file */
+@REQ(save_registry)
+    obj_handle_t hkey;         /* key to save */
+    obj_handle_t file;         /* file to save to */
+@END
+
+
+/* Add a registry key change notification */
+@REQ(set_registry_notification)
+    obj_handle_t hkey;         /* key to watch for changes */
+    obj_handle_t event;        /* event to set */
+    int          subtree;      /* should we watch the whole subtree? */
+    unsigned int filter;       /* things to watch */
+@END
+
+
+/* Create a waitable timer */
+@REQ(create_timer)
+    unsigned int access;        /* wanted access rights */
+    int          manual;        /* manual reset */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;        /* handle to the timer */
+@END
+
+
+/* Open a waitable timer */
+@REQ(open_timer)
+    unsigned int access;        /* wanted access rights */
+    unsigned int attributes;    /* object attributes */
+    obj_handle_t rootdir;       /* root directory */
+    VARARG(name,unicode_str);   /* object name */
+@REPLY
+    obj_handle_t handle;        /* handle to the timer */
+@END
+
+/* Set a waitable timer */
+@REQ(set_timer)
+    obj_handle_t handle;        /* handle to the timer */
+    timeout_t    expire;        /* next expiration absolute time */
+    client_ptr_t callback;      /* callback function */
+    client_ptr_t arg;           /* callback argument */
+    int          period;        /* timer period in ms */
+@REPLY
+    int          signaled;      /* was the timer signaled before this call ? */
+@END
+
+/* Cancel a waitable timer */
+@REQ(cancel_timer)
+    obj_handle_t handle;        /* handle to the timer */
+@REPLY
+     int         signaled;      /* was the timer signaled before this calltime ? */
+@END
+
+/* Get information on a waitable timer */
+@REQ(get_timer_info)
+    obj_handle_t handle;        /* handle to the timer */
+@REPLY
+    timeout_t    when;          /* absolute time when the timer next expires */
+    int          signaled;      /* is the timer signaled? */
+@END
+
+
+/* Retrieve the current context of a thread */
+@REQ(get_thread_context)
+    obj_handle_t handle;       /* thread handle */
+    unsigned int flags;        /* context flags */
+    int          suspend;      /* suspend the thread if needed */
+@REPLY
+    int          self;         /* was it a handle to the current thread? */
+    VARARG(context,context);   /* thread context */
+@END
+
+
+/* Set the current context of a thread */
+@REQ(set_thread_context)
+    obj_handle_t handle;       /* thread handle */
+    int          suspend;      /* suspend the thread if needed */
+    VARARG(context,context);   /* thread context */
+@REPLY
+    int          self;         /* was it a handle to the current thread? */
+@END
+
+
+/* Fetch a selector entry for a thread */
+@REQ(get_selector_entry)
+    obj_handle_t  handle;      /* thread handle */
+    int           entry;       /* LDT entry */
+@REPLY
+    unsigned int  base;        /* selector base */
+    unsigned int  limit;       /* selector limit */
+    unsigned char flags;       /* selector flags */
+@END
+
+
+/* Add an atom */
+@REQ(add_atom)
+    obj_handle_t  table;       /* which table to add atom to */
+    VARARG(name,unicode_str);  /* atom name */
+@REPLY
+    atom_t        atom;        /* resulting atom */
+@END
+
+
+/* Delete an atom */
+@REQ(delete_atom)
+    obj_handle_t  table;       /* which table to delete atom from */
+    atom_t        atom;        /* atom handle */
+@END
+
+
+/* Find an atom */
+@REQ(find_atom)
+    obj_handle_t table;        /* which table to find atom from */
+    VARARG(name,unicode_str);  /* atom name */
+@REPLY
+    atom_t       atom;         /* atom handle */
+@END
+
+
+/* Get information about an atom */
+@REQ(get_atom_information)
+    obj_handle_t table;        /* which table to find atom from */
+    atom_t       atom;         /* atom handle */
+@REPLY
+    int          count;        /* atom lock count */
+    int          pinned;       /* whether the atom has been pinned */
+    data_size_t  total;        /* actual length of atom name */
+    VARARG(name,unicode_str);  /* atom name */
+@END
+
+
+/* Set information about an atom */
+@REQ(set_atom_information)
+    obj_handle_t table;        /* which table to find atom from */
+    atom_t       atom;         /* atom handle */
+    int          pinned;       /* whether to bump atom information */
+@END
+
+
+/* Empty an atom table */
+@REQ(empty_atom_table)
+    obj_handle_t table;        /* which table to find atom from */
+    int          if_pinned;    /* whether to delete pinned atoms */
+@END
+
+
+/* Init an atom table */
+@REQ(init_atom_table)
+    int          entries;      /* number of entries (only for local) */
+@REPLY
+    obj_handle_t table;        /* handle to the atom table */
+@END
+
+
+/* Get the message queue of the current thread */
+@REQ(get_msg_queue)
+@REPLY
+    obj_handle_t handle;       /* handle to the queue */
+@END
+
+
+/* Set the file descriptor associated to the current thread queue */
+@REQ(set_queue_fd)
+    obj_handle_t handle;       /* handle to the file descriptor */
+@END
+
+
+/* Set the current message queue wakeup mask */
+@REQ(set_queue_mask)
+    unsigned int wake_mask;    /* wakeup bits mask */
+    unsigned int changed_mask; /* changed bits mask */
+    int          skip_wait;    /* will we skip waiting if signaled? */
+@REPLY
+    unsigned int wake_bits;    /* current wake bits */
+    unsigned int changed_bits; /* current changed bits */
+@END
+
+
+/* Get the current message queue status */
+@REQ(get_queue_status)
+    unsigned int clear_bits;   /* should we clear the change bits? */
+@REPLY
+    unsigned int wake_bits;    /* wake bits */
+    unsigned int changed_bits; /* changed bits since last time */
+@END
+
+
+/* Retrieve the process idle event */
+@REQ(get_process_idle_event)
+    obj_handle_t handle;       /* process handle */
+@REPLY
+    obj_handle_t event;        /* handle to idle event */
+@END
+
+
+/* Send a message to a thread queue */
+@REQ(send_message)
+    thread_id_t     id;        /* thread id */
+    int             type;      /* message type (see below) */
+    int             flags;     /* message flags (see below) */
+    user_handle_t   win;       /* window handle */
+    unsigned int    msg;       /* message code */
+    lparam_t        wparam;    /* parameters */
+    lparam_t        lparam;    /* parameters */
+    timeout_t       timeout;   /* timeout for reply */
+    VARARG(data,message_data); /* message data for sent messages */
+@END
+
+@REQ(post_quit_message)
+    int             exit_code; /* exit code to return */
+@END
+
+enum message_type
+{
+    MSG_ASCII,          /* Ascii message (from SendMessageA) */
+    MSG_UNICODE,        /* Unicode message (from SendMessageW) */
+    MSG_NOTIFY,         /* notify message (from SendNotifyMessageW), always Unicode */
+    MSG_CALLBACK,       /* callback message (from SendMessageCallbackW), always Unicode */
+    MSG_CALLBACK_RESULT,/* result of a callback message */
+    MSG_OTHER_PROCESS,  /* sent from other process, may include vararg data, always Unicode */
+    MSG_POSTED,         /* posted message (from PostMessageW), always Unicode */
+    MSG_HARDWARE,       /* hardware message */
+    MSG_WINEVENT,       /* winevent message */
+    MSG_HOOK_LL         /* low-level hardware hook */
+};
+#define SEND_MSG_ABORT_IF_HUNG  0x01
+
+
+/* Send a hardware message to a thread queue */
+@REQ(send_hardware_message)
+    user_handle_t   win;       /* window handle */
+    hw_input_t      input;     /* input data */
+    unsigned int    flags;     /* flags (see below) */
+@REPLY
+    int             wait;      /* do we need to wait for a reply? */
+    int             prev_x;    /* previous cursor position */
+    int             prev_y;
+    int             new_x;     /* new cursor position */
+    int             new_y;
+    VARARG(keystate,bytes);    /* global state array for all the keys */
+@END
+#define SEND_HWMSG_INJECTED    0x01
+
+
+/* Get a message from the current queue */
+@REQ(get_message)
+    unsigned int    flags;     /* PM_* flags */
+    user_handle_t   get_win;   /* window handle to get */
+    unsigned int    get_first; /* first message code to get */
+    unsigned int    get_last;  /* last message code to get */
+    unsigned int    hw_id;     /* id of the previous hardware message (or 0) */
+    unsigned int    wake_mask; /* wakeup bits mask */
+    unsigned int    changed_mask; /* changed bits mask */
+@REPLY
+    user_handle_t   win;       /* window handle */
+    unsigned int    msg;       /* message code */
+    lparam_t        wparam;    /* parameters */
+    lparam_t        lparam;    /* parameters */
+    int             type;      /* message type */
+    int             x;         /* message x position */
+    int             y;         /* message y position */
+    unsigned int    time;      /* message time */
+    unsigned int    active_hooks; /* active hooks bitmap */
+    data_size_t     total;     /* total size of extra data */
+    VARARG(data,message_data); /* message data for sent messages */
+@END
+
+
+/* Reply to a sent message */
+@REQ(reply_message)
+    int             remove;    /* should we remove the message? */
+    lparam_t        result;    /* message result */
+    VARARG(data,bytes);        /* message data for sent messages */
+@END
+
+
+/* Accept the current hardware message */
+@REQ(accept_hardware_message)
+    unsigned int    hw_id;     /* id of the hardware message */
+    int             remove;    /* should we remove the message? */
+@END
+
+
+/* Retrieve the reply for the last message sent */
+@REQ(get_message_reply)
+    int             cancel;    /* cancel message if not ready? */
+@REPLY
+    lparam_t        result;    /* message result */
+    VARARG(data,bytes);        /* message data for sent messages */
+@END
+
+
+/* Set a window timer */
+@REQ(set_win_timer)
+    user_handle_t   win;       /* window handle */
+    unsigned int    msg;       /* message to post */
+    unsigned int    rate;      /* timer rate in ms */
+    lparam_t        id;        /* timer id */
+    lparam_t        lparam;    /* message lparam (callback proc) */
+@REPLY
+    lparam_t        id;        /* timer id */
+@END
+
+
+/* Kill a window timer */
+@REQ(kill_win_timer)
+    user_handle_t   win;       /* window handle */
+    lparam_t        id;        /* timer id */
+    unsigned int    msg;       /* message to post */
+@END
+
+
+/* check if the thread owning the window is hung */
+@REQ(is_window_hung)
+    user_handle_t   win;       /* window handle */
+@REPLY
+    int is_hung;
+@END
+
+
+/* Retrieve info about a serial port */
+@REQ(get_serial_info)
+    obj_handle_t handle;       /* handle to comm port */
+    int          flags;
+@REPLY
+    unsigned int eventmask;
+    unsigned int cookie;
+    unsigned int pending_write;
+@END
+
+
+/* Set info about a serial port */
+@REQ(set_serial_info)
+    obj_handle_t handle;       /* handle to comm port */
+    int          flags;        /* bitmask to set values (see below) */
+@END
+#define SERIALINFO_PENDING_WRITE 0x04
+#define SERIALINFO_PENDING_WAIT  0x08
+
+
+/* Create an async I/O */
+@REQ(register_async)
+    int          type;          /* type of queue to look after */
+    async_data_t async;         /* async I/O parameters */
+    int          count;         /* count - usually # of bytes to be read/written */
+@END
+#define ASYNC_TYPE_READ  0x01
+#define ASYNC_TYPE_WRITE 0x02
+#define ASYNC_TYPE_WAIT  0x03
+
+
+/* Cancel all async op on a fd */
+@REQ(cancel_async)
+    obj_handle_t handle;        /* handle to comm port, socket or file */
+    client_ptr_t iosb;          /* I/O status block (NULL=all) */
+    int          only_thread;   /* cancel matching this thread */
+@END
+
+
+/* Retrieve results of an async */
+@REQ(get_async_result)
+    client_ptr_t   user_arg;      /* user arg used to identify async */
+@REPLY
+    data_size_t    size;          /* result size (input or output depending on the operation) */
+    VARARG(out_data,bytes);       /* iosb output data */
+@END
+
+
+/* Perform a read on a file object */
+@REQ(read)
+    async_data_t   async;         /* async I/O parameters */
+    file_pos_t     pos;           /* read position */
+@REPLY
+    obj_handle_t   wait;          /* handle to wait on for blocking read */
+    unsigned int   options;       /* device open options */
+    VARARG(data,bytes);           /* read data */
+@END
+
+
+/* Perform a write on a file object */
+@REQ(write)
+    async_data_t   async;         /* async I/O parameters */
+    file_pos_t     pos;           /* write position */
+    VARARG(data,bytes);           /* write data */
+@REPLY
+    obj_handle_t   wait;          /* handle to wait on for blocking write */
+    unsigned int   options;       /* device open options */
+    data_size_t    size;          /* size written */
+@END
+
+
+/* Perform an ioctl on a file */
+@REQ(ioctl)
+    ioctl_code_t   code;          /* ioctl code */
+    async_data_t   async;         /* async I/O parameters */
+    VARARG(in_data,bytes);        /* ioctl input data */
+@REPLY
+    obj_handle_t   wait;          /* handle to wait on for blocking ioctl */
+    unsigned int   options;       /* device open options */
+    VARARG(out_data,bytes);       /* ioctl output data */
+@END
+
+
+/* Store results of an async irp */
+@REQ(set_irp_result)
+    obj_handle_t handle;          /* handle to the irp */
+    unsigned int status;          /* status of the irp */
+    data_size_t  size;            /* result size (input or output depending on the operation) */
+    client_ptr_t file_ptr;        /* opaque pointer to the file object */
+    VARARG(data,bytes);           /* output data of the irp */
+@END
+
+
+/* Create a named pipe */
+@REQ(create_named_pipe)
+    unsigned int   access;
+    unsigned int   options;
+    unsigned int   sharing;
+    unsigned int   maxinstances;
+    unsigned int   outsize;
+    unsigned int   insize;
+    timeout_t      timeout;
+    unsigned int   flags;
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t   handle;       /* handle to the pipe */
+@END
+
+/* flags in create_named_pipe and get_named_pipe_info */
+#define NAMED_PIPE_MESSAGE_STREAM_WRITE 0x0001
+#define NAMED_PIPE_MESSAGE_STREAM_READ  0x0002
+#define NAMED_PIPE_NONBLOCKING_MODE     0x0004
+#define NAMED_PIPE_SERVER_END           0x8000
+
+/* Get named pipe information by handle */
+@REQ(get_named_pipe_info)
+    obj_handle_t   handle;
+@REPLY
+    unsigned int   flags;
+    unsigned int   sharing;
+    unsigned int   maxinstances;
+    unsigned int   instances;
+    unsigned int   outsize;
+    unsigned int   insize;
+@END
+
+/* Set named pipe information by handle */
+@REQ(set_named_pipe_info)
+    obj_handle_t   handle;
+    unsigned int   flags;
+@END
+
+/* Create a window */
+@REQ(create_window)
+    user_handle_t  parent;      /* parent window */
+    user_handle_t  owner;       /* owner window */
+    atom_t         atom;        /* class atom */
+    mod_handle_t   instance;    /* module instance */
+    VARARG(class,unicode_str);  /* class name */
+@REPLY
+    user_handle_t  handle;      /* created window */
+    user_handle_t  parent;      /* full handle of parent */
+    user_handle_t  owner;       /* full handle of owner */
+    int            extra;       /* number of extra bytes */
+    client_ptr_t   class_ptr;   /* pointer to class in client address space */
+@END
+
+
+/* Destroy a window */
+@REQ(destroy_window)
+    user_handle_t  handle;      /* handle to the window */
+@END
+
+
+/* Retrieve the desktop window for the current thread */
+@REQ(get_desktop_window)
+    int            force;       /* force creation if it doesn't exist */
+@REPLY
+    user_handle_t  top_window;  /* handle to the desktop window */
+    user_handle_t  msg_window;  /* handle to the top-level HWND_MESSAGE parent */
+@END
+
+
+/* Set a window owner */
+@REQ(set_window_owner)
+    user_handle_t  handle;      /* handle to the window */
+    user_handle_t  owner;       /* new owner */
+@REPLY
+    user_handle_t  full_owner;  /* full handle of new owner */
+    user_handle_t  prev_owner;  /* full handle of previous owner */
+@END
+
+
+/* Get information from a window handle */
+@REQ(get_window_info)
+    user_handle_t  handle;      /* handle to the window */
+@REPLY
+    user_handle_t  full_handle; /* full 32-bit handle */
+    user_handle_t  last_active; /* last active popup */
+    process_id_t   pid;         /* process owning the window */
+    thread_id_t    tid;         /* thread owning the window */
+    atom_t         atom;        /* class atom */
+    int            is_unicode;  /* ANSI or unicode */
+@END
+
+
+/* Set some information in a window */
+@REQ(set_window_info)
+    unsigned short flags;         /* flags for fields to set (see below) */
+    short int      is_unicode;    /* ANSI or unicode */
+    user_handle_t  handle;        /* handle to the window */
+    unsigned int   style;         /* window style */
+    unsigned int   ex_style;      /* window extended style */
+    unsigned int   id;            /* window id */
+    mod_handle_t   instance;      /* creator instance */
+    lparam_t       user_data;     /* user-specific data */
+    int            extra_offset;  /* offset to set in extra bytes */
+    data_size_t    extra_size;    /* size to set in extra bytes */
+    lparam_t       extra_value;   /* value to set in extra bytes */
+@REPLY
+    unsigned int   old_style;     /* old window style */
+    unsigned int   old_ex_style;  /* old window extended style */
+    mod_handle_t   old_instance;  /* old creator instance */
+    lparam_t       old_user_data; /* old user-specific data */
+    lparam_t       old_extra_value; /* old value in extra bytes */
+    unsigned int   old_id;        /* old window id */
+@END
+#define SET_WIN_STYLE     0x01
+#define SET_WIN_EXSTYLE   0x02
+#define SET_WIN_ID        0x04
+#define SET_WIN_INSTANCE  0x08
+#define SET_WIN_USERDATA  0x10
+#define SET_WIN_EXTRA     0x20
+#define SET_WIN_UNICODE   0x40
+
+
+/* Set the parent of a window */
+@REQ(set_parent)
+    user_handle_t  handle;      /* handle to the window */
+    user_handle_t  parent;      /* handle to the parent */
+@REPLY
+    user_handle_t  old_parent;  /* old parent window */
+    user_handle_t  full_parent; /* full handle of new parent */
+@END
+
+
+/* Get a list of the window parents, up to the root of the tree */
+@REQ(get_window_parents)
+    user_handle_t  handle;        /* handle to the window */
+@REPLY
+    int            count;         /* total count of parents */
+    VARARG(parents,user_handles); /* parent handles */
+@END
+
+
+/* Get a list of the window children */
+@REQ(get_window_children)
+    obj_handle_t   desktop;       /* handle to desktop */
+    user_handle_t  parent;        /* parent window */
+    atom_t         atom;          /* class atom for the listed children */
+    thread_id_t    tid;           /* thread owning the listed children */
+    VARARG(class,unicode_str);    /* class name */
+@REPLY
+    int            count;         /* total count of children */
+    VARARG(children,user_handles); /* children handles */
+@END
+
+
+/* Get a list of the window children that contain a given point */
+@REQ(get_window_children_from_point)
+    user_handle_t  parent;        /* parent window */
+    int            x;             /* point in parent coordinates */
+    int            y;
+@REPLY
+    int            count;         /* total count of children */
+    VARARG(children,user_handles); /* children handles */
+@END
+
+
+/* Get window tree information from a window handle */
+@REQ(get_window_tree)
+    user_handle_t  handle;        /* handle to the window */
+@REPLY
+    user_handle_t  parent;        /* parent window */
+    user_handle_t  owner;         /* owner window */
+    user_handle_t  next_sibling;  /* next sibling in Z-order */
+    user_handle_t  prev_sibling;  /* prev sibling in Z-order */
+    user_handle_t  first_sibling; /* first sibling in Z-order */
+    user_handle_t  last_sibling;  /* last sibling in Z-order */
+    user_handle_t  first_child;   /* first child */
+    user_handle_t  last_child;    /* last child */
+@END
+
+/* Set the position and Z order of a window */
+@REQ(set_window_pos)
+    unsigned short swp_flags;     /* SWP_* flags */
+    unsigned short paint_flags;   /* paint flags (see below) */
+    user_handle_t  handle;        /* handle to the window */
+    user_handle_t  previous;      /* previous window in Z order */
+    rectangle_t    window;        /* window rectangle (in parent coords) */
+    rectangle_t    client;        /* client rectangle (in parent coords) */
+    VARARG(valid,rectangles);     /* valid rectangles from WM_NCCALCSIZE (in parent coords) */
+@REPLY
+    unsigned int   new_style;     /* new window style */
+    unsigned int   new_ex_style;  /* new window extended style */
+    user_handle_t  surface_win;   /* parent window that holds the surface */
+    int            needs_update;  /* whether the surface region needs an update */
+@END
+#define SET_WINPOS_PAINT_SURFACE 0x01  /* window has a paintable surface */
+#define SET_WINPOS_PIXEL_FORMAT  0x02  /* window has a custom pixel format */
+
+/* Get the window and client rectangles of a window */
+@REQ(get_window_rectangles)
+    user_handle_t  handle;        /* handle to the window */
+    int            relative;      /* coords relative to (see below) */
+@REPLY
+    rectangle_t    window;        /* window rectangle */
+    rectangle_t    visible;       /* visible part of the window rectangle */
+    rectangle_t    client;        /* client rectangle */
+@END
+enum coords_relative
+{
+    COORDS_CLIENT,   /* relative to client area */
+    COORDS_WINDOW,   /* relative to whole window area */
+    COORDS_PARENT,   /* relative to parent's client area */
+    COORDS_SCREEN    /* relative to screen origin */
+};
+
+
+/* Get the window text */
+@REQ(get_window_text)
+    user_handle_t  handle;        /* handle to the window */
+@REPLY
+    VARARG(text,unicode_str);     /* window text */
+@END
+
+
+/* Set the window text */
+@REQ(set_window_text)
+    user_handle_t  handle;        /* handle to the window */
+    VARARG(text,unicode_str);     /* window text */
+@END
+
+
+/* Get the coordinates offset between two windows */
+@REQ(get_windows_offset)
+    user_handle_t  from;          /* handle to the first window */
+    user_handle_t  to;            /* handle to the second window */
+@REPLY
+    int            x;             /* x coordinate offset */
+    int            y;             /* y coordinate offset */
+    int            mirror;        /* whether to mirror the x coordinate */
+@END
+
+
+/* Get the visible region of a window */
+@REQ(get_visible_region)
+    user_handle_t  window;        /* handle to the window */
+    unsigned int   flags;         /* DCX flags */
+@REPLY
+    user_handle_t  top_win;       /* top window to clip against */
+    rectangle_t    top_rect;      /* top window visible rect with screen coords */
+    rectangle_t    win_rect;      /* window rect in screen coords */
+    unsigned int   paint_flags;   /* paint flags (from SET_WINPOS_* flags) */
+    data_size_t    total_size;    /* total size of the resulting region */
+    VARARG(region,rectangles);    /* list of rectangles for the region (in screen coords) */
+@END
+
+
+/* Get the visible surface region of a window */
+@REQ(get_surface_region)
+    user_handle_t  window;        /* handle to the window */
+@REPLY
+    rectangle_t    visible_rect;  /* window visible rect in screen coords */
+    data_size_t    total_size;    /* total size of the resulting region */
+    VARARG(region,rectangles);    /* list of rectangles for the region (in screen coords) */
+@END
+
+
+/* Get the window region */
+@REQ(get_window_region)
+    user_handle_t  window;        /* handle to the window */
+@REPLY
+    data_size_t    total_size;    /* total size of the resulting region */
+    VARARG(region,rectangles);    /* list of rectangles for the region (in window coords) */
+@END
+
+
+/* Set the window region */
+@REQ(set_window_region)
+    user_handle_t  window;        /* handle to the window */
+    int            redraw;        /* redraw the window? */
+    VARARG(region,rectangles);    /* list of rectangles for the region (in window coords) */
+@END
+
+
+/* Get the window update region */
+@REQ(get_update_region)
+    user_handle_t  window;        /* handle to the window */
+    user_handle_t  from_child;    /* child to start searching from */
+    unsigned int   flags;         /* update flags (see below) */
+@REPLY
+    user_handle_t  child;         /* child to repaint (or window itself) */
+    unsigned int   flags;         /* resulting update flags (see below) */
+    data_size_t    total_size;    /* total size of the resulting region */
+    VARARG(region,rectangles);    /* list of rectangles for the region (in screen coords) */
+@END
+#define UPDATE_NONCLIENT       0x001  /* get region for repainting non-client area */
+#define UPDATE_ERASE           0x002  /* get region for erasing client area */
+#define UPDATE_PAINT           0x004  /* get region for painting client area */
+#define UPDATE_INTERNALPAINT   0x008  /* get region if internal paint is pending */
+#define UPDATE_ALLCHILDREN     0x010  /* force repaint of all children */
+#define UPDATE_NOCHILDREN      0x020  /* don't try to repaint any children */
+#define UPDATE_NOREGION        0x040  /* don't return a region, only the flags */
+#define UPDATE_DELAYED_ERASE   0x080  /* still needs erase after BeginPaint */
+#define UPDATE_CLIPCHILDREN    0x100  /* remove clipped children from the update region */
+
+
+/* Update the z order of a window so that a given rectangle is fully visible */
+@REQ(update_window_zorder)
+    user_handle_t  window;        /* handle to the window */
+    rectangle_t    rect;          /* rectangle that must be visible (in client coords) */
+@END
+
+
+/* Mark parts of a window as needing a redraw */
+@REQ(redraw_window)
+    user_handle_t  window;        /* handle to the window */
+    unsigned int   flags;         /* RDW_* flags */
+    VARARG(region,rectangles);    /* list of rectangles for the region (in window coords) */
+@END
+
+
+/* Set a window property */
+@REQ(set_window_property)
+    user_handle_t  window;        /* handle to the window */
+    lparam_t       data;          /* data to store */
+    atom_t         atom;          /* property atom (if no name specified) */
+    VARARG(name,unicode_str);     /* property name */
+@END
+
+
+/* Remove a window property */
+@REQ(remove_window_property)
+    user_handle_t  window;        /* handle to the window */
+    atom_t         atom;          /* property atom (if no name specified) */
+    VARARG(name,unicode_str);     /* property name */
+@REPLY
+    lparam_t       data;          /* data stored in property */
+@END
+
+
+/* Get a window property */
+@REQ(get_window_property)
+    user_handle_t  window;        /* handle to the window */
+    atom_t         atom;          /* property atom (if no name specified) */
+    VARARG(name,unicode_str);     /* property name */
+@REPLY
+    lparam_t       data;          /* data stored in property */
+@END
+
+
+/* Get the list of properties of a window */
+@REQ(get_window_properties)
+    user_handle_t  window;        /* handle to the window */
+@REPLY
+    int            total;         /* total number of properties */
+    VARARG(props,properties);     /* list of properties */
+@END
+
+
+/* Create a window station */
+@REQ(create_winstation)
+    unsigned int flags;           /* window station flags */
+    unsigned int access;          /* wanted access rights */
+    unsigned int attributes;      /* object attributes */
+    obj_handle_t rootdir;         /* root directory */
+    VARARG(name,unicode_str);     /* object name */
+@REPLY
+    obj_handle_t handle;          /* handle to the window station */
+@END
+
+
+/* Open a handle to a window station */
+@REQ(open_winstation)
+    unsigned int access;          /* wanted access rights */
+    unsigned int attributes;      /* object attributes */
+    obj_handle_t rootdir;         /* root directory */
+    VARARG(name,unicode_str);     /* object name */
+@REPLY
+    obj_handle_t handle;          /* handle to the window station */
+@END
+
+
+/* Close a window station */
+@REQ(close_winstation)
+    obj_handle_t handle;          /* handle to the window station */
+@END
+
+
+/* Get the process current window station */
+@REQ(get_process_winstation)
+@REPLY
+    obj_handle_t handle;          /* handle to the window station */
+@END
+
+
+/* Set the process current window station */
+@REQ(set_process_winstation)
+    obj_handle_t handle;          /* handle to the window station */
+@END
+
+
+/* Enumerate window stations */
+@REQ(enum_winstation)
+    unsigned int index;           /* current index */
+@REPLY
+    unsigned int next;            /* next index */
+    VARARG(name,unicode_str);     /* window station name */
+@END
+
+
+/* Create a desktop */
+@REQ(create_desktop)
+    unsigned int flags;           /* desktop flags */
+    unsigned int access;          /* wanted access rights */
+    unsigned int attributes;      /* object attributes */
+    VARARG(name,unicode_str);     /* object name */
+@REPLY
+    obj_handle_t handle;          /* handle to the desktop */
+@END
+
+
+/* Open a handle to a desktop */
+@REQ(open_desktop)
+    obj_handle_t winsta;          /* window station to open (null allowed) */
+    unsigned int flags;           /* desktop flags */
+    unsigned int access;          /* wanted access rights */
+    unsigned int attributes;      /* object attributes */
+    VARARG(name,unicode_str);     /* object name */
+@REPLY
+    obj_handle_t handle;          /* handle to the desktop */
+@END
+
+
+/* Open a handle to current input desktop */
+@REQ(open_input_desktop)
+    unsigned int flags;           /* desktop flags */
+    unsigned int access;          /* wanted access rights */
+    unsigned int attributes;      /* object attributes */
+@REPLY
+    obj_handle_t handle;          /* handle to the desktop */
+@END
+
+
+/* Close a desktop */
+@REQ(close_desktop)
+    obj_handle_t handle;          /* handle to the desktop */
+@END
+
+
+/* Get the thread current desktop */
+@REQ(get_thread_desktop)
+    thread_id_t  tid;             /* thread id */
+@REPLY
+    obj_handle_t handle;          /* handle to the desktop */
+@END
+
+
+/* Set the thread current desktop */
+@REQ(set_thread_desktop)
+    obj_handle_t handle;          /* handle to the desktop */
+@END
+
+
+/* Enumerate desktops */
+@REQ(enum_desktop)
+    obj_handle_t winstation;      /* handle to the window station */
+    unsigned int index;           /* current index */
+@REPLY
+    unsigned int next;            /* next index */
+    VARARG(name,unicode_str);     /* window station name */
+@END
+
+
+/* Get/set information about a user object (window station or desktop) */
+@REQ(set_user_object_info)
+    obj_handle_t handle;          /* handle to the object */
+    unsigned int flags;           /* information to set/get */
+    unsigned int obj_flags;       /* new object flags */
+@REPLY
+    int          is_desktop;      /* is object a desktop? */
+    unsigned int old_obj_flags;   /* old object flags */
+    VARARG(name,unicode_str);     /* object name */
+@END
+#define SET_USER_OBJECT_SET_FLAGS       1
+#define SET_USER_OBJECT_GET_FULL_NAME   2
+
+
+/* Register a hotkey */
+@REQ(register_hotkey)
+    user_handle_t  window;        /* handle to the window */
+    int            id;            /* hotkey identifier */
+    unsigned int   flags;         /* modifier keys */
+    unsigned int   vkey;          /* virtual key code */
+@REPLY
+    int            replaced;      /* did we replace an existing hotkey? */
+    unsigned int   flags;         /* flags of replaced hotkey */
+    unsigned int   vkey;          /* virtual key code of replaced hotkey */
+@END
+
+
+/* Unregister a hotkey */
+@REQ(unregister_hotkey)
+    user_handle_t  window;        /* handle to the window */
+    int            id;            /* hotkey identifier */
+@REPLY
+    unsigned int   flags;         /* flags of removed hotkey */
+    unsigned int   vkey;          /* virtual key code of removed hotkey */
+@END
+
+
+/* Attach (or detach) thread inputs */
+@REQ(attach_thread_input)
+    thread_id_t    tid_from;       /* thread to be attached */
+    thread_id_t    tid_to;         /* thread to which tid_from should be attached */
+    int            attach;         /* is it an attach? */
+@END
+
+
+/* Get input data for a given thread */
+@REQ(get_thread_input)
+    thread_id_t    tid;           /* id of thread */
+@REPLY
+    user_handle_t  focus;         /* handle to the focus window */
+    user_handle_t  capture;       /* handle to the capture window */
+    user_handle_t  active;        /* handle to the active window */
+    user_handle_t  foreground;    /* handle to the global foreground window */
+    user_handle_t  menu_owner;    /* handle to the menu owner */
+    user_handle_t  move_size;     /* handle to the moving/resizing window */
+    user_handle_t  caret;         /* handle to the caret window */
+    user_handle_t  cursor;        /* handle to the cursor */
+    int            show_count;    /* cursor show count */
+    rectangle_t    rect;          /* caret rectangle */
+@END
+
+
+/* Get the time of the last input event */
+@REQ(get_last_input_time)
+@REPLY
+    unsigned int time;
+@END
+
+
+/* Retrieve queue keyboard state for a given thread */
+@REQ(get_key_state)
+    thread_id_t    tid;           /* id of thread */
+    int            key;           /* optional key code or -1 */
+@REPLY
+    unsigned char  state;         /* state of specified key */
+    VARARG(keystate,bytes);       /* state array for all the keys */
+@END
+
+/* Set queue keyboard state for a given thread */
+@REQ(set_key_state)
+    thread_id_t    tid;           /* id of thread */
+    int            async;         /* whether to change the async state too */
+    VARARG(keystate,bytes);       /* state array for all the keys */
+@END
+
+/* Set the system foreground window */
+@REQ(set_foreground_window)
+    user_handle_t  handle;        /* handle to the foreground window */
+@REPLY
+    user_handle_t  previous;      /* handle to the previous foreground window */
+    int            send_msg_old;  /* whether we have to send a msg to the old window */
+    int            send_msg_new;  /* whether we have to send a msg to the new window */
+@END
+
+/* Set the current thread focus window */
+@REQ(set_focus_window)
+    user_handle_t  handle;        /* handle to the focus window */
+@REPLY
+    user_handle_t  previous;      /* handle to the previous focus window */
+@END
+
+/* Set the current thread active window */
+@REQ(set_active_window)
+    user_handle_t  handle;        /* handle to the active window */
+@REPLY
+    user_handle_t  previous;      /* handle to the previous active window */
+@END
+
+/* Set the current thread capture window */
+@REQ(set_capture_window)
+    user_handle_t  handle;        /* handle to the capture window */
+    unsigned int   flags;         /* capture flags (see below) */
+@REPLY
+    user_handle_t  previous;      /* handle to the previous capture window */
+    user_handle_t  full_handle;   /* full 32-bit handle of new capture window */
+@END
+#define CAPTURE_MENU     0x01  /* capture is for a menu */
+#define CAPTURE_MOVESIZE 0x02  /* capture is for moving/resizing */
+
+
+/* Set the current thread caret window */
+@REQ(set_caret_window)
+    user_handle_t  handle;        /* handle to the caret window */
+    int            width;         /* caret width */
+    int            height;        /* caret height */
+@REPLY
+    user_handle_t  previous;      /* handle to the previous caret window */
+    rectangle_t    old_rect;      /* previous caret rectangle */
+    int            old_hide;      /* previous hide count */
+    int            old_state;     /* previous caret state (1=on, 0=off) */
+@END
+
+
+/* Set the current thread caret information */
+@REQ(set_caret_info)
+    unsigned int   flags;         /* caret flags (see below) */
+    user_handle_t  handle;        /* handle to the caret window */
+    int            x;             /* caret x position */
+    int            y;             /* caret y position */
+    int            hide;          /* increment for hide count (can be negative to show it) */
+    int            state;         /* caret state (see below) */
+@REPLY
+    user_handle_t  full_handle;   /* handle to the current caret window */
+    rectangle_t    old_rect;      /* previous caret rectangle */
+    int            old_hide;      /* previous hide count */
+    int            old_state;     /* previous caret state (1=on, 0=off) */
+@END
+#define SET_CARET_POS        0x01  /* set the caret position from x,y */
+#define SET_CARET_HIDE       0x02  /* increment the caret hide count */
+#define SET_CARET_STATE      0x04  /* set the caret on/off state */
+enum caret_state
+{
+    CARET_STATE_OFF,        /* off */
+    CARET_STATE_ON,         /* on */
+    CARET_STATE_TOGGLE,     /* toggle current state */
+    CARET_STATE_ON_IF_MOVED /* on if the position differs, unchanged otherwise */
+};
+
+
+/* Set a window hook */
+@REQ(set_hook)
+    int            id;             /* id of the hook */
+    process_id_t   pid;            /* id of process to set the hook into */
+    thread_id_t    tid;            /* id of thread to set the hook into */
+    int            event_min;
+    int            event_max;
+    client_ptr_t   proc;           /* hook procedure */
+    int            flags;
+    int            unicode;        /* is it a unicode hook? */
+    VARARG(module,unicode_str);    /* module name */
+@REPLY
+    user_handle_t  handle;         /* handle to the hook */
+    unsigned int   active_hooks;   /* active hooks bitmap */
+@END
+
+
+/* Remove a window hook */
+@REQ(remove_hook)
+    user_handle_t  handle;         /* handle to the hook */
+    client_ptr_t   proc;           /* hook procedure if handle is 0 */
+    int            id;             /* id of the hook if handle is 0 */
+@REPLY
+    unsigned int   active_hooks;   /* active hooks bitmap */
+@END
+
+
+/* Start calling a hook chain */
+@REQ(start_hook_chain)
+    int            id;             /* id of the hook */
+    int            event;          /* signalled event */
+    user_handle_t  window;         /* handle to the event window */
+    int            object_id;      /* object id for out of context winevent */
+    int            child_id;       /* child id for out of context winevent */
+@REPLY
+    user_handle_t  handle;         /* handle to the next hook */
+    process_id_t   pid;            /* process id for low-level keyboard/mouse hooks */
+    thread_id_t    tid;            /* thread id for low-level keyboard/mouse hooks */
+    int            unicode;        /* is it a unicode hook? */
+    client_ptr_t   proc;           /* hook procedure */
+    unsigned int   active_hooks;   /* active hooks bitmap */
+    VARARG(module,unicode_str);    /* module name */
+@END
+
+
+/* Finished calling a hook chain */
+@REQ(finish_hook_chain)
+    int            id;             /* id of the hook */
+@END
+
+
+/* Get the hook information */
+@REQ(get_hook_info)
+    user_handle_t  handle;         /* handle to the current hook */
+    int            get_next;       /* do we want info about current or next hook? */
+    int            event;          /* signalled event */
+    user_handle_t  window;         /* handle to the event window */
+    int            object_id;      /* object id for out of context winevent */
+    int            child_id;       /* child id for out of context winevent */
+@REPLY
+    user_handle_t  handle;         /* handle to the hook */
+    int            id;             /* id of the hook */
+    process_id_t   pid;            /* process id for low-level keyboard/mouse hooks */
+    thread_id_t    tid;            /* thread id for low-level keyboard/mouse hooks */
+    client_ptr_t   proc;           /* hook procedure */
+    int            unicode;        /* is it a unicode hook? */
+    VARARG(module,unicode_str);    /* module name */
+@END
+
+
+/* Create a window class */
+@REQ(create_class)
+    int            local;          /* is it a local class? */
+    atom_t         atom;           /* class atom */
+    unsigned int   style;          /* class style */
+    mod_handle_t   instance;       /* module instance */
+    int            extra;          /* number of extra class bytes */
+    int            win_extra;      /* number of window extra bytes */
+    client_ptr_t   client_ptr;     /* pointer to class in client address space */
+    VARARG(name,unicode_str);      /* class name */
+@REPLY
+    atom_t         atom;           /* resulting class atom */
+@END
+
+
+/* Destroy a window class */
+@REQ(destroy_class)
+    atom_t         atom;           /* class atom */
+    mod_handle_t   instance;       /* module instance */
+    VARARG(name,unicode_str);      /* class name */
+@REPLY
+    client_ptr_t   client_ptr;     /* pointer to class in client address space */
+@END
+
+
+/* Set some information in a class */
+@REQ(set_class_info)
+    user_handle_t  window;         /* handle to the window */
+    unsigned int   flags;          /* flags for info to set (see below) */
+    atom_t         atom;           /* class atom */
+    unsigned int   style;          /* class style */
+    int            win_extra;      /* number of window extra bytes */
+    mod_handle_t   instance;       /* module instance */
+    int            extra_offset;   /* offset to set in extra bytes */
+    data_size_t    extra_size;     /* size to set in extra bytes */
+    lparam_t       extra_value;    /* value to set in extra bytes */
+@REPLY
+    atom_t         old_atom;       /* previous class atom */
+    unsigned int   old_style;      /* previous class style */
+    int            old_extra;      /* previous number of class extra bytes */
+    int            old_win_extra;  /* previous number of window extra bytes */
+    mod_handle_t   old_instance;   /* previous module instance */
+    lparam_t       old_extra_value; /* old value in extra bytes */
+@END
+#define SET_CLASS_ATOM      0x0001
+#define SET_CLASS_STYLE     0x0002
+#define SET_CLASS_WINEXTRA  0x0004
+#define SET_CLASS_INSTANCE  0x0008
+#define SET_CLASS_EXTRA     0x0010
+
+
+/* Open the clipboard */
+@REQ(open_clipboard)
+    user_handle_t  window;         /* clipboard window */
+@REPLY
+    user_handle_t  owner;          /* current clipboard owner */
+@END
+
+
+/* Close the clipboard */
+@REQ(close_clipboard)
+@REPLY
+    user_handle_t  viewer;         /* first clipboard viewer */
+    user_handle_t  owner;          /* current clipboard owner */
+@END
+
+
+/* Empty the clipboard and grab ownership */
+@REQ(empty_clipboard)
+@END
+
+
+/* Add a data format to the clipboard */
+@REQ(set_clipboard_data)
+    unsigned int   format;         /* clipboard format of the data */
+    unsigned int   lcid;           /* locale id to use for synthesizing text formats */
+    VARARG(data,bytes);            /* data contents */
+@REPLY
+    unsigned int   seqno;          /* sequence number for the set data */
+@END
+
+
+/* Fetch a data format from the clipboard */
+@REQ(get_clipboard_data)
+    unsigned int   format;         /* clipboard format of the data */
+    int            render;         /* will we try to render it if missing? */
+    int            cached;         /* do we already have it in the client-side cache? */
+    unsigned int   seqno;          /* sequence number for the data in the cache */
+@REPLY
+    unsigned int   from;           /* for synthesized data, format to generate it from */
+    user_handle_t  owner;          /* clipboard owner for delayed-rendered formats */
+    unsigned int   seqno;          /* sequence number for the originally set data */
+    data_size_t    total;          /* total data size */
+    VARARG(data,bytes);            /* data contents */
+@END
+
+
+/* Retrieve a list of available formats */
+@REQ(get_clipboard_formats)
+    unsigned int   format;         /* specific format to query, return all if 0 */
+@REPLY
+    unsigned int   count;          /* count of available formats */
+    VARARG(formats,uints);         /* array of available formats */
+@END
+
+
+/* Retrieve the next available format */
+@REQ(enum_clipboard_formats)
+    unsigned int   previous;       /* previous format, or first if 0 */
+@REPLY
+    unsigned int   format;         /* next format */
+@END
+
+
+/* Release ownership of the clipboard */
+@REQ(release_clipboard)
+    user_handle_t  owner;          /* clipboard owner to release */
+@REPLY
+    user_handle_t  viewer;         /* first clipboard viewer */
+    user_handle_t  owner;          /* current clipboard owner */
+@END
+
+
+/* Get clipboard information */
+@REQ(get_clipboard_info)
+@REPLY
+    user_handle_t  window;         /* clipboard window */
+    user_handle_t  owner;          /* clipboard owner */
+    user_handle_t  viewer;         /* clipboard viewer */
+    unsigned int   seqno;          /* current sequence number */
+@END
+
+
+/* Set the clipboard viewer window */
+@REQ(set_clipboard_viewer)
+    user_handle_t  viewer;         /* clipboard viewer */
+    user_handle_t  previous;       /* if non-zero, check that this was the previous viewer */
+@REPLY
+    user_handle_t  old_viewer;     /* previous clipboard viewer */
+    user_handle_t  owner;          /* clipboard owner */
+@END
+
+
+/* Add a clipboard listener window */
+@REQ(add_clipboard_listener)
+    user_handle_t  window;         /* clipboard listener window */
+@END
+
+
+/* Remove a clipboard listener window */
+@REQ(remove_clipboard_listener)
+    user_handle_t  window;         /* clipboard listener window */
+@END
+
+
+/* Open a security token */
+@REQ(open_token)
+    obj_handle_t   handle;    /* handle to the thread or process */
+    unsigned int   access;    /* access rights to the new token */
+    unsigned int   attributes;/* object attributes */
+    unsigned int   flags;     /* flags (see below) */
+@REPLY
+    obj_handle_t   token;    /* handle to the token */
+@END
+#define OPEN_TOKEN_THREAD   1
+#define OPEN_TOKEN_AS_SELF  2
+
+
+/* Set/get the global windows */
+@REQ(set_global_windows)
+    unsigned int   flags;               /* flags for fields to set (see below) */
+    user_handle_t  shell_window;        /* handle to the new shell window */
+    user_handle_t  shell_listview;      /* handle to the new shell listview window */
+    user_handle_t  progman_window;      /* handle to the new program manager window */
+    user_handle_t  taskman_window;      /* handle to the new task manager window */
+@REPLY
+    user_handle_t  old_shell_window;    /* handle to the shell window */
+    user_handle_t  old_shell_listview;  /* handle to the shell listview window */
+    user_handle_t  old_progman_window;  /* handle to the new program manager window */
+    user_handle_t  old_taskman_window;  /* handle to the new task manager window */
+@END
+#define SET_GLOBAL_SHELL_WINDOWS   0x01  /* set both main shell and listview windows */
+#define SET_GLOBAL_PROGMAN_WINDOW  0x02
+#define SET_GLOBAL_TASKMAN_WINDOW  0x04
+
+/* Adjust the privileges held by a token */
+@REQ(adjust_token_privileges)
+    obj_handle_t  handle; /* handle to the token */
+    int           disable_all; /* disable all privileges? */
+    int           get_modified_state; /* get modified privileges? */
+    VARARG(privileges,LUID_AND_ATTRIBUTES); /* privileges to enable/disable/remove */
+@REPLY
+    unsigned int  len; /* total length in bytes required to store token privileges */
+    VARARG(privileges,LUID_AND_ATTRIBUTES); /* modified privileges */
+@END
+
+/* Retrieves the set of privileges held by or available to a token */
+@REQ(get_token_privileges)
+    obj_handle_t  handle; /* handle to the token */
+@REPLY
+    unsigned int  len; /* total length in bytes required to store token privileges */
+    VARARG(privileges,LUID_AND_ATTRIBUTES); /* privileges held by or available to a token */
+@END
+
+/* Check the token has the required privileges */
+@REQ(check_token_privileges)
+    obj_handle_t  handle; /* handle to the token */
+    int           all_required; /* are all the privileges required for the check to succeed? */
+    VARARG(privileges,LUID_AND_ATTRIBUTES); /* privileges to check */
+@REPLY
+    int           has_privileges; /* does the token have the required privileges? */
+    VARARG(privileges,LUID_AND_ATTRIBUTES); /* privileges held by or available to a token */
+@END
+
+@REQ(duplicate_token)
+    obj_handle_t  handle;        /* handle to the token to duplicate */
+    unsigned int  access;        /* access rights to the new token */
+    int           primary;       /* is the new token to be a primary one? */
+    int           impersonation_level; /* impersonation level of the new token */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t  new_handle; /* duplicated handle */
+@END
+
+@REQ(access_check)
+    obj_handle_t    handle; /* handle to the token */
+    unsigned int    desired_access; /* desired access to the object */
+    unsigned int    mapping_read; /* mapping from generic read to specific rights */
+    unsigned int    mapping_write; /* mapping from generic write to specific rights */
+    unsigned int    mapping_execute; /* mapping from generic execute to specific rights */
+    unsigned int    mapping_all; /* mapping from generic all to specific rights */
+    VARARG(sd,security_descriptor); /* security descriptor to check */
+@REPLY
+    unsigned int    access_granted; /* access rights actually granted */
+    unsigned int    access_status; /* was access granted? */
+    unsigned int    privileges_len; /* length needed to store privileges */
+    VARARG(privileges,LUID_AND_ATTRIBUTES); /* privileges used during access check */
+@END
+
+@REQ(get_token_sid)
+    obj_handle_t    handle;       /* handle to the token */
+    unsigned int    which_sid;    /* which SID to retrieve from the token */
+@REPLY
+    data_size_t     sid_len;      /* length needed to store sid */
+    VARARG(sid,SID);              /* the sid specified by which_sid from the token */
+@END
+
+@REQ(get_token_groups)
+    obj_handle_t    handle;       /* handle to the token */
+@REPLY
+    data_size_t     user_len;     /* length needed to store user */
+    VARARG(user,token_groups);    /* groups the token's user belongs to */
+@END
+
+@REQ(get_token_default_dacl)
+    obj_handle_t    handle;     /* handle to the token */
+@REPLY
+    data_size_t     acl_len;    /* length needed to store access control list */
+    VARARG(acl,ACL);            /* access control list */
+@END
+
+@REQ(set_token_default_dacl)
+    obj_handle_t    handle;     /* handle to the token */
+    VARARG(acl,ACL);            /* default dacl to set */
+@END
+
+@REQ(set_security_object)
+    obj_handle_t    handle;       /* handle to the object */
+    unsigned int    security_info; /* which parts of security descriptor to set */
+    VARARG(sd,security_descriptor); /* security descriptor to set */
+@END
+
+@REQ(get_security_object)
+    obj_handle_t    handle;       /* handle to the object */
+    unsigned int    security_info; /* which parts of security descriptor to get */
+@REPLY
+    unsigned int    sd_len;         /* buffer size needed for sd */
+    VARARG(sd,security_descriptor); /* retrieved security descriptor */
+@END
+
+
+struct handle_info
+{
+    process_id_t owner;
+    obj_handle_t handle;
+    unsigned int access;
+};
+
+/* Return a list of all opened handles */
+@REQ(get_system_handles)
+@REPLY
+    unsigned int    count;        /* number of handles */
+    VARARG(data,handle_infos);    /* array of handle_infos */
+@END
+
+
+/* Create a mailslot */
+@REQ(create_mailslot)
+    unsigned int   access;        /* wanted access rights */
+    timeout_t      read_timeout;
+    unsigned int   max_msgsize;
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t   handle;        /* handle to the mailslot */
+@END
+
+
+/* Set mailslot information */
+@REQ(set_mailslot_info)
+    obj_handle_t   handle;        /* handle to the mailslot */
+    timeout_t      read_timeout;
+    unsigned int   flags;
+@REPLY
+    timeout_t      read_timeout;
+    unsigned int   max_msgsize;
+@END
+#define MAILSLOT_SET_READ_TIMEOUT  1
+
+
+/* Create a directory object */
+@REQ(create_directory)
+    unsigned int   access;        /* access flags */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t   handle;        /* handle to the directory */
+@END
+
+
+/* Open a directory object */
+@REQ(open_directory)
+    unsigned int   access;        /* access flags */
+    unsigned int   attributes;    /* object attributes */
+    obj_handle_t   rootdir;       /* root directory */
+    VARARG(directory_name,unicode_str); /* Directory name */
+@REPLY
+    obj_handle_t   handle;        /* handle to the directory */
+@END
+
+
+/* Get a directory entry by index */
+@REQ(get_directory_entry)
+    obj_handle_t   handle;             /* handle to the directory */
+    unsigned int   index;              /* entry index */
+@REPLY
+    data_size_t    name_len;           /* length of the entry name in bytes */
+    VARARG(name,unicode_str,name_len); /* entry name */
+    VARARG(type,unicode_str);          /* entry type */
+@END
+
+
+/* Create a symbolic link object */
+@REQ(create_symlink)
+    unsigned int   access;        /* access flags */
+    VARARG(objattr,object_attributes); /* object attributes */
+    VARARG(target_name,unicode_str);   /* target name */
+@REPLY
+    obj_handle_t   handle;        /* handle to the symlink */
+@END
+
+
+/* Open a symbolic link object */
+@REQ(open_symlink)
+    unsigned int   access;        /* access flags */
+    unsigned int   attributes;    /* object attributes */
+    obj_handle_t   rootdir;       /* root directory */
+    VARARG(name,unicode_str);     /* symlink name */
+@REPLY
+    obj_handle_t   handle;        /* handle to the symlink */
+@END
+
+
+/* Query a symbolic link object */
+@REQ(query_symlink)
+    obj_handle_t   handle;        /* handle to the symlink */
+@REPLY
+    data_size_t    total;         /* total needed size for name */
+    VARARG(target_name,unicode_str); /* target name */
+@END
+
+
+/* Query basic object information */
+@REQ(get_object_info)
+    obj_handle_t   handle;        /* handle to the object */
+@REPLY
+    unsigned int   access;        /* granted access mask */
+    unsigned int   ref_count;     /* object ref count */
+    unsigned int   handle_count;  /* object handle count */
+    data_size_t    total;         /* total needed size for name */
+    VARARG(name,unicode_str);     /* object name */
+@END
+
+
+/* Query object type name information */
+@REQ(get_object_type)
+    obj_handle_t   handle;        /* handle to the object */
+@REPLY
+    data_size_t    total;         /* needed size for type name */
+    VARARG(type,unicode_str);     /* type name */
+@END
+
+
+/* Unlink a named object */
+@REQ(unlink_object)
+    obj_handle_t   handle;        /* handle to the object */
+@END
+
+
+/* Query the impersonation level of an impersonation token */
+@REQ(get_token_impersonation_level)
+    obj_handle_t   handle;        /* handle to the object */
+@REPLY
+    int            impersonation_level; /* impersonation level of the impersonation token */
+@END
+
+/* Allocate a locally-unique identifier */
+@REQ(allocate_locally_unique_id)
+@REPLY
+    luid_t         luid;
+@END
+
+
+/* Create a device manager */
+@REQ(create_device_manager)
+    unsigned int access;          /* wanted access rights */
+    unsigned int attributes;      /* object attributes */
+@REPLY
+    obj_handle_t handle;          /* handle to the device */
+@END
+
+
+/* Create a device */
+@REQ(create_device)
+    unsigned int access;          /* wanted access rights */
+    unsigned int attributes;      /* object attributes */
+    obj_handle_t rootdir;         /* root directory */
+    client_ptr_t user_ptr;        /* opaque ptr for use by client */
+    obj_handle_t manager;         /* device manager */
+    VARARG(name,unicode_str);     /* object name */
+@REPLY
+    obj_handle_t handle;          /* handle to the device */
+@END
+
+
+/* Delete a device */
+@REQ(delete_device)
+    obj_handle_t handle;          /* handle to the device */
+@END
+
+
+/* Retrieve the next pending device irp request */
+@REQ(get_next_device_request)
+    obj_handle_t manager;         /* handle to the device manager */
+    obj_handle_t prev;            /* handle to the previous irp */
+    unsigned int status;          /* status of the previous irp */
+@REPLY
+    irp_params_t params;          /* irp parameters */
+    obj_handle_t next;            /* handle to the next irp */
+    process_id_t client_pid;      /* pid of process calling irp */
+    thread_id_t  client_tid;      /* tid of thread calling irp */
+    data_size_t  in_size;         /* total needed input size */
+    data_size_t  out_size;        /* needed output size */
+    VARARG(next_data,bytes);      /* input data of the next irp */
+@END
+
+
+/* Make the current process a system process */
+@REQ(make_process_system)
+@REPLY
+    obj_handle_t event;           /* event signaled when all user processes have exited */
+@END
+
+
+/* Get detailed fixed-size information about a token */
+@REQ(get_token_statistics)
+    obj_handle_t   handle;        /* handle to the object */
+@REPLY
+    luid_t         token_id;      /* locally-unique identifier of the token */
+    luid_t         modified_id;   /* locally-unique identifier of the modified version of the token */
+    int            primary;       /* is the token primary or impersonation? */
+    int            impersonation_level; /* level of impersonation */
+    int            group_count;   /* the number of groups the token is a member of */
+    int            privilege_count; /* the number of privileges the token has */
+@END
+
+
+/* Create I/O completion port */
+@REQ(create_completion)
+    unsigned int access;          /* desired access to a port */
+    unsigned int concurrent;      /* max number of concurrent active threads */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;          /* port handle */
+@END
+
+
+/* Open I/O completion port */
+@REQ(open_completion)
+    unsigned int access;          /* desired access to a port */
+    unsigned int attributes;      /* object attributes */
+    obj_handle_t rootdir;         /* root directory */
+    VARARG(filename,unicode_str); /* port name */
+@REPLY
+    obj_handle_t handle;          /* port handle */
+@END
+
+
+/* add completion to completion port */
+@REQ(add_completion)
+    obj_handle_t  handle;         /* port handle */
+    apc_param_t   ckey;           /* completion key */
+    apc_param_t   cvalue;         /* completion value */
+    apc_param_t   information;    /* IO_STATUS_BLOCK Information */
+    unsigned int  status;         /* completion result */
+@END
+
+
+/* get completion from completion port queue */
+@REQ(remove_completion)
+    obj_handle_t handle;          /* port handle */
+@REPLY
+    apc_param_t   ckey;           /* completion key */
+    apc_param_t   cvalue;         /* completion value */
+    apc_param_t   information;    /* IO_STATUS_BLOCK Information */
+    unsigned int  status;         /* completion result */
+@END
+
+
+/* get completion queue depth */
+@REQ(query_completion)
+    obj_handle_t  handle;         /* port handle */
+@REPLY
+    unsigned int  depth;          /* completion queue depth */
+@END
+
+
+/* associate object with completion port */
+@REQ(set_completion_info)
+    obj_handle_t  handle;         /* object handle */
+    apc_param_t   ckey;           /* completion key */
+    obj_handle_t  chandle;        /* port handle */
+@END
+
+
+/* check for associated completion and push msg */
+@REQ(add_fd_completion)
+    obj_handle_t   handle;        /* async' object */
+    apc_param_t    cvalue;        /* completion value */
+    apc_param_t    information;   /* IO_STATUS_BLOCK Information */
+    unsigned int   status;        /* completion status */
+    int            force;         /* don't check if skip-on-success is set */
+@END
+
+
+/* set fd completion information */
+@REQ(set_fd_compl_info)
+    obj_handle_t handle;          /* handle to a file or directory */
+    int          flags;           /* completion flags (see below) */
+@END
+
+
+/* get fd completion information */
+@REQ(get_fd_compl_info)
+    obj_handle_t handle;          /* handle to a file or directory */
+@REPLY
+    int          flags;           /* completion flags */
+@END
+
+
+/* set fd disposition information */
+@REQ(set_fd_disp_info)
+    obj_handle_t handle;          /* handle to a file or directory */
+    int          unlink;          /* whether to unlink file on close */
+@END
+
+
+/* set fd name information */
+@REQ(set_fd_name_info)
+    obj_handle_t handle;          /* handle to a file or directory */
+    obj_handle_t rootdir;         /* root directory */
+    int          link;            /* link instead of renaming */
+    VARARG(filename,string);      /* new file name */
+@END
+
+
+/* Retrieve layered info for a window */
+@REQ(get_window_layered_info)
+    user_handle_t  handle;        /* handle to the window */
+@REPLY
+    unsigned int   color_key;     /* color key */
+    unsigned int   alpha;         /* alpha (0..255) */
+    unsigned int   flags;         /* LWA_* flags */
+@END
+
+
+/* Set layered info for a window */
+@REQ(set_window_layered_info)
+    user_handle_t  handle;        /* handle to the window */
+    unsigned int   color_key;     /* color key */
+    unsigned int   alpha;         /* alpha (0..255) */
+    unsigned int   flags;         /* LWA_* flags */
+@END
+
+
+/* Allocate an arbitrary user handle */
+@REQ(alloc_user_handle)
+@REPLY
+    user_handle_t  handle;        /* allocated handle */
+@END
+
+
+/* Free an arbitrary user handle */
+@REQ(free_user_handle)
+    user_handle_t  handle;        /* handle to free*/
+@END
+
+
+/* Set/get the current cursor */
+@REQ(set_cursor)
+    unsigned int   flags;         /* flags for fields to set (see below) */
+    user_handle_t  handle;        /* handle to the cursor */
+    int            show_count;    /* show count increment/decrement */
+    int            x;             /* cursor position */
+    int            y;
+    rectangle_t    clip;          /* cursor clip rectangle */
+    unsigned int   clip_msg;      /* message to post on cursor clip changes */
+@REPLY
+    user_handle_t  prev_handle;   /* previous handle */
+    int            prev_count;    /* previous show count */
+    int            prev_x;        /* previous position */
+    int            prev_y;
+    int            new_x;         /* new position */
+    int            new_y;
+    rectangle_t    new_clip;      /* new clip rectangle */
+    unsigned int   last_change;   /* time of last position change */
+@END
+#define SET_CURSOR_HANDLE 0x01
+#define SET_CURSOR_COUNT  0x02
+#define SET_CURSOR_POS    0x04
+#define SET_CURSOR_CLIP   0x08
+#define SET_CURSOR_NOCLIP 0x10
+
+
+/* Modify the list of registered rawinput devices */
+@REQ(update_rawinput_devices)
+    VARARG(devices,rawinput_devices);
+@END
+
+
+/* Retrieve the suspended context of a thread */
+@REQ(get_suspend_context)
+@REPLY
+    VARARG(context,context);   /* thread context */
+@END
+
+
+/* Store the suspend context of a thread */
+@REQ(set_suspend_context)
+    VARARG(context,context);   /* thread context */
+@END
+
+
+/* Create a new job object */
+@REQ(create_job)
+    unsigned int access;          /* wanted access rights */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;          /* handle to the job */
+@END
+
+
+/* Open a job object */
+@REQ(open_job)
+    unsigned int access;          /* wanted access rights */
+    unsigned int attributes;      /* object attributes */
+    obj_handle_t rootdir;         /* root directory */
+    VARARG(name,unicode_str);     /* object name */
+@REPLY
+    obj_handle_t handle;          /* handle to the job */
+@END
+
+
+/* Assign a job object to a process */
+@REQ(assign_job)
+    obj_handle_t job;             /* handle to the job */
+    obj_handle_t process;         /* handle to the process */
+@END
+
+
+/* Check if a process is associated with a job */
+@REQ(process_in_job)
+    obj_handle_t job;             /* handle to the job */
+    obj_handle_t process;         /* handle to the process */
+@END
+
+
+/* Set limit flags on a job */
+@REQ(set_job_limits)
+    obj_handle_t handle;          /* handle to the job */
+    unsigned int limit_flags;     /* new limit flags */
+@END
+
+
+/* Set new completion port for a job */
+@REQ(set_job_completion_port)
+    obj_handle_t job;             /* handle to the job */
+    obj_handle_t port;            /* handle to the completion port */
+    client_ptr_t key;             /* key to send with completion messages */
+@END
+
+
+/* Terminate all processes associated with the job  */
+@REQ(terminate_job)
+    obj_handle_t handle;          /* handle to the job */
+    int          status;          /* process exit code */
+@END

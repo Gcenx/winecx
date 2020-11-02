@@ -1,0 +1,4 @@
+MODULE    = mssip32.dll
+
+C_SRCS = \
+	main.c

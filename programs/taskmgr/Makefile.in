@@ -1,0 +1,28 @@
+MODULE    = taskmgr.exe
+APPMODE   = -mwindows -mno-cygwin
+IMPORTS   = shell32 comctl32 user32 gdi32 advapi32
+
+C_SRCS = \
+	about.c \
+	affinity.c \
+	applpage.c \
+	column.c \
+	dbgchnl.c \
+	debug.c \
+	endproc.c \
+	graph.c \
+	graphctl.c \
+	optnmenu.c \
+	perfdata.c \
+	perfpage.c \
+	priority.c \
+	proclist.c \
+	procpage.c \
+	run.c \
+	taskmgr.c \
+	trayicon.c
+
+RC_SRCS = taskmgr.rc
+
+SVG_SRCS = \
+	taskmgr.svg

@@ -1,0 +1,469 @@
+#! /usr/bin/perl -w
+#
+# Build the server/trace.c and server/request.h files
+# from the contents of server/protocol.def.
+#
+# Copyright (C) 1998 Alexandre Julliard
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+#
+use strict;
+
+my %formats =
+(                     # size align format
+    "int"           => [  4,   4,  "%d" ],
+    "short int"     => [  2,   2,  "%d" ],
+    "char"          => [  1,   1,  "%c" ],
+    "unsigned char" => [  1,   1,  "%02x" ],
+    "unsigned short"=> [  2,   2,  "%04x" ],
+    "unsigned int"  => [  4,   4,  "%08x" ],
+    "data_size_t"   => [  4,   4,  "%u" ],
+    "obj_handle_t"  => [  4,   4,  "%04x" ],
+    "atom_t"        => [  4,   4,  "%04x" ],
+    "user_handle_t" => [  4,   4,  "%08x" ],
+    "process_id_t"  => [  4,   4,  "%04x" ],
+    "thread_id_t"   => [  4,   4,  "%04x" ],
+    "client_ptr_t"  => [  8,   8,  "&dump_uint64" ],
+    "mod_handle_t"  => [  8,   8,  "&dump_uint64" ],
+    "lparam_t"      => [  8,   8,  "&dump_uint64" ],
+    "apc_param_t"   => [  8,   8,  "&dump_uint64" ],
+    "file_pos_t"    => [  8,   8,  "&dump_uint64" ],
+    "mem_size_t"    => [  8,   8,  "&dump_uint64" ],
+    "affinity_t"    => [  8,   8,  "&dump_uint64" ],
+    "timeout_t"     => [  8,   8,  "&dump_timeout" ],
+    "rectangle_t"   => [  16,  4,  "&dump_rectangle" ],
+    "char_info_t"   => [  4,   2,  "&dump_char_info" ],
+    "apc_call_t"    => [  40,  8,  "&dump_apc_call" ],
+    "apc_result_t"  => [  40,  8,  "&dump_apc_result" ],
+    "async_data_t"  => [  40,  8,  "&dump_async_data" ],
+    "irp_params_t"  => [  24,  8,  "&dump_irp_params" ],
+    "luid_t"        => [  8,   4,  "&dump_luid" ],
+    "ioctl_code_t"  => [  4,   4,  "&dump_ioctl_code" ],
+    "cpu_type_t"    => [  4,   4,  "&dump_cpu_type" ],
+    "hw_input_t"    => [  32,  8,  "&dump_hw_input" ],
+);
+
+my @requests = ();
+my %replies = ();
+my @asserts = ();
+
+my @trace_lines = ();
+
+my $max_req_size = 64;
+
+my $warnings = scalar(@ARGV) && $ARGV[0] eq "-w";
+
+sub add_padding($$)
+{
+    my ($offset, $padding) = @_;
+    if ($offset % $padding)
+    {
+        my $count = $padding - ($offset % $padding);
+        print SERVER_PROT "    char __pad_$offset\[$count\];\n";
+        $offset += $count;
+    }
+    return $offset;
+}
+
+### Generate a dumping function
+
+sub DO_DUMP_FUNC($$@)
+{
+    my $name = shift;
+    my $req = shift;
+    my $prefix = " ";
+    push @trace_lines, "static void dump_${name}_$req( const struct ${name}_$req *req )\n{\n";
+    while ($#_ >= 0)
+    {
+	my $type = shift;
+	my $var = shift;
+        next if $var =~ /^__pad/;
+	if (defined($formats{$type}))
+	{
+            my $fmt = ${$formats{$type}}[2];
+            if ($fmt =~ /^&(.*)/)
+            {
+                my $func = $1;
+                push @trace_lines, "    $func( \"$prefix$var=\", &req->$var );\n";
+            }
+            elsif ($fmt =~ /^(%.*)\s+\((.*)\)/)
+            {
+                my ($format, $cast) = ($1, $2);
+                push @trace_lines, "    fprintf( stderr, \"$prefix$var=$format\", ($cast)req->$var );\n";
+            }
+            else
+            {
+                push @trace_lines, "    fprintf( stderr, \"$prefix$var=$fmt\", req->$var );\n";
+            }
+	}
+	else  # must be some varargs format
+	{
+            push @trace_lines, "    " . sprintf($type, "$prefix$var=") . ";\n";
+        }
+        $prefix = ", ";
+    }
+    push @trace_lines, "}\n\n";
+}
+
+### Parse the request definitions
+
+sub PARSE_REQUESTS()
+{
+    # states: 0 = header 1 = declarations 2 = inside @REQ 3 = inside @REPLY
+    my $state = 0;
+    my $offset = 0;
+    my $name = "";
+    my @in_struct = ();
+    my @out_struct = ();
+
+    open(PROTOCOL,"server/protocol.def") or die "Can't open server/protocol.def";
+
+    while (<PROTOCOL>)
+    {
+        my ($type, $var);
+        # strip comments
+	s!/\*.*\*/!!g;
+        # strip white space at end of line
+        s/\s+$//;
+
+        if (/^\@HEADER/)
+        {
+            die "Misplaced \@HEADER" unless $state == 0;
+            $state++;
+            next;
+        }
+
+        # ignore everything while in state 0
+        next if $state == 0;
+
+        if (/^\@REQ\(\s*(\w+)\s*\)/)
+        {
+            $name = $1;
+            die "Misplaced \@REQ" unless $state == 1;
+            # start a new request
+            @in_struct = ();
+            @out_struct = ();
+            $offset = 12;
+            print SERVER_PROT "struct ${name}_request\n{\n";
+            print SERVER_PROT "    struct request_header __header;\n";
+            $state++;
+            next;
+        }
+
+        if (/^\@REPLY/)
+        {
+            die "Misplaced \@REPLY" unless $state == 2;
+            $offset = add_padding( $offset, 8 ); # all requests should be 8-byte aligned
+            die "request $name too large ($offset)" if ($offset > $max_req_size);
+            push @asserts, "C_ASSERT( sizeof(struct ${name}_request) == $offset );\n";
+            print SERVER_PROT "};\n";
+            print SERVER_PROT "struct ${name}_reply\n{\n";
+            print SERVER_PROT "    struct reply_header __header;\n";
+            $offset = 8;
+            $state++;
+            next;
+        }
+
+        if (/^\@END/)
+        {
+            die "Misplaced \@END" unless ($state == 2 || $state == 3);
+
+            $offset = add_padding( $offset, 8 ); # all requests should be 8-byte aligned
+            print SERVER_PROT "};\n";
+            if ($state == 2)  # build dummy reply struct
+            {
+                die "request $name too large ($offset)" if ($offset > $max_req_size);
+                push @asserts, "C_ASSERT( sizeof(struct ${name}_request) == $offset );\n";
+                print SERVER_PROT "struct ${name}_reply\n{\n";
+                print SERVER_PROT "    struct reply_header __header;\n";
+                print SERVER_PROT "};\n";
+            }
+            else
+            {
+                die "reply $name too large ($offset)" if ($offset > $max_req_size);
+                push @asserts, "C_ASSERT( sizeof(struct ${name}_reply) == $offset );\n";
+            }
+            # got a complete request
+            push @requests, $name;
+            DO_DUMP_FUNC( $name, "request", @in_struct);
+            if ($#out_struct >= 0)
+            {
+                $replies{$name} = 1;
+                DO_DUMP_FUNC( $name, "reply", @out_struct);
+            }
+            $state = 1;
+            next;
+        }
+
+        if ($state != 1)
+        {
+            # skip empty lines (but keep them in output file)
+            if (/^$/)
+            {
+                print SERVER_PROT "\n";
+                next;
+            }
+
+            if (/^\s*VARARG\((\w+),(\w+),(\w+)\)/)
+            {
+                $var = $1;
+                $type = "dump_varargs_" . $2 . "( \"%s\", min(cur_size,req->" . $3 . ") )";
+                s!(VARARG\(.*\)\s*;)!/* $1 */!;
+            }
+            elsif (/^\s*VARARG\((\w+),(\w+)\)/)
+            {
+                $var = $1;
+                $type = "dump_varargs_" . $2 . "( \"%s\", cur_size )";
+                s!(VARARG\(.*\)\s*;)!/* $1 */!;
+            }
+            elsif (/^\s*(\w+\**(\s+\w+\**)*)\s+(\w+);/)
+            {
+                $type = $1;
+                $var = $3;
+                die "Unrecognized type $type" unless defined($formats{$type});
+                my @fmt = @{$formats{$type}};
+                if ($offset & ($fmt[1] - 1))
+                {
+                    my $count = $fmt[1] - ($offset & ($fmt[1] - 1));
+                    print "protocol.def:$.: warning: $name $offset $type $var needs padding\n" if $warnings;
+                    print SERVER_PROT "    char __pad_$offset\[$count\];\n";
+                    $offset += $count;
+                }
+                if ($state == 2)
+                {
+                    push @asserts, "C_ASSERT( FIELD_OFFSET(struct ${name}_request, $var) == $offset );\n";
+                }
+                else
+                {
+                    push @asserts, "C_ASSERT( FIELD_OFFSET(struct ${name}_reply, $var) == $offset );\n";
+                }
+                $offset += $fmt[0];
+            }
+            else
+            {
+                die "Unrecognized syntax $_";
+            }
+            if ($state == 2) { push @in_struct, $type, $var; }
+            if ($state == 3) { push @out_struct, $type, $var; }
+        }
+
+        # Pass it through into the output file
+        print SERVER_PROT $_ . "\n";
+    }
+    close PROTOCOL;
+}
+
+### Retrieve the server protocol version from the existing server_protocol.h file
+
+sub GET_PROTOCOL_VERSION()
+{
+    my $protocol = 0;
+    open SERVER_PROT, "include/wine/server_protocol.h" or return 0;
+    while (<SERVER_PROT>)
+    {
+        if (/^\#define SERVER_PROTOCOL_VERSION (\d+)/) { $protocol = $1; last; }
+    }
+    close SERVER_PROT;
+    return $protocol;
+}
+
+### Retrieve the list of status and errors used in the server
+
+sub GET_ERROR_NAMES()
+{
+    my %errors = ();
+    foreach my $f (glob "server/*.c")
+    {
+        next if $f eq "server/trace.c";
+        open FILE, $f or die "Can't open $f";
+        while (<FILE>)
+        {
+            if (/STATUS_(\w+)/)
+            {
+                $errors{$1} = "STATUS_$1" unless $1 eq "SUCCESS";
+            }
+            elsif (/set_win32_error\s*\(\s*(\w+)\s*\)/)
+            {
+                $errors{$1} = "0xc0010000 | $1";
+            }
+        }
+        close FILE;
+    }
+    return %errors;
+}
+
+# update a file if changed
+sub update_file($)
+{
+    my $file = shift;
+    my $ret = !(-f $file) || system "cmp $file $file.new >/dev/null";
+    if (!$ret)
+    {
+        unlink "$file.new";
+    }
+    else
+    {
+        rename "$file.new", "$file";
+        print "$file updated\n";
+    }
+    return $ret;
+}
+
+# replace some lines in a file between two markers
+sub replace_in_file($$$@)
+{
+    my $file = shift;
+    my $start = shift;
+    my $end = shift;
+
+    open NEW_FILE, ">$file.new" or die "cannot create $file.new";
+
+    if (defined($start))
+    {
+        open OLD_FILE, "$file" or die "cannot open $file";
+        while (<OLD_FILE>)
+        {
+            print NEW_FILE $_;
+            last if /$start/;
+        }
+    }
+
+    print NEW_FILE "\n", @_, "\n";
+
+    if (defined($end))
+    {
+        my $skip=1;
+        while (<OLD_FILE>)
+        {
+            $skip = 0 if /$end/;
+            print NEW_FILE $_ unless $skip;
+        }
+    }
+
+    close OLD_FILE if defined($start);
+    close NEW_FILE;
+    return update_file($file);
+}
+
+### Main
+
+# Get the server protocol version
+my $protocol = GET_PROTOCOL_VERSION();
+
+my %errors = GET_ERROR_NAMES();
+
+### Create server_protocol.h and print header
+
+open SERVER_PROT, ">include/wine/server_protocol.h.new" or die "Cannot create include/wine/server_protocol.h.new";
+print SERVER_PROT "/*\n * Wine server protocol definitions\n *\n";
+print SERVER_PROT " * This file is automatically generated; DO NO EDIT!\n";
+print SERVER_PROT " * Edit server/protocol.def instead and re-run tools/make_requests\n";
+print SERVER_PROT " */\n\n";
+print SERVER_PROT "#ifndef __WINE_WINE_SERVER_PROTOCOL_H\n";
+print SERVER_PROT "#define __WINE_WINE_SERVER_PROTOCOL_H\n";
+
+### Parse requests to find request/reply structure definitions
+
+PARSE_REQUESTS();
+
+### Build the request list and structures
+
+print SERVER_PROT "\n\nenum request\n{\n";
+foreach my $req (@requests) { print SERVER_PROT "    REQ_$req,\n"; }
+print SERVER_PROT "    REQ_NB_REQUESTS\n};\n\n";
+
+print SERVER_PROT "union generic_request\n{\n";
+print SERVER_PROT "    struct request_max_size max_size;\n";
+print SERVER_PROT "    struct request_header request_header;\n";
+foreach my $req (@requests) { print SERVER_PROT "    struct ${req}_request ${req}_request;\n"; }
+print SERVER_PROT "};\n";
+
+print SERVER_PROT "union generic_reply\n{\n";
+print SERVER_PROT "    struct request_max_size max_size;\n";
+print SERVER_PROT "    struct reply_header reply_header;\n";
+foreach my $req (@requests) { print SERVER_PROT "    struct ${req}_reply ${req}_reply;\n"; }
+print SERVER_PROT "};\n\n";
+
+printf SERVER_PROT "#define SERVER_PROTOCOL_VERSION %d\n\n", $protocol + 1;
+print SERVER_PROT "#endif /* __WINE_WINE_SERVER_PROTOCOL_H */\n";
+close SERVER_PROT;
+update_file( "include/wine/server_protocol.h" );
+
+### Output the dumping function tables
+
+push @trace_lines, "static const dump_func req_dumpers[REQ_NB_REQUESTS] = {\n";
+foreach my $req (@requests)
+{
+    push @trace_lines, "    (dump_func)dump_${req}_request,\n";
+}
+push @trace_lines, "};\n\n";
+
+push @trace_lines, "static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {\n";
+foreach my $req (@requests)
+{
+    push @trace_lines, "    ", $replies{$req} ? "(dump_func)dump_${req}_reply,\n" : "NULL,\n";
+}
+push @trace_lines, "};\n\n";
+
+push @trace_lines, "static const char * const req_names[REQ_NB_REQUESTS] = {\n";
+foreach my $req (@requests)
+{
+    push @trace_lines, "    \"$req\",\n";
+}
+push @trace_lines, "};\n\n";
+
+push @trace_lines, "static const struct\n{\n";
+push @trace_lines, "    const char  *name;\n";
+push @trace_lines, "    unsigned int value;\n";
+push @trace_lines, "} status_names[] =\n{\n";
+
+foreach my $err (sort keys %errors)
+{
+    push @trace_lines, sprintf("    { %-30s %s },\n", "\"$err\",", $errors{$err});
+}
+push @trace_lines, "    { NULL, 0 }\n";
+push @trace_lines, "};\n";
+
+replace_in_file( "server/trace.c",
+                 "### make_requests begin ###",
+                 "### make_requests end ###",
+                 @trace_lines );
+
+### Output the request handlers list
+
+my @request_lines = ();
+
+foreach my $req (@requests) { push @request_lines, "DECL_HANDLER($req);\n"; }
+push @request_lines, "\n#ifdef WANT_REQUEST_HANDLERS\n\n";
+push @request_lines, "typedef void (*req_handler)( const void *req, void *reply );\n";
+push @request_lines, "static const req_handler req_handlers[REQ_NB_REQUESTS] =\n{\n";
+foreach my $req (@requests)
+{
+    push @request_lines, "    (req_handler)req_$req,\n";
+}
+push @request_lines, "};\n\n";
+
+foreach my $type (sort keys %formats)
+{
+    my $size = ${$formats{$type}}[0];
+    push @request_lines, "C_ASSERT( sizeof($type) == $size );\n";
+}
+push @request_lines, @asserts;
+push @request_lines, "\n#endif  /* WANT_REQUEST_HANDLERS */\n";
+
+replace_in_file( "server/request.h",
+                 "### make_requests begin ###",
+                 "### make_requests end ###",
+                 @request_lines );

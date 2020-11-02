@@ -1,0 +1,11 @@
+MODULE    = fusion.dll
+IMPORTS   = advapi32 dbghelp shlwapi version user32
+
+C_SRCS = \
+	asmcache.c \
+	asmenum.c \
+	asmname.c \
+	assembly.c \
+	fusion.c
+
+RC_SRCS = version.rc

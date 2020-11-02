@@ -1,0 +1,4 @@
+MODULE    = wevtapi.dll
+
+C_SRCS = \
+	main.c

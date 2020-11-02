@@ -1,0 +1,23 @@
+MODULE    = d3dcompiler_43.dll
+IMPORTLIB = d3dcompiler
+IMPORTS   = dxguid uuid
+EXTRALIBS = -lwpp
+
+C_SRCS = \
+	asmparser.c \
+	blob.c \
+	bytecodewriter.c \
+	compiler.c \
+	main.c \
+	reflection.c \
+	utils.c
+
+LEX_SRCS = \
+	asmshader.l \
+	hlsl.l
+
+BISON_SRCS = \
+	asmshader.y \
+	hlsl.y
+
+RC_SRCS = version.rc

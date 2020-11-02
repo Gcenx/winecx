@@ -1,0 +1,30 @@
+EXTRADEFS = -D_RPCRT4_ -DMSWMSG
+MODULE    = rpcrt4.dll
+IMPORTLIB = rpcrt4
+IMPORTS   = uuid advapi32
+DELAYIMPORTS = iphlpapi wininet secur32 user32
+EXTRALIBS = $(SOCKET_LIBS)
+
+C_SRCS = \
+	cproxy.c \
+	cpsf.c \
+	cstub.c \
+	ndr_clientserver.c \
+	ndr_contexthandle.c \
+	ndr_es.c \
+	ndr_fullpointer.c \
+	ndr_marshall.c \
+	ndr_ole.c \
+	ndr_stubless.c \
+	rpc_assoc.c \
+	rpc_async.c \
+	rpc_binding.c \
+	rpc_epmap.c \
+	rpc_message.c \
+	rpc_server.c \
+	rpc_transport.c \
+	rpcrt4_main.c
+
+RC_SRCS = version.rc
+
+IDL_SRCS = epm.idl

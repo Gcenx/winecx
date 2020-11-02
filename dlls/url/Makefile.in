@@ -1,0 +1,5 @@
+MODULE    = url.dll
+IMPORTLIB = url
+IMPORTS   = shell32 shlwapi
+
+C_SRCS = url_main.c

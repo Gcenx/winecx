@@ -1,0 +1,19 @@
+EXTRADEFS = -D_WINX32_
+MODULE    = wininet.dll
+IMPORTLIB = wininet
+IMPORTS   = mpr shlwapi shell32 user32 ws2_32 advapi32
+DELAYIMPORTS = secur32 crypt32 cryptui
+EXTRALIBS = $(CORESERVICES_LIBS) $(Z_LIBS)
+
+C_SRCS = \
+	cookie.c \
+	dialogs.c \
+	ftp.c \
+	gopher.c \
+	http.c \
+	internet.c \
+	netconnection.c \
+	urlcache.c \
+	utility.c
+
+RC_SRCS = wininet.rc

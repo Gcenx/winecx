@@ -1,0 +1,16 @@
+MODULE    = glu32.dll
+IMPORTLIB = glu32
+# CrossOver Hack 10798: Get GLU functions from the gdi32 driver rather than linking against libGLU
+IMPORTS   = opengl32 gdi32
+
+C_SRCS = \
+	geom.c \
+	glu.c \
+	mesh.c \
+	mipmap.c \
+	priorityq.c \
+	project.c \
+	quad.c \
+	render.c \
+	sweep.c \
+	tess.c

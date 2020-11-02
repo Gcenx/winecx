@@ -1,0 +1,4 @@
+MODULE    = vdhcp.vxd
+
+C_SRCS = \
+	vdhcp.c

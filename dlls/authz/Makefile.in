@@ -1,0 +1,4 @@
+MODULE    = authz.dll
+
+C_SRCS = \
+	authz.c

@@ -1,0 +1,11 @@
+TESTDLL   = vbscript.dll
+IMPORTS   = oleaut32 ole32 advapi32
+
+C_SRCS = \
+	createobj.c \
+	run.c \
+	vbscript.c
+
+RC_SRCS = rsrc.rc
+
+IDL_SRCS = vbsregexp55.idl

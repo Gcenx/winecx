@@ -1,0 +1,26 @@
+MODULE    = winecfg.exe
+APPMODE   = -mwindows
+IMPORTS   = uuid comdlg32 comctl32 shell32 ole32 winmm shlwapi uxtheme user32 gdi32 advapi32
+
+C_SRCS = \
+	about.c \
+	appdefaults.c \
+	audio.c \
+	drive.c \
+	drivedetect.c \
+	driveui.c \
+	libraries.c \
+	main.c \
+	theme.c \
+	winecfg.c \
+	x11drvdlg.c
+
+RC_SRCS = winecfg.rc
+
+MANPAGES = winecfg.man.in
+
+SVG_SRCS = \
+	logo.svg \
+	winecfg.svg
+
+INSTALL_LIB = winecfg.exe winecfg

@@ -1,0 +1,7 @@
+MODULE    = localui.dll
+IMPORTS   = winspool user32
+
+C_SRCS = \
+	localui.c
+
+RC_SRCS = localui.rc

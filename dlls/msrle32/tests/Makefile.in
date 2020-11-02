@@ -1,0 +1,4 @@
+TESTDLL   = msrle32.dll
+IMPORTS   = msvfw32
+
+C_SRCS    = msrle.c

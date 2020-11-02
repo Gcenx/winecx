@@ -1,0 +1,6 @@
+EXTRADEFS = -DCOM_NO_WINDOWS_H
+MODULE    = ieinfo5.ocx
+IMPORTS   = uuid ole32 user32 advapi32
+
+C_SRCS = \
+	main.c

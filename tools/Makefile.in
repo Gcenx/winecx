@@ -1,0 +1,8 @@
+PROGRAMS = \
+	make_xftmpl
+
+C_SRCS = \
+	make_xftmpl.c
+
+IN_SRCS = \
+	wineapploader.in

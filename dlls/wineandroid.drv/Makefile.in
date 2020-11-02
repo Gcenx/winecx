@@ -1,0 +1,117 @@
+MODULE  = wineandroid.drv
+IMPORTS = uuid ole32 psapi imm32 user32 gdi32 advapi32 ntoskrnl
+ANDROID_TOP_LIB_DIR = wineandroid
+ANDROID_LIB_DIR = $(ANDROID_TOP_LIB_DIR)/src/main
+
+C_SRCS = \
+	clipboard.c \
+	device.c \
+	gamepad.c \
+	ime.c \
+	init.c \
+	keyboard.c \
+	mmdevdrv.c \
+	opengl.c \
+	systray.c \
+	window.c
+
+RC_SRCS = version.rc
+
+JAVA_SRCS = \
+	WineDriver.java \
+	WineProvider.java
+
+ANDROID_PROJECT_SRCS = \
+	AndroidManifest.xml \
+	build.gradle
+
+ANDROID_VALUE_RES_SRCS = \
+	strings.xml
+
+# Manual dependencies
+
+.PHONY: install-lib
+
+install-lib:: $(JAVA_SRCS:%=$(ANDROID_LIB_DIR)/java/org/winehq/wine/%) \
+			 $(ANDROID_TOP_LIB_DIR)/build.gradle \
+			 $(ANDROID_TOP_LIB_DIR)/gradlew \
+			 $(ANDROID_TOP_LIB_DIR)/gradle/wrapper/gradle-wrapper.jar \
+			 $(ANDROID_TOP_LIB_DIR)/gradle/wrapper/gradle-wrapper.properties \
+			 $(ANDROID_LIB_DIR)/AndroidManifest.xml \
+			 $(ANDROID_VALUE_RES_SRCS:%=$(ANDROID_LIB_DIR)/res/values/%) \
+			 $(ANDROID_LIB_DIR)/res/drawable-ldpi/wine.png \
+			 $(ANDROID_LIB_DIR)/res/drawable-mdpi/wine.png \
+			 $(ANDROID_LIB_DIR)/res/drawable-hdpi/wine.png \
+			 $(ANDROID_LIB_DIR)/res/drawable-xhdpi/wine.png \
+			 $(ANDROID_LIB_DIR)/res/drawable-xxhdpi/wine.png \
+			 $(ANDROID_LIB_DIR)/res/drawable-xxxhdpi/wine.png
+	cd $(ANDROID_TOP_LIB_DIR) && ./gradlew build --console plain
+
+$(ANDROID_LIB_DIR)/java/org/winehq/wine/WineDriver.java: $(srcdir)/WineDriver.java
+	mkdir -p `dirname $@`
+	cp $(srcdir)/WineDriver.java $@
+
+$(ANDROID_LIB_DIR)/java/org/winehq/wine/WineProvider.java: $(srcdir)/WineProvider.java
+	mkdir -p `dirname $@`
+	cp $(srcdir)/WineProvider.java $@
+
+$(ANDROID_LIB_DIR)/AndroidManifest.xml: $(srcdir)/AndroidManifest.xml
+	mkdir -p `dirname $@`
+	cp $(srcdir)/AndroidManifest.xml $@
+
+$(ANDROID_TOP_LIB_DIR)/build.gradle: $(srcdir)/build.gradle
+	mkdir -p `dirname $@`
+	cp $(srcdir)/build.gradle $@
+
+$(ANDROID_TOP_LIB_DIR)/gradlew: $(srcdir)/gradlew
+	mkdir -p `dirname $@`
+	cp $(srcdir)/gradlew $@
+
+$(ANDROID_TOP_LIB_DIR)/gradle/wrapper/gradle-wrapper.jar: $(srcdir)/gradle-wrapper.jar
+	mkdir -p `dirname $@`
+	cp $(srcdir)/gradle-wrapper.jar $@
+
+$(ANDROID_TOP_LIB_DIR)/gradle/wrapper/gradle-wrapper.properties: $(srcdir)/gradle-wrapper.properties
+	mkdir -p `dirname $@`
+	cp $(srcdir)/gradle-wrapper.properties $@
+
+$(ANDROID_LIB_DIR)/res/values/strings.xml: $(srcdir)/strings.xml
+	mkdir -p `dirname $@`
+	cp $(srcdir)/strings.xml $@
+
+$(ANDROID_LIB_DIR)/res/drawable-ldpi/wine.png: $(srcdir)/wine_ldpi.png
+	mkdir -p `dirname $@`
+	cp $(srcdir)/wine_ldpi.png $@
+
+$(ANDROID_LIB_DIR)/res/drawable-mdpi/wine.png: $(srcdir)/wine_mdpi.png
+	mkdir -p `dirname $@`
+	cp $(srcdir)/wine_mdpi.png $@
+
+$(ANDROID_LIB_DIR)/res/drawable-hdpi/wine.png: $(srcdir)/wine_hdpi.png
+	mkdir -p `dirname $@`
+	cp $(srcdir)/wine_hdpi.png $@
+
+$(ANDROID_LIB_DIR)/res/drawable-xhdpi/wine.png: $(srcdir)/wine_xhdpi.png
+	mkdir -p `dirname $@`
+	cp $(srcdir)/wine_xhdpi.png $@
+
+$(ANDROID_LIB_DIR)/res/drawable-xxhdpi/wine.png: $(srcdir)/wine_xxhdpi.png
+	mkdir -p `dirname $@`
+	cp $(srcdir)/wine_xxhdpi.png $@
+
+$(ANDROID_LIB_DIR)/res/drawable-xxxhdpi/wine.png: $(srcdir)/wine_xxxhdpi.png
+	mkdir -p `dirname $@`
+	cp $(srcdir)/wine_xxxhdpi.png $@
+
+$(srcdir)/wine_ldpi.png: $(srcdir)/wine.svg
+	test -z "$(RSVG)" || $(RSVG) -z 0.75 -o $@ $(srcdir)/wine.svg
+$(srcdir)/wine_mdpi.png: $(srcdir)/wine.svg
+	test -z "$(RSVG)" || $(RSVG) -z 1 -o $@ $(srcdir)/wine.svg
+$(srcdir)/wine_hdpi.png: $(srcdir)/wine.svg
+	test -z "$(RSVG)" || $(RSVG) -z 1.5 -o $@ $(srcdir)/wine.svg
+$(srcdir)/wine_xhdpi.png: $(srcdir)/wine.svg
+	test -z "$(RSVG)" || $(RSVG) -z 2 -o $@ $(srcdir)/wine.svg
+$(srcdir)/wine_xxhdpi.png: $(srcdir)/wine.svg
+	test -z "$(RSVG)" || $(RSVG) -z 3 -o $@ $(srcdir)/wine.svg
+$(srcdir)/wine_xxxhdpi.png: $(srcdir)/wine.svg
+	test -z "$(RSVG)" || $(RSVG) -z 4 -o $@ $(srcdir)/wine.svg

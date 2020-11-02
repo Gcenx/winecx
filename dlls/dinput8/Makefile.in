@@ -1,0 +1,10 @@
+MODULE    = dinput8.dll
+IMPORTLIB = dinput8
+IMPORTS   = uuid dxguid dinput ole32 advapi32
+
+C_SRCS = \
+	dinput8_main.c
+
+IDL_SRCS = dinput8.idl
+
+RC_SRCS = version.rc

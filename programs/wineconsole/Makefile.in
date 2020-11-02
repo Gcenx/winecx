@@ -1,0 +1,17 @@
+MODULE    = wineconsole.exe
+APPMODE   = -mwindows
+IMPORTS   = advapi32
+DELAYIMPORTS = comctl32 user32 gdi32
+
+C_SRCS = \
+	curses.c \
+	dialog.c \
+	registry.c \
+	user.c \
+	wineconsole.c
+
+RC_SRCS = wineconsole.rc
+
+MANPAGES = wineconsole.man.in
+
+INSTALL_LIB = wineconsole.exe wineconsole

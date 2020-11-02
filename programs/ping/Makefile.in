@@ -1,0 +1,5 @@
+MODULE    = ping.exe
+APPMODE   = -mconsole
+
+C_SRCS = \
+	ping_main.c

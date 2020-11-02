@@ -1,0 +1,25 @@
+TESTDLL   = ntdll.dll
+IMPORTS   = user32
+
+C_SRCS = \
+	atom.c \
+	change.c \
+	directory.c \
+	env.c \
+	error.c \
+	exception.c \
+	file.c \
+	generated.c \
+	info.c \
+	large_int.c \
+	om.c \
+	path.c \
+	pipe.c \
+	port.c \
+	reg.c \
+	rtl.c \
+	rtlbitmap.c \
+	rtlstr.c \
+	string.c \
+	threadpool.c \
+	time.c

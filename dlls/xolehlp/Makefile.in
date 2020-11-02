@@ -1,0 +1,4 @@
+MODULE    = xolehlp.dll
+IMPORTS   = adsiid uuid
+
+C_SRCS = xolehlp.c

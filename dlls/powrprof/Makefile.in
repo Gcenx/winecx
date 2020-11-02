@@ -1,0 +1,5 @@
+MODULE    = powrprof.dll
+IMPORTLIB = powrprof
+IMPORTS   = advapi32
+
+C_SRCS = powrprof.c

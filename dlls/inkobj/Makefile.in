@@ -1,0 +1,4 @@
+MODULE    = inkobj.dll
+
+C_SRCS = \
+	inkobj.c

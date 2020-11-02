@@ -1,0 +1,6 @@
+MODULE    = msvcrtd.dll
+IMPORTLIB = msvcrtd
+IMPORTS   = msvcrt
+
+C_SRCS = \
+	debug.c

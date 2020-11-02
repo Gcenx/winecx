@@ -1,0 +1,4 @@
+MODULE = tdh.dll
+
+C_SRCS = \
+	main.c

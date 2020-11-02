@@ -1,0 +1,11 @@
+MODULE    = dmsynth.dll
+IMPORTS   = dxguid uuid ole32 advapi32
+
+C_SRCS = \
+	dmsynth_main.c \
+	synth.c \
+	synthsink.c
+
+IDL_SRCS = dmsynth.idl
+
+RC_SRCS = version.rc

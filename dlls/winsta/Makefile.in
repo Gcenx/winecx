@@ -1,0 +1,4 @@
+MODULE    = winsta.dll
+
+C_SRCS = \
+	main.c

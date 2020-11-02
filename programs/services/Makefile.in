@@ -1,0 +1,10 @@
+MODULE    = services.exe
+APPMODE   = -mconsole
+IMPORTS   = rpcrt4 advapi32 userenv
+
+C_SRCS = \
+	rpc.c \
+	services.c \
+	utils.c
+
+IDL_SRCS = svcctl.idl

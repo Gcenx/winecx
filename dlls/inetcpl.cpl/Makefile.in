@@ -1,0 +1,14 @@
+MODULE    = inetcpl.cpl
+IMPORTS   = comctl32 shlwapi user32 advapi32
+DELAYIMPORTS = cryptui wininet ole32 urlmon shell32
+
+C_SRCS = \
+	content.c \
+	general.c \
+	inetcpl.c \
+	security.c
+
+RC_SRCS = inetcpl.rc
+
+SVG_SRCS = \
+	inetcpl.svg

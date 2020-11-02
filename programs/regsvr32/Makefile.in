@@ -1,0 +1,12 @@
+MODULE    = regsvr32.exe
+APPMODE   = -mwindows -municode
+IMPORTS   = ole32 user32
+
+C_SRCS = \
+	regsvr32.c
+
+RC_SRCS = regsvr32.rc
+
+MANPAGES = regsvr32.man.in
+
+INSTALL_LIB = regsvr32.exe regsvr32

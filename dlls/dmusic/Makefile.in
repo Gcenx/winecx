@@ -1,0 +1,17 @@
+MODULE    = dmusic.dll
+IMPORTS   = dxguid uuid ole32 advapi32 dsound user32 winmm
+
+C_SRCS = \
+	buffer.c \
+	clock.c \
+	collection.c \
+	dmobject.c \
+	dmusic.c \
+	dmusic_main.c \
+	download.c \
+	instrument.c \
+	port.c
+
+IDL_SRCS = dmusic.idl
+
+RC_SRCS = version.rc

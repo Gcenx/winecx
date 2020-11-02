@@ -1,0 +1,4 @@
+MODULE    = vtdapi.vxd
+
+C_SRCS = \
+	vtdapi.c

@@ -1,0 +1,14 @@
+MODULE    = atl.dll
+IMPORTLIB = atl
+IMPORTS   = uuid oleaut32 ole32 user32 gdi32 advapi32 shlwapi
+EXTRADEFS = -D_ATL_VER=_ATL_VER_30
+
+C_SRCS = \
+	atl.c \
+	atl30.c \
+	atl_ax.c \
+	registrar.c
+
+IDL_SRCS = \
+	atl_classes.idl \
+	atl_lib.idl

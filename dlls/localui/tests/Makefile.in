@@ -1,0 +1,5 @@
+TESTDLL   = localui.dll
+IMPORTS   = winspool
+
+C_SRCS = \
+	localui.c

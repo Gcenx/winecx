@@ -1,0 +1,10 @@
+MODULE    = wshom.ocx
+IMPORTS   = uuid oleaut32 ole32 shell32 user32 advapi32
+
+C_SRCS = \
+	shell.c \
+	wshom_main.c
+
+RC_SRCS = wshom.rc
+
+IDL_SRCS = wshom.idl

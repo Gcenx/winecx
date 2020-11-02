@@ -1,0 +1,14 @@
+TESTDLL   = setupapi.dll
+IMPORTS   = setupapi user32 advapi32
+
+C_SRCS = \
+	devinst.c \
+	diskspace.c \
+	install.c \
+	misc.c \
+	parser.c \
+	query.c \
+	setupcab.c \
+	stringtable.c
+
+RC_SRCS = setupapi.rc

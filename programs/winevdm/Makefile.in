@@ -1,0 +1,6 @@
+MODULE    = winevdm.exe
+APPMODE   = -mwindows
+IMPORTS   = user32 kernel
+
+C_SRCS = \
+	winevdm.c

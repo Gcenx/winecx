@@ -1,0 +1,5 @@
+MODULE    = d3dim.dll
+
+C_SRCS = d3dim_main.c
+
+RC_SRCS = version.rc

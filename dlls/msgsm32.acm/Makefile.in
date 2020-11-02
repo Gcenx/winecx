@@ -1,0 +1,4 @@
+MODULE    = msgsm32.acm
+IMPORTS   = winmm user32
+
+C_SRCS = msgsm32.c

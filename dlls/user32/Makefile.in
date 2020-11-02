@@ -1,0 +1,62 @@
+EXTRADEFS = -D_USER32_ -D_WINABLE_
+MODULE    = user32.dll
+IMPORTLIB = user32
+IMPORTS   = gdi32 version advapi32
+EXTRAINCL = $(PNG_CFLAGS)
+DELAYIMPORTS = imm32 usp10
+
+C_SRCS = \
+	button.c \
+	caret.c \
+	class.c \
+	clipboard.c \
+	combo.c \
+	cursoricon.c \
+	dde_client.c \
+	dde_misc.c \
+	dde_server.c \
+	defdlg.c \
+	defwnd.c \
+	desktop.c \
+	dialog.c \
+	driver.c \
+	edit.c \
+	exticon.c \
+	focus.c \
+	hook.c \
+	icontitle.c \
+	input.c \
+	listbox.c \
+	lstr.c \
+	mdi.c \
+	menu.c \
+	message.c \
+	misc.c \
+	msgbox.c \
+	nonclient.c \
+	painting.c \
+	property.c \
+	resource.c \
+	scroll.c \
+	spy.c \
+	static.c \
+	sysparams.c \
+	text.c \
+	uitools.c \
+	user_main.c \
+	win.c \
+	winhelp.c \
+	winpos.c \
+	winproc.c \
+	winstation.c \
+	wsprintf.c
+
+RC_SRCS = user32.rc
+
+SVG_SRCS = \
+	resources/oic_bang.svg \
+	resources/oic_hand.svg \
+	resources/oic_note.svg \
+	resources/oic_ques.svg \
+	resources/oic_sample.svg \
+	resources/oic_winlogo.svg

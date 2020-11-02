@@ -1,0 +1,5 @@
+MODULE    = openal32.dll
+EXTRALIBS = $(OPENAL_LIBS)
+
+C_SRCS = \
+	openal.c

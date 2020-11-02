@@ -1,0 +1,5 @@
+MODULE    = loadperf.dll
+IMPORTLIB = loadperf
+
+C_SRCS = \
+	loadperf_main.c

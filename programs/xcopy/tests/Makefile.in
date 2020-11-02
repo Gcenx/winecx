@@ -1,0 +1,4 @@
+TESTDLL   = xcopy.exe
+
+C_SRCS = \
+	xcopy.c

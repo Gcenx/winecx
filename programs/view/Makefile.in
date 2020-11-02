@@ -1,0 +1,8 @@
+MODULE    = view.exe
+APPMODE   = -mwindows -municode
+IMPORTS   = comdlg32 user32 gdi32
+
+C_SRCS = \
+	view.c
+
+RC_SRCS = view.rc

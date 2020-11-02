@@ -1,0 +1,4 @@
+MODULE = difxapi.dll
+
+C_SRCS = \
+	main.c

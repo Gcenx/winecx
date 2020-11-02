@@ -1,0 +1,5 @@
+MODULE    = query.dll
+IMPORTS   = uuid
+
+C_SRCS = \
+	query_main.c

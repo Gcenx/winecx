@@ -1,0 +1,17 @@
+TESTDLL   = mshtml.dll
+IMPORTS   = ole32 oleaut32 wininet user32 urlmon gdi32 advapi32
+C_SRCS = \
+	activex.c \
+	dom.c \
+	events.c \
+	htmldoc.c \
+	htmllocation.c \
+	misc.c \
+	protocol.c \
+	script.c \
+	style.c \
+	xmlhttprequest.c
+
+IDL_SRCS = test_tlb.idl
+
+RC_SRCS = rsrc.rc

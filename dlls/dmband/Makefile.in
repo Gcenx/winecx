@@ -1,0 +1,13 @@
+MODULE    = dmband.dll
+IMPORTS   = dxguid uuid ole32 advapi32
+
+C_SRCS = \
+	band.c \
+	bandtrack.c \
+	dmband_main.c \
+	dmobject.c \
+	dmutils.c
+
+IDL_SRCS = dmband.idl
+
+RC_SRCS = version.rc

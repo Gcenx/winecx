@@ -1,0 +1,15 @@
+MODULE    = hnetcfg.dll
+IMPORTS   = oleaut32 ole32 advapi32
+
+C_SRCS = \
+	apps.c \
+	hnetcfg.c \
+	manager.c \
+	policy.c \
+	port.c \
+	profile.c \
+	service.c
+
+IDL_SRCS = \
+	hnetcfg.idl \
+	hnetcfg_tlb.idl

@@ -1,0 +1,26 @@
+EXTRADEFS = -D_ADVAPI32_
+MODULE    = advapi32.dll
+IMPORTLIB = advapi32
+DELAYIMPORTS = rpcrt4
+EXTRALIBS = $(SECURITY_LIBS)
+
+C_SRCS = \
+	advapi.c \
+	cred.c \
+	crypt.c \
+	crypt_arc4.c \
+	crypt_des.c \
+	crypt_lmhash.c \
+	crypt_md4.c \
+	crypt_md5.c \
+	crypt_sha.c \
+	eventlog.c \
+	lsa.c \
+	registry.c \
+	security.c \
+	service.c \
+	wmi.c
+
+IDL_SRCS = svcctl.idl
+
+RC_SRCS = version.rc

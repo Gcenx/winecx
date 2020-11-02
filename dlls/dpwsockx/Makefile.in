@@ -1,0 +1,5 @@
+MODULE    = dpwsockx.dll
+IMPORTS   = dxguid ws2_32
+
+C_SRCS = \
+	dpwsockx_main.c

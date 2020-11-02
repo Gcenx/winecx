@@ -1,0 +1,8 @@
+MODULE    = winealsa.drv
+IMPORTS   = uuid ole32 advapi32
+DELAYIMPORTS = winmm
+EXTRALIBS = $(ALSA_LIBS)
+
+C_SRCS = \
+	midi.c \
+	mmdevdrv.c

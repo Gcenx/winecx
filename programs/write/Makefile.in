@@ -1,0 +1,7 @@
+MODULE    = write.exe
+APPMODE   = -mwindows
+IMPORTS   = user32 gdi32
+
+C_SRCS = write.c
+
+RC_SRCS = write.rc

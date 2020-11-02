@@ -1,0 +1,4 @@
+MODULE    = msg711.acm
+IMPORTS   = winmm user32
+
+C_SRCS = msg711.c

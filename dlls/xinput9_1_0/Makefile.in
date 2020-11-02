@@ -1,0 +1,3 @@
+MODULE    = xinput9_1_0.dll
+
+RC_SRCS = version.rc

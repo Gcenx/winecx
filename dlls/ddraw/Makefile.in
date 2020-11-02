@@ -1,0 +1,21 @@
+MODULE    = ddraw.dll
+IMPORTLIB = ddraw
+IMPORTS   = dxguid uuid wined3d user32 gdi32 advapi32
+
+C_SRCS = \
+	clipper.c \
+	ddraw.c \
+	device.c \
+	executebuffer.c \
+	light.c \
+	main.c \
+	material.c \
+	palette.c \
+	surface.c \
+	utils.c \
+	vertexbuffer.c \
+	viewport.c
+
+IDL_SRCS = ddraw_classes.idl
+
+RC_SRCS = version.rc

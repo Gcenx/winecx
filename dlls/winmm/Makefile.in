@@ -1,0 +1,21 @@
+EXTRADEFS = -D_WINMM_
+MODULE    = winmm.dll
+IMPORTLIB = winmm
+IMPORTS   = uuid user32 advapi32
+# CROSSOVER HACK for bug 8627: delay load ole32 and msacm32
+DELAYIMPORTS = ole32 msacm32
+
+C_SRCS = \
+	driver.c \
+	joystick.c \
+	lolvldrv.c \
+	mci.c \
+	mmio.c \
+	playsound.c \
+	time.c \
+	waveform.c \
+	winmm.c
+
+RC_SRCS = \
+	winmm.rc \
+	winmm_res.rc

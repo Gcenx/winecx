@@ -1,0 +1,5 @@
+MODULE    = wtsapi32.dll
+IMPORTLIB = wtsapi32
+
+C_SRCS = \
+	wtsapi32.c

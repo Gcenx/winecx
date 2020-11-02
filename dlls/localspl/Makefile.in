@@ -1,0 +1,9 @@
+MODULE    = localspl.dll
+IMPORTS   = spoolss user32 advapi32
+
+C_SRCS = \
+	localmon.c \
+	localspl_main.c \
+	provider.c
+
+RC_SRCS = localspl.rc

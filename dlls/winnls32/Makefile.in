@@ -1,0 +1,5 @@
+MODULE    = winnls32.dll
+IMPORTLIB = winnls32
+
+C_SRCS = \
+	winnls.c

@@ -1,0 +1,9 @@
+MODULE    = ntoskrnl.exe
+IMPORTLIB = ntoskrnl
+IMPORTS   = advapi32
+
+C_SRCS = \
+	instr.c \
+	ntoskrnl.c
+
+RC_SRCS = ntoskrnl.rc

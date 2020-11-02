@@ -1,0 +1,7 @@
+MODULE    = pstorec.dll
+IMPORTS   = uuid ole32 shlwapi advapi32
+
+C_SRCS = \
+	pstorec.c
+
+IDL_SRCS = pstorec_tlb.idl

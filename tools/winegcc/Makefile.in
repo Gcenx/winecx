@@ -1,0 +1,21 @@
+PROGRAMS = winegcc
+
+MANPAGES = winegcc.man.in
+
+winegcc_SYMLINKS = winecpp wineg++
+
+C_SRCS = \
+	utils.c \
+	winegcc.c
+
+winegcc_EXTRADEFS = \
+	-DINCLUDEDIR="\"${includedir}\"" \
+	-DDLLDIR="\"${dlldir}\"" \
+	-DLIBDIR="\"${libdir}\"" \
+	-DCC="\"$(CC)\"" \
+	-DCPP="\"$(CPPBIN)\"" \
+	-DCXX="\"$(CXX)\"" \
+	-DLD="\"$(LD)\"" \
+	-DPRELINK="\"$(PRELINK)\""
+
+INSTALL_DEV = $(PROGRAMS) $(winegcc_SYMLINKS)

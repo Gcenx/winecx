@@ -1,0 +1,55 @@
+EXTRADEFS = -D_COMCTL32_
+MODULE    = comctl32.dll
+IMPORTLIB = comctl32
+IMPORTS   = uuid user32 gdi32 advapi32
+DELAYIMPORTS = winmm uxtheme
+
+C_SRCS = \
+	animate.c \
+	comboex.c \
+	comctl32undoc.c \
+	commctrl.c \
+	datetime.c \
+	dpa.c \
+	draglist.c \
+	dsa.c \
+	flatsb.c \
+	header.c \
+	hotkey.c \
+	imagelist.c \
+	ipaddress.c \
+	listview.c \
+	monthcal.c \
+	nativefont.c \
+	pager.c \
+	progress.c \
+	propsheet.c \
+	rebar.c \
+	smoothscroll.c \
+	status.c \
+	string.c \
+	syslink.c \
+	tab.c \
+	taskdialog.c \
+	theme_button.c \
+	theme_combo.c \
+	theme_dialog.c \
+	theme_edit.c \
+	theme_listbox.c \
+	theme_scrollbar.c \
+	theming.c \
+	toolbar.c \
+	tooltips.c \
+	trackbar.c \
+	treeview.c \
+	updown.c
+
+RC_SRCS = comctl32.rc
+
+SVG_SRCS = \
+	idb_hist_large.svg \
+	idb_hist_small.svg \
+	idb_std_large.svg \
+	idb_std_small.svg \
+	idb_view_large.svg \
+	idb_view_small.svg

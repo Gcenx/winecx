@@ -1,0 +1,14 @@
+MODULE    = appwiz.cpl
+IMPORTS   = uuid urlmon advpack comctl32 advapi32 shell32 ole32 user32 comdlg32
+DELAYIMPORTS = msi
+
+C_SRCS = \
+	addons.c \
+	appwiz.c
+
+RC_SRCS = appwiz.rc
+
+SVG_SRCS = \
+	appwiz.svg
+
+addons_EXTRADEFS = -DINSTALL_DATADIR="\"${datadir}\""

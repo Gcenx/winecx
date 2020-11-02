@@ -1,0 +1,7 @@
+TESTDLL   = mscoree.dll
+IMPORTS   = ole32 shlwapi uuid
+
+C_SRCS = \
+	debugging.c \
+	metahost.c \
+	mscoree.c

@@ -1,0 +1,9 @@
+MODULE    = clock.exe
+APPMODE   = -mwindows
+IMPORTS   = comdlg32 shell32 user32 gdi32
+
+C_SRCS = \
+	main.c \
+	winclock.c
+
+RC_SRCS = clock.rc

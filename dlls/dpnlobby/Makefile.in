@@ -1,0 +1,4 @@
+MODULE    = dpnlobby.dll
+IMPORTS   = dpnet
+
+RC_SRCS = version.rc

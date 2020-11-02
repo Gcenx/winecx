@@ -1,0 +1,359 @@
+The Wine development release 2.8 is now available.
+
+What's new in this release (see below for details):
+  - Direct3D command stream runs asynchronously.
+  - Better serial and parallel ports autodetection.
+  - Still more fixes for high DPI settings.
+  - System tray notifications on macOS.
+  - Various bug fixes.
+
+The source is available from the following locations:
+
+  http://dl.winehq.org/wine/source/2.x/wine-2.8.tar.xz
+  http://mirrors.ibiblio.org/wine/source/2.x/wine-2.8.tar.xz
+
+Binary packages for various distributions will be available from:
+
+  http://www.winehq.org/download
+
+You will find documentation on http://www.winehq.org/documentation
+
+You can also get the current source directly from the git
+repository. Check http://www.winehq.org/git for details.
+
+Wine is available thanks to the work of many people. See the file
+AUTHORS in the distribution for the complete list.
+
+----------------------------------------------------------------
+
+Bugs fixed in 2.8 (total 35):
+
+  11811  Multiple applications fail to enumerate serial ports ('HKLM\\HARDWARE\\DeviceMap\\Serialcomm' registry entries)(Coastal Explorer, GPS apps, HyperTerminal)
+  30105  Chessbase Ludwig 3: MS Visual C++ Runtime Error
+  32155  MS Office 2007 SP3 installation needs msi.dll.MsiGetPatchFileListW
+  34551  Necrovision demo sometimes crashes with builtin d3dx9
+  34977  WinDjView: missing checkbox in the set as default viewer dialog
+  36820  Multiple games (Rift, dynamarisa, ShipSimulator 2008 demo) crash on startup (ID3DXBaseEffect::GetPassDesc returns NULL ptr for vertex and pixel shader function)
+  37811  Xvid 1.3.x installer MPEG-4 Video Codec 'xvid.ax' registration fails (crash on unimplemented function mfplat.dll.MFTRegister)
+  39309  Prism Video Converter v2.48 crashes on unimplemented function mfplat.dll.MFTEnum
+  39314  WAtomic: Black OpenGL (wgl) components
+  39936  Toad Data Modeler v5.4.8.1 fails to install (needs 'Scriptlet.TypeLib' object, CLSID '{06290BD5-48AA-11D2-8432-006008C3FBFC}')
+  40955  Steam version of Left 4 Dead 2 v2.1.4.6 crashes randomly in Multiplayer because of a certificate problem in the MOTD
+  41796  Fill Up! (freely downloadable game) crashes when creating a player profile
+  42035  WindBot needs msvcp120.?_2@placeholders@std@@3V?$_Ph@$01@2@A
+  42478  Undeclared O_CLOEXEC use in qcap DLL
+  42605  B4J (Basic 4 Java) crashes when click menu
+  42652  CryptCreateHash error NTE_FAIL after CryptImportKey(public-key)
+  42712  Image-Bugs in Guild Wars 2 (Guild emblem)
+  42835  redefinition of typedef 'WSD*'
+  42838  Steuer-Spar-Erklärung 2017 crashes on launch
+  42905  Compile error Undefined GNUTLS_MAC_AEAD
+  42919  Witcher Enhanced Edition Director's Cut crashes (purist)
+  42923  Neverwinter Online new module crashes with wine-2.7-staging
+  42925  strftime() truncates output inappropriately when %z is used
+  42926  Cut-and-paste from Wine App to Linux App adds trailing hidden chars ^@^@
+  42935  Dawn of War III crashes with unimplemented function concrt140.dll.??0scoped_lock_read@reader_writer_lock@Concurrency@@QEAA@AEAV12@@Z,
+  42946  FFXIV fails to render (D3D11)
+  42962  Multiple games use unimplemented d3d11_immediate_context_ClearState() (FFXIV, Gauntlet)
+  42965  BeamNG.drive 0.9.x crashes on unimplemented function api-ms-win-core-memory-l1-1-2.d.CreateFileMappingW
+  42975  Graphical glitches on Age of Empires
+  42986  wine can't be compiled by gcc-2.95.4 (amstream/mediastream.c)
+  42990  wine can't be compiled by gcc-2.95.4 (d3dx9_36/effect.c)
+  42991  wine can't be compiled by gcc-2.95.4 (dmusic/port.c)
+  42992  wine can't be compiled by gcc-2.95.4 (dwrite/opentype.c)
+  42995  wine can't be compiled by gcc-2.95.4 (netprofm/list.c)
+  42996  wine can't be compiled by gcc-2.95.4 (programs/ipconfig/ipconfig.c)
+
+----------------------------------------------------------------
+
+Changes since 2.7:
+
+Akihiro Sagawa (2):
+      rsaenh/tests: Add CryptImportKey tests with a public key.
+      rsaenh: Don't import a public key to a key container.
+
+Alex Henrie (3):
+      mountmgr: Create devices and registry entries for serial ports.
+      mountmgr: Create devices and registry entries for parallel ports.
+      ntdll: Implement ProcessVmCounters for Linux for other processes.
+
+Alexandre Julliard (14):
+      preloader: Add a fallback to the old mmap syscall just in case.
+      mountmgr: Create the DEVICEMAP registry keys in their respective driver.
+      mountmgr: Create symbolic links in DosDevices for serial and parallel ports.
+      kernel32: Rely solely on the DosDevices symbolic links in QueryDosDevice.
+      configure: Check for the necessary data structure for if_nameindex().
+      server: Implement IOCTL_SERIAL_GET_TIMEOUTS as an ioctl on the server side.
+      server: Implement IOCTL_SERIAL_SET_TIMEOUTS as an ioctl on the server side.
+      server: Implement IOCTL_SERIAL_SET_WAIT_MASK as an ioctl on the server side.
+      server: Implement IOCTL_SERIAL_GET_WAIT_MASK as an ioctl on the server side.
+      server: Store the SERIAL_TIMEOUTS structure directly in the object.
+      qcap: Fix build when O_CLOEXEC isn't defined.
+      winex11: Simplify the clipboard HTML export function.
+      winex11: Remove all trailing nulls when exporting text strings.
+      user32/tests: Test resulting size of strings with trailing nulls.
+
+Alistair Leslie-Hughes (3):
+      include: Add drmexternals.idl and wmdrmsdk.idl.
+      include/wmsdkidl.idl: Add more interfaces.
+      wmvcore/tests: Add more interface tests.
+
+Andrew Wesie (1):
+      setupapi: Fix SetupDiGetDeviceRegistryProperty if property does not exist.
+
+Andrey Gusev (2):
+      ext-ms-win-authz-context-l1-1-0: Add dll.
+      msi: Add MsiGetPatchFileListA/W stubs.
+
+Björn Bidar (1):
+      wined3d: Add NVIDIA GTX 1080 Ti to the GPU list.
+
+Bruno Jesus (2):
+      gdiplus: Use software mode to draw semi-transparent lines when necessary.
+      ws2_32: Use unsigned interface index on interface_bind_check.
+
+Daniel Lehman (4):
+      msvcp140: Remove forwards for some _Thrd functions.
+      include: Remove references to SPARC.
+      dbghelp: Add support for char16_t type.
+      dbghelp: Add support for char32_t type.
+
+Dmitry Kislyuk (1):
+      vbscript: Allow colons at the end of first line of loops.
+
+Dmitry Timoshkov (2):
+      include: Fix the GUID_WICPixelFormat32bppCMYK definition.
+      include: Fix typos in WICPersistOptions enumeration names.
+
+Hans Leidekker (6):
+      webservices: Allow listeners to be cancelled.
+      webservices: Don't trace output parameters in WsReadQualifiedName.
+      webservices: Implement WsReadAttribute.
+      iphlpapi: Return a fully initialized GUID from ConvertInterfaceLuidToGuid.
+      netprofm: Fix compilation on systems that don't support nameless unions.
+      iphlpapi: Adapter names returned from GetAdaptersAddresses are GUID strings.
+
+Henri Verbeet (30):
+      ddraw/tests: Port test_texturemapblend() to ddraw4.c as well.
+      ddraw: Validate that non-fill blits have a source surface in ddraw_surface7_Blt().
+      wined3d: Print a FIXME if the view format doesn't match the resource format in surface_cpu_blt_colour_fill().
+      wined3d: Use the CPU blitter for clearing depth/stencil textures that are current in the map binding.
+      wined3d: Allow the command stream thread to run asynchronously.
+      d3dx9/tests: Use compare_float() in D3DXFresnelTest().
+      d3dx9/tests: Use compare_float() in D3DXMatrixTest().
+      d3dx9/tests: Use compare_float() in D3DXQuaternionTest().
+      d3dx9/tests: Use compare_float() in D3DXVector2Test().
+      d3dx9/tests: Use compare_float() in D3DXVector3Test().
+      d3dx9/tests: Use compare_float() in D3DXVector4Test().
+      d3dx9/tests: Use compare_float() in test_D3DXFloat_Array().
+      d3dx9/tests: Use compare_float() in test_D3DXSHAdd().
+      d3dx9/tests: Use compare_float() in test_D3DXSHDot().
+      d3dx9/tests: Use compare_float() in test_D3DXSHEvalConeLight().
+      d3dx9/tests: Use compare_float() in test_D3DXSHEvalDirection().
+      d3dx9/tests: Use compare_float() in test_D3DXSHEvalDirectionalLight().
+      d3dx9/tests: Use compare_float() in test_D3DXSHEvalHemisphereLight().
+      d3dx9/tests: Use compare_float() in test_D3DXSHMultiply2().
+      d3dx9/tests: Use compare_float() in test_D3DXSHMultiply3().
+      d3dx9/tests: Use compare_float() in test_D3DXSHMultiply4().
+      d3dx9/tests: Use compare_float() in test_D3DXSHRotate().
+      d3dx9/tests: Use compare_float() in test_D3DXSHRotateZ().
+      d3dx9/tests: Use compare_float() in test_D3DXSHEvalSphericalLight().
+      d3dx9/tests: Use compare_float() in test_D3DXSHScale().
+      d3dx9/tests: Use a more reasonable ARRAY_SIZE macro.
+      d3dx9/tests: Use ARRAY_SIZE in test_D3DXFloat_Array().
+      d3dx9/tests: Use ARRAY_SIZE in test_D3DXSHDot().
+      d3dx9/tests: Use ARRAY_SIZE in test_D3DXSHEvalConeLight().
+      d3dx9/tests: Use ARRAY_SIZE in test_D3DXSHEvalDirection().
+
+Hugh McMaster (7):
+      regedit: Add a missing 'break' statement (Coverity).
+      regedit: Pass RegQueryValueEx() the actual buffer size (Coverity).
+      regedit: Simplify clean-up in get_lineA/W().
+      regedit: Return a Unicode line from get_lineA().
+      regedit: Use a function pointer to read each registry line instead of calling get_lineA/W() directly.
+      regedit: Merge header checks from processRegLinesA/W() to their caller.
+      regedit: Merge processRegLinesA/W() into their caller.
+
+Huw D. M. Davies (12):
+      explorer: Set the rebar band height to match the combobox.
+      wordpad: Scale the comboboxes with font size and correctly set the rebar band height.
+      shell32: Fix the icon sizes of the shell imagelists.
+      shell32: Simplify imagelist handling.
+      shell32: Load icons with the correct size.
+      user32: Fix the calculation of system metrics icon sizes.
+      user32: Fix icon spacing minimium values.
+      user32: Change IsProcessDPIAware() to always return TRUE.
+      comdlg32: Scale the control size limits with dpi.
+      comdlg32: Use pixel sizes throughout.
+      comdlg32: Set the radiobuttons' font if they're part of a visual group.
+      comdlg32: Select the correct font before querying the extents.
+
+Jacek Caban (15):
+      jscript: Simplify pop_to_stat implementation.
+      jscript: Added new opcode to enter catch block and use it to setup the scope.
+      jscript: Ensure that OP_pop_except is called with proper stack depth.
+      jscript: Pass finally offset instead of catch ident to OP_push_except.
+      jscript: Always jump to finally block from OP_pop_exept when available.
+      jscript/tests: Added more exception tests.
+      ntdll/tests: Added more completion port tests.
+      ieframe: Return DISP_E_UNKNOWNNAME in IShellUIHelper2::GetIDsOfNames.
+      jscript: Added new debug channel printing details and backtrace of unwinded exceptions.
+      mshtml: Don't expose doScroll in IE11 document mode.
+      mshtml: Added separated IE5 and quicks mode compatibility mode.
+      mshtml: Use IE version dependent on compatibility mode for conditional comments.
+      server: Allocate wait handle on async object in queue_irp.
+      ntdll/tests: Added FSCTL_PIPE_PEEK tests.
+      kernel32/tests: Use shorter timeout for wait that we expect to time out.
+
+Józef Kucia (36):
+      wined3d: Introduce wined3d_device_get_hs_resource_view().
+      d3d11: Implement d3d11_immediate_context_HSGetShaderResources().
+      wined3d: Introduce wined3d_device_get_ds_resource_view().
+      d3d11: Implement d3d11_immediate_context_DSGetShaderResources().
+      wined3d: Introduce wined3d_device_get_hs_sampler().
+      d3d11: Implement d3d11_immediate_context_HSGetSamplers().
+      d3d10: Validate SDK version.
+      wined3d: Introduce wined3d_device_get_ds_sampler().
+      d3d11: Implement d3d11_immediate_context_DSGetSamplers().
+      wined3d: Rework geometry shader inputs/outputs handling.
+      wined3d: Pass correct input count to shader_glsl_setup_sm3_rasterizer_input().
+      wined3d: Use interface blocks for shader inputs and outputs in GLSL 1.50.
+      wined3d: Merge shader_glsl_generate_sm4_rasterizer_input_setup() into shader_glsl_generate_output_setup().
+      d3d11: Implement d3d11_immediate_context_OMGetRenderTargetsAndUnorderedAccessViews().
+      d3d11: Handle unsupported vertex buffer slots in better way.
+      d3d11: Implement d3d11_immediate_context_ClearState().
+      wined3d: Set geometry shader irrespective of vertex shader.
+      wined3d: Ignore unhandled shader data types.
+      d3d11: Implement d3d11_class_linkage_GetDevice().
+      amstream: Fix compilation on systems that don't support nameless unions.
+      ipconfig: Fix compilation on systems that don't support nameless unions.
+      dmusic: Fix compilation on systems that don't support nameless structs or unions.
+      wined3d: Disable only ARB_clip_control when ARB_viewport_array cannot be used for pixel center offsets.
+      wined3d: Implement floating-point viewports.
+      d3d11/tests: Add test for fractional viewports.
+      wined3d: Make "value" optional in wined3d_device_get_predication().
+      wined3d: Add "parent_ops" for query objects.
+      d3d11/tests: Add test for predication state refcounting.
+      d3dx9: Fix compilation on systems that don't support nameless unions.
+      mscoree: Fix compilation on systems that don't support nameless unions.
+      wined3d: Add support for patch constant signatures.
+      wined3d: Add ARB_clear_texture extension.
+      wined3d: Add ARB_clear_buffer_object extension.
+      wined3d: Implement clearing buffer unordered access views.
+      d3d11: Implement d3d11_immediate_context_ClearUnorderedAccessViewUint().
+      d3d11/tests: Add test for clearing buffer unordered access views.
+
+Ken Thomases (2):
+      winemac: Move CVDisplayLink operations out of @synchronized blocks to avoid potential deadlock.
+      winemac: Track whether a view has ever had an OpenGL context attached.
+
+Matteo Bruni (3):
+      wined3d: Release context on CPU blit failure.
+      wined3d: Fix specular lighting calculation.
+      wined3d: Ignore lights out of maximum range for legacy FFP lighting too.
+
+Michael Müller (6):
+      ntdll/tests: Add tests for LdrEnumerateLoadedModules.
+      ntdll: Implement LdrEnumerateLoadedModules.
+      mfplat: Implement MFTRegister.
+      mfplat: Implement MFTUnregister.
+      mfplat: Implement MFTEnum.
+      mfplat/tests: Add tests.
+
+Michael Stefaniuc (25):
+      dmusic: Use DMUS_EVENT_SIZE() to calculate the size of the message.
+      dmusic: Implement IDirectMusicBuffer::PackUnstructured().
+      dmusic: Avoid an intermediate copy in PackStructured().
+      dmime/tests: Use simpler variable names in test_InitAudio().
+      dmime/tests: Add more InitAudio() tests.
+      dmime: Properly use SetCooperativeLevel() on the dsound ifaces we create.
+      dmusic/tests: Add some IDirectMusic_SetDirectSound() tests.
+      dmusic/tests: Expand the dsound refcount testing with the port.
+      dmusic: Use more sensible and consistent field names for IDirectMusic8Impl.
+      dmusic: Implement IDirectMusic8::SetDirectSound().
+      dmusic: Pass only the needed stuff to the DMPort create functions.
+      dmusic: Partially implement the synth IDirectMusicPort::SetDirectSound().
+      dmusic: Add dsound handling to the synth port Activate() method.
+      dmime/tests: Add refcount test for generated dmusic/dsound.
+      dmime: Simplify the check if the performance was initialized.
+      dmime: Avoid a temporary variable in IDirectMusicPerformance8Impl_InitAudio().
+      dmime: Finish the reindentation in CloseDown().
+      dmime: Do not use Init() from InitAudio().
+      dmime: Finish the cleanup of InitAudio().
+      dmime: Forward Init() to InitAudio().
+      dmusic: Set the dsound pointer to NULL on an error path.
+      dmusic: Remove the port from the ports list on the port destruction.
+      dmime: Add proper error handling to InitAudio().
+      dmime: Initialize dmusic in InitAudio().
+      dmusic: Fail in CreatePort() if SetDirectSound() wasn't called.
+
+Nikolay Sivov (26):
+      msxml3/tests: Consistently use non-null pointer value.
+      msxml3/tests: Initialize string pointer on default case too (Coverity).
+      comctl32/tests: Fully initialize message test data (Coverity).
+      dwrite/tests: Fully initialize call sequence test data (Coverity).
+      shell32: Move SHCreateShellFolderView/SHCreateShellFolderViewEx and tests to corresponding files.
+      shell32/tests: Don't trace all messages sent to listview.
+      shell32/shellview: Set provided callback in SHCreateShellFolderView().
+      shell32/shellview: Handle NULL folder pointer in SHCreateShellFolderViewEx().
+      shell32/shellview: Respond to special interface id CDefView.
+      comctl32/taskdialog: Remove superfluous title pointer check (Coverity).
+      inetcomm: Fixed buffer leak on error path (Coverity).
+      dpnet/tests: Fix free buffer access (Coverity).
+      dpnet/tests: Added missing break (Coverity).
+      mshtml/tests: Fix BSTR double-free (Coverity).
+      comctl32/listview: Remove internal autoarrange flag, it breaks positioning.
+      ntdll: Move EventEnabled() to ntdll.
+      ntdll: Move EventWrite() to ntdll.
+      api-ms-win-core-memory-l1-1-2: Update spec file.
+      user32/msgbox: Fix static control id.
+      user32: Added a helper to get screen dc.
+      dwrite: Update to IDWriteFactory5.
+      webservices/tests: Enable WsInitializeMessage() tests (Coverity).
+      comctl32/listview: Convert item text once when looking for insertion point.
+      dwrite: Initial support for number substitution.
+      dwrite: Fix compilation failure regarding nameless unions.
+      comdlg32: Use existing symbol for Help button id.
+
+Owen Rudge (5):
+      wsdapi: Implement WSD LinkedMemory functions.
+      wsdapi: Implement WSDXMLAddChild, Sibling, BuildAnyForSingleElement, CleanupElement.
+      wsdapi/tests: Add tests for WSDXMLBuildAnyForSingleElement.
+      wsdapi/tests: Add tests for WSDXMLAddChild.
+      wsdapi/tests: Add tests for WSDXMLAddSibling.
+
+Paul Gofman (11):
+      d3dx9/tests: Add test for D3DXFX_LARGEADDRESSAWARE effect creation flag.
+      d3dx9: Store effect creation flags in struct d3dx_base_effect.
+      d3dx9: Don't call get_parameter_by_name() from get_valid_parameter() if D3DXFX_LARGEADDRESSAWARE flag is set.
+      d3dx9/tests: Factor out test_effect_preshader_compare_shader_bytecode() function.
+      d3dx9/tests: Add test for GetPassDesc() function.
+      d3dx9: Return shader functions in d3dx9_base_effect_get_pass_desc().
+      d3dx9: Do not set active pass if BeginPass() failed.
+      d3dx9/tests: Add tests for setting strings in effect.
+      d3dx9: Support setting strings in effect.
+      d3dx9: Sort preshader opcode table.
+      d3dx9: Add 'log' preshader opcode.
+
+Piotr Caban (6):
+      msvcrt: Fix '%z' format handling in strftime.
+      msvcp90: Don't overwrite pointers to class members in basic_streambuf:swap.
+      msvcr100: Add _invalid_parameter_noinfo_noreturn implementation.
+      msvcp90: Call invalid_parameter_handler on index out of range in basic_string::operator[].
+      msvcp110: Add placeholder::_Ph* exports.
+      msvcr100: Add reader_writer_lock::scoped_lock implementation.
+
+Sebastian Lackner (3):
+      psapi/tests: Remove todo_wine from succeeding tests.
+      mfplat: Fix invalid memory access.
+      wined3d: Shutdown CS thread before deallocating resources.
+
+Stefan Dösinger (1):
+      winemac.drv: Implement systray version 1-4 notifications.
+
+Zebediah Figura (1):
+      kernel32: Use the full path as an argument to winevdm.exe.
+
+--
+Alexandre Julliard
+julliard@winehq.org

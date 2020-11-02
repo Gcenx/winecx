@@ -1,0 +1,12 @@
+EXTRADEFS = -D_SPOOL32_
+MODULE    = winspool.drv
+IMPORTLIB = winspool
+IMPORTS   = user32 gdi32 advapi32
+EXTRAINCL = $(CUPS_CFLAGS)
+EXTRALIBS = $(APPLICATIONSERVICES_LIBS)
+
+C_SRCS = \
+	info.c \
+	wspool.c
+
+RC_SRCS = winspool.rc

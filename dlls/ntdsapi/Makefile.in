@@ -1,0 +1,6 @@
+MODULE    = ntdsapi.dll
+IMPORTLIB = ntdsapi
+IMPORTS   = user32
+
+C_SRCS = \
+	ntdsapi.c

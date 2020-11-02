@@ -1,0 +1,14 @@
+TESTDLL   = winmm.dll
+IMPORTS   = winmm ole32 user32 advapi32
+
+C_SRCS = \
+	capture.c \
+	generated.c \
+	joystick.c \
+	mci.c \
+	mcicda.c \
+	midi.c \
+	mixer.c \
+	mmio.c \
+	timer.c \
+	wave.c

@@ -1,0 +1,16 @@
+PROGRAMS = wmc
+MANPAGES = wmc.man.in
+
+C_SRCS = \
+	lang.c \
+	mcl.c \
+	po.c \
+	utils.c \
+	wmc.c \
+	write.c
+
+BISON_SRCS = mcy.y
+
+EXTRALIBS = $(GETTEXTPO_LIBS)
+
+INSTALL_DEV = $(PROGRAMS)

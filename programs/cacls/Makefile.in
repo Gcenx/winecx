@@ -1,0 +1,5 @@
+MODULE    = cacls.exe
+APPMODE   = -mconsole
+
+C_SRCS = \
+	cacls_main.c

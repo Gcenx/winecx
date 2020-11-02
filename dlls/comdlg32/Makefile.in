@@ -1,0 +1,25 @@
+MODULE    = comdlg32.dll
+IMPORTLIB = comdlg32
+IMPORTS   = uuid shell32 shlwapi comctl32 winspool user32 gdi32 advapi32
+DELAYIMPORTS = ole32
+
+C_SRCS = \
+	cdlg32.c \
+	colordlg.c \
+	filedlg.c \
+	filedlg31.c \
+	filedlgbrowser.c \
+	finddlg.c \
+	fontdlg.c \
+	itemdlg.c \
+	printdlg.c
+
+RC_SRCS = comdlg32.rc
+
+SVG_SRCS = \
+	pd32_collate.svg \
+	pd32_landscape.svg \
+	pd32_nocollate.svg \
+	pd32_portrait.svg
+
+IDL_SRCS = comdlg32_classes.idl

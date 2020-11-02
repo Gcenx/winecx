@@ -1,0 +1,7 @@
+TESTDLL   = mstask.dll
+IMPORTS   = ole32 user32
+
+C_SRCS = \
+	task.c \
+	task_scheduler.c \
+	task_trigger.c

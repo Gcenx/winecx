@@ -1,0 +1,25 @@
+TESTDLL   = gdi32.dll
+IMPORTS   = user32 gdi32 advapi32
+
+C_SRCS = \
+	bitmap.c \
+	brush.c \
+	clipping.c \
+	dc.c \
+	dib.c \
+	font.c \
+	gdiobj.c \
+	generated.c \
+	icm.c \
+	mapping.c \
+	metafile.c \
+	palette.c \
+	path.c \
+	pen.c
+
+FONT_SRCS = \
+	vertical.sfd \
+	wine_test.sfd \
+	wine_vdmx.sfd
+
+RC_SRCS = resource.rc

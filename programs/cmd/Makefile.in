@@ -1,0 +1,13 @@
+MODULE    = cmd.exe
+APPMODE   = -mconsole -municode
+IMPORTS   = shell32 user32 advapi32
+
+C_SRCS = \
+	batch.c \
+	builtins.c \
+	directory.c \
+	wcmdmain.c
+
+RC_SRCS = cmd.rc
+
+SVG_SRCS = wcmd.svg

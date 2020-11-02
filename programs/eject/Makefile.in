@@ -1,0 +1,4 @@
+MODULE    = eject.exe
+APPMODE   = -mconsole
+
+C_SRCS = eject.c

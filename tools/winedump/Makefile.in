@@ -1,0 +1,27 @@
+PROGRAMS = winedump
+MANPAGES = winedump.man.in
+SCRIPTS  = function_grep.pl
+
+C_SRCS = \
+	debug.c \
+	dos.c \
+	dump.c \
+	emf.c \
+	font.c \
+	le.c \
+	lib.c \
+	lnk.c \
+	main.c \
+	minidump.c \
+	misc.c \
+	msc.c \
+	msmangle.c \
+	ne.c \
+	output.c \
+	pdb.c \
+	pe.c \
+	search.c \
+	symbol.c \
+	tlb.c
+
+INSTALL_DEV = $(PROGRAMS) $(SCRIPTS)

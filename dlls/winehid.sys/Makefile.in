@@ -1,0 +1,6 @@
+MODULE    = winehid.sys
+IMPORTS   = hidclass ntoskrnl
+EXTRADLLFLAGS = -Wb,--subsystem,native
+
+C_SRCS = \
+	main.c

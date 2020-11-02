@@ -1,0 +1,4 @@
+TESTDLL   = psapi.dll
+
+C_SRCS = \
+	psapi_main.c

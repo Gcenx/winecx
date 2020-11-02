@@ -1,0 +1,81 @@
+/*
+ * Joystick testing control panel applet resource file
+ *
+ * Copyright 2012 Lucas Fialho Zawacki
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ *
+ */
+
+#include "joy.h"
+
+#pragma makedep po
+
+LANGUAGE LANG_ENGLISH, SUBLANG_DEFAULT
+
+STRINGTABLE
+BEGIN
+    IDS_CPL_NAME        "Game Controllers"
+END
+
+IDD_LIST DIALOG 0, 0, 320, 220
+STYLE WS_CAPTION | WS_CHILD | WS_DISABLED
+CAPTION "Joysticks"
+FONT 8, "Ms Shell Dlg"
+{
+    PUSHBUTTON      "&Disable", IDC_BUTTONDISABLE, 200, 20, 60, 15
+    PUSHBUTTON      "&Enable", IDC_BUTTONENABLE, 200, 105, 60, 15
+    LTEXT           "Connected", IDC_STATIC, 10, 10, 100, 10
+    LISTBOX         IDC_JOYSTICKLIST, 10, 20, 180, 70, WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY
+    LTEXT           "Disabled", IDC_STATIC, 10, 95, 100, 10
+    LISTBOX         IDC_DISABLEDLIST, 10, 105, 180, 70, WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY
+    LTEXT           "After disabling or enabling a device, the connected joysticks won't be updated here until you restart this applet.", IDC_STATIC, 10, 175, 200, 25
+}
+
+IDD_TEST DIALOG 0, 0, 320, 220
+STYLE WS_CAPTION | WS_CHILD | WS_DISABLED
+CAPTION "Test Joystick"
+FONT 8, "Ms Shell Dlg"
+{
+    COMBOBOX        IDC_TESTSELECTCOMBO, 5, 5, 200, 30, CBS_DROPDOWNLIST | CBS_HASSTRINGS
+    GROUPBOX        "Buttons", IDC_STATIC, 0, 110, 250, 110
+    GROUPBOX        "", IDC_TESTGROUPXY, 15, 30, 60, 60
+    GROUPBOX        "", IDC_TESTGROUPRXRY, 92, 30, 60, 60
+    GROUPBOX        "", IDC_TESTGROUPZRZ, 169, 30, 60, 60
+    GROUPBOX        "", IDC_TESTGROUPPOV, 246, 30, 60, 60
+}
+
+IDD_FORCEFEEDBACK DIALOG 0, 0, 320, 220
+STYLE WS_CAPTION | WS_CHILD | WS_DISABLED
+CAPTION "Test Force Feedback"
+FONT 8, "Ms Shell Dlg"
+{
+    COMBOBOX        IDC_FFSELECTCOMBO, 5, 5, 200, 30, CBS_DROPDOWNLIST | CBS_HASSTRINGS
+    LTEXT           "Available Effects", IDC_STATIC, 10, 30, 100, 10
+    LISTBOX         IDC_FFEFFECTLIST, 10, 40, 180, 70, WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY
+    LTEXT           "Press any button in the controller to activate the chosen effect. The effect direction can be changed with the controller axis.",
+                    IDC_STATIC, 10, 110, 210, 25
+    GROUPBOX        "Direction", IDC_STATIC, 220, 30, 60, 60
+}
+
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+
+/* @makedep: joy.ico */
+ICO_MAIN ICON "joy.ico"
+
+#define WINE_FILENAME_STR "joy.cpl"
+#define WINE_FILEDESCRIPTION_STR "Game Controllers Configuration Panel"
+
+#include "wine/wine_common_ver.rc"

@@ -1,0 +1,13 @@
+MODULE    = amstream.dll
+IMPORTS   = strmiids strmbase uuid ole32 advapi32 ddraw
+
+C_SRCS = \
+	amstream.c \
+	audiodata.c \
+	main.c \
+	mediastream.c \
+	mediastreamfilter.c
+
+IDL_SRCS = amstream_classes.idl
+
+RC_SRCS = version.rc

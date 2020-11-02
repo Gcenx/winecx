@@ -1,0 +1,10 @@
+MODULE    = mciavi32.dll
+IMPORTS   = msvfw32 winmm user32 gdi32
+
+C_SRCS = \
+	info.c \
+	mciavi.c \
+	mmoutput.c \
+	wnd.c
+
+RC_SRCS = mciavi_res.rc

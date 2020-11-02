@@ -1,0 +1,12 @@
+MODULE    = mstask.dll
+IMPORTS   = uuid ole32
+
+C_SRCS = \
+	factory.c \
+	mstask_main.c \
+	task.c \
+	task_scheduler.c \
+	task_trigger.c
+
+IDL_SRCS = \
+	mstask_local.idl

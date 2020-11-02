@@ -1,0 +1,4 @@
+MODULE    = traffic.dll
+
+C_SRCS = \
+	traffic_main.c

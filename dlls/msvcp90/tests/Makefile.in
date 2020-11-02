@@ -1,0 +1,10 @@
+TESTDLL   = msvcp90.dll
+APPMODE   = -mno-cygwin
+
+C_SRCS = \
+	ios.c \
+	misc.c \
+	string.c
+
+RC_SRCS = \
+	msvcp90.rc

@@ -1,0 +1,4 @@
+MODULE = kernelbase.dll
+
+C_SRCS = \
+	main.c

@@ -1,0 +1,9 @@
+MODULE    = uninstaller.exe
+APPMODE   = -mconsole -municode
+IMPORTS   = advapi32
+DELAYIMPORTS = shlwapi shell32 user32 gdi32
+
+C_SRCS = \
+	main.c
+
+RC_SRCS = uninstaller.rc

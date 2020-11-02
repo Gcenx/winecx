@@ -1,0 +1,6 @@
+TESTDLL   = d3d10.dll
+IMPORTS   = d3d10
+
+C_SRCS = \
+	device.c \
+	effect.c

@@ -1,0 +1,19 @@
+TESTDLL   = msvcrt.dll
+APPMODE   = -mno-cygwin
+EXTRAINCL = -I$(srcdir)/..
+
+C_SRCS = \
+	cpp.c \
+	data.c \
+	dir.c \
+	environ.c \
+	file.c \
+	headers.c \
+	heap.c \
+	locale.c \
+	misc.c \
+	printf.c \
+	scanf.c \
+	signal.c \
+	string.c \
+	time.c

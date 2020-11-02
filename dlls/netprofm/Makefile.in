@@ -1,0 +1,8 @@
+MODULE    = netprofm.dll
+IMPORTS   = iphlpapi
+
+C_SRCS = \
+	list.c \
+	main.c
+
+IDL_SRCS = netprofm.idl

@@ -1,0 +1,5 @@
+MODULE    = wlanapi.dll
+IMPORTLIB = wlanapi
+
+C_SRCS = \
+	main.c

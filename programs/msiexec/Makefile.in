@@ -1,0 +1,15 @@
+MODULE    = msiexec.exe
+APPMODE   = -mwindows
+IMPORTS   = msi ole32 advapi32 user32
+
+C_SRCS = \
+	msiexec.c \
+	service.c
+
+RC_SRCS = rsrc.rc
+
+MANPAGES = msiexec.man.in
+
+SVG_SRCS = msiexec.svg
+
+INSTALL_LIB = msiexec.exe msiexec

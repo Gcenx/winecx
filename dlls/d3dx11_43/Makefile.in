@@ -1,0 +1,10 @@
+MODULE = d3dx11_43.dll
+IMPORTLIB = d3dx11
+IMPORTS   = d3dcompiler
+
+C_SRCS = \
+	async.c \
+	d3dx11_43.c \
+	texture.c
+
+RC_SRCS = version.rc

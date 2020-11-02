@@ -1,0 +1,16 @@
+MODULE    = winemine.exe
+APPMODE   = -mwindows -municode
+IMPORTS   = user32 gdi32 advapi32
+DELAYIMPORTS = shell32
+
+C_SRCS = \
+	dialog.c \
+	main.c
+
+RC_SRCS = winemine.rc
+
+MANPAGES = winemine.man.in
+
+SVG_SRCS = winemine.svg
+
+INSTALL_LIB = winemine.exe winemine

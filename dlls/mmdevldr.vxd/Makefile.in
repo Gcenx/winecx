@@ -1,0 +1,4 @@
+MODULE    = mmdevldr.vxd
+
+C_SRCS = \
+	mmdevldr.c

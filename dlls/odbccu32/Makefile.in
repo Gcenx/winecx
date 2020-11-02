@@ -1,0 +1,3 @@
+MODULE    = odbccu32.dll
+
+RC_SRCS = version.rc

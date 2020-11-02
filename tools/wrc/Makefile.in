@@ -1,0 +1,22 @@
+PROGRAMS = wrc
+MANPAGES = wrc.man.in
+
+C_SRCS = \
+	dumpres.c \
+	genres.c \
+	newstruc.c \
+	po.c \
+	readres.c \
+	translation.c \
+	utils.c \
+	wrc.c \
+	writeres.c
+
+LEX_SRCS   = parser.l
+BISON_SRCS = parser.y
+
+wrc_EXTRADEFS = -DINCLUDEDIR="\"${includedir}\""
+
+EXTRALIBS = $(GETTEXTPO_LIBS) -lwpp
+
+INSTALL_DEV = $(PROGRAMS)

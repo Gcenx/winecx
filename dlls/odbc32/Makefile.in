@@ -1,0 +1,8 @@
+MODULE    = odbc32.dll
+IMPORTLIB = odbc32
+IMPORTS   = advapi32
+
+C_SRCS = \
+	proxyodbc.c
+
+RC_SRCS = rsrc.rc

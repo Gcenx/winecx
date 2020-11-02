@@ -1,0 +1,6 @@
+MODULE    = wuaueng.dll
+
+C_SRCS = \
+	main.c
+
+RC_SRCS = version.rc

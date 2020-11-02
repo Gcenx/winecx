@@ -1,0 +1,517 @@
+#!/usr/bin/perl -w
+#
+# Update spec files across dlls that share an implementation
+#
+# Copyright 2011 Alexandre Julliard
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+#
+
+use strict;
+
+my %funcs;
+my $group_head;
+
+my @dll_groups =
+(
+ [
+  "msvcrt",
+  "msvcirt",
+  "msvcrt40",
+  "msvcrt20",
+  "msvcrtd",
+  "crtdll",
+ ],
+ [
+  "msvcrt",
+  "msvcp90",
+  "msvcp100",
+  "msvcp110",
+  "msvcp120",
+  "msvcp140",
+  "msvcp71",
+  "msvcp80",
+  "msvcp70",
+  "msvcp60",
+ ],
+ [
+  "msvcr120",
+  "msvcr120_app",
+  "concrt140",
+ ],
+ [
+  "ucrtbase",
+  "api-ms-win-crt-conio-l1-1-0",
+  "api-ms-win-crt-convert-l1-1-0",
+  "api-ms-win-crt-environment-l1-1-0",
+  "api-ms-win-crt-filesystem-l1-1-0",
+  "api-ms-win-crt-heap-l1-1-0",
+  "api-ms-win-crt-locale-l1-1-0",
+  "api-ms-win-crt-math-l1-1-0",
+  "api-ms-win-crt-multibyte-l1-1-0",
+  "api-ms-win-crt-private-l1-1-0",
+  "api-ms-win-crt-process-l1-1-0",
+  "api-ms-win-crt-runtime-l1-1-0",
+  "api-ms-win-crt-stdio-l1-1-0",
+  "api-ms-win-crt-string-l1-1-0",
+  "api-ms-win-crt-time-l1-1-0",
+  "api-ms-win-crt-utility-l1-1-0",
+  "vcruntime140",
+ ],
+ [
+  "msvcp120",
+  "msvcp120_app",
+ ],
+ [
+  "d3dx10_43",
+  "d3dx10_42",
+  "d3dx10_41",
+  "d3dx10_40",
+  "d3dx10_39",
+  "d3dx10_38",
+  "d3dx10_37",
+  "d3dx10_36",
+  "d3dx10_35",
+  "d3dx10_34",
+  "d3dx10_33",
+ ],
+ [
+  "xinput1_3",
+  "xinput1_4",
+  "xinput1_2",
+  "xinput1_1",
+  "xinput9_1_0",
+ ],
+ [
+  "setupapi",
+  "cfgmgr32",
+  "api-ms-win-devices-config-l1-1-1",
+  "api-ms-win-devices-query-l1-1-1",
+ ],
+ [
+  "vcomp",
+  "vcomp140",
+  "vcomp120",
+  "vcomp110",
+  "vcomp100",
+  "vcomp90",
+ ],
+ [
+  "advapi32",
+  "api-ms-win-core-localregistry-l1-1-0",
+  "api-ms-win-downlevel-advapi32-l1-1-0",
+  "api-ms-win-downlevel-advapi32-l2-1-0",
+  "api-ms-win-security-base-l1-1-0",
+  "api-ms-win-core-registry-l1-1-0",
+  "api-ms-win-core-registry-l2-1-0",
+  "api-ms-win-eventing-classicprovider-l1-1-0",
+  "api-ms-win-eventing-consumer-l1-1-0",
+  "api-ms-win-eventing-controller-l1-1-0",
+  "api-ms-win-eventing-provider-l1-1-0",
+  "api-ms-win-eventlog-legacy-l1-1-0",
+  "api-ms-win-security-audit-l1-1-1",
+  "api-ms-win-security-base-l1-2-0",
+  "api-ms-win-security-base-private-l1-1-1",
+  "api-ms-win-security-lsalookup-l1-1-0",
+  "api-ms-win-security-lsalookup-l1-1-1",
+  "api-ms-win-security-lsalookup-l2-1-1",
+  "api-ms-win-security-lsapolicy-l1-1-0",
+  "api-ms-win-security-sddl-l1-1-0",
+  "api-ms-win-security-systemfunctions-l1-1-0",
+  "api-ms-win-service-core-l1-1-0",
+  "api-ms-win-service-core-l1-1-1",
+  "api-ms-win-service-management-l1-1-0",
+  "api-ms-win-service-management-l2-1-0",
+  "api-ms-win-service-private-l1-1-1",
+  "api-ms-win-service-winsvc-l1-1-0",
+  "api-ms-win-service-winsvc-l1-2-0",
+ ],
+ [
+  "authz",
+  "ext-ms-win-authz-context-l1-1-0",
+ ],
+ [
+  "netapi32",
+  "ext-ms-win-domainjoin-netjoin-l1-1-0",
+ ],
+ [
+  "ntdll",
+  "api-ms-win-core-xstate-l1-1-0",
+ ],
+ [
+  "ntdll",
+  "powrprof",
+  "api-ms-win-power-base-l1-1-0",
+  "api-ms-win-power-setting-l1-1-0",
+ ],
+ [
+  "kernel32",
+  "api-ms-win-appmodel-identity-l1-1-0",
+  "api-ms-win-appmodel-runtime-l1-1-1",
+  "api-ms-win-downlevel-normaliz-l1-1-0",
+  "api-ms-win-core-appcompat-l1-1-1",
+  "api-ms-win-core-atoms-l1-1-0",
+  "api-ms-win-core-debug-l1-1-0",
+  "api-ms-win-core-debug-l1-1-1",
+  "api-ms-win-core-delayload-l1-1-0",
+  "api-ms-win-core-delayload-l1-1-1",
+  "api-ms-win-core-errorhandling-l1-1-0",
+  "api-ms-win-core-errorhandling-l1-1-1",
+  "api-ms-win-core-interlocked-l1-1-0",
+  "api-ms-win-core-interlocked-l1-2-0",
+  "api-ms-win-core-misc-l1-1-0",
+  "api-ms-win-core-profile-l1-1-0",
+  "api-ms-win-core-realtime-l1-1-0",
+  "api-ms-win-core-sidebyside-l1-1-0",
+  "api-ms-win-core-string-l1-1-0",
+  "api-ms-win-core-string-obsolete-l1-1-0",
+  "api-ms-win-core-sysinfo-l1-1-0",
+  "api-ms-win-core-sysinfo-l1-2-0",
+  "api-ms-win-core-util-l1-1-0",
+  "api-ms-win-core-synch-l1-1-0",
+  "api-ms-win-core-synch-l1-2-0",
+  "api-ms-win-core-console-l1-1-0",
+  "api-ms-win-core-console-l2-1-0",
+  "api-ms-win-core-file-l1-1-0",
+  "api-ms-win-core-file-l1-2-1",
+  "api-ms-win-core-file-l1-2-0",
+  "api-ms-win-core-file-l2-1-0",
+  "api-ms-win-core-file-l2-1-1",
+  "api-ms-win-core-handle-l1-1-0",
+  "api-ms-win-core-heap-l1-1-0",
+  "api-ms-win-core-heap-l1-2-0",
+  "api-ms-win-core-heap-obsolete-l1-1-0",
+  "api-ms-win-core-io-l1-1-0",
+  "api-ms-win-core-io-l1-1-1",
+  "api-ms-win-core-job-l1-1-0",
+  "api-ms-win-core-job-l2-1-0",
+  "api-ms-win-core-kernel32-legacy-l1-1-0",
+  "api-ms-win-core-kernel32-legacy-l1-1-1",
+  "api-ms-win-core-kernel32-private-l1-1-1",
+  "api-ms-win-core-libraryloader-l1-2-2",
+  "api-ms-win-core-localization-l1-1-0",
+  "api-ms-win-core-localization-l1-2-0",
+  "api-ms-win-core-localization-l2-1-0",
+  "api-ms-win-core-localization-obsolete-l1-1-0",
+  "api-ms-win-core-localization-obsolete-l1-2-0",
+  "api-ms-win-core-localization-private-l1-1-0",
+  "api-ms-win-core-memory-l1-1-0",
+  "api-ms-win-core-memory-l1-1-1",
+  "api-ms-win-core-memory-l1-1-2",
+  "api-ms-win-core-namespace-l1-1-0",
+  "api-ms-win-core-normalization-l1-1-0",
+  "api-ms-win-core-privateprofile-l1-1-1",
+  "api-ms-win-core-processenvironment-l1-1-0",
+  "api-ms-win-core-processenvironment-l1-2-0",
+  "api-ms-win-core-psapi-l1-1-0",
+  "api-ms-win-core-psapi-obsolete-l1-1-0",
+  "api-ms-win-core-threadpool-l1-1-0",
+  "api-ms-win-core-threadpool-l1-2-0",
+  "api-ms-win-core-threadpool-legacy-l1-1-0",
+  "api-ms-win-core-threadpool-private-l1-1-0",
+  "api-ms-win-core-timezone-l1-1-0",
+  "api-ms-win-core-toolhelp-l1-1-0",
+  "api-ms-win-core-sysinfo-l1-2-1",
+  "api-ms-win-core-processthreads-l1-1-2",
+  "api-ms-win-core-fibers-l1-1-0",
+  "api-ms-win-core-fibers-l1-1-1",
+  "api-ms-win-core-localization-l1-2-1",
+  "api-ms-win-core-datetime-l1-1-0",
+  "api-ms-win-core-datetime-l1-1-1",
+  "api-ms-win-core-windowserrorreporting-l1-1-0",
+  "api-ms-win-core-wow64-l1-1-0",
+  "api-ms-win-core-xstate-l2-1-0",
+  "api-ms-win-core-errorhandling-l1-1-2",
+  "api-ms-win-core-util-l1-1-0",
+  "ext-ms-win-kernel32-package-current-l1-1-0",
+ ],
+ [
+  "kernel32",
+  "user32",
+  "api-ms-win-core-appinit-l1-1-0",
+  "api-ms-win-core-libraryloader-l1-1-0",
+  "api-ms-win-core-libraryloader-l1-1-1",
+  "api-ms-win-core-libraryloader-l1-2-0",
+ ],
+ [
+  "kernel32",
+  "advapi32",
+  "api-ms-win-core-namedpipe-l1-1-0",
+  "api-ms-win-core-namedpipe-l1-2-0",
+  "api-ms-win-core-processthreads-l1-1-0",
+  "api-ms-win-core-processthreads-l1-1-1",
+ ],
+ [
+  "kernel32",
+  "advapi32",
+  "user32",
+  "shlwapi",
+  "version",
+  "kernelbase",
+  "api-ms-win-core-bem-l1-1-0",
+ ],
+ [
+  "kernelbase",
+  "api-ms-win-core-quirks-l1-1-0",
+  "api-ms-win-security-grouppolicy-l1-1-0",
+ ],
+ [
+  "ole32",
+  "api-ms-win-downlevel-ole32-l1-1-0",
+  "api-ms-win-core-com-l1-1-0",
+  "api-ms-win-core-com-l1-1-1",
+  "api-ms-win-core-com-private-l1-1-0",
+  "combase",
+  "iprop",
+ ],
+ [
+  "shell32",
+  "api-ms-win-downlevel-shell32-l1-1-0",
+  "api-ms-win-shell-shellcom-l1-1-0",
+  "api-ms-win-shell-shellfolders-l1-1-0",
+ ],
+ [
+  "shlwapi",
+  "api-ms-win-downlevel-shlwapi-l1-1-0",
+  "api-ms-win-downlevel-shlwapi-l2-1-0",
+  "api-ms-win-core-registryuserspecific-l1-1-0",
+  "api-ms-win-core-shlwapi-legacy-l1-1-0",
+  "api-ms-win-core-shlwapi-obsolete-l1-1-0",
+  "api-ms-win-core-url-l1-1-0",
+ ],
+ [
+  "user32",
+  "api-ms-win-core-stringansi-l1-1-0",
+  "api-ms-win-core-string-l2-1-0",
+  "api-ms-win-downlevel-user32-l1-1-0",
+  "api-ms-win-ntuser-dc-access-l1-1-0",
+  "api-ms-win-rtcore-ntuser-private-l1-1-0",
+  "ext-ms-win-ntuser-message-l1-1-1",
+  "ext-ms-win-ntuser-private-l1-1-1",
+  "ext-ms-win-ntuser-rectangle-ext-l1-1-0",
+  "ext-ms-win-ntuser-uicontext-ext-l1-1-0",
+  "ext-ms-win-ntuser-window-l1-1-1",
+  "ext-ms-win-rtcore-ntuser-dc-access-l1-1-0",
+  "ext-ms-win-rtcore-ntuser-dpi-l1-1-0",
+  "ext-ms-win-rtcore-ntuser-sysparams-l1-1-0",
+ ],
+ [
+  "version",
+  "api-ms-win-core-versionansi-l1-1-0",
+  "api-ms-win-core-version-l1-1-0",
+  "api-ms-win-core-version-private-l1-1-0",
+  "api-ms-win-downlevel-version-l1-1-0",
+ ],
+ [
+  "winmm",
+  "api-ms-win-mm-misc-l1-1-1",
+  "api-ms-win-mm-mme-l1-1-0",
+ ],
+ [
+  "msvcrt",
+  "ntdll",
+  "ntoskrnl.exe",
+  "api-ms-win-core-apiquery-l1-1-0",
+  "api-ms-win-core-rtlsupport-l1-1-0",
+  "api-ms-win-core-rtlsupport-l1-2-0",
+ ],
+ [
+  "gdi32",
+  "api-ms-win-dx-d3dkmt-l1-1-0",
+  "ext-ms-win-gdi-dc-create-l1-1-1",
+  "ext-ms-win-gdi-dc-l1-2-0",
+  "ext-ms-win-gdi-devcaps-l1-1-0",
+  "ext-ms-win-gdi-draw-l1-1-1",
+  "ext-ms-win-gdi-render-l1-1-0",
+  "ext-ms-win-rtcore-gdi-object-l1-1-0",
+  "ext-ms-win-rtcore-gdi-rgn-l1-1-0",
+ ],
+ [
+  "combase",
+  "api-ms-win-core-winrt-errorprivate-l1-1-1",
+  "api-ms-win-core-winrt-l1-1-0",
+  "api-ms-win-core-winrt-registration-l1-1-0",
+  "api-ms-win-core-winrt-roparameterizediid-l1-1-0",
+  "api-ms-win-core-winrt-string-l1-1-0",
+ ],
+ [
+  "bthprops.cpl",
+  "irprops.cpl",
+ ],
+ [
+  "sfc_os",
+  "sfc",
+ ],
+ [
+  "bcrypt",
+  "ncrypt",
+ ],
+ [
+  "ntoskrnl.exe",
+  "hal",
+ ],
+);
+
+my $update_flags = 0;
+my $show_duplicates = 0;
+
+foreach my $arg (@ARGV)
+{
+    if ($arg eq "-f") { $update_flags = 1; }
+    elsif ($arg eq "-d") { $show_duplicates = 1; }
+}
+
+# update a file if changed
+sub update_file($$)
+{
+    my $file = shift;
+    my $new = shift;
+
+    open FILE, ">$file.new" or die "cannot create $file.new";
+    print FILE $new;
+    close FILE;
+    rename "$file.new", "$file";
+    print "$file updated\n";
+}
+
+# parse a spec file line
+sub parse_line($$$)
+{
+    my ($name, $line, $str) = @_;
+
+    if ($str =~ /^\s*(\@|\d+)\s+(stdcall|cdecl|varargs|thiscall|stub|extern)\s+((?:-\S+\s+)*)([A-Za-z0-9_\@\$?]+)(?:\s*(\([^)]*\)))?(?:\s+([A-Za-z0-9_\@\$?.]+))?(\s*\#.*)?/)
+    {
+        return ( "ordinal" => $1, "callconv" => $2, "flags" => $3, "name" => $4, "args" => $5 || "",
+                 "target" => $6 || $4, "comment" => $7, "spec" => $name );
+    }
+    return () if $str =~ /^\s*$/;
+    return () if $str =~ /^\s*\#/;
+    printf STDERR "$name.spec:$line: error: Unrecognized line $_\n";
+}
+
+sub read_spec_file($)
+{
+    my $name = shift;
+    my $file = "dlls/$name/$name.spec";
+    my %stubs;
+    open SPEC, "<$file" or die "cannot open $file";
+    while (<SPEC>)
+    {
+        chomp;
+        my %descr = parse_line( $name, $., $_ );
+        next unless %descr;
+
+        my $func = $descr{name};
+        next if defined $funcs{$func};
+        next if $func eq "@";
+        $funcs{$func} = \%descr;
+    }
+    close SPEC;
+}
+
+sub update_spec_file($)
+{
+    my $name = shift;
+    my $file = "dlls/$name/$name.spec";
+    my %stubs;
+    my ($old, $new);
+
+    open SPEC, "<$file" or die "cannot open $file";
+    while (<SPEC>)
+    {
+        $old .= $_;
+        chomp;
+
+        my $commented_out = 0;
+        my %descr = parse_line( $name, $., $_ );
+        if (!%descr)
+        {
+            # check for commented out exports
+            if (/^\s*\#\s*((?:\@|\d+)\s+)?((?:extern|stub|stdcall|cdecl|varargs|thiscall)\s+.*)/)
+            {
+                $commented_out = 1;
+                %descr = parse_line( $name, $., ($1 || "\@ ") . $2 );
+            }
+        }
+        goto done unless %descr;
+
+        my $func = $descr{name};
+        if (!defined $funcs{$func})
+        {
+            $funcs{$func} = \%descr unless $commented_out;
+            goto done;
+        }
+
+        my %parent = %{$funcs{$func}};
+        goto done if $parent{spec} eq $descr{spec};  # the definition is in this spec file
+        goto done if $descr{comment} && $descr{comment} =~ /don't forward/;
+        if ($descr{callconv} ne "stub" && $descr{target} !~ /\./ && !$commented_out)
+        {
+            printf "%s:%u: note: %s already defined in %s\n", $file, $., $func, $parent{spec} if $show_duplicates;
+            goto done;
+        }
+
+        my $flags = $descr{flags};
+        if ($parent{callconv} ne "stub" || $update_flags)
+        {
+            $flags = $parent{flags};
+            $flags =~ s/-ordinal\s*// if $descr{ordinal} eq "@";
+            $flags =~ s/-noname\s*// if $descr{ordinal} eq "@";
+            if ($descr{flags} =~ /-private/)  # preserve -private flag
+            {
+                $flags = "-private " . $flags unless $flags =~ /-private/;
+            }
+        }
+
+        if ($parent{callconv} ne "stub" || $parent{args})
+        {
+            my $callconv = $parent{callconv} ne "stub" ? $parent{callconv} :
+                           $parent{spec} =~ /(msvc|ucrtbase)/ ? "cdecl" : "stdcall";  # hack
+            $_ = sprintf "$descr{ordinal} %s %s%s", $callconv, $flags, $func;
+
+            if ($parent{target} =~ /$group_head\./)  # use the same forward as parent if possible
+            {
+                $_ .= sprintf "%s %s", $parent{args}, $parent{target};
+            }
+            else
+            {
+                $_ .= sprintf "%s %s.%s", $parent{args}, $parent{spec}, $func;
+            }
+        }
+        else
+        {
+            $_ = sprintf "$descr{ordinal} stub %s%s", $flags, $func;
+        }
+        $_ .= $descr{comment} || "";
+
+      done:
+        $new .= "$_\n";
+    }
+    close SPEC;
+    update_file( $file, $new ) if $old ne $new;
+}
+
+sub sync_spec_files(@)
+{
+    %funcs = ();
+    $group_head = shift;
+    read_spec_file( $group_head );
+    foreach my $spec (@_) { update_spec_file($spec); }
+}
+
+foreach my $group (@dll_groups)
+{
+    sync_spec_files( @{$group} );
+}

@@ -1,0 +1,4 @@
+TESTDLL   = ntprint.dll
+
+C_SRCS = \
+	ntprint.c

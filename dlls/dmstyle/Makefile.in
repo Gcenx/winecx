@@ -1,0 +1,18 @@
+MODULE    = dmstyle.dll
+IMPORTS   = dxguid uuid ole32 advapi32
+
+C_SRCS = \
+	auditiontrack.c \
+	chordtrack.c \
+	commandtrack.c \
+	dmobject.c \
+	dmstyle_main.c \
+	dmutils.c \
+	motiftrack.c \
+	mutetrack.c \
+	style.c \
+	styletrack.c
+
+IDL_SRCS = dmstyle.idl
+
+RC_SRCS = version.rc

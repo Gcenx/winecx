@@ -1,0 +1,5 @@
+MODULE    = clusapi.dll
+IMPORTLIB = clusapi
+
+C_SRCS = \
+	clusapi.c

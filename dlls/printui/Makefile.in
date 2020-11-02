@@ -1,0 +1,7 @@
+MODULE    = printui.dll
+IMPORTS   = shell32
+
+C_SRCS = \
+	printui.c
+
+RC_SRCS = printui.rc

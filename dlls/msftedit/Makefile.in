@@ -1,0 +1,7 @@
+MODULE    = msftedit.dll
+IMPORTS   = uuid riched20
+
+C_SRCS = \
+	msftedit_main.c
+
+RC_SRCS = version.rc

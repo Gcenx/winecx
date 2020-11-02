@@ -1,0 +1,5 @@
+MODULE    = resutils.dll
+IMPORTLIB = resutils
+
+C_SRCS = \
+	resutils.c

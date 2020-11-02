@@ -1,0 +1,26 @@
+PROGRAMS = widl
+MANPAGES = widl.man.in
+
+C_SRCS = \
+	client.c \
+	expr.c \
+	hash.c \
+	header.c \
+	proxy.c \
+	register.c \
+	server.c \
+	typegen.c \
+	typelib.c \
+	typetree.c \
+	utils.c \
+	widl.c \
+	write_msft.c
+
+LEX_SRCS   = parser.l
+BISON_SRCS = parser.y
+
+widl_EXTRADEFS = -DDEFAULT_INCLUDE_DIR=\"${includedir}/windows/\"
+
+EXTRALIBS = -lwpp
+
+INSTALL_DEV = $(PROGRAMS)

@@ -1,0 +1,4 @@
+MODULE    = mapistub.dll
+
+C_SRCS = \
+	main.c

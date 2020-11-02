@@ -1,0 +1,4 @@
+MODULE    = acledit.dll
+
+C_SRCS = \
+	main.c

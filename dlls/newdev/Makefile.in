@@ -1,0 +1,4 @@
+MODULE    = newdev.dll
+IMPORTLIB = newdev
+
+C_SRCS = main.c
