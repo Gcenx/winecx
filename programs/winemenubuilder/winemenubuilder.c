@@ -331,7 +331,7 @@ static char* wchars_to_unix_chars(LPCWSTR string)
     return ret;
 }
 
-static WCHAR* utf8_chars_to_wchars(LPCSTR string)
+WCHAR* utf8_chars_to_wchars(LPCSTR string)
 {
     WCHAR *ret;
     INT size = MultiByteToWideChar(CP_UTF8, 0, string, -1, NULL, 0);

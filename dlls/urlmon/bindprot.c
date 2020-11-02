@@ -723,7 +723,8 @@ static HRESULT WINAPI ProtocolHandler_Terminate(IInternetProtocol *iface, DWORD 
     /* This may get released in Terminate call. */
     IInternetProtocolEx_AddRef(&This->IInternetProtocolEx_iface);
 
-    IInternetProtocol_Terminate(This->protocol, 0);
+    if(This->protocol)
+        IInternetProtocol_Terminate(This->protocol, 0);
 
     set_binding_sink(This, NULL, NULL);
 

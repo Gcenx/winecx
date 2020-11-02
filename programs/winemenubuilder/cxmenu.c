@@ -51,8 +51,8 @@ int cx_write_to_file = 0;
  * Functions to invoke the CrossOver menu management scripts.
  */
 
-static int cx_wineshelllink(const char* link, int is_desktop, const char* root,
-                            const char* path, const char* args,
+static int cx_wineshelllink(LPCWSTR linkW, int is_desktop, LPCWSTR rootW,
+                            LPCWSTR pathW, LPCWSTR argsW,
                             const char* icon_name, const char* description, const char* arch)
 {
     const char *argv[20];
@@ -62,28 +62,28 @@ static int cx_wineshelllink(const char* link, int is_desktop, const char* root,
     argv[pos++] = "wineshelllink";
     argv[pos++] = "--utf8";
     argv[pos++] = "--root";
-    argv[pos++] = root;
+    argv[pos++] = wchars_to_utf8_chars(rootW);
     argv[pos++] = "--link";
-    argv[pos++] = link;
+    argv[pos++] = wchars_to_utf8_chars(linkW);
     argv[pos++] = "--path";
-    argv[pos++] = path;
+    argv[pos++] = wchars_to_utf8_chars(pathW);
     argv[pos++] = is_desktop ? "--desktop" : "--menu";
-    if (args && strlen(args))
+    if (argsW && *argsW)
     {
         argv[pos++] = "--args";
-        argv[pos++] = args;
+        argv[pos++] = wchars_to_utf8_chars(argsW);
     }
     if (icon_name)
     {
         argv[pos++] = "--icon";
         argv[pos++] = icon_name;
     }
-    if (description && strlen(description))
+    if (description && *description)
     {
         argv[pos++] = "--descr";
         argv[pos++] = description;
     }
-    if (arch && strlen(arch))
+    if (arch && *arch)
     {
         argv[pos++] = "--arch";
         argv[pos++] = arch;
@@ -96,10 +96,10 @@ static int cx_wineshelllink(const char* link, int is_desktop, const char* root,
     return retcode;
 }
 
-static char* cx_escape_string(const char* src)
+static WCHAR* cx_escape_string(const WCHAR* src)
 {
-    const char* s;
-    char *dst, *d;
+    const WCHAR* s;
+    WCHAR *dst, *d;
     DWORD len;
 
     len=1;
@@ -116,7 +116,7 @@ static char* cx_escape_string(const char* src)
         }
     }
 
-    dst=d=HeapAlloc(GetProcessHeap(), 0, len);
+    dst=d=HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
     for (s=src; *s; s++)
     {
         switch (*s)
@@ -143,39 +143,57 @@ static char* cx_escape_string(const char* src)
     return dst;
 }
 
-static void cx_print_value(const char* name, const char* value)
+static void cx_print_value(const char* name, const WCHAR* value)
 {
     if (value)
     {
-        char* str = cx_escape_string(value);
-        fprintf(cx_menu_file, "\"%s\" = \"%s\"\n", name, str);
+        WCHAR* str = cx_escape_string(value);
+        char *strA;
+
+        strA = wchars_to_utf8_chars(str);
+
+        fprintf(cx_menu_file, "\"%s\"=\"%s\"\n", name, strA);
+
         HeapFree(GetProcessHeap(), 0, str);
+        HeapFree(GetProcessHeap(), 0, strA);
     }
 }
 
-static void cx_write_profile_value(const char *fname, const char *section,
-                                   const char* key, const char* value)
+static void cx_write_profile_value(const char *fname, const WCHAR *section,
+                                   const WCHAR *key, const WCHAR *value)
 {
     if (value)
     {
-        char* str = cx_escape_string(value);
-        char *str2 = HeapAlloc(GetProcessHeap(), 0, strlen(str) + 3);
-        strcpy(str2, "\"");
-        strcat(str2, str);
-        strcat(str2, "\"");
+        WCHAR *dosfname;
+        WCHAR *str = cx_escape_string(value);
+        WCHAR *str2 = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(str) + 3) * sizeof(WCHAR));
 
-        if (WritePrivateProfileStringA(section, key, str2, fname))
-            WINE_TRACE("Failed to dump %s for %s : %d\n", key, section, GetLastError());
+        static const WCHAR quoteW[] = {'"',0};
+
+        lstrcpyW(str2, quoteW);
+        lstrcatW(str2, str);
+        lstrcatW(str2, quoteW);
+
+        dosfname = wine_get_dos_file_name(fname);
+
+        if (!WritePrivateProfileStringW(section, key, str2, dosfname))
+            WINE_TRACE("Failed to dump %s for %s : %d\n", debugstr_w(key), debugstr_w(section), GetLastError());
+
+        HeapFree(GetProcessHeap(), 0, dosfname);
         HeapFree(GetProcessHeap(), 0, str);
         HeapFree(GetProcessHeap(), 0, str2);
     }
 }
 
 
-static void cx_dump_menu(const char* link, int is_desktop, const char* root,
-                         const char* path, const char* args,
-                         const char* icon_name, const char* description, const char* arch)
+static void cx_dump_menu(LPCWSTR linkW, int is_desktop, LPCWSTR rootW,
+                         LPCWSTR pathW, LPCWSTR argsW,
+                         const char *icon_name, const char *description, const char *arch)
 {
+    static const WCHAR zeroW[] = {'0',0};
+    static const WCHAR oneW[] = {'1',0};
+
+    WCHAR *icon_nameW, *descriptionW, *archW;
     const char *s = "/menuItems.txt";
     char *fname = malloc(strlen(xdg_data_dir) + strlen(s) + 1 );
     sprintf(fname, "%s%s", xdg_data_dir, s);
@@ -200,28 +218,48 @@ static void cx_dump_menu(const char* link, int is_desktop, const char* root,
             cx_menu_file = stdout;
     }
 
+    icon_nameW = utf8_chars_to_wchars(icon_name);
+    descriptionW = utf8_chars_to_wchars(description);
+    archW = utf8_chars_to_wchars(arch);
+
     if (cx_menu_file == stdout)
     {
+        char *link = wchars_to_utf8_chars(linkW);
+
         fprintf(cx_menu_file, "[%s]\n", link);
-        cx_print_value("IsMenu", (is_desktop ? "0" : "1"));
-        cx_print_value("Root", root);
-        cx_print_value("Path", path);
-        cx_print_value("Args", args);
-        cx_print_value("Icon", icon_name);
-        cx_print_value("Description", description);
-        cx_print_value("Arch", arch);
+        cx_print_value("IsMenu", (is_desktop ? zeroW : oneW));
+        cx_print_value("Root", rootW);
+        cx_print_value("Path", pathW);
+        cx_print_value("Args", argsW);
+        cx_print_value("Icon", icon_nameW);
+        cx_print_value("Description", descriptionW);
+        cx_print_value("Arch", archW);
         fprintf(cx_menu_file, "\n");
+
+        HeapFree(GetProcessHeap(), 0, link);
     }
     else
     {
-        cx_write_profile_value(fname, link, "IsMenu", (is_desktop ? "0" : "1"));
-        cx_write_profile_value(fname, link, "Root", root);
-        cx_write_profile_value(fname, link, "Path", path);
-        cx_write_profile_value(fname, link, "Args", args);
-        cx_write_profile_value(fname, link, "Icon", icon_name);
-        cx_write_profile_value(fname, link, "Description", description);
-        cx_write_profile_value(fname, link, "Arch", arch);
+        static const WCHAR IsMenuW[] = {'I','s','M','e','n','u',0};
+        static const WCHAR RootW[] = {'R','o','o','t',0};
+        static const WCHAR PathW[] = {'P','a','t','h',0};
+        static const WCHAR ArgsW[] = {'A','r','g','s',0};
+        static const WCHAR IconW[] = {'I','c','o','n',0};
+        static const WCHAR DescriptionW[] = {'D','e','s','c','r','i','p','t','i','o','n',0};
+        static const WCHAR ArchW[] = {'A','r','c','h',0};
+
+        cx_write_profile_value(fname, linkW, IsMenuW, (is_desktop ? zeroW : oneW));
+        cx_write_profile_value(fname, linkW, RootW, rootW);
+        cx_write_profile_value(fname, linkW, PathW, pathW);
+        cx_write_profile_value(fname, linkW, ArgsW, argsW);
+        cx_write_profile_value(fname, linkW, IconW, icon_nameW);
+        cx_write_profile_value(fname, linkW, DescriptionW, descriptionW);
+        cx_write_profile_value(fname, linkW, ArchW, archW);
     }
+
+    HeapFree(GetProcessHeap(), 0, icon_nameW);
+    HeapFree(GetProcessHeap(), 0, descriptionW);
+    HeapFree(GetProcessHeap(), 0, archW);
     free(fname);
 }
 
@@ -230,31 +268,23 @@ int cx_process_menu(LPCWSTR linkW, BOOL is_desktop, DWORD root_csidl,
                     LPCSTR icon_name, LPCSTR description, LPCSTR arch)
 {
     WCHAR rootW[MAX_PATH];
-    char *link, *root, *path, *args;
     int rc;
 
-    link = wchars_to_utf8_chars(linkW);
     SHGetSpecialFolderPathW(NULL, rootW, root_csidl, FALSE);
-    root = wchars_to_utf8_chars(rootW);
-    path = pathW ? wchars_to_utf8_chars(pathW) : NULL;
-    args = argsW ? wchars_to_utf8_chars(argsW) : NULL;
 
     WINE_TRACE("link='%s' %s: '%s' path='%s' args='%s' icon='%s' desc='%s' arch='%s'\n",
-               link, is_desktop ? "desktop" : "menu", root,
-               path, args, icon_name, description, arch);
+               debugstr_w(linkW), is_desktop ? "desktop" : "menu", debugstr_w(rootW),
+               debugstr_w(pathW), debugstr_w(argsW), icon_name, description,
+               arch);
 
     if (cx_dump_menus || cx_write_to_file)
     {
         rc = 0;
-        cx_dump_menu(link, is_desktop, root, path, args, icon_name, description, arch);
+        cx_dump_menu(linkW, is_desktop, rootW, pathW, argsW, icon_name, description, arch);
     }
     else
-        rc = cx_wineshelllink(link, is_desktop, root, path, args, icon_name, description, arch);
+        rc = cx_wineshelllink(linkW, is_desktop, rootW, pathW, argsW, icon_name, description, arch);
 
-    HeapFree(GetProcessHeap(), 0, link);
-    HeapFree(GetProcessHeap(), 0, root);
-    HeapFree(GetProcessHeap(), 0, path);
-    HeapFree(GetProcessHeap(), 0, args);
     return rc;
 }
 

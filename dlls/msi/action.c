@@ -1766,7 +1766,7 @@ static BOOL process_overrides( MSIPACKAGE *package, int level )
     ret |= process_state_property( package, level, szReinstall, INSTALLSTATE_UNKNOWN );
     ret |= process_state_property( package, level, szAdvertise, INSTALLSTATE_ADVERTISED );
 
-    if (ret && !package->full_reinstall)
+    if (ret)
         msi_set_property( package->db, szPreselected, szOne, -1 );
 
     return ret;
@@ -1821,7 +1821,34 @@ UINT MSI_SetFeatureStates(MSIPACKAGE *package)
 
     level = msi_get_property_int(package->db, szInstallLevel, 1);
 
-    if (!msi_get_property_int( package->db, szPreselected, 0 ))
+    if (msi_get_property_int( package->db, szPreselected, 0 ))
+    {
+        LIST_FOR_EACH_ENTRY( feature, &package->features, MSIFEATURE, entry )
+        {
+            if (!is_feature_selected( feature, level )) continue;
+
+            if (feature->ActionRequest == INSTALLSTATE_UNKNOWN)
+            {
+                if (feature->Installed == INSTALLSTATE_ABSENT)
+                {
+                    feature->Action = INSTALLSTATE_UNKNOWN;
+                    feature->ActionRequest = INSTALLSTATE_UNKNOWN;
+                }
+                else
+                {
+                    feature->Action = feature->Installed;
+                    feature->ActionRequest = feature->Installed;
+                }
+            }
+        }
+        LIST_FOR_EACH_ENTRY( feature, &package->features, MSIFEATURE, entry )
+        {
+            if (feature->Feature_Parent) continue;
+            disable_children( feature, level );
+            follow_parent( feature );
+        }
+    }
+    else if (!msi_get_property_int( package->db, szInstalled, 0 ))
     {
         LIST_FOR_EACH_ENTRY( feature, &package->features, MSIFEATURE, entry )
         {
@@ -1847,33 +1874,6 @@ UINT MSI_SetFeatureStates(MSIPACKAGE *package)
             }
         }
         /* disable child features of unselected parent or follow parent */
-        LIST_FOR_EACH_ENTRY( feature, &package->features, MSIFEATURE, entry )
-        {
-            if (feature->Feature_Parent) continue;
-            disable_children( feature, level );
-            follow_parent( feature );
-        }
-    }
-    else /* preselected */
-    {
-        LIST_FOR_EACH_ENTRY( feature, &package->features, MSIFEATURE, entry )
-        {
-            if (!is_feature_selected( feature, level )) continue;
-
-            if (feature->ActionRequest == INSTALLSTATE_UNKNOWN)
-            {
-                if (feature->Installed == INSTALLSTATE_ABSENT)
-                {
-                    feature->Action = INSTALLSTATE_UNKNOWN;
-                    feature->ActionRequest = INSTALLSTATE_UNKNOWN;
-                }
-                else
-                {
-                    feature->Action = feature->Installed;
-                    feature->ActionRequest = feature->Installed;
-                }
-            }
-        }
         LIST_FOR_EACH_ENTRY( feature, &package->features, MSIFEATURE, entry )
         {
             if (feature->Feature_Parent) continue;
@@ -1927,6 +1927,14 @@ UINT MSI_SetFeatureStates(MSIPACKAGE *package)
                 else if (feature->Attributes & msidbFeatureAttributesFavorSource)
                     component->hasSourceFeature = 1;
                 else
+                    component->hasLocalFeature = 1;
+                break;
+            case INSTALLSTATE_UNKNOWN:
+                if (feature->Installed == INSTALLSTATE_ADVERTISED)
+                    component->hasAdvertisedFeature = 1;
+                if (feature->Installed == INSTALLSTATE_SOURCE)
+                    component->hasSourceFeature = 1;
+                if (feature->Installed == INSTALLSTATE_LOCAL)
                     component->hasLocalFeature = 1;
                 break;
             default:
@@ -4341,7 +4349,7 @@ static BOOL msi_check_publish(MSIPACKAGE *package)
     LIST_FOR_EACH_ENTRY(feature, &package->features, MSIFEATURE, entry)
     {
         feature->Action = msi_get_feature_action( package, feature );
-        if (feature->Action == INSTALLSTATE_LOCAL)
+        if (feature->Action == INSTALLSTATE_LOCAL || feature->Action == INSTALLSTATE_SOURCE)
             return TRUE;
     }
 
@@ -4950,6 +4958,8 @@ static UINT ACTION_PublishFeatures(MSIPACKAGE *package)
         MSIRECORD *uirow;
 
         if (feature->Level <= 0) continue;
+        if (feature->Action == INSTALLSTATE_UNKNOWN &&
+                feature->Installed != INSTALLSTATE_ABSENT) continue;
 
         if (feature->Action != INSTALLSTATE_LOCAL &&
             feature->Action != INSTALLSTATE_SOURCE &&
@@ -5377,25 +5387,16 @@ static UINT ACTION_UnpublishProduct(MSIPACKAGE *package)
 
 static BOOL is_full_uninstall( MSIPACKAGE *package )
 {
-    WCHAR **features, *remove = msi_dup_property( package->db, szRemove );
     MSIFEATURE *feature;
-    BOOL ret = TRUE;
-    UINT i;
 
     LIST_FOR_EACH_ENTRY( feature, &package->features, MSIFEATURE, entry )
     {
-        if (feature->Action == INSTALLSTATE_LOCAL) ret = FALSE;
+        if (feature->Action != INSTALLSTATE_ABSENT &&
+                (feature->Installed != INSTALLSTATE_ABSENT || feature->Action != INSTALLSTATE_UNKNOWN))
+            return FALSE;
     }
 
-    features = msi_split_string( remove, ',' );
-    for (i = 0; features && features[i]; i++)
-    {
-        if (!strcmpW( features[i], szAll )) ret = TRUE;
-    }
-
-    msi_free(features);
-    msi_free(remove);
-    return ret;
+    return TRUE;
 }
 
 static UINT ACTION_InstallFinalize(MSIPACKAGE *package)
@@ -7950,7 +7951,7 @@ UINT MSI_InstallPackage( MSIPACKAGE *package, LPCWSTR szPackagePath,
     static const WCHAR szDisableRollback[] = {'D','I','S','A','B','L','E','R','O','L','L','B','A','C','K',0};
     static const WCHAR szAction[] = {'A','C','T','I','O','N',0};
     static const WCHAR szInstall[] = {'I','N','S','T','A','L','L',0};
-    WCHAR *reinstall, *remove, *patch, *productcode;
+    WCHAR *reinstall = NULL, *productcode;
     BOOL ui_exists;
     UINT rc;
 
@@ -8000,16 +8001,6 @@ UINT MSI_InstallPackage( MSIPACKAGE *package, LPCWSTR szPackagePath,
 
     msi_apply_transforms( package );
     msi_apply_patches( package );
-
-    patch = msi_dup_property( package->db, szPatch );
-    remove = msi_dup_property( package->db, szRemove );
-    reinstall = msi_dup_property( package->db, szReinstall );
-    if (msi_get_property_int( package->db, szInstalled, 0 ) && !remove && !reinstall && !patch)
-    {
-        TRACE("setting REINSTALL property to ALL\n");
-        msi_set_property( package->db, szReinstall, szAll, -1 );
-        package->full_reinstall = 1;
-    }
 
     msi_set_original_database_property( package->db, szPackagePath );
     msi_parse_command_line( package, szCommandLine, FALSE );
@@ -8064,14 +8055,12 @@ UINT MSI_InstallPackage( MSIPACKAGE *package, LPCWSTR szPackagePath,
     /* finish up running custom actions */
     ACTION_FinishCustomActions(package);
 
-    if (package->need_rollback && !reinstall)
+    if (package->need_rollback && !(reinstall = msi_dup_property( package->db, szReinstall )))
     {
         WARN("installation failed, running rollback script\n");
         execute_script( package, SCRIPT_ROLLBACK );
     }
     msi_free( reinstall );
-    msi_free( remove );
-    msi_free( patch );
 
     if (rc == ERROR_SUCCESS && package->need_reboot_at_end)
         return ERROR_SUCCESS_REBOOT_REQUIRED;

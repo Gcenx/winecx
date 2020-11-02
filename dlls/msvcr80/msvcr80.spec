@@ -745,10 +745,10 @@
 @ cdecl _mbbtype(long long)
 @ stub _mbbtype_l
 # extern _mbcasemap
-@ cdecl _mbccpy(ptr str)
-@ stub _mbccpy_l
-@ stub _mbccpy_s
-@ stub _mbccpy_s_l
+@ cdecl _mbccpy(ptr ptr)
+@ cdecl _mbccpy_l(ptr ptr ptr)
+@ cdecl _mbccpy_s(ptr long ptr ptr)
+@ cdecl _mbccpy_s_l(ptr long ptr ptr ptr)
 @ cdecl _mbcjistojms(long)
 @ stub _mbcjistojms_l
 @ cdecl _mbcjmstojis(long)
@@ -790,7 +790,7 @@
 @ cdecl _mbsinc(str)
 @ stub _mbsinc_l
 @ cdecl _mbslen(str)
-@ stub _mbslen_l
+@ cdecl _mbslen_l(str ptr)
 @ cdecl _mbslwr(str)
 @ stub _mbslwr_l
 @ cdecl _mbslwr_s(str long)
@@ -839,8 +839,8 @@
 @ stub _mbsnicoll_l
 @ cdecl _mbsninc(str long)
 @ stub _mbsninc_l
-@ stub _mbsnlen
-@ stub _mbsnlen_l
+@ cdecl _mbsnlen(str long)
+@ cdecl _mbsnlen_l(str long ptr)
 @ cdecl _mbsnset(ptr long long)
 @ stub _mbsnset_l
 @ stub _mbsnset_s

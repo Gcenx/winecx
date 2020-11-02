@@ -6258,43 +6258,6 @@ static BOOL freetype_EnumFonts( PHYSDEV dev, LPLOGFONTW plf, FONTENUMPROCW proc,
     LOGFONTW lf;
     struct enum_charset_list enum_charsets;
 
-    /* for the photoshop japanese font hack */
-    char name[MAX_PATH], *p;
-    INT blockNum=0;
-    static const CHAR BLOCK_LIST[][MAX_PATH] = {
-"/System/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe8\xa7\x92\xe3\x82\xb3\xe3\x82\x99 Std W8.otf",
-"/System/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe6\x98\x8e\xe6\x9c\x9d Pro W3.otf",
-"/System/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe8\xa7\x92\xe3\x82\xb3\xe3\x82\x99 Pro W3.otf",
-"/System/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe6\x98\x8e\xe6\x9c\x9d Pro W6.otf",
-"/System/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe8\xa7\x92\xe3\x82\xb3\xe3\x82\x99 Pro W6.otf",
-"/System/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe4\xb8\xb8\xe3\x82\xb3\xe3\x82\x99 Pro W4.otf",
-/* for Leopard new fonts and things moved */
-"/System/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe6\x98\x8e\xe6\x9c\x9d ProN W3.otf",
-"/System/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe8\xa7\x92\xe3\x82\xb3\xe3\x82\x99 ProN W3.otf",
-"/System/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe6\x98\x8e\xe6\x9c\x9d ProN W6.otf",
-"/System/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe8\xa7\x92\xe3\x82\xb3\xe3\x82\x99 ProN W6.otf",
-"/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe8\xa7\x92\xe3\x82\xb3\xe3\x82\x99 StdN W8.otf",
-"/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe8\xa7\x92\xe3\x82\xb3\xe3\x82\x99 Std W8.otf",
-"/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe6\x98\x8e\xe6\x9c\x9d Pro W3.otf",
-"/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe8\xa7\x92\xe3\x82\xb3\xe3\x82\x99 Pro W3.otf",
-"/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe6\x98\x8e\xe6\x9c\x9d Pro W6.otf",
-"/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe8\xa7\x92\xe3\x82\xb3\xe3\x82\x99 Pro W6.otf",
-"/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe4\xb8\xb8\xe3\x82\xb3\xe3\x82\x99 Pro W4.otf",
-"/Library/Fonts/\xe3\x83\x92\xe3\x83\xa9\xe3\x82\xad\xe3\x82\x99\xe3\x83\x8e\xe4\xb8\xb8\xe3\x82\xb3\xe3\x82\x99 ProN W4.otf"
-    };
-
-    GetModuleFileNameA(GetModuleHandleA(NULL),name,MAX_PATH);
-    p = strrchr(name,'\\');
-    if (p)
-        p++;
-    else
-        p = name;
-    if ((strcasecmp(p,"photoshop.exe")==0) ||
-        (strcasecmp(p,"imageready.exe")==0))
-        blockNum = 18;
-    else
-        blockNum = 0;
-
     if (!plf)
     {
         lf.lfCharSet = DEFAULT_CHARSET;
@@ -6324,24 +6287,6 @@ static BOOL freetype_EnumFonts( PHYSDEV dev, LPLOGFONTW plf, FONTENUMPROCW proc,
             face_list = get_face_list_from_family(family);
             LIST_FOR_EACH_ENTRY( face, face_list, Face, entry ) {
                 if (!face_matches(family->FamilyName, face, face_name)) continue;
-                if (blockNum>0)
-                {
-                    int i = 0;
-                    BOOL blocked = FALSE;
-                    char *file = strWtoA( CP_UNIXCP, face->file );
-                    for ( i = 0; i < blockNum; i++)
-                        if (lstrcmpA(file,BLOCK_LIST[i])==0)
-                        {
-                            blocked = TRUE;
-                            break;
-                        }
-                    HeapFree( GetProcessHeap(), 0, file );
-                    if (blocked)
-                    {
-                        TRACE("Blocked for Photoshop\n");
-                        continue;
-                    }
-                }
                 if (!enum_face_charsets(family, face, &enum_charsets, proc, lparam, psub ? psub->from.name : NULL)) return FALSE;
 	    }
 	}
@@ -6349,24 +6294,6 @@ static BOOL freetype_EnumFonts( PHYSDEV dev, LPLOGFONTW plf, FONTENUMPROCW proc,
         LIST_FOR_EACH_ENTRY( family, &font_list, Family, entry ) {
             face_list = get_face_list_from_family(family);
             face = LIST_ENTRY(list_head(face_list), Face, entry);
-            if (blockNum>0)
-            {
-                int i = 0;
-                BOOL blocked = FALSE;
-                char *file = strWtoA( CP_UNIXCP, face->file );
-                for ( i = 0; i < blockNum; i++)
-                    if (lstrcmpA(file,BLOCK_LIST[i])==0)
-                    {
-                        blocked = TRUE;
-                        break;
-                    }
-                HeapFree( GetProcessHeap(), 0, file );
-                if (blocked)
-                {
-                    TRACE("Blocked for Photoshop\n");
-                    continue;
-                }
-            }
             if (!enum_face_charsets(family, face, &enum_charsets, proc, lparam, NULL)) return FALSE;
 	}
     }

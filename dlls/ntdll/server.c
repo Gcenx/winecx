@@ -1153,7 +1153,9 @@ static void setup_config_dir(void)
 
     mkdir( "drive_c", 0777 );
     symlink( "../drive_c", "dosdevices/c:" );
+#ifndef __ANDROID__
     symlink( "/", "dosdevices/z:" );
+#endif
 }
 
 

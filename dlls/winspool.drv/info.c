@@ -8375,50 +8375,47 @@ static BOOL get_command( HKEY key, const WCHAR *value, WCHAR *buffer, DWORD size
     return (res == ERROR_SUCCESS);
 }
 
-static BOOL google_cloud_print( const WCHAR *cmd, const char *filename, const WCHAR *t )
+static BOOL google_cloud_print( const WCHAR *cmd_templateW, const char *filename,
+                                const WCHAR *titleW, const WCHAR *printer_idW, const WCHAR *printer_nameW )
 {
-    char *fname;
+    char *fname, *cmd;
     int i, count;
-    char *p, **argv_new;
+    char **argv_new;
     BOOL rc = TRUE;
-    WCHAR **args;
-    char *title = strdup_unixcp( t );
-    const char *prefix = "file:///data/data/com.codeweavers.";
-    int has_title = (t != NULL && strcmp( title, "" ));
+    WCHAR **args, *quoted_title;
+    const char *prefix = "file://";
+    static const WCHAR untitledW[] = { 'U','n','t','i','t','l','e','d',0};
+    static const WCHAR fmt[] = { '"', '%', 's', '"', 0 };
 
-    TRACE( "cmd template %s file %s title %s\n", debugstr_w( cmd ),
-           filename, debugstr_w( t ) );
+    if (!titleW || !strlenW( titleW ))
+    {
+        if (titleW) HeapFree( GetProcessHeap(), 0, titleW );
+        titleW = HeapAlloc( GetProcessHeap(), 0, strlenW( untitledW ) + 1 );
+        lstrcpyW( titleW, untitledW );
+    }
 
-    fname = HeapAlloc( GetProcessHeap(), 0, strlenW( filename ) + strlen( prefix ) );
-    p = strstr( filename, "cxoffice" );
+    fname = HeapAlloc( GetProcessHeap(), 0, strlen( filename ) + strlen( prefix ) + 1 );
     fname[0] = 0;
     strcpy( fname, prefix );
-    strcat( fname, p );
-    args  = CommandLineToArgvW( cmd, &count );
+    strcat( fname, filename );
 
-    if (!(argv_new = HeapAlloc( GetProcessHeap(), 0, (count + 4) * sizeof(*argv_new) ))) return 0;
+    quoted_title = HeapAlloc( GetProcessHeap(), 0, (strlenW( titleW ) + 3) * sizeof( WCHAR ) );
+    wsprintfW( quoted_title, fmt, titleW );
+
+    cmd = HeapAlloc( GetProcessHeap(), 0,
+                     (strlenW( cmd_templateW ) + strlen( fname ) +
+                      strlen( filename ) + strlenW( quoted_title ) +
+                      strlenW( printer_nameW ) + strlenW( printer_idW ) + 1 ) *
+                     sizeof(WCHAR) );
+    wsprintfW( cmd, cmd_templateW, fname, printer_idW, printer_nameW, quoted_title );
+    args = CommandLineToArgvW( cmd, &count );
+    if (!(argv_new = HeapAlloc( GetProcessHeap(), 0, (count + 1) * sizeof(*argv_new) ))) return 0;
     for (i = 0; i < count; i++) argv_new[i] = strdup_unixcp( args[i] );
-    argv_new[count] = fname;
-    if (has_title)
-    {
-        argv_new[count + 1] = "-es";
-        argv_new[count + 2] = title;
-        argv_new[count + 3] = NULL;
-    }
-    else
-    {
-        argv_new[count + 1] = NULL;
-    }
+    argv_new[count] = NULL;
 
     TRACE( "Trying" );
-    for (i = 0; i <= count; i++) TRACE( " %s", debugstr_a( argv_new[i] ));
-    if (has_title)
-    {
-        TRACE( " %s", debugstr_a( argv_new[count + 1] ) );
-        TRACE( " %s", debugstr_a( argv_new[count + 2] ) );
-    }
+    for (i = 0; i < count; i++) TRACE( " %s", debugstr_a( argv_new[i] ));
     TRACE( "\n" );
-
     if ((_spawnvp( _P_NOWAIT, argv_new[0], (const char **)argv_new )) == -1)
     {
         WINE_ERR( "Failed to launch %s : %d\n", debugstr_a( argv_new[0] ), errno );
@@ -8427,8 +8424,9 @@ static BOOL google_cloud_print( const WCHAR *cmd, const char *filename, const WC
 
     for (i = 0; i < count; i++) HeapFree( GetProcessHeap(), 0, argv_new[i] );
     HeapFree( GetProcessHeap(), 0, argv_new );
+    HeapFree( GetProcessHeap(), 0, cmd );
     HeapFree( GetProcessHeap(), 0, fname );
-    HeapFree( GetProcessHeap(), 0, title );
+    HeapFree( GetProcessHeap(), 0, quoted_title );
 
     return rc;
 }
@@ -8490,7 +8488,8 @@ static int file_copy( const char *dst_fname, const char *src_fname )
 /*****************************************************************************
  *          schedule_gcloud
  */
-static BOOL schedule_gcloud(LPCWSTR filename, LPCWSTR document_title)
+static BOOL schedule_gcloud(LPWSTR printer_id, LPCWSTR filename,
+                            LPCWSTR document_title, LPCWSTR printer_name)
 {
     static const WCHAR printer_key[] =
         {'S','o','f','t','w','a','r','e','\\','W','i','n','e','\\',
@@ -8533,7 +8532,7 @@ static BOOL schedule_gcloud(LPCWSTR filename, LPCWSTR document_title)
     HeapFree( GetProcessHeap(), 0, android_spool_dir );
     if (!rc) return rc;
 
-    return google_cloud_print( cmdlineW, template, document_title );
+    return google_cloud_print( cmdlineW, template, document_title, printer_id, printer_name );
 }
 
 static INT_PTR CALLBACK file_dlg_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
@@ -8734,7 +8733,15 @@ BOOL WINAPI ScheduleJob( HANDLE hPrinter, DWORD dwJobID )
             }
             else if(!strncmpW(portname, GCLOUD_Port, strlenW(GCLOUD_Port)))
             {
-                ret = schedule_gcloud( job->filename, job->document_title);
+                if (!pi5)
+                {
+                    GetPrinterW(hPrinter, 5, NULL, 0, &needed);
+                    pi5 = HeapAlloc(GetProcessHeap(), 0, needed);
+                    GetPrinterW(hPrinter, 5, (LPBYTE)pi5, needed, &needed);
+                }
+
+                ret = schedule_gcloud(portname + strlenW(GCLOUD_Port), job->filename, job->document_title,
+                                      pi5->pPrinterName);
             }
             else if(!strncmpW(portname, FILE_Port, strlenW(FILE_Port)))
             {

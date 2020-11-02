@@ -93,6 +93,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
     private static final Object desktopReadyLock = new Object();
     private static Boolean desktopReady = false;
     private File prefix = null;
+    protected float dpi_scale = 1.0f;
 
     private String providerAuthority;
 
@@ -973,8 +974,8 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
 
         public void get_event_pos( MotionEvent event, int[] pos )
         {
-            pos[0] = Math.round( event.getRawX() );
-            pos[1] = Math.round( event.getRawY() );
+            pos[0] = Math.round( event.getRawX() / dpi_scale );
+            pos[1] = Math.round( event.getRawY() / dpi_scale );
         }
     }
 
@@ -1233,6 +1234,25 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
                     wine_send_gamepad_axis(event.getDeviceId(), axis);
                     return true;
                 }
+            if ((event.getSource() & InputDevice.SOURCE_CLASS_POINTER) != 0 &&
+                event.getAction() == MotionEvent.ACTION_SCROLL)
+            {
+                int[] pos = new int[2];
+                int hscroll = (int)event.getAxisValue(MotionEvent.AXIS_HSCROLL);
+                int vscroll = (int)event.getAxisValue(MotionEvent.AXIS_VSCROLL);
+                window.get_event_pos( event, pos );
+                Log.i("wine", String.format( "view scroll event win %08x action %d pos %d,%d buttons %04x view %d,%d scroll %d,%d",
+                                             window.hwnd, event.getAction(), pos[0], pos[1], event.getButtonState(), getLeft(), getTop(), hscroll, vscroll ));
+
+                if (vscroll != 0)
+                    wine_motion_event( window.hwnd, event.getAction(), pos[0], pos[1], event.getButtonState(),
+                                       vscroll < 0 ? -120 : 120 );
+                if (hscroll != 0)
+                    wine_motion_event( window.hwnd, event.getAction() | 0x10000, pos[0], pos[1], event.getButtonState(),
+                                       hscroll < 0 ? 120 : -120 );
+
+                return true;
+            }
             if ((event.getSource() & InputDevice.SOURCE_CLASS_POINTER) != 0)
             {
                 int[] pos = new int[2];
@@ -1240,12 +1260,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
                 Log.i("wine", String.format( "view motion event win %08x action %d pos %d,%d buttons %04x view %d,%d",
                                              window.hwnd, event.getAction(), pos[0], pos[1], event.getButtonState(), getLeft(), getTop() ));
 
-                int vscroll = (int)event.getAxisValue(MotionEvent.AXIS_VSCROLL);
-                if (vscroll < 0) vscroll = -120;
-                else if (vscroll > 0) vscroll = 120;
-
-                return wine_motion_event( window.hwnd, event.getAction(), pos[0], pos[1], event.getButtonState(),
-                                          vscroll );
+                return wine_motion_event( window.hwnd, event.getAction(), pos[0], pos[1], event.getButtonState(), 0 );
             }
             return super.onGenericMotionEvent(event);
         }
@@ -1302,20 +1317,47 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
             {
                 if (event.getActionMasked() == MotionEvent.ACTION_MOVE)
                 {
+                    int hscroll = scroll_last_x - pos[0];
                     int vscroll = pos[1] - scroll_last_y;
-
-                    Log.i( "wine", String.format( "view touchpad scroll %d", vscroll ) );
 
                     scroll_last_x = pos[0];
                     scroll_last_y = pos[1];
 
-                    return wine_motion_event( window.hwnd, MotionEvent.ACTION_SCROLL, scroll_origin_x, scroll_origin_y, event.getButtonState(), vscroll );
+                    if (hscroll != 0)
+                    {
+                        Log.i( "wine", String.format( "view touchpad hscroll %d", hscroll ) );
+                        wine_motion_event( window.hwnd, MotionEvent.ACTION_SCROLL | 0x10000, scroll_origin_x, scroll_origin_y, event.getButtonState(), hscroll );
+                    }
+                    if (vscroll != 0)
+                    {
+                        Log.i( "wine", String.format( "view touchpad vscroll %d", vscroll ) );
+                        wine_motion_event( window.hwnd, MotionEvent.ACTION_SCROLL, scroll_origin_x, scroll_origin_y, event.getButtonState(), vscroll );
+                    }
+                    return true;
                 }
                 else if (event.getActionMasked() == MotionEvent.ACTION_UP)
                 {
                     Log.i( "wine", "view end touchpad scroll" );
                     scroll_active = false;
                     /* There was no button down, so prevent the button up */
+                    return wine_motion_event( window.hwnd, MotionEvent.ACTION_HOVER_MOVE, scroll_origin_x, scroll_origin_y, event.getButtonState(), 0 );
+                }
+                else if (event.getActionMasked() == MotionEvent.ACTION_CANCEL)
+                {
+                    Log.i( "wine", "view cancel touchpad scroll" );
+                    int hscroll = scroll_last_x - scroll_origin_x;
+                    int vscroll = scroll_origin_y - scroll_last_y;
+                    scroll_active = false;
+                    if (hscroll != 0)
+                    {
+                        Log.i( "wine", String.format( "view touchpad hscroll %d", hscroll ) );
+                        wine_motion_event( window.hwnd, MotionEvent.ACTION_SCROLL | 0x10000, scroll_origin_x, scroll_origin_y, event.getButtonState(), hscroll );
+                    }
+                    if (vscroll != 0)
+                    {
+                        Log.i( "wine", String.format( "view touchpad vscroll %d", vscroll ) );
+                        wine_motion_event( window.hwnd, MotionEvent.ACTION_SCROLL, scroll_origin_x, scroll_origin_y, event.getButtonState(), vscroll );
+                    }
                     return wine_motion_event( window.hwnd, MotionEvent.ACTION_HOVER_MOVE, scroll_origin_x, scroll_origin_y, event.getButtonState(), 0 );
                 }
             }
@@ -1397,7 +1439,7 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         {
             Log.i("wine", "desktop size " + width + "x" + height );
             desktop_view.layout( 0, 0, width, height );
-            wine_desktop_changed( width, height );
+            wine_desktop_changed( (int)(width / dpi_scale), (int)(height / dpi_scale) );
         }
 
         @Override
@@ -1508,13 +1550,27 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         }
     }
 
-    public void create_desktop_window( int hwnd )
+    public void create_desktop_window( int hwnd, int scaling )
     {
-        Log.i( "wine", "create desktop view " + String.format("%08x",hwnd));
+        Log.i( "wine", String.format( "create desktop %08x scale %d", hwnd, scaling ));
         create_window( WineWindow.HWND_MESSAGE, false, 0, 0, null );
         top_view = new TopView( hwnd );
         if (startupDpi == 0)
             startupDpi = context.getResources().getConfiguration().densityDpi;
+        if (scaling == 0)  /* no scaling */
+        {
+            dpi_scale = 1.0f;
+        }
+        else if (scaling == 1)  /* scale to screen DPI */
+        {
+            dpi_scale = startupDpi / 96.0f;
+            startupDpi = 96;
+        }
+        else
+        {
+            dpi_scale = scaling / 96.0f;
+            startupDpi = 96;
+        }
         wine_config_changed( startupDpi );
         synchronized( desktopReadyLock )
         {
@@ -1735,9 +1791,9 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         clipboard_manager.setPrimaryClip( data );
     }
 
-    public void createDesktopWindow( final int hwnd )
+    public void createDesktopWindow( final int hwnd, final int scaling )
     {
-        runOnUiThread( new Runnable() { public void run() { create_desktop_window( hwnd ); }} );
+        runOnUiThread( new Runnable() { public void run() { create_desktop_window( hwnd, scaling ); }} );
     }
 
     public void createWindow( final int hwnd, final boolean opengl, final int parent, final int pid, final String wingroup )

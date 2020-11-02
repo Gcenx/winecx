@@ -30,6 +30,7 @@ extern int cx_write_to_file;
 
 /* Functions used by the cxmenu backend */
 char* wchars_to_utf8_chars(LPCWSTR string);
+WCHAR* utf8_chars_to_wchars(const char *);
 
 /* The backend functions */
 int cx_process_menu(LPCWSTR linkW, BOOL is_desktop, DWORD root_csidl,

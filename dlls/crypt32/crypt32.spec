@@ -93,6 +93,7 @@
 @ stdcall CertStrToNameA(long str long ptr ptr ptr ptr)
 @ stdcall CertStrToNameW(long wstr long ptr ptr ptr ptr)
 @ stdcall CertVerifyCertificateChainPolicy(str ptr ptr ptr)
+@ stdcall CertUnregisterPhysicalStore(ptr long wstr)
 @ stdcall CertVerifyCRLRevocation(long ptr long ptr)
 @ stdcall CertVerifyCRLTimeValidity(ptr ptr)
 @ stdcall CertVerifyCTLUsage(long long ptr ptr long ptr ptr)

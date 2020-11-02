@@ -390,18 +390,29 @@ static void notify_empty( struct pipe_server *server )
     fd_async_wake_up( server->pipe_end.fd, ASYNC_TYPE_WAIT, STATUS_SUCCESS );
 }
 
+static struct pipe_message *queue_message( struct pipe_end *pipe_end, struct iosb *iosb )
+{
+    struct pipe_message *message;
+
+    if (!(message = mem_alloc( sizeof(*message) ))) return NULL;
+    message->iosb = (struct iosb *)grab_object( iosb );
+    message->async = NULL;
+    message->read_pos = 0;
+    list_add_tail( &pipe_end->message_queue, &message->entry );
+    return message;
+}
+
 static void wake_message( struct pipe_message *message )
 {
     struct async *async = message->async;
 
     message->async = NULL;
+    if (!async) return;
+
     message->iosb->status = STATUS_SUCCESS;
     message->iosb->result = message->iosb->in_size;
-    if (async)
-    {
-        async_terminate( async, message->iosb->result ? STATUS_ALERTED : STATUS_SUCCESS );
-        release_object( async );
-    }
+    async_terminate( async, message->iosb->result ? STATUS_ALERTED : STATUS_SUCCESS );
+    release_object( async );
 }
 
 static void free_message( struct pipe_message *message )
@@ -801,7 +812,7 @@ static void reselect_write_queue( struct pipe_end *pipe_end )
         else
         {
             avail += message->iosb->in_size - message->read_pos;
-            if (message->iosb->status == STATUS_PENDING && (avail <= reader->buffer_size || !message->iosb->in_size))
+            if (message->async && (avail <= reader->buffer_size || !message->iosb->in_size))
                 wake_message( message );
         }
     }
@@ -846,39 +857,38 @@ static obj_handle_t pipe_end_read( struct fd *fd, struct async *async, file_pos_
 
 static obj_handle_t pipe_end_write( struct fd *fd, struct async *async, file_pos_t pos )
 {
-    struct pipe_end *write_end = get_fd_user( fd );
-    struct pipe_end *read_end = write_end->connection;
+    struct pipe_end *pipe_end = get_fd_user( fd );
     struct pipe_message *message;
     obj_handle_t handle = 0;
+    struct iosb *iosb;
 
-    if (!use_server_io( write_end )) return no_fd_write( fd, async, pos );
+    if (!use_server_io( pipe_end )) return no_fd_write( fd, async, pos );
 
-    if (!read_end)
+    if (!pipe_end->connection)
     {
         set_error( STATUS_PIPE_DISCONNECTED );
         return 0;
     }
 
-    if (!write_end->write_q && !(write_end->write_q = create_async_queue( fd ))) return 0;
+    if (!pipe_end->write_q && !(pipe_end->write_q = create_async_queue( fd ))) return 0;
     if (!(handle = alloc_handle( current->process, async, SYNCHRONIZE, 0 ))) return 0;
 
-    if (!(message = mem_alloc( sizeof(*message) )))
+    iosb = async_get_iosb( async );
+    message = queue_message( pipe_end->connection, iosb );
+    release_object( iosb );
+    if (!message)
     {
         close_handle( current->process, handle );
         return 0;
     }
-    message->async = (struct async *)grab_object( async );
-    message->iosb = async_get_iosb( async );
-    message->read_pos = 0;
-    list_add_tail( &read_end->message_queue, &message->entry );
 
-    queue_async( write_end->write_q, async );
-    reselect_write_queue( write_end );
+    message->async = (struct async *)grab_object( async );
+    queue_async( pipe_end->write_q, async );
+    reselect_write_queue( pipe_end );
     set_error( STATUS_PENDING );
 
     if (!async_is_blocking( async ))
     {
-        struct iosb *iosb;
         iosb = async_get_iosb( async );
         if (iosb->status == STATUS_PENDING)
         {
@@ -959,6 +969,71 @@ static void pipe_end_peek( struct pipe_end *pipe_end )
     if (reply_size) memcpy( buffer->Data, (const char *)message->iosb->in_data + message->read_pos, reply_size );
 }
 
+static obj_handle_t pipe_end_transceive( struct pipe_end *pipe_end, struct async *async )
+{
+    struct pipe_message *message;
+    obj_handle_t handle = 0;
+    struct iosb *iosb;
+
+    if ((pipe_end->flags & (NAMED_PIPE_MESSAGE_STREAM_WRITE | NAMED_PIPE_MESSAGE_STREAM_READ))
+        != (NAMED_PIPE_MESSAGE_STREAM_WRITE | NAMED_PIPE_MESSAGE_STREAM_READ))
+    {
+        set_error( STATUS_INVALID_READ_MODE );
+        return 0;
+    }
+
+    if (!pipe_end->connection)
+    {
+        set_error( STATUS_PIPE_BROKEN );
+        return 0;
+    }
+
+    /* not allowed if we already have read data buffered */
+    if (!list_empty( &pipe_end->message_queue ))
+    {
+        set_error( STATUS_PIPE_BUSY );
+        return 0;
+    }
+
+    if (!pipe_end->read_q && !(pipe_end->read_q = create_async_queue( pipe_end->fd ))) return 0;
+    if (async_is_blocking( async )
+        && !(handle = alloc_handle( current->process, async, SYNCHRONIZE, 0 ))) return 0;
+
+    iosb = async_get_iosb( async );
+    /* ignore output buffer copy transferred because of METHOD_NEITHER */
+    iosb->in_size -= iosb->out_size;
+    /* transaction never blocks on write, so just queue a message without async */
+    message = queue_message( pipe_end->connection, iosb );
+    release_object( iosb );
+    if (!message)
+    {
+        if (handle) close_handle( current->process, handle );
+        return 0;
+    }
+    reselect_read_queue( pipe_end->connection );
+
+    queue_async( pipe_end->read_q, async );
+    reselect_read_queue( pipe_end );
+    set_error( STATUS_PENDING );
+    return handle;
+}
+
+static obj_handle_t pipe_end_ioctl( struct pipe_end *pipe_end, ioctl_code_t code, struct async *async )
+{
+    switch(code)
+    {
+    case FSCTL_PIPE_PEEK:
+        pipe_end_peek( pipe_end );
+        return 0;
+
+    case FSCTL_PIPE_TRANSCEIVE:
+        return pipe_end_transceive( pipe_end, async );
+
+    default:
+        return default_fd_ioctl( pipe_end->fd, code, async );
+    }
+}
+
 static obj_handle_t pipe_server_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
 {
     struct pipe_server *server = get_fd_user( fd );
@@ -1024,12 +1099,8 @@ static obj_handle_t pipe_server_ioctl( struct fd *fd, ioctl_code_t code, struct 
         }
         return 0;
 
-    case FSCTL_PIPE_PEEK:
-        pipe_end_peek( &server->pipe_end );
-        return 0;
-
     default:
-        return default_fd_ioctl( fd, code, async );
+        return pipe_end_ioctl( &server->pipe_end, code, async );
     }
 }
 
@@ -1039,12 +1110,12 @@ static obj_handle_t pipe_client_ioctl( struct fd *fd, ioctl_code_t code, struct 
 
     switch(code)
     {
-    case FSCTL_PIPE_PEEK:
-        pipe_end_peek( &client->pipe_end );
+    case FSCTL_PIPE_LISTEN:
+        set_error( STATUS_ILLEGAL_FUNCTION );
         return 0;
 
     default:
-        return default_fd_ioctl( fd, code, async );
+        return pipe_end_ioctl( &client->pipe_end, code, async );
     }
 }
 

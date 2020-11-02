@@ -36,6 +36,7 @@
 #include "winbase.h"
 #include "winternl.h"
 #include "winioctl.h"
+#include "winreg.h"
 #include "psapi.h"
 #include "ddk/wdm.h"
 #include "android.h"
@@ -674,11 +675,23 @@ static void create_desktop_window( HWND hwnd )
 {
     static jmethodID method;
     jobject object;
+    HKEY hkey;
+    DWORD scale = 0;
 
-    if (!(object = load_java_method( &method, "createDesktopWindow", "(I)V" ))) return;
+    /* @@ Wine registry key: HKCU\Software\Wine\Android Driver */
+    if (!RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\Android Driver", &hkey ))
+    {
+        char buffer[16];
+        DWORD type, size = sizeof(buffer);
+        if (!RegQueryValueExA( hkey, "DPIScaling", 0, &type, (LPBYTE)buffer, &size ) && type == REG_DWORD)
+            scale = *(DWORD *)buffer;
+        RegCloseKey( hkey );
+    }
+
+    if (!(object = load_java_method( &method, "createDesktopWindow", "(II)V" ))) return;
 
     wrap_java_call();
-    (*jni_env)->CallVoidMethod( jni_env, object, method, HandleToLong( hwnd ));
+    (*jni_env)->CallVoidMethod( jni_env, object, method, HandleToLong( hwnd ), scale );
     unwrap_java_call();
 }
 

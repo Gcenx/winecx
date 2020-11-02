@@ -497,3 +497,15 @@ void CDECL MSVCRT___std_exception_destroy(struct __std_exception_data *data)
     data->what   = NULL;
     data->dofree = 0;
 }
+
+#if _MSVCR_VER>=140
+/*********************************************************************
+ *  __current_exception (UCRTBASE.@)
+ */
+void** CDECL __current_exception(void)
+{
+    TRACE("()\n");
+    return (void**)&msvcrt_get_thread_data()->exc_record;
+}
+
+#endif /* _MSVCR_VER>=140 */

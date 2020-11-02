@@ -369,12 +369,15 @@ static HRESULT WINAPI OleObject_SetClientSite(IOleObject *iface, IOleClientSite 
 
     load_settings(This->doc_obj);
 
+    /* CXHACK 15998: Don't call GetWindow() here. */
+    if(0) {
     /* Native calls here GetWindow. What is it for?
      * We don't have anything to do with it here (yet). */
     hres = IOleClientSite_QueryInterface(pClientSite, &IID_IOleWindow, (void**)&ole_window);
     if(SUCCEEDED(hres)) {
         IOleWindow_GetWindow(ole_window, &hwnd);
         IOleWindow_Release(ole_window);
+    }
     }
 
     hres = do_query_service((IUnknown*)pClientSite, &IID_IShellBrowser,
