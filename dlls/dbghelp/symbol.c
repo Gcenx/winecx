@@ -53,10 +53,10 @@ static inline int cmp_sorttab_addr(struct module* module, int idx, ULONG64 addr)
     return cmp_addr(ref, addr);
 }
 
-int symt_cmp_addr(const void* p1, const void* p2)
+int symt_cmp_addr(const void* HOSTPTR p1, const void* HOSTPTR p2)
 {
-    const struct symt*  sym1 = *(const struct symt* const *)p1;
-    const struct symt*  sym2 = *(const struct symt* const *)p2;
+    const struct symt*  sym1 = *(const struct symt* const * HOSTPTR)p1;
+    const struct symt*  sym2 = *(const struct symt* const * HOSTPTR)p2;
     ULONG64     a1, a2;
 
     symt_get_address(sym1, &a1);
@@ -850,7 +850,7 @@ static void symt_get_length(struct module* module, const struct symt* symt, ULON
     *size = 0x1000; /* arbitrary value */
 }
 
-/* neede by symt_find_nearest */
+/* needed by symt_find_nearest */
 static int symt_get_best_at(struct module* module, int idx_sorttab)
 {
     ULONG64 ref_addr;
@@ -870,7 +870,7 @@ static int symt_get_best_at(struct module* module, int idx_sorttab)
                    !cmp_sorttab_addr(module, idx_sorttab + 1, ref_addr))
                 idx_sorttab++;
         }
-        /* if no better symbol fond restore original */
+        /* if no better symbol was found restore the original */
         if (module->addr_sorttab[idx_sorttab]->symt.tag == SymTagPublicSymbol)
             idx_sorttab = idx_sorttab_orig;
     }
@@ -1062,7 +1062,7 @@ static BOOL sym_enum(HANDLE hProcess, ULONG64 BaseOfDll, PCWSTR Mask,
         }
         /* not found in PE modules, retry on the ELF ones
          */
-        if (!pair.requested && (dbghelp_options & SYMOPT_WINE_WITH_NATIVE_MODULES))
+        if (!pair.requested && dbghelp_opt_native)
         {
             for (pair.requested = pair.pcs->lmodules; pair.requested; pair.requested = pair.requested->next)
             {
@@ -1393,7 +1393,7 @@ BOOL WINAPI SymFromName(HANDLE hProcess, PCSTR Name, PSYMBOL_INFO Symbol)
     }
     /* not found in PE modules, retry on the ELF ones
      */
-    if (dbghelp_options & SYMOPT_WINE_WITH_NATIVE_MODULES)
+    if (dbghelp_opt_native)
     {
         for (module = pcs->lmodules; module; module = module->next)
         {
@@ -1478,7 +1478,19 @@ BOOL symt_fill_func_line_info(const struct module* module, const struct symt_fun
         }
         if (found)
         {
-            line->FileName = (char*)source_get(module, dli->u.source_file);
+            if (dbghelp_opt_native)
+            {
+                /* Return native file paths when using winedbg */
+                line->FileName = (char*)source_get(module, dli->u.source_file);
+            }
+            else
+            {
+                WCHAR *dospath = wine_get_dos_file_name(source_get(module, dli->u.source_file));
+                DWORD len = WideCharToMultiByte(CP_ACP, 0, dospath, -1, NULL, 0, NULL, NULL);
+                line->FileName = fetch_buffer(module->process, len);
+                WideCharToMultiByte(CP_ACP, 0, dospath, -1, line->FileName, len, NULL, NULL);
+                HeapFree( GetProcessHeap(), 0, dospath );
+            }
             return TRUE;
         }
     }

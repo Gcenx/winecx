@@ -445,6 +445,12 @@ static async_data_t server_async( HANDLE handle, struct async_fileio *user, HAND
     return async;
 }
 
+static NTSTATUS wait_async( HANDLE handle, BOOL alertable, IO_STATUS_BLOCK *io )
+{
+    if (NtWaitForSingleObject( handle, alertable, NULL )) return STATUS_PENDING;
+    return io->u.Status;
+}
+
 /* callback for irp async I/O completion */
 static NTSTATUS irp_completion( void *user, IO_STATUS_BLOCK *io, NTSTATUS status )
 {
@@ -608,12 +614,7 @@ static NTSTATUS server_read_file( HANDLE handle, HANDLE event, PIO_APC_ROUTINE a
 
     if (status != STATUS_PENDING) RtlFreeHeap( GetProcessHeap(), 0, async );
 
-    if (wait_handle)
-    {
-        NtWaitForSingleObject( wait_handle, (options & FILE_SYNCHRONOUS_IO_ALERT), NULL );
-        status = io->u.Status;
-    }
-
+    if (wait_handle) status = wait_async( wait_handle, (options & FILE_SYNCHRONOUS_IO_ALERT), io );
     return status;
 }
 
@@ -651,12 +652,7 @@ static NTSTATUS server_write_file( HANDLE handle, HANDLE event, PIO_APC_ROUTINE 
 
     if (status != STATUS_PENDING) RtlFreeHeap( GetProcessHeap(), 0, async );
 
-    if (wait_handle)
-    {
-        NtWaitForSingleObject( wait_handle, (options & FILE_SYNCHRONOUS_IO_ALERT), NULL );
-        status = io->u.Status;
-    }
-
+    if (wait_handle) status = wait_async( wait_handle, (options & FILE_SYNCHRONOUS_IO_ALERT), io );
     return status;
 }
 
@@ -875,7 +871,7 @@ NTSTATUS WINAPI rpc_NtReadFile(HANDLE hFile, HANDLE hEvent,
     int result, unix_handle, needs_close;
     unsigned int options;
     struct io_timeouts timeouts;
-    NTSTATUS status;
+    NTSTATUS status, ret_status;
     ULONG total = 0;
     enum server_fd_type type;
     ULONG_PTR cvalue = apc ? 0 : (ULONG_PTR)apc_user;
@@ -1063,9 +1059,11 @@ err:
         if (status != STATUS_PENDING && hEvent) NtResetEvent( hEvent, NULL );
     }
 
-    if (send_completion) NTDLL_AddCompletion( hFile, cvalue, status, total );
+    ret_status = async_read && type == FD_TYPE_FILE && status == STATUS_SUCCESS
+            ? STATUS_PENDING : status;
 
-    return status;
+    if (send_completion) NTDLL_AddCompletion( hFile, cvalue, status, total, ret_status == STATUS_PENDING );
+    return ret_status;
 }
 
 NTSTATUS WINAPI NtReadFile(HANDLE hFile, HANDLE hEvent,
@@ -1145,7 +1143,7 @@ NTSTATUS WINAPI NtReadFileScatter( HANDLE file, HANDLE event, PIO_APC_ROUTINE ap
     if (event) NtSetEvent( event, NULL );
     if (apc) NtQueueApcThread( GetCurrentThread(), (PNTAPCFUNC)apc,
                                (ULONG_PTR)apc_user, (ULONG_PTR)io_status, 0 );
-    if (send_completion) NTDLL_AddCompletion( file, cvalue, status, total );
+    if (send_completion) NTDLL_AddCompletion( file, cvalue, status, total, TRUE );
 
     return STATUS_PENDING;
 
@@ -1254,7 +1252,7 @@ NTSTATUS WINAPI NtWriteFile(HANDLE hFile, HANDLE hEvent,
     int result, unix_handle, needs_close;
     unsigned int options;
     struct io_timeouts timeouts;
-    NTSTATUS status;
+    NTSTATUS status, ret_status;
     ULONG total = 0;
     enum server_fd_type type;
     ULONG_PTR cvalue = apc ? 0 : (ULONG_PTR)apc_user;
@@ -1276,6 +1274,8 @@ NTSTATUS WINAPI NtWriteFile(HANDLE hFile, HANDLE hEvent,
     }
     if (status && status != STATUS_BAD_DEVICE_TYPE) return status;
 
+    async_write = !(options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT));
+
     if (!virtual_check_buffer_for_read( buffer, length ))
     {
         status = STATUS_INVALID_USER_BUFFER;
@@ -1284,8 +1284,6 @@ NTSTATUS WINAPI NtWriteFile(HANDLE hFile, HANDLE hEvent,
 
     if (status == STATUS_BAD_DEVICE_TYPE)
         return server_write_file( hFile, hEvent, apc, apc_user, io_status, buffer, length, offset, key );
-
-    async_write = !(options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT));
 
     if (type == FD_TYPE_FILE)
     {
@@ -1464,9 +1462,10 @@ err:
         if (status != STATUS_PENDING && hEvent) NtResetEvent( hEvent, NULL );
     }
 
-    if (send_completion) NTDLL_AddCompletion( hFile, cvalue, status, total );
+    ret_status = async_write && type == FD_TYPE_FILE && status == STATUS_SUCCESS ? STATUS_PENDING : status;
+    if (send_completion) NTDLL_AddCompletion( hFile, cvalue, status, total, ret_status == STATUS_PENDING );
 
-    return status;
+    return ret_status;
 }
 
 
@@ -1556,7 +1555,7 @@ NTSTATUS WINAPI NtWriteFileGather( HANDLE file, HANDLE event, PIO_APC_ROUTINE ap
         if (status != STATUS_PENDING && event) NtResetEvent( event, NULL );
     }
 
-    if (send_completion) NTDLL_AddCompletion( file, cvalue, status, total );
+    if (send_completion) NTDLL_AddCompletion( file, cvalue, status, total, FALSE );
 
     return status;
 }
@@ -1604,12 +1603,7 @@ static NTSTATUS server_ioctl_file( HANDLE handle, HANDLE event,
 
     if (status != STATUS_PENDING) RtlFreeHeap( GetProcessHeap(), 0, async );
 
-    if (wait_handle)
-    {
-        NtWaitForSingleObject( wait_handle, (options & FILE_SYNCHRONOUS_IO_ALERT), NULL );
-        status = io->u.Status;
-    }
-
+    if (wait_handle) status = wait_async( wait_handle, (options & FILE_SYNCHRONOUS_IO_ALERT), io );
     return status;
 }
 
@@ -1970,10 +1964,9 @@ static int futimens( int fd, const struct timespec spec[2] )
 #define UTIME_OMIT ((1 << 30) - 2)
 #endif
 
-static NTSTATUS set_file_times( int fd, const LARGE_INTEGER *mtime, const LARGE_INTEGER *atime )
+static BOOL set_file_times_precise( int fd, const LARGE_INTEGER *mtime,
+        const LARGE_INTEGER *atime, NTSTATUS *status )
 {
-    NTSTATUS status = STATUS_SUCCESS;
-
 #ifdef HAVE_FUTIMENS
     struct timespec tv[2];
 
@@ -1989,12 +1982,29 @@ static NTSTATUS set_file_times( int fd, const LARGE_INTEGER *mtime, const LARGE_
         tv[1].tv_sec = mtime->QuadPart / 10000000 - SECS_1601_TO_1970;
         tv[1].tv_nsec = (mtime->QuadPart % 10000000) * 100;
     }
-    if (futimens( fd, tv ) == -1) status = FILE_GetNtStatus();
+#ifdef __APPLE__
+    if (!&futimens) return FALSE;
+#endif
+    if (futimens( fd, tv ) == -1) *status = FILE_GetNtStatus();
+    else *status = STATUS_SUCCESS;
+    return TRUE;
+#else
+    return FALSE;
+#endif
+}
 
-#elif defined(HAVE_FUTIMES) || defined(HAVE_FUTIMESAT)
+static NTSTATUS set_file_times( int fd, const LARGE_INTEGER *mtime, const LARGE_INTEGER *atime )
+{
+    NTSTATUS status = STATUS_SUCCESS;
+#if defined(HAVE_FUTIMES) || defined(HAVE_FUTIMESAT)
     struct timeval tv[2];
     struct stat st;
+#endif
 
+    if (set_file_times_precise( fd, mtime, atime, &status ))
+        return status;
+
+#if defined(HAVE_FUTIMES) || defined(HAVE_FUTIMESAT)
     if (!atime->QuadPart || !mtime->QuadPart)
     {
 
@@ -3404,11 +3414,7 @@ NTSTATUS WINAPI NtFlushBuffersFile( HANDLE hFile, IO_STATUS_BLOCK *io )
 
         if (ret != STATUS_PENDING) RtlFreeHeap( GetProcessHeap(), 0, async );
 
-        if (wait_handle)
-        {
-            NtWaitForSingleObject( wait_handle, FALSE, NULL );
-            ret = io->u.Status;
-        }
+        if (wait_handle) ret = wait_async( wait_handle, FALSE, io );
     }
 
     if (needs_close) close( fd );
@@ -3535,12 +3541,12 @@ NTSTATUS WINAPI NtCreateNamedPipeFile( PHANDLE handle, ULONG access,
     data_size_t len;
     struct object_attributes *objattr;
 
+    if (!attr) return STATUS_INVALID_PARAMETER;
+
     TRACE("(%p %x %s %p %x %d %x %d %d %d %d %d %d %p)\n",
-          handle, access, debugstr_w(attr->ObjectName->Buffer), iosb, sharing, dispo,
+          handle, access, debugstr_us(attr->ObjectName), iosb, sharing, dispo,
           options, pipe_type, read_mode, completion_mode, max_inst, inbound_quota,
           outbound_quota, timeout);
-
-    if (!attr) return STATUS_INVALID_PARAMETER;
 
     /* assume we only get relative timeout */
     if (timeout->QuadPart > 0)

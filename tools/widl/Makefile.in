@@ -21,6 +21,8 @@ BISON_SRCS = parser.y
 
 widl_EXTRADEFS = -DDEFAULT_INCLUDE_DIR=\"${includedir}/wine/windows/\"
 
+EXTRADEFS = $(HOSTSTACK_CFLAGS)
+
 EXTRALIBS = -lwpp
 
 INSTALL_DEV = $(PROGRAMS)

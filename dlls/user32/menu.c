@@ -1874,7 +1874,7 @@ static void MENU_DrawPopupMenu( HWND hwnd, HDC hdc, HMENU hmenu )
  */
 static int MENU_get_menu_socket(void)
 {
-    char *socketname;
+    char * HOSTPTR socketname;
 
     if ((socketname = getenv("CX_MENU_SOCKET")))
     {

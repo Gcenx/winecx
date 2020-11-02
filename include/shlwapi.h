@@ -21,6 +21,8 @@
 #ifndef __WINE_SHLWAPI_H
 #define __WINE_SHLWAPI_H
 
+#include "wine/winheader_enter.h"
+
 /* FIXME: #include <specstrings.h> */
 #include <objbase.h>
 #include <shtypes.h>
@@ -30,6 +32,14 @@ extern "C" {
 #endif /* defined(__cplusplus) */
 
 #include <pshpack8.h>
+
+#ifndef NO_SHLWAPI_HTTP
+
+HRESULT WINAPI GetAcceptLanguagesA(char *buffer, DWORD *buff_len);
+HRESULT WINAPI GetAcceptLanguagesW(WCHAR *buffer, DWORD *buff_len);
+#define GetAcceptLanguages WINELIB_NAME_AW(GetAcceptLanguages)
+
+#endif /* NO_SHLWAPI_HTTP */
 
 #ifndef NO_SHLWAPI_REG
 
@@ -1130,5 +1140,7 @@ HRESULT WINAPI QISearch(void* base, const QITAB *pqit, REFIID riid, void **ppv);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_SHLWAPI_H */

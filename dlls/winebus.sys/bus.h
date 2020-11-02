@@ -19,9 +19,10 @@
 typedef int(*enum_func)(DEVICE_OBJECT *device, void *context);
 
 /* Buses */
-NTSTATUS WINAPI udev_driver_init(DRIVER_OBJECT *driver, UNICODE_STRING *registry_path) DECLSPEC_HIDDEN;
-NTSTATUS WINAPI iohid_driver_init(DRIVER_OBJECT *driver, UNICODE_STRING *registry_path) DECLSPEC_HIDDEN;
-NTSTATUS WINAPI sdl_driver_init(DRIVER_OBJECT *driver, UNICODE_STRING *registry_path) DECLSPEC_HIDDEN;
+NTSTATUS udev_driver_init(void) DECLSPEC_HIDDEN;
+NTSTATUS iohid_driver_init(void) DECLSPEC_HIDDEN;
+NTSTATUS sdl_driver_init(void) DECLSPEC_HIDDEN;
+NTSTATUS xbox_driver_init(void) DECLSPEC_HIDDEN;
 void udev_driver_unload( void ) DECLSPEC_HIDDEN;
 void iohid_driver_unload( void ) DECLSPEC_HIDDEN;
 void sdl_driver_unload( void ) DECLSPEC_HIDDEN;
@@ -29,7 +30,7 @@ void sdl_driver_unload( void ) DECLSPEC_HIDDEN;
 /* Native device function table */
 typedef struct
 {
-    int (*compare_platform_device)(DEVICE_OBJECT *device, void *platform_dev);
+    int (*compare_platform_device)(DEVICE_OBJECT *device, void * HOSTPTR platform_dev);
     NTSTATUS (*get_reportdescriptor)(DEVICE_OBJECT *device, BYTE *buffer, DWORD length, DWORD *out_length);
     NTSTATUS (*get_string)(DEVICE_OBJECT *device, DWORD index, WCHAR *buffer, DWORD length);
     NTSTATUS (*begin_report_processing)(DEVICE_OBJECT *device);
@@ -41,16 +42,17 @@ typedef struct
 void *get_platform_private(DEVICE_OBJECT *device) DECLSPEC_HIDDEN;
 
 /* HID Plug and Play Bus */
-NTSTATUS WINAPI common_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp) DECLSPEC_HIDDEN;
-DEVICE_OBJECT *bus_create_hid_device(DRIVER_OBJECT *driver, const WCHAR *busidW, WORD vid, WORD pid,
-                                     DWORD version, DWORD uid, const WCHAR *serialW, BOOL is_gamepad,
+DEVICE_OBJECT *bus_create_hid_device(const WCHAR *busidW, WORD vid, WORD pid,
+                                     WORD input, DWORD version, DWORD uid, const WCHAR *serialW, BOOL is_gamepad,
                                      const GUID *class, const platform_vtbl *vtbl, DWORD platform_data_size) DECLSPEC_HIDDEN;
-DEVICE_OBJECT *bus_find_hid_device(const platform_vtbl *vtbl, void *platform_dev) DECLSPEC_HIDDEN;
+DEVICE_OBJECT *bus_find_hid_device(const platform_vtbl *vtbl, void * HOSTPTR platform_dev) DECLSPEC_HIDDEN;
 void bus_remove_hid_device(DEVICE_OBJECT *device) DECLSPEC_HIDDEN;
-NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp) DECLSPEC_HIDDEN;
-void process_hid_report(DEVICE_OBJECT *device, BYTE *report, DWORD length) DECLSPEC_HIDDEN;
+void process_hid_report(DEVICE_OBJECT *device, BYTE * HOSTPTR report, DWORD length) DECLSPEC_HIDDEN;
 DEVICE_OBJECT* bus_enumerate_hid_devices(const platform_vtbl *vtbl, enum_func function, void* context) DECLSPEC_HIDDEN;
+DEVICE_OBJECT* find_device_by_uid(DWORD uid) DECLSPEC_HIDDEN;
 
 /* General Bus Functions */
-DWORD check_bus_option(UNICODE_STRING *registry_path, const UNICODE_STRING *option, DWORD default_value) DECLSPEC_HIDDEN;
+DWORD check_bus_option(const UNICODE_STRING *option, DWORD default_value) DECLSPEC_HIDDEN;
 BOOL is_xbox_gamepad(WORD vid, WORD pid) DECLSPEC_HIDDEN;
+
+HANDLE driver_key DECLSPEC_HIDDEN;

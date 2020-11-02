@@ -3,6 +3,9 @@
 #if you change a Nt.. function DON'T FORGET to change the
 #Zw one too.
 
+@ stdcall A_SHAFinal(ptr ptr)
+@ stdcall A_SHAInit(ptr)
+@ stdcall A_SHAUpdate(ptr ptr long)
 @ stdcall ApiSetQueryApiSetPresence(ptr ptr)
 @ stub CsrAllocateCaptureBuffer
 @ stub CsrAllocateCapturePointer
@@ -36,19 +39,28 @@
 @ stub DbgUiConvertStateChangeStructure
 # @ stub DbgUiDebugActiveProcess
 # @ stub DbgUiGetThreadDebugObject
-# @ stub DbgUiIssueRemoteBreakin
+@ stdcall DbgUiIssueRemoteBreakin(long)
 @ stdcall DbgUiRemoteBreakin(ptr)
 # @ stub DbgUiSetThreadDebugObject
 # @ stub DbgUiStopDebugging
 @ stub DbgUiWaitStateChange
 @ stdcall DbgUserBreakPoint()
+@ stdcall EtwEventActivityIdControl(long ptr)
 @ stdcall EtwEventEnabled(int64 ptr)
+@ stdcall EtwEventProviderEnabled(int64 long int64)
 @ stdcall EtwEventRegister(ptr ptr ptr ptr)
 @ stdcall EtwEventSetInformation(int64 long ptr long)
 @ stdcall EtwEventUnregister(int64)
 @ stdcall EtwEventWrite(int64 ptr long ptr)
+@ stdcall EtwEventWriteTransfer(int64 ptr ptr ptr long ptr)
+@ stdcall EtwGetTraceEnableFlags(int64)
+@ stdcall EtwGetTraceEnableLevel(int64)
+@ stdcall -ret64 EtwGetTraceLoggerHandle(ptr)
+@ stdcall EtwLogTraceEvent(int64 ptr)
 @ stdcall EtwRegisterTraceGuidsA(ptr ptr ptr long ptr str str ptr)
 @ stdcall EtwRegisterTraceGuidsW(ptr ptr ptr long ptr wstr wstr ptr)
+@ varargs EtwTraceMessage(int64 long ptr long)
+@ stdcall EtwTraceMessageVa(int64 long ptr long ptr)
 @ stdcall EtwUnregisterTraceGuids(int64)
 # @ stub KiFastSystemCall
 # @ stub KiFastSystemCallRet
@@ -95,6 +107,12 @@
 @ stdcall LdrUnlockLoaderLock(long long)
 @ stdcall LdrUnregisterDllNotification(ptr)
 @ stub LdrVerifyImageMatchesChecksum
+@ stdcall MD4Final(ptr)
+@ stdcall MD4Init(ptr)
+@ stdcall MD4Update(ptr ptr long)
+@ stdcall MD5Final(ptr)
+@ stdcall MD5Init(ptr)
+@ stdcall MD5Update(ptr ptr long)
 @ extern NlsAnsiCodePage
 @ extern NlsMbCodePageTag
 @ extern NlsMbOemCodePageTag
@@ -160,7 +178,7 @@
 @ stdcall NtCreateTimer(ptr long ptr long)
 @ stub NtCreateToken
 # @ stub NtCreateWaitablePort
-@ stdcall -arch=win32,arm64 NtCurrentTeb()
+@ stdcall -arch=win32,arm64 NtCurrentTeb() NTDLL_NtCurrentTeb
 # @ stub NtDebugActiveProcess
 # @ stub NtDebugContinue
 @ stdcall NtDelayExecution(long ptr)
@@ -301,6 +319,7 @@
 @ stdcall NtReadFileScatter(long long ptr ptr ptr ptr long ptr ptr)
 @ stub NtReadRequestData
 @ stdcall NtReadVirtualMemory(long ptr ptr long ptr)
+@ stdcall -arch=x86_32on64 wine_NtReadVirtualMemory_HOSTPTR(long int64 ptr long ptr)
 @ stub NtRegisterNewDevice
 @ stdcall NtRegisterThreadTerminatePort(ptr)
 @ stdcall NtReleaseKeyedEvent(long ptr long ptr)
@@ -526,6 +545,7 @@
 @ stdcall RtlCreateUnicodeStringFromAsciiz(ptr str)
 @ stdcall RtlCreateUserProcess(ptr long ptr ptr ptr long long long long ptr)
 @ stub RtlCreateUserSecurityObject
+@ stdcall RtlCreateUserStack(long long long long long ptr)
 @ stdcall RtlCreateUserThread(long ptr long ptr long long ptr ptr ptr ptr)
 @ stub RtlCustomCPToUnicodeN
 @ stub RtlCutoverTimeToSystemTime
@@ -542,6 +562,7 @@
 @ stdcall RtlDeleteAce(ptr long)
 @ stdcall RtlDeleteAtomFromAtomTable(ptr long)
 @ stdcall RtlDeleteCriticalSection(ptr)
+@ cdecl -arch=arm,arm64,x86_64 RtlDeleteGrowableFunctionTable(ptr)
 @ stub RtlDeleteElementGenericTable
 @ stub RtlDeleteElementGenericTableAvl
 @ cdecl -arch=arm,arm64,x86_64 RtlDeleteFunctionTable(ptr)
@@ -643,7 +664,7 @@
 @ stdcall RtlFreeSid (ptr)
 @ stdcall RtlFreeThreadActivationContextStack()
 @ stdcall RtlFreeUnicodeString(ptr)
-@ stub RtlFreeUserThreadStack
+@ stdcall RtlFreeUserStack(ptr)
 @ stdcall RtlGUIDFromString(ptr ptr)
 @ stub RtlGenerate8dot3Name
 @ stdcall RtlGetAce(ptr long ptr)
@@ -679,6 +700,7 @@
 @ stdcall RtlGetSaclSecurityDescriptor(ptr ptr ptr ptr)
 # @ stub RtlGetSecurityDescriptorRMControl
 # @ stub RtlGetSetBootStatusData
+@ stdcall -ret64 RtlGetSystemTimePrecise()
 @ stdcall RtlGetThreadErrorMode()
 @ stdcall RtlGetUnloadEventTrace()
 @ stdcall RtlGetUnloadEventTraceEx(ptr ptr ptr)
@@ -721,7 +743,7 @@
 # @ stub RtlInitializeStackTraceDataBase
 @ stub RtlInsertElementGenericTable
 @ stdcall RtlInsertElementGenericTableAvl(ptr ptr long ptr)
-@ cdecl -arch=x86_64 RtlInstallFunctionTableCallback(long long long ptr ptr wstr)
+@ cdecl -arch=arm,arm64,x86_64 RtlInstallFunctionTableCallback(long long long ptr ptr wstr)
 @ stdcall RtlInt64ToUnicodeString(int64 long ptr)
 @ stdcall RtlIntegerToChar(long long long ptr)
 @ stdcall RtlIntegerToUnicodeString(long long ptr)
@@ -729,7 +751,7 @@
 @ stdcall RtlInterlockedFlushSList(ptr)
 @ stdcall RtlInterlockedPopEntrySList(ptr)
 @ stdcall RtlInterlockedPushEntrySList(ptr ptr)
-@ stdcall -norelay RtlInterlockedPushListSList(ptr ptr ptr long)
+@ stdcall -fastcall RtlInterlockedPushListSList(ptr ptr ptr long)
 @ stdcall RtlInterlockedPushListSListEx(ptr ptr ptr long)
 # @ stub RtlInvertRangeList
 @ stdcall RtlIpv4AddressToStringA(ptr ptr)
@@ -755,6 +777,7 @@
 @ stub RtlIsGenericTableEmpty
 # @ stub RtlIsGenericTableEmptyAvl
 @ stdcall RtlIsNameLegalDOS8Dot3(ptr ptr ptr)
+@ stdcall RtlIsProcessorFeaturePresent(long)
 # @ stub RtlIsRangeAvailable
 @ stdcall RtlIsTextUnicode(ptr long ptr)
 # @ stub RtlIsThreadWithinLoaderCallout
@@ -1355,10 +1378,10 @@
 @ cdecl -private -arch=i386 _CIsqrt() NTDLL__CIsqrt
 @ stdcall -arch=x86_64 __C_specific_handler(ptr long ptr ptr)
 @ stdcall -private -arch=arm,x86_64 -norelay __chkstk()
-@ cdecl -private __isascii(long) NTDLL___isascii
-@ cdecl -private __iscsym(long) NTDLL___iscsym
-@ cdecl -private __iscsymf(long) NTDLL___iscsymf
-@ cdecl -private __toascii(long) NTDLL___toascii
+@ cdecl __isascii(long) NTDLL___isascii
+@ cdecl __iscsym(long) NTDLL___iscsym
+@ cdecl __iscsymf(long) NTDLL___iscsymf
+@ cdecl __toascii(long) NTDLL___toascii
 @ stdcall -arch=i386 -ret64 _alldiv(int64 int64)
 @ stdcall -arch=i386 -norelay _alldvrm(int64 int64)
 @ stdcall -arch=i386 -ret64 _allmul(int64 int64)
@@ -1366,129 +1389,131 @@
 @ stdcall -arch=i386 -ret64 _allrem(int64 int64)
 @ stdcall -arch=i386 -ret64 _allshl(int64 long)
 @ stdcall -arch=i386 -ret64 _allshr(int64 long)
-@ cdecl -private -ret64 _atoi64(str)
+@ cdecl -ret64 _atoi64(str)
 @ stdcall -arch=i386 -ret64 _aulldiv(int64 int64)
 @ stdcall -arch=i386 -norelay _aulldvrm(int64 int64)
 @ stdcall -arch=i386 -ret64 _aullrem(int64 int64)
 @ stdcall -arch=i386 -ret64 _aullshr(int64 long)
 @ stdcall -private -arch=i386 -norelay _chkstk()
 @ stub _fltused
-@ cdecl -private -arch=i386 -ret64 _ftol() NTDLL__ftol
-@ cdecl -private _i64toa(int64 ptr long)
-@ cdecl -private _i64tow(int64 ptr long)
-@ cdecl -private _itoa(long ptr long)
-@ cdecl -private _itow(long ptr long)
-@ cdecl -private _lfind(ptr ptr ptr long ptr)
+@ cdecl -arch=i386 -ret64 _ftol() NTDLL__ftol
+@ cdecl _i64toa(int64 ptr long)
+@ cdecl _i64tow(int64 ptr long)
+@ cdecl _itoa(long ptr long)
+@ cdecl _itow(long ptr long)
+@ cdecl _lfind(ptr ptr ptr long ptr)
 @ stdcall -arch=x86_64 _local_unwind(ptr ptr)
-@ cdecl -private _ltoa(long ptr long)
-@ cdecl -private _ltow(long ptr long)
-@ cdecl -private _memccpy(ptr ptr long long)
-@ cdecl -private _memicmp(str str long)
-@ varargs -private _snprintf(ptr long str) NTDLL__snprintf
-@ varargs -private _snwprintf(ptr long wstr) NTDLL__snwprintf
-@ cdecl -private _splitpath(str ptr ptr ptr ptr)
-@ cdecl -private _strcmpi(str str) _stricmp
-@ cdecl -private _stricmp(str str)
-@ cdecl -private _strlwr(str)
-@ cdecl -private _strnicmp(str str long)
-@ cdecl -private _strupr(str)
-@ cdecl -private _tolower(long) NTDLL__tolower
-@ cdecl -private _toupper(long) NTDLL__toupper
-@ cdecl -private _ui64toa(int64 ptr long)
-@ cdecl -private _ui64tow(int64 ptr long)
-@ cdecl -private _ultoa(long ptr long)
-@ cdecl -private _ultow(long ptr long)
-@ cdecl -private _vsnprintf(ptr long str ptr) NTDLL__vsnprintf
-@ cdecl -private _vsnwprintf(ptr long wstr ptr) NTDLL__vsnwprintf
-@ cdecl -private _wcsicmp(wstr wstr) NTDLL__wcsicmp
-@ cdecl -private _wcslwr(wstr) NTDLL__wcslwr
-@ cdecl -private _wcsnicmp(wstr wstr long) NTDLL__wcsnicmp
-@ cdecl -private _wcsupr(wstr) NTDLL__wcsupr
-@ cdecl -private _wtoi(wstr)
-@ cdecl -private -ret64 _wtoi64(wstr)
-@ cdecl -private _wtol(wstr)
-@ cdecl -private abs(long) NTDLL_abs
-@ cdecl -private atan(double) NTDLL_atan
-@ cdecl -private atoi(str) NTDLL_atoi
-@ cdecl -private atol(str) NTDLL_atol
-@ cdecl -private bsearch(ptr ptr long long ptr) NTDLL_bsearch
-@ cdecl -private ceil(double) NTDLL_ceil
-@ cdecl -private cos(double) NTDLL_cos
-@ cdecl -private fabs(double) NTDLL_fabs
-@ cdecl -private floor(double) NTDLL_floor
-@ cdecl -private isalnum(long) NTDLL_isalnum
-@ cdecl -private isalpha(long) NTDLL_isalpha
-@ cdecl -private iscntrl(long) NTDLL_iscntrl
-@ cdecl -private isdigit(long) NTDLL_isdigit
-@ cdecl -private isgraph(long) NTDLL_isgraph
-@ cdecl -private islower(long) NTDLL_islower
-@ cdecl -private isprint(long) NTDLL_isprint
-@ cdecl -private ispunct(long) NTDLL_ispunct
-@ cdecl -private isspace(long) NTDLL_isspace
-@ cdecl -private isupper(long) NTDLL_isupper
-@ cdecl -private iswalpha(long) NTDLL_iswalpha
-@ cdecl -private iswctype(long long) NTDLL_iswctype
-@ cdecl -private iswdigit(long) NTDLL_iswdigit
-@ cdecl -private iswlower(long) NTDLL_iswlower
-@ cdecl -private iswspace(long) NTDLL_iswspace
-@ cdecl -private iswxdigit(long) NTDLL_iswxdigit
-@ cdecl -private isxdigit(long) NTDLL_isxdigit
-@ cdecl -private labs(long) NTDLL_labs
-@ cdecl -private log(double) NTDLL_log
-@ cdecl -private mbstowcs(ptr str long) NTDLL_mbstowcs
-@ cdecl -private memchr(ptr long long) NTDLL_memchr
-@ cdecl -private memcmp(ptr ptr long) NTDLL_memcmp
-@ cdecl -private memcpy(ptr ptr long) NTDLL_memcpy
-@ cdecl -private memmove(ptr ptr long) NTDLL_memmove
-@ cdecl -private memset(ptr long long) NTDLL_memset
-@ cdecl -private pow(double double) NTDLL_pow
-@ cdecl -private qsort(ptr long long ptr) NTDLL_qsort
-@ cdecl -private sin(double) NTDLL_sin
-@ varargs -private sprintf(ptr str) NTDLL_sprintf
-@ cdecl -private sqrt(double) NTDLL_sqrt
-@ varargs -private sscanf(str str) NTDLL_sscanf
-@ cdecl -private strcat(str str) NTDLL_strcat
-@ cdecl -private strchr(str long) NTDLL_strchr
-@ cdecl -private strcmp(str str) NTDLL_strcmp
-@ cdecl -private strcpy(ptr str) NTDLL_strcpy
-@ cdecl -private strcspn(str str) NTDLL_strcspn
-@ cdecl -private strlen(str) NTDLL_strlen
-@ cdecl -private strncat(str str long) NTDLL_strncat
-@ cdecl -private strncmp(str str long) NTDLL_strncmp
-@ cdecl -private strncpy(ptr str long) NTDLL_strncpy
-@ cdecl -private strnlen(ptr long) NTDLL_strnlen
-@ cdecl -private strpbrk(str str) NTDLL_strpbrk
-@ cdecl -private strrchr(str long) NTDLL_strrchr
-@ cdecl -private strspn(str str) NTDLL_strspn
-@ cdecl -private strstr(str str) NTDLL_strstr
-@ cdecl -private strtol(str ptr long) NTDLL_strtol
-@ cdecl -private strtoul(str ptr long) NTDLL_strtoul
-@ varargs -private swprintf(ptr wstr) NTDLL_swprintf
-@ cdecl -private tan(double) NTDLL_tan
-@ cdecl -private tolower(long) NTDLL_tolower
-@ cdecl -private toupper(long) NTDLL_toupper
-@ cdecl -private towlower(long) NTDLL_towlower
-@ cdecl -private towupper(long) NTDLL_towupper
+@ cdecl _ltoa(long ptr long)
+@ cdecl _ltow(long ptr long)
+@ cdecl _memccpy(ptr ptr long long)
+@ cdecl _memicmp(str str long)
+@ varargs _snprintf(ptr long str) NTDLL__snprintf
+@ varargs _snprintf_s(ptr long long str) _snprintf_s
+@ varargs _snwprintf(ptr long wstr) NTDLL__snwprintf
+@ cdecl _splitpath(str ptr ptr ptr ptr)
+@ cdecl _strcmpi(str str) _stricmp
+@ cdecl _stricmp(str str)
+@ cdecl _strlwr(str)
+@ cdecl _strnicmp(str str long)
+@ cdecl _strupr(str)
+@ cdecl _tolower(long) NTDLL__tolower
+@ cdecl _toupper(long) NTDLL__toupper
+@ cdecl _ui64toa(int64 ptr long)
+@ cdecl _ui64tow(int64 ptr long)
+@ cdecl _ultoa(long ptr long)
+@ cdecl _ultow(long ptr long)
+@ cdecl -norelay _vsnprintf(ptr long str ptr) NTDLL__vsnprintf
+@ cdecl _vsnprintf_s(ptr long str ptr) _vsnprintf_s
+@ cdecl _vsnwprintf(ptr long wstr ptr) NTDLL__vsnwprintf
+@ cdecl _wcsicmp(wstr wstr) NTDLL__wcsicmp
+@ cdecl _wcslwr(wstr) NTDLL__wcslwr
+@ cdecl _wcsnicmp(wstr wstr long) NTDLL__wcsnicmp
+@ cdecl _wcsupr(wstr) NTDLL__wcsupr
+@ cdecl _wtoi(wstr)
+@ cdecl -ret64 _wtoi64(wstr)
+@ cdecl _wtol(wstr)
+@ cdecl abs(long) NTDLL_abs
+@ cdecl atan(double) NTDLL_atan
+@ cdecl atoi(str) NTDLL_atoi
+@ cdecl atol(str) NTDLL_atol
+@ cdecl bsearch(ptr ptr long long ptr) NTDLL_bsearch
+@ cdecl ceil(double) NTDLL_ceil
+@ cdecl cos(double) NTDLL_cos
+@ cdecl fabs(double) NTDLL_fabs
+@ cdecl floor(double) NTDLL_floor
+@ cdecl isalnum(long) NTDLL_isalnum
+@ cdecl isalpha(long) NTDLL_isalpha
+@ cdecl iscntrl(long) NTDLL_iscntrl
+@ cdecl isdigit(long) NTDLL_isdigit
+@ cdecl isgraph(long) NTDLL_isgraph
+@ cdecl islower(long) NTDLL_islower
+@ cdecl isprint(long) NTDLL_isprint
+@ cdecl ispunct(long) NTDLL_ispunct
+@ cdecl isspace(long) NTDLL_isspace
+@ cdecl isupper(long) NTDLL_isupper
+@ cdecl iswalpha(long) NTDLL_iswalpha
+@ cdecl iswctype(long long) NTDLL_iswctype
+@ cdecl iswdigit(long) NTDLL_iswdigit
+@ cdecl iswlower(long) NTDLL_iswlower
+@ cdecl iswspace(long) NTDLL_iswspace
+@ cdecl iswxdigit(long) NTDLL_iswxdigit
+@ cdecl isxdigit(long) NTDLL_isxdigit
+@ cdecl labs(long) NTDLL_labs
+@ cdecl log(double) NTDLL_log
+@ cdecl mbstowcs(ptr str long) NTDLL_mbstowcs
+@ cdecl memchr(ptr long long) NTDLL_memchr
+@ cdecl memcmp(ptr ptr long) NTDLL_memcmp
+@ cdecl memcpy(ptr ptr long) NTDLL_memcpy
+@ cdecl memmove(ptr ptr long) NTDLL_memmove
+@ cdecl memset(ptr long long) NTDLL_memset
+@ cdecl pow(double double) NTDLL_pow
+@ cdecl qsort(ptr long long ptr) NTDLL_qsort
+@ cdecl sin(double) NTDLL_sin
+@ varargs sprintf(ptr str) NTDLL_sprintf
+@ cdecl sqrt(double) NTDLL_sqrt
+@ varargs sscanf(str str) NTDLL_sscanf
+@ cdecl strcat(str str) NTDLL_strcat
+@ cdecl strchr(str long) NTDLL_strchr
+@ cdecl strcmp(str str) NTDLL_strcmp
+@ cdecl strcpy(ptr str) NTDLL_strcpy
+@ cdecl strcspn(str str) NTDLL_strcspn
+@ cdecl strlen(str) NTDLL_strlen
+@ cdecl strncat(str str long) NTDLL_strncat
+@ cdecl strncmp(str str long) NTDLL_strncmp
+@ cdecl strncpy(ptr str long) NTDLL_strncpy
+@ cdecl strnlen(ptr long) NTDLL_strnlen
+@ cdecl strpbrk(str str) NTDLL_strpbrk
+@ cdecl strrchr(str long) NTDLL_strrchr
+@ cdecl strspn(str str) NTDLL_strspn
+@ cdecl strstr(str str) NTDLL_strstr
+@ cdecl strtol(str ptr long) NTDLL_strtol
+@ cdecl strtoul(str ptr long) NTDLL_strtoul
+@ varargs swprintf(ptr wstr) NTDLL_swprintf
+@ cdecl tan(double) NTDLL_tan
+@ cdecl tolower(long) NTDLL_tolower
+@ cdecl toupper(long) NTDLL_toupper
+@ cdecl towlower(long) NTDLL_towlower
+@ cdecl towupper(long) NTDLL_towupper
 @ stdcall vDbgPrintEx(long long str ptr)
 @ stdcall vDbgPrintExWithPrefix(str long long str ptr)
-@ cdecl -private vsprintf(ptr str ptr) NTDLL_vsprintf
-@ cdecl -private wcscat(wstr wstr) NTDLL_wcscat
-@ cdecl -private wcschr(wstr long) NTDLL_wcschr
-@ cdecl -private wcscmp(wstr wstr) NTDLL_wcscmp
-@ cdecl -private wcscpy(ptr wstr) NTDLL_wcscpy
-@ cdecl -private wcscspn(wstr wstr) NTDLL_wcscspn
-@ cdecl -private wcslen(wstr) NTDLL_wcslen
-@ cdecl -private wcsncat(wstr wstr long) NTDLL_wcsncat
-@ cdecl -private wcsncmp(wstr wstr long) NTDLL_wcsncmp
-@ cdecl -private wcsncpy(ptr wstr long) NTDLL_wcsncpy
-@ cdecl -private wcspbrk(wstr wstr) NTDLL_wcspbrk
-@ cdecl -private wcsrchr(wstr long) NTDLL_wcsrchr
-@ cdecl -private wcsspn(wstr wstr) NTDLL_wcsspn
-@ cdecl -private wcsstr(wstr wstr) NTDLL_wcsstr
-@ cdecl -private wcstok(wstr wstr) NTDLL_wcstok
-@ cdecl -private wcstol(wstr ptr long) NTDLL_wcstol
-@ cdecl -private wcstombs(ptr ptr long) NTDLL_wcstombs
-@ cdecl -private wcstoul(wstr ptr long) NTDLL_wcstoul
+@ cdecl vsprintf(ptr str ptr) NTDLL_vsprintf
+@ cdecl wcscat(wstr wstr) NTDLL_wcscat
+@ cdecl wcschr(wstr long) NTDLL_wcschr
+@ cdecl wcscmp(wstr wstr) NTDLL_wcscmp
+@ cdecl wcscpy(ptr wstr) NTDLL_wcscpy
+@ cdecl wcscspn(wstr wstr) NTDLL_wcscspn
+@ cdecl wcslen(wstr) NTDLL_wcslen
+@ cdecl wcsncat(wstr wstr long) NTDLL_wcsncat
+@ cdecl wcsncmp(wstr wstr long) NTDLL_wcsncmp
+@ cdecl wcsncpy(ptr wstr long) NTDLL_wcsncpy
+@ cdecl wcspbrk(wstr wstr) NTDLL_wcspbrk
+@ cdecl wcsrchr(wstr long) NTDLL_wcsrchr
+@ cdecl wcsspn(wstr wstr) NTDLL_wcsspn
+@ cdecl wcsstr(wstr wstr) NTDLL_wcsstr
+@ cdecl wcstok(wstr wstr) NTDLL_wcstok
+@ cdecl wcstol(wstr ptr long) NTDLL_wcstol
+@ cdecl wcstombs(ptr ptr long) NTDLL_wcstombs
+@ cdecl wcstoul(wstr ptr long) NTDLL_wcstoul
 
 ##################
 # Wine extensions
@@ -1504,8 +1529,16 @@
 @ cdecl wine_server_send_fd(long)
 @ cdecl __wine_make_process_system()
 
-# Loader
-@ cdecl __wine_ldr_start_process(ptr)
+# Debugging
+@ cdecl -norelay __wine_dbg_get_channel_flags(ptr)
+@ cdecl -norelay __wine_dbg_header(long long str)
+@ cdecl -norelay __wine_dbg_output(str)
+@ cdecl -norelay __wine_dbg_strdup(str)
+
+@ cdecl -norelay -arch=x86_32on64 __wine_dbg_get_channel_flags_HOSTPTR(int64)
+@ cdecl -norelay -arch=x86_32on64 __wine_dbg_header_HOSTPTR(long int64 int64)
+@ cdecl -norelay -arch=x86_32on64 __wine_dbg_output_HOSTPTR(int64)
+@ cdecl -norelay -arch=x86_32on64 -ret64 __wine_dbg_strdup_HOSTPTR(int64)
 
 # Virtual memory
 @ cdecl __wine_locked_recvmsg(long ptr long)
@@ -1525,8 +1558,14 @@
 @ cdecl wine_nt_to_unix_file_name(ptr ptr long long)
 @ cdecl wine_unix_to_nt_file_name(ptr ptr)
 
+# User shared data
+@ cdecl __wine_user_shared_data()
+
 # hack
 @ stdcall rpc_NtReadFile(long long ptr ptr ptr ptr long ptr ptr)
 
-# User shared data
-@ cdecl __wine_user_shared_data()
+# Loader
+@ cdecl -arch=x86_32on64 __wine_get_extra_proc(ptr ptr)
+@ cdecl -arch=x86_32on64 __wine_is_module_hybrid(ptr)
+
+@ cdecl -arch=x86_32on64 wine_strnicmp_HOSTPTR(int64 int64 long)

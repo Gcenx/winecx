@@ -31,7 +31,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
-#ifdef HAVE_PNG_H
+#ifdef SONAME_LIBPNG
 #include <png.h>
 #endif
 
@@ -146,8 +146,8 @@ static struct {
 static const char *soname_libpng;
 static const char *libpng_ver_string;
 
-static void *libpng_handle;
-#define MAKE_FUNCPTR(f) static typeof(f) * p##f
+static void * HOSTPTR libpng_handle;
+#define MAKE_FUNCPTR(f) static typeof(f) * HOSTPTR p##f
 MAKE_FUNCPTR(png_create_read_struct);
 MAKE_FUNCPTR(png_create_info_struct);
 MAKE_FUNCPTR(png_destroy_read_struct);
@@ -242,7 +242,7 @@ struct png_wrapper
 
 static void user_read_data(png_structp png_ptr, png_bytep data, png_size_t length)
 {
-    struct png_wrapper *png = ppng_get_io_ptr(png_ptr);
+    struct png_wrapper * HOSTPTR png = ppng_get_io_ptr(png_ptr);
 
     if (png->size - png->pos >= length)
     {
@@ -300,7 +300,7 @@ static BITMAPINFO *load_png(const char *png_data, DWORD *size)
     struct png_wrapper png;
     png_structp png_ptr;
     png_infop info_ptr;
-    png_bytep *row_pointers = NULL;
+    png_bytep * WIN32PTR row_pointers = NULL;
     jmp_buf jmpbuf;
     int color_type, bit_depth, bpp, width, height;
     int rowbytes, image_size, mask_size = 0, i;
@@ -3010,6 +3010,8 @@ static HBITMAP BITMAP_Load( HINSTANCE instance, LPCWSTR name,
     }
 
     orig_bm = SelectObject(screen_mem_dc, hbitmap);
+    if (info->bmiHeader.biBitCount > 1)
+        SetStretchBltMode(screen_mem_dc, HALFTONE);
     StretchDIBits(screen_mem_dc, 0, 0, new_width, new_height, 0, 0, width, height, bits, fix_info, DIB_RGB_COLORS, SRCCOPY);
     SelectObject(screen_mem_dc, orig_bm);
 
@@ -3251,6 +3253,8 @@ HANDLE WINAPI CopyImage( HANDLE hnd, UINT type, INT desiredx,
                     void * bits;
 
                     dc = CreateCompatibleDC(NULL);
+                    if (ds.dsBm.bmBitsPixel > 1)
+                        SetStretchBltMode(dc, HALFTONE);
 
                     bi->bmiHeader.biWidth = ds.dsBm.bmWidth;
                     bi->bmiHeader.biHeight = ds.dsBm.bmHeight;

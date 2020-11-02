@@ -165,9 +165,9 @@
 #include "pidl.h"
 #include "debughlp.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(shell);
-
 #if !defined(__MINGW32__) && !defined(_MSC_VER)
+
+WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
 #define LEN_SHITEMID_FIXED_PART ((USHORT) \
     ( sizeof(USHORT)      /* SHITEMID's cb field. */ \
@@ -404,7 +404,7 @@ static BOOL UNIXFS_get_unix_path(LPCWSTR pszDosPath, char *pszCanonicalPath)
     pszUnixPath = wine_get_unix_file_name(wszDrive);
     if (!pszUnixPath) return FALSE;
     cDriveSymlinkLen = strlen(pszUnixPath);
-    pElement = realpath(pszUnixPath, szPath);
+    pElement = ADDRSPACECAST(char *, realpath(pszUnixPath, szPath));
     heap_free(pszUnixPath);
     if (!pElement) return FALSE;
     if (szPath[strlen(szPath)-1] != '/') strcat(szPath, "/");
@@ -2450,7 +2450,7 @@ static HRESULT WINAPI UnixSubFolderIterator_IEnumIDList_Next(IEnumIDList* iface,
             /* Temporarily build absolute path in This->m_szFolder. Then construct a pidl
              * and see if it passes the filter. 
              */
-            lstrcpyA(pszRelativePath, pDirEntry->d_name);
+            strcpy(pszRelativePath, pDirEntry->d_name);
             rgelt[i] = SHAlloc(
                 UNIXFS_shitemid_len_from_filename(pszRelativePath, NULL, NULL)+sizeof(USHORT));
             if (!UNIXFS_build_shitemid(This->m_szFolder, TRUE, NULL, rgelt[i]) ||

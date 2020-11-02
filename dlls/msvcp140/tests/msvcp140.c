@@ -176,7 +176,9 @@ static void (__cdecl *p__Release_chore)(_Threadpool_chore*);
 static void (__cdecl *p_Close_dir)(void*);
 static MSVCP_bool (__cdecl *p_Current_get)(WCHAR *);
 static MSVCP_bool (__cdecl *p_Current_set)(WCHAR const *);
+static int (__cdecl *p_Equivalent)(WCHAR const*, WCHAR const*);
 static ULONGLONG (__cdecl *p_File_size)(WCHAR const *);
+static int (__cdecl *p_Resize)(const WCHAR *, UINT64);
 static __int64 (__cdecl *p_Last_write_time)(WCHAR const*);
 static void (__cdecl *p_Set_last_write_time)(WCHAR const*, __int64);
 static int (__cdecl *p_Link)(WCHAR const*, WCHAR const*);
@@ -267,7 +269,9 @@ static BOOL init(void)
     SET(p_Close_dir, "_Close_dir");
     SET(p_Current_get, "_Current_get");
     SET(p_Current_set, "_Current_set");
+    SET(p_Equivalent, "_Equivalent");
     SET(p_File_size, "_File_size");
+    SET(p_Resize, "_Resize");
     SET(p_Last_write_time, "_Last_write_time");
     SET(p_Set_last_write_time, "_Set_last_write_time");
     SET(p_Link, "_Link");
@@ -655,9 +659,8 @@ static void test_File_size(void)
     WCHAR test_dir_W[] = {'w','i','n','e','_','t','e','s','t','_','d','i','r',0};
     WCHAR test_ne_W[] = {'w','i','n','e','_','t','e','s','t','_','d','i','r','/','n','e',0};
     WCHAR temp_path[MAX_PATH], origin_path[MAX_PATH];
+    int r;
 
-    memset(origin_path, 0, sizeof(origin_path));
-    memset(origin_path, 0, sizeof(temp_path));
     GetCurrentDirectoryW(MAX_PATH, origin_path);
     GetTempPathW(MAX_PATH, temp_path);
     ok(SetCurrentDirectoryW(temp_path), "SetCurrentDirectoryW to temp_path failed\n");
@@ -692,7 +695,26 @@ static void test_File_size(void)
     ok(val == ~(ULONGLONG)0, "file_size is %s\n", wine_dbgstr_longlong(val));
     ok(errno == 0xdeadbeef, "errno = %d\n", errno);
 
+    r = p_Resize(test_f1_W, 1000);
+    ok(!r, "p_Resize returned %d\n", r);
+    val = p_File_size(test_f1_W);
+    ok(val == 1000, "file_size is %s\n", wine_dbgstr_longlong(val));
+
+    r = p_Resize(test_f1_W, 100);
+    ok(!r, "p_Resize returned %d\n", r);
+    val = p_File_size(test_f1_W);
+    ok(val == 100, "file_size is %s\n", wine_dbgstr_longlong(val));
+
+    r = p_Resize(test_f1_W, 0);
+    ok(!r, "p_Resize returned %d\n", r);
+    val = p_File_size(test_f1_W);
+    ok(val == 0, "file_size is %s\n", wine_dbgstr_longlong(val));
+
     ok(DeleteFileW(test_f1_W), "expect wine_test_dir/f1 to exist\n");
+
+    r = p_Resize(test_f1_W, 0);
+    ok(r == ERROR_FILE_NOT_FOUND, "p_Resize returned %d\n", r);
+
     ok(DeleteFileW(test_f2_W), "expect wine_test_dir/f2 to exist\n");
     ok(RemoveDirectoryW(test_dir_W), "expect wine_test_dir to exist\n");
     ok(SetCurrentDirectoryW(origin_path), "SetCurrentDirectoryW to origin_path failed\n");
@@ -700,23 +722,21 @@ static void test_File_size(void)
 
 static void test_Current_get(void)
 {
+    static const WCHAR backslashW[] = {'\\',0};
     WCHAR temp_path[MAX_PATH], current_path[MAX_PATH], origin_path[MAX_PATH];
     BOOL ret;
-    memset(origin_path, 0, sizeof(origin_path));
+
     GetCurrentDirectoryW(MAX_PATH, origin_path);
-    memset(temp_path, 0, sizeof(temp_path));
     GetTempPathW(MAX_PATH, temp_path);
 
     ok(SetCurrentDirectoryW(temp_path), "SetCurrentDirectoryW to temp_path failed\n");
-    memset(current_path, 0, sizeof(current_path));
     ret = p_Current_get(current_path);
     ok(ret == TRUE, "p_Current_get returned %u\n", ret);
-    current_path[wcslen(current_path)] = '\\';
+    wcscat(current_path, backslashW);
     ok(!wcscmp(temp_path, current_path), "p_Current_get(): expect: %s, got %s\n",
             wine_dbgstr_w(temp_path), wine_dbgstr_w(current_path));
 
     ok(SetCurrentDirectoryW(origin_path), "SetCurrentDirectoryW to origin_path failed\n");
-    memset(current_path, 0, sizeof(current_path));
     ret = p_Current_get(current_path);
     ok(ret == TRUE, "p_Current_get returned %u\n", ret);
     ok(!wcscmp(origin_path, current_path), "p_Current_get(): expect: %s, got %s\n",
@@ -727,27 +747,25 @@ static void test_Current_set(void)
 {
     WCHAR temp_path[MAX_PATH], current_path[MAX_PATH], origin_path[MAX_PATH];
     MSVCP_bool ret;
-    WCHAR testW[] = {'.','/',0};
-    WCHAR not_exit_dirW[] = {'n', 'o', 't', '_', 'e', 'x', 'i', 's', 't', '_', 'd', 'i', 'r', 0};
-    WCHAR invalid_nameW[] = {'?', '?', 'i', 'n', 'v', 'a', 'l', 'i', 'd', '_', 'n', 'a', 'm', 'e', '>', '>', 0};
-    memset(temp_path, 0, sizeof(temp_path));
+    static const WCHAR backslashW[] = {'\\',0};
+    static const WCHAR testW[] = {'.','/',0};
+    static const WCHAR not_exit_dirW[] = {'n', 'o', 't', '_', 'e', 'x', 'i', 's', 't', '_', 'd', 'i', 'r', 0};
+    static const WCHAR invalid_nameW[] = {'?', '?', 'i', 'n', 'v', 'a', 'l', 'i', 'd', '_', 'n', 'a', 'm', 'e', '>', '>', 0};
+
     GetTempPathW(MAX_PATH, temp_path);
-    memset(origin_path, 0, sizeof(origin_path));
     GetCurrentDirectoryW(MAX_PATH, origin_path);
 
     ok(p_Current_set(temp_path), "p_Current_set to temp_path failed\n");
-    memset(current_path, 0, sizeof(current_path));
     ret = p_Current_get(current_path);
     ok(ret == TRUE, "p_Current_get returned %u\n", ret);
-    current_path[wcslen(current_path)] = '\\';
+    wcscat(current_path, backslashW);
     ok(!wcscmp(temp_path, current_path), "p_Current_get(): expect: %s, got %s\n",
             wine_dbgstr_w(temp_path), wine_dbgstr_w(current_path));
 
     ok(p_Current_set(testW), "p_Current_set to temp_path failed\n");
-    memset(current_path, 0, sizeof(current_path));
     ret = p_Current_get(current_path);
     ok(ret == TRUE, "p_Current_get returned %u\n", ret);
-    current_path[wcslen(current_path)] = '\\';
+    wcscat(current_path, backslashW);
     ok(!wcscmp(temp_path, current_path), "p_Current_get(): expect: %s, got %s\n",
             wine_dbgstr_w(temp_path), wine_dbgstr_w(current_path));
 
@@ -760,7 +778,6 @@ static void test_Current_set(void)
     ok(errno == 0xdeadbeef, "errno = %d\n", errno);
 
     ok(p_Current_set(origin_path), "p_Current_set to origin_path failed\n");
-    memset(current_path, 0, sizeof(current_path));
     ret = p_Current_get(current_path);
     ok(ret == TRUE, "p_Current_get returned %u\n", ret);
     ok(!wcscmp(origin_path, current_path), "p_Current_get(): expect: %s, got %s\n",
@@ -797,8 +814,6 @@ static void test_Stat(void)
         { test_dir_linkW, directory_file, 0777, TRUE },
     };
 
-    memset(origin_path, 0, sizeof(origin_path));
-    memset(origin_path, 0, sizeof(temp_path));
     GetCurrentDirectoryW(MAX_PATH, origin_path);
     GetTempPathW(MAX_PATH, temp_path);
     ok(SetCurrentDirectoryW(temp_path), "SetCurrentDirectoryW to temp_path failed\n");
@@ -912,8 +927,6 @@ static void test_dir_operation(void)
     WCHAR not_existW[] = {'n','o','t','_','e','x','i','s','t',0};
     WCHAR empty_dirW[] = {'e','m','p','t','y','_','d','i','r',0};
 
-    memset(origin_path, 0, sizeof(origin_path));
-    memset(origin_path, 0, sizeof(temp_path));
     GetCurrentDirectoryW(MAX_PATH, origin_path);
     GetTempPathW(MAX_PATH, temp_path);
     ok(SetCurrentDirectoryW(temp_path), "SetCurrentDirectoryW to temp_path failed\n");
@@ -936,7 +949,7 @@ static void test_dir_operation(void)
     wcscat(longer_path, backslashW);
     while(lstrlenW(longer_path) < MAX_PATH-1)
         wcscat(longer_path, sW);
-    memset(first_file_name, 0, sizeof(first_file_name));
+    memset(first_file_name, 0xff, sizeof(first_file_name));
     type = err =  0xdeadbeef;
     result_handle = NULL;
     result_handle = p_Open_dir(first_file_name, longer_path, &err, &type);
@@ -945,7 +958,7 @@ static void test_dir_operation(void)
     ok(err == ERROR_BAD_PATHNAME, "_Open_dir(): expect: ERROR_BAD_PATHNAME, got %d\n", err);
     ok((int)type == 0xdeadbeef, "_Open_dir(): expect 0xdeadbeef, got %d\n", type);
 
-    memset(first_file_name, 0, sizeof(first_file_name));
+    memset(first_file_name, 0xff, sizeof(first_file_name));
     memset(dest, 0, sizeof(dest));
     err = type = 0xdeadbeef;
     result_handle = NULL;
@@ -976,17 +989,17 @@ static void test_dir_operation(void)
     ok(num_of_sub_dir == 1, "found sub_dir %d times\n", num_of_sub_dir);
     ok(num_of_other_files == 0, "found %d other files\n", num_of_other_files);
 
-    memset(first_file_name, 0, sizeof(first_file_name));
+    memset(first_file_name, 0xff, sizeof(first_file_name));
     err = type = 0xdeadbeef;
     result_handle = file;
     result_handle = p_Open_dir(first_file_name, not_existW, &err, &type);
     ok(result_handle == NULL, "_Open_dir(): expect: NULL, got %p\n", result_handle);
-    todo_wine ok(err == ERROR_BAD_PATHNAME, "_Open_dir(): expect: ERROR_BAD_PATHNAME, got %d\n", err);
+    ok(err == ERROR_BAD_PATHNAME, "_Open_dir(): expect: ERROR_BAD_PATHNAME, got %d\n", err);
     ok((int)type == 0xdeadbeef, "_Open_dir(): expect: 0xdeadbeef, got %d\n", type);
     ok(!*first_file_name, "_Open_dir(): expect: 0, got %s\n", wine_dbgstr_w(first_file_name));
 
     CreateDirectoryW(empty_dirW, NULL);
-    memset(first_file_name, 0, sizeof(first_file_name));
+    memset(first_file_name, 0xff, sizeof(first_file_name));
     err = type = 0xdeadbeef;
     result_handle = file;
     result_handle = p_Open_dir(first_file_name, empty_dirW, &err, &type);
@@ -1138,9 +1151,7 @@ static void test_Rename(void)
         { not_existW, invalidW, ERROR_FILE_NOT_FOUND }
     };
 
-    memset(current_path, 0, MAX_PATH);
     GetCurrentDirectoryW(MAX_PATH, current_path);
-    memset(temp_path, 0, MAX_PATH);
     GetTempPathW(MAX_PATH, temp_path);
     ok(SetCurrentDirectoryW(temp_path), "SetCurrentDirectoryW to temp_path failed\n");
     ret = p_Make_dir(wine_test_dirW);
@@ -1360,6 +1371,70 @@ static void test__Winerror_map(void)
     }
 }
 
+static void test_Equivalent(void)
+{
+    int val, i;
+    HANDLE file;
+    WCHAR temp_path[MAX_PATH], current_path[MAX_PATH];
+    static const WCHAR wine_test_dirW[] =
+            {'w','i','n','e','_','t','e','s','t','_','d','i','r',0};
+    static const WCHAR f1W[] =
+            {'w','i','n','e','_','t','e','s','t','_','d','i','r','/','f','1',0};
+    static const WCHAR f1W_backslash[] =
+            {'w','i','n','e','_','t','e','s','t','_','d','i','r','\\','f','1',0};
+    static const WCHAR f1W_subdir[] =
+            {'w','i','n','e','_','t','e','s','t','_','d','i','r','/','.','/','f','1',0};
+    static const WCHAR f1W_long[] =
+            {'w','i','n','e','_','t','e','s','t','_','d','i','r','/','.','.','/','w','i','n','e','_','t','e','s','t','_','d','i','r','/','f','1',0};
+    static const WCHAR f2W[] =
+            {'w','i','n','e','_','t','e','s','t','_','d','i','r','/','f','2',0};
+    static const WCHAR not_existW[] =
+            {'n','o','t','_','e','x','i','s','t','s','_','f','i','l','e',0};
+    static const struct {
+        const WCHAR *path1;
+        const WCHAR *path2;
+        int equivalent;
+    } tests[] = {
+        { NULL, NULL, -1 },
+        { NULL, f1W, 0 },
+        { f1W, NULL, 0 },
+        { f1W, wine_test_dirW, 0 },
+        { wine_test_dirW, f1W, 0 },
+        { wine_test_dirW, wine_test_dirW, -1 },
+        { f1W_subdir, f2W, 0 },
+        { f1W, f1W, 1 },
+        { not_existW, f1W, 0 },
+        { f1W_backslash, f1W_subdir, 1 },
+        { not_existW, not_existW, -1 },
+        { f1W, not_existW, 0 },
+        { f1W_long, f1W, 1 }
+    };
+
+    GetCurrentDirectoryW(MAX_PATH, current_path);
+    GetTempPathW(MAX_PATH, temp_path);
+    ok(SetCurrentDirectoryW(temp_path), "SetCurrentDirectoryW to temp_path failed\n");
+    CreateDirectoryW(wine_test_dirW, NULL);
+
+    file = CreateFileW(f1W, 0, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "create file failed: INVALID_HANDLE_VALUE\n");
+    CloseHandle(file);
+    file = CreateFileW(f2W, 0, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "create file failed: INVALID_HANDLE_VALUE\n");
+    CloseHandle(file);
+
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
+        errno = 0xdeadbeef;
+        val = p_Equivalent(tests[i].path1, tests[i].path2);
+        ok(tests[i].equivalent == val, "_Equivalent(): test %d expect: %d, got %d\n", i+1, tests[i].equivalent, val);
+        ok(errno == 0xdeadbeef, "errno = %d\n", errno);
+    }
+
+    ok(DeleteFileW(f1W), "expect wine_test_dir/f1 to exist\n");
+    ok(DeleteFileW(f2W), "expect wine_test_dir/f2 to exist\n");
+    ok(p_Remove_dir(wine_test_dirW), "expect wine_test_dir to exist\n");
+    ok(SetCurrentDirectoryW(current_path), "SetCurrentDirectoryW failed\n");
+}
+
 START_TEST(msvcp140)
 {
     if(!init()) return;
@@ -1383,5 +1458,6 @@ START_TEST(msvcp140)
     test_Last_write_time();
     test__Winerror_message();
     test__Winerror_map();
+    test_Equivalent();
     FreeLibrary(msvcp);
 }

@@ -19,6 +19,8 @@
 #ifndef __WINE_WINHTTP_H
 #define __WINE_WINHTTP_H
 
+#include "wine/winheader_enter.h"
+
 #ifdef _WIN64
 #include <pshpack8.h>
 #else
@@ -589,5 +591,7 @@ BOOL        WINAPI WinHttpWriteData(HINTERNET,LPCVOID,DWORD,LPDWORD);
 #endif
 
 #include <poppack.h>
+
+#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_WINHTTP_H */

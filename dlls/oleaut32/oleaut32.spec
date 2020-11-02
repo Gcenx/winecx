@@ -417,3 +417,6 @@
 @ stdcall -private DllGetClassObject(ptr ptr ptr)
 @ stdcall -private DllRegisterServer()
 @ stdcall -private DllUnregisterServer()
+
+@ stdcall -arch=x86_32on64 wine_SysAllocStringByteLen_HOSTPTR(int64 long)
+@ stdcall -arch=x86_32on64 wine_SysAllocStringLen_HOSTPTR(int64 long)

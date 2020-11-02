@@ -25,6 +25,8 @@
 #ifndef __WINE_RPC_H
 #define __WINE_RPC_H
 
+#include "wine/winheader_enter.h"
+
 #if defined(__powerpc__) || defined(_MAC) /* ? */
 # define __RPC_MAC__
  /* Also define __RPC_WIN32__ to ensure compatibility */
@@ -80,5 +82,7 @@ typedef void* I_RPC_HANDLE;
 /* #define RpcAbnormalTermination() abort() */
 
 #endif /* USE_COMPILER_EXCEPTIONS */
+
+#include "wine/winheader_exit.h"
 
 #endif /*__WINE_RPC_H */

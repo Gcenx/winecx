@@ -19,6 +19,8 @@
 #ifndef __WINE_NETIOAPI_H
 #define __WINE_NETIOAPI_H
 
+#include "wine/winheader_enter.h"
+
 #include <ntddndis.h>
 
 #ifndef ANY_SIZE
@@ -252,5 +254,7 @@ DWORD WINAPI GetIpInterfaceTable(ADDRESS_FAMILY,MIB_IPINTERFACE_TABLE**);
 DWORD WINAPI GetUnicastIpAddressEntry(MIB_UNICASTIPADDRESS_ROW*);
 PCHAR WINAPI if_indextoname(NET_IFINDEX,PCHAR);
 NET_IFINDEX WINAPI if_nametoindex(PCSTR);
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_NETIOAPI_H */

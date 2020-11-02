@@ -227,8 +227,8 @@ static ANDROID_PDEVICE *create_android_physdev(void)
 /**********************************************************************
  *           ANDROID_CreateDC
  */
-static BOOL ANDROID_CreateDC( PHYSDEV *pdev, LPCWSTR driver, LPCWSTR device,
-                              LPCWSTR output, const DEVMODEW* initData )
+static BOOL CDECL ANDROID_CreateDC( PHYSDEV *pdev, LPCWSTR driver, LPCWSTR device,
+                                    LPCWSTR output, const DEVMODEW* initData )
 {
     ANDROID_PDEVICE *physdev = create_android_physdev();
 
@@ -242,7 +242,7 @@ static BOOL ANDROID_CreateDC( PHYSDEV *pdev, LPCWSTR driver, LPCWSTR device,
 /**********************************************************************
  *           ANDROID_CreateCompatibleDC
  */
-static BOOL ANDROID_CreateCompatibleDC( PHYSDEV orig, PHYSDEV *pdev )
+static BOOL CDECL ANDROID_CreateCompatibleDC( PHYSDEV orig, PHYSDEV *pdev )
 {
     ANDROID_PDEVICE *physdev = create_android_physdev();
 
@@ -256,7 +256,7 @@ static BOOL ANDROID_CreateCompatibleDC( PHYSDEV orig, PHYSDEV *pdev )
 /**********************************************************************
  *           ANDROID_DeleteDC
  */
-static BOOL ANDROID_DeleteDC( PHYSDEV dev )
+static BOOL CDECL ANDROID_DeleteDC( PHYSDEV dev )
 {
     HeapFree( GetProcessHeap(), 0, dev );
     return TRUE;
@@ -344,7 +344,7 @@ BOOL CDECL ANDROID_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devm
 /**********************************************************************
  *           ANDROID_wine_get_wgl_driver
  */
-static struct opengl_funcs * ANDROID_wine_get_wgl_driver( PHYSDEV dev, UINT version )
+static struct opengl_funcs * CDECL ANDROID_wine_get_wgl_driver( PHYSDEV dev, UINT version )
 {
     struct opengl_funcs *ret;
 
@@ -396,6 +396,7 @@ static const struct gdi_dc_funcs android_drv_funcs =
     NULL,                               /* pGetCharABCWidths */
     NULL,                               /* pGetCharABCWidthsI */
     NULL,                               /* pGetCharWidth */
+    NULL,                               /* pGetCharWidthInfo */
     NULL,                               /* pGetDeviceCaps */
     NULL,                               /* pGetDeviceGammaRamp */
     NULL,                               /* pGetFontData */

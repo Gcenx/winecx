@@ -544,7 +544,7 @@ void get_selector_entry( struct thread *thread, int entry, unsigned int *base,
 
 
 #if defined(linux) && (defined(HAVE_SYS_USER_H) || defined(HAVE_ASM_USER_H)) \
-    && (defined(__i386__) || defined(__x86_64__))
+    && (defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__))
 
 #ifdef HAVE_SYS_USER_H
 #include <sys/user.h>

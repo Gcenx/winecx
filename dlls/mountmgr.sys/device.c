@@ -108,7 +108,7 @@ static CRITICAL_SECTION device_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 static char *get_dosdevices_path( char **device )
 {
-    const char *config_dir = wine_get_config_dir();
+    const char * HOSTPTR config_dir = wine_get_config_dir();
     size_t len = strlen(config_dir) + sizeof("/dosdevices/com256");
     char *path = HeapAlloc( GetProcessHeap(), 0, len );
     if (path)

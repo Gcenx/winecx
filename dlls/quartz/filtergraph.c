@@ -918,16 +918,7 @@ static HRESULT WINAPI FilterGraph2_SetDefaultSyncSource(IFilterGraph2 *iface)
 
     LIST_FOR_EACH_ENTRY(filter, &This->filters, struct filter, entry)
     {
-        DWORD miscflags;
-        IAMFilterMiscFlags *flags = NULL;
-        IBaseFilter_QueryInterface(filter->filter, &IID_IAMFilterMiscFlags, (void **)&flags);
-        if (!flags)
-            continue;
-        miscflags = IAMFilterMiscFlags_GetMiscFlags(flags);
-        IAMFilterMiscFlags_Release(flags);
-        if (miscflags == AM_FILTER_MISC_FLAGS_IS_RENDERER)
-            IBaseFilter_QueryInterface(filter->filter, &IID_IReferenceClock, (void **)&pClock);
-        if (pClock)
+        if (IBaseFilter_QueryInterface(filter->filter, &IID_IReferenceClock, (void **)&pClock) == S_OK)
             break;
     }
 
@@ -2313,21 +2304,12 @@ static HRESULT all_renderers_seek(IFilterGraphImpl *This, fnFoundSeek FoundSeek,
     HRESULT hr, hr_return = S_OK;
     struct filter *filter;
 
-    TRACE("(%p)->(%p %08lx)\n", This, FoundSeek, arg);
+    TRACE("(%p)->(%p %08lx)\n", This, FoundSeek, (unsigned long)arg);
     /* Send a message to all renderers, they are responsible for broadcasting it further */
 
     LIST_FOR_EACH_ENTRY(filter, &This->filters, struct filter, entry)
     {
         IMediaSeeking *seek = NULL;
-        IAMFilterMiscFlags *flags = NULL;
-        ULONG filterflags;
-        IBaseFilter_QueryInterface(filter->filter, &IID_IAMFilterMiscFlags, (void **)&flags);
-        if (!flags)
-            continue;
-        filterflags = IAMFilterMiscFlags_GetMiscFlags(flags);
-        IAMFilterMiscFlags_Release(flags);
-        if (filterflags != AM_FILTER_MISC_FLAGS_IS_RENDERER)
-            continue;
 
         IBaseFilter_QueryInterface(filter->filter, &IID_IMediaSeeking, (void **)&seek);
         if (!seek)
@@ -3076,90 +3058,51 @@ static ULONG WINAPI BasicAudio_Release(IBasicAudio *iface)
     return IUnknown_Release(This->outer_unk);
 }
 
-/*** IDispatch methods ***/
-static HRESULT WINAPI BasicAudio_GetTypeInfoCount(IBasicAudio *iface, UINT *pctinfo)
+static HRESULT WINAPI BasicAudio_GetTypeInfoCount(IBasicAudio *iface, UINT *count)
 {
-    IFilterGraphImpl *This = impl_from_IBasicAudio(iface);
-    IBasicAudio* pBasicAudio;
+    TRACE("iface %p, count %p.\n", iface, count);
+    *count = 1;
+    return S_OK;
+}
+
+static HRESULT WINAPI BasicAudio_GetTypeInfo(IBasicAudio *iface, UINT index,
+        LCID lcid, ITypeInfo **typeinfo)
+{
+    TRACE("iface %p, index %u, lcid %#x, typeinfo %p.\n", iface, index, lcid, typeinfo);
+    return strmbase_get_typeinfo(IBasicAudio_tid, typeinfo);
+}
+
+static HRESULT WINAPI BasicAudio_GetIDsOfNames(IBasicAudio *iface, REFIID iid,
+        LPOLESTR *names, UINT count, LCID lcid, DISPID *ids)
+{
+    ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%p)\n", This, iface, pctinfo);
+    TRACE("iface %p, iid %s, names %p, count %u, lcid %#x, ids %p.\n",
+            iface, debugstr_guid(iid), names, count, lcid, ids);
 
-    EnterCriticalSection(&This->cs);
-
-    hr = GetTargetInterface(This, &IID_IBasicAudio, (LPVOID*)&pBasicAudio);
-
-    if (hr == S_OK)
-        hr = IBasicAudio_GetTypeInfoCount(pBasicAudio, pctinfo);
-
-    LeaveCriticalSection(&This->cs);
-
+    if (SUCCEEDED(hr = strmbase_get_typeinfo(IBasicAudio_tid, &typeinfo)))
+    {
+        hr = ITypeInfo_GetIDsOfNames(typeinfo, names, count, ids);
+        ITypeInfo_Release(typeinfo);
+    }
     return hr;
 }
 
-static HRESULT WINAPI BasicAudio_GetTypeInfo(IBasicAudio *iface, UINT iTInfo, LCID lcid,
-        ITypeInfo **ppTInfo)
+static HRESULT WINAPI BasicAudio_Invoke(IBasicAudio *iface, DISPID id, REFIID iid, LCID lcid,
+        WORD flags, DISPPARAMS *params, VARIANT *result, EXCEPINFO *excepinfo, UINT *error_arg)
 {
-    IFilterGraphImpl *This = impl_from_IBasicAudio(iface);
-    IBasicAudio* pBasicAudio;
+    ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d, %d, %p)\n", This, iface, iTInfo, lcid, ppTInfo);
+    TRACE("iface %p, id %d, iid %s, lcid %#x, flags %#x, params %p, result %p, excepinfo %p, error_arg %p.\n",
+            iface, id, debugstr_guid(iid), lcid, flags, params, result, excepinfo, error_arg);
 
-    EnterCriticalSection(&This->cs);
-
-    hr = GetTargetInterface(This, &IID_IBasicAudio, (LPVOID*)&pBasicAudio);
-
-    if (hr == S_OK)
-        hr = IBasicAudio_GetTypeInfo(pBasicAudio, iTInfo, lcid, ppTInfo);
-
-    LeaveCriticalSection(&This->cs);
-
-    return hr;
-}
-
-static HRESULT WINAPI BasicAudio_GetIDsOfNames(IBasicAudio *iface, REFIID riid, LPOLESTR *rgszNames,
-        UINT cNames, LCID lcid, DISPID *rgDispId)
-{
-    IFilterGraphImpl *This = impl_from_IBasicAudio(iface);
-    IBasicAudio* pBasicAudio;
-    HRESULT hr;
-
-    TRACE("(%p/%p)->(%s, %p, %d, %d, %p)\n", This, iface, debugstr_guid(riid), rgszNames, cNames,
-            lcid, rgDispId);
-
-    EnterCriticalSection(&This->cs);
-
-    hr = GetTargetInterface(This, &IID_IBasicAudio, (LPVOID*)&pBasicAudio);
-
-    if (hr == S_OK)
-        hr = IBasicAudio_GetIDsOfNames(pBasicAudio, riid, rgszNames, cNames, lcid, rgDispId);
-
-    LeaveCriticalSection(&This->cs);
-
-    return hr;
-}
-
-static HRESULT WINAPI BasicAudio_Invoke(IBasicAudio *iface, DISPID dispIdMember, REFIID riid,
-        LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *pExepInfo,
-        UINT *puArgErr)
-{
-    IFilterGraphImpl *This = impl_from_IBasicAudio(iface);
-    IBasicAudio* pBasicAudio;
-    HRESULT hr;
-
-    TRACE("(%p/%p)->(%d, %s, %d, %04x, %p, %p, %p, %p)\n", This, iface, dispIdMember,
-            debugstr_guid(riid), lcid, wFlags, pDispParams, pVarResult, pExepInfo, puArgErr);
-
-    EnterCriticalSection(&This->cs);
-
-    hr = GetTargetInterface(This, &IID_IBasicAudio, (LPVOID*)&pBasicAudio);
-
-    if (hr == S_OK)
-        hr = IBasicAudio_Invoke(pBasicAudio, dispIdMember, riid, lcid, wFlags, pDispParams, pVarResult, pExepInfo, puArgErr);
-
-    LeaveCriticalSection(&This->cs);
-
+    if (SUCCEEDED(hr = strmbase_get_typeinfo(IBasicAudio_tid, &typeinfo)))
+    {
+        hr = ITypeInfo_Invoke(typeinfo, iface, id, flags, params, result, excepinfo, error_arg);
+        ITypeInfo_Release(typeinfo);
+    }
     return hr;
 }
 
@@ -3291,90 +3234,51 @@ static ULONG WINAPI BasicVideo_Release(IBasicVideo2 *iface)
     return IUnknown_Release(This->outer_unk);
 }
 
-/*** IDispatch methods ***/
-static HRESULT WINAPI BasicVideo_GetTypeInfoCount(IBasicVideo2 *iface, UINT *pctinfo)
+static HRESULT WINAPI BasicVideo_GetTypeInfoCount(IBasicVideo2 *iface, UINT *count)
 {
-    IFilterGraphImpl *This = impl_from_IBasicVideo2(iface);
-    IBasicVideo *pBasicVideo;
+    TRACE("iface %p, count %p.\n", iface, count);
+    *count = 1;
+    return S_OK;
+}
+
+static HRESULT WINAPI BasicVideo_GetTypeInfo(IBasicVideo2 *iface, UINT index,
+        LCID lcid, ITypeInfo **typeinfo)
+{
+    TRACE("iface %p, index %u, lcid %#x, typeinfo %p.\n", iface, index, lcid, typeinfo);
+    return strmbase_get_typeinfo(IBasicVideo_tid, typeinfo);
+}
+
+static HRESULT WINAPI BasicVideo_GetIDsOfNames(IBasicVideo2 *iface, REFIID iid,
+        LPOLESTR *names, UINT count, LCID lcid, DISPID *ids)
+{
+    ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%p)\n", This, iface, pctinfo);
+    TRACE("iface %p, iid %s, names %p, count %u, lcid %#x, ids %p.\n",
+            iface, debugstr_guid(iid), names, count, lcid, ids);
 
-    EnterCriticalSection(&This->cs);
-
-    hr = GetTargetInterface(This, &IID_IBasicVideo, (LPVOID*)&pBasicVideo);
-
-    if (hr == S_OK)
-        hr = IBasicVideo_GetTypeInfoCount(pBasicVideo, pctinfo);
-
-    LeaveCriticalSection(&This->cs);
-
+    if (SUCCEEDED(hr = strmbase_get_typeinfo(IBasicVideo_tid, &typeinfo)))
+    {
+        hr = ITypeInfo_GetIDsOfNames(typeinfo, names, count, ids);
+        ITypeInfo_Release(typeinfo);
+    }
     return hr;
 }
 
-static HRESULT WINAPI BasicVideo_GetTypeInfo(IBasicVideo2 *iface, UINT iTInfo, LCID lcid,
-        ITypeInfo **ppTInfo)
+static HRESULT WINAPI BasicVideo_Invoke(IBasicVideo2 *iface, DISPID id, REFIID iid, LCID lcid,
+        WORD flags, DISPPARAMS *params, VARIANT *result, EXCEPINFO *excepinfo, UINT *error_arg)
 {
-    IFilterGraphImpl *This = impl_from_IBasicVideo2(iface);
-    IBasicVideo *pBasicVideo;
+    ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d, %d, %p)\n", This, iface, iTInfo, lcid, ppTInfo);
+    TRACE("iface %p, id %d, iid %s, lcid %#x, flags %#x, params %p, result %p, excepinfo %p, error_arg %p.\n",
+            iface, id, debugstr_guid(iid), lcid, flags, params, result, excepinfo, error_arg);
 
-    EnterCriticalSection(&This->cs);
-
-    hr = GetTargetInterface(This, &IID_IBasicVideo, (LPVOID*)&pBasicVideo);
-
-    if (hr == S_OK)
-        hr = IBasicVideo_GetTypeInfo(pBasicVideo, iTInfo, lcid, ppTInfo);
-
-    LeaveCriticalSection(&This->cs);
-
-    return hr;
-}
-
-static HRESULT WINAPI BasicVideo_GetIDsOfNames(IBasicVideo2 *iface, REFIID riid,
-        LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
-{
-    IFilterGraphImpl *This = impl_from_IBasicVideo2(iface);
-    IBasicVideo *pBasicVideo;
-    HRESULT hr;
-
-    TRACE("(%p/%p)->(%s, %p, %d, %d, %p)\n", This, iface, debugstr_guid(riid), rgszNames, cNames,
-            lcid, rgDispId);
-
-    EnterCriticalSection(&This->cs);
-
-    hr = GetTargetInterface(This, &IID_IBasicVideo, (LPVOID*)&pBasicVideo);
-
-    if (hr == S_OK)
-        hr = IBasicVideo_GetIDsOfNames(pBasicVideo, riid, rgszNames, cNames, lcid, rgDispId);
-
-    LeaveCriticalSection(&This->cs);
-
-    return hr;
-}
-
-static HRESULT WINAPI BasicVideo_Invoke(IBasicVideo2 *iface, DISPID dispIdMember, REFIID riid,
-        LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *pExepInfo,
-        UINT *puArgErr)
-{
-    IFilterGraphImpl *This = impl_from_IBasicVideo2(iface);
-    IBasicVideo *pBasicVideo;
-    HRESULT hr;
-
-    TRACE("(%p/%p)->(%d, %s, %d, %04x, %p, %p, %p, %p)\n", This, iface, dispIdMember,
-            debugstr_guid(riid), lcid, wFlags, pDispParams, pVarResult, pExepInfo, puArgErr);
-
-    EnterCriticalSection(&This->cs);
-
-    hr = GetTargetInterface(This, &IID_IBasicVideo, (LPVOID*)&pBasicVideo);
-
-    if (hr == S_OK)
-        hr = IBasicVideo_Invoke(pBasicVideo, dispIdMember, riid, lcid, wFlags, pDispParams, pVarResult, pExepInfo, puArgErr);
-
-    LeaveCriticalSection(&This->cs);
-
+    if (SUCCEEDED(hr = strmbase_get_typeinfo(IBasicVideo_tid, &typeinfo)))
+    {
+        hr = ITypeInfo_Invoke(typeinfo, iface, id, flags, params, result, excepinfo, error_arg);
+        ITypeInfo_Release(typeinfo);
+    }
     return hr;
 }
 
@@ -4123,93 +4027,53 @@ static ULONG WINAPI VideoWindow_Release(IVideoWindow *iface)
     return IUnknown_Release(This->outer_unk);
 }
 
-/*** IDispatch methods ***/
-static HRESULT WINAPI VideoWindow_GetTypeInfoCount(IVideoWindow *iface, UINT *pctinfo)
+HRESULT WINAPI VideoWindow_GetTypeInfoCount(IVideoWindow *iface, UINT *count)
 {
-    IFilterGraphImpl *This = impl_from_IVideoWindow(iface);
-    IVideoWindow *pVideoWindow;
+    TRACE("iface %p, count %p.\n", iface, count);
+    *count = 1;
+    return S_OK;
+}
+
+HRESULT WINAPI VideoWindow_GetTypeInfo(IVideoWindow *iface, UINT index,
+        LCID lcid, ITypeInfo **typeinfo)
+{
+    TRACE("iface %p, index %u, lcid %#x, typeinfo %p.\n", iface, index, lcid, typeinfo);
+    return strmbase_get_typeinfo(IVideoWindow_tid, typeinfo);
+}
+
+HRESULT WINAPI VideoWindow_GetIDsOfNames(IVideoWindow *iface, REFIID iid,
+        LPOLESTR *names, UINT count, LCID lcid, DISPID *ids)
+{
+    ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%p)\n", This, iface, pctinfo);
+    TRACE("iface %p, iid %s, names %p, count %u, lcid %#x, ids %p.\n",
+            iface, debugstr_guid(iid), names, count, lcid, ids);
 
-    EnterCriticalSection(&This->cs);
-
-    hr = GetTargetInterface(This, &IID_IVideoWindow, (LPVOID*)&pVideoWindow);
-
-    if (hr == S_OK)
-        hr = IVideoWindow_GetTypeInfoCount(pVideoWindow, pctinfo);
-
-    LeaveCriticalSection(&This->cs);
-
+    if (SUCCEEDED(hr = strmbase_get_typeinfo(IVideoWindow_tid, &typeinfo)))
+    {
+        hr = ITypeInfo_GetIDsOfNames(typeinfo, names, count, ids);
+        ITypeInfo_Release(typeinfo);
+    }
     return hr;
 }
 
-static HRESULT WINAPI VideoWindow_GetTypeInfo(IVideoWindow *iface, UINT iTInfo, LCID lcid,
-        ITypeInfo **ppTInfo)
+static HRESULT WINAPI VideoWindow_Invoke(IVideoWindow *iface, DISPID id, REFIID iid, LCID lcid,
+        WORD flags, DISPPARAMS *params, VARIANT *result, EXCEPINFO *excepinfo, UINT *error_arg)
 {
-    IFilterGraphImpl *This = impl_from_IVideoWindow(iface);
-    IVideoWindow *pVideoWindow;
+    ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d, %d, %p)\n", This, iface, iTInfo, lcid, ppTInfo);
+    TRACE("iface %p, id %d, iid %s, lcid %#x, flags %#x, params %p, result %p, excepinfo %p, error_arg %p.\n",
+            iface, id, debugstr_guid(iid), lcid, flags, params, result, excepinfo, error_arg);
 
-    EnterCriticalSection(&This->cs);
-
-    hr = GetTargetInterface(This, &IID_IVideoWindow, (LPVOID*)&pVideoWindow);
-
-    if (hr == S_OK)
-        hr = IVideoWindow_GetTypeInfo(pVideoWindow, iTInfo, lcid, ppTInfo);
-
-    LeaveCriticalSection(&This->cs);
-
+    if (SUCCEEDED(hr = strmbase_get_typeinfo(IVideoWindow_tid, &typeinfo)))
+    {
+        hr = ITypeInfo_Invoke(typeinfo, iface, id, flags, params, result, excepinfo, error_arg);
+        ITypeInfo_Release(typeinfo);
+    }
     return hr;
 }
-
-static HRESULT WINAPI VideoWindow_GetIDsOfNames(IVideoWindow *iface, REFIID riid,
-        LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
-{
-    IFilterGraphImpl *This = impl_from_IVideoWindow(iface);
-    IVideoWindow *pVideoWindow;
-    HRESULT hr;
-
-    TRACE("(%p/%p)->(%s, %p, %d, %d, %p)\n", This, iface, debugstr_guid(riid), rgszNames, cNames,
-            lcid, rgDispId);
-
-    EnterCriticalSection(&This->cs);
-
-    hr = GetTargetInterface(This, &IID_IVideoWindow, (LPVOID*)&pVideoWindow);
-
-    if (hr == S_OK)
-        hr = IVideoWindow_GetIDsOfNames(pVideoWindow, riid, rgszNames, cNames, lcid, rgDispId);
-
-    LeaveCriticalSection(&This->cs);
-
-    return hr;
-}
-
-static HRESULT WINAPI VideoWindow_Invoke(IVideoWindow *iface, DISPID dispIdMember, REFIID riid,
-        LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *pExepInfo,
-        UINT*puArgErr)
-{
-    IFilterGraphImpl *This = impl_from_IVideoWindow(iface);
-    IVideoWindow *pVideoWindow;
-    HRESULT hr;
-
-    TRACE("(%p/%p)->(%d, %s, %d, %04x, %p, %p, %p, %p)\n", This, iface, dispIdMember,
-            debugstr_guid(riid), lcid, wFlags, pDispParams, pVarResult, pExepInfo, puArgErr);
-
-    EnterCriticalSection(&This->cs);
-
-    hr = GetTargetInterface(This, &IID_IVideoWindow, (LPVOID*)&pVideoWindow);
-
-    if (hr == S_OK)
-        hr = IVideoWindow_Invoke(pVideoWindow, dispIdMember, riid, lcid, wFlags, pDispParams, pVarResult, pExepInfo, puArgErr);
-
-    LeaveCriticalSection(&This->cs);
-
-    return hr;
-}
-
 
 /*** IVideoWindow methods ***/
 static HRESULT WINAPI VideoWindow_put_Caption(IVideoWindow *iface, BSTR strCaption)
@@ -4840,7 +4704,7 @@ static HRESULT WINAPI VideoWindow_NotifyOwnerMessage(IVideoWindow *iface, OAHWND
     IVideoWindow *pVideoWindow;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%08lx, %d, %08lx, %08lx)\n", This, iface, hwnd, uMsg, wParam, lParam);
+    TRACE("(%p/%p)->(%08lx, %d, %08lx, %08lx)\n", This, iface, (long)hwnd, uMsg, (long)wParam, (long)lParam);
 
     EnterCriticalSection(&This->cs);
 
@@ -5218,7 +5082,7 @@ static HRESULT WINAPI MediaEvent_FreeEventParams(IMediaEventEx *iface, LONG lEvC
 {
     IFilterGraphImpl *This = impl_from_IMediaEventEx(iface);
 
-    TRACE("(%p/%p)->(%d, %08lx, %08lx): stub !!!\n", This, iface, lEvCode, lParam1, lParam2);
+    TRACE("(%p/%p)->(%d, %08lx, %08lx): stub !!!\n", This, iface, lEvCode, (long)lParam1, (long)lParam2);
 
     return S_OK;
 }
@@ -5229,7 +5093,7 @@ static HRESULT WINAPI MediaEvent_SetNotifyWindow(IMediaEventEx *iface, OAHWND hw
 {
     IFilterGraphImpl *This = impl_from_IMediaEventEx(iface);
 
-    TRACE("(%p/%p)->(%08lx, %d, %08lx)\n", This, iface, hwnd, lMsg, lInstanceData);
+    TRACE("(%p/%p)->(%08lx, %d, %08lx)\n", This, iface, (long)hwnd, lMsg, (long)lInstanceData);
 
     This->notif.hWnd = (HWND)hwnd;
     This->notif.msg = lMsg;
@@ -5554,7 +5418,7 @@ static HRESULT WINAPI MediaEventSink_Notify(IMediaEventSink *iface, LONG EventCo
     IFilterGraphImpl *This = impl_from_IMediaEventSink(iface);
     Event evt;
 
-    TRACE("(%p/%p)->(%d, %ld, %ld)\n", This, iface, EventCode, EventParam1, EventParam2);
+    TRACE("(%p/%p)->(%d, %ld, %ld)\n", This, iface, EventCode, (long)EventParam1, (long)EventParam2);
 
     /* We need thread safety here, let's use the events queue's one */
     EnterCriticalSection(&This->evqueue.msg_crst);

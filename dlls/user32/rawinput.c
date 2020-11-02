@@ -58,20 +58,100 @@ static CRITICAL_SECTION_DEBUG hid_devices_cs_debug =
 };
 static CRITICAL_SECTION hid_devices_cs = { &hid_devices_cs_debug, -1, 0, 0, 0, 0 };
 
+static BOOL array_reserve(void **elements, unsigned int *capacity, unsigned int count, unsigned int size)
+{
+    unsigned int new_capacity, max_capacity;
+    void *new_elements;
+
+    if (count <= *capacity)
+        return TRUE;
+
+    max_capacity = ~(SIZE_T)0 / size;
+    if (count > max_capacity)
+        return FALSE;
+
+    new_capacity = max(4, *capacity);
+    while (new_capacity < count && new_capacity <= max_capacity / 2)
+        new_capacity *= 2;
+    if (new_capacity < count)
+        new_capacity = max_capacity;
+
+    if (!(new_elements = heap_realloc(*elements, new_capacity * size)))
+        return FALSE;
+
+    *elements = new_elements;
+    *capacity = new_capacity;
+
+    return TRUE;
+}
+
+static struct hid_device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
+{
+    SP_DEVICE_INTERFACE_DETAIL_DATA_W *detail;
+    struct hid_device *device;
+    HANDLE file;
+    WCHAR *path;
+    DWORD size;
+
+    SetupDiGetDeviceInterfaceDetailW(set, iface, NULL, 0, &size, NULL);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+    {
+        ERR("Failed to get device path, error %#x.\n", GetLastError());
+        return FALSE;
+    }
+    if (!(detail = heap_alloc(size)))
+    {
+        ERR("Failed to allocate memory.\n");
+        return FALSE;
+    }
+    detail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W);
+    SetupDiGetDeviceInterfaceDetailW(set, iface, detail, size, NULL, NULL);
+
+    TRACE("Found HID device %s.\n", debugstr_w(detail->DevicePath));
+
+    if (!(path = heap_strdupW(detail->DevicePath)))
+    {
+        ERR("Failed to allocate memory.\n");
+        heap_free(detail);
+        return NULL;
+    }
+    heap_free(detail);
+
+    file = CreateFileW(path, GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, 0);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        ERR("Failed to open device file %s, error %u.\n", debugstr_w(path), GetLastError());
+        heap_free(path);
+        return NULL;
+    }
+
+    if (!array_reserve((void **)&hid_devices, &hid_devices_max, hid_devices_count + 1, sizeof(*hid_devices)))
+    {
+        ERR("Failed to allocate memory.\n");
+        CloseHandle(file);
+        heap_free(path);
+        return NULL;
+    }
+
+    device = &hid_devices[hid_devices_count++];
+    device->path = path;
+    device->file = file;
+
+    return device;
+}
+
 static void find_hid_devices(void)
 {
     static ULONGLONG last_check;
 
     SP_DEVICE_INTERFACE_DATA iface = { sizeof(iface) };
-    SP_DEVICE_INTERFACE_DETAIL_DATA_W *detail;
-    DWORD detail_size, needed;
+    struct hid_device *device;
     HIDD_ATTRIBUTES attr;
-    DWORD idx, didx;
     HIDP_CAPS caps;
     GUID hid_guid;
     HDEVINFO set;
-    HANDLE file;
-    WCHAR *path;
+    DWORD idx;
 
     if (GetTickCount64() - last_check < 2000)
         return;
@@ -81,98 +161,40 @@ static void find_hid_devices(void)
 
     set = SetupDiGetClassDevsW(&hid_guid, NULL, NULL, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
 
-    detail_size = sizeof(*detail) + (MAX_PATH * sizeof(WCHAR));
-    if (!(detail = heap_alloc(detail_size)))
-        return;
-    detail->cbSize = sizeof(*detail);
-
     EnterCriticalSection(&hid_devices_cs);
 
     /* destroy previous list */
-    for (didx = 0; didx < hid_devices_count; ++didx)
+    for (idx = 0; idx < hid_devices_count; ++idx)
     {
-        CloseHandle(hid_devices[didx].file);
-        heap_free(hid_devices[didx].path);
+        CloseHandle(hid_devices[idx].file);
+        heap_free(hid_devices[idx].path);
     }
 
-    didx = 0;
+    hid_devices_count = 0;
     for (idx = 0; SetupDiEnumDeviceInterfaces(set, NULL, &hid_guid, idx, &iface); ++idx)
     {
-        if (!SetupDiGetDeviceInterfaceDetailW(set, &iface, detail, detail_size, &needed, NULL))
-        {
-            if (!(detail = heap_realloc(detail, needed)))
-            {
-                ERR("Failed to allocate memory.\n");
-                goto done;
-            }
-            detail_size = needed;
-
-            SetupDiGetDeviceInterfaceDetailW(set, &iface, detail, detail_size, NULL, NULL);
-        }
-
-        if (!(path = heap_strdupW(detail->DevicePath)))
-        {
-            ERR("Failed to allocate memory.\n");
-            goto done;
-        }
-
-        file = CreateFileW(path, GENERIC_READ | GENERIC_WRITE,
-                FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, 0);
-        if (file == INVALID_HANDLE_VALUE)
-        {
-            ERR("Failed to open device file %s, error %u.\n", debugstr_w(path), GetLastError());
-            heap_free(path);
+        if (!(device = add_device(set, &iface)))
             continue;
-        }
-
-        if (didx >= hid_devices_max)
-        {
-            if (hid_devices)
-            {
-                hid_devices_max *= 2;
-                hid_devices = heap_realloc(hid_devices,
-                    hid_devices_max * sizeof(hid_devices[0]));
-            }
-            else
-            {
-                hid_devices_max = 8;
-                hid_devices = heap_alloc(hid_devices_max * sizeof(hid_devices[0]));
-            }
-            if (!hid_devices)
-            {
-                ERR("Failed to allocate memory.\n");
-                goto done;
-            }
-        }
-
-        TRACE("Found HID device %s.\n", debugstr_w(path));
-
-        hid_devices[didx].path = path;
-        hid_devices[didx].file = file;
 
         attr.Size = sizeof(HIDD_ATTRIBUTES);
-        if (!HidD_GetAttributes(file, &attr))
-            WARN_(rawinput)("Failed to get attributes.\n");
-        hid_devices[didx].info.dwVendorId = attr.VendorID;
-        hid_devices[didx].info.dwProductId = attr.ProductID;
-        hid_devices[didx].info.dwVersionNumber = attr.VersionNumber;
+        if (!HidD_GetAttributes(device->file, &attr))
+            WARN("Failed to get attributes.\n");
+        device->info.dwVendorId = attr.VendorID;
+        device->info.dwProductId = attr.ProductID;
+        device->info.dwVersionNumber = attr.VersionNumber;
 
-        if (!HidD_GetPreparsedData(file, &hid_devices[didx].data))
-            WARN_(rawinput)("Failed to get preparsed data.\n");
+        if (!HidD_GetPreparsedData(device->file, &device->data))
+            WARN("Failed to get preparsed data.\n");
 
-        if (!HidP_GetCaps(hid_devices[didx].data, &caps))
-            WARN_(rawinput)("Failed to get caps.\n");
+        if (!HidP_GetCaps(device->data, &caps))
+            WARN("Failed to get caps.\n");
 
-        hid_devices[didx].info.usUsagePage = caps.UsagePage;
-        hid_devices[didx].info.usUsage = caps.Usage;
-
-        didx++;
+        device->info.usUsagePage = caps.UsagePage;
+        device->info.usUsage = caps.Usage;
     }
-    hid_devices_count = didx;
 
-done:
     LeaveCriticalSection(&hid_devices_cs);
-    heap_free(detail);
+    SetupDiDestroyDeviceInfoList(set);
 }
 
 /***********************************************************************
@@ -281,6 +303,9 @@ UINT WINAPI GetRawInputData(HRAWINPUT rawinput, UINT command, void *data, UINT *
     TRACE("rawinput %p, command %#x, data %p, data_size %p, header_size %u.\n",
             rawinput, command, data, data_size, header_size);
 
+    if (!ri)
+        return ~0U;
+
     if (header_size != sizeof(RAWINPUTHEADER))
     {
         WARN("Invalid structure size %u.\n", header_size);
@@ -325,16 +350,37 @@ UINT WINAPI DECLSPEC_HOTPATCH GetRawInputBuffer(RAWINPUT *data, UINT *data_size,
  */
 UINT WINAPI GetRawInputDeviceInfoA(HANDLE device, UINT command, void *data, UINT *data_size)
 {
-    UINT ret;
-
     TRACE("device %p, command %#x, data %p, data_size %p.\n",
             device, command, data, data_size);
 
-    ret = GetRawInputDeviceInfoW(device, command, data, data_size);
-    if (command == RIDI_DEVICENAME && ret && ret != ~0U)
-        ret = WideCharToMultiByte(CP_ACP, 0, data, -1, data, *data_size, NULL, NULL);
+    /* RIDI_DEVICENAME data_size is in chars, not bytes */
+    if (command == RIDI_DEVICENAME)
+    {
+        WCHAR *nameW;
+        UINT ret, nameW_sz;
 
-    return ret;
+        if (!data_size) return ~0U;
+
+        nameW_sz = *data_size;
+
+        if (data && nameW_sz > 0)
+            nameW = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR) * nameW_sz);
+        else
+            nameW = NULL;
+
+        ret = GetRawInputDeviceInfoW(device, command, nameW, &nameW_sz);
+
+        if (ret && ret != ~0U)
+            WideCharToMultiByte(CP_ACP, 0, nameW, -1, data, *data_size, NULL, NULL);
+
+        *data_size = nameW_sz;
+
+        HeapFree(GetProcessHeap(), 0, nameW);
+
+        return ret;
+    }
+
+    return GetRawInputDeviceInfoW(device, command, data, data_size);
 }
 
 /***********************************************************************
@@ -362,18 +408,18 @@ UINT WINAPI GetRawInputDeviceInfoW(HANDLE device, UINT command, void *data, UINT
     case RIDI_DEVICENAME:
         if (device == WINE_MOUSE_HANDLE)
         {
-            s = sizeof(mouse_name);
+            s = ARRAY_SIZE(mouse_name);
             name = mouse_name;
         }
         else if (device == WINE_KEYBOARD_HANDLE)
         {
-            s = sizeof(keyboard_name);
+            s = ARRAY_SIZE(keyboard_name);
             name = keyboard_name;
         }
         else
         {
             hid_device = device;
-            s = (strlenW(hid_device->path) + 1) * sizeof(WCHAR);
+            s = strlenW(hid_device->path) + 1;
             name = hid_device->path;
         }
         break;
@@ -398,7 +444,7 @@ UINT WINAPI GetRawInputDeviceInfoW(HANDLE device, UINT command, void *data, UINT
 
     if (command == RIDI_DEVICENAME)
     {
-        memcpy(data, name, s);
+        memcpy(data, name, s * sizeof(WCHAR));
         return s;
     }
 

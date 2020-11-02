@@ -1975,7 +1975,7 @@ static void test_CompareStringA(void)
 
     /* \xB9 character lies between a and b */
     ret = CompareStringA(lcid, 0, "a", 1, "\xB9", 1);
-    todo_wine ok(ret == CSTR_LESS_THAN, "\'\\xB9\' character should be greater than \'a\'\n");
+    ok(ret == CSTR_LESS_THAN, "\'\\xB9\' character should be greater than \'a\'\n");
     ret = CompareStringA(lcid, 0, "\xB9", 1, "b", 1);
     ok(ret == CSTR_LESS_THAN, "\'\\xB9\' character should be smaller than \'b\'\n");
 
@@ -2001,6 +2001,9 @@ static void test_CompareStringW(void)
 {
     static const WCHAR ABC_EE[] = {'A','B','C',0,0xEE};
     static const WCHAR ABC_FF[] = {'A','B','C',0,0xFF};
+    static const WCHAR A_ACUTE_BC[] = {0xc1,'B','C',0};
+    static const WCHAR A_ACUTE_BC_DECOMP[] = {'A',0x301,'B','C',0};
+    static const WCHAR A_NULL_BC[] = {'A',0,'B','C',0};
     WCHAR *str1, *str2;
     SYSTEM_INFO si;
     DWORD old_prot;
@@ -2038,6 +2041,35 @@ static void test_CompareStringW(void)
     ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
     ret = CompareStringW(CP_ACP, 0, ABC_FF, 5, ABC_EE, 5);
     ok(ret == CSTR_GREATER_THAN, "expected CSTR_GREATER_THAN, got %d\n", ret);
+
+    ret = CompareStringW(CP_ACP, 0, ABC_EE, 4, A_ACUTE_BC, 4);
+    ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
+    ret = CompareStringW(CP_ACP, 0, ABC_EE, 4, A_ACUTE_BC_DECOMP, 5);
+    ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
+    ret = CompareStringW(CP_ACP, 0, A_ACUTE_BC, 4, A_ACUTE_BC_DECOMP, 5);
+    ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
+
+    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, ABC_EE, 3, A_ACUTE_BC, 4);
+    todo_wine ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
+    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, ABC_EE, 4, A_ACUTE_BC_DECOMP, 5);
+    todo_wine ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
+    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, A_ACUTE_BC, 4, A_ACUTE_BC_DECOMP, 5);
+    ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
+
+    ret = CompareStringW(CP_ACP, 0, ABC_EE, 4, A_NULL_BC, 4);
+    ok(ret == CSTR_EQUAL, "expected CSTR_LESS_THAN, got %d\n", ret);
+    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, ABC_EE, 4, A_NULL_BC, 4);
+    ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
+
+    ret = CompareStringW(CP_ACP, 0, A_NULL_BC, 4, A_ACUTE_BC, 4);
+    ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
+    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, A_NULL_BC, 4, A_ACUTE_BC, 4);
+    todo_wine ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
+
+    ret = CompareStringW(CP_ACP, 0, A_NULL_BC, 4, A_ACUTE_BC_DECOMP, 5);
+    ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
+    ret = CompareStringW(CP_ACP, NORM_IGNORENONSPACE, A_NULL_BC, 4, A_ACUTE_BC_DECOMP, 5);
+    todo_wine ok(ret == CSTR_EQUAL, "expected CSTR_EQUAL, got %d\n", ret);
 }
 
 struct comparestringex_test {
@@ -2066,7 +2098,7 @@ static const struct comparestringex_test comparestringex_tests[] = {
     },
     { /* 3 */
       "tr-TR", 0,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                TRUE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
     },
     { /* 4 */
       "tr-TR", 0,
@@ -2083,7 +2115,7 @@ static const struct comparestringex_test comparestringex_tests[] = {
     },
     { /* 7 */
       "tr-TR", NORM_IGNORECASE,
-      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                TRUE
+      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
     },
     { /* 8 */
       "tr-TR", NORM_IGNORECASE,
@@ -2091,7 +2123,7 @@ static const struct comparestringex_test comparestringex_tests[] = {
     },
     { /* 9 */
       "tr-TR", NORM_IGNORECASE,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                TRUE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
     },
     { /* 10 */
       "tr-TR", NORM_IGNORECASE,
@@ -2116,7 +2148,7 @@ static const struct comparestringex_test comparestringex_tests[] = {
     },
     { /* 15 */
       "tr-TR", NORM_LINGUISTIC_CASING,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                TRUE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
     },
     { /* 16 */
       "tr-TR", NORM_LINGUISTIC_CASING,
@@ -2141,7 +2173,7 @@ static const struct comparestringex_test comparestringex_tests[] = {
     },
     { /* 21 */
       "tr-TR", LINGUISTIC_IGNORECASE,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                TRUE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
     },
     { /* 22 */
       "tr-TR", LINGUISTIC_IGNORECASE,
@@ -2158,7 +2190,7 @@ static const struct comparestringex_test comparestringex_tests[] = {
     },
     { /* 25 */
       "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
-      {'i',0},   {0x130,0}, CSTR_EQUAL,        CSTR_LESS_THAN,    FALSE
+      {'i',0},   {0x130,0}, CSTR_EQUAL,        CSTR_LESS_THAN,    TRUE
     },
     { /* 26 */
       "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
@@ -2166,7 +2198,7 @@ static const struct comparestringex_test comparestringex_tests[] = {
     },
     { /* 27 */
       "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                TRUE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
      },
     { /* 28 */
       "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
@@ -2191,7 +2223,7 @@ static const struct comparestringex_test comparestringex_tests[] = {
     },
     { /* 33 */
       "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
-      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                TRUE
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
     },
     { /* 34 */
       "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
@@ -2361,6 +2393,12 @@ static void test_LCMapStringA(void)
     ok(buf2[ret2-1] == 0, "LCMapStringA not null-terminated\n" );
     ok(ret == ret2, "lengths of sort keys must be equal\n");
     ok(!lstrcmpA(buf, buf2), "sort keys must be equal\n");
+
+    /* test we get the same length when no dest buffer is provided */
+    ret2 = LCMapStringA(LOCALE_USER_DEFAULT, LCMAP_SORTKEY,
+                       upper_case, lstrlenA(upper_case), NULL, 0);
+    ok(ret2, "LCMapStringA must succeed\n");
+    ok(ret == ret2, "lengths of sort keys must be equal (%d vs %d)\n", ret, ret2);
 
     /* test LCMAP_SORTKEY | NORM_IGNORECASE */
     ret = LCMapStringA(LOCALE_USER_DEFAULT, LCMAP_SORTKEY | NORM_IGNORECASE,
@@ -5693,9 +5731,15 @@ static void test_NormalizeString(void)
     static const WCHAR part1_str10[] = {0x309B,0};
     static const WCHAR part1_nfkc10[] = {0x20,0x3099,0};
 
+    /* ANGSTROM SIGN */
+    static const WCHAR part1_str11[] = {0x212B,0};
+    static const WCHAR part1_nfc11[] = {0xC5,0};
+    static const WCHAR part1_nfd11[] = {'A',0x030A,0};
+
     struct test_data_normal {
         const WCHAR *str;
         const WCHAR *expected[4];
+        BOOL todo[4];
     };
     static const struct test_data_normal test_arr[] =
     {
@@ -5720,6 +5764,7 @@ static void test_NormalizeString(void)
         { part1_str8, { part1_str8, part1_nfd8, part1_str8, part1_nfd8 } },
         { part1_str9, { part1_str9, part1_str9, part1_nfkc9, part1_nfkc9 } },
         { part1_str10, { part1_str10, part1_str10, part1_nfkc10, part1_nfkc10 } },
+        { part1_str11, { part1_nfc11, part1_nfd11, part1_nfc11, part1_nfd11 } },
         { 0 }
     };
     const struct test_data_normal *ptest = test_arr;
@@ -5733,10 +5778,8 @@ static void test_NormalizeString(void)
         return;
     }
 
-    todo_wine {
-        dstlen = pNormalizeString( NormalizationD, ptest->str, -1, dst, 1 );
-        ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Should have failed with ERROR_INSUFFICIENT_BUFFER\n");
-    }
+    dstlen = pNormalizeString( NormalizationD, ptest->str, -1, dst, 1 );
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Should have failed with ERROR_INSUFFICIENT_BUFFER\n");
 
     /*
      * For each string, first test passing -1 as srclen to NormalizeString,
@@ -5750,29 +5793,217 @@ static void test_NormalizeString(void)
 
         for (i = 0; i < 4; i++)
         {
-            todo_wine {
-                dstlen = pNormalizeString( norm_forms[i], ptest->str, -1, NULL, 0 );
-                if (dstlen)
-                {
-                    dstlen = pNormalizeString( norm_forms[i], ptest->str, -1, dst, dstlen );
-                    ok(dstlen == strlenW( ptest->expected[i] )+1, "Copied length differed: was %d, should be %d\n",
-                       dstlen, strlenW( ptest->expected[i] )+1);
-                    str_cmp = strncmpW( ptest->expected[i], dst, dstlen+1 );
-                    ok( str_cmp == 0, "test failed: returned value was %d\n", str_cmp );
-                }
+            dstlen = pNormalizeString( norm_forms[i], ptest->str, -1, NULL, 0 );
+            if (dstlen)
+            {
+                dstlen = pNormalizeString( norm_forms[i], ptest->str, -1, dst, dstlen );
+                ok(dstlen == strlenW( dst )+1, "%s:%d: Copied length differed: was %d, should be %d\n",
+                   wine_dbgstr_w(ptest->str), i, dstlen, strlenW( dst )+1);
+                str_cmp = strncmpW( ptest->expected[i], dst, dstlen+1 );
+todo_wine_if(ptest->todo[i])
+                ok( str_cmp == 0, "%s:%d: string incorrect got %s expect %s\n", wine_dbgstr_w(ptest->str), i,
+                    wine_dbgstr_w(dst), wine_dbgstr_w(ptest->expected[i]) );
+            }
 
-                dstlen = pNormalizeString( norm_forms[i], ptest->str, strlenW(ptest->str), NULL, 0 );
-                if (dstlen)
-                {
-                    dstlen = pNormalizeString( norm_forms[i], ptest->str, strlenW(ptest->str), dst, dstlen );
-                    ok(dstlen == strlenW( ptest->expected[i] ), "Copied length differed: was %d, should be %d\n",
-                       dstlen, strlenW( ptest->expected[i] ));
-                    str_cmp = strncmpW( ptest->expected[i], dst, dstlen );
-                    ok( str_cmp == 0, "test failed: returned value was %d\n", str_cmp );
-                }
+            dstlen = pNormalizeString( norm_forms[i], ptest->str, strlenW(ptest->str), NULL, 0 );
+            if (dstlen)
+            {
+                memset(dst, 0, sizeof(dst));
+                dstlen = pNormalizeString( norm_forms[i], ptest->str, strlenW(ptest->str), dst, dstlen );
+                ok(dstlen == strlenW( dst ), "%s:%d: Copied length differed: was %d, should be %d\n",
+                   wine_dbgstr_w(ptest->str), i, dstlen, strlenW( dst ));
+                str_cmp = strncmpW( ptest->expected[i], dst, dstlen );
+todo_wine_if(ptest->todo[i])
+                ok( str_cmp == 0, "%s:%d: string incorrect got %s expect %s\n", wine_dbgstr_w(ptest->str), i,
+                    wine_dbgstr_w(dst), wine_dbgstr_w(ptest->expected[i]) );
             }
         }
         ptest++;
+    }
+}
+
+static void test_SpecialCasing(void)
+{
+    int ret, i;
+    WCHAR exp, buffer[8];
+    static const WCHAR azCyrlazW[] = {'a','z','-','C','y','r','l','-','a','z',0};
+    static const WCHAR azLatnazW[] = {'a','z','-','L','a','t','n','-','a','z',0};
+    static const WCHAR deDEW[] = {'d','e','-','D','E',0};
+    static const WCHAR elGRW[] = {'e','l','-','G','R',0};
+    static const WCHAR enUSW[] = {'e','n','-','U','S',0};
+    static const WCHAR hyAMW[] = {'h','y','-','A','M',0};
+    static const WCHAR ltLTW[] = {'l','t','-','L','T',0};
+    static const WCHAR trTRW[] = {'t','r','-','T','R',0};
+    static const WCHAR TRTRW[] = {'T','R','-','T','R',0};
+    static const struct test {
+        const WCHAR *lang;
+        DWORD flags;
+        WCHAR ch;
+        WCHAR exp;      /* 0 if self */
+        WCHAR exp_ling; /* 0 if exp */
+        BOOL todo;
+        BOOL todo_ling;
+    } tests[] = {
+        {deDEW, LCMAP_UPPERCASE, 0x00DF},   /* LATIN SMALL LETTER SHARP S */
+
+        {enUSW, LCMAP_UPPERCASE, 0xFB00},   /* LATIN SMALL LIGATURE FF */
+        {enUSW, LCMAP_UPPERCASE, 0xFB01},   /* LATIN SMALL LIGATURE FI */
+        {enUSW, LCMAP_UPPERCASE, 0xFB02},   /* LATIN SMALL LIGATURE FL */
+        {enUSW, LCMAP_UPPERCASE, 0xFB03},   /* LATIN SMALL LIGATURE FFI */
+        {enUSW, LCMAP_UPPERCASE, 0xFB04},   /* LATIN SMALL LIGATURE FFL */
+        {enUSW, LCMAP_UPPERCASE, 0xFB05},   /* LATIN SMALL LIGATURE LONG S T */
+        {enUSW, LCMAP_UPPERCASE, 0xFB06},   /* LATIN SMALL LIGATURE ST */
+
+        {hyAMW, LCMAP_UPPERCASE, 0x0587},   /* ARMENIAN SMALL LIGATURE ECH YIWN */
+        {hyAMW, LCMAP_UPPERCASE, 0xFB13},   /* ARMENIAN SMALL LIGATURE MEN NOW */
+        {hyAMW, LCMAP_UPPERCASE, 0xFB14},   /* ARMENIAN SMALL LIGATURE MEN ECH */
+        {hyAMW, LCMAP_UPPERCASE, 0xFB15},   /* ARMENIAN SMALL LIGATURE MEN INI */
+        {hyAMW, LCMAP_UPPERCASE, 0xFB16},   /* ARMENIAN SMALL LIGATURE VEW NOW */
+        {hyAMW, LCMAP_UPPERCASE, 0xFB17},   /* ARMENIAN SMALL LIGATURE MEN XEH */
+
+        {enUSW, LCMAP_UPPERCASE, 0x0149},   /* LATIN SMALL LETTER N PRECEDED BY APOSTROPHE */
+        {elGRW, LCMAP_UPPERCASE, 0x0390},   /* GREEK SMALL LETTER IOTA WITH DIALYTIKA AND TONOS */
+        {elGRW, LCMAP_UPPERCASE, 0x03B0},   /* GREEK SMALL LETTER UPSILON WITH DIALYTIKA AND TONOS */
+        {enUSW, LCMAP_UPPERCASE, 0x01F0},   /* LATIN SMALL LETTER J WITH CARON */
+        {enUSW, LCMAP_UPPERCASE, 0x1E96},   /* LATIN SMALL LETTER H WITH LINE BELOW */
+        {enUSW, LCMAP_UPPERCASE, 0x1E97},   /* LATIN SMALL LETTER T WITH DIAERESIS */
+        {enUSW, LCMAP_UPPERCASE, 0x1E98},   /* LATIN SMALL LETTER W WITH RING ABOVE */
+        {enUSW, LCMAP_UPPERCASE, 0x1E99},   /* LATIN SMALL LETTER Y WITH RING ABOVE */
+        {enUSW, LCMAP_UPPERCASE, 0x1E9A},   /* LATIN SMALL LETTER A WITH RIGHT HALF RING */
+        {elGRW, LCMAP_UPPERCASE, 0x1F50},   /* GREEK SMALL LETTER UPSILON WITH PSILI */
+        {elGRW, LCMAP_UPPERCASE, 0x1F52},   /* GREEK SMALL LETTER UPSILON WITH PSILI AND VARIA */
+        {elGRW, LCMAP_UPPERCASE, 0x1F54},   /* GREEK SMALL LETTER UPSILON WITH PSILI AND OXIA */
+        {elGRW, LCMAP_UPPERCASE, 0x1F56},   /* GREEK SMALL LETTER UPSILON WITH PSILI AND PERISPOMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FB6},   /* GREEK SMALL LETTER ALPHA WITH PERISPOMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FC6},   /* GREEK SMALL LETTER ETA WITH PERISPOMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FD2},   /* GREEK SMALL LETTER IOTA WITH DIALYTIKA AND VARIA */
+        {elGRW, LCMAP_UPPERCASE, 0x1FD3},   /* GREEK SMALL LETTER IOTA WITH DIALYTIKA AND OXIA */
+        {elGRW, LCMAP_UPPERCASE, 0x1FD6},   /* GREEK SMALL LETTER IOTA WITH PERISPOMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FD7},   /* GREEK SMALL LETTER IOTA WITH DIALYTIKA AND PERISPOMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FE2},   /* GREEK SMALL LETTER UPSILON WITH DIALYTIKA AND VARIA */
+        {elGRW, LCMAP_UPPERCASE, 0x1FE3},   /* GREEK SMALL LETTER UPSILON WITH DIALYTIKA AND OXIA */
+        {elGRW, LCMAP_UPPERCASE, 0x1FE4},   /* GREEK SMALL LETTER RHO WITH PSILI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FE6},   /* GREEK SMALL LETTER UPSILON WITH PERISPOMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FE7},   /* GREEK SMALL LETTER UPSILON WITH DIALYTIKA AND PERISPOMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FF6},   /* GREEK SMALL LETTER OMEGA WITH PERISPOMENI */
+
+        {elGRW, LCMAP_UPPERCASE, 0x1F80,0x1F88}, /* GREEK SMALL LETTER ALPHA WITH PSILI AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1F81,0x1F89}, /* GREEK SMALL LETTER ALPHA WITH DASIA AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1F82,0x1F8A}, /* GREEK SMALL LETTER ALPHA WITH PSILI AND VARIA AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1F83,0x1F8B}, /* GREEK SMALL LETTER ALPHA WITH DASIA AND VARIA AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1F84,0x1F8C}, /* GREEK SMALL LETTER ALPHA WITH PSILI AND OXIA AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1F85,0x1F8D}, /* GREEK SMALL LETTER ALPHA WITH DASIA AND OXIA AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1F86,0x1F8E}, /* GREEK SMALL LETTER ALPHA WITH PSILI AND PERISPOMENI AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1F87,0x1F8F}, /* GREEK SMALL LETTER ALPHA WITH DASIA AND PERISPOMENI AND YPOGEGRAMMENI */
+
+        {elGRW, LCMAP_LOWERCASE, 0x1F88,0x1F80}, /* GREEK CAPITAL LETTER ALPHA WITH PSILI AND PROSGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1F89,0x1F81}, /* GREEK CAPITAL LETTER ALPHA WITH DASIA AND PROSGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1F8A,0x1F82}, /* GREEK CAPITAL LETTER ALPHA WITH PSILI AND VARIA AND PROSGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1F8B,0x1F83}, /* GREEK CAPITAL LETTER ALPHA WITH DASIA AND VARIA AND PROSGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1F8C,0x1F84}, /* GREEK CAPITAL LETTER ALPHA WITH PSILI AND OXIA AND PROSGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1F8D,0x1F85}, /* GREEK CAPITAL LETTER ALPHA WITH DASIA AND OXIA AND PROSGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1F8E,0x1F86}, /* GREEK CAPITAL LETTER ALPHA WITH PSILI AND PERISPOMENI AND PROSGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1F8F,0x1F87}, /* GREEK CAPITAL LETTER ALPHA WITH DASIA AND PERISPOMENI AND PROSGEGRAMMENI */
+
+        {elGRW, LCMAP_UPPERCASE, 0x1F90,0x1F98}, /* GREEK SMALL LETTER ETA WITH PSILI AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1F91,0x1F99}, /* GREEK SMALL LETTER ETA WITH DASIA AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1F92,0x1F9A}, /* GREEK SMALL LETTER ETA WITH PSILI AND VARIA AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1F93,0x1F9B}, /* GREEK SMALL LETTER ETA WITH DASIA AND VARIA AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1F94,0x1F9C}, /* GREEK SMALL LETTER ETA WITH PSILI AND OXIA AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1F95,0x1F9D}, /* GREEK SMALL LETTER ETA WITH DASIA AND OXIA AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1F96,0x1F9E}, /* GREEK SMALL LETTER ETA WITH PSILI AND PERISPOMENI AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1F97,0x1F9F}, /* GREEK SMALL LETTER ETA WITH DASIA AND PERISPOMENI AND YPOGEGRAMMENI */
+
+        {elGRW, LCMAP_LOWERCASE, 0x1FA8,0x1FA0}, /* GREEK CAPITAL LETTER OMEGA WITH PSILI AND PROSGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1FA9,0x1FA1}, /* GREEK CAPITAL LETTER OMEGA WITH DASIA AND PROSGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1FAA,0x1FA2}, /* GREEK CAPITAL LETTER OMEGA WITH PSILI AND VARIA AND PROSGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1FAB,0x1FA3}, /* GREEK CAPITAL LETTER OMEGA WITH DASIA AND VARIA AND PROSGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1FAC,0x1FA4}, /* GREEK CAPITAL LETTER OMEGA WITH PSILI AND OXIA AND PROSGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1FAD,0x1FA5}, /* GREEK CAPITAL LETTER OMEGA WITH DASIA AND OXIA AND PROSGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1FAE,0x1FA6}, /* GREEK CAPITAL LETTER OMEGA WITH PSILI AND PERISPOMENI AND PROSGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1FAF,0x1FA7}, /* GREEK CAPITAL LETTER OMEGA WITH DASIA AND PERISPOMENI AND PROSGEGRAMMENI */
+
+        {elGRW, LCMAP_UPPERCASE, 0x1FB3,0x1FBC}, /* GREEK SMALL LETTER ALPHA WITH YPOGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1FBC,0x1FB3}, /* GREEK CAPITAL LETTER ALPHA WITH PROSGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FC3,0x1FCC}, /* GREEK SMALL LETTER ETA WITH YPOGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1FCC,0x1FC3}, /* GREEK CAPITAL LETTER ETA WITH PROSGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FF3,0x1FFC}, /* GREEK SMALL LETTER OMEGA WITH YPOGEGRAMMENI */
+        {elGRW, LCMAP_LOWERCASE, 0x1FFC,0x1FF3}, /* GREEK CAPITAL LETTER OMEGA WITH PROSGEGRAMMENI */
+
+        {elGRW, LCMAP_UPPERCASE, 0x1FB2}, /* GREEK SMALL LETTER ALPHA WITH VARIA AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FB4}, /* GREEK SMALL LETTER ALPHA WITH OXIA AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FC2}, /* GREEK SMALL LETTER ETA WITH VARIA AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FC4}, /* GREEK SMALL LETTER ETA WITH OXIA AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FF2}, /* GREEK SMALL LETTER OMEGA WITH VARIA AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FF4}, /* GREEK SMALL LETTER OMEGA WITH OXIA AND YPOGEGRAMMENI */
+
+        {elGRW, LCMAP_UPPERCASE, 0x1FB7}, /* GREEK SMALL LETTER ALPHA WITH PERISPOMENI AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FC7}, /* GREEK SMALL LETTER ETA WITH PERISPOMENI AND YPOGEGRAMMENI */
+        {elGRW, LCMAP_UPPERCASE, 0x1FF7}, /* GREEK SMALL LETTER OMEGA WITH PERISPOMENI AND YPOGEGRAMMENI */
+
+        {elGRW, LCMAP_LOWERCASE, 0x03A3,0x03C3}, /* GREEK CAPITAL LETTER SIGMA */
+
+        {ltLTW, LCMAP_LOWERCASE, 'J','j'},        /* LATIN CAPITAL LETTER J */
+        {ltLTW, LCMAP_LOWERCASE, 0x012E,0x012F},  /* LATIN CAPITAL LETTER I WITH OGONEK */
+        {ltLTW, LCMAP_LOWERCASE, 0x00CC,0x00EC},  /* LATIN CAPITAL LETTER I WITH GRAVE */
+        {ltLTW, LCMAP_LOWERCASE, 0x00CD,0x00ED},  /* LATIN CAPITAL LETTER I WITH ACUTE */
+        {ltLTW, LCMAP_LOWERCASE, 0x0128,0x0129},  /* LATIN CAPITAL LETTER I WITH TILDE */
+
+        {enUSW, LCMAP_UPPERCASE, 'i', 'I'}, /* LATIN SMALL LETTER I */
+        {ltLTW, LCMAP_UPPERCASE, 'i', 'I'}, /* LATIN SMALL LETTER I */
+        {trTRW, LCMAP_UPPERCASE, 'i', 'I', 0x0130, FALSE, TRUE}, /* LATIN SMALL LETTER I */
+        {TRTRW, LCMAP_UPPERCASE, 'i', 'I', 0x0130, FALSE, TRUE}, /* LATIN SMALL LETTER I */
+        {azCyrlazW, LCMAP_UPPERCASE, 'i', 'I', 0x0130, FALSE, TRUE}, /* LATIN SMALL LETTER I */
+        {azLatnazW, LCMAP_UPPERCASE, 'i', 'I', 0x0130, FALSE, TRUE}, /* LATIN SMALL LETTER I */
+
+        {enUSW, LCMAP_LOWERCASE, 'I', 'i'}, /* LATIN CAPITAL LETTER I */
+        {ltLTW, LCMAP_LOWERCASE, 'I', 'i'}, /* LATIN CAPITAL LETTER I */
+        {trTRW, LCMAP_LOWERCASE, 'I', 'i', 0x0131, FALSE, TRUE}, /* LATIN CAPITAL LETTER I */
+        {TRTRW, LCMAP_LOWERCASE, 'I', 'i', 0x0131, FALSE, TRUE}, /* LATIN CAPITAL LETTER I */
+        {azCyrlazW, LCMAP_LOWERCASE, 'I', 'i', 0x0131, FALSE, TRUE}, /* LATIN CAPITAL LETTER I */
+        {azLatnazW, LCMAP_LOWERCASE, 'I', 'i', 0x0131, FALSE, TRUE}, /* LATIN CAPITAL LETTER I */
+
+        {enUSW, LCMAP_LOWERCASE, 0x0130,0,'i', TRUE}, /* LATIN CAPITAL LETTER I WITH DOT ABOVE */
+        {trTRW, LCMAP_LOWERCASE, 0x0130,0,'i', TRUE}, /* LATIN CAPITAL LETTER I WITH DOT ABOVE */
+        {TRTRW, LCMAP_LOWERCASE, 0x0130,0,'i', TRUE}, /* LATIN CAPITAL LETTER I WITH DOT ABOVE */
+        {azCyrlazW, LCMAP_LOWERCASE, 0x0130,0,'i', TRUE}, /* LATIN CAPITAL LETTER I WITH DOT ABOVE */
+        {azLatnazW, LCMAP_LOWERCASE, 0x0130,0,'i', TRUE}, /* LATIN CAPITAL LETTER I WITH DOT ABOVE */
+
+        {enUSW, LCMAP_UPPERCASE, 0x0131,0,'I', TRUE}, /* LATIN SMALL LETTER DOTLESS I */
+        {trTRW, LCMAP_UPPERCASE, 0x0131,0,'I', TRUE}, /* LATIN SMALL LETTER DOTLESS I */
+        {TRTRW, LCMAP_UPPERCASE, 0x0131,0,'I', TRUE}, /* LATIN SMALL LETTER DOTLESS I */
+        {azCyrlazW, LCMAP_UPPERCASE, 0x0131,0,'I', TRUE}, /* LATIN SMALL LETTER DOTLESS I */
+        {azLatnazW, LCMAP_UPPERCASE, 0x0131,0,'I', TRUE}, /* LATIN SMALL LETTER DOTLESS I */
+    };
+
+    if (!pLCMapStringEx)
+    {
+        win_skip("LCMapStringEx not available\n");
+        return;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(tests); i++) {
+        memset(buffer, 0, sizeof(buffer));
+        ret = pLCMapStringEx(tests[i].lang, tests[i].flags,
+            &tests[i].ch, 1, buffer, ARRAY_SIZE(buffer), NULL, NULL, 0);
+        ok(ret == 1, "expected 1, got %d for %04x for %s\n", ret, tests[i].ch,
+            wine_dbgstr_w(tests[i].lang));
+        exp = tests[i].exp ? tests[i].exp : tests[i].ch;
+        todo_wine_if(tests[i].todo)
+        ok(buffer[0] == exp || broken(buffer[0] != exp),
+            "expected %04x, got %04x for %04x for %s\n",
+            exp, buffer[0], tests[i].ch, wine_dbgstr_w(tests[i].lang));
+
+        memset(buffer, 0, sizeof(buffer));
+        ret = pLCMapStringEx(tests[i].lang, tests[i].flags|LCMAP_LINGUISTIC_CASING,
+            &tests[i].ch, 1, buffer, ARRAY_SIZE(buffer), NULL, NULL, 0);
+        ok(ret == 1, "expected 1, got %d for %04x for %s\n", ret, tests[i].ch,
+            wine_dbgstr_w(tests[i].lang));
+        exp = tests[i].exp_ling ? tests[i].exp_ling : exp;
+        todo_wine_if(tests[i].todo_ling)
+        ok(buffer[0] == exp || broken(buffer[0] != exp),
+            "expected %04x, got %04x for %04x for %s\n",
+            exp, buffer[0], tests[i].ch, wine_dbgstr_w(tests[i].lang));
     }
 }
 
@@ -5826,6 +6057,7 @@ START_TEST(locale)
   test_FindStringOrdinal();
   test_SetThreadUILanguage();
   test_NormalizeString();
+  test_SpecialCasing();
   /* this requires collation table patch to make it MS compatible */
   if (0) test_sorting();
 }

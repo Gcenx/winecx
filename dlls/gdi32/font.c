@@ -861,7 +861,7 @@ static BOOL FONT_DeleteObject( HGDIOBJ handle )
 /***********************************************************************
  *           nulldrv_SelectFont
  */
-HFONT nulldrv_SelectFont( PHYSDEV dev, HFONT font, UINT *aa_flags )
+HFONT CDECL nulldrv_SelectFont( PHYSDEV dev, HFONT font, UINT *aa_flags )
 {
     static const WCHAR desktopW[] = { 'C','o','n','t','r','o','l',' ','P','a','n','e','l','\\',
                                       'D','e','s','k','t','o','p',0 };
@@ -1585,7 +1585,7 @@ UINT WINAPI GetOutlineTextMetricsA(
     left = needed - sizeof(*output);
 
     if(lpOTMW->otmpFamilyName) {
-        output->otmpFamilyName = (LPSTR)(ptr - (char*)output);
+        output->otmpFamilyName = TRUNCCAST(LPSTR, ptr - (char*)output);
 	len = WideCharToMultiByte(CP_ACP, 0,
 	     (WCHAR*)((char*)lpOTMW + (ptrdiff_t)lpOTMW->otmpFamilyName), -1,
 				  ptr, left, NULL, NULL);
@@ -1595,7 +1595,7 @@ UINT WINAPI GetOutlineTextMetricsA(
         output->otmpFamilyName = 0;
 
     if(lpOTMW->otmpFaceName) {
-        output->otmpFaceName = (LPSTR)(ptr - (char*)output);
+        output->otmpFaceName = TRUNCCAST(LPSTR, ptr - (char*)output);
 	len = WideCharToMultiByte(CP_ACP, 0,
 	     (WCHAR*)((char*)lpOTMW + (ptrdiff_t)lpOTMW->otmpFaceName), -1,
 				  ptr, left, NULL, NULL);
@@ -1605,7 +1605,7 @@ UINT WINAPI GetOutlineTextMetricsA(
         output->otmpFaceName = 0;
 
     if(lpOTMW->otmpStyleName) {
-        output->otmpStyleName = (LPSTR)(ptr - (char*)output);
+        output->otmpStyleName = TRUNCCAST(LPSTR, ptr - (char*)output);
 	len = WideCharToMultiByte(CP_ACP, 0,
 	     (WCHAR*)((char*)lpOTMW + (ptrdiff_t)lpOTMW->otmpStyleName), -1,
 				  ptr, left, NULL, NULL);
@@ -1615,7 +1615,7 @@ UINT WINAPI GetOutlineTextMetricsA(
         output->otmpStyleName = 0;
 
     if(lpOTMW->otmpFullName) {
-        output->otmpFullName = (LPSTR)(ptr - (char*)output);
+        output->otmpFullName = TRUNCCAST(LPSTR, ptr - (char*)output);
 	len = WideCharToMultiByte(CP_ACP, 0,
 	     (WCHAR*)((char*)lpOTMW + (ptrdiff_t)lpOTMW->otmpFullName), -1,
 				  ptr, left, NULL, NULL);
@@ -1992,8 +1992,8 @@ static void draw_glyph( DC *dc, INT origin_x, INT origin_y, const GLYPHMETRICS *
 /***********************************************************************
  *           nulldrv_ExtTextOut
  */
-BOOL nulldrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, const RECT *rect,
-                         LPCWSTR str, UINT count, const INT *dx )
+BOOL CDECL nulldrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, const RECT *rect,
+                               LPCWSTR str, UINT count, const INT *dx )
 {
     DC *dc = get_nulldrv_dc( dev );
     UINT i;
@@ -3980,5 +3980,29 @@ BOOL WINAPI GdiRealizationInfo(HDC hdc, struct realization_info *info)
         info->instance_id = ri.instance_id;
     }
 
+    return ret;
+}
+
+/*************************************************************
+ *           GetCharWidthInfo    (GDI32.@)
+ *
+ */
+BOOL WINAPI GetCharWidthInfo(HDC hdc, struct char_width_info *info)
+{
+    PHYSDEV dev;
+    BOOL ret;
+    DC *dc;
+
+    dc = get_dc_ptr(hdc);
+    if (!dc) return FALSE;
+    dev = GET_DC_PHYSDEV( dc, pGetCharWidthInfo );
+    ret = dev->funcs->pGetCharWidthInfo( dev, info );
+
+    if (ret)
+    {
+        info->lsb = width_to_LP( dc, info->lsb );
+        info->rsb = width_to_LP( dc, info->rsb );
+    }
+    release_dc_ptr(dc);
     return ret;
 }

@@ -26,6 +26,7 @@
 #include "winuser.h"
 #include "dplay.h"
 #include "dplobby.h"
+#include "wine/winheader_enter.h"
 
 /* GUID for IDirectPlaySP  {0C9F6360-CC61-11cf-ACEC-00AA006886E3} */
 DEFINE_GUID(IID_IDirectPlaySP, 0xc9f6360, 0xcc61, 0x11cf, 0xac, 0xec, 0x0, 0xaa, 0x0, 0x68, 0x86, 0xe3);
@@ -369,5 +370,7 @@ typedef HRESULT (WINAPI *LPDPSP_SPINIT)(LPSPINITDATA);
  * SP directly
  */
 extern DWORD gdwDPlaySPRefCount;
+
+#include "wine/winheader_exit.h"
 
 #endif

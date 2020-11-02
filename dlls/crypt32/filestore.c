@@ -394,7 +394,7 @@ WINECRYPT_CERTSTORE *CRYPT_FileNameOpenStoreA(HCRYPTPROV hCryptProv,
         SetLastError(ERROR_FILE_NOT_FOUND);
         return NULL;
     }
-    len = MultiByteToWideChar(CP_ACP, 0, pvPara, -1, NULL, 0);
+    len = MultiByteToWideChar(CP_ACP, 0, (LPCSTR)pvPara, -1, NULL, 0);
     if (len)
     {
         LPWSTR storeName = CryptMemAlloc(len * sizeof(WCHAR));

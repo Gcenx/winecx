@@ -34,12 +34,12 @@ WINE_DEFAULT_DEBUG_CHANNEL(ctapi32);
 static const WCHAR value_name[] = {'l','i','b','r','a','r','y',0};
 
 
-static IS8 (*pCT_init)(IU16 ctn, IU16 pn) = NULL;
-static IS8 (*pCT_data)(IU16 ctn, IU8 *dad, IU8 *sad, IU16 lenc, IU8 *command,
-	IU16 *lenr, IU8 *response) = NULL;
-static IS8 (*pCT_close)(IU16 ctn) = NULL;
+static IS8 (* HOSTPTR pCT_init)(IU16 ctn, IU16 pn) = NULL;
+static IS8 (* HOSTPTR pCT_data)(IU16 ctn, IU8 * HOSTPTR dad, IU8 * HOSTPTR sad, IU16 lenc, IU8 * HOSTPTR command,
+	IU16 * HOSTPTR lenr, IU8 * HOSTPTR response) = NULL;
+static IS8 (* HOSTPTR pCT_close)(IU16 ctn) = NULL;
 
-static void *ctapi_handle = NULL;
+static void * HOSTPTR ctapi_handle = NULL;
 
 
 static BOOL load_functions(void) {

@@ -225,7 +225,7 @@ typedef struct _select_ns_entry {
 
 static inline xmldoc_priv * priv_from_xmlDocPtr(const xmlDocPtr doc)
 {
-    return doc->_private;
+    return ADDRSPACECAST(void *, doc->_private);
 }
 
 static inline domdoc_properties * properties_from_xmlDocPtr(xmlDocPtr doc)
@@ -420,13 +420,15 @@ static inline BOOL strn_isspace(xmlChar const* str, int len)
     return len == 0;
 }
 
+#include "wine/hostptraddrspace_enter.h"
+
 static void sax_characters(void *ctx, const xmlChar *ch, int len)
 {
     xmlParserCtxtPtr ctxt;
     const domdoc *This;
 
     ctxt = (xmlParserCtxtPtr) ctx;
-    This = (const domdoc*) ctxt->_private;
+    This = ADDRSPACECAST(void * WIN32PTR, ctxt->_private);
 
     if (ctxt->node)
     {
@@ -453,9 +455,9 @@ static void sax_characters(void *ctx, const xmlChar *ch, int len)
         {
             /* Keep information about ignorable whitespace text node in previous or parent node */
             if (ctxt->node->last)
-                *(DWORD*)&ctxt->node->last->_private |= NODE_PRIV_TRAILING_IGNORABLE_WS;
+                *(unsigned long*)&ctxt->node->last->_private |= NODE_PRIV_TRAILING_IGNORABLE_WS;
             else if (ctxt->node->type != XML_DOCUMENT_NODE)
-                *(DWORD*)&ctxt->node->_private |= NODE_PRIV_CHILD_IGNORABLE_WS;
+                *(unsigned long*)&ctxt->node->_private |= NODE_PRIV_CHILD_IGNORABLE_WS;
             return;
         }
     }
@@ -483,6 +485,8 @@ static void sax_serror(void* ctx, xmlErrorPtr err)
 {
     LIBXML2_CALLBACK_SERROR(doparse, err);
 }
+
+#include "wine/hostptraddrspace_exit.h"
 
 static xmlDocPtr doparse(domdoc* This, char const* ptr, int len, xmlCharEncoding encoding)
 {
@@ -563,7 +567,7 @@ static xmlDocPtr doparse(domdoc* This, char const* ptr, int len, xmlCharEncoding
         node = xmlNewDocPI( doc, (xmlChar*)"xml", NULL );
 
         /* version attribute can't be omitted */
-        sprintf(buff, "version=\"%s\"", doc->version ? (char*)doc->version : "1.0");
+        sprintf(buff, "version=\"%s\"", doc->version ? (char* HOSTPTR)doc->version : "1.0");
         xmlNodeAddContent( node, xmlbuff );
 
         if (doc->encoding)
@@ -1371,7 +1375,7 @@ static HRESULT WINAPI domdoc_put_dataType(
     return E_FAIL;
 }
 
-static int XMLCALL domdoc_get_xml_writecallback(void *ctx, const char *data, int len)
+static int XMLCALL domdoc_get_xml_writecallback(void * HOSTPTR ctx, const char * HOSTPTR data, int len)
 {
     return xmlBufferAdd((xmlBufferPtr)ctx, (xmlChar*)data, len) == 0 ? len : 0;
 }
@@ -1949,7 +1953,7 @@ xmlChar* tagName_to_XPath(const BSTR tagName)
                 ++tokEnd;
             len = WideCharToMultiByte(CP_UTF8, 0, tokBegin, tokEnd-tokBegin, NULL, 0, NULL, NULL);
             tmp = xmlMalloc(len);
-            WideCharToMultiByte(CP_UTF8, 0, tokBegin, tokEnd-tokBegin, (char*)tmp, len, NULL, NULL);
+            WideCharToMultiByte(CP_UTF8, 0, tokBegin, tokEnd-tokBegin, (char* HOSTPTR)tmp, len, NULL, NULL);
             query = xmlStrncat(query, tmp, len);
             xmlFree(tmp);
             tokBegin = tokEnd;
@@ -2312,7 +2316,7 @@ static HRESULT WINAPI domdoc_load(
 
         if (SUCCEEDED(hr))
         {
-            get_doc(This)->name = (char *)xmlchar_from_wcharn(filename, -1, TRUE);
+            get_doc(This)->name = (char * HOSTPTR)xmlchar_from_wcharn(filename, -1, TRUE);
             This->properties->uri = uri;
             hr = This->error = S_OK;
             *isSuccessful = VARIANT_TRUE;
@@ -2474,11 +2478,11 @@ static HRESULT WINAPI domdoc_loadXML(
     return hr;
 }
 
-static int XMLCALL domdoc_save_writecallback(void *ctx, const char *buffer, int len)
+static int XMLCALL domdoc_save_writecallback(void * HOSTPTR ctx, const char * HOSTPTR buffer, int len)
 {
     DWORD written = -1;
 
-    if(!WriteFile(ctx, buffer, len, &written, NULL))
+    if(!WriteFile(ADDRSPACECAST(HANDLE, ctx), ADDRSPACECAST(const char*, buffer), len, &written, NULL))
     {
         WARN("write error\n");
         return -1;
@@ -2487,17 +2491,17 @@ static int XMLCALL domdoc_save_writecallback(void *ctx, const char *buffer, int 
         return written;
 }
 
-static int XMLCALL domdoc_save_closecallback(void *ctx)
+static int XMLCALL domdoc_save_closecallback(void * HOSTPTR ctx)
 {
-    return CloseHandle(ctx) ? 0 : -1;
+    return CloseHandle(ADDRSPACECAST(void *, ctx)) ? 0 : -1;
 }
 
-static int XMLCALL domdoc_stream_save_writecallback(void *ctx, const char *buffer, int len)
+static int XMLCALL domdoc_stream_save_writecallback(void * HOSTPTR ctx, const char * HOSTPTR buffer, int len)
 {
     ULONG written = 0;
     HRESULT hr;
 
-    hr = IStream_Write((IStream*)ctx, buffer, len, &written);
+    hr = i_stream_write(ADDRSPACECAST(void *, ctx), buffer, len, &written);
     TRACE("0x%08x %p %d %u\n", hr, buffer, len, written);
     if (hr != S_OK)
     {
@@ -2508,9 +2512,9 @@ static int XMLCALL domdoc_stream_save_writecallback(void *ctx, const char *buffe
         return len;
 }
 
-static int XMLCALL domdoc_stream_save_closecallback(void *ctx)
+static int XMLCALL domdoc_stream_save_closecallback(void * HOSTPTR ctx)
 {
-    IStream_Release((IStream*)ctx);
+    IStream_Release(ADDRSPACECAST(void *, ctx));
     return 0;
 }
 
@@ -2821,6 +2825,8 @@ static inline BOOL is_wellformed(xmlDocPtr doc)
 #endif
 }
 
+#include "wine/hostptraddrspace_enter.h"
+
 static void LIBXML2_LOG_CALLBACK validate_error(void* ctx, char const* msg, ...)
 {
     va_list ap;
@@ -2836,6 +2842,8 @@ static void LIBXML2_LOG_CALLBACK validate_warning(void* ctx, char const* msg, ..
     LIBXML2_CALLBACK_WARN(domdoc_validateNode, msg, ap);
     va_end(ap);
 }
+
+#include "wine/hostptraddrspace_exit.h"
 
 static HRESULT WINAPI domdoc_validateNode(
     IXMLDOMDocument3* iface,
@@ -3045,7 +3053,7 @@ static HRESULT WINAPI domdoc_setProperty(
                 {
                     hr = E_FAIL;
                     WARN("Syntax error in xmlns string: %s\n\tat token: %s\n",
-                          debugstr_w(bstr), debugstr_an((const char*)pTokBegin, pTokEnd-pTokBegin));
+                          debugstr_w(bstr), debugstr_an((const char* HOSTPTR)pTokBegin, pTokEnd-pTokBegin));
                     continue;
                 }
 
@@ -3066,7 +3074,7 @@ static HRESULT WINAPI domdoc_setProperty(
                     {
                         hr = E_FAIL;
                         WARN("Syntax error in xmlns string: %s\n\tat token: %s\n",
-                              debugstr_w(bstr), debugstr_an((const char*)pTokBegin, pTokEnd-pTokBegin));
+                              debugstr_w(bstr), debugstr_an((const char* HOSTPTR)pTokBegin, pTokEnd-pTokBegin));
                         continue;
                     }
 
@@ -3093,7 +3101,7 @@ static HRESULT WINAPI domdoc_setProperty(
                     else
                     {
                         WARN("Syntax error in xmlns string: %s\n\tat token: %s\n",
-                              debugstr_w(bstr), debugstr_an((const char*)pTokInner, pTokEnd-pTokInner));
+                              debugstr_w(bstr), debugstr_an((const char* HOSTPTR)pTokInner, pTokEnd-pTokInner));
                         list_add_tail(pNsList, &ns_entry->entry);
 
                         ns_entry = NULL;
@@ -3162,9 +3170,9 @@ static HRESULT WINAPI domdoc_getProperty(
         nsStr = This->properties->selectNsStr;
         pNsList = &This->properties->selectNsList;
         lenA = This->properties->selectNsStr_len;
-        lenW = MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)nsStr, lenA+1, NULL, 0);
+        lenW = MultiByteToWideChar(CP_UTF8, 0, (const char* HOSTPTR)nsStr, lenA+1, NULL, 0);
         rebuiltStr = heap_alloc(lenW*sizeof(WCHAR));
-        MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)nsStr, lenA+1, rebuiltStr, lenW);
+        MultiByteToWideChar(CP_UTF8, 0, (const char* HOSTPTR)nsStr, lenA+1, rebuiltStr, lenW);
         cur = rebuiltStr;
         /* this is fine because all of the chars that end tokens are ASCII*/
         LIST_FOR_EACH_ENTRY(pNsEntry, pNsList, select_ns_entry, entry)

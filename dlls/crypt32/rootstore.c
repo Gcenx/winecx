@@ -42,6 +42,7 @@
 #include "wincrypt.h"
 #include "winternl.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "crypt32_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(crypt);
@@ -815,12 +816,15 @@ static void read_trusted_roots_from_known_locations(HCERTSTORE store)
                 CFDataRef certData;
                 if ((status = SecKeychainItemExport(cert, kSecFormatX509Cert, 0, NULL, &certData)) == noErr)
                 {
+                    size_t len = CFDataGetLength(certData);
+                    BYTE *bytes = heap_alloc(len);
+                    memcpy(bytes, CFDataGetBytePtr(certData), len);
                     if (CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
-                            CFDataGetBytePtr(certData), CFDataGetLength(certData),
-                            CERT_STORE_ADD_NEW, NULL))
+                            bytes, len, CERT_STORE_ADD_NEW, NULL))
                         ret = TRUE;
                     else
                         WARN("adding root cert %d failed: %08x\n", i, GetLastError());
+                    heap_free(bytes);
                     CFRelease(certData);
                 }
                 else

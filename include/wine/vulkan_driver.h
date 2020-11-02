@@ -3,7 +3,7 @@
  * This file is generated from Vulkan vk.xml file covered
  * by the following copyright and permission notice:
  *
- * Copyright (c) 2015-2018 The Khronos Group Inc.
+ * Copyright (c) 2015-2019 The Khronos Group Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,6 +40,8 @@
 
 /* Wine internal vulkan driver version, needs to be bumped upon vulkan_funcs changes. */
 #define WINE_VULKAN_DRIVER_VERSION 7
+
+#include "wine/winheader_enter.h"
 
 struct vulkan_funcs
 {
@@ -131,5 +133,7 @@ static inline void *get_vulkan_driver_instance_proc_addr(
 
     return get_vulkan_driver_device_proc_addr(vulkan_funcs, name);
 }
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_VULKAN_DRIVER_H */

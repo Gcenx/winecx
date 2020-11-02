@@ -18,6 +18,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  *
  */
+
+#define WINE_RBTREE_HOSTADDRSPACE
+
 #include "config.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -48,7 +51,7 @@ int source_rb_compare(const void *key, const struct wine_rb_entry *entry)
  *
  * check whether a source file has already been stored
  */
-static unsigned source_find(const char* name)
+static unsigned source_find(const char* HOSTPTR name)
 {
     struct wine_rb_entry*       e;
 
@@ -65,7 +68,7 @@ static unsigned source_find(const char* name)
 unsigned source_new(struct module* module, const char* base, const char* name)
 {
     unsigned    ret = -1;
-    const char* full;
+    const char* HOSTPTR full;
     char*       tmp = NULL;
 
     if (!name) return ret;

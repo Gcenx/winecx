@@ -787,7 +787,6 @@ static HRESULT WINAPI DocObjectService_FireNavigateComplete2(
 
     SysFreeString(url);
 
-    This->doc_host->busy = VARIANT_FALSE;
     IShellBrowser_Release(&This->IShellBrowser_iface);
     return S_OK;
 }
@@ -851,8 +850,6 @@ static HRESULT WINAPI DocObjectService_FireDocumentComplete(
     TRACE("<<<\n");
 
     SysFreeString(url);
-    if(This->doc_host)
-        This->doc_host->busy = VARIANT_FALSE;
 
     IShellBrowser_Release(&This->IShellBrowser_iface);
     return S_OK;

@@ -18,6 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
@@ -25,7 +29,7 @@
 #include "wine/library.h"
 #include "crt0_private.h"
 
-extern int wmain( int argc, WCHAR *argv[] );
+extern int __cdecl wmain( int argc, WCHAR *argv[] );
 
 DWORD WINAPI DECLSPEC_HIDDEN __wine_spec_exe_wentry( PEB *peb )
 {

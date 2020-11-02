@@ -56,14 +56,14 @@ static inline void service_event(const char *event)
     send_msg("EVENT", event);
 }
 
-static void service_ok(int cnd, const char *msg, ...)
+static void WINAPIV service_ok(int cnd, const char *msg, ...)
 {
-   va_list valist;
-   char buf[512];
+    __ms_va_list valist;
+    char buf[512];
 
-    va_start(valist, msg);
+    __ms_va_start(valist, msg);
     vsprintf(buf, msg, valist);
-    va_end(valist);
+    __ms_va_end(valist);
 
     send_msg(cnd ? "OK" : "FAIL", buf);
 }
@@ -462,7 +462,7 @@ static void test_service(void)
 
     res = QueryServiceStatus(service_handle, &status);
     ok(res, "QueryServiceStatus failed: %d\n", GetLastError());
-    todo_wine ok(status.dwServiceType == SERVICE_WIN32_OWN_PROCESS, "status.dwServiceType = %x\n", status.dwServiceType);
+    ok(status.dwServiceType == SERVICE_WIN32_OWN_PROCESS, "status.dwServiceType = %x\n", status.dwServiceType);
     ok(status.dwCurrentState == SERVICE_RUNNING, "status.dwCurrentState = %x\n", status.dwCurrentState);
     ok(status.dwControlsAccepted == (SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN),
             "status.dwControlsAccepted = %x\n", status.dwControlsAccepted);
@@ -517,7 +517,7 @@ static inline void test_no_stop(void)
 
     res = QueryServiceStatus(service_handle, &status);
     ok(res, "QueryServiceStatus failed: %d\n", GetLastError());
-    todo_wine ok(status.dwServiceType == SERVICE_WIN32_OWN_PROCESS, "status.dwServiceType = %x\n", status.dwServiceType);
+    ok(status.dwServiceType == SERVICE_WIN32_OWN_PROCESS, "status.dwServiceType = %x\n", status.dwServiceType);
     ok(status.dwCurrentState == SERVICE_RUNNING, "status.dwCurrentState = %x\n", status.dwCurrentState);
     ok(status.dwControlsAccepted == (SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN),
             "status.dwControlsAccepted = %x\n", status.dwControlsAccepted);
@@ -538,7 +538,7 @@ static inline void test_no_stop(void)
 
     res = QueryServiceStatus(service_handle, &status);
     ok(res, "QueryServiceStatus failed: %d\n", GetLastError());
-    todo_wine ok(status.dwServiceType == SERVICE_WIN32_OWN_PROCESS, "status.dwServiceType = %x\n", status.dwServiceType);
+    ok(status.dwServiceType == SERVICE_WIN32_OWN_PROCESS, "status.dwServiceType = %x\n", status.dwServiceType);
     ok(status.dwCurrentState==SERVICE_STOPPED || status.dwCurrentState==SERVICE_STOP_PENDING,
             "status.dwCurrentState = %x\n", status.dwCurrentState);
     ok(status.dwControlsAccepted == 0, "status.dwControlsAccepted = %x\n", status.dwControlsAccepted);
@@ -558,7 +558,7 @@ static inline void test_no_stop(void)
 
     res = QueryServiceStatus(service_handle, &status);
     ok(res, "QueryServiceStatus failed: %d\n", GetLastError());
-    todo_wine ok(status.dwServiceType == SERVICE_WIN32_OWN_PROCESS, "status.dwServiceType = %x\n", status.dwServiceType);
+    ok(status.dwServiceType == SERVICE_WIN32_OWN_PROCESS, "status.dwServiceType = %x\n", status.dwServiceType);
     ok(status.dwCurrentState==SERVICE_STOPPED || status.dwCurrentState==SERVICE_STOP_PENDING,
             "status.dwCurrentState = %x\n", status.dwCurrentState);
     ok(status.dwControlsAccepted == 0, "status.dwControlsAccepted = %x\n", status.dwControlsAccepted);

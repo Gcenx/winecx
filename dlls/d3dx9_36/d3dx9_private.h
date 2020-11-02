@@ -121,6 +121,10 @@ HRESULT load_volume_from_dds(IDirect3DVolume9 *dst_volume, const PALETTEENTRY *d
     const D3DXIMAGE_INFO *src_info) DECLSPEC_HIDDEN;
 HRESULT load_volume_texture_from_dds(IDirect3DVolumeTexture9 *volume_texture, const void *src_data,
     const PALETTEENTRY *palette, DWORD filter, DWORD color_key, const D3DXIMAGE_INFO *src_info) DECLSPEC_HIDDEN;
+HRESULT lock_surface(IDirect3DSurface9 *surface, D3DLOCKED_RECT *lock,
+        IDirect3DSurface9 **temp_surface, BOOL write) DECLSPEC_HIDDEN;
+HRESULT unlock_surface(IDirect3DSurface9 *surface, D3DLOCKED_RECT *lock,
+        IDirect3DSurface9 *temp_surface, BOOL update) DECLSPEC_HIDDEN;
 
 unsigned short float_32_to_16(const float in) DECLSPEC_HIDDEN;
 float float_16_to_32(const unsigned short in) DECLSPEC_HIDDEN;
@@ -338,7 +342,7 @@ struct d3dx_shared_data
     ULONG64 update_version;
 };
 
-struct d3dx9_base_effect;
+struct d3dx_effect;
 
 static inline BOOL is_top_level_parameter(struct d3dx_parameter *param)
 {
@@ -371,14 +375,14 @@ static inline BOOL is_param_dirty(struct d3dx_parameter *param, ULONG64 update_v
     return is_top_level_param_dirty(param->top_level_param, update_version);
 }
 
-struct d3dx_parameter *get_parameter_by_name(struct d3dx9_base_effect *base,
+struct d3dx_parameter *get_parameter_by_name(struct d3dx_effect *effect,
         struct d3dx_parameter *parameter, const char *name) DECLSPEC_HIDDEN;
 
 #define SET_D3D_STATE_(manager, device, method, args...) (manager ? manager->lpVtbl->method(manager, args) \
         : device->lpVtbl->method(device, args))
 #define SET_D3D_STATE(base_effect, args...) SET_D3D_STATE_(base_effect->manager, base_effect->device, args)
 
-HRESULT d3dx_create_param_eval(struct d3dx9_base_effect *base_effect, void *byte_code,
+HRESULT d3dx_create_param_eval(struct d3dx_effect *effect, void *byte_code,
         unsigned int byte_code_size, D3DXPARAMETER_TYPE type,
         struct d3dx_param_eval **peval, ULONG64 *version_counter,
         const char **skip_constants, unsigned int skip_constants_count) DECLSPEC_HIDDEN;

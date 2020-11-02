@@ -674,7 +674,7 @@ static HRESULT update_mapping(WINMM_MMDevice ***map, UINT count,
     for(i = 0; i < count; ++i){
         WINMM_MMDevice *tmp;
 
-        if(!lstrcmpW((*map)[i]->dev_id, default_id)){
+        if(!wcscmp((*map)[i]->dev_id, default_id)){
             (*map)[0] = (*map)[i];
             (*map)[i] = prev;
 
@@ -3124,9 +3124,9 @@ UINT WINAPI waveOutSetVolume(HWAVEOUT hWaveOut, DWORD in)
         return MMSYSERR_ERROR;
     }
 
-    vols[0] = (float)((DWORD)(in & 0xFFFF) / (float)0xFFFF);
+    vols[0] = (float)((in & 0xFFFF) / (float)0xFFFF);
     if(channels > 1)
-        vols[1] = (float)((DWORD)(in >> 16) / (float)0xFFFF);
+        vols[1] = (float)((in >> 16) / (float)0xFFFF);
 
     hr = IAudioStreamVolume_SetAllVolumes(device->volume, channels, vols);
     if(FAILED(hr)){

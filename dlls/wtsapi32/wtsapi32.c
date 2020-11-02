@@ -15,7 +15,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
 #include <stdarg.h>
 #include <stdlib.h>
 #include "windef.h"
@@ -254,8 +253,17 @@ BOOL WINAPI WTSQuerySessionInformationW(
  */
 BOOL WINAPI WTSQueryUserToken(ULONG session_id, PHANDLE token)
 {
-    FIXME("%u %p\n", session_id, token);
-    return FALSE;
+    FIXME("%u %p semi-stub!\n", session_id, token);
+
+    if (!token)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    return DuplicateHandle(GetCurrentProcess(), GetCurrentProcessToken(),
+                           GetCurrentProcess(), token,
+                           0, FALSE, DUPLICATE_SAME_ACCESS);
 }
 
 /************************************************************

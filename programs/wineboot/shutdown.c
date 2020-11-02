@@ -23,7 +23,6 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "tlhelp32.h"
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 #include "resource.h"
@@ -63,7 +62,7 @@ static BOOL CALLBACK enum_proc( HWND hwnd, LPARAM lp )
 }
 
 /* compare two window info structures; callback for qsort */
-static int cmp_window( const void *ptr1, const void *ptr2 )
+static int __cdecl cmp_window( const void *ptr1, const void *ptr2 )
 {
     const struct window_info *info1 = ptr1;
     const struct window_info *info2 = ptr2;
@@ -395,7 +394,7 @@ void kill_processes( BOOL kill_desktop )
             if (process.th32ProcessID == desktop_pid) continue;
             /* CODEWEAVERS HACK: don't kill winewrapper so end-of-installation
              * detection works properly */
-            if (strstrW( process.szExeFile, winewrapperW )) continue;
+            if (wcsstr( process.szExeFile, winewrapperW )) continue;
             WINE_TRACE("killing process %04x %s\n",
                        process.th32ProcessID, wine_dbgstr_w(process.szExeFile) );
             if (!(handle = OpenProcess( PROCESS_TERMINATE, FALSE, process.th32ProcessID )))

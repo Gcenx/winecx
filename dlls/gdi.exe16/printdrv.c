@@ -31,9 +31,6 @@
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
-#ifdef HAVE_IO_H
-# include <io.h>
-#endif
 #ifdef HAVE_SYS_WAIT_H
 # include <sys/wait.h>
 #endif
@@ -518,9 +515,8 @@ INT16 WINAPI EndSpoolPage16(HPJOB16 hJob)
  */
 DWORD WINAPI GetSpoolJob16(int nOption, LONG param)
 {
-    DWORD retval = 0;
     TRACE("In GetSpoolJob param 0x%x noption %d\n",param, nOption);
-    return retval;
+    return 0;
 }
 
 

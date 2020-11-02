@@ -25,17 +25,17 @@
 
 #include "ole2.h"
 
-void* XAudio_Internal_Malloc(size_t size)
+void * HOSTPTR XAudio_Internal_Malloc(size_t size)
 {
     return CoTaskMemAlloc(size);
 }
 
-void XAudio_Internal_Free(void* ptr)
+void XAudio_Internal_Free(void * HOSTPTR ptr)
 {
-    return CoTaskMemFree(ptr);
+    return CoTaskMemFree(ADDRSPACECAST(void *, ptr));
 }
 
-void* XAudio_Internal_Realloc(void* ptr, size_t size)
+void * HOSTPTR XAudio_Internal_Realloc(void * HOSTPTR ptr, size_t size)
 {
-    return CoTaskMemRealloc(ptr, size);
+    return CoTaskMemRealloc(ADDRSPACECAST(void *, ptr), size);
 }

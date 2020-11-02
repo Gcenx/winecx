@@ -19,6 +19,8 @@
 #ifndef _FLATAPI_H
 #define _FLATAPI_H
 
+#include "wine/winheader_enter.h"
+
 #define WINGDIPAPI __stdcall
 
 #define GDIPCONST const
@@ -266,6 +268,7 @@ GpStatus WINGDIPAPI GdipGraphicsClear(GpGraphics*,ARGB);
 GpStatus WINGDIPAPI GdipGraphicsSetAbort(GpGraphics*,GdiplusAbort*);
 GpStatus WINGDIPAPI GdipGetVisibleClipBounds(GpGraphics*,GpRectF*);
 GpStatus WINGDIPAPI GdipGetVisibleClipBoundsI(GpGraphics*,GpRect*);
+GpStatus WINGDIPAPI GdipInitializePalette(ColorPalette*,PaletteType,INT,BOOL,GpBitmap*);
 GpStatus WINGDIPAPI GdipIsClipEmpty(GpGraphics*, BOOL*);
 GpStatus WINGDIPAPI GdipIsVisiblePoint(GpGraphics*,REAL,REAL,BOOL*);
 GpStatus WINGDIPAPI GdipIsVisiblePointI(GpGraphics*,INT,INT,BOOL*);
@@ -755,5 +758,7 @@ GpStatus WINGDIPAPI GdipTestControl(GpTestControlEnum,void*);
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif

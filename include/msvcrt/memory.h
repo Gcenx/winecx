@@ -8,6 +8,8 @@
 #ifndef __WINE_MEMORY_H
 #define __WINE_MEMORY_H
 
+#include "wine/winheader_enter.h"
+
 #include <crtdefs.h>
 
 #ifdef __cplusplus
@@ -33,5 +35,7 @@ static inline void* memccpy(void *s1, const void *s2, int c, size_t n) { return 
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_MEMORY_H */

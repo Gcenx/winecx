@@ -298,10 +298,11 @@ static void assign_action(HWND dialog)
     int obj = lv_get_cur_item(dialog);
     int old_action = lv_get_item_data(dialog, obj);
     int used_obj;
-
-    DIDEVICEOBJECTINSTANCEW ddo = device->ddo[obj];
+    DWORD type;
 
     if (old_action == action) return;
+    if (obj < 0) return;
+    type = device->ddo[obj].dwType;
 
     /* Clear old action */
     if (old_action != -1)
@@ -320,7 +321,7 @@ static void assign_action(HWND dialog)
     lv_set_action(dialog, used_obj, -1, lpdiaf);
 
     /* Set new action */
-    lpdiaf->rgoAction[action].dwObjID = ddo.dwType;
+    lpdiaf->rgoAction[action].dwObjID = type;
     lpdiaf->rgoAction[action].guidInstance = device->ddi.guidInstance;
     lpdiaf->rgoAction[action].dwHow = DIAH_USERCONFIG;
 
@@ -374,8 +375,14 @@ static INT_PTR CALLBACK ConfigureDevicesDlgProc(HWND dialog, UINT uMsg, WPARAM w
             SendDlgItemMessageW(dialog, IDC_CONTROLLERCOMBO, CB_SETCURSEL, 0, 0);
             fill_device_object_list(dialog);
 
+            ShowCursor(TRUE);
+
             break;
         }
+
+        case WM_DESTROY:
+            ShowCursor(FALSE);
+            break;
 
         case WM_NOTIFY:
 

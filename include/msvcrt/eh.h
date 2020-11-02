@@ -20,6 +20,8 @@
 #ifndef __WINE_EH_H
 #define __WINE_EH_H
 
+#include "wine/winheader_enter.h"
+
 #include <crtdefs.h>
 
 #if !defined(__cplusplus) && !defined(__WINE_MSVCRT_TEST)
@@ -40,9 +42,11 @@ terminate_function __cdecl set_terminate(terminate_function func);
 unexpected_function __cdecl set_unexpected(unexpected_function func);
 _se_translator_function __cdecl set_se_translator(_se_translator_function func);
 
-void __cdecl terminate(void);
-void __cdecl unexpected(void);
+void __cdecl terminate(void) DECLSPEC_NORETURN;
+void __cdecl unexpected(void) DECLSPEC_NORETURN;
 
 #include <poppack.h>
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_EH_H */

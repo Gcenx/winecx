@@ -2471,6 +2471,7 @@ static void test_SetWindowPos(HWND hwnd, HWND hwnd2)
     LONG_PTR old_proc;
     HWND hwnd_grandchild, hwnd_child, hwnd_child2;
     HWND hwnd_desktop;
+    RECT rc_expected;
     RECT rc1, rc2;
     BOOL ret;
 
@@ -2554,11 +2555,59 @@ static void test_SetWindowPos(HWND hwnd, HWND hwnd2)
 
     /* Does not seem to do anything even without passing flags, still returns TRUE */
     GetWindowRect(hwnd_child, &rc1);
-    ret = SetWindowPos(hwnd_child, hwnd2 , 1, 2, 3, 4, 0);
-    ok(ret, "Got %d\n", ret);
+    ret = SetWindowPos(hwnd_child, hwnd2, 1, 2, 3, 4, 0);
+    ok(ret, "Got %d.\n", ret);
     GetWindowRect(hwnd_child, &rc2);
-    ok(EqualRect(&rc1, &rc2), "%s != %s\n", wine_dbgstr_rect(&rc1), wine_dbgstr_rect(&rc2));
+    ok(EqualRect(&rc1, &rc2), "%s != %s.\n", wine_dbgstr_rect(&rc1), wine_dbgstr_rect(&rc2));
     check_active_state(hwnd2, hwnd2, hwnd2);
+
+    GetWindowRect(hwnd_child, &rc1);
+    ret = SetWindowPos(hwnd_child, HWND_NOTOPMOST, 1, 2, 3, 4, 0);
+    ok(ret, "Got %d.\n", ret);
+    GetWindowRect(hwnd_child, &rc2);
+    todo_wine ok(EqualRect(&rc1, &rc2), "%s != %s.\n", wine_dbgstr_rect(&rc1), wine_dbgstr_rect(&rc2));
+    check_active_state(hwnd2, hwnd2, hwnd2);
+    SetWindowPos(hwnd_child, HWND_NOTOPMOST, 0, 0, rc1.right - rc1.left, rc1.bottom - rc1.top, 0);
+
+    GetWindowRect(hwnd_child, &rc1);
+    ret = SetWindowPos(hwnd_child, HWND_TOPMOST, 1, 2, 3, 4, 0);
+    ok(ret, "Got %d.\n", ret);
+    GetWindowRect(hwnd_child, &rc2);
+    todo_wine ok(EqualRect(&rc1, &rc2), "%s != %s.\n", wine_dbgstr_rect(&rc1), wine_dbgstr_rect(&rc2));
+    check_active_state(hwnd2, hwnd2, hwnd2);
+    SetWindowPos(hwnd_child, HWND_TOPMOST, 0, 0, rc1.right - rc1.left, rc1.bottom - rc1.top, 0);
+
+    /* HWND_TOP / HWND_BOTTOM are different. */
+    GetWindowRect(hwnd_child, &rc1);
+    rc_expected.left = rc1.left + 1;
+    rc_expected.top = rc1.top + 2;
+    rc_expected.right = rc1.left + 4;
+    rc_expected.bottom = rc1.top + 6;
+    ret = SetWindowPos(hwnd_child, HWND_TOP, 1, 2, 3, 4, 0);
+    ok(ret, "Got %d.\n", ret);
+    GetWindowRect(hwnd_child, &rc2);
+    ok(EqualRect(&rc_expected, &rc2), "%s != %s.\n",
+            wine_dbgstr_rect(&rc_expected), wine_dbgstr_rect(&rc2));
+    check_active_state(hwnd2, hwnd2, hwnd2);
+    SetWindowPos(hwnd_child, HWND_TOP, 0, 0, rc1.right - rc1.left, rc1.bottom - rc1.top, 0);
+
+    GetWindowRect(hwnd_child, &rc1);
+    ret = SetWindowPos(hwnd_child, HWND_BOTTOM, 1, 2, 3, 4, 0);
+    ok(ret, "Got %d.\n", ret);
+    GetWindowRect(hwnd_child, &rc2);
+    ok(EqualRect(&rc_expected, &rc2), "%s != %s.\n",
+            wine_dbgstr_rect(&rc_expected), wine_dbgstr_rect(&rc2));
+    check_active_state(hwnd2, hwnd2, hwnd2);
+    SetWindowPos(hwnd_child, HWND_BOTTOM, 0, 0, rc1.right - rc1.left, rc1.bottom - rc1.top, 0);
+
+    GetWindowRect(hwnd_child, &rc1);
+    ret = SetWindowPos(hwnd_child, NULL, 1, 2, 3, 4, 0);
+    ok(ret, "Got %d.\n", ret);
+    GetWindowRect(hwnd_child, &rc2);
+    ok(EqualRect(&rc_expected, &rc2), "%s != %s.\n",
+            wine_dbgstr_rect(&rc_expected), wine_dbgstr_rect(&rc2));
+    check_active_state(hwnd2, hwnd2, hwnd2);
+    SetWindowPos(hwnd_child, NULL, 0, 0, rc1.right - rc1.left, rc1.bottom - rc1.top, 0);
 
     /* Same thing the other way around. */
     GetWindowRect(hwnd2, &rc1);
@@ -2581,10 +2630,8 @@ static void test_SetWindowPos(HWND hwnd, HWND hwnd2)
     ret = SetWindowPos(hwnd_grandchild, hwnd_child2, 1, 2, 3, 4, SWP_NOZORDER);
     ok(ret, "Got %d\n", ret);
     GetWindowRect(hwnd_grandchild, &rc2);
-    ok((rc1.left+1) == rc2.left && (rc1.top+2) == rc2.top &&
-       (rc1.left+4) == rc2.right && (rc1.top+6) == rc2.bottom,
-       "(%d,%d)-(%d,%d) != %s\n", rc1.left+1, rc1.top+2, rc1.left+4, rc1.top+6,
-       wine_dbgstr_rect(&rc2));
+    ok(EqualRect(&rc_expected, &rc2),
+            "%s != %s.\n", wine_dbgstr_rect(&rc_expected), wine_dbgstr_rect(&rc2));
     check_active_state(hwnd2, hwnd2, hwnd2);
 
     /* Given a sibling window, the window is properly resized. */
@@ -2592,10 +2639,8 @@ static void test_SetWindowPos(HWND hwnd, HWND hwnd2)
     ret = SetWindowPos(hwnd_child, hwnd_child2, 1, 2, 3, 4, 0);
     ok(ret, "Got %d\n", ret);
     GetWindowRect(hwnd_child, &rc2);
-    ok((rc1.left+1) == rc2.left && (rc1.top+2) == rc2.top &&
-       (rc1.left+4) == rc2.right && (rc1.top+6) == rc2.bottom,
-       "(%d,%d)-(%d,%d) != %s\n", rc1.left+1, rc1.top+2, rc1.left+4, rc1.top+6,
-       wine_dbgstr_rect(&rc2));
+    ok(EqualRect(&rc_expected, &rc2),
+            "%s != %s.\n", wine_dbgstr_rect(&rc_expected), wine_dbgstr_rect(&rc2));
     check_active_state(hwnd2, hwnd2, hwnd2);
 
     /* Involving the desktop window changes things. */
@@ -5297,7 +5342,7 @@ static void test_AWR_window_size(BOOL menu)
 
 static void test_AWR_flags(void)
 {
-    static const DWORD styles[] = { WS_POPUP, WS_BORDER, WS_DLGFRAME, WS_THICKFRAME };
+    static const DWORD styles[] = { WS_POPUP, WS_BORDER, WS_DLGFRAME, WS_THICKFRAME, WS_MINIMIZE };
     static const DWORD exStyles[] = { WS_EX_CLIENTEDGE, WS_EX_TOOLWINDOW, WS_EX_WINDOWEDGE,
                                       WS_EX_APPWINDOW, WS_EX_DLGMODALFRAME, WS_EX_STATICEDGE };
 
@@ -6285,6 +6330,229 @@ static int check_error(DWORD actual, DWORD expected)
     return (!sets_last_error && (actual == 0xdeadbeef)) || (actual == expected);
 }
 
+static void test_set_window_long_size(void)
+{
+#ifdef _WIN64
+    WNDPROC wnd_proc, wnd_proc_2;
+    LONG_PTR retval;
+    HWND hwnd;
+    LONG ret;
+
+    /* It's not allowed to set or get 64-bit pointer values using 32-bit functions. */
+    hwnd = CreateWindowExA(0, "MainWindowClass", "Child window", WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CHILD |
+            WS_MAXIMIZEBOX | WS_VISIBLE, 100, 100, 200, 200, hwndMain, 0, GetModuleHandleA(NULL), NULL);
+    ok(hwnd != NULL, "Failed to create test window.\n");
+
+    /* GWLP_WNDPROC */
+    SetLastError(0xdeadbeef);
+    wnd_proc = (WNDPROC)(LONG_PTR)GetWindowLongA(hwnd, GWLP_WNDPROC);
+    ok(!wnd_proc && GetLastError() == ERROR_INVALID_INDEX, "Unexpected window proc.\n");
+
+    wnd_proc = (WNDPROC)GetWindowLongPtrA(hwnd, GWLP_WNDPROC);
+    ok(!!wnd_proc, "Unexpected window proc.\n");
+
+    SetLastError(0xdeadbeef);
+    wnd_proc_2 = (WNDPROC)(LONG_PTR)SetWindowLongA(hwnd, GWLP_WNDPROC, 0xdeadbeef);
+    ok(!wnd_proc_2 && GetLastError() == ERROR_INVALID_INDEX, "Unexpected window proc.\n");
+
+    wnd_proc_2 = (WNDPROC)GetWindowLongPtrA(hwnd, GWLP_WNDPROC);
+    ok(wnd_proc_2 == wnd_proc, "Unexpected window proc.\n");
+
+    SetLastError(0xdeadbeef);
+    ret = GetWindowWord(hwnd, GWLP_WNDPROC);
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected return value.\n");
+
+    /* GWLP_USERDATA */
+    SetWindowLongPtrA(hwnd, GWLP_USERDATA, ((LONG_PTR)1 << 32) | 123);
+    ret = GetWindowLongA(hwnd, GWLP_USERDATA);
+    ok(ret == 123, "Unexpected user data %#x.\n", ret);
+    retval = GetWindowLongPtrA(hwnd, GWLP_USERDATA);
+    ok(retval > 123, "Unexpected user data.\n");
+    ret = GetWindowWord(hwnd, GWLP_USERDATA);
+todo_wine
+    ok(ret == 123, "Unexpected user data %#x.\n", ret);
+    ret = SetWindowWord(hwnd, GWLP_USERDATA, 124);
+todo_wine
+    ok(ret == 123, "Unexpected user data %#x.\n", ret);
+    ret = GetWindowLongA(hwnd, GWLP_USERDATA);
+todo_wine
+    ok(ret == 124, "Unexpected user data %#x.\n", ret);
+    retval = GetWindowLongPtrA(hwnd, GWLP_USERDATA);
+todo_wine
+    ok(retval == 124, "Unexpected user data.\n");
+
+    SetWindowLongA(hwnd, GWLP_USERDATA, (1 << 16) | 123);
+    ret = GetWindowLongA(hwnd, GWLP_USERDATA);
+    ok(ret == ((1 << 16) | 123), "Unexpected user data %#x.\n", ret);
+    ret = GetWindowWord(hwnd, GWLP_USERDATA);
+todo_wine
+    ok(ret == 123, "Unexpected user data %#x.\n", ret);
+
+    ret = SetWindowWord(hwnd, GWLP_USERDATA, 124);
+todo_wine
+    ok(ret == 123, "Unexpected user data %#x.\n", ret);
+    ret = GetWindowLongA(hwnd, GWLP_USERDATA);
+todo_wine
+    ok(ret == ((1 << 16) | 124), "Unexpected user data %#x.\n", ret);
+    ret = GetWindowWord(hwnd, GWLP_USERDATA);
+todo_wine
+    ok(ret == 124, "Unexpected user data %#x.\n", ret);
+
+    /* GWLP_ID */
+    ret = SetWindowLongA(hwnd, GWLP_ID, 1);
+    ok(!ret, "Unexpected id %#x.\n", ret);
+
+    ret = GetWindowLongA(hwnd, GWLP_ID);
+    ok(ret == 1, "Unexpected id %#x.\n", ret);
+
+    ret = GetWindowLongW(hwnd, GWLP_ID);
+    ok(ret == 1, "Unexpected id %#x.\n", ret);
+
+    SetWindowLongPtrA(hwnd, GWLP_ID, ((LONG_PTR)1 << 32) | 123);
+    ret = GetWindowLongA(hwnd, GWLP_ID);
+    ok(ret == 123, "Unexpected id %#x.\n", ret);
+    ret = GetWindowLongW(hwnd, GWLP_ID);
+    ok(ret == 123, "Unexpected id %#x.\n", ret);
+    retval = GetWindowLongPtrA(hwnd, GWLP_ID);
+    ok(retval > 123, "Unexpected id.\n");
+    SetLastError(0xdeadbeef);
+    ret = GetWindowWord(hwnd, GWLP_ID);
+todo_wine
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected id %#x.\n", ret);
+
+    /* GWLP_HINSTANCE */
+    retval = GetWindowLongPtrA(hwnd, GWLP_HINSTANCE);
+    ok(retval == (LONG_PTR)GetModuleHandleA(NULL), "Unexpected instance %#lx.\n", retval);
+
+    SetLastError(0xdeadbeef);
+    ret = GetWindowLongA(hwnd, GWLP_HINSTANCE);
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected instance %#x.\n", ret);
+
+    SetLastError(0xdeadbeef);
+    ret = GetWindowLongW(hwnd, GWLP_HINSTANCE);
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected instance %#x.\n", ret);
+
+    SetLastError(0xdeadbeef);
+    ret = GetWindowWord(hwnd, GWLP_HINSTANCE);
+todo_wine
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected instance %#x.\n", ret);
+
+    SetLastError(0xdeadbeef);
+    ret = SetWindowLongA(hwnd, GWLP_HINSTANCE, 1);
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected instance %#x.\n", ret);
+
+    SetLastError(0xdeadbeef);
+    ret = SetWindowLongW(hwnd, GWLP_HINSTANCE, 1);
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected instance %#x.\n", ret);
+
+    /* GWLP_HWNDPARENT */
+    SetLastError(0xdeadbeef);
+    ret = GetWindowLongA(hwnd, GWLP_HWNDPARENT);
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected parent window %#x.\n", ret);
+
+    SetLastError(0xdeadbeef);
+    ret = SetWindowLongA(hwnd, GWLP_HWNDPARENT, 0);
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected parent window %#x.\n", ret);
+
+    SetLastError(0xdeadbeef);
+    ret = SetWindowLongW(hwnd, GWLP_HWNDPARENT, 0);
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected parent window %#x.\n", ret);
+
+    SetLastError(0xdeadbeef);
+    ret = GetWindowWord(hwnd, GWLP_HWNDPARENT);
+todo_wine
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected parent window %#x.\n", ret);
+
+    DestroyWindow(hwnd);
+#endif
+}
+
+static void test_set_window_word_size(void)
+{
+    WNDPROC wnd_proc, wnd_proc_2;
+    LONG_PTR retval;
+    HWND hwnd;
+    LONG ret;
+
+    /* It's not allowed to set or get 64-bit pointer values using 32-bit functions. */
+    hwnd = CreateWindowExA(0, "MainWindowClass", "Child window", WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CHILD |
+            WS_MAXIMIZEBOX | WS_VISIBLE, 100, 100, 200, 200, hwndMain, 0, GetModuleHandleA(NULL), NULL);
+    ok(hwnd != NULL, "Failed to create test window.\n");
+
+    /* GWLP_WNDPROC */
+    wnd_proc = (WNDPROC)GetWindowLongPtrA(hwnd, GWLP_WNDPROC);
+    ok(!!wnd_proc, "Unexpected window proc.\n");
+
+    SetLastError(0xdeadbeef);
+    ret = GetWindowWord(hwnd, GWLP_WNDPROC);
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected window proc.\n");
+
+    SetLastError(0xdeadbeef);
+    ret = SetWindowWord(hwnd, GWLP_WNDPROC, 0xbeef);
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected window proc.\n");
+
+    wnd_proc_2 = (WNDPROC)GetWindowLongPtrA(hwnd, GWLP_WNDPROC);
+    ok(wnd_proc_2 == wnd_proc, "Unexpected window proc.\n");
+
+    /* GWLP_USERDATA */
+    ret = SetWindowLongA(hwnd, GWLP_USERDATA, (1 << 16) | 123);
+    ok(!ret, "Unexpected user data %#x.\n", ret);
+    ret = GetWindowLongA(hwnd, GWLP_USERDATA);
+    ok(ret > 123, "Unexpected user data %#x.\n", ret);
+    ret = GetWindowWord(hwnd, GWLP_USERDATA);
+todo_wine
+    ok(ret == 123, "Unexpected user data %#x.\n", ret);
+    ret = SetWindowWord(hwnd, GWLP_USERDATA, 124);
+todo_wine
+    ok(ret == 123, "Unexpected user data %#x.\n", ret);
+    ret = GetWindowWord(hwnd, GWLP_USERDATA);
+todo_wine
+    ok(ret == 124, "Unexpected user data %#x.\n", ret);
+    ret = GetWindowLongA(hwnd, GWLP_USERDATA);
+todo_wine
+    ok(ret == ((1 << 16) | 124), "Unexpected user data %#x.\n", ret);
+
+    /* GWLP_ID */
+    ret = SetWindowLongA(hwnd, GWLP_ID, 1);
+    ok(!ret, "Unexpected id %#x.\n", ret);
+    ret = GetWindowLongA(hwnd, GWLP_ID);
+    ok(ret == 1, "Unexpected id %#x.\n", ret);
+
+    SetLastError(0xdeadbeef);
+    ret = GetWindowWord(hwnd, GWLP_ID);
+todo_wine
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected id %#x.\n", ret);
+    SetLastError(0xdeadbeef);
+    ret = SetWindowWord(hwnd, GWLP_ID, 2);
+todo_wine
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected id %#x.\n", ret);
+
+    /* GWLP_HINSTANCE */
+    retval = GetWindowLongPtrA(hwnd, GWLP_HINSTANCE);
+    ok(retval == (LONG_PTR)GetModuleHandleA(NULL), "Unexpected instance %#lx.\n", retval);
+
+    SetLastError(0xdeadbeef);
+    ret = GetWindowWord(hwnd, GWLP_HINSTANCE);
+todo_wine
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected instance %#x.\n", ret);
+
+    SetLastError(0xdeadbeef);
+    ret = SetWindowWord(hwnd, GWLP_HINSTANCE, 0xdead);
+todo_wine
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected instance %#x.\n", ret);
+
+    /* GWLP_HWNDPARENT */
+    retval = GetWindowLongPtrA(hwnd, GWLP_HWNDPARENT);
+    ok(!!retval, "Unexpected parent window %#x.\n", ret);
+
+    SetLastError(0xdeadbeef);
+    ret = GetWindowWord(hwnd, GWLP_HWNDPARENT);
+todo_wine
+    ok(!ret && GetLastError() == ERROR_INVALID_INDEX, "Unexpected parent window %#x.\n", ret);
+
+    DestroyWindow(hwnd);
+}
+
 static void test_SetWindowLong(void)
 {
     LONG_PTR retval;
@@ -6326,6 +6594,9 @@ static void test_SetWindowLong(void)
         /* set it back to ANSI */
         SetWindowLongPtrA(hwndMain, GWLP_WNDPROC, 0);
     }
+
+    test_set_window_long_size();
+    test_set_window_word_size();
 }
 
 static LRESULT WINAPI check_style_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -6424,7 +6695,7 @@ static void test_ShowWindow(void)
 {
     HWND hwnd;
     DWORD style;
-    RECT rcMain, rc, rcMinimized, rcClient, rcEmpty, rcMaximized, rcResized;
+    RECT rcMain, rc, rcMinimized, rcClient, rcEmpty, rcMaximized, rcResized, rcNonClient;
     LPARAM ret;
     MONITORINFO mon_info;
 
@@ -6484,11 +6755,9 @@ static void test_ShowWindow(void)
     ok(style & WS_MINIMIZE, "window should be minimized\n");
     ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
     GetWindowRect(hwnd, &rc);
-    todo_wine
     ok(EqualRect(&rcMinimized, &rc), "expected %s, got %s\n",
        wine_dbgstr_rect(&rcMinimized), wine_dbgstr_rect(&rc));
     GetClientRect(hwnd, &rc);
-    todo_wine
     ok(EqualRect(&rcEmpty, &rc), "expected %s, got %s\n",
        wine_dbgstr_rect(&rcEmpty), wine_dbgstr_rect(&rc));
     /* shouldn't be able to resize minimized windows */
@@ -6498,13 +6767,27 @@ static void test_ShowWindow(void)
                        SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
     ok(ret, "not expected ret: %lu\n", ret);
     GetWindowRect(hwnd, &rc);
-    todo_wine
     ok(EqualRect(&rcMinimized, &rc), "expected %s, got %s\n",
        wine_dbgstr_rect(&rcMinimized), wine_dbgstr_rect(&rc));
     GetClientRect(hwnd, &rc);
-    todo_wine
     ok(EqualRect(&rcEmpty, &rc), "expected %s, got %s\n",
        wine_dbgstr_rect(&rcEmpty), wine_dbgstr_rect(&rc));
+    /* SetWindowPos shouldn't affect the client rect */
+    ret = SetWindowPos(hwnd, 0, 0, 0, 0, 0,
+                       SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
+    ok(ret, "not expected ret: %lu\n", ret);
+    GetWindowRect(hwnd, &rc);
+    ok(EqualRect(&rcMinimized, &rc), "expected %s, got %s\n",
+       wine_dbgstr_rect(&rcMinimized), wine_dbgstr_rect(&rc));
+    GetClientRect(hwnd, &rc);
+    ok(EqualRect(&rcEmpty, &rc), "expected %s, got %s\n",
+       wine_dbgstr_rect(&rcEmpty), wine_dbgstr_rect(&rc));
+    /* test NC area */
+    GetWindowRect(hwnd, &rc);
+    SetRect(&rcNonClient, rc.left, rc.top, rc.left, rc.top);
+    DefWindowProcA(hwnd, WM_NCCALCSIZE, 0, (LPARAM)&rc);
+    ok(EqualRect(&rc, &rcNonClient), "expected %s, got %s\n",
+       wine_dbgstr_rect(&rcNonClient), wine_dbgstr_rect(&rc));
 
     ShowWindow(hwnd, SW_RESTORE);
     ok(ret, "not expected ret: %lu\n", ret);
@@ -6590,11 +6873,9 @@ static void test_ShowWindow(void)
     ok(style & WS_MINIMIZE, "window should be minimized\n");
     ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
     GetWindowRect(hwnd, &rc);
-    todo_wine
     ok(EqualRect(&rcMinimized, &rc), "expected %s, got %s\n",
        wine_dbgstr_rect(&rcMinimized), wine_dbgstr_rect(&rc));
     GetClientRect(hwnd, &rc);
-    todo_wine
     ok(EqualRect(&rcEmpty, &rc), "expected %s, got %s\n",
        wine_dbgstr_rect(&rcEmpty), wine_dbgstr_rect(&rc));
 
@@ -6606,11 +6887,9 @@ static void test_ShowWindow(void)
     ok(style & WS_MINIMIZE, "window should be minimized\n");
     ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
     GetWindowRect(hwnd, &rc);
-    todo_wine
     ok(EqualRect(&rcMinimized, &rc), "expected %s, got %s\n",
        wine_dbgstr_rect(&rcMinimized), wine_dbgstr_rect(&rc));
     GetClientRect(hwnd, &rc);
-    todo_wine
     ok(EqualRect(&rcEmpty, &rc), "expected %s, got %s\n",
        wine_dbgstr_rect(&rcEmpty), wine_dbgstr_rect(&rc));
 
@@ -6653,7 +6932,6 @@ static void test_ShowWindow(void)
     ok(EqualRect(&rcMinimized, &rc), "expected %s, got %s\n",
        wine_dbgstr_rect(&rcMinimized), wine_dbgstr_rect(&rc));
     GetClientRect(hwnd, &rc);
-    todo_wine
     ok(EqualRect(&rcEmpty, &rc), "expected %s, got %s\n",
        wine_dbgstr_rect(&rcEmpty), wine_dbgstr_rect(&rc));
     DestroyWindow(hwnd);
@@ -6668,16 +6946,406 @@ static void test_ShowWindow(void)
     style = GetWindowLongA(hwnd, GWL_STYLE);
     ok(style & WS_MINIMIZE, "window should be minimized\n");
     GetWindowRect(hwnd, &rc);
-    todo_wine
     ok(EqualRect(&rcMinimized, &rc), "expected %s, got %s\n",
        wine_dbgstr_rect(&rcMinimized), wine_dbgstr_rect(&rc));
     GetClientRect(hwnd, &rc);
-    todo_wine
     ok(EqualRect(&rcEmpty, &rc), "expected %s, got %s\n",
        wine_dbgstr_rect(&rcEmpty), wine_dbgstr_rect(&rc));
     DestroyWindow(hwnd);
 
     flush_events(TRUE);
+}
+
+static void test_ShowWindow_owned(HWND hwndMain)
+{
+    MONITORINFO mon_info = {sizeof(mon_info)};
+    RECT rect, orig, expect, nc;
+    BOOL ret;
+    HWND hwnd, hwnd2;
+    LONG style;
+
+    GetMonitorInfoW(MonitorFromWindow(hwndMain, MONITOR_DEFAULTTOPRIMARY), &mon_info);
+    SetRect(&orig, 20, 20, 210, 110);
+    hwnd = CreateWindowA("MainWindowClass", "owned", WS_CAPTION | WS_SYSMENU |
+                         WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+                         orig.left, orig.top, orig.right - orig.left,
+                         orig.bottom - orig.top, hwndMain, 0, 0, NULL);
+    ok(!!hwnd, "failed to create window, error %u\n", GetLastError());
+    hwnd2 = CreateWindowA("MainWindowClass", "owned2", WS_CAPTION | WS_SYSMENU |
+                          WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_VISIBLE,
+                          orig.left, orig.top, orig.right - orig.left,
+                          orig.bottom - orig.top, hwndMain, 0, 0, NULL);
+    ok(!!hwnd2, "failed to create window, error %u\n", GetLastError());
+
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(!(style & WS_VISIBLE), "window should not be visible\n");
+    ok(!(style & WS_MINIMIZE), "window should not be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    ok(EqualRect(&orig, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&orig), wine_dbgstr_rect(&rect));
+
+    ret = ShowWindow(hwnd, SW_SHOW);
+    ok(!ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(!(style & WS_MINIMIZE), "window should not be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    ok(EqualRect(&orig, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&orig), wine_dbgstr_rect(&rect));
+
+    ret = ShowWindow(hwnd, SW_MINIMIZE);
+    ok(ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(style & WS_MINIMIZE, "window should be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    SetRect(&expect, 0, mon_info.rcWork.bottom - GetSystemMetrics(SM_CYMINIMIZED),
+            GetSystemMetrics(SM_CXMINIMIZED), mon_info.rcWork.bottom);
+    todo_wine
+    ok(EqualRect(&expect, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+    /* shouldn't be able to resize minimized windows */
+    ret = SetWindowPos(hwnd, 0, 0, 0, 200, 200, SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+    ok(ret, "wrong ret %d\n", ret);
+    GetWindowRect(hwnd, &rect);
+    todo_wine
+    ok(EqualRect(&expect, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+    /* test NC area */
+    GetWindowRect(hwnd, &rect);
+    SetRect(&nc, rect.left, rect.top, rect.left, rect.top);
+    DefWindowProcA(hwnd, WM_NCCALCSIZE, 0, (LPARAM)&rect);
+    ok(EqualRect(&rect, &nc), "expected %s, got %s\n",
+       wine_dbgstr_rect(&nc), wine_dbgstr_rect(&rect));
+
+    /* multiple minimized owned windows stack next to each other (and eventually
+     * on top of each other) */
+    OffsetRect(&expect, GetSystemMetrics(SM_CXMINIMIZED), 0);
+    ret = ShowWindow(hwnd2, SW_MINIMIZE);
+    ok(ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd2, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(style & WS_MINIMIZE, "window should be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd2, &rect);
+    todo_wine
+    ok(EqualRect(&expect, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+
+    ShowWindow(hwnd, SW_RESTORE);
+    ok(ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(!(style & WS_MINIMIZE), "window should not be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    ok(EqualRect(&orig, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&orig), wine_dbgstr_rect(&rect));
+
+    ShowWindow(hwnd, SW_MAXIMIZE);
+    ok(ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(!(style & WS_MINIMIZE), "window should be minimized\n");
+    ok(style & WS_MAXIMIZE, "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    expect = mon_info.rcWork;
+    AdjustWindowRectEx(&expect, GetWindowLongA(hwnd, GWL_STYLE) & ~WS_BORDER,
+                       0, GetWindowLongA(hwnd, GWL_EXSTYLE));
+    ok(EqualRect(&expect, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+    /* maximized windows can be resized */
+    ret = SetWindowPos(hwnd, 0, 300, 300, 200, 200, SWP_NOACTIVATE | SWP_NOZORDER);
+    ok(ret, "wrong ret %d\n", ret);
+    GetWindowRect(hwnd, &rect);
+    SetRect(&expect, 300, 300, 500, 500);
+    ok(EqualRect(&expect, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+
+    ShowWindow(hwnd, SW_RESTORE);
+    ok(ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(!(style & WS_MINIMIZE), "window should not be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    ok(EqualRect(&orig, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&orig), wine_dbgstr_rect(&rect));
+
+    DestroyWindow(hwnd2);
+    DestroyWindow(hwnd);
+}
+
+static void test_ShowWindow_child(HWND hwndMain)
+{
+    RECT rect, orig, expect, nc;
+    BOOL ret;
+    HWND hwnd, hwnd2;
+    LONG style;
+    POINT pt = {0};
+
+    SetRect(&orig, 20, 20, 210, 110);
+    hwnd = CreateWindowA("MainWindowClass", "child", WS_CAPTION | WS_SYSMENU |
+                         WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CHILD,
+                         orig.left, orig.top, orig.right - orig.left,
+                         orig.bottom - orig.top, hwndMain, 0, 0, NULL);
+    ok(!!hwnd, "failed to create window, error %u\n", GetLastError());
+    hwnd2 = CreateWindowA("MainWindowClass", "child2", WS_CAPTION | WS_SYSMENU |
+                          WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CHILD | WS_VISIBLE,
+                          orig.left, orig.top, orig.right - orig.left,
+                          orig.bottom - orig.top, hwndMain, 0, 0, NULL);
+    ok(!!hwnd2, "failed to create window, error %u\n", GetLastError());
+
+    ClientToScreen(hwndMain, &pt);
+    OffsetRect(&orig, pt.x, pt.y);
+
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(!(style & WS_VISIBLE), "window should not be visible\n");
+    ok(!(style & WS_MINIMIZE), "window should not be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    ok(EqualRect(&orig, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&orig), wine_dbgstr_rect(&rect));
+
+    ret = ShowWindow(hwnd, SW_SHOW);
+    ok(!ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(!(style & WS_MINIMIZE), "window should not be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    ok(EqualRect(&orig, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&orig), wine_dbgstr_rect(&rect));
+
+    ret = ShowWindow(hwnd, SW_MINIMIZE);
+    ok(ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(style & WS_MINIMIZE, "window should be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    GetClientRect(hwndMain, &expect);
+    SetRect(&expect, 0, expect.bottom - GetSystemMetrics(SM_CYMINIMIZED),
+            GetSystemMetrics(SM_CXMINIMIZED), expect.bottom);
+    OffsetRect(&expect, pt.x, pt.y);
+    ok(EqualRect(&expect, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+    /* shouldn't be able to resize minimized windows */
+    ret = SetWindowPos(hwnd, 0, 0, 0, 200, 200, SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+    ok(ret, "wrong ret %d\n", ret);
+    GetWindowRect(hwnd, &rect);
+    ok(EqualRect(&expect, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+    /* test NC area */
+    GetWindowRect(hwnd, &rect);
+    SetRect(&nc, rect.left, rect.top, rect.left, rect.top);
+    DefWindowProcA(hwnd, WM_NCCALCSIZE, 0, (LPARAM)&rect);
+    ok(EqualRect(&rect, &nc), "expected %s, got %s\n",
+       wine_dbgstr_rect(&nc), wine_dbgstr_rect(&rect));
+
+    /* multiple minimized children also stack; here the parent is too small to
+     * fit more than one per row */
+    OffsetRect(&expect, 0, -GetSystemMetrics(SM_CYMINIMIZED));
+    ret = ShowWindow(hwnd2, SW_MINIMIZE);
+    ok(ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd2, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(style & WS_MINIMIZE, "window should be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd2, &rect);
+    ok(EqualRect(&expect, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+
+    ShowWindow(hwnd, SW_RESTORE);
+    ok(ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(!(style & WS_MINIMIZE), "window should not be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    ok(EqualRect(&orig, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&orig), wine_dbgstr_rect(&rect));
+
+    ShowWindow(hwnd, SW_MAXIMIZE);
+    ok(ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(!(style & WS_MINIMIZE), "window should be minimized\n");
+    ok(style & WS_MAXIMIZE, "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    GetClientRect(hwndMain, &expect);
+    AdjustWindowRectEx(&expect, GetWindowLongA(hwnd, GWL_STYLE) & ~WS_BORDER,
+                       0, GetWindowLongA(hwnd, GWL_EXSTYLE));
+    OffsetRect(&expect, pt.x, pt.y);
+    ok(EqualRect(&expect, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+    /* maximized windows can be resized */
+    ret = SetWindowPos(hwnd, 0, 300, 300, 200, 200, SWP_NOACTIVATE | SWP_NOZORDER);
+    ok(ret, "wrong ret %d\n", ret);
+    GetWindowRect(hwnd, &rect);
+    SetRect(&expect, 300, 300, 500, 500);
+    OffsetRect(&expect, pt.x, pt.y);
+    ok(EqualRect(&expect, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+
+    ShowWindow(hwnd, SW_RESTORE);
+    ok(ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(!(style & WS_MINIMIZE), "window should not be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    ok(EqualRect(&orig, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&orig), wine_dbgstr_rect(&rect));
+
+    DestroyWindow(hwnd2);
+    DestroyWindow(hwnd);
+}
+
+static void test_ShowWindow_mdichild(HWND hwndMain)
+{
+    RECT rect, orig, expect, nc;
+    BOOL ret;
+    HWND mdiclient, hwnd, hwnd2;
+    LONG style;
+    POINT pt = {0};
+    CLIENTCREATESTRUCT mdi_client_cs = {0,1};
+
+    SetRect(&orig, 20, 20, 210, 110);
+    GetClientRect(hwndMain, &rect);
+    mdiclient = CreateWindowA("mdiclient", "MDI client", WS_CHILD,
+                              rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
+                              hwndMain, 0, 0, &mdi_client_cs);
+    ok(!!mdiclient, "failed to create window, error %u\n", GetLastError());
+    hwnd = CreateWindowExA(WS_EX_MDICHILD, "MainWindowClass", "MDI child",
+                           WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+                           orig.left, orig.top, orig.right - orig.left,
+                           orig.bottom - orig.top, mdiclient, 0, 0, NULL);
+    ok(!!hwnd, "failed to create window, error %u\n", GetLastError());
+    hwnd2 = CreateWindowExA(WS_EX_MDICHILD, "MainWindowClass", "MDI child 2",
+                            WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+                            orig.left, orig.top, orig.right - orig.left,
+                            orig.bottom - orig.top, mdiclient, 0, 0, NULL);
+    ok(!!hwnd2, "failed to create window, error %u\n", GetLastError());
+
+    ClientToScreen(hwndMain, &pt);
+    OffsetRect(&orig, pt.x, pt.y);
+
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should not be visible\n");
+    ok(!(style & WS_MINIMIZE), "window should not be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    ok(EqualRect(&orig, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&orig), wine_dbgstr_rect(&rect));
+
+    ret = ShowWindow(hwnd, SW_MINIMIZE);
+    ok(ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(style & WS_MINIMIZE, "window should be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    GetClientRect(hwndMain, &expect);
+    SetRect(&expect, 0, expect.bottom - GetSystemMetrics(SM_CYMINIMIZED),
+            GetSystemMetrics(SM_CXMINIMIZED), expect.bottom);
+    OffsetRect(&expect, pt.x, pt.y);
+    ok(EqualRect(&expect, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+    /* shouldn't be able to resize minimized windows */
+    ret = SetWindowPos(hwnd, 0, 0, 0, 200, 200, SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+    ok(ret, "wrong ret %d\n", ret);
+    GetWindowRect(hwnd, &rect);
+    ok(EqualRect(&expect, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+    /* test NC area */
+    GetWindowRect(hwnd, &rect);
+    SetRect(&nc, rect.left, rect.top, rect.left, rect.top);
+    DefWindowProcA(hwnd, WM_NCCALCSIZE, 0, (LPARAM)&rect);
+    ok(EqualRect(&rect, &nc), "expected %s, got %s\n",
+       wine_dbgstr_rect(&nc), wine_dbgstr_rect(&rect));
+
+    /* multiple minimized children also stack; here the parent is too small to
+     * fit more than one per row */
+    OffsetRect(&expect, 0, -GetSystemMetrics(SM_CYMINIMIZED));
+    ret = ShowWindow(hwnd2, SW_MINIMIZE);
+    ok(ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd2, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(style & WS_MINIMIZE, "window should be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd2, &rect);
+    ok(EqualRect(&expect, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+
+    ShowWindow(hwnd, SW_RESTORE);
+    ok(ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(!(style & WS_MINIMIZE), "window should not be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    ok(EqualRect(&orig, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&orig), wine_dbgstr_rect(&rect));
+
+    ShowWindow(hwnd, SW_MAXIMIZE);
+    ok(ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(!(style & WS_MINIMIZE), "window should be minimized\n");
+    ok(style & WS_MAXIMIZE, "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    GetClientRect(hwndMain, &expect);
+    AdjustWindowRectEx(&expect, GetWindowLongA(hwnd, GWL_STYLE) & ~WS_BORDER,
+                       0, GetWindowLongA(hwnd, GWL_EXSTYLE));
+    OffsetRect(&expect, pt.x, pt.y);
+    ok(EqualRect(&expect, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+    /* maximized windows can be resized */
+    ret = SetWindowPos(hwnd, 0, 300, 300, 200, 200, SWP_NOACTIVATE | SWP_NOZORDER);
+    ok(ret, "wrong ret %d\n", ret);
+    GetWindowRect(hwnd, &rect);
+    SetRect(&expect, 300, 300, 500, 500);
+    OffsetRect(&expect, pt.x, pt.y);
+    ok(EqualRect(&expect, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+
+    ShowWindow(hwnd, SW_RESTORE);
+    ok(ret, "wrong ret %d\n", ret);
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(!(style & WS_DISABLED), "window should not be disabled\n");
+    ok(style & WS_VISIBLE, "window should be visible\n");
+    ok(!(style & WS_MINIMIZE), "window should not be minimized\n");
+    ok(!(style & WS_MAXIMIZE), "window should not be maximized\n");
+    GetWindowRect(hwnd, &rect);
+    ok(EqualRect(&orig, &rect), "expected %s, got %s\n",
+       wine_dbgstr_rect(&orig), wine_dbgstr_rect(&rect));
+
+    DestroyWindow(hwnd2);
+    DestroyWindow(hwnd);
+    DestroyWindow(mdiclient);
 }
 
 static DWORD CALLBACK enablewindow_thread(LPVOID arg)
@@ -8221,7 +8889,7 @@ static void test_FlashWindowEx(void)
 
     SetLastError(0xdeadbeef);
     ret = pFlashWindowEx(&finfo);
-    ok(!ret, "previous window state should not be active\n");
+    todo_wine ok(!ret, "previous window state should not be active\n");
 
     finfo.cbSize = sizeof(FLASHWINFO) - 1;
     SetLastError(0xdeadbeef);
@@ -8272,7 +8940,7 @@ static void test_FlashWindowEx(void)
     finfo.dwFlags = FLASHW_STOP;
     SetLastError(0xdeadbeef);
     ret = pFlashWindowEx(&finfo);
-    todo_wine ok(prev != ret, "previous window state should be different\n");
+    ok(prev != ret, "previous window state should be different\n");
 
     DestroyWindow( hwnd );
 }
@@ -10721,6 +11389,350 @@ static void test_IsWindowEnabled(void)
     DestroyWindow(hwnd);
 }
 
+static void test_window_placement(void)
+{
+    RECT orig = {100, 200, 300, 400}, orig2 = {200, 300, 400, 500}, rect;
+    WINDOWPLACEMENT wp = {sizeof(wp)};
+    HWND hwnd;
+    BOOL ret;
+
+    hwnd = CreateWindowA("MainWindowClass", "wp", WS_OVERLAPPEDWINDOW,
+        orig.left, orig.top, orig.right - orig.left, orig.bottom - orig.top, 0, 0, 0, 0);
+    ok(!!hwnd, "failed to create window, error %u\n", GetLastError());
+
+    ret = GetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to get window placement, error %u\n", GetLastError());
+    ok(wp.showCmd == SW_SHOWNORMAL, "got show cmd %u\n", wp.showCmd);
+    ok(wp.ptMinPosition.x == -1 && wp.ptMinPosition.y == -1,
+        "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
+    ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
+        "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
+    ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
+        wine_dbgstr_rect(&wp.rcNormalPosition));
+
+    ShowWindow(hwnd, SW_MINIMIZE);
+
+    ret = GetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to get window placement, error %u\n", GetLastError());
+    ok(!wp.flags, "got flags %#x\n", wp.flags);
+    ok(wp.showCmd == SW_SHOWMINIMIZED, "got show cmd %u\n", wp.showCmd);
+    ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
+        "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
+    ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
+        "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
+    ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
+        wine_dbgstr_rect(&wp.rcNormalPosition));
+
+    ShowWindow(hwnd, SW_RESTORE);
+
+    ret = GetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to get window placement, error %u\n", GetLastError());
+    ok(wp.showCmd == SW_SHOWNORMAL, "got show cmd %u\n", wp.showCmd);
+    ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
+        "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
+    ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
+        "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
+    ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
+        wine_dbgstr_rect(&wp.rcNormalPosition));
+
+    ShowWindow(hwnd, SW_MAXIMIZE);
+
+    ret = GetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to get window placement, error %u\n", GetLastError());
+    ok(wp.showCmd == SW_SHOWMAXIMIZED, "got show cmd %u\n", wp.showCmd);
+    ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
+        "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
+todo_wine
+    ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
+        "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
+    ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
+        wine_dbgstr_rect(&wp.rcNormalPosition));
+
+    SetWindowPos(hwnd, 0, 100, 100, 100, 100, SWP_NOZORDER | SWP_NOACTIVATE);
+
+    ret = GetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to get window placement, error %u\n", GetLastError());
+    ok(wp.showCmd == SW_SHOWMAXIMIZED, "got show cmd %u\n", wp.showCmd);
+    ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
+        "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
+    ok(wp.ptMaxPosition.x == 100 && wp.ptMaxPosition.y == 100,
+        "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
+    ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
+        wine_dbgstr_rect(&wp.rcNormalPosition));
+
+    ShowWindow(hwnd, SW_MINIMIZE);
+
+    ret = GetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to get window placement, error %u\n", GetLastError());
+    ok(wp.flags == WPF_RESTORETOMAXIMIZED, "got flags %#x\n", wp.flags);
+    ok(wp.showCmd == SW_SHOWMINIMIZED, "got show cmd %u\n", wp.showCmd);
+    ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
+        "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
+todo_wine
+    ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
+        "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
+    ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
+        wine_dbgstr_rect(&wp.rcNormalPosition));
+
+    ShowWindow(hwnd, SW_RESTORE);
+
+    ret = GetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to get window placement, error %u\n", GetLastError());
+    ok(wp.showCmd == SW_SHOWMAXIMIZED, "got show cmd %u\n", wp.showCmd);
+    ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
+        "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
+todo_wine
+    ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
+        "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
+    ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
+        wine_dbgstr_rect(&wp.rcNormalPosition));
+
+    ShowWindow(hwnd, SW_RESTORE);
+
+    ret = GetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to get window placement, error %u\n", GetLastError());
+    ok(wp.showCmd == SW_SHOWNORMAL, "got show cmd %u\n", wp.showCmd);
+    ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
+        "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
+todo_wine
+    ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
+        "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
+    ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
+        wine_dbgstr_rect(&wp.rcNormalPosition));
+
+    wp.flags = WPF_SETMINPOSITION;
+    wp.ptMinPosition.x = wp.ptMinPosition.y = 100;
+    wp.ptMaxPosition.x = wp.ptMaxPosition.y = 100;
+    wp.rcNormalPosition = orig2;
+    ret = SetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to set window placement, error %u\n", GetLastError());
+
+    ret = GetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to get window placement, error %u\n", GetLastError());
+    ok(wp.showCmd == SW_SHOWNORMAL, "got show cmd %u\n", wp.showCmd);
+    ok(wp.ptMinPosition.x == 100 && wp.ptMinPosition.y == 100,
+        "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
+todo_wine
+    ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
+        "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
+    ok(EqualRect(&wp.rcNormalPosition, &orig2), "got normal pos %s\n",
+        wine_dbgstr_rect(&wp.rcNormalPosition));
+    GetWindowRect(hwnd, &rect);
+    ok(EqualRect(&rect, &orig2), "got window rect %s\n", wine_dbgstr_rect(&rect));
+
+    ShowWindow(hwnd, SW_MINIMIZE);
+
+    ret = GetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to get window placement, error %u\n", GetLastError());
+    ok(!wp.flags, "got flags %#x\n", wp.flags);
+    ok(wp.showCmd == SW_SHOWMINIMIZED, "got show cmd %u\n", wp.showCmd);
+    ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
+        "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
+todo_wine
+    ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
+        "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
+    ok(EqualRect(&wp.rcNormalPosition, &orig2), "got normal pos %s\n",
+        wine_dbgstr_rect(&wp.rcNormalPosition));
+
+    ShowWindow(hwnd, SW_RESTORE);
+
+    wp.flags = WPF_SETMINPOSITION;
+    wp.showCmd = SW_MINIMIZE;
+    wp.ptMinPosition.x = wp.ptMinPosition.y = 100;
+    wp.ptMaxPosition.x = wp.ptMaxPosition.y = 100;
+    wp.rcNormalPosition = orig;
+    ret = SetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to set window placement, error %u\n", GetLastError());
+
+    ret = GetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to get window placement, error %u\n", GetLastError());
+    ok(!wp.flags, "got flags %#x\n", wp.flags);
+    ok(wp.showCmd == SW_SHOWMINIMIZED, "got show cmd %u\n", wp.showCmd);
+    ok(wp.ptMinPosition.x == -32000 && wp.ptMinPosition.y == -32000,
+        "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
+todo_wine
+    ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
+        "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
+    ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
+        wine_dbgstr_rect(&wp.rcNormalPosition));
+
+    ShowWindow(hwnd, SW_RESTORE);
+
+    wp.flags = WPF_SETMINPOSITION;
+    wp.showCmd = SW_MAXIMIZE;
+    wp.ptMinPosition.x = wp.ptMinPosition.y = 100;
+    wp.ptMaxPosition.x = wp.ptMaxPosition.y = 100;
+    wp.rcNormalPosition = orig;
+    ret = SetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to set window placement, error %u\n", GetLastError());
+
+    ret = GetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to get window placement, error %u\n", GetLastError());
+    ok(wp.showCmd == SW_SHOWMAXIMIZED, "got show cmd %u\n", wp.showCmd);
+    ok(wp.ptMinPosition.x == 100 && wp.ptMinPosition.y == 100,
+        "got minimized pos (%d,%d)\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
+todo_wine
+    ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
+        "got maximized pos (%d,%d)\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
+    ok(EqualRect(&wp.rcNormalPosition, &orig), "got normal pos %s\n",
+        wine_dbgstr_rect(&wp.rcNormalPosition));
+
+    DestroyWindow(hwnd);
+}
+
+static void test_arrange_iconic_windows(void)
+{
+    MINIMIZEDMETRICS mm = {sizeof(mm)}, oldmm = {sizeof(oldmm)};
+    RECT orig = {100, 200, 300, 400}, rect, expect, parent_rect;
+    POINT pt = {0};
+    HWND parent, hwnds[10];
+    UINT ret;
+    int i, row, col;
+
+    parent = CreateWindowA("MainWindowClass", "parent", WS_OVERLAPPEDWINDOW,
+            100, 200, 500, 300, NULL, 0, 0, NULL);
+    ok(!!parent, "failed to create window, error %u\n", GetLastError());
+
+    GetClientRect(parent, &parent_rect);
+    ClientToScreen(parent, &pt);
+    SystemParametersInfoA(SPI_GETMINIMIZEDMETRICS, sizeof(oldmm), &oldmm, 0);
+
+    mm.iWidth = 100;
+    mm.iHorzGap = 40;
+    mm.iVertGap = 3;
+    mm.iArrange = ARW_TOPLEFT | ARW_RIGHT;
+    ret = SystemParametersInfoA(SPI_SETMINIMIZEDMETRICS, sizeof(mm), &mm, 0);
+    ok(ret, "failed to set minimized metrics, error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = ArrangeIconicWindows(parent);
+    ok(!ret, "wrong ret %u\n", ret);
+    ok(GetLastError() == 0xdeadbeef, "wrong error %u\n", GetLastError());
+
+    for (i = 0; i < ARRAY_SIZE(hwnds); ++i)
+    {
+        hwnds[i] = CreateWindowA("MainWindowClass", "child", WS_CHILD |
+            WS_OVERLAPPEDWINDOW, orig.left, orig.top, orig.right - orig.left,
+            orig.bottom - orig.top, parent, 0, 0, NULL);
+        ok(!!hwnds[i], "failed to create window %u, error %u\n", i, GetLastError());
+    }
+
+    SetLastError(0xdeadbeef);
+    ret = ArrangeIconicWindows(parent);
+    ok(!ret, "wrong ret %u\n", ret);
+    ok(GetLastError() == 0xdeadbeef, "wrong error %u\n", GetLastError());
+
+    for (i = 0; i < ARRAY_SIZE(hwnds); ++i)
+    {
+        GetWindowRect(hwnds[i], &rect);
+        expect = orig;
+        OffsetRect(&expect, pt.x, pt.y);
+        ok(EqualRect(&rect, &expect), "hwnd %u: expected rect %s, got %s\n", i,
+            wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+    }
+
+    ShowWindow(hwnds[0], SW_MINIMIZE);
+
+    for (i = 0; i < ARRAY_SIZE(hwnds); ++i)
+    {
+        ret = SetWindowPos(hwnds[i], 0, orig.left, orig.top, 0, 0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        ok(ret, "hwnd %u: failed to move window, error %u\n", i, GetLastError());
+    }
+
+    ret = ArrangeIconicWindows(parent);
+    ok(ret == 1, "wrong ret %u\n", ret);
+
+    GetWindowRect(hwnds[0], &rect);
+    SetRect(&expect, 0, 0, GetSystemMetrics(SM_CXMINIMIZED), GetSystemMetrics(SM_CYMINIMIZED));
+    OffsetRect(&expect, mm.iHorzGap, mm.iVertGap);
+    OffsetRect(&expect, pt.x, pt.y);
+    ok(EqualRect(&rect, &expect), "expected rect %s, got %s\n",
+        wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+
+    for (i = 1; i < ARRAY_SIZE(hwnds); ++i)
+    {
+        GetWindowRect(hwnds[i], &rect);
+        expect = orig;
+        OffsetRect(&expect, pt.x, pt.y);
+        ok(EqualRect(&rect, &expect), "hwnd %u: expected rect %s, got %s\n", i,
+            wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+    }
+
+    for (i = 0; i < ARRAY_SIZE(hwnds); ++i)
+    {
+        ShowWindow(hwnds[i], SW_MINIMIZE);
+        ret = SetWindowPos(hwnds[i], 0, orig.left, orig.top, 0, 0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        ok(ret, "hwnd %u: failed to move window, error %u\n", i, GetLastError());
+    }
+
+    ret = ArrangeIconicWindows(parent);
+    ok(ret == 10, "wrong ret %u\n", ret);
+
+    col = mm.iHorzGap;
+    row = mm.iVertGap;
+    for (i = 0; i < ARRAY_SIZE(hwnds); ++i)
+    {
+        if (col + GetSystemMetrics(SM_CXMINIMIZED) > parent_rect.right - parent_rect.left)
+        {
+            col = mm.iHorzGap;
+            row += GetSystemMetrics(SM_CYMINIMIZED) + mm.iVertGap;
+        }
+
+        GetWindowRect(hwnds[i], &rect);
+        SetRect(&expect, col, row, col + GetSystemMetrics(SM_CXMINIMIZED),
+            row + GetSystemMetrics(SM_CYMINIMIZED));
+        OffsetRect(&expect, pt.x, pt.y);
+        ok(EqualRect(&rect, &expect), "hwnd %u: expected rect %s, got %s\n", i,
+            wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+
+        col += GetSystemMetrics(SM_CXMINIMIZED) + mm.iHorzGap;
+    }
+
+    mm.iArrange = ARW_BOTTOMRIGHT | ARW_UP;
+    mm.iVertGap = 10;
+    ret = SystemParametersInfoA(SPI_SETMINIMIZEDMETRICS, sizeof(mm), &mm, 0);
+    ok(ret, "failed to set minimized metrics, error %u\n", GetLastError());
+
+    for (i = 0; i < ARRAY_SIZE(hwnds); ++i)
+    {
+        ret = SetWindowPos(hwnds[i], 0, orig.left, orig.top, 0, 0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        ok(ret, "hwnd %u: failed to move window, error %u\n", i, GetLastError());
+    }
+
+    ret = ArrangeIconicWindows(parent);
+    ok(ret == 10, "wrong ret %u\n", ret);
+
+    col = parent_rect.right - mm.iHorzGap;
+    row = parent_rect.bottom - mm.iVertGap;
+    for (i = 0; i < ARRAY_SIZE(hwnds); ++i)
+    {
+        if (row - GetSystemMetrics(SM_CYMINIMIZED) < parent_rect.top)
+        {
+            row = parent_rect.bottom - mm.iVertGap;
+            col -= GetSystemMetrics(SM_CXMINIMIZED) + mm.iHorzGap;
+        }
+
+        GetWindowRect(hwnds[i], &rect);
+        SetRect(&expect, col - GetSystemMetrics(SM_CXMINIMIZED),
+            row - GetSystemMetrics(SM_CYMINIMIZED), col, row);
+        OffsetRect(&expect, pt.x, pt.y);
+        ok(EqualRect(&rect, &expect), "hwnd %u: expected rect %s, got %s\n", i,
+            wine_dbgstr_rect(&expect), wine_dbgstr_rect(&rect));
+
+        row -= GetSystemMetrics(SM_CYMINIMIZED) + mm.iVertGap;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(hwnds); ++i)
+        DestroyWindow(hwnds[i]);
+    DestroyWindow(parent);
+
+    ret = SystemParametersInfoA(SPI_SETMINIMIZEDMETRICS, sizeof(oldmm), &oldmm, 0);
+    ok(ret, "failed to restore minimized metrics, error %u\n", GetLastError());
+}
+
 START_TEST(win)
 {
     char **argv;
@@ -10853,6 +11865,9 @@ START_TEST(win)
     test_SetWindowLong();
     test_set_window_style();
     test_ShowWindow();
+    test_ShowWindow_owned(hwndMain);
+    test_ShowWindow_child(hwndMain);
+    test_ShowWindow_mdichild(hwndMain);
     test_EnableWindow();
     test_gettext();
     test_GetUpdateRect();
@@ -10860,7 +11875,6 @@ START_TEST(win)
     test_layered_window();
 
     test_SetForegroundWindow(hwndMain);
-    test_shell_window();
     test_handles( hwndMain );
     test_winregion();
     test_map_points();
@@ -10878,6 +11892,8 @@ START_TEST(win)
     test_minimize_window(hwndMain);
     test_destroy_quit();
     test_IsWindowEnabled();
+    test_window_placement();
+    test_arrange_iconic_windows();
 
     /* add the tests above this line */
     if (hhook) UnhookWindowsHookEx(hhook);
@@ -10890,4 +11906,8 @@ START_TEST(win)
      * state of hwndMain and hwndMain2 windows.
      */
     test_topmost();
+
+    /* Execute the SetShellWindow() test last, since it kills explorer and that
+     * breaks a lot of things. */
+    test_shell_window();
 }

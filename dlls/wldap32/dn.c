@@ -81,7 +81,7 @@ PWCHAR CDECL ldap_dn2ufnW( PWCHAR dn )
 {
     PWCHAR ret = NULL;
 #ifdef HAVE_LDAP
-    char *dnU, *retU;
+    char *dnU, * HOSTPTR retU;
 
     TRACE( "(%s)\n", debugstr_w(dn) );
 
@@ -145,7 +145,7 @@ PWCHAR * CDECL ldap_explode_dnW( PWCHAR dn, ULONG notypes )
 {
     PWCHAR *ret = NULL;
 #ifdef HAVE_LDAP
-    char *dnU, **retU;
+    char *dnU, * HOSTPTR * HOSTPTR retU;
 
     TRACE( "(%s, 0x%08x)\n", debugstr_w(dn), notypes );
 
@@ -156,7 +156,7 @@ PWCHAR * CDECL ldap_explode_dnW( PWCHAR dn, ULONG notypes )
     ret = strarrayUtoW( retU );
 
     strfreeU( dnU );
-    ldap_memvfree( (void **)retU );
+    ldap_memvfree( (void * HOSTPTR * HOSTPTR)retU );
 
 #endif
     return ret;
@@ -206,13 +206,13 @@ PWCHAR CDECL ldap_get_dnW( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *entry )
 {
     PWCHAR ret = NULL;
 #ifdef HAVE_LDAP
-    char *retU;
+    char * HOSTPTR retU;
 
     TRACE( "(%p, %p)\n", ld, entry );
 
     if (!ld || !entry) return NULL;
 
-    retU = ldap_get_dn( ld, entry );
+    retU = ldap_get_dn( ldap_get( ld ), ldmsg_get( entry ) );
 
     ret = strUtoW( retU );
     ldap_memfree( retU );

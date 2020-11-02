@@ -77,7 +77,7 @@ static ULONG create_page_control( ULONG pagesize, struct WLDAP32_berval *cookie,
     LDAPControlW *ctrl;
     BerElement *ber;
     ber_tag_t tag;
-    struct berval *berval, null_cookie = { 0, NULL };
+    struct berval *berval, bvcookie = { 0, NULL };
     INT ret, len;
     char *val;
 
@@ -85,9 +85,11 @@ static ULONG create_page_control( ULONG pagesize, struct WLDAP32_berval *cookie,
     if (!ber) return WLDAP32_LDAP_NO_MEMORY;
 
     if (cookie)
-        tag = ber_printf( ber, "{iO}", (ber_int_t)pagesize, cookie );
-    else
-        tag = ber_printf( ber, "{iO}", (ber_int_t)pagesize, &null_cookie );
+    {
+        bvcookie.bv_len = cookie->bv_len;
+        bvcookie.bv_val = cookie->bv_val;
+    }
+    tag = ber_printf( ber, "{iO}", (ber_int_t)pagesize, &bvcookie );
 
     ret = ber_flatten( ber, &berval );
     ber_free( ber, 1 );
@@ -226,6 +228,7 @@ ULONG CDECL ldap_parse_page_controlW( WLDAP32_LDAP *ld, PLDAPControlW *ctrls,
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
 #ifdef HAVE_LDAP
     LDAPControlW *control = NULL;
+    struct berval *bvret = NULL;
     BerElement *ber;
     ber_tag_t tag;
     ULONG i;
@@ -248,11 +251,12 @@ ULONG CDECL ldap_parse_page_controlW( WLDAP32_LDAP *ld, PLDAPControlW *ctrls,
     if (!ber)
         return WLDAP32_LDAP_NO_MEMORY;
 
-    tag = ber_scanf( ber, "{iO}", count, cookie );
+    tag = ber_scanf( ber, "{iO}", count, &bvret );
     if ( tag == LBER_ERROR )
         ret = WLDAP32_LDAP_DECODING_ERROR;
     else
         ret = WLDAP32_LDAP_SUCCESS;
+    ret = bvconvert_and_free( ret, bvret, cookie );
 
     ber_free( ber, 1 );
     

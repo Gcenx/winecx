@@ -181,7 +181,7 @@ static unsigned char checksum(const char* ptr, int len)
 static const char target_xml[] = "";
 #elif defined(__powerpc__)
 static const char target_xml[] = "";
-#elif defined(__x86_64__)
+#elif defined(__x86_64__) || defined(__i386_on_x86_64__)
 static const char target_xml[] = "";
 #elif defined(__arm__)
 static const char target_xml[] =

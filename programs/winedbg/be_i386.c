@@ -21,7 +21,7 @@
 #include "debugger.h"
 #include "wine/debug.h"
 
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
 
 WINE_DEFAULT_DEBUG_CHANNEL(winedbg);
 
@@ -33,7 +33,7 @@ extern void             be_i386_disasm_one_insn(ADDRESS64* addr, int display);
 
 #define IS_VM86_MODE(ctx) (ctx->EFlags & V86_FLAG)
 
-#ifndef __x86_64__
+#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
 typedef struct DECLSPEC_ALIGN(16) _M128A {
     ULONGLONG Low;
     LONGLONG High;

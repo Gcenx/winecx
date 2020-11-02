@@ -29,6 +29,7 @@
 #include "dbghelp_private.h"
 #include "winternl.h"
 #include "psapi.h"
+#include "wine/asm.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
@@ -292,6 +293,49 @@ static BOOL fetch_macho_module_info_cb(const WCHAR* name, unsigned long base,
         size = checksum = 0;
     add_module(dc, name, base ? base : rbase, size, 0 /* FIXME */, checksum, TRUE);
     return TRUE;
+}
+
+static void minidump_add_memory64_block(struct dump_context* dc, ULONG64 base, ULONG64 size)
+{
+    if (!dc->mem64)
+    {
+        dc->alloc_mem64 = 32;
+        dc->mem64 = HeapAlloc(GetProcessHeap(), 0, dc->alloc_mem64 * sizeof(*dc->mem64));
+    }
+    else if (dc->num_mem64 >= dc->alloc_mem64)
+    {
+        dc->alloc_mem64 *= 2;
+        dc->mem64 = HeapReAlloc(GetProcessHeap(), 0, dc->mem64,
+                                dc->alloc_mem64 * sizeof(*dc->mem64));
+    }
+    if (dc->mem64)
+    {
+        dc->mem64[dc->num_mem64].base = base;
+        dc->mem64[dc->num_mem64].size = size;
+        dc->num_mem64++;
+    }
+    else dc->num_mem64 = dc->alloc_mem64 = 0;
+}
+
+static void fetch_memory64_info(struct dump_context* dc)
+{
+    ULONG_PTR                   addr;
+    MEMORY_BASIC_INFORMATION    mbi;
+
+    addr = 0;
+    while (VirtualQueryEx(dc->hProcess, (LPCVOID)addr, &mbi, sizeof(mbi)) != 0)
+    {
+        /* Memory regions with state MEM_COMMIT will be added to the dump */
+        if (mbi.State == MEM_COMMIT)
+        {
+            minidump_add_memory64_block(dc, (ULONG_PTR)mbi.BaseAddress, mbi.RegionSize);
+        }
+
+        if ((addr + mbi.RegionSize) < addr)
+            break;
+
+        addr = (ULONG_PTR)mbi.BaseAddress + mbi.RegionSize;
+    }
 }
 
 static void fetch_modules_info(struct dump_context* dc)
@@ -571,6 +615,31 @@ __ASM_GLOBAL_FUNC( have_x86cpuid,
                    "xorl %ecx,%eax\n\t"
                    "andl $0x00200000,%eax\n\t"
                    "ret" )
+#elif defined(__i386_on_x86_64__)
+extern void do_x86cpuid(unsigned int ax, unsigned int *p);
+__ASM_GLOBAL_FUNC( do_x86cpuid,
+                   "pushq %rbx\n\t"
+                   "movl %edi,%eax\n\t"
+                   "cpuid\n\t"
+                   "movl %eax,(%esi)\n\t"
+                   "movl %ebx,4(%esi)\n\t"
+                   "movl %ecx,8(%esi)\n\t"
+                   "movl %edx,12(%esi)\n\t"
+                   "popq %rbx\n\t"
+                   "retq" )
+extern int have_x86cpuid(void);
+__ASM_GLOBAL_FUNC( have_x86cpuid,
+                   "pushfq\n\t"
+                   "pushfq\n\t"
+                   "movq (%rsp),%rcx\n\t"
+                   "xorq $0x0000000000200000,(%rsp)\n\t"
+                   "popfq\n\t"
+                   "pushfq\n\t"
+                   "popq %rax\n\t"
+                   "popfq\n\t"
+                   "xorq %rcx,%rax\n\t"
+                   "andq $0x0000000000200000,%rax\n\t"
+                   "retq" )
 #else
 static void do_x86cpuid(unsigned int ax, unsigned int *p)
 {
@@ -831,6 +900,60 @@ static unsigned         dump_memory_info(struct dump_context* dc)
     return sz;
 }
 
+/******************************************************************
+ *		dump_memory64_info
+ *
+ * dumps information about the memory of the process (virtual memory)
+ */
+static unsigned         dump_memory64_info(struct dump_context* dc)
+{
+    MINIDUMP_MEMORY64_LIST          mdMem64List;
+    MINIDUMP_MEMORY_DESCRIPTOR64    mdMem64;
+    DWORD                           written;
+    unsigned                        i, len, sz;
+    RVA                             rva_base;
+    char                            tmp[1024];
+    ULONG64                         pos;
+    LARGE_INTEGER                   filepos;
+
+    sz = sizeof(mdMem64List.NumberOfMemoryRanges) +
+            sizeof(mdMem64List.BaseRva) +
+            dc->num_mem64 * sizeof(mdMem64);
+
+    mdMem64List.NumberOfMemoryRanges = dc->num_mem64;
+    mdMem64List.BaseRva = dc->rva + sz;
+
+    append(dc, &mdMem64List.NumberOfMemoryRanges,
+           sizeof(mdMem64List.NumberOfMemoryRanges));
+    append(dc, &mdMem64List.BaseRva,
+           sizeof(mdMem64List.BaseRva));
+
+    rva_base = dc->rva;
+    dc->rva += dc->num_mem64 * sizeof(mdMem64);
+
+    /* dc->rva is not updated past this point. The end of the dump
+     * is just the full memory data. */
+    filepos.QuadPart = dc->rva;
+    for (i = 0; i < dc->num_mem64; i++)
+    {
+        mdMem64.StartOfMemoryRange = dc->mem64[i].base;
+        mdMem64.DataSize = dc->mem64[i].size;
+        SetFilePointerEx(dc->hFile, filepos, NULL, FILE_BEGIN);
+        for (pos = 0; pos < dc->mem64[i].size; pos += sizeof(tmp))
+        {
+            len = min(dc->mem64[i].size - pos, sizeof(tmp));
+            if (ReadProcessMemory(dc->hProcess,
+                                  (void*)(ULONG_PTR)(dc->mem64[i].base + pos),
+                                  tmp, len, NULL))
+                WriteFile(dc->hFile, tmp, len, &written, NULL);
+        }
+        filepos.QuadPart += mdMem64.DataSize;
+        writeat(dc, rva_base + i * sizeof(mdMem64), &mdMem64, sizeof(mdMem64));
+    }
+
+    return sz;
+}
+
 static unsigned         dump_misc_info(struct dump_context* dc)
 {
     MINIDUMP_MISC_INFO  mmi;
@@ -876,6 +999,9 @@ BOOL WINAPI MiniDumpWriteDump(HANDLE hProcess, DWORD pid, HANDLE hFile,
     dc.mem = NULL;
     dc.num_mem = 0;
     dc.alloc_mem = 0;
+    dc.mem64 = NULL;
+    dc.num_mem64 = 0;
+    dc.alloc_mem64 = 0;
     dc.rva = 0;
 
     if (!fetch_process_info(&dc)) return FALSE;
@@ -890,8 +1016,6 @@ BOOL WINAPI MiniDumpWriteDump(HANDLE hProcess, DWORD pid, HANDLE hFile,
 
     if (DumpType & MiniDumpWithDataSegs)
         FIXME("NIY MiniDumpWithDataSegs\n");
-    if (DumpType & MiniDumpWithFullMemory)
-        FIXME("NIY MiniDumpWithFullMemory\n");
     if (DumpType & MiniDumpWithHandleData)
         FIXME("NIY MiniDumpWithHandleData\n");
     if (DumpType & MiniDumpFilterMemory)
@@ -940,11 +1064,15 @@ BOOL WINAPI MiniDumpWriteDump(HANDLE hProcess, DWORD pid, HANDLE hFile,
     writeat(&dc, mdHead.StreamDirectoryRva + idx_stream++ * sizeof(mdDir),
             &mdDir, sizeof(mdDir));
 
-    mdDir.StreamType = MemoryListStream;
-    mdDir.Location.Rva = dc.rva;
-    mdDir.Location.DataSize = dump_memory_info(&dc);
-    writeat(&dc, mdHead.StreamDirectoryRva + idx_stream++ * sizeof(mdDir),
-            &mdDir, sizeof(mdDir));
+
+    if (!(DumpType & MiniDumpWithFullMemory))
+    {
+        mdDir.StreamType = MemoryListStream;
+        mdDir.Location.Rva = dc.rva;
+        mdDir.Location.DataSize = dump_memory_info(&dc);
+        writeat(&dc, mdHead.StreamDirectoryRva + idx_stream++ * sizeof(mdDir),
+                &mdDir, sizeof(mdDir));
+    }
 
     mdDir.StreamType = MiscInfoStream;
     mdDir.Location.Rva = dc.rva;
@@ -977,12 +1105,25 @@ BOOL WINAPI MiniDumpWriteDump(HANDLE hProcess, DWORD pid, HANDLE hFile,
         }
     }
 
+    /* 3.4) write full memory (if requested) */
+    if (DumpType & MiniDumpWithFullMemory)
+    {
+        fetch_memory64_info(&dc);
+
+        mdDir.StreamType = Memory64ListStream;
+        mdDir.Location.Rva = dc.rva;
+        mdDir.Location.DataSize = dump_memory64_info(&dc);
+        writeat(&dc, mdHead.StreamDirectoryRva + idx_stream++ * sizeof(mdDir),
+                &mdDir, sizeof(mdDir));
+    }
+
     /* fill the remaining directory entries with 0's (unused stream types) */
     /* NOTE: this should always come last in the dump! */
     for (i = idx_stream; i < nStreams; i++)
         writeat(&dc, mdHead.StreamDirectoryRva + i * sizeof(emptyDir), &emptyDir, sizeof(emptyDir));
 
     HeapFree(GetProcessHeap(), 0, dc.mem);
+    HeapFree(GetProcessHeap(), 0, dc.mem64);
     HeapFree(GetProcessHeap(), 0, dc.modules);
     HeapFree(GetProcessHeap(), 0, dc.threads);
 

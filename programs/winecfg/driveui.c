@@ -21,6 +21,10 @@
  *
  */
 
+#include <stdarg.h>
+#ifndef _VA_LIST_T /* Clang's stdarg.h guards with _VA_LIST, while Xcode's uses _VA_LIST_T */
+#define _VA_LIST_T
+#endif
 #include <stdio.h>
 
 #define WIN32_LEAN_AND_MEAN

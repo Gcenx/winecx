@@ -46,16 +46,11 @@ typedef struct VideoRendererImpl
     BaseControlWindow baseControlWindow;
     BaseControlVideo baseControlVideo;
 
-    IUnknown IUnknown_inner;
-    IAMFilterMiscFlags IAMFilterMiscFlags_iface;
-    IUnknown *outer_unk;
-
     BOOL init;
     HANDLE hThread;
 
     DWORD ThreadID;
     HANDLE hEvent;
-/* hEvent == evComplete? */
     BOOL ThreadResult;
     RECT SourceRect;
     RECT DestRect;
@@ -88,11 +83,6 @@ static inline VideoRendererImpl *impl_from_IVideoWindow(IVideoWindow *iface)
 static inline VideoRendererImpl *impl_from_BaseControlVideo(BaseControlVideo *iface)
 {
     return CONTAINING_RECORD(iface, VideoRendererImpl, baseControlVideo);
-}
-
-static inline VideoRendererImpl *impl_from_IBasicVideo(IBasicVideo *iface)
-{
-    return CONTAINING_RECORD(iface, VideoRendererImpl, baseControlVideo.IBasicVideo_iface);
 }
 
 static DWORD WINAPI MessageLoop(LPVOID lpParameter)
@@ -210,7 +200,7 @@ static DWORD VideoRenderer_SendSampleData(VideoRendererImpl* This, LPBYTE data, 
 
     TRACE("(%p)->(%p, %d)\n", This, data, size);
 
-    hr = IPin_ConnectionMediaType(&This->renderer.pInputPin->pin.IPin_iface, &amt);
+    hr = IPin_ConnectionMediaType(&This->renderer.sink.pin.IPin_iface, &amt);
     if (FAILED(hr)) {
         ERR("Unable to retrieve media type\n");
         return hr;
@@ -372,13 +362,11 @@ static HRESULT WINAPI VideoRenderer_EndFlush(BaseRenderer* iface)
 
     if (This->renderer.pMediaSample) {
         ResetEvent(This->hEvent);
-        LeaveCriticalSection(iface->pInputPin->pin.pCritSec);
         LeaveCriticalSection(&iface->filter.csFilter);
         LeaveCriticalSection(&iface->csRenderLock);
         WaitForSingleObject(This->hEvent, INFINITE);
         EnterCriticalSection(&iface->csRenderLock);
         EnterCriticalSection(&iface->filter.csFilter);
-        EnterCriticalSection(iface->pInputPin->pin.pCritSec);
     }
     if (This->renderer.filter.state == State_Paused) {
         ResetEvent(This->hEvent);
@@ -387,7 +375,37 @@ static HRESULT WINAPI VideoRenderer_EndFlush(BaseRenderer* iface)
     return BaseRendererImpl_EndFlush(iface);
 }
 
-static VOID WINAPI VideoRenderer_OnStopStreaming(BaseRenderer* iface)
+static void video_renderer_destroy(BaseRenderer *iface)
+{
+    VideoRendererImpl *filter = impl_from_BaseRenderer(iface);
+
+    BaseControlWindow_Destroy(&filter->baseControlWindow);
+    BaseControlVideo_Destroy(&filter->baseControlVideo);
+    PostThreadMessageW(filter->ThreadID, WM_QUIT, 0, 0);
+    WaitForSingleObject(filter->hThread, INFINITE);
+    CloseHandle(filter->hThread);
+    CloseHandle(filter->hEvent);
+
+    strmbase_renderer_cleanup(&filter->renderer);
+    CoTaskMemFree(filter);
+}
+
+static HRESULT video_renderer_query_interface(BaseRenderer *iface, REFIID iid, void **out)
+{
+    VideoRendererImpl *filter = impl_from_BaseRenderer(iface);
+
+    if (IsEqualGUID(iid, &IID_IBasicVideo))
+        *out = &filter->baseControlVideo.IBasicVideo_iface;
+    else if (IsEqualGUID(iid, &IID_IVideoWindow))
+        *out = &filter->baseControlWindow.IVideoWindow_iface;
+    else
+        return E_NOINTERFACE;
+
+    IUnknown_AddRef((IUnknown *)*out);
+    return S_OK;
+}
+
+static void video_renderer_stop_stream(BaseRenderer *iface)
 {
     VideoRendererImpl *This = impl_from_BaseRenderer(iface);
 
@@ -399,13 +417,14 @@ static VOID WINAPI VideoRenderer_OnStopStreaming(BaseRenderer* iface)
         RedrawWindow(This->baseControlWindow.baseWindow.hWnd, NULL, NULL, RDW_INVALIDATE|RDW_ERASE);
 }
 
-static VOID WINAPI VideoRenderer_OnStartStreaming(BaseRenderer* iface)
+static void video_renderer_start_stream(BaseRenderer *iface)
 {
     VideoRendererImpl *This = impl_from_BaseRenderer(iface);
 
     TRACE("(%p)\n", This);
 
-    if (This->renderer.pInputPin->pin.pConnectedTo && (This->renderer.filter.state == State_Stopped || !This->renderer.pInputPin->end_of_stream))
+    if (This->renderer.sink.pin.pConnectedTo
+        && (This->renderer.filter.state == State_Stopped || !This->renderer.sink.end_of_stream))
     {
         if (This->renderer.filter.state == State_Stopped)
         {
@@ -450,26 +469,16 @@ static BOOL WINAPI VideoRenderer_OnSize(BaseWindow *iface, LONG Width, LONG Heig
     return BaseWindowImpl_OnSize(iface, Width, Height);
 }
 
-static const BaseRendererFuncTable BaseFuncTable = {
-    VideoRenderer_CheckMediaType,
-    VideoRenderer_DoRenderSample,
-    /**/
-    NULL,
-    NULL,
-    NULL,
-    VideoRenderer_OnStartStreaming,
-    VideoRenderer_OnStopStreaming,
-    NULL,
-    NULL,
-    NULL,
-    VideoRenderer_ShouldDrawSampleNow,
-    NULL,
-    /**/
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    VideoRenderer_EndFlush,
+static const BaseRendererFuncTable BaseFuncTable =
+{
+    .pfnCheckMediaType = VideoRenderer_CheckMediaType,
+    .pfnDoRenderSample = VideoRenderer_DoRenderSample,
+    .renderer_start_stream = video_renderer_start_stream,
+    .renderer_stop_stream = video_renderer_stop_stream,
+    .pfnShouldDrawSampleNow = VideoRenderer_ShouldDrawSampleNow,
+    .pfnEndFlush = VideoRenderer_EndFlush,
+    .renderer_destroy = video_renderer_destroy,
+    .renderer_query_interface = video_renderer_query_interface,
 };
 
 static const BaseWindowFuncTable renderer_BaseWindowFuncTable = {
@@ -490,9 +499,9 @@ static HRESULT WINAPI VideoRenderer_GetSourceRect(BaseControlVideo* iface, RECT 
 static HRESULT WINAPI VideoRenderer_GetStaticImage(BaseControlVideo* iface, LONG *pBufferSize, LONG *pDIBImage)
 {
     VideoRendererImpl *This = impl_from_BaseControlVideo(iface);
+    AM_MEDIA_TYPE *amt = &This->renderer.sink.pin.mtCurrent;
     BITMAPINFOHEADER *bmiHeader;
     LONG needed_size;
-    AM_MEDIA_TYPE *amt = &This->renderer.pInputPin->pin.mtCurrent;
     char *ptr;
 
     FIXME("(%p/%p)->(%p, %p): partial stub\n", This, iface, pBufferSize, pDIBImage);
@@ -560,7 +569,7 @@ static VIDEOINFOHEADER* WINAPI VideoRenderer_GetVideoFormat(BaseControlVideo* if
 
     TRACE("(%p/%p)\n", This, iface);
 
-    pmt = &This->renderer.pInputPin->pin.mtCurrent;
+    pmt = &This->renderer.sink.pin.mtCurrent;
     if (IsEqualIID(&pmt->formattype, &FORMAT_VideoInfo)) {
         return (VIDEOINFOHEADER*)pmt->pbFormat;
     } else if (IsEqualIID(&pmt->formattype, &FORMAT_VideoInfo2)) {
@@ -640,107 +649,6 @@ static const BaseControlVideoFuncTable renderer_BaseControlVideoFuncTable = {
     VideoRenderer_SetTargetRect
 };
 
-static inline VideoRendererImpl *impl_from_IUnknown(IUnknown *iface)
-{
-    return CONTAINING_RECORD(iface, VideoRendererImpl, IUnknown_inner);
-}
-
-static HRESULT WINAPI VideoRendererInner_QueryInterface(IUnknown *iface, REFIID riid, void **ppv)
-{
-    VideoRendererImpl *This = impl_from_IUnknown(iface);
-
-    TRACE("(%p/%p)->(%s, %p)\n", This, iface, qzdebugstr_guid(riid), ppv);
-
-    *ppv = NULL;
-
-    if (IsEqualIID(riid, &IID_IUnknown))
-        *ppv = &This->IUnknown_inner;
-    else if (IsEqualIID(riid, &IID_IBasicVideo))
-        *ppv = &This->baseControlVideo.IBasicVideo_iface;
-    else if (IsEqualIID(riid, &IID_IVideoWindow))
-        *ppv = &This->baseControlWindow.IVideoWindow_iface;
-    else if (IsEqualIID(riid, &IID_IAMFilterMiscFlags))
-        *ppv = &This->IAMFilterMiscFlags_iface;
-    else
-    {
-        HRESULT hr;
-        hr = BaseRendererImpl_QueryInterface(&This->renderer.filter.IBaseFilter_iface, riid, ppv);
-        if (SUCCEEDED(hr))
-            return hr;
-    }
-
-    if (*ppv)
-    {
-        IUnknown_AddRef((IUnknown *)*ppv);
-        return S_OK;
-    }
-
-    if (!IsEqualIID(riid, &IID_IPin))
-        FIXME("No interface for %s!\n", qzdebugstr_guid(riid));
-
-    return E_NOINTERFACE;
-}
-
-static ULONG WINAPI VideoRendererInner_AddRef(IUnknown *iface)
-{
-    VideoRendererImpl *This = impl_from_IUnknown(iface);
-    ULONG refCount = BaseFilterImpl_AddRef(&This->renderer.filter.IBaseFilter_iface);
-
-    TRACE("(%p)->(): new ref = %d\n", This, refCount);
-
-    return refCount;
-}
-
-static ULONG WINAPI VideoRendererInner_Release(IUnknown *iface)
-{
-    VideoRendererImpl *This = impl_from_IUnknown(iface);
-    ULONG refCount = BaseRendererImpl_Release(&This->renderer.filter.IBaseFilter_iface);
-
-    TRACE("(%p)->(): new ref = %d\n", This, refCount);
-
-    if (!refCount)
-    {
-        BaseControlWindow_Destroy(&This->baseControlWindow);
-        BaseControlVideo_Destroy(&This->baseControlVideo);
-        PostThreadMessageW(This->ThreadID, WM_QUIT, 0, 0);
-        WaitForSingleObject(This->hThread, INFINITE);
-        CloseHandle(This->hThread);
-        CloseHandle(This->hEvent);
-
-        TRACE("Destroying Video Renderer\n");
-        CoTaskMemFree(This);
-
-        return 0;
-    }
-    else
-        return refCount;
-}
-
-static const IUnknownVtbl IInner_VTable =
-{
-    VideoRendererInner_QueryInterface,
-    VideoRendererInner_AddRef,
-    VideoRendererInner_Release
-};
-
-static HRESULT WINAPI VideoRenderer_QueryInterface(IBaseFilter * iface, REFIID riid, LPVOID * ppv)
-{
-    VideoRendererImpl *This = impl_from_IBaseFilter(iface);
-    return IUnknown_QueryInterface(This->outer_unk, riid, ppv);
-}
-
-static ULONG WINAPI VideoRenderer_AddRef(IBaseFilter * iface)
-{
-    VideoRendererImpl *This = impl_from_IBaseFilter(iface);
-    return IUnknown_AddRef(This->outer_unk);
-}
-
-static ULONG WINAPI VideoRenderer_Release(IBaseFilter * iface)
-{
-    VideoRendererImpl *This = impl_from_IBaseFilter(iface);
-    return IUnknown_Release(This->outer_unk);
-}
-
 /** IMediaFilter methods **/
 
 static HRESULT WINAPI VideoRenderer_Pause(IBaseFilter * iface)
@@ -754,12 +662,12 @@ static HRESULT WINAPI VideoRenderer_Pause(IBaseFilter * iface)
     {
         if (This->renderer.filter.state == State_Stopped)
         {
-            This->renderer.pInputPin->end_of_stream = 0;
+            This->renderer.sink.end_of_stream = 0;
             ResetEvent(This->hEvent);
             VideoRenderer_AutoShowWindow(This);
         }
 
-        ResetEvent(This->renderer.RenderEvent);
+        ResetEvent(This->renderer.flush_event);
         This->renderer.filter.state = State_Paused;
     }
     LeaveCriticalSection(&This->renderer.csRenderLock);
@@ -769,9 +677,9 @@ static HRESULT WINAPI VideoRenderer_Pause(IBaseFilter * iface)
 
 static const IBaseFilterVtbl VideoRenderer_Vtbl =
 {
-    VideoRenderer_QueryInterface,
-    VideoRenderer_AddRef,
-    VideoRenderer_Release,
+    BaseFilterImpl_QueryInterface,
+    BaseFilterImpl_AddRef,
+    BaseFilterImpl_Release,
     BaseFilterImpl_GetClassID,
     BaseRendererImpl_Stop,
     VideoRenderer_Pause,
@@ -780,111 +688,11 @@ static const IBaseFilterVtbl VideoRenderer_Vtbl =
     BaseRendererImpl_SetSyncSource,
     BaseFilterImpl_GetSyncSource,
     BaseFilterImpl_EnumPins,
-    BaseRendererImpl_FindPin,
+    BaseFilterImpl_FindPin,
     BaseFilterImpl_QueryFilterInfo,
     BaseFilterImpl_JoinFilterGraph,
     BaseFilterImpl_QueryVendorInfo
 };
-
-/*** IUnknown methods ***/
-static HRESULT WINAPI BasicVideo_QueryInterface(IBasicVideo *iface, REFIID riid, LPVOID *ppvObj)
-{
-    VideoRendererImpl *This = impl_from_IBasicVideo(iface);
-
-    TRACE("(%p/%p)->(%s, %p)\n", This, iface, debugstr_guid(riid), ppvObj);
-
-    return IUnknown_QueryInterface(This->outer_unk, riid, ppvObj);
-}
-
-static ULONG WINAPI BasicVideo_AddRef(IBasicVideo *iface)
-{
-    VideoRendererImpl *This = impl_from_IBasicVideo(iface);
-
-    TRACE("(%p/%p)->()\n", This, iface);
-
-    return IUnknown_AddRef(This->outer_unk);
-}
-
-static ULONG WINAPI BasicVideo_Release(IBasicVideo *iface)
-{
-    VideoRendererImpl *This = impl_from_IBasicVideo(iface);
-
-    TRACE("(%p/%p)->()\n", This, iface);
-
-    return IUnknown_Release(This->outer_unk);
-}
-
-static const IBasicVideoVtbl IBasicVideo_VTable =
-{
-    BasicVideo_QueryInterface,
-    BasicVideo_AddRef,
-    BasicVideo_Release,
-    BaseControlVideoImpl_GetTypeInfoCount,
-    BaseControlVideoImpl_GetTypeInfo,
-    BaseControlVideoImpl_GetIDsOfNames,
-    BaseControlVideoImpl_Invoke,
-    BaseControlVideoImpl_get_AvgTimePerFrame,
-    BaseControlVideoImpl_get_BitRate,
-    BaseControlVideoImpl_get_BitErrorRate,
-    BaseControlVideoImpl_get_VideoWidth,
-    BaseControlVideoImpl_get_VideoHeight,
-    BaseControlVideoImpl_put_SourceLeft,
-    BaseControlVideoImpl_get_SourceLeft,
-    BaseControlVideoImpl_put_SourceWidth,
-    BaseControlVideoImpl_get_SourceWidth,
-    BaseControlVideoImpl_put_SourceTop,
-    BaseControlVideoImpl_get_SourceTop,
-    BaseControlVideoImpl_put_SourceHeight,
-    BaseControlVideoImpl_get_SourceHeight,
-    BaseControlVideoImpl_put_DestinationLeft,
-    BaseControlVideoImpl_get_DestinationLeft,
-    BaseControlVideoImpl_put_DestinationWidth,
-    BaseControlVideoImpl_get_DestinationWidth,
-    BaseControlVideoImpl_put_DestinationTop,
-    BaseControlVideoImpl_get_DestinationTop,
-    BaseControlVideoImpl_put_DestinationHeight,
-    BaseControlVideoImpl_get_DestinationHeight,
-    BaseControlVideoImpl_SetSourcePosition,
-    BaseControlVideoImpl_GetSourcePosition,
-    BaseControlVideoImpl_SetDefaultSourcePosition,
-    BaseControlVideoImpl_SetDestinationPosition,
-    BaseControlVideoImpl_GetDestinationPosition,
-    BaseControlVideoImpl_SetDefaultDestinationPosition,
-    BaseControlVideoImpl_GetVideoSize,
-    BaseControlVideoImpl_GetVideoPaletteEntries,
-    BaseControlVideoImpl_GetCurrentImage,
-    BaseControlVideoImpl_IsUsingDefaultSource,
-    BaseControlVideoImpl_IsUsingDefaultDestination
-};
-
-
-/*** IUnknown methods ***/
-static HRESULT WINAPI VideoWindow_QueryInterface(IVideoWindow *iface, REFIID riid, LPVOID *ppvObj)
-{
-    VideoRendererImpl *This = impl_from_IVideoWindow(iface);
-
-    TRACE("(%p/%p)->(%s, %p)\n", This, iface, debugstr_guid(riid), ppvObj);
-
-    return IUnknown_QueryInterface(This->outer_unk, riid, ppvObj);
-}
-
-static ULONG WINAPI VideoWindow_AddRef(IVideoWindow *iface)
-{
-    VideoRendererImpl *This = impl_from_IVideoWindow(iface);
-
-    TRACE("(%p/%p)->()\n", This, iface);
-
-    return IUnknown_AddRef(This->outer_unk);
-}
-
-static ULONG WINAPI VideoWindow_Release(IVideoWindow *iface)
-{
-    VideoRendererImpl *This = impl_from_IVideoWindow(iface);
-
-    TRACE("(%p/%p)->()\n", This, iface);
-
-    return IUnknown_Release(This->outer_unk);
-}
 
 static HRESULT WINAPI VideoWindow_get_FullScreenMode(IVideoWindow *iface,
                                                      LONG *FullScreenMode)
@@ -931,9 +739,9 @@ static HRESULT WINAPI VideoWindow_put_FullScreenMode(IVideoWindow *iface,
 
 static const IVideoWindowVtbl IVideoWindow_VTable =
 {
-    VideoWindow_QueryInterface,
-    VideoWindow_AddRef,
-    VideoWindow_Release,
+    BaseControlWindowImpl_QueryInterface,
+    BaseControlWindowImpl_AddRef,
+    BaseControlWindowImpl_Release,
     BaseControlWindowImpl_GetTypeInfoCount,
     BaseControlWindowImpl_GetTypeInfo,
     BaseControlWindowImpl_GetIDsOfNames,
@@ -979,54 +787,15 @@ static const IVideoWindowVtbl IVideoWindow_VTable =
     BaseControlWindowImpl_IsCursorHidden
 };
 
-static VideoRendererImpl *impl_from_IAMFilterMiscFlags(IAMFilterMiscFlags *iface)
+HRESULT VideoRenderer_create(IUnknown *outer, void **out)
 {
-    return CONTAINING_RECORD(iface, VideoRendererImpl, IAMFilterMiscFlags_iface);
-}
-
-static HRESULT WINAPI AMFilterMiscFlags_QueryInterface(IAMFilterMiscFlags *iface, REFIID riid,
-        void **ppv)
-{
-    VideoRendererImpl *This = impl_from_IAMFilterMiscFlags(iface);
-    return IUnknown_QueryInterface(This->outer_unk, riid, ppv);
-}
-
-static ULONG WINAPI AMFilterMiscFlags_AddRef(IAMFilterMiscFlags *iface)
-{
-    VideoRendererImpl *This = impl_from_IAMFilterMiscFlags(iface);
-    return IUnknown_AddRef(This->outer_unk);
-}
-
-static ULONG WINAPI AMFilterMiscFlags_Release(IAMFilterMiscFlags *iface)
-{
-    VideoRendererImpl *This = impl_from_IAMFilterMiscFlags(iface);
-    return IUnknown_Release(This->outer_unk);
-}
-
-static ULONG WINAPI AMFilterMiscFlags_GetMiscFlags(IAMFilterMiscFlags *iface)
-{
-    return AM_FILTER_MISC_FLAGS_IS_RENDERER;
-}
-
-static const IAMFilterMiscFlagsVtbl IAMFilterMiscFlags_Vtbl = {
-    AMFilterMiscFlags_QueryInterface,
-    AMFilterMiscFlags_AddRef,
-    AMFilterMiscFlags_Release,
-    AMFilterMiscFlags_GetMiscFlags
-};
-
-HRESULT VideoRenderer_create(IUnknown *pUnkOuter, void **ppv)
-{
+    static const WCHAR sink_name[] = {'I','n',0};
     HRESULT hr;
     VideoRendererImpl * pVideoRenderer;
 
-    TRACE("(%p, %p)\n", pUnkOuter, ppv);
-
-    *ppv = NULL;
+    *out = NULL;
 
     pVideoRenderer = CoTaskMemAlloc(sizeof(VideoRendererImpl));
-    pVideoRenderer->IUnknown_inner.lpVtbl = &IInner_VTable;
-    pVideoRenderer->IAMFilterMiscFlags_iface.lpVtbl = &IAMFilterMiscFlags_Vtbl;
 
     pVideoRenderer->init = FALSE;
     ZeroMemory(&pVideoRenderer->SourceRect, sizeof(RECT));
@@ -1034,27 +803,22 @@ HRESULT VideoRenderer_create(IUnknown *pUnkOuter, void **ppv)
     ZeroMemory(&pVideoRenderer->WindowPos, sizeof(RECT));
     pVideoRenderer->FullScreenMode = OAFALSE;
 
-    if (pUnkOuter)
-        pVideoRenderer->outer_unk = pUnkOuter;
-    else
-        pVideoRenderer->outer_unk = &pVideoRenderer->IUnknown_inner;
-
-    hr = BaseRenderer_Init(&pVideoRenderer->renderer, &VideoRenderer_Vtbl, pUnkOuter,
-            &CLSID_VideoRenderer, (DWORD_PTR)(__FILE__ ": VideoRendererImpl.csFilter"),
-            &BaseFuncTable);
+    hr = strmbase_renderer_init(&pVideoRenderer->renderer, &VideoRenderer_Vtbl,
+            outer, &CLSID_VideoRenderer, sink_name,
+            (DWORD_PTR)(__FILE__ ": VideoRendererImpl.csFilter"), &BaseFuncTable);
 
     if (FAILED(hr))
         goto fail;
 
     hr = BaseControlWindow_Init(&pVideoRenderer->baseControlWindow, &IVideoWindow_VTable,
             &pVideoRenderer->renderer.filter, &pVideoRenderer->renderer.filter.csFilter,
-            &pVideoRenderer->renderer.pInputPin->pin, &renderer_BaseWindowFuncTable);
+            &pVideoRenderer->renderer.sink.pin, &renderer_BaseWindowFuncTable);
     if (FAILED(hr))
         goto fail;
 
-    hr = BaseControlVideo_Init(&pVideoRenderer->baseControlVideo, &IBasicVideo_VTable,
+    hr = strmbase_video_init(&pVideoRenderer->baseControlVideo,
             &pVideoRenderer->renderer.filter, &pVideoRenderer->renderer.filter.csFilter,
-            &pVideoRenderer->renderer.pInputPin->pin, &renderer_BaseControlVideoFuncTable);
+            &pVideoRenderer->renderer.sink.pin, &renderer_BaseControlVideoFuncTable);
     if (FAILED(hr))
         goto fail;
 
@@ -1063,11 +827,11 @@ HRESULT VideoRenderer_create(IUnknown *pUnkOuter, void **ppv)
         goto fail;
     }
 
-    *ppv = &pVideoRenderer->IUnknown_inner;
+    *out = &pVideoRenderer->renderer.filter.IUnknown_inner;
     return S_OK;
 
 fail:
-    BaseRendererImpl_Release(&pVideoRenderer->renderer.filter.IBaseFilter_iface);
+    strmbase_renderer_cleanup(&pVideoRenderer->renderer);
     CoTaskMemFree(pVideoRenderer);
     return hr;
 }

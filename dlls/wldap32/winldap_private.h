@@ -45,11 +45,6 @@ typedef enum {
     WLDAP32_LDAP_REFERRAL_LIMIT_EXCEEDED =   0x61
 } LDAP_RETCODE;
 
-typedef struct berelement
-{
-    PCHAR opaque;
-} WLDAP32_BerElement;
-
 #define WLDAP32_LDAP_OPT_API_INFO               0x00
 #define WLDAP32_LDAP_OPT_DESC                   0x01
 #define WLDAP32_LDAP_OPT_DEREF                  0x02
@@ -101,7 +96,11 @@ typedef struct berelement
 #define WLDAP32_LDAP_OPT_SECURITY_CONTEXT       0x99
 #define WLDAP32_LDAP_OPT_ROOTDSE_CACHE          0x9a
 
+#ifdef __i386_on_x86_64__
+typedef struct
+#else
 typedef struct ldap
+#endif
 {
     struct
     {
@@ -126,14 +125,23 @@ typedef struct ldap
     ULONG ld_cldaptimeout;
     ULONG ld_refhoplimit;
     ULONG ld_options;
+#ifdef __i386_on_x86_64__
+    LDAP *ld_ld64;
+#endif
 } WLDAP32_LDAP, *WLDAP32_PLDAP;
+
+typedef struct WLDAP32_berval
+{
+    ULONG bv_len;
+    PCHAR bv_val;
+} LDAP_BERVAL, *PLDAP_BERVAL, BERVAL, *PBERVAL, WLDAP32_BerValue;
 
 typedef struct ldapmodA {
     ULONG mod_op;
     PCHAR mod_type;
     union {
         PCHAR *modv_strvals;
-        struct berval **modv_bvals;
+        BERVAL **modv_bvals;
     } mod_vals;
 } LDAPModA, *PLDAPModA;
 
@@ -142,7 +150,7 @@ typedef struct ldapmodW {
     PWCHAR mod_type;
     union {
         PWCHAR *modv_strvals;
-        struct berval **modv_bvals;
+        BERVAL **modv_bvals;
     } mod_vals;
 } LDAPModW, *PLDAPModW;
 
@@ -152,15 +160,24 @@ typedef struct l_timeval
     LONG tv_usec;
 } LDAP_TIMEVAL, *PLDAP_TIMEVAL;
 
+#ifdef __i386_on_x86_64__
+typedef struct WLDAP32_ldapmsg
+#else
 typedef struct ldapmsg
+#endif
 {
     ULONG lm_msgid;
     ULONG lm_msgtype;
 
     PVOID lm_ber;
 
+#ifdef __i386_on_x86_64__
+    struct WLDAP32_ldapmsg *lm_chain;
+    struct WLDAP32_ldapmsg *lm_next;
+#else
     struct ldapmsg *lm_chain;
     struct ldapmsg *lm_next;
+#endif
     ULONG lm_time;
 
     WLDAP32_PLDAP Connection;
@@ -170,6 +187,9 @@ typedef struct ldapmsg
     BOOLEAN lm_chased;
     BOOLEAN lm_eom;
     BOOLEAN ConnectionReferenced;
+#ifdef __i386_on_x86_64__
+    struct ldapmsg * HOSTPTR lm_msg64;
+#endif
 } WLDAP32_LDAPMessage, *WLDAP32_PLDAPMessage;
 
 #define LAPI_MAJOR_VER1     1
@@ -182,23 +202,28 @@ typedef struct ldap_version_info
     ULONG lv_minor;
 } LDAP_VERSION_INFO, *PLDAP_VERSION_INFO;
 
-typedef struct WLDAP32_berval
+#ifdef __i386_on_x86_64__
+typedef struct
+#else
+typedef struct berelement
+#endif
 {
-    ULONG bv_len;
-    PCHAR bv_val;
-} LDAP_BERVAL, *PLDAP_BERVAL, BERVAL, *PBERVAL, WLDAP32_BerValue;
+    PCHAR opaque;
+} WLDAP32_BerElement;
 
 #define LDAP_PAGED_RESULT_OID_STRING "1.2.840.113556.1.4.319"
-#define LDAP_PAGED_RESULT_OID_STRING_W (const WCHAR []){'1','.','2','.', \
-        '8','4','0','.','1','1','3','5','5','6','.','1','.','4','.','3','1','9',0}
-
 #define LDAP_SERVER_RESP_SORT_OID "1.2.840.113556.1.4.474"
-#define LDAP_SERVER_RESP_SORT_OID_W (const WCHAR []){'1','.','2','.', \
-        '8','4','0','.','1','1','3','5','5','6','.','1','.','4','.','4','7','4',0}
-
 #define LDAP_CONTROL_VLVRESPONSE "2.16.840.1.113730.3.4.10"
-#define LDAP_CONTROL_VLVRESPONSE_W (const WCHAR []){'2','.','1','6','.', \
-        '8','4','0','.','1','.','1','1','3','7','3','0','.','3','.','4','.','1','0',0}
+
+#if defined(_MSC_VER) || defined(__MINGW32__)
+#define LDAP_PAGED_RESULT_OID_STRING_W L"1.2.840.113556.1.4.319"
+#define LDAP_SERVER_RESP_SORT_OID_W L"1.2.840.113556.1.4.474"
+#define LDAP_CONTROL_VLVRESPONSE_W L"2.16.840.1.113730.3.4.10"
+#else
+static const WCHAR LDAP_PAGED_RESULT_OID_STRING_W[] = {'1','.','2','.','8','4','0','.','1','1','3','5','5','6','.','1','.','4','.','3','1','9',0};
+static const WCHAR LDAP_SERVER_RESP_SORT_OID_W[] = {'1','.','2','.','8','4','0','.','1','1','3','5','5','6','.','1','.','4','.','4','7','4',0};
+static const WCHAR LDAP_CONTROL_VLVRESPONSE_W[] = {'2','.','1','6','.','8','4','0','.','1','.','1','1','3','7','3','0','.','3','.','4','.','1','0',0};
+#endif
 
 typedef struct ldapcontrolA
 {

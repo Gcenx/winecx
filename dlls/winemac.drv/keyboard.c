@@ -176,7 +176,9 @@ enum {
     kVK_UpArrow             = 0x7E,
 };
 
+#include "wine/hostaddrspace_enter.h"
 extern const CFStringRef kTISTypeKeyboardLayout;
+#include "wine/hostaddrspace_exit.h"
 
 /* Indexed by Mac virtual keycode values defined above. */
 static const struct {
@@ -1286,7 +1288,7 @@ void macdrv_hotkey_press(const macdrv_event *event)
 /***********************************************************************
  *              macdrv_process_text_input
  */
-void macdrv_process_text_input(UINT vkey, UINT scan, UINT repeat, const BYTE *key_state, void *himc, int* done)
+void macdrv_process_text_input(UINT vkey, UINT scan, UINT repeat, const BYTE *key_state, void * WIN32PTR himc, int* done)
 {
     struct macdrv_thread_data *thread_data = macdrv_thread_data();
     unsigned int flags;
@@ -1317,7 +1319,10 @@ void macdrv_process_text_input(UINT vkey, UINT scan, UINT repeat, const BYTE *ke
         if (thread_data->keyc2vkey[keyc] == vkey) break;
 
     if (keyc >= ARRAY_SIZE(thread_data->keyc2vkey))
+    {
+        *done = -1;
         return;
+    }
 
     TRACE("flags 0x%08x keyc 0x%04x\n", flags, keyc);
 

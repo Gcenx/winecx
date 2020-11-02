@@ -19,6 +19,8 @@
 #ifndef __WINE_WINCON_H
 #define __WINE_WINCON_H
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -268,7 +270,7 @@ typedef struct tagINPUT_RECORD
 
 #define CONSOLE_TEXTMODE_BUFFER  1
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 /* Note: this should return a COORD, but calling convention for returning
  * structures is different between Windows and gcc on i386. */
 
@@ -297,17 +299,19 @@ static inline COORD __wine_GetLargestConsoleWindowSize_wrapper(HANDLE h)
 }
 #define GetLargestConsoleWindowSize(h) __wine_GetLargestConsoleWindowSize_wrapper(h)
 
-#else  /* __i386__ */
+#else  /* __i386__ || __i386_on_x86_64__ */
 WINBASEAPI COORD WINAPI GetConsoleFontSize(HANDLE, DWORD);
 WINBASEAPI COORD WINAPI GetLargestConsoleWindowSize(HANDLE);
-#endif  /* __i386__ */
+#endif  /* __i386__ || __i386_on_x86_64__ */
 
 WINBASEAPI BOOL   WINAPI AddConsoleAliasA(LPSTR,LPSTR,LPSTR);
 WINBASEAPI BOOL   WINAPI AddConsoleAliasW(LPWSTR,LPWSTR,LPWSTR);
 #define                  AddConsoleAlias WINELIB_NAME_AW(AddConsoleAlias)
 WINBASEAPI BOOL   WINAPI AllocConsole(VOID);
 WINBASEAPI BOOL   WINAPI AttachConsole(DWORD);
-WINBASEAPI HANDLE WINAPI CreateConsoleScreenBuffer( DWORD,DWORD,LPSECURITY_ATTRIBUTES,DWORD,LPVOID);
+WINBASEAPI BOOL   WINAPI CloseConsoleHandle(HANDLE);
+WINBASEAPI HANDLE WINAPI CreateConsoleScreenBuffer(DWORD,DWORD,LPSECURITY_ATTRIBUTES,DWORD,LPVOID);
+WINBASEAPI HANDLE WINAPI DuplicateConsoleHandle(HANDLE,DWORD,BOOL,DWORD);
 WINBASEAPI BOOL WINAPI   FillConsoleOutputAttribute( HANDLE,WORD,DWORD,COORD,LPDWORD);
 WINBASEAPI BOOL WINAPI   FillConsoleOutputCharacterA(HANDLE,CHAR,DWORD,COORD,LPDWORD);
 WINBASEAPI BOOL WINAPI   FillConsoleOutputCharacterW(HANDLE,WCHAR,DWORD,COORD,LPDWORD);
@@ -337,6 +341,7 @@ WINBASEAPI BOOL WINAPI   GetConsoleHistoryInfo(LPCONSOLE_HISTORY_INFO);
 WINBASEAPI BOOL WINAPI   GetConsoleInputExeNameA(DWORD,LPSTR);
 WINBASEAPI BOOL WINAPI   GetConsoleInputExeNameW(DWORD,LPWSTR);
 #define                  GetConsoleInputExeName WINELIB_NAME_AW(GetConsoleInputExeName)
+WINBASEAPI HANDLE WINAPI GetConsoleInputWaitHandle(void);
 WINBASEAPI BOOL WINAPI   GetConsoleMode( HANDLE,LPDWORD);
 WINBASEAPI DWORD WINAPI  GetConsoleOriginalTitleA(LPSTR,DWORD);
 WINBASEAPI DWORD WINAPI  GetConsoleOriginalTitleW(LPWSTR,DWORD);
@@ -352,6 +357,9 @@ WINBASEAPI HWND WINAPI   GetConsoleWindow(void);
 WINBASEAPI BOOL WINAPI   GetCurrentConsoleFont(HANDLE,BOOL,LPCONSOLE_FONT_INFO);
 WINBASEAPI BOOL WINAPI   GetNumberOfConsoleInputEvents( HANDLE,LPDWORD);
 WINBASEAPI BOOL WINAPI   GetNumberOfConsoleMouseButtons(LPDWORD);
+WINBASEAPI HANDLE WINAPI OpenConsoleA(LPCSTR,DWORD,BOOL,DWORD);
+WINBASEAPI HANDLE WINAPI OpenConsoleW(LPCWSTR,DWORD,BOOL,DWORD);
+#define                  OpenConsole WINELIB_NAME_AW(OpenConsole)
 WINBASEAPI BOOL WINAPI   PeekConsoleInputA( HANDLE,PINPUT_RECORD,DWORD,LPDWORD);
 WINBASEAPI BOOL WINAPI   PeekConsoleInputW( HANDLE,PINPUT_RECORD,DWORD,LPDWORD);
 #define                  PeekConsoleInput WINELIB_NAME_AW(PeekConsoleInput)
@@ -387,6 +395,7 @@ WINBASEAPI BOOL WINAPI   SetConsoleTitleA(LPCSTR);
 WINBASEAPI BOOL WINAPI   SetConsoleTitleW(LPCWSTR);
 #define                  SetConsoleTitle WINELIB_NAME_AW(SetConsoleTitle)
 WINBASEAPI BOOL WINAPI   SetConsoleWindowInfo( HANDLE,BOOL,LPSMALL_RECT);
+WINBASEAPI BOOL WINAPI   VerifyConsoleIoHandle(HANDLE);
 WINBASEAPI BOOL WINAPI   WriteConsoleA(HANDLE,const void *,DWORD,LPDWORD,void *);
 WINBASEAPI BOOL WINAPI   WriteConsoleW(HANDLE,const void *,DWORD,LPDWORD,void *);
 #define                  WriteConsole WINELIB_NAME_AW(WriteConsole)
@@ -404,5 +413,7 @@ WINBASEAPI BOOL WINAPI   WriteConsoleOutputCharacterW(HANDLE,LPCWSTR,DWORD,COORD
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_WINCON_H */

@@ -1402,9 +1402,7 @@ static void print_something(HDC hdc)
 
     strcpy(buf, "deadbeef");
     ret = ExtEscape(hdc, DOWNLOADHEADER, 0, NULL, sizeof(buf), buf );
-todo_wine
     ok(ret == 1, "DOWNLOADHEADER failed\n");
-todo_wine
     ok(strcmp(buf, "deadbeef") != 0, "DOWNLOADHEADER failed\n");
 
     strcpy(buf + 2, "\n% ===> after DOWNLOADHEADER <===\n");
@@ -1435,7 +1433,6 @@ todo_wine
 
         while (*p == '\r' || *p == '\n') p++;
     }
-todo_wine
     ok(p && !memcmp(p, psadobe, sizeof(psadobe)), "wrong signature: %.14s\n", p ? p : buf);
 
     DeleteFileA(file_name);
@@ -1464,22 +1461,18 @@ static void test_pscript_printer_dc(void)
 
     query = DOWNLOADFACE;
     ret = Escape(hdc, QUERYESCSUPPORT, sizeof(query), (LPCSTR)&query, NULL);
-todo_wine
     ok(ret == 1, "DOWNLOADFACE is not supported\n");
 
     query = OPENCHANNEL;
     ret = Escape(hdc, QUERYESCSUPPORT, sizeof(query), (LPCSTR)&query, NULL);
-todo_wine
     ok(ret == 1, "OPENCHANNEL is not supported\n");
 
     query = DOWNLOADHEADER;
     ret = Escape(hdc, QUERYESCSUPPORT, sizeof(query), (LPCSTR)&query, NULL);
-todo_wine
     ok(ret == 1, "DOWNLOADHEADER is not supported\n");
 
     query = CLOSECHANNEL;
     ret = Escape(hdc, QUERYESCSUPPORT, sizeof(query), (LPCSTR)&query, NULL);
-todo_wine
     ok(ret == 1, "CLOSECHANNEL is not supported\n");
 
     query = POSTSCRIPT_PASSTHROUGH;
@@ -1487,7 +1480,6 @@ todo_wine
     ok(ret == 1, "POSTSCRIPT_PASSTHROUGH is not supported\n");
 
     ret = ExtEscape(hdc, GETFACENAME, 0, NULL, sizeof(buf), buf);
-todo_wine
     ok(ret == 1, "GETFACENAME failed\n");
     trace("face name: %s\n", buf);
 

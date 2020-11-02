@@ -19,6 +19,8 @@
 #ifndef __AUTHZ_H__
 #define __AUTHZ_H__
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -103,6 +105,7 @@ BOOL WINAPI AuthzAccessCheck(DWORD flags, AUTHZ_CLIENT_CONTEXT_HANDLE client_con
         AUTHZ_ACCESS_CHECK_RESULTS_HANDLE *access_check_result);
 
 BOOL WINAPI AuthzFreeContext(AUTHZ_CLIENT_CONTEXT_HANDLE client_context);
+BOOL WINAPI AuthzFreeResourceManager(AUTHZ_RESOURCE_MANAGER_HANDLE handle);
 
 BOOL WINAPI AuthzInitializeContextFromSid(DWORD flags, PSID sid,
         AUTHZ_RESOURCE_MANAGER_HANDLE resource_manager, LARGE_INTEGER *expire_time,
@@ -115,5 +118,7 @@ BOOL WINAPI AuthzInitializeContextFromToken(DWORD flags, HANDLE token_handle,
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif

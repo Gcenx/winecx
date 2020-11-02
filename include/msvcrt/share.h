@@ -23,6 +23,7 @@
 
 #ifndef __WINE_SHARE_H
 #define __WINE_SHARE_H
+
 #ifndef __WINE_USE_MSVCRT
 #define __WINE_USE_MSVCRT
 #endif

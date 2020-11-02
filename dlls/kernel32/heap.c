@@ -825,10 +825,10 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
    {
       retval=HeapSize(GetProcessHeap(), 0, hmem);
 
-      if (retval == ~0ul) /* It might be a GMEM_MOVEABLE data pointer */
+      if (retval == (SIZE_T)-1) /* It might be a GMEM_MOVEABLE data pointer */
       {
           retval = HeapSize(GetProcessHeap(), 0, (char*)hmem - HGLOBAL_STORAGE);
-          if (retval != ~0ul) retval -= HGLOBAL_STORAGE;
+          if (retval != (SIZE_T)-1) retval -= HGLOBAL_STORAGE;
       }
    }
    else
@@ -843,7 +843,7 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
          else
          {
              retval = HeapSize(GetProcessHeap(), 0, (char *)pintern->Pointer - HGLOBAL_STORAGE );
-             if (retval != ~0ul) retval -= HGLOBAL_STORAGE;
+             if (retval != (SIZE_T)-1) retval -= HGLOBAL_STORAGE;
          }
       }
       else
@@ -854,7 +854,7 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
       }
       RtlUnlockHeap(GetProcessHeap());
    }
-   if (retval == ~0ul) retval = 0;
+   if (retval == (SIZE_T)-1) retval = 0;
    return retval;
 }
 
@@ -1437,9 +1437,10 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
 
     TRACE_(globalmem)("Length %u, MemoryLoad %u, TotalPhys %lx, AvailPhys %lx,"
           " TotalPageFile %lx, AvailPageFile %lx, TotalVirtual %lx, AvailVirtual %lx\n",
-          lpBuffer->dwLength, lpBuffer->dwMemoryLoad, lpBuffer->dwTotalPhys,
-          lpBuffer->dwAvailPhys, lpBuffer->dwTotalPageFile, lpBuffer->dwAvailPageFile,
-          lpBuffer->dwTotalVirtual, lpBuffer->dwAvailVirtual );
+          lpBuffer->dwLength, lpBuffer->dwMemoryLoad, (unsigned long)lpBuffer->dwTotalPhys,
+          (unsigned long)lpBuffer->dwAvailPhys, (unsigned long)lpBuffer->dwTotalPageFile,
+          (unsigned long)lpBuffer->dwAvailPageFile, (unsigned long)lpBuffer->dwTotalVirtual,
+          (unsigned long)lpBuffer->dwAvailVirtual );
 }
 
 /***********************************************************************
@@ -1472,7 +1473,7 @@ BOOL WINAPI GetSystemFileCacheSize(PSIZE_T mincache, PSIZE_T maxcache, PDWORD fl
 
 BOOL WINAPI SetSystemFileCacheSize(SIZE_T mincache, SIZE_T maxcache, DWORD flags)
 {
-    FIXME("stub: %ld %ld %d\n", mincache, maxcache, flags);
+    FIXME("stub: %lu %lu %08x\n", (unsigned long)mincache, (unsigned long)maxcache, flags);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
@@ -1487,6 +1488,14 @@ BOOL WINAPI AllocateUserPhysicalPages(HANDLE process, ULONG_PTR *pages, ULONG_PT
 BOOL WINAPI FreeUserPhysicalPages(HANDLE process, ULONG_PTR *pages, ULONG_PTR *userarray)
 {
     FIXME("stub: %p %p %p\n", process, pages, userarray);
+    *pages = 0;
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+BOOL WINAPI MapUserPhysicalPages(PVOID addr, ULONG_PTR page_count, PULONG_PTR pages)
+{
+    FIXME("(%p, %lu, %p): stub\n", addr, (unsigned long)page_count, pages);
     *pages = 0;
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;

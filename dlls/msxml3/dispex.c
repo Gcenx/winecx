@@ -150,31 +150,43 @@ static inline unsigned get_libid_from_tid(tid_t tid)
     return tid_ids[tid].lib;
 }
 
-HRESULT get_typeinfo(enum tid_t tid, ITypeInfo **typeinfo)
+static HRESULT get_typelib(unsigned lib, ITypeLib **tl)
 {
-    unsigned lib = get_libid_from_tid(tid);
     HRESULT hres;
 
     if(!typelib[lib]) {
-        ITypeLib *tl;
-
-        hres = LoadRegTypeLib(lib_ids[lib].iid, lib_ids[lib].major, 0, LOCALE_SYSTEM_DEFAULT, &tl);
+        hres = LoadRegTypeLib(lib_ids[lib].iid, lib_ids[lib].major, 0, LOCALE_SYSTEM_DEFAULT, tl);
         if(FAILED(hres)) {
             ERR("LoadRegTypeLib failed: %08x\n", hres);
             return hres;
         }
 
-        if(InterlockedCompareExchangePointer((void**)&typelib[lib], tl, NULL))
-            ITypeLib_Release(tl);
+        if (InterlockedCompareExchangePointer((void**)&typelib[lib], *tl, NULL))
+            ITypeLib_Release(*tl);
     }
+
+    *tl = typelib[lib];
+    return S_OK;
+}
+
+HRESULT get_typeinfo(enum tid_t tid, ITypeInfo **typeinfo)
+{
+    unsigned lib = get_libid_from_tid(tid);
+    ITypeLib *typelib;
+    HRESULT hres;
+
+    if (FAILED(hres = get_typelib(lib, &typelib)))
+        return hres;
 
     if(!typeinfos[tid]) {
         ITypeInfo *ti;
 
-        hres = ITypeLib_GetTypeInfoOfGuid(typelib[lib], get_riid_from_tid(tid), &ti);
+        hres = ITypeLib_GetTypeInfoOfGuid(typelib, get_riid_from_tid(tid), &ti);
         if(FAILED(hres)) {
             /* try harder with typelib from msxml.dll */
-            hres = ITypeLib_GetTypeInfoOfGuid(typelib[LibXml], get_riid_from_tid(tid), &ti);
+            if (FAILED(hres = get_typelib(LibXml, &typelib)))
+                return hres;
+            hres = ITypeLib_GetTypeInfoOfGuid(typelib, get_riid_from_tid(tid), &ti);
             if(FAILED(hres)) {
                 ERR("GetTypeInfoOfGuid failed: %08x\n", hres);
                 return hres;
@@ -239,14 +251,14 @@ static void add_func_info(dispex_data_t *data, DWORD *size, tid_t tid, DISPID id
     data->func_cnt++;
 }
 
-static int dispid_cmp(const void *p1, const void *p2)
+static int dispid_cmp(const void * HOSTPTR p1, const void * HOSTPTR p2)
 {
-    return ((const func_info_t*)p1)->id - ((const func_info_t*)p2)->id;
+    return ((const func_info_t* HOSTPTR)p1)->id - ((const func_info_t* HOSTPTR)p2)->id;
 }
 
-static int func_name_cmp(const void *p1, const void *p2)
+static int func_name_cmp(const void * HOSTPTR p1, const void * HOSTPTR p2)
 {
-    return strcmpiW((*(func_info_t* const*)p1)->name, (*(func_info_t* const*)p2)->name);
+    return strcmpiW((*(func_info_t* const* HOSTPTR)p1)->name, (*(func_info_t* const* HOSTPTR)p2)->name);
 }
 
 static dispex_data_t *preprocess_dispex_data(DispatchEx *This)

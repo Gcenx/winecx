@@ -49,7 +49,6 @@ typedef struct tagWND
     RECT           normal_rect;   /* Normal window rect saved when maximized/minimized */
     POINT          min_pos;       /* Position for minimized window */
     POINT          max_pos;       /* Position for maximized window */
-    HWND           icon_title;    /* Icon title window */
     LPWSTR         text;          /* Window text */
     void          *pScroll;       /* Scroll-bar info */
     DWORD          dwStyle;       /* Window style (from CreateWindow) */
@@ -92,7 +91,6 @@ extern HWND WIN_GetFullHandle( HWND hwnd ) DECLSPEC_HIDDEN;
 extern HWND WIN_IsCurrentProcess( HWND hwnd ) DECLSPEC_HIDDEN;
 extern HWND WIN_IsCurrentThread( HWND hwnd ) DECLSPEC_HIDDEN;
 extern UINT win_set_flags( HWND hwnd, UINT set_mask, UINT clear_mask ) DECLSPEC_HIDDEN;
-extern HWND WIN_SetOwner( HWND hwnd, HWND owner ) DECLSPEC_HIDDEN;
 extern ULONG WIN_SetStyle( HWND hwnd, ULONG set_bits, ULONG clear_bits ) DECLSPEC_HIDDEN;
 extern BOOL WIN_GetRectangles( HWND hwnd, enum coords_relative relative, RECT *rectWindow, RECT *rectClient ) DECLSPEC_HIDDEN;
 extern void map_window_region( HWND from, HWND to, HRGN hrgn ) DECLSPEC_HIDDEN;
@@ -120,7 +118,6 @@ static inline void WIN_ReleasePtr( WND *ptr )
 
 extern LRESULT HOOK_CallHooks( INT id, INT code, WPARAM wparam, LPARAM lparam, BOOL unicode ) DECLSPEC_HIDDEN;
 
-extern BOOL WINPOS_RedrawIconTitle( HWND hWnd ) DECLSPEC_HIDDEN;
 extern MINMAXINFO WINPOS_GetMinMaxInfo( HWND hwnd ) DECLSPEC_HIDDEN;
 extern LONG WINPOS_HandleWindowPosChanging(HWND hwnd, WINDOWPOS *winpos) DECLSPEC_HIDDEN;
 extern HWND WINPOS_WindowFromPoint( HWND hwndScope, POINT pt, INT *hittest ) DECLSPEC_HIDDEN;

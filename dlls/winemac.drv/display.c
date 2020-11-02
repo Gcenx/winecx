@@ -519,7 +519,7 @@ static CFDictionaryRef create_mode_dict(CGDisplayModeRef display_mode, BOOL is_o
             CFSTR("pixel_encoding"),
             CFSTR("refresh_rate"),
         };
-        const void* values[ARRAY_SIZE(keys)] = {
+        const void* HOSTPTR values[ARRAY_SIZE(keys)] = {
             cf_io_flags,
             cf_width,
             cf_height,
@@ -527,7 +527,7 @@ static CFDictionaryRef create_mode_dict(CGDisplayModeRef display_mode, BOOL is_o
             cf_refresh,
         };
 
-        ret = CFDictionaryCreate(NULL, (const void**)keys, (const void**)values, ARRAY_SIZE(keys),
+        ret = CFDictionaryCreate(NULL, (const void* HOSTPTR * HOSTPTR)keys, (const void* HOSTPTR * HOSTPTR)values, ARRAY_SIZE(keys),
                                  &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     }
 
@@ -566,10 +566,10 @@ static CFArrayRef copy_display_modes(CGDirectDisplayID display)
         struct display_mode_descriptor* desc;
         CFMutableDictionaryRef modes_by_size;
         CFIndex i, count;
-        CGDisplayModeRef* mode_array;
+        CGDisplayModeRef* WIN32PTR mode_array;
 
-        options = CFDictionaryCreate(NULL, (const void**)&kCGDisplayShowDuplicateLowResolutionModes,
-                                     (const void**)&kCFBooleanTrue, 1, &kCFTypeDictionaryKeyCallBacks,
+        options = CFDictionaryCreate(NULL, (const void* HOSTPTR * HOSTPTR)&kCGDisplayShowDuplicateLowResolutionModes,
+                                     (const void* HOSTPTR * HOSTPTR)&kCFBooleanTrue, 1, &kCFTypeDictionaryKeyCallBacks,
                                      &kCFTypeDictionaryValueCallBacks);
 
         modes = CGDisplayCopyAllDisplayModes(display, options);
@@ -660,8 +660,8 @@ static CFArrayRef copy_display_modes(CGDirectDisplayID display)
 
         count = CFDictionaryGetCount(modes_by_size);
         mode_array = HeapAlloc(GetProcessHeap(), 0, count * sizeof(mode_array[0]));
-        CFDictionaryGetKeysAndValues(modes_by_size, NULL, (const void **)mode_array);
-        modes = CFArrayCreate(NULL, (const void **)mode_array, count, &kCFTypeArrayCallBacks);
+        CFDictionaryGetKeysAndValues(modes_by_size, NULL, (const void * HOSTPTR * HOSTPTR)mode_array);
+        modes = CFArrayCreate(NULL, (const void * HOSTPTR * HOSTPTR)mode_array, count, &kCFTypeArrayCallBacks);
         HeapFree(GetProcessHeap(), 0, mode_array);
         CFRelease(modes_by_size);
     }
@@ -913,7 +913,7 @@ BOOL CDECL macdrv_EnumDisplayMonitors(HDC hdc, LPRECT rect, MONITORENUMPROC proc
     int i;
     BOOL ret = TRUE;
 
-    TRACE("%p, %s, %p, %#lx\n", hdc, wine_dbgstr_rect(rect), proc, lparam);
+    TRACE("%p, %s, %p, %#lx\n", hdc, wine_dbgstr_rect(rect), proc, (long)lparam);
 
     if (hdc)
     {
@@ -1175,7 +1175,7 @@ failed:
 /***********************************************************************
  *              GetDeviceGammaRamp (MACDRV.@)
  */
-BOOL macdrv_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
+BOOL CDECL macdrv_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
 {
     BOOL ret = FALSE;
     DDGAMMARAMP *r = ramp;
@@ -1183,7 +1183,7 @@ BOOL macdrv_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
     int num_displays;
     uint32_t mac_entries;
     int win_entries = ARRAY_SIZE(r->red);
-    CGGammaValue *red, *green, *blue;
+    CGGammaValue * WIN32PTR red, * WIN32PTR green, * WIN32PTR blue;
     CGError err;
     int win_entry;
 
@@ -1313,13 +1313,13 @@ BOOL CDECL macdrv_GetMonitorInfo(HMONITOR monitor, LPMONITORINFO info)
 /***********************************************************************
  *              SetDeviceGammaRamp (MACDRV.@)
  */
-BOOL macdrv_SetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
+BOOL CDECL macdrv_SetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
 {
     DDGAMMARAMP *r = ramp;
     struct macdrv_display *displays;
     int num_displays;
     int win_entries = ARRAY_SIZE(r->red);
-    CGGammaValue *red, *green, *blue;
+    CGGammaValue * WIN32PTR red, * WIN32PTR green, * WIN32PTR blue;
     int i;
     CGError err = kCGErrorFailure;
 

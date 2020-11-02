@@ -16,7 +16,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
 #include "d3d8_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d8);
@@ -1116,6 +1115,12 @@ HRESULT texture_init(struct d3d8_texture *texture, struct d3d8_device *device,
     desc.depth = 1;
     desc.size = 0;
 
+    if (usage & D3DUSAGE_WRITEONLY)
+    {
+        WARN("Texture can't be created with the D3DUSAGE_WRITEONLY flag, returning D3DERR_INVALIDCALL.\n");
+        return D3DERR_INVALIDCALL;
+    }
+
     if (!levels)
         levels = wined3d_log2i(max(width, height)) + 1;
 
@@ -1160,6 +1165,12 @@ HRESULT cubetexture_init(struct d3d8_texture *texture, struct d3d8_device *devic
     desc.height = edge_length;
     desc.depth = 1;
     desc.size = 0;
+
+    if (usage & D3DUSAGE_WRITEONLY)
+    {
+        WARN("Texture can't be created with the D3DUSAGE_WRITEONLY flag, returning D3DERR_INVALIDCALL.\n");
+        return D3DERR_INVALIDCALL;
+    }
 
     if (!levels)
         levels = wined3d_log2i(edge_length) + 1;
@@ -1207,6 +1218,12 @@ HRESULT volumetexture_init(struct d3d8_texture *texture, struct d3d8_device *dev
     desc.height = height;
     desc.depth = depth;
     desc.size = 0;
+
+    if (usage & D3DUSAGE_WRITEONLY)
+    {
+        WARN("Texture can't be created with the D3DUSAGE_WRITEONLY flags, returning D3DERR_INVALIDCALL.\n");
+        return D3DERR_INVALIDCALL;
+    }
 
     if (!levels)
         levels = wined3d_log2i(max(max(width, height), depth)) + 1;

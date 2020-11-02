@@ -24,7 +24,7 @@
 #include <winbase.h>
 #include <winnls.h>
 #include <wine/windef16.h>
-#include <wine/library.h>
+#include <wine/winheader_enter.h>
 
 #include <pshpack1.h>
 
@@ -559,5 +559,7 @@ UINT16      WINAPI _lwrite16(HFILE16,LPCSTR,UINT16);
 BOOL16      WINAPI WritePrivateProfileSection16(LPCSTR,LPCSTR,LPCSTR);
 BOOL16      WINAPI WritePrivateProfileStruct16(LPCSTR,LPCSTR,LPVOID,UINT16,LPCSTR);
 BOOL16      WINAPI WriteProfileSection16(LPCSTR,LPCSTR);
+
+#include <wine/winheader_exit.h>
 
 #endif /* __WINE_WINE_WINBASE16_H */

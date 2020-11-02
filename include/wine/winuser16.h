@@ -21,6 +21,7 @@
 
 #include <wine/wingdi16.h> /* wingdi.h needed for COLORREF */
 #include <winuser.h> /* winuser.h needed for MSGBOXCALLBACK */
+#include <wine/winheader_enter.h>
 
 #include <pshpack1.h>
 
@@ -953,5 +954,7 @@ BOOL16      WINAPI GrayString16(HDC16,HBRUSH16,GRAYSTRINGPROC16,LPARAM,
 DWORD       WINAPI GetFileResourceSize16(LPCSTR,LPCSTR,LPCSTR,LPDWORD);
 DWORD       WINAPI GetFileResource16(LPCSTR,LPCSTR,LPCSTR,DWORD,DWORD,LPVOID);
 FARPROC16   WINAPI SetTaskSignalProc(HTASK16,FARPROC16);
+
+#include <wine/winheader_exit.h>
 
 #endif /* __WINE_WINE_WINUSER16_H */

@@ -27,6 +27,7 @@
 #include "wingdi.h"
 #include "winnls.h"
 #include "winspool.h"
+#include "winternl.h"
 
 #include "psdrv.h"
 #include "wine/debug.h"
@@ -36,7 +37,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
 /***********************************************************************
  *           SelectFont   (WINEPS.@)
  */
-HFONT PSDRV_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
+HFONT CDECL PSDRV_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
 {
     PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
     PHYSDEV next = GET_NEXT_PHYSDEV( dev, pSelectFont );
@@ -93,8 +94,8 @@ HFONT PSDRV_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
 
 	for (i = 0; i < physDev->pi->FontSubTableSize; ++i)
 	{
-	    if (!strcasecmp (FaceName,
-		    physDev->pi->FontSubTable[i].pValueName))
+	    if (!_strnicmp (FaceName,
+		    physDev->pi->FontSubTable[i].pValueName, -1))
 	    {
 		TRACE ("substituting facename '%s' for '%s'\n",
 			(LPSTR) physDev->pi->FontSubTable[i].pData, FaceName);

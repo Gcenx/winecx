@@ -35,14 +35,18 @@
 #include "ole2.h"
 #include "rpcproxy.h"
 
+#include "wine/asm.h"
 #include "wine/debug.h"
 #include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xaudio2);
 
-#if XAUDIO2_VER != 0 && defined(__i386__)
-/* EVE Online uses an OnVoiceProcessingPassStart callback which corrupts %esi. */
+#if XAUDIO2_VER != 0 && (defined(__i386__) || defined(__i386_on_x86_64__))
+/* EVE Online uses an OnVoiceProcessingPassStart callback which corrupts %esi;
+ * League of Legends uses a callback which corrupts %ebx. */
 #define IXAudio2VoiceCallback_OnVoiceProcessingPassStart(a, b) call_on_voice_processing_pass_start(a, b)
+
+#ifdef __i386__
 extern void call_on_voice_processing_pass_start(IXAudio2VoiceCallback *This, UINT32 BytesRequired);
 __ASM_GLOBAL_FUNC( call_on_voice_processing_pass_start,
                    "pushl %ebp\n\t"
@@ -54,13 +58,17 @@ __ASM_GLOBAL_FUNC( call_on_voice_processing_pass_start,
                   __ASM_CFI(".cfi_rel_offset %esi,-4\n\t")
                    "pushl %edi\n\t"
                   __ASM_CFI(".cfi_rel_offset %edi,-8\n\t")
-                   "subl $8,%esp\n\t"
+                   "pushl %ebx\n\t"
+                  __ASM_CFI(".cfi_rel_offset %ebx,-12\n\t")
+                   "subl $4,%esp\n\t"
                    "pushl 12(%ebp)\n\t"     /* BytesRequired */
                    "pushl 8(%ebp)\n\t"      /* This */
                    "movl 8(%ebp),%eax\n\t"
                    "movl 0(%eax),%eax\n\t"
                    "call *0(%eax)\n\t"      /* This->lpVtbl->OnVoiceProcessingPassStart */
-                   "leal -8(%ebp),%esp\n\t"
+                   "leal -12(%ebp),%esp\n\t"
+                   "popl %ebx\n\t"
+                   __ASM_CFI(".cfi_same_value %ebx\n\t")
                    "popl %edi\n\t"
                    __ASM_CFI(".cfi_same_value %edi\n\t")
                    "popl %esi\n\t"
@@ -69,6 +77,41 @@ __ASM_GLOBAL_FUNC( call_on_voice_processing_pass_start,
                    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
                    __ASM_CFI(".cfi_same_value %ebp\n\t")
                    "ret" )
+#else
+__ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(call_on_voice_processing_pass_start),
+                     "pushl %ebp\n\t"
+                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                     __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                     "movl %esp,%ebp\n\t"
+                     __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                     "pushl %esi\n\t"
+                     __ASM_CFI(".cfi_rel_offset %esi,-4\n\t")
+                     "pushl %edi\n\t"
+                     __ASM_CFI(".cfi_rel_offset %edi,-8\n\t")
+                     "subl $8,%esp\n\t"
+                     "pushl 12(%ebp)\n\t"     /* BytesRequired */
+                     "pushl 8(%ebp)\n\t"      /* This */
+                     "movl 8(%ebp),%eax\n\t"
+                     "movl 0(%eax),%eax\n\t"
+                     "call *0(%eax)\n\t"      /* This->lpVtbl->OnVoiceProcessingPassStart */
+                     "leal -8(%ebp),%esp\n\t"
+                     "popl %edi\n\t"
+                     __ASM_CFI(".cfi_same_value %edi\n\t")
+                     "popl %esi\n\t"
+                     __ASM_CFI(".cfi_same_value %esi\n\t")
+                     "popl %ebp\n\t"
+                     __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                     __ASM_CFI(".cfi_same_value %ebp\n\t")
+                     "ret" )
+void CDECL DECLSPEC_HIDDEN call_on_voice_processing_pass_start(IXAudio2VoiceCallback *This, UINT32 BytesRequired)
+{
+    if (wine_is_thunk32to64( This->lpVtbl->OnVoiceProcessingPassStart ))
+        This->lpVtbl->OnVoiceProcessingPassStart( This, BytesRequired );
+    else
+        WINE_CALL_IMPL32(call_on_voice_processing_pass_start)( This, BytesRequired );
+
+}
+#endif
 #endif
 
 static HINSTANCE instance;
@@ -81,10 +124,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, void *pReserved)
 
     switch (reason)
     {
-#ifndef _WIN64
-    case DLL_WINE_PREATTACH:
-        return FALSE;  /* prefer native version */
-#endif
     case DLL_PROCESS_ATTACH:
         instance = hinstDLL;
         DisableThreadLibraryCalls( hinstDLL );
@@ -114,17 +153,17 @@ HRESULT WINAPI DllUnregisterServer(void)
 
 static inline XA2XAPOImpl *impl_from_FAPO(FAPO *iface)
 {
-    return CONTAINING_RECORD(iface, XA2XAPOImpl, FAPO_vtbl);
+    return CONTAINING_RECORD(ADDRSPACECAST(FAPO * WIN32PTR, iface), XA2XAPOImpl, FAPO_vtbl);
 }
 
-static int32_t FAPOCALL XAPO_AddRef(void *iface)
+static int32_t FAPOCALL XAPO_AddRef(void * HOSTPTR iface)
 {
     XA2XAPOImpl *This = impl_from_FAPO(iface);
     TRACE("%p\n", This);
     return InterlockedIncrement(&This->ref);
 }
 
-static int32_t FAPOCALL XAPO_Release(void *iface)
+static int32_t FAPOCALL XAPO_Release(void * HOSTPTR iface)
 {
     int32_t r;
     XA2XAPOImpl *This = impl_from_FAPO(iface);
@@ -139,8 +178,8 @@ static int32_t FAPOCALL XAPO_Release(void *iface)
     return r;
 }
 
-static uint32_t FAPOCALL XAPO_GetRegistrationProperties(void *iface,
-        FAPORegistrationProperties **ppRegistrationProperties)
+static uint32_t FAPOCALL XAPO_GetRegistrationProperties(void * HOSTPTR iface,
+        FAPORegistrationProperties ** HOSTPTR ppRegistrationProperties)
 {
     XA2XAPOImpl *This = impl_from_FAPO(iface);
     XAPO_REGISTRATION_PROPERTIES *xprops;
@@ -157,64 +196,111 @@ static uint32_t FAPOCALL XAPO_GetRegistrationProperties(void *iface,
     return 0;
 }
 
-static uint32_t FAPOCALL XAPO_IsInputFormatSupported(void *iface,
+static uint32_t FAPOCALL XAPO_IsInputFormatSupported(void * HOSTPTR iface,
         const FAudioWaveFormatEx *pOutputFormat, const FAudioWaveFormatEx *pRequestedInputFormat,
-        FAudioWaveFormatEx **ppSupportedInputFormat)
+        FAudioWaveFormatEx ** HOSTPTR ppSupportedInputFormat)
 {
     XA2XAPOImpl *This = impl_from_FAPO(iface);
+    WAVEFORMATEX *supported_win_fmt;
+    HRESULT hr;
+
     TRACE("%p\n", This);
-    return IXAPO_IsInputFormatSupported(This->xapo, (const WAVEFORMATEX*)pOutputFormat,
-            (const WAVEFORMATEX*)pRequestedInputFormat, (WAVEFORMATEX**)ppSupportedInputFormat);
+    hr = IXAPO_IsInputFormatSupported(This->xapo, ADDRSPACECAST(const WAVEFORMATEX *, pOutputFormat),
+            ADDRSPACECAST(const WAVEFORMATEX *, pRequestedInputFormat), ppSupportedInputFormat ? &supported_win_fmt : NULL);
+    if (ppSupportedInputFormat)
+        *ppSupportedInputFormat = (FAudioWaveFormatEx *)supported_win_fmt;
+    return hr;
 }
 
-static uint32_t FAPOCALL XAPO_IsOutputFormatSupported(void *iface,
+static uint32_t FAPOCALL XAPO_IsOutputFormatSupported(void * HOSTPTR iface,
         const FAudioWaveFormatEx *pInputFormat, const FAudioWaveFormatEx *pRequestedOutputFormat,
-        FAudioWaveFormatEx **ppSupportedOutputFormat)
+        FAudioWaveFormatEx ** HOSTPTR ppSupportedOutputFormat)
 {
     XA2XAPOImpl *This = impl_from_FAPO(iface);
+    WAVEFORMATEX *supported_win_fmt;
+    HRESULT hr;
+
     TRACE("%p\n", This);
-    return IXAPO_IsOutputFormatSupported(This->xapo, (const WAVEFORMATEX *)pInputFormat,
-            (const WAVEFORMATEX *)pRequestedOutputFormat, (WAVEFORMATEX**)ppSupportedOutputFormat);
+    hr = IXAPO_IsOutputFormatSupported(This->xapo, ADDRSPACECAST(const WAVEFORMATEX *, pInputFormat),
+            ADDRSPACECAST(const WAVEFORMATEX *, pRequestedOutputFormat), ppSupportedOutputFormat ? &supported_win_fmt : NULL);
+    if (ppSupportedOutputFormat)
+        *ppSupportedOutputFormat = (FAudioWaveFormatEx *)supported_win_fmt;
+    return hr;
 }
 
-static uint32_t FAPOCALL XAPO_Initialize(void *iface, const void *pData,
+static uint32_t FAPOCALL XAPO_Initialize(void * HOSTPTR iface, const void * HOSTPTR pData,
         uint32_t DataByteSize)
 {
     XA2XAPOImpl *This = impl_from_FAPO(iface);
     TRACE("%p\n", This);
-    return IXAPO_Initialize(This->xapo, pData, DataByteSize);
+    return IXAPO_Initialize(This->xapo, ADDRSPACECAST(void *, pData), DataByteSize);
 }
 
-static void FAPOCALL XAPO_Reset(void *iface)
+static void FAPOCALL XAPO_Reset(void * HOSTPTR iface)
 {
     XA2XAPOImpl *This = impl_from_FAPO(iface);
     TRACE("%p\n", This);
     IXAPO_Reset(This->xapo);
 }
 
-static uint32_t FAPOCALL XAPO_LockForProcess(void *iface,
+static uint32_t FAPOCALL XAPO_LockForProcess(void * HOSTPTR iface,
         uint32_t InputLockedParameterCount,
         const FAPOLockForProcessBufferParameters *pInputLockedParameters,
         uint32_t OutputLockedParameterCount,
         const FAPOLockForProcessBufferParameters *pOutputLockedParameters)
 {
     XA2XAPOImpl *This = impl_from_FAPO(iface);
+#ifdef __i386_on_x86_64__
+    HRESULT hr;
+    XAPO_LOCKFORPROCESS_BUFFER_PARAMETERS *input_locked_params;
+    XAPO_LOCKFORPROCESS_BUFFER_PARAMETERS *output_locked_params;
+    uint32_t i;
+#endif
     TRACE("%p\n", This);
+#ifndef __i386_on_x86_64__
     return IXAPO_LockForProcess(This->xapo,
             InputLockedParameterCount,
             (const XAPO_LOCKFORPROCESS_BUFFER_PARAMETERS *)pInputLockedParameters,
             OutputLockedParameterCount,
             (const XAPO_LOCKFORPROCESS_BUFFER_PARAMETERS *)pOutputLockedParameters);
+#else
+    /* XAPO_LOCKFOPRPROCESS_BUFFER_PARAMETERS has a pointer in it, so we have to marshal. */
+    input_locked_params = CoTaskMemAlloc(InputLockedParameterCount * sizeof(*input_locked_params));
+    output_locked_params = CoTaskMemAlloc(InputLockedParameterCount * sizeof(*output_locked_params));
+
+    if (!input_locked_params || !output_locked_params)
+        return E_OUTOFMEMORY;
+
+    for (i = 0; i < InputLockedParameterCount; i++)
+    {
+        input_locked_params[i].pFormat = ADDRSPACECAST(const WAVEFORMATEX *, pInputLockedParameters[i].pFormat);
+        input_locked_params[i].MaxFrameCount = pInputLockedParameters[i].MaxFrameCount;
+    }
+    for (i = 0; i < OutputLockedParameterCount; i++)
+    {
+        output_locked_params[i].pFormat = ADDRSPACECAST(const WAVEFORMATEX *, pOutputLockedParameters[i].pFormat);
+        output_locked_params[i].MaxFrameCount = pOutputLockedParameters[i].MaxFrameCount;
+    }
+
+    hr = IXAPO_LockForProcess(This->xapo,
+            InputLockedParameterCount,
+            input_locked_params,
+            OutputLockedParameterCount,
+            output_locked_params);
+    CoTaskMemFree(input_locked_params);
+    CoTaskMemFree(output_locked_params);
+    return hr;
+#endif
 }
 
-static void FAPOCALL XAPO_UnlockForProcess(void *iface)
+static void FAPOCALL XAPO_UnlockForProcess(void * HOSTPTR iface)
 {
     XA2XAPOImpl *This = impl_from_FAPO(iface);
     TRACE("%p\n", This);
     IXAPO_UnlockForProcess(This->xapo);
 }
 
-static void FAPOCALL XAPO_Process(void *iface,
+static void FAPOCALL XAPO_Process(void * HOSTPTR iface,
         uint32_t InputProcessParameterCount,
         const FAPOProcessBufferParameters* pInputProcessParameters,
         uint32_t OutputProcessParameterCount,
@@ -222,15 +308,57 @@ static void FAPOCALL XAPO_Process(void *iface,
         int32_t IsEnabled)
 {
     XA2XAPOImpl *This = impl_from_FAPO(iface);
+#ifdef __i386_on_x86_64__
+    XAPO_PROCESS_BUFFER_PARAMETERS *input_process_params;
+    XAPO_PROCESS_BUFFER_PARAMETERS *output_process_params;
+    uint32_t i;
+#endif
     TRACE("%p\n", This);
+#ifndef __i386_on_x86_64__
     IXAPO_Process(This->xapo, InputProcessParameterCount,
             (const XAPO_PROCESS_BUFFER_PARAMETERS *)pInputProcessParameters,
             OutputProcessParameterCount,
             (XAPO_PROCESS_BUFFER_PARAMETERS *)pOutputProcessParameters,
             IsEnabled);
+#else
+    /* XAPO_PROCESS_BUFFER_PARAMETERS has a pointer in it, so we have to marshal. */
+    input_process_params = CoTaskMemAlloc(InputProcessParameterCount * sizeof(*input_process_params));
+    output_process_params = CoTaskMemAlloc(InputProcessParameterCount * sizeof(*output_process_params));
+
+    if (!input_process_params || !output_process_params)
+        return;
+
+    for (i = 0; i < InputProcessParameterCount; i++)
+    {
+        input_process_params[i].pBuffer = ADDRSPACECAST(void *, pInputProcessParameters[i].pBuffer);
+        input_process_params[i].BufferFlags = (XAPO_BUFFER_FLAGS)pInputProcessParameters[i].BufferFlags;
+        input_process_params[i].ValidFrameCount = pInputProcessParameters[i].ValidFrameCount;
+    }
+    for (i = 0; i < OutputProcessParameterCount; i++)
+    {
+        input_process_params[i].pBuffer = ADDRSPACECAST(void *, pOutputProcessParameters[i].pBuffer);
+        input_process_params[i].BufferFlags = (XAPO_BUFFER_FLAGS)pOutputProcessParameters[i].BufferFlags;
+        input_process_params[i].ValidFrameCount = pOutputProcessParameters[i].ValidFrameCount;
+    }
+
+    IXAPO_Process(This->xapo, InputProcessParameterCount,
+            input_process_params,
+            OutputProcessParameterCount,
+            output_process_params,
+            IsEnabled);
+    CoTaskMemFree(input_process_params);
+
+    for (i = 0; i < OutputProcessParameterCount; i++)
+    {
+        pOutputProcessParameters[i].pBuffer = output_process_params[i].pBuffer;
+        pOutputProcessParameters[i].BufferFlags = (FAPOBufferFlags)output_process_params[i].BufferFlags;
+        pOutputProcessParameters[i].ValidFrameCount = output_process_params[i].ValidFrameCount;
+    }
+    CoTaskMemFree(output_process_params);
+#endif
 }
 
-static uint32_t FAPOCALL XAPO_CalcInputFrames(void *iface,
+static uint32_t FAPOCALL XAPO_CalcInputFrames(void * HOSTPTR iface,
         uint32_t OutputFrameCount)
 {
     XA2XAPOImpl *This = impl_from_FAPO(iface);
@@ -238,7 +366,7 @@ static uint32_t FAPOCALL XAPO_CalcInputFrames(void *iface,
     return IXAPO_CalcInputFrames(This->xapo, OutputFrameCount);
 }
 
-static uint32_t FAPOCALL XAPO_CalcOutputFrames(void *iface,
+static uint32_t FAPOCALL XAPO_CalcOutputFrames(void * HOSTPTR iface,
         uint32_t InputFrameCount)
 {
     XA2XAPOImpl *This = impl_from_FAPO(iface);
@@ -246,22 +374,22 @@ static uint32_t FAPOCALL XAPO_CalcOutputFrames(void *iface,
     return IXAPO_CalcOutputFrames(This->xapo, InputFrameCount);
 }
 
-static void FAPOCALL XAPO_SetParameters(void *iface,
-        const void *pParameters, uint32_t ParametersByteSize)
+static void FAPOCALL XAPO_SetParameters(void * HOSTPTR iface,
+        const void * HOSTPTR pParameters, uint32_t ParametersByteSize)
 {
     XA2XAPOImpl *This = impl_from_FAPO(iface);
     TRACE("%p\n", This);
     if(This->xapo_params)
-        IXAPOParameters_SetParameters(This->xapo_params, pParameters, ParametersByteSize);
+        IXAPOParameters_SetParameters(This->xapo_params, ADDRSPACECAST(const void *, pParameters), ParametersByteSize);
 }
 
-static void FAPOCALL XAPO_GetParameters(void *iface,
-        void *pParameters, uint32_t ParametersByteSize)
+static void FAPOCALL XAPO_GetParameters(void * HOSTPTR iface,
+        void * HOSTPTR pParameters, uint32_t ParametersByteSize)
 {
     XA2XAPOImpl *This = impl_from_FAPO(iface);
     TRACE("%p\n", This);
     if(This->xapo_params)
-        IXAPOParameters_GetParameters(This->xapo_params, pParameters, ParametersByteSize);
+        IXAPOParameters_GetParameters(This->xapo_params, ADDRSPACECAST(void *, pParameters), ParametersByteSize);
     else
         memset(pParameters, 0, ParametersByteSize);
 }
@@ -333,7 +461,7 @@ FAudioEffectChain *wrap_effect_chain(const XAUDIO2_EFFECT_CHAIN *pEffectChain)
     ret = heap_alloc(sizeof(*ret) + sizeof(FAudioEffectDescriptor) * pEffectChain->EffectCount);
 
     ret->EffectCount = pEffectChain->EffectCount;
-    ret->pEffectDescriptors = (void*)(ret + 1);
+    ret->pEffectDescriptors = (void * HOSTPTR)(ret + 1);
 
     for(i = 0; i < ret->EffectCount; ++i){
         ret->pEffectDescriptors[i].pEffect = &wrap_xapo(pEffectChain->pEffectDescriptors[i].pEffect)->FAPO_vtbl;
@@ -386,7 +514,7 @@ static void free_voice_sends(FAudioVoiceSends *sends)
 
 static inline XA2VoiceImpl *impl_from_FAudioVoiceCallback(FAudioVoiceCallback *iface)
 {
-    return CONTAINING_RECORD(iface, XA2VoiceImpl, FAudioVoiceCallback_vtbl);
+    return CONTAINING_RECORD(ADDRSPACECAST(FAudioVoiceCallback * WIN32PTR, iface), XA2VoiceImpl, FAudioVoiceCallback_vtbl);
 }
 
 static void FAUDIOCALL XA2VCB_OnVoiceProcessingPassStart(FAudioVoiceCallback *iface,
@@ -419,39 +547,39 @@ static void FAUDIOCALL XA2VCB_OnStreamEnd(FAudioVoiceCallback *iface)
 }
 
 static void FAUDIOCALL XA2VCB_OnBufferStart(FAudioVoiceCallback *iface,
-        void *pBufferContext)
+        void * HOSTPTR pBufferContext)
 {
     XA2VoiceImpl *This = impl_from_FAudioVoiceCallback(iface);
     TRACE("%p\n", This);
     if(This->cb)
-        IXAudio2VoiceCallback_OnBufferStart(This->cb, pBufferContext);
+        IXAudio2VoiceCallback_OnBufferStart(This->cb, ADDRSPACECAST(void *, pBufferContext));
 }
 
 static void FAUDIOCALL XA2VCB_OnBufferEnd(FAudioVoiceCallback *iface,
-        void *pBufferContext)
+        void * HOSTPTR pBufferContext)
 {
     XA2VoiceImpl *This = impl_from_FAudioVoiceCallback(iface);
     TRACE("%p\n", This);
     if(This->cb)
-        IXAudio2VoiceCallback_OnBufferEnd(This->cb, pBufferContext);
+        IXAudio2VoiceCallback_OnBufferEnd(This->cb, ADDRSPACECAST(void *, pBufferContext));
 }
 
 static void FAUDIOCALL XA2VCB_OnLoopEnd(FAudioVoiceCallback *iface,
-        void *pBufferContext)
+        void * HOSTPTR pBufferContext)
 {
     XA2VoiceImpl *This = impl_from_FAudioVoiceCallback(iface);
     TRACE("%p\n", This);
     if(This->cb)
-        IXAudio2VoiceCallback_OnLoopEnd(This->cb, pBufferContext);
+        IXAudio2VoiceCallback_OnLoopEnd(This->cb, ADDRSPACECAST(void *, pBufferContext));
 }
 
 static void FAUDIOCALL XA2VCB_OnVoiceError(FAudioVoiceCallback *iface,
-        void *pBufferContext, unsigned int Error)
+        void * HOSTPTR pBufferContext, unsigned int Error)
 {
     XA2VoiceImpl *This = impl_from_FAudioVoiceCallback(iface);
     TRACE("%p\n", This);
     if(This->cb)
-        IXAudio2VoiceCallback_OnVoiceError(This->cb, pBufferContext, (HRESULT)Error);
+        IXAudio2VoiceCallback_OnVoiceError(This->cb, ADDRSPACECAST(void *, pBufferContext), (HRESULT)Error);
 }
 
 static const FAudioVoiceCallback FAudioVoiceCallback_Vtbl = {
@@ -468,7 +596,7 @@ static const FAudioVoiceCallback FAudioVoiceCallback_Vtbl = {
 
 static inline IXAudio2Impl *impl_from_FAudioEngineCallback(FAudioEngineCallback *iface)
 {
-    return CONTAINING_RECORD(iface, IXAudio2Impl, FAudioEngineCallback_vtbl);
+    return CONTAINING_RECORD(ADDRSPACECAST(FAudioEngineCallback * WIN32PTR, iface), IXAudio2Impl, FAudioEngineCallback_vtbl);
 }
 
 static void FAUDIOCALL XA2ECB_OnProcessingPassStart(FAudioEngineCallback *iface)
@@ -1676,14 +1804,14 @@ static HRESULT WINAPI IXAudio2Impl_CreateSubmixVoice(IXAudio2 *iface,
 }
 
 /* called thread created by SDL, must not access Wine TEB */
-void engine_cb(FAudioEngineCallEXT proc, FAudio *faudio, float *stream, void *user)
+void engine_cb(FAudioEngineCallEXT proc, FAudio *faudio, float * HOSTPTR stream, void * HOSTPTR user)
 {
-    XA2VoiceImpl *This = user;
+    XA2VoiceImpl *This = ADDRSPACECAST(XA2VoiceImpl *, user);
 
     pthread_mutex_lock(&This->engine_lock);
 
     This->engine_params.proc = proc;
-    This->engine_params.stream = stream;
+    This->engine_params.stream = ADDRSPACECAST(float *, stream);
     This->engine_params.faudio = faudio;
 
     pthread_cond_broadcast(&This->engine_ready);
@@ -1795,9 +1923,13 @@ static HRESULT WINAPI IXAudio2Impl_CommitChanges(IXAudio2 *iface,
 {
     IXAudio2Impl *This = impl_from_IXAudio2(iface);
 
-    TRACE("(%p)->(0x%x): stub!\n", This, operationSet);
+    TRACE("(%p)->(0x%x)\n", This, operationSet);
 
+#ifdef HAVE_FAUDIO_COMMITOPERATIONSET
+    return FAudio_CommitOperationSet(This->faudio, operationSet);
+#else
     return FAudio_CommitChanges(This->faudio);
+#endif
 }
 
 static void WINAPI IXAudio2Impl_GetPerformanceData(IXAudio2 *iface,
@@ -1805,7 +1937,7 @@ static void WINAPI IXAudio2Impl_GetPerformanceData(IXAudio2 *iface,
 {
     IXAudio2Impl *This = impl_from_IXAudio2(iface);
 
-    TRACE("(%p)->(%p): stub!\n", This, pPerfData);
+    TRACE("(%p)->(%p)\n", This, pPerfData);
 
     FAudio_GetPerformanceData(This->faudio, (FAudioPerformanceData *)pPerfData);
 }
@@ -1816,7 +1948,7 @@ static void WINAPI IXAudio2Impl_SetDebugConfiguration(IXAudio2 *iface,
 {
     IXAudio2Impl *This = impl_from_IXAudio2(iface);
 
-    TRACE("(%p)->(%p, %p): stub!\n", This, pDebugConfiguration, pReserved);
+    TRACE("(%p)->(%p, %p)\n", This, pDebugConfiguration, pReserved);
 
     FAudio_SetDebugConfiguration(This->faudio, (FAudioDebugConfiguration *)pDebugConfiguration, pReserved);
 }
@@ -2069,6 +2201,8 @@ HRESULT WINAPI CreateAudioVolumeMeter(IUnknown **out)
     IClassFactory *cf;
     HRESULT hr;
 
+    TRACE("%p\n", out);
+
     hr = make_xapo_factory(&CLSID_AudioVolumeMeter27, &IID_IClassFactory, (void**)&cf);
     if(FAILED(hr))
         return hr;
@@ -2084,6 +2218,8 @@ HRESULT WINAPI CreateAudioReverb(IUnknown **out)
 {
     IClassFactory *cf;
     HRESULT hr;
+
+    TRACE("%p\n", out);
 
     hr = make_xapo_factory(&CLSID_AudioReverb27, &IID_IClassFactory, (void**)&cf);
     if(FAILED(hr))

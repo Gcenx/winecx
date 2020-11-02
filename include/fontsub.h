@@ -19,12 +19,14 @@
 #ifndef __WINE_FONTSUB_H
 #define __WINE_FONTSUB_H
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef void *(__cdecl *CFP_ALLOCPROC)(size_t);
-typedef void *(__cdecl *CFP_REALLOCPROC)(void *, size_t);
+typedef void *(__cdecl *CFP_ALLOCPROC)(SIZE_T);
+typedef void *(__cdecl *CFP_REALLOCPROC)(void *, SIZE_T);
 typedef void (__cdecl *CFP_FREEPROC)(void *);
 
 #define TTFCFP_SUBSET  0
@@ -60,5 +62,7 @@ ULONG __cdecl CreateFontPackage(const unsigned char *src, const ULONG src_len, u
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif

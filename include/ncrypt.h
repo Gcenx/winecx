@@ -19,6 +19,8 @@
 #ifndef __NCRYPT_H__
 #define __NCRYPT_H__
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -38,6 +40,11 @@ typedef ULONG_PTR NCRYPT_KEY_HANDLE;
 typedef ULONG_PTR NCRYPT_HASH_HANDLE;
 typedef ULONG_PTR NCRYPT_SECRET_HANDLE;
 
+#define NCRYPT_KEY_STORAGE_INTERFACE        0x00010001
+#define NCRYPT_SCHANNEL_INTERFACE           0x00010002
+#define NCRYPT_SCHANNEL_SIGNATURE_INTERFACE 0x00010003
+#define NCRYPT_KEY_PROTECTION_INTERFACE     0x00010004
+
 SECURITY_STATUS WINAPI NCryptCreatePersistedKey(NCRYPT_PROV_HANDLE, NCRYPT_KEY_HANDLE *, const WCHAR *, const WCHAR *, DWORD, DWORD);
 SECURITY_STATUS WINAPI NCryptDecrypt(NCRYPT_KEY_HANDLE, BYTE *, DWORD, void *, BYTE *, DWORD, DWORD *, DWORD);
 SECURITY_STATUS WINAPI NCryptEncrypt(NCRYPT_KEY_HANDLE, BYTE *, DWORD, void *, BYTE *, DWORD, DWORD *, DWORD);
@@ -49,5 +56,7 @@ SECURITY_STATUS WINAPI NCryptOpenStorageProvider(NCRYPT_PROV_HANDLE *, const WCH
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __NCRYPT_H__ */

@@ -34,6 +34,9 @@
 #include <pwd.h>
 #endif
 #ifdef __APPLE__
+#include <sys/utsname.h>
+#include <sys/types.h>
+#include <sys/sysctl.h>
 #include <crt_externs.h>
 #include <spawn.h>
 #ifndef _POSIX_SPAWN_DISABLE_ASLR
@@ -246,11 +249,9 @@ static void init_server_dir( dev_t dev, ino_t ino )
 
 #ifdef __ANDROID__  /* there's no /tmp dir on Android */
     root = build_path( config_dir, ".wineserver" );
-#elif defined(HAVE_GETUID)
+#else
     root = xmalloc( sizeof(server_root_prefix) + 12 );
     sprintf( root, "%s-%u", server_root_prefix, getuid() );
-#else
-    root = xstrdup( server_root_prefix );
 #endif
 
     server_dir = xmalloc( strlen(root) + sizeof(server_dir_prefix) + 2*sizeof(dev) + 2*sizeof(ino) + 2 );
@@ -285,8 +286,6 @@ static void init_paths(void)
     const char *home = getenv( "HOME" );
     const char *user = NULL;
     const char *prefix = getenv( "WINEPREFIX" );
-
-#ifdef HAVE_GETPWUID
     char uid_str[32];
     struct passwd *pwd = getpwuid( getuid() );
 
@@ -300,10 +299,6 @@ static void init_paths(void)
         sprintf( uid_str, "%lu", (unsigned long)getuid() );
         user = uid_str;
     }
-#else  /* HAVE_GETPWUID */
-    if (!(user = getenv( "USER" )))
-        fatal_error( "cannot determine your user name, set the USER environment variable\n" );
-#endif  /* HAVE_GETPWUID */
     user_name = xstrdup( user );
 
     /* build config_dir */
@@ -335,10 +330,7 @@ static void init_paths(void)
         }
     }
     if (!S_ISDIR(st.st_mode)) fatal_error( "%s is not a directory\n", config_dir );
-#ifdef HAVE_GETUID
     if (st.st_uid != getuid()) fatal_error( "%s is not owned by you\n", config_dir );
-#endif
-
     init_server_dir( st.st_dev, st.st_ino );
 }
 
@@ -462,7 +454,7 @@ done:
     if (build_dir)
     {
         argv0_name = build_path( "loader/", basename );
-        if (sizeof(int) == sizeof(void *))
+        if (!wine_is_64bit())
         {
             char *loader, *linkname = build_path( build_dir, "loader/wine64" );
             if ((loader = symlink_dirname( linkname )))
@@ -540,6 +532,32 @@ const char *wine_get_build_id(void)
     return wine_build;
 }
 
+/* return whether the OS needs to use a 64-bit process to emulate 32-bit Wine */
+int wine_needs_32on64(void)
+{
+#ifdef __APPLE__
+    static int result = -1;
+    struct utsname name;
+    unsigned major, minor;
+
+    if (result == -1)
+    {
+        if (getenv("WINE_USE_32ON64"))
+            result = 1;
+        else
+        {
+            result = (uname(&name) == 0 &&
+                      sscanf(name.release, "%u.%u", &major, &minor) == 2 &&
+                      major >= 19);
+        }
+    }
+
+    return result;
+#else
+    return 0;
+#endif
+}
+
 /* exec a binary using the preloader if requested; helper for wine_exec_wine_binary */
 static void preloader_exec( char **argv, int use_preloader )
 {
@@ -547,15 +565,18 @@ static void preloader_exec( char **argv, int use_preloader )
     {
         static const char preloader[] = "wine-preloader";
         static const char preloader64[] = "wine64-preloader";
+        static const char preloader32on64[] = "wine32on64-preloader";
         char *p, *full_name;
         char **last_arg = argv, **new_argv;
 
         if (!(p = strrchr( argv[0], '/' ))) p = argv[0];
         else p++;
 
-        full_name = xmalloc( p - argv[0] + sizeof(preloader64) );
+        full_name = xmalloc( p - argv[0] + sizeof(preloader32on64) );
         memcpy( full_name, argv[0], p - argv[0] );
-        if (strendswith( p, "64" ))
+        if (strendswith( p, "32on64" ))
+            memcpy( full_name + (p - argv[0]), preloader32on64, sizeof(preloader32on64) );
+        else if (strendswith( p, "64" ))
             memcpy( full_name + (p - argv[0]), preloader64, sizeof(preloader64) );
         else
             memcpy( full_name + (p - argv[0]), preloader, sizeof(preloader) );

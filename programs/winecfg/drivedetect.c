@@ -251,7 +251,7 @@ static void ensure_home_is_mapped(void)
 {
     int i;
     BOOL mapped = FALSE;
-    char *home = getenv("HOME");
+    char * HOSTPTR home = getenv("HOME");
 
     if (!home) return;
 
@@ -278,7 +278,7 @@ static void ensure_home_is_mapped(void)
 static void ensure_drive_c_is_mapped(void)
 {
     struct stat buf;
-    const char *configdir = wine_get_config_dir();
+    const char * HOSTPTR configdir = wine_get_config_dir();
     int len;
     char *drive_c_dir;
     

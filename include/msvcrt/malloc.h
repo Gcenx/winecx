@@ -20,6 +20,8 @@
 #ifndef __WINE_MALLOC_H
 #define __WINE_MALLOC_H
 
+#include "wine/winheader_enter.h"
+
 #include <crtdefs.h>
 
 /* heap function constants */
@@ -43,7 +45,7 @@ typedef struct _heapinfo
 } _HEAPINFO;
 #endif /* _HEAPINFO_DEFINED */
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 extern unsigned int* __cdecl __p__amblksiz(void);
 #define _amblksiz (*__p__amblksiz());
 #else
@@ -85,5 +87,7 @@ int    __cdecl _set_sbh_threshold(size_t size);
 # define _alloca(x) __builtin_alloca((x))
 # define alloca(x) __builtin_alloca((x))
 # endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_MALLOC_H */

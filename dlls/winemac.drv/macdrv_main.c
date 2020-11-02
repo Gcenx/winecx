@@ -79,7 +79,8 @@ CFDictionaryRef localized_strings;
 const char* debugstr_cf(CFTypeRef t)
 {
     CFStringRef s;
-    const char* ret;
+    const char* HOSTPTR cstring = NULL;
+    const char* ret = NULL;
 
     if (!t) return "(null)";
 
@@ -87,13 +88,13 @@ const char* debugstr_cf(CFTypeRef t)
         s = t;
     else
         s = CFCopyDescription(t);
-    ret = CFStringGetCStringPtr(s, kCFStringEncodingUTF8);
-    if (ret) ret = debugstr_a(ret);
+    cstring = CFStringGetCStringPtr(s, kCFStringEncodingUTF8);
+    if (cstring) ret = debugstr_a(cstring);
     if (!ret)
     {
-        const UniChar* u = CFStringGetCharactersPtr(s);
+        const UniChar* HOSTPTR u = CFStringGetCharactersPtr(s);
         if (u)
-            ret = debugstr_wn((const WCHAR*)u, CFStringGetLength(s));
+            ret = debugstr_wn((const WCHAR* HOSTPTR)u, CFStringGetLength(s));
     }
     if (!ret)
     {

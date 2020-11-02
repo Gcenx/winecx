@@ -21,6 +21,8 @@
 #ifndef __WINE_ICMPAPI_H
 #define __WINE_ICMPAPI_H
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -49,5 +51,7 @@ DWORD WINAPI IcmpSendEcho(
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_ICMPAPI_H */

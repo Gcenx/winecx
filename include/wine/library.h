@@ -22,13 +22,19 @@
 #define __WINE_WINE_LIBRARY_H
 
 #include <stdarg.h>
+#include <stdint.h>
 #include <sys/types.h>
 
 #include <windef.h>
 #include <winbase.h>
+#include <wine/hostaddrspace_enter.h>
 
 #ifdef __WINE_WINE_TEST_H
 #error This file should not be used in Wine tests
+#endif
+
+#ifdef __WINE_USE_MSVCRT
+#error This file should not be used with msvcrt headers
 #endif
 
 #ifdef __cplusplus
@@ -46,10 +52,11 @@ extern const char *wine_get_version(void);
 extern const char *wine_get_build_id(void);
 extern void wine_init_argv0_path( const char *argv0 );
 extern void wine_exec_wine_binary( const char *name, char **argv, const char *env_var );
+extern int wine_needs_32on64(void);
 
 /* dll loading */
 
-typedef void (*load_dll_callback_t)( void *, const char * );
+typedef void (*load_dll_callback_t)( void * WIN32PTR, const char *);
 
 extern void *wine_dlopen( const char *filename, int flag, char *error, size_t errorsize );
 extern void *wine_dlsym( void *handle, const char *symbol, char *error, size_t errorsize );
@@ -61,17 +68,18 @@ extern void *wine_dll_load_main_exe( const char *name, char *error, int errorsiz
 extern void wine_dll_unload( void *handle );
 extern const char *wine_dll_enum_load_path( unsigned int index );
 extern int wine_dll_get_owner( const char *name, char *buffer, int size, int *file_exists );
+extern int wine_enable_dlopen_redirect(int enable);
 
 extern int __wine_main_argc;
 extern char **__wine_main_argv;
-extern WCHAR **__wine_main_wargv;
+extern WCHAR * WIN32PTR * WIN32PTR __wine_main_wargv;
 extern void __wine_dll_register( const IMAGE_NT_HEADERS *header, const char *filename );
 extern void wine_init( int argc, char *argv[], char *error, int error_size );
 
 /* portability */
 
-extern void DECLSPEC_NORETURN wine_switch_to_stack( void (*func)(void *), void *arg, void *stack );
-extern int wine_call_on_stack( int (*func)(void *), void *arg, void *stack );
+extern void DECLSPEC_NORETURN wine_switch_to_stack( void (*func)(void * WIN32PTR), void * WIN32PTR arg, void * WIN32PTR stack );
+extern int wine_call_on_stack( int (*func)(void * WIN32PTR), void * WIN32PTR arg, void * WIN32PTR stack );
 
 /* memory mappings */
 
@@ -82,7 +90,7 @@ extern int wine_mmap_is_in_reserved_area( void *addr, size_t size );
 extern int wine_mmap_enum_reserved_areas( int (*enum_func)(void *base, size_t size, void *arg),
                                           void *arg, int top_down );
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 
 /* LDT management */
 
@@ -101,7 +109,7 @@ extern void wine_ldt_free_fs( unsigned short sel );
 /* the local copy of the LDT */
 extern struct __wine_ldt_copy
 {
-    void         *base[8192];  /* base address or 0 if entry is free   */
+    void *WIN32PTR base[8192];  /* base address or 0 if entry is free   */
     unsigned long limit[8192]; /* limit in bytes or 0 if entry is free */
     unsigned char flags[8192]; /* flags (defined below) */
 } wine_ldt_copy;
@@ -114,7 +122,7 @@ extern struct __wine_ldt_copy
 #define WINE_LDT_FLAGS_ALLOCATED 0x80  /* Segment is allocated (no longer free) */
 
 /* helper functions to manipulate the LDT_ENTRY structure */
-static inline void wine_ldt_set_base( LDT_ENTRY *ent, const void *base )
+static inline void wine_ldt_set_base( LDT_ENTRY *ent, const void * WIN32PTR base )
 {
     ent->BaseLow               = (WORD)(ULONG_PTR)base;
     ent->HighWord.Bits.BaseMid = (BYTE)((ULONG_PTR)base >> 16);
@@ -126,13 +134,13 @@ static inline void wine_ldt_set_limit( LDT_ENTRY *ent, unsigned int limit )
     ent->LimitLow = (WORD)limit;
     ent->HighWord.Bits.LimitHi = (limit >> 16);
 }
-static inline void *wine_ldt_get_base( const LDT_ENTRY *ent )
+static inline void * WIN32PTR wine_ldt_get_base( const LDT_ENTRY * HOSTPTR ent )
 {
-    return (void *)(ent->BaseLow |
+    return (void * WIN32PTR)(ent->BaseLow |
                     (ULONG_PTR)ent->HighWord.Bits.BaseMid << 16 |
                     (ULONG_PTR)ent->HighWord.Bits.BaseHi << 24);
 }
-static inline unsigned int wine_ldt_get_limit( const LDT_ENTRY *ent )
+static inline unsigned int wine_ldt_get_limit( const LDT_ENTRY * HOSTPTR ent )
 {
     unsigned int limit = ent->LimitLow | (ent->HighWord.Bits.LimitHi << 16);
     if (ent->HighWord.Bits.Granularity) limit = (limit << 12) | 0xfff;
@@ -190,10 +198,18 @@ __DEFINE_SET_SEG(gs)
 #undef __DEFINE_GET_SEG
 #undef __DEFINE_SET_SEG
 
-#endif  /* __i386__ */
+#ifdef __i386_on_x86_64__
+extern unsigned short wine_32on64_cs32;
+extern unsigned short wine_32on64_cs64;
+extern unsigned short wine_32on64_ds32;
+#endif
+
+#endif  /* __i386__ || __i386_on_x86_64__ */
 
 #ifdef __cplusplus
 }
 #endif
+
+#include <wine/hostaddrspace_exit.h>
 
 #endif  /* __WINE_WINE_LIBRARY_H */

@@ -18,7 +18,6 @@
 
 #define COBJMACROS
 
-#include "config.h"
 #include <stdarg.h>
 
 #include "windef.h"
@@ -239,7 +238,7 @@ void destroy_array( struct array *array, CIMTYPE type )
     UINT i, size;
 
     if (!array) return;
-    if (type == CIM_STRING || type == CIM_DATETIME)
+    if (type == CIM_STRING || type == CIM_DATETIME || type == CIM_REFERENCE)
     {
         size = get_type_size( type );
         for (i = 0; i < array->count; i++) heap_free( *(WCHAR **)((char *)array->ptr + i * size) );
@@ -256,8 +255,9 @@ static void destroy_record( struct record *record )
     release_table( record->table );
     for (i = 0; i < record->count; i++)
     {
-        if (record->fields[i].type == CIM_STRING || record->fields[i].type == CIM_DATETIME)
-            heap_free( record->fields[i].u.sval );
+        if (record->fields[i].type == CIM_STRING ||
+            record->fields[i].type == CIM_DATETIME ||
+            record->fields[i].type == CIM_REFERENCE) heap_free( record->fields[i].u.sval );
         else if (record->fields[i].type & CIM_FLAG_ARRAY)
             destroy_array( record->fields[i].u.aval, record->fields[i].type & CIM_TYPE_MASK );
     }
@@ -358,6 +358,7 @@ static HRESULT record_get_value( const struct record *record, UINT index, VARIAN
     {
     case CIM_STRING:
     case CIM_DATETIME:
+    case CIM_REFERENCE:
         if (!vartype) vartype = VT_BSTR;
         V_BSTR( var ) = SysAllocString( record->fields[index].u.sval );
         break;
@@ -419,6 +420,7 @@ static HRESULT record_set_value( struct record *record, UINT index, VARIANT *var
     {
     case CIM_STRING:
     case CIM_DATETIME:
+    case CIM_REFERENCE:
         record->fields[index].u.sval = (WCHAR *)(INT_PTR)val;
         return S_OK;
     case CIM_SINT16:
@@ -586,7 +588,7 @@ static BSTR get_body_text( const struct table *table, UINT row, UINT *len )
         if ((value = get_value_bstr( table, row, i )))
         {
             *len += ARRAY_SIZE( fmtW );
-            *len += strlenW( table->columns[i].name );
+            *len += lstrlenW( table->columns[i].name );
             *len += SysStringLen( value );
             SysFreeString( value );
         }
@@ -597,7 +599,7 @@ static BSTR get_body_text( const struct table *table, UINT row, UINT *len )
     {
         if ((value = get_value_bstr( table, row, i )))
         {
-            p += sprintfW( p, fmtW, table->columns[i].name, value );
+            p += swprintf( p, *len - (p - ret), fmtW, table->columns[i].name, value );
             SysFreeString( value );
         }
     }
@@ -612,12 +614,12 @@ static BSTR get_object_text( const struct view *view, UINT index )
     BSTR ret, body;
 
     len = ARRAY_SIZE( fmtW );
-    len += strlenW( view->table->name );
+    len += lstrlenW( view->table->name );
     if (!(body = get_body_text( view->table, row, &len_body ))) return NULL;
     len += len_body;
 
     if (!(ret = SysAllocStringLen( NULL, len ))) return NULL;
-    sprintfW( ret, fmtW, view->table->name, body );
+    swprintf( ret, len, fmtW, view->table->name, body );
     SysFreeString( body );
     return ret;
 }
@@ -807,12 +809,12 @@ static WCHAR *build_signature_table_name( const WCHAR *class, const WCHAR *metho
     static const WCHAR fmtW[] = {'_','_','%','s','_','%','s','_','%','s',0};
     static const WCHAR outW[] = {'O','U','T',0};
     static const WCHAR inW[] = {'I','N',0};
-    UINT len = ARRAY_SIZE(fmtW) + ARRAY_SIZE(outW) + strlenW( class ) + strlenW( method );
+    UINT len = ARRAY_SIZE(fmtW) + ARRAY_SIZE(outW) + lstrlenW( class ) + lstrlenW( method );
     WCHAR *ret;
 
     if (!(ret = heap_alloc( len * sizeof(WCHAR) ))) return NULL;
-    sprintfW( ret, fmtW, class, method, dir == PARAM_IN ? inW : outW );
-    return struprW( ret );
+    swprintf( ret, len, fmtW, class, method, dir == PARAM_IN ? inW : outW );
+    return wcsupr( ret );
 }
 
 HRESULT create_signature( const WCHAR *class, const WCHAR *method, enum param_direction dir,
@@ -831,9 +833,9 @@ HRESULT create_signature( const WCHAR *class, const WCHAR *method, enum param_di
     WCHAR *query, *name;
     HRESULT hr;
 
-    len += strlenW( class ) + strlenW( method );
+    len += lstrlenW( class ) + lstrlenW( method );
     if (!(query = heap_alloc( len * sizeof(WCHAR) ))) return E_OUTOFMEMORY;
-    sprintfW( query, selectW, class, method, dir >= 0 ? geW : leW );
+    swprintf( query, len, selectW, class, method, dir >= 0 ? geW : leW );
 
     hr = exec_query( query, &iter );
     heap_free( query );

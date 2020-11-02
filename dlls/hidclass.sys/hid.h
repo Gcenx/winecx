@@ -34,8 +34,6 @@
 #define DEFAULT_POLL_INTERVAL 200
 #define MAX_POLL_INTERVAL_MSEC 10000
 
-typedef NTSTATUS (WINAPI *pAddDevice)(DRIVER_OBJECT *DriverObject, DEVICE_OBJECT *PhysicalDeviceObject);
-
 /* Ring buffer functions */
 struct ReportRingBuffer;
 
@@ -54,7 +52,11 @@ typedef struct _BASE_DEVICE_EXTENSION {
     HANDLE halt_event;
     HANDLE thread;
 
+    KSPIN_LOCK irp_queue_lock;
     LIST_ENTRY irp_queue;
+
+    BOOL is_mouse;
+    UNICODE_STRING mouse_link_name;
 
     /* Minidriver Specific stuff will end up here */
 } BASE_DEVICE_EXTENSION;
@@ -84,7 +86,7 @@ typedef struct _minidriver
 
     PDRIVER_UNLOAD DriverUnload;
 
-    pAddDevice AddDevice;
+    PDRIVER_ADD_DEVICE AddDevice;
     PDRIVER_DISPATCH PNPDispatch;
     struct list device_list;
 } minidriver;
@@ -95,7 +97,7 @@ minidriver* find_minidriver(DRIVER_OBJECT* driver) DECLSPEC_HIDDEN;
 /* Internal device functions */
 NTSTATUS HID_CreateDevice(DEVICE_OBJECT *native_device, HID_MINIDRIVER_REGISTRATION *driver, DEVICE_OBJECT **device) DECLSPEC_HIDDEN;
 NTSTATUS HID_LinkDevice(DEVICE_OBJECT *device) DECLSPEC_HIDDEN;
-void HID_DeleteDevice(HID_MINIDRIVER_REGISTRATION *driver, DEVICE_OBJECT *device) DECLSPEC_HIDDEN;
+void HID_DeleteDevice(DEVICE_OBJECT *device) DECLSPEC_HIDDEN;
 void HID_StartDeviceThread(DEVICE_OBJECT *device) DECLSPEC_HIDDEN;
 
 NTSTATUS WINAPI HID_Device_ioctl(DEVICE_OBJECT *device, IRP *irp) DECLSPEC_HIDDEN;

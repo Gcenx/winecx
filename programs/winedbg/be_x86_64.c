@@ -25,7 +25,7 @@
 #include "debugger.h"
 #include "wine/debug.h"
 
-#if defined(__x86_64__)
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
 
 WINE_DEFAULT_DEBUG_CHANNEL(winedbg);
 

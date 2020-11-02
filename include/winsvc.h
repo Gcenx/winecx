@@ -19,6 +19,8 @@
 #ifndef __WINE_WINSVC_H
 #define __WINE_WINSVC_H
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif /* defined(__cplusplus) */
@@ -26,17 +28,14 @@ extern "C" {
 #ifdef _ADVAPI32_
 #define WINADVAPI
 #else
-#define WINADVAPI DECLSPEC_IMPORT
+#define WINADVAPI DECLSPEC_HIDDEN
 #endif
 
 /* Service database names */
 #define SERVICES_ACTIVE_DATABASEA     "ServicesActive"
 #define SERVICES_FAILED_DATABASEA     "ServicesFailed"
 
-#if defined(__GNUC__)
-# define SERVICES_ACTIVE_DATABASEW    (const WCHAR []){ 'S','e','r','v','i','c','e','s','A','c','t','i','v','e',0 }
-# define SERVICES_FAILED_DATABASEW    (const WCHAR []){ 'S','e','r','v','i','c','e','s','F','a','i','l','e','d',0 }
-#elif defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__MINGW32__)
 # define SERVICES_ACTIVE_DATABASEW    L"ServicesActive"
 # define SERVICES_FAILED_DATABASEW    L"ServicesFailed"
 #else
@@ -452,5 +451,7 @@ WINADVAPI BOOL        WINAPI UnlockServiceDatabase(SC_LOCK);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
+
+#include "wine/winheader_exit.h"
 
 #endif /* !defined(__WINE_WINSVC_H) */

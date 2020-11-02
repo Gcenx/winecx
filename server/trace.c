@@ -129,7 +129,7 @@ static void dump_ioctl_code( const char *prefix, const ioctl_code_t *code )
     }
 }
 
-static void dump_cpu_type( const char *prefix, const cpu_type_t *code )
+static void dump_client_cpu( const char *prefix, const client_cpu_t *code )
 {
     switch (*code)
     {
@@ -218,6 +218,9 @@ static void dump_apc_call( const char *prefix, const apc_call_t *call )
         dump_uint64( ",commit=", &call->create_thread.commit );
         fprintf( stderr, ",suspend=%u", call->create_thread.suspend );
         break;
+    case APC_BREAK_PROCESS:
+        fprintf( stderr, "APC_BREAK_PROCESS" );
+        break;
     default:
         fprintf( stderr, "type=%u", call->type );
         break;
@@ -298,6 +301,9 @@ static void dump_apc_result( const char *prefix, const apc_result_t *result )
                  get_status_name( result->create_thread.status ),
                  result->create_thread.tid, result->create_thread.handle );
         break;
+    case APC_BREAK_PROCESS:
+        fprintf( stderr, "APC_BREAK_PROCESS,status=%s", get_status_name( result->break_process.status ) );
+        break;
     default:
         fprintf( stderr, "type=%u", result->type );
         break;
@@ -317,47 +323,56 @@ static void dump_async_data( const char *prefix, const async_data_t *data )
 
 static void dump_irp_params( const char *prefix, const irp_params_t *data )
 {
-    switch (data->major)
+    switch (data->type)
     {
-    case IRP_MJ_CREATE:
-        fprintf( stderr, "%s{major=CREATE,access=%08x,sharing=%08x,options=%08x",
+    case IRP_CALL_NONE:
+        fprintf( stderr, "%s{NONE}", prefix );
+        break;
+    case IRP_CALL_CREATE:
+        fprintf( stderr, "%s{CREATE,access=%08x,sharing=%08x,options=%08x",
                  prefix, data->create.access, data->create.sharing, data->create.options );
         dump_uint64( ",device=", &data->create.device );
-        fputc( '}', stderr );
+        fprintf( stderr, ",file=%08x}", data->create.file );
         break;
-    case IRP_MJ_CLOSE:
-        fprintf( stderr, "%s{major=CLOSE", prefix );
+    case IRP_CALL_CLOSE:
+        fprintf( stderr, "%s{CLOSE", prefix );
         dump_uint64( ",file=", &data->close.file );
         fputc( '}', stderr );
         break;
-    case IRP_MJ_READ:
-        fprintf( stderr, "%s{major=READ,key=%08x", prefix, data->read.key );
+    case IRP_CALL_READ:
+        fprintf( stderr, "%s{READ,key=%08x,out_size=%u", prefix, data->read.key,
+                 data->read.out_size );
         dump_uint64( ",pos=", &data->read.pos );
         dump_uint64( ",file=", &data->read.file );
         fputc( '}', stderr );
         break;
-    case IRP_MJ_WRITE:
-        fprintf( stderr, "%s{major=WRITE,key=%08x", prefix, data->write.key );
+    case IRP_CALL_WRITE:
+        fprintf( stderr, "%s{WRITE,key=%08x", prefix, data->write.key );
         dump_uint64( ",pos=", &data->write.pos );
         dump_uint64( ",file=", &data->write.file );
         fputc( '}', stderr );
         break;
-    case IRP_MJ_FLUSH_BUFFERS:
-        fprintf( stderr, "%s{major=FLUSH_BUFFERS", prefix );
+    case IRP_CALL_FLUSH:
+        fprintf( stderr, "%s{FLUSH", prefix );
         dump_uint64( ",file=", &data->flush.file );
         fputc( '}', stderr );
         break;
-    case IRP_MJ_DEVICE_CONTROL:
-        fprintf( stderr, "%s{major=DEVICE_CONTROL", prefix );
+    case IRP_CALL_IOCTL:
+        fprintf( stderr, "%s{IOCTL", prefix );
         dump_ioctl_code( ",code=", &data->ioctl.code );
+        fprintf( stderr, ",out_size=%u", data->ioctl.out_size );
         dump_uint64( ",file=", &data->ioctl.file );
         fputc( '}', stderr );
         break;
-    case IRP_MJ_MAXIMUM_FUNCTION + 1: /* invalid */
-        fprintf( stderr, "%s{}", prefix );
+    case IRP_CALL_FREE:
+        fprintf( stderr, "%s{FREE", prefix );
+        dump_uint64( ",obj=", &data->free.obj );
+        fputc( '}', stderr );
         break;
-    default:
-        fprintf( stderr, "%s{major=%u}", prefix, data->major );
+    case IRP_CALL_CANCEL:
+        fprintf( stderr, "%s{CANCEL", prefix );
+        dump_uint64( ",irp=", &data->cancel.irp );
+        fputc( '}', stderr );
         break;
     }
 }
@@ -550,7 +565,7 @@ static void dump_varargs_context( const char *prefix, data_size_t size )
     memcpy( &ctx, context, size );
 
     fprintf( stderr,"%s{", prefix );
-    dump_cpu_type( "cpu=", &ctx.cpu );
+    dump_client_cpu( "cpu=", &ctx.cpu );
     switch (ctx.cpu)
     {
     case CPU_x86:
@@ -1181,7 +1196,7 @@ static void dump_varargs_pe_image_info( const char *prefix, data_size_t size )
              info.zerobits, info.subsystem, info.subsystem_low, info.subsystem_high, info.gp,
              info.image_charact, info.dll_charact, info.machine, info.contains_code, info.image_flags,
              info.loader_flags, info.header_size, info.file_size, info.checksum );
-    dump_cpu_type( ",cpu=", &info.cpu );
+    dump_client_cpu( ",cpu=", &info.cpu );
     fputc( '}', stderr );
     remove_data( size );
 }
@@ -1232,7 +1247,7 @@ static void dump_new_process_request( const struct new_process_request *req )
     fprintf( stderr, ", socket_fd=%d", req->socket_fd );
     fprintf( stderr, ", exe_file=%04x", req->exe_file );
     fprintf( stderr, ", access=%08x", req->access );
-    dump_cpu_type( ", cpu=", &req->cpu );
+    dump_client_cpu( ", cpu=", &req->cpu );
     fprintf( stderr, ", info_size=%u", req->info_size );
     dump_varargs_object_attributes( ", objattr=", cur_size );
     dump_varargs_startup_info( ", info=", min(cur_size,req->info_size) );
@@ -1250,7 +1265,7 @@ static void dump_exec_process_request( const struct exec_process_request *req )
 {
     fprintf( stderr, " socket_fd=%d", req->socket_fd );
     fprintf( stderr, ", exe_file=%04x", req->exe_file );
-    dump_cpu_type( ", cpu=", &req->cpu );
+    dump_client_cpu( ", cpu=", &req->cpu );
 }
 
 static void dump_get_new_process_info_request( const struct get_new_process_info_request *req )
@@ -1312,7 +1327,7 @@ static void dump_init_thread_request( const struct init_thread_request *req )
     dump_uint64( ", entry=", &req->entry );
     fprintf( stderr, ", reply_fd=%d", req->reply_fd );
     fprintf( stderr, ", wait_fd=%d", req->wait_fd );
-    dump_cpu_type( ", cpu=", &req->cpu );
+    dump_client_cpu( ", cpu=", &req->cpu );
 }
 
 static void dump_init_thread_reply( const struct init_thread_reply *req )
@@ -1364,7 +1379,7 @@ static void dump_get_process_info_reply( const struct get_process_info_reply *re
     dump_timeout( ", end_time=", &req->end_time );
     fprintf( stderr, ", exit_code=%d", req->exit_code );
     fprintf( stderr, ", priority=%d", req->priority );
-    dump_cpu_type( ", cpu=", &req->cpu );
+    dump_client_cpu( ", cpu=", &req->cpu );
     fprintf( stderr, ", debugger_present=%d", req->debugger_present );
     fprintf( stderr, ", debug_children=%d", req->debug_children );
 }
@@ -1592,6 +1607,11 @@ static void dump_event_op_request( const struct event_op_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
     fprintf( stderr, ", op=%d", req->op );
+}
+
+static void dump_event_op_reply( const struct event_op_reply *req )
+{
+    fprintf( stderr, " state=%d", req->state );
 }
 
 static void dump_query_event_request( const struct query_event_request *req )
@@ -2427,16 +2447,6 @@ static void dump_debug_process_request( const struct debug_process_request *req 
     fprintf( stderr, ", attach=%d", req->attach );
 }
 
-static void dump_debug_break_request( const struct debug_break_request *req )
-{
-    fprintf( stderr, " handle=%04x", req->handle );
-}
-
-static void dump_debug_break_reply( const struct debug_break_reply *req )
-{
-    fprintf( stderr, " self=%d", req->self );
-}
-
 static void dump_set_debugger_kill_on_exit_request( const struct set_debugger_kill_on_exit_request *req )
 {
     fprintf( stderr, " kill_on_exit=%d", req->kill_on_exit );
@@ -3005,7 +3015,6 @@ static void dump_set_irp_result_request( const struct set_irp_result_request *re
     fprintf( stderr, " handle=%04x", req->handle );
     fprintf( stderr, ", status=%08x", req->status );
     fprintf( stderr, ", size=%u", req->size );
-    dump_uint64( ", file_ptr=", &req->file_ptr );
     dump_varargs_bytes( ", data=", cur_size );
 }
 
@@ -4281,22 +4290,16 @@ static void dump_create_device_manager_reply( const struct create_device_manager
 
 static void dump_create_device_request( const struct create_device_request *req )
 {
-    fprintf( stderr, " access=%08x", req->access );
-    fprintf( stderr, ", attributes=%08x", req->attributes );
-    fprintf( stderr, ", rootdir=%04x", req->rootdir );
+    fprintf( stderr, " rootdir=%04x", req->rootdir );
     dump_uint64( ", user_ptr=", &req->user_ptr );
     fprintf( stderr, ", manager=%04x", req->manager );
     dump_varargs_unicode_str( ", name=", cur_size );
 }
 
-static void dump_create_device_reply( const struct create_device_reply *req )
-{
-    fprintf( stderr, " handle=%04x", req->handle );
-}
-
 static void dump_delete_device_request( const struct delete_device_request *req )
 {
-    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, " manager=%04x", req->manager );
+    dump_uint64( ", device=", &req->device );
 }
 
 static void dump_get_next_device_request_request( const struct get_next_device_request_request *req )
@@ -4304,17 +4307,59 @@ static void dump_get_next_device_request_request( const struct get_next_device_r
     fprintf( stderr, " manager=%04x", req->manager );
     fprintf( stderr, ", prev=%04x", req->prev );
     fprintf( stderr, ", status=%08x", req->status );
+    dump_uint64( ", user_ptr=", &req->user_ptr );
 }
 
 static void dump_get_next_device_request_reply( const struct get_next_device_request_reply *req )
 {
     dump_irp_params( " params=", &req->params );
     fprintf( stderr, ", next=%04x", req->next );
-    fprintf( stderr, ", client_pid=%04x", req->client_pid );
     fprintf( stderr, ", client_tid=%04x", req->client_tid );
+    dump_uint64( ", client_thread=", &req->client_thread );
     fprintf( stderr, ", in_size=%u", req->in_size );
-    fprintf( stderr, ", out_size=%u", req->out_size );
     dump_varargs_bytes( ", next_data=", cur_size );
+}
+
+static void dump_get_kernel_object_ptr_request( const struct get_kernel_object_ptr_request *req )
+{
+    fprintf( stderr, " manager=%04x", req->manager );
+    fprintf( stderr, ", handle=%04x", req->handle );
+}
+
+static void dump_get_kernel_object_ptr_reply( const struct get_kernel_object_ptr_reply *req )
+{
+    dump_uint64( " user_ptr=", &req->user_ptr );
+}
+
+static void dump_set_kernel_object_ptr_request( const struct set_kernel_object_ptr_request *req )
+{
+    fprintf( stderr, " manager=%04x", req->manager );
+    fprintf( stderr, ", handle=%04x", req->handle );
+    dump_uint64( ", user_ptr=", &req->user_ptr );
+}
+
+static void dump_grab_kernel_object_request( const struct grab_kernel_object_request *req )
+{
+    fprintf( stderr, " manager=%04x", req->manager );
+    dump_uint64( ", user_ptr=", &req->user_ptr );
+}
+
+static void dump_release_kernel_object_request( const struct release_kernel_object_request *req )
+{
+    fprintf( stderr, " manager=%04x", req->manager );
+    dump_uint64( ", user_ptr=", &req->user_ptr );
+}
+
+static void dump_get_kernel_object_handle_request( const struct get_kernel_object_handle_request *req )
+{
+    fprintf( stderr, " manager=%04x", req->manager );
+    dump_uint64( ", user_ptr=", &req->user_ptr );
+    fprintf( stderr, ", access=%08x", req->access );
+}
+
+static void dump_get_kernel_object_handle_reply( const struct get_kernel_object_handle_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
 }
 
 static void dump_make_process_system_request( const struct make_process_system_request *req )
@@ -4565,6 +4610,16 @@ static void dump_terminate_job_request( const struct terminate_job_request *req 
     fprintf( stderr, ", status=%d", req->status );
 }
 
+static void dump_suspend_process_request( const struct suspend_process_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_resume_process_request( const struct resume_process_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
 static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_new_process_request,
     (dump_func)dump_exec_process_request,
@@ -4667,7 +4722,6 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_exception_status_request,
     (dump_func)dump_continue_debug_event_request,
     (dump_func)dump_debug_process_request,
-    (dump_func)dump_debug_break_request,
     (dump_func)dump_set_debugger_kill_on_exit_request,
     (dump_func)dump_read_process_memory_request,
     (dump_func)dump_write_process_memory_request,
@@ -4833,6 +4887,11 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_create_device_request,
     (dump_func)dump_delete_device_request,
     (dump_func)dump_get_next_device_request_request,
+    (dump_func)dump_get_kernel_object_ptr_request,
+    (dump_func)dump_set_kernel_object_ptr_request,
+    (dump_func)dump_grab_kernel_object_request,
+    (dump_func)dump_release_kernel_object_request,
+    (dump_func)dump_get_kernel_object_handle_request,
     (dump_func)dump_make_process_system_request,
     (dump_func)dump_get_token_statistics_request,
     (dump_func)dump_create_completion_request,
@@ -4860,6 +4919,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_set_job_limits_request,
     (dump_func)dump_set_job_completion_port_request,
     (dump_func)dump_terminate_job_request,
+    (dump_func)dump_suspend_process_request,
+    (dump_func)dump_resume_process_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
@@ -4892,7 +4953,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_open_thread_reply,
     (dump_func)dump_select_reply,
     (dump_func)dump_create_event_reply,
-    NULL,
+    (dump_func)dump_event_op_reply,
     (dump_func)dump_query_event_reply,
     (dump_func)dump_open_event_reply,
     (dump_func)dump_create_keyed_event_reply,
@@ -4964,7 +5025,6 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_exception_status_reply,
     NULL,
     NULL,
-    (dump_func)dump_debug_break_reply,
     NULL,
     (dump_func)dump_read_process_memory_reply,
     NULL,
@@ -5127,9 +5187,14 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_token_impersonation_level_reply,
     (dump_func)dump_allocate_locally_unique_id_reply,
     (dump_func)dump_create_device_manager_reply,
-    (dump_func)dump_create_device_reply,
+    NULL,
     NULL,
     (dump_func)dump_get_next_device_request_reply,
+    (dump_func)dump_get_kernel_object_ptr_reply,
+    NULL,
+    NULL,
+    NULL,
+    (dump_func)dump_get_kernel_object_handle_reply,
     (dump_func)dump_make_process_system_reply,
     (dump_func)dump_get_token_statistics_reply,
     (dump_func)dump_create_completion_reply,
@@ -5152,6 +5217,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     (dump_func)dump_create_job_reply,
     (dump_func)dump_open_job_reply,
+    NULL,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -5261,7 +5328,6 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_exception_status",
     "continue_debug_event",
     "debug_process",
-    "debug_break",
     "set_debugger_kill_on_exit",
     "read_process_memory",
     "write_process_memory",
@@ -5427,6 +5493,11 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "create_device",
     "delete_device",
     "get_next_device_request",
+    "get_kernel_object_ptr",
+    "set_kernel_object_ptr",
+    "grab_kernel_object",
+    "release_kernel_object",
+    "get_kernel_object_handle",
     "make_process_system",
     "get_token_statistics",
     "create_completion",
@@ -5454,6 +5525,8 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "set_job_limits",
     "set_job_completion_port",
     "terminate_job",
+    "suspend_process",
+    "resume_process",
 };
 
 static const struct
@@ -5470,7 +5543,6 @@ static const struct
     { "ALIAS_EXISTS",                STATUS_ALIAS_EXISTS },
     { "BAD_DEVICE_TYPE",             STATUS_BAD_DEVICE_TYPE },
     { "BAD_IMPERSONATION_LEVEL",     STATUS_BAD_IMPERSONATION_LEVEL },
-    { "BREAKPOINT",                  STATUS_BREAKPOINT },
     { "BUFFER_OVERFLOW",             STATUS_BUFFER_OVERFLOW },
     { "BUFFER_TOO_SMALL",            STATUS_BUFFER_TOO_SMALL },
     { "CANCELLED",                   STATUS_CANCELLED },

@@ -20,6 +20,8 @@
 #ifndef __WINE_TIME_H
 #define __WINE_TIME_H
 
+#include "wine/winheader_enter.h"
+
 #include <crtdefs.h>
 
 #include <pshpack8.h>
@@ -60,7 +62,7 @@ struct tm {
 extern "C" {
 #endif
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 #define _daylight (*__p__daylight())
 #define _dstbias (*__p__dstbias())
 #define _timezone (*__p__timezone())
@@ -148,5 +150,7 @@ static inline wchar_t* _wctime(const time_t *t) { return _wctime64(t); }
 #endif
 
 #include <poppack.h>
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_TIME_H */

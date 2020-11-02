@@ -27,6 +27,7 @@
 #include "winerror.h"
 #include "wine/server.h"
 #include "kernel_private.h"
+#include "wine/asm.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
 
@@ -198,6 +199,7 @@ BOOL WINAPI ContinueDebugEvent(
  */
 BOOL WINAPI DebugActiveProcess( DWORD pid )
 {
+    HANDLE process;
     BOOL ret;
     SERVER_START_REQ( debug_process )
     {
@@ -206,6 +208,11 @@ BOOL WINAPI DebugActiveProcess( DWORD pid )
         ret = !wine_server_call_err( req );
     }
     SERVER_END_REQ;
+    if (!ret) return FALSE;
+    if (!(process = OpenProcess( PROCESS_CREATE_THREAD, FALSE, pid ))) return FALSE;
+    ret = DebugBreakProcess( process );
+    NtClose( process );
+    if (!ret) DebugActiveProcessStop( pid );
     return ret;
 }
 
@@ -384,8 +391,11 @@ void WINAPI DECLSPEC_HOTPATCH OutputDebugStringW( LPCWSTR str )
  *  Raises an exception so that a debugger (if attached)
  *  can take some action.
  */
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
 __ASM_STDCALL_FUNC( DebugBreak, 0, "jmp " __ASM_NAME("DbgBreakPoint") )
+#ifdef __i386_on_x86_64__
+__ASM_THUNK_STDCALL( DebugBreak, 0, "jmp " __ASM_THUNK_SYMBOL("DbgBreakPoint") )
+#endif
 #else
 void WINAPI DebugBreak(void)
 {
@@ -406,21 +416,15 @@ void WINAPI DebugBreak(void)
  *
  *  True if successful.
  */
-BOOL WINAPI DebugBreakProcess(HANDLE hProc)
+BOOL WINAPI DebugBreakProcess(HANDLE process)
 {
-    BOOL ret, self;
+    NTSTATUS status;
 
-    TRACE("(%p)\n", hProc);
+    TRACE("(%p)\n", process);
 
-    SERVER_START_REQ( debug_break )
-    {
-        req->handle = wine_server_obj_handle( hProc );
-        ret = !wine_server_call_err( req );
-        self = ret && reply->self;
-    }
-    SERVER_END_REQ;
-    if (self) DbgBreakPoint();
-    return ret;
+    status = DbgUiIssueRemoteBreakin(process);
+    if (status) SetLastError(RtlNtStatusToDosError(status));
+    return !status;
 }
 
 

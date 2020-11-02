@@ -302,7 +302,7 @@ DWORD getInterfaceStatsByName(const char *name, PMIB_IFROW entry)
             while ((ptr = fgets(buf, sizeof(buf), fp)))
             {
                 while (*ptr && isspace(*ptr)) ptr++;
-                if (strncasecmp(ptr, name, nameLen) == 0 && *(ptr + nameLen) == ':')
+                if (_strnicmp(ptr, name, nameLen) == 0 && *(ptr + nameLen) == ':')
                 {
                     ptr += nameLen + 1;
                     sscanf( ptr, "%u %u %u %u %u %u %u %u %u %u %u %u",
@@ -433,10 +433,10 @@ DWORD WINAPI GetIcmpStatistics(PMIB_ICMP stats)
 
             while ((ptr = fgets(buf, sizeof(buf), fp)))
             {
-                if (strncasecmp(buf, hdr, sizeof(hdr) - 1)) continue;
+                if (_strnicmp(buf, hdr, sizeof(hdr) - 1)) continue;
                 /* last line was a header, get another */
                 if (!(ptr = fgets(buf, sizeof(buf), fp))) break;
-                if (!strncasecmp(buf, hdr, sizeof(hdr) - 1))
+                if (!_strnicmp(buf, hdr, sizeof(hdr) - 1))
                 {
                     ptr += sizeof(hdr);
                     sscanf( ptr, "%u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u",
@@ -657,13 +657,13 @@ DWORD WINAPI GetIcmpStatisticsEx(PMIB_ICMP_EX stats, DWORD family)
                     if ((ptr = strchr(value, '\n')))
                         *ptr='\0';
 
-                    if (!strcasecmp(buf, "Icmp6InMsgs"))
+                    if (!_strnicmp(buf, "Icmp6InMsgs", -1))
                     {
                         if (sscanf(value, "%d", &res)) stats->icmpInStats.dwMsgs = res;
                         continue;
                     }
 
-                    if (!strcasecmp(buf, "Icmp6InErrors"))
+                    if (!_strnicmp(buf, "Icmp6InErrors", -1))
                     {
                         if (sscanf(value, "%d", &res)) stats->icmpInStats.dwErrors = res;
                         continue;
@@ -671,7 +671,7 @@ DWORD WINAPI GetIcmpStatisticsEx(PMIB_ICMP_EX stats, DWORD family)
 
                     for (i = 0; i < ARRAY_SIZE(icmpinstatlist); i++)
                     {
-                        if (!strcasecmp(buf, icmpinstatlist[i].name))
+                        if (!_strnicmp(buf, icmpinstatlist[i].name, -1))
                         {
                             if (sscanf(value, "%d", &res))
                                 stats->icmpInStats.rgdwTypeCount[icmpinstatlist[i].pos] = res;
@@ -679,13 +679,13 @@ DWORD WINAPI GetIcmpStatisticsEx(PMIB_ICMP_EX stats, DWORD family)
                         }
                     }
 
-                    if (!strcasecmp(buf, "Icmp6OutMsgs"))
+                    if (!_strnicmp(buf, "Icmp6OutMsgs", -1))
                     {
                         if (sscanf(value, "%d", &res)) stats->icmpOutStats.dwMsgs = res;
                         continue;
                     }
 
-                    if (!strcasecmp(buf, "Icmp6OutErrors"))
+                    if (!_strnicmp(buf, "Icmp6OutErrors", -1))
                     {
                         if (sscanf(value, "%d", &res)) stats->icmpOutStats.dwErrors = res;
                         continue;
@@ -693,7 +693,7 @@ DWORD WINAPI GetIcmpStatisticsEx(PMIB_ICMP_EX stats, DWORD family)
 
                     for (i = 0; i < ARRAY_SIZE(icmpoutstatlist); i++)
                     {
-                        if (!strcasecmp(buf, icmpoutstatlist[i].name))
+                        if (!_strnicmp(buf, icmpoutstatlist[i].name, -1))
                         {
                             if (sscanf(value, "%d", &res))
                                 stats->icmpOutStats.rgdwTypeCount[icmpoutstatlist[i].pos] = res;
@@ -823,11 +823,8 @@ DWORD WINAPI GetIpStatisticsEx(PMIB_IPSTATS stats, DWORD family)
                         *ptr='\0';
 
                     for (i = 0; i < ARRAY_SIZE(ipstatlist); i++)
-                        if (!strcasecmp(buf, ipstatlist[i].name))
-                        {
-                            if (sscanf(value, "%d", &res)) *ipstatlist[i].elem = res;
-                            continue;
-                        }
+                        if (!_strnicmp(buf, ipstatlist[i].name, -1) && sscanf(value, "%d", &res))
+                            *ipstatlist[i].elem = res;
                 }
                 fclose(fp);
                 ret = NO_ERROR;
@@ -850,10 +847,10 @@ DWORD WINAPI GetIpStatisticsEx(PMIB_IPSTATS stats, DWORD family)
 
             while ((ptr = fgets(buf, sizeof(buf), fp)))
             {
-                if (strncasecmp(buf, hdr, sizeof(hdr) - 1)) continue;
+                if (_strnicmp(buf, hdr, sizeof(hdr) - 1)) continue;
                 /* last line was a header, get another */
                 if (!(ptr = fgets(buf, sizeof(buf), fp))) break;
-                if (!strncasecmp(buf, hdr, sizeof(hdr) - 1))
+                if (!_strnicmp(buf, hdr, sizeof(hdr) - 1))
                 {
                     ptr += sizeof(hdr);
                     sscanf( ptr, "%u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u",
@@ -1032,10 +1029,10 @@ DWORD WINAPI GetTcpStatisticsEx(PMIB_TCPSTATS stats, DWORD family)
 
             while ((ptr = fgets(buf, sizeof(buf), fp)))
             {
-                if (strncasecmp(buf, hdr, sizeof(hdr) - 1)) continue;
+                if (_strnicmp(buf, hdr, sizeof(hdr) - 1)) continue;
                 /* last line was a header, get another */
                 if (!(ptr = fgets(buf, sizeof(buf), fp))) break;
-                if (!strncasecmp(buf, hdr, sizeof(hdr) - 1))
+                if (!_strnicmp(buf, hdr, sizeof(hdr) - 1))
                 {
                     ptr += sizeof(hdr);
                     sscanf( ptr, "%u %u %u %u %u %u %u %u %u %u %u %u %u %u",
@@ -1213,11 +1210,8 @@ DWORD WINAPI GetUdpStatisticsEx(PMIB_UDPSTATS stats, DWORD family)
                         *ptr='\0';
 
                     for (i = 0; i < ARRAY_SIZE(udpstatlist); i++)
-                        if (!strcasecmp(buf, udpstatlist[i].name))
-                        {
-                            if (sscanf(value, "%d", &res)) *udpstatlist[i].elem = res;
-                            continue;
-                        }
+                        if (!_strnicmp(buf, udpstatlist[i].name, -1) && sscanf(value, "%d", &res))
+                            *udpstatlist[i].elem = res;
                 }
                 fclose(fp);
                 ret = NO_ERROR;
@@ -1240,10 +1234,10 @@ DWORD WINAPI GetUdpStatisticsEx(PMIB_UDPSTATS stats, DWORD family)
 
             while ((ptr = fgets(buf, sizeof(buf), fp)))
             {
-                if (strncasecmp(buf, hdr, sizeof(hdr) - 1)) continue;
+                if (_strnicmp(buf, hdr, sizeof(hdr) - 1)) continue;
                 /* last line was a header, get another */
                 if (!(ptr = fgets(buf, sizeof(buf), fp))) break;
-                if (!strncasecmp(buf, hdr, sizeof(hdr) - 1))
+                if (!_strnicmp(buf, hdr, sizeof(hdr) - 1))
                 {
                     ptr += sizeof(hdr);
                     sscanf( ptr, "%u %u %u %u %u",
@@ -1347,10 +1341,10 @@ static MIB_IPFORWARDTABLE *append_ipforward_row( HANDLE heap, DWORD flags, MIB_I
     return table;
 }
 
-static int compare_ipforward_rows(const void *a, const void *b)
+static int compare_ipforward_rows(const void * HOSTPTR a, const void * HOSTPTR b)
 {
-    const MIB_IPFORWARDROW *rowA = a;
-    const MIB_IPFORWARDROW *rowB = b;
+    const MIB_IPFORWARDROW * HOSTPTR rowA = a;
+    const MIB_IPFORWARDROW * HOSTPTR rowB = b;
     int ret;
 
     if ((ret = rowA->dwForwardDest - rowB->dwForwardDest) != 0) return ret;
@@ -1478,7 +1472,7 @@ DWORD WINAPI AllocateAndGetIpForwardTableFromStack(PMIB_IPFORWARDTABLE *ppIpForw
        int mib[6] = {CTL_NET, PF_ROUTE, 0, PF_INET, NET_RT_DUMP, 0};
        size_t needed;
        char *buf = NULL, *lim, *next, *addrPtr;
-       struct rt_msghdr *rtm;
+       struct rt_msghdr * WIN32PTR rtm;
 
        if (sysctl (mib, 6, NULL, &needed, NULL, 0) < 0)
        {
@@ -1505,7 +1499,7 @@ DWORD WINAPI AllocateAndGetIpForwardTableFromStack(PMIB_IPFORWARDTABLE *ppIpForw
        {
           int i;
 
-          rtm = (struct rt_msghdr *)next;
+          rtm = (struct rt_msghdr * WIN32PTR)next;
 
           if (rtm->rtm_type != RTM_GET)
           {
@@ -1617,10 +1611,10 @@ static MIB_IPNETTABLE *append_ipnet_row( HANDLE heap, DWORD flags, MIB_IPNETTABL
     return table;
 }
 
-static int compare_ipnet_rows(const void *a, const void *b)
+static int compare_ipnet_rows(const void * HOSTPTR a, const void * HOSTPTR b)
 {
-    const MIB_IPNETROW *rowA = a;
-    const MIB_IPNETROW *rowB = b;
+    const MIB_IPNETROW * HOSTPTR rowA = a;
+    const MIB_IPNETROW * HOSTPTR rowB = b;
 
     return ntohl(rowA->dwAddr) - ntohl(rowB->dwAddr);
 }
@@ -1741,8 +1735,8 @@ DWORD WINAPI AllocateAndGetIpNetTableFromStack(PMIB_IPNETTABLE *ppIpNetTable, BO
       int mib[] = {CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_FLAGS, RTF_LLINFO};
       size_t needed;
       char *buf = NULL, *lim, *next;
-      struct rt_msghdr *rtm;
-      struct sockaddr_inarp *sinarp;
+      struct rt_msghdr * WIN32PTR rtm;
+      struct sockaddr_inarp * WIN32PTR sinarp;
       struct sockaddr_dl *sdl;
 
       if (sysctl (mib, ARRAY_SIZE(mib),  NULL, &needed, NULL, 0) == -1)
@@ -1769,8 +1763,8 @@ DWORD WINAPI AllocateAndGetIpNetTableFromStack(PMIB_IPNETTABLE *ppIpNetTable, BO
       next = buf;
       while(next < lim)
       {
-          rtm = (struct rt_msghdr *)next;
-          sinarp=(struct sockaddr_inarp *)(rtm + 1);
+          rtm = (struct rt_msghdr * WIN32PTR)next;
+          sinarp=(struct sockaddr_inarp * WIN32PTR)(rtm + 1);
           sdl = (struct sockaddr_dl *)((char *)sinarp + ROUNDUP(sinarp->sin_len));
           if(sdl->sdl_alen) /* arp entry */
           {
@@ -1891,10 +1885,10 @@ static inline MIB_TCP_STATE TCPStateToMIBState (int state)
    }
 }
 
-static int compare_tcp_rows(const void *a, const void *b)
+static int compare_tcp_rows(const void * HOSTPTR a, const void * HOSTPTR b)
 {
-    const MIB_TCPROW *rowA = a;
-    const MIB_TCPROW *rowB = b;
+    const MIB_TCPROW * HOSTPTR rowA = a;
+    const MIB_TCPROW * HOSTPTR rowB = b;
     int ret;
 
     if ((ret = ntohl (rowA->dwLocalAddr) - ntohl (rowB->dwLocalAddr)) != 0) return ret;
@@ -2046,7 +2040,7 @@ static unsigned int find_owning_pid( struct pid_map *map, unsigned int num_entri
     procstat_close( pstat );
     return 0;
 #elif defined(HAVE_PROC_PIDINFO)
-    struct proc_fdinfo *fds;
+    struct proc_fdinfo * WIN32PTR fds;
     struct socket_fdinfo sock;
     unsigned int i, j, n;
 
@@ -2195,7 +2189,7 @@ DWORD build_tcp_table( TCP_TABLE_CLASS class, void **tablep, BOOL order, HANDLE 
     {
         size_t Len = 0;
         char *Buf = NULL;
-        struct xinpgen *pXIG, *pOrigXIG;
+        struct xinpgen * WIN32PTR pXIG, * WIN32PTR pOrigXIG;
         struct pid_map *pMap = NULL;
         unsigned NumEntries;
 
@@ -2225,12 +2219,12 @@ DWORD build_tcp_table( TCP_TABLE_CLASS class, void **tablep, BOOL order, HANDLE 
         /* Might be nothing here; first entry is just a header it seems */
         if (Len <= sizeof (struct xinpgen)) goto done;
 
-        pOrigXIG = (struct xinpgen *)Buf;
+        pOrigXIG = (struct xinpgen * WIN32PTR)Buf;
         pXIG = pOrigXIG;
 
-        for (pXIG = (struct xinpgen *)((char *)pXIG + pXIG->xig_len);
+        for (pXIG = (struct xinpgen * WIN32PTR)((char *)pXIG + pXIG->xig_len);
              pXIG->xig_len > sizeof (struct xinpgen);
-             pXIG = (struct xinpgen *)((char *)pXIG + pXIG->xig_len))
+             pXIG = (struct xinpgen * WIN32PTR)((char *)pXIG + pXIG->xig_len))
         {
             struct tcpcb *pTCPData = NULL;
             struct inpcb *pINData;
@@ -2326,6 +2320,42 @@ DWORD WINAPI AllocateAndGetTcpTableFromStack( PMIB_TCPTABLE *ppTcpTable, BOOL bO
     return build_tcp_table( TCP_TABLE_BASIC_ALL, (void **)ppTcpTable, bOrder, heap, flags, NULL );
 }
 
+/******************************************************************
+ *    AllocateAndGetTcpExTableFromStack (IPHLPAPI.@)
+ *
+ * Get the TCP connection table.
+ * Like GetTcpTable(), but allocate the returned table from heap.
+ *
+ * PARAMS
+ *  ppTcpTable [Out] pointer into which the MIB_TCPTABLE_EX is
+ *                   allocated and returned.
+ *  bOrder     [In]  whether to sort the table
+ *  heap       [In]  heap from which the table is allocated
+ *  flags      [In]  flags to HeapAlloc
+ *  family     [In]  address family [AF_INET|AF_INET6]
+ *
+ * RETURNS
+ *  ERROR_INVALID_PARAMETER if ppTcpTable is NULL, whatever GetTcpTable()
+ *  returns otherwise.
+ */
+DWORD WINAPI AllocateAndGetTcpExTableFromStack( VOID **ppTcpTable, BOOL bOrder,
+                                                HANDLE heap, DWORD flags, DWORD family )
+{
+    TRACE("table %p, bOrder %d, heap %p, flags 0x%08x, family %u\n",
+          ppTcpTable, bOrder, heap, flags, family);
+
+    if (!ppTcpTable || !family)
+        return ERROR_INVALID_PARAMETER;
+
+    if (family != WS_AF_INET)
+    {
+        FIXME( "family = %u not supported\n", family );
+        return ERROR_NOT_SUPPORTED;
+    }
+
+    return build_tcp_table( TCP_TABLE_OWNER_PID_ALL, ppTcpTable, bOrder, heap, flags, NULL );
+}
+
 static DWORD get_udp_table_sizes( UDP_TABLE_CLASS class, DWORD row_count, DWORD *row_size )
 {
     DWORD table_size;
@@ -2380,10 +2410,10 @@ static MIB_UDPTABLE *append_udp_row( UDP_TABLE_CLASS class, HANDLE heap, DWORD f
     return table;
 }
 
-static int compare_udp_rows(const void *a, const void *b)
+static int compare_udp_rows(const void * HOSTPTR a, const void * HOSTPTR b)
 {
-    const MIB_UDPROW *rowA = a;
-    const MIB_UDPROW *rowB = b;
+    const MIB_UDPROW * HOSTPTR rowA = a;
+    const MIB_UDPROW * HOSTPTR rowB = b;
     int ret;
 
     if ((ret = rowA->dwLocalAddr - rowB->dwLocalAddr) != 0) return ret;
@@ -2470,7 +2500,7 @@ DWORD build_udp_table( UDP_TABLE_CLASS class, void **tablep, BOOL order, HANDLE 
     {
         size_t Len = 0;
         char *Buf = NULL;
-        struct xinpgen *pXIG, *pOrigXIG;
+        struct xinpgen * WIN32PTR pXIG, * WIN32PTR pOrigXIG;
         struct pid_map *pMap = NULL;
         unsigned NumEntries;
 
@@ -2501,12 +2531,12 @@ DWORD build_udp_table( UDP_TABLE_CLASS class, void **tablep, BOOL order, HANDLE 
         /* Might be nothing here; first entry is just a header it seems */
         if (Len <= sizeof (struct xinpgen)) goto done;
 
-        pOrigXIG = (struct xinpgen *)Buf;
+        pOrigXIG = (struct xinpgen * WIN32PTR)Buf;
         pXIG = pOrigXIG;
 
-        for (pXIG = (struct xinpgen *)((char *)pXIG + pXIG->xig_len);
+        for (pXIG = (struct xinpgen * WIN32PTR)((char *)pXIG + pXIG->xig_len);
              pXIG->xig_len > sizeof (struct xinpgen);
-             pXIG = (struct xinpgen *)((char *)pXIG + pXIG->xig_len))
+             pXIG = (struct xinpgen * WIN32PTR)((char *)pXIG + pXIG->xig_len))
         {
             struct inpcb *pINData;
             struct xsocket *pSockData;
@@ -2622,10 +2652,10 @@ static MIB_UDP6TABLE *append_udp6_row( UDP_TABLE_CLASS class, HANDLE heap, DWORD
     return table;
 }
 
-static int compare_udp6_rows(const void *a, const void *b)
+static int compare_udp6_rows(const void * HOSTPTR a, const void * HOSTPTR b)
 {
-    const MIB_UDP6ROW *rowA = a;
-    const MIB_UDP6ROW *rowB = b;
+    const MIB_UDP6ROW * HOSTPTR rowA = a;
+    const MIB_UDP6ROW * HOSTPTR rowB = b;
     int ret;
 
     if ((ret = memcmp(&rowA->dwLocalAddr, &rowB->dwLocalAddr, sizeof(rowA->dwLocalAddr)) != 0)) return ret;

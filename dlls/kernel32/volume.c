@@ -71,7 +71,7 @@ enum fs_type
 /* get the path of a dos device symlink in the $WINEPREFIX/dosdevices directory */
 static char *get_dos_device_path( LPCWSTR name )
 {
-    const char *config_dir = wine_get_config_dir();
+    const char * HOSTPTR config_dir = wine_get_config_dir();
     char *buffer, *dev;
     int i;
 
@@ -1969,7 +1969,7 @@ BOOL WINAPI GetVolumePathNamesForVolumeNameW(LPCWSTR volumename, LPWSTR volumepa
             linkname = (const WCHAR *)((const char *)link + link->MountPoints[j].SymbolicLinkNameOffset);
 
             if (link->MountPoints[j].SymbolicLinkNameLength == sizeof(dosdevicesW) + 2 * sizeof(WCHAR) &&
-                !memicmpW( linkname, dosdevicesW, ARRAY_SIZE( dosdevicesW )))
+                !strncmpiW( linkname, dosdevicesW, ARRAY_SIZE( dosdevicesW )))
             {
                 len += 4;
                 if (volumepathname && len < buflen)

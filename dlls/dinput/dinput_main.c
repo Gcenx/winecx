@@ -40,6 +40,7 @@
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
+#include "wine/asm.h"
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -47,6 +48,7 @@
 #include "objbase.h"
 #include "rpcproxy.h"
 #include "initguid.h"
+#include "devguid.h"
 #include "dinput_private.h"
 #include "device_private.h"
 #include "dinputd.h"
@@ -468,9 +470,10 @@ static HRESULT WINAPI IDirectInputAImpl_EnumDevices(
 
     for (i = 0; i < ARRAY_SIZE(dinput_devices); i++) {
         if (!dinput_devices[i]->enum_deviceA) continue;
+
+        TRACE(" Checking device %u ('%s')\n", i, dinput_devices[i]->name);
         for (j = 0, r = S_OK; SUCCEEDED(r); j++) {
             devInstance.dwSize = sizeof(devInstance);
-            TRACE("  - checking device %u ('%s')\n", i, dinput_devices[i]->name);
             r = dinput_devices[i]->enum_deviceA(dwDevType, dwFlags, &devInstance, This->dwVersion, j);
             if (r == S_OK)
                 if (enum_callback_wrapper(lpCallback, &devInstance, pvRef) == DIENUM_STOP)
@@ -526,7 +529,7 @@ static ULONG WINAPI IDirectInputAImpl_AddRef(LPDIRECTINPUT7A iface)
     IDirectInputImpl *This = impl_from_IDirectInput7A( iface );
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE( "(%p) incrementing from %d\n", This, ref - 1);
+    TRACE( "(%p) ref %d\n", This, ref );
     return ref;
 }
 
@@ -541,7 +544,7 @@ static ULONG WINAPI IDirectInputAImpl_Release(LPDIRECTINPUT7A iface)
     IDirectInputImpl *This = impl_from_IDirectInput7A( iface );
     ULONG ref = InterlockedDecrement( &This->ref );
 
-    TRACE( "(%p) releasing from %d\n", This, ref + 1 );
+    TRACE( "(%p) ref %d\n", This, ref );
 
     if (ref == 0)
     {
@@ -567,53 +570,39 @@ static HRESULT WINAPI IDirectInputAImpl_QueryInterface(LPDIRECTINPUT7A iface, RE
     if (!riid || !ppobj)
         return E_POINTER;
 
+    *ppobj = NULL;
+
+#if DIRECTINPUT_VERSION == 0x0700
     if (IsEqualGUID( &IID_IUnknown, riid ) ||
-        IsEqualGUID( &IID_IDirectInputA,  riid ) ||
-        IsEqualGUID( &IID_IDirectInput2A, riid ) ||
-        IsEqualGUID( &IID_IDirectInput7A, riid ))
-    {
+         IsEqualGUID( &IID_IDirectInputA,  riid ) ||
+         IsEqualGUID( &IID_IDirectInput2A, riid ) ||
+         IsEqualGUID( &IID_IDirectInput7A, riid ))
         *ppobj = &This->IDirectInput7A_iface;
-        IUnknown_AddRef( (IUnknown*)*ppobj );
-
-        return DI_OK;
-    }
-
-    if (IsEqualGUID( &IID_IDirectInputW,  riid ) ||
-        IsEqualGUID( &IID_IDirectInput2W, riid ) ||
-        IsEqualGUID( &IID_IDirectInput7W, riid ))
-    {
+    else if (IsEqualGUID( &IID_IDirectInputW,  riid ) ||
+             IsEqualGUID( &IID_IDirectInput2W, riid ) ||
+             IsEqualGUID( &IID_IDirectInput7W, riid ))
         *ppobj = &This->IDirectInput7W_iface;
-        IUnknown_AddRef( (IUnknown*)*ppobj );
 
-        return DI_OK;
-    }
-
-    if (IsEqualGUID( &IID_IDirectInput8A, riid ))
-    {
+#else
+    if (IsEqualGUID( &IID_IUnknown, riid ) ||
+        IsEqualGUID( &IID_IDirectInput8A, riid ))
         *ppobj = &This->IDirectInput8A_iface;
-        IUnknown_AddRef( (IUnknown*)*ppobj );
 
-        return DI_OK;
-    }
-
-    if (IsEqualGUID( &IID_IDirectInput8W, riid ))
-    {
+    else if (IsEqualGUID( &IID_IDirectInput8W, riid ))
         *ppobj = &This->IDirectInput8W_iface;
-        IUnknown_AddRef( (IUnknown*)*ppobj );
 
-        return DI_OK;
-    }
+#endif
 
     if (IsEqualGUID( &IID_IDirectInputJoyConfig8, riid ))
-    {
         *ppobj = &This->IDirectInputJoyConfig8_iface;
-        IUnknown_AddRef( (IUnknown*)*ppobj );
 
+    if(*ppobj)
+    {
+        IUnknown_AddRef( (IUnknown*)*ppobj );
         return DI_OK;
     }
 
-    FIXME( "Unsupported interface: %s\n", debugstr_guid(riid));
-    *ppobj = NULL;
+    WARN( "Unsupported interface: %s\n", debugstr_guid(riid));
     return E_NOINTERFACE;
 }
 
@@ -691,7 +680,7 @@ static HRESULT WINAPI IDirectInputAImpl_Initialize(LPDIRECTINPUT7A iface, HINSTA
 {
     IDirectInputImpl *This = impl_from_IDirectInput7A( iface );
 
-    TRACE("(%p)->(%p, 0x%04x)\n", iface, hinst, version);
+    TRACE("(%p)->(%p, 0x%04x)\n", This, hinst, version);
 
     if (!hinst)
         return DIERR_INVALIDPARAM;
@@ -948,7 +937,7 @@ static HRESULT WINAPI IDirectInput8AImpl_Initialize(LPDIRECTINPUT8A iface, HINST
 {
     IDirectInputImpl *This = impl_from_IDirectInput8A( iface );
 
-    TRACE("(%p)->(%p, 0x%04x)\n", iface, hinst, version);
+    TRACE("(%p)->(%p, 0x%04x)\n", This, hinst, version);
 
     if (!hinst)
         return DIERR_INVALIDPARAM;
@@ -1105,10 +1094,12 @@ static HRESULT WINAPI IDirectInput8AImpl_EnumDevicesBySemantics(
 
         if (lpCallback(&didevis[i], lpdid, callbackFlags, --remain, pvRef) == DIENUM_STOP)
         {
+            IDirectInputDevice_Release(lpdid);
             HeapFree(GetProcessHeap(), 0, didevis);
             HeapFree(GetProcessHeap(), 0, username_w);
             return DI_OK;
         }
+        IDirectInputDevice_Release(lpdid);
     }
 
     HeapFree(GetProcessHeap(), 0, didevis);
@@ -1131,9 +1122,11 @@ static HRESULT WINAPI IDirectInput8AImpl_EnumDevicesBySemantics(
 
             if (lpCallback(&didevi, lpdid, callbackFlags, --remain, pvRef) == DIENUM_STOP)
             {
+                IDirectInputDevice_Release(lpdid);
                 HeapFree(GetProcessHeap(), 0, username_w);
                 return DI_OK;
             }
+            IDirectInputDevice_Release(lpdid);
         }
     }
 
@@ -1716,7 +1709,7 @@ static DWORD WINAPI hook_thread_proc(void *param)
 
     /* Force creation of the message queue */
     PeekMessageW( &msg, 0, 0, 0, PM_NOREMOVE );
-    SetEvent(*(LPHANDLE)param);
+    SetEvent(param);
 
     while (GetMessageW( &msg, 0, 0, 0 ))
     {
@@ -1778,10 +1771,11 @@ static DWORD WINAPI hook_thread_proc(void *param)
         DispatchMessageW(&msg);
     }
 
-    return 0;
+    FreeLibraryAndExitThread(DINPUT_instance, 0);
 }
 
 static DWORD hook_thread_id;
+static HANDLE hook_thread_event;
 
 static CRITICAL_SECTION_DEBUG dinput_critsect_debug =
 {
@@ -1794,46 +1788,39 @@ static CRITICAL_SECTION dinput_hook_crit = { &dinput_critsect_debug, -1, 0, 0, 0
 static BOOL check_hook_thread(void)
 {
     static HANDLE hook_thread;
+    HMODULE module;
 
     EnterCriticalSection(&dinput_hook_crit);
 
     TRACE("IDirectInputs left: %d\n", list_count(&direct_input_list));
     if (!list_empty(&direct_input_list) && !hook_thread)
     {
-        HANDLE event;
-
-        event = CreateEventW(NULL, FALSE, FALSE, NULL);
-        hook_thread = CreateThread(NULL, 0, hook_thread_proc, &event, 0, &hook_thread_id);
-        if (event && hook_thread)
-        {
-            HANDLE handles[2];
-            handles[0] = event;
-            handles[1] = hook_thread;
-            WaitForMultipleObjects(2, handles, FALSE, INFINITE);
-        }
-        LeaveCriticalSection(&dinput_hook_crit);
-        CloseHandle(event);
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (const WCHAR*)DINPUT_instance, &module);
+        hook_thread_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+        hook_thread = CreateThread(NULL, 0, hook_thread_proc, hook_thread_event, 0, &hook_thread_id);
     }
     else if (list_empty(&direct_input_list) && hook_thread)
     {
         DWORD tid = hook_thread_id;
 
+        if (hook_thread_event) /* if thread is not started yet */
+        {
+            WaitForSingleObject(hook_thread_event, INFINITE);
+            CloseHandle(hook_thread_event);
+            hook_thread_event = NULL;
+        }
+
         hook_thread_id = 0;
         PostThreadMessageW(tid, WM_USER+0x10, 0, 0);
-        LeaveCriticalSection(&dinput_hook_crit);
-
-        /* wait for hook thread to exit */
-        WaitForSingleObject(hook_thread, INFINITE);
         CloseHandle(hook_thread);
         hook_thread = NULL;
     }
-    else
-        LeaveCriticalSection(&dinput_hook_crit);
 
+    LeaveCriticalSection(&dinput_hook_crit);
     return hook_thread_id != 0;
 }
 
-void check_dinput_hooks(LPDIRECTINPUTDEVICE8W iface)
+void check_dinput_hooks(LPDIRECTINPUTDEVICE8W iface, BOOL acquired)
 {
     static HHOOK callwndproc_hook;
     static ULONG foreground_cnt;
@@ -1843,7 +1830,7 @@ void check_dinput_hooks(LPDIRECTINPUTDEVICE8W iface)
 
     if (dev->dwCoopLevel & DISCL_FOREGROUND)
     {
-        if (dev->acquired)
+        if (acquired)
             foreground_cnt++;
         else
             foreground_cnt--;
@@ -1856,6 +1843,13 @@ void check_dinput_hooks(LPDIRECTINPUTDEVICE8W iface)
     {
         UnhookWindowsHookEx( callwndproc_hook );
         callwndproc_hook = NULL;
+    }
+
+    if (hook_thread_event) /* if thread is not started yet */
+    {
+        WaitForSingleObject(hook_thread_event, INFINITE);
+        CloseHandle(hook_thread_event);
+        hook_thread_event = NULL;
     }
 
     PostThreadMessageW( hook_thread_id, WM_USER+0x10, 1, 0 );

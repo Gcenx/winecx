@@ -28,6 +28,7 @@
 #define WIN32_NO_STATUS
 #include "windef.h"
 #include "winternl.h"
+#include "wine/asm.h"
 
 #ifndef _WIN64
 
@@ -258,7 +259,7 @@ ULONGLONG WINAPI RtlEnlargedUnsignedMultiply( UINT a, UINT b )
  */
 UINT WINAPI RtlEnlargedUnsignedDivide( ULONGLONG a, UINT b, UINT *remptr )
 {
-#if defined(__i386__) && defined(__GNUC__)
+#if (defined(__i386__) || defined(__i386_on_x86_64__)) && defined(__GNUC__)
     UINT ret, rem;
 
     __asm__("divl %4"
@@ -519,7 +520,7 @@ NTSTATUS WINAPI RtlInt64ToUnicodeString(
 }
 
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 
 /******************************************************************************
  *        _alldiv   (NTDLL.@)
@@ -639,6 +640,64 @@ LONGLONG WINAPI _allshr( LONGLONG a, LONG b )
  *  Returns the quotient of a and b in edx:eax.
  *  Returns the remainder of a and b in ebx:ecx.
  */
+#ifdef __i386_on_x86_64__
+__ASM_STDCALL_FUNC( _alldvrm, 16,
+                    "pushq %rbp\n\t"
+                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                    __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                    "movl %esp,%ebp\n\t"
+                    __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                    "subl $16, %esp\n\t"
+                    "movl "__ASM_EXTRA_DIST"+20(%ebp), %eax\n\t"
+                    "movl %eax, 12(%esp)\n\t"
+                    "movl "__ASM_EXTRA_DIST"+16(%ebp), %eax\n\t"
+                    "movl %eax, 8(%esp)\n\t"
+                    "movl "__ASM_EXTRA_DIST"+12(%ebp), %eax\n\t"
+                    "movl %eax, 4(%esp)\n\t"
+                    "movl "__ASM_EXTRA_DIST"+8(%ebp), %eax\n\t"
+                    "movl %eax, (%esp)\n\t"
+                    "call " __ASM_NAME("_allrem") "\n\t"
+                    "movl %edx,%ebx\n\t"
+                    "subl $20, %esp\n\t"
+                    "movl %eax, 16(%esp)\n\t"
+                    "movl "__ASM_EXTRA_DIST"+20(%ebp), %eax\n\t"
+                    "movl %eax, 12(%esp)\n\t"
+                    "movl "__ASM_EXTRA_DIST"+16(%ebp), %eax\n\t"
+                    "movl %eax, 8(%esp)\n\t"
+                    "movl "__ASM_EXTRA_DIST"+12(%ebp), %eax\n\t"
+                    "movl %eax, 4(%esp)\n\t"
+                    "movl "__ASM_EXTRA_DIST"+8(%ebp), %eax\n\t"
+                    "movl %eax, (%esp)\n\t"
+                    "call " __ASM_NAME("_alldiv") "\n\t"
+                    "movl (%esp), %ecx\n\t"
+                    "leave\n\t"
+                    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                    __ASM_CFI(".cfi_same_value %ebp\n\t")
+                    "retq" )
+__ASM_THUNK_STDCALL( _alldvrm, 16,
+                     "pushl %ebp\n\t"
+                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                     __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                     "movl %esp,%ebp\n\t"
+                     __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                     "pushl 20(%ebp)\n\t"
+                     "pushl 16(%ebp)\n\t"
+                     "pushl 12(%ebp)\n\t"
+                     "pushl 8(%ebp)\n\t"
+                     "call " __ASM_THUNK_SYMBOL("_allrem") "\n\t"
+                     "movl %edx,%ebx\n\t"
+                     "pushl %eax\n\t"
+                     "pushl 20(%ebp)\n\t"
+                     "pushl 16(%ebp)\n\t"
+                     "pushl 12(%ebp)\n\t"
+                     "pushl 8(%ebp)\n\t"
+                     "call " __ASM_THUNK_SYMBOL("_alldiv") "\n\t"
+                     "popl %ecx\n\t"
+                     "leave\n\t"
+                     __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                     __ASM_CFI(".cfi_same_value %ebp\n\t")
+                     "ret $16" )
+#else
 __ASM_STDCALL_FUNC( _alldvrm, 16,
                     "pushl %ebp\n\t"
                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
@@ -662,6 +721,7 @@ __ASM_STDCALL_FUNC( _alldvrm, 16,
                     __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
                     __ASM_CFI(".cfi_same_value %ebp\n\t")
                     "ret $16" )
+#endif
 
 /******************************************************************************
  *        _aullrem   (NTDLL.@)
@@ -710,6 +770,64 @@ ULONGLONG WINAPI _aullshr( ULONGLONG a, LONG b )
  *  Returns the quotient of a and b in edx:eax.
  *  Returns the remainder of a and b in ebx:ecx.
  */
+#ifdef __i386_on_x86_64__
+__ASM_STDCALL_FUNC( _aulldvrm, 16,
+                    "pushq %rbp\n\t"
+                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                    __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                    "movl %esp,%ebp\n\t"
+                    __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                    "subl $16, %esp\n\t"
+                    "movl "__ASM_EXTRA_DIST"+20(%ebp), %eax\n\t"
+                    "movl %eax, 12(%esp)\n\t"
+                    "movl "__ASM_EXTRA_DIST"+16(%ebp), %eax\n\t"
+                    "movl %eax, 8(%esp)\n\t"
+                    "movl "__ASM_EXTRA_DIST"+12(%ebp), %eax\n\t"
+                    "movl %eax, 4(%esp)\n\t"
+                    "movl "__ASM_EXTRA_DIST"+8(%ebp), %eax\n\t"
+                    "movl %eax, (%esp)\n\t"
+                    "call " __ASM_NAME("_aullrem") "\n\t"
+                    "movl %edx,%ebx\n\t"
+                    "subl $20, %esp\n\t"
+                    "movl %eax, 16(%esp)\n\t"
+                    "movl "__ASM_EXTRA_DIST"+20(%ebp), %eax\n\t"
+                    "movl %eax, 12(%esp)\n\t"
+                    "movl "__ASM_EXTRA_DIST"+16(%ebp), %eax\n\t"
+                    "movl %eax, 8(%esp)\n\t"
+                    "movl "__ASM_EXTRA_DIST"+12(%ebp), %eax\n\t"
+                    "movl %eax, 4(%esp)\n\t"
+                    "movl "__ASM_EXTRA_DIST"+8(%ebp), %eax\n\t"
+                    "movl %eax, (%esp)\n\t"
+                    "call " __ASM_NAME("_aulldiv") "\n\t"
+                    "movl (%esp), %ecx\n\t"
+                    "leave\n\t"
+                    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                    __ASM_CFI(".cfi_same_value %ebp\n\t")
+                    "retq" )
+__ASM_THUNK_STDCALL( _aulldvrm, 16,
+                     "pushl %ebp\n\t"
+                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                     __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                     "movl %esp,%ebp\n\t"
+                     __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                     "pushl 20(%ebp)\n\t"
+                     "pushl 16(%ebp)\n\t"
+                     "pushl 12(%ebp)\n\t"
+                     "pushl 8(%ebp)\n\t"
+                     "call " __ASM_THUNK_SYMBOL("_aullrem") "\n\t"
+                     "movl %edx,%ebx\n\t"
+                     "pushl %eax\n\t"
+                     "pushl 20(%ebp)\n\t"
+                     "pushl 16(%ebp)\n\t"
+                     "pushl 12(%ebp)\n\t"
+                     "pushl 8(%ebp)\n\t"
+                     "call " __ASM_THUNK_SYMBOL("_aulldiv") "\n\t"
+                     "popl %ecx\n\t"
+                     "leave\n\t"
+                     __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                     __ASM_CFI(".cfi_same_value %ebp\n\t")
+                     "ret $16" )
+#else
 __ASM_STDCALL_FUNC( _aulldvrm, 16,
                     "pushl %ebp\n\t"
                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
@@ -733,5 +851,6 @@ __ASM_STDCALL_FUNC( _aulldvrm, 16,
                     __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
                     __ASM_CFI(".cfi_same_value %ebp\n\t")
                     "ret $16" )
+#endif
 
 #endif  /* __i386__ */

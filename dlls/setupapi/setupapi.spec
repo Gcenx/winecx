@@ -67,6 +67,8 @@
 @ stdcall CM_Get_Class_Registry_PropertyW(ptr long ptr ptr long long ptr)
 @ stub CM_Get_Depth
 @ stub CM_Get_Depth_Ex
+@ stdcall CM_Get_DevNode_PropertyW(long ptr ptr ptr ptr long)
+@ stdcall CM_Get_DevNode_Property_ExW(long ptr ptr ptr ptr long ptr)
 @ stdcall CM_Get_DevNode_Registry_PropertyA(long long ptr ptr ptr long)
 @ stdcall CM_Get_DevNode_Registry_PropertyW(long long ptr ptr ptr long)
 @ stdcall CM_Get_DevNode_Registry_Property_ExA(long long ptr ptr ptr long ptr)
@@ -123,7 +125,7 @@
 @ stub CM_Get_Res_Des_Data_Ex
 @ stub CM_Get_Res_Des_Data_Size
 @ stub CM_Get_Res_Des_Data_Size_Ex
-@ stub CM_Get_Sibling
+@ stdcall CM_Get_Sibling(ptr long long)
 @ stdcall CM_Get_Sibling_Ex(ptr long long ptr)
 @ stdcall CM_Get_Version()
 @ stub CM_Get_Version_Ex
@@ -168,8 +170,8 @@
 @ stub CM_Remove_SubTree_Ex
 @ stub CM_Remove_Unmarked_Children
 @ stub CM_Remove_Unmarked_Children_Ex
-@ stub CM_Request_Device_EjectA
-@ stub CM_Request_Device_EjectW
+@ stdcall CM_Request_Device_EjectA(ptr ptr ptr long long)
+@ stdcall CM_Request_Device_EjectW(ptr ptr ptr long long)
 @ stub CM_Request_Eject_PC
 @ stub CM_Reset_Children_Marks
 @ stub CM_Reset_Children_Marks_Ex
@@ -366,8 +368,9 @@
 @ stub SetupDiInstallClassExA
 @ stub SetupDiInstallClassExW
 @ stdcall SetupDiInstallClassW(long wstr long ptr)
-@ stub SetupDiInstallDevice
-@ stub SetupDiInstallDriverFiles
+@ stdcall SetupDiInstallDevice(ptr ptr)
+@ stdcall SetupDiInstallDeviceInterfaces(ptr ptr)
+@ stdcall SetupDiInstallDriverFiles(ptr ptr)
 @ stdcall SetupDiLoadClassIcon(ptr ptr ptr)
 @ stub SetupDiMoveDuplicateDevice
 @ stdcall SetupDiOpenClassRegKey(ptr long)
@@ -379,6 +382,7 @@
 @ stdcall SetupDiOpenDeviceInterfaceA(ptr str long ptr)
 @ stub SetupDiOpenDeviceInterfaceRegKey
 @ stdcall SetupDiOpenDeviceInterfaceW(ptr wstr long ptr)
+@ stdcall SetupDiRegisterCoDeviceInstallers(ptr ptr)
 @ stdcall SetupDiRegisterDeviceInfo(ptr ptr long ptr ptr ptr)
 @ stdcall SetupDiRemoveDevice(ptr ptr)
 @ stdcall SetupDiRemoveDeviceInterface(ptr ptr)
@@ -389,6 +393,7 @@
 @ stdcall SetupDiSetClassInstallParamsW(ptr ptr ptr long)
 @ stdcall SetupDiSetDeviceInstallParamsA(ptr ptr ptr)
 @ stdcall SetupDiSetDeviceInstallParamsW(ptr ptr ptr)
+@ stdcall SetupDiSetDevicePropertyW(ptr ptr ptr long ptr long long)
 @ stdcall SetupDiSetDeviceRegistryPropertyA(ptr ptr long ptr long)
 @ stdcall SetupDiSetDeviceRegistryPropertyW(ptr ptr long ptr long)
 @ stub SetupDiSetDriverInstallParamsA

@@ -16,13 +16,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
 #include "d3dx11.h"
 #include "d3dcompiler.h"
 
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3dx);
 
@@ -317,13 +314,13 @@ HRESULT WINAPI D3DX11CreateAsyncFileLoaderW(const WCHAR *filename, ID3DX11DataLo
         return E_OUTOFMEMORY;
 
     object->ID3DX11DataLoader_iface.lpVtbl = &filedataloadervtbl;
-    object->u.file.path = HeapAlloc(GetProcessHeap(), 0, (strlenW(filename) + 1) * sizeof(WCHAR));
+    object->u.file.path = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(filename) + 1) * sizeof(WCHAR));
     if (!object->u.file.path)
     {
         HeapFree(GetProcessHeap(), 0, object);
         return E_OUTOFMEMORY;
     }
-    strcpyW(object->u.file.path, filename);
+    lstrcpyW(object->u.file.path, filename);
     object->data = NULL;
     object->size = 0;
 
@@ -348,7 +345,7 @@ HRESULT WINAPI D3DX11CreateAsyncResourceLoaderA(HMODULE module, const char *reso
 
     if (!(rsrc = FindResourceA(module, resource, (const char *)RT_RCDATA)))
     {
-        ERR("Failed to find resource.\n");
+        WARN("Failed to find resource.\n");
         HeapFree(GetProcessHeap(), 0, object);
         return D3DX11_ERR_INVALID_DATA;
     }
@@ -380,7 +377,7 @@ HRESULT WINAPI D3DX11CreateAsyncResourceLoaderW(HMODULE module, const WCHAR *res
 
     if (!(rsrc = FindResourceW(module, resource, (const WCHAR *)RT_RCDATA)))
     {
-        ERR("Failed to find resource.\n");
+        WARN("Failed to find resource.\n");
         HeapFree(GetProcessHeap(), 0, object);
         return D3DX11_ERR_INVALID_DATA;
     }

@@ -51,8 +51,6 @@ typedef struct ACMWrapperImpl
     LONGLONG lasttime_sent;
 } ACMWrapperImpl;
 
-static const IBaseFilterVtbl ACMWrapper_Vtbl;
-
 static inline ACMWrapperImpl *impl_from_TransformFilter( TransformFilter *iface )
 {
     return CONTAINING_RECORD(iface, ACMWrapperImpl, tf);
@@ -61,7 +59,6 @@ static inline ACMWrapperImpl *impl_from_TransformFilter( TransformFilter *iface 
 static HRESULT WINAPI ACMWrapper_Receive(TransformFilter *tf, IMediaSample *pSample)
 {
     ACMWrapperImpl* This = impl_from_TransformFilter(tf);
-    AM_MEDIA_TYPE amt;
     IMediaSample* pOutSample = NULL;
     DWORD cbDstStream, cbSrcStream;
     LPBYTE pbDstStream;
@@ -105,20 +102,12 @@ static HRESULT WINAPI ACMWrapper_Receive(TransformFilter *tf, IMediaSample *pSam
 
     TRACE("Sample data ptr = %p, size = %d\n", pbSrcStream, cbSrcStream);
 
-    hr = IPin_ConnectionMediaType(This->tf.ppPins[0], &amt);
-    if (FAILED(hr))
-    {
-        ERR("Unable to retrieve media type\n");
-        LeaveCriticalSection(&This->tf.csReceive);
-        return hr;
-    }
-
     ash.pbSrc = pbSrcStream;
     ash.cbSrcLength = cbSrcStream;
 
     while(hr == S_OK && ash.cbSrcLength)
     {
-        hr = BaseOutputPinImpl_GetDeliveryBuffer((BaseOutputPin*)This->tf.ppPins[1], &pOutSample, NULL, NULL, 0);
+        hr = BaseOutputPinImpl_GetDeliveryBuffer(&This->tf.source, &pOutSample, NULL, NULL, 0);
         if (FAILED(hr))
         {
             ERR("Unable to get delivery buffer (%x)\n", hr);
@@ -218,7 +207,7 @@ static HRESULT WINAPI ACMWrapper_Receive(TransformFilter *tf, IMediaSample *pSam
         TRACE("Sample stop time: %u.%03u\n", (DWORD)(tStart/10000000), (DWORD)((tStart/10000)%1000));
 
         LeaveCriticalSection(&This->tf.csReceive);
-        hr = BaseOutputPinImpl_Deliver((BaseOutputPin*)This->tf.ppPins[1], pOutSample);
+        hr = BaseOutputPinImpl_Deliver(&This->tf.source, pOutSample);
         EnterCriticalSection(&This->tf.csReceive);
 
         if (hr != S_OK && hr != VFW_E_NOT_CONNECTED) {
@@ -377,44 +366,21 @@ static const TransformFilterFuncTable ACMWrapper_FuncsTable = {
     NULL
 };
 
-HRESULT ACMWrapper_create(IUnknown * pUnkOuter, LPVOID * ppv)
+HRESULT ACMWrapper_create(IUnknown *outer, void **out)
 {
     HRESULT hr;
     ACMWrapperImpl* This;
 
-    TRACE("(%p, %p)\n", pUnkOuter, ppv);
+    *out = NULL;
 
-    *ppv = NULL;
-
-    if (pUnkOuter)
-        return CLASS_E_NOAGGREGATION;
-
-    hr = TransformFilter_Construct(&ACMWrapper_Vtbl, sizeof(ACMWrapperImpl), &CLSID_ACMWrapper, &ACMWrapper_FuncsTable, (IBaseFilter**)&This);
+    hr = strmbase_transform_create(sizeof(ACMWrapperImpl), outer, &CLSID_ACMWrapper,
+            &ACMWrapper_FuncsTable, (IBaseFilter **)&This);
 
     if (FAILED(hr))
         return hr;
 
-    *ppv = &This->tf.filter.IBaseFilter_iface;
+    *out = &This->tf.filter.IUnknown_inner;
     This->lasttime_real = This->lasttime_sent = -1;
 
     return hr;
 }
-
-static const IBaseFilterVtbl ACMWrapper_Vtbl =
-{
-    TransformFilterImpl_QueryInterface,
-    BaseFilterImpl_AddRef,
-    TransformFilterImpl_Release,
-    BaseFilterImpl_GetClassID,
-    TransformFilterImpl_Stop,
-    TransformFilterImpl_Pause,
-    TransformFilterImpl_Run,
-    BaseFilterImpl_GetState,
-    BaseFilterImpl_SetSyncSource,
-    BaseFilterImpl_GetSyncSource,
-    BaseFilterImpl_EnumPins,
-    BaseFilterImpl_FindPin,
-    BaseFilterImpl_QueryFilterInfo,
-    BaseFilterImpl_JoinFilterGraph,
-    BaseFilterImpl_QueryVendorInfo
-};

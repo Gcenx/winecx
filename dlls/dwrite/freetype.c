@@ -50,7 +50,7 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
 };
 static CRITICAL_SECTION freetype_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 
-static void *ft_handle = NULL;
+static void * HOSTPTR ft_handle = NULL;
 static FT_Library library = 0;
 static FTC_Manager cache_manager = 0;
 static FTC_CMapCache cmap_cache = 0;
@@ -62,7 +62,7 @@ typedef struct
     FT_Int patch;
 } FT_Version_t;
 
-#define MAKE_FUNCPTR(f) static typeof(f) * p##f = NULL
+#define MAKE_FUNCPTR(f) static typeof(f) * HOSTPTR p##f = NULL
 MAKE_FUNCPTR(FT_Done_FreeType);
 MAKE_FUNCPTR(FT_Done_Glyph);
 MAKE_FUNCPTR(FT_Get_First_Char);
@@ -93,8 +93,8 @@ MAKE_FUNCPTR(FTC_Manager_Done);
 MAKE_FUNCPTR(FTC_Manager_LookupFace);
 MAKE_FUNCPTR(FTC_Manager_LookupSize);
 MAKE_FUNCPTR(FTC_Manager_RemoveFaceID);
+MAKE_FUNCPTR(FT_Outline_EmboldenXY);
 #undef MAKE_FUNCPTR
-static FT_Error (*pFT_Outline_EmboldenXY)(FT_Outline *, FT_Pos, FT_Pos);
 
 struct face_finalizer_data
 {
@@ -102,10 +102,10 @@ struct face_finalizer_data
     void *context;
 };
 
-static void face_finalizer(void *object)
+static void face_finalizer(void * HOSTPTR object)
 {
     FT_Face face = object;
-    struct face_finalizer_data *data = (struct face_finalizer_data *)face->generic.data;
+    struct face_finalizer_data * HOSTPTR data = face->generic.data;
 
     IDWriteFontFileStream_ReleaseFileFragment(data->stream, data->context);
     IDWriteFontFileStream_Release(data->stream);
@@ -114,7 +114,7 @@ static void face_finalizer(void *object)
 
 static FT_Error face_requester(FTC_FaceID face_id, FT_Library library, FT_Pointer request_data, FT_Face *face)
 {
-    IDWriteFontFace *fontface = (IDWriteFontFace*)face_id;
+    IDWriteFontFace *fontface = ADDRSPACECAST(void *, face_id);
     IDWriteFontFileStream *stream;
     IDWriteFontFile *file;
     const void *data_ptr;
@@ -263,14 +263,14 @@ void freetype_notify_cacheremove(IDWriteFontFace4 *fontface)
     LeaveCriticalSection(&freetype_cs);
 }
 
-HRESULT freetype_get_design_glyph_metrics(IDWriteFontFace4 *fontface, UINT16 unitsperEm, UINT16 glyph, DWRITE_GLYPH_METRICS *ret)
+HRESULT freetype_get_design_glyph_metrics(struct dwrite_fontface *fontface, UINT16 glyph, DWRITE_GLYPH_METRICS *ret)
 {
     FTC_ScalerRec scaler;
     FT_Size size;
 
-    scaler.face_id = fontface;
-    scaler.width  = unitsperEm;
-    scaler.height = unitsperEm;
+    scaler.face_id = &fontface->IDWriteFontFace4_iface;
+    scaler.width = fontface->metrics.designUnitsPerEm;
+    scaler.height = fontface->metrics.designUnitsPerEm;
     scaler.pixel = 1;
     scaler.x_res = 0;
     scaler.y_res = 0;
@@ -278,22 +278,23 @@ HRESULT freetype_get_design_glyph_metrics(IDWriteFontFace4 *fontface, UINT16 uni
     EnterCriticalSection(&freetype_cs);
     if (pFTC_Manager_LookupSize(cache_manager, &scaler, &size) == 0) {
          if (pFT_Load_Glyph(size->face, glyph, FT_LOAD_NO_SCALE) == 0) {
-             USHORT simulations = IDWriteFontFace4_GetSimulations(fontface);
              FT_Glyph_Metrics *metrics = &size->face->glyph->metrics;
 
              ret->leftSideBearing = metrics->horiBearingX;
              ret->advanceWidth = metrics->horiAdvance;
              ret->rightSideBearing = metrics->horiAdvance - metrics->horiBearingX - metrics->width;
-             ret->topSideBearing = metrics->vertBearingY;
+
              ret->advanceHeight = metrics->vertAdvance;
-             ret->bottomSideBearing = metrics->vertAdvance - metrics->vertBearingY - metrics->height;
-             ret->verticalOriginY = metrics->height + metrics->vertBearingY;
+             ret->verticalOriginY = fontface->typo_metrics.ascent;
+             ret->topSideBearing = fontface->typo_metrics.ascent - metrics->horiBearingY;
+             ret->bottomSideBearing = metrics->vertAdvance - metrics->height - ret->topSideBearing;
 
              /* Adjust in case of bold simulation, glyphs without contours are ignored. */
-             if (simulations & DWRITE_FONT_SIMULATIONS_BOLD && size->face->glyph->format == FT_GLYPH_FORMAT_OUTLINE &&
-                     size->face->glyph->outline.n_contours != 0) {
+             if (fontface->simulations & DWRITE_FONT_SIMULATIONS_BOLD &&
+                     size->face->glyph->format == FT_GLYPH_FORMAT_OUTLINE && size->face->glyph->outline.n_contours)
+             {
                  if (ret->advanceWidth)
-                     ret->advanceWidth += (unitsperEm + 49) / 50;
+                     ret->advanceWidth += (fontface->metrics.designUnitsPerEm + 49) / 50;
              }
          }
     }
@@ -317,36 +318,35 @@ BOOL freetype_is_monospaced(IDWriteFontFace4 *fontface)
 
 struct decompose_context {
     IDWriteGeometrySink *sink;
-    FLOAT xoffset;
-    FLOAT yoffset;
+    D2D1_POINT_2F offset;
     BOOL figure_started;
     BOOL move_to;     /* last call was 'move_to' */
     FT_Vector origin; /* 'pen' position from last call */
 };
 
-static inline void ft_vector_to_d2d_point(const FT_Vector *v, FLOAT xoffset, FLOAT yoffset, D2D1_POINT_2F *p)
+static inline void ft_vector_to_d2d_point(const FT_Vector *v, D2D1_POINT_2F offset, D2D1_POINT_2F *p)
 {
-    p->x = (v->x / 64.0f) + xoffset;
-    p->y = (v->y / 64.0f) + yoffset;
+    p->x = (v->x / 64.0f) + offset.x;
+    p->y = (v->y / 64.0f) + offset.y;
 }
 
-static void decompose_beginfigure(struct decompose_context *ctxt)
+static void decompose_beginfigure(struct decompose_context * HOSTPTR ctxt)
 {
     D2D1_POINT_2F point;
 
     if (!ctxt->move_to)
         return;
 
-    ft_vector_to_d2d_point(&ctxt->origin, ctxt->xoffset, ctxt->yoffset, &point);
+    ft_vector_to_d2d_point(&ctxt->origin, ctxt->offset, &point);
     ID2D1SimplifiedGeometrySink_BeginFigure(ctxt->sink, point, D2D1_FIGURE_BEGIN_FILLED);
 
     ctxt->figure_started = TRUE;
     ctxt->move_to = FALSE;
 }
 
-static int decompose_move_to(const FT_Vector *to, void *user)
+static int decompose_move_to(const FT_Vector *to, void * HOSTPTR user)
 {
-    struct decompose_context *ctxt = (struct decompose_context*)user;
+    struct decompose_context * HOSTPTR ctxt = user;
 
     if (ctxt->figure_started) {
         ID2D1SimplifiedGeometrySink_EndFigure(ctxt->sink, D2D1_FIGURE_END_CLOSED);
@@ -358,9 +358,9 @@ static int decompose_move_to(const FT_Vector *to, void *user)
     return 0;
 }
 
-static int decompose_line_to(const FT_Vector *to, void *user)
+static int decompose_line_to(const FT_Vector *to, void * HOSTPTR user)
 {
-    struct decompose_context *ctxt = (struct decompose_context*)user;
+    struct decompose_context * HOSTPTR ctxt = user;
     D2D1_POINT_2F point;
 
     /* Special case for empty contours, in a way freetype returns them. */
@@ -369,16 +369,16 @@ static int decompose_line_to(const FT_Vector *to, void *user)
 
     decompose_beginfigure(ctxt);
 
-    ft_vector_to_d2d_point(to, ctxt->xoffset, ctxt->yoffset, &point);
+    ft_vector_to_d2d_point(to, ctxt->offset, &point);
     ID2D1SimplifiedGeometrySink_AddLines(ctxt->sink, &point, 1);
 
     ctxt->origin = *to;
     return 0;
 }
 
-static int decompose_conic_to(const FT_Vector *control, const FT_Vector *to, void *user)
+static int decompose_conic_to(const FT_Vector *control, const FT_Vector *to, void * HOSTPTR user)
 {
-    struct decompose_context *ctxt = (struct decompose_context*)user;
+    struct decompose_context * HOSTPTR ctxt = user;
     D2D1_POINT_2F points[3];
     FT_Vector cubic[3];
 
@@ -414,31 +414,31 @@ static int decompose_conic_to(const FT_Vector *control, const FT_Vector *to, voi
     cubic[1].y += (to->y + 1) / 3;
     cubic[2] = *to;
 
-    ft_vector_to_d2d_point(cubic, ctxt->xoffset, ctxt->yoffset, points);
-    ft_vector_to_d2d_point(cubic + 1, ctxt->xoffset, ctxt->yoffset, points + 1);
-    ft_vector_to_d2d_point(cubic + 2, ctxt->xoffset, ctxt->yoffset, points + 2);
+    ft_vector_to_d2d_point(cubic, ctxt->offset, points);
+    ft_vector_to_d2d_point(cubic + 1, ctxt->offset, points + 1);
+    ft_vector_to_d2d_point(cubic + 2, ctxt->offset, points + 2);
     ID2D1SimplifiedGeometrySink_AddBeziers(ctxt->sink, (D2D1_BEZIER_SEGMENT*)points, 1);
     ctxt->origin = *to;
     return 0;
 }
 
 static int decompose_cubic_to(const FT_Vector *control1, const FT_Vector *control2,
-    const FT_Vector *to, void *user)
+    const FT_Vector *to, void * HOSTPTR user)
 {
-    struct decompose_context *ctxt = (struct decompose_context*)user;
+    struct decompose_context * HOSTPTR ctxt = user;
     D2D1_POINT_2F points[3];
 
     decompose_beginfigure(ctxt);
 
-    ft_vector_to_d2d_point(control1, ctxt->xoffset, ctxt->yoffset, points);
-    ft_vector_to_d2d_point(control2, ctxt->xoffset, ctxt->yoffset, points + 1);
-    ft_vector_to_d2d_point(to, ctxt->xoffset, ctxt->yoffset, points + 2);
+    ft_vector_to_d2d_point(control1, ctxt->offset, points);
+    ft_vector_to_d2d_point(control2, ctxt->offset, points + 1);
+    ft_vector_to_d2d_point(to, ctxt->offset, points + 2);
     ID2D1SimplifiedGeometrySink_AddBeziers(ctxt->sink, (D2D1_BEZIER_SEGMENT*)points, 1);
     ctxt->origin = *to;
     return 0;
 }
 
-static void decompose_outline(FT_Outline *outline, FLOAT xoffset, FLOAT yoffset, IDWriteGeometrySink *sink)
+static void decompose_outline(FT_Outline *outline, D2D1_POINT_2F offset, IDWriteGeometrySink *sink)
 {
     static const FT_Outline_Funcs decompose_funcs = {
         decompose_move_to,
@@ -451,8 +451,7 @@ static void decompose_outline(FT_Outline *outline, FLOAT xoffset, FLOAT yoffset,
     struct decompose_context context;
 
     context.sink = sink;
-    context.xoffset = xoffset;
-    context.yoffset = yoffset;
+    context.offset = offset;
     context.figure_started = FALSE;
     context.move_to = FALSE;
     context.origin.x = 0;
@@ -485,8 +484,9 @@ static void embolden_glyph(FT_Glyph glyph, FLOAT emsize)
     embolden_glyph_outline(&outline_glyph->outline, emsize);
 }
 
-HRESULT freetype_get_glyphrun_outline(IDWriteFontFace4 *fontface, FLOAT emSize, UINT16 const *glyphs,
-    FLOAT const *advances, DWRITE_GLYPH_OFFSET const *offsets, UINT32 count, BOOL is_rtl, IDWriteGeometrySink *sink)
+HRESULT freetype_get_glyphrun_outline(IDWriteFontFace4 *fontface, float emSize, UINT16 const *glyphs,
+        float const *advances, DWRITE_GLYPH_OFFSET const *offsets, unsigned int count, BOOL is_rtl,
+        IDWriteGeometrySink *sink)
 {
     FTC_ScalerRec scaler;
     USHORT simulations;
@@ -509,14 +509,19 @@ HRESULT freetype_get_glyphrun_outline(IDWriteFontFace4 *fontface, FLOAT emSize, 
 
     EnterCriticalSection(&freetype_cs);
     if (pFTC_Manager_LookupSize(cache_manager, &scaler, &size) == 0) {
-        FLOAT advance = 0.0f;
-        UINT32 g;
+        float rtl_factor = is_rtl ? -1.0f : 1.0f;
+        D2D1_POINT_2F origin;
+        unsigned int i;
 
-        for (g = 0; g < count; g++) {
-            if (pFT_Load_Glyph(size->face, glyphs[g], FT_LOAD_NO_BITMAP) == 0) {
+        origin.x = origin.y = 0.0f;
+        for (i = 0; i < count; ++i)
+        {
+            if (pFT_Load_Glyph(size->face, glyphs[i], FT_LOAD_NO_BITMAP) == 0)
+            {
                 FLOAT ft_advance = size->face->glyph->metrics.horiAdvance >> 6;
                 FT_Outline *outline = &size->face->glyph->outline;
-                FLOAT xoffset = 0.0f, yoffset = 0.0f;
+                D2D1_POINT_2F glyph_origin;
+                float advance;
                 FT_Matrix m;
 
                 if (simulations & DWRITE_FONT_SIMULATIONS_BOLD)
@@ -529,23 +534,25 @@ HRESULT freetype_get_glyphrun_outline(IDWriteFontFace4 *fontface, FLOAT emSize, 
 
                 pFT_Outline_Transform(outline, &m);
 
+                if (advances)
+                    advance = rtl_factor * advances[i];
+                else
+                    advance = rtl_factor * ft_advance;
+
+                glyph_origin = origin;
+                if (is_rtl)
+                    glyph_origin.x += advance;
+
                 /* glyph offsets act as current glyph adjustment */
-                if (offsets) {
-                    xoffset += is_rtl ? -offsets[g].advanceOffset : offsets[g].advanceOffset;
-                    yoffset -= offsets[g].ascenderOffset;
+                if (offsets)
+                {
+                    glyph_origin.x += rtl_factor * offsets[i].advanceOffset;
+                    glyph_origin.y -= offsets[i].ascenderOffset;
                 }
 
-                if (g == 0 && is_rtl)
-                    advance = advances ? -advances[g] : -ft_advance;
+                decompose_outline(outline, glyph_origin, sink);
 
-                xoffset += advance;
-                decompose_outline(outline, xoffset, yoffset, sink);
-
-                /* update advance to next glyph */
-                if (advances)
-                    advance += is_rtl ? -advances[g] : advances[g];
-                else
-                    advance += is_rtl ? -ft_advance : ft_advance;
+                origin.x += advance;
             }
         }
     }
@@ -686,7 +693,7 @@ void freetype_get_glyph_bbox(struct dwrite_glyphbitmap *bitmap)
     imagetype.height = bitmap->emsize;
     imagetype.flags = needs_transform ? FT_LOAD_NO_BITMAP : FT_LOAD_DEFAULT;
 
-    if (pFTC_ImageCache_Lookup(image_cache, &imagetype, bitmap->index, &glyph, NULL) == 0) {
+    if (pFTC_ImageCache_Lookup(image_cache, &imagetype, bitmap->glyph, &glyph, NULL) == 0) {
         if (needs_transform) {
             FT_Glyph glyph_copy;
 
@@ -708,32 +715,6 @@ void freetype_get_glyph_bbox(struct dwrite_glyphbitmap *bitmap)
 
     /* flip Y axis */
     SetRect(&bitmap->bbox, bbox.xMin, -bbox.yMax, bbox.xMax, -bbox.yMin);
-}
-
-void freetype_get_design_glyph_bbox(IDWriteFontFace4 *fontface, UINT16 unitsperEm, UINT16 glyph, RECT *bbox)
-{
-    FTC_ScalerRec scaler;
-    FT_Size size;
-
-    scaler.face_id = fontface;
-    scaler.width  = unitsperEm;
-    scaler.height = unitsperEm;
-    scaler.pixel = 1;
-    scaler.x_res = 0;
-    scaler.y_res = 0;
-
-    EnterCriticalSection(&freetype_cs);
-    if (pFTC_Manager_LookupSize(cache_manager, &scaler, &size) == 0) {
-         if (pFT_Load_Glyph(size->face, glyph, FT_LOAD_NO_SCALE) == 0) {
-             FT_Glyph_Metrics *metrics = &size->face->glyph->metrics;
-
-             bbox->left = metrics->horiBearingX;
-             bbox->right = bbox->left + metrics->horiAdvance;
-             bbox->top = -metrics->horiBearingY;
-             bbox->bottom = bbox->top + metrics->height;
-         }
-    }
-    LeaveCriticalSection(&freetype_cs);
 }
 
 static BOOL freetype_get_aliased_glyph_bitmap(struct dwrite_glyphbitmap *bitmap, FT_Glyph glyph)
@@ -764,7 +745,7 @@ static BOOL freetype_get_aliased_glyph_bitmap(struct dwrite_glyphbitmap *bitmap,
     }
     else if (glyph->format == FT_GLYPH_FORMAT_BITMAP) {
         FT_Bitmap *ft_bitmap = &((FT_BitmapGlyph)glyph)->bitmap;
-        BYTE *src = ft_bitmap->buffer, *dst = bitmap->buf;
+        BYTE * HOSTPTR src = ft_bitmap->buffer, *dst = bitmap->buf;
         int w = min(bitmap->pitch, (ft_bitmap->width + 7) >> 3);
         int h = min(height, ft_bitmap->rows);
 
@@ -809,7 +790,7 @@ static BOOL freetype_get_aa_glyph_bitmap(struct dwrite_glyphbitmap *bitmap, FT_G
     }
     else if (glyph->format == FT_GLYPH_FORMAT_BITMAP) {
         FT_Bitmap *ft_bitmap = &((FT_BitmapGlyph)glyph)->bitmap;
-        BYTE *src = ft_bitmap->buffer, *dst = bitmap->buf;
+        BYTE * HOSTPTR src = ft_bitmap->buffer, *dst = bitmap->buf;
         int w = min(bitmap->pitch, (ft_bitmap->width + 7) >> 3);
         int h = min(height, ft_bitmap->rows);
 
@@ -844,7 +825,7 @@ BOOL freetype_get_glyph_bitmap(struct dwrite_glyphbitmap *bitmap)
     imagetype.height = bitmap->emsize;
     imagetype.flags = needs_transform ? FT_LOAD_NO_BITMAP : FT_LOAD_DEFAULT;
 
-    if (pFTC_ImageCache_Lookup(image_cache, &imagetype, bitmap->index, &glyph, NULL) == 0) {
+    if (pFTC_ImageCache_Lookup(image_cache, &imagetype, bitmap->glyph, &glyph, NULL) == 0) {
         FT_Glyph glyph_copy;
 
         if (needs_transform) {
@@ -949,7 +930,7 @@ void freetype_notify_cacheremove(IDWriteFontFace4 *fontface)
 {
 }
 
-HRESULT freetype_get_design_glyph_metrics(IDWriteFontFace4 *fontface, UINT16 unitsperEm, UINT16 glyph, DWRITE_GLYPH_METRICS *ret)
+HRESULT freetype_get_design_glyph_metrics(struct dwrite_fontface *fontface, UINT16 glyph, DWRITE_GLYPH_METRICS *ret)
 {
     return E_NOTIMPL;
 }
@@ -959,8 +940,9 @@ BOOL freetype_is_monospaced(IDWriteFontFace4 *fontface)
     return FALSE;
 }
 
-HRESULT freetype_get_glyphrun_outline(IDWriteFontFace4 *fontface, FLOAT emSize, UINT16 const *glyphs, FLOAT const *advances,
-    DWRITE_GLYPH_OFFSET const *offsets, UINT32 count, BOOL is_rtl, IDWriteGeometrySink *sink)
+HRESULT freetype_get_glyphrun_outline(IDWriteFontFace4 *fontface, float emSize, UINT16 const *glyphs,
+        float const *advances, DWRITE_GLYPH_OFFSET const *offsets, unsigned int count, BOOL is_rtl,
+        IDWriteGeometrySink *sink)
 {
     return E_NOTIMPL;
 }
@@ -989,11 +971,6 @@ INT32 freetype_get_kerning_pair_adjustment(IDWriteFontFace4 *fontface, UINT16 le
 void freetype_get_glyph_bbox(struct dwrite_glyphbitmap *bitmap)
 {
     SetRectEmpty(&bitmap->bbox);
-}
-
-void freetype_get_design_glyph_bbox(IDWriteFontFace4 *fontface, UINT16 unitsperEm, UINT16 glyph, RECT *bbox)
-{
-    SetRectEmpty(bbox);
 }
 
 BOOL freetype_get_glyph_bitmap(struct dwrite_glyphbitmap *bitmap)

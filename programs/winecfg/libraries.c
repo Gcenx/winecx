@@ -28,6 +28,7 @@
 #include <commdlg.h>
 #include <wine/library.h>
 #include <wine/debug.h>
+#include <wine/heap.h>
 #include <stdio.h>
 #include <dirent.h>
 #include <assert.h>
@@ -52,7 +53,6 @@ static const char * const builtin_only[] =
     "dbghelp",
     "ddraw",
     "gdi32",
-    "glu32",
     "gphoto2.ds",
     "icmp",
     "iphlpapi",
@@ -190,17 +190,17 @@ static DWORD mode_to_id(enum dllmode mode)
 }
 
 /* helper for is_builtin_only */
-static int compare_dll( const void *ptr1, const void *ptr2 )
+static int compare_dll( const void * HOSTPTR ptr1, const void * HOSTPTR ptr2 )
 {
-    const char * const *name1 = ptr1;
-    const char * const *name2 = ptr2;
+    const char * const * HOSTPTR name1 = ptr1;
+    const char * const * HOSTPTR name2 = ptr2;
     return strcmp( *name1, *name2 );
 }
 
 /* check if dll is recommended as builtin only */
-static inline BOOL is_builtin_only( const char *name )
+static inline BOOL is_builtin_only( const char * HOSTPTR name )
 {
-    const char *ext = strrchr( name, '.' );
+    const char * HOSTPTR ext = strrchr( name, '.' );
 
     if (ext)
     {
@@ -214,9 +214,9 @@ static inline BOOL is_builtin_only( const char *name )
 }
 
 /* check if dll should be offered in the drop-down list */
-static BOOL show_dll_in_list( const char *name )
+static BOOL show_dll_in_list( const char * HOSTPTR name )
 {
-    const char *ext = strrchr( name, '.' );
+    const char * HOSTPTR ext = strrchr( name, '.' );
 
     if (ext)
     {
@@ -252,7 +252,7 @@ static void clear_settings(HWND dialog)
 }
 
 /* load the list of available libraries from a given dir */
-static void load_library_list_from_dir( HWND dialog, const char *dir_path, int check_subdirs )
+static void load_library_list_from_dir( HWND dialog, const char * HOSTPTR dir_path, int check_subdirs )
 {
     char *buffer = NULL, name[256];
     struct dirent *de;
@@ -283,13 +283,17 @@ static void load_library_list_from_dir( HWND dialog, const char *dir_path, int c
             sprintf( buffer, "%s/%s/%s.dll.so", dir_path, de->d_name, de->d_name );
             if (!stat( buffer, &st ))
             {
-                SendDlgItemMessageA( dialog, IDC_DLLCOMBO, CB_ADDSTRING, 0, (LPARAM)de->d_name );
+                char *d_name = heap_strdup( de->d_name );
+                SendDlgItemMessageA( dialog, IDC_DLLCOMBO, CB_ADDSTRING, 0, (LPARAM)d_name );
+                heap_free( d_name );
                 continue;
             }
             sprintf( buffer, "%s/%s/%s.so", dir_path, de->d_name, de->d_name );
             if (!stat( buffer, &st ))
             {
-                SendDlgItemMessageA( dialog, IDC_DLLCOMBO, CB_ADDSTRING, 0, (LPARAM)de->d_name );
+                char *d_name = heap_strdup( de->d_name );
+                SendDlgItemMessageA( dialog, IDC_DLLCOMBO, CB_ADDSTRING, 0, (LPARAM)d_name );
+                heap_free( d_name );
                 continue;
             }
         }
@@ -302,7 +306,7 @@ static void load_library_list_from_dir( HWND dialog, const char *dir_path, int c
 static void load_library_list( HWND dialog )
 {
     unsigned int i = 0;
-    const char *path, *build_dir = wine_get_build_dir();
+    const char * HOSTPTR path, * HOSTPTR build_dir = wine_get_build_dir();
     char item1[256], item2[256];
     HCURSOR old_cursor = SetCursor( LoadCursorW(0, (LPWSTR)IDC_WAIT) );
 

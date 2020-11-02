@@ -20,6 +20,8 @@
 #define _WINGDI_
 #ifndef NOGDI
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -27,7 +29,13 @@ extern "C" {
 #ifdef _GDI32_
 #define WINGDIAPI
 #else
-#define WINGDIAPI DECLSPEC_IMPORT
+#define WINGDIAPI DECLSPEC_HIDDEN
+#endif
+
+#ifdef _OPENGL32_
+#define WGLAPI
+#else
+#define WGLAPI DECLSPEC_HIDDEN
 #endif
 
 typedef struct _ABCFLOAT {
@@ -3318,12 +3326,24 @@ DECL_WINELIB_TYPE_AW(DISPLAY_DEVICE)
 DECL_WINELIB_TYPE_AW(PDISPLAY_DEVICE)
 DECL_WINELIB_TYPE_AW(LPDISPLAY_DEVICE)
 
-/* DISPLAY_DEVICE.StateFlags (?)*/
+/* DISPLAY_DEVICE.StateFlags for adapters */
 #define	DISPLAY_DEVICE_ATTACHED_TO_DESKTOP	0x00000001
 #define	DISPLAY_DEVICE_MULTI_DRIVER		0x00000002
 #define	DISPLAY_DEVICE_PRIMARY_DEVICE		0x00000004
 #define	DISPLAY_DEVICE_MIRRORING_DRIVER		0x00000008
 #define	DISPLAY_DEVICE_VGA_COMPATIBLE		0x00000010
+#define DISPLAY_DEVICE_REMOVABLE                0x00000020
+#define DISPLAY_DEVICE_ACC_DRIVER               0x00000040
+#define DISPLAY_DEVICE_UNSAFE_MODES_ON          0x00080000
+#define DISPLAY_DEVICE_TS_COMPATIBLE            0x00200000
+#define DISPLAY_DEVICE_RDPUDD                   0x01000000
+#define DISPLAY_DEVICE_DISCONNECT               0x02000000
+#define DISPLAY_DEVICE_REMOTE                   0x04000000
+#define DISPLAY_DEVICE_MODESPRUNED              0x08000000
+
+/* DISPLAY_DEVICE.StateFlags for monitors */
+#define DISPLAY_DEVICE_ACTIVE                   0x00000001
+#define DISPLAY_DEVICE_ATTACHED                 0x00000002
 
 typedef struct DISPLAYCONFIG_DESKTOP_IMAGE_INFO
 {
@@ -3982,30 +4002,32 @@ WINGDIAPI BOOL        WINAPI PolyTextOutW(HDC,const POLYTEXTW*,INT);
 #define WGL_FONT_POLYGONS   1
 
 /* WGL prototypes */
-WINGDIAPI HGLRC   WINAPI wglCreateContext(HDC);
-WINGDIAPI HGLRC   WINAPI wglCreateLayerContext(HDC,INT);
-WINGDIAPI BOOL    WINAPI wglCopyContext(HGLRC,HGLRC,UINT);
-WINGDIAPI BOOL    WINAPI wglDeleteContext(HGLRC);
-WINGDIAPI BOOL    WINAPI wglDescribeLayerPlane(HDC,INT,INT,UINT,LPLAYERPLANEDESCRIPTOR);
-WINGDIAPI HGLRC   WINAPI wglGetCurrentContext(void);
-WINGDIAPI HDC     WINAPI wglGetCurrentDC(void);
-WINGDIAPI INT     WINAPI wglGetLayerPaletteEntries(HDC,INT,INT,INT,const COLORREF *);
-WINGDIAPI PROC    WINAPI wglGetProcAddress(LPCSTR);
-WINGDIAPI BOOL    WINAPI wglMakeCurrent(HDC,HGLRC);
-WINGDIAPI BOOL    WINAPI wglRealizeLayerPalette(HDC,INT,BOOL);
-WINGDIAPI INT     WINAPI wglSetLayerPaletteEntries(HDC,INT,INT,INT,const COLORREF *);
-WINGDIAPI BOOL    WINAPI wglShareLists(HGLRC,HGLRC);
-WINGDIAPI BOOL    WINAPI wglSwapLayerBuffers(HDC,UINT);
-WINGDIAPI BOOL    WINAPI wglUseFontBitmapsA(HDC,DWORD,DWORD,DWORD);
-WINGDIAPI BOOL    WINAPI wglUseFontBitmapsW(HDC,DWORD,DWORD,DWORD);
-#define                  wglUseFontBitmaps WINELIB_NAME_AW(wglUseFontBitmaps)
-WINGDIAPI BOOL    WINAPI wglUseFontOutlinesA(HDC,DWORD,DWORD,DWORD,FLOAT,FLOAT,INT,LPGLYPHMETRICSFLOAT);
-WINGDIAPI BOOL    WINAPI wglUseFontOutlinesW(HDC,DWORD,DWORD,DWORD,FLOAT,FLOAT,INT,LPGLYPHMETRICSFLOAT);
-#define                  wglUseFontOutlines WINELIB_NAME_AW(wglUseFontOutlines)
+WGLAPI HGLRC   WINAPI wglCreateContext(HDC);
+WGLAPI HGLRC   WINAPI wglCreateLayerContext(HDC,INT);
+WGLAPI BOOL    WINAPI wglCopyContext(HGLRC,HGLRC,UINT);
+WGLAPI BOOL    WINAPI wglDeleteContext(HGLRC);
+WGLAPI BOOL    WINAPI wglDescribeLayerPlane(HDC,INT,INT,UINT,LPLAYERPLANEDESCRIPTOR);
+WGLAPI HGLRC   WINAPI wglGetCurrentContext(void);
+WGLAPI HDC     WINAPI wglGetCurrentDC(void);
+WGLAPI INT     WINAPI wglGetLayerPaletteEntries(HDC,INT,INT,INT,const COLORREF *);
+WGLAPI PROC    WINAPI wglGetProcAddress(LPCSTR);
+WGLAPI BOOL    WINAPI wglMakeCurrent(HDC,HGLRC);
+WGLAPI BOOL    WINAPI wglRealizeLayerPalette(HDC,INT,BOOL);
+WGLAPI INT     WINAPI wglSetLayerPaletteEntries(HDC,INT,INT,INT,const COLORREF *);
+WGLAPI BOOL    WINAPI wglShareLists(HGLRC,HGLRC);
+WGLAPI BOOL    WINAPI wglSwapLayerBuffers(HDC,UINT);
+WGLAPI BOOL    WINAPI wglUseFontBitmapsA(HDC,DWORD,DWORD,DWORD);
+WGLAPI BOOL    WINAPI wglUseFontBitmapsW(HDC,DWORD,DWORD,DWORD);
+#define               wglUseFontBitmaps WINELIB_NAME_AW(wglUseFontBitmaps)
+WGLAPI BOOL    WINAPI wglUseFontOutlinesA(HDC,DWORD,DWORD,DWORD,FLOAT,FLOAT,INT,LPGLYPHMETRICSFLOAT);
+WGLAPI BOOL    WINAPI wglUseFontOutlinesW(HDC,DWORD,DWORD,DWORD,FLOAT,FLOAT,INT,LPGLYPHMETRICSFLOAT);
+#define               wglUseFontOutlines WINELIB_NAME_AW(wglUseFontOutlines)
 
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* !NOGDI */
 #endif /* _WINGDI_ */

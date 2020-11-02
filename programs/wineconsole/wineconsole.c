@@ -830,11 +830,11 @@ static UINT WINECON_ParseOptions(const char* lpCmdLine, struct wc_init* wci)
         if (wci->ptr[0] != '-') break;
         if (strncmp(wci->ptr, "--use-event=", 12) == 0)
         {
-            char*           end;
+            char* HOSTPTR end;
             wci->event = ULongToHandle( strtoul(wci->ptr + 12, &end, 10) );
             if (end == wci->ptr + 12) return IDS_CMD_INVALID_EVENT_ID;
             wci->mode = from_event;
-            wci->ptr = end;
+            wci->ptr = ADDRSPACECAST(const char *, end);
         }
         else if (strncmp(wci->ptr, "--backend=", 10) == 0)
         {

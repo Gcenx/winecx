@@ -19,6 +19,8 @@
 #ifndef __WINE_OLEAUTO_H
 #define __WINE_OLEAUTO_H
 
+#include "wine/winheader_enter.h"
+
 #include <oaidl.h>
 
 #ifdef __cplusplus
@@ -41,6 +43,10 @@ ULONG WINAPI OaBuildVersion(void);
 BSTR WINAPI SysAllocString(const OLECHAR*);
 BSTR WINAPI SysAllocStringByteLen(LPCSTR,UINT);
 BSTR WINAPI SysAllocStringLen(const OLECHAR*,UINT);
+#ifdef __i386_on_x86_64__
+BSTR WINAPI SysAllocStringByteLen(const CHAR* HOSTPTR,UINT) __attribute__((overloadable)) asm(__ASM_NAME("wine_SysAllocStringByteLen_HOSTPTR"));
+BSTR WINAPI SysAllocStringLen(const OLECHAR* HOSTPTR,UINT) __attribute__((overloadable)) asm(__ASM_NAME("wine_SysAllocStringLen_HOSTPTR"));
+#endif
 void WINAPI SysFreeString(BSTR);
 INT  WINAPI SysReAllocString(LPBSTR,const OLECHAR*);
 int  WINAPI SysReAllocStringLen(BSTR*,const OLECHAR*,UINT);
@@ -763,5 +769,7 @@ VOID WINAPI ClearCustData(LPCUSTDATA);
 } /* extern "C" */
 #endif
 
+
+#include "wine/winheader_exit.h"
 
 #endif /*__WINE_OLEAUTO_H*/

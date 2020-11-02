@@ -20,6 +20,8 @@
 #ifndef _INC_SETUPAPI
 #define _INC_SETUPAPI
 
+#include "wine/winheader_enter.h"
+
 #include <commctrl.h>
 #include <devpropdef.h>
 
@@ -1106,6 +1108,7 @@ DECL_WINELIB_SETUPAPI_TYPE_AW(PSP_INF_SIGNER_INFO)
 #define DIF_POWERMESSAGEWAKE                0x27
 #define DIF_ADDREMOTEPROPERTYPAGE_ADVANCED  0x28
 #define DIF_UPDATEDRIVER_UI                 0x29
+#define DIF_FINISHINSTALL_ACTION            0x2a
 #define DIF_RESERVED2                       0x30
 
 /* Directory ids */
@@ -1634,6 +1637,8 @@ BOOL     WINAPI SetupDiSetDeviceInterfaceDefault(HDEVINFO, PSP_DEVICE_INTERFACE_
 BOOL     WINAPI SetupDiSetDeviceInstallParamsA(HDEVINFO, PSP_DEVINFO_DATA, PSP_DEVINSTALL_PARAMS_A);
 BOOL     WINAPI SetupDiSetDeviceInstallParamsW(HDEVINFO, PSP_DEVINFO_DATA, PSP_DEVINSTALL_PARAMS_W);
 #define         SetupDiSetDeviceInstallParams WINELIB_NAME_AW(SetupDiSetDeviceInstallParams)
+BOOL     WINAPI SetupDiSetDevicePropertyW(HDEVINFO, PSP_DEVINFO_DATA, const DEVPROPKEY *, DEVPROPTYPE, const BYTE *, DWORD, DWORD);
+#define         SetupDiSetDeviceProperty WINELIB_NAME_AW(SetupDiSetDeviceProperty) /* note: A function doesn't exist */
 BOOL     WINAPI SetupDiSetDeviceRegistryPropertyA(HDEVINFO, PSP_DEVINFO_DATA, DWORD, const BYTE *, DWORD);
 BOOL     WINAPI SetupDiSetDeviceRegistryPropertyW(HDEVINFO, PSP_DEVINFO_DATA, DWORD, const BYTE *, DWORD);
 #define         SetupDiSetDeviceRegistryProperty WINELIB_NAME_AW(SetupDiSetDeviceRegistryProperty)
@@ -1864,5 +1869,7 @@ BOOL     WINAPI UnmapAndCloseFile(HANDLE, HANDLE, PVOID);
 #undef DECL_WINELIB_SETUPAPI_TYPE_AW
 
 #include <poppack.h>
+
+#include "wine/winheader_exit.h"
 
 #endif /* _INC_SETUPAPI */

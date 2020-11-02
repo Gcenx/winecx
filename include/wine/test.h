@@ -46,6 +46,15 @@
 #define INVALID_SET_FILE_POINTER (~0u)
 #endif
 
+#ifdef _MSC_VER
+# ifndef INFINITY
+#  define INFINITY ((float)HUGE_VAL)
+# endif
+# ifndef NAN
+#  define NAN (INFINITY * 0.0f)
+# endif
+#endif
+
 /* debug level */
 extern int winetest_debug;
 
@@ -90,9 +99,13 @@ static inline int winetest_strcmpW( const WCHAR *str1, const WCHAR *str2 )
 #define START_TEST(name) void func_##name(void)
 #endif
 
-#if (defined(__x86_64__) || defined(__aarch64__)) && defined(__GNUC__) && defined(__WINE_USE_MSVCRT)
+#if (defined(__x86_64__) || defined(__i386_on_x86_64__) || defined(__aarch64__)) && defined(__GNUC__) && defined(__WINE_USE_MSVCRT)
 #define __winetest_cdecl __cdecl
+#if defined(__i386_on_x86_64__)
+#define __winetest_va_list __builtin_va_list32
+#else
 #define __winetest_va_list __builtin_ms_va_list
+#endif
 #else
 #define __winetest_cdecl
 #define __winetest_va_list va_list
@@ -192,7 +205,10 @@ extern void __winetest_cdecl winetest_trace( const char *msg, ... ) WINETEST_PRI
 #include <stdio.h>
 #include <excpt.h>
 
-#if (defined(__x86_64__) || defined(__aarch64__)) && defined(__GNUC__) && defined(__WINE_USE_MSVCRT)
+#if defined(__i386_on_x86_64__) && defined(__WINE_USE_MSVCRT)
+# define __winetest_va_start(list,arg) __builtin_va_start32(list,arg)
+# define __winetest_va_end(list) __builtin_va_end32(list)
+#elif (defined(__x86_64__) || defined(__aarch64__)) && defined(__GNUC__) && defined(__WINE_USE_MSVCRT)
 # define __winetest_va_start(list,arg) __builtin_ms_va_start(list,arg)
 # define __winetest_va_end(list) __builtin_ms_va_end(list)
 #else
@@ -511,7 +527,7 @@ const char *wine_dbgstr_wn( const WCHAR *str, int n )
         case '\\': *dst++ = '\\'; *dst++ = '\\'; break;
         default:
             if (c >= ' ' && c <= 126)
-                *dst++ = c;
+                *dst++ = (char)c;
             else
             {
                 *dst++ = '\\';

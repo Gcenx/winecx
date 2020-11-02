@@ -63,7 +63,7 @@ static inline const rtti_object_locator *get_obj_locator( void *cppobj )
     return (const rtti_object_locator *)vtable[-1];
 }
 
-#ifndef __x86_64__
+#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
 static void dump_obj_locator( const rtti_object_locator *ptr )
 {
     int i;
@@ -1094,7 +1094,7 @@ DEFINE_EXCEPTION_TYPE_INFO(improper_scheduler_detach, 1, &exception_cxx_type_inf
 
 void msvcrt_init_exception(void *base)
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
     init_type_info_rtti(base);
     init_exception_rtti(base);
 #if _MSVCR_VER >= 80
@@ -1304,7 +1304,7 @@ void CDECL MSVCRT_unexpected(void)
  *  This function is usually called by compiler generated code as a result
  *  of using one of the C++ dynamic cast statements.
  */
-#ifndef __x86_64__
+#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
 const type_info* CDECL MSVCRT___RTtypeid(void *cppobj)
 {
     const type_info *ret;
@@ -1393,7 +1393,7 @@ const type_info* CDECL MSVCRT___RTtypeid(void *cppobj)
  *  This function is usually called by compiler generated code as a result
  *  of using one of the C++ dynamic cast statements.
  */
-#ifndef __x86_64__
+#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
 void* CDECL MSVCRT___RTDynamicCast(void *cppobj, int unknown,
                                    type_info *src, type_info *dst,
                                    int do_throw)
@@ -1564,7 +1564,7 @@ void* CDECL MSVCRT___RTCastToVoid(void *cppobj)
 /*********************************************************************
  *		_CxxThrowException (MSVCRT.@)
  */
-#ifndef __x86_64__
+#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
 void WINAPI _CxxThrowException( exception *object, const cxx_exception_type *type )
 {
     ULONG_PTR args[3];
@@ -1593,7 +1593,7 @@ void WINAPI _CxxThrowException( exception *object, const cxx_exception_type *typ
  * ?_is_exception_typeof@@YAHABVtype_info@@PAU_EXCEPTION_POINTERS@@@Z
  * ?_is_exception_typeof@@YAHAEBVtype_info@@PEAU_EXCEPTION_POINTERS@@@Z
  */
-#ifndef __x86_64__
+#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
 int __cdecl _is_exception_typeof(const type_info *ti, EXCEPTION_POINTERS *ep)
 {
     int ret = -1;
@@ -1717,13 +1717,15 @@ void __cdecl __ExceptionPtrCreate(exception_ptr *ep)
     ep->ref = NULL;
 }
 
-#ifdef __i386__
+#if defined(__i386__) && !defined(__MINGW32__)
 extern void call_dtor(const cxx_exception_type *type, void *func, void *object);
 
 __ASM_GLOBAL_FUNC( call_dtor,
                    "movl 12(%esp),%ecx\n\t"
                    "call *8(%esp)\n\t"
                    "ret" );
+#elif defined(__i386_on_x86_64__)
+#define call_dtor(type, func, object) ((void (__attribute__((thiscall32))*)(void*))(func))(object)
 #elif __x86_64__
 static inline void call_dtor(const cxx_exception_type *type, unsigned int dtor, void *object)
 {
@@ -1732,7 +1734,7 @@ static inline void call_dtor(const cxx_exception_type *type, unsigned int dtor, 
     func(object);
 }
 #else
-#define call_dtor(type, func, object) ((void (__cdecl*)(void*))(func))(object)
+#define call_dtor(type, func, object) ((void (__thiscall*)(void*))(func))(object)
 #endif
 
 /*********************************************************************
@@ -1821,6 +1823,15 @@ void __cdecl __ExceptionPtrRethrow(const exception_ptr *ep)
 
 #ifdef __i386__
 extern void call_copy_ctor( void *func, void *this, void *src, int has_vbase );
+#elif defined(__i386_on_x86_64__)
+static inline void call_copy_ctor( void *func, void *this, void *src, int has_vbase )
+{
+    TRACE( "calling copy ctor %p object %p src %p\n", func, this, src );
+    if (has_vbase)
+        ((void (__attribute__((thiscall32))*)(void*, void*, BOOL))func)(this, src, 1);
+    else
+        ((void (__attribute__((thiscall32))*)(void*, void*))func)(this, src);
+}
 #else
 static inline void call_copy_ctor( void *func, void *this, void *src, int has_vbase )
 {
@@ -1836,7 +1847,7 @@ static inline void call_copy_ctor( void *func, void *this, void *src, int has_vb
  * ?__ExceptionPtrCurrentException@@YAXPAX@Z
  * ?__ExceptionPtrCurrentException@@YAXPEAX@Z
  */
-#ifndef __x86_64__
+#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
 void __cdecl __ExceptionPtrCurrentException(exception_ptr *ep)
 {
     EXCEPTION_RECORD *rec = msvcrt_get_thread_data()->exc_record;
@@ -1950,7 +1961,7 @@ MSVCRT_bool __cdecl __ExceptionPtrToBool(exception_ptr *ep)
  * ?__ExceptionPtrCopyException@@YAXPAXPBX1@Z
  * ?__ExceptionPtrCopyException@@YAXPEAXPEBX1@Z
  */
-#ifndef __x86_64__
+#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
 void __cdecl __ExceptionPtrCopyException(exception_ptr *ep,
         exception *object, const cxx_exception_type *type)
 {

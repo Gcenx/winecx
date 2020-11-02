@@ -22,6 +22,8 @@
 #ifndef _OBJBASE_H_
 #define _OBJBASE_H_
 
+#include "wine/winheader_enter.h"
+
 /*****************************************************************************
  * Macros to define a COM interface
  */
@@ -350,6 +352,8 @@ HRESULT WINAPI CoUnmarshalHresult(LPSTREAM pstm, HRESULT* phresult);
 HRESULT WINAPI CoUnmarshalInterface(LPSTREAM pStm, REFIID riid, LPVOID* ppv);
 HRESULT WINAPI CoLockObjectExternal(LPUNKNOWN pUnk, BOOL fLock, BOOL fLastUnlockReleases);
 BOOL WINAPI CoIsHandlerConnected(LPUNKNOWN pUnk);
+HRESULT WINAPI CoDisableCallCancellation(void *reserved);
+HRESULT WINAPI CoEnableCallCancellation(void *reserved);
 
 /* security */
 HRESULT WINAPI CoInitializeSecurity(PSECURITY_DESCRIPTOR pSecDesc, LONG cAuthSvc, SOLE_AUTHENTICATION_SERVICE* asAuthSvc, void* pReserved1, DWORD dwAuthnLevel, DWORD dwImpLevel, void* pReserved2, DWORD dwCapabilities, void* pReserved3);
@@ -504,5 +508,7 @@ HRESULT WINAPI StgSetTimes( OLECHAR const *lpszName, FILETIME const *pctime, FIL
 #define WINOLEAPI_(type) STDAPI_(type)
 
 #endif /* __WINESRC__ */
+
+#include "wine/winheader_exit.h"
 
 #endif /* _OBJBASE_H_ */

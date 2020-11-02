@@ -143,10 +143,6 @@ static HRESULT WINAPI EnumWorkItems_Next(IEnumWorkItems *iface, ULONG count, LPW
     enumerated = 0;
     list = NULL;
 
-    allocated = 64;
-    list = CoTaskMemAlloc(allocated * sizeof(list[0]));
-    if (!list) return E_OUTOFMEMORY;
-
     if (This->handle == INVALID_HANDLE_VALUE)
     {
         GetWindowsDirectoryW(path, MAX_PATH);
@@ -160,6 +156,10 @@ static HRESULT WINAPI EnumWorkItems_Next(IEnumWorkItems *iface, ULONG count, LPW
         if (!FindNextFileW(This->handle, &data))
             return S_FALSE;
     }
+
+    allocated = 64;
+    list = CoTaskMemAlloc(allocated * sizeof(list[0]));
+    if (!list) return E_OUTOFMEMORY;
 
     do
     {
@@ -423,7 +423,7 @@ static HRESULT WINAPI MSTASK_ITaskScheduler_Delete(ITaskScheduler *iface, LPCWST
 
     TRACE("%p, %s\n", iface, debugstr_w(name));
 
-    if (strchrW(name, '.')) return E_INVALIDARG;
+    if (wcschr(name, '.')) return E_INVALIDARG;
 
     GetWindowsDirectoryW(task_name, MAX_PATH);
     lstrcatW(task_name, tasksW);
@@ -467,7 +467,7 @@ static HRESULT WINAPI MSTASK_ITaskScheduler_AddWorkItem(ITaskScheduler *iface, L
 
     TRACE("%p, %s, %p\n", iface, debugstr_w(name), item);
 
-    if (strchrW(name, '.')) return E_INVALIDARG;
+    if (wcschr(name, '.')) return E_INVALIDARG;
 
     GetWindowsDirectoryW(task_name, MAX_PATH);
     lstrcatW(task_name, tasksW);

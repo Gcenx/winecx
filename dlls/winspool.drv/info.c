@@ -104,7 +104,6 @@
 #undef SetRect
 #undef ShowCursor
 #undef UnionRect
-#undef DPRINTF
 #endif
 
 #include "wine/library.h"
@@ -123,6 +122,7 @@
 #include "winnls.h"
 #include "shlwapi.h"
 #include "shellapi.h"
+#include "wine/heap.h"
 
 #include "ddk/winsplp.h"
 #include "wspool.h"
@@ -677,6 +677,8 @@ static char *get_fallback_ppd_name( const char *printer_name )
     return NULL;
 }
 
+#include "wine/hostaddrspace_enter.h"
+
 static BOOL copy_file( const char *src, const char *dst )
 {
     int fds[2] = {-1, -1}, num;
@@ -699,6 +701,8 @@ fail:
     if (fds[0] != -1) close( fds[0] );
     return ret;
 }
+
+#include "wine/hostaddrspace_exit.h"
 
 static BOOL get_internal_fallback_ppd( const WCHAR *ppd )
 {
@@ -792,6 +796,8 @@ static void unlink_ppd( const WCHAR *ppd )
 
 #ifdef SONAME_LIBCUPS
 
+#include "wine/hostaddrspace_enter.h"
+
 static void *cupshandle;
 
 #define CUPS_FUNCS \
@@ -816,11 +822,13 @@ static const char *  (*pcupsGetPPD)(const char *);
 static http_status_t (*pcupsGetPPD3)(http_t *, const char *, time_t *, char *, size_t);
 static const char *  (*pcupsLastErrorString)(void);
 
-static http_status_t cupsGetPPD3_wrapper( http_t *http, const char *name,
+#include "wine/hostaddrspace_exit.h"
+
+static http_status_t cupsGetPPD3_wrapper( http_t *http, const char * HOSTPTR name,
                                           time_t *modtime, char *buffer,
                                           size_t bufsize )
 {
-    const char *ppd;
+    const char * HOSTPTR ppd;
 
     if (pcupsGetPPD3) return pcupsGetPPD3( http, name, modtime, buffer, bufsize );
 
@@ -844,11 +852,13 @@ static http_status_t cupsGetPPD3_wrapper( http_t *http, const char *name,
     return HTTP_OK;
 }
 
-static BOOL get_cups_ppd( const char *printer_name, const WCHAR *ppd )
+static BOOL get_cups_ppd( const char * HOSTPTR printer_name, const WCHAR *ppd )
 {
     time_t modtime = 0;
     http_status_t http_status;
     char *unix_name = wine_get_unix_file_name( ppd );
+    BOOL ret;
+    char *name;
 
     TRACE( "(%s, %s)\n", debugstr_a(printer_name), debugstr_w(ppd) );
 
@@ -864,12 +874,16 @@ static BOOL get_cups_ppd( const char *printer_name, const WCHAR *ppd )
 
     TRACE( "failed to get ppd for printer %s from cups (status %d), calling fallback\n",
            debugstr_a(printer_name), http_status );
-    return get_fallback_ppd( printer_name, ppd );
+
+    name = heap_strdup( printer_name );
+    ret = get_fallback_ppd( name, ppd );
+    heap_free( name );
+    return ret;
 }
 
 static WCHAR *get_cups_option( const char *name, int num_options, cups_option_t *options )
 {
-    const char *value;
+    const char * HOSTPTR value;
     WCHAR *ret;
     int len;
 
@@ -1166,7 +1180,7 @@ static BOOL PRINTCAP_ParseEntry( const char *pent, BOOL isfirst )
     size_t		name_len;
     char		*e,*s,*name,*prettyname,*devname;
     BOOL		ret = FALSE, set_default = FALSE;
-    char *port = NULL, *env_default;
+    char *port = NULL, * HOSTPTR env_default;
     HKEY hkeyPrinter, hkeyPrinters = NULL;
     WCHAR devnameW[MAX_PATH], *ppd_dir = NULL, *ppd;
     HANDLE added_printer;
@@ -1208,14 +1222,14 @@ static BOOL PRINTCAP_ParseEntry( const char *pent, BOOL isfirst )
         e = s;
         while(isspace(*--e)) *e = '\0';
         TRACE("\t%s\n", debugstr_a(prettyname));
-        if(env_default && !strcasecmp(prettyname, env_default)) set_default = TRUE;
+        if(env_default && !_strnicmp(prettyname, env_default, -1)) set_default = TRUE;
         for(prettyname = s+1; isspace(*prettyname); prettyname++)
             ;
     }
     e = prettyname + strlen(prettyname);
     while(isspace(*--e)) *e = '\0';
     TRACE("\t%s\n", debugstr_a(prettyname));
-    if(env_default && !strcasecmp(prettyname, env_default)) set_default = TRUE;
+    if(env_default && !_strnicmp(prettyname, env_default, -1)) set_default = TRUE;
 
     /* prettyname must fit into the dmDeviceName member of DEVMODE struct,
      * if it is too long, we use it as comment below. */
@@ -8379,9 +8393,10 @@ static BOOL get_command( HKEY key, const WCHAR *value, WCHAR *buffer, DWORD size
 static BOOL google_cloud_print( const WCHAR *cmd_templateW, const char *filename,
                                 const WCHAR *titleW, const WCHAR *printer_idW, const WCHAR *printer_nameW )
 {
-    char *fname, *cmd;
+    char *fname;
+    WCHAR *cmd;
     int i, count;
-    char **argv_new;
+    char * HOSTPTR * HOSTPTR argv_new;
     BOOL rc = TRUE;
     WCHAR **args, *quoted_title, *quoted_printername;
     const char *prefix = "file://";
@@ -8389,10 +8404,7 @@ static BOOL google_cloud_print( const WCHAR *cmd_templateW, const char *filename
     static const WCHAR fmt[] = { '"', '%', 's', '"', 0 };
 
     if (!titleW || !strlenW( titleW ))
-    {
-        titleW = HeapAlloc( GetProcessHeap(), 0, strlenW( untitledW ) + 1 );
-        lstrcpyW( titleW, untitledW );
-    }
+        titleW = untitledW;
 
     fname = HeapAlloc( GetProcessHeap(), 0, strlen( filename ) + strlen( prefix ) + 1 );
     fname[0] = 0;
@@ -8419,14 +8431,14 @@ static BOOL google_cloud_print( const WCHAR *cmd_templateW, const char *filename
     TRACE( "Trying" );
     for (i = 0; i < count; i++) TRACE( " %s", debugstr_a( argv_new[i] ));
     TRACE( "\n" );
-    if ((_spawnvp( _P_NOWAIT, argv_new[0], (const char **)argv_new )) == -1)
+    if ((_spawnvp( _P_NOWAIT, argv_new[0], (const char * HOSTPTR * HOSTPTR)argv_new )) == -1)
     {
         WINE_ERR( "Failed to launch %s : %d\n", debugstr_a( argv_new[0] ), errno );
         rc = FALSE;
     }
 
-    for (i = 0; i < count; i++) HeapFree( GetProcessHeap(), 0, argv_new[i] );
-    HeapFree( GetProcessHeap(), 0, argv_new );
+    for (i = 0; i < count; i++) HeapFree( GetProcessHeap(), 0, ADDRSPACECAST(char*, argv_new[i]) );
+    HeapFree( GetProcessHeap(), 0, ADDRSPACECAST(void*, argv_new) );
     HeapFree( GetProcessHeap(), 0, cmd );
     HeapFree( GetProcessHeap(), 0, fname );
     HeapFree( GetProcessHeap(), 0, quoted_title );

@@ -128,10 +128,10 @@ static BOOL isLoopbackInterface(int fd, const char *name)
  */
 char *getInterfaceNameByIndex(IF_INDEX index, char *name)
 {
-  return if_indextoname(index, name);
+  return ADDRSPACECAST(char*, if_indextoname(index, name));
 }
 
-DWORD getInterfaceIndexByName(const char *name, IF_INDEX *index)
+DWORD getInterfaceIndexByName(const char * HOSTPTR name, IF_INDEX *index)
 {
   DWORD ret;
   unsigned int idx;
@@ -398,7 +398,7 @@ DWORD get_interface_indices( BOOL skip_loopback, InterfaceIndexTable **table )
 }
 #endif
 
-static DWORD getInterfaceBCastAddrByName(const char *name)
+static DWORD getInterfaceBCastAddrByName(const char * HOSTPTR name)
 {
   DWORD ret = INADDR_ANY;
 
@@ -417,7 +417,7 @@ static DWORD getInterfaceBCastAddrByName(const char *name)
   return ret;
 }
 
-static DWORD getInterfaceMaskByName(const char *name)
+static DWORD getInterfaceMaskByName(const char * HOSTPTR name)
 {
   DWORD ret = INADDR_NONE;
 
@@ -590,7 +590,7 @@ static DWORD getInterfacePhysicalByName(const char *name, PDWORD len, PBYTE addr
   DWORD ret;
   struct if_msghdr *ifm;
   struct sockaddr_dl *sdl;
-  u_char *p, *buf;
+  u_char * WIN32PTR p, * WIN32PTR buf;
   size_t mibLen;
   int mib[] = { CTL_NET, AF_ROUTE, 0, AF_LINK, NET_RT_IFLIST, 0 };
   unsigned addrLen;
@@ -790,7 +790,7 @@ DWORD getInterfaceEntryByName(const char *name, PMIB_IFROW entry)
   return ret;
 }
 
-static DWORD getIPAddrRowByName(PMIB_IPADDRROW ipAddrRow, const char *ifName,
+static DWORD getIPAddrRowByName(PMIB_IPADDRROW ipAddrRow, const char * HOSTPTR ifName,
  const struct sockaddr *sa)
 {
   DWORD ret, bcast;

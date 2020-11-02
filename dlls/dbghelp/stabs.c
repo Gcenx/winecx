@@ -106,6 +106,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dbghelp_stabs);
 #define N_EXCL		0xc2
 #define N_RBRAC		0xe0
 
+#include "wine/hostaddrspace_enter.h"
 struct stab_nlist
 {
     unsigned            n_strx;
@@ -114,8 +115,9 @@ struct stab_nlist
     short               n_desc;
     unsigned            n_value;
 };
+#include "wine/hostaddrspace_exit.h"
 
-static void stab_strcpy(char* dest, int sz, const char* source)
+static void stab_strcpy(char* dest, int sz, const char* HOSTPTR source)
 {
     char*       ptr = dest;
     /*
@@ -169,7 +171,7 @@ static struct symt**            cu_vector = NULL;
 static int 		        cu_nrofentries = 0;
 static struct symt_basic*       stabs_basic[36];
 
-static int stabs_new_include(const char* file, unsigned long val)
+static int stabs_new_include(const char* HOSTPTR file, unsigned long val)
 {
     if (num_include_def == num_alloc_include_def)
     {
@@ -194,7 +196,7 @@ static int stabs_new_include(const char* file, unsigned long val)
     return num_include_def++;
 }
 
-static int stabs_find_include(const char* file, unsigned long val)
+static int stabs_find_include(const char* HOSTPTR file, unsigned long val)
 {
     int		i;
 
@@ -292,11 +294,11 @@ static struct symt** stabs_find_ref(long filenr, long subnr)
     return ret;
 }
 
-static struct symt** stabs_read_type_enum(const char** x)
+static struct symt** stabs_read_type_enum(const char* HOSTPTR * x)
 {
     long        filenr, subnr;
-    const char* iter;
-    char*       end;
+    const char* HOSTPTR iter;
+    char* HOSTPTR end;
 
     iter = *x;
     if (*iter == '(')
@@ -320,14 +322,14 @@ static struct symt** stabs_read_type_enum(const char** x)
 #define PTS_DEBUG
 struct ParseTypedefData
 {
-    const char*		ptr;
+    const char* HOSTPTR ptr;
     char		buf[1024];
     int			idx;
     struct module*      module;
 #ifdef PTS_DEBUG
     struct PTS_Error 
     {
-        const char*         ptr;
+        const char* HOSTPTR ptr;
         unsigned            line;
     } errors[16];
     int                 err_idx;
@@ -392,7 +394,7 @@ static int stabs_pts_read_type_def(struct ParseTypedefData* ptd,
 
 static int stabs_pts_read_id(struct ParseTypedefData* ptd)
 {
-    const char*	        first = ptd->ptr;
+    const char*	HOSTPTR first = ptd->ptr;
     unsigned int	template = 0;
     char                ch;
 
@@ -420,7 +422,7 @@ static int stabs_pts_read_id(struct ParseTypedefData* ptd)
 
 static int stabs_pts_read_number(struct ParseTypedefData* ptd, long* v)
 {
-    char*	last;
+    char* HOSTPTR last;
 
     *v = strtol(ptd->ptr, &last, 10);
     PTS_ABORTIF(ptd, last == ptd->ptr);
@@ -456,7 +458,7 @@ struct pts_range_value
 
 static int stabs_pts_read_range_value(struct ParseTypedefData* ptd, struct pts_range_value* prv)
 {
-    char*	last;
+    char* HOSTPTR last;
 
     switch (*ptd->ptr)
     {
@@ -581,7 +583,7 @@ static int stabs_pts_read_range(struct ParseTypedefData* ptd, const char* typena
 static inline int stabs_pts_read_method_info(struct ParseTypedefData* ptd)
 {
     struct symt*        dt;
-    const char*         tmp;
+    const char* HOSTPTR tmp;
     char                mthd;
 
     do
@@ -737,7 +739,7 @@ static inline int stabs_pts_read_aggregate(struct ParseTypedefData* ptd,
             break;
         case ':':
             {
-                const char* tmp;
+                const char* HOSTPTR tmp;
                 /* method parameters... terminated by ';' */
                 PTS_ABORTIF(ptd, !(tmp = strchr(ptd->ptr, ';')));
                 ptd->ptr = tmp + 1;
@@ -1020,7 +1022,7 @@ static int stabs_pts_read_type_def(struct ParseTypedefData* ptd, const char* typ
     return 0;
 }
 
-static int stabs_parse_typedef(struct module* module, const char* ptr, 
+static int stabs_parse_typedef(struct module* module, const char* HOSTPTR ptr, 
                                const char* typename)
 {
     struct ParseTypedefData	ptd;
@@ -1073,9 +1075,9 @@ static int stabs_parse_typedef(struct module* module, const char* ptr,
     return TRUE;
 }
 
-static struct symt* stabs_parse_type(const char* stab)
+static struct symt* stabs_parse_type(const char* HOSTPTR stab)
 {
-    const char* c = stab - 1;
+    const char* HOSTPTR c = stab - 1;
 
     /*
      * Look through the stab definition, and figure out what struct symt
@@ -1161,7 +1163,7 @@ static inline void pending_make_room(struct pending_list* pending)
     }
 }
 
-static inline void pending_add_var(struct pending_list* pending, const char* name,
+static inline void pending_add_var(struct pending_list* pending, const char* HOSTPTR name,
                                    enum DataKind dt, const struct location* loc)
 {
     pending_make_room(pending);
@@ -1246,7 +1248,7 @@ static void stabs_finalize_function(struct module* module, struct symt_function*
     if (size) func->size = size;
 }
 
-static inline void stabbuf_append(char **buf, unsigned *buf_size, const char *str)
+static inline void stabbuf_append(char **buf, unsigned *buf_size, const char * HOSTPTR str)
 {
     unsigned str_len, buf_len;
 
@@ -1272,11 +1274,11 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
     char*                       srcpath = NULL;
     int                         i;
     int                         nstab;
-    const char*                 ptr;
+    const char* HOSTPTR         ptr;
     char*                       stabbuff;
     unsigned int                stabbufflen;
     const struct stab_nlist*    stab_ptr;
-    const char*                 strs_end;
+    const char* HOSTPTR         strs_end;
     int                         strtabinc;
     char                        symname[4096];
     unsigned                    incl[32];
@@ -1291,7 +1293,7 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
     uint64_t                    n_value;
 
 #ifdef __APPLE__
-    if (module->process->is_64bit)
+    if (module->process->is_64bit || module->process->is_32on64)
         stabsize = sizeof(struct nlist_64);
 #endif
     nstab = stablen / stabsize;
@@ -1315,7 +1317,7 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
         stab_ptr = (struct stab_nlist *)(pv_stab_ptr + i * stabsize);
         n_value = stab_ptr->n_value;
 #ifdef __APPLE__
-        if (module->process->is_64bit)
+        if (module->process->is_64bit || module->process->is_32on64)
             n_value = ((struct nlist_64 *)stab_ptr)->n_value;
 #endif
         ptr = strs + stab_ptr->n_strx;

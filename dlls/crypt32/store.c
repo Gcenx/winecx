@@ -32,6 +32,7 @@
 #include "winbase.h"
 #include "winnls.h"
 #include "winreg.h"
+#include "winternl.h"
 #include "winuser.h"
 #include "wincrypt.h"
 #include "wine/debug.h"
@@ -526,7 +527,7 @@ static WINECRYPT_CERTSTORE *CRYPT_SysRegOpenStoreA(HCRYPTPROV hCryptProv,
         SetLastError(ERROR_FILE_NOT_FOUND);
         return NULL;
     }
-    len = MultiByteToWideChar(CP_ACP, 0, pvPara, -1, NULL, 0);
+    len = MultiByteToWideChar(CP_ACP, 0, (LPCSTR)pvPara, -1, NULL, 0);
     if (len)
     {
         LPWSTR storeName = CryptMemAlloc(len * sizeof(WCHAR));
@@ -627,7 +628,7 @@ static WINECRYPT_CERTSTORE *CRYPT_SysOpenStoreA(HCRYPTPROV hCryptProv,
         SetLastError(ERROR_FILE_NOT_FOUND);
         return NULL;
     }
-    len = MultiByteToWideChar(CP_ACP, 0, pvPara, -1, NULL, 0);
+    len = MultiByteToWideChar(CP_ACP, 0, (LPCSTR)pvPara, -1, NULL, 0);
     if (len)
     {
         LPWSTR storeName = CryptMemAlloc(len * sizeof(WCHAR));
@@ -873,19 +874,19 @@ HCERTSTORE WINAPI CertOpenStore(LPCSTR lpszStoreProvider,
                 FIXME("unimplemented type %d\n", LOWORD(lpszStoreProvider));
         }
     }
-    else if (!strcasecmp(lpszStoreProvider, sz_CERT_STORE_PROV_MEMORY))
+    else if (!_strnicmp(lpszStoreProvider, sz_CERT_STORE_PROV_MEMORY, -1))
         openFunc = CRYPT_MemOpenStore;
-    else if (!strcasecmp(lpszStoreProvider, sz_CERT_STORE_PROV_FILENAME_W))
+    else if (!_strnicmp(lpszStoreProvider, sz_CERT_STORE_PROV_FILENAME_W, -1))
         openFunc = CRYPT_FileOpenStore;
-    else if (!strcasecmp(lpszStoreProvider, sz_CERT_STORE_PROV_SYSTEM))
+    else if (!_strnicmp(lpszStoreProvider, sz_CERT_STORE_PROV_SYSTEM, -1))
         openFunc = CRYPT_SysOpenStoreW;
-    else if (!strcasecmp(lpszStoreProvider, sz_CERT_STORE_PROV_PKCS7))
+    else if (!_strnicmp(lpszStoreProvider, sz_CERT_STORE_PROV_PKCS7, -1))
         openFunc = CRYPT_PKCSOpenStore;
-    else if (!strcasecmp(lpszStoreProvider, sz_CERT_STORE_PROV_SERIALIZED))
+    else if (!_strnicmp(lpszStoreProvider, sz_CERT_STORE_PROV_SERIALIZED, -1))
         openFunc = CRYPT_SerializedOpenStore;
-    else if (!strcasecmp(lpszStoreProvider, sz_CERT_STORE_PROV_COLLECTION))
+    else if (!_strnicmp(lpszStoreProvider, sz_CERT_STORE_PROV_COLLECTION, -1))
         openFunc = CRYPT_CollectionOpenStore;
-    else if (!strcasecmp(lpszStoreProvider, sz_CERT_STORE_PROV_SYSTEM_REGISTRY))
+    else if (!_strnicmp(lpszStoreProvider, sz_CERT_STORE_PROV_SYSTEM_REGISTRY, -1))
         openFunc = CRYPT_SysRegOpenStoreW;
     else
     {

@@ -26,7 +26,6 @@
 #include <CoreServices/CoreServices.h>
 #undef GetCurrentThread
 #undef LoadResource
-#undef DPRINTF
 #endif
 
 #include "windef.h"
@@ -36,6 +35,7 @@
 #include "ws2tcpip.h"
 #include "winhttp.h"
 #include "winreg.h"
+#include "winternl.h"
 #define COBJMACROS
 #include "ole2.h"
 #include "dispex.h"
@@ -81,7 +81,6 @@ static void session_destroy( struct object_header *hdr )
     TRACE("%p\n", session);
 
     if (session->unload_event) SetEvent( session->unload_event );
-    if (session->cred_handle_initialized) FreeCredentialsHandle( &session->cred_handle );
     destroy_cookies( session );
 
     session->cs.DebugInfo->Spare[0] = 0;
@@ -610,7 +609,9 @@ static void request_destroy( struct object_header *hdr )
     }
     release_object( &request->connect->hdr );
 
+    if (request->cred_handle_initialized) FreeCredentialsHandle( &request->cred_handle );
     CertFreeCertificateContext( request->server_cert );
+    CertFreeCertificateContext( request->client_cert );
 
     destroy_authinfo( request->authinfo );
     destroy_authinfo( request->proxy_authinfo );
@@ -1000,14 +1001,39 @@ static BOOL request_set_option( struct object_header *hdr, DWORD option, void *b
         return TRUE;
     }
     case WINHTTP_OPTION_CLIENT_CERT_CONTEXT:
+    {
+        const CERT_CONTEXT *cert;
+
         if (!(hdr->flags & WINHTTP_FLAG_SECURE))
         {
             SetLastError( ERROR_WINHTTP_INCORRECT_HANDLE_STATE );
             return FALSE;
         }
-        FIXME("WINHTTP_OPTION_CLIENT_CERT_CONTEXT\n");
-        return TRUE;
+        if (!buffer)
+        {
+            CertFreeCertificateContext( request->client_cert );
+            request->client_cert = NULL;
+        }
+        else if (buflen >= sizeof(cert))
+        {
+            if (!(cert = CertDuplicateCertificateContext( buffer ))) return FALSE;
+            CertFreeCertificateContext( request->client_cert );
+            request->client_cert = cert;
+        }
+        else
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return FALSE;
+        }
 
+        if (request->cred_handle_initialized)
+        {
+            FreeCredentialsHandle( &request->cred_handle );
+            request->cred_handle_initialized = FALSE;
+        }
+
+        return TRUE;
+    }
     case WINHTTP_OPTION_ENABLE_FEATURE:
         if(buflen == sizeof( DWORD ) && *(DWORD *)buffer == WINHTTP_ENABLE_SSL_REVOCATION)
         {
@@ -1305,7 +1331,7 @@ static BOOL is_domain_suffix( const char *domain, const char *suffix )
     int len_domain = strlen( domain ), len_suffix = strlen( suffix );
 
     if (len_suffix > len_domain) return FALSE;
-    if (!strcasecmp( domain + len_domain - len_suffix, suffix )) return TRUE;
+    if (!_strnicmp( domain + len_domain - len_suffix, suffix, -1 )) return TRUE;
     return FALSE;
 }
 
@@ -1340,7 +1366,7 @@ static BOOL get_system_proxy_autoconfig_url( char *buf, DWORD buflen )
 {
 #if defined(MAC_OS_X_VERSION_10_6) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_6
     CFDictionaryRef settings = CFNetworkCopySystemProxySettings();
-    const void *ref;
+    CFStringRef ref;
     BOOL ret = FALSE;
 
     if (!settings) return FALSE;
@@ -1494,7 +1520,7 @@ BOOL WINAPI WinHttpGetDefaultProxyConfiguration( WINHTTP_PROXY_INFO *info )
     LONG l;
     HKEY key;
     BOOL got_from_reg = FALSE, direct = TRUE;
-    char *envproxy;
+    char * HOSTPTR envproxy;
 
     TRACE("%p\n", info);
 
@@ -1572,7 +1598,7 @@ BOOL WINAPI WinHttpGetDefaultProxyConfiguration( WINHTTP_PROXY_INFO *info )
     }
     if (!got_from_reg && (envproxy = getenv( "http_proxy" )))
     {
-        char *colon, *http_proxy = NULL;
+        char * HOSTPTR colon, * HOSTPTR http_proxy = NULL;
 
         if (!(colon = strchr( envproxy, ':' ))) http_proxy = envproxy;
         else
@@ -1711,7 +1737,7 @@ static BOOL parse_script_result( const char *result, WINHTTP_PROXY_INFO *info )
     p = result;
     while (*p == ' ') p++;
     len = strlen( p );
-    if (len >= 5 && !strncasecmp( p, "PROXY", sizeof("PROXY") - 1 ))
+    if (len >= 5 && !_strnicmp( p, "PROXY", sizeof("PROXY") - 1 ))
     {
         p += 5;
         while (*p == ' ') p++;

@@ -93,6 +93,8 @@ static const char version_string[] = "Wine IDL Compiler version " PACKAGE_VERSIO
 
 #ifdef __i386__
 enum target_cpu target_cpu = CPU_x86;
+#elif defined(__i386_on_x86_64__)
+enum target_cpu target_cpu = CPU_x86_32on64;
 #elif defined(__x86_64__)
 enum target_cpu target_cpu = CPU_x86_64;
 #elif defined(__powerpc__)
@@ -290,6 +292,7 @@ static void set_target( const char *target )
         { "armv5",   CPU_ARM },
         { "armv6",   CPU_ARM },
         { "armv7",   CPU_ARM },
+        { "armv7a",  CPU_ARM },
         { "arm64",   CPU_ARM64 },
         { "aarch64", CPU_ARM64 },
     };
@@ -739,6 +742,7 @@ int main(int argc,char *argv[])
   switch (target_cpu)
   {
   case CPU_x86:
+  case CPU_x86_32on64:
       if (pointer_size == 8) target_cpu = CPU_x86_64;
       else pointer_size = 4;
       break;

@@ -17,6 +17,8 @@ BISON_SRCS = parser.y
 
 wrc_EXTRADEFS = -DINCLUDEDIR="\"${includedir}/wine\""
 
+EXTRADEFS = $(HOSTSTACK_CFLAGS)
+
 EXTRALIBS = $(GETTEXTPO_LIBS) -lwpp
 
 INSTALL_DEV = $(PROGRAMS)

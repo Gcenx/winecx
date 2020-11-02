@@ -274,7 +274,7 @@ struct macdrv_win_data *get_win_data(HWND hwnd)
 
     if (!hwnd) return NULL;
     EnterCriticalSection(&win_data_section);
-    if (win_datas && (data = (struct macdrv_win_data*)CFDictionaryGetValue(win_datas, hwnd)))
+    if (win_datas && (data = ADDRSPACECAST(struct macdrv_win_data*, CFDictionaryGetValue(win_datas, hwnd))))
         return data;
     LeaveCriticalSection(&win_data_section);
     return NULL;
@@ -824,7 +824,8 @@ static void set_cocoa_view_parent(struct macdrv_win_data *data, HWND parent)
     macdrv_window cocoa_window = parent_data ? parent_data->cocoa_window : NULL;
     macdrv_view superview = parent_data ? parent_data->client_cocoa_view : NULL;
 
-    TRACE("win %p/%p parent %p/%p\n", data->hwnd, data->cocoa_view, parent, cocoa_window ? (void*)cocoa_window : (void*)superview);
+    TRACE("win %p/%p parent %p/%p\n", data->hwnd, data->cocoa_view, parent,
+          cocoa_window ? (void* HOSTPTR)cocoa_window : (void* HOSTPTR)superview);
 
     if (!cocoa_window && !superview)
         WARN("hwnd %p new parent %p has no Cocoa window or view in this process\n", data->hwnd, parent);
@@ -1232,7 +1233,7 @@ static void sync_window_position(struct macdrv_win_data *data, UINT swp_flags, c
         sync_window_region(data, (HRGN)1);
 
     TRACE("win %p/%p whole_rect %s frame %s\n", data->hwnd,
-          data->cocoa_window ? (void*)data->cocoa_window : (void*)data->cocoa_view,
+          data->cocoa_window ? (void* HOSTPTR)data->cocoa_window : (void* HOSTPTR)data->cocoa_view,
           wine_dbgstr_rect(&data->whole_rect), wine_dbgstr_cgrect(frame));
 
     if (force_z_order || !(swp_flags & SWP_NOZORDER) || (swp_flags & SWP_SHOWWINDOW))
@@ -1310,7 +1311,7 @@ static void set_app_icon(void)
     }
     else /* CrossOver Hack 13440: Find an icon from the CrossOver app bundle */
     {
-        const char *cx_root;
+        const char * HOSTPTR cx_root;
         if ((cx_root = getenv("CX_ROOT")) && cx_root[0])
         {
             CFURLRef url, temp;
@@ -2566,6 +2567,7 @@ void macdrv_window_did_unminimize(HWND hwnd)
     {
         TRACE("restoring win %p/%p\n", hwnd, data->cocoa_window);
         release_win_data(data);
+        SetActiveWindow(hwnd);
         SendMessageW(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
         return;
     }

@@ -154,7 +154,7 @@ unsigned TERM_FillSimpleChar(WCHAR real_inchar, INPUT_RECORD* ir)
 # define CURSES_NAME "curses"
 #endif
 
-static void *nc_handle = NULL;
+static void * HOSTPTR nc_handle = NULL;
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p_##f;
 
@@ -326,7 +326,7 @@ static const struct dbkey_init TERM_dbkey_init[] = {
 
 struct dbkey_pair
 {
-    const char*         string;
+    const char* HOSTPTR string;
     unsigned            string_len;
     struct dbkey_descr  descr;
 };
@@ -335,16 +335,16 @@ static struct dbkey_pair*       TERM_dbkey;
 static unsigned                 TERM_dbkey_size;
 static unsigned                 TERM_dbkey_index;
 
-static int  TERM_dbkey_cmp(const void* p1, const void* p2)
+static int  TERM_dbkey_cmp(const void* HOSTPTR p1, const void* HOSTPTR p2)
 {
-    const struct dbkey_pair*  kp1 = p1;
-    const struct dbkey_pair*  kp2 = p2;
+    const struct dbkey_pair* HOSTPTR  kp1 = p1;
+    const struct dbkey_pair* HOSTPTR  kp2 = p2;
     return strcmp(kp1->string, kp2->string);
 }
 
-static BOOL TERM_AddKeyDescr(const char* string, const struct dbkey_descr* descr)
+static BOOL TERM_AddKeyDescr(const char* HOSTPTR string, const struct dbkey_descr* descr)
 {
-    if (!string || string == (const char*)-1) return TRUE;
+    if (!string || string == (const char* HOSTPTR)-1) return TRUE;
     if (!TERM_dbkey)
     {
         TERM_dbkey_size = 32;

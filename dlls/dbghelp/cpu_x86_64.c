@@ -82,7 +82,7 @@ static BOOL x86_64_get_addr(HANDLE hThread, const CONTEXT* ctx,
     addr->Mode = AddrModeFlat;
     switch (ca)
     {
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
     case cpu_addr_pc:    addr->Segment = ctx->SegCs; addr->Offset = ctx->Rip; return TRUE;
     case cpu_addr_stack: addr->Segment = ctx->SegSs; addr->Offset = ctx->Rsp; return TRUE;
     case cpu_addr_frame: addr->Segment = ctx->SegSs; addr->Offset = ctx->Rbp; return TRUE;
@@ -92,7 +92,7 @@ static BOOL x86_64_get_addr(HANDLE hThread, const CONTEXT* ctx,
     }
 }
 
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
 
 enum st_mode {stm_start, stm_64bit, stm_done};
 
@@ -698,7 +698,7 @@ static BOOL x86_64_stack_walk(struct cpu_stack_walk *csw, STACKFRAME64 *frame,
 
 static void*    x86_64_find_runtime_function(struct module* module, DWORD64 addr)
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
     RUNTIME_FUNCTION*   rtf;
     ULONG               size;
     int                 min, max;
@@ -782,7 +782,7 @@ static unsigned x86_64_map_dwarf_register(unsigned regno, BOOL eh_frame)
 
 static void *x86_64_fetch_context_reg(union ctx *pctx, unsigned regno, unsigned *size)
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
     CONTEXT *ctx = &pctx->ctx;
 
     switch (regno)
@@ -910,7 +910,7 @@ static BOOL x86_64_fetch_minidump_thread(struct dump_context* dc, unsigned index
     if (ctx->ContextFlags && (flags & ThreadWriteInstructionWindow))
     {
         /* FIXME: crop values across module boundaries, */
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
         ULONG64 base = ctx->Rip <= 0x80 ? 0 : ctx->Rip - 0x80;
         minidump_add_memory_block(dc, base, ctx->Rip + 0x80 - base, 0);
 #endif
@@ -925,7 +925,7 @@ static BOOL x86_64_fetch_minidump_module(struct dump_context* dc, unsigned index
     if (1)
     {
         /* FIXME: crop values across module boundaries, */
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
         struct process*         pcs;
         struct module*          module;
         const RUNTIME_FUNCTION* rtf;

@@ -42,18 +42,19 @@ extern const LUID SeManageVolumePrivilege;
 extern const LUID SeImpersonatePrivilege;
 extern const LUID SeCreateGlobalPrivilege;
 
-extern const PSID security_world_sid;
-extern const PSID security_local_user_sid;
-extern const PSID security_local_system_sid;
-extern const PSID security_builtin_users_sid;
-extern const PSID security_builtin_admins_sid;
-extern const PSID security_high_label_sid;
+extern SID *const security_world_sid;
+extern SID *const security_local_user_sid;
+extern SID *const security_local_system_sid;
+extern SID *const security_builtin_users_sid;
+extern SID *const security_builtin_admins_sid;
+extern SID *const security_domain_users_sid;
+extern SID *const security_high_label_sid;
 
 
 /* token functions */
 
 extern struct token *token_create_admin(void);
-extern int token_assign_label( struct token *token, PSID label );
+extern int token_assign_label( struct token *token, SID *label );
 extern struct token *token_duplicate( struct token *src_token, unsigned primary,
                                       int impersonation_level, const struct security_descriptor *sd );
 extern int token_check_privileges( struct token *token, int all_required,

@@ -398,6 +398,8 @@ int CDECL MSVCRT__toupper_l(int c, MSVCRT__locale_t locale)
  */
 int CDECL MSVCRT_toupper(int c)
 {
+    if(initial_locale)
+        return c>='a' && c<='z' ? c-'a'+'A' : c;
     return MSVCRT__toupper_l(c, NULL);
 }
 
@@ -458,7 +460,9 @@ int CDECL MSVCRT__tolower_l(int c, MSVCRT__locale_t locale)
  */
 int CDECL MSVCRT_tolower(int c)
 {
-        return MSVCRT__tolower_l(c, NULL);
+    if(initial_locale)
+        return c>='A' && c<='Z' ? c-'A'+'a' : c;
+    return MSVCRT__tolower_l(c, NULL);
 }
 
 /*********************************************************************

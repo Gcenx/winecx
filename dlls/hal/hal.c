@@ -18,136 +18,122 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdarg.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
+#include "winbase.h"
 #include "winternl.h"
 #include "excpt.h"
 #include "ddk/ntddk.h"
+#include "wine/asm.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntoskrnl);
 
 #ifdef __i386__
-#define DEFINE_FASTCALL1_ENTRYPOINT( name ) \
-    __ASM_STDCALL_FUNC( name, 4, \
-                       "popl %eax\n\t" \
-                       "pushl %ecx\n\t" \
-                       "pushl %eax\n\t" \
-                       "jmp " __ASM_NAME("__regs_") #name __ASM_STDCALL(4))
-#define DEFINE_FASTCALL2_ENTRYPOINT( name ) \
-    __ASM_STDCALL_FUNC( name, 8, \
-                       "popl %eax\n\t" \
-                       "pushl %edx\n\t" \
-                       "pushl %ecx\n\t" \
-                       "pushl %eax\n\t" \
-                       "jmp " __ASM_NAME("__regs_") #name __ASM_STDCALL(8))
-#endif
 
+#ifndef _WIN32
 
-#ifdef DEFINE_FASTCALL1_ENTRYPOINT
-DEFINE_FASTCALL1_ENTRYPOINT( ExAcquireFastMutex )
-VOID WINAPI DECLSPEC_HIDDEN __regs_ExAcquireFastMutex(PFAST_MUTEX FastMutex)
-#else
-VOID WINAPI ExAcquireFastMutex(PFAST_MUTEX FastMutex)
-#endif
+extern void * WINAPI wrap_fastcall_func1( void *func, const void *a );
+__ASM_STDCALL_FUNC( wrap_fastcall_func1, 8,
+                   "popl %ecx\n\t"
+                   "popl %eax\n\t"
+                   "xchgl (%esp),%ecx\n\t"
+                   "jmp *%eax" );
+extern void * WINAPI wrap_fastcall_func2( void *func, const void *a, const void *b );
+__ASM_STDCALL_FUNC( wrap_fastcall_func2, 12,
+                   "popl %edx\n\t"
+                   "popl %eax\n\t"
+                   "popl %ecx\n\t"
+                   "xchgl (%esp),%edx\n\t"
+                   "jmp *%eax" );
+
+#define call_fastcall_func1(func,a) wrap_fastcall_func1(func,a)
+#define call_fastcall_func2(func,a,b) wrap_fastcall_func2(func,a,b)
+
+#else  /* _WIN32 */
+
+#define call_fastcall_func1(func,a) func(a)
+#define call_fastcall_func2(func,a,b) func(a,b)
+
+#endif  /* _WIN32 */
+
+DEFINE_FASTCALL1_WRAPPER( ExAcquireFastMutex )
+void FASTCALL ExAcquireFastMutex( FAST_MUTEX *mutex )
 {
-    FIXME("%p: stub\n", FastMutex);
+    call_fastcall_func1( ExAcquireFastMutexUnsafe, mutex );
 }
 
-#ifdef DEFINE_FASTCALL1_ENTRYPOINT
-DEFINE_FASTCALL1_ENTRYPOINT( ExReleaseFastMutex )
-VOID WINAPI DECLSPEC_HIDDEN __regs_ExReleaseFastMutex(PFAST_MUTEX FastMutex)
-#else
-VOID WINAPI ExReleaseFastMutex(PFAST_MUTEX FastMutex)
-#endif
+DEFINE_FASTCALL1_WRAPPER( ExReleaseFastMutex )
+void FASTCALL ExReleaseFastMutex( FAST_MUTEX *mutex )
 {
-    FIXME("%p: stub\n", FastMutex);
+    call_fastcall_func1( ExReleaseFastMutexUnsafe, mutex );
 }
 
-#ifdef DEFINE_FASTCALL1_ENTRYPOINT
-DEFINE_FASTCALL1_ENTRYPOINT( ExTryToAcquireFastMutex )
-BOOLEAN WINAPI DECLSPEC_HIDDEN __regs_ExTryToAcquireFastMutex(PFAST_MUTEX FastMutex)
-#else
-BOOLEAN WINAPI ExTryToAcquireFastMutex(PFAST_MUTEX FastMutex)
-#endif
+DEFINE_FASTCALL1_WRAPPER( ExTryToAcquireFastMutex )
+BOOLEAN FASTCALL ExTryToAcquireFastMutex( FAST_MUTEX *mutex )
 {
-    FIXME("(%p) stub\n", FastMutex);
-    return TRUE;
+    TRACE("mutex %p.\n", mutex);
+
+    return (InterlockedCompareExchange( &mutex->Count, 0, 1 ) == 1);
 }
 
-#ifdef DEFINE_FASTCALL1_ENTRYPOINT
-DEFINE_FASTCALL1_ENTRYPOINT( KfAcquireSpinLock )
-KIRQL WINAPI DECLSPEC_HIDDEN __regs_KfAcquireSpinLock(PKSPIN_LOCK SpinLock)
-#else
-KIRQL WINAPI KfAcquireSpinLock(PKSPIN_LOCK SpinLock)
-#endif
+DEFINE_FASTCALL1_WRAPPER( KfAcquireSpinLock )
+KIRQL FASTCALL KfAcquireSpinLock( KSPIN_LOCK *lock )
 {
-    FIXME( "(%p) stub!\n", SpinLock );
-
-    return 0;
+    KIRQL irql;
+    KeAcquireSpinLock( lock, &irql );
+    return irql;
 }
 
+void WINAPI KeAcquireSpinLock( KSPIN_LOCK *lock, KIRQL *irql )
+{
+    TRACE("lock %p, irql %p.\n", lock, irql);
+    KeAcquireSpinLockAtDpcLevel( lock );
+    *irql = 0;
+}
 
-#ifdef DEFINE_FASTCALL1_ENTRYPOINT
-DEFINE_FASTCALL1_ENTRYPOINT( KfLowerIrql )
-VOID WINAPI DECLSPEC_HIDDEN __regs_KfLowerIrql(KIRQL NewIrql)
-#else
-VOID WINAPI KfLowerIrql(KIRQL NewIrql)
-#endif
+DEFINE_FASTCALL_WRAPPER( KfReleaseSpinLock, 8 )
+void FASTCALL KfReleaseSpinLock( KSPIN_LOCK *lock, KIRQL irql )
+{
+    KeReleaseSpinLock( lock, irql );
+}
+
+void WINAPI KeReleaseSpinLock( KSPIN_LOCK *lock, KIRQL irql )
+{
+    TRACE("lock %p, irql %u.\n", lock, irql);
+    KeReleaseSpinLockFromDpcLevel( lock );
+}
+
+DEFINE_FASTCALL_WRAPPER( KeAcquireInStackQueuedSpinLock, 8 )
+void FASTCALL KeAcquireInStackQueuedSpinLock( KSPIN_LOCK *lock, KLOCK_QUEUE_HANDLE *queue )
+{
+    call_fastcall_func2( KeAcquireInStackQueuedSpinLockAtDpcLevel, lock, queue );
+}
+
+DEFINE_FASTCALL1_WRAPPER( KeReleaseInStackQueuedSpinLock )
+void FASTCALL KeReleaseInStackQueuedSpinLock( KLOCK_QUEUE_HANDLE *queue )
+{
+    call_fastcall_func1( KeReleaseInStackQueuedSpinLockFromDpcLevel, queue );
+}
+#endif /* __i386__ */
+
+#if defined(__i386__) || defined(__arm__) || defined(__aarch64__)
+
+DEFINE_FASTCALL1_WRAPPER( KfLowerIrql )
+VOID FASTCALL KfLowerIrql(KIRQL NewIrql)
 {
     FIXME( "(%u) stub!\n", NewIrql );
 }
 
-
-#ifdef DEFINE_FASTCALL1_ENTRYPOINT
-DEFINE_FASTCALL1_ENTRYPOINT( KfRaiseIrql )
-KIRQL WINAPI DECLSPEC_HIDDEN __regs_KfRaiseIrql(KIRQL NewIrql)
-#else
-KIRQL WINAPI KfRaiseIrql(KIRQL NewIrql)
-#endif
+DEFINE_FASTCALL1_WRAPPER( KfRaiseIrql )
+KIRQL FASTCALL KfRaiseIrql(KIRQL NewIrql)
 {
     FIXME( "(%u) stub!\n", NewIrql );
 
     return 0;
-}
-
-
-#ifdef DEFINE_FASTCALL2_ENTRYPOINT
-DEFINE_FASTCALL2_ENTRYPOINT( KfReleaseSpinLock )
-VOID WINAPI DECLSPEC_HIDDEN __regs_KfReleaseSpinLock(PKSPIN_LOCK SpinLock, KIRQL NewIrql)
-#else
-VOID WINAPI KfReleaseSpinLock(PKSPIN_LOCK SpinLock, KIRQL NewIrql)
-#endif
-{
-    FIXME( "(%p %u) stub!\n", SpinLock, NewIrql );
-}
-
-ULONG WINAPI HalGetBusData(BUS_DATA_TYPE BusDataType, ULONG BusNumber, ULONG SlotNumber, PVOID Buffer, ULONG Length)
-{
-    FIXME("(%u %u %u %p %u) stub!\n", BusDataType, BusNumber, SlotNumber, Buffer, Length);
-    /* Claim that there is no such bus */
-    return 0;
-}
-
-ULONG WINAPI HalGetBusDataByOffset(BUS_DATA_TYPE BusDataType, ULONG BusNumber, ULONG SlotNumber, PVOID Buffer, ULONG Offset, ULONG Length)
-{
-    FIXME("(%u %u %u %p %u %u) stub!\n", BusDataType, BusNumber, SlotNumber, Buffer, Offset, Length);
-    /* Claim that there is no such bus */
-    return 0;
-}
-
-BOOLEAN WINAPI HalTranslateBusAddress(INTERFACE_TYPE InterfaceType, ULONG BusNumber, PHYSICAL_ADDRESS BusAddress,
-		                              PULONG AddressSpace, PPHYSICAL_ADDRESS TranslatedAddress)
-{
-    FIXME("(%d %d %s %p %p) stub!\n", InterfaceType, BusNumber,
-		wine_dbgstr_longlong(BusAddress.QuadPart), AddressSpace, TranslatedAddress);
-    return FALSE;
 }
 
 KIRQL WINAPI KeGetCurrentIrql(VOID)
@@ -176,6 +162,29 @@ void WINAPI WRITE_PORT_UCHAR(UCHAR *port, UCHAR value)
 void WINAPI WRITE_PORT_ULONG(ULONG *port, ULONG value)
 {
     FIXME("(%p %d) stub!\n", port, value);
+}
+#endif /* __i386__ || __arm__ || __arm64__ */
+
+ULONG WINAPI HalGetBusData(BUS_DATA_TYPE BusDataType, ULONG BusNumber, ULONG SlotNumber, PVOID Buffer, ULONG Length)
+{
+    FIXME("(%u %u %u %p %u) stub!\n", BusDataType, BusNumber, SlotNumber, Buffer, Length);
+    /* Claim that there is no such bus */
+    return 0;
+}
+
+ULONG WINAPI HalGetBusDataByOffset(BUS_DATA_TYPE BusDataType, ULONG BusNumber, ULONG SlotNumber, PVOID Buffer, ULONG Offset, ULONG Length)
+{
+    FIXME("(%u %u %u %p %u %u) stub!\n", BusDataType, BusNumber, SlotNumber, Buffer, Offset, Length);
+    /* Claim that there is no such bus */
+    return 0;
+}
+
+BOOLEAN WINAPI HalTranslateBusAddress(INTERFACE_TYPE InterfaceType, ULONG BusNumber, PHYSICAL_ADDRESS BusAddress,
+		                              PULONG AddressSpace, PPHYSICAL_ADDRESS TranslatedAddress)
+{
+    FIXME("(%d %d %s %p %p) stub!\n", InterfaceType, BusNumber,
+		wine_dbgstr_longlong(BusAddress.QuadPart), AddressSpace, TranslatedAddress);
+    return FALSE;
 }
 
 ULONGLONG WINAPI KeQueryPerformanceCounter(LARGE_INTEGER *frequency)

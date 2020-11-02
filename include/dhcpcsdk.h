@@ -18,6 +18,8 @@
 #ifndef _DHCPCSDK_
 #define _DHCPCSDK_
 
+#include "wine/winheader_enter.h"
+
 typedef struct _DHCPAPI_PARAMS
 {
     ULONG  Flags;
@@ -46,5 +48,7 @@ typedef struct _DHCPCAPI_CLASSID
 DWORD WINAPI DhcpRequestParams( DWORD flags, void *reserved, WCHAR *adaptername, DHCPCAPI_CLASSID *classid,
                                 DHCPCAPI_PARAMS_ARRAY sendparams, DHCPCAPI_PARAMS_ARRAY recdparams,
                                 BYTE *buffer, DWORD *size, WCHAR *requestidstr );
+
+#include "wine/winheader_exit.h"
 
 #endif

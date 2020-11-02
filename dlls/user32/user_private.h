@@ -33,6 +33,7 @@
 
 #define GET_WORD(ptr)  (*(const WORD *)(ptr))
 #define GET_DWORD(ptr) (*(const DWORD *)(ptr))
+#define GET_LONG(ptr) (*(const LONG *)(ptr))
 
 #define WM_SYSTIMER	    0x0118
 #define WM_POPUPSYSTEMMENU  0x0313
@@ -120,6 +121,9 @@ typedef struct tagUSER_DRIVER {
 extern const USER_DRIVER *USER_Driver DECLSPEC_HIDDEN;
 
 extern void USER_unload_driver(void) DECLSPEC_HIDDEN;
+
+extern BOOL CDECL nulldrv_EnumDisplayMonitors( HDC hdc, RECT *rect, MONITORENUMPROC proc, LPARAM lp ) DECLSPEC_HIDDEN;
+extern BOOL CDECL nulldrv_GetMonitorInfo( HMONITOR handle, MONITORINFO *info ) DECLSPEC_HIDDEN;
 
 struct received_message_info;
 

@@ -1,11 +1,14 @@
 MODULE    = ntoskrnl.exe
 IMPORTLIB = ntoskrnl
-IMPORTS   = advapi32
+IMPORTS   = advapi32 hal
 DELAYIMPORTS = setupapi user32
+
+EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
 	instr.c \
 	ntoskrnl.c \
+	pnp.c \
 	sync.c
 
 RC_SRCS = ntoskrnl.rc

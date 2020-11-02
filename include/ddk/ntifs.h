@@ -19,6 +19,8 @@
 #ifndef __NTIFS_H__
 #define __NTIFS_H__
 
+#include "wine/winheader_enter.h"
+
 #include "ntddk.h"
 
 typedef struct _EX_PUSH_LOCK EX_PUSH_LOCK, *PEX_PUSH_LOCK;
@@ -130,6 +132,14 @@ typedef struct _FS_FILTER_CALLBACKS
 } FS_FILTER_CALLBACKS, *PFS_FILTER_CALLBACKS;
 
 BOOLEAN WINAPI FsRtlIsNameInExpression(PUNICODE_STRING, PUNICODE_STRING, BOOLEAN, PWCH);
+DEVICE_OBJECT * WINAPI IoGetAttachedDevice(DEVICE_OBJECT*);
+NTSTATUS WINAPI ObOpenObjectByPointer(void*,ULONG,PACCESS_STATE,ACCESS_MASK,POBJECT_TYPE,KPROCESSOR_MODE,HANDLE*);
 NTSTATUS WINAPI ObQueryNameString(PVOID,POBJECT_NAME_INFORMATION,ULONG,PULONG);
+BOOLEAN WINAPI PsIsSystemThread(PETHREAD);
+NTSTATUS WINAPI PsLookupProcessByProcessId(HANDLE,PEPROCESS*);
+NTSTATUS WINAPI PsLookupThreadByThreadId(HANDLE,PETHREAD*);
+void WINAPI PsRevertToSelf(void);
+
+#include "wine/winheader_exit.h"
 
 #endif

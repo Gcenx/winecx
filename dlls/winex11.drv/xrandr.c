@@ -322,8 +322,30 @@ static int xrandr12_get_current_mode(void)
     return ret;
 }
 
+static void get_screen_size( XRRScreenResources *resources, unsigned int *width, unsigned int *height )
+{
+    XRRCrtcInfo *crtc_info;
+    int i;
+    *width = *height = 0;
+
+    for (i = 0; i < resources->ncrtc; ++i)
+    {
+        if (!(crtc_info = pXRRGetCrtcInfo( gdi_display, resources, resources->crtcs[i] )))
+            continue;
+
+        if (crtc_info->mode != None)
+        {
+            *width = max(*width, crtc_info->x + crtc_info->width);
+            *height = max(*height, crtc_info->y + crtc_info->height);
+        }
+
+        pXRRFreeCrtcInfo( crtc_info );
+    }
+}
+
 static LONG xrandr12_set_current_mode( int mode, struct x11drv_mode_info *mode_info )
 {
+    unsigned int screen_width, screen_height;
     Status status = RRSetConfigFailed;
     Screen *screen;
     XWindowAttributes attr;
@@ -350,34 +372,40 @@ static LONG xrandr12_set_current_mode( int mode, struct x11drv_mode_info *mode_i
     TRACE("CRTC %d: mode %#lx, %ux%u+%d+%d.\n", primary_crtc, crtc_info->mode,
           crtc_info->width, crtc_info->height, crtc_info->x, crtc_info->y);
 
-    screen = DefaultScreenOfDisplay( gdi_display );
-    XGetWindowAttributes( gdi_display, root_window, &attr );
-    max_width = max(attr.width, mode_info->width);
-    max_height = max(attr.height, mode_info->height);
+    /* According to the RandR spec, the entire CRTC must fit inside the screen.
+     * Since we use the union of all enabled CRTCs to determine the necessary
+     * screen size, this might involve shrinking the screen, so we must disable
+     * the CRTC in question first. */
 
-    if (crtc_info->width == attr.width && crtc_info->height == attr.height)
+    XGrabServer( gdi_display );
+
+    status = pXRRSetCrtcConfig( gdi_display, resources, resources->crtcs[primary_crtc],
+                                CurrentTime, crtc_info->x, crtc_info->y, None,
+                                crtc_info->rotation, NULL, 0 );
+    if (status != RRSetConfigSuccess)
     {
-        if (max_width > attr.width || max_height > attr.height)
-        {
-            TRACE("CRTC matches the whole screen, also changing screen size.\n");
-            pXRRSetScreenSize( gdi_display, root_window, max_width, max_height,
-                               screen->mwidth, screen->mheight );
-        }
+        XUngrabServer( gdi_display );
+        ERR("Failed to disable CRTC.\n");
+        pXRRFreeCrtcInfo( crtc_info );
+        pXRRFreeScreenResources( resources );
+        return DISP_CHANGE_FAILED;
     }
+
+    get_screen_size( resources, &screen_width, &screen_height );
+    screen_width = max( screen_width, crtc_info->x + dd_modes[mode].width );
+    screen_height = max( screen_height, crtc_info->y + dd_modes[mode].height );
+
+    pXRRSetScreenSize( gdi_display, root_window, screen_width, screen_height,
+            screen_width * DisplayWidthMM( gdi_display, default_visual.screen )
+                         / DisplayWidth( gdi_display, default_visual.screen ),
+            screen_height * DisplayHeightMM( gdi_display, default_visual.screen )
+                         / DisplayHeight( gdi_display, default_visual.screen ));
 
     status = pXRRSetCrtcConfig( gdi_display, resources, resources->crtcs[primary_crtc],
                                 CurrentTime, crtc_info->x, crtc_info->y, xrandr12_modes[mode],
                                 crtc_info->rotation, crtc_info->outputs, crtc_info->noutput );
 
-    if (crtc_info->width == attr.width && crtc_info->height == attr.height)
-    {
-        if (mode_info->width < max_width || mode_info->height < max_height)
-        {
-            TRACE("CRTC matches the whole screen, also changing screen size.\n");
-            pXRRSetScreenSize( gdi_display, root_window, mode_info->width, mode_info->height,
-                               screen->mwidth, screen->mheight );
-        }
-    }
+    XUngrabServer( gdi_display );
 
     pXRRFreeCrtcInfo( crtc_info );
     pXRRFreeScreenResources( resources );

@@ -27,6 +27,8 @@
 #import <QuartzCore/QuartzCore.h>
 #endif
 
+#include "wine/hostaddrspace_enter.h"
+
 #import "cocoa_window.h"
 
 #include "macdrv_cocoa.h"
@@ -370,10 +372,10 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 @property (readwrite, getter=isFakingClose, nonatomic) BOOL fakingClose;
 @property (retain, nonatomic) NSWindow* latentParentWindow;
 
-@property (nonatomic) void* hwnd;
+@property (nonatomic) void* WIN32PTR hwnd;
 @property (retain, readwrite, nonatomic) WineEventQueue* queue;
 
-@property (nonatomic) void* surface;
+@property (nonatomic) void* WIN32PTR surface;
 @property (nonatomic) pthread_mutex_t* surface_mutex;
 
 @property (copy, nonatomic) NSBezierPath* shape;
@@ -385,7 +387,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 @property (nonatomic) CGFloat colorKeyRed, colorKeyGreen, colorKeyBlue;
 @property (nonatomic) BOOL usePerPixelAlpha;
 
-@property (assign, nonatomic) void* imeData;
+@property (assign, nonatomic) void* WIN32PTR imeData;
 @property (nonatomic) BOOL commandDone;
 
 @property (readonly, copy, nonatomic) NSArray* childWineWindows;
@@ -702,6 +704,13 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         [self invalidateHasGLDescendant];
     }
 
+    - (void) clearMarkedText
+    {
+        [markedText deleteCharactersInRange:NSMakeRange(0, [markedText length])];
+        markedTextSelection = NSMakeRange(0, 0);
+        [[self inputContext] discardMarkedText];
+    }
+
     - (void) completeText:(NSString*)text
     {
         macdrv_event* event;
@@ -716,9 +725,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 
         macdrv_release_event(event);
 
-        [markedText deleteCharactersInRange:NSMakeRange(0, [markedText length])];
-        markedTextSelection = NSMakeRange(0, 0);
-        [[self inputContext] discardMarkedText];
+        [self clearMarkedText];
     }
 
     - (void) didAddSubview:(NSView*)subview
@@ -745,6 +752,12 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
             _metalView = nil;
 #endif
         [super willRemoveSubview:subview];
+    }
+
+    - (void) setLayer:(CALayer*)newLayer
+    {
+        [super setLayer:newLayer];
+        [self updateGLContexts];
     }
 
     /*
@@ -945,7 +958,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 
     + (WineWindow*) createWindowWithFeatures:(const struct macdrv_window_features*)wf
                                  windowFrame:(NSRect)window_frame
-                                        hwnd:(void*)hwnd
+                                        hwnd:(void* WIN32PTR)hwnd
                                        queue:(WineEventQueue*)queue
     {
         WineWindow* window;
@@ -1278,6 +1291,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
                     }
                     else
                     {
+                        [self setStyleMask:(([self styleMask] | NSMiniaturizableWindowMask))];
                         [super miniaturize:nil];
                         discard |= event_mask_for_type(WINDOW_BROUGHT_FORWARD) |
                                    event_mask_for_type(WINDOW_GOT_FOCUS) |
@@ -1752,6 +1766,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 
             if (pendingMinimize)
             {
+                [self setStyleMask:(([self styleMask] | NSMiniaturizableWindowMask))];
                 [super miniaturize:nil];
                 pendingMinimize = FALSE;
             }
@@ -2259,7 +2274,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
                 return;
         }
 
-        const void* windowID = (const void*)(CGWindowID)window.windowNumber;
+        const void* windowID = (const void*)window.windowNumber;
         CFArrayRef windowIDs = CFArrayCreate(NULL, &windowID, 1, NULL);
         CGImageRef windowImage = CGWindowListCreateImageFromArray(CGRectNull, windowIDs, kCGWindowImageBoundsIgnoreFraming);
         CFRelease(windowIDs);
@@ -3268,7 +3283,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
  * title bar, close box, etc.).
  */
 macdrv_window macdrv_create_cocoa_window(const struct macdrv_window_features* wf,
-        CGRect frame, void* hwnd, macdrv_event_queue queue)
+        CGRect frame, void* WIN32PTR hwnd, macdrv_event_queue queue)
 {
     __block WineWindow* window;
 
@@ -3307,7 +3322,7 @@ void macdrv_destroy_cocoa_window(macdrv_window w)
  *
  * Get the hwnd that was set for the window at creation.
  */
-void* macdrv_get_window_hwnd(macdrv_window w)
+void* WIN32PTR macdrv_get_window_hwnd(macdrv_window w)
 {
     WineWindow* window = (WineWindow*)w;
     return window.hwnd;
@@ -3458,7 +3473,7 @@ void macdrv_set_cocoa_parent_window(macdrv_window w, macdrv_window parent)
 /***********************************************************************
  *              macdrv_set_window_surface
  */
-void macdrv_set_window_surface(macdrv_window w, void *surface, pthread_mutex_t *mutex)
+void macdrv_set_window_surface(macdrv_window w, void * WIN32PTR surface, pthread_mutex_t *mutex)
 {
     NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
     WineWindow* window = (WineWindow*)w;
@@ -3940,7 +3955,7 @@ uint32_t macdrv_window_background_color(void)
 /***********************************************************************
  *              macdrv_send_text_input_event
  */
-void macdrv_send_text_input_event(int pressed, unsigned int flags, int repeat, int keyc, void* data, int* done)
+void macdrv_send_text_input_event(int pressed, unsigned int flags, int repeat, int keyc, void* WIN32PTR data, int* done)
 {
     OnMainThreadAsync(^{
         BOOL ret;
@@ -3982,5 +3997,20 @@ void macdrv_send_text_input_event(int pressed, unsigned int flags, int repeat, i
         event->sent_text_input.done = done;
         [[window queue] postEvent:event];
         macdrv_release_event(event);
+    });
+}
+
+void macdrv_clear_ime_text(void)
+{
+    OnMainThreadAsync(^{
+        WineWindow* window = (WineWindow*)[NSApp keyWindow];
+        if (![window isKindOfClass:[WineWindow class]])
+        {
+            window = (WineWindow*)[NSApp mainWindow];
+            if (![window isKindOfClass:[WineWindow class]])
+                window = [[WineApplicationController sharedController] frontWineWindow];
+        }
+        if (window)
+            [[window contentView] clearMarkedText];
     });
 }

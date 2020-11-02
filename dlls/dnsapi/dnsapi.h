@@ -134,5 +134,5 @@ const char *dns_type_to_str( unsigned short ) DECLSPEC_HIDDEN;
 int dns_ns_initparse( const u_char *, int, ns_msg * ) DECLSPEC_HIDDEN;
 int dns_ns_parserr( ns_msg *, ns_sect, int, ns_rr * ) DECLSPEC_HIDDEN;
 int dns_ns_name_skip( const u_char **, const u_char * ) DECLSPEC_HIDDEN;
-int dns_ns_name_uncompress( const u_char *, const u_char *, const u_char *, char *, size_t ) DECLSPEC_HIDDEN;
+int dns_ns_name_uncompress( const u_char *, const u_char *, const u_char * HOSTPTR, char *, size_t ) DECLSPEC_HIDDEN;
 #endif

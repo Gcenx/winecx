@@ -20,6 +20,8 @@
 #ifndef __WINE_INCLUDE_DLS1_H
 #define __WINE_INCLUDE_DLS1_H
 
+#include "wine/winheader_enter.h"
+
 /*****************************************************************************
  * FOURCCs
  */
@@ -198,5 +200,7 @@ struct _rloop {
 	ULONG ulStart;
 	ULONG ulLength;
 };
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_INCLUDE_DLS1_H */

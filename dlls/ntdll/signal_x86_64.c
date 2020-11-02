@@ -18,7 +18,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
 
 #include "config.h"
 #include "wine/port.h"
@@ -54,6 +54,9 @@
 #ifdef HAVE_LIBUNWIND_H
 # define UNW_LOCAL_ONLY
 # include <libunwind.h>
+#endif
+#ifdef __APPLE__
+# include <mach/mach.h>
 #endif
 
 #define NONAMELESSUNION
@@ -340,11 +343,12 @@ struct dynamic_unwind_entry
 
     /* memory region which matches this entry */
     DWORD64 base;
-    DWORD size;
+    DWORD64 end;
 
     /* lookup table */
     RUNTIME_FUNCTION *table;
-    DWORD table_size;
+    DWORD count;
+    DWORD max_count;
 
     /* user defined callback */
     PGET_RUNTIME_FUNCTION_CALLBACK callback;
@@ -2518,7 +2522,7 @@ static RUNTIME_FUNCTION *find_function_info( ULONG64 pc, HMODULE module,
                                              RUNTIME_FUNCTION *func, ULONG size )
 {
     int min = 0;
-    int max = size/sizeof(*func) - 1;
+    int max = size - 1;
 
     while (min <= max)
     {
@@ -2553,7 +2557,7 @@ static RUNTIME_FUNCTION *lookup_function_info( ULONG64 pc, ULONG64 *base, LDR_MO
                                                   IMAGE_DIRECTORY_ENTRY_EXCEPTION, &size )))
         {
             /* lookup in function table */
-            func = find_function_info( pc, (*module)->BaseAddress, func, size );
+            func = find_function_info( pc, (*module)->BaseAddress, func, size/sizeof(*func) );
         }
     }
     else
@@ -2563,7 +2567,7 @@ static RUNTIME_FUNCTION *lookup_function_info( ULONG64 pc, ULONG64 *base, LDR_MO
         RtlEnterCriticalSection( &dynamic_unwind_section );
         LIST_FOR_EACH_ENTRY( entry, &dynamic_unwind_list, struct dynamic_unwind_entry, entry )
         {
-            if (pc >= entry->base && pc < entry->base + entry->size)
+            if (pc >= entry->base && pc < entry->end)
             {
                 *base = entry->base;
 
@@ -2571,7 +2575,7 @@ static RUNTIME_FUNCTION *lookup_function_info( ULONG64 pc, ULONG64 *base, LDR_MO
                 if (entry->callback)
                     func = entry->callback( pc, entry->context );
                 else
-                    func = find_function_info( pc, (HMODULE)entry->base, entry->table, entry->table_size );
+                    func = find_function_info( pc, (HMODULE)entry->base, entry->table, entry->count );
                 break;
             }
         }
@@ -2581,8 +2585,8 @@ static RUNTIME_FUNCTION *lookup_function_info( ULONG64 pc, ULONG64 *base, LDR_MO
     return func;
 }
 
-static DWORD nested_exception_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
-                                       CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
+static DWORD __cdecl nested_exception_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
+                                               CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
 {
     if (rec->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND)) return ExceptionContinueSearch;
 
@@ -3135,7 +3139,10 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *sigcontext )
         rec->ExceptionCode = EXCEPTION_SINGLE_STEP;
         break;
     case TRAP_BRKPT:   /* Breakpoint exception */
-        /* Check if this is actuallly icebp instruction */
+#ifdef SI_KERNEL
+    case SI_KERNEL:
+#endif
+        /* Check if this is actually icebp instruction */
         if (((unsigned char *)rec->ExceptionAddress)[-1] == 0xF1)
         {
             rec->ExceptionCode = EXCEPTION_SINGLE_STEP;
@@ -3261,24 +3268,24 @@ int CDECL __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
  */
 NTSTATUS signal_alloc_thread( TEB **teb )
 {
-    static size_t sigstack_zero_bits;
+    static size_t sigstack_alignment;
     SIZE_T size;
     NTSTATUS status;
 
-    if (!sigstack_zero_bits)
+    if (!sigstack_alignment)
     {
         size_t min_size = teb_size + max( MINSIGSTKSZ, 8192 );
         /* find the first power of two not smaller than min_size */
-        sigstack_zero_bits = 12;
-        while ((1u << sigstack_zero_bits) < min_size) sigstack_zero_bits++;
-        signal_stack_size = (1 << sigstack_zero_bits) - teb_size;
+        sigstack_alignment = 12;
+        while ((1u << sigstack_alignment) < min_size) sigstack_alignment++;
+        signal_stack_size = (1 << sigstack_alignment) - teb_size;
         assert( sizeof(TEB) <= teb_size );
     }
 
-    size = 1 << sigstack_zero_bits;
+    size = 1 << sigstack_alignment;
     *teb = NULL;
-    if (!(status = NtAllocateVirtualMemory( NtCurrentProcess(), (void **)teb, sigstack_zero_bits,
-                                            &size, MEM_COMMIT | MEM_TOP_DOWN, PAGE_READWRITE )))
+    if (!(status = virtual_alloc_aligned( (void **)teb, 0, &size, MEM_COMMIT | MEM_TOP_DOWN,
+                                          PAGE_READWRITE, sigstack_alignment )))
     {
         (*teb)->Tib.Self = &(*teb)->Tib;
         (*teb)->Tib.ExceptionList = (void *)~0UL;
@@ -3304,8 +3311,17 @@ void signal_free_thread( TEB *teb )
  */
 static void *mac_thread_gsbase(void)
 {
+    struct thread_identifier_info tiinfo;
+    unsigned int info_count = THREAD_IDENTIFIER_INFO_COUNT;
     static int gsbase_offset = -1;
     void *ret;
+
+    kern_return_t kr = thread_info(mach_thread_self(), THREAD_IDENTIFIER_INFO, (thread_info_t) &tiinfo, &info_count);
+    if (kr == KERN_SUCCESS)
+    {
+        TRACE("pthread_self() %p thread ID %llx gsbase %llx\n", pthread_self(), tiinfo.thread_id, tiinfo.thread_handle);
+        return (void*)tiinfo.thread_handle;
+    }
 
     if (gsbase_offset < 0)
     {
@@ -3459,12 +3475,13 @@ BOOLEAN CDECL RtlAddFunctionTable( RUNTIME_FUNCTION *table, DWORD count, DWORD64
     if (!entry)
         return FALSE;
 
-    entry->base       = addr;
-    entry->size       = table[count - 1].EndAddress;
-    entry->table      = table;
-    entry->table_size = count * sizeof(RUNTIME_FUNCTION);
-    entry->callback   = NULL;
-    entry->context    = NULL;
+    entry->base      = addr;
+    entry->end       = addr + (count ? table[count - 1].EndAddress : 0);
+    entry->table     = table;
+    entry->count     = count;
+    entry->max_count = 0;
+    entry->callback  = NULL;
+    entry->context   = NULL;
 
     RtlEnterCriticalSection( &dynamic_unwind_section );
     list_add_tail( &dynamic_unwind_list, &entry->entry );
@@ -3494,12 +3511,13 @@ BOOLEAN CDECL RtlInstallFunctionTableCallback( DWORD64 table, DWORD64 base, DWOR
     if (!entry)
         return FALSE;
 
-    entry->base       = base;
-    entry->size       = length;
-    entry->table      = (RUNTIME_FUNCTION *)table;
-    entry->table_size = 0;
-    entry->callback   = callback;
-    entry->context    = context;
+    entry->base      = base;
+    entry->end       = base + length;
+    entry->table     = (RUNTIME_FUNCTION *)table;
+    entry->count     = 0;
+    entry->max_count = 0;
+    entry->callback  = callback;
+    entry->context   = context;
 
     RtlEnterCriticalSection( &dynamic_unwind_section );
     list_add_tail( &dynamic_unwind_list, &entry->entry );
@@ -3515,9 +3533,29 @@ BOOLEAN CDECL RtlInstallFunctionTableCallback( DWORD64 table, DWORD64 base, DWOR
 DWORD WINAPI RtlAddGrowableFunctionTable( void **table, RUNTIME_FUNCTION *functions, DWORD count, DWORD max_count,
                                           ULONG_PTR base, ULONG_PTR end )
 {
-    FIXME( "(%p, %p, %d, %d, %ld, %ld) semi-stub!\n", table, functions, count, max_count, base, end );
-    if (table) *table = NULL;
-    return RtlAddFunctionTable(functions, count, base);
+    struct dynamic_unwind_entry *entry;
+
+    TRACE( "%p, %p, %u, %u, %lx, %lx\n", table, functions, count, max_count, base, end );
+
+    entry = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*entry) );
+    if (!entry)
+        return STATUS_NO_MEMORY;
+
+    entry->base      = base;
+    entry->end       = end;
+    entry->table     = functions;
+    entry->count     = count;
+    entry->max_count = max_count;
+    entry->callback  = NULL;
+    entry->context   = NULL;
+
+    RtlEnterCriticalSection( &dynamic_unwind_section );
+    list_add_tail( &dynamic_unwind_list, &entry->entry );
+    RtlLeaveCriticalSection( &dynamic_unwind_section );
+
+    *table = entry;
+
+    return STATUS_SUCCESS;
 }
 
 
@@ -3526,7 +3564,46 @@ DWORD WINAPI RtlAddGrowableFunctionTable( void **table, RUNTIME_FUNCTION *functi
  */
 void WINAPI RtlGrowFunctionTable( void *table, DWORD count )
 {
-    FIXME( "(%p, %d) stub!\n", table, count );
+    struct dynamic_unwind_entry *entry;
+
+    TRACE( "%p, %u\n", table, count );
+
+    RtlEnterCriticalSection( &dynamic_unwind_section );
+    LIST_FOR_EACH_ENTRY( entry, &dynamic_unwind_list, struct dynamic_unwind_entry, entry )
+    {
+        if (entry == table)
+        {
+            if (count > entry->count && count <= entry->max_count)
+                entry->count = count;
+            break;
+        }
+    }
+    RtlLeaveCriticalSection( &dynamic_unwind_section );
+}
+
+
+/*************************************************************************
+ *              RtlDeleteGrowableFunctionTable   (NTDLL.@)
+ */
+void WINAPI RtlDeleteGrowableFunctionTable( void *table )
+{
+    struct dynamic_unwind_entry *entry, *to_free = NULL;
+
+    TRACE( "%p\n", table );
+
+    RtlEnterCriticalSection( &dynamic_unwind_section );
+    LIST_FOR_EACH_ENTRY( entry, &dynamic_unwind_list, struct dynamic_unwind_entry, entry )
+    {
+        if (entry == table)
+        {
+            to_free = entry;
+            list_remove( &entry->entry );
+            break;
+        }
+    }
+    RtlLeaveCriticalSection( &dynamic_unwind_section );
+
+    RtlFreeHeap( GetProcessHeap(), 0, to_free );
 }
 
 
@@ -3874,8 +3951,8 @@ struct unwind_exception_frame
  *
  * Handler for exceptions happening while calling an unwind handler.
  */
-static DWORD unwind_exception_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
-                                       CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
+static DWORD __cdecl unwind_exception_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
+                                               CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
 {
     struct unwind_exception_frame *unwind_frame = (struct unwind_exception_frame *)frame;
     DISPATCHER_CONTEXT *dispatch = (DISPATCHER_CONTEXT *)dispatcher;
@@ -4173,7 +4250,7 @@ void WINAPI RtlUnwindEx( PVOID end_frame, PVOID target_ip, EXCEPTION_RECORD *rec
 
         new_context.Rip = *(ULONG64 *)context->Rsp;
         new_context.Rsp = context->Rsp + sizeof(ULONG64);
-        dispatch.EstablisherFrame = new_context.Rsp;
+        dispatch.EstablisherFrame = context->Rsp;
         dispatch.LanguageHandler = NULL;
 
     unwind_done:
@@ -4498,7 +4575,7 @@ PCONTEXT DECLSPEC_HIDDEN attach_thread( LPTHREAD_START_ROUTINE entry, void *arg,
         init_thread_context( ctx, entry, arg, relay );
     }
     ctx->ContextFlags = CONTEXT_FULL;
-    LdrInitializeThunk( ctx, (ULONG_PTR)&ctx->Rcx, 0, 0 );
+    LdrInitializeThunk( ctx, (void **)&ctx->Rcx, 0, 0 );
     return ctx;
 }
 
@@ -4557,4 +4634,4 @@ __ASM_STDCALL_FUNC( DbgBreakPoint, 0, "int $3; ret")
  */
 __ASM_STDCALL_FUNC( DbgUserBreakPoint, 0, "int $3; ret")
 
-#endif  /* __x86_64__ */
+#endif  /* __x86_64__ && !__i386_on_x86_64__ */

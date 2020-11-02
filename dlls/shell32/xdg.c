@@ -110,27 +110,27 @@ static const char *path_values[ARRAY_SIZE(paths)] = {
 
 static char *load_path(int path_id)
 {
-    char *env = getenv(paths[path_id].var_name);
+    char * HOSTPTR env = getenv(paths[path_id].var_name);
     char *ret;
     
     if (env != NULL && env[0]=='/')
     {
         ret = SHAlloc(strlen(env)+1);
         if (ret != NULL)
-            lstrcpyA(ret, env);
+            strcpy(ret, env);
         return ret;
     }
     
     if (memcmp(paths[path_id].default_value, "$HOME", 5)==0)
     {
-	char *home = getenv("HOME");
+	char * HOSTPTR home = getenv("HOME");
 	int len;
 
         if (!home) return NULL;
 	ret = SHAlloc(strlen(home)+strlen(paths[path_id].default_value)-5+1);
 	if (ret == NULL) return NULL;
 	
-	lstrcpyA(ret, home);
+	strcpy(ret, home);
 	len = strlen(ret);
 	if (len>0 && ret[len-1]=='/')
 	    ret[--len]=0;
@@ -747,9 +747,9 @@ char *XDG_GetStringValue(XDG_PARSED_FILE *file, const char *group_name, const ch
  * [in] home_dir - $HOME
  * [out] config_file - the name of the configuration file
  */
-static HRESULT get_xdg_config_file(char * home_dir, char ** config_file)
+static HRESULT get_xdg_config_file(char * HOSTPTR home_dir, char ** config_file)
 {
-    char *config_home;
+    char * HOSTPTR config_home;
 
     config_home = getenv("XDG_CONFIG_HOME");
     if (!config_home || !config_home[0])
@@ -830,7 +830,7 @@ static int parse_config1(const char * const *xdg_dirs, const unsigned int num_di
  * [in] home_dir - $HOME
  * [out] out_ptr - the directory name
  */
-static HRESULT parse_config2(char * p, const char * home_dir, char ** out_ptr)
+static HRESULT parse_config2(char * p, const char * HOSTPTR home_dir, char ** out_ptr)
 {
     BOOL relative;
     char *out, *d;
@@ -889,7 +889,7 @@ HRESULT XDG_UserDirLookup(const char * const *xdg_dirs, const unsigned int num_d
 {
     FILE *file;
     char **out;
-    char *home_dir, *config_file;
+    char * HOSTPTR home_dir, *config_file;
     char buffer[512];
     int len;
     unsigned int i;
@@ -939,14 +939,10 @@ HRESULT XDG_UserDirLookup(const char * const *xdg_dirs, const unsigned int num_d
 
         /* Parse the value */
         hr = parse_config2(p, home_dir, &out[idx]);
-        if (FAILED(hr))
+        if (hr == E_OUTOFMEMORY)
         {
-            if (hr == E_OUTOFMEMORY)
-            {
-                fclose(file);
-                goto xdg_user_dir_lookup_error;
-            }
-            continue;
+            fclose(file);
+            goto xdg_user_dir_lookup_error;
         }
     }
     fclose (file);

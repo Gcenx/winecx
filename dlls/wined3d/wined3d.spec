@@ -20,7 +20,9 @@
 @ cdecl wined3d_get_output_desc(ptr long ptr)
 @ cdecl wined3d_incref(ptr)
 @ cdecl wined3d_register_software_device(ptr ptr)
+@ cdecl wined3d_register_window(ptr ptr ptr long)
 @ cdecl wined3d_set_adapter_display_mode(ptr long ptr)
+@ cdecl wined3d_unregister_windows(ptr)
 
 @ cdecl wined3d_blend_state_create(ptr ptr ptr ptr ptr)
 @ cdecl wined3d_blend_state_decref(ptr)
@@ -120,8 +122,6 @@
 @ cdecl wined3d_device_get_vs_sampler(ptr long)
 @ cdecl wined3d_device_get_wined3d(ptr)
 @ cdecl wined3d_device_incref(ptr)
-@ cdecl wined3d_device_init_3d(ptr ptr)
-@ cdecl wined3d_device_init_gdi(ptr ptr)
 @ cdecl wined3d_device_multiply_transform(ptr long ptr)
 @ cdecl wined3d_device_process_vertices(ptr long long long ptr ptr long long)
 @ cdecl wined3d_device_release_focus_window(ptr)
@@ -189,8 +189,6 @@
 @ cdecl wined3d_device_set_vs_sampler(ptr long ptr)
 @ cdecl wined3d_device_setup_fullscreen_window(ptr ptr long long)
 @ cdecl wined3d_device_show_cursor(ptr long)
-@ cdecl wined3d_device_uninit_3d(ptr)
-@ cdecl wined3d_device_uninit_gdi(ptr)
 @ cdecl wined3d_device_update_sub_resource(ptr ptr long ptr ptr long long long)
 @ cdecl wined3d_device_update_texture(ptr ptr ptr)
 @ cdecl wined3d_device_validate_device(ptr ptr)
@@ -315,3 +313,5 @@
 @ cdecl wined3d_vertex_declaration_decref(ptr)
 @ cdecl wined3d_vertex_declaration_get_parent(ptr)
 @ cdecl wined3d_vertex_declaration_incref(ptr)
+
+@ cdecl wined3d_extract_shader_input_signature_from_dxbc(ptr ptr long)

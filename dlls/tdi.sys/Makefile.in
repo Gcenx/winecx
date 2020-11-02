@@ -1,5 +1,6 @@
 MODULE    = tdi.sys
-EXTRADLLFLAGS = -Wb,--subsystem,native
+
+EXTRADLLFLAGS = -mno-cygwin -Wl,--subsystem,native
 
 C_SRCS = \
 	main.c

@@ -647,7 +647,6 @@ static LRESULT BrsFolder_Treeview_Keydown(browse_info *info, LPNMTVKEYDOWN keydo
             TV_ITEMDATA *item_data;
 
             item.mask  = TVIF_PARAM;
-            item.mask  = TVIF_HANDLE|TVIF_PARAM;
             item.hItem = selected_item;
             SendMessageW(info->hwndTreeView, TVM_GETITEMW, 0, (LPARAM)&item);
             item_data = (TV_ITEMDATA *)item.lParam;
@@ -783,6 +782,8 @@ static BOOL BrsFolder_OnCreate( HWND hWnd, browse_info *info )
     info->hNotify = SHChangeNotifyRegister(hWnd, SHCNRF_InterruptLevel, SHCNE_ALLEVENTS, SHV_CHANGE_NOTIFY, 1, &ntreg);
 
     browsefolder_callback( info->lpBrowseInfo, hWnd, BFFM_INITIALIZED, 0 );
+
+    ILFree(computer_pidl);
 
     return TRUE;
 }

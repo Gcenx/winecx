@@ -19,7 +19,6 @@
 #include "wine/debug.h"
 #include "wine/heap.h"
 #include "wine/list.h"
-#include "wine/unicode.h"
 
 IClientSecurity client_security DECLSPEC_HIDDEN;
 struct list *table_list DECLSPEC_HIDDEN;
@@ -148,8 +147,17 @@ struct record
     struct table *table;
 };
 
+struct keyword
+{
+    const WCHAR *name;
+    const WCHAR *value;
+    const struct keyword *next;
+};
+
 struct view
 {
+    const WCHAR *path;                      /* ASSOCIATORS OF query */
+    const struct keyword *keywordlist;
     const struct property *proplist;
     struct table *table;
     const struct expr *cond;
@@ -170,8 +178,8 @@ struct query *addref_query( struct query * ) DECLSPEC_HIDDEN;
 void release_query( struct query *query ) DECLSPEC_HIDDEN;
 HRESULT exec_query( const WCHAR *, IEnumWbemClassObject ** ) DECLSPEC_HIDDEN;
 HRESULT parse_query( const WCHAR *, struct view **, struct list * ) DECLSPEC_HIDDEN;
-HRESULT create_view( const struct property *, const WCHAR *, const struct expr *,
-                     struct view ** ) DECLSPEC_HIDDEN;
+HRESULT create_view( const WCHAR *, const struct keyword *, const WCHAR *, const struct property *,
+                     const struct expr *, struct view ** ) DECLSPEC_HIDDEN;
 void destroy_view( struct view * ) DECLSPEC_HIDDEN;
 HRESULT execute_view( struct view * ) DECLSPEC_HIDDEN;
 void init_table_list( void ) DECLSPEC_HIDDEN;
@@ -231,7 +239,7 @@ static inline WCHAR *heap_strdupW( const WCHAR *src )
 {
     WCHAR *dst;
     if (!src) return NULL;
-    if ((dst = heap_alloc( (strlenW( src ) + 1) * sizeof(WCHAR) ))) strcpyW( dst, src );
+    if ((dst = heap_alloc( (lstrlenW( src ) + 1) * sizeof(WCHAR) ))) lstrcpyW( dst, src );
     return dst;
 }
 

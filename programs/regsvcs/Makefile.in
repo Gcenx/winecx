@@ -1,5 +1,7 @@
 MODULE    = regsvcs.exe
-APPMODE   = -mconsole -municode
+
+# CrossOver HACK for bug 16893 - build as .so so .NET 2 installs can override
+EXTRADLLFLAGS = -mconsole -municode
 
 C_SRCS = \
 	main.c

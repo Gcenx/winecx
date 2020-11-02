@@ -18,6 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
@@ -25,7 +29,7 @@
 
 int WINAPI wWinMain(HINSTANCE,HINSTANCE,LPWSTR,int);
 
-int wmain( int argc, WCHAR *argv[] )
+int __cdecl wmain( int argc, WCHAR *argv[] )
 {
     STARTUPINFOW info;
     WCHAR *cmdline = GetCommandLineW();

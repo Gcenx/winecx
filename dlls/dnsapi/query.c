@@ -156,7 +156,7 @@ static DNS_STATUS dns_map_h_errno( int error )
     }
 }
 
-static char *dns_dname_from_msg( ns_msg msg, const unsigned char *pos )
+static char *dns_dname_from_msg( ns_msg msg, const unsigned char * HOSTPTR pos )
 {
     int len;
     char *str, dname[NS_MAXDNAME] = ".";
@@ -170,7 +170,7 @@ static char *dns_dname_from_msg( ns_msg msg, const unsigned char *pos )
     return str;
 }
 
-static char *dns_str_from_rdata( const unsigned char *rdata )
+static char *dns_str_from_rdata( const unsigned char * HOSTPTR rdata )
 {
     char *str;
     unsigned int len = rdata[0];
@@ -186,7 +186,7 @@ static char *dns_str_from_rdata( const unsigned char *rdata )
 
 static unsigned int dns_get_record_size( const ns_rr *rr )
 {
-    const unsigned char *pos = rr->rdata;
+    const unsigned char * HOSTPTR pos = rr->rdata;
     unsigned int num = 0, size = sizeof(DNS_RECORDA);
 
     switch (rr->type)
@@ -218,6 +218,7 @@ static unsigned int dns_get_record_size( const ns_rr *rr )
         break;
     }
     case ns_t_null:
+    case ns_t_opt:
     {
         size += rr->rdlength - 1;
         break;
@@ -238,14 +239,14 @@ static unsigned int dns_get_record_size( const ns_rr *rr )
 static DNS_STATUS dns_copy_rdata( ns_msg msg, const ns_rr *rr, DNS_RECORDA *r, WORD *dlen )
 {
     DNS_STATUS ret = ERROR_SUCCESS;
-    const unsigned char *pos = rr->rdata;
+    const unsigned char * HOSTPTR pos = rr->rdata;
     unsigned int i, size;
 
     switch (rr->type)
     {
     case ns_t_a:
     {
-        r->Data.A.IpAddress = *(const DWORD *)pos;
+        r->Data.A.IpAddress = *(const DWORD * HOSTPTR)pos;
         *dlen = sizeof(DNS_A_DATA);
         break; 
     }
@@ -253,7 +254,7 @@ static DNS_STATUS dns_copy_rdata( ns_msg msg, const ns_rr *rr, DNS_RECORDA *r, W
     {
         for (i = 0; i < sizeof(IP6_ADDRESS)/sizeof(DWORD); i++)
         {
-            r->Data.AAAA.Ip6Address.IP6Dword[i] = *(const DWORD *)pos;
+            r->Data.AAAA.Ip6Address.IP6Dword[i] = *(const DWORD * HOSTPTR)pos;
             pos += sizeof(DWORD);
         }
 
@@ -263,7 +264,7 @@ static DNS_STATUS dns_copy_rdata( ns_msg msg, const ns_rr *rr, DNS_RECORDA *r, W
     case ns_t_key:
     {
         /* FIXME: byte order? */
-        r->Data.KEY.wFlags      = *(const WORD *)pos;   pos += sizeof(WORD);
+        r->Data.KEY.wFlags      = *(const WORD * HOSTPTR)pos; pos += sizeof(WORD);
         r->Data.KEY.chProtocol  = *pos++;
         r->Data.KEY.chAlgorithm = *pos++;
 
@@ -298,7 +299,7 @@ static DNS_STATUS dns_copy_rdata( ns_msg msg, const ns_rr *rr, DNS_RECORDA *r, W
     case ns_t_rt:
     case ns_t_mx:
     {
-        r->Data.MX.wPreference = ntohs( *(const WORD *)pos );
+        r->Data.MX.wPreference = ntohs( *(const WORD * HOSTPTR)pos );
         r->Data.MX.pNameExchange = dns_dname_from_msg( msg, pos + sizeof(WORD) );
         if (!r->Data.MX.pNameExchange) return ERROR_NOT_ENOUGH_MEMORY;
 
@@ -311,6 +312,15 @@ static DNS_STATUS dns_copy_rdata( ns_msg msg, const ns_rr *rr, DNS_RECORDA *r, W
         memcpy( r->Data.Null.Data, rr->rdata, rr->rdlength );
 
         *dlen = sizeof(DNS_NULL_DATA) + rr->rdlength - 1;
+        break;
+    }
+    case ns_t_opt:
+    {
+        r->Data.OPT.wDataLength = rr->rdlength;
+        r->Data.OPT.wPad        = 0;
+        memcpy( r->Data.OPT.Data, rr->rdata, rr->rdlength );
+
+        *dlen = sizeof(DNS_OPT_DATA) + rr->rdlength - 1;
         break;
     }
     case ns_t_cname:
@@ -337,13 +347,13 @@ static DNS_STATUS dns_copy_rdata( ns_msg msg, const ns_rr *rr, DNS_RECORDA *r, W
             return DNS_ERROR_BAD_PACKET;
 
         /* FIXME: byte order? */
-        r->Data.SIG.wTypeCovered  = *(const WORD *)pos;   pos += sizeof(WORD);
+        r->Data.SIG.wTypeCovered  = *(const WORD * HOSTPTR)pos;   pos += sizeof(WORD);
         r->Data.SIG.chAlgorithm   = *pos++;
         r->Data.SIG.chLabelCount  = *pos++;
-        r->Data.SIG.dwOriginalTtl = *(const DWORD *)pos;  pos += sizeof(DWORD);
-        r->Data.SIG.dwExpiration  = *(const DWORD *)pos;  pos += sizeof(DWORD);
-        r->Data.SIG.dwTimeSigned  = *(const DWORD *)pos;  pos += sizeof(DWORD);
-        r->Data.SIG.wKeyTag       = *(const WORD *)pos;
+        r->Data.SIG.dwOriginalTtl = *(const DWORD * HOSTPTR)pos;  pos += sizeof(DWORD);
+        r->Data.SIG.dwExpiration  = *(const DWORD * HOSTPTR)pos;  pos += sizeof(DWORD);
+        r->Data.SIG.dwTimeSigned  = *(const DWORD * HOSTPTR)pos;  pos += sizeof(DWORD);
+        r->Data.SIG.wKeyTag       = *(const WORD * HOSTPTR)pos;
 
         size = rr->rdata + rr->rdlength - pos;
 
@@ -371,20 +381,20 @@ static DNS_STATUS dns_copy_rdata( ns_msg msg, const ns_rr *rr, DNS_RECORDA *r, W
         if (dns_ns_name_skip( &pos, ns_msg_end( msg ) ) < 0)
             return DNS_ERROR_BAD_PACKET;
 
-        r->Data.SOA.dwSerialNo   = ntohl( *(const DWORD *)pos ); pos += sizeof(DWORD);
-        r->Data.SOA.dwRefresh    = ntohl( *(const DWORD *)pos ); pos += sizeof(DWORD);
-        r->Data.SOA.dwRetry      = ntohl( *(const DWORD *)pos ); pos += sizeof(DWORD);
-        r->Data.SOA.dwExpire     = ntohl( *(const DWORD *)pos ); pos += sizeof(DWORD);
-        r->Data.SOA.dwDefaultTtl = ntohl( *(const DWORD *)pos ); pos += sizeof(DWORD);
+        r->Data.SOA.dwSerialNo   = ntohl( *(const DWORD * HOSTPTR)pos ); pos += sizeof(DWORD);
+        r->Data.SOA.dwRefresh    = ntohl( *(const DWORD * HOSTPTR)pos ); pos += sizeof(DWORD);
+        r->Data.SOA.dwRetry      = ntohl( *(const DWORD * HOSTPTR)pos ); pos += sizeof(DWORD);
+        r->Data.SOA.dwExpire     = ntohl( *(const DWORD * HOSTPTR)pos ); pos += sizeof(DWORD);
+        r->Data.SOA.dwDefaultTtl = ntohl( *(const DWORD * HOSTPTR)pos ); pos += sizeof(DWORD);
 
         *dlen = sizeof(DNS_SOA_DATAA);
         break; 
     }
     case ns_t_srv:
     {
-        r->Data.SRV.wPriority = ntohs( *(const WORD *)pos ); pos += sizeof(WORD);
-        r->Data.SRV.wWeight   = ntohs( *(const WORD *)pos ); pos += sizeof(WORD);
-        r->Data.SRV.wPort     = ntohs( *(const WORD *)pos ); pos += sizeof(WORD);
+        r->Data.SRV.wPriority = ntohs( *(const WORD * HOSTPTR)pos ); pos += sizeof(WORD);
+        r->Data.SRV.wWeight   = ntohs( *(const WORD * HOSTPTR)pos ); pos += sizeof(WORD);
+        r->Data.SRV.wPort     = ntohs( *(const WORD * HOSTPTR)pos ); pos += sizeof(WORD);
 
         r->Data.SRV.pNameTarget = dns_dname_from_msg( msg, pos );
         if (!r->Data.SRV.pNameTarget) return ERROR_NOT_ENOUGH_MEMORY;
@@ -642,7 +652,7 @@ exit:
 
 #endif /* HAVE_RESOLV */
 
-static const char *debugstr_query_request(const DNS_QUERY_REQUEST *req)
+static const char * HOSTPTR debugstr_query_request(const DNS_QUERY_REQUEST *req)
 {
     if (!req)
         return "(null)";

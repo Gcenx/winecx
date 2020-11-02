@@ -71,8 +71,6 @@ static class_decl_t *add_dim_prop(parser_ctx_t*,class_decl_t*,dim_decl_t*,unsign
 
 static statement_t *link_statements(statement_t*,statement_t*);
 
-static const WCHAR propertyW[] = {'p','r','o','p','e','r','t','y',0};
-
 #define STORAGE_IS_PRIVATE    1
 #define STORAGE_IS_DEFAULT    2
 
@@ -104,21 +102,23 @@ static const WCHAR propertyW[] = {'p','r','o','p','e','r','t','y',0};
     double dbl;
 }
 
-%token tEOF tNL tREM tEMPTYBRACKETS
-%token tTRUE tFALSE
-%token tNOT tAND tOR tXOR tEQV tIMP tNEQ
-%token tIS tLTEQ tGTEQ tMOD
-%token tCALL tDIM tSUB tFUNCTION tPROPERTY tGET tLET tCONST
-%token tIF tELSE tELSEIF tEND tTHEN tEXIT
-%token tWHILE tWEND tDO tLOOP tUNTIL tFOR tTO tSTEP tEACH tIN
-%token tSELECT tCASE
-%token tBYREF tBYVAL
-%token tOPTION tEXPLICIT
-%token tSTOP
-%token tNOTHING tEMPTY tNULL
-%token tCLASS tSET tNEW tPUBLIC tPRIVATE tDEFAULT tME
-%token tERROR tNEXT tON tRESUME tGOTO
+%token tEOF tNL tEMPTYBRACKETS
+%token tLTEQ tGTEQ tNEQ
+%token tSTOP tME tREM
+%token <string> tTRUE tFALSE
+%token <string> tNOT tAND tOR tXOR tEQV tIMP
+%token <string> tIS tMOD
+%token <string> tCALL tDIM tSUB tFUNCTION tGET tLET tCONST
+%token <string> tIF tELSE tELSEIF tEND tTHEN tEXIT
+%token <string> tWHILE tWEND tDO tLOOP tUNTIL tFOR tTO tEACH tIN
+%token <string> tSELECT tCASE
+%token <string> tBYREF tBYVAL
+%token <string> tOPTION
+%token <string> tNOTHING tEMPTY tNULL
+%token <string> tCLASS tSET tNEW tPUBLIC tPRIVATE
+%token <string> tNEXT tON tRESUME tGOTO
 %token <string> tIdentifier tString
+%token <string> tDEFAULT tERROR tEXPLICIT tPROPERTY tSTEP
 %token <lng> tLong tShort
 %token <dbl> tDouble
 
@@ -138,7 +138,7 @@ static const WCHAR propertyW[] = {'p','r','o','p','e','r','t','y',0};
 %type <dim_decl> DimDeclList DimDecl
 %type <dim_list> DimList
 %type <const_decl> ConstDecl ConstDeclList
-%type <string> Identifier
+%type <string> Identifier DotIdentifier
 %type <case_clausule> CaseClausules
 
 %%
@@ -210,7 +210,7 @@ SimpleStatement
 
 MemberExpression
     : Identifier                            { $$ = new_member_expression(ctx, NULL, $1); CHECK_ERROR; }
-    | CallExpression '.' Identifier         { $$ = new_member_expression(ctx, $1, $3); CHECK_ERROR; }
+    | CallExpression '.' DotIdentifier      { $$ = new_member_expression(ctx, $1, $3); CHECK_ERROR; }
 
 DimDeclList
     : DimDecl                               { $$ = $1; }
@@ -443,10 +443,67 @@ ArgumentDecl
     | tBYREF Identifier EmptyBrackets_opt       { $$ = new_argument_decl(ctx, $2, TRUE); }
     | tBYVAL Identifier EmptyBrackets_opt       { $$ = new_argument_decl(ctx, $2, FALSE); }
 
-/* 'property' may be both keyword and identifier, depending on context */
+/* these keywords may also be an identifier, depending on context */
 Identifier
     : tIdentifier    { $$ = $1; }
-    | tPROPERTY      { $$ = propertyW; }
+    | tDEFAULT       { $$ = $1; }
+    | tERROR         { $$ = $1; }
+    | tEXPLICIT      { $$ = $1; }
+    | tPROPERTY      { $$ = $1; }
+    | tSTEP          { $$ = $1; }
+
+/* most keywords can be an identifier after a dot */
+DotIdentifier
+    : Identifier     { $$ = $1; }
+    | tTRUE          { $$ = $1; }
+    | tFALSE         { $$ = $1; }
+    | tNOT           { $$ = $1; }
+    | tAND           { $$ = $1; }
+    | tOR            { $$ = $1; }
+    | tXOR           { $$ = $1; }
+    | tEQV           { $$ = $1; }
+    | tIMP           { $$ = $1; }
+    | tIS            { $$ = $1; }
+    | tMOD           { $$ = $1; }
+    | tCALL          { $$ = $1; }
+    | tDIM           { $$ = $1; }
+    | tSUB           { $$ = $1; }
+    | tFUNCTION      { $$ = $1; }
+    | tGET           { $$ = $1; }
+    | tLET           { $$ = $1; }
+    | tCONST         { $$ = $1; }
+    | tIF            { $$ = $1; }
+    | tELSE          { $$ = $1; }
+    | tELSEIF        { $$ = $1; }
+    | tEND           { $$ = $1; }
+    | tTHEN          { $$ = $1; }
+    | tEXIT          { $$ = $1; }
+    | tWHILE         { $$ = $1; }
+    | tWEND          { $$ = $1; }
+    | tDO            { $$ = $1; }
+    | tLOOP          { $$ = $1; }
+    | tUNTIL         { $$ = $1; }
+    | tFOR           { $$ = $1; }
+    | tTO            { $$ = $1; }
+    | tEACH          { $$ = $1; }
+    | tIN            { $$ = $1; }
+    | tSELECT        { $$ = $1; }
+    | tCASE          { $$ = $1; }
+    | tBYREF         { $$ = $1; }
+    | tBYVAL         { $$ = $1; }
+    | tOPTION        { $$ = $1; }
+    | tNOTHING       { $$ = $1; }
+    | tEMPTY         { $$ = $1; }
+    | tNULL          { $$ = $1; }
+    | tCLASS         { $$ = $1; }
+    | tSET           { $$ = $1; }
+    | tNEW           { $$ = $1; }
+    | tPUBLIC        { $$ = $1; }
+    | tPRIVATE       { $$ = $1; }
+    | tNEXT          { $$ = $1; }
+    | tON            { $$ = $1; }
+    | tRESUME        { $$ = $1; }
+    | tGOTO          { $$ = $1; }
 
 /* Most statements accept both new line and ':' as separators */
 StSep
@@ -879,7 +936,7 @@ static class_decl_t *add_class_function(parser_ctx_t *ctx, class_decl_t *class_d
     function_decl_t *iter;
 
     for(iter = class_decl->funcs; iter; iter = iter->next) {
-        if(!strcmpiW(iter->name, decl->name)) {
+        if(!wcsicmp(iter->name, decl->name)) {
             if(decl->type == FUNC_SUB || decl->type == FUNC_FUNCTION) {
                 FIXME("Redefinition of %s::%s\n", debugstr_w(class_decl->name), debugstr_w(decl->name));
                 ctx->hres = E_FAIL;
@@ -972,7 +1029,7 @@ HRESULT parse_script(parser_ctx_t *ctx, const WCHAR *code, const WCHAR *delimite
     static const WCHAR html_delimiterW[] = {'<','/','s','c','r','i','p','t','>',0};
 
     ctx->code = ctx->ptr = code;
-    ctx->end = ctx->code + strlenW(ctx->code);
+    ctx->end = ctx->code + lstrlenW(ctx->code);
 
     heap_pool_init(&ctx->heap);
 
@@ -984,7 +1041,7 @@ HRESULT parse_script(parser_ctx_t *ctx, const WCHAR *code, const WCHAR *delimite
     ctx->stats = ctx->stats_tail = NULL;
     ctx->class_decls = NULL;
     ctx->option_explicit = FALSE;
-    ctx->is_html = delimiter && !strcmpiW(delimiter, html_delimiterW);
+    ctx->is_html = delimiter && !wcsicmp(delimiter, html_delimiterW);
 
     parser_parse(ctx);
 

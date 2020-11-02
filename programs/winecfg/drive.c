@@ -93,7 +93,7 @@ ULONG drive_available_mask(char letter)
   return result;
 }
 
-BOOL add_drive(char letter, const char *targetpath, const char *device, const WCHAR *label,
+BOOL add_drive(char letter, const char * HOSTPTR targetpath, const char *device, const WCHAR *label,
                DWORD serial, DWORD type)
 {
     int driveIndex = letter_to_index(letter);

@@ -19,6 +19,8 @@
 #ifndef __WINE_D3DX9XOF_H
 #define __WINE_D3DX9XOF_H
 
+#include "wine/winheader_enter.h"
+
 #include "d3dx9.h"
 
 #ifdef __cplusplus
@@ -49,7 +51,7 @@ typedef struct _D3DXF_FILELOADRESOURCE
 
 typedef struct _D3DXF_FILELOADMEMORY
 {
-    void *lpMemory;
+    const void *lpMemory;
     SIZE_T dSize;
 } D3DXF_FILELOADMEMORY;
 
@@ -182,5 +184,7 @@ DECLARE_INTERFACE_IID_(ID3DXFileData,IUnknown,"cef08cfd-7b4f-4429-9624-2a690a933
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_D3DX9XOF_H */

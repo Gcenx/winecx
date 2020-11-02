@@ -30,6 +30,7 @@
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 
+#define WINE_LIST_HOSTADDRSPACE
 #include "wine/list.h"
 
 #include "request.h"

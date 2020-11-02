@@ -8,7 +8,10 @@
 #ifndef __WINE_STRING_H
 #define __WINE_STRING_H
 
+#include "wine/winheader_enter.h"
+
 #include <crtdefs.h>
+#include <wine/asm.h>
 
 #ifndef _NLSCMP_DEFINED
 #define _NLSCMPERROR               ((unsigned int)0x7fffffff)
@@ -32,6 +35,9 @@ extern "C" {
 void*   __cdecl memchr(const void*,int,size_t);
 int     __cdecl memcmp(const void*,const void*,size_t);
 void*   __cdecl memcpy(void*,const void*,size_t);
+#ifdef __i386_on_x86_64__
+void* HOSTPTR __cdecl memcpy(void* HOSTPTR,const void* HOSTPTR,size_t) __attribute__((overloadable)) asm(__ASM_NAME("wine_memcpy_HOSTPTR"));
+#endif
 errno_t __cdecl memcpy_s(void*,size_t,const void*,size_t);
 void*   __cdecl memset(void*,int,size_t);
 void*   __cdecl _memccpy(void*,const void*,int,unsigned int);
@@ -73,6 +79,9 @@ errno_t __cdecl strcpy_s(char*,size_t,const char*);
 size_t  __cdecl strcspn(const char*,const char*);
 char*   __cdecl strerror(int);
 size_t  __cdecl strlen(const char*);
+#ifdef __i386_on_x86_64__
+size_t  __cdecl strlen(const char* HOSTPTR) __attribute__((overloadable)) asm(__ASM_NAME("wine_strlen_HOSTPTR"));
+#endif
 char*   __cdecl strncat(char*,const char*,size_t);
 errno_t __cdecl strncat_s(char*,size_t,const char*,size_t);
 int     __cdecl strncmp(const char*,const char*,size_t);
@@ -147,10 +156,13 @@ static inline char* strupr(char* str) { return _strupr(str); }
 static inline wchar_t* wcsdup(const wchar_t* str) { return _wcsdup(str); }
 static inline int wcsicoll(const wchar_t* str1, const wchar_t* str2) { return _wcsicoll(str1, str2); }
 static inline wchar_t* wcslwr(wchar_t* str) { return _wcslwr(str); }
+static inline int wcsicmp(const wchar_t* s1, const wchar_t* s2) { return _wcsicmp(s1, s2); }
 static inline int wcsnicmp(const wchar_t* str1, const wchar_t* str2, size_t n) { return _wcsnicmp(str1, str2, n); }
 static inline wchar_t* wcsnset(wchar_t* str, wchar_t c, size_t n) { return _wcsnset(str, c, n); }
 static inline wchar_t* wcsrev(wchar_t* str) { return _wcsrev(str); }
 static inline wchar_t* wcsset(wchar_t* str, wchar_t c) { return _wcsset(str, c); }
 static inline wchar_t* wcsupr(wchar_t* str) { return _wcsupr(str); }
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_STRING_H */

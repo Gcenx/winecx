@@ -23,6 +23,8 @@
 #ifndef __WINE_RPCNDR_H
 #define __WINE_RPCNDR_H
 
+#include "wine/winheader_enter.h"
+
 #include <basetsd.h>
 #include <rpcsal.h>
 
@@ -427,7 +429,7 @@ typedef struct _MIDL_STUBLESS_PROXY_INFO
 } MIDL_STUBLESS_PROXY_INFO, *PMIDL_STUBLESS_PROXY_INFO;
 
 
-#if defined(__i386__) && !defined(_MSC_VER) && !defined(__MINGW32__) && !defined(__CYGWIN__)
+#if (defined(__i386__) || defined(__i386_on_x86_64__)) && !defined(_MSC_VER) && !defined(__MINGW32__) && !defined(__CYGWIN__)
 /* Calling convention for returning structures/unions is different between Windows and gcc on i386 */
 typedef LONG_PTR CLIENT_CALL_RETURN;
 #else
@@ -677,6 +679,8 @@ RPCRTAPI void RPC_ENTRY
 RPCRTAPI void RPC_ENTRY
   NdrServerCall( PRPC_MESSAGE pRpcMsg );
 RPCRTAPI void RPC_ENTRY
+  NdrServerCallAll( PRPC_MESSAGE pRpcMsg );
+RPCRTAPI void RPC_ENTRY
   NdrAsyncServerCall( PRPC_MESSAGE pRpcMsg );
 
 RPCRTAPI LONG RPC_ENTRY
@@ -774,4 +778,6 @@ RPCRTAPI RPC_STATUS RPC_ENTRY
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 #endif /*__WINE_RPCNDR_H */

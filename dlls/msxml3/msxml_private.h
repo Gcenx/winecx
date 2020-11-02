@@ -288,7 +288,7 @@ extern MSXML_VERSION xmldoc_version( xmlDocPtr doc ) DECLSPEC_HIDDEN;
 
 extern HRESULT XMLElement_create( xmlNodePtr node, LPVOID *ppObj, BOOL own ) DECLSPEC_HIDDEN;
 
-extern void wineXmlCallbackLog(char const* caller, xmlErrorLevel lvl, char const* msg, va_list ap) DECLSPEC_HIDDEN;
+extern void wineXmlCallbackLog(char const* HOSTPTR caller, xmlErrorLevel lvl, char const* HOSTPTR msg, va_list ap) DECLSPEC_HIDDEN;
 extern void wineXmlCallbackError(char const* caller, xmlErrorPtr err) DECLSPEC_HIDDEN;
 
 #define LIBXML2_LOG_CALLBACK __WINE_PRINTF_ATTR(2,3)
@@ -363,8 +363,8 @@ extern xmlChar* tagName_to_XPath(const BSTR tagName) DECLSPEC_HIDDEN;
 
 #ifdef SONAME_LIBXSLT
 #  include <libxslt/documents.h>
-extern xmlDocPtr xslt_doc_default_loader(const xmlChar *uri, xmlDictPtr dict, int options,
-    void *_ctxt, xsltLoadType type) DECLSPEC_HIDDEN;
+extern xmlDocPtr xslt_doc_default_loader(const xmlChar * HOSTPTR uri, xmlDictPtr dict, int options,
+    void * HOSTPTR _ctxt, xsltLoadType type) DECLSPEC_HIDDEN;
 #endif /* SONAME_LIBXSLT */
 
 static inline BSTR bstr_from_xmlChar(const xmlChar *str)
@@ -372,10 +372,10 @@ static inline BSTR bstr_from_xmlChar(const xmlChar *str)
     BSTR ret = NULL;
 
     if(str) {
-        DWORD len = MultiByteToWideChar(CP_UTF8, 0, (LPCSTR)str, -1, NULL, 0);
+        DWORD len = MultiByteToWideChar(CP_UTF8, 0, (const char * HOSTPTR)str, -1, NULL, 0);
         ret = SysAllocStringLen(NULL, len-1);
         if(ret)
-            MultiByteToWideChar( CP_UTF8, 0, (LPCSTR)str, -1, ret, len);
+            MultiByteToWideChar( CP_UTF8, 0, (const char * HOSTPTR)str, -1, ret, len);
     }
     else
         ret = SysAllocStringLen(NULL, 0);
@@ -391,15 +391,15 @@ static inline xmlChar *xmlchar_from_wcharn(const WCHAR *str, int nchars, BOOL us
     xmlstr = use_xml_alloc ? xmlMalloc( len + 1 ) : heap_alloc( len + 1 );
     if ( xmlstr )
     {
-        WideCharToMultiByte( CP_UTF8, 0, str, nchars, (LPSTR) xmlstr, len+1, NULL, NULL );
+        WideCharToMultiByte( CP_UTF8, 0, str, nchars, (char * HOSTPTR) xmlstr, len+1, NULL, NULL );
         xmlstr[len] = 0;
     }
     return xmlstr;
 }
 
-static inline xmlChar *xmlchar_from_wchar( const WCHAR *str )
+static inline xmlChar * WIN32PTR xmlchar_from_wchar( const WCHAR *str )
 {
-    return xmlchar_from_wcharn(str, -1, FALSE);
+    return ADDRSPACECAST(unsigned char *, xmlchar_from_wcharn(str, -1, FALSE));
 }
 
 static inline xmlChar *heap_strdupxmlChar(const xmlChar *str)

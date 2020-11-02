@@ -21,6 +21,9 @@
 #ifndef _WINDEF_
 #define _WINDEF_
 
+#include "wine/winheader_enter.h"
+#include "wine/32on64utils.h"
+
 #ifndef WINVER
 #define WINVER 0x0500
 #endif
@@ -37,7 +40,7 @@ extern "C" {
 
 /* Calling conventions definitions */
 
-#if (defined(__x86_64__) || defined(__powerpc64__) || defined(__aarch64__)) && !defined(_WIN64)
+#if ((defined(__x86_64__) && !defined(__i386_on_x86_64__)) || defined(__powerpc64__) || defined(__aarch64__)) && !defined(_WIN64)
 #define _WIN64
 #endif
 
@@ -63,6 +66,8 @@ extern "C" {
 #  else
 #   error You need to define __stdcall for your compiler
 #  endif
+# elif defined(__i386_on_x86_64__)
+#   define __stdcall __attribute__((stdcall32)) __attribute__((__force_align_arg_pointer__))
 # elif defined(__x86_64__) && defined (__GNUC__)
 #  if (__GNUC__ > 5) || ((__GNUC__ == 5) && (__GNUC_MINOR__ >= 3))
 #   define __stdcall __attribute__((ms_abi)) __attribute__((__force_align_arg_pointer__))
@@ -85,6 +90,8 @@ extern "C" {
 #  else
 #   define __cdecl __attribute__((__cdecl__))
 #  endif
+# elif defined(__i386_on_x86_64__)
+#   define __cdecl __attribute__((cdecl32)) __attribute__((__force_align_arg_pointer__))
 # elif defined(__x86_64__) && defined (__GNUC__)
 #  if (__GNUC__ > 5) || ((__GNUC__ == 5) && (__GNUC_MINOR__ >= 3))
 #   define __cdecl __attribute__((ms_abi)) __attribute__((__force_align_arg_pointer__))
@@ -100,8 +107,31 @@ extern "C" {
 # endif
 #endif /* __cdecl */
 
+#ifndef __fastcall
+# ifndef _MSC_VER
+#  ifdef __i386_on_x86_64__
+#   define __fastcall __attribute__((fastcall32))
+#  else
+#   define __fastcall __stdcall
+#  endif
+# endif
+#endif
+
+#ifndef __thiscall
+# ifdef __i386_on_x86_64__
+#  define __thiscall __attribute__((thiscall32))
+# else
+#  define __thiscall __stdcall
+# endif
+#endif
+
 #ifndef __ms_va_list
-# if (defined(__x86_64__) || defined(__aarch64__)) && defined (__GNUC__)
+# if defined(__i386_on_x86_64__)
+#  define __ms_va_list __builtin_va_list32
+#  define __ms_va_start(list,arg) __builtin_va_start32(list,arg)
+#  define __ms_va_end(list) __builtin_va_end32(list)
+#  define __ms_va_copy(dest,src) __builtin_va_copy32(dest,src)
+# elif (defined(__x86_64__) || defined(__aarch64__)) && defined (__GNUC__)
 #  define __ms_va_list __builtin_ms_va_list
 #  define __ms_va_start(list,arg) __builtin_ms_va_start(list,arg)
 #  define __ms_va_end(list) __builtin_ms_va_end(list)
@@ -345,11 +375,11 @@ typedef INT_PTR (CALLBACK *PROC)();
 
 /* Macros to split words and longs. */
 
-#define LOBYTE(w)              ((BYTE)((DWORD_PTR)(w) & 0xFF))
-#define HIBYTE(w)              ((BYTE)((DWORD_PTR)(w) >> 8))
+#define LOBYTE(w)              ((BYTE)((ULONG_HOSTPTR)(w) & 0xFF))
+#define HIBYTE(w)              ((BYTE)((ULONG_HOSTPTR)(w) >> 8))
 
-#define LOWORD(l)              ((WORD)((DWORD_PTR)(l) & 0xFFFF))
-#define HIWORD(l)              ((WORD)((DWORD_PTR)(l) >> 16))
+#define LOWORD(l)              ((WORD)((ULONG_HOSTPTR)(l) & 0xFFFF))
+#define HIWORD(l)              ((WORD)((ULONG_HOSTPTR)(l) >> 16))
 
 #define MAKEWORD(low,high)     ((WORD)(((BYTE)((DWORD_PTR)(low) & 0xFF)) | ((WORD)((BYTE)((DWORD_PTR)(high) & 0xFF))) << 8))
 #define MAKELONG(low,high)     ((LONG)(((WORD)((DWORD_PTR)(low) & 0xFFFF)) | ((DWORD)((WORD)((DWORD_PTR)(high) & 0xFFFF))) << 16))
@@ -452,8 +482,19 @@ typedef enum DPI_AWARENESS
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((DPI_AWARENESS_CONTEXT)-4)
 #define DPI_AWARENESS_CONTEXT_UNAWARE_GDISCALED    ((DPI_AWARENESS_CONTEXT)-5)
 
+static inline int wine_is_64bit(void)
+{
+#ifdef __i386_on_x86_64__
+    return 0;
+#else
+    return sizeof(void*) > sizeof(int);
+#endif
+}
+
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* _WINDEF_ */

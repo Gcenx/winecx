@@ -36,7 +36,7 @@ static int printA(const char *msgA)
     return count;
 }
 
-int wmain(int argc, WCHAR *argv[])
+int __cdecl wmain(int argc, WCHAR *argv[])
 {
     int i;
 

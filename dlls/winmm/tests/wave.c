@@ -102,11 +102,11 @@ static char* wave_generate_la(WAVEFORMATEX* wfx, double duration, DWORD* size)
     for (i=0;i<nb_samples;i++) {
         double y=sin(440.0*2*PI*i/wfx->nSamplesPerSec);
         if (wfx->wBitsPerSample==8) {
-            unsigned char sample=(unsigned char)((double)127.5*(y+1.0));
+            unsigned char sample=(unsigned char)(127.5*(y+1.0));
             for (j = 0; j < wfx->nChannels; j++)
                 *b++=sample;
         } else if (wfx->wBitsPerSample==16) {
-            signed short sample=(signed short)((double)32767.5*y-0.5);
+            signed short sample=(signed short)(32767.5*y-0.5);
             for (j = 0; j < wfx->nChannels; j++) {
                 b[0]=sample & 0xff;
                 b[1]=sample >> 8;
@@ -665,8 +665,7 @@ static void wave_out_test_deviceOut(int device, double duration, int headers, in
        (rc==MMSYSERR_INVALFLAG && (flags & WAVE_FORMAT_DIRECT)),
        "waveOutOpen(%s): format=%dx%2dx%d flags=%x(%s) rc=%s\n",
        dev_name(device),pwfx->nSamplesPerSec,pwfx->wBitsPerSample,
-       pwfx->nChannels,CALLBACK_EVENT|flags,
-       wave_open_flags(CALLBACK_EVENT|flags),wave_out_error(rc));
+       pwfx->nChannels,flags,wave_open_flags(flags),wave_out_error(rc));
     if ((rc==WAVERR_BADFORMAT || rc==MMSYSERR_NOTSUPPORTED) &&
        (flags & WAVE_FORMAT_DIRECT) && (pcaps->dwFormats & format))
         trace(" Reason: The device lists this format as supported in its "

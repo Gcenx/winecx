@@ -18,15 +18,20 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
 #include "wine/library.h"
 #include "crt0_private.h"
+#include "wine/hostptraddrspace_enter.h"
 
 enum init_state __wine_spec_init_state = NO_INIT_DONE;
 
-extern const IMAGE_NT_HEADERS __wine_spec_nt_header;
+extern const WIN32STORAGE IMAGE_NT_HEADERS __wine_spec_nt_header;
 extern const char __wine_spec_file_name[];
 
 void DECLSPEC_HIDDEN __wine_spec_init(void)

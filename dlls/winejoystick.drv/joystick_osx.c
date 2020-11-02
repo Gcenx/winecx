@@ -55,6 +55,7 @@
 #define MAKE_HRESULT __carbon_MAKE_HRESULT
 #define HRESULT __carbon_HRESULT
 #define STDMETHODCALLTYPE __carbon_STDMETHODCALLTYPE
+#define LPVOID __carbon_LPVOID
 #include <IOKit/IOKitLib.h>
 #include <IOKit/hid/IOHIDLib.h>
 #undef ULONG
@@ -77,6 +78,7 @@
 #undef MAKE_HRESULT
 #undef HRESULT
 #undef STDMETHODCALLTYPE
+#undef LPVOID
 #undef DWORD
 #undef LPDWORD
 #undef LONG
@@ -179,7 +181,8 @@ static long get_device_location_ID(IOHIDDeviceRef device)
 static const char* debugstr_cf(CFTypeRef t)
 {
     CFStringRef s;
-    const char* ret;
+    const char* ret = NULL;
+    const char* HOSTPTR cstringptr;
 
     if (!t) return "(null)";
 
@@ -187,13 +190,13 @@ static const char* debugstr_cf(CFTypeRef t)
         s = t;
     else
         s = CFCopyDescription(t);
-    ret = CFStringGetCStringPtr(s, kCFStringEncodingUTF8);
-    if (ret) ret = debugstr_a(ret);
+    cstringptr = CFStringGetCStringPtr(s, kCFStringEncodingUTF8);
+    if (cstringptr) ret = debugstr_a(cstringptr);
     if (!ret)
     {
         const UniChar* u = CFStringGetCharactersPtr(s);
         if (u)
-            ret = debugstr_wn((const WCHAR*)u, CFStringGetLength(s));
+            ret = debugstr_wn((const WCHAR* HOSTPTR)u, CFStringGetLength(s));
     }
     if (!ret)
     {
@@ -284,7 +287,7 @@ static CFDictionaryRef create_osx_device_match(int usage)
 
     if (values[0] && values[1])
     {
-        result = CFDictionaryCreate(NULL, (const void**)keys, (const void**)values, ARRAY_SIZE(values),
+        result = CFDictionaryCreate(NULL, (const void* HOSTPTR * HOSTPTR)keys, (const void* HOSTPTR * HOSTPTR)values, ARRAY_SIZE(values),
                                     &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 
         if (!result)
@@ -363,7 +366,7 @@ static CFComparisonResult device_name_comparator(IOHIDDeviceRef device1, IOHIDDe
  *
  * Helper to sort device array first by location ID, since location IDs are consistent across boots & launches, then by product name
  */
-static CFComparisonResult device_location_name_comparator(const void *val1, const void *val2, void *context)
+static CFComparisonResult device_location_name_comparator(const void * HOSTPTR val1, const void * HOSTPTR val2, void * HOSTPTR context)
 {
     IOHIDDeviceRef device1 = (IOHIDDeviceRef)val1, device2 = (IOHIDDeviceRef)val2;
     long loc1 = get_device_location_ID(device1), loc2 = get_device_location_ID(device2);
@@ -380,7 +383,7 @@ static CFComparisonResult device_location_name_comparator(const void *val1, cons
  *
  * Helper to copy the CFSet to a CFArray
  */
-static void copy_set_to_array(const void *value, void *context)
+static void copy_set_to_array(const void * HOSTPTR value, void * HOSTPTR context)
 {
     CFArrayAppendValue(context, value);
 }
@@ -418,7 +421,7 @@ static int find_osx_devices(void)
         }
     }
 
-    matching = CFArrayCreate(NULL, (const void**)matching_dicts, ARRAY_SIZE(matching_dicts),
+    matching = CFArrayCreate(NULL, (const void* HOSTPTR * HOSTPTR)matching_dicts, ARRAY_SIZE(matching_dicts),
                              &kCFTypeArrayCallBacks);
 
     for (i = 0; i < ARRAY_SIZE(matching_dicts); i++)
@@ -434,7 +437,7 @@ static int find_osx_devices(void)
 
         num_devices = CFSetGetCount(devset);
         devices = CFArrayCreateMutable(kCFAllocatorDefault, num_devices, &kCFTypeArrayCallBacks);
-        CFSetApplyFunction(devset, copy_set_to_array, (void *)devices);
+        CFSetApplyFunction(devset, copy_set_to_array, (void * HOSTPTR)devices);
         CFArraySortValues(devices, CFRangeMake(0, num_devices), device_location_name_comparator, NULL);
 
         CFRelease(devset);
@@ -615,7 +618,7 @@ static void collect_joystick_elements(joystick_t* joystick, IOHIDElementRef coll
 /**************************************************************************
  *                              button_usage_comparator
  */
-static CFComparisonResult button_usage_comparator(const void *val1, const void *val2, void *context)
+static CFComparisonResult button_usage_comparator(const void * HOSTPTR val1, const void * HOSTPTR val2, void * HOSTPTR context)
 {
     IOHIDElementRef element1 = (IOHIDElementRef)val1, element2 = (IOHIDElementRef)val2;
     int usage1 = IOHIDElementGetUsage(element1), usage2 = IOHIDElementGetUsage(element2);

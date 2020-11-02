@@ -30,6 +30,7 @@
 #include "wtypes.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
+#include "wine/library.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
@@ -171,6 +172,30 @@ MSVCRT_wchar_t* CDECL MSVCRT__wcsnset( MSVCRT_wchar_t* str, MSVCRT_wchar_t c, MS
   MSVCRT_wchar_t* ret = str;
   while ((n-- > 0) && *str) *str++ = c;
   return ret;
+}
+
+/*********************************************************************
+ *              _wcsnset_s (MSVCRT.@)
+ */
+int CDECL MSVCRT__wcsnset_s( MSVCRT_wchar_t *str, MSVCRT_size_t size, MSVCRT_wchar_t c, MSVCRT_size_t count )
+{
+    MSVCRT_size_t i;
+
+    if(!str && !size && !count) return 0;
+    if(!MSVCRT_CHECK_PMT(str != NULL)) return MSVCRT_EINVAL;
+    if(!MSVCRT_CHECK_PMT(size > 0)) return MSVCRT_EINVAL;
+
+    for(i=0; i<size-1 && i<count; i++) {
+        if(!str[i]) return 0;
+        str[i] = c;
+    }
+    for(; i<size; i++)
+        if(!str[i]) return 0;
+
+    str[0] = 0;
+    MSVCRT__invalid_parameter(NULL, NULL, NULL, 0, 0);
+    *MSVCRT__errno() = MSVCRT_EINVAL;
+    return MSVCRT_EINVAL;
 }
 
 /*********************************************************************
@@ -772,8 +797,8 @@ static int puts_clbk_str_c99_a(void *ctx, int len, const char *str)
 /*********************************************************************
  *              __stdio_common_vsprintf (UCRTBASE.@)
  */
-int CDECL MSVCRT__stdio_common_vsprintf( unsigned __int64 options, char *str, MSVCRT_size_t len, const char *format,
-                                         MSVCRT__locale_t locale, __ms_va_list valist )
+int CDECL __stdio_common_vsprintf( unsigned __int64 options, char *str, MSVCRT_size_t len, const char *format,
+                                   MSVCRT__locale_t locale, __ms_va_list valist )
 {
     static const char nullbyte = '\0';
     struct _str_ctx_a ctx = {len, str};
@@ -2017,16 +2042,21 @@ INT CDECL MSVCRT_wcscpy_s( MSVCRT_wchar_t* wcDest, MSVCRT_size_t numElement, con
     if(!MSVCRT_CHECK_PMT(wcDest)) return MSVCRT_EINVAL;
     if(!MSVCRT_CHECK_PMT(numElement)) return MSVCRT_EINVAL;
 
-    wcDest[0] = 0;
-
-    if(!MSVCRT_CHECK_PMT(wcSrc)) return MSVCRT_EINVAL;
+    if(!MSVCRT_CHECK_PMT(wcSrc))
+    {
+        wcDest[0] = 0;
+        return MSVCRT_EINVAL;
+    }
 
     size = strlenW(wcSrc) + 1;
 
     if(!MSVCRT_CHECK_PMT_ERR(size <= numElement, MSVCRT_ERANGE))
+    {
+        wcDest[0] = 0;
         return MSVCRT_ERANGE;
+    }
 
-    memcpy( wcDest, wcSrc, size*sizeof(WCHAR) );
+    memmove( wcDest, wcSrc, size*sizeof(WCHAR) );
 
     return 0;
 }
@@ -2478,6 +2508,19 @@ MSVCRT_size_t CDECL MSVCRT_wcsnlen(const MSVCRT_wchar_t *s, MSVCRT_size_t maxlen
  */
 int CDECL MSVCRT__towupper_l(MSVCRT_wint_t c, MSVCRT__locale_t locale)
 {
+    MSVCRT_pthreadlocinfo locinfo;
+
+    if(!locale)
+        locinfo = get_locinfo();
+    else
+        locinfo = locale->locinfo;
+
+    if(!locinfo->lc_handle[MSVCRT_LC_CTYPE]) {
+        if(c >= 'a' && c <= 'z')
+            return c + 'A' - 'a';
+        return c;
+    }
+
     return toupperW(c);
 }
 
@@ -2494,6 +2537,19 @@ int CDECL MSVCRT_towupper(MSVCRT_wint_t c)
  */
 int CDECL MSVCRT__towlower_l(MSVCRT_wint_t c, MSVCRT__locale_t locale)
 {
+    MSVCRT_pthreadlocinfo locinfo;
+
+    if(!locale)
+        locinfo = get_locinfo();
+    else
+        locinfo = locale->locinfo;
+
+    if(!locinfo->lc_handle[MSVCRT_LC_CTYPE]) {
+        if(c >= 'A' && c <= 'Z')
+            return c + 'a' - 'A';
+        return c;
+    }
+
     return tolowerW(c);
 }
 

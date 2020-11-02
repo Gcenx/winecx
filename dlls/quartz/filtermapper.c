@@ -853,10 +853,10 @@ static BOOL MatchTypes(
 }
 
 /* internal helper function for qsort of MONIKER_MERIT array */
-static int mm_compare(const void * left, const void * right)
+static int mm_compare(const void * HOSTPTR left, const void * HOSTPTR right)
 {
-    const struct MONIKER_MERIT * mmLeft = left;
-    const struct MONIKER_MERIT * mmRight = right;
+    const struct MONIKER_MERIT * HOSTPTR mmLeft = left;
+    const struct MONIKER_MERIT * HOSTPTR mmRight = right;
 
     if (mmLeft->dwMerit == mmRight->dwMerit)
         return 0;

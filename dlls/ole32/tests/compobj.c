@@ -788,7 +788,7 @@ static HRESULT WINAPI MessageFilter_QueryInterface(IMessageFilter *iface, REFIID
     if (ppvObj == NULL) return E_POINTER;
 
     if (IsEqualGUID(riid, &IID_IUnknown) ||
-        IsEqualGUID(riid, &IID_IClassFactory))
+        IsEqualGUID(riid, &IID_IMessageFilter))
     {
         *ppvObj = iface;
         IMessageFilter_AddRef(iface);
@@ -1031,7 +1031,7 @@ static HRESULT WINAPI PSFactoryBuffer_CreateStub(
 {
     CHECK_EXPECT(CreateStub);
 
-    ok(pUnkServer == (IUnknown*)&Test_Unknown, "unexpected pUnkServer %p\n", pUnkServer);
+    ok(pUnkServer == &Test_Unknown, "unexpected pUnkServer %p\n", pUnkServer);
     if(!ps_factory_buffer)
         return E_NOTIMPL;
 
@@ -3308,14 +3308,14 @@ static ULONG WINAPI testinitialize_Release(IInitializeSpy *iface)
 
 static HRESULT WINAPI testinitialize_PreInitialize(IInitializeSpy *iface, DWORD coinit, DWORD aptrefs)
 {
-    ok(0, "unexpected call\n");
-    return E_NOTIMPL;
+    ok(coinit == (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE), "Unexpected init flags %#x.\n", coinit);
+    return S_OK;
 }
 
 static HRESULT WINAPI testinitialize_PostInitialize(IInitializeSpy *iface, HRESULT hr, DWORD coinit, DWORD aptrefs)
 {
-    ok(0, "unexpected call\n");
-    return E_NOTIMPL;
+    ok(coinit == (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE), "Unexpected init flags %#x.\n", coinit);
+    return hr;
 }
 
 static HRESULT WINAPI testinitialize_PreUninitialize(IInitializeSpy *iface, DWORD aptrefs)
@@ -3363,32 +3363,28 @@ static void test_IInitializeSpy(void)
     cookie.LowPart = 1;
     hr = CoRegisterInitializeSpy(&testinitialize, &cookie);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-todo_wine {
     ok(cookie.HighPart == GetCurrentThreadId(), "got high part 0x%08x, expected 0x%08x\n", cookie.HighPart,
         GetCurrentThreadId());
     ok(cookie.LowPart == 0, "got wrong low part 0x%x\n", cookie.LowPart);
-}
+
     /* register same instance one more time */
     cookie1.HighPart = 0;
     cookie1.LowPart = 0;
     hr = CoRegisterInitializeSpy(&testinitialize, &cookie1);
-todo_wine {
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(cookie1.HighPart == GetCurrentThreadId(), "got high part 0x%08x, expected 0x%08x\n", cookie1.HighPart,
         GetCurrentThreadId());
     ok(cookie1.LowPart == 1, "got wrong low part 0x%x\n", cookie1.LowPart);
-}
+
     cookie2.HighPart = 0;
     cookie2.LowPart = 0;
     hr = CoRegisterInitializeSpy(&testinitialize, &cookie2);
-todo_wine {
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(cookie2.HighPart == GetCurrentThreadId(), "got high part 0x%08x, expected 0x%08x\n", cookie2.HighPart,
         GetCurrentThreadId());
     ok(cookie2.LowPart == 2, "got wrong low part 0x%x\n", cookie2.LowPart);
-}
+
     hr = CoRevokeInitializeSpy(cookie1);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     hr = CoRevokeInitializeSpy(cookie1);
@@ -3397,22 +3393,24 @@ todo_wine
     cookie1.HighPart = 0;
     cookie1.LowPart = 0;
     hr = CoRegisterInitializeSpy(&testinitialize, &cookie1);
-todo_wine {
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(cookie1.HighPart == GetCurrentThreadId(), "got high part 0x%08x, expected 0x%08x\n", cookie1.HighPart,
         GetCurrentThreadId());
     ok(cookie1.LowPart == 1, "got wrong low part 0x%x\n", cookie1.LowPart);
-}
+
+    hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    ok(hr == S_OK, "Failed to initialize COM, hr %#x.\n", hr);
+
     hr = CoRevokeInitializeSpy(cookie);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     hr = CoRevokeInitializeSpy(cookie1);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     hr = CoRevokeInitializeSpy(cookie2);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    CoUninitialize();
 }
 
 static HRESULT g_persistfile_qi_ret;
@@ -3755,10 +3753,10 @@ static DWORD CALLBACK implicit_mta_proc(void *param)
     hr = CoRegisterMessageFilter(NULL, NULL);
     ok(hr == CO_E_NOT_SUPPORTED, "got %#x\n", hr);
 
-    hr = CoLockObjectExternal((IUnknown *)&Test_Unknown, TRUE, TRUE);
+    hr = CoLockObjectExternal(&Test_Unknown, TRUE, TRUE);
     ok_ole_success(hr, "CoLockObjectExternal");
 
-    hr = CoDisconnectObject((IUnknown *)&Test_Unknown, 0);
+    hr = CoDisconnectObject(&Test_Unknown, 0);
     ok_ole_success(hr, "CoDisconnectObject");
 
     return 0;

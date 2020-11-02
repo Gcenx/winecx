@@ -18,9 +18,12 @@
 #ifndef __WINE_STRSAFE_H
 #define __WINE_STRSAFE_H
 
+#include <stdarg.h>
+#ifndef _VA_LIST_T /* Clang's stdarg.h guards with _VA_LIST, while Xcode's uses _VA_LIST_T */
+#define _VA_LIST_T
+#endif
 #include <stdio.h>
 #include <string.h>
-#include <stdarg.h>
 
 /* Windows version includes this header. */
 /* #include <specstring.h> */

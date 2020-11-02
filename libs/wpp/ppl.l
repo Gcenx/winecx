@@ -171,11 +171,11 @@ ul	[uUlL]|[uUlL][lL]|[lL][uU]|[lL][lL][uU]|[uU][lL][lL]|[lL][uU][lL]
 #include <limits.h>
 
 #ifndef LLONG_MAX
-# define LLONG_MAX  ((long long)0x7fffffff << 32 | 0xffffffff)
+# define LLONG_MAX  ((__int64)0x7fffffff << 32 | 0xffffffff)
 # define LLONG_MIN  (-LLONG_MAX - 1)
 #endif
 #ifndef ULLONG_MAX
-# define ULLONG_MAX ((long long)0xffffffff << 32 | 0xffffffff)
+# define ULLONG_MAX ((__int64)0xffffffff << 32 | 0xffffffff)
 #endif
 
 #ifndef HAVE_UNISTD_H
@@ -306,7 +306,7 @@ includelogicentry_t *pp_includelogiclist = NULL;
 
 #define YY_INPUT(buf,result,max_size)					     \
 	{								     \
-		result = wpp_callbacks->read(pp_status.file, buf, max_size); \
+		result = fread(buf, 1, max_size, pp_status.file);	     \
 	}
 
 #define BUFFERINITIALCAPACITY 256
@@ -353,7 +353,7 @@ void pp_writestring(const char *format, ...)
 		va_end(valist);
 	}
 
-	wpp_callbacks->write(buffer, len);
+        fwrite(buffer, 1, len, ppy_out);
 }
 
 %}
@@ -899,29 +899,21 @@ static int make_number(int radix, YYSTYPE *val, const char *str, int len)
 		is_u++;
 	}
 
-	if(is_ll)
+	if(is_u && is_ll)
 	{
-/* Assume as in the declaration of wrc_ull_t and wrc_sll_t */
-#ifdef HAVE_LONG_LONG
-		if (is_u)
-		{
-			errno = 0;
-			val->ull = strtoull(str, NULL, radix);
-			if (val->ull == ULLONG_MAX && errno == ERANGE)
-				ppy_error("integer constant %s is too large\n", str);
-			return tULONGLONG;
-		}
-		else
-		{
-			errno = 0;
-			val->sll = strtoll(str, NULL, radix);
-			if ((val->sll == LLONG_MIN || val->sll == LLONG_MAX) && errno == ERANGE)
-				ppy_error("integer constant %s is too large\n", str);
-			return tSLONGLONG;
-		}
-#else
-		pp_internal_error(__FILE__, __LINE__, "long long constants not supported on this platform");
-#endif
+		errno = 0;
+		val->ull = strtoull(str, NULL, radix);
+		if (val->ull == ULLONG_MAX && errno == ERANGE)
+		    ppy_error("integer constant %s is too large\n", str);
+		return tULONGLONG;
+	}
+	else if(!is_u && is_ll)
+	{
+		errno = 0;
+		val->sll = strtoll(str, NULL, radix);
+		if ((val->sll == LLONG_MIN || val->sll == LLONG_MAX) && errno == ERANGE)
+		    ppy_error("integer constant %s is too large\n", str);
+		return tSLONGLONG;
 	}
 	else if(is_u && is_l)
 	{
@@ -1348,7 +1340,7 @@ static bufferstackentry_t *pop_buffer(void)
 
 		if(!bufferstack[bufferstackidx].should_pop)
 		{
-			wpp_callbacks->close(pp_status.file);
+			fclose(pp_status.file);
 			pp_writestring("# %d \"%s\" 2\n", bufferstack[bufferstackidx].line_number, bufferstack[bufferstackidx].filename);
 
 			/* We have EOF, check the include logic */
@@ -1569,7 +1561,7 @@ static void put_buffer(const char *s, int len)
 	if(top_macro())
 		add_text_to_macro(s, len);
 	else
-		wpp_callbacks->write(s, len);
+		fwrite(s, 1, len, ppy_out);
 }
 
 

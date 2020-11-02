@@ -134,7 +134,7 @@ BOOL WINAPI Shell_NotifyIconW(DWORD dwMessage, PNOTIFYICONDATAW nid)
 {
     HWND tray;
     COPYDATASTRUCT cds;
-    char *socketname;
+    char * HOSTPTR socketname;
     struct notify_data data_buffer;
     struct notify_data *data = &data_buffer;
     BOOL ret;

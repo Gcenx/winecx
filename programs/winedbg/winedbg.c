@@ -279,7 +279,7 @@ struct dbg_process*     dbg_get_process_h(HANDLE h)
     return NULL;
 }
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 extern struct backend_cpu be_i386;
 #elif defined(__powerpc__)
 extern struct backend_cpu be_ppc;
@@ -312,7 +312,7 @@ struct dbg_process*	dbg_add_process(const struct be_process_io* pio, DWORD pid, 
     p->pio_data = NULL;
     p->imageName = NULL;
     list_init(&p->threads);
-    p->continue_on_first_exception = FALSE;
+    p->event_on_first_exception = NULL;
     p->active_debuggee = FALSE;
     p->next_bp = 1;  /* breakpoint 0 is reserved for step-over */
     memset(p->bp, 0, sizeof(p->bp));
@@ -328,7 +328,7 @@ struct dbg_process*	dbg_add_process(const struct be_process_io* pio, DWORD pid, 
 
     IsWow64Process(h, &wow64);
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     p->be_cpu = &be_i386;
 #elif defined(__powerpc__)
     p->be_cpu = &be_ppc;
@@ -372,6 +372,7 @@ void dbg_del_process(struct dbg_process* p)
     source_free_files(p);
     list_remove(&p->entry);
     if (p == dbg_curr_process) dbg_curr_process = NULL;
+    if (p->event_on_first_exception) CloseHandle(p->event_on_first_exception);
     HeapFree(GetProcessHeap(), 0, (char*)p->imageName);
     HeapFree(GetProcessHeap(), 0, p);
 }
@@ -436,7 +437,7 @@ static BOOL CALLBACK mod_loader_cb(PCSTR mod_name, DWORD64 base, PVOID ctx)
 BOOL dbg_get_debuggee_info(HANDLE hProcess, IMAGEHLP_MODULE64* imh_mod)
 {
     struct mod_loader_info  mli;
-    DWORD                   opt;
+    BOOL                    opt;
 
     /* this will resynchronize builtin dbghelp's internal ELF module list */
     SymLoadModule(hProcess, 0, 0, 0, 0, 0);
@@ -447,9 +448,9 @@ BOOL dbg_get_debuggee_info(HANDLE hProcess, IMAGEHLP_MODULE64* imh_mod)
     /* this is a wine specific options to return also ELF modules in the
      * enumeration
      */
-    SymSetOptions((opt = SymGetOptions()) | 0x40000000);
+    opt = SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, TRUE);
     SymEnumerateModules64(hProcess, mod_loader_cb, &mli);
-    SymSetOptions(opt);
+    SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, opt);
 
     return imh_mod->BaseOfImage != 0;
 }
@@ -559,7 +560,12 @@ BOOL dbg_interrupt_debuggee(void)
     p = LIST_ENTRY(list_head(&dbg_process_list), struct dbg_process, entry);
     if (list_next(&dbg_process_list, &p->entry)) dbg_printf("Ctrl-C: only stopping the first process\n");
     else dbg_printf("Ctrl-C: stopping debuggee\n");
-    p->continue_on_first_exception = FALSE;
+    if (p->event_on_first_exception)
+    {
+        SetEvent(p->event_on_first_exception);
+        CloseHandle(p->event_on_first_exception);
+        p->event_on_first_exception = NULL;
+    }
     return DebugBreakProcess(p->handle);
 }
 
@@ -662,7 +668,7 @@ static void restart_if_wow64(void)
     }
 }
 
-int main(int argc, char** argv)
+int __cdecl main(int argc, char** argv)
 {
     int 	        retv = 0;
     HANDLE              hFile = INVALID_HANDLE_VALUE;

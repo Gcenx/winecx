@@ -759,7 +759,7 @@ static HRESULT BindStatusCallback_create(httprequest* This, BindStatusCallback *
         case VT_ARRAY|VT_UI1:
         {
             sa = V_ARRAY(body);
-            if ((hr = SafeArrayAccessData(sa, (void **)&ptr)) != S_OK)
+            if ((hr = SafeArrayAccessData(sa, &ptr)) != S_OK)
             {
                 heap_free(bsc);
                 return hr;
@@ -1138,7 +1138,7 @@ static HRESULT httprequest_get_responseText(httprequest *This, BSTR *body)
     hr = GetHGlobalFromStream(This->bsc->stream, &hglobal);
     if (hr == S_OK)
     {
-        xmlChar *ptr = GlobalLock(hglobal);
+        xmlChar * WIN32PTR ptr = GlobalLock(hglobal);
         DWORD size = GlobalSize(hglobal);
         xmlCharEncoding encoding = XML_CHAR_ENCODING_UTF8;
 

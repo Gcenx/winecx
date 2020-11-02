@@ -19,9 +19,13 @@
 #ifndef __WINE_WCT_H
 #define __WINE_WCT_H
 
+#include "wine/winheader_enter.h"
+
 typedef HRESULT (WINAPI *PCOGETCALLSTATE)(int,PULONG);
 typedef HRESULT (WINAPI *PCOGETACTIVATIONSTATE)(GUID,DWORD,DWORD*);
 
 void WINAPI RegisterWaitChainCOMCallback(PCOGETCALLSTATE,PCOGETACTIVATIONSTATE);
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_WCT_H */

@@ -64,7 +64,7 @@
 
 #include "debugger.h"
 
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
 
 /*
  * Switch to disassemble 16-bit code.

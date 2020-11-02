@@ -21,6 +21,8 @@
 #ifndef __WINE_WERAPI_H
 #define __WINE_WERAPI_H
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -186,9 +188,13 @@ HRESULT WINAPI WerReportSetUIOption(HREPORT, WER_REPORT_UI, PCWSTR);
 HRESULT WINAPI WerReportSubmit(HREPORT, WER_CONSENT, DWORD, PWER_SUBMIT_RESULT);
 HRESULT WINAPI WerSetFlags(DWORD flags);
 HRESULT WINAPI WerUnregisterMemoryBlock(void *block);
+HRESULT WINAPI WerUnregisterRuntimeExceptionModule(PCWSTR callbackdll, void *context);
+
 
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_WERAPI_H */

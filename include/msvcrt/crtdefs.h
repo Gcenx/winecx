@@ -21,6 +21,9 @@
 #ifndef __WINE_CRTDEFS_H
 #define __WINE_CRTDEFS_H
 
+#include "wine/winheader_enter.h"
+#include "wine/32on64utils.h"
+
 #ifndef __WINE_USE_MSVCRT
 #define __WINE_USE_MSVCRT
 #endif
@@ -29,15 +32,27 @@
 # error You cannot use both wine/port.h and msvcrt headers
 #endif
 
-#if (defined(__x86_64__) || defined(__powerpc64__) || defined(__aarch64__)) && !defined(_WIN64)
+#if ((defined(__x86_64__) && !defined(__i386_on_x86_64__)) || defined(__powerpc64__) || defined(__aarch64__)) && !defined(_WIN64)
 #define _WIN64
 #endif
 
+#if !defined(_MSC_VER) && !defined(__int32)
+# define __int32 int
+#endif
+
 #if !defined(_MSC_VER) && !defined(__int64)
-# if defined(_WIN64) && !defined(__MINGW64__)
+# if (defined(_WIN64) || defined(__i386_on_x86_64__)) && !defined(__MINGW64__)
 #   define __int64 long
 # else
 #   define __int64 long long
+# endif
+#endif
+
+#if !defined(_MSC_VER) && !defined(__int3264)
+# if defined(_WIN64)
+#  define __int3264 __int64
+# else
+#  define __int3264 __int32
 # endif
 #endif
 
@@ -54,6 +69,8 @@
 #  else
 #   error You need to define __stdcall for your compiler
 #  endif
+# elif defined(__i386_on_x86_64__)
+#   define __stdcall __attribute__((stdcall32)) __attribute__((__force_align_arg_pointer__))
 # elif defined(__x86_64__) && defined (__GNUC__)
 #  if (__GNUC__ > 5) || ((__GNUC__ == 5) && (__GNUC_MINOR__ >= 3))
 #   define __stdcall __attribute__((ms_abi)) __attribute__((__force_align_arg_pointer__))
@@ -76,6 +93,8 @@
 #  else
 #   define __cdecl __attribute__((__cdecl__))
 #  endif
+# elif defined(__i386_on_x86_64__)
+#   define __cdecl __attribute__((cdecl32)) __attribute__((__force_align_arg_pointer__))
 # elif defined(__x86_64__) && defined (__GNUC__)
 #  if (__GNUC__ > 5) || ((__GNUC__ == 5) && (__GNUC_MINOR__ >= 3))
 #   define __cdecl __attribute__((ms_abi)) __attribute__((__force_align_arg_pointer__))
@@ -92,7 +111,12 @@
 #endif /* __cdecl */
 
 #ifndef __ms_va_list
-# if (defined(__x86_64__) || defined(__aarch64__)) && defined (__GNUC__)
+# if defined(__i386_on_x86_64__)
+#  define __ms_va_list __builtin_va_list32
+#  define __ms_va_start(list,arg) __builtin_va_start32(list,arg)
+#  define __ms_va_end(list) __builtin_va_end32(list)
+#  define __ms_va_copy(dest,src) __builtin_va_copy32(dest,src)
+# elif (defined(__x86_64__) || defined(__aarch64__)) && defined (__GNUC__)
 #  define __ms_va_list __builtin_ms_va_list
 #  define __ms_va_start(list,arg) __builtin_ms_va_start(list,arg)
 #  define __ms_va_end(list) __builtin_ms_va_end(list)
@@ -114,6 +138,16 @@
 #  define WINAPIV __attribute__((pcs("aapcs")))
 # else
 #  define WINAPIV __cdecl
+# endif
+#endif
+
+#ifndef DECLSPEC_NORETURN
+# if defined(_MSC_VER) && (_MSC_VER >= 1200) && !defined(MIDL_PASS)
+#  define DECLSPEC_NORETURN __declspec(noreturn)
+# elif defined(__GNUC__)
+#  define DECLSPEC_NORETURN __attribute__((noreturn))
+# else
+#  define DECLSPEC_NORETURN
 # endif
 #endif
 
@@ -265,5 +299,7 @@ typedef struct threadlocaleinfostruct {
 } threadlocinfo;
 #define _THREADLOCALEINFO
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_CRTDEFS_H */

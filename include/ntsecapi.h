@@ -19,6 +19,8 @@
 #ifndef __WINE_NTSECAPI_H
 #define __WINE_NTSECAPI_H
 
+#include "wine/winheader_enter.h"
+
 #ifndef GUID_DEFINED
 # include <guiddef.h>
 #endif
@@ -349,12 +351,17 @@ typedef enum _POLICY_NOTIFICATION_INFORMATION_CLASS
     PolicyNotifyMachineAccountPasswordInformation
 } POLICY_NOTIFICATION_INFORMATION_CLASS, *PPOLICY_NOTIFICATION_INFORMATION_CLASS;
 
+typedef struct _AUDIT_POLICY_INFORMATION
+{
+    GUID    AuditSubCategoryGuid;
+    ULONG   AuditingInformation;
+    GUID    AuditCategoryGuid;
+} AUDIT_POLICY_INFORMATION, *PAUDIT_POLICY_INFORMATION;
+
 #define MICROSOFT_KERBEROS_NAME_A "Kerberos"
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__MINGW32__)
 #define MICROSOFT_KERBEROS_NAME_W L"Kerberos"
-#elif defined(__GNUC__)
-#define MICROSOFT_KERBEROS_NAME_W (const WCHAR []){ 'K','e','r','b','e','r','o','s',0 }
-#else /* _MSC_VER/__GNUC__ */
+#else /* _MSC_VER/__MINGW32__ */
 static const WCHAR MICROSOFT_KERBEROS_NAME_W[] = { 'K','e','r','b','e','r','o','s',0 };
 #endif
 
@@ -458,6 +465,8 @@ typedef struct _KERB_PURGE_TKT_CACHE_REQUEST
 #define RtlEncryptMemory                SystemFunction040
 #define RtlDecryptMemory                SystemFunction041
 
+BOOLEAN WINAPI AuditQuerySystemPolicy(const GUID*,ULONG,AUDIT_POLICY_INFORMATION**);
+
 BOOLEAN WINAPI RtlGenRandom(PVOID,ULONG);
 NTSTATUS WINAPI RtlEncryptMemory(PVOID,ULONG,ULONG);
 NTSTATUS WINAPI RtlDecryptMemory(PVOID,ULONG,ULONG);
@@ -504,5 +513,7 @@ NTSTATUS WINAPI LsaUnregisterPolicyChangeNotification(POLICY_NOTIFICATION_INFORM
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
+
+#include "wine/winheader_exit.h"
 
 #endif /* !defined(__WINE_NTSECAPI_H) */

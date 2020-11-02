@@ -131,7 +131,7 @@ struct d3d8_device
 
     /* The d3d8 API supports only one implicit swapchain (no D3DCREATE_ADAPTERGROUP_DEVICE,
      * no GetSwapchain, GetBackBuffer doesn't accept a swapchain number). */
-    struct d3d8_swapchain   *implicit_swapchain;
+    struct wined3d_swapchain *implicit_swapchain;
 };
 
 HRESULT device_init(struct d3d8_device *device, struct d3d8 *parent, struct wined3d *wined3d, UINT adapter,
@@ -208,7 +208,7 @@ struct d3d8_vertexbuffer
     struct wined3d_buffer *wined3d_buffer;
     IDirect3DDevice8 *parent_device;
     struct wined3d_buffer *draw_buffer;
-    DWORD fvf;
+    DWORD fvf, usage;
 };
 
 HRESULT vertexbuffer_init(struct d3d8_vertexbuffer *buffer, struct d3d8_device *device,
@@ -223,6 +223,7 @@ struct d3d8_indexbuffer
     IDirect3DDevice8 *parent_device;
     struct wined3d_buffer *draw_buffer;
     enum wined3d_format_id format;
+    DWORD usage;
 };
 
 HRESULT indexbuffer_init(struct d3d8_indexbuffer *buffer, struct d3d8_device *device,
@@ -250,6 +251,7 @@ struct d3d8_vertex_declaration
 {
     DWORD *elements;
     DWORD elements_size; /* Size of elements, in bytes */
+    DWORD stream_map;
     struct wined3d_vertex_declaration *wined3d_vertex_declaration;
     DWORD shader_handle;
 };
@@ -282,7 +284,7 @@ HRESULT d3d8_pixel_shader_init(struct d3d8_pixel_shader *shader, struct d3d8_dev
 
 D3DFORMAT d3dformat_from_wined3dformat(enum wined3d_format_id format) DECLSPEC_HIDDEN;
 enum wined3d_format_id wined3dformat_from_d3dformat(D3DFORMAT format) DECLSPEC_HIDDEN;
-unsigned int wined3dmapflags_from_d3dmapflags(unsigned int flags) DECLSPEC_HIDDEN;
+unsigned int wined3dmapflags_from_d3dmapflags(unsigned int flags, unsigned int usage) DECLSPEC_HIDDEN;
 void load_local_constants(const DWORD *d3d8_elements, struct wined3d_shader *wined3d_vertex_shader) DECLSPEC_HIDDEN;
 size_t parse_token(const DWORD *pToken) DECLSPEC_HIDDEN;
 
@@ -312,23 +314,35 @@ static inline D3DPOOL d3dpool_from_wined3daccess(unsigned int access, unsigned i
     }
 }
 
+static inline unsigned int map_access_from_usage(unsigned int usage)
+{
+    if (usage & D3DUSAGE_WRITEONLY)
+        return WINED3D_RESOURCE_ACCESS_MAP_W;
+    return WINED3D_RESOURCE_ACCESS_MAP_R | WINED3D_RESOURCE_ACCESS_MAP_W;
+}
+
 static inline unsigned int wined3daccess_from_d3dpool(D3DPOOL pool, unsigned int usage)
 {
+    unsigned int access;
+
     switch (pool)
     {
         case D3DPOOL_DEFAULT:
-            if (usage & D3DUSAGE_DYNAMIC)
-                return WINED3D_RESOURCE_ACCESS_GPU | WINED3D_RESOURCE_ACCESS_MAP_R | WINED3D_RESOURCE_ACCESS_MAP_W;
-            return WINED3D_RESOURCE_ACCESS_GPU;
+            access = WINED3D_RESOURCE_ACCESS_GPU;
+            break;
         case D3DPOOL_MANAGED:
-            return WINED3D_RESOURCE_ACCESS_GPU | WINED3D_RESOURCE_ACCESS_CPU
-                    | WINED3D_RESOURCE_ACCESS_MAP_R | WINED3D_RESOURCE_ACCESS_MAP_W;
+            access = WINED3D_RESOURCE_ACCESS_GPU | WINED3D_RESOURCE_ACCESS_CPU;
+            break;
         case D3DPOOL_SYSTEMMEM:
         case D3DPOOL_SCRATCH:
-            return WINED3D_RESOURCE_ACCESS_CPU | WINED3D_RESOURCE_ACCESS_MAP_R | WINED3D_RESOURCE_ACCESS_MAP_W;
+            access = WINED3D_RESOURCE_ACCESS_CPU;
+            break;
         default:
-            return 0;
+            access = 0;
     }
+    if (pool != D3DPOOL_DEFAULT || usage & D3DUSAGE_DYNAMIC)
+        access |= map_access_from_usage(usage);
+    return access;
 }
 
 static inline unsigned int wined3d_bind_flags_from_d3d8_usage(DWORD usage)

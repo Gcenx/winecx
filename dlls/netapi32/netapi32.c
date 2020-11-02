@@ -70,21 +70,21 @@ static char *strdup_unixcp( const WCHAR *str )
 
 #ifdef SONAME_LIBNETAPI
 
-static void *libnetapi_handle;
+static void * HOSTPTR libnetapi_handle;
 static void *libnetapi_ctx;
 
-static DWORD (*plibnetapi_init)(void **);
-static DWORD (*plibnetapi_free)(void *);
-static DWORD (*plibnetapi_set_debuglevel)(void *, const char *);
-static DWORD (*plibnetapi_set_username)(void *, const char *);
-static DWORD (*plibnetapi_set_password)(void *, const char *);
+static DWORD (* HOSTPTR plibnetapi_init)(void **);
+static DWORD (* HOSTPTR plibnetapi_free)(void *);
+static DWORD (* HOSTPTR plibnetapi_set_debuglevel)(void *, const char *);
+static DWORD (* HOSTPTR plibnetapi_set_username)(void *, const char *);
+static DWORD (* HOSTPTR plibnetapi_set_password)(void *, const char *);
 
-static NET_API_STATUS (*pNetApiBufferAllocate)(unsigned int, void **);
-static NET_API_STATUS (*pNetApiBufferFree)(void *);
-static NET_API_STATUS (*pNetServerGetInfo)(const char *, unsigned int, unsigned char **);
-static NET_API_STATUS (*pNetShareAdd)(const char *, unsigned int, unsigned char *, unsigned int *);
-static NET_API_STATUS (*pNetShareDel)(const char *, const char *, unsigned int);
-static NET_API_STATUS (*pNetWkstaGetInfo)(const char *, unsigned int, unsigned char **);
+static NET_API_STATUS (* HOSTPTR pNetApiBufferAllocate)(unsigned int, void **);
+static NET_API_STATUS (* HOSTPTR pNetApiBufferFree)(void *);
+static NET_API_STATUS (* HOSTPTR pNetServerGetInfo)(const char *, unsigned int, unsigned char **);
+static NET_API_STATUS (* HOSTPTR pNetShareAdd)(const char *, unsigned int, unsigned char *, unsigned int *);
+static NET_API_STATUS (* HOSTPTR pNetShareDel)(const char *, const char *, unsigned int);
+static NET_API_STATUS (* HOSTPTR pNetWkstaGetInfo)(const char *, unsigned int, unsigned char **);
 
 static void destroy_context(void)
 {
@@ -2876,7 +2876,7 @@ static NET_API_STATUS change_password_smb( LPCWSTR domainname, LPCWSTR username,
     int pipe_out[2];
     pid_t pid, wret;
     int status;
-    char *server = NULL, *user, *argv[7], *old = NULL, *new = NULL;
+    char *server = NULL, *user, * HOSTPTR argv[7], *old = NULL, *new = NULL;
 
     if (domainname && !(server = strdup_unixcp( domainname ))) return ERROR_OUTOFMEMORY;
     if (!(user = strdup_unixcp( username )))
@@ -3394,7 +3394,7 @@ DWORD WINAPI DavGetHTTPFromUNCPath(const WCHAR *unc_path, WCHAR *buf, DWORD *buf
     {
         p = ++q;
         while (*p && (*p != '\\' && *p != '/' && *p != '@')) p++;
-        if (p - q == 3 && !memicmpW( q, sslW, 3 ))
+        if (p - q == 3 && !strncmpiW( q, sslW, 3 ))
         {
             scheme = httpsW;
             q = p;
@@ -3477,8 +3477,8 @@ DWORD WINAPI DavGetUNCFromHTTPPath(const WCHAR *http_path, WCHAR *buf, DWORD *bu
     TRACE("(%s %p %p)\n", debugstr_w(http_path), buf, buflen);
 
     while (*p && *p != ':') { p++; len++; };
-    if (len == ARRAY_SIZE(httpW) && !memicmpW( http_path, httpW, len )) ssl = FALSE;
-    else if (len == ARRAY_SIZE(httpsW) && !memicmpW( http_path, httpsW, len )) ssl = TRUE;
+    if (len == ARRAY_SIZE(httpW) && !strncmpiW( http_path, httpW, len )) ssl = FALSE;
+    else if (len == ARRAY_SIZE(httpsW) && !strncmpiW( http_path, httpsW, len )) ssl = TRUE;
     else return ERROR_INVALID_PARAMETER;
 
     if (p[0] != ':' || p[1] != '/' || p[2] != '/') return ERROR_INVALID_PARAMETER;

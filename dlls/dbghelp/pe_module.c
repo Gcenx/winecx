@@ -53,7 +53,7 @@ static void* pe_map_full(struct image_file_map* fmap, IMAGE_NT_HEADERS** nth)
         fmap->u.pe.full_count++;
         return fmap->u.pe.full_map;
     }
-    return IMAGE_NO_MAP;
+    return NULL;
 }
 
 static void pe_unmap_full(struct image_file_map* fmap)
@@ -127,7 +127,7 @@ BOOL pe_find_section(struct image_file_map* fmap, const char* name,
             sectname = memcpy(tmp, sectname, IMAGE_SIZEOF_SHORT_NAME);
             tmp[IMAGE_SIZEOF_SHORT_NAME] = '\0';
         }
-        if (!strcasecmp(sectname, name))
+        if (!_strnicmp(sectname, name, -1))
         {
             ism->fmap = fmap;
             ism->sidx = i;
@@ -468,7 +468,7 @@ static BOOL pe_load_coff_symbol_table(struct module* module)
  */
 static BOOL pe_load_stabs(const struct process* pcs, struct module* module)
 {
-    struct image_file_map*      fmap = &module->format_info[DFI_PE]->u.pe_info->fmap;
+    struct image_file_map* WIN32PTR fmap = &module->format_info[DFI_PE]->u.pe_info->fmap;
     struct image_section_map    sect_stabs, sect_stabstr;
     BOOL                        ret = FALSE;
 
@@ -477,8 +477,8 @@ static BOOL pe_load_stabs(const struct process* pcs, struct module* module)
         const char* stab;
         const char* stabstr;
 
-        stab = image_map_section(&sect_stabs);
-        stabstr = image_map_section(&sect_stabstr);
+        stab = ADDRSPACECAST(const char*, image_map_section(&sect_stabs));
+        stabstr = ADDRSPACECAST(const char*, image_map_section(&sect_stabstr));
         if (stab != IMAGE_NO_MAP && stabstr != IMAGE_NO_MAP)
         {
             ret = stabs_parse(module,
@@ -504,7 +504,7 @@ static BOOL pe_load_stabs(const struct process* pcs, struct module* module)
  */
 static BOOL pe_load_dwarf(struct module* module)
 {
-    struct image_file_map*      fmap = &module->format_info[DFI_PE]->u.pe_info->fmap;
+    struct image_file_map* WIN32PTR fmap = &module->format_info[DFI_PE]->u.pe_info->fmap;
     BOOL                        ret;
 
     ret = dwarf2_parse(module,

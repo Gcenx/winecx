@@ -21,6 +21,8 @@
 #ifndef __WINE_HTTP_H
 #define __WINE_HTTP_H
 
+#include "wine/winheader_enter.h"
+
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
@@ -60,6 +62,7 @@ ULONG WINAPI HttpTerminate(ULONG,PVOID);
 ULONG WINAPI HttpAddUrl(HANDLE,PCWSTR,PVOID);
 ULONG WINAPI HttpCreateHttpHandle(PHANDLE,ULONG);
 ULONG WINAPI HttpCreateServerSession(HTTPAPI_VERSION,PHTTP_SERVER_SESSION_ID,ULONG);
+ULONG WINAPI HttpCloseServerSession(HTTP_SERVER_SESSION_ID);
 ULONG WINAPI HttpDeleteServiceConfiguration(HANDLE,HTTP_SERVICE_CONFIG_ID,PVOID,ULONG,LPOVERLAPPED);
 ULONG WINAPI HttpQueryServiceConfiguration(HANDLE,HTTP_SERVICE_CONFIG_ID,PVOID,ULONG,PVOID,ULONG,PULONG,LPOVERLAPPED);
 ULONG WINAPI HttpSetServiceConfiguration(HANDLE,HTTP_SERVICE_CONFIG_ID,PVOID,ULONG,LPOVERLAPPED);
@@ -67,5 +70,7 @@ ULONG WINAPI HttpSetServiceConfiguration(HANDLE,HTTP_SERVICE_CONFIG_ID,PVOID,ULO
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_HTTP_H */

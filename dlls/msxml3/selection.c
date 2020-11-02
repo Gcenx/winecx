@@ -760,7 +760,7 @@ static void XSLPattern_OP_IGEq(xmlXPathParserContextPtr pctx, int nargs)
     xmlFree(arg2);
 }
 
-static void query_serror(void* ctx, xmlErrorPtr err)
+static void query_serror(void* HOSTPTR ctx, xmlErrorPtr err)
 {
     LIBXML2_CALLBACK_SERROR(domselection_create, err);
 }
@@ -771,7 +771,7 @@ HRESULT create_selection(xmlNodePtr node, xmlChar* query, IXMLDOMNodeList **out)
     xmlXPathContextPtr ctxt = xmlXPathNewContext(node->doc);
     HRESULT hr;
 
-    TRACE("(%p, %s, %p)\n", node, debugstr_a((char const*)query), out);
+    TRACE("(%p, %s, %p)\n", node, debugstr_a((char const* HOSTPTR)query), out);
 
     *out = NULL;
     if (!This || !ctxt || !query)
@@ -831,7 +831,7 @@ HRESULT create_selection(xmlNodePtr node, xmlChar* query, IXMLDOMNodeList **out)
     TRACE("found %d matches\n", xmlXPathNodeSetGetLength(This->result->nodesetval));
 
 cleanup:
-    if (This && FAILED(hr))
+    if (FAILED(hr))
         IXMLDOMSelection_Release( &This->IXMLDOMSelection_iface );
     xmlXPathFreeContext(ctxt);
     return hr;

@@ -33,6 +33,7 @@
 #include "win.h"
 #include "user_private.h"
 #include "wine/unicode.h"
+#include "wine/asm.h"
 #include "wine/debug.h"
 
 WINE_DECLARE_DEBUG_CHANNEL(msg);
@@ -211,6 +212,49 @@ __ASM_GLOBAL_FUNC( WINPROC_wrapper,
                    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
                    __ASM_CFI(".cfi_same_value %ebp\n\t")
                    "ret" )
+#elif defined(__i386_on_x86_64__)
+/* Some window procedures modify register they shouldn't, or are not
+ * properly declared stdcall; so we need a small assembly wrapper to
+ * call them. */
+__ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(WINPROC_wrapper),
+                     "pushl %ebp\n\t"
+                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                     __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                     "movl %esp,%ebp\n\t"
+                     __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                     "pushl %edi\n\t"
+                     __ASM_CFI(".cfi_rel_offset %edi,-4\n\t")
+                     "pushl %esi\n\t"
+                     __ASM_CFI(".cfi_rel_offset %esi,-8\n\t")
+                     "pushl %ebx\n\t"
+                     __ASM_CFI(".cfi_rel_offset %ebx,-12\n\t")
+                     /* TreePad X Enterprise assumes that edi is < 0x80000000 in WM_TIMER messages */
+                     "xorl %edi,%edi\n\t"
+                     "subl $("__ASM_EXTRA_DIST"-4),%esp\n\t"
+                     "pushl 24(%ebp)\n\t"
+                     "pushl 20(%ebp)\n\t"
+                     "pushl 16(%ebp)\n\t"
+                     "pushl 12(%ebp)\n\t"
+                     "movl 8(%ebp),%eax\n\t"
+                     "call *%eax\n\t"
+                     "leal -12(%ebp),%esp\n\t"
+                     "popl %ebx\n\t"
+                     __ASM_CFI(".cfi_same_value %ebx\n\t")
+                     "popl %esi\n\t"
+                     __ASM_CFI(".cfi_same_value %esi\n\t")
+                     "popl %edi\n\t"
+                     __ASM_CFI(".cfi_same_value %edi\n\t")
+                     "leave\n\t"
+                     __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                     __ASM_CFI(".cfi_same_value %ebp\n\t")
+                     "ret" )
+LRESULT CDECL DECLSPEC_HIDDEN WINPROC_wrapper( WNDPROC proc, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
+{
+    if (wine_is_thunk32to64( proc ))
+        return proc( hwnd, msg, wParam, lParam );
+    else
+        return WINE_CALL_IMPL32(WINPROC_wrapper)( proc, hwnd, msg, wParam, lParam );
+}
 #else
 static inline LRESULT WINPROC_wrapper( WNDPROC proc, HWND hwnd, UINT msg,
                                        WPARAM wParam, LPARAM lParam )

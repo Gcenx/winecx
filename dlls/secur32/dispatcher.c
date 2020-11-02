@@ -44,7 +44,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(ntlm);
 
 SECURITY_STATUS fork_helper(PNegoHelper *new_helper, const char *prog,
-        char* const argv[])
+        char* HOSTPTR const argv[])
 {
 #ifdef HAVE_FORK
     int pipe_in[2];

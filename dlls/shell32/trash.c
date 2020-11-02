@@ -21,6 +21,7 @@
  */
 
 #include "config.h"
+#include "wine/port.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -64,18 +65,18 @@ WINE_DEFAULT_DEBUG_CHANNEL(trash);
  *  bucket name                 - currently only an empty string meaning the home bucket is supported
  *  trash file name             - a NUL-terminated string
  */
-static HRESULT TRASH_CreateSimplePIDL(LPCSTR filename, const WIN32_FIND_DATAW *data, LPITEMIDLIST *pidlOut)
+static HRESULT TRASH_CreateSimplePIDL(const char* HOSTPTR filename, const WIN32_FIND_DATAW *data, LPITEMIDLIST *pidlOut)
 {
-    LPITEMIDLIST pidl = SHAlloc(2+1+sizeof(WIN32_FIND_DATAW)+1+lstrlenA(filename)+1+2);
+    LPITEMIDLIST pidl = SHAlloc(2+1+sizeof(WIN32_FIND_DATAW)+1+strlen(filename)+1+2);
     *pidlOut = NULL;
     if (pidl == NULL)
         return E_OUTOFMEMORY;
-    pidl->mkid.cb = (USHORT)(2+1+sizeof(WIN32_FIND_DATAW)+1+lstrlenA(filename)+1);
+    pidl->mkid.cb = (USHORT)(2+1+sizeof(WIN32_FIND_DATAW)+1+strlen(filename)+1);
     pidl->mkid.abID[0] = 0;
     memcpy(pidl->mkid.abID+1, data, sizeof(WIN32_FIND_DATAW));
     pidl->mkid.abID[1+sizeof(WIN32_FIND_DATAW)] = 0;
-    lstrcpyA((LPSTR)(pidl->mkid.abID+1+sizeof(WIN32_FIND_DATAW)+1), filename);
-    *(USHORT *)(pidl->mkid.abID+1+sizeof(WIN32_FIND_DATAW)+1+lstrlenA(filename)+1) = 0;
+    strcpy((LPSTR)(pidl->mkid.abID+1+sizeof(WIN32_FIND_DATAW)+1), filename);
+    *(USHORT *)(pidl->mkid.abID+1+sizeof(WIN32_FIND_DATAW)+1+strlen(filename)+1) = 0;
     *pidlOut = pidl;
     return S_OK;
 }
@@ -133,7 +134,7 @@ static char *TRASH_GetTrashPath(const char *unix_path, const char **base_name)
      */
     if (memcmp(&stfs.f_fsid, &home_stfs.f_fsid, sizeof(fsid_t)) == 0)
     {
-        size_t home_size = lstrlenA(user->pw_dir);
+        size_t home_size = strlen(user->pw_dir);
         trash_path = heap_alloc(home_size + sizeof("/.Trash/") + name_size);
         if (!trash_path)
             return NULL;
@@ -222,12 +223,12 @@ BOOL TRASH_TrashFile(LPCWSTR wszPath)
  *  - set file deletion time
  *  - set original file location
  */
-HRESULT TRASH_GetDetails(const char *trash_path, const char *name, WIN32_FIND_DATAW *data)
+HRESULT TRASH_GetDetails(const char *trash_path, const char * HOSTPTR name, WIN32_FIND_DATAW *data)
 {
     static int once;
 
     int trash_path_length = lstrlenA(trash_path);
-    int name_length = lstrlenA(name);
+    int name_length = strlen(name);
     char *path = SHAlloc(trash_path_length+1+name_length+1);
     struct stat stats;
     int ret;
@@ -290,8 +291,8 @@ HRESULT TRASH_EnumItems(const WCHAR *path, LPITEMIDLIST **pidls, int *count)
     while((entry = readdir(dir))) {
         WIN32_FIND_DATAW data;
 
-        if(!lstrcmpA(entry->d_name, ".") || !lstrcmpA(entry->d_name, ".." )
-                || !lstrcmpA(entry->d_name, ".DS_Store"))
+        if(!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".." )
+                || !strcmp(entry->d_name, ".DS_Store"))
             continue;
 
         if(i == ret_size) {
@@ -605,7 +606,7 @@ BOOL TRASH_TrashFile(LPCWSTR wszPath)
     return result;
 }
 
-static HRESULT TRASH_GetDetails(const TRASH_BUCKET *bucket, LPCSTR filename, WIN32_FIND_DATAW *data)
+static HRESULT TRASH_GetDetails(const TRASH_BUCKET *bucket, const char* filename, WIN32_FIND_DATAW *data)
 {
     LPSTR path = NULL;
     XDG_PARSED_FILE *parsed = NULL;

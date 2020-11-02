@@ -2483,6 +2483,8 @@ HRESULT WINAPI WICConvertBitmapSource(REFWICPixelFormatGUID dstFormat, IWICBitma
     BOOL canconvert;
     ULONG num_fetched;
 
+    TRACE("%s,%p,%p\n", debugstr_guid(dstFormat), pISrc, ppIDst);
+
     res = IWICBitmapSource_GetPixelFormat(pISrc, &srcFormat);
     if (FAILED(res)) return res;
 
@@ -2523,7 +2525,7 @@ HRESULT WINAPI WICConvertBitmapSource(REFWICPixelFormatGUID dstFormat, IWICBitma
 
                     if (SUCCEEDED(res) && canconvert)
                         res = IWICFormatConverter_Initialize(converter, pISrc, dstFormat, WICBitmapDitherTypeNone,
-                            NULL, 0.0, WICBitmapPaletteTypeCustom);
+                            NULL, 0.0, WICBitmapPaletteTypeMedianCut);
 
                     if (FAILED(res) || !canconvert)
                     {

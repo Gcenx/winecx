@@ -241,8 +241,8 @@
 @ stub fdiml
 @ cdecl floor(double) ucrtbase.floor
 @ cdecl -arch=arm,x86_64,arm64 floorf(float) ucrtbase.floorf
-@ stub fma
-@ stub fmaf
+@ cdecl fma(double double double) ucrtbase.fma
+@ cdecl -arch=arm,x86_64,arm64 fmaf(float float float) ucrtbase.fmaf
 @ stub fmal
 @ cdecl fmax(double double) ucrtbase.fmax
 @ cdecl fmaxf(float float) ucrtbase.fmaxf
@@ -254,9 +254,9 @@
 @ cdecl -arch=arm,x86_64,arm64 fmodf(float float) ucrtbase.fmodf
 @ cdecl frexp(double ptr) ucrtbase.frexp
 @ cdecl hypot(double double) ucrtbase.hypot
-@ stub ilogb
-@ stub ilogbf
-@ stub ilogbl
+@ cdecl ilogb(double) ucrtbase.ilogb
+@ cdecl ilogbf(float) ucrtbase.ilogbf
+@ cdecl ilogbl(double) ucrtbase.ilogbl
 @ cdecl ldexp(double long) ucrtbase.ldexp
 @ cdecl lgamma(double) ucrtbase.lgamma
 @ cdecl lgammaf(float) ucrtbase.lgammaf
@@ -276,9 +276,9 @@
 @ cdecl log2(double) ucrtbase.log2
 @ cdecl log2f(float) ucrtbase.log2f
 @ cdecl log2l(double) ucrtbase.log2l
-@ stub logb
-@ stub logbf
-@ stub logbl
+@ cdecl logb(double) ucrtbase.logb
+@ cdecl logbf(float) ucrtbase.logbf
+@ cdecl logbl(double) ucrtbase.logbl
 @ cdecl -arch=arm,x86_64,arm64 logf(float) ucrtbase.logf
 @ cdecl lrint(double) ucrtbase.lrint
 @ cdecl lrintf(float) ucrtbase.lrintf
@@ -297,9 +297,9 @@
 @ cdecl nextafter(double double) ucrtbase.nextafter
 @ cdecl nextafterf(float float) ucrtbase.nextafterf
 @ cdecl nextafterl(double double) ucrtbase.nextafterl
-@ stub nexttoward
-@ stub nexttowardf
-@ stub nexttowardl
+@ cdecl nexttoward(double double) ucrtbase.nexttoward
+@ cdecl nexttowardf(float double) ucrtbase.nexttowardf
+@ cdecl nexttowardl(double double) ucrtbase.nexttowardl
 @ stub norm
 @ stub normf
 @ stub norml
@@ -308,9 +308,9 @@
 @ cdecl remainder(double double) ucrtbase.remainder
 @ cdecl remainderf(float float) ucrtbase.remainderf
 @ cdecl remainderl(double double) ucrtbase.remainderl
-@ stub remquo
-@ stub remquof
-@ stub remquol
+@ cdecl remquo(double double ptr) ucrtbase.remquo
+@ cdecl remquof(float float ptr) ucrtbase.remquof
+@ cdecl remquol(double double ptr) ucrtbase.remquol
 @ cdecl rint(double) ucrtbase.rint
 @ cdecl rintf(float) ucrtbase.rintf
 @ cdecl rintl(double) ucrtbase.rintl

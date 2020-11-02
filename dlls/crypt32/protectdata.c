@@ -112,10 +112,10 @@ struct protect_data_t
 static const char crypt_magic_str[] = "Wine Crypt32 ok";
 
 /* debugging tool to print strings of hex chars */
-static const char *
+static const char * HOSTPTR
 hex_str(const unsigned char *p, int n)
 {
-    const char * ptr;
+    const char * HOSTPTR ptr;
     char report[80];
     int r=-1;
     report[0]='\0';

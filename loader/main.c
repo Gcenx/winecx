@@ -78,7 +78,7 @@ static void check_command_line( int argc, char *argv[] )
 
 static int pre_exec(void)
 {
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
     return 1;  /* we have a preloader */
 #else
     return 0;  /* no exec needed */
@@ -160,14 +160,14 @@ static int pre_exec(void)
 #endif
 }
 
-#elif defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
+#elif defined(__linux__) && (defined(__x86_64__) || defined(__i386_on_x86_64__) || defined(__aarch64__))
 
 static int pre_exec(void)
 {
     return 1;  /* we have a preloader on x86-64/arm64 */
 }
 
-#elif defined(__APPLE__) && (defined(__i386__) || defined(__x86_64__))
+#elif defined(__APPLE__) && (defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__))
 
 static int pre_exec(void)
 {

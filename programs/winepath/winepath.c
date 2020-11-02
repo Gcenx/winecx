@@ -24,6 +24,10 @@
 
 #include "config.h"
 
+#include <stdarg.h>
+#ifndef _VA_LIST_T /* Clang's stdarg.h guards with _VA_LIST, while Xcode's uses _VA_LIST_T */
+#define _VA_LIST_T
+#endif
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -144,7 +148,7 @@ static int parse_options(WCHAR *argv[])
 /*
  * Main function
  */
-int wmain(int argc, WCHAR *argv[])
+int __cdecl wmain(int argc, WCHAR *argv[])
 {
     LPSTR (*CDECL wine_get_unix_file_name_ptr)(LPCWSTR) = NULL;
     LPWSTR (*CDECL wine_get_dos_file_name_ptr)(LPCSTR) = NULL;

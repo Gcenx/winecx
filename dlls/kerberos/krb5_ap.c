@@ -88,9 +88,9 @@ static LSA_DISPATCH_TABLE lsa_dispatch;
 
 #ifdef SONAME_LIBKRB5
 
-static void *libkrb5_handle;
+static void * HOSTPTR libkrb5_handle;
 
-#define MAKE_FUNCPTR(f) static typeof(f) * p_##f
+#define MAKE_FUNCPTR(f) static typeof(f) * HOSTPTR p_##f
 MAKE_FUNCPTR(krb5_cc_close);
 MAKE_FUNCPTR(krb5_cc_default);
 MAKE_FUNCPTR(krb5_cc_end_seq_get);
@@ -239,7 +239,7 @@ static void free_ticket_info(struct ticket_info *info)
     heap_free(info->info);
 }
 
-static WCHAR *utf8_to_wstr(const char *utf8)
+static WCHAR *utf8_to_wstr(const char * HOSTPTR utf8)
 {
     int len;
     WCHAR *wstr;
@@ -259,7 +259,7 @@ static NTSTATUS copy_tickets_from_cache(krb5_context context, krb5_ccache cache,
     krb5_error_code error;
     krb5_creds credentials;
     krb5_ticket *ticket;
-    char *name_with_realm, *name_without_realm, *realm_name;
+    char * HOSTPTR name_with_realm, * HOSTPTR name_without_realm, * HOSTPTR realm_name;
     WCHAR *realm_nameW, *name_without_realmW;
 
     error = p_krb5_cc_start_seq_get(context, cache, &cursor);
@@ -599,7 +599,7 @@ static NTSTATUS NTAPI kerberos_SpGetInfo(SecPkgInfoW *info)
 #ifdef SONAME_LIBGSSAPI_KRB5
 
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
-static void *libgssapi_krb5_handle;
+static void * HOSTPTR libgssapi_krb5_handle;
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f
 MAKE_FUNCPTR(gss_accept_sec_context);
@@ -669,15 +669,55 @@ static void unload_gssapi_krb5(void)
     libgssapi_krb5_handle = NULL;
 }
 
+#ifdef __i386_on_x86_64__
+
+static inline gss_cred_id_t credhandle_sspi_to_gss( LSA_SEC_HANDLE cred )
+{
+    if (!cred) return GSS_C_NO_CREDENTIAL;
+    return *(gss_cred_id_t*)(ULONG64)cred;
+}
+
+static inline BOOL credhandle_gss_to_sspi( gss_cred_id_t handle, LSA_SEC_HANDLE *cred )
+{
+    gss_cred_id_t *obj = heap_alloc(sizeof(*obj));
+    if (!obj) return FALSE;
+    *obj = handle;
+    *cred = (LSA_SEC_HANDLE)(ULONG64)obj;
+    return TRUE;
+}
+
+static inline gss_ctx_id_t ctxthandle_sspi_to_gss( LSA_SEC_HANDLE ctxt )
+{
+    if (!ctxt) return GSS_C_NO_CONTEXT;
+    return *(gss_ctx_id_t*)(ULONG64)ctxt;
+}
+
+static inline BOOL ctxthandle_gss_to_sspi( gss_ctx_id_t handle, LSA_SEC_HANDLE *ctxt )
+{
+    gss_ctx_id_t *obj = heap_alloc(sizeof(*obj));
+    if (!obj) return FALSE;
+    *obj = handle;
+    *ctxt = (LSA_SEC_HANDLE)(ULONG64)obj;
+    return TRUE;
+}
+
+static inline void delete_lsa_sec_handle(LSA_SEC_HANDLE obj)
+{
+    heap_free((void *)obj);
+}
+
+#else
+
 static inline gss_cred_id_t credhandle_sspi_to_gss( LSA_SEC_HANDLE cred )
 {
     if (!cred) return GSS_C_NO_CREDENTIAL;
     return (gss_cred_id_t)cred;
 }
 
-static inline void credhandle_gss_to_sspi( gss_cred_id_t handle, LSA_SEC_HANDLE *cred )
+static inline BOOL credhandle_gss_to_sspi( gss_cred_id_t handle, LSA_SEC_HANDLE *cred )
 {
     *cred = (LSA_SEC_HANDLE)handle;
+    return TRUE;
 }
 
 static inline gss_ctx_id_t ctxthandle_sspi_to_gss( LSA_SEC_HANDLE ctxt )
@@ -686,10 +726,18 @@ static inline gss_ctx_id_t ctxthandle_sspi_to_gss( LSA_SEC_HANDLE ctxt )
     return (gss_ctx_id_t)ctxt;
 }
 
-static inline void ctxthandle_gss_to_sspi( gss_ctx_id_t handle, LSA_SEC_HANDLE *ctxt )
+static inline BOOL ctxthandle_gss_to_sspi( gss_ctx_id_t handle, LSA_SEC_HANDLE *ctxt )
 {
     *ctxt = (LSA_SEC_HANDLE)handle;
+    return TRUE;
 }
+
+static inline void delete_lsa_sec_handle(LSA_SEC_HANDLE obj)
+{
+    (void)obj;
+}
+
+#endif
 
 static NTSTATUS status_gss_to_sspi( OM_uint32 status )
 {
@@ -940,7 +988,11 @@ static NTSTATUS acquire_credentials_handle( UNICODE_STRING *principal_us, gss_cr
     if (GSS_ERROR(ret)) trace_gss_status( ret, minor_status );
     if (ret == GSS_S_COMPLETE)
     {
-        credhandle_gss_to_sspi( cred_handle, credential );
+        if(!credhandle_gss_to_sspi( cred_handle, credential ))
+        {
+            pgss_release_cred( &minor_status, &cred_handle );
+            return SEC_E_INSUFFICIENT_MEMORY;
+        }
         expirytime_gss_to_sspi( expiry_time, ts_expiry );
     }
 
@@ -1001,6 +1053,7 @@ static NTSTATUS NTAPI kerberos_SpFreeCredentialsHandle( LSA_SEC_HANDLE credentia
     if (!(cred_handle = credhandle_sspi_to_gss( credential ))) return SEC_E_OK;
 
     ret = pgss_release_cred( &minor_status, &cred_handle );
+    delete_lsa_sec_handle(credential);
     TRACE( "gss_release_cred returned %08x minor status %08x\n", ret, minor_status );
     if (GSS_ERROR(ret)) trace_gss_status( ret, minor_status );
 
@@ -1069,7 +1122,11 @@ static NTSTATUS NTAPI kerberos_SpInitLsaModeContext( LSA_SEC_HANDLE credential, 
         memcpy( output->pBuffers[idx].pvBuffer, output_token.value, output_token.length );
         pgss_release_buffer( &minor_status, &output_token );
 
-        ctxthandle_gss_to_sspi( ctxt_handle, new_context );
+        if (!ctxthandle_gss_to_sspi( ctxt_handle, new_context ))
+        {
+            pgss_delete_sec_context( &minor_status, &ctxt_handle, GSS_C_NO_BUFFER );
+            return SEC_E_INSUFFICIENT_MEMORY;
+        }
         if (context_attr) *context_attr = flags_gss_to_isc_ret( ret_flags );
         expirytime_gss_to_sspi( expiry_time, ts_expiry );
     }
@@ -1139,7 +1196,11 @@ static NTSTATUS NTAPI kerberos_SpAcceptLsaModeContext( LSA_SEC_HANDLE credential
         memcpy( output->pBuffers[idx].pvBuffer, output_token.value, output_token.length );
         pgss_release_buffer( &minor_status, &output_token );
 
-        ctxthandle_gss_to_sspi( ctxt_handle, new_context );
+        if (!ctxthandle_gss_to_sspi( ctxt_handle, new_context ))
+        {
+            pgss_delete_sec_context( &minor_status, &ctxt_handle, GSS_C_NO_BUFFER );
+            return SEC_E_INSUFFICIENT_MEMORY;
+        }
         if (context_attr) *context_attr = flags_gss_to_asc_ret( ret_flags );
         expirytime_gss_to_sspi( expiry_time, ts_expiry );
     }
@@ -1168,6 +1229,7 @@ static NTSTATUS NTAPI kerberos_SpDeleteContext( LSA_SEC_HANDLE context )
     if (!(ctxt_handle = ctxthandle_sspi_to_gss( context ))) return SEC_E_OK;
 
     ret = pgss_delete_sec_context( &minor_status, &ctxt_handle, GSS_C_NO_BUFFER );
+    delete_lsa_sec_handle(context);
     TRACE( "gss_delete_sec_context returned %08x minor status %08x\n", ret, minor_status );
     if (GSS_ERROR(ret)) trace_gss_status( ret, minor_status );
 
@@ -1478,7 +1540,7 @@ static NTSTATUS seal_message( gss_ctx_id_t ctxt_handle, SecBufferDesc *message )
             return SEC_E_BUFFER_TOO_SMALL;
         }
         memcpy( message->pBuffers[data_idx].pvBuffer, output.value, len_data );
-        memcpy( message->pBuffers[token_idx].pvBuffer, (char *)output.value + len_data, output.length - len_data );
+        memcpy( message->pBuffers[token_idx].pvBuffer, (char * HOSTPTR)output.value + len_data, output.length - len_data );
         message->pBuffers[token_idx].cbBuffer = output.length - len_data;
         pgss_release_buffer( &minor_status, &output );
     }
@@ -1564,7 +1626,7 @@ static NTSTATUS unseal_message( gss_ctx_id_t ctxt_handle, SecBufferDesc *message
     input.length = len_data + len_token;
     if (!(input.value = heap_alloc( input.length ))) return SEC_E_INSUFFICIENT_MEMORY;
     memcpy( input.value, message->pBuffers[data_idx].pvBuffer, len_data );
-    memcpy( (char *)input.value + len_data, message->pBuffers[token_idx].pvBuffer, len_token );
+    memcpy( (char * HOSTPTR)input.value + len_data, message->pBuffers[token_idx].pvBuffer, len_token );
 
     ret = pgss_unwrap( &minor_status, ctxt_handle, &input, &output, &conf_state, NULL );
     heap_free( input.value );

@@ -22,7 +22,9 @@
 #include <wchar.h>
 #include <stdio.h>
 #include <float.h>
+#include <math.h>
 #include <limits.h>
+#include <wctype.h>
 
 #include <windef.h>
 #include <winbase.h>
@@ -113,20 +115,6 @@ typedef struct {
     critical_section lock;
 } _Condition_variable;
 
-static inline float __port_infinity(void)
-{
-    static const unsigned __inf_bytes = 0x7f800000;
-    return *(const float *)&__inf_bytes;
-}
-#define INFINITY __port_infinity()
-
-static inline float __port_nan(void)
-{
-    static const unsigned __nan_bytes = 0x7fc00000;
-    return *(const float *)&__nan_bytes;
-}
-#define NAN __port_nan()
-
 struct MSVCRT_lconv
 {
     char* decimal_point;
@@ -192,6 +180,11 @@ static unsigned short (__cdecl *p_wctype)(const char*);
 static int (__cdecl *p_vsscanf)(const char*, const char *, __ms_va_list valist);
 static _Dcomplex* (__cdecl *p__Cbuild)(_Dcomplex*, double, double);
 static double (__cdecl *p_creal)(_Dcomplex);
+static double (__cdecl *p_nexttoward)(double, double);
+static float (__cdecl *p_nexttowardf)(float, double);
+static double (__cdecl *p_nexttowardl)(double, double);
+static wctrans_t (__cdecl *p_wctrans)(const char*);
+static wint_t (__cdecl *p_towctrans)(wint_t, wctrans_t);
 
 /* make sure we use the correct errno */
 #undef errno
@@ -252,6 +245,11 @@ static BOOL init(void)
     SET(p_vsscanf, "vsscanf");
     SET(p__Cbuild, "_Cbuild");
     SET(p_creal, "creal");
+    SET(p_nexttoward, "nexttoward");
+    SET(p_nexttowardf, "nexttowardf");
+    SET(p_nexttowardl, "nexttowardl");
+    SET(p_wctrans, "wctrans");
+    SET(p_towctrans, "towctrans");
     if(sizeof(void*) == 8) { /* 64-bit initialization */
         SET(p_critical_section_ctor,
                 "??0critical_section@Concurrency@@QEAA@XZ");
@@ -964,6 +962,109 @@ static void test__Cbuild(void)
     ok(d == 3.0, "creal returned %lf\n", d);
 }
 
+static void test_nexttoward(void)
+{
+    errno_t e;
+    double d;
+    float f;
+    int i;
+
+    struct
+    {
+        double source;
+        double dir;
+        float f;
+        double d;
+    }
+    tests[] =
+    {
+        {0.0,                      0.0,                      0.0f,        0.0},
+        {0.0,                      1.0,                      1.0e-45f,    5.0e-324},
+        {0.0,                     -1.0,                     -1.0e-45f,   -5.0e-324},
+        {2.2250738585072009e-308,  0.0,                      0.0f,        2.2250738585072004e-308},
+        {2.2250738585072009e-308,  2.2250738585072010e-308,  1.0e-45f,    2.2250738585072009e-308},
+        {2.2250738585072009e-308,  1.0,                      1.0e-45f,    2.2250738585072014e-308},
+        {2.2250738585072014e-308,  0.0,                      0.0f,        2.2250738585072009e-308},
+        {2.2250738585072014e-308,  2.2250738585072014e-308,  1.0e-45f,    2.2250738585072014e-308},
+        {2.2250738585072014e-308,  1.0,                      1.0e-45f,    2.2250738585072019e-308},
+        {1.0,                      2.0,                      1.00000012f, 1.0000000000000002},
+        {1.0,                      0.0,                      0.99999994f, 0.9999999999999999},
+        {1.0,                      1.0,                      1.0f,        1.0},
+        {0.0,                      INFINITY,                 1.0e-45f,    5.0e-324},
+        {FLT_MAX,                  INFINITY,                 INFINITY,    3.402823466385289e+038},
+        {DBL_MAX,                  INFINITY,                 INFINITY,    INFINITY},
+        {INFINITY,                 INFINITY,                 INFINITY,    INFINITY},
+        {INFINITY,                 0,                        FLT_MAX,     DBL_MAX},
+    };
+
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
+    {
+        f = p_nexttowardf(tests[i].source, tests[i].dir);
+        ok(f == tests[i].f, "Test %d: expected %0.8ef, got %0.8ef.\n", i, tests[i].f, f);
+
+        errno = -1;
+        d = p_nexttoward(tests[i].source, tests[i].dir);
+        e = errno;
+        ok(d == tests[i].d, "Test %d: expected %0.16e, got %0.16e.\n", i, tests[i].d, d);
+        if (!isnormal(d) && !isinf(tests[i].source))
+            ok(e == ERANGE, "Test %d: expected ERANGE, got %d.\n", i, e);
+        else
+            ok(e == -1, "Test %d: expected no error, got %d.\n", i, e);
+
+        d = p_nexttowardl(tests[i].source, tests[i].dir);
+        ok(d == tests[i].d, "Test %d: expected %0.16e, got %0.16e.\n", i, tests[i].d, d);
+    }
+
+    errno = -1;
+    d = p_nexttoward(NAN, 0);
+    e = errno;
+    ok(_isnan(d), "Expected NAN, got %0.16e.\n", d);
+    ok(e == -1, "Expected no error, got %d.\n", e);
+
+    errno = -1;
+    d = p_nexttoward(NAN, NAN);
+    e = errno;
+    ok(_isnan(d), "Expected NAN, got %0.16e.\n", d);
+    ok(e == -1, "Expected no error, got %d.\n", e);
+
+    errno = -1;
+    d = p_nexttoward(0, NAN);
+    e = errno;
+    ok(_isnan(d), "Expected NAN, got %0.16e.\n", d);
+    ok(e == -1, "Expected no error, got %d.\n", e);
+}
+
+static void test_towctrans(void)
+{
+    wchar_t ret;
+
+    ret = p_wctrans("tolower");
+    ok(ret == 2, "wctrans returned %d, expected 2\n", ret);
+    ret = p_wctrans("toupper");
+    ok(ret == 1, "wctrans returned %d, expected 1\n", ret);
+    ret = p_wctrans("toLower");
+    ok(ret == 0, "wctrans returned %d, expected 0\n", ret);
+    ret = p_wctrans("");
+    ok(ret == 0, "wctrans returned %d, expected 0\n", ret);
+    if(0) { /* crashes on windows */
+        ret = p_wctrans(NULL);
+        ok(ret == 0, "wctrans returned %d, expected 0\n", ret);
+    }
+
+    ret = p_towctrans('t', 2);
+    ok(ret == 't', "towctrans('t', 2) returned %c, expected t\n", ret);
+    ret = p_towctrans('T', 2);
+    ok(ret == 't', "towctrans('T', 2) returned %c, expected t\n", ret);
+    ret = p_towctrans('T', 0);
+    ok(ret == 't', "towctrans('T', 0) returned %c, expected t\n", ret);
+    ret = p_towctrans('T', 3);
+    ok(ret == 't', "towctrans('T', 3) returned %c, expected t\n", ret);
+    ret = p_towctrans('t', 1);
+    ok(ret == 'T', "towctrans('t', 1) returned %c, expected T\n", ret);
+    ret = p_towctrans('T', 1);
+    ok(ret == 'T', "towctrans('T', 1) returned %c, expected T\n", ret);
+}
+
 START_TEST(msvcr120)
 {
     if (!init()) return;
@@ -983,4 +1084,6 @@ START_TEST(msvcr120)
     test_wctype();
     test_vsscanf();
     test__Cbuild();
+    test_nexttoward();
+    test_towctrans();
 }

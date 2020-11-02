@@ -8,6 +8,8 @@
 #ifndef __WINE_SYS_STAT_H
 #define __WINE_SYS_STAT_H
 
+#include "wine/winheader_enter.h"
+
 #include <crtdefs.h>
 #include <sys/types.h>
 
@@ -197,5 +199,7 @@ static inline int umask(int fd) { return _umask(fd); }
 #endif
 
 #include <poppack.h>
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_SYS_STAT_H */

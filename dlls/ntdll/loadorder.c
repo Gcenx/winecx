@@ -63,9 +63,9 @@ static struct loadorder_list env_list;
  * Sorting and comparing function used in sort and search of loadorder
  * entries.
  */
-static int cmp_sort_func(const void *s1, const void *s2)
+static int cmp_sort_func(const void * HOSTPTR s1, const void * HOSTPTR s2)
 {
-    return strcmpiW(((const module_loadorder_t *)s1)->modulename, ((const module_loadorder_t *)s2)->modulename);
+    return strcmpiW(((const module_loadorder_t * HOSTPTR)s1)->modulename, ((const module_loadorder_t * HOSTPTR)s2)->modulename);
 }
 
 
@@ -228,8 +228,7 @@ static void add_load_order_set( WCHAR *entry )
  */
 static void init_load_order(void)
 {
-    const char *order = getenv( "WINEDLLOVERRIDES" );
-    UNICODE_STRING strW;
+    const char * HOSTPTR order = getenv( "WINEDLLOVERRIDES" );
     WCHAR *entry, *next;
 
     init_done = TRUE;
@@ -249,8 +248,7 @@ static void init_load_order(void)
         exit(0);
     }
 
-    RtlCreateUnicodeStringFromAsciiz( &strW, order );
-    entry = strW.Buffer;
+    if (ntdll_ambstowcs( &entry, order ) <= 0) return;
     while (*entry)
     {
         while (*entry == ';') entry++;
@@ -278,7 +276,7 @@ static void init_load_order(void)
  */
 static inline enum loadorder get_env_load_order( const WCHAR *module )
 {
-    module_loadorder_t tmp, *res;
+    module_loadorder_t tmp, * HOSTPTR res;
 
     tmp.modulename = module;
     /* some bsearch implementations (Solaris) are buggy when the number of items is 0 */
@@ -429,16 +427,19 @@ static enum loadorder get_load_order_value( HANDLE std_key, HANDLE app_key, cons
  * Return the loadorder of a module.
  * The system directory and '.dll' extension is stripped from the path.
  */
-enum loadorder get_load_order( const WCHAR *app_name, const WCHAR *path )
+enum loadorder get_load_order( const WCHAR *app_name, const UNICODE_STRING *nt_name )
 {
+    static const WCHAR nt_prefixW[] = {'\\','?','?','\\',0};
     enum loadorder ret = LO_INVALID;
     HANDLE std_key, app_key = 0;
+    const WCHAR *path = nt_name->Buffer;
     WCHAR *module, *basename;
     int len;
 
     if (!init_done) init_load_order();
     std_key = get_standard_key();
     if (app_name) app_key = get_app_key( app_name );
+    if (!strncmpW( path, nt_prefixW, 4 )) path += 4;
 
     TRACE("looking for %s\n", debugstr_w(path));
 

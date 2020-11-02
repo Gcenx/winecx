@@ -445,10 +445,13 @@ void init_empty_store(void) DECLSPEC_HIDDEN;
 /* Align up to a DWORD_PTR boundary
  */
 #define ALIGN_DWORD_PTR(x) (((x) + sizeof(DWORD_PTR) - 1) & ~(sizeof(DWORD_PTR) - 1))
-#define POINTER_ALIGN_DWORD_PTR(p) ((LPVOID)ALIGN_DWORD_PTR((DWORD_PTR)(p)))
+#define POINTER_ALIGN_DWORD_PTR(p) TRUNCCAST(LPVOID, ALIGN_DWORD_PTR((DWORD_PTR)(p)))
 
 /* Check if the OID is a small int
  */
 #define IS_INTOID(x)    (((ULONG_PTR)(x) >> 16) == 0)
+
+BOOL gnutls_initialize(void) DECLSPEC_HIDDEN;
+void gnutls_uninitialize(void) DECLSPEC_HIDDEN;
 
 #endif

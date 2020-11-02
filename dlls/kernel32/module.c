@@ -41,8 +41,10 @@
 
 #include "wine/exception.h"
 #include "wine/list.h"
+#include "wine/asm.h"
 #include "wine/debug.h"
 #include "wine/unicode.h"
+#include "wine/library.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(module);
 
@@ -129,10 +131,10 @@ DWORD WINAPI GetDllDirectoryW( DWORD buf_len, LPWSTR buffer )
  */
 BOOL WINAPI SetDllDirectoryA( LPCSTR dir )
 {
-    WCHAR *dirW;
+    WCHAR *dirW = NULL;
     BOOL ret;
 
-    if (!(dirW = FILE_name_AtoW( dir, TRUE ))) return FALSE;
+    if (dir && !(dirW = FILE_name_AtoW( dir, TRUE ))) return FALSE;
     ret = SetDllDirectoryW( dirW );
     HeapFree( GetProcessHeap(), 0, dirW );
     return ret;
@@ -940,10 +942,19 @@ static HMODULE load_library( const UNICODE_STRING *libname, DWORD flags )
     const DWORD unsupported_flags = (LOAD_IGNORE_CODE_AUTHZ_LEVEL |
                                      LOAD_LIBRARY_REQUIRE_SIGNED_TARGET);
 
-    if (!(flags & load_library_search_flags)) flags |= default_search_flags;
-
     if( flags & unsupported_flags)
         FIXME("unsupported flag(s) used (flags: 0x%08x)\n", flags);
+
+    if (flags & LOAD_WITH_ALTERED_SEARCH_PATH)
+    {
+        if (flags & load_library_search_flags)
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return 0;
+        }
+        if (default_search_flags) flags |= default_search_flags | LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR;
+    }
+    else if (!(flags & load_library_search_flags)) flags |= default_search_flags;
 
     if (flags & load_library_search_flags)
         load_path = get_dll_load_path_search_flags( libname->Buffer, flags );
@@ -1102,6 +1113,12 @@ BOOL WINAPI DECLSPEC_HOTPATCH FreeLibrary(HINSTANCE hLibModule)
 
     if ((ULONG_PTR)hLibModule & 3) /* this is a datafile module */
     {
+        void *ptr = (void *)((ULONG_PTR)hLibModule & ~3);
+        if (!RtlImageNtHeader( ptr ))
+        {
+            SetLastError( ERROR_BAD_EXE_FORMAT );
+            return FALSE;
+        }
         if ((ULONG_PTR)hLibModule & 1)
         {
             struct exclusive_datafile *file;
@@ -1119,7 +1136,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH FreeLibrary(HINSTANCE hLibModule)
             }
             LdrUnlockLoaderLock( 0, magic );
         }
-        return UnmapViewOfFile( (void *)((ULONG_PTR)hLibModule & ~3) );
+        return UnmapViewOfFile( ptr );
     }
 
     if ((nts = LdrUnloadDll( hLibModule )) == STATUS_SUCCESS) retv = TRUE;
@@ -1165,7 +1182,7 @@ FARPROC get_proc_address( HMODULE hModule, LPCSTR function )
     return fp;
 }
 
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
 /*
  * Work around a Delphi bug on x86_64.  When delay loading a symbol,
  * Delphi saves rcx, rdx, r8 and r9 to the stack.  It then calls
@@ -1199,14 +1216,14 @@ __ASM_GLOBAL_FUNC( get_proc_address_wrapper,
                    __ASM_CFI(".cfi_adjust_cfa_offset -8\n\t")
                    __ASM_CFI(".cfi_same_value %rbp\n\t")
                    "ret" )
-#else /* __x86_64__ */
+#else /* __x86_64__ && !__i386_on_x86_64__ */
 
 static inline FARPROC get_proc_address_wrapper( HMODULE module, LPCSTR function )
 {
     return get_proc_address( module, function );
 }
 
-#endif /* __x86_64__ */
+#endif /* __x86_64__ && !__i386_on_x86_64__ */
 
 FARPROC WINAPI GetProcAddress( HMODULE hModule, LPCSTR function )
 {
@@ -1300,7 +1317,7 @@ static BOOL init_module_iterator(MODULE_ITERATOR *iter, HANDLE process)
         return FALSE;
     }
 
-    if (sizeof(void *) == 8 && iter->wow64)
+    if (wine_is_64bit() && iter->wow64)
     {
         PEB_LDR_DATA32 *ldr_data32_ptr;
         DWORD ldr_data32, first_module;
@@ -1346,7 +1363,7 @@ static int module_iterator_next(MODULE_ITERATOR *iter)
     if (iter->current == iter->head)
         return 0;
 
-    if (sizeof(void *) == 8 && iter->wow64)
+    if (wine_is_64bit() && iter->wow64)
     {
         LIST_ENTRY32 *entry32 = (LIST_ENTRY32 *)iter->current;
 
@@ -1440,7 +1457,7 @@ BOOL WINAPI K32EnumProcessModules(HANDLE process, HMODULE *lphModule,
     {
         if (cb >= sizeof(HMODULE))
         {
-            if (sizeof(void *) == 8 && iter.wow64)
+            if (wine_is_64bit() && iter.wow64)
                 *lphModule++ = (HMODULE) (DWORD_PTR)iter.ldr_module32.BaseAddress;
             else
                 *lphModule++ = iter.ldr_module.BaseAddress;
@@ -1485,7 +1502,7 @@ DWORD WINAPI K32GetModuleBaseNameW(HANDLE process, HMODULE module,
     if (!IsWow64Process(process, &wow64))
         return 0;
 
-    if (sizeof(void *) == 8 && wow64)
+    if (wine_is_64bit() && wow64)
     {
         LDR_MODULE32 ldr_module32;
 
@@ -1557,7 +1574,7 @@ DWORD WINAPI K32GetModuleFileNameExW(HANDLE process, HMODULE module,
     if (!IsWow64Process(process, &wow64))
         return 0;
 
-    if (sizeof(void *) == 8 && wow64)
+    if (wine_is_64bit() && wow64)
     {
         LDR_MODULE32 ldr_module32;
 
@@ -1612,7 +1629,7 @@ DWORD WINAPI K32GetModuleFileNameExA(HANDLE process, HMODULE module,
     if ( process == GetCurrentProcess() )
     {
         len = GetModuleFileNameA( module, file_name, size );
-        if (size) file_name[size - 1] = '\0';
+        file_name[size - 1] = '\0';
         return len;
     }
 
@@ -1655,7 +1672,7 @@ BOOL WINAPI K32GetModuleInformation(HANDLE process, HMODULE module,
     if (!IsWow64Process(process, &wow64))
         return FALSE;
 
-    if (sizeof(void *) == 8 && wow64)
+    if (wine_is_64bit() && wow64)
     {
         LDR_MODULE32 ldr_module32;
 
@@ -1678,14 +1695,14 @@ BOOL WINAPI K32GetModuleInformation(HANDLE process, HMODULE module,
     return TRUE;
 }
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 
 /***********************************************************************
  *           __wine_dll_register_16 (KERNEL32.@)
  *
  * No longer used.
  */
-void __wine_dll_register_16( const IMAGE_DOS_HEADER *header, const char *file_name )
+void CDECL __wine_dll_register_16( const IMAGE_DOS_HEADER *header, const char *file_name )
 {
     ERR( "loading old style 16-bit dll %s no longer supported\n", file_name );
 }
@@ -1696,7 +1713,7 @@ void __wine_dll_register_16( const IMAGE_DOS_HEADER *header, const char *file_na
  *
  * No longer used.
  */
-void __wine_dll_unregister_16( const IMAGE_DOS_HEADER *header )
+void CDECL __wine_dll_unregister_16( const IMAGE_DOS_HEADER *header )
 {
 }
 

@@ -65,7 +65,7 @@
 @ stub PSCoerceToCanonicalValue
 @ stub PSCreateAdapterFromPropertyStore
 @ stub PSCreateDelayedMultiplexPropertyStore
-@ stub PSCreateMemoryPropertyStore
+@ stdcall PSCreateMemoryPropertyStore(ptr ptr)
 @ stub PSCreateMultiplexPropertyStore
 @ stub PSCreatePropertyChangeArray
 @ stub PSCreatePropertyStoreFromObject
@@ -111,8 +111,8 @@
 @ stub PropVariantToBooleanVector
 @ stub PropVariantToBooleanVectorAlloc
 @ stub PropVariantToBooleanWithDefault
-@ stub PropVariantToBuffer
-@ stub PropVariantToDouble
+@ stdcall PropVariantToBuffer(ptr ptr long)
+@ stdcall PropVariantToDouble(ptr ptr)
 @ stub PropVariantToDoubleVector
 @ stub PropVariantToDoubleVectorAlloc
 @ stub PropVariantToDoubleWithDefault
@@ -133,7 +133,7 @@
 @ stub PropVariantToInt64VectorAlloc
 @ stub PropVariantToInt64WithDefault
 @ stub PropVariantToStrRet
-@ stub PropVariantToString
+@ stdcall PropVariantToString(ptr ptr long)
 @ stdcall PropVariantToStringAlloc(ptr ptr)
 @ stub PropVariantToStringVector
 @ stub PropVariantToStringVectorAlloc

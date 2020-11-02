@@ -21,7 +21,8 @@
 #ifndef __WINE_WINE_EXCEPTION_H
 #define __WINE_WINE_EXCEPTION_H
 
-#include <setjmp.h>
+#include "wine/winheader_enter.h"
+
 #include <windef.h>
 #include <excpt.h>
 
@@ -92,38 +93,47 @@ extern "C" {
 
 #else  /* USE_COMPILER_EXCEPTIONS */
 
-#if defined(__MINGW32__) || defined(__CYGWIN__) || defined(__WINE_SETJMP_H)
-#define sigjmp_buf jmp_buf
-#define sigsetjmp(buf,sigs) setjmp(buf)
-#define siglongjmp(buf,val) longjmp(buf,val)
+#ifdef __i386__
+typedef struct { int reg[16]; } __wine_jmp_buf;
+#elif defined(__x86_64__) || defined(__i386_on_x86_64__)
+typedef struct { DECLSPEC_ALIGN(16) struct { unsigned __int64 Part[2]; } reg[16]; } __wine_jmp_buf;
+#elif defined(__arm__)
+typedef struct { int reg[28]; } __wine_jmp_buf;
+#elif defined(__aarch64__)
+typedef struct { __int64 reg[24]; } __wine_jmp_buf;
+#else
+typedef struct { int reg; } __wine_jmp_buf;
 #endif
 
-extern void __wine_rtl_unwind( EXCEPTION_REGISTRATION_RECORD* frame, EXCEPTION_RECORD *record,
-                               void (*target)(void) ) DECLSPEC_HIDDEN DECLSPEC_NORETURN;
-extern DWORD __wine_exception_handler( EXCEPTION_RECORD *record,
-                                       EXCEPTION_REGISTRATION_RECORD *frame,
-                                       CONTEXT *context,
-                                       EXCEPTION_REGISTRATION_RECORD **pdispatcher ) DECLSPEC_HIDDEN;
-extern DWORD __wine_exception_ctx_handler( EXCEPTION_RECORD *record,
-                                           EXCEPTION_REGISTRATION_RECORD *frame,
-                                           CONTEXT *context,
-                                           EXCEPTION_REGISTRATION_RECORD **pdispatcher ) DECLSPEC_HIDDEN;
-extern DWORD __wine_exception_handler_page_fault( EXCEPTION_RECORD *record,
-                                                  EXCEPTION_REGISTRATION_RECORD *frame,
-                                                  CONTEXT *context,
-                                                  EXCEPTION_REGISTRATION_RECORD **pdispatcher ) DECLSPEC_HIDDEN;
-extern DWORD __wine_exception_handler_all( EXCEPTION_RECORD *record,
-                                           EXCEPTION_REGISTRATION_RECORD *frame,
-                                           CONTEXT *context,
-                                           EXCEPTION_REGISTRATION_RECORD **pdispatcher ) DECLSPEC_HIDDEN;
-extern DWORD __wine_finally_handler( EXCEPTION_RECORD *record,
-                                     EXCEPTION_REGISTRATION_RECORD *frame,
-                                     CONTEXT *context,
-                                     EXCEPTION_REGISTRATION_RECORD **pdispatcher ) DECLSPEC_HIDDEN;
-extern DWORD __wine_finally_ctx_handler( EXCEPTION_RECORD *record,
-                                         EXCEPTION_REGISTRATION_RECORD *frame,
-                                         CONTEXT *context,
-                                         EXCEPTION_REGISTRATION_RECORD **pdispatcher ) DECLSPEC_HIDDEN;
+extern int __cdecl __attribute__ ((__nothrow__,__returns_twice__)) __wine_setjmpex( __wine_jmp_buf *buf,
+                                                   EXCEPTION_REGISTRATION_RECORD *frame ) DECLSPEC_HIDDEN;
+extern void __cdecl __wine_longjmp( __wine_jmp_buf *buf, int retval ) DECLSPEC_HIDDEN DECLSPEC_NORETURN;
+extern void __cdecl __wine_rtl_unwind( EXCEPTION_REGISTRATION_RECORD* frame, EXCEPTION_RECORD *record,
+                                       void (__cdecl *target)(void) ) DECLSPEC_HIDDEN DECLSPEC_NORETURN;
+extern DWORD __cdecl __wine_exception_handler( EXCEPTION_RECORD *record,
+                                               EXCEPTION_REGISTRATION_RECORD *frame,
+                                               CONTEXT *context,
+                                               EXCEPTION_REGISTRATION_RECORD **pdispatcher ) DECLSPEC_HIDDEN;
+extern DWORD __cdecl __wine_exception_ctx_handler( EXCEPTION_RECORD *record,
+                                                   EXCEPTION_REGISTRATION_RECORD *frame,
+                                                   CONTEXT *context,
+                                                   EXCEPTION_REGISTRATION_RECORD **pdispatcher ) DECLSPEC_HIDDEN;
+extern DWORD __cdecl __wine_exception_handler_page_fault( EXCEPTION_RECORD *record,
+                                                          EXCEPTION_REGISTRATION_RECORD *frame,
+                                                          CONTEXT *context,
+                                                          EXCEPTION_REGISTRATION_RECORD **pdispatcher ) DECLSPEC_HIDDEN;
+extern DWORD __cdecl __wine_exception_handler_all( EXCEPTION_RECORD *record,
+                                                   EXCEPTION_REGISTRATION_RECORD *frame,
+                                                   CONTEXT *context,
+                                                   EXCEPTION_REGISTRATION_RECORD **pdispatcher ) DECLSPEC_HIDDEN;
+extern DWORD __cdecl __wine_finally_handler( EXCEPTION_RECORD *record,
+                                             EXCEPTION_REGISTRATION_RECORD *frame,
+                                             CONTEXT *context,
+                                             EXCEPTION_REGISTRATION_RECORD **pdispatcher ) DECLSPEC_HIDDEN;
+extern DWORD __cdecl __wine_finally_ctx_handler( EXCEPTION_RECORD *record,
+                                                 EXCEPTION_REGISTRATION_RECORD *frame,
+                                                 CONTEXT *context,
+                                                 EXCEPTION_REGISTRATION_RECORD **pdispatcher ) DECLSPEC_HIDDEN;
 
 #define __TRY \
     do { __WINE_FRAME __f; \
@@ -139,7 +149,7 @@ extern DWORD __wine_finally_ctx_handler( EXCEPTION_RECORD *record,
          } else { \
              __f.frame.Handler = __wine_exception_handler; \
              __f.u.filter = (func); \
-             if (sigsetjmp( __f.jmp, 0 )) { \
+             if (__wine_setjmpex( &__f.jmp, &__f.frame )) { \
                  const __WINE_FRAME * const __eptr __attribute__((unused)) = &__f; \
                  do {
 
@@ -151,7 +161,7 @@ extern DWORD __wine_finally_ctx_handler( EXCEPTION_RECORD *record,
              __f.frame.Handler = __wine_exception_ctx_handler; \
              __f.u.filter_ctx = (func); \
              __f.ctx = context; \
-             if (sigsetjmp( __f.jmp, 0 )) { \
+             if (__wine_setjmpex( &__f.jmp, &__f.frame )) { \
                  const __WINE_FRAME * const __eptr __attribute__((unused)) = &__f; \
                  do {
 
@@ -162,18 +172,18 @@ extern DWORD __wine_finally_ctx_handler( EXCEPTION_RECORD *record,
              break; \
          } else { \
              __f.frame.Handler = __wine_exception_handler_page_fault; \
-             if (sigsetjmp( __f.jmp, 0 )) { \
+             if (__wine_setjmpex( &__f.jmp, &__f.frame )) { \
                  const __WINE_FRAME * const __eptr __attribute__((unused)) = &__f; \
                  do {
 
-/* convenience handler for all exception */
+/* convenience handler for all exceptions */
 #define __EXCEPT_ALL \
              } while(0); \
              __wine_pop_frame( &__f.frame ); \
              break; \
          } else { \
              __f.frame.Handler = __wine_exception_handler_all; \
-             if (sigsetjmp( __f.jmp, 0 )) { \
+             if (__wine_setjmpex( &__f.jmp, &__f.frame )) { \
                  const __WINE_FRAME * const __eptr __attribute__((unused)) = &__f; \
                  do {
 
@@ -236,7 +246,7 @@ typedef struct __tagWINE_FRAME
         __WINE_FINALLY_CTX finally_func_ctx;
     } u;
     void *ctx;
-    sigjmp_buf jmp;
+    __wine_jmp_buf jmp;
     /* hack to make GetExceptionCode() work in handler */
     DWORD ExceptionCode;
     const struct __tagWINE_FRAME *ExceptionRecord;
@@ -246,7 +256,7 @@ typedef struct __tagWINE_FRAME
 
 static inline EXCEPTION_REGISTRATION_RECORD *__wine_push_frame( EXCEPTION_REGISTRATION_RECORD *frame )
 {
-#if defined(__GNUC__) && defined(__i386__)
+#if defined(__GNUC__) && (defined(__i386__) || defined(__i386_on_x86_64__))
     EXCEPTION_REGISTRATION_RECORD *prev;
     __asm__ __volatile__(".byte 0x64\n\tmovl (0),%0"
                          "\n\tmovl %0,(%1)"
@@ -263,7 +273,7 @@ static inline EXCEPTION_REGISTRATION_RECORD *__wine_push_frame( EXCEPTION_REGIST
 
 static inline EXCEPTION_REGISTRATION_RECORD *__wine_pop_frame( EXCEPTION_REGISTRATION_RECORD *frame )
 {
-#if defined(__GNUC__) && defined(__i386__)
+#if defined(__GNUC__) && (defined(__i386__) || defined(__i386_on_x86_64__))
     __asm__ __volatile__(".byte 0x64\n\tmovl %0,(0)"
                          : : "r" (frame->Prev) : "memory" );
     return frame->Prev;
@@ -277,7 +287,7 @@ static inline EXCEPTION_REGISTRATION_RECORD *__wine_pop_frame( EXCEPTION_REGISTR
 
 static inline EXCEPTION_REGISTRATION_RECORD *__wine_get_frame(void)
 {
-#if defined(__GNUC__) && defined(__i386__)
+#if defined(__GNUC__) && (defined(__i386__) || defined(__i386_on_x86_64__))
     EXCEPTION_REGISTRATION_RECORD *ret;
     __asm__ __volatile__(".byte 0x64\n\tmovl (0),%0" : "=r" (ret) );
     return ret;
@@ -306,5 +316,7 @@ static inline EXCEPTION_REGISTRATION_RECORD *__wine_get_frame(void)
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_WINE_EXCEPTION_H */

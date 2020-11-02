@@ -81,7 +81,7 @@ static BOOL is_wine_loader(const WCHAR *module)
     static const WCHAR wineW[] = {'w','i','n','e',0};
     static const WCHAR suffixW[] = {'6','4',0};
     const WCHAR *filename = get_filename(module, NULL);
-    const char *ptr, *p;
+    const char * HOSTPTR ptr, * HOSTPTR p;
     BOOL ret = FALSE;
     WCHAR *buffer;
     DWORD len;
@@ -143,8 +143,9 @@ WCHAR *get_wine_loader_name(struct process *pcs)
 {
     static const WCHAR wineW[] = {'w','i','n','e',0};
     static const WCHAR suffixW[] = {'6','4',0};
+    static const WCHAR suffix32on64W[] = {'3','2','o','n','6','4',0};
     WCHAR *buffer, *p;
-    const char *env;
+    const char * HOSTPTR env;
 
     /* All binaries are loaded with WINELOADER (if run from tree) or by the
      * main executable
@@ -157,15 +158,23 @@ WCHAR *get_wine_loader_name(struct process *pcs)
     }
     else
     {
-        buffer = heap_alloc( sizeof(wineW) + 2 * sizeof(WCHAR) );
+        buffer = heap_alloc( sizeof(wineW) + sizeof(suffix32on64W) );
         strcpyW( buffer, wineW );
     }
 
-    p = buffer + strlenW( buffer ) - strlenW( suffixW );
-    if (p > buffer && !strcmpW( p, suffixW ))
+    p = buffer + strlenW( buffer ) - strlenW( suffix32on64W );
+    if (p > buffer && !strcmpW( p, suffix32on64W ))
         *p = 0;
+    else
+    {
+        p = buffer + strlenW( buffer ) - strlenW( suffixW );
+        if (p > buffer && !strcmpW( p, suffixW ))
+            *p = 0;
+    }
 
-    if (pcs->is_64bit)
+    if (pcs->is_32on64)
+        strcatW(buffer, suffix32on64W);
+    else if (pcs->is_64bit)
         strcatW(buffer, suffixW);
 
     TRACE( "returning %s\n", debugstr_w(buffer) );
@@ -334,16 +343,15 @@ static struct module* module_get_container(const struct process* pcs,
  *           module_get_containee
  *
  */
-struct module* module_get_containee(const struct process* pcs, 
-                                    const struct module* outter)
+struct module* module_get_containee(const struct process* pcs, const struct module* outer)
 {
     struct module*      module;
-     
+
     for (module = pcs->lmodules; module; module = module->next)
     {
-        if (module != outter &&
-            outter->module.BaseOfImage <= module->module.BaseOfImage &&
-            outter->module.BaseOfImage + outter->module.ImageSize >=
+        if (module != outer &&
+            outer->module.BaseOfImage <= module->module.BaseOfImage &&
+            outer->module.BaseOfImage + outer->module.ImageSize >=
             module->module.BaseOfImage + module->module.ImageSize)
             return module;
     }
@@ -833,7 +841,7 @@ BOOL  WINAPI SymEnumerateModulesW64(HANDLE hProcess,
     
     for (module = pcs->lmodules; module; module = module->next)
     {
-        if (!(dbghelp_options & SYMOPT_WINE_WITH_NATIVE_MODULES) &&
+        if (!dbghelp_opt_native &&
             (module->type == DMT_ELF || module->type == DMT_MACHO))
             continue;
         if (!EnumModulesCallback(module->modulename,

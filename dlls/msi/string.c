@@ -29,7 +29,6 @@
 #include "winbase.h"
 #include "winerror.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 #include "msi.h"
 #include "msiquery.h"
 #include "objbase.h"
@@ -209,9 +208,9 @@ static void insert_string_sorted( string_table *st, UINT string_id )
 }
 
 static void set_st_entry( string_table *st, UINT n, WCHAR *str, int len, USHORT refcount,
-                          enum StringPersistence persistence )
+                          BOOL persistent )
 {
-    if (persistence == StringPersistent)
+    if (persistent)
     {
         st->strings[n].persistent_refcount = refcount;
         st->strings[n].nonpersistent_refcount = 0;
@@ -257,7 +256,7 @@ static UINT string2id( const string_table *st, const char *buffer, UINT *id )
     return r;
 }
 
-static int add_string( string_table *st, UINT n, const char *data, UINT len, USHORT refcount, enum StringPersistence persistence )
+static int add_string( string_table *st, UINT n, const char *data, UINT len, USHORT refcount, BOOL persistent )
 {
     LPWSTR str;
     int sz;
@@ -274,7 +273,7 @@ static int add_string( string_table *st, UINT n, const char *data, UINT len, USH
     {
         if (string2id( st, data, &n ) == ERROR_SUCCESS)
         {
-            if (persistence == StringPersistent)
+            if (persistent)
                 st->strings[n].persistent_refcount += refcount;
             else
                 st->strings[n].nonpersistent_refcount += refcount;
@@ -299,11 +298,11 @@ static int add_string( string_table *st, UINT n, const char *data, UINT len, USH
     MultiByteToWideChar( st->codepage, 0, data, len, str, sz );
     str[sz] = 0;
 
-    set_st_entry( st, n, str, sz, refcount, persistence );
+    set_st_entry( st, n, str, sz, refcount, persistent );
     return n;
 }
 
-int msi_add_string( string_table *st, const WCHAR *data, int len, enum StringPersistence persistence )
+int msi_add_string( string_table *st, const WCHAR *data, int len, BOOL persistent )
 {
     UINT n;
     LPWSTR str;
@@ -311,14 +310,14 @@ int msi_add_string( string_table *st, const WCHAR *data, int len, enum StringPer
     if( !data )
         return 0;
 
-    if (len < 0) len = strlenW( data );
+    if (len < 0) len = lstrlenW( data );
 
     if( !data[0] && !len )
         return 0;
 
     if (msi_string2id( st, data, len, &n) == ERROR_SUCCESS )
     {
-        if (persistence == StringPersistent)
+        if (persistent)
             st->strings[n].persistent_refcount++;
         else
             st->strings[n].nonpersistent_refcount++;
@@ -338,7 +337,7 @@ int msi_add_string( string_table *st, const WCHAR *data, int len, enum StringPer
     memcpy( str, data, len*sizeof(WCHAR) );
     str[len] = 0;
 
-    set_st_entry( st, n, str, len, 1, persistence );
+    set_st_entry( st, n, str, len, 1, persistent );
     return n;
 }
 
@@ -404,7 +403,7 @@ UINT msi_string2id( const string_table *st, const WCHAR *str, int len, UINT *id 
 {
     int i, c, low = 0, high = st->sortcount - 1;
 
-    if (len < 0) len = strlenW( str );
+    if (len < 0) len = lstrlenW( str );
 
     while (low <= high)
     {
@@ -545,7 +544,7 @@ string_table *msi_load_string_table( IStorage *stg, UINT *bytes_per_strref )
             break;
         }
 
-        r = add_string( st, n, data+offset, len, refs, StringPersistent );
+        r = add_string( st, n, data+offset, len, refs, TRUE );
         if( r != n )
             ERR("Failed to add string %d\n", n );
         n++;

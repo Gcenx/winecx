@@ -8,6 +8,8 @@
 #ifndef __WINE_WINE_SERVER_PROTOCOL_H
 #define __WINE_WINE_SERVER_PROTOCOL_H
 
+#include <wine/winheader_enter.h>
+
 #include <stdarg.h>
 #include <stdlib.h>
 #include <time.h>
@@ -119,12 +121,12 @@ enum cpu_type
 {
     CPU_x86, CPU_x86_64, CPU_POWERPC, CPU_ARM, CPU_ARM64
 };
-typedef int cpu_type_t;
+typedef int client_cpu_t;
 
 
 typedef struct
 {
-    cpu_type_t       cpu;
+    client_cpu_t     cpu;
     unsigned int     flags;
     union
     {
@@ -449,7 +451,8 @@ enum apc_type
     APC_VIRTUAL_UNLOCK,
     APC_MAP_VIEW,
     APC_UNMAP_VIEW,
-    APC_CREATE_THREAD
+    APC_CREATE_THREAD,
+    APC_BREAK_PROCESS
 };
 
 typedef union
@@ -638,51 +641,86 @@ typedef union
         thread_id_t      tid;
         obj_handle_t     handle;
     } create_thread;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+    } break_process;
 } apc_result_t;
+
+enum irp_type
+{
+    IRP_CALL_NONE,
+    IRP_CALL_CREATE,
+    IRP_CALL_CLOSE,
+    IRP_CALL_READ,
+    IRP_CALL_WRITE,
+    IRP_CALL_FLUSH,
+    IRP_CALL_IOCTL,
+    IRP_CALL_FREE,
+    IRP_CALL_CANCEL
+};
 
 typedef union
 {
-    unsigned int         major;
+    enum irp_type        type;
     struct
     {
-        unsigned int     major;
+        enum irp_type    type;
         unsigned int     access;
         unsigned int     sharing;
         unsigned int     options;
         client_ptr_t     device;
+        obj_handle_t     file;
     } create;
     struct
     {
-        unsigned int     major;
+        enum irp_type    type;
         int              __pad;
         client_ptr_t     file;
     } close;
     struct
     {
-        unsigned int     major;
+        enum irp_type    type;
         unsigned int     key;
+        data_size_t      out_size;
+        int              __pad;
         client_ptr_t     file;
         file_pos_t       pos;
     } read;
     struct
     {
-        unsigned int     major;
+        enum irp_type    type;
         unsigned int     key;
         client_ptr_t     file;
         file_pos_t       pos;
     } write;
     struct
     {
-        unsigned int     major;
+        enum irp_type    type;
         int              __pad;
         client_ptr_t     file;
     } flush;
     struct
     {
-        unsigned int     major;
+        enum irp_type    type;
         ioctl_code_t     code;
+        data_size_t      out_size;
+        int              __pad;
         client_ptr_t     file;
     } ioctl;
+    struct
+    {
+        enum irp_type    type;
+        int              __pad;
+        client_ptr_t     obj;
+    } free;
+    struct
+    {
+        enum irp_type    type;
+        int              __pad;
+        client_ptr_t     irp;
+    } cancel;
 } irp_params_t;
 
 
@@ -707,13 +745,16 @@ typedef struct
     unsigned int   header_size;
     unsigned int   file_size;
     unsigned int   checksum;
-    cpu_type_t     cpu;
+    client_cpu_t   cpu;
+    int            __pad;
 } pe_image_info_t;
 #define IMAGE_FLAGS_ComPlusNativeReady        0x01
 #define IMAGE_FLAGS_ComPlusILOnly             0x02
 #define IMAGE_FLAGS_ImageDynamicallyRelocated 0x04
 #define IMAGE_FLAGS_ImageMappedFlat           0x08
 #define IMAGE_FLAGS_BaseBelow4gb              0x10
+#define IMAGE_FLAGS_WineBuiltin               0x40
+#define IMAGE_FLAGS_WineFakeDll               0x80
 
 struct rawinput_device
 {
@@ -735,7 +776,7 @@ struct new_process_request
     int          socket_fd;
     obj_handle_t exe_file;
     unsigned int access;
-    cpu_type_t   cpu;
+    client_cpu_t cpu;
     data_size_t  info_size;
     /* VARARG(objattr,object_attributes); */
     /* VARARG(info,startup_info,info_size); */
@@ -757,7 +798,7 @@ struct exec_process_request
     struct request_header __header;
     int          socket_fd;
     obj_handle_t exe_file;
-    cpu_type_t   cpu;
+    client_cpu_t cpu;
 };
 struct exec_process_reply
 {
@@ -842,7 +883,7 @@ struct init_thread_request
     client_ptr_t entry;
     int          reply_fd;
     int          wait_fd;
-    cpu_type_t   cpu;
+    client_cpu_t cpu;
     char __pad_52[4];
 };
 struct init_thread_reply
@@ -907,7 +948,7 @@ struct get_process_info_reply
     timeout_t    end_time;
     int          exit_code;
     int          priority;
-    cpu_type_t   cpu;
+    client_cpu_t cpu;
     short int    debugger_present;
     short int    debug_children;
 };
@@ -1246,6 +1287,8 @@ struct event_op_request
 struct event_op_reply
 {
     struct reply_header __header;
+    int           state;
+    char __pad_12[4];
 };
 enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
 
@@ -2511,20 +2554,6 @@ struct debug_process_reply
 
 
 
-struct debug_break_request
-{
-    struct request_header __header;
-    obj_handle_t handle;
-};
-struct debug_break_reply
-{
-    struct reply_header __header;
-    int          self;
-    char __pad_12[4];
-};
-
-
-
 struct set_debugger_kill_on_exit_request
 {
     struct request_header __header;
@@ -3402,7 +3431,6 @@ struct set_irp_result_request
     obj_handle_t handle;
     unsigned int status;
     data_size_t  size;
-    client_ptr_t file_ptr;
     /* VARARG(data,bytes); */
 };
 struct set_irp_result_reply
@@ -5237,19 +5265,15 @@ struct create_device_manager_reply
 struct create_device_request
 {
     struct request_header __header;
-    unsigned int access;
-    unsigned int attributes;
     obj_handle_t rootdir;
     client_ptr_t user_ptr;
     obj_handle_t manager;
     /* VARARG(name,unicode_str); */
-    char __pad_36[4];
+    char __pad_28[4];
 };
 struct create_device_reply
 {
     struct reply_header __header;
-    obj_handle_t handle;
-    char __pad_12[4];
 };
 
 
@@ -5257,7 +5281,8 @@ struct create_device_reply
 struct delete_device_request
 {
     struct request_header __header;
-    obj_handle_t handle;
+    obj_handle_t manager;
+    client_ptr_t device;
 };
 struct delete_device_reply
 {
@@ -5272,18 +5297,91 @@ struct get_next_device_request_request
     obj_handle_t manager;
     obj_handle_t prev;
     unsigned int status;
+    client_ptr_t user_ptr;
 };
 struct get_next_device_request_reply
 {
     struct reply_header __header;
     irp_params_t params;
     obj_handle_t next;
-    process_id_t client_pid;
     thread_id_t  client_tid;
+    client_ptr_t client_thread;
     data_size_t  in_size;
-    data_size_t  out_size;
     /* VARARG(next_data,bytes); */
-    char __pad_52[4];
+    char __pad_60[4];
+};
+
+
+
+struct get_kernel_object_ptr_request
+{
+    struct request_header __header;
+    obj_handle_t manager;
+    obj_handle_t handle;
+    char __pad_20[4];
+};
+struct get_kernel_object_ptr_reply
+{
+    struct reply_header __header;
+    client_ptr_t user_ptr;
+};
+
+
+
+struct set_kernel_object_ptr_request
+{
+    struct request_header __header;
+    obj_handle_t manager;
+    obj_handle_t handle;
+    char __pad_20[4];
+    client_ptr_t user_ptr;
+};
+struct set_kernel_object_ptr_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct grab_kernel_object_request
+{
+    struct request_header __header;
+    obj_handle_t manager;
+    client_ptr_t user_ptr;
+};
+struct grab_kernel_object_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct release_kernel_object_request
+{
+    struct request_header __header;
+    obj_handle_t manager;
+    client_ptr_t user_ptr;
+};
+struct release_kernel_object_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct get_kernel_object_handle_request
+{
+    struct request_header __header;
+    obj_handle_t manager;
+    client_ptr_t user_ptr;
+    unsigned int access;
+    char __pad_28[4];
+};
+struct get_kernel_object_handle_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
 };
 
 
@@ -5708,6 +5806,30 @@ struct terminate_job_reply
 };
 
 
+
+struct suspend_process_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct suspend_process_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct resume_process_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct resume_process_reply
+{
+    struct reply_header __header;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -5811,7 +5933,6 @@ enum request
     REQ_get_exception_status,
     REQ_continue_debug_event,
     REQ_debug_process,
-    REQ_debug_break,
     REQ_set_debugger_kill_on_exit,
     REQ_read_process_memory,
     REQ_write_process_memory,
@@ -5977,6 +6098,11 @@ enum request
     REQ_create_device,
     REQ_delete_device,
     REQ_get_next_device_request,
+    REQ_get_kernel_object_ptr,
+    REQ_set_kernel_object_ptr,
+    REQ_grab_kernel_object,
+    REQ_release_kernel_object,
+    REQ_get_kernel_object_handle,
     REQ_make_process_system,
     REQ_get_token_statistics,
     REQ_create_completion,
@@ -6004,6 +6130,8 @@ enum request
     REQ_set_job_limits,
     REQ_set_job_completion_port,
     REQ_terminate_job,
+    REQ_suspend_process,
+    REQ_resume_process,
     REQ_NB_REQUESTS
 };
 
@@ -6112,7 +6240,6 @@ union generic_request
     struct get_exception_status_request get_exception_status_request;
     struct continue_debug_event_request continue_debug_event_request;
     struct debug_process_request debug_process_request;
-    struct debug_break_request debug_break_request;
     struct set_debugger_kill_on_exit_request set_debugger_kill_on_exit_request;
     struct read_process_memory_request read_process_memory_request;
     struct write_process_memory_request write_process_memory_request;
@@ -6278,6 +6405,11 @@ union generic_request
     struct create_device_request create_device_request;
     struct delete_device_request delete_device_request;
     struct get_next_device_request_request get_next_device_request_request;
+    struct get_kernel_object_ptr_request get_kernel_object_ptr_request;
+    struct set_kernel_object_ptr_request set_kernel_object_ptr_request;
+    struct grab_kernel_object_request grab_kernel_object_request;
+    struct release_kernel_object_request release_kernel_object_request;
+    struct get_kernel_object_handle_request get_kernel_object_handle_request;
     struct make_process_system_request make_process_system_request;
     struct get_token_statistics_request get_token_statistics_request;
     struct create_completion_request create_completion_request;
@@ -6305,6 +6437,8 @@ union generic_request
     struct set_job_limits_request set_job_limits_request;
     struct set_job_completion_port_request set_job_completion_port_request;
     struct terminate_job_request terminate_job_request;
+    struct suspend_process_request suspend_process_request;
+    struct resume_process_request resume_process_request;
 };
 union generic_reply
 {
@@ -6411,7 +6545,6 @@ union generic_reply
     struct get_exception_status_reply get_exception_status_reply;
     struct continue_debug_event_reply continue_debug_event_reply;
     struct debug_process_reply debug_process_reply;
-    struct debug_break_reply debug_break_reply;
     struct set_debugger_kill_on_exit_reply set_debugger_kill_on_exit_reply;
     struct read_process_memory_reply read_process_memory_reply;
     struct write_process_memory_reply write_process_memory_reply;
@@ -6577,6 +6710,11 @@ union generic_reply
     struct create_device_reply create_device_reply;
     struct delete_device_reply delete_device_reply;
     struct get_next_device_request_reply get_next_device_request_reply;
+    struct get_kernel_object_ptr_reply get_kernel_object_ptr_reply;
+    struct set_kernel_object_ptr_reply set_kernel_object_ptr_reply;
+    struct grab_kernel_object_reply grab_kernel_object_reply;
+    struct release_kernel_object_reply release_kernel_object_reply;
+    struct get_kernel_object_handle_reply get_kernel_object_handle_reply;
     struct make_process_system_reply make_process_system_reply;
     struct get_token_statistics_reply get_token_statistics_reply;
     struct create_completion_reply create_completion_reply;
@@ -6604,8 +6742,12 @@ union generic_reply
     struct set_job_limits_reply set_job_limits_reply;
     struct set_job_completion_port_reply set_job_completion_port_reply;
     struct terminate_job_reply terminate_job_reply;
+    struct suspend_process_reply suspend_process_reply;
+    struct resume_process_reply resume_process_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 572
+#define SERVER_PROTOCOL_VERSION 589
+
+#include <wine/winheader_exit.h>
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

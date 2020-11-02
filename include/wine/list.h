@@ -22,6 +22,14 @@
 #define __WINE_SERVER_LIST_H
 
 #include <stddef.h>
+#include <stdint.h>
+#include <wine/32on64utils.h>
+
+#ifdef WINE_LIST_HOSTADDRSPACE
+#include <wine/hostaddrspace_enter.h>
+#else
+#include <wine/winheader_enter.h>
+#endif
 
 struct list
 {
@@ -229,6 +237,12 @@ static inline void list_move_head( struct list *dst, struct list *src )
 /* get pointer to object containing list element */
 #undef LIST_ENTRY
 #define LIST_ENTRY(elem, type, field) \
-    ((type *)((char *)(elem) - offsetof(type, field)))
+    TRUNCCAST(type *, ((uintptr_t)(elem) - offsetof(type, field)))
+
+#ifdef WINE_LIST_HOSTADDRSPACE
+#include <wine/hostaddrspace_exit.h>
+#else
+#include <wine/winheader_exit.h>
+#endif
 
 #endif  /* __WINE_SERVER_LIST_H */

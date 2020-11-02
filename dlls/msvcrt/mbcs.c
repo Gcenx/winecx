@@ -123,7 +123,7 @@ static inline int u_strcmp( const unsigned char *s1, const unsigned char *s2 )
 
 static inline int u_strcasecmp( const unsigned char *s1, const unsigned char *s2 )
 {
-  return strcasecmp( (const char*)s1, (const char*)s2 );
+  return MSVCRT__stricmp( (const char*)s1, (const char*)s2 );
 }
 
 static inline int u_strncmp( const unsigned char *s1, const unsigned char *s2, MSVCRT_size_t len )
@@ -133,7 +133,7 @@ static inline int u_strncmp( const unsigned char *s1, const unsigned char *s2, M
 
 static inline int u_strncasecmp( const unsigned char *s1, const unsigned char *s2, MSVCRT_size_t len )
 {
-  return strncasecmp( (const char*)s1, (const char*)s2, len );
+  return MSVCRT__strnicmp( (const char*)s1, (const char*)s2, len );
 }
 
 static inline unsigned char *u_strchr( const unsigned char *s, unsigned char x )
@@ -404,7 +404,7 @@ unsigned int CDECL _mbctolower(unsigned int c)
       FIXME("Handle MBC chars\n");
       return c;
     }
-    return tolower(c); /* ASCII CP or SB char */
+    return MSVCRT__tolower_l(c, NULL); /* ASCII CP or SB char */
 }
 
 /*********************************************************************
@@ -417,7 +417,7 @@ unsigned int CDECL _mbctoupper(unsigned int c)
       FIXME("Handle MBC chars\n");
       return c;
     }
-    return toupper(c); /* ASCII CP or SB char */
+    return MSVCRT__toupper_l(c, NULL); /* ASCII CP or SB char */
 }
 
 /*********************************************************************
@@ -1551,13 +1551,35 @@ int CDECL _ismbblead(unsigned int c)
     return _ismbblead_l(c, NULL);
 }
 
+/*********************************************************************
+ *              _ismbbtrail_l(MSVCRT.@)
+ */
+int CDECL _ismbbtrail_l(unsigned int c, MSVCRT__locale_t locale)
+{
+    MSVCRT_pthreadmbcinfo mbcinfo;
+
+    if(!locale)
+        mbcinfo = get_mbcinfo();
+    else
+        mbcinfo = locale->mbcinfo;
+
+    return (mbcinfo->mbctype[(c&0xff) + 1] & _M2) != 0;
+}
 
 /*********************************************************************
  *		_ismbbtrail(MSVCRT.@)
  */
 int CDECL _ismbbtrail(unsigned int c)
 {
-  return (get_mbcinfo()->mbctype[(c&0xff) + 1] & _M2) != 0;
+    return _ismbbtrail_l(c, NULL);
+}
+
+/*********************************************************************
+ *              _ismbclegal_l(MSVCRT.@)
+ */
+int CDECL _ismbclegal_l(unsigned int c, MSVCRT__locale_t locale)
+{
+    return _ismbblead_l(HIBYTE(c), locale) && _ismbbtrail_l(LOBYTE(c), locale);
 }
 
 /*********************************************************************
@@ -1565,7 +1587,7 @@ int CDECL _ismbbtrail(unsigned int c)
  */
 int CDECL _ismbclegal(unsigned int c)
 {
-    return _ismbblead(HIBYTE(c)) && _ismbbtrail(LOBYTE(c));
+    return _ismbclegal_l(c, NULL);
 }
 
 /*********************************************************************
@@ -1887,7 +1909,7 @@ unsigned char* CDECL _mbslwr(unsigned char* s)
       *s++=c;
     }
   }
-  else for ( ; *s; s++) *s = tolower(*s);
+  else for ( ; *s; s++) *s = MSVCRT__tolower_l(*s, NULL);
   return ret;
 }
 
@@ -1921,7 +1943,7 @@ int CDECL _mbslwr_s(unsigned char* s, MSVCRT_size_t len)
       *s++=c;
     }
   }
-  else for ( ; *s && len > 0; s++, len--) *s = tolower(*s);
+  else for ( ; *s && len > 0; s++, len--) *s = MSVCRT__tolower_l(*s, NULL);
   if (*s)
   {
     *s = '\0';
@@ -1955,7 +1977,7 @@ unsigned char* CDECL _mbsupr(unsigned char* s)
       *s++=c;
     }
   }
-  else for ( ; *s; s++) *s = toupper(*s);
+  else for ( ; *s; s++) *s = MSVCRT__toupper_l(*s, NULL);
   return ret;
 }
 
@@ -1989,7 +2011,7 @@ int CDECL _mbsupr_s(unsigned char* s, MSVCRT_size_t len)
       *s++=c;
     }
   }
-  else for ( ; *s && len > 0; s++, len--) *s = toupper(*s);
+  else for ( ; *s && len > 0; s++, len--) *s = MSVCRT__toupper_l(*s, NULL);
   if (*s)
   {
     *s = '\0';
@@ -2373,7 +2395,7 @@ MSVCRT_size_t CDECL MSVCRT__mbstowcs_l(MSVCRT_wchar_t *wcstr, const char *mbstr,
         }
     }
 
-    if(size<count && wcstr)
+    if(size<count)
         wcstr[size] = '\0';
 
     return size;
@@ -2529,16 +2551,89 @@ unsigned int CDECL _mbctokata(unsigned int c)
     return c;
 }
 
+/*********************************************************************
+ *		_ismbcl0_l (MSVCRT.@)
+ */
+int CDECL _ismbcl0_l(unsigned int c, MSVCRT__locale_t locale)
+{
+    MSVCRT_pthreadmbcinfo mbcinfo;
+
+    if(!locale)
+        mbcinfo = get_mbcinfo();
+    else
+        mbcinfo = locale->mbcinfo;
+
+    if(mbcinfo->mbcodepage == 932)
+    {
+        /* JIS non-Kanji */
+        return _ismbclegal_l(c, locale) && c >= 0x8140 && c <= 0x889e;
+    }
+
+    return 0;
+}
 
 /*********************************************************************
  *		_ismbcl0 (MSVCRT.@)
  */
 int CDECL _ismbcl0(unsigned int c)
 {
-  if(get_mbcinfo()->mbcodepage == 932)
-  {
-    /* JIS non-Kanji */
-    return (c >= 0x8140 && c <= 0x889e);
-  }
-  return 0;
+    return _ismbcl0_l(c, NULL);
+}
+
+/*********************************************************************
+ *		_ismbcl1_l (MSVCRT.@)
+ */
+int CDECL _ismbcl1_l(unsigned int c, MSVCRT__locale_t locale)
+{
+    MSVCRT_pthreadmbcinfo mbcinfo;
+
+    if(!locale)
+        mbcinfo = get_mbcinfo();
+    else
+        mbcinfo = locale->mbcinfo;
+
+    if(mbcinfo->mbcodepage == 932)
+    {
+        /* JIS level-1 */
+        return _ismbclegal_l(c, locale) && c >= 0x889f && c <= 0x9872;
+    }
+
+    return 0;
+}
+
+/*********************************************************************
+ *		_ismbcl1 (MSVCRT.@)
+ */
+int CDECL _ismbcl1(unsigned int c)
+{
+    return _ismbcl1_l(c, NULL);
+}
+
+/*********************************************************************
+ *		_ismbcl2_l (MSVCRT.@)
+ */
+int CDECL _ismbcl2_l(unsigned int c, MSVCRT__locale_t locale)
+{
+    MSVCRT_pthreadmbcinfo mbcinfo;
+
+    if(!locale)
+        mbcinfo = get_mbcinfo();
+    else
+        mbcinfo = locale->mbcinfo;
+
+    if(mbcinfo->mbcodepage == 932)
+    {
+        /* JIS level-2 */
+        return _ismbclegal_l(c, locale) && c >= 0x989f && c <= 0xeaa4;
+    }
+
+    return 0;
+}
+
+/*********************************************************************
+ *		_ismbcl2 (MSVCRT.@)
+ */
+int CDECL _ismbcl2(unsigned int c)
+{
+    return _ismbcl2_l(c, NULL);
 }

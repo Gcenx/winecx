@@ -22,6 +22,6 @@
 #ifndef __WIDL_HASH_H
 #define __WIDL_HASH_H
 
-extern unsigned int lhash_val_of_name_sys( syskind_t skind, LCID lcid, LPCSTR lpStr);
+extern unsigned int lhash_val_of_name_sys( syskind_t skind, LCID lcid, const CHAR *lpStr);
 
 #endif

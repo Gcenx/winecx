@@ -18,9 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include "d3drm_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3drm);
@@ -53,6 +50,7 @@ static HRESULT d3drm_update_background_material(struct d3drm_viewport *viewport)
     if (FAILED(hr = IDirect3DRMFrame_GetScene(viewport->camera, &root_frame)))
         return hr;
     color = IDirect3DRMFrame_GetSceneBackground(root_frame);
+    IDirect3DRMFrame_Release(root_frame);
 
     memset(&mat, 0, sizeof(mat));
     mat.dwSize = sizeof(mat);

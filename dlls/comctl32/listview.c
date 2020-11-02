@@ -124,9 +124,6 @@
  *   -- LVGroupComparE
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <assert.h>
 #include <ctype.h>
 #include <string.h>
@@ -145,7 +142,6 @@
 #include "uxtheme.h"
 
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(listview);
 
@@ -997,7 +993,7 @@ static BOOL notify_dispinfoT(const LISTVIEW_INFO *infoPtr, UINT code, LPNMLVDISP
         }
         else if (return_unicode && (pdi->hdr.code == LVN_GETDISPINFOW))
         {
-            strcpyW(ret_text, pdi->item.pszText);
+            lstrcpyW(ret_text, pdi->item.pszText);
         }
         else if (return_ansi) /* note : pointer can be changed by app ! */
         {
@@ -1870,7 +1866,7 @@ static INT LISTVIEW_ProcessLetterKeys(LISTVIEW_INFO *infoPtr, WPARAM charCode, L
     if (!charCode || !keyData || infoPtr->nItemCount == 0) return 0;
 
     /* only allow the valid WM_CHARs through */
-    if (!isalnumW(charCode) &&
+    if (!iswalnum(charCode) &&
         charCode != '.' && charCode != '`' && charCode != '!' &&
         charCode != '@' && charCode != '#' && charCode != '$' &&
         charCode != '%' && charCode != '^' && charCode != '&' &&
@@ -6405,7 +6401,7 @@ again:
 	{
             if (lpFindInfo->flags & (LVFI_PARTIAL | LVFI_SUBSTRING))
             {
-		WCHAR *p = strstrW(lvItem.pszText, lpFindInfo->psz);
+		WCHAR *p = wcsstr(lvItem.pszText, lpFindInfo->psz);
 		if (!p || p != lvItem.pszText) continue;
             }
             else
@@ -9899,7 +9895,7 @@ static LRESULT LISTVIEW_HScroll(LISTVIEW_INFO *infoPtr, INT nScrollCode,
     /* carry on only if it really changed */
     if (nNewScrollPos == nOldScrollPos) return 0;
 
-    if (infoPtr->hwndHeader) LISTVIEW_UpdateHeaderSize(infoPtr, nNewScrollPos);
+    LISTVIEW_UpdateHeaderSize(infoPtr, nNewScrollPos);
 
     /* now adjust to client coordinates */
     nScrollDiff = nOldScrollPos - nNewScrollPos;
@@ -9913,7 +9909,7 @@ static LRESULT LISTVIEW_HScroll(LISTVIEW_INFO *infoPtr, INT nScrollCode,
 
 static LRESULT LISTVIEW_MouseWheel(LISTVIEW_INFO *infoPtr, INT wheelDelta)
 {
-    UINT pulScrollLines = 3;
+    INT pulScrollLines = 3;
 
     TRACE("(wheelDelta=%d)\n", wheelDelta);
 
@@ -9942,8 +9938,8 @@ static LRESULT LISTVIEW_MouseWheel(LISTVIEW_INFO *infoPtr, INT wheelDelta)
         {
             int cLineScroll;
             pulScrollLines = min((UINT)LISTVIEW_GetCountPerColumn(infoPtr), pulScrollLines);
-            cLineScroll = pulScrollLines * (float)infoPtr->cWheelRemainder / WHEEL_DELTA;
-            infoPtr->cWheelRemainder -= WHEEL_DELTA * cLineScroll / (int)pulScrollLines;
+            cLineScroll = pulScrollLines * infoPtr->cWheelRemainder / WHEEL_DELTA;
+            infoPtr->cWheelRemainder -= WHEEL_DELTA * cLineScroll / pulScrollLines;
             LISTVIEW_VScroll(infoPtr, SB_INTERNAL, -cLineScroll);
         }
         break;
@@ -11084,13 +11080,21 @@ static void LISTVIEW_UpdateSize(LISTVIEW_INFO *infoPtr)
         infoPtr->rcList.bottom = max (infoPtr->rcList.bottom - 2, 0);
     }
 
-    /* if control created invisible header isn't created */
+    /* When ListView control is created invisible, header isn't created right away. */
     if (infoPtr->hwndHeader)
     {
-	HDLAYOUT hl;
-	WINDOWPOS wp;
+        POINT origin;
+        WINDOWPOS wp;
+        HDLAYOUT hl;
+        RECT rect;
 
-	hl.prc = &infoPtr->rcList;
+        LISTVIEW_GetOrigin(infoPtr, &origin);
+
+        rect = infoPtr->rcList;
+        rect.left += origin.x;
+        rect.top += origin.y;
+
+        hl.prc = &rect;
 	hl.pwpos = &wp;
 	SendMessageW( infoPtr->hwndHeader, HDM_LAYOUT, 0, (LPARAM)&hl );
 	TRACE("  wp.flags=0x%08x, wp=%d,%d (%dx%d)\n", wp.flags, wp.x, wp.y, wp.cx, wp.cy);

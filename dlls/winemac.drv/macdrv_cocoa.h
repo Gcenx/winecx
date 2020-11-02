@@ -83,7 +83,6 @@
 #undef SetRect
 #undef ShowCursor
 #undef UnionRect
-#undef DPRINTF
 
 #include <pthread.h>
 
@@ -97,6 +96,9 @@
 #  define DECLSPEC_HIDDEN
 # endif
 #endif
+
+#include "wine/32on64utils.h"
+#include "wine/hostptraddrspace_enter.h"
 
 
 #include "macdrv_res.h"
@@ -354,7 +356,7 @@ typedef struct macdrv_event {
             unsigned long   time_ms;
         }                                           hotkey_press;
         struct {
-            void           *data;
+            void * WIN32PTR data;
             CFStringRef     text;       /* new text or NULL if just completing existing text */
             unsigned int    cursor_pos;
             unsigned int    complete;   /* is completing text? */
@@ -462,7 +464,7 @@ typedef struct macdrv_query {
             CFTypeRef           pasteboard;
         }                                           drag_operation;
         struct {
-            void   *data;
+            void * WIN32PTR data;
             CFRange range;
             CGRect  rect;
         }                                           ime_char_rect;
@@ -524,9 +526,9 @@ struct macdrv_window_state {
 };
 
 extern macdrv_window macdrv_create_cocoa_window(const struct macdrv_window_features* wf,
-        CGRect frame, void* hwnd, macdrv_event_queue queue) DECLSPEC_HIDDEN;
+        CGRect frame, void* WIN32PTR hwnd, macdrv_event_queue queue) DECLSPEC_HIDDEN;
 extern void macdrv_destroy_cocoa_window(macdrv_window w) DECLSPEC_HIDDEN;
-extern void* macdrv_get_window_hwnd(macdrv_window w) DECLSPEC_HIDDEN;
+extern void* WIN32PTR macdrv_get_window_hwnd(macdrv_window w) DECLSPEC_HIDDEN;
 extern void macdrv_set_cocoa_window_features(macdrv_window w,
         const struct macdrv_window_features* wf) DECLSPEC_HIDDEN;
 extern void macdrv_set_cocoa_window_state(macdrv_window w,
@@ -539,9 +541,9 @@ extern void macdrv_hide_cocoa_window(macdrv_window w) DECLSPEC_HIDDEN;
 extern void macdrv_set_cocoa_window_frame(macdrv_window w, const CGRect* new_frame) DECLSPEC_HIDDEN;
 extern void macdrv_get_cocoa_window_frame(macdrv_window w, CGRect* out_frame) DECLSPEC_HIDDEN;
 extern void macdrv_set_cocoa_parent_window(macdrv_window w, macdrv_window parent) DECLSPEC_HIDDEN;
-extern void macdrv_set_window_surface(macdrv_window w, void *surface, pthread_mutex_t *mutex) DECLSPEC_HIDDEN;
-extern CGImageRef create_surface_image(void *window_surface, CGRect *rect, int copy_data) DECLSPEC_HIDDEN;
-extern int get_surface_blit_rects(void *window_surface, const CGRect **rects, int *count) DECLSPEC_HIDDEN;
+extern void macdrv_set_window_surface(macdrv_window w, void * WIN32PTR surface, pthread_mutex_t *mutex) DECLSPEC_HIDDEN;
+extern CGImageRef create_surface_image(void * WIN32PTR window_surface, CGRect *rect, int copy_data) DECLSPEC_HIDDEN;
+extern int get_surface_blit_rects(void * WIN32PTR window_surface, const CGRect **rects, int *count) DECLSPEC_HIDDEN;
 extern void macdrv_window_needs_display(macdrv_window w, CGRect rect) DECLSPEC_HIDDEN;
 extern void macdrv_set_window_shape(macdrv_window w, const CGRect *rects, int count) DECLSPEC_HIDDEN;
 extern void macdrv_set_window_alpha(macdrv_window w, CGFloat alpha) DECLSPEC_HIDDEN;
@@ -568,7 +570,7 @@ extern int macdrv_get_view_backing_size(macdrv_view v, int backing_size[2]) DECL
 extern void macdrv_set_view_backing_size(macdrv_view v, const int backing_size[2]) DECLSPEC_HIDDEN;
 extern uint32_t macdrv_window_background_color(void) DECLSPEC_HIDDEN;
 extern void macdrv_send_text_input_event(int pressed, unsigned int flags, int repeat, int keyc,
-                                         void* data, int* done) DECLSPEC_HIDDEN;
+                                         void* WIN32PTR data, int* done) DECLSPEC_HIDDEN;
 
 
 /* keyboard */
@@ -605,7 +607,11 @@ extern void macdrv_destroy_status_item(macdrv_status_item s) DECLSPEC_HIDDEN;
 extern void macdrv_set_status_item_image(macdrv_status_item s, CGImageRef cgimage) DECLSPEC_HIDDEN;
 extern void macdrv_set_status_item_tooltip(macdrv_status_item s, CFStringRef cftip) DECLSPEC_HIDDEN;
 
+extern void macdrv_clear_ime_text(void) DECLSPEC_HIDDEN;
+
 /* CrossOver Hack #15388 */
 extern int quicken_signin_hack;
+
+#include "wine/hostptraddrspace_exit.h"
 
 #endif  /* __WINE_MACDRV_COCOA_H */

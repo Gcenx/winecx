@@ -25,8 +25,6 @@
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
 
-#include "config.h"
-
 #include <string.h>
 
 #include "wine/debug.h"
@@ -283,7 +281,7 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
         WCHAR buf[256];
 
         res = di->pi->ppd->DefaultResolution;
-        len = sprintfW(buf, resW, res);
+        len = swprintf(buf, ARRAY_SIZE(buf), resW, res);
         buf[len++] = ' ';
         LoadStringW(PSDRV_hInstance, IDS_DPI, buf + len, ARRAY_SIZE(buf) - len);
         SendDlgItemMessageW(hwnd, IDD_QUALITY, CB_ADDSTRING, 0, (LPARAM)buf);
@@ -313,9 +311,9 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
             DWORD idx;
 
             if (res->resx == res->resy)
-                len = sprintfW(buf, resW, res->resx);
+                len = swprintf(buf, ARRAY_SIZE(buf), resW, res->resx);
             else
-                len = sprintfW(buf, resxyW, res->resx, res->resy);
+                len = swprintf(buf, ARRAY_SIZE(buf), resxyW, res->resx, res->resy);
             buf[len++] = ' ';
             LoadStringW(PSDRV_hInstance, IDS_DPI, buf + len, ARRAY_SIZE(buf) - len);
             idx = SendDlgItemMessageW(hwnd, IDD_QUALITY, CB_ADDSTRING, 0, (LPARAM)buf);
@@ -523,9 +521,9 @@ static DEVMODEA *DEVMODEdupWtoA( const DEVMODEW *dmW )
  *
  * Just returns default devmode at the moment.  No use of initialization file.
  */
-INT PSDRV_ExtDeviceMode(LPSTR lpszDriver, HWND hwnd, LPDEVMODEA lpdmOutput,
-                        LPSTR lpszDevice, LPSTR lpszPort, LPDEVMODEA lpdmInput,
-                        LPSTR lpszProfile, DWORD dwMode)
+INT CDECL PSDRV_ExtDeviceMode(LPSTR lpszDriver, HWND hwnd, LPDEVMODEA lpdmOutput,
+                              LPSTR lpszDevice, LPSTR lpszPort, LPDEVMODEA lpdmInput,
+                              LPSTR lpszProfile, DWORD dwMode)
 {
   PRINTERINFO *pi = PSDRV_FindPrinterInfoA(lpszDevice);
   if(!pi) return -1;
@@ -618,8 +616,8 @@ INT PSDRV_ExtDeviceMode(LPSTR lpszDriver, HWND hwnd, LPDEVMODEA lpdmOutput,
  * Returns
  *      Result depends on the setting of fwCapability.  -1 indicates failure.
  */
-DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszPort,
-                               WORD fwCapability, LPSTR lpszOutput, LPDEVMODEA lpDevMode)
+DWORD CDECL PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszPort,
+                                     WORD fwCapability, LPSTR lpszOutput, LPDEVMODEA lpDevMode)
 {
   PRINTERINFO *pi;
   DEVMODEW *lpdm;

@@ -97,6 +97,7 @@ struct process
     struct list          rawinput_devices;/* list of registered rawinput devices */
     const struct rawinput_device *rawinput_mouse; /* rawinput mouse device, if any */
     const struct rawinput_device *rawinput_kbd;   /* rawinput keyboard device, if any */
+    struct list          kernel_object;   /* list of kernel object pointers */
 };
 
 struct process_snapshot
@@ -136,7 +137,6 @@ extern void resume_process( struct process *process );
 extern void kill_process( struct process *process, int violent_death );
 extern void kill_console_processes( struct thread *renderer, int exit_code );
 extern void kill_debugged_processes( struct thread *debugger, int exit_code );
-extern void break_process( struct process *process );
 extern void detach_debugged_processes( struct thread *debugger );
 extern struct process_snapshot *process_snap( int *count );
 extern void enum_processes( int (*cb)(struct process*, void*), void *user);

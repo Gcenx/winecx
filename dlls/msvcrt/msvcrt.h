@@ -41,6 +41,7 @@
 #include "windef.h"
 #include "winbase.h"
 
+#define MSVCRT_INT_MAX     0x7fffffff
 #define MSVCRT_LONG_MAX    0x7fffffff
 #define MSVCRT_LONG_MIN    (-MSVCRT_LONG_MAX-1)
 #define MSVCRT_ULONG_MAX   0xffffffff
@@ -62,6 +63,7 @@
 typedef unsigned char  MSVCRT_bool;
 typedef unsigned short MSVCRT_wchar_t;
 typedef unsigned short MSVCRT_wint_t;
+typedef unsigned short MSVCRT_wctrans_t;
 typedef unsigned short MSVCRT_wctype_t;
 typedef unsigned short MSVCRT__ino_t;
 typedef unsigned int   MSVCRT__fsize_t;
@@ -73,11 +75,15 @@ typedef unsigned __int64 MSVCRT_size_t;
 typedef __int64 MSVCRT_intptr_t;
 typedef unsigned __int64 MSVCRT_uintptr_t;
 #else
-typedef unsigned long MSVCRT_size_t;
-typedef long MSVCRT_intptr_t;
-typedef unsigned long MSVCRT_uintptr_t;
+typedef unsigned __int32 MSVCRT_size_t;
+typedef __int32 MSVCRT_intptr_t;
+typedef unsigned __int32 MSVCRT_uintptr_t;
 #endif
+#ifdef _CRTDLL
+typedef short MSVCRT__dev_t;
+#else
 typedef unsigned int   MSVCRT__dev_t;
+#endif
 typedef int MSVCRT__off_t;
 typedef int MSVCRT_clock_t;
 typedef int MSVCRT___time32_t;
@@ -204,6 +210,13 @@ typedef struct MSVCRT_localeinfo_struct
     MSVCRT_pthreadmbcinfo mbcinfo;
 } MSVCRT__locale_tstruct, *MSVCRT__locale_t;
 
+typedef struct MSVCRT__onexit_table_t
+{
+    MSVCRT__onexit_t *_first;
+    MSVCRT__onexit_t *_last;
+    MSVCRT__onexit_t *_end;
+} MSVCRT__onexit_table_t;
+
 typedef struct _frame_info
 {
     void *object;
@@ -283,6 +296,7 @@ extern MSVCRT__locale_t MSVCRT_locale DECLSPEC_HIDDEN;
 extern unsigned int MSVCRT___lc_codepage;
 extern int MSVCRT___lc_collate_cp;
 extern WORD MSVCRT__ctype [257];
+extern BOOL initial_locale DECLSPEC_HIDDEN;
 
 void msvcrt_set_errno(int) DECLSPEC_HIDDEN;
 #if _MSVCR_VER >= 80
@@ -481,20 +495,20 @@ struct MSVCRT__heapinfo {
   int            _useflag;
 };
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 struct MSVCRT___JUMP_BUFFER {
-    unsigned long Ebp;
-    unsigned long Ebx;
-    unsigned long Edi;
-    unsigned long Esi;
-    unsigned long Esp;
-    unsigned long Eip;
-    unsigned long Registration;
-    unsigned long TryLevel;
+    unsigned __int32 Ebp;
+    unsigned __int32 Ebx;
+    unsigned __int32 Edi;
+    unsigned __int32 Esi;
+    unsigned __int32 Esp;
+    unsigned __int32 Eip;
+    unsigned __int32 Registration;
+    unsigned __int32 TryLevel;
     /* Start of new struct members */
-    unsigned long Cookie;
-    unsigned long UnwindFunc;
-    unsigned long UnwindData[6];
+    unsigned __int32 Cookie;
+    unsigned __int32 UnwindFunc;
+    unsigned __int32 UnwindData[6];
 };
 #elif defined(__x86_64__)
 struct MSVCRT__SETJMP_FLOAT128
@@ -1102,6 +1116,7 @@ int            __cdecl _ismbblead_l(unsigned int, MSVCRT__locale_t);
 int            __cdecl _ismbclegal(unsigned int c);
 int            __cdecl _ismbstrail(const unsigned char* start, const unsigned char* str);
 int            __cdecl MSVCRT_mbtowc(MSVCRT_wchar_t*,const char*,MSVCRT_size_t);
+int            __cdecl MSVCRT_mbtowc_l(MSVCRT_wchar_t*,const char*,MSVCRT_size_t,MSVCRT__locale_t);
 MSVCRT_size_t  __cdecl MSVCRT_mbstowcs(MSVCRT_wchar_t*,const char*,MSVCRT_size_t);
 MSVCRT_size_t  __cdecl MSVCRT__mbstowcs_l(MSVCRT_wchar_t*, const char*, MSVCRT_size_t, MSVCRT__locale_t);
 MSVCRT_size_t  __cdecl MSVCRT_wcstombs(char*,const MSVCRT_wchar_t*,MSVCRT_size_t);
@@ -1127,6 +1142,7 @@ MSVCRT_size_t __cdecl MSVCRT_strnlen(const char *,MSVCRT_size_t);
 MSVCRT_size_t __cdecl MSVCRT_wcsnlen(const MSVCRT_wchar_t*,MSVCRT_size_t);
 MSVCRT_wchar_t*** __cdecl MSVCRT___p__wenviron(void);
 INT     __cdecl MSVCRT_wctomb(char*,MSVCRT_wchar_t);
+int     __cdecl MSVCRT__wctomb_l(char*, MSVCRT_wchar_t, MSVCRT__locale_t);
 char*   __cdecl MSVCRT__strdate(char* date);
 char*   __cdecl MSVCRT__strtime(char* date);
 int     __cdecl _setmbcp(int);
@@ -1141,6 +1157,10 @@ void __cdecl MSVCRT__invalid_parameter(const MSVCRT_wchar_t *expr, const MSVCRT_
                                        const MSVCRT_wchar_t *file, unsigned int line, MSVCRT_uintptr_t arg);
 int __cdecl      MSVCRT__toupper_l(int,MSVCRT__locale_t);
 int __cdecl      MSVCRT__tolower_l(int,MSVCRT__locale_t);
+int __cdecl      MSVCRT__towupper_l(MSVCRT_wint_t,MSVCRT__locale_t);
+int __cdecl      MSVCRT__towlower_l(MSVCRT_wint_t,MSVCRT__locale_t);
+int __cdecl      MSVCRT__stricmp(const char*, const char*);
+int __cdecl      MSVCRT__strnicmp(const char*, const char*, MSVCRT_size_t);
 int __cdecl      MSVCRT__strnicoll_l(const char*, const char*, MSVCRT_size_t, MSVCRT__locale_t);
 int __cdecl      MSVCRT__strncoll_l(const char*, const char*, MSVCRT_size_t, MSVCRT__locale_t);
 unsigned int __cdecl MSVCRT__get_output_format(void);
@@ -1183,6 +1203,9 @@ printf_arg arg_clbk_positional(void*, int, int, __ms_va_list*) DECLSPEC_HIDDEN;
 #define MSVCRT_DBL_MIN 2.2250738585072014e-308
 #define MSVCRT__OVERFLOW  3
 #define MSVCRT__UNDERFLOW 4
+
+#define MSVCRT_FP_ILOGB0 (-MSVCRT_INT_MAX - 1)
+#define MSVCRT_FP_ILOGBNAN MSVCRT_INT_MAX
 
 typedef struct
 {

@@ -61,7 +61,6 @@
 #undef CompareString
 #undef GetCurrentThread
 #undef _CDECL
-#undef DPRINTF
 #undef GetCurrentProcess
 #undef AnimatePalette
 #undef EqualRgn
@@ -130,6 +129,12 @@ typedef struct
 } FT_Version_t;
 static FT_Version_t FT_Version;
 static DWORD FT_SimpleVersion;
+#define FT_VERSION_VALUE(major, minor, patch) (((major) << 16) | ((minor) << 8) | (patch))
+
+#ifdef __i386_on_x86_64__
+#pragma clang default_addr_space(push, default)
+#pragma clang storage_addr_space(push, default)
+#endif
 
 static void *ft_handle = NULL;
 
@@ -169,6 +174,7 @@ static FT_TrueTypeEngineType (*pFT_Get_TrueType_Engine_Type)(FT_Library);
 #ifdef FT_LCD_FILTER_H
 static FT_Error (*pFT_Library_SetLcdFilter)(FT_Library, FT_LcdFilter);
 #endif
+static FT_Error (*pFT_Property_Set)(FT_Library, const FT_String *, const FT_String *, const void *);
 
 #ifdef SONAME_LIBFONTCONFIG
 #include <fontconfig/fontconfig.h>
@@ -193,6 +199,11 @@ MAKE_FUNCPTR(FcPatternGetString);
 #endif /* SONAME_LIBFONTCONFIG */
 
 #undef MAKE_FUNCPTR
+
+#ifdef __i386_on_x86_64__
+#pragma clang default_addr_space(pop)
+#pragma clang storage_addr_space(pop)
+#endif
 
 #ifndef FT_MAKE_TAG
 #define FT_MAKE_TAG( ch0, ch1, ch2, ch3 ) \
@@ -251,6 +262,9 @@ typedef struct {
     FT_Short internal_leading;
 } Bitmap_Size;
 
+#ifdef __i386_on_x86_64__
+#pragma clang default_addr_space(push, default)
+#endif
 /* FT_Bitmap_Size gained 3 new elements between FreeType 2.1.4 and 2.1.5
    So to let this compile on older versions of FreeType we'll define the
    new structure here. */
@@ -258,6 +272,10 @@ typedef struct {
     FT_Short height, width;
     FT_Pos size, x_ppem, y_ppem;
 } My_FT_Bitmap_Size;
+
+#ifdef __i386_on_x86_64__
+#pragma clang default_addr_space(pop)
+#endif
 
 struct enum_data
 {
@@ -594,7 +612,7 @@ struct font_mapping
     int         refcount;
     dev_t       dev;
     ino_t       ino;
-    void       *data;
+    void* HOSTPTR data;
     size_t      size;
 };
 
@@ -817,7 +835,7 @@ static char *find_cache_dir(void)
 static char **expand_mac_font(const char *path)
 {
     FSRef ref;
-    SInt16 res_ref;
+    ResFileRefNum res_ref;
     OSStatus s;
     unsigned int idx;
     const char *out_dir;
@@ -876,8 +894,8 @@ static char **expand_mac_font(const char *path)
     while(1)
     {
         FamRec *fam_rec;
-        unsigned short *num_faces_ptr, num_faces, face;
-        AsscEntry *assoc;
+        unsigned short * HOSTPTR num_faces_ptr, num_faces, face;
+        AsscEntry * HOSTPTR assoc;
         Handle fond;
         ResType fond_res = FT_MAKE_TAG('F','O','N','D');
 
@@ -886,11 +904,11 @@ static char **expand_mac_font(const char *path)
         TRACE("got fond resource %d\n", idx);
         HLock(fond);
 
-        fam_rec = *(FamRec**)fond;
-        num_faces_ptr = (unsigned short *)(fam_rec + 1);
+        fam_rec = *(FamRec** HOSTPTR)fond;
+        num_faces_ptr = (unsigned short * HOSTPTR)(fam_rec + 1);
         num_faces = GET_BE_WORD(*num_faces_ptr);
         num_faces++;
-        assoc = (AsscEntry*)(num_faces_ptr + 1);
+        assoc = (AsscEntry * HOSTPTR)(num_faces_ptr + 1);
         TRACE("num faces %04x\n", num_faces);
         for(face = 0; face < num_faces; face++, assoc++)
         {
@@ -927,11 +945,8 @@ static char **expand_mac_font(const char *path)
                 {
                     if(fd != -1)
                     {
-                        unsigned char *sfnt_data;
-
                         HLock(sfnt);
-                        sfnt_data = *(unsigned char**)sfnt;
-                        write(fd, sfnt_data, GetHandleSize(sfnt));
+                        write(fd, *sfnt, GetHandleSize(sfnt));
                         HUnlock(sfnt);
                         close(fd);
                     }
@@ -1007,7 +1022,7 @@ static BOOL is_subpixel_rendering_enabled( void )
     if (enabled == -1)
     {
         /* FreeType >= 2.8.1 offers LCD-optimezed rendering without lcd filters. */
-        if (FT_SimpleVersion >= ((2 << 16) | (8 << 8) | (1 << 0)))
+        if (FT_SimpleVersion >= FT_VERSION_VALUE(2, 8, 1))
             enabled = TRUE;
 #ifdef FT_LCD_FILTER_H
         else if (pFT_Library_SetLcdFilter &&
@@ -1167,7 +1182,7 @@ static BOOL add_font_subst(struct list *subst_list, FontSubst *subst, INT flags)
     return FALSE;
 }
 
-static WCHAR *towstr(UINT cp, const char *str)
+static WCHAR *towstr(UINT cp, const char * HOSTPTR str)
 {
     int len;
     WCHAR *wstr;
@@ -1442,9 +1457,9 @@ static WCHAR *copy_name_table_string( const FT_SfntName *name )
         return ret;
     case TT_PLATFORM_MACINTOSH:
         codepage = get_mac_code_page( name );
-        i = MultiByteToWideChar( codepage, 0, (char *)name->string, name->string_len, NULL, 0 );
+        i = MultiByteToWideChar( codepage, 0, (char * HOSTPTR)name->string, name->string_len, NULL, 0 );
         ret = HeapAlloc( GetProcessHeap(), 0, (i + 1) * sizeof(WCHAR) );
-        MultiByteToWideChar( codepage, 0, (char *)name->string, name->string_len, ret, i );
+        MultiByteToWideChar( codepage, 0, (char * HOSTPTR)name->string, name->string_len, ret, i );
         ret[i] = 0;
         return ret;
     }
@@ -2192,7 +2207,7 @@ static FT_Face new_ft_face( const char *file, void *font_data_ptr, DWORD font_da
     }
 
     /* There are too many bugs in FreeType < 2.1.9 for bitmap font support */
-    if (!FT_IS_SCALABLE( ft_face ) && FT_SimpleVersion < ((2 << 16) | (1 << 8) | (9 << 0)))
+    if (!FT_IS_SCALABLE( ft_face ) && FT_SimpleVersion < FT_VERSION_VALUE(2, 1, 9))
     {
         WARN("FreeType version < 2.1.9, skipping bitmap font %s/%p\n", debugstr_a(file), font_data_ptr);
         goto fail;
@@ -2691,10 +2706,9 @@ static void populate_system_links(const WCHAR *name, const WCHAR *const *values)
 /*************************************************************
  * init_system_links
  */
-static BOOL init_system_links(void)
+static void init_system_links(void)
 {
     HKEY hkey;
-    BOOL ret = FALSE;
     DWORD type, max_val, max_data, val_len, data_len, index;
     WCHAR *value, *data;
     WCHAR *entry, *next;
@@ -2840,7 +2854,6 @@ skip_internal:
         }
     }
     list_add_tail(&system_links, &system_font_link->entry);
-    return ret;
 }
 
 static BOOL ReadFontDir(const char *dirname, BOOL external_fonts)
@@ -2913,7 +2926,7 @@ static UINT parse_aa_pattern( FcPattern *pattern )
 
 static void init_fontconfig(void)
 {
-    void *fc_handle = wine_dlopen(SONAME_LIBFONTCONFIG, RTLD_NOW, NULL, 0);
+    void * HOSTPTR fc_handle = wine_dlopen(SONAME_LIBFONTCONFIG, RTLD_NOW, NULL, 0);
 
     if (!fc_handle)
     {
@@ -3005,7 +3018,7 @@ static void load_fontconfig_fonts(void)
         len = strlen( file );
         if(len < 4) continue;
         ext = &file[ len - 3 ];
-        if(strcasecmp(ext, "pfa") && strcasecmp(ext, "pfb"))
+        if(_strnicmp(ext, "pfa", -1) && _strnicmp(ext, "pfb", -1))
             AddFontToList(file, NULL, 0,
                           ADDFONT_EXTERNAL_FONT | ADDFONT_ADD_TO_CACHE | ADDFONT_AA_FLAGS(aa_flags) );
     }
@@ -3015,11 +3028,15 @@ static void load_fontconfig_fonts(void)
 
 #elif defined(HAVE_CARBON_CARBON_H)
 
+#ifdef __i386_on_x86_64__
+#pragma clang default_addr_space(push, default)
+#endif
+
 static void load_mac_font_callback(const void *value, void *context)
 {
     CFStringRef pathStr = value;
     CFIndex len;
-    char* path;
+    char* WIN32PTR path;
 
     len = CFStringGetMaximumSizeOfFileSystemRepresentation(pathStr);
     path = HeapAlloc(GetProcessHeap(), 0, len);
@@ -3135,11 +3152,15 @@ static void load_mac_fonts(void)
     CFRelease(paths);
 }
 
+#ifdef __i386_on_x86_64__
+#pragma clang default_addr_space(pop)
+#endif
+
 #endif
 
 static char *get_font_dir(void)
 {
-    const char *build_dir, *data_dir;
+    const char * HOSTPTR build_dir, * HOSTPTR data_dir;
     char *name = NULL;
 
     if ((data_dir = wine_get_data_dir()))
@@ -3457,7 +3478,7 @@ HANDLE WineEngAddFontMemResourceEx(PVOID pbFont, DWORD cbFont, PVOID pdv, DWORD 
         /* FIXME: is the handle only for use in RemoveFontMemResourceEx or should it be a true handle?
          * For now return something unique but quite random
          */
-        TRACE("Returning handle %lx\n", ((INT_PTR)pFontCopy)^0x87654321);
+        TRACE("Returning handle %lx\n", ((size_t)pFontCopy)^0x87654321);
         return (HANDLE)(((INT_PTR)pFontCopy)^0x87654321);
     }
 
@@ -4299,6 +4320,7 @@ static BOOL init_freetype(void)
 #ifdef FT_LCD_FILTER_H
     pFT_Library_SetLcdFilter = wine_dlsym(ft_handle, "FT_Library_SetLcdFilter", NULL, 0);
 #endif
+    pFT_Property_Set = wine_dlsym(ft_handle, "FT_Property_Set", NULL, 0);
 
     if(pFT_Init_FreeType(&library) != 0) {
         ERR("Can't init FreeType library\n");
@@ -4312,6 +4334,13 @@ static BOOL init_freetype(void)
     FT_SimpleVersion = ((FT_Version.major << 16) & 0xff0000) |
                        ((FT_Version.minor <<  8) & 0x00ff00) |
                        ((FT_Version.patch      ) & 0x0000ff);
+
+    /* In FreeType < 2.8.1 v40's FT_LOAD_TARGET_MONO has broken advance widths. */
+    if (pFT_Property_Set && FT_SimpleVersion < FT_VERSION_VALUE(2, 8, 1))
+    {
+        FT_UInt interpreter_version = 35;
+        pFT_Property_Set( library, "truetype", "interpreter-version", &interpreter_version );
+    }
 
     font_driver = &freetype_funcs;
     return TRUE;
@@ -4456,7 +4485,7 @@ static void init_font_list(void)
                 ptr = valueA;
                 while (ptr)
                 {
-                    const char* home;
+                    const char* HOSTPTR home;
                     LPSTR next = strchr( ptr, ':' );
                     if (next) *next++ = 0;
                     if (ptr[0] == '~' && ptr[1] == '/' && (home = getenv( "HOME" )) &&
@@ -4668,7 +4697,7 @@ static struct font_mapping *map_font_file( const char *name )
     mapping->data = mmap( NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0 );
     close( fd );
 
-    if (mapping->data == MAP_FAILED)
+    if (mapping->data == MAP_FAILED_HOSTPTR)
     {
         HeapFree( GetProcessHeap(), 0, mapping );
         return NULL;
@@ -4701,7 +4730,7 @@ static FT_Face OpenFontFace(GdiFont *font, Face *face, LONG width, LONG height)
 {
     FT_Error err;
     FT_Face ft_face;
-    void *data_ptr;
+    void * HOSTPTR data_ptr;
     DWORD data_size;
 
     TRACE("%s/%p, %ld, %d x %d\n", debugstr_w(face->file), face->font_data_ptr, face->face_index, width, height);
@@ -4855,6 +4884,52 @@ static void free_font(GdiFont *font)
     HeapFree(GetProcessHeap(), 0, font);
 }
 
+/* TODO: GGO format support */
+static BOOL get_cached_metrics( GdiFont *font, UINT index, GLYPHMETRICS *gm, ABC *abc )
+{
+    UINT block = index / GM_BLOCK_SIZE;
+    UINT entry = index % GM_BLOCK_SIZE;
+
+    if (block < font->gmsize && font->gm[block] && font->gm[block][entry].init)
+    {
+        *gm  = font->gm[block][entry].gm;
+        *abc = font->gm[block][entry].abc;
+
+        TRACE( "cached gm: %u, %u, %s, %d, %d abc: %d, %u, %d\n",
+               gm->gmBlackBoxX, gm->gmBlackBoxY, wine_dbgstr_point( &gm->gmptGlyphOrigin ),
+               gm->gmCellIncX, gm->gmCellIncY, abc->abcA, abc->abcB, abc->abcC );
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+static void set_cached_metrics( GdiFont *font, UINT index, const GLYPHMETRICS *gm, const ABC *abc )
+{
+    UINT block = index / GM_BLOCK_SIZE;
+    UINT entry = index % GM_BLOCK_SIZE;
+
+    if (block >= font->gmsize)
+    {
+        GM **ptr = HeapReAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                font->gm, (block + 1) * sizeof(GM *) );
+        if (!ptr) return;
+
+        font->gmsize = block + 1;
+        font->gm = ptr;
+    }
+
+    if (!font->gm[block])
+    {
+        font->gm[block] = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                     sizeof(GM) * GM_BLOCK_SIZE );
+        if (!font->gm[block]) return;
+    }
+
+    font->gm[block][entry].gm   = *gm;
+    font->gm[block][entry].abc  = *abc;
+    font->gm[block][entry].init = TRUE;
+}
 
 static DWORD get_font_data( GdiFont *font, DWORD table, DWORD offset, LPVOID buf, DWORD cbData)
 {
@@ -5279,8 +5354,8 @@ static BOOL select_charmap(FT_Face ft_face, FT_Encoding encoding)
 /*************************************************************
  * freetype_CreateDC
  */
-static BOOL freetype_CreateDC( PHYSDEV *dev, LPCWSTR driver, LPCWSTR device,
-                               LPCWSTR output, const DEVMODEW *devmode )
+static BOOL CDECL freetype_CreateDC( PHYSDEV *dev, LPCWSTR driver, LPCWSTR device,
+                                     LPCWSTR output, const DEVMODEW *devmode )
 {
     struct freetype_physdev *physdev = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*physdev) );
 
@@ -5293,7 +5368,7 @@ static BOOL freetype_CreateDC( PHYSDEV *dev, LPCWSTR driver, LPCWSTR device,
 /*************************************************************
  * freetype_DeleteDC
  */
-static BOOL freetype_DeleteDC( PHYSDEV dev )
+static BOOL CDECL freetype_DeleteDC( PHYSDEV dev )
 {
     struct freetype_physdev *physdev = get_freetype_dev( dev );
     release_font( physdev->font );
@@ -5412,7 +5487,7 @@ static Family* get_fontconfig_family(DWORD pitch_and_family, const CHARSETINFO *
         const SYSTEM_LINKS *font_link;
         const struct list *face_list;
 
-        ret = MultiByteToWideChar(CP_UTF8, 0, (const char*)str, -1,
+        ret = MultiByteToWideChar(CP_UTF8, 0, (const char* HOSTPTR)str, -1,
                                   nameW, ARRAY_SIZE(nameW));
         if (!ret) continue;
         family = find_family_from_any_name(nameW);
@@ -5601,7 +5676,7 @@ static void fill_fileinfo_from_face( GdiFont *font, Face *face )
 /*************************************************************
  * freetype_SelectFont
  */
-static HFONT freetype_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
+static HFONT CDECL freetype_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
 {
     struct freetype_physdev *physdev = get_freetype_dev( dev );
     GdiFont *ret;
@@ -6361,7 +6436,7 @@ static BOOL enum_face_charsets(const Family *family, Face *face, struct enum_cha
 /*************************************************************
  * freetype_EnumFonts
  */
-static BOOL freetype_EnumFonts( PHYSDEV dev, LPLOGFONTW plf, FONTENUMPROCW proc, LPARAM lparam )
+static BOOL CDECL freetype_EnumFonts( PHYSDEV dev, LPLOGFONTW plf, FONTENUMPROCW proc, LPARAM lparam )
 {
     Family *family;
     Face *face;
@@ -6679,7 +6754,7 @@ static FT_UInt get_default_char_index(GdiFont *font)
 /*************************************************************
  * freetype_GetGlyphIndices
  */
-static DWORD freetype_GetGlyphIndices( PHYSDEV dev, LPCWSTR lpstr, INT count, LPWORD pgi, DWORD flags )
+static DWORD CDECL freetype_GetGlyphIndices( PHYSDEV dev, LPCWSTR lpstr, INT count, LPWORD pgi, DWORD flags )
 {
     struct freetype_physdev *physdev = get_freetype_dev( dev );
     int i;
@@ -6744,6 +6819,119 @@ static inline FT_Vector normalize_vector(FT_Vector *vec)
     else
         out.x = out.y = 0;
     return out;
+}
+
+/* get_glyph_outline() glyph transform matrices index */
+enum matrices_index
+{
+    matrix_hori,
+    matrix_vert,
+    matrix_unrotated
+};
+
+static BOOL get_transform_matrices( GdiFont *font, BOOL vertical, const MAT2 *user_transform,
+                                    FT_Matrix matrices[3] )
+{
+    static const FT_Matrix identity_mat = { (1 << 16), 0, 0, (1 << 16) };
+    BOOL needs_transform = FALSE;
+    double width_ratio;
+    int i;
+
+    matrices[matrix_unrotated] = identity_mat;
+
+    /* Scaling factor */
+    if (font->aveWidth)
+    {
+        TEXTMETRICW tm;
+        get_text_metrics( font, &tm );
+
+        width_ratio = (double)font->aveWidth;
+        width_ratio /= (double)font->potm->otmTextMetrics.tmAveCharWidth;
+    }
+    else
+        width_ratio = font->scale_y;
+
+    /* Scaling transform */
+    if (width_ratio != 1.0 || font->scale_y != 1.0)
+    {
+        FT_Matrix scale_mat;
+        scale_mat.xx = FT_FixedFromFloat( width_ratio );
+        scale_mat.xy = 0;
+        scale_mat.yx = 0;
+        scale_mat.yy = FT_FixedFromFloat( font->scale_y );
+
+        pFT_Matrix_Multiply( &scale_mat, &matrices[matrix_unrotated] );
+        needs_transform = TRUE;
+    }
+
+    /* Slant transform */
+    if (font->fake_italic)
+    {
+        FT_Matrix slant_mat;
+        slant_mat.xx = (1 << 16);
+        slant_mat.xy = (1 << 16) >> 2;
+        slant_mat.yx = 0;
+        slant_mat.yy = (1 << 16);
+
+        pFT_Matrix_Multiply( &slant_mat, &matrices[matrix_unrotated] );
+        needs_transform = TRUE;
+    }
+
+    /* Rotation transform */
+    matrices[matrix_hori] = matrices[matrix_unrotated];
+    if (font->orientation % 3600)
+    {
+        FT_Matrix rotation_mat;
+        FT_Vector angle;
+
+        pFT_Vector_Unit( &angle, MulDiv( 1 << 16, font->orientation, 10 ) );
+        rotation_mat.xx =  angle.x;
+        rotation_mat.xy = -angle.y;
+        rotation_mat.yx =  angle.y;
+        rotation_mat.yy =  angle.x;
+        pFT_Matrix_Multiply( &rotation_mat, &matrices[matrix_hori] );
+        needs_transform = TRUE;
+    }
+
+    /* Vertical transform */
+    matrices[matrix_vert] = matrices[matrix_hori];
+    if (vertical)
+    {
+        FT_Matrix vertical_mat = { 0, -(1 << 16), 1 << 16, 0 }; /* 90 degrees rotation */
+
+        pFT_Matrix_Multiply( &vertical_mat, &matrices[matrix_vert] );
+        needs_transform = TRUE;
+    }
+
+    /* World transform */
+    if (!is_identity_FMAT2( &font->font_desc.matrix ))
+    {
+        FT_Matrix world_mat;
+        world_mat.xx =  FT_FixedFromFloat( font->font_desc.matrix.eM11 );
+        world_mat.xy = -FT_FixedFromFloat( font->font_desc.matrix.eM21 );
+        world_mat.yx = -FT_FixedFromFloat( font->font_desc.matrix.eM12 );
+        world_mat.yy =  FT_FixedFromFloat( font->font_desc.matrix.eM22 );
+
+        for (i = 0; i < 3; i++)
+            pFT_Matrix_Multiply( &world_mat, &matrices[i] );
+        needs_transform = TRUE;
+    }
+
+    /* Extra transformation specified by caller */
+    if (!is_identity_MAT2( user_transform ))
+    {
+        FT_Matrix user_mat;
+        user_mat.xx = FT_FixedFromFIXED( user_transform->eM11 );
+        user_mat.xy = FT_FixedFromFIXED( user_transform->eM21 );
+        user_mat.yx = FT_FixedFromFIXED( user_transform->eM12 );
+        user_mat.yy = FT_FixedFromFIXED( user_transform->eM22 );
+
+        for (i = 0; i < 3; i++)
+            pFT_Matrix_Multiply( &user_mat, &matrices[i] );
+        needs_transform = TRUE;
+    }
+
+    return needs_transform;
 }
 
 static BOOL get_bold_glyph_outline(FT_GlyphSlot glyph, LONG ppem, FT_Glyph_Metrics *metrics)
@@ -6856,6 +7044,431 @@ static FT_Vector get_advance_metric(GdiFont *incoming_font, GdiFont *font,
     adv.x = (adv.x + 63) & -64;
     adv.y = -((adv.y + 63) & -64);
     return adv;
+}
+
+static FT_BBox get_transformed_bbox( const FT_Glyph_Metrics *metrics,
+                                     BOOL needs_transform, const FT_Matrix metrices[3] )
+{
+    FT_BBox bbox = { 0, 0, 0, 0 };
+
+    if (!needs_transform)
+    {
+        bbox.xMin = (metrics->horiBearingX) & -64;
+        bbox.xMax = (metrics->horiBearingX + metrics->width + 63) & -64;
+        bbox.yMax = (metrics->horiBearingY + 63) & -64;
+        bbox.yMin = (metrics->horiBearingY - metrics->height) & -64;
+    }
+    else
+    {
+        FT_Vector vec;
+        INT xc, yc;
+
+        for (xc = 0; xc < 2; xc++)
+        {
+            for (yc = 0; yc < 2; yc++)
+            {
+                vec.x = metrics->horiBearingX + xc * metrics->width;
+                vec.y = metrics->horiBearingY - yc * metrics->height;
+                TRACE( "Vec %ld,i %ld\n", vec.x, vec.y );
+                pFT_Vector_Transform( &vec, &metrices[matrix_vert] );
+                if (xc == 0 && yc == 0)
+                {
+                    bbox.xMin = bbox.xMax = vec.x;
+                    bbox.yMin = bbox.yMax = vec.y;
+                }
+                else
+                {
+                    if      (vec.x < bbox.xMin) bbox.xMin = vec.x;
+                    else if (vec.x > bbox.xMax) bbox.xMax = vec.x;
+                    if      (vec.y < bbox.yMin) bbox.yMin = vec.y;
+                    else if (vec.y > bbox.yMax) bbox.yMax = vec.y;
+                }
+            }
+        }
+        bbox.xMin = bbox.xMin & -64;
+        bbox.xMax = (bbox.xMax + 63) & -64;
+        bbox.yMin = bbox.yMin & -64;
+        bbox.yMax = (bbox.yMax + 63) & -64;
+        TRACE( "transformed box: (%ld, %ld - %ld, %ld)\n", bbox.xMin, bbox.yMax, bbox.xMax, bbox.yMin );
+    }
+
+    return bbox;
+}
+
+static void compute_metrics( GdiFont *incoming_font, GdiFont *font,
+                             FT_BBox bbox, const FT_Glyph_Metrics *metrics,
+                             BOOL vertical, BOOL vertical_metrics,
+                             BOOL needs_transform, const FT_Matrix matrices[3],
+                             GLYPHMETRICS *gm, ABC *abc )
+{
+    FT_Vector adv, vec, origin;
+
+    if (!needs_transform)
+    {
+        adv = get_advance_metric( incoming_font, font, metrics, NULL, vertical_metrics );
+        gm->gmCellIncX = adv.x >> 6;
+        gm->gmCellIncY = 0;
+        origin.x = bbox.xMin;
+        origin.y = bbox.yMax;
+        abc->abcA = origin.x >> 6;
+        abc->abcB = (metrics->width + 63) >> 6;
+    }
+    else
+    {
+        FT_Pos lsb;
+
+        if (vertical && (font->potm || get_outline_text_metrics( font )))
+        {
+            if (vertical_metrics)
+                lsb = metrics->horiBearingY + metrics->vertBearingY;
+            else
+                lsb = metrics->vertAdvance + (font->potm->otmDescent << 6);
+            vec.x = lsb;
+            vec.y = font->potm->otmDescent << 6;
+            TRACE( "Vec %ld,%ld\n", vec.x>>6, vec.y>>6 );
+            pFT_Vector_Transform( &vec, &matrices[matrix_hori] );
+            origin.x = (vec.x + bbox.xMin) & -64;
+            origin.y = (vec.y + bbox.yMax + 63) & -64;
+            lsb -= metrics->horiBearingY;
+        }
+        else
+        {
+            origin.x = bbox.xMin;
+            origin.y = bbox.yMax;
+            lsb = metrics->horiBearingX;
+        }
+
+        adv = get_advance_metric( incoming_font, font, metrics, &matrices[matrix_hori],
+                                  vertical_metrics );
+        gm->gmCellIncX = adv.x >> 6;
+        gm->gmCellIncY = adv.y >> 6;
+
+        adv = get_advance_metric( incoming_font, font, metrics, &matrices[matrix_unrotated],
+                                  vertical_metrics );
+        adv.x = pFT_Vector_Length( &adv );
+        adv.y = 0;
+
+        vec.x = lsb;
+        vec.y = 0;
+        pFT_Vector_Transform( &vec, &matrices[matrix_unrotated] );
+        if (lsb > 0) abc->abcA = pFT_Vector_Length( &vec ) >> 6;
+        else abc->abcA = -((pFT_Vector_Length( &vec ) + 63) >> 6);
+
+        /* We use lsb again to avoid rounding errors */
+        vec.x = lsb + (vertical ? metrics->height : metrics->width);
+        vec.y = 0;
+        pFT_Vector_Transform( &vec, &matrices[matrix_unrotated] );
+        abc->abcB = ((pFT_Vector_Length( &vec ) + 63) >> 6) - abc->abcA;
+    }
+    if (!abc->abcB) abc->abcB = 1;
+    abc->abcC = (adv.x >> 6) - abc->abcA - abc->abcB;
+
+    gm->gmptGlyphOrigin.x = origin.x >> 6;
+    gm->gmptGlyphOrigin.y = origin.y >> 6;
+    gm->gmBlackBoxX = (bbox.xMax - bbox.xMin) >> 6;
+    gm->gmBlackBoxY = (bbox.yMax - bbox.yMin) >> 6;
+    if (!gm->gmBlackBoxX) gm->gmBlackBoxX = 1;
+    if (!gm->gmBlackBoxY) gm->gmBlackBoxY = 1;
+
+    TRACE( "gm: %u, %u, %s, %d, %d abc %d, %u, %d\n",
+           gm->gmBlackBoxX, gm->gmBlackBoxY, wine_dbgstr_point(&gm->gmptGlyphOrigin),
+           gm->gmCellIncX, gm->gmCellIncY, abc->abcA, abc->abcB, abc->abcC );
+}
+
+
+static const BYTE masks[8] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
+
+static DWORD get_mono_glyph_bitmap( FT_GlyphSlot glyph, FT_BBox bbox,
+                                    BOOL fake_bold, BOOL needs_transform, FT_Matrix matrices[3],
+                                    DWORD buflen, BYTE *buf )
+{
+    DWORD width  = (bbox.xMax - bbox.xMin ) >> 6;
+    DWORD height = (bbox.yMax - bbox.yMin ) >> 6;
+    DWORD pitch  = ((width + 31) >> 5) << 2;
+    DWORD needed = pitch * height;
+    FT_Bitmap ft_bitmap;
+    BYTE * HOSTPTR src, *dst;
+    INT w, h, x;
+
+    if (!buf || !buflen) return needed;
+    if (!needed) return GDI_ERROR;  /* empty glyph */
+    if (needed > buflen) return GDI_ERROR;
+
+    switch (glyph->format)
+    {
+    case FT_GLYPH_FORMAT_BITMAP:
+        src = glyph->bitmap.buffer;
+        dst = buf;
+        w = min( pitch, (glyph->bitmap.width + 7) >> 3 );
+        h = min( height, glyph->bitmap.rows );
+        while (h--)
+        {
+            if (!fake_bold)
+                memcpy( dst, src, w );
+            else
+            {
+                dst[0] = 0;
+                for (x = 0; x < w; x++)
+                {
+                    dst[x] = (dst[x] & 0x80) | (src[x] >> 1) | src[x];
+                    if (x + 1 < pitch)
+                        dst[x + 1] = (src[x] & 0x01) << 7;
+                }
+            }
+            src += glyph->bitmap.pitch;
+            dst += pitch;
+        }
+        break;
+
+    case FT_GLYPH_FORMAT_OUTLINE:
+        ft_bitmap.width = width;
+        ft_bitmap.rows = height;
+        ft_bitmap.pitch = pitch;
+        ft_bitmap.pixel_mode = FT_PIXEL_MODE_MONO;
+        ft_bitmap.buffer = buf;
+
+        if (needs_transform)
+            pFT_Outline_Transform( &glyph->outline, &matrices[matrix_vert] );
+        pFT_Outline_Translate( &glyph->outline, -bbox.xMin, -bbox.yMin );
+
+        /* Note: FreeType will only set 'black' bits for us. */
+        memset( buf, 0, buflen );
+        pFT_Outline_Get_Bitmap( library, &glyph->outline, &ft_bitmap );
+        break;
+
+    default:
+        FIXME( "loaded glyph format %x\n", glyph->format );
+        return GDI_ERROR;
+    }
+
+    return needed;
+}
+
+static DWORD get_antialias_glyph_bitmap( FT_GlyphSlot glyph, FT_BBox bbox, UINT format,
+                                         BOOL fake_bold, BOOL needs_transform, FT_Matrix matrices[3],
+                                         DWORD buflen, BYTE *buf )
+{
+    DWORD width  = (bbox.xMax - bbox.xMin ) >> 6;
+    DWORD height = (bbox.yMax - bbox.yMin ) >> 6;
+    DWORD pitch  = (width + 3) / 4 * 4;
+    DWORD needed = pitch * height;
+    FT_Bitmap ft_bitmap;
+    INT w, h, x, max_level;
+    BYTE * HOSTPTR src, *dst;
+
+    if (!buf || !buflen) return needed;
+    if (!needed) return GDI_ERROR;  /* empty glyph */
+    if (needed > buflen) return GDI_ERROR;
+
+    max_level = get_max_level( format );
+
+    switch (glyph->format)
+    {
+    case FT_GLYPH_FORMAT_BITMAP:
+        src = glyph->bitmap.buffer;
+        dst = buf;
+        memset( buf, 0, buflen );
+
+        w = min( pitch, glyph->bitmap.width );
+        h = min( height, glyph->bitmap.rows );
+        while (h--)
+        {
+            for (x = 0; x < w; x++)
+            {
+                if (src[x / 8] & masks[x % 8])
+                {
+                    dst[x] = max_level;
+                    if (fake_bold && x + 1 < pitch) dst[x + 1] = max_level;
+                }
+            }
+            src += glyph->bitmap.pitch;
+            dst += pitch;
+        }
+        break;
+
+    case FT_GLYPH_FORMAT_OUTLINE:
+        ft_bitmap.width = width;
+        ft_bitmap.rows = height;
+        ft_bitmap.pitch = pitch;
+        ft_bitmap.pixel_mode = FT_PIXEL_MODE_GRAY;
+        ft_bitmap.buffer = buf;
+
+        if (needs_transform)
+            pFT_Outline_Transform( &glyph->outline, &matrices[matrix_vert] );
+        pFT_Outline_Translate( &glyph->outline, -bbox.xMin, -bbox.yMin );
+
+        memset( buf, 0, buflen );
+        pFT_Outline_Get_Bitmap( library, &glyph->outline, &ft_bitmap );
+
+        if (max_level != 255)
+        {
+            INT row, col;
+            BYTE *ptr, *start;
+
+            for (row = 0, start = buf; row < height; row++)
+            {
+                for (col = 0, ptr = start; col < width; col++, ptr++)
+                    *ptr = (((int)*ptr) * (max_level + 1)) / 256;
+                start += pitch;
+            }
+        }
+        break;
+
+    default:
+        FIXME("loaded glyph format %x\n", glyph->format);
+        return GDI_ERROR;
+    }
+
+    return needed;
+}
+
+static DWORD get_subpixel_glyph_bitmap( FT_GlyphSlot glyph, FT_BBox bbox, UINT format,
+                                        BOOL fake_bold, BOOL needs_transform, FT_Matrix matrices[3],
+                                        GLYPHMETRICS *gm, DWORD buflen, BYTE *buf )
+{
+    DWORD width  = (bbox.xMax - bbox.xMin ) >> 6;
+    DWORD height = (bbox.yMax - bbox.yMin ) >> 6;
+    DWORD pitch, needed = 0;
+    BYTE * HOSTPTR src, *dst;
+    INT  w, h, x;
+
+    switch (glyph->format)
+    {
+    case FT_GLYPH_FORMAT_BITMAP:
+        pitch  = width * 4;
+        needed = pitch * height;
+
+        if (!buf || !buflen) break;
+        if (!needed) return GDI_ERROR;  /* empty glyph */
+        if (needed > buflen) return GDI_ERROR;
+
+        src = glyph->bitmap.buffer;
+        dst = buf;
+        memset( buf, 0, buflen );
+
+        w = min( width, glyph->bitmap.width );
+        h = min( height, glyph->bitmap.rows );
+        while (h--)
+        {
+            for (x = 0; x < w; x++)
+            {
+                if ( src[x / 8] & masks[x % 8] )
+                {
+                    ((unsigned int *)dst)[x] = ~0u;
+                    if (fake_bold && x + 1 < width) ((unsigned int *)dst)[x + 1] = ~0u;
+                }
+            }
+            src += glyph->bitmap.pitch;
+            dst += pitch;
+        }
+        break;
+
+    case FT_GLYPH_FORMAT_OUTLINE:
+      {
+        INT src_pitch, src_width, src_height, x_shift, y_shift;
+        INT sub_stride, hmul, vmul;
+        const INT *sub_order;
+        const INT rgb_order[3] = { 0, 1, 2 };
+        const INT bgr_order[3] = { 2, 1, 0 };
+        FT_Render_Mode render_mode =
+            (format == WINE_GGO_HRGB_BITMAP ||
+             format == WINE_GGO_HBGR_BITMAP) ? FT_RENDER_MODE_LCD : FT_RENDER_MODE_LCD_V;
+
+        if (!width || !height) /* empty glyph */
+        {
+            if (!buf || !buflen) break;
+            return GDI_ERROR;
+        }
+
+        if ( render_mode == FT_RENDER_MODE_LCD)
+        {
+            gm->gmBlackBoxX += 2;
+            gm->gmptGlyphOrigin.x -= 1;
+            bbox.xMin -= (1 << 6);
+        }
+        else
+        {
+            gm->gmBlackBoxY += 2;
+            gm->gmptGlyphOrigin.y += 1;
+            bbox.yMax += (1 << 6);
+        }
+
+        width  = gm->gmBlackBoxX;
+        height = gm->gmBlackBoxY;
+        pitch  = width * 4;
+        needed = pitch * height;
+
+        if (!buf || !buflen) return needed;
+        if (needed > buflen) return GDI_ERROR;
+
+        if (needs_transform)
+            pFT_Outline_Transform( &glyph->outline, &matrices[matrix_vert] );
+
+#ifdef FT_LCD_FILTER_H
+        if (pFT_Library_SetLcdFilter)
+            pFT_Library_SetLcdFilter( library, FT_LCD_FILTER_DEFAULT );
+#endif
+        pFT_Render_Glyph( glyph, render_mode );
+
+        src_pitch = glyph->bitmap.pitch;
+        src_width = glyph->bitmap.width;
+        src_height = glyph->bitmap.rows;
+        src = glyph->bitmap.buffer;
+        dst = buf;
+        memset( buf, 0, buflen );
+
+        sub_order  = (format == WINE_GGO_HRGB_BITMAP ||
+                      format == WINE_GGO_VRGB_BITMAP) ? rgb_order : bgr_order;
+        sub_stride = render_mode == FT_RENDER_MODE_LCD ? 1 : src_pitch;
+        hmul       = render_mode == FT_RENDER_MODE_LCD ? 3 : 1;
+        vmul       = render_mode == FT_RENDER_MODE_LCD ? 1 : 3;
+
+        x_shift = glyph->bitmap_left - (bbox.xMin >> 6);
+        if ( x_shift < 0 )
+        {
+            src += hmul * -x_shift;
+            src_width -= hmul * -x_shift;
+        }
+        else if ( x_shift > 0 )
+        {
+            dst += x_shift * sizeof(unsigned int);
+            width -= x_shift;
+        }
+
+        y_shift = (bbox.yMax >> 6) - glyph->bitmap_top;
+        if ( y_shift < 0 )
+        {
+            src += src_pitch * vmul * -y_shift;
+            src_height -= vmul * -y_shift;
+        }
+        else if ( y_shift > 0 )
+        {
+            dst += y_shift * pitch;
+            height -= y_shift;
+        }
+
+        w = min( width, src_width / hmul );
+        h = min( height, src_height / vmul );
+        while (h--)
+        {
+            for (x = 0; x < w; x++)
+            {
+                ((unsigned int *)dst)[x] =
+                    ((unsigned int)src[hmul * x + sub_stride * sub_order[0]] << 16) |
+                    ((unsigned int)src[hmul * x + sub_stride * sub_order[1]] << 8) |
+                    ((unsigned int)src[hmul * x + sub_stride * sub_order[2]]);
+            }
+            src += src_pitch * vmul;
+            dst += pitch;
+        }
+        break;
+      }
+    default:
+        FIXME ( "loaded glyph format %x\n", glyph->format );
+        return GDI_ERROR;
+    }
+
+    return needed;
 }
 
 static unsigned int get_native_glyph_outline(FT_Outline *outline, unsigned int buflen, char *buf)
@@ -7086,34 +7699,23 @@ static FT_Int get_load_flags( UINT format )
     return load_flags;
 }
 
-static const BYTE masks[8] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
-
 static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
                                LPGLYPHMETRICS lpgm, ABC *abc, DWORD buflen, LPVOID buf,
                                const MAT2* lpmat)
 {
-    static const FT_Matrix identityMat = {(1 << 16), 0, 0, (1 << 16)};
     GLYPHMETRICS gm;
     FT_Face ft_face = incoming_font->ft_face;
     GdiFont *font = incoming_font;
     FT_Glyph_Metrics metrics;
     FT_UInt glyph_index;
-    DWORD width, height, pitch, needed = 0;
-    FT_Bitmap ft_bitmap;
+    DWORD needed = 0;
     FT_Error err;
-    INT left, right, top = 0, bottom = 0;
-    FT_Vector adv;
-    INT origin_x = 0, origin_y = 0;
-    FT_Angle angle = 0;
+    FT_BBox bbox;
     FT_Int load_flags = get_load_flags(format);
-    double widthRatio = 1.0;
-    FT_Matrix transMat = identityMat;
-    FT_Matrix transMatUnrotated;
-    FT_Matrix transMatTategaki;
+    FT_Matrix matrices[3];
     BOOL needsTransform = FALSE;
     BOOL tategaki = (font->name[0] == '@');
     BOOL vertical_metrics;
-    UINT original_index;
 
     TRACE("%p, %04x, %08x, %p, %08x, %p, %p\n", font, glyph, format, lpgm,
 	  buflen, buf, lpmat);
@@ -7130,7 +7732,6 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
             TRACE("translate glyph index %04x -> %04x\n", glyph, glyph_index);
         } else
             glyph_index = glyph;
-        original_index = glyph_index;
 	format &= ~GGO_GLYPH_INDEX;
         /* TODO: Window also turns off tategaki for glyphs passed in by index
             if their unicode code points fall outside of the range that is
@@ -7139,145 +7740,22 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
         BOOL vert;
         get_glyph_index_linked(incoming_font, glyph, &font, &glyph_index, &vert);
         ft_face = font->ft_face;
-        original_index = glyph_index;
         if (!vert && tategaki)
             tategaki = check_unicode_tategaki(glyph);
     }
 
     format &= ~GGO_UNHINTED;
 
-    if(original_index >= font->gmsize * GM_BLOCK_SIZE) {
-	font->gmsize = (original_index / GM_BLOCK_SIZE + 1);
-	font->gm = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, font->gm,
-			       font->gmsize * sizeof(GM*));
-    } else {
-        if (format == GGO_METRICS && font->gm[original_index / GM_BLOCK_SIZE] != NULL &&
-            FONT_GM(font,original_index)->init && is_identity_MAT2(lpmat))
-        {
-            *lpgm = FONT_GM(font,original_index)->gm;
-            *abc = FONT_GM(font,original_index)->abc;
-            TRACE("cached: %u,%u,%s,%d,%d\n", lpgm->gmBlackBoxX, lpgm->gmBlackBoxY,
-                  wine_dbgstr_point(&lpgm->gmptGlyphOrigin),
-                  lpgm->gmCellIncX, lpgm->gmCellIncY);
-	    return 1; /* FIXME */
-	}
-    }
+    if (format == GGO_METRICS && is_identity_MAT2(lpmat) &&
+        get_cached_metrics( font, glyph_index, lpgm, abc ))
+        return 1; /* FIXME */
 
-    if (!font->gm[original_index / GM_BLOCK_SIZE])
-        font->gm[original_index / GM_BLOCK_SIZE] = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY, sizeof(GM) * GM_BLOCK_SIZE);
-
-    /* Scaling factor */
-    if (font->aveWidth)
-    {
-        TEXTMETRICW tm;
-
-        get_text_metrics(font, &tm);
-
-        widthRatio = (double)font->aveWidth;
-        widthRatio /= (double)font->potm->otmTextMetrics.tmAveCharWidth;
-    }
-    else
-        widthRatio = font->scale_y;
-
-    /* Scaling transform */
-    if (widthRatio != 1.0 || font->scale_y != 1.0)
-    {
-        FT_Matrix scaleMat;
-        scaleMat.xx = FT_FixedFromFloat(widthRatio);
-        scaleMat.xy = 0;
-        scaleMat.yx = 0;
-        scaleMat.yy = FT_FixedFromFloat(font->scale_y);
-
-        pFT_Matrix_Multiply(&scaleMat, &transMat);
-        needsTransform = TRUE;
-    }
-
-    /* Slant transform */
-    if (font->fake_italic) {
-        FT_Matrix slantMat;
-        
-        slantMat.xx = (1 << 16);
-        slantMat.xy = ((1 << 16) >> 2);
-        slantMat.yx = 0;
-        slantMat.yy = (1 << 16);
-        pFT_Matrix_Multiply(&slantMat, &transMat);
-        needsTransform = TRUE;
-    }
-
-    /* Rotation transform */
-    transMatUnrotated = transMat;
-    transMatTategaki = transMat;
-    if(font->orientation || tategaki) {
-        FT_Matrix rotationMat;
-        FT_Matrix taterotationMat;
-        FT_Vector vecAngle;
-
-        double orient = font->orientation / 10.0;
-        double tate_orient = 0.f;
-
-        if (tategaki)
-            tate_orient = ((font->orientation+900)%3600)/10.0;
-        else
-            tate_orient = font->orientation/10.0;
-
-        if (orient)
-        {
-            angle = FT_FixedFromFloat(orient);
-            pFT_Vector_Unit(&vecAngle, angle);
-            rotationMat.xx = vecAngle.x;
-            rotationMat.xy = -vecAngle.y;
-            rotationMat.yx = -rotationMat.xy;
-            rotationMat.yy = rotationMat.xx;
-
-            pFT_Matrix_Multiply(&rotationMat, &transMat);
-        }
-
-        if (tate_orient)
-        {
-            angle = FT_FixedFromFloat(tate_orient);
-            pFT_Vector_Unit(&vecAngle, angle);
-            taterotationMat.xx = vecAngle.x;
-            taterotationMat.xy = -vecAngle.y;
-            taterotationMat.yx = -taterotationMat.xy;
-            taterotationMat.yy = taterotationMat.xx;
-            pFT_Matrix_Multiply(&taterotationMat, &transMatTategaki);
-        }
-
-        needsTransform = TRUE;
-    }
-
-    /* World transform */
-    if (!is_identity_FMAT2(&font->font_desc.matrix))
-    {
-        FT_Matrix worldMat;
-        worldMat.xx = FT_FixedFromFloat(font->font_desc.matrix.eM11);
-        worldMat.xy = -FT_FixedFromFloat(font->font_desc.matrix.eM21);
-        worldMat.yx = -FT_FixedFromFloat(font->font_desc.matrix.eM12);
-        worldMat.yy = FT_FixedFromFloat(font->font_desc.matrix.eM22);
-        pFT_Matrix_Multiply(&worldMat, &transMat);
-        pFT_Matrix_Multiply(&worldMat, &transMatUnrotated);
-        pFT_Matrix_Multiply(&worldMat, &transMatTategaki);
-        needsTransform = TRUE;
-    }
-
-    /* Extra transformation specified by caller */
-    if (!is_identity_MAT2(lpmat))
-    {
-        FT_Matrix extraMat;
-        extraMat.xx = FT_FixedFromFIXED(lpmat->eM11);
-        extraMat.xy = FT_FixedFromFIXED(lpmat->eM21);
-        extraMat.yx = FT_FixedFromFIXED(lpmat->eM12);
-        extraMat.yy = FT_FixedFromFIXED(lpmat->eM22);
-        pFT_Matrix_Multiply(&extraMat, &transMat);
-        pFT_Matrix_Multiply(&extraMat, &transMatUnrotated);
-        pFT_Matrix_Multiply(&extraMat, &transMatTategaki);
-        needsTransform = TRUE;
-    }
+    needsTransform = get_transform_matrices( font, tategaki, lpmat, matrices );
 
     vertical_metrics = (tategaki && FT_HAS_VERTICAL(ft_face));
     /* there is a freetype bug where vertical metrics are only
        properly scaled and correct in 2.4.0 or greater */
-    if ((vertical_metrics) && (FT_Version.major < 2 || (FT_Version.major == 2 && FT_Version.minor < 4)))
+    if (vertical_metrics && FT_SimpleVersion < FT_VERSION_VALUE(2, 4, 0))
         vertical_metrics = FALSE;
 
     if (needsTransform || format != GGO_BITMAP) load_flags |= FT_LOAD_NO_BITMAP;
@@ -7302,8 +7780,8 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
     if(incoming_font->potm || get_outline_text_metrics(incoming_font) ||
         get_bitmap_text_metrics(incoming_font)) {
         TEXTMETRICW *ptm = &incoming_font->potm->otmTextMetrics;
-        top = min( metrics.horiBearingY, ptm->tmAscent << 6 );
-        bottom = max( metrics.horiBearingY - metrics.height, -(ptm->tmDescent << 6) );
+        INT top = min( metrics.horiBearingY, ptm->tmAscent << 6 );
+        INT bottom = max( metrics.horiBearingY - metrics.height, -(ptm->tmDescent << 6) );
         metrics.horiBearingY = top;
         metrics.height = top - bottom;
 
@@ -7311,110 +7789,14 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
         /* metrics.width = min( metrics.width, ptm->tmMaxCharWidth << 6 ); */
     }
 
-    if(!needsTransform) {
-        left = (INT)(metrics.horiBearingX) & -64;
-        right = (INT)((metrics.horiBearingX + metrics.width) + 63) & -64;
-	top = (metrics.horiBearingY + 63) & -64;
-	bottom = (metrics.horiBearingY - metrics.height) & -64;
-	adv = get_advance_metric(incoming_font, font, &metrics, NULL, vertical_metrics);
-	gm.gmCellIncX = adv.x >> 6;
-	gm.gmCellIncY = 0;
-        origin_x = left;
-        origin_y = top;
-        abc->abcA = origin_x >> 6;
-        abc->abcB = (metrics.width + 63) >> 6;
-    } else {
-        INT xc, yc;
-	FT_Vector vec;
-        FT_Pos lsb;
-
-        left = right = 0;
-
-	for(xc = 0; xc < 2; xc++) {
-	    for(yc = 0; yc < 2; yc++) {
-	        vec.x = metrics.horiBearingX + xc * metrics.width;
-		vec.y = metrics.horiBearingY - yc * metrics.height;
-		TRACE("Vec %ld,%ld\n", vec.x, vec.y);
-		pFT_Vector_Transform(&vec, &transMatTategaki);
-		if(xc == 0 && yc == 0) {
-		    left = right = vec.x;
-		    top = bottom = vec.y;
-		} else {
-		    if(vec.x < left) left = vec.x;
-		    else if(vec.x > right) right = vec.x;
-		    if(vec.y < bottom) bottom = vec.y;
-		    else if(vec.y > top) top = vec.y;
-		}
-	    }
-	}
-	left = left & -64;
-	right = (right + 63) & -64;
-	bottom = bottom & -64;
-	top = (top + 63) & -64;
-
-        if (tategaki && (font->potm || get_outline_text_metrics(font)))
-        {
-            if (vertical_metrics)
-                lsb = metrics.horiBearingY + metrics.vertBearingY;
-            else
-                lsb = metrics.vertAdvance + (font->potm->otmDescent << 6);
-            vec.x = lsb;
-            vec.y = font->potm->otmDescent << 6;
-            TRACE ("Vec %ld,%ld\n", vec.x>>6, vec.y>>6);
-            pFT_Vector_Transform(&vec, &transMat);
-            origin_x = (vec.x + left) & -64;
-            origin_y = (vec.y + top + 63) & -64;
-            lsb -= metrics.horiBearingY;
-        }
-        else
-        {
-            origin_x = left;
-            origin_y = top;
-            lsb = metrics.horiBearingX;
-        }
-
-	TRACE("transformed box: (%d,%d - %d,%d)\n", left, top, right, bottom);
-        adv = get_advance_metric(incoming_font, font, &metrics, &transMat, vertical_metrics);
-        gm.gmCellIncX = adv.x >> 6;
-        gm.gmCellIncY = adv.y >> 6;
-
-        adv = get_advance_metric(incoming_font, font, &metrics, &transMatUnrotated, vertical_metrics);
-        adv.x = pFT_Vector_Length(&adv);
-        adv.y = 0;
-
-        vec.x = lsb;
-        vec.y = 0;
-        pFT_Vector_Transform(&vec, &transMatUnrotated);
-        if(lsb > 0) abc->abcA = pFT_Vector_Length(&vec) >> 6;
-        else abc->abcA = -((pFT_Vector_Length(&vec) + 63) >> 6);
-
-        /* We use lsb again to avoid rounding errors */
-        vec.x = lsb + (tategaki ? metrics.height : metrics.width);
-        vec.y = 0;
-        pFT_Vector_Transform(&vec, &transMatUnrotated);
-        abc->abcB = ((pFT_Vector_Length(&vec) + 63) >> 6) - abc->abcA;
-    }
-
-    width  = (right - left) >> 6;
-    height = (top - bottom) >> 6;
-    gm.gmBlackBoxX = width  ? width  : 1;
-    gm.gmBlackBoxY = height ? height : 1;
-    gm.gmptGlyphOrigin.x = origin_x >> 6;
-    gm.gmptGlyphOrigin.y = origin_y >> 6;
-    if (!abc->abcB) abc->abcB = 1;
-    abc->abcC = (adv.x >> 6) - abc->abcA - abc->abcB;
-
-    TRACE("%u,%u,%s,%d,%d\n", gm.gmBlackBoxX, gm.gmBlackBoxY,
-          wine_dbgstr_point(&gm.gmptGlyphOrigin),
-          gm.gmCellIncX, gm.gmCellIncY);
+    bbox = get_transformed_bbox( &metrics, needsTransform, matrices );
+    compute_metrics( incoming_font, font, bbox, &metrics,
+                     tategaki, vertical_metrics, needsTransform, matrices,
+                     &gm, abc );
 
     if ((format == GGO_METRICS || format == GGO_BITMAP || format ==  WINE_GGO_GRAY16_BITMAP) &&
         is_identity_MAT2(lpmat)) /* don't cache custom transforms */
-    {
-        FONT_GM(font,original_index)->gm = gm;
-        FONT_GM(font,original_index)->abc = *abc;
-        FONT_GM(font,original_index)->init = TRUE;
-    }
+        set_cached_metrics( font, glyph_index, &gm, abc );
 
     if(format == GGO_METRICS)
     {
@@ -7429,70 +7811,17 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
 	return GDI_ERROR;
     }
 
-    switch(format) {
+    switch (format)
+    {
     case GGO_BITMAP:
-	pitch = ((width + 31) >> 5) << 2;
-        needed = pitch * height;
-
-	if(!buf || !buflen) break;
-        if (!needed) return GDI_ERROR;  /* empty glyph */
-        if (needed > buflen)
-            return GDI_ERROR;
-
-	switch(ft_face->glyph->format) {
-	case ft_glyph_format_bitmap:
-	  {
-	    BYTE *src = ft_face->glyph->bitmap.buffer, *dst = buf;
-	    INT w = min( pitch, (ft_face->glyph->bitmap.width + 7) >> 3 );
-	    INT h = min( height, ft_face->glyph->bitmap.rows );
-	    while(h--) {
-		if (!font->fake_bold)
-		    memcpy(dst, src, w);
-		else {
-		    INT x;
-		    dst[0] = 0;
-		    for (x = 0; x < w; x++) {
-			dst[x  ] = (dst[x] & 0x80) | (src[x] >> 1) | src[x];
-			if (x+1 < pitch)
-			    dst[x+1] = (src[x] & 0x01) << 7;
-		    }
-		}
-		src += ft_face->glyph->bitmap.pitch;
-		dst += pitch;
-	    }
-	    break;
-	  }
-
-	case ft_glyph_format_outline:
-	    ft_bitmap.width = width;
-	    ft_bitmap.rows = height;
-	    ft_bitmap.pitch = pitch;
-	    ft_bitmap.pixel_mode = ft_pixel_mode_mono;
-	    ft_bitmap.buffer = buf;
-
-	    if(needsTransform)
-		pFT_Outline_Transform(&ft_face->glyph->outline, &transMatTategaki);
-
-	    pFT_Outline_Translate(&ft_face->glyph->outline, -left, -bottom );
-
-	    /* Note: FreeType will only set 'black' bits for us. */
-	    memset(buf, 0, needed);
-	    pFT_Outline_Get_Bitmap(library, &ft_face->glyph->outline, &ft_bitmap);
-	    break;
-
-	default:
-	    FIXME("loaded glyph format %x\n", ft_face->glyph->format);
-	    return GDI_ERROR;
-	}
-	break;
+        needed = get_mono_glyph_bitmap( ft_face->glyph, bbox, font->fake_bold,
+                                        needsTransform, matrices, buflen, buf );
+        break;
 
     case GGO_GRAY2_BITMAP:
     case GGO_GRAY4_BITMAP:
     case GGO_GRAY8_BITMAP:
     case WINE_GGO_GRAY16_BITMAP:
-      {
-	unsigned int max_level, row, col;
-	BYTE *start, *ptr;
 
         /****************** CodeWeavers hack to fix HL2 crash **************************
          *
@@ -7506,8 +7835,11 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
            !strcmp(ft_face->family_name, "csd"))
         {
             int i;
+            DWORD width  = (bbox.xMax - bbox.xMin ) >> 6;
+            DWORD height = (bbox.yMax - bbox.yMin ) >> 6;
+
             if(width) width--;
- 
+
             for(i = 0; i < 2; i++)
             {
                 if(height)
@@ -7521,237 +7853,17 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
         }
         /*********************************** End CW's hack ****************************/
 
-	pitch = (width + 3) / 4 * 4;
-	needed = pitch * height;
-
-	if(!buf || !buflen) break;
-        if (!needed) return GDI_ERROR;  /* empty glyph */
-        if (needed > buflen)
-            return GDI_ERROR;
-
-        max_level = get_max_level( format );
-
-	switch(ft_face->glyph->format) {
-	case ft_glyph_format_bitmap:
-	  {
-            BYTE *src = ft_face->glyph->bitmap.buffer, *dst = buf;
-            INT h = min( height, ft_face->glyph->bitmap.rows );
-            INT x;
-            memset( buf, 0, needed );
-            while(h--) {
-                for(x = 0; x < pitch && x < ft_face->glyph->bitmap.width; x++) {
-                    if (src[x / 8] & masks[x % 8]) {
-                        dst[x] = max_level;
-                        if (font->fake_bold && x+1 < pitch) dst[x+1] = max_level;
-                    }
-                }
-                src += ft_face->glyph->bitmap.pitch;
-                dst += pitch;
-            }
-            break;
-	  }
-        case ft_glyph_format_outline:
-          {
-            ft_bitmap.width = width;
-            ft_bitmap.rows = height;
-            ft_bitmap.pitch = pitch;
-            ft_bitmap.pixel_mode = ft_pixel_mode_grays;
-            ft_bitmap.buffer = buf;
-
-            if(needsTransform)
-                pFT_Outline_Transform(&ft_face->glyph->outline, &transMatTategaki);
-
-            pFT_Outline_Translate(&ft_face->glyph->outline, -left, -bottom );
-
-            memset(ft_bitmap.buffer, 0, buflen);
-
-            pFT_Outline_Get_Bitmap(library, &ft_face->glyph->outline, &ft_bitmap);
-
-            if (max_level != 255)
-            {
-                for (row = 0, start = buf; row < height; row++)
-                {
-                    for (col = 0, ptr = start; col < width; col++, ptr++)
-                        *ptr = (((int)*ptr) * (max_level + 1)) / 256;
-                    start += pitch;
-                }
-            }
-            break;
-          }
-
-        default:
-            FIXME("loaded glyph format %x\n", ft_face->glyph->format);
-            return GDI_ERROR;
-        }
+        needed = get_antialias_glyph_bitmap( ft_face->glyph, bbox, format, font->fake_bold,
+                                             needsTransform, matrices, buflen, buf );
 	break;
-      }
 
     case WINE_GGO_HRGB_BITMAP:
     case WINE_GGO_HBGR_BITMAP:
     case WINE_GGO_VRGB_BITMAP:
     case WINE_GGO_VBGR_BITMAP:
-      {
-        switch (ft_face->glyph->format)
-        {
-        case FT_GLYPH_FORMAT_BITMAP:
-          {
-            BYTE *src, *dst;
-            INT src_pitch, x;
-
-            pitch  = width * 4;
-            needed = pitch * height;
-
-            if (!buf || !buflen) break;
-            if (!needed) return GDI_ERROR;  /* empty glyph */
-            if (needed > buflen)
-                return GDI_ERROR;
-
-            memset(buf, 0, buflen);
-            dst = buf;
-            src = ft_face->glyph->bitmap.buffer;
-            src_pitch = ft_face->glyph->bitmap.pitch;
-
-            height = min( height, ft_face->glyph->bitmap.rows );
-            while ( height-- )
-            {
-                for (x = 0; x < width && x < ft_face->glyph->bitmap.width; x++)
-                {
-                    if ( src[x / 8] & masks[x % 8] )
-                    {
-                        ((unsigned int *)dst)[x] = ~0u;
-                        if (font->fake_bold && x+1 < width) ((unsigned int *)dst)[x+1] = ~0u;
-                    }
-                }
-                src += src_pitch;
-                dst += pitch;
-            }
-
-            break;
-          }
-
-        case FT_GLYPH_FORMAT_OUTLINE:
-          {
-            unsigned int *dst;
-            BYTE *src;
-            INT x, src_pitch, src_width, src_height, rgb_interval, hmul, vmul;
-            INT x_shift, y_shift;
-            const INT *sub_order;
-            const INT rgb_order[3] = { 0, 1, 2 };
-            const INT bgr_order[3] = { 2, 1, 0 };
-            FT_Render_Mode render_mode =
-                (format == WINE_GGO_HRGB_BITMAP || format == WINE_GGO_HBGR_BITMAP)?
-                    FT_RENDER_MODE_LCD: FT_RENDER_MODE_LCD_V;
-
-            if (!width || !height)
-            {
-                if (!buf || !buflen) break;
-                return GDI_ERROR;
-            }
-
-            if ( render_mode == FT_RENDER_MODE_LCD)
-            {
-                gm.gmBlackBoxX += 2;
-                gm.gmptGlyphOrigin.x -= 1;
-                left -= (1 << 6);
-            }
-            else
-            {
-                gm.gmBlackBoxY += 2;
-                gm.gmptGlyphOrigin.y += 1;
-                top += (1 << 6);
-            }
-
-            width  = gm.gmBlackBoxX;
-            height = gm.gmBlackBoxY;
-            pitch  = width * 4;
-            needed = pitch * height;
-
-            if (!buf || !buflen) break;
-            if (needed > buflen)
-                return GDI_ERROR;
-
-            memset(buf, 0, buflen);
-            dst = buf;
-
-            if ( needsTransform )
-                pFT_Outline_Transform (&ft_face->glyph->outline, &transMatTategaki);
-
-#ifdef FT_LCD_FILTER_H
-            if ( pFT_Library_SetLcdFilter )
-                pFT_Library_SetLcdFilter( library, FT_LCD_FILTER_DEFAULT );
-#endif
-            pFT_Render_Glyph (ft_face->glyph, render_mode);
-
-            src = ft_face->glyph->bitmap.buffer;
-            src_pitch = ft_face->glyph->bitmap.pitch;
-            src_width = ft_face->glyph->bitmap.width;
-            src_height = ft_face->glyph->bitmap.rows;
-
-            if ( render_mode == FT_RENDER_MODE_LCD)
-            {
-                rgb_interval = 1;
-                hmul = 3;
-                vmul = 1;
-            }
-            else
-            {
-                rgb_interval = src_pitch;
-                hmul = 1;
-                vmul = 3;
-            }
-
-            x_shift = ft_face->glyph->bitmap_left - (left >> 6);
-            if ( x_shift < 0 )
-            {
-                src += hmul * -x_shift;
-                src_width -= hmul * -x_shift;
-            }
-            else if ( x_shift > 0 )
-            {
-                dst += x_shift;
-                width -= x_shift;
-            }
-
-            y_shift = (top >> 6) - ft_face->glyph->bitmap_top;
-            if ( y_shift < 0 )
-            {
-                src += src_pitch * vmul * -y_shift;
-                src_height -= vmul * -y_shift;
-            }
-            else if ( y_shift > 0 )
-            {
-                dst += y_shift * ( pitch / sizeof(*dst) );
-                height -= y_shift;
-            }
-
-            width = min( width, src_width / hmul );
-            height = min( height, src_height / vmul );
-
-            sub_order = (format == WINE_GGO_HRGB_BITMAP || format == WINE_GGO_VRGB_BITMAP)?
-                        rgb_order : bgr_order;
-
-            while ( height-- )
-            {
-                for ( x = 0; x < width; x++ )
-                {
-                    dst[x] = ((unsigned int)src[hmul * x + rgb_interval * sub_order[0]] << 16) |
-                             ((unsigned int)src[hmul * x + rgb_interval * sub_order[1]] << 8) |
-                             ((unsigned int)src[hmul * x + rgb_interval * sub_order[2]]);
-                }
-                src += src_pitch * vmul;
-                dst += pitch / sizeof(*dst);
-            }
-
-            break;
-          }
-
-        default:
-            FIXME ("loaded glyph format %x\n", ft_face->glyph->format);
-            return GDI_ERROR;
-        }
-
+        needed = get_subpixel_glyph_bitmap( ft_face->glyph, bbox, format, font->fake_bold,
+                                            needsTransform, matrices, &gm, buflen, buf );
         break;
-      }
 
     case GGO_NATIVE:
       {
@@ -7760,7 +7872,7 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
         if(buflen == 0) buf = NULL;
 
         if (needsTransform && buf)
-            pFT_Outline_Transform(outline, &transMatTategaki);
+            pFT_Outline_Transform( outline, &matrices[matrix_vert] );
 
         needed = get_native_glyph_outline(outline, buflen, NULL);
 
@@ -7778,7 +7890,7 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
         if(buflen == 0) buf = NULL;
 
         if (needsTransform && buf)
-		pFT_Outline_Transform(outline, &transMat);
+            pFT_Outline_Transform( outline, &matrices[matrix_vert] );
 
         needed = get_bezier_glyph_outline(outline, buflen, NULL);
 
@@ -7795,7 +7907,9 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
         FIXME("Unsupported format %d\n", format);
 	return GDI_ERROR;
     }
-    *lpgm = gm;
+    if (needed != GDI_ERROR)
+        *lpgm = gm;
+
     return needed;
 }
 
@@ -8296,16 +8410,16 @@ static BOOL get_outline_text_metrics(GdiFont *font)
 
     /* otmp* members should clearly have type ptrdiff_t, but M$ knows best */
     cp = (char*)font->potm + sizeof(*font->potm);
-    font->potm->otmpFamilyName = (LPSTR)(cp - (char*)font->potm);
+    font->potm->otmpFamilyName = TRUNCCAST(LPSTR, cp - (char*)font->potm);
     strcpyW((WCHAR*)cp, family_nameW);
     cp += lenfam;
-    font->potm->otmpStyleName = (LPSTR)(cp - (char*)font->potm);
+    font->potm->otmpStyleName = TRUNCCAST(LPSTR, cp - (char*)font->potm);
     strcpyW((WCHAR*)cp, style_nameW);
     cp += lensty;
-    font->potm->otmpFaceName = (LPSTR)(cp - (char*)font->potm);
+    font->potm->otmpFaceName = TRUNCCAST(LPSTR, cp - (char*)font->potm);
     strcpyW((WCHAR*)cp, face_nameW);
-	cp += lenface;
-    font->potm->otmpFullName = (LPSTR)(cp - (char*)font->potm);
+    cp += lenface;
+    font->potm->otmpFullName = TRUNCCAST(LPSTR, cp - (char*)font->potm);
     strcpyW((WCHAR*)cp, full_nameW);
     ret = TRUE;
 
@@ -8320,8 +8434,8 @@ end:
 /*************************************************************
  * freetype_GetGlyphOutline
  */
-static DWORD freetype_GetGlyphOutline( PHYSDEV dev, UINT glyph, UINT format,
-                                       LPGLYPHMETRICS lpgm, DWORD buflen, LPVOID buf, const MAT2 *lpmat )
+static DWORD CDECL freetype_GetGlyphOutline( PHYSDEV dev, UINT glyph, UINT format,
+                                             LPGLYPHMETRICS lpgm, DWORD buflen, LPVOID buf, const MAT2 *lpmat )
 {
     struct freetype_physdev *physdev = get_freetype_dev( dev );
     DWORD ret;
@@ -8343,7 +8457,7 @@ static DWORD freetype_GetGlyphOutline( PHYSDEV dev, UINT glyph, UINT format,
 /*************************************************************
  * freetype_GetTextMetrics
  */
-static BOOL freetype_GetTextMetrics( PHYSDEV dev, TEXTMETRICW *metrics )
+static BOOL CDECL freetype_GetTextMetrics( PHYSDEV dev, TEXTMETRICW *metrics )
 {
     struct freetype_physdev *physdev = get_freetype_dev( dev );
     BOOL ret;
@@ -8364,7 +8478,7 @@ static BOOL freetype_GetTextMetrics( PHYSDEV dev, TEXTMETRICW *metrics )
 /*************************************************************
  * freetype_GetOutlineTextMetrics
  */
-static UINT freetype_GetOutlineTextMetrics( PHYSDEV dev, UINT cbSize, OUTLINETEXTMETRICW *potm )
+static UINT CDECL freetype_GetOutlineTextMetrics( PHYSDEV dev, UINT cbSize, OUTLINETEXTMETRICW *potm )
 {
     struct freetype_physdev *physdev = get_freetype_dev( dev );
     UINT ret = 0;
@@ -8402,14 +8516,14 @@ static BOOL load_child_font(GdiFont *font, CHILD_FONT *child)
     UINT penalty = 0, new_penalty = 0;
     BOOL bold, italic, bd, it;
 
-    italic = font->font_desc.lf.lfItalic ? TRUE : FALSE;
-    bold = font->font_desc.lf.lfWeight > FW_MEDIUM ? TRUE : FALSE;
+    italic = !!font->font_desc.lf.lfItalic;
+    bold = font->font_desc.lf.lfWeight > FW_MEDIUM;
 
     face_list = get_face_list_from_family( child->face->family );
     LIST_FOR_EACH_ENTRY( child_face, face_list, Face, entry )
     {
-        it = child_face->ntmFlags & NTM_ITALIC ? TRUE : FALSE;
-        bd = child_face->ntmFlags & NTM_BOLD ? TRUE : FALSE;
+        it = !!(child_face->ntmFlags & NTM_ITALIC);
+        bd = !!(child_face->ntmFlags & NTM_BOLD);
         new_penalty = ( it ^ italic ) + ( bd ^ bold );
         if (!best_face || new_penalty < penalty)
         {
@@ -8488,7 +8602,7 @@ done:
 /*************************************************************
  * freetype_GetCharWidth
  */
-static BOOL freetype_GetCharWidth( PHYSDEV dev, UINT firstChar, UINT lastChar, LPINT buffer )
+static BOOL CDECL freetype_GetCharWidth( PHYSDEV dev, UINT firstChar, UINT lastChar, LPINT buffer )
 {
     static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
     UINT c;
@@ -8515,9 +8629,43 @@ static BOOL freetype_GetCharWidth( PHYSDEV dev, UINT firstChar, UINT lastChar, L
 }
 
 /*************************************************************
+ * freetype_GetCharWidthInfo
+ */
+static BOOL CDECL freetype_GetCharWidthInfo( PHYSDEV dev, void* ptr )
+{
+    struct freetype_physdev *physdev = get_freetype_dev( dev );
+    struct char_width_info *info = ptr;
+    TT_HoriHeader *pHori;
+
+    if (!physdev->font)
+    {
+        dev = GET_NEXT_PHYSDEV( dev, pGetCharWidthInfo );
+        return dev->funcs->pGetCharWidthInfo( dev, ptr );
+    }
+
+    TRACE("%p, %p\n", physdev->font, info);
+
+    if (FT_IS_SCALABLE(physdev->font->ft_face) &&
+        (pHori = pFT_Get_Sfnt_Table(physdev->font->ft_face, ft_sfnt_hhea)))
+    {
+        FT_Fixed em_scale;
+        em_scale = MulDiv(physdev->font->ppem, 1 << 16,
+                          physdev->font->ft_face->units_per_EM);
+        info->lsb = (SHORT)pFT_MulFix(pHori->min_Left_Side_Bearing,  em_scale);
+        info->rsb = (SHORT)pFT_MulFix(pHori->min_Right_Side_Bearing, em_scale);
+    }
+    else
+        info->lsb = info->rsb = 0;
+
+    info->unk = 0;
+
+    return TRUE;
+}
+
+/*************************************************************
  * freetype_GetCharABCWidths
  */
-static BOOL freetype_GetCharABCWidths( PHYSDEV dev, UINT firstChar, UINT lastChar, LPABC buffer )
+static BOOL CDECL freetype_GetCharABCWidths( PHYSDEV dev, UINT firstChar, UINT lastChar, LPABC buffer )
 {
     static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
     UINT c;
@@ -8545,7 +8693,7 @@ static BOOL freetype_GetCharABCWidths( PHYSDEV dev, UINT firstChar, UINT lastCha
 /*************************************************************
  * freetype_GetCharABCWidthsI
  */
-static BOOL freetype_GetCharABCWidthsI( PHYSDEV dev, UINT firstChar, UINT count, LPWORD pgi, LPABC buffer )
+static BOOL CDECL freetype_GetCharABCWidthsI( PHYSDEV dev, UINT firstChar, UINT count, LPWORD pgi, LPABC buffer )
 {
     static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
     UINT c;
@@ -8575,7 +8723,7 @@ static BOOL freetype_GetCharABCWidthsI( PHYSDEV dev, UINT firstChar, UINT count,
 /*************************************************************
  * freetype_GetTextExtentExPoint
  */
-static BOOL freetype_GetTextExtentExPoint( PHYSDEV dev, LPCWSTR wstr, INT count, LPINT dxs )
+static BOOL CDECL freetype_GetTextExtentExPoint( PHYSDEV dev, LPCWSTR wstr, INT count, LPINT dxs )
 {
     static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
     INT idx, pos;
@@ -8608,7 +8756,7 @@ static BOOL freetype_GetTextExtentExPoint( PHYSDEV dev, LPCWSTR wstr, INT count,
 /*************************************************************
  * freetype_GetTextExtentExPointI
  */
-static BOOL freetype_GetTextExtentExPointI( PHYSDEV dev, const WORD *indices, INT count, LPINT dxs )
+static BOOL CDECL freetype_GetTextExtentExPointI( PHYSDEV dev, const WORD *indices, INT count, LPINT dxs )
 {
     static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
     INT idx, pos;
@@ -8642,7 +8790,7 @@ static BOOL freetype_GetTextExtentExPointI( PHYSDEV dev, const WORD *indices, IN
 /*************************************************************
  * freetype_GetFontData
  */
-static DWORD freetype_GetFontData( PHYSDEV dev, DWORD table, DWORD offset, LPVOID buf, DWORD cbData )
+static DWORD CDECL freetype_GetFontData( PHYSDEV dev, DWORD table, DWORD offset, LPVOID buf, DWORD cbData )
 {
     struct freetype_physdev *physdev = get_freetype_dev( dev );
 
@@ -8661,7 +8809,7 @@ static DWORD freetype_GetFontData( PHYSDEV dev, DWORD table, DWORD offset, LPVOI
 /*************************************************************
  * freetype_GetTextFace
  */
-static INT freetype_GetTextFace( PHYSDEV dev, INT count, LPWSTR str )
+static INT CDECL freetype_GetTextFace( PHYSDEV dev, INT count, LPWSTR str )
 {
     INT n;
     struct freetype_physdev *physdev = get_freetype_dev( dev );
@@ -8684,7 +8832,7 @@ static INT freetype_GetTextFace( PHYSDEV dev, INT count, LPWSTR str )
 /*************************************************************
  * freetype_GetTextCharsetInfo
  */
-static UINT freetype_GetTextCharsetInfo( PHYSDEV dev, LPFONTSIGNATURE fs, DWORD flags )
+static UINT CDECL freetype_GetTextCharsetInfo( PHYSDEV dev, LPFONTSIGNATURE fs, DWORD flags )
 {
     struct freetype_physdev *physdev = get_freetype_dev( dev );
 
@@ -8764,7 +8912,7 @@ static DWORD get_font_unicode_ranges(FT_Face face, GLYPHSET *gs)
 /*************************************************************
  * freetype_GetFontUnicodeRanges
  */
-static DWORD freetype_GetFontUnicodeRanges( PHYSDEV dev, LPGLYPHSET glyphset )
+static DWORD CDECL freetype_GetFontUnicodeRanges( PHYSDEV dev, LPGLYPHSET glyphset )
 {
     struct freetype_physdev *physdev = get_freetype_dev( dev );
     DWORD size, num_ranges;
@@ -8789,7 +8937,7 @@ static DWORD freetype_GetFontUnicodeRanges( PHYSDEV dev, LPGLYPHSET glyphset )
 /*************************************************************
  * freetype_FontIsLinked
  */
-static BOOL freetype_FontIsLinked( PHYSDEV dev )
+static BOOL CDECL freetype_FontIsLinked( PHYSDEV dev )
 {
     struct freetype_physdev *physdev = get_freetype_dev( dev );
     BOOL ret;
@@ -8821,7 +8969,7 @@ BOOL WINAPI GetRasterizerCaps( LPRASTERIZER_STATUS lprs, UINT cbNumBytes)
 /*************************************************************
  * freetype_GetFontRealizationInfo
  */
-static BOOL freetype_GetFontRealizationInfo( PHYSDEV dev, void *ptr )
+static BOOL CDECL freetype_GetFontRealizationInfo( PHYSDEV dev, void *ptr )
 {
     struct freetype_physdev *physdev = get_freetype_dev( dev );
     struct font_realization_info *info = ptr;
@@ -9012,7 +9160,7 @@ static DWORD parse_format0_kern_subtable(GdiFont *font,
 /*************************************************************
  * freetype_GetKerningPairs
  */
-static DWORD freetype_GetKerningPairs( PHYSDEV dev, DWORD cPairs, KERNINGPAIR *kern_pair )
+static DWORD CDECL freetype_GetKerningPairs( PHYSDEV dev, DWORD cPairs, KERNINGPAIR *kern_pair )
 {
     DWORD length;
     void *buf;
@@ -9209,6 +9357,7 @@ static const struct gdi_dc_funcs freetype_funcs =
     freetype_GetCharABCWidths,          /* pGetCharABCWidths */
     freetype_GetCharABCWidthsI,         /* pGetCharABCWidthsI */
     freetype_GetCharWidth,              /* pGetCharWidth */
+    freetype_GetCharWidthInfo,          /* pGetCharWidthInfo */
     NULL,                               /* pGetDeviceCaps */
     NULL,                               /* pGetDeviceGammaRamp */
     freetype_GetFontData,               /* pGetFontData */

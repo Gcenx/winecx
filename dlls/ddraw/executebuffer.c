@@ -18,9 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include "ddraw_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ddraw);
@@ -48,8 +45,7 @@ static void _dump_D3DEXECUTEBUFFERDESC(const D3DEXECUTEBUFFERDESC *lpDesc) {
     TRACE("lpData       : %p\n", lpDesc->lpData);
 }
 
-HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *buffer,
-        struct d3d_device *device, struct d3d_viewport *viewport)
+HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *buffer, struct d3d_device *device)
 {
     DWORD is = buffer->data.dwInstructionOffset;
     char *instr = (char *)buffer->desc.lpData + is;
@@ -57,16 +53,6 @@ HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *buffer,
     struct wined3d_map_desc map_desc;
     struct wined3d_box box = {0};
     HRESULT hr;
-
-    if (viewport->active_device != device)
-    {
-        WARN("Viewport %p active device is %p.\n",
-                viewport, viewport->active_device);
-        return DDERR_INVALIDPARAMS;
-    }
-
-    /* Activate the viewport */
-    viewport_activate(viewport, FALSE);
 
     TRACE("ExecuteData :\n");
     if (TRACE_ON(ddraw))
@@ -129,10 +115,9 @@ HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *buffer,
                     struct wined3d_buffer_desc desc;
 
                     desc.byte_width = new_size * sizeof(*indices);
-                    desc.usage = WINED3DUSAGE_DYNAMIC | WINED3DUSAGE_WRITEONLY | WINED3DUSAGE_STATICDECL;
+                    desc.usage = WINED3DUSAGE_DYNAMIC | WINED3DUSAGE_STATICDECL;
                     desc.bind_flags = WINED3D_BIND_INDEX_BUFFER;
-                    desc.access = WINED3D_RESOURCE_ACCESS_GPU
-                            | WINED3D_RESOURCE_ACCESS_MAP_R | WINED3D_RESOURCE_ACCESS_MAP_W;
+                    desc.access = WINED3D_RESOURCE_ACCESS_GPU | WINED3D_RESOURCE_ACCESS_MAP_W;
                     desc.misc_flags = 0;
                     desc.structure_byte_stride = 0;
 
@@ -318,21 +303,11 @@ HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *buffer,
                         case D3DPROCESSVERTICES_TRANSFORM:
                             wined3d_device_set_stream_source(device->wined3d_device, 0,
                                     buffer->src_vertex_buffer, buffer->src_vertex_pos, sizeof(D3DVERTEX));
-                            if (op == D3DPROCESSVERTICES_TRANSFORMLIGHT)
-                            {
-                                wined3d_device_set_vertex_declaration(device->wined3d_device,
-                                        ddraw_find_decl(device->ddraw, D3DFVF_VERTEX));
-                                wined3d_device_set_render_state(device->wined3d_device,
-                                        WINED3D_RS_LIGHTING, TRUE);
-                            }
-                            else
-                            {
-                                wined3d_device_set_vertex_declaration(device->wined3d_device,
-                                        ddraw_find_decl(device->ddraw, D3DFVF_LVERTEX));
-                                wined3d_device_set_render_state(device->wined3d_device,
-                                        WINED3D_RS_LIGHTING, FALSE);
-                            }
-
+                            wined3d_device_set_render_state(device->wined3d_device, WINED3D_RS_LIGHTING,
+                                    op == D3DPROCESSVERTICES_TRANSFORMLIGHT && !!device->material);
+                            wined3d_device_set_vertex_declaration(device->wined3d_device,
+                                    ddraw_find_decl(device->ddraw, op == D3DPROCESSVERTICES_TRANSFORMLIGHT
+                                    ? D3DFVF_VERTEX : D3DFVF_LVERTEX));
                             wined3d_device_process_vertices(device->wined3d_device, ci->wStart, ci->wDest,
                                     ci->dwCount, buffer->dst_vertex_buffer, NULL, 0, D3DFVF_TLVERTEX);
                             break;
@@ -639,7 +614,7 @@ static HRESULT WINAPI d3d_execute_buffer_SetExecuteData(IDirect3DExecuteBuffer *
 
         desc.byte_width = new_size * sizeof(D3DTLVERTEX);
         desc.usage = WINED3DUSAGE_STATICDECL;
-        desc.access = WINED3D_RESOURCE_ACCESS_GPU | WINED3D_RESOURCE_ACCESS_MAP_R | WINED3D_RESOURCE_ACCESS_MAP_W;
+        desc.access = WINED3D_RESOURCE_ACCESS_GPU | WINED3D_RESOURCE_ACCESS_MAP_W;
 
         if (FAILED(hr = wined3d_buffer_create(buffer->d3ddev->wined3d_device, &desc,
                 NULL, NULL, &ddraw_null_wined3d_parent_ops, &dst_buffer)))

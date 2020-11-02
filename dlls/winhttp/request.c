@@ -1527,25 +1527,28 @@ static DWORD map_secure_protocols( DWORD mask )
     return ret;
 }
 
-static BOOL ensure_cred_handle( struct session *session )
+static BOOL ensure_cred_handle( struct request *request )
 {
     SECURITY_STATUS status = SEC_E_OK;
 
-    if (session->cred_handle_initialized) return TRUE;
+    if (request->cred_handle_initialized) return TRUE;
 
-    EnterCriticalSection( &session->cs );
-    if (!session->cred_handle_initialized)
+    if (!request->cred_handle_initialized)
     {
         SCHANNEL_CRED cred;
         memset( &cred, 0, sizeof(cred) );
         cred.dwVersion             = SCHANNEL_CRED_VERSION;
-        cred.grbitEnabledProtocols = map_secure_protocols( session->secure_protocols );
+        cred.grbitEnabledProtocols = map_secure_protocols( request->connect->session->secure_protocols );
+        if (request->client_cert)
+        {
+            cred.paCred = &request->client_cert;
+            cred.cCreds = 1;
+        }
         status = AcquireCredentialsHandleW( NULL, (WCHAR *)UNISP_NAME_W, SECPKG_CRED_OUTBOUND, NULL,
-                                            &cred, NULL, NULL, &session->cred_handle, NULL );
+                                            &cred, NULL, NULL, &request->cred_handle, NULL );
         if (status == SEC_E_OK)
-            session->cred_handle_initialized = TRUE;
+            request->cred_handle_initialized = TRUE;
     }
-    LeaveCriticalSection( &session->cs );
 
     if (status != SEC_E_OK)
     {
@@ -1670,6 +1673,9 @@ static BOOL open_connection( struct request *request )
         }
         netconn_set_timeout( netconn, TRUE, request->send_timeout );
         netconn_set_timeout( netconn, FALSE, request->receive_response_timeout );
+
+        request->netconn = netconn;
+
         if (is_secure)
         {
             if (connect->session->proxy_server &&
@@ -1677,6 +1683,7 @@ static BOOL open_connection( struct request *request )
             {
                 if (!secure_proxy_connect( request ))
                 {
+                    request->netconn = NULL;
                     heap_free( addressW );
                     netconn_close( netconn );
                     return FALSE;
@@ -1686,17 +1693,17 @@ static BOOL open_connection( struct request *request )
             CertFreeCertificateContext( request->server_cert );
             request->server_cert = NULL;
 
-            if (!ensure_cred_handle( connect->session ) ||
+            if (!ensure_cred_handle( request ) ||
                 !netconn_secure_connect( netconn, connect->hostname, request->security_flags,
-                                         &connect->session->cred_handle, request->check_revocation ))
+                                         &request->cred_handle, request->check_revocation ))
             {
+                request->netconn = NULL;
                 heap_free( addressW );
                 netconn_close( netconn );
                 return FALSE;
             }
         }
 
-        request->netconn = netconn;
         send_callback( &request->hdr, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, addressW, strlenW(addressW) + 1 );
     }
     else

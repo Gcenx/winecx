@@ -20,6 +20,8 @@
 #ifndef __WINE_WINEVT_H
 #define __WINE_WINEVT_H
 
+#include "wine/winheader_enter.h"
+
 #include <wtypes.h>
 
 #ifdef __cplusplus
@@ -133,5 +135,7 @@ EVT_HANDLE WINAPI EvtOpenChannelConfig(EVT_HANDLE Session, LPCWSTR ChannelPath, 
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_WINEVT_H */

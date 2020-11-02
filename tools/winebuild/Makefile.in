@@ -12,4 +12,6 @@ C_SRCS = \
 	spec32.c \
 	utils.c
 
+EXTRADEFS = $(HOSTSTACK_CFLAGS)
+
 INSTALL_DEV = $(PROGRAMS)

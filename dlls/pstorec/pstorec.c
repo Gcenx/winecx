@@ -33,8 +33,6 @@
 #include "shlwapi.h"
 
 #include "pstore.h"
-
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(pstores);
@@ -209,7 +207,7 @@ static HRESULT WINAPI PStore_fnCreateType( IPStore* This,
         if( dwCreated == REG_CREATED_NEW_KEY )
         {
             r = RegSetValueW( hkeytype, NULL, REG_SZ, 
-                   pInfo->szDisplayName, strlenW( pInfo->szDisplayName ) );
+                   pInfo->szDisplayName, lstrlenW( pInfo->szDisplayName ) );
             if( r == ERROR_SUCCESS )
                 hres = PST_E_OK;
             RegCloseKey( hkeytype );
@@ -288,7 +286,7 @@ static HRESULT WINAPI PStore_fnCreateSubtype( IPStore* This,
         if( dwCreated == REG_CREATED_NEW_KEY )
         {
             r = RegSetValueW( hkeysubtype, NULL, REG_SZ, 
-                       pInfo->szDisplayName, strlenW( pInfo->szDisplayName ) );
+                       pInfo->szDisplayName, lstrlenW( pInfo->szDisplayName ) );
             if( r == ERROR_SUCCESS )
                 hres = S_OK;
             RegCloseKey( hkeysubtype );

@@ -305,11 +305,6 @@ HWND WINPOS_WindowFromPoint( HWND hwndScope, POINT pt, INT *hittest )
         LONG style = GetWindowLongW( list[i], GWL_STYLE );
 
         /* If window is minimized or disabled, return at once */
-        if (style & WS_MINIMIZE)
-        {
-            *hittest = HTCAPTION;
-            break;
-        }
         if (style & WS_DISABLED)
         {
             *hittest = HTERROR;
@@ -683,67 +678,6 @@ BOOL WINAPI MoveWindow( HWND hwnd, INT x, INT y, INT cx, INT cy,
 }
 
 
-/***********************************************************************
- *           WINPOS_RedrawIconTitle
- */
-BOOL WINPOS_RedrawIconTitle( HWND hWnd )
-{
-    HWND icon_title = 0;
-    WND *win = WIN_GetPtr( hWnd );
-
-    if (win && win != WND_OTHER_PROCESS && win != WND_DESKTOP)
-    {
-	icon_title = win->icon_title;
-        WIN_ReleasePtr( win );
-    }
-    if (!icon_title) return FALSE;
-    SendMessageW( icon_title, WM_SHOWWINDOW, TRUE, 0 );
-    InvalidateRect( icon_title, NULL, TRUE );
-    return TRUE;
-}
-
-/***********************************************************************
- *           WINPOS_ShowIconTitle
- */
-static void WINPOS_ShowIconTitle( HWND hwnd, BOOL bShow )
-{
-    WND *win = WIN_GetPtr( hwnd );
-    HWND title = 0;
-
-    TRACE("%p %i\n", hwnd, (bShow != 0) );
-
-    if (!win || win == WND_OTHER_PROCESS || win == WND_DESKTOP) return;
-    if (win->window_rect.left == -32000 || win->window_rect.top == -32000)
-    {
-        TRACE( "not showing title for hidden icon %p\n", hwnd );
-        bShow = FALSE;
-    }
-    else title = win->icon_title;
-    WIN_ReleasePtr( win );
-
-    if (bShow)
-    {
-        if (!title)
-        {
-            title = ICONTITLE_Create( hwnd );
-            if (!(win = WIN_GetPtr( hwnd )) || win == WND_OTHER_PROCESS)
-            {
-                DestroyWindow( title );
-                return;
-            }
-            win->icon_title = title;
-            WIN_ReleasePtr( win );
-        }
-        if (!IsWindowVisible(title))
-        {
-            SendMessageW( title, WM_SHOWWINDOW, TRUE, 0 );
-            SetWindowPos( title, 0, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE |
-                          SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW );
-        }
-    }
-    else if (title) ShowWindow( title, SW_HIDE );
-}
-
 /*******************************************************************
  *           WINPOS_GetMinMaxInfo
  *
@@ -852,22 +786,83 @@ MINMAXINFO WINPOS_GetMinMaxInfo( HWND hwnd )
     return MinMax;
 }
 
+static POINT get_first_minimized_child_pos( const RECT *parent, const MINIMIZEDMETRICS *mm,
+                                            int width, int height )
+{
+    POINT ret;
 
-/***********************************************************************
- *           WINPOS_FindIconPos
- *
- * Find a suitable place for an iconic window.
- */
-static POINT WINPOS_FindIconPos( HWND hwnd, POINT pt )
+    if (mm->iArrange & ARW_STARTRIGHT)
+        ret.x = parent->right - mm->iHorzGap - width;
+    else
+        ret.x = parent->left + mm->iHorzGap;
+    if (mm->iArrange & ARW_STARTTOP)
+        ret.y = parent->top + mm->iVertGap;
+    else
+        ret.y = parent->bottom - mm->iVertGap - height;
+
+    return ret;
+}
+
+static void get_next_minimized_child_pos( const RECT *parent, const MINIMIZEDMETRICS *mm,
+                                          int width, int height, POINT *pos )
+{
+    BOOL next;
+
+    if (mm->iArrange & ARW_UP) /* == ARW_DOWN */
+    {
+        if (mm->iArrange & ARW_STARTTOP)
+        {
+            pos->y += height + mm->iVertGap;
+            if ((next = pos->y + height > parent->bottom))
+                pos->y = parent->top + mm->iVertGap;
+        }
+        else
+        {
+            pos->y -= height + mm->iVertGap;
+            if ((next = pos->y < parent->top))
+                pos->y = parent->bottom - mm->iVertGap - height;
+        }
+
+        if (next)
+        {
+            if (mm->iArrange & ARW_STARTRIGHT)
+                pos->x -= width + mm->iHorzGap;
+            else
+                pos->x += width + mm->iHorzGap;
+        }
+    }
+    else
+    {
+        if (mm->iArrange & ARW_STARTRIGHT)
+        {
+            pos->x -= width + mm->iHorzGap;
+            if ((next = pos->x < parent->left))
+                pos->x = parent->right - mm->iHorzGap - width;
+        }
+        else
+        {
+            pos->x += width + mm->iHorzGap;
+            if ((next = pos->x + width > parent->right))
+                pos->x = parent->left + mm->iHorzGap;
+        }
+
+        if (next)
+        {
+            if (mm->iArrange & ARW_STARTTOP)
+                pos->y += height + mm->iVertGap;
+            else
+                pos->y -= height + mm->iVertGap;
+        }
+    }
+}
+
+static POINT get_minimized_pos( HWND hwnd, POINT pt )
 {
     RECT rect, rectParent;
     HWND parent, child;
     HRGN hrgn, tmp;
-    int x, y, xspacing, yspacing;
     MINIMIZEDMETRICS metrics;
-
-    metrics.cbSize = sizeof(metrics);
-    SystemParametersInfoW( SPI_GETMINIMIZEDMETRICS, sizeof(metrics), &metrics, 0 );
+    int width, height;
 
     parent = GetAncestor( hwnd, GA_PARENT );
     if (parent == GetDesktopWindow())
@@ -881,12 +876,15 @@ static POINT WINPOS_FindIconPos( HWND hwnd, POINT pt )
     }
     else GetClientRect( parent, &rectParent );
 
-    if ((pt.x >= rectParent.left) && (pt.x + GetSystemMetrics(SM_CXICON) < rectParent.right) &&
-        (pt.y >= rectParent.top) && (pt.y + GetSystemMetrics(SM_CYICON) < rectParent.bottom))
+    if ((pt.x >= rectParent.left) && (pt.x + GetSystemMetrics( SM_CXMINIMIZED ) < rectParent.right) &&
+        (pt.y >= rectParent.top) && (pt.y + GetSystemMetrics( SM_CYMINIMIZED ) < rectParent.bottom))
         return pt;  /* The icon already has a suitable position */
 
-    xspacing = GetSystemMetrics(SM_CXICONSPACING);
-    yspacing = GetSystemMetrics(SM_CYICONSPACING);
+    width = GetSystemMetrics( SM_CXMINIMIZED );
+    height = GetSystemMetrics( SM_CYMINIMIZED );
+
+    metrics.cbSize = sizeof(metrics);
+    SystemParametersInfoW( SPI_GETMINIMIZEDMETRICS, sizeof(metrics), &metrics, 0 );
 
     /* Check if another icon already occupies this spot */
     /* FIXME: this is completely inefficient */
@@ -906,42 +904,17 @@ static POINT WINPOS_FindIconPos( HWND hwnd, POINT pt )
     }
     DeleteObject( tmp );
 
-    for (y = 0; y < (rectParent.bottom - rectParent.top) / yspacing; y++)
+    pt = get_first_minimized_child_pos( &rectParent, &metrics, width, height );
+    for (;;)
     {
-        if (metrics.iArrange & ARW_STARTTOP)
-        {
-            rect.top = rectParent.top + y * yspacing;
-            rect.bottom = rect.top + yspacing;
-        }
-        else
-        {
-            rect.bottom = rectParent.bottom - y * yspacing;
-            rect.top = rect.bottom - yspacing;
-        }
-        for (x = 0; x < (rectParent.right - rectParent.left) / xspacing; x++)
-        {
-            if (metrics.iArrange & ARW_STARTRIGHT)
-            {
-                rect.right = rectParent.right - x * xspacing;
-                rect.left = rect.right - xspacing;
-            }
-            else
-            {
-                rect.left = rectParent.left + x * xspacing;
-                rect.right = rect.left + xspacing;
-            }
-            if (!RectInRegion( hrgn, &rect ))
-            {
-                /* No window was found, so it's OK for us */
-                pt.x = rect.left + (xspacing - GetSystemMetrics(SM_CXICON)) / 2;
-                pt.y = rect.top + (yspacing - GetSystemMetrics(SM_CYICON)) / 2;
-                DeleteObject( hrgn );
-                return pt;
-            }
-        }
+        SetRect( &rect, pt.x, pt.y, pt.x + width, pt.y + height );
+        if (!RectInRegion( hrgn, &rect ))
+            break;
+
+        get_next_minimized_child_pos( &rectParent, &metrics, width, height, &pt );
     }
+
     DeleteObject( hrgn );
-    pt.x = pt.y = 0;
     return pt;
 }
 
@@ -972,11 +945,11 @@ UINT WINPOS_MinMaximize( HWND hwnd, UINT cmd, LPRECT rect )
         case SW_SHOWMINIMIZED:
         case SW_FORCEMINIMIZE:
         case SW_MINIMIZE:
-            wpl.ptMinPosition = WINPOS_FindIconPos( hwnd, wpl.ptMinPosition );
+            wpl.ptMinPosition = get_minimized_pos( hwnd, wpl.ptMinPosition );
 
             SetRect( rect, wpl.ptMinPosition.x, wpl.ptMinPosition.y,
-                     wpl.ptMinPosition.x + GetSystemMetrics(SM_CXICON),
-                     wpl.ptMinPosition.y + GetSystemMetrics(SM_CYICON) );
+                     wpl.ptMinPosition.x + GetSystemMetrics(SM_CXMINIMIZED),
+                     wpl.ptMinPosition.y + GetSystemMetrics(SM_CYMINIMIZED) );
             return SWP_NOSIZE | SWP_NOMOVE;
         }
         if (!SendMessageW( hwnd, WM_QUERYOPEN, 0, 0 )) return SWP_NOSIZE | SWP_NOMOVE;
@@ -1002,12 +975,12 @@ UINT WINPOS_MinMaximize( HWND hwnd, UINT cmd, LPRECT rect )
 
         old_style = WIN_SetStyle( hwnd, WS_MINIMIZE, WS_MAXIMIZE );
 
-        wpl.ptMinPosition = WINPOS_FindIconPos( hwnd, wpl.ptMinPosition );
+        wpl.ptMinPosition = get_minimized_pos( hwnd, wpl.ptMinPosition );
 
         if (!(old_style & WS_MINIMIZE)) swpFlags |= SWP_STATECHANGED;
         SetRect( rect, wpl.ptMinPosition.x, wpl.ptMinPosition.y,
-                 wpl.ptMinPosition.x + GetSystemMetrics(SM_CXICON),
-                 wpl.ptMinPosition.y + GetSystemMetrics(SM_CYICON) );
+                 wpl.ptMinPosition.x + GetSystemMetrics(SM_CXMINIMIZED),
+                 wpl.ptMinPosition.y + GetSystemMetrics(SM_CYMINIMIZED) );
         swpFlags |= SWP_NOCOPYBITS;
         break;
 
@@ -1019,10 +992,7 @@ UINT WINPOS_MinMaximize( HWND hwnd, UINT cmd, LPRECT rect )
 
         old_style = WIN_SetStyle( hwnd, WS_MAXIMIZE, WS_MINIMIZE );
         if (old_style & WS_MINIMIZE)
-        {
             win_set_flags( hwnd, WIN_RESTORE_MAX, 0 );
-            WINPOS_ShowIconTitle( hwnd, FALSE );
-        }
 
         if (!(old_style & WS_MAXIMIZE)) swpFlags |= SWP_STATECHANGED;
         SetRect( rect, minmax.ptMaxPosition.x, minmax.ptMaxPosition.y,
@@ -1038,7 +1008,6 @@ UINT WINPOS_MinMaximize( HWND hwnd, UINT cmd, LPRECT rect )
         old_style = WIN_SetStyle( hwnd, 0, WS_MINIMIZE | WS_MAXIMIZE );
         if (old_style & WS_MINIMIZE)
         {
-            WINPOS_ShowIconTitle( hwnd, FALSE );
             if (win_get_flags( hwnd ) & WIN_RESTORE_MAX)
             {
                 /* Restore to maximized position */
@@ -1168,8 +1137,6 @@ static BOOL show_window( HWND hwnd, INT cmd )
     {
         HWND hFocus;
 
-        WINPOS_ShowIconTitle( hwnd, FALSE );
-
         /* FIXME: This will cause the window to be activated irrespective
          * of whether it is owned by the same thread. Has to be done
          * asynchronously.
@@ -1188,8 +1155,6 @@ static BOOL show_window( HWND hwnd, INT cmd )
         }
         goto done;
     }
-
-    if (IsIconic(hwnd)) WINPOS_ShowIconTitle( hwnd, TRUE );
 
     if (!(wndPtr = WIN_GetPtr( hwnd )) || wndPtr == WND_OTHER_PROCESS) goto done;
 
@@ -1443,7 +1408,6 @@ static BOOL WINPOS_SetPlacement( HWND hwnd, const WINDOWPLACEMENT *wndpl, UINT f
     {
         if (flags & PLACE_MIN)
         {
-            WINPOS_ShowIconTitle( hwnd, FALSE );
             SetWindowPos( hwnd, 0, wp.ptMinPosition.x, wp.ptMinPosition.y, 0, 0,
                           SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
         }
@@ -1464,8 +1428,6 @@ static BOOL WINPOS_SetPlacement( HWND hwnd, const WINDOWPLACEMENT *wndpl, UINT f
 
     if (IsIconic( hwnd ))
     {
-        if (GetWindowLongW( hwnd, GWL_STYLE ) & WS_VISIBLE) WINPOS_ShowIconTitle( hwnd, TRUE );
-
         /* SDK: ...valid only the next time... */
         if( wndpl->flags & WPF_RESTORETOMAXIMIZED )
             win_set_flags( hwnd, WIN_RESTORE_MAX, 0 );
@@ -1699,14 +1661,14 @@ static BOOL SWP_DoWinPosChanging( WINDOWPOS *pWinpos, RECT *old_window_rect, REC
 
     WIN_GetRectangles( pWinpos->hwnd, COORDS_PARENT, old_window_rect, old_client_rect );
     *new_window_rect = *old_window_rect;
-    *new_client_rect = (wndPtr->dwStyle & WS_MINIMIZE) ? *old_window_rect : *old_client_rect;
+    *new_client_rect = *old_client_rect;
 
     if (!(pWinpos->flags & SWP_NOSIZE))
     {
         if (wndPtr->dwStyle & WS_MINIMIZE)
         {
-            new_window_rect->right  = new_window_rect->left + GetSystemMetrics(SM_CXICON);
-            new_window_rect->bottom = new_window_rect->top + GetSystemMetrics(SM_CYICON);
+            new_window_rect->right  = new_window_rect->left + GetSystemMetrics(SM_CXMINIMIZED);
+            new_window_rect->bottom = new_window_rect->top + GetSystemMetrics(SM_CYMINIMIZED);
         }
         else
         {
@@ -2589,14 +2551,16 @@ BOOL WINAPI EndDeferWindowPos( HDWP hdwp )
  */
 UINT WINAPI ArrangeIconicWindows( HWND parent )
 {
+    int width, height, count = 0;
     RECT rectParent;
     HWND hwndChild;
-    INT x, y, xspacing, yspacing;
     POINT pt;
     MINIMIZEDMETRICS metrics;
 
     metrics.cbSize = sizeof(metrics);
     SystemParametersInfoW( SPI_GETMINIMIZEDMETRICS, sizeof(metrics), &metrics, 0 );
+    width = GetSystemMetrics( SM_CXMINIMIZED );
+    height = GetSystemMetrics( SM_CYMINIMIZED );
 
     if (parent == GetDesktopWindow())
     {
@@ -2609,41 +2573,21 @@ UINT WINAPI ArrangeIconicWindows( HWND parent )
     }
     else GetClientRect( parent, &rectParent );
 
-    x = y = 0;
-    xspacing = GetSystemMetrics(SM_CXICONSPACING);
-    yspacing = GetSystemMetrics(SM_CYICONSPACING);
+    pt = get_first_minimized_child_pos( &rectParent, &metrics, width, height );
 
     hwndChild = GetWindow( parent, GW_CHILD );
     while (hwndChild)
     {
         if( IsIconic( hwndChild ) )
         {
-            WINPOS_ShowIconTitle( hwndChild, FALSE );
-
-            if (metrics.iArrange & ARW_STARTRIGHT)
-                pt.x = rectParent.right - (x + 1) * xspacing;
-            else
-                pt.x = rectParent.left + x * xspacing;
-            if (metrics.iArrange & ARW_STARTTOP)
-                pt.y = rectParent.top + y * yspacing;
-            else
-                pt.y = rectParent.bottom - (y + 1) * yspacing;
-
-            SetWindowPos( hwndChild, 0, pt.x + (xspacing - GetSystemMetrics(SM_CXICON)) / 2,
-                          pt.y + (yspacing - GetSystemMetrics(SM_CYICON)) / 2, 0, 0,
+            SetWindowPos( hwndChild, 0, pt.x, pt.y, 0, 0,
                           SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
-	    if( IsWindow(hwndChild) )
-                WINPOS_ShowIconTitle(hwndChild , TRUE );
-
-            if (++x >= (rectParent.right - rectParent.left) / xspacing)
-            {
-                x = 0;
-                y++;
-            }
+            get_next_minimized_child_pos( &rectParent, &metrics, width, height, &pt );
+            count++;
         }
         hwndChild = GetWindow( hwndChild, GW_HWNDNEXT );
     }
-    return yspacing;
+    return count;
 }
 
 
@@ -2787,12 +2731,10 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
     HWND parent;
     LONG hittest = (LONG)(wParam & 0x0f);
     WPARAM syscommand = wParam & 0xfff0,mmstate;
-    HCURSOR hDragCursor = 0, hOldCursor = 0;
     MINMAXINFO minmax;
     POINT capturePoint, pt;
     LONG style = GetWindowLongW( hwnd, GWL_STYLE );
     BOOL    thickframe = HAS_THICKFRAME( style );
-    BOOL    iconic = style & WS_MINIMIZE;
     BOOL    moved = FALSE;
     DWORD     dwPoint = GetMessagePos ();
     BOOL DragFullWindows = TRUE;
@@ -2872,13 +2814,6 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
     /* Retrieve a default cache DC (without using the window style) */
     hdc = GetDCEx( parent, 0, DCX_CACHE );
 
-    if( iconic ) /* create a cursor for dragging */
-    {
-        hDragCursor = (HCURSOR)GetClassLongPtrW( hwnd, GCLP_HICON);
-        if( !hDragCursor ) hDragCursor = (HCURSOR)SendMessageW( hwnd, WM_QUERYDRAGICON, 0, 0L);
-        if( !hDragCursor ) iconic = FALSE;
-    }
-
     /* we only allow disabling the full window drag for child windows */
     if (parent) SystemParametersInfoW( SPI_GETDRAGFULLWINDOWS, 0, &DragFullWindows, 0 );
 
@@ -2948,21 +2883,14 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
             if( !moved )
             {
                 moved = TRUE;
-
-                if( iconic ) /* ok, no system popup tracking */
-                {
-                    hOldCursor = SetCursor(hDragCursor);
-                    ShowCursor( TRUE );
-                    WINPOS_ShowIconTitle( hwnd, FALSE );
-                }
-                else if(!DragFullWindows)
+                if (!DragFullWindows)
                     draw_moving_frame( parent, hdc, &sizingRect, thickframe );
             }
 
             if (msg.message == WM_KEYDOWN) SetCursorPos( pt.x, pt.y );
             else
             {
-                if(!iconic && !DragFullWindows) draw_moving_frame( parent, hdc, &sizingRect, thickframe );
+                if (!DragFullWindows) draw_moving_frame( parent, hdc, &sizingRect, thickframe );
                 if (hittest == HTCAPTION) OffsetRect( &sizingRect, dx, dy );
                 if (ON_LEFT_BORDER(hittest)) sizingRect.left += dx;
                 else if (ON_RIGHT_BORDER(hittest)) sizingRect.right += dx;
@@ -2982,32 +2910,21 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
                 else
                     SendMessageW( hwnd, WM_MOVING, 0, (LPARAM)&sizingRect );
 
-                if (!iconic)
+                if (!DragFullWindows)
+                    draw_moving_frame( parent, hdc, &sizingRect, thickframe );
+                else
                 {
-                    if(!DragFullWindows)
-                        draw_moving_frame( parent, hdc, &sizingRect, thickframe );
-                    else
-                    {
-                        RECT rect = sizingRect;
-                        MapWindowPoints( 0, parent, (POINT *)&rect, 2 );
-                        SetWindowPos( hwnd, 0, rect.left, rect.top,
-                                      rect.right - rect.left, rect.bottom - rect.top,
-                                      ( hittest == HTCAPTION ) ? SWP_NOSIZE : 0 );
-                    }
+                    RECT rect = sizingRect;
+                    MapWindowPoints( 0, parent, (POINT *)&rect, 2 );
+                    SetWindowPos( hwnd, 0, rect.left, rect.top,
+                                  rect.right - rect.left, rect.bottom - rect.top,
+                                  (hittest == HTCAPTION) ? SWP_NOSIZE : 0 );
                 }
             }
         }
     }
 
-    if( iconic )
-    {
-        if( moved ) /* restore cursors, show icon title later on */
-        {
-            ShowCursor( FALSE );
-            SetCursor( hOldCursor );
-        }
-    }
-    else if (moved && !DragFullWindows)
+    if (moved && !DragFullWindows)
     {
         draw_moving_frame( parent, hdc, &sizingRect, thickframe );
     }
@@ -3031,7 +2948,7 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
         if (!((msg.message == WM_KEYDOWN) && (msg.wParam == VK_ESCAPE)) )
         {
             /* NOTE: SWP_NOACTIVATE prevents document window activation in Word 6 */
-            if(!DragFullWindows || iconic)
+            if (!DragFullWindows)
                 SetWindowPos( hwnd, 0, sizingRect.left, sizingRect.top,
                               sizingRect.right - sizingRect.left,
                               sizingRect.bottom - sizingRect.top,
@@ -3057,7 +2974,6 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
                 SendMessageW( hwnd, WM_SYSCOMMAND,
                               SC_MOUSEMENU + HTSYSMENU, MAKELONG(pt.x,pt.y));
         }
-        else WINPOS_ShowIconTitle( hwnd, TRUE );
     }
 
     /* windows finishes this off with a WM_MOUSEMOVE with the current position

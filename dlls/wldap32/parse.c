@@ -90,14 +90,16 @@ ULONG CDECL ldap_parse_extended_resultW( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
 #ifdef HAVE_LDAP
-    char *oidU = NULL;
+    char * HOSTPTR oidU = NULL;
+    struct berval *bvret = NULL;
 
     TRACE( "(%p, %p, %p, %p, 0x%02x)\n", ld, result, oid, data, free );
 
     if (!ld) return WLDAP32_LDAP_PARAM_ERROR;
     if (!result) return WLDAP32_LDAP_NO_RESULTS_RETURNED;
 
-    ret = map_error( ldap_parse_extended_result( ld, result, &oidU, (struct berval **)data, free ) );
+    ret = map_error( ldap_parse_extended_result( ldap_get( ld ), ldmsg_get( result ), &oidU, &bvret, free ) );
+    ret = bvconvert_and_free( ret, bvret, data );
 
     if (oid) {
         *oid = strUtoW( oidU );
@@ -156,13 +158,13 @@ ULONG CDECL ldap_parse_referenceW( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *messag
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
 #ifdef HAVE_LDAP_PARSE_REFERENCE
-    char **referralsU = NULL;
+    char * HOSTPTR * HOSTPTR referralsU = NULL;
 
     TRACE( "(%p, %p, %p)\n", ld, message, referrals );
 
     if (!ld) return ~0u;
     
-    ret = map_error( ldap_parse_reference( ld, message, &referralsU, NULL, 0 ));
+    ret = map_error( ldap_parse_reference( ldap_get( ld ), ldmsg_get( message ), &referralsU, NULL, 0 ));
 
     *referrals = strarrayUtoW( referralsU );
     ldap_memfree( referralsU );
@@ -239,15 +241,15 @@ ULONG CDECL ldap_parse_resultW( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *result,
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
 #ifdef HAVE_LDAP
-    char *matchedU = NULL, *errorU = NULL, **referralsU = NULL;
-    LDAPControl **serverctrlsU = NULL;
+    char * HOSTPTR matchedU = NULL, * HOSTPTR errorU = NULL, * HOSTPTR * HOSTPTR referralsU = NULL;
+    LDAPControl ** HOSTPTR serverctrlsU = NULL;
 
     TRACE( "(%p, %p, %p, %p, %p, %p, %p, 0x%02x)\n", ld, result, retcode,
            matched, error, referrals, serverctrls, free );
 
     if (!ld) return WLDAP32_LDAP_PARAM_ERROR;
 
-    ret = map_error( ldap_parse_result( ld, result, (int *)retcode, &matchedU, &errorU,
+    ret = map_error( ldap_parse_result( ldap_get( ld ), ldmsg_get( result ), (int *)retcode, &matchedU, &errorU,
                                         &referralsU, &serverctrlsU, free ));
 
     if (matched) *matched = strUtoW( matchedU );
@@ -258,7 +260,7 @@ ULONG CDECL ldap_parse_resultW( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *result,
 
     ldap_memfree( matchedU );
     ldap_memfree( errorU );
-    strarrayfreeU( referralsU );
+    ldap_memvfree( (void * HOSTPTR * HOSTPTR)referralsU );
     ldap_controls_free( serverctrlsU );
 
 #endif
@@ -318,7 +320,7 @@ ULONG CDECL ldap_parse_sort_controlW( WLDAP32_LDAP *ld, PLDAPControlW *control,
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
 #ifdef HAVE_LDAP
-    char *attrU = NULL;
+    char * HOSTPTR attrU = NULL;
     LDAPControl **controlU = NULL;
 #ifdef HAVE_LDAP_PARSE_SORT_CONTROL
     unsigned long res;
@@ -337,7 +339,7 @@ ULONG CDECL ldap_parse_sort_controlW( WLDAP32_LDAP *ld, PLDAPControlW *control,
     if (!controlU) return WLDAP32_LDAP_NO_MEMORY;
 
 #ifdef HAVE_LDAP_PARSE_SORT_CONTROL
-    if (!(ret = ldap_parse_sort_control( ld, controlU, &res, &attrU )))
+    if (!(ret = ldap_parse_sort_control( ldap_get( ld ), controlU, &res, &attrU )))
     {
         *result = res;
         *attr = strUtoW( attrU );
@@ -353,7 +355,7 @@ ULONG CDECL ldap_parse_sort_controlW( WLDAP32_LDAP *ld, PLDAPControlW *control,
         controlarrayfreeU( controlU );
         return WLDAP32_LDAP_CONTROL_NOT_FOUND;
     }
-    if (!(ret = ldap_parse_sortresponse_control( ld, sortcontrol, &res, &attrU )))
+    if (!(ret = ldap_parse_sortresponse_control( ldap_get( ld ), sortcontrol, &res, &attrU )))
     {
         *result = res;
         *attr = strUtoW( attrU );
@@ -426,9 +428,11 @@ INT CDECL ldap_parse_vlv_controlW( WLDAP32_LDAP *ld, PLDAPControlW *control,
     LDAPControl **controlU = NULL;
 #ifdef HAVE_LDAP_PARSE_VLV_CONTROL
     unsigned long pos, count;
+    struct berval *bvret = NULL;
 #elif defined(HAVE_LDAP_PARSE_VLVRESPONSE_CONTROL)
     ber_int_t pos, count;
     LDAPControl *vlvcontrol = NULL;
+    struct berval *bvret = NULL;
     unsigned int i;
 #endif
 
@@ -441,9 +445,10 @@ INT CDECL ldap_parse_vlv_controlW( WLDAP32_LDAP *ld, PLDAPControlW *control,
     if (!controlU) return WLDAP32_LDAP_NO_MEMORY;
 
 #ifdef HAVE_LDAP_PARSE_VLV_CONTROL
-    if (!(ret = ldap_parse_vlv_control( ld, controlU, &pos, &count,
-                                        (struct berval **)context, errcode )))
+    if (!(ret = ldap_parse_vlv_control( ldap_get( ld ), controlU, &pos, &count,
+                                        &bvret, errcode )))
     {
+        ret = bvconvert_and_free( ret, bvret, context );
         *targetpos = pos;
         *listcount = count;
     }
@@ -458,9 +463,10 @@ INT CDECL ldap_parse_vlv_controlW( WLDAP32_LDAP *ld, PLDAPControlW *control,
         controlarrayfreeU( controlU );
         return WLDAP32_LDAP_CONTROL_NOT_FOUND;
     }
-    if (!(ret = ldap_parse_vlvresponse_control( ld, vlvcontrol, &pos, &count,
-                                                (struct berval **)context, errcode )))
+    if (!(ret = ldap_parse_vlvresponse_control( ldap_get( ld ), vlvcontrol, &pos, &count,
+                                                &bvret, errcode )))
     {
+        ret = bvconvert_and_free( ret, bvret, context );
         *targetpos = pos;
         *listcount = count;
     }

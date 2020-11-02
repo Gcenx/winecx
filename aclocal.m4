@@ -83,7 +83,8 @@ LIBS="-l$1 $5 $LIBS"
     *) AS_VAR_SET(ac_Lib,[`$READELF -d conftest$ac_exeext | grep "NEEDED.*ac_lib_pattern\\.$LIBEXT" | sed -e "s/^.*\\m4_dquote(\\(ac_lib_pattern\\.$LIBEXT[[^	 ]]*\\)\\).*$/\1/"';2,$d'`])
        AS_VAR_IF([ac_Lib],[],
              [AS_VAR_SET(ac_Lib,[`$LDD conftest$ac_exeext | grep "ac_lib_pattern\\.$LIBEXT" | sed -e "s/^.*\(ac_lib_pattern\.$LIBEXT[[^	 ]]*\).*$/\1/"';2,$d'`])]) ;;
-  esac])
+  esac],
+  [AS_VAR_SET(ac_Lib,[])])
   LIBS=$ac_check_soname_save_LIBS])dnl
 AS_VAR_IF([ac_Lib],[],
       [AC_MSG_RESULT([not found])
@@ -149,6 +150,29 @@ CFLAGS=$ac_wine_try_cflags_saved])
 AS_VAR_IF([ac_var],[yes],[m4_default([$2], [EXTRACFLAGS="$EXTRACFLAGS $1"])], [$3])dnl
 AS_VAR_POPDEF([ac_var])])
 
+dnl **** Check if we can link an empty program with special CFLAGS ****
+dnl
+dnl Usage: WINE_TRY_CROSSCFLAGS(flags,[action-if-yes,[action-if-no]])
+dnl
+dnl The default action-if-yes is to append the flags to EXTRACROSSCFLAGS.
+dnl
+AC_DEFUN([WINE_TRY_CROSSCFLAGS],
+[AS_VAR_PUSHDEF([ac_var], ac_cv_crosscflags_[[$1]])dnl
+AC_CACHE_CHECK([whether the cross-compiler supports $1], ac_var,
+[ac_wine_try_cflags_saved=$CFLAGS
+ac_wine_try_cflags_saved_cc=$CC
+ac_wine_try_cflags_saved_exeext=$ac_exeext
+CFLAGS="$CFLAGS $1"
+CC="$CROSSCC"
+ac_exeext=".exe"
+AC_LINK_IFELSE([AC_LANG_SOURCE([[int main(int argc, char **argv) { return 0; }]])],
+               [AS_VAR_SET(ac_var,yes)], [AS_VAR_SET(ac_var,no)])
+CFLAGS=$ac_wine_try_cflags_saved
+CC=$ac_wine_try_cflags_saved_cc
+ac_exeext=$ac_wine_try_cflags_saved_exeext])
+AS_VAR_IF([ac_var],[yes],[m4_default([$2], [EXTRACROSSCFLAGS="$EXTRACROSSCFLAGS $1"])], [$3])dnl
+AS_VAR_POPDEF([ac_var])])
+
 dnl **** Check if we can link an empty shared lib (no main) with special CFLAGS ****
 dnl
 dnl Usage: WINE_TRY_SHLIB_FLAGS(flags,[action-if-yes,[action-if-no]])
@@ -195,7 +219,7 @@ AC_DEFUN([WINE_CHECK_MINGW_PROG],
     ac_prefix_list="aarch64-w64-mingw32-clang aarch64-w64-mingw32-gcc" ;;
   arm*)
     ac_prefix_list="armv7-w64-mingw32-clang armv7-w64-mingw32-gcc" ;;
-  i[[3456789]]86*)
+  i[[3456789]]86*|x86_32on64)
     ac_prefix_list="m4_foreach([ac_wine_prefix],[w64-mingw32, pc-mingw32, mingw32msvc, mingw32],
                         m4_foreach([ac_wine_cpu],[i686,i586,i486,i386],[ac_wine_cpu-ac_wine_prefix-gcc ]))
                      m4_foreach([ac_wine_cpu],[i686,i586,i486,i386],[ac_wine_cpu-w64-mingw32-clang ])

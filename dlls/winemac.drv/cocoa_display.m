@@ -19,6 +19,9 @@
  */
 
 #import <AppKit/AppKit.h>
+
+#include "wine/hostaddrspace_enter.h"
+
 #include "macdrv_cocoa.h"
 
 

@@ -67,6 +67,7 @@ enum type_context
     TYPE_CONTEXT_PARAM,
     TYPE_CONTEXT_CONTAINER,
     TYPE_CONTEXT_CONTAINER_NO_POINTERS,
+    TYPE_CONTEXT_RETVAL,
 };
 
 /* parameter flags in Oif mode */
@@ -287,7 +288,7 @@ static unsigned char get_pointer_fc_context( const type_t *type, const attr_list
     int pointer_fc = get_pointer_fc(type, attrs, context == TYPE_CONTEXT_TOPLEVELPARAM);
 
     if (pointer_fc == FC_UP && is_attr( attrs, ATTR_OUT ) &&
-        context == TYPE_CONTEXT_PARAM && is_object( current_iface ))
+        (context == TYPE_CONTEXT_PARAM || context == TYPE_CONTEXT_RETVAL) && is_object( current_iface ))
         pointer_fc = FC_OP;
 
     return pointer_fc;
@@ -442,23 +443,27 @@ static unsigned int get_stack_size( const var_t *var, int *by_value )
 }
 
 static unsigned char get_contexthandle_flags( const type_t *iface, const attr_list_t *attrs,
-                                              const type_t *type )
+                                              const type_t *type, int is_return )
 {
     unsigned char flags = 0;
+    int is_out;
 
     if (is_attr(iface->attrs, ATTR_STRICTCONTEXTHANDLE)) flags |= NDR_STRICT_CONTEXT_HANDLE;
 
     if (is_ptr(type) &&
         !is_attr( type->attrs, ATTR_CONTEXTHANDLE ) &&
         !is_attr( attrs, ATTR_CONTEXTHANDLE ))
-        flags |= 0x80;
+        flags |= HANDLE_PARAM_IS_VIA_PTR;
 
-    if (is_attr(attrs, ATTR_IN))
+    if (is_return) return flags | HANDLE_PARAM_IS_OUT | HANDLE_PARAM_IS_RETURN;
+
+    is_out = is_attr(attrs, ATTR_OUT);
+    if (is_attr(attrs, ATTR_IN) || !is_out)
     {
-        flags |= 0x40;
-        if (!is_attr(attrs, ATTR_OUT)) flags |= NDR_CONTEXT_HANDLE_CANNOT_BE_NULL;
+        flags |= HANDLE_PARAM_IS_IN;
+        if (!is_out) flags |= NDR_CONTEXT_HANDLE_CANNOT_BE_NULL;
     }
-    if (is_attr(attrs, ATTR_OUT)) flags |= 0x20;
+    if (is_out) flags |= HANDLE_PARAM_IS_OUT;
 
     return flags;
 }
@@ -1059,9 +1064,17 @@ static unsigned char get_parameter_fc( const var_t *var, int is_return, unsigned
             case TGT_UNION:
             case TGT_USER_TYPE:
             case TGT_RANGE:
-            case TGT_ARRAY:
-                *flags |= IsSimpleRef | MustFree;
+                *flags |= MustFree | IsSimpleRef;
                 *typestring_offset = ref->typestring_offset;
+                if (!is_in && is_out) server_size = type_memsize( ref );
+                break;
+            case TGT_ARRAY:
+                *flags |= MustFree;
+                if (!type_array_is_decl_as_ptr(ref))
+                {
+                    *flags |= IsSimpleRef;
+                    *typestring_offset = ref->typestring_offset;
+                }
                 if (!is_in && is_out) server_size = type_memsize( ref );
                 break;
             case TGT_STRING:
@@ -1361,7 +1374,7 @@ static void write_proc_func_header( FILE *file, int indent, const type_t *iface,
             *offset += 6;
             break;
         case FC_BIND_CONTEXT:
-            handle_flags = get_contexthandle_flags( iface, handle_var->attrs, handle_var->type );
+            handle_flags = get_contexthandle_flags( iface, handle_var->attrs, handle_var->type, 0 );
             print_file( file, indent, "0x%02x,\t/* %s */\n", explicit_fc, string_of_type(explicit_fc) );
             print_file( file, indent, "0x%02x,\n", handle_flags );
             print_file( file, indent, "NdrFcShort(0x%hx),\t/* stack offset = %hu */\n",
@@ -2120,6 +2133,7 @@ static unsigned int write_nonsimple_pointer(FILE *file, const attr_list_t *attrs
             case TGT_POINTER:
             case TGT_CTXT_HANDLE:
             case TGT_CTXT_HANDLE_POINTER:
+            case TGT_ARRAY:
                 flags |= FC_ALLOCED_ON_STACK;
                 break;
             case TGT_IFACE_POINTER:
@@ -2938,14 +2952,10 @@ static unsigned int write_array_tfs(FILE *file, const attr_list_t *attrs, type_t
     unsigned int size;
     unsigned int start_offset;
     unsigned char fc;
-    int pointer_type = get_attrv(attrs, ATTR_POINTERTYPE);
     unsigned int baseoff
         = !type_array_is_decl_as_ptr(type) && current_structure
         ? type_memsize(current_structure)
         : 0;
-
-    if (!pointer_type)
-        pointer_type = FC_RP;
 
     if (!is_string_type(attrs, type_array_get_element(type)))
         write_embedded_types(file, attrs, type_array_get_element(type), name, FALSE, typestring_offset);
@@ -3494,17 +3504,17 @@ static unsigned int write_ip_tfs(FILE *file, const attr_list_t *attrs, type_t *t
 static unsigned int write_contexthandle_tfs(FILE *file,
                                             const attr_list_t *attrs,
                                             type_t *type,
-                                            int toplevel_param,
+                                            enum type_context context,
                                             unsigned int *typeformat_offset)
 {
     unsigned int start_offset = *typeformat_offset;
-    unsigned char flags = get_contexthandle_flags( current_iface, attrs, type );
+    unsigned char flags = get_contexthandle_flags( current_iface, attrs, type, context == TYPE_CONTEXT_RETVAL );
 
     print_start_tfs_comment(file, type, start_offset);
 
     if (flags & 0x80)  /* via ptr */
     {
-        int pointer_type = get_pointer_fc( type, attrs, toplevel_param );
+        int pointer_type = get_pointer_fc( type, attrs, context == TYPE_CONTEXT_TOPLEVELPARAM );
         if (!pointer_type) pointer_type = FC_RP;
         *typeformat_offset += 4;
         print_file(file, 2,"0x%x, 0x0,\t/* %s */\n", pointer_type, string_of_type(pointer_type) );
@@ -3514,8 +3524,7 @@ static unsigned int write_contexthandle_tfs(FILE *file,
 
     print_file(file, 2, "0x%02x,\t/* FC_BIND_CONTEXT */\n", FC_BIND_CONTEXT);
     print_file(file, 2, "0x%x,\t/* Context flags: ", flags);
-    /* return and can't be null values overlap */
-    if (((flags & 0x21) != 0x21) && (flags & NDR_CONTEXT_HANDLE_CANNOT_BE_NULL))
+    if (flags & NDR_CONTEXT_HANDLE_CANNOT_BE_NULL)
         print_file(file, 0, "can't be null, ");
     if (flags & NDR_CONTEXT_HANDLE_SERIALIZE)
         print_file(file, 0, "serialize, ");
@@ -3523,13 +3532,13 @@ static unsigned int write_contexthandle_tfs(FILE *file,
         print_file(file, 0, "no serialize, ");
     if (flags & NDR_STRICT_CONTEXT_HANDLE)
         print_file(file, 0, "strict, ");
-    if ((flags & 0x21) == 0x20)
-        print_file(file, 0, "out, ");
-    if ((flags & 0x21) == 0x21)
+    if (flags & HANDLE_PARAM_IS_RETURN)
         print_file(file, 0, "return, ");
-    if (flags & 0x40)
+    if (flags & HANDLE_PARAM_IS_OUT)
+        print_file(file, 0, "out, ");
+    if (flags & HANDLE_PARAM_IS_IN)
         print_file(file, 0, "in, ");
-    if (flags & 0x80)
+    if (flags & HANDLE_PARAM_IS_VIA_PTR)
         print_file(file, 0, "via ptr, ");
     print_file(file, 0, "*/\n");
     print_file(file, 2, "0x%x,\t/* rundown routine */\n", get_context_handle_offset( type ));
@@ -3568,9 +3577,8 @@ static unsigned int write_range_tfs(FILE *file, const attr_list_t *attrs,
     return start_offset;
 }
 
-static unsigned int write_type_tfs(FILE *file, int indent,
-                                   const attr_list_t *attrs, type_t *type,
-                                   const char *name,
+static unsigned int write_type_tfs(FILE *file, const attr_list_t *attrs,
+                                   type_t *type, const char *name,
                                    enum type_context context,
                                    unsigned int *typeformat_offset)
 {
@@ -3580,8 +3588,7 @@ static unsigned int write_type_tfs(FILE *file, int indent,
     {
     case TGT_CTXT_HANDLE:
     case TGT_CTXT_HANDLE_POINTER:
-        return write_contexthandle_tfs(file, attrs, type,
-                                       context == TYPE_CONTEXT_TOPLEVELPARAM, typeformat_offset);
+        return write_contexthandle_tfs(file, attrs, type, context, typeformat_offset);
     case TGT_USER_TYPE:
         return write_user_tfs(file, type, typeformat_offset);
     case TGT_STRING:
@@ -3600,8 +3607,7 @@ static unsigned int write_type_tfs(FILE *file, int indent,
             context != TYPE_CONTEXT_CONTAINER_NO_POINTERS)
         {
             int ptr_type;
-            ptr_type = get_pointer_fc(type, attrs,
-                                      context == TYPE_CONTEXT_TOPLEVELPARAM);
+            ptr_type = get_pointer_fc_context(type, attrs, context);
             if (ptr_type != FC_RP || type_array_is_decl_as_ptr(type))
             {
                 unsigned int absoff = type->typestring_offset;
@@ -3653,13 +3659,13 @@ static unsigned int write_type_tfs(FILE *file, int indent,
             if (context != TYPE_CONTEXT_CONTAINER_NO_POINTERS)
                 write_pointer_tfs(file, attrs, type, *typeformat_offset + 4, context, typeformat_offset);
 
-            offset = write_type_tfs(file, indent, attrs, ref, name, ref_context, typeformat_offset);
+            offset = write_type_tfs(file, attrs, ref, name, ref_context, typeformat_offset);
             if (context == TYPE_CONTEXT_CONTAINER_NO_POINTERS)
                 return 0;
             return offset;
         }
 
-        offset = write_type_tfs( file, indent, attrs, type_pointer_get_ref(type), name,
+        offset = write_type_tfs( file, attrs, type_pointer_get_ref(type), name,
                                  ref_context, typeformat_offset);
         if (context == TYPE_CONTEXT_CONTAINER_NO_POINTERS)
             return 0;
@@ -3675,7 +3681,7 @@ static unsigned int write_type_tfs(FILE *file, int indent,
 static int write_embedded_types(FILE *file, const attr_list_t *attrs, type_t *type,
                                 const char *name, int write_ptr, unsigned int *tfsoff)
 {
-    return write_type_tfs(file, 2, attrs, type, name, write_ptr ? TYPE_CONTEXT_CONTAINER : TYPE_CONTEXT_CONTAINER_NO_POINTERS, tfsoff);
+    return write_type_tfs(file, attrs, type, name, write_ptr ? TYPE_CONTEXT_CONTAINER : TYPE_CONTEXT_CONTAINER_NO_POINTERS, tfsoff);
 }
 
 static void process_tfs_iface(type_t *iface, FILE *file, int indent, unsigned int *offset)
@@ -3702,12 +3708,12 @@ static void process_tfs_iface(type_t *iface, FILE *file, int indent, unsigned in
 
             var = type_function_get_retval(func->type);
             if (!is_void(var->type))
-                var->typestring_offset = write_type_tfs( file, 2, func->attrs, var->type, func->name,
-                                                         TYPE_CONTEXT_PARAM, offset);
+                var->typestring_offset = write_type_tfs( file, var->attrs, var->type, func->name,
+                                                         TYPE_CONTEXT_RETVAL, offset);
 
             if (type_get_function_args(func->type))
                 LIST_FOR_EACH_ENTRY( var, type_get_function_args(func->type), var_t, entry )
-                    var->typestring_offset = write_type_tfs( file, 2, var->attrs, var->type, var->name,
+                    var->typestring_offset = write_type_tfs( file, var->attrs, var->type, var->name,
                                                              TYPE_CONTEXT_TOPLEVELPARAM, offset );
             break;
 
@@ -3719,7 +3725,7 @@ static void process_tfs_iface(type_t *iface, FILE *file, int indent, unsigned in
             {
                 if (is_attr(type_entry->type->attrs, ATTR_ENCODE)
                     || is_attr(type_entry->type->attrs, ATTR_DECODE))
-                    type_entry->type->typestring_offset = write_type_tfs( file, 2,
+                    type_entry->type->typestring_offset = write_type_tfs( file,
                             type_entry->type->attrs, type_entry->type, type_entry->type->name,
                             TYPE_CONTEXT_CONTAINER, offset);
             }
@@ -4243,13 +4249,14 @@ static void write_remoting_arg(FILE *file, int indent, const var_t *func, const 
         }
         else if (phase == PHASE_UNMARSHAL)
         {
-            if (pass == PASS_OUT)
+            if (pass == PASS_OUT || pass == PASS_RETURN)
             {
                 if (!in_attr)
                     print_file(file, indent, "*%s%s = 0;\n", local_var_prefix, var->name);
                 print_file(file, indent, "NdrClientContextUnmarshall(\n");
                 print_file(file, indent + 1, "&__frame->_StubMsg,\n");
-                print_file(file, indent + 1, "(NDR_CCONTEXT *)%s%s,\n", local_var_prefix, var->name);
+                print_file(file, indent + 1, "(NDR_CCONTEXT *)%s%s%s,\n",
+                           pass == PASS_RETURN ? "&" : "", local_var_prefix, var->name);
                 print_file(file, indent + 1, "__frame->_Handle);\n");
             }
             else
@@ -4602,9 +4609,14 @@ void declare_stub_args( FILE *file, int indent, const var_t *func )
     /* declare return value */
     if (!is_void(var->type))
     {
-        print_file(file, indent, "%s", "");
-        write_type_decl(file, var->type, var->name);
-        fprintf(file, ";\n");
+        if (is_context_handle(var->type))
+            print_file(file, indent, "NDR_SCONTEXT %s;\n", var->name);
+        else
+        {
+            print_file(file, indent, "%s", "");
+            write_type_decl(file, var->type, var->name);
+            fprintf(file, ";\n");
+        }
     }
 
     if (!type_get_function_args(func->type))
@@ -5029,7 +5041,7 @@ void write_exceptions( FILE *file )
     fprintf( file, "    EXCEPTION_REGISTRATION_RECORD frame; \\\n");
     fprintf( file, "    __filter_func                 filter; \\\n");
     fprintf( file, "    __finally_func                finally; \\\n");
-    fprintf( file, "    sigjmp_buf                    jmp; \\\n");
+    fprintf( file, "    __wine_jmp_buf                jmp; \\\n");
     fprintf( file, "    DWORD                         code; \\\n");
     fprintf( file, "    unsigned char                 abnormal_termination; \\\n");
     fprintf( file, "    unsigned char                 filter_level; \\\n");
@@ -5039,7 +5051,7 @@ void write_exceptions( FILE *file )
     fprintf( file, "    __DECL_EXCEPTION_FRAME\n");
     fprintf( file, "};\n");
     fprintf( file, "\n");
-    fprintf( file, "static inline void __widl_unwind_target(void)\n" );
+    fprintf( file, "static inline void __cdecl __widl_unwind_target(void)\n" );
     fprintf( file, "{\n");
     fprintf( file, "    struct __exception_frame *exc_frame = (struct __exception_frame *)__wine_get_frame();\n" );
     fprintf( file, "    if (exc_frame->finally_level > exc_frame->filter_level)\n" );
@@ -5049,13 +5061,13 @@ void write_exceptions( FILE *file )
     fprintf( file, "        __wine_pop_frame( &exc_frame->frame );\n");
     fprintf( file, "    }\n");
     fprintf( file, "    exc_frame->filter_level = 0;\n");
-    fprintf( file, "    siglongjmp( exc_frame->jmp, 1 );\n");
+    fprintf( file, "    __wine_longjmp( &exc_frame->jmp, 1 );\n");
     fprintf( file, "}\n");
     fprintf( file, "\n");
-    fprintf( file, "static DWORD __widl_exception_handler( EXCEPTION_RECORD *record,\n");
-    fprintf( file, "                                       EXCEPTION_REGISTRATION_RECORD *frame,\n");
-    fprintf( file, "                                       CONTEXT *context,\n");
-    fprintf( file, "                                       EXCEPTION_REGISTRATION_RECORD **pdispatcher )\n");
+    fprintf( file, "static DWORD __cdecl __widl_exception_handler( EXCEPTION_RECORD *record,\n");
+    fprintf( file, "                                               EXCEPTION_REGISTRATION_RECORD *frame,\n");
+    fprintf( file, "                                               CONTEXT *context,\n");
+    fprintf( file, "                                               EXCEPTION_REGISTRATION_RECORD **pdispatcher )\n");
     fprintf( file, "{\n");
     fprintf( file, "    struct __exception_frame *exc_frame = (struct __exception_frame *)frame;\n");
     fprintf( file, "\n");
@@ -5075,7 +5087,7 @@ void write_exceptions( FILE *file )
     fprintf( file, "}\n");
     fprintf( file, "\n");
     fprintf( file, "#define RpcTryExcept \\\n");
-    fprintf( file, "    if (!sigsetjmp( __frame->jmp, 0 )) \\\n");
+    fprintf( file, "    if (!__wine_setjmpex( &__frame->jmp, &__frame->frame )) \\\n");
     fprintf( file, "    { \\\n");
     fprintf( file, "        if (!__frame->finally_level) \\\n" );
     fprintf( file, "            __wine_push_frame( &__frame->frame ); \\\n");

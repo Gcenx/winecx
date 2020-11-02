@@ -21,6 +21,8 @@
 #import <Carbon/Carbon.h>
 #include <dlfcn.h>
 
+#include "wine/hostaddrspace_enter.h"
+
 #import "cocoa_app.h"
 #import "cocoa_event.h"
 #import "cocoa_window.h"
@@ -1658,6 +1660,34 @@ static NSString* WineLocalizedString(unsigned int stringID)
         }
     }
 
+    - (void) handleWindowDrag:(NSEvent*)anEvent begin:(BOOL)begin
+    {
+        WineWindow* window = (WineWindow*)[anEvent window];
+        if ([window isKindOfClass:[WineWindow class]])
+        {
+            macdrv_event* event;
+            int eventType;
+
+            if (begin)
+            {
+                [windowsBeingDragged addObject:window];
+                eventType = WINDOW_DRAG_BEGIN;
+            }
+            else
+            {
+                [windowsBeingDragged removeObject:window];
+                eventType = WINDOW_DRAG_END;
+            }
+            [self updateCursorClippingState];
+
+            event = macdrv_create_event(eventType, window);
+            if (eventType == WINDOW_DRAG_BEGIN)
+                event->window_drag_begin.no_activate = [NSEvent wine_commandKeyDown];
+            [window.queue postEvent:event];
+            macdrv_release_event(event);
+        }
+    }
+
     - (void) handleMouseMove:(NSEvent*)anEvent
     {
         WineWindow* targetWindow;
@@ -1821,6 +1851,9 @@ static NSString* WineLocalizedString(unsigned int stringID)
         NSEventType type = [theEvent type];
         WineWindow* windowBroughtForward = nil;
         BOOL process = FALSE;
+
+        if (type == NSLeftMouseUp && [windowsBeingDragged count])
+            [self handleWindowDrag:theEvent begin:NO];
 
         if ([window isKindOfClass:[WineWindow class]] &&
             type == NSLeftMouseDown &&
@@ -2183,32 +2216,7 @@ static NSString* WineLocalizedString(unsigned int stringID)
             // "a window is being dragged" and "a window is no longer being
             // dragged", respectively.
             if (subtype == 20 || subtype == 21)
-            {
-                WineWindow* window = (WineWindow*)[anEvent window];
-                if ([window isKindOfClass:[WineWindow class]])
-                {
-                    macdrv_event* event;
-                    int eventType;
-
-                    if (subtype == 20)
-                    {
-                        [windowsBeingDragged addObject:window];
-                        eventType = WINDOW_DRAG_BEGIN;
-                    }
-                    else
-                    {
-                        [windowsBeingDragged removeObject:window];
-                        eventType = WINDOW_DRAG_END;
-                    }
-                    [self updateCursorClippingState];
-
-                    event = macdrv_create_event(eventType, window);
-                    if (eventType == WINDOW_DRAG_BEGIN)
-                        event->window_drag_begin.no_activate = [NSEvent wine_commandKeyDown];
-                    [window.queue postEvent:event];
-                    macdrv_release_event(event);
-                }
-            }
+                [self handleWindowDrag:anEvent begin:(subtype == 20)];
         }
 
         return ret;

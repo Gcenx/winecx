@@ -21,6 +21,8 @@
 #ifndef __WINE_WINREG_H
 #define __WINE_WINREG_H
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif /* defined(__cplusplus) */
@@ -84,9 +86,16 @@ typedef LONG LSTATUS;
 #define RRF_NOEXPAND            (1 << 28)
 #define RRF_ZEROONFAILURE       (1 << 29)
 
+#define REG_PROCESS_APPKEY          0x00000001
+
+#define REG_MUI_STRING_TRUNCATE     0x00000001
+
 WINADVAPI BOOL      WINAPI AbortSystemShutdownA(LPSTR);
 WINADVAPI BOOL      WINAPI AbortSystemShutdownW(LPWSTR);
 #define                    AbortSystemShutdown WINELIB_NAME_AW(AbortSystemShutdown)
+WINADVAPI DWORD     WINAPI InitiateShutdownA(char*,char*,DWORD,DWORD,DWORD);
+WINADVAPI DWORD     WINAPI InitiateShutdownW(WCHAR*,WCHAR*,DWORD,DWORD,DWORD);
+#define                    InitiateShutdown WINELIB_NAME_AW(InitiateShutdown)
 WINADVAPI BOOL      WINAPI InitiateSystemShutdownA(LPSTR,LPSTR,DWORD,BOOL,BOOL);
 WINADVAPI BOOL      WINAPI InitiateSystemShutdownW(LPWSTR,LPWSTR,DWORD,BOOL,BOOL);
 #define                    InitiateSystemShutdown WINELIB_NAME_AW(InitiateSystemShutdown)
@@ -97,6 +106,9 @@ WINADVAPI LSTATUS   WINAPI RegCloseKey(HKEY);
 WINADVAPI LSTATUS   WINAPI RegConnectRegistryA(LPCSTR,HKEY,PHKEY);
 WINADVAPI LSTATUS   WINAPI RegConnectRegistryW(LPCWSTR,HKEY,PHKEY);
 #define                    RegConnectRegistry WINELIB_NAME_AW(RegConnectRegistry)
+WINADVAPI LSTATUS   WINAPI RegCopyTreeA(HKEY,const char*,HKEY);
+WINADVAPI LSTATUS   WINAPI RegCopyTreeW(HKEY,const WCHAR*,HKEY);
+#define                    RegCopyTree WINELIB_NAME_AW(RegCopyTree)
 WINADVAPI LSTATUS   WINAPI RegCreateKeyA(HKEY,LPCSTR,PHKEY);
 WINADVAPI LSTATUS   WINAPI RegCreateKeyW(HKEY,LPCWSTR,PHKEY);
 #define                    RegCreateKey WINELIB_NAME_AW(RegCreateKey)
@@ -133,6 +145,9 @@ WINADVAPI LSTATUS   WINAPI RegGetKeySecurity(HKEY,SECURITY_INFORMATION,PSECURITY
 WINADVAPI LSTATUS   WINAPI RegGetValueA(HKEY,LPCSTR,LPCSTR,DWORD,LPDWORD,PVOID,LPDWORD);
 WINADVAPI LSTATUS   WINAPI RegGetValueW(HKEY,LPCWSTR,LPCWSTR,DWORD,LPDWORD,PVOID,LPDWORD);
 #define                    RegGetValue WINELIB_NAME_AW(RegGetValue)
+WINADVAPI LSTATUS   WINAPI RegLoadAppKeyA(const char*,HKEY*,REGSAM,DWORD,DWORD);
+WINADVAPI LSTATUS   WINAPI RegLoadAppKeyW(const WCHAR*,HKEY*,REGSAM,DWORD,DWORD);
+#define                    RegLoadAppKey WINELIB_NAME_AW(RegLoadAppKey)
 WINADVAPI LSTATUS   WINAPI RegLoadKeyA(HKEY,LPCSTR,LPCSTR);
 WINADVAPI LSTATUS   WINAPI RegLoadKeyW(HKEY,LPCWSTR,LPCWSTR);
 #define                    RegLoadKey WINELIB_NAME_AW(RegLoadKey)
@@ -190,5 +205,7 @@ WINADVAPI LSTATUS   WINAPI RegUnLoadKeyW(HKEY,LPCWSTR);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
+
+#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_WINREG_H */

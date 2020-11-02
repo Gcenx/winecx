@@ -408,7 +408,7 @@ void CDECL __DestructExceptionObject(EXCEPTION_RECORD *rec)
     TRACE("(%p)\n", rec);
 
     if (rec->ExceptionCode != CXX_EXCEPTION) return;
-#ifndef __x86_64__
+#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
     if (rec->NumberParameters != 3) return;
 #else
     if (rec->NumberParameters != 4) return;
@@ -421,6 +421,8 @@ void CDECL __DestructExceptionObject(EXCEPTION_RECORD *rec)
 
 #if defined(__i386__)
     __asm__ __volatile__("call *%0" : : "r" (info->destructor), "c" (object) : "eax", "edx", "memory" );
+#elif defined(__i386_on_x86_64__)
+    ((void (__attribute__((thiscall32))*)(void*))info->destructor)(object);
 #elif defined(__x86_64__)
     ((void (__cdecl*)(void*))(info->destructor+rec->ExceptionInformation[3]))(object);
 #else

@@ -50,8 +50,6 @@ typedef struct AVIDecImpl
     REFERENCE_TIME late;
 } AVIDecImpl;
 
-static const IBaseFilterVtbl AVIDec_Vtbl;
-
 static inline AVIDecImpl *impl_from_TransformFilter( TransformFilter *iface )
 {
     return CONTAINING_RECORD(iface, AVIDecImpl, tf);
@@ -107,7 +105,6 @@ static int AVIDec_DropSample(AVIDecImpl *This, REFERENCE_TIME tStart) {
 static HRESULT WINAPI AVIDec_Receive(TransformFilter *tf, IMediaSample *pSample)
 {
     AVIDecImpl* This = impl_from_TransformFilter(tf);
-    AM_MEDIA_TYPE amt;
     HRESULT hr;
     DWORD res;
     IMediaSample* pOutSample = NULL;
@@ -130,16 +127,10 @@ static HRESULT WINAPI AVIDec_Receive(TransformFilter *tf, IMediaSample *pSample)
 
     TRACE("Sample data ptr = %p, size = %d\n", pbSrcStream, cbSrcStream);
 
-    hr = IPin_ConnectionMediaType(This->tf.ppPins[0], &amt);
-    if (FAILED(hr)) {
-        ERR("Unable to retrieve media type\n");
-        goto error;
-    }
-
     /* Update input size to match sample size */
     This->pBihIn->biSizeImage = cbSrcStream;
 
-    hr = BaseOutputPinImpl_GetDeliveryBuffer((BaseOutputPin*)This->tf.ppPins[1], &pOutSample, NULL, NULL, 0);
+    hr = BaseOutputPinImpl_GetDeliveryBuffer(&This->tf.source, &pOutSample, NULL, NULL, 0);
     if (FAILED(hr)) {
         ERR("Unable to get delivery buffer (%x)\n", hr);
         goto error;
@@ -197,7 +188,7 @@ static HRESULT WINAPI AVIDec_Receive(TransformFilter *tf, IMediaSample *pSample)
         IMediaSample_SetMediaTime(pOutSample, NULL, NULL);
 
     LeaveCriticalSection(&This->tf.csReceive);
-    hr = BaseOutputPinImpl_Deliver((BaseOutputPin*)This->tf.ppPins[1], pOutSample);
+    hr = BaseOutputPinImpl_Deliver(&This->tf.source, pOutSample);
     EnterCriticalSection(&This->tf.csReceive);
     if (hr != S_OK && hr != VFW_E_NOT_CONNECTED)
         ERR("Error sending sample (%x)\n", hr);
@@ -392,19 +383,15 @@ static const TransformFilterFuncTable AVIDec_FuncsTable = {
     AVIDec_NotifyDrop
 };
 
-HRESULT AVIDec_create(IUnknown * pUnkOuter, LPVOID * ppv)
+HRESULT AVIDec_create(IUnknown *outer, void **out)
 {
     HRESULT hr;
     AVIDecImpl * This;
 
-    TRACE("(%p, %p)\n", pUnkOuter, ppv);
+    *out = NULL;
 
-    *ppv = NULL;
-
-    if (pUnkOuter)
-        return CLASS_E_NOAGGREGATION;
-
-    hr = TransformFilter_Construct(&AVIDec_Vtbl, sizeof(AVIDecImpl), &CLSID_AVIDec, &AVIDec_FuncsTable, (IBaseFilter**)&This);
+    hr = strmbase_transform_create(sizeof(AVIDecImpl), outer, &CLSID_AVIDec,
+            &AVIDec_FuncsTable, (IBaseFilter **)&This);
 
     if (FAILED(hr))
         return hr;
@@ -413,26 +400,7 @@ HRESULT AVIDec_create(IUnknown * pUnkOuter, LPVOID * ppv)
     This->pBihIn = NULL;
     This->pBihOut = NULL;
 
-    *ppv = &This->tf.filter.IBaseFilter_iface;
+    *out = &This->tf.filter.IUnknown_inner;
 
     return hr;
 }
-
-static const IBaseFilterVtbl AVIDec_Vtbl =
-{
-    TransformFilterImpl_QueryInterface,
-    BaseFilterImpl_AddRef,
-    TransformFilterImpl_Release,
-    BaseFilterImpl_GetClassID,
-    TransformFilterImpl_Stop,
-    TransformFilterImpl_Pause,
-    TransformFilterImpl_Run,
-    BaseFilterImpl_GetState,
-    BaseFilterImpl_SetSyncSource,
-    BaseFilterImpl_GetSyncSource,
-    BaseFilterImpl_EnumPins,
-    BaseFilterImpl_FindPin,
-    BaseFilterImpl_QueryFilterInfo,
-    BaseFilterImpl_JoinFilterGraph,
-    BaseFilterImpl_QueryVendorInfo
-};

@@ -21,6 +21,8 @@
 #ifndef __WINE_IMAGEHLP_H
 #define __WINE_IMAGEHLP_H
 
+#include "wine/winheader_enter.h"
+
 #include <wintrust.h>
 
 /* A set of documentation macros (see also dbghelp.h) */
@@ -1136,10 +1138,10 @@ ULONG WINAPI SymGetFileLineOffsets64(
   HANDLE, PCSTR, PCSTR, PDWORD64, ULONG
 );
 PCHAR WINAPI SymGetHomeDirectory(
-  DWORD, PSTR, size_t
+  DWORD, PSTR, SIZE_T
 );
 PWSTR WINAPI SymGetHomeDirectoryW(
-  DWORD, PWSTR, size_t
+  DWORD, PWSTR, SIZE_T
 );
 BOOL WINAPI SymGetLineFromAddr(
   HANDLE, DWORD, PDWORD, PIMAGEHLP_LINE
@@ -1396,5 +1398,7 @@ BOOL WINAPI UpdateDebugInfoFileEx(
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
+
+#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_IMAGEHLP_H */

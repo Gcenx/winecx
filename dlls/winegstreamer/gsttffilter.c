@@ -57,8 +57,6 @@ struct typeinfo {
     const char *type;
 };
 
-static const IBaseFilterVtbl GSTTf_Vtbl;
-
 static gboolean match_element(GstPluginFeature *feature, gpointer gdata)
 {
     struct typeinfo *data = (struct typeinfo*)gdata;
@@ -170,7 +168,7 @@ GstFlowReturn got_data(GstPad *pad, GstObject *parent, GstBuffer *buf)
 
         gst_buffer_map(buf, &info, GST_MAP_READ);
 
-        hr = BaseOutputPinImpl_GetDeliveryBuffer((BaseOutputPin*)This->tf.ppPins[1], &sample, NULL, NULL, 0);
+        hr = BaseOutputPinImpl_GetDeliveryBuffer(&This->tf.source, &sample, NULL, NULL, 0);
         if (FAILED(hr)) {
             ERR("Could not get output buffer: %08x\n", hr);
             return GST_FLOW_FLUSHING;
@@ -207,7 +205,7 @@ GstFlowReturn got_data(GstPad *pad, GstObject *parent, GstBuffer *buf)
     IMediaSample_SetSyncPoint(sample, !GST_BUFFER_FLAG_IS_SET(buf, GST_BUFFER_FLAG_DELTA_UNIT));
     IMediaSample_SetActualDataLength(sample, gst_buffer_get_size(buf));
 
-    hr = BaseOutputPinImpl_Deliver((BaseOutputPin*)This->tf.ppPins[1], sample);
+    hr = BaseOutputPinImpl_Deliver(&This->tf.source, sample);
     IMediaSample_Release(sample);
     gst_buffer_unref(buf);
     if (FAILED(hr))
@@ -491,17 +489,16 @@ static HRESULT WINAPI Gstreamer_transform_QOS(TransformFilter *iface, IBaseFilte
     return TransformFilterImpl_Notify(iface, sender, qm);
 }
 
-static HRESULT Gstreamer_transform_create(IUnknown *punkouter, const CLSID *clsid, const char *name, const TransformFilterFuncTable *vtbl, void **obj)
+static HRESULT Gstreamer_transform_create(IUnknown *outer, const CLSID *clsid,
+        const char *name, const TransformFilterFuncTable *vtbl, void **obj)
 {
     GstTfImpl *This;
 
-    TRACE("%p, %p, %p, %p, %p\n", punkouter, clsid, name, vtbl, obj);
-
-    if (FAILED(TransformFilter_Construct(&GSTTf_Vtbl, sizeof(GstTfImpl), clsid, vtbl, (IBaseFilter**)&This)))
+    if (FAILED(strmbase_transform_create(sizeof(GstTfImpl), outer, clsid, vtbl, (IBaseFilter **)&This)))
         return E_OUTOFMEMORY;
 
     This->gstreamer_name = name;
-    *obj = This;
+    *obj = &This->tf.filter.IUnknown_inner;
 
     TRACE("returning %p\n", This);
 
@@ -626,7 +623,7 @@ IUnknown * CALLBACK Gstreamer_Mp3_create(IUnknown *punkouter, HRESULT *phr)
 
     TRACE("%p %p\n", punkouter, phr);
 
-    if (!Gstreamer_init())
+    if (!init_gstreamer())
     {
         *phr = E_FAIL;
         return NULL;
@@ -769,7 +766,7 @@ IUnknown * CALLBACK Gstreamer_YUV2RGB_create(IUnknown *punkouter, HRESULT *phr)
 
     TRACE("%p %p\n", punkouter, phr);
 
-    if (!Gstreamer_init())
+    if (!init_gstreamer())
     {
         *phr = E_FAIL;
         return NULL;
@@ -871,7 +868,7 @@ IUnknown * CALLBACK Gstreamer_YUV2ARGB_create(IUnknown *punkouter, HRESULT *phr)
 
     TRACE("%p %p\n", punkouter, phr);
 
-    if (!Gstreamer_init())
+    if (!init_gstreamer())
     {
         *phr = E_FAIL;
         return NULL;
@@ -1004,7 +1001,7 @@ IUnknown * CALLBACK Gstreamer_AudioConvert_create(IUnknown *punkouter, HRESULT *
 
     TRACE("%p %p\n", punkouter, phr);
 
-    if (!Gstreamer_init())
+    if (!init_gstreamer())
     {
         *phr = E_FAIL;
         return NULL;
@@ -1016,22 +1013,3 @@ IUnknown * CALLBACK Gstreamer_AudioConvert_create(IUnknown *punkouter, HRESULT *
 
     return obj;
 }
-
-static const IBaseFilterVtbl GSTTf_Vtbl =
-{
-    TransformFilterImpl_QueryInterface,
-    BaseFilterImpl_AddRef,
-    TransformFilterImpl_Release,
-    BaseFilterImpl_GetClassID,
-    TransformFilterImpl_Stop,
-    TransformFilterImpl_Pause,
-    TransformFilterImpl_Run,
-    BaseFilterImpl_GetState,
-    BaseFilterImpl_SetSyncSource,
-    BaseFilterImpl_GetSyncSource,
-    BaseFilterImpl_EnumPins,
-    BaseFilterImpl_FindPin,
-    BaseFilterImpl_QueryFilterInfo,
-    BaseFilterImpl_JoinFilterGraph,
-    BaseFilterImpl_QueryVendorInfo
-};

@@ -156,8 +156,6 @@ static const WELLKNOWNRID WellKnownRids[] = {
 };
 
 
-static SID const sidWorld = { SID_REVISION, 1, { SECURITY_WORLD_SID_AUTHORITY} , { SECURITY_WORLD_RID } };
-
 typedef struct _AccountSid {
     WELL_KNOWN_SID_TYPE type;
     LPCWSTR account;
@@ -341,7 +339,7 @@ static const WCHAR SDDL_INHERITED[]          = {'I','D',0};
 static const WCHAR SDDL_AUDIT_SUCCESS[]      = {'S','A',0};
 static const WCHAR SDDL_AUDIT_FAILURE[]      = {'F','A',0};
 
-const char * debugstr_sid(PSID sid)
+const char * HOSTPTR debugstr_sid(PSID sid)
 {
     int auth = 0;
     SID * psid = sid;
@@ -390,14 +388,6 @@ const char * debugstr_sid(PSID sid)
             psid->SubAuthority[6], psid->SubAuthority[7]);
     }
     return "(too-big)";
-}
-
-/* set last error code from NT status and get the proper boolean return value */
-/* used for functions that are a simple wrapper around the corresponding ntdll API */
-static inline BOOL set_ntstatus( NTSTATUS status )
-{
-    if (status) SetLastError( RtlNtStatusToDosError( status ));
-    return !status;
 }
 
 /* helper function for SE_FILE_OBJECT objects in [Get|Set]NamedSecurityInfo */
@@ -462,24 +452,6 @@ static inline DWORD get_security_regkey( LPWSTR full_key_name, DWORD access, HAN
     return RegOpenKeyExW( hParent, p+1, 0, access, (HKEY *)key );
 }
 
-#define	WINE_SIZE_OF_WORLD_ACCESS_ACL	(sizeof(ACL) + sizeof(ACCESS_ALLOWED_ACE) + sizeof(sidWorld) - sizeof(DWORD))
-
-static void GetWorldAccessACL(PACL pACL)
-{
-    PACCESS_ALLOWED_ACE pACE = (PACCESS_ALLOWED_ACE) (pACL + 1);
-
-    pACL->AclRevision = ACL_REVISION;
-    pACL->Sbz1 = 0;
-    pACL->AclSize = WINE_SIZE_OF_WORLD_ACCESS_ACL;
-    pACL->AceCount = 1;
-    pACL->Sbz2 = 0;
-
-    pACE->Header.AceType = ACCESS_ALLOWED_ACE_TYPE;
-    pACE->Header.AceFlags = CONTAINER_INHERIT_ACE;
-    pACE->Header.AceSize = sizeof(ACCESS_ALLOWED_ACE) + sizeof(sidWorld) - sizeof(DWORD);
-    pACE->Mask = 0xf3ffffff; /* Everything except reserved bits */
-    memcpy(&pACE->SidStart, &sidWorld, sizeof(sidWorld));
-}
 
 /************************************************************
  *                ADVAPI_IsLocalComputer
@@ -523,617 +495,6 @@ BOOL ADVAPI_GetComputerSid(PSID sid)
     return TRUE;
 }
 
-/*	##############################
-	######	TOKEN FUNCTIONS ######
-	##############################
-*/
-
-/******************************************************************************
- * OpenProcessToken			[ADVAPI32.@]
- * Opens the access token associated with a process handle.
- *
- * PARAMS
- *   ProcessHandle [I] Handle to process
- *   DesiredAccess [I] Desired access to process
- *   TokenHandle   [O] Pointer to handle of open access token
- *
- * RETURNS
- *  Success: TRUE. TokenHandle contains the access token.
- *  Failure: FALSE.
- *
- * NOTES
- *  See NtOpenProcessToken.
- */
-BOOL WINAPI
-OpenProcessToken( HANDLE ProcessHandle, DWORD DesiredAccess,
-                  HANDLE *TokenHandle )
-{
-	return set_ntstatus(NtOpenProcessToken( ProcessHandle, DesiredAccess, TokenHandle ));
-}
-
-/******************************************************************************
- * OpenThreadToken [ADVAPI32.@]
- *
- * Opens the access token associated with a thread handle.
- *
- * PARAMS
- *   ThreadHandle  [I] Handle to process
- *   DesiredAccess [I] Desired access to the thread
- *   OpenAsSelf    [I] ???
- *   TokenHandle   [O] Destination for the token handle
- *
- * RETURNS
- *  Success: TRUE. TokenHandle contains the access token.
- *  Failure: FALSE.
- *
- * NOTES
- *  See NtOpenThreadToken.
- */
-BOOL WINAPI
-OpenThreadToken( HANDLE ThreadHandle, DWORD DesiredAccess,
-		 BOOL OpenAsSelf, HANDLE *TokenHandle)
-{
-	return set_ntstatus( NtOpenThreadToken(ThreadHandle, DesiredAccess, OpenAsSelf, TokenHandle));
-}
-
-BOOL WINAPI
-AdjustTokenGroups( HANDLE TokenHandle, BOOL ResetToDefault, PTOKEN_GROUPS NewState,
-                   DWORD BufferLength, PTOKEN_GROUPS PreviousState, PDWORD ReturnLength )
-{
-    return set_ntstatus( NtAdjustGroupsToken(TokenHandle, ResetToDefault, NewState, BufferLength,
-                                             PreviousState, ReturnLength));
-}
-
-/******************************************************************************
- * AdjustTokenPrivileges [ADVAPI32.@]
- *
- * Adjust the privileges of an open token handle.
- * 
- * PARAMS
- *  TokenHandle          [I]   Handle from OpenProcessToken() or OpenThreadToken() 
- *  DisableAllPrivileges [I]   TRUE=Remove all privileges, FALSE=Use NewState
- *  NewState             [I]   Desired new privileges of the token
- *  BufferLength         [I]   Length of NewState
- *  PreviousState        [O]   Destination for the previous state
- *  ReturnLength         [I/O] Size of PreviousState
- *
- *
- * RETURNS
- *  Success: TRUE. Privileges are set to NewState and PreviousState is updated.
- *  Failure: FALSE.
- *
- * NOTES
- *  See NtAdjustPrivilegesToken.
- */
-BOOL WINAPI
-AdjustTokenPrivileges( HANDLE TokenHandle, BOOL DisableAllPrivileges,
-                       PTOKEN_PRIVILEGES NewState, DWORD BufferLength,
-                       PTOKEN_PRIVILEGES PreviousState, PDWORD ReturnLength )
-{
-    NTSTATUS status;
-
-    TRACE("(%p %d %p %d %p %p)\n", TokenHandle, DisableAllPrivileges, NewState, BufferLength,
-        PreviousState, ReturnLength);
-
-    status = NtAdjustPrivilegesToken(TokenHandle, DisableAllPrivileges,
-                                                     NewState, BufferLength, PreviousState,
-                                                     ReturnLength);
-    SetLastError( RtlNtStatusToDosError( status ));
-    if ((status == STATUS_SUCCESS) || (status == STATUS_NOT_ALL_ASSIGNED))
-        return TRUE;
-    else
-        return FALSE;
-}
-
-/******************************************************************************
- * CheckTokenMembership [ADVAPI32.@]
- *
- * Determine if an access token is a member of a SID.
- * 
- * PARAMS
- *   TokenHandle [I] Handle from OpenProcessToken() or OpenThreadToken()
- *   SidToCheck  [I] SID that possibly contains the token
- *   IsMember    [O] Destination for result.
- *
- * RETURNS
- *  Success: TRUE. IsMember is TRUE if TokenHandle is a member, FALSE otherwise.
- *  Failure: FALSE.
- */
-BOOL WINAPI
-CheckTokenMembership( HANDLE token, PSID sid_to_check,
-                      PBOOL is_member )
-{
-    PTOKEN_GROUPS token_groups = NULL;
-    HANDLE thread_token = NULL;
-    DWORD size, i;
-    BOOL ret;
-
-    TRACE("(%p %s %p)\n", token, debugstr_sid(sid_to_check), is_member);
-
-    *is_member = FALSE;
-
-    if (!token)
-    {
-        if (!OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &thread_token))
-        {
-            HANDLE process_token;
-            ret = OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE, &process_token);
-            if (!ret)
-                goto exit;
-            ret = DuplicateTokenEx(process_token, TOKEN_QUERY,
-                NULL, SecurityImpersonation, TokenImpersonation,
-                &thread_token);
-            CloseHandle(process_token);
-            if (!ret)
-                goto exit;
-        }
-        token = thread_token;
-    }
-    else
-    {
-        TOKEN_TYPE type;
-
-        ret = GetTokenInformation(token, TokenType, &type, sizeof(TOKEN_TYPE), &size);
-        if (!ret) goto exit;
-
-        if (type == TokenPrimary)
-        {
-            SetLastError(ERROR_NO_IMPERSONATION_TOKEN);
-            return FALSE;
-        }
-    }
-
-    ret = GetTokenInformation(token, TokenGroups, NULL, 0, &size);
-    if (!ret && GetLastError() != ERROR_INSUFFICIENT_BUFFER)
-        goto exit;
-
-    token_groups = heap_alloc(size);
-    if (!token_groups)
-    {
-        ret = FALSE;
-        goto exit;
-    }
-
-    ret = GetTokenInformation(token, TokenGroups, token_groups, size, &size);
-    if (!ret)
-        goto exit;
-
-    for (i = 0; i < token_groups->GroupCount; i++)
-    {
-        TRACE("Groups[%d]: {0x%x, %s}\n", i,
-            token_groups->Groups[i].Attributes,
-            debugstr_sid(token_groups->Groups[i].Sid));
-        if ((token_groups->Groups[i].Attributes & SE_GROUP_ENABLED) &&
-            EqualSid(sid_to_check, token_groups->Groups[i].Sid))
-        {
-            *is_member = TRUE;
-            TRACE("sid enabled and found in token\n");
-            break;
-        }
-    }
-
-exit:
-    heap_free(token_groups);
-    if (thread_token != NULL) CloseHandle(thread_token);
-
-    return ret;
-}
-
-/******************************************************************************
- * GetTokenInformation [ADVAPI32.@]
- *
- * Get a type of information about an access token.
- *
- * PARAMS
- *   token           [I] Handle from OpenProcessToken() or OpenThreadToken()
- *   tokeninfoclass  [I] A TOKEN_INFORMATION_CLASS from "winnt.h"
- *   tokeninfo       [O] Destination for token information
- *   tokeninfolength [I] Length of tokeninfo
- *   retlen          [O] Destination for returned token information length
- *
- * RETURNS
- *  Success: TRUE. tokeninfo contains retlen bytes of token information
- *  Failure: FALSE.
- *
- * NOTES
- *  See NtQueryInformationToken.
- */
-BOOL WINAPI
-GetTokenInformation( HANDLE token, TOKEN_INFORMATION_CLASS tokeninfoclass,
-		     LPVOID tokeninfo, DWORD tokeninfolength, LPDWORD retlen )
-{
-    TRACE("(%p, %s, %p, %d, %p):\n",
-          token,
-          (tokeninfoclass == TokenUser) ? "TokenUser" :
-          (tokeninfoclass == TokenGroups) ? "TokenGroups" :
-          (tokeninfoclass == TokenPrivileges) ? "TokenPrivileges" :
-          (tokeninfoclass == TokenOwner) ? "TokenOwner" :
-          (tokeninfoclass == TokenPrimaryGroup) ? "TokenPrimaryGroup" :
-          (tokeninfoclass == TokenDefaultDacl) ? "TokenDefaultDacl" :
-          (tokeninfoclass == TokenSource) ? "TokenSource" :
-          (tokeninfoclass == TokenType) ? "TokenType" :
-          (tokeninfoclass == TokenImpersonationLevel) ? "TokenImpersonationLevel" :
-          (tokeninfoclass == TokenStatistics) ? "TokenStatistics" :
-          (tokeninfoclass == TokenRestrictedSids) ? "TokenRestrictedSids" :
-          (tokeninfoclass == TokenSessionId) ? "TokenSessionId" :
-          (tokeninfoclass == TokenGroupsAndPrivileges) ? "TokenGroupsAndPrivileges" :
-          (tokeninfoclass == TokenSessionReference) ? "TokenSessionReference" :
-          (tokeninfoclass == TokenSandBoxInert) ? "TokenSandBoxInert" :
-          "Unknown",
-          tokeninfo, tokeninfolength, retlen);
-    return set_ntstatus( NtQueryInformationToken( token, tokeninfoclass, tokeninfo,
-                                                  tokeninfolength, retlen));
-}
-
-/******************************************************************************
- * SetTokenInformation [ADVAPI32.@]
- *
- * Set information for an access token.
- *
- * PARAMS
- *   token           [I] Handle from OpenProcessToken() or OpenThreadToken()
- *   tokeninfoclass  [I] A TOKEN_INFORMATION_CLASS from "winnt.h"
- *   tokeninfo       [I] Token information to set
- *   tokeninfolength [I] Length of tokeninfo
- *
- * RETURNS
- *  Success: TRUE. The information for the token is set to tokeninfo.
- *  Failure: FALSE.
- */
-BOOL WINAPI
-SetTokenInformation( HANDLE token, TOKEN_INFORMATION_CLASS tokeninfoclass,
-		     LPVOID tokeninfo, DWORD tokeninfolength )
-{
-    TRACE("(%p, %s, %p, %d)\n",
-          token,
-          (tokeninfoclass == TokenUser) ? "TokenUser" :
-          (tokeninfoclass == TokenGroups) ? "TokenGroups" :
-          (tokeninfoclass == TokenPrivileges) ? "TokenPrivileges" :
-          (tokeninfoclass == TokenOwner) ? "TokenOwner" :
-          (tokeninfoclass == TokenPrimaryGroup) ? "TokenPrimaryGroup" :
-          (tokeninfoclass == TokenDefaultDacl) ? "TokenDefaultDacl" :
-          (tokeninfoclass == TokenSource) ? "TokenSource" :
-          (tokeninfoclass == TokenType) ? "TokenType" :
-          (tokeninfoclass == TokenImpersonationLevel) ? "TokenImpersonationLevel" :
-          (tokeninfoclass == TokenStatistics) ? "TokenStatistics" :
-          (tokeninfoclass == TokenRestrictedSids) ? "TokenRestrictedSids" :
-          (tokeninfoclass == TokenSessionId) ? "TokenSessionId" :
-          (tokeninfoclass == TokenGroupsAndPrivileges) ? "TokenGroupsAndPrivileges" :
-          (tokeninfoclass == TokenSessionReference) ? "TokenSessionReference" :
-          (tokeninfoclass == TokenSandBoxInert) ? "TokenSandBoxInert" :
-          "Unknown",
-          tokeninfo, tokeninfolength);
-
-    return set_ntstatus( NtSetInformationToken( token, tokeninfoclass, tokeninfo, tokeninfolength ));
-}
-
-/*************************************************************************
- * SetThreadToken [ADVAPI32.@]
- *
- * Assigns an 'impersonation token' to a thread so it can assume the
- * security privileges of another thread or process.  Can also remove
- * a previously assigned token. 
- *
- * PARAMS
- *   thread          [O] Handle to thread to set the token for
- *   token           [I] Token to set
- *
- * RETURNS
- *  Success: TRUE. The threads access token is set to token
- *  Failure: FALSE.
- *
- * NOTES
- *  Only supported on NT or higher. On Win9X this function does nothing.
- *  See SetTokenInformation.
- */
-BOOL WINAPI SetThreadToken(PHANDLE thread, HANDLE token)
-{
-    return set_ntstatus( NtSetInformationThread( thread ? *thread : GetCurrentThread(),
-                                                 ThreadImpersonationToken, &token, sizeof token ));
-}
-
-/*************************************************************************
- * CreateRestrictedToken [ADVAPI32.@]
- *
- * Create a new more restricted token from an existing token.
- *
- * PARAMS
- *   baseToken       [I] Token to base the new restricted token on
- *   flags           [I] Options
- *   nDisableSids    [I] Length of disableSids array
- *   disableSids     [I] Array of SIDs to disable in the new token
- *   nDeletePrivs    [I] Length of deletePrivs array
- *   deletePrivs     [I] Array of privileges to delete in the new token
- *   nRestrictSids   [I] Length of restrictSids array
- *   restrictSids    [I] Array of SIDs to restrict in the new token
- *   newToken        [O] Address where the new token is stored
- *
- * RETURNS
- *  Success: TRUE
- *  Failure: FALSE
- */
-BOOL WINAPI CreateRestrictedToken(
-    HANDLE baseToken,
-    DWORD flags,
-    DWORD nDisableSids,
-    PSID_AND_ATTRIBUTES disableSids,
-    DWORD nDeletePrivs,
-    PLUID_AND_ATTRIBUTES deletePrivs,
-    DWORD nRestrictSids,
-    PSID_AND_ATTRIBUTES restrictSids,
-    PHANDLE newToken)
-{
-    TOKEN_TYPE type;
-    SECURITY_IMPERSONATION_LEVEL level = SecurityAnonymous;
-    DWORD size;
-
-    FIXME("(%p, 0x%x, %u, %p, %u, %p, %u, %p, %p): stub\n",
-          baseToken, flags, nDisableSids, disableSids,
-          nDeletePrivs, deletePrivs,
-          nRestrictSids, restrictSids,
-          newToken);
-
-    size = sizeof(type);
-    if (!GetTokenInformation( baseToken, TokenType, &type, size, &size )) return FALSE;
-    if (type == TokenImpersonation)
-    {
-        size = sizeof(level);
-        if (!GetTokenInformation( baseToken, TokenImpersonationLevel, &level, size, &size ))
-            return FALSE;
-    }
-    return DuplicateTokenEx( baseToken, MAXIMUM_ALLOWED, NULL, level, type, newToken );
-}
-
-/*	##############################
-	######	SID FUNCTIONS	######
-	##############################
-*/
-
-/******************************************************************************
- * AllocateAndInitializeSid [ADVAPI32.@]
- *
- * PARAMS
- *   pIdentifierAuthority []
- *   nSubAuthorityCount   []
- *   nSubAuthority0       []
- *   nSubAuthority1       []
- *   nSubAuthority2       []
- *   nSubAuthority3       []
- *   nSubAuthority4       []
- *   nSubAuthority5       []
- *   nSubAuthority6       []
- *   nSubAuthority7       []
- *   pSid                 []
- */
-BOOL WINAPI
-AllocateAndInitializeSid( PSID_IDENTIFIER_AUTHORITY pIdentifierAuthority,
-                          BYTE nSubAuthorityCount,
-                          DWORD nSubAuthority0, DWORD nSubAuthority1,
-                          DWORD nSubAuthority2, DWORD nSubAuthority3,
-                          DWORD nSubAuthority4, DWORD nSubAuthority5,
-                          DWORD nSubAuthority6, DWORD nSubAuthority7,
-                          PSID *pSid )
-{
-    return set_ntstatus( RtlAllocateAndInitializeSid(
-                             pIdentifierAuthority, nSubAuthorityCount,
-                             nSubAuthority0, nSubAuthority1, nSubAuthority2, nSubAuthority3,
-                             nSubAuthority4, nSubAuthority5, nSubAuthority6, nSubAuthority7,
-                             pSid ));
-}
-
-/******************************************************************************
- * FreeSid [ADVAPI32.@]
- *
- * PARAMS
- *   pSid []
- */
-PVOID WINAPI
-FreeSid( PSID pSid )
-{
-    	RtlFreeSid(pSid);
-	return NULL; /* is documented like this */
-}
-
-/******************************************************************************
- * CopySid [ADVAPI32.@]
- *
- * PARAMS
- *   nDestinationSidLength []
- *   pDestinationSid       []
- *   pSourceSid            []
- */
-BOOL WINAPI
-CopySid( DWORD nDestinationSidLength, PSID pDestinationSid, PSID pSourceSid )
-{
-	return RtlCopySid(nDestinationSidLength, pDestinationSid, pSourceSid);
-}
-
-/******************************************************************************
- * CreateWellKnownSid [ADVAPI32.@]
- */
-BOOL WINAPI
-CreateWellKnownSid( WELL_KNOWN_SID_TYPE WellKnownSidType,
-                    PSID DomainSid,
-                    PSID pSid,
-                    DWORD* cbSid)
-{
-    unsigned int i;
-    TRACE("(%d, %s, %p, %p)\n", WellKnownSidType, debugstr_sid(DomainSid), pSid, cbSid);
-
-    if (cbSid == NULL || (DomainSid && !IsValidSid(DomainSid)))
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
-
-    for (i = 0; i < ARRAY_SIZE(WellKnownSids); i++) {
-        if (WellKnownSids[i].Type == WellKnownSidType) {
-            DWORD length = GetSidLengthRequired(WellKnownSids[i].Sid.SubAuthorityCount);
-
-            if (*cbSid < length)
-            {
-                *cbSid = length;
-                SetLastError(ERROR_INSUFFICIENT_BUFFER);
-                return FALSE;
-            }
-            if (!pSid)
-            {
-                SetLastError(ERROR_INVALID_PARAMETER);
-                return FALSE;
-            }
-            CopyMemory(pSid, &WellKnownSids[i].Sid.Revision, length);
-            *cbSid = length;
-            return TRUE;
-        }
-    }
-
-    if (DomainSid == NULL || *GetSidSubAuthorityCount(DomainSid) == SID_MAX_SUB_AUTHORITIES)
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
-
-    for (i = 0; i < ARRAY_SIZE(WellKnownRids); i++)
-        if (WellKnownRids[i].Type == WellKnownSidType) {
-            UCHAR domain_subauth = *GetSidSubAuthorityCount(DomainSid);
-            DWORD domain_sid_length = GetSidLengthRequired(domain_subauth);
-            DWORD output_sid_length = GetSidLengthRequired(domain_subauth + 1);
-
-            if (*cbSid < output_sid_length)
-            {
-                *cbSid = output_sid_length;
-                SetLastError(ERROR_INSUFFICIENT_BUFFER);
-                return FALSE;
-            }
-            if (!pSid)
-            {
-                SetLastError(ERROR_INVALID_PARAMETER);
-                return FALSE;
-            }
-            CopyMemory(pSid, DomainSid, domain_sid_length);
-            (*GetSidSubAuthorityCount(pSid))++;
-            (*GetSidSubAuthority(pSid, domain_subauth)) = WellKnownRids[i].Rid;
-            *cbSid = output_sid_length;
-            return TRUE;
-        }
-
-    SetLastError(ERROR_INVALID_PARAMETER);
-    return FALSE;
-}
-
-/******************************************************************************
- * IsWellKnownSid [ADVAPI32.@]
- */
-BOOL WINAPI
-IsWellKnownSid( PSID pSid, WELL_KNOWN_SID_TYPE WellKnownSidType )
-{
-    unsigned int i;
-    TRACE("(%s, %d)\n", debugstr_sid(pSid), WellKnownSidType);
-
-    for (i = 0; i < ARRAY_SIZE(WellKnownSids); i++)
-        if (WellKnownSids[i].Type == WellKnownSidType)
-            if (EqualSid(pSid, (PSID)&(WellKnownSids[i].Sid.Revision)))
-                return TRUE;
-
-    return FALSE;
-}
-
-BOOL WINAPI
-IsTokenRestricted( HANDLE TokenHandle )
-{
-    TOKEN_GROUPS *groups;
-    DWORD size;
-    NTSTATUS status;
-    BOOL restricted;
-
-    TRACE("(%p)\n", TokenHandle);
- 
-    status = NtQueryInformationToken(TokenHandle, TokenRestrictedSids, NULL, 0, &size);
-    if (status != STATUS_BUFFER_TOO_SMALL)
-        return FALSE;
- 
-    groups = heap_alloc(size);
-    if (!groups)
-    {
-        SetLastError(ERROR_OUTOFMEMORY);
-        return FALSE;
-    }
- 
-    status = NtQueryInformationToken(TokenHandle, TokenRestrictedSids, groups, size, &size);
-    if (status != STATUS_SUCCESS)
-    {
-        heap_free(groups);
-        return set_ntstatus(status);
-    }
- 
-    restricted = groups->GroupCount > 0;
-    heap_free(groups);
- 
-    return restricted;
-}
-
-/******************************************************************************
- * IsValidSid [ADVAPI32.@]
- *
- * PARAMS
- *   pSid []
- */
-BOOL WINAPI
-IsValidSid( PSID pSid )
-{
-	return RtlValidSid( pSid );
-}
-
-/******************************************************************************
- * EqualSid [ADVAPI32.@]
- *
- * PARAMS
- *   pSid1 []
- *   pSid2 []
- */
-BOOL WINAPI
-EqualSid( PSID pSid1, PSID pSid2 )
-{
-	BOOL ret = RtlEqualSid( pSid1, pSid2 );
-	SetLastError(ERROR_SUCCESS);
-	return ret;
-}
-
-/******************************************************************************
- * EqualPrefixSid [ADVAPI32.@]
- */
-BOOL WINAPI EqualPrefixSid (PSID pSid1, PSID pSid2)
-{
-	return RtlEqualPrefixSid(pSid1, pSid2);
-}
-
-/******************************************************************************
- * GetSidLengthRequired [ADVAPI32.@]
- *
- * PARAMS
- *   nSubAuthorityCount []
- */
-DWORD WINAPI
-GetSidLengthRequired( BYTE nSubAuthorityCount )
-{
-	return RtlLengthRequiredSid(nSubAuthorityCount);
-}
-
-/******************************************************************************
- * InitializeSid [ADVAPI32.@]
- *
- * PARAMS
- *   pIdentifierAuthority []
- */
-BOOL WINAPI
-InitializeSid (
-	PSID pSid,
-	PSID_IDENTIFIER_AUTHORITY pIdentifierAuthority,
-	BYTE nSubAuthorityCount)
-{
-	return RtlInitializeSid(pSid, pIdentifierAuthority, nSubAuthorityCount);
-}
-
 DWORD WINAPI
 GetEffectiveRightsFromAclA( PACL pacl, PTRUSTEEA pTrustee, PACCESS_MASK pAccessRights )
 {
@@ -1149,58 +510,6 @@ GetEffectiveRightsFromAclW( PACL pacl, PTRUSTEEW pTrustee, PACCESS_MASK pAccessR
     FIXME("%p %p %p - stub\n", pacl, pTrustee, pAccessRights);
 
     return 1;
-}
-
-/******************************************************************************
- * GetSidIdentifierAuthority [ADVAPI32.@]
- *
- * PARAMS
- *   pSid []
- */
-PSID_IDENTIFIER_AUTHORITY WINAPI
-GetSidIdentifierAuthority( PSID pSid )
-{
-    SetLastError(ERROR_SUCCESS);
-    return RtlIdentifierAuthoritySid(pSid);
-}
-
-/******************************************************************************
- * GetSidSubAuthority [ADVAPI32.@]
- *
- * PARAMS
- *   pSid          []
- *   nSubAuthority []
- */
-PDWORD WINAPI
-GetSidSubAuthority( PSID pSid, DWORD nSubAuthority )
-{
-        SetLastError(ERROR_SUCCESS);
-	return RtlSubAuthoritySid(pSid, nSubAuthority);
-}
-
-/******************************************************************************
- * GetSidSubAuthorityCount [ADVAPI32.@]
- *
- * PARAMS
- *   pSid []
- */
-PUCHAR WINAPI
-GetSidSubAuthorityCount (PSID pSid)
-{
-        SetLastError(ERROR_SUCCESS);
-	return RtlSubAuthorityCountSid(pSid);
-}
-
-/******************************************************************************
- * GetLengthSid [ADVAPI32.@]
- *
- * PARAMS
- *   pSid []
- */
-DWORD WINAPI
-GetLengthSid (PSID pSid)
-{
-	return RtlLengthSid(pSid);
 }
 
 /*	##############################################
@@ -1375,510 +684,6 @@ done:
     return ret;
 } 
 
-/******************************************************************************
- * InitializeSecurityDescriptor [ADVAPI32.@]
- *
- * PARAMS
- *   pDescr   []
- *   revision []
- */
-BOOL WINAPI
-InitializeSecurityDescriptor( PSECURITY_DESCRIPTOR pDescr, DWORD revision )
-{
-	return set_ntstatus( RtlCreateSecurityDescriptor(pDescr, revision ));
-}
-
-
-/******************************************************************************
- * MakeAbsoluteSD [ADVAPI32.@]
- */
-BOOL WINAPI MakeAbsoluteSD (
-        IN PSECURITY_DESCRIPTOR pSelfRelativeSecurityDescriptor,
-	OUT PSECURITY_DESCRIPTOR pAbsoluteSecurityDescriptor,
-	OUT LPDWORD lpdwAbsoluteSecurityDescriptorSize,
-	OUT PACL pDacl,
-	OUT LPDWORD lpdwDaclSize,
-	OUT PACL pSacl,
-	OUT LPDWORD lpdwSaclSize,
-	OUT PSID pOwner,
-	OUT LPDWORD lpdwOwnerSize,
-	OUT PSID pPrimaryGroup,
-	OUT LPDWORD lpdwPrimaryGroupSize)
-{
-    return set_ntstatus( RtlSelfRelativeToAbsoluteSD(pSelfRelativeSecurityDescriptor,
-                                                     pAbsoluteSecurityDescriptor,
-                                                     lpdwAbsoluteSecurityDescriptorSize,
-                                                     pDacl, lpdwDaclSize, pSacl, lpdwSaclSize,
-                                                     pOwner, lpdwOwnerSize,
-                                                     pPrimaryGroup, lpdwPrimaryGroupSize));
-}
-
-/******************************************************************************
- * GetKernelObjectSecurity [ADVAPI32.@]
- */
-BOOL WINAPI GetKernelObjectSecurity(
-        HANDLE Handle,
-        SECURITY_INFORMATION RequestedInformation,
-        PSECURITY_DESCRIPTOR pSecurityDescriptor,
-        DWORD nLength,
-        LPDWORD lpnLengthNeeded )
-{
-    TRACE("(%p,0x%08x,%p,0x%08x,%p)\n", Handle, RequestedInformation,
-          pSecurityDescriptor, nLength, lpnLengthNeeded);
-
-    return set_ntstatus( NtQuerySecurityObject(Handle, RequestedInformation, pSecurityDescriptor,
-                                               nLength, lpnLengthNeeded ));
-}
-
-/******************************************************************************
- * GetPrivateObjectSecurity [ADVAPI32.@]
- */
-BOOL WINAPI GetPrivateObjectSecurity(
-        PSECURITY_DESCRIPTOR ObjectDescriptor,
-        SECURITY_INFORMATION SecurityInformation,
-        PSECURITY_DESCRIPTOR ResultantDescriptor,
-        DWORD DescriptorLength,
-        PDWORD ReturnLength )
-{
-    SECURITY_DESCRIPTOR desc;
-    BOOL defaulted, present;
-    PACL pacl;
-    PSID psid;
-
-    TRACE("(%p,0x%08x,%p,0x%08x,%p)\n", ObjectDescriptor, SecurityInformation,
-          ResultantDescriptor, DescriptorLength, ReturnLength);
-
-    if (!InitializeSecurityDescriptor(&desc, SECURITY_DESCRIPTOR_REVISION))
-        return FALSE;
-
-    if (SecurityInformation & OWNER_SECURITY_INFORMATION)
-    {
-        if (!GetSecurityDescriptorOwner(ObjectDescriptor, &psid, &defaulted))
-            return FALSE;
-        SetSecurityDescriptorOwner(&desc, psid, defaulted);
-    }
-
-    if (SecurityInformation & GROUP_SECURITY_INFORMATION)
-    {
-        if (!GetSecurityDescriptorGroup(ObjectDescriptor, &psid, &defaulted))
-            return FALSE;
-        SetSecurityDescriptorGroup(&desc, psid, defaulted);
-    }
-
-    if (SecurityInformation & DACL_SECURITY_INFORMATION)
-    {
-        if (!GetSecurityDescriptorDacl(ObjectDescriptor, &present, &pacl, &defaulted))
-            return FALSE;
-        SetSecurityDescriptorDacl(&desc, present, pacl, defaulted);
-    }
-
-    if (SecurityInformation & SACL_SECURITY_INFORMATION)
-    {
-        if (!GetSecurityDescriptorSacl(ObjectDescriptor, &present, &pacl, &defaulted))
-            return FALSE;
-        SetSecurityDescriptorSacl(&desc, present, pacl, defaulted);
-    }
-
-    *ReturnLength = DescriptorLength;
-    return MakeSelfRelativeSD(&desc, ResultantDescriptor, ReturnLength);
-}
-
-/******************************************************************************
- * GetSecurityDescriptorLength [ADVAPI32.@]
- */
-DWORD WINAPI GetSecurityDescriptorLength( PSECURITY_DESCRIPTOR pDescr)
-{
-	return RtlLengthSecurityDescriptor(pDescr);
-}
-
-/******************************************************************************
- * GetSecurityDescriptorOwner [ADVAPI32.@]
- *
- * PARAMS
- *   pOwner            []
- *   lpbOwnerDefaulted []
- */
-BOOL WINAPI
-GetSecurityDescriptorOwner( PSECURITY_DESCRIPTOR pDescr, PSID *pOwner,
-			    LPBOOL lpbOwnerDefaulted )
-{
-    BOOLEAN defaulted;
-    BOOL ret = set_ntstatus( RtlGetOwnerSecurityDescriptor( pDescr, pOwner, &defaulted ));
-    *lpbOwnerDefaulted = defaulted;
-    return ret;
-}
-
-/******************************************************************************
- * SetSecurityDescriptorOwner [ADVAPI32.@]
- *
- * PARAMS
- */
-BOOL WINAPI SetSecurityDescriptorOwner( PSECURITY_DESCRIPTOR pSecurityDescriptor,
-				   PSID pOwner, BOOL bOwnerDefaulted)
-{
-    return set_ntstatus( RtlSetOwnerSecurityDescriptor(pSecurityDescriptor, pOwner, bOwnerDefaulted));
-}
-/******************************************************************************
- * GetSecurityDescriptorGroup			[ADVAPI32.@]
- */
-BOOL WINAPI GetSecurityDescriptorGroup(
-	PSECURITY_DESCRIPTOR SecurityDescriptor,
-	PSID *Group,
-	LPBOOL GroupDefaulted)
-{
-    BOOLEAN defaulted;
-    BOOL ret = set_ntstatus( RtlGetGroupSecurityDescriptor(SecurityDescriptor, Group, &defaulted ));
-    *GroupDefaulted = defaulted;
-    return ret;
-}
-/******************************************************************************
- * SetSecurityDescriptorGroup [ADVAPI32.@]
- */
-BOOL WINAPI SetSecurityDescriptorGroup ( PSECURITY_DESCRIPTOR SecurityDescriptor,
-					   PSID Group, BOOL GroupDefaulted)
-{
-    return set_ntstatus( RtlSetGroupSecurityDescriptor( SecurityDescriptor, Group, GroupDefaulted));
-}
-
-/******************************************************************************
- * IsValidSecurityDescriptor [ADVAPI32.@]
- *
- * PARAMS
- *   lpsecdesc []
- */
-BOOL WINAPI
-IsValidSecurityDescriptor( PSECURITY_DESCRIPTOR SecurityDescriptor )
-{
-    return set_ntstatus( RtlValidSecurityDescriptor(SecurityDescriptor));
-}
-
-/******************************************************************************
- *  GetSecurityDescriptorDacl			[ADVAPI32.@]
- */
-BOOL WINAPI GetSecurityDescriptorDacl(
-	IN PSECURITY_DESCRIPTOR pSecurityDescriptor,
-	OUT LPBOOL lpbDaclPresent,
-	OUT PACL *pDacl,
-	OUT LPBOOL lpbDaclDefaulted)
-{
-    BOOLEAN present, defaulted;
-    BOOL ret = set_ntstatus( RtlGetDaclSecurityDescriptor(pSecurityDescriptor, &present, pDacl, &defaulted));
-    *lpbDaclPresent = present;
-    *lpbDaclDefaulted = defaulted;
-    return ret;
-}
-
-/******************************************************************************
- *  SetSecurityDescriptorDacl			[ADVAPI32.@]
- */
-BOOL WINAPI
-SetSecurityDescriptorDacl (
-	PSECURITY_DESCRIPTOR lpsd,
-	BOOL daclpresent,
-	PACL dacl,
-	BOOL dacldefaulted )
-{
-    return set_ntstatus( RtlSetDaclSecurityDescriptor (lpsd, daclpresent, dacl, dacldefaulted ) );
-}
-/******************************************************************************
- *  GetSecurityDescriptorSacl			[ADVAPI32.@]
- */
-BOOL WINAPI GetSecurityDescriptorSacl(
-	IN PSECURITY_DESCRIPTOR lpsd,
-	OUT LPBOOL lpbSaclPresent,
-	OUT PACL *pSacl,
-	OUT LPBOOL lpbSaclDefaulted)
-{
-    BOOLEAN present, defaulted;
-    BOOL ret = set_ntstatus( RtlGetSaclSecurityDescriptor(lpsd, &present, pSacl, &defaulted) );
-    *lpbSaclPresent = present;
-    *lpbSaclDefaulted = defaulted;
-    return ret;
-}
-
-/**************************************************************************
- * SetSecurityDescriptorSacl			[ADVAPI32.@]
- */
-BOOL WINAPI SetSecurityDescriptorSacl (
-	PSECURITY_DESCRIPTOR lpsd,
-	BOOL saclpresent,
-	PACL lpsacl,
-	BOOL sacldefaulted)
-{
-    return set_ntstatus (RtlSetSaclSecurityDescriptor(lpsd, saclpresent, lpsacl, sacldefaulted));
-}
-/******************************************************************************
- * MakeSelfRelativeSD [ADVAPI32.@]
- *
- * PARAMS
- *   lpabssecdesc  []
- *   lpselfsecdesc []
- *   lpbuflen      []
- */
-BOOL WINAPI
-MakeSelfRelativeSD(
-	IN PSECURITY_DESCRIPTOR pAbsoluteSecurityDescriptor,
-	IN PSECURITY_DESCRIPTOR pSelfRelativeSecurityDescriptor,
-	IN OUT LPDWORD lpdwBufferLength)
-{
-    return set_ntstatus( RtlMakeSelfRelativeSD( pAbsoluteSecurityDescriptor,
-                                                pSelfRelativeSecurityDescriptor, lpdwBufferLength));
-}
-
-/******************************************************************************
- * GetSecurityDescriptorControl			[ADVAPI32.@]
- */
-
-BOOL WINAPI GetSecurityDescriptorControl ( PSECURITY_DESCRIPTOR  pSecurityDescriptor,
-		 PSECURITY_DESCRIPTOR_CONTROL pControl, LPDWORD lpdwRevision)
-{
-    return set_ntstatus( RtlGetControlSecurityDescriptor(pSecurityDescriptor,pControl,lpdwRevision));
-}
-
-/******************************************************************************
- * SetSecurityDescriptorControl			[ADVAPI32.@]
- */
-BOOL WINAPI SetSecurityDescriptorControl( PSECURITY_DESCRIPTOR pSecurityDescriptor,
-  SECURITY_DESCRIPTOR_CONTROL ControlBitsOfInterest,
-  SECURITY_DESCRIPTOR_CONTROL ControlBitsToSet )
-{
-    return set_ntstatus( RtlSetControlSecurityDescriptor(
-        pSecurityDescriptor, ControlBitsOfInterest, ControlBitsToSet ) );
-}
-
-/******************************************************************************
- * GetWindowsAccountDomainSid         [ADVAPI32.@]
- */
-BOOL WINAPI GetWindowsAccountDomainSid( PSID sid, PSID domain_sid, DWORD *size )
-{
-    SID_IDENTIFIER_AUTHORITY domain_ident = { SECURITY_NT_AUTHORITY };
-    DWORD required_size;
-    int i;
-
-    FIXME( "(%p %p %p): semi-stub\n", sid, domain_sid, size );
-
-    if (!sid || !IsValidSid( sid ))
-    {
-        SetLastError( ERROR_INVALID_SID );
-        return FALSE;
-    }
-
-    if (!size)
-    {
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return FALSE;
-    }
-
-    if (*GetSidSubAuthorityCount( sid ) < 4)
-    {
-        SetLastError( ERROR_INVALID_SID );
-        return FALSE;
-    }
-
-    required_size = GetSidLengthRequired( 4 );
-    if (*size < required_size || !domain_sid)
-    {
-        *size = required_size;
-        SetLastError( domain_sid ? ERROR_INSUFFICIENT_BUFFER :
-                                   ERROR_INVALID_PARAMETER );
-        return FALSE;
-    }
-
-    InitializeSid( domain_sid, &domain_ident, 4 );
-    for (i = 0; i < 4; i++)
-        *GetSidSubAuthority( domain_sid, i ) = *GetSidSubAuthority( sid, i );
-
-    *size = required_size;
-    return TRUE;
-}
-
-/*	##############################
-	######	ACL FUNCTIONS	######
-	##############################
-*/
-
-/*************************************************************************
- * InitializeAcl [ADVAPI32.@]
- */
-BOOL WINAPI InitializeAcl(PACL acl, DWORD size, DWORD rev)
-{
-    return set_ntstatus( RtlCreateAcl(acl, size, rev));
-}
-
-BOOL WINAPI ImpersonateNamedPipeClient( HANDLE hNamedPipe )
-{
-    IO_STATUS_BLOCK io_block;
-
-    TRACE("(%p)\n", hNamedPipe);
-
-    return set_ntstatus( NtFsControlFile(hNamedPipe, NULL, NULL, NULL,
-                         &io_block, FSCTL_PIPE_IMPERSONATE, NULL, 0, NULL, 0) );
-}
-
-/******************************************************************************
- *  AddAccessAllowedAce [ADVAPI32.@]
- */
-BOOL WINAPI AddAccessAllowedAce(
-        IN OUT PACL pAcl,
-        IN DWORD dwAceRevision,
-        IN DWORD AccessMask,
-        IN PSID pSid)
-{
-    return set_ntstatus(RtlAddAccessAllowedAce(pAcl, dwAceRevision, AccessMask, pSid));
-}
-
-/******************************************************************************
- *  AddAccessAllowedAceEx [ADVAPI32.@]
- */
-BOOL WINAPI AddAccessAllowedAceEx(
-        IN OUT PACL pAcl,
-        IN DWORD dwAceRevision,
-	IN DWORD AceFlags,
-        IN DWORD AccessMask,
-        IN PSID pSid)
-{
-    return set_ntstatus(RtlAddAccessAllowedAceEx(pAcl, dwAceRevision, AceFlags, AccessMask, pSid));
-}
-
-/******************************************************************************
- *  AddAccessAllowedObjectAce [ADVAPI32.@]
- */
-BOOL WINAPI AddAccessAllowedObjectAce(
-        IN OUT PACL pAcl,
-        IN DWORD dwAceRevision,
-        IN DWORD dwAceFlags,
-        IN DWORD dwAccessMask,
-        IN GUID* pObjectTypeGuid,
-        IN GUID* pInheritedObjectTypeGuid,
-        IN PSID pSid)
-{
-    return set_ntstatus(RtlAddAccessAllowedObjectAce(pAcl, dwAceRevision, dwAceFlags, dwAccessMask,
-                        pObjectTypeGuid, pInheritedObjectTypeGuid, pSid));
-}
-
-/******************************************************************************
- *  AddAccessDeniedAce [ADVAPI32.@]
- */
-BOOL WINAPI AddAccessDeniedAce(
-        IN OUT PACL pAcl,
-        IN DWORD dwAceRevision,
-        IN DWORD AccessMask,
-        IN PSID pSid)
-{
-    return set_ntstatus(RtlAddAccessDeniedAce(pAcl, dwAceRevision, AccessMask, pSid));
-}
-
-/******************************************************************************
- *  AddAccessDeniedAceEx [ADVAPI32.@]
- */
-BOOL WINAPI AddAccessDeniedAceEx(
-        IN OUT PACL pAcl,
-        IN DWORD dwAceRevision,
-	IN DWORD AceFlags,
-        IN DWORD AccessMask,
-        IN PSID pSid)
-{
-    return set_ntstatus(RtlAddAccessDeniedAceEx(pAcl, dwAceRevision, AceFlags, AccessMask, pSid));
-}
-
-/******************************************************************************
- *  AddAccessDeniedObjectAce [ADVAPI32.@]
- */
-BOOL WINAPI AddAccessDeniedObjectAce(
-    IN OUT PACL pAcl,
-    IN DWORD dwAceRevision,
-    IN DWORD dwAceFlags,
-    IN DWORD dwAccessMask,
-    IN GUID* pObjectTypeGuid,
-    IN GUID* pInheritedObjectTypeGuid,
-    IN PSID pSid)
-{
-    return set_ntstatus( RtlAddAccessDeniedObjectAce(pAcl, dwAceRevision, dwAceFlags, dwAccessMask,
-                         pObjectTypeGuid, pInheritedObjectTypeGuid, pSid) );
-}
-
-/******************************************************************************
- *  AddAce [ADVAPI32.@]
- */
-BOOL WINAPI AddAce(
-        IN OUT PACL pAcl,
-        IN DWORD dwAceRevision,
-        IN DWORD dwStartingAceIndex,
-        LPVOID pAceList,
-        DWORD nAceListLength)
-{
-    return set_ntstatus(RtlAddAce(pAcl, dwAceRevision, dwStartingAceIndex, pAceList, nAceListLength));
-}
-
-/******************************************************************************
- *  AddMandatoryAce [ADVAPI32.@]
- */
-BOOL WINAPI AddMandatoryAce(ACL *acl, DWORD ace_revision, DWORD ace_flags, DWORD mandatory_policy, PSID label_sid)
-{
-    return set_ntstatus(RtlAddMandatoryAce(acl, ace_revision, ace_flags, mandatory_policy,
-                                           SYSTEM_MANDATORY_LABEL_ACE_TYPE, label_sid));
-}
-
-/******************************************************************************
- * DeleteAce [ADVAPI32.@]
- */
-BOOL WINAPI DeleteAce(PACL pAcl, DWORD dwAceIndex)
-{
-    return set_ntstatus(RtlDeleteAce(pAcl, dwAceIndex));
-}
-
-/******************************************************************************
- *  FindFirstFreeAce [ADVAPI32.@]
- */
-BOOL WINAPI FindFirstFreeAce(IN PACL pAcl, LPVOID * pAce)
-{
-	return RtlFirstFreeAce(pAcl, (PACE_HEADER *)pAce);
-}
-
-/******************************************************************************
- * GetAce [ADVAPI32.@]
- */
-BOOL WINAPI GetAce(PACL pAcl,DWORD dwAceIndex,LPVOID *pAce )
-{
-    return set_ntstatus(RtlGetAce(pAcl, dwAceIndex, pAce));
-}
-
-/******************************************************************************
- * GetAclInformation [ADVAPI32.@]
- */
-BOOL WINAPI GetAclInformation(
-  PACL pAcl,
-  LPVOID pAclInformation,
-  DWORD nAclInformationLength,
-  ACL_INFORMATION_CLASS dwAclInformationClass)
-{
-    return set_ntstatus(RtlQueryInformationAcl(pAcl, pAclInformation,
-                                               nAclInformationLength, dwAclInformationClass));
-}
-
-/******************************************************************************
- *  IsValidAcl [ADVAPI32.@]
- */
-BOOL WINAPI IsValidAcl(IN PACL pAcl)
-{
-	return RtlValidAcl(pAcl);
-}
-
-/*	##############################
-	######	MISC FUNCTIONS	######
-	##############################
-*/
-
-/******************************************************************************
- * AllocateLocallyUniqueId [ADVAPI32.@]
- *
- * PARAMS
- *   lpLuid []
- */
-BOOL WINAPI AllocateLocallyUniqueId( PLUID lpLuid )
-{
-    return set_ntstatus(NtAllocateLocallyUniqueId(lpLuid));
-}
 
 static const WCHAR SE_CREATE_TOKEN_NAME_W[] =
  { 'S','e','C','r','e','a','t','e','T','o','k','e','n','P','r','i','v','i','l','e','g','e',0 };
@@ -2220,45 +1025,6 @@ GetFileSecurityA( LPCSTR lpFileName,
 }
 
 /******************************************************************************
- * GetFileSecurityW [ADVAPI32.@]
- *
- * See GetFileSecurityA.
- */
-BOOL WINAPI
-GetFileSecurityW( LPCWSTR lpFileName,
-                    SECURITY_INFORMATION RequestedInformation,
-                    PSECURITY_DESCRIPTOR pSecurityDescriptor,
-                    DWORD nLength, LPDWORD lpnLengthNeeded )
-{
-    HANDLE hfile;
-    NTSTATUS status;
-    DWORD access = 0, err;
-
-    TRACE("(%s,%d,%p,%d,%p)\n", debugstr_w(lpFileName),
-          RequestedInformation, pSecurityDescriptor,
-          nLength, lpnLengthNeeded);
-
-    if (RequestedInformation & (OWNER_SECURITY_INFORMATION|GROUP_SECURITY_INFORMATION|
-                                DACL_SECURITY_INFORMATION))
-        access |= READ_CONTROL;
-    if (RequestedInformation & SACL_SECURITY_INFORMATION)
-        access |= ACCESS_SYSTEM_SECURITY;
-
-    err = get_security_file( lpFileName, access, &hfile);
-    if (err)
-    {
-        SetLastError(err);
-        return FALSE;
-    }
-
-    status = NtQuerySecurityObject( hfile, RequestedInformation, pSecurityDescriptor,
-                                    nLength, lpnLengthNeeded );
-    CloseHandle( hfile );
-    return set_ntstatus( status );
-}
-
-
-/******************************************************************************
  * LookupAccountSidA [ADVAPI32.@]
  */
 BOOL WINAPI
@@ -2313,6 +1079,21 @@ LookupAccountSidA(
     heap_free( domainW );
 
     return r;
+}
+
+/******************************************************************************
+ * LookupAccountSidLocalA [ADVAPI32.@]
+ */
+BOOL WINAPI
+LookupAccountSidLocalA(
+	PSID sid,
+	LPSTR account,
+	LPDWORD accountSize,
+	LPSTR domain,
+	LPDWORD domainSize,
+	PSID_NAME_USE name_use )
+{
+    return LookupAccountSidA(NULL, sid, account, accountSize, domain, domainSize, name_use);
 }
 
 /******************************************************************************
@@ -2492,6 +1273,21 @@ LookupAccountSidW(
 }
 
 /******************************************************************************
+ * LookupAccountSidLocalW [ADVAPI32.@]
+ */
+BOOL WINAPI
+LookupAccountSidLocalW(
+	PSID sid,
+	LPWSTR account,
+	LPDWORD accountSize,
+	LPWSTR domain,
+	LPDWORD domainSize,
+	PSID_NAME_USE name_use )
+{
+    return LookupAccountSidW(NULL, sid, account, accountSize, domain, domainSize, name_use);
+}
+
+/******************************************************************************
  * SetFileSecurityA [ADVAPI32.@]
  *
  * See SetFileSecurityW.
@@ -2508,96 +1304,6 @@ BOOL WINAPI SetFileSecurityA( LPCSTR lpFileName,
     heap_free( name );
 
     return r;
-}
-
-/******************************************************************************
- * SetFileSecurityW [ADVAPI32.@]
- *
- * Sets the security of a file or directory.
- *
- * PARAMS
- *   lpFileName           []
- *   RequestedInformation []
- *   pSecurityDescriptor  []
- *
- * RETURNS
- *  Success: TRUE.
- *  Failure: FALSE.
- */
-BOOL WINAPI
-SetFileSecurityW( LPCWSTR lpFileName,
-                    SECURITY_INFORMATION RequestedInformation,
-                    PSECURITY_DESCRIPTOR pSecurityDescriptor )
-{
-    HANDLE file;
-    DWORD access = 0, err;
-    NTSTATUS status;
-    static int is_office = 2;
-
-    TRACE("(%s, 0x%x, %p)\n", debugstr_w(lpFileName), RequestedInformation,
-          pSecurityDescriptor );
-
-    /* CX HACK 10834 -- msoffice sets FILE_EXECUTE on files it saves and Wine
-     * maps that to the x permission on files. Some Linux file managers decide
-     * to try to execute the file instead of opening it with the assigned
-     * application. So, skip setting that bit for msoffice programs. */
-    if(is_office == 2){
-        char name[MAX_PATH], *p;
-        GetModuleFileNameA(GetModuleHandleA(NULL), name, sizeof(name));
-        p = strrchr(name, '\\');
-        if(p)
-            ++p;
-        else
-            p = name;
-        if(strcasecmp(p, "CLVIEW.EXE") == 0 ||
-                strcasecmp(p, "CNFNOT32.EXE") == 0 ||
-                strcasecmp(p, "DSSM.EXE") == 0 ||
-                strcasecmp(p, "excelcnv.exe") == 0 ||
-                strcasecmp(p, "EXCEL.EXE") == 0 ||
-                strcasecmp(p, "GRAPH.EXE") == 0 ||
-                strcasecmp(p, "MSOHTMED.EXE") == 0 ||
-                strcasecmp(p, "MSQRY32.EXE") == 0 ||
-                strcasecmp(p, "MSTORDB.EXE") == 0 ||
-                strcasecmp(p, "MSTORE.EXE") == 0 ||
-                strcasecmp(p, "OIS.EXE") == 0 ||
-                strcasecmp(p, "OUTLOOK.EXE") == 0 ||
-                strcasecmp(p, "POWERPNT.EXE") == 0 ||
-                strcasecmp(p, "PPTVIEW.EXE") == 0 ||
-                strcasecmp(p, "SCANOST.EXE") == 0 ||
-                strcasecmp(p, "SCANPST.EXE") == 0 ||
-                strcasecmp(p, "SELFCERT.EXE") == 0 ||
-                strcasecmp(p, "SETLANG.EXE") == 0 ||
-                strcasecmp(p, "VPREVIEW.EXE") == 0 ||
-                strcasecmp(p, "WINWORD.EXE") == 0 ||
-                strcasecmp(p, "Wordconv.exe") == 0)
-            is_office = 1;
-        else
-            is_office = 0;
-    }
-    if(is_office){
-        TRACE("CX HACK 10834: Skipping SetFileSecurity\n");
-        return TRUE;
-    }
-    /* End hack */
-
-    if (RequestedInformation & OWNER_SECURITY_INFORMATION ||
-        RequestedInformation & GROUP_SECURITY_INFORMATION)
-        access |= WRITE_OWNER;
-    if (RequestedInformation & SACL_SECURITY_INFORMATION)
-        access |= ACCESS_SYSTEM_SECURITY;
-    if (RequestedInformation & DACL_SECURITY_INFORMATION)
-        access |= WRITE_DAC;
-
-    err = get_security_file( lpFileName, access, &file);
-    if (err)
-    {
-        SetLastError(err);
-        return FALSE;
-    }
-
-    status = NtSetSecurityObject( file, RequestedInformation, pSecurityDescriptor );
-    CloseHandle( file );
-    return set_ntstatus( status );
 }
 
 /******************************************************************************
@@ -2641,239 +1347,6 @@ NotifyBootConfigStatus( BOOL x1 )
 {
 	FIXME("(0x%08d):stub\n",x1);
 	return TRUE;
-}
-
-/******************************************************************************
- * RevertToSelf [ADVAPI32.@]
- *
- * Ends the impersonation of a user.
- *
- * PARAMS
- *   void []
- *
- * RETURNS
- *  Success: TRUE.
- *  Failure: FALSE.
- */
-BOOL WINAPI
-RevertToSelf( void )
-{
-    HANDLE Token = NULL;
-    return set_ntstatus( NtSetInformationThread( GetCurrentThread(),
-        ThreadImpersonationToken, &Token, sizeof(Token) ) );
-}
-
-/******************************************************************************
- * ImpersonateSelf [ADVAPI32.@]
- *
- * Makes an impersonation token that represents the process user and assigns
- * to the current thread.
- *
- * PARAMS
- *  ImpersonationLevel [I] Level at which to impersonate.
- *
- * RETURNS
- *  Success: TRUE.
- *  Failure: FALSE.
- */
-BOOL WINAPI
-ImpersonateSelf(SECURITY_IMPERSONATION_LEVEL ImpersonationLevel)
-{
-    return set_ntstatus( RtlImpersonateSelf( ImpersonationLevel ) );
-}
-
-/******************************************************************************
- * ImpersonateLoggedOnUser [ADVAPI32.@]
- */
-BOOL WINAPI ImpersonateLoggedOnUser(HANDLE hToken)
-{
-    DWORD size;
-    NTSTATUS Status;
-    HANDLE ImpersonationToken;
-    TOKEN_TYPE Type;
-    static BOOL warn = TRUE;
-
-    if (warn)
-    {
-        FIXME( "(%p)\n", hToken );
-        warn = FALSE;
-    }
-    if (!GetTokenInformation( hToken, TokenType, &Type,
-                              sizeof(TOKEN_TYPE), &size ))
-        return FALSE;
-
-    if (Type == TokenPrimary)
-    {
-        OBJECT_ATTRIBUTES ObjectAttributes;
-
-        InitializeObjectAttributes( &ObjectAttributes, NULL, 0, NULL, NULL );
-
-        Status = NtDuplicateToken( hToken,
-                                   TOKEN_IMPERSONATE | TOKEN_QUERY,
-                                   &ObjectAttributes,
-                                   SecurityImpersonation,
-                                   TokenImpersonation,
-                                   &ImpersonationToken );
-        if (Status != STATUS_SUCCESS)
-        {
-            ERR( "NtDuplicateToken failed with error 0x%08x\n", Status );
-            SetLastError( RtlNtStatusToDosError( Status ) );
-            return FALSE;
-        }
-    }
-    else
-        ImpersonationToken = hToken;
-
-    Status = NtSetInformationThread( GetCurrentThread(),
-                                     ThreadImpersonationToken,
-                                     &ImpersonationToken,
-                                     sizeof(ImpersonationToken) );
-
-    if (Type == TokenPrimary)
-        NtClose( ImpersonationToken );
-
-    if (Status != STATUS_SUCCESS)
-    {
-        ERR( "NtSetInformationThread failed with error 0x%08x\n", Status );
-        SetLastError( RtlNtStatusToDosError( Status ) );
-        return FALSE;
-    }
-
-    return TRUE;
-}
-
-/******************************************************************************
- * ImpersonateAnonymousToken [ADVAPI32.@]
- */
-BOOL WINAPI ImpersonateAnonymousToken( HANDLE thread )
-{
-    TRACE("(%p)\n", thread);
-    return set_ntstatus( NtImpersonateAnonymousToken( thread ) );
-}
-
-/******************************************************************************
- * AccessCheck [ADVAPI32.@]
- */
-BOOL WINAPI
-AccessCheck(
-	PSECURITY_DESCRIPTOR SecurityDescriptor,
-	HANDLE ClientToken,
-	DWORD DesiredAccess,
-	PGENERIC_MAPPING GenericMapping,
-	PPRIVILEGE_SET PrivilegeSet,
-	LPDWORD PrivilegeSetLength,
-	LPDWORD GrantedAccess,
-	LPBOOL AccessStatus)
-{
-    NTSTATUS access_status;
-    BOOL ret = set_ntstatus( NtAccessCheck(SecurityDescriptor, ClientToken, DesiredAccess,
-                                           GenericMapping, PrivilegeSet, PrivilegeSetLength,
-                                           GrantedAccess, &access_status) );
-    if (ret) *AccessStatus = set_ntstatus( access_status );
-    return ret;
-}
-
-
-/******************************************************************************
- * AccessCheckByType [ADVAPI32.@]
- */
-BOOL WINAPI AccessCheckByType(
-    PSECURITY_DESCRIPTOR pSecurityDescriptor, 
-    PSID PrincipalSelfSid,
-    HANDLE ClientToken, 
-    DWORD DesiredAccess, 
-    POBJECT_TYPE_LIST ObjectTypeList,
-    DWORD ObjectTypeListLength,
-    PGENERIC_MAPPING GenericMapping,
-    PPRIVILEGE_SET PrivilegeSet,
-    LPDWORD PrivilegeSetLength, 
-    LPDWORD GrantedAccess,
-    LPBOOL AccessStatus)
-{
-	FIXME("stub\n");
-
-	*AccessStatus = TRUE;
-
-	return !*AccessStatus;
-}
-
-/******************************************************************************
- * MapGenericMask [ADVAPI32.@]
- *
- * Maps generic access rights into specific access rights according to the
- * supplied mapping.
- *
- * PARAMS
- *  AccessMask     [I/O] Access rights.
- *  GenericMapping [I] The mapping between generic and specific rights.
- *
- * RETURNS
- *  Nothing.
- */
-VOID WINAPI MapGenericMask( PDWORD AccessMask, PGENERIC_MAPPING GenericMapping )
-{
-    RtlMapGenericMask( AccessMask, GenericMapping );
-}
-
-/*************************************************************************
- * SetKernelObjectSecurity [ADVAPI32.@]
- */
-BOOL WINAPI SetKernelObjectSecurity (
-	IN HANDLE Handle,
-	IN SECURITY_INFORMATION SecurityInformation,
-	IN PSECURITY_DESCRIPTOR SecurityDescriptor )
-{
-    return set_ntstatus (NtSetSecurityObject (Handle, SecurityInformation, SecurityDescriptor));
-}
-
-
-/******************************************************************************
- *  AddAuditAccessAce [ADVAPI32.@]
- */
-BOOL WINAPI AddAuditAccessAce(
-    IN OUT PACL pAcl, 
-    IN DWORD dwAceRevision, 
-    IN DWORD dwAccessMask, 
-    IN PSID pSid, 
-    IN BOOL bAuditSuccess, 
-    IN BOOL bAuditFailure) 
-{
-    return set_ntstatus( RtlAddAuditAccessAce(pAcl, dwAceRevision, dwAccessMask, pSid, 
-                                              bAuditSuccess, bAuditFailure) ); 
-}
-
-/******************************************************************************
- *  AddAuditAccessAceEx [ADVAPI32.@]
- */
-BOOL WINAPI AddAuditAccessAceEx(
-    IN OUT PACL pAcl,
-    IN DWORD dwAceRevision,
-    IN DWORD dwAceFlags,
-    IN DWORD dwAccessMask,
-    IN PSID pSid,
-    IN BOOL bAuditSuccess,
-    IN BOOL bAuditFailure)
-{
-    return set_ntstatus( RtlAddAuditAccessAceEx(pAcl, dwAceRevision, dwAceFlags, dwAccessMask, pSid,
-                                              bAuditSuccess, bAuditFailure) );
-}
-
-/******************************************************************************
- *  AddAuditAccessObjectAce [ADVAPI32.@]
- */
-BOOL WINAPI AddAuditAccessObjectAce(
-    IN OUT PACL pAcl,
-    IN DWORD dwAceRevision,
-    IN DWORD dwAceFlags,
-    IN DWORD dwAccessMask,
-    IN GUID* pObjectTypeGuid,
-    IN GUID* pInheritedObjectTypeGuid,
-    IN PSID pSid,
-    IN BOOL bAuditSuccess,
-    IN BOOL bAuditFailure)
-{
-    return set_ntstatus( RtlAddAuditAccessObjectAce(pAcl, dwAceRevision, dwAceFlags, dwAccessMask,
-           pObjectTypeGuid, pInheritedObjectTypeGuid, pSid, bAuditSuccess, bAuditFailure) );
 }
 
 /******************************************************************************
@@ -3234,22 +1707,6 @@ BOOL WINAPI LookupAccountNameW( LPCWSTR lpSystemName, LPCWSTR lpAccountName, PSI
 }
 
 /******************************************************************************
- * PrivilegeCheck [ADVAPI32.@]
- */
-BOOL WINAPI PrivilegeCheck( HANDLE ClientToken, PPRIVILEGE_SET RequiredPrivileges, LPBOOL pfResult)
-{
-    BOOL ret;
-    BOOLEAN Result;
-
-    TRACE("%p %p %p\n", ClientToken, RequiredPrivileges, pfResult);
-
-    ret = set_ntstatus (NtPrivilegeCheck (ClientToken, RequiredPrivileges, &Result));
-    if (ret)
-        *pfResult = Result;
-    return ret;
-}
-
-/******************************************************************************
  * AccessCheckAndAuditAlarmA [ADVAPI32.@]
  */
 BOOL WINAPI AccessCheckAndAuditAlarmA(LPCSTR Subsystem, LPVOID HandleId, LPSTR ObjectTypeName,
@@ -3264,38 +1721,9 @@ BOOL WINAPI AccessCheckAndAuditAlarmA(LPCSTR Subsystem, LPVOID HandleId, LPSTR O
 	return TRUE;
 }
 
-/******************************************************************************
- * AccessCheckAndAuditAlarmW [ADVAPI32.@]
- */
-BOOL WINAPI AccessCheckAndAuditAlarmW(LPCWSTR Subsystem, LPVOID HandleId, LPWSTR ObjectTypeName,
-  LPWSTR ObjectName, PSECURITY_DESCRIPTOR SecurityDescriptor, DWORD DesiredAccess,
-  PGENERIC_MAPPING GenericMapping, BOOL ObjectCreation, LPDWORD GrantedAccess,
-  LPBOOL AccessStatus, LPBOOL pfGenerateOnClose)
-{
-	FIXME("stub (%s,%p,%s,%s,%p,%08x,%p,%x,%p,%p,%p)\n", debugstr_w(Subsystem),
-		HandleId, debugstr_w(ObjectTypeName), debugstr_w(ObjectName),
-		SecurityDescriptor, DesiredAccess, GenericMapping,
-		ObjectCreation, GrantedAccess, AccessStatus, pfGenerateOnClose);
-	return TRUE;
-}
-
 BOOL WINAPI ObjectCloseAuditAlarmA(LPCSTR SubsystemName, LPVOID HandleId, BOOL GenerateOnClose)
 {
     FIXME("stub (%s,%p,%x)\n", debugstr_a(SubsystemName), HandleId, GenerateOnClose);
-
-    return TRUE;
-}
-
-BOOL WINAPI ObjectCloseAuditAlarmW(LPCWSTR SubsystemName, LPVOID HandleId, BOOL GenerateOnClose)
-{
-    FIXME("stub (%s,%p,%x)\n", debugstr_w(SubsystemName), HandleId, GenerateOnClose);
-
-    return TRUE;
-}
-
-BOOL WINAPI ObjectDeleteAuditAlarmW(LPCWSTR SubsystemName, LPVOID HandleId, BOOL GenerateOnClose)
-{
-    FIXME("stub (%s,%p,%x)\n", debugstr_w(SubsystemName), HandleId, GenerateOnClose);
 
     return TRUE;
 }
@@ -3313,19 +1741,6 @@ BOOL WINAPI ObjectOpenAuditAlarmA(LPCSTR SubsystemName, LPVOID HandleId, LPSTR O
     return TRUE;
 }
 
-BOOL WINAPI ObjectOpenAuditAlarmW(LPCWSTR SubsystemName, LPVOID HandleId, LPWSTR ObjectTypeName,
-  LPWSTR ObjectName, PSECURITY_DESCRIPTOR pSecurityDescriptor, HANDLE ClientToken, DWORD DesiredAccess,
-  DWORD GrantedAccess, PPRIVILEGE_SET Privileges, BOOL ObjectCreation, BOOL AccessGranted,
-  LPBOOL GenerateOnClose)
-{
-    FIXME("stub (%s,%p,%s,%s,%p,%p,0x%08x,0x%08x,%p,%x,%x,%p)\n", debugstr_w(SubsystemName),
-        HandleId, debugstr_w(ObjectTypeName), debugstr_w(ObjectName), pSecurityDescriptor,
-        ClientToken, DesiredAccess, GrantedAccess, Privileges, ObjectCreation, AccessGranted,
-        GenerateOnClose);
-
-    return TRUE;
-}
-
 BOOL WINAPI ObjectPrivilegeAuditAlarmA( LPCSTR SubsystemName, LPVOID HandleId, HANDLE ClientToken,
   DWORD DesiredAccess, PPRIVILEGE_SET Privileges, BOOL AccessGranted)
 {
@@ -3335,28 +1750,10 @@ BOOL WINAPI ObjectPrivilegeAuditAlarmA( LPCSTR SubsystemName, LPVOID HandleId, H
     return TRUE;
 }
 
-BOOL WINAPI ObjectPrivilegeAuditAlarmW( LPCWSTR SubsystemName, LPVOID HandleId, HANDLE ClientToken,
-  DWORD DesiredAccess, PPRIVILEGE_SET Privileges, BOOL AccessGranted)
-{
-    FIXME("stub (%s,%p,%p,0x%08x,%p,%x)\n", debugstr_w(SubsystemName), HandleId, ClientToken,
-          DesiredAccess, Privileges, AccessGranted);
-
-    return TRUE;
-}
-
 BOOL WINAPI PrivilegedServiceAuditAlarmA( LPCSTR SubsystemName, LPCSTR ServiceName, HANDLE ClientToken,
                                    PPRIVILEGE_SET Privileges, BOOL AccessGranted)
 {
     FIXME("stub (%s,%s,%p,%p,%x)\n", debugstr_a(SubsystemName), debugstr_a(ServiceName),
-          ClientToken, Privileges, AccessGranted);
-
-    return TRUE;
-}
-
-BOOL WINAPI PrivilegedServiceAuditAlarmW( LPCWSTR SubsystemName, LPCWSTR ServiceName, HANDLE ClientToken,
-                                   PPRIVILEGE_SET Privileges, BOOL AccessGranted)
-{
-    FIXME("stub %s,%s,%p,%p,%x)\n", debugstr_w(SubsystemName), debugstr_w(ServiceName),
           ClientToken, Privileges, AccessGranted);
 
     return TRUE;
@@ -3830,16 +2227,6 @@ TRUSTEE_TYPE WINAPI GetTrusteeTypeW(PTRUSTEEW pTrustee)
     return pTrustee->TrusteeType; 
 } 
  
-BOOL WINAPI SetAclInformation( PACL pAcl, LPVOID pAclInformation,
-                               DWORD nAclInformationLength,
-                               ACL_INFORMATION_CLASS dwAclInformationClass )
-{
-    FIXME("%p %p 0x%08x 0x%08x - stub\n", pAcl, pAclInformation,
-          nAclInformationLength, dwAclInformationClass);
-
-    return TRUE;
-}
-
 static DWORD trustee_name_A_to_W(TRUSTEE_FORM form, char *trustee_nameA, WCHAR **ptrustee_nameW)
 {
     switch (form)
@@ -4250,43 +2637,6 @@ DWORD WINAPI SetNamedSecurityInfoA(LPSTR pObjectName,
     heap_free( wstr );
 
     return r;
-}
-
-BOOL WINAPI SetPrivateObjectSecurity( SECURITY_INFORMATION SecurityInformation,
-    PSECURITY_DESCRIPTOR ModificationDescriptor,
-    PSECURITY_DESCRIPTOR* ObjectsSecurityDescriptor,
-    PGENERIC_MAPPING GenericMapping,
-    HANDLE Token )
-{
-    FIXME("0x%08x %p %p %p %p - stub\n", SecurityInformation, ModificationDescriptor,
-          ObjectsSecurityDescriptor, GenericMapping, Token);
-
-    return TRUE;
-}
-
-BOOL WINAPI AreAllAccessesGranted( DWORD GrantedAccess, DWORD DesiredAccess )
-{
-    return RtlAreAllAccessesGranted( GrantedAccess, DesiredAccess );
-}
-
-/******************************************************************************
- * AreAnyAccessesGranted [ADVAPI32.@]
- *
- * Determines whether or not any of a set of specified access permissions have
- * been granted or not.
- *
- * PARAMS
- *   GrantedAccess [I] The permissions that have been granted.
- *   DesiredAccess [I] The permissions that you want to have.
- *
- * RETURNS
- *   Nonzero if any of the permissions have been granted, zero if none of the
- *   permissions have been granted.
- */
-
-BOOL WINAPI AreAnyAccessesGranted( DWORD GrantedAccess, DWORD DesiredAccess )
-{
-    return RtlAreAnyAccessesGranted( GrantedAccess, DesiredAccess );
 }
 
 /******************************************************************************
@@ -5524,88 +3874,6 @@ BOOL WINAPI ConvertSidToStringSidA(PSID pSid, LPSTR *pstr)
     return TRUE;
 }
 
-BOOL WINAPI ConvertToAutoInheritPrivateObjectSecurity(
-        PSECURITY_DESCRIPTOR pdesc,
-        PSECURITY_DESCRIPTOR cdesc,
-        PSECURITY_DESCRIPTOR* ndesc,
-        GUID* objtype,
-        BOOL isdir,
-        PGENERIC_MAPPING genmap )
-{
-    FIXME("%p %p %p %p %d %p - stub\n", pdesc, cdesc, ndesc, objtype, isdir, genmap);
-
-    return FALSE;
-}
-
-BOOL WINAPI CreatePrivateObjectSecurityEx(
-    PSECURITY_DESCRIPTOR parent, PSECURITY_DESCRIPTOR creator, PSECURITY_DESCRIPTOR *out,
-    GUID *objtype, BOOL is_directory, ULONG flags, HANDLE token, PGENERIC_MAPPING mapping)
-{
-    SECURITY_DESCRIPTOR_RELATIVE *relative;
-    DWORD needed, offset;
-    BYTE *buffer;
-
-    FIXME("%p %p %p %p %d %u %p %p - returns fake SECURITY_DESCRIPTOR\n", parent, creator, out,
-          objtype, is_directory, flags, token, mapping);
-
-    needed = sizeof(SECURITY_DESCRIPTOR_RELATIVE);
-    needed += sizeof(sidWorld);
-    needed += sizeof(sidWorld);
-    needed += WINE_SIZE_OF_WORLD_ACCESS_ACL;
-    needed += WINE_SIZE_OF_WORLD_ACCESS_ACL;
-
-    if (!(buffer = heap_alloc( needed ))) return FALSE;
-    relative = (SECURITY_DESCRIPTOR_RELATIVE *)buffer;
-    if (!InitializeSecurityDescriptor( relative, SECURITY_DESCRIPTOR_REVISION ))
-    {
-        heap_free( buffer );
-        return FALSE;
-    }
-    relative->Control |= SE_SELF_RELATIVE;
-    offset = sizeof(SECURITY_DESCRIPTOR_RELATIVE);
-
-    memcpy( buffer + offset, &sidWorld, sizeof(sidWorld) );
-    relative->Owner = offset;
-    offset += sizeof(sidWorld);
-
-    memcpy( buffer + offset, &sidWorld, sizeof(sidWorld) );
-    relative->Group = offset;
-    offset += sizeof(sidWorld);
-
-    GetWorldAccessACL( (ACL *)(buffer + offset) );
-    relative->Dacl = offset;
-    offset += WINE_SIZE_OF_WORLD_ACCESS_ACL;
-
-    GetWorldAccessACL( (ACL *)(buffer + offset) );
-    relative->Sacl = offset;
-
-    *out = relative;
-    return TRUE;
-}
-
-BOOL WINAPI CreatePrivateObjectSecurity(
-    PSECURITY_DESCRIPTOR parent, PSECURITY_DESCRIPTOR creator, PSECURITY_DESCRIPTOR *out,
-    BOOL is_container, HANDLE token, PGENERIC_MAPPING mapping)
-{
-    return CreatePrivateObjectSecurityEx(parent, creator, out, NULL, is_container, 0, token, mapping);
-}
-
-BOOL WINAPI CreatePrivateObjectSecurityWithMultipleInheritance(
-    PSECURITY_DESCRIPTOR parent, PSECURITY_DESCRIPTOR creator, PSECURITY_DESCRIPTOR *out,
-    GUID **types, ULONG count, BOOL is_container, ULONG flags, HANDLE token, PGENERIC_MAPPING mapping)
-{
-    FIXME(": semi-stub\n");
-    return CreatePrivateObjectSecurityEx(parent, creator, out, NULL, is_container, flags, token, mapping);
-}
-
-BOOL WINAPI DestroyPrivateObjectSecurity( PSECURITY_DESCRIPTOR* ObjectDescriptor )
-{
-    FIXME("%p - stub\n", ObjectDescriptor);
-
-    heap_free( *ObjectDescriptor );
-    return TRUE;
-}
-
 /******************************************************************************
  * CreateProcessWithLogonW
  */
@@ -5633,46 +3901,6 @@ BOOL WINAPI CreateProcessWithTokenW(HANDLE token, DWORD logon_flags, LPCWSTR app
     /* FIXME: check if handles should be inherited */
     return CreateProcessW( application_name, command_line, NULL, NULL, FALSE, creation_flags, environment,
                            current_directory, startup_info, process_information );
-}
-
-/******************************************************************************
- * DuplicateTokenEx [ADVAPI32.@]
- */
-BOOL WINAPI DuplicateTokenEx(
-        HANDLE ExistingTokenHandle, DWORD dwDesiredAccess,
-        LPSECURITY_ATTRIBUTES lpTokenAttributes,
-        SECURITY_IMPERSONATION_LEVEL ImpersonationLevel,
-        TOKEN_TYPE TokenType,
-        PHANDLE DuplicateTokenHandle )
-{
-    OBJECT_ATTRIBUTES ObjectAttributes;
-
-    TRACE("%p 0x%08x 0x%08x 0x%08x %p\n", ExistingTokenHandle, dwDesiredAccess,
-          ImpersonationLevel, TokenType, DuplicateTokenHandle);
-
-    InitializeObjectAttributes(
-        &ObjectAttributes,
-        NULL,
-        (lpTokenAttributes && lpTokenAttributes->bInheritHandle) ? OBJ_INHERIT : 0,
-        NULL,
-        lpTokenAttributes ? lpTokenAttributes->lpSecurityDescriptor : NULL );
-
-    return set_ntstatus( NtDuplicateToken( ExistingTokenHandle,
-                                           dwDesiredAccess,
-                                           &ObjectAttributes,
-                                           ImpersonationLevel,
-                                           TokenType,
-                                           DuplicateTokenHandle ) );
-}
-
-BOOL WINAPI DuplicateToken(
-        HANDLE ExistingTokenHandle,
-        SECURITY_IMPERSONATION_LEVEL ImpersonationLevel,
-        PHANDLE DuplicateTokenHandle )
-{
-    return DuplicateTokenEx( ExistingTokenHandle, TOKEN_IMPERSONATE | TOKEN_QUERY,
-                             NULL, ImpersonationLevel, TokenImpersonation,
-                             DuplicateTokenHandle );
 }
 
 /******************************************************************************
@@ -6008,6 +4236,64 @@ BOOL WINAPI FileEncryptionStatusA(LPCSTR lpFileName, LPDWORD lpStatus)
     return TRUE;
 }
 
+static NTSTATUS combine_dacls(ACL *parent, ACL *child, ACL **result)
+{
+    NTSTATUS status;
+    ACL *combined;
+    int i;
+
+    /* initialize a combined DACL containing both inherited and new ACEs */
+    combined = heap_alloc_zero(child->AclSize+parent->AclSize);
+    if (!combined)
+        return STATUS_NO_MEMORY;
+
+    status = RtlCreateAcl(combined, parent->AclSize+child->AclSize, ACL_REVISION);
+    if (status != STATUS_SUCCESS)
+    {
+        heap_free(combined);
+        return status;
+    }
+
+    /* copy the new ACEs */
+    for (i=0; i<child->AceCount; i++)
+    {
+        ACE_HEADER *ace;
+
+        if (!GetAce(child, i, (void*)&ace))
+            continue;
+        if (!AddAce(combined, ACL_REVISION, MAXDWORD, ace, ace->AceSize))
+            WARN("error adding new ACE\n");
+    }
+
+    /* copy the inherited ACEs */
+    for (i=0; i<parent->AceCount; i++)
+    {
+        ACE_HEADER *ace;
+
+        if (!GetAce(parent, i, (void*)&ace))
+            continue;
+        if (!(ace->AceFlags & (OBJECT_INHERIT_ACE|CONTAINER_INHERIT_ACE)))
+            continue;
+        if ((ace->AceFlags & (OBJECT_INHERIT_ACE|CONTAINER_INHERIT_ACE)) !=
+                (OBJECT_INHERIT_ACE|CONTAINER_INHERIT_ACE))
+        {
+            FIXME("unsupported flags: %x\n", ace->AceFlags);
+            continue;
+        }
+
+        if (ace->AceFlags & NO_PROPAGATE_INHERIT_ACE)
+            ace->AceFlags &= ~(OBJECT_INHERIT_ACE|CONTAINER_INHERIT_ACE|NO_PROPAGATE_INHERIT_ACE);
+        ace->AceFlags &= ~INHERIT_ONLY_ACE;
+        ace->AceFlags |= INHERITED_ACE;
+
+        if (!AddAce(combined, ACL_REVISION, MAXDWORD, ace, ace->AceSize))
+            WARN("error adding inherited ACE\n");
+    }
+
+    *result = combined;
+    return STATUS_SUCCESS;
+}
+
 /******************************************************************************
  * SetSecurityInfo [ADVAPI32.@]
  */
@@ -6107,41 +4393,10 @@ DWORD WINAPI SetSecurityInfo(HANDLE handle, SE_OBJECT_TYPE ObjectType,
 
                     if (!err)
                     {
-                        int i;
-
-                        dacl = heap_alloc_zero(pDacl->AclSize+parent_dacl->AclSize);
-                        if (!dacl)
-                        {
-                            LocalFree(parent_sd);
-                            return ERROR_NOT_ENOUGH_MEMORY;
-                        }
-                        memcpy(dacl, pDacl, pDacl->AclSize);
-                        dacl->AclSize = pDacl->AclSize+parent_dacl->AclSize;
-
-                        for (i=0; i<parent_dacl->AceCount; i++)
-                        {
-                            ACE_HEADER *ace;
-
-                            if (!GetAce(parent_dacl, i, (void*)&ace))
-                                continue;
-                            if (!(ace->AceFlags & (OBJECT_INHERIT_ACE|CONTAINER_INHERIT_ACE)))
-                                continue;
-                            if ((ace->AceFlags & (OBJECT_INHERIT_ACE|CONTAINER_INHERIT_ACE)) !=
-                                    (OBJECT_INHERIT_ACE|CONTAINER_INHERIT_ACE))
-                            {
-                                FIXME("unsupported flags: %x\n", ace->AceFlags);
-                                continue;
-                            }
-
-                            if (ace->AceFlags & NO_PROPAGATE_INHERIT_ACE)
-                                ace->AceFlags &= ~(OBJECT_INHERIT_ACE|CONTAINER_INHERIT_ACE|NO_PROPAGATE_INHERIT_ACE);
-                            ace->AceFlags &= ~INHERIT_ONLY_ACE;
-                            ace->AceFlags |= INHERITED_ACE;
-
-                            if(!AddAce(dacl, ACL_REVISION, MAXDWORD, ace, ace->AceSize))
-                                WARN("error adding inherited ACE\n");
-                        }
+                        status = combine_dacls(parent_dacl, pDacl, &dacl);
                         LocalFree(parent_sd);
+                        if (status != STATUS_SUCCESS)
+                            return RtlNtStatusToDosError(status);
                     }
                 }
                 else
@@ -6189,7 +4444,7 @@ BOOL WINAPI SaferComputeTokenFromLevel(SAFER_LEVEL_HANDLE handle, HANDLE token, 
 {
     FIXME("(%p, %p, %p, %x, %p) stub\n", handle, token, access_token, flags, reserved);
 
-    *access_token = (HANDLE)0xdeadbeef;
+    *access_token = (flags & SAFER_TOKEN_NULL_IF_EQUAL) ? NULL : (HANDLE)0xdeadbeef;
     return TRUE;
 }
 
@@ -6226,6 +4481,17 @@ BOOL WINAPI SaferGetPolicyInformation(DWORD scope, SAFER_POLICY_INFO_CLASS class
 {
     FIXME("(%u %u %u %p %p %p) stub\n", scope, class, size, buffer, required, lpReserved);
     return FALSE;
+}
+
+/******************************************************************************
+ * SaferIdentifyLevel   [ADVAPI32.@]
+ */
+BOOL WINAPI SaferIdentifyLevel(DWORD count, SAFER_CODE_PROPERTIES *properties, SAFER_LEVEL_HANDLE *handle,
+                               void *reserved)
+{
+    FIXME("(%u %p %p %p) stub\n", count, properties, handle, reserved);
+    *handle = (SAFER_LEVEL_HANDLE)0xdeadbeef;
+    return TRUE;
 }
 
 /******************************************************************************

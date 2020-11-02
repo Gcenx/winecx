@@ -5,6 +5,8 @@ IMPORTS   = uuid user32 advapi32
 # CROSSOVER HACK for bug 8627: delay load ole32 and msacm32
 DELAYIMPORTS = ole32 msacm32
 
+EXTRADLLFLAGS = -mno-cygwin
+
 C_SRCS = \
 	driver.c \
 	joystick.c \

@@ -137,7 +137,6 @@ static const WCHAR emptyW[] = {0};
 
 #define HTTP_ADDHDR_FLAG_ADD				0x20000000
 #define HTTP_ADDHDR_FLAG_ADD_IF_NEW			0x10000000
-#define HTTP_ADDHDR_FLAG_COALESCE			0x40000000
 #define HTTP_ADDHDR_FLAG_COALESCE_WITH_COMMA		0x40000000
 #define HTTP_ADDHDR_FLAG_COALESCE_WITH_SEMICOLON	0x01000000
 #define HTTP_ADDHDR_FLAG_REPLACE			0x80000000
@@ -1335,7 +1334,7 @@ BOOL WINAPI HttpAddRequestHeadersW(HINTERNET hHttpRequest,
     http_request_t *request;
     DWORD res = ERROR_INTERNET_INCORRECT_HANDLE_TYPE;
 
-    TRACE("%p, %s, %i, %i\n", hHttpRequest, debugstr_wn(lpszHeader, dwHeaderLength), dwHeaderLength, dwModifier);
+    TRACE("%p, %s, %u, %08x\n", hHttpRequest, debugstr_wn(lpszHeader, dwHeaderLength), dwHeaderLength, dwModifier);
 
     if (!lpszHeader) 
       return TRUE;
@@ -1367,7 +1366,7 @@ BOOL WINAPI HttpAddRequestHeadersA(HINTERNET hHttpRequest,
     WCHAR *headers = NULL;
     BOOL r;
 
-    TRACE("%p, %s, %i, %i\n", hHttpRequest, debugstr_an(lpszHeader, dwHeaderLength), dwHeaderLength, dwModifier);
+    TRACE("%p, %s, %u, %08x\n", hHttpRequest, debugstr_an(lpszHeader, dwHeaderLength), dwHeaderLength, dwModifier);
 
     if(lpszHeader)
         headers = heap_strndupAtoW(lpszHeader, dwHeaderLength, &dwHeaderLength);
@@ -2267,6 +2266,15 @@ static DWORD HTTPREQ_QueryOption(object_header_t *hdr, DWORD option, void *buffe
         *(DWORD*)buffer = flags;
         return ERROR_SUCCESS;
     }
+    case INTERNET_OPTION_ERROR_MASK:
+        TRACE("INTERNET_OPTION_ERROR_MASK\n");
+
+        if (*size < sizeof(ULONG))
+            return ERROR_INSUFFICIENT_BUFFER;
+
+        *(ULONG*)buffer = hdr->ErrorMask;
+        *size = sizeof(ULONG);
+        return ERROR_SUCCESS;
     }
 
     return INET_QueryOption(hdr, option, buffer, size, unicode);
@@ -2335,11 +2343,6 @@ static DWORD HTTPREQ_SetOption(object_header_t *hdr, DWORD option, void *buffer,
         if (!(req->session->appInfo->proxyPassword = heap_strdupW(buffer))) return ERROR_OUTOFMEMORY;
         return ERROR_SUCCESS;
 
-    case INTERNET_OPTION_HTTP_DECODING:
-        if(size != sizeof(BOOL))
-            return ERROR_INVALID_PARAMETER;
-        req->decoding = *(BOOL*)buffer;
-        return ERROR_SUCCESS;
     }
 
     return INET_SetOption(hdr, option, buffer, size);
@@ -2909,7 +2912,7 @@ static DWORD set_content_length(http_request_t *request)
         request->contentLength = ~0u;
     }
 
-    if(request->decoding) {
+    if(request->hdr.decoding) {
         int encoding_idx;
 
         static const WCHAR deflateW[] = {'d','e','f','l','a','t','e',0};
@@ -3307,6 +3310,7 @@ static DWORD HTTP_HttpOpenRequestW(http_session_t *session,
     request->hdr.htype = WH_HHTTPREQ;
     request->hdr.dwFlags = dwFlags;
     request->hdr.dwContext = dwContext;
+    request->hdr.decoding = session->hdr.decoding;
     request->contentLength = ~0u;
 
     request->netconn_stream.data_stream.vtbl = &netconn_stream_vtbl;
@@ -3924,8 +3928,8 @@ lend:
          WININET_Release( &request->hdr );
 
     TRACE("%u <--\n", res);
-    if(res != ERROR_SUCCESS)
-        SetLastError(res);
+
+    SetLastError(res);
     return res == ERROR_SUCCESS;
 }
 
@@ -5807,6 +5811,7 @@ DWORD HTTP_Connect(appinfo_t *hIC, LPCWSTR lpszServerName,
     session->hdr.dwFlags = dwFlags;
     session->hdr.dwContext = dwContext;
     session->hdr.dwInternalFlags |= dwInternalFlags;
+    session->hdr.decoding = hIC->hdr.decoding;
 
     WININET_AddRef( &hIC->hdr );
     session->appInfo = hIC;
@@ -6059,7 +6064,7 @@ static LPWSTR * HTTP_InterpretHttpHeader(LPCWSTR buffer)
  *
  */
 
-#define COALESCEFLAGS (HTTP_ADDHDR_FLAG_COALESCE|HTTP_ADDHDR_FLAG_COALESCE_WITH_COMMA|HTTP_ADDHDR_FLAG_COALESCE_WITH_SEMICOLON)
+#define COALESCEFLAGS (HTTP_ADDHDR_FLAG_COALESCE_WITH_COMMA|HTTP_ADDHDR_FLAG_COALESCE_WITH_SEMICOLON)
 
 static DWORD HTTP_ProcessHeader(http_request_t *request, LPCWSTR field, LPCWSTR value, DWORD dwModifier)
 {

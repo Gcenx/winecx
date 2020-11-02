@@ -78,6 +78,20 @@ static inline struct idtr get_idtr(void)
     struct idtr ret;
 #if defined(__i386__) && defined(__GNUC__)
     __asm__( "sidtl %0" : "=m" (ret) );
+#elif defined(__i386_on_x86_64__)
+    #include "pshpack1.h"
+    struct idtr64
+    {
+        WORD limit;
+        unsigned __int64 base;
+    };
+    #include "poppack.h"
+    struct idtr64 tmp;
+    __asm__( "sidtl %0" : "=m" (tmp) );
+    if (tmp.base >= 0x100000000 - tmp.limit)
+        ERR("IDT extends above 4GB");
+    ret.base = (BYTE*)tmp.base;
+    ret.limit = tmp.limit;
 #else
     ret.base = (BYTE *)idt;
     ret.limit = sizeof(idt) - 1;

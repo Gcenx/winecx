@@ -177,6 +177,15 @@ while test $# -ne 0; do
   shift
 done
 
+# CrossOver HACK for bug 17253.
+# mingw's strip removes the Wine builtin tag, so re-add it if necessary.
+fixup_builtin_tag () {
+    builtin_tag=`dd if="$1" bs=1 count=16 skip=64 2>/dev/null`
+    if test "x$builtin_tag" = "xWine builtin DLL"; then
+        printf 'Wine builtin DLL\0'|dd of="$2" bs=1 seek=64 conv=notrunc 2>/dev/null
+    fi
+}
+
 if test $# -ne 0 && test -z "$dir_arg$dst_arg"; then
   # When -d is used, all remaining arguments are directories to create.
   # When -t is used, the destination is already specified.
@@ -468,6 +477,7 @@ do
     { test -z "$chowncmd" || $doit $chowncmd "$dsttmp"; } &&
     { test -z "$chgrpcmd" || $doit $chgrpcmd "$dsttmp"; } &&
     { test -z "$stripcmd" || $doit $stripcmd "$dsttmp"; } &&
+    { fixup_builtin_tag "$src" "$dsttmp"; } &&
     { test -z "$chmodcmd" || $doit $chmodcmd $mode "$dsttmp"; } &&
 
     # If -C, don't bother to copy if it wouldn't change the file.

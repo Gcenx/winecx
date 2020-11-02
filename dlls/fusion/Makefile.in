@@ -1,5 +1,7 @@
 MODULE    = fusion.dll
-IMPORTS   = advapi32 dbghelp shlwapi version user32
+IMPORTS   = bcrypt dbghelp shlwapi version user32
+
+EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
 	asmcache.c \

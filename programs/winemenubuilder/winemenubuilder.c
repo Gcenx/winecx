@@ -96,6 +96,7 @@
 #include "wine/library.h"
 #include "wine/list.h"
 #include "wine/rbtree.h"
+#include "wine/heap.h"
 
 #include "cxmenu.h"
 
@@ -219,15 +220,6 @@ static unsigned short crc16(const char* string)
         }
     }
     return crc;
-}
-
-static char *strdupA( const char *str )
-{
-    char *ret;
-
-    if (!str) return NULL;
-    if ((ret = HeapAlloc( GetProcessHeap(), 0, strlen(str) + 1 ))) strcpy( ret, str );
-    return ret;
 }
 
 static char* heap_printf(const char *format, ...)
@@ -541,7 +533,7 @@ static int populate_module16_icons(struct IconData16 *iconData16, GRPICONDIR *gr
         for (j = 0; j < iconData16->iconResources->count; j++)
         {
             NE_NAMEINFO *iconInfo = (NE_NAMEINFO*)iconPtr;
-            if ((((BYTE*)iconPtr) + sizeof(NE_NAMEINFO)) > (iconData16->fileBytes + iconData16->fileSize))
+            if ((iconPtr + sizeof(NE_NAMEINFO)) > (iconData16->fileBytes + iconData16->fileSize))
             {
                 WINE_WARN("file too small for icon NE_NAMEINFO\n");
                 break;
@@ -1158,7 +1150,7 @@ static HRESULT platform_write_icon(IStream *icoStream, ICONDIRENTRY *iconDirEntr
     } best[ICNS_SLOTS];
     int indexes[ICNS_SLOTS];
     int i;
-    const char* tmpdir;
+    const char* HOSTPTR tmpdir;
     char *icnsPath = NULL;
     LARGE_INTEGER zero;
     HRESULT hr;
@@ -1217,7 +1209,7 @@ static HRESULT platform_write_icon(IStream *icoStream, ICONDIRENTRY *iconDirEntr
     }
 
     if (destFilename)
-        *nativeIdentifier = heap_printf("%s", destFilename);
+        *nativeIdentifier = heap_strdup(destFilename);
     else
         *nativeIdentifier = compute_native_identifier(exeIndex, icoPathW);
     if (*nativeIdentifier == NULL)
@@ -1299,7 +1291,7 @@ static HRESULT platform_write_icon(IStream *icoStream, ICONDIRENTRY *iconDirEntr
     LARGE_INTEGER zero;
 
     if (destFilename)
-        *nativeIdentifier = heap_printf("%s", destFilename);
+        *nativeIdentifier = heap_strdup(destFilename);
     else
         *nativeIdentifier = compute_native_identifier(exeIndex, icoPathW);
     if (*nativeIdentifier == NULL)
@@ -2053,9 +2045,9 @@ static BOOL add_mimes(const char *xdg_data_dir, struct list *mime_types)
                     if (mime_type_entry)
                     {
                         *pos = 0;
-                        mime_type_entry->mimeType = strdupA(line);
-                        mime_type_entry->glob = strdupA(pos + 1);
-                        mime_type_entry->lower_glob = strdupA(pos + 1);
+                        mime_type_entry->mimeType = heap_strdup(line);
+                        mime_type_entry->glob = heap_strdup(pos + 1);
+                        mime_type_entry->lower_glob = heap_strdup(pos + 1);
                         if (mime_type_entry->lower_glob)
                         {
                             char *l;
@@ -2103,14 +2095,15 @@ static void free_native_mime_types(struct list *native_mime_types)
 
 static BOOL build_native_mime_types(const char *xdg_data_home, struct list *mime_types)
 {
-    char *xdg_data_dirs;
+    char * HOSTPTR xdg_data_dirs_env;
+    char * xdg_data_dirs;
     BOOL ret;
 
-    xdg_data_dirs = getenv("XDG_DATA_DIRS");
-    if (xdg_data_dirs == NULL)
-        xdg_data_dirs = heap_printf("/usr/local/share/:/usr/share/");
+    xdg_data_dirs_env = getenv("XDG_DATA_DIRS");
+    if (xdg_data_dirs_env == NULL)
+        xdg_data_dirs = heap_strdup("/usr/local/share/:/usr/share/");
     else
-        xdg_data_dirs = strdupA(xdg_data_dirs);
+        xdg_data_dirs = heap_strdup(xdg_data_dirs_env);
 
     if (xdg_data_dirs)
     {
@@ -2164,7 +2157,7 @@ static BOOL match_glob(struct list *native_mime_types, const char *extension,
 
     if (*match != NULL)
     {
-        *match = strdupA(*match);
+        *match = heap_strdup(*match);
         if (*match == NULL)
             return FALSE;
     }
@@ -2621,7 +2614,7 @@ static BOOL generate_associations(const char *xdg_data_home, const char *package
                 if (contentTypeW != NULL && strchrW(contentTypeW, '/'))
                     mimeTypeA = wchars_to_utf8_chars(contentTypeW);
                 else if ((get_special_mime_type(extensionW)))
-                    mimeTypeA = strdupA(get_special_mime_type(extensionW));
+                    mimeTypeA = heap_strdup(get_special_mime_type(extensionW));
                 else
                     mimeTypeA = heap_printf("application/x-wine-extension-%s", &extensionA[1]);
 
@@ -2678,7 +2671,7 @@ static BOOL generate_associations(const char *xdg_data_home, const char *package
             }
             else
             {
-                friendlyAppNameA = heap_printf("A Wine application");
+                friendlyAppNameA = heap_strdup("A Wine application");
                 if (friendlyAppNameA == NULL)
                 {
                     WINE_ERR("out of memory\n");
@@ -3395,7 +3388,7 @@ static void RefreshFileTypeAssociations(void)
     hasChanged |= cleanup_associations();
     if (hasChanged)
     {
-        const char *argv[3];
+        const char * HOSTPTR argv[3];
 
         argv[0] = "update-mime-database";
         argv[1] = mime_dir;
@@ -3644,7 +3637,7 @@ static BOOL init_xdg(void)
     {
         create_directories(xdg_config_dir);
         if (getenv("XDG_DATA_HOME"))
-            xdg_data_dir = strdupA(getenv("XDG_DATA_HOME"));
+            xdg_data_dir = heap_strdup(getenv("XDG_DATA_HOME"));
         else
             xdg_data_dir = heap_printf("%s/.local/share", getenv("HOME"));
         if (xdg_data_dir)

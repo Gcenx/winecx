@@ -86,6 +86,9 @@ fi
 
 if [ -x "$topdir/loader/$name" ]
 then WINELOADER="$topdir/loader/$name"
+elif [ -n "$WINE_USE_32ON64" ] || ( [ -x "$topdir/loader/wine32on64" ] && \
+    [ -r /usr/lib/libSystem.dylib ] && ! file /usr/lib/libSystem.dylib 2>/dev/null | grep -qs i386 )
+then WINELOADER="$topdir/loader/wine32on64"
 elif [ -x "$topdir/loader/wine" ]
 then WINELOADER="$topdir/loader/wine"
 elif [ -x "$topdir/loader/wine64" ]

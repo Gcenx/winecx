@@ -33,7 +33,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
 
 #define IS_VM86_MODE(ctx) (ctx->EFlags & V86_FLAG)
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 static ADDRESS_MODE get_selector_type(HANDLE hThread, const CONTEXT* ctx, WORD sel)
 {
     LDT_ENTRY	le;
@@ -75,7 +75,7 @@ static BOOL i386_build_addr(HANDLE hThread, const CONTEXT* ctx, ADDRESS64* addr,
 static BOOL i386_get_addr(HANDLE hThread, const CONTEXT* ctx,
                           enum cpu_addr ca, ADDRESS64* addr)
 {
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     switch (ca)
     {
     case cpu_addr_pc:    return i386_build_addr(hThread, ctx, addr, ctx->SegCs, ctx->Eip);
@@ -670,7 +670,7 @@ static BOOL i386_fetch_minidump_thread(struct dump_context* dc, unsigned index, 
     if (ctx->ContextFlags && (flags & ThreadWriteInstructionWindow))
     {
         /* FIXME: crop values across module boundaries, */
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
         ULONG base = ctx->Eip <= 0x80 ? 0 : ctx->Eip - 0x80;
         minidump_add_memory_block(dc, base, ctx->Eip + 0x80 - base, 0);
 #endif

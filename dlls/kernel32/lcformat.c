@@ -2312,7 +2312,7 @@ BOOL WINAPI EnumCalendarInfoExEx( CALINFO_ENUMPROCEXEX calinfoproc, LPCWSTR loca
 {
   struct enumcalendar_context ctxt;
 
-  TRACE("(%p,%s,0x%08x,%p,0x%08x,0x%ld)\n", calinfoproc, debugstr_w(locale), calendar, reserved, caltype, lParam);
+  TRACE("(%p,%s,0x%08x,%p,0x%08x,0x%ld)\n", calinfoproc, debugstr_w(locale), calendar, reserved, caltype, (long)lParam);
 
   ctxt.type = CALLBACK_ENUMPROCEXEX;
   ctxt.u.callbackexex = calinfoproc;

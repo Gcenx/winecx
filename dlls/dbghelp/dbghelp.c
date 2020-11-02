@@ -24,6 +24,7 @@
 #include "winerror.h"
 #include "psapi.h"
 #include "wine/debug.h"
+#include "wine/library.h"
 #include "wdbgexts.h"
 #include "winnls.h"
 
@@ -65,6 +66,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
  */
 
 unsigned   dbghelp_options = SYMOPT_UNDNAME;
+BOOL       dbghelp_opt_native = FALSE;
 
 static struct process* process_first /* = NULL */;
 
@@ -87,7 +89,7 @@ struct process*    process_find_by_handle(HANDLE hProcess)
  */
 BOOL validate_addr64(DWORD64 addr)
 {
-    if (sizeof(void*) == sizeof(int) && (addr >> 32))
+    if (!wine_is_64bit() && (addr >> 32))
     {
         FIXME("Unsupported address %s\n", wine_dbgstr_longlong(addr));
         SetLastError(ERROR_INVALID_PARAMETER);
@@ -114,7 +116,7 @@ void* fetch_buffer(struct process* pcs, unsigned size)
     return pcs->buffer;
 }
 
-const char* wine_dbgstr_addr(const ADDRESS64* addr)
+const char* HOSTPTR wine_dbgstr_addr(const ADDRESS64* addr)
 {
     if (!addr) return "(null)";
     switch (addr->Mode)
@@ -136,7 +138,7 @@ extern struct cpu       cpu_i386, cpu_x86_64, cpu_ppc, cpu_arm, cpu_arm64;
 
 static struct cpu*      dbghelp_cpus[] = {&cpu_i386, &cpu_x86_64, &cpu_ppc, &cpu_arm, &cpu_arm64, NULL};
 struct cpu*             dbghelp_current_cpu =
-#if defined(__i386__)
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     &cpu_i386
 #elif defined(__x86_64__)
     &cpu_x86_64
@@ -317,7 +319,8 @@ BOOL WINAPI SymInitializeW(HANDLE hProcess, PCWSTR UserSearchPath, BOOL fInvadeP
     if (!pcs) return FALSE;
 
     pcs->handle = hProcess;
-    pcs->is_64bit = (sizeof(void *) == 8 || wow64) && !child_wow64;
+    pcs->is_64bit = (wine_is_64bit() || wow64) && !child_wow64;
+    pcs->is_32on64 = !pcs->is_64bit && wine_needs_32on64();
 
     if (UserSearchPath)
     {
@@ -449,6 +452,44 @@ DWORD WINAPI SymSetOptions(DWORD opts)
 DWORD WINAPI SymGetOptions(void)
 {
     return dbghelp_options;
+}
+
+/******************************************************************
+ *		SymSetExtendedOption (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymSetExtendedOption(IMAGEHLP_EXTENDED_OPTIONS option, BOOL value)
+{
+    BOOL old = FALSE;
+
+    switch(option)
+    {
+        case SYMOPT_EX_WINE_NATIVE_MODULES:
+            old = dbghelp_opt_native;
+            dbghelp_opt_native = value;
+            break;
+        default:
+            FIXME("Unsupported option %d with value %d\n", option, value);
+    }
+
+    return old;
+}
+
+/******************************************************************
+ *		SymGetExtendedOption (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymGetExtendedOption(IMAGEHLP_EXTENDED_OPTIONS option)
+{
+    switch(option)
+    {
+        case SYMOPT_EX_WINE_NATIVE_MODULES:
+            return dbghelp_opt_native;
+        default:
+            FIXME("Unsupported option %d\n", option);
+    }
+
+    return FALSE;
 }
 
 /******************************************************************

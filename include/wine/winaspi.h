@@ -24,6 +24,7 @@
 
 /* Include base aspi defs */
 #include <wnaspi32.h>
+#include <wine/winheader_enter.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -139,5 +140,7 @@ extern WORD WINAPI GetASPISupportInfo16(void);
 #ifdef __cplusplus
 }
 #endif /* #ifdef __cplusplus */
+
+#include <wine/winheader_exit.h>
 
 #endif /* __WINE_WINASPI_H */

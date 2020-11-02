@@ -26,6 +26,8 @@
 #include "msvcrt.h"
 #include "wine/debug.h"
 #include "ntsecapi.h"
+#include "windows.h"
+#include "wine/asm.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
@@ -158,7 +160,7 @@ void* CDECL MSVCRT_bsearch_s(const void *key, const void *base,
                              int (__cdecl *compare)(void *, const void *, const void *), void *ctx)
 {
     ssize_t min = 0;
-    ssize_t max = nmemb - 1;
+    ssize_t max = (ssize_t)nmemb - 1;
 
     if (!MSVCRT_CHECK_PMT(size != 0)) return NULL;
     if (!MSVCRT_CHECK_PMT(compare != NULL)) return NULL;
@@ -212,9 +214,11 @@ void* CDECL MSVCRT_bsearch(const void *key, const void *base, MSVCRT_size_t nmem
  *  the function is incorrect.  It can also mean that the .spec entry has
  *  the wrong calling convention or parameters.
  */
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 
 # ifdef __GNUC__
+
+#  ifdef __i386__
 
 __ASM_GLOBAL_FUNC(_chkesp,
                   "jnz 1f\n\t"
@@ -236,6 +240,31 @@ __ASM_GLOBAL_FUNC(_chkesp,
                   __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
                   __ASM_CFI(".cfi_same_value %ebp\n\t")
                   "ret")
+#  else
+
+extern void CDECL _chkesp(void);
+__ASM_GLOBAL_FUNC32(__ASM_THUNK_NAME(_chkesp),
+                    "jnz 1f\n\t"
+                    "ret\n"
+                    "1:\tpushl %ebp\n\t"
+                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                    __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                    "movl %esp,%ebp\n\t"
+                    __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                    "subl $12,%esp\n\t"
+                    "pushl %eax\n\t"
+                    "pushl %ecx\n\t"
+                    "pushl %edx\n\t"
+                    "call " __ASM_THUNK_SYMBOL("MSVCRT_chkesp_fail") "\n\t"
+                    "popl %edx\n\t"
+                    "popl %ecx\n\t"
+                    "popl %eax\n\t"
+                    "leave\n\t"
+                    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                    __ASM_CFI(".cfi_same_value %ebp\n\t")
+                    "ret")
+
+#  endif
 
 void CDECL DECLSPEC_HIDDEN MSVCRT_chkesp_fail(void)
 {
@@ -253,7 +282,7 @@ void CDECL _chkesp(void)
 
 # endif  /* __GNUC__ */
 
-#endif  /* __i386__ */
+#endif  /* __i386__ || __i386_on_x86_64__ */
 
 static inline void swap(char *l, char *r, MSVCRT_size_t size)
 {
@@ -517,8 +546,8 @@ int CDECL MSVCR110__crtGetShowWindowMode(void)
     STARTUPINFOW si;
 
     GetStartupInfoW(&si);
-    TRACE("window=%d\n", si.wShowWindow);
-    return si.wShowWindow;
+    TRACE("flags=%x window=%d\n", si.dwFlags, si.wShowWindow);
+    return si.dwFlags & STARTF_USESHOWWINDOW ? si.wShowWindow : SW_SHOWDEFAULT;
 }
 
 /*********************************************************************

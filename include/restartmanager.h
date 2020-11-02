@@ -19,6 +19,8 @@
 #ifndef RESTARTMANAGER_H
 #define RESTARTMANAGER_H
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -69,5 +71,7 @@ typedef void (CDECL *RM_WRITE_STATUS_CALLBACK)(UINT);
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* RESTARTMANAGER_H */

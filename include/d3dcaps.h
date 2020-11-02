@@ -19,9 +19,11 @@
 #ifndef __WINE_D3DCAPS_H
 #define __WINE_D3DCAPS_H
 
+#include "wine/winheader_enter.h"
+
 #include <ddraw.h>
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 #include <pshpack4.h>
 #endif
 
@@ -432,8 +434,10 @@ typedef struct _D3DDEVINFO_TEXTURING {
 	DWORD   dwNumGetDCs;
 } D3DDEVINFO_TEXTURING, *LPD3DDEVINFO_TEXTURING;
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 #include <poppack.h>
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif

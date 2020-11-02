@@ -67,6 +67,26 @@ static const unsigned char bmp_8bpp[] = {
 0x00,0x00
 };
 
+/* 2x2 bmp (32 bpp XRGB) */
+static const unsigned char bmp_32bpp_xrgb[] =
+{
+    0x42,0x4d,0x46,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x36,0x00,0x00,0x00,0x28,0x00,
+    0x00,0x00,0x02,0x00,0x00,0x00,0x02,0x00,0x00,0x00,0x01,0x00,0x20,0x00,0x00,0x00,
+    0x00,0x00,0x10,0x00,0x00,0x00,0x12,0x0b,0x00,0x00,0x12,0x0b,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0xa0,0xb0,0xc0,0x00,0xa1,0xb1,0xc1,0x00,0xa2,0xb2,
+    0xc2,0x00,0xa3,0xb3,0xc3,0x00
+};
+
+/* 2x2 bmp (32 bpp ARGB) */
+static const unsigned char bmp_32bpp_argb[] =
+{
+    0x42,0x4d,0x46,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x36,0x00,0x00,0x00,0x28,0x00,
+    0x00,0x00,0x02,0x00,0x00,0x00,0x02,0x00,0x00,0x00,0x01,0x00,0x20,0x00,0x00,0x00,
+    0x00,0x00,0x10,0x00,0x00,0x00,0x12,0x0b,0x00,0x00,0x12,0x0b,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0xa0,0xb0,0xc0,0x00,0xa1,0xb1,0xc1,0x00,0xa2,0xb2,
+    0xc2,0x00,0xa3,0xb3,0xc3,0x01
+};
+
 static const unsigned char png_grayscale[] =
 {
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49,
@@ -560,6 +580,13 @@ static void test_D3DXGetImageInfo(void)
     ok(info.Depth == 1, "Got depth %u, expected 1\n", info.Depth);
     ok(info.Format == D3DFMT_P8, "Got format %u, expected %u\n", info.Format, D3DFMT_P8);
 
+    hr = D3DXGetImageInfoFromFileInMemory(bmp_32bpp_xrgb, sizeof(bmp_32bpp_xrgb), &info);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(info.Format == D3DFMT_X8R8G8B8, "Got unexpected format %u.\n", info.Format);
+    hr = D3DXGetImageInfoFromFileInMemory(bmp_32bpp_argb, sizeof(bmp_32bpp_argb), &info);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    todo_wine ok(info.Format == D3DFMT_A8R8G8B8, "Got unexpected format %u.\n", info.Format);
+
     /* Grayscale PNG */
     hr = D3DXGetImageInfoFromFileInMemory(png_grayscale, sizeof(png_grayscale), &info);
     ok(hr == D3D_OK, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
@@ -847,21 +874,24 @@ static void test_D3DXLoadSurface(IDirect3DDevice9 *device)
 
     /* non-lockable render target */
     hr = IDirect3DDevice9_CreateRenderTarget(device, 256, 256, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &newsurf, NULL);
-    if (SUCCEEDED(hr)) {
-        hr = D3DXLoadSurfaceFromSurface(surf, NULL, NULL, newsurf, NULL, NULL, D3DX_FILTER_NONE, 0);
-        ok(hr == D3D_OK, "D3DXLoadSurfaceFromSurface returned %#x, expected %#x\n", hr, D3D_OK);
-
-        IDirect3DSurface9_Release(newsurf);
-    } else skip("Failed to create render target surface\n");
+    ok(hr == D3D_OK, "Unexpected hr %#x.\n", hr);
+    hr = D3DXLoadSurfaceFromSurface(surf, NULL, NULL, newsurf, NULL, NULL, D3DX_FILTER_NONE, 0);
+    ok(hr == D3D_OK, "Unexpected hr %#x.\n", hr);
+    IDirect3DSurface9_Release(newsurf);
 
     /* non-lockable multisampled render target */
     hr = IDirect3DDevice9_CreateRenderTarget(device, 256, 256, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_2_SAMPLES, 0, FALSE, &newsurf, NULL);
-    if (SUCCEEDED(hr)) {
+    if (SUCCEEDED(hr))
+    {
        hr = D3DXLoadSurfaceFromSurface(surf, NULL, NULL, newsurf, NULL, NULL, D3DX_FILTER_NONE, 0);
-       ok(hr == D3D_OK, "D3DXLoadSurfaceFromSurface returned %#x, expected %#x\n", hr, D3D_OK);
+       ok(hr == D3D_OK, "Unexpected hr %#x.\n", hr);
 
        IDirect3DSurface9_Release(newsurf);
-    } else skip("Failed to create multisampled render target.\n");
+    }
+    else
+    {
+        skip("Failed to create multisampled render target.\n");
+    }
 
     hr = IDirect3DDevice9_GetRenderTarget(device, 0, &newsurf);
     ok(hr == D3D_OK, "IDirect3DDevice9_GetRenderTarget returned %#x, expected %#x.\n", hr, D3D_OK);
@@ -1253,16 +1283,30 @@ static void test_D3DXLoadSurface(IDirect3DDevice9 *device)
 
 static void test_D3DXSaveSurfaceToFileInMemory(IDirect3DDevice9 *device)
 {
-    HRESULT hr;
-    RECT rect;
-    ID3DXBuffer *buffer;
-    IDirect3DSurface9 *surface;
+    static const struct
+    {
+        DWORD usage;
+        D3DPOOL pool;
+    }
+    test_access_types[] =
+    {
+        {0,  D3DPOOL_MANAGED},
+        {0,  D3DPOOL_DEFAULT},
+        {D3DUSAGE_RENDERTARGET, D3DPOOL_DEFAULT},
+    };
+
     struct
     {
          DWORD magic;
          struct dds_header header;
          BYTE *data;
     } *dds;
+    IDirect3DSurface9 *surface;
+    IDirect3DTexture9 *texture;
+    ID3DXBuffer *buffer;
+    unsigned int i;
+    HRESULT hr;
+    RECT rect;
 
     hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 4, 4, D3DFMT_A8R8G8B8, D3DPOOL_SCRATCH, &surface, NULL);
     if (FAILED(hr)) {
@@ -1317,6 +1361,27 @@ static void test_D3DXSaveSurfaceToFileInMemory(IDirect3DDevice9 *device)
     ID3DXBuffer_Release(buffer);
 
     IDirect3DSurface9_Release(surface);
+
+    for (i = 0; i < ARRAY_SIZE(test_access_types); ++i)
+    {
+        hr = IDirect3DDevice9_CreateTexture(device, 4, 4, 0, test_access_types[i].usage,
+                D3DFMT_A8R8G8B8, test_access_types[i].pool, &texture, NULL);
+        ok(hr == D3D_OK, "Unexpected hr %#x, i %u.\n", hr, i);
+
+        hr = IDirect3DTexture9_GetSurfaceLevel(texture, 0, &surface);
+        ok(hr == D3D_OK, "Unexpected hr %#x, i %u.\n", hr, i);
+
+        hr = D3DXSaveSurfaceToFileInMemory(&buffer, D3DXIFF_DDS, surface, NULL, NULL);
+        ok(hr == D3D_OK, "Unexpected hr %#x, i %u.\n", hr, i);
+        ID3DXBuffer_Release(buffer);
+
+        hr = D3DXSaveSurfaceToFileInMemory(&buffer, D3DXIFF_BMP, surface, NULL, NULL);
+        ok(hr == D3D_OK, "Unexpected hr %#x, i %u.\n", hr, i);
+        ID3DXBuffer_Release(buffer);
+
+        IDirect3DSurface9_Release(surface);
+        IDirect3DTexture9_Release(texture);
+    }
 }
 
 static void test_D3DXSaveSurfaceToFile(IDirect3DDevice9 *device)

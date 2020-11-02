@@ -33,8 +33,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 #define UNLOCK_HEAP _munlock( _HEAP_LOCK )
 
 /* _aligned */
-#define SAVED_PTR(x) ((void *)((DWORD_PTR)((char *)x - sizeof(void *)) & \
-                               ~(sizeof(void *) - 1)))
+#define SAVED_PTR(x) TRUNCCAST(void *, (DWORD_PTR)((char *)x - sizeof(void *)) & \
+                               ~(sizeof(void *) - 1))
 #define ALIGN_PTR(ptr, alignment, offset) ((void *) \
     ((((DWORD_PTR)((char *)ptr + alignment + sizeof(void *) + offset)) & \
       ~(alignment - 1)) - offset))

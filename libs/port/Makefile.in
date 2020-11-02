@@ -73,6 +73,9 @@ C_SRCS = \
 	c_936.c \
 	c_949.c \
 	c_950.c \
+	casemap.c \
+	collation.c \
+	combclass.c \
 	compose.c \
 	cpsymbol.c \
 	cptable.c \
@@ -82,28 +85,27 @@ C_SRCS = \
 	fold.c \
 	fstatvfs.c \
 	getopt.c \
-	getopt1.c \
 	interlocked.c \
 	isfinite.c \
 	isinf.c \
 	isnan.c \
 	lstat.c \
 	mbtowc.c \
-	memcpy_unaligned.c \
-	memmove.c \
 	mkstemps.c \
+	normalize.c \
 	poll.c \
 	pread.c \
 	pwrite.c \
 	readlink.c \
 	rint.c \
+	sortkey.c \
 	spawn.c \
 	statvfs.c \
-	strcasecmp.c \
-	strerror.c \
-	strncasecmp.c \
+	string.c \
 	strnlen.c \
+	stubs.c \
 	symlink.c \
 	usleep.c \
 	utf8.c \
-	wctomb.c
+	wctomb.c \
+	wctype.c

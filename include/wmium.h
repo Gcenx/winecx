@@ -19,10 +19,12 @@
 #ifndef _WMIUM_
 #define _WMIUM_
 
+#include "wine/winheader_enter.h"
+
 #ifdef _WMI_SOURCE_
 #define WMIAPI __stdcall
 #else
-#define WMIAPI DECLSPEC_IMPORT __stdcall
+#define WMIAPI DECLSPEC_HIDDEN __stdcall
 #endif
 
 #include <guiddef.h>
@@ -112,5 +114,7 @@ ULONG WMIAPI WmiSetSingleItemW(WMIHANDLE, const WCHAR *, ULONG, ULONG, ULONG, vo
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif  /* _WMIUM_ */

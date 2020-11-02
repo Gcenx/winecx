@@ -26,21 +26,19 @@
 #include <windef.h>
 #include <winbase.h>
 #include <winnls.h>
+#include <wine/hostaddrspace_enter.h>
+#include <wine/asm.h>
 
 #ifdef __WINE_WINE_TEST_H
 #error This file should not be used in Wine tests
 #endif
 
-#ifdef __cplusplus
-extern "C" {
+#ifdef __WINE_USE_MSVCRT
+#error This file should not be used with msvcrt headers
 #endif
 
-#ifndef WINE_UNICODE_API
-# if defined(_MSC_VER) || defined(__MINGW32__)
-#  define WINE_UNICODE_API DECLSPEC_IMPORT
-# else
-#  define WINE_UNICODE_API
-# endif
+#ifdef __cplusplus
+extern "C" {
 #endif
 
 #ifndef WINE_UNICODE_INLINE
@@ -60,8 +58,8 @@ struct cp_info
 struct sbcs_table
 {
     struct cp_info        info;
-    const WCHAR          *cp2uni;            /* code page -> Unicode map */
-    const WCHAR          *cp2uni_glyphs;     /* code page -> Unicode map with glyph chars */
+    const WCHAR * HOSTPTR cp2uni;            /* code page -> Unicode map */
+    const WCHAR * HOSTPTR cp2uni_glyphs;     /* code page -> Unicode map with glyph chars */
     const unsigned char  *uni2cp_low;        /* Unicode -> code page map */
     const unsigned short *uni2cp_high;
 };
@@ -69,7 +67,7 @@ struct sbcs_table
 struct dbcs_table
 {
     struct cp_info        info;
-    const WCHAR          *cp2uni;            /* code page -> Unicode map */
+    const WCHAR * HOSTPTR cp2uni;            /* code page -> Unicode map */
     const unsigned char  *cp2uni_leadbytes;
     const unsigned short *uni2cp_low;        /* Unicode -> code page map */
     const unsigned short *uni2cp_high;
@@ -88,29 +86,40 @@ extern const union cptable *wine_cp_enum_table( unsigned int index );
 
 extern int wine_cp_mbstowcs( const union cptable *table, int flags,
                              const char *src, int srclen,
-                             WCHAR *dst, int dstlen );
+                             WCHAR * HOSTPTR dst, int dstlen );
 extern int wine_cp_wcstombs( const union cptable *table, int flags,
-                             const WCHAR *src, int srclen,
+                             const WCHAR * HOSTPTR src, int srclen,
                              char *dst, int dstlen, const char *defchar, int *used );
-extern int wine_cpsymbol_mbstowcs( const char *src, int srclen, WCHAR *dst, int dstlen );
-extern int wine_cpsymbol_wcstombs( const WCHAR *src, int srclen, char *dst, int dstlen );
-extern int wine_utf8_mbstowcs( int flags, const char *src, int srclen, WCHAR *dst, int dstlen );
-extern int wine_utf8_wcstombs( int flags, const WCHAR *src, int srclen, char *dst, int dstlen );
+extern int wine_cpsymbol_mbstowcs( const char *src, int srclen, WCHAR * HOSTPTR dst, int dstlen );
+extern int wine_cpsymbol_wcstombs( const WCHAR * HOSTPTR src, int srclen, char *dst, int dstlen );
+extern int wine_utf8_mbstowcs( int flags, const char *src, int srclen, WCHAR * HOSTPTR dst, int dstlen );
+extern int wine_utf8_wcstombs( int flags, const WCHAR * HOSTPTR src, int srclen, char *dst, int dstlen );
 
-extern int wine_compare_string( int flags, const WCHAR *str1, int len1, const WCHAR *str2, int len2 );
-extern int wine_get_sortkey( int flags, const WCHAR *src, int srclen, char *dst, int dstlen );
-extern int wine_fold_string( int flags, const WCHAR *src, int srclen , WCHAR *dst, int dstlen );
+extern int wine_compare_string( int flags, const WCHAR * HOSTPTR str1, int len1, const WCHAR * HOSTPTR str2, int len2 );
+extern int wine_get_sortkey( int flags, const WCHAR * HOSTPTR src, int srclen, char *dst, int dstlen );
+extern int wine_fold_string( int flags, const WCHAR * HOSTPTR src, int srclen , WCHAR * HOSTPTR dst, int dstlen );
 
-extern int strcmpiW( const WCHAR *str1, const WCHAR *str2 );
-extern int strncmpiW( const WCHAR *str1, const WCHAR *str2, int n );
-extern int memicmpW( const WCHAR *str1, const WCHAR *str2, int n );
-extern WCHAR *strstrW( const WCHAR *str, const WCHAR *sub );
-extern long int strtolW( const WCHAR *nptr, WCHAR **endptr, int base );
-extern unsigned long int strtoulW( const WCHAR *nptr, WCHAR **endptr, int base );
-extern int sprintfW( WCHAR *str, const WCHAR *format, ... );
-extern int snprintfW( WCHAR *str, size_t len, const WCHAR *format, ... );
-extern int vsprintfW( WCHAR *str, const WCHAR *format, va_list valist );
-extern int vsnprintfW( WCHAR *str, size_t len, const WCHAR *format, va_list valist );
+extern unsigned int wine_compose_string( WCHAR * HOSTPTR str, unsigned int len );
+extern unsigned int wine_decompose_string( int flags, const WCHAR * HOSTPTR src, unsigned int srclen, WCHAR * HOSTPTR dst, unsigned int dstlen );
+#define WINE_DECOMPOSE_COMPAT     1
+#define WINE_DECOMPOSE_REORDER    2
+
+extern int strcmpiW( const WCHAR * HOSTPTR str1, const WCHAR * HOSTPTR str2 );
+extern int strncmpiW( const WCHAR * HOSTPTR str1, const WCHAR * HOSTPTR str2, int n );
+extern int memicmpW( const WCHAR * HOSTPTR str1, const WCHAR * HOSTPTR str2, int n );
+extern WCHAR * HOSTPTR strstrW( const WCHAR * HOSTPTR str, const WCHAR * HOSTPTR sub );
+extern long int strtolW( const WCHAR * HOSTPTR nptr, WCHAR * HOSTPTR * HOSTPTR endptr, int base );
+extern unsigned long int strtoulW( const WCHAR * HOSTPTR nptr, WCHAR * HOSTPTR * HOSTPTR endptr, int base );
+extern int sprintfW( WCHAR * HOSTPTR str, const WCHAR * HOSTPTR format, ... );
+extern int snprintfW( WCHAR * HOSTPTR str, size_t len, const WCHAR * HOSTPTR format, ... );
+extern int vsprintfW( WCHAR * HOSTPTR str, const WCHAR * HOSTPTR format, va_list valist );
+extern int vsnprintfW( WCHAR * HOSTPTR str, size_t len, const WCHAR * HOSTPTR format, va_list valist );
+
+#ifdef __i386_on_x86_64__
+extern WCHAR * WIN32PTR strstrW( const WCHAR * WIN32PTR str, const WCHAR * HOSTPTR sub ) __attribute__((overloadable)) asm(__ASM_NAME("strstrW_WIN32PTR"));
+extern long int strtolW( const WCHAR * WIN32PTR nptr, WCHAR * WIN32PTR * WIN32PTR endptr, int base ) __attribute__((overloadable)) asm(__ASM_NAME("strtolW_WIN32PTR"));
+extern unsigned long int strtoulW( const WCHAR * WIN32PTR nptr, WCHAR * WIN32PTR * WIN32PTR endptr, int base ) __attribute__((overloadable)) asm(__ASM_NAME("strtoulW_WIN32PTR"));
+#endif
 
 WINE_UNICODE_INLINE int wine_is_dbcs_leadbyte( const union cptable *table, unsigned char ch )
 {
@@ -119,13 +128,13 @@ WINE_UNICODE_INLINE int wine_is_dbcs_leadbyte( const union cptable *table, unsig
 
 WINE_UNICODE_INLINE WCHAR tolowerW( WCHAR ch )
 {
-    extern WINE_UNICODE_API const WCHAR wine_casemap_lower[];
+    extern const WCHAR wine_casemap_lower[];
     return ch + wine_casemap_lower[wine_casemap_lower[ch >> 8] + (ch & 0xff)];
 }
 
 WINE_UNICODE_INLINE WCHAR toupperW( WCHAR ch )
 {
-    extern WINE_UNICODE_API const WCHAR wine_casemap_upper[];
+    extern const WCHAR wine_casemap_upper[];
     return ch + wine_casemap_upper[wine_casemap_upper[ch >> 8] + (ch & 0xff)];
 }
 
@@ -133,7 +142,7 @@ WINE_UNICODE_INLINE WCHAR toupperW( WCHAR ch )
 /* and the C2_* type in the high 4 bits */
 WINE_UNICODE_INLINE unsigned short get_char_typeW( WCHAR ch )
 {
-    extern WINE_UNICODE_API const unsigned short wine_wctype_table[];
+    extern const unsigned short wine_wctype_table[];
     return wine_wctype_table[wine_wctype_table[ch >> 8] + (ch & 0xff)];
 }
 
@@ -194,14 +203,14 @@ WINE_UNICODE_INLINE int isprintW( WCHAR wc )
 
 /* some useful string manipulation routines */
 
-WINE_UNICODE_INLINE unsigned int strlenW( const WCHAR *str )
+WINE_UNICODE_INLINE unsigned int strlenW( const WCHAR * HOSTPTR str )
 {
-    const WCHAR *s = str;
+    const WCHAR * HOSTPTR s = str;
     while (*s) s++;
     return s - str;
 }
 
-WINE_UNICODE_INLINE WCHAR *strcpyW( WCHAR *dst, const WCHAR *src )
+WINE_UNICODE_INLINE WCHAR *strcpyW( WCHAR *dst, const WCHAR * HOSTPTR src )
 {
     WCHAR *p = dst;
     while ((*p++ = *src++));
@@ -211,61 +220,86 @@ WINE_UNICODE_INLINE WCHAR *strcpyW( WCHAR *dst, const WCHAR *src )
 /* strncpy doesn't do what you think, don't use it */
 #define strncpyW(d,s,n) error do_not_use_strncpyW_use_lstrcpynW_or_memcpy_instead
 
-WINE_UNICODE_INLINE int strcmpW( const WCHAR *str1, const WCHAR *str2 )
+WINE_UNICODE_INLINE int strcmpW( const WCHAR * HOSTPTR str1, const WCHAR * HOSTPTR str2 )
 {
     while (*str1 && (*str1 == *str2)) { str1++; str2++; }
     return *str1 - *str2;
 }
 
-WINE_UNICODE_INLINE int strncmpW( const WCHAR *str1, const WCHAR *str2, int n )
+WINE_UNICODE_INLINE int strncmpW( const WCHAR * HOSTPTR str1, const WCHAR * HOSTPTR str2, int n )
 {
     if (n <= 0) return 0;
     while ((--n > 0) && *str1 && (*str1 == *str2)) { str1++; str2++; }
     return *str1 - *str2;
 }
 
-WINE_UNICODE_INLINE WCHAR *strcatW( WCHAR *dst, const WCHAR *src )
+WINE_UNICODE_INLINE WCHAR *strcatW( WCHAR *dst, const WCHAR * HOSTPTR src )
 {
     strcpyW( dst + strlenW(dst), src );
     return dst;
 }
 
-WINE_UNICODE_INLINE WCHAR *strchrW( const WCHAR *str, WCHAR ch )
+WINE_UNICODE_INLINE WCHAR * WIN32PTR strchrW( const WCHAR * WIN32PTR str, WCHAR ch )
 {
-    do { if (*str == ch) return (WCHAR *)(ULONG_PTR)str; } while (*str++);
+    do { if (*str == ch) return (WCHAR * WIN32PTR)(ULONG_PTR)str; } while (*str++);
     return NULL;
 }
 
-WINE_UNICODE_INLINE WCHAR *strrchrW( const WCHAR *str, WCHAR ch )
+#ifdef __i386_on_x86_64__
+WINE_UNICODE_INLINE WCHAR * HOSTPTR strchrW( const WCHAR * HOSTPTR str, WCHAR ch ) __attribute__((overloadable))
 {
-    WCHAR *ret = NULL;
-    do { if (*str == ch) ret = (WCHAR *)(ULONG_PTR)str; } while (*str++);
+    do { if (*str == ch) return (WCHAR * HOSTPTR)(ULONGLONG)str; } while (*str++);
+    return NULL;
+}
+#endif
+
+WINE_UNICODE_INLINE WCHAR * WIN32PTR strrchrW( const WCHAR * WIN32PTR str, WCHAR ch )
+{
+    WCHAR * WIN32PTR ret = NULL;
+    do { if (*str == ch) ret = (WCHAR * WIN32PTR)(ULONG_PTR)str; } while (*str++);
     return ret;
 }
 
-WINE_UNICODE_INLINE WCHAR *strpbrkW( const WCHAR *str, const WCHAR *accept )
+#ifdef __i386_on_x86_64__
+WINE_UNICODE_INLINE WCHAR * HOSTPTR strrchrW( const WCHAR * HOSTPTR str, WCHAR ch ) __attribute__((overloadable))
 {
-    for ( ; *str; str++) if (strchrW( accept, *str )) return (WCHAR *)(ULONG_PTR)str;
+    WCHAR * HOSTPTR ret = NULL;
+    do { if (*str == ch) ret = (WCHAR * HOSTPTR)(ULONGLONG)str; } while (*str++);
+    return ret;
+}
+#endif
+
+WINE_UNICODE_INLINE WCHAR * WIN32PTR strpbrkW( const WCHAR * WIN32PTR str, const WCHAR * WIN32PTR accept )
+{
+    for ( ; *str; str++) if (strchrW( accept, *str )) return (WCHAR * WIN32PTR)(ULONG_PTR)str;
     return NULL;
 }
 
-WINE_UNICODE_INLINE size_t strspnW( const WCHAR *str, const WCHAR *accept )
+#ifdef __i386_on_x86_64__
+WINE_UNICODE_INLINE WCHAR * HOSTPTR strpbrkW( const WCHAR * HOSTPTR str, const WCHAR * HOSTPTR accept ) __attribute__((overloadable))
 {
-    const WCHAR *ptr;
+    for ( ; *str; str++) if (strchrW( accept, *str )) return (WCHAR * HOSTPTR)(ULONGLONG)str;
+    return NULL;
+}
+#endif
+
+WINE_UNICODE_INLINE size_t strspnW( const WCHAR * HOSTPTR str, const WCHAR *accept )
+{
+    const WCHAR * HOSTPTR ptr;
     for (ptr = str; *ptr; ptr++) if (!strchrW( accept, *ptr )) break;
     return ptr - str;
 }
 
-WINE_UNICODE_INLINE size_t strcspnW( const WCHAR *str, const WCHAR *reject )
+WINE_UNICODE_INLINE size_t strcspnW( const WCHAR * HOSTPTR str, const WCHAR *reject )
 {
-    const WCHAR *ptr;
+    const WCHAR * HOSTPTR ptr;
     for (ptr = str; *ptr; ptr++) if (strchrW( reject, *ptr )) break;
     return ptr - str;
 }
 
-WINE_UNICODE_INLINE WCHAR *strlwrW( WCHAR *str )
+WINE_UNICODE_INLINE WCHAR * WIN32PTR strlwrW( WCHAR * WIN32PTR str )
 {
-    WCHAR *ret;
+    WCHAR * WIN32PTR ret;
     for (ret = str; *str; str++) *str = tolowerW(*str);
     return ret;
 }
@@ -277,27 +311,46 @@ WINE_UNICODE_INLINE WCHAR *struprW( WCHAR *str )
     return ret;
 }
 
-WINE_UNICODE_INLINE WCHAR *memchrW( const WCHAR *ptr, WCHAR ch, size_t n )
+WINE_UNICODE_INLINE WCHAR * WIN32PTR memchrW( const WCHAR * WIN32PTR ptr, WCHAR ch, size_t n )
 {
-    const WCHAR *end;
-    for (end = ptr + n; ptr < end; ptr++) if (*ptr == ch) return (WCHAR *)(ULONG_PTR)ptr;
+    const WCHAR * WIN32PTR end;
+    for (end = ptr + n; ptr < end; ptr++) if (*ptr == ch) return (WCHAR * WIN32PTR)(ULONG_PTR)ptr;
     return NULL;
 }
 
-WINE_UNICODE_INLINE WCHAR *memrchrW( const WCHAR *ptr, WCHAR ch, size_t n )
+#ifdef __i386_on_x86_64__
+WINE_UNICODE_INLINE WCHAR * HOSTPTR memchrW( const WCHAR * HOSTPTR ptr, WCHAR ch, size_t n ) __attribute__((overloadable))
 {
-    const WCHAR *end;
-    WCHAR *ret = NULL;
-    for (end = ptr + n; ptr < end; ptr++) if (*ptr == ch) ret = (WCHAR *)(ULONG_PTR)ptr;
+    const WCHAR * HOSTPTR end;
+    for (end = ptr + n; ptr < end; ptr++) if (*ptr == ch) return (WCHAR * HOSTPTR)(ULONGLONG)ptr;
+    return NULL;
+}
+#endif
+
+WINE_UNICODE_INLINE WCHAR * WIN32PTR memrchrW( const WCHAR * WIN32PTR ptr, WCHAR ch, size_t n )
+{
+    const WCHAR * WIN32PTR end;
+    WCHAR * WIN32PTR ret = NULL;
+    for (end = ptr + n; ptr < end; ptr++) if (*ptr == ch) ret = (WCHAR * WIN32PTR)(ULONG_PTR)ptr;
     return ret;
 }
 
-WINE_UNICODE_INLINE long int atolW( const WCHAR *str )
+#ifdef __i386_on_x86_64__
+WINE_UNICODE_INLINE WCHAR * HOSTPTR memrchrW( const WCHAR * HOSTPTR ptr, WCHAR ch, size_t n ) __attribute__((overloadable))
 {
-    return strtolW( str, (WCHAR **)0, 10 );
+    const WCHAR * HOSTPTR end;
+    WCHAR * HOSTPTR ret = NULL;
+    for (end = ptr + n; ptr < end; ptr++) if (*ptr == ch) ret = (WCHAR * HOSTPTR)(ULONGLONG)ptr;
+    return ret;
+}
+#endif
+
+WINE_UNICODE_INLINE long int atolW( const WCHAR * HOSTPTR str )
+{
+    return strtolW( str, 0, 10 );
 }
 
-WINE_UNICODE_INLINE int atoiW( const WCHAR *str )
+WINE_UNICODE_INLINE int atoiW( const WCHAR * HOSTPTR str )
 {
     return (int)atolW( str );
 }
@@ -307,5 +360,7 @@ WINE_UNICODE_INLINE int atoiW( const WCHAR *str )
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/hostaddrspace_exit.h"
 
 #endif  /* __WINE_WINE_UNICODE_H */

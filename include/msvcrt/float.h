@@ -9,6 +9,8 @@
 #ifndef __WINE_FLOAT_H
 #define __WINE_FLOAT_H
 
+#include "wine/winheader_enter.h"
+
 #include <crtdefs.h>
 
 #ifdef __cplusplus
@@ -128,7 +130,7 @@ extern "C" {
 #define _FPE_STACKUNDERFLOW     0x8b
 #define _FPE_EXPLICITGEN        0x8c
 
-#if defined(__i386__)
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 #define _CW_DEFAULT (_RC_NEAR + _PC_53 + _EM_INVALID + _EM_ZERODIVIDE + _EM_OVERFLOW + _EM_UNDERFLOW + _EM_INEXACT + _EM_DENORMAL)
 #elif defined(__x86_64__)
 #define _CW_DEFAULT (_RC_NEAR + _PC_64 + _EM_INVALID + _EM_ZERODIVIDE + _EM_OVERFLOW + _EM_UNDERFLOW + _EM_INEXACT + _EM_DENORMAL)
@@ -147,12 +149,14 @@ int    __cdecl _finite(double);
 int    __cdecl _isnan(double);
 int    __cdecl _fpclass(double);
 
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
 float __cdecl _scalbf(float, __msvcrt_long);
 #endif
 
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_FLOAT_H */

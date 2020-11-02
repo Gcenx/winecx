@@ -19,6 +19,8 @@
 #ifndef _WLAN_WLANAPI_H
 #define _WLAN_WLANAPI_H
 
+#include "wine/winheader_enter.h"
+
 typedef enum _WLAN_INTERFACE_STATE
 {
     wlan_interface_state_not_ready,
@@ -157,5 +159,7 @@ void WINAPI WlanFreeMemory(void *);
 DWORD WINAPI WlanScan(HANDLE, const GUID *, const DOT11_SSID *, const WLAN_RAW_DATA *, void *);
 DWORD WINAPI WlanRegisterNotification(HANDLE, DWORD, BOOL, WLAN_NOTIFICATION_CALLBACK, void *, void *, DWORD *);
 DWORD WINAPI WlanGetAvailableNetworkList(HANDLE, const GUID *, DWORD, void *, WLAN_AVAILABLE_NETWORK_LIST **);
+
+#include "wine/winheader_exit.h"
 
 #endif /* _WLAN_WLANAPI_H */

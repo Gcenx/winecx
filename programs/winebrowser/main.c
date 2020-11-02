@@ -42,6 +42,7 @@
 #include "wine/port.h"
 #include "wine/debug.h"
 #include "wine/unicode.h"
+#include "wine/heap.h"
 
 #include <windows.h>
 #include <shlwapi.h>
@@ -72,9 +73,9 @@ static char *strdup_unixcp( const WCHAR *str )
 /* try to launch a unix app from a comma separated string of app names */
 static int launch_app( const WCHAR *candidates, const WCHAR *argv1 )
 {
-    char *cmdline;
+    char * HOSTPTR cmdline;
     int i, count;
-    char **argv_new;
+    char * HOSTPTR * HOSTPTR argv_new;
 
     if (!(cmdline = strdup_unixcp( argv1 ))) return 1;
 
@@ -82,7 +83,7 @@ static int launch_app( const WCHAR *candidates, const WCHAR *argv1 )
     {
         WCHAR **args = CommandLineToArgvW( candidates, &count );
 
-        if (!(argv_new = HeapAlloc( GetProcessHeap(), 0, (count + 2) * sizeof(*argv_new) ))) break;
+        if (!(argv_new = heap_alloc( (count + 2) * sizeof(*argv_new) ))) break;
         for (i = 0; i < count; i++) argv_new[i] = strdup_unixcp( args[i] );
         argv_new[count] = cmdline;
         argv_new[count + 1] = NULL;
@@ -91,14 +92,14 @@ static int launch_app( const WCHAR *candidates, const WCHAR *argv1 )
         for (i = 0; i <= count; i++) TRACE( " %s", wine_dbgstr_a( argv_new[i] ));
         TRACE( "\n" );
 
-        _spawnvp( _P_OVERLAY, argv_new[0], (const char **)argv_new );  /* only returns on error */
-        for (i = 0; i < count; i++) HeapFree( GetProcessHeap(), 0, argv_new[i] );
-        HeapFree( GetProcessHeap(), 0, argv_new );
+        _spawnvp( _P_OVERLAY, argv_new[0], (const char * HOSTPTR * HOSTPTR)argv_new );  /* only returns on error */
+        for (i = 0; i < count; i++) heap_free( argv_new[i] );
+        heap_free( argv_new );
         candidates += strlenW( candidates ) + 1;  /* grab the next app */
     }
     WINE_ERR( "could not find a suitable app to open %s\n", debugstr_w( argv1 ));
 
-    HeapFree( GetProcessHeap(), 0, cmdline );
+    heap_free( cmdline );
     return 1;
 }
 
@@ -426,7 +427,7 @@ static WCHAR *convert_file_uri(IUri *uri)
  * Main entry point. This is a console application so we have a wmain() not a
  * winmain().
  */
-int wmain(int argc, WCHAR *argv[])
+int __cdecl wmain(int argc, WCHAR *argv[])
 {
     static const WCHAR nohomeW[] = {'-','n','o','h','o','m','e',0};
 

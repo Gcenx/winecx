@@ -25,6 +25,10 @@
 #include "config.h"
 #include "wine/port.h"
 
+#include <stdarg.h>
+#ifndef _VA_LIST_T /* Clang's stdarg.h guards with _VA_LIST, while Xcode's uses _VA_LIST_T */
+#define _VA_LIST_T
+#endif
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>

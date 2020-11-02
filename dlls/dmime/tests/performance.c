@@ -178,7 +178,7 @@ static HRESULT test_InitAudio(void)
 
     /* Provided dmusic initialized with SetDirectSound */
     create_performance(&performance, &dmusic, &dsound, TRUE);
-    IDirectMusic_SetDirectSound(dmusic, dsound, NULL);
+    hr = IDirectMusic_SetDirectSound(dmusic, dsound, NULL);
     ok(hr == S_OK, "SetDirectSound failed: %08x\n", hr);
     ref = get_refcount(dsound);
     ok(ref == 2, "dsound ref count got %d expected 2\n", ref);
@@ -192,7 +192,7 @@ static HRESULT test_InitAudio(void)
 
     /* Provided dmusic and dsound, dmusic initialized with SetDirectSound */
     create_performance(&performance, &dmusic, &dsound, TRUE);
-    IDirectMusic_SetDirectSound(dmusic, dsound, NULL);
+    hr = IDirectMusic_SetDirectSound(dmusic, dsound, NULL);
     ok(hr == S_OK, "SetDirectSound failed: %08x\n", hr);
     ref = get_refcount(dsound);
     ok(ref == 2, "dsound ref count got %d expected 2\n", ref);
@@ -314,6 +314,9 @@ static void test_createport(void)
     ok(hr == E_NOINTERFACE, "CreatePort failed: %08x\n", hr);
     ok(port == NULL, "Get IDirectMusicPort pointer? %p\n", port);
     ok(portparams.dwValidParams == 0, "portparams struct was filled in?\n");
+
+    hr = IDirectMusicPerformance8_CloseDown(perf);
+    ok(hr == S_OK, "CloseDown failed: %08x\n", hr);
 
     IDirectMusic_Release(music);
     IDirectMusicPerformance_Release(perf);

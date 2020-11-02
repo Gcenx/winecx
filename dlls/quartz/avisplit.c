@@ -105,6 +105,11 @@ static inline AVISplitterImpl *impl_from_IMediaSeeking( IMediaSeeking *iface )
     return CONTAINING_RECORD(iface, AVISplitterImpl, Parser.sourceSeeking.IMediaSeeking_iface);
 }
 
+static inline AVISplitterImpl *impl_from_IBaseFilter(IBaseFilter *iface)
+{
+    return CONTAINING_RECORD(iface, AVISplitterImpl, Parser.filter.IBaseFilter_iface);
+}
+
 /* The threading stuff cries for an explanation
  *
  * PullPin starts processing and calls AVISplitter_first_request
@@ -125,20 +130,14 @@ static inline AVISplitterImpl *impl_from_IMediaSeeking( IMediaSeeking *iface )
  * != S_OK occurs. This means that any error is fatal to processing.
  */
 
-static HRESULT AVISplitter_SendEndOfFile(AVISplitterImpl *This, DWORD streamnumber)
+static HRESULT AVISplitter_SendEndOfFile(AVISplitterImpl *filter, DWORD index)
 {
-    IPin* ppin = NULL;
-    HRESULT hr;
+    IPin *peer;
 
     TRACE("End of file reached\n");
 
-    hr = IPin_ConnectedTo(This->Parser.ppPins[streamnumber+1], &ppin);
-    if (SUCCEEDED(hr))
-    {
-        hr = IPin_EndOfStream(ppin);
-        IPin_Release(ppin);
-    }
-    TRACE("--> %x\n", hr);
+    if ((peer = filter->Parser.sources[index]->pin.pin.pConnectedTo))
+        IPin_EndOfStream(peer);
 
     /* Force the pullpin thread to stop */
     return S_FALSE;
@@ -292,7 +291,7 @@ static HRESULT AVISplitter_next_request(AVISplitterImpl *This, DWORD streamnumbe
 
 static HRESULT AVISplitter_Receive(AVISplitterImpl *This, IMediaSample *sample, DWORD streamnumber)
 {
-    Parser_OutputPin *pin = unsafe_impl_Parser_OutputPin_from_IPin(This->Parser.ppPins[1+streamnumber]);
+    Parser_OutputPin *pin = This->Parser.sources[streamnumber];
     HRESULT hr;
     LONGLONG start, stop, rtstart, rtstop;
     StreamData *stream = &This->streams[streamnumber];
@@ -407,7 +406,7 @@ static HRESULT AVISplitter_Sample(LPVOID iface, IMediaSample * pSample, DWORD_PT
      * That thread should also not have a sample queued at the moment
      */
     /* Debugging */
-    TRACE("(%p)->(%p size: %u, %lu)\n", This, pSample, IMediaSample_GetActualDataLength(pSample), cookie);
+    TRACE("(%p)->(%p size: %u, %lu)\n", This, pSample, IMediaSample_GetActualDataLength(pSample), (unsigned long)cookie);
     assert(cookie < This->Parser.cStreams);
     assert(!stream->sample);
     assert(WaitForSingleObject(stream->packet_queued, 0) == WAIT_TIMEOUT);
@@ -566,7 +565,7 @@ static HRESULT AVISplitter_ProcessIndex(AVISplitterImpl *This, AVISTDINDEX **ind
     if (!pIndex)
         return E_OUTOFMEMORY;
 
-    IAsyncReader_SyncRead((impl_PullPin_from_IPin(This->Parser.ppPins[0]))->pReader, qwOffset, cb, (BYTE *)pIndex);
+    IAsyncReader_SyncRead(This->Parser.pInputPin->pReader, qwOffset, cb, (BYTE *)pIndex);
     rest = cb - sizeof(AVISUPERINDEX) + sizeof(RIFFCHUNK) + sizeof(pIndex->aIndex);
 
     TRACE("FOURCC: %s\n", debugstr_an((char *)&pIndex->fcc, 4));
@@ -955,10 +954,8 @@ static HRESULT AVISplitter_InitializeStreams(AVISplitterImpl *This)
 
         for (x = 0; x < This->Parser.cStreams; ++x)
         {
-            if ((DWORD)This->streams[x].frames != This->streams[x].streamheader.dwLength)
-            {
-                FIXME("stream %u: frames found: %u, frames meant to be found: %u\n", x, (DWORD)This->streams[x].frames, This->streams[x].streamheader.dwLength);
-            }
+            if (This->streams[x].frames != This->streams[x].streamheader.dwLength)
+                FIXME("stream %u: frames found: %u, frames meant to be found: %u\n", x, This->streams[x].frames, This->streams[x].streamheader.dwLength);
         }
 
     }
@@ -1027,6 +1024,7 @@ static HRESULT AVISplitter_Disconnect(LPVOID iface);
 static HRESULT AVISplitter_InputPin_PreConnect(IPin * iface, IPin * pConnectPin, ALLOCATOR_PROPERTIES *props)
 {
     PullPin *This = impl_PullPin_from_IPin(iface);
+    AVISplitterImpl *pAviSplit = impl_from_IBaseFilter(This->pin.pinInfo.pFilter);
     HRESULT hr;
     RIFFLIST list;
     LONGLONG pos = 0; /* in bytes */
@@ -1035,8 +1033,6 @@ static HRESULT AVISplitter_InputPin_PreConnect(IPin * iface, IPin * pConnectPin,
     LONGLONG total, avail;
     ULONG x;
     DWORD indexes;
-
-    AVISplitterImpl * pAviSplit = (AVISplitterImpl *)This->pin.pinInfo.pFilter;
 
     hr = IAsyncReader_SyncRead(This->pReader, pos, sizeof(list), (BYTE *)&list);
     pos += sizeof(list);
@@ -1264,24 +1260,6 @@ static HRESULT AVISplitter_Disconnect(LPVOID iface)
     return S_OK;
 }
 
-static ULONG WINAPI AVISplitter_Release(IBaseFilter *iface)
-{
-    AVISplitterImpl *This = (AVISplitterImpl *)iface;
-    ULONG ref;
-
-    ref = InterlockedDecrement(&This->Parser.filter.refCount);
-
-    TRACE("(%p)->() Release from %d\n", This, ref + 1);
-
-    if (!ref)
-    {
-        AVISplitter_Flush(This);
-        Parser_Destroy(&This->Parser);
-    }
-
-    return ref;
-}
-
 static HRESULT WINAPI AVISplitter_seek(IMediaSeeking *iface)
 {
     AVISplitterImpl *This = impl_from_IMediaSeeking(iface);
@@ -1308,7 +1286,7 @@ static HRESULT WINAPI AVISplitter_seek(IMediaSeeking *iface)
     EnterCriticalSection(&This->Parser.filter.csFilter);
     for (x = 0; x < This->Parser.cStreams; ++x)
     {
-        Parser_OutputPin *pin = unsafe_impl_Parser_OutputPin_from_IPin(This->Parser.ppPins[1+x]);
+        Parser_OutputPin *pin = This->Parser.sources[x];
         StreamData *stream = This->streams + x;
         LONGLONG wanted_frames;
         DWORD last_keyframe = 0, last_keyframeidx = 0, preroll = 0;
@@ -1410,34 +1388,43 @@ static HRESULT WINAPI AVISplitter_seek(IMediaSeeking *iface)
 
 static const IBaseFilterVtbl AVISplitterImpl_Vtbl =
 {
-    Parser_QueryInterface,
-    Parser_AddRef,
-    AVISplitter_Release,
-    Parser_GetClassID,
+    BaseFilterImpl_QueryInterface,
+    BaseFilterImpl_AddRef,
+    BaseFilterImpl_Release,
+    BaseFilterImpl_GetClassID,
     Parser_Stop,
     Parser_Pause,
     Parser_Run,
     Parser_GetState,
     Parser_SetSyncSource,
-    Parser_GetSyncSource,
-    Parser_EnumPins,
+    BaseFilterImpl_GetSyncSource,
+    BaseFilterImpl_EnumPins,
     BaseFilterImpl_FindPin,
-    Parser_QueryFilterInfo,
-    Parser_JoinFilterGraph,
-    Parser_QueryVendorInfo
+    BaseFilterImpl_QueryFilterInfo,
+    BaseFilterImpl_JoinFilterGraph,
+    BaseFilterImpl_QueryVendorInfo,
 };
 
-HRESULT AVISplitter_create(IUnknown * pUnkOuter, LPVOID * ppv)
+static void avi_splitter_destroy(BaseFilter *iface)
 {
+    AVISplitterImpl *filter = impl_from_IBaseFilter(&iface->IBaseFilter_iface);
+    AVISplitter_Flush(filter);
+    Parser_Destroy(&filter->Parser);
+}
+
+static const BaseFilterFuncTable avi_splitter_func_table =
+{
+    .filter_get_pin = parser_get_pin,
+    .filter_destroy = avi_splitter_destroy,
+};
+
+HRESULT AVISplitter_create(IUnknown *outer, void **out)
+{
+    static const WCHAR sink_name[] = {'i','n','p','u','t',' ','p','i','n',0};
     HRESULT hr;
     AVISplitterImpl * This;
 
-    TRACE("(%p, %p)\n", pUnkOuter, ppv);
-
-    *ppv = NULL;
-
-    if (pUnkOuter)
-        return CLASS_E_NOAGGREGATION;
+    *out = NULL;
 
     /* Note: This memory is managed by the transform filter once created */
     This = CoTaskMemAlloc(sizeof(AVISplitterImpl));
@@ -1445,12 +1432,16 @@ HRESULT AVISplitter_create(IUnknown * pUnkOuter, LPVOID * ppv)
     This->streams = NULL;
     This->oldindex = NULL;
 
-    hr = Parser_Create(&(This->Parser), &AVISplitterImpl_Vtbl, &CLSID_AviSplitter, AVISplitter_Sample, AVISplitter_QueryAccept, AVISplitter_InputPin_PreConnect, AVISplitter_Flush, AVISplitter_Disconnect, AVISplitter_first_request, AVISplitter_done_process, NULL, AVISplitter_seek, NULL);
+    hr = Parser_Create(&This->Parser, &AVISplitterImpl_Vtbl, outer, &CLSID_AviSplitter,
+            &avi_splitter_func_table, sink_name, AVISplitter_Sample, AVISplitter_QueryAccept,
+            AVISplitter_InputPin_PreConnect, AVISplitter_Flush,
+            AVISplitter_Disconnect, AVISplitter_first_request,
+            AVISplitter_done_process, NULL, AVISplitter_seek, NULL);
 
     if (FAILED(hr))
         return hr;
 
-    *ppv = &This->Parser.filter.IBaseFilter_iface;
+    *out = &This->Parser.filter.IUnknown_inner;
 
     return hr;
 }

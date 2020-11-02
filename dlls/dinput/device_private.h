@@ -119,7 +119,7 @@ extern void _dump_DIPROPHEADER(LPCDIPROPHEADER diph)  DECLSPEC_HIDDEN;
 extern void _dump_OBJECTINSTANCEA(const DIDEVICEOBJECTINSTANCEA *ddoi)  DECLSPEC_HIDDEN;
 extern void _dump_OBJECTINSTANCEW(const DIDEVICEOBJECTINSTANCEW *ddoi)  DECLSPEC_HIDDEN;
 extern void _dump_DIDATAFORMAT(const DIDATAFORMAT *df)  DECLSPEC_HIDDEN;
-extern const char *_dump_dinput_GUID(const GUID *guid)  DECLSPEC_HIDDEN;
+extern const char * HOSTPTR _dump_dinput_GUID(const GUID *guid)  DECLSPEC_HIDDEN;
 
 extern LPDIOBJECTDATAFORMAT dataformat_to_odf_by_type(LPCDIDATAFORMAT df, int n, DWORD type)   DECLSPEC_HIDDEN;
 

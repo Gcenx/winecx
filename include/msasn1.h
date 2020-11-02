@@ -18,6 +18,8 @@
 #ifndef __MS_ASN1_H__
 #define __MS_ASN1_H__
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -286,5 +288,7 @@ void         WINAPI ASN1ztcharstring_free(ASN1charstring_t*);
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __MS_ASN1_H__ */

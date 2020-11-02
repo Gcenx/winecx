@@ -1,6 +1,8 @@
 MODULE    = mscoree.dll
 IMPORTS   = dbghelp uuid shell32 advapi32 ole32 oleaut32 shlwapi
 
+EXTRADLLFLAGS = -mno-cygwin
+
 C_SRCS = \
 	assembly.c \
 	config.c \
@@ -11,3 +13,5 @@ C_SRCS = \
 	mscoree_main.c
 
 IDL_SRCS = mscoree_classes.idl
+
+metahost_EXTRADEFS = -DINSTALL_DATADIR="\"${datadir}\""

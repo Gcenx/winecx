@@ -20,16 +20,18 @@
 #ifndef _BASETYPS_H_
 #define _BASETYPS_H_
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 # define EXTERN_C extern "C"
 #else
 # define EXTERN_C extern
 #endif
 
-#define STDMETHODCALLTYPE  __stdcall
-#define STDMETHODVCALLTYPE __cdecl
-#define STDAPICALLTYPE     __stdcall
-#define STDAPIVCALLTYPE    __cdecl
+#define STDMETHODCALLTYPE  WINAPI
+#define STDMETHODVCALLTYPE WINAPIV
+#define STDAPICALLTYPE     WINAPI
+#define STDAPIVCALLTYPE    WINAPIV
 #define STDAPI             EXTERN_C HRESULT STDAPICALLTYPE
 #define STDAPI_(t)         EXTERN_C t STDAPICALLTYPE
 #define STDMETHODIMP       HRESULT STDMETHODCALLTYPE
@@ -79,5 +81,7 @@ typedef unsigned long error_status_t;
 typedef unsigned short wchar_t;
 #define _WCHAR_T_DEFINED
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* _BASETYPS_H_ */

@@ -109,7 +109,7 @@ struct drive
 #define DRIVE_MASK_BIT(B) (1 << (toupper(B) - 'A'))
 
 ULONG drive_available_mask(char letter);
-BOOL add_drive(char letter, const char *targetpath, const char *device,
+BOOL add_drive(char letter, const char * HOSTPTR targetpath, const char *device,
                const WCHAR *label, DWORD serial, DWORD type);
 void delete_drive(struct drive *pDrive);
 void apply_drive_changes(void);
@@ -124,7 +124,7 @@ extern BOOL gui_mode;
 void PRINTERROR(void); /* WINE_TRACE() the plaintext error message from GetLastError() */
 
 /* returns a string in the win32 heap  */
-static inline char *strdupA(const char *s)
+static inline char *strdupA(const char * HOSTPTR s)
 {
     char *r = HeapAlloc(GetProcessHeap(), 0, strlen(s)+1);
     return strcpy(r, s);

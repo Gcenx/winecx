@@ -18,6 +18,8 @@
 #ifndef _APPMODEL_H_
 #define _APPMODEL_H_
 
+#include "wine/winheader_enter.h"
+
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -56,5 +58,7 @@ LONG WINAPI AppPolicyGetWindowingModel(HANDLE processToken, AppPolicyWindowingMo
 #if defined(__cplusplus)
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* _APPMODEL_H_ */

@@ -40,6 +40,7 @@ typedef struct StdMediaSample2
     struct list listentry;
     LONGLONG tMediaStart;
     LONGLONG tMediaEnd;
+    BOOL media_time_valid;
 } StdMediaSample2;
 
 typedef struct BaseMemAllocator
@@ -73,8 +74,6 @@ static const IMediaSample2Vtbl StdMediaSample2_VTable;
 static inline StdMediaSample2 *unsafe_impl_from_IMediaSample(IMediaSample * iface);
 
 #define AM_SAMPLE2_PROP_SIZE_WRITABLE FIELD_OFFSET(AM_SAMPLE2_PROPERTIES, pbBuffer)
-
-#define INVALID_MEDIA_TIME (((ULONGLONG)0x7fffffff << 32) | 0xffffffff)
 
 static HRESULT BaseMemAllocator_Init(HRESULT (* fnAlloc)(IMemAllocator *),
                                      HRESULT (* fnFree)(IMemAllocator *),
@@ -196,7 +195,6 @@ static HRESULT WINAPI BaseMemAllocator_SetProperties(IMemAllocator * iface, ALLO
 static HRESULT WINAPI BaseMemAllocator_GetProperties(IMemAllocator * iface, ALLOCATOR_PROPERTIES *pProps)
 {
     BaseMemAllocator *This = impl_from_IMemAllocator(iface);
-    HRESULT hr = S_OK;
 
     TRACE("(%p)->(%p)\n", This, pProps);
 
@@ -206,7 +204,7 @@ static HRESULT WINAPI BaseMemAllocator_GetProperties(IMemAllocator * iface, ALLO
     }
     LeaveCriticalSection(This->pCritSect);
 
-    return hr;
+    return S_OK;
 }
 
 static HRESULT WINAPI BaseMemAllocator_Commit(IMemAllocator * iface)
@@ -436,8 +434,7 @@ static HRESULT StdMediaSample2_Construct(BYTE * pbBuffer, LONG cbBuffer, IMemAll
     (*ppSample)->props.cbData = sizeof(AM_SAMPLE2_PROPERTIES);
     (*ppSample)->props.cbBuffer = (*ppSample)->props.lActual = cbBuffer;
     (*ppSample)->props.pbBuffer = pbBuffer;
-    (*ppSample)->tMediaStart = INVALID_MEDIA_TIME;
-    (*ppSample)->tMediaEnd = 0;
+    (*ppSample)->media_time_valid = FALSE;
 
     return S_OK;
 }
@@ -493,6 +490,12 @@ static ULONG WINAPI StdMediaSample2_Release(IMediaSample2 * iface)
 
     if (!ref)
     {
+        if (This->props.pMediaType)
+            DeleteMediaType(This->props.pMediaType);
+        This->props.pMediaType = NULL;
+        This->props.dwSampleFlags = 0;
+        This->media_time_valid = FALSE;
+
         if (This->pParent)
             IMemAllocator_ReleaseBuffer(This->pParent, (IMediaSample *)iface);
         else
@@ -554,27 +557,27 @@ static HRESULT WINAPI StdMediaSample2_GetTime(IMediaSample2 * iface, REFERENCE_T
     return hr;
 }
 
-static HRESULT WINAPI StdMediaSample2_SetTime(IMediaSample2 * iface, REFERENCE_TIME * pStart, REFERENCE_TIME * pEnd)
+static HRESULT WINAPI StdMediaSample2_SetTime(IMediaSample2 *iface, REFERENCE_TIME *start, REFERENCE_TIME *end)
 {
-    StdMediaSample2 *This = impl_from_IMediaSample2(iface);
+    StdMediaSample2 *sample = impl_from_IMediaSample2(iface);
 
-    TRACE("(%p)->(%p, %p)\n", iface, pStart, pEnd);
+    TRACE("iface %p, start %p, end %p.\n", iface, start, end);
 
-    if (pStart)
+    if (start)
     {
-        This->props.tStart = *pStart;
-        This->props.dwSampleFlags |= AM_SAMPLE_TIMEVALID;
+        sample->props.tStart = *start;
+        sample->props.dwSampleFlags |= AM_SAMPLE_TIMEVALID;
+
+        if (end)
+        {
+            sample->props.tStop = *end;
+            sample->props.dwSampleFlags |= AM_SAMPLE_STOPVALID;
+        }
+        else
+            sample->props.dwSampleFlags &= ~AM_SAMPLE_STOPVALID;
     }
     else
-        This->props.dwSampleFlags &= ~AM_SAMPLE_TIMEVALID;
-
-    if (pEnd)
-    {
-        This->props.tStop = *pEnd;
-        This->props.dwSampleFlags |= AM_SAMPLE_STOPVALID;
-    }
-    else
-        This->props.dwSampleFlags &= ~AM_SAMPLE_STOPVALID;
+        sample->props.dwSampleFlags &= ~(AM_SAMPLE_TIMEVALID | AM_SAMPLE_STOPVALID);
 
     return S_OK;
 }
@@ -682,8 +685,15 @@ static HRESULT WINAPI StdMediaSample2_SetMediaType(IMediaSample2 * iface, AM_MED
         DeleteMediaType(This->props.pMediaType);
         This->props.pMediaType = NULL;
     }
+
     if (!pMediaType)
-        return S_FALSE;
+    {
+        This->props.dwSampleFlags &= ~AM_SAMPLE_TYPECHANGED;
+        return S_OK;
+    }
+
+    This->props.dwSampleFlags |= AM_SAMPLE_TYPECHANGED;
+
     if (!(This->props.pMediaType = CoTaskMemAlloc(sizeof(AM_MEDIA_TYPE))))
         return E_OUTOFMEMORY;
 
@@ -719,7 +729,7 @@ static HRESULT WINAPI StdMediaSample2_GetMediaTime(IMediaSample2 * iface, LONGLO
 
     TRACE("(%p)->(%p, %p)\n", iface, pStart, pEnd);
 
-    if (This->tMediaStart == INVALID_MEDIA_TIME)
+    if (!This->media_time_valid)
         return VFW_E_MEDIA_TIME_NOT_SET;
 
     *pStart = This->tMediaStart;
@@ -728,21 +738,21 @@ static HRESULT WINAPI StdMediaSample2_GetMediaTime(IMediaSample2 * iface, LONGLO
     return S_OK;
 }
 
-static HRESULT WINAPI StdMediaSample2_SetMediaTime(IMediaSample2 * iface, LONGLONG * pStart, LONGLONG * pEnd)
+static HRESULT WINAPI StdMediaSample2_SetMediaTime(IMediaSample2 *iface, LONGLONG *start, LONGLONG *end)
 {
-    StdMediaSample2 *This = impl_from_IMediaSample2(iface);
+    StdMediaSample2 *sample = impl_from_IMediaSample2(iface);
 
-    TRACE("(%p)->(%p, %p)\n", iface, pStart, pEnd);
+    TRACE("sample %p, start %p, end %p.\n", iface, start, end);
 
-    if (pStart)
-        This->tMediaStart = *pStart;
+    if (start)
+    {
+        if (!end) return E_POINTER;
+        sample->tMediaStart = *start;
+        sample->tMediaEnd = *end;
+        sample->media_time_valid = TRUE;
+    }
     else
-        This->tMediaStart = INVALID_MEDIA_TIME;
-
-    if (pEnd)
-        This->tMediaEnd = *pEnd;
-    else
-        This->tMediaEnd = 0;
+        sample->media_time_valid = FALSE;
 
     return S_OK;
 }

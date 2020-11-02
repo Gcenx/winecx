@@ -69,7 +69,7 @@ char *getInterfaceNameByIndex(IF_INDEX index, char *name) DECLSPEC_HIDDEN;
  * ERROR_INVALID_PARAMETER if name or index is NULL, ERROR_INVALID_DATA if name
  * is not found, and NO_ERROR on success.
  */
-DWORD getInterfaceIndexByName(const char *name, IF_INDEX *index) DECLSPEC_HIDDEN;
+DWORD getInterfaceIndexByName(const char * HOSTPTR name, IF_INDEX *index) DECLSPEC_HIDDEN;
 
 /* Gets a few physical characteristics of a device:  MAC addr len, MAC addr,
  * and type as one of the MIB_IF_TYPEs.

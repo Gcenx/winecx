@@ -911,16 +911,16 @@ static cab_UWORD compress_NONE( FCI_Int *fci )
 
 #ifdef HAVE_ZLIB
 
-static void *zalloc( void *opaque, unsigned int items, unsigned int size )
+static void * HOSTPTR zalloc( void * HOSTPTR opaque, unsigned int items, unsigned int size )
 {
-    FCI_Int *fci = opaque;
+    FCI_Int * HOSTPTR fci = opaque;
     return fci->alloc( items * size );
 }
 
-static void zfree( void *opaque, void *ptr )
+static void zfree( void * HOSTPTR opaque, void * HOSTPTR ptr )
 {
-    FCI_Int *fci = opaque;
-    fci->free( ptr );
+    FCI_Int * HOSTPTR fci = opaque;
+    fci->free( ADDRSPACECAST(void * WIN32PTR, ptr) );
 }
 
 static cab_UWORD compress_MSZIP( FCI_Int *fci )

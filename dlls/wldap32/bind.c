@@ -117,7 +117,7 @@ ULONG CDECL ldap_bindW( WLDAP32_LDAP *ld, PWCHAR dn, PWCHAR cred, ULONG method )
         pwd.bv_val = credU;
     }
 
-    ret = ldap_sasl_bind( ld, dnU, LDAP_SASL_SIMPLE, &pwd, NULL, NULL, &msg );
+    ret = ldap_sasl_bind( ldap_get( ld ), dnU, LDAP_SASL_SIMPLE, &pwd, NULL, NULL, &msg );
 
     if (ret == LDAP_SUCCESS)
         ret = msg;
@@ -209,7 +209,7 @@ ULONG CDECL ldap_bind_sW( WLDAP32_LDAP *ld, PWCHAR dn, PWCHAR cred, ULONG method
         pwd.bv_val = credU;
     }
 
-    ret = map_error( ldap_sasl_bind_s( ld, dnU, LDAP_SASL_SIMPLE, &pwd, NULL, NULL, NULL ));
+    ret = map_error( ldap_sasl_bind_s( ldap_get( ld ), dnU, LDAP_SASL_SIMPLE, &pwd, NULL, NULL, NULL ));
 
 exit:
     strfreeU( dnU );
@@ -326,7 +326,7 @@ ULONG CDECL ldap_sasl_bindW( WLDAP32_LDAP *ld, const PWCHAR dn,
     credU.bv_len = cred->bv_len;
     credU.bv_val = cred->bv_val;
 
-    ret = map_error( ldap_sasl_bind( ld, dnU, mechanismU, &credU,
+    ret = map_error( ldap_sasl_bind( ldap_get( ld ), dnU, mechanismU, &credU,
                                      serverctrlsU, clientctrlsU, message ));
 
 exit:
@@ -419,6 +419,7 @@ ULONG CDECL ldap_sasl_bind_sW( WLDAP32_LDAP *ld, const PWCHAR dn,
     char *dnU, *mechanismU = NULL;
     LDAPControl **serverctrlsU = NULL, **clientctrlsU = NULL;
     struct berval credU;
+    struct berval *bvret = NULL;
 
     ret = WLDAP32_LDAP_NO_MEMORY;
 
@@ -446,8 +447,9 @@ ULONG CDECL ldap_sasl_bind_sW( WLDAP32_LDAP *ld, const PWCHAR dn,
     credU.bv_len = cred->bv_len;
     credU.bv_val = cred->bv_val;
 
-    ret = map_error( ldap_sasl_bind_s( ld, dnU, mechanismU, &credU,
-                                       serverctrlsU, clientctrlsU, (struct berval **)serverdata ));
+    ret = map_error( ldap_sasl_bind_s( ldap_get( ld ), dnU, mechanismU, &credU,
+                                       serverctrlsU, clientctrlsU, &bvret ));
+    ret = bvconvert_and_free( ret, bvret, serverdata );
 
 exit:
     strfreeU( dnU );
@@ -538,7 +540,7 @@ ULONG CDECL ldap_simple_bindW( WLDAP32_LDAP *ld, PWCHAR dn, PWCHAR passwd )
         pwd.bv_val = passwdU;
     }
 
-    ret = ldap_sasl_bind( ld, dnU, LDAP_SASL_SIMPLE, &pwd, NULL, NULL, &msg );
+    ret = ldap_sasl_bind( ldap_get( ld ), dnU, LDAP_SASL_SIMPLE, &pwd, NULL, NULL, &msg );
 
     if (ret == LDAP_SUCCESS)
         ret = msg;
@@ -631,7 +633,7 @@ ULONG CDECL ldap_simple_bind_sW( WLDAP32_LDAP *ld, PWCHAR dn, PWCHAR passwd )
         pwd.bv_val = passwdU;
     }
 
-    ret = map_error( ldap_sasl_bind_s( ld, dnU, LDAP_SASL_SIMPLE, &pwd, NULL, NULL, NULL ));
+    ret = map_error( ldap_sasl_bind_s( ldap_get( ld ), dnU, LDAP_SASL_SIMPLE, &pwd, NULL, NULL, NULL ));
 
 exit:
     strfreeU( dnU );
@@ -661,9 +663,10 @@ ULONG CDECL WLDAP32_ldap_unbind( WLDAP32_LDAP *ld )
     TRACE( "(%p)\n", ld );
 
     if (ld)
-        ret = map_error( ldap_unbind_ext( ld, NULL, NULL ));
+        ret = map_error( ldap_unbind_ext( ldap_get( ld ), NULL, NULL ));
     else
         ret = WLDAP32_LDAP_PARAM_ERROR;
+    ldap_unwrap( ld );
 
 #endif
     return ret;
@@ -689,9 +692,10 @@ ULONG CDECL WLDAP32_ldap_unbind_s( WLDAP32_LDAP *ld )
     TRACE( "(%p)\n", ld );
 
     if (ld)
-        ret = map_error( ldap_unbind_ext_s( ld, NULL, NULL ));
+        ret = map_error( ldap_unbind_ext_s( ldap_get( ld ), NULL, NULL ));
     else
         ret = WLDAP32_LDAP_PARAM_ERROR;
+    ldap_unwrap( ld );
 
 #endif
     return ret;

@@ -503,7 +503,7 @@ static const unsigned char Lookup_224[128 * 3] = {
  *  skind and lcid, while the low word is based on a repeated string
  *  hash of skind/str.
  */
-unsigned int lhash_val_of_name_sys( syskind_t skind, LCID lcid, LPCSTR lpStr)
+unsigned int lhash_val_of_name_sys( syskind_t skind, LCID lcid, const CHAR *lpStr)
 {
   ULONG nOffset, nMask = skind == SYS_MAC ? 1 : 0;
   ULONG nHiWord, nLoWord = 0x0deadbee;

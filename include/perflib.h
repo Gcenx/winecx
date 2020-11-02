@@ -19,6 +19,8 @@
 #ifndef _PERFLIB_H_
 #define _PERFLIB_H_
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -54,5 +56,7 @@ typedef struct _PROVIDER_CONTEXT {
 #ifdef __cplusplus
 }       /* extern "C" */
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* _PERFLIB_H_ */

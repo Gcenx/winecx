@@ -145,50 +145,50 @@ static inline void add_bounds_rect( RECT *bounds, const RECT *rect )
 
 /* Wine driver X11 functions */
 
-extern BOOL X11DRV_Arc( PHYSDEV dev, INT left, INT top, INT right,
-                        INT bottom, INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_Chord( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
-                          INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_Ellipse( PHYSDEV dev, INT left, INT top, INT right, INT bottom ) DECLSPEC_HIDDEN;
-extern INT X11DRV_EnumICMProfiles( PHYSDEV dev, ICMENUMPROCW proc, LPARAM lparam ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT fillType ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_FillPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_GetDeviceGammaRamp( PHYSDEV dev, LPVOID ramp ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_GetICMProfile( PHYSDEV dev, LPDWORD size, LPWSTR filename ) DECLSPEC_HIDDEN;
-extern DWORD X11DRV_GetImage( PHYSDEV dev, BITMAPINFO *info,
-                              struct gdi_image_bits *bits, struct bitblt_coords *src ) DECLSPEC_HIDDEN;
-extern COLORREF X11DRV_GetNearestColor( PHYSDEV dev, COLORREF color ) DECLSPEC_HIDDEN;
-extern UINT X11DRV_GetSystemPaletteEntries( PHYSDEV dev, UINT start, UINT count, LPPALETTEENTRY entries ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
-                                 void *grad_array, ULONG ngrad, ULONG mode ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_LineTo( PHYSDEV dev, INT x, INT y) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_PaintRgn( PHYSDEV dev, HRGN hrgn ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_Pie( PHYSDEV dev, INT left, INT top, INT right,
-                        INT bottom, INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_Polygon( PHYSDEV dev, const POINT* pt, INT count ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_PolyPolygon( PHYSDEV dev, const POINT* pt, const INT* counts, UINT polygons) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_PolyPolyline( PHYSDEV dev, const POINT* pt, const DWORD* counts, DWORD polylines) DECLSPEC_HIDDEN;
-extern DWORD X11DRV_PutImage( PHYSDEV dev, HRGN clip, BITMAPINFO *info,
-                              const struct gdi_image_bits *bits, struct bitblt_coords *src,
-                              struct bitblt_coords *dst, DWORD rop ) DECLSPEC_HIDDEN;
-extern UINT X11DRV_RealizeDefaultPalette( PHYSDEV dev ) DECLSPEC_HIDDEN;
-extern UINT X11DRV_RealizePalette( PHYSDEV dev, HPALETTE hpal, BOOL primary ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_Rectangle(PHYSDEV dev, INT left, INT top, INT right, INT bottom) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
-                              INT ell_width, INT ell_height ) DECLSPEC_HIDDEN;
-extern HBRUSH X11DRV_SelectBrush( PHYSDEV dev, HBRUSH hbrush, const struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
-extern HPEN X11DRV_SelectPen( PHYSDEV dev, HPEN hpen, const struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
-extern COLORREF X11DRV_SetDCBrushColor( PHYSDEV dev, COLORREF crColor ) DECLSPEC_HIDDEN;
-extern COLORREF X11DRV_SetDCPenColor( PHYSDEV dev, COLORREF crColor ) DECLSPEC_HIDDEN;
-extern void X11DRV_SetDeviceClipping( PHYSDEV dev, HRGN rgn ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_SetDeviceGammaRamp( PHYSDEV dev, LPVOID ramp ) DECLSPEC_HIDDEN;
-extern COLORREF X11DRV_SetPixel( PHYSDEV dev, INT x, INT y, COLORREF color ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
-                               PHYSDEV src_dev, struct bitblt_coords *src, DWORD rop ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_StrokeAndFillPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_StrokePath( PHYSDEV dev ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_UnrealizePalette( HPALETTE hpal ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_Arc( PHYSDEV dev, INT left, INT top, INT right,
+                              INT bottom, INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_Chord( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
+                                INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_Ellipse( PHYSDEV dev, INT left, INT top, INT right, INT bottom ) DECLSPEC_HIDDEN;
+extern INT CDECL X11DRV_EnumICMProfiles( PHYSDEV dev, ICMENUMPROCW proc, LPARAM lparam ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT fillType ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_FillPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_GetDeviceGammaRamp( PHYSDEV dev, LPVOID ramp ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_GetICMProfile( PHYSDEV dev, LPDWORD size, LPWSTR filename ) DECLSPEC_HIDDEN;
+extern DWORD CDECL X11DRV_GetImage( PHYSDEV dev, BITMAPINFO *info,
+                                    struct gdi_image_bits *bits, struct bitblt_coords *src ) DECLSPEC_HIDDEN;
+extern COLORREF CDECL X11DRV_GetNearestColor( PHYSDEV dev, COLORREF color ) DECLSPEC_HIDDEN;
+extern UINT CDECL X11DRV_GetSystemPaletteEntries( PHYSDEV dev, UINT start, UINT count, LPPALETTEENTRY entries ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
+                                       void *grad_array, ULONG ngrad, ULONG mode ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_LineTo( PHYSDEV dev, INT x, INT y) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_PaintRgn( PHYSDEV dev, HRGN hrgn ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_Pie( PHYSDEV dev, INT left, INT top, INT right,
+                              INT bottom, INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_Polygon( PHYSDEV dev, const POINT* pt, INT count ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_PolyPolygon( PHYSDEV dev, const POINT* pt, const INT* counts, UINT polygons) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_PolyPolyline( PHYSDEV dev, const POINT* pt, const DWORD* counts, DWORD polylines) DECLSPEC_HIDDEN;
+extern DWORD CDECL X11DRV_PutImage( PHYSDEV dev, HRGN clip, BITMAPINFO *info,
+                                    const struct gdi_image_bits *bits, struct bitblt_coords *src,
+                                    struct bitblt_coords *dst, DWORD rop ) DECLSPEC_HIDDEN;
+extern UINT CDECL X11DRV_RealizeDefaultPalette( PHYSDEV dev ) DECLSPEC_HIDDEN;
+extern UINT CDECL X11DRV_RealizePalette( PHYSDEV dev, HPALETTE hpal, BOOL primary ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_Rectangle(PHYSDEV dev, INT left, INT top, INT right, INT bottom) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
+                                    INT ell_width, INT ell_height ) DECLSPEC_HIDDEN;
+extern HBRUSH CDECL X11DRV_SelectBrush( PHYSDEV dev, HBRUSH hbrush, const struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
+extern HPEN CDECL X11DRV_SelectPen( PHYSDEV dev, HPEN hpen, const struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
+extern COLORREF CDECL X11DRV_SetDCBrushColor( PHYSDEV dev, COLORREF crColor ) DECLSPEC_HIDDEN;
+extern COLORREF CDECL X11DRV_SetDCPenColor( PHYSDEV dev, COLORREF crColor ) DECLSPEC_HIDDEN;
+extern void CDECL X11DRV_SetDeviceClipping( PHYSDEV dev, HRGN rgn ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_SetDeviceGammaRamp( PHYSDEV dev, LPVOID ramp ) DECLSPEC_HIDDEN;
+extern COLORREF CDECL X11DRV_SetPixel( PHYSDEV dev, INT x, INT y, COLORREF color ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
+                                     PHYSDEV src_dev, struct bitblt_coords *src, DWORD rop ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_StrokeAndFillPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_StrokePath( PHYSDEV dev ) DECLSPEC_HIDDEN;
+extern BOOL CDECL X11DRV_UnrealizePalette( HPALETTE hpal ) DECLSPEC_HIDDEN;
 
 /* X11 driver internal functions */
 
@@ -585,7 +585,7 @@ extern void release_win_data( struct x11drv_win_data *data ) DECLSPEC_HIDDEN;
 extern Window X11DRV_get_whole_window( HWND hwnd ) DECLSPEC_HIDDEN;
 extern XIC X11DRV_get_ic( HWND hwnd ) DECLSPEC_HIDDEN;
 
-extern void sync_gl_drawable( HWND hwnd ) DECLSPEC_HIDDEN;
+extern void sync_gl_drawable( HWND hwnd, BOOL known_child ) DECLSPEC_HIDDEN;
 extern void set_gl_drawable_parent( HWND hwnd, HWND parent ) DECLSPEC_HIDDEN;
 extern void destroy_gl_drawable( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void wine_vk_surface_destroy( HWND hwnd ) DECLSPEC_HIDDEN;
@@ -666,6 +666,83 @@ struct x11drv_mode_info *X11DRV_Settings_SetHandlers(const char *name,
 
 void X11DRV_XF86VM_Init(void) DECLSPEC_HIDDEN;
 void X11DRV_XRandR_Init(void) DECLSPEC_HIDDEN;
+
+/* X11 display device handler. Used to initialize display device registry data */
+
+/* Represent a physical GPU in the PCI slots */
+struct x11drv_gpu
+{
+    /* ID to uniquely identify a GPU in handler */
+    ULONG_PTR id;
+    /* Name */
+    WCHAR name[128];
+    /* PCI ID */
+    UINT vendor_id;
+    UINT device_id;
+    UINT subsys_id;
+    UINT revision_id;
+};
+
+/* Represent an adapter in EnumDisplayDevices context */
+struct x11drv_adapter
+{
+    /* ID to uniquely identify an adapter in handler */
+    ULONG_PTR id;
+    /* as StateFlags in DISPLAY_DEVICE struct */
+    DWORD state_flags;
+};
+
+/* Represent a monitor in EnumDisplayDevices context */
+struct x11drv_monitor
+{
+    /* Name */
+    WCHAR name[128];
+    /* RcMonitor in MONITORINFO struct */
+    RECT rc_monitor;
+    /* RcWork in MONITORINFO struct */
+    RECT rc_work;
+    /* StateFlags in DISPLAY_DEVICE struct */
+    DWORD state_flags;
+};
+
+/* Required functions for display device registry initialization */
+struct x11drv_display_device_handler
+{
+    /* A name to tell what host driver is used */
+    const char *name;
+
+    /* Higher priority can override handlers with lower proprity */
+    INT priority;
+
+    /* pGetGpus will be called to get a list of GPUs. First GPU has to be where the primary adapter is.
+     *
+     * Return FALSE on failure with parameters unchanged */
+    BOOL (*pGetGpus)(struct x11drv_gpu **gpus, int *count);
+
+    /* pGetAdapters will be called to get a list of adapters in EnumDisplayDevices context under a GPU.
+     * The first adapter has to be primary if GPU is primary.
+     *
+     * Return FALSE on failure with parameters unchanged */
+    BOOL (*pGetAdapters)(ULONG_PTR gpu_id, struct x11drv_adapter **adapters, int *count);
+
+    /* pGetMonitors will be called to get a list of monitors in EnumDisplayDevices context under an adapter.
+     * The first monitor has to be primary if adapter is primary.
+     *
+     * Return FALSE on failure with parameters unchanged */
+    BOOL (*pGetMonitors)(ULONG_PTR adapter_id, struct x11drv_monitor **monitors, int *count);
+
+    /* pFreeGpus will be called to free a GPU list from pGetGpus */
+    void (*pFreeGpus)(struct x11drv_gpu *gpus);
+
+    /* pFreeAdapters will be called to free an adapter list from pGetAdapters */
+    void (*pFreeAdapters)(struct x11drv_adapter *adapters);
+
+    /* pFreeMonitors will be called to free a monitor list from pGetMonitors */
+    void (*pFreeMonitors)(struct x11drv_monitor *monitors);
+};
+
+extern void X11DRV_DisplayDevices_SetHandler(const struct x11drv_display_device_handler *handler) DECLSPEC_HIDDEN;
+extern void X11DRV_DisplayDevices_Init(BOOL force) DECLSPEC_HIDDEN;
 
 /* XIM support */
 extern BOOL X11DRV_InitXIM( const char *input_style ) DECLSPEC_HIDDEN;

@@ -158,7 +158,7 @@ BOOL symt_get_address(const struct symt* type, ULONG64* addr)
 
 static struct symt* symt_find_type_by_name(const struct module* module,
                                            enum SymTagEnum sym_tag, 
-                                           const char* typename)
+                                           const char* HOSTPTR typename)
 {
     void*                       ptr;
     struct symt_ht*             type;

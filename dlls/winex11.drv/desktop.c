@@ -154,6 +154,7 @@ void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height )
     max_width = primary_rect.right - primary_rect.left;
     max_height = primary_rect.bottom - primary_rect.top;
     xinerama_init( width, height );
+    X11DRV_DisplayDevices_Init( TRUE );
 
     /* initialize the available resolutions */
     dd_modes = X11DRV_Settings_SetHandlers("desktop", 
@@ -303,6 +304,7 @@ void X11DRV_resize_desktop( unsigned int width, unsigned int height )
     resize_data.old_virtual_rect = get_virtual_screen_rect();
 
     xinerama_init( width, height );
+    X11DRV_DisplayDevices_Init( TRUE );
     resize_data.new_virtual_rect = get_virtual_screen_rect();
 
     if (GetWindowThreadProcessId( hwnd, NULL ) != GetCurrentThreadId())

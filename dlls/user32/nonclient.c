@@ -319,8 +319,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH AdjustWindowRectEx( LPRECT rect, DWORD style, BOOL
 {
     NONCLIENTMETRICSW ncm;
 
-    if (style & WS_MINIMIZE) return TRUE;
-
     TRACE("(%s) %08x %d %08x\n", wine_dbgstr_rect(rect), style, menu, exStyle );
 
     ncm.cbSize = sizeof(ncm);
@@ -338,8 +336,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH AdjustWindowRectExForDpi( LPRECT rect, DWORD style
                                                         DWORD exStyle, UINT dpi )
 {
     NONCLIENTMETRICSW ncm;
-
-    if (style & WS_MINIMIZE) return TRUE;
 
     TRACE("(%s) %08x %d %08x %u\n", wine_dbgstr_rect(rect), style, menu, exStyle, dpi );
 
@@ -418,36 +414,11 @@ LRESULT NC_HandleNCCalcSize( HWND hwnd, WPARAM wparam, RECT *winRect )
         if (winRect->left > winRect->right)
             winRect->right = winRect->left;
     }
-    else /* CrossOver Hack #15440.  Powerpnt 2010 requires that
-            minimized windows have an empty client rect, which is the
-            case with win95-style minimization.  Wine however uses
-            win31-style so this will break things, however it seems ok
-            for Powerpnt. */
+    else
     {
-        static int is_ppt = -1;
-        WCHAR class_name[80];
-        static const WCHAR PPTFrameClass[] = {'P','P','T','F','r','a','m','e','C','l','a','s','s',0};
-
-        if (is_ppt == -1)
-        {
-            WCHAR name[MAX_PATH], *p;
-            static const WCHAR POWERPNT[] = {'P','O','W','E','R','P','N','T','.','E','X','E',0};
-
-            GetModuleFileNameW( NULL, name, sizeof(name) / sizeof(name[0]) );
-            p = strrchrW( name, '\\' );
-            if (!p) p = name;
-            else p++;
-            is_ppt = !strcmpiW( p, POWERPNT );
-        }
-
-        if (is_ppt && GetClassNameW( hwnd, class_name, sizeof(class_name) / sizeof(class_name[0]) ) &&
-            !strcmpiW( class_name, PPTFrameClass ))
-        {
-            winRect->right = winRect->left;
-            winRect->bottom = winRect->top;
-        }
+        winRect->right = winRect->left;
+        winRect->bottom = winRect->top;
     }
-
     return result;
 }
 
@@ -462,8 +433,6 @@ static void NC_GetInsideRect( HWND hwnd, enum coords_relative relative, RECT *re
                               DWORD style, DWORD ex_style )
 {
     WIN_GetRectangles( hwnd, relative, rect, NULL );
-
-    if (style & WS_MINIMIZE) return;
 
     /* Remove frame from rectangle */
     if (HAS_THICKFRAME( style, ex_style ))
@@ -508,7 +477,6 @@ LRESULT NC_HandleNCHitTest( HWND hwnd, POINT pt )
 
     style = GetWindowLongW( hwnd, GWL_STYLE );
     ex_style = GetWindowLongW( hwnd, GWL_EXSTYLE );
-    if (style & WS_MINIMIZE) return HTCAPTION;
 
     if (PtInRect( &rcClient, pt )) return HTCLIENT;
 
@@ -785,12 +753,14 @@ static void NC_DrawMaxButton(HWND hwnd,HDC hdc,BOOL down, BOOL bGrayed)
 static void  NC_DrawMinButton(HWND hwnd,HDC hdc,BOOL down, BOOL bGrayed)
 {
     RECT rect;
-    UINT flags = DFCS_CAPTIONMIN;
+    UINT flags;
     DWORD style = GetWindowLongW( hwnd, GWL_STYLE );
     DWORD ex_style = GetWindowLongW( hwnd, GWL_EXSTYLE );
 
     /* never draw minimize box when window has WS_EX_TOOLWINDOW style */
     if (ex_style & WS_EX_TOOLWINDOW) return;
+
+    flags = (style & WS_MINIMIZE) ? DFCS_CAPTIONRESTORE : DFCS_CAPTIONMIN;
 
     NC_GetInsideRect( hwnd, COORDS_WINDOW, &rect, style, ex_style );
     if (style & WS_SYSMENU)
@@ -988,9 +958,6 @@ static void  NC_DoNCPaint( HWND  hwnd, HRGN  clip )
     flags = wndPtr->flags;
     WIN_ReleasePtr( wndPtr );
 
-    if ( dwStyle & WS_MINIMIZE ||
-         !WIN_IsWindowDrawable( hwnd, 0 )) return; /* Nothing to do */
-
     active  = flags & WIN_NCACTIVATED;
 
     TRACE("%p %d\n", hwnd, active );
@@ -1098,10 +1065,7 @@ LRESULT NC_HandleNCPaint( HWND hwnd , HRGN clip)
 
     if( dwStyle & WS_VISIBLE )
     {
-	if( dwStyle & WS_MINIMIZE )
-	    WINPOS_RedrawIconTitle( hwnd );
-	else
-	    NC_DoNCPaint( hwnd, clip );
+        NC_DoNCPaint( hwnd, clip );
 
         if (parent == GetDesktopWindow())
             PostMessageW( parent, WM_PARENTNOTIFY, WM_NCPAINT, (LPARAM)hwnd );
@@ -1130,10 +1094,7 @@ LRESULT NC_HandleNCActivate( HWND hwnd, WPARAM wParam, LPARAM lParam )
      */
     if (lParam != -1)
     {
-        if (IsIconic(hwnd))
-            WINPOS_RedrawIconTitle( hwnd );
-        else
-            NC_DoNCPaint( hwnd, (HRGN)1 );
+        NC_DoNCPaint( hwnd, (HRGN)1 );
 
         if (GetAncestor( hwnd, GA_PARENT ) == GetDesktopWindow())
             PostMessageW( GetDesktopWindow(), WM_PARENTNOTIFY, WM_NCACTIVATE, (LPARAM)hwnd );
@@ -1290,7 +1251,8 @@ static void NC_TrackMinMaxBox( HWND hwnd, WORD wParam )
         return;
 
     if (wParam == HTMINBUTTON)
-        SendMessageW( hwnd, WM_SYSCOMMAND, SC_MINIMIZE, MAKELONG(msg.pt.x,msg.pt.y) );
+        SendMessageW( hwnd, WM_SYSCOMMAND,
+                      IsIconic(hwnd) ? SC_RESTORE : SC_MINIMIZE, MAKELONG(msg.pt.x,msg.pt.y) );
     else
         SendMessageW( hwnd, WM_SYSCOMMAND,
                       IsZoomed(hwnd) ? SC_RESTORE:SC_MAXIMIZE, MAKELONG(msg.pt.x,msg.pt.y) );
@@ -1405,17 +1367,14 @@ LRESULT NC_HandleNCLButtonDown( HWND hwnd, WPARAM wParam, LPARAM lParam )
         }
 
     case HTSYSMENU:
-         if( style & WS_SYSMENU )
-         {
-             if( !(style & WS_MINIMIZE) )
-             {
-                HDC hDC = GetWindowDC(hwnd);
-                NC_DrawSysButton( hwnd, hDC, TRUE );
-                ReleaseDC( hwnd, hDC );
-             }
-             SendMessageW( hwnd, WM_SYSCOMMAND, SC_MOUSEMENU + HTSYSMENU, lParam );
-         }
-         break;
+        if (style & WS_SYSMENU)
+        {
+            HDC hDC = GetWindowDC( hwnd );
+            NC_DrawSysButton( hwnd, hDC, TRUE );
+            ReleaseDC( hwnd, hDC );
+            SendMessageW( hwnd, WM_SYSCOMMAND, SC_MOUSEMENU + HTSYSMENU, lParam );
+        }
+        break;
 
     case HTMENU:
         SendMessageW( hwnd, WM_SYSCOMMAND, SC_MOUSEMENU, lParam );

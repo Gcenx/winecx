@@ -18,9 +18,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
 #include <assert.h>
+#include "basetsd.h"
+#include "wine/asm.h"
 
 #ifdef __i386__
 
@@ -136,7 +136,7 @@ __ASM_GLOBAL_FUNC(interlocked_xchg_add,
 
 #endif
 
-#elif defined(__x86_64__)
+#elif defined(__x86_64__) || defined(__i386_on_x86_64__)
 
 __ASM_GLOBAL_FUNC(interlocked_cmpxchg,
                   "mov %edx, %eax\n\t"

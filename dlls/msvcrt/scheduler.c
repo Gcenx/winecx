@@ -36,7 +36,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 static int context_id = -1;
 static int scheduler_id = -1;
 
-#ifdef __i386__
+#if defined(__i386__) && !defined(__MINGW32__)
 
 #define DEFINE_VTBL_WRAPPER(off)            \
     __ASM_GLOBAL_FUNC(vtbl_wrapper_ ## off, \
@@ -1130,7 +1130,7 @@ void __asm_dummy_vtables(void) {
 
 void msvcrt_init_scheduler(void *base)
 {
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
     init_Context_rtti(base);
     init_ContextBase_rtti(base);
     init_ExternalContextBase_rtti(base);

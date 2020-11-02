@@ -24,6 +24,7 @@
 #include <winbase.h>
 #include <wingdi.h>
 #include <wine/winbase16.h>
+#include <wine/winheader_enter.h>
 
 #include <pshpack1.h>
 
@@ -616,5 +617,7 @@ INT16       WINAPI UpdateColors16(HDC16);
 BOOL16      WINAPI WidenPath16(HDC16);
 INT16       WINAPI WriteDialog16(HPJOB16,LPSTR,INT16);
 INT16       WINAPI WriteSpool16(HPJOB16,LPSTR,INT16);
+
+#include <wine/winheader_exit.h>
 
 #endif /* __WINE_WINE_WINGDI16_H */

@@ -18,6 +18,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
@@ -37,6 +41,10 @@ struct ImgDelayDescr
 extern struct ImgDelayDescr __wine_spec_delay_imports[];
 
 extern FARPROC WINAPI DelayLoadFailureHook( LPCSTR name, LPCSTR function );
+#ifdef __i386_on_x86_64__
+extern FARPROC CDECL __wine_get_extra_proc( HMODULE module, LPCSTR name );
+int CDECL __wine_is_module_hybrid( HMODULE module );
+#endif
 
 FARPROC WINAPI DECLSPEC_HIDDEN __wine_spec_delay_load( unsigned int id )
 {
@@ -49,6 +57,20 @@ FARPROC WINAPI DECLSPEC_HIDDEN __wine_spec_delay_load( unsigned int id )
         !(proc = GetProcAddress( *descr->phmod, (LPCSTR)descr->pINT[func].u1.Function )))
         proc = DelayLoadFailureHook( descr->szName, (LPCSTR)descr->pINT[func].u1.Function );
     descr->pIAT[func].u1.Function = (ULONG_PTR)proc;
+#ifdef __i386_on_x86_64__
+    while (descr->pIAT[func].u1.Function != 0) func++;
+    func += LOWORD(id) + 1;
+    if (__wine_is_module_hybrid(*descr->phmod))
+    {
+        if (!(proc = __wine_get_extra_proc( *descr->phmod, (LPCSTR)descr->pINT[func].u1.Function )))
+            proc = DelayLoadFailureHook( descr->szName, (LPCSTR)descr->pINT[func].u1.Function );
+        descr->pIAT[func].u1.Function = (ULONG_PTR)proc;
+    }
+    else
+    {
+        descr->pIAT[func].u1.Function = 0;
+    }
+#endif
     return proc;
 }
 

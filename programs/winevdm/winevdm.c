@@ -31,6 +31,7 @@
 #include "winuser.h"
 #include "wincon.h"
 #include "wine/unicode.h"
+#include "wine/library.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(winevdm);
@@ -485,7 +486,7 @@ static void usage(void)
 /***********************************************************************
  *           main
  */
-int main( int argc, char *argv[] )
+int __cdecl main( int argc, char *argv[] )
 {
     DWORD count;
     HINSTANCE16 instance;

@@ -58,7 +58,7 @@ ULONG CDECL WLDAP32_ldap_abandon( WLDAP32_LDAP *ld, ULONG msgid )
     TRACE( "(%p, 0x%08x)\n", ld, msgid );
 
     if (!ld) return ~0u;
-    ret = map_error( ldap_abandon_ext( ld, msgid, NULL, NULL ));
+    ret = map_error( ldap_abandon_ext( ldap_get( ld ), msgid, NULL, NULL ));
 
 #endif
     return ret;
@@ -161,7 +161,7 @@ ULONG CDECL WLDAP32_ldap_count_entries( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *r
     TRACE( "(%p, %p)\n", ld, res );
 
     if (!ld) return ~0u;
-    ret = ldap_count_entries( ld, res );
+    ret = ldap_count_entries( ldap_get( ld ), ldmsg_get( res ) );
 
 #endif
     return ret;
@@ -188,7 +188,7 @@ ULONG CDECL WLDAP32_ldap_count_references( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage
     TRACE( "(%p, %p)\n", ld, res );
 
     if (!ld) return 0;
-    ret = ldap_count_references( ld, res );
+    ret = ldap_count_references( ldap_get( ld ), ldmsg_get( res ) );
 
 #endif
     return ret;
@@ -328,12 +328,18 @@ PWCHAR CDECL ldap_first_attributeW( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *entry
 {
     PWCHAR ret = NULL;
 #ifdef HAVE_LDAP
-    char *retU;
+    char * HOSTPTR retU;
+    BerElement* ber = NULL;
 
     TRACE( "(%p, %p, %p)\n", ld, entry, ptr );
 
     if (!ld || !entry) return NULL;
-    retU = ldap_first_attribute( ld, entry, ptr );
+    retU = ldap_first_attribute( ldap_get( ld ), ldmsg_get( entry ), &ber );
+    if (!(*ptr = ber_wrap( ber, 0 )))
+    {
+        ldap_memfree( retU );
+        return NULL;
+    }
 
     ret = strUtoW( retU );
     ldap_memfree( retU );
@@ -341,6 +347,7 @@ PWCHAR CDECL ldap_first_attributeW( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *entry
 #endif
     return ret;
 }
+
 
 /***********************************************************************
  *      ldap_first_entry     (WLDAP32.@)
@@ -365,7 +372,7 @@ WLDAP32_LDAPMessage * CDECL WLDAP32_ldap_first_entry( WLDAP32_LDAP *ld, WLDAP32_
     TRACE( "(%p, %p)\n", ld, res );
 
     if (!ld || !res) return NULL;
-    return ldap_first_entry( ld, res );
+    return message_tail_insert( res, ldap_first_entry( ldap_get( ld ), ldmsg_get( res ) ) );
 
 #else
     return NULL;
@@ -391,8 +398,8 @@ WLDAP32_LDAPMessage * CDECL WLDAP32_ldap_first_reference( WLDAP32_LDAP *ld, WLDA
 
     TRACE( "(%p, %p)\n", ld, res );
 
-    if (!ld) return NULL;
-    return ldap_first_reference( ld, res );
+    if (!ld || !res) return NULL;
+    return message_tail_insert( res, ldap_first_reference( ldap_get( ld ), ldmsg_get( res ) ) );
 
 #else
     return NULL;
@@ -438,7 +445,7 @@ ULONG CDECL WLDAP32_ldap_msgfree( WLDAP32_LDAPMessage *res )
 #ifdef HAVE_LDAP
 
     TRACE( "(%p)\n", res );
-    ldap_msgfree( res );
+    message_free_chain( res );
 
 #endif
     return ret;
@@ -491,12 +498,12 @@ PWCHAR CDECL ldap_next_attributeW( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *entry,
 {
     PWCHAR ret = NULL;
 #ifdef HAVE_LDAP
-    char *retU;
+    char * HOSTPTR retU;
 
     TRACE( "(%p, %p, %p)\n", ld, entry, ptr );
 
     if (!ld || !entry || !ptr) return NULL;
-    retU = ldap_next_attribute( ld, entry, ptr );
+    retU = ldap_next_attribute( ldap_get( ld ), ldmsg_get( entry ), ber_get( ptr ) );
 
     ret = strUtoW( retU );
     ldap_memfree( retU );
@@ -528,7 +535,7 @@ WLDAP32_LDAPMessage * CDECL WLDAP32_ldap_next_entry( WLDAP32_LDAP *ld, WLDAP32_L
     TRACE( "(%p, %p)\n", ld, entry );
 
     if (!ld || !entry) return NULL;
-    return ldap_next_entry( ld, entry );
+    return message_tail_insert( entry, ldap_next_entry( ldap_get( ld ), ldmsg_get( entry ) ) );
 
 #else
     return NULL;
@@ -558,7 +565,7 @@ WLDAP32_LDAPMessage * CDECL WLDAP32_ldap_next_reference( WLDAP32_LDAP *ld, WLDAP
     TRACE( "(%p, %p)\n", ld, entry );
 
     if (!ld || !entry) return NULL;
-    return ldap_next_reference( ld, entry );
+    return message_tail_insert( entry, ldap_next_reference( ldap_get( ld ), ldmsg_get( entry ) ) );
 
 #else
     return NULL;
@@ -606,11 +613,21 @@ ULONG CDECL WLDAP32_ldap_result( WLDAP32_LDAP *ld, ULONG msgid, ULONG all,
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
 #ifdef HAVE_LDAP
+    struct timeval tv;
+    LDAPMessage *msg = NULL;
 
     TRACE( "(%p, 0x%08x, 0x%08x, %p, %p)\n", ld, msgid, all, timeout, res );
 
     if (!ld || !res || msgid == ~0u) return ~0u;
-    ret = ldap_result( ld, msgid, all, (struct timeval *)timeout, res );
+
+    if (timeout)
+    {
+        tv.tv_sec = timeout->tv_sec;
+        tv.tv_usec = timeout->tv_usec;
+    }
+
+    ret = ldap_result( ldap_get( ld ), msgid, all, timeout ? &tv : NULL, &msg );
+    ret = message_wrap( ret, msg, res );
 
 #endif
     return ret;

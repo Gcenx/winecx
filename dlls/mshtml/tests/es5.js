@@ -615,6 +615,41 @@ function test_string_split() {
         return;
     }
 
+    function test(string, separator, result) {
+        var r = string.split(separator);
+        ok(r == result, "\"" + string + "\".split(" + separator + ") returned " + r + " expected " + result);
+    }
+
+    test("test", /^|\s+/, "test");
+    test("test", /$|\s+/, "test");
+    test("test", /^|./, "t,,,");
+    test("test", /.*/, ",");
+    test("test", /x*/, "t,e,s,t");
+    test("test", /$|x*/, "t,e,s,t");
+    test("test", /^|x*/, "t,e,s,t");
+    test("test", /t*/, ",e,s,");
+    test("xaabaax", /a*|b*/, "x,b,x");
+    test("xaabaax", /a+|b+/, "x,,,x");
+    test("xaabaax", /a+|b*/, "x,,,x");
+    test("xaaxbaax", /b+|a+/, "x,x,,x");
+    test("test", /^|t/, "tes,");
+    test("test", /^|t/, "tes,");
+    test("a,,b", /,/, "a,,b");
+    test("ab", /a*/, ",b");
+    test("aab", "a", ",,b");
+    test("a", "a", ",");
+
+    function test_length(string, separator, len) {
+        var r = string.split(separator);
+        ok(r.length === len, "\"" + string + "\".split(" + separator + ").length = "
+           + r.length + " expected " + len);
+    }
+
+    test_length("", /a*/, 0);
+    test_length("", /a+/, 1);
+    test_length("", "", 0);
+    test_length("", "x", 1);
+
     r = "1,2,3".split(undefined);
     ok(typeof(r) === "object", "typeof(r) = " + typeof(r));
     ok(r.length === 1, "r.length = " + r.length);
@@ -650,6 +685,45 @@ function test_string_split() {
     next_test();
 }
 
+function test_getPrototypeOf() {
+    ok(Object.create.length === 2, "Object.create.length = " + Object.create.length);
+    ok(Object.getPrototypeOf.length === 1, "Object.getPrototypeOf.length = " + Object.getPrototypeOf.length);
+
+    ok(Object.getPrototypeOf(new Object()) === Object.prototype,
+       "Object.getPrototypeOf(new Object()) !== Object.prototype");
+
+    function Constr() {}
+    var obj = new Constr();
+    ok(Object.getPrototypeOf(Constr.prototype) === Object.prototype,
+       "Object.getPrototypeOf(Constr.prototype) !== Object.prototype");
+    ok(Object.getPrototypeOf(obj) === Constr.prototype,
+       "Object.getPrototypeOf(obj) !== Constr.prototype");
+
+    var proto = new Object();
+    Constr.prototype = proto;
+    ok(Object.getPrototypeOf(obj) != proto,
+       "Object.getPrototypeOf(obj) == proto");
+    obj = new Constr();
+    ok(Object.getPrototypeOf(obj) === proto,
+       "Object.getPrototypeOf(obj) !== proto");
+    ok(Object.getPrototypeOf(obj, 2, 3, 4) === proto,
+       "Object.getPrototypeOf(obj) !== proto");
+
+    ok(Object.getPrototypeOf(Object.prototype) === null,
+       "Object.getPrototypeOf(Object.prototype) !== null");
+
+    obj = Object.create(proto = { test: 1 });
+    ok(Object.getPrototypeOf(obj) === proto,
+       "Object.getPrototypeOf(obj) !== proto");
+    ok(obj.test === 1, "obj.test = " + obj.test);
+
+    obj = Object.create(null);
+    ok(!("toString" in obj), "toString is in obj");
+    ok(Object.getPrototypeOf(obj) === null, "Object.getPrototypeOf(obj) = " + Object.getPrototypeOf(obj));
+
+    next_test();
+}
+
 var tests = [
     test_date_now,
     test_toISOString,
@@ -663,5 +737,6 @@ var tests = [
     test_property_definitions,
     test_string_trim,
     test_global_properties,
-    test_string_split
+    test_string_split,
+    test_getPrototypeOf
 ];

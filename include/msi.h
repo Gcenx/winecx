@@ -19,6 +19,8 @@
 #ifndef __WINE_MSI_H
 #define __WINE_MSI_H
 
+#include "wine/winheader_enter.h"
+
 #ifndef _MSI_NO_CRYPTO
 #include <wincrypt.h>
 #endif
@@ -672,6 +674,10 @@ UINT WINAPI MsiSourceListAddMediaDiskA(LPCSTR, LPCSTR, MSIINSTALLCONTEXT, DWORD,
 UINT WINAPI MsiSourceListAddMediaDiskW(LPCWSTR, LPCWSTR, MSIINSTALLCONTEXT, DWORD, DWORD, LPCWSTR, LPCWSTR);
 #define     MsiSourceListAddMediaDisk WINELIB_NAME_AW(MsiSourceListAddMediaDisk)
 
+UINT WINAPI MsiSourceListForceResolutionA(const CHAR*, const CHAR*, DWORD);
+UINT WINAPI MsiSourceListForceResolutionW(const WCHAR*, const WCHAR*, DWORD);
+#define     MsiSourceListForceResolution WINELIB_NAME_AW(MsiSourceListForceResolution)
+
 UINT WINAPI MsiEnumPatchesA(LPCSTR, DWORD, LPSTR, LPSTR, LPDWORD);
 UINT WINAPI MsiEnumPatchesW(LPCWSTR, DWORD, LPWSTR, LPWSTR, LPDWORD);
 #define     MsiEnumPatches WINELIB_NAME_AW(MsiEnumPatches)
@@ -730,5 +736,7 @@ UINT WINAPI MsiSetExternalUIRecord(INSTALLUI_HANDLER_RECORD, DWORD, LPVOID, PINS
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_MSI_H */

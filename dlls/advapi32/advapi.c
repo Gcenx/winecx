@@ -86,10 +86,10 @@ BOOL WINAPI
 GetUserNameW( LPWSTR lpszName, LPDWORD lpSize )
 {
     /* CrossOver Hack 12735: Use a consistent username */
-    const char *report_real_username = getenv( "CX_REPORT_REAL_USERNAME" );
-    const char *name;
-    DWORD i, len;
+    const char * HOSTPTR report_real_username = getenv( "CX_REPORT_REAL_USERNAME" );
+    const char * HOSTPTR name;
     LPWSTR backslash;
+    DWORD i, len;
 
     if (!report_real_username)
         name = "crossover";
@@ -275,6 +275,24 @@ BOOL WINAPI InitiateSystemShutdownW( LPWSTR lpMachineName, LPWSTR lpMessage, DWO
     return InitiateSystemShutdownExW( lpMachineName, lpMessage, dwTimeout,
                                       bForceAppsClosed, bRebootAfterShutdown,
                                       SHTDN_REASON_MAJOR_LEGACY_API );
+}
+
+/***********************************************************************
+ *     InitiateShutdownA [ADVAPI32.@]
+ */
+DWORD WINAPI InitiateShutdownA(char *name, char *message, DWORD seconds, DWORD flags, DWORD reason)
+{
+    FIXME("%s, %s, %d, %d, %d stub\n", debugstr_a(name), debugstr_a(message), seconds, flags, reason);
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+/***********************************************************************
+ *     InitiateShutdownW [ADVAPI32.@]
+ */
+DWORD WINAPI InitiateShutdownW(WCHAR *name, WCHAR *message, DWORD seconds, DWORD flags, DWORD reason)
+{
+    FIXME("%s, %s, %d, %d, %d stub\n", debugstr_w(name), debugstr_w(message), seconds, flags, reason);
+    return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
 BOOL WINAPI LogonUserA( LPCSTR lpszUsername, LPCSTR lpszDomain, LPCSTR lpszPassword,

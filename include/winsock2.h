@@ -24,6 +24,8 @@
 #ifndef _WINSOCK2API_
 #define _WINSOCK2API_
 
+#include "wine/winheader_enter.h"
+
 /*
  * Setup phase
  */
@@ -842,5 +844,7 @@ typedef DWORD (WINAPI *LPFN_WSAWAITFORMULTIPLEEVENTS)(DWORD,const WSAEVENT*,BOOL
 #undef WS
 #undef WS_API_PROTOTYPES
 #undef WS_API_TYPEDEFS
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINSOCK2API__ */

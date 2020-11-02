@@ -21,6 +21,8 @@
 #ifndef __D3DX10TEX_H__
 #define __D3DX10TEX_H__
 
+#include "wine/winheader_enter.h"
+
 typedef enum D3DX10_FILTER_FLAG
 {
     D3DX10_FILTER_NONE             = 0x00000001,
@@ -118,5 +120,7 @@ HRESULT WINAPI D3DX10GetImageInfoFromMemory(const void *src_data, SIZE_T src_dat
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif

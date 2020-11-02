@@ -19,6 +19,8 @@
 #ifndef __WINE_SHELLSCALINGAPI_H
 #define __WINE_SHELLSCALINGAPI_H
 
+#include "wine/winheader_enter.h"
+
 typedef enum MONITOR_DPI_TYPE
 {
     MDT_EFFECTIVE_DPI   = 0,
@@ -37,5 +39,7 @@ typedef enum PROCESS_DPI_AWARENESS
 HRESULT WINAPI GetDpiForMonitor(HMONITOR,MONITOR_DPI_TYPE,UINT*,UINT*);
 HRESULT WINAPI GetProcessDpiAwareness(HANDLE,PROCESS_DPI_AWARENESS*);
 HRESULT WINAPI SetProcessDpiAwareness(PROCESS_DPI_AWARENESS);
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_SHELLSCALINGAPI_H */

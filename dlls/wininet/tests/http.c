@@ -722,8 +722,11 @@ static void InternetReadFile_test(int flags, const test_data_t *test)
 
     length = sizeof(buffer)-2;
     memset(buffer, 0x77, sizeof(buffer));
+    SetLastError(0xdeadbeef);
     res = HttpQueryInfoA(hor,HTTP_QUERY_RAW_HEADERS,buffer,&length,0x0);
     ok(res, "HttpQueryInfoA(HTTP_QUERY_RAW_HEADERS) failed with error %d\n", GetLastError());
+    ok(GetLastError() == 0 ||
+                broken(GetLastError() == 0xdeadbeef /* XP/W2K3 */), "Last Error not reset %u\n", GetLastError());
     /* show that the function writes data past the length returned */
     ok(buffer[length-2], "Expected any header character, got 0x00\n");
     ok(!buffer[length-1], "Expected 0x00, got %02X\n", buffer[length-1]);
@@ -984,7 +987,10 @@ static void InternetReadFile_chunked_test(void)
         {
             char *buffer = HeapAlloc(GetProcessHeap(),0,length+1);
 
+            SetLastError(0xdeadbeef);
             res = InternetReadFile(hor,buffer,length,&got);
+            ok(GetLastError() == 0 ||
+                broken(GetLastError() == 0xdeadbeef /* XP/W2K3 */), "Last Error not reset %u\n", GetLastError());
 
             buffer[got]=0;
             trace("ReadFile -> %i %i\n",res,got);
@@ -997,8 +1003,11 @@ static void InternetReadFile_chunked_test(void)
         if (length == 0)
         {
             got = 0xdeadbeef;
+            SetLastError(0xdeadbeef);
             res = InternetReadFile( hor, buffer, 1, &got );
             ok( res, "InternetReadFile failed: %u\n", GetLastError() );
+            ok(GetLastError() == 0 ||
+                broken(GetLastError() == 0xdeadbeef /* XP/W2K3 */), "Last Error not reset %u\n", GetLastError());
             ok( !got, "got %u\n", got );
             break;
         }
@@ -3687,6 +3696,68 @@ static void test_cache_read_gzipped(int port)
     InternetCloseHandle(con);
     InternetCloseHandle(ses);
 
+    /* Decompression doesn't work while reading from cache */
+    test_cache_gzip = 0;
+    sprintf(cache_url, cache_url_fmt, port, get_gzip);
+    DeleteUrlCacheEntryA(cache_url);
+
+    ses = InternetOpenA("winetest", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+    ok(ses != NULL,"InternetOpen failed with error %u\n", GetLastError());
+
+    ret = TRUE;
+    ret = InternetSetOptionA(ses, INTERNET_OPTION_HTTP_DECODING, &ret, sizeof(ret));
+    ok(ret, "InternetSetOption(INTERNET_OPTION_HTTP_DECODING) failed: %d\n", GetLastError());
+
+    con = InternetConnectA(ses, "localhost", port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+    ok(con != NULL, "InternetConnect failed with error %u\n", GetLastError());
+
+    req = HttpOpenRequestA(con, NULL, get_gzip, NULL, NULL, NULL, 0, 0);
+    ok(req != NULL, "HttpOpenRequest failed\n");
+
+    ret = HttpSendRequestA(req, "Accept-Encoding: gzip", -1, NULL, 0);
+    ok(ret, "HttpSendRequest failed with error %u\n", GetLastError());
+    size = 0;
+    while(InternetReadFile(req, buf+size, sizeof(buf)-1-size, &read) && read)
+        size += read;
+    ok(size == 10, "read %d bytes of data\n", size);
+    buf[size] = 0;
+    ok(!strncmp(buf, content, size), "incorrect page content: %s\n", buf);
+    InternetCloseHandle(req);
+
+    InternetCloseHandle(con);
+    InternetCloseHandle(ses);
+
+    /* Decompression doesn't work while reading from cache */
+    test_cache_gzip = 0;
+    sprintf(cache_url, cache_url_fmt, port, get_gzip);
+    DeleteUrlCacheEntryA(cache_url);
+
+    ses = InternetOpenA("winetest", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+    ok(ses != NULL,"InternetOpen failed with error %u\n", GetLastError());
+
+    con = InternetConnectA(ses, "localhost", port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+    ok(con != NULL, "InternetConnect failed with error %u\n", GetLastError());
+
+    ret = TRUE;
+    ret = InternetSetOptionA(con, INTERNET_OPTION_HTTP_DECODING, &ret, sizeof(ret));
+    ok(ret, "InternetSetOption(INTERNET_OPTION_HTTP_DECODING) failed: %d\n", GetLastError());
+
+    req = HttpOpenRequestA(con, NULL, get_gzip, NULL, NULL, NULL, 0, 0);
+    ok(req != NULL, "HttpOpenRequest failed\n");
+
+    ret = HttpSendRequestA(req, "Accept-Encoding: gzip", -1, NULL, 0);
+    ok(ret, "HttpSendRequest failed with error %u\n", GetLastError());
+    size = 0;
+    while(InternetReadFile(req, buf+size, sizeof(buf)-1-size, &read) && read)
+        size += read;
+    ok(size == 10, "read %d bytes of data\n", size);
+    buf[size] = 0;
+    ok(!strncmp(buf, content, size), "incorrect page content: %s\n", buf);
+    InternetCloseHandle(req);
+
+    InternetCloseHandle(con);
+    InternetCloseHandle(ses);
+
     DeleteUrlCacheEntryA(cache_url);
 }
 
@@ -5813,6 +5884,9 @@ static void test_security_flags(void)
         ok(!cert->lpszEncryptionAlgName, "unexpected encryption algorithm name\n");
         ok(!cert->lpszProtocolName, "unexpected protocol name\n");
         ok(cert->dwKeySize != 0xdeadbeef, "unexpected key size\n");
+
+        LocalFree(cert->lpszSubjectInfo);
+        LocalFree(cert->lpszIssuerInfo);
     }
     HeapFree(GetProcessHeap(), 0, cert);
 

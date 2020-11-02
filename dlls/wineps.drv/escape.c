@@ -18,9 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,9 +25,6 @@
 #include <signal.h>
 #include <errno.h>
 #include <fcntl.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
 
 #include "windef.h"
 #include "winbase.h"
@@ -58,8 +52,8 @@ DWORD write_spool( PHYSDEV dev, const void *data, DWORD num )
 /**********************************************************************
  *           ExtEscape  (WINEPS.@)
  */
-INT PSDRV_ExtEscape( PHYSDEV dev, INT nEscape, INT cbInput, LPCVOID in_data,
-                     INT cbOutput, LPVOID out_data )
+INT CDECL PSDRV_ExtEscape( PHYSDEV dev, INT nEscape, INT cbInput, LPCVOID in_data,
+                           INT cbOutput, LPVOID out_data )
 {
     PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
 
@@ -97,13 +91,54 @@ INT PSDRV_ExtEscape( PHYSDEV dev, INT nEscape, INT cbInput, LPCVOID in_data,
 	    case CLIP_TO_PATH:
 	    case END_PATH:
 	    /*case DRAWPATTERNRECT:*/
+
+            /* PageMaker checks for it */
+            case DOWNLOADHEADER:
+
+            /* PageMaker doesn't check for DOWNLOADFACE and GETFACENAME but
+             * uses them, they are supposed to be supported by any PS printer.
+             */
+            case DOWNLOADFACE:
+
+            /* PageMaker checks for these as a part of process of detecting
+             * a "fully compatible" PS printer, but doesn't actually use them.
+             */
+            case OPENCHANNEL:
+            case CLOSECHANNEL:
 	        return TRUE;
+
+            /* Windows PS driver reports 0, but still supports this escape */
+            case GETFACENAME:
+                return FALSE; /* suppress the FIXME below */
 
 	    default:
 		FIXME("QUERYESCSUPPORT(%d) - not supported.\n", num);
 	        return FALSE;
 	    }
 	}
+
+    case OPENCHANNEL:
+        FIXME("OPENCHANNEL: stub\n");
+        return 1;
+
+    case CLOSECHANNEL:
+        FIXME("CLOSECHANNEL: stub\n");
+        return 1;
+
+    case DOWNLOADHEADER:
+        FIXME("DOWNLOADHEADER: stub\n");
+        /* should return name of the downloaded procset */
+        *(char *)out_data = 0;
+        return 1;
+
+    case GETFACENAME:
+        FIXME("GETFACENAME: stub\n");
+        lstrcpynA(out_data, "Courier", cbOutput);
+        return 1;
+
+    case DOWNLOADFACE:
+        FIXME("DOWNLOADFACE: stub\n");
+        return 1;
 
     case MFCOMMENT:
     {
@@ -352,19 +387,18 @@ INT PSDRV_ExtEscape( PHYSDEV dev, INT nEscape, INT cbInput, LPCVOID in_data,
 /************************************************************************
  *           PSDRV_StartPage
  */
-INT PSDRV_StartPage( PHYSDEV dev )
+INT CDECL PSDRV_StartPage( PHYSDEV dev )
 {
     PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
+
+    TRACE("%p\n", dev->hdc);
 
     if(!physDev->job.OutOfPage) {
         FIXME("Already started a page?\n");
 	return 1;
     }
 
-    if(physDev->job.PageNo++ == 0) {
-        if(!PSDRV_WriteHeader( dev, physDev->job.doc_name ))
-            return 0;
-    }
+    physDev->job.PageNo++;
 
     if(!PSDRV_WriteNewPage( dev ))
         return 0;
@@ -376,9 +410,11 @@ INT PSDRV_StartPage( PHYSDEV dev )
 /************************************************************************
  *           PSDRV_EndPage
  */
-INT PSDRV_EndPage( PHYSDEV dev )
+INT CDECL PSDRV_EndPage( PHYSDEV dev )
 {
     PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
+
+    TRACE("%p\n", dev->hdc);
 
     if(physDev->job.OutOfPage) {
         FIXME("Already ended a page?\n");
@@ -397,7 +433,7 @@ INT PSDRV_EndPage( PHYSDEV dev )
 /************************************************************************
  *           PSDRV_StartDoc
  */
-INT PSDRV_StartDoc( PHYSDEV dev, const DOCINFOW *doc )
+INT CDECL PSDRV_StartDoc( PHYSDEV dev, const DOCINFOW *doc )
 {
     PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
     DOC_INFO_1W di;
@@ -442,6 +478,13 @@ INT PSDRV_StartDoc( PHYSDEV dev, const DOCINFOW *doc )
         ClosePrinter(physDev->job.hprinter);
 	return 0;
     }
+
+    if (!PSDRV_WriteHeader( dev, doc->lpszDocName )) {
+        WARN("Failed to write header\n");
+        ClosePrinter(physDev->job.hprinter);
+        return 0;
+    }
+
     physDev->job.banding = FALSE;
     physDev->job.OutOfPage = TRUE;
     physDev->job.PageNo = 0;
@@ -455,10 +498,12 @@ INT PSDRV_StartDoc( PHYSDEV dev, const DOCINFOW *doc )
 /************************************************************************
  *           PSDRV_EndDoc
  */
-INT PSDRV_EndDoc( PHYSDEV dev )
+INT CDECL PSDRV_EndDoc( PHYSDEV dev )
 {
     PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
     INT ret = 1;
+
+    TRACE("%p\n", dev->hdc);
 
     if(!physDev->job.id) {
         FIXME("hJob == 0. Now what?\n");

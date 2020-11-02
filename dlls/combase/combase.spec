@@ -82,10 +82,10 @@
 @ stub CoDeactivateObject
 @ stub CoDecodeProxy
 @ stub CoDecrementMTAUsage
-@ stub CoDisableCallCancellation
+@ stdcall CoDisableCallCancellation(ptr) ole32.CoDisableCallCancellation
 @ stub CoDisconnectContext
 @ stdcall CoDisconnectObject(ptr long) ole32.CoDisconnectObject
-@ stub CoEnableCallCancellation
+@ stdcall CoEnableCallCancellation(ptr) ole32.CoEnableCallCancellation
 @ stdcall CoFreeUnusedLibraries() ole32.CoFreeUnusedLibraries
 @ stdcall CoFreeUnusedLibrariesEx(long long) ole32.CoFreeUnusedLibrariesEx
 @ stdcall CoGetActivationState(int128 long ptr) ole32.CoGetActivationState
@@ -170,7 +170,7 @@
 @ stdcall CreateStreamOnHGlobal(ptr long ptr) ole32.CreateStreamOnHGlobal
 @ stub DcomChannelSetHResult
 @ stdcall DllDebugObjectRPCHook(long ptr) ole32.DllDebugObjectRPCHook
-@ stub DllGetActivationFactory
+@ stdcall DllGetActivationFactory(ptr ptr)
 @ stdcall -private DllGetClassObject(ptr ptr ptr) ole32.DllGetClassObject
 @ stub EnableHookObject
 @ stdcall FreePropVariantArray(long ptr) ole32.FreePropVariantArray

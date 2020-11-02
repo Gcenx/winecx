@@ -896,7 +896,7 @@ static ULONG_PTR CLASS_GetClassLong( HWND hwnd, INT offset, UINT size,
                     retvalue = reply->old_extra;
                     break;
                 case GCLP_HMODULE:
-                    retvalue = (ULONG_PTR)wine_server_get_ptr( reply->old_instance );
+                    retvalue = TRUNCCAST(ULONG_PTR, wine_server_get_ptr( reply->old_instance ));
                     break;
                 case GCW_ATOM:
                     retvalue = reply->old_atom;

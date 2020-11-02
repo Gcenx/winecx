@@ -135,12 +135,12 @@ enum cpu_type
 {
     CPU_x86, CPU_x86_64, CPU_POWERPC, CPU_ARM, CPU_ARM64
 };
-typedef int cpu_type_t;
+typedef int client_cpu_t;
 
 /* context data */
 typedef struct
 {
-    cpu_type_t       cpu;        /* cpu type */
+    client_cpu_t     cpu;        /* cpu type */
     unsigned int     flags;      /* SERVER_CTX_* flags */
     union
     {
@@ -465,7 +465,8 @@ enum apc_type
     APC_VIRTUAL_UNLOCK,
     APC_MAP_VIEW,
     APC_UNMAP_VIEW,
-    APC_CREATE_THREAD
+    APC_CREATE_THREAD,
+    APC_BREAK_PROCESS
 };
 
 typedef union
@@ -654,51 +655,86 @@ typedef union
         thread_id_t      tid;       /* thread id */
         obj_handle_t     handle;    /* handle to new thread */
     } create_thread;
+    struct
+    {
+        enum apc_type    type;      /* APC_BREAK_PROCESS */
+        unsigned int     status;    /* status returned by call */
+    } break_process;
 } apc_result_t;
+
+enum irp_type
+{
+    IRP_CALL_NONE,
+    IRP_CALL_CREATE,
+    IRP_CALL_CLOSE,
+    IRP_CALL_READ,
+    IRP_CALL_WRITE,
+    IRP_CALL_FLUSH,
+    IRP_CALL_IOCTL,
+    IRP_CALL_FREE,
+    IRP_CALL_CANCEL
+};
 
 typedef union
 {
-    unsigned int         major;     /* irp major function */
+    enum irp_type        type;      /* irp call type */
     struct
     {
-        unsigned int     major;     /* IRP_MJ_CREATE */
+        enum irp_type    type;      /* IRP_CALL_CREATE */
         unsigned int     access;    /* access rights */
         unsigned int     sharing;   /* sharing flags */
         unsigned int     options;   /* file options */
         client_ptr_t     device;    /* opaque ptr for the device */
+        obj_handle_t     file;      /* file handle */
     } create;
     struct
     {
-        unsigned int     major;     /* IRP_MJ_CLOSE */
+        enum irp_type    type;      /* IRP_CALL_CLOSE */
         int              __pad;
         client_ptr_t     file;      /* opaque ptr for the file object */
     } close;
     struct
     {
-        unsigned int     major;     /* IRP_MJ_READ */
+        enum irp_type    type;      /* IRP_CALL_READ */
         unsigned int     key;       /* driver key */
+        data_size_t      out_size;  /* needed output size */
+        int              __pad;
         client_ptr_t     file;      /* opaque ptr for the file object */
         file_pos_t       pos;       /* file position */
     } read;
     struct
     {
-        unsigned int     major;     /* IRP_MJ_WRITE */
+        enum irp_type    type;      /* IRP_CALL_WRITE */
         unsigned int     key;       /* driver key */
         client_ptr_t     file;      /* opaque ptr for the file object */
         file_pos_t       pos;       /* file position */
     } write;
     struct
     {
-        unsigned int     major;     /* IRP_MJ_FLUSH_BUFFERS */
+        enum irp_type    type;      /* IRP_CALL_FLUSH */
         int              __pad;
         client_ptr_t     file;      /* opaque ptr for the file object */
     } flush;
     struct
     {
-        unsigned int     major;     /* IRP_MJ_DEVICE_CONTROL */
+        enum irp_type    type;      /* IRP_CALL_IOCTL */
         ioctl_code_t     code;      /* ioctl code */
+        data_size_t      out_size;  /* needed output size */
+        int              __pad;
         client_ptr_t     file;      /* opaque ptr for the file object */
     } ioctl;
+    struct
+    {
+        enum irp_type    type;      /* IRP_CALL_FREE */
+        int              __pad;
+        client_ptr_t     obj;       /* opaque ptr for the freed object */
+    } free;
+    struct
+    {
+        enum irp_type    type;      /* IRP_CALL_CANCEL */
+        int              __pad;
+        client_ptr_t     irp;       /* opaque ptr for canceled irp */
+    } cancel;
 } irp_params_t;
 
 /* information about a PE image mapping, roughly equivalent to SECTION_IMAGE_INFORMATION */
@@ -723,13 +759,16 @@ typedef struct
     unsigned int   header_size;
     unsigned int   file_size;
     unsigned int   checksum;
-    cpu_type_t     cpu;
+    client_cpu_t   cpu;
+    int            __pad;
 } pe_image_info_t;
 #define IMAGE_FLAGS_ComPlusNativeReady        0x01
 #define IMAGE_FLAGS_ComPlusILOnly             0x02
 #define IMAGE_FLAGS_ImageDynamicallyRelocated 0x04
 #define IMAGE_FLAGS_ImageMappedFlat           0x08
 #define IMAGE_FLAGS_BaseBelow4gb              0x10
+#define IMAGE_FLAGS_WineBuiltin               0x40
+#define IMAGE_FLAGS_WineFakeDll               0x80
 
 struct rawinput_device
 {
@@ -749,7 +788,7 @@ struct rawinput_device
     int          socket_fd;      /* file descriptor for process socket */
     obj_handle_t exe_file;       /* file handle for main exe */
     unsigned int access;         /* access rights for process object */
-    cpu_type_t   cpu;            /* CPU that the new process will use */
+    client_cpu_t cpu;            /* CPU that the new process will use */
     data_size_t  info_size;      /* size of startup info */
     VARARG(objattr,object_attributes);   /* object attributes */
     VARARG(info,startup_info,info_size); /* startup information */
@@ -765,7 +804,7 @@ struct rawinput_device
 @REQ(exec_process)
     int          socket_fd;      /* file descriptor for process socket */
     obj_handle_t exe_file;       /* file handle for main exe */
-    cpu_type_t   cpu;            /* CPU that the new process will use */
+    client_cpu_t cpu;            /* CPU that the new process will use */
 @END
 
 
@@ -820,7 +859,7 @@ struct rawinput_device
     client_ptr_t entry;        /* entry point or PEB if initial thread (in thread address space) */
     int          reply_fd;     /* fd for reply pipe */
     int          wait_fd;      /* fd for blocking calls pipe */
-    cpu_type_t   cpu;          /* CPU that this thread is running on */
+    client_cpu_t cpu;          /* CPU that this thread is running on */
 @REPLY
     process_id_t pid;          /* process id of the new thread's process */
     thread_id_t  tid;          /* thread id of the new thread */
@@ -863,7 +902,7 @@ struct rawinput_device
     timeout_t    end_time;         /* process end time */
     int          exit_code;        /* process exit code */
     int          priority;         /* priority class */
-    cpu_type_t   cpu;              /* CPU that this process is running on */
+    client_cpu_t cpu;              /* CPU that this process is running on */
     short int    debugger_present; /* process is being debugged */
     short int    debug_children;   /* inherit debugger to child processes */
 @END
@@ -1079,6 +1118,8 @@ struct rawinput_device
 @REQ(event_op)
     obj_handle_t  handle;       /* handle to event */
     int           op;           /* event operation (see below) */
+@REPLY
+    int           state;        /* previous state */
 @END
 enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
 
@@ -1899,14 +1940,6 @@ enum char_info_mode
 @END
 
 
-/* Simulate a breakpoint in a process */
-@REQ(debug_break)
-    obj_handle_t handle;       /* process handle */
-@REPLY
-    int          self;         /* was it the caller itself? */
-@END
-
-
 /* Set debugger kill on exit flag */
 @REQ(set_debugger_kill_on_exit)
     int          kill_on_exit;  /* 0=detach/1=kill debuggee when debugger dies */
@@ -2449,7 +2482,6 @@ enum message_type
     obj_handle_t handle;          /* handle to the irp */
     unsigned int status;          /* status of the irp */
     data_size_t  size;            /* result size (input or output depending on the operation) */
-    client_ptr_t file_ptr;        /* opaque pointer to the file object */
     VARARG(data,bytes);           /* output data of the irp */
 @END
 
@@ -3612,20 +3644,17 @@ struct handle_info
 
 /* Create a device */
 @REQ(create_device)
-    unsigned int access;          /* wanted access rights */
-    unsigned int attributes;      /* object attributes */
     obj_handle_t rootdir;         /* root directory */
     client_ptr_t user_ptr;        /* opaque ptr for use by client */
     obj_handle_t manager;         /* device manager */
     VARARG(name,unicode_str);     /* object name */
-@REPLY
-    obj_handle_t handle;          /* handle to the device */
 @END
 
 
 /* Delete a device */
 @REQ(delete_device)
-    obj_handle_t handle;          /* handle to the device */
+    obj_handle_t manager;         /* handle to the device manager */
+    client_ptr_t device;          /* pointer to the device */
 @END
 
 
@@ -3634,14 +3663,55 @@ struct handle_info
     obj_handle_t manager;         /* handle to the device manager */
     obj_handle_t prev;            /* handle to the previous irp */
     unsigned int status;          /* status of the previous irp */
+    client_ptr_t user_ptr;        /* user pointer of the previous irp */
 @REPLY
     irp_params_t params;          /* irp parameters */
     obj_handle_t next;            /* handle to the next irp */
-    process_id_t client_pid;      /* pid of process calling irp */
     thread_id_t  client_tid;      /* tid of thread calling irp */
+    client_ptr_t client_thread;   /* pointer to thread object of calling irp */
     data_size_t  in_size;         /* total needed input size */
-    data_size_t  out_size;        /* needed output size */
     VARARG(next_data,bytes);      /* input data of the next irp */
+@END
+
+
+/* Get kernel pointer from server object */
+@REQ(get_kernel_object_ptr)
+    obj_handle_t manager;         /* handle to the device manager */
+    obj_handle_t handle;          /* object handle */
+@REPLY
+    client_ptr_t user_ptr;        /* kernel object pointer */
+@END
+
+
+/* Associate kernel pointer with server object */
+@REQ(set_kernel_object_ptr)
+    obj_handle_t manager;         /* handle to the device manager */
+    obj_handle_t handle;          /* object handle */
+    client_ptr_t user_ptr;        /* kernel object pointer */
+@END
+
+
+/* Grab server object reference from kernel object pointer */
+@REQ(grab_kernel_object)
+    obj_handle_t manager;         /* handle to the device manager */
+    client_ptr_t user_ptr;        /* kernel object pointer */
+@END
+
+
+/* Release server object reference from kernel object pointer */
+@REQ(release_kernel_object)
+    obj_handle_t manager;         /* handle to the device manager */
+    client_ptr_t user_ptr;        /* kernel object pointer */
+@END
+
+
+/* Get handle from kernel object pointer */
+@REQ(get_kernel_object_handle)
+    obj_handle_t manager;         /* handle to the device manager */
+    client_ptr_t user_ptr;        /* kernel object pointer */
+    unsigned int access;          /* wanted access rights */
+@REPLY
+    obj_handle_t handle;          /* kernel object handle */
 @END
 
 
@@ -3886,4 +3956,16 @@ struct handle_info
 @REQ(terminate_job)
     obj_handle_t handle;          /* handle to the job */
     int          status;          /* process exit code */
+@END
+
+
+/* Suspend a process */
+@REQ(suspend_process)
+    obj_handle_t handle;       /* process handle */
+@END
+
+
+/* Resume a process */
+@REQ(resume_process)
+    obj_handle_t handle;       /* process handle */
 @END

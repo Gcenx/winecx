@@ -19,15 +19,15 @@
 #ifndef __D3DCOMPILER_H__
 #define __D3DCOMPILER_H__
 
+#include "wine/winheader_enter.h"
+
 #include "d3d11shader.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if defined(__GNUC__)
-#define D3DCOMPILER_DLL_W (const WCHAR[]){'d','3','d','c','o','m','p','i','l','e','r','_','4','7','.','d','l','l',0}
-#elif defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__MINGW32__)
 #define D3DCOMPILER_DLL_W L"d3dcompiler_47.dll"
 #else
 static const WCHAR D3DCOMPILER_DLL_W[] = {'d','3','d','c','o','m','p','i','l','e','r','_','4','7','.','d','l','l',0};
@@ -125,5 +125,7 @@ HRESULT WINAPI D3DLoadModule(const void *data, SIZE_T size, ID3D11Module **modul
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif

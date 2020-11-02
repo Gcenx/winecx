@@ -19,6 +19,8 @@
 #ifndef _CFGMGR32_H_
 #define _CFGMGR32_H_
 
+#include "wine/winheader_enter.h"
+
 /* FIXME: #include <cfg.h> */
 
 #ifndef GUID_DEFINED
@@ -175,6 +177,23 @@ typedef CHAR *DEVNODEID_A, *DEVINSTID_A;
 typedef WCHAR *DEVNODEID_W, *DEVINSTID_W;
 typedef ULONG REGDISPOSITION;
 
+typedef enum _PNP_VETO_TYPE
+{
+    PNP_VetoTypeUnknown,
+    PNP_VetoLegacyDevice,
+    PNP_VetoPendingClose,
+    PNP_VetoWindowsApp,
+    PNP_VetoWindowsService,
+    PNP_VetoOutstandingOpen,
+    PNP_VetoDevice,
+    PNP_VetoDriver,
+    PNP_VetoIllegalDeviceRequest,
+    PNP_VetoInsufficientPower,
+    PNP_VetoNonDisableable,
+    PNP_VetoLegacyDriver,
+    PNP_VetoInsufficientRights
+} PNP_VETO_TYPE, *PPNP_VETO_TYPE;
+
 DECL_WINELIB_CFGMGR32_TYPE_AW(DEVNODEID)
 DECL_WINELIB_CFGMGR32_TYPE_AW(DEVINSTID)
 
@@ -205,6 +224,7 @@ CMAPI CONFIGRET WINAPI CM_Get_Device_ID_List_ExW(PCWSTR,PWCHAR,ULONG,ULONG,HMACH
 #define     CM_Get_Device_ID_List_Ex WINELIB_NAME_AW(CM_Get_Device_ID_List_Ex)
 CMAPI CONFIGRET WINAPI CM_Get_Device_ID_Size(PULONG,DEVINST,ULONG);
 CMAPI CONFIGRET WINAPI CM_Get_Device_ID_Size_Ex(PULONG,DEVINST,ULONG,HMACHINE);
+CMAPI CONFIGRET WINAPI CM_Get_Sibling(PDEVINST,DEVINST,ULONG);
 CMAPI CONFIGRET WINAPI CM_Get_Sibling_Ex(PDEVINST pdnDevInst, DEVINST DevInst, ULONG ulFlags, HMACHINE hMachine);
 CMAPI WORD      WINAPI CM_Get_Version(void);
 CMAPI CONFIGRET WINAPI CM_Locate_DevNodeA(PDEVINST,DEVINSTID_A,ULONG);
@@ -212,11 +232,16 @@ CMAPI CONFIGRET WINAPI CM_Locate_DevNodeW(PDEVINST,DEVINSTID_W,ULONG);
 #define     CM_Locate_DevNode WINELIB_NAME_AW(CM_Locate_DevNode)
 CMAPI CONFIGRET WINAPI CM_Open_DevNode_Key(DEVINST dnDevInst, REGSAM access, ULONG ulHardwareProfile,
                                            REGDISPOSITION disposition, PHKEY phkDevice, ULONG ulFlags);
+CMAPI CONFIGRET WINAPI CM_Request_Device_EjectA(DEVINST dev, PPNP_VETO_TYPE type, LPSTR name, ULONG length, ULONG flags);
+CMAPI CONFIGRET WINAPI CM_Request_Device_EjectW(DEVINST dev, PPNP_VETO_TYPE type, LPWSTR name, ULONG length, ULONG flags);
+#define     CM_Request_Device_Eject WINELIB_NAME_AW(CM_Get_Device_ID_List_Ex)
 
 #ifdef __cplusplus
 }
 #endif
 
 #undef DECL_WINELIB_CFGMGR32_TYPE_AW
+
+#include "wine/winheader_exit.h"
 
 #endif /* _CFGMGR32_H_ */

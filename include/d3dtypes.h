@@ -25,11 +25,13 @@
 #ifndef __WINE_D3DTYPES_H
 #define __WINE_D3DTYPES_H
 
+#include "wine/winheader_enter.h"
+
 #include <windows.h>
 #include <float.h>
 #include <ddraw.h>
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 #include <pshpack4.h>
 #endif
 
@@ -1363,8 +1365,10 @@ typedef enum _D3DTEXTURETRANSFORMFLAGS {
 #define D3DFVF_TEXCOORDSIZE4(CoordIndex) (D3DFVF_TEXTUREFORMAT4 << (CoordIndex*2 + 16))
 #define D3DFVF_TEXCOORDSIZE1(CoordIndex) (D3DFVF_TEXTUREFORMAT1 << (CoordIndex*2 + 16))
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 #include <poppack.h>
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif

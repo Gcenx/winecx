@@ -30,11 +30,11 @@ dnl **** Command-line arguments ****
 
 AC_ARG_ENABLE(win16, AS_HELP_STRING([--disable-win16],[do not include Win16 support]))
 AC_ARG_ENABLE(win64, AS_HELP_STRING([--enable-win64],[build a Win64 emulator on AMD64 (won't run Win32 binaries)]))
+AC_ARG_ENABLE(win32on64, AS_HELP_STRING([--enable-win32on64],[build a Win32 emulator on AMD64]))
 AC_ARG_ENABLE(tests, AS_HELP_STRING([--disable-tests],[do not build the regression tests]))
 AC_ARG_ENABLE(maintainer-mode, AS_HELP_STRING([--enable-maintainer-mode],[enable maintainer-specific build rules]))
 
-AC_ARG_WITH(alsa,      AS_HELP_STRING([--without-alsa],[do not use the Alsa sound support]),
-            [if test "x$withval" = "xno"; then ac_cv_header_sys_asoundlib_h=no; ac_cv_header_alsa_asoundlib_h=no; fi])
+AC_ARG_WITH(alsa,      AS_HELP_STRING([--without-alsa],[do not use the Alsa sound support]))
 AC_ARG_WITH(capi,      AS_HELP_STRING([--without-capi],[do not use CAPI (ISDN support)]))
 AC_ARG_WITH(cms,       AS_HELP_STRING([--without-cms],[do not use CMS (color management support)]))
 AC_ARG_WITH(coreaudio, AS_HELP_STRING([--without-coreaudio],[do not use the CoreAudio sound support]),
@@ -58,10 +58,12 @@ AC_ARG_WITH(gsm,       AS_HELP_STRING([--without-gsm],[do not use libgsm (GSM 06
 AC_ARG_WITH(gssapi,    AS_HELP_STRING([--without-gssapi],[do not use GSSAPI (Kerberos SSP support)]))
 AC_ARG_WITH(gstreamer, AS_HELP_STRING([--without-gstreamer],[do not use GStreamer (codecs support)]))
 AC_ARG_WITH(hal,       AS_HELP_STRING([--without-hal],[do not use HAL (dynamic device support)]))
+AC_ARG_WITH(inotify,   AS_HELP_STRING([--without-inotify],[do not use inotify (filesystem change notifications)]))
 AC_ARG_WITH(jpeg,      AS_HELP_STRING([--without-jpeg],[do not use JPEG]))
 AC_ARG_WITH(krb5,      AS_HELP_STRING([--without-krb5],[do not use krb5 (Kerberos)]))
 AC_ARG_WITH(ldap,      AS_HELP_STRING([--without-ldap],[do not use LDAP]),
             [if test "x$withval" = "xno"; then ac_cv_header_ldap_h=no; ac_cv_header_lber_h=no; fi])
+AC_ARG_WITH(mingw,     AS_HELP_STRING([--without-mingw],[do not use the MinGW cross-compiler]))
 AC_ARG_WITH(mpg123,    AS_HELP_STRING([--without-mpg123],[do not use the mpg123 library]))
 AC_ARG_WITH(netapi,    AS_HELP_STRING([--without-netapi],[do not use the Samba NetAPI library]))
 AC_ARG_WITH(openal,    AS_HELP_STRING([--without-openal],[do not use OpenAL]),
@@ -81,7 +83,7 @@ AC_ARG_WITH(sane,      AS_HELP_STRING([--without-sane],[do not use SANE (scanner
 AC_ARG_WITH(sdl,       AS_HELP_STRING([--without-sdl],[do not use SDL]))
 AC_ARG_WITH(tiff,      AS_HELP_STRING([--without-tiff],[do not use TIFF]))
 AC_ARG_WITH(udev,      AS_HELP_STRING([--without-udev],[do not use udev (plug and play support)]))
-AC_ARG_WITH(v4l,       AS_HELP_STRING([--without-v4l],[do not use v4l1 (v4l support)]))
+AC_ARG_WITH(v4l2,      AS_HELP_STRING([--without-v4l2],[do not use v4l2 (video capture)]))
 AC_ARG_WITH(vkd3d,     AS_HELP_STRING([--without-vkd3d],[do not use vkd3d (Direct3D 12 support)]))
 AC_ARG_WITH(vulkan,    AS_HELP_STRING([--without-vulkan],[do not use Vulkan]))
 AC_ARG_WITH(xcomposite,AS_HELP_STRING([--without-xcomposite],[do not use the Xcomposite extension]),
@@ -108,8 +110,7 @@ AC_ARG_WITH(xshm,      AS_HELP_STRING([--without-xshm],[do not use XShm (shared 
 AC_ARG_WITH(xslt,      AS_HELP_STRING([--without-xslt],[do not use XSLT]))
 AC_ARG_WITH(xxf86vm,   AS_HELP_STRING([--without-xxf86vm],[do not use XFree video mode extension]),
             [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_xf86vmode_h=no; ac_cv_header_X11_extensions_xf86vmproto_h=no; fi])
-AC_ARG_WITH(zlib,      AS_HELP_STRING([--without-zlib],[do not use Zlib (data compression)]),
-            [if test "x$withval" = "xno"; then ac_cv_header_zlib_h=no; fi])
+AC_ARG_WITH(zlib,      AS_HELP_STRING([--without-zlib],[do not use Zlib (data compression)]))
 
 AC_ARG_WITH(wine-tools,AS_HELP_STRING([--with-wine-tools=DIR],[use Wine tools from directory DIR]))
 AC_ARG_WITH(wine64,    AS_HELP_STRING([--with-wine64=DIR],[use the 64-bit Wine in DIR for a Wow64 build]))
@@ -135,33 +136,40 @@ AC_CHECK_TOOL(CPPBIN,cpp,cpp)
 AC_DEFINE_UNQUOTED(EXEEXT,["$ac_exeext"],[Define to the file extension for executables.])
 AC_CHECK_TOOL(LD,ld)
 
+WINE_TRY_CFLAGS([-ilocal include],
+                [AC_DEFINE(HAVE_ILOCAL, 1, [Define to 1 if your compiler supports the -ilocal option.])],[])
+
 case $host in
   *-darwin*)
     with_fontconfig=${with_fontconfig:-no}
     ;;
   *-mingw32*|*-cygwin*)
     enable_win16=${enable_win16:-no}
+    with_mingw=${with_mingw:-no}
     CFLAGS="$CFLAGS -D_WIN32"
     ;;
 esac
 
+AC_SUBST(HOSTSTACK_CFLAGS,"")
+
 case $host in
   x86_64*|amd64*)
-    if test "x$enable_win64" != "xyes" -a "$cross_compiling" != "yes"
+    if test "x$enable_win64" != "xyes" -a "x$enable_win32on64" != "xyes" -a "$cross_compiling" != "yes"
     then
       CC="$CC -m32"
       CXX="$CXX -m32"
-      AC_MSG_CHECKING([whether $CC works])
-      AC_LINK_IFELSE([AC_LANG_PROGRAM()],AC_MSG_RESULT([yes]),
-                     [AC_MSG_RESULT([no])
-                      AC_MSG_ERROR([Cannot build a 32-bit program, you need to install 32-bit development libraries.])])
+      AC_CACHE_CHECK([whether $CC works], wine_cv_cc_m32,
+          [AC_LINK_IFELSE([AC_LANG_PROGRAM()],[wine_cv_cc_m32=yes],[wine_cv_cc_m32=no])])
+      test $wine_cv_cc_m32 != no || AC_MSG_ERROR([Cannot build a 32-bit program, you need to install 32-bit development libraries.])
       host_cpu="i386"
       notice_platform="32-bit "
       AC_SUBST(TARGETFLAGS,"-m32")
+      AC_SUBST(WIDLFLAGS,"-m32")
       PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-/usr/lib/i386-linux-gnu/pkgconfig:/usr/lib/pkgconfig}
       export PKG_CONFIG_PATH
       enable_win16=${enable_win16:-yes}
-    else
+    elif test "x$enable_win64" != "xyes" -a "x$enable_win32on64" = "xyes" -a "$cross_compiling" != "yes"
+    then
       if test "x${GCC}" = "xyes"
       then
         AC_MSG_CHECKING([whether $CC supports __builtin_ms_va_list])
@@ -169,20 +177,38 @@ case $host in
                           [AC_MSG_RESULT([yes])],
                           [AC_MSG_RESULT([no])
                            AC_MSG_ERROR([You need gcc >= 4.4 or clang >= 3.8 to build Wine as 64-bit.])])
+        AS_VAR_IF([ac_cv_cflags__ilocal_include], [no],
+                  [AC_MSG_ERROR([You need a version of clang that supports -ilocal to build Wine for 32on64.])], [])
+      fi
+      CC="$CC -mwine32 -mstorage-address-space=default -minterop64-32-thunk-prefix=wine -minterop64-32-cs32-name=wine_32on64_cs32 -minterop64-32-cs64-name=wine_32on64_cs64 -mstack64"
+      CXX="$CXX -mwine32 -mstorage-address-space=default -minterop64-32-thunk-prefix=wine -minterop64-32-cs32-name=wine_32on64_cs32 -minterop64-32-cs64-name=wine_32on64_cs64 -mstack64"
+      HOSTSTACK_CFLAGS="$HOSTSTACK_CFLAGS -mstack64"
+      AC_SUBST(MODULECFLAGS, "-mdefault-address-space=ptr32 -mstorage-address-space=ptr32 -mno-stack64")
+      host_cpu="x86_32on64"
+      notice_platform="64-bit "
+      AC_SUBST(TARGETFLAGS,"-mwine32")
+      AC_SUBST(WIDLFLAGS,"-m32")
+    else
+      if test "x${GCC}" = "xyes"
+      then
+        AC_CACHE_CHECK([whether $CC supports __builtin_ms_va_list],wine_cv_builtin_ms_va_list,
+            [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <stdarg.h>]], [[void func(__builtin_ms_va_list *args);]])],
+                          [wine_cv_builtin_ms_va_list=yes],[wine_cv_builtin_ms_va_list=no])])
+        test $wine_cv_builtin_ms_va_list != no || AC_MSG_ERROR([You need gcc >= 4.4 or clang >= 3.8 to build Wine as 64-bit.])
       fi
       CC="$CC -m64"
       CXX="$CXX -m64"
       host_cpu="x86_64"
       notice_platform="64-bit "
       AC_SUBST(TARGETFLAGS,"-m64")
+      AC_SUBST(WIDLFLAGS,"-m64")
     fi
     ;;
   arm*)
-    AC_MSG_CHECKING([whether $CC supports Thumb])
-    WINE_TRY_ASM_LINK([".thumb\nblx ac_test\n.arm"],[int ac_test(int i) { return i; }], [if (ac_test(1)) return 1],
-                      [AC_MSG_RESULT([yes])],
-                      [AC_MSG_RESULT([no])
-                       AC_MSG_ERROR([You need a target with Thumb support to build Wine for ARM.])])
+    AC_CACHE_CHECK([whether $CC supports Thumb],wine_cv_thumb,
+        [WINE_TRY_ASM_LINK([".thumb\nblx ac_test\n.arm"],[int ac_test(int i) { return i; }], [if (ac_test(1)) return 1],
+                           [wine_cv_thumb=yes],[wine_cv_thumb=no])])
+    test $wine_cv_thumb != no || AC_MSG_ERROR([You need a target with Thumb support to build Wine for ARM.])
     case $with_float_abi in
       soft|softfp|hard)
         float_abi=$with_float_abi ;;
@@ -194,25 +220,26 @@ case $host in
             float_abi=softfp
             saved_CFLAGS=$CFLAGS
             CFLAGS="$CFLAGS -marm -mfloat-abi=$float_abi"
-            AC_MSG_CHECKING([whether $CC supports -mfloat-abi=$float_abi])
-            WINE_TRY_ASM_LINK(["vmrs r2,fpscr"],,,
-                              [AC_MSG_RESULT([yes])],
-                              [AC_MSG_RESULT([no])
-                               float_abi=soft
-                               WINE_WARNING([Floating point is not supported for this target. The resulting build won't be compatible with Windows ARM binaries.])])
+            AC_CACHE_CHECK([whether $CC supports -mfloat-abi=$float_abi],wine_cv_float_abi,
+                [WINE_TRY_ASM_LINK(["vmrs r2,fpscr"],,,[wine_cv_float_abi=yes],[wine_cv_float_abi=no])])
+            if test $wine_cv_float_abi = no
+            then
+                float_abi=soft
+                WINE_WARNING([Floating point is not supported for this target. The resulting build won't be compatible with Windows ARM binaries.])
+            fi
             CFLAGS=$saved_CFLAGS
         esac
         ;;
     esac
     CFLAGS="$CFLAGS -marm -mfloat-abi=$float_abi"
     AC_SUBST(TARGETFLAGS,"-marm -mfloat-abi=$float_abi")
+    AC_SUBST(WIDLFLAGS,"-marm -mfloat-abi=$float_abi")
     ;;
   aarch64*)
-    AC_MSG_CHECKING([whether $CC supports __builtin_ms_va_list])
-    AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <stdarg.h>]], [[void func(__builtin_ms_va_list *args);]])],
-                      [AC_MSG_RESULT([yes])],
-                      [AC_MSG_RESULT([no])
-                       AC_MSG_ERROR([You need clang >= 5.0 to build Wine for arm64.])])
+    AC_CACHE_CHECK([whether $CC supports __builtin_ms_va_list],wine_cv_builtin_ms_va_list,
+        [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <stdarg.h>]], [[void func(__builtin_ms_va_list *args);]])],
+                      [wine_cv_builtin_ms_va_list=yes],[wine_cv_builtin_ms_va_list=no])])
+    test $wine_cv_builtin_ms_va_list != no || AC_MSG_ERROR([You need clang >= 5.0 to build Wine for arm64.])
     ;;
   i[[3456789]]86*)
     enable_win16=${enable_win16:-yes}
@@ -222,6 +249,7 @@ esac
 dnl enable_win16 defaults to yes on x86, to no on other CPUs
 enable_win16=${enable_win16:-no}
 enable_win64=${enable_win64:-no}
+enable_win32on64=${enable_win32on64:-no}
 
 dnl Disable winetest too if tests are disabled
 enable_winetest=${enable_winetest:-$enable_tests}
@@ -231,7 +259,15 @@ if test "x$enable_win64" = "xyes"
 then
     test -z "$with_wine64" || AC_MSG_ERROR([--enable-win64 and --with-wine64 are mutually exclusive.
 --enable-win64 should be used in the 64-bit build tree, --with-wine64 in the 32-bit Wow64 build tree.])
+    test "x$enable_win32on64" != "xyes" || AC_MSG_ERROR([--enable-win64 and --enable-win32on64 are mutually exclusive.
+--enable-win64 should be used in the 64-bit build tree, --enable-win32on64 in the 32-bit Wow64 build tree.])
     test "x$libdir" != "x\${exec_prefix}/lib" || libdir="\${exec_prefix}/lib64"
+fi
+
+dnl Some special cases for the 32-on-64-bit build
+if test "x$enable_win32on64" = "xyes"
+then
+    test "x$libdir" != "x\${exec_prefix}/lib" || libdir="\${exec_prefix}/lib32on64"
 fi
 
 AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
@@ -242,25 +278,25 @@ AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
      elif test -n "$with_wine64"; then
        wine_cv_toolsdir="$with_wine64"
      fi
-   fi
-   if test -z "$wine_cv_toolsdir"; then
-     wine_makedep=tools/makedep
-     wine_cv_toolsdir="\$(top_builddir)"
-   elif test -d "$wine_cv_toolsdir/tools/winebuild"; then
-     wine_makedep=$wine_cv_toolsdir/tools/makedep
-     case "$wine_cv_toolsdir" in
-       /*) ;;
-       *)  wine_cv_toolsdir="\$(top_builddir)/$wine_cv_toolsdir" ;;
-     esac
-     enable_tools=${enable_tools:-no}
-     test -f "$wine_makedep" || AC_MSG_ERROR([the Wine tools have not yet been built in $wine_cv_toolsdir])
-   else
-     AC_MSG_ERROR([could not find Wine tools in $wine_cv_toolsdir])
    fi])
-AC_SUBST(TOOLSDIR,$wine_cv_toolsdir)
+if test -z "$wine_cv_toolsdir"; then
+    wine_makedep=tools/makedep
+    AC_SUBST(TOOLSDIR,"\$(top_builddir)")
+elif test -d "$wine_cv_toolsdir/tools/winebuild"; then
+    wine_makedep=$wine_cv_toolsdir/tools/makedep
+    case "$wine_cv_toolsdir" in
+       /*) AC_SUBST(TOOLSDIR,$wine_cv_toolsdir) ;;
+       *)  AC_SUBST(TOOLSDIR,"\$(top_builddir)/$wine_cv_toolsdir") ;;
+    esac
+    enable_tools=${enable_tools:-no}
+    test -f "$wine_makedep" || AC_MSG_ERROR([the Wine tools have not yet been built in $wine_cv_toolsdir])
+else
+    AC_MSG_ERROR([could not find Wine tools in $wine_cv_toolsdir])
+fi
 if test -n "$host_alias" -a "$host_alias" != "$build_alias"
 then
     AC_SUBST(TARGETFLAGS,"-b $host_alias $TARGETFLAGS")
+    AC_SUBST(WIDLFLAGS,"-b $host_alias $WIDLFLAGS")
 fi
 
 dnl Check for flex
@@ -269,20 +305,20 @@ if test "$FLEX" = "none"
 then
   AC_MSG_ERROR([no suitable flex found. Please install the 'flex' package.])
 fi
-AC_MSG_CHECKING([whether flex is recent enough])
-cat >conftest.l <<EOF
+AC_CACHE_CHECK([whether flex is recent enough],wine_cv_recent_flex,
+    [cat >conftest.l <<EOF
 %top{
 #include "prediluvian.h"
 }
 %%
 EOF
-if $FLEX -t conftest.l >/dev/null 2>&AS_MESSAGE_LOG_FD
-then
-  AC_MSG_RESULT([yes])
-else
-  AC_MSG_RESULT([no])
-  AC_MSG_ERROR([Your flex version is too old. Please install flex version 2.5.33 or newer.])
-fi
+    if $FLEX -t conftest.l >/dev/null 2>&AS_MESSAGE_LOG_FD
+    then
+      wine_cv_recent_flex=yes
+    else
+      wine_cv_recent_flex=no
+    fi])
+test $wine_cv_recent_flex != no || AC_MSG_ERROR([Your flex version is too old. Please install flex version 2.5.33 or newer.])
 
 dnl Check for bison
 AC_CHECK_PROGS(BISON,bison,none)
@@ -290,6 +326,19 @@ if test "$BISON" = "none"
 then
   AC_MSG_ERROR([no suitable bison found. Please install the 'bison' package.])
 fi
+AC_CACHE_CHECK([whether bison is recent enough],wine_cv_recent_bison,
+    [cat >conftest.y <<EOF
+%define parse.error verbose
+%%
+empty: ;
+EOF
+    if $BISON conftest.y >/dev/null 2>&AS_MESSAGE_LOG_FD
+    then
+      wine_cv_recent_bison=yes
+    else
+      wine_cv_recent_bison=no
+    fi])
+test $wine_cv_recent_bison != no || AC_MSG_ERROR([Your bison version is too old. Please install bison version 3.0 or newer.])
 
 AC_CHECK_TOOLS(AR,[ar gar],ar)
 AC_CHECK_TOOL(STRIP,strip,strip)
@@ -369,14 +418,13 @@ else
   dnl Maintainer mode requires gettext
   with_gettext=yes
   with_gettextpo=yes
-  AS_UNSET(ac_cv_header_gettext_po_h)
 fi
 
 test "x$with_gettext" != xno || MSGFMT=false
 if test "$MSGFMT" != "false"
 then
-  AC_MSG_CHECKING([whether msgfmt supports contexts])
-  cat >conftest.po <<EOF
+  AC_CACHE_CHECK([whether msgfmt supports contexts],wine_cv_msgfmt_contexts,
+  [cat >conftest.po <<EOF
 # comment
 msgctxt "ctxt"
 msgid "id"
@@ -384,11 +432,11 @@ msgstr "str"
 EOF
   if $MSGFMT -o /dev/null conftest.po 2>&AS_MESSAGE_LOG_FD
   then
-    AC_MSG_RESULT([yes])
+    wine_cv_msgfmt_contexts=yes
   else
-    AC_MSG_RESULT([no])
-    MSGFMT=false
-  fi
+    wine_cv_msgfmt_contexts=no
+  fi])
+  test $wine_cv_msgfmt_contexts != no || MSGFMT=false
 fi
 WINE_WARNING_WITH(gettext,[test "$MSGFMT" = false],
                   [gettext tools not found (or too old), translations won't be built.],
@@ -422,18 +470,17 @@ AC_CHECK_HEADERS(\
 	EGL/egl.h \
 	IOKit/IOKitLib.h \
 	IOKit/hid/IOHIDLib.h \
+	IOKit/usb/IOUSBLib.h \
 	OpenAL/al.h \
 	OpenCL/opencl.h \
 	QuickTime/ImageCompression.h \
 	Security/Security.h \
 	alias.h \
-	alsa/asoundlib.h \
 	arpa/inet.h \
 	arpa/nameser.h \
 	asm/types.h \
 	asm/user.h \
 	curses.h \
-	direct.h \
 	dirent.h \
 	dlfcn.h \
 	elf.h \
@@ -446,7 +493,6 @@ AC_CHECK_HEADERS(\
 	gsm/gsm.h \
 	ieeefp.h \
 	inet/mib2.h \
-	io.h \
 	kstat.h \
 	libproc.h \
 	link.h \
@@ -481,7 +527,6 @@ AC_CHECK_HEADERS(\
 	pcap/pcap.h \
 	poll.h \
 	port.h \
-	process.h \
 	pthread.h \
 	pwd.h \
 	sched.h \
@@ -491,7 +536,6 @@ AC_CHECK_HEADERS(\
 	stdbool.h \
 	stdint.h \
 	stropts.h \
-	sys/asoundlib.h \
 	sys/attr.h \
 	sys/auxv.h \
 	sys/cdio.h \
@@ -500,7 +544,6 @@ AC_CHECK_HEADERS(\
 	sys/event.h \
 	sys/exec_elf.h \
 	sys/filio.h \
-	sys/inotify.h \
 	sys/ioctl.h \
 	sys/ipc.h \
 	sys/limits.h \
@@ -540,8 +583,7 @@ AC_CHECK_HEADERS(\
 	unistd.h \
 	utime.h \
 	valgrind/memcheck.h \
-	valgrind/valgrind.h \
-	zlib.h
+	valgrind/valgrind.h
 )
 WINE_HEADER_MAJOR()
 AC_HEADER_STAT()
@@ -678,7 +720,7 @@ AC_CHECK_HEADERS([pthread_np.h],,,
 #include <pthread.h>
 #endif])
 
-AC_CHECK_HEADERS([linux/videodev.h linux/videodev2.h libv4l1.h],,,
+AC_CHECK_HEADERS([linux/videodev2.h],,,
 [#ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
 #endif
@@ -703,6 +745,7 @@ dnl **** Check for working dll ****
 AC_SUBST(DLLFLAGS,"-D_REENTRANT")
 AC_SUBST(LDRPATH_INSTALL,"")
 AC_SUBST(LDRPATH_LOCAL,"")
+AC_SUBST(LDDLLFLAGS,"")
 AC_SUBST(LDEXECFLAGS,"")
 AC_SUBST(TOP_INSTALL_LIB,"")
 AC_SUBST(TOP_INSTALL_DEV,"")
@@ -710,11 +753,11 @@ AC_SUBST(WINELOADER_LDFLAGS,"")
 AC_SUBST(WINEPRELOADER_LDFLAGS,"")
 LIBEXT="so"
 DLLEXT=".so"
-IMPLIBEXT="def"
 WINE_PATH_SONAME_TOOLS
 WINE_CONFIG_HELPERS
 
 wine_binary="wine"
+test "x$enable_win32on64" != "xyes" || wine_binary="wine32on64"
 test "x$enable_win64" != "xyes" || wine_binary="wine64"
 AC_SUBST(WINELOADER_PROGRAMS,"$wine_binary")
 libwine_soversion=`expr $libwine_version : '\([[0-9]]*\)\..*'`
@@ -724,11 +767,13 @@ case $host_os in
     AC_CHECK_TOOL(DLLTOOL,dlltool,false)
     LIBEXT="dll"
     DLLEXT=""
-    IMPLIBEXT="a"
+    dnl Disable stdcall fixups to catch prototype mismatches
+    case $host_cpu in
+      *i[[3456]]86*) LDDLLFLAGS="-Wl,--disable-stdcall-fixup" ;;
+    esac
     dnl Disable modules that can't be used on Windows
     enable_iphlpapi=${enable_iphlpapi:-no}
     enable_kernel32=${enable_kernel32:-no}
-    enable_msvcrt=${enable_msvcrt:-no}
     enable_ntdll=${enable_ntdll:-no}
     enable_ws2_32=${enable_ws2_32:-no}
     enable_loader=${enable_loader:-no}
@@ -736,20 +781,6 @@ case $host_os in
     dnl Disable dependencies that are not useful on Windows
     with_x=${with_x:-no}
     with_pthread=${with_pthread:-no}
-
-    dnl Mingw needs explicit msvcrt for linking libwine and winsock for wininet
-    crtlibs=""
-    case $host_os in
-        mingw32*)
-          crtlibs="-lmsvcrt" ;;
-    esac
-
-    AC_SUBST(LIBWINE_SHAREDLIB,"libwine.dll")
-    AC_SUBST(LIBWINE_IMPORTLIB,"libwine.a")
-    AC_SUBST(LIBWINE_LDFLAGS,"-shared \$(srcdir)/wine.def")
-    AC_SUBST(LIBWINE_DEPENDS,"wine.def")
-    TOP_INSTALL_LIB="$TOP_INSTALL_LIB libs/wine/libwine.dll"
-    TOP_INSTALL_DEV="$TOP_INSTALL_DEV libs/wine/libwine.a"
     ;;
 
   darwin*|macosx*)
@@ -759,6 +790,7 @@ case $host_os in
     AC_LANG_POP([Objective C])
     LIBEXT="dylib"
     DLLFLAGS="$DLLFLAGS -fPIC"
+    LDDLLFLAGS="-fPIC"
     LDRPATH_INSTALL="-Wl,-rpath,@loader_path/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`"
     LDRPATH_LOCAL="-Wl,-rpath,@loader_path/\$(top_builddir)/libs/wine"
     dnl declare needed frameworks
@@ -768,29 +800,43 @@ case $host_os in
     AC_SUBST(APPLICATIONSERVICES_LIBS,"-framework ApplicationServices")
     AC_SUBST(CORESERVICES_LIBS,"-framework CoreServices")
     AC_SUBST(APPKIT_LIBS,"-framework AppKit")
+    libwine_tag=""
 
     WINELOADER_LDFLAGS="-Wl,-pie,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,wine_info.plist"
 
     wine_can_build_preloader=yes
+    preloader_needs_mmacosx_version_min=no
+    if xcodebuild -version | egrep -qs 'Xcode 9(\D|$)' ; then
+        preloader_needs_mmacosx_version_min=yes
+    fi
     WINEPRELOADER_LDFLAGS="-nostartfiles -nodefaultlibs -e _start -ldylib1.o -Wl,-image_base,0x7c400000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,wine_info.plist"
     WINE_TRY_CFLAGS([-Wl,-no_new_main -e _main],
                     [WINEPRELOADER_LDFLAGS="-Wl,-no_new_main $WINEPRELOADER_LDFLAGS"
                      WINE_TRY_CFLAGS([-Wl,-no_new_main -e _main -nostartfiles -nodefaultlibs],,
                         [WINE_TRY_CFLAGS([-Wl,-no_new_main -e _main -mmacosx-version-min=10.7 -nostartfiles -nodefaultlibs],
-                                         [WINEPRELOADER_LDFLAGS="-mmacosx-version-min=10.7 $WINEPRELOADER_LDFLAGS"],
+                                         [preloader_needs_mmacosx_version_min=yes],
                                          [wine_can_build_preloader=no])])],
                     [WINE_TRY_CFLAGS([-nostartfiles -nodefaultlibs],,
                         [WINE_TRY_CFLAGS([-mmacosx-version-min=10.7 -nostartfiles -nodefaultlibs],
-                                         [WINEPRELOADER_LDFLAGS="-mmacosx-version-min=10.7 $WINEPRELOADER_LDFLAGS"],
+                                         [preloader_needs_mmacosx_version_min=yes],
                                          [wine_can_build_preloader=no])])])
     if test "$wine_can_build_preloader" = "yes"
     then
+        if test "$preloader_needs_mmacosx_version_min" = "yes"
+        then
+            WINEPRELOADER_LDFLAGS="-mmacosx-version-min=10.7 $WINEPRELOADER_LDFLAGS"
+        fi
         WINE_TRY_CFLAGS([-Wl,-no_pie],
                         [WINEPRELOADER_LDFLAGS="-Wl,-no_pie $WINEPRELOADER_LDFLAGS"])
         test "$wine_binary" = wine || WINE_IGNORE_FILE("loader/wine-preloader")
         WINELOADER_PROGRAMS="$WINELOADER_PROGRAMS $wine_binary-preloader"
     else
         WINE_WARNING([can't build Wine preloader; many programs won't work])
+    fi
+    if test "$host_cpu" = "x86_32on64"
+    then
+        WINEPRELOADER_LDFLAGS="$WINEPRELOADER_LDFLAGS -Wl,-stack_size,0x04000000,-stack_addr,0xc0000000"
+        libwine_tag="32on64"
     fi
 
     if test "$ac_cv_header_DiskArbitration_DiskArbitration_h" = "yes"
@@ -839,6 +885,13 @@ case $host_os in
         ac_save_LIBS="$LIBS"
         LIBS="$LIBS $IOKIT_LIBS"
         AC_CHECK_FUNCS(IOHIDManagerCreate)
+        LIBS="$ac_save_LIBS"
+    fi
+    if test "$ac_cv_header_IOKit_usb_IOUSBLib_h" = "yes"
+    then
+        ac_save_LIBS="$LIBS"
+        LIBS="$LIBS $IOKIT_LIBS"
+        AC_CHECK_FUNCS(IOServiceMatching)
         LIBS="$ac_save_LIBS"
     fi
     if test "$ac_cv_header_QuickTime_ImageCompression_h" = "yes"
@@ -895,15 +948,22 @@ case $host_os in
                                        AC_MSG_RESULT([[cross-compiling, assuming yes]]))
     fi
 
-    AC_SUBST(LIBWINE_SHAREDLIB,"libwine.$libwine_version.dylib")
-    AC_SUBST(LIBWINE_LDFLAGS,["-dynamiclib -install_name @rpath/libwine.$libwine_soversion.dylib -Wl,-rpath,@loader_path/ -compatibility_version $libwine_soversion -current_version $libwine_version"])
+    AC_SUBST(LIBWINE_NAME,"wine$libwine_tag")
+    AC_SUBST(LIBWINE_SHAREDLIB,"lib$LIBWINE_NAME.$libwine_version.dylib")
+    AC_SUBST(LIBWINE_LDFLAGS,["-dynamiclib -install_name @rpath/lib$LIBWINE_NAME.$libwine_soversion.dylib -Wl,-rpath,@loader_path/ -compatibility_version $libwine_soversion -current_version $libwine_version"])
+    dnl *** CrossOver Hack #17255 ***
+    if test "$host_cpu" = "x86_32on64"
+    then
+        LIBWINE_LDFLAGS="$LIBWINE_LDFLAGS  -Wl,-rpath,@loader_path/../lib64"
+    fi
     AC_SUBST(WINELOADER_DEPENDS,"wine_info.plist")
-    TOP_INSTALL_LIB="$TOP_INSTALL_LIB libs/wine/libwine.$libwine_version.dylib libs/wine/libwine.$libwine_soversion.dylib"
-    TOP_INSTALL_DEV="$TOP_INSTALL_DEV libs/wine/libwine.dylib"
+    TOP_INSTALL_LIB="$TOP_INSTALL_LIB libs/wine/lib$LIBWINE_NAME.$libwine_version.dylib libs/wine/lib$LIBWINE_NAME.$libwine_soversion.dylib"
+    TOP_INSTALL_DEV="$TOP_INSTALL_DEV libs/wine/lib$LIBWINE_NAME.dylib"
     ;;
 
   linux-android*)
     DLLFLAGS="$DLLFLAGS -fPIC"
+    LDDLLFLAGS="-fPIC"
     LDEXECFLAGS="-Wl,-pie"
     enable_wineandroid_drv=${enable_wineandroid_drv:-yes}
     WINE_TRY_CFLAGS([-fPIC -Wl,--export-dynamic],
@@ -918,9 +978,10 @@ case $host_os in
     WINE_TRY_CFLAGS([-Wl,--enable-new-dtags],
                     [LDRPATH_INSTALL="$LDRPATH_INSTALL -Wl,--enable-new-dtags"])
 
-    AC_SUBST(LIBWINE_SHAREDLIB,"libwine.so")
-    AC_SUBST(LIBWINE_LDFLAGS,["-shared -Wl,-soname,libwine.so"])
-    TOP_INSTALL_LIB="$TOP_INSTALL_LIB libs/wine/libwine.so"
+    AC_SUBST(LIBWINE_NAME,"wine")
+    AC_SUBST(LIBWINE_SHAREDLIB,"lib$LIBWINE_NAME.so")
+    AC_SUBST(LIBWINE_LDFLAGS,["-shared -Wl,-soname,lib$LIBWINE_NAME.so"])
+    TOP_INSTALL_LIB="$TOP_INSTALL_LIB libs/wine/lib$LIBWINE_NAME.so"
 
     WINE_CHECK_SONAME(EGL,eglGetProcAddress)
     WINE_CHECK_SONAME(GLESv2,glFlush)
@@ -937,31 +998,39 @@ case $host_os in
     ;;
 
   *)
-    DLLFLAGS="$DLLFLAGS -fPIC"
+    case $host_cpu in
+      *i[[3456789]]86*)
+        DLLFLAGS="$DLLFLAGS -fno-PIC"
+        LDDLLFLAGS="-fno-PIC" ;;
+      *)
+        DLLFLAGS="$DLLFLAGS -fPIC"
+        LDDLLFLAGS="-fPIC" ;;
+    esac
     AC_CACHE_CHECK([whether we can build a GNU style ELF dll], ac_cv_c_dll_gnuelf,
         [WINE_TRY_SHLIB_FLAGS([-fPIC -shared -Wl,-Bsymbolic],
                               ac_cv_c_dll_gnuelf="yes",ac_cv_c_dll_gnuelf="no")])
+    AC_SUBST(LIBWINE_NAME,"wine")
     if test "$ac_cv_c_dll_gnuelf" = "yes"
     then
       LIBWINE_LDFLAGS="-shared"
-      WINE_TRY_CFLAGS([-fPIC -shared -Wl,-soname,confest.so.1],
-                      [LIBWINE_LDFLAGS="-shared -Wl,-soname,libwine.so.$libwine_soversion"],
-                      [WINE_TRY_CFLAGS([-fPIC -shared -Wl,-h,confest.so.1],
-                                       [LIBWINE_LDFLAGS="-shared -Wl,-h,libwine.so.$libwine_soversion"])])
+      WINE_TRY_CFLAGS([-shared -Wl,-soname,confest.so.1],
+                      [LIBWINE_LDFLAGS="-shared -Wl,-soname,lib$LIBWINE_NAME.so.$libwine_soversion"],
+                      [WINE_TRY_CFLAGS([-shared -Wl,-h,confest.so.1],
+                                       [LIBWINE_LDFLAGS="-shared -Wl,-h,lib$LIBWINE_NAME.so.$libwine_soversion"])])
 
       echo '{ global: *; };' >conftest.map
-      WINE_TRY_CFLAGS([-fPIC -shared -Wl,--version-script=conftest.map],
+      WINE_TRY_CFLAGS([-shared -Wl,--version-script=conftest.map],
                       [LIBWINE_LDFLAGS="$LIBWINE_LDFLAGS -Wl,--version-script=\$(srcdir)/wine.map"])
       rm -f conftest.map
 
-      WINE_TRY_CFLAGS([-fPIC -Wl,--export-dynamic],
+      WINE_TRY_CFLAGS([-Wl,--export-dynamic],
                       [WINELOADER_LDFLAGS="-Wl,--export-dynamic"])
       WINEPRELOADER_LDFLAGS="-static -nostartfiles -nodefaultlibs -Wl,-Ttext=0x7c400000"
 
-      WINE_TRY_CFLAGS([-fPIC -Wl,--rpath,\$ORIGIN/../lib],
+      WINE_TRY_CFLAGS([-Wl,--rpath,\$ORIGIN/../lib],
                       [LDRPATH_INSTALL="-Wl,--rpath,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`"
                        LDRPATH_LOCAL="-Wl,--rpath,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"],
-          [WINE_TRY_CFLAGS([-fPIC -Wl,-R,\$ORIGIN/../lib],
+          [WINE_TRY_CFLAGS([-Wl,-R,\$ORIGIN/../lib],
                            [LDRPATH_INSTALL="-Wl,-R,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`"
                             LDRPATH_LOCAL="-Wl,-R,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"])])
 
@@ -996,13 +1065,13 @@ case $host_os in
                                 ac_cv_c_dll_unixware="yes",ac_cv_c_dll_unixware="no")])
       if test "$ac_cv_c_dll_unixware" = "yes"
       then
-        LIBWINE_LDFLAGS="-Wl,-G,-h,libwine.so.$libwine_soversion"
+        LIBWINE_LDFLAGS="-Wl,-G,-h,lib$LIBWINE_NAME.so.$libwine_soversion"
       fi
     fi
-    AC_SUBST(LIBWINE_SHAREDLIB,"libwine.so.$libwine_version")
+    AC_SUBST(LIBWINE_SHAREDLIB,"lib$LIBWINE_NAME.so.$libwine_version")
     AC_SUBST(LIBWINE_DEPENDS,"wine.map")
-    TOP_INSTALL_LIB="$TOP_INSTALL_LIB libs/wine/libwine.so.$libwine_version libs/wine/libwine.so.$libwine_soversion"
-    TOP_INSTALL_DEV="$TOP_INSTALL_DEV libs/wine/libwine.so"
+    TOP_INSTALL_LIB="$TOP_INSTALL_LIB libs/wine/lib$LIBWINE_NAME.so.$libwine_version libs/wine/lib$LIBWINE_NAME.so.$libwine_soversion"
+    TOP_INSTALL_DEV="$TOP_INSTALL_DEV libs/wine/lib$LIBWINE_NAME.so"
     ;;
 esac
 
@@ -1013,31 +1082,77 @@ enable_winemac_drv=${enable_winemac_drv:-no}
 
 dnl Check for cross compiler to build test programs
 AC_SUBST(CROSSTARGET,"")
-if test "x$enable_tests" != xno -a "$LIBEXT" != "dll"
+if test "x$with_mingw" != xno
 then
-    WINE_CHECK_MINGW_PROG(CROSSCC,false)
+    case "x$with_mingw" in
+      x|xyes) WINE_CHECK_MINGW_PROG(CROSSCC,false) ;;
+      *) CROSSCC=$with_mingw ;;
+    esac
     if test "$CROSSCC" != "false"
     then
         ac_save_CC="$CC"
+        saved_CFLAGS=$CFLAGS
+        AC_SUBST(CROSSCFLAGS,${CROSSCFLAGS:-"-g -O2"})
+        AC_SUBST(EXTRACROSSCFLAGS,"-DWINE_CROSS_PE -Wall")
+
         CC="$CROSSCC"
-        AC_MSG_CHECKING([whether $CROSSCC works])
-        AC_COMPILE_IFELSE([AC_LANG_PROGRAM([])],
-                          [AC_MSG_RESULT([yes])
-                           set x $CROSSCC
-                           shift
-                           while test $# -ge 1
-                           do
-                               case "$1" in
-                                 *-gcc) CROSSTARGET=`expr "$1" : '\(.*\)-gcc'` ;;
-                                 *-clang) CROSSTARGET=`expr "$1" : '\(.*\)-clang'` ;;
-                               esac
-                               shift
-                           done],
-                          [AC_MSG_RESULT([no])])
+        CFLAGS=$CROSSCFLAGS
+        AC_CACHE_CHECK([whether $CROSSCC works], wine_cv_crosscc,
+            [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([])],[wine_cv_crosscc=yes],[wine_cv_crosscc=no])])
+        if test $wine_cv_crosscc = yes
+        then
+            set x $CROSSCC
+            shift
+            while test $# -ge 1
+            do
+                case "$1" in
+                    *-gcc) CROSSTARGET=`expr "$1" : '\(.*\)-gcc'` ;;
+                    *-clang) CROSSTARGET=`expr "$1" : '\(.*\)-clang'` ;;
+                esac
+                shift
+            done
+        fi
+        WINE_TRY_CROSSCFLAGS([-fno-strict-aliasing])
+        dnl clang needs to be told to fail on unknown options
+        WINE_TRY_CROSSCFLAGS([-Werror=unknown-warning-option],[CFLAGS="$CFLAGS -Werror=unknown-warning-option"])
+        WINE_TRY_CROSSCFLAGS([-Wdeclaration-after-statement])
+        WINE_TRY_CROSSCFLAGS([-Wempty-body])
+        WINE_TRY_CROSSCFLAGS([-Wignored-qualifiers])
+        WINE_TRY_CROSSCFLAGS([-Wpacked-not-aligned],[EXTRACROSSCFLAGS="$EXTRACROSSCFLAGS -Wno-packed-not-aligned"])
+        WINE_TRY_CROSSCFLAGS([-Wpragma-pack],[EXTRACROSSCFLAGS="$EXTRACROSSCFLAGS -Wno-pragma-pack"])
+        WINE_TRY_CROSSCFLAGS([-Wshift-overflow=2])
+        WINE_TRY_CROSSCFLAGS([-Wstrict-prototypes])
+        WINE_TRY_CROSSCFLAGS([-Wtype-limits])
+        WINE_TRY_CROSSCFLAGS([-Wunused-but-set-parameter])
+        WINE_TRY_CROSSCFLAGS([-Wvla])
+        WINE_TRY_CROSSCFLAGS([-Wwrite-strings])
+        WINE_TRY_CROSSCFLAGS([-Wpointer-arith])
+        WINE_TRY_CROSSCFLAGS([-Wlogical-op])
+
+        case $host_cpu in
+          *i[[3456789]]86*|x86_32on64) WINE_TRY_CROSSCFLAGS([-fno-omit-frame-pointer]) ;;
+          x86_64) WINE_TRY_CROSSCFLAGS([-Wno-format]) ;;
+        esac
+
+        dnl Default to dwarf-2 debug info
+        for ac_flag in $CROSSCFLAGS; do
+          case $ac_flag in
+            -g) WINE_TRY_CROSSCFLAGS([-gdwarf-2])
+                WINE_TRY_CROSSCFLAGS([-gstrict-dwarf]) ;;
+          esac
+        done
+
+        if test "x$enable_maintainer_mode" = xyes
+        then
+            WINE_TRY_CROSSCFLAGS([-Werror])
+        fi
+
+        CFLAGS=$saved_CFLAGS
         CC="$ac_save_CC"
-        AC_SUBST(CROSSCFLAGS,${CROSSCFLAGS:-$CFLAGS})
     fi
 fi
+WINE_NOTICE_WITH(mingw,[test "x$CROSSTARGET" = "x"],
+                 [MinGW compiler not found, cross-compiling PE files won't be supported.])
 
 dnl **** Check for pthread ****
 
@@ -1326,6 +1441,16 @@ fi
 WINE_WARNING_WITH(xslt,[test "x$ac_cv_lib_soname_xslt" = "x"],
                  [libxslt ${notice_platform}development files not found, xslt won't be supported.])
 
+dnl **** Check for inotify ****
+if test "x$with_inotify" != "xno"
+then
+    WINE_PACKAGE_FLAGS(INOTIFY,[libinotify],,,,
+        [AC_CHECK_HEADERS([sys/inotify.h])
+         AC_CHECK_LIB(inotify,inotify_add_watch,[:],[INOTIFY_LIBS=""],[$INOTIFY_LIBS])])
+fi
+WINE_NOTICE_WITH(inotify,[test "$ac_cv_header_sys_inotify_h" != "yes"],
+                 [libinotify ${notice_platform}development files not found (or too old), filesystem change notifications won't be supported.])
+
 dnl **** Check for libdbus ****
 if test "x$with_dbus" != "xno"
 then
@@ -1392,13 +1517,13 @@ fi
 WINE_NOTICE_WITH(sane,[test "x$ac_cv_lib_soname_sane" = "x"],
                  [libsane ${notice_platform}development files not found, scanners won't be supported.])
 
-dnl **** Check for libv4l1 ****
-if test "x$with_v4l" != "xno"
+dnl **** Check for libv4l2 ****
+if test "x$with_v4l2" != "xno"
 then
-    WINE_CHECK_SONAME(v4l1,v4l1_open,,,)
+    WINE_CHECK_SONAME(v4l2,v4l2_open)
 fi
-WINE_NOTICE_WITH(v4l,[test "x$ac_cv_lib_soname_v4l1" = "x"],
-                 [libv4l ${notice_platform}development files not found.])
+WINE_NOTICE_WITH(v4l2,[test "x$ac_cv_lib_soname_v4l2" = "x"],
+                 [libv4l2 ${notice_platform}development files not found.])
 
 dnl **** Check for libgphoto2 ****
 if test "x$with_gphoto" != "xno"
@@ -1508,18 +1633,18 @@ fi
 
 dnl **** Check for pthread functions ****
 WINE_CHECK_LIB_FUNCS(\
-        pthread_attr_get_np \
-        pthread_getattr_np \
         pthread_getthreadid_np \
-        pthread_get_stackaddr_np \
-        pthread_get_stacksize_np,
         [$PTHREAD_LIBS])
 
 dnl **** Check for zlib ****
-if test "$ac_cv_header_zlib_h" = "yes"
+if test "x$with_zlib" != "xno"
 then
-    AC_CHECK_LIB(z,inflate,[AC_DEFINE(HAVE_ZLIB,1,[Define to 1 if you have the `z' library (-lz).])
-                            AC_SUBST(Z_LIBS,"-lz")])
+    WINE_PACKAGE_FLAGS(Z,[libz],[-lz],,,
+        [AC_CHECK_HEADERS(zlib.h,
+            [AC_CHECK_LIB(z,inflate,
+                          [AC_DEFINE(HAVE_ZLIB,1,[Define to 1 if you have the `z' library (-lz).])],
+                          [Z_LIBS=""],[$Z_LIBS])],
+            [Z_LIBS=""])])
 fi
 WINE_NOTICE_WITH(zlib,[test "x$Z_LIBS" = "x"],[libz ${notice_platform}development files not found, data compression won't be supported.])
 
@@ -1579,14 +1704,10 @@ test "x$ac_cv_lib_gstreamer_1_0_gst_pad_new" = xyes || enable_winegstreamer=${en
 
 dnl **** Check for ALSA 1.x ****
 AC_SUBST(ALSA_LIBS,"")
-if test "$ac_cv_header_sys_asoundlib_h" = "yes" -o "$ac_cv_header_alsa_asoundlib_h" = "yes"
+if test "x$with_alsa" != "xno"
 then
     AC_CHECK_LIB(asound,snd_pcm_hw_params_get_access_mask,
-        [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#ifdef HAVE_ALSA_ASOUNDLIB_H
-#include <alsa/asoundlib.h>
-#elif defined(HAVE_SYS_ASOUNDLIB_H)
-#include <sys/asoundlib.h>
-#endif]], [[snd_pcm_hw_params_get_access_mask(NULL, NULL)]])],
+        [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <alsa/asoundlib.h>]], [[snd_pcm_hw_params_get_access_mask(NULL, NULL)]])],
                         [ALSA_LIBS="-lasound"])])
 fi
 test -n "$ALSA_LIBS" || enable_winealsa_drv=${enable_winealsa_drv:-no}
@@ -1640,6 +1761,10 @@ then
     WINE_PACKAGE_FLAGS(FAUDIO,[faudio],[-lFAudio],,,
         [AC_CHECK_HEADERS([FAudio.h],
             [WINE_CHECK_SONAME(FAudio,FAudioCreate,,,[$FAUDIO_LIBS],[[libFAudio*]])])])
+    WINE_CHECK_LIB_FUNCS(\
+        FAudio_CommitOperationSet \
+        F3DAudioInitialize8,
+        [$FAUDIO_LIBS])
 fi
 WINE_NOTICE_WITH(faudio,[test "x$ac_cv_lib_soname_FAudio" = "x"],
                  [libFAudio ${notice_platform}development files not found, XAudio2 won't be supported.])
@@ -1818,14 +1943,6 @@ then
     enable_x3daudio1_5=${enable_x3daudio1_5:-no}
     enable_x3daudio1_6=${enable_x3daudio1_6:-no}
     enable_x3daudio1_7=${enable_x3daudio1_7:-no}
-    enable_xactengine3_0=${enable_xactengine3_0:-no}
-    enable_xactengine3_1=${enable_xactengine3_1:-no}
-    enable_xactengine3_2=${enable_xactengine3_2:-no}
-    enable_xactengine3_3=${enable_xactengine3_3:-no}
-    enable_xactengine3_4=${enable_xactengine3_4:-no}
-    enable_xactengine3_5=${enable_xactengine3_5:-no}
-    enable_xactengine3_6=${enable_xactengine3_6:-no}
-    enable_xactengine3_7=${enable_xactengine3_7:-no}
     enable_xapofx1_1=${enable_xapofx1_1:-no}
     enable_xapofx1_2=${enable_xapofx1_2:-no}
     enable_xapofx1_3=${enable_xapofx1_3:-no}
@@ -1892,10 +2009,10 @@ dnl **** Check for vkd3d ****
 if test "x$with_vkd3d" != "xno"
 then
     WINE_PACKAGE_FLAGS(VKD3D,[libvkd3d],,,,
-        [WINE_CHECK_SONAME(vkd3d,vkd3d_create_device,,,[$VKD3D_LIBS])])
+        [WINE_CHECK_SONAME(vkd3d,vkd3d_get_dxgi_format,,,[$VKD3D_LIBS])])
 fi
 WINE_NOTICE_WITH(vkd3d,[test "x$ac_cv_lib_soname_vkd3d" = "x"],
-                 [vkd3d ${notice_platform}development files not found, Direct3D 12 won't be supported.])
+                 [vkd3d ${notice_platform}development files not found (or too old), Direct3D 12 won't be supported.])
 test "x$ac_cv_lib_soname_vkd3d" != "x" || enable_d3d12=${enable_d3d12:-no}
 
 dnl **** Check for gcc specific options ****
@@ -1922,12 +2039,12 @@ then
   fi
 
   dnl Check for some compiler flags
-  WINE_TRY_CFLAGS([-fno-builtin],[AC_SUBST(BUILTINFLAG,"-fno-builtin")])
   WINE_TRY_CFLAGS([-fno-strict-aliasing])
   WINE_TRY_CFLAGS([-fexcess-precision=standard],[AC_SUBST(EXCESS_PRECISION_CFLAGS,"-fexcess-precision=standard")])
   dnl clang needs to be told to fail on unknown options
   saved_CFLAGS=$CFLAGS
   WINE_TRY_CFLAGS([-Werror=unknown-warning-option],[CFLAGS="$CFLAGS -Werror=unknown-warning-option"])
+  WINE_TRY_CFLAGS([-Werror=unused-command-line-argument],[CFLAGS="$CFLAGS -Werror=unused-command-line-argument"])
   WINE_TRY_CFLAGS([-Wdeclaration-after-statement])
   WINE_TRY_CFLAGS([-Wempty-body])
   WINE_TRY_CFLAGS([-Wignored-qualifiers])
@@ -1959,8 +2076,6 @@ char*f(const char *h,char n) {return strchr(h,n);}]])],[ac_cv_c_logicalop_noisy=
       CFLAGS=$saved_string_h_CFLAGS
       test "$ac_cv_c_logicalop_noisy" = yes || EXTRACFLAGS="$EXTRACFLAGS -Wlogical-op"])
 
-  CFLAGS=$saved_CFLAGS
-
   dnl Default to dwarf-2 debug info
   for ac_flag in $CFLAGS; do
     case $ac_flag in
@@ -1969,15 +2084,27 @@ char*f(const char *h,char n) {return strchr(h,n);}]])],[ac_cv_c_logicalop_noisy=
     esac
   done
 
-  dnl gcc-4.6+ omits frame pointers by default, breaking some copy protections
-  case $host_cpu in
-    *i[[3456789]]86*) WINE_TRY_CFLAGS([-fno-omit-frame-pointer]) ;;
+  dnl Disable gcc builtins except for Mingw
+  AC_SUBST(MSVCRTFLAGS,"")
+  case $host_os in
+    cygwin*|mingw32*) ;;
+    *) WINE_TRY_CFLAGS([-fno-builtin],[MSVCRTFLAGS="$MSVCRTFLAGS -fno-builtin"])
+       WINE_TRY_CFLAGS([-fshort-wchar],[MSVCRTFLAGS="$MSVCRTFLAGS -fshort-wchar"]) ;;
   esac
 
-  dnl mingw uses Windows 64-bit types, not Unix ones
-  case $host in
-    x86_64-*mingw32*|x86_64-*cygwin*) WINE_TRY_CFLAGS([-Wno-format]) ;;
+  case $host_cpu in
+    dnl gcc-4.6+ omits frame pointers by default, breaking some copy protections
+    *i[[3456789]]86*) WINE_TRY_CFLAGS([-fno-omit-frame-pointer]) ;;
+    *x86_64*|x86_32on64)
+      case $host_os in
+        dnl Mingw uses Windows 64-bit types, not Unix ones
+        cygwin*|mingw32*) WINE_TRY_CFLAGS([-Wno-format]) ;;
+        dnl Default to ms_abi on 64-bit
+        *) WINE_TRY_CFLAGS([-mabi=ms],[MSVCRTFLAGS="$MSVCRTFLAGS -mabi=ms"]) ;;
+      esac ;;
   esac
+
+  CFLAGS=$saved_CFLAGS
 
   dnl Enable -Werror for maintainer mode
   if test "x$enable_maintainer_mode" = "xyes"
@@ -1985,19 +2112,22 @@ char*f(const char *h,char n) {return strchr(h,n);}]])],[ac_cv_c_logicalop_noisy=
       WINE_TRY_CFLAGS([-Werror])
   fi
 
-  dnl Check for ms_hook_prologue support
-  saved_CFLAGS="$CFLAGS"
-  CFLAGS="$CFLAGS -Werror"
-  AC_CACHE_CHECK([for ms_hook_prologue attribute], ac_cv_have_ms_hook_prologue,
-                 AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[int __attribute__((__ms_hook_prologue__)) test(void) { return 0; }]])],
-                                   [ac_cv_have_ms_hook_prologue="yes"],[ac_cv_have_ms_hook_prologue="no"]))
-  CFLAGS="$saved_CFLAGS"
-  if test "$ac_cv_have_ms_hook_prologue" = "yes"
+  dnl Extra errors for 32-on-64-bit mode, to catch address space issues
+  if test "x$enable_win64" != "xyes" -a "x$enable_win32on64" = "xyes" -a "$cross_compiling" != "yes"
   then
-      AC_DEFINE(DECLSPEC_HOTPATCH, [__attribute__((__ms_hook_prologue__))],
-                [Define to a function attribute for Microsoft hotpatch assembly prefix.])
-  else
-      AC_DEFINE(DECLSPEC_HOTPATCH, [/* */])
+      WINE_TRY_CFLAGS([-Werror=extra-tokens],[EXTRACFLAGS="$EXTRACFLAGS -Werror=extra-tokens"])
+      WINE_TRY_CFLAGS([-Werror=implicit-function-declaration],[EXTRACFLAGS="$EXTRACFLAGS -Werror=implicit-function-declaration"])
+      WINE_TRY_CFLAGS([-Werror=incompatible-function-pointer-types],[EXTRACFLAGS="$EXTRACFLAGS -Werror=incompatible-function-pointer-types"])
+      WINE_TRY_CFLAGS([-Werror=incompatible-pointer-types-discards-qualifiers],[EXTRACFLAGS="$EXTRACFLAGS -Werror=incompatible-pointer-types-discards-qualifiers"])
+      WINE_TRY_CFLAGS([-Werror=incompatible-pointer-types],[EXTRACFLAGS="$EXTRACFLAGS -Werror=incompatible-pointer-types"])
+      WINE_TRY_CFLAGS([-Werror=pointer-to-int-cast-truncates],[EXTRACFLAGS="$EXTRACFLAGS -Werror=pointer-to-int-cast-truncates"])
+      WINE_TRY_CFLAGS([-Werror=pointer-to-int-cast],[EXTRACFLAGS="$EXTRACFLAGS -Werror=pointer-to-int-cast"])
+      WINE_TRY_CFLAGS([-Werror=int-to-pointer-cast-truncates],[EXTRACFLAGS="$EXTRACFLAGS -Werror=int-to-pointer-cast-truncates"])
+      WINE_TRY_CFLAGS([-Werror=out-of-scope-function],[EXTRACFLAGS="$EXTRACFLAGS -Werror=out-of-scope-function"])
+      WINE_TRY_CFLAGS([-Werror=pointer-arith],[EXTRACFLAGS="$EXTRACFLAGS -Werror=pointer-arith"])
+      WINE_TRY_CFLAGS([-Werror=pointer-type-mismatch],[EXTRACFLAGS="$EXTRACFLAGS -Werror=pointer-type-mismatch"])
+      WINE_TRY_CFLAGS([-Werror=strict-prototypes],[EXTRACFLAGS="$EXTRACFLAGS -Werror=strict-prototypes"])
+      WINE_TRY_CFLAGS([-Werror=tautological-constant-out-of-range-compare],[EXTRACFLAGS="$EXTRACFLAGS -Werror=tautological-constant-out-of-range-compare"])
   fi
 fi
 
@@ -2014,118 +2144,20 @@ then
     CFLAGS="$CFLAGS -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0"
 fi
 
-dnl **** Check for underscore on external symbols ****
-
-AC_CACHE_CHECK([whether external symbols need an underscore prefix], ac_cv_c_extern_prefix,
-    WINE_TRY_ASM_LINK([".globl _ac_test\n_ac_test:\t.long 0"],
-                      [extern int ac_test;],
-                      [if (ac_test) return 1],
-                      ac_cv_c_extern_prefix="yes",ac_cv_c_extern_prefix="no"))
-
-case $host_cpu in
-  *i[[3456789]]86*)
-    AC_CACHE_CHECK([whether external symbols need stdcall decoration], ac_cv_c_stdcall_suffix,
-        WINE_TRY_ASM_LINK(["jmp _ac_test@4"],
-[#ifndef _MSC_VER
-#define __stdcall __attribute__((__stdcall__))
-#endif
-int __stdcall ac_test(int i) { return i; }],
-                          [if (ac_test(1)) return 1],
-                          ac_cv_c_stdcall_suffix="yes",ac_cv_c_stdcall_suffix="no")) ;;
-  *) ac_cv_c_stdcall_suffix="no" ;;
-esac
-
-AH_TEMPLATE(__ASM_NAME,[Define to a macro to generate an assembly name from a C symbol])
-if test "$ac_cv_c_extern_prefix" = "yes"
-then
-    AC_DEFINE([__ASM_NAME(name)], ["_" name])
-    asm_name_prefix="_"
-else
-    AC_DEFINE([__ASM_NAME(name)], [name])
-    asm_name_prefix=""
-fi
-
-AH_TEMPLATE(__ASM_STDCALL,[Define to a macro to generate an stdcall suffix])
-if test "$ac_cv_c_stdcall_suffix" = "yes"
-then
-    AC_DEFINE([__ASM_STDCALL(args)],["@" #args])
-else
-    AC_DEFINE([__ASM_STDCALL(args)],[""])
-fi
-
-dnl **** Check how to define a function in assembly code ****
-
-AC_CACHE_CHECK([how to define a function in assembly code], ac_cv_asm_func_def,
-  WINE_TRY_ASM_LINK(
-      ["\t.globl _ac_test\n\t.def _ac_test; .scl 2; .type 32; .endef\n_ac_test:\t.long 0"],,,
-      ac_cv_asm_func_def=".def",
-    [WINE_TRY_ASM_LINK(["\t.globl _ac_test\n\t.type _ac_test,@function\n_ac_test:\t.long 0"],,,
-      ac_cv_asm_func_def=".type @function",
-    [WINE_TRY_ASM_LINK(["\t.globl _ac_test\n\t.type _ac_test,2\n_ac_test:\t.long 0"],,,
-      ac_cv_asm_func_def=".type 2",
-      ac_cv_asm_func_def="unknown")])]))
-
-AH_TEMPLATE(__ASM_FUNC,[Define to a macro to generate an assembly function directive])
-case "$ac_cv_asm_func_def" in
-  ".def")
-     AC_DEFINE([__ASM_FUNC(name)], [".def " __ASM_NAME(name) "; .scl 2; .type 32; .endef"])
-     asm_func_header=".def $asm_name_prefix\" #name suffix \"; .scl 2; .type 32; .endef" ;;
-  ".type @function")
-     AC_DEFINE([__ASM_FUNC(name)], [".type " __ASM_NAME(name) ",@function"])
-     asm_func_header=".type $asm_name_prefix\" #name suffix \",@function" ;;
-  ".type 2")
-     AC_DEFINE([__ASM_FUNC(name)], [".type " __ASM_NAME(name) ",2"])
-     asm_func_header=".type $asm_name_prefix\" #name suffix \",2" ;;
-  *)
-     AC_DEFINE([__ASM_FUNC(name)], [""])
-     asm_func_header="" ;;
-esac
-
-AC_CACHE_CHECK([whether asm() works outside of functions], ac_cv_c_asm_outside_funcs,
-    AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[asm(".text\n\t.long 0");]],)],
-                      ac_cv_c_asm_outside_funcs="yes",ac_cv_c_asm_outside_funcs="no"))
-
-AC_CACHE_CHECK([whether .previous is supported in assembly code], ac_cv_c_dot_previous,
-    WINE_TRY_ASM_LINK([".text\nac_test:\t.long 0\n\t.previous"],,,
-                      ac_cv_c_dot_previous="yes",ac_cv_c_dot_previous="no"))
+dnl **** Check for CFI directives support ****
 
 AC_CACHE_CHECK([whether CFI directives are supported in assembly code], ac_cv_c_cfi_support,
     AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[asm(".text\nac_test:\t.cfi_startproc\n\t.long 0\n\t.cfi_endproc");]])],
                       ac_cv_c_cfi_support="yes",ac_cv_c_cfi_support="no"))
-
-asm_func_header=".globl $asm_name_prefix\" #name suffix \"\\n\\t$asm_func_header\\n$asm_name_prefix\" #name suffix \":\\n\\t"
-asm_func_trailer=""
-if test "$ac_cv_c_dot_previous" = "yes"
-then
-   asm_func_trailer="\\n\\t.previous"
-fi
 if test "$ac_cv_c_cfi_support" = "yes"
 then
-   asm_func_header="$asm_func_header.cfi_startproc\\n\\t"
-   asm_func_trailer="\\n\\t.cfi_endproc$asm_func_trailer"
-   AC_DEFINE([__ASM_CFI(str)],[str],[Define to a macro to output a .cfi assembly pseudo-op])
-   AC_SUBST([UNWINDFLAGS],[-fasynchronous-unwind-tables])
+   LDDLLFLAGS="$LDDLLFLAGS -fasynchronous-unwind-tables"
 else
-   AC_DEFINE([__ASM_CFI(str)],[""])
    if test "x$enable_win64" = "xyes"
    then
       WINE_WARNING([building 64-bit Wine without support for CFI directives; exception handling will not work properly.])
    fi
 fi
-
-asm_func_code="$asm_func_header\" code \"$asm_func_trailer"
-
-AH_TEMPLATE(__ASM_DEFINE_FUNC,[Define to a macro to define an assembly function])
-if test "$ac_cv_c_asm_outside_funcs" = "yes"
-then
-    AC_DEFINE_UNQUOTED([__ASM_DEFINE_FUNC(name,suffix,code)],[asm(".text\n\t.align 4\n\t$asm_func_code");])
-else
-    AC_DEFINE_UNQUOTED([__ASM_DEFINE_FUNC(name,suffix,code)],[void __asm_dummy_##name(void) { asm(".text\n\t.align 4\n\t$asm_func_code"); }])
-fi
-AC_DEFINE([__ASM_GLOBAL_FUNC(name,code)],[__ASM_DEFINE_FUNC(name,"",code)],
-          [Define to a macro to generate an assembly function with C calling convention])
-AC_DEFINE([__ASM_STDCALL_FUNC(name,args,code)],[__ASM_DEFINE_FUNC(name,__ASM_STDCALL(args),code)],
-          [Define to a macro to generate an assembly function with stdcall calling convention])
 
 dnl **** Platform-specific checks ****
 
@@ -2151,20 +2183,7 @@ CFLAGS="$CFLAGS $BUILTINFLAG"
 AC_CHECK_FUNCS(\
         __res_get_state \
         __res_getservers \
-	_finite \
-	_isnan \
-	_pclose \
-	_popen \
-	_snprintf \
 	_spawnvp \
-	_strdup \
-	_stricmp \
-	_strnicmp \
-	_strtoi64 \
-	_strtoui64 \
-	_vsnprintf \
-	asctime_r \
-	chsize \
 	dlopen \
 	epoll_create \
 	ffs \
@@ -2174,7 +2193,6 @@ AC_CHECK_FUNCS(\
 	fpclass \
 	fstatfs \
 	fstatvfs \
-	ftruncate \
 	futimens \
 	futimes \
 	futimesat \
@@ -2182,17 +2200,10 @@ AC_CHECK_FUNCS(\
 	getauxval \
 	getifaddrs \
 	getopt_long_only \
-	getpwuid \
-	gettimeofday \
-	getuid \
 	kqueue \
 	lstat \
-	memmove \
-	mmap \
-	pclose \
 	pipe2 \
 	poll \
-	popen \
 	port_create \
 	prctl \
 	pread \
@@ -2204,28 +2215,18 @@ AC_CHECK_FUNCS(\
 	select \
 	setproctitle \
 	setprogname \
-	setrlimit \
 	settimeofday \
-	sigaltstack \
 	sigprocmask \
-	snprintf \
 	statfs \
 	statvfs \
-	strcasecmp \
-	strdup \
-	strerror \
-	strncasecmp \
 	strnlen \
 	strtold \
-	strtoll \
-	strtoull \
 	symlink \
 	sysinfo \
 	tcdrain \
 	thr_kill2 \
 	timegm \
-	usleep \
-	vsnprintf
+	usleep
 )
 CFLAGS="$ac_save_CFLAGS"
 
@@ -2263,16 +2264,18 @@ AC_CHECK_FUNCS(\
 	inet_network \
 	inet_ntop \
 	inet_pton \
-	sendmsg \
-	socketpair \
 )
 
 dnl Check for clock_gettime which may be in -lrt
-ac_save_LIBS=$LIBS
-AC_SEARCH_LIBS(clock_gettime, rt,
-               [AC_DEFINE(HAVE_CLOCK_GETTIME, 1, [Define to 1 if you have the `clock_gettime' function.])
+case $host_os in
+    darwin*|macosx*) ;;
+    *) ac_save_LIBS=$LIBS
+        AC_SEARCH_LIBS(clock_gettime, rt,
+            [AC_DEFINE(HAVE_CLOCK_GETTIME, 1, [Define to 1 if you have the `clock_gettime' function.])
                 test "$ac_res" = "none required" || AC_SUBST(RT_LIBS,"$ac_res")])
-LIBS=$ac_save_LIBS
+    LIBS=$ac_save_LIBS
+    ;;
+esac
 
 dnl Check for shm_open which may be in -lrt
 ac_save_LIBS=$LIBS
@@ -2316,15 +2319,6 @@ fi
 WINE_NOTICE_WITH(ldap,[test "x$LDAP_LIBS" = "x"],
                  [libldap (OpenLDAP) ${notice_platform}development files not found, LDAP won't be supported.])
 
-AC_CACHE_CHECK([whether mkdir takes only one argument],
-   	wine_cv_one_arg_mkdir,
-	AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <sys/stat.h>]],[[mkdir("foo");]])],
-                          [wine_cv_one_arg_mkdir=yes],[wine_cv_one_arg_mkdir=no]))
-if test "$wine_cv_one_arg_mkdir" = "yes"
-then
-  AC_DEFINE(HAVE_ONE_ARG_MKDIR, 1, [Define if mkdir takes only one argument])
-fi
-
 AC_CACHE_CHECK([for sched_setaffinity],wine_cv_have_sched_setaffinity,
                 AC_LINK_IFELSE([AC_LANG_PROGRAM(
 [[#define _GNU_SOURCE
@@ -2346,7 +2340,7 @@ fi
 dnl **** Check for types ****
 
 AC_C_INLINE
-AC_CHECK_TYPES([mode_t, off_t, pid_t, size_t, ssize_t, long long, fsblkcnt_t, fsfilcnt_t])
+AC_CHECK_TYPES([fsblkcnt_t, fsfilcnt_t])
 AC_CHECK_TYPES([sigset_t],,,[#include <sys/types.h>
 #include <signal.h>])
 AC_CHECK_TYPES([request_sense],,,[#include <linux/cdrom.h>])
@@ -2699,20 +2693,6 @@ AC_CHECK_MEMBERS([struct ifreq.ifr_hwaddr],,,
 # include <net/if.h>
 #endif])
 
-dnl Check for the external timezone variables timezone and daylight
-AC_CACHE_CHECK([for timezone variable], ac_cv_have_timezone,
-               AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <time.h>]], [[timezone = 1]])],[ac_cv_have_timezone="yes"],[ac_cv_have_timezone="no"]))
-if test "$ac_cv_have_timezone" = "yes"
-then
-    AC_DEFINE(HAVE_TIMEZONE, 1, [Define if you have the timezone variable])
-fi
-AC_CACHE_CHECK([for daylight variable], ac_cv_have_daylight,
-               AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <time.h>]], [[daylight = 1]])],[ac_cv_have_daylight="yes"],[ac_cv_have_daylight="no"]))
-if test "$ac_cv_have_daylight" = "yes"
-then
-    AC_DEFINE(HAVE_DAYLIGHT, 1, [Define if you have the daylight variable])
-fi
-
 dnl Check for isfinite
 ac_save_LIBS="$LIBS"
 LIBS="$LIBS -lm"
@@ -2757,6 +2737,10 @@ AC_CHECK_FUNCS(\
 	exp2f \
 	expm1 \
 	expm1f \
+	fma \
+	fmaf \
+	ilogb \
+	ilogbf \
 	j0 \
 	j1 \
 	jn \
@@ -2776,9 +2760,13 @@ AC_CHECK_FUNCS(\
 	lroundf \
 	nearbyint \
 	nearbyintf \
+	nexttoward \
+	nexttowardf \
 	powl \
 	remainder \
 	remainderf \
+	remquo \
+	remquof \
 	rint \
 	rintf \
 	round \
@@ -2822,6 +2810,7 @@ dnl *** check for the need to define platform-specific symbols
 case $host_cpu in
   *i[[3456789]]86*) WINE_CHECK_DEFINE([__i386__]) ;;
   *x86_64*)         WINE_CHECK_DEFINE([__x86_64__]) ;;
+  *x86_32on64*)     WINE_CHECK_DEFINE([__i386_on_x86_64__]) ;;
   *sparc64*)        WINE_CHECK_DEFINE([__sparc64__]) ;;
   *sparc*)          WINE_CHECK_DEFINE([__sparc__]) ;;
   *powerpc64*)      WINE_CHECK_DEFINE([__powerpc64__]) ;;
@@ -2838,9 +2827,10 @@ dnl **** Generate output files ****
 
 AH_TOP([#ifndef __WINE_CONFIG_H
 #define __WINE_CONFIG_H
-#ifndef WINE_CROSSTEST])
-AH_BOTTOM([#endif /* WINE_CROSSTEST */
-#endif /* __WINE_CONFIG_H */])
+#ifdef WINE_CROSS_PE
+#error config.h should not be used when cross-compiling
+#endif])
+AH_BOTTOM([#endif /* __WINE_CONFIG_H */])
 
 AC_CONFIG_COMMANDS([include/stamp-h], [echo timestamp > include/stamp-h])
 AS_ECHO_N("creating Makefile rules...") >&AS_MESSAGE_FD
@@ -2866,6 +2856,7 @@ WINE_CONFIG_SYMLINK(fonts,fonts,[marlett.ttf,symbol.ttf,tahoma.ttf,tahomabd.ttf,
 WINE_CONFIG_SYMLINK(loader,loader,[l_intl.nls])
 WINE_CONFIG_SYMLINK(,tools,[wine],,winewrapper)
 WINE_CONFIG_SYMLINK(,tools,[wine64],["x$enable_win64" != xno -o -n "$with_wine64"],winewrapper)
+WINE_CONFIG_SYMLINK(,tools,[wine32on64],["x$enable_win32on64" != xno -o -n "$with_wine64"],winewrapper)
 
 WINE_CONFIG_MAKEFILE(dlls/acledit)
 WINE_CONFIG_MAKEFILE(dlls/aclui)
@@ -2879,6 +2870,7 @@ WINE_CONFIG_MAKEFILE(dlls/advapi32)
 WINE_CONFIG_MAKEFILE(dlls/advapi32/tests)
 WINE_CONFIG_MAKEFILE(dlls/advpack)
 WINE_CONFIG_MAKEFILE(dlls/advpack/tests)
+WINE_CONFIG_MAKEFILE(dlls/amsi)
 WINE_CONFIG_MAKEFILE(dlls/amstream)
 WINE_CONFIG_MAKEFILE(dlls/amstream/tests)
 WINE_CONFIG_MAKEFILE(dlls/api-ms-win-appmodel-identity-l1-1-0)
@@ -3234,6 +3226,7 @@ WINE_CONFIG_MAKEFILE(dlls/d3dxof)
 WINE_CONFIG_MAKEFILE(dlls/d3dxof/tests)
 WINE_CONFIG_MAKEFILE(dlls/davclnt)
 WINE_CONFIG_MAKEFILE(dlls/dbgeng)
+WINE_CONFIG_MAKEFILE(dlls/dbgeng/tests)
 WINE_CONFIG_MAKEFILE(dlls/dbghelp)
 WINE_CONFIG_MAKEFILE(dlls/dbghelp/tests)
 WINE_CONFIG_MAKEFILE(dlls/dciman32)
@@ -3314,17 +3307,25 @@ WINE_CONFIG_MAKEFILE(dlls/explorerframe/tests)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-authz-context-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-domainjoin-netjoin-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-dwmapi-ext-l1-1-0)
+WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-gdi-dc-create-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-gdi-dc-create-l1-1-1)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-gdi-dc-l1-2-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-gdi-devcaps-l1-1-0)
+WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-gdi-draw-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-gdi-draw-l1-1-1)
+WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-gdi-font-l1-1-0)
+WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-gdi-font-l1-1-1)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-gdi-render-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-kernel32-package-current-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-kernel32-package-l1-1-1)
+WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-dialogbox-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-draw-l1-1-0)
+WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-gui-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-gui-l1-3-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-keyboard-l1-3-0)
+WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-message-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-message-l1-1-1)
+WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-misc-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-misc-l1-2-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-misc-l1-5-1)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-mouse-l1-1-0)
@@ -3332,8 +3333,10 @@ WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-private-l1-1-1)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-private-l1-3-1)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-rectangle-ext-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-uicontext-ext-l1-1-0)
+WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-window-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-window-l1-1-1)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-window-l1-1-4)
+WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-windowclass-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ntuser-windowclass-l1-1-1)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-oleacc-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-ras-rasapi32-l1-1-0)
@@ -3349,6 +3352,9 @@ WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-rtcore-ntuser-syscolors-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-rtcore-ntuser-sysparams-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-security-credui-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-security-cryptui-l1-1-0)
+WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-shell-comctl32-init-l1-1-0)
+WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-shell-comdlg32-l1-1-0)
+WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-shell-shell32-l1-2-0)
 WINE_CONFIG_MAKEFILE(dlls/ext-ms-win-uxtheme-themes-l1-1-0)
 WINE_CONFIG_MAKEFILE(dlls/faultrep)
 WINE_CONFIG_MAKEFILE(dlls/faultrep/tests)
@@ -3424,6 +3430,7 @@ WINE_CONFIG_MAKEFILE(dlls/kernelbase)
 WINE_CONFIG_MAKEFILE(dlls/kernelbase/tests)
 WINE_CONFIG_MAKEFILE(dlls/keyboard.drv16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/krnl386.exe16,enable_win16)
+WINE_CONFIG_MAKEFILE(dlls/ksecdd.sys)
 WINE_CONFIG_MAKEFILE(dlls/ksuser)
 WINE_CONFIG_MAKEFILE(dlls/ktmw32)
 WINE_CONFIG_MAKEFILE(dlls/l3codeca.acm)
@@ -3446,9 +3453,12 @@ WINE_CONFIG_MAKEFILE(dlls/mciwave)
 WINE_CONFIG_MAKEFILE(dlls/mf)
 WINE_CONFIG_MAKEFILE(dlls/mf/tests)
 WINE_CONFIG_MAKEFILE(dlls/mf3216)
+WINE_CONFIG_MAKEFILE(dlls/mferror)
 WINE_CONFIG_MAKEFILE(dlls/mfplat)
 WINE_CONFIG_MAKEFILE(dlls/mfplat/tests)
+WINE_CONFIG_MAKEFILE(dlls/mfplay)
 WINE_CONFIG_MAKEFILE(dlls/mfreadwrite)
+WINE_CONFIG_MAKEFILE(dlls/mfreadwrite/tests)
 WINE_CONFIG_MAKEFILE(dlls/mfuuid)
 WINE_CONFIG_MAKEFILE(dlls/mgmtapi)
 WINE_CONFIG_MAKEFILE(dlls/midimap)
@@ -3505,6 +3515,7 @@ WINE_CONFIG_MAKEFILE(dlls/msisys.ocx)
 WINE_CONFIG_MAKEFILE(dlls/msls31)
 WINE_CONFIG_MAKEFILE(dlls/msnet32)
 WINE_CONFIG_MAKEFILE(dlls/mspatcha)
+WINE_CONFIG_MAKEFILE(dlls/mspatcha/tests)
 WINE_CONFIG_MAKEFILE(dlls/msports)
 WINE_CONFIG_MAKEFILE(dlls/msrle32)
 WINE_CONFIG_MAKEFILE(dlls/msrle32/tests)
@@ -3645,6 +3656,8 @@ WINE_CONFIG_MAKEFILE(dlls/qmgrprxy)
 WINE_CONFIG_MAKEFILE(dlls/quartz)
 WINE_CONFIG_MAKEFILE(dlls/quartz/tests)
 WINE_CONFIG_MAKEFILE(dlls/query)
+WINE_CONFIG_MAKEFILE(dlls/qwave)
+WINE_CONFIG_MAKEFILE(dlls/qwave/tests)
 WINE_CONFIG_MAKEFILE(dlls/rasapi16.dll16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/rasapi32)
 WINE_CONFIG_MAKEFILE(dlls/rasapi32/tests)
@@ -3739,6 +3752,7 @@ WINE_CONFIG_MAKEFILE(dlls/typelib.dll16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/tzres)
 WINE_CONFIG_MAKEFILE(dlls/ucrtbase)
 WINE_CONFIG_MAKEFILE(dlls/ucrtbase/tests)
+WINE_CONFIG_MAKEFILE(dlls/uianimation)
 WINE_CONFIG_MAKEFILE(dlls/uiautomationcore)
 WINE_CONFIG_MAKEFILE(dlls/uiautomationcore/tests)
 WINE_CONFIG_MAKEFILE(dlls/uiribbon)
@@ -3780,8 +3794,8 @@ WINE_CONFIG_MAKEFILE(dlls/vnbt.vxd,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/vnetbios.vxd,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/vssapi)
 WINE_CONFIG_MAKEFILE(dlls/vtdapi.vxd,enable_win16)
-WINE_CONFIG_MAKEFILE(dlls/vulkan-1)
-WINE_CONFIG_MAKEFILE(dlls/vulkan-1/tests)
+WINE_CONFIG_MAKEFILE(dlls/vulkan-1,,[test "x$with_vulkan" = xno])
+WINE_CONFIG_MAKEFILE(dlls/vulkan-1/tests,,[test "x$with_vulkan" = xno])
 WINE_CONFIG_MAKEFILE(dlls/vwin32.vxd,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/w32skrnl,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/w32sys.dll16,enable_win16)
@@ -3822,7 +3836,7 @@ WINE_CONFIG_MAKEFILE(dlls/wineps.drv)
 WINE_CONFIG_MAKEFILE(dlls/wineps16.drv16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/winepulse.drv)
 WINE_CONFIG_MAKEFILE(dlls/wineqtdecoder)
-WINE_CONFIG_MAKEFILE(dlls/winevulkan)
+WINE_CONFIG_MAKEFILE(dlls/winevulkan,,[test "x$with_vulkan" = xno])
 WINE_CONFIG_MAKEFILE(dlls/winex11.drv)
 WINE_CONFIG_MAKEFILE(dlls/wing.dll16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/wing32)
@@ -3886,14 +3900,6 @@ WINE_CONFIG_MAKEFILE(dlls/x3daudio1_4)
 WINE_CONFIG_MAKEFILE(dlls/x3daudio1_5)
 WINE_CONFIG_MAKEFILE(dlls/x3daudio1_6)
 WINE_CONFIG_MAKEFILE(dlls/x3daudio1_7)
-WINE_CONFIG_MAKEFILE(dlls/xactengine3_0)
-WINE_CONFIG_MAKEFILE(dlls/xactengine3_1)
-WINE_CONFIG_MAKEFILE(dlls/xactengine3_2)
-WINE_CONFIG_MAKEFILE(dlls/xactengine3_3)
-WINE_CONFIG_MAKEFILE(dlls/xactengine3_4)
-WINE_CONFIG_MAKEFILE(dlls/xactengine3_5)
-WINE_CONFIG_MAKEFILE(dlls/xactengine3_6)
-WINE_CONFIG_MAKEFILE(dlls/xactengine3_7)
 WINE_CONFIG_MAKEFILE(dlls/xapofx1_1)
 WINE_CONFIG_MAKEFILE(dlls/xapofx1_2)
 WINE_CONFIG_MAKEFILE(dlls/xapofx1_3)
@@ -3959,6 +3965,7 @@ WINE_CONFIG_MAKEFILE(programs/ipconfig)
 WINE_CONFIG_MAKEFILE(programs/lodctr)
 WINE_CONFIG_MAKEFILE(programs/mofcomp)
 WINE_CONFIG_MAKEFILE(programs/mshta)
+WINE_CONFIG_MAKEFILE(programs/msidb)
 WINE_CONFIG_MAKEFILE(programs/msiexec)
 WINE_CONFIG_MAKEFILE(programs/msinfo32)
 WINE_CONFIG_MAKEFILE(programs/net)
@@ -4061,7 +4068,7 @@ then
 [wine_fn_output_makedep ()
 {
     AS_MKDIR_P(tools)
-    $CC -Iinclude -I$srcdir/include -D__WINESRC__ $EXTRACFLAGS $CPPFLAGS $CFLAGS -o tools/makedep$ac_exeext $srcdir/tools/makedep.c $LDFLAGS
+    $CC -Iinclude -I$srcdir/include -D__WINESRC__ $EXTRACFLAGS $CPPFLAGS $CFLAGS $HOSTSTACK_CFLAGS -o tools/makedep$ac_exeext $srcdir/tools/makedep.c $LDFLAGS
 }])
 fi
 
@@ -4112,21 +4119,22 @@ then
     dnl Get rid of old symlinks
     rm -f fonts server 2>/dev/null
     WINE_APPEND_RULE(
-[all: loader/wine64 loader/wine64-preloader $with_wine64/loader/wine $with_wine64/loader/wine-preloader
+[all: loader/wine64 loader/wine64-preloader $with_wine64/loader/$wine_binary $with_wine64/loader/$wine_binary-preloader
 loader/wine64 loader/wine64-preloader:
 	rm -f \$[@] && \$(LN_S) $reldir$with_wine64/\$[@] \$[@]
-$with_wine64/loader/wine:
-	rm -f \$[@] && \$(LN_S) $ac_pwd/loader/wine \$[@]
-$with_wine64/loader/wine-preloader:
-	rm -f \$[@] && \$(LN_S) $ac_pwd/loader/wine-preloader \$[@]
+$with_wine64/loader/$wine_binary:
+	rm -f \$[@] && \$(LN_S) $ac_pwd/loader/$wine_binary \$[@]
+$with_wine64/loader/$wine_binary-preloader:
+	rm -f \$[@] && \$(LN_S) $ac_pwd/loader/$wine_binary-preloader \$[@]
 clean::
-	rm -f loader/wine64 loader/wine64-preloader $with_wine64/loader/wine $with_wine64/loader/wine-preloader])
+	rm -f loader/wine64 loader/wine64-preloader $with_wine64/loader/$wine_binary $with_wine64/loader/$wine_binary-preloader])
 else
     TOP_INSTALL_DEV="$TOP_INSTALL_DEV include"
     TOP_INSTALL_LIB="$TOP_INSTALL_LIB \
 fonts \
 loader/l_intl.nls \
 loader/wine.inf \
+loader/winehid.inf \
 server/wineserver"
 fi
 

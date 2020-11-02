@@ -23,8 +23,17 @@
 #ifndef __WINE_WINE_RBTREE_H
 #define __WINE_WINE_RBTREE_H
 
+#include <stdint.h>
+#include <wine/32on64utils.h>
+
+#ifdef WINE_RBTREE_HOSTADDRSPACE
+#include <wine/hostaddrspace_enter.h>
+#else
+#include <wine/winheader_enter.h>
+#endif
+
 #define WINE_RB_ENTRY_VALUE(element, type, field) \
-    ((type *)((char *)(element) - offsetof(type, field)))
+    TRUNCCAST(type *, (uintptr_t)(element) - offsetof(type, field))
 
 struct wine_rb_entry
 {
@@ -388,5 +397,11 @@ static inline void wine_rb_remove_key(struct wine_rb_tree *tree, const void *key
     struct wine_rb_entry *entry = wine_rb_get(tree, key);
     if (entry) wine_rb_remove(tree, entry);
 }
+
+#ifdef WINE_RBTREE_HOSTADDRSPACE
+#include <wine/hostaddrspace_exit.h>
+#else
+#include <wine/winheader_exit.h>
+#endif
 
 #endif  /* __WINE_WINE_RBTREE_H */

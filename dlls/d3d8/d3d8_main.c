@@ -19,7 +19,6 @@
  *
  */
 
-#include "config.h"
 #include "initguid.h"
 #include "d3d8_private.h"
 #include "wine/debug.h"
@@ -56,77 +55,95 @@ IDirect3D8 * WINAPI DECLSPEC_HOTPATCH Direct3DCreate8(UINT sdk_version)
     return &object->IDirect3D8_iface;
 }
 
-/***********************************************************************
- *              ValidateVertexShader (D3D8.@)
- *
- * I've seen reserved1 and reserved2 always passed as 0's
- * bool seems always passed as 0 or 1, but other values work as well...
- * toto       result?
- */
-HRESULT WINAPI ValidateVertexShader(DWORD* vertexshader, DWORD* reserved1, DWORD* reserved2, BOOL bool, DWORD* toto)
+/* FIXME: We should probably use libvkd3d-shader for validation. */
+HRESULT WINAPI ValidateVertexShader(const DWORD *vs_code, const DWORD *declaration,
+        const D3DCAPS8 *caps, BOOL return_error, char **errors)
 {
-  HRESULT ret;
-  static BOOL warned;
+    const char *message = "";
+    SIZE_T message_size;
+    HRESULT hr = E_FAIL;
 
-  if (TRACE_ON(d3d8) || !warned) {
-      FIXME("(%p %p %p %d %p): stub\n", vertexshader, reserved1, reserved2, bool, toto);
-      warned = TRUE;
-  }
+    TRACE("vs_code %p, declaration %p, caps %p, return_error %#x, errors %p.\n",
+            vs_code, declaration, caps, return_error, errors);
 
-  if (!vertexshader)
-      return E_FAIL;
+    if (!vs_code)
+    {
+        message = "Invalid code pointer.\n";
+        goto done;
+    }
 
-  if (reserved1 || reserved2)
-      return E_FAIL;
-
-  switch(*vertexshader) {
-        case 0xFFFE0101:
-        case 0xFFFE0100:
-            ret=S_OK;
+    switch (*vs_code)
+    {
+        case D3DVS_VERSION(1, 1):
+        case D3DVS_VERSION(1, 0):
             break;
-        default:
-            WARN("Invalid shader version token %#x.\n", *vertexshader);
-            ret=E_FAIL;
-        }
 
-  return ret;
+        default:
+            message = "Unsupported shader version.\n";
+            goto done;
+    }
+
+    if (caps && *vs_code > caps->VertexShaderVersion)
+    {
+        message = "Shader version not supported by caps.\n";
+        goto done;
+    }
+
+    hr = S_OK;
+
+done:
+    if (!return_error)
+        message = "";
+    message_size = strlen(message) + 1;
+    if (errors && (*errors = heap_alloc(message_size)))
+        memcpy(*errors, message, message_size);
+
+    return hr;
 }
 
-/***********************************************************************
- *              ValidatePixelShader (D3D8.@)
- *
- * PARAMS
- * toto       result?
- */
-HRESULT WINAPI ValidatePixelShader(DWORD* pixelshader, DWORD* reserved1, BOOL bool, DWORD* toto)
+HRESULT WINAPI ValidatePixelShader(const DWORD *ps_code,
+        const D3DCAPS8 *caps, BOOL return_error, char **errors)
 {
-  HRESULT ret;
-  static BOOL warned;
+    const char *message = "";
+    SIZE_T message_size;
+    HRESULT hr = E_FAIL;
 
-  if (TRACE_ON(d3d8) || !warned) {
-      FIXME("(%p %p %d %p): stub\n", pixelshader, reserved1, bool, toto);
-      warned = TRUE;
-  }
+    TRACE("ps_code %p, caps %p, return_error %#x, errors %p.\n",
+            ps_code, caps, return_error, errors);
 
-  if (!pixelshader)
-      return E_FAIL;
+    if (!ps_code)
+        return E_FAIL;
 
-  if (reserved1)
-      return E_FAIL;
-
-  switch(*pixelshader) {
-        case 0xFFFF0100:
-        case 0xFFFF0101:
-        case 0xFFFF0102:
-        case 0xFFFF0103:
-        case 0xFFFF0104:
-            ret=S_OK;
+    switch (*ps_code)
+    {
+        case D3DPS_VERSION(1, 4):
+        case D3DPS_VERSION(1, 3):
+        case D3DPS_VERSION(1, 2):
+        case D3DPS_VERSION(1, 1):
+        case D3DPS_VERSION(1, 0):
             break;
+
         default:
-            WARN("Invalid shader version token %#x.\n", *pixelshader);
-            ret=E_FAIL;
-        }
-  return ret;
+            message = "Unsupported shader version.\n";
+            goto done;
+    }
+
+    if (caps && *ps_code > caps->PixelShaderVersion)
+    {
+        message = "Shader version not supported by caps.\n";
+        goto done;
+    }
+
+    hr = S_OK;
+
+done:
+    if (!return_error)
+        message = "";
+    message_size = strlen(message) + 1;
+    if (errors && (*errors = heap_alloc(message_size)))
+        memcpy(*errors, message, message_size);
+
+    return hr;
 }
 
 void d3d8_resource_cleanup(struct d3d8_resource *resource)

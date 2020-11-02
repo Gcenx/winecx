@@ -122,7 +122,7 @@ void* pool_alloc(struct pool* pool, size_t len)
     return ret;
 }
 
-char* pool_strdup(struct pool* pool, const char* str)
+char* pool_strdup(struct pool* pool, const char* HOSTPTR str)
 {
     char* ret;
     if ((ret = pool_alloc(pool, strlen(str) + 1))) strcpy(ret, str);
@@ -315,7 +315,7 @@ unsigned sparse_array_length(const struct sparse_array* sa)
     return sa->elements.num_elts;
 }
 
-static unsigned hash_table_hash(const char* name, unsigned num_buckets)
+static unsigned hash_table_hash(const char* HOSTPTR name, unsigned num_buckets)
 {
     unsigned    hash = 0;
     while (*name)

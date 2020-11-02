@@ -8,6 +8,8 @@
 #ifndef __WINE_STDLIB_H
 #define __WINE_STDLIB_H
 
+#include "wine/winheader_enter.h"
+
 #include <crtdefs.h>
 
 #include <pshpack8.h>
@@ -89,7 +91,7 @@ typedef struct _lldiv_t {
 extern "C" {
 #endif
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 
 extern unsigned int* __cdecl __p__osver(void);
 #define _osver             (*__p__osver())
@@ -184,9 +186,9 @@ errno_t       __cdecl _ui64toa_s(unsigned __int64,char*,size_t,int);
 char*         __cdecl _ultoa(__msvcrt_ulong,char*,int);
 errno_t       __cdecl _ultoa_s(__msvcrt_ulong,char*,size_t,int);
 
-void          __cdecl _Exit(int);
-void          __cdecl _exit(int);
-void          __cdecl abort(void);
+void          __cdecl _Exit(int) DECLSPEC_NORETURN;
+void          __cdecl _exit(int) DECLSPEC_NORETURN;
+void          __cdecl abort(void) DECLSPEC_NORETURN;
 int           __cdecl abs(int);
 int           __cdecl atexit(void (__cdecl *)(void));
 double        __cdecl atof(const char*);
@@ -195,12 +197,12 @@ int           __cdecl _atoi_l(const char*,_locale_t);
 __msvcrt_long __cdecl atol(const char*);
 __int64       __cdecl atoll(const char*);
 void*         __cdecl calloc(size_t,size_t);
-#ifndef __i386__
+#if !defined(__i386__) && !defined(__i386_on_x86_64__)
 div_t  __cdecl div(int,int);
 ldiv_t __cdecl ldiv(__msvcrt_long,__msvcrt_long);
 #endif
 lldiv_t       __cdecl lldiv(__int64,__int64);
-void          __cdecl exit(int);
+void          __cdecl exit(int) DECLSPEC_NORETURN;
 void          __cdecl free(void*);
 char*         __cdecl getenv(const char*);
 __msvcrt_long __cdecl labs(__msvcrt_long);
@@ -292,7 +294,7 @@ static inline int putenv(const char* str) { return _putenv(str); }
 static inline void swab(char* src, char* dst, int len) { _swab(src, dst, len); }
 static inline char* ultoa(__msvcrt_ulong value, char* str, int radix) { return _ultoa(value, str, radix); }
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 static inline div_t __wine_msvcrt_div(int num, int denom)
 {
     extern unsigned __int64 div(int,int);
@@ -316,5 +318,7 @@ static inline ldiv_t __wine_msvcrt_ldiv(__msvcrt_long num, __msvcrt_long denom)
 #endif
 
 #include <poppack.h>
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_STDLIB_H */

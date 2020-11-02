@@ -32,8 +32,9 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wine/library.h"
+#include "wine/asm.h"
 
-#if defined(__i386__) && !defined(__MINGW32__) && !defined(_MSC_VER)
+#if (defined(__i386__) || defined(__i386_on_x86_64__))
 
 #ifdef __linux__
 
@@ -255,6 +256,10 @@ int wine_ldt_set_entry( unsigned short sel, const LDT_ENTRY *entry )
  */
 int wine_ldt_is_system( unsigned short sel )
 {
+#ifdef __i386_on_x86_64__
+    if (sel == wine_32on64_cs32 || sel == wine_32on64_ds32)
+        return TRUE;
+#endif
     return is_gdt_sel(sel) || ((sel >> 3) < LDT_FIRST_ENTRY);
 }
 
@@ -466,7 +471,17 @@ __ASM_GLOBAL_FUNC( wine_get_es, "movw %es,%ax\n\tret" )
 __ASM_GLOBAL_FUNC( wine_get_fs, "movw %fs,%ax\n\tret" )
 __ASM_GLOBAL_FUNC( wine_get_gs, "movw %gs,%ax\n\tret" )
 __ASM_GLOBAL_FUNC( wine_get_ss, "movw %ss,%ax\n\tret" )
+
+#ifdef __i386__
 __ASM_GLOBAL_FUNC( wine_set_fs, "movl 4(%esp),%eax\n\tmovw %ax,%fs\n\tret" )
 __ASM_GLOBAL_FUNC( wine_set_gs, "movl 4(%esp),%eax\n\tmovw %ax,%gs\n\tret" )
+#else
+__ASM_GLOBAL_FUNC( wine_set_fs, "movw %di,%fs\n\tretq" )
+__ASM_GLOBAL_FUNC( wine_set_gs, "int $3\n\tretq" )
 
-#endif /* __i386__ */
+unsigned short wine_32on64_cs32 = 0;
+unsigned short wine_32on64_cs64 = 0;
+unsigned short wine_32on64_ds32 = 0;
+#endif
+
+#endif /* __i386__ || __i386_on_x86_64__ */

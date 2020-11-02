@@ -135,6 +135,7 @@ DEFINE_EXPECT(QS_VariantConversion);
 DEFINE_EXPECT(QS_IActiveScriptSite);
 DEFINE_EXPECT(QS_GetCaller);
 DEFINE_EXPECT(ChangeType);
+DEFINE_EXPECT(GetTypeInfo);
 
 #define TESTSCRIPT_CLSID "{178fc163-f585-4e24-9c13-4bb7faf80746}"
 #define TESTACTIVEX_CLSID "{178fc163-f585-4e24-9c13-4bb7faf80646}"
@@ -399,7 +400,7 @@ static HRESULT WINAPI DispatchEx_GetTypeInfoCount(IDispatchEx *iface, UINT *pcti
 static HRESULT WINAPI DispatchEx_GetTypeInfo(IDispatchEx *iface, UINT iTInfo,
                                               LCID lcid, ITypeInfo **ppTInfo)
 {
-    ok(0, "unexpected call\n");
+    CHECK_EXPECT2(GetTypeInfo);
     return E_NOTIMPL;
 }
 
@@ -3086,6 +3087,8 @@ static HRESULT WINAPI ProtocolEx_StartEx(IInternetProtocolEx *iface, IUri *uri, 
     HRSRC src;
     HRESULT hres;
 
+    static const WCHAR empty_prefixW[] = {'/','e','m','p','t','y'};
+
     hres = IInternetBindInfo_GetBindInfo(pOIBindInfo, &bindf, &This->bind_info);
     ok(hres == S_OK, "GetBindInfo failed: %08x\n", hres);
 
@@ -3120,6 +3123,10 @@ static HRESULT WINAPI ProtocolEx_StartEx(IInternetProtocolEx *iface, IUri *uri, 
         register_stream(This, query+1);
         SysFreeString(query);
         block = TRUE;
+    }else if(SysStringLen(path) >= ARRAY_SIZE(empty_prefixW) && !memcmp(path, empty_prefixW, sizeof(empty_prefixW))) {
+        static char empty_data[] = " ";
+        This->data = empty_data;
+        This->size = strlen(This->data);
     }else {
         src = FindResourceW(NULL, *path == '/' ? path+1 : path, (const WCHAR*)RT_HTML);
         ok(src != NULL, "Could not find resource for path %s\n", wine_dbgstr_w(path));
@@ -3398,7 +3405,7 @@ static void run_from_path(const char *path, const char *opt)
 
     strcat(buf, path);
     if(opt)
-        strcat(buf, opt);
+        sprintf(buf + strlen(buf), "?%s", opt);
     url = a2bstr(buf);
     hres = CreateURLMoniker(NULL, url, &mon);
     SysFreeString(url);
@@ -3430,7 +3437,7 @@ static void run_script_as_http_with_mode(const char *script, const char *opt, co
             document_mode ? "\">" : "",
             script);
 
-    run_from_path("/index.html", opt);
+    run_from_path("/index.html", opt ? opt : script);
 }
 
 static void init_protocol_handler(void)
@@ -3453,8 +3460,11 @@ static void run_js_tests(void)
 {
     run_js_script("jstest.html");
     run_js_script("exectest.html");
-    run_js_script("vbtest.html");
     run_js_script("events.html");
+
+    SET_EXPECT(GetTypeInfo);
+    run_js_script("vbtest.html");
+    CLEAR_CALLED(GetTypeInfo);
 
     if(!is_ie9plus) {
         win_skip("Skipping some script tests on IE older than 9.\n");
@@ -3463,22 +3473,23 @@ static void run_js_tests(void)
 
     init_protocol_handler();
 
+    run_script_as_http_with_mode("xhr.js", NULL, "9");
     run_script_as_http_with_mode("xhr.js", NULL, "11");
-    run_script_as_http_with_mode("elements.js", NULL, "11");
+    run_script_as_http_with_mode("dom.js", NULL, "11");
     run_script_as_http_with_mode("es5.js", NULL, "11");
     run_script_as_http_with_mode("events.js", NULL, "9");
     run_script_as_http_with_mode("navigation.js", NULL, NULL);
     run_script_as_http_with_mode("navigation.js", NULL, "11");
 
-    run_script_as_http_with_mode("documentmode.js", "?0", NULL);
-    run_script_as_http_with_mode("documentmode.js", "?5", "5");
-    run_script_as_http_with_mode("documentmode.js", "?5", "6");
-    run_script_as_http_with_mode("documentmode.js", "?7", "7");
-    run_script_as_http_with_mode("documentmode.js", "?8", "8");
-    run_script_as_http_with_mode("documentmode.js", "?9", "9");
-    run_script_as_http_with_mode("documentmode.js", "?10", "10");
-    run_script_as_http_with_mode("documentmode.js", "?11", "11");
-    run_script_as_http_with_mode("documentmode.js", "?11", "edge");
+    run_script_as_http_with_mode("documentmode.js", "0", NULL);
+    run_script_as_http_with_mode("documentmode.js", "5", "5");
+    run_script_as_http_with_mode("documentmode.js", "5", "6");
+    run_script_as_http_with_mode("documentmode.js", "7", "7");
+    run_script_as_http_with_mode("documentmode.js", "8", "8");
+    run_script_as_http_with_mode("documentmode.js", "9", "9");
+    run_script_as_http_with_mode("documentmode.js", "10", "10");
+    run_script_as_http_with_mode("documentmode.js", "11", "11");
+    run_script_as_http_with_mode("documentmode.js", "11", "edge");
 
     run_script_as_http_with_mode("asyncscriptload.js", NULL, "9");
 }

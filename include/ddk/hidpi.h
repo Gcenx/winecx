@@ -19,6 +19,8 @@
 #ifndef __HIDPI_H__
 #define __HIDPI_H__
 
+#include "wine/winheader_enter.h"
+
 typedef enum _HIDP_REPORT_TYPE
 {
     HidP_Input,
@@ -187,6 +189,9 @@ NTSTATUS WINAPI HidP_InitializeReportForID(HIDP_REPORT_TYPE ReportType, UCHAR Re
 ULONG WINAPI HidP_MaxUsageListLength(HIDP_REPORT_TYPE ReportType, USAGE UsagePage, PHIDP_PREPARSED_DATA PreparsedData);
 NTSTATUS WINAPI HidP_GetScaledUsageValue(HIDP_REPORT_TYPE ReportType, USAGE UsagePage, USHORT LinkCollection, USAGE Usage, PLONG UsageValue, PHIDP_PREPARSED_DATA PreparsedData, PCHAR Report, ULONG ReportLength);
 NTSTATUS WINAPI HidP_SetUsageValue(HIDP_REPORT_TYPE ReportType, USAGE UsagePage, USHORT LinkCollection, USAGE Usage, ULONG UsageValue, PHIDP_PREPARSED_DATA PreparsedData, CHAR *Report, ULONG ReportLength);
+NTSTATUS WINAPI HidP_SetUsages(HIDP_REPORT_TYPE ReportType, USAGE UsagePage,
+        USHORT LinkCollection, PUSAGE UsageList, PULONG UsageLength,
+        PHIDP_PREPARSED_DATA PreparsedData, PCHAR Report, ULONG ReportLength);
 NTSTATUS WINAPI HidP_TranslateUsagesToI8042ScanCodes(USAGE *ChangedUsageList, ULONG UsageListLength, HIDP_KEYBOARD_DIRECTION KeyAction, HIDP_KEYBOARD_MODIFIER_STATE *ModifierState, PHIDP_INSERT_SCANCODES InsertCodesProcedure, VOID *InsertCodesContext);
 NTSTATUS WINAPI HidP_GetSpecificButtonCaps(HIDP_REPORT_TYPE ReportType, USAGE UsagePage, USHORT LinkCollection, USAGE Usage, HIDP_BUTTON_CAPS *ButtonCaps, USHORT *ButtonCapsLength, PHIDP_PREPARSED_DATA PreparsedData);
 NTSTATUS WINAPI HidP_GetSpecificValueCaps(HIDP_REPORT_TYPE ReportType, USAGE UsagePage, USHORT LinkCollection, USAGE Usage, HIDP_VALUE_CAPS *ValueCaps, USHORT *ValueCapsLength, PHIDP_PREPARSED_DATA PreparsedData);
@@ -219,5 +224,7 @@ NTSTATUS WINAPI HidP_GetData(HIDP_REPORT_TYPE ReportType, HIDP_DATA *DataList, U
 #define HIDP_STATUS_BUTTON_NOT_PRESSED       (HIDP_ERROR_CODES(0xcu,0x0f))
 #define HIDP_STATUS_REPORT_DOES_NOT_EXIST    (HIDP_ERROR_CODES(0xcu,0x10))
 #define HIDP_STATUS_NOT_IMPLEMENTED          (HIDP_ERROR_CODES(0xcu,0x20))
+
+#include "wine/winheader_exit.h"
 
 #endif /* __HIDPI_H__ */

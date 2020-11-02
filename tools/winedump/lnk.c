@@ -306,7 +306,7 @@ static const unsigned char table_dec85[0x80] = {
 0x47,0x48,0x49,0x4a,0x4b,0x4c,0x4d,0x4e,0x4f,0x50,0x51,0x52,0xff,0x53,0x54,0xff,
 };
 
-static BOOL base85_to_guid( const char *str, LPGUID guid )
+static BOOL base85_to_guid( const char *str, GUID * HOSTPTR guid )
 {
     DWORD i, val = 0, base = 1, *p;
     unsigned char ch;

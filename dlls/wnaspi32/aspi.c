@@ -241,7 +241,7 @@ int SCSI_OpenDevice( int h, int c, int t, int d )
     TRACE("Opening device %s mode O_RDWR\n",devstr);
     fd = open(devstr, O_RDWR);
     if (fd == -1) {
-        char *errstring = strerror(errno);
+        char * HOSTPTR errstring = strerror(errno);
         ERR("Failed to open device %s: %s\n", devstr, errstring);
     }
 

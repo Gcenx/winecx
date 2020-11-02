@@ -421,9 +421,7 @@ static struct reader *alloc_reader(void)
 
     ret->magic       = READER_MAGIC;
     InitializeCriticalSection( &ret->cs );
-#ifndef __MINGW32__
     ret->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": reader.cs");
-#endif
 
     prop_init( reader_props, count, ret->prop, &ret[1] );
     ret->prop_count  = count;
@@ -520,9 +518,7 @@ static void free_reader( struct reader *reader )
     heap_free( reader->prefixes );
     heap_free( reader->stream_buf );
 
-#ifndef __MINGW32__
     reader->cs.DebugInfo->Spare[0] = 0;
-#endif
     DeleteCriticalSection( &reader->cs );
     heap_free( reader );
 }
@@ -1112,7 +1108,7 @@ static HRESULT read_xmldecl( struct reader *reader )
     HRESULT hr;
 
     if ((hr = read_more_data( reader, 1, NULL, NULL )) != S_OK) return hr;
-    if (*read_current_ptr( reader ) != '<' || (hr = read_cmp( reader, "<?", 2 ) != S_OK))
+    if (*read_current_ptr( reader ) != '<' || (hr = read_cmp( reader, "<?", 2 )) != S_OK)
     {
         reader->state = READER_STATE_BOF;
         return S_OK;

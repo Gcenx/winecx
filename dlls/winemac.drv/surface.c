@@ -332,7 +332,7 @@ void set_window_surface(macdrv_window window, struct window_surface *window_surf
  *            must not use Win32 or Wine functions, including debug
  *            logging.
  */
-int get_surface_blit_rects(void *window_surface, const CGRect **rects, int *count)
+int get_surface_blit_rects(void * WIN32PTR window_surface, const CGRect **rects, int *count)
 {
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);
 
@@ -365,7 +365,7 @@ int get_surface_blit_rects(void *window_surface, const CGRect **rects, int *coun
  *            must not use Win32 or Wine functions, including debug
  *            logging.
  */
-CGImageRef create_surface_image(void *window_surface, CGRect *rect, int copy_data)
+CGImageRef create_surface_image(void * WIN32PTR window_surface, CGRect *rect, int copy_data)
 {
     CGImageRef cgimage = NULL;
     struct macdrv_window_surface *surface = get_mac_surface(window_surface);

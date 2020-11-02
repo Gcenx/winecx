@@ -30,6 +30,9 @@
 #include "ws2tcpip.h"
 
 #include <stdarg.h>
+#ifndef _VA_LIST_T /* Clang's stdarg.h guards with _VA_LIST, while Xcode's uses _VA_LIST_T */
+#define _VA_LIST_T
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2581,8 +2584,7 @@ HINTERNET FTP_Connect(appinfo_t *hIC, LPCWSTR lpszServerName,
 lerror:
     if (!bSuccess)
     {
-        if(lpwfs)
-            WININET_Release( &lpwfs->hdr );
+        WININET_Release(&lpwfs->hdr);
         return NULL;
     }
 
@@ -3746,7 +3748,7 @@ static BOOL FTP_ParseNextFile(INT nSocket, LPCWSTR lpszSearchFile, LPFILEPROPERT
 
             pszToken = strtok(NULL, szSpace);
             if(!pszToken) continue;
-            if(!strcasecmp(pszToken, "<DIR>")) {
+            if(!_strnicmp(pszToken, "<DIR>", -1)) {
                 lpfp->bIsDirectory = TRUE;
                 lpfp->nSize = 0;
                 TRACE("Is directory\n");

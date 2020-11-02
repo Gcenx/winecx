@@ -19,6 +19,8 @@
 #ifndef __SQLTYPES_H
 #define __SQLTYPES_H
 
+#include "wine/winheader_enter.h"
+
 #ifndef ODBCVER
 #define ODBCVER	0x0351
 #endif
@@ -88,7 +90,7 @@ typedef signed short int        SWORD;
 typedef unsigned int            UDWORD;
 typedef unsigned short int      UWORD;
 typedef UDWORD                  SQLUINTEGER;
-typedef signed long             SLONG;
+typedef signed __int3264        SLONG;
 typedef signed short            SSHORT;
 typedef double                  SDOUBLE;
 typedef double            		LDOUBLE;
@@ -245,5 +247,7 @@ typedef SQLULEN BOOKMARK;
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif

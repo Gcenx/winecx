@@ -1,6 +1,8 @@
 MODULE    = pstorec.dll
 IMPORTS   = uuid ole32 shlwapi advapi32
 
+EXTRADLLFLAGS = -mno-cygwin
+
 C_SRCS = \
 	pstorec.c
 

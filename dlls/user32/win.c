@@ -31,6 +31,7 @@
 #include "winver.h"
 #include "wine/server.h"
 #include "wine/unicode.h"
+#include "wine/asm.h"
 #include "win.h"
 #include "user_private.h"
 #include "controls.h"
@@ -742,7 +743,7 @@ HWND WIN_GetFullHandle( HWND hwnd )
  *
  * Change the owner of a window.
  */
-HWND WIN_SetOwner( HWND hwnd, HWND owner )
+static HWND WIN_SetOwner( HWND hwnd, HWND owner )
 {
     WND *win = WIN_GetPtr( hwnd );
     HWND ret = 0;
@@ -970,7 +971,6 @@ LRESULT WIN_DestroyWindow( HWND hwnd )
     WND *wndPtr;
     HWND *list;
     HMENU menu = 0, sys_menu;
-    HWND icon_title;
     struct window_surface *surface;
 
     TRACE("%p\n", hwnd );
@@ -1018,7 +1018,6 @@ LRESULT WIN_DestroyWindow( HWND hwnd )
     sys_menu = wndPtr->hSysMenu;
     free_dce( wndPtr->dce, hwnd );
     wndPtr->dce = NULL;
-    icon_title = wndPtr->icon_title;
     HeapFree( GetProcessHeap(), 0, wndPtr->text );
     wndPtr->text = NULL;
     HeapFree( GetProcessHeap(), 0, wndPtr->pScroll );
@@ -1028,7 +1027,6 @@ LRESULT WIN_DestroyWindow( HWND hwnd )
     wndPtr->surface = NULL;
     WIN_ReleasePtr( wndPtr );
 
-    if (icon_title) DestroyWindow( icon_title );
     if (menu) DestroyMenu( menu );
     if (sys_menu) DestroyMenu( sys_menu );
     if (surface)
@@ -2391,7 +2389,7 @@ static LONG_PTR WIN_GetWindowLong( HWND hwnd, INT offset, UINT size, BOOL unicod
                 case GWL_STYLE:      retvalue = reply->old_style; break;
                 case GWL_EXSTYLE:    retvalue = reply->old_ex_style; break;
                 case GWLP_ID:        retvalue = reply->old_id; break;
-                case GWLP_HINSTANCE: retvalue = (ULONG_PTR)wine_server_get_ptr( reply->old_instance ); break;
+                case GWLP_HINSTANCE: retvalue = TRUNCCAST(ULONG_PTR, wine_server_get_ptr( reply->old_instance )); break;
                 case GWLP_USERDATA:  retvalue = reply->old_user_data; break;
                 default:
                     if (offset >= 0) retvalue = get_win_data( &reply->old_extra_value, size );
@@ -2647,7 +2645,7 @@ LONG_PTR WIN_SetWindowLong( HWND hwnd, INT offset, UINT size, LONG_PTR newval, B
                 break;
             case GWLP_HINSTANCE:
                 wndPtr->hInstance = (HINSTANCE)newval;
-                retval = (ULONG_PTR)wine_server_get_ptr( reply->old_instance );
+                retval = TRUNCCAST(ULONG_PTR, wine_server_get_ptr( reply->old_instance ));
                 break;
             case GWLP_WNDPROC:
                 break;
@@ -2716,7 +2714,19 @@ WORD WINAPI GetWindowWord( HWND hwnd, INT offset )
  */
 LONG WINAPI GetWindowLongA( HWND hwnd, INT offset )
 {
-    return WIN_GetWindowLong( hwnd, offset, sizeof(LONG), FALSE );
+    switch (offset)
+    {
+#ifdef _WIN64
+    case GWLP_WNDPROC:
+    case GWLP_HINSTANCE:
+    case GWLP_HWNDPARENT:
+        WARN( "Invalid offset %d\n", offset );
+        SetLastError( ERROR_INVALID_INDEX );
+        return 0;
+#endif
+    default:
+        return WIN_GetWindowLong( hwnd, offset, sizeof(LONG), FALSE );
+    }
 }
 
 
@@ -2725,7 +2735,19 @@ LONG WINAPI GetWindowLongA( HWND hwnd, INT offset )
  */
 LONG WINAPI GetWindowLongW( HWND hwnd, INT offset )
 {
-    return WIN_GetWindowLong( hwnd, offset, sizeof(LONG), TRUE );
+    switch (offset)
+    {
+#ifdef _WIN64
+    case GWLP_WNDPROC:
+    case GWLP_HINSTANCE:
+    case GWLP_HWNDPARENT:
+        WARN( "Invalid offset %d\n", offset );
+        SetLastError( ERROR_INVALID_INDEX );
+        return 0;
+#endif
+    default:
+        return WIN_GetWindowLong( hwnd, offset, sizeof(LONG), TRUE );
+    }
 }
 
 
@@ -2760,7 +2782,19 @@ WORD WINAPI SetWindowWord( HWND hwnd, INT offset, WORD newval )
  */
 LONG WINAPI DECLSPEC_HOTPATCH SetWindowLongA( HWND hwnd, INT offset, LONG newval )
 {
-    return WIN_SetWindowLong( hwnd, offset, sizeof(LONG), newval, FALSE );
+    switch (offset)
+    {
+#ifdef _WIN64
+    case GWLP_WNDPROC:
+    case GWLP_HINSTANCE:
+    case GWLP_HWNDPARENT:
+        WARN( "Invalid offset %d\n", offset );
+        SetLastError( ERROR_INVALID_INDEX );
+        return 0;
+#endif
+    default:
+        return WIN_SetWindowLong( hwnd, offset, sizeof(LONG), newval, FALSE );
+    }
 }
 
 
@@ -2834,7 +2868,8 @@ LONG WINAPI DECLSPEC_HOTPATCH SetWindowLongW(
     HWND hwnd,  /* [in] window to alter */
     INT offset, /* [in] offset, in bytes, of location to alter */
     LONG newval /* [in] new value of location */
-) {
+)
+{
     if (GetVersion()&0x80000000 && offset == GWLP_WNDPROC)
     {
          /* CodeWeavers Only Hack... Needed for the Delegates tab 
@@ -2862,7 +2897,19 @@ LONG WINAPI DECLSPEC_HOTPATCH SetWindowLongW(
             }
          }
     }
-    return WIN_SetWindowLong( hwnd, offset, sizeof(LONG), newval, TRUE );
+    switch (offset)
+    {
+#ifdef _WIN64
+    case GWLP_WNDPROC:
+    case GWLP_HINSTANCE:
+    case GWLP_HWNDPARENT:
+        WARN("Invalid offset %d\n", offset );
+        SetLastError( ERROR_INVALID_INDEX );
+        return 0;
+#endif
+    default:
+        return WIN_SetWindowLong( hwnd, offset, sizeof(LONG), newval, TRUE );
+    }
 }
 
 
@@ -3710,12 +3757,13 @@ BOOL WINAPI FlashWindowEx( PFLASHWINFO pfinfo )
         if (!wndPtr || wndPtr == WND_OTHER_PROCESS || wndPtr == WND_DESKTOP) return FALSE;
         hwnd = wndPtr->obj.handle;  /* make it a full handle */
 
-        wparam = (wndPtr->flags & WIN_NCACTIVATED) != 0;
+        if (pfinfo->dwFlags) wparam = !(wndPtr->flags & WIN_NCACTIVATED);
+        else wparam = (hwnd == GetForegroundWindow());
 
         WIN_ReleasePtr( wndPtr );
         SendMessageW( hwnd, WM_NCACTIVATE, wparam, 0 );
         USER_Driver->pFlashWindowEx( pfinfo );
-        return (pfinfo->dwFlags & FLASHW_CAPTION) ? TRUE : wparam;
+        return wparam;
     }
 }
 

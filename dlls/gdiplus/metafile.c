@@ -25,7 +25,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "wine/unicode.h"
 
 #define COBJMACROS
 #include "objbase.h"
@@ -1817,6 +1816,39 @@ static GpStatus metafile_deserialize_image(const BYTE *record_data, UINT data_si
         }
         break;
     }
+    case ImageDataTypeMetafile:
+    {
+        EmfPlusMetafile *metafiledata = &data->ImageData.metafile;
+
+        if (data_size <= FIELD_OFFSET(EmfPlusMetafile, MetafileData))
+            return InvalidParameter;
+        data_size -= FIELD_OFFSET(EmfPlusMetafile, MetafileData);
+
+        switch (metafiledata->Type) {
+        case MetafileTypeEmf:
+        case MetafileTypeEmfPlusOnly:
+        case MetafileTypeEmfPlusDual:
+        {
+            HENHMETAFILE hemf;
+
+            hemf = SetEnhMetaFileBits(data_size, metafiledata->MetafileData);
+
+            if (!hemf)
+                return GenericError;
+
+            status = GdipCreateMetafileFromEmf(hemf, TRUE, (GpMetafile**)image);
+
+            if (status != Ok)
+                DeleteEnhMetaFile(hemf);
+
+            break;
+        }
+        default:
+            FIXME("metafile type %d not supported.\n", metafiledata->Type);
+            return NotImplemented;
+        }
+        break;
+    }
     default:
         FIXME("image type %d not supported.\n", data->Type);
         return NotImplemented;
@@ -3070,7 +3102,7 @@ GpStatus WINGDIPAPI GdipPlayMetafileRecord(GDIPCONST GpMetafile *metafile,
 
             if (flags & 0x8000)
             {
-                stat = GdipCreateSolidFill(fill->data.Color, (GpSolidFill **)&solidfill);
+                stat = GdipCreateSolidFill(fill->data.Color, &solidfill);
                 if (stat != Ok)
                     return stat;
                 brush = (GpBrush *)solidfill;
@@ -3118,7 +3150,7 @@ GpStatus WINGDIPAPI GdipPlayMetafileRecord(GDIPCONST GpMetafile *metafile,
 
             if (flags & 0x8000) /* S */
             {
-                stat = GdipCreateSolidFill(fill->BrushId, (GpSolidFill **)&solidfill);
+                stat = GdipCreateSolidFill(fill->BrushId, &solidfill);
                 if (stat != Ok)
                     return stat;
                 brush = (GpBrush *)solidfill;
@@ -3183,7 +3215,7 @@ GpStatus WINGDIPAPI GdipPlayMetafileRecord(GDIPCONST GpMetafile *metafile,
 
             if (flags & 0x8000)
             {
-                stat = GdipCreateSolidFill(fill->BrushId, (GpSolidFill **)&solidfill);
+                stat = GdipCreateSolidFill(fill->BrushId, &solidfill);
                 if (stat != Ok)
                     return stat;
                 brush = (GpBrush *)solidfill;
@@ -3222,7 +3254,7 @@ GpStatus WINGDIPAPI GdipPlayMetafileRecord(GDIPCONST GpMetafile *metafile,
 
             if (flags & 0x8000) /* S */
             {
-                stat = GdipCreateSolidFill(fill->BrushId, (GpSolidFill **)&solidfill);
+                stat = GdipCreateSolidFill(fill->BrushId, &solidfill);
                 if (stat != Ok)
                     return stat;
                 brush = (GpBrush *)solidfill;

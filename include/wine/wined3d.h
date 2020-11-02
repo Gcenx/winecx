@@ -26,11 +26,8 @@
 #ifndef __WINE_WINED3D_H
 #define __WINE_WINED3D_H
 
-#ifndef __WINE_CONFIG_H
-# error You must include config.h to use this header
-#endif
-
 #include "wine/list.h"
+#include "wine/winheader_enter.h"
 
 #define WINED3D_OK                                              S_OK
 
@@ -96,8 +93,8 @@ enum wined3d_feature_level
     WINED3D_FEATURE_LEVEL_7      = 0x7000,
     WINED3D_FEATURE_LEVEL_8      = 0x8000,
     WINED3D_FEATURE_LEVEL_9_1    = 0x9100,
-    WINED3D_FEATURE_LEVEL_9_SM2  = 0x9200,
-    WINED3D_FEATURE_LEVEL_9_SM3  = 0x9300,
+    WINED3D_FEATURE_LEVEL_9_2    = 0x9200,
+    WINED3D_FEATURE_LEVEL_9_3    = 0x9300,
     WINED3D_FEATURE_LEVEL_10     = 0xa000,
     WINED3D_FEATURE_LEVEL_10_1   = 0xa100,
     WINED3D_FEATURE_LEVEL_11     = 0xb000,
@@ -902,6 +899,8 @@ enum wined3d_shader_type
 #define WINED3D_SWAPCHAIN_USE_CLOSEST_MATCHING_MODE             0x00002000u
 #define WINED3D_SWAPCHAIN_RESTORE_WINDOW_RECT                   0x00004000u
 #define WINED3D_SWAPCHAIN_GDI_COMPATIBLE                        0x00008000u
+#define WINED3D_SWAPCHAIN_IMPLICIT                              0x00010000u
+#define WINED3D_SWAPCHAIN_HOOK                                  0x00020000u
 
 #define WINED3DDP_MAXTEXCOORD                                   8
 
@@ -914,7 +913,6 @@ enum wined3d_shader_type
 #define WINED3D_BIND_DEPTH_STENCIL                              0x00000040
 #define WINED3D_BIND_UNORDERED_ACCESS                           0x00000080
 
-#define WINED3DUSAGE_WRITEONLY                                  0x00000008
 #define WINED3DUSAGE_SOFTWAREPROCESSING                         0x00000010
 #define WINED3DUSAGE_DONOTCLIP                                  0x00000020
 #define WINED3DUSAGE_POINTS                                     0x00000040
@@ -926,7 +924,7 @@ enum wined3d_shader_type
 #define WINED3DUSAGE_RESTRICT_SHARED_RESOURCE                   0x00002000
 #define WINED3DUSAGE_DMAP                                       0x00004000
 #define WINED3DUSAGE_TEXTAPI                                    0x10000000
-#define WINED3DUSAGE_MASK                                       0x10007bf8
+#define WINED3DUSAGE_MASK                                       0x10007bf0
 
 #define WINED3DUSAGE_SCRATCH                                    0x00400000
 #define WINED3DUSAGE_PRIVATE                                    0x00800000
@@ -1210,7 +1208,6 @@ enum wined3d_shader_type
 #define WINED3DPRASTERCAPS_ANTIALIASSORTINDEPENDENT             0x00000800
 #define WINED3DPRASTERCAPS_ANTIALIASEDGES                       0x00001000
 #define WINED3DPRASTERCAPS_MIPMAPLODBIAS                        0x00002000
-#define WINED3DPRASTERCAPS_ZBIAS                                0x00004000
 #define WINED3DPRASTERCAPS_ZBUFFERLESSHSR                       0x00008000
 #define WINED3DPRASTERCAPS_FOGRANGE                             0x00010000
 #define WINED3DPRASTERCAPS_ANISOTROPY                           0x00020000
@@ -1575,7 +1572,6 @@ enum wined3d_shader_type
 #define WINED3D_OUTPUT_SLOT_UNUSED                              0xfffffffe
 
 #define WINED3D_MAX_STREAM_OUTPUT_BUFFERS                       4
-#define WINED3D_STREAM_OUTPUT_GAP                               0xffffffff
 #define WINED3D_NO_RASTERIZER_STREAM                            0xffffffff
 
 #define WINED3D_VIEW_BUFFER_RAW                                 0x00000001
@@ -1585,6 +1581,10 @@ enum wined3d_shader_type
 #define WINED3D_VIEW_TEXTURE_ARRAY                              0x00000010
 
 #define WINED3D_MAX_VIEWPORTS                                   16
+
+#define WINED3D_REGISTER_WINDOW_NO_WINDOW_CHANGES               0x00000001u
+#define WINED3D_REGISTER_WINDOW_NO_ALT_ENTER                    0x00000002u
+#define WINED3D_REGISTER_WINDOW_NO_PRINT_SCREEN                 0x00000004u
 
 struct wined3d_display_mode
 {
@@ -1721,17 +1721,19 @@ struct wined3d_tri_patch_info
 struct wined3d_adapter_identifier
 {
     char *driver;
-    UINT driver_size;
+    unsigned int driver_size;
     char *description;
-    UINT description_size;
+    unsigned int description_size;
     char *device_name;
-    UINT device_name_size;
+    unsigned int device_name_size;
     LARGE_INTEGER driver_version;
     DWORD vendor_id;
     DWORD device_id;
     DWORD subsystem_id;
     DWORD revision;
     GUID device_identifier;
+    GUID driver_uuid;
+    GUID device_uuid;
     DWORD whql_level;
     LUID adapter_luid;
     SIZE_T video_memory;
@@ -2055,13 +2057,14 @@ struct wined3d_shader_signature
 struct wined3d_shader_desc
 {
     const DWORD *byte_code;
-    size_t byte_code_size;
+    SIZE_T byte_code_size;
 };
 
 struct wined3d_stream_output_element
 {
     unsigned int stream_idx;
-    unsigned int register_idx;
+    const char *semantic_name;
+    unsigned int semantic_idx;
     BYTE component_idx;
     BYTE component_count;
     BYTE output_slot;
@@ -2069,7 +2072,7 @@ struct wined3d_stream_output_element
 
 struct wined3d_stream_output_desc
 {
-    struct wined3d_stream_output_element *elements;
+    const struct wined3d_stream_output_element *elements;
     unsigned int element_count;
     unsigned int buffer_strides[WINED3D_MAX_STREAM_OUTPUT_BUFFERS];
     unsigned int buffer_stride_count;
@@ -2144,8 +2147,6 @@ struct wined3d_device_parent_ops
             void **parent, const struct wined3d_parent_ops **parent_ops);
     HRESULT (__cdecl *create_swapchain_texture)(struct wined3d_device_parent *device_parent, void *parent,
             const struct wined3d_resource_desc *desc, DWORD texture_flags, struct wined3d_texture **texture);
-    HRESULT (__cdecl *create_swapchain)(struct wined3d_device_parent *device_parent,
-            struct wined3d_swapchain_desc *desc, struct wined3d_swapchain **swapchain);
 };
 
 struct wined3d_private_store
@@ -2205,14 +2206,17 @@ UINT __cdecl wined3d_get_adapter_mode_count(const struct wined3d *wined3d, UINT 
         enum wined3d_format_id format_id, enum wined3d_scanline_ordering scanline_ordering);
 HRESULT __cdecl wined3d_get_adapter_raster_status(const struct wined3d *wined3d, UINT adapter_idx,
         struct wined3d_raster_status *raster_status);
-HRESULT __cdecl wined3d_get_device_caps(const struct wined3d *wined3d, UINT adapter_idx,
+HRESULT __cdecl wined3d_get_device_caps(const struct wined3d *wined3d, unsigned int adapter_idx,
         enum wined3d_device_type device_type, struct wined3d_caps *caps);
 HRESULT __cdecl wined3d_get_output_desc(const struct wined3d *wined3d, unsigned int adapter_idx,
         struct wined3d_output_desc *desc);
 ULONG __cdecl wined3d_incref(struct wined3d *wined3d);
 HRESULT __cdecl wined3d_register_software_device(struct wined3d *wined3d, void *init_function);
+BOOL __cdecl wined3d_register_window(struct wined3d *wined3d, HWND window,
+        struct wined3d_device *device, unsigned int flags);
 HRESULT __cdecl wined3d_set_adapter_display_mode(struct wined3d *wined3d,
         UINT adapter_idx, const struct wined3d_display_mode *mode);
+void __cdecl wined3d_unregister_windows(struct wined3d *wined3d);
 
 HRESULT __cdecl wined3d_buffer_create(struct wined3d_device *device, const struct wined3d_buffer_desc *desc,
         const struct wined3d_sub_resource_data *data, void *parent, const struct wined3d_parent_ops *parent_ops,
@@ -2362,8 +2366,6 @@ struct wined3d_shader_resource_view * __cdecl wined3d_device_get_vs_resource_vie
 struct wined3d_sampler * __cdecl wined3d_device_get_vs_sampler(const struct wined3d_device *device, UINT idx);
 struct wined3d * __cdecl wined3d_device_get_wined3d(const struct wined3d_device *device);
 ULONG __cdecl wined3d_device_incref(struct wined3d_device *device);
-HRESULT __cdecl wined3d_device_init_3d(struct wined3d_device *device, struct wined3d_swapchain_desc *swapchain_desc);
-HRESULT __cdecl wined3d_device_init_gdi(struct wined3d_device *device, struct wined3d_swapchain_desc *swapchain_desc);
 void __cdecl wined3d_device_multiply_transform(struct wined3d_device *device,
         enum wined3d_transform_state state, const struct wined3d_matrix *matrix);
 HRESULT __cdecl wined3d_device_process_vertices(struct wined3d_device *device,
@@ -2457,7 +2459,7 @@ void __cdecl wined3d_device_set_stream_output(struct wined3d_device *device, UIN
 HRESULT __cdecl wined3d_device_set_stream_source(struct wined3d_device *device,
         UINT stream_idx, struct wined3d_buffer *buffer, UINT offset, UINT stride);
 HRESULT __cdecl wined3d_device_set_stream_source_freq(struct wined3d_device *device, UINT stream_idx, UINT divider);
-HRESULT __cdecl wined3d_device_set_texture(struct wined3d_device *device, UINT stage, struct wined3d_texture *texture);
+void __cdecl wined3d_device_set_texture(struct wined3d_device *device, UINT stage, struct wined3d_texture *texture);
 void __cdecl wined3d_device_set_texture_stage_state(struct wined3d_device *device,
         UINT stage, enum wined3d_texture_stage_state state, DWORD value);
 void __cdecl wined3d_device_set_transform(struct wined3d_device *device,
@@ -2478,10 +2480,9 @@ HRESULT __cdecl wined3d_device_set_vs_consts_i(struct wined3d_device *device,
 void __cdecl wined3d_device_set_vs_resource_view(struct wined3d_device *device,
         UINT idx, struct wined3d_shader_resource_view *view);
 void __cdecl wined3d_device_set_vs_sampler(struct wined3d_device *device, UINT idx, struct wined3d_sampler *sampler);
-void __cdecl wined3d_device_setup_fullscreen_window(struct wined3d_device *device, HWND window, UINT w, UINT h);
+HRESULT __cdecl wined3d_device_setup_fullscreen_window(struct wined3d_device *device,
+        HWND window, unsigned int w, unsigned int h);
 BOOL __cdecl wined3d_device_show_cursor(struct wined3d_device *device, BOOL show);
-HRESULT __cdecl wined3d_device_uninit_3d(struct wined3d_device *device);
-HRESULT __cdecl wined3d_device_uninit_gdi(struct wined3d_device *device);
 void __cdecl wined3d_device_update_sub_resource(struct wined3d_device *device, struct wined3d_resource *resource,
         unsigned int sub_resource_idx, const struct wined3d_box *box, const void *data, unsigned int row_pitch,
         unsigned int depth_pitch, unsigned int flags);
@@ -2751,10 +2752,13 @@ ULONG __cdecl wined3d_vertex_declaration_decref(struct wined3d_vertex_declaratio
 void * __cdecl wined3d_vertex_declaration_get_parent(const struct wined3d_vertex_declaration *declaration);
 ULONG __cdecl wined3d_vertex_declaration_incref(struct wined3d_vertex_declaration *declaration);
 
+HRESULT __cdecl wined3d_extract_shader_input_signature_from_dxbc(struct wined3d_shader_signature *signature,
+        const void *byte_code, SIZE_T byte_code_size);
+
 /* Return the integer base-2 logarithm of x. Undefined for x == 0. */
 static inline unsigned int wined3d_log2i(unsigned int x)
 {
-#ifdef HAVE___BUILTIN_CLZ
+#if defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 3)))
     return __builtin_clz(x) ^ 0x1f;
 #else
     static const unsigned int l[] =
@@ -2782,6 +2786,19 @@ static inline unsigned int wined3d_log2i(unsigned int x)
 #endif
 }
 
+static inline int wined3d_bit_scan(unsigned int *x)
+{
+    int bit_offset;
+#if defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 3)))
+    bit_offset = __builtin_ffs(*x) - 1;
+#else
+    for (bit_offset = 0; bit_offset < 32; bit_offset++)
+        if (*x & (1u << bit_offset)) break;
+#endif
+    *x ^= 1u << bit_offset;
+    return bit_offset;
+}
+
 static inline void wined3d_box_set(struct wined3d_box *box, unsigned int left, unsigned int top,
         unsigned int right, unsigned int bottom, unsigned int front, unsigned int back)
 {
@@ -2792,5 +2809,7 @@ static inline void wined3d_box_set(struct wined3d_box *box, unsigned int left, u
     box->front = front;
     box->back = back;
 }
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_WINED3D_H */

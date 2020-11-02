@@ -40,22 +40,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(qcap);
 #define ALIGN(x) ((x+1)/2*2)
 
 typedef struct {
-    BaseOutputPin pin;
-    IQualityControl IQualityControl_iface;
-
-    int cur_stream;
-    LONGLONG cur_time;
-
-    int buf_pos;
-    BYTE buf[65536];
-
-    int movi_off;
-    int out_pos;
-    int size;
-    IStream *stream;
-} AviMuxOut;
-
-typedef struct {
     BaseInputPin pin;
     IAMStreamControl IAMStreamControl_iface;
     IPropertyBag IPropertyBag_iface;
@@ -97,7 +81,9 @@ typedef struct {
     REFERENCE_TIME interleave;
     REFERENCE_TIME preroll;
 
-    AviMuxOut *out;
+    BaseOutputPin source;
+    IQualityControl IQualityControl_iface;
+
     int input_pin_no;
     AviMuxIn *in[MAX_PIN_NO-1];
 
@@ -107,6 +93,17 @@ typedef struct {
     int idx1_entries;
     int idx1_size;
     AVIINDEXENTRY *idx1;
+
+    int cur_stream;
+    LONGLONG cur_time;
+
+    int buf_pos;
+    BYTE buf[65536];
+
+    int movi_off;
+    int out_pos;
+    int size;
+    IStream *stream;
 } AviMux;
 
 static HRESULT create_input_pin(AviMux*);
@@ -116,33 +113,64 @@ static inline AviMux* impl_from_BaseFilter(BaseFilter *filter)
     return CONTAINING_RECORD(filter, AviMux, filter);
 }
 
-static IPin* WINAPI AviMux_GetPin(BaseFilter *iface, int pos)
+static IPin *avi_mux_get_pin(BaseFilter *iface, unsigned int index)
 {
-    AviMux *This = impl_from_BaseFilter(iface);
+    AviMux *filter = impl_from_BaseFilter(iface);
 
-    TRACE("(%p)->(%d)\n", This, pos);
-
-    if(pos == 0) {
-        IPin_AddRef(&This->out->pin.pin.IPin_iface);
-        return &This->out->pin.pin.IPin_iface;
-    }else if(pos>0 && pos<=This->input_pin_no) {
-        IPin_AddRef(&This->in[pos-1]->pin.pin.IPin_iface);
-        return &This->in[pos-1]->pin.pin.IPin_iface;
-    }
-
+    if (!index)
+        return &filter->source.pin.IPin_iface;
+    else if (index <= filter->input_pin_no)
+        return &filter->in[index - 1]->pin.pin.IPin_iface;
     return NULL;
 }
 
-static LONG WINAPI AviMux_GetPinCount(BaseFilter *iface)
+static void avi_mux_destroy(BaseFilter *iface)
 {
-    AviMux *This = impl_from_BaseFilter(iface);
-    TRACE("(%p)\n", This);
-    return This->input_pin_no+1;
+    AviMux *filter = impl_from_BaseFilter(iface);
+    int i;
+
+    strmbase_source_cleanup(&filter->source);
+
+    for (i = 0; i < filter->input_pin_no; ++i)
+    {
+        IPin_Disconnect(&filter->in[i]->pin.pin.IPin_iface);
+        IMemAllocator_Release(filter->in[i]->samples_allocator);
+        filter->in[i]->samples_allocator = NULL;
+        strmbase_sink_cleanup(&filter->in[i]->pin);
+        heap_free(filter->in[i]);
+    }
+
+    heap_free(filter->idx1);
+    strmbase_filter_cleanup(&filter->filter);
+    heap_free(filter);
+    ObjectRefCount(FALSE);
+}
+
+static HRESULT avi_mux_query_interface(BaseFilter *iface, REFIID iid, void **out)
+{
+    AviMux *filter = impl_from_BaseFilter(iface);
+
+    if (IsEqualGUID(iid, &IID_IConfigAviMux))
+        *out = &filter->IConfigAviMux_iface;
+    else if (IsEqualGUID(iid, &IID_IConfigInterleaving))
+        *out = &filter->IConfigInterleaving_iface;
+    else if (IsEqualGUID(iid, &IID_IMediaSeeking))
+        *out = &filter->IMediaSeeking_iface;
+    else if (IsEqualGUID(iid, &IID_IPersistMediaPropertyBag))
+        *out = &filter->IPersistMediaPropertyBag_iface;
+    else if (IsEqualGUID(iid, &IID_ISpecifyPropertyPages))
+        *out = &filter->ISpecifyPropertyPages_iface;
+    else
+        return E_NOINTERFACE;
+
+    IUnknown_AddRef((IUnknown *)*out);
+    return S_OK;
 }
 
 static const BaseFilterFuncTable filter_func_table = {
-    AviMux_GetPin,
-    AviMux_GetPinCount
+    .filter_get_pin = avi_mux_get_pin,
+    .filter_destroy = avi_mux_destroy,
+    .filter_query_interface = avi_mux_query_interface,
 };
 
 static inline AviMux* impl_from_IBaseFilter(IBaseFilter *iface)
@@ -151,76 +179,21 @@ static inline AviMux* impl_from_IBaseFilter(IBaseFilter *iface)
     return impl_from_BaseFilter(filter);
 }
 
-static HRESULT WINAPI AviMux_QueryInterface(IBaseFilter *iface, REFIID riid, void **ppv)
-{
-    AviMux *This = impl_from_IBaseFilter(iface);
-
-    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppv);
-
-    if(IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IPersist) ||
-            IsEqualIID(riid, &IID_IMediaFilter) || IsEqualIID(riid, &IID_IBaseFilter))
-        *ppv = &This->filter.IBaseFilter_iface;
-    else if(IsEqualIID(riid, &IID_IConfigAviMux))
-        *ppv = &This->IConfigAviMux_iface;
-    else if(IsEqualIID(riid, &IID_IConfigInterleaving))
-        *ppv = &This->IConfigInterleaving_iface;
-    else if(IsEqualIID(riid, &IID_IMediaSeeking))
-        *ppv = &This->IMediaSeeking_iface;
-    else if(IsEqualIID(riid, &IID_IPersistMediaPropertyBag))
-        *ppv = &This->IPersistMediaPropertyBag_iface;
-    else if(IsEqualIID(riid, &IID_ISpecifyPropertyPages))
-        *ppv = &This->ISpecifyPropertyPages_iface;
-    else {
-        FIXME("no interface for %s\n", debugstr_guid(riid));
-        *ppv = NULL;
-        return E_NOINTERFACE;
-    }
-
-    IUnknown_AddRef((IUnknown*)*ppv);
-    return S_OK;
-}
-
-static ULONG WINAPI AviMux_Release(IBaseFilter *iface)
-{
-    AviMux *This = impl_from_IBaseFilter(iface);
-    ULONG ref = BaseFilterImpl_Release(iface);
-
-    TRACE("(%p) new refcount: %u\n", This, ref);
-
-    if(!ref) {
-        int i;
-
-        BaseOutputPinImpl_Release(&This->out->pin.pin.IPin_iface);
-
-        for(i=0; i<This->input_pin_no; i++) {
-            IPin_Disconnect(&This->in[i]->pin.pin.IPin_iface);
-            IMemAllocator_Release(This->in[i]->samples_allocator);
-            This->in[i]->samples_allocator = NULL;
-            BaseInputPinImpl_Release(&This->in[i]->pin.pin.IPin_iface);
-        }
-
-        HeapFree(GetProcessHeap(), 0, This->idx1);
-        HeapFree(GetProcessHeap(), 0, This);
-        ObjectRefCount(FALSE);
-    }
-    return ref;
-}
-
 static HRESULT out_flush(AviMux *This)
 {
     ULONG written;
     HRESULT hr;
 
-    if(!This->out->buf_pos)
+    if(!This->buf_pos)
         return S_OK;
 
-    hr = IStream_Write(This->out->stream, This->out->buf, This->out->buf_pos, &written);
+    hr = IStream_Write(This->stream, This->buf, This->buf_pos, &written);
     if(FAILED(hr))
         return hr;
-    if(written != This->out->buf_pos)
+    if (written != This->buf_pos)
         return E_FAIL;
 
-    This->out->buf_pos = 0;
+    This->buf_pos = 0;
     return S_OK;
 }
 
@@ -234,13 +207,13 @@ static HRESULT out_seek(AviMux *This, int pos)
         return hr;
 
     li.QuadPart = pos;
-    hr = IStream_Seek(This->out->stream, li, STREAM_SEEK_SET, NULL);
+    hr = IStream_Seek(This->stream, li, STREAM_SEEK_SET, NULL);
     if(FAILED(hr))
         return hr;
 
-    This->out->out_pos = pos;
-    if(This->out->out_pos > This->out->size)
-        This->out->size = This->out->out_pos;
+    This->out_pos = pos;
+    if(This->out_pos > This->size)
+        This->size = This->out_pos;
     return hr;
 }
 
@@ -250,18 +223,18 @@ static HRESULT out_write(AviMux *This, const void *data, int size)
     HRESULT hr;
 
     while(1) {
-        if(size > sizeof(This->out->buf)-This->out->buf_pos)
-            chunk_size = sizeof(This->out->buf)-This->out->buf_pos;
+        if (size > sizeof(This->buf) - This->buf_pos)
+            chunk_size = sizeof(This->buf) - This->buf_pos;
         else
             chunk_size = size;
 
-        memcpy(This->out->buf + This->out->buf_pos, data, chunk_size);
+        memcpy(This->buf + This->buf_pos, data, chunk_size);
         size -= chunk_size;
         data = (const BYTE*)data + chunk_size;
-        This->out->buf_pos += chunk_size;
-        This->out->out_pos += chunk_size;
-        if(This->out->out_pos > This->out->size)
-            This->out->size = This->out->out_pos;
+        This->buf_pos += chunk_size;
+        This->out_pos += chunk_size;
+        if (This->out_pos > This->size)
+            This->size = This->out_pos;
 
         if(!size)
             break;
@@ -302,7 +275,7 @@ static HRESULT flush_queue(AviMux *avimux, AviMuxIn *avimuxin, BOOL closing)
     DWORD flags;
     HRESULT hr;
 
-    if(avimux->out->cur_stream != avimuxin->stream_id)
+    if (avimux->cur_stream != avimuxin->stream_id)
         return S_OK;
 
     while(avimuxin->samples_head) {
@@ -325,17 +298,18 @@ static HRESULT flush_queue(AviMux *avimux, AviMuxIn *avimuxin, BOOL closing)
         if(IMediaSample_IsSyncPoint(sample) == S_OK)
             flags |= AM_SAMPLE_SPLICEPOINT;
 
-        if(avimuxin->stream_time + (closing ? 0 : avimuxin->strh.dwScale) > avimux->out->cur_time &&
-                !(flags & AM_SAMPLE_TIMEDISCONTINUITY)) {
+        if (avimuxin->stream_time + (closing ? 0 : avimuxin->strh.dwScale) > avimux->cur_time
+                && !(flags & AM_SAMPLE_TIMEDISCONTINUITY))
+        {
             if(closing)
                 break;
 
-            avimux->out->cur_stream++;
-            if(avimux->out->cur_stream >= avimux->input_pin_no-1) {
-                avimux->out->cur_time += avimux->interleave;
-                avimux->out->cur_stream = 0;
+            avimux->cur_stream++;
+            if(avimux->cur_stream >= avimux->input_pin_no-1) {
+                avimux->cur_time += avimux->interleave;
+                avimux->cur_stream = 0;
             }
-            avimuxin = avimux->in[avimux->out->cur_stream];
+            avimuxin = avimux->in[avimux->cur_stream];
             continue;
         }
 
@@ -357,8 +331,8 @@ static HRESULT flush_queue(AviMux *avimux, AviMuxIn *avimuxin, BOOL closing)
             avimuxin->ix->nEntriesInUse = 0;
             avimuxin->ix->qwBaseOffset = 0;
 
-            avimuxin->ix_off = avimux->out->size;
-            avimux->out->size += sizeof(avimuxin->ix_data);
+            avimuxin->ix_off = avimux->size;
+            avimux->size += sizeof(avimuxin->ix_data);
         }
 
         if(*head_prev == avimuxin->samples_head)
@@ -370,11 +344,11 @@ static HRESULT flush_queue(AviMux *avimux, AviMuxIn *avimuxin, BOOL closing)
         avimuxin->strh.dwLength++;
         if(!(flags & AM_SAMPLE_TIMEDISCONTINUITY)) {
             if(!avimuxin->ix->qwBaseOffset)
-                avimuxin->ix->qwBaseOffset = avimux->out->size;
-            avimuxin->ix->aIndex[avimuxin->ix->nEntriesInUse].dwOffset = avimux->out->size
-                + sizeof(RIFFCHUNK) - avimuxin->ix->qwBaseOffset;
+                avimuxin->ix->qwBaseOffset = avimux->size;
+            avimuxin->ix->aIndex[avimuxin->ix->nEntriesInUse].dwOffset =
+                    avimux->size + sizeof(RIFFCHUNK) - avimuxin->ix->qwBaseOffset;
 
-            hr = out_seek(avimux, avimux->out->size);
+            hr = out_seek(avimux, avimux->size);
             if(FAILED(hr)) {
                 IMediaSample_Release(sample);
                 return hr;
@@ -389,7 +363,7 @@ static HRESULT flush_queue(AviMux *avimux, AviMuxIn *avimuxin, BOOL closing)
         rf.cb = size;
         hr = idx1_add_entry(avimux, rf.fcc, flags & AM_SAMPLE_SPLICEPOINT ? AVIIF_KEYFRAME : 0,
                 flags & AM_SAMPLE_TIMEDISCONTINUITY ?
-                avimux->idx1[avimux->idx1_entries-1].dwChunkOffset : avimux->out->size, size);
+                avimux->idx1[avimux->idx1_entries-1].dwChunkOffset : avimux->size, size);
         if(FAILED(hr)) {
             IMediaSample_Release(sample);
             return hr;
@@ -456,26 +430,27 @@ static HRESULT WINAPI AviMux_Stop(IBaseFilter *iface)
     if(This->filter.state == State_Stopped)
         return S_OK;
 
-    if(This->out->stream) {
+    if (This->stream)
+    {
         AVIEXTHEADER dmlh;
         RIFFCHUNK rc;
         RIFFLIST rl;
         int idx1_off, empty_stream;
 
-        empty_stream = This->out->cur_stream;
+        empty_stream = This->cur_stream;
         for(i=empty_stream+1; ; i++) {
             if(i >= This->input_pin_no-1)
                 i = 0;
             if(i == empty_stream)
                 break;
 
-            This->out->cur_stream = i;
-            hr = flush_queue(This, This->in[This->out->cur_stream], TRUE);
+            This->cur_stream = i;
+            hr = flush_queue(This, This->in[This->cur_stream], TRUE);
             if(FAILED(hr))
                 return hr;
         }
 
-        idx1_off = This->out->size;
+        idx1_off = This->size;
         rc.fcc = ckidAVIOLDINDEX;
         rc.cb = This->idx1_entries * sizeof(*This->idx1);
         hr = out_write(This, &rc, sizeof(rc));
@@ -519,14 +494,14 @@ static HRESULT WINAPI AviMux_Stop(IBaseFilter *iface)
             return hr;
 
         rl.fcc = FCC('R','I','F','F');
-        rl.cb = This->out->size-sizeof(RIFFCHUNK)-2*sizeof(int);
+        rl.cb = This->size - sizeof(RIFFCHUNK) - 2 * sizeof(int);
         rl.fccListType = FCC('A','V','I',' ');
         hr = out_write(This, &rl, sizeof(rl));
         if(FAILED(hr))
             return hr;
 
         rl.fcc = FCC('L','I','S','T');
-        rl.cb = This->out->movi_off - sizeof(RIFFLIST) - sizeof(RIFFCHUNK);
+        rl.cb = This->movi_off - sizeof(RIFFLIST) - sizeof(RIFFCHUNK);
         rl.fccListType = FCC('h','d','r','l');
         hr = out_write(This, &rl, sizeof(rl));
         if(FAILED(hr))
@@ -574,13 +549,13 @@ static HRESULT WINAPI AviMux_Stop(IBaseFilter *iface)
         dmlh.dwGrandFrames = This->in[0]->strh.dwLength;
         hr = out_write(This, &dmlh, sizeof(dmlh));
 
-        rl.cb = idx1_off - This->out->movi_off - sizeof(RIFFCHUNK);
+        rl.cb = idx1_off - This->movi_off - sizeof(RIFFCHUNK);
         rl.fccListType = FCC('m','o','v','i');
         out_write(This, &rl, sizeof(rl));
         out_flush(This);
 
-        IStream_Release(This->out->stream);
-        This->out->stream = NULL;
+        IStream_Release(This->stream);
+        This->stream = NULL;
     }
 
     This->filter.state = State_Stopped;
@@ -635,9 +610,10 @@ static HRESULT WINAPI AviMux_Run(IBaseFilter *iface, REFERENCE_TIME tStart)
         IMediaSeeking_Release(ms);
     }
 
-    if(This->out->pin.pMemInputPin) {
-        hr = IMemInputPin_QueryInterface(This->out->pin.pMemInputPin,
-                &IID_IStream, (void**)&This->out->stream);
+    if (This->source.pMemInputPin)
+    {
+        hr = IMemInputPin_QueryInterface(This->source.pMemInputPin,
+                &IID_IStream, (void **)&This->stream);
         if(FAILED(hr))
             return hr;
     }
@@ -650,7 +626,7 @@ static HRESULT WINAPI AviMux_Run(IBaseFilter *iface, REFERENCE_TIME tStart)
             return E_OUTOFMEMORY;
     }
 
-    This->out->size = 3*sizeof(RIFFLIST) + sizeof(AVIMAINHEADER) + sizeof(AVIEXTHEADER);
+    This->size = 3*sizeof(RIFFLIST) + sizeof(AVIMAINHEADER) + sizeof(AVIEXTHEADER);
     This->start = -1;
     This->stop = -1;
     memset(&This->avih, 0, sizeof(This->avih));
@@ -659,34 +635,35 @@ static HRESULT WINAPI AviMux_Run(IBaseFilter *iface, REFERENCE_TIME tStart)
             continue;
 
         This->avih.dwStreams++;
-        This->out->size += sizeof(RIFFLIST) + sizeof(AVISTREAMHEADER) + sizeof(RIFFCHUNK)
-            + This->in[i]->strf->cb + sizeof(This->in[i]->indx_data);
+        This->size += sizeof(RIFFLIST) + sizeof(AVISTREAMHEADER) + sizeof(RIFFCHUNK)
+                + This->in[i]->strf->cb + sizeof(This->in[i]->indx_data);
 
         This->in[i]->strh.dwScale = MulDiv(This->in[i]->avg_time_per_frame, This->interleave, 10000000);
         This->in[i]->strh.dwRate = This->interleave;
 
         hr = IMemAllocator_Commit(This->in[i]->pin.pAllocator);
         if(FAILED(hr)) {
-            if(This->out->stream) {
-                IStream_Release(This->out->stream);
-                This->out->stream = NULL;
+            if (This->stream)
+            {
+                IStream_Release(This->stream);
+                This->stream = NULL;
             }
             return hr;
         }
     }
 
-    This->out->movi_off = This->out->size;
-    This->out->size += sizeof(RIFFLIST);
+    This->movi_off = This->size;
+    This->size += sizeof(RIFFLIST);
 
-    idx1_add_entry(This, FCC('7','F','x','x'), 0, This->out->movi_off+sizeof(RIFFLIST), 0);
+    idx1_add_entry(This, FCC('7','F','x','x'), 0, This->movi_off + sizeof(RIFFLIST), 0);
 
     stream_id = 0;
     for(i=0; i<This->input_pin_no; i++) {
         if(!This->in[i]->pin.pin.pConnectedTo)
             continue;
 
-        This->in[i]->ix_off = This->out->size;
-        This->out->size += sizeof(This->in[i]->ix_data);
+        This->in[i]->ix_off = This->size;
+        This->size += sizeof(This->in[i]->ix_data);
         This->in[i]->ix->fcc = FCC('i','x','0'+stream_id/10,'0'+stream_id%10);
         This->in[i]->ix->cb = sizeof(This->in[i]->ix_data) - sizeof(RIFFCHUNK);
         This->in[i]->ix->wLongsPerEntry = 2;
@@ -704,8 +681,8 @@ static HRESULT WINAPI AviMux_Run(IBaseFilter *iface, REFERENCE_TIME tStart)
         This->in[i]->stream_id = stream_id++;
     }
 
-    This->out->buf_pos = 0;
-    This->out->out_pos = 0;
+    This->buf_pos = 0;
+    This->out_pos = 0;
 
     This->avih.fcc = ckidMAINAVIHEADER;
     This->avih.cb = sizeof(AVIMAINHEADER) - sizeof(RIFFCHUNK);
@@ -720,59 +697,10 @@ static HRESULT WINAPI AviMux_Run(IBaseFilter *iface, REFERENCE_TIME tStart)
     return S_OK;
 }
 
-static HRESULT WINAPI AviMux_EnumPins(IBaseFilter *iface, IEnumPins **ppEnum)
-{
-    AviMux *This = impl_from_IBaseFilter(iface);
-    TRACE("(%p)->(%p)\n", This, ppEnum);
-    return BaseFilterImpl_EnumPins(iface, ppEnum);
-}
-
-static HRESULT WINAPI AviMux_FindPin(IBaseFilter *iface, LPCWSTR Id, IPin **ppPin)
-{
-    AviMux *This = impl_from_IBaseFilter(iface);
-    int i;
-
-    TRACE("(%p)->(%s %p)\n", This, debugstr_w(Id), ppPin);
-
-    if(!Id || !ppPin)
-        return E_POINTER;
-
-    if(!lstrcmpiW(Id, This->out->pin.pin.pinInfo.achName)) {
-        IPin_AddRef(&This->out->pin.pin.IPin_iface);
-        *ppPin = &This->out->pin.pin.IPin_iface;
-        return S_OK;
-    }
-
-    for(i=0; i<This->input_pin_no; i++) {
-        if(lstrcmpiW(Id, This->in[i]->pin.pin.pinInfo.achName))
-            continue;
-
-        IPin_AddRef(&This->in[i]->pin.pin.IPin_iface);
-        *ppPin = &This->in[i]->pin.pin.IPin_iface;
-        return S_OK;
-    }
-
-    return VFW_E_NOT_FOUND;
-}
-
-static HRESULT WINAPI AviMux_QueryFilterInfo(IBaseFilter *iface, FILTER_INFO *pInfo)
-{
-    AviMux *This = impl_from_IBaseFilter(iface);
-    FIXME("(%p)->(%p)\n", This, pInfo);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI AviMux_QueryVendorInfo(IBaseFilter *iface, LPWSTR *pVendorInfo)
-{
-    AviMux *This = impl_from_IBaseFilter(iface);
-    FIXME("(%p)->(%p)\n", This, pVendorInfo);
-    return E_NOTIMPL;
-}
-
 static const IBaseFilterVtbl AviMuxVtbl = {
-    AviMux_QueryInterface,
+    BaseFilterImpl_QueryInterface,
     BaseFilterImpl_AddRef,
-    AviMux_Release,
+    BaseFilterImpl_Release,
     BaseFilterImpl_GetClassID,
     AviMux_Stop,
     AviMux_Pause,
@@ -780,11 +708,11 @@ static const IBaseFilterVtbl AviMuxVtbl = {
     BaseFilterImpl_GetState,
     BaseFilterImpl_SetSyncSource,
     BaseFilterImpl_GetSyncSource,
-    AviMux_EnumPins,
-    AviMux_FindPin,
-    AviMux_QueryFilterInfo,
+    BaseFilterImpl_EnumPins,
+    BaseFilterImpl_FindPin,
+    BaseFilterImpl_QueryFilterInfo,
     BaseFilterImpl_JoinFilterGraph,
-    AviMux_QueryVendorInfo
+    BaseFilterImpl_QueryVendorInfo
 };
 
 static inline AviMux* impl_from_IConfigAviMux(IConfigAviMux *iface)
@@ -886,9 +814,9 @@ static HRESULT WINAPI ConfigInterleaving_put_Mode(
         return E_INVALIDARG;
 
     if(This->mode != mode) {
-        if(This->out->pin.pin.pConnectedTo) {
+        if(This->source.pin.pConnectedTo) {
             HRESULT hr = IFilterGraph_Reconnect(This->filter.filterInfo.pGraph,
-                    &This->out->pin.pin.IPin_iface);
+                    &This->source.pin.IPin_iface);
             if(FAILED(hr))
                 return hr;
         }
@@ -1229,7 +1157,7 @@ static HRESULT WINAPI AviMuxOut_CheckMediaType(BasePin *base, const AM_MEDIA_TYP
     return S_OK;
 }
 
-static HRESULT WINAPI AviMuxOut_AttemptConnection(BasePin *base,
+static HRESULT WINAPI AviMuxOut_AttemptConnection(BaseOutputPin *base,
         IPin *pReceivePin, const AM_MEDIA_TYPE *pmt)
 {
     PIN_DIRECTION dir;
@@ -1243,11 +1171,6 @@ static HRESULT WINAPI AviMuxOut_AttemptConnection(BasePin *base,
         return VFW_E_INVALID_DIRECTION;
 
     return BaseOutputPinImpl_AttemptConnection(base, pReceivePin, pmt);
-}
-
-static LONG WINAPI AviMuxOut_GetMediaTypeVersion(BasePin *base)
-{
-    return 0;
 }
 
 static HRESULT WINAPI AviMuxOut_GetMediaType(BasePin *base, int iPosition, AM_MEDIA_TYPE *amt)
@@ -1297,30 +1220,19 @@ static HRESULT WINAPI AviMuxOut_DecideAllocator(BaseOutputPin *base,
     return IMemInputPin_NotifyAllocator(pPin, *pAlloc, TRUE);
 }
 
-static HRESULT WINAPI AviMuxOut_BreakConnect(BaseOutputPin *base)
-{
-    FIXME("(%p)\n", base);
-    return E_NOTIMPL;
-}
-
 static const BaseOutputPinFuncTable AviMuxOut_BaseOutputFuncTable = {
     {
         AviMuxOut_CheckMediaType,
-        AviMuxOut_AttemptConnection,
-        AviMuxOut_GetMediaTypeVersion,
         AviMuxOut_GetMediaType
     },
+    AviMuxOut_AttemptConnection,
     NULL,
     AviMuxOut_DecideAllocator,
-    AviMuxOut_BreakConnect
 };
 
-static inline AviMux* impl_from_out_IPin(IPin *iface)
+static inline AviMux *impl_from_out_IPin(IPin *iface)
 {
-    BasePin *bp = CONTAINING_RECORD(iface, BasePin, IPin_iface);
-    IBaseFilter *bf = bp->pinInfo.pFilter;
-
-    return impl_from_IBaseFilter(bf);
+    return CONTAINING_RECORD(iface, AviMux, source.pin.IPin_iface);
 }
 
 static HRESULT WINAPI AviMuxOut_QueryInterface(IPin *iface, REFIID riid, void **ppv)
@@ -1332,7 +1244,7 @@ static HRESULT WINAPI AviMuxOut_QueryInterface(IPin *iface, REFIID riid, void **
     if(IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IPin))
         *ppv = iface;
     else if(IsEqualIID(riid, &IID_IQualityControl))
-        *ppv = &This->out->IQualityControl_iface;
+        *ppv = &This->IQualityControl_iface;
     else {
         FIXME("no interface for %s\n", debugstr_guid(riid));
         *ppv = NULL;
@@ -1341,18 +1253,6 @@ static HRESULT WINAPI AviMuxOut_QueryInterface(IPin *iface, REFIID riid, void **
 
     IUnknown_AddRef((IUnknown*)*ppv);
     return S_OK;
-}
-
-static ULONG WINAPI AviMuxOut_AddRef(IPin *iface)
-{
-    AviMux *This = impl_from_out_IPin(iface);
-    return IBaseFilter_AddRef(&This->filter.IBaseFilter_iface);
-}
-
-static ULONG WINAPI AviMuxOut_Release(IPin *iface)
-{
-    AviMux *This = impl_from_out_IPin(iface);
-    return IBaseFilter_Release(&This->filter.IBaseFilter_iface);
 }
 
 static HRESULT WINAPI AviMuxOut_Connect(IPin *iface,
@@ -1496,8 +1396,8 @@ static HRESULT WINAPI AviMuxOut_NewSegment(IPin *iface, REFERENCE_TIME tStart,
 
 static const IPinVtbl AviMuxOut_PinVtbl = {
     AviMuxOut_QueryInterface,
-    AviMuxOut_AddRef,
-    AviMuxOut_Release,
+    BasePinImpl_AddRef,
+    BasePinImpl_Release,
     AviMuxOut_Connect,
     AviMuxOut_ReceiveConnection,
     AviMuxOut_Disconnect,
@@ -1517,15 +1417,14 @@ static const IPinVtbl AviMuxOut_PinVtbl = {
 
 static inline AviMux* impl_from_out_IQualityControl(IQualityControl *iface)
 {
-    AviMuxOut *amo = CONTAINING_RECORD(iface, AviMuxOut, IQualityControl_iface);
-    return impl_from_IBaseFilter(amo->pin.pin.pinInfo.pFilter);
+    return CONTAINING_RECORD(iface, AviMux, IQualityControl_iface);
 }
 
 static HRESULT WINAPI AviMuxOut_QualityControl_QueryInterface(
         IQualityControl *iface, REFIID riid, void **ppv)
 {
     AviMux *This = impl_from_out_IQualityControl(iface);
-    return IPin_QueryInterface(&This->out->pin.pin.IPin_iface, riid, ppv);
+    return IPin_QueryInterface(&This->source.pin.IPin_iface, riid, ppv);
 }
 
 static ULONG WINAPI AviMuxOut_QualityControl_AddRef(IQualityControl *iface)
@@ -1583,11 +1482,6 @@ static HRESULT WINAPI AviMuxIn_CheckMediaType(BasePin *base, const AM_MEDIA_TYPE
              IsEqualIID(&pmt->formattype, &FORMAT_DvInfo)))
         return S_OK;
     return S_FALSE;
-}
-
-static LONG WINAPI AviMuxIn_GetMediaTypeVersion(BasePin *base)
-{
-    return 0;
 }
 
 static HRESULT WINAPI AviMuxIn_GetMediaType(BasePin *base, int iPosition, AM_MEDIA_TYPE *amt)
@@ -1701,8 +1595,6 @@ static HRESULT WINAPI AviMuxIn_Receive(BaseInputPin *base, IMediaSample *pSample
 static const BaseInputPinFuncTable AviMuxIn_BaseInputFuncTable = {
     {
         AviMuxIn_CheckMediaType,
-        NULL,
-        AviMuxIn_GetMediaTypeVersion,
         AviMuxIn_GetMediaType
     },
     AviMuxIn_Receive
@@ -1749,18 +1641,6 @@ static HRESULT WINAPI AviMuxIn_QueryInterface(IPin *iface, REFIID riid, void **p
 
     IUnknown_AddRef((IUnknown*)*ppv);
     return S_OK;
-}
-
-static ULONG WINAPI AviMuxIn_AddRef(IPin *iface)
-{
-    AviMux *This = impl_from_in_IPin(iface);
-    return IBaseFilter_AddRef(&This->filter.IBaseFilter_iface);
-}
-
-static ULONG WINAPI AviMuxIn_Release(IPin *iface)
-{
-    AviMux *This = impl_from_in_IPin(iface);
-    return IBaseFilter_Release(&This->filter.IBaseFilter_iface);
 }
 
 static HRESULT WINAPI AviMuxIn_Connect(IPin *iface,
@@ -1972,8 +1852,8 @@ static HRESULT WINAPI AviMuxIn_NewSegment(IPin *iface, REFERENCE_TIME tStart,
 
 static const IPinVtbl AviMuxIn_PinVtbl = {
     AviMuxIn_QueryInterface,
-    AviMuxIn_AddRef,
-    AviMuxIn_Release,
+    BasePinImpl_AddRef,
+    BasePinImpl_Release,
     AviMuxIn_Connect,
     AviMuxIn_ReceiveConnection,
     AviMuxIn_Disconnect,
@@ -2177,10 +2057,10 @@ static HRESULT WINAPI AviMuxIn_MemInputPin_ReceiveCanBlock(IMemInputPin *iface)
 
     TRACE("(%p:%s)\n", This, debugstr_w(avimuxin->pin.pin.pinInfo.achName));
 
-    if(!This->out->pin.pMemInputPin)
+    if(!This->source.pMemInputPin)
         return S_FALSE;
 
-    hr = IMemInputPin_ReceiveCanBlock(This->out->pin.pMemInputPin);
+    hr = IMemInputPin_ReceiveCanBlock(This->source.pMemInputPin);
     return hr != S_FALSE ? S_OK : S_FALSE;
 }
 
@@ -2308,6 +2188,7 @@ static const IQualityControlVtbl AviMuxIn_QualityControlVtbl = {
 static HRESULT create_input_pin(AviMux *avimux)
 {
     static const WCHAR name[] = {'I','n','p','u','t',' ','0','0',0};
+    AviMuxIn *object;
     PIN_INFO info;
     HRESULT hr;
 
@@ -2320,44 +2201,43 @@ static HRESULT create_input_pin(AviMux *avimux)
     info.achName[7] = '0' + (avimux->input_pin_no+1) % 10;
     info.achName[6] = '0' + (avimux->input_pin_no+1) / 10;
 
-    hr = BaseInputPin_Construct(&AviMuxIn_PinVtbl, sizeof(AviMuxIn), &info,
-            &AviMuxIn_BaseInputFuncTable, &avimux->filter.csFilter, NULL, (IPin**)&avimux->in[avimux->input_pin_no]);
-    if(FAILED(hr))
-        return hr;
-    avimux->in[avimux->input_pin_no]->pin.IMemInputPin_iface.lpVtbl = &AviMuxIn_MemInputPinVtbl;
-    avimux->in[avimux->input_pin_no]->IAMStreamControl_iface.lpVtbl = &AviMuxIn_AMStreamControlVtbl;
-    avimux->in[avimux->input_pin_no]->IPropertyBag_iface.lpVtbl = &AviMuxIn_PropertyBagVtbl;
-    avimux->in[avimux->input_pin_no]->IQualityControl_iface.lpVtbl = &AviMuxIn_QualityControlVtbl;
+    if (!(object = heap_alloc_zero(sizeof(*object))))
+        return E_OUTOFMEMORY;
 
-    avimux->in[avimux->input_pin_no]->samples_head = NULL;
+    strmbase_sink_init(&object->pin, &AviMuxIn_PinVtbl, &info,
+            &AviMuxIn_BaseInputFuncTable, &avimux->filter.csFilter, NULL);
+    object->pin.IMemInputPin_iface.lpVtbl = &AviMuxIn_MemInputPinVtbl;
+    object->IAMStreamControl_iface.lpVtbl = &AviMuxIn_AMStreamControlVtbl;
+    object->IPropertyBag_iface.lpVtbl = &AviMuxIn_PropertyBagVtbl;
+    object->IQualityControl_iface.lpVtbl = &AviMuxIn_QualityControlVtbl;
+
     hr = CoCreateInstance(&CLSID_MemoryAllocator, NULL, CLSCTX_INPROC_SERVER,
-            &IID_IMemAllocator, (void**)&avimux->in[avimux->input_pin_no]->samples_allocator);
-    if(FAILED(hr)) {
-        BaseInputPinImpl_Release(&avimux->in[avimux->input_pin_no]->pin.pin.IPin_iface);
+            &IID_IMemAllocator, (void **)&object->samples_allocator);
+    if (FAILED(hr))
+    {
+        strmbase_sink_cleanup(&object->pin);
+        heap_free(object);
         return hr;
     }
 
     hr = CoCreateInstance(&CLSID_MemoryAllocator, NULL, CLSCTX_INPROC_SERVER,
-            &IID_IMemAllocator, (void**)&avimux->in[avimux->input_pin_no]->pin.pAllocator);
-    if(FAILED(hr)) {
-        IMemAllocator_Release(avimux->in[avimux->input_pin_no]->samples_allocator);
-        BaseInputPinImpl_Release(&avimux->in[avimux->input_pin_no]->pin.pin.IPin_iface);
+            &IID_IMemAllocator, (void **)&object->pin.pAllocator);
+    if (FAILED(hr))
+    {
+        IMemAllocator_Release(object->samples_allocator);
+        strmbase_sink_cleanup(&object->pin);
+        heap_free(object);
         return hr;
     }
 
-    avimux->in[avimux->input_pin_no]->stream_time = 0;
-    memset(&avimux->in[avimux->input_pin_no]->strh, 0, sizeof(avimux->in[avimux->input_pin_no]->strh));
-    avimux->in[avimux->input_pin_no]->strf = NULL;
-    memset(&avimux->in[avimux->input_pin_no]->indx_data, 0, sizeof(avimux->in[avimux->input_pin_no]->indx_data));
-    memset(&avimux->in[avimux->input_pin_no]->ix_data, 0, sizeof(avimux->in[avimux->input_pin_no]->ix_data));
-    avimux->in[avimux->input_pin_no]->indx = (AVISUPERINDEX*)&avimux->in[avimux->input_pin_no]->indx_data;
-    avimux->in[avimux->input_pin_no]->ix = (AVISTDINDEX*)avimux->in[avimux->input_pin_no]->ix_data;
+    object->indx = (AVISUPERINDEX *)&object->indx_data;
+    object->ix = (AVISTDINDEX *)object->ix_data;
 
-    avimux->input_pin_no++;
+    avimux->in[avimux->input_pin_no++] = object;
     return S_OK;
 }
 
-IUnknown* WINAPI QCAP_createAVIMux(IUnknown *pUnkOuter, HRESULT *phr)
+IUnknown * WINAPI QCAP_createAVIMux(IUnknown *outer, HRESULT *phr)
 {
     static const WCHAR output_name[] = {'A','V','I',' ','O','u','t',0};
 
@@ -2365,20 +2245,13 @@ IUnknown* WINAPI QCAP_createAVIMux(IUnknown *pUnkOuter, HRESULT *phr)
     PIN_INFO info;
     HRESULT hr;
 
-    TRACE("(%p)\n", pUnkOuter);
-
-    if(pUnkOuter) {
-        *phr = CLASS_E_NOAGGREGATION;
-        return NULL;
-    }
-
     avimux = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(AviMux));
     if(!avimux) {
         *phr = E_OUTOFMEMORY;
         return NULL;
     }
 
-    BaseFilter_Init(&avimux->filter, &AviMuxVtbl, &CLSID_AviDest,
+    strmbase_filter_init(&avimux->filter, &AviMuxVtbl, outer, &CLSID_AviDest,
             (DWORD_PTR)(__FILE__ ": AviMux.csFilter"), &filter_func_table);
     avimux->IConfigAviMux_iface.lpVtbl = &ConfigAviMuxVtbl;
     avimux->IConfigInterleaving_iface.lpVtbl = &ConfigInterleavingVtbl;
@@ -2389,23 +2262,17 @@ IUnknown* WINAPI QCAP_createAVIMux(IUnknown *pUnkOuter, HRESULT *phr)
     info.dir = PINDIR_OUTPUT;
     info.pFilter = &avimux->filter.IBaseFilter_iface;
     lstrcpyW(info.achName, output_name);
-    hr = BaseOutputPin_Construct(&AviMuxOut_PinVtbl, sizeof(AviMuxOut), &info,
-            &AviMuxOut_BaseOutputFuncTable, &avimux->filter.csFilter, (IPin**)&avimux->out);
-    if(FAILED(hr)) {
-        BaseFilterImpl_Release(&avimux->filter.IBaseFilter_iface);
-        HeapFree(GetProcessHeap(), 0, avimux);
-        *phr = hr;
-        return NULL;
-    }
-    avimux->out->IQualityControl_iface.lpVtbl = &AviMuxOut_QualityControlVtbl;
-    avimux->out->cur_stream = 0;
-    avimux->out->cur_time = 0;
-    avimux->out->stream = NULL;
+    strmbase_source_init(&avimux->source, &AviMuxOut_PinVtbl, &info,
+            &AviMuxOut_BaseOutputFuncTable, &avimux->filter.csFilter);
+    avimux->IQualityControl_iface.lpVtbl = &AviMuxOut_QualityControlVtbl;
+    avimux->cur_stream = 0;
+    avimux->cur_time = 0;
+    avimux->stream = NULL;
 
     hr = create_input_pin(avimux);
     if(FAILED(hr)) {
-        BaseOutputPinImpl_Release(&avimux->out->pin.pin.IPin_iface);
-        BaseFilterImpl_Release(&avimux->filter.IBaseFilter_iface);
+        strmbase_source_cleanup(&avimux->source);
+        strmbase_filter_cleanup(&avimux->filter);
         HeapFree(GetProcessHeap(), 0, avimux);
         *phr = hr;
         return NULL;
@@ -2415,5 +2282,5 @@ IUnknown* WINAPI QCAP_createAVIMux(IUnknown *pUnkOuter, HRESULT *phr)
 
     ObjectRefCount(TRUE);
     *phr = S_OK;
-    return (IUnknown*)&avimux->filter.IBaseFilter_iface;
+    return &avimux->filter.IUnknown_inner;
 }

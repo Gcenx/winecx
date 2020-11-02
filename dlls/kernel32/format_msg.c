@@ -502,7 +502,7 @@ DWORD WINAPI FormatMessageA(
     from = NULL;
     if (dwFlags & FORMAT_MESSAGE_FROM_STRING)
     {
-        DWORD length = MultiByteToWideChar(CP_ACP, 0, lpSource, -1, NULL, 0);
+        DWORD length = MultiByteToWideChar(CP_ACP, 0, (LPCSTR)lpSource, -1, NULL, 0);
         from = HeapAlloc( GetProcessHeap(), 0, length * sizeof(WCHAR) );
         MultiByteToWideChar(CP_ACP, 0, lpSource, -1, from, length);
     }

@@ -28,12 +28,19 @@
 #include "winnt.h"
 #include "winternl.h"
 #include "wine/server.h"
+#include "wine/asm.h"
 
 #define MAX_NT_PATH_LENGTH 277
 
 #define MAX_DOS_DRIVES 26
 
-#if defined(__i386__) || defined(__x86_64__)
+#ifdef __i386_on_x86_64__
+#define SYSCALL(func) WINE_CALL_IMPL32(__syscall_##func)
+#else
+#define SYSCALL(func) __syscall_##func
+#endif
+
+#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
 static const UINT_PTR page_size = 0x1000;
 #else
 extern UINT_PTR page_size DECLSPEC_HIDDEN;
@@ -80,6 +87,8 @@ extern void virtual_init(void) DECLSPEC_HIDDEN;
 extern void virtual_init_threading(void) DECLSPEC_HIDDEN;
 extern void fill_cpu_info(void) DECLSPEC_HIDDEN;
 extern void heap_set_debug_flags( HANDLE handle ) DECLSPEC_HIDDEN;
+extern void init_user_process_params( SIZE_T data_size ) DECLSPEC_HIDDEN;
+extern void update_user_process_params( const UNICODE_STRING *image ) DECLSPEC_HIDDEN;
 
 /* server support */
 extern timeout_t server_start_time DECLSPEC_HIDDEN;
@@ -118,11 +127,6 @@ extern void SNOOP_SetupDLL( HMODULE hmod ) DECLSPEC_HIDDEN;
 extern const WCHAR system_dir[] DECLSPEC_HIDDEN;
 
 extern void (WINAPI *kernel32_start_process)(LPTHREAD_START_ROUTINE,void*) DECLSPEC_HIDDEN;
-
-/* redefine these to make sure we don't reference kernel symbols */
-#define GetProcessHeap()       (NtCurrentTeb()->Peb->ProcessHeap)
-#define GetCurrentProcessId()  (HandleToULong(NtCurrentTeb()->ClientId.UniqueProcess))
-#define GetCurrentThreadId()   (HandleToULong(NtCurrentTeb()->ClientId.UniqueThread))
 
 /* Device IO */
 extern NTSTATUS CDROM_DeviceIoControl(HANDLE hDevice, 
@@ -165,17 +169,19 @@ extern NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, ANSI_S
                                            UINT disposition ) DECLSPEC_HIDDEN;
 
 /* virtual memory */
+extern NTSTATUS virtual_alloc_aligned( PVOID *ret, ULONG zero_bits, SIZE_T *size_ptr,
+                                       ULONG type, ULONG protect, ULONG alignment ) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_map_section( HANDLE handle, PVOID *addr_ptr, ULONG zero_bits, SIZE_T commit_size,
                                      const LARGE_INTEGER *offset_ptr, SIZE_T *size_ptr, ULONG protect,
                                      pe_image_info_t *image_info ) DECLSPEC_HIDDEN;
 extern void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info ) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_create_builtin_view( void *base ) DECLSPEC_HIDDEN;
-extern NTSTATUS virtual_alloc_thread_stack( TEB *teb, SIZE_T reserve_size,
+extern NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, SIZE_T reserve_size,
                                             SIZE_T commit_size, SIZE_T *pthread_size ) DECLSPEC_HIDDEN;
 extern void virtual_clear_thread_stack( void *stack_end ) DECLSPEC_HIDDEN;
 extern BOOL virtual_handle_stack_fault( void *addr ) DECLSPEC_HIDDEN;
 extern BOOL virtual_is_valid_code_address( const void *addr, SIZE_T size ) DECLSPEC_HIDDEN;
-extern NTSTATUS virtual_handle_fault( LPCVOID addr, DWORD err, BOOL on_signal_stack ) DECLSPEC_HIDDEN;
+extern NTSTATUS virtual_handle_fault( const void * HOSTPTR addr, DWORD err, BOOL on_signal_stack ) DECLSPEC_HIDDEN;
 extern unsigned int virtual_locked_server_call( void *req_ptr ) DECLSPEC_HIDDEN;
 extern ssize_t virtual_locked_read( int fd, void *addr, size_t size ) DECLSPEC_HIDDEN;
 extern ssize_t virtual_locked_pread( int fd, void *addr, size_t size, off_t offset ) DECLSPEC_HIDDEN;
@@ -195,12 +201,13 @@ extern BYTE* CDECL __wine_user_shared_data(void);
 
 /* completion */
 extern NTSTATUS NTDLL_AddCompletion( HANDLE hFile, ULONG_PTR CompletionValue,
-                                     NTSTATUS CompletionStatus, ULONG Information ) DECLSPEC_HIDDEN;
+                                     NTSTATUS CompletionStatus, ULONG Information, BOOL async) DECLSPEC_HIDDEN;
 
 /* code pages */
-extern int ntdll_umbstowcs(DWORD flags, const char* src, int srclen, WCHAR* dst, int dstlen) DECLSPEC_HIDDEN;
+extern int ntdll_umbstowcs(DWORD flags, const char* HOSTPTR src, int srclen, WCHAR* dst, int dstlen) DECLSPEC_HIDDEN;
 extern int ntdll_wcstoumbs(DWORD flags, const WCHAR* src, int srclen, char* dst, int dstlen,
                            const char* defchar, int *used ) DECLSPEC_HIDDEN;
+extern int ntdll_ambstowcs(WCHAR **dstptr, const char* HOSTPTR src) DECLSPEC_HIDDEN;
 
 extern int CDECL NTDLL__vsnprintf( char *str, SIZE_T len, const char *format, __ms_va_list args ) DECLSPEC_HIDDEN;
 extern int CDECL NTDLL__vsnwprintf( WCHAR *str, SIZE_T len, const WCHAR *format, __ms_va_list args ) DECLSPEC_HIDDEN;
@@ -218,14 +225,14 @@ enum loadorder
     LO_DEFAULT          /* nothing specified, use default strategy */
 };
 
-extern enum loadorder get_load_order( const WCHAR *app_name, const WCHAR *path ) DECLSPEC_HIDDEN;
+extern enum loadorder get_load_order( const WCHAR *app_name, const UNICODE_STRING *nt_name ) DECLSPEC_HIDDEN;
 
 struct debug_info
 {
-    char *str_pos;       /* current position in strings buffer */
-    char *out_pos;       /* current position in output buffer */
-    char  strings[1024]; /* buffer for temporary strings */
-    char  output[1024];  /* current output line */
+    unsigned int str_pos;       /* current position in strings buffer */
+    unsigned int out_pos;       /* current position in output buffer */
+    char         strings[1024]; /* buffer for temporary strings */
+    char         output[1024];  /* current output line */
 };
 
 /* thread private data, stored in NtCurrentTeb()->GdiTebBatch */
@@ -247,13 +254,25 @@ static inline struct ntdll_thread_data *ntdll_get_thread_data(void)
     return (struct ntdll_thread_data *)&NtCurrentTeb()->GdiTebBatch;
 }
 
+static inline int get_unix_exit_code( NTSTATUS status )
+{
+    /* prevent a nonzero exit code to end up truncated to zero in unix */
+    if (status && !(status & 0xff)) return 1;
+    return status;
+}
+
 extern mode_t FILE_umask DECLSPEC_HIDDEN;
 extern HANDLE keyed_event DECLSPEC_HIDDEN;
+extern SYSTEM_CPU_INFORMATION cpu_info DECLSPEC_HIDDEN;
 
 #define HASH_STRING_ALGORITHM_DEFAULT  0
 #define HASH_STRING_ALGORITHM_X65599   1
 #define HASH_STRING_ALGORITHM_INVALID  0xffffffff
 
 NTSTATUS WINAPI RtlHashUnicodeString(PCUNICODE_STRING,BOOLEAN,ULONG,ULONG*);
+void     WINAPI LdrInitializeThunk(CONTEXT*,void**,ULONG_PTR,ULONG_PTR);
 
+/* string functions */
+int __cdecl NTDLL_tolower( int c );
+int __cdecl _stricmp( LPCSTR str1, LPCSTR str2 );
 #endif

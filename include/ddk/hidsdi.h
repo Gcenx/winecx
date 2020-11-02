@@ -19,6 +19,8 @@
 #ifndef __WINE_HIDSDI_H
 #define __WINE_HIDSDI_H
 
+#include "wine/winheader_enter.h"
+
 #ifndef WINE_NTSTATUS_DECLARED
 #define WINE_NTSTATUS_DECLARED
 typedef LONG NTSTATUS;
@@ -34,8 +36,10 @@ typedef struct _HIDD_ATTRIBUTES {
   USHORT VersionNumber;
 } HIDD_ATTRIBUTES, *PHIDD_ATTRIBUTES;
 
+BOOLEAN WINAPI HidD_FlushQueue(HANDLE file);
 BOOLEAN WINAPI HidD_GetFeature(HANDLE HidDeviceObject, PVOID ReportBuffer, ULONG ReportBufferLength);
 void WINAPI HidD_GetHidGuid(LPGUID guid);
+BOOLEAN WINAPI HidD_GetIndexedString(HANDLE file, ULONG index, void *buffer, ULONG length);
 BOOLEAN WINAPI HidD_GetInputReport(HANDLE HidDeviceObject, PVOID ReportBuffer, ULONG ReportBufferLength);
 BOOLEAN WINAPI HidD_GetManufacturerString(HANDLE HidDeviceObject, PVOID Buffer, ULONG BufferLength);
 BOOLEAN WINAPI HidD_GetNumInputBuffers(HANDLE HidDeviceObject, ULONG *NumberBuffers);
@@ -47,5 +51,7 @@ BOOLEAN WINAPI HidD_GetPreparsedData( HANDLE HidDeviceObject, PHIDP_PREPARSED_DA
 BOOLEAN WINAPI HidD_FreePreparsedData(PHIDP_PREPARSED_DATA PreparsedData);
 BOOLEAN WINAPI HidD_GetAttributes(HANDLE HidDeviceObject, PHIDD_ATTRIBUTES Attr);
 BOOLEAN WINAPI HidD_SetOutputReport(HANDLE HidDeviceObject, void *ReportBuffer, ULONG ReportBufferLength);
+
+#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_HIDSDI_H */

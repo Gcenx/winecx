@@ -262,7 +262,7 @@ CFArrayRef create_monochrome_cursor(HDC hdc, const ICONINFOEXW *icon, int width,
     BITMAPINFO *info = (BITMAPINFO *)buffer;
     unsigned int width_bytes = (width + 31) / 32 * 4;
     unsigned long *and_bits = NULL, *xor_bits;
-    unsigned long *data_bits;
+    unsigned long * HOSTPTR data_bits;
     int count, i;
     CGColorSpaceRef colorspace;
     CFMutableDataRef data;
@@ -347,7 +347,7 @@ CFArrayRef create_monochrome_cursor(HDC hdc, const ICONINFOEXW *icon, int width,
     /* image data = AND mask */
     CFDataAppendBytes(data, (UInt8*)and_bits, info->bmiHeader.biSizeImage / 2);
     /* image data ^= XOR mask */
-    data_bits = (unsigned long*)CFDataGetMutableBytePtr(data);
+    data_bits = (unsigned long* HOSTPTR)CFDataGetMutableBytePtr(data);
     count = (info->bmiHeader.biSizeImage / 2) / sizeof(*data_bits);
     for (i = 0; i < count; i++)
         data_bits[i] ^= xor_bits[i];
@@ -396,7 +396,7 @@ CFArrayRef create_monochrome_cursor(HDC hdc, const ICONINFOEXW *icon, int width,
     /* mask data = AND mask */
     CFDataAppendBytes(data, (UInt8*)and_bits, info->bmiHeader.biSizeImage / 2);
     /* mask data &= ~XOR mask */
-    data_bits = (unsigned long*)CFDataGetMutableBytePtr(data);
+    data_bits = (unsigned long* HOSTPTR)CFDataGetMutableBytePtr(data);
     for (i = 0; i < count; i++)
         data_bits[i] &= ~xor_bits[i];
     HeapFree(GetProcessHeap(), 0, and_bits);
@@ -439,7 +439,7 @@ CFArrayRef create_monochrome_cursor(HDC hdc, const ICONINFOEXW *icon, int width,
 
     values[0] = cgmasked;
     values[1] = hot_spot_dict;
-    frame = CFDictionaryCreate(NULL, (const void**)keys, values, ARRAY_SIZE(keys),
+    frame = CFDictionaryCreate(NULL, (const void* HOSTPTR *)keys, values, ARRAY_SIZE(keys),
                                &kCFCopyStringDictionaryKeyCallBacks,
                                &kCFTypeDictionaryValueCallBacks);
     CFRelease(hot_spot_dict);
@@ -450,7 +450,7 @@ CFArrayRef create_monochrome_cursor(HDC hdc, const ICONINFOEXW *icon, int width,
         return NULL;
     }
 
-    frames = CFArrayCreate(NULL, (const void**)&frame, 1, &kCFTypeArrayCallBacks);
+    frames = CFArrayCreate(NULL, (const void* HOSTPTR *)&frame, 1, &kCFTypeArrayCallBacks);
     CFRelease(frame);
     if (!frames)
     {

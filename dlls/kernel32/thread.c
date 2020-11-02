@@ -38,6 +38,7 @@
 #include "wine/exception.h"
 #include "wine/library.h"
 #include "wine/server.h"
+#include "wine/asm.h"
 #include "wine/debug.h"
 
 #include "kernel_private.h"
@@ -142,7 +143,7 @@ HANDLE WINAPI OpenThread( DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwTh
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
 
-    cid.UniqueProcess = 0; /* FIXME */
+    cid.UniqueProcess = 0;
     cid.UniqueThread = ULongToHandle(dwThreadId);
     status = NtOpenThread( &handle, dwDesiredAccess, &attr, &cid );
     if (status)
@@ -240,7 +241,7 @@ BOOL WINAPI SetThreadContext( HANDLE handle,           /* [in]  Handle to thread
  */
 BOOL WINAPI Wow64SetThreadContext( HANDLE handle, const WOW64_CONTEXT *context)
 {
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     NTSTATUS status = NtSetContextThread( handle, (const CONTEXT *)context );
 #elif defined(__x86_64__)
     NTSTATUS status = RtlWow64SetThreadContext( handle, context );
@@ -264,7 +265,7 @@ BOOL WINAPI GetThreadContext( HANDLE handle,     /* [in]  Handle to thread with 
 {
     NTSTATUS status = NtGetContextThread( handle, context );
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     /* CXHACK 15388 */
     if(!status)
     {
@@ -289,13 +290,46 @@ BOOL WINAPI GetThreadContext( HANDLE handle,     /* [in]  Handle to thread with 
     return !status;
 }
 
+#ifdef __i386_on_x86_64__
+/* We need a direct 32-bit implementation of this in case the caller is requesting
+   its own context.  Thunking to 64-bit mode would give us a context that won't
+   make any sense to the caller. */
+__ASM_THUNK_STDCALL( GetThreadContext, 8,
+                     "pushl %ebp\n\t"
+                     "movl %esp, %ebp\n\t"
+                     "pushl %esi\n\t"
+                     "andl $-0x10, %esp\n\t"
+                     "subl $0x20, %esp\n\t"
+                     "movl 0x8(%ebp), %eax\n\t"
+                     "movl 0xc(%ebp), %ecx\n\t"
+                     "movl %ecx, 0x4(%esp)\n\t"
+                     "movl %eax, (%esp)\n\t"
+                     "calll " __ASM_THUNK_STDCALL_SYMBOL("NtGetContextThread", 8) "\n\t"
+                     "subl $0x8, %esp\n\t"
+                     "movl %eax, %esi\n\t"
+                     "testl %eax, %eax\n\t"
+                     "je 1f\n\t"
+                     "movl %esi, (%esp)\n\t"
+                     "calll " __ASM_THUNK_STDCALL_SYMBOL("RtlNtStatusToDosError", 4) "\n\t"
+                     "subl $0x4, %esp\n\t"
+                     "movl %eax, %fs:0x34\n"
+                     "1:\n\t"
+                     "xorl %eax, %eax\n\t"
+                     "testl %esi, %esi\n\t"
+                     "sete %al\n\t"
+                     "leal -0x4(%ebp), %esp\n\t"
+                     "popl %esi\n\t"
+                     "popl %ebp\n\t"
+                     "retl $8\n\t" )
+#endif
+
 
 /***********************************************************************
  * Wow64GetThreadContext [KERNEL32.@]
  */
 BOOL WINAPI Wow64GetThreadContext( HANDLE handle, WOW64_CONTEXT *context)
 {
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     NTSTATUS status = NtGetContextThread( handle, (CONTEXT *)context );
 #elif defined(__x86_64__)
     NTSTATUS status = RtlWow64GetThreadContext( handle, context );
@@ -306,6 +340,14 @@ BOOL WINAPI Wow64GetThreadContext( HANDLE handle, WOW64_CONTEXT *context)
     if (status) SetLastError( RtlNtStatusToDosError(status) );
     return !status;
 }
+
+#ifdef __i386_on_x86_64__
+/* We need a direct 32-bit implementation of this in case the caller is requesting
+   its own context.  Thunking to 64-bit mode would give us a context that won't
+   make any sense to the caller. */
+__ASM_THUNK_STDCALL( Wow64GetThreadContext, 8,
+                     "jmp " __ASM_THUNK_STDCALL_SYMBOL("GetThreadContext", 8) )
+#endif
 
 
 /**********************************************************************
@@ -717,8 +759,7 @@ DWORD WINAPI GetProcessIdOfThread(HANDLE Thread)
  * RETURNS
  *    Pseudohandle for the current thread
  */
-#undef GetCurrentThread
-HANDLE WINAPI GetCurrentThread(void)
+HANDLE WINAPI KERNEL32_GetCurrentThread(void)
 {
     return (HANDLE)~(ULONG_PTR)1;
 }
@@ -732,113 +773,6 @@ void WINAPI GetCurrentThreadStackLimits(ULONG_PTR *low, ULONG_PTR *high)
     *high = (ULONG_PTR)NtCurrentTeb()->Tib.StackBase;
 }
 
-
-#ifdef __i386__
-
-/***********************************************************************
- *		SetLastError (KERNEL32.@)
- */
-/* void WINAPI SetLastError( DWORD error ); */
-__ASM_STDCALL_FUNC( SetLastError, 4,
-                   "movl 4(%esp),%eax\n\t"
-                   ".byte 0x64\n\t"
-                   "movl %eax,0x34\n\t"
-                   "ret $4" )
-
-/***********************************************************************
- *		GetLastError (KERNEL32.@)
- */
-/* DWORD WINAPI GetLastError(void); */
-__ASM_STDCALL_FUNC( GetLastError, 0, ".byte 0x64\n\tmovl 0x34,%eax\n\tret" )
-
-/***********************************************************************
- *		GetCurrentProcessId (KERNEL32.@)
- */
-/* DWORD WINAPI GetCurrentProcessId(void) */
-__ASM_STDCALL_FUNC( GetCurrentProcessId, 0, ".byte 0x64\n\tmovl 0x20,%eax\n\tret" )
-
-/***********************************************************************
- *		GetCurrentThreadId (KERNEL32.@)
- */
-/* DWORD WINAPI GetCurrentThreadId(void) */
-__ASM_STDCALL_FUNC( GetCurrentThreadId, 0, ".byte 0x64\n\tmovl 0x24,%eax\n\tret" )
-
-/***********************************************************************
- *		GetProcessHeap (KERNEL32.@)
- */
-/* HANDLE WINAPI GetProcessHeap(void) */
-__ASM_STDCALL_FUNC( GetProcessHeap, 0, ".byte 0x64\n\tmovl 0x30,%eax\n\tmovl 0x18(%eax),%eax\n\tret");
-
-#elif defined(__x86_64__)
-
-#ifdef __APPLE__
-
-/***********************************************************************
- *		SetLastError (KERNEL32.@)
- */
-/* void WINAPI SetLastError( DWORD error ); */
-__ASM_STDCALL_FUNC( SetLastError, 8, ".byte 0x65\n\tmovq 0x30,%rax\n\tmovl %ecx,0x68(%rax)\n\tret" );
-
-/***********************************************************************
- *		GetLastError (KERNEL32.@)
- */
-/* DWORD WINAPI GetLastError(void); */
-__ASM_STDCALL_FUNC( GetLastError, 0, ".byte 0x65\n\tmovq 0x30,%rax\n\tmovl 0x68(%rax),%eax\n\tret" );
-
-/***********************************************************************
- *		GetCurrentProcessId (KERNEL32.@)
- */
-/* DWORD WINAPI GetCurrentProcessId(void) */
-__ASM_STDCALL_FUNC( GetCurrentProcessId, 0, ".byte 0x65\n\tmovq 0x30,%rax\n\tmovl 0x40(%rax),%eax\n\tret" );
-
-/***********************************************************************
- *		GetCurrentThreadId (KERNEL32.@)
- */
-/* DWORD WINAPI GetCurrentThreadId(void) */
-__ASM_STDCALL_FUNC( GetCurrentThreadId, 0, ".byte 0x65\n\tmovq 0x30,%rax\n\tmovl 0x48(%rax),%eax\n\tret" );
-
-/***********************************************************************
- *		GetProcessHeap (KERNEL32.@)
- */
-/* HANDLE WINAPI GetProcessHeap(void) */
-__ASM_STDCALL_FUNC( GetProcessHeap, 0, ".byte 0x65\n\tmovq 0x30,%rax\n\tmovq 0x60(%rax),%rax\n\tmovq 0x30(%rax),%rax\n\tret");
-
-#else
-
-/***********************************************************************
- *		SetLastError (KERNEL32.@)
- */
-/* void WINAPI SetLastError( DWORD error ); */
-__ASM_STDCALL_FUNC( SetLastError, 8, ".byte 0x65\n\tmovl %ecx,0x68\n\tret" );
-
-/***********************************************************************
- *		GetLastError (KERNEL32.@)
- */
-/* DWORD WINAPI GetLastError(void); */
-__ASM_STDCALL_FUNC( GetLastError, 0, ".byte 0x65\n\tmovl 0x68,%eax\n\tret" );
-
-/***********************************************************************
- *		GetCurrentProcessId (KERNEL32.@)
- */
-/* DWORD WINAPI GetCurrentProcessId(void) */
-__ASM_STDCALL_FUNC( GetCurrentProcessId, 0, ".byte 0x65\n\tmovl 0x40,%eax\n\tret" );
-
-/***********************************************************************
- *		GetCurrentThreadId (KERNEL32.@)
- */
-/* DWORD WINAPI GetCurrentThreadId(void) */
-__ASM_STDCALL_FUNC( GetCurrentThreadId, 0, ".byte 0x65\n\tmovl 0x48,%eax\n\tret" );
-
-/***********************************************************************
- *		GetProcessHeap (KERNEL32.@)
- */
-/* HANDLE WINAPI GetProcessHeap(void) */
-__ASM_STDCALL_FUNC( GetProcessHeap, 0, ".byte 0x65\n\tmovq 0x60,%rax\n\tmovq 0x30(%rax),%rax\n\tret");
-
-#endif /* __APPLE__ */
-
-#else  /* __x86_64__ */
-
 /**********************************************************************
  *		SetLastError (KERNEL32.@)
  *
@@ -847,10 +781,18 @@ __ASM_STDCALL_FUNC( GetProcessHeap, 0, ".byte 0x65\n\tmovq 0x60,%rax\n\tmovq 0x3
  * RETURNS
  * Nothing.
  */
-void WINAPI SetLastError( DWORD error ) /* [in] Per-thread error code */
+void WINAPI KERNEL32_SetLastError( DWORD error ) /* [in] Per-thread error code */
 {
     NtCurrentTeb()->LastErrorValue = error;
 }
+
+#ifdef __i386_on_x86_64__
+__ASM_THUNK_STDCALL( KERNEL32_SetLastError, 4,
+                     "movl 4(%esp),%eax\n\t"
+                     ".byte 0x64\n\t"
+                     "movl %eax,0x34\n\t"
+                     "ret $4" )
+#endif
 
 /**********************************************************************
  *              GetLastError (KERNEL32.@)
@@ -860,10 +802,15 @@ void WINAPI SetLastError( DWORD error ) /* [in] Per-thread error code */
  * RETURNS
  *  last-error code.
  */
-DWORD WINAPI GetLastError(void)
+DWORD WINAPI KERNEL32_GetLastError(void)
 {
     return NtCurrentTeb()->LastErrorValue;
 }
+
+#ifdef __i386_on_x86_64__
+__ASM_THUNK_STDCALL( KERNEL32_GetLastError, 0, ".byte 0x64\n\tmovl 0x34,%eax\n\tret" )
+#endif
+
 
 /***********************************************************************
  *		GetCurrentProcessId (KERNEL32.@)
@@ -873,10 +820,14 @@ DWORD WINAPI GetLastError(void)
  * RETURNS
  *  current process identifier
  */
-DWORD WINAPI GetCurrentProcessId(void)
+DWORD WINAPI KERNEL32_GetCurrentProcessId(void)
 {
     return HandleToULong(NtCurrentTeb()->ClientId.UniqueProcess);
 }
+
+#ifdef __i386_on_x86_64__
+__ASM_THUNK_STDCALL( KERNEL32_GetCurrentProcessId, 0, ".byte 0x64\n\tmovl 0x20,%eax\n\tret" )
+#endif
 
 /***********************************************************************
  *		GetCurrentThreadId (KERNEL32.@)
@@ -886,20 +837,26 @@ DWORD WINAPI GetCurrentProcessId(void)
  * RETURNS
  *  current thread identifier
  */
-DWORD WINAPI GetCurrentThreadId(void)
+DWORD WINAPI KERNEL32_GetCurrentThreadId(void)
 {
     return HandleToULong(NtCurrentTeb()->ClientId.UniqueThread);
 }
 
+#ifdef __i386_on_x86_64__
+__ASM_THUNK_STDCALL( KERNEL32_GetCurrentThreadId, 0, ".byte 0x64\n\tmovl 0x24,%eax\n\tret" )
+#endif
+
 /***********************************************************************
  *           GetProcessHeap    (KERNEL32.@)
  */
-HANDLE WINAPI GetProcessHeap(void)
+HANDLE WINAPI KERNEL32_GetProcessHeap(void)
 {
     return NtCurrentTeb()->Peb->ProcessHeap;
 }
 
-#endif  /* __i386__ */
+#ifdef __i386_on_x86_64__
+__ASM_THUNK_STDCALL( KERNEL32_GetProcessHeap, 0, ".byte 0x64\n\tmovl 0x30,%eax\n\tmovl 0x18(%eax),%eax\n\tret")
+#endif
 
 /*************************************************************************
  *              rtlmode_to_win32mode

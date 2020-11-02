@@ -18,12 +18,16 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep unix
+#endif
+
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
 
-int main( int argc, char *argv[] )
+int __cdecl main( int argc, char *argv[] )
 {
     STARTUPINFOA info;
     char *cmdline = GetCommandLineA();

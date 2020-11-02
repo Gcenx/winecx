@@ -164,6 +164,7 @@
 #include "wine/debug.h"
 #include "wine/exception.h"
 #include "wine/unicode.h"
+#include "wine/heap.h"
 
 #if defined(linux) && !defined(IP_UNICAST_IF)
 #define IP_UNICAST_IF 50
@@ -248,7 +249,7 @@ static struct interface_filter generic_interface_filter = {
 };
 #endif /* LINUX_BOUND_IF */
 
-extern ssize_t CDECL __wine_locked_recvmsg( int fd, struct msghdr *hdr, int flags );
+extern ssize_t CDECL __wine_locked_recvmsg( int fd, struct msghdr * WIN32PTR hdr, int flags );
 
 /*
  * The actual definition of WSASendTo, wrapped in a different function name
@@ -640,9 +641,9 @@ static INT num_startup;          /* reference counter */
 static FARPROC blocking_hook = (FARPROC)WSA_DefaultBlockingHook;
 
 /* function prototypes */
-static struct WS_hostent *WS_create_he(char *name, int aliases, int aliases_size, int addresses, int address_length);
+static struct WS_hostent *WS_create_he(char * HOSTPTR name, int aliases, int aliases_size, int addresses, int address_length);
 static struct WS_hostent *WS_dup_he(const struct hostent* p_he);
-static struct WS_protoent *WS_create_pe( const char *name, char **aliases, int prot );
+static struct WS_protoent *WS_create_pe( const char * HOSTPTR name, char * HOSTPTR * HOSTPTR aliases, int prot );
 static struct WS_servent *WS_dup_se(const struct servent* p_se);
 static int ws_protocol_info(SOCKET s, int unicode, WSAPROTOCOL_INFOW *buffer, int *size);
 
@@ -845,6 +846,8 @@ static inline WSACMSGHDR *fill_control_message(int level, int type, WSACMSGHDR *
 }
 #endif /* IP_PKTINFO */
 
+#include "wine/hostptraddrspace_enter.h"
+
 static inline int convert_control_headers(struct msghdr *hdr, WSABUF *control)
 {
 #ifdef IP_PKTINFO
@@ -870,7 +873,7 @@ static inline int convert_control_headers(struct msghdr *hdr, WSABUF *control)
                         memcpy(&data_win.ipi_addr,&data_unix->ipi_addr.s_addr,4); /* 4 bytes = 32 address bits */
                         data_win.ipi_ifindex = data_unix->ipi_ifindex;
                         ptr = fill_control_message(WS_IPPROTO_IP, WS_IP_PKTINFO, ptr, &ctlsize,
-                                                   (void*)&data_win, sizeof(data_win));
+                                                   &data_win, sizeof(data_win));
                         if (!ptr) goto error;
                     }   break;
                     default:
@@ -893,6 +896,9 @@ error:
     return 1;
 #endif /* IP_PKTINFO */
 }
+
+#include "wine/hostptraddrspace_exit.h"
+
 #endif /* HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS */
 
 /* ----------------------------------- error handling */
@@ -1343,7 +1349,7 @@ static void free_per_thread_data(void)
     HeapFree( GetProcessHeap(), 0, ptb->he_buffer );
     HeapFree( GetProcessHeap(), 0, ptb->se_buffer );
     HeapFree( GetProcessHeap(), 0, ptb->pe_buffer );
-    HeapFree( GetProcessHeap(), 0, ptb->fd_cache );
+    HeapFree( GetProcessHeap(), 0, ADDRSPACECAST(void *, ptb->fd_cache) );
 
     HeapFree( GetProcessHeap(), 0, ptb );
     NtCurrentTeb()->WinSockData = NULL;
@@ -2634,6 +2640,12 @@ static int WS2_send( int fd, struct ws2_async *wsa, int flags )
 
     while ((ret = sendmsg(fd, &hdr, flags)) == -1)
     {
+        if (errno == EISCONN)
+        {
+            hdr.msg_name = 0;
+            hdr.msg_namelen = 0;
+            continue;
+        }
         if (errno != EINTR)
             return -1;
     }
@@ -2643,7 +2655,7 @@ static int WS2_send( int fd, struct ws2_async *wsa, int flags )
         n -= wsa->iovec[wsa->first_iovec++].iov_len;
     if (wsa->first_iovec < wsa->n_iovecs)
     {
-        wsa->iovec[wsa->first_iovec].iov_base = (char*)wsa->iovec[wsa->first_iovec].iov_base + n;
+        wsa->iovec[wsa->first_iovec].iov_base = (char* HOSTPTR)wsa->iovec[wsa->first_iovec].iov_base + n;
         wsa->iovec[wsa->first_iovec].iov_len -= n;
     }
     return ret;
@@ -2828,15 +2840,16 @@ static BOOL WINAPI WS2_AcceptEx(SOCKET listener, SOCKET acceptor, PVOID dest, DW
     TRACE("(%04lx, %04lx, %p, %d, %d, %d, %p, %p)\n", listener, acceptor, dest, dest_len, local_addr_len,
                                                   rem_addr_len, received, overlapped);
 
-    if (!dest)
-    {
-        SetLastError(WSAEINVAL);
-        return FALSE;
-    }
-
     if (!overlapped)
     {
         SetLastError(WSA_INVALID_PARAMETER);
+        return FALSE;
+    }
+    overlapped->Internal = STATUS_PENDING;
+
+    if (!dest)
+    {
+        SetLastError(WSAEINVAL);
         return FALSE;
     }
 
@@ -5285,7 +5298,7 @@ static struct pollfd *fd_sets_to_poll( const WS_fd_set *readfds, const WS_fd_set
             SetLastError( ERROR_NOT_ENOUGH_MEMORY );
             return NULL;
         }
-        HeapFree(GetProcessHeap(), 0, ptb->fd_cache);
+        HeapFree(GetProcessHeap(), 0, ADDRSPACECAST(void *, ptb->fd_cache));
         ptb->fd_cache = fds;
         ptb->fd_count = count;
     }
@@ -5507,7 +5520,7 @@ int WINAPI WS_select(int nfds, WS_fd_set *ws_readfds,
 int WINAPI WSAPoll(WSAPOLLFD *wfds, ULONG count, int timeout)
 {
     int i, ret;
-    struct pollfd *ufds;
+    struct pollfd * WIN32PTR ufds;
 
     if (!count)
     {
@@ -6304,9 +6317,9 @@ struct WS_hostent* WINAPI WS_gethostbyaddr(const char *addr, int len, int type)
  * Comparison function for qsort(), for sorting two routes (struct route)
  * by metric in ascending order.
  */
-static int WS_compare_routes_by_metric_asc(const void *left, const void *right)
+static int WS_compare_routes_by_metric_asc(const void * HOSTPTR left, const void * HOSTPTR right)
 {
-    const struct route *a = left, *b = right;
+    const struct route * HOSTPTR a = left, * HOSTPTR b = right;
     if (a->default_route && b->default_route)
         return a->default_route - b->default_route;
     if (a->default_route && !b->default_route)
@@ -6345,8 +6358,7 @@ static struct WS_hostent* WS_get_local_ips( char *hostname )
         return NULL;
     adapters = HeapAlloc(GetProcessHeap(), 0, adap_size);
     routes = HeapAlloc(GetProcessHeap(), 0, route_size);
-    route_addrs = HeapAlloc(GetProcessHeap(), 0, 0); /* HeapReAlloc doesn't work on NULL */
-    if (adapters == NULL || routes == NULL || route_addrs == NULL)
+    if (adapters == NULL || routes == NULL)
         goto cleanup;
     /* Obtain the adapter list and the full routing table */
     if (GetAdaptersInfo(adapters, &adap_size) != NO_ERROR)
@@ -6379,7 +6391,7 @@ static struct WS_hostent* WS_get_local_ips( char *hostname )
         }
         if (exists)
             continue;
-        route_addrs = HeapReAlloc(GetProcessHeap(), 0, route_addrs, (numroutes+1)*sizeof(struct route));
+        route_addrs = heap_realloc(route_addrs, (numroutes+1)*sizeof(struct route));
         if (route_addrs == NULL)
             goto cleanup; /* Memory allocation error, fail gracefully */
         route_addrs[numroutes].interface = ifindex;
@@ -6501,7 +6513,7 @@ struct WS_hostent* WINAPI WS_gethostbyname(const char* name)
 }
 
 
-static const struct { int prot; const char *names[3]; } protocols[] =
+static const struct { int prot; const char * HOSTPTR names[3]; } protocols[] =
 {
     {   0, { "ip", "IP" }},
     {   1, { "icmp", "ICMP" }},
@@ -6575,8 +6587,8 @@ struct WS_protoent* WINAPI WS_getprotobyname(const char* name)
         unsigned int i;
         for (i = 0; i < ARRAY_SIZE(protocols); i++)
         {
-            if (strcasecmp( protocols[i].names[0], name )) continue;
-            retval = WS_create_pe( protocols[i].names[0], (char **)protocols[i].names + 1,
+            if (_strnicmp( protocols[i].names[0], name, -1 )) continue;
+            retval = WS_create_pe( protocols[i].names[0], (char * HOSTPTR *)protocols[i].names + 1,
                                    protocols[i].prot );
             break;
         }
@@ -6610,7 +6622,7 @@ struct WS_protoent* WINAPI WS_getprotobynumber(int number)
         for (i = 0; i < ARRAY_SIZE(protocols); i++)
         {
             if (protocols[i].prot != number) continue;
-            retval = WS_create_pe( protocols[i].names[0], (char **)protocols[i].names + 1,
+            retval = WS_create_pe( protocols[i].names[0], (char * HOSTPTR *)protocols[i].names + 1,
                                    protocols[i].prot );
             break;
         }
@@ -7164,7 +7176,7 @@ end:
  *		GetAddrInfoExW		(WS2_32.@)
  */
 int WINAPI GetAddrInfoExW(const WCHAR *name, const WCHAR *servname, DWORD namespace, GUID *namespace_id,
-        const ADDRINFOEXW *hints, ADDRINFOEXW **result, struct timeval *timeout, OVERLAPPED *overlapped,
+        const ADDRINFOEXW *hints, ADDRINFOEXW **result, struct WS_timeval *timeout, OVERLAPPED *overlapped,
         LPLOOKUPSERVICE_COMPLETION_ROUTINE completion_routine, HANDLE *handle)
 {
     int ret;
@@ -7841,7 +7853,7 @@ INT WINAPI WSAUnhookBlockingHook(void)
  * pointers (via a template of some kind).
  */
 
-static int list_size(char** l, int item_size)
+static int list_size(char* HOSTPTR * HOSTPTR l, int item_size)
 {
   int i,j = 0;
   if(l)
@@ -7851,7 +7863,7 @@ static int list_size(char** l, int item_size)
   return j;
 }
 
-static int list_dup(char** l_src, char** l_to, int item_size)
+static int list_dup(char* HOSTPTR * HOSTPTR l_src, char** l_to, int item_size)
 {
    char *p;
    int i;
@@ -7882,7 +7894,7 @@ static int list_dup(char** l_src, char** l_to, int item_size)
  * the list has no items ("aliases" and "addresses" must be
  * at least "1", a truly empty list is invalid).
  */
-static struct WS_hostent *WS_create_he(char *name, int aliases, int aliases_size, int addresses, int address_length)
+static struct WS_hostent *WS_create_he(char * HOSTPTR name, int aliases, int aliases_size, int addresses, int address_length)
 {
     struct WS_hostent *p_to;
     char *p;
@@ -7958,7 +7970,7 @@ static struct WS_hostent *WS_dup_he(const struct hostent* p_he)
 
 /* ----- protoent */
 
-static struct WS_protoent *WS_create_pe( const char *name, char **aliases, int prot )
+static struct WS_protoent *WS_create_pe( const char * HOSTPTR name, char * HOSTPTR * HOSTPTR aliases, int prot )
 {
     struct WS_protoent *ret;
     unsigned int size = sizeof(*ret) + strlen(name) + sizeof(char *) + list_size(aliases, 0);
@@ -8379,13 +8391,13 @@ PCSTR WINAPI WS_inet_ntop( INT family, PVOID addr, PSTR buffer, SIZE_T len )
     case WS_AF_INET:
     {
         in = addr;
-        pdst = inet_ntop( AF_INET, &in->WS_s_addr, buffer, len );
+        pdst = ADDRSPACECAST(PCSTR, inet_ntop( AF_INET, &in->WS_s_addr, buffer, len ));
         break;
     }
     case WS_AF_INET6:
     {
         in6 = addr;
-        pdst = inet_ntop( AF_INET6, in6->WS_s6_addr, buffer, len );
+        pdst = ADDRSPACECAST(PCSTR, inet_ntop( AF_INET6, in6->WS_s6_addr, buffer, len ));
         break;
     }
     default:

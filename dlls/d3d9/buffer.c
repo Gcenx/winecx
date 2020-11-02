@@ -18,7 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
 #include "d3d9_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d9);
@@ -190,6 +189,7 @@ static HRESULT WINAPI d3d9_vertexbuffer_Lock(IDirect3DVertexBuffer9 *iface, UINT
         void **data, DWORD flags)
 {
     struct d3d9_vertexbuffer *buffer = impl_from_IDirect3DVertexBuffer9(iface);
+    struct wined3d_resource *wined3d_resource;
     struct wined3d_map_desc wined3d_map_desc;
     struct wined3d_box wined3d_box = {0};
     HRESULT hr;
@@ -200,8 +200,9 @@ static HRESULT WINAPI d3d9_vertexbuffer_Lock(IDirect3DVertexBuffer9 *iface, UINT
     wined3d_box.left = offset;
     wined3d_box.right = offset + size;
     wined3d_mutex_lock();
-    hr = wined3d_resource_map(wined3d_buffer_get_resource(buffer->wined3d_buffer),
-            0, &wined3d_map_desc, &wined3d_box, wined3dmapflags_from_d3dmapflags(flags));
+    wined3d_resource = wined3d_buffer_get_resource(buffer->wined3d_buffer);
+    hr = wined3d_resource_map(wined3d_resource, 0, &wined3d_map_desc, &wined3d_box,
+            wined3dmapflags_from_d3dmapflags(flags, buffer->usage));
     wined3d_mutex_unlock();
     *data = wined3d_map_desc.data;
 
@@ -237,7 +238,7 @@ static HRESULT WINAPI d3d9_vertexbuffer_GetDesc(IDirect3DVertexBuffer9 *iface,
 
     desc->Format = D3DFMT_VERTEXDATA;
     desc->Type = D3DRTYPE_VERTEXBUFFER;
-    desc->Usage = d3dusage_from_wined3dusage(wined3d_desc.usage, wined3d_desc.bind_flags);
+    desc->Usage = buffer->usage;
     desc->Pool = d3dpool_from_wined3daccess(wined3d_desc.access, wined3d_desc.usage);
     desc->Size = wined3d_desc.size;
     desc->FVF = buffer->fvf;
@@ -306,13 +307,16 @@ HRESULT vertexbuffer_init(struct d3d9_vertexbuffer *buffer, struct d3d9_device *
 
     buffer->IDirect3DVertexBuffer9_iface.lpVtbl = &d3d9_vertexbuffer_vtbl;
     buffer->fvf = fvf;
+    buffer->usage = usage;
     d3d9_resource_init(&buffer->resource);
 
     desc.byte_width = size;
     desc.usage = usage & WINED3DUSAGE_MASK;
     desc.bind_flags = 0;
-    desc.access = wined3daccess_from_d3dpool(pool, usage)
-            | WINED3D_RESOURCE_ACCESS_MAP_R | WINED3D_RESOURCE_ACCESS_MAP_W;
+    desc.access = wined3daccess_from_d3dpool(pool, usage) | map_access_from_usage(usage);
+    /* Buffers are always readable. */
+    if (pool != D3DPOOL_DEFAULT)
+        desc.access |= WINED3D_RESOURCE_ACCESS_MAP_R | WINED3D_RESOURCE_ACCESS_MAP_W;
     desc.misc_flags = 0;
     desc.structure_byte_stride = 0;
 
@@ -521,6 +525,7 @@ static HRESULT WINAPI d3d9_indexbuffer_Lock(IDirect3DIndexBuffer9 *iface,
         UINT offset, UINT size, void **data, DWORD flags)
 {
     struct d3d9_indexbuffer *buffer = impl_from_IDirect3DIndexBuffer9(iface);
+    struct wined3d_resource *wined3d_resource;
     struct wined3d_map_desc wined3d_map_desc;
     struct wined3d_box wined3d_box = {0};
     HRESULT hr;
@@ -531,8 +536,9 @@ static HRESULT WINAPI d3d9_indexbuffer_Lock(IDirect3DIndexBuffer9 *iface,
     wined3d_box.left = offset;
     wined3d_box.right = offset + size;
     wined3d_mutex_lock();
-    hr = wined3d_resource_map(wined3d_buffer_get_resource(buffer->wined3d_buffer),
-            0, &wined3d_map_desc, &wined3d_box, wined3dmapflags_from_d3dmapflags(flags));
+    wined3d_resource = wined3d_buffer_get_resource(buffer->wined3d_buffer);
+    hr = wined3d_resource_map(wined3d_resource, 0, &wined3d_map_desc, &wined3d_box,
+            wined3dmapflags_from_d3dmapflags(flags, buffer->usage));
     wined3d_mutex_unlock();
     *data = wined3d_map_desc.data;
 
@@ -567,7 +573,7 @@ static HRESULT WINAPI d3d9_indexbuffer_GetDesc(IDirect3DIndexBuffer9 *iface, D3D
 
     desc->Format = d3dformat_from_wined3dformat(buffer->format);
     desc->Type = D3DRTYPE_INDEXBUFFER;
-    desc->Usage = d3dusage_from_wined3dusage(wined3d_desc.usage, wined3d_desc.bind_flags);
+    desc->Usage = buffer->usage;
     desc->Pool = d3dpool_from_wined3daccess(wined3d_desc.access, wined3d_desc.usage);
     desc->Size = wined3d_desc.size;
 
@@ -633,8 +639,10 @@ HRESULT indexbuffer_init(struct d3d9_indexbuffer *buffer, struct d3d9_device *de
     desc.byte_width = size;
     desc.usage = (usage & WINED3DUSAGE_MASK) | WINED3DUSAGE_STATICDECL;
     desc.bind_flags = 0;
-    desc.access = wined3daccess_from_d3dpool(pool, usage)
-            | WINED3D_RESOURCE_ACCESS_MAP_R | WINED3D_RESOURCE_ACCESS_MAP_W;
+    desc.access = wined3daccess_from_d3dpool(pool, usage) | map_access_from_usage(usage);
+    /* Buffers are always readable. */
+    if (pool != D3DPOOL_DEFAULT)
+        desc.access |= WINED3D_RESOURCE_ACCESS_MAP_R | WINED3D_RESOURCE_ACCESS_MAP_W;
     desc.misc_flags = 0;
     desc.structure_byte_stride = 0;
 
@@ -646,6 +654,7 @@ HRESULT indexbuffer_init(struct d3d9_indexbuffer *buffer, struct d3d9_device *de
 
     buffer->IDirect3DIndexBuffer9_iface.lpVtbl = &d3d9_indexbuffer_vtbl;
     buffer->format = wined3dformat_from_d3dformat(format);
+    buffer->usage = usage;
     d3d9_resource_init(&buffer->resource);
 
     wined3d_mutex_lock();

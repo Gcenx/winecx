@@ -32,7 +32,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(enhmetafile);
 
-static BOOL EMFDRV_DeleteDC( PHYSDEV dev );
+static BOOL CDECL EMFDRV_DeleteDC( PHYSDEV dev );
 
 static const struct gdi_dc_funcs emfdrv_driver =
 {
@@ -73,6 +73,7 @@ static const struct gdi_dc_funcs emfdrv_driver =
     NULL,                            /* pGetCharABCWidths */
     NULL,                            /* pGetCharABCWidthsI */
     NULL,                            /* pGetCharWidth */
+    NULL,                            /* pGetCharWidthInfo */
     EMFDRV_GetDeviceCaps,            /* pGetDeviceCaps */
     NULL,                            /* pGetDeviceGammaRamp */
     NULL,                            /* pGetFontData */
@@ -171,7 +172,7 @@ static const struct gdi_dc_funcs emfdrv_driver =
 /**********************************************************************
  *	     EMFDRV_DeleteDC
  */
-static BOOL EMFDRV_DeleteDC( PHYSDEV dev )
+static BOOL CDECL EMFDRV_DeleteDC( PHYSDEV dev )
 {
     EMFDRV_PDEVICE *physDev = get_emf_physdev( dev );
     UINT index;

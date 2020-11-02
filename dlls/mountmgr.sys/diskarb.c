@@ -37,10 +37,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(mountmgr);
 
 #ifdef HAVE_DISKARBITRATION_DISKARBITRATION_H
 
-static void appeared_callback( DADiskRef disk, void *context )
+static void appeared_callback( DADiskRef disk, void * HOSTPTR context )
 {
     CFDictionaryRef dict = DADiskCopyDescription( disk );
-    const void *ref;
+    const void * HOSTPTR ref;
     char device[64];
     char mount_point[PATH_MAX];
     GUID guid, *guid_ptr = NULL;
@@ -88,15 +88,15 @@ done:
     CFRelease( dict );
 }
 
-static void changed_callback( DADiskRef disk, CFArrayRef keys, void *context )
+static void changed_callback( DADiskRef disk, CFArrayRef keys, void * HOSTPTR context )
 {
     appeared_callback( disk, context );
 }
 
-static void disappeared_callback( DADiskRef disk, void *context )
+static void disappeared_callback( DADiskRef disk, void * HOSTPTR context )
 {
     CFDictionaryRef dict = DADiskCopyDescription( disk );
-    const void *ref;
+    const void * HOSTPTR ref;
     char device[100];
 
     if (!dict) return;

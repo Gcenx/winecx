@@ -36,7 +36,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
-static const WCHAR wcsOutputPinName[] = {'o','u','t','p','u','t',' ','p','i','n',0};
+static const WCHAR outputW[] = {'o','u','t','p','u','t',0};
 
 typedef struct WAVEParserImpl
 {
@@ -102,7 +102,7 @@ static HRESULT WAVEParser_Sample(LPVOID iface, IMediaSample * pSample, DWORD_PTR
         return S_OK;
     }
 
-    pOutputPin = unsafe_impl_Parser_OutputPin_from_IPin(This->Parser.ppPins[1]);
+    pOutputPin = This->Parser.sources[0];
 
     if (SUCCEEDED(hr))
         hr = IMemAllocator_GetBuffer(pin->pAlloc, &newsample, NULL, NULL, 0);
@@ -161,7 +161,7 @@ static HRESULT WAVEParser_Sample(LPVOID iface, IMediaSample * pSample, DWORD_PTR
 
             TRACE("Send End Of Stream to output pin %u\n", i);
 
-            hr = IPin_ConnectedTo(This->Parser.ppPins[i+1], &ppin);
+            hr = IPin_ConnectedTo(&This->Parser.sources[i]->pin.pin.IPin_iface, &ppin);
             if (SUCCEEDED(hr))
             {
                 hr = IPin_EndOfStream(ppin);
@@ -196,8 +196,8 @@ static HRESULT WINAPI WAVEParserImpl_seek(IMediaSeeking *iface)
 {
     WAVEParserImpl *This = impl_from_IMediaSeeking(iface);
     PullPin *pPin = This->Parser.pInputPin;
-    IPin *victim = NULL;
     LONGLONG newpos, curpos, endpos, bytepos;
+    IPin *peer;
 
     newpos = This->Parser.sourceSeeking.llCurrent;
     curpos = bytepos_to_duration(This, pPin->rtCurrent);
@@ -225,15 +225,12 @@ static HRESULT WINAPI WAVEParserImpl_seek(IMediaSeeking *iface)
 
     /* Make sure this is done while stopped, BeginFlush takes care of this */
     EnterCriticalSection(&This->Parser.filter.csFilter);
-    IPin_ConnectedTo(This->Parser.ppPins[1], &victim);
-    if (victim)
-    {
-        IPin_NewSegment(victim, newpos, endpos, pPin->dRate);
-        IPin_Release(victim);
-    }
+
+    if ((peer = This->Parser.sources[0]->pin.pin.pConnectedTo))
+        IPin_NewSegment(peer, newpos, endpos, pPin->dRate);
 
     pPin->rtStart = pPin->rtCurrent = bytepos;
-    unsafe_impl_Parser_OutputPin_from_IPin(This->Parser.ppPins[1])->dwSamplesProcessed = 0;
+    This->Parser.sources[0]->dwSamplesProcessed = 0;
     LeaveCriticalSection(&This->Parser.filter.csFilter);
 
     TRACE("Done flushing\n");
@@ -256,7 +253,7 @@ static HRESULT WAVEParser_InputPin_PreConnect(IPin * iface, IPin * pConnectPin, 
 
     piOutput.dir = PINDIR_OUTPUT;
     piOutput.pFilter = &pWAVEParser->Parser.filter.IBaseFilter_iface;
-    lstrcpynW(piOutput.achName, wcsOutputPinName, ARRAY_SIZE(piOutput.achName));
+    lstrcpynW(piOutput.achName, outputW, ARRAY_SIZE(piOutput.achName));
 
     hr = IAsyncReader_SyncRead(This->pReader, pos, sizeof(list), (BYTE *)&list);
     pos += sizeof(list);
@@ -287,29 +284,27 @@ static HRESULT WAVEParser_InputPin_PreConnect(IPin * iface, IPin * pConnectPin, 
 
     amt.majortype = MEDIATYPE_Audio;
     amt.formattype = FORMAT_WaveFormatEx;
-    amt.cbFormat = chunk.cb;
-    amt.pbFormat = CoTaskMemAlloc(amt.cbFormat);
+    amt.bFixedSizeSamples = TRUE;
+    amt.bTemporalCompression = FALSE;
+    amt.lSampleSize = 1;
     amt.pUnk = NULL;
-    IAsyncReader_SyncRead(This->pReader, pos, amt.cbFormat, amt.pbFormat);
+    amt.cbFormat = max(chunk.cb, sizeof(WAVEFORMATEX));
+    amt.pbFormat = CoTaskMemAlloc(amt.cbFormat);
+    memset(amt.pbFormat, 0, amt.cbFormat);
+    IAsyncReader_SyncRead(This->pReader, pos, chunk.cb, amt.pbFormat);
     amt.subtype = MEDIATYPE_Audio;
     amt.subtype.Data1 = ((WAVEFORMATEX*)amt.pbFormat)->wFormatTag;
 
     pos += chunk.cb;
     hr = IAsyncReader_SyncRead(This->pReader, pos, sizeof(chunk), (BYTE *)&chunk);
-    if (chunk.fcc == mmioFOURCC('f','a','c','t'))
+    while (chunk.fcc != mmioFOURCC('d','a','t','a'))
     {
-        FIXME("'fact' chunk not supported yet\n");
-	pos += sizeof(chunk) + chunk.cb;
-	hr = IAsyncReader_SyncRead(This->pReader, pos, sizeof(chunk), (BYTE *)&chunk);
+        FIXME("Ignoring %s chunk.\n", debugstr_fourcc(chunk.fcc));
+        pos += sizeof(chunk) + chunk.cb;
+        hr = IAsyncReader_SyncRead(This->pReader, pos, sizeof(chunk), (BYTE *)&chunk);
+        if (hr != S_OK)
+            return E_FAIL;
     }
-    if (chunk.fcc != mmioFOURCC('d','a','t','a'))
-    {
-        ERR("Expected 'data' chunk, but got %.04s\n", (LPSTR)&chunk.fcc);
-        return E_FAIL;
-    }
-
-    if (hr != S_OK)
-        return E_FAIL;
 
     pWAVEParser->StartOfFile = MEDIATIME_FROM_BYTES(pos + sizeof(RIFFCHUNK));
     pWAVEParser->EndOfFile = MEDIATIME_FROM_BYTES(pos + chunk.cb + sizeof(RIFFCHUNK));
@@ -366,7 +361,6 @@ static HRESULT WAVEParser_first_request(LPVOID iface)
         LONGLONG rtSampleStart = pin->rtNext;
         /* Add 4 for the next header, which should hopefully work */
         LONGLONG rtSampleStop = rtSampleStart + MEDIATIME_FROM_BYTES(IMediaSample_GetSize(sample));
-        Parser_OutputPin *outpin = unsafe_impl_Parser_OutputPin_from_IPin(This->Parser.ppPins[1]);
 
         if (rtSampleStop > pin->rtStop)
             rtSampleStop = MEDIATIME_FROM_BYTES(ALIGNUP(BYTES_FROM_MEDIATIME(pin->rtStop), pin->cbAlign));
@@ -377,7 +371,7 @@ static HRESULT WAVEParser_first_request(LPVOID iface)
         pin->rtNext = rtSampleStop;
 
         IMediaSample_SetPreroll(sample, FALSE);
-        if (!outpin->dwSamplesProcessed++)
+        if (!This->Parser.sources[0]->dwSamplesProcessed++)
             IMediaSample_SetDiscontinuity(sample, TRUE);
         else
             IMediaSample_SetDiscontinuity(sample, FALSE);
@@ -398,44 +392,55 @@ static HRESULT WAVEParser_disconnect(LPVOID iface)
 
 static const IBaseFilterVtbl WAVEParser_Vtbl =
 {
-    Parser_QueryInterface,
-    Parser_AddRef,
-    Parser_Release,
-    Parser_GetClassID,
+    BaseFilterImpl_QueryInterface,
+    BaseFilterImpl_AddRef,
+    BaseFilterImpl_Release,
+    BaseFilterImpl_GetClassID,
     Parser_Stop,
     Parser_Pause,
     Parser_Run,
     Parser_GetState,
     Parser_SetSyncSource,
-    Parser_GetSyncSource,
-    Parser_EnumPins,
+    BaseFilterImpl_GetSyncSource,
+    BaseFilterImpl_EnumPins,
     BaseFilterImpl_FindPin,
-    Parser_QueryFilterInfo,
-    Parser_JoinFilterGraph,
-    Parser_QueryVendorInfo
+    BaseFilterImpl_QueryFilterInfo,
+    BaseFilterImpl_JoinFilterGraph,
+    BaseFilterImpl_QueryVendorInfo,
 };
 
-HRESULT WAVEParser_create(IUnknown * pUnkOuter, LPVOID * ppv)
+static void wave_parser_destroy(BaseFilter *iface)
 {
+    WAVEParserImpl *filter = impl_from_IBaseFilter(&iface->IBaseFilter_iface);
+    Parser_Destroy(&filter->Parser);
+}
+
+static const BaseFilterFuncTable wave_parser_func_table =
+{
+    .filter_get_pin = parser_get_pin,
+    .filter_destroy = wave_parser_destroy,
+};
+
+HRESULT WAVEParser_create(IUnknown *outer, void **out)
+{
+    static const WCHAR sink_name[] = {'i','n','p','u','t',' ','p','i','n',0};
     HRESULT hr;
     WAVEParserImpl * This;
 
-    TRACE("(%p, %p)\n", pUnkOuter, ppv);
-
-    *ppv = NULL;
-
-    if (pUnkOuter)
-        return CLASS_E_NOAGGREGATION;
+    *out = NULL;
 
     /* Note: This memory is managed by the transform filter once created */
     This = CoTaskMemAlloc(sizeof(WAVEParserImpl));
 
-    hr = Parser_Create(&(This->Parser), &WAVEParser_Vtbl, &CLSID_WAVEParser, WAVEParser_Sample, WAVEParser_QueryAccept, WAVEParser_InputPin_PreConnect, WAVEParser_Cleanup, WAVEParser_disconnect, WAVEParser_first_request, NULL, NULL, WAVEParserImpl_seek, NULL);
+    hr = Parser_Create(&This->Parser, &WAVEParser_Vtbl, outer, &CLSID_WAVEParser,
+            &wave_parser_func_table, sink_name, WAVEParser_Sample, WAVEParser_QueryAccept,
+            WAVEParser_InputPin_PreConnect, WAVEParser_Cleanup, WAVEParser_disconnect,
+            WAVEParser_first_request, NULL, NULL, WAVEParserImpl_seek, NULL);
 
     if (FAILED(hr))
         return hr;
 
-    *ppv = &This->Parser.filter.IBaseFilter_iface;
+    *out = &This->Parser.filter.IUnknown_inner;
 
     return hr;
 }

@@ -23,7 +23,7 @@
 @ cdecl _ismbbpunct(long) ucrtbase._ismbbpunct
 @ stub _ismbbpunct_l
 @ cdecl _ismbbtrail(long) ucrtbase._ismbbtrail
-@ stub _ismbbtrail_l
+@ cdecl _ismbbtrail_l(long ptr) ucrtbase._ismbbtrail_l
 @ cdecl _ismbcalnum(long) ucrtbase._ismbcalnum
 @ stub _ismbcalnum_l
 @ cdecl _ismbcalpha(long) ucrtbase._ismbcalpha
@@ -39,13 +39,13 @@
 @ cdecl _ismbckata(long) ucrtbase._ismbckata
 @ stub _ismbckata_l
 @ cdecl _ismbcl0(long) ucrtbase._ismbcl0
-@ stub _ismbcl0_l
+@ cdecl _ismbcl0_l(long ptr) ucrtbase._ismbcl0_l
 @ cdecl _ismbcl1(long) ucrtbase._ismbcl1
-@ stub _ismbcl1_l
+@ cdecl _ismbcl1_l(long ptr) ucrtbase._ismbcl1_l
 @ cdecl _ismbcl2(long) ucrtbase._ismbcl2
-@ stub _ismbcl2_l
+@ cdecl _ismbcl2_l(long ptr) ucrtbase._ismbcl2_l
 @ cdecl _ismbclegal(long) ucrtbase._ismbclegal
-@ stub _ismbclegal_l
+@ cdecl _ismbclegal_l(long ptr) ucrtbase._ismbclegal_l
 @ cdecl _ismbclower(long) ucrtbase._ismbclower
 @ stub _ismbclower_l
 @ cdecl _ismbcprint(long) ucrtbase._ismbcprint

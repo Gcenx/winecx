@@ -144,7 +144,7 @@ void SECUR32_deinitSchannelSP(void) DECLSPEC_HIDDEN;
 
 /* Functions from dispatcher.c used elsewhere in the code */
 SECURITY_STATUS fork_helper(PNegoHelper *new_helper, const char *prog,
-        char * const argv[]) DECLSPEC_HIDDEN;
+        char * HOSTPTR const argv[]) DECLSPEC_HIDDEN;
 
 SECURITY_STATUS run_helper(PNegoHelper helper, char *buffer,
         unsigned int max_buflen, int *buflen) DECLSPEC_HIDDEN;
@@ -200,7 +200,7 @@ typedef struct schan_imp_session_opaque *schan_imp_session;
 typedef struct schan_credentials
 {
     ULONG credential_use;
-    void *credentials;
+    void * HOSTPTR credentials;
     DWORD enabled_protocols;
 } schan_credentials;
 
@@ -224,8 +224,8 @@ struct schan_transport
 };
 
 char *schan_get_buffer(const struct schan_transport *t, struct schan_buffers *s, SIZE_T *count) DECLSPEC_HIDDEN;
-extern int schan_pull(struct schan_transport *t, void *buff, size_t *buff_len) DECLSPEC_HIDDEN;
-extern int schan_push(struct schan_transport *t, const void *buff, size_t *buff_len) DECLSPEC_HIDDEN;
+extern int schan_pull(struct schan_transport *t, void * HOSTPTR buff, size_t *buff_len) DECLSPEC_HIDDEN;
+extern int schan_push(struct schan_transport *t, const void * HOSTPTR buff, size_t *buff_len) DECLSPEC_HIDDEN;
 
 extern schan_imp_session schan_session_for_transport(struct schan_transport* t) DECLSPEC_HIDDEN;
 
@@ -244,10 +244,10 @@ extern SECURITY_STATUS schan_imp_get_connection_info(schan_imp_session session,
 extern SECURITY_STATUS schan_imp_get_session_peer_certificate(schan_imp_session session, HCERTSTORE,
                                                               PCCERT_CONTEXT *cert) DECLSPEC_HIDDEN;
 extern SECURITY_STATUS schan_imp_send(schan_imp_session session, const void *buffer,
-                                      SIZE_T *length) DECLSPEC_HIDDEN;
+                                      size_t *length) DECLSPEC_HIDDEN;
 extern SECURITY_STATUS schan_imp_recv(schan_imp_session session, void *buffer,
-                                      SIZE_T *length) DECLSPEC_HIDDEN;
-extern BOOL schan_imp_allocate_certificate_credentials(schan_credentials*) DECLSPEC_HIDDEN;
+                                      size_t *length) DECLSPEC_HIDDEN;
+extern BOOL schan_imp_allocate_certificate_credentials(schan_credentials *, const CERT_CONTEXT *) DECLSPEC_HIDDEN;
 extern void schan_imp_free_certificate_credentials(schan_credentials*) DECLSPEC_HIDDEN;
 extern DWORD schan_imp_enabled_protocols(void) DECLSPEC_HIDDEN;
 extern BOOL schan_imp_init(void) DECLSPEC_HIDDEN;

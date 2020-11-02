@@ -16,6 +16,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "wine/winheader_enter.h"
+
 #ifndef GUID_DEFINED
 #define GUID_DEFINED
 
@@ -158,3 +160,5 @@ inline bool operator!=(const GUID& guidOne, const GUID& guidOther)
 extern const IID GUID_NULL;
 
 #endif /* _GUIDDEF_H_ */
+
+#include "wine/winheader_exit.h"

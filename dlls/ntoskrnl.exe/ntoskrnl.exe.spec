@@ -1,15 +1,17 @@
-@ stdcall -norelay ExAcquireFastMutexUnsafe(ptr)
+@ stdcall -arch=arm,arm64,x86_64 ExAcquireFastMutex(ptr)
+@ stdcall -fastcall ExAcquireFastMutexUnsafe(ptr)
 @ stub ExAcquireRundownProtection
 @ stub ExAcquireRundownProtectionEx
 @ stub ExInitializeRundownProtection
 @ stub ExInterlockedAddLargeStatistic
 @ stub ExInterlockedCompareExchange64
-@ stub ExInterlockedFlushSList
-@ stdcall -norelay ExInterlockedPopEntrySList(ptr ptr) NTOSKRNL_ExInterlockedPopEntrySList
-@ stdcall -norelay ExInterlockedPushEntrySList (ptr ptr ptr) NTOSKRNL_ExInterlockedPushEntrySList
+@ stdcall -fastcall -arch=i386 ExInterlockedFlushSList(ptr) NTOSKRNL_ExInterlockedFlushSList
+@ stdcall -fastcall -arch=i386 ExInterlockedPopEntrySList(ptr ptr) NTOSKRNL_ExInterlockedPopEntrySList
+@ stdcall -fastcall -arch=i386 ExInterlockedPushEntrySList (ptr ptr ptr) NTOSKRNL_ExInterlockedPushEntrySList
 @ stub ExReInitializeRundownProtection
-@ stdcall -norelay ExReleaseFastMutexUnsafe(ptr)
-@ stdcall ExReleaseResourceLite(ptr)
+@ stdcall -arch=arm,arm64,x86_64 ExReleaseFastMutex(ptr)
+@ stdcall -fastcall ExReleaseFastMutexUnsafe(ptr)
+@ stdcall -fastcall ExReleaseResourceLite(ptr)
 @ stub ExReleaseRundownProtection
 @ stub ExReleaseRundownProtectionEx
 @ stub ExRundownCompleted
@@ -22,36 +24,44 @@
 @ stub ExfInterlockedInsertTailList
 @ stub ExfInterlockedPopEntryList
 @ stub ExfInterlockedPushEntryList
-@ stdcall -norelay ExfInterlockedRemoveHeadList(ptr ptr)
+@ stdcall -fastcall -arch=i386 ExfInterlockedRemoveHeadList(ptr ptr)
 @ stub ExfReleasePushLock
 @ stub Exfi386InterlockedDecrementLong
 @ stub Exfi386InterlockedExchangeUlong
 @ stub Exfi386InterlockedIncrementLong
+@ stdcall -arch=win64 ExpInterlockedFlushSList(ptr) RtlInterlockedFlushSList
+@ stdcall -arch=win64 ExpInterlockedPopEntrySList(ptr) RtlInterlockedPopEntrySList
+@ stdcall -arch=win64 ExpInterlockedPushEntrySList(ptr ptr) RtlInterlockedPushEntrySList
 @ stub HalExamineMBR
-@ stdcall -norelay InterlockedCompareExchange(ptr long long) NTOSKRNL_InterlockedCompareExchange
-@ stdcall -norelay InterlockedDecrement(ptr) NTOSKRNL_InterlockedDecrement
-@ stdcall -norelay InterlockedExchange(ptr long) NTOSKRNL_InterlockedExchange
-@ stdcall -norelay InterlockedExchangeAdd(ptr long) NTOSKRNL_InterlockedExchangeAdd
-@ stdcall -norelay InterlockedIncrement(ptr) NTOSKRNL_InterlockedIncrement
-@ stdcall -norelay InterlockedPopEntrySList(ptr) NTOSKRNL_InterlockedPopEntrySList
-@ stdcall -norelay InterlockedPushEntrySList(ptr ptr) NTOSKRNL_InterlockedPushEntrySList
+@ stdcall -fastcall InterlockedCompareExchange(ptr long long) NTOSKRNL_InterlockedCompareExchange
+@ stdcall -fastcall InterlockedDecrement(ptr) NTOSKRNL_InterlockedDecrement
+@ stdcall -fastcall InterlockedExchange(ptr long) NTOSKRNL_InterlockedExchange
+@ stdcall -fastcall InterlockedExchangeAdd(ptr long) NTOSKRNL_InterlockedExchangeAdd
+@ stdcall -fastcall InterlockedIncrement(ptr) NTOSKRNL_InterlockedIncrement
+@ stdcall -fastcall -arch=win32 InterlockedPopEntrySList(ptr) NTOSKRNL_InterlockedPopEntrySList
+@ stdcall -fastcall -arch=win32 InterlockedPushEntrySList(ptr ptr) NTOSKRNL_InterlockedPushEntrySList
+@ stdcall -arch=win64 ExQueryDepthSList(ptr) RtlQueryDepthSList
 @ stub IoAssignDriveLetters
 @ stub IoReadPartitionTable
 @ stub IoSetPartitionInformation
 @ stub IoWritePartitionTable
-@ stdcall -norelay IofCallDriver(ptr ptr)
-@ stdcall -norelay IofCompleteRequest(ptr long)
-@ stdcall -norelay KeAcquireInStackQueuedSpinLock(ptr ptr)
-@ stub KeAcquireInStackQueuedSpinLockAtDpcLevel
-@ stdcall -norelay KeReleaseInStackQueuedSpinLock(ptr)
-@ stub KeReleaseInStackQueuedSpinLockFromDpcLevel
+@ stdcall -fastcall IofCallDriver(ptr ptr)
+@ stdcall -fastcall IofCompleteRequest(ptr long)
+@ stdcall -arch=arm,arm64,x86_64 KeAcquireInStackQueuedSpinLock(ptr ptr)
+@ stdcall -fastcall KeAcquireInStackQueuedSpinLockAtDpcLevel(ptr ptr)
+@ stdcall KeEnterGuardedRegion()
+@ stdcall KeExpandKernelStackAndCallout(ptr ptr long)
+@ stdcall KeExpandKernelStackAndCalloutEx(ptr ptr long long ptr)
+@ stdcall KeLeaveGuardedRegion()
+@ stdcall -arch=arm,arm64,x86_64 KeReleaseInStackQueuedSpinLock(ptr)
+@ stdcall -fastcall KeReleaseInStackQueuedSpinLockFromDpcLevel(ptr)
 @ stub KeSetTimeUpdateNotifyRoutine
 @ stub KefAcquireSpinLockAtDpcLevel
 @ stub KefReleaseSpinLockFromDpcLevel
 @ stub KiAcquireSpinLock
 @ stub KiReleaseSpinLock
-@ stdcall -norelay ObfDereferenceObject(ptr)
-@ stdcall -norelay ObfReferenceObject(ptr)
+@ stdcall -fastcall ObfDereferenceObject(ptr)
+@ stdcall -fastcall ObfReferenceObject(ptr)
 @ stub RtlPrefetchMemoryNonTemporal
 @ cdecl -i386 -norelay RtlUlongByteSwap()
 @ cdecl -ret64 RtlUlonglongByteSwap(int64)
@@ -114,9 +124,9 @@
 @ stdcall DbgQueryDebugFilterState(long long)
 @ stub DbgSetDebugFilterState
 @ stdcall ExAcquireResourceExclusiveLite(ptr long)
-@ stub ExAcquireResourceSharedLite
-@ stub ExAcquireSharedStarveExclusive
-@ stub ExAcquireSharedWaitForExclusive
+@ stdcall ExAcquireResourceSharedLite(ptr long)
+@ stdcall ExAcquireSharedStarveExclusive(ptr long)
+@ stdcall ExAcquireSharedWaitForExclusive(ptr long)
 @ stub ExAllocateFromPagedLookasideList
 @ stdcall ExAllocatePool(long long)
 @ stdcall ExAllocatePoolWithQuota(long long)
@@ -131,17 +141,17 @@
 @ stub ExDesktopObjectType
 @ stub ExDisableResourceBoostLite
 @ stub ExEnumHandleTable
-@ stub ExEventObjectType
+@ extern ExEventObjectType
 @ stub ExExtendZone
-@ stdcall -norelay ExfUnblockPushLock(ptr ptr)
+@ stdcall -fastcall ExfUnblockPushLock(ptr ptr)
 @ stdcall ExFreePool(ptr)
 @ stdcall ExFreePoolWithTag(ptr long)
 @ stub ExFreeToPagedLookasideList
 @ stub ExGetCurrentProcessorCounts
 @ stub ExGetCurrentProcessorCpuUsage
-@ stub ExGetExclusiveWaiterCount
+@ stdcall ExGetExclusiveWaiterCount(ptr)
 @ stub ExGetPreviousMode
-@ stub ExGetSharedWaiterCount
+@ stdcall ExGetSharedWaiterCount(ptr)
 @ stdcall ExInitializeNPagedLookasideList(ptr ptr ptr long long long long)
 @ stdcall ExInitializePagedLookasideList(ptr ptr ptr long long long long)
 @ stdcall ExInitializeResourceLite(ptr)
@@ -158,8 +168,8 @@
 @ stub ExInterlockedPushEntryList
 @ stdcall ExInterlockedRemoveHeadList(ptr ptr)
 @ stub ExIsProcessorFeaturePresent
-@ stub ExIsResourceAcquiredExclusiveLite
-@ stub ExIsResourceAcquiredSharedLite
+@ stdcall ExIsResourceAcquiredExclusiveLite(ptr)
+@ stdcall ExIsResourceAcquiredSharedLite(ptr)
 @ stdcall ExLocalTimeToSystemTime(ptr ptr) RtlLocalTimeToSystemTime
 @ stub ExNotifyCallback
 @ stub ExQueryPoolBlockSize
@@ -172,13 +182,13 @@
 @ stub ExRegisterCallback
 @ stub ExReinitializeResourceLite
 @ stdcall ExReleaseResourceForThreadLite(ptr long)
-@ stub ExSemaphoreObjectType
+@ extern ExSemaphoreObjectType
 @ stub ExSetResourceOwnerPointer
-@ stub ExSetTimerResolution
+@ stdcall ExSetTimerResolution(long long)
 @ stub ExSystemExceptionFilter
 @ stdcall ExSystemTimeToLocalTime(ptr ptr) RtlSystemTimeToLocalTime
 @ stub ExUnregisterCallback
-@ stub ExUuidCreate
+@ stdcall ExUuidCreate(ptr)
 @ stub ExVerifySuite
 @ stub ExWindowStationObjectType
 @ stub Exi386InterlockedDecrementLong
@@ -322,13 +332,13 @@
 @ stub IoAttachDeviceByPointer
 @ stdcall IoAttachDeviceToDeviceStack(ptr ptr)
 @ stub IoAttachDeviceToDeviceStackSafe
-@ stub IoBuildAsynchronousFsdRequest
+@ stdcall IoBuildAsynchronousFsdRequest(long ptr ptr long ptr ptr)
 @ stdcall IoBuildDeviceIoControlRequest(long ptr ptr long ptr long long ptr ptr)
 @ stub IoBuildPartialMdl
 @ stdcall IoBuildSynchronousFsdRequest(long ptr ptr long ptr ptr ptr)
 @ stdcall IoCallDriver(ptr ptr)
 @ stub IoCancelFileOpen
-@ stub IoCancelIrp
+@ stdcall IoCancelIrp(ptr)
 @ stub IoCheckDesiredAccess
 @ stub IoCheckEaBufferValidity
 @ stub IoCheckFunctionAccess
@@ -359,23 +369,23 @@
 @ stdcall IoDeleteDevice(ptr)
 @ stdcall IoDeleteDriver(ptr)
 @ stdcall IoDeleteSymbolicLink(ptr)
-@ stub IoDetachDevice
+@ stdcall IoDetachDevice(ptr)
 @ stub IoDeviceHandlerObjectSize
 @ stub IoDeviceHandlerObjectType
-@ stub IoDeviceObjectType
+@ extern IoDeviceObjectType
 @ stub IoDisconnectInterrupt
-@ stub IoDriverObjectType
+@ extern IoDriverObjectType
 @ stub IoEnqueueIrp
 @ stub IoEnumerateDeviceObjectList
 @ stub IoFastQueryNetworkAttributes
-@ stub IoFileObjectType
+@ extern IoFileObjectType
 @ stub IoForwardAndCatchIrp
 @ stub IoForwardIrpSynchronously
 @ stub IoFreeController
 @ stub IoFreeErrorLogEntry
 @ stdcall IoFreeIrp(ptr)
 @ stdcall IoFreeMdl(ptr)
-@ stub IoFreeWorkItem
+@ stdcall IoFreeWorkItem(ptr)
 @ stdcall IoGetAttachedDevice(ptr)
 @ stdcall IoGetAttachedDeviceReference(ptr)
 @ stub IoGetBaseFileSystemDeviceObject
@@ -398,7 +408,7 @@
 @ stub IoGetRequestorProcess
 @ stub IoGetRequestorProcessId
 @ stub IoGetRequestorSessionId
-@ stub IoGetStackLimits
+@ stdcall IoGetStackLimits(ptr ptr)
 @ stub IoGetTopLevelIrp
 @ stdcall IoInitializeIrp(ptr long long)
 @ stdcall IoInitializeRemoveLockEx(ptr long long long long)
@@ -420,7 +430,7 @@
 @ stub IoQueryFileInformation
 @ stub IoQueryVolumeInformation
 @ stub IoQueueThreadIrp
-@ stub IoQueueWorkItem
+@ stdcall IoQueueWorkItem(ptr ptr long ptr)
 @ stub IoRaiseHardError
 @ stub IoRaiseInformationalHardError
 @ stub IoReadDiskSignature
@@ -483,7 +493,7 @@
 @ stub IoWMIDeviceObjectToInstanceName
 @ stub IoWMIExecuteMethod
 @ stub IoWMIHandleToInstanceName
-@ stub IoWMIOpenBlock
+@ stdcall IoWMIOpenBlock(ptr long ptr)
 @ stub IoWMIQueryAllData
 @ stub IoWMIQueryAllDataMultiple
 @ stub IoWMIQuerySingleInstance
@@ -510,13 +520,13 @@
 @ stub Ke386QueryIoAccessMap
 @ stdcall Ke386SetIoAccessMap(long ptr)
 @ stub KeAcquireInterruptSpinLock
-@ stub KeAcquireSpinLockAtDpcLevel
-@ stdcall -arch=x86_64 KeAcquireSpinLockRaiseToDpc(ptr)
+@ stdcall KeAcquireSpinLockAtDpcLevel(ptr)
+@ stdcall -arch=arm,arm64,x86_64 KeAcquireSpinLockRaiseToDpc(ptr)
 @ stub KeAddSystemServiceTable
-@ stub KeAreApcsDisabled
+@ stdcall KeAreApcsDisabled()
 @ stub KeAttachProcess
-@ stub KeBugCheck
-@ stub KeBugCheckEx
+@ stdcall KeBugCheck(long)
+@ stdcall KeBugCheckEx(long long long long long)
 @ stdcall KeCancelTimer(ptr)
 @ stub KeCapturePersistentThreadState
 @ stdcall KeClearEvent(ptr)
@@ -593,8 +603,8 @@
 @ stub KeReleaseMutant
 @ stdcall KeReleaseMutex(ptr long)
 @ stdcall KeReleaseSemaphore(ptr long long long)
-@ stdcall KeReleaseSpinLock(ptr long)
-@ stub KeReleaseSpinLockFromDpcLevel
+@ stdcall -arch=arm,arm64,x86_64 KeReleaseSpinLock(ptr long)
+@ stdcall KeReleaseSpinLockFromDpcLevel(ptr)
 @ stub KeRemoveByKeyDeviceQueue
 @ stub KeRemoveByKeyDeviceQueueIfBusy
 @ stub KeRemoveDeviceQueue
@@ -604,7 +614,7 @@
 @ stub KeRemoveSystemServiceTable
 @ stdcall KeResetEvent(ptr)
 @ stub KeRestoreFloatingPointState
-@ stub KeRevertToUserAffinityThread
+@ stdcall KeRevertToUserAffinityThread()
 @ stub KeRundownQueue
 @ stub KeSaveFloatingPointState
 @ stub KeSaveStateForHibernate
@@ -665,7 +675,7 @@
 @ stub MmAllocateMappingAddress
 @ stdcall MmAllocateNonCachedMemory(long)
 @ stdcall MmAllocatePagesForMdl(int64 int64 int64 long)
-@ stub MmBuildMdlForNonPagedPool
+@ stdcall MmBuildMdlForNonPagedPool(ptr)
 @ stub MmCanFileBeTruncated
 @ stub MmCommitSessionMappedView
 @ stdcall MmCopyVirtualMemory(ptr ptr ptr ptr long long ptr)
@@ -725,7 +735,7 @@
 @ stdcall MmUnlockPagableImageSection(ptr)
 @ stdcall MmUnlockPages(ptr)
 @ stdcall MmUnmapIoSpace(ptr long)
-@ stub MmUnmapLockedPages
+@ stdcall MmUnmapLockedPages(ptr ptr)
 @ stub MmUnmapReservedMapping
 @ stub MmUnmapVideoDisplay
 @ stub MmUnmapViewInSessionSpace
@@ -744,7 +754,7 @@
 @ stdcall NtAllocateLocallyUniqueId(ptr)
 @ stdcall NtAllocateUuids(ptr ptr ptr ptr)
 @ stdcall NtAllocateVirtualMemory(long ptr long ptr long long)
-@ stub NtBuildNumber
+@ extern NtBuildNumber
 @ stdcall NtClose(long)
 @ stdcall NtConnectPort(ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall NtCreateEvent(ptr long ptr long long)
@@ -814,7 +824,7 @@
 @ stub ObLogSecurityDescriptor
 @ stub ObMakeTemporaryObject
 @ stub ObOpenObjectByName
-@ stub ObOpenObjectByPointer
+@ stdcall ObOpenObjectByPointer(ptr long ptr long ptr long ptr)
 @ stdcall ObQueryNameString(ptr ptr long ptr)
 @ stub ObQueryObjectAuditingByHandle
 @ stdcall ObReferenceObjectByHandle(long long ptr long ptr ptr)
@@ -831,7 +841,7 @@
 @ stub PfxInitialize
 @ stub PfxInsertPrefix
 @ stub PfxRemovePrefix
-@ stub PoCallDriver
+@ stdcall PoCallDriver(ptr ptr)
 @ stub PoCancelDeviceNotify
 @ stub PoQueueShutdownWorkItem
 @ stub PoRegisterDeviceForIdleDetection
@@ -843,7 +853,7 @@
 @ stdcall PoSetPowerState(ptr long long)
 @ stub PoSetSystemState
 @ stub PoShutdownBugCheck
-@ stub PoStartNextPowerIrp
+@ stdcall PoStartNextPowerIrp(ptr)
 @ stub PoUnregisterSystemState
 @ stdcall ProbeForRead(ptr long long)
 @ stdcall ProbeForWrite(ptr long long)
@@ -878,7 +888,7 @@
 @ stub PsGetProcessExitTime
 @ stdcall PsGetProcessId(ptr)
 @ stub PsGetProcessImageFileName
-@ stub PsGetProcessInheritedFromUniqueProcessId
+@ stdcall PsGetProcessInheritedFromUniqueProcessId(ptr)
 @ stub PsGetProcessJob
 @ stub PsGetProcessPeb
 @ stub PsGetProcessPriorityClass
@@ -890,35 +900,37 @@
 @ stdcall -arch=x86_64 PsGetProcessWow64Process(ptr)
 @ stub PsGetThreadFreezeCount
 @ stub PsGetThreadHardErrorsAreDisabled
-@ stub PsGetThreadId
+@ stdcall PsGetThreadId(ptr)
 @ stub PsGetThreadProcess
-@ stub PsGetThreadProcessId
+@ stdcall PsGetThreadProcessId(ptr)
 @ stub PsGetThreadSessionId
 @ stub PsGetThreadTeb
 @ stub PsGetThreadWin32Thread
 @ stdcall PsGetVersion(ptr ptr ptr ptr)
 @ stdcall PsImpersonateClient(ptr ptr long long long)
-@ stub PsInitialSystemProcess
+@ extern PsInitialSystemProcess
 @ stub PsIsProcessBeingDebugged
-@ stub PsIsSystemThread
+@ stdcall PsIsSystemThread(ptr)
 @ stub PsIsThreadImpersonating
 @ stub PsIsThreadTerminating
 @ stub PsJobType
 @ stdcall PsLookupProcessByProcessId(ptr ptr)
 @ stub PsLookupProcessThreadByCid
-@ stub PsLookupThreadByThreadId
-@ stub PsProcessType
+@ stdcall PsLookupThreadByThreadId(ptr ptr)
+@ extern PsProcessType
 @ stub PsReferenceImpersonationToken
 @ stub PsReferencePrimaryToken
+@ stdcall PsReferenceProcessFilePointer(ptr ptr)
 @ stdcall PsReleaseProcessExitSynchronization(ptr)
 @ stdcall PsRemoveCreateThreadNotifyRoutine(ptr)
 @ stdcall PsRemoveLoadImageNotifyRoutine(ptr)
 @ stub PsRestoreImpersonation
+@ stdcall PsResumeProcess(ptr)
 @ stub PsReturnPoolQuota
 @ stub PsReturnProcessNonPagedPoolQuota
 @ stub PsReturnProcessPagedPoolQuota
 @ stub PsRevertThreadToSelf
-@ stub PsRevertToSelf
+@ stdcall PsRevertToSelf()
 @ stub PsSetContextThread
 @ stdcall PsSetCreateProcessNotifyRoutine(ptr long)
 @ stdcall PsSetCreateProcessNotifyRoutineEx(ptr long)
@@ -933,8 +945,9 @@
 @ stub PsSetProcessWindowStation
 @ stub PsSetThreadHardErrorsAreDisabled
 @ stub PsSetThreadWin32Thread
+@ stdcall PsSuspendProcess(ptr)
 @ stdcall PsTerminateSystemThread(long)
-@ stub PsThreadType
+@ extern PsThreadType
 @ stdcall READ_REGISTER_BUFFER_UCHAR(ptr ptr long)
 @ stub READ_REGISTER_BUFFER_ULONG
 @ stub READ_REGISTER_BUFFER_USHORT
@@ -1267,7 +1280,7 @@
 @ stub SeTokenIsAdmin
 @ stub SeTokenIsRestricted
 @ stub SeTokenIsWriteRestricted
-@ stub SeTokenObjectType
+@ extern SeTokenObjectType
 @ stub SeTokenType
 @ stub SeUnlockSubjectContext
 @ stub SeUnregisterLogonSessionTerminatedRoutine
@@ -1305,8 +1318,8 @@
 @ stub ZwCloseObjectAuditAlarm
 @ stdcall -private ZwConnectPort(ptr ptr ptr ptr ptr ptr ptr ptr) NtConnectPort
 @ stdcall -private ZwCreateDirectoryObject(ptr long ptr) NtCreateDirectoryObject
-@ stdcall -private ZwCreateEvent(ptr long ptr long long) NtCreateEvent
-@ stdcall -private ZwCreateFile(ptr long ptr ptr ptr long long long long ptr long) NtCreateFile
+@ stdcall ZwCreateEvent(ptr long ptr long long) NtCreateEvent
+@ stdcall ZwCreateFile(ptr long ptr ptr ptr long long long long ptr long) NtCreateFile
 @ stdcall -private ZwCreateJobObject(ptr long ptr) NtCreateJobObject
 @ stdcall -private ZwCreateKey(ptr long ptr long ptr long ptr) NtCreateKey
 @ stdcall -private ZwCreateSection(ptr long ptr ptr long long long) NtCreateSection
@@ -1318,7 +1331,7 @@
 @ stdcall -private ZwDeleteValueKey(long ptr) NtDeleteValueKey
 @ stdcall -private ZwDeviceIoControlFile(long long ptr ptr ptr long ptr long ptr long) NtDeviceIoControlFile
 @ stdcall -private ZwDisplayString(ptr) NtDisplayString
-@ stdcall -private ZwDuplicateObject(long long long ptr long long long) NtDuplicateObject
+@ stdcall ZwDuplicateObject(long long long ptr long long long) NtDuplicateObject
 @ stdcall -private ZwDuplicateToken(long long ptr long long ptr) NtDuplicateToken
 @ stub ZwEnumerateBootEntries
 @ stdcall -private ZwEnumerateKey(long long long ptr long ptr) NtEnumerateKey
@@ -1361,7 +1374,7 @@
 @ stdcall -private ZwQueryFullAttributesFile(ptr ptr) NtQueryFullAttributesFile
 @ stdcall -private ZwQueryInformationFile(long ptr ptr long long) NtQueryInformationFile
 @ stdcall -private ZwQueryInformationJobObject(long long ptr long ptr) NtQueryInformationJobObject
-@ stdcall -private ZwQueryInformationProcess(long long ptr long ptr) NtQueryInformationProcess
+@ stdcall ZwQueryInformationProcess(long long ptr long ptr) NtQueryInformationProcess
 @ stdcall -private ZwQueryInformationThread(long long ptr long ptr) NtQueryInformationThread
 @ stdcall -private ZwQueryInformationToken(long long ptr long ptr) NtQueryInformationToken
 @ stdcall -private ZwQueryInstallUILanguage(ptr) NtQueryInstallUILanguage
@@ -1385,7 +1398,7 @@
 @ stdcall -private ZwSetDefaultLocale(long long) NtSetDefaultLocale
 @ stdcall -private ZwSetDefaultUILanguage(long) NtSetDefaultUILanguage
 @ stdcall -private ZwSetEaFile(long ptr ptr long) NtSetEaFile
-@ stdcall -private ZwSetEvent(long ptr) NtSetEvent
+@ stdcall ZwSetEvent(long ptr) NtSetEvent
 @ stdcall -private ZwSetInformationFile(long ptr ptr long long) NtSetInformationFile
 @ stdcall -private ZwSetInformationJobObject(long long ptr long) NtSetInformationJobObject
 @ stdcall -private ZwSetInformationObject(long long ptr long) NtSetInformationObject
@@ -1407,99 +1420,100 @@
 @ stdcall ZwWaitForSingleObject(long long ptr) NtWaitForSingleObject
 @ stdcall ZwWriteFile(long long ptr ptr ptr ptr long ptr ptr) NtWriteFile
 @ stdcall -private ZwYieldExecution() NtYieldExecution
+@ stdcall -arch=x86_64 __C_specific_handler(ptr long ptr ptr)
 @ stdcall -private -arch=arm,x86_64 -norelay __chkstk()
-@ cdecl -private -arch=i386 _CIcos() msvcrt._CIcos
-@ cdecl -private -arch=i386 _CIsin() msvcrt._CIsin
-@ cdecl -private -arch=i386 _CIsqrt() msvcrt._CIsqrt
-@ cdecl -private _abnormal_termination() msvcrt._abnormal_termination
-@ stdcall -private -arch=i386 -ret64 _alldiv(int64 int64)
-@ stdcall -private -arch=i386 -norelay _alldvrm(int64 int64)
-@ stdcall -private -arch=i386 -ret64 _allmul(int64 int64)
-@ stdcall -private -arch=i386 -norelay _alloca_probe()
-@ stdcall -private -arch=i386 -ret64 _allrem(int64 int64)
-@ stdcall -private -arch=i386 -ret64 _allshl(int64 long)
-@ stdcall -private -arch=i386 -ret64 _allshr(int64 long)
-@ stdcall -private -arch=i386 -ret64 _aulldiv(int64 int64)
-@ stdcall -private -arch=i386 -norelay _aulldvrm(int64 int64)
-@ stdcall -private -arch=i386 -ret64 _aullrem(int64 int64)
-@ stdcall -private -arch=i386 -ret64 _aullshr(int64 long)
-@ stdcall -private -arch=i386 -norelay _chkstk()
-@ cdecl -private -arch=i386 _except_handler2(ptr ptr ptr ptr) msvcrt._except_handler2
-@ cdecl -private -arch=i386 _except_handler3(ptr ptr ptr ptr) msvcrt._except_handler3
-@ cdecl -private -arch=i386 _global_unwind2(ptr) msvcrt._global_unwind2
-@ cdecl -private _itoa(long ptr long) msvcrt._itoa
-@ cdecl -private _itow(long ptr long) msvcrt._itow
-@ cdecl -private -arch=x86_64 _local_unwind(ptr ptr) msvcrt._local_unwind
-@ cdecl -private -arch=i386 _local_unwind2(ptr long) msvcrt._local_unwind2
-@ cdecl -private _purecall() msvcrt._purecall
-@ varargs -private _snprintf(ptr long str) msvcrt._snprintf
-@ varargs -private _snwprintf(ptr long wstr) msvcrt._snwprintf
-@ cdecl -private _stricmp(str str) NTOSKRNL__stricmp
-@ cdecl -private _strlwr(str) msvcrt._strlwr
-@ cdecl -private _strnicmp(str str long) NTOSKRNL__strnicmp
-@ cdecl -private _strnset(str long long) msvcrt._strnset
-@ cdecl -private _strrev(str) msvcrt._strrev
-@ cdecl -private _strset(str long) msvcrt._strset
-@ cdecl -private _strupr(str) msvcrt._strupr
-@ cdecl _vsnprintf(ptr long str ptr) msvcrt._vsnprintf
-@ cdecl -private _vsnwprintf(ptr long wstr ptr) msvcrt._vsnwprintf
-@ cdecl -private _wcsicmp(wstr wstr) msvcrt._wcsicmp
-@ cdecl -private _wcslwr(wstr) msvcrt._wcslwr
-@ cdecl -private _wcsnicmp(wstr wstr long) NTOSKRNL__wcsnicmp
-@ cdecl -private _wcsnset(wstr long long) msvcrt._wcsnset
-@ cdecl -private _wcsrev(wstr) msvcrt._wcsrev
-@ cdecl -private _wcsupr(wstr) msvcrt._wcsupr
-@ cdecl -private atoi(str) msvcrt.atoi
-@ cdecl -private atol(str) msvcrt.atol
-@ cdecl -private isdigit(long) msvcrt.isdigit
-@ cdecl -private islower(long) msvcrt.islower
-@ cdecl -private isprint(long) msvcrt.isprint
-@ cdecl -private isspace(long) msvcrt.isspace
-@ cdecl -private isupper(long) msvcrt.isupper
-@ cdecl -private isxdigit(long) msvcrt.isxdigit
-@ cdecl -private mbstowcs(ptr str long) msvcrt.mbstowcs
-@ cdecl -private mbtowc(ptr str long) msvcrt.mbtowc
-@ cdecl -private memchr(ptr long long) msvcrt.memchr
-@ cdecl -private memcpy(ptr ptr long) NTOSKRNL_memcpy
-@ cdecl -private memmove(ptr ptr long) msvcrt.memmove
-@ cdecl -private memset(ptr long long) NTOSKRNL_memset
-@ cdecl -private qsort(ptr long long ptr) msvcrt.qsort
-@ cdecl -private rand() msvcrt.rand
-@ varargs -private sprintf(ptr str) msvcrt.sprintf
-@ cdecl -private srand(long) msvcrt.srand
-@ cdecl -private strcat(str str) msvcrt.strcat
-@ cdecl -private strchr(str long) msvcrt.strchr
-@ cdecl -private strcmp(str str) msvcrt.strcmp
-@ cdecl -private strcpy(ptr str) msvcrt.strcpy
-@ cdecl -private strlen(str) msvcrt.strlen
-@ cdecl -private strncat(str str long) msvcrt.strncat
-@ cdecl -private strncmp(str str long) msvcrt.strncmp
-@ cdecl -private strncpy(ptr str long) msvcrt.strncpy
-@ cdecl -private strrchr(str long) msvcrt.strrchr
-@ cdecl -private strspn(str str) msvcrt.strspn
-@ cdecl -private strstr(str str) msvcrt.strstr
-@ varargs -private swprintf(ptr wstr) msvcrt.swprintf
-@ cdecl -private tolower(long) msvcrt.tolower
-@ cdecl -private toupper(long) msvcrt.toupper
-@ cdecl -private towlower(long) msvcrt.towlower
-@ cdecl -private towupper(long) msvcrt.towupper
+@ cdecl -private -arch=i386 _CIcos()
+@ cdecl -private -arch=i386 _CIsin()
+@ cdecl -private -arch=i386 _CIsqrt()
+@ cdecl -private _abnormal_termination()
+@ stdcall -arch=i386 -ret64 _alldiv(int64 int64)
+@ stdcall -arch=i386 -norelay _alldvrm(int64 int64)
+@ stdcall -arch=i386 -ret64 _allmul(int64 int64)
+@ stdcall -arch=i386 -norelay _alloca_probe()
+@ stdcall -arch=i386 -ret64 _allrem(int64 int64)
+@ stdcall -arch=i386 -ret64 _allshl(int64 long)
+@ stdcall -arch=i386 -ret64 _allshr(int64 long)
+@ stdcall -arch=i386 -ret64 _aulldiv(int64 int64)
+@ stdcall -arch=i386 -norelay _aulldvrm(int64 int64)
+@ stdcall -arch=i386 -ret64 _aullrem(int64 int64)
+@ stdcall -arch=i386 -ret64 _aullshr(int64 long)
+@ stdcall -arch=i386 -norelay _chkstk()
+@ cdecl -arch=i386 _except_handler2(ptr ptr ptr ptr)
+@ cdecl -arch=i386 _except_handler3(ptr ptr ptr ptr)
+@ cdecl -arch=i386 _global_unwind2(ptr)
+@ cdecl _itoa(long ptr long)
+@ cdecl _itow(long ptr long)
+@ cdecl -arch=x86_64 _local_unwind(ptr ptr)
+@ cdecl -arch=i386 _local_unwind2(ptr long)
+@ cdecl _purecall()
+@ varargs _snprintf(ptr long str)
+@ varargs _snwprintf(ptr long wstr)
+@ cdecl _stricmp(str str)
+@ cdecl _strlwr(str)
+@ cdecl _strnicmp(str str long)
+@ cdecl _strnset(str long long)
+@ cdecl _strrev(str)
+@ cdecl _strset(str long)
+@ cdecl _strupr(str)
+@ cdecl _vsnprintf(ptr long str ptr)
+@ cdecl _vsnwprintf(ptr long wstr ptr)
+@ cdecl _wcsicmp(wstr wstr)
+@ cdecl _wcslwr(wstr)
+@ cdecl _wcsnicmp(wstr wstr long)
+@ cdecl _wcsnset(wstr long long)
+@ cdecl _wcsrev(wstr)
+@ cdecl _wcsupr(wstr)
+@ cdecl atoi(str)
+@ cdecl atol(str)
+@ cdecl isdigit(long)
+@ cdecl islower(long)
+@ cdecl isprint(long)
+@ cdecl isspace(long)
+@ cdecl isupper(long)
+@ cdecl isxdigit(long)
+@ cdecl mbstowcs(ptr str long)
+@ cdecl mbtowc(ptr str long)
+@ cdecl memchr(ptr long long)
+@ cdecl memcpy(ptr ptr long)
+@ cdecl memmove(ptr ptr long)
+@ cdecl memset(ptr long long)
+@ cdecl qsort(ptr long long ptr)
+@ cdecl rand()
+@ varargs sprintf(ptr str)
+@ cdecl srand(long)
+@ cdecl strcat(str str)
+@ cdecl strchr(str long)
+@ cdecl strcmp(str str)
+@ cdecl strcpy(ptr str)
+@ cdecl strlen(str)
+@ cdecl strncat(str str long)
+@ cdecl strncmp(str str long)
+@ cdecl strncpy(ptr str long)
+@ cdecl strrchr(str long)
+@ cdecl strspn(str str)
+@ cdecl strstr(str str)
+@ varargs swprintf(ptr wstr)
+@ cdecl tolower(long)
+@ cdecl toupper(long)
+@ cdecl towlower(long)
+@ cdecl towupper(long)
 @ stdcall vDbgPrintEx(long long str ptr)
 @ stdcall vDbgPrintExWithPrefix(str long long str ptr)
-@ cdecl -private vsprintf(ptr str ptr) msvcrt.vsprintf
-@ cdecl -private wcscat(wstr wstr) msvcrt.wcscat
-@ cdecl -private wcschr(wstr long) msvcrt.wcschr
-@ cdecl -private wcscmp(wstr wstr) msvcrt.wcscmp
-@ cdecl -private wcscpy(ptr wstr) msvcrt.wcscpy
-@ cdecl -private wcscspn(wstr wstr) msvcrt.wcscspn
-@ cdecl -private wcslen(wstr) msvcrt.wcslen
-@ cdecl -private wcsncat(wstr wstr long) msvcrt.wcsncat
-@ cdecl -private wcsncmp(wstr wstr long) NTOSKRNL_wcsncmp
-@ cdecl -private wcsncpy(ptr wstr long) msvcrt.wcsncpy
-@ cdecl -private wcsrchr(wstr long) msvcrt.wcsrchr
-@ cdecl -private wcsspn(wstr wstr) msvcrt.wcsspn
-@ cdecl -private wcsstr(wstr wstr) msvcrt.wcsstr
-@ cdecl -private wcstombs(ptr ptr long) msvcrt.wcstombs
-@ cdecl -private wctomb(ptr long) msvcrt.wctomb
+@ cdecl vsprintf(ptr str ptr)
+@ cdecl wcscat(wstr wstr)
+@ cdecl wcschr(wstr long)
+@ cdecl wcscmp(wstr wstr)
+@ cdecl wcscpy(ptr wstr)
+@ cdecl wcscspn(wstr wstr)
+@ cdecl wcslen(wstr)
+@ cdecl wcsncat(wstr wstr long)
+@ cdecl wcsncmp(wstr wstr long)
+@ cdecl wcsncpy(ptr wstr long)
+@ cdecl wcsrchr(wstr long)
+@ cdecl wcsspn(wstr wstr)
+@ cdecl wcsstr(wstr wstr)
+@ cdecl wcstombs(ptr ptr long)
+@ cdecl wctomb(ptr long)
 
 ################################################################
 # Wine internal extensions

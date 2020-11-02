@@ -60,6 +60,8 @@ static struct opengl_funcs opengl_funcs;
 static const char *opengl_func_names[] = { ALL_WGL_FUNCS };
 #undef USE_GL_FUNC
 
+#include "wine/hostptraddrspace_enter.h"
+
 static OSMesaContext (*pOSMesaCreateContextExt)( GLenum format, GLint depthBits, GLint stencilBits,
                                                  GLint accumBits, OSMesaContext sharelist );
 static void (*pOSMesaDestroyContext)( OSMesaContext ctx );
@@ -67,6 +69,8 @@ static void * (*pOSMesaGetProcAddress)( const char *funcName );
 static GLboolean (*pOSMesaMakeCurrent)( OSMesaContext ctx, void *buffer, GLenum type,
                                         GLsizei width, GLsizei height );
 static void (*pOSMesaPixelStore)( GLint pname, GLint value );
+
+#include "wine/hostptraddrspace_exit.h"
 
 static const struct
 {
@@ -98,7 +102,7 @@ static const struct
 static BOOL init_opengl(void)
 {
     static BOOL init_done = FALSE;
-    static void *osmesa_handle;
+    static void * HOSTPTR osmesa_handle;
     char buffer[200];
     unsigned int i;
 
@@ -127,7 +131,7 @@ static BOOL init_opengl(void)
 
     for (i = 0; i < ARRAY_SIZE( opengl_func_names ); i++)
     {
-        if (!(((void **)&opengl_funcs.gl)[i] = pOSMesaGetProcAddress( opengl_func_names[i] )))
+        if (!(((void *HOSTPTR *)&opengl_funcs.gl)[i] = pOSMesaGetProcAddress( opengl_func_names[i] )))
         {
             ERR( "%s not found in %s, disabling.\n", opengl_func_names[i], SONAME_LIBOSMESA );
             goto failed;
@@ -239,10 +243,10 @@ static int dibdrv_wglGetPixelFormat( HDC hdc )
 /***********************************************************************
  *		dibdrv_wglGetProcAddress
  */
-static PROC dibdrv_wglGetProcAddress( const char *proc )
+static WINEGLDEF(PROC) dibdrv_wglGetProcAddress( const char *proc )
 {
     if (!strncmp( proc, "wgl", 3 )) return NULL;
-    return (PROC)pOSMesaGetProcAddress( proc );
+    return (WINEGLDEF(PROC))pOSMesaGetProcAddress( proc );
 }
 
 /***********************************************************************
@@ -345,7 +349,7 @@ static struct opengl_funcs opengl_funcs =
 /**********************************************************************
  *	     dibdrv_wine_get_wgl_driver
  */
-struct opengl_funcs *dibdrv_wine_get_wgl_driver( PHYSDEV dev, UINT version )
+struct opengl_funcs * CDECL dibdrv_wine_get_wgl_driver( PHYSDEV dev, UINT version )
 {
     if (version != WINE_WGL_DRIVER_VERSION)
     {
@@ -363,7 +367,7 @@ struct opengl_funcs *dibdrv_wine_get_wgl_driver( PHYSDEV dev, UINT version )
 /**********************************************************************
  *	     dibdrv_wine_get_wgl_driver
  */
-struct opengl_funcs *dibdrv_wine_get_wgl_driver( PHYSDEV dev, UINT version )
+struct opengl_funcs * CDECL dibdrv_wine_get_wgl_driver( PHYSDEV dev, UINT version )
 {
     static int warned;
     if (!warned++) ERR( "OSMesa not compiled in, no OpenGL bitmap support\n" );

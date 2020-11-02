@@ -53,6 +53,7 @@
 #include <winnls.h>
 #include "winecon_private.h"
 
+#include "wine/heap.h"
 #include "wine/library.h"
 #include "wine/debug.h"
 #undef ERR
@@ -80,6 +81,8 @@ struct inner_data_curse
     chtype*             line;
     int                 allow_scroll;
 };
+
+#include "wine/hostptraddrspace_enter.h"
 
 static void *nc_handle = NULL;
 
@@ -128,6 +131,7 @@ MAKE_FUNCPTR(mousemask)
 MAKE_FUNCPTR(acs_map)
 
 #undef MAKE_FUNCPTR
+
 
 /**********************************************************************/
 
@@ -255,11 +259,10 @@ static void WCCURSES_ResizeScreenBuffer(struct inner_data* data)
     if (!PRIVATE(data)->pad)
         WINE_FIXME("Cannot create pad\n");
     if (PRIVATE(data)->line) 
-	PRIVATE(data)->line = HeapReAlloc(GetProcessHeap(), 0, PRIVATE(data)->line, 
-                                      sizeof(chtype) * data->curcfg.sb_width);
+	PRIVATE(data)->line = heap_realloc(PRIVATE(data)->line, 
+                                       sizeof(chtype) * data->curcfg.sb_width);
     else 
-	PRIVATE(data)->line = HeapAlloc(GetProcessHeap(), 0, 
-                                      sizeof(chtype) * data->curcfg.sb_width);
+	PRIVATE(data)->line = heap_alloc(sizeof(chtype) * data->curcfg.sb_width);
 }
 
 /******************************************************************
@@ -933,7 +936,7 @@ static unsigned WCCURSES_FillCode(struct inner_data* data, INPUT_RECORD* ir, int
 /******************************************************************
  *		input_thread
  */
-static DWORD CALLBACK input_thread( void *arg )
+static DWORD CALLBACK input_thread( void * WIN32PTR arg )
 {
     struct inner_data* data = arg;
     int		        inchar;
@@ -1002,8 +1005,8 @@ static void WCCURSES_DeleteBackend(struct inner_data* data)
     endwin();
 
     if (data->hWnd) DestroyWindow(data->hWnd);
-    HeapFree(GetProcessHeap(), 0, PRIVATE(data)->line);
-    HeapFree(GetProcessHeap(), 0, PRIVATE(data));
+    heap_free(PRIVATE(data)->line);
+    heap_free(PRIVATE(data));
     data->private = NULL;
 }
 
@@ -1125,3 +1128,5 @@ enum init_return WCCURSES_InitBackend(struct inner_data* data)
     return init_not_supported;
 }
 #endif
+
+#include "wine/hostptraddrspace_exit.h"

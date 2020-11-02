@@ -19,6 +19,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+%top{
+#ifdef __i386_on_x86_64__
+#pragma clang default_addr_space(default)
+#endif
+}
+
 %option noinput nounput always-interactive 8bit prefix="dbg_"
 
 %{

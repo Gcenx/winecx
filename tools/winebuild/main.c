@@ -46,9 +46,12 @@ int verbose = 0;
 int link_ext_symbols = 0;
 int force_pointer_size = 0;
 int unwind_tables = 0;
+int unix_lib = 0;
 
 #ifdef __i386__
 enum target_cpu target_cpu = CPU_x86;
+#elif defined(__i386_on_x86_64__)
+enum target_cpu target_cpu = CPU_x86_32on64;
 #elif defined(__x86_64__)
 enum target_cpu target_cpu = CPU_x86_64;
 #elif defined(__powerpc__)
@@ -79,7 +82,6 @@ char *input_file_name = NULL;
 char *spec_file_name = NULL;
 FILE *output_file = NULL;
 const char *output_file_name = NULL;
-static const char *output_file_source_name;
 static int fake_module;
 
 struct strarray lib_path = { 0 };
@@ -225,7 +227,7 @@ static void set_target( const char *target )
     /* get the OS part */
 
     target_platform = PLATFORM_UNSPECIFIED;  /* default value */
-    for (i = 0; i < sizeof(platform_names)/sizeof(platform_names[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(platform_names); i++)
     {
         if (!strncmp( platform_names[i].name, platform, strlen(platform_names[i].name) ))
         {
@@ -276,6 +278,7 @@ static const char usage_str[] =
 "   -l, --library=LIB         Import the specified library\n"
 "   -L, --library-path=DIR    Look for imports libraries in DIR\n"
 "   -m16, -m32, -m64          Force building 16-bit, 32-bit resp. 64-bit code\n"
+"   -mwine32                  Force building 32-bit-on-64-bit hybrid code\n"
 "   -M, --main-module=MODULE  Set the name of the main module for a Win16 dll\n"
 "       --nm-cmd=NM           Command to use to get undefined symbols (default: nm)\n"
 "       --nxcompat=y|n        Set the NX compatibility flag (default: yes)\n"
@@ -369,6 +372,15 @@ static void set_exec_mode( enum exec_mode_values mode )
     exec_mode = mode;
 }
 
+/* get the default entry point for a given spec file */
+static const char *get_default_entry_point( const DLLSPEC *spec )
+{
+    if (spec->characteristics & IMAGE_FILE_DLL) return "__wine_spec_dll_entry";
+    if (spec->subsystem == IMAGE_SUBSYSTEM_NATIVE) return "__wine_spec_drv_entry";
+    if (spec->type == SPEC_WIN16) return "__wine_spec_exe16_entry";
+    return "__wine_spec_exe_entry";
+}
+
 /* parse options from the argv array and remove all the recognized ones */
 static char **parse_options( int argc, char **argv, DLLSPEC *spec )
 {
@@ -410,8 +422,10 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
             if (!strcmp( optarg, "16" )) spec->type = SPEC_WIN16;
             else if (!strcmp( optarg, "32" )) force_pointer_size = 4;
             else if (!strcmp( optarg, "64" )) force_pointer_size = 8;
+            else if (!strcmp( optarg, "wine32" )) { force_pointer_size = 8; target_cpu = CPU_x86_32on64; }
             else if (!strcmp( optarg, "arm" )) thumb_mode = 0;
             else if (!strcmp( optarg, "thumb" )) thumb_mode = 1;
+            else if (!strcmp( optarg, "unix" )) unix_lib = 1;
             else if (!strncmp( optarg, "cpu=", 4 )) cpu_option = xstrdup( optarg + 4 );
             else if (!strncmp( optarg, "fpu=", 4 )) fpu_option = xstrdup( optarg + 4 );
             else if (!strncmp( optarg, "arch=", 5 )) arch_option = xstrdup( optarg + 5 );
@@ -450,25 +464,9 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
             add_import_dll( optarg, NULL );
             break;
         case 'o':
-            {
-                char *ext = strrchr( optarg, '.' );
-
-                if (unlink( optarg ) == -1 && errno != ENOENT)
-                    fatal_error( "Unable to create output file '%s'\n", optarg );
-                if (ext && !strcmp( ext, ".o" ))
-                {
-                    output_file_source_name = get_temp_file_name( optarg, ".s" );
-                    if (!(output_file = fopen( output_file_source_name, "w" )))
-                        fatal_error( "Unable to create output file '%s'\n", optarg );
-                }
-                else
-                {
-                    if (!(output_file = fopen( optarg, "w" )))
-                        fatal_error( "Unable to create output file '%s'\n", optarg );
-                }
-                output_file_name = xstrdup(optarg);
-                atexit( cleanup );  /* make sure we remove the output file on exit */
-            }
+            if (unlink( optarg ) == -1 && errno != ENOENT)
+                fatal_error( "Unable to create output file '%s'\n", optarg );
+            output_file_name = xstrdup( optarg );
             break;
         case 'r':
             strarray_add( &res_files, xstrdup( optarg ), NULL );
@@ -551,6 +549,8 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
         break;
     case CPU_x86_64:
         if (force_pointer_size == 4) target_cpu = CPU_x86;
+        break;
+    case CPU_x86_32on64:
         break;
     default:
         if (force_pointer_size == 8)
@@ -636,8 +636,8 @@ int main(int argc, char **argv)
     signal( SIGTERM, exit_on_signal );
     signal( SIGINT, exit_on_signal );
 
-    output_file = stdout;
     argv = parse_options( argc, argv, spec );
+    atexit( cleanup );  /* make sure we remove the output file on exit */
 
     switch(exec_mode)
     {
@@ -647,31 +647,31 @@ int main(int argc, char **argv)
         /* fall through */
     case MODE_EXE:
         load_resources( argv, spec );
-        load_import_libs( argv );
         if (spec_file_name && !parse_input_file( spec )) break;
+        if (!spec->init_func) spec->init_func = xstrdup( get_default_entry_point( spec ));
+
         if (fake_module)
         {
             if (spec->type == SPEC_WIN16) output_fake_module16( spec );
             else output_fake_module( spec );
             break;
         }
-        read_undef_symbols( spec, argv );
-        switch (spec->type)
+        if (target_platform != PLATFORM_WINDOWS)
         {
-            case SPEC_WIN16:
-                output_spec16_file( spec );
-                break;
-            case SPEC_WIN32:
-                BuildSpec32File( spec );
-                break;
-            default: assert(0);
+            load_import_libs( argv );
+            read_undef_symbols( spec, argv );
+            resolve_imports( spec );
         }
+        if (spec->type == SPEC_WIN16) output_spec16_file( spec );
+        else output_spec32_file( spec );
         break;
     case MODE_DEF:
         if (argv[0]) fatal_error( "file argument '%s' not allowed in this mode\n", argv[0] );
         if (!spec_file_name) fatal_error( "missing .spec file\n" );
         if (!parse_input_file( spec )) break;
+        open_output_file();
         output_def_file( spec, 1 );
+        close_output_file();
         break;
     case MODE_IMPLIB:
         if (!spec_file_name) fatal_error( "missing .spec file\n" );
@@ -687,11 +687,6 @@ int main(int argc, char **argv)
         break;
     }
     if (nb_errors) exit(1);
-    if (output_file_name)
-    {
-        if (fclose( output_file ) < 0) fatal_perror( "fclose" );
-        if (output_file_source_name) assemble_file( output_file_source_name, output_file_name );
-        output_file_name = NULL;
-    }
+    output_file_name = NULL;
     return 0;
 }

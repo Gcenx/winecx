@@ -30,7 +30,6 @@
 #include <CoreServices/CoreServices.h>
 #undef GetCurrentThread
 #undef LoadResource
-#undef DPRINTF
 #endif
 
 #include "windef.h"
@@ -631,10 +630,10 @@ static ALG_ID schan_get_kx_algid(const struct cipher_suite* c)
  *          more data to be read.
  *      other error code for failure.
  */
-static OSStatus schan_pull_adapter(SSLConnectionRef transport, void *buff,
-                                   SIZE_T *buff_len)
+static OSStatus schan_pull_adapter(SSLConnectionRef transport, void * HOSTPTR buff,
+                                   size_t *buff_len)
 {
-    struct mac_session *s = (struct mac_session*)transport;
+    struct mac_session *s = ADDRSPACECAST(struct mac_session*,transport);
     size_t requested = *buff_len;
     int status;
     OSStatus ret;
@@ -697,10 +696,10 @@ static OSStatus schan_pull_adapter(SSLConnectionRef transport, void *buff,
  *          caller should try again.
  *      other error code for failure.
  */
-static OSStatus schan_push_adapter(SSLConnectionRef transport, const void *buff,
-                                       SIZE_T *buff_len)
+static OSStatus schan_push_adapter(SSLConnectionRef transport, const void * HOSTPTR buff,
+                                       size_t *buff_len)
 {
-    struct mac_session *s = (struct mac_session*)transport;
+    struct mac_session *s = ADDRSPACECAST(struct mac_session*,transport);
     int status;
     OSStatus ret;
 
@@ -1048,6 +1047,40 @@ static void schan_imp_cf_release(const void *arg, void *ctx)
 }
 #endif
 
+#ifdef __i386_on_x86_64__
+static const BYTE* lock_cfdataref(CFDataRef data)
+{
+    const BYTE * HOSTPTR byteptr;
+    CFIndex len;
+    BYTE *result;
+
+    len = CFDataGetLength(data);
+    if (!len)
+        return NULL;
+
+    byteptr = (const BYTE* HOSTPTR)CFDataGetBytePtr(data);
+
+    result = HeapAlloc(GetProcessHeap(), 0, len);
+    memcpy(result, byteptr, len);
+
+    return result;
+}
+
+static inline void unlock_cfdataref(const BYTE* data)
+{
+    HeapFree(GetProcessHeap(), 0, (BYTE*)data);
+}
+#else /* !__i386_on_x86_64__ */
+static inline const BYTE* lock_cfdataref(CFDataRef data)
+{
+    return (const BYTE*)CFDataGetBytePtr(data);
+}
+
+static inline void unlock_cfdataref(const BYTE* data)
+{
+}
+#endif
+
 SECURITY_STATUS schan_imp_get_session_peer_certificate(schan_imp_session session, HCERTSTORE store,
                                                        PCCERT_CONTEXT *ret_cert)
 {
@@ -1076,6 +1109,8 @@ SECURITY_STATUS schan_imp_get_session_peer_certificate(schan_imp_session session
 
     cnt = CFArrayGetCount(cert_array);
     for (i=0; i < cnt; i++) {
+        const BYTE *locked;
+
         if (!(mac_cert = (SecCertificateRef)CFArrayGetValueAtIndex(cert_array, i)) ||
             (SecKeychainItemExport(mac_cert, kSecFormatX509Cert, 0, NULL, &data) != noErr))
         {
@@ -1084,8 +1119,13 @@ SECURITY_STATUS schan_imp_get_session_peer_certificate(schan_imp_session session
             break;
         }
 
-        res = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING, CFDataGetBytePtr(data), CFDataGetLength(data),
+        locked = lock_cfdataref(data);
+
+        res = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING, locked, CFDataGetLength(data),
                                                CERT_STORE_ADD_REPLACE_EXISTING, i ? NULL : &cert);
+
+        unlock_cfdataref(locked);
+
         CFRelease(data);
         if (!res)
         {
@@ -1112,7 +1152,7 @@ SECURITY_STATUS schan_imp_get_session_peer_certificate(schan_imp_session session
 }
 
 SECURITY_STATUS schan_imp_send(schan_imp_session session, const void *buffer,
-                               SIZE_T *length)
+                               size_t *length)
 {
     struct mac_session* s = (struct mac_session*)session;
     int status;
@@ -1149,7 +1189,7 @@ SECURITY_STATUS schan_imp_send(schan_imp_session session, const void *buffer,
 }
 
 SECURITY_STATUS schan_imp_recv(schan_imp_session session, void *buffer,
-                               SIZE_T *length)
+                               size_t *length)
 {
     struct mac_session* s = (struct mac_session*)session;
     int status;
@@ -1185,9 +1225,9 @@ SECURITY_STATUS schan_imp_recv(schan_imp_session session, void *buffer,
     return SEC_E_OK;
 }
 
-BOOL schan_imp_allocate_certificate_credentials(schan_credentials *c)
+BOOL schan_imp_allocate_certificate_credentials(schan_credentials *c, const CERT_CONTEXT *cert)
 {
-    /* The certificate is never really used for anything. */
+    if (cert) FIXME("no support for certificate credentials on this platform\n");
     c->credentials = NULL;
     return TRUE;
 }

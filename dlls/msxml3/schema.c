@@ -74,7 +74,7 @@ static const xmlChar XDR_schema[] = "Schema";
 static const xmlChar XDR_nsURI[] = "urn:schemas-microsoft-com:xml-data";
 static const xmlChar DT_nsURI[] = "urn:schemas-microsoft-com:datatypes";
 
-static xmlChar *        datatypes_src;
+static xmlChar * WIN32PTR datatypes_src;
 static int              datatypes_len;
 static HGLOBAL          datatypes_handle;
 static HRSRC            datatypes_rsrc;
@@ -239,6 +239,8 @@ static const BYTE hash_assoc_values[] =
     116, 116, 116, 116, 116, 116
 };
 
+#include "wine/hostptraddrspace_enter.h"
+
 static void LIBXML2_LOG_CALLBACK parser_error(void* ctx, char const* msg, ...)
 {
     va_list ap;
@@ -296,6 +298,8 @@ static void validate_serror(void* ctx, xmlErrorPtr err)
     LIBXML2_CALLBACK_SERROR(Schema_validate_tree, err);
 }
 #endif
+
+#include "wine/hostptraddrspace_exit.h"
 
 static HRESULT schema_cache_get_item(IUnknown *iface, LONG index, VARIANT *item)
 {
@@ -605,7 +609,7 @@ OLECHAR const* dt_to_bstr(XDR_DT dt)
 
 const char* debugstr_dt(XDR_DT dt)
 {
-    return debugstr_a(dt != DT_INVALID ? (const char*)DT_string_table[dt] : NULL);
+    return debugstr_a(dt != DT_INVALID ? (const char* HOSTPTR)DT_string_table[dt] : NULL);
 }
 
 HRESULT dt_validate(XDR_DT dt, xmlChar const* content)
@@ -615,7 +619,7 @@ HRESULT dt_validate(XDR_DT dt, xmlChar const* content)
     xmlNsPtr ns;
     HRESULT hr;
 
-    TRACE("(dt:%s, %s)\n", debugstr_dt(dt), debugstr_a((char const*)content));
+    TRACE("(dt:%s, %s)\n", debugstr_dt(dt), debugstr_a((char const* HOSTPTR)content));
 
     if (!datatypes_schema)
     {
@@ -697,8 +701,9 @@ static inline xmlChar const* get_node_nsURI(xmlNodePtr node)
 
 static inline cache_entry* get_entry(schema_cache* This, xmlChar const* nsURI)
 {
-    return (!nsURI)? xmlHashLookup(This->cache, BAD_CAST "") :
-                     xmlHashLookup(This->cache, nsURI);
+    return ADDRSPACECAST(void *,
+            (!nsURI)? xmlHashLookup(This->cache, BAD_CAST "") :
+                      xmlHashLookup(This->cache, nsURI));
 }
 
 static inline xmlSchemaPtr get_node_schema(schema_cache* This, xmlNodePtr node)
@@ -709,7 +714,7 @@ static inline xmlSchemaPtr get_node_schema(schema_cache* This, xmlNodePtr node)
 
 static xmlExternalEntityLoader _external_entity_loader;
 
-static xmlParserInputPtr external_entity_loader(const char *URL, const char *ID,
+static xmlParserInputPtr external_entity_loader(const char * HOSTPTR URL, const char * HOSTPTR ID,
                                                 xmlParserCtxtPtr ctxt)
 {
     xmlParserInputPtr input;
@@ -722,7 +727,7 @@ static xmlParserInputPtr external_entity_loader(const char *URL, const char *ID,
     assert(datatypes_src != NULL);
 
     /* TODO: if the desired schema is in the cache, load it from there */
-    if (lstrcmpA(URL, "urn:schemas-microsoft-com:datatypes") == 0)
+    if (strcmp(URL, "urn:schemas-microsoft-com:datatypes") == 0)
     {
         TRACE("loading built-in schema for %s\n", URL);
         input = xmlNewStringInputStream(ctxt, datatypes_src);
@@ -986,9 +991,9 @@ static cache_entry* cache_entry_from_url(VARIANT url, xmlChar const* nsURI, MSXM
     return entry;
 }
 
-static void cache_free(void* data, XMLHASH_CONST xmlChar* name /* ignored */)
+static void cache_free(void* HOSTPTR data, XMLHASH_CONST xmlChar* name /* ignored */)
 {
-    cache_entry_release((cache_entry*)data);
+    cache_entry_release(ADDRSPACECAST(void *, data));
 }
 
 /* returns index or -1 if not found */
@@ -1346,7 +1351,7 @@ static HRESULT WINAPI schema_cache_get(IXMLDOMSchemaCollection2* iface, BSTR uri
     *node = NULL;
 
     name = uri ? xmlchar_from_wchar(uri) : xmlchar_from_wchar(emptyW);
-    entry = (cache_entry*) xmlHashLookup(This->cache, name);
+    entry = ADDRSPACECAST(void *, xmlHashLookup(This->cache, name));
     heap_free(name);
 
     /* TODO: this should be read-only */
@@ -1403,10 +1408,10 @@ static HRESULT WINAPI schema_cache_get_namespaceURI(IXMLDOMSchemaCollection2* if
     return S_OK;
 }
 
-static void cache_copy(void* data, void* dest, XMLHASH_CONST xmlChar* name)
+static void cache_copy(void* HOSTPTR data, void* HOSTPTR dest, XMLHASH_CONST xmlChar* name)
 {
-    schema_cache* This = (schema_cache*) dest;
-    cache_entry* entry = (cache_entry*) data;
+    schema_cache* This = ADDRSPACECAST(void *, dest);
+    cache_entry* entry = ADDRSPACECAST(void *, data);
 
     if (xmlHashLookup(This->cache, name) == NULL)
     {

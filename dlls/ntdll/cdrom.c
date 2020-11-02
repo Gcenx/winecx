@@ -28,9 +28,6 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
-#ifdef HAVE_IO_H
-# include <io.h>
-#endif
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
@@ -82,6 +79,7 @@
 #endif
 
 #ifdef HAVE_IOKIT_IOKITLIB_H
+# define cpu_type_t mach_cpu_type_t
 # include <libkern/OSByteOrder.h>
 # include <sys/disk.h>
 # include <IOKit/IOKitLib.h>
@@ -90,6 +88,7 @@
 # include <IOKit/storage/IODVDMediaBSDClient.h>
 # include <IOKit/scsi/SCSITask.h>
 # include <IOKit/scsi/SCSICmds_REQUEST_SENSE_Defs.h>
+# undef cpu_type_t
 # define SENSEBUFLEN kSenseDefaultSize
 
 typedef struct
@@ -1661,7 +1660,7 @@ static NTSTATUS CDROM_ScsiPassThroughDirect(int fd, PSCSI_PASS_THROUGH_DIRECT pP
     io = ioctl(fd, SG_IO, &cmd);
 
     pPacket->ScsiStatus         = cmd.status;
-    pPacket->DataTransferLength = cmd.resid;
+    pPacket->DataTransferLength -= cmd.resid;
     pPacket->SenseInfoLength    = cmd.sb_len_wr;
 
     ret = CDROM_GetStatusCode(io);
@@ -1845,7 +1844,7 @@ static NTSTATUS CDROM_ScsiPassThrough(int fd, PSCSI_PASS_THROUGH pPacket)
     io = ioctl(fd, SG_IO, &cmd);
 
     pPacket->ScsiStatus         = cmd.status;
-    pPacket->DataTransferLength = cmd.resid;
+    pPacket->DataTransferLength -= cmd.resid;
     pPacket->SenseInfoLength    = cmd.sb_len_wr;
 
     ret = CDROM_GetStatusCode(io);

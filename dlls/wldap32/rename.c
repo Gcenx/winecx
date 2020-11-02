@@ -155,7 +155,7 @@ ULONG CDECL ldap_rename_extW( WLDAP32_LDAP *ld, PWCHAR dn, PWCHAR newrdn,
         if (!clientctrlsU) goto exit;
     }
 
-    ret = map_error( ldap_rename( ld, dn ? dnU : "", newrdn ? newrdnU : "", newparentU,
+    ret = map_error( ldap_rename( ldap_get( ld ), dn ? dnU : "", newrdn ? newrdnU : "", newparentU,
                                   delete, serverctrlsU, clientctrlsU, (int *)message ));
 
 exit:
@@ -281,7 +281,7 @@ ULONG CDECL ldap_rename_ext_sW( WLDAP32_LDAP *ld, PWCHAR dn, PWCHAR newrdn,
         if (!clientctrlsU) goto exit;
     }
 
-    ret = map_error( ldap_rename_s( ld, dn ? dnU : "", newrdn ? newrdnU : "", newparentU,
+    ret = map_error( ldap_rename_s( ldap_get( ld ), dn ? dnU : "", newrdn ? newrdnU : "", newparentU,
                                     delete, serverctrlsU, clientctrlsU ));
 
 exit:

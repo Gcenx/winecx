@@ -19,6 +19,8 @@
 #ifndef __D3DX10ASYNC_H__
 #define __D3DX10ASYNC_H__
 
+#include "wine/winheader_enter.h"
+
 #include "d3dx10.h"
 
 HRESULT WINAPI D3DX10CompileFromMemory(const char *data, SIZE_T data_size, const char *filename,
@@ -63,5 +65,7 @@ HRESULT WINAPI D3DX10CreateAsyncFileLoaderA(const char *filename, ID3DX10DataLoa
 HRESULT WINAPI D3DX10CreateAsyncMemoryLoader(const void *data, SIZE_T datasize, ID3DX10DataLoader **loader);
 HRESULT WINAPI D3DX10CreateAsyncResourceLoaderA(HMODULE module, const char *resource, ID3DX10DataLoader **loader);
 HRESULT WINAPI D3DX10CreateAsyncResourceLoaderW(HMODULE module, const WCHAR *resource, ID3DX10DataLoader **loader);
+
+#include "wine/winheader_exit.h"
 
 #endif

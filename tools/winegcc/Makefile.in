@@ -18,4 +18,6 @@ winegcc_EXTRADEFS = \
 	-DLD="\"$(LD)\"" \
 	-DPRELINK="\"$(PRELINK)\""
 
+EXTRADEFS = $(HOSTSTACK_CFLAGS)
+
 INSTALL_DEV = $(PROGRAMS) $(winegcc_SYMLINKS)

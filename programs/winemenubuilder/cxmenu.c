@@ -55,7 +55,7 @@ static int cx_wineshelllink(LPCWSTR linkW, int is_desktop, LPCWSTR rootW,
                             LPCWSTR pathW, LPCWSTR argsW,
                             const char* icon_name, const char* description, const char* arch)
 {
-    const char *argv[20];
+    const char * HOSTPTR argv[20];
     int pos = 0;
     int retcode;
 
@@ -195,7 +195,7 @@ static void cx_dump_menu(LPCWSTR linkW, int is_desktop, LPCWSTR rootW,
 
     WCHAR *icon_nameW, *descriptionW, *archW;
     const char *s = "/menuItems.txt";
-    char *fname = malloc(strlen(xdg_data_dir) + strlen(s) + 1 );
+    char *fname = HeapAlloc( GetProcessHeap(), 0, strlen(xdg_data_dir) + strlen(s) + 1 );
     sprintf(fname, "%s%s", xdg_data_dir, s);
 
     /* -----------------------------------------------------------
@@ -260,7 +260,7 @@ static void cx_dump_menu(LPCWSTR linkW, int is_desktop, LPCWSTR rootW,
     HeapFree(GetProcessHeap(), 0, icon_nameW);
     HeapFree(GetProcessHeap(), 0, descriptionW);
     HeapFree(GetProcessHeap(), 0, archW);
-    free(fname);
+    HeapFree(GetProcessHeap(), 0, fname);
 }
 
 int cx_process_menu(LPCWSTR linkW, BOOL is_desktop, DWORD root_csidl,

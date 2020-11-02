@@ -174,7 +174,6 @@ static HRESULT PullPin_Init(const IPinVtbl *PullPin_Vtbl, const PIN_INFO *info,
 {
     /* Common attributes */
     pPinImpl->pin.IPin_iface.lpVtbl = PullPin_Vtbl;
-    pPinImpl->pin.refCount = 1;
     pPinImpl->pin.pConnectedTo = NULL;
     pPinImpl->pin.pCritSec = pCritSec;
     /* avoid copying uninitialized data */
@@ -364,32 +363,22 @@ HRESULT WINAPI PullPin_QueryInterface(IPin * iface, REFIID riid, LPVOID * ppv)
     return E_NOINTERFACE;
 }
 
-ULONG WINAPI PullPin_Release(IPin *iface)
+void PullPin_destroy(PullPin *pin)
 {
-    PullPin *This = impl_PullPin_from_IPin(iface);
-    ULONG refCount = InterlockedDecrement(&This->pin.refCount);
+    WaitForSingleObject(pin->hEventStateChanged, INFINITE);
+    assert(!pin->hThread);
 
-    TRACE("(%p)->() Release from %d\n", This, refCount + 1);
-
-    if (!refCount)
-    {
-        WaitForSingleObject(This->hEventStateChanged, INFINITE);
-        assert(!This->hThread);
-
-        if(This->prefAlloc)
-            IMemAllocator_Release(This->prefAlloc);
-        if(This->pAlloc)
-            IMemAllocator_Release(This->pAlloc);
-        if(This->pReader)
-            IAsyncReader_Release(This->pReader);
-        CloseHandle(This->thread_sleepy);
-        CloseHandle(This->hEventStateChanged);
-        This->thread_lock.DebugInfo->Spare[0] = 0;
-        DeleteCriticalSection(&This->thread_lock);
-        CoTaskMemFree(This);
-        return 0;
-    }
-    return refCount;
+    if (pin->prefAlloc)
+        IMemAllocator_Release(pin->prefAlloc);
+    if (pin->pAlloc)
+        IMemAllocator_Release(pin->pAlloc);
+    if (pin->pReader)
+        IAsyncReader_Release(pin->pReader);
+    CloseHandle(pin->thread_sleepy);
+    CloseHandle(pin->hEventStateChanged);
+    pin->thread_lock.DebugInfo->Spare[0] = 0;
+    DeleteCriticalSection(&pin->thread_lock);
+    CoTaskMemFree(pin);
 }
 
 static void PullPin_Flush(PullPin *This)

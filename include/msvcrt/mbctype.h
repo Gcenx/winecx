@@ -20,13 +20,15 @@
 #ifndef __WINE_MBCTYPE_H
 #define __WINE_MBCTYPE_H
 
+#include "wine/winheader_enter.h"
+
 #include <crtdefs.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 unsigned char* __cdecl __p__mbctype(void);
 #define _mbctype                   (__p__mbctype())
 #else
@@ -76,5 +78,7 @@ int __cdecl _ismbstrail(const unsigned char*,const unsigned char*);
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_MBCTYPE_H */

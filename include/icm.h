@@ -19,6 +19,8 @@
 #ifndef __WINE_ICM_H
 #define __WINE_ICM_H
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -411,6 +413,8 @@ BOOL       WINAPI UnregisterCMMW(PCWSTR,DWORD);
 #define    UnregisterCMM WINELIB_NAME_AW(UnregisterCMM)
 BOOL       WINAPI WcsEnumColorProfilesSize(WCS_PROFILE_MANAGEMENT_SCOPE,ENUMTYPEW*,DWORD*);
 BOOL       WINAPI WcsGetUsePerUserProfiles(const WCHAR*,DWORD,BOOL*);
+HPROFILE   WINAPI WcsOpenColorProfileA(PROFILE*,PROFILE*,PROFILE*,DWORD,DWORD,DWORD,DWORD);
+HPROFILE   WINAPI WcsOpenColorProfileW(PROFILE*,PROFILE*,PROFILE*,DWORD,DWORD,DWORD,DWORD);
 
 #define PROFILE_FILENAME    1
 #define PROFILE_MEMBUFFER   2
@@ -440,5 +444,7 @@ BOOL       WINAPI WcsGetUsePerUserProfiles(const WCHAR*,DWORD,BOOL*);
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_ICM_H */

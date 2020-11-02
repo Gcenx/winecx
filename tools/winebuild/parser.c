@@ -56,7 +56,6 @@ static const char * const TypeNames[TYPE_NBTYPES] =
     "stdcall",      /* TYPE_STDCALL */
     "cdecl",        /* TYPE_CDECL */
     "varargs",      /* TYPE_VARARGS */
-    "thiscall",     /* TYPE_THISCALL */
     "extern"        /* TYPE_EXTERN */
 };
 
@@ -69,6 +68,9 @@ static const char * const FlagNames[] =
     "register",    /* FLAG_REGISTER */
     "private",     /* FLAG_PRIVATE */
     "ordinal",     /* FLAG_ORDINAL */
+    "thiscall",    /* FLAG_THISCALL */
+    "fastcall",    /* FLAG_FASTCALL */
+    "import",      /* FLAG_IMPORT */
     NULL
 };
 
@@ -287,10 +289,36 @@ static int parse_spec_arguments( ORDDEF *odp, DLLSPEC *spec, int optional )
     }
 
     odp->u.func.nb_args = i;
-    if (odp->type == TYPE_THISCALL && (!i || odp->u.func.args[0] != ARG_PTR))
+    if (odp->flags & FLAG_THISCALL)
     {
-        error( "First argument of a thiscall function must be a pointer\n" );
-        return 0;
+        if (odp->type != TYPE_STDCALL)
+        {
+            error( "A thiscall function must use the stdcall convention\n" );
+            return 0;
+        }
+        if (!i || odp->u.func.args[0] != ARG_PTR)
+        {
+            error( "First argument of a thiscall function must be a pointer\n" );
+            return 0;
+        }
+    }
+    if (odp->flags & FLAG_FASTCALL)
+    {
+        if (odp->type != TYPE_STDCALL)
+        {
+            error( "A fastcall function must use the stdcall convention\n" );
+            return 0;
+        }
+        if (!i || (odp->u.func.args[0] != ARG_PTR && odp->u.func.args[0] != ARG_LONG))
+        {
+            error( "First argument of a fastcall function must be a pointer or integer\n" );
+            return 0;
+        }
+        if (i > 1 && odp->u.func.args[1] != ARG_PTR && odp->u.func.args[1] != ARG_LONG)
+        {
+            error( "Second argument of a fastcall function must be a pointer or integer\n" );
+            return 0;
+        }
     }
     return 1;
 }
@@ -311,11 +339,6 @@ static int parse_spec_export( ORDDEF *odp, DLLSPEC *spec )
         error( "'stdcall' not supported for Win16\n" );
         return 0;
     }
-    if (!is_win32 && odp->type == TYPE_THISCALL)
-    {
-        error( "'thiscall' not supported for Win16\n" );
-        return 0;
-    }
     if (is_win32 && odp->type == TYPE_PASCAL)
     {
         error( "'pascal' not supported for Win32\n" );
@@ -326,6 +349,9 @@ static int parse_spec_export( ORDDEF *odp, DLLSPEC *spec )
 
     if (odp->type == TYPE_VARARGS)
         odp->flags |= FLAG_NORELAY;  /* no relay debug possible for varags entry point */
+
+    if (target_cpu != CPU_x86 && target_cpu != CPU_x86_32on64)
+        odp->flags &= ~(FLAG_THISCALL | FLAG_FASTCALL);
 
     if (!(token = GetToken(1)))
     {
@@ -348,12 +374,6 @@ static int parse_spec_export( ORDDEF *odp, DLLSPEC *spec )
             }
             odp->flags |= FLAG_FORWARD;
         }
-    }
-    if (target_cpu == CPU_x86 && odp->type == TYPE_THISCALL && !(odp->flags & FLAG_FORWARD))
-    {
-        char *link_name = strmake( "__thiscall_%s", odp->link_name );
-        free( odp->link_name );
-        odp->link_name = link_name;
     }
     return 1;
 }
@@ -403,9 +423,9 @@ static int parse_spec_stub( ORDDEF *odp, DLLSPEC *spec )
     odp->link_name = xstrdup("");
     /* don't bother generating stubs for Winelib */
     if (odp->flags & FLAG_CPU_MASK)
-        odp->flags &= FLAG_CPU(CPU_x86) | FLAG_CPU(CPU_x86_64) | FLAG_CPU(CPU_ARM) | FLAG_CPU(CPU_ARM64);
+        odp->flags &= FLAG_CPU(CPU_x86) | FLAG_CPU(CPU_x86_32on64) | FLAG_CPU(CPU_x86_64) | FLAG_CPU(CPU_ARM) | FLAG_CPU(CPU_ARM64);
     else
-        odp->flags |= FLAG_CPU(CPU_x86) | FLAG_CPU(CPU_x86_64) | FLAG_CPU(CPU_ARM) | FLAG_CPU(CPU_ARM64);
+        odp->flags |= FLAG_CPU(CPU_x86) | FLAG_CPU(CPU_x86_32on64) | FLAG_CPU(CPU_x86_64) | FLAG_CPU(CPU_ARM) | FLAG_CPU(CPU_ARM64);
 
     return parse_spec_arguments( odp, spec, 1 );
 }
@@ -480,6 +500,8 @@ static const char *parse_spec_flags( DLLSPEC *spec, ORDDEF *odp )
                         return NULL;
                     }
                     odp->flags |= FLAG_CPU( cpu );
+                    if (cpu == CPU_x86)
+                        odp->flags |= FLAG_CPU( CPU_x86_32on64 );
                 }
                 cpu_name = strtok( NULL, "," );
             }
@@ -487,7 +509,7 @@ static const char *parse_spec_flags( DLLSPEC *spec, ORDDEF *odp )
         }
         else if (!strcmp( token, "i386" ))  /* backwards compatibility */
         {
-            odp->flags |= FLAG_CPU(CPU_x86);
+            odp->flags |= FLAG_CPU(CPU_x86)| FLAG_CPU(CPU_x86_32on64);
         }
         else
         {
@@ -506,6 +528,8 @@ static const char *parse_spec_flags( DLLSPEC *spec, ORDDEF *odp )
                     error( "Flag '%s' is not supported in Win32\n", FlagNames[i] );
                 break;
             case FLAG_RET64:
+            case FLAG_THISCALL:
+            case FLAG_FASTCALL:
                 if (spec->type == SPEC_WIN16)
                     error( "Flag '%s' is not supported in Win16\n", FlagNames[i] );
                 break;
@@ -521,7 +545,7 @@ static const char *parse_spec_flags( DLLSPEC *spec, ORDDEF *odp )
 
 static int needs_syscall( ORDDEF *odp, DLLSPEC *spec )
 {
-    if (target_cpu != CPU_x86 && target_cpu != CPU_x86_64)
+    if (target_cpu != CPU_x86 && target_cpu != CPU_x86_32on64 && target_cpu != CPU_x86_64)
         return 0;
     if (odp->flags & (FLAG_FORWARD | FLAG_REGISTER))
         return 0;
@@ -556,8 +580,16 @@ static int parse_spec_ordinal( int ordinal, DLLSPEC *spec )
 
     if (odp->type >= TYPE_NBTYPES)
     {
-        error( "Expected type after ordinal, found '%s' instead\n", token );
-        goto error;
+        if (!strcmp( token, "thiscall" )) /* for backwards compatibility */
+        {
+            odp->type = TYPE_STDCALL;
+            odp->flags |= FLAG_THISCALL;
+        }
+        else
+        {
+            error( "Expected type after ordinal, found '%s' instead\n", token );
+            goto error;
+        }
     }
 
     if (!(token = GetToken(0))) goto error;
@@ -589,7 +621,6 @@ static int parse_spec_ordinal( int ordinal, DLLSPEC *spec )
     case TYPE_STDCALL:
     case TYPE_VARARGS:
     case TYPE_CDECL:
-    case TYPE_THISCALL:
         if (!parse_spec_export( odp, spec )) goto error;
         break;
     case TYPE_ABS:
@@ -747,6 +778,7 @@ static void assign_names( DLLSPEC *spec )
 
         /* sort the list of names */
         qsort( spec->names, spec->nb_names, sizeof(spec->names[0]), name_compare );
+        for (i = 0; i < spec->nb_names; i++) spec->names[i]->hint = i;
     }
 }
 

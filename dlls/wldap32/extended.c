@@ -137,6 +137,7 @@ ULONG CDECL ldap_extended_operationW( WLDAP32_LDAP *ld, PWCHAR oid, struct WLDAP
 #ifdef HAVE_LDAP
     char *oidU = NULL;
     LDAPControl **serverctrlsU = NULL, **clientctrlsU = NULL;
+    struct berval bvdata;
 
     ret = WLDAP32_LDAP_NO_MEMORY;
 
@@ -149,6 +150,10 @@ ULONG CDECL ldap_extended_operationW( WLDAP32_LDAP *ld, PWCHAR oid, struct WLDAP
         oidU = strWtoU( oid );
         if (!oidU) goto exit;
     }
+    if (data) {
+        bvdata.bv_len = data->bv_len;
+        bvdata.bv_val = data->bv_val;
+    }
     if (serverctrls) {
         serverctrlsU = controlarrayWtoU( serverctrls );
         if (!serverctrlsU) goto exit;
@@ -158,7 +163,7 @@ ULONG CDECL ldap_extended_operationW( WLDAP32_LDAP *ld, PWCHAR oid, struct WLDAP
         if (!clientctrlsU) goto exit;
     }
 
-    ret = map_error( ldap_extended_operation( ld, oid ? oidU : "", (struct berval *)data,
+    ret = map_error( ldap_extended_operation( ldap_get( ld ), oid ? oidU : "", data ? &bvdata : NULL,
                                               serverctrlsU, clientctrlsU, (int *)message ));
 
 exit:
@@ -252,8 +257,10 @@ ULONG CDECL ldap_extended_operation_sW( WLDAP32_LDAP *ld, PWCHAR oid, struct WLD
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
 #ifdef HAVE_LDAP
-    char *oidU = NULL, *retoidU = NULL;
+    char *oidU = NULL, * HOSTPTR retoidU = NULL;
     LDAPControl **serverctrlsU = NULL, **clientctrlsU = NULL;
+    struct berval *bvret = NULL;
+    struct berval bvdata;
 
     ret = WLDAP32_LDAP_NO_MEMORY;
 
@@ -266,6 +273,10 @@ ULONG CDECL ldap_extended_operation_sW( WLDAP32_LDAP *ld, PWCHAR oid, struct WLD
         oidU = strWtoU( oid );
         if (!oidU) goto exit;
     }
+    if (data) {
+        bvdata.bv_len = data->bv_len;
+        bvdata.bv_val = data->bv_val;
+    }
     if (serverctrls) {
         serverctrlsU = controlarrayWtoU( serverctrls );
         if (!serverctrlsU) goto exit;
@@ -275,8 +286,9 @@ ULONG CDECL ldap_extended_operation_sW( WLDAP32_LDAP *ld, PWCHAR oid, struct WLD
         if (!clientctrlsU) goto exit;
     }
 
-    ret = map_error( ldap_extended_operation_s( ld, oid ? oidU : "", (struct berval *)data, serverctrlsU,
-                                                clientctrlsU, &retoidU, (struct berval **)retdata ));
+    ret = map_error( ldap_extended_operation_s( ldap_get( ld ), oid ? oidU : "", data ? &bvdata : NULL,
+                                                serverctrlsU, clientctrlsU, &retoidU, &bvret ));
+    ret = bvconvert_and_free( ret, bvret, retdata );
 
     if (retoid && retoidU) {
         *retoid = strUtoW( retoidU );

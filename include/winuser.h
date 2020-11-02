@@ -19,8 +19,10 @@
 #ifndef _WINUSER_
 #define _WINUSER_
 
+#include "wine/winheader_enter.h"
+
 #if !defined(_USER32_)
-#define WINUSERAPI DECLSPEC_IMPORT
+#define WINUSERAPI DECLSPEC_HIDDEN
 #else
 #define WINUSERAPI
 #endif
@@ -100,6 +102,8 @@ typedef void* HPOWERNOTIFY;
 
 #define WSF_VISIBLE     1
 #define DF_ALLOWOTHERACCOUNTHOOK  1
+
+#define CWF_CREATE_ONLY 0x01
 
 typedef struct tagUSEROBJECTFLAGS {
     BOOL fInherit;
@@ -1081,6 +1085,9 @@ WINUSERAPI BOOL     WINAPI SetSysColors(INT,const INT*,const COLORREF*);
 /* Used for EnumDisplaySettingsEx */
 #define ENUM_CURRENT_SETTINGS  ((DWORD) -1)
 #define ENUM_REGISTRY_SETTINGS ((DWORD) -2)
+
+/* Used by EnumDisplayDevices */
+#define EDD_GET_DEVICE_INTERFACE_NAME 0x00000001
 
 #define EDS_RAWMODE       0x00000002
 #define EDS_ROTATEDMODE   0x00000004
@@ -3828,6 +3835,7 @@ WINUSERAPI HWND        WINAPI GetNextDlgTabItem(HWND,HWND,BOOL);
 WINUSERAPI HWND        WINAPI GetOpenClipboardWindow(void);
 WINUSERAPI HWND        WINAPI GetParent(HWND);
 WINUSERAPI BOOL        WINAPI GetPhysicalCursorPos(POINT*);
+WINUSERAPI BOOL        WINAPI GetPointerType(UINT32,POINTER_INPUT_TYPE *);
 WINUSERAPI INT         WINAPI GetPriorityClipboardFormat(UINT*,INT);
 WINUSERAPI BOOL        WINAPI GetProcessDefaultLayout(DWORD*);
 WINUSERAPI BOOL        WINAPI GetProcessDpiAwarenessInternal(HANDLE,DPI_AWARENESS*);
@@ -4049,7 +4057,6 @@ WINUSERAPI UINT        WINAPI PrivateExtractIconExA(LPCSTR,int,HICON*,HICON*,UIN
 WINUSERAPI UINT        WINAPI PrivateExtractIconExW(LPCWSTR,int,HICON*,HICON*,UINT);
 WINUSERAPI UINT        WINAPI PrivateExtractIconsA(LPCSTR,int,int,int,HICON*,UINT*,UINT,UINT);
 WINUSERAPI UINT        WINAPI PrivateExtractIconsW(LPCWSTR,int,int,int,HICON*,UINT*,UINT,UINT);
-WINUSERAPI BOOL        WINAPI PtInRect(const RECT*,POINT);
 WINUSERAPI HWND        WINAPI RealChildWindowFromPoint(HWND,POINT);
 WINUSERAPI UINT        WINAPI RealGetWindowClassA(HWND,LPSTR,UINT);
 WINUSERAPI UINT        WINAPI RealGetWindowClassW(HWND,LPWSTR,UINT);
@@ -4278,6 +4285,7 @@ WINUSERAPI BOOL        WINAPI EqualRect(const RECT*,const RECT*);
 WINUSERAPI BOOL        WINAPI InflateRect(LPRECT,INT,INT);
 WINUSERAPI BOOL        WINAPI IsRectEmpty(const RECT*);
 WINUSERAPI BOOL        WINAPI OffsetRect(LPRECT,INT,INT);
+WINUSERAPI BOOL        WINAPI PtInRect(const RECT*,POINT);
 WINUSERAPI BOOL        WINAPI SetRect(LPRECT,INT,INT,INT,INT);
 WINUSERAPI BOOL        WINAPI SetRectEmpty(LPRECT);
 
@@ -4318,6 +4326,13 @@ static inline BOOL WINAPI OffsetRect(LPRECT rect, INT x, INT y)
     return TRUE;
 }
 
+static inline BOOL WINAPI PtInRect(const RECT *rect, POINT pt)
+{
+    if (!rect) return FALSE;
+    return ((pt.x >= rect->left) && (pt.x < rect->right) &&
+            (pt.y >= rect->top) && (pt.y < rect->bottom));
+}
+
 static inline BOOL WINAPI SetRect(LPRECT rect, INT left, INT top, INT right, INT bottom)
 {
     if (!rect) return FALSE;
@@ -4349,5 +4364,7 @@ WINUSERAPI BOOL CDECL __wine_send_input( HWND hwnd, const INPUT *input );
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* _WINUSER_ */

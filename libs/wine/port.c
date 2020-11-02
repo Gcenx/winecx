@@ -25,14 +25,20 @@
 #include <string.h>
 #include <sys/types.h>
 
+#define WINE_UNICODE_INLINE  /* nothing */
 #include "wine/unicode.h"
 #include "wine/library.h"
+#include "wine/asm.h"
 
 /* functions from libwine_port that are also exported from libwine for backwards compatibility,
  * on platforms that require it */
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(__i386_on_x86_64__)
+
 const void *libwine_port_functions[] =
 {
+    strtolW,
+    vsnprintfW,
+    wine_compare_string,
     wine_cp_enum_table,
     wine_cp_get_table,
     wine_cp_mbstowcs,
@@ -72,9 +78,9 @@ void wine_pthread_set_functions( const struct wine_pthread_functions *functions,
  *
  * Switch to the specified stack and call the function.
  */
-void DECLSPEC_NORETURN wine_switch_to_stack( void (*func)(void *), void *arg, void *stack )
+void DECLSPEC_NORETURN wine_switch_to_stack( void (*func)(void * WIN32PTR), void * WIN32PTR arg, void * WIN32PTR stack )
 {
-    wine_call_on_stack( (int (*)(void *))func, arg, stack );
+    wine_call_on_stack( (int (*)(void * WIN32PTR))func, arg, stack );
     abort();
 }
 
@@ -129,7 +135,7 @@ __declspec(naked) int wine_call_on_stack( int (*func)(void *), void *arg, void *
   __asm pop ebp;
   __asm ret;
 }
-#elif defined(__x86_64__) && defined(__GNUC__)
+#elif (defined(__x86_64__) || defined(__i386_on_x86_64__)) && defined(__GNUC__)
 __ASM_GLOBAL_FUNC( wine_call_on_stack,
                    "pushq %rbp\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t")

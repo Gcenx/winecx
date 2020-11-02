@@ -851,6 +851,8 @@ interface IStream : ISequentialStream
     [out] IStream **ppstm);
 }
 
+cpp_quote("#include \"wine/objidl_helpers.h\"")
+
 [
   object,
   uuid(0000000d-0000-0000-C000-000000000046),

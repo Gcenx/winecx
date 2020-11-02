@@ -242,7 +242,7 @@ static inline void do_rop_codes_line_rev_4(BYTE *dst, int dst_x, const BYTE *src
 
 static inline void memset_32( DWORD *start, DWORD val, DWORD size )
 {
-#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__))
     DWORD dummy;
     __asm__ __volatile__( "cld; rep; stosl"
                           : "=c" (dummy), "=D" (dummy)
@@ -254,7 +254,7 @@ static inline void memset_32( DWORD *start, DWORD val, DWORD size )
 
 static inline void memset_16( WORD *start, WORD val, DWORD size )
 {
-#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__))
     DWORD dummy;
     __asm__ __volatile__( "cld; rep; stosw"
                           : "=c" (dummy), "=D" (dummy)

@@ -30,9 +30,6 @@
 #ifdef HAVE_TERMIOS_H
 #include <termios.h>
 #endif
-#ifdef HAVE_IO_H
-# include <io.h>
-#endif
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
@@ -280,8 +277,8 @@ static NTSTATUS get_line_control(int fd, SERIAL_LINE_CONTROL* slc)
     case PARENB:                slc->Parity = EVENPARITY;       break;
     case PARENB|PARODD:         slc->Parity = ODDPARITY;        break;
 #ifdef CMSPAR
-    case PARENB|CMSPAR:         slc->Parity = MARKPARITY;       break;
-    case PARENB|PARODD|CMSPAR:  slc->Parity = SPACEPARITY;      break;
+    case PARENB|PARODD|CMSPAR:  slc->Parity = MARKPARITY;       break;
+    case PARENB|CMSPAR:         slc->Parity = SPACEPARITY;      break;
 #endif
     }
     switch (port.c_cflag & CSIZE)
@@ -676,8 +673,8 @@ static NTSTATUS set_line_control(int fd, const SERIAL_LINE_CONTROL* slc)
     case EVENPARITY:    port.c_cflag |= PARENB;                         break;
 #ifdef CMSPAR
         /* Linux defines mark/space (stick) parity */
-    case MARKPARITY:    port.c_cflag |= PARENB | CMSPAR;                break;
-    case SPACEPARITY:   port.c_cflag |= PARENB | PARODD |  CMSPAR;      break;
+    case MARKPARITY:    port.c_cflag |= PARENB | PARODD | CMSPAR;       break;
+    case SPACEPARITY:   port.c_cflag |= PARENB | CMSPAR;                break;
 #else
         /* try the POSIX way */
     case MARKPARITY:

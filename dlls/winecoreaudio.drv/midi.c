@@ -847,9 +847,9 @@ void MIDIIn_SendMessage(MIDIMessage msg)
     CFRelease(messagePort);
 }
 
-static CFDataRef MIDIIn_MessageHandler(CFMessagePortRef local, SInt32 msgid, CFDataRef data, void *info)
+static CFDataRef MIDIIn_MessageHandler(CFMessagePortRef local, SInt32 msgid, CFDataRef data, void * HOSTPTR info)
 {
-    MIDIMessage *msg = NULL;
+    MIDIMessage * HOSTPTR msg = NULL;
     int i = 0;
     MIDISource *src = NULL;
     DWORD sendData = 0;
@@ -860,7 +860,7 @@ static CFDataRef MIDIIn_MessageHandler(CFMessagePortRef local, SInt32 msgid, CFD
     switch (msgid)
     {
         case 0:
-            msg = (MIDIMessage *) CFDataGetBytePtr(data);
+            msg = (MIDIMessage * HOSTPTR) CFDataGetBytePtr(data);
             TRACE("devID=%d\n", msg->devID);
              for (i = 0; i < msg->length; ++i) {
                 TRACE("%02X ", msg->data[i]);

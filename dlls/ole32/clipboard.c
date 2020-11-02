@@ -788,7 +788,7 @@ static HRESULT get_data_from_stream(IDataObject *data, FORMATETC *fmt, HGLOBAL *
         if(FAILED(hr)) goto error;
 
         offs.QuadPart = 0;
-        IStream_Seek(med.u.pstm, offs, STREAM_SEEK_CUR, &pos);
+        IStream_Seek(med.u.pstm, offs, STREAM_SEEK_END, &pos);
         IStream_Seek(med.u.pstm, offs, STREAM_SEEK_SET, NULL);
         hr = IStream_CopyTo(med.u.pstm, stm, pos, NULL, NULL);
         ReleaseStgMedium(&med);
@@ -1363,7 +1363,7 @@ static inline BOOL string_off_equal(const DVTARGETDEVICE *t1, WORD off1, const D
     str1 = (const WCHAR*)((const char*)t1 + off1);
     str2 = (const WCHAR*)((const char*)t2 + off2);
 
-    return !lstrcmpW(str1, str2);
+    return !wcscmp(str1, str2);
 }
 
 static inline BOOL td_equal(const DVTARGETDEVICE *t1, const DVTARGETDEVICE *t2)

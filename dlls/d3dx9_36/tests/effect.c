@@ -22,25 +22,6 @@
 #include "wine/test.h"
 #include "d3dx9.h"
 
-#ifndef INFINITY
-static inline float __port_infinity(void)
-{
-    static const unsigned __inf_bytes = 0x7f800000;
-    return *(const float *)&__inf_bytes;
-}
-#define INFINITY __port_infinity()
-#endif /* INFINITY */
-
-#ifndef NAN
-static float get_nan(void)
-{
-    DWORD nan = 0x7fc00000;
-
-    return *(float *)&nan;
-}
-#define NAN get_nan()
-#endif
-
 /* helper functions */
 static BOOL compare_float(FLOAT f, FLOAT g, UINT ulps)
 {
@@ -343,7 +324,7 @@ static void test_create_effect_and_pool(IDirect3DDevice9 *device)
 
     hr = pool->lpVtbl->QueryInterface(pool, &IID_ID3DXEffectPool, (void **)&pool2);
     ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK)\n", hr);
-    ok(pool == pool2, "Release failed, got %p, expected %p\n", pool2, pool);
+    ok(pool == pool2, "Got effect pool %p, expected %p.\n", pool2, pool);
 
     count = pool2->lpVtbl->Release(pool2);
     ok(count == 1, "Release failed, got %u, expected 1\n", count);
@@ -359,7 +340,7 @@ static void test_create_effect_and_pool(IDirect3DDevice9 *device)
 
     hr = effect->lpVtbl->GetPool(effect, &pool);
     ok(hr == D3D_OK, "GetPool failed, got %x, expected 0 (D3D_OK)\n", hr);
-    ok(pool == pool2, "GetPool failed, got %p, expected %p\n", pool2, pool);
+    ok(pool == pool2, "Got effect pool %p, expected %p.\n", pool2, pool);
 
     count = pool2->lpVtbl->Release(pool2);
     ok(count == 2, "Release failed, got %u, expected 2\n", count);
@@ -2933,7 +2914,10 @@ technique tech0
    pass p0
    {
        vertexshader = vs_arr1[1];
-       VertexShaderConstant1[3] = {2,2,2,2};
+       VertexShaderConstant1[1] = 3.0f;
+       VertexShaderConstant4[2] = 1;
+       VertexShaderConstant1[3] = {2, 2, 2, 2};
+       VertexShaderConstant4[4] = {4, 4, 4, 4, 5, 5, 5, 5, 6};
        BlendOp = 2;
        AlphaOp[3] = 4;
        ZEnable = true;
@@ -2948,7 +2932,7 @@ technique tech0
 #endif
 static const DWORD test_effect_states_effect_blob[] =
 {
-    0xfeff0901, 0x000002e8, 0x00000000, 0x00000010, 0x00000004, 0x00000020, 0x00000000, 0x00000002,
+    0xfeff0901, 0x00000368, 0x00000000, 0x00000010, 0x00000004, 0x00000020, 0x00000000, 0x00000002,
     0x00000001, 0x00000002, 0x00000008, 0x615f7376, 0x00317272, 0x0000000a, 0x00000004, 0x00000074,
     0x00000000, 0x00000000, 0x00000002, 0x00000002, 0x00000002, 0x00000000, 0x00000000, 0x00000000,
     0x00000001, 0x00000001, 0x00000001, 0x000000ab, 0x00000100, 0x00000044, 0x00000040, 0x00000009,
@@ -2956,8 +2940,12 @@ static const DWORD test_effect_states_effect_blob[] =
     0x00000004, 0x00000004, 0x40800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
     0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
     0x00000000, 0x40c00000, 0x00000007, 0x656d6163, 0x00006172, 0x00000005, 0x57454956, 0x00000000,
-    0x00000003, 0x00000010, 0x00000004, 0x00000000, 0x00000000, 0x00000000, 0x40000000, 0x40000000,
+    0x00000003, 0x00000010, 0x00000004, 0x00000000, 0x00000000, 0x00000000, 0x40400000, 0x00000003,
+    0x00000003, 0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000001, 0x3f800000, 0x00000003,
+    0x00000003, 0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000001, 0x40000000, 0x40000000,
     0x40000000, 0x40000000, 0x00000003, 0x00000003, 0x00000000, 0x00000000, 0x00000000, 0x00000004,
+    0x00000001, 0x40800000, 0x40800000, 0x40800000, 0x40800000, 0x40a00000, 0x40a00000, 0x40a00000,
+    0x40a00000, 0x40c00000, 0x00000003, 0x00000003, 0x00000000, 0x00000000, 0x00000000, 0x00000009,
     0x00000001, 0x00000002, 0x00000002, 0x00000002, 0x00000000, 0x00000000, 0x00000000, 0x00000001,
     0x00000001, 0x00000004, 0x00000002, 0x00000002, 0x00000000, 0x00000000, 0x00000000, 0x00000001,
     0x00000001, 0x00000001, 0x00000002, 0x00000002, 0x00000000, 0x00000000, 0x00000000, 0x00000001,
@@ -2973,68 +2961,85 @@ static const DWORD test_effect_states_effect_blob[] =
     0x00000001, 0x00000000, 0x0000000a, 0x00000004, 0x00000000, 0x00000000, 0x00000000, 0x00000003,
     0x00003070, 0x00000006, 0x68636574, 0x00000030, 0x00000003, 0x00000001, 0x00000005, 0x00000004,
     0x00000004, 0x00000018, 0x00000000, 0x00000000, 0x0000002c, 0x00000060, 0x00000000, 0x00000000,
-    0x00000084, 0x000000a0, 0x00000000, 0x00000000, 0x000002dc, 0x00000000, 0x00000001, 0x000002d4,
-    0x00000000, 0x0000000b, 0x00000092, 0x00000000, 0x000000fc, 0x000000f8, 0x00000098, 0x00000003,
-    0x00000120, 0x00000110, 0x0000004b, 0x00000000, 0x00000140, 0x0000013c, 0x0000006b, 0x00000003,
-    0x00000160, 0x0000015c, 0x00000000, 0x00000000, 0x00000180, 0x0000017c, 0x0000007d, 0x00000001,
-    0x000001dc, 0x0000019c, 0x0000007c, 0x00000000, 0x00000238, 0x000001f8, 0x00000091, 0x00000002,
-    0x00000258, 0x00000254, 0x00000084, 0x00000002, 0x00000278, 0x00000274, 0x00000088, 0x00000002,
-    0x000002a0, 0x00000294, 0x000000b2, 0x00000001, 0x000002c0, 0x000002bc, 0x00000002, 0x00000003,
-    0x00000001, 0x0000002c, 0xfffe0101, 0x00000051, 0xa00f0000, 0x3f800000, 0x3f800000, 0x3f800000,
-    0x3f800000, 0x00000001, 0xc00f0000, 0xa0e40000, 0x0000ffff, 0x00000002, 0x0000002c, 0xfffe0200,
-    0x05000051, 0xa00f0000, 0x40000000, 0x40000000, 0x40000000, 0x40000000, 0x02000001, 0xc00f0000,
-    0xa0e40000, 0x0000ffff, 0x00000000, 0x00000000, 0xffffffff, 0x0000000a, 0x00000001, 0x00000009,
-    0x706d6173, 0x3172656c, 0x00000000, 0x00000000, 0x00000000, 0xffffffff, 0x00000006, 0x00000000,
-    0x0000016c, 0x46580200, 0x0030fffe, 0x42415443, 0x0000001c, 0x0000008b, 0x46580200, 0x00000001,
-    0x0000001c, 0x20000100, 0x00000088, 0x00000030, 0x00000002, 0x00000004, 0x00000038, 0x00000048,
-    0x656d6163, 0xab006172, 0x00030003, 0x00040004, 0x00000001, 0x00000000, 0x40800000, 0x00000000,
+    0x00000084, 0x000000a0, 0x00000000, 0x00000000, 0x0000035c, 0x00000000, 0x00000001, 0x00000354,
+    0x00000000, 0x0000000e, 0x00000092, 0x00000000, 0x000000fc, 0x000000f8, 0x00000098, 0x00000001,
+    0x00000114, 0x00000110, 0x0000009b, 0x00000002, 0x00000134, 0x00000130, 0x00000098, 0x00000003,
+    0x00000160, 0x00000150, 0x0000009b, 0x00000004, 0x000001a0, 0x0000017c, 0x0000004b, 0x00000000,
+    0x000001c0, 0x000001bc, 0x0000006b, 0x00000003, 0x000001e0, 0x000001dc, 0x00000000, 0x00000000,
+    0x00000200, 0x000001fc, 0x0000007d, 0x00000001, 0x0000025c, 0x0000021c, 0x0000007c, 0x00000000,
+    0x000002b8, 0x00000278, 0x00000091, 0x00000002, 0x000002d8, 0x000002d4, 0x00000084, 0x00000002,
+    0x000002f8, 0x000002f4, 0x00000088, 0x00000002, 0x00000320, 0x00000314, 0x000000b2, 0x00000001,
+    0x00000340, 0x0000033c, 0x00000002, 0x00000003, 0x00000001, 0x0000002c, 0xfffe0101, 0x00000051,
+    0xa00f0000, 0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000, 0x00000001, 0xc00f0000, 0xa0e40000,
+    0x0000ffff, 0x00000002, 0x0000002c, 0xfffe0200, 0x05000051, 0xa00f0000, 0x40000000, 0x40000000,
+    0x40000000, 0x40000000, 0x02000001, 0xc00f0000, 0xa0e40000, 0x0000ffff, 0x00000000, 0x00000000,
+    0xffffffff, 0x0000000d, 0x00000001, 0x00000009, 0x706d6173, 0x3172656c, 0x00000000, 0x00000000,
+    0x00000000, 0xffffffff, 0x00000009, 0x00000000, 0x0000016c, 0x46580200, 0x0030fffe, 0x42415443,
+    0x0000001c, 0x0000008b, 0x46580200, 0x00000001, 0x0000001c, 0x20000100, 0x00000088, 0x00000030,
+    0x00000002, 0x00000004, 0x00000038, 0x00000048, 0x656d6163, 0xab006172, 0x00030003, 0x00040004,
+    0x00000001, 0x00000000, 0x40800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
     0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x40c00000, 0x4d007874, 0x6f726369,
-    0x74666f73, 0x29522820, 0x534c4820, 0x6853204c, 0x72656461, 0x6d6f4320, 0x656c6970, 0x2e392072,
-    0x392e3932, 0x332e3235, 0x00313131, 0x0002fffe, 0x54494c43, 0x00000000, 0x0024fffe, 0x434c5846,
-    0x00000004, 0x10000004, 0x00000001, 0x00000000, 0x00000002, 0x00000000, 0x00000000, 0x00000004,
-    0x00000000, 0x10000004, 0x00000001, 0x00000000, 0x00000002, 0x00000004, 0x00000000, 0x00000004,
-    0x00000004, 0x10000004, 0x00000001, 0x00000000, 0x00000002, 0x00000008, 0x00000000, 0x00000004,
-    0x00000008, 0x10000004, 0x00000001, 0x00000000, 0x00000002, 0x0000000c, 0x00000000, 0x00000004,
-    0x0000000c, 0xf0f0f0f0, 0x0f0f0f0f, 0x0000ffff, 0x00000000, 0x00000000, 0xffffffff, 0x00000000,
-    0x00000001, 0x0000000b, 0x615f7376, 0x5b317272, 0x00005d31,
+    0x00000000, 0x40c00000, 0x4d007874, 0x6f726369, 0x74666f73, 0x29522820, 0x534c4820, 0x6853204c,
+    0x72656461, 0x6d6f4320, 0x656c6970, 0x2e392072, 0x392e3932, 0x332e3235, 0x00313131, 0x0002fffe,
+    0x54494c43, 0x00000000, 0x0024fffe, 0x434c5846, 0x00000004, 0x10000004, 0x00000001, 0x00000000,
+    0x00000002, 0x00000000, 0x00000000, 0x00000004, 0x00000000, 0x10000004, 0x00000001, 0x00000000,
+    0x00000002, 0x00000004, 0x00000000, 0x00000004, 0x00000004, 0x10000004, 0x00000001, 0x00000000,
+    0x00000002, 0x00000008, 0x00000000, 0x00000004, 0x00000008, 0x10000004, 0x00000001, 0x00000000,
+    0x00000002, 0x0000000c, 0x00000000, 0x00000004, 0x0000000c, 0xf0f0f0f0, 0x0f0f0f0f, 0x0000ffff,
+    0x00000000, 0x00000000, 0xffffffff, 0x00000000, 0x00000001, 0x0000000b, 0x615f7376, 0x5b317272,
+    0x00005d31,
 };
-#define TEST_EFFECT_STATES_VSHADER_POS 271
+#define TEST_EFFECT_STATES_VSHADER_POS 315
+
+static const D3DXVECTOR4 fvect_filler = {-9999.0f, -9999.0f, -9999.0f, -9999.0f};
+
+static void test_effect_clear_vconsts(IDirect3DDevice9 *device)
+{
+    unsigned int i;
+    HRESULT hr;
+
+    for (i = 0; i < 256; ++i)
+    {
+        hr = IDirect3DDevice9_SetVertexShaderConstantF(device, i, &fvect_filler.x, 1);
+        ok(hr == D3D_OK, "Got result %#x.\n", hr);
+    }
+}
 
 static void test_effect_states(IDirect3DDevice9 *device)
 {
-    D3DMATRIX test_mat =
+    static const D3DMATRIX test_mat =
     {{{
         -1.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 0.0f
     }}};
-    D3DMATRIX test_mat_camera =
+    static const D3DMATRIX test_mat_camera =
     {{{
         4.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 6.0f
     }}};
-    D3DMATRIX test_mat_world1 =
+    static const D3DMATRIX test_mat_world1 =
     {{{
         2.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 4.0f
     }}};
-    D3DMATRIX mat;
-    HRESULT hr;
+
+    IDirect3DVertexShader9 *vshader;
     ID3DXEffect *effect;
+    UINT byte_code_size;
+    D3DXVECTOR4 fvect;
+    void *byte_code;
+    D3DLIGHT9 light;
+    D3DMATRIX mat;
     UINT npasses;
     DWORD value;
-    IDirect3DVertexShader9 *vshader;
-    void *byte_code;
-    UINT byte_code_size;
+    HRESULT hr;
     BOOL bval;
-    D3DLIGHT9 light;
-    float float_data[4];
 
     hr = D3DXCreateEffect(device, test_effect_states_effect_blob, sizeof(test_effect_states_effect_blob),
             NULL, NULL, 0, NULL, &effect, NULL);
@@ -3086,6 +3091,8 @@ static void test_effect_states(IDirect3DDevice9 *device)
     ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK).\n", hr);
     ok(!memcmp(mat.m, test_mat.m, sizeof(mat)), "World matrix does not match.\n");
 
+    test_effect_clear_vconsts(device);
+
     hr = effect->lpVtbl->BeginPass(effect, 0);
     ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK).\n", hr);
 
@@ -3127,11 +3134,44 @@ static void test_effect_states(IDirect3DDevice9 *device)
     if (hr == D3D_OK)
         ok(light.Position.x == 4.0f && light.Position.y == 5.0f && light.Position.z == 6.0f,
                 "Got unexpected light position (%f, %f, %f).\n", light.Position.x, light.Position.y, light.Position.z);
-    hr = IDirect3DDevice9_GetVertexShaderConstantF(device, 3, float_data, 1);
+
+    /* Testing first value only for constants 1, 2 as the rest of the vector seem to
+     * contain garbage data on native. */
+    hr = IDirect3DDevice9_GetVertexShaderConstantF(device, 1, &fvect.x, 1);
     ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK).\n", hr);
-    ok(float_data[0] == 2.0f && float_data[1] == 2.0f && float_data[2] == 2.0f && float_data[3] == 2.0f,
-            "Got unexpected vertex shader floats: (%f %f %f %f).\n",
-            float_data[0], float_data[1], float_data[2], float_data[3]);
+    ok(fvect.x == 3.0f, "Got unexpected vertex shader constant (%.8e, %.8e, %.8e, %.8e).\n",
+            fvect.x, fvect.y, fvect.z, fvect.w);
+    hr = IDirect3DDevice9_GetVertexShaderConstantF(device, 2, &fvect.x, 1);
+    ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK).\n", hr);
+    ok(fvect.x == 1.0f, "Got unexpected vertex shader constant (%.8e, %.8e, %.8e, %.8e).\n",
+            fvect.x, fvect.y, fvect.z, fvect.w);
+
+    hr = IDirect3DDevice9_GetVertexShaderConstantF(device, 3, &fvect.x, 1);
+    ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK).\n", hr);
+    ok(fvect.x == 2.0f && fvect.y == 2.0f && fvect.z == 2.0f && fvect.w == 2.0f,
+            "Got unexpected vertex shader constant (%.8e, %.8e, %.8e, %.8e).\n",
+            fvect.x, fvect.y, fvect.z, fvect.w);
+
+    hr = IDirect3DDevice9_GetVertexShaderConstantF(device, 4, &fvect.x, 1);
+    ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK).\n", hr);
+    ok(fvect.x == 4.0f && fvect.y == 4.0f && fvect.z == 4.0f && fvect.w == 4.0f,
+            "Got unexpected vertex shader constant (%.8e, %.8e, %.8e, %.8e).\n",
+            fvect.x, fvect.y, fvect.z, fvect.w);
+    hr = IDirect3DDevice9_GetVertexShaderConstantF(device, 5, &fvect.x, 1);
+    ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK).\n", hr);
+    ok(fvect.x == 0.0f && fvect.y == 0.0f && fvect.z == 0.0f && fvect.w == 0.0f,
+            "Got unexpected vertex shader constant (%.8e, %.8e, %.8e, %.8e).\n",
+            fvect.x, fvect.y, fvect.z, fvect.w);
+    hr = IDirect3DDevice9_GetVertexShaderConstantF(device, 6, &fvect.x, 1);
+    ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK).\n", hr);
+    ok(fvect.x == 0.0f && fvect.y == 0.0f && fvect.z == 0.0f && fvect.w == 0.0f,
+            "Got unexpected vertex shader constant (%.8e, %.8e, %.8e, %.8e).\n",
+            fvect.x, fvect.y, fvect.z, fvect.w);
+    hr = IDirect3DDevice9_GetVertexShaderConstantF(device, 7, &fvect.x, 1);
+    ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK).\n", hr);
+    ok(!memcmp(&fvect, &fvect_filler, sizeof(fvect_filler)),
+            "Got unexpected vertex shader constant (%.8e, %.8e, %.8e, %.8e).\n",
+            fvect.x, fvect.y, fvect.z, fvect.w);
 
     hr = effect->lpVtbl->EndPass(effect);
     ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK).\n", hr);
@@ -4367,20 +4407,6 @@ static void test_effect_preshader_op_results_(unsigned int line, IDirect3DDevice
     }
 }
 
-static const D3DXVECTOR4 fvect_filler = {-9999.0f, -9999.0f, -9999.0f, -9999.0f};
-
-static void test_effect_preshader_clear_vconsts(IDirect3DDevice9 *device)
-{
-    unsigned int i;
-    HRESULT hr;
-
-    for (i = 0; i < 256; ++i)
-    {
-        hr = IDirect3DDevice9_SetVertexShaderConstantF(device, i, &fvect_filler.x, 1);
-        ok(hr == D3D_OK, "Got result %#x.\n", hr);
-    }
-}
-
 static const D3DXVECTOR4 test_effect_preshader_fvect_v[] =
 {
     {0.0f,   0.0f,  0.0f,  0.0f},
@@ -4588,7 +4614,7 @@ static void test_effect_preshader(IDirect3DDevice9 *device)
             NULL, NULL, 0, NULL, &effect, NULL);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
 
-    test_effect_preshader_clear_vconsts(device);
+    test_effect_clear_vconsts(device);
 
     for (i = 0; i < 224; ++i)
     {
@@ -5443,7 +5469,7 @@ static void test_effect_commitchanges(IDirect3DDevice9 *device)
 
     for (i = 0; i < ARRAY_SIZE(check_vconsts_parameters); ++i)
     {
-        test_effect_preshader_clear_vconsts(device);
+        test_effect_clear_vconsts(device);
         param = effect->lpVtbl->GetParameterByName(effect, NULL, check_vconsts_parameters[i].param_name);
         ok(!!param, "GetParameterByName failed.\n");
         hr = effect->lpVtbl->GetValue(effect, param, buffer, sizeof(buffer));
@@ -5473,7 +5499,7 @@ static void test_effect_commitchanges(IDirect3DDevice9 *device)
                 check_bconsts_parameters[i].param_name);
     }
 
-    test_effect_preshader_clear_vconsts(device);
+    test_effect_clear_vconsts(device);
     param = effect->lpVtbl->GetParameterByName(effect, NULL, "g_Selector");
     ok(!!param, "GetParameterByName failed.\n");
     fvect.x = fvect.y = fvect.z = fvect.w = 0.0f;
@@ -5484,7 +5510,7 @@ static void test_effect_commitchanges(IDirect3DDevice9 *device)
     test_effect_preshader_compare_vconsts(device, check_vconsts_parameters[0].const_updated_mask,
                 check_vconsts_parameters[0].param_name);
 
-    test_effect_preshader_clear_vconsts(device);
+    test_effect_clear_vconsts(device);
     param = effect->lpVtbl->GetParameterByName(effect, NULL, "arr2");
     ok(!!param, "GetParameterByName failed.\n");
     param = effect->lpVtbl->GetParameterElement(effect, param, 0);
@@ -5496,7 +5522,7 @@ static void test_effect_commitchanges(IDirect3DDevice9 *device)
     test_effect_preshader_compare_vconsts(device, const_no_update_mask,
                 check_vconsts_parameters[10].param_name);
 
-    test_effect_preshader_clear_vconsts(device);
+    test_effect_clear_vconsts(device);
     param = effect->lpVtbl->GetParameterByName(effect, NULL, "arr2");
     ok(!!param, "GetParameterByName failed.\n");
     param = effect->lpVtbl->GetParameterElement(effect, param, 1);
@@ -5509,7 +5535,7 @@ static void test_effect_commitchanges(IDirect3DDevice9 *device)
     test_effect_preshader_compare_vconsts(device, check_vconsts_parameters[10].const_updated_mask,
                 check_vconsts_parameters[10].param_name);
 
-    test_effect_preshader_clear_vconsts(device);
+    test_effect_clear_vconsts(device);
     param = effect->lpVtbl->GetParameterByName(effect, NULL, "arr2");
     ok(!!param, "GetParameterByName failed.\n");
     fvect.x = 92.0f;
@@ -5520,7 +5546,7 @@ static void test_effect_commitchanges(IDirect3DDevice9 *device)
     test_effect_preshader_compare_vconsts(device, check_vconsts_parameters[10].const_updated_mask,
                 check_vconsts_parameters[10].param_name);
 
-    test_effect_preshader_clear_vconsts(device);
+    test_effect_clear_vconsts(device);
     param = effect->lpVtbl->GetParameterByName(effect, NULL, "arr2");
     ok(!!param, "GetParameterByName failed.\n");
     param = effect->lpVtbl->GetParameterElement(effect, param, 1);
@@ -5532,7 +5558,7 @@ static void test_effect_commitchanges(IDirect3DDevice9 *device)
     test_effect_preshader_compare_vconsts(device, const_no_update_mask,
                 check_vconsts_parameters[10].param_name);
 
-    test_effect_preshader_clear_vconsts(device);
+    test_effect_clear_vconsts(device);
     param = effect->lpVtbl->GetParameterByName(effect, NULL, "g_Pos1");
     ok(!!param, "GetParameterByName failed.\n");
     fvect.x = fvect.y = fvect.z = fvect.w = 0.0f;
@@ -5543,7 +5569,7 @@ static void test_effect_commitchanges(IDirect3DDevice9 *device)
     test_effect_preshader_compare_vconsts(device, check_vconsts_parameters[1].const_updated_mask,
                 check_vconsts_parameters[1].param_name);
 
-    test_effect_preshader_clear_vconsts(device);
+    test_effect_clear_vconsts(device);
     param = effect->lpVtbl->GetParameterByName(effect, NULL, "ts1");
     ok(!!param, "GetParameterByName failed.\n");
     param = effect->lpVtbl->GetParameterElement(effect, param, 0);
@@ -5567,7 +5593,7 @@ static void test_effect_commitchanges(IDirect3DDevice9 *device)
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_POINTSCALE_B, value);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
-    test_effect_preshader_clear_vconsts(device);
+    test_effect_clear_vconsts(device);
     param = effect->lpVtbl->GetParameterByName(effect, NULL, "ts2");
     ok(!!param, "GetParameterByName failed.\n");
     param = effect->lpVtbl->GetParameterElement(effect, param, 0);
@@ -5604,7 +5630,7 @@ static void test_effect_commitchanges(IDirect3DDevice9 *device)
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_POINTSCALE_B, value);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
-    test_effect_preshader_clear_vconsts(device);
+    test_effect_clear_vconsts(device);
     param = effect->lpVtbl->GetParameterByName(effect, NULL, "ts3");
     ok(!!param, "GetParameterByName failed.\n");
     param = effect->lpVtbl->GetParameterByName(effect, param, "ts");
@@ -5666,7 +5692,7 @@ static void test_effect_commitchanges(IDirect3DDevice9 *device)
 
     hr = IDirect3DDevice9_SetVertexShader(device, NULL);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
-    test_effect_preshader_clear_vconsts(device);
+    test_effect_clear_vconsts(device);
 
     hr = effect->lpVtbl->CommitChanges(effect);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
@@ -6656,7 +6682,7 @@ static void test_effect_shared_parameters(IDirect3DDevice9 *device)
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
     }
 
-    test_effect_preshader_clear_vconsts(device);
+    test_effect_clear_vconsts(device);
     fvect.x = fvect.y = fvect.z = fvect.w = 28.0f;
     hr = effect2->lpVtbl->SetVector(effect2, "g_Pos1", &fvect);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
@@ -6755,7 +6781,7 @@ static void test_effect_shared_parameters(IDirect3DDevice9 *device)
     hr = effect1->lpVtbl->SetFloatArray(effect1, "arr2", fval, 2);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
 
-    test_effect_preshader_clear_vconsts(device);
+    test_effect_clear_vconsts(device);
 
     hr = effect1->lpVtbl->CommitChanges(effect1);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
@@ -6765,7 +6791,7 @@ static void test_effect_shared_parameters(IDirect3DDevice9 *device)
     fvect.x = -1.0f;
     test_effect_shared_parameters_compare_vconst(device, 30, &fvect, FALSE);
 
-    test_effect_preshader_clear_vconsts(device);
+    test_effect_clear_vconsts(device);
 
     hr = effect1->lpVtbl->CommitChanges(effect1);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
@@ -7064,7 +7090,7 @@ static void test_effect_skip_constants(IDirect3DDevice9 *device)
     hr = effect->lpVtbl->SetFloat(effect, "v5", 32.0f);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
 
-    test_effect_preshader_clear_vconsts(device);
+    test_effect_clear_vconsts(device);
 
     hr = effect->lpVtbl->Begin(effect, &passes_count, 0);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
@@ -7182,11 +7208,12 @@ static void test_effect_unsupported_shader(void)
 
     hr = effect->lpVtbl->ValidateTechnique(effect, "tech1");
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
-    effect->lpVtbl->SetInt(effect, "i", 1);
+    hr = effect->lpVtbl->SetInt(effect, "i", 1);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
     hr = effect->lpVtbl->ValidateTechnique(effect, "tech1");
     ok(hr == E_FAIL, "Got result %#x.\n", hr);
-    effect->lpVtbl->SetInt(effect, "i", 0);
+    hr = effect->lpVtbl->SetInt(effect, "i", 0);
+    ok(hr == D3D_OK, "Got result %#x.\n", hr);
     hr = effect->lpVtbl->ValidateTechnique(effect, "tech1");
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
 
@@ -7229,7 +7256,7 @@ static void test_effect_unsupported_shader(void)
     HeapFree(GetProcessHeap(), 0, byte_code);
     IDirect3DVertexShader9_Release(vshader);
 
-    effect->lpVtbl->SetInt(effect, "i", 1);
+    hr = effect->lpVtbl->SetInt(effect, "i", 1);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
     hr = effect->lpVtbl->CommitChanges(effect);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
@@ -7321,16 +7348,16 @@ static void test_effect_null_shader(void)
 
     hr = effect->lpVtbl->ValidateTechnique(effect, "tech0");
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
-    effect->lpVtbl->SetInt(effect, "i", 0);
+    hr = effect->lpVtbl->SetInt(effect, "i", 0);
     ok(hr == D3D_OK, "Failed to set parameter, hr %#x.\n", hr);
     hr = effect->lpVtbl->ValidateTechnique(effect, "tech1");
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
-    effect->lpVtbl->SetInt(effect, "i", 1);
+    hr = effect->lpVtbl->SetInt(effect, "i", 1);
     ok(hr == D3D_OK, "Failed to set parameter, hr %#x.\n", hr);
     hr = effect->lpVtbl->ValidateTechnique(effect, "tech1");
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
 
-    effect->lpVtbl->SetInt(effect, "i", 2);
+    hr = effect->lpVtbl->SetInt(effect, "i", 2);
     ok(hr == D3D_OK, "Failed to set parameter, hr %#x.\n", hr);
     hr = effect->lpVtbl->ValidateTechnique(effect, "tech1");
     ok(hr == E_FAIL, "Got result %#x.\n", hr);
@@ -7938,7 +7965,7 @@ static void test_effect_find_next_valid_technique(void)
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
     ok(!strcmp(desc.Name, "tech0"), "Got unexpected technique %s.\n", desc.Name);
 
-    effect->lpVtbl->SetInt(effect, "i", 1);
+    hr = effect->lpVtbl->SetInt(effect, "i", 1);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);
 
     tech = (D3DXHANDLE)0xdeadbeef;
@@ -7951,7 +7978,8 @@ static void test_effect_find_next_valid_technique(void)
     hr = effect->lpVtbl->FindNextValidTechnique(effect, tech, &tech);
     ok(hr == S_FALSE, "Got result %#x.\n", hr);
 
-    effect->lpVtbl->SetInt(effect, "i", 0);
+    hr = effect->lpVtbl->SetInt(effect, "i", 0);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
 
     hr = effect->lpVtbl->FindNextValidTechnique(effect, tech, &tech);
     ok(hr == D3D_OK, "Got result %#x.\n", hr);

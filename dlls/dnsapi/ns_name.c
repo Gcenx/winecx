@@ -35,6 +35,8 @@
 #endif
 #include <string.h>
 
+#include "wine/hostptraddrspace_enter.h"
+
 /* Data. */
 
 static const char	digits[] = "0123456789";

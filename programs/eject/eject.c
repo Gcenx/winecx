@@ -20,8 +20,6 @@
 
 #define WIN32_LEAN_AND_MEAN
 
-#include "config.h"
-
 #include <windows.h>
 #include <winioctl.h>
 #include <ntddstor.h>
@@ -147,7 +145,7 @@ static void parse_options( int *argc, char *argv[] )
     }
 }
 
-int main( int argc, char *argv[] )
+int __cdecl main( int argc, char *argv[] )
 {
     parse_options( &argc, argv );
 

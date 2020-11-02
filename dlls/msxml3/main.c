@@ -56,6 +56,7 @@
 #include "wine/unicode.h"
 #include "wine/debug.h"
 #include "wine/library.h"
+#include "wine/heap.h"
 
 #include "msxml_private.h"
 
@@ -64,6 +65,28 @@ HINSTANCE MSXML_hInstance = NULL;
 #ifdef HAVE_LIBXML2
 
 WINE_DEFAULT_DEBUG_CHANNEL(msxml);
+
+#include "wine/hostptraddrspace_enter.h"
+
+static void XMLCALL wineXmlFree(void *mem)
+{
+    heap_free(mem);
+}
+
+static void * LIBXML_ATTR_ALLOC_SIZE(1) XMLCALL wineXmlMalloc(size_t size)
+{
+    return heap_alloc(size);
+}
+
+static void * XMLCALL wineXmlRealloc(void *mem, size_t size)
+{
+    return heap_realloc(mem, size);
+}
+
+static char * XMLCALL wineXmlStrdup(const char *str)
+{
+    return heap_strdup(str);
+}
 
 void wineXmlCallbackLog(char const* caller, xmlErrorLevel lvl, char const* msg, va_list ap)
 {
@@ -150,7 +173,7 @@ static int wineXmlReadCallback(void * context, char * buffer, int len)
     if ((context == NULL) || (buffer == NULL))
         return(-1);
 
-    if(!ReadFile( context, buffer,len, &dwBytesRead, NULL))
+    if(!ReadFile( ADDRSPACECAST(HANDLE, context), ADDRSPACECAST(char * WIN32PTR, buffer),len, &dwBytesRead, NULL))
     {
         ERR("Failed to read file\n");
         return -1;
@@ -163,7 +186,7 @@ static int wineXmlReadCallback(void * context, char * buffer, int len)
 
 static int wineXmlFileCloseCallback (void * context)
 {
-    return CloseHandle(context) ? 0 : -1;
+    return CloseHandle(ADDRSPACECAST(void * WIN32PTR, context)) ? 0 : -1;
 }
 
 void* libxslt_handle = NULL;
@@ -230,6 +253,8 @@ static void init_libxslt(void)
 #endif
 }
 
+#include "wine/hostptraddrspace_exit.h"
+
 #endif  /* HAVE_LIBXML2 */
 
 
@@ -247,6 +272,11 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID reserved)
     {
     case DLL_PROCESS_ATTACH:
 #ifdef HAVE_LIBXML2
+        xmlInitMemory();
+        if(xmlMemSetup(wineXmlFree, wineXmlMalloc, wineXmlRealloc,
+                       wineXmlStrdup) == -1)
+            WARN("Failed to register memory callbacks\n");
+
         xmlInitParser();
 
         /* Set the default indent character to a single tab,
@@ -280,6 +310,7 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID reserved)
 
         xmlCleanupParser();
         schemasCleanup();
+        xmlCleanupMemory();
 #endif
         release_typelib();
         break;

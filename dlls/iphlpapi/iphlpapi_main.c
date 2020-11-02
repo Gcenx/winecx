@@ -137,18 +137,18 @@ DWORD WINAPI AllocateAndGetIfTableFromStack(PMIB_IFTABLE *ppIfTable,
 }
 
 
-static int IpAddrTableNumericSorter(const void *a, const void *b)
+static int IpAddrTableNumericSorter(const void * HOSTPTR a, const void * HOSTPTR b)
 {
   int ret = 0;
 
   if (a && b)
-    ret = ((const MIB_IPADDRROW*)a)->dwAddr - ((const MIB_IPADDRROW*)b)->dwAddr;
+    ret = ((const MIB_IPADDRROW* HOSTPTR)a)->dwAddr - ((const MIB_IPADDRROW* HOSTPTR)b)->dwAddr;
   return ret;
 }
 
-static int IpAddrTableLoopbackSorter(const void *a, const void *b)
+static int IpAddrTableLoopbackSorter(const void * HOSTPTR a, const void * HOSTPTR b)
 {
-  const MIB_IPADDRROW *left = a, *right = b;
+  const MIB_IPADDRROW * HOSTPTR left = a, * HOSTPTR right = b;
   int ret = 0;
 
   if (isIfIndexLoopback(left->dwIndex))
@@ -843,14 +843,14 @@ static ULONG v4addressesFromIndex(IF_INDEX index, DWORD **addrs, ULONG *num_addr
 
 static char *debugstr_ipv4(const in_addr_t *in_addr, char *buf)
 {
-    const BYTE *addrp;
+    const BYTE * HOSTPTR addrp;
     char *p = buf;
 
-    for (addrp = (const BYTE *)in_addr;
-     addrp - (const BYTE *)in_addr < sizeof(*in_addr);
+    for (addrp = (const BYTE * HOSTPTR)in_addr;
+     addrp - (const BYTE * HOSTPTR)in_addr < sizeof(*in_addr);
      addrp++)
     {
-        if (addrp == (const BYTE *)in_addr + sizeof(*in_addr) - 1)
+        if (addrp == (const BYTE * HOSTPTR)in_addr + sizeof(*in_addr) - 1)
             sprintf(p, "%d", *addrp);
         else
             p += sprintf(p, "%d.", *addrp);
@@ -1414,7 +1414,7 @@ static ULONG get_dns_server_addresses(PIP_ADAPTER_DNS_SERVER_ADDRESS address, UL
 }
 
 #ifdef HAVE_STRUCT___RES_STATE
-static BOOL is_ip_address_string(const char *str)
+static BOOL is_ip_address_string(const char * HOSTPTR str)
 {
     struct in_addr in;
     int ret;
@@ -1427,7 +1427,7 @@ static BOOL is_ip_address_string(const char *str)
 static ULONG get_dns_suffix(WCHAR *suffix, ULONG *len)
 {
     ULONG size;
-    const char *found_suffix = "";
+    const char * HOSTPTR found_suffix = "";
     /* Always return a NULL-terminated string, even if it's empty. */
 
 #ifdef HAVE_STRUCT___RES_STATE
@@ -1779,12 +1779,12 @@ DWORD WINAPI GetIfEntry2( MIB_IF_ROW2 *row2 )
     return NO_ERROR;
 }
 
-static int IfTableSorter(const void *a, const void *b)
+static int IfTableSorter(const void * HOSTPTR a, const void * HOSTPTR b)
 {
   int ret;
 
   if (a && b)
-    ret = ((const MIB_IFROW*)a)->dwIndex - ((const MIB_IFROW*)b)->dwIndex;
+    ret = ((const MIB_IFROW* HOSTPTR)a)->dwIndex - ((const MIB_IFROW* HOSTPTR)b)->dwIndex;
   else
     ret = 0;
   return ret;
@@ -3326,5 +3326,25 @@ DWORD WINAPI GetIpNetTable2(ADDRESS_FAMILY family, PMIB_IPNET_TABLE2 *table)
 DWORD WINAPI GetIpInterfaceTable(ADDRESS_FAMILY family, PMIB_IPINTERFACE_TABLE *table)
 {
     FIXME("(%u %p): stub\n", family, table);
+    return ERROR_NOT_SUPPORTED;
+}
+
+/******************************************************************
+ *    GetBestRoute2 (IPHLPAPI.@)
+ */
+DWORD WINAPI GetBestRoute2(NET_LUID *luid, NET_IFINDEX index,
+                           const SOCKADDR_INET *source, const SOCKADDR_INET *destination,
+                           ULONG options, PMIB_IPFORWARD_ROW2 bestroute,
+                           SOCKADDR_INET *bestaddress)
+{
+    static int once;
+
+    if (!once++)
+        FIXME("(%p, %d, %p, %p, 0x%08x, %p, %p): stub\n", luid, index, source,
+                destination, options, bestroute, bestaddress);
+
+    if (!destination || !bestroute || !bestaddress)
+        return ERROR_INVALID_PARAMETER;
+
     return ERROR_NOT_SUPPORTED;
 }

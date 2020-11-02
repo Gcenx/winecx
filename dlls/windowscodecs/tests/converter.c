@@ -118,9 +118,30 @@ static HRESULT WINAPI BitmapTestSrc_GetResolution(IWICBitmapSource *iface,
 }
 
 static HRESULT WINAPI BitmapTestSrc_CopyPalette(IWICBitmapSource *iface,
-    IWICPalette *pIPalette)
+    IWICPalette *palette)
 {
-    return E_NOTIMPL;
+    BitmapTestSrc *This = impl_from_IWICBitmapSource(iface);
+
+    if (IsEqualGUID(This->data->format, &GUID_WICPixelFormat1bppIndexed) ||
+        IsEqualGUID(This->data->format, &GUID_WICPixelFormat2bppIndexed) ||
+        IsEqualGUID(This->data->format, &GUID_WICPixelFormat4bppIndexed) ||
+        IsEqualGUID(This->data->format, &GUID_WICPixelFormat8bppIndexed))
+    {
+        WICColor colors[8];
+
+        colors[0] = 0xff0000ff;
+        colors[1] = 0xff00ff00;
+        colors[2] = 0xffff0000;
+        colors[3] = 0xff000000;
+        colors[4] = 0xffffff00;
+        colors[5] = 0xffff00ff;
+        colors[6] = 0xff00ffff;
+        colors[7] = 0xffffffff;
+        return IWICPalette_InitializeCustom(palette, colors, 8);
+    }
+
+    /* unique error marker */
+    return 0xdeadbeef;
 }
 
 static HRESULT WINAPI BitmapTestSrc_CopyPixels(IWICBitmapSource *iface,
@@ -252,16 +273,58 @@ static BOOL compare_bits(const struct bitmap_data *expect, UINT buffersize, cons
                 break;
             }
     }
+    else if (IsEqualGUID(expect->format, &GUID_WICPixelFormat2bppIndexed) ||
+             IsEqualGUID(expect->format, &GUID_WICPixelFormat4bppIndexed) ||
+             IsEqualGUID(expect->format, &GUID_WICPixelFormat8bppIndexed))
+    {
+        UINT i;
+        const BYTE *a=(const BYTE*)expect->bits, *b=(const BYTE*)converted_bits;
+        equal=TRUE;
+
+        for (i=0; i<buffersize; i++)
+            if (a[i] != b[i])
+            {
+                equal = FALSE;
+                break;
+            }
+    }
     else
         equal = (memcmp(expect->bits, converted_bits, buffersize) == 0);
 
     if (!equal && expect->alt_data)
         equal = compare_bits(expect->alt_data, buffersize, converted_bits);
 
+    if (!equal && winetest_debug > 1)
+    {
+        UINT i, bps;
+        bps = expect->bpp / 8;
+        if (!bps) bps = buffersize;
+        printf("converted_bits (%u bytes):\n    ", buffersize);
+        for (i = 0; i < buffersize; i++)
+        {
+            printf("%u,", converted_bits[i]);
+            if (!((i + 1) % 32)) printf("\n    ");
+            else if (!((i+1) % bps)) printf(" ");
+        }
+        printf("\n");
+    }
+
     return equal;
 }
 
-static void compare_bitmap_data(const struct bitmap_data *expect, IWICBitmapSource *source, const char *name)
+static BOOL is_indexed_format(const GUID *format)
+{
+    if (IsEqualGUID(format, &GUID_WICPixelFormat1bppIndexed) ||
+        IsEqualGUID(format, &GUID_WICPixelFormat2bppIndexed) ||
+        IsEqualGUID(format, &GUID_WICPixelFormat4bppIndexed) ||
+        IsEqualGUID(format, &GUID_WICPixelFormat8bppIndexed))
+        return TRUE;
+
+    return FALSE;
+}
+
+static void compare_bitmap_data(const struct bitmap_data *src, const struct bitmap_data *expect,
+                                IWICBitmapSource *source, const char *name)
 {
     BYTE *converted_bits;
     UINT width, height;
@@ -294,15 +357,24 @@ static void compare_bitmap_data(const struct bitmap_data *expect, IWICBitmapSour
     buffersize = stride * expect->height;
 
     converted_bits = HeapAlloc(GetProcessHeap(), 0, buffersize);
+    memset(converted_bits, 0xaa, buffersize);
     hr = IWICBitmapSource_CopyPixels(source, &prc, stride, buffersize, converted_bits);
     ok(SUCCEEDED(hr), "CopyPixels(%s) failed, hr=%x\n", name, hr);
-    ok(compare_bits(expect, buffersize, converted_bits), "unexpected pixel data (%s)\n", name);
+
+    /* The result of conversion of color to indexed formats depends on
+     * optimized palette generation implementation. We either need to
+     * assign our own palette, or just skip the comparison.
+     */
+    if (!(!is_indexed_format(src->format) && is_indexed_format(expect->format)))
+        ok(compare_bits(expect, buffersize, converted_bits), "unexpected pixel data (%s)\n", name);
 
     /* Test with NULL rectangle - should copy the whole bitmap */
     memset(converted_bits, 0xaa, buffersize);
     hr = IWICBitmapSource_CopyPixels(source, NULL, stride, buffersize, converted_bits);
     ok(SUCCEEDED(hr), "CopyPixels(%s,rc=NULL) failed, hr=%x\n", name, hr);
-    ok(compare_bits(expect, buffersize, converted_bits), "unexpected pixel data (%s)\n", name);
+    /* see comment above */
+    if (!(!is_indexed_format(src->format) && is_indexed_format(expect->format)))
+        ok(compare_bits(expect, buffersize, converted_bits), "unexpected pixel data (%s)\n", name);
 
     HeapFree(GetProcessHeap(), 0, converted_bits);
 }
@@ -318,78 +390,171 @@ static const struct bitmap_data testdata_1bppIndexed = {
 
 /* some encoders (like BMP) require data to be 4-bytes aligned */
 static const BYTE bits_2bpp[] = {
-    0x55,0x55,0x55,0x55,
-    0xaa,0xaa,0xaa,0xaa};
+    0xdb,0xdb,0xdb,0xdb,0xdb,0xdb,0xdb,0xdb,
+    0x24,0x24,0x24,0x24,0x24,0x24,0x24,0x24};
 static const struct bitmap_data testdata_2bppIndexed = {
-    &GUID_WICPixelFormat2bppIndexed, 2, bits_2bpp, 16, 2, 96.0, 96.0};
+    &GUID_WICPixelFormat2bppIndexed, 2, bits_2bpp, 32, 2, 96.0, 96.0};
 
 /* some encoders (like BMP) require data to be 4-bytes aligned */
 static const BYTE bits_4bpp[] = {
-    0x55,0x55,0x55,0x55,
-    0xaa,0xaa,0xaa,0xaa};
+    0x34,0x43,0x34,0x43,0x34,0x43,0x34,0x43,0x34,0x43,0x34,0x43,0x34,0x43,0x34,0x43,
+    0x44,0x44,0x44,0x44,0x44,0x44,0x44,0x44,0x44,0x44,0x44,0x44,0x44,0x44,0x44,0x44};
+
 static const struct bitmap_data testdata_4bppIndexed = {
-    &GUID_WICPixelFormat4bppIndexed, 4, bits_4bpp, 8, 2, 96.0, 96.0};
+    &GUID_WICPixelFormat4bppIndexed, 4, bits_4bpp, 32, 2, 96.0, 96.0};
+
+static const BYTE bits_8bpp_BW[] = {
+    0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,
+    1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0};
+static const struct bitmap_data testdata_8bppIndexed_BW = {
+    &GUID_WICPixelFormat8bppIndexed, 8, bits_8bpp_BW, 32, 2, 96.0, 96.0};
+
+static const BYTE bits_8bpp_4colors[] = {
+    0,1,2,0,0,1,2,0,0,1,2,0,0,1,2,0,0,1,2,0,0,1,2,0,0,1,2,0,0,1,2,0,
+    3,2,1,3,3,2,1,3,3,2,1,3,3,2,1,3,3,2,1,3,3,2,1,3,3,2,1,3,3,2,1,3};
+static const struct bitmap_data testdata_8bppIndexed_4colors = {
+    &GUID_WICPixelFormat8bppIndexed, 8, bits_8bpp_4colors, 32, 2, 96.0, 96.0};
 
 static const BYTE bits_8bpp[] = {
-    0,1,2,3,
-    4,5,6,7};
+    0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
 static const struct bitmap_data testdata_8bppIndexed = {
-    &GUID_WICPixelFormat8bppIndexed, 8, bits_8bpp, 4, 2, 96.0, 96.0};
+    &GUID_WICPixelFormat8bppIndexed, 8, bits_8bpp, 32, 2, 96.0, 96.0};
 
 static const BYTE bits_24bppBGR[] = {
-    255,0,0, 0,255,0, 0,0,255, 0,0,0,
-    0,255,255, 255,0,255, 255,255,0, 255,255,255};
+    255,0,0, 0,255,0, 0,0,255, 0,0,0, 255,0,0, 0,255,0, 0,0,255, 0,0,0,
+    255,0,0, 0,255,0, 0,0,255, 0,0,0, 255,0,0, 0,255,0, 0,0,255, 0,0,0,
+    255,0,0, 0,255,0, 0,0,255, 0,0,0, 255,0,0, 0,255,0, 0,0,255, 0,0,0,
+    255,0,0, 0,255,0, 0,0,255, 0,0,0, 255,0,0, 0,255,0, 0,0,255, 0,0,0,
+    0,255,255, 255,0,255, 255,255,0, 255,255,255, 0,255,255, 255,0,255, 255,255,0, 255,255,255,
+    0,255,255, 255,0,255, 255,255,0, 255,255,255, 0,255,255, 255,0,255, 255,255,0, 255,255,255,
+    0,255,255, 255,0,255, 255,255,0, 255,255,255, 0,255,255, 255,0,255, 255,255,0, 255,255,255,
+    0,255,255, 255,0,255, 255,255,0, 255,255,255, 0,255,255, 255,0,255, 255,255,0, 255,255,255};
 static const struct bitmap_data testdata_24bppBGR = {
-    &GUID_WICPixelFormat24bppBGR, 24, bits_24bppBGR, 4, 2, 96.0, 96.0};
+    &GUID_WICPixelFormat24bppBGR, 24, bits_24bppBGR, 32, 2, 96.0, 96.0};
 
 static const BYTE bits_24bppRGB[] = {
-    0,0,255, 0,255,0, 255,0,0, 0,0,0,
-    255,255,0, 255,0,255, 0,255,255, 255,255,255};
+    0,0,255, 0,255,0, 255,0,0, 0,0,0, 0,0,255, 0,255,0, 255,0,0, 0,0,0,
+    0,0,255, 0,255,0, 255,0,0, 0,0,0, 0,0,255, 0,255,0, 255,0,0, 0,0,0,
+    0,0,255, 0,255,0, 255,0,0, 0,0,0, 0,0,255, 0,255,0, 255,0,0, 0,0,0,
+    0,0,255, 0,255,0, 255,0,0, 0,0,0, 0,0,255, 0,255,0, 255,0,0, 0,0,0,
+    255,255,0, 255,0,255, 0,255,255, 255,255,255, 255,255,0, 255,0,255, 0,255,255, 255,255,255,
+    255,255,0, 255,0,255, 0,255,255, 255,255,255, 255,255,0, 255,0,255, 0,255,255, 255,255,255,
+    255,255,0, 255,0,255, 0,255,255, 255,255,255, 255,255,0, 255,0,255, 0,255,255, 255,255,255,
+    255,255,0, 255,0,255, 0,255,255, 255,255,255, 255,255,0, 255,0,255, 0,255,255, 255,255,255 };
 static const struct bitmap_data testdata_24bppRGB = {
-    &GUID_WICPixelFormat24bppRGB, 24, bits_24bppRGB, 4, 2, 96.0, 96.0};
+    &GUID_WICPixelFormat24bppRGB, 24, bits_24bppRGB, 32, 2, 96.0, 96.0};
 
 static const BYTE bits_32bppBGR[] = {
-    255,0,0,80, 0,255,0,80, 0,0,255,80, 0,0,0,80,
-    0,255,255,80, 255,0,255,80, 255,255,0,80, 255,255,255,80};
+    255,0,0,80, 0,255,0,80, 0,0,255,80, 0,0,0,80, 255,0,0,80, 0,255,0,80, 0,0,255,80, 0,0,0,80,
+    255,0,0,80, 0,255,0,80, 0,0,255,80, 0,0,0,80, 255,0,0,80, 0,255,0,80, 0,0,255,80, 0,0,0,80,
+    255,0,0,80, 0,255,0,80, 0,0,255,80, 0,0,0,80, 255,0,0,80, 0,255,0,80, 0,0,255,80, 0,0,0,80,
+    255,0,0,80, 0,255,0,80, 0,0,255,80, 0,0,0,80, 255,0,0,80, 0,255,0,80, 0,0,255,80, 0,0,0,80,
+    0,255,255,80, 255,0,255,80, 255,255,0,80, 255,255,255,80, 0,255,255,80, 255,0,255,80, 255,255,0,80, 255,255,255,80,
+    0,255,255,80, 255,0,255,80, 255,255,0,80, 255,255,255,80, 0,255,255,80, 255,0,255,80, 255,255,0,80, 255,255,255,80,
+    0,255,255,80, 255,0,255,80, 255,255,0,80, 255,255,255,80, 0,255,255,80, 255,0,255,80, 255,255,0,80, 255,255,255,80,
+    0,255,255,80, 255,0,255,80, 255,255,0,80, 255,255,255,80, 0,255,255,80, 255,0,255,80, 255,255,0,80, 255,255,255,80};
 static const struct bitmap_data testdata_32bppBGR = {
-    &GUID_WICPixelFormat32bppBGR, 32, bits_32bppBGR, 4, 2, 96.0, 96.0};
+    &GUID_WICPixelFormat32bppBGR, 32, bits_32bppBGR, 32, 2, 96.0, 96.0};
+static const struct bitmap_data testdata_32bppBGRA80 = {
+    &GUID_WICPixelFormat32bppBGRA, 32, bits_32bppBGR, 32, 2, 96.0, 96.0};
+static const struct bitmap_data testdata_32bppRGBA80 = {
+    &GUID_WICPixelFormat32bppRGBA, 32, bits_32bppBGR, 32, 2, 96.0, 96.0};
 
 static const BYTE bits_32bppBGRA[] = {
-    255,0,0,255, 0,255,0,255, 0,0,255,255, 0,0,0,255,
-    0,255,255,255, 255,0,255,255, 255,255,0,255, 255,255,255,255};
+    255,0,0,255, 0,255,0,255, 0,0,255,255, 0,0,0,255, 255,0,0,255, 0,255,0,255, 0,0,255,255, 0,0,0,255,
+    255,0,0,255, 0,255,0,255, 0,0,255,255, 0,0,0,255, 255,0,0,255, 0,255,0,255, 0,0,255,255, 0,0,0,255,
+    255,0,0,255, 0,255,0,255, 0,0,255,255, 0,0,0,255, 255,0,0,255, 0,255,0,255, 0,0,255,255, 0,0,0,255,
+    255,0,0,255, 0,255,0,255, 0,0,255,255, 0,0,0,255, 255,0,0,255, 0,255,0,255, 0,0,255,255, 0,0,0,255,
+    0,255,255,255, 255,0,255,255, 255,255,0,255, 255,255,255,255, 0,255,255,255, 255,0,255,255, 255,255,0,255, 255,255,255,255,
+    0,255,255,255, 255,0,255,255, 255,255,0,255, 255,255,255,255, 0,255,255,255, 255,0,255,255, 255,255,0,255, 255,255,255,255,
+    0,255,255,255, 255,0,255,255, 255,255,0,255, 255,255,255,255, 0,255,255,255, 255,0,255,255, 255,255,0,255, 255,255,255,255,
+    0,255,255,255, 255,0,255,255, 255,255,0,255, 255,255,255,255, 0,255,255,255, 255,0,255,255, 255,255,0,255, 255,255,255,255};
 static const struct bitmap_data testdata_32bppBGRA = {
-    &GUID_WICPixelFormat32bppBGRA, 32, bits_32bppBGRA, 4, 2, 96.0, 96.0};
+    &GUID_WICPixelFormat32bppBGRA, 32, bits_32bppBGRA, 32, 2, 96.0, 96.0};
+static const struct bitmap_data testdata_32bppRGBA = {
+    &GUID_WICPixelFormat32bppRGBA, 32, bits_32bppBGRA, 32, 2, 96.0, 96.0};
+static const struct bitmap_data testdata_32bppRGB = {
+    &GUID_WICPixelFormat32bppRGB, 32, bits_32bppBGRA, 32, 2, 96.0, 96.0};
+
+static const BYTE bits_32bppPBGRA[] = {
+    80,0,0,80, 0,80,0,80, 0,0,80,80, 0,0,0,80, 80,0,0,80, 0,80,0,80, 0,0,80,80, 0,0,0,80,
+    80,0,0,80, 0,80,0,80, 0,0,80,80, 0,0,0,80, 80,0,0,80, 0,80,0,80, 0,0,80,80, 0,0,0,80,
+    80,0,0,80, 0,80,0,80, 0,0,80,80, 0,0,0,80, 80,0,0,80, 0,80,0,80, 0,0,80,80, 0,0,0,80,
+    80,0,0,80, 0,80,0,80, 0,0,80,80, 0,0,0,80, 80,0,0,80, 0,80,0,80, 0,0,80,80, 0,0,0,80,
+    0,80,80,80, 80,0,80,80, 80,80,0,80, 80,80,80,80, 0,80,80,80, 80,0,80,80, 80,80,0,80, 80,80,80,80,
+    0,80,80,80, 80,0,80,80, 80,80,0,80, 80,80,80,80, 0,80,80,80, 80,0,80,80, 80,80,0,80, 80,80,80,80,
+    0,80,80,80, 80,0,80,80, 80,80,0,80, 80,80,80,80, 0,80,80,80, 80,0,80,80, 80,80,0,80, 80,80,80,80,
+    0,80,80,80, 80,0,80,80, 80,80,0,80, 80,80,80,80, 0,80,80,80, 80,0,80,80, 80,80,0,80, 80,80,80,80};
+static const struct bitmap_data testdata_32bppPBGRA = {
+    &GUID_WICPixelFormat32bppPBGRA, 32, bits_32bppPBGRA, 32, 2, 96.0, 96.0};
+static const struct bitmap_data testdata_32bppPRGBA = {
+    &GUID_WICPixelFormat32bppPRGBA, 32, bits_32bppPBGRA, 32, 2, 96.0, 96.0};
+
+static const BYTE bits_64bppRGBA[] = {
+    128,255,128,0,128,0,128,255,128, 0,128,255,128,0,128,255,128, 0,128,0,128,255,128,255,128, 0,128,0,128,0,128,255,128, 255,128,0,128,0,128,255,128, 0,128,255,128,0,128,255,128, 0,128,0,128,255,128,255,128, 0,128,0,128,0,128,255,
+    128,255,128,0,128,0,128,255,128, 0,128,255,128,0,128,255,128, 0,128,0,128,255,128,255,128, 0,128,0,128,0,128,255,128, 255,128,0,128,0,128,255,128, 0,128,255,128,0,128,255,128, 0,128,0,128,255,128,255,128, 0,128,0,128,0,128,255,
+    128,255,128,0,128,0,128,255,128, 0,128,255,128,0,128,255,128, 0,128,0,128,255,128,255,128, 0,128,0,128,0,128,255,128, 255,128,0,128,0,128,255,128, 0,128,255,128,0,128,255,128, 0,128,0,128,255,128,255,128, 0,128,0,128,0,128,255,
+    128,255,128,0,128,0,128,255,128, 0,128,255,128,0,128,255,128, 0,128,0,128,255,128,255,128, 0,128,0,128,0,128,255,128, 255,128,0,128,0,128,255,128, 0,128,255,128,0,128,255,128, 0,128,0,128,255,128,255,128, 0,128,0,128,0,128,255,
+    128,0,128,255,128,255,128,255,128, 255,128,0,128,255,128,255,128, 255,128,255,128,0,128,255,128, 255,128,255,128,255,128,255,128, 0,128,255,128,255,128,255,128, 255,128,0,128,255,128,255,128, 255,128,255,128,0,128,255,128, 255,128,255,128,255,128,255,
+    128,0,128,255,128,255,128,255,128, 255,128,0,128,255,128,255,128, 255,128,255,128,0,128,255,128, 255,128,255,128,255,128,255,128, 0,128,255,128,255,128,255,128, 255,128,0,128,255,128,255,128, 255,128,255,128,0,128,255,128, 255,128,255,128,255,128,255,
+    128,0,128,255,128,255,128,255,128, 255,128,0,128,255,128,255,128, 255,128,255,128,0,128,255,128, 255,128,255,128,255,128,255,128, 0,128,255,128,255,128,255,128, 255,128,0,128,255,128,255,128, 255,128,255,128,0,128,255,128, 255,128,255,128,255,128,255,
+    128,0,128,255,128,255,128,255,128, 255,128,0,128,255,128,255,128, 255,128,255,128,0,128,255,128, 255,128,255,128,255,128,255,128, 0,128,255,128,255,128,255,128, 255,128,0,128,255,128,255,128, 255,128,255,128,0,128,255,128, 255,128,255,128,255,128,255};
+static const struct bitmap_data testdata_64bppRGBA = {
+    &GUID_WICPixelFormat64bppRGBA, 64, bits_64bppRGBA, 32, 2, 96.0, 96.0};
 
 /* XP and 2003 use linear color conversion, later versions use sRGB gamma */
 static const float bits_32bppGrayFloat_xp[] = {
-    0.114000f,0.587000f,0.299000f,0.000000f,
-    0.886000f,0.413000f,0.701000f,1.000000f};
+    0.114000f,0.587000f,0.299000f,0.000000f,0.114000f,0.587000f,0.299000f,0.000000f,
+    0.114000f,0.587000f,0.299000f,0.000000f,0.114000f,0.587000f,0.299000f,0.000000f,
+    0.114000f,0.587000f,0.299000f,0.000000f,0.114000f,0.587000f,0.299000f,0.000000f,
+    0.114000f,0.587000f,0.299000f,0.000000f,0.114000f,0.587000f,0.299000f,0.000000f,
+    0.886000f,0.413000f,0.701000f,1.000000f,0.886000f,0.413000f,0.701000f,1.000000f,
+    0.886000f,0.413000f,0.701000f,1.000000f,0.886000f,0.413000f,0.701000f,1.000000f,
+    0.886000f,0.413000f,0.701000f,1.000000f,0.886000f,0.413000f,0.701000f,1.000000f,
+    0.886000f,0.413000f,0.701000f,1.000000f,0.886000f,0.413000f,0.701000f,1.000000f};
 static const struct bitmap_data testdata_32bppGrayFloat_xp = {
-    &GUID_WICPixelFormat32bppGrayFloat, 32, (const BYTE *)bits_32bppGrayFloat_xp, 4, 2, 96.0, 96.0};
+    &GUID_WICPixelFormat32bppGrayFloat, 32, (const BYTE *)bits_32bppGrayFloat_xp, 32, 2, 96.0, 96.0};
 
 static const float bits_32bppGrayFloat[] = {
-    0.072200f,0.715200f,0.212600f,0.000000f,
-    0.927800f,0.284800f,0.787400f,1.000000f};
+    0.072200f,0.715200f,0.212600f,0.000000f,0.072200f,0.715200f,0.212600f,0.000000f,
+    0.072200f,0.715200f,0.212600f,0.000000f,0.072200f,0.715200f,0.212600f,0.000000f,
+    0.072200f,0.715200f,0.212600f,0.000000f,0.072200f,0.715200f,0.212600f,0.000000f,
+    0.072200f,0.715200f,0.212600f,0.000000f,0.072200f,0.715200f,0.212600f,0.000000f,
+    0.927800f,0.284800f,0.787400f,1.000000f,0.927800f,0.284800f,0.787400f,1.000000f,
+    0.927800f,0.284800f,0.787400f,1.000000f,0.927800f,0.284800f,0.787400f,1.000000f,
+    0.927800f,0.284800f,0.787400f,1.000000f,0.927800f,0.284800f,0.787400f,1.000000f,
+    0.927800f,0.284800f,0.787400f,1.000000f,0.927800f,0.284800f,0.787400f,1.000000f};
 static const struct bitmap_data testdata_32bppGrayFloat = {
-    &GUID_WICPixelFormat32bppGrayFloat, 32, (const BYTE *)bits_32bppGrayFloat, 4, 2, 96.0, 96.0, &testdata_32bppGrayFloat_xp};
+    &GUID_WICPixelFormat32bppGrayFloat, 32, (const BYTE *)bits_32bppGrayFloat, 32, 2, 96.0, 96.0, &testdata_32bppGrayFloat_xp};
 
 static const BYTE bits_8bppGray_xp[] = {
-    29,150,76,0,
-    226,105,179,255};
+    29,150,76,0,29,150,76,0,29,150,76,0,29,150,76,0,
+    29,150,76,0,29,150,76,0,29,150,76,0,29,150,76,0,
+    226,105,179,255,226,105,179,255,226,105,179,255,226,105,179,255,
+    226,105,179,255,226,105,179,255,226,105,179,255,226,105,179,255};
 static const struct bitmap_data testdata_8bppGray_xp = {
-    &GUID_WICPixelFormat8bppGray, 8, bits_8bppGray_xp, 4, 2, 96.0, 96.0};
+    &GUID_WICPixelFormat8bppGray, 8, bits_8bppGray_xp, 32, 2, 96.0, 96.0};
 
 static const BYTE bits_8bppGray[] = {
-    76,220,127,0,
-    247,145,230,255};
+    76,220,127,0,76,220,127,0,76,220,127,0,76,220,127,0,
+    76,220,127,0,76,220,127,0,76,220,127,0,76,220,127,0,
+    247,145,230,255,247,145,230,255,247,145,230,255,247,145,230,255,
+    247,145,230,255,247,145,230,255,247,145,230,255,247,145,230,255};
 static const struct bitmap_data testdata_8bppGray = {
-    &GUID_WICPixelFormat8bppGray, 8, bits_8bppGray, 4, 2, 96.0, 96.0, &testdata_8bppGray_xp};
+    &GUID_WICPixelFormat8bppGray, 8, bits_8bppGray, 32, 2, 96.0, 96.0, &testdata_8bppGray_xp};
 
 static const BYTE bits_24bppBGR_gray[] = {
-    76,76,76, 220,220,220, 127,127,127, 0,0,0,
-    247,247,247, 145,145,145, 230,230,230, 255,255,255};
+    76,76,76, 220,220,220, 127,127,127, 0,0,0, 76,76,76, 220,220,220, 127,127,127, 0,0,0,
+    76,76,76, 220,220,220, 127,127,127, 0,0,0, 76,76,76, 220,220,220, 127,127,127, 0,0,0,
+    76,76,76, 220,220,220, 127,127,127, 0,0,0, 76,76,76, 220,220,220, 127,127,127, 0,0,0,
+    76,76,76, 220,220,220, 127,127,127, 0,0,0, 76,76,76, 220,220,220, 127,127,127, 0,0,0,
+    247,247,247, 145,145,145, 230,230,230, 255,255,255, 247,247,247, 145,145,145, 230,230,230, 255,255,255,
+    247,247,247, 145,145,145, 230,230,230, 255,255,255, 247,247,247, 145,145,145, 230,230,230, 255,255,255,
+    247,247,247, 145,145,145, 230,230,230, 255,255,255, 247,247,247, 145,145,145, 230,230,230, 255,255,255,
+    247,247,247, 145,145,145, 230,230,230, 255,255,255, 247,247,247, 145,145,145, 230,230,230, 255,255,255};
 static const struct bitmap_data testdata_24bppBGR_gray = {
-    &GUID_WICPixelFormat24bppBGR, 24, bits_24bppBGR_gray, 4, 2, 96.0, 96.0};
+    &GUID_WICPixelFormat24bppBGR, 24, bits_24bppBGR_gray, 32, 2, 96.0, 96.0};
 
 static void test_conversion(const struct bitmap_data *src, const struct bitmap_data *dst, const char *name, BOOL todo)
 {
@@ -401,11 +566,12 @@ static void test_conversion(const struct bitmap_data *src, const struct bitmap_d
 
     hr = WICConvertBitmapSource(dst->format, &src_obj->IWICBitmapSource_iface, &dst_bitmap);
     todo_wine_if (todo)
-        ok(SUCCEEDED(hr), "WICConvertBitmapSource(%s) failed, hr=%x\n", name, hr);
+        ok(hr == S_OK ||
+           broken(hr == E_INVALIDARG || hr == WINCODEC_ERR_COMPONENTNOTFOUND) /* XP */, "WICConvertBitmapSource(%s) failed, hr=%x\n", name, hr);
 
-    if (SUCCEEDED(hr))
+    if (hr == S_OK)
     {
-        compare_bitmap_data(dst, dst_bitmap, name);
+        compare_bitmap_data(src, dst, dst_bitmap, name);
 
         IWICBitmapSource_Release(dst_bitmap);
     }
@@ -453,7 +619,7 @@ static void test_default_converter(void)
         ok(SUCCEEDED(hr), "Initialize returned %x\n", hr);
 
         if (SUCCEEDED(hr))
-            compare_bitmap_data(&testdata_32bppBGR, (IWICBitmapSource*)converter, "default converter");
+            compare_bitmap_data(&testdata_32bppBGRA, &testdata_32bppBGR, (IWICBitmapSource*)converter, "default converter");
 
         IWICFormatConverter_Release(converter);
     }
@@ -709,7 +875,7 @@ static void check_tiff_format(IStream *stream, const WICPixelFormatGUID *format)
     ok(hr == S_OK, "GetCount error %#x\n", hr);
     ok(count != 0, "wrong count %u\n", count);
 
-    for (i = 0; i < sizeof(tag)/sizeof(tag[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(tag); i++)
     {
         PropVariantInit(&id);
         PropVariantInit(&value);
@@ -726,6 +892,8 @@ static void check_tiff_format(IStream *stream, const WICPixelFormatGUID *format)
         }
         else
             tag[i].value[0] = -1;
+
+        PropVariantClear(&value);
     }
 
     IWICMetadataReader_Release(reader);
@@ -752,7 +920,7 @@ static void check_tiff_format(IStream *stream, const WICPixelFormatGUID *format)
     }
     else if (IsEqualGUID(format, &GUID_WICPixelFormat4bppIndexed))
     {
-        ok(width == 8, "wrong width %u\n", width);
+        ok(width == 32, "wrong width %u\n", width);
         ok(height == 2, "wrong height %u\n", height);
 
         ok(bps == 4, "wrong bps %d\n", bps);
@@ -762,7 +930,7 @@ static void check_tiff_format(IStream *stream, const WICPixelFormatGUID *format)
     }
     else if (IsEqualGUID(format, &GUID_WICPixelFormat8bppIndexed))
     {
-        ok(width == 4, "wrong width %u\n", width);
+        ok(width == 32, "wrong width %u\n", width);
         ok(height == 2, "wrong height %u\n", height);
 
         ok(bps == 8, "wrong bps %d\n", bps);
@@ -772,7 +940,7 @@ static void check_tiff_format(IStream *stream, const WICPixelFormatGUID *format)
     }
     else if (IsEqualGUID(format, &GUID_WICPixelFormat24bppBGR))
     {
-        ok(width == 4, "wrong width %u\n", width);
+        ok(width == 32, "wrong width %u\n", width);
         ok(height == 2, "wrong height %u\n", height);
 
         ok(bps == 3, "wrong bps %d\n", bps);
@@ -790,7 +958,6 @@ static void check_bmp_format(IStream *stream, const WICPixelFormatGUID *format)
     BITMAPFILEHEADER bfh;
     BITMAPV5HEADER bih;
 
-    memset(&bfh, 0, sizeof(bfh));
     hr = IStream_Read(stream, &bfh, sizeof(bfh), NULL);
     ok(hr == S_OK, "IStream_Read error %#x\n", hr);
 
@@ -798,13 +965,12 @@ static void check_bmp_format(IStream *stream, const WICPixelFormatGUID *format)
     ok(bfh.bfReserved1 == 0, "wrong bfReserved1 %02x\n", bfh.bfReserved1);
     ok(bfh.bfReserved2 == 0, "wrong bfReserved2 %02x\n", bfh.bfReserved2);
 
-    memset(&bih, 0, sizeof(bih));
     hr = IStream_Read(stream, &bih, sizeof(bih), NULL);
     ok(hr == S_OK, "IStream_Read error %#x\n", hr);
 
     if (IsEqualGUID(format, &GUID_WICPixelFormat1bppIndexed))
     {
-        ok(bfh.bfOffBits == 0x0436, "wrong bfOffBits %02x\n", bfh.bfOffBits);
+        ok(bfh.bfOffBits == 0x0436, "wrong bfOffBits %08x\n", bfh.bfOffBits);
 
         ok(bih.bV5Width == 32, "wrong width %u\n", bih.bV5Width);
         ok(bih.bV5Height == 2, "wrong height %u\n", bih.bV5Height);
@@ -816,9 +982,9 @@ static void check_bmp_format(IStream *stream, const WICPixelFormatGUID *format)
     }
     else if (IsEqualGUID(format, &GUID_WICPixelFormat4bppIndexed))
     {
-        ok(bfh.bfOffBits == 0x0436, "wrong bfOffBits %02x\n", bfh.bfOffBits);
+        ok(bfh.bfOffBits == 0x0436, "wrong bfOffBits %08x\n", bfh.bfOffBits);
 
-        ok(bih.bV5Width == 8, "wrong width %u\n", bih.bV5Width);
+        ok(bih.bV5Width == 32, "wrong width %u\n", bih.bV5Width);
         ok(bih.bV5Height == 2, "wrong height %u\n", bih.bV5Height);
 
         ok(bih.bV5Planes == 1, "wrong Planes %d\n", bih.bV5Planes);
@@ -828,9 +994,9 @@ static void check_bmp_format(IStream *stream, const WICPixelFormatGUID *format)
     }
     else if (IsEqualGUID(format, &GUID_WICPixelFormat8bppIndexed))
     {
-        ok(bfh.bfOffBits == 0x0436, "wrong bfOffBits %02x\n", bfh.bfOffBits);
+        ok(bfh.bfOffBits == 0x0436, "wrong bfOffBits %08x\n", bfh.bfOffBits);
 
-        ok(bih.bV5Width == 4, "wrong width %u\n", bih.bV5Width);
+        ok(bih.bV5Width == 32, "wrong width %u\n", bih.bV5Width);
         ok(bih.bV5Height == 2, "wrong height %u\n", bih.bV5Height);
 
         ok(bih.bV5Planes == 1, "wrong Planes %d\n", bih.bV5Planes);
@@ -840,9 +1006,9 @@ static void check_bmp_format(IStream *stream, const WICPixelFormatGUID *format)
     }
     else if (IsEqualGUID(format, &GUID_WICPixelFormat32bppBGR))
     {
-        ok(bfh.bfOffBits == 0x0036, "wrong bfOffBits %02x\n", bfh.bfOffBits);
+        ok(bfh.bfOffBits == 0x0036, "wrong bfOffBits %08x\n", bfh.bfOffBits);
 
-        ok(bih.bV5Width == 4, "wrong width %u\n", bih.bV5Width);
+        ok(bih.bV5Width == 32, "wrong width %u\n", bih.bV5Width);
         ok(bih.bV5Height == 2, "wrong height %u\n", bih.bV5Height);
 
         ok(bih.bV5Planes == 1, "wrong Planes %d\n", bih.bV5Planes);
@@ -910,7 +1076,7 @@ static void check_png_format(IStream *stream, const WICPixelFormatGUID *format)
     }
     else if (IsEqualGUID(format, &GUID_WICPixelFormat2bppIndexed))
     {
-        ok(be_uint(png.width) == 16, "wrong width %u\n", be_uint(png.width));
+        ok(be_uint(png.width) == 32, "wrong width %u\n", be_uint(png.width));
         ok(be_uint(png.height) == 2, "wrong height %u\n", be_uint(png.height));
 
         ok(png.bit_depth == 2, "wrong bit_depth %d\n", png.bit_depth);
@@ -921,7 +1087,7 @@ static void check_png_format(IStream *stream, const WICPixelFormatGUID *format)
     }
     else if (IsEqualGUID(format, &GUID_WICPixelFormat4bppIndexed))
     {
-        ok(be_uint(png.width) == 8, "wrong width %u\n", be_uint(png.width));
+        ok(be_uint(png.width) == 32, "wrong width %u\n", be_uint(png.width));
         ok(be_uint(png.height) == 2, "wrong height %u\n", be_uint(png.height));
 
         ok(png.bit_depth == 4, "wrong bit_depth %d\n", png.bit_depth);
@@ -932,7 +1098,7 @@ static void check_png_format(IStream *stream, const WICPixelFormatGUID *format)
     }
     else if (IsEqualGUID(format, &GUID_WICPixelFormat8bppIndexed))
     {
-        ok(be_uint(png.width) == 4, "wrong width %u\n", be_uint(png.width));
+        ok(be_uint(png.width) == 32, "wrong width %u\n", be_uint(png.width));
         ok(be_uint(png.height) == 2, "wrong height %u\n", be_uint(png.height));
 
         ok(png.bit_depth == 8, "wrong bit_depth %d\n", png.bit_depth);
@@ -943,7 +1109,7 @@ static void check_png_format(IStream *stream, const WICPixelFormatGUID *format)
     }
     else if (IsEqualGUID(format, &GUID_WICPixelFormat24bppBGR))
     {
-        ok(be_uint(png.width) == 4, "wrong width %u\n", be_uint(png.width));
+        ok(be_uint(png.width) == 32, "wrong width %u\n", be_uint(png.width));
         ok(be_uint(png.height) == 2, "wrong height %u\n", be_uint(png.height));
 
         ok(png.bit_depth == 8, "wrong bit_depth %d\n", png.bit_depth);
@@ -1201,8 +1367,8 @@ static void test_multi_encoder(const struct bitmap_data **srcs, const CLSID* cls
                             ok(SUCCEEDED(hr), "WriteSource(%dx%d) failed, hr=%x (%s)\n", rc->Width, rc->Height, hr, name);
                         else
                             ok(hr == S_OK ||
-                               (hr == E_NOTIMPL && IsEqualGUID(clsid_encoder, &CLSID_WICBmpEncoder) && srcs[i]->bpp == 2) ||
-                               (hr == E_NOTIMPL && IsEqualGUID(clsid_encoder, &CLSID_WICTiffEncoder) && srcs[i]->bpp == 2) ||
+                               (FAILED(hr) && IsEqualGUID(clsid_encoder, &CLSID_WICBmpEncoder) && srcs[i]->bpp == 2) /* XP */ ||
+                               (FAILED(hr) && IsEqualGUID(clsid_encoder, &CLSID_WICTiffEncoder) && srcs[i]->bpp == 2) /* XP */ ||
                                broken(hr == E_INVALIDARG && IsEqualGUID(clsid_encoder, &CLSID_WICBmpEncoder) && IsEqualGUID(srcs[i]->format, &GUID_WICPixelFormatBlackWhite)) /* XP */,
                                "WriteSource(NULL) failed, hr=%x (%s)\n", hr, name);
                     }
@@ -1234,7 +1400,8 @@ static void test_multi_encoder(const struct bitmap_data **srcs, const CLSID* cls
                 hr = IWICBitmapEncoder_Commit(encoder);
                 ok(SUCCEEDED(hr), "Commit failed, hr=%x\n", hr);
 
-                check_bitmap_format(stream, clsid_encoder, dsts[0]->format);
+                if (IsEqualGUID(&pixelformat, dsts[0]->format))
+                    check_bitmap_format(stream, clsid_encoder, dsts[0]->format);
             }
 
             if (SUCCEEDED(hr))
@@ -1269,7 +1436,10 @@ static void test_multi_encoder(const struct bitmap_data **srcs, const CLSID* cls
 
                     if (SUCCEEDED(hr))
                     {
-                        compare_bitmap_data(dsts[i], (IWICBitmapSource*)framedecode, name);
+                        hr = IWICBitmapFrameDecode_GetPixelFormat(framedecode, &pixelformat);
+                        ok(hr == S_OK, "GetPixelFormat) failed, hr=%x (%s)\n", hr, name);
+                        if (IsEqualGUID(&pixelformat, dsts[i]->format))
+                            compare_bitmap_data(srcs[i], dsts[i], (IWICBitmapSource*)framedecode, name);
 
                         hr = IWICBitmapFrameDecode_CopyPalette(framedecode, frame_palette);
                         if (winetest_debug > 1)
@@ -1317,8 +1487,8 @@ static void test_multi_encoder(const struct bitmap_data **srcs, const CLSID* cls
                             else if (IsEqualGUID(clsid_decoder, &CLSID_WICBmpDecoder) ||
                                      IsEqualGUID(clsid_decoder, &CLSID_WICTiffDecoder))
                             {
-                                if (IsEqualGUID(dsts[i]->format, &GUID_WICPixelFormatBlackWhite) ||
-                                    IsEqualGUID(dsts[i]->format, &GUID_WICPixelFormat8bppIndexed))
+                                if (IsEqualGUID(&pixelformat, &GUID_WICPixelFormatBlackWhite) ||
+                                    IsEqualGUID(&pixelformat, &GUID_WICPixelFormat8bppIndexed))
                                 {
                                     ok(count == 256, "expected 256, got %u (%s)\n", count, name);
 
@@ -1329,7 +1499,7 @@ static void test_multi_encoder(const struct bitmap_data **srcs, const CLSID* cls
                                     ok(colors[4] == 0xff555555, "got %08x (%s)\n", colors[4], name);
                                     ok(colors[5] == 0xff000000, "got %08x (%s)\n", colors[5], name);
                                 }
-                                else if (IsEqualGUID(dsts[i]->format, &GUID_WICPixelFormat4bppIndexed))
+                                else if (IsEqualGUID(&pixelformat, &GUID_WICPixelFormat4bppIndexed))
                                 {
                                     ok(count == 16, "expected 16, got %u (%s)\n", count, name);
 
@@ -1419,7 +1589,7 @@ static void test_encoder_rects(void)
 
     rc.X = 0;
     rc.Y = 0;
-    rc.Width = 4;
+    rc.Width = 32;
     rc.Height = 2;
 
     test_multi_encoder(srcs, &CLSID_WICTiffEncoder, dsts, &CLSID_WICTiffDecoder, &rc, NULL, "test_encoder_rects full", NULL);
@@ -1430,7 +1600,7 @@ static void test_encoder_rects(void)
     rc.Width = -1;
     test_multi_encoder(srcs, &CLSID_WICTiffEncoder, dsts, &CLSID_WICTiffDecoder, &rc, NULL, "test_encoder_rects width=-1", NULL);
 
-    rc.Width = 4;
+    rc.Width = 32;
     rc.Height = 0;
     test_multi_encoder(srcs, &CLSID_WICTiffEncoder, dsts, &CLSID_WICTiffDecoder, &rc, NULL, "test_encoder_rects height=0", NULL);
 
@@ -1452,6 +1622,163 @@ static const struct setting png_interlace_settings[] = {
     {NULL}
 };
 
+static void test_converter_8bppIndexed(void)
+{
+    HRESULT hr;
+    BitmapTestSrc *src_obj;
+    IWICFormatConverter *converter;
+    IWICPalette *palette;
+    UINT count, i;
+    BYTE buf[32 * 2 * 3]; /* enough to hold 32x2 24bppBGR data */
+
+    CreateTestBitmap(&testdata_24bppBGR, &src_obj);
+
+    hr = IWICImagingFactory_CreatePalette(factory, &palette);
+    ok(hr == S_OK, "CreatePalette error %#x\n", hr);
+    count = 0xdeadbeef;
+    hr = IWICPalette_GetColorCount(palette, &count);
+    ok(hr == S_OK, "GetColorCount error %#x\n", hr);
+    ok(count == 0, "expected 0, got %u\n", count);
+
+    /* NULL palette + Custom type */
+    hr = IWICImagingFactory_CreateFormatConverter(factory, &converter);
+    ok(hr == S_OK, "CreateFormatConverter error %#x\n", hr);
+    hr = IWICFormatConverter_Initialize(converter, &src_obj->IWICBitmapSource_iface,
+                                        &GUID_WICPixelFormat24bppBGR, WICBitmapDitherTypeNone,
+                                        NULL, 0.0, WICBitmapPaletteTypeCustom);
+    ok(hr == S_OK, "Initialize error %#x\n", hr);
+    hr = IWICFormatConverter_CopyPalette(converter, palette);
+    ok(hr == 0xdeadbeef, "unexpected error %#x\n", hr);
+    hr = IWICFormatConverter_CopyPixels(converter, NULL, 32 * 3, sizeof(buf), buf);
+    ok(hr == S_OK, "CopyPixels error %#x\n", hr);
+    IWICFormatConverter_Release(converter);
+
+    /* NULL palette + Custom type */
+    hr = IWICImagingFactory_CreateFormatConverter(factory, &converter);
+    ok(hr == S_OK, "CreateFormatConverter error %#x\n", hr);
+    hr = IWICFormatConverter_Initialize(converter, &src_obj->IWICBitmapSource_iface,
+                                        &GUID_WICPixelFormat8bppIndexed, WICBitmapDitherTypeNone,
+                                        NULL, 0.0, WICBitmapPaletteTypeCustom);
+    ok(hr == E_INVALIDARG, "unexpected error %#x\n", hr);
+    hr = IWICFormatConverter_CopyPalette(converter, palette);
+    ok(hr == WINCODEC_ERR_WRONGSTATE, "unexpected error %#x\n", hr);
+    hr = IWICFormatConverter_CopyPixels(converter, NULL, 32, sizeof(buf), buf);
+    ok(hr == WINCODEC_ERR_WRONGSTATE, "unexpected error %#x\n", hr);
+    IWICFormatConverter_Release(converter);
+
+    /* empty palette + Custom type */
+    hr = IWICImagingFactory_CreateFormatConverter(factory, &converter);
+    ok(hr == S_OK, "CreateFormatConverter error %#x\n", hr);
+    hr = IWICFormatConverter_Initialize(converter, &src_obj->IWICBitmapSource_iface,
+                                        &GUID_WICPixelFormat8bppIndexed, WICBitmapDitherTypeNone,
+                                        palette, 0.0, WICBitmapPaletteTypeCustom);
+    ok(hr == S_OK, "Initialize error %#x\n", hr);
+    hr = IWICFormatConverter_CopyPalette(converter, palette);
+    ok(hr == S_OK, "CopyPalette error %#x\n", hr);
+    count = 0xdeadbeef;
+    hr = IWICPalette_GetColorCount(palette, &count);
+    ok(hr == S_OK, "GetColorCount error %#x\n", hr);
+    ok(count == 0, "expected 0, got %u\n", count);
+    memset(buf, 0xaa, sizeof(buf));
+    hr = IWICFormatConverter_CopyPixels(converter, NULL, 32, sizeof(buf), buf);
+    ok(hr == S_OK, "CopyPixels error %#x\n", hr);
+    count = 0;
+    for (i = 0; i < 32 * 2; i++)
+        if (buf[i] != 0) count++;
+    ok(count == 0, "expected 0\n");
+    IWICFormatConverter_Release(converter);
+
+    /* NULL palette + Predefined type */
+    hr = IWICImagingFactory_CreateFormatConverter(factory, &converter);
+    ok(hr == S_OK, "CreateFormatConverter error %#x\n", hr);
+    hr = IWICFormatConverter_Initialize(converter, &src_obj->IWICBitmapSource_iface,
+                                        &GUID_WICPixelFormat8bppIndexed, WICBitmapDitherTypeNone,
+                                        NULL, 0.0, WICBitmapPaletteTypeFixedGray16);
+    ok(hr == S_OK, "Initialize error %#x\n", hr);
+    hr = IWICFormatConverter_CopyPalette(converter, palette);
+    ok(hr == S_OK, "CopyPalette error %#x\n", hr);
+    count = 0xdeadbeef;
+    hr = IWICPalette_GetColorCount(palette, &count);
+    ok(hr == S_OK, "GetColorCount error %#x\n", hr);
+    ok(count == 16, "expected 16, got %u\n", count);
+    hr = IWICFormatConverter_CopyPixels(converter, NULL, 32, sizeof(buf), buf);
+    ok(hr == S_OK, "CopyPixels error %#x\n", hr);
+    count = 0;
+    for (i = 0; i < 32 * 2; i++)
+        if (buf[i] != 0) count++;
+    ok(count != 0, "expected != 0\n");
+    IWICFormatConverter_Release(converter);
+
+    /* not empty palette + Predefined type */
+    hr = IWICImagingFactory_CreateFormatConverter(factory, &converter);
+    ok(hr == S_OK, "CreateFormatConverter error %#x\n", hr);
+    hr = IWICFormatConverter_Initialize(converter, &src_obj->IWICBitmapSource_iface,
+                                        &GUID_WICPixelFormat8bppIndexed, WICBitmapDitherTypeNone,
+                                        palette, 0.0, WICBitmapPaletteTypeFixedHalftone64);
+    ok(hr == S_OK, "Initialize error %#x\n", hr);
+    hr = IWICFormatConverter_CopyPalette(converter, palette);
+    ok(hr == S_OK, "CopyPalette error %#x\n", hr);
+    count = 0xdeadbeef;
+    hr = IWICPalette_GetColorCount(palette, &count);
+    ok(hr == S_OK, "GetColorCount error %#x\n", hr);
+    ok(count == 16, "expected 16, got %u\n", count);
+    hr = IWICFormatConverter_CopyPixels(converter, NULL, 32, sizeof(buf), buf);
+    ok(hr == S_OK, "CopyPixels error %#x\n", hr);
+    count = 0;
+    for (i = 0; i < 32 * 2; i++)
+        if (buf[i] != 0) count++;
+    ok(count != 0, "expected != 0\n");
+    IWICFormatConverter_Release(converter);
+
+    /* not empty palette + MedianCut type */
+    hr = IWICImagingFactory_CreateFormatConverter(factory, &converter);
+    ok(hr == S_OK, "CreateFormatConverter error %#x\n", hr);
+    hr = IWICFormatConverter_Initialize(converter, &src_obj->IWICBitmapSource_iface,
+                                        &GUID_WICPixelFormat8bppIndexed, WICBitmapDitherTypeNone,
+                                        palette, 0.0, WICBitmapPaletteTypeMedianCut);
+    ok(hr == S_OK, "Initialize error %#x\n", hr);
+    hr = IWICFormatConverter_CopyPalette(converter, palette);
+    ok(hr == S_OK, "CopyPalette error %#x\n", hr);
+    count = 0xdeadbeef;
+    hr = IWICPalette_GetColorCount(palette, &count);
+    ok(hr == S_OK, "GetColorCount error %#x\n", hr);
+    ok(count == 16, "expected 16, got %u\n", count);
+    hr = IWICFormatConverter_CopyPixels(converter, NULL, 32, sizeof(buf), buf);
+    ok(hr == S_OK, "CopyPixels error %#x\n", hr);
+    count = 0;
+    for (i = 0; i < 32 * 2; i++)
+        if (buf[i] != 0) count++;
+    ok(count != 0, "expected != 0\n");
+    IWICFormatConverter_Release(converter);
+
+    /* NULL palette + MedianCut type */
+    hr = IWICImagingFactory_CreateFormatConverter(factory, &converter);
+    ok(hr == S_OK, "CreateFormatConverter error %#x\n", hr);
+    hr = IWICFormatConverter_Initialize(converter, &src_obj->IWICBitmapSource_iface,
+                                        &GUID_WICPixelFormat8bppIndexed, WICBitmapDitherTypeNone,
+                                        NULL, 0.0, WICBitmapPaletteTypeMedianCut);
+    ok(hr == S_OK || broken(hr == E_INVALIDARG) /* XP */, "Initialize error %#x\n", hr);
+    if (hr == S_OK)
+    {
+        hr = IWICFormatConverter_CopyPalette(converter, palette);
+        ok(hr == S_OK, "CopyPalette error %#x\n", hr);
+        count = 0xdeadbeef;
+        hr = IWICPalette_GetColorCount(palette, &count);
+        ok(hr == S_OK, "GetColorCount error %#x\n", hr);
+        ok(count == 8, "expected 8, got %u\n", count);
+        hr = IWICFormatConverter_CopyPixels(converter, NULL, 32, sizeof(buf), buf);
+        ok(hr == S_OK, "CopyPixels error %#x\n", hr);
+        count = 0;
+        for (i = 0; i < 32 * 2; i++)
+            if (buf[i] != 0) count++;
+        ok(count != 0, "expected != 0\n");
+    }
+    IWICFormatConverter_Release(converter);
+
+    IWICPalette_Release(palette);
+    DeleteTestBitmap(src_obj);
+}
+
 START_TEST(converter)
 {
     HRESULT hr;
@@ -1462,9 +1789,25 @@ START_TEST(converter)
                           &IID_IWICImagingFactory, (void **)&factory);
     ok(hr == S_OK, "failed to create factory: %#x\n", hr);
 
+    test_conversion(&testdata_24bppRGB, &testdata_1bppIndexed, "24bppRGB -> 1bppIndexed", TRUE);
+    test_conversion(&testdata_24bppRGB, &testdata_2bppIndexed, "24bppRGB -> 2bppIndexed", TRUE);
+    test_conversion(&testdata_24bppRGB, &testdata_4bppIndexed, "24bppRGB -> 4bppIndexed", TRUE);
+    test_conversion(&testdata_24bppRGB, &testdata_8bppIndexed, "24bppRGB -> 8bppIndexed", FALSE);
+
+    test_conversion(&testdata_BlackWhite, &testdata_8bppIndexed_BW, "BlackWhite -> 8bppIndexed", TRUE);
+    test_conversion(&testdata_1bppIndexed, &testdata_8bppIndexed_BW, "1bppIndexed -> 8bppIndexed", TRUE);
+    test_conversion(&testdata_2bppIndexed, &testdata_8bppIndexed_4colors, "2bppIndexed -> 8bppIndexed", TRUE);
+    test_conversion(&testdata_4bppIndexed, &testdata_8bppIndexed, "4bppIndexed -> 8bppIndexed", TRUE);
+
     test_conversion(&testdata_32bppBGRA, &testdata_32bppBGR, "BGRA -> BGR", FALSE);
     test_conversion(&testdata_32bppBGR, &testdata_32bppBGRA, "BGR -> BGRA", FALSE);
     test_conversion(&testdata_32bppBGRA, &testdata_32bppBGRA, "BGRA -> BGRA", FALSE);
+    test_conversion(&testdata_32bppBGRA80, &testdata_32bppPBGRA, "BGRA -> PBGRA", FALSE);
+
+    test_conversion(&testdata_32bppRGBA, &testdata_32bppRGB, "RGBA -> RGB", FALSE);
+    test_conversion(&testdata_32bppRGB, &testdata_32bppRGBA, "RGB -> RGBA", FALSE);
+    test_conversion(&testdata_32bppRGBA, &testdata_32bppRGBA, "RGBA -> RGBA", FALSE);
+    test_conversion(&testdata_32bppRGBA80, &testdata_32bppPRGBA, "RGBA -> PRGBA", FALSE);
 
     test_conversion(&testdata_24bppBGR, &testdata_24bppBGR, "24bppBGR -> 24bppBGR", FALSE);
     test_conversion(&testdata_24bppBGR, &testdata_24bppRGB, "24bppBGR -> 24bppRGB", FALSE);
@@ -1476,6 +1819,9 @@ START_TEST(converter)
     test_conversion(&testdata_24bppRGB, &testdata_32bppBGR, "24bppRGB -> 32bppBGR", FALSE);
     test_conversion(&testdata_32bppBGRA, &testdata_24bppRGB, "32bppBGRA -> 24bppRGB", FALSE);
 
+    test_conversion(&testdata_64bppRGBA, &testdata_32bppRGBA, "64bppRGBA -> 32bppRGBA", FALSE);
+    test_conversion(&testdata_64bppRGBA, &testdata_32bppRGB, "64bppRGBA -> 32bppRGB", FALSE);
+
     test_conversion(&testdata_24bppRGB, &testdata_32bppGrayFloat, "24bppRGB -> 32bppGrayFloat", FALSE);
     test_conversion(&testdata_32bppBGR, &testdata_32bppGrayFloat, "32bppBGR -> 32bppGrayFloat", FALSE);
 
@@ -1486,6 +1832,7 @@ START_TEST(converter)
 
     test_invalid_conversion();
     test_default_converter();
+    test_converter_8bppIndexed();
 
     test_encoder(&testdata_BlackWhite, &CLSID_WICPngEncoder,
                  &testdata_BlackWhite, &CLSID_WICPngDecoder, "PNG encoder BlackWhite");
@@ -1499,6 +1846,11 @@ START_TEST(converter)
                  &testdata_8bppIndexed, &CLSID_WICPngDecoder, "PNG encoder 8bppIndexed");
     test_encoder(&testdata_24bppBGR, &CLSID_WICPngEncoder,
                  &testdata_24bppBGR, &CLSID_WICPngDecoder, "PNG encoder 24bppBGR");
+if (!strcmp(winetest_platform, "windows")) /* FIXME: enable once implemented in Wine */
+{
+    test_encoder(&testdata_32bppBGR, &CLSID_WICPngEncoder,
+                 &testdata_24bppBGR, &CLSID_WICPngDecoder, "PNG encoder 32bppBGR");
+}
 
     test_encoder(&testdata_BlackWhite, &CLSID_WICBmpEncoder,
                  &testdata_1bppIndexed, &CLSID_WICBmpDecoder, "BMP encoder BlackWhite");

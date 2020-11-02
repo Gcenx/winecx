@@ -119,7 +119,7 @@ static int format_exception_msg( const EXCEPTION_POINTERS *ptr, char *buffer, in
             len = snprintf( buffer, size, "Unhandled page fault on %s access to 0x%08lx",
                             rec->ExceptionInformation[0] == EXCEPTION_WRITE_FAULT ? "write" :
                             rec->ExceptionInformation[0] == EXCEPTION_EXECUTE_FAULT ? "execute" : "read",
-                            rec->ExceptionInformation[1]);
+                            (long)rec->ExceptionInformation[1]);
         else
             len = snprintf( buffer, size, "Unhandled page fault");
         break;
@@ -131,15 +131,15 @@ static int format_exception_msg( const EXCEPTION_POINTERS *ptr, char *buffer, in
         break;
     case STATUS_POSSIBLE_DEADLOCK:
         len = snprintf( buffer, size, "Critical section %08lx wait failed",
-                 rec->ExceptionInformation[0]);
+                 (long)rec->ExceptionInformation[0]);
         break;
     case EXCEPTION_WINE_STUB:
         if ((ULONG_PTR)rec->ExceptionInformation[1] >> 16)
             len = snprintf( buffer, size, "Unimplemented function %s.%s called",
                             (char *)rec->ExceptionInformation[0], (char *)rec->ExceptionInformation[1] );
         else
-            len = snprintf( buffer, size, "Unimplemented function %s.%ld called",
-                            (char *)rec->ExceptionInformation[0], rec->ExceptionInformation[1] );
+            len = snprintf( buffer, size, "Unimplemented function %s.%hu called",
+                            (char *)rec->ExceptionInformation[0], (unsigned short)rec->ExceptionInformation[1] );
         break;
     case EXCEPTION_WINE_ASSERTION:
         len = snprintf( buffer, size, "Assertion failed" );
@@ -150,7 +150,7 @@ static int format_exception_msg( const EXCEPTION_POINTERS *ptr, char *buffer, in
     }
     if ((len<0) || (len>=size))
         return -1;
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
     if (LOWORD(ptr->ContextRecord->SegCs) != wine_get_cs())
         len2 = snprintf(buffer+len, size-len, " at address 0x%04x:0x%08x",
                         LOWORD(ptr->ContextRecord->SegCs),
@@ -364,12 +364,11 @@ static BOOL start_debugger_atomic(PEXCEPTION_POINTERS epointers)
 	{
 	    /* ok, our event has been set... we're the winning thread */
 	    BOOL	ret = start_debugger( epointers, hRunOnce );
-	    DWORD	tmp;
 
 	    if (!ret)
 	    {
 		/* so that the other threads won't be stuck */
-		NtSetEvent( hRunOnce, &tmp );
+		NtSetEvent( hRunOnce, NULL );
 	    }
 	    return ret;
 	}

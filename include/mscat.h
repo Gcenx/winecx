@@ -19,6 +19,8 @@
 #ifndef __WINE_MSCAT_H
 #define __WINE_MSCAT_H
 
+#include "wine/winheader_enter.h"
+
 #include <mssip.h>
 
 typedef HANDLE HCATADMIN;
@@ -132,5 +134,7 @@ HANDLE    WINAPI CryptCATOpen(LPWSTR,DWORD,HCRYPTPROV,DWORD,DWORD);
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif

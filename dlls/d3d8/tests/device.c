@@ -27,6 +27,7 @@
 #include <initguid.h>
 #include <d3d8.h>
 #include "wine/test.h"
+#include "wine/heap.h"
 
 struct vec3
 {
@@ -51,8 +52,8 @@ struct device_desc
 
 static DEVMODEW registry_mode;
 
-static HRESULT (WINAPI *ValidateVertexShader)(DWORD *, DWORD *, DWORD *, int, DWORD *);
-static HRESULT (WINAPI *ValidatePixelShader)(DWORD *, DWORD *, int, DWORD *);
+static HRESULT (WINAPI *ValidateVertexShader)(const DWORD *, const DWORD *, const D3DCAPS8 *, BOOL, char **);
+static HRESULT (WINAPI *ValidatePixelShader)(const DWORD *, const D3DCAPS8 *, BOOL, char **);
 
 static BOOL (WINAPI *pGetCursorInfo)(PCURSORINFO);
 
@@ -100,6 +101,11 @@ static void flush_events(void)
         while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
         diff = time - GetTickCount();
     }
+}
+
+static BOOL adapter_is_warp(const D3DADAPTER_IDENTIFIER8 *identifier)
+{
+    return !strcmp(identifier->Driver, "d3d10warp.dll");
 }
 
 static IDirect3DDevice8 *create_device(IDirect3D8 *d3d8, HWND focus_window, const struct device_desc *desc)
@@ -1321,6 +1327,7 @@ static void test_reset(void)
     IDirect3D8 *d3d8;
     RECT winrect, client_rect;
     D3DVIEWPORT8 vp;
+    ULONG refcount;
     D3DCAPS8 caps;
     DWORD shader;
     DWORD value;
@@ -1688,6 +1695,46 @@ static void test_reset(void)
     {
         skip("Volume textures not supported.\n");
     }
+
+    /* Test with DEFAULT pool resources bound but otherwise not referenced. */
+    hr = IDirect3DDevice8_CreateVertexBuffer(device1, 16, 0,
+            D3DFVF_XYZ, D3DPOOL_DEFAULT, &vb);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice8_SetStreamSource(device1, 0, vb, 16);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    refcount = IDirect3DVertexBuffer8_Release(vb);
+    ok(!refcount, "Unexpected refcount %u.\n", refcount);
+    hr = IDirect3DDevice8_CreateIndexBuffer(device1, 16, 0,
+            D3DFMT_INDEX16, D3DPOOL_DEFAULT, &ib);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice8_SetIndices(device1, ib, 0);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    refcount = IDirect3DIndexBuffer8_Release(ib);
+    ok(!refcount, "Unexpected refcount %u.\n", refcount);
+    hr = IDirect3DDevice8_CreateTexture(device1, 16, 16, 0, 0,
+            D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &texture);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice8_SetTexture(device1, i, (IDirect3DBaseTexture8 *)texture);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(hr == D3DERR_DEVICELOST, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(hr == D3DERR_DEVICENOTRESET, "Got unexpected hr %#x.\n", hr);
+
+    /* Crashes on Windows. */
+    if (0)
+    {
+        hr = IDirect3DDevice8_GetIndices(device1, &ib, &i);
+        todo_wine ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    }
+    refcount = IDirect3DTexture8_Release(texture);
+    ok(!refcount, "Unexpected refcount %u.\n", refcount);
+
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
 
     /* Scratch, sysmem and managed pool resources are fine. */
     hr = IDirect3DDevice8_CreateTexture(device1, 16, 16, 1, 0, D3DFMT_R5G6B5, D3DPOOL_SCRATCH, &texture);
@@ -2256,6 +2303,55 @@ static void test_lights(void)
         ok(hr == D3D_OK, "Disabling light %u failed with %08x\n", i, hr);
     }
 
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+cleanup:
+    IDirect3D8_Release(d3d8);
+    DestroyWindow(window);
+}
+
+static void test_set_stream_source(void)
+{
+    IDirect3DVertexBuffer8 *vb, *current_vb;
+    IDirect3DDevice8 *device;
+    unsigned int stride;
+    IDirect3D8 *d3d8;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+
+    window = create_window();
+    ok(!!window, "Failed to create a window.\n");
+    d3d8 = Direct3DCreate8(D3D_SDK_VERSION);
+    ok(!!d3d8, "Failed to create a D3D object.\n");
+    if (!(device = create_device(d3d8, window, NULL)))
+    {
+        skip("Failed to create a 3D device, skipping test.\n");
+        goto cleanup;
+    }
+
+    hr = IDirect3DDevice8_CreateVertexBuffer(device, 512, 0, 0, D3DPOOL_DEFAULT, &vb);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_SetStreamSource(device, 0, vb, 32);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_SetStreamSource(device, 0, NULL, 0);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice8_GetStreamSource(device, 0, &current_vb, &stride);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(!current_vb, "Got unexpected vb %p.\n", current_vb);
+    ok(stride == 32, "Got unexpected stride %u.\n", stride);
+
+    hr = IDirect3DDevice8_SetStreamSource(device, 0, vb, 0);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice8_GetStreamSource(device, 0, &current_vb, &stride);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(current_vb == vb, "Got unexpected vb %p.\n", current_vb);
+    IDirect3DVertexBuffer8_Release(current_vb);
+    ok(!stride, "Got unexpected stride %u.\n", stride);
+
+    IDirect3DVertexBuffer8_Release(vb);
     refcount = IDirect3DDevice8_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);
 cleanup:
@@ -3002,8 +3098,9 @@ static void test_wndproc(void)
     /* Remove the maximized state from the SYSCOMMAND test while we're not
      * interfering with a device. */
     ShowWindow(focus_window, SW_SHOWNORMAL);
-    filter_messages = focus_window;
 
+    /* On Windows 10 style change messages are delivered on device
+     * creation. */
     device_desc.device_window = focus_window;
     if (!(device = create_device(d3d8, focus_window, &device_desc)))
     {
@@ -3018,7 +3115,6 @@ static void test_wndproc(void)
     SetForegroundWindow(GetDesktopWindow());
     ok(!expect_messages->message, "Expected message %#x for window %#x, but didn't receive it.\n",
             expect_messages->message, expect_messages->window);
-    ok(!windowposchanged_received, "Received WM_WINDOWPOSCHANGED but did not expect it.\n");
     expect_messages = NULL;
 
     /* The window is iconic even though no message was sent. */
@@ -3074,6 +3170,7 @@ static void test_wndproc(void)
     hr = IDirect3DDevice8_TestCooperativeLevel(device);
     ok(hr == D3DERR_DEVICENOTRESET, "Got unexpected hr %#x.\n", hr);
 
+    filter_messages = NULL;
     hr = reset_device(device, &device_desc);
     ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
 
@@ -4360,7 +4457,7 @@ static void test_set_rt_vp_scissor(void)
 
 static void test_validate_vs(void)
 {
-    static DWORD vs[] =
+    static DWORD vs_code[] =
     {
         0xfffe0101,                                                             /* vs_1_1                       */
         0x00000009, 0xc0010000, 0x90e40000, 0xa0e40000,                         /* dp4 oPos.x, v0, c0           */
@@ -4369,81 +4466,169 @@ static void test_validate_vs(void)
         0x00000009, 0xc0080000, 0x90e40000, 0xa0e40003,                         /* dp4 oPos.w, v0, c3           */
         0x0000ffff,                                                             /* end                          */
     };
+    D3DCAPS8 caps;
+    char *errors;
     HRESULT hr;
 
-    hr = ValidateVertexShader(0, 0, 0, 0, 0);
-    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
-    hr = ValidateVertexShader(0, 0, 0, 1, 0);
-    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
-    hr = ValidateVertexShader(vs, 0, 0, 0, 0);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    static DWORD declaration_valid1[] =
+    {
+        D3DVSD_STREAM(0),
+        D3DVSD_REG(D3DVSDE_POSITION, D3DVSDT_FLOAT4),
+        D3DVSD_END()
+    };
+    static DWORD declaration_valid2[] =
+    {
+        D3DVSD_STREAM(0),
+        D3DVSD_REG(D3DVSDE_POSITION, D3DVSDT_FLOAT2),
+        D3DVSD_END()
+    };
+    static DWORD declaration_invalid[] =
+    {
+        D3DVSD_STREAM(0),
+        D3DVSD_REG(D3DVSDE_NORMAL, D3DVSDT_FLOAT4),
+        D3DVSD_END()
+    };
 
-    hr = ValidateVertexShader(vs, 0, 0, 1, 0);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-    /* Seems to do some version checking. */
-    *vs = 0xfffe0100;                                                           /* vs_1_0                       */
-    hr = ValidateVertexShader(vs, 0, 0, 0, 0);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ValidateVertexShader(NULL, NULL, NULL, FALSE, NULL);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    hr = ValidateVertexShader(NULL, NULL, NULL, TRUE, NULL);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    hr = ValidateVertexShader(NULL, NULL, NULL, FALSE, &errors);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(!*errors, "Got unexpected string \"%s\".\n", errors);
+    heap_free(errors);
+    hr = ValidateVertexShader(NULL, NULL, NULL, TRUE, &errors);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(!!*errors, "Got unexpected empty string.\n");
+    heap_free(errors);
 
-    *vs = 0xfffe0102;                                                           /* bogus version                */
-    hr = ValidateVertexShader(vs, 0, 0, 1, 0);
-    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
-    /* I've seen that applications always pass the 2nd and 3rd parameter as 0.
-     * Simple test with non-zero parameters. */
-    *vs = 0xfffe0101;                                                           /* vs_1_1                       */
-    hr = ValidateVertexShader(vs, vs, 0, 1, 0);
-    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    hr = ValidateVertexShader(vs_code, NULL, NULL, FALSE, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ValidateVertexShader(vs_code, NULL, NULL, TRUE, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ValidateVertexShader(vs_code, NULL, NULL, TRUE, &errors);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(!*errors, "Got unexpected string \"%s\".\n", errors);
+    heap_free(errors);
 
-    hr = ValidateVertexShader(vs, 0, vs, 1, 0);
+    hr = ValidateVertexShader(vs_code, declaration_valid1, NULL, FALSE, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ValidateVertexShader(vs_code, declaration_valid2, NULL, FALSE, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ValidateVertexShader(vs_code, declaration_invalid, NULL, FALSE, NULL);
+    todo_wine ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+
+    memset(&caps, 0, sizeof(caps));
+    caps.VertexShaderVersion = D3DVS_VERSION(1, 1);
+    caps.MaxVertexShaderConst = 4;
+    hr = ValidateVertexShader(vs_code, NULL, &caps, FALSE, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    caps.VertexShaderVersion = D3DVS_VERSION(1, 0);
+    hr = ValidateVertexShader(vs_code, NULL, &caps, FALSE, NULL);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
-    /* I've seen the 4th parameter always passed as either 0 or 1, but passing
-     * other values doesn't seem to hurt. */
-    hr = ValidateVertexShader(vs, 0, 0, 12345, 0);
+    caps.VertexShaderVersion = D3DVS_VERSION(1, 2);
+    hr = ValidateVertexShader(vs_code, NULL, &caps, FALSE, NULL);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-    /* What is the 5th parameter? The following seems to work ok. */
-    hr = ValidateVertexShader(vs, 0, 0, 1, vs);
+    caps.VertexShaderVersion = D3DVS_VERSION(8, 8);
+    hr = ValidateVertexShader(vs_code, NULL, &caps, FALSE, NULL);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    caps.VertexShaderVersion = D3DVS_VERSION(1, 1);
+    caps.MaxVertexShaderConst = 3;
+    hr = ValidateVertexShader(vs_code, NULL, &caps, FALSE, NULL);
+    todo_wine ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+
+    *vs_code = D3DVS_VERSION(1, 0);
+    hr = ValidateVertexShader(vs_code, NULL, NULL, FALSE, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    *vs_code = D3DVS_VERSION(1, 2);
+    hr = ValidateVertexShader(vs_code, NULL, NULL, TRUE, NULL);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    hr = ValidateVertexShader(vs_code, NULL, NULL, FALSE, &errors);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(!*errors, "Got unexpected string \"%s\".\n", errors);
+    heap_free(errors);
+    hr = ValidateVertexShader(vs_code, NULL, NULL, TRUE, &errors);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(!!*errors, "Got unexpected empty string.\n");
+    heap_free(errors);
 }
 
 static void test_validate_ps(void)
 {
-    static DWORD ps[] =
+    static DWORD ps_1_1_code[] =
     {
         0xffff0101,                                                             /* ps_1_1                       */
-        0x00000051, 0xa00f0001, 0x3f800000, 0x00000000, 0x00000000, 0x00000000, /* def c1 = 1.0, 0.0, 0.0, 0.0  */
-        0x00000042, 0xb00f0000,                                                 /* tex t0                       */
-        0x00000008, 0x800f0000, 0xa0e40001, 0xa0e40000,                         /* dp3 r0, c1, c0               */
-        0x00000005, 0x800f0000, 0x90e40000, 0x80e40000,                         /* mul r0, v0, r0               */
-        0x00000005, 0x800f0000, 0xb0e40000, 0x80e40000,                         /* mul r0, t0, r0               */
-        0x0000ffff,                                                             /* end                          */
+        0x00000001, 0x800f0001, 0xa0e40001,                                     /* mov r1, c1                   */
+        0x00000002, 0x800f0000, 0x80e40001, 0xa0e40002,                         /* add r0, r1, c2               */
+        0x0000ffff                                                              /* end                          */
     };
+    static const DWORD ps_2_0_code[] =
+    {
+        0xffff0200,                                                             /* ps_2_0                       */
+        0x02000001, 0x800f0001, 0xa0e40001,                                     /* mov r1, c1                   */
+        0x03000002, 0x800f0000, 0x80e40001, 0xa0e40002,                         /* add r0, r1, c2               */
+        0x02000001, 0x800f0800, 0x80e40000,                                     /* mov oC0, r0                  */
+        0x0000ffff                                                              /* end                          */
+    };
+    D3DCAPS8 caps;
+    char *errors;
     HRESULT hr;
 
-    hr = ValidatePixelShader(0, 0, 0, 0);
+    hr = ValidatePixelShader(NULL, NULL, FALSE, NULL);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
-    hr = ValidatePixelShader(0, 0, 1, 0);
+    hr = ValidatePixelShader(NULL, NULL, TRUE, NULL);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
-    hr = ValidatePixelShader(ps, 0, 0, 0);
+    errors = (void *)0xcafeface;
+    hr = ValidatePixelShader(NULL, NULL, FALSE, &errors);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(errors == (void *)0xcafeface, "Got unexpected errors %p.\n", errors);
+    errors = (void *)0xcafeface;
+    hr = ValidatePixelShader(NULL, NULL, TRUE, &errors);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(errors == (void *)0xcafeface, "Got unexpected errors %p.\n", errors);
+
+    hr = ValidatePixelShader(ps_1_1_code, NULL, FALSE, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ValidatePixelShader(ps_1_1_code, NULL, TRUE, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ValidatePixelShader(ps_1_1_code, NULL, TRUE, &errors);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(!*errors, "Got unexpected string \"%s\".\n", errors);
+    heap_free(errors);
+
+    memset(&caps, 0, sizeof(caps));
+    caps.PixelShaderVersion = D3DPS_VERSION(1, 1);
+    hr = ValidatePixelShader(ps_1_1_code, &caps, FALSE, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    caps.PixelShaderVersion = D3DPS_VERSION(1, 0);
+    hr = ValidatePixelShader(ps_1_1_code, &caps, FALSE, NULL);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    caps.PixelShaderVersion = D3DPS_VERSION(1, 2);
+    hr = ValidatePixelShader(ps_1_1_code, &caps, FALSE, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    caps.PixelShaderVersion = D3DPS_VERSION(8, 8);
+    hr = ValidatePixelShader(ps_1_1_code, &caps, FALSE, NULL);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
 
-    hr = ValidatePixelShader(ps, 0, 1, 0);
+    *ps_1_1_code = D3DPS_VERSION(1, 0);
+    hr = ValidatePixelShader(ps_1_1_code, NULL, FALSE, NULL);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-    /* Seems to do some version checking. */
-    *ps = 0xffff0105;                                                           /* bogus version                */
-    hr = ValidatePixelShader(ps, 0, 1, 0);
+    *ps_1_1_code = D3DPS_VERSION(1, 4);
+    hr = ValidatePixelShader(ps_1_1_code, NULL, FALSE, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ValidatePixelShader(ps_2_0_code, NULL, FALSE, NULL);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
-    /* I've seen that applications always pass the 2nd parameter as 0.
-     * Simple test with a non-zero parameter. */
-    *ps = 0xffff0101;                                                           /* ps_1_1                       */
-    hr = ValidatePixelShader(ps, ps, 1, 0);
+    *ps_1_1_code = D3DPS_VERSION(1, 5);
+    hr = ValidatePixelShader(ps_1_1_code, NULL, TRUE, NULL);
     ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
-    /* I've seen the 3rd parameter always passed as either 0 or 1, but passing
-     * other values doesn't seem to hurt. */
-    hr = ValidatePixelShader(ps, 0, 12345, 0);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-    /* What is the 4th parameter? The following seems to work ok. */
-    hr = ValidatePixelShader(ps, 0, 1, ps);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ValidatePixelShader(ps_1_1_code, NULL, FALSE, &errors);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(!*errors, "Got unexpected string \"%s\".\n", errors);
+    heap_free(errors);
+    hr = ValidatePixelShader(ps_1_1_code, NULL, TRUE, &errors);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+    ok(!!*errors, "Got unexpected empty string.\n");
+    heap_free(errors);
 }
 
 static void test_volume_get_container(void)
@@ -4566,7 +4751,8 @@ static void test_vb_lock_flags(void)
         return;
     }
 
-    hr = IDirect3DDevice8_CreateVertexBuffer(device, 1024, D3DUSAGE_DYNAMIC, 0, D3DPOOL_DEFAULT, &buffer);
+    hr = IDirect3DDevice8_CreateVertexBuffer(device, 1024, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
+            0, D3DPOOL_DEFAULT, &buffer);
     ok(SUCCEEDED(hr), "Failed to create vertex buffer, hr %#x.\n", hr);
 
     for (i = 0; i < ARRAY_SIZE(test_data); ++i)
@@ -5162,6 +5348,11 @@ static void test_lockrect_invalid(void)
             ok(SUCCEEDED(hr), "Failed to unlock texture, hr %#x, type %s.\n", hr, resources[r].name);
 
             IDirect3DTexture8_Release(texture);
+
+            hr = IDirect3DDevice8_CreateTexture(device, 128, 128, 1, D3DUSAGE_WRITEONLY,
+                    D3DFMT_A8R8G8B8, resources[r].pool, &texture);
+            ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x for type %s.\n",
+                    hr, resources[r].name);
         }
 
         if (cube_texture)
@@ -5202,6 +5393,11 @@ static void test_lockrect_invalid(void)
             ok(SUCCEEDED(hr), "Failed to unlock texture, hr %#x, type %s.\n", hr, resources[r].name);
 
             IDirect3DTexture8_Release(cube_texture);
+
+            hr = IDirect3DDevice8_CreateCubeTexture(device, 128, 1, D3DUSAGE_WRITEONLY, D3DFMT_A8R8G8B8,
+                    resources[r].pool, &cube_texture);
+            ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x for type %s.\n",
+                    hr, resources[r].name);
         }
     }
 
@@ -6000,164 +6196,98 @@ static void test_set_palette(void)
     DestroyWindow(window);
 }
 
-static void test_swvp_buffer(void)
+static void test_pinned_buffers(void)
 {
-    IDirect3DDevice8 *device;
-    IDirect3D8 *d3d8;
-    UINT refcount;
-    HWND window;
-    HRESULT hr;
-    unsigned int i;
-    IDirect3DVertexBuffer8 *buffer;
-    static const unsigned int bufsize = 1024;
-    D3DVERTEXBUFFER_DESC desc;
-    struct device_desc device_desc;
-    struct
+    static const struct
     {
-        float x, y, z;
-    } *ptr, *ptr2;
-
-    window = create_window();
-    d3d8 = Direct3DCreate8(D3D_SDK_VERSION);
-    ok(!!d3d8, "Failed to create a D3D object.\n");
-
-    device_desc.device_window = window;
-    device_desc.width = 640;
-    device_desc.height = 480;
-    device_desc.flags = CREATE_DEVICE_SWVP_ONLY;
-    if (!(device = create_device(d3d8, window, &device_desc)))
-    {
-        skip("Failed to create a D3D device, skipping tests.\n");
-        IDirect3D8_Release(d3d8);
-        DestroyWindow(window);
-        return;
+        DWORD device_flags;
+        DWORD usage;
+        D3DPOOL pool;
     }
-
-    hr = IDirect3DDevice8_CreateVertexBuffer(device, bufsize * sizeof(*ptr), D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, 0,
-            D3DPOOL_DEFAULT, &buffer);
-    ok(SUCCEEDED(hr), "Failed to create buffer, hr %#x.\n", hr);
-    hr = IDirect3DVertexBuffer8_GetDesc(buffer, &desc);
-    ok(SUCCEEDED(hr), "Failed to get desc, hr %#x.\n", hr);
-    ok(desc.Pool == D3DPOOL_DEFAULT, "Got pool %u, expected D3DPOOL_DEFAULT\n", desc.Pool);
-    ok(desc.Usage == (D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY),
-            "Got usage %u, expected D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY\n", desc.Usage);
-
-    hr = IDirect3DVertexBuffer8_Lock(buffer, 0, bufsize * sizeof(*ptr), (BYTE **)&ptr, D3DLOCK_DISCARD);
-    ok(SUCCEEDED(hr), "Failed to lock buffer, hr %#x.\n", hr);
-    for (i = 0; i < bufsize; i++)
+    tests[] =
     {
-        ptr[i].x = i * 1.0f;
-        ptr[i].y = i * 2.0f;
-        ptr[i].z = i * 3.0f;
-    }
-    hr = IDirect3DVertexBuffer8_Unlock(buffer);
-    ok(SUCCEEDED(hr), "Failed to unlock buffer, hr %#x.\n", hr);
-
-    hr = IDirect3DDevice8_SetVertexShader(device, D3DFVF_XYZ);
-    ok(SUCCEEDED(hr), "Failed to set fvf, hr %#x.\n", hr);
-    hr = IDirect3DDevice8_SetStreamSource(device, 0, buffer, sizeof(*ptr));
-    ok(SUCCEEDED(hr), "Failed to set stream source, hr %#x.\n", hr);
-    hr = IDirect3DDevice8_BeginScene(device);
-    ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
-    hr = IDirect3DDevice8_DrawPrimitive(device, D3DPT_TRIANGLELIST, 0, 2);
-    ok(SUCCEEDED(hr), "Failed to draw, hr %#x.\n", hr);
-    hr = IDirect3DDevice8_EndScene(device);
-    ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
-
-    hr = IDirect3DVertexBuffer8_Lock(buffer, 0, bufsize * sizeof(*ptr2), (BYTE **)&ptr2, D3DLOCK_DISCARD);
-    ok(SUCCEEDED(hr), "Failed to lock buffer, hr %#x.\n", hr);
-    ok(ptr == ptr2, "Lock returned two different pointers: %p, %p\n", ptr, ptr2);
-    for (i = 0; i < bufsize; i++)
-    {
-        if (ptr2[i].x != i * 1.0f || ptr2[i].y != i * 2.0f || ptr2[i].z != i * 3.0f)
-        {
-            ok(FALSE, "Vertex %u is %f,%f,%f, expected %f,%f,%f\n", i,
-                    ptr2[i].x, ptr2[i].y, ptr2[i].z, i * 1.0f, i * 2.0f, i * 3.0f);
-            break;
-        }
-    }
-    hr = IDirect3DVertexBuffer8_Unlock(buffer);
-    ok(SUCCEEDED(hr), "Failed to unlock buffer, hr %#x.\n", hr);
-
-    IDirect3DVertexBuffer8_Release(buffer);
-    refcount = IDirect3DDevice8_Release(device);
-    ok(!refcount, "Device has %u references left.\n", refcount);
-    IDirect3D8_Release(d3d8);
-    DestroyWindow(window);
-}
-
-static void test_managed_buffer(void)
-{
+        {CREATE_DEVICE_SWVP_ONLY, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, D3DPOOL_DEFAULT},
+        {0, 0, D3DPOOL_MANAGED},
+        {0, 0, D3DPOOL_SYSTEMMEM},
+    };
     static const unsigned int vertex_count = 1024;
+    struct device_desc device_desc;
     IDirect3DVertexBuffer8 *buffer;
     D3DVERTEXBUFFER_DESC desc;
     IDirect3DDevice8 *device;
     struct vec3 *ptr, *ptr2;
-    IDirect3D8 *d3d8;
-    unsigned int i;
+    unsigned int i, test;
+    IDirect3D8 *d3d;
     UINT refcount;
     HWND window;
     HRESULT hr;
 
     window = create_window();
-    d3d8 = Direct3DCreate8(D3D_SDK_VERSION);
-    ok(!!d3d8, "Failed to create a D3D object.\n");
-    if (!(device = create_device(d3d8, window, NULL)))
+    d3d = Direct3DCreate8(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create a D3D object.\n");
+
+    for (test = 0; test < ARRAY_SIZE(tests); ++test)
     {
-        skip("Failed to create a D3D device, skipping tests.\n");
-        IDirect3D8_Release(d3d8);
-        DestroyWindow(window);
-        return;
-    }
-
-    hr = IDirect3DDevice8_CreateVertexBuffer(device, vertex_count * sizeof(*ptr), 0, 0, D3DPOOL_MANAGED, &buffer);
-    ok(SUCCEEDED(hr), "Failed to create buffer, hr %#x.\n", hr);
-    hr = IDirect3DVertexBuffer8_GetDesc(buffer, &desc);
-    ok(SUCCEEDED(hr), "Failed to get desc, hr %#x.\n", hr);
-    ok(desc.Pool == D3DPOOL_MANAGED, "Got unexpected pool %#x.\n", desc.Pool);
-    ok(!desc.Usage, "Got unexpected usage %#x.\n", desc.Usage);
-
-    hr = IDirect3DVertexBuffer8_Lock(buffer, 0, vertex_count * sizeof(*ptr), (BYTE **)&ptr, D3DLOCK_DISCARD);
-    ok(SUCCEEDED(hr), "Failed to lock buffer, hr %#x.\n", hr);
-    for (i = 0; i < vertex_count; ++i)
-    {
-        ptr[i].x = i * 1.0f;
-        ptr[i].y = i * 2.0f;
-        ptr[i].z = i * 3.0f;
-    }
-    hr = IDirect3DVertexBuffer8_Unlock(buffer);
-    ok(SUCCEEDED(hr), "Failed to unlock buffer, hr %#x.\n", hr);
-
-    hr = IDirect3DDevice8_SetVertexShader(device, D3DFVF_XYZ);
-    ok(SUCCEEDED(hr), "Failed to set fvf, hr %#x.\n", hr);
-    hr = IDirect3DDevice8_SetStreamSource(device, 0, buffer, sizeof(*ptr));
-    ok(SUCCEEDED(hr), "Failed to set stream source, hr %#x.\n", hr);
-    hr = IDirect3DDevice8_BeginScene(device);
-    ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
-    hr = IDirect3DDevice8_DrawPrimitive(device, D3DPT_TRIANGLELIST, 0, 2);
-    ok(SUCCEEDED(hr), "Failed to draw, hr %#x.\n", hr);
-    hr = IDirect3DDevice8_EndScene(device);
-    ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
-
-    hr = IDirect3DVertexBuffer8_Lock(buffer, 0, vertex_count * sizeof(*ptr2), (BYTE **)&ptr2, D3DLOCK_DISCARD);
-    ok(SUCCEEDED(hr), "Failed to lock buffer, hr %#x.\n", hr);
-    ok(ptr2 == ptr, "Got unexpected ptr2 %p, expected %p.\n", ptr2, ptr);
-    for (i = 0; i < vertex_count; ++i)
-    {
-        if (ptr2[i].x != i * 1.0f || ptr2[i].y != i * 2.0f || ptr2[i].z != i * 3.0f)
+        device_desc.device_window = window;
+        device_desc.width = 640;
+        device_desc.height = 480;
+        device_desc.flags = tests[test].device_flags;
+        if (!(device = create_device(d3d, window, &device_desc)))
         {
-            ok(FALSE, "Got unexpected vertex %u {%.8e, %.8e, %.8e}, expected {%.8e, %.8e, %.8e}.\n",
-                    i, ptr2[i].x, ptr2[i].y, ptr2[i].z, i * 1.0f, i * 2.0f, i * 3.0f);
-            break;
+            skip("Test %u: failed to create a D3D device.\n", test);
+            continue;
         }
-    }
-    hr = IDirect3DVertexBuffer8_Unlock(buffer);
-    ok(SUCCEEDED(hr), "Failed to unlock buffer, hr %#x.\n", hr);
 
-    IDirect3DVertexBuffer8_Release(buffer);
-    refcount = IDirect3DDevice8_Release(device);
-    ok(!refcount, "Device has %u references left.\n", refcount);
-    IDirect3D8_Release(d3d8);
+        hr = IDirect3DDevice8_CreateVertexBuffer(device, vertex_count * sizeof(*ptr),
+                tests[test].usage, 0, tests[test].pool, &buffer);
+        ok(hr == D3D_OK, "Test %u: got unexpected hr %#x.\n", test, hr);
+        hr = IDirect3DVertexBuffer8_GetDesc(buffer, &desc);
+        ok(hr == D3D_OK, "Test %u: got unexpected hr %#x.\n", test, hr);
+        ok(desc.Pool == tests[test].pool, "Test %u: got unexpected pool %#x.\n", test, desc.Pool);
+        ok(desc.Usage == tests[test].usage, "Test %u: got unexpected usage %#x.\n", test, desc.Usage);
+
+        hr = IDirect3DVertexBuffer8_Lock(buffer, 0, vertex_count * sizeof(*ptr), (BYTE **)&ptr, D3DLOCK_DISCARD);
+        ok(hr == D3D_OK, "Test %u: got unexpected hr %#x.\n", test, hr);
+        for (i = 0; i < vertex_count; ++i)
+        {
+            ptr[i].x = i * 1.0f;
+            ptr[i].y = i * 2.0f;
+            ptr[i].z = i * 3.0f;
+        }
+        hr = IDirect3DVertexBuffer8_Unlock(buffer);
+        ok(hr == D3D_OK, "Test %u: got unexpected hr %#x.\n", test, hr);
+
+        hr = IDirect3DDevice8_SetVertexShader(device, D3DFVF_XYZ);
+        ok(hr == D3D_OK, "Test %u: got unexpected hr %#x.\n", test, hr);
+        hr = IDirect3DDevice8_SetStreamSource(device, 0, buffer, sizeof(*ptr));
+        ok(hr == D3D_OK, "Test %u: got unexpected hr %#x.\n", test, hr);
+        hr = IDirect3DDevice8_BeginScene(device);
+        ok(hr == D3D_OK, "Test %u: got unexpected hr %#x.\n", test, hr);
+        hr = IDirect3DDevice8_DrawPrimitive(device, D3DPT_TRIANGLELIST, 0, 2);
+        ok(hr == D3D_OK, "Test %u: got unexpected hr %#x.\n", test, hr);
+        hr = IDirect3DDevice8_EndScene(device);
+        ok(hr == D3D_OK, "Test %u: got unexpected hr %#x.\n", test, hr);
+
+        hr = IDirect3DVertexBuffer8_Lock(buffer, 0, vertex_count * sizeof(*ptr2), (BYTE **)&ptr2, D3DLOCK_DISCARD);
+        ok(hr == D3D_OK, "Test %u: got unexpected hr %#x.\n", test, hr);
+        ok(ptr2 == ptr, "Test %u: got unexpected ptr2 %p, expected %p.\n", test, ptr2, ptr);
+        for (i = 0; i < vertex_count; ++i)
+        {
+            if (ptr2[i].x != i * 1.0f || ptr2[i].y != i * 2.0f || ptr2[i].z != i * 3.0f)
+            {
+                ok(FALSE, "Test %u: got unexpected vertex %u {%.8e, %.8e, %.8e}, expected {%.8e, %.8e, %.8e}.\n",
+                        test, i, ptr2[i].x, ptr2[i].y, ptr2[i].z, i * 1.0f, i * 2.0f, i * 3.0f);
+                break;
+            }
+        }
+        hr = IDirect3DVertexBuffer8_Unlock(buffer);
+        ok(hr == D3D_OK, "Test %u: got unexpected hr %#x.\n", test, hr);
+
+        IDirect3DVertexBuffer8_Release(buffer);
+        refcount = IDirect3DDevice8_Release(device);
+        ok(!refcount, "Test %u: device has %u references left.\n", test, refcount);
+    }
+    IDirect3D8_Release(d3d);
     DestroyWindow(window);
 }
 
@@ -7014,6 +7144,11 @@ static void test_lockbox_invalid(void)
     ok(SUCCEEDED(hr), "Failed to unlock volume texture, hr %#x.\n", hr);
 
     IDirect3DVolumeTexture8_Release(texture);
+
+    hr = IDirect3DDevice8_CreateVolumeTexture(device, 4, 4, 2, 1, D3DUSAGE_WRITEONLY,
+            D3DFMT_A8R8G8B8, D3DPOOL_SCRATCH, &texture);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+
     refcount = IDirect3DDevice8_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);
     IDirect3D8_Release(d3d);
@@ -7145,10 +7280,11 @@ cleanup:
 
 static void test_begin_end_state_block(void)
 {
+    DWORD stateblock, stateblock2;
     IDirect3DDevice8 *device;
-    DWORD stateblock;
     IDirect3D8 *d3d;
     ULONG refcount;
+    DWORD value;
     HWND window;
     HRESULT hr;
 
@@ -7163,28 +7299,54 @@ static void test_begin_end_state_block(void)
         return;
     }
 
-    /* Should succeed. */
     hr = IDirect3DDevice8_BeginStateBlock(device);
-    ok(SUCCEEDED(hr), "Failed to begin stateblock, hr %#x.\n", hr);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
 
-    /* Calling BeginStateBlock() while recording should return
-     * D3DERR_INVALIDCALL. */
-    hr = IDirect3DDevice8_BeginStateBlock(device);
-    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice8_SetRenderState(device, D3DRS_LIGHTING, FALSE);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
 
-    /* Should succeed. */
     stateblock = 0xdeadbeef;
     hr = IDirect3DDevice8_EndStateBlock(device, &stateblock);
-    ok(SUCCEEDED(hr), "Failed to end stateblock, hr %#x.\n", hr);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
     ok(!!stateblock && stateblock != 0xdeadbeef, "Got unexpected stateblock %#x.\n", stateblock);
-    IDirect3DDevice8_DeleteStateBlock(device, stateblock);
 
-    /* Calling EndStateBlock() while not recording should return
-     * D3DERR_INVALIDCALL. stateblock should not be touched. */
-    stateblock = 0xdeadbeef;
-    hr = IDirect3DDevice8_EndStateBlock(device, &stateblock);
+    stateblock2 = 0xdeadbeef;
+    hr = IDirect3DDevice8_EndStateBlock(device, &stateblock2);
     ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
-    ok(stateblock == 0xdeadbeef, "Got unexpected stateblock %#x.\n", stateblock);
+    ok(stateblock2 == 0xdeadbeef, "Got unexpected stateblock %#x.\n", stateblock2);
+
+    hr = IDirect3DDevice8_GetRenderState(device, D3DRS_LIGHTING, &value);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(value == TRUE, "Got unexpected value %#x.\n", value);
+
+    hr = IDirect3DDevice8_BeginStateBlock(device);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_BeginStateBlock(device);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_ApplyStateBlock(device, stateblock);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_CaptureStateBlock(device, stateblock);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_CreateStateBlock(device, D3DSBT_ALL, &stateblock2);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_GetRenderState(device, D3DRS_LIGHTING, &value);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(value == TRUE, "Got unexpected value %#x.\n", value);
+
+    hr = IDirect3DDevice8_EndStateBlock(device, &stateblock2);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_ApplyStateBlock(device, stateblock2);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_GetRenderState(device, D3DRS_LIGHTING, &value);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(value == TRUE, "Got unexpected value %#x.\n", value);
 
     refcount = IDirect3DDevice8_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);
@@ -7653,6 +7815,7 @@ static void test_writeonly_resource(void)
 
 static void test_lost_device(void)
 {
+    D3DADAPTER_IDENTIFIER8 identifier;
     struct device_desc device_desc;
     IDirect3DDevice8 *device;
     IDirect3D8 *d3d;
@@ -7664,6 +7827,8 @@ static void test_lost_device(void)
     window = create_window();
     d3d = Direct3DCreate8(D3D_SDK_VERSION);
     ok(!!d3d, "Failed to create a D3D object.\n");
+    hr = IDirect3D8_GetAdapterIdentifier(d3d, D3DADAPTER_DEFAULT, 0, &identifier);
+    ok(SUCCEEDED(hr), "Failed to get adapter identifier, hr %#x.\n", hr);
     device_desc.device_window = window;
     device_desc.width = registry_mode.dmPelsWidth;
     device_desc.height = registry_mode.dmPelsHeight;
@@ -7681,6 +7846,13 @@ static void test_lost_device(void)
         IDirect3DDevice8_Release(device);
         goto done;
     }
+    if (adapter_is_warp(&identifier))
+    {
+        win_skip("Windows 10 WARP crashes during this test.\n");
+        IDirect3DDevice8_Release(device);
+        goto done;
+    }
+
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
     hr = IDirect3DDevice8_Present(device, NULL, NULL, NULL, NULL);
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
@@ -8062,6 +8234,13 @@ static void test_check_device_format(void)
         ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x, device type %#x.\n", hr, device_type);
     }
 
+    hr = IDirect3D8_CheckDeviceFormat(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_A8R8G8B8,
+            0, D3DRTYPE_TEXTURE, D3DFMT_X8R8G8B8);
+    ok(hr == D3DERR_NOTAVAILABLE, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3D8_CheckDeviceFormat(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8,
+            0, D3DRTYPE_TEXTURE, D3DFMT_X8R8G8B8);
+    ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE, "Got unexpected hr %#x.\n", hr);
+
     hr = IDirect3D8_CheckDeviceFormat(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8,
             0, D3DRTYPE_VERTEXBUFFER, D3DFMT_VERTEXDATA);
     todo_wine ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
@@ -8081,6 +8260,16 @@ static void test_check_device_format(void)
     hr = IDirect3D8_CheckDeviceFormat(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8,
             D3DUSAGE_SOFTWAREPROCESSING, D3DRTYPE_INDEXBUFFER, D3DFMT_INDEX16);
     todo_wine ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3D8_CheckDepthStencilMatch(d3d, D3DADAPTER_DEFAULT,
+            D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, D3DFMT_A8R8G8B8, D3DFMT_D32);
+    ok(hr == D3DERR_NOTAVAILABLE || broken(hr == D3DERR_INVALIDCALL /* Windows 10 */),
+            "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3D8_CheckDepthStencilMatch(d3d, D3DADAPTER_DEFAULT,
+            D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, D3DFMT_R5G6B5, D3DFMT_D32);
+    ok(hr == D3DERR_NOTAVAILABLE || broken(hr == D3DERR_INVALIDCALL /* Windows 10 */),
+            "Got unexpected hr %#x.\n", hr);
 
     IDirect3D8_Release(d3d);
 }
@@ -8751,6 +8940,8 @@ static void test_device_caps(void)
     /* AMD gives 6, Nvidia returns 8. */
     ok(caps.MaxUserClipPlanes <= 8,
             "MaxUserClipPlanes field has unexpected value %u.\n", caps.MaxUserClipPlanes);
+    ok(caps.MaxVertexW == 0.0f || caps.MaxVertexW >= 1e10f,
+            "MaxVertexW field has unexpected value %.8e.\n", caps.MaxVertexW);
 
     refcount = IDirect3DDevice8_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);
@@ -8803,6 +8994,7 @@ static void test_resource_access(void)
     IDirect3DSurface8 *backbuffer, *depth_stencil;
     D3DFORMAT colour_format, depth_format, format;
     BOOL depth_2d, depth_cube, depth_plain;
+    D3DADAPTER_IDENTIFIER8 identifier;
     struct device_desc device_desc;
     D3DSURFACE_DESC surface_desc;
     IDirect3DDevice8 *device;
@@ -8811,6 +9003,7 @@ static void test_resource_access(void)
     ULONG refcount;
     HWND window;
     HRESULT hr;
+    BOOL warp;
 
     enum surface_type
     {
@@ -8895,6 +9088,9 @@ static void test_resource_access(void)
     window = create_window();
     d3d = Direct3DCreate8(D3D_SDK_VERSION);
     ok(!!d3d, "Failed to create a D3D object.\n");
+    hr = IDirect3D8_GetAdapterIdentifier(d3d, D3DADAPTER_DEFAULT, 0, &identifier);
+    ok(SUCCEEDED(hr), "Failed to get adapter identifier, hr %#x.\n", hr);
+    warp = adapter_is_warp(&identifier);
 
     device_desc.device_window = window;
     device_desc.width = 16;
@@ -9001,7 +9197,9 @@ static void test_resource_access(void)
                     hr = IDirect3DDevice8_CreateDepthStencilSurface(device,
                             16, 16, format, D3DMULTISAMPLE_NONE, &surface);
                     todo_wine_if(tests[j].format == FORMAT_ATI2)
-                        ok(hr == (tests[j].format != FORMAT_COLOUR ? D3D_OK : D3DERR_INVALIDCALL),
+                        ok(hr == (tests[j].format == FORMAT_DEPTH ? D3D_OK
+                                : tests[j].format == FORMAT_COLOUR ? D3DERR_INVALIDCALL : E_INVALIDARG)
+                                || (tests[j].format == FORMAT_ATI2 && hr == D3D_OK),
                                 "Test %s %u: Got unexpected hr %#x.\n", surface_types[i].name, j, hr);
                     if (FAILED(hr))
                         continue;
@@ -9097,17 +9295,20 @@ static void test_resource_access(void)
         HRESULT expected_hr;
         D3DLOCKED_BOX lb;
 
-        if (tests[j].format == FORMAT_DEPTH)
+        if (tests[i].format == FORMAT_DEPTH)
             continue;
 
-        if (tests[j].format == FORMAT_ATI2)
+        if (tests[i].format == FORMAT_ATI2)
             format = MAKEFOURCC('A','T','I','2');
         else
             format = colour_format;
 
         hr = IDirect3DDevice8_CreateVolumeTexture(device, 16, 16, 1, 1,
                 tests[i].usage, format, tests[i].pool, &texture);
-        ok(hr == (!(tests[i].usage & ~D3DUSAGE_DYNAMIC) ? D3D_OK : D3DERR_INVALIDCALL),
+        ok((hr == ((!(tests[i].usage & ~D3DUSAGE_DYNAMIC) && tests[i].format != FORMAT_ATI2)
+                || (tests[i].pool == D3DPOOL_SCRATCH && !tests[i].usage)
+                ? D3D_OK : D3DERR_INVALIDCALL))
+                || (tests[i].format == FORMAT_ATI2 && (hr == D3D_OK || warp)),
                 "Test %u: Got unexpected hr %#x.\n", i, hr);
         if (FAILED(hr))
             continue;
@@ -9125,9 +9326,11 @@ static void test_resource_access(void)
             expected_hr = D3D_OK;
         else
             expected_hr = D3DERR_INVALIDCALL;
-        ok(hr == expected_hr, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == expected_hr || (volume_desc.Pool == D3DPOOL_DEFAULT && hr == D3D_OK),
+                "Test %u: Got unexpected hr %#x.\n", i, hr);
         hr = IDirect3DVolume8_UnlockBox(volume);
-        ok(hr == expected_hr, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == expected_hr || (volume_desc.Pool == D3DPOOL_DEFAULT && hr == D3D_OK),
+                "Test %u: Got unexpected hr %#x.\n", i, hr);
 
         hr = IDirect3DDevice8_SetTexture(device, 0, (IDirect3DBaseTexture8 *)texture);
         ok(hr == D3D_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
@@ -9208,6 +9411,372 @@ static void test_resource_access(void)
     DestroyWindow(window);
 }
 
+static void test_multiply_transform(void)
+{
+    IDirect3DDevice8 *device;
+    D3DMATRIX ret_mat;
+    DWORD stateblock;
+    IDirect3D8 *d3d;
+    unsigned int i;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+
+    static const D3DTRANSFORMSTATETYPE tests[] =
+    {
+        D3DTS_VIEW,
+        D3DTS_PROJECTION,
+        D3DTS_TEXTURE0,
+        D3DTS_TEXTURE1,
+        D3DTS_TEXTURE2,
+        D3DTS_TEXTURE3,
+        D3DTS_TEXTURE4,
+        D3DTS_TEXTURE5,
+        D3DTS_TEXTURE6,
+        D3DTS_TEXTURE7,
+        D3DTS_WORLDMATRIX(0),
+        D3DTS_WORLDMATRIX(1),
+        D3DTS_WORLDMATRIX(2),
+        D3DTS_WORLDMATRIX(3),
+        D3DTS_WORLDMATRIX(255),
+    };
+
+    static const D3DMATRIX mat1 =
+    {{{
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    }}},
+    mat2 =
+    {{{
+        2.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 2.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 2.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 2.0f,
+    }}};
+
+    window = create_window();
+    ok(!!window, "Failed to create a window.\n");
+    d3d = Direct3DCreate8(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create D3D object.\n");
+
+    if (!(device = create_device(d3d, window, NULL)))
+    {
+        skip("Failed to create 3D device.\n");
+        IDirect3D8_Release(d3d);
+        DestroyWindow(window);
+        return;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
+    {
+        hr = IDirect3DDevice8_GetTransform(device, tests[i], &ret_mat);
+        ok(hr == D3D_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(!memcmp(&ret_mat, &mat1, sizeof(mat1)), "Test %u: Got unexpected transform matrix.\n", i);
+
+        hr = IDirect3DDevice8_MultiplyTransform(device, tests[i], &mat2);
+        ok(hr == D3D_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+
+        hr = IDirect3DDevice8_GetTransform(device, tests[i], &ret_mat);
+        ok(hr == D3D_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(!memcmp(&ret_mat, &mat2, sizeof(mat2)), "Test %u: Got unexpected transform matrix.\n", i);
+
+        /* MultiplyTransform() goes directly into the primary stateblock. */
+
+        hr = IDirect3DDevice8_SetTransform(device, tests[i], &mat1);
+        ok(hr == D3D_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+
+        hr = IDirect3DDevice8_BeginStateBlock(device);
+        ok(hr == D3D_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+
+        hr = IDirect3DDevice8_MultiplyTransform(device, tests[i], &mat2);
+        ok(hr == D3D_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+
+        hr = IDirect3DDevice8_EndStateBlock(device, &stateblock);
+        ok(hr == D3D_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+
+        hr = IDirect3DDevice8_GetTransform(device, tests[i], &ret_mat);
+        ok(hr == D3D_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(!memcmp(&ret_mat, &mat2, sizeof(mat2)), "Test %u: Got unexpected transform matrix.\n", i);
+
+        hr = IDirect3DDevice8_CaptureStateBlock(device, stateblock);
+        ok(hr == D3D_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+
+        hr = IDirect3DDevice8_SetTransform(device, tests[i], &mat1);
+        ok(hr == D3D_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+
+        hr = IDirect3DDevice8_ApplyStateBlock(device, stateblock);
+        ok(hr == D3D_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+
+        hr = IDirect3DDevice8_GetTransform(device, tests[i], &ret_mat);
+        ok(hr == D3D_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(!memcmp(&ret_mat, &mat1, sizeof(mat1)), "Test %u: Got unexpected transform matrix.\n", i);
+
+        IDirect3DDevice8_DeleteStateBlock(device, stateblock);
+    }
+
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    IDirect3D8_Release(d3d);
+    DestroyWindow(window);
+}
+
+static void test_draw_primitive(void)
+{
+    static const struct
+    {
+        float position[3];
+        DWORD color;
+    }
+    quad[] =
+    {
+        {{-1.0f, -1.0f, 0.0f}, 0xffff0000},
+        {{-1.0f,  1.0f, 0.0f}, 0xffff0000},
+        {{ 1.0f,  1.0f, 0.0f}, 0xffff0000},
+        {{ 1.0f, -1.0f, 0.0f}, 0xffff0000},
+        {{-1.0f, -1.0f, 0.0f}, 0xffff0000},
+    };
+    static const WORD indices[] = {0, 1, 2, 3, 0, 2};
+
+    IDirect3DVertexBuffer8 *vertex_buffer, *current_vb;
+    IDirect3DIndexBuffer8 *index_buffer, *current_ib;
+    UINT stride, base_vertex_index;
+    IDirect3DDevice8 *device;
+    DWORD stateblock;
+    IDirect3D8 *d3d;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+    BYTE *ptr;
+
+    window = create_window();
+    d3d = Direct3DCreate8(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create a D3D object.\n");
+    if (!(device = create_device(d3d, window, NULL)))
+    {
+        skip("Failed to create a D3D device.\n");
+        IDirect3D8_Release(d3d);
+        DestroyWindow(window);
+        return;
+    }
+
+    hr = IDirect3DDevice8_CreateVertexBuffer(device, sizeof(quad), 0, 0,
+            D3DPOOL_DEFAULT, &vertex_buffer);
+    ok(SUCCEEDED(hr), "CreateVertexBuffer failed, hr %#x.\n", hr);
+    hr = IDirect3DVertexBuffer8_Lock(vertex_buffer, 0, 0, &ptr, D3DLOCK_DISCARD);
+    ok(SUCCEEDED(hr), "Lock failed, hr %#x.\n", hr);
+    memcpy(ptr, quad, sizeof(quad));
+    hr = IDirect3DVertexBuffer8_Unlock(vertex_buffer);
+    ok(SUCCEEDED(hr), "Unlock failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_SetStreamSource(device, 0, vertex_buffer, sizeof(*quad));
+    ok(SUCCEEDED(hr), "SetStreamSource failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_SetVertexShader(device, D3DFVF_XYZ | D3DFVF_DIFFUSE);
+    ok(SUCCEEDED(hr), "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_CreateIndexBuffer(device, sizeof(indices), 0, D3DFMT_INDEX16,
+            D3DPOOL_DEFAULT, &index_buffer);
+    ok(SUCCEEDED(hr), "CreateIndexBuffer failed, hr %#x.\n", hr);
+    hr = IDirect3DIndexBuffer8_Lock(index_buffer, 0, 0, &ptr, D3DLOCK_DISCARD);
+    ok(SUCCEEDED(hr), "Lock failed, hr %#x.\n", hr);
+    memcpy(ptr, indices, sizeof(indices));
+    hr = IDirect3DIndexBuffer8_Unlock(index_buffer);
+    ok(SUCCEEDED(hr), "Unlock failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_SetRenderState(device, D3DRS_LIGHTING, FALSE);
+    ok(SUCCEEDED(hr), "SetRenderState D3DRS_LIGHTING failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_BeginScene(device);
+    ok(SUCCEEDED(hr), "BeginScene failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_DrawPrimitive(device, D3DPT_TRIANGLELIST, 0, 2);
+    ok(SUCCEEDED(hr), "DrawPrimitive failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_GetStreamSource(device, 0, &current_vb, &stride);
+    ok(SUCCEEDED(hr), "GetStreamSource failed, hr %#x.\n", hr);
+    ok(current_vb == vertex_buffer, "Unexpected vb %p.\n", current_vb);
+    ok(stride == sizeof(*quad), "Unexpected stride %u.\n", stride);
+    IDirect3DVertexBuffer8_Release(current_vb);
+
+    hr = IDirect3DDevice8_DrawPrimitiveUP(device, D3DPT_TRIANGLELIST, 0, quad, 0);
+    ok(hr == D3D_OK, "DrawPrimitiveUP failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_DrawPrimitiveUP(device, D3DPT_TRIANGLELIST, 0, quad, sizeof(*quad));
+    ok(hr == D3D_OK, "DrawPrimitiveUP failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_DrawPrimitiveUP(device, D3DPT_TRIANGLELIST, 2, quad, sizeof(*quad));
+    ok(SUCCEEDED(hr), "DrawPrimitiveUP failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_GetStreamSource(device, 0, &current_vb, &stride);
+    ok(SUCCEEDED(hr), "GetStreamSource failed, hr %#x.\n", hr);
+    ok(!current_vb, "Unexpected vb %p.\n", current_vb);
+    ok(!stride, "Unexpected stride %u.\n", stride);
+
+    /* NULL index buffer, NULL stream source. */
+    hr = IDirect3DDevice8_SetIndices(device, NULL, 0);
+    ok(SUCCEEDED(hr), "SetIndices failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST, 0, 4, 0, 2);
+    todo_wine ok(SUCCEEDED(hr), "DrawIndexedPrimitive failed, hr %#x.\n", hr);
+
+    /* Valid index buffer, NULL stream source. */
+    hr = IDirect3DDevice8_SetIndices(device, index_buffer, 1);
+    ok(SUCCEEDED(hr), "SetIndices failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST, 0, 4, 0, 2);
+    ok(SUCCEEDED(hr), "DrawIndexedPrimitive failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_GetIndices(device, &current_ib, &base_vertex_index);
+    ok(SUCCEEDED(hr), "GetIndices failed, hr %#x.\n", hr);
+    ok(current_ib == index_buffer, "Unexpected index buffer %p.\n", current_ib);
+    ok(base_vertex_index == 1, "Unexpected base vertex index %u.\n", base_vertex_index);
+    IDirect3DIndexBuffer8_Release(current_ib);
+
+    hr = IDirect3DDevice8_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST, 0, 4, 0,
+            indices, D3DFMT_INDEX16, quad, 0);
+    ok(SUCCEEDED(hr), "DrawIndexedPrimitiveUP failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST, 0, 4, 2,
+            indices, D3DFMT_INDEX16, quad, 0);
+    ok(SUCCEEDED(hr), "DrawIndexedPrimitiveUP failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST, 0, 4, 2,
+            indices, D3DFMT_INDEX16, quad, sizeof(*quad));
+    ok(SUCCEEDED(hr), "DrawIndexedPrimitiveUP failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_GetIndices(device, &current_ib, &base_vertex_index);
+    ok(SUCCEEDED(hr), "GetIndices failed, hr %#x.\n", hr);
+    ok(!current_ib, "Unexpected index buffer %p.\n", current_ib);
+    ok(!base_vertex_index, "Unexpected base vertex index %u.\n", base_vertex_index);
+
+    /* Resetting of stream source and index buffer is not recorded in stateblocks. */
+
+    hr = IDirect3DDevice8_SetStreamSource(device, 0, vertex_buffer, sizeof(*quad));
+    ok(SUCCEEDED(hr), "SetStreamSource failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_SetIndices(device, index_buffer, 1);
+    ok(SUCCEEDED(hr), "SetIndices failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_BeginStateBlock(device);
+    ok(SUCCEEDED(hr), "BeginStateBlock failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST, 0, 4, 2,
+            indices, D3DFMT_INDEX16, quad, sizeof(*quad));
+    ok(SUCCEEDED(hr), "DrawIndexedPrimitiveUP failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_EndStateBlock(device, &stateblock);
+    ok(SUCCEEDED(hr), "BeginStateBlock failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_GetStreamSource(device, 0, &current_vb, &stride);
+    ok(SUCCEEDED(hr), "GetStreamSource failed, hr %#x.\n", hr);
+todo_wine {
+    ok(!current_vb, "Unexpected vb %p.\n", current_vb);
+    ok(!stride, "Unexpected stride %u.\n", stride);
+}
+    if (current_vb)
+        IDirect3DVertexBuffer8_Release(current_vb);
+    hr = IDirect3DDevice8_GetIndices(device, &current_ib, &base_vertex_index);
+    ok(SUCCEEDED(hr), "GetIndices failed, hr %#x.\n", hr);
+todo_wine {
+    ok(!current_ib, "Unexpected index buffer %p.\n", current_ib);
+    ok(!base_vertex_index, "Unexpected base vertex index %u.\n", base_vertex_index);
+}
+    if (current_ib)
+        IDirect3DIndexBuffer8_Release(current_ib);
+
+    hr = IDirect3DDevice8_CaptureStateBlock(device, stateblock);
+    ok(SUCCEEDED(hr), "Capture failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_SetStreamSource(device, 0, vertex_buffer, sizeof(*quad));
+    ok(SUCCEEDED(hr), "SetStreamSource failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_SetIndices(device, index_buffer, 1);
+    ok(SUCCEEDED(hr), "SetIndices failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_ApplyStateBlock(device, stateblock);
+    ok(SUCCEEDED(hr), "Apply failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_GetStreamSource(device, 0, &current_vb, &stride);
+    ok(SUCCEEDED(hr), "GetStreamSource failed, hr %#x.\n", hr);
+    ok(current_vb == vertex_buffer, "Unexpected vb %p.\n", current_vb);
+    ok(stride == sizeof(*quad), "Unexpected stride %u.\n", stride);
+    IDirect3DVertexBuffer8_Release(current_vb);
+    hr = IDirect3DDevice8_GetIndices(device, &current_ib, &base_vertex_index);
+    ok(SUCCEEDED(hr), "GetIndices failed, hr %#x.\n", hr);
+    ok(current_ib == index_buffer, "Unexpected index buffer %p.\n", current_ib);
+    ok(base_vertex_index == 1, "Unexpected base vertex index %u.\n", base_vertex_index);
+    IDirect3DIndexBuffer8_Release(current_ib);
+
+    hr = IDirect3DDevice8_EndScene(device);
+    ok(SUCCEEDED(hr), "EndScene failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_Present(device, NULL, NULL, NULL, NULL);
+    ok(SUCCEEDED(hr), "Present failed, hr %#x.\n", hr);
+
+    IDirect3DDevice8_DeleteStateBlock(device, stateblock);
+    IDirect3DVertexBuffer8_Release(vertex_buffer);
+    IDirect3DIndexBuffer8_Release(index_buffer);
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    IDirect3D8_Release(d3d);
+    DestroyWindow(window);
+}
+
+static void test_get_display_mode(void)
+{
+    IDirect3DDevice8 *device;
+    struct device_desc desc;
+    D3DDISPLAYMODE mode;
+    IDirect3D8 *d3d;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+
+    window = create_window();
+    d3d = Direct3DCreate8(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create a D3D object.\n");
+
+    if (!(device = create_device(d3d, window, NULL)))
+    {
+        skip("Failed to create a D3D device.\n");
+        IDirect3D8_Release(d3d);
+        DestroyWindow(window);
+        return;
+    }
+
+    hr = IDirect3DDevice8_GetDisplayMode(device, &mode);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(mode.Format == D3DFMT_X8R8G8B8, "Unexpected format %#x.\n", mode.Format);
+    hr = IDirect3D8_GetAdapterDisplayMode(d3d, D3DADAPTER_DEFAULT, &mode);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(mode.Format == D3DFMT_X8R8G8B8, "Unexpected format %#x.\n", mode.Format);
+
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+
+    desc.device_window = window;
+    desc.width = 640;
+    desc.height = 480;
+    desc.flags = CREATE_DEVICE_FULLSCREEN;
+    if (!(device = create_device(d3d, window, &desc)))
+    {
+        skip("Failed to create a D3D device.\n");
+        IDirect3D8_Release(d3d);
+        DestroyWindow(window);
+        return;
+    }
+
+    hr = IDirect3DDevice8_GetDisplayMode(device, &mode);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(mode.Width == 640, "Unexpected width %u.\n", mode.Width);
+    ok(mode.Height == 480, "Unexpected width %u.\n", mode.Height);
+    ok(mode.Format == D3DFMT_X8R8G8B8, "Unexpected format %#x.\n", mode.Format);
+    hr = IDirect3D8_GetAdapterDisplayMode(d3d, D3DADAPTER_DEFAULT, &mode);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(mode.Width == 640, "Unexpected width %u.\n", mode.Width);
+    ok(mode.Height == 480, "Unexpected width %u.\n", mode.Height);
+    ok(mode.Format == D3DFMT_X8R8G8B8, "Unexpected format %#x.\n", mode.Format);
+
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    IDirect3D8_Release(d3d);
+    DestroyWindow(window);
+}
+
 START_TEST(device)
 {
     HMODULE d3d8_handle = GetModuleHandleA("d3d8.dll");
@@ -9264,6 +9833,7 @@ START_TEST(device)
     test_shader();
     test_limits();
     test_lights();
+    test_set_stream_source();
     test_ApplyStateBlock();
     test_render_zero_triangles();
     test_depth_stencil_reset();
@@ -9293,8 +9863,7 @@ START_TEST(device)
     test_surface_double_unlock();
     test_surface_blocks();
     test_set_palette();
-    test_swvp_buffer();
-    test_managed_buffer();
+    test_pinned_buffers();
     test_npot_textures();
     test_volume_locking();
     test_update_volumetexture();
@@ -9321,6 +9890,9 @@ START_TEST(device)
     test_device_caps();
     test_get_info();
     test_resource_access();
+    test_multiply_transform();
+    test_draw_primitive();
+    test_get_display_mode();
 
     UnregisterClassA("d3d8_test_wc", GetModuleHandleA(NULL));
 }

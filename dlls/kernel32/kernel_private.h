@@ -23,11 +23,7 @@
 
 #include "wine/server.h"
 
-HANDLE  WINAPI OpenConsoleW(LPCWSTR, DWORD, BOOL, DWORD);
-BOOL    WINAPI VerifyConsoleIoHandle(HANDLE);
-HANDLE  WINAPI DuplicateConsoleHandle(HANDLE, DWORD, BOOL, DWORD);
-BOOL    WINAPI CloseConsoleHandle(HANDLE handle);
-HANDLE  WINAPI GetConsoleInputWaitHandle(void);
+NTSTATUS WINAPI BaseGetNamedObjectDirectory( HANDLE *dir );
 BOOL           CONSOLE_Init(RTL_USER_PROCESS_PARAMETERS *params) DECLSPEC_HIDDEN;
 BOOL           CONSOLE_Exit(void) DECLSPEC_HIDDEN;
 

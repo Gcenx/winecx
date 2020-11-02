@@ -38,11 +38,11 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(relay);
 
-#if defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
+#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__) || defined(__arm__) || defined(__aarch64__)
 
 struct relay_descr  /* descriptor for a module */
 {
-    void               *magic;               /* signature */
+    ULONG_PTR           magic;               /* signature */
     void               *relay_call;          /* functions to call from relay thunks */
     void               *private;             /* reserved for the relay code private data */
     const char         *entry_point_base;    /* base address of entry point thunks */
@@ -50,7 +50,13 @@ struct relay_descr  /* descriptor for a module */
     const char         *args_string;         /* string describing the arguments */
 };
 
-#define RELAY_DESCR_MAGIC  ((void *)0xdeb90002)
+struct relay_descr_rva  /* RVA to the descriptor for PE dlls */
+{
+    DWORD magic;
+    DWORD descr;
+};
+
+#define RELAY_DESCR_MAGIC  0xdeb90002
 #define IS_INTARG(x)       (((ULONG_PTR)(x) >> 16) == 0)
 
 /* private data built at dll load time */
@@ -322,7 +328,7 @@ static void trace_string_w( INT_PTR ptr )
     else TRACE( "%08lx", ptr );
 }
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 
 /***********************************************************************
  *           relay_trace_entry
@@ -371,7 +377,11 @@ DECLSPEC_HIDDEN void * WINAPI relay_trace_entry( struct relay_descr *descr, unsi
         if (!is_ret_val( arg_types[i+1] )) TRACE( "," );
     }
     *nb_args = pos;
-    if (arg_types[0] == 't') *nb_args |= 0x80000000;  /* thiscall */
+    if (arg_types[0] == 't')
+    {
+        *nb_args |= 0x80000000;  /* thiscall/fastcall */
+        if (arg_types[1] == 't') *nb_args |= 0x40000000;  /* fastcall */
+    }
     TRACE( ") ret=%08x\n", stack[-1] );
     return entry_point->orig_func;
 }
@@ -395,6 +405,7 @@ DECLSPEC_HIDDEN void WINAPI relay_trace_exit( struct relay_descr *descr, unsigne
 }
 
 extern LONGLONG WINAPI relay_call( struct relay_descr *descr, unsigned int idx );
+#ifdef __i386__
 __ASM_GLOBAL_FUNC( relay_call,
                    "pushl %ebp\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
@@ -416,9 +427,8 @@ __ASM_GLOBAL_FUNC( relay_call,
                    "pushl 8(%ebp)\n\t"
                    "call " __ASM_NAME("relay_trace_entry") "\n\t"
                    /* copy the arguments*/
-                   "movl -16(%ebp),%ecx\n\t"  /* number of args */
+                   "movzwl -16(%ebp),%ecx\n\t"  /* number of args */
                    "jecxz 1f\n\t"
-                   "andl $0x7fffffff,%ecx\n\t"
                    "leal 0(,%ecx,4),%edx\n\t"
                    "subl %edx,%esp\n\t"
                    "andl $~15,%esp\n\t"
@@ -427,7 +437,10 @@ __ASM_GLOBAL_FUNC( relay_call,
                    "rep; movsl\n\t"
                    "testl $0x80000000,-16(%ebp)\n\t"  /* thiscall */
                    "jz 1f\n\t"
-                   "popl %ecx\n"
+                   "popl %ecx\n\t"
+                   "testl $0x40000000,-16(%ebp)\n\t"  /* fastcall */
+                   "jz 1f\n\t"
+                   "popl %edx\n"
                    /* call the entry point */
                    "1:\tcall *%eax\n\t"
                    "movl %eax,%esi\n\t"
@@ -454,6 +467,69 @@ __ASM_GLOBAL_FUNC( relay_call,
                    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
                    __ASM_CFI(".cfi_same_value %ebp\n\t")
                    "ret $8" )
+#else
+__ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(relay_call),
+                     "pushl %ebp\n\t"
+                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                     __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                     "movl %esp,%ebp\n\t"
+                     __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                     "pushl %esi\n\t"
+                     __ASM_CFI(".cfi_rel_offset %esi,-4\n\t")
+                     "pushl %edi\n\t"
+                     __ASM_CFI(".cfi_rel_offset %edi,-8\n\t")
+                     "pushl %ecx\n\t"
+                     __ASM_CFI(".cfi_rel_offset %ecx,-12\n\t")
+                     /* trace the parameters */
+                     "pushl %eax\n\t"
+                     "pushl %esp\n\t"  /* number of args return ptr */
+                     "leal 20(%ebp),%esi\n\t"  /* stack */
+                     "pushl %esi\n\t"
+                     "pushl 12(%ebp)\n\t"
+                     "pushl 8(%ebp)\n\t"
+                     "call " __ASM_THUNK_SYMBOL("relay_trace_entry") "\n\t"
+                     /* copy the arguments*/
+                     "movzwl -16(%ebp),%ecx\n\t"  /* number of args */
+                     "jecxz 1f\n\t"
+                     "leal 0(,%ecx,4),%edx\n\t"
+                     "subl %edx,%esp\n\t"
+                     "andl $~15,%esp\n\t"
+                     "movl %esp,%edi\n\t"
+                     "cld\n\t"
+                     "rep; movsl\n\t"
+                     "testl $0x80000000,-16(%ebp)\n\t"  /* thiscall */
+                     "jz 1f\n\t"
+                     "popl %ecx\n\t"
+                     "testl $0x40000000,-16(%ebp)\n\t"  /* fastcall */
+                     "jz 1f\n\t"
+                     "popl %edx\n"
+                     /* call the entry point */
+                     "1:\tcall *%eax\n\t"
+                     "movl %eax,%esi\n\t"
+                     "movl %edx,%edi\n\t"
+                     /* trace the return value */
+                     "leal -20(%ebp),%esp\n\t"
+                     "pushl %edx\n\t"
+                     "pushl %eax\n\t"
+                     "pushl 16(%ebp)\n\t"
+                     "pushl 12(%ebp)\n\t"
+                     "pushl 8(%ebp)\n\t"
+                     "call " __ASM_THUNK_SYMBOL("relay_trace_exit") "\n\t"
+                     /* restore return value and return */
+                     "leal -12(%ebp),%esp\n\t"
+                     "movl %esi,%eax\n\t"
+                     "movl %edi,%edx\n\t"
+                     "popl %ecx\n\t"
+                     __ASM_CFI(".cfi_same_value %ecx\n\t")
+                     "popl %edi\n\t"
+                     __ASM_CFI(".cfi_same_value %edi\n\t")
+                     "popl %esi\n\t"
+                     __ASM_CFI(".cfi_same_value %esi\n\t")
+                     "popl %ebp\n\t"
+                     __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                     __ASM_CFI(".cfi_same_value %ebp\n\t")
+                     "ret $8" )
+#endif /* __i386__ */
 
 #elif defined(__arm__)
 
@@ -831,6 +907,26 @@ __ASM_GLOBAL_FUNC( relay_call,
 #endif
 
 
+static struct relay_descr *get_relay_descr( HMODULE module, const IMAGE_EXPORT_DIRECTORY *exports,
+                                            DWORD exp_size )
+{
+    struct relay_descr *descr;
+    struct relay_descr_rva *rva;
+    ULONG_PTR ptr = (ULONG_PTR)module + exports->Name;
+
+    /* sanity checks */
+    if (ptr <= (ULONG_PTR)(exports + 1)) return NULL;
+    if (ptr > (ULONG_PTR)exports + exp_size) return NULL;
+    if (ptr % sizeof(DWORD)) return NULL;
+
+    rva = (struct relay_descr_rva *)ptr - 1;
+    if (rva->magic != RELAY_DESCR_MAGIC) return NULL;
+    if (rva->descr) descr = (struct relay_descr *)((char *)module + rva->descr);
+    else descr = (struct relay_descr *)((const char *)exports + exp_size);
+    if (descr->magic != RELAY_DESCR_MAGIC) return NULL;
+    return descr;
+}
+
 /***********************************************************************
  *           RELAY_GetProcAddress
  *
@@ -840,9 +936,9 @@ FARPROC RELAY_GetProcAddress( HMODULE module, const IMAGE_EXPORT_DIRECTORY *expo
                               DWORD exp_size, FARPROC proc, DWORD ordinal, const WCHAR *user )
 {
     struct relay_private_data *data;
-    const struct relay_descr *descr = (const struct relay_descr *)((const char *)exports + exp_size);
+    const struct relay_descr *descr = get_relay_descr( module, exports, exp_size );
 
-    if (descr->magic != RELAY_DESCR_MAGIC || !(data = descr->private)) return proc;  /* no relay data */
+    if (!descr || !(data = descr->private)) return proc;  /* no relay data */
     if (!data->entry_points[ordinal].orig_func) return proc;  /* not a relayed function */
     if (check_from_module( debug_from_relay_includelist, debug_from_relay_excludelist, user ))
         return proc;  /* we want to relay it */
@@ -860,18 +956,19 @@ void RELAY_SetupDLL( HMODULE module )
     IMAGE_EXPORT_DIRECTORY *exports;
     DWORD *funcs;
     unsigned int i, len;
-    DWORD size, entry_point_rva;
+    DWORD size, entry_point_rva, old_prot;
     struct relay_descr *descr;
     struct relay_private_data *data;
     const WORD *ordptr;
+    void *func_base;
+    SIZE_T func_size;
 
     RtlRunOnceExecuteOnce( &init_once, init_debug_lists, NULL, NULL );
 
     exports = RtlImageDirectoryEntryToData( module, TRUE, IMAGE_DIRECTORY_ENTRY_EXPORT, &size );
     if (!exports) return;
 
-    descr = (struct relay_descr *)((char *)exports + size);
-    if (descr->magic != RELAY_DESCR_MAGIC) return;
+    if (!(descr = get_relay_descr( module, exports, size ))) return;
 
     if (!(data = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) +
                                   (exports->NumberOfFunctions-1) * sizeof(data->entry_points) )))
@@ -883,7 +980,7 @@ void RELAY_SetupDLL( HMODULE module )
     data->module = module;
     data->base   = exports->Base;
     len = strlen( (char *)module + exports->Name );
-    if (len > 4 && !strcasecmp( (char *)module + exports->Name + len - 4, ".dll" )) len -= 4;
+    if (len > 4 && !_stricmp( (char *)module + exports->Name + len - 4, ".dll" )) len -= 4;
     len = min( len, sizeof(data->dllname) - 1 );
     memcpy( data->dllname, (char *)module + exports->Name, len );
     data->dllname[len] = 0;
@@ -901,6 +998,10 @@ void RELAY_SetupDLL( HMODULE module )
 
     funcs = (DWORD *)((char *)module + exports->AddressOfFunctions);
     entry_point_rva = descr->entry_point_base - (const char *)module;
+
+    func_base = funcs;
+    func_size = exports->NumberOfFunctions * sizeof(*funcs);
+    NtProtectVirtualMemory( NtCurrentProcess(), &func_base, &func_size, PAGE_READWRITE, &old_prot );
     for (i = 0; i < exports->NumberOfFunctions; i++, funcs++)
     {
         if (!descr->entry_point_offsets[i]) continue;   /* not a normal function */
@@ -910,6 +1011,8 @@ void RELAY_SetupDLL( HMODULE module )
         data->entry_points[i].orig_func = (char *)module + *funcs;
         *funcs = entry_point_rva + descr->entry_point_offsets[i];
     }
+    if (old_prot != PAGE_READWRITE)
+        NtProtectVirtualMemory( NtCurrentProcess(), &func_base, &func_size, old_prot, &old_prot );
 }
 
 #else  /* __i386__ || __x86_64__ || __arm__ || __aarch64__ */
@@ -1048,7 +1151,7 @@ void SNOOP_SetupDLL(HMODULE hmod)
     (*dll)->nrofordinals = exports->NumberOfFunctions;
     strcpy( (*dll)->name, name );
     p = (*dll)->name + strlen((*dll)->name) - 4;
-    if (p > (*dll)->name && !strcasecmp( p, ".dll" )) *p = 0;
+    if (p > (*dll)->name && !_stricmp( p, ".dll" )) *p = 0;
 
     size = exports->NumberOfFunctions * sizeof(SNOOP_FUN);
     addr = NULL;
@@ -1314,7 +1417,7 @@ void WINAPI DECLSPEC_HIDDEN __regs_SNOOP_Return( void **stack )
                         "leal 12(%esp),%eax\n\t"                        \
                         "pushl %eax\n\t"                                \
                         __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")       \
-                        "call " __ASM_NAME("__regs_" #name) __ASM_STDCALL(4) "\n\t" \
+                        "call " __ASM_STDCALL("__regs_" #name,4) "\n\t" \
                         __ASM_CFI(".cfi_adjust_cfa_offset -4\n\t")      \
                         "popl %edx\n\t"                                 \
                         __ASM_CFI(".cfi_adjust_cfa_offset -4\n\t")      \
@@ -1326,6 +1429,12 @@ void WINAPI DECLSPEC_HIDDEN __regs_SNOOP_Return( void **stack )
 
 SNOOP_WRAPPER( SNOOP_Entry )
 SNOOP_WRAPPER( SNOOP_Return )
+
+// #elif defined(__i386_on_x86_64__)
+//
+// #error "Implement this for x86_32on64?"
+// // It seems optional, but if it's relatively easy it'd be nice to have.
+// // If it's hard, just remove this #elif branch.
 
 #else  /* __i386__ */
 

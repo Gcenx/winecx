@@ -319,7 +319,11 @@ HRESULT DSOUND_ReopenDevice(DirectSoundDevice *device, BOOL forcewave)
         return hres;
     }
 
-    IAudioClient_SetEventHandle(client, device->sleepev);
+    hres = IAudioClient_SetEventHandle(client, device->sleepev);
+    if (FAILED(hres)) {
+        WARN("SetEventHandle failed: %08x\n", hres);
+        goto err;
+    }
 
     hres = IAudioClient_GetService(client, &IID_IAudioRenderClient, (void**)&render);
     if(FAILED(hres))
@@ -572,7 +576,7 @@ static HRESULT WINAPI PrimaryBufferImpl_SetVolume(IDirectSoundBuffer8 *iface, LO
 
 		for (i = 0; i < DS_MAX_CHANNELS; i++) {
 			if (device->pwfx->nChannels > i){
-				fvol = (float)((DWORD)(device->volpan.dwTotalAmpFactor[i] & 0xFFFF) / (float)0xFFFF);
+				fvol = (float)((device->volpan.dwTotalAmpFactor[i] & 0xFFFF) / (float)0xFFFF);
 				hr = IAudioStreamVolume_SetChannelVolume(device->volume, i, fvol);
 				if (FAILED(hr)){
 					LeaveCriticalSection(&device->mixlock);
@@ -928,7 +932,7 @@ static HRESULT WINAPI PrimaryBufferImpl_SetPan(IDirectSoundBuffer8 *iface, LONG 
 
 		for (i = 0; i < DS_MAX_CHANNELS; i++) {
 			if (device->pwfx->nChannels > i) {
-				fvol = (float)((DWORD)(device->volpan.dwTotalAmpFactor[i] & 0xFFFF) / (float)0xFFFF);
+				fvol = (float)((device->volpan.dwTotalAmpFactor[i] & 0xFFFF) / (float)0xFFFF);
 				hr = IAudioStreamVolume_SetChannelVolume(device->volume, i, fvol);
 				if (FAILED(hr)){
 					LeaveCriticalSection(&device->mixlock);

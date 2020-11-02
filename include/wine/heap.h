@@ -23,6 +23,7 @@
 #define __WINE_WINE_HEAP_H
 
 #include <winbase.h>
+#include <wine/winheader_enter.h>
 
 static inline void * __WINE_ALLOC_SIZE(1) heap_alloc(SIZE_T len)
 {
@@ -34,16 +35,34 @@ static inline void * __WINE_ALLOC_SIZE(1) heap_alloc_zero(SIZE_T len)
     return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, len);
 }
 
-static inline void * __WINE_ALLOC_SIZE(2) heap_realloc(void *mem, SIZE_T len)
+/* Calling heap_realloc() on a non-NULL pointer implies that the pointer was
+   allocated by HeapAlloc() and so can be safely cast to a WIN32PTR. */
+static inline void * __WINE_ALLOC_SIZE(2) heap_realloc(void * HOSTPTR mem, SIZE_T len)
 {
     if (!mem)
         return HeapAlloc(GetProcessHeap(), 0, len);
-    return HeapReAlloc(GetProcessHeap(), 0, mem, len);
+#ifdef __i386_on_x86_64__
+    /* If it's out of range make it work like any other attempt to realloc a
+       pointer that wasn't allocated.  In particular, don't let truncating
+       to 32 bits turn an invalid pointer into a potentially valid one. */
+    if ((ULONGLONG)mem >= 0x100000000)
+        mem = (void * HOSTPTR)0xdeadbeef;
+#endif
+    return HeapReAlloc(GetProcessHeap(), 0, ADDRSPACECAST(void*, mem), len);
 }
 
-static inline void heap_free(void *mem)
+/* Calling heap_free() on a non-NULL pointer implies that the pointer was
+   allocated by HeapAlloc() and so can be safely cast to a WIN32PTR. */
+static inline void heap_free(void * HOSTPTR mem)
 {
-    HeapFree(GetProcessHeap(), 0, mem);
+#ifdef __i386_on_x86_64__
+    /* If it's out of range make it work like any other attempt to free a
+       pointer that wasn't allocated.  In particular, don't let truncating
+       to 32 bits turn an invalid pointer into a potentially valid one. */
+    if ((ULONGLONG)mem >= 0x100000000)
+        mem = (void * HOSTPTR)0xdeadbeef;
+#endif
+    HeapFree(GetProcessHeap(), 0, ADDRSPACECAST(void*, mem));
 }
 
 static inline void *heap_calloc(SIZE_T count, SIZE_T size)
@@ -54,5 +73,15 @@ static inline void *heap_calloc(SIZE_T count, SIZE_T size)
         return NULL;
     return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, len);
 }
+
+static inline char *heap_strdup(const char * HOSTPTR str)
+{
+    SIZE_T len = strlen(str);
+    char *ret = HeapAlloc(GetProcessHeap(), 0, len + 1);
+    memcpy(ret, str, len + 1);
+    return ret;
+}
+
+#include <wine/winheader_exit.h>
 
 #endif  /* __WINE_WINE_HEAP_H */

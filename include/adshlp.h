@@ -19,6 +19,8 @@
 #ifndef __WINE_ADSHLP_H
 #define __WINE_ADSHLP_H
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -32,5 +34,7 @@ BOOL    WINAPI FreeADsMem(LPVOID);
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif

@@ -227,8 +227,8 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcquireCredentialsHandleW(
 
         phCredential->dwUpper = fCredentialUse;
         phCredential->dwLower = (ULONG_PTR)ntlm_cred;
-        TRACE("ACH phCredential->dwUpper: 0x%08lx, dwLower: 0x%08lx\n", phCredential->dwUpper,
-              phCredential->dwLower);
+        TRACE("ACH phCredential->dwUpper: 0x%08lx, dwLower: 0x%08lx\n", (unsigned long)phCredential->dwUpper,
+              (unsigned long)phCredential->dwLower);
         ret = SEC_E_OK;
         break;
 
@@ -464,7 +464,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
     {
         static char helper_protocol[] = "--helper-protocol=ntlmssp-client-1";
         static CHAR credentials_argv[] = "--use-cached-creds";
-        SEC_CHAR *client_argv[6];
+        SEC_CHAR * HOSTPTR client_argv[6];
         int pwlen = 0, arg = 0;
 
         TRACE("First time in ISC()\n");
@@ -980,7 +980,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcceptSecurityContext(
     if(phContext == NULL)
     {
         static CHAR server_helper_protocol[] = "--helper-protocol=squid-2.5-ntlmssp";
-        SEC_CHAR *server_argv[] = { ntlm_auth,
+        SEC_CHAR * HOSTPTR server_argv[] = { ntlm_auth,
             server_helper_protocol,
             config_file_option,
             NULL };
@@ -1998,7 +1998,7 @@ void SECUR32_initNTLMSP(void)
     PNegoHelper helper;
     static CHAR version[] = "--version";
 
-    SEC_CHAR *args[] = {
+    SEC_CHAR * HOSTPTR args[] = {
         ntlm_auth,
         version,
         NULL };
@@ -2022,7 +2022,7 @@ void SECUR32_initNTLMSP(void)
          getenv("CX_ROOT") )
     {
         static const char config_file_format[] = "--configfile=%s/smb.conf";
-        const char *datadir = wine_get_data_dir();
+        const char * HOSTPTR datadir = wine_get_data_dir();
 
         cleanup_helper(helper);
 

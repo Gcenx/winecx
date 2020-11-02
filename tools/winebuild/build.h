@@ -38,6 +38,8 @@
 #define min(a,b)   (((a) < (b)) ? (a) : (b))
 #endif
 
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+
 typedef enum
 {
     TYPE_VARIABLE,     /* variable */
@@ -47,7 +49,6 @@ typedef enum
     TYPE_STDCALL,      /* stdcall function (Win32) */
     TYPE_CDECL,        /* cdecl function (Win32) */
     TYPE_VARARGS,      /* varargs function (Win32) */
-    TYPE_THISCALL,     /* thiscall function (Win32 on i386) */
     TYPE_EXTERN,       /* external symbol (Win32) */
     TYPE_NBTYPES
 } ORD_TYPE;
@@ -99,6 +100,7 @@ typedef struct
 {
     ORD_TYPE    type;
     int         ordinal;
+    int         hint;
     int         lineno;
     int         flags;
     char       *name;         /* public name of this function */
@@ -145,7 +147,7 @@ typedef struct
 
 enum target_cpu
 {
-    CPU_x86, CPU_x86_64, CPU_POWERPC, CPU_ARM, CPU_ARM64, CPU_LAST = CPU_ARM64
+    CPU_x86, CPU_x86_32on64, CPU_x86_64, CPU_POWERPC, CPU_ARM, CPU_ARM64, CPU_LAST = CPU_ARM64
 };
 
 enum target_platform
@@ -169,20 +171,24 @@ struct strarray
 };
 
 /* entry point flags */
-#define FLAG_NORELAY   0x01  /* don't use relay debugging for this function */
-#define FLAG_NONAME    0x02  /* don't export function by name */
-#define FLAG_RET16     0x04  /* function returns a 16-bit value */
-#define FLAG_RET64     0x08  /* function returns a 64-bit value */
-#define FLAG_REGISTER  0x10  /* use register calling convention */
-#define FLAG_PRIVATE   0x20  /* function is private (cannot be imported) */
-#define FLAG_ORDINAL   0x40  /* function should be imported by ordinal */
+#define FLAG_NORELAY   0x0001  /* don't use relay debugging for this function */
+#define FLAG_NONAME    0x0002  /* don't export function by name */
+#define FLAG_RET16     0x0004  /* function returns a 16-bit value */
+#define FLAG_RET64     0x0008  /* function returns a 64-bit value */
+#define FLAG_REGISTER  0x0010  /* use register calling convention */
+#define FLAG_PRIVATE   0x0020  /* function is private (cannot be imported) */
+#define FLAG_ORDINAL   0x0040  /* function should be imported by ordinal */
+#define FLAG_THISCALL  0x0080  /* use thiscall calling convention */
+#define FLAG_FASTCALL  0x0100  /* use fastcall calling convention */
+#define FLAG_IMPORT    0x0200  /* export is imported from another module */
 
-#define FLAG_FORWARD   0x100  /* function is a forwarded name */
-#define FLAG_EXT_LINK  0x200  /* function links to an external symbol */
-#define FLAG_EXPORT32  0x400  /* 32-bit export in 16-bit spec file */
-#define FLAG_SYSCALL   0x800  /* function should be called through a syscall thunk */
+#define FLAG_FORWARD   0x1000  /* function is a forwarded name */
+#define FLAG_EXT_LINK  0x2000  /* function links to an external symbol */
+#define FLAG_EXPORT32  0x4000  /* 32-bit export in 16-bit spec file */
+#define FLAG_SYSCALL   0x8000  /* function should be called through a syscall thunk */
 
-#define FLAG_CPU(cpu)  (0x01000 << (cpu))
+#define FLAG_CPU(cpu)  (0x10000 << (cpu))
+
 #define FLAG_CPU_MASK  (FLAG_CPU(CPU_LAST + 1) - FLAG_CPU(0))
 #define FLAG_CPU_WIN64 (FLAG_CPU(CPU_x86_64) | FLAG_CPU(CPU_ARM64))
 #define FLAG_CPU_WIN32 (FLAG_CPU_MASK & ~FLAG_CPU_WIN64)
@@ -251,6 +257,8 @@ extern int output( const char *format, ... )
    __attribute__ ((__format__ (__printf__, 1, 2)));
 extern void output_cfi( const char *format, ... )
    __attribute__ ((__format__ (__printf__, 1, 2)));
+extern void output_rva( const char *format, ... )
+   __attribute__ ((__format__ (__printf__, 1, 2)));
 extern void spawn( struct strarray array );
 extern struct strarray find_tool( const char *name, const char * const *names );
 extern struct strarray get_as_command(void);
@@ -261,6 +269,9 @@ extern char *get_temp_file_name( const char *prefix, const char *suffix );
 extern void output_standard_file_header(void);
 extern FILE *open_input_file( const char *srcdir, const char *name );
 extern void close_input_file( FILE *file );
+extern void open_output_file(void);
+extern void close_output_file(void);
+extern char *open_temp_output_file( const char *suffix );
 extern void dump_bytes( const void *buffer, unsigned int size );
 extern int remove_stdcall_decoration( char *name );
 extern void assemble_file( const char *src_file, const char *obj_file );
@@ -268,17 +279,23 @@ extern DLLSPEC *alloc_dll_spec(void);
 extern void free_dll_spec( DLLSPEC *spec );
 extern char *make_c_identifier( const char *str );
 extern const char *get_stub_name( const ORDDEF *odp, const DLLSPEC *spec );
+extern const char *get_link_name( const ORDDEF *odp );
 extern int get_cpu_from_name( const char *name );
 extern unsigned int get_alignment(unsigned int align);
 extern unsigned int get_page_size(void);
 extern unsigned int get_ptr_size(void);
+extern unsigned int get_host_ptr_size(void);
 extern unsigned int get_args_size( const ORDDEF *odp );
 extern const char *asm_name( const char *func );
+extern const char *thunk32_name( const char *func );
 extern const char *func_declaration( const char *func );
 extern const char *asm_globl( const char *func );
 extern const char *get_asm_ptr_keyword(void);
+extern const char *get_asm_host_ptr_keyword(void);
 extern const char *get_asm_string_keyword(void);
+extern const char *get_asm_export_section(void);
 extern const char *get_asm_rodata_section(void);
+extern const char *get_asm_rsrc_section(void);
 extern const char *get_asm_string_section(void);
 extern void output_function_size( const char *name );
 extern void output_gnu_stack_note(void);
@@ -299,8 +316,9 @@ extern void output_exports( DLLSPEC *spec );
 extern int load_res32_file( const char *name, DLLSPEC *spec );
 extern void output_resources( DLLSPEC *spec );
 extern void output_bin_resources( DLLSPEC *spec, unsigned int start_rva );
+extern void output_spec32_file( DLLSPEC *spec );
 extern void output_fake_module( DLLSPEC *spec );
-extern void output_def_file( DLLSPEC *spec, int include_private );
+extern void output_def_file( DLLSPEC *spec, int include_stubs );
 extern void load_res16_file( const char *name, DLLSPEC *spec );
 extern void output_res16_data( DLLSPEC *spec );
 extern void output_bin_res16_data( DLLSPEC *spec );
@@ -310,8 +328,6 @@ extern void output_spec16_file( DLLSPEC *spec );
 extern void output_fake_module16( DLLSPEC *spec16 );
 extern void output_res_o_file( DLLSPEC *spec );
 extern void output_asm_relays16(void);
-
-extern void BuildSpec32File( DLLSPEC *spec );
 
 extern void add_16bit_exports( DLLSPEC *spec32, DLLSPEC *spec16 );
 extern int parse_spec_file( FILE *file, DLLSPEC *spec );
@@ -362,6 +378,7 @@ extern int verbose;
 extern int link_ext_symbols;
 extern int force_pointer_size;
 extern int unwind_tables;
+extern int unix_lib;
 
 extern char *input_file_name;
 extern char *spec_file_name;
@@ -379,5 +396,6 @@ extern char *arch_option;
 extern const char *float_abi_option;
 extern int thumb_mode;
 extern int needs_get_pc_thunk;
+extern int needs_invoke32;
 
 #endif  /* __WINE_BUILD_H */

@@ -53,7 +53,7 @@
 #include "security.h"
 
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__i386_on_x86_64__)
 static const unsigned int supported_cpus = CPU_FLAG(CPU_x86);
 #elif defined(__x86_64__)
 static const unsigned int supported_cpus = CPU_FLAG(CPU_x86_64) | CPU_FLAG(CPU_x86);
@@ -120,6 +120,7 @@ static const struct object_ops thread_apc_ops =
     no_link_name,               /* link_name */
     NULL,                       /* unlink_name */
     no_open_file,               /* open_file */
+    no_kernel_obj_list,         /* get_kernel_obj_list */
     no_close_handle,            /* close_handle */
     thread_apc_destroy          /* destroy */
 };
@@ -128,16 +129,18 @@ static const struct object_ops thread_apc_ops =
 /* thread operations */
 
 static void dump_thread( struct object *obj, int verbose );
+static struct object_type *thread_get_type( struct object *obj );
 static int thread_signaled( struct object *obj, struct wait_queue_entry *entry );
 static unsigned int thread_map_access( struct object *obj, unsigned int access );
 static void thread_poll_event( struct fd *fd, int event );
+static struct list *thread_get_kernel_obj_list( struct object *obj );
 static void destroy_thread( struct object *obj );
 
 static const struct object_ops thread_ops =
 {
     sizeof(struct thread),      /* size */
     dump_thread,                /* dump */
-    no_get_type,                /* get_type */
+    thread_get_type,            /* get_type */
     add_queue,                  /* add_queue */
     remove_queue,               /* remove_queue */
     thread_signaled,            /* signaled */
@@ -151,6 +154,7 @@ static const struct object_ops thread_ops =
     no_link_name,               /* link_name */
     NULL,                       /* unlink_name */
     no_open_file,               /* open_file */
+    thread_get_kernel_obj_list, /* get_kernel_obj_list */
     no_close_handle,            /* close_handle */
     destroy_thread              /* destroy */
 };
@@ -181,7 +185,6 @@ static inline void init_thread_structure( struct thread *thread )
     thread->entry_point     = 0;
     thread->debug_ctx       = NULL;
     thread->debug_event     = NULL;
-    thread->debug_break     = 0;
     thread->system_regs     = 0;
     thread->queue           = NULL;
     thread->wait            = NULL;
@@ -206,6 +209,7 @@ static inline void init_thread_structure( struct thread *thread )
     list_init( &thread->mutex_list );
     list_init( &thread->system_apc );
     list_init( &thread->user_apc );
+    list_init( &thread->kernel_object );
 
     for (i = 0; i < MAX_INFLIGHT_FDS; i++)
         thread->inflight[i].server = thread->inflight[i].client = -1;
@@ -301,6 +305,12 @@ static void thread_poll_event( struct fd *fd, int event )
     release_object( thread );
 }
 
+static struct list *thread_get_kernel_obj_list( struct object *obj )
+{
+    struct thread *thread = (struct thread *)obj;
+    return &thread->kernel_object;
+}
+
 /* cleanup everything that is no longer needed by a dead thread */
 /* used by destroy_thread and kill_thread */
 static void cleanup_thread( struct thread *thread )
@@ -359,6 +369,13 @@ static void dump_thread( struct object *obj, int verbose )
 
     fprintf( stderr, "Thread id=%04x unix pid=%d unix tid=%d state=%d\n",
              thread->id, thread->unix_pid, thread->unix_tid, thread->state );
+}
+
+static struct object_type *thread_get_type( struct object *obj )
+{
+    static const WCHAR name[] = {'T','h','r','e','a','d'};
+    static const struct unicode_str str = { name, sizeof(name) };
+    return get_object_type( &str );
 }
 
 static int thread_signaled( struct object *obj, struct wait_queue_entry *entry )
@@ -552,7 +569,7 @@ void stop_thread_if_suspended( struct thread *thread )
 }
 
 /* suspend a thread */
-static int suspend_thread( struct thread *thread )
+int suspend_thread( struct thread *thread )
 {
     int old_count = thread->suspend;
     if (thread->suspend < MAXIMUM_SUSPEND_COUNT)
@@ -564,7 +581,7 @@ static int suspend_thread( struct thread *thread )
 }
 
 /* resume a thread */
-static int resume_thread( struct thread *thread )
+int resume_thread( struct thread *thread )
 {
     int old_count = thread->suspend;
     if (thread->suspend > 0)
@@ -1180,39 +1197,6 @@ static unsigned int get_context_system_regs( enum cpu_type cpu )
     return 0;
 }
 
-/* trigger a breakpoint event in a given thread */
-void break_thread( struct thread *thread )
-{
-    debug_event_t data;
-
-    assert( thread->context );
-
-    memset( &data, 0, sizeof(data) );
-    data.exception.first     = 1;
-    data.exception.exc_code  = STATUS_BREAKPOINT;
-    data.exception.flags     = EXCEPTION_CONTINUABLE;
-    switch (thread->context->cpu)
-    {
-    case CPU_x86:
-        data.exception.address = thread->context->ctl.i386_regs.eip;
-        break;
-    case CPU_x86_64:
-        data.exception.address = thread->context->ctl.x86_64_regs.rip;
-        break;
-    case CPU_POWERPC:
-        data.exception.address = thread->context->ctl.powerpc_regs.iar;
-        break;
-    case CPU_ARM:
-        data.exception.address = thread->context->ctl.arm_regs.pc;
-        break;
-    case CPU_ARM64:
-        data.exception.address = thread->context->ctl.arm64_regs.pc;
-        break;
-    }
-    generate_debug_event( thread, EXCEPTION_DEBUG_EVENT, &data );
-    thread->debug_break = 0;
-}
-
 /* take a snapshot of currently running threads */
 struct thread_snapshot *thread_snap( int *count )
 {
@@ -1625,6 +1609,7 @@ DECL_HANDLER(queue_apc)
         }
         break;
     case APC_CREATE_THREAD:
+    case APC_BREAK_PROCESS:
         process = get_process_from_handle( req->handle, PROCESS_CREATE_THREAD );
         break;
     default:
@@ -1810,7 +1795,6 @@ DECL_HANDLER(set_suspend_context)
         memcpy( current->suspend_context, get_req_data(), sizeof(context_t) );
         current->suspend_context->flags = 0;  /* to keep track of what is modified */
         current->context = current->suspend_context;
-        if (current->debug_break) break_thread( current );
     }
 }
 

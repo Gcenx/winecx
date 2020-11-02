@@ -33,7 +33,6 @@
 #include "query.h"
 
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msidb);
 
@@ -104,13 +103,23 @@ static UINT STREAMS_fetch_stream(struct tagMSIVIEW *view, UINT row, UINT col, IS
     return ERROR_SUCCESS;
 }
 
-static UINT STREAMS_get_row( struct tagMSIVIEW *view, UINT row, MSIRECORD **rec )
+static UINT STREAMS_set_string( struct tagMSIVIEW *view, UINT row, UINT col, const WCHAR *val, int len )
+{
+    ERR("Cannot modify primary key.\n");
+    return ERROR_FUNCTION_FAILED;
+}
+
+static UINT STREAMS_set_stream( MSIVIEW *view, UINT row, UINT col, IStream *stream )
 {
     MSISTREAMSVIEW *sv = (MSISTREAMSVIEW *)view;
+    IStream *prev;
 
-    TRACE("%p %d %p\n", sv, row, rec);
+    TRACE("view %p, row %u, col %u, stream %p.\n", view, row, col, stream);
 
-    return msi_view_get_row( sv->db, view, row, rec );
+    prev = sv->db->streams[row].stream;
+    IStream_AddRef(sv->db->streams[row].stream = stream);
+    if (prev) IStream_Release(prev);
+    return ERROR_SUCCESS;
 }
 
 static UINT STREAMS_set_row(struct tagMSIVIEW *view, UINT row, MSIRECORD *rec, UINT mask)
@@ -127,7 +136,7 @@ static UINT STREAMS_set_row(struct tagMSIVIEW *view, UINT row, MSIRECORD *rec, U
         const WCHAR *name = MSI_RecordGetString( rec, 1 );
 
         if (!name) return ERROR_INVALID_PARAMETER;
-        sv->db->streams[row].str_index = msi_add_string( sv->db->strings, name, -1, StringNonPersistent );
+        sv->db->streams[row].str_index = msi_add_string( sv->db->strings, name, -1, FALSE );
     }
     if (mask & 2)
     {
@@ -208,8 +217,28 @@ static UINT STREAMS_insert_row(struct tagMSIVIEW *view, MSIRECORD *rec, UINT row
 
 static UINT STREAMS_delete_row(struct tagMSIVIEW *view, UINT row)
 {
-    FIXME("(%p %d): stub!\n", view, row);
-    return ERROR_SUCCESS;
+    MSIDATABASE *db = ((MSISTREAMSVIEW *)view)->db;
+    UINT i, num_rows = db->num_streams - 1;
+    const WCHAR *name;
+    WCHAR *encname;
+    HRESULT hr;
+
+    TRACE("(%p %d)\n", view, row);
+
+    if (!db->num_streams || row > num_rows)
+        return ERROR_FUNCTION_FAILED;
+
+    name = msi_string_lookup( db->strings, db->streams[row].str_index, NULL );
+    if (!(encname = encode_streamname( FALSE, name ))) return ERROR_OUTOFMEMORY;
+    IStream_Release( db->streams[row].stream );
+
+    for (i = row; i < num_rows; i++)
+        db->streams[i] = db->streams[i + 1];
+    db->num_streams = num_rows;
+
+    hr = IStorage_DestroyElement( db->storage, encname );
+    msi_free( encname );
+    return FAILED( hr ) ? ERROR_FUNCTION_FAILED : ERROR_SUCCESS;
 }
 
 static UINT STREAMS_execute(struct tagMSIVIEW *view, MSIRECORD *record)
@@ -307,12 +336,15 @@ static UINT STREAMS_modify(struct tagMSIVIEW *view, MSIMODIFY eModifyMode, MSIRE
         r = streams_modify_update(view, rec);
         break;
 
+    case MSIMODIFY_DELETE:
+        r = STREAMS_delete_row(view, row - 1);
+        break;
+
     case MSIMODIFY_VALIDATE_NEW:
     case MSIMODIFY_INSERT_TEMPORARY:
     case MSIMODIFY_REFRESH:
     case MSIMODIFY_REPLACE:
     case MSIMODIFY_MERGE:
-    case MSIMODIFY_DELETE:
     case MSIMODIFY_VALIDATE:
     case MSIMODIFY_VALIDATE_FIELD:
     case MSIMODIFY_VALIDATE_DELETE:
@@ -337,40 +369,13 @@ static UINT STREAMS_delete(struct tagMSIVIEW *view)
     return ERROR_SUCCESS;
 }
 
-static UINT STREAMS_find_matching_rows(struct tagMSIVIEW *view, UINT col,
-                                       UINT val, UINT *row, MSIITERHANDLE *handle)
-{
-    MSISTREAMSVIEW *sv = (MSISTREAMSVIEW *)view;
-    UINT index = PtrToUlong(*handle);
-
-    TRACE("(%p, %d, %d, %p, %p)\n", view, col, val, row, handle);
-
-    if (!col || col > sv->num_cols)
-        return ERROR_INVALID_PARAMETER;
-
-    while (index < sv->db->num_streams)
-    {
-        if (sv->db->streams[index].str_index == val)
-        {
-            *row = index;
-            break;
-        }
-        index++;
-    }
-
-    *handle = UlongToPtr(++index);
-
-    if (index > sv->db->num_streams)
-        return ERROR_NO_MORE_ITEMS;
-
-    return ERROR_SUCCESS;
-}
-
 static const MSIVIEWOPS streams_ops =
 {
     STREAMS_fetch_int,
     STREAMS_fetch_stream,
-    STREAMS_get_row,
+    NULL,
+    STREAMS_set_string,
+    STREAMS_set_stream,
     STREAMS_set_row,
     STREAMS_insert_row,
     STREAMS_delete_row,
@@ -380,8 +385,6 @@ static const MSIVIEWOPS streams_ops =
     STREAMS_get_column_info,
     STREAMS_modify,
     STREAMS_delete,
-    STREAMS_find_matching_rows,
-    NULL,
     NULL,
     NULL,
     NULL,
@@ -430,7 +433,7 @@ static UINT append_stream( MSIDATABASE *db, const WCHAR *name, IStream *stream )
     if (!streams_resize_table( db, db->num_streams + 1 ))
         return ERROR_OUTOFMEMORY;
 
-    db->streams[i].str_index = msi_add_string( db->strings, name, -1, StringNonPersistent );
+    db->streams[i].str_index = msi_add_string( db->strings, name, -1, FALSE );
     db->streams[i].stream = stream;
     db->num_streams++;
 
@@ -611,7 +614,10 @@ UINT msi_commit_streams( MSIDATABASE *db )
     for (i = 0; i < db->num_streams; i++)
     {
         name = msi_string_lookup( db->strings, db->streams[i].str_index, NULL );
+        if (!wcscmp( name, szSumInfo )) continue;
+
         if (!(encname = encode_streamname( FALSE, name ))) return ERROR_OUTOFMEMORY;
+        TRACE("saving stream %s as %s\n", debugstr_w(name), debugstr_w(encname));
 
         hr = IStorage_CreateStream( db->storage, encname, STGM_WRITE|STGM_SHARE_EXCLUSIVE, 0, 0, &stream );
         if (SUCCEEDED( hr ))

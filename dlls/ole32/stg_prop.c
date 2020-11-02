@@ -36,9 +36,6 @@
  *   PropertyStorage_ReadFromStream
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -52,7 +49,7 @@
 #include "winbase.h"
 #include "winnls.h"
 #include "winuser.h"
-#include "wine/unicode.h"
+#include "wine/asm.h"
 #include "wine/debug.h"
 #include "dictionary.h"
 #include "storage32.h"
@@ -371,7 +368,7 @@ static HRESULT PropertyStorage_StringCopy(LPCSTR src, LCID srcCP, LPSTR *dst,
         size_t len;
 
         if (dstCP == CP_UNICODE)
-            len = (strlenW((LPCWSTR)src) + 1) * sizeof(WCHAR);
+            len = (lstrlenW((LPCWSTR)src) + 1) * sizeof(WCHAR);
         else
             len = strlen(src) + 1;
         *dst = CoTaskMemAlloc(len * sizeof(WCHAR));
@@ -939,7 +936,7 @@ static int PropertyStorage_PropNameCompare(const void *a, const void *b,
     {
         TRACE("(%s, %s)\n", debugstr_w(a), debugstr_w(b));
         if (This->grfFlags & PROPSETFLAG_CASE_SENSITIVE)
-            return lstrcmpW(a, b);
+            return wcscmp(a, b);
         else
             return lstrcmpiW(a, b);
     }

@@ -637,7 +637,7 @@ static void segv_handler( int signal, siginfo_t *info, void *ucontext )
 {
     EXCEPTION_RECORD *rec;
     ucontext_t *context = ucontext;
-    DWORD *orig_pc = PC_sig(context);
+    DWORD *orig_pc = (DWORD *)PC_sig(context);
 
     /* check for page fault inside the thread stack */
     if (signal == SIGSEGV &&
@@ -871,24 +871,24 @@ int CDECL __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
  */
 NTSTATUS signal_alloc_thread( TEB **teb )
 {
-    static size_t sigstack_zero_bits;
+    static size_t sigstack_alignment;
     SIZE_T size;
     NTSTATUS status;
 
-    if (!sigstack_zero_bits)
+    if (!sigstack_alignment)
     {
         size_t min_size = teb_size + max( MINSIGSTKSZ, 8192 );
         /* find the first power of two not smaller than min_size */
-        sigstack_zero_bits = 12;
-        while ((1u << sigstack_zero_bits) < min_size) sigstack_zero_bits++;
-        signal_stack_size = (1 << sigstack_zero_bits) - teb_size;
+        sigstack_alignment = 12;
+        while ((1u << sigstack_alignment) < min_size) sigstack_alignment++;
+        signal_stack_size = (1 << sigstack_alignment) - teb_size;
         assert( sizeof(TEB) <= teb_size );
     }
 
-    size = 1 << sigstack_zero_bits;
+    size = 1 << sigstack_alignment;
     *teb = NULL;
-    if (!(status = NtAllocateVirtualMemory( NtCurrentProcess(), (void **)teb, sigstack_zero_bits,
-                                            &size, MEM_COMMIT | MEM_TOP_DOWN, PAGE_READWRITE )))
+    if (!(status = virtual_alloc_aligned( (void **)teb, 0, &size, MEM_COMMIT | MEM_TOP_DOWN,
+                                          PAGE_READWRITE, sigstack_alignment )))
     {
         (*teb)->Tib.Self = &(*teb)->Tib;
         (*teb)->Tib.ExceptionList = (void *)~0UL;
@@ -977,6 +977,16 @@ BOOLEAN CDECL RtlAddFunctionTable( RUNTIME_FUNCTION *table, DWORD count, ULONG_P
     return TRUE;
 }
 
+/**********************************************************************
+ *              RtlInstallFunctionTableCallback   (NTDLL.@)
+ */
+BOOLEAN CDECL RtlInstallFunctionTableCallback( ULONG_PTR table, ULONG_PTR base, DWORD length,
+                                               PGET_RUNTIME_FUNCTION_CALLBACK callback, PVOID context, PCWSTR dll )
+{
+    FIXME( "%lx %lx %d %p %p %s: stub\n", table, base, length, callback, context, wine_dbgstr_w(dll) );
+    return TRUE;
+}
+
 
 /*************************************************************************
  *              RtlAddGrowableFunctionTable   (NTDLL.@)
@@ -986,7 +996,7 @@ DWORD WINAPI RtlAddGrowableFunctionTable( void **table, RUNTIME_FUNCTION *functi
 {
     FIXME( "(%p, %p, %d, %d, %ld, %ld) stub!\n", table, functions, count, max_count, base, end );
     if (table) *table = NULL;
-    return S_OK;
+    return STATUS_SUCCESS;
 }
 
 
@@ -998,6 +1008,13 @@ void WINAPI RtlGrowFunctionTable( void *table, DWORD count )
     FIXME( "(%p, %d) stub!\n", table, count );
 }
 
+/*************************************************************************
+ *              RtlDeleteGrowableFunctionTable   (NTDLL.@)
+ */
+void WINAPI RtlDeleteGrowableFunctionTable( void *table )
+{
+    FIXME( "(%p) stub!\n", table );
+}
 
 /**********************************************************************
  *              RtlDeleteFunctionTable   (NTDLL.@)
@@ -1093,7 +1110,7 @@ static void thread_startup( void *param )
     context.Pc = (DWORD_PTR)info->start;
 
     if (info->suspend) wait_suspend( &context );
-    LdrInitializeThunk( &context, (ULONG_PTR *)&context.u.s.X0, 0, 0 );
+    LdrInitializeThunk( &context, (void **)&context.u.s.X0, 0, 0 );
 
     ((thread_start_func)context.Pc)( (LPTHREAD_START_ROUTINE)context.u.s.X0, (void *)context.u.s.X1 );
 }
@@ -1161,7 +1178,7 @@ void WINAPI DbgUserBreakPoint(void)
 /**********************************************************************
  *           NtCurrentTeb   (NTDLL.@)
  */
-TEB * WINAPI NtCurrentTeb(void)
+TEB * WINAPI NTDLL_NtCurrentTeb(void)
 {
     return pthread_getspecific( teb_key );
 }

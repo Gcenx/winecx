@@ -598,8 +598,11 @@ static void delete_file_test(void)
     pRtlFreeUnicodeString( &nameW );
 }
 
+#define TEST_OVERLAPPED_READ_SIZE 4096
+
 static void read_file_test(void)
 {
+    DECLSPEC_ALIGN(TEST_OVERLAPPED_READ_SIZE) static unsigned char aligned_buffer[TEST_OVERLAPPED_READ_SIZE];
     const char text[] = "foobar";
     HANDLE handle;
     IO_STATUS_BLOCK iosb;
@@ -616,7 +619,8 @@ static void read_file_test(void)
     offset.QuadPart = 0;
     ResetEvent( event );
     status = pNtWriteFile( handle, event, apc, &apc_count, &iosb, text, strlen(text), &offset, NULL );
-    ok( status == STATUS_SUCCESS || status == STATUS_PENDING, "wrong status %x\n", status );
+    ok( status == STATUS_PENDING || broken(status == STATUS_SUCCESS) /* before Vista */,
+            "wrong status %x.\n", status );
     if (status == STATUS_PENDING) WaitForSingleObject( event, 1000 );
     ok( U(iosb).Status == STATUS_SUCCESS, "wrong status %x\n", U(iosb).Status );
     ok( iosb.Information == strlen(text), "wrong info %lu\n", iosb.Information );
@@ -631,9 +635,9 @@ static void read_file_test(void)
     offset.QuadPart = 0;
     ResetEvent( event );
     status = pNtReadFile( handle, event, apc, &apc_count, &iosb, buffer, strlen(text) + 10, &offset, NULL );
-    ok( status == STATUS_SUCCESS ||
-        status == STATUS_PENDING, /* vista */
-        "wrong status %x\n", status );
+    ok(status == STATUS_PENDING
+            || broken(status == STATUS_SUCCESS) /* before Vista */,
+            "wrong status %x.\n", status);
     if (status == STATUS_PENDING) WaitForSingleObject( event, 1000 );
     ok( U(iosb).Status == STATUS_SUCCESS, "wrong status %x\n", U(iosb).Status );
     ok( iosb.Information == strlen(text), "wrong info %lu\n", iosb.Information );
@@ -711,7 +715,46 @@ static void read_file_test(void)
 
     CloseHandle( handle );
 
-    CloseHandle( event );
+    if (!(handle = create_temp_file(FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING)))
+        return;
+
+    apc_count = 0;
+    offset.QuadPart = 0;
+    U(iosb).Status = 0xdeadbabe;
+    iosb.Information = 0xdeadbeef;
+    offset.QuadPart = 0;
+    ResetEvent(event);
+    status = pNtWriteFile(handle, event, apc, &apc_count, &iosb,
+            aligned_buffer, sizeof(aligned_buffer), &offset, NULL);
+    ok(status == STATUS_END_OF_FILE || status == STATUS_PENDING
+            || broken(status == STATUS_SUCCESS) /* before Vista */,
+            "Wrong status %x.\n", status);
+    ok(U(iosb).Status == STATUS_SUCCESS, "Wrong status %x.\n", U(iosb).Status);
+    ok(iosb.Information == sizeof(aligned_buffer), "Wrong info %lu.\n", iosb.Information);
+    ok(is_signaled(event), "event is not signaled.\n");
+    ok(!apc_count, "apc was called.\n");
+    SleepEx(1, TRUE); /* alertable sleep */
+    ok(apc_count == 1, "apc was not called.\n");
+
+    apc_count = 0;
+    offset.QuadPart = 0;
+    U(iosb).Status = 0xdeadbabe;
+    iosb.Information = 0xdeadbeef;
+    offset.QuadPart = 0;
+    ResetEvent(event);
+    status = pNtReadFile(handle, event, apc, &apc_count, &iosb,
+            aligned_buffer, sizeof(aligned_buffer), &offset, NULL);
+    ok(status == STATUS_PENDING, "Wrong status %x.\n", status);
+    WaitForSingleObject(event, 1000);
+    ok(U(iosb).Status == STATUS_SUCCESS, "Wrong status %x.\n", U(iosb).Status);
+    ok(iosb.Information == sizeof(aligned_buffer), "Wrong info %lu.\n", iosb.Information);
+    ok(is_signaled(event), "event is not signaled.\n");
+    ok(!apc_count, "apc was called.\n");
+    SleepEx(1, TRUE); /* alertable sleep */
+    ok(apc_count == 1, "apc was not called.\n");
+
+    CloseHandle(handle);
+    CloseHandle(event);
 }
 
 static void append_file_test(void)
@@ -3362,6 +3405,7 @@ static void _test_completion_flags(unsigned line, HANDLE handle, DWORD expected_
 
 static void test_file_completion_information(void)
 {
+    DECLSPEC_ALIGN(TEST_OVERLAPPED_READ_SIZE) static unsigned char aligned_buf[TEST_OVERLAPPED_READ_SIZE];
     static const char buf[] = "testdata";
     FILE_IO_COMPLETION_NOTIFICATION_INFORMATION info;
     OVERLAPPED ov, *pov;
@@ -3430,6 +3474,8 @@ static void test_file_completion_information(void)
     {
         SetLastError(0xdeadbeef);
         ret = WriteFile(h, buf, sizeof(buf), &num_bytes, &ov);
+        ok((!ret && GetLastError() == ERROR_IO_PENDING) || broken(ret) /* Before Vista */,
+                "Unexpected result %#x, GetLastError() %u.\n", ret, GetLastError());
         if (ret || GetLastError() != ERROR_IO_PENDING) break;
         ret = GetOverlappedResult(h, &ov, &num_bytes, TRUE);
         ok(ret, "GetOverlappedResult failed, error %u\n", GetLastError());
@@ -3448,8 +3494,6 @@ static void test_file_completion_information(void)
         ok(key == 0xdeadbeef, "expected 0xdeadbeef, got %lx\n", key);
         ok(pov == &ov, "expected %p, got %p\n", &ov, pov);
     }
-    else
-        win_skip("WriteFile never returned TRUE\n");
 
     info.Flags = FILE_SKIP_COMPLETION_PORT_ON_SUCCESS;
     status = pNtSetInformationFile(h, &io, &info, sizeof(info), FileIoCompletionNotificationInformation);
@@ -3460,6 +3504,8 @@ static void test_file_completion_information(void)
     {
         SetLastError(0xdeadbeef);
         ret = WriteFile(h, buf, sizeof(buf), &num_bytes, &ov);
+        ok((!ret && GetLastError() == ERROR_IO_PENDING) || broken(ret) /* Before Vista */,
+                "Unexpected result %#x, GetLastError() %u.\n", ret, GetLastError());
         if (ret || GetLastError() != ERROR_IO_PENDING) break;
         ret = GetOverlappedResult(h, &ov, &num_bytes, TRUE);
         ok(ret, "GetOverlappedResult failed, error %u\n", GetLastError());
@@ -3474,8 +3520,6 @@ static void test_file_completion_information(void)
         ok(!ret, "GetQueuedCompletionStatus succeeded\n");
         ok(pov == NULL, "expected NULL, got %p\n", pov);
     }
-    else
-        win_skip("WriteFile never returned TRUE\n");
 
     info.Flags = 0;
     status = pNtSetInformationFile(h, &io, &info, sizeof(info), FileIoCompletionNotificationInformation);
@@ -3486,6 +3530,8 @@ static void test_file_completion_information(void)
     {
         SetLastError(0xdeadbeef);
         ret = WriteFile(h, buf, sizeof(buf), &num_bytes, &ov);
+        ok((!ret && GetLastError() == ERROR_IO_PENDING) || broken(ret) /* Before Vista */,
+                "Unexpected result %#x, GetLastError() %u.\n", ret, GetLastError());
         if (ret || GetLastError() != ERROR_IO_PENDING) break;
         ret = GetOverlappedResult(h, &ov, &num_bytes, TRUE);
         ok(ret, "GetOverlappedResult failed, error %u\n", GetLastError());
@@ -3502,8 +3548,40 @@ static void test_file_completion_information(void)
         ok(!ret, "GetQueuedCompletionStatus succeeded\n");
         ok(pov == NULL, "expected NULL, got %p\n", pov);
     }
-    else
-        win_skip("WriteFile never returned TRUE\n");
+
+    CloseHandle(port);
+    CloseHandle(h);
+
+    if (!(h = create_temp_file(FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING)))
+        return;
+
+    port = CreateIoCompletionPort(h, NULL, 0xdeadbeef, 0);
+    ok(port != NULL, "CreateIoCompletionPort failed, error %u.\n", GetLastError());
+
+    info.Flags = FILE_SKIP_COMPLETION_PORT_ON_SUCCESS;
+    status = pNtSetInformationFile(h, &io, &info, sizeof(info), FileIoCompletionNotificationInformation);
+    ok(status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %#x.\n", status);
+    test_completion_flags(h, FILE_SKIP_COMPLETION_PORT_ON_SUCCESS);
+
+    ret = WriteFile(h, aligned_buf, sizeof(aligned_buf), &num_bytes, &ov);
+    if (!ret && GetLastError() == ERROR_IO_PENDING)
+    {
+        ret = GetOverlappedResult(h, &ov, &num_bytes, TRUE);
+        ok(ret, "GetOverlappedResult failed, error %u.\n", GetLastError());
+        ok(num_bytes == sizeof(aligned_buf), "expected sizeof(aligned_buf), got %u.\n", num_bytes);
+        ret = GetQueuedCompletionStatus(port, &num_bytes, &key, &pov, 1000);
+        ok(ret, "GetQueuedCompletionStatus failed, error %u.\n", GetLastError());
+    }
+    ok(num_bytes == sizeof(aligned_buf), "expected sizeof(buf), got %u.\n", num_bytes);
+
+    SetLastError(0xdeadbeef);
+    ret = ReadFile(h, aligned_buf, sizeof(aligned_buf), &num_bytes, &ov);
+    ok(!ret && GetLastError() == ERROR_IO_PENDING, "Unexpected result, ret %#x, error %u.\n",
+            ret, GetLastError());
+    ret = GetOverlappedResult(h, &ov, &num_bytes, TRUE);
+    ok(ret, "GetOverlappedResult failed, error %u.\n", GetLastError());
+    ret = GetQueuedCompletionStatus(port, &num_bytes, &key, &pov, 1000);
+    ok(ret, "GetQueuedCompletionStatus failed, error %u.\n", GetLastError());
 
     CloseHandle(ov.hEvent);
     CloseHandle(port);
@@ -4289,7 +4367,8 @@ static void test_read_write(void)
     iob.Information = -1;
     offset.QuadPart = 0;
     status = pNtWriteFile(hfile, 0, NULL, NULL, &iob, contents, sizeof(contents), &offset, NULL);
-    ok(status == STATUS_PENDING || status == STATUS_SUCCESS /* before Vista */, "expected STATUS_PENDING or STATUS_SUCCESS, got %#x\n", status);
+    ok(status == STATUS_PENDING || broken(status == STATUS_SUCCESS) /* before Vista */,
+            "expected STATUS_PENDING, got %#x.\n", status);
     if (status == STATUS_PENDING)
     {
         ret = WaitForSingleObject(hfile, 3000);
@@ -4371,9 +4450,8 @@ static void test_read_write(void)
     bytes = 0xdeadbeef;
     SetLastError(0xdeadbeef);
     ret = ReadFile(hfile, buf, 0, &bytes, &ovl);
-    /* ReadFile return value depends on Windows version and testing it is not practical */
-    if (!ret)
-        ok(GetLastError() == ERROR_IO_PENDING, "expected ERROR_IO_PENDING, got %d\n", GetLastError());
+    ok((!ret && GetLastError() == ERROR_IO_PENDING) || broken(ret) /* before Vista */,
+            "Unexpected result, ret %#x, GetLastError() %u.\n", ret, GetLastError());
     ret = GetLastError();
     ok(bytes == 0, "bytes %u\n", bytes);
 
@@ -4385,8 +4463,7 @@ static void test_read_write(void)
         bytes = 0xdeadbeef;
         SetLastError(0xdeadbeef);
         ret = GetOverlappedResult(hfile, &ovl, &bytes, TRUE);
-        ok(ret, "GetOverlappedResult should report TRUE\n");
-        ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %d\n", GetLastError());
+        ok(ret, "GetOverlappedResult returned FALSE with %u (expected TRUE)\n", GetLastError());
         ok(bytes == 0, "expected 0, read %u\n", bytes);
         ok((NTSTATUS)ovl.Internal == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", ovl.Internal);
         ok(ovl.InternalHigh == 0, "expected 0, got %lu\n", ovl.InternalHigh);
@@ -4401,9 +4478,8 @@ static void test_read_write(void)
     bytes = 0xdeadbeef;
     SetLastError(0xdeadbeef);
     ret = ReadFile(hfile, NULL, 0, &bytes, &ovl);
-    /* ReadFile return value depends on Windows version and testing it is not practical */
-    if (!ret)
-        ok(GetLastError() == ERROR_IO_PENDING, "expected ERROR_IO_PENDING, got %d\n", GetLastError());
+    ok((!ret && GetLastError() == ERROR_IO_PENDING) || broken(ret) /* before Vista */,
+            "Unexpected result, ret %#x, GetLastError() %u.\n", ret, GetLastError());
     ret = GetLastError();
     ok(bytes == 0, "bytes %u\n", bytes);
 
@@ -4415,8 +4491,7 @@ static void test_read_write(void)
         bytes = 0xdeadbeef;
         SetLastError(0xdeadbeef);
         ret = GetOverlappedResult(hfile, &ovl, &bytes, TRUE);
-        ok(ret, "GetOverlappedResult should report TRUE\n");
-        ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %d\n", GetLastError());
+        ok(ret, "GetOverlappedResult returned FALSE with %u (expected TRUE)\n", GetLastError());
         ok(bytes == 0, "expected 0, read %u\n", bytes);
         ok((NTSTATUS)ovl.Internal == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", ovl.Internal);
         ok(ovl.InternalHigh == 0, "expected 0, got %lu\n", ovl.InternalHigh);
@@ -4447,6 +4522,8 @@ static void test_read_write(void)
     iob.Information = -1;
     offset.QuadPart = sizeof(contents);
     status = pNtReadFile(hfile, 0, NULL, NULL, &iob, buf, 0, &offset, NULL);
+    ok(status == STATUS_PENDING || broken(status == STATUS_SUCCESS) /* before Vista */,
+            "expected STATUS_PENDING, got %#x.\n", status);
     if (status == STATUS_PENDING)
     {
         ret = WaitForSingleObject(hfile, 3000);
@@ -4456,7 +4533,6 @@ static void test_read_write(void)
     }
     else
     {
-        ok(status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#x\n", status);
         ok(U(iob).Status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#x\n", U(iob).Status);
         ok(iob.Information == 0, "expected 0, got %lu\n", iob.Information);
     }
@@ -4472,13 +4548,12 @@ static void test_read_write(void)
     bytes = 0;
     SetLastError(0xdeadbeef);
     ret = ReadFile(hfile, buf, sizeof(buf), &bytes, &ovl);
-    /* ReadFile return value depends on Windows version and testing it is not practical */
+    ok((!ret && GetLastError() == ERROR_IO_PENDING) || broken(ret) /* before Vista */,
+            "Unexpected result, ret %#x, GetLastError() %u.\n", ret, GetLastError());
     if (!ret)
-    {
-        ok(GetLastError() == ERROR_IO_PENDING, "expected ERROR_IO_PENDING, got %d\n", GetLastError());
         ok(bytes == 0, "bytes %u\n", bytes);
-    }
-    else ok(bytes == 14, "bytes %u\n", bytes);
+    else
+        ok(bytes == 14, "bytes %u\n", bytes);
     ok((NTSTATUS)ovl.Internal == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", ovl.Internal);
     ok(ovl.InternalHigh == sizeof(contents), "expected sizeof(contents), got %lu\n", ovl.InternalHigh);
 
@@ -4504,7 +4579,8 @@ static void test_read_write(void)
     iob.Information = -1;
     offset.QuadPart = (LONGLONG)-1 /* FILE_WRITE_TO_END_OF_FILE */;
     status = pNtWriteFile(hfile, 0, NULL, NULL, &iob, "DCBA", 4, &offset, NULL);
-    ok(status == STATUS_PENDING || status == STATUS_SUCCESS /* before Vista */, "expected STATUS_PENDING or STATUS_SUCCESS, got %#x\n", status);
+    ok(status == STATUS_PENDING || broken(status == STATUS_SUCCESS) /* before Vista */,
+            "expected STATUS_PENDING, got %#x.\n", status);
     if (status == STATUS_PENDING)
     {
         ret = WaitForSingleObject(hfile, 3000);
@@ -4520,7 +4596,8 @@ static void test_read_write(void)
     iob.Information = -1;
     offset.QuadPart = 0;
     status = pNtReadFile(hfile, 0, NULL, NULL, &iob, buf, sizeof(buf), &offset, NULL);
-    ok(status == STATUS_PENDING || status == STATUS_SUCCESS, "expected STATUS_PENDING or STATUS_SUCCESS, got %#x\n", status);
+    ok(status == STATUS_PENDING || broken(status == STATUS_SUCCESS) /* before Vista */,
+            "expected STATUS_PENDING, got %#x.\n", status);
     if (status == STATUS_PENDING)
     {
         ret = WaitForSingleObject(hfile, 3000);
@@ -4546,10 +4623,10 @@ static void test_read_write(void)
     bytes = 0;
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, "ABCD", 4, &bytes, &ovl);
-    /* WriteFile return value depends on Windows version and testing it is not practical */
+    ok((!ret && GetLastError() == ERROR_IO_PENDING) || broken(ret) /* before Vista */,
+            "Unexpected result %#x, GetLastError() %u.\n", ret, GetLastError());
     if (!ret)
     {
-        ok(GetLastError() == ERROR_IO_PENDING, "expected ERROR_IO_PENDING, got %d\n", GetLastError());
         ok(bytes == 0, "bytes %u\n", bytes);
         ret = WaitForSingleObject(hfile, 3000);
         ok(ret == WAIT_OBJECT_0, "WaitForSingleObject error %d\n", ret);
@@ -4579,10 +4656,10 @@ static void test_read_write(void)
     bytes = 0;
     SetLastError(0xdeadbeef);
     ret = ReadFile(hfile, buf, sizeof(buf), &bytes, &ovl);
-    /* ReadFile return value depends on Windows version and testing it is not practical */
+    ok((!ret && GetLastError() == ERROR_IO_PENDING) || broken(ret) /* before Vista */,
+            "Unexpected result %#x, GetLastError() %u.\n", ret, GetLastError());
     if (!ret)
     {
-        ok(GetLastError() == ERROR_IO_PENDING, "expected ERROR_IO_PENDING, got %d\n", GetLastError());
         ok(bytes == 0, "bytes %u\n", bytes);
         ret = WaitForSingleObject(hfile, 3000);
         ok(ret == WAIT_OBJECT_0, "WaitForSingleObject error %d\n", ret);
@@ -4686,6 +4763,74 @@ static void test_flush_buffers_file(void)
     DeleteFileA(buffer);
 }
 
+static void test_file_readonly_access(void)
+{
+    static const DWORD default_sharing = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    static const WCHAR fooW[] = {'f', 'o', 'o', 0};
+    WCHAR path[MAX_PATH];
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING nameW;
+    IO_STATUS_BLOCK io;
+    HANDLE handle;
+    NTSTATUS status;
+    DWORD ret;
+
+    /* Set up */
+    GetTempPathW(MAX_PATH, path);
+    GetTempFileNameW(path, fooW, 0, path);
+    DeleteFileW(path);
+    pRtlDosPathNameToNtPathName_U(path, &nameW, NULL, NULL);
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = NULL;
+    attr.ObjectName = &nameW;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    status = pNtCreateFile(&handle, FILE_GENERIC_WRITE, &attr, &io, NULL, FILE_ATTRIBUTE_READONLY, default_sharing,
+                           FILE_CREATE, 0, NULL, 0);
+    ok(status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#x.\n", status);
+    CloseHandle(handle);
+
+    /* NtCreateFile FILE_GENERIC_WRITE */
+    status = pNtCreateFile(&handle, FILE_GENERIC_WRITE, &attr, &io, NULL, FILE_ATTRIBUTE_NORMAL, default_sharing,
+                           FILE_OPEN, FILE_NON_DIRECTORY_FILE, NULL, 0);
+    ok(status == STATUS_ACCESS_DENIED, "expected STATUS_ACCESS_DENIED, got %#x.\n", status);
+
+    /* NtCreateFile DELETE without FILE_DELETE_ON_CLOSE */
+    status = pNtCreateFile(&handle, DELETE, &attr, &io, NULL, FILE_ATTRIBUTE_NORMAL, default_sharing, FILE_OPEN,
+                           FILE_NON_DIRECTORY_FILE, NULL, 0);
+    ok(status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#x.\n", status);
+    CloseHandle(handle);
+
+    /* NtCreateFile DELETE with FILE_DELETE_ON_CLOSE */
+    status = pNtCreateFile(&handle, SYNCHRONIZE | DELETE, &attr, &io, NULL, FILE_ATTRIBUTE_NORMAL, default_sharing,
+                           FILE_OPEN, FILE_DELETE_ON_CLOSE | FILE_NON_DIRECTORY_FILE, NULL, 0);
+    ok(status == STATUS_CANNOT_DELETE, "expected STATUS_CANNOT_DELETE, got %#x.\n", status);
+
+    /* NtOpenFile GENERIC_WRITE */
+    status = pNtOpenFile(&handle, GENERIC_WRITE, &attr, &io, default_sharing, FILE_NON_DIRECTORY_FILE);
+    ok(status == STATUS_ACCESS_DENIED, "expected STATUS_ACCESS_DENIED, got %#x.\n", status);
+
+    /* NtOpenFile DELETE without FILE_DELETE_ON_CLOSE */
+    status = pNtOpenFile(&handle, DELETE, &attr, &io, default_sharing, FILE_NON_DIRECTORY_FILE);
+    ok(status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#x.\n", status);
+    CloseHandle(handle);
+
+    /* NtOpenFile DELETE with FILE_DELETE_ON_CLOSE */
+    status = pNtOpenFile(&handle, DELETE, &attr, &io, default_sharing, FILE_DELETE_ON_CLOSE | FILE_NON_DIRECTORY_FILE);
+    ok(status == STATUS_CANNOT_DELETE, "expected STATUS_CANNOT_DELETE, got %#x.\n", status);
+
+    ret = GetFileAttributesW(path);
+    ok(ret & FILE_ATTRIBUTE_READONLY, "got wrong attribute: %#x.\n", ret);
+
+    /* Clean up */
+    pRtlFreeUnicodeString(&nameW);
+    SetFileAttributesW(path, FILE_ATTRIBUTE_NORMAL);
+    DeleteFileW(path);
+}
+
 START_TEST(file)
 {
     HMODULE hkernel32 = GetModuleHandleA("kernel32.dll");
@@ -4750,6 +4895,7 @@ START_TEST(file)
     test_file_id_information();
     test_file_access_information();
     test_file_mode();
+    test_file_readonly_access();
     test_query_volume_information_file();
     test_query_attribute_information_file();
     test_ioctl();

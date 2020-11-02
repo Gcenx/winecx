@@ -45,8 +45,10 @@
 #ifdef HAVE_MACH_O_LOADER_H
 #include <mach-o/loader.h>
 #endif
+#include "wine/hostptraddrspace_enter.h"
 
-#define IMAGE_NO_MAP  ((void*)-1)
+
+#define IMAGE_NO_MAP  ((void* HOSTPTR)-1)
 
 #ifndef __ELF__
 #ifndef SHT_NULL
@@ -76,7 +78,7 @@ struct image_file_map
             struct
             {
                 Elf64_Shdr                      shdr;
-                const char*                     mapped;
+                const char* HOSTPTR             mapped;
             }*                          sect;
 #endif
         } elf;
@@ -101,7 +103,7 @@ struct image_file_map
             struct
             {
                 struct section_64               section;
-                const char*                     mapped;
+                const char* HOSTPTR             mapped;
                 unsigned int                    ignored : 1;
             }*                          sect;
 #endif
@@ -111,13 +113,13 @@ struct image_file_map
             HANDLE                      hMap;
             IMAGE_NT_HEADERS            ntheader;
             unsigned                    full_count;
-            void*                       full_map;
+            void* WIN32PTR              full_map;
             struct
             {
                 IMAGE_SECTION_HEADER            shdr;
                 const char*                     mapped;
-            }*                          sect;
-            const char*	                strtable;
+            }* WIN32PTR                 sect;
+            const char* WIN32PTR        strtable;
         } pe;
     } u;
 };
@@ -208,3 +210,5 @@ static inline unsigned image_get_map_size(const struct image_section_map* ism)
     default: assert(0); return 0;
     }
 }
+
+#include "wine/hostptraddrspace_exit.h"

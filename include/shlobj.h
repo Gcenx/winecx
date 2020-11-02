@@ -19,6 +19,8 @@
 #ifndef __WINE_SHLOBJ_H
 #define __WINE_SHLOBJ_H
 
+#include "wine/winheader_enter.h"
+
 #include <ole2.h>
 #include <commctrl.h>
 #include <prsht.h>
@@ -1825,5 +1827,7 @@ HRESULT WINAPI SHLimitInputEdit(HWND hwnd, IShellFolder *folder);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_SHLOBJ_H */

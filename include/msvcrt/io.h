@@ -8,6 +8,8 @@
 #ifndef __WINE_IO_H
 #define __WINE_IO_H
 
+#include "wine/winheader_enter.h"
+
 #include <crtdefs.h>
 
 #include <pshpack8.h>
@@ -181,5 +183,7 @@ extern int WINAPIV sopen(const char*,int,int,...) __attribute__((alias("_sopen")
 #endif /* __GNUC__ */
 
 #include <poppack.h>
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_IO_H */

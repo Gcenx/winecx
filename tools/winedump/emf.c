@@ -347,7 +347,7 @@ static int dump_emfrecord(void)
                etoW->emrtext.rcl.left, etoW->emrtext.rcl.top,
                etoW->emrtext.rcl.right, etoW->emrtext.rcl.bottom,
                etoW->emrtext.fOptions,
-               debugstr_wn((LPCWSTR)((const BYTE *)etoW + etoW->emrtext.offString), etoW->emrtext.nChars));
+               debugstr_wn((const WCHAR* HOSTPTR)((const BYTE *)etoW + etoW->emrtext.offString), etoW->emrtext.nChars));
 	break;
     }
 

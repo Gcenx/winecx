@@ -146,6 +146,7 @@ extern int get_file_unix_fd( struct file *file );
 extern struct file *create_file_for_fd( int fd, unsigned int access, unsigned int sharing );
 extern struct file *create_file_for_fd_obj( struct fd *fd, unsigned int access, unsigned int sharing );
 extern void file_set_error(void);
+extern struct object_type *file_get_type( struct object *obj );
 extern struct security_descriptor *mode_to_sd( mode_t mode, const SID *user, const SID *group );
 extern mode_t sd_to_mode( const struct security_descriptor *sd, const SID *owner );
 
@@ -195,6 +196,7 @@ extern obj_handle_t async_handoff( struct async *async, int success, data_size_t
 extern void queue_async( struct async_queue *queue, struct async *async );
 extern void async_set_timeout( struct async *async, timeout_t timeout, unsigned int status );
 extern void async_set_result( struct object *obj, unsigned int status, apc_param_t total );
+extern void set_async_pending( struct async *async, int signal );
 extern int async_waiting( struct async_queue *queue );
 extern void async_terminate( struct async *async, unsigned int status );
 extern void async_wake_up( struct async_queue *queue, unsigned int status );

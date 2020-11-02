@@ -345,7 +345,7 @@ static HRESULT WINAPI MSTASK_ITask_CreateTrigger(ITask *iface, WORD *idx, ITaskT
     new_trigger->wStartHour = time.wHour;
     new_trigger->wStartMinute = time.wMinute;
     new_trigger->rgFlags = TASK_TRIGGER_FLAG_DISABLED;
-    new_trigger->TriggerType = TASK_TIME_TRIGGER_DAILY,
+    new_trigger->TriggerType = TASK_TIME_TRIGGER_DAILY;
     new_trigger->Type.Daily.DaysInterval = 1;
 
     *idx = This->trigger_count++;
@@ -1690,7 +1690,11 @@ static HRESULT WINAPI MSTASK_IPersistFile_Save(IPersistFile *iface, LPCOLESTR ta
         hfile = CreateFileW(task_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, disposition, 0, 0);
         if (hfile != INVALID_HANDLE_VALUE) break;
 
-        if (try++ >= 3) return HRESULT_FROM_WIN32(GetLastError());
+        if (try++ >= 3)
+        {
+            hr = HRESULT_FROM_WIN32(GetLastError());
+            goto failed;
+        }
         Sleep(100);
     }
 
@@ -1781,13 +1785,16 @@ failed:
         CoTaskMemFree(comment);
     CoTaskMemFree(user_data);
 
-    CloseHandle(hfile);
-    if (hr != S_OK)
-        DeleteFileW(task_name);
-    else if (remember)
+    if (hfile != INVALID_HANDLE_VALUE)
     {
-        heap_free(This->task_name);
-        This->task_name = heap_strdupW(task_name);
+        CloseHandle(hfile);
+        if (hr != S_OK)
+            DeleteFileW(task_name);
+        else if (remember)
+        {
+            heap_free(This->task_name);
+            This->task_name = heap_strdupW(task_name);
+        }
     }
     return hr;
 }
@@ -1806,10 +1813,10 @@ static HRESULT WINAPI MSTASK_IPersistFile_GetCurFile(IPersistFile *iface, LPOLES
 
     TRACE("(%p, %p)\n", iface, file_name);
 
-    *file_name = CoTaskMemAlloc((strlenW(This->task_name) + 1) * sizeof(WCHAR));
+    *file_name = CoTaskMemAlloc((lstrlenW(This->task_name) + 1) * sizeof(WCHAR));
     if (!*file_name) return E_OUTOFMEMORY;
 
-    strcpyW(*file_name, This->task_name);
+    lstrcpyW(*file_name, This->task_name);
     return S_OK;
 }
 
@@ -1886,7 +1893,7 @@ HRESULT TaskConstructor(ITaskService *service, const WCHAR *name, ITask **task)
 
     TRACE("(%s, %p)\n", debugstr_w(name), task);
 
-    if (strchrW(name, '.')) return E_INVALIDARG;
+    if (wcschr(name, '.')) return E_INVALIDARG;
 
     GetWindowsDirectoryW(task_name, MAX_PATH);
     lstrcatW(task_name, tasksW);

@@ -21,6 +21,8 @@
 #ifndef __SQLUCODE_H
 #define __SQLUCODE_H
 
+#include "wine/winheader_enter.h"
+
 #include <sqlext.h>
 
 #ifdef __cplusplus
@@ -60,5 +62,7 @@ SQLRETURN WINAPI SQLSetStmtAttrW(SQLHSTMT StatementHandle,
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif

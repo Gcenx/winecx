@@ -23,6 +23,9 @@
 #include "ws2tcpip.h"
 
 #include <stdarg.h>
+#ifndef _VA_LIST_T /* Clang's stdarg.h guards with _VA_LIST, while Xcode's uses _VA_LIST_T */
+#define _VA_LIST_T
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -238,7 +241,7 @@ static cookie_t *alloc_cookie(substr_t name, substr_t data, FILETIME expiry, FIL
 {
     cookie_t *new_cookie;
 
-    new_cookie = heap_alloc(sizeof(*new_cookie));
+    new_cookie = heap_alloc_zero(sizeof(*new_cookie));
     if(!new_cookie)
         return NULL;
 
@@ -247,9 +250,12 @@ static cookie_t *alloc_cookie(substr_t name, substr_t data, FILETIME expiry, FIL
     new_cookie->flags = flags;
     list_init(&new_cookie->entry);
 
-    new_cookie->name = heap_strndupW(name.str, name.len);
-    new_cookie->data = heap_strndupW(data.str, data.len);
-    if(!new_cookie->name || !new_cookie->data) {
+    if(name.str && !(new_cookie->name = heap_strndupW(name.str, name.len))) {
+        delete_cookie(new_cookie);
+        return NULL;
+    }
+
+    if(data.str && !(new_cookie->data = heap_strndupW(data.str, data.len))) {
         delete_cookie(new_cookie);
         return NULL;
     }
@@ -730,7 +736,7 @@ BOOL WINAPI InternetGetCookieExW(LPCWSTR lpszUrl, LPCWSTR lpszCookieName,
 
     TRACE("(%s, %s, %p, %p, %x, %p)\n", debugstr_w(lpszUrl),debugstr_w(lpszCookieName), lpCookieData, lpdwSize, flags, reserved);
 
-    if (flags)
+    if (flags & ~INTERNET_COOKIE_HTTPONLY)
         FIXME("flags 0x%08x not supported\n", flags);
 
     if (!lpszUrl)

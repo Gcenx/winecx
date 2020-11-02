@@ -8,6 +8,8 @@
 #ifndef __WINE_CONIO_H
 #define __WINE_CONIO_H
 
+#include "wine/winheader_enter.h"
+
 #include <crtdefs.h>
 
 #ifdef __cplusplus
@@ -59,5 +61,7 @@ extern int WINAPIV cscanf(const char*,...) __attribute__((alias("_cscanf"),forma
 #define cprintf _cprintf
 #define cscanf _cscanf
 #endif /* __GNUC__ */
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_CONIO_H */

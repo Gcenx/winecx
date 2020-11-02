@@ -45,14 +45,18 @@ typedef struct __JUMP_BUFFER
 #define _JBLEN 16
 #define _JBTYPE int
 
+#elif defined(__i386_on_x86_64__)
+
+#error Can't use this header for 32-on-64-bit mode
+
 #elif defined(__x86_64__)
 
-typedef struct _SETJMP_FLOAT128
+typedef DECLSPEC_ALIGN(16) struct _SETJMP_FLOAT128
 {
-    unsigned __int64 DECLSPEC_ALIGN(16) Part[2];
+    unsigned __int64 Part[2];
 } SETJMP_FLOAT128;
 
-typedef struct _JUMP_BUFFER
+typedef DECLSPEC_ALIGN(16) struct _JUMP_BUFFER
 {
     unsigned __int64 Frame;
     unsigned __int64 Rbx;
@@ -146,11 +150,17 @@ extern "C" {
 int __cdecl _setjmp(jmp_buf);
 void __cdecl longjmp(jmp_buf,int);
 
+#if defined(_WIN64) && defined(__GNUC__)
+int __cdecl __attribute__ ((__nothrow__,__returns_twice__)) _setjmpex(jmp_buf,void*);
+# define setjmp(buf)   _setjmpex(buf,__builtin_frame_address(0))
+# define setjmpex(buf) _setjmpex(buf,__builtin_frame_address(0))
+#else
+# define setjmp _setjmp
+#endif
+
 #ifdef __cplusplus
 }
 #endif
-
-#define setjmp _setjmp
 
 #include <poppack.h>
 

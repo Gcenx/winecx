@@ -25,7 +25,7 @@
 #include "winnls.h"
 #include "wine/heap.h"
 
-const char * debugstr_sid(PSID sid) DECLSPEC_HIDDEN;
+const char * HOSTPTR debugstr_sid(PSID sid) DECLSPEC_HIDDEN;
 BOOL ADVAPI_IsLocalComputer(LPCWSTR ServerName) DECLSPEC_HIDDEN;
 BOOL ADVAPI_GetComputerSid(PSID sid) DECLSPEC_HIDDEN;
 

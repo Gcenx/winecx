@@ -21,6 +21,8 @@
 #ifndef __WINE_DBGHELP_H
 #define __WINE_DBGHELP_H
 
+#include "wine/winheader_enter.h"
+
 /* A set of documentation macros (see also imagehlp.h) */
 #ifndef __deref_out
 # define __deref_out
@@ -500,8 +502,16 @@ typedef struct _IMAGEHLP_DUPLICATE_SYMBOL64
 #define SYMOPT_NO_PROMPTS               0x00080000
 #define SYMOPT_OVERWRITE                0x00100000
 #define SYMOPT_IGNORE_IMAGEDIR          0x00200000
-
-#define SYMOPT_DEBUG                    0x80000000
+#define SYMOPT_FLAT_DIRECTORY           0x00400000
+#define SYMOPT_FAVOR_COMPRESSED         0x00800000
+#define SYMOPT_ALLOW_ZERO_ADDRESS       0x01000000
+#define SYMOPT_DISABLE_SYMSRV_AUTODETECT  0x02000000
+#define SYMOPT_READONLY_CACHE             0x04000000
+#define SYMOPT_SYMPATH_LAST               0x08000000
+#define SYMOPT_DISABLE_FAST_SYMBOLS       0x10000000
+#define SYMOPT_DISABLE_SYMSRV_TIMEOUT     0x20000000
+#define SYMOPT_DISABLE_SRVSTAR_ON_STARTUP 0x40000000
+#define SYMOPT_DEBUG                      0x80000000
 
 typedef struct _IMAGEHLP_STACK_FRAME
 {
@@ -746,6 +756,19 @@ typedef struct _MINIDUMP_MEMORY_LIST
     ULONG                       NumberOfMemoryRanges;
     MINIDUMP_MEMORY_DESCRIPTOR  MemoryRanges[1]; /* FIXME: 0-sized array not supported */
 } MINIDUMP_MEMORY_LIST, *PMINIDUMP_MEMORY_LIST;
+
+typedef struct _MINIDUMP_MEMORY_DESCRIPTOR64
+{
+    ULONG64                     StartOfMemoryRange;
+    ULONG64                     DataSize;
+} MINIDUMP_MEMORY_DESCRIPTOR64, *PMINIDUMP_MEMORY_DESCRIPTOR64;
+
+typedef struct _MINIDUMP_MEMORY64_LIST
+{
+    ULONG64                     NumberOfMemoryRanges;
+    RVA64                       BaseRva;
+    MINIDUMP_MEMORY_DESCRIPTOR64 MemoryRanges[1]; /* FIXME: 0-sized array not supported */
+} MINIDUMP_MEMORY64_LIST, *PMINIDUMP_MEMORY64_LIST;
 
 #define MINIDUMP_MISC1_PROCESS_ID       0x00000001
 #define MINIDUMP_MISC1_PROCESS_TIMES    0x00000002
@@ -1253,8 +1276,8 @@ BOOL WINAPI SymMatchFileName(PCSTR, PCSTR, PSTR*, PSTR*);
 BOOL WINAPI SymMatchFileNameW(PCWSTR, PCWSTR, PWSTR*, PWSTR*);
 PCHAR WINAPI SymSetHomeDirectory(HANDLE, PCSTR);
 PWSTR WINAPI SymSetHomeDirectoryW(HANDLE, PCWSTR);
-PCHAR WINAPI SymGetHomeDirectory(DWORD, PSTR, size_t);
-PWSTR WINAPI SymGetHomeDirectoryW(DWORD, PWSTR, size_t);
+PCHAR WINAPI SymGetHomeDirectory(DWORD, PSTR, SIZE_T);
+PWSTR WINAPI SymGetHomeDirectoryW(DWORD, PWSTR, SIZE_T);
 #define hdBase  0
 #define hdSym   1
 #define hdSrc   2
@@ -1403,6 +1426,15 @@ typedef struct _IMAGE_DEBUG_INFORMATION
     DWORD                       Reserved[ 2 ];
 } IMAGE_DEBUG_INFORMATION, *PIMAGE_DEBUG_INFORMATION;
 
+typedef enum
+{
+    SYMOPT_EX_DISABLEACCESSTIMEUPDATE,
+    SYMOPT_EX_MAX,
+
+#ifdef __WINESRC__
+    SYMOPT_EX_WINE_NATIVE_MODULES = 1000,
+#endif
+} IMAGEHLP_EXTENDED_OPTIONS;
 
 PIMAGE_DEBUG_INFORMATION WINAPI MapDebugInformation(HANDLE, PCSTR, PCSTR, ULONG);
 
@@ -1410,6 +1442,9 @@ BOOL WINAPI UnmapDebugInformation(PIMAGE_DEBUG_INFORMATION);
 
 DWORD   WINAPI  SymGetOptions(void);
 DWORD   WINAPI  SymSetOptions(DWORD);
+
+BOOL WINAPI SymGetExtendedOption(IMAGEHLP_EXTENDED_OPTIONS option);
+BOOL WINAPI SymSetExtendedOption(IMAGEHLP_EXTENDED_OPTIONS option, BOOL value);
 
 BOOL WINAPI SymSetParentWindow(HWND);
 
@@ -1539,5 +1574,7 @@ BOOL    WINAPI SymUnloadModule(HANDLE, DWORD);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
+
+#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_DBGHELP_H */

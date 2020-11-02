@@ -20,6 +20,8 @@
 #ifndef __WINE_XINPUT_H
 #define __WINE_XINPUT_H
 
+#include "wine/winheader_enter.h"
+
 #include <windef.h>
 
 /*
@@ -242,5 +244,7 @@ DWORD WINAPI XInputGetStateEx(DWORD, XINPUT_STATE*);
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_XINPUT_H */

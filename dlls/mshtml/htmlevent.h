@@ -46,6 +46,7 @@ typedef enum {
     EVENTID_MOUSEOVER,
     EVENTID_MOUSEUP,
     EVENTID_MOUSEWHEEL,
+    EVENTID_MSTHUMBNAILCLICK,
     EVENTID_PASTE,
     EVENTID_READYSTATECHANGE,
     EVENTID_RESIZE,
@@ -57,7 +58,7 @@ typedef enum {
     EVENTID_LAST
 } eventid_t;
 
-typedef struct {
+typedef struct DOMEvent {
     DispatchEx dispex;
     IDOMEvent IDOMEvent_iface;
     IDOMUIEvent IDOMUIEvent_iface;
@@ -65,6 +66,8 @@ typedef struct {
     IDOMKeyboardEvent IDOMKeyboardEvent_iface;
 
     LONG ref;
+    void *(*query_interface)(struct DOMEvent*,REFIID);
+    void (*destroy)(struct DOMEvent*);
 
     nsIDOMEvent *nsevent;
     nsIDOMUIEvent *ui_event;

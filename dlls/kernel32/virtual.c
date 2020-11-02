@@ -46,6 +46,7 @@
 
 WINE_DECLARE_DEBUG_CHANNEL(seh);
 WINE_DECLARE_DEBUG_CHANNEL(file);
+WINE_DECLARE_DEBUG_CHANNEL(virtual);
 
 
 /***********************************************************************
@@ -86,7 +87,7 @@ LPVOID WINAPI DECLSPEC_HOTPATCH VirtualAlloc( void *addr, SIZE_T size, DWORD typ
  *	Success: Base address of allocated region of pages.
  *	Failure: NULL.
  */
-LPVOID WINAPI VirtualAllocEx( HANDLE hProcess, LPVOID addr, SIZE_T size,
+LPVOID WINAPI DECLSPEC_HOTPATCH VirtualAllocEx( HANDLE hProcess, LPVOID addr, SIZE_T size,
     DWORD type, DWORD protect )
 {
     LPVOID ret = addr;
@@ -98,6 +99,17 @@ LPVOID WINAPI VirtualAllocEx( HANDLE hProcess, LPVOID addr, SIZE_T size,
         ret = NULL;
     }
     return ret;
+}
+
+
+/***********************************************************************
+ *             VirtualAllocExNuma   (KERNEL32.@)
+ */
+LPVOID WINAPI DECLSPEC_HOTPATCH VirtualAllocExNuma(HANDLE process, void *addr, SIZE_T size,
+        DWORD type, DWORD protect, DWORD numa_node)
+{
+    FIXME_(virtual)("Ignoring preferred numa_node\n");
+    return VirtualAllocEx(process, addr, size, type, protect);
 }
 
 
@@ -607,13 +619,22 @@ BOOL WINAPI IsBadCodePtr( FARPROC ptr )
  *	Success: TRUE.
  *	Failure: FALSE. Read access to all bytes in string.
  */
+#ifdef __i386_on_x86_64__
 BOOL WINAPI IsBadStringPtrA( LPCSTR str, UINT_PTR max )
+{
+    return IsBadStringPtrA((const char * HOSTPTR)str, (ULONGLONG)max);
+}
+
+BOOL WINAPI IsBadStringPtrA( const char * HOSTPTR str, ULONGLONG max ) __attribute__((overloadable))
+#else
+BOOL WINAPI IsBadStringPtrA( LPCSTR str, UINT_PTR max )
+#endif
 {
     if (!str) return TRUE;
     
     __TRY
     {
-        volatile const char *p = str;
+        volatile const char * HOSTPTR p = str;
         while (p != str + max) if (!*p++) break;
     }
     __EXCEPT_PAGE_FAULT
@@ -631,13 +652,22 @@ BOOL WINAPI IsBadStringPtrA( LPCSTR str, UINT_PTR max )
  *
  * See IsBadStringPtrA.
  */
+#ifdef __i386_on_x86_64__
 BOOL WINAPI IsBadStringPtrW( LPCWSTR str, UINT_PTR max )
+{
+    return IsBadStringPtrW( (const WCHAR * HOSTPTR)str, (ULONGLONG)max );
+}
+
+BOOL WINAPI IsBadStringPtrW( const WCHAR * HOSTPTR str, ULONGLONG max ) __attribute__((overloadable))
+#else
+BOOL WINAPI IsBadStringPtrW( LPCWSTR str, UINT_PTR max )
+#endif
 {
     if (!str) return TRUE;
     
     __TRY
     {
-        volatile const WCHAR *p = str;
+        volatile const WCHAR * HOSTPTR p = str;
         while (p != str + max) if (!*p++) break;
     }
     __EXCEPT_PAGE_FAULT
@@ -710,6 +740,17 @@ BOOL WINAPI K32GetWsChanges(HANDLE process, PPSAPI_WS_WATCH_INFORMATION watchinf
         return FALSE;
     }
     return TRUE;
+}
+
+/***********************************************************************
+ *           K32GetWsChangesEx (KERNEL32.@)
+ */
+BOOL WINAPI K32GetWsChangesEx(HANDLE process, PSAPI_WS_WATCH_INFORMATION_EX *watchinfoex, DWORD *size)
+{
+    FIXME_(seh)("(%p, %p, %p)\n", process, watchinfoex, size);
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
 }
 
 /***********************************************************************

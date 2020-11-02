@@ -29,7 +29,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(event);
 
 
 /* return the name of an Mac event */
-static const char *dbgstr_event(int type)
+static const char * HOSTPTR dbgstr_event(int type)
 {
     static const char * const event_names[] = {
         "APP_ACTIVATED",

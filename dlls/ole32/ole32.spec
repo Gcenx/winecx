@@ -14,8 +14,10 @@
 @ stdcall CoCreateGuid(ptr)
 @ stdcall CoCreateInstance(ptr ptr long ptr ptr)
 @ stdcall CoCreateInstanceEx(ptr ptr long ptr long ptr)
+@ stdcall CoDisableCallCancellation(ptr)
 @ stdcall CoDisconnectObject(ptr long)
 @ stdcall CoDosDateTimeToFileTime(long long ptr) kernel32.DosDateTimeToFileTime
+@ stdcall CoEnableCallCancellation(ptr)
 @ stdcall CoFileTimeNow(ptr)
 @ stdcall CoFileTimeToDosDateTime(ptr ptr ptr) kernel32.FileTimeToDosDateTime
 @ stdcall CoFreeAllLibraries()

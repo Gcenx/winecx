@@ -21,9 +21,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include "ddraw_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ddraw);
@@ -1547,6 +1544,12 @@ static HRESULT ddraw_surface_blt_clipped(struct ddraw_surface *dst_surface, cons
             hr = ddraw_surface_update_frontbuffer(dst_surface, &dst_rect, FALSE, 0);
 
         return hr;
+    }
+
+    if (!ddraw_clipper_is_valid(dst_surface->clipper))
+    {
+        FIXME("Attempting to blit with an invalid clipper.\n");
+        return DDERR_INVALIDPARAMS;
     }
 
     scale_x = (float)(src_rect.right - src_rect.left) / (float)(dst_rect.right - dst_rect.left);
@@ -4408,39 +4411,26 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH ddraw_surface1_BltFast(IDirectDrawSurfac
             src_impl ? &src_impl->IDirectDrawSurface7_iface : NULL, src_rect, flags);
 }
 
-/*****************************************************************************
- * IDirectDrawSurface7::GetClipper
- *
- * Returns the IDirectDrawClipper interface of the clipper assigned to this
- * surface
- *
- * Params:
- *  Clipper: Address to store the interface pointer at
- *
- * Returns:
- *  DD_OK on success
- *  DDERR_INVALIDPARAMS if Clipper is NULL
- *  DDERR_NOCLIPPERATTACHED if there's no clipper attached
- *
- *****************************************************************************/
-static HRESULT WINAPI ddraw_surface7_GetClipper(IDirectDrawSurface7 *iface, IDirectDrawClipper **Clipper)
+static HRESULT WINAPI ddraw_surface7_GetClipper(IDirectDrawSurface7 *iface, IDirectDrawClipper **clipper)
 {
     struct ddraw_surface *surface = impl_from_IDirectDrawSurface7(iface);
 
-    TRACE("iface %p, clipper %p.\n", iface, Clipper);
+    TRACE("iface %p, clipper %p.\n", iface, clipper);
 
-    if (!Clipper)
+    if (!clipper)
         return DDERR_INVALIDPARAMS;
 
     wined3d_mutex_lock();
     if (!surface->clipper)
     {
         wined3d_mutex_unlock();
+        *clipper = NULL;
         return DDERR_NOCLIPPERATTACHED;
     }
 
-    *Clipper = &surface->clipper->IDirectDrawClipper_iface;
-    IDirectDrawClipper_AddRef(*Clipper);
+    *clipper = &surface->clipper->IDirectDrawClipper_iface;
+    if (ddraw_clipper_is_valid(surface->clipper))
+        IDirectDrawClipper_AddRef(*clipper);
     wined3d_mutex_unlock();
 
     return DD_OK;
@@ -4515,7 +4505,7 @@ static HRESULT WINAPI ddraw_surface7_SetClipper(IDirectDrawSurface7 *iface,
 
     if (clipper != NULL)
         IDirectDrawClipper_AddRef(iclipper);
-    if (old_clipper)
+    if (old_clipper && ddraw_clipper_is_valid(old_clipper))
         IDirectDrawClipper_Release(&old_clipper->IDirectDrawClipper_iface);
 
     if ((This->surface_desc.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE) && This->ddraw->wined3d_swapchain)
@@ -5796,11 +5786,14 @@ static void STDMETHODCALLTYPE ddraw_surface_wined3d_object_destroyed(void *paren
     /* Reduce the ddraw surface count. */
     list_remove(&surface->surface_list_entry);
 
-    if (surface->clipper)
+    if (surface->clipper && ddraw_clipper_is_valid(surface->clipper))
         IDirectDrawClipper_Release(&surface->clipper->IDirectDrawClipper_iface);
 
     if (surface == surface->ddraw->primary)
+    {
         surface->ddraw->primary = NULL;
+        surface->ddraw->gdi_surface = NULL;
+    }
 
     wined3d_private_store_cleanup(&surface->private_store);
 
@@ -5980,11 +5973,19 @@ HRESULT ddraw_surface_create(struct ddraw *ddraw, const DDSURFACEDESC2 *surface_
         }
         if (desc->ddsCaps.dwCaps & (DDSCAPS_VIDEOMEMORY | DDSCAPS_SYSTEMMEMORY))
         {
-            WARN("DDSCAPS2_TEXTUREMANAGE used width DDSCAPS_VIDEOMEMORY "
+            WARN("DDSCAPS2_TEXTUREMANAGE used with DDSCAPS_VIDEOMEMORY "
                     "or DDSCAPS_SYSTEMMEMORY, returning DDERR_INVALIDCAPS.\n");
             heap_free(texture);
             return DDERR_INVALIDCAPS;
         }
+    }
+
+    if (desc->ddsCaps.dwCaps & DDSCAPS_WRITEONLY
+            && !(desc->ddsCaps.dwCaps2 & (DDSCAPS2_TEXTUREMANAGE | DDSCAPS2_D3DTEXTUREMANAGE)))
+    {
+        WARN("DDSCAPS_WRITEONLY used without DDSCAPS2_TEXTUREMANAGE, returning DDERR_INVALIDCAPS.\n");
+        heap_free(texture);
+        return DDERR_INVALIDCAPS;
     }
 
     if (FAILED(hr = wined3d_get_adapter_display_mode(ddraw->wined3d, WINED3DADAPTER_DEFAULT, &mode, NULL)))
@@ -6339,6 +6340,8 @@ HRESULT ddraw_surface_create(struct ddraw *ddraw, const DDSURFACEDESC2 *surface_
         {
             mip = wined3d_texture_get_sub_resource_parent(wined3d_texture, i * levels + j);
             mip_desc = &mip->surface_desc;
+            if (desc->ddsCaps.dwCaps & DDSCAPS_MIPMAP)
+                mip_desc->u2.dwMipMapCount = levels - j;
 
             if (j)
             {
@@ -6457,7 +6460,10 @@ HRESULT ddraw_surface_create(struct ddraw *ddraw, const DDSURFACEDESC2 *surface_
     }
 
     if (surface_desc->ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE)
+    {
         ddraw->primary = root;
+        ddraw->gdi_surface = root->wined3d_texture;
+    }
     *surface = root;
 
     return DD_OK;

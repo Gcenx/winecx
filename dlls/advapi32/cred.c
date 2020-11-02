@@ -235,13 +235,23 @@ static DWORD registry_read_credential(HKEY hkey, PCREDENTIALW credential,
 }
 
 #ifdef __APPLE__
+static int utf8towc(const char * HOSTPTR utf8, int len, LPWSTR out, int out_len)
+{
+    int ret;
+    char *temp = heap_alloc(len);
+    memcpy(temp, utf8, len);
+    ret = MultiByteToWideChar(CP_UTF8, 0, temp, len, out, out_len);
+    heap_free(temp);
+    return ret;
+}
+
 static DWORD mac_read_credential_from_item(SecKeychainItemRef item, BOOL require_password,
                                            PCREDENTIALW credential, char *buffer,
                                            DWORD *len)
 {
     int status;
     UInt32 i, cred_blob_len;
-    void *cred_blob;
+    void * HOSTPTR cred_blob;
     WCHAR *user = NULL;
     BOOL user_name_present = FALSE;
     SecKeychainAttributeInfo info;
@@ -298,14 +308,14 @@ static DWORD mac_read_credential_from_item(SecKeychainItemRef item, BOOL require
         {
             case kSecServiceItemAttr:
                 TRACE("kSecServiceItemAttr: %.*s\n", (int)attr_list->attr[i].length,
-                      (char *)attr_list->attr[i].data);
+                      attr_list->attr[i].data);
                 if (!attr_list->attr[i].data) continue;
                 if (buffer)
                 {
                     INT str_len;
                     credential->TargetName = (LPWSTR)buffer;
-                    str_len = MultiByteToWideChar(CP_UTF8, 0, attr_list->attr[i].data,
-                                                  attr_list->attr[i].length, (LPWSTR)buffer, 0xffff);
+                    str_len = utf8towc(attr_list->attr[i].data,
+                                      attr_list->attr[i].length, (LPWSTR)buffer, 0xffff);
                     credential->TargetName[str_len] = '\0';
                     buffer += (str_len + 1) * sizeof(WCHAR);
                     *len += (str_len + 1) * sizeof(WCHAR);
@@ -313,8 +323,8 @@ static DWORD mac_read_credential_from_item(SecKeychainItemRef item, BOOL require
                 else
                 {
                     INT str_len;
-                    str_len = MultiByteToWideChar(CP_UTF8, 0, attr_list->attr[i].data,
-                                                  attr_list->attr[i].length, NULL, 0);
+                    str_len = utf8towc(attr_list->attr[i].data,
+                                      attr_list->attr[i].length, NULL, 0);
                     *len += (str_len + 1) * sizeof(WCHAR);
                 }
                 break;
@@ -322,26 +332,26 @@ static DWORD mac_read_credential_from_item(SecKeychainItemRef item, BOOL require
             {
                 INT str_len;
                 TRACE("kSecAccountItemAttr: %.*s\n", (int)attr_list->attr[i].length,
-                      (char *)attr_list->attr[i].data);
+                      attr_list->attr[i].data);
                 if (!attr_list->attr[i].data) continue;
-                str_len = MultiByteToWideChar(CP_UTF8, 0, attr_list->attr[i].data,
-                                              attr_list->attr[i].length, NULL, 0);
+                str_len = utf8towc(attr_list->attr[i].data,
+                                  attr_list->attr[i].length, NULL, 0);
                 user = heap_alloc((str_len + 1) * sizeof(WCHAR));
-                MultiByteToWideChar(CP_UTF8, 0, attr_list->attr[i].data,
-                                    attr_list->attr[i].length, user, str_len);
+                utf8towc(attr_list->attr[i].data,
+                        attr_list->attr[i].length, user, str_len);
                 user[str_len] = '\0';
                 break;
             }
             case kSecCommentItemAttr:
                 TRACE("kSecCommentItemAttr: %.*s\n", (int)attr_list->attr[i].length,
-                      (char *)attr_list->attr[i].data);
+                      attr_list->attr[i].data);
                 if (!attr_list->attr[i].data) continue;
                 if (buffer)
                 {
                     INT str_len;
                     credential->Comment = (LPWSTR)buffer;
-                    str_len = MultiByteToWideChar(CP_UTF8, 0, attr_list->attr[i].data,
-                                                  attr_list->attr[i].length, (LPWSTR)buffer, 0xffff);
+                    str_len = utf8towc(attr_list->attr[i].data,
+                                      attr_list->attr[i].length, (LPWSTR)buffer, 0xffff);
                     credential->Comment[str_len] = '\0';
                     buffer += (str_len + 1) * sizeof(WCHAR);
                     *len += (str_len + 1) * sizeof(WCHAR);
@@ -349,14 +359,14 @@ static DWORD mac_read_credential_from_item(SecKeychainItemRef item, BOOL require
                 else
                 {
                     INT str_len;
-                    str_len = MultiByteToWideChar(CP_UTF8, 0, attr_list->attr[i].data,
-                                                  attr_list->attr[i].length, NULL, 0);
+                    str_len = utf8towc(attr_list->attr[i].data,
+                                      attr_list->attr[i].length, NULL, 0);
                     *len += (str_len + 1) * sizeof(WCHAR);
                 }
                 break;
             case kSecCreationDateItemAttr:
                 TRACE("kSecCreationDateItemAttr: %.*s\n", (int)attr_list->attr[i].length,
-                      (char *)attr_list->attr[i].data);
+                      attr_list->attr[i].data);
                 if (!attr_list->attr[i].data) continue;
                 if (buffer)
                 {
@@ -399,16 +409,14 @@ static DWORD mac_read_credential_from_item(SecKeychainItemRef item, BOOL require
         {
             INT str_len;
             credential->CredentialBlob = (BYTE *)buffer;
-            str_len = MultiByteToWideChar(CP_UTF8, 0, cred_blob, cred_blob_len,
-                                          (LPWSTR)buffer, 0xffff);
+            str_len = utf8towc(cred_blob, cred_blob_len, (LPWSTR)buffer, 0xffff);
             credential->CredentialBlobSize = str_len * sizeof(WCHAR);
             *len += str_len * sizeof(WCHAR);
         }
         else
         {
             INT str_len;
-            str_len = MultiByteToWideChar(CP_UTF8, 0, cred_blob, cred_blob_len,
-                                          NULL, 0);
+            str_len = utf8towc(cred_blob, cred_blob_len, NULL, 0);
             *len += str_len * sizeof(WCHAR);
         }
     }
@@ -503,6 +511,7 @@ static DWORD mac_write_credential(const CREDENTIALW *credential, BOOL preserve_b
     UInt32 userlen, pwlen, serverlen;
     SecKeychainAttribute attrs[1];
     SecKeychainAttributeList attr_list;
+    void *attr_str;
 
     if (credential->Flags)
         FIXME("Flags 0x%x not written\n", credential->Flags);
@@ -552,8 +561,8 @@ static DWORD mac_write_credential(const CREDENTIALW *credential, BOOL preserve_b
         attrs[0].tag = kSecCommentItemAttr;
         attrs[0].length = WideCharToMultiByte(CP_UTF8, 0, credential->Comment, -1, NULL, 0, NULL, NULL);
         if (attrs[0].length) attrs[0].length--;
-        attrs[0].data = heap_alloc(attrs[0].length);
-        WideCharToMultiByte(CP_UTF8, 0, credential->Comment, -1, attrs[0].data, attrs[0].length, NULL, NULL);
+        attrs[0].data = attr_str = heap_alloc(attrs[0].length);
+        WideCharToMultiByte(CP_UTF8, 0, credential->Comment, -1, attr_str, attrs[0].length, NULL, NULL);
     }
     else
     {
@@ -564,7 +573,7 @@ static DWORD mac_write_credential(const CREDENTIALW *credential, BOOL preserve_b
                                                     preserve_blob ? 0 : strlen(password),
                                                     preserve_blob ? NULL : password);
     if (credential->Comment)
-        heap_free(attrs[0].data);
+        heap_free(attr_str);
     heap_free(password);
     /* FIXME: set TargetAlias attribute */
     CFRelease(keychain_item);
@@ -746,7 +755,7 @@ static DWORD registry_enumerate_credentials(HKEY hkeyMgr, LPCWSTR filter,
 }
 
 #ifdef __APPLE__
-static BOOL mac_credential_matches_filter(void *data, UInt32 data_len, const WCHAR *filter)
+static BOOL mac_credential_matches_filter(void * HOSTPTR data, UInt32 data_len, const WCHAR *filter)
 {
     int len;
     WCHAR *target_name;
@@ -755,9 +764,9 @@ static BOOL mac_credential_matches_filter(void *data, UInt32 data_len, const WCH
 
     if (!filter) return TRUE;
 
-    len = MultiByteToWideChar(CP_UTF8, 0, data, data_len, NULL, 0);
+    len = utf8towc(data, data_len, NULL, 0);
     if (!(target_name = heap_alloc((len + 1) * sizeof(WCHAR)))) return FALSE;
-    MultiByteToWideChar(CP_UTF8, 0, data, data_len, target_name, len);
+    utf8towc(data, data_len, target_name, len);
     target_name[len] = 0;
 
     TRACE("comparing filter %s to target name %s\n", debugstr_w(filter), debugstr_w(target_name));
@@ -813,7 +822,7 @@ static DWORD mac_enumerate_credentials(LPCWSTR filter, PCREDENTIALW *credentials
                 SecKeychainItemFreeAttributesAndData(attr_list, NULL);
                 continue;
             }
-            TRACE("service item: %.*s\n", (int)attr_list->attr[0].length, (char *)attr_list->attr[0].data);
+            TRACE("service item: %.*s\n", (int)attr_list->attr[0].length, attr_list->attr[0].data);
             match = mac_credential_matches_filter(attr_list->attr[0].data, attr_list->attr[0].length, filter);
             SecKeychainItemFreeAttributesAndData(attr_list, NULL);
             if (!match) continue;
@@ -865,9 +874,9 @@ static DWORD mac_delete_credential(LPCWSTR TargetName)
                 CFRelease(item);
                 continue;
             }
-            str_len = MultiByteToWideChar(CP_UTF8, 0, attr_list->attr[0].data, attr_list->attr[0].length, NULL, 0);
+            str_len = utf8towc(attr_list->attr[0].data, attr_list->attr[0].length, NULL, 0);
             target_name = heap_alloc((str_len + 1) * sizeof(WCHAR));
-            MultiByteToWideChar(CP_UTF8, 0, attr_list->attr[0].data, attr_list->attr[0].length, target_name, str_len);
+            utf8towc(attr_list->attr[0].data, attr_list->attr[0].length, target_name, str_len);
             /* nul terminate */
             target_name[str_len] = '\0';
             if (strcmpiW(TargetName, target_name))
@@ -1454,9 +1463,9 @@ BOOL WINAPI CredReadW(LPCWSTR TargetName, DWORD Type, DWORD Flags, PCREDENTIALW 
                     CFRelease(item);
                     continue;
                 }
-                str_len = MultiByteToWideChar(CP_UTF8, 0, attr_list->attr[0].data, attr_list->attr[0].length, NULL, 0);
+                str_len = utf8towc(attr_list->attr[0].data, attr_list->attr[0].length, NULL, 0);
                 target_name = heap_alloc((str_len + 1) * sizeof(WCHAR));
-                MultiByteToWideChar(CP_UTF8, 0, attr_list->attr[0].data, attr_list->attr[0].length, target_name, str_len);
+                utf8towc(attr_list->attr[0].data, attr_list->attr[0].length, target_name, str_len);
                 /* nul terminate */
                 target_name[str_len] = '\0';
                 if (strcmpiW(TargetName, target_name))

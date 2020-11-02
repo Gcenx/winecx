@@ -30,6 +30,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
+#include "winternl.h"
 
 #include "winldap_private.h"
 #include "wldap32.h"
@@ -114,10 +115,10 @@ oom:
 /* Determine if a URL starts with a known LDAP scheme */
 static BOOL has_ldap_scheme( char *url )
 {
-    return !strncasecmp( url, "ldap://", 7 )  ||
-           !strncasecmp( url, "ldaps://", 8 ) ||
-           !strncasecmp( url, "ldapi://", 8 ) ||
-           !strncasecmp( url, "cldap://", 8 );
+    return !_strnicmp( url, "ldap://", 7 )  ||
+           !_strnicmp( url, "ldaps://", 8 ) ||
+           !_strnicmp( url, "ldapi://", 8 ) ||
+           !_strnicmp( url, "cldap://", 8 );
 }
 
 /* Flatten an array of hostnames into a space separated string of URLs.
@@ -204,13 +205,13 @@ static char *urlify_hostnames( const char *scheme, char *hostnames, ULONG port )
 WINE_DEFAULT_DEBUG_CHANNEL(wldap32);
 
 #ifdef HAVE_LDAP
-static LDAP *create_context( const char *url )
+static WLDAP32_LDAP *create_context( const char *url )
 {
     LDAP *ld;
     int version = LDAP_VERSION3;
     if (ldap_initialize( &ld, url ) != LDAP_SUCCESS) return NULL;
     ldap_set_option( ld, LDAP_OPT_PROTOCOL_VERSION, &version );
-    return ld;
+    return ldap_wrap( ld );
 }
 #endif
 
@@ -267,7 +268,7 @@ exit:
 WLDAP32_LDAP * CDECL cldap_openW( PWCHAR hostname, ULONG portnumber )
 {
 #ifdef HAVE_LDAP
-    LDAP *ld = NULL;
+    WLDAP32_LDAP *ld = NULL;
     char *hostnameU = NULL, *url = NULL;
 
     TRACE( "(%s, %d)\n", debugstr_w(hostname), portnumber );
@@ -376,7 +377,7 @@ exit:
 WLDAP32_LDAP * CDECL ldap_initW( const PWCHAR hostname, ULONG portnumber )
 {
 #ifdef HAVE_LDAP
-    LDAP *ld = NULL;
+    WLDAP32_LDAP *ld = NULL;
     char *hostnameU = NULL, *url = NULL;
 
     TRACE( "(%s, %d)\n", debugstr_w(hostname), portnumber );
@@ -458,7 +459,7 @@ exit:
 WLDAP32_LDAP * CDECL ldap_openW( PWCHAR hostname, ULONG portnumber )
 {
 #ifdef HAVE_LDAP
-    LDAP *ld = NULL;
+    WLDAP32_LDAP *ld = NULL;
     char *hostnameU = NULL, *url = NULL;
 
     TRACE( "(%s, %d)\n", debugstr_w(hostname), portnumber );
@@ -541,7 +542,7 @@ WLDAP32_LDAP * CDECL ldap_sslinitA( PCHAR hostname, ULONG portnumber, int secure
 WLDAP32_LDAP * CDECL ldap_sslinitW( PWCHAR hostname, ULONG portnumber, int secure )
 {
 #ifdef HAVE_LDAP
-    WLDAP32_LDAP *ld = NULL;
+    LDAP *ld = NULL;
     char *hostnameU = NULL, *url = NULL;
 
     TRACE( "(%s, %d, 0x%08x)\n", debugstr_w(hostname), portnumber, secure );
@@ -566,7 +567,7 @@ WLDAP32_LDAP * CDECL ldap_sslinitW( PWCHAR hostname, ULONG portnumber, int secur
 exit:
     strfreeU( hostnameU );
     strfreeU( url );
-    return ld;
+    return ldap_wrap( ld );
 
 #else
     return NULL;
@@ -651,7 +652,7 @@ ULONG CDECL ldap_start_tls_sW( WLDAP32_LDAP *ld, PULONG retval, WLDAP32_LDAPMess
         if (!clientctrlsU) goto exit;
     }
 
-    ret = map_error( ldap_start_tls_s( ld, serverctrlsU, clientctrlsU ));
+    ret = map_error( ldap_start_tls_s( ldap_get( ld ), serverctrlsU, clientctrlsU ));
 
 exit:
     controlarrayfreeU( serverctrlsU );

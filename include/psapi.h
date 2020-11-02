@@ -21,6 +21,8 @@
 #ifndef __WINE_PSAPI_H
 #define __WINE_PSAPI_H
 
+#include "wine/winheader_enter.h"
+
 #ifndef PSAPI_VERSION
 #define PSAPI_VERSION 2
 #endif
@@ -49,6 +51,12 @@ typedef struct _PSAPI_WS_WATCH_INFORMATION {
   LPVOID FaultingPc;
   LPVOID FaultingVa;
 } PSAPI_WS_WATCH_INFORMATION, *PPSAPI_WS_WATCH_INFORMATION;
+
+typedef struct _PSAPI_WS_WATCH_INFORMATION_EX {
+  PSAPI_WS_WATCH_INFORMATION BasicInfo;
+  ULONG_PTR FaultingThreadId;
+  ULONG_PTR Flags;
+} PSAPI_WS_WATCH_INFORMATION_EX, *PPSAPI_WS_WATCH_INFORMATION_EX;
 
 typedef struct _PERFORMANCE_INFORMATION {
     DWORD cb;
@@ -128,6 +136,7 @@ BOOL  WINAPI QueryWorkingSet(HANDLE, PVOID, DWORD);
 BOOL  WINAPI QueryWorkingSetEx(HANDLE, PVOID, DWORD);
 BOOL  WINAPI InitializeProcessForWsWatch(HANDLE);
 BOOL  WINAPI GetWsChanges(HANDLE, PPSAPI_WS_WATCH_INFORMATION, DWORD);
+BOOL  WINAPI GetWsChangesEx(HANDLE, PSAPI_WS_WATCH_INFORMATION_EX*, DWORD*);
 DWORD WINAPI GetMappedFileNameW(HANDLE, LPVOID, LPWSTR, DWORD);
 DWORD WINAPI GetMappedFileNameA(HANDLE, LPVOID, LPSTR, DWORD);
 #define      GetMappedFileName WINELIB_NAME_AW(GetMappedFileName)
@@ -150,5 +159,7 @@ DWORD WINAPI GetProcessImageFileNameW(HANDLE, LPWSTR, DWORD);
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif  /* __WINE_PSAPI_H */

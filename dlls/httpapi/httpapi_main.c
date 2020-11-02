@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 
 #include "windef.h"
@@ -191,4 +189,13 @@ ULONG WINAPI HttpCreateServerSession( HTTPAPI_VERSION version, HTTP_SERVER_SESSI
 {
     FIXME( "({%d,%d}, %p, %d): stub!\n", version.HttpApiMajorVersion, version.HttpApiMinorVersion, id, reserved );
     return ERROR_ACCESS_DENIED;
+}
+
+/***********************************************************************
+ *        HttpCloseServerSession     (HTTPAPI.@)
+ */
+ULONG WINAPI HttpCloseServerSession( HTTP_SERVER_SESSION_ID id )
+{
+    FIXME( "(%s): stub!\n", wine_dbgstr_longlong(id));
+    return ERROR_INVALID_PARAMETER;
 }

@@ -21,6 +21,8 @@
 #ifndef __MSVCRT_CPPEXCEPT_H
 #define __MSVCRT_CPPEXCEPT_H
 
+#include "wine/asm.h"
+
 #define CXX_FRAME_MAGIC_VC6 0x19930520
 #define CXX_FRAME_MAGIC_VC7 0x19930521
 #define CXX_FRAME_MAGIC_VC8 0x19930522
@@ -57,7 +59,7 @@ typedef struct
 } this_ptr_offsets;
 
 /* complete information about a C++ type */
-#ifndef __x86_64__
+#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
 typedef struct __cxx_type_info
 {
     UINT             flags;        /* flags (see CLASS_* flags below) */
@@ -81,7 +83,7 @@ typedef struct __cxx_type_info
 #define CLASS_HAS_VIRTUAL_BASE_CLASS  4
 
 /* table of C++ types that apply for a given object */
-#ifndef __x86_64__
+#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
 typedef struct __cxx_type_info_table
 {
     UINT                 count;     /* number of types */
@@ -104,7 +106,7 @@ typedef DWORD (*cxx_exc_custom_handler)( PEXCEPTION_RECORD, struct __cxx_excepti
                                          EXCEPTION_REGISTRATION_RECORD *nested_frame, DWORD unknown3 );
 
 /* type information for an exception object */
-#ifndef __x86_64__
+#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
 typedef struct __cxx_exception_type
 {
     UINT                       flags;            /* TYPE_FLAG flags */
@@ -125,7 +127,7 @@ typedef struct
 void WINAPI _CxxThrowException(exception*,const cxx_exception_type*);
 int CDECL _XcptFilter(NTSTATUS, PEXCEPTION_POINTERS);
 
-static inline const char *dbgstr_type_info( const type_info *info )
+static inline const char * HOSTPTR dbgstr_type_info( const type_info *info )
 {
     if (!info) return "{}";
     return wine_dbg_sprintf( "{vtable=%p name=%s (%s)}",
@@ -152,7 +154,7 @@ static inline void *get_this_pointer( const this_ptr_offsets *off, void *object 
     return object;
 }
 
-#ifndef __x86_64__
+#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
 #define DEFINE_EXCEPTION_TYPE_INFO(type, base_no, cl1, cl2)  \
 \
 static const cxx_type_info type ## _cxx_type_info = { \

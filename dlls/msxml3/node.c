@@ -29,13 +29,6 @@
 # include <libxml/parserInternals.h>
 # include <libxml/xmlerror.h>
 # include <libxml/HTMLtree.h>
-/*
- * CrossOver HACK
- * Avoid relying on presence of symbol _xmlBufContent
- * in libxml2 on the deployment machine.
- * For bug 12289.
- */
-#undef LIBXML2_NEW_BUFFER
 # ifdef SONAME_LIBXSLT
 #  ifdef HAVE_LIBXSLT_PATTERN_H
 #   include <libxslt/pattern.h>
@@ -407,7 +400,7 @@ HRESULT node_get_next_sibling(xmlnode *This, IXMLDOMNode **ret)
 
 static int node_get_inst_cnt(xmlNodePtr node)
 {
-    int ret = *(LONG *)&node->_private & NODE_PRIV_REFCOUNT_MASK;
+    int ret = *TRUNCCAST(LONG * HOSTPTR, &node->_private) & NODE_PRIV_REFCOUNT_MASK;
     xmlNodePtr child;
 
     /* add attribute counts */
@@ -443,13 +436,13 @@ int xmlnode_get_inst_cnt(xmlnode *node)
 void xmlnode_add_ref(xmlNodePtr node)
 {
     if (node->type == XML_DOCUMENT_NODE) return;
-    InterlockedIncrement((LONG*)&node->_private);
+    __sync_add_and_fetch(TRUNCCAST(LONG* HOSTPTR, &node->_private), 1);
 }
 
 void xmlnode_release(xmlNodePtr node)
 {
     if (node->type == XML_DOCUMENT_NODE) return;
-    InterlockedDecrement((LONG*)&node->_private);
+    __sync_sub_and_fetch(TRUNCCAST(LONG* HOSTPTR, &node->_private), 1);
 }
 
 HRESULT node_insert_before(xmlnode *This, IXMLDOMNode *new_child, const VARIANT *ref_child,
@@ -744,7 +737,7 @@ static xmlChar* do_get_text(xmlNodePtr node, BOOL trim, DWORD *first, DWORD *las
     if (!node->children)
     {
         str = xmlNodeGetContent(node);
-        *trail_ig_ws = *(DWORD*)&node->_private & NODE_PRIV_CHILD_IGNORABLE_WS;
+        *trail_ig_ws = *TRUNCCAST(DWORD* HOSTPTR, &node->_private) & NODE_PRIV_CHILD_IGNORABLE_WS;
     }
     else
     {
@@ -754,7 +747,7 @@ static xmlChar* do_get_text(xmlNodePtr node, BOOL trim, DWORD *first, DWORD *las
         str = xmlStrdup(BAD_CAST "");
 
         if (node->type != XML_DOCUMENT_NODE)
-            ig_ws = *(DWORD*)&node->_private & NODE_PRIV_CHILD_IGNORABLE_WS;
+            ig_ws = *TRUNCCAST(DWORD* HOSTPTR, &node->_private) & NODE_PRIV_CHILD_IGNORABLE_WS;
         *trail_ig_ws = FALSE;
 
         for (child = node->children; child != NULL; child = child->next)
@@ -818,7 +811,7 @@ static xmlChar* do_get_text(xmlNodePtr node, BOOL trim, DWORD *first, DWORD *las
 
             if (!ig_ws)
             {
-                ig_ws = *(DWORD*)&child->_private & NODE_PRIV_TRAILING_IGNORABLE_WS;
+                ig_ws = *TRUNCCAST(DWORD* HOSTPTR, &child->_private) & NODE_PRIV_TRAILING_IGNORABLE_WS;
             }
             if (!ig_ws)
                 ig_ws = *trail_ig_ws;
@@ -1014,7 +1007,7 @@ static void xml_write_quotedstring(xmlOutputBufferPtr buf, const xmlChar *string
                 if (*cur == '"')
                 {
                     if (base != cur)
-                        xmlOutputBufferWrite(buf, cur-base, (const char*)base);
+                        xmlOutputBufferWrite(buf, cur-base, (const char* HOSTPTR)base);
                     xmlOutputBufferWrite(buf, 6, "&quot;");
                     cur++;
                     base = cur;
@@ -1023,23 +1016,44 @@ static void xml_write_quotedstring(xmlOutputBufferPtr buf, const xmlChar *string
                     cur++;
             }
             if (base != cur)
-                xmlOutputBufferWrite(buf, cur-base, (const char*)base);
+                xmlOutputBufferWrite(buf, cur-base, (const char* HOSTPTR)base);
             xmlOutputBufferWrite(buf, 1, "\"");
         }
         else
         {
             xmlOutputBufferWrite(buf, 1, "\'");
-            xmlOutputBufferWriteString(buf, (const char*)string);
+            xmlOutputBufferWriteString(buf, (const char* HOSTPTR)string);
             xmlOutputBufferWrite(buf, 1, "\'");
         }
     }
     else
     {
         xmlOutputBufferWrite(buf, 1, "\"");
-        xmlOutputBufferWriteString(buf, (const char*)string);
+        xmlOutputBufferWriteString(buf, (const char* HOSTPTR)string);
         xmlOutputBufferWrite(buf, 1, "\"");
     }
 }
+
+#ifdef __i386_on_x86_64__
+
+static int XMLCALL transform_to_stream_write(void * __ptr64 context, const char * __ptr64 buffer, int len)
+{
+    ISequentialStream *stream = (ISequentialStream *)ADDRSPACECAST(void *, context);
+    DWORD total = 0;
+    while (len)
+    {
+        char local[1024];
+        DWORD written = min(len, sizeof(local));
+        memcpy(local, buffer + total, written);
+        if (ISequentialStream_Write(stream, local, written, &written) != S_OK)
+            return -1;
+        len -= written;
+        total += written;
+    }
+    return total;
+}
+
+#else
 
 static int XMLCALL transform_to_stream_write(void *context, const char *buffer, int len)
 {
@@ -1048,6 +1062,8 @@ static int XMLCALL transform_to_stream_write(void *context, const char *buffer, 
     return hr == S_OK ? written : -1;
 }
 
+#endif
+
 /* Output for method "text" */
 static void transform_write_text(xmlDocPtr result, xsltStylesheetPtr style, xmlOutputBufferPtr output)
 {
@@ -1055,7 +1071,7 @@ static void transform_write_text(xmlDocPtr result, xsltStylesheetPtr style, xmlO
     while (cur)
     {
         if (cur->type == XML_TEXT_NODE)
-            xmlOutputBufferWriteString(output, (const char*)cur->content);
+            xmlOutputBufferWriteString(output, (const char* HOSTPTR)cur->content);
 
         /* skip to next node */
         if (cur->children)
@@ -1122,7 +1138,7 @@ static void transform_write_xmldecl(xmlDocPtr result, xsltStylesheetPtr style, B
     if (result->version)
     {
         xmlOutputBufferWriteString(output, "\"");
-        xmlOutputBufferWriteString(output, (const char *)result->version);
+        xmlOutputBufferWriteString(output, (const char * HOSTPTR)result->version);
         xmlOutputBufferWriteString(output, "\"");
     }
     else
@@ -1136,7 +1152,7 @@ static void transform_write_xmldecl(xmlDocPtr result, xsltStylesheetPtr style, B
         XSLT_GET_IMPORT_PTR(encoding, style, encoding);
         xmlOutputBufferWriteString(output, " encoding=");
         xmlOutputBufferWriteString(output, "\"");
-        xmlOutputBufferWriteString(output, encoding ? (const char *)encoding : "UTF-16");
+        xmlOutputBufferWriteString(output, encoding ? (const char * HOSTPTR)encoding : "UTF-16");
         xmlOutputBufferWriteString(output, "\"");
     }
 
@@ -1152,7 +1168,7 @@ static void htmldtd_dumpcontent(xmlOutputBufferPtr buf, xmlDocPtr doc)
     xmlDtdPtr cur = doc->intSubset;
 
     xmlOutputBufferWriteString(buf, "<!DOCTYPE ");
-    xmlOutputBufferWriteString(buf, (const char *)cur->name);
+    xmlOutputBufferWriteString(buf, (const char * HOSTPTR)cur->name);
     if (cur->ExternalID)
     {
         xmlOutputBufferWriteString(buf, " PUBLIC ");
@@ -1172,7 +1188,7 @@ static void htmldtd_dumpcontent(xmlOutputBufferPtr buf, xmlDocPtr doc)
 }
 
 /* Duplicates htmlDocContentDumpFormatOutput() the way we need it - doesn't add trailing newline. */
-static void htmldoc_dumpcontent(xmlOutputBufferPtr buf, xmlDocPtr doc, const char *encoding, int format)
+static void htmldoc_dumpcontent(xmlOutputBufferPtr buf, xmlDocPtr doc, const char * HOSTPTR encoding, int format)
 {
     xmlElementType type;
 
@@ -1202,7 +1218,7 @@ static inline BOOL transform_is_valid_method(xsltStylesheetPtr style)
 }
 
 /* Helper to write transformation result to specified output buffer. */
-static HRESULT node_transform_write(xsltStylesheetPtr style, xmlDocPtr result, BOOL omit_encoding, const char *encoding, xmlOutputBufferPtr output)
+static HRESULT node_transform_write(xsltStylesheetPtr style, xmlDocPtr result, BOOL omit_encoding, const char * HOSTPTR encoding, xmlOutputBufferPtr output)
 {
     const xmlChar *method;
     int indent;
@@ -1224,7 +1240,7 @@ static HRESULT node_transform_write(xsltStylesheetPtr style, xmlDocPtr result, B
         htmlSetMetaEncoding(result, (const xmlChar *)encoding);
         if (indent == -1)
             indent = 1;
-        htmldoc_dumpcontent(output, result, (const char*)encoding, indent);
+        htmldoc_dumpcontent(output, result, encoding, indent);
     }
     else if (method && xmlStrEqual(method, (const xmlChar *)"xhtml"))
     {
@@ -1282,7 +1298,7 @@ static HRESULT node_transform_write_to_bstr(xsltStylesheetPtr style, xmlDocPtr r
 #endif
         /* UTF-16 encoder places UTF-16 bom, we don't need it for BSTR */
         content += sizeof(WCHAR);
-        *str = SysAllocStringLen((WCHAR*)content, len/sizeof(WCHAR) - 1);
+        *str = SysAllocStringLen((WCHAR* HOSTPTR)content, len/sizeof(WCHAR) - 1);
         xmlOutputBufferClose(output);
     }
 
@@ -1313,11 +1329,11 @@ static HRESULT node_transform_write_to_stream(xsltStylesheetPtr style, xmlDocPtr
     if (!encoding)
         encoding = utf16;
 
-    output = xmlOutputBufferCreateIO(transform_to_stream_write, NULL, stream, xmlFindCharEncodingHandler((const char*)encoding));
+    output = xmlOutputBufferCreateIO(transform_to_stream_write, NULL, stream, xmlFindCharEncodingHandler((const char* HOSTPTR)encoding));
     if (!output)
         return E_OUTOFMEMORY;
 
-    hr = node_transform_write(style, result, FALSE, (const char*)encoding, output);
+    hr = node_transform_write(style, result, FALSE, (const char* HOSTPTR)encoding, output);
     xmlOutputBufferClose(output);
     return hr;
 }
@@ -1329,9 +1345,9 @@ struct import_buffer
     int len;
 };
 
-static int XMLCALL import_loader_io_read(void *context, char *out, int len)
+static int XMLCALL import_loader_io_read(void * HOSTPTR context, char * HOSTPTR out, int len)
 {
-    struct import_buffer *buffer = (struct import_buffer *)context;
+    struct import_buffer * HOSTPTR buffer = context;
 
     TRACE("%p, %p, %d\n", context, out, len);
 
@@ -1347,9 +1363,9 @@ static int XMLCALL import_loader_io_read(void *context, char *out, int len)
     return len;
 }
 
-static int XMLCALL import_loader_io_close(void * context)
+static int XMLCALL import_loader_io_close(void * HOSTPTR context)
 {
-    struct import_buffer *buffer = (struct import_buffer *)context;
+    struct import_buffer * HOSTPTR buffer = context;
 
     TRACE("%p\n", context);
 
@@ -1380,7 +1396,7 @@ static HRESULT import_loader_onDataAvailable(void *ctxt, char *ptr, DWORD len)
     return *input ? S_OK : E_FAIL;
 }
 
-static HRESULT xslt_doc_get_uri(const xmlChar *uri, void *_ctxt, xsltLoadType type, IUri **doc_uri)
+static HRESULT xslt_doc_get_uri(const xmlChar *uri, void * HOSTPTR _ctxt, xsltLoadType type, IUri **doc_uri)
 {
     xsltStylesheetPtr style = (xsltStylesheetPtr)_ctxt;
     IUri *href_uri;
@@ -1429,7 +1445,7 @@ static HRESULT xslt_doc_get_uri(const xmlChar *uri, void *_ctxt, xsltLoadType ty
 }
 
 xmlDocPtr xslt_doc_default_loader(const xmlChar *uri, xmlDictPtr dict, int options,
-    void *_ctxt, xsltLoadType type)
+    void * HOSTPTR _ctxt, xsltLoadType type)
 {
     IUri *import_uri = NULL;
     xmlParserInputPtr input;
@@ -1440,7 +1456,7 @@ xmlDocPtr xslt_doc_default_loader(const xmlChar *uri, xmlDictPtr dict, int optio
     bsc_t *bsc;
     BSTR uriW;
 
-    TRACE("%s, %p, %#x, %p, %d\n", debugstr_a((const char *)uri), dict, options, _ctxt, type);
+    TRACE("%s, %p, %#x, %p, %d\n", debugstr_a((const char * HOSTPTR)uri), dict, options, _ctxt, type);
 
     pctxt = xmlNewParserCtxt();
     if (!pctxt)
@@ -1488,7 +1504,7 @@ xmlDocPtr xslt_doc_default_loader(const xmlChar *uri, xmlDictPtr dict, int optio
         /* Set imported uri, to give nested imports a chance. */
         if (IUri_GetPropertyBSTR(import_uri, Uri_PROPERTY_ABSOLUTE_URI, &uriW, 0) == S_OK)
         {
-            doc->name = (char *)xmlchar_from_wcharn(uriW, SysStringLen(uriW), TRUE);
+            doc->name = (char * HOSTPTR)xmlchar_from_wcharn(uriW, SysStringLen(uriW), TRUE);
             SysFreeString(uriW);
         }
     }
@@ -1530,7 +1546,7 @@ HRESULT node_transform_node_params(const xmlnode *This, IXMLDOMNode *stylesheet,
     xsltSS = pxsltParseStylesheetDoc(sheet_doc);
     if (xsltSS)
     {
-        const char **xslparams = NULL;
+        const char * HOSTPTR *xslparams = NULL;
         xmlDocPtr result;
         unsigned int i;
 
@@ -1559,7 +1575,7 @@ HRESULT node_transform_node_params(const xmlnode *This, IXMLDOMNode *stylesheet,
             pxsltFreeTransformContext(ctxt);
 
             for (i = 0; i < params->count*2; i++)
-                heap_free((char*)xslparams[i]);
+                heap_free((char* HOSTPTR)xslparams[i]);
             heap_free(xslparams);
         }
         else

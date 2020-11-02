@@ -20,6 +20,8 @@
 #ifndef __WINE_SYS_TYPES_H
 #define __WINE_SYS_TYPES_H
 
+#include "wine/winheader_enter.h"
+
 #include <crtdefs.h>
 
 #ifndef _DEV_T_DEFINED
@@ -68,5 +70,7 @@ typedef int ssize_t;
 #endif
 #define _SSIZE_T_DEFINED
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_SYS_TYPES_H */

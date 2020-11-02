@@ -16,9 +16,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include "d2d1_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d2d);
@@ -206,11 +203,6 @@ static inline struct d2d_device_context *impl_from_IUnknown(IUnknown *iface)
 }
 
 static inline struct d2d_device_context *impl_from_ID2D1DeviceContext(ID2D1DeviceContext *iface)
-{
-    return CONTAINING_RECORD(iface, struct d2d_device_context, ID2D1DeviceContext_iface);
-}
-
-static inline struct d2d_device_context *impl_from_ID2D1RenderTarget(ID2D1RenderTarget *iface)
 {
     return CONTAINING_RECORD(iface, struct d2d_device_context, ID2D1DeviceContext_iface);
 }

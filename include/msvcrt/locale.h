@@ -20,6 +20,8 @@
 #ifndef __WINE_LOCALE_H
 #define __WINE_LOCALE_H
 
+#include "wine/winheader_enter.h"
+
 #include <crtdefs.h>
 
 #define LC_ALL                 0
@@ -76,5 +78,7 @@ wchar_t* __cdecl _wsetlocale(int,const wchar_t*);
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_LOCALE_H */

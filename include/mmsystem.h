@@ -21,6 +21,8 @@
 #ifndef __WINE_MMSYSTEM_H
 #define __WINE_MMSYSTEM_H
 
+#include "wine/winheader_enter.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -474,6 +476,7 @@ DECL_WINELIB_TYPE_AW(LPWAVEINCAPS2)
 #define WAVE_FORMAT_96M16      0x00040000    /* 96     kHz, Mono,   16-bit */
 #define WAVE_FORMAT_96S16      0x00080000    /* 96     kHz, Stereo, 16-bit */
 
+#ifndef WAVE_FORMAT_PCM
 /* General format structure common to all formats, same for Win16 and Win32 */
 typedef struct waveformat_tag {
     WORD	wFormatTag;
@@ -489,6 +492,7 @@ typedef struct pcmwaveformat_tag {
     WAVEFORMAT	wf;
     WORD	wBitsPerSample;
 } PCMWAVEFORMAT, *LPPCMWAVEFORMAT;
+#endif
 
 #ifndef _WAVEFORMATEX_
 #define _WAVEFORMATEX_
@@ -2519,5 +2523,7 @@ DECL_WINELIB_TYPE_AW(LPMCI_OVLY_LOAD_PARMS)
 #ifdef __cplusplus
 }
 #endif
+
+#include "wine/winheader_exit.h"
 
 #endif /* __WINE_MMSYSTEM_H */

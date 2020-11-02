@@ -49,8 +49,8 @@ msgid "Support Information"
 msgstr ""
 
 #: appwiz.rc:78 avifil32.rc:54 comctl32.rc:71 comctl32.rc:55 comdlg32.rc:232
-#: comdlg32.rc:262 comdlg32.rc:305 comdlg32.rc:359 comdlg32.rc:398
-#: comdlg32.rc:452 credui.rc:52 cryptui.rc:268 cryptui.rc:280 cryptui.rc:370
+#: comdlg32.rc:262 comdlg32.rc:305 comdlg32.rc:388 comdlg32.rc:422
+#: comdlg32.rc:453 credui.rc:52 cryptui.rc:268 cryptui.rc:280 cryptui.rc:370
 #: cryptui.rc:462 dinput.rc:37 ieframe.rc:96 localui.rc:44 localui.rc:57
 #: mpr.rc:49 msacm32.rc:53 mshtml.rc:47 mshtml.rc:57 msvfw32.rc:36 oledlg.rc:62
 #: oledlg.rc:94 serialui.rc:41 setupapi.rc:59 shell32.rc:276 shell32.rc:300
@@ -60,7 +60,7 @@ msgstr ""
 #: progman.rc:142 progman.rc:158 progman.rc:180 progman.rc:199 progman.rc:216
 #: regedit.rc:296 regedit.rc:307 regedit.rc:320 regedit.rc:336 regedit.rc:349
 #: regedit.rc:362 taskmgr.rc:442 taskmgr.rc:517 winecfg.rc:214 winecfg.rc:224
-#: wineconsole.rc:135 winefile.rc:128 winefile.rc:151 winefile.rc:181
+#: wineconsole.rc:135 winefile.rc:127 winefile.rc:150 winefile.rc:180
 #: winemine.rc:73 winemine.rc:84 winemine.rc:98 wordpad.rc:215 wordpad.rc:226
 #: wordpad.rc:244 wordpad.rc:257
 msgid "OK"
@@ -74,7 +74,7 @@ msgstr ""
 msgid "Publisher:"
 msgstr ""
 
-#: appwiz.rc:81 winefile.rc:166
+#: appwiz.rc:81 winefile.rc:165
 msgid "Version:"
 msgstr ""
 
@@ -124,8 +124,8 @@ msgstr ""
 #: appwiz.rc:110 appwiz.rc:125 avifil32.rc:55 browseui.rc:45 comctl32.rc:72
 #: comctl32.rc:87 comctl32.rc:56 comdlg32.rc:171 comdlg32.rc:193
 #: comdlg32.rc:211 comdlg32.rc:233 comdlg32.rc:263 comdlg32.rc:306
-#: comdlg32.rc:328 comdlg32.rc:348 comdlg32.rc:360 comdlg32.rc:399
-#: comdlg32.rc:453 comdlg32.rc:478 comdlg32.rc:504 comdlg32.rc:527 credui.rc:53
+#: comdlg32.rc:328 comdlg32.rc:348 comdlg32.rc:389 comdlg32.rc:423
+#: comdlg32.rc:454 comdlg32.rc:479 comdlg32.rc:505 comdlg32.rc:528 credui.rc:53
 #: cryptui.rc:269 cryptui.rc:281 cryptui.rc:371 cryptui.rc:463 dinput.rc:38
 #: ieframe.rc:97 inetcpl.rc:81 localui.rc:45 localui.rc:58 mpr.rc:50
 #: msacm32.rc:54 mshtml.rc:48 mshtml.rc:58 msvfw32.rc:37 oledlg.rc:63
@@ -136,8 +136,8 @@ msgstr ""
 #: progman.rc:143 progman.rc:159 progman.rc:181 progman.rc:200 progman.rc:217
 #: regedit.rc:297 regedit.rc:308 regedit.rc:321 regedit.rc:337 regedit.rc:350
 #: regedit.rc:363 taskmgr.rc:443 taskmgr.rc:518 wineboot.rc:34 winecfg.rc:215
-#: winecfg.rc:225 wineconsole.rc:136 winefile.rc:129 winefile.rc:152
-#: winefile.rc:182 winemine.rc:99 wordpad.rc:216 wordpad.rc:227 wordpad.rc:245
+#: winecfg.rc:225 wineconsole.rc:136 winefile.rc:128 winefile.rc:151
+#: winefile.rc:181 winemine.rc:99 wordpad.rc:216 wordpad.rc:227 wordpad.rc:245
 #: wordpad.rc:258
 msgid "Cancel"
 msgstr ""
@@ -181,7 +181,7 @@ msgstr ""
 msgid "Not specified"
 msgstr ""
 
-#: appwiz.rc:38 shell32.rc:144 shell32.rc:241 regedit.rc:147 winefile.rc:107
+#: appwiz.rc:38 shell32.rc:144 shell32.rc:241 regedit.rc:147 winefile.rc:106
 msgid "Name"
 msgstr ""
 
@@ -300,7 +300,7 @@ msgstr ""
 msgid "hours"
 msgstr ""
 
-#: comctl32.rc:68 winefile.rc:157
+#: comctl32.rc:68 winefile.rc:156
 msgid "Properties for %s"
 msgstr ""
 
@@ -342,12 +342,12 @@ msgid "R&eset"
 msgstr ""
 
 #: comctl32.rc:102 comdlg32.rc:172 comdlg32.rc:194 comdlg32.rc:265
-#: comdlg32.rc:329 comdlg32.rc:349 comdlg32.rc:361 comdlg32.rc:479
-#: comdlg32.rc:505 comdlg32.rc:528 ieframe.rc:58 msacm32.rc:52 oledlg.rc:96
-#: shell32.rc:128 clock.rc:44 notepad.rc:60 notepad.rc:119 oleview.rc:72
-#: progman.rc:55 progman.rc:108 progman.rc:126 progman.rc:144 progman.rc:160
-#: progman.rc:184 progman.rc:202 progman.rc:219 regedit.rc:77 taskmgr.rc:87
-#: winefile.rc:82 winemine.rc:53 winhlp32.rc:57 wordpad.rc:102
+#: comdlg32.rc:329 comdlg32.rc:349 comdlg32.rc:390 comdlg32.rc:424
+#: comdlg32.rc:480 comdlg32.rc:506 comdlg32.rc:529 ieframe.rc:58 msacm32.rc:52
+#: oledlg.rc:96 shell32.rc:128 clock.rc:44 notepad.rc:60 notepad.rc:119
+#: oleview.rc:72 progman.rc:55 progman.rc:108 progman.rc:126 progman.rc:144
+#: progman.rc:160 progman.rc:184 progman.rc:202 progman.rc:219 regedit.rc:77
+#: taskmgr.rc:87 winefile.rc:82 winemine.rc:53 winhlp32.rc:57 wordpad.rc:102
 msgid "&Help"
 msgstr ""
 
@@ -417,8 +417,8 @@ msgstr ""
 msgid "Go to today"
 msgstr ""
 
-#: comdlg32.rc:157 comdlg32.rc:170 comdlg32.rc:459 comdlg32.rc:484
-#: comdlg32.rc:511 shell32.rc:167 oleview.rc:101
+#: comdlg32.rc:157 comdlg32.rc:170 comdlg32.rc:460 comdlg32.rc:485
+#: comdlg32.rc:512 shell32.rc:167 oleview.rc:101
 msgid "Open"
 msgstr ""
 
@@ -439,7 +439,7 @@ msgid "Dri&ves:"
 msgstr ""
 
 #: comdlg32.rc:173 comdlg32.rc:195 shell32.rc:370 shell32.rc:407
-#: winefile.rc:173
+#: winefile.rc:172
 msgid "&Read Only"
 msgstr ""
 
@@ -460,11 +460,11 @@ msgstr ""
 msgid "Printer:"
 msgstr ""
 
-#: comdlg32.rc:206 comdlg32.rc:383
+#: comdlg32.rc:206 comdlg32.rc:373
 msgid "Print range"
 msgstr ""
 
-#: comdlg32.rc:207 comdlg32.rc:384 regedit.rc:268
+#: comdlg32.rc:207 comdlg32.rc:374 regedit.rc:268
 msgid "&All"
 msgstr ""
 
@@ -504,7 +504,7 @@ msgstr ""
 msgid "Print Setup"
 msgstr ""
 
-#: comdlg32.rc:227 comdlg32.rc:363 comdlg32.rc:402
+#: comdlg32.rc:227 comdlg32.rc:359 comdlg32.rc:398
 msgid "Printer"
 msgstr ""
 
@@ -520,7 +520,7 @@ msgstr ""
 msgid "Specific &Printer"
 msgstr ""
 
-#: comdlg32.rc:235 comdlg32.rc:421 comdlg32.rc:440 wineps.rc:34
+#: comdlg32.rc:235 comdlg32.rc:417 comdlg32.rc:441 wineps.rc:34
 msgid "Orientation"
 msgstr ""
 
@@ -528,11 +528,11 @@ msgstr ""
 msgid "Po&rtrait"
 msgstr ""
 
-#: comdlg32.rc:237 comdlg32.rc:442 wineps.rc:37
+#: comdlg32.rc:237 comdlg32.rc:443 wineps.rc:37
 msgid "&Landscape"
 msgstr ""
 
-#: comdlg32.rc:240 comdlg32.rc:415 comdlg32.rc:435 wineps.rc:28
+#: comdlg32.rc:240 comdlg32.rc:411 comdlg32.rc:436 wineps.rc:28
 msgid "Paper"
 msgstr ""
 
@@ -556,7 +556,7 @@ msgstr ""
 msgid "Font St&yle:"
 msgstr ""
 
-#: comdlg32.rc:259 comdlg32.rc:436 winecfg.rc:294
+#: comdlg32.rc:259 comdlg32.rc:437 winecfg.rc:294
 msgid "&Size:"
 msgstr ""
 
@@ -682,136 +682,136 @@ msgstr ""
 msgid "Replace &All"
 msgstr ""
 
-#: comdlg32.rc:364
-msgid "Print to fi&le"
-msgstr ""
-
-#: comdlg32.rc:365 comdlg32.rc:403 ieframe.rc:42 shdoclc.rc:61 shell32.rc:108
+#: comdlg32.rc:361 comdlg32.rc:401 ieframe.rc:42 shdoclc.rc:61 shell32.rc:108
 #: clock.rc:31 wineconsole.rc:30
 msgid "&Properties"
 msgstr ""
 
-#: comdlg32.rc:366 comdlg32.rc:404 msacm32.rc:34 winefile.rc:138
+#: comdlg32.rc:362
+msgid "Print to fi&le"
+msgstr ""
+
+#: comdlg32.rc:363 comdlg32.rc:399 msacm32.rc:34 winefile.rc:137
 msgid "&Name:"
 msgstr ""
 
-#: comdlg32.rc:368 comdlg32.rc:406
+#: comdlg32.rc:364 comdlg32.rc:402
 msgid "Status:"
 msgstr ""
 
-#: comdlg32.rc:370 comdlg32.rc:408
+#: comdlg32.rc:366 comdlg32.rc:404
 msgid "Type:"
 msgstr ""
 
-#: comdlg32.rc:372 comdlg32.rc:410
+#: comdlg32.rc:368 comdlg32.rc:406
 msgid "Where:"
 msgstr ""
 
-#: comdlg32.rc:374 comdlg32.rc:412
+#: comdlg32.rc:370 comdlg32.rc:408
 msgid "Comment:"
 msgstr ""
 
-#: comdlg32.rc:377
-msgid "Copies"
-msgstr ""
-
-#: comdlg32.rc:378
-msgid "Number of &copies:"
-msgstr ""
-
-#: comdlg32.rc:380
-msgid "C&ollate"
-msgstr ""
-
-#: comdlg32.rc:385
+#: comdlg32.rc:375
 msgid "Pa&ges"
 msgstr ""
 
-#: comdlg32.rc:386
+#: comdlg32.rc:376
 msgid "&Selection"
 msgstr ""
 
-#: comdlg32.rc:389
+#: comdlg32.rc:379
 msgid "&from:"
 msgstr ""
 
-#: comdlg32.rc:390
+#: comdlg32.rc:380
 msgid "&to:"
 msgstr ""
 
-#: comdlg32.rc:416 winecfg.rc:300
+#: comdlg32.rc:382
+msgid "Copies"
+msgstr ""
+
+#: comdlg32.rc:383
+msgid "Number of &copies:"
+msgstr ""
+
+#: comdlg32.rc:385
+msgid "C&ollate"
+msgstr ""
+
+#: comdlg32.rc:412 winecfg.rc:300
 msgid "Si&ze:"
 msgstr ""
 
-#: comdlg32.rc:418
+#: comdlg32.rc:414
 msgid "&Source:"
 msgstr ""
 
-#: comdlg32.rc:423
+#: comdlg32.rc:419
 msgid "P&ortrait"
 msgstr ""
 
-#: comdlg32.rc:424
+#: comdlg32.rc:420
 msgid "L&andscape"
 msgstr ""
 
-#: comdlg32.rc:429
+#: comdlg32.rc:430
 msgid "Setup Page"
 msgstr ""
 
-#: comdlg32.rc:438
+#: comdlg32.rc:439
 msgid "&Tray:"
 msgstr ""
 
-#: comdlg32.rc:441 wineps.rc:35
+#: comdlg32.rc:442 wineps.rc:35
 msgid "&Portrait"
 msgstr ""
 
-#: comdlg32.rc:444
+#: comdlg32.rc:445
 msgid "L&eft:"
 msgstr ""
 
-#: comdlg32.rc:446 notepad.rc:112
+#: comdlg32.rc:447 notepad.rc:112
 msgid "&Right:"
 msgstr ""
 
-#: comdlg32.rc:448
+#: comdlg32.rc:449
 msgid "T&op:"
 msgstr ""
 
-#: comdlg32.rc:450 notepad.rc:114
+#: comdlg32.rc:451 notepad.rc:114
 msgid "&Bottom:"
 msgstr ""
 
-#: comdlg32.rc:454
+#: comdlg32.rc:455
 msgid "P&rinter..."
 msgstr ""
 
-#: comdlg32.rc:462 comdlg32.rc:487
+#: comdlg32.rc:463 comdlg32.rc:488
 msgid "Look &in:"
 msgstr ""
 
-#: comdlg32.rc:468 comdlg32.rc:494
+#: comdlg32.rc:469 comdlg32.rc:495
 msgid "File &name:"
 msgstr ""
 
-#: comdlg32.rc:472 comdlg32.rc:498
+#: comdlg32.rc:473 comdlg32.rc:499
 msgid "Files of &type:"
 msgstr ""
 
-#: comdlg32.rc:475 comdlg32.rc:501
+#: comdlg32.rc:476 comdlg32.rc:502
 msgid "Open as &read-only"
 msgstr ""
 
-#: comdlg32.rc:477 comdlg32.rc:503 comdlg32.rc:521 shdoclc.rc:127 shell32.rc:99
+#: comdlg32.rc:478 comdlg32.rc:504 comdlg32.rc:522 shdoclc.rc:127 shell32.rc:99
 msgid "&Open"
 msgstr ""
 
-#: comdlg32.rc:514
+#: comdlg32.rc:515
 msgid "File name:"
 msgstr ""
 
-#: comdlg32.rc:517
+#: comdlg32.rc:518
 msgid "Files of type:"
 msgstr ""
 
@@ -2877,7 +2877,7 @@ msgstr ""
 msgid "Select a certificate"
 msgstr ""
 
-#: cryptui.rc:181 winefile.rc:102 winhlp32.rc:110 winhlp32.rc:85
+#: cryptui.rc:181 winefile.rc:101 winhlp32.rc:110 winhlp32.rc:85
 msgid "Not yet implemented"
 msgstr ""
 
@@ -3337,7 +3337,7 @@ msgstr ""
 msgid "Delete"
 msgstr ""
 
-#: inetcpl.rc:90 winefile.rc:115
+#: inetcpl.rc:90 winefile.rc:114
 msgid "Security"
 msgstr ""
 
@@ -4025,7 +4025,7 @@ msgstr ""
 msgid "Insufficient buffer.\n"
 msgstr ""
 
-#: winerror.mc:483
+#: winerror.mc:483 mferror.mc:109
 msgid "Invalid name.\n"
 msgstr ""
 
@@ -4818,7 +4818,7 @@ msgid "Too many links.\n"
 msgstr ""
 
 #: winerror.mc:1478
-msgid "Newer windows version needed.\n"
+msgid "Newer Windows version needed.\n"
 msgstr ""
 
 #: winerror.mc:1483
@@ -5597,7 +5597,7 @@ msgstr ""
 msgid "Class has open windows.\n"
 msgstr ""
 
-#: winerror.mc:2463
+#: winerror.mc:2463 mferror.mc:130
 msgid "Invalid index.\n"
 msgstr ""
 
@@ -6675,6 +6675,390 @@ msgstr ""
 
 #: mapi32.rc:32
 msgid "Send Mail"
+msgstr ""
+
+#: mferror.mc:249 mferror.mc:256
+msgid "Begin request has already been made.\n"
+msgstr ""
+
+#: mferror.mc:599
+msgid "Sink has not been finalized.\n"
+msgstr ""
+
+#: mferror.mc:32
+msgid "Media Foundation platform is not initialized.\n"
+msgstr ""
+
+#: mferror.mc:39
+msgid "Buffer is too small.\n"
+msgstr ""
+
+#: mferror.mc:46
+msgid "Invalid request.\n"
+msgstr ""
+
+#: mferror.mc:53
+msgid "Invalid stream number.\n"
+msgstr ""
+
+#: mferror.mc:60
+msgid "Invalid media type.\n"
+msgstr ""
+
+#: mferror.mc:67
+msgid "No more input is accepted.\n"
+msgstr ""
+
+#: mferror.mc:74
+msgid "Object is not initialized.\n"
+msgstr ""
+
+#: mferror.mc:81
+msgid "Representation is not supported.\n"
+msgstr ""
+
+#: mferror.mc:88
+msgid "No more types in the list of suggested media types.\n"
+msgstr ""
+
+#: mferror.mc:95
+msgid "Unsupported service.\n"
+msgstr ""
+
+#: mferror.mc:102
+msgid "Unexpected error.\n"
+msgstr ""
+
+#: mferror.mc:116
+msgid "Invalid type.\n"
+msgstr ""
+
+#: mferror.mc:123
+msgid "Invalid file format.\n"
+msgstr ""
+
+#: mferror.mc:137
+msgid "Invalid timestamp.\n"
+msgstr ""
+
+#: mferror.mc:144
+msgid "Unsupported scheme.\n"
+msgstr ""
+
+#: mferror.mc:151
+msgid "Unsupported bytestream type.\n"
+msgstr ""
+
+#: mferror.mc:158
+msgid "Unsupported time format.\n"
+msgstr ""
+
+#: mferror.mc:165
+msgid "Timestamp is not set for the sample.\n"
+msgstr ""
+
+#: mferror.mc:172
+msgid "No duration set for the sample.\n"
+msgstr ""
+
+#: mferror.mc:179
+msgid "Invalid stream data.\n"
+msgstr ""
+
+#: mferror.mc:186
+msgid "Realtime support is not available.\n"
+msgstr ""
+
+#: mferror.mc:193
+msgid "Unsupported rate.\n"
+msgstr ""
+
+#: mferror.mc:200
+msgid "Unsupported thinning.\n"
+msgstr ""
+
+#: mferror.mc:207
+msgid "Reversing is not supported.\n"
+msgstr ""
+
+#: mferror.mc:214
+msgid "Unsupported rate transition.\n"
+msgstr ""
+
+#: mferror.mc:221
+msgid "Rate change was preempted.\n"
+msgstr ""
+
+#: mferror.mc:228
+msgid "Object or value wasn't found.\n"
+msgstr ""
+
+#: mferror.mc:235
+msgid "Value is not available.\n"
+msgstr ""
+
+#: mferror.mc:242
+msgid "Clock is not available.\n"
+msgstr ""
+
+#: mferror.mc:263
+msgid "Multiple subscribers are not supported.\n"
+msgstr ""
+
+#: mferror.mc:270
+msgid "The timer was orphaned.\n"
+msgstr ""
+
+#: mferror.mc:277
+msgid "State transition is pending.\n"
+msgstr ""
+
+#: mferror.mc:284
+msgid "Unsupported state transition.\n"
+msgstr ""
+
+#: mferror.mc:291
+msgid "Unrecoverable error occurred.\n"
+msgstr ""
+
+#: mferror.mc:298
+msgid "Sample has too many buffers.\n"
+msgstr ""
+
+#: mferror.mc:305
+msgid "Sample is not writable.\n"
+msgstr ""
+
+#: mferror.mc:312
+msgid "Key is invalid.\n"
+msgstr ""
+
+#: mferror.mc:319
+msgid "Bad startup version.\n"
+msgstr ""
+
+#: mferror.mc:326
+msgid "Unsupported caption.\n"
+msgstr ""
+
+#: mferror.mc:333
+msgid "Invalid position.\n"
+msgstr ""
+
+#: mferror.mc:340
+msgid "Attribute is not found.\n"
+msgstr ""
+
+#: mferror.mc:347
+msgid "Property type is not allowed.\n"
+msgstr ""
+
+#: mferror.mc:354
+msgid "Property type is not supported.\n"
+msgstr ""
+
+#: mferror.mc:361
+msgid "Property is empty.\n"
+msgstr ""
+
+#: mferror.mc:368
+msgid "Property is not empty.\n"
+msgstr ""
+
+#: mferror.mc:375
+msgid "Vector property is not allowed.\n"
+msgstr ""
+
+#: mferror.mc:382
+msgid "Vector property is required.\n"
+msgstr ""
+
+#: mferror.mc:389
+msgid "Operation was cancelled.\n"
+msgstr ""
+
+#: mferror.mc:396
+msgid "Bytestream is not seekable.\n"
+msgstr ""
+
+#: mferror.mc:403
+msgid "Platform is disabled in safe mode.\n"
+msgstr ""
+
+#: mferror.mc:410
+msgid "Cannot parse bytestream.\n"
+msgstr ""
+
+#: mferror.mc:417
+msgid "Mutually exclusive flags passed to source resolver.\n"
+msgstr ""
+
+#: mferror.mc:424
+msgid "Unknown bytestream length.\n"
+msgstr ""
+
+#: mferror.mc:431
+msgid "Invalid work queue index.\n"
+msgstr ""
+
+#: mferror.mc:438
+msgid "No events available.\n"
+msgstr ""
+
+#: mferror.mc:445
+msgid "Invalid media source state transition.\n"
+msgstr ""
+
+#: mferror.mc:452
+msgid "End of media stream has been reached.\n"
+msgstr ""
+
+#: mferror.mc:459
+msgid "Shutdown() was called.\n"
+msgstr ""
+
+#: mferror.mc:466
+msgid "Media stream has no duration set.\n"
+msgstr ""
+
+#: mferror.mc:473
+msgid "Media format was recognized but is invalid.\n"
+msgstr ""
+
+#: mferror.mc:480
+msgid "Property wasn't found.\n"
+msgstr ""
+
+#: mferror.mc:487
+msgid "Property is read-only.\n"
+msgstr ""
+
+#: mferror.mc:494
+msgid "Property is not allowed.\n"
+msgstr ""
+
+#: mferror.mc:501
+msgid "Media source is not started.\n"
+msgstr ""
+
+#: mferror.mc:508
+msgid "Unsupported media format.\n"
+msgstr ""
+
+#: mferror.mc:515
+msgid "Media source is in wrong state.\n"
+msgstr ""
+
+#: mferror.mc:522
+msgid "No media streams were selected.\n"
+msgstr ""
+
+#: mferror.mc:529
+msgid "Unsupported media source characteristics.\n"
+msgstr ""
+
+#: mferror.mc:536
+msgid "Stream sink was removed.\n"
+msgstr ""
+
+#: mferror.mc:543
+msgid "Stream sinks are out of sync.\n"
+msgstr ""
+
+#: mferror.mc:550
+msgid "Media sink stream sinks set is fixed.\n"
+msgstr ""
+
+#: mferror.mc:557
+msgid "Stream sink already exists.\n"
+msgstr ""
+
+#: mferror.mc:564
+msgid "Sample allocation was canceled.\n"
+msgstr ""
+
+#: mferror.mc:571
+msgid "Sample allocator is empty.\n"
+msgstr ""
+
+#: mferror.mc:578
+msgid "Sink was already stopped.\n"
+msgstr ""
+
+#: mferror.mc:585
+msgid "Bitrate was unknown for ASF file sink.\n"
+msgstr ""
+
+#: mferror.mc:592
+msgid "No streams were selected for the sink.\n"
+msgstr ""
+
+#: mferror.mc:606
+msgid "Metadata was too long.\n"
+msgstr ""
+
+#: mferror.mc:613
+msgid "No samples were processed by the sink.\n"
+msgstr ""
+
+#: mferror.mc:620
+msgid "Sink was not provided with required headers.\n"
+msgstr ""
+
+#: mferror.mc:627
+msgid "Optional node is invalid.\n"
+msgstr ""
+
+#: mferror.mc:634
+msgid "Cannot find decryptor.\n"
+msgstr ""
+
+#: mferror.mc:641
+msgid "Codec was not found.\n"
+msgstr ""
+
+#: mferror.mc:648
+msgid "Cannot connect topology nodes.\n"
+msgstr ""
+
+#: mferror.mc:655
+msgid "Topology request is not supported.\n"
+msgstr ""
+
+#: mferror.mc:662
+msgid "Invalid topology time attributes.\n"
+msgstr ""
+
+#: mferror.mc:669
+msgid "Found loops in topology.\n"
+msgstr ""
+
+#: mferror.mc:676
+msgid "Presentation descriptor is missing.\n"
+msgstr ""
+
+#: mferror.mc:683
+msgid "Stream descriptor is missing.\n"
+msgstr ""
+
+#: mferror.mc:690
+msgid "Stream descriptor is not selected.\n"
+msgstr ""
+
+#: mferror.mc:697
+msgid "Source is missing.\n"
+msgstr ""
+
+#: mferror.mc:704
+msgid "Topology loader does not support sink activates.\n"
+msgstr ""
+
+#: mferror.mc:711
+msgid "Clock has no time source set.\n"
+msgstr ""
+
+#: mferror.mc:718
+msgid "Clock state was already set.\n"
 msgstr ""
 
 #: mpr.rc:35 wininet.rc:37
@@ -8404,7 +8788,7 @@ msgid "&Open:"
 msgstr ""
 
 #: shell32.rc:343 progman.rc:182 progman.rc:201 progman.rc:218 winecfg.rc:243
-#: winefile.rc:130
+#: winefile.rc:129
 msgid "&Browse..."
 msgstr ""
 
@@ -8416,7 +8800,7 @@ msgstr ""
 msgid "Location:"
 msgstr ""
 
-#: shell32.rc:361 shell32.rc:394 winefile.rc:170
+#: shell32.rc:361 shell32.rc:394 winefile.rc:169
 msgid "Size:"
 msgstr ""
 
@@ -8428,11 +8812,11 @@ msgstr ""
 msgid "Attributes:"
 msgstr ""
 
-#: shell32.rc:371 shell32.rc:408 winefile.rc:174
+#: shell32.rc:371 shell32.rc:408 winefile.rc:173
 msgid "H&idden"
 msgstr ""
 
-#: shell32.rc:372 shell32.rc:409 winefile.rc:175
+#: shell32.rc:372 shell32.rc:409 winefile.rc:174
 msgid "&Archive"
 msgstr ""
 
@@ -8452,7 +8836,7 @@ msgstr ""
 msgid "Last accessed:"
 msgstr ""
 
-#: shell32.rc:138 shell32.rc:142 winefile.rc:108
+#: shell32.rc:138 shell32.rc:142 winefile.rc:107
 msgid "Size"
 msgstr ""
 
@@ -8464,7 +8848,7 @@ msgstr ""
 msgid "Modified"
 msgstr ""
 
-#: shell32.rc:141 winefile.rc:172 winefile.rc:114
+#: shell32.rc:141 winefile.rc:171 winefile.rc:113
 msgid "Attributes"
 msgstr ""
 
@@ -8492,7 +8876,7 @@ msgstr ""
 msgid "Date deleted"
 msgstr ""
 
-#: shell32.rc:156 winecfg.rc:101 winefile.rc:100
+#: shell32.rc:156 winecfg.rc:101 winefile.rc:99
 msgctxt "display name"
 msgid "Desktop"
 msgstr ""
@@ -8614,7 +8998,7 @@ msgstr ""
 msgid "Contacts"
 msgstr ""
 
-#: shell32.rc:225 winefile.rc:113
+#: shell32.rc:225 winefile.rc:112
 msgid "Links"
 msgstr ""
 
@@ -10289,8 +10673,8 @@ msgstr ""
 
 #: winmm.rc:128
 msgid ""
-"The specified MIDI port is already in use. Wait until it is free; then try "
-"again."
+"The specified MIDI port is already in use. Wait until it is free, and then "
+"try again."
 msgstr ""
 
 #: winmm.rc:131
@@ -10306,7 +10690,7 @@ msgstr ""
 #: winmm.rc:133
 msgid ""
 "All multimedia timers are being used by other applications. Quit one of "
-"these applications; then, try again."
+"these applications, and then try again."
 msgstr ""
 
 #: winmm.rc:132
@@ -10925,8 +11309,8 @@ msgid ""
 "/affinity mask Start the program with the specified affinity mask.\n"
 "/wait          Wait for the started program to finish, then exit with its\n"
 "exit code.\n"
-"/unix          Use a Unix filename and start the file like windows\n"
-"explorer.\n"
+"/unix          Use a Unix filename and start the file like Windows\n"
+"Explorer.\n"
 "/ProgIDOpen    Open a document using the specified progID.\n"
 "/?             Display this help and exit.\n"
 msgstr ""
@@ -12351,7 +12735,7 @@ msgid "File `%s' exists. Not overwritten."
 msgstr ""
 
 #: progman.rc:80
-msgid "Save group as `%s to prevent overwriting original files."
+msgid "Save group as `%s' to prevent overwriting original files."
 msgstr ""
 
 #: progman.rc:84
@@ -14043,6 +14427,10 @@ msgstr ""
 msgid "Regular Metafile Viewer"
 msgstr ""
 
+#: view.rc:50
+msgid "Metafiles (*.wmf, *.emf)"
+msgstr ""
+
 #: wineboot.rc:31
 msgid "Waiting for Program"
 msgstr ""
@@ -14199,7 +14587,7 @@ msgstr ""
 
 #: winecfg.rc:233
 msgid ""
-"Failed to connect to the mount manager, the drive configuration cannot be "
+"Failed to connect to the mount manager; the drive configuration cannot be "
 "edited."
 msgstr ""
 
@@ -14485,7 +14873,7 @@ msgid ""
 "Are you sure you want to delete drive C?\n"
 "\n"
 "Most Windows applications expect drive C to exist, and will die messily if "
-"it doesn't. If you proceed remember to recreate it!"
+"it doesn't. If you proceed, remember to recreate it!"
 msgstr ""
 
 #: winecfg.rc:77
@@ -14970,67 +15358,67 @@ msgstr ""
 msgid "&About Wine File Manager"
 msgstr ""
 
-#: winefile.rc:122
+#: winefile.rc:121
 msgid "Select destination"
 msgstr ""
 
-#: winefile.rc:135
+#: winefile.rc:134
 msgid "By File Type"
 msgstr ""
 
-#: winefile.rc:140
+#: winefile.rc:139
 msgid "File type"
 msgstr ""
 
-#: winefile.rc:141
+#: winefile.rc:140
 msgid "&Directories"
 msgstr ""
 
-#: winefile.rc:143
+#: winefile.rc:142
 msgid "&Programs"
 msgstr ""
 
-#: winefile.rc:145
+#: winefile.rc:144
 msgid "Docu&ments"
 msgstr ""
 
-#: winefile.rc:147
+#: winefile.rc:146
 msgid "&Other files"
 msgstr ""
 
-#: winefile.rc:149
+#: winefile.rc:148
 msgid "Show Hidden/&System Files"
 msgstr ""
 
-#: winefile.rc:160
+#: winefile.rc:159
 msgid "&File Name:"
 msgstr ""
 
-#: winefile.rc:162
+#: winefile.rc:161
 msgid "Full &Path:"
 msgstr ""
 
-#: winefile.rc:164
+#: winefile.rc:163
 msgid "Last Change:"
 msgstr ""
 
-#: winefile.rc:168
+#: winefile.rc:167
 msgid "Cop&yright:"
 msgstr ""
 
-#: winefile.rc:176
+#: winefile.rc:175
 msgid "&System"
 msgstr ""
 
-#: winefile.rc:177
+#: winefile.rc:176
 msgid "&Compressed"
 msgstr ""
 
-#: winefile.rc:178
+#: winefile.rc:177
 msgid "Version information"
 msgstr ""
 
-#: winefile.rc:194
+#: winefile.rc:193
 msgctxt "accelerator Fullscreen"
 msgid "S"
 msgstr ""
@@ -15051,31 +15439,27 @@ msgstr ""
 msgid "root fs"
 msgstr ""
 
-#: winefile.rc:99
-msgid "unixfs"
-msgstr ""
-
-#: winefile.rc:101
+#: winefile.rc:100
 msgid "Shell"
 msgstr ""
 
-#: winefile.rc:109
+#: winefile.rc:108
 msgid "Creation date"
 msgstr ""
 
-#: winefile.rc:110
+#: winefile.rc:109
 msgid "Access date"
 msgstr ""
 
-#: winefile.rc:111
+#: winefile.rc:110
 msgid "Modification date"
 msgstr ""
 
-#: winefile.rc:112
+#: winefile.rc:111
 msgid "Index/Inode"
 msgstr ""
 
-#: winefile.rc:117
+#: winefile.rc:116
 msgid "%1 of %2 free"
 msgstr ""
 
@@ -15531,7 +15915,7 @@ msgid "Text documents (*.txt)"
 msgstr ""
 
 #: wordpad.rc:149
-msgid "Unicode text document (*.txt)"
+msgid "Unicode text documents (*.txt)"
 msgstr ""
 
 #: wordpad.rc:150
@@ -15742,7 +16126,7 @@ msgid ""
 "\tmore files.\n"
 "[/S]  Copy directories and subdirectories.\n"
 "[/E]  Copy directories and subdirectories, including any empty ones.\n"
-"[/Q]  Do not list names during copy, that is be quiet.\n"
+"[/Q]  Do not list names during copy; that is, be quiet.\n"
 "[/F]  Show full source and destination names during copy.\n"
 "[/L]  Simulate operation, showing names which would be copied.\n"
 "[/W]  Prompts before beginning the copy operation.\n"
@@ -15752,13 +16136,13 @@ msgid ""
 "[/P]  Prompts on each source file before copying.\n"
 "[/N]  Copy using short names.\n"
 "[/U]  Copy only files which already exist in destination.\n"
-"[/R]  Overwrite any read only files.\n"
+"[/R]  Overwrite any read-only files.\n"
 "[/H]  Include hidden and system files in the copy.\n"
 "[/C]  Continue even if an error occurs during the copy.\n"
 "[/A]  Only copy files with archive attribute set.\n"
 "[/M]  Only copy files with archive attribute set, removes the\n"
 "\tarchive attribute.\n"
-"[/K]  Copy file attributes, without this attributes are not preserved.\n"
+"[/K]  Copy file attributes; without this, attributes are not preserved.\n"
 "[/D | /D:m-d-y] Copy new files or those modified after the supplied date.\n"
 "\t\tIf no date is supplied, only copy if destination is older\n"
 "\t\tthan source.\n"

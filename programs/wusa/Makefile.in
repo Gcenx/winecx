@@ -1,5 +1,8 @@
 MODULE    = wusa.exe
-APPMODE   = -mconsole -municode
+
+EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+IMPORTS   = cabinet shlwapi ole32 oleaut32 advapi32
 
 C_SRCS = \
-	main.c
+	main.c \
+	manifest.c

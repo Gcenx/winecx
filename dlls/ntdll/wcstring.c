@@ -47,7 +47,7 @@ INT __cdecl NTDLL__wcsicmp( LPCWSTR str1, LPCWSTR str2 )
  */
 LPWSTR __cdecl NTDLL__wcslwr( LPWSTR str )
 {
-    return strlwrW( str );
+    return ADDRSPACECAST(LPWSTR, strlwrW( str ));
 }
 
 
@@ -65,7 +65,7 @@ INT __cdecl NTDLL__wcsnicmp( LPCWSTR str1, LPCWSTR str2, INT n )
  */
 LPWSTR __cdecl NTDLL__wcsupr( LPWSTR str )
 {
-    return struprW( str );
+    return ADDRSPACECAST(LPWSTR, struprW( str ));
 }
 
 
@@ -92,7 +92,7 @@ WCHAR __cdecl NTDLL_towupper( WCHAR ch )
  */
 LPWSTR __cdecl NTDLL_wcscat( LPWSTR dst, LPCWSTR src )
 {
-    return strcatW( dst, src );
+    return ADDRSPACECAST(LPWSTR, strcatW( dst, src ));
 }
 
 
@@ -119,7 +119,7 @@ INT __cdecl NTDLL_wcscmp( LPCWSTR str1, LPCWSTR str2 )
  */
 LPWSTR __cdecl NTDLL_wcscpy( LPWSTR dst, LPCWSTR src )
 {
-    return strcpyW( dst, src );
+    return ADDRSPACECAST(LPWSTR, strcpyW( dst, src ));
 }
 
 
