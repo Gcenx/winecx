@@ -693,6 +693,9 @@ static void pulse_underflow_callback(pa_stream *s, void *userdata)
     ACImpl *This = userdata;
     WARN("%p: Underflow\n", userdata);
     This->just_underran = TRUE;
+    /* re-sync */
+    This->pa_offs_bytes = This->lcl_offs_bytes;
+    This->pa_held_bytes = This->held_bytes;
 }
 
 static void pulse_started_callback(pa_stream *s, void *userdata)
@@ -824,6 +827,11 @@ static DWORD WINAPI pulse_timer_cb(void *user)
         if(err == 0){
             TRACE("got now: %s, last time: %s\n", wine_dbgstr_longlong(now), wine_dbgstr_longlong(This->last_time));
             if(This->started && (This->dataflow == eCapture || This->held_bytes)){
+                if(This->just_underran){
+                    This->last_time = now;
+                    This->just_started = TRUE;
+                }
+
                 if(This->just_started){
                     /* let it play out a period to absorb some latency and get accurate timing */
                     pa_usec_t diff = now - This->last_time;
@@ -853,6 +861,7 @@ static DWORD WINAPI pulse_timer_cb(void *user)
                     /* regardless of what PA does, advance one period */
                     adv_bytes = min(This->period_bytes, This->held_bytes);
                     This->lcl_offs_bytes += adv_bytes;
+                    This->lcl_offs_bytes %= This->real_bufsize_bytes;
                     This->held_bytes -= adv_bytes;
                 }else if(This->dataflow == eCapture){
                     pulse_read(This);
@@ -2150,6 +2159,11 @@ static HRESULT WINAPI AudioRenderClient_ReleaseBuffer(
 
     This->held_bytes += written_bytes;
     This->pa_held_bytes += written_bytes;
+    if(This->pa_held_bytes > This->real_bufsize_bytes){
+        This->pa_offs_bytes += This->pa_held_bytes - This->real_bufsize_bytes;
+        This->pa_offs_bytes %= This->real_bufsize_bytes;
+        This->pa_held_bytes = This->real_bufsize_bytes;
+    }
     This->clock_written += written_bytes;
     This->locked = 0;
 
@@ -2385,13 +2399,6 @@ static HRESULT WINAPI AudioClock_GetPosition(IAudioClock *iface, UINT64 *pos,
     }
 
     *pos = This->clock_written - This->held_bytes;
-
-    if(This->started){
-        if(*pos < This->period_bytes)
-            *pos = 0;
-        else if(This->held_bytes > This->period_bytes)
-            *pos -= This->period_bytes;
-    }
 
     if (This->share == AUDCLNT_SHAREMODE_EXCLUSIVE)
         *pos /= pa_frame_size(&This->ss);

@@ -1393,7 +1393,8 @@ struct ps_compile_args
     DWORD alpha_test_func : 3;
     DWORD render_offscreen : 1;
     DWORD alpha_override : 16; /* MAX_FRAGMENT_SAMPLERS, 16 */
-    DWORD padding : 10;
+    DWORD rt_alpha_swizzle : 8; /* MAX_RENDER_TARGET_VIEWS, 8 */
+    DWORD padding : 2;
 };
 
 enum fog_src_type

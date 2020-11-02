@@ -48,6 +48,10 @@
 # include <valgrind/valgrind.h>
 #endif
 
+#ifdef __APPLE__ /* CrossOver Hack #16371 */
+#include <mach-o/dyld.h>
+#endif
+
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #define NONAMELESSUNION
@@ -2457,14 +2461,33 @@ void virtual_release_address_space(void)
     if (range.limit > range.base)
     {
         while (wine_mmap_enum_reserved_areas( free_reserved_memory, &range, 1 )) /* nothing */;
+#ifdef __APPLE__
+        /* On macOS, we still want to free some of low memory, for OpenGL resources */
+        range.base  = (char *)0x40000000;
+#else
+        range.base  = NULL;
+#endif
     }
     else
+        range.base = (char *)0x20000000;
+
+#ifdef __APPLE__ /* CrossOver Hack #16371 */
     {
-#ifndef __APPLE__  /* dyld doesn't support parts of the WINE_DOS segment being unmapped */
-        range.base  = (char *)0x20000000;
+        char buf[1024], *p;
+        uint32_t size = sizeof(buf);
+        if (_NSGetExecutablePath(buf, &size) == 0)
+        {
+            if ((p = strrchr(buf, '/'))) ++p;
+            else p = buf;
+            if (!strcasestr(p, "preloader"))
+                range.base  = (char *)0x40001000;
+        }
+    }
+#endif
+    if (range.base)
+    {
         range.limit = (char *)0x7f000000;
         while (wine_mmap_enum_reserved_areas( free_reserved_memory, &range, 0 )) /* nothing */;
-#endif
     }
 
     server_leave_uninterrupted_section( &csVirtual, &sigset );

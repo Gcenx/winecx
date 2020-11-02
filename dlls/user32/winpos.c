@@ -2061,7 +2061,7 @@ BOOL set_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
 {
     WND *win;
     HWND surface_win = 0, parent = GetAncestor( hwnd, GA_PARENT );
-    BOOL ret, needs_update = FALSE;
+    BOOL ret, needs_update = FALSE, dummy_shm_surface = FALSE;
     RECT visible_rect, old_visible_rect, old_window_rect, old_client_rect, extra_rects[3];
     struct window_surface *old_surface, *new_surface = NULL;
 
@@ -2070,6 +2070,20 @@ BOOL set_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
         new_surface = &dummy_surface;  /* provide a default surface for top-level windows */
         window_surface_add_ref( new_surface );
     }
+#ifdef __APPLE__
+    else if (!(swp_flags & SWP_HIDEWINDOW))
+    {
+        win = WIN_GetPtr( parent );
+        if (win == OBJ_OTHER_PROCESS)
+        {
+            /* provide a default shm surface for windows with parents in other process */
+            new_surface = &dummy_surface;
+            window_surface_add_ref( new_surface );
+            dummy_shm_surface = TRUE;
+        }
+        else if (win && win != WND_DESKTOP) WIN_ReleasePtr( win );
+    }
+#endif
     visible_rect = *window_rect;
     USER_Driver->pWindowPosChanging( hwnd, insert_after, swp_flags,
                                      window_rect, client_rect, &visible_rect, &new_surface );
@@ -2085,6 +2099,14 @@ BOOL set_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
     old_visible_rect = win->visible_rect;
     old_client_rect = win->client_rect;
     old_surface = win->surface;
+
+    if (dummy_shm_surface && new_surface == &dummy_surface)
+    {
+        FIXME("Other process parent\n");
+        window_surface_release( new_surface );
+        new_surface = create_shm_surface( hwnd, &visible_rect, old_surface );
+    }
+
     if (old_surface != new_surface) swp_flags |= SWP_FRAMECHANGED;  /* force refreshing non-client area */
     if (new_surface == &dummy_surface) swp_flags |= SWP_NOREDRAW;
     else if (old_surface == &dummy_surface)

@@ -750,10 +750,10 @@ static unsigned int get_mapping_flags( obj_handle_t handle, unsigned int flags )
 }
 
 
-static struct object *create_mapping( struct object *root, const struct unicode_str *name,
-                                      unsigned int attr, mem_size_t size, unsigned int flags,
-                                      obj_handle_t handle, unsigned int file_access,
-                                      const struct security_descriptor *sd )
+struct object *create_mapping( struct object *root, const struct unicode_str *name,
+                               unsigned int attr, mem_size_t size, unsigned int flags,
+                               obj_handle_t handle, unsigned int file_access,
+                               const struct security_descriptor *sd )
 {
     struct mapping *mapping;
     struct file *file;

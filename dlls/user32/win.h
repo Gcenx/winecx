@@ -134,6 +134,10 @@ extern BOOL set_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
                             const RECT *window_rect, const RECT *client_rect,
                             const RECT *valid_rects ) DECLSPEC_HIDDEN;
 
+extern struct window_surface *create_shm_surface( HWND hwnd, const RECT *visible_rect,
+                                                  struct window_surface *old_surface ) DECLSPEC_HIDDEN;
+extern void process_surface_message( const MSG *msg, const rectangle_t *bounds ) DECLSPEC_HIDDEN;
+
 static inline void mirror_rect( const RECT *window_rect, RECT *rect )
 {
     int width = window_rect->right - window_rect->left;

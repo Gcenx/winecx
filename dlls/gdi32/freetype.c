@@ -5486,6 +5486,7 @@ static void fill_fileinfo_from_face( GdiFont *font, Face *face )
     if (!face->file)
     {
         font->fileinfo = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*font->fileinfo));
+        font->fileinfo->size.QuadPart = face->font_data_size;
         return;
     }
 
@@ -8709,11 +8710,42 @@ static BOOL freetype_GetFontRealizationInfo( PHYSDEV dev, void *ptr )
 }
 
 /*************************************************************************
- *             GetFontFileInfo   (GDI32.@)
+ *             GetFontFileData   (GDI32.@)
  */
-BOOL WINAPI GetFontFileInfo( DWORD instance_id, DWORD unknown, struct font_fileinfo *info, DWORD size, DWORD *needed )
+BOOL WINAPI GetFontFileData( DWORD instance_id, DWORD unknown, UINT64 offset, void *buff, DWORD buff_size )
 {
     struct font_handle_entry *entry = handle_entry( instance_id );
+    DWORD tag = 0, size;
+    GdiFont *font;
+
+    if (!entry)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    font = entry->obj;
+    if (font->ttc_item_offset)
+        tag = MS_TTCF_TAG;
+
+    size = get_font_data( font, tag, 0, NULL, 0 );
+    if (size < buff_size || offset > size - buff_size)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    /* For now this only works for SFNT case. */
+    return get_font_data( font, tag, offset, buff, buff_size ) != 0;
+}
+
+/*************************************************************************
+ *             GetFontFileInfo   (GDI32.@)
+ */
+BOOL WINAPI GetFontFileInfo( DWORD instance_id, DWORD unknown, struct font_fileinfo *info, SIZE_T size, SIZE_T *needed )
+{
+    struct font_handle_entry *entry = handle_entry( instance_id );
+    SIZE_T required_size;
     const GdiFont *font;
 
     if (!entry)
@@ -8721,6 +8753,9 @@ BOOL WINAPI GetFontFileInfo( DWORD instance_id, DWORD unknown, struct font_filei
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
+
+    if (!needed)
+        needed = &required_size;
 
     font = entry->obj;
     *needed = sizeof(*info) + strlenW(font->fileinfo->path) * sizeof(WCHAR);
@@ -9168,6 +9203,14 @@ BOOL WINAPI GetRasterizerCaps( LPRASTERIZER_STATUS lprs, UINT cbNumBytes)
     lprs->wFlags = 0;
     lprs->nLanguageID = 0;
     return TRUE;
+}
+
+/*************************************************************************
+ *             GetFontFileData   (GDI32.@)
+ */
+BOOL WINAPI GetFontFileData( DWORD instance_id, DWORD unknown, UINT64 offset, void *buff, DWORD buff_size )
+{
+    return FALSE;
 }
 
 /*************************************************************************

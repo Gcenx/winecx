@@ -24,7 +24,7 @@ wine64_DEPS = $(WINELOADER_DEPENDS)
 wine64_LDFLAGS = $(WINELOADER_LDFLAGS) $(LDEXECFLAGS) -lwine $(PTHREAD_LIBS)
 
 wine_preloader_OBJS = preloader.o
-wine_preloader_LDFLAGS = -static -nostartfiles -nodefaultlibs -Wl,-Ttext=0x7c400000
+wine_preloader_LDFLAGS = $(WINEPRELOADER_LDFLAGS)
 
 wine64_preloader_OBJS = preloader.o
-wine64_preloader_LDFLAGS = -static -nostartfiles -nodefaultlibs -Wl,-Ttext=0x7c400000
+wine64_preloader_LDFLAGS = $(WINEPRELOADER_LDFLAGS)

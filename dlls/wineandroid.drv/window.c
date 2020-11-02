@@ -1918,6 +1918,13 @@ LRESULT CDECL ANDROID_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
  */
 BOOL CDECL ANDROID_create_desktop( UINT width, UINT height )
 {
+    static const WCHAR shellW[] = {'s','h','e','l','l',0};
+    WCHAR name[MAX_PATH];
+
+    if (!GetUserObjectInformationW( GetThreadDesktop( GetCurrentThreadId() ),
+                                    UOI_NAME, name, sizeof(name), NULL ))
+        name[0] = 0;
+
     desktop_orig_wndproc = (WNDPROC)SetWindowLongPtrW( GetDesktopWindow(), GWLP_WNDPROC,
                                                        (LONG_PTR)desktop_wndproc_wrapper );
 
@@ -1931,5 +1938,6 @@ BOOL CDECL ANDROID_create_desktop( UINT width, UINT height )
         }
         process_events( QS_ALLINPUT );
     }
-    return TRUE;
+    /* use desktop mode only for the "shell" desktop */
+    return !lstrcmpiW( name, shellW );
 }

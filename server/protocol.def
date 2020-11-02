@@ -2251,7 +2251,8 @@ enum message_type
     MSG_POSTED,         /* posted message (from PostMessageW), always Unicode */
     MSG_HARDWARE,       /* hardware message */
     MSG_WINEVENT,       /* winevent message */
-    MSG_HOOK_LL         /* low-level hardware hook */
+    MSG_HOOK_LL,        /* low-level hardware hook */
+    MSG_SURFACE         /* flush surface pseudo-message */
 };
 #define SEND_MSG_ABORT_IF_HUNG  0x01
 
@@ -2712,6 +2713,30 @@ enum coords_relative
     rectangle_t    visible_rect;  /* window visible rect in screen coords */
     data_size_t    total_size;    /* total size of the resulting region */
     VARARG(region,rectangles);    /* list of rectangles for the region (in screen coords) */
+@END
+
+
+/* Create shared memory surface object */
+@REQ(create_shm_surface)
+    user_handle_t  window;        /* handle to the window */
+    data_size_t    mapping_size;  /* size of shared memory */
+@REPLY
+    obj_handle_t   handle;        /* handle to the surface */
+    obj_handle_t   mapping;       /* handle to the mapping */
+@END
+
+
+/* Lock or unlock the surface */
+@REQ(lock_shm_surface)
+    obj_handle_t   surface;       /* handle to the surface */
+    int            lock;          /* lock/unlock flag */
+@END
+
+
+/* Flush the surface */
+@REQ(flush_shm_surface)
+    obj_handle_t   surface;       /* handle to the surface */
+    rectangle_t    bounds;        /* bounds of flushed rectangle */
 @END
 
 

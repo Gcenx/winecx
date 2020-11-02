@@ -1219,7 +1219,7 @@ NTSTATUS WINAPI IoSetDeviceInterfaceState( UNICODE_STRING *name, BOOLEAN enable 
 
     refstr = memrchrW(name->Buffer + 4, '\\', namelen - 4);
 
-    len = strlenW(DeviceClassesW) + 38 + 1 + namelen + 2;
+    len = strlenW(DeviceClassesW) + 38 + 1 + namelen + 2 + 1;
 
     if (!(path = heap_alloc( len * sizeof(WCHAR) )))
         return STATUS_NO_MEMORY;

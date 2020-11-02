@@ -140,6 +140,14 @@ struct msg_queue
     struct thread_input   *input;           /* thread input descriptor */
     struct hook_table     *hooks;           /* hook table */
     timeout_t              last_get_msg;    /* time of last get message call */
+    /* FIXME: consider something cleaner */
+    int                    pending_surface_flush; /* flag if there is a surface flush expected
+                                                   * on this queue (meaning that queue needs
+                                                   * to be signaled */
+    struct shm_surface    *surface_flushed; /* currently flushed surface (it's set when get_message
+                                             * returns flush message and cleaned on the next
+                                             * get_message call) */
+
 };
 
 struct hotkey
@@ -298,6 +306,8 @@ static struct msg_queue *create_msg_queue( struct thread *thread, struct thread_
         queue->input           = (struct thread_input *)grab_object( input );
         queue->hooks           = NULL;
         queue->last_get_msg    = current_time;
+        queue->pending_surface_flush = 0;
+        queue->surface_flushed = NULL;
         list_init( &queue->send_result );
         list_init( &queue->callback_result );
         list_init( &queue->pending_timers );
@@ -432,7 +442,8 @@ void set_queue_hooks( struct thread *thread, struct hook_table *hooks )
 /* check the queue status */
 static inline int is_signaled( struct msg_queue *queue )
 {
-    return ((queue->wake_bits & queue->wake_mask) || (queue->changed_bits & queue->changed_mask));
+    return ((queue->wake_bits & queue->wake_mask) || (queue->changed_bits & queue->changed_mask))
+        || queue->pending_surface_flush;
 }
 
 /* set some queue bits */
@@ -900,6 +911,16 @@ static int is_queue_hung( struct msg_queue *queue )
     return 1;
 }
 
+static void clear_flushed_surface( struct msg_queue *queue )
+{
+    if (queue->surface_flushed)
+    {
+        unlock_surface( queue->surface_flushed );
+        release_object( queue->surface_flushed );
+        queue->surface_flushed = NULL;
+    }
+}
+
 static int msg_queue_add_queue( struct object *obj, struct wait_queue_entry *entry )
 {
     struct msg_queue *queue = (struct msg_queue *)obj;
@@ -966,6 +987,7 @@ static void msg_queue_destroy( struct object *obj )
     struct hotkey *hotkey, *hotkey2;
     int i;
 
+    clear_flushed_surface( queue );
     cleanup_results( queue );
     for (i = 0; i < NB_MSG_KINDS; i++) empty_msg_list( &queue->msg_list[i] );
 
@@ -1005,6 +1027,18 @@ static void msg_queue_poll_event( struct fd *fd, int event )
     if (event & (POLLERR | POLLHUP)) set_fd_events( fd, -1 );
     else set_fd_events( queue->fd, 0 );
     wake_up( &queue->obj, 0 );
+}
+
+void wake_queue_for_surface( struct process *process )
+{
+    struct thread *thread;
+    LIST_FOR_EACH_ENTRY( thread, &process->thread_list, struct thread, proc_entry )
+    {
+        if (!thread->queue || list_empty( &thread->queue->obj.wait_queue )) continue;
+        thread->queue->pending_surface_flush = 1;
+        wake_up( &thread->queue->obj, 0 );
+        return;
+    }
 }
 
 static void thread_input_dump( struct object *obj, int verbose )
@@ -2433,8 +2467,25 @@ DECL_HANDLER(get_message)
     reply->active_hooks = get_active_hooks();
 
     if (!queue) return;
+    clear_flushed_surface( queue );
     queue->last_get_msg = current_time;
     if (!filter) filter = QS_ALLINPUT;
+
+    if (get_reply_max_size() >= sizeof(rectangle_t))
+    {
+        struct shm_surface *surface;
+        rectangle_t bounds;
+        if ((surface = find_pending_surface( current->process, &reply->win, &reply->lparam, &bounds )))
+        {
+            reply->type  = MSG_SURFACE;
+            reply->total = sizeof(bounds);
+            set_reply_data( &bounds, sizeof(bounds) );
+            get_message_defaults( queue, &reply->x, &reply->y, &reply->time );
+            queue->surface_flushed = surface;
+            return;
+        }
+        queue->pending_surface_flush = 0;
+    }
 
     /* first check for sent messages */
     if ((ptr = list_head( &queue->msg_list[SEND_MESSAGE] )))

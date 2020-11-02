@@ -149,6 +149,10 @@ extern mode_t sd_to_mode( const struct security_descriptor *sd, const SID *owner
 
 /* file mapping functions */
 
+extern struct object *create_mapping( struct object *root, const struct unicode_str *name,
+                                      unsigned int attr, mem_size_t size, unsigned int flags,
+                                      obj_handle_t handle, unsigned int file_access,
+                                      const struct security_descriptor *sd );
 extern struct mapping *get_mapping_obj( struct process *process, obj_handle_t handle,
                                         unsigned int access );
 extern struct file *get_mapping_file( struct process *process, client_ptr_t base,

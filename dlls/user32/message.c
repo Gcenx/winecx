@@ -2883,6 +2883,9 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
             }
             reply_message( &info, result, TRUE );
             continue;
+        case MSG_SURFACE:
+            process_surface_message( &info.msg, buffer );
+            continue;
         case MSG_OTHER_PROCESS:
             info.flags = ISMEX_SEND;
             if (!unpack_message( info.msg.hwnd, info.msg.message, &info.msg.wParam,

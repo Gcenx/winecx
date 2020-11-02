@@ -1820,10 +1820,6 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
                                          event_mask_for_type(WINDOW_MINIMIZE_REQUESTED) |
                                          event_mask_for_type(WINDOW_RESTORE_REQUESTED)
                                forWindow:self];
-
-        /* CrossOver Hack #15388 */
-        if (quicken_signin_hack && ![controller frontWineWindow])
-            [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
     }
 
     - (void) updateFullscreen
@@ -2324,7 +2320,6 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
      */
     - (BOOL) canBecomeKeyWindow
     {
-        if (quicken_signin_hack) return YES; /* CrossOver Hack #15388 */
         if (causing_becomeKeyWindow == self) return YES;
         if (self.disabled || self.noActivate) return NO;
         return [self isKeyWindow];

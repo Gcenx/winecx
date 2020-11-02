@@ -3295,6 +3295,30 @@ static void dump_get_surface_region_reply( const struct get_surface_region_reply
     dump_varargs_rectangles( ", region=", cur_size );
 }
 
+static void dump_create_shm_surface_request( const struct create_shm_surface_request *req )
+{
+    fprintf( stderr, " window=%08x", req->window );
+    fprintf( stderr, ", mapping_size=%u", req->mapping_size );
+}
+
+static void dump_create_shm_surface_reply( const struct create_shm_surface_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", mapping=%04x", req->mapping );
+}
+
+static void dump_lock_shm_surface_request( const struct lock_shm_surface_request *req )
+{
+    fprintf( stderr, " surface=%04x", req->surface );
+    fprintf( stderr, ", lock=%d", req->lock );
+}
+
+static void dump_flush_shm_surface_request( const struct flush_shm_surface_request *req )
+{
+    fprintf( stderr, " surface=%04x", req->surface );
+    dump_rectangle( ", bounds=", &req->bounds );
+}
+
 static void dump_get_window_region_request( const struct get_window_region_request *req )
 {
     fprintf( stderr, " window=%08x", req->window );
@@ -4737,6 +4761,9 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_windows_offset_request,
     (dump_func)dump_get_visible_region_request,
     (dump_func)dump_get_surface_region_request,
+    (dump_func)dump_create_shm_surface_request,
+    (dump_func)dump_lock_shm_surface_request,
+    (dump_func)dump_flush_shm_surface_request,
     (dump_func)dump_get_window_region_request,
     (dump_func)dump_set_window_region_request,
     (dump_func)dump_get_update_region_request,
@@ -5032,6 +5059,9 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_windows_offset_reply,
     (dump_func)dump_get_visible_region_reply,
     (dump_func)dump_get_surface_region_reply,
+    (dump_func)dump_create_shm_surface_reply,
+    NULL,
+    NULL,
     (dump_func)dump_get_window_region_reply,
     NULL,
     (dump_func)dump_get_update_region_reply,
@@ -5327,6 +5357,9 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_windows_offset",
     "get_visible_region",
     "get_surface_region",
+    "create_shm_surface",
+    "lock_shm_surface",
+    "flush_shm_surface",
     "get_window_region",
     "set_window_region",
     "get_update_region",
@@ -5499,6 +5532,7 @@ static const struct
     { "INSUFFICIENT_RESOURCES",      STATUS_INSUFFICIENT_RESOURCES },
     { "INVALID_CID",                 STATUS_INVALID_CID },
     { "INVALID_DEVICE_REQUEST",      STATUS_INVALID_DEVICE_REQUEST },
+    { "INVALID_DEVICE_STATE",        STATUS_INVALID_DEVICE_STATE },
     { "INVALID_FILE_FOR_SECTION",    STATUS_INVALID_FILE_FOR_SECTION },
     { "INVALID_HANDLE",              STATUS_INVALID_HANDLE },
     { "INVALID_IMAGE_FORMAT",        STATUS_INVALID_IMAGE_FORMAT },

@@ -603,7 +603,4 @@ extern void macdrv_destroy_status_item(macdrv_status_item s) DECLSPEC_HIDDEN;
 extern void macdrv_set_status_item_image(macdrv_status_item s, CGImageRef cgimage) DECLSPEC_HIDDEN;
 extern void macdrv_set_status_item_tooltip(macdrv_status_item s, CFStringRef cftip) DECLSPEC_HIDDEN;
 
-/* CrossOver Hack #15388 */
-extern int quicken_signin_hack;
-
 #endif  /* __WINE_MACDRV_COCOA_H */
