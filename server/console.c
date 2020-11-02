@@ -191,6 +191,8 @@ static const struct fd_ops console_fd_ops =
     no_fd_read,                   /* read */
     no_fd_write,                  /* write */
     no_fd_flush,                  /* flush */
+    no_fd_get_file_info,          /* get_file_info */
+    no_fd_get_volume_info,        /* get_volume_info */
     default_fd_ioctl,             /* ioctl */
     default_fd_queue_async,       /* queue_async */
     default_fd_reselect_async     /* reselect_async */
@@ -1542,6 +1544,49 @@ DECL_HANDLER(open_console)
         release_object( obj );
     }
     else if (!get_error()) set_error( STATUS_ACCESS_DENIED );
+}
+
+/* attach to a other process's console */
+DECL_HANDLER(attach_console)
+{
+    struct process *process;
+
+    if (current->process->console)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+
+    process = get_process_from_id( req->pid == ATTACH_PARENT_PROCESS
+                                   ? current->process->parent_id : req->pid );
+    if (!process) return;
+
+    if (process->console && process->console->active)
+    {
+        reply->std_in = alloc_handle( current->process, process->console, GENERIC_READ, 0 );
+        if (!reply->std_in) goto error;
+
+        reply->std_out = alloc_handle( current->process, process->console->active, GENERIC_WRITE, 0 );
+        if (!reply->std_out) goto error;
+
+        reply->std_err = alloc_handle( current->process, process->console->active, GENERIC_WRITE, 0 );
+        if (!reply->std_err) goto error;
+
+        current->process->console = (struct console_input *)grab_object( process->console );
+        current->process->console->num_proc++;
+    }
+    else
+    {
+        set_error( STATUS_INVALID_HANDLE );
+    }
+
+    release_object( process );
+    return;
+
+error:
+    if (reply->std_in) close_handle( current->process, reply->std_in );
+    if (reply->std_out) close_handle( current->process, reply->std_out );
+    release_object( process );
 }
 
 /* set info about a console input */

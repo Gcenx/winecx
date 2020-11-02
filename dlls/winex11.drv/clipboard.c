@@ -187,7 +187,6 @@ static const struct
 
 static struct list format_list = LIST_INIT( format_list );
 
-#define NB_BUILTIN_FORMATS (sizeof(builtin_formats) / sizeof(builtin_formats[0]))
 #define GET_ATOM(prop)  (((prop) < FIRST_XATOM) ? (Atom)(prop) : X11DRV_Atoms[(prop) - FIRST_XATOM])
 
 static DWORD clipboard_thread_id;
@@ -295,9 +294,9 @@ static void register_builtin_formats(void)
     struct clipboard_format *formats;
     unsigned int i;
 
-    if (!(formats = HeapAlloc( GetProcessHeap(), 0, NB_BUILTIN_FORMATS * sizeof(*formats)))) return;
+    if (!(formats = HeapAlloc( GetProcessHeap(), 0, ARRAY_SIZE(builtin_formats) * sizeof(*formats)))) return;
 
-    for (i = 0; i < NB_BUILTIN_FORMATS; i++)
+    for (i = 0; i < ARRAY_SIZE(builtin_formats); i++)
     {
         if (builtin_formats[i].name)
             formats[i].id = RegisterClipboardFormatW( builtin_formats[i].name );
@@ -983,7 +982,7 @@ static HANDLE import_targets( Atom type, const void *data, size_t size )
     register_x11_formats( properties, count );
 
     /* the builtin formats contain duplicates, so allocate some extra space */
-    if (!(formats = HeapAlloc( GetProcessHeap(), 0, (count + NB_BUILTIN_FORMATS) * sizeof(*formats ))))
+    if (!(formats = HeapAlloc( GetProcessHeap(), 0, (count + ARRAY_SIZE(builtin_formats)) * sizeof(*formats ))))
         return 0;
 
     pos = 0;
@@ -1087,8 +1086,9 @@ static HANDLE render_format( UINT id )
     for (i = 0; i < nb_current_x11_formats; i++)
     {
         if (current_x11_formats[i]->id != id) continue;
-        handle = import_selection( display, import_window, current_selection, current_x11_formats[i] );
-        if (handle) SetClipboardData( id, handle );
+        if (!(handle = import_selection( display, import_window,
+                                         current_selection, current_x11_formats[i] ))) continue;
+        SetClipboardData( id, handle );
         break;
     }
     return handle;
@@ -1505,7 +1505,8 @@ static BOOL export_targets( Display *display, Window win, Atom prop, Atom target
     if (!(formats = get_clipboard_formats( &count ))) return FALSE;
 
     /* the builtin formats contain duplicates, so allocate some extra space */
-    if (!(targets = HeapAlloc( GetProcessHeap(), 0, (count + NB_BUILTIN_FORMATS) * sizeof(*targets) )))
+    if (!(targets = HeapAlloc( GetProcessHeap(), 0,
+                               (count + ARRAY_SIZE(builtin_formats)) * sizeof(*targets) )))
     {
         HeapFree( GetProcessHeap(), 0, formats );
         return FALSE;

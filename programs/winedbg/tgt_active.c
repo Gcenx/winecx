@@ -91,19 +91,7 @@ BOOL dbg_attach_debuggee(DWORD pid, BOOL cofe)
 
 static unsigned dbg_fetch_context(void)
 {
-    dbg_context.ContextFlags = CONTEXT_CONTROL
-        | CONTEXT_INTEGER
-#ifdef CONTEXT_FLOATING_POINT
-        | CONTEXT_FLOATING_POINT
-#endif
-#ifdef CONTEXT_SEGMENTS
-        | CONTEXT_SEGMENTS
-#endif
-#ifdef CONTEXT_DEBUG_REGISTERS
-        | CONTEXT_DEBUG_REGISTERS
-#endif
-        ;
-    if (!GetThreadContext(dbg_curr_thread->handle, &dbg_context))
+    if (!dbg_curr_process->be_cpu->get_context(dbg_curr_thread->handle, &dbg_context))
     {
         WINE_WARN("Can't get thread's context\n");
         return FALSE;
@@ -148,7 +136,8 @@ static BOOL dbg_exception_prolog(BOOL is_debug, const EXCEPTION_RECORD* rec)
         case AddrMode1616: name = "16 bit";     break;
         case AddrMode1632: name = "segmented 32 bit"; break;
         case AddrModeReal: name = "vm86";       break;
-        case AddrModeFlat: name = be_cpu->pointer_size == 4 ? "32 bit" : "64 bit"; break;
+        case AddrModeFlat: name = dbg_curr_process->be_cpu->pointer_size == 4
+                                  ? "32 bit" : "64 bit"; break;
         }
         dbg_printf("In %s mode.\n", name);
         dbg_curr_thread->addr_mode = addr.Mode;
@@ -158,9 +147,9 @@ static BOOL dbg_exception_prolog(BOOL is_debug, const EXCEPTION_RECORD* rec)
     if (!is_debug)
     {
 	/* This is a real crash, dump some info */
-	be_cpu->print_context(dbg_curr_thread->handle, &dbg_context, 0);
+        dbg_curr_process->be_cpu->print_context(dbg_curr_thread->handle, &dbg_context, 0);
 	stack_info(-1);
-        be_cpu->print_segment_info(dbg_curr_thread->handle, &dbg_context);
+        dbg_curr_process->be_cpu->print_segment_info(dbg_curr_thread->handle, &dbg_context);
 	stack_backtrace(dbg_curr_tid);
     }
     else
@@ -249,6 +238,8 @@ static DWORD dbg_handle_exception(const EXCEPTION_RECORD* rec, BOOL first_chance
         if (dbg_read_memory(pThreadName->szName, pThread->name, 9))
             dbg_printf("Thread ID=%04x renamed using MS VC6 extension (name==\"%.9s\")\n",
                        pThread->tid, pThread->name);
+        return DBG_CONTINUE;
+    case EXCEPTION_INVALID_HANDLE:
         return DBG_CONTINUE;
     }
 
@@ -355,7 +346,7 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
                                         de->u.Exception.dwFirstChance);
             if (cont && dbg_curr_thread)
             {
-                SetThreadContext(dbg_curr_thread->handle, &dbg_context);
+                dbg_curr_process->be_cpu->set_context(dbg_curr_thread->handle, &dbg_context);
             }
         }
         break;
@@ -371,7 +362,7 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
         fetch_module_name(de->u.CreateProcessInfo.lpImageName,
                           de->u.CreateProcessInfo.fUnicode,
                           de->u.CreateProcessInfo.lpBaseOfImage,
-                          u.buffer, sizeof(u.buffer) / sizeof(WCHAR), TRUE);
+                          u.buffer, ARRAY_SIZE(u.buffer), TRUE);
 
         WINE_TRACE("%04x:%04x: create process '%s'/%p @%p (%u<%u>)\n",
                    de->dwProcessId, de->dwThreadId,
@@ -466,7 +457,7 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
         fetch_module_name(de->u.LoadDll.lpImageName,
                           de->u.LoadDll.fUnicode,
                           de->u.LoadDll.lpBaseOfDll,
-                          u.buffer, sizeof(u.buffer) / sizeof(WCHAR), FALSE);
+                          u.buffer, ARRAY_SIZE(u.buffer), FALSE);
 
         WINE_TRACE("%04x:%04x: loads DLL %s @%p (%u<%u>)\n",
                    de->dwProcessId, de->dwThreadId,
@@ -538,7 +529,7 @@ static void dbg_resume_debuggee(DWORD cont)
                    dbg_curr_thread->exec_count);
         if (dbg_curr_thread)
         {
-            if (!SetThreadContext(dbg_curr_thread->handle, &dbg_context))
+            if (!dbg_curr_process->be_cpu->set_context(dbg_curr_thread->handle, &dbg_context))
                 dbg_printf("Cannot set ctx on %04lx\n", dbg_curr_tid);
         }
     }
@@ -719,7 +710,7 @@ static const char *get_windows_version(void)
 
     GetVersionExW( (OSVERSIONINFOW *)&info );
 
-    for (i = 0; i < sizeof(version_table) / sizeof(version_table[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(version_table); i++)
     {
         if (version_table[i].type == info.wProductType &&
             version_table[i].platform == info.dwPlatformId &&
@@ -997,10 +988,10 @@ static BOOL tgt_process_active_close_process(struct dbg_process* pcs, BOOL kill)
         /* needed for single stepping (ugly).
          * should this be handled inside the server ??? 
          */
-        be_cpu->single_step(&dbg_context, FALSE);
+        dbg_curr_process->be_cpu->single_step(&dbg_context, FALSE);
         if (dbg_curr_thread->in_exception)
         {
-            SetThreadContext(dbg_curr_thread->handle, &dbg_context);
+            dbg_curr_process->be_cpu->set_context(dbg_curr_thread->handle, &dbg_context);
             ContinueDebugEvent(dbg_curr_pid, dbg_curr_tid, DBG_CONTINUE);
         }
     }

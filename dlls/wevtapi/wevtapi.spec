@@ -4,7 +4,7 @@
 @ stdcall EvtClose(ptr)
 @ stub EvtCreateBookmark
 @ stub EvtCreateRenderContext
-@ stub EvtExportLog
+@ stub EvtExportLog(ptr wstr wstr wstr long)
 @ stub EvtFormatMessage
 @ stdcall EvtGetChannelConfigProperty(ptr long long long ptr ptr)
 @ stub EvtGetEventInfo
@@ -25,18 +25,18 @@
 @ stub EvtIntRetractConfig
 @ stub EvtIntSysprepCleanup
 @ stub EvtIntWriteXmlEventToLocalLogfile
-@ stub EvtNext
-@ stub EvtNextChannelPath
+@ stdcall EvtNext(ptr long ptr long long ptr)
+@ stdcall EvtNextChannelPath(ptr long ptr ptr)
 @ stub EvtNextEventMetadata
 @ stub EvtNextPublisherId
 @ stdcall EvtOpenChannelConfig(ptr wstr long)
-@ stub EvtOpenChannelEnum
+@ stdcall EvtOpenChannelEnum(ptr long)
 @ stub EvtOpenEventMetadataEnum
-@ stub EvtOpenLog
+@ stdcall EvtOpenLog(ptr wstr long)
 @ stub EvtOpenPublisherEnum
 @ stub EvtOpenPublisherMetadata
-@ stub EvtOpenSession
-@ stub EvtQuery
+@ stdcall EvtOpenSession(long ptr long long)
+@ stdcall EvtQuery(ptr wstr wstr long)
 @ stub EvtRender
 @ stub EvtSaveChannelConfig
 @ stub EvtSeek

@@ -455,7 +455,7 @@ HWND16 WINAPI GetParent16( HWND16 hwnd )
  */
 BOOL16 WINAPI IsWindow16( HWND16 hwnd )
 {
-    STACK16FRAME *frame = MapSL( (SEGPTR)NtCurrentTeb()->WOW32Reserved );
+    STACK16FRAME *frame = MapSL( (SEGPTR)NtCurrentTeb()->SystemReserved1[0] );
     frame->es = USER_HeapSel;
     /* don't use WIN_Handle32 here, we don't care about the full handle */
     return IsWindow( HWND_32(hwnd) );
@@ -1924,7 +1924,7 @@ HWND16 WINAPI CreateWindowEx16( DWORD exStyle, LPCSTR className,
     {
         WCHAR bufferW[256];
 
-        if (!MultiByteToWideChar( CP_ACP, 0, className, -1, bufferW, sizeof(bufferW)/sizeof(WCHAR) ))
+        if (!MultiByteToWideChar( CP_ACP, 0, className, -1, bufferW, ARRAY_SIZE(bufferW)))
             return 0;
         hwnd = create_window16( (CREATESTRUCTW *)&cs, bufferW, HINSTANCE_32(instance), FALSE );
     }

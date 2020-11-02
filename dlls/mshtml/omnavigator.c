@@ -1,5 +1,5 @@
 /*
- * Copyright 2008 Jacek Caban for CodeWeavers
+ * Copyright 2008,2009 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -182,6 +182,237 @@ HRESULT create_dom_implementation(IHTMLDOMImplementation **ret)
             &HTMLDOMImplementation_dispex);
 
     *ret = &dom_implementation->IHTMLDOMImplementation_iface;
+    return S_OK;
+}
+
+typedef struct {
+    DispatchEx dispex;
+    IHTMLScreen IHTMLScreen_iface;
+
+    LONG ref;
+} HTMLScreen;
+
+static inline HTMLScreen *impl_from_IHTMLScreen(IHTMLScreen *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLScreen, IHTMLScreen_iface);
+}
+
+static HRESULT WINAPI HTMLScreen_QueryInterface(IHTMLScreen *iface, REFIID riid, void **ppv)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+
+    if(IsEqualGUID(&IID_IUnknown, riid)) {
+        *ppv = &This->IHTMLScreen_iface;
+    }else if(IsEqualGUID(&IID_IHTMLScreen, riid)) {
+        *ppv = &This->IHTMLScreen_iface;
+    }else if(dispex_query_interface(&This->dispex, riid, ppv)) {
+        return *ppv ? S_OK : E_NOINTERFACE;
+    }else {
+        *ppv = NULL;
+        WARN("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI HTMLScreen_AddRef(IHTMLScreen *iface)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI HTMLScreen_Release(IHTMLScreen *iface)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    if(!ref) {
+        release_dispex(&This->dispex);
+        heap_free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI HTMLScreen_GetTypeInfoCount(IHTMLScreen *iface, UINT *pctinfo)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+    return IDispatchEx_GetTypeInfoCount(&This->dispex.IDispatchEx_iface, pctinfo);
+}
+
+static HRESULT WINAPI HTMLScreen_GetTypeInfo(IHTMLScreen *iface, UINT iTInfo,
+        LCID lcid, ITypeInfo **ppTInfo)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+    return IDispatchEx_GetTypeInfo(&This->dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
+}
+
+static HRESULT WINAPI HTMLScreen_GetIDsOfNames(IHTMLScreen *iface, REFIID riid,
+        LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+    return IDispatchEx_GetIDsOfNames(&This->dispex.IDispatchEx_iface, riid, rgszNames, cNames,
+            lcid, rgDispId);
+}
+
+static HRESULT WINAPI HTMLScreen_Invoke(IHTMLScreen *iface, DISPID dispIdMember,
+        REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
+        VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+    return IDispatchEx_Invoke(&This->dispex.IDispatchEx_iface, dispIdMember, riid, lcid, wFlags,
+            pDispParams, pVarResult, pExcepInfo, puArgErr);
+}
+
+static HRESULT WINAPI HTMLScreen_get_colorDepth(IHTMLScreen *iface, LONG *p)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+    HDC hdc = GetDC(0);
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    *p = GetDeviceCaps(hdc, BITSPIXEL);
+    ReleaseDC(0, hdc);
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLScreen_put_bufferDepth(IHTMLScreen *iface, LONG v)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+    FIXME("(%p)->(%d)\n", This, v);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLScreen_get_bufferDepth(IHTMLScreen *iface, LONG *p)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLScreen_get_width(IHTMLScreen *iface, LONG *p)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    *p = GetSystemMetrics(SM_CXSCREEN);
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLScreen_get_height(IHTMLScreen *iface, LONG *p)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    *p = GetSystemMetrics(SM_CYSCREEN);
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLScreen_put_updateInterval(IHTMLScreen *iface, LONG v)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+    FIXME("(%p)->(%d)\n", This, v);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLScreen_get_updateInterval(IHTMLScreen *iface, LONG *p)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLScreen_get_availHeight(IHTMLScreen *iface, LONG *p)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+    RECT work_area;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!SystemParametersInfoW(SPI_GETWORKAREA, 0, &work_area, 0))
+        return E_FAIL;
+
+    *p = work_area.bottom-work_area.top;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLScreen_get_availWidth(IHTMLScreen *iface, LONG *p)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+    RECT work_area;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!SystemParametersInfoW(SPI_GETWORKAREA, 0, &work_area, 0))
+        return E_FAIL;
+
+    *p = work_area.right-work_area.left;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLScreen_get_fontSmoothingEnabled(IHTMLScreen *iface, VARIANT_BOOL *p)
+{
+    HTMLScreen *This = impl_from_IHTMLScreen(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static const IHTMLScreenVtbl HTMLSreenVtbl = {
+    HTMLScreen_QueryInterface,
+    HTMLScreen_AddRef,
+    HTMLScreen_Release,
+    HTMLScreen_GetTypeInfoCount,
+    HTMLScreen_GetTypeInfo,
+    HTMLScreen_GetIDsOfNames,
+    HTMLScreen_Invoke,
+    HTMLScreen_get_colorDepth,
+    HTMLScreen_put_bufferDepth,
+    HTMLScreen_get_bufferDepth,
+    HTMLScreen_get_width,
+    HTMLScreen_get_height,
+    HTMLScreen_put_updateInterval,
+    HTMLScreen_get_updateInterval,
+    HTMLScreen_get_availHeight,
+    HTMLScreen_get_availWidth,
+    HTMLScreen_get_fontSmoothingEnabled
+};
+
+static const tid_t HTMLScreen_iface_tids[] = {
+    IHTMLScreen_tid,
+    0
+};
+static dispex_static_data_t HTMLScreen_dispex = {
+    NULL,
+    DispHTMLScreen_tid,
+    HTMLScreen_iface_tids
+};
+
+HRESULT HTMLScreen_Create(IHTMLScreen **ret)
+{
+    HTMLScreen *screen;
+
+    screen = heap_alloc_zero(sizeof(HTMLScreen));
+    if(!screen)
+        return E_OUTOFMEMORY;
+
+    screen->IHTMLScreen_iface.lpVtbl = &HTMLSreenVtbl;
+    screen->ref = 1;
+
+    init_dispex(&screen->dispex, (IUnknown*)&screen->IHTMLScreen_iface, &HTMLScreen_dispex);
+
+    *ret = &screen->IHTMLScreen_iface;
     return S_OK;
 }
 
@@ -1088,4 +1319,724 @@ IOmNavigator *OmNavigator_Create(void)
     init_dispex(&ret->dispex, (IUnknown*)&ret->IOmNavigator_iface, &OmNavigator_dispex);
 
     return &ret->IOmNavigator_iface;
+}
+
+typedef struct {
+    DispatchEx dispex;
+    IHTMLPerformanceTiming IHTMLPerformanceTiming_iface;
+
+    LONG ref;
+} HTMLPerformanceTiming;
+
+static inline HTMLPerformanceTiming *impl_from_IHTMLPerformanceTiming(IHTMLPerformanceTiming *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLPerformanceTiming, IHTMLPerformanceTiming_iface);
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_QueryInterface(IHTMLPerformanceTiming *iface, REFIID riid, void **ppv)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+
+    if(IsEqualGUID(&IID_IUnknown, riid)) {
+        *ppv = &This->IHTMLPerformanceTiming_iface;
+    }else if(IsEqualGUID(&IID_IHTMLPerformanceTiming, riid)) {
+        *ppv = &This->IHTMLPerformanceTiming_iface;
+    }else if(dispex_query_interface(&This->dispex, riid, ppv)) {
+        return *ppv ? S_OK : E_NOINTERFACE;
+    }else {
+        WARN("Unsupported interface %s\n", debugstr_mshtml_guid(riid));
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI HTMLPerformanceTiming_AddRef(IHTMLPerformanceTiming *iface)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI HTMLPerformanceTiming_Release(IHTMLPerformanceTiming *iface)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    if(!ref) {
+        release_dispex(&This->dispex);
+        heap_free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_GetTypeInfoCount(IHTMLPerformanceTiming *iface, UINT *pctinfo)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+    FIXME("(%p)->(%p)\n", This, pctinfo);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_GetTypeInfo(IHTMLPerformanceTiming *iface, UINT iTInfo,
+                                              LCID lcid, ITypeInfo **ppTInfo)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    return IDispatchEx_GetTypeInfo(&This->dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_GetIDsOfNames(IHTMLPerformanceTiming *iface, REFIID riid,
+                                                          LPOLESTR *rgszNames, UINT cNames,
+                                                          LCID lcid, DISPID *rgDispId)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    return IDispatchEx_GetIDsOfNames(&This->dispex.IDispatchEx_iface, riid, rgszNames, cNames,
+            lcid, rgDispId);
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_Invoke(IHTMLPerformanceTiming *iface, DISPID dispIdMember,
+                            REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
+                            VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    return IDispatchEx_Invoke(&This->dispex.IDispatchEx_iface, dispIdMember, riid, lcid, wFlags,
+            pDispParams, pVarResult, pExcepInfo, puArgErr);
+}
+
+#define TIMING_FAKE_TIMESTAMP 0xdeadbeef
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_navigationStart(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_unloadEventStart(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_unloadEventEnd(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_redirectStart(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_redirectEnd(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_fetchStart(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_domainLookupStart(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_domainLookupEnd(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_connectStart(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_connectEnd(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_requestStart(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_responseStart(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_responseEnd(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_domLoading(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_domInteractive(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_domContentLoadedEventStart(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_domContentLoadedEventEnd(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_domComplete(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_loadEventStart(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_loadEventEnd(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_get_msFirstPaint(IHTMLPerformanceTiming *iface, ULONGLONG *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+
+    FIXME("(%p)->(%p) returning fake value\n", This, p);
+
+    *p = TIMING_FAKE_TIMESTAMP;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_toString(IHTMLPerformanceTiming *iface, BSTR *string)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+    FIXME("(%p)->(%p)\n", This, string);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLPerformanceTiming_toJSON(IHTMLPerformanceTiming *iface, VARIANT *p)
+{
+    HTMLPerformanceTiming *This = impl_from_IHTMLPerformanceTiming(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static const IHTMLPerformanceTimingVtbl HTMLPerformanceTimingVtbl = {
+    HTMLPerformanceTiming_QueryInterface,
+    HTMLPerformanceTiming_AddRef,
+    HTMLPerformanceTiming_Release,
+    HTMLPerformanceTiming_GetTypeInfoCount,
+    HTMLPerformanceTiming_GetTypeInfo,
+    HTMLPerformanceTiming_GetIDsOfNames,
+    HTMLPerformanceTiming_Invoke,
+    HTMLPerformanceTiming_get_navigationStart,
+    HTMLPerformanceTiming_get_unloadEventStart,
+    HTMLPerformanceTiming_get_unloadEventEnd,
+    HTMLPerformanceTiming_get_redirectStart,
+    HTMLPerformanceTiming_get_redirectEnd,
+    HTMLPerformanceTiming_get_fetchStart,
+    HTMLPerformanceTiming_get_domainLookupStart,
+    HTMLPerformanceTiming_get_domainLookupEnd,
+    HTMLPerformanceTiming_get_connectStart,
+    HTMLPerformanceTiming_get_connectEnd,
+    HTMLPerformanceTiming_get_requestStart,
+    HTMLPerformanceTiming_get_responseStart,
+    HTMLPerformanceTiming_get_responseEnd,
+    HTMLPerformanceTiming_get_domLoading,
+    HTMLPerformanceTiming_get_domInteractive,
+    HTMLPerformanceTiming_get_domContentLoadedEventStart,
+    HTMLPerformanceTiming_get_domContentLoadedEventEnd,
+    HTMLPerformanceTiming_get_domComplete,
+    HTMLPerformanceTiming_get_loadEventStart,
+    HTMLPerformanceTiming_get_loadEventEnd,
+    HTMLPerformanceTiming_get_msFirstPaint,
+    HTMLPerformanceTiming_toString,
+    HTMLPerformanceTiming_toJSON
+};
+
+static const tid_t HTMLPerformanceTiming_iface_tids[] = {
+    IHTMLPerformanceTiming_tid,
+    0
+};
+static dispex_static_data_t HTMLPerformanceTiming_dispex = {
+    NULL,
+    IHTMLPerformanceTiming_tid,
+    HTMLPerformanceTiming_iface_tids
+};
+
+typedef struct {
+    DispatchEx dispex;
+    IHTMLPerformanceNavigation IHTMLPerformanceNavigation_iface;
+
+    LONG ref;
+} HTMLPerformanceNavigation;
+
+static inline HTMLPerformanceNavigation *impl_from_IHTMLPerformanceNavigation(IHTMLPerformanceNavigation *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLPerformanceNavigation, IHTMLPerformanceNavigation_iface);
+}
+
+static HRESULT WINAPI HTMLPerformanceNavigation_QueryInterface(IHTMLPerformanceNavigation *iface, REFIID riid, void **ppv)
+{
+    HTMLPerformanceNavigation *This = impl_from_IHTMLPerformanceNavigation(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+
+    if(IsEqualGUID(&IID_IUnknown, riid)) {
+        *ppv = &This->IHTMLPerformanceNavigation_iface;
+    }else if(IsEqualGUID(&IID_IHTMLPerformanceNavigation, riid)) {
+        *ppv = &This->IHTMLPerformanceNavigation_iface;
+    }else if(dispex_query_interface(&This->dispex, riid, ppv)) {
+        return *ppv ? S_OK : E_NOINTERFACE;
+    }else {
+        WARN("Unsupported interface %s\n", debugstr_mshtml_guid(riid));
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI HTMLPerformanceNavigation_AddRef(IHTMLPerformanceNavigation *iface)
+{
+    HTMLPerformanceNavigation *This = impl_from_IHTMLPerformanceNavigation(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI HTMLPerformanceNavigation_Release(IHTMLPerformanceNavigation *iface)
+{
+    HTMLPerformanceNavigation *This = impl_from_IHTMLPerformanceNavigation(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    if(!ref) {
+        release_dispex(&This->dispex);
+        heap_free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI HTMLPerformanceNavigation_GetTypeInfoCount(IHTMLPerformanceNavigation *iface, UINT *pctinfo)
+{
+    HTMLPerformanceNavigation *This = impl_from_IHTMLPerformanceNavigation(iface);
+    FIXME("(%p)->(%p)\n", This, pctinfo);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLPerformanceNavigation_GetTypeInfo(IHTMLPerformanceNavigation *iface, UINT iTInfo,
+                                              LCID lcid, ITypeInfo **ppTInfo)
+{
+    HTMLPerformanceNavigation *This = impl_from_IHTMLPerformanceNavigation(iface);
+
+    return IDispatchEx_GetTypeInfo(&This->dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
+}
+
+static HRESULT WINAPI HTMLPerformanceNavigation_GetIDsOfNames(IHTMLPerformanceNavigation *iface, REFIID riid,
+                                                          LPOLESTR *rgszNames, UINT cNames,
+                                                          LCID lcid, DISPID *rgDispId)
+{
+    HTMLPerformanceNavigation *This = impl_from_IHTMLPerformanceNavigation(iface);
+
+    return IDispatchEx_GetIDsOfNames(&This->dispex.IDispatchEx_iface, riid, rgszNames, cNames,
+            lcid, rgDispId);
+}
+
+static HRESULT WINAPI HTMLPerformanceNavigation_Invoke(IHTMLPerformanceNavigation *iface, DISPID dispIdMember,
+                            REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
+                            VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    HTMLPerformanceNavigation *This = impl_from_IHTMLPerformanceNavigation(iface);
+
+    return IDispatchEx_Invoke(&This->dispex.IDispatchEx_iface, dispIdMember, riid, lcid, wFlags,
+            pDispParams, pVarResult, pExcepInfo, puArgErr);
+}
+
+static HRESULT WINAPI HTMLPerformanceNavigation_get_type(IHTMLPerformanceNavigation *iface, ULONG *p)
+{
+    HTMLPerformanceNavigation *This = impl_from_IHTMLPerformanceNavigation(iface);
+
+    FIXME("(%p)->(%p) returning TYPE_NAVIGATE\n", This, p);
+
+    *p = 0; /* TYPE_NAVIGATE */
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformanceNavigation_get_redirectCount(IHTMLPerformanceNavigation *iface, ULONG *p)
+{
+    HTMLPerformanceNavigation *This = impl_from_IHTMLPerformanceNavigation(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLPerformanceNavigation_toString(IHTMLPerformanceNavigation *iface, BSTR *string)
+{
+    HTMLPerformanceNavigation *This = impl_from_IHTMLPerformanceNavigation(iface);
+    FIXME("(%p)->(%p)\n", This, string);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLPerformanceNavigation_toJSON(IHTMLPerformanceNavigation *iface, VARIANT *p)
+{
+    HTMLPerformanceNavigation *This = impl_from_IHTMLPerformanceNavigation(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static const IHTMLPerformanceNavigationVtbl HTMLPerformanceNavigationVtbl = {
+    HTMLPerformanceNavigation_QueryInterface,
+    HTMLPerformanceNavigation_AddRef,
+    HTMLPerformanceNavigation_Release,
+    HTMLPerformanceNavigation_GetTypeInfoCount,
+    HTMLPerformanceNavigation_GetTypeInfo,
+    HTMLPerformanceNavigation_GetIDsOfNames,
+    HTMLPerformanceNavigation_Invoke,
+    HTMLPerformanceNavigation_get_type,
+    HTMLPerformanceNavigation_get_redirectCount,
+    HTMLPerformanceNavigation_toString,
+    HTMLPerformanceNavigation_toJSON
+};
+
+static const tid_t HTMLPerformanceNavigation_iface_tids[] = {
+    IHTMLPerformanceNavigation_tid,
+    0
+};
+static dispex_static_data_t HTMLPerformanceNavigation_dispex = {
+    NULL,
+    IHTMLPerformanceNavigation_tid,
+    HTMLPerformanceNavigation_iface_tids
+};
+
+typedef struct {
+    DispatchEx dispex;
+    IHTMLPerformance IHTMLPerformance_iface;
+
+    LONG ref;
+
+    IHTMLPerformanceNavigation *navigation;
+    IHTMLPerformanceTiming *timing;
+} HTMLPerformance;
+
+static inline HTMLPerformance *impl_from_IHTMLPerformance(IHTMLPerformance *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLPerformance, IHTMLPerformance_iface);
+}
+
+static HRESULT WINAPI HTMLPerformance_QueryInterface(IHTMLPerformance *iface, REFIID riid, void **ppv)
+{
+    HTMLPerformance *This = impl_from_IHTMLPerformance(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+
+    if(IsEqualGUID(&IID_IUnknown, riid)) {
+        *ppv = &This->IHTMLPerformance_iface;
+    }else if(IsEqualGUID(&IID_IHTMLPerformance, riid)) {
+        *ppv = &This->IHTMLPerformance_iface;
+    }else if(dispex_query_interface(&This->dispex, riid, ppv)) {
+        return *ppv ? S_OK : E_NOINTERFACE;
+    }else {
+        WARN("Unsupported interface %s\n", debugstr_mshtml_guid(riid));
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI HTMLPerformance_AddRef(IHTMLPerformance *iface)
+{
+    HTMLPerformance *This = impl_from_IHTMLPerformance(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI HTMLPerformance_Release(IHTMLPerformance *iface)
+{
+    HTMLPerformance *This = impl_from_IHTMLPerformance(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    if(!ref) {
+        if(This->timing)
+            IHTMLPerformanceTiming_Release(This->timing);
+        if(This->navigation)
+            IHTMLPerformanceNavigation_Release(This->navigation);
+        release_dispex(&This->dispex);
+        heap_free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI HTMLPerformance_GetTypeInfoCount(IHTMLPerformance *iface, UINT *pctinfo)
+{
+    HTMLPerformance *This = impl_from_IHTMLPerformance(iface);
+    FIXME("(%p)->(%p)\n", This, pctinfo);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLPerformance_GetTypeInfo(IHTMLPerformance *iface, UINT iTInfo,
+                                                  LCID lcid, ITypeInfo **ppTInfo)
+{
+    HTMLPerformance *This = impl_from_IHTMLPerformance(iface);
+
+    return IDispatchEx_GetTypeInfo(&This->dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
+}
+
+static HRESULT WINAPI HTMLPerformance_GetIDsOfNames(IHTMLPerformance *iface, REFIID riid,
+                                                    LPOLESTR *rgszNames, UINT cNames,
+                                                    LCID lcid, DISPID *rgDispId)
+{
+    HTMLPerformance *This = impl_from_IHTMLPerformance(iface);
+
+    return IDispatchEx_GetIDsOfNames(&This->dispex.IDispatchEx_iface, riid, rgszNames, cNames,
+            lcid, rgDispId);
+}
+
+static HRESULT WINAPI HTMLPerformance_Invoke(IHTMLPerformance *iface, DISPID dispIdMember,
+                            REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
+                            VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    HTMLPerformance *This = impl_from_IHTMLPerformance(iface);
+
+    return IDispatchEx_Invoke(&This->dispex.IDispatchEx_iface, dispIdMember, riid, lcid, wFlags,
+            pDispParams, pVarResult, pExcepInfo, puArgErr);
+}
+
+static HRESULT WINAPI HTMLPerformance_get_navigation(IHTMLPerformance *iface,
+                                                     IHTMLPerformanceNavigation **p)
+{
+    HTMLPerformance *This = impl_from_IHTMLPerformance(iface);
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!This->navigation) {
+        HTMLPerformanceNavigation *navigation;
+
+        navigation = heap_alloc_zero(sizeof(*navigation));
+        if(!navigation)
+            return E_OUTOFMEMORY;
+
+        navigation->IHTMLPerformanceNavigation_iface.lpVtbl = &HTMLPerformanceNavigationVtbl;
+        navigation->ref = 1;
+        init_dispex(&navigation->dispex, (IUnknown*)&navigation->IHTMLPerformanceNavigation_iface,
+                    &HTMLPerformanceNavigation_dispex);
+
+        This->navigation = &navigation->IHTMLPerformanceNavigation_iface;
+    }
+
+    IHTMLPerformanceNavigation_AddRef(*p = This->navigation);
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformance_get_timing(IHTMLPerformance *iface, IHTMLPerformanceTiming **p)
+{
+    HTMLPerformance *This = impl_from_IHTMLPerformance(iface);
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!This->timing) {
+        HTMLPerformanceTiming *timing;
+
+        timing = heap_alloc_zero(sizeof(*timing));
+        if(!timing)
+            return E_OUTOFMEMORY;
+
+        timing->IHTMLPerformanceTiming_iface.lpVtbl = &HTMLPerformanceTimingVtbl;
+        timing->ref = 1;
+        init_dispex(&timing->dispex, (IUnknown*)&timing->IHTMLPerformanceTiming_iface,
+                    &HTMLPerformanceTiming_dispex);
+
+        This->timing = &timing->IHTMLPerformanceTiming_iface;
+    }
+
+    IHTMLPerformanceTiming_AddRef(*p = This->timing);
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLPerformance_toString(IHTMLPerformance *iface, BSTR *string)
+{
+    HTMLPerformance *This = impl_from_IHTMLPerformance(iface);
+    FIXME("(%p)->(%p)\n", This, string);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLPerformance_toJSON(IHTMLPerformance *iface, VARIANT *var)
+{
+    HTMLPerformance *This = impl_from_IHTMLPerformance(iface);
+    FIXME("(%p)->(%p)\n", This, var);
+    return E_NOTIMPL;
+}
+
+static const IHTMLPerformanceVtbl HTMLPerformanceVtbl = {
+    HTMLPerformance_QueryInterface,
+    HTMLPerformance_AddRef,
+    HTMLPerformance_Release,
+    HTMLPerformance_GetTypeInfoCount,
+    HTMLPerformance_GetTypeInfo,
+    HTMLPerformance_GetIDsOfNames,
+    HTMLPerformance_Invoke,
+    HTMLPerformance_get_navigation,
+    HTMLPerformance_get_timing,
+    HTMLPerformance_toString,
+    HTMLPerformance_toJSON
+};
+
+static const tid_t HTMLPerformance_iface_tids[] = {
+    IHTMLPerformance_tid,
+    0
+};
+static dispex_static_data_t HTMLPerformance_dispex = {
+    NULL,
+    IHTMLPerformance_tid,
+    HTMLPerformance_iface_tids
+};
+
+HRESULT create_performance(IHTMLPerformance **ret)
+{
+    HTMLPerformance *performance;
+
+    performance = heap_alloc_zero(sizeof(*performance));
+    if(!performance)
+        return E_OUTOFMEMORY;
+
+    performance->IHTMLPerformance_iface.lpVtbl = &HTMLPerformanceVtbl;
+    performance->ref = 1;
+
+    init_dispex(&performance->dispex, (IUnknown*)&performance->IHTMLPerformance_iface,
+                &HTMLPerformance_dispex);
+
+    *ret = &performance->IHTMLPerformance_iface;
+    return S_OK;
 }

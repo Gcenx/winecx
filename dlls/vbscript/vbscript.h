@@ -25,9 +25,11 @@
 #include "ole2.h"
 #include "dispex.h"
 #include "activscp.h"
+#include "activdbg.h"
 
 #include "vbscript_classes.h"
 
+#include "wine/heap.h"
 #include "wine/list.h"
 #include "wine/unicode.h"
 
@@ -341,6 +343,7 @@ struct _vbscode_t {
 
     BOOL pending_exec;
     function_t main_code;
+    IDispatch *context;
 
     BSTR *bstr_pool;
     unsigned bstr_pool_size;
@@ -354,6 +357,7 @@ void release_vbscode(vbscode_t*) DECLSPEC_HIDDEN;
 HRESULT compile_script(script_ctx_t*,const WCHAR*,const WCHAR*,vbscode_t**) DECLSPEC_HIDDEN;
 HRESULT exec_script(script_ctx_t*,function_t*,vbdisp_t*,DISPPARAMS*,VARIANT*) DECLSPEC_HIDDEN;
 void release_dynamic_vars(dynamic_var_t*) DECLSPEC_HIDDEN;
+IDispatch *lookup_named_item(script_ctx_t*,const WCHAR*,unsigned) DECLSPEC_HIDDEN;
 
 typedef struct {
     UINT16 len;
@@ -391,6 +395,8 @@ HRESULT create_regexp(IDispatch**) DECLSPEC_HIDDEN;
 
 HRESULT map_hres(HRESULT) DECLSPEC_HIDDEN;
 
+HRESULT create_safearray_iter(SAFEARRAY *sa, IEnumVARIANT **ev) DECLSPEC_HIDDEN;
+
 #define FACILITY_VBS 0xa
 #define MAKE_VBSERROR(code) MAKE_HRESULT(SEVERITY_ERROR, FACILITY_VBS, code)
 
@@ -427,26 +433,6 @@ HRESULT map_hres(HRESULT) DECLSPEC_HIDDEN;
 
 HRESULT WINAPI VBScriptFactory_CreateInstance(IClassFactory*,IUnknown*,REFIID,void**) DECLSPEC_HIDDEN;
 HRESULT WINAPI VBScriptRegExpFactory_CreateInstance(IClassFactory*,IUnknown*,REFIID,void**) DECLSPEC_HIDDEN;
-
-static inline void* __WINE_ALLOC_SIZE(1) heap_alloc(size_t size)
-{
-    return HeapAlloc(GetProcessHeap(), 0, size);
-}
-
-static inline void* __WINE_ALLOC_SIZE(1) heap_alloc_zero(size_t size)
-{
-    return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
-}
-
-static inline void* __WINE_ALLOC_SIZE(2) heap_realloc(void *mem, size_t size)
-{
-    return HeapReAlloc(GetProcessHeap(), 0, mem, size);
-}
-
-static inline BOOL heap_free(void *mem)
-{
-    return HeapFree(GetProcessHeap(), 0, mem);
-}
 
 static inline LPWSTR heap_strdupW(LPCWSTR str)
 {

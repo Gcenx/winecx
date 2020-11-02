@@ -31,6 +31,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(dwrite);
 extern const unsigned short wine_linebreak_table[] DECLSPEC_HIDDEN;
 extern const unsigned short wine_scripts_table[] DECLSPEC_HIDDEN;
 
+/* Number of characters needed for LOCALE_SNATIVEDIGITS */
+#define NATIVE_DIGITS_LEN 11
+
 struct dwritescript_properties {
     DWRITE_SCRIPT_PROPERTIES props;
     UINT32 scripttag;    /* OpenType script tag */
@@ -181,6 +184,10 @@ static const struct dwritescript_properties dwritescripts_properties[Script_Last
     { /* Osge */ { 0x6567734f, 219,  8, 0x0020, 0, 1, 1, 0, 0, 0, 0 }, _OT('o','s','g','e') },
     { /* Sgnw */ { 0x776e6753,  95,  8, 0x0020, 0, 1, 1, 0, 0, 0, 0 }, _OT('s','g','n','w') },
     { /* Tang */ { 0x676e6154, 520,  8, 0x0020, 0, 1, 1, 0, 0, 0, 0 }, _OT('t','a','n','g') },
+    { /* Gonm */ { 0x6d6e6f47, 313,  8, 0x0020, 0, 1, 1, 0, 0, 0, 0 }, _OT('g','o','n','m') },
+    { /* Nshu */ { 0x7568734e, 499,  1, 0x0020, 0, 0, 1, 1, 0, 0, 0 }, _OT('n','s','h','u') },
+    { /* Soyo */ { 0x6f796f53, 329,  8, 0x0020, 0, 1, 1, 0, 0, 0, 0 }, _OT('s','o','y','o') },
+    { /* Zanb */ { 0x626e615a, 339,  8, 0x0020, 0, 1, 1, 0, 0, 0, 0 }, _OT('z','a','n','b') },
 };
 #undef _OT
 
@@ -214,8 +221,8 @@ struct fallback_mapping {
 
 static const struct fallback_mapping fontfallback_neutral_data[] = {
 #define MAPPING_RANGE(ranges, families) \
-        { (DWRITE_UNICODE_RANGE *)ranges, sizeof(ranges)/sizeof(ranges[0]), \
-          (WCHAR **)families, sizeof(families)/sizeof(families[0]) }
+        { (DWRITE_UNICODE_RANGE *)ranges, ARRAY_SIZE(ranges), \
+          (WCHAR **)families, ARRAY_SIZE(families) }
 
     MAPPING_RANGE(cjk_ranges, cjk_families),
 
@@ -1053,7 +1060,7 @@ static UINT32 get_opentype_language(const WCHAR *locale)
 
     if (locale) {
         WCHAR tag[5];
-        if (GetLocaleInfoEx(locale, LOCALE_SOPENTYPELANGUAGETAG, tag, sizeof(tag)/sizeof(WCHAR)))
+        if (GetLocaleInfoEx(locale, LOCALE_SOPENTYPELANGUAGETAG, tag, ARRAY_SIZE(tag)))
             language = DWRITE_MAKE_OPENTYPE_TAG(tag[0],tag[1],tag[2],tag[3]);
     }
 
@@ -1101,11 +1108,11 @@ static DWRITE_NUMBER_SUBSTITUTION_METHOD get_number_substitutes(IDWriteNumberSub
     switch (method)
     {
     case DWRITE_NUMBER_SUBSTITUTION_METHOD_NATIONAL:
-        GetLocaleInfoEx(numbersubst->locale, lctype | LOCALE_SNATIVEDIGITS, digits, sizeof(digits)/sizeof(digits[0]));
+        GetLocaleInfoEx(numbersubst->locale, lctype | LOCALE_SNATIVEDIGITS, digits, NATIVE_DIGITS_LEN);
         break;
     case DWRITE_NUMBER_SUBSTITUTION_METHOD_CONTEXTUAL:
     case DWRITE_NUMBER_SUBSTITUTION_METHOD_TRADITIONAL:
-        if (GetLocaleInfoEx(numbersubst->locale, LOCALE_SISO639LANGNAME, isolang, sizeof(isolang)/sizeof(isolang[0]))) {
+        if (GetLocaleInfoEx(numbersubst->locale, LOCALE_SISO639LANGNAME, isolang, ARRAY_SIZE(isolang))) {
              static const WCHAR arW[] = {'a','r',0};
              static const WCHAR arabicW[] = {0x640,0x641,0x642,0x643,0x644,0x645,0x646,0x647,0x648,0x649,0};
 
@@ -1115,7 +1122,7 @@ static DWRITE_NUMBER_SUBSTITUTION_METHOD get_number_substitutes(IDWriteNumberSub
                  break;
              }
         }
-        GetLocaleInfoEx(numbersubst->locale, lctype | LOCALE_SNATIVEDIGITS, digits, sizeof(digits)/sizeof(digits[0]));
+        GetLocaleInfoEx(numbersubst->locale, lctype | LOCALE_SNATIVEDIGITS, digits, NATIVE_DIGITS_LEN);
         break;
     default:
         ;
@@ -1129,11 +1136,27 @@ static DWRITE_NUMBER_SUBSTITUTION_METHOD get_number_substitutes(IDWriteNumberSub
     return method;
 }
 
+static void analyzer_dump_user_features(DWRITE_TYPOGRAPHIC_FEATURES const **features,
+        UINT32 const *feature_range_lengths, UINT32 feature_ranges)
+{
+    UINT32 i, j, start;
+
+    if (!TRACE_ON(dwrite) || !features)
+        return;
+
+    for (i = 0, start = 0; i < feature_ranges; start += feature_range_lengths[i++]) {
+        TRACE("feature range [%u,%u)\n", start, start + feature_range_lengths[i]);
+        for (j = 0; j < features[i]->featureCount; j++)
+            TRACE("feature %s, parameter %u\n", debugstr_an((char *)&features[i]->features[j].nameTag, 4),
+                    features[i]->features[j].parameter);
+    }
+}
+
 static HRESULT WINAPI dwritetextanalyzer_GetGlyphs(IDWriteTextAnalyzer2 *iface,
     WCHAR const* text, UINT32 length, IDWriteFontFace* fontface, BOOL is_sideways,
     BOOL is_rtl, DWRITE_SCRIPT_ANALYSIS const* analysis, WCHAR const* locale,
     IDWriteNumberSubstitution* substitution, DWRITE_TYPOGRAPHIC_FEATURES const** features,
-    UINT32 const* feature_range_len, UINT32 feature_ranges, UINT32 max_glyph_count,
+    UINT32 const* feature_range_lengths, UINT32 feature_ranges, UINT32 max_glyph_count,
     UINT16* clustermap, DWRITE_SHAPING_TEXT_PROPERTIES* text_props, UINT16* glyph_indices,
     DWRITE_SHAPING_GLYPH_PROPERTIES* glyph_props, UINT32* actual_glyph_count)
 {
@@ -1142,8 +1165,8 @@ static HRESULT WINAPI dwritetextanalyzer_GetGlyphs(IDWriteTextAnalyzer2 *iface,
     struct scriptshaping_context context;
     struct scriptshaping_cache *cache = NULL;
     BOOL update_cluster, need_vertical;
+    WCHAR digits[NATIVE_DIGITS_LEN];
     IDWriteFontFace1 *fontface1;
-    WCHAR digits[11];
     WCHAR *string;
     UINT32 i, g;
     HRESULT hr = S_OK;
@@ -1151,8 +1174,10 @@ static HRESULT WINAPI dwritetextanalyzer_GetGlyphs(IDWriteTextAnalyzer2 *iface,
 
     TRACE("(%s:%u %p %d %d %s %s %p %p %p %u %u %p %p %p %p %p)\n", debugstr_wn(text, length),
         length, fontface, is_sideways, is_rtl, debugstr_sa_script(analysis->script), debugstr_w(locale), substitution,
-        features, feature_range_len, feature_ranges, max_glyph_count, clustermap, text_props, glyph_indices,
+        features, feature_range_lengths, feature_ranges, max_glyph_count, clustermap, text_props, glyph_indices,
         glyph_props, actual_glyph_count);
+
+    analyzer_dump_user_features(features, feature_range_lengths, feature_ranges);
 
     script = analysis->script > Script_LastId ? Script_Unknown : analysis->script;
 
@@ -1285,7 +1310,7 @@ static HRESULT WINAPI dwritetextanalyzer_GetGlyphPlacements(IDWriteTextAnalyzer2
     UINT32 text_len, UINT16 const* glyphs, DWRITE_SHAPING_GLYPH_PROPERTIES const* glyph_props,
     UINT32 glyph_count, IDWriteFontFace *fontface, FLOAT emSize, BOOL is_sideways, BOOL is_rtl,
     DWRITE_SCRIPT_ANALYSIS const* analysis, WCHAR const* locale, DWRITE_TYPOGRAPHIC_FEATURES const** features,
-    UINT32 const* feature_range_len, UINT32 feature_ranges, FLOAT *advances, DWRITE_GLYPH_OFFSET *offsets)
+    UINT32 const* feature_range_lengths, UINT32 feature_ranges, FLOAT *advances, DWRITE_GLYPH_OFFSET *offsets)
 {
     DWRITE_FONT_METRICS metrics;
     IDWriteFontFace1 *fontface1;
@@ -1294,8 +1319,10 @@ static HRESULT WINAPI dwritetextanalyzer_GetGlyphPlacements(IDWriteTextAnalyzer2
 
     TRACE("(%s %p %p %u %p %p %u %p %.2f %d %d %s %s %p %p %u %p %p)\n", debugstr_wn(text, text_len),
         clustermap, props, text_len, glyphs, glyph_props, glyph_count, fontface, emSize, is_sideways,
-        is_rtl, debugstr_sa_script(analysis->script), debugstr_w(locale), features, feature_range_len,
+        is_rtl, debugstr_sa_script(analysis->script), debugstr_w(locale), features, feature_range_lengths,
         feature_ranges, advances, offsets);
+
+    analyzer_dump_user_features(features, feature_range_lengths, feature_ranges);
 
     if (glyph_count == 0)
         return S_OK;
@@ -1345,6 +1372,8 @@ static HRESULT WINAPI dwritetextanalyzer_GetGdiCompatibleGlyphPlacements(IDWrite
         clustermap, props, text_len, glyphs, glyph_props, glyph_count, fontface, emSize, ppdip,
         transform, use_gdi_natural, is_sideways, is_rtl, debugstr_sa_script(analysis->script), debugstr_w(locale),
         features, feature_range_lengths, feature_ranges, advances, offsets);
+
+    analyzer_dump_user_features(features, feature_range_lengths, feature_ranges);
 
     if (glyph_count == 0)
         return S_OK;
@@ -1842,10 +1871,9 @@ static const struct IDWriteTextAnalyzer2Vtbl textanalyzervtbl = {
 
 static IDWriteTextAnalyzer2 textanalyzer = { &textanalyzervtbl };
 
-HRESULT get_textanalyzer(IDWriteTextAnalyzer **ret)
+IDWriteTextAnalyzer *get_text_analyzer(void)
 {
-    *ret = (IDWriteTextAnalyzer*)&textanalyzer;
-    return S_OK;
+    return (IDWriteTextAnalyzer *)&textanalyzer;
 }
 
 static HRESULT WINAPI dwritenumbersubstitution_QueryInterface(IDWriteNumberSubstitution *iface, REFIID riid, void **obj)
@@ -2175,7 +2203,7 @@ HRESULT create_system_fontfallback(IDWriteFactory5 *factory, IDWriteFontFallback
     fallback->IDWriteFontFallback_iface.lpVtbl = &fontfallbackvtbl;
     fallback->factory = factory;
     fallback->mappings = (struct fallback_mapping *)fontfallback_neutral_data;
-    fallback->mappings_count = sizeof(fontfallback_neutral_data) / sizeof(*fontfallback_neutral_data);
+    fallback->mappings_count = ARRAY_SIZE(fontfallback_neutral_data);
     IDWriteFactory5_GetSystemFontCollection(fallback->factory, FALSE, &fallback->systemcollection, FALSE);
 
     *ret = &fallback->IDWriteFontFallback_iface;

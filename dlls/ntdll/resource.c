@@ -314,8 +314,8 @@ NTSTATUS WINAPI LdrFindResource_U( HMODULE hmod, const LDR_RESOURCE_INFO *info,
 
 /* don't penalize other platforms stuff needed on i386 for compatibility */
 #ifdef __i386__
-NTSTATUS WINAPI access_resource( HMODULE hmod, const IMAGE_RESOURCE_DATA_ENTRY *entry,
-                                 void **ptr, ULONG *size )
+NTSTATUS WINAPI DECLSPEC_HIDDEN access_resource( HMODULE hmod, const IMAGE_RESOURCE_DATA_ENTRY *entry,
+                                                 void **ptr, ULONG *size )
 #else
 static inline NTSTATUS access_resource( HMODULE hmod, const IMAGE_RESOURCE_DATA_ENTRY *entry,
                                         void **ptr, ULONG *size )
@@ -333,12 +333,12 @@ static inline NTSTATUS access_resource( HMODULE hmod, const IMAGE_RESOURCE_DATA_
         {
             if (ptr)
             {
-                if (is_data_file_module(hmod))
-                {
-                    HMODULE mod = (HMODULE)((ULONG_PTR)hmod & ~1);
-                    *ptr = RtlImageRvaToVa( RtlImageNtHeader(mod), mod, entry->OffsetToData, NULL );
-                }
-                else *ptr = (char *)hmod + entry->OffsetToData;
+                BOOL is_data_file = is_data_file_module(hmod);
+                hmod = (HMODULE)((ULONG_PTR)hmod & ~3);
+                if (is_data_file)
+                    *ptr = RtlImageRvaToVa( RtlImageNtHeader(hmod), hmod, entry->OffsetToData, NULL );
+                else
+                    *ptr = (char *)hmod + entry->OffsetToData;
             }
             if (size) *size = entry->Size;
             status = STATUS_SUCCESS;

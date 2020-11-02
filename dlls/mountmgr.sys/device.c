@@ -658,7 +658,7 @@ static void create_drive_devices(void)
             if (!RegQueryValueExW( drives_key, driveW, NULL, &type, (BYTE *)buffer, &size ) &&
                 type == REG_SZ)
             {
-                for (j = 0; j < sizeof(drive_types)/sizeof(drive_types[0]); j++)
+                for (j = 0; j < ARRAY_SIZE(drive_types); j++)
                     if (drive_types[j][0] && !strcmpiW( buffer, drive_types[j] ))
                     {
                         drive_type = j;
@@ -1000,12 +1000,12 @@ static BOOL create_port_device( DRIVER_OBJECT *driver, int n, const char *unix_p
 {
     static const WCHAR comW[] = {'C','O','M','%','u',0};
     static const WCHAR lptW[] = {'L','P','T','%','u',0};
-    static const WCHAR auxW[] = {'\\','D','o','s','D','e','v','i','c','e','s','\\','A','U','X',0};
-    static const WCHAR prnW[] = {'\\','D','o','s','D','e','v','i','c','e','s','\\','P','R','N',0};
     static const WCHAR device_serialW[] = {'\\','D','e','v','i','c','e','\\','S','e','r','i','a','l','%','u',0};
     static const WCHAR device_parallelW[] = {'\\','D','e','v','i','c','e','\\','P','a','r','a','l','l','e','l','%','u',0};
     static const WCHAR dosdevices_comW[] = {'\\','D','o','s','D','e','v','i','c','e','s','\\','C','O','M','%','u',0};
+    static const WCHAR dosdevices_auxW[] = {'\\','D','o','s','D','e','v','i','c','e','s','\\','A','U','X',0};
     static const WCHAR dosdevices_lptW[] = {'\\','D','o','s','D','e','v','i','c','e','s','\\','L','P','T','%','u',0};
+    static const WCHAR dosdevices_prnW[] = {'\\','D','o','s','D','e','v','i','c','e','s','\\','P','R','N',0};
     const WCHAR *dos_name_format, *nt_name_format, *reg_value_format, *symlink_format, *default_device;
     WCHAR dos_name[7], reg_value[256], nt_buffer[32], symlink_buffer[32];
     DWORD type, size;
@@ -1020,7 +1020,7 @@ static BOOL create_port_device( DRIVER_OBJECT *driver, int n, const char *unix_p
         nt_name_format = device_serialW;
         reg_value_format = comW;
         symlink_format = dosdevices_comW;
-        default_device = auxW;
+        default_device = dosdevices_auxW;
     }
     else
     {
@@ -1028,7 +1028,7 @@ static BOOL create_port_device( DRIVER_OBJECT *driver, int n, const char *unix_p
         nt_name_format = device_parallelW;
         reg_value_format = dosdevices_lptW;
         symlink_format = dosdevices_lptW;
-        default_device = prnW;
+        default_device = dosdevices_prnW;
     }
 
     sprintfW( dos_name, dos_name_format, n );
@@ -1085,6 +1085,7 @@ static void create_port_devices( DRIVER_OBJECT *driver )
 #ifdef linux
         "/dev/ttyS%u",
         "/dev/ttyUSB%u",
+        "/dev/ttyACM%u",
 #elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
         "/dev/cuau%u",
 #elif defined(__DragonFly__)
@@ -1122,7 +1123,7 @@ static void create_port_devices( DRIVER_OBJECT *driver )
         p[1] = 'o';
         p[2] = 'm';
         search_paths = serial_search_paths;
-        num_search_paths = sizeof(serial_search_paths)/sizeof(serial_search_paths[0]);
+        num_search_paths = ARRAY_SIZE(serial_search_paths);
         windows_ports_key_name = serialcomm_keyW;
     }
     else
@@ -1131,12 +1132,13 @@ static void create_port_devices( DRIVER_OBJECT *driver )
         p[1] = 'p';
         p[2] = 't';
         search_paths = parallel_search_paths;
-        num_search_paths = sizeof(parallel_search_paths)/sizeof(parallel_search_paths[0]);
+        num_search_paths = ARRAY_SIZE(parallel_search_paths);
         windows_ports_key_name = parallel_ports_keyW;
     }
     p += 3;
 
-    RegOpenKeyExW( HKEY_LOCAL_MACHINE, ports_keyW, 0, KEY_QUERY_VALUE, &wine_ports_key );
+    RegCreateKeyExW( HKEY_LOCAL_MACHINE, ports_keyW, 0, NULL, 0,
+                     KEY_QUERY_VALUE, NULL, &wine_ports_key, NULL );
     RegCreateKeyExW( HKEY_LOCAL_MACHINE, windows_ports_key_name, 0, NULL, REG_OPTION_VOLATILE,
                      KEY_ALL_ACCESS, NULL, &windows_ports_key, NULL );
 

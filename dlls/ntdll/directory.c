@@ -205,8 +205,6 @@ static RTL_RUN_ONCE init_once = RTL_RUN_ONCE_INIT;
 /* at some point we may want to allow Winelib apps to set this */
 static const BOOL is_case_sensitive = FALSE;
 
-UNICODE_STRING system_dir = { 0, 0, NULL };  /* system directory */
-
 static struct file_identity windir;
 
 static RTL_CRITICAL_SECTION dir_section;
@@ -794,6 +792,7 @@ static char *parse_mount_entries( FILE *f, dev_t dev, ino_t ino )
     {
         /* don't even bother stat'ing network mounts, there's no meaningful device anyway */
         if (!strcmp( entry->mnt_type, "nfs" ) ||
+            !strcmp( entry->mnt_type, "cifs" ) ||
             !strcmp( entry->mnt_type, "smbfs" ) ||
             !strcmp( entry->mnt_type, "ncpfs" )) continue;
 
@@ -1072,6 +1071,7 @@ static char *get_device_mount_point( dev_t dev )
         {
             /* don't even bother stat'ing network mounts, there's no meaningful device anyway */
             if (!strcmp( entry->mnt_type, "nfs" ) ||
+                !strcmp( entry->mnt_type, "cifs" ) ||
                 !strcmp( entry->mnt_type, "smbfs" ) ||
                 !strcmp( entry->mnt_type, "ncpfs" )) continue;
 
@@ -1162,7 +1162,7 @@ struct vol_caps
 static struct fs_cache *look_up_fs_cache( dev_t dev )
 {
     int i;
-    for (i = 0; i < sizeof(fs_cache)/sizeof(fs_cache[0]); i++)
+    for (i = 0; i < ARRAY_SIZE( fs_cache ); i++)
         if (fs_cache[i].dev == dev)
             return fs_cache+i;
     return NULL;
@@ -1187,7 +1187,7 @@ static void add_fs_cache( dev_t dev, fsid_t fsid, BOOLEAN case_sensitive )
     }
 
     /* Add a new entry */
-    for (i = 0; i < sizeof(fs_cache)/sizeof(fs_cache[0]); i++)
+    for (i = 0; i < ARRAY_SIZE( fs_cache ); i++)
         if (fs_cache[i].dev == 0)
         {
             /* This entry is empty, use it */
@@ -1636,8 +1636,8 @@ static BOOL append_entry( struct dir_data *data, const char *long_name,
     if (short_name)
     {
         short_len = ntdll_umbstowcs( 0, short_name, strlen(short_name),
-                                     short_nameW, sizeof(short_nameW) / sizeof(WCHAR) - 1 );
-        if (short_len == -1) short_len = sizeof(short_nameW) / sizeof(WCHAR) - 1;
+                                     short_nameW, ARRAY_SIZE( short_nameW ) - 1 );
+        if (short_len == -1) short_len = ARRAY_SIZE( short_nameW ) - 1;
         for (i = 0; i < short_len; i++) short_nameW[i] = toupperW( short_nameW[i] );
     }
     else  /* generate a short name if necessary */
@@ -2476,7 +2476,7 @@ static void init_redirects(void)
     {
         windir.dev = st.st_dev;
         windir.ino = st.st_ino;
-        nb_redirects = sizeof(redirects) / sizeof(redirects[0]);
+        nb_redirects = ARRAY_SIZE( redirects );
         for (i = 0; i < nb_redirects; i++)
         {
             if (!redirects[i].dos_target) continue;
@@ -2561,14 +2561,10 @@ static int get_redirect_path( char *unix_name, int pos, const WCHAR *name, int l
 #endif
 
 /***********************************************************************
- *           DIR_init_windows_dir
+ *           init_directories
  */
-void DIR_init_windows_dir( const WCHAR *win, const WCHAR *sys )
+void init_directories(void)
 {
-    /* FIXME: should probably store paths as NT file names */
-
-    RtlCreateUnicodeString( &system_dir, sys );
-
 #ifndef _WIN64
     if (is_wow64) init_redirects();
 #endif
@@ -2662,11 +2658,11 @@ static inline int get_dos_prefix_len( const UNICODE_STRING *name )
 
     if (name->Length >= sizeof(nt_prefixW) &&
         !memcmp( name->Buffer, nt_prefixW, sizeof(nt_prefixW) ))
-        return sizeof(nt_prefixW) / sizeof(WCHAR);
+        return ARRAY_SIZE( nt_prefixW );
 
     if (name->Length >= sizeof(dosdev_prefixW) &&
-        !memicmpW( name->Buffer, dosdev_prefixW, sizeof(dosdev_prefixW)/sizeof(WCHAR) ))
-        return sizeof(dosdev_prefixW) / sizeof(WCHAR);
+        !memicmpW( name->Buffer, dosdev_prefixW, ARRAY_SIZE( dosdev_prefixW )))
+        return ARRAY_SIZE( dosdev_prefixW );
 
     return 0;
 }
@@ -3149,6 +3145,7 @@ NTSTATUS WINAPI RtlWow64EnableFsRedirectionEx( ULONG disable, ULONG *old_value )
     return STATUS_SUCCESS;
 }
 
+NTSTATUS WINAPI __syscall_NtQueryAttributesFile( const OBJECT_ATTRIBUTES *attr, FILE_BASIC_INFORMATION *info );
 
 /******************************************************************
  *		RtlDoesFileExists_U   (NTDLL.@)
@@ -3169,7 +3166,7 @@ BOOLEAN WINAPI RtlDoesFileExists_U(LPCWSTR file_name)
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
 
-    ret = NtQueryAttributesFile(&attr, &basic_info) == STATUS_SUCCESS;
+    ret = __syscall_NtQueryAttributesFile(&attr, &basic_info) == STATUS_SUCCESS;
 
     RtlFreeUnicodeString( &nt_name );
     return ret;

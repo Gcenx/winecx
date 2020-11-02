@@ -160,20 +160,27 @@ static void CredDialogFillUsernameCombo(HWND hwndUsername, const struct cred_dia
         DWORD j;
         BOOL duplicate = FALSE;
 
+        if (!credentials[i]->UserName)
+            continue;
+
         if (params->dwFlags & CREDUI_FLAGS_GENERIC_CREDENTIALS)
         {
-            if ((credentials[i]->Type != CRED_TYPE_GENERIC) || !credentials[i]->UserName)
+            if (credentials[i]->Type != CRED_TYPE_GENERIC)
+            {
+                credentials[i]->UserName = NULL;
                 continue;
+            }
         }
-        else
+        else if (credentials[i]->Type == CRED_TYPE_GENERIC)
         {
-            if (credentials[i]->Type == CRED_TYPE_GENERIC)
-                continue;
+            credentials[i]->UserName = NULL;
+            continue;
         }
 
         /* don't add another item with the same name if we've already added it */
         for (j = 0; j < i; j++)
-            if (!strcmpW(credentials[i]->UserName, credentials[j]->UserName))
+            if (credentials[j]->UserName
+                && !strcmpW(credentials[i]->UserName, credentials[j]->UserName))
             {
                 duplicate = TRUE;
                 break;
@@ -206,7 +213,7 @@ static void CredDialogCreateBalloonTip(HWND hwndDlg, struct cred_dialog_params *
     SetWindowPos(params->hwndBalloonTip, HWND_TOPMOST, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
-    if (!LoadStringW(hinstCredUI, IDS_INCORRECTPASSWORD, wszText, sizeof(wszText)/sizeof(wszText[0])))
+    if (!LoadStringW(hinstCredUI, IDS_INCORRECTPASSWORD, wszText, ARRAY_SIZE(wszText)))
     {
         ERR("failed to load IDS_INCORRECTPASSWORD\n");
         return;
@@ -223,7 +230,7 @@ static void CredDialogCreateBalloonTip(HWND hwndDlg, struct cred_dialog_params *
     toolinfo.lpReserved = NULL;
     SendMessageW(params->hwndBalloonTip, TTM_ADDTOOLW, 0, (LPARAM)&toolinfo);
 
-    if (!LoadStringW(hinstCredUI, IDS_CAPSLOCKON, wszText, sizeof(wszText)/sizeof(wszText[0])))
+    if (!LoadStringW(hinstCredUI, IDS_CAPSLOCKON, wszText, ARRAY_SIZE(wszText)))
     {
         ERR("failed to load IDS_CAPSLOCKON\n");
         return;
@@ -251,7 +258,7 @@ static void CredDialogShowIncorrectPasswordBalloon(HWND hwndDlg, struct cred_dia
     if (params->fBalloonTipActive)
         return;
 
-    if (!LoadStringW(hinstCredUI, IDS_INCORRECTPASSWORDTITLE, wszTitle, sizeof(wszTitle)/sizeof(wszTitle[0])))
+    if (!LoadStringW(hinstCredUI, IDS_INCORRECTPASSWORDTITLE, wszTitle, ARRAY_SIZE(wszTitle)))
     {
         ERR("failed to load IDS_INCORRECTPASSWORDTITLE\n");
         return;
@@ -289,7 +296,7 @@ static void CredDialogShowCapsLockBalloon(HWND hwndDlg, struct cred_dialog_param
     if (params->fBalloonTipActive)
         return;
 
-    if (!LoadStringW(hinstCredUI, IDS_CAPSLOCKONTITLE, wszTitle, sizeof(wszTitle)/sizeof(wszTitle[0])))
+    if (!LoadStringW(hinstCredUI, IDS_CAPSLOCKONTITLE, wszTitle, ARRAY_SIZE(wszTitle)))
     {
         ERR("failed to load IDS_IDSCAPSLOCKONTITLE\n");
         return;
@@ -383,8 +390,8 @@ static BOOL CredDialogInit(HWND hwndDlg, struct cred_dialog_params *params)
     {
         WCHAR format[256];
         WCHAR message[256];
-        LoadStringW(hinstCredUI, IDS_MESSAGEFORMAT, format, sizeof(format)/sizeof(format[0]));
-        snprintfW(message, sizeof(message)/sizeof(message[0]), format, params->pszTargetName);
+        LoadStringW(hinstCredUI, IDS_MESSAGEFORMAT, format, ARRAY_SIZE(format));
+        snprintfW(message, ARRAY_SIZE(message), format, params->pszTargetName);
         SetDlgItemTextW(hwndDlg, IDC_MESSAGE, message);
     }
     SetWindowTextW(hwndUsername, params->pszUsername);
@@ -408,8 +415,8 @@ static BOOL CredDialogInit(HWND hwndDlg, struct cred_dialog_params *params)
     {
         WCHAR format[256];
         WCHAR title[256];
-        LoadStringW(hinstCredUI, IDS_TITLEFORMAT, format, sizeof(format)/sizeof(format[0]));
-        snprintfW(title, sizeof(title)/sizeof(title[0]), format, params->pszTargetName);
+        LoadStringW(hinstCredUI, IDS_TITLEFORMAT, format, ARRAY_SIZE(format));
+        snprintfW(title, ARRAY_SIZE(title), format, params->pszTargetName);
         SetWindowTextW(hwndDlg, title);
     }
 
@@ -867,8 +874,8 @@ ULONG SEC_ENTRY SspiPromptForCredentialsW( PCWSTR target, void *info,
     static const WCHAR negotiateW[] = {'N','e','g','o','t','i','a','t','e',0};
     WCHAR username[CREDUI_MAX_USERNAME_LENGTH + 1] = {0};
     WCHAR password[CREDUI_MAX_PASSWORD_LENGTH + 1] = {0};
-    DWORD len_username = sizeof(username) / sizeof(username[0]);
-    DWORD len_password = sizeof(password) / sizeof(password[0]);
+    DWORD len_username = ARRAY_SIZE(username);
+    DWORD len_password = ARRAY_SIZE(password);
     DWORD ret, flags;
     CREDUI_INFOW *cred_info = info;
     SEC_WINNT_AUTH_IDENTITY_W *id = input_id;

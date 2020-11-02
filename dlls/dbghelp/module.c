@@ -29,6 +29,7 @@
 #include "psapi.h"
 #include "winternl.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
 
@@ -75,9 +76,42 @@ static const WCHAR* get_filename(const WCHAR* name, const WCHAR* endptr)
     return ++ptr;
 }
 
+static BOOL is_wine_loader(const WCHAR *module)
+{
+    static const WCHAR wineW[] = {'w','i','n','e',0};
+    static const WCHAR suffixW[] = {'6','4',0};
+    const WCHAR *filename = get_filename(module, NULL);
+    const char *ptr, *p;
+    BOOL ret = FALSE;
+    WCHAR *buffer;
+    DWORD len;
+
+    if ((ptr = getenv("WINELOADER")))
+    {
+        if ((p = strrchr(ptr, '/'))) ptr = p + 1;
+        len = 2 + MultiByteToWideChar( CP_UNIXCP, 0, ptr, -1, NULL, 0 );
+        buffer = heap_alloc( len * sizeof(WCHAR) );
+        MultiByteToWideChar( CP_UNIXCP, 0, ptr, -1, buffer, len );
+    }
+    else
+    {
+        buffer = heap_alloc( sizeof(wineW) + 2 * sizeof(WCHAR) );
+        strcpyW( buffer, wineW );
+    }
+
+    if (!strcmpW( filename, buffer ))
+        ret = TRUE;
+
+    strcatW( buffer, suffixW );
+    if (!strcmpW( filename, buffer ))
+        ret = TRUE;
+
+    heap_free( buffer );
+    return ret;
+}
+
 static void module_fill_module(const WCHAR* in, WCHAR* out, size_t size)
 {
-    const WCHAR *loader = get_wine_loader_name();
     const WCHAR *ptr, *endptr;
     size_t      len, l;
 
@@ -87,7 +121,7 @@ static void module_fill_module(const WCHAR* in, WCHAR* out, size_t size)
     out[len] = '\0';
     if (len > 4 && (l = match_ext(out, len)))
         out[len - l] = '\0';
-    else if (len > strlenW(loader) && !strcmpiW(out + len - strlenW(loader), loader))
+    else if (is_wine_loader(out))
         lstrcpynW(out, S_WineLoaderW, size);
     else
     {
@@ -100,46 +134,42 @@ static void module_fill_module(const WCHAR* in, WCHAR* out, size_t size)
 
 void module_set_module(struct module* module, const WCHAR* name)
 {
-    module_fill_module(name, module->module.ModuleName, sizeof(module->module.ModuleName));
+    module_fill_module(name, module->module.ModuleName, ARRAY_SIZE(module->module.ModuleName));
+    module_fill_module(name, module->modulename, ARRAY_SIZE(module->modulename));
 }
 
-const WCHAR *get_wine_loader_name(void)
+/* Returned string must be freed by caller */
+WCHAR *get_wine_loader_name(struct process *pcs)
 {
-    static const BOOL is_win64 = sizeof(void *) > sizeof(int); /* FIXME: should depend on target process */
     static const WCHAR wineW[] = {'w','i','n','e',0};
     static const WCHAR suffixW[] = {'6','4',0};
-    static const WCHAR *loader;
+    WCHAR *buffer, *p;
+    const char *env;
 
-    if (!loader)
+    /* All binaries are loaded with WINELOADER (if run from tree) or by the
+     * main executable
+     */
+    if ((env = getenv("WINELOADER")))
     {
-        WCHAR *p, *buffer;
-        const char *ptr;
-
-        /* All binaries are loaded with WINELOADER (if run from tree) or by the
-         * main executable
-         */
-        if ((ptr = getenv("WINELOADER")))
-        {
-            DWORD len = 2 + MultiByteToWideChar( CP_UNIXCP, 0, ptr, -1, NULL, 0 );
-            buffer = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
-            MultiByteToWideChar( CP_UNIXCP, 0, ptr, -1, buffer, len );
-        }
-        else
-        {
-            buffer = HeapAlloc( GetProcessHeap(), 0, sizeof(wineW) + 2 * sizeof(WCHAR) );
-            strcpyW( buffer, wineW );
-        }
-        p = buffer + strlenW( buffer ) - strlenW( suffixW );
-        if (p > buffer && !strcmpW( p, suffixW ))
-        {
-            if (!is_win64) *p = 0;
-        }
-        else if (is_win64) strcatW( buffer, suffixW );
-
-        TRACE( "returning %s\n", debugstr_w(buffer) );
-        loader = buffer;
+        DWORD len = 2 + MultiByteToWideChar( CP_UNIXCP, 0, env, -1, NULL, 0 );
+        buffer = heap_alloc( len * sizeof(WCHAR) );
+        MultiByteToWideChar( CP_UNIXCP, 0, env, -1, buffer, len );
     }
-    return loader;
+    else
+    {
+        buffer = heap_alloc( sizeof(wineW) + 2 * sizeof(WCHAR) );
+        strcpyW( buffer, wineW );
+    }
+
+    p = buffer + strlenW( buffer ) - strlenW( suffixW );
+    if (p > buffer && !strcmpW( p, suffixW ))
+        *p = 0;
+
+    if (pcs->is_64bit)
+        strcatW(buffer, suffixW);
+
+    TRACE( "returning %s\n", debugstr_w(buffer) );
+    return buffer;
 }
 
 static const char*      get_module_type(enum module_type type, BOOL virtual)
@@ -184,7 +214,7 @@ struct module* module_new(struct process* pcs, const WCHAR* name,
     module->module.ImageSize = size;
     module_set_module(module, name);
     module->module.ImageName[0] = '\0';
-    lstrcpynW(module->module.LoadedImageName, name, sizeof(module->module.LoadedImageName) / sizeof(WCHAR));
+    lstrcpynW(module->module.LoadedImageName, name, ARRAY_SIZE(module->module.LoadedImageName));
     module->module.SymType = SymNone;
     module->module.NumSyms = 0;
     module->module.TimeDateStamp = stamp;
@@ -250,7 +280,7 @@ struct module* module_find_by_nameA(const struct process* pcs, const char* name)
 {
     WCHAR wname[MAX_PATH];
 
-    MultiByteToWideChar(CP_ACP, 0, name, -1, wname, sizeof(wname) / sizeof(WCHAR));
+    MultiByteToWideChar(CP_ACP, 0, name, -1, wname, ARRAY_SIZE(wname));
     return module_find_by_nameW(pcs, wname);
 }
 
@@ -366,7 +396,7 @@ BOOL module_get_debug(struct module_pair* pair)
                          &idslW64);
             break;
         case DMT_MACHO:
-            ret = macho_load_debug_info(pair->effective);
+            ret = macho_load_debug_info(pair->pcs, pair->effective);
             break;
         default:
             ret = FALSE;
@@ -453,15 +483,14 @@ static BOOL module_is_container_loaded(const struct process* pcs,
  */
 enum module_type module_get_type_by_name(const WCHAR* name)
 {
-    int loader_len, len = strlenW(name);
-    const WCHAR *loader;
+    int len = strlenW(name);
 
     /* Skip all version extensions (.[digits]) regex: "(\.\d+)*$" */
     do
     {
         int i = len;
 
-        while (i && isdigit(name[i - 1])) i--;
+        while (i && name[i - 1] >= '0' && name[i - 1] <= '9') i--;
 
         if (i && name[i - 1] == '.')
             len = i - 1;
@@ -489,10 +518,7 @@ enum module_type module_get_type_by_name(const WCHAR* name)
         return DMT_DBG;
 
     /* wine is also a native module (Mach-O on Mac OS X, ELF elsewhere) */
-    loader = get_wine_loader_name();
-    loader_len = strlenW( loader );
-    if ((len == loader_len || (len > loader_len && name[len - loader_len - 1] == '/')) &&
-        !strcmpiW(name + len - loader_len, loader))
+    if (is_wine_loader(name))
     {
 #ifdef __APPLE__
         return DMT_MACHO;
@@ -644,8 +670,7 @@ DWORD64 WINAPI  SymLoadModuleExW(HANDLE hProcess, HANDLE hFile, PCWSTR wImageNam
     if (wModuleName)
         module_set_module(module, wModuleName);
     if (wImageName)
-        lstrcpynW(module->module.ImageName, wImageName,
-              sizeof(module->module.ImageName) / sizeof(WCHAR));
+        lstrcpynW(module->module.ImageName, wImageName, ARRAY_SIZE(module->module.ImageName));
 
     return module->module.BaseOfImage;
 }
@@ -811,7 +836,7 @@ BOOL  WINAPI SymEnumerateModulesW64(HANDLE hProcess,
         if (!(dbghelp_options & SYMOPT_WINE_WITH_NATIVE_MODULES) &&
             (module->type == DMT_ELF || module->type == DMT_MACHO))
             continue;
-        if (!EnumModulesCallback(module->module.ModuleName,
+        if (!EnumModulesCallback(module->modulename,
                                  module->module.BaseOfImage, UserContext))
             break;
     }
@@ -908,15 +933,21 @@ BOOL  WINAPI EnumerateLoadedModulesW64(HANDLE hProcess,
     for (i = 0; i < sz; i++)
     {
         if (!GetModuleInformation(hProcess, hMods[i], &mi, sizeof(mi)) ||
-            !GetModuleBaseNameW(hProcess, hMods[i], baseW, sizeof(baseW) / sizeof(WCHAR)))
+            !GetModuleBaseNameW(hProcess, hMods[i], baseW, ARRAY_SIZE(baseW)))
             continue;
-        module_fill_module(baseW, modW, sizeof(modW) / sizeof(CHAR));
+        module_fill_module(baseW, modW, ARRAY_SIZE(modW));
         EnumLoadedModulesCallback(modW, (DWORD_PTR)mi.lpBaseOfDll, mi.SizeOfImage,
                                   UserContext);
     }
     HeapFree(GetProcessHeap(), 0, hMods);
 
     return sz != 0 && i == sz;
+}
+
+static void dbghelp_str_WtoA(const WCHAR *src, char *dst, int dst_len)
+{
+    WideCharToMultiByte(CP_ACP, 0, src, -1, dst, dst_len - 1, NULL, NULL);
+    dst[dst_len - 1] = 0;
 }
 
 /******************************************************************
@@ -934,19 +965,16 @@ BOOL  WINAPI SymGetModuleInfo(HANDLE hProcess, DWORD dwAddr,
     miw64.SizeOfStruct = sizeof(miw64);
     if (!SymGetModuleInfoW64(hProcess, dwAddr, &miw64)) return FALSE;
 
-    mi.SizeOfStruct  = miw64.SizeOfStruct;
+    mi.SizeOfStruct  = ModuleInfo->SizeOfStruct;
     mi.BaseOfImage   = miw64.BaseOfImage;
     mi.ImageSize     = miw64.ImageSize;
     mi.TimeDateStamp = miw64.TimeDateStamp;
     mi.CheckSum      = miw64.CheckSum;
     mi.NumSyms       = miw64.NumSyms;
     mi.SymType       = miw64.SymType;
-    WideCharToMultiByte(CP_ACP, 0, miw64.ModuleName, -1,
-                        mi.ModuleName, sizeof(mi.ModuleName), NULL, NULL);
-    WideCharToMultiByte(CP_ACP, 0, miw64.ImageName, -1,
-                        mi.ImageName, sizeof(mi.ImageName), NULL, NULL);
-    WideCharToMultiByte(CP_ACP, 0, miw64.LoadedImageName, -1,
-                        mi.LoadedImageName, sizeof(mi.LoadedImageName), NULL, NULL);
+    dbghelp_str_WtoA(miw64.ModuleName, mi.ModuleName, sizeof(mi.ModuleName));
+    dbghelp_str_WtoA(miw64.ImageName, mi.ImageName, sizeof(mi.ImageName));
+    dbghelp_str_WtoA(miw64.LoadedImageName, mi.LoadedImageName, sizeof(mi.LoadedImageName));
 
     memcpy(ModuleInfo, &mi, ModuleInfo->SizeOfStruct);
 
@@ -968,7 +996,7 @@ BOOL  WINAPI SymGetModuleInfoW(HANDLE hProcess, DWORD dwAddr,
     miw64.SizeOfStruct = sizeof(miw64);
     if (!SymGetModuleInfoW64(hProcess, dwAddr, &miw64)) return FALSE;
 
-    miw.SizeOfStruct  = miw64.SizeOfStruct;
+    miw.SizeOfStruct  = ModuleInfo->SizeOfStruct;
     miw.BaseOfImage   = miw64.BaseOfImage;
     miw.ImageSize     = miw64.ImageSize;
     miw.TimeDateStamp = miw64.TimeDateStamp;
@@ -1003,25 +1031,20 @@ BOOL  WINAPI SymGetModuleInfo64(HANDLE hProcess, DWORD64 dwAddr,
     miw64.SizeOfStruct = sizeof(miw64);
     if (!SymGetModuleInfoW64(hProcess, dwAddr, &miw64)) return FALSE;
 
-    mi64.SizeOfStruct  = miw64.SizeOfStruct;
+    mi64.SizeOfStruct  = ModuleInfo->SizeOfStruct;
     mi64.BaseOfImage   = miw64.BaseOfImage;
     mi64.ImageSize     = miw64.ImageSize;
     mi64.TimeDateStamp = miw64.TimeDateStamp;
     mi64.CheckSum      = miw64.CheckSum;
     mi64.NumSyms       = miw64.NumSyms;
     mi64.SymType       = miw64.SymType;
-    WideCharToMultiByte(CP_ACP, 0, miw64.ModuleName, -1,
-                        mi64.ModuleName, sizeof(mi64.ModuleName), NULL, NULL);
-    WideCharToMultiByte(CP_ACP, 0, miw64.ImageName, -1,
-                        mi64.ImageName, sizeof(mi64.ImageName), NULL, NULL);
-    WideCharToMultiByte(CP_ACP, 0, miw64.LoadedImageName, -1,
-                        mi64.LoadedImageName, sizeof(mi64.LoadedImageName), NULL, NULL);
-    WideCharToMultiByte(CP_ACP, 0, miw64.LoadedPdbName, -1,
-                        mi64.LoadedPdbName, sizeof(mi64.LoadedPdbName), NULL, NULL);
+    dbghelp_str_WtoA(miw64.ModuleName, mi64.ModuleName, sizeof(mi64.ModuleName));
+    dbghelp_str_WtoA(miw64.ImageName, mi64.ImageName, sizeof(mi64.ImageName));
+    dbghelp_str_WtoA(miw64.LoadedImageName, mi64.LoadedImageName, sizeof(mi64.LoadedImageName));
+    dbghelp_str_WtoA(miw64.LoadedPdbName, mi64.LoadedPdbName, sizeof(mi64.LoadedPdbName));
 
     mi64.CVSig         = miw64.CVSig;
-    WideCharToMultiByte(CP_ACP, 0, miw64.CVData, -1,
-                        mi64.CVData, sizeof(mi64.CVData), NULL, NULL);
+    dbghelp_str_WtoA(miw64.CVData, mi64.CVData, sizeof(mi64.CVData));
     mi64.PdbSig        = miw64.PdbSig;
     mi64.PdbSig70      = miw64.PdbSig70;
     mi64.PdbAge        = miw64.PdbAge;

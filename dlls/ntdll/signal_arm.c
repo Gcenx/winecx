@@ -62,6 +62,7 @@
 #include "winnt.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
+WINE_DECLARE_DEBUG_CHANNEL(relay);
 
 static pthread_key_t teb_key;
 
@@ -200,8 +201,8 @@ static void save_context( CONTEXT *context, const ucontext_t *sigcontext )
     context->Lr   = LR_sig(sigcontext);   /* Link register */
     context->Pc   = PC_sig(sigcontext);   /* Program Counter */
     context->Cpsr = CPSR_sig(sigcontext); /* Current State Register */
-    context->Ip   = IP_sig(sigcontext);   /* Intra-Procedure-call scratch register */
-    context->Fp   = FP_sig(sigcontext);   /* Frame pointer */
+    context->R11  = FP_sig(sigcontext);   /* Frame pointer */
+    context->R12  = IP_sig(sigcontext);   /* Intra-Procedure-call scratch register */
 }
 
 
@@ -221,8 +222,8 @@ static void restore_context( const CONTEXT *context, ucontext_t *sigcontext )
     LR_sig(sigcontext)   = context->Lr ;  /* Link register */
     PC_sig(sigcontext)   = context->Pc;   /* Program Counter */
     CPSR_sig(sigcontext) = context->Cpsr; /* Current State Register */
-    IP_sig(sigcontext)   = context->Ip;   /* Intra-Procedure-call scratch register */
-    FP_sig(sigcontext)   = context->Fp;   /* Frame pointer */
+    FP_sig(sigcontext)   = context->R11;  /* Frame pointer */
+    IP_sig(sigcontext)   = context->R12;  /* Intra-Procedure-call scratch register */
 }
 
 
@@ -261,24 +262,10 @@ __ASM_GLOBAL_FUNC( __chkstk, "lsl r4, r4, #2\n\t"
 /* FIXME: Use the Stack instead of the actual register values */
 __ASM_STDCALL_FUNC( RtlCaptureContext, 4,
                     ".arm\n\t"
-                    "stmfd SP!, {r1}\n\t"
-                    "mov r1, #0x0200000\n\t"/* CONTEXT_ARM */
-                    "add r1, r1, #0x3\n\t"  /* CONTEXT_FULL */
-                    "str r1, [r0]\n\t"      /* context->ContextFlags */
-                    "ldmfd SP!, {r1}\n\t"
-                    "str r0, [r0, #0x4]\n\t"   /* context->R0 */
-                    "str r1, [r0, #0x8]\n\t"   /* context->R1 */
-                    "str r2, [r0, #0xc]\n\t"   /* context->R2 */
-                    "str r3, [r0, #0x10]\n\t"  /* context->R3 */
-                    "str r4, [r0, #0x14]\n\t"  /* context->R4 */
-                    "str r5, [r0, #0x18]\n\t"  /* context->R5 */
-                    "str r6, [r0, #0x1c]\n\t"  /* context->R6 */
-                    "str r7, [r0, #0x20]\n\t"  /* context->R7 */
-                    "str r8, [r0, #0x24]\n\t"  /* context->R8 */
-                    "str r9, [r0, #0x28]\n\t"  /* context->R9 */
-                    "str r10, [r0, #0x2c]\n\t" /* context->R10 */
-                    "str r11, [r0, #0x30]\n\t" /* context->Fp */
-                    "str IP, [r0, #0x34]\n\t"  /* context->Ip */
+                    "stmib r0, {r0-r12}\n\t"   /* context->R0..R12 */
+                    "mov r1, #0x0200000\n\t"   /* CONTEXT_ARM */
+                    "add r1, r1, #0x3\n\t"     /* CONTEXT_FULL */
+                    "str r1, [r0]\n\t"         /* context->ContextFlags */
                     "str SP, [r0, #0x38]\n\t"  /* context->Sp */
                     "str LR, [r0, #0x3c]\n\t"  /* context->Lr */
                     "str PC, [r0, #0x40]\n\t"  /* context->Pc */
@@ -293,25 +280,35 @@ __ASM_STDCALL_FUNC( RtlCaptureContext, 4,
  *
  * Set the new CPU context.
  */
-/* FIXME: What about the CPSR? */
+void DECLSPEC_HIDDEN set_cpu_context( const CONTEXT *context );
 __ASM_GLOBAL_FUNC( set_cpu_context,
-                   "mov IP, r0\n\t"
-                   "ldr r0,  [IP, #0x4]\n\t"  /* context->R0 */
-                   "ldr r1,  [IP, #0x8]\n\t"  /* context->R1 */
-                   "ldr r2,  [IP, #0xc]\n\t"  /* context->R2 */
-                   "ldr r3,  [IP, #0x10]\n\t" /* context->R3 */
-                   "ldr r4,  [IP, #0x14]\n\t" /* context->R4 */
-                   "ldr r5,  [IP, #0x18]\n\t" /* context->R5 */
-                   "ldr r6,  [IP, #0x1c]\n\t" /* context->R6 */
-                   "ldr r7,  [IP, #0x20]\n\t" /* context->R7 */
-                   "ldr r8,  [IP, #0x24]\n\t" /* context->R8 */
-                   "ldr r9,  [IP, #0x28]\n\t" /* context->R9 */
-                   "ldr r10, [IP, #0x2c]\n\t" /* context->R10 */
-                   "ldr r11, [IP, #0x30]\n\t" /* context->Fp */
-                   "ldr SP,  [IP, #0x38]\n\t" /* context->Sp */
-                   "ldr LR,  [IP, #0x3c]\n\t" /* context->Lr */
-                   "ldr PC,  [IP, #0x40]\n\t" /* context->Pc */
-                   )
+                   ".arm\n\t"
+                   "ldr r1, [r0, #0x44]\n\t"  /* context->Cpsr */
+                   "msr CPSR_f, r1\n\t"
+                   "ldr r1, [r0, #0x40]\n\t"  /* context->Pc */
+                   "ldr lr, [r0, #0x3c]\n\t"  /* context->Lr */
+                   "ldr sp, [r0, #0x38]\n\t"  /* context->Sp */
+                   "push {r1}\n\t"
+                   "ldmib r0, {r0-r12}\n\t"   /* context->R0..R12 */
+                   "pop {pc}" )
+
+
+/***********************************************************************
+ *           get_server_context_flags
+ *
+ * Convert CPU-specific flags to generic server flags
+ */
+static unsigned int get_server_context_flags( DWORD flags )
+{
+    unsigned int ret = 0;
+
+    flags &= ~CONTEXT_ARM;  /* get rid of CPU id */
+    if (flags & CONTEXT_CONTROL) ret |= SERVER_CTX_CONTROL;
+    if (flags & CONTEXT_INTEGER) ret |= SERVER_CTX_INTEGER;
+    if (flags & CONTEXT_FLOATING_POINT) ret |= SERVER_CTX_FLOATING_POINT;
+    if (flags & CONTEXT_DEBUG_REGISTERS) ret |= SERVER_CTX_DEBUG_REGISTERS;
+    return ret;
+}
 
 
 /***********************************************************************
@@ -319,7 +316,7 @@ __ASM_GLOBAL_FUNC( set_cpu_context,
  *
  * Copy a register context according to the flags.
  */
-void copy_context( CONTEXT *to, const CONTEXT *from, DWORD flags )
+static void copy_context( CONTEXT *to, const CONTEXT *from, DWORD flags )
 {
     flags &= ~CONTEXT_ARM;  /* get rid of CPU id */
     if (flags & CONTEXT_CONTROL)
@@ -342,8 +339,13 @@ void copy_context( CONTEXT *to, const CONTEXT *from, DWORD flags )
         to->R8  = from->R8;
         to->R9  = from->R9;
         to->R10 = from->R10;
-        to->Ip  = from->Ip;
-        to->Fp  = from->Fp;
+        to->R11 = from->R11;
+        to->R12 = from->R12;
+    }
+    if (flags & CONTEXT_FLOATING_POINT)
+    {
+        to->Fpscr = from->Fpscr;
+        memcpy( to->u.D, from->u.D, sizeof(to->u.D) );
     }
 }
 
@@ -355,7 +357,7 @@ void copy_context( CONTEXT *to, const CONTEXT *from, DWORD flags )
  */
 NTSTATUS context_to_server( context_t *to, const CONTEXT *from )
 {
-    DWORD flags = from->ContextFlags & ~CONTEXT_ARM;  /* get rid of CPU id */
+    DWORD i, flags = from->ContextFlags & ~CONTEXT_ARM;  /* get rid of CPU id */
 
     memset( to, 0, sizeof(*to) );
     to->cpu = CPU_ARM;
@@ -382,8 +384,22 @@ NTSTATUS context_to_server( context_t *to, const CONTEXT *from )
         to->integer.arm_regs.r[8]  = from->R8;
         to->integer.arm_regs.r[9]  = from->R9;
         to->integer.arm_regs.r[10] = from->R10;
-        to->integer.arm_regs.r[11] = from->Fp;
-        to->integer.arm_regs.r[12] = from->Ip;
+        to->integer.arm_regs.r[11] = from->R11;
+        to->integer.arm_regs.r[12] = from->R12;
+    }
+    if (flags & CONTEXT_FLOATING_POINT)
+    {
+        to->flags |= SERVER_CTX_FLOATING_POINT;
+        for (i = 0; i < 32; i++) to->fp.arm_regs.d[i] = from->u.D[i];
+        to->fp.arm_regs.fpscr = from->Fpscr;
+    }
+    if (flags & CONTEXT_DEBUG_REGISTERS)
+    {
+        to->flags |= SERVER_CTX_DEBUG_REGISTERS;
+        for (i = 0; i < ARM_MAX_BREAKPOINTS; i++) to->debug.arm_regs.bvr[i] = from->Bvr[i];
+        for (i = 0; i < ARM_MAX_BREAKPOINTS; i++) to->debug.arm_regs.bcr[i] = from->Bcr[i];
+        for (i = 0; i < ARM_MAX_WATCHPOINTS; i++) to->debug.arm_regs.wvr[i] = from->Wvr[i];
+        for (i = 0; i < ARM_MAX_WATCHPOINTS; i++) to->debug.arm_regs.wcr[i] = from->Wcr[i];
     }
     return STATUS_SUCCESS;
 }
@@ -396,6 +412,8 @@ NTSTATUS context_to_server( context_t *to, const CONTEXT *from )
  */
 NTSTATUS context_from_server( CONTEXT *to, const context_t *from )
 {
+    DWORD i;
+
     if (from->cpu != CPU_ARM) return STATUS_INVALID_PARAMETER;
 
     to->ContextFlags = CONTEXT_ARM;
@@ -421,11 +439,73 @@ NTSTATUS context_from_server( CONTEXT *to, const context_t *from )
         to->R8  = from->integer.arm_regs.r[8];
         to->R9  = from->integer.arm_regs.r[9];
         to->R10 = from->integer.arm_regs.r[10];
-        to->Fp  = from->integer.arm_regs.r[11];
-        to->Ip  = from->integer.arm_regs.r[12];
-     }
+        to->R11 = from->integer.arm_regs.r[11];
+        to->R12 = from->integer.arm_regs.r[12];
+    }
+    if (from->flags & SERVER_CTX_FLOATING_POINT)
+    {
+        to->ContextFlags |= CONTEXT_FLOATING_POINT;
+        for (i = 0; i < 32; i++) to->u.D[i] = from->fp.arm_regs.d[i];
+        to->Fpscr = from->fp.arm_regs.fpscr;
+    }
+    if (from->flags & SERVER_CTX_DEBUG_REGISTERS)
+    {
+        to->ContextFlags |= CONTEXT_DEBUG_REGISTERS;
+        for (i = 0; i < ARM_MAX_BREAKPOINTS; i++) to->Bvr[i] = from->debug.arm_regs.bvr[i];
+        for (i = 0; i < ARM_MAX_BREAKPOINTS; i++) to->Bcr[i] = from->debug.arm_regs.bcr[i];
+        for (i = 0; i < ARM_MAX_WATCHPOINTS; i++) to->Wvr[i] = from->debug.arm_regs.wvr[i];
+        for (i = 0; i < ARM_MAX_WATCHPOINTS; i++) to->Wcr[i] = from->debug.arm_regs.wcr[i];
+    }
     return STATUS_SUCCESS;
 }
+
+/***********************************************************************
+ *              NtSetContextThread  (NTDLL.@)
+ *              ZwSetContextThread  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
+{
+    NTSTATUS ret;
+    BOOL self;
+    context_t server_context;
+
+    context_to_server( &server_context, context );
+    ret = set_thread_context( handle, &server_context, &self );
+    if (self && ret == STATUS_SUCCESS) set_cpu_context( context );
+    return ret;
+}
+
+
+/***********************************************************************
+ *              NtGetContextThread  (NTDLL.@)
+ *              ZwGetContextThread  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
+{
+    NTSTATUS ret;
+    DWORD needed_flags = context->ContextFlags;
+    BOOL self = (handle == GetCurrentThread());
+
+    if (!self)
+    {
+        context_t server_context;
+        unsigned int server_flags = get_server_context_flags( context->ContextFlags );
+
+        if ((ret = get_thread_context( handle, &server_context, server_flags, &self ))) return ret;
+        if ((ret = context_from_server( context, &server_context ))) return ret;
+        needed_flags &= ~context->ContextFlags;
+    }
+
+    if (self && needed_flags)
+    {
+        CONTEXT ctx;
+        RtlCaptureContext( &ctx );
+        copy_context( context, &ctx, ctx.ContextFlags & needed_flags );
+        context->ContextFlags |= ctx.ContextFlags & needed_flags;
+    }
+    return STATUS_SUCCESS;
+}
+
 
 extern void raise_func_trampoline_thumb( EXCEPTION_RECORD *rec, CONTEXT *context, raise_func func );
 __ASM_GLOBAL_FUNC( raise_func_trampoline_thumb,
@@ -589,10 +669,10 @@ static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL f
         {
             TRACE( " r0=%08x r1=%08x r2=%08x r3=%08x r4=%08x r5=%08x\n",
                    context->R0, context->R1, context->R2, context->R3, context->R4, context->R5 );
-            TRACE( " r6=%08x r7=%08x r8=%08x r9=%08x r10=%08x fp=%08x\n",
-                   context->R6, context->R7, context->R8, context->R9, context->R10, context->Fp );
-            TRACE( " ip=%08x sp=%08x lr=%08x pc=%08x cpsr=%08x\n",
-                   context->Ip, context->Sp, context->Lr, context->Pc, context->Cpsr );
+            TRACE( " r6=%08x r7=%08x r8=%08x r9=%08x r10=%08x r11=%08x\n",
+                   context->R6, context->R7, context->R8, context->R9, context->R10, context->R11 );
+            TRACE( " r12=%08x sp=%08x lr=%08x pc=%08x cpsr=%08x\n",
+                   context->R12, context->Sp, context->Lr, context->Pc, context->Cpsr );
         }
 
         status = send_debug_event( rec, TRUE, context );
@@ -860,7 +940,7 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
  */
 int CDECL __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
 {
-    if (sig >= sizeof(handlers) / sizeof(handlers[0])) return -1;
+    if (sig >= ARRAY_SIZE(handlers)) return -1;
     if (handlers[sig] != NULL) return -2;
     handlers[sig] = wsh;
     return 0;
@@ -901,14 +981,8 @@ NTSTATUS signal_alloc_thread( TEB **teb )
  */
 void signal_free_thread( TEB *teb )
 {
-    SIZE_T size;
+    SIZE_T size = 0;
 
-    if (teb->DeallocationStack)
-    {
-        size = 0;
-        NtFreeVirtualMemory( GetCurrentProcess(), &teb->DeallocationStack, &size, MEM_RELEASE );
-    }
-    size = 0;
     NtFreeVirtualMemory( NtCurrentProcess(), (void **)&teb, &size, MEM_RELEASE );
 }
 
@@ -972,15 +1046,6 @@ void signal_init_process(void)
  error:
     perror("sigaction");
     exit(1);
-}
-
-
-/**********************************************************************
- *              __wine_enter_vm86   (NTDLL.@)
- */
-void __wine_enter_vm86( CONTEXT *context )
-{
-    MESSAGE("vm86 mode not supported on this platform\n");
 }
 
 
@@ -1155,11 +1220,12 @@ USHORT WINAPI RtlCaptureStackBackTrace( ULONG skip, ULONG count, PVOID *buffer, 
 /***********************************************************************
  *           call_thread_entry_point
  */
-void call_thread_entry_point( LPTHREAD_START_ROUTINE entry, void *arg )
+static void call_thread_entry_point( LPTHREAD_START_ROUTINE entry, void *arg )
 {
     __TRY
     {
-        exit_thread( entry( arg ));
+        TRACE_(relay)( "\1Starting thread proc %p (arg=%p)\n", entry, arg );
+        RtlExitUserThread( entry( arg ));
     }
     __EXCEPT(unhandled_exception_filter)
     {
@@ -1169,20 +1235,117 @@ void call_thread_entry_point( LPTHREAD_START_ROUTINE entry, void *arg )
     abort();  /* should not be reached */
 }
 
+extern void DECLSPEC_NORETURN start_thread( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend,
+                                            void *relay, TEB *teb );
+__ASM_GLOBAL_FUNC( start_thread,
+                   ".arm\n\t"
+                   "push {r4-r12,lr}\n\t"
+                   /* store exit frame */
+                   "ldr r4, [sp, #40]\n\t"    /* teb */
+                   "str sp, [r4, #0x1d4]\n\t" /* teb->SystemReserved2 */
+                   /* switch to thread stack */
+                   "ldr r4, [r4, #4]\n\t"     /* teb->Tib.StackBase */
+                   "sub sp, r4, #0x1000\n\t"
+                   /* attach dlls */
+                   "bl " __ASM_NAME("attach_thread") "\n\t"
+                   "mov sp, r0\n\t"
+                   /* clear the stack */
+                   "and r0, #~0xff0\n\t"  /* round down to page size */
+                   "bl " __ASM_NAME("virtual_clear_thread_stack") "\n\t"
+                   /* switch to the initial context */
+                   "mov r0, sp\n\t"
+                   "b " __ASM_NAME("set_cpu_context") )
+
+extern void DECLSPEC_NORETURN call_thread_exit_func( int status, void (*func)(int), TEB *teb );
+__ASM_GLOBAL_FUNC( call_thread_exit_func,
+                   ".arm\n\t"
+                   "ldr r3, [r2, #0x1d4]\n\t"  /* teb->SystemReserved2 */
+                   "mov ip, #0\n\t"
+                   "str ip, [r2, #0x1d4]\n\t"
+                   "cmp r3, ip\n\t"
+                   "movne sp, r3\n\t"
+                   "blx r1" )
+
 /***********************************************************************
- *           RtlExitUserThread  (NTDLL.@)
+ *           init_thread_context
  */
-void WINAPI RtlExitUserThread( ULONG status )
+static void init_thread_context( CONTEXT *context, LPTHREAD_START_ROUTINE entry, void *arg, void *relay )
 {
-    exit_thread( status );
+    context->R0 = (DWORD)entry;
+    context->R1 = (DWORD)arg;
+    context->Sp = (DWORD)NtCurrentTeb()->Tib.StackBase;
+    context->Pc = (DWORD)relay;
+}
+
+
+/***********************************************************************
+ *           attach_thread
+ */
+PCONTEXT DECLSPEC_HIDDEN attach_thread( LPTHREAD_START_ROUTINE entry, void *arg,
+                                        BOOL suspend, void *relay )
+{
+    CONTEXT *ctx;
+
+    if (suspend)
+    {
+        CONTEXT context = { CONTEXT_ALL };
+
+        init_thread_context( &context, entry, arg, relay );
+        wait_suspend( &context );
+        ctx = (CONTEXT *)((ULONG_PTR)context.Sp & ~15) - 1;
+        *ctx = context;
+    }
+    else
+    {
+        ctx = (CONTEXT *)NtCurrentTeb()->Tib.StackBase - 1;
+        init_thread_context( ctx, entry, arg, relay );
+    }
+    ctx->ContextFlags = CONTEXT_FULL;
+    LdrInitializeThunk( ctx, (ULONG_PTR *)&ctx->R0, 0, 0 );
+    return ctx;
+}
+
+
+/***********************************************************************
+ *           signal_start_thread
+ *
+ * Thread startup sequence:
+ * signal_start_thread()
+ *   -> thread_startup()
+ *     -> call_thread_entry_point()
+ */
+void signal_start_thread( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend )
+{
+    start_thread( entry, arg, suspend, call_thread_entry_point, NtCurrentTeb() );
+}
+
+/**********************************************************************
+ *		signal_start_process
+ *
+ * Process startup sequence:
+ * signal_start_process()
+ *   -> thread_startup()
+ *     -> kernel32_start_process()
+ */
+void signal_start_process( LPTHREAD_START_ROUTINE entry, BOOL suspend )
+{
+    start_thread( entry, NtCurrentTeb()->Peb, suspend, kernel32_start_process, NtCurrentTeb() );
 }
 
 /***********************************************************************
- *           abort_thread
+ *           signal_exit_thread
  */
-void abort_thread( int status )
+void signal_exit_thread( int status )
 {
-    terminate_thread( status );
+    call_thread_exit_func( status, exit_thread, NtCurrentTeb() );
+}
+
+/***********************************************************************
+ *           signal_exit_process
+ */
+void signal_exit_process( int status )
+{
+    call_thread_exit_func( status, exit, NtCurrentTeb() );
 }
 
 /**********************************************************************

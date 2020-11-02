@@ -44,36 +44,11 @@
 #endif
 #ifdef HAVE_MACH_O_LOADER_H
 #include <mach-o/loader.h>
-
-#ifdef _WIN64
-typedef struct mach_header_64       macho_mach_header;
-typedef struct section_64           macho_section;
-#else
-typedef struct mach_header          macho_mach_header;
-typedef struct section              macho_section;
-#endif
 #endif
 
 #define IMAGE_NO_MAP  ((void*)-1)
 
-#ifdef __ELF__
-
-#ifdef _WIN64
-#define         Elf_Ehdr        Elf64_Ehdr
-#define         Elf_Shdr        Elf64_Shdr
-#define         Elf_Phdr        Elf64_Phdr
-#define         Elf_Dyn         Elf64_Dyn
-#define         Elf_Sym         Elf64_Sym
-#define         Elf_auxv_t      Elf64_auxv_t
-#else
-#define         Elf_Ehdr        Elf32_Ehdr
-#define         Elf_Shdr        Elf32_Shdr
-#define         Elf_Phdr        Elf32_Phdr
-#define         Elf_Dyn         Elf32_Dyn
-#define         Elf_Sym         Elf32_Sym
-#define         Elf_auxv_t      Elf32_auxv_t
-#endif
-#else
+#ifndef __ELF__
 #ifndef SHT_NULL
 #define SHT_NULL        0
 #endif
@@ -97,10 +72,10 @@ struct image_file_map
             struct image_file_map*      alternate;      /* another ELF file (linked to this one) */
             char*                       target_copy;
 #ifdef __ELF__
-            Elf_Ehdr                    elfhdr;
+            Elf64_Ehdr                  elfhdr;
             struct
             {
-                Elf_Shdr                        shdr;
+                Elf64_Shdr                      shdr;
                 const char*                     mapped;
             }*                          sect;
 #endif
@@ -113,7 +88,8 @@ struct image_file_map
             struct image_file_map*      dsym;   /* the debug symbols file associated with this one */
 
 #ifdef HAVE_MACH_O_LOADER_H
-            macho_mach_header           mach_header;
+            struct mach_header          mach_header;
+            size_t                      header_size; /* size of real header in file */
             const struct load_command*  load_commands;
             const struct uuid_command*  uuid;
 
@@ -124,7 +100,7 @@ struct image_file_map
             int                         num_sections;
             struct
             {
-                const macho_section*            section;
+                struct section_64               section;
                 const char*                     mapped;
                 unsigned int                    ignored : 1;
             }*                          sect;

@@ -264,7 +264,7 @@ static void add_tbs_to_menu(HMENU menu)
         WCHAR classes_key[] = {'S','o','f','t','w','a','r','e','\\',
                                'C','l','a','s','s','e','s','\\','C','L','S','I','D',0};
         WCHAR guid[39];
-        DWORD value_len = sizeof(guid)/sizeof(guid[0]);
+        DWORD value_len = ARRAY_SIZE(guid);
         int i;
 
         if(SHRegOpenUSKeyW(classes_key, KEY_READ, NULL, &classes_handle, TRUE) != ERROR_SUCCESS)
@@ -277,11 +277,11 @@ static void add_tbs_to_menu(HMENU menu)
         for(i = 0; SHRegEnumUSValueW(toolbar_handle, i, guid, &value_len, NULL, NULL, NULL, SHREGENUM_HKLM) == ERROR_SUCCESS; i++)
         {
             WCHAR tb_name[100];
-            DWORD tb_name_len = sizeof(tb_name)/sizeof(tb_name[0]);
+            DWORD tb_name_len = ARRAY_SIZE(tb_name);
             HUSKEY tb_class_handle;
             MENUITEMINFOW item;
             LSTATUS ret;
-            value_len = sizeof(guid)/sizeof(guid[0]);
+            value_len = ARRAY_SIZE(guid);
 
             if(lstrlenW(guid) != 38)
             {
@@ -419,7 +419,7 @@ static void add_tb_button(InternetExplorer *ie, int bmp, int cmd, int strId)
     TBBUTTON btn;
     WCHAR buf[30];
 
-    LoadStringW(ieframe_instance, strId, buf, sizeof(buf)/sizeof(buf[0]));
+    LoadStringW(ieframe_instance, strId, buf, ARRAY_SIZE(buf));
 
     btn.iBitmap = bmp;
     btn.idCommand = cmd;
@@ -446,7 +446,7 @@ static void create_rebar(InternetExplorer *ie)
     HIMAGELIST imagelist;
     SIZE toolbar_size;
 
-    LoadStringW(ieframe_instance, IDS_ADDRESS, addr, sizeof(addr)/sizeof(addr[0]));
+    LoadStringW(ieframe_instance, IDS_ADDRESS, addr, ARRAY_SIZE(addr));
 
     hwndRebar = CreateWindowExW(WS_EX_TOOLWINDOW, REBARCLASSNAMEW, NULL,
             WS_CHILD|WS_VISIBLE|WS_CLIPSIBLINGS|WS_CLIPCHILDREN|RBS_VARHEIGHT|CCS_TOP|CCS_NODIVIDER, 0, 0, 0, 0,
@@ -888,7 +888,10 @@ static ULONG WINAPI InternetExplorerManager_Release(IInternetExplorerManager *if
     TRACE("(%p) decreasing refcount to %u\n", iface, ref);
 
     if (ref == 0)
+    {
         HeapFree(GetProcessHeap(), 0, This);
+        released_obj();
+    }
 
     return ref;
 }
@@ -924,6 +927,7 @@ HRESULT WINAPI InternetExplorerManager_Create(IClassFactory *iface, IUnknown *pO
     hr = IInternetExplorerManager_QueryInterface(&ret->IInternetExplorerManager_iface, riid, ppv);
     IInternetExplorerManager_Release(&ret->IInternetExplorerManager_iface);
 
+    InterlockedIncrement(&obj_cnt);
     return hr;
 }
 

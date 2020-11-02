@@ -1987,27 +1987,33 @@ D3DXVECTOR3* WINAPI D3DXVec3TransformNormalArray(D3DXVECTOR3* out, UINT outstrid
     return out;
 }
 
-D3DXVECTOR3* WINAPI D3DXVec3Unproject(D3DXVECTOR3 *pout, const D3DXVECTOR3 *pv, const D3DVIEWPORT9 *pviewport, const D3DXMATRIX *pprojection, const D3DXMATRIX *pview, const D3DXMATRIX *pworld)
+D3DXVECTOR3 * WINAPI D3DXVec3Unproject(D3DXVECTOR3 *out, const D3DXVECTOR3 *v,
+        const D3DVIEWPORT9 *viewport, const D3DXMATRIX *projection, const D3DXMATRIX *view,
+        const D3DXMATRIX *world)
 {
     D3DXMATRIX m;
 
-    TRACE("pout %p, pv %p, pviewport %p, pprojection %p, pview %p, pworlds %p\n", pout, pv, pviewport, pprojection, pview, pworld);
+    TRACE("out %p, v %p, viewport %p, projection %p, view %p, world %p.\n",
+            out, v, viewport, projection, view, world);
 
     D3DXMatrixIdentity(&m);
-    if (pworld) D3DXMatrixMultiply(&m, &m, pworld);
-    if (pview) D3DXMatrixMultiply(&m, &m, pview);
-    if (pprojection) D3DXMatrixMultiply(&m, &m, pprojection);
+    if (world)
+        D3DXMatrixMultiply(&m, &m, world);
+    if (view)
+        D3DXMatrixMultiply(&m, &m, view);
+    if (projection)
+        D3DXMatrixMultiply(&m, &m, projection);
     D3DXMatrixInverse(&m, NULL, &m);
 
-    *pout = *pv;
-    if (pviewport)
+    *out = *v;
+    if (viewport)
     {
-        pout->x = 2.0f * ( pout->x - pviewport->X ) / pviewport->Width - 1.0f;
-        pout->y = 1.0f - 2.0f * ( pout->y - pviewport->Y ) / pviewport->Height;
-        pout->z = ( pout->z - pviewport->MinZ) / ( pviewport->MaxZ - pviewport->MinZ );
+        out->x = 2.0f * (out->x - viewport->X) / viewport->Width - 1.0f;
+        out->y = 1.0f - 2.0f * (out->y - viewport->Y) / viewport->Height;
+        out->z = (out->z - viewport->MinZ) / (viewport->MaxZ - viewport->MinZ);
     }
-    D3DXVec3TransformCoord(pout, pout, &m);
-    return pout;
+    D3DXVec3TransformCoord(out, out, &m);
+    return out;
 }
 
 D3DXVECTOR3* WINAPI D3DXVec3UnprojectArray(D3DXVECTOR3* out, UINT outstride, const D3DXVECTOR3* in, UINT instride, const D3DVIEWPORT9* viewport, const D3DXMATRIX* projection, const D3DXMATRIX* view, const D3DXMATRIX* world, UINT elements)
@@ -2573,27 +2579,27 @@ FLOAT * WINAPI D3DXSHMultiply3(FLOAT *out, const FLOAT *a, const FLOAT *b)
 
     out[0] = 0.28209479f * a[0] * b[0];
 
-    ta = 0.28209479f * a[0] - 0.12615662f * a[6] - 0.21850968f * a[8];
-    tb = 0.28209479f * b[0] - 0.12615662f * b[6] - 0.21850968f * b[8];
+    ta = 0.28209479f * a[0] - 0.12615663f * a[6] - 0.21850969f * a[8];
+    tb = 0.28209479f * b[0] - 0.12615663f * b[6] - 0.21850969f * b[8];
     out[1] = ta * b[1] + tb * a[1];
     t = a[1] * b[1];
     out[0] += 0.28209479f * t;
-    out[6] = -0.12615662f * t;
-    out[8] = -0.21850968f * t;
+    out[6] = -0.12615663f * t;
+    out[8] = -0.21850969f * t;
 
-    ta = 0.21850968f * a[5];
-    tb = 0.21850968f * b[5];
+    ta = 0.21850969f * a[5];
+    tb = 0.21850969f * b[5];
     out[1] += ta * b[2] + tb * a[2];
     out[2] = ta * b[1] + tb * a[1];
     t = a[1] * b[2] +a[2] * b[1];
-    out[5] = 0.21850968f * t;
+    out[5] = 0.21850969f * t;
 
-    ta = 0.21850968f * a[4];
-    tb = 0.21850968f * b[4];
+    ta = 0.21850969f * a[4];
+    tb = 0.21850969f * b[4];
     out[1] += ta * b[3] + tb * a[3];
     out[3]  = ta * b[1] + tb * a[1];
     t = a[1] * b[3] + a[3] * b[1];
-    out[4] = 0.21850968f * t;
+    out[4] = 0.21850969f * t;
 
     ta = 0.28209480f * a[0] + 0.25231326f * a[6];
     tb = 0.28209480f * b[0] + 0.25231326f * b[6];
@@ -2629,14 +2635,14 @@ FLOAT * WINAPI D3DXSHMultiply3(FLOAT *out, const FLOAT *a, const FLOAT *b)
     out[4] += ta * b[5] + tb * a[5];
     out[5] += ta * b[4] + tb * a[4];
     t = a[4] * b[5] + a[5] * b[4];
-    out[7] += 0.15607834f * t;
+    out[7] += 0.15607835f * t;
 
-    ta = 0.28209479f * a[0] + 0.09011186f * a[6] - 0.15607835f * a[8];
-    tb = 0.28209479f * b[0] + 0.09011186f * b[6] - 0.15607835f * b[8];
+    ta = 0.28209479f * a[0] + 0.09011188f * a[6] - 0.15607835f * a[8];
+    tb = 0.28209479f * b[0] + 0.09011188f * b[6] - 0.15607835f * b[8];
     out[5] += ta * b[5] + tb * a[5];
     t = a[5] * b[5];
     out[0] += 0.28209479f * t;
-    out[6] += 0.09011186f * t;
+    out[6] += 0.09011188f * t;
     out[8] -= 0.15607835f * t;
 
     ta = 0.28209480f * a[0];
@@ -2646,12 +2652,12 @@ FLOAT * WINAPI D3DXSHMultiply3(FLOAT *out, const FLOAT *a, const FLOAT *b)
     out[0] += 0.28209480f * t;
     out[6] += 0.18022376f * t;
 
-    ta = 0.28209479f * a[0] + 0.09011186f * a[6] + 0.15607835f * a[8];
-    tb = 0.28209479f * b[0] + 0.09011186f * b[6] + 0.15607835f * b[8];
+    ta = 0.28209479f * a[0] + 0.09011188f * a[6] + 0.15607835f * a[8];
+    tb = 0.28209479f * b[0] + 0.09011188f * b[6] + 0.15607835f * b[8];
     out[7] += ta * b[7] + tb * a[7];
     t = a[7] * b[7];
     out[0] += 0.28209479f * t;
-    out[6] += 0.09011186f * t;
+    out[6] += 0.09011188f * t;
     out[8] += 0.15607835f * t;
 
     ta = 0.28209479f * a[0] - 0.18022375f * a[6];

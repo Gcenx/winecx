@@ -67,6 +67,7 @@ static const struct {
 } InterfaceTable[] = {
 
 	{&CLSID_ApplicationAssociationRegistration, ApplicationAssociationRegistration_Constructor},
+	{&CLSID_ApplicationDestinations, ApplicationDestinations_Constructor},
 	{&CLSID_AutoComplete,   IAutoComplete_Constructor},
 	{&CLSID_ControlPanel,	IControlPanel_Constructor},
 	{&CLSID_DragDropHelper, IDropTargetHelper_Constructor},
@@ -149,7 +150,7 @@ HRESULT WINAPI SHCoCreateInstance(
         }
 
 	/* we look up the dll path in the registry */
-        SHStringFromGUIDW(myclsid, sClassID, sizeof(sClassID)/sizeof(WCHAR));
+        SHStringFromGUIDW(myclsid, sClassID, ARRAY_SIZE(sClassID));
 	lstrcpyW(sKeyName, sCLSID);
 	lstrcatW(sKeyName, sClassID);
 	lstrcatW(sKeyName, sInProcServer32);
@@ -257,7 +258,7 @@ DWORD WINAPI SHCLSIDFromStringA (LPCSTR clsid, CLSID *id)
 {
     WCHAR buffer[40];
     TRACE("(%p(%s) %p)\n", clsid, clsid, id);
-    if (!MultiByteToWideChar( CP_ACP, 0, clsid, -1, buffer, sizeof(buffer)/sizeof(WCHAR) ))
+    if (!MultiByteToWideChar( CP_ACP, 0, clsid, -1, buffer, ARRAY_SIZE(buffer) ))
         return CO_E_CLASSSTRING;
     return CLSIDFromString( buffer, id );
 }
@@ -390,7 +391,7 @@ static IClassFactory * IDefClF_fnConstructor(LPFNCREATEINSTANCE lpfnCI, PLONG pc
 {
 	IDefClFImpl* lpclf;
 
-	lpclf = HeapAlloc(GetProcessHeap(),0,sizeof(IDefClFImpl));
+	lpclf = heap_alloc(sizeof(*lpclf));
 	lpclf->ref = 1;
 	lpclf->IClassFactory_iface.lpVtbl = &dclfvt;
 	lpclf->lpfnCI = lpfnCI;
@@ -450,9 +451,9 @@ static ULONG WINAPI IDefClF_fnRelease(LPCLASSFACTORY iface)
 	  if (This->pcRefDll) InterlockedDecrement(This->pcRefDll);
 
 	  TRACE("-- destroying IClassFactory(%p)\n",This);
-	  HeapFree(GetProcessHeap(),0,This);
-	  return 0;
+	  heap_free(This);
 	}
+
 	return refCount;
 }
 /******************************************************************************
@@ -585,7 +586,7 @@ UINT WINAPI DragQueryFileA(
             LPWSTR lpszFileW = NULL;
 
             if(lpszFile && lFile != 0xFFFFFFFF) {
-                lpszFileW = HeapAlloc(GetProcessHeap(), 0, lLength*sizeof(WCHAR));
+                lpszFileW = heap_alloc(lLength*sizeof(WCHAR));
                 if(lpszFileW == NULL) {
                     goto end;
                 }
@@ -594,7 +595,7 @@ UINT WINAPI DragQueryFileA(
 
             if(lpszFileW) {
                 WideCharToMultiByte(CP_ACP, 0, lpszFileW, -1, lpszFile, lLength, 0, NULL);
-                HeapFree(GetProcessHeap(), 0, lpszFileW);
+                heap_free(lpszFileW);
             }
             goto end;
         }
@@ -640,7 +641,7 @@ UINT WINAPI DragQueryFileW(
             LPSTR lpszFileA = NULL;
 
             if(lpszwFile && lFile != 0xFFFFFFFF) {
-                lpszFileA = HeapAlloc(GetProcessHeap(), 0, lLength);
+                lpszFileA = heap_alloc(lLength);
                 if(lpszFileA == NULL) {
                     goto end;
                 }
@@ -649,7 +650,7 @@ UINT WINAPI DragQueryFileW(
 
             if(lpszFileA) {
                 MultiByteToWideChar(CP_ACP, 0, lpszFileA, -1, lpszwFile, lLength);
-                HeapFree(GetProcessHeap(), 0, lpszFileA);
+                heap_free(lpszFileA);
             }
             goto end;
         }
@@ -881,7 +882,7 @@ static ULONG WINAPI ShellImageData_Release(IShellImageData *iface)
     if (!ref)
     {
         GdipDisposeImage(This->image);
-        HeapFree(GetProcessHeap(), 0, This->path);
+        heap_free(This->path);
         SHFree(This);
     }
 

@@ -658,7 +658,7 @@ static void test_CredUnmarshalCredentialA(void)
     ok( error == ERROR_INVALID_PARAMETER, "got %u\n", error );
     }
 
-    for (i = 0; i < sizeof(tests) / sizeof(tests[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
     {
         SetLastError(0xdeadbeef);
         type = 0;

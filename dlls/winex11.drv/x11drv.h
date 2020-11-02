@@ -114,11 +114,13 @@ typedef struct
     int           exposures;   /* count of graphics exposures operations */
 } X11DRV_PDEVICE;
 
+#define GAMMA_RAMP_SIZE 256
+
 struct x11drv_gamma_ramp
 {
-    WORD red[256];
-    WORD green[256];
-    WORD blue[256];
+    WORD red[GAMMA_RAMP_SIZE];
+    WORD green[GAMMA_RAMP_SIZE];
+    WORD blue[GAMMA_RAMP_SIZE];
 };
 
 static inline X11DRV_PDEVICE *get_x11drv_dev( PHYSDEV dev )
@@ -223,6 +225,7 @@ extern BOOL shape_layered_windows DECLSPEC_HIDDEN;
 extern const struct gdi_dc_funcs *X11DRV_XRender_Init(void) DECLSPEC_HIDDEN;
 
 extern struct opengl_funcs *get_wgl_driver(UINT) DECLSPEC_HIDDEN;
+extern const struct vulkan_funcs *get_vulkan_driver(UINT) DECLSPEC_HIDDEN;
 
 /* IME support */
 extern void IME_SetOpenStatus(BOOL fOpen) DECLSPEC_HIDDEN;
@@ -303,6 +306,7 @@ struct x11drv_escape_flush_gl_drawable
 {
     enum x11drv_escape_codes code;         /* escape code (X11DRV_FLUSH_GL_DRAWABLE) */
     Drawable                 gl_drawable;  /* GL drawable */
+    BOOL                     flush;        /* flush X11 before copying */
 };
 
 /**************************************************************************
@@ -345,7 +349,10 @@ extern DWORD thread_data_tls_index DECLSPEC_HIDDEN;
 
 static inline struct x11drv_thread_data *x11drv_thread_data(void)
 {
-    return TlsGetValue( thread_data_tls_index );
+    DWORD err = GetLastError();  /* TlsGetValue always resets last error */
+    struct x11drv_thread_data *data = TlsGetValue( thread_data_tls_index );
+    SetLastError( err );
+    return data;
 }
 
 /* retrieve the thread display, or NULL if not created yet */
@@ -397,6 +404,7 @@ extern BOOL use_egl DECLSPEC_HIDDEN;
 
 extern int xrender_error_base DECLSPEC_HIDDEN;
 extern HMODULE x11drv_module DECLSPEC_HIDDEN;
+extern char *process_name DECLSPEC_HIDDEN;
 extern Display *clipboard_display DECLSPEC_HIDDEN;
 
 /* atoms */
@@ -562,6 +570,7 @@ struct x11drv_win_data
     BOOL        embedded : 1;   /* is window an XEMBED client? */
     BOOL        shaped : 1;     /* is window using a custom region shape? */
     BOOL        layered : 1;    /* is window layered and with valid attributes? */
+    BOOL        use_alpha : 1;  /* does window use an alpha channel? */
     int         wm_state;       /* current value of the WM_STATE property */
     DWORD       net_wm_state;   /* bit mask of active x11drv_net_wm_state values */
     Window      embedder;       /* window id of embedder */
@@ -578,9 +587,10 @@ extern void release_win_data( struct x11drv_win_data *data ) DECLSPEC_HIDDEN;
 extern Window X11DRV_get_whole_window( HWND hwnd ) DECLSPEC_HIDDEN;
 extern XIC X11DRV_get_ic( HWND hwnd ) DECLSPEC_HIDDEN;
 
-extern void sync_gl_drawable( HWND hwnd, const RECT *visible_rect, const RECT *client_rect ) DECLSPEC_HIDDEN;
+extern void sync_gl_drawable( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void set_gl_drawable_parent( HWND hwnd, HWND parent ) DECLSPEC_HIDDEN;
 extern void destroy_gl_drawable( HWND hwnd ) DECLSPEC_HIDDEN;
+extern void wine_vk_surface_destroy( HWND hwnd ) DECLSPEC_HIDDEN;
 
 extern void wait_for_withdrawn_state( HWND hwnd, BOOL set ) DECLSPEC_HIDDEN;
 extern Window init_clip_window(void) DECLSPEC_HIDDEN;
@@ -588,8 +598,8 @@ extern void update_user_time( Time time ) DECLSPEC_HIDDEN;
 extern void read_net_wm_states( Display *display, struct x11drv_win_data *data ) DECLSPEC_HIDDEN;
 extern void update_net_wm_states( struct x11drv_win_data *data ) DECLSPEC_HIDDEN;
 extern void make_window_embedded( struct x11drv_win_data *data ) DECLSPEC_HIDDEN;
-extern Window create_client_window( struct x11drv_win_data *data, const XVisualInfo *visual ) DECLSPEC_HIDDEN;
-extern void set_window_visual( struct x11drv_win_data *data, const XVisualInfo *vis ) DECLSPEC_HIDDEN;
+extern Window create_client_window( HWND hwnd, const XVisualInfo *visual ) DECLSPEC_HIDDEN;
+extern void set_window_visual( struct x11drv_win_data *data, const XVisualInfo *vis, BOOL use_alpha ) DECLSPEC_HIDDEN;
 extern void change_systray_owner( Display *display, Window systray_window ) DECLSPEC_HIDDEN;
 extern void update_systray_balloon_position(void) DECLSPEC_HIDDEN;
 extern HWND create_foreign_window( Display *display, Window window ) DECLSPEC_HIDDEN;

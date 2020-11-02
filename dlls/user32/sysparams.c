@@ -21,6 +21,7 @@
 #include "config.h"
 
 #include <assert.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,6 +39,7 @@
 #include "winerror.h"
 
 #include "controls.h"
+#include "win.h"
 #include "user_private.h"
 #include "wine/gdi_driver.h"
 #include "wine/unicode.h"
@@ -70,6 +72,7 @@ enum parameter_key
     SHOWSOUNDS_KEY,
     KEYBOARDPREF_KEY,
     SCREENREADER_KEY,
+    AUDIODESC_KEY,
     NB_PARAM_KEYS
 };
 
@@ -94,6 +97,9 @@ static const WCHAR KEYBOARDPREF_REGKEY[] = {'C','o','n','t','r','o','l',' ','P',
 static const WCHAR SCREENREADER_REGKEY[] = {'C','o','n','t','r','o','l',' ','P','a','n','e','l','\\',
                                             'A','c','c','e','s','s','i','b','i','l','i','t','y','\\',
                                             'B','l','i','n','d',' ','A','c','c','e','s','s',0};
+static const WCHAR AUDIODESC_REGKEY[] = {'C','o','n','t','r','o','l',' ','P','a','n','e','l','\\',
+                                            'A','c','c','e','s','s','i','b','i','l','i','t','y','\\',
+                                            'A','u','d','i','o','D','e','s','c','r','i','p','t','i','o','n',0};
 
 static const WCHAR *parameter_key_names[NB_PARAM_KEYS] =
 {
@@ -107,6 +113,7 @@ static const WCHAR *parameter_key_names[NB_PARAM_KEYS] =
     SHOWSOUNDS_REGKEY,
     KEYBOARDPREF_REGKEY,
     SCREENREADER_REGKEY,
+    AUDIODESC_REGKEY,
 };
 
 /* parameter key values; the first char is actually an enum parameter_key to specify the key */
@@ -144,6 +151,8 @@ static const WCHAR DESKPATTERN_VALNAME[]=              {DESKTOP_KEY,'P','a','t',
 static const WCHAR FONTSMOOTHING_VALNAME[]=            {DESKTOP_KEY,'F','o','n','t','S','m','o','o','t','h','i','n','g',0};
 static const WCHAR DRAGWIDTH_VALNAME[]=                {DESKTOP_KEY,'D','r','a','g','W','i','d','t','h',0};
 static const WCHAR DRAGHEIGHT_VALNAME[]=               {DESKTOP_KEY,'D','r','a','g','H','e','i','g','h','t',0};
+static const WCHAR DPISCALINGVER_VALNAME[]=            {DESKTOP_KEY,'D','p','i','S','c','a','l','i','n','g','V','e','r',0};
+static const WCHAR LOGPIXELS_VALNAME[]=                {DESKTOP_KEY,'L','o','g','P','i','x','e','l','s',0};
 static const WCHAR LOWPOWERACTIVE_VALNAME[]=           {DESKTOP_KEY,'L','o','w','P','o','w','e','r','A','c','t','i','v','e',0};
 static const WCHAR POWEROFFACTIVE_VALNAME[]=           {DESKTOP_KEY,'P','o','w','e','r','O','f','f','A','c','t','i','v','e',0};
 static const WCHAR USERPREFERENCESMASK_VALNAME[]=      {DESKTOP_KEY,'U','s','e','r','P','r','e','f','e','r','e','n','c','e','s','M','a','s','k',0};
@@ -215,6 +224,8 @@ static const WCHAR COLOR_GRADIENTACTIVECAPTION_VALNAME[] = {COLORS_KEY,'G','r','
 static const WCHAR COLOR_GRADIENTINACTIVECAPTION_VALNAME[] = {COLORS_KEY,'G','r','a','d','i','e','n','t','I','n','a','c','t','i','v','e','T','i','t','l','e',0};
 static const WCHAR COLOR_MENUHILIGHT_VALNAME[] =       {COLORS_KEY,'M','e','n','u','H','i','l','i','g','h','t',0};
 static const WCHAR COLOR_MENUBAR_VALNAME[] =           {COLORS_KEY,'M','e','n','u','B','a','r',0};
+static const WCHAR AUDIODESC_LOCALE_VALNAME[] =        {AUDIODESC_KEY,'L','o','c','a','l','e',0};
+static const WCHAR AUDIODESC_ON_VALNAME[] =            {AUDIODESC_KEY,'O','n',0};
 
 /* FIXME - real value */
 static const WCHAR SCREENSAVERRUNNING_VALNAME[]=  {DESKTOP_KEY,'W','I','N','E','_','S','c','r','e','e','n','S','a','v','e','r','R','u','n','n','i','n','g',0};
@@ -233,6 +244,17 @@ static const WCHAR CSu[] =   {'%','u',0};
 static const WCHAR CSd[] =   {'%','d',0};
 static const WCHAR CSrgb[] = {'%','u',' ','%','u',' ','%','u',0};
 
+static HDC display_dc;
+static CRITICAL_SECTION display_dc_section;
+static CRITICAL_SECTION_DEBUG critsect_debug =
+{
+    0, 0, &display_dc_section,
+    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": display_dc_section") }
+};
+static CRITICAL_SECTION display_dc_section = { &critsect_debug, -1 ,0, 0, 0, 0 };
+
+
 /* Indicators whether system parameter value is loaded */
 static char spi_loaded[SPI_INDEX_COUNT];
 
@@ -240,6 +262,9 @@ static BOOL notify_change = TRUE;
 
 /* System parameters storage */
 static RECT work_area;
+static UINT system_dpi;
+static DPI_AWARENESS dpi_awareness;
+static DPI_AWARENESS default_awareness = DPI_AWARENESS_UNAWARE;
 
 static HKEY volatile_base_key;
 
@@ -247,7 +272,7 @@ union sysparam_all_entry;
 
 struct sysparam_entry
 {
-    BOOL       (*get)( union sysparam_all_entry *entry, UINT int_param, void *ptr_param );
+    BOOL       (*get)( union sysparam_all_entry *entry, UINT int_param, void *ptr_param, UINT dpi );
     BOOL       (*set)( union sysparam_all_entry *entry, UINT int_param, void *ptr_param, UINT flags );
     BOOL       (*init)( union sysparam_all_entry *entry );
     const WCHAR *regval;
@@ -435,20 +460,26 @@ static void SYSPARAMS_NonClientMetrics32ATo32W( const NONCLIENTMETRICSA* lpnm32A
 struct monitor_info
 {
     int count;
+    RECT primary_rect;
     RECT virtual_rect;
 };
 
 static BOOL CALLBACK monitor_info_proc( HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM lp )
 {
+    MONITORINFO mi;
     struct monitor_info *info = (struct monitor_info *)lp;
     info->count++;
     UnionRect( &info->virtual_rect, &info->virtual_rect, rect );
+    mi.cbSize = sizeof(mi);
+    if (GetMonitorInfoW( monitor, &mi ) && (mi.dwFlags & MONITORINFOF_PRIMARY))
+        info->primary_rect = mi.rcMonitor;
     return TRUE;
 }
 
 static void get_monitors_info( struct monitor_info *info )
 {
     info->count = 0;
+    SetRectEmpty( &info->primary_rect );
     SetRectEmpty( &info->virtual_rect );
     EnumDisplayMonitors( 0, NULL, monitor_info_proc, (LPARAM)info );
 }
@@ -601,23 +632,30 @@ static BOOL init_entry_string( struct sysparam_entry *entry, const WCHAR *str )
     return init_entry( entry, str, (strlenW(str) + 1) * sizeof(WCHAR), REG_SZ );
 }
 
-static inline HDC get_display_dc(void)
+HDC get_display_dc(void)
 {
     static const WCHAR DISPLAY[] = {'D','I','S','P','L','A','Y',0};
-    static HDC display_dc;
-    if (!display_dc)
-    {
-        display_dc = CreateICW( DISPLAY, NULL, NULL, NULL );
-        __wine_make_gdi_object_system( display_dc, TRUE );
-    }
+    EnterCriticalSection( &display_dc_section );
+    if (!display_dc) display_dc = CreateDCW( DISPLAY, NULL, NULL, NULL );
     return display_dc;
 }
 
-static inline int get_display_dpi(void)
+void release_display_dc( HDC hdc )
 {
-    static int display_dpi;
-    if (!display_dpi) display_dpi = GetDeviceCaps( get_display_dc(), LOGPIXELSY );
-    return display_dpi;
+    LeaveCriticalSection( &display_dc_section );
+}
+
+/* map value from system dpi to standard 96 dpi for storing in the registry */
+static int map_from_system_dpi( int val )
+{
+    return MulDiv( val, USER_DEFAULT_SCREEN_DPI, GetDpiForSystem() );
+}
+
+/* map value from 96 dpi to system or custom dpi */
+static int map_to_dpi( int val, UINT dpi )
+{
+    if (!dpi) dpi = GetDpiForSystem();
+    return MulDiv( val, dpi, USER_DEFAULT_SCREEN_DPI );
 }
 
 static INT CALLBACK real_fontname_proc(const LOGFONTW *lf, const TEXTMETRICW *ntm, DWORD type, LPARAM lparam)
@@ -629,33 +667,36 @@ static INT CALLBACK real_fontname_proc(const LOGFONTW *lf, const TEXTMETRICW *nt
     return 0;
 }
 
-static void get_real_fontname(LOGFONTW *lf)
+static void get_real_fontname( HDC hdc, LOGFONTW *lf )
 {
-    EnumFontFamiliesExW(get_display_dc(), lf, real_fontname_proc, (LPARAM)lf, 0);
+    EnumFontFamiliesExW(hdc, lf, real_fontname_proc, (LPARAM)lf, 0);
 }
 
 /* adjust some of the raw values found in the registry */
 static void normalize_nonclientmetrics( NONCLIENTMETRICSW *pncm)
 {
     TEXTMETRICW tm;
+    HDC hdc = get_display_dc();
+
     if( pncm->iBorderWidth < 1) pncm->iBorderWidth = 1;
     if( pncm->iCaptionWidth < 8) pncm->iCaptionWidth = 8;
     if( pncm->iScrollWidth < 8) pncm->iScrollWidth = 8;
     if( pncm->iScrollHeight < 8) pncm->iScrollHeight = 8;
 
     /* adjust some heights to the corresponding font */
-    get_text_metr_size( get_display_dc(), &pncm->lfMenuFont, &tm, NULL);
+    get_text_metr_size( hdc, &pncm->lfMenuFont, &tm, NULL);
     pncm->iMenuHeight = max( pncm->iMenuHeight, 2 + tm.tmHeight + tm.tmExternalLeading );
-    get_real_fontname( &pncm->lfMenuFont );
-    get_text_metr_size( get_display_dc(), &pncm->lfCaptionFont, &tm, NULL);
+    get_real_fontname( hdc, &pncm->lfMenuFont );
+    get_text_metr_size( hdc, &pncm->lfCaptionFont, &tm, NULL);
     pncm->iCaptionHeight = max( pncm->iCaptionHeight, 2 + tm.tmHeight);
-    get_real_fontname( &pncm->lfCaptionFont );
-    get_text_metr_size( get_display_dc(), &pncm->lfSmCaptionFont, &tm, NULL);
+    get_real_fontname( hdc, &pncm->lfCaptionFont );
+    get_text_metr_size( hdc, &pncm->lfSmCaptionFont, &tm, NULL);
     pncm->iSmCaptionHeight = max( pncm->iSmCaptionHeight, 2 + tm.tmHeight);
-    get_real_fontname( &pncm->lfSmCaptionFont );
+    get_real_fontname( hdc, &pncm->lfSmCaptionFont );
 
-    get_real_fontname( &pncm->lfStatusFont );
-    get_real_fontname( &pncm->lfMessageFont );
+    get_real_fontname( hdc, &pncm->lfStatusFont );
+    get_real_fontname( hdc, &pncm->lfMessageFont );
+    release_display_dc( hdc );
 }
 
 static BOOL CALLBACK enum_monitors( HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM lp )
@@ -673,7 +714,7 @@ static BOOL CALLBACK enum_monitors( HMONITOR monitor, HDC hdc, LPRECT rect, LPAR
 }
 
 /* load a uint parameter from the registry */
-static BOOL get_uint_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param )
+static BOOL get_uint_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param, UINT dpi )
 {
     if (!ptr_param) return FALSE;
 
@@ -730,33 +771,45 @@ static BOOL init_int_entry( union sysparam_all_entry *entry )
 }
 
 /* load a twips parameter from the registry */
-static BOOL get_twips_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param )
+static BOOL get_twips_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param, UINT dpi )
 {
+    int val;
+
     if (!ptr_param) return FALSE;
 
     if (!entry->hdr.loaded)
     {
         WCHAR buf[32];
 
-        if (load_entry( &entry->hdr, buf, sizeof(buf) ))
-        {
-            int val = atoiW( buf );
-            /* Dimensions are quoted as being "twips" values if negative and pixels if positive.
-             * One inch is 1440 twips.
-             * See for example
-             *       Technical Reference to the Windows 2000 Registry ->
-             *       HKEY_CURRENT_USER -> Control Panel -> Desktop -> WindowMetrics
-             */
-            if (val < 0) val = (-val * get_display_dpi() + 720) / 1440;
-            entry->uint.val = val;
-        }
+        if (load_entry( &entry->hdr, buf, sizeof(buf) )) entry->uint.val = atoiW( buf );
     }
-    *(UINT *)ptr_param = entry->uint.val;
+
+    /* Dimensions are quoted as being "twips" values if negative and pixels if positive.
+     * One inch is 1440 twips.
+     * See for example
+     *       Technical Reference to the Windows 2000 Registry ->
+     *       HKEY_CURRENT_USER -> Control Panel -> Desktop -> WindowMetrics
+     */
+    val = entry->uint.val;
+    if (val < 0)
+        val = MulDiv( -val, dpi, 1440 );
+    else
+        val = map_to_dpi( val, dpi );
+
+    *(int *)ptr_param = val;
     return TRUE;
 }
 
+/* set a twips parameter in the registry */
+static BOOL set_twips_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param, UINT flags )
+{
+    int val = int_param;
+    if (val > 0) val = map_from_system_dpi( val );
+    return set_int_entry( entry, val, ptr_param, flags );
+}
+
 /* load a bool parameter from the registry */
-static BOOL get_bool_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param )
+static BOOL get_bool_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param, UINT dpi )
 {
     if (!ptr_param) return FALSE;
 
@@ -792,7 +845,7 @@ static BOOL init_bool_entry( union sysparam_all_entry *entry )
 }
 
 /* load a bool parameter using Yes/No strings from the registry */
-static BOOL get_yesno_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param )
+static BOOL get_yesno_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param, UINT dpi )
 {
     if (!ptr_param) return FALSE;
 
@@ -824,7 +877,7 @@ static BOOL init_yesno_entry( union sysparam_all_entry *entry )
 }
 
 /* load a dword (binary) parameter from the registry */
-static BOOL get_dword_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param )
+static BOOL get_dword_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param, UINT dpi )
 {
     if (!ptr_param) return FALSE;
 
@@ -833,7 +886,7 @@ static BOOL get_dword_entry( union sysparam_all_entry *entry, UINT int_param, vo
         DWORD val;
         if (load_entry( &entry->hdr, &val, sizeof(val) ) == sizeof(DWORD)) entry->dword.val = val;
     }
-    *(DWORD *)ptr_param = entry->bool.val;
+    *(DWORD *)ptr_param = entry->dword.val;
     return TRUE;
 }
 
@@ -855,7 +908,7 @@ static BOOL init_dword_entry( union sysparam_all_entry *entry )
 }
 
 /* load an RGB parameter from the registry */
-static BOOL get_rgb_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param )
+static BOOL get_rgb_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param, UINT dpi )
 {
     if (!ptr_param) return FALSE;
 
@@ -919,25 +972,25 @@ static BOOL init_rgb_entry( union sysparam_all_entry *entry )
 }
 
 /* load a font (binary) parameter from the registry */
-static BOOL get_font_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param )
+static BOOL get_font_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param, UINT dpi )
 {
+    LOGFONTW font;
+
     if (!ptr_param) return FALSE;
 
     if (!entry->hdr.loaded)
     {
-        LOGFONTW font;
-
         switch (load_entry( &entry->hdr, &font, sizeof(font) ))
         {
         case sizeof(font):
             if (font.lfHeight > 0) /* positive height value means points ( inch/72 ) */
-                font.lfHeight = -MulDiv( font.lfHeight, get_display_dpi(), 72 );
+                font.lfHeight = -MulDiv( font.lfHeight, USER_DEFAULT_SCREEN_DPI, 72 );
             entry->font.val = font;
             break;
         case sizeof(LOGFONT16): /* win9x-winME format */
             SYSPARAMS_LogFont16To32W( (LOGFONT16 *)&font, &entry->font.val );
             if (entry->font.val.lfHeight > 0)
-                entry->font.val.lfHeight = -MulDiv( entry->font.val.lfHeight, get_display_dpi(), 72 );
+                entry->font.val.lfHeight = -MulDiv( entry->font.val.lfHeight, USER_DEFAULT_SCREEN_DPI, 72 );
             break;
         default:
             WARN( "Unknown format in key %s value %s\n",
@@ -946,13 +999,16 @@ static BOOL get_font_entry( union sysparam_all_entry *entry, UINT int_param, voi
             /* fall through */
         case 0: /* use the default GUI font */
             GetObjectW( GetStockObject( DEFAULT_GUI_FONT ), sizeof(font), &font );
+            font.lfHeight = map_from_system_dpi( font.lfHeight );
             font.lfWeight = entry->font.weight;
             entry->font.val = font;
             break;
         }
         entry->hdr.loaded = TRUE;
     }
-    *(LOGFONTW *)ptr_param = entry->font.val;
+    font = entry->font.val;
+    font.lfHeight = map_to_dpi( font.lfHeight, dpi );
+    *(LOGFONTW *)ptr_param = font;
     return TRUE;
 }
 
@@ -966,6 +1022,7 @@ static BOOL set_font_entry( union sysparam_all_entry *entry, UINT int_param, voi
     /* zero pad the end of lfFaceName so we don't save uninitialised data */
     ptr = memchrW( font.lfFaceName, 0, LF_FACESIZE );
     if (ptr) memset( ptr, 0, (font.lfFaceName + LF_FACESIZE - ptr) * sizeof(WCHAR) );
+    if (font.lfHeight < 0) font.lfHeight = map_from_system_dpi( font.lfHeight );
 
     if (!save_entry( &entry->hdr, &font, sizeof(font), REG_BINARY, flags )) return FALSE;
     entry->font.val = font;
@@ -977,12 +1034,13 @@ static BOOL set_font_entry( union sysparam_all_entry *entry, UINT int_param, voi
 static BOOL init_font_entry( union sysparam_all_entry *entry )
 {
     GetObjectW( GetStockObject( DEFAULT_GUI_FONT ), sizeof(entry->font.val), &entry->font.val );
+    entry->font.val.lfHeight = map_from_system_dpi( entry->font.val.lfHeight );
     entry->font.val.lfWeight = entry->font.weight;
     return init_entry( &entry->hdr, &entry->font.val, sizeof(entry->font.val), REG_BINARY );
 }
 
 /* get a path parameter in the registry */
-static BOOL get_path_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param )
+static BOOL get_path_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param, UINT dpi )
 {
     if (!ptr_param) return FALSE;
 
@@ -1020,7 +1078,7 @@ static BOOL init_path_entry( union sysparam_all_entry *entry )
 }
 
 /* get a binary parameter in the registry */
-static BOOL get_binary_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param )
+static BOOL get_binary_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param, UINT dpi )
 {
     if (!ptr_param) return FALSE;
 
@@ -1065,14 +1123,14 @@ static BOOL init_binary_entry( union sysparam_all_entry *entry )
 }
 
 /* get a user pref parameter in the registry */
-static BOOL get_userpref_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param )
+static BOOL get_userpref_entry( union sysparam_all_entry *entry, UINT int_param, void *ptr_param, UINT dpi )
 {
     union sysparam_all_entry *parent_entry = (union sysparam_all_entry *)entry->pref.parent;
     BYTE prefs[8];
 
     if (!ptr_param) return FALSE;
 
-    if (!parent_entry->hdr.get( parent_entry, sizeof(prefs), prefs )) return FALSE;
+    if (!parent_entry->hdr.get( parent_entry, sizeof(prefs), prefs, dpi )) return FALSE;
     *(BOOL *)ptr_param = (prefs[entry->pref.offset] & entry->pref.mask) != 0;
     return TRUE;
 }
@@ -1084,7 +1142,7 @@ static BOOL set_userpref_entry( union sysparam_all_entry *entry, UINT int_param,
     BYTE prefs[8];
 
     parent_entry->hdr.loaded = FALSE;  /* force loading it again */
-    if (!parent_entry->hdr.get( parent_entry, sizeof(prefs), prefs )) return FALSE;
+    if (!parent_entry->hdr.get( parent_entry, sizeof(prefs), prefs, GetDpiForSystem() )) return FALSE;
 
     if (PtrToUlong( ptr_param )) prefs[entry->pref.offset] |= entry->pref.mask;
     else prefs[entry->pref.offset] &= ~entry->pref.mask;
@@ -1092,10 +1150,15 @@ static BOOL set_userpref_entry( union sysparam_all_entry *entry, UINT int_param,
     return parent_entry->hdr.set( parent_entry, sizeof(prefs), prefs, flags );
 }
 
-static BOOL get_entry( void *ptr, UINT int_param, void *ptr_param )
+static BOOL get_entry_dpi( void *ptr, UINT int_param, void *ptr_param, UINT dpi )
 {
     union sysparam_all_entry *entry = ptr;
-    return entry->hdr.get( entry, int_param, ptr_param );
+    return entry->hdr.get( entry, int_param, ptr_param, dpi );
+}
+
+static BOOL get_entry( void *ptr, UINT int_param, void *ptr_param )
+{
+    return get_entry_dpi( ptr, int_param, ptr_param, GetDpiForSystem() );
 }
 
 static BOOL set_entry( void *ptr, UINT int_param, void *ptr_param, UINT flags )
@@ -1129,7 +1192,7 @@ static BOOL set_entry( void *ptr, UINT int_param, void *ptr_param, UINT flags )
                                                   name ##_VALNAME }, (val) }
 
 #define TWIPS_ENTRY(name,val) \
-    struct sysparam_uint_entry entry_##name = { { get_twips_entry, set_int_entry, init_int_entry, \
+    struct sysparam_uint_entry entry_##name = { { get_twips_entry, set_twips_entry, init_int_entry, \
                                                   name ##_VALNAME }, (val) }
 
 #define DWORD_ENTRY(name,val) \
@@ -1192,6 +1255,7 @@ static BOOL_ENTRY( SCREENSAVERRUNNING, FALSE );
 static BOOL_ENTRY( SHOWSOUNDS, FALSE );
 static BOOL_ENTRY( SNAPTODEFBUTTON, FALSE );
 static BOOL_ENTRY_MIRROR( ICONTITLEWRAP, TRUE );
+static BOOL_ENTRY( AUDIODESC_ON, FALSE);
 
 static YESNO_ENTRY( BEEP, TRUE );
 
@@ -1211,6 +1275,7 @@ static TWIPS_ENTRY( SMCAPTIONWIDTH, -225 );
 static DWORD_ENTRY( ACTIVEWINDOWTRACKING, 0 );
 static DWORD_ENTRY( ACTIVEWNDTRKTIMEOUT, 0 );
 static DWORD_ENTRY( CARETWIDTH, 1 );
+static DWORD_ENTRY( DPISCALINGVER, 0 );
 static DWORD_ENTRY( FOCUSBORDERHEIGHT, 1 );
 static DWORD_ENTRY( FOCUSBORDERWIDTH, 1 );
 static DWORD_ENTRY( FONTSMOOTHINGCONTRAST, 0 );
@@ -1218,7 +1283,9 @@ static DWORD_ENTRY( FONTSMOOTHINGORIENTATION, FE_FONTSMOOTHINGORIENTATIONRGB );
 static DWORD_ENTRY( FONTSMOOTHINGTYPE, FE_FONTSMOOTHINGSTANDARD );
 static DWORD_ENTRY( FOREGROUNDFLASHCOUNT, 3 );
 static DWORD_ENTRY( FOREGROUNDLOCKTIMEOUT, 0 );
+static DWORD_ENTRY( LOGPIXELS, 0 );
 static DWORD_ENTRY( MOUSECLICKLOCKTIME, 1200 );
+static DWORD_ENTRY( AUDIODESC_LOCALE, 0 );
 
 static PATH_ENTRY( DESKPATTERN );
 static PATH_ENTRY( DESKWALLPAPER );
@@ -1292,7 +1359,6 @@ static struct sysparam_rgb_entry system_colors[] =
     RGB_ENTRY( COLOR_MENUBAR, RGB(212, 208, 200) )
 #undef RGB_ENTRY
 };
-#define NUM_SYS_COLORS (sizeof(system_colors) / sizeof(system_colors[0]))
 
 /* entries that are initialized by default in the registry */
 static union sysparam_all_entry * const default_entries[] =
@@ -1350,6 +1416,8 @@ static union sysparam_all_entry * const default_entries[] =
     (union sysparam_all_entry *)&entry_USERPREFERENCESMASK,
     (union sysparam_all_entry *)&entry_WHEELSCROLLCHARS,
     (union sysparam_all_entry *)&entry_WHEELSCROLLLINES,
+    (union sysparam_all_entry *)&entry_AUDIODESC_LOCALE,
+    (union sysparam_all_entry *)&entry_AUDIODESC_ON,
 };
 
 /***********************************************************************
@@ -1357,8 +1425,10 @@ static union sysparam_all_entry * const default_entries[] =
  */
 void SYSPARAMS_Init(void)
 {
+    static const WCHAR def_key_name[] = {'S','o','f','t','w','a','r','e','\\','F','o','n','t','s',0};
+    static const WCHAR def_value_name[] = {'L','o','g','P','i','x','e','l','s',0};
     HKEY key;
-    DWORD i, dispos;
+    DWORD i, dispos, dpi_scaling;
 
     /* this one must be non-volatile */
     if (RegCreateKeyW( HKEY_CURRENT_USER, WINE_CURRENT_USER_REGKEY, &key ))
@@ -1374,9 +1444,27 @@ void SYSPARAMS_Init(void)
 
     RegCloseKey( key );
 
+    get_dword_entry( (union sysparam_all_entry *)&entry_LOGPIXELS, 0, &system_dpi, 0 );
+    if (!system_dpi)  /* check fallback key */
+    {
+        if (!RegOpenKeyW( HKEY_CURRENT_CONFIG, def_key_name, &key ))
+        {
+            DWORD type, size = sizeof(system_dpi);
+            if (RegQueryValueExW( key, def_value_name, NULL, &type, (void *)&system_dpi, &size ) ||
+                type != REG_DWORD)
+                system_dpi = 0;
+            RegCloseKey( key );
+        }
+    }
+    if (!system_dpi) system_dpi = USER_DEFAULT_SCREEN_DPI;
+
+    /* FIXME: what do the DpiScalingVer flags mean? */
+    get_dword_entry( (union sysparam_all_entry *)&entry_DPISCALINGVER, 0, &dpi_scaling, 0 );
+    if (!dpi_scaling) default_awareness = DPI_AWARENESS_PER_MONITOR_AWARE;
+
     if (volatile_base_key && dispos == REG_CREATED_NEW_KEY)  /* first process, initialize entries */
     {
-        for (i = 0; i < sizeof(default_entries)/sizeof(default_entries[0]); i++)
+        for (i = 0; i < ARRAY_SIZE( default_entries ); i++)
             default_entries[i]->hdr.init( default_entries[i] );
     }
 }
@@ -1397,6 +1485,61 @@ static BOOL update_desktop_wallpaper(void)
     else SendMessageW( GetDesktopWindow(), WM_SETTINGCHANGE, SPI_SETDESKWALLPAPER, 0 );
     return TRUE;
 }
+
+
+/***********************************************************************
+ *		SystemParametersInfoForDpi  (USER32.@)
+ */
+BOOL WINAPI SystemParametersInfoForDpi( UINT action, UINT val, PVOID ptr, UINT winini, UINT dpi )
+{
+    BOOL ret = FALSE;
+
+    switch (action)
+    {
+    case SPI_GETICONTITLELOGFONT:
+        ret = get_entry_dpi( &entry_ICONTITLELOGFONT, val, ptr, dpi );
+        break;
+    case SPI_GETNONCLIENTMETRICS:
+    {
+        NONCLIENTMETRICSW *ncm = ptr;
+
+        if (!ncm) break;
+        ret = get_entry_dpi( &entry_BORDER, 0, &ncm->iBorderWidth, dpi ) &&
+              get_entry_dpi( &entry_SCROLLWIDTH, 0, &ncm->iScrollWidth, dpi ) &&
+              get_entry_dpi( &entry_SCROLLHEIGHT, 0, &ncm->iScrollHeight, dpi ) &&
+              get_entry_dpi( &entry_CAPTIONWIDTH, 0, &ncm->iCaptionWidth, dpi ) &&
+              get_entry_dpi( &entry_CAPTIONHEIGHT, 0, &ncm->iCaptionHeight, dpi ) &&
+              get_entry_dpi( &entry_CAPTIONLOGFONT, 0, &ncm->lfCaptionFont, dpi ) &&
+              get_entry_dpi( &entry_SMCAPTIONWIDTH, 0, &ncm->iSmCaptionWidth, dpi ) &&
+              get_entry_dpi( &entry_SMCAPTIONHEIGHT, 0, &ncm->iSmCaptionHeight, dpi ) &&
+              get_entry_dpi( &entry_SMCAPTIONLOGFONT, 0, &ncm->lfSmCaptionFont, dpi ) &&
+              get_entry_dpi( &entry_MENUWIDTH, 0, &ncm->iMenuWidth, dpi ) &&
+              get_entry_dpi( &entry_MENUHEIGHT, 0, &ncm->iMenuHeight, dpi ) &&
+              get_entry_dpi( &entry_MENULOGFONT, 0, &ncm->lfMenuFont, dpi ) &&
+              get_entry_dpi( &entry_STATUSLOGFONT, 0, &ncm->lfStatusFont, dpi ) &&
+              get_entry_dpi( &entry_MESSAGELOGFONT, 0, &ncm->lfMessageFont, dpi );
+        if (ret && ncm->cbSize == sizeof(NONCLIENTMETRICSW))
+            ret = get_entry_dpi( &entry_PADDEDBORDERWIDTH, 0, &ncm->iPaddedBorderWidth, dpi );
+        normalize_nonclientmetrics( ncm );
+        break;
+    }
+    case SPI_GETICONMETRICS:
+    {
+	ICONMETRICSW *im = ptr;
+	if (im && im->cbSize == sizeof(*im))
+            ret = get_entry_dpi( &entry_ICONHORIZONTALSPACING, 0, &im->iHorzSpacing, dpi ) &&
+                  get_entry_dpi( &entry_ICONVERTICALSPACING, 0, &im->iVertSpacing, dpi ) &&
+                  get_entry_dpi( &entry_ICONTITLEWRAP, 0, &im->iTitleWrap, dpi ) &&
+                  get_entry_dpi( &entry_ICONTITLELOGFONT, 0, &im->lfFont, dpi );
+	break;
+    }
+    default:
+        SetLastError( ERROR_INVALID_PARAMETER );
+        break;
+    }
+    return ret;
+}
+
 
 /***********************************************************************
  *		SystemParametersInfoW (USER32.@)
@@ -1488,9 +1631,7 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
             ret = get_entry( &entry_ICONHORIZONTALSPACING, uiParam, pvParam );
         else
         {
-            int min_val = 32;
-            if (IsProcessDPIAware())
-                min_val = MulDiv( min_val, get_display_dpi(), USER_DEFAULT_SCREEN_DPI );
+            int min_val = map_to_dpi( 32, GetDpiForSystem() );
             ret = set_entry( &entry_ICONHORIZONTALSPACING, max( min_val, uiParam ), pvParam, fWinIni );
         }
         break;
@@ -1531,9 +1672,7 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
             ret = get_entry( &entry_ICONVERTICALSPACING, uiParam, pvParam );
         else
         {
-            int min_val = 32;
-            if (IsProcessDPIAware())
-                min_val = MulDiv( min_val, get_display_dpi(), USER_DEFAULT_SCREEN_DPI );
+            int min_val = map_to_dpi( 32, GetDpiForSystem() );
             ret = set_entry( &entry_ICONVERTICALSPACING, max( min_val, uiParam ), pvParam, fWinIni );
         }
         break;
@@ -1588,10 +1727,12 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
     case SPI_GETNONCLIENTMETRICS:
     {
         LPNONCLIENTMETRICSW lpnm = pvParam;
+        int padded_border;
 
         if (!pvParam) return FALSE;
 
         ret = get_entry( &entry_BORDER, 0, &lpnm->iBorderWidth ) &&
+              get_entry( &entry_PADDEDBORDERWIDTH, 0, &padded_border ) &&
               get_entry( &entry_SCROLLWIDTH, 0, &lpnm->iScrollWidth ) &&
               get_entry( &entry_SCROLLHEIGHT, 0, &lpnm->iScrollHeight ) &&
               get_entry( &entry_CAPTIONWIDTH, 0, &lpnm->iCaptionWidth ) &&
@@ -1605,19 +1746,22 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
               get_entry( &entry_MENULOGFONT, 0, &lpnm->lfMenuFont ) &&
               get_entry( &entry_STATUSLOGFONT, 0, &lpnm->lfStatusFont ) &&
               get_entry( &entry_MESSAGELOGFONT, 0, &lpnm->lfMessageFont );
-        if (ret && lpnm->cbSize == sizeof(NONCLIENTMETRICSW))
-            ret = get_entry( &entry_PADDEDBORDERWIDTH, 0, &lpnm->iPaddedBorderWidth );
+        lpnm->iBorderWidth += padded_border;
+        if (ret && lpnm->cbSize == sizeof(NONCLIENTMETRICSW)) lpnm->iPaddedBorderWidth = 0;
         normalize_nonclientmetrics( lpnm );
         break;
     }
     case SPI_SETNONCLIENTMETRICS:
     {
         LPNONCLIENTMETRICSW lpnm = pvParam;
+        int padded_border;
 
         if (lpnm && (lpnm->cbSize == sizeof(NONCLIENTMETRICSW) ||
                      lpnm->cbSize == FIELD_OFFSET(NONCLIENTMETRICSW, iPaddedBorderWidth)))
         {
-            ret = set_entry( &entry_BORDER, lpnm->iBorderWidth, NULL, fWinIni ) &&
+            get_entry( &entry_PADDEDBORDERWIDTH, 0, &padded_border );
+
+            ret = set_entry( &entry_BORDER, lpnm->iBorderWidth - padded_border, NULL, fWinIni ) &&
                   set_entry( &entry_SCROLLWIDTH, lpnm->iScrollWidth, NULL, fWinIni ) &&
                   set_entry( &entry_SCROLLHEIGHT, lpnm->iScrollHeight, NULL, fWinIni ) &&
                   set_entry( &entry_CAPTIONWIDTH, lpnm->iCaptionWidth, NULL, fWinIni ) &&
@@ -1631,9 +1775,6 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
                   set_entry( &entry_SMCAPTIONLOGFONT, 0, &lpnm->lfSmCaptionFont, fWinIni ) &&
                   set_entry( &entry_STATUSLOGFONT, 0, &lpnm->lfStatusFont, fWinIni ) &&
                   set_entry( &entry_MESSAGELOGFONT, 0, &lpnm->lfMessageFont, fWinIni );
-
-            if (ret && lpnm->cbSize == sizeof(NONCLIENTMETRICSW))
-                set_entry( &entry_PADDEDBORDERWIDTH, lpnm->iPaddedBorderWidth, NULL, fWinIni );
         }
         break;
     }
@@ -2212,7 +2353,26 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
     case SPI_SETFONTSMOOTHINGORIENTATION:
         ret = set_entry( &entry_FONTSMOOTHINGORIENTATION, uiParam, pvParam, fWinIni );
         break;
-
+    case SPI_GETAUDIODESCRIPTION:
+    {
+        AUDIODESCRIPTION *audio = pvParam;
+        if (audio && audio->cbSize == sizeof(AUDIODESCRIPTION) && uiParam == sizeof(AUDIODESCRIPTION) )
+        {
+            ret = get_entry( &entry_AUDIODESC_ON, 0, &audio->Enabled ) &&
+                  get_entry( &entry_AUDIODESC_LOCALE, 0, &audio->Locale );
+        }
+        break;
+    }
+    case SPI_SETAUDIODESCRIPTION:
+    {
+        AUDIODESCRIPTION *audio = pvParam;
+        if (audio && audio->cbSize == sizeof(AUDIODESCRIPTION) && uiParam == sizeof(AUDIODESCRIPTION) )
+        {
+            ret = set_entry( &entry_AUDIODESC_ON, 0, &audio->Enabled, fWinIni) &&
+                  set_entry( &entry_AUDIODESC_LOCALE, 0, &audio->Locale, fWinIni );
+        }
+        break;
+    }
     default:
 	FIXME( "Unknown action: %u\n", uiAction );
 	SetLastError( ERROR_INVALID_SPI_VALUE );
@@ -2248,9 +2408,8 @@ BOOL WINAPI SystemParametersInfoA( UINT uiAction, UINT uiParam,
     {
 	WCHAR buffer[256];
 	if (pvParam)
-            if (!MultiByteToWideChar( CP_ACP, 0, pvParam, -1, buffer,
-                                      sizeof(buffer)/sizeof(WCHAR) ))
-                buffer[sizeof(buffer)/sizeof(WCHAR)-1] = 0;
+            if (!MultiByteToWideChar( CP_ACP, 0, pvParam, -1, buffer, ARRAY_SIZE( buffer )))
+                buffer[ARRAY_SIZE(buffer)-1] = 0;
 	ret = SystemParametersInfoW( uiAction, uiParam, pvParam ? buffer : NULL, fuWinIni );
 	break;
     }
@@ -2376,22 +2535,25 @@ BOOL WINAPI SystemParametersInfoA( UINT uiAction, UINT uiParam,
  */
 INT WINAPI GetSystemMetrics( INT index )
 {
+    struct monitor_info info;
     NONCLIENTMETRICSW ncm;
+    MINIMIZEDMETRICS mm;
+    ICONMETRICSW im;
     UINT ret;
+    HDC hdc;
 
     /* some metrics are dynamic */
     switch (index)
     {
-    case SM_CXSCREEN:
-        return GetDeviceCaps( get_display_dc(), HORZRES );
-    case SM_CYSCREEN:
-        return GetDeviceCaps( get_display_dc(), VERTRES );
     case SM_CXVSCROLL:
     case SM_CYHSCROLL:
-        get_entry( &entry_SCROLLWIDTH, 0, &ret );
-        return max( 8, ret );
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
+        return ncm.iScrollWidth;
     case SM_CYCAPTION:
-        return GetSystemMetrics( SM_CYSIZE ) + 1;
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
+        return ncm.iCaptionHeight + 1;
     case SM_CXBORDER:
     case SM_CYBORDER:
         /* SM_C{X,Y}BORDER always returns 1 regardless of 'BorderWidth' value in registry */
@@ -2403,19 +2565,22 @@ INT WINAPI GetSystemMetrics( INT index )
     case SM_CXHTHUMB:
     case SM_CYVSCROLL:
     case SM_CXHSCROLL:
-        get_entry( &entry_SCROLLHEIGHT, 0, &ret );
-        return max( 8, ret );
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
+        return ncm.iScrollHeight;
     case SM_CXICON:
     case SM_CYICON:
-        ret = 32;
-        if (IsProcessDPIAware())
-            ret = MulDiv( ret, get_display_dpi(), USER_DEFAULT_SCREEN_DPI );
-        return ret;
+        return map_to_dpi( 32, GetDpiForSystem() );
     case SM_CXCURSOR:
     case SM_CYCURSOR:
+        ret = map_to_dpi( 32, GetDpiForSystem() );
+        if (ret >= 64) return 64;
+        if (ret >= 48) return 48;
         return 32;
     case SM_CYMENU:
-        return GetSystemMetrics(SM_CYMENUSIZE) + 1;
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
+        return ncm.iMenuHeight + 1;
     case SM_CXFULLSCREEN:
         /* see the remark for SM_CXMAXIMIZED, at least this formulation is
          * correct */
@@ -2441,23 +2606,28 @@ INT WINAPI GetSystemMetrics( INT index )
     case SM_CXMIN:
         ncm.cbSize = sizeof(ncm);
         SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
-        get_text_metr_size( get_display_dc(), &ncm.lfCaptionFont, NULL, &ret );
+        hdc = get_display_dc();
+        get_text_metr_size( hdc, &ncm.lfCaptionFont, NULL, &ret );
+        release_display_dc( hdc );
         return 3 * ncm.iCaptionWidth + ncm.iCaptionHeight + 4 * ret + 2 * GetSystemMetrics(SM_CXFRAME) + 4;
     case SM_CYMIN:
         return GetSystemMetrics( SM_CYCAPTION) + 2 * GetSystemMetrics( SM_CYFRAME);
     case SM_CXSIZE:
-        get_entry( &entry_CAPTIONWIDTH, 0, &ret );
-        return max( 8, ret );
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
+        return ncm.iCaptionWidth;
     case SM_CYSIZE:
         ncm.cbSize = sizeof(ncm);
         SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
         return ncm.iCaptionHeight;
     case SM_CXFRAME:
-        get_entry( &entry_BORDER, 0, &ret );
-        return GetSystemMetrics(SM_CXDLGFRAME) + max( 1, ret );
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
+        return GetSystemMetrics(SM_CXDLGFRAME) + ncm.iBorderWidth;
     case SM_CYFRAME:
-        get_entry( &entry_BORDER, 0, &ret );
-        return GetSystemMetrics(SM_CYDLGFRAME) + max( 1, ret );
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
+        return GetSystemMetrics(SM_CYDLGFRAME) + ncm.iBorderWidth;
     case SM_CXMINTRACK:
         return GetSystemMetrics(SM_CXMIN);
     case SM_CYMINTRACK:
@@ -2469,13 +2639,15 @@ INT WINAPI GetSystemMetrics( INT index )
         get_entry( &entry_DOUBLECLKHEIGHT, 0, &ret );
         return ret;
     case SM_CXICONSPACING:
-        get_entry( &entry_ICONHORIZONTALSPACING, 0, &ret );
-        return ret;
+        im.cbSize = sizeof(im);
+        SystemParametersInfoW( SPI_GETICONMETRICS, sizeof(im), &im, 0 );
+        return im.iHorzSpacing;
     case SM_CYICONSPACING:
-        get_entry( &entry_ICONVERTICALSPACING, 0, &ret );
-        return ret;
+        im.cbSize = sizeof(im);
+        SystemParametersInfoW( SPI_GETICONMETRICS, sizeof(im), &im, 0 );
+        return im.iVertSpacing;
     case SM_MENUDROPALIGNMENT:
-        get_entry( &entry_MENUDROPALIGNMENT, 0, &ret );
+        SystemParametersInfoW( SPI_GETMENUDROPALIGNMENT, 0, &ret, 0 );
         return ret;
     case SM_PENWINDOWS:
         return 0;
@@ -2494,41 +2666,48 @@ INT WINAPI GetSystemMetrics( INT index )
     case SM_CYEDGE:
         return GetSystemMetrics(SM_CYBORDER) + 1;
     case SM_CXMINSPACING:
-        get_entry( &entry_MINHORZGAP, 0, &ret );
-        return GetSystemMetrics(SM_CXMINIMIZED) + max( 0, (INT)ret );
+        mm.cbSize = sizeof(mm);
+        SystemParametersInfoW( SPI_GETMINIMIZEDMETRICS, sizeof(mm), &mm, 0 );
+        return GetSystemMetrics(SM_CXMINIMIZED) + mm.iHorzGap;
     case SM_CYMINSPACING:
-        get_entry( &entry_MINVERTGAP, 0, &ret );
-        return GetSystemMetrics(SM_CYMINIMIZED) + max( 0, (INT)ret );
+        mm.cbSize = sizeof(mm);
+        SystemParametersInfoW( SPI_GETMINIMIZEDMETRICS, sizeof(mm), &mm, 0 );
+        return GetSystemMetrics(SM_CYMINIMIZED) + mm.iVertGap;
     case SM_CXSMICON:
     case SM_CYSMICON:
-        ret = 16;
-        if (IsProcessDPIAware())
-            ret = MulDiv( ret, get_display_dpi(), USER_DEFAULT_SCREEN_DPI ) & ~1;
-        return ret;
+        return map_to_dpi( 16, GetDpiForSystem() ) & ~1;
     case SM_CYSMCAPTION:
-        return GetSystemMetrics(SM_CYSMSIZE) + 1;
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
+        return ncm.iSmCaptionHeight + 1;
     case SM_CXSMSIZE:
-        get_entry( &entry_SMCAPTIONWIDTH, 0, &ret );
-        return ret;
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
+        return ncm.iSmCaptionWidth;
     case SM_CYSMSIZE:
         ncm.cbSize = sizeof(ncm);
         SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
         return ncm.iSmCaptionHeight;
     case SM_CXMENUSIZE:
-        get_entry( &entry_MENUWIDTH, 0, &ret );
-        return ret;
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
+        return ncm.iMenuWidth;
     case SM_CYMENUSIZE:
         ncm.cbSize = sizeof(ncm);
         SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
         return ncm.iMenuHeight;
     case SM_ARRANGE:
-        get_entry( &entry_MINARRANGE, 0, &ret );
-        return ret & 0x0f;
+        mm.cbSize = sizeof(mm);
+        SystemParametersInfoW( SPI_GETMINIMIZEDMETRICS, sizeof(mm), &mm, 0 );
+        return mm.iArrange;
     case SM_CXMINIMIZED:
-        get_entry( &entry_MINWIDTH, 0, &ret );
-        return max( 0, (INT)ret ) + 6;
+        mm.cbSize = sizeof(mm);
+        SystemParametersInfoW( SPI_GETMINIMIZEDMETRICS, sizeof(mm), &mm, 0 );
+        return mm.iWidth + 6;
     case SM_CYMINIMIZED:
-        return GetSystemMetrics( SM_CYSIZE ) + 6;
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
+        return ncm.iCaptionHeight + 6;
     case SM_CXMAXTRACK:
         return GetSystemMetrics(SM_CXVIRTUALSCREEN) + 4 + 2 * GetSystemMetrics(SM_CXFRAME);
     case SM_CYMAXTRACK:
@@ -2558,7 +2737,9 @@ INT WINAPI GetSystemMetrics( INT index )
         TEXTMETRICW tm;
         ncm.cbSize = sizeof(ncm);
         SystemParametersInfoW( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0 );
-        get_text_metr_size( get_display_dc(), &ncm.lfMenuFont, &tm, NULL);
+        hdc = get_display_dc();
+        get_text_metr_size( hdc, &ncm.lfMenuFont, &tm, NULL);
+        release_display_dc( hdc );
         return tm.tmHeight <= 0 ? 13 : ((tm.tmHeight + tm.tmExternalLeading + 1) / 2) * 2 - 1;
     }
     case SM_SLOWMACHINE:
@@ -2567,32 +2748,27 @@ INT WINAPI GetSystemMetrics( INT index )
         return 0;  /* FIXME */
     case SM_MOUSEWHEELPRESENT:
         return 1;
+    case SM_CXSCREEN:
+        get_monitors_info( &info );
+        return info.primary_rect.right - info.primary_rect.left;
+    case SM_CYSCREEN:
+        get_monitors_info( &info );
+        return info.primary_rect.bottom - info.primary_rect.top;
     case SM_XVIRTUALSCREEN:
-    {
-        RECT rect = get_virtual_screen_rect();
-        return rect.left;
-    }
+        get_monitors_info( &info );
+        return info.virtual_rect.left;
     case SM_YVIRTUALSCREEN:
-    {
-        RECT rect = get_virtual_screen_rect();
-        return rect.top;
-    }
+        get_monitors_info( &info );
+        return info.virtual_rect.top;
     case SM_CXVIRTUALSCREEN:
-    {
-        RECT rect = get_virtual_screen_rect();
-        return rect.right - rect.left;
-    }
+        get_monitors_info( &info );
+        return info.virtual_rect.right - info.virtual_rect.left;
     case SM_CYVIRTUALSCREEN:
-    {
-        RECT rect = get_virtual_screen_rect();
-        return rect.bottom - rect.top;
-    }
+        get_monitors_info( &info );
+        return info.virtual_rect.bottom - info.virtual_rect.top;
     case SM_CMONITORS:
-    {
-        struct monitor_info info;
         get_monitors_info( &info );
         return info.count;
-    }
     case SM_SAMEDISPLAYFORMAT:
         return 1;
     case SM_IMMENABLED:
@@ -2607,6 +2783,112 @@ INT WINAPI GetSystemMetrics( INT index )
         return SM_CMETRICS;
     default:
         return 0;
+    }
+}
+
+
+/***********************************************************************
+ *		GetSystemMetricsForDpi (USER32.@)
+ */
+INT WINAPI GetSystemMetricsForDpi( INT index, UINT dpi )
+{
+    NONCLIENTMETRICSW ncm;
+    ICONMETRICSW im;
+    UINT ret;
+    HDC hdc;
+
+    /* some metrics are dynamic */
+    switch (index)
+    {
+    case SM_CXVSCROLL:
+    case SM_CYHSCROLL:
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
+        return ncm.iScrollWidth;
+    case SM_CYCAPTION:
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
+        return ncm.iCaptionHeight + 1;
+    case SM_CYVTHUMB:
+    case SM_CXHTHUMB:
+    case SM_CYVSCROLL:
+    case SM_CXHSCROLL:
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
+        return ncm.iScrollHeight;
+    case SM_CXICON:
+    case SM_CYICON:
+        return map_to_dpi( 32, dpi );
+    case SM_CXCURSOR:
+    case SM_CYCURSOR:
+        ret = map_to_dpi( 32, dpi );
+        if (ret >= 64) return 64;
+        if (ret >= 48) return 48;
+        return 32;
+    case SM_CYMENU:
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
+        return ncm.iMenuHeight + 1;
+    case SM_CXSIZE:
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
+        return ncm.iCaptionWidth;
+    case SM_CYSIZE:
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
+        return ncm.iCaptionHeight;
+    case SM_CXFRAME:
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
+        return GetSystemMetricsForDpi( SM_CXDLGFRAME, dpi ) + ncm.iBorderWidth;
+    case SM_CYFRAME:
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
+        return GetSystemMetricsForDpi( SM_CYDLGFRAME, dpi ) + ncm.iBorderWidth;
+    case SM_CXICONSPACING:
+        im.cbSize = sizeof(im);
+        SystemParametersInfoForDpi( SPI_GETICONMETRICS, sizeof(im), &im, 0, dpi );
+        return im.iHorzSpacing;
+    case SM_CYICONSPACING:
+        im.cbSize = sizeof(im);
+        SystemParametersInfoForDpi( SPI_GETICONMETRICS, sizeof(im), &im, 0, dpi );
+        return im.iVertSpacing;
+    case SM_CXSMICON:
+    case SM_CYSMICON:
+        return map_to_dpi( 16, dpi ) & ~1;
+    case SM_CYSMCAPTION:
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
+        return ncm.iSmCaptionHeight + 1;
+    case SM_CXSMSIZE:
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
+        return ncm.iSmCaptionWidth;
+    case SM_CYSMSIZE:
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
+        return ncm.iSmCaptionHeight;
+    case SM_CXMENUSIZE:
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
+        return ncm.iMenuWidth;
+    case SM_CYMENUSIZE:
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
+        return ncm.iMenuHeight;
+    case SM_CXMENUCHECK:
+    case SM_CYMENUCHECK:
+    {
+        TEXTMETRICW tm;
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoForDpi( SPI_GETNONCLIENTMETRICS, 0, &ncm, 0, dpi );
+        hdc = get_display_dc();
+        get_text_metr_size( hdc, &ncm.lfMenuFont, &tm, NULL);
+        release_display_dc( hdc );
+        return tm.tmHeight <= 0 ? 13 : ((tm.tmHeight + tm.tmExternalLeading - 1) | 1);
+    }
+    default:
+        return GetSystemMetrics( index );
     }
 }
 
@@ -2655,7 +2937,8 @@ COLORREF WINAPI DECLSPEC_HOTPATCH GetSysColor( INT nIndex )
 {
     COLORREF ret = 0;
 
-    if (nIndex >= 0 && nIndex < NUM_SYS_COLORS) get_entry( &system_colors[nIndex], 0, &ret );
+    if (nIndex >= 0 && nIndex < ARRAY_SIZE( system_colors ))
+        get_entry( &system_colors[nIndex], 0, &ret );
     return ret;
 }
 
@@ -2670,7 +2953,7 @@ BOOL WINAPI SetSysColors( INT count, const INT *colors, const COLORREF *values )
     if (IS_INTRESOURCE(colors)) return FALSE; /* stupid app passes a color instead of an array */
 
     for (i = 0; i < count; i++)
-        if (colors[i] >= 0 && colors[i] <= NUM_SYS_COLORS)
+        if (colors[i] >= 0 && colors[i] <= ARRAY_SIZE( system_colors ))
             set_entry( &system_colors[colors[i]], values[i], 0, 0 );
 
     /* Send WM_SYSCOLORCHANGE message to all windows */
@@ -2679,8 +2962,7 @@ BOOL WINAPI SetSysColors( INT count, const INT *colors, const COLORREF *values )
 
     /* Repaint affected portions of all visible windows */
 
-    RedrawWindow( GetDesktopWindow(), NULL, 0,
-                RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN );
+    RedrawWindow( 0, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN );
     return TRUE;
 }
 
@@ -2700,7 +2982,7 @@ DWORD_PTR WINAPI SetSysColorsTemp( const COLORREF *pPens, const HBRUSH *pBrushes
  */
 HBRUSH WINAPI DECLSPEC_HOTPATCH GetSysColorBrush( INT index )
 {
-    if (index < 0 || index >= NUM_SYS_COLORS) return 0;
+    if (index < 0 || index >= ARRAY_SIZE( system_colors )) return 0;
 
     if (!system_colors[index].brush)
     {
@@ -2722,7 +3004,7 @@ HBRUSH WINAPI DECLSPEC_HOTPATCH GetSysColorBrush( INT index )
 HPEN SYSCOLOR_GetPen( INT index )
 {
     /* We can assert here, because this function is internal to Wine */
-    assert (0 <= index && index < NUM_SYS_COLORS);
+    assert (0 <= index && index < ARRAY_SIZE( system_colors ));
 
     if (!system_colors[index].pen)
     {
@@ -2907,12 +3189,126 @@ BOOL WINAPI EnumDisplaySettingsExW(LPCWSTR lpszDeviceName, DWORD iModeNum,
     return USER_Driver->pEnumDisplaySettingsEx(lpszDeviceName, iModeNum, lpDevMode, dwFlags);
 }
 
+
+/**********************************************************************
+ *              get_monitor_dpi
+ */
+UINT get_monitor_dpi( HMONITOR monitor )
+{
+    /* FIXME: use the monitor DPI instead */
+    return system_dpi;
+}
+
+/**********************************************************************
+ *              get_win_monitor_dpi
+ */
+UINT get_win_monitor_dpi( HWND hwnd )
+{
+    /* FIXME: use the monitor DPI instead */
+    return system_dpi;
+}
+
+/**********************************************************************
+ *              SetProcessDpiAwarenessContext   (USER32.@)
+ */
+BOOL WINAPI SetProcessDpiAwarenessContext( DPI_AWARENESS_CONTEXT context )
+{
+    DPI_AWARENESS val = GetAwarenessFromDpiAwarenessContext( context );
+
+    if (val == DPI_AWARENESS_INVALID)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    val |= 0x10;  /* avoid 0 value */
+    if (InterlockedCompareExchange( &dpi_awareness, val, 0 ))
+    {
+        SetLastError( ERROR_ACCESS_DENIED );
+        return FALSE;
+    }
+    TRACE( "set to %p\n", context );
+    return TRUE;
+}
+
+/**********************************************************************
+ *              GetProcessDpiAwarenessInternal   (USER32.@)
+ */
+BOOL WINAPI GetProcessDpiAwarenessInternal( HANDLE process, DPI_AWARENESS *awareness )
+{
+    if (process && process != GetCurrentProcess())
+    {
+        WARN( "not supported on other process %p\n", process );
+        *awareness = DPI_AWARENESS_UNAWARE;
+    }
+    else *awareness = dpi_awareness & 3;
+    return TRUE;
+}
+
+/**********************************************************************
+ *              SetProcessDpiAwarenessInternal   (USER32.@)
+ */
+BOOL WINAPI SetProcessDpiAwarenessInternal( DPI_AWARENESS awareness )
+{
+    static const DPI_AWARENESS_CONTEXT contexts[3] = { DPI_AWARENESS_CONTEXT_UNAWARE,
+                                                       DPI_AWARENESS_CONTEXT_SYSTEM_AWARE,
+                                                       DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE };
+
+    if (awareness < DPI_AWARENESS_UNAWARE || awareness > DPI_AWARENESS_PER_MONITOR_AWARE)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    return SetProcessDpiAwarenessContext( contexts[awareness] );
+}
+
+/***********************************************************************
+ *              AreDpiAwarenessContextsEqual   (USER32.@)
+ */
+BOOL WINAPI AreDpiAwarenessContextsEqual( DPI_AWARENESS_CONTEXT ctx1, DPI_AWARENESS_CONTEXT ctx2 )
+{
+    DPI_AWARENESS aware1 = GetAwarenessFromDpiAwarenessContext( ctx1 );
+    DPI_AWARENESS aware2 = GetAwarenessFromDpiAwarenessContext( ctx2 );
+    return aware1 != DPI_AWARENESS_INVALID && aware1 == aware2;
+}
+
+/***********************************************************************
+ *              GetAwarenessFromDpiAwarenessContext   (USER32.@)
+ */
+DPI_AWARENESS WINAPI GetAwarenessFromDpiAwarenessContext( DPI_AWARENESS_CONTEXT context )
+{
+    switch ((ULONG_PTR)context)
+    {
+    case 0x10:
+    case 0x11:
+    case 0x12:
+    case 0x80000010:
+    case 0x80000011:
+    case 0x80000012:
+        return (ULONG_PTR)context & 3;
+    case (ULONG_PTR)DPI_AWARENESS_CONTEXT_UNAWARE:
+    case (ULONG_PTR)DPI_AWARENESS_CONTEXT_SYSTEM_AWARE:
+    case (ULONG_PTR)DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE:
+        return ~(ULONG_PTR)context;
+    default:
+        return DPI_AWARENESS_INVALID;
+    }
+}
+
+/***********************************************************************
+ *              IsValidDpiAwarenessContext   (USER32.@)
+ */
+BOOL WINAPI IsValidDpiAwarenessContext( DPI_AWARENESS_CONTEXT context )
+{
+    return GetAwarenessFromDpiAwarenessContext( context ) != DPI_AWARENESS_INVALID;
+}
+
 /***********************************************************************
  *              SetProcessDPIAware   (USER32.@)
  */
 BOOL WINAPI SetProcessDPIAware(void)
 {
     TRACE("\n");
+    InterlockedCompareExchange( &dpi_awareness, 0x11, 0 );
     return TRUE;
 }
 
@@ -2921,17 +3317,362 @@ BOOL WINAPI SetProcessDPIAware(void)
  */
 BOOL WINAPI IsProcessDPIAware(void)
 {
-    TRACE("returning TRUE\n");
+    return GetAwarenessFromDpiAwarenessContext( GetThreadDpiAwarenessContext() ) != DPI_AWARENESS_UNAWARE;
+}
+
+/***********************************************************************
+ *              GetDpiForSystem   (USER32.@)
+ */
+UINT WINAPI GetDpiForSystem(void)
+{
+    if (!IsProcessDPIAware()) return USER_DEFAULT_SCREEN_DPI;
+    return system_dpi;
+}
+
+/***********************************************************************
+ *              GetDpiForMonitorInternal   (USER32.@)
+ */
+BOOL WINAPI GetDpiForMonitorInternal( HMONITOR monitor, UINT type, UINT *x, UINT *y )
+{
+    if (type > 2)
+    {
+        SetLastError( ERROR_BAD_ARGUMENTS );
+        return FALSE;
+    }
+    if (!x || !y)
+    {
+        SetLastError( ERROR_INVALID_ADDRESS );
+        return FALSE;
+    }
+    switch (GetAwarenessFromDpiAwarenessContext( GetThreadDpiAwarenessContext() ))
+    {
+    case DPI_AWARENESS_UNAWARE:      *x = *y = USER_DEFAULT_SCREEN_DPI; break;
+    case DPI_AWARENESS_SYSTEM_AWARE: *x = *y = system_dpi; break;
+    default:                         *x = *y = get_monitor_dpi( monitor ); break;
+    }
     return TRUE;
 }
+
+/**********************************************************************
+ *              GetThreadDpiAwarenessContext   (USER32.@)
+ */
+DPI_AWARENESS_CONTEXT WINAPI GetThreadDpiAwarenessContext(void)
+{
+    struct user_thread_info *info = get_user_thread_info();
+
+    if (info->dpi_awareness) return ULongToHandle( info->dpi_awareness );
+    if (dpi_awareness) return ULongToHandle( dpi_awareness );
+    return ULongToHandle( 0x10 | default_awareness );
+}
+
+/**********************************************************************
+ *              SetThreadDpiAwarenessContext   (USER32.@)
+ */
+DPI_AWARENESS_CONTEXT WINAPI SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT context )
+{
+    struct user_thread_info *info = get_user_thread_info();
+    DPI_AWARENESS prev, val = GetAwarenessFromDpiAwarenessContext( context );
+
+    if (val == DPI_AWARENESS_INVALID)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+    if (!(prev = info->dpi_awareness))
+    {
+        prev = dpi_awareness;
+        if (!prev) prev = 0x10 | DPI_AWARENESS_UNAWARE;
+        prev |= 0x80000000;  /* restore to process default */
+    }
+    if (((ULONG_PTR)context & ~(ULONG_PTR)0x13) == 0x80000000) info->dpi_awareness = 0;
+    else info->dpi_awareness = val | 0x10;
+    return ULongToHandle( prev );
+}
+
+/**********************************************************************
+ *              LogicalToPhysicalPointForPerMonitorDPI   (USER32.@)
+ */
+BOOL WINAPI LogicalToPhysicalPointForPerMonitorDPI( HWND hwnd, POINT *pt )
+{
+    UINT dpi = GetDpiForWindow( hwnd );
+    RECT rect;
+
+    GetWindowRect( hwnd, &rect );
+    if (pt->x < rect.left || pt->y < rect.top || pt->x > rect.right || pt->y > rect.bottom) return FALSE;
+    pt->x = MulDiv( pt->x, system_dpi, dpi );
+    pt->y = MulDiv( pt->y, system_dpi, dpi );
+    return TRUE;
+}
+
+/**********************************************************************
+ *              PhysicalToLogicalPointForPerMonitorDPI   (USER32.@)
+ */
+BOOL WINAPI PhysicalToLogicalPointForPerMonitorDPI( HWND hwnd, POINT *pt )
+{
+    DPI_AWARENESS_CONTEXT context;
+    UINT dpi = GetDpiForWindow( hwnd );
+    RECT rect;
+
+    /* get window rect in physical coords */
+    context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
+    GetWindowRect( hwnd, &rect );
+    SetThreadDpiAwarenessContext( context );
+
+    if (pt->x < rect.left || pt->y < rect.top || pt->x > rect.right || pt->y > rect.bottom) return FALSE;
+    pt->x = MulDiv( pt->x, dpi, system_dpi );
+    pt->y = MulDiv( pt->y, dpi, system_dpi );
+    return TRUE;
+}
+
+struct monitor_enum_info
+{
+    RECT     rect;
+    UINT     max_area;
+    UINT     min_distance;
+    HMONITOR primary;
+    HMONITOR nearest;
+    HMONITOR ret;
+};
+
+/* helper callback for MonitorFromRect */
+static BOOL CALLBACK monitor_enum( HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM lp )
+{
+    struct monitor_enum_info *info = (struct monitor_enum_info *)lp;
+    RECT intersect;
+
+    if (IntersectRect( &intersect, rect, &info->rect ))
+    {
+        /* check for larger intersecting area */
+        UINT area = (intersect.right - intersect.left) * (intersect.bottom - intersect.top);
+        if (area > info->max_area)
+        {
+            info->max_area = area;
+            info->ret = monitor;
+        }
+    }
+    else if (!info->max_area)  /* if not intersecting, check for min distance */
+    {
+        UINT distance;
+        UINT x, y;
+
+        if (info->rect.right <= rect->left) x = rect->left - info->rect.right;
+        else if (rect->right <= info->rect.left) x = info->rect.left - rect->right;
+        else x = 0;
+        if (info->rect.bottom <= rect->top) y = rect->top - info->rect.bottom;
+        else if (rect->bottom <= info->rect.top) y = info->rect.top - rect->bottom;
+        else y = 0;
+        distance = x * x + y * y;
+        if (distance < info->min_distance)
+        {
+            info->min_distance = distance;
+            info->nearest = monitor;
+        }
+    }
+    if (!info->primary)
+    {
+        MONITORINFO mon_info;
+        mon_info.cbSize = sizeof(mon_info);
+        GetMonitorInfoW( monitor, &mon_info );
+        if (mon_info.dwFlags & MONITORINFOF_PRIMARY) info->primary = monitor;
+    }
+    return TRUE;
+}
+
+/***********************************************************************
+ *		MonitorFromRect (USER32.@)
+ */
+HMONITOR WINAPI MonitorFromRect( const RECT *rect, DWORD flags )
+{
+    struct monitor_enum_info info;
+
+    info.rect         = *rect;
+    info.max_area     = 0;
+    info.min_distance = ~0u;
+    info.primary      = 0;
+    info.nearest      = 0;
+    info.ret          = 0;
+
+    if (IsRectEmpty(&info.rect))
+    {
+        info.rect.right = info.rect.left + 1;
+        info.rect.bottom = info.rect.top + 1;
+    }
+
+    if (!EnumDisplayMonitors( 0, NULL, monitor_enum, (LPARAM)&info )) return 0;
+    if (!info.ret)
+    {
+        if (flags & MONITOR_DEFAULTTOPRIMARY) info.ret = info.primary;
+        else if (flags & MONITOR_DEFAULTTONEAREST) info.ret = info.nearest;
+    }
+
+    TRACE( "%s flags %x returning %p\n", wine_dbgstr_rect(rect), flags, info.ret );
+    return info.ret;
+}
+
+/***********************************************************************
+ *		MonitorFromPoint (USER32.@)
+ */
+HMONITOR WINAPI MonitorFromPoint( POINT pt, DWORD flags )
+{
+    RECT rect;
+
+    SetRect( &rect, pt.x, pt.y, pt.x + 1, pt.y + 1 );
+    return MonitorFromRect( &rect, flags );
+}
+
+/***********************************************************************
+ *		MonitorFromWindow (USER32.@)
+ */
+HMONITOR WINAPI MonitorFromWindow(HWND hWnd, DWORD dwFlags)
+{
+    RECT rect;
+    WINDOWPLACEMENT wp;
+
+    TRACE("(%p, 0x%08x)\n", hWnd, dwFlags);
+
+    wp.length = sizeof(wp);
+    if (IsIconic(hWnd) && GetWindowPlacement(hWnd, &wp))
+        return MonitorFromRect( &wp.rcNormalPosition, dwFlags );
+
+    if (GetWindowRect( hWnd, &rect ))
+        return MonitorFromRect( &rect, dwFlags );
+
+    if (!(dwFlags & (MONITOR_DEFAULTTOPRIMARY|MONITOR_DEFAULTTONEAREST))) return 0;
+    /* retrieve the primary */
+    SetRect( &rect, 0, 0, 1, 1 );
+    return MonitorFromRect( &rect, dwFlags );
+}
+
+/***********************************************************************
+ *		GetMonitorInfoA (USER32.@)
+ */
+BOOL WINAPI GetMonitorInfoA( HMONITOR monitor, LPMONITORINFO info )
+{
+    MONITORINFOEXW miW;
+    BOOL ret;
+
+    if (info->cbSize == sizeof(MONITORINFO)) return GetMonitorInfoW( monitor, info );
+    if (info->cbSize != sizeof(MONITORINFOEXA)) return FALSE;
+
+    miW.cbSize = sizeof(miW);
+    ret = GetMonitorInfoW( monitor, (MONITORINFO *)&miW );
+    if (ret)
+    {
+        MONITORINFOEXA *miA = (MONITORINFOEXA *)info;
+        miA->rcMonitor = miW.rcMonitor;
+        miA->rcWork = miW.rcWork;
+        miA->dwFlags = miW.dwFlags;
+        WideCharToMultiByte(CP_ACP, 0, miW.szDevice, -1, miA->szDevice, sizeof(miA->szDevice), NULL, NULL);
+    }
+    return ret;
+}
+
+/***********************************************************************
+ *		GetMonitorInfoW (USER32.@)
+ */
+BOOL WINAPI GetMonitorInfoW( HMONITOR monitor, LPMONITORINFO info )
+{
+    BOOL ret;
+
+    if (info->cbSize != sizeof(MONITORINFOEXW) && info->cbSize != sizeof(MONITORINFO)) return FALSE;
+
+    ret = USER_Driver->pGetMonitorInfo( monitor, info );
+    if (ret)
+        TRACE( "flags %04x, monitor %s, work %s\n", info->dwFlags,
+               wine_dbgstr_rect(&info->rcMonitor), wine_dbgstr_rect(&info->rcWork));
+    return ret;
+}
+
+struct enum_mon_data
+{
+    MONITORENUMPROC proc;
+    LPARAM lparam;
+    HDC hdc;
+    POINT origin;
+    RECT limit;
+};
+
+#ifdef __i386__
+/* Some apps pass a non-stdcall callback to EnumDisplayMonitors,
+ * so we need a small assembly wrapper to call it.
+ * MJ's Help Diagnostic expects that %ecx contains the address to the rect.
+ */
+extern BOOL enum_mon_callback_wrapper( HMONITOR monitor, LPRECT rect, struct enum_mon_data *data );
+__ASM_GLOBAL_FUNC( enum_mon_callback_wrapper,
+    "pushl %ebp\n\t"
+    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+    __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+    "movl %esp,%ebp\n\t"
+    __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+    "subl $8,%esp\n\t"
+    "movl 16(%ebp),%eax\n\t"    /* data */
+    "movl 12(%ebp),%ecx\n\t"    /* rect */
+    "pushl 4(%eax)\n\t"         /* data->lparam */
+    "pushl %ecx\n\t"            /* rect */
+    "pushl 8(%eax)\n\t"         /* data->hdc */
+    "pushl 8(%ebp)\n\t"         /* monitor */
+    "call *(%eax)\n\t"          /* data->proc */
+    "leave\n\t"
+    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+    __ASM_CFI(".cfi_same_value %ebp\n\t")
+    "ret" )
+#endif /* __i386__ */
+
+static BOOL CALLBACK enum_mon_callback( HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM lp )
+{
+    struct enum_mon_data *data = (struct enum_mon_data *)lp;
+    RECT monrect = *rect;
+
+    OffsetRect( &monrect, -data->origin.x, -data->origin.y );
+    if (!IntersectRect( &monrect, &monrect, &data->limit )) return TRUE;
+#ifdef __i386__
+    return enum_mon_callback_wrapper( monitor, &monrect, data );
+#else
+    return data->proc( monitor, data->hdc, &monrect, data->lparam );
+#endif
+}
+
+/***********************************************************************
+ *		EnumDisplayMonitors (USER32.@)
+ */
+BOOL WINAPI EnumDisplayMonitors( HDC hdc, LPRECT rect, MONITORENUMPROC proc, LPARAM lp )
+{
+    struct enum_mon_data data;
+
+    data.proc = proc;
+    data.lparam = lp;
+    data.hdc = hdc;
+
+    if (hdc)
+    {
+        if (!GetDCOrgEx( hdc, &data.origin )) return FALSE;
+        if (GetClipBox( hdc, &data.limit ) == ERROR) return FALSE;
+    }
+    else
+    {
+        data.origin.x = data.origin.y = 0;
+        data.limit.left = data.limit.top = INT_MIN;
+        data.limit.right = data.limit.bottom = INT_MAX;
+    }
+    if (rect && !IntersectRect( &data.limit, &data.limit, rect )) return TRUE;
+    return USER_Driver->pEnumDisplayMonitors( 0, NULL, enum_mon_callback, (LPARAM)&data );
+}
+
 
 /**********************************************************************
  *              GetAutoRotationState [USER32.@]
  */
 BOOL WINAPI GetAutoRotationState( AR_STATE *state )
 {
-    FIXME("(%p): stub\n", state);
-    *state = AR_NOT_SUPPORTED;
+    TRACE("(%p)\n", state);
+
+    if (!state)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    *state = AR_NOSENSOR;
     return TRUE;
 }
 
@@ -2942,5 +3683,39 @@ BOOL WINAPI GetDisplayAutoRotationPreferences( ORIENTATION_PREFERENCE *orientati
 {
     FIXME("(%p): stub\n", orientation);
     *orientation = ORIENTATION_PREFERENCE_NONE;
+    return TRUE;
+}
+
+/* physical<->logical mapping functions from win8 that are nops in later versions */
+
+/***********************************************************************
+ *              GetPhysicalCursorPos   (USER32.@)
+ */
+BOOL WINAPI GetPhysicalCursorPos( POINT *point )
+{
+    return GetCursorPos( point );
+}
+
+/***********************************************************************
+ *              SetPhysicalCursorPos   (USER32.@)
+ */
+BOOL WINAPI SetPhysicalCursorPos( INT x, INT y )
+{
+    return SetCursorPos( x, y );
+}
+
+/***********************************************************************
+ *		LogicalToPhysicalPoint (USER32.@)
+ */
+BOOL WINAPI LogicalToPhysicalPoint( HWND hwnd, POINT *point )
+{
+    return TRUE;
+}
+
+/***********************************************************************
+ *		PhysicalToLogicalPoint (USER32.@)
+ */
+BOOL WINAPI PhysicalToLogicalPoint( HWND hwnd, POINT *point )
+{
     return TRUE;
 }

@@ -620,7 +620,7 @@ static BOOL add_printer_driver(const WCHAR *name, WCHAR *ppd)
         res = AddPrinterDriverExW( NULL, 3, (LPBYTE)&di3, APD_COPY_NEW_FILES | APD_COPY_FROM_DIRECTORY );
         TRACE("got %d and %d for %s (%s)\n", res, GetLastError(), debugstr_w(name), debugstr_w(di3.pEnvironment));
 
-        if (!res & (GetLastError() != ERROR_PRINTER_DRIVER_ALREADY_INSTALLED))
+        if (!res && (GetLastError() != ERROR_PRINTER_DRIVER_ALREADY_INSTALLED))
         {
             ERR("failed with %u for %s (%s) %s\n", GetLastError(), debugstr_w(name),
                 debugstr_w(di3.pEnvironment), debugstr_w(di3.pDriverPath));
@@ -8382,14 +8382,13 @@ static BOOL google_cloud_print( const WCHAR *cmd_templateW, const char *filename
     int i, count;
     char **argv_new;
     BOOL rc = TRUE;
-    WCHAR **args, *quoted_title;
+    WCHAR **args, *quoted_title, *quoted_printername;
     const char *prefix = "file://";
     static const WCHAR untitledW[] = { 'U','n','t','i','t','l','e','d',0};
     static const WCHAR fmt[] = { '"', '%', 's', '"', 0 };
 
     if (!titleW || !strlenW( titleW ))
     {
-        if (titleW) HeapFree( GetProcessHeap(), 0, titleW );
         titleW = HeapAlloc( GetProcessHeap(), 0, strlenW( untitledW ) + 1 );
         lstrcpyW( titleW, untitledW );
     }
@@ -8402,12 +8401,15 @@ static BOOL google_cloud_print( const WCHAR *cmd_templateW, const char *filename
     quoted_title = HeapAlloc( GetProcessHeap(), 0, (strlenW( titleW ) + 3) * sizeof( WCHAR ) );
     wsprintfW( quoted_title, fmt, titleW );
 
+    quoted_printername = HeapAlloc( GetProcessHeap(), 0, (strlenW( printer_nameW ) + 3) * sizeof( WCHAR ) );
+    wsprintfW( quoted_printername, fmt, printer_nameW );
+
     cmd = HeapAlloc( GetProcessHeap(), 0,
                      (strlenW( cmd_templateW ) + strlen( fname ) +
                       strlen( filename ) + strlenW( quoted_title ) +
-                      strlenW( printer_nameW ) + strlenW( printer_idW ) + 1 ) *
+                      strlenW( quoted_printername ) + strlenW( printer_idW ) + 1 ) *
                      sizeof(WCHAR) );
-    wsprintfW( cmd, cmd_templateW, fname, printer_idW, printer_nameW, quoted_title );
+    wsprintfW( cmd, cmd_templateW, fname, printer_idW, quoted_printername, quoted_title );
     args = CommandLineToArgvW( cmd, &count );
     if (!(argv_new = HeapAlloc( GetProcessHeap(), 0, (count + 1) * sizeof(*argv_new) ))) return 0;
     for (i = 0; i < count; i++) argv_new[i] = strdup_unixcp( args[i] );
@@ -8427,6 +8429,7 @@ static BOOL google_cloud_print( const WCHAR *cmd_templateW, const char *filename
     HeapFree( GetProcessHeap(), 0, cmd );
     HeapFree( GetProcessHeap(), 0, fname );
     HeapFree( GetProcessHeap(), 0, quoted_title );
+    HeapFree( GetProcessHeap(), 0, quoted_printername );
 
     return rc;
 }
@@ -8904,4 +8907,33 @@ HRESULT WINAPI UploadPrinterDriverPackageW( LPCWSTR server, LPCWSTR path, LPCWST
     FIXME("%s, %s, %s, %x, %p, %p, %p\n", debugstr_w(server), debugstr_w(path), debugstr_w(env),
           flags, hwnd, dst, dstlen);
     return E_NOTIMPL;
+}
+
+/*****************************************************************************
+ *          PerfOpen [WINSPOOL.@]
+ */
+DWORD WINAPI PerfOpen(LPWSTR context)
+{
+    FIXME("%s: stub\n", debugstr_w(context));
+    return ERROR_SUCCESS;
+}
+
+/*****************************************************************************
+ *          PerfClose [WINSPOOL.@]
+ */
+DWORD WINAPI PerfClose(void)
+{
+    FIXME("stub\n");
+    return ERROR_SUCCESS;
+}
+
+/*****************************************************************************
+ *          PerfCollect [WINSPOOL.@]
+ */
+DWORD WINAPI PerfCollect(LPWSTR query, LPVOID *data, LPDWORD size, LPDWORD obj_count)
+{
+    FIXME("%s, %p, %p, %p: stub\n", debugstr_w(query), data, size, obj_count);
+    *size = 0;
+    *obj_count = 0;
+    return ERROR_SUCCESS;
 }

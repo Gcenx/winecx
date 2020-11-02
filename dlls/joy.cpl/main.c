@@ -416,7 +416,7 @@ static DWORD WINAPI input_thread(void *param)
         axes_pos[2][1] = state.lRz;
 
         /* Set pov values */
-        for (j = 0; j < sizeof(pov_val)/sizeof(pov_val[0]); j++)
+        for (j = 0; j < ARRAY_SIZE(pov_val); j++)
         {
             if (state.rgdwPOV[0] == pov_val[j])
             {
@@ -724,6 +724,7 @@ static BOOL CALLBACK ff_effects_callback(const DIEFFECTINFOW *pdei, void *pvRef)
     DIRAMPFORCE rforce;
     DICONSTANTFORCE cforce;
     DIPERIODIC pforce;
+    DICONDITION cdforce;
 
     if (joystick->effects == NULL)
     {
@@ -775,6 +776,22 @@ static BOOL CALLBACK ff_effects_callback(const DIEFFECTINFOW *pdei, void *pvRef)
 
         dieffect.cbTypeSpecificParams = sizeof(pforce);
         dieffect.lpvTypeSpecificParams = &pforce;
+        dieffect.dwFlags |= DIEP_TYPESPECIFICPARAMS;
+    }
+    else if (IsEqualGUID(&pdei->guid, &GUID_Spring) ||
+             IsEqualGUID(&pdei->guid, &GUID_Damper) ||
+             IsEqualGUID(&pdei->guid, &GUID_Inertia) ||
+             IsEqualGUID(&pdei->guid, &GUID_Friction))
+    {
+        cdforce.dwPositiveSaturation = 10000;
+        cdforce.dwNegativeSaturation = 10000;
+        cdforce.lPositiveCoefficient = 10000;
+        cdforce.lNegativeCoefficient = 10000;
+        cdforce.lDeadBand = 0;
+        cdforce.lOffset = 0;
+
+        dieffect.cbTypeSpecificParams = sizeof(cdforce);
+        dieffect.lpvTypeSpecificParams = &cdforce;
         dieffect.dwFlags |= DIEP_TYPESPECIFICPARAMS;
     }
 

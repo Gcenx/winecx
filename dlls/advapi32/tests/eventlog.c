@@ -674,7 +674,7 @@ static BOOL create_new_eventlog(void)
     }
 
     /* Create some event sources, the registry value 'Sources' is updated automatically */
-    for (i = 0; i < sizeof(eventsources)/sizeof(eventsources[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(eventsources); i++)
     {
         HKEY srckey;
 
@@ -833,7 +833,7 @@ static void test_readwrite(void)
     CloseEventLog(handle);
 
     /* Write a bunch of events while using different event sources */
-    for (i = 0; i < sizeof(read_write)/sizeof(read_write[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(read_write); i++)
     {
         DWORD oldest;
         BOOL run_sidtests = read_write[i].evt_sid & sidavailable;
@@ -1074,7 +1074,7 @@ static void test_autocreation(void)
         /* Build the expected string */
         memset(sources_verify, 0, sizeof(sources_verify));
         p = sources_verify;
-        for (i = sizeof(eventsources)/sizeof(eventsources[0]); i > 0; i--)
+        for (i = ARRAY_SIZE(eventsources); i > 0; i--)
         {
             lstrcpyA(p, eventsources[i - 1]);
             p += (lstrlenA(eventsources[i - 1]) + 1);
@@ -1132,7 +1132,7 @@ static void cleanup_eventlog(void)
     lstrcatA(winesvc, eventlogname);
 
     RegOpenKeyA(HKEY_LOCAL_MACHINE, winesvc, &key);
-    for (i = 0; i < sizeof(eventsources)/sizeof(eventsources[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(eventsources); i++)
         RegDeleteKeyA(key, eventsources[i]);
     RegDeleteValueA(key, "Sources");
     RegCloseKey(key);
@@ -1157,7 +1157,7 @@ static void test_start_trace(void)
     LONG ret;
 
     buffersize = sizeof(EVENT_TRACE_PROPERTIES) + sizeof(sessionname) + sizeof(filepath);
-    properties = (EVENT_TRACE_PROPERTIES *) HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, buffersize);
+    properties = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, buffersize);
     properties->Wnode.BufferSize = buffersize;
     properties->Wnode.Flags = WNODE_FLAG_TRACED_GUID;
     properties->LogFileMode = EVENT_TRACE_FILE_MODE_NONE;
@@ -1209,7 +1209,7 @@ static void test_start_trace(void)
     ret = StartTraceA(&handle, sessionname, properties);
     todo_wine
     ok(ret == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", ret);
-    properties->Wnode.Guid = (GUID){0};
+    memset(&properties->Wnode.Guid, 0, sizeof(properties->Wnode.Guid));
 
     properties->LogFileNameOffset = 0;
     ret = StartTraceA(&handle, sessionname, properties);

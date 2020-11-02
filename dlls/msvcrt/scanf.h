@@ -540,7 +540,7 @@ _FUNCTION_ {
                     char *str = suppress ? NULL : va_arg(ap, char*);
                     char *pstr = str;
 #ifdef SECURE
-                    unsigned size = suppress ? UINT_MAX : va_arg(ap, unsigned)/sizeof(char);
+                    unsigned size = suppress ? UINT_MAX : va_arg(ap, unsigned);
 #else
                     unsigned size = UINT_MAX;
 #endif
@@ -548,13 +548,13 @@ _FUNCTION_ {
                     while (width && (nch != _EOF_))
                     {
                         if (!suppress) {
-                            *str++ = _CHAR2SUPPORTED_(nch);
                             if(size) size--;
                             else {
                                 _UNLOCK_FILE_(file);
                                 *pstr = 0;
                                 return rd;
                             }
+                            *str++ = _CHAR2SUPPORTED_(nch);
                         }
                         st++;
                         width--;
@@ -566,7 +566,7 @@ _FUNCTION_ {
                     MSVCRT_wchar_t *str = suppress ? NULL : va_arg(ap, MSVCRT_wchar_t*);
                     MSVCRT_wchar_t *pstr = str;
 #ifdef SECURE
-                    unsigned size = suppress ? UINT_MAX : va_arg(ap, unsigned)/sizeof(MSVCRT_wchar_t);
+                    unsigned size = suppress ? UINT_MAX : va_arg(ap, unsigned);
 #else
                     unsigned size = UINT_MAX;
 #endif
@@ -574,13 +574,13 @@ _FUNCTION_ {
                     while (width && (nch != _EOF_))
                     {
                         if (!suppress) {
-                            *str++ = _WIDE2SUPPORTED_(nch);
                             if(size) size--;
                             else {
                                 _UNLOCK_FILE_(file);
                                 *pstr = 0;
                                 return rd;
                             }
+                            *str++ = _WIDE2SUPPORTED_(nch);
                         }
                         st++;
                         width--;
@@ -615,7 +615,7 @@ _FUNCTION_ {
                     ULONG *Mask;
 		    int invert = 0; /* Set if we are NOT to find the chars */
 #ifdef SECURE
-                    unsigned size = suppress ? UINT_MAX : va_arg(ap, unsigned)/sizeof(_CHAR_);
+                    unsigned size = suppress ? UINT_MAX : va_arg(ap, unsigned);
 #else
                     unsigned size = UINT_MAX;
 #endif
@@ -667,6 +667,7 @@ _FUNCTION_ {
                         else {
                             _UNLOCK_FILE_(file);
                             *str = 0;
+                            HeapFree(GetProcessHeap(), 0, Mask);
                             return rd;
                         }
                     }

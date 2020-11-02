@@ -131,6 +131,9 @@ static size_t (__cdecl *p_mbstowcs)(wchar_t*, const char*, size_t);
 static size_t (__cdecl *p_wcstombs)(char*, const wchar_t*, size_t);
 static char* (__cdecl *p_setlocale)(int, const char*);
 static int (__cdecl *p__fpieee_flt)(ULONG, EXCEPTION_POINTERS*, int (__cdecl *handler)(_FPIEEE_RECORD*));
+static int (__cdecl *p__memicmp)(const char*, const char*, size_t);
+static int (__cdecl *p__memicmp_l)(const char*, const char*, size_t, _locale_t);
+static int (__cdecl *p__vsnwprintf)(wchar_t *buffer,size_t count, const wchar_t *format, __ms_va_list valist);
 
 /* make sure we use the correct errno */
 #undef errno
@@ -397,6 +400,10 @@ static BOOL init(void)
     SET(p_wcstombs, "wcstombs");
     SET(p_setlocale, "setlocale");
     SET(p__fpieee_flt, "_fpieee_flt");
+    SET(p__memicmp, "_memicmp");
+    SET(p__memicmp_l, "_memicmp_l");
+    SET(p__vsnwprintf, "_vsnwprintf");
+
     if (sizeof(void *) == 8)
     {
         SET(p_type_info_name_internal_method, "?_name_internal_method@type_info@@QEBAPEBDPEAU__type_info_node@@@Z");
@@ -893,7 +900,7 @@ static void test_bsearch_s(void)
     CHECK_CALLED(invalid_parameter_handler, EINVAL);
 
     /* just try all array sizes */
-    for (j=1;j<sizeof(arr)/sizeof(arr[0]);j++) {
+    for (j=1; j<ARRAY_SIZE(arr); j++) {
         for (i=0;i<j;i++) {
             l = arr[i];
             g_bsearch_s_context_counter = 0;
@@ -1179,7 +1186,7 @@ static void test_getptd(void)
     ok(p_get_unexpected() == ptd->unexpected_handler, "ptd->unexpected_handler != _get_unexpected()\n");
 }
 
-static int __cdecl __vswprintf_l_wrapper(wchar_t *buf,
+static int WINAPIV __vswprintf_l_wrapper(wchar_t *buf,
         const wchar_t *format, _locale_t locale, ...)
 {
     int ret;
@@ -1190,7 +1197,7 @@ static int __cdecl __vswprintf_l_wrapper(wchar_t *buf,
     return ret;
 }
 
-static int __cdecl _vswprintf_l_wrapper(wchar_t *buf,
+static int WINAPIV _vswprintf_l_wrapper(wchar_t *buf,
         const wchar_t *format, _locale_t locale, ...)
 {
     int ret;
@@ -1487,7 +1494,7 @@ static void test__AdjustPointer(void)
     void *ret;
     int i;
 
-    for(i=0; i<sizeof(data)/sizeof(data[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(data); i++) {
         ret = p__AdjustPointer(data[i].ptr, &data[i].this_ptr_offsets);
         ok(ret == data[i].ret, "%d) __AdjustPointer returned %p, expected %p\n", i, ret, data[i].ret);
     }
@@ -1727,7 +1734,7 @@ static void test__fpieee_flt(void)
     ok(ret == EXCEPTION_CONTINUE_SEARCH, "_fpieee_flt returned %d\n", ret);
     ok(handler_called == 0, "handler_called = %d\n", handler_called);
 
-    for(i=0; i<sizeof(test_data)/sizeof(test_data[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(test_data); i++) {
         ep.ExceptionRecord = &rec;
         ep.ContextRecord = &ctx;
         memset(&rec, 0, sizeof(rec));
@@ -1797,6 +1804,96 @@ static void test__fpieee_flt(void)
 }
 #endif
 
+static void test__memicmp(void)
+{
+    static const char *s1 = "abc";
+    static const char *s2 = "aBd";
+    int ret;
+
+    ret = p__memicmp(NULL, NULL, 0);
+    ok(!ret, "got %d\n", ret);
+
+    SET_EXPECT(invalid_parameter_handler);
+    ret = p__memicmp(NULL, NULL, 1);
+    ok(ret == _NLSCMPERROR, "got %d\n", ret);
+    CHECK_CALLED(invalid_parameter_handler, EINVAL);
+
+    SET_EXPECT(invalid_parameter_handler);
+    ret = p__memicmp(s1, NULL, 1);
+    ok(ret == _NLSCMPERROR, "got %d\n", ret);
+    CHECK_CALLED(invalid_parameter_handler, EINVAL);
+
+    SET_EXPECT(invalid_parameter_handler);
+    ret = p__memicmp(NULL, s2, 1);
+    ok(ret == _NLSCMPERROR, "got %d\n", ret);
+    CHECK_CALLED(invalid_parameter_handler, EINVAL);
+
+    ret = p__memicmp(s1, s2, 2);
+    ok(!ret, "got %d\n", ret);
+
+    ret = p__memicmp(s1, s2, 3);
+    ok(ret == -1, "got %d\n", ret);
+}
+
+static void test__memicmp_l(void)
+{
+    static const char *s1 = "abc";
+    static const char *s2 = "aBd";
+    int ret;
+
+    ret = p__memicmp_l(NULL, NULL, 0, NULL);
+    ok(!ret, "got %d\n", ret);
+
+    SET_EXPECT(invalid_parameter_handler);
+    ret = p__memicmp_l(NULL, NULL, 1, NULL);
+    ok(ret == _NLSCMPERROR, "got %d\n", ret);
+    CHECK_CALLED(invalid_parameter_handler, EINVAL);
+
+    SET_EXPECT(invalid_parameter_handler);
+    ret = p__memicmp_l(s1, NULL, 1, NULL);
+    ok(ret == _NLSCMPERROR, "got %d\n", ret);
+    CHECK_CALLED(invalid_parameter_handler, EINVAL);
+
+    SET_EXPECT(invalid_parameter_handler);
+    ret = p__memicmp_l(NULL, s2, 1, NULL);
+    ok(ret == _NLSCMPERROR, "got %d\n", ret);
+    CHECK_CALLED(invalid_parameter_handler, EINVAL);
+
+    ret = p__memicmp_l(s1, s2, 2, NULL);
+    ok(!ret, "got %d\n", ret);
+
+    ret = p__memicmp_l(s1, s2, 3, NULL);
+    ok(ret == -1, "got %d\n", ret);
+}
+
+static int WINAPIV _vsnwprintf_wrapper(wchar_t *str, size_t len, const wchar_t *format, ...)
+{
+    int ret;
+    __ms_va_list valist;
+    __ms_va_start(valist, format);
+    ret = p__vsnwprintf(str, len, format, valist);
+    __ms_va_end(valist);
+    return ret;
+}
+
+static void test__vsnwprintf(void)
+{
+    int ret;
+    WCHAR str[2] = {0};
+
+    _invalid_parameter_handler old_handler = p_set_invalid_parameter_handler(test_invalid_parameter_handler);
+
+    SET_EXPECT(invalid_parameter_handler);
+    errno = 0xdeadbeef;
+    str[0] = 'x';
+    ret = _vsnwprintf_wrapper(str, 0, NULL);
+    ok(ret == -1, "got %d, expected -1\n", ret);
+    ok(str[0] == 'x', "Expected string to be unchanged.\n");
+    CHECK_CALLED(invalid_parameter_handler, EINVAL);
+
+    ok(p_set_invalid_parameter_handler(old_handler) == test_invalid_parameter_handler, "Cannot reset invalid parameter handler\n");
+}
+
 START_TEST(msvcr90)
 {
     if(!init())
@@ -1828,6 +1925,9 @@ START_TEST(msvcr90)
     test_mbstowcs();
     test_strtok_s();
     test__mbstok_s();
+    test__memicmp();
+    test__memicmp_l();
+    test__vsnwprintf();
 #ifdef __i386__
     test__fpieee_flt();
 #endif

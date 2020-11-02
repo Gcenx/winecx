@@ -1315,8 +1315,8 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
         return S_OK;
 
     case DISPID_GLOBAL_TESTARGTYPES: {
-        VARIANT args[6], v;
-        DISPPARAMS dp = {args, NULL, sizeof(args)/sizeof(*args), 0};
+        VARIANT args[8], v;
+        DISPPARAMS dp = {args, NULL, ARRAY_SIZE(args), 0};
         HRESULT hres;
 
         CHECK_EXPECT(global_testargtypes_i);
@@ -1355,6 +1355,10 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
         V_UI4(args+4) = 0xffffffff;
         V_VT(args+5) = VT_BYREF|VT_VARIANT;
         V_VARIANTREF(args+5) = &v;
+        V_VT(args+6) = VT_R4;
+        V_R4(args+6) = 0.5;
+        V_VT(args+7) = VT_UI2;
+        V_R4(args+7) = 3;
         V_VT(&v) = VT_I4;
         V_I4(&v) = 2;
         hres = IDispatch_Invoke(V_DISPATCH(pdp->rgvarg), DISPID_VALUE, &IID_NULL, 0, DISPATCH_METHOD, &dp, NULL, NULL, NULL);
@@ -2143,6 +2147,8 @@ static HRESULT parse_script_expr(const char *expr, VARIANT *res, IActiveScript *
     HRESULT hres;
 
     engine = create_script();
+    if(!engine)
+        return E_FAIL;
 
     hres = IActiveScript_QueryInterface(engine, &IID_IActiveScriptParse, (void**)&parser);
     ok(hres == S_OK, "Could not get IActiveScriptParse: %08x\n", hres);
@@ -2187,6 +2193,8 @@ static void test_retval(void)
     HRESULT hres;
 
     engine = create_script();
+    if(!engine)
+        return;
 
     hres = IActiveScript_QueryInterface(engine, &IID_IActiveScriptParse, (void**)&parser);
     ok(hres == S_OK, "Could not get IActiveScriptParse: %08x\n", hres);
@@ -2644,7 +2652,8 @@ static BOOL run_tests(void)
     CHECK_CALLED(global_propargput_i);
 
     SET_EXPECT(global_testargtypes_i);
-    parse_script_a("testArgTypes(dispUnk, intProp(), intProp, getShort(), shortProp, function(i4ref,ui4,nullunk,d,i,s) {"
+    parse_script_a("testArgTypes(dispUnk, intProp(), intProp, getShort(), shortProp,"
+                   "function(ui2,r4,i4ref,ui4,nullunk,d,i,s) {"
                    "    ok(getVT(i) === 'VT_I4', 'getVT(i) = ' + getVT(i));"
                    "    ok(getVT(s) === 'VT_I4', 'getVT(s) = ' + getVT(s));"
                    "    ok(getVT(d) === 'VT_DISPATCH', 'getVT(d) = ' + getVT(d));"
@@ -2654,6 +2663,9 @@ static BOOL run_tests(void)
                    "    ok(ui4 > 0, 'ui4 = ' + ui4);"
                    "    ok(getVT(i4ref) === 'VT_I4', 'getVT(i4ref) = ' + getVT(i4ref));"
                    "    ok(i4ref === 2, 'i4ref = ' + i4ref);"
+                   "    ok(r4 === 0.5, 'r4 = ' + r4);"
+                   "    ok(getVT(r4) === 'VT_R8', 'getVT(r4) = ' + getVT(r4));"
+                   "    ok(getVT(ui2) === 'VT_I4', 'getVT(ui2) = ' + getVT(ui2));"
                    "});");
     CHECK_CALLED(global_testargtypes_i);
 

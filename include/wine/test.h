@@ -52,6 +52,9 @@ extern int winetest_debug;
 /* running in interactive mode? */
 extern int winetest_interactive;
 
+/* report successful tests (BOOL) */
+extern int winetest_report_success;
+
 /* current platform */
 extern const char *winetest_platform;
 
@@ -87,7 +90,7 @@ static inline int winetest_strcmpW( const WCHAR *str1, const WCHAR *str2 )
 #define START_TEST(name) void func_##name(void)
 #endif
 
-#if defined(__x86_64__) && defined(__GNUC__) && defined(__WINE_USE_MSVCRT)
+#if (defined(__x86_64__) || defined(__aarch64__)) && defined(__GNUC__) && defined(__WINE_USE_MSVCRT)
 #define __winetest_cdecl __cdecl
 #define __winetest_va_list __builtin_ms_va_list
 #else
@@ -110,10 +113,17 @@ extern void __winetest_cdecl winetest_skip( const char *msg, ... ) WINETEST_PRIN
 extern void __winetest_cdecl winetest_win_skip( const char *msg, ... ) WINETEST_PRINTF_ATTR(1,2);
 extern void __winetest_cdecl winetest_trace( const char *msg, ... ) WINETEST_PRINTF_ATTR(1,2);
 
-#define ok_(file, line)       (winetest_set_location(file, line), 0) ? (void)0 : winetest_ok
-#define skip_(file, line)     (winetest_set_location(file, line), 0) ? (void)0 : winetest_skip
-#define win_skip_(file, line) (winetest_set_location(file, line), 0) ? (void)0 : winetest_win_skip
-#define trace_(file, line)    (winetest_set_location(file, line), 0) ? (void)0 : winetest_trace
+#ifdef WINETEST_NO_LINE_NUMBERS
+# define ok_(file, line)       (winetest_set_location(file, 0), 0) ? (void)0 : winetest_ok
+# define skip_(file, line)     (winetest_set_location(file, 0), 0) ? (void)0 : winetest_skip
+# define win_skip_(file, line) (winetest_set_location(file, 0), 0) ? (void)0 : winetest_win_skip
+# define trace_(file, line)    (winetest_set_location(file, 0), 0) ? (void)0 : winetest_trace
+#else
+# define ok_(file, line)       (winetest_set_location(file, line), 0) ? (void)0 : winetest_ok
+# define skip_(file, line)     (winetest_set_location(file, line), 0) ? (void)0 : winetest_skip
+# define win_skip_(file, line) (winetest_set_location(file, line), 0) ? (void)0 : winetest_win_skip
+# define trace_(file, line)    (winetest_set_location(file, line), 0) ? (void)0 : winetest_trace
+#endif
 
 #define ok       ok_(__FILE__, __LINE__)
 #define skip     skip_(__FILE__, __LINE__)
@@ -126,6 +136,10 @@ extern void __winetest_cdecl winetest_trace( const char *msg, ... ) WINETEST_PRI
 #define todo_wine               todo_if(!strcmp(winetest_platform, "wine"))
 #define todo_wine_if(is_todo)   todo_if((is_todo) && !strcmp(winetest_platform, "wine"))
 
+
+#ifndef ARRAY_SIZE
+# define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#endif
 
 #ifdef NONAMELESSUNION
 # define U(x)  (x).u
@@ -178,7 +192,7 @@ extern void __winetest_cdecl winetest_trace( const char *msg, ... ) WINETEST_PRI
 #include <stdio.h>
 #include <excpt.h>
 
-#if defined(__x86_64__) && defined(__GNUC__) && defined(__WINE_USE_MSVCRT)
+#if (defined(__x86_64__) || defined(__aarch64__)) && defined(__GNUC__) && defined(__WINE_USE_MSVCRT)
 # define __winetest_va_start(list,arg) __builtin_ms_va_start(list,arg)
 # define __winetest_va_end(list) __builtin_ms_va_end(list)
 #else
@@ -204,7 +218,7 @@ int winetest_interactive = 0;
 const char *winetest_platform = "windows";
 
 /* report successful tests (BOOL) */
-static int report_success = 0;
+int winetest_report_success = 0;
 
 /* passing arguments around */
 static int winetest_argc;
@@ -338,7 +352,7 @@ int winetest_vok( int condition, const char *msg, __winetest_va_list args )
         }
         else
         {
-            if (report_success)
+            if (winetest_report_success)
                 printf( "%s:%d: Test succeeded\n",
                         data->current_file, data->current_line);
             InterlockedIncrement(&successes);
@@ -668,7 +682,7 @@ int main( int argc, char **argv )
 
     if (GetEnvironmentVariableA( "WINETEST_DEBUG", p, sizeof(p) )) winetest_debug = atoi(p);
     if (GetEnvironmentVariableA( "WINETEST_INTERACTIVE", p, sizeof(p) )) winetest_interactive = atoi(p);
-    if (GetEnvironmentVariableA( "WINETEST_REPORT_SUCCESS", p, sizeof(p) )) report_success = atoi(p);
+    if (GetEnvironmentVariableA( "WINETEST_REPORT_SUCCESS", p, sizeof(p) )) winetest_report_success = atoi(p);
 
     if (!strcmp( winetest_platform, "windows" )) SetUnhandledExceptionFilter( exc_filter );
     if (!winetest_interactive) SetErrorMode( SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX );

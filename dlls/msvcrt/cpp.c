@@ -650,6 +650,7 @@ void * __thiscall MSVCRT_type_info_vector_dtor(type_info * _this, unsigned int f
 }
 
 #if _MSVCR_VER >= 80
+
 typedef exception bad_alloc;
 extern const vtable_ptr MSVCRT_bad_alloc_vtable;
 
@@ -675,9 +676,11 @@ void __thiscall MSVCRT_bad_alloc_dtor(bad_alloc * _this)
     TRACE("(%p)\n", _this);
     MSVCRT_exception_dtor(_this);
 }
-#endif
+
+#endif /* _MSVCR_VER >= 80 */
 
 #if _MSVCR_VER >= 100
+
 typedef struct {
     exception e;
     HRESULT hr;
@@ -985,7 +988,8 @@ void __thiscall MSVCRT_improper_scheduler_detach_dtor(
     TRACE("(%p)\n", _this);
     MSVCRT_exception_dtor(_this);
 }
-#endif
+
+#endif /* _MSVCR_VER >= 100 */
 
 #ifndef __GNUC__
 void __asm_dummy_vtables(void) {
@@ -1583,6 +1587,8 @@ void WINAPI _CxxThrowException( exception *object, const cxx_exception_type *typ
 }
 #endif
 
+#if _MSVCR_VER >= 80
+
 /*********************************************************************
  * ?_is_exception_typeof@@YAHABVtype_info@@PAU_EXCEPTION_POINTERS@@@Z
  * ?_is_exception_typeof@@YAHAEBVtype_info@@PEAU_EXCEPTION_POINTERS@@@Z
@@ -1669,7 +1675,7 @@ int __cdecl _is_exception_typeof(const type_info *ti, EXCEPTION_POINTERS *ep)
 #endif
 
 /*********************************************************************
- * __clean_type_info_names_internal (MSVCR100.@)
+ * __clean_type_info_names_internal (MSVCR80.@)
  */
 void CDECL __clean_type_info_names_internal(void *p)
 {
@@ -1688,12 +1694,16 @@ const char * __thiscall type_info_name_internal_method(type_info * _this, struct
     return MSVCRT_type_info_name(_this);
 }
 
+#endif /* _MSVCR_VER >= 80 */
+
 /* std::exception_ptr class helpers */
 typedef struct
 {
     EXCEPTION_RECORD *rec;
     int *ref; /* not binary compatible with native msvcr100 */
 } exception_ptr;
+
+#if _MSVCR_VER >= 100
 
 /*********************************************************************
  * ?__ExceptionPtrCreate@@YAXPAX@Z
@@ -1708,10 +1718,12 @@ void __cdecl __ExceptionPtrCreate(exception_ptr *ep)
 }
 
 #ifdef __i386__
-static inline void call_dtor(const cxx_exception_type *type, void *func, void *object)
-{
-    __asm__ __volatile__("call *%0" : : "m" (func), "c" (object) : "eax", "edx", "memory");
-}
+extern void call_dtor(const cxx_exception_type *type, void *func, void *object);
+
+__ASM_GLOBAL_FUNC( call_dtor,
+                   "movl 12(%esp),%ecx\n\t"
+                   "call *8(%esp)\n\t"
+                   "ret" );
 #elif __x86_64__
 static inline void call_dtor(const cxx_exception_type *type, unsigned int dtor, void *object)
 {
@@ -1781,6 +1793,8 @@ void __cdecl __ExceptionPtrAssign(exception_ptr *ep, const exception_ptr *assign
         InterlockedIncrement(ep->ref);
 }
 
+#endif /* _MSVCR_VER >= 100 */
+
 /*********************************************************************
  * ?__ExceptionPtrRethrow@@YAXPBX@Z
  * ?__ExceptionPtrRethrow@@YAXPEBX@Z
@@ -1803,18 +1817,10 @@ void __cdecl __ExceptionPtrRethrow(const exception_ptr *ep)
             ep->rec->NumberParameters, ep->rec->ExceptionInformation);
 }
 
+#if _MSVCR_VER >= 100
+
 #ifdef __i386__
-static inline void call_copy_ctor( void *func, void *this, void *src, int has_vbase )
-{
-    TRACE( "calling copy ctor %p object %p src %p\n", func, this, src );
-    if (has_vbase)
-        /* in that case copy ctor takes an extra bool indicating whether to copy the base class */
-        __asm__ __volatile__("pushl $1; pushl %2; call *%0"
-                             : : "m" (func), "c" (this), "m" (src) : "eax", "edx", "memory" );
-    else
-        __asm__ __volatile__("pushl %2; call *%0"
-                             : : "m" (func), "c" (this), "m" (src) : "eax", "edx", "memory" );
-}
+extern void call_copy_ctor( void *func, void *this, void *src, int has_vbase );
 #else
 static inline void call_copy_ctor( void *func, void *this, void *src, int has_vbase )
 {
@@ -1925,6 +1931,9 @@ void __cdecl __ExceptionPtrCurrentException(exception_ptr *ep)
 }
 #endif
 
+#endif /* _MSVCR_VER >= 100 */
+
+#if _MSVCR_VER >= 110
 /*********************************************************************
  * ?__ExceptionPtrToBool@@YA_NPBX@Z
  * ?__ExceptionPtrToBool@@YA_NPEBX@Z
@@ -1933,6 +1942,9 @@ MSVCRT_bool __cdecl __ExceptionPtrToBool(exception_ptr *ep)
 {
     return !!ep->rec;
 }
+#endif
+
+#if _MSVCR_VER >= 100
 
 /*********************************************************************
  * ?__ExceptionPtrCopyException@@YAXPAXPBX1@Z
@@ -2020,12 +2032,17 @@ MSVCRT_bool __cdecl __ExceptionPtrCompare(const exception_ptr *ep1, const except
     return ep1->rec == ep2->rec;
 }
 
+#endif /* _MSVCR_VER >= 100 */
+
+#if _MSVCR_VER >= 80
 void* __cdecl __AdjustPointer(void *obj, const this_ptr_offsets *off)
 {
     return get_this_pointer(off, obj);
 }
+#endif
 
 #if _MSVCR_VER >= 140
+
 typedef struct
 {
     char *name;
@@ -2139,9 +2156,11 @@ MSVCRT_size_t CDECL MSVCRT_type_info_hash(const type_info140 *ti)
 
     return hash;
 }
-#endif
+
+#endif /* _MSVCR_VER >= 140 */
 
 #if _MSVCR_VER >= 100
+
 enum ConcRT_EventType
 {
     CONCRT_EVENT_GENERIC,
@@ -2160,4 +2179,5 @@ void __cdecl Concurrency__Trace_ppl_function(const GUID *guid, unsigned char lev
 {
     FIXME("(%s %u %i) stub\n", debugstr_guid(guid), level, type);
 }
-#endif
+
+#endif /* _MSVCR_VER >= 100 */

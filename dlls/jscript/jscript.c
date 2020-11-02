@@ -55,6 +55,7 @@ typedef struct {
     LONG thread_id;
     LCID lcid;
     DWORD version;
+    BOOL html_mode;
     BOOL is_encode;
 
     IActiveScriptSite *site;
@@ -68,6 +69,7 @@ void script_release(script_ctx_t *ctx)
     if(--ctx->ref)
         return;
 
+    jsval_release(ctx->acc);
     clear_ei(ctx);
     if(ctx->cc)
         release_cc(ctx->cc);
@@ -712,7 +714,9 @@ static HRESULT WINAPI JScriptParse_InitNew(IActiveScriptParse *iface)
     ctx->active_script = &This->IActiveScript_iface;
     ctx->safeopt = This->safeopt;
     ctx->version = This->version;
+    ctx->html_mode = This->html_mode;
     ctx->ei.val = jsval_undefined();
+    ctx->acc = jsval_undefined();
     heap_pool_init(&ctx->tmp_heap);
 
     hres = create_jscaller(ctx);
@@ -920,12 +924,14 @@ static HRESULT WINAPI JScriptProperty_SetProperty(IActiveScriptProperty *iface, 
 
     switch(dwProperty) {
     case SCRIPTPROP_INVOKEVERSIONING:
-        if(V_VT(pvarValue) != VT_I4 || V_I4(pvarValue) < 0 || V_I4(pvarValue) > 15) {
+        if(V_VT(pvarValue) != VT_I4 || V_I4(pvarValue) < 0
+           || (V_I4(pvarValue) > 15 && !(V_I4(pvarValue) & SCRIPTLANGUAGEVERSION_HTML))) {
             WARN("invalid value %s\n", debugstr_variant(pvarValue));
             return E_INVALIDARG;
         }
 
-        This->version = V_I4(pvarValue);
+        This->version = V_I4(pvarValue) & 0x1ff;
+        This->html_mode = (V_I4(pvarValue) & SCRIPTLANGUAGEVERSION_HTML) != 0;
         break;
     default:
         FIXME("Unimplemented property %x\n", dwProperty);

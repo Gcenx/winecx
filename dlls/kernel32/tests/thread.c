@@ -1325,10 +1325,12 @@ static DWORD WINAPI LS_ThreadProc(LPVOID p)
     ok(LS_index0 != LS_index1, "%s failed\n", LS_AllocFuncName);
 
     /* Both slots should be initialized to NULL */
+    SetLastError(0xdeadbeef);
     val = LS_GetValueFunc(LS_index0);
     ok(GetLastError() == ERROR_SUCCESS, "%s failed\n", LS_GetValueFuncName);
     ok(val == NULL, "Slot not initialized correctly\n");
 
+    SetLastError(0xdeadbeef);
     val = LS_GetValueFunc(LS_index1);
     ok(GetLastError() == ERROR_SUCCESS, "%s failed\n", LS_GetValueFuncName);
     ok(val == NULL, "Slot not initialized correctly\n");
@@ -1337,10 +1339,12 @@ static DWORD WINAPI LS_ThreadProc(LPVOID p)
 
   if (sync_threads_and_run_one(0, id))
   {
+    SetLastError(0xdeadbeef);
     val = LS_GetValueFunc(LS_index0);
     ok(GetLastError() == ERROR_SUCCESS, "%s failed\n", LS_GetValueFuncName);
     ok(val == NULL, "Slot not initialized correctly\n");
 
+    SetLastError(0xdeadbeef);
     val = LS_GetValueFunc(LS_index1);
     ok(GetLastError() == ERROR_SUCCESS, "%s failed\n", LS_GetValueFuncName);
     ok(val == NULL, "Slot not initialized correctly\n");
@@ -1351,10 +1355,12 @@ static DWORD WINAPI LS_ThreadProc(LPVOID p)
     ret = LS_SetValueFunc(LS_index1, (LPVOID) 2);
     ok(ret, "%s failed\n", LS_SetValueFuncName);
 
+    SetLastError(0xdeadbeef);
     val = LS_GetValueFunc(LS_index0);
     ok(GetLastError() == ERROR_SUCCESS, "%s failed\n", LS_GetValueFuncName);
     ok(val == (LPVOID) 1, "Slot not initialized correctly\n");
 
+    SetLastError(0xdeadbeef);
     val = LS_GetValueFunc(LS_index1);
     ok(GetLastError() == ERROR_SUCCESS, "%s failed\n", LS_GetValueFuncName);
     ok(val == (LPVOID) 2, "Slot not initialized correctly\n");
@@ -1647,6 +1653,7 @@ static WORD get_thread_fpu_cw(void)
     res = CloseHandle(ctx.finished);
     ok(!!res, "Failed to close event handle, last error %#x.\n", GetLastError());
 
+    CloseHandle(thread);
     return ctx.cw;
 }
 
@@ -1926,7 +1933,7 @@ static void test_thread_info(void)
         return;
     }
 
-    for (i = 0; i < sizeof(info_size)/sizeof(info_size[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(info_size); i++)
     {
         memset(buf, 0, sizeof(buf));
 

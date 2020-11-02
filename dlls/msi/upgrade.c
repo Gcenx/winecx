@@ -103,7 +103,7 @@ static UINT ITERATE_FindRelatedProducts(MSIRECORD *rec, LPVOID param)
 {
     MSIPACKAGE *package = param;
     WCHAR product[SQUASHED_GUID_SIZE];
-    DWORD index = 0, attributes = 0, sz = sizeof(product)/sizeof(product[0]);
+    DWORD index = 0, attributes = 0, sz = ARRAY_SIZE(product);
     LPCWSTR upgrade_code;
     HKEY hkey = 0;
     UINT rc = ERROR_SUCCESS;
@@ -191,7 +191,7 @@ static UINT ITERATE_FindRelatedProducts(MSIRECORD *rec, LPVOID param)
             action_property = MSI_RecordGetString(rec, 7);
             append_productcode(package, action_property, productid);
             MSI_RecordSetStringW(uirow, 1, productid);
-            msi_ui_actiondata(package, szFindRelatedProducts, uirow);
+            MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
         }
         index ++;
     }

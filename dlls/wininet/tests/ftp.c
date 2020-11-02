@@ -112,6 +112,7 @@ static void test_connect(HINTERNET hInternet)
     ok ( hFtp != NULL, "InternetConnect failed : %d\n", GetLastError());
     ok ( GetLastError() == ERROR_SUCCESS,
         "ERROR_SUCCESS, got %d\n", GetLastError());
+    InternetCloseHandle(hFtp);
 
     SetLastError(0xdeadbeef);
     hFtp = InternetConnectA(hInternet, "ftp.winehq.org", INTERNET_DEFAULT_FTP_PORT, "", NULL,
@@ -125,6 +126,7 @@ static void test_connect(HINTERNET hInternet)
     {
         ok(GetLastError() == ERROR_SUCCESS,
                 "Expected ERROR_SUCCESS, got %d\n", GetLastError());
+        InternetCloseHandle(hFtp);
     }
 }
 
@@ -733,7 +735,7 @@ static void test_command(HINTERNET hFtp, HINTERNET hConnect)
         return;
     }
 
-    for (i = 0; i < sizeof(command_test) / sizeof(command_test[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(command_test); i++)
     {
         SetLastError(0xdeadbeef);
         ret = pFtpCommandA(hFtp, FALSE, FTP_TRANSFER_TYPE_ASCII, command_test[i].cmd, 0, NULL);

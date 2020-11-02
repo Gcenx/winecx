@@ -37,6 +37,13 @@
 #define PARENT_SEQ_INDEX       0
 #define NUM_MSG_SEQUENCES      1
 
+static HWND (WINAPI *pCreateToolbarEx)(HWND, DWORD, UINT, INT, HINSTANCE, UINT_PTR, const TBBUTTON *,
+    INT, INT, INT, INT, INT, UINT);
+static BOOL (WINAPI *pImageList_Destroy)(HIMAGELIST);
+static INT (WINAPI *pImageList_GetImageCount)(HIMAGELIST);
+static BOOL (WINAPI *pImageList_GetIconSize)(HIMAGELIST, int *, int *);
+static HIMAGELIST (WINAPI *pImageList_LoadImageA)(HINSTANCE, LPCSTR, int, int, COLORREF, UINT, UINT);
+
 static struct msg_sequence *sequences[NUM_MSG_SEQUENCES];
 
 static HWND hMainWnd;
@@ -174,7 +181,7 @@ static LRESULT parent_wnd_notify(LPARAM lParam)
             if (save->iItem == -1)
             {
                 save->cbData = save->cbData * 2 + 11 * sizeof(DWORD);
-                save->pData = HeapAlloc( GetProcessHeap(), 0, save->cbData );
+                save->pData = heap_alloc( save->cbData );
                 save->pData[0] = 0xcafe;
                 save->pCurrent = save->pData + 1;
             }
@@ -250,7 +257,7 @@ static LRESULT parent_wnd_notify(LPARAM lParam)
 
                 if (restore->iItem == 0)
                 {
-                    restore->tbButton.iString = (INT_PTR)HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, 8 );
+                    restore->tbButton.iString = (INT_PTR)heap_alloc_zero( 8 );
                     strcpy( (char *)restore->tbButton.iString, "foo" );
                 }
                 else if (restore->iItem == 1)
@@ -280,7 +287,7 @@ static LRESULT parent_wnd_notify(LPARAM lParam)
             {
             case 0:
                 tb->tbButton.idCommand = 7;
-                alloced_str = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, 8 );
+                alloced_str = heap_alloc_zero( 8 );
                 strcpy( alloced_str, "foo" );
                 tb->tbButton.iString = (INT_PTR)alloced_str;
                 return 1;
@@ -375,12 +382,12 @@ static void basic_test(void)
     MakeButton(buttons+3, 1003, TBSTYLE_SEP|TBSTYLE_GROUP, 0);
     MakeButton(buttons+6, 1006, TBSTYLE_SEP, 0);
 
-    hToolbar = CreateToolbarEx(hMainWnd,
+    hToolbar = pCreateToolbarEx(hMainWnd,
         WS_VISIBLE | WS_CLIPCHILDREN | CCS_TOP |
         WS_CHILD | TBSTYLE_LIST,
         100,
         0, NULL, 0,
-        buttons, sizeof(buttons)/sizeof(buttons[0]),
+        buttons, ARRAY_SIZE(buttons),
         0, 0, 20, 16, sizeof(TBBUTTON));
     ok(hToolbar != NULL, "Toolbar creation\n");
     SendMessageA(hToolbar, TB_ADDSTRINGA, 0, (LPARAM)"test\000");
@@ -481,21 +488,89 @@ static void add_128x15_bitmap(HWND hToolbar, int nCmds)
     HIMAGELIST himl = (HIMAGELIST)SendMessageA(hToolbar, TB_GETIMAGELIST, 0, 0); \
     ok(himl != NULL, "No image list\n"); \
     if (himl != NULL) {\
-        ok(ImageList_GetImageCount(himl) == count, "Images count mismatch - %d vs %d\n", count, ImageList_GetImageCount(himl)); \
-        ImageList_GetIconSize(himl, &cx, &cy); \
+        ok(pImageList_GetImageCount(himl) == count, "Images count mismatch - %d vs %d\n", count, pImageList_GetImageCount(himl)); \
+        pImageList_GetIconSize(himl, &cx, &cy); \
         ok(cx == dx && cy == dy, "Icon size mismatch - %dx%d vs %dx%d\n", dx, dy, cx, cy); \
     } \
 }
 
 static void test_add_bitmap(void)
 {
+    TBADDBITMAP stdsmall, std;
     HWND hToolbar = NULL;
     TBADDBITMAP bmp128;
     TBADDBITMAP bmp80;
-    TBADDBITMAP stdsmall;
     TBADDBITMAP addbmp;
     HIMAGELIST himl;
-    INT ret;
+    INT ret, id;
+
+    /* Test default bitmaps range */
+    for (id = IDB_STD_SMALL_COLOR; id < IDB_HIST_LARGE_COLOR; id++)
+    {
+        HIMAGELIST himl;
+        int cx, cy, count;
+
+        rebuild_toolbar(&hToolbar);
+
+        std.hInst = HINST_COMMCTRL;
+        std.nID = id;
+
+        ret = SendMessageA(hToolbar, TB_ADDBITMAP, 0, (LPARAM)&std);
+        ok(ret == 0, "Got %d\n", ret);
+
+        himl = (HIMAGELIST)SendMessageA(hToolbar, TB_GETIMAGELIST, 0, 0);
+        ok(himl != NULL, "Got %p\n", himl);
+
+        ret = pImageList_GetIconSize(himl, &cx, &cy);
+        ok(ret, "Got %d\n", ret);
+        ok(cx == cy, "Got %d x %d\n", cx, cy);
+
+        count = pImageList_GetImageCount(himl);
+
+        /* Image count */
+        switch (id)
+        {
+        case IDB_STD_SMALL_COLOR:
+        case IDB_STD_LARGE_COLOR:
+        case 2:
+        case 3:
+            ok(count == 15, "got count %d\n", count);
+            break;
+        case IDB_VIEW_SMALL_COLOR:
+        case IDB_VIEW_LARGE_COLOR:
+        case 6:
+        case 7:
+            ok(count == 12, "got count %d\n", count);
+            break;
+        case IDB_HIST_SMALL_COLOR:
+        case IDB_HIST_LARGE_COLOR:
+            ok(count == 5, "got count %d\n", count);
+            break;
+        default:
+            ok(0, "id %d, count %d\n", id, count);
+        }
+
+        /* Image sizes */
+        switch (id)
+        {
+        case IDB_STD_SMALL_COLOR:
+        case 2:
+        case IDB_VIEW_SMALL_COLOR:
+        case 6:
+        case IDB_HIST_SMALL_COLOR:
+            ok(cx == 16, "got size %d\n", cx);
+            break;
+        case IDB_STD_LARGE_COLOR:
+        case 3:
+        case IDB_VIEW_LARGE_COLOR:
+        case 7:
+        case IDB_HIST_LARGE_COLOR:
+            ok(cx == 24, "got size %d\n", cx);
+            break;
+        default:
+            ok(0, "id %d, size %d\n", id, cx);
+        }
+    }
 
     /* empty 128x15 bitmap */
     bmp128.hInst = GetModuleHandleA(NULL);
@@ -619,7 +694,7 @@ static void test_add_bitmap(void)
 
     /* the control can add bitmaps to an existing image list */
     rebuild_toolbar(&hToolbar);
-    himl = ImageList_LoadImageA(GetModuleHandleA(NULL), (LPCSTR)MAKEINTRESOURCE(IDB_BITMAP_80x15),
+    himl = pImageList_LoadImageA(GetModuleHandleA(NULL), (LPCSTR)MAKEINTRESOURCE(IDB_BITMAP_80x15),
                                 20, 2, CLR_NONE, IMAGE_BITMAP, LR_DEFAULTCOLOR);
     ok(himl != NULL, "failed to create imagelist\n");
     ok(SendMessageA(hToolbar, TB_SETIMAGELIST, 0, (LPARAM)himl) == 0, "TB_SETIMAGELIST failed\n");
@@ -640,7 +715,7 @@ static void test_add_bitmap(void)
     addbmp.hInst = HINST_COMMCTRL;
     addbmp.nID = IDB_STD_SMALL_COLOR;
     rebuild_toolbar(&hToolbar);
-    ImageList_Destroy(himl);
+    pImageList_Destroy(himl);
 
     ok(SendMessageA(hToolbar, TB_ADDBITMAP, 1, (LPARAM)&addbmp) == 0, "TB_ADDBITMAP - unexpected return\n");
     CHECK_IMAGELIST(15, 16, 16);
@@ -802,7 +877,7 @@ static void test_hotitem(void)
     ok(ret == 3, "Hot item: %lx, expected 3\n", ret);
     g_fBlockHotItemChange = TRUE;
     ret = SendMessageA(hToolbar, TB_SETHOTITEM, 2, 0);
-    ok(ret == 3, "TB_SETHOTITEM returned %ld, expected 2\n", ret);
+    ok(ret == 3, "TB_SETHOTITEM returned %ld, expected 3\n", ret);
     ret = SendMessageA(hToolbar, TB_GETHOTITEM, 0, 0);
     ok(ret == 3, "Hot item: %lx, expected 3\n", ret);
     g_fBlockHotItemChange = FALSE;
@@ -833,7 +908,7 @@ static void test_hotitem(void)
     /* enabling the button won't change that */
     SendMessageA(hToolbar, TB_ENABLEBUTTON, 9, TRUE);
     ret = SendMessageA(hToolbar, TB_GETHOTITEM, 0, 0);
-    ok(ret == -1, "TB_SETHOTITEM returned %ld, expected -1\n", ret);
+    ok(ret == -1, "TB_GETHOTITEM returned %ld, expected -1\n", ret);
 
     /* disabling a hot button works */
     ret = SendMessageA(hToolbar, TB_SETHOTITEM, 3, 0);
@@ -841,7 +916,7 @@ static void test_hotitem(void)
     g_fReceivedHotItemChange = FALSE;
     SendMessageA(hToolbar, TB_ENABLEBUTTON, 7, FALSE);
     ret = SendMessageA(hToolbar, TB_GETHOTITEM, 0, 0);
-    ok(ret == 3, "TB_SETHOTITEM returned %ld, expected 3\n", ret);
+    ok(ret == 3, "TB_GETHOTITEM returned %ld, expected 3\n", ret);
     ok(g_fReceivedHotItemChange == FALSE, "Unexpected TBN_HOTITEMCHANGE\n");
 
     SendMessageA(hToolbar, TB_SETHOTITEM, 1, 0);
@@ -851,7 +926,17 @@ static void test_hotitem(void)
     g_fReceivedHotItemChange = FALSE;
     ok(SendMessageA(hToolbar, TB_SETBUTTONINFOA, 1, (LPARAM)&tbinfo) == TRUE, "TB_SETBUTTONINFOA failed\n");
     ret = SendMessageA(hToolbar, TB_GETHOTITEM, 0, 0);
+    ok(ret == 1, "TB_GETHOTITEM returned %ld, expected 1\n", ret);
+    ok(g_fReceivedHotItemChange == FALSE, "Unexpected TBN_HOTITEMCHANGE\n");
+
+    /* deleting a button unsets the hot item */
+    ret = SendMessageA(hToolbar, TB_SETHOTITEM, 0, 0);
     ok(ret == 1, "TB_SETHOTITEM returned %ld, expected 1\n", ret);
+    g_fReceivedHotItemChange = FALSE;
+    ret = SendMessageA(hToolbar, TB_DELETEBUTTON, 1, 0);
+    ok(ret == TRUE, "TB_DELETEBUTTON returned %ld, expected TRUE\n", ret);
+    ret = SendMessageA(hToolbar, TB_GETHOTITEM, 0, 0);
+    ok(ret == -1, "TB_GETHOTITEM returned %ld, expected -1\n", ret);
     ok(g_fReceivedHotItemChange == FALSE, "Unexpected TBN_HOTITEMCHANGE\n");
 
     DestroyWindow(hToolbar);
@@ -920,7 +1005,7 @@ static tbsize_result_t init_tbsize_result(int nButtonsAlloc, int cleft, int ctop
     ret.szMin.cx = minx;
     ret.szMin.cy = miny;
     ret.nButtons = 0;
-    ret.prcButtons = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, nButtonsAlloc*sizeof(RECT));
+    ret.prcButtons = heap_alloc_zero(nButtonsAlloc * sizeof(*ret.prcButtons));
 
     return ret;
 }
@@ -942,7 +1027,7 @@ static void init_tbsize_results(void) {
     int fontheight = system_font_height();
     int buttonwidth;
 
-    tbsize_results = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, tbsize_results_num*sizeof(tbsize_result_t));
+    tbsize_results = heap_alloc_zero(tbsize_results_num * sizeof(*tbsize_results));
 
     tbsize_results[0] = init_tbsize_result(5, 0, 0 ,672 ,26, 100 ,22);
     tbsize_addbutton(&tbsize_results[0],   0,   2,  23,  24);
@@ -1197,8 +1282,8 @@ static void free_tbsize_results(void) {
     int i;
 
     for (i = 0; i < tbsize_results_num; i++)
-        HeapFree(GetProcessHeap(), 0, tbsize_results[i].prcButtons);
-    HeapFree(GetProcessHeap(), 0, tbsize_results);
+        heap_free(tbsize_results[i].prcButtons);
+    heap_free(tbsize_results);
     tbsize_results = NULL;
 }
 
@@ -1230,7 +1315,7 @@ static DWORD tbsize_alt_numtests = 0;
         compare(buttonCount, res->nButtons, "%d"); \
         for (i=0; i<min(buttonCount, res->nButtons); i++) { \
             ok(SendMessageA(hToolbar, TB_GETITEMRECT, i, (LPARAM)&rc) == 1, "TB_GETITEMRECT\n"); \
-            if (broken(tbsize_alt_numtests < sizeof(tbsize_alt_results)/sizeof(tbsize_alt_results[0]) && \
+            if (broken(tbsize_alt_numtests < ARRAY_SIZE(tbsize_alt_results) && \
                        EqualRect(&rc, &tbsize_alt_results[tbsize_alt_numtests].rcButton))) { \
                 win_skip("Alternate rect found\n"); \
                 tbsize_alt_numtests++; \
@@ -1427,14 +1512,14 @@ static void test_sizes(void)
 
     /* TB_SETIMAGELIST always changes the height but the width only if necessary */
     SendMessageA(hToolbar, TB_SETBUTTONSIZE, 0, MAKELONG(100, 100));
-    himl = ImageList_LoadImageA(GetModuleHandleA(NULL), (LPCSTR)MAKEINTRESOURCE(IDB_BITMAP_80x15),
+    himl = pImageList_LoadImageA(GetModuleHandleA(NULL), (LPCSTR)MAKEINTRESOURCE(IDB_BITMAP_80x15),
                                 20, 2, CLR_NONE, IMAGE_BITMAP, LR_DEFAULTCOLOR);
     ok(SendMessageA(hToolbar, TB_SETIMAGELIST, 0, (LPARAM)himl) == 0, "TB_SETIMAGELIST failed\n");
     check_button_size(hToolbar, 100, 21);
     SendMessageA(hToolbar, TB_SETBUTTONSIZE, 0, MAKELONG(100, 100));
     check_button_size(hToolbar, 100, 100);
     /* But there are no update when we change imagelist, and image sizes are the same */
-    himl2 = ImageList_LoadImageA(GetModuleHandleA(NULL), (LPCSTR)MAKEINTRESOURCE(IDB_BITMAP_128x15),
+    himl2 = pImageList_LoadImageA(GetModuleHandleA(NULL), (LPCSTR)MAKEINTRESOURCE(IDB_BITMAP_128x15),
                                  20, 2, CLR_NONE, IMAGE_BITMAP, LR_DEFAULTCOLOR);
     ok(SendMessageA(hToolbar, TB_SETIMAGELIST, 0, (LRESULT)himl2) == (LRESULT)himl, "TB_SETIMAGELIST failed\n");
     check_button_size(hToolbar, 100, 100);
@@ -1459,8 +1544,8 @@ static void test_sizes(void)
     check_sizes_todo(0x30);     /* some small problems with BTNS_AUTOSIZE button sizes */
 
     rebuild_toolbar(&hToolbar);
-    ImageList_Destroy(himl);
-    ImageList_Destroy(himl2);
+    pImageList_Destroy(himl);
+    pImageList_Destroy(himl2);
 
     SendMessageA(hToolbar, TB_ADDBUTTONSA, 1, (LPARAM)&buttons3[3]);
     check_button_size(hToolbar, 7 + string_width(STRING2), 23 + fontheight);
@@ -1744,43 +1829,43 @@ static void test_createtoolbarex(void)
     TBBUTTON btns[3];
     ZeroMemory(&btns, sizeof(btns));
 
-    hToolbar = CreateToolbarEx(hMainWnd, WS_VISIBLE, 1, 16, GetModuleHandleA(NULL), IDB_BITMAP_128x15, btns,
+    hToolbar = pCreateToolbarEx(hMainWnd, WS_VISIBLE, 1, 16, GetModuleHandleA(NULL), IDB_BITMAP_128x15, btns,
         3, 20, 20, 16, 16, sizeof(TBBUTTON));
     CHECK_IMAGELIST(16, 20, 20);
     compare((int)SendMessageA(hToolbar, TB_GETBUTTONSIZE, 0, 0), 0x1a001b, "%x");
     DestroyWindow(hToolbar);
 
-    hToolbar = CreateToolbarEx(hMainWnd, WS_VISIBLE, 1, 16, GetModuleHandleA(NULL), IDB_BITMAP_128x15, btns,
+    hToolbar = pCreateToolbarEx(hMainWnd, WS_VISIBLE, 1, 16, GetModuleHandleA(NULL), IDB_BITMAP_128x15, btns,
         3, 4, 4, 16, 16, sizeof(TBBUTTON));
     CHECK_IMAGELIST(32, 4, 4);
     compare((int)SendMessageA(hToolbar, TB_GETBUTTONSIZE, 0, 0), 0xa000b, "%x");
     DestroyWindow(hToolbar);
 
-    hToolbar = CreateToolbarEx(hMainWnd, WS_VISIBLE, 1, 16, GetModuleHandleA(NULL), IDB_BITMAP_128x15, btns,
+    hToolbar = pCreateToolbarEx(hMainWnd, WS_VISIBLE, 1, 16, GetModuleHandleA(NULL), IDB_BITMAP_128x15, btns,
         3, 0, 8, 12, 12, sizeof(TBBUTTON));
     CHECK_IMAGELIST(16, 12, 12);
     compare((int)SendMessageA(hToolbar, TB_GETBUTTONSIZE, 0, 0), 0x120013, "%x");
     DestroyWindow(hToolbar);
 
-    hToolbar = CreateToolbarEx(hMainWnd, WS_VISIBLE, 1, 16, GetModuleHandleA(NULL), IDB_BITMAP_128x15, btns,
+    hToolbar = pCreateToolbarEx(hMainWnd, WS_VISIBLE, 1, 16, GetModuleHandleA(NULL), IDB_BITMAP_128x15, btns,
         3, -1, 8, 12, 12, sizeof(TBBUTTON));
     CHECK_IMAGELIST(16, 12, 8);
     compare((int)SendMessageA(hToolbar, TB_GETBUTTONSIZE, 0, 0), 0xe0013, "%x");
     DestroyWindow(hToolbar);
 
-    hToolbar = CreateToolbarEx(hMainWnd, WS_VISIBLE, 1, 16, GetModuleHandleA(NULL), IDB_BITMAP_128x15, btns,
+    hToolbar = pCreateToolbarEx(hMainWnd, WS_VISIBLE, 1, 16, GetModuleHandleA(NULL), IDB_BITMAP_128x15, btns,
         3, -1, 8, -1, 12, sizeof(TBBUTTON));
     CHECK_IMAGELIST(16, 16, 8);
     compare((int)SendMessageA(hToolbar, TB_GETBUTTONSIZE, 0, 0), 0xe0017, "%x");
     DestroyWindow(hToolbar);
 
-    hToolbar = CreateToolbarEx(hMainWnd, WS_VISIBLE, 1, 16, GetModuleHandleA(NULL), IDB_BITMAP_128x15, btns,
+    hToolbar = pCreateToolbarEx(hMainWnd, WS_VISIBLE, 1, 16, GetModuleHandleA(NULL), IDB_BITMAP_128x15, btns,
         3, 0, 0, 12, -1, sizeof(TBBUTTON));
     CHECK_IMAGELIST(16, 12, 16);
     compare((int)SendMessageA(hToolbar, TB_GETBUTTONSIZE, 0, 0), 0x160013, "%x");
     DestroyWindow(hToolbar);
 
-    hToolbar = CreateToolbarEx(hMainWnd, WS_VISIBLE, 1, 16, GetModuleHandleA(NULL), IDB_BITMAP_128x15, btns,
+    hToolbar = pCreateToolbarEx(hMainWnd, WS_VISIBLE, 1, 16, GetModuleHandleA(NULL), IDB_BITMAP_128x15, btns,
         3, 0, 0, 0, 12, sizeof(TBBUTTON));
     CHECK_IMAGELIST(16, 16, 16);
     compare((int)SendMessageA(hToolbar, TB_GETBUTTONSIZE, 0, 0), 0x160017, "%x");
@@ -1849,18 +1934,18 @@ static void test_setrows(void)
         MakeButton(buttons+i, 1000+i, TBSTYLE_FLAT | TBSTYLE_CHECKGROUP, 0);
 
     /* Test 1 - 9 buttons */
-    hToolbar = CreateToolbarEx(hMainWnd,
+    hToolbar = pCreateToolbarEx(hMainWnd,
         WS_VISIBLE | WS_CLIPCHILDREN | WS_CHILD | CCS_NORESIZE | CCS_NOPARENTALIGN
         | CCS_NOMOVEY | CCS_TOP,
         0,
         0, NULL, 0,
-        buttons, sizeof(buttons)/sizeof(buttons[0]),
+        buttons, ARRAY_SIZE(buttons),
         20, 20, 0, 0, sizeof(TBBUTTON));
     ok(hToolbar != NULL, "Toolbar creation\n");
     ok(SendMessageA(hToolbar, TB_AUTOSIZE, 0, 0) == 0, "TB_AUTOSIZE failed\n");
 
     /* test setting rows to each of 1-10 with bLarger true and false */
-    for (i=0; i<(sizeof(tbrows_results) / sizeof(tbrows_result_t)); i++) {
+    for (i=0; i<ARRAY_SIZE(tbrows_results); i++) {
         RECT rc;
         int rows;
 
@@ -1968,12 +2053,12 @@ static void test_get_set_style(void)
     MakeButton(buttons+3, 1003, TBSTYLE_SEP|TBSTYLE_GROUP, 0);
     MakeButton(buttons+6, 1006, TBSTYLE_SEP, 0);
 
-    hToolbar = CreateToolbarEx(hMainWnd,
+    hToolbar = pCreateToolbarEx(hMainWnd,
         WS_VISIBLE | WS_CLIPCHILDREN | CCS_TOP |
         WS_CHILD | TBSTYLE_LIST,
         100,
         0, NULL, 0,
-        buttons, sizeof(buttons)/sizeof(buttons[0]),
+        buttons, ARRAY_SIZE(buttons),
         0, 0, 20, 16, sizeof(TBBUTTON));
     ok(hToolbar != NULL, "Toolbar creation\n");
     SendMessageA(hToolbar, TB_ADDSTRINGA, 0, (LPARAM)"test\000");
@@ -2191,7 +2276,7 @@ static void test_TB_GET_SET_EXTENDEDSTYLE(void)
         return;
     }
 
-    for (i = 0; i < sizeof(extended_style_test)/sizeof(extended_style_t); i++)
+    for (i = 0; i < ARRAY_SIZE(extended_style_test); i++)
     {
         ptr = &extended_style_test[i];
 
@@ -2312,7 +2397,7 @@ static void test_save(void)
     params.pszValueName = value;
 
     rebuild_toolbar_with_buttons( &wnd );
-    SendMessageW( wnd, TB_ADDBUTTONSW, sizeof(more_btns) / sizeof(more_btns[0]), (LPARAM)more_btns );
+    SendMessageW(wnd, TB_ADDBUTTONSW, ARRAY_SIZE(more_btns), (LPARAM)more_btns);
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
     res = SendMessageW( wnd, TB_SAVERESTOREW, TRUE, (LPARAM)&params );
@@ -2338,7 +2423,7 @@ static void test_save(void)
     ok( res, "restoring failed\n" );
     ok_sequence(sequences, PARENT_SEQ_INDEX, restore_parent_seq, "restore", FALSE);
     count = SendMessageW( wnd, TB_BUTTONCOUNT, 0, 0 );
-    ok( count == sizeof(expect_btns) / sizeof(expect_btns[0]), "got %d\n", count );
+    ok( count == ARRAY_SIZE(expect_btns), "got %d\n", count );
 
     for (i = 0; i < count; i++)
     {
@@ -2408,6 +2493,39 @@ todo_wine
     DestroyWindow(hwnd);
 }
 
+static void test_imagelist(void)
+{
+    HIMAGELIST imagelist;
+    HWND hwnd = NULL;
+    int ret;
+
+    rebuild_toolbar(&hwnd);
+
+    imagelist = (HIMAGELIST)SendMessageA(hwnd, TB_GETIMAGELIST, 0, 0);
+    ok(imagelist == NULL, "got %p\n", imagelist);
+
+    ret = SendMessageA(hwnd, TB_SETBITMAPSIZE, 0, MAKELONG(16, 16));
+    ok(ret, "got %d\n", ret);
+
+    imagelist = (HIMAGELIST)SendMessageA(hwnd, TB_GETIMAGELIST, 0, 0);
+    ok(imagelist == NULL, "got %p\n", imagelist);
+
+    DestroyWindow(hwnd);
+}
+
+static void init_functions(void)
+{
+    HMODULE hComCtl32 = LoadLibraryA("comctl32.dll");
+
+#define X(f) p##f = (void*)GetProcAddress(hComCtl32, #f);
+    X(CreateToolbarEx);
+    X(ImageList_GetIconSize);
+    X(ImageList_GetImageCount);
+    X(ImageList_LoadImageA);
+    X(ImageList_Destroy);
+#undef X
+}
+
 START_TEST(toolbar)
 {
     WNDCLASSA wc;
@@ -2415,9 +2533,8 @@ START_TEST(toolbar)
     RECT rc;
 
     init_msg_sequences(sequences, NUM_MSG_SEQUENCES);
+    init_functions();
 
-    InitCommonControls();
-  
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.cbClsExtra = 0;
     wc.cbWndExtra = 0;
@@ -2453,6 +2570,7 @@ START_TEST(toolbar)
     test_noresize();
     test_save();
     test_drawtext_flags();
+    test_imagelist();
 
     PostQuitMessage(0);
     while(GetMessageA(&msg,0,0,0)) {

@@ -44,6 +44,12 @@ WINE_DEFAULT_DEBUG_CHANNEL(advapi);
         return FailureCode; \
 }
 
+static LPCSTR debugstr_us( const UNICODE_STRING *us )
+{
+    if (!us) return "(null)";
+    return debugstr_wn(us->Buffer, us->Length / sizeof(WCHAR));
+}
+
 static void dumpLsaAttributes(const LSA_OBJECT_ATTRIBUTES *oa)
 {
     if (oa)
@@ -757,16 +763,64 @@ NTSTATUS WINAPI LsaQueryInformationPolicy(
         break;
         case  PolicyDnsDomainInformation:	/* 12 (0xc) */
         {
-            /* Only the domain name is valid for the local computer.
-             * All other fields are zero.
-             */
-            PPOLICY_DNS_DOMAIN_INFO pinfo;
+            struct
+            {
+                POLICY_DNS_DOMAIN_INFO info;
+                struct
+                {
+                    SID sid;
+                    DWORD sid_subauthority[3];
+                } domain_sid;
+                WCHAR domain_name[256];
+                WCHAR dns_domain_name[256];
+                WCHAR dns_forest_name[256];
+            } *xdi;
+            struct
+            {
+                SID sid;
+                DWORD sid_subauthority[3];
+            } computer_sid;
+            DWORD dwSize;
 
-            pinfo = ADVAPI_GetDomainName(sizeof(*pinfo), offsetof(POLICY_DNS_DOMAIN_INFO, Name));
+            xdi = heap_alloc_zero(sizeof(*xdi));
+            if (!xdi) return STATUS_NO_MEMORY;
 
-            TRACE("setting domain to %s\n", debugstr_w(pinfo->Name.Buffer));
+            dwSize = 256;
+            if (GetComputerNameExW(ComputerNamePhysicalDnsDomain, xdi->domain_name, &dwSize))
+            {
+                WCHAR *dot;
 
-            *Buffer = pinfo;
+                dot = strrchrW(xdi->domain_name, '.');
+                if (dot) *dot = 0;
+                struprW(xdi->domain_name);
+                xdi->info.Name.Buffer = xdi->domain_name;
+                xdi->info.Name.Length = strlenW(xdi->domain_name) * sizeof(WCHAR);
+                xdi->info.Name.MaximumLength = xdi->info.Name.Length + sizeof(WCHAR);
+                TRACE("setting Name to %s\n", debugstr_w(xdi->info.Name.Buffer));
+            }
+
+            dwSize = 256;
+            if (GetComputerNameExW(ComputerNameDnsDomain, xdi->dns_domain_name, &dwSize))
+            {
+                xdi->info.DnsDomainName.Buffer = xdi->dns_domain_name;
+                xdi->info.DnsDomainName.Length = dwSize * sizeof(WCHAR);
+                xdi->info.DnsDomainName.MaximumLength = (dwSize + 1) * sizeof(WCHAR);
+                TRACE("setting DnsDomainName to %s\n", debugstr_w(xdi->info.DnsDomainName.Buffer));
+
+                xdi->info.DnsForestName.Buffer = xdi->dns_domain_name;
+                xdi->info.DnsForestName.Length = dwSize * sizeof(WCHAR);
+                xdi->info.DnsForestName.MaximumLength = (dwSize + 1) * sizeof(WCHAR);
+                TRACE("setting DnsForestName to %s\n", debugstr_w(xdi->info.DnsForestName.Buffer));
+            }
+
+            dwSize = sizeof(xdi->domain_sid);
+            if (ADVAPI_GetComputerSid(&computer_sid.sid) && GetWindowsAccountDomainSid(&computer_sid.sid, &xdi->domain_sid.sid, &dwSize))
+            {
+                xdi->info.Sid = &xdi->domain_sid.sid;
+                TRACE("setting SID to %s\n", debugstr_sid(&xdi->domain_sid.sid));
+            }
+
+            *Buffer = xdi;
         }
         break;
         case  PolicyAuditLogInformation:
@@ -972,4 +1026,49 @@ NTSTATUS WINAPI LsaUnregisterPolicyChangeNotification(
 {
     FIXME("(%d,%p) stub\n", class, event);
     return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ * LsaLookupPrivilegeName [ADVAPI32.@]
+ *
+ */
+NTSTATUS WINAPI LsaLookupPrivilegeName(LSA_HANDLE handle, LUID *luid, LSA_UNICODE_STRING **name)
+{
+    const WCHAR *privnameW;
+    DWORD length;
+    WCHAR *strW;
+
+    TRACE("(%p,%p,%p)\n", handle, luid, name);
+
+    if (!luid || !handle)
+        return STATUS_INVALID_PARAMETER;
+
+    *name = NULL;
+
+    if (!(privnameW = get_wellknown_privilege_name(luid)))
+        return STATUS_NO_SUCH_PRIVILEGE;
+
+    length = strlenW(privnameW);
+    *name = heap_alloc(sizeof(**name) + (length + 1) * sizeof(WCHAR));
+    if (!*name)
+        return STATUS_NO_MEMORY;
+
+    strW = (WCHAR *)(*name + 1);
+    memcpy(strW, privnameW, length * sizeof(WCHAR));
+    strW[length] = 0;
+    RtlInitUnicodeString(*name, strW);
+
+    return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ * LsaLookupPrivilegeDisplayName [ADVAPI32.@]
+ *
+ */
+NTSTATUS WINAPI LsaLookupPrivilegeDisplayName(LSA_HANDLE handle, LSA_UNICODE_STRING *name,
+    LSA_UNICODE_STRING **display_name, SHORT *language)
+{
+    FIXME("(%p, %s, %p, %p)\n", handle, debugstr_us(name), display_name, language);
+
+    return STATUS_NO_SUCH_PRIVILEGE;
 }

@@ -16,8 +16,8 @@
 16 stub SAFEARRAYDESTROY
 17 pascal -ret16 SafeArrayGetDim(ptr) SafeArrayGetDim16
 18 pascal -ret16 SafeArrayGetElemsize(ptr) SafeArrayGetElemsize16
-19 stub SAFEARRAYGETUBOUND
-20 stub SAFEARRAYGETLBOUND
+19 pascal SafeArrayGetUBound(ptr word ptr) SafeArrayGetUBound16
+20 pascal SafeArrayGetLBound(ptr word ptr) SafeArrayGetLBound16
 21 pascal SafeArrayLock(ptr) SafeArrayLock16
 22 pascal SafeArrayUnlock(ptr) SafeArrayUnlock16
 23 pascal SafeArrayAccessData(ptr ptr) SafeArrayAccessData16
@@ -38,7 +38,7 @@
 38 pascal SafeArrayAllocDescriptor(word ptr) SafeArrayAllocDescriptor16
 39 pascal SafeArrayAllocData(ptr) SafeArrayAllocData16
 40 pascal SafeArrayDestroyDescriptor(segptr) SafeArrayDestroyDescriptor16
-41 stub SAFEARRAYDESTROYDATA
+41 pascal SafeArrayDestroyData(ptr) SafeArrayDestroyData16
 42 stub SAFEARRAYREDIM
 43 stub VARI2FROMI4
 44 stub VARI2FROMR4

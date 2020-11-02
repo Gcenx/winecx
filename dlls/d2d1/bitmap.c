@@ -24,20 +24,22 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d2d);
 
-static inline struct d2d_bitmap *impl_from_ID2D1Bitmap(ID2D1Bitmap *iface)
+static inline struct d2d_bitmap *impl_from_ID2D1Bitmap1(ID2D1Bitmap1 *iface)
 {
-    return CONTAINING_RECORD(iface, struct d2d_bitmap, ID2D1Bitmap_iface);
+    return CONTAINING_RECORD(iface, struct d2d_bitmap, ID2D1Bitmap1_iface);
 }
 
-static HRESULT STDMETHODCALLTYPE d2d_bitmap_QueryInterface(ID2D1Bitmap *iface, REFIID iid, void **out)
+static HRESULT STDMETHODCALLTYPE d2d_bitmap_QueryInterface(ID2D1Bitmap1 *iface, REFIID iid, void **out)
 {
     TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
 
-    if (IsEqualGUID(iid, &IID_ID2D1Bitmap)
+    if (IsEqualGUID(iid, &IID_ID2D1Bitmap1)
+            || IsEqualGUID(iid, &IID_ID2D1Bitmap)
+            || IsEqualGUID(iid, &IID_ID2D1Image)
             || IsEqualGUID(iid, &IID_ID2D1Resource)
             || IsEqualGUID(iid, &IID_IUnknown))
     {
-        ID2D1Bitmap_AddRef(iface);
+        ID2D1Bitmap1_AddRef(iface);
         *out = iface;
         return S_OK;
     }
@@ -48,9 +50,9 @@ static HRESULT STDMETHODCALLTYPE d2d_bitmap_QueryInterface(ID2D1Bitmap *iface, R
     return E_NOINTERFACE;
 }
 
-static ULONG STDMETHODCALLTYPE d2d_bitmap_AddRef(ID2D1Bitmap *iface)
+static ULONG STDMETHODCALLTYPE d2d_bitmap_AddRef(ID2D1Bitmap1 *iface)
 {
-    struct d2d_bitmap *bitmap = impl_from_ID2D1Bitmap(iface);
+    struct d2d_bitmap *bitmap = impl_from_ID2D1Bitmap1(iface);
     ULONG refcount = InterlockedIncrement(&bitmap->refcount);
 
     TRACE("%p increasing refcount to %u.\n", iface, refcount);
@@ -58,9 +60,9 @@ static ULONG STDMETHODCALLTYPE d2d_bitmap_AddRef(ID2D1Bitmap *iface)
     return refcount;
 }
 
-static ULONG STDMETHODCALLTYPE d2d_bitmap_Release(ID2D1Bitmap *iface)
+static ULONG STDMETHODCALLTYPE d2d_bitmap_Release(ID2D1Bitmap1 *iface)
 {
-    struct d2d_bitmap *bitmap = impl_from_ID2D1Bitmap(iface);
+    struct d2d_bitmap *bitmap = impl_from_ID2D1Bitmap1(iface);
     ULONG refcount = InterlockedDecrement(&bitmap->refcount);
 
     TRACE("%p decreasing refcount to %u.\n", iface, refcount);
@@ -69,24 +71,24 @@ static ULONG STDMETHODCALLTYPE d2d_bitmap_Release(ID2D1Bitmap *iface)
     {
         ID3D10ShaderResourceView_Release(bitmap->view);
         ID2D1Factory_Release(bitmap->factory);
-        HeapFree(GetProcessHeap(), 0, bitmap);
+        heap_free(bitmap);
     }
 
     return refcount;
 }
 
-static void STDMETHODCALLTYPE d2d_bitmap_GetFactory(ID2D1Bitmap *iface, ID2D1Factory **factory)
+static void STDMETHODCALLTYPE d2d_bitmap_GetFactory(ID2D1Bitmap1 *iface, ID2D1Factory **factory)
 {
-    struct d2d_bitmap *bitmap = impl_from_ID2D1Bitmap(iface);
+    struct d2d_bitmap *bitmap = impl_from_ID2D1Bitmap1(iface);
 
     TRACE("iface %p, factory %p.\n", iface, factory);
 
     ID2D1Factory_AddRef(*factory = bitmap->factory);
 }
 
-static D2D1_SIZE_F * STDMETHODCALLTYPE d2d_bitmap_GetSize(ID2D1Bitmap *iface, D2D1_SIZE_F *size)
+static D2D1_SIZE_F * STDMETHODCALLTYPE d2d_bitmap_GetSize(ID2D1Bitmap1 *iface, D2D1_SIZE_F *size)
 {
-    struct d2d_bitmap *bitmap = impl_from_ID2D1Bitmap(iface);
+    struct d2d_bitmap *bitmap = impl_from_ID2D1Bitmap1(iface);
 
     TRACE("iface %p, size %p.\n", iface, size);
 
@@ -95,9 +97,9 @@ static D2D1_SIZE_F * STDMETHODCALLTYPE d2d_bitmap_GetSize(ID2D1Bitmap *iface, D2
     return size;
 }
 
-static D2D1_SIZE_U * STDMETHODCALLTYPE d2d_bitmap_GetPixelSize(ID2D1Bitmap *iface, D2D1_SIZE_U *pixel_size)
+static D2D1_SIZE_U * STDMETHODCALLTYPE d2d_bitmap_GetPixelSize(ID2D1Bitmap1 *iface, D2D1_SIZE_U *pixel_size)
 {
-    struct d2d_bitmap *bitmap = impl_from_ID2D1Bitmap(iface);
+    struct d2d_bitmap *bitmap = impl_from_ID2D1Bitmap1(iface);
 
     TRACE("iface %p, pixel_size %p.\n", iface, pixel_size);
 
@@ -105,9 +107,9 @@ static D2D1_SIZE_U * STDMETHODCALLTYPE d2d_bitmap_GetPixelSize(ID2D1Bitmap *ifac
     return pixel_size;
 }
 
-static D2D1_PIXEL_FORMAT * STDMETHODCALLTYPE d2d_bitmap_GetPixelFormat(ID2D1Bitmap *iface, D2D1_PIXEL_FORMAT *format)
+static D2D1_PIXEL_FORMAT * STDMETHODCALLTYPE d2d_bitmap_GetPixelFormat(ID2D1Bitmap1 *iface, D2D1_PIXEL_FORMAT *format)
 {
-    struct d2d_bitmap *bitmap = impl_from_ID2D1Bitmap(iface);
+    struct d2d_bitmap *bitmap = impl_from_ID2D1Bitmap1(iface);
 
     TRACE("iface %p, format %p.\n", iface, format);
 
@@ -115,9 +117,9 @@ static D2D1_PIXEL_FORMAT * STDMETHODCALLTYPE d2d_bitmap_GetPixelFormat(ID2D1Bitm
     return format;
 }
 
-static void STDMETHODCALLTYPE d2d_bitmap_GetDpi(ID2D1Bitmap *iface, float *dpi_x, float *dpi_y)
+static void STDMETHODCALLTYPE d2d_bitmap_GetDpi(ID2D1Bitmap1 *iface, float *dpi_x, float *dpi_y)
 {
-    struct d2d_bitmap *bitmap = impl_from_ID2D1Bitmap(iface);
+    struct d2d_bitmap *bitmap = impl_from_ID2D1Bitmap1(iface);
 
     TRACE("iface %p, dpi_x %p, dpi_y %p.\n", iface, dpi_x, dpi_y);
 
@@ -125,7 +127,7 @@ static void STDMETHODCALLTYPE d2d_bitmap_GetDpi(ID2D1Bitmap *iface, float *dpi_x
     *dpi_y = bitmap->dpi_y;
 }
 
-static HRESULT STDMETHODCALLTYPE d2d_bitmap_CopyFromBitmap(ID2D1Bitmap *iface,
+static HRESULT STDMETHODCALLTYPE d2d_bitmap_CopyFromBitmap(ID2D1Bitmap1 *iface,
         const D2D1_POINT_2U *dst_point, ID2D1Bitmap *bitmap, const D2D1_RECT_U *src_rect)
 {
     FIXME("iface %p, dst_point %p, bitmap %p, src_rect %p stub!\n", iface, dst_point, bitmap, src_rect);
@@ -133,7 +135,7 @@ static HRESULT STDMETHODCALLTYPE d2d_bitmap_CopyFromBitmap(ID2D1Bitmap *iface,
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE d2d_bitmap_CopyFromRenderTarget(ID2D1Bitmap *iface,
+static HRESULT STDMETHODCALLTYPE d2d_bitmap_CopyFromRenderTarget(ID2D1Bitmap1 *iface,
         const D2D1_POINT_2U *dst_point, ID2D1RenderTarget *render_target, const D2D1_RECT_U *src_rect)
 {
     FIXME("iface %p, dst_point %p, render_target %p, src_rect %p stub!\n", iface, dst_point, render_target, src_rect);
@@ -141,10 +143,10 @@ static HRESULT STDMETHODCALLTYPE d2d_bitmap_CopyFromRenderTarget(ID2D1Bitmap *if
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE d2d_bitmap_CopyFromMemory(ID2D1Bitmap *iface,
+static HRESULT STDMETHODCALLTYPE d2d_bitmap_CopyFromMemory(ID2D1Bitmap1 *iface,
         const D2D1_RECT_U *dst_rect, const void *src_data, UINT32 pitch)
 {
-    struct d2d_bitmap *bitmap = impl_from_ID2D1Bitmap(iface);
+    struct d2d_bitmap *bitmap = impl_from_ID2D1Bitmap1(iface);
     ID3D10Device *device;
     ID3D10Resource *dst;
     D3D10_BOX box;
@@ -170,7 +172,41 @@ static HRESULT STDMETHODCALLTYPE d2d_bitmap_CopyFromMemory(ID2D1Bitmap *iface,
     return S_OK;
 }
 
-static const struct ID2D1BitmapVtbl d2d_bitmap_vtbl =
+static void STDMETHODCALLTYPE d2d_bitmap_GetColorContext(ID2D1Bitmap1 *iface, ID2D1ColorContext **context)
+{
+    FIXME("iface %p, context %p stub!\n", iface, context);
+}
+
+static D2D1_BITMAP_OPTIONS STDMETHODCALLTYPE d2d_bitmap_GetOptions(ID2D1Bitmap1 *iface)
+{
+    FIXME("iface %p stub!\n", iface);
+
+    return D2D1_BITMAP_OPTIONS_NONE;
+}
+
+static HRESULT STDMETHODCALLTYPE d2d_bitmap_GetSurface(ID2D1Bitmap1 *iface, IDXGISurface **surface)
+{
+    FIXME("iface %p, surface %p stub!\n", iface, surface);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE d2d_bitmap_Map(ID2D1Bitmap1 *iface, D2D1_MAP_OPTIONS options,
+        D2D1_MAPPED_RECT *mapped_rect)
+{
+    FIXME("iface %p, options %#x, mapped_rect %p stub!\n", iface, options, mapped_rect);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE d2d_bitmap_Unmap(ID2D1Bitmap1 *iface)
+{
+    FIXME("iface %p stub!\n", iface);
+
+    return E_NOTIMPL;
+}
+
+static const struct ID2D1Bitmap1Vtbl d2d_bitmap_vtbl =
 {
     d2d_bitmap_QueryInterface,
     d2d_bitmap_AddRef,
@@ -183,6 +219,11 @@ static const struct ID2D1BitmapVtbl d2d_bitmap_vtbl =
     d2d_bitmap_CopyFromBitmap,
     d2d_bitmap_CopyFromRenderTarget,
     d2d_bitmap_CopyFromMemory,
+    d2d_bitmap_GetColorContext,
+    d2d_bitmap_GetOptions,
+    d2d_bitmap_GetSurface,
+    d2d_bitmap_Map,
+    d2d_bitmap_Unmap,
 };
 
 static BOOL format_supported(const D2D1_PIXEL_FORMAT *format)
@@ -210,7 +251,7 @@ static BOOL format_supported(const D2D1_PIXEL_FORMAT *format)
         {DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,   D2D1_ALPHA_MODE_IGNORE       },
     };
 
-    for (i = 0; i < sizeof(supported_formats) / sizeof(*supported_formats); ++i)
+    for (i = 0; i < ARRAY_SIZE(supported_formats); ++i)
     {
         if (supported_formats[i].format == format->format
                 && supported_formats[i].alphaMode == format->alphaMode)
@@ -223,7 +264,7 @@ static BOOL format_supported(const D2D1_PIXEL_FORMAT *format)
 static void d2d_bitmap_init(struct d2d_bitmap *bitmap, ID2D1Factory *factory,
         ID3D10ShaderResourceView *view, D2D1_SIZE_U size, const D2D1_BITMAP_PROPERTIES *desc)
 {
-    bitmap->ID2D1Bitmap_iface.lpVtbl = &d2d_bitmap_vtbl;
+    bitmap->ID2D1Bitmap1_iface.lpVtbl = &d2d_bitmap_vtbl;
     bitmap->refcount = 1;
     ID2D1Factory_AddRef(bitmap->factory = factory);
     ID3D10ShaderResourceView_AddRef(bitmap->view = view);
@@ -285,7 +326,7 @@ HRESULT d2d_bitmap_create(ID2D1Factory *factory, ID3D10Device *device, D2D1_SIZE
         return hr;
     }
 
-    if ((*bitmap = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(**bitmap))))
+    if ((*bitmap = heap_alloc_zero(sizeof(**bitmap))))
     {
         d2d_bitmap_init(*bitmap, factory, view, size, desc);
         TRACE("Created bitmap %p.\n", *bitmap);
@@ -296,7 +337,7 @@ HRESULT d2d_bitmap_create(ID2D1Factory *factory, ID3D10Device *device, D2D1_SIZE
     return *bitmap ? S_OK : E_OUTOFMEMORY;
 }
 
-HRESULT d2d_bitmap_create_shared(ID2D1RenderTarget *render_target, ID3D10Device *target_device,
+HRESULT d2d_bitmap_create_shared(ID2D1DeviceContext *context, ID3D10Device *target_device,
         REFIID iid, void *data, const D2D1_BITMAP_PROPERTIES *desc, struct d2d_bitmap **bitmap)
 {
     D2D1_BITMAP_PROPERTIES d;
@@ -308,7 +349,7 @@ HRESULT d2d_bitmap_create_shared(ID2D1RenderTarget *render_target, ID3D10Device 
         ID3D10Device *device;
         HRESULT hr = S_OK;
 
-        ID2D1RenderTarget_GetFactory(render_target, &factory);
+        ID2D1DeviceContext_GetFactory(context, &factory);
         if (src_impl->factory != factory)
         {
             hr = D2DERR_WRONG_FACTORY;
@@ -339,7 +380,7 @@ HRESULT d2d_bitmap_create_shared(ID2D1RenderTarget *render_target, ID3D10Device 
             goto failed;
         }
 
-        if (!(*bitmap = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(**bitmap))))
+        if (!(*bitmap = heap_alloc_zero(sizeof(**bitmap))))
         {
             hr = E_OUTOFMEMORY;
             goto failed;
@@ -385,7 +426,7 @@ HRESULT d2d_bitmap_create_shared(ID2D1RenderTarget *render_target, ID3D10Device 
             return hr;
         }
 
-        if (!(*bitmap = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(**bitmap))))
+        if (!(*bitmap = heap_alloc_zero(sizeof(**bitmap))))
         {
             ID3D10ShaderResourceView_Release(view);
             return E_OUTOFMEMORY;
@@ -396,7 +437,7 @@ HRESULT d2d_bitmap_create_shared(ID2D1RenderTarget *render_target, ID3D10Device 
         {
             float dpi_x, dpi_y;
 
-            ID2D1RenderTarget_GetDpi(render_target, &dpi_x, &dpi_y);
+            ID2D1DeviceContext_GetDpi(context, &dpi_x, &dpi_y);
             if (d.dpiX == 0.0f)
                 d.dpiX = dpi_x;
             if (d.dpiY == 0.0f)
@@ -413,7 +454,7 @@ HRESULT d2d_bitmap_create_shared(ID2D1RenderTarget *render_target, ID3D10Device 
         pixel_size.width = surface_desc.Width;
         pixel_size.height = surface_desc.Height;
 
-        ID2D1RenderTarget_GetFactory(render_target, &factory);
+        ID2D1DeviceContext_GetFactory(context, &factory);
         d2d_bitmap_init(*bitmap, factory, view, pixel_size, &d);
         ID3D10ShaderResourceView_Release(view);
         ID2D1Factory_Release(factory);
@@ -476,7 +517,7 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(ID2D1Factory *factory, ID3D10Device *d
         return hr;
     }
 
-    for (i = 0, d2d_format = NULL; i < sizeof(format_lookup) / sizeof(*format_lookup); ++i)
+    for (i = 0, d2d_format = NULL; i < ARRAY_SIZE(format_lookup); ++i)
     {
         if (IsEqualGUID(&wic_format, format_lookup[i].wic))
         {
@@ -508,9 +549,11 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(ID2D1Factory *factory, ID3D10Device *d
     }
 
     pitch = ((bpp * size.width) + 15) & ~15;
-    data_size = pitch * size.height;
-    if (!(data = HeapAlloc(GetProcessHeap(), 0, data_size)))
+    if (pitch / bpp < size.width)
         return E_OUTOFMEMORY;
+    if (!(data = heap_calloc(size.height, pitch)))
+        return E_OUTOFMEMORY;
+    data_size = size.height * pitch;
 
     rect.X = 0;
     rect.Y = 0;
@@ -519,13 +562,13 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(ID2D1Factory *factory, ID3D10Device *d
     if (FAILED(hr = IWICBitmapSource_CopyPixels(bitmap_source, &rect, pitch, data_size, data)))
     {
         WARN("Failed to copy bitmap pixels, hr %#x.\n", hr);
-        HeapFree(GetProcessHeap(), 0, data);
+        heap_free(data);
         return hr;
     }
 
     hr = d2d_bitmap_create(factory, device, size, data, pitch, &bitmap_desc, bitmap);
 
-    HeapFree(GetProcessHeap(), 0, data);
+    heap_free(data);
 
     return hr;
 }
@@ -534,6 +577,6 @@ struct d2d_bitmap *unsafe_impl_from_ID2D1Bitmap(ID2D1Bitmap *iface)
 {
     if (!iface)
         return NULL;
-    assert(iface->lpVtbl == &d2d_bitmap_vtbl);
-    return CONTAINING_RECORD(iface, struct d2d_bitmap, ID2D1Bitmap_iface);
+    assert(iface->lpVtbl == (ID2D1BitmapVtbl *)&d2d_bitmap_vtbl);
+    return CONTAINING_RECORD(iface, struct d2d_bitmap, ID2D1Bitmap1_iface);
 }

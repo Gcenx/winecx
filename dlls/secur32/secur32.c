@@ -178,7 +178,7 @@ static PWSTR SECUR32_strdupW(PCWSTR str)
 
     if (str)
     {
-        ret = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(str) + 1) * sizeof(WCHAR));
+        ret = heap_alloc((lstrlenW(str) + 1) * sizeof(WCHAR));
         if (ret)
             lstrcpyW(ret, str);
     }
@@ -197,7 +197,7 @@ PWSTR SECUR32_AllocWideFromMultiByte(PCSTR str)
 
         if (charsNeeded)
         {
-            ret = HeapAlloc(GetProcessHeap(), 0, charsNeeded * sizeof(WCHAR));
+            ret = heap_alloc(charsNeeded * sizeof(WCHAR));
             if (ret)
                 MultiByteToWideChar(CP_ACP, 0, str, -1, ret, charsNeeded);
         }
@@ -220,7 +220,7 @@ PSTR SECUR32_AllocMultiByteFromWide(PCWSTR str)
 
         if (charsNeeded)
         {
-            ret = HeapAlloc(GetProcessHeap(), 0, charsNeeded);
+            ret = heap_alloc(charsNeeded);
             if (ret)
                 WideCharToMultiByte(CP_ACP, 0, str, -1, ret, charsNeeded,
                  NULL, NULL);
@@ -406,7 +406,7 @@ SecureProvider *SECUR32_addProvider(const SecurityFunctionTableA *fnTableA,
 
     if (!providerTable)
     {
-        providerTable = HeapAlloc(GetProcessHeap(), 0, sizeof(SecureProviderTable));
+        providerTable = heap_alloc(sizeof(SecureProviderTable));
         if (!providerTable)
         {
             LeaveCriticalSection(&cs);
@@ -416,7 +416,7 @@ SecureProvider *SECUR32_addProvider(const SecurityFunctionTableA *fnTableA,
         list_init(&providerTable->table);
     }
 
-    ret = HeapAlloc(GetProcessHeap(), 0, sizeof(SecureProvider));
+    ret = heap_alloc(sizeof(SecureProvider));
     if (!ret)
     {
         LeaveCriticalSection(&cs);
@@ -455,7 +455,7 @@ void SECUR32_addPackages(SecureProvider *provider, ULONG toAdd,
 
     if (!packageTable)
     {
-        packageTable = HeapAlloc(GetProcessHeap(), 0, sizeof(SecurePackageTable));
+        packageTable = heap_alloc(sizeof(SecurePackageTable));
         if (!packageTable)
         {
             LeaveCriticalSection(&cs);
@@ -468,7 +468,7 @@ void SECUR32_addPackages(SecureProvider *provider, ULONG toAdd,
         
     for (i = 0; i < toAdd; i++)
     {
-        SecurePackage *package = HeapAlloc(GetProcessHeap(), 0, sizeof(SecurePackage));
+        SecurePackage *package = heap_alloc(sizeof(SecurePackage));
         if (!package)
             continue;
 
@@ -564,7 +564,8 @@ static void SECUR32_initializeProviders(void)
     /* First load built-in providers */
     SECUR32_initSchannelSP();
     SECUR32_initNTLMSP();
-    SECUR32_initKerberosSP();
+    /* Load SSP/AP packages (Kerberos and others) */
+    load_auth_packages();
     /* Load the Negotiate provider last so apps stumble over the working NTLM
      * provider first. Attempting to fix bug #16905 while keeping the
      * application reported on wine-users on 2006-09-12 working. */
@@ -684,12 +685,12 @@ static void SECUR32_freeProviders(void)
         LIST_FOR_EACH_ENTRY_SAFE(package, package_next, &packageTable->table,
                                  SecurePackage, entry)
         {
-            HeapFree(GetProcessHeap(), 0, package->infoW.Name);
-            HeapFree(GetProcessHeap(), 0, package->infoW.Comment);
-            HeapFree(GetProcessHeap(), 0, package);
+            heap_free(package->infoW.Name);
+            heap_free(package->infoW.Comment);
+            heap_free(package);
         }
 
-        HeapFree(GetProcessHeap(), 0, packageTable);
+        heap_free(packageTable);
         packageTable = NULL;
     }
 
@@ -699,13 +700,13 @@ static void SECUR32_freeProviders(void)
         LIST_FOR_EACH_ENTRY_SAFE(provider, provider_next, &providerTable->table,
                                  SecureProvider, entry)
         {
-            HeapFree(GetProcessHeap(), 0, provider->moduleName);
+            heap_free(provider->moduleName);
             if (provider->lib)
                 FreeLibrary(provider->lib);
-            HeapFree(GetProcessHeap(), 0, provider);
+            heap_free(provider);
         }
 
-        HeapFree(GetProcessHeap(), 0, providerTable);
+        heap_free(providerTable);
         providerTable = NULL;
     }
 
@@ -722,8 +723,7 @@ static void SECUR32_freeProviders(void)
  */
 SECURITY_STATUS WINAPI FreeContextBuffer(PVOID pv)
 {
-    HeapFree(GetProcessHeap(), 0, pv);
-
+    heap_free(pv);
     return SEC_E_OK;
 }
 
@@ -755,7 +755,7 @@ SECURITY_STATUS WINAPI EnumerateSecurityPackagesW(PULONG pcPackages,
         }
         if (bytesNeeded)
         {
-            *ppPackageInfo = HeapAlloc(GetProcessHeap(), 0, bytesNeeded);
+            *ppPackageInfo = heap_alloc(bytesNeeded);
             if (*ppPackageInfo)
             {
                 ULONG i = 0;
@@ -820,7 +820,7 @@ static PSecPkgInfoA thunk_PSecPkgInfoWToA(ULONG cPackages,
                 bytesNeeded += WideCharToMultiByte(CP_ACP, 0, info[i].Comment,
                  -1, NULL, 0, NULL, NULL);
         }
-        ret = HeapAlloc(GetProcessHeap(), 0, bytesNeeded);
+        ret = heap_alloc(bytesNeeded);
         if (ret)
         {
             PSTR nextString;
@@ -921,9 +921,11 @@ BOOLEAN WINAPI GetComputerObjectNameA(
     BOOLEAN rc;
     LPWSTR bufferW = NULL;
     ULONG sizeW = *nSize;
+
     TRACE("(%d %p %p)\n", NameFormat, lpNameBuffer, nSize);
+
     if (lpNameBuffer) {
-        bufferW = HeapAlloc(GetProcessHeap(), 0, sizeW * sizeof(WCHAR));
+        bufferW = heap_alloc(sizeW * sizeof(WCHAR));
         if (bufferW == NULL) {
             SetLastError(ERROR_NOT_ENOUGH_MEMORY);
             return FALSE;
@@ -937,7 +939,7 @@ BOOLEAN WINAPI GetComputerObjectNameA(
     }
     else
         *nSize = sizeW;
-    HeapFree(GetProcessHeap(), 0, bufferW);
+    heap_free(bufferW);
     return rc;
 }
 
@@ -952,6 +954,7 @@ BOOLEAN WINAPI GetComputerObjectNameW(
     PPOLICY_DNS_DOMAIN_INFO domainInfo;
     NTSTATUS ntStatus;
     BOOLEAN status;
+
     TRACE("(%d %p %p)\n", NameFormat, lpNameBuffer, nSize);
 
     if (NameFormat == NameUnknown)
@@ -992,33 +995,30 @@ BOOLEAN WINAPI GetComputerObjectNameW(
         case NameSamCompatible:
             {
                 WCHAR name[MAX_COMPUTERNAME_LENGTH + 1];
-                DWORD size = sizeof(name)/sizeof(name[0]);
+                DWORD size = ARRAY_SIZE(name);
                 if (GetComputerNameW(name, &size))
                 {
                     DWORD len = domainInfo->Name.Length + size + 3;
-                    if (lpNameBuffer)
+                    if (lpNameBuffer && *nSize >= len)
                     {
-                        if (*nSize < len)
+                        WCHAR bs[] = { '\\', 0 };
+                        WCHAR ds[] = { '$', 0 };
+                        if (domainInfo->Name.Buffer)
                         {
-                            *nSize = len;
-                            SetLastError(ERROR_INSUFFICIENT_BUFFER);
-                            status = FALSE;
-                        }
-                        else
-                        {
-                            WCHAR bs[] = { '\\', 0 };
-                            WCHAR ds[] = { '$', 0 };
                             lstrcpyW(lpNameBuffer, domainInfo->Name.Buffer);
                             lstrcatW(lpNameBuffer, bs);
-                            lstrcatW(lpNameBuffer, name);
-                            lstrcatW(lpNameBuffer, ds);
-                            status = TRUE;
                         }
+                        else
+                            *lpNameBuffer = 0;
+                        lstrcatW(lpNameBuffer, name);
+                        lstrcatW(lpNameBuffer, ds);
+                        status = TRUE;
                     }
                     else	/* just requesting length required */
                     {
                         *nSize = len;
-                        status = TRUE;
+                        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+                        status = FALSE;
                     }
                 }
                 else
@@ -1029,6 +1029,64 @@ BOOLEAN WINAPI GetComputerObjectNameW(
             }
             break;
         case NameFullyQualifiedDN:
+        {
+            static const WCHAR cnW[] = { 'C','N','=',0 };
+            static const WCHAR ComputersW[] = { 'C','N','=','C','o','m','p','u','t','e','r','s',0 };
+            static const WCHAR dcW[] = { 'D','C','=',0 };
+            static const WCHAR commaW[] = { ',',0 };
+            WCHAR name[MAX_COMPUTERNAME_LENGTH + 1];
+            DWORD len, size;
+            WCHAR *suffix;
+
+            size = ARRAY_SIZE(name);
+            if (!GetComputerNameW(name, &size))
+            {
+                status = FALSE;
+                break;
+            }
+
+            len = strlenW(cnW) + size + 1 + strlenW(ComputersW) + 1 + strlenW(dcW);
+            if (domainInfo->DnsDomainName.Buffer)
+            {
+                suffix = strrchrW(domainInfo->DnsDomainName.Buffer, '.');
+                if (suffix)
+                {
+                    *suffix++ = 0;
+                    len += 1 + strlenW(dcW) + strlenW(suffix);
+                }
+                len += strlenW(domainInfo->DnsDomainName.Buffer);
+            }
+            else
+                suffix = NULL;
+
+            if (lpNameBuffer && *nSize > len)
+            {
+                lstrcpyW(lpNameBuffer, cnW);
+                lstrcatW(lpNameBuffer, name);
+                lstrcatW(lpNameBuffer, commaW);
+                lstrcatW(lpNameBuffer, ComputersW);
+                if (domainInfo->DnsDomainName.Buffer)
+                {
+                    lstrcatW(lpNameBuffer, commaW);
+                    lstrcatW(lpNameBuffer, dcW);
+                    lstrcatW(lpNameBuffer, domainInfo->DnsDomainName.Buffer);
+                    if (suffix)
+                    {
+                        lstrcatW(lpNameBuffer, commaW);
+                        lstrcatW(lpNameBuffer, dcW);
+                        lstrcatW(lpNameBuffer, suffix);
+                    }
+                }
+                status = TRUE;
+            }
+            else /* just requesting length required */
+            {
+                SetLastError(ERROR_INSUFFICIENT_BUFFER);
+                status = FALSE;
+            }
+            *nSize = len + 1;
+            break;
+        }
         case NameDisplay:
         case NameUniqueId:
         case NameCanonical:
@@ -1080,7 +1138,7 @@ BOOLEAN WINAPI GetUserNameExA(
     ULONG sizeW = *nSize;
     TRACE("(%d %p %p)\n", NameFormat, lpNameBuffer, nSize);
     if (lpNameBuffer) {
-        bufferW = HeapAlloc(GetProcessHeap(), 0, sizeW * sizeof(WCHAR));
+        bufferW = heap_alloc(sizeW * sizeof(WCHAR));
         if (bufferW == NULL) {
             SetLastError(ERROR_NOT_ENOUGH_MEMORY);
             return FALSE;
@@ -1103,7 +1161,7 @@ BOOLEAN WINAPI GetUserNameExA(
     }
     else
         *nSize = sizeW;
-    HeapFree(GetProcessHeap(), 0, bufferW);
+    heap_free(bufferW);
     return rc;
 }
 

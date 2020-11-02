@@ -138,7 +138,7 @@ static HRESULT RuntimeHost_GetDefaultDomain(RuntimeHost *This, const WCHAR *conf
 
     if (!config_path)
     {
-        DWORD len = sizeof(config_dir)/sizeof(*config_dir);
+        DWORD len = ARRAY_SIZE(config_dir);
 
         static const WCHAR machine_configW[] = {'\\','C','O','N','F','I','G','\\','m','a','c','h','i','n','e','.','c','o','n','f','i','g',0};
 
@@ -159,7 +159,7 @@ static HRESULT RuntimeHost_GetDefaultDomain(RuntimeHost *This, const WCHAR *conf
         goto end;
     }
 
-    GetModuleFileNameW(NULL, base_dir, sizeof(base_dir) / sizeof(*base_dir));
+    GetModuleFileNameW(NULL, base_dir, ARRAY_SIZE(base_dir));
     base_dirA = WtoA(base_dir);
     if (!base_dirA)
     {
@@ -1457,7 +1457,7 @@ __int32 WINAPI _CorExeMain(void)
 
             if (assembly)
             {
-                mono_trace_set_assembly(assembly);
+                mono_callspec_set_assembly(assembly);
 
                 exit_code = mono_jit_exec(domain, assembly, argc, argv);
             }
@@ -1607,7 +1607,6 @@ HRESULT RuntimeHost_GetInterface(RuntimeHost *This, REFCLSID clsid, REFIID riid,
 }
 
 #define CHARS_IN_GUID 39
-#define ARRAYSIZE(array) (sizeof(array)/sizeof((array)[0]))
 
 HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
 {
@@ -1618,7 +1617,7 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
     static const WCHAR wszCLSIDSlash[] = {'C','L','S','I','D','\\',0};
     static const WCHAR wszInprocServer32[] = {'\\','I','n','p','r','o','c','S','e','r','v','e','r','3','2',0};
     static const WCHAR wszDLL[] = {'.','d','l','l',0};
-    WCHAR path[CHARS_IN_GUID + ARRAYSIZE(wszCLSIDSlash) + ARRAYSIZE(wszInprocServer32) - 1];
+    WCHAR path[CHARS_IN_GUID + ARRAY_SIZE(wszCLSIDSlash) + ARRAY_SIZE(wszInprocServer32) - 1];
     MonoDomain *domain;
     MonoAssembly *assembly;
     ICLRRuntimeInfo *info = NULL;
@@ -1675,7 +1674,7 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
         if (res != ERROR_SUCCESS || numKeys == 0)
             goto cleanup;
         numKeys--;
-        keyLength = sizeof(subkeyName) / sizeof(WCHAR);
+        keyLength = ARRAY_SIZE(subkeyName);
         res = RegEnumKeyExW(key, numKeys, subkeyName, &keyLength, 0, 0, 0, 0);
         if (res != ERROR_SUCCESS)
             goto cleanup;

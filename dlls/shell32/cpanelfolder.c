@@ -100,9 +100,10 @@ static inline ICPanelImpl *impl_from_IShellExecuteHookA(IShellExecuteHookA *ifac
 *   IShellFolder [ControlPanel] implementation
 */
 
-static const shvheader ControlPanelSFHeader[] = {
-    {IDS_SHV_COLUMN8, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 15},/*FIXME*/
-    {IDS_SHV_COLUMN9, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 80},/*FIXME*/
+static const shvheader ControlPanelSFHeader[] =
+{
+    { &FMTID_Storage, PID_STG_NAME, IDS_SHV_COLUMN8, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 15 },/*FIXME*/
+    { NULL, 0, IDS_SHV_COLUMN9, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 80 },/*FIXME*/
 };
 
 #define CONROLPANELSHELLVIEWCOLUMNS 2
@@ -710,12 +711,13 @@ static HRESULT WINAPI ISF_ControlPanel_fnSetNameOf(IShellFolder2 *iface, HWND hw
     return E_FAIL;
 }
 
-static HRESULT WINAPI ISF_ControlPanel_fnGetDefaultSearchGUID(IShellFolder2 *iface, GUID *pguid)
+static HRESULT WINAPI ISF_ControlPanel_fnGetDefaultSearchGUID(IShellFolder2 *iface, GUID *guid)
 {
     ICPanelImpl *This = impl_from_IShellFolder2(iface);
-    FIXME("(%p)\n", This);
+    TRACE("(%p)->(%p)\n", This, guid);
     return E_NOTIMPL;
 }
+
 static HRESULT WINAPI ISF_ControlPanel_fnEnumSearches(IShellFolder2 *iface,
         IEnumExtraSearch **ppenum)
 {
@@ -723,17 +725,17 @@ static HRESULT WINAPI ISF_ControlPanel_fnEnumSearches(IShellFolder2 *iface,
     FIXME("(%p)\n", This);
     return E_NOTIMPL;
 }
-static HRESULT WINAPI ISF_ControlPanel_fnGetDefaultColumn(IShellFolder2 *iface, DWORD dwRes,
-        ULONG *pSort, ULONG *pDisplay)
+
+static HRESULT WINAPI ISF_ControlPanel_fnGetDefaultColumn(IShellFolder2 *iface, DWORD reserved,
+        ULONG *sort, ULONG *display)
 {
     ICPanelImpl *This = impl_from_IShellFolder2(iface);
 
-    TRACE("(%p)\n", This);
+    TRACE("(%p)->(%#x %p %p)\n", This, reserved, sort, display);
 
-    if (pSort) *pSort = 0;
-    if (pDisplay) *pDisplay = 0;
-    return S_OK;
+    return E_NOTIMPL;
 }
+
 static HRESULT WINAPI ISF_ControlPanel_fnGetDefaultColumnState(IShellFolder2 *iface, UINT iColumn,
         DWORD *pcsFlags)
 {

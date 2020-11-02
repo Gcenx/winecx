@@ -2,9 +2,6 @@
 101 stub -noname ClusterSplOpen
 102 stub -noname ClusterSplClose
 103 stub -noname ClusterSplIsAlive
-104 stub PerfClose
-105 stub PerfCollect
-106 stub PerfOpen
 201 stdcall GetDefaultPrinterA(ptr ptr)
 202 stdcall SetDefaultPrinterA(str)
 203 stdcall GetDefaultPrinterW(ptr ptr)
@@ -151,6 +148,9 @@
 @ stdcall IsValidDevmodeW(ptr long)
 @ stdcall OpenPrinterA(str ptr ptr)
 @ stdcall OpenPrinterW(wstr ptr ptr)
+@ stdcall PerfClose()
+@ stdcall PerfCollect(wstr ptr ptr ptr)
+@ stdcall PerfOpen(wstr)
 @ stub PlayGdiScriptOnPrinterIC
 @ stub PrinterMessageBoxA
 @ stub PrinterMessageBoxW

@@ -23,33 +23,24 @@
 #include <winternl.h>
 #include <commctrl.h>
 #include <stdlib.h>
-#include <stdio.h>
 
 #include "main.h"
-
+#include "wine/heap.h"
 #include "wine/unicode.h"
+
 static INT Image_String;
 static INT Image_Binary;
-
-typedef struct tagLINE_INFO
-{
-    DWORD dwValType;
-    LPWSTR name;
-    void* val;
-    size_t val_len;
-} LINE_INFO;
 
 /*******************************************************************************
  * Global and Local Variables:
  */
 
-static WNDPROC g_orgListWndProc;
-static DWORD g_columnToSort = ~0U;
-static BOOL  g_invertSort = FALSE;
-static LPWSTR g_valueName;
-static LPWSTR g_currentPath;
-static HKEY g_currentRootKey;
-static WCHAR g_szValueNotSet[64];
+DWORD   g_columnToSort = ~0U;
+BOOL    g_invertSort = FALSE;
+WCHAR  *g_currentPath;
+HKEY    g_currentRootKey;
+static  WCHAR *g_valueName;
+static  WCHAR g_szValueNotSet[64];
 
 #define MAX_LIST_COLUMNS (IDS_LIST_COLUMN_LAST - IDS_LIST_COLUMN_FIRST + 1)
 static int default_column_widths[MAX_LIST_COLUMNS] = { 200, 175, 400 };
@@ -57,30 +48,27 @@ static int column_alignment[MAX_LIST_COLUMNS] = { LVCFMT_LEFT, LVCFMT_LEFT, LVCF
 
 LPWSTR GetItemText(HWND hwndLV, UINT item)
 {
-    LPWSTR newStr, curStr;
+    WCHAR *curStr;
     unsigned int maxLen = 128;
     if (item == 0) return NULL; /* first item is ALWAYS a default */
 
-    curStr = HeapAlloc(GetProcessHeap(), 0, maxLen * sizeof(WCHAR));
-    if (!curStr) return NULL;
+    curStr = heap_xalloc(maxLen * sizeof(WCHAR));
     do {
         ListView_GetItemTextW(hwndLV, item, 0, curStr, maxLen);
         if (lstrlenW(curStr) < maxLen - 1) return curStr;
         maxLen *= 2;
-        newStr = HeapReAlloc(GetProcessHeap(), 0, curStr, maxLen * sizeof(WCHAR));
-        if (!newStr) break;
-        curStr = newStr;
+        curStr = heap_xrealloc(curStr, maxLen * sizeof(WCHAR));
     } while (TRUE);
-    HeapFree(GetProcessHeap(), 0, curStr);
+    heap_free(curStr);
     return NULL;
 }
 
-LPCWSTR GetValueName(HWND hwndLV)
+WCHAR *GetValueName(HWND hwndLV)
 {
     INT item;
 
     if (g_valueName != LPSTR_TEXTCALLBACKW)
-        HeapFree(GetProcessHeap(), 0,  g_valueName);
+        heap_free(g_valueName);
     g_valueName = NULL;
 
     item = SendMessageW(hwndLV, LVM_GETNEXTITEM, -1, MAKELPARAM(LVNI_FOCUSED, 0));
@@ -89,6 +77,16 @@ LPCWSTR GetValueName(HWND hwndLV)
     g_valueName = GetItemText(hwndLV, item);
 
     return g_valueName;
+}
+
+BOOL update_listview_path(const WCHAR *path)
+{
+    heap_free(g_currentPath);
+
+    g_currentPath = heap_xalloc((lstrlenW(path) + 1) * sizeof(WCHAR));
+    lstrcpyW(g_currentPath, path);
+
+    return TRUE;
 }
 
 /* convert '\0' separated string list into ',' separated string list */
@@ -109,37 +107,78 @@ static void MakeMULTISZDisplayable(LPWSTR multi)
 /*******************************************************************************
  * Local module support methods
  */
-static void AddEntryToList(HWND hwndLV, LPWSTR Name, DWORD dwValType,
-    void* ValBuf, DWORD dwCount, BOOL bHighlight)
+void format_value_data(HWND hwndLV, int index, DWORD type, void *data, DWORD size)
 {
-    LINE_INFO* linfo;
-    LVITEMW item;
+    switch (type)
+    {
+        case REG_SZ:
+        case REG_EXPAND_SZ:
+            ListView_SetItemTextW(hwndLV, index, 2, data ? data : g_szValueNotSet);
+            break;
+        case REG_DWORD:
+        case REG_DWORD_BIG_ENDIAN:
+        {
+            DWORD value = *(DWORD *)data;
+            WCHAR buf[64];
+            WCHAR format[] = {'0','x','%','0','8','x',' ','(','%','u',')',0};
+            if (type == REG_DWORD_BIG_ENDIAN)
+                value = RtlUlongByteSwap(value);
+            wsprintfW(buf, format, value, value);
+            ListView_SetItemTextW(hwndLV, index, 2, buf);
+            break;
+        }
+        case REG_MULTI_SZ:
+            MakeMULTISZDisplayable(data);
+            ListView_SetItemTextW(hwndLV, index, 2, data);
+            break;
+        case REG_BINARY:
+        case REG_NONE:
+        default:
+        {
+            unsigned int i;
+            BYTE *pData = data;
+            WCHAR *strBinary = heap_xalloc(size * sizeof(WCHAR) * 3 + sizeof(WCHAR));
+            WCHAR format[] = {'%','0','2','X',' ',0};
+            for (i = 0; i < size; i++)
+                wsprintfW( strBinary + i*3, format, pData[i] );
+            strBinary[size * 3] = 0;
+            ListView_SetItemTextW(hwndLV, index, 2, strBinary);
+            heap_free(strBinary);
+            break;
+        }
+    }
+}
+
+int AddEntryToList(HWND hwndLV, WCHAR *Name, DWORD dwValType, void *ValBuf, DWORD dwCount, int pos)
+{
+    LINE_INFO *linfo;
+    LVITEMW item = { 0 };
     int index;
 
-    linfo = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(LINE_INFO) + dwCount);
+    linfo = heap_xalloc(sizeof(LINE_INFO));
     linfo->dwValType = dwValType;
     linfo->val_len = dwCount;
-    CopyMemory(&linfo[1], ValBuf, dwCount);
-    
+
     if (Name)
     {
-        linfo->name = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(Name) + 1) * sizeof(WCHAR));
+        linfo->name = heap_xalloc((lstrlenW(Name) + 1) * sizeof(WCHAR));
         lstrcpyW(linfo->name, Name);
-    } else
-    {
-        linfo->name = NULL;
     }
+    else linfo->name = NULL;
+
+    if (ValBuf && dwCount)
+    {
+        linfo->val = heap_xalloc(dwCount);
+        memcpy(linfo->val, ValBuf, dwCount);
+    }
+    else linfo->val = NULL;
 
     item.mask = LVIF_TEXT | LVIF_PARAM | LVIF_STATE | LVIF_IMAGE;
-    item.iItem = SendMessageW(hwndLV, LVM_GETITEMCOUNT, 0, 0);
-    item.iSubItem = 0;
-    item.state = 0;
+    item.iItem = (pos == -1) ? SendMessageW(hwndLV, LVM_GETITEMCOUNT, 0, 0) : pos;
     item.stateMask = LVIS_FOCUSED | LVIS_SELECTED;
     item.pszText = Name ? Name : LPSTR_TEXTCALLBACKW;
     item.cchTextMax = Name ? lstrlenW(item.pszText) : 0;
-    if (bHighlight) {
-        item.stateMask = item.state = LVIS_FOCUSED;
-    }
+
     switch (dwValType)
     {
     case REG_SZ:
@@ -153,58 +192,9 @@ static void AddEntryToList(HWND hwndLV, LPWSTR Name, DWORD dwValType,
     }
     item.lParam = (LPARAM)linfo;
 
-#if (_WIN32_IE >= 0x0300)
-    item.iIndent = 0;
-#endif
-
-    index = ListView_InsertItemW(hwndLV, &item);
-    if (index != -1) {
-        switch (dwValType) {
-        case REG_SZ:
-        case REG_EXPAND_SZ:
-            if (ValBuf) {
-                ListView_SetItemTextW(hwndLV, index, 2, ValBuf);
-            } else {
-                ListView_SetItemTextW(hwndLV, index, 2, g_szValueNotSet);
-            }
-            break;
-        case REG_DWORD:
-        case REG_DWORD_BIG_ENDIAN: {
-                DWORD value = *(DWORD*)ValBuf;
-                WCHAR buf[64];
-                WCHAR format[] = {'0','x','%','0','8','x',' ','(','%','u',')',0};
-                if (dwValType == REG_DWORD_BIG_ENDIAN)
-                    value = RtlUlongByteSwap(value);
-                wsprintfW(buf, format, value, value);
-                ListView_SetItemTextW(hwndLV, index, 2, buf);
-            }
-            break;
-        case REG_BINARY:
-        case REG_NONE: {
-                unsigned int i;
-                LPBYTE pData = ValBuf;
-                LPWSTR strBinary = HeapAlloc(GetProcessHeap(), 0, dwCount * sizeof(WCHAR) * 3 + sizeof(WCHAR));
-                WCHAR format[] = {'%','0','2','X',' ',0};
-                for (i = 0; i < dwCount; i++)
-                    wsprintfW( strBinary + i*3, format, pData[i] );
-                strBinary[dwCount * 3] = 0;
-                ListView_SetItemTextW(hwndLV, index, 2, strBinary);
-                HeapFree(GetProcessHeap(), 0, strBinary);
-            }
-            break;
-        case REG_MULTI_SZ:
-            MakeMULTISZDisplayable(ValBuf);
-            ListView_SetItemTextW(hwndLV, index, 2, ValBuf);
-            break;
-        default:
-          {
-            WCHAR szText[128];
-            LoadStringW(hInst, IDS_REGISTRY_VALUE_CANT_DISPLAY, szText, COUNT_OF(szText));
-            ListView_SetItemTextW(hwndLV, index, 2, szText);
-            break;
-          }
-        }
-    }
+    if ((index = ListView_InsertItemW(hwndLV, &item)) != -1)
+        format_value_data(hwndLV, index, dwValType, ValBuf, dwCount);
+    return index;
 }
 
 static BOOL InitListViewImageList(HWND hWndListView)
@@ -250,15 +240,14 @@ static BOOL CreateListColumns(HWND hWndListView)
         lvC.iSubItem = index;
         lvC.cx = default_column_widths[index];
         lvC.fmt = column_alignment[index];
-        LoadStringW(hInst, IDS_LIST_COLUMN_FIRST + index, szText, sizeof(szText)/sizeof(WCHAR));
+        LoadStringW(hInst, IDS_LIST_COLUMN_FIRST + index, szText, ARRAY_SIZE(szText));
         if (ListView_InsertColumnW(hWndListView, index, &lvC) == -1) return FALSE;
     }
     return TRUE;
 }
 
 /* OnGetDispInfo - processes the LVN_GETDISPINFO notification message.  */
-
-static void OnGetDispInfo(NMLVDISPINFOW* plvdi)
+void OnGetDispInfo(NMLVDISPINFOW *plvdi)
 {
     static WCHAR buffer[200];
     static WCHAR reg_szT[]               = {'R','E','G','_','S','Z',0},
@@ -281,7 +270,10 @@ static void OnGetDispInfo(NMLVDISPINFOW* plvdi)
         plvdi->item.pszText = g_pszDefaultValueName;
         break;
     case 1:
-        switch (((LINE_INFO*)plvdi->item.lParam)->dwValType) {
+    {
+        DWORD data_type = ((LINE_INFO *)plvdi->item.lParam)->dwValType;
+
+        switch (data_type) {
         case REG_SZ:
             plvdi->item.pszText = reg_szT;
             break;
@@ -311,14 +303,14 @@ static void OnGetDispInfo(NMLVDISPINFOW* plvdi)
             break;
         default:
           {
-            WCHAR szUnknownFmt[64];
-            LoadStringW(hInst, IDS_REGISTRY_UNKNOWN_TYPE, szUnknownFmt, COUNT_OF(szUnknownFmt));
-            wsprintfW(buffer, szUnknownFmt, plvdi->item.lParam);
+            WCHAR fmt[] = {'0','x','%','x',0};
+            wsprintfW(buffer, fmt, data_type);
             plvdi->item.pszText = buffer;
             break;
           }
         }
         break;
+    }
     case 2:
         plvdi->item.pszText = g_szValueNotSet;
         break;
@@ -328,7 +320,7 @@ static void OnGetDispInfo(NMLVDISPINFOW* plvdi)
     }
 }
 
-static int CALLBACK CompareFunc(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort)
+int CALLBACK CompareFunc(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort)
 {
     LINE_INFO*l, *r;
     l = (LINE_INFO*)lParam1;
@@ -360,119 +352,6 @@ HWND StartValueRename(HWND hwndLV)
     return (HWND)SendMessageW(hwndLV, LVM_EDITLABELW, item, 0);
 }
 
-static BOOL _CmdWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    switch (LOWORD(wParam)) {
-        /*    case ID_FILE_OPEN: */
-        /*        break; */
-    default:
-        return FALSE;
-    }
-    return TRUE;
-}
-
-static LRESULT CALLBACK ListWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    switch (message) {
-    case WM_COMMAND:
-        if (!_CmdWndProc(hWnd, message, wParam, lParam)) {
-            return CallWindowProcW(g_orgListWndProc, hWnd, message, wParam, lParam);
-        }
-        break;
-    case WM_NOTIFY_REFLECT:
-        switch (((LPNMHDR)lParam)->code) {
-	
-        case LVN_BEGINLABELEDITW:
-            if (!((NMLVDISPINFOW *)lParam)->item.iItem)
-                return 1;
-            return 0;
-        case LVN_GETDISPINFOW:
-            OnGetDispInfo((NMLVDISPINFOW*)lParam);
-            break;
-        case LVN_COLUMNCLICK:
-            if (g_columnToSort == ((LPNMLISTVIEW)lParam)->iSubItem)
-                g_invertSort = !g_invertSort;
-            else {
-                g_columnToSort = ((LPNMLISTVIEW)lParam)->iSubItem;
-                g_invertSort = FALSE;
-            }
-                    
-            SendMessageW(hWnd, LVM_SORTITEMS, (WPARAM)hWnd, (LPARAM)CompareFunc);
-            break;
-	case LVN_ENDLABELEDITW: {
-	        LPNMLVDISPINFOW dispInfo = (LPNMLVDISPINFOW)lParam;
-		LPWSTR oldName = GetItemText(hWnd, dispInfo->item.iItem);
-                LONG ret;
-                if (!oldName) return -1; /* cannot rename a default value */
-	        ret = RenameValue(hWnd, g_currentRootKey, g_currentPath, oldName, dispInfo->item.pszText);
-		if (ret)
-                {
-                    RefreshListView(hWnd, g_currentRootKey, g_currentPath, dispInfo->item.pszText);
-                }
-		HeapFree(GetProcessHeap(), 0, oldName);
-		return 0;
-	    }
-        case NM_RETURN: {
-            int cnt = SendMessageW(hWnd, LVM_GETNEXTITEM, -1, MAKELPARAM(LVNI_FOCUSED | LVNI_SELECTED, 0));
-            if (cnt != -1)
-                SendMessageW(hFrameWnd, WM_COMMAND, ID_EDIT_MODIFY, 0);
-            }
-            break;
-        case NM_DBLCLK: {
-                NMITEMACTIVATE* nmitem = (LPNMITEMACTIVATE)lParam;
-                LVHITTESTINFO info;
-
-                /* if (nmitem->hdr.hwndFrom != hWnd) break; unnecessary because of WM_NOTIFY_REFLECT */
-                /*            if (nmitem->hdr.idFrom != IDW_LISTVIEW) break;  */
-                /*            if (nmitem->hdr.code != ???) break;  */
-#ifdef _MSC_VER
-                switch (nmitem->uKeyFlags) {
-                case LVKF_ALT:     /*  The ALT key is pressed.   */
-                    /* properties dialog box ? */
-                    break;
-                case LVKF_CONTROL: /*  The CTRL key is pressed. */
-                    /* run dialog box for providing parameters... */
-                    break;
-                case LVKF_SHIFT:   /*  The SHIFT key is pressed.    */
-                    break;
-                }
-#endif
-                info.pt.x = nmitem->ptAction.x;
-                info.pt.y = nmitem->ptAction.y;
-                if (SendMessageW(hWnd, LVM_HITTEST, 0, (LPARAM)&info) != -1) {
-                    LVITEMW item;
-
-                    item.state = 0;
-                    item.stateMask = LVIS_FOCUSED | LVIS_SELECTED;
-                    SendMessageW(hWnd, LVM_SETITEMSTATE, (UINT)-1, (LPARAM)&item);
-
-                    item.state = LVIS_FOCUSED | LVIS_SELECTED;
-                    item.stateMask = LVIS_FOCUSED | LVIS_SELECTED;
-                    SendMessageW(hWnd, LVM_SETITEMSTATE, info.iItem, (LPARAM)&item);
-
-                    SendMessageW(hFrameWnd, WM_COMMAND, ID_EDIT_MODIFY, 0);
-                }
-            }
-            break;
-
-        default:
-            return 0; /* shouldn't call default ! */
-        }
-        break;
-    case WM_CONTEXTMENU: {
-        int cnt = SendMessageW(hWnd, LVM_GETNEXTITEM, -1, MAKELPARAM(LVNI_SELECTED, 0));
-        TrackPopupMenu(GetSubMenu(hPopupMenus, cnt == -1 ? PM_NEW : PM_MODIFYVALUE),
-                       TPM_RIGHTBUTTON, (short)LOWORD(lParam), (short)HIWORD(lParam),
-                       0, hFrameWnd, NULL);
-        break;
-    }
-    default:
-        return CallWindowProcW(g_orgListWndProc, hWnd, message, wParam, lParam);
-    }
-    return 0;
-}
-
-
 HWND CreateListView(HWND hwndParent, UINT id)
 {
     RECT rcClient;
@@ -480,7 +359,7 @@ HWND CreateListView(HWND hwndParent, UINT id)
     WCHAR ListView[] = {'L','i','s','t',' ','V','i','e','w',0};
 
     /* prepare strings */
-    LoadStringW(hInst, IDS_REGISTRY_VALUE_NOT_SET, g_szValueNotSet, COUNT_OF(g_szValueNotSet));
+    LoadStringW(hInst, IDS_REGISTRY_VALUE_NOT_SET, g_szValueNotSet, ARRAY_SIZE(g_szValueNotSet));
 
     /* Get the dimensions of the parent window's client area, and create the list view control.  */
     GetClientRect(hwndParent, &rcClient);
@@ -495,7 +374,6 @@ HWND CreateListView(HWND hwndParent, UINT id)
     /* Initialize the image list */
     if (!InitListViewImageList(hwndLV)) goto fail;
     if (!CreateListColumns(hwndLV)) goto fail;
-    g_orgListWndProc = (WNDPROC) SetWindowLongPtrW(hwndLV, GWLP_WNDPROC, (LPARAM)ListWndProc);
     return hwndLV;
 fail:
     DestroyWindow(hwndLV);
@@ -513,7 +391,6 @@ BOOL RefreshListView(HWND hwndLV, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR highli
     BYTE* valBuf = 0;
     HKEY hKey = 0;
     LONG errCode;
-    INT count, i;
     LVITEMW item;
 
     if (!hwndLV) return FALSE;
@@ -523,16 +400,8 @@ BOOL RefreshListView(HWND hwndLV, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR highli
     errCode = RegOpenKeyExW(hKeyRoot, keyPath, 0, KEY_READ, &hKey);
     if (errCode != ERROR_SUCCESS) goto done;
 
-    count = SendMessageW(hwndLV, LVM_GETITEMCOUNT, 0, 0);
-    for (i = 0; i < count; i++) {
-        item.mask = LVIF_PARAM;
-        item.iItem = i;
-        SendMessageW( hwndLV, LVM_GETITEMW, 0, (LPARAM)&item );
-        HeapFree(GetProcessHeap(), 0, ((LINE_INFO*)item.lParam)->name);
-        HeapFree(GetProcessHeap(), 0, (void*)item.lParam);
-    }
     g_columnToSort = ~0U;
-    SendMessageW( hwndLV, LVM_DELETEALLITEMS, 0, 0L );
+    SendMessageW(hwndLV, LVM_DELETEALLITEMS, 0, 0);
 
     /* get size information and resize the buffers if necessary */
     errCode = RegQueryInfoKeyW(hKey, NULL, NULL, NULL, NULL, &max_sub_key_len, NULL,
@@ -543,44 +412,41 @@ BOOL RefreshListView(HWND hwndLV, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR highli
     max_val_name_len++;
     max_val_size++;
 
-    valName = HeapAlloc(GetProcessHeap(), 0, max_val_name_len * sizeof(WCHAR));
-    if (!valName)
-        goto done;
-    valBuf = HeapAlloc(GetProcessHeap(), 0, max_val_size);
-    if (!valBuf)
-        goto done;
+    valName = heap_xalloc(max_val_name_len * sizeof(WCHAR));
+    valBuf = heap_xalloc(max_val_size);
 
     valSize = max_val_size;
     if (RegQueryValueExW(hKey, NULL, NULL, &valType, valBuf, &valSize) == ERROR_FILE_NOT_FOUND) {
-        AddEntryToList(hwndLV, NULL, REG_SZ, NULL, 0, !highlightValue);
+        AddEntryToList(hwndLV, NULL, REG_SZ, NULL, 0, -1);
     }
     for(index = 0; index < val_count; index++) {
-        BOOL bSelected = (valName == highlightValue); /* NOT a bug, we check for double NULL here */
         valNameLen = max_val_name_len;
         valSize = max_val_size;
 	valType = 0;
         errCode = RegEnumValueW(hKey, index, valName, &valNameLen, NULL, &valType, valBuf, &valSize);
 	if (errCode != ERROR_SUCCESS) goto done;
         valBuf[valSize] = 0;
-        if (highlightValue && !lstrcmpW(valName, highlightValue))
-            bSelected = TRUE;
-        AddEntryToList(hwndLV, valName[0] ? valName : NULL, valType, valBuf, valSize, bSelected);
+        AddEntryToList(hwndLV, valName[0] ? valName : NULL, valType, valBuf, valSize, -1);
     }
+
+    memset(&item, 0, sizeof(item));
+    if (!highlightValue)
+    {
+        item.state = item.stateMask = LVIS_FOCUSED;
+        SendMessageW(hwndLV, LVM_SETITEMSTATE, 0, (LPARAM)&item);
+    }
+
     SendMessageW(hwndLV, LVM_SORTITEMS, (WPARAM)hwndLV, (LPARAM)CompareFunc);
 
     g_currentRootKey = hKeyRoot;
-    if (keyPath != g_currentPath) {
-	HeapFree(GetProcessHeap(), 0, g_currentPath);
-	g_currentPath = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(keyPath) + 1) * sizeof(WCHAR));
-	if (!g_currentPath) goto done;
-	lstrcpyW(g_currentPath, keyPath);
-    }
+    if (keyPath != g_currentPath && !update_listview_path(keyPath))
+        goto done;
 
     result = TRUE;
 
 done:
-    HeapFree(GetProcessHeap(), 0, valBuf);
-    HeapFree(GetProcessHeap(), 0, valName);
+    heap_free(valBuf);
+    heap_free(valName);
     SendMessageW(hwndLV, WM_SETREDRAW, TRUE, 0);
     if (hKey) RegCloseKey(hKey);
 

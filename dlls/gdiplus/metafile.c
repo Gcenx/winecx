@@ -20,6 +20,8 @@
 #include <math.h>
 #include <assert.h>
 
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
@@ -43,13 +45,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(gdiplus);
 
 HRESULT WINAPI WICCreateImagingFactory_Proxy(UINT, IWICImagingFactory**);
 
-typedef struct EmfPlusARGB
-{
-    BYTE Blue;
-    BYTE Green;
-    BYTE Red;
-    BYTE Alpha;
-} EmfPlusARGB;
+typedef ARGB EmfPlusARGB;
 
 typedef struct EmfPlusRecordHeader
 {
@@ -229,10 +225,56 @@ typedef struct EmfPlusPenData
     BYTE OptionalData[1];
 } EmfPlusPenData;
 
+enum BrushDataFlags
+{
+    BrushDataPath             = 1 << 0,
+    BrushDataTransform        = 1 << 1,
+    BrushDataPresetColors     = 1 << 2,
+    BrushDataBlendFactorsH    = 1 << 3,
+    BrushDataBlendFactorsV    = 1 << 4,
+    BrushDataFocusScales      = 1 << 6,
+    BrushDataIsGammaCorrected = 1 << 7,
+    BrushDataDoNotTransform   = 1 << 8,
+};
+
 typedef struct EmfPlusSolidBrushData
 {
     EmfPlusARGB SolidColor;
 } EmfPlusSolidBrushData;
+
+typedef struct EmfPlusHatchBrushData
+{
+    DWORD HatchStyle;
+    EmfPlusARGB ForeColor;
+    EmfPlusARGB BackColor;
+} EmfPlusHatchBrushData;
+
+typedef struct EmfPlusTextureBrushData
+{
+    DWORD BrushDataFlags;
+    INT WrapMode;
+    BYTE OptionalData[1];
+} EmfPlusTextureBrushData;
+
+typedef struct EmfPlusRectF
+{
+    float X;
+    float Y;
+    float Width;
+    float Height;
+} EmfPlusRectF;
+
+typedef struct EmfPlusLinearGradientBrushData
+{
+    DWORD BrushDataFlags;
+    INT WrapMode;
+    EmfPlusRectF RectF;
+    EmfPlusARGB StartColor;
+    EmfPlusARGB EndColor;
+    DWORD Reserved1;
+    DWORD Reserved2;
+    BYTE OptionalData[1];
+} EmfPlusLinearGradientBrushData;
 
 typedef struct EmfPlusBrush
 {
@@ -240,6 +282,9 @@ typedef struct EmfPlusBrush
     DWORD Type;
     union {
         EmfPlusSolidBrushData solid;
+        EmfPlusHatchBrushData hatch;
+        EmfPlusTextureBrushData texture;
+        EmfPlusLinearGradientBrushData lineargradient;
     } BrushData;
 } EmfPlusBrush;
 
@@ -348,14 +393,6 @@ typedef struct EmfPlusObject
     } ObjectData;
 } EmfPlusObject;
 
-typedef struct EmfPlusRectF
-{
-    float X;
-    float Y;
-    float Width;
-    float Height;
-} EmfPlusRectF;
-
 typedef struct EmfPlusPointR7
 {
     BYTE X;
@@ -373,6 +410,19 @@ typedef struct EmfPlusPointF
     float X;
     float Y;
 } EmfPlusPointF;
+
+typedef struct EmfPlusDrawImage
+{
+    EmfPlusRecordHeader Header;
+    DWORD ImageAttributesID;
+    DWORD SrcUnit;
+    EmfPlusRectF SrcRect;
+    union
+    {
+        EmfPlusRect rect;
+        EmfPlusRectF rectF;
+    } RectData;
+} EmfPlusDrawImage;
 
 typedef struct EmfPlusDrawImagePoints
 {
@@ -395,6 +445,51 @@ typedef struct EmfPlusDrawPath
     DWORD PenId;
 } EmfPlusDrawPath;
 
+typedef struct EmfPlusDrawArc
+{
+    EmfPlusRecordHeader Header;
+    float StartAngle;
+    float SweepAngle;
+    union
+    {
+        EmfPlusRect rect;
+        EmfPlusRectF rectF;
+    } RectData;
+} EmfPlusDrawArc;
+
+typedef struct EmfPlusDrawEllipse
+{
+    EmfPlusRecordHeader Header;
+    union
+    {
+        EmfPlusRect rect;
+        EmfPlusRectF rectF;
+    } RectData;
+} EmfPlusDrawEllipse;
+
+typedef struct EmfPlusDrawPie
+{
+    EmfPlusRecordHeader Header;
+    float StartAngle;
+    float SweepAngle;
+    union
+    {
+        EmfPlusRect rect;
+        EmfPlusRectF rectF;
+    } RectData;
+} EmfPlusDrawPie;
+
+typedef struct EmfPlusDrawRects
+{
+    EmfPlusRecordHeader Header;
+    DWORD Count;
+    union
+    {
+        EmfPlusRect rect[1];
+        EmfPlusRectF rectF[1];
+    } RectData;
+} EmfPlusDrawRects;
+
 typedef struct EmfPlusFillPath
 {
     EmfPlusRecordHeader Header;
@@ -404,6 +499,44 @@ typedef struct EmfPlusFillPath
         EmfPlusARGB Color;
     } data;
 } EmfPlusFillPath;
+
+typedef struct EmfPlusFillClosedCurve
+{
+    EmfPlusRecordHeader Header;
+    DWORD BrushId;
+    float Tension;
+    DWORD Count;
+    union
+    {
+        EmfPlusPointR7 pointsR[1];
+        EmfPlusPoint points[1];
+        EmfPlusPointF pointsF[1];
+    } PointData;
+} EmfPlusFillClosedCurve;
+
+typedef struct EmfPlusFillEllipse
+{
+    EmfPlusRecordHeader Header;
+    DWORD BrushId;
+    union
+    {
+        EmfPlusRect rect;
+        EmfPlusRectF rectF;
+    } RectData;
+} EmfPlusFillEllipse;
+
+typedef struct EmfPlusFillPie
+{
+    EmfPlusRecordHeader Header;
+    DWORD BrushId;
+    float StartAngle;
+    float SweepAngle;
+    union
+    {
+        EmfPlusRect rect;
+        EmfPlusRectF rectF;
+    } RectData;
+} EmfPlusFillPie;
 
 typedef struct EmfPlusFont
 {
@@ -473,7 +606,7 @@ void METAFILE_Free(GpMetafile *metafile)
     if (metafile->record_stream)
         IStream_Release(metafile->record_stream);
 
-    for (i = 0; i < sizeof(metafile->objtable)/sizeof(metafile->objtable[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(metafile->objtable); i++)
         metafile_free_object_table_entry(metafile, i);
 }
 
@@ -847,6 +980,74 @@ static BOOL is_integer_rect(const GpRectF *rect)
     return TRUE;
 }
 
+static GpStatus METAFILE_PrepareBrushData(GpBrush *brush, DWORD *size)
+{
+    switch (brush->bt)
+    {
+    case BrushTypeSolidColor:
+        *size = FIELD_OFFSET(EmfPlusBrush, BrushData) + sizeof(EmfPlusSolidBrushData);
+        break;
+    case BrushTypeHatchFill:
+        *size = FIELD_OFFSET(EmfPlusBrush, BrushData) + sizeof(EmfPlusHatchBrushData);
+        break;
+    default:
+        FIXME("unsupported brush type: %d\n", brush->bt);
+        return NotImplemented;
+    }
+
+    return Ok;
+}
+
+static void METAFILE_FillBrushData(GpBrush *brush, EmfPlusBrush *data)
+{
+    data->Version = VERSION_MAGIC2;
+    data->Type = brush->bt;
+
+    switch (brush->bt)
+    {
+    case BrushTypeSolidColor:
+    {
+        GpSolidFill *solid = (GpSolidFill *)brush;
+        data->BrushData.solid.SolidColor = solid->color;
+        break;
+    }
+    case BrushTypeHatchFill:
+    {
+        GpHatch *hatch = (GpHatch *)brush;
+        data->BrushData.hatch.HatchStyle = hatch->hatchstyle;
+        data->BrushData.hatch.ForeColor = hatch->forecol;
+        data->BrushData.hatch.BackColor = hatch->backcol;
+        break;
+    }
+    default:
+        FIXME("unsupported brush type: %d\n", brush->bt);
+    }
+}
+
+static GpStatus METAFILE_AddBrushObject(GpMetafile *metafile, GpBrush *brush, DWORD *id)
+{
+    EmfPlusObject *object_record;
+    GpStatus stat;
+    DWORD size;
+
+    *id = -1;
+    if (metafile->metafile_type != MetafileTypeEmfPlusOnly && metafile->metafile_type != MetafileTypeEmfPlusDual)
+        return Ok;
+
+    stat = METAFILE_PrepareBrushData(brush, &size);
+    if (stat != Ok) return stat;
+
+    stat = METAFILE_AllocateRecord(metafile,
+        FIELD_OFFSET(EmfPlusObject, ObjectData) + size, (void**)&object_record);
+    if (stat != Ok) return stat;
+
+    *id = METAFILE_AddObjectId(metafile);
+    object_record->Header.Type = EmfPlusRecordTypeObject;
+    object_record->Header.Flags = *id | ObjectTypeBrush << 8;
+    METAFILE_FillBrushData(brush, &object_record->ObjectData.brush);
+    return Ok;
+}
+
 GpStatus METAFILE_FillRectangles(GpMetafile* metafile, GpBrush* brush,
     GDIPCONST GpRectF* rects, INT count)
 {
@@ -866,8 +1067,9 @@ GpStatus METAFILE_FillRectangles(GpMetafile* metafile, GpBrush* brush,
         }
         else
         {
-            FIXME("brush serialization not implemented\n");
-            return NotImplemented;
+            stat = METAFILE_AddBrushObject(metafile, brush, &brushid);
+            if (stat != Ok)
+                return stat;
         }
 
         for (i=0; i<count; i++)
@@ -1328,7 +1530,7 @@ GpStatus METAFILE_GraphicsDeleted(GpMetafile* metafile)
             bounds_rc.right = ceilf(metafile->auto_frame_max.X * x_scale);
             bounds_rc.bottom = ceilf(metafile->auto_frame_max.Y * y_scale);
 
-            gdi_bounds_rc = header.EmfHeader.rclBounds;
+            gdi_bounds_rc = header.u.EmfHeader.rclBounds;
             if (gdi_bounds_rc.right > gdi_bounds_rc.left && gdi_bounds_rc.bottom > gdi_bounds_rc.top)
             {
                 bounds_rc.left = min(bounds_rc.left, gdi_bounds_rc.left);
@@ -1822,7 +2024,10 @@ static GpStatus metafile_deserialize_brush(const BYTE *record_data, UINT data_si
 {
     static const UINT header_size = FIELD_OFFSET(EmfPlusBrush, BrushData);
     EmfPlusBrush *data = (EmfPlusBrush *)record_data;
+    EmfPlusTransformMatrix *transform = NULL;
+    DWORD brushflags;
     GpStatus status;
+    UINT offset;
 
     *brush = NULL;
 
@@ -1835,8 +2040,117 @@ static GpStatus metafile_deserialize_brush(const BYTE *record_data, UINT data_si
         if (data_size != header_size + sizeof(EmfPlusSolidBrushData))
             return InvalidParameter;
 
-        status = GdipCreateSolidFill(*(ARGB *)&data->BrushData.solid.SolidColor, (GpSolidFill **)brush);
+        status = GdipCreateSolidFill(data->BrushData.solid.SolidColor, (GpSolidFill **)brush);
         break;
+    case BrushTypeHatchFill:
+        if (data_size != header_size + sizeof(EmfPlusHatchBrushData))
+            return InvalidParameter;
+
+        status = GdipCreateHatchBrush(data->BrushData.hatch.HatchStyle, data->BrushData.hatch.ForeColor,
+            data->BrushData.hatch.BackColor, (GpHatch **)brush);
+        break;
+    case BrushTypeTextureFill:
+    {
+        GpImage *image;
+
+        offset = header_size + FIELD_OFFSET(EmfPlusTextureBrushData, OptionalData);
+        if (data_size <= offset)
+            return InvalidParameter;
+
+        brushflags = data->BrushData.texture.BrushDataFlags;
+        if (brushflags & BrushDataTransform)
+        {
+            if (data_size <= offset + sizeof(EmfPlusTransformMatrix))
+                return InvalidParameter;
+            transform = (EmfPlusTransformMatrix *)(record_data + offset);
+            offset += sizeof(EmfPlusTransformMatrix);
+        }
+
+        status = metafile_deserialize_image(record_data + offset, data_size - offset, &image);
+        if (status != Ok)
+            return status;
+
+        status = GdipCreateTexture(image, data->BrushData.texture.WrapMode, (GpTexture **)brush);
+        if (status == Ok && transform && !(brushflags & BrushDataDoNotTransform))
+            GdipSetTextureTransform((GpTexture *)*brush, (const GpMatrix *)transform);
+
+        GdipDisposeImage(image);
+        break;
+    }
+    case BrushTypeLinearGradient:
+    {
+        GpLineGradient *gradient = NULL;
+        GpPointF startpoint, endpoint;
+        UINT position_count = 0;
+
+        offset = header_size + FIELD_OFFSET(EmfPlusLinearGradientBrushData, OptionalData);
+        if (data_size <= offset)
+            return InvalidParameter;
+
+        brushflags = data->BrushData.lineargradient.BrushDataFlags;
+        if ((brushflags & BrushDataPresetColors) && (brushflags & (BrushDataBlendFactorsH | BrushDataBlendFactorsV)))
+            return InvalidParameter;
+
+        if (brushflags & BrushDataTransform)
+        {
+            if (data_size <= offset + sizeof(EmfPlusTransformMatrix))
+                return InvalidParameter;
+            transform = (EmfPlusTransformMatrix *)(record_data + offset);
+            offset += sizeof(EmfPlusTransformMatrix);
+        }
+
+        if (brushflags & (BrushDataPresetColors | BrushDataBlendFactorsH | BrushDataBlendFactorsV))
+        {
+            if (data_size <= offset + sizeof(DWORD)) /* Number of factors/preset colors. */
+                return InvalidParameter;
+            position_count = *(DWORD *)(record_data + offset);
+            offset += sizeof(DWORD);
+        }
+
+        if (brushflags & BrushDataPresetColors)
+        {
+            if (data_size != offset + position_count * (sizeof(float) + sizeof(EmfPlusARGB)))
+                return InvalidParameter;
+        }
+        else if (brushflags & BrushDataBlendFactorsH)
+        {
+            if (data_size != offset + position_count * 2 * sizeof(float))
+                return InvalidParameter;
+        }
+
+        startpoint.X = data->BrushData.lineargradient.RectF.X;
+        startpoint.Y = data->BrushData.lineargradient.RectF.Y;
+        endpoint.X = startpoint.X + data->BrushData.lineargradient.RectF.Width;
+        endpoint.Y = startpoint.Y + data->BrushData.lineargradient.RectF.Height;
+
+        status = GdipCreateLineBrush(&startpoint, &endpoint, data->BrushData.lineargradient.StartColor,
+            data->BrushData.lineargradient.EndColor, data->BrushData.lineargradient.WrapMode, &gradient);
+        if (status == Ok)
+        {
+            if (transform)
+                status = GdipSetLineTransform(gradient, (const GpMatrix *)transform);
+
+            if (status == Ok)
+            {
+                if (brushflags & BrushDataPresetColors)
+                    status = GdipSetLinePresetBlend(gradient, (ARGB *)(record_data + offset +
+                        position_count * sizeof(REAL)), (REAL *)(record_data + offset), position_count);
+                else if (brushflags & BrushDataBlendFactorsH)
+                    status = GdipSetLineBlend(gradient, (REAL *)(record_data + offset + position_count * sizeof(REAL)),
+                        (REAL *)(record_data + offset), position_count);
+
+                if (brushflags & BrushDataIsGammaCorrected)
+                    FIXME("BrushDataIsGammaCorrected is not handled.\n");
+            }
+        }
+
+        if (status == Ok)
+            *brush = (GpBrush *)gradient;
+        else
+            GdipDeleteBrush((GpBrush *)gradient);
+
+        break;
+    }
     default:
         FIXME("brush type %u is not supported.\n", data->Type);
         return NotImplemented;
@@ -2160,8 +2474,6 @@ GpStatus WINGDIPAPI GdipPlayMetafileRecord(GDIPCONST GpMetafile *metafile,
         /* regular EMF record */
         if (metafile->playback_dc)
         {
-            ENHMETARECORD *record;
-
             switch (recordType)
             {
             case EMR_SETMAPMODE:
@@ -2206,24 +2518,27 @@ GpStatus WINGDIPAPI GdipPlayMetafileRecord(GDIPCONST GpMetafile *metafile,
                 return Ok;
             }
             default:
+            {
+                ENHMETARECORD *record = heap_alloc_zero(dataSize + 8);
+
+                if (record)
+                {
+                    record->iType = recordType;
+                    record->nSize = dataSize + 8;
+                    memcpy(record->dParm, data, dataSize);
+
+                    if(PlayEnhMetaFileRecord(metafile->playback_dc, metafile->handle_table,
+                            record, metafile->handle_count) == 0)
+                        ERR("PlayEnhMetaFileRecord failed\n");
+
+                    heap_free(record);
+                }
+                else
+                    return OutOfMemory;
+
                 break;
             }
-
-            record = heap_alloc_zero(dataSize + 8);
-
-            if (record)
-            {
-                record->iType = recordType;
-                record->nSize = dataSize + 8;
-                memcpy(record->dParm, data, dataSize);
-
-                PlayEnhMetaFileRecord(metafile->playback_dc, metafile->handle_table,
-                    record, metafile->handle_count);
-
-                heap_free(record);
             }
-            else
-                return OutOfMemory;
         }
     }
     else
@@ -2271,7 +2586,7 @@ GpStatus WINGDIPAPI GdipPlayMetafileRecord(GDIPCONST GpMetafile *metafile,
 
             if (flags & 0x8000)
             {
-                stat = GdipCreateSolidFill((ARGB)record->BrushID, (GpSolidFill**)&temp_brush);
+                stat = GdipCreateSolidFill(record->BrushID, (GpSolidFill **)&temp_brush);
                 brush = temp_brush;
             }
             else
@@ -2351,6 +2666,27 @@ GpStatus WINGDIPAPI GdipPlayMetafileRecord(GDIPCONST GpMetafile *metafile,
                 return InvalidParameter;
 
             stat = GdipCloneRegion(real_metafile->objtable[regionid].u.region, &region);
+            if (stat == Ok)
+            {
+                stat = metafile_set_clip_region(real_metafile, region, mode);
+                GdipDeleteRegion(region);
+            }
+
+            return stat;
+        }
+        case EmfPlusRecordTypeSetClipPath:
+        {
+            CombineMode mode = (flags >> 8) & 0xf;
+            BYTE pathid = flags & 0xff;
+            GpRegion *region;
+
+            if (dataSize != 0)
+                return InvalidParameter;
+
+            if (pathid >= EmfPlusObjectTableSize || real_metafile->objtable[pathid].type != ObjectTypePath)
+                return InvalidParameter;
+
+            stat = GdipCreateRegionPath(real_metafile->objtable[pathid].u.path, &region);
             if (stat == Ok)
             {
                 stat = metafile_set_clip_region(real_metafile, region, mode);
@@ -2609,9 +2945,53 @@ GpStatus WINGDIPAPI GdipPlayMetafileRecord(GDIPCONST GpMetafile *metafile,
         {
             return GdipSetSmoothingMode(real_metafile->playback_graphics, (flags >> 1) & 0xff);
         }
+        case EmfPlusRecordTypeSetCompositingMode:
+        {
+            return GdipSetCompositingMode(real_metafile->playback_graphics, flags & 0xff);
+        }
         case EmfPlusRecordTypeObject:
         {
             return METAFILE_PlaybackObject(real_metafile, flags, dataSize, data);
+        }
+        case EmfPlusRecordTypeDrawImage:
+        {
+            EmfPlusDrawImage *draw = (EmfPlusDrawImage *)header;
+            BYTE image = flags & 0xff;
+            GpPointF points[3];
+
+            if (image >= EmfPlusObjectTableSize || real_metafile->objtable[image].type != ObjectTypeImage)
+                return InvalidParameter;
+
+            if (dataSize != FIELD_OFFSET(EmfPlusDrawImage, RectData) - sizeof(EmfPlusRecordHeader) +
+                    (flags & 0x4000 ? sizeof(EmfPlusRect) : sizeof(EmfPlusRectF)))
+                return InvalidParameter;
+
+            if (draw->ImageAttributesID >= EmfPlusObjectTableSize ||
+                    real_metafile->objtable[draw->ImageAttributesID].type != ObjectTypeImageAttributes)
+                return InvalidParameter;
+
+            if (flags & 0x4000) /* C */
+            {
+                points[0].X = draw->RectData.rect.X;
+                points[0].Y = draw->RectData.rect.Y;
+                points[1].X = points[0].X + draw->RectData.rect.Width;
+                points[1].Y = points[0].Y;
+                points[2].X = points[1].X;
+                points[2].Y = points[1].Y + draw->RectData.rect.Height;
+            }
+            else
+            {
+                points[0].X = draw->RectData.rectF.X;
+                points[0].Y = draw->RectData.rectF.Y;
+                points[1].X = points[0].X + draw->RectData.rectF.Width;
+                points[1].Y = points[0].Y;
+                points[2].X = points[1].X;
+                points[2].Y = points[1].Y + draw->RectData.rectF.Height;
+            }
+
+            return GdipDrawImagePointsRect(real_metafile->playback_graphics, real_metafile->objtable[image].u.image,
+                points, 3, draw->SrcRect.X, draw->SrcRect.Y, draw->SrcRect.Width, draw->SrcRect.Height, draw->SrcUnit,
+                real_metafile->objtable[draw->ImageAttributesID].u.image_attributes, NULL, NULL);
         }
         case EmfPlusRecordTypeDrawImagePoints:
         {
@@ -2690,7 +3070,7 @@ GpStatus WINGDIPAPI GdipPlayMetafileRecord(GDIPCONST GpMetafile *metafile,
 
             if (flags & 0x8000)
             {
-                stat = GdipCreateSolidFill(*(ARGB *)&fill->data.Color, (GpSolidFill **)&solidfill);
+                stat = GdipCreateSolidFill(fill->data.Color, (GpSolidFill **)&solidfill);
                 if (stat != Ok)
                     return stat;
                 brush = (GpBrush *)solidfill;
@@ -2705,6 +3085,166 @@ GpStatus WINGDIPAPI GdipPlayMetafileRecord(GDIPCONST GpMetafile *metafile,
             }
 
             stat = GdipFillPath(real_metafile->playback_graphics, brush, real_metafile->objtable[path].u.path);
+            GdipDeleteBrush((GpBrush *)solidfill);
+            return stat;
+        }
+        case EmfPlusRecordTypeFillClosedCurve:
+        {
+            static const UINT fixed_part_size = FIELD_OFFSET(EmfPlusFillClosedCurve, PointData) -
+                sizeof(EmfPlusRecordHeader);
+            EmfPlusFillClosedCurve *fill = (EmfPlusFillClosedCurve *)header;
+            GpSolidFill *solidfill = NULL;
+            GpFillMode mode;
+            GpBrush *brush;
+            UINT size, i;
+
+            if (dataSize <= fixed_part_size)
+                return InvalidParameter;
+
+            if (fill->Count == 0)
+                return InvalidParameter;
+
+            if (flags & 0x800) /* P */
+                size = (fixed_part_size + sizeof(EmfPlusPointR7) * fill->Count + 3) & ~3;
+            else if (flags & 0x4000) /* C */
+                size = fixed_part_size + sizeof(EmfPlusPoint) * fill->Count;
+            else
+                size = fixed_part_size + sizeof(EmfPlusPointF) * fill->Count;
+
+            if (dataSize != size)
+                return InvalidParameter;
+
+            mode = flags & 0x200 ? FillModeWinding : FillModeAlternate; /* W */
+
+            if (flags & 0x8000) /* S */
+            {
+                stat = GdipCreateSolidFill(fill->BrushId, (GpSolidFill **)&solidfill);
+                if (stat != Ok)
+                    return stat;
+                brush = (GpBrush *)solidfill;
+            }
+            else
+            {
+                if (fill->BrushId >= EmfPlusObjectTableSize ||
+                        real_metafile->objtable[fill->BrushId].type != ObjectTypeBrush)
+                    return InvalidParameter;
+
+                brush = real_metafile->objtable[fill->BrushId].u.brush;
+            }
+
+            if (flags & (0x800 | 0x4000))
+            {
+                GpPointF *points = GdipAlloc(fill->Count * sizeof(*points));
+                if (points)
+                {
+                    if (flags & 0x800) /* P */
+                    {
+                        for (i = 1; i < fill->Count; i++)
+                        {
+                            points[i].X = points[i - 1].X + fill->PointData.pointsR[i].X;
+                            points[i].Y = points[i - 1].Y + fill->PointData.pointsR[i].Y;
+                        }
+                    }
+                    else
+                    {
+                        for (i = 0; i < fill->Count; i++)
+                        {
+                            points[i].X = fill->PointData.points[i].X;
+                            points[i].Y = fill->PointData.points[i].Y;
+                        }
+                    }
+
+                    stat = GdipFillClosedCurve2(real_metafile->playback_graphics, brush,
+                        points, fill->Count, fill->Tension, mode);
+                    GdipFree(points);
+                }
+                else
+                    stat = OutOfMemory;
+            }
+            else
+                stat = GdipFillClosedCurve2(real_metafile->playback_graphics, brush,
+                    (const GpPointF *)fill->PointData.pointsF, fill->Count, fill->Tension, mode);
+
+            GdipDeleteBrush((GpBrush *)solidfill);
+            return stat;
+        }
+        case EmfPlusRecordTypeFillEllipse:
+        {
+            EmfPlusFillEllipse *fill = (EmfPlusFillEllipse *)header;
+            GpSolidFill *solidfill = NULL;
+            GpBrush *brush;
+
+            if (dataSize <= FIELD_OFFSET(EmfPlusFillEllipse, RectData) - sizeof(EmfPlusRecordHeader))
+                return InvalidParameter;
+            dataSize -= FIELD_OFFSET(EmfPlusFillEllipse, RectData) - sizeof(EmfPlusRecordHeader);
+
+            if (dataSize != (flags & 0x4000 ? sizeof(EmfPlusRect) : sizeof(EmfPlusRectF)))
+                return InvalidParameter;
+
+            if (flags & 0x8000)
+            {
+                stat = GdipCreateSolidFill(fill->BrushId, (GpSolidFill **)&solidfill);
+                if (stat != Ok)
+                    return stat;
+                brush = (GpBrush *)solidfill;
+            }
+            else
+            {
+                if (fill->BrushId >= EmfPlusObjectTableSize ||
+                        real_metafile->objtable[fill->BrushId].type != ObjectTypeBrush)
+                    return InvalidParameter;
+
+                brush = real_metafile->objtable[fill->BrushId].u.brush;
+            }
+
+            if (flags & 0x4000)
+                stat = GdipFillEllipseI(real_metafile->playback_graphics, brush, fill->RectData.rect.X,
+                    fill->RectData.rect.Y, fill->RectData.rect.Width, fill->RectData.rect.Height);
+            else
+                stat = GdipFillEllipse(real_metafile->playback_graphics, brush, fill->RectData.rectF.X,
+                    fill->RectData.rectF.Y, fill->RectData.rectF.Width, fill->RectData.rectF.Height);
+
+            GdipDeleteBrush((GpBrush *)solidfill);
+            return stat;
+        }
+        case EmfPlusRecordTypeFillPie:
+        {
+            EmfPlusFillPie *fill = (EmfPlusFillPie *)header;
+            GpSolidFill *solidfill = NULL;
+            GpBrush *brush;
+
+            if (dataSize <= FIELD_OFFSET(EmfPlusFillPie, RectData) - sizeof(EmfPlusRecordHeader))
+                return InvalidParameter;
+            dataSize -= FIELD_OFFSET(EmfPlusFillPie, RectData) - sizeof(EmfPlusRecordHeader);
+
+            if (dataSize != (flags & 0x4000 ? sizeof(EmfPlusRect) : sizeof(EmfPlusRectF)))
+                return InvalidParameter;
+
+            if (flags & 0x8000) /* S */
+            {
+                stat = GdipCreateSolidFill(fill->BrushId, (GpSolidFill **)&solidfill);
+                if (stat != Ok)
+                    return stat;
+                brush = (GpBrush *)solidfill;
+            }
+            else
+            {
+                if (fill->BrushId >= EmfPlusObjectTableSize ||
+                        real_metafile->objtable[fill->BrushId].type != ObjectTypeBrush)
+                    return InvalidParameter;
+
+                brush = real_metafile->objtable[fill->BrushId].u.brush;
+            }
+
+            if (flags & 0x4000) /* C */
+                stat = GdipFillPieI(real_metafile->playback_graphics, brush, fill->RectData.rect.X,
+                    fill->RectData.rect.Y, fill->RectData.rect.Width, fill->RectData.rect.Height,
+                    fill->StartAngle, fill->SweepAngle);
+            else
+                stat = GdipFillPie(real_metafile->playback_graphics, brush, fill->RectData.rectF.X,
+                    fill->RectData.rectF.Y, fill->RectData.rectF.Width, fill->RectData.rectF.Height,
+                    fill->StartAngle, fill->SweepAngle);
+
             GdipDeleteBrush((GpBrush *)solidfill);
             return stat;
         }
@@ -2725,6 +3265,106 @@ GpStatus WINGDIPAPI GdipPlayMetafileRecord(GDIPCONST GpMetafile *metafile,
 
             return GdipDrawPath(real_metafile->playback_graphics, real_metafile->objtable[draw->PenId].u.pen,
                 real_metafile->objtable[path].u.path);
+        }
+        case EmfPlusRecordTypeDrawArc:
+        {
+            EmfPlusDrawArc *draw = (EmfPlusDrawArc *)header;
+            BYTE pen = flags & 0xff;
+
+            if (pen >= EmfPlusObjectTableSize || real_metafile->objtable[pen].type != ObjectTypePen)
+                return InvalidParameter;
+
+            if (dataSize != FIELD_OFFSET(EmfPlusDrawArc, RectData) - sizeof(EmfPlusRecordHeader) +
+                    (flags & 0x4000 ? sizeof(EmfPlusRect) : sizeof(EmfPlusRectF)))
+                return InvalidParameter;
+
+            if (flags & 0x4000) /* C */
+                return GdipDrawArcI(real_metafile->playback_graphics, real_metafile->objtable[pen].u.pen,
+                    draw->RectData.rect.X, draw->RectData.rect.Y, draw->RectData.rect.Width,
+                    draw->RectData.rect.Height, draw->StartAngle, draw->SweepAngle);
+            else
+                return GdipDrawArc(real_metafile->playback_graphics, real_metafile->objtable[pen].u.pen,
+                    draw->RectData.rectF.X, draw->RectData.rectF.Y, draw->RectData.rectF.Width,
+                    draw->RectData.rectF.Height, draw->StartAngle, draw->SweepAngle);
+        }
+        case EmfPlusRecordTypeDrawEllipse:
+        {
+            EmfPlusDrawEllipse *draw = (EmfPlusDrawEllipse *)header;
+            BYTE pen = flags & 0xff;
+
+            if (pen >= EmfPlusObjectTableSize || real_metafile->objtable[pen].type != ObjectTypePen)
+                return InvalidParameter;
+
+            if (dataSize != (flags & 0x4000 ? sizeof(EmfPlusRect) : sizeof(EmfPlusRectF)))
+                return InvalidParameter;
+
+            if (flags & 0x4000) /* C */
+                return GdipDrawEllipseI(real_metafile->playback_graphics, real_metafile->objtable[pen].u.pen,
+                    draw->RectData.rect.X, draw->RectData.rect.Y, draw->RectData.rect.Width,
+                    draw->RectData.rect.Height);
+            else
+                return GdipDrawEllipse(real_metafile->playback_graphics, real_metafile->objtable[pen].u.pen,
+                    draw->RectData.rectF.X, draw->RectData.rectF.Y, draw->RectData.rectF.Width,
+                    draw->RectData.rectF.Height);
+        }
+        case EmfPlusRecordTypeDrawPie:
+        {
+            EmfPlusDrawPie *draw = (EmfPlusDrawPie *)header;
+            BYTE pen = flags & 0xff;
+
+            if (pen >= EmfPlusObjectTableSize || real_metafile->objtable[pen].type != ObjectTypePen)
+                return InvalidParameter;
+
+            if (dataSize != FIELD_OFFSET(EmfPlusDrawPie, RectData) - sizeof(EmfPlusRecordHeader) +
+                    (flags & 0x4000 ? sizeof(EmfPlusRect) : sizeof(EmfPlusRectF)))
+                return InvalidParameter;
+
+            if (flags & 0x4000) /* C */
+                return GdipDrawPieI(real_metafile->playback_graphics, real_metafile->objtable[pen].u.pen,
+                    draw->RectData.rect.X, draw->RectData.rect.Y, draw->RectData.rect.Width,
+                    draw->RectData.rect.Height, draw->StartAngle, draw->SweepAngle);
+            else
+                return GdipDrawPie(real_metafile->playback_graphics, real_metafile->objtable[pen].u.pen,
+                    draw->RectData.rectF.X, draw->RectData.rectF.Y, draw->RectData.rectF.Width,
+                    draw->RectData.rectF.Height, draw->StartAngle, draw->SweepAngle);
+        }
+        case EmfPlusRecordTypeDrawRects:
+        {
+            EmfPlusDrawRects *draw = (EmfPlusDrawRects *)header;
+            BYTE pen = flags & 0xff;
+            GpRectF *rects = NULL;
+
+            if (pen >= EmfPlusObjectTableSize || real_metafile->objtable[pen].type != ObjectTypePen)
+                return InvalidParameter;
+
+            if (dataSize <= FIELD_OFFSET(EmfPlusDrawRects, RectData) - sizeof(EmfPlusRecordHeader))
+                return InvalidParameter;
+            dataSize -= FIELD_OFFSET(EmfPlusDrawRects, RectData) - sizeof(EmfPlusRecordHeader);
+
+            if (dataSize != draw->Count * (flags & 0x4000 ? sizeof(EmfPlusRect) : sizeof(EmfPlusRectF)))
+                return InvalidParameter;
+
+            if (flags & 0x4000)
+            {
+                DWORD i;
+
+                rects = GdipAlloc(draw->Count * sizeof(*rects));
+                if (!rects)
+                    return OutOfMemory;
+
+                for (i = 0; i < draw->Count; i++)
+                {
+                    rects[i].X = draw->RectData.rect[i].X;
+                    rects[i].Y = draw->RectData.rect[i].Y;
+                    rects[i].Width = draw->RectData.rect[i].Width;
+                    rects[i].Height = draw->RectData.rect[i].Height;
+                }
+            }
+
+            stat = GdipDrawRectangles(real_metafile->playback_graphics, real_metafile->objtable[pen].u.pen,
+                    rects ? rects : (GpRectF *)draw->RectData.rectF, draw->Count);
+            GdipFree(rects);
+            return stat;
         }
         default:
             FIXME("Not implemented for record type %x\n", recordType);
@@ -3082,7 +3722,7 @@ GpStatus WINGDIPAPI GdipGetMetafileHeaderFromEmf(HENHMETAFILE hemf,
     header->Y = gdip_round((REAL)emfheader.rclFrame.top / 2540.0 * header->DpiY);
     header->Width = gdip_round((REAL)(emfheader.rclFrame.right - emfheader.rclFrame.left) / 2540.0 * header->DpiX);
     header->Height = gdip_round((REAL)(emfheader.rclFrame.bottom - emfheader.rclFrame.top) / 2540.0 * header->DpiY);
-    header->EmfHeader = emfheader;
+    header->u.EmfHeader = emfheader;
 
     if (metafile_type == MetafileTypeEmfPlusDual || metafile_type == MetafileTypeEmfPlusOnly)
     {
@@ -3185,11 +3825,11 @@ GpStatus WINGDIPAPI GdipCreateMetafileFromEmf(HENHMETAFILE hemf, BOOL delete,
     (*metafile)->image.frame_count = 1;
     (*metafile)->image.xres = header.DpiX;
     (*metafile)->image.yres = header.DpiY;
-    (*metafile)->bounds.X = (REAL)header.EmfHeader.rclFrame.left / 2540.0 * header.DpiX;
-    (*metafile)->bounds.Y = (REAL)header.EmfHeader.rclFrame.top / 2540.0 * header.DpiY;
-    (*metafile)->bounds.Width = (REAL)(header.EmfHeader.rclFrame.right - header.EmfHeader.rclFrame.left)
+    (*metafile)->bounds.X = (REAL)header.u.EmfHeader.rclFrame.left / 2540.0 * header.DpiX;
+    (*metafile)->bounds.Y = (REAL)header.u.EmfHeader.rclFrame.top / 2540.0 * header.DpiY;
+    (*metafile)->bounds.Width = (REAL)(header.u.EmfHeader.rclFrame.right - header.u.EmfHeader.rclFrame.left)
                                 / 2540.0 * header.DpiX;
-    (*metafile)->bounds.Height = (REAL)(header.EmfHeader.rclFrame.bottom - header.EmfHeader.rclFrame.top)
+    (*metafile)->bounds.Height = (REAL)(header.u.EmfHeader.rclFrame.bottom - header.u.EmfHeader.rclFrame.top)
                                  / 2540.0 * header.DpiY;
     (*metafile)->unit = UnitPixel;
     (*metafile)->metafile_type = header.Type;
@@ -3541,10 +4181,7 @@ static GpStatus METAFILE_AddImageAttributesObject(GpMetafile *metafile, const Gp
     attrs_record->Version = VERSION_MAGIC2;
     attrs_record->Reserved1 = 0;
     attrs_record->WrapMode = attrs->wrap;
-    attrs_record->ClampColor.Blue = attrs->outside_color & 0xff;
-    attrs_record->ClampColor.Green = (attrs->outside_color >> 8) & 0xff;
-    attrs_record->ClampColor.Red = (attrs->outside_color >> 16) & 0xff;
-    attrs_record->ClampColor.Alpha = attrs->outside_color >> 24;
+    attrs_record->ClampColor = attrs->outside_color;
     attrs_record->ObjectClamp = attrs->clamp;
     attrs_record->Reserved2 = 0;
     return Ok;
@@ -3668,33 +4305,6 @@ static GpStatus METAFILE_AddPathObject(GpMetafile *metafile, GpPath *path, DWORD
     object_record->Header.Flags = *id | ObjectTypePath << 8;
     write_path_data(path, &object_record->ObjectData.path);
     return Ok;
-}
-
-static GpStatus METAFILE_PrepareBrushData(GpBrush *brush, DWORD *size)
-{
-    if (brush->bt == BrushTypeSolidColor)
-    {
-        *size = FIELD_OFFSET(EmfPlusBrush, BrushData.solid) + sizeof(EmfPlusSolidBrushData);
-        return Ok;
-    }
-
-    FIXME("unsupported brush type: %d\n", brush->bt);
-    return NotImplemented;
-}
-
-static void METAFILE_FillBrushData(GpBrush *brush, EmfPlusBrush *data)
-{
-    if (brush->bt == BrushTypeSolidColor)
-    {
-        GpSolidFill *solid = (GpSolidFill*)brush;
-
-        data->Version = VERSION_MAGIC2;
-        data->Type = solid->brush.bt;
-        data->BrushData.solid.SolidColor.Blue = solid->color & 0xff;
-        data->BrushData.solid.SolidColor.Green = (solid->color >> 8) & 0xff;
-        data->BrushData.solid.SolidColor.Red = (solid->color >> 16) & 0xff;
-        data->BrushData.solid.SolidColor.Alpha = solid->color >> 24;
-    }
 }
 
 static GpStatus METAFILE_AddPenObject(GpMetafile *metafile, GpPen *pen, DWORD *id)
@@ -3892,30 +4502,6 @@ GpStatus METAFILE_DrawPath(GpMetafile *metafile, GpPen *pen, GpPath *path)
     return Ok;
 }
 
-static GpStatus METAFILE_AddBrushObject(GpMetafile *metafile, GpBrush *brush, DWORD *id)
-{
-    EmfPlusObject *object_record;
-    GpStatus stat;
-    DWORD size;
-
-    *id = -1;
-    if (metafile->metafile_type != MetafileTypeEmfPlusOnly && metafile->metafile_type != MetafileTypeEmfPlusDual)
-        return Ok;
-
-    stat = METAFILE_PrepareBrushData(brush, &size);
-    if (stat != Ok) return stat;
-
-    stat = METAFILE_AllocateRecord(metafile,
-        FIELD_OFFSET(EmfPlusObject, ObjectData) + size, (void**)&object_record);
-    if (stat != Ok) return stat;
-
-    *id = METAFILE_AddObjectId(metafile);
-    object_record->Header.Type = EmfPlusRecordTypeObject;
-    object_record->Header.Flags = *id | ObjectTypeBrush << 8;
-    METAFILE_FillBrushData(brush, &object_record->ObjectData.brush);
-    return Ok;
-}
-
 GpStatus METAFILE_FillPath(GpMetafile *metafile, GpBrush *brush, GpPath *path)
 {
     EmfPlusFillPath *fill_path_record;
@@ -3946,10 +4532,7 @@ GpStatus METAFILE_FillPath(GpMetafile *metafile, GpBrush *brush, GpPath *path)
     if (inline_color)
     {
         fill_path_record->Header.Flags = 0x8000 | path_id;
-        fill_path_record->data.Color.Blue = ((GpSolidFill*)brush)->color & 0xff;
-        fill_path_record->data.Color.Green = (((GpSolidFill*)brush)->color >> 8) & 0xff;
-        fill_path_record->data.Color.Red = (((GpSolidFill*)brush)->color >> 16) & 0xff;
-        fill_path_record->data.Color.Alpha = ((GpSolidFill*)brush)->color >> 24;
+        fill_path_record->data.Color = ((GpSolidFill *)brush)->color;
     }
     else
     {

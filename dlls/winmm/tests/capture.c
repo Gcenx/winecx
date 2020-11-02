@@ -398,7 +398,7 @@ static void wave_in_test_device(UINT_PTR device)
 
     HeapFree(GetProcessHeap(), 0, nameA);
 
-    for (f=0;f<NB_WIN_FORMATS;f++) {
+    for (f = 0; f < ARRAY_SIZE(win_formats); f++) {
         format.wFormatTag=WAVE_FORMAT_PCM;
         format.nChannels=win_formats[f][3];
         format.wBitsPerSample=win_formats[f][2];
@@ -660,6 +660,16 @@ static void wave_in_tests(void)
     if(rc != MMSYSERR_NOTSUPPORTED)
         ok((ndev == 0 && (preferred == -1 || broken(preferred != -1))) ||
                 preferred < ndev, "Got invalid preferred device: 0x%x\n", preferred);
+
+    rc = waveInMessage((HWAVEIN)WAVE_MAPPER, DRVM_MAPPER_PREFERRED_GET,
+         (DWORD_PTR)-1  , 0);
+    ok(rc == MMSYSERR_INVALPARAM || rc == MMSYSERR_BADDEVICEID, /* w2008+wvista */
+       "waveInMessage(DRVM_MAPPER_PREFERRED_GET) failed: %u\n", rc);
+
+    rc = waveInMessage((HWAVEIN)WAVE_MAPPER, DRVM_MAPPER_PREFERRED_GET,
+         0, (DWORD_PTR)&status);
+    ok(rc == MMSYSERR_INVALPARAM || rc == MMSYSERR_BADDEVICEID, /* w2008+wvista */
+       "waveInMessage(DRVM_MAPPER_PREFERRED_GET) failed: %u\n", rc);
 
     rc=waveInGetDevCapsA(ndev+1,&capsA,sizeof(capsA));
     ok(rc==MMSYSERR_BADDEVICEID,

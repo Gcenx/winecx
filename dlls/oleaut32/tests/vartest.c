@@ -97,6 +97,150 @@ static BOOL has_i8;
 #define R8_MAX DBL_MAX
 #define R8_MIN DBL_MIN
 
+#define DEFINE_EXPECT(func) \
+    static BOOL expect_ ## func = FALSE, called_ ## func = FALSE
+
+#define SET_EXPECT(func) \
+    do { called_ ## func = FALSE; expect_ ## func = TRUE; } while(0)
+
+#define CHECK_EXPECT2(func) \
+    do { \
+        ok(expect_ ##func, "unexpected call " #func "\n"); \
+        called_ ## func = TRUE; \
+    }while(0)
+
+#define CHECK_EXPECT(func) \
+    do { \
+        CHECK_EXPECT2(func); \
+        expect_ ## func = FALSE; \
+    }while(0)
+
+#define CHECK_CALLED(func) \
+    do { \
+        ok(called_ ## func, "expected " #func "\n"); \
+        expect_ ## func = called_ ## func = FALSE; \
+    }while(0)
+
+DEFINE_EXPECT(dispatch_invoke);
+
+typedef struct
+{
+    IDispatch IDispatch_iface;
+    VARTYPE vt;
+    HRESULT result;
+} DummyDispatch;
+
+static inline DummyDispatch *impl_from_IDispatch(IDispatch *iface)
+{
+    return CONTAINING_RECORD(iface, DummyDispatch, IDispatch_iface);
+}
+
+static ULONG WINAPI DummyDispatch_AddRef(IDispatch *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI DummyDispatch_Release(IDispatch *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI DummyDispatch_QueryInterface(IDispatch *iface,
+                                                   REFIID riid,
+                                                   void** ppvObject)
+{
+    *ppvObject = NULL;
+
+    if (IsEqualIID(riid, &IID_IDispatch) ||
+        IsEqualIID(riid, &IID_IUnknown))
+    {
+        *ppvObject = iface;
+        IDispatch_AddRef(iface);
+    }
+
+    return *ppvObject ? S_OK : E_NOINTERFACE;
+}
+
+static HRESULT WINAPI DummyDispatch_GetTypeInfoCount(IDispatch *iface, UINT *pctinfo)
+{
+    ok(0, "Unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI DummyDispatch_GetTypeInfo(IDispatch *iface, UINT tinfo, LCID lcid, ITypeInfo **ti)
+{
+    ok(0, "Unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI DummyDispatch_GetIDsOfNames(IDispatch *iface, REFIID riid, LPOLESTR *names,
+    UINT cnames, LCID lcid, DISPID *dispid)
+{
+    ok(0, "Unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI DummyDispatch_Invoke(IDispatch *iface,
+                                           DISPID dispid, REFIID riid,
+                                           LCID lcid, WORD wFlags,
+                                           DISPPARAMS *params,
+                                           VARIANT *res,
+                                           EXCEPINFO *ei,
+                                           UINT *arg_err)
+{
+    DummyDispatch *This = impl_from_IDispatch(iface);
+
+    CHECK_EXPECT(dispatch_invoke);
+
+    ok(dispid == DISPID_VALUE, "got dispid %d\n", dispid);
+    ok(IsEqualIID(riid, &IID_NULL), "go riid %s\n", wine_dbgstr_guid(riid));
+    ok(wFlags == DISPATCH_PROPERTYGET, "Flags wrong\n");
+
+    ok(params->rgvarg == NULL, "got %p\n", params->rgvarg);
+    ok(params->rgdispidNamedArgs == NULL, "got %p\n", params->rgdispidNamedArgs);
+    ok(params->cArgs == 0, "got %d\n", params->cArgs);
+    ok(params->cNamedArgs == 0, "got %d\n", params->cNamedArgs);
+
+    ok(res != NULL, "got %p\n", res);
+    ok(V_VT(res) == VT_EMPTY, "got %d\n", V_VT(res));
+    ok(ei == NULL, "got %p\n", ei);
+    ok(arg_err == NULL, "got %p\n", arg_err);
+
+    if (FAILED(This->result))
+        return This->result;
+
+    V_VT(res) = This->vt;
+    if (This->vt == VT_UI1)
+        V_UI1(res) = 34;
+    else if (This->vt == VT_NULL)
+    {
+        V_VT(res) = VT_NULL;
+        V_BSTR(res) = NULL;
+    }
+    else
+        memset(res, 0, sizeof(*res));
+
+    return S_OK;
+}
+
+static const IDispatchVtbl DummyDispatch_VTable =
+{
+    DummyDispatch_QueryInterface,
+    DummyDispatch_AddRef,
+    DummyDispatch_Release,
+    DummyDispatch_GetTypeInfoCount,
+    DummyDispatch_GetTypeInfo,
+    DummyDispatch_GetIDsOfNames,
+    DummyDispatch_Invoke
+};
+
+static void init_test_dispatch(VARTYPE vt, DummyDispatch *dispatch)
+{
+    dispatch->IDispatch_iface.lpVtbl = &DummyDispatch_VTable;
+    dispatch->vt = vt;
+    dispatch->result = S_OK;
+}
+
 typedef struct IRecordInfoImpl
 {
     IRecordInfo IRecordInfo_iface;
@@ -393,7 +537,7 @@ static const char *vtstr(int x)
         return "VT_BSTR_BLOB/VT_ILLEGALMASKED/VT_TYPEMASK";
 
     default:
-        vtstr_current %= sizeof(vtstr_buffer)/sizeof(*vtstr_buffer);
+        vtstr_current %= ARRAY_SIZE(vtstr_buffer);
         sprintf(vtstr_buffer[vtstr_current], "unknown variant type %d", x);
         return vtstr_buffer[vtstr_current++];
     }
@@ -401,7 +545,7 @@ static const char *vtstr(int x)
 
 static const char *variantstr( const VARIANT *var )
 {
-    vtstr_current %= sizeof(vtstr_buffer)/sizeof(*vtstr_buffer);
+    vtstr_current %= ARRAY_SIZE(vtstr_buffer);
     switch(V_VT(var))
     {
     case VT_I1:
@@ -520,7 +664,7 @@ static void test_var_call2( int line, HRESULT (WINAPI *func)(LPVARIANT,LPVARIANT
 static int strcmp_wa(const WCHAR *strw, const char *stra)
 {
     WCHAR buf[512];
-    MultiByteToWideChar(CP_ACP, 0, stra, -1, buf, sizeof(buf)/sizeof(buf[0]));
+    MultiByteToWideChar(CP_ACP, 0, stra, -1, buf, ARRAY_SIZE(buf));
     return lstrcmpW(strw, buf);
 }
 
@@ -648,7 +792,7 @@ static void test_VariantClear(void)
    * Also demonstrates that null pointers in 'v' are not dereferenced.
    * Individual variant tests should test VariantClear() with non-NULL values.
    */
-  for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+  for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
   {
     VARTYPE vt;
 
@@ -777,7 +921,7 @@ static void test_VariantCopy(void)
    */
 
   /* vSrc == vDst */
-  for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+  for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
   {
     for (vt = 0; vt <= VT_BSTR_BLOB; vt++)
     {
@@ -805,7 +949,7 @@ static void test_VariantCopy(void)
   memset(&vSrc, 0, sizeof(vSrc));
   V_VT(&vSrc) = VT_UI1;
 
-  for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+  for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
   {
     for (vt = 0; vt <= VT_BSTR_BLOB; vt++)
     {
@@ -831,7 +975,7 @@ static void test_VariantCopy(void)
   }
 
   /* Test that VariantClear() checks vSrc for validity before copying */
-  for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+  for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
   {
     for (vt = 0; vt <= VT_BSTR_BLOB; vt++)
     {
@@ -935,7 +1079,7 @@ static void test_VariantCopyInd(void)
   memset(buffer, 0, sizeof(buffer));
 
   /* vSrc == vDst */
-  for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+  for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
   {
     if (ExtraFlags[i] & VT_ARRAY)
       continue; /* Native crashes on NULL safearray */
@@ -986,7 +1130,7 @@ static void test_VariantCopyInd(void)
   V_VT(&vSrc) = VT_UI1|VT_BYREF;
   V_BYREF(&vSrc) = &buffer;
 
-  for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+  for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
   {
     for (vt = 0; vt <= VT_BSTR_BLOB; vt++)
     {
@@ -1012,7 +1156,7 @@ static void test_VariantCopyInd(void)
   }
 
   /* bad src */
-  for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+  for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
   {
     if (ExtraFlags[i] & VT_ARRAY)
       continue; /* Native crashes on NULL safearray */
@@ -1132,7 +1276,7 @@ static HRESULT convert_str( const char *str, INT dig, ULONG flags,
                             NUMPARSE *np, BYTE rgb[128], LCID lcid )
 {
     OLECHAR buff[128];
-    MultiByteToWideChar( CP_ACP,0, str, -1, buff, sizeof(buff)/sizeof(WCHAR) );
+    MultiByteToWideChar( CP_ACP,0, str, -1, buff, ARRAY_SIZE( buff ));
     memset( rgb, FAILDIG, 128 );
     memset( np, 255, sizeof(*np) );
     np->cDig = dig;
@@ -1803,6 +1947,11 @@ static void test_VarNumFromParseNum(void)
 
   /* Currency is preferred over decimal */
   SETRGB(0, 1); CONVERT(1,0,0,1,0,0, VTBIT_CY|VTBIT_DECIMAL); EXPECT_CY(1);
+
+  /* Underflow test */
+  SETRGB(0, 1); CONVERT(1,0,NUMPRS_EXPONENT,1,0,-94938484, VTBIT_R4); EXPECT_R4(0.0);
+  SETRGB(0, 1); CONVERT(1,0,NUMPRS_EXPONENT,1,0,-94938484, VTBIT_R8); EXPECT_R8(0.0);
+  SETRGB(0, 1); CONVERT(1,0,NUMPRS_EXPONENT,1,0,-94938484, VTBIT_CY); EXPECT_CY(0);
 }
 
 
@@ -2142,7 +2291,7 @@ static void test_VarAbs(void)
 
     /* Test all possible V_VT values.
      */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
         VARTYPE vt;
 
@@ -2205,7 +2354,7 @@ static void test_VarAbs(void)
     hres = pVarAbs(&v,&vDst);
     ok(hres == S_OK && V_VT(&vDst) == VT_CY && V_CY(&vDst).int64 == 10000,
        "VarAbs(CY): expected 0x0 got 0x%X\n", hres);
-    GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_SDECIMAL, buff, sizeof(buff)/sizeof(char));
+    GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_SDECIMAL, buff, ARRAY_SIZE(buff));
     if (buff[1])
     {
         trace("Skipping VarAbs(BSTR) as decimal separator is '%s'\n", buff);
@@ -2243,7 +2392,7 @@ static void test_VarNot(void)
     CHECKPTR(VarNot);
 
     /* Test all possible V_VT values */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
         VARTYPE vt;
 
@@ -2374,7 +2523,7 @@ static void test_VarSub(void)
     VariantInit(&result);
 
     /* Test all possible flag/vt combinations & the resulting vt type */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
 
         VARTYPE leftvt, rightvt, resvt;
@@ -3105,7 +3254,7 @@ static void test_VarFix(void)
     CHECKPTR(VarFix);
 
     /* Test all possible V_VT values */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
         VARTYPE vt;
 
@@ -3220,7 +3369,7 @@ static void test_VarInt(void)
     CHECKPTR(VarInt);
 
     /* Test all possible V_VT values */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
         VARTYPE vt;
 
@@ -3341,7 +3490,7 @@ static void test_VarNeg(void)
      * native version. This at least ensures (as with all tests here) that
      * we will notice if/when new vtypes/flags are added in native.
      */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
         VARTYPE vt;
 
@@ -3528,7 +3677,7 @@ static void test_VarRound(void)
     VARROUND(DATE,-1.449,1,DATE,-1.4);
 
     /* replace the decimal separator */
-    GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_SDECIMAL, buff, sizeof(buff)/sizeof(char));
+    GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_SDECIMAL, buff, ARRAY_SIZE(buff));
     if (!buff[1]) {
         szNumMin[2] = buff[0];
         szNum[1] = buff[0];
@@ -3572,7 +3721,7 @@ static void test_VarRound(void)
         "VarRound: expected 0x0,%d got 0x%X,%d\n", VT_NULL, hres, V_VT(&vDst));
 
     /* VT_DECIMAL */
-    for (i = 0; i < sizeof(decimal_round_data)/sizeof(struct decimal_round_t); i++)
+    for (i = 0; i < ARRAY_SIZE(decimal_round_data); i++)
     {
         const struct decimal_round_t *ptr = &decimal_round_data[i];
         DECIMAL *pdec;
@@ -3637,7 +3786,7 @@ static void test_VarXor(void)
     CHECKPTR(VarXor);
 
     /* Test all possible flag/vt combinations & the resulting vt type */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
         VARTYPE leftvt, rightvt, resvt;
 
@@ -4371,7 +4520,7 @@ static void test_VarOr(void)
     CHECKPTR(VarOr);
 
     /* Test all possible flag/vt combinations & the resulting vt type */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
         VARTYPE leftvt, rightvt, resvt;
 
@@ -5103,7 +5252,7 @@ static void test_VarEqv(void)
     CHECKPTR(VarEqv);
 
     /* Test all possible flag/vt combinations & the resulting vt type */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
         VARTYPE leftvt, rightvt, resvt;
 
@@ -5247,7 +5396,7 @@ static void test_VarMul(void)
     rbstr = SysAllocString(sz12);
 
     /* Test all possible flag/vt combinations & the resulting vt type */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
         VARTYPE leftvt, rightvt, resvt;
 
@@ -5418,7 +5567,7 @@ static void test_VarAdd(void)
     rbstr = SysAllocString(sz12);
 
     /* Test all possible flag/vt combinations & the resulting vt type */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
         VARTYPE leftvt, rightvt, resvt;
 
@@ -5607,6 +5756,7 @@ static void test_VarCat(void)
     HRESULT hres;
     HRESULT expected_error_num;
     int cmp;
+    DummyDispatch dispatch;
 
     CHECKPTR(VarCat);
 
@@ -5941,6 +6091,81 @@ static void test_VarCat(void)
     VariantClear(&result);
     VariantClear(&expected);
 
+    /* Dispatch conversion */
+    init_test_dispatch(VT_NULL, &dispatch);
+    V_VT(&left) = VT_DISPATCH;
+    V_DISPATCH(&left) = &dispatch.IDispatch_iface;
+
+    SET_EXPECT(dispatch_invoke);
+    hres = VarCat(&left, &right, &result);
+    ok(hres == S_OK, "got 0x%08x\n", hres);
+    ok(V_VT(&result) == VT_BSTR, "got %d\n", V_VT(&result));
+    ok(SysStringLen(V_BSTR(&result)) == 0, "got %d\n", SysStringLen(V_BSTR(&result)));
+    CHECK_CALLED(dispatch_invoke);
+
+    VariantClear(&left);
+    VariantClear(&right);
+    VariantClear(&result);
+
+    init_test_dispatch(VT_NULL, &dispatch);
+    V_VT(&right) = VT_DISPATCH;
+    V_DISPATCH(&right) = &dispatch.IDispatch_iface;
+
+    SET_EXPECT(dispatch_invoke);
+    hres = VarCat(&left, &right, &result);
+    ok(hres == S_OK, "got 0x%08x\n", hres);
+    ok(V_VT(&result) == VT_BSTR, "got %d\n", V_VT(&result));
+    ok(SysStringLen(V_BSTR(&result)) == 0, "got %d\n", SysStringLen(V_BSTR(&result)));
+    CHECK_CALLED(dispatch_invoke);
+
+    VariantClear(&left);
+    VariantClear(&right);
+    VariantClear(&result);
+
+    init_test_dispatch(VT_UI1, &dispatch);
+    V_VT(&right) = VT_DISPATCH;
+    V_DISPATCH(&right) = &dispatch.IDispatch_iface;
+
+    V_VT(&left) = VT_BSTR;
+    V_BSTR(&left) = SysAllocString(sz12);
+    SET_EXPECT(dispatch_invoke);
+    hres = pVarCat(&left,&right,&result);
+    ok(hres == S_OK, "VarCat failed with error 0x%08x\n", hres);
+    CHECK_CALLED(dispatch_invoke);
+    ok(!strcmp_wa(V_BSTR(&result), "1234"), "got %s\n", wine_dbgstr_w(V_BSTR(&result)));
+
+    VariantClear(&left);
+    VariantClear(&right);
+    VariantClear(&result);
+
+    init_test_dispatch(VT_NULL, &dispatch);
+    dispatch.result = E_OUTOFMEMORY;
+    V_VT(&right) = VT_DISPATCH;
+    V_DISPATCH(&right) = &dispatch.IDispatch_iface;
+
+    SET_EXPECT(dispatch_invoke);
+    hres = VarCat(&left, &right, &result);
+    ok(hres == E_OUTOFMEMORY, "got 0x%08x\n", hres);
+    CHECK_CALLED(dispatch_invoke);
+
+    VariantClear(&left);
+    VariantClear(&right);
+    VariantClear(&result);
+
+    init_test_dispatch(VT_NULL, &dispatch);
+    dispatch.result = DISP_E_TYPEMISMATCH;
+    V_VT(&right) = VT_DISPATCH;
+    V_DISPATCH(&right) = &dispatch.IDispatch_iface;
+
+    SET_EXPECT(dispatch_invoke);
+    hres = VarCat(&left, &right, &result);
+    ok(hres == DISP_E_TYPEMISMATCH, "got 0x%08x\n", hres);
+    CHECK_CALLED(dispatch_invoke);
+
+    VariantClear(&left);
+    VariantClear(&right);
+    VariantClear(&result);
+
     /* Test boolean conversion */
     V_VT(&left) = VT_BOOL;
     V_BOOL(&left) = VARIANT_TRUE;
@@ -6006,7 +6231,7 @@ static void test_VarAnd(void)
     false_str = SysAllocString(szFalse);
 
     /* Test all possible flag/vt combinations & the resulting vt type */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
         VARTYPE leftvt, rightvt, resvt;
 
@@ -6722,7 +6947,7 @@ static void test_VarCmp(void)
     bstr1few = SysAllocString(sz1few);
 
     /* Test all possible flag/vt combinations & the resulting vt type */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
         VARTYPE leftvt, rightvt;
 
@@ -6958,7 +7183,7 @@ static void test_VarPow(void)
     num3_str = SysAllocString(str3);
 
     /* Test all possible flag/vt combinations & the resulting vt type */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
         VARTYPE leftvt, rightvt, resvt;
 
@@ -7484,7 +7709,7 @@ static void test_VarDiv(void)
     num2_str = SysAllocString(str2);
 
     /* Test all possible flag/vt combinations & the resulting vt type */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
         VARTYPE leftvt, rightvt, resvt;
 
@@ -7857,7 +8082,7 @@ static void test_VarIdiv(void)
     num2_str = SysAllocString(str2);
 
     /* Test all possible flag/vt combinations & the resulting vt type */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
         VARTYPE leftvt, rightvt, resvt;
 
@@ -8423,7 +8648,7 @@ static void test_VarImp(void)
     false_str = SysAllocString(szFalse);
 
     /* Test all possible flag/vt combinations & the resulting vt type */
-    for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ExtraFlags); i++)
     {
         VARTYPE leftvt, rightvt, resvt;
 

@@ -183,7 +183,7 @@ static void test_ExtTextOut(void)
     static const RECT rc = { 0, 0, 100, 100 };
     BOOL ret;
 
-    assert(sizeof(dx)/sizeof(dx[0]) >= lstrlenA(text));
+    assert(ARRAY_SIZE(dx) >= lstrlenA(text));
 
     /* Win9x doesn't play EMFs on invisible windows */
     hwnd = CreateWindowExA(0, "static", NULL, WS_POPUP | WS_VISIBLE,
@@ -2432,16 +2432,16 @@ static const unsigned char EMF_CLIPPING[] =
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x1e, 0x00, 0x00, 0x00, 0x1d, 0x00, 0x00, 0x00,
+    0x1a, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00,
     0x20, 0x45, 0x4d, 0x46, 0x00, 0x00, 0x01, 0x00,
-    0xd0, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+    0x04, 0x01, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
     0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x05, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
-    0x7c, 0x01, 0x00, 0x00, 0x2c, 0x01, 0x00, 0x00,
+    0x80, 0x07, 0x00, 0x00, 0xb0, 0x04, 0x00, 0x00,
+    0xfc, 0x01, 0x00, 0x00, 0x3e, 0x01, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x60, 0xcc, 0x05, 0x00,
-    0xe0, 0x93, 0x04, 0x00, 0x36, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x60, 0xc0, 0x07, 0x00,
+    0x30, 0xda, 0x04, 0x00, 0x36, 0x00, 0x00, 0x00,
     0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
     0x01, 0x00, 0x00, 0x00, 0x4b, 0x00, 0x00, 0x00,
     0x40, 0x00, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00,
@@ -2451,9 +2451,16 @@ static const unsigned char EMF_CLIPPING[] =
     0x64, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
     0x00, 0x04, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00,
     0x64, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
-    0x00, 0x04, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00,
-    0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x10, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00
+    0x00, 0x04, 0x00, 0x00, 0x3b, 0x00, 0x00, 0x00,
+    0x08, 0x00, 0x00, 0x00, 0x2b, 0x00, 0x00, 0x00,
+    0x18, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00,
+    0x64, 0x00, 0x00, 0x00, 0xff, 0x03, 0x00, 0x00,
+    0xff, 0x03, 0x00, 0x00, 0x3c, 0x00, 0x00, 0x00,
+    0x08, 0x00, 0x00, 0x00, 0x43, 0x00, 0x00, 0x00,
+    0x0c, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x0e, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00,
+    0x14, 0x00, 0x00, 0x00
 };
 
 static void translate( POINT *pt, UINT count, const XFORM *xform )
@@ -2604,6 +2611,12 @@ static void test_emf_clipping(void)
     hrgn = CreateRectRgn(rc_clip.left, rc_clip.top, rc_clip.right, rc_clip.bottom);
     ret = SelectClipRgn(hdc, hrgn);
     ok(ret == SIMPLEREGION, "expected SIMPLEREGION, got %d\n", ret);
+
+    BeginPath(hdc);
+    Rectangle(hdc, rc_clip.left, rc_clip.top, rc_clip.right, rc_clip.bottom);
+    EndPath(hdc);
+    ret = SelectClipPath(hdc, RGN_AND);
+    ok(ret, "SelectClipPath error %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     hemf = CloseEnhMetaFile(hdc);
@@ -3882,8 +3895,7 @@ static void test_emf_GradientFill(void)
      * written to the EMF, but is not considered in the bounds
      * calculation.
      */
-    ret = GdiGradientFill( mf, v, sizeof(v) / sizeof(v[0]), tri, sizeof(tri) / sizeof(tri[0]),
-                           GRADIENT_FILL_TRIANGLE );
+    ret = GdiGradientFill( mf, v, ARRAY_SIZE(v), tri, ARRAY_SIZE(tri), GRADIENT_FILL_TRIANGLE );
     ok( ret, "GradientFill\n" );
 
     hemf = CloseEnhMetaFile( mf );
@@ -3897,6 +3909,258 @@ static void test_emf_GradientFill(void)
     }
 
     DeleteEnhMetaFile( hemf );
+}
+
+static void set_rotation_xform(XFORM *out, float rad, int dx, int dy)
+{
+    out->eM11 = cosf(rad);
+    out->eM12 = -1.f * sinf(rad);
+    out->eM21 = sinf(rad);
+    out->eM22 = cosf(rad);
+    out->eDx = dx;
+    out->eDy = dy;
+}
+
+struct emf_WorldTransform_test_data
+{
+    const char *name;
+
+    BOOL do_modify;
+    BOOL do_playback;
+
+    XFORM expected;
+    XFORM scale;
+    XFORM stored; /* this is the "hidden" world transform used in PlayEnhMetaFileRecord */
+};
+
+static BOOL xform_eq(const XFORM *a, const XFORM *b)
+{
+    return fabs(a->eM11 - b->eM11) < 0.001f &&
+        fabs(a->eM12 - b->eM12) < 0.001f &&
+        fabs(a->eM21 - b->eM21) < 0.001f &&
+        fabs(a->eM22 - b->eM22) < 0.001f &&
+        fabs(a->eDx - b->eDx) < 0.001f &&
+        fabs(a->eDy - b->eDy) < 0.001f;
+}
+
+static INT CALLBACK enum_emf_WorldTransform(HDC hdc, HANDLETABLE *ht,
+        const ENHMETARECORD *emr, INT nobj, LPARAM param)
+{
+    XFORM xform = {0};
+    struct emf_WorldTransform_test_data *test_data = (struct emf_WorldTransform_test_data *)param;
+    BOOL ret;
+
+    switch(emr->iType)
+    {
+    case EMR_SETWORLDTRANSFORM:
+        {
+            const EMRSETWORLDTRANSFORM *lpXfrm = (const EMRSETWORLDTRANSFORM *)emr;
+
+            /* get scale factors with an identity world transform */
+            GetWorldTransform(hdc, &test_data->scale);
+
+            /* play back record */
+            ret = PlayEnhMetaFileRecord(hdc, ht, emr, nobj);
+            ok(ret == TRUE, "%s: PlayEnhMetaFileRecord failed\n", test_data->name);
+
+            test_data->stored = lpXfrm->xform;
+            CombineTransform(&test_data->expected, &test_data->stored, &test_data->scale);
+
+            /* verify it is updated immediately */
+            ret = GetWorldTransform(hdc, &xform);
+            ok(ret == TRUE, "%s: GetWorldTransform failed\n", test_data->name);
+            ok(xform_eq(&xform, &test_data->expected),
+                    "%s: After SWT playback, got wrong world transform: %f, %f; %f %f; %f %f; expected: %f, %f; %f %f; %f %f\n",
+                    test_data->name,
+                    xform.eM11, xform.eM12,
+                    xform.eM21, xform.eM22,
+                    xform.eDx, xform.eDy,
+                    test_data->expected.eM11, test_data->expected.eM12,
+                    test_data->expected.eM21, test_data->expected.eM22,
+                    test_data->expected.eDx, test_data->expected.eDy);
+
+            break;
+        }
+
+    case EMR_MODIFYWORLDTRANSFORM:
+        {
+            const EMRMODIFYWORLDTRANSFORM *lpXfrm = (const EMRMODIFYWORLDTRANSFORM *)emr;
+
+            /* transform persists across calls */
+            ret = GetWorldTransform(hdc, &xform);
+            ok(ret == TRUE, "%s: GetWorldTransform failed\n", test_data->name);
+            ok(xform_eq(&xform, &test_data->expected),
+                    "%s: On MWT entry, got wrong world transform: %f, %f; %f %f; %f %f; expected: %f, %f; %f %f; %f %f\n",
+                    test_data->name,
+                    xform.eM11, xform.eM12,
+                    xform.eM21, xform.eM22,
+                    xform.eDx, xform.eDy,
+                    test_data->expected.eM11, test_data->expected.eM12,
+                    test_data->expected.eM21, test_data->expected.eM22,
+                    test_data->expected.eDx, test_data->expected.eDy);
+
+            if(test_data->do_playback)
+            {
+                /* play back record */
+                ret = PlayEnhMetaFileRecord(hdc, ht, emr, nobj);
+                ok(ret == TRUE, "%s: PlayEnhMetaFileRecord failed\n", test_data->name);
+
+                if(lpXfrm->iMode == MWT_LEFTMULTIPLY)
+                {
+                    /* left multiply does not discard direct modifications */
+                    CombineTransform(&test_data->expected, &lpXfrm->xform, &test_data->expected);
+
+                    /* and updates the stored matrix separately */
+                    CombineTransform(&test_data->stored, &lpXfrm->xform, &test_data->stored);
+
+                }
+                else if(lpXfrm->iMode == MWT_RIGHTMULTIPLY)
+                {
+                    /* but right multiply does discard */
+                    CombineTransform(&test_data->stored, &test_data->stored, &lpXfrm->xform);
+
+                    CombineTransform(&test_data->expected, &test_data->stored, &test_data->scale);
+                }
+
+                /* verify it is updated immediately */
+                ret = GetWorldTransform(hdc, &xform);
+                ok(ret == TRUE, "%s: GetWorldTransform failed\n", test_data->name);
+                ok(xform_eq(&xform, &test_data->expected),
+                        "%s: After MWT playback, got wrong world transform: %f, %f; %f %f; %f %f; expected: %f, %f; %f %f; %f %f\n",
+                        test_data->name,
+                        xform.eM11, xform.eM12,
+                        xform.eM21, xform.eM22,
+                        xform.eDx, xform.eDy,
+                        test_data->expected.eM11, test_data->expected.eM12,
+                        test_data->expected.eM21, test_data->expected.eM22,
+                        test_data->expected.eDx, test_data->expected.eDy);
+            }
+
+            if(test_data->do_modify)
+            {
+                /* modify directly */
+                set_rotation_xform(&xform, M_PI / 4.f, 1, -1);
+                ret = ModifyWorldTransform(hdc, &xform, MWT_LEFTMULTIPLY);
+                ok(ret == TRUE, "%s: ModifyWorldTransform failed\n", test_data->name);
+
+                /* the modified transform persists across callback calls */
+                CombineTransform(&test_data->expected, &xform, &test_data->expected);
+
+                ret = GetWorldTransform(hdc, &xform);
+                ok(ret == TRUE, "%s: GetWorldTransform failed\n", test_data->name);
+                ok(xform_eq(&xform, &test_data->expected),
+                        "%s: After ModifyWT, got wrong world transform: %f, %f; %f %f; %f %f; expected: %f, %f; %f %f; %f %f\n",
+                        test_data->name,
+                        xform.eM11, xform.eM12,
+                        xform.eM21, xform.eM22,
+                        xform.eDx, xform.eDy,
+                        test_data->expected.eM11, test_data->expected.eM12,
+                        test_data->expected.eM21, test_data->expected.eM22,
+                        test_data->expected.eDx, test_data->expected.eDy);
+            }
+
+            break;
+        }
+
+    case EMR_LINETO:
+        ret = GetWorldTransform(hdc, &xform);
+        ok(ret == TRUE, "%s: GetWorldTransform failed\n", test_data->name);
+        ok(xform_eq(&xform, &test_data->expected),
+                "%s: Before LINETO playback, got wrong world transform: %f, %f; %f %f; %f %f; expected: %f, %f; %f %f; %f %f\n",
+                test_data->name,
+                xform.eM11, xform.eM12,
+                xform.eM21, xform.eM22,
+                xform.eDx, xform.eDy,
+                test_data->expected.eM11, test_data->expected.eM12,
+                test_data->expected.eM21, test_data->expected.eM22,
+                test_data->expected.eDx, test_data->expected.eDy);
+
+        ret = PlayEnhMetaFileRecord(hdc, ht, emr, nobj);
+        ok(ret == TRUE, "%s: PlayEnhMetaFileRecord failed\n", test_data->name);
+
+        /* transform doesn't change during LINETO playback */
+        ret = GetWorldTransform(hdc, &xform);
+        ok(ret == TRUE, "%s: GetWorldTransform failed\n", test_data->name);
+        ok(xform_eq(&xform, &test_data->expected),
+                "%s: After LINETO playback, got wrong world transform: %f, %f; %f %f; %f %f; expected: %f, %f; %f %f; %f %f\n",
+                test_data->name,
+                xform.eM11, xform.eM12,
+                xform.eM21, xform.eM22,
+                xform.eDx, xform.eDy,
+                test_data->expected.eM11, test_data->expected.eM12,
+                test_data->expected.eM21, test_data->expected.eM22,
+                test_data->expected.eDx, test_data->expected.eDy);
+
+        break;
+
+    default:
+        PlayEnhMetaFileRecord(hdc, ht, emr, nobj);
+        break;
+    }
+
+    return 1;
+}
+
+static void test_emf_WorldTransform(void)
+{
+    HDC hdcMetafile, hdc;
+    HWND hwnd;
+    HENHMETAFILE hemf;
+    XFORM xform;
+    BOOL ret;
+    RECT rect = { 0, 0, 100, 100 };
+    int i;
+    struct emf_WorldTransform_test_data test_data[] = {
+        { "normal", FALSE, TRUE },
+        { "playback and modify", TRUE, TRUE },
+        { "manual modify", TRUE, FALSE }
+    };
+
+    for(i = 0; i < ARRAY_SIZE(test_data); ++i)
+    {
+        hdcMetafile = CreateEnhMetaFileA(GetDC(0), NULL, NULL, NULL);
+        ok(hdcMetafile != 0, "CreateEnhMetaFileA error %d\n", GetLastError());
+
+        ret = SetGraphicsMode(hdcMetafile, GM_ADVANCED);
+        ok(ret == TRUE, "SetGraphicsMode failed\n");
+
+        set_rotation_xform(&xform, M_PI / 4.f, 2, 3);
+        ret = SetWorldTransform(hdcMetafile, &xform); /* EMR_SETWORLDTRANSFORM */
+        ok(ret == TRUE, "SetWorldTransform failed\n");
+
+        set_rotation_xform(&xform, M_PI / 2.f, -2, -3);
+        ret = ModifyWorldTransform(hdcMetafile, &xform, MWT_LEFTMULTIPLY); /* EMR_MODIFYWORLDTRANSFORM */
+        ok(ret == TRUE, "ModifyWorldTransform failed\n");
+
+        set_rotation_xform(&xform, M_PI / 3.f, -2, 3);
+        ret = ModifyWorldTransform(hdcMetafile, &xform, MWT_LEFTMULTIPLY); /* EMR_MODIFYWORLDTRANSFORM */
+        ok(ret == TRUE, "ModifyWorldTransform failed\n");
+
+        set_rotation_xform(&xform, M_PI, 2, -3);
+        ret = ModifyWorldTransform(hdcMetafile, &xform, MWT_RIGHTMULTIPLY); /* EMR_MODIFYWORLDTRANSFORM */
+        ok(ret == TRUE, "ModifyWorldTransform failed\n");
+
+        ret = LineTo(hdcMetafile, 1, 1);
+        ok(ret == TRUE, "LineTo failed\n");
+
+        hemf = CloseEnhMetaFile(hdcMetafile);
+        ok(hemf != 0, "CloseEnhMetaFile error %d\n", GetLastError());
+
+        hwnd = CreateWindowExA(0, "static", NULL, WS_POPUP | WS_VISIBLE,
+                               0, 0, 200, 200, 0, 0, 0, NULL);
+        ok(hwnd != 0, "CreateWindowExA error %d\n", GetLastError());
+
+        hdc = GetDC(hwnd);
+        ok(hdc != 0, "GetDC failed\n");
+
+        ret = EnumEnhMetaFile(hdc, hemf, enum_emf_WorldTransform, &test_data[i], &rect);
+        ok(ret == TRUE, "EnumEnhMetaFile failed: %u\n", GetLastError());
+
+        ReleaseDC(hwnd, hdc);
+        DestroyWindow(hwnd);
+
+        DeleteEnhMetaFile(hemf);
+    }
 }
 
 START_TEST(metafile)
@@ -3915,6 +4179,7 @@ START_TEST(metafile)
     test_emf_paths();
     test_emf_PolyPolyline();
     test_emf_GradientFill();
+    test_emf_WorldTransform();
 
     /* For win-format metafiles (mfdrv) */
     test_mf_SaveDC();

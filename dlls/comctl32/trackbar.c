@@ -18,16 +18,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
- *
- * NOTE
- * 
- * This code was audited for completeness against the documented features
- * of Comctl32.dll version 6.0 on Sep. 12, 2002, by Dimitrie O. Paun.
- * 
- * Unless otherwise noted, we believe this code to be complete, as per
- * the specification mentioned above.
- * If you discover missing features, or bugs, please note them below.
- * 
  */
 
 #include <stdarg.h>
@@ -69,9 +59,8 @@ typedef struct
     HWND hwndBuddyLA;
     HWND hwndBuddyRB;
     INT  fLocation;
-    INT  flags;
+    DWORD flags;
     BOOL bUnicode;
-    BOOL bFocussed;
     RECT rcChannel;
     RECT rcSelection;
     RECT rcThumb;
@@ -88,15 +77,19 @@ typedef struct
 /* Used by TRACKBAR_Refresh to find out which parts of the control
    need to be recalculated */
 
-#define TB_THUMBPOSCHANGED      1
-#define TB_THUMBSIZECHANGED     2
-#define TB_THUMBCHANGED 	(TB_THUMBPOSCHANGED | TB_THUMBSIZECHANGED)
-#define TB_SELECTIONCHANGED     4
-#define TB_DRAG_MODE            8     /* we're dragging the slider */
-#define TB_AUTO_PAGE_LEFT	16
-#define TB_AUTO_PAGE_RIGHT	32
-#define TB_AUTO_PAGE		(TB_AUTO_PAGE_LEFT | TB_AUTO_PAGE_RIGHT)
-#define TB_THUMB_HOT            64    /* mouse hovers above thumb */
+#define TB_THUMBPOSCHANGED      0x00000001
+#define TB_THUMBSIZECHANGED     0x00000002
+#define TB_THUMBCHANGED        (TB_THUMBPOSCHANGED | TB_THUMBSIZECHANGED)
+#define TB_SELECTIONCHANGED     0x00000004
+#define TB_DRAG_MODE            0x00000008     /* we're dragging the slider */
+#define TB_AUTO_PAGE_LEFT       0x00000010
+#define TB_AUTO_PAGE_RIGHT      0x00000020
+#define TB_AUTO_PAGE           (TB_AUTO_PAGE_LEFT | TB_AUTO_PAGE_RIGHT)
+#define TB_THUMB_HOT            0x00000040    /* mouse hovers above thumb */
+
+/* Page was set with TBM_SETPAGESIZE */
+#define TB_USER_PAGE            0x00000080
+#define TB_IS_FOCUSED           0x00000100
 
 /* helper defines for TRACKBAR_DrawTic */
 #define TIC_EDGE                0x20
@@ -694,7 +687,7 @@ TRACKBAR_FillThumb (const TRACKBAR_INFO *infoPtr, HDC hdc, HBRUSH hbrush)
 
     oldbr = SelectObject(hdc, hbrush);
     SetPolyFillMode(hdc, WINDING);
-    Polygon(hdc, points, sizeof(points) / sizeof(points[0]));
+    Polygon(hdc, points, ARRAY_SIZE(points));
     SelectObject(hdc, oldbr);
 
     return PointDepth;
@@ -1006,7 +999,7 @@ TRACKBAR_Refresh (TRACKBAR_INFO *infoPtr, HDC hdcDst)
     }
 
     /* draw focus rectangle */
-    if (infoPtr->bFocussed) {
+    if (infoPtr->flags & TB_IS_FOCUSED) {
 	DrawFocusRect(hdc, &rcClient);
     }
 
@@ -1203,16 +1196,30 @@ TRACKBAR_SetLineSize (TRACKBAR_INFO *infoPtr, LONG lLineSize)
     return lTemp;
 }
 
+static void TRACKBAR_UpdatePageSize(TRACKBAR_INFO *infoPtr)
+{
+    if (infoPtr->flags & TB_USER_PAGE)
+        return;
+
+    infoPtr->lPageSize = (infoPtr->lRangeMax - infoPtr->lRangeMin) / 5;
+    if (infoPtr->lPageSize == 0) infoPtr->lPageSize = 1;
+}
 
 static inline LONG
 TRACKBAR_SetPageSize (TRACKBAR_INFO *infoPtr, LONG lPageSize)
 {
     LONG lTemp = infoPtr->lPageSize;
 
-    if (lPageSize != -1)
-        infoPtr->lPageSize = lPageSize;
+    if (lPageSize == -1)
+    {
+        infoPtr->flags &= ~TB_USER_PAGE;
+        TRACKBAR_UpdatePageSize(infoPtr);
+    }
     else
-        infoPtr->lPageSize = TB_DEFAULTPAGESIZE;
+    {
+        infoPtr->flags |= TB_USER_PAGE;
+        infoPtr->lPageSize = lPageSize;
+    }
 
     return lTemp;
 }
@@ -1239,7 +1246,6 @@ TRACKBAR_SetPos (TRACKBAR_INFO *infoPtr, BOOL fPosition, LONG lPosition)
     return 0;
 }
 
-
 static inline LRESULT
 TRACKBAR_SetRange (TRACKBAR_INFO *infoPtr, BOOL redraw, LONG range)
 {
@@ -1256,8 +1262,7 @@ TRACKBAR_SetRange (TRACKBAR_INFO *infoPtr, BOOL redraw, LONG range)
     if (infoPtr->lPos > infoPtr->lRangeMax)
         infoPtr->lPos = infoPtr->lRangeMax;
 
-    infoPtr->lPageSize = (infoPtr->lRangeMax - infoPtr->lRangeMin) / 5;
-    if (infoPtr->lPageSize == 0) infoPtr->lPageSize = 1;
+    TRACKBAR_UpdatePageSize(infoPtr);
 
     if (changed) {
         if (infoPtr->dwStyle & TBS_AUTOTICKS)
@@ -1283,8 +1288,7 @@ TRACKBAR_SetRangeMax (TRACKBAR_INFO *infoPtr, BOOL redraw, LONG lMax)
         infoPtr->flags |= TB_THUMBPOSCHANGED;
     }
 
-    infoPtr->lPageSize = (infoPtr->lRangeMax - infoPtr->lRangeMin) / 5;
-    if (infoPtr->lPageSize == 0) infoPtr->lPageSize = 1;
+    TRACKBAR_UpdatePageSize(infoPtr);
 
     if (changed && (infoPtr->dwStyle & TBS_AUTOTICKS))
         TRACKBAR_RecalculateTics (infoPtr);
@@ -1306,8 +1310,7 @@ TRACKBAR_SetRangeMin (TRACKBAR_INFO *infoPtr, BOOL redraw, LONG lMin)
         infoPtr->flags |= TB_THUMBPOSCHANGED;
     }
 
-    infoPtr->lPageSize = (infoPtr->lRangeMax - infoPtr->lRangeMin) / 5;
-    if (infoPtr->lPageSize == 0) infoPtr->lPageSize = 1;
+    TRACKBAR_UpdatePageSize(infoPtr);
 
     if (changed && (infoPtr->dwStyle & TBS_AUTOTICKS))
         TRACKBAR_RecalculateTics (infoPtr);
@@ -1465,25 +1468,28 @@ TRACKBAR_SetUnicodeFormat (TRACKBAR_INFO *infoPtr, BOOL fUnicode)
     return bTemp;
 }
 
+static int get_scaled_metric(const TRACKBAR_INFO *infoPtr, int value)
+{
+    return MulDiv(value, GetDpiForWindow(infoPtr->hwndSelf), 96);
+}
 
 static LRESULT
 TRACKBAR_InitializeThumb (TRACKBAR_INFO *infoPtr)
 {
+    int client_size;
     RECT rect;
-    int clientWidth, clientMetric;
 
-    /* initial thumb length */
-    clientMetric = (infoPtr->dwStyle & TBS_ENABLESELRANGE) ? 23 : 21;
+    infoPtr->uThumbLen = get_scaled_metric(infoPtr, infoPtr->dwStyle & TBS_ENABLESELRANGE ? 23 : 21);
+
     GetClientRect(infoPtr->hwndSelf,&rect);
-    if (infoPtr->dwStyle & TBS_VERT) {
-	clientWidth = rect.right - rect.left;
-    } else {
-	clientWidth = rect.bottom - rect.top;
-    }
-    if (clientWidth >= clientMetric)
-        infoPtr->uThumbLen = clientMetric;
+    if (infoPtr->dwStyle & TBS_VERT)
+        client_size = rect.right - rect.left;
     else
-        infoPtr->uThumbLen = clientWidth > 9 ? clientWidth - 6 : 4;
+        client_size = rect.bottom - rect.top;
+
+    if (client_size < infoPtr->uThumbLen)
+        infoPtr->uThumbLen = client_size > get_scaled_metric(infoPtr, 9) ?
+            client_size - get_scaled_metric(infoPtr, 5) : get_scaled_metric(infoPtr, 4);
 
     TRACKBAR_CalcChannel (infoPtr);
     TRACKBAR_UpdateThumb (infoPtr);
@@ -1570,7 +1576,7 @@ static LRESULT
 TRACKBAR_KillFocus (TRACKBAR_INFO *infoPtr)
 {
     TRACE("\n");
-    infoPtr->bFocussed = FALSE;
+    infoPtr->flags &= ~TB_IS_FOCUSED;
     TRACKBAR_InvalidateAll(infoPtr);
 
     return 0;
@@ -1657,7 +1663,7 @@ static LRESULT
 TRACKBAR_SetFocus (TRACKBAR_INFO *infoPtr)
 {
     TRACE("\n");
-    infoPtr->bFocussed = TRUE;
+    infoPtr->flags |= TB_IS_FOCUSED;
     TRACKBAR_InvalidateAll(infoPtr);
 
     return 0;

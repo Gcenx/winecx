@@ -81,7 +81,7 @@ typedef struct _XA2SourceImpl {
     /* most cases will only need about 4 AL buffers, but some corner cases
      * could require up to MAX_QUEUED_BUFFERS */
     ALuint al_bufs[XAUDIO2_MAX_QUEUED_BUFFERS];
-    DWORD first_al_buf, al_bufs_used;
+    DWORD first_al_buf, al_bufs_used, abandoned_albufs;
 
     struct list entry;
 } XA2SourceImpl;
@@ -181,5 +181,5 @@ extern const IXAudio22Vtbl XAudio22_Vtbl DECLSPEC_HIDDEN;
 extern const IXAudio27Vtbl XAudio27_Vtbl DECLSPEC_HIDDEN;
 #endif
 
-extern IClassFactory *make_xapo_factory(REFCLSID clsid) DECLSPEC_HIDDEN;
+extern HRESULT make_xapo_factory(REFCLSID clsid, REFIID riid, void **ppv) DECLSPEC_HIDDEN;
 extern HRESULT xaudio2_initialize(IXAudio2Impl *This, UINT32 flags, XAUDIO2_PROCESSOR proc) DECLSPEC_HIDDEN;

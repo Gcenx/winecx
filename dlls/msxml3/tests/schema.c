@@ -432,9 +432,8 @@ static const CHAR szOpenSeqXML4[] = "<test><x/><x/><y/><z/><z/><v/></test>";
 #define _expect64(expr, str, base, TYPE, CONV) { \
     TYPE v1 = expr; \
     TYPE v2 = CONV(str, NULL, base); \
-    ok(v1 == v2, #expr "returned 0x%08x%08x, expected 0x%08x%08x\n", \
-                  (ULONG)((ULONG64)v1 >> 32), (ULONG)((ULONG64)v2 & (ULONG64)0xffffffff), \
-                  (ULONG)((ULONG64)v1 >> 32), (ULONG)((ULONG64)v2 & (ULONG64)0xffffffff)); \
+    ok(v1 == v2, #expr "returned %s, expected %s\n", \
+                  wine_dbgstr_longlong(v1), wine_dbgstr_longlong(v2)); \
 }
 
 #define expect_int64(expr, x, base) _expect64(expr, #x, base, LONG64, strtoll)
@@ -453,7 +452,7 @@ static BSTR alloc_str_from_narrow(const char *str)
 
 static BSTR _bstr_(const char *str)
 {
-    assert(alloced_bstrs_count < sizeof(alloced_bstrs)/sizeof(alloced_bstrs[0]));
+    assert(alloced_bstrs_count < ARRAY_SIZE(alloced_bstrs));
     alloced_bstrs[alloced_bstrs_count] = alloc_str_from_narrow(str);
     return alloced_bstrs[alloced_bstrs_count++];
 }
@@ -667,25 +666,25 @@ static void test_collection_refs(void)
     LONG length;
 
     schema1 = create_document(&IID_IXMLDOMDocument2);
+    ok(schema1 != NULL, "Failed to create a document.\n");
+
+    cache1 = create_cache(&IID_IXMLDOMSchemaCollection);
+    ok(cache1 != NULL, "Failed to create schema collection.\n");
+
+    if (!schema1 || !cache1)
+    {
+        if (schema1)
+            IXMLDOMDocument2_Release(schema1);
+        if (cache1)
+            IXMLDOMSchemaCollection_Release(cache1);
+        return;
+    }
+
     schema2 = create_document(&IID_IXMLDOMDocument2);
     schema3 = create_document(&IID_IXMLDOMDocument2);
 
-    cache1 = create_cache(&IID_IXMLDOMSchemaCollection);
     cache2 = create_cache(&IID_IXMLDOMSchemaCollection);
     cache3 = create_cache(&IID_IXMLDOMSchemaCollection);
-
-    if (!schema1 || !schema2 || !schema3 || !cache1 || !cache2 || !cache3)
-    {
-        if (schema1) IXMLDOMDocument2_Release(schema1);
-        if (schema2) IXMLDOMDocument2_Release(schema2);
-        if (schema3) IXMLDOMDocument2_Release(schema3);
-
-        if (cache1) IXMLDOMSchemaCollection_Release(cache1);
-        if (cache2) IXMLDOMSchemaCollection_Release(cache2);
-        if (cache3) IXMLDOMSchemaCollection_Release(cache2);
-
-        return;
-    }
 
     ole_check(IXMLDOMDocument2_loadXML(schema1, _bstr_(xdr_schema1_xml), &b));
     ok(b == VARIANT_TRUE, "failed to load XML\n");

@@ -164,6 +164,7 @@ static void test_invert(void)
     GdipCreateMatrix2(2.0/16.0, 2.0/16.0, -5.0/16.0, 3.0/16.0, 3.0/16.0, -21.0/16.0, &inverted);
     GdipIsMatrixEqual(matrix, inverted, &equal);
     expect(TRUE, equal);
+    GdipDeleteMatrix(matrix);
 
     GdipCreateMatrix2(0.0006, 0, 0, 0.0006, 400, 400, &matrix);
     status = GdipInvertMatrix(matrix);
@@ -373,6 +374,13 @@ START_TEST(matrix)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
     ULONG_PTR gdiplusToken;
+    HMODULE hmsvcrt;
+    int (CDECL * _controlfp_s)(unsigned int *cur, unsigned int newval, unsigned int mask);
+
+    /* Enable all FP exceptions except _EM_INEXACT, which gdi32 can trigger */
+    hmsvcrt = LoadLibraryA("msvcrt");
+    _controlfp_s = (void*)GetProcAddress(hmsvcrt, "_controlfp_s");
+    if (_controlfp_s) _controlfp_s(0, 0, 0x0008001e);
 
     gdiplusStartupInput.GdiplusVersion              = 1;
     gdiplusStartupInput.DebugEventCallback          = NULL;

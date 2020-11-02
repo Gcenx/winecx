@@ -63,6 +63,7 @@ int use_precise_scrolling = TRUE;
 int gl_surface_mode = GL_SURFACE_IN_FRONT_OPAQUE;
 int retina_enabled = FALSE;
 HMODULE macdrv_module = 0;
+int enable_app_nap = FALSE;
 
 /* CrossOver Hack 14364 */
 BOOL force_backing_store = FALSE;
@@ -95,7 +96,7 @@ const char* debugstr_cf(CFTypeRef t)
     if (!ret)
     {
         UniChar buf[200];
-        int len = min(CFStringGetLength(s), sizeof(buf)/sizeof(buf[0]));
+        int len = min(CFStringGetLength(s), ARRAY_SIZE(buf));
         CFStringGetCharacters(s, CFRangeMake(0, len), buf);
         ret = debugstr_wn(buf, len);
     }
@@ -213,6 +214,9 @@ static void setup_options(void)
             gl_surface_mode = GL_SURFACE_IN_FRONT_OPAQUE;
     }
 
+    if (!get_config_key(hkey, appkey, "EnableAppNap", buffer, sizeof(buffer)))
+        enable_app_nap = IS_OPTION_TRUE(buffer[0]);
+
     /* Don't use appkey.  The DPI and monitor sizes should be consistent for all
        processes in the prefix. */
     if (!get_config_key(hkey, NULL, "RetinaMode", buffer, sizeof(buffer)))
@@ -258,7 +262,7 @@ static void load_strings(HINSTANCE instance)
         return;
     }
 
-    for (i = 0; i < sizeof(ids) / sizeof(ids[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(ids); i++)
     {
         LPCWSTR str;
         int len = LoadStringW(instance, ids[i], (LPWSTR)&str, 0);

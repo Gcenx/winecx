@@ -2,10 +2,10 @@
  * Cursor and icon support
  *
  * Copyright 1995 Alexandre Julliard
- *           1996 Martin Von Loewis
- *           1997 Alex Korobka
- *           1998 Turchanov Sergey
- *           2007 Henri Verbeet
+ * Copyright 1996 Martin Von Loewis
+ * Copyright 1997 Alex Korobka
+ * Copyright 1998 Turchanov Sergey
+ * Copyright 2007 Henri Verbeet
  * Copyright 2009 Vincent Povirk for CodeWeavers
  * Copyright 2016 Dmitry Timoshkov
  *
@@ -103,15 +103,20 @@ struct animated_cursoricon_object
     HICON                    frames[1];  /* list of animated cursor frames */
 };
 
-static HDC get_screen_dc(void)
+static HBITMAP create_color_bitmap( int width, int height )
 {
-    static const WCHAR DISPLAYW[] = {'D','I','S','P','L','A','Y',0};
-    static HDC screen_dc;
+    HDC hdc = get_display_dc();
+    HBITMAP ret = CreateCompatibleBitmap( hdc, width, height );
+    release_display_dc( hdc );
+    return ret;
+}
 
-    if (!screen_dc)
-        screen_dc = CreateDCW( DISPLAYW, NULL, NULL, NULL );
-
-    return screen_dc;
+static int get_display_bpp(void)
+{
+    HDC hdc = get_display_dc();
+    int ret = GetDeviceCaps( hdc, BITSPIXEL );
+    release_display_dc( hdc );
+    return ret;
 }
 
 #ifdef SONAME_LIBPNG
@@ -164,19 +169,11 @@ MAKE_FUNCPTR(png_set_gray_to_rgb);
 MAKE_FUNCPTR(png_set_read_fn);
 #undef MAKE_FUNCPTR
 
-static BOOL load_libpng(void)
+static INIT_ONCE init_once = INIT_ONCE_STATIC_INIT;
+
+static BOOL WINAPI load_libpng( INIT_ONCE *once, void *param, void **context )
 {
     int i;
-
-    if (libpng_handle) return TRUE;
-
-    USER_Lock();
-
-    if (libpng_handle)
-    {
-        USER_Unlock();
-        return TRUE;
-    }
 
     for(i = 0; i < sizeof(libpng_candidates) / sizeof(*libpng_candidates); ++i){
         soname_libpng = libpng_candidates[i].soname;
@@ -185,40 +182,39 @@ static BOOL load_libpng(void)
         if(libpng_handle)
             break;
     }
-
-    if (libpng_handle)
+    if (!libpng_handle)
     {
+        WARN( "failed to load %s\n", SONAME_LIBPNG );
+        return TRUE;
+    }
 #define LOAD_FUNCPTR(f) \
     if ((p##f = wine_dlsym(libpng_handle, #f, NULL, 0)) == NULL) \
     { \
+        WARN( "%s not found in %s\n", #f, soname_libpng ); \
         libpng_handle = NULL; \
-        USER_Unlock(); \
-        return FALSE; \
+        return TRUE; \
     }
-        LOAD_FUNCPTR(png_create_read_struct);
-        LOAD_FUNCPTR(png_create_info_struct);
-        LOAD_FUNCPTR(png_destroy_read_struct);
-        LOAD_FUNCPTR(png_error);
-        LOAD_FUNCPTR(png_get_bit_depth);
-        LOAD_FUNCPTR(png_get_color_type);
-        LOAD_FUNCPTR(png_get_error_ptr);
-        LOAD_FUNCPTR(png_get_image_height);
-        LOAD_FUNCPTR(png_get_image_width);
-        LOAD_FUNCPTR(png_get_io_ptr);
-        LOAD_FUNCPTR(png_read_image);
-        LOAD_FUNCPTR(png_read_info);
-        LOAD_FUNCPTR(png_read_update_info);
-        LOAD_FUNCPTR(png_set_bgr);
-        LOAD_FUNCPTR(png_set_crc_action);
-        LOAD_FUNCPTR(png_set_error_fn);
-        LOAD_FUNCPTR(png_set_expand);
-        LOAD_FUNCPTR(png_set_gray_to_rgb);
-        LOAD_FUNCPTR(png_set_read_fn);
+    LOAD_FUNCPTR(png_create_read_struct);
+    LOAD_FUNCPTR(png_create_info_struct);
+    LOAD_FUNCPTR(png_destroy_read_struct);
+    LOAD_FUNCPTR(png_error);
+    LOAD_FUNCPTR(png_get_bit_depth);
+    LOAD_FUNCPTR(png_get_color_type);
+    LOAD_FUNCPTR(png_get_error_ptr);
+    LOAD_FUNCPTR(png_get_image_height);
+    LOAD_FUNCPTR(png_get_image_width);
+    LOAD_FUNCPTR(png_get_io_ptr);
+    LOAD_FUNCPTR(png_read_image);
+    LOAD_FUNCPTR(png_read_info);
+    LOAD_FUNCPTR(png_read_update_info);
+    LOAD_FUNCPTR(png_set_bgr);
+    LOAD_FUNCPTR(png_set_crc_action);
+    LOAD_FUNCPTR(png_set_error_fn);
+    LOAD_FUNCPTR(png_set_expand);
+    LOAD_FUNCPTR(png_set_gray_to_rgb);
+    LOAD_FUNCPTR(png_set_read_fn);
 #undef LOAD_FUNCPTR
-    }
-
-    USER_Unlock();
-    return libpng_handle != NULL;
+    return TRUE;
 }
 
 static void user_error_fn(png_structp png_ptr, png_const_charp error_message)
@@ -240,11 +236,8 @@ static void user_warning_fn(png_structp png_ptr, png_const_charp warning_message
 
 struct png_wrapper
 {
-    png_structp png_ptr;
-    png_infop info_ptr;
-    int width, height, bpp;
     const char *buffer;
-    int size, pos;
+    size_t size, pos;
 };
 
 static void user_read_data(png_structp png_ptr, png_bytep data, png_size_t length)
@@ -258,85 +251,131 @@ static void user_read_data(png_structp png_ptr, png_bytep data, png_size_t lengt
     }
     else
     {
-        ppng_error(png->png_ptr, "failed to read PNG data");
+        ppng_error(png_ptr, "failed to read PNG data");
     }
 }
 
-static BOOL create_png_decoder(struct png_wrapper *png)
+static unsigned be_uint(unsigned val)
 {
-    jmp_buf jmpbuf;
-    int color_type, bit_depth;
-    static int enable_png_icons = -1;
-
-    if (enable_png_icons == -1)
-        enable_png_icons = (GetEnvironmentVariableA("CX_PNG_ICON", NULL, 0) != 0);
-
-    if (!enable_png_icons)
+    union
     {
-        WARN("PNG icon loading disabled because CX_PNG_ICON is not set\n");
-        return FALSE;
-    }
+        unsigned val;
+        unsigned char c[4];
+    } u;
 
-    if (!load_libpng()) return FALSE;
+    u.val = val;
+    return (u.c[0] << 24) | (u.c[1] << 16) | (u.c[2] << 8) | u.c[3];
+}
+
+static BOOL have_libpng(void)
+{
+    return InitOnceExecuteOnce( &init_once, load_libpng, NULL, NULL ) && libpng_handle;
+}
+
+static BOOL get_png_info(const void *png_data, DWORD size, int *width, int *height, int *bpp)
+{
+    static const char png_sig[8] = { 0x89,'P','N','G',0x0d,0x0a,0x1a,0x0a };
+    static const char png_IHDR[8] = { 0,0,0,0x0d,'I','H','D','R' };
+    const struct
+    {
+        char png_sig[8];
+        char ihdr_sig[8];
+        unsigned width, height;
+        char bit_depth, color_type, compression, filter, interlace;
+    } *png = png_data;
+
+    if (size < sizeof(*png)) return FALSE;
+    if (memcmp(png->png_sig, png_sig, sizeof(png_sig)) != 0) return FALSE;
+    if (memcmp(png->ihdr_sig, png_IHDR, sizeof(png_IHDR)) != 0) return FALSE;
+
+    *bpp = (png->color_type == PNG_COLOR_TYPE_RGB_ALPHA) ? 32 : 24;
+    *width = be_uint(png->width);
+    *height = be_uint(png->height);
+
+    return TRUE;
+}
+
+static BITMAPINFO *load_png(const char *png_data, DWORD *size)
+{
+    struct png_wrapper png;
+    png_structp png_ptr;
+    png_infop info_ptr;
+    png_bytep *row_pointers = NULL;
+    jmp_buf jmpbuf;
+    int color_type, bit_depth, bpp, width, height;
+    int rowbytes, image_size, mask_size = 0, i;
+    BITMAPINFO *info = NULL;
+    unsigned char *image_data;
+
+    if (!get_png_info(png_data, *size, &width, &height, &bpp))
+        return NULL;
+
+    if (!have_libpng()) return NULL;
+
+    png.buffer = png_data;
+    png.size = *size;
+    png.pos = 0;
 
     /* initialize libpng */
-    png->png_ptr = ppng_create_read_struct(libpng_ver_string, NULL, NULL, NULL);
-    if (!png->png_ptr) return FALSE;
+    png_ptr = ppng_create_read_struct(libpng_ver_string, NULL, NULL, NULL);
+    if (!png_ptr) return NULL;
 
-    png->info_ptr = ppng_create_info_struct(png->png_ptr);
-    if (!png->info_ptr)
+    info_ptr = ppng_create_info_struct(png_ptr);
+    if (!info_ptr)
     {
-        ppng_destroy_read_struct(&png->png_ptr, NULL, NULL);
-        return FALSE;
+        ppng_destroy_read_struct(&png_ptr, NULL, NULL);
+        return NULL;
     }
 
     /* set up setjmp/longjmp error handling */
     if (setjmp(jmpbuf))
     {
-        ppng_destroy_read_struct(&png->png_ptr, &png->info_ptr, NULL);
-        return FALSE;
+        HeapFree(GetProcessHeap(), 0, row_pointers);
+        HeapFree(GetProcessHeap(), 0, info);
+        ppng_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        return NULL;
     }
 
-    ppng_set_error_fn(png->png_ptr, jmpbuf, user_error_fn, user_warning_fn);
-    ppng_set_crc_action(png->png_ptr, PNG_CRC_QUIET_USE, PNG_CRC_QUIET_USE);
+    ppng_set_error_fn(png_ptr, jmpbuf, user_error_fn, user_warning_fn);
+    ppng_set_crc_action(png_ptr, PNG_CRC_QUIET_USE, PNG_CRC_QUIET_USE);
 
     /* set up custom i/o handling */
-    ppng_set_read_fn(png->png_ptr, png, user_read_data);
+    ppng_set_read_fn(png_ptr, &png, user_read_data);
 
     /* read the header */
-    ppng_read_info(png->png_ptr, png->info_ptr);
+    ppng_read_info(png_ptr, info_ptr);
 
-    color_type = ppng_get_color_type(png->png_ptr, png->info_ptr);
-    bit_depth = ppng_get_bit_depth(png->png_ptr, png->info_ptr);
+    color_type = ppng_get_color_type(png_ptr, info_ptr);
+    bit_depth = ppng_get_bit_depth(png_ptr, info_ptr);
 
     /* expand grayscale image data to rgb */
     if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
-        ppng_set_gray_to_rgb(png->png_ptr);
+        ppng_set_gray_to_rgb(png_ptr);
 
     /* expand palette image data to rgb */
     if (color_type == PNG_COLOR_TYPE_PALETTE || bit_depth < 8)
-        ppng_set_expand(png->png_ptr);
+        ppng_set_expand(png_ptr);
 
     /* update color type information */
-    ppng_read_update_info(png->png_ptr, png->info_ptr);
+    ppng_read_update_info(png_ptr, info_ptr);
 
-    color_type = ppng_get_color_type(png->png_ptr, png->info_ptr);
-    bit_depth = ppng_get_bit_depth(png->png_ptr, png->info_ptr);
+    color_type = ppng_get_color_type(png_ptr, info_ptr);
+    bit_depth = ppng_get_bit_depth(png_ptr, info_ptr);
 
-    png->bpp = 0;
+    bpp = 0;
 
     switch (color_type)
     {
     case PNG_COLOR_TYPE_RGB:
         if (bit_depth == 8)
-            png->bpp = 24;
+            bpp = 24;
         break;
 
     case PNG_COLOR_TYPE_RGB_ALPHA:
         if (bit_depth == 8)
         {
-            ppng_set_bgr(png->png_ptr);
-            png->bpp = 32;
+            ppng_set_bgr(png_ptr);
+            bpp = 32;
         }
         break;
 
@@ -344,100 +383,52 @@ static BOOL create_png_decoder(struct png_wrapper *png)
         break;
     }
 
-    if (!png->bpp)
+    if (!bpp)
     {
         FIXME("unsupported PNG color format %d, %d bpp\n", color_type, bit_depth);
-        ppng_destroy_read_struct(&png->png_ptr, &png->info_ptr, NULL);
-        return FALSE;
+        ppng_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        return NULL;
     }
 
-    png->width = ppng_get_image_width(png->png_ptr, png->info_ptr);
-    png->height = ppng_get_image_height(png->png_ptr, png->info_ptr);
+    width = ppng_get_image_width(png_ptr, info_ptr);
+    height = ppng_get_image_height(png_ptr, info_ptr);
 
-    return TRUE;
-}
-
-static void destroy_png_decoder(struct png_wrapper *png)
-{
-    ppng_destroy_read_struct(&png->png_ptr, &png->info_ptr, NULL);
-}
-
-static BOOL get_png_info(const void *png_data, DWORD size, int *width, int *height, int *bpp)
-{
-    static const char png_sig[8] = { 0x89,'P','N','G',0x0d,0x0a,0x1a,0x0a };
-    struct png_wrapper png;
-
-    if (size < sizeof(png_sig) || memcmp(png_data, png_sig, sizeof(png_sig)) != 0)
-        return FALSE;
-
-    png.buffer = png_data;
-    png.size = size;
-    png.pos = 0;
-
-    if (!create_png_decoder(&png)) return FALSE;
-
-    *width = png.width;
-    *height = png.height;
-    *bpp = png.bpp;
-
-    destroy_png_decoder(&png);
-    return TRUE;
-}
-
-static BITMAPINFO *load_png(const char *png_data, DWORD *size)
-{
-    static const char png_sig[8] = { 0x89,'P','N','G',0x0d,0x0a,0x1a,0x0a };
-    struct png_wrapper png;
-    png_bytep *row_pointers;
-    int rowbytes, image_size, mask_size = 0, i;
-    BITMAPINFO *info;
-    unsigned char *image_data;
-
-    if (*size < sizeof(png_sig) || memcmp(png_data, png_sig, sizeof(png_sig)) != 0)
-        return NULL;
-
-    png.buffer = png_data;
-    png.size = *size;
-    png.pos = 0;
-
-    if (!create_png_decoder(&png)) return NULL;
-
-    rowbytes = (png.width * png.bpp + 7) / 8;
-    image_size = png.height * rowbytes;
-    if (png.bpp != 32) /* add a mask if there is no alpha */
-        mask_size = (png.width + 7) / 8 * png.height;
+    rowbytes = (width * bpp + 7) / 8;
+    image_size = height * rowbytes;
+    if (bpp != 32) /* add a mask if there is no alpha */
+        mask_size = (width + 7) / 8 * height;
 
     info = HeapAlloc(GetProcessHeap(), 0, sizeof(BITMAPINFOHEADER) + image_size + mask_size);
     if (!info)
     {
-        destroy_png_decoder(&png);
+        ppng_destroy_read_struct(&png_ptr, &info_ptr, NULL);
         return NULL;
     }
 
     image_data = (unsigned char *)info + sizeof(BITMAPINFOHEADER);
     memset(image_data + image_size, 0, mask_size);
 
-    row_pointers = HeapAlloc(GetProcessHeap(), 0, png.height * sizeof(png_bytep));
+    row_pointers = HeapAlloc(GetProcessHeap(), 0, height * sizeof(png_bytep));
     if (!row_pointers)
     {
         HeapFree(GetProcessHeap(), 0, info);
-        destroy_png_decoder(&png);
+        ppng_destroy_read_struct(&png_ptr, &info_ptr, NULL);
         return NULL;
     }
 
     /* upside down */
-    for (i = 0; i < png.height; i++)
-        row_pointers[i] = image_data + (png.height - i - 1) * rowbytes;
+    for (i = 0; i < height; i++)
+        row_pointers[i] = image_data + (height - i - 1) * rowbytes;
 
-    ppng_read_image(png.png_ptr, row_pointers);
-
+    ppng_read_image(png_ptr, row_pointers);
     HeapFree(GetProcessHeap(), 0, row_pointers);
+    ppng_destroy_read_struct(&png_ptr, &info_ptr, NULL);
 
     info->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    info->bmiHeader.biWidth = png.width;
-    info->bmiHeader.biHeight = png.height * 2;
+    info->bmiHeader.biWidth = width;
+    info->bmiHeader.biHeight = height * 2;
     info->bmiHeader.biPlanes = 1;
-    info->bmiHeader.biBitCount = png.bpp;
+    info->bmiHeader.biBitCount = bpp;
     info->bmiHeader.biCompression = BI_RGB;
     info->bmiHeader.biSizeImage = image_size;
     info->bmiHeader.biXPelsPerMeter = 0;
@@ -447,22 +438,25 @@ static BITMAPINFO *load_png(const char *png_data, DWORD *size)
 
     *size = sizeof(BITMAPINFOHEADER) + image_size + mask_size;
 
-    destroy_png_decoder(&png);
-
     return info;
 }
 
 #else /* SONAME_LIBPNG */
 
+static BOOL have_libpng(void)
+{
+    static int warned;
+    if (!warned++) WARN( "PNG support not compiled in\n" );
+    return FALSE;
+}
+
 static BOOL get_png_info(const void *png_data, DWORD size, int *width, int *height, int *bpp)
 {
-    ERR("Trying to load PNG icon, but PNG support is not compiled in.\n");
     return FALSE;
 }
 
 static BITMAPINFO *load_png( const char *png, DWORD *max_size )
 {
-    ERR("Trying to load PNG icon, but PNG support is not compiled in.\n");
     return NULL;
 }
 
@@ -913,6 +907,7 @@ static BOOL CURSORICON_GetResIconEntry( LPCVOID dir, DWORD size, int n,
     *width = icon->bWidth;
     *height = icon->bHeight;
     *bits = resdir->idEntries[n].wBitCount;
+    if (!*width && !*height && have_libpng()) *width = *height = 256;
     return TRUE;
 }
 
@@ -926,7 +921,7 @@ static BOOL CURSORICON_GetResIconEntry( LPCVOID dir, DWORD size, int n,
 static int CURSORICON_FindBestCursor( LPCVOID dir, DWORD size, fnGetCIEntry get_entry,
                                       int width, int height, int depth, UINT loadflags )
 {
-    int i, maxwidth, maxheight, cx, cy, bits, bestEntry = -1;
+    int i, maxwidth, maxheight, maxbits, cx, cy, bits, bestEntry = -1;
 
     if (loadflags & LR_DEFAULTSIZE)
     {
@@ -940,22 +935,25 @@ static int CURSORICON_FindBestCursor( LPCVOID dir, DWORD size, fnGetCIEntry get_
         return 0;
     }
 
-    /* Double height to account for AND and XOR masks */
-
-    height *= 2;
-
     /* First find the largest one smaller than or equal to the requested size*/
 
-    maxwidth = maxheight = 0;
+    maxwidth = maxheight = maxbits = 0;
     for ( i = 0; get_entry( dir, size, i, &cx, &cy, &bits ); i++ )
     {
-        if ((cx <= width) && (cy <= height) &&
-            (cx > maxwidth) && (cy > maxheight))
+        if (cx > width || cy > height) continue;
+        if (cx < maxwidth || cy < maxheight) continue;
+        if (cx == maxwidth && cy == maxheight)
         {
-            bestEntry = i;
-            maxwidth  = cx;
-            maxheight = cy;
+            if (loadflags & LR_MONOCHROME)
+            {
+                if (maxbits && bits >= maxbits) continue;
+            }
+            else if (bits <= maxbits) continue;
         }
+        bestEntry = i;
+        maxwidth  = cx;
+        maxheight = cy;
+        maxbits = bits;
     }
     if (bestEntry != -1) return bestEntry;
 
@@ -964,13 +962,21 @@ static int CURSORICON_FindBestCursor( LPCVOID dir, DWORD size, fnGetCIEntry get_
     maxwidth = maxheight = 255;
     for ( i = 0; get_entry( dir, size, i, &cx, &cy, &bits ); i++ )
     {
-        if (((cx < maxwidth) && (cy < maxheight)) || (bestEntry == -1))
+        if (cx > maxwidth || cy > maxheight) continue;
+        if (cx == maxwidth && cy == maxheight)
         {
-            bestEntry = i;
-            maxwidth  = cx;
-            maxheight = cy;
+            if (loadflags & LR_MONOCHROME)
+            {
+                if (maxbits && bits >= maxbits) continue;
+            }
+            else if (bits <= maxbits) continue;
         }
+        bestEntry = i;
+        maxwidth  = cx;
+        maxheight = cy;
+        maxbits = bits;
     }
+    if (bestEntry == -1) bestEntry = 0;
 
     return bestEntry;
 }
@@ -989,6 +995,7 @@ static BOOL CURSORICON_GetResCursorEntry( LPCVOID dir, DWORD size, int n,
     *width = cursor->wWidth;
     *height = cursor->wHeight;
     *bits = resdir->idEntries[n].wBitCount;
+    if (*height == *width * 2) *height /= 2;
     return TRUE;
 }
 
@@ -1028,12 +1035,17 @@ static BOOL CURSORICON_GetFileEntry( LPCVOID dir, DWORD size, int n,
     if ((const char *)&filedir->idEntries[n + 1] - (const char *)dir > size)
         return FALSE;
     entry = &filedir->idEntries[n];
+    if (entry->dwDIBOffset > size - sizeof(info->biSize)) return FALSE;
     info = (const BITMAPINFOHEADER *)((const char *)dir + entry->dwDIBOffset);
+
     if (info->biSize == PNG_SIGN)
     {
-        return get_png_info(info, size, width, height, bits);
+        if (have_libpng()) return get_png_info(info, size, width, height, bits);
+        *width = *height = *bits = 0;
+        return TRUE;
     }
-    else if (info->biSize != sizeof(BITMAPCOREHEADER))
+
+    if (info->biSize != sizeof(BITMAPCOREHEADER))
     {
         if ((const char *)(info + 1) - (const char *)dir > size) return FALSE;
         *bits = info->biBitCount;
@@ -1170,7 +1182,6 @@ static HICON create_icon_from_bmi( const BITMAPINFO *bmi, DWORD maxsize, HMODULE
     BOOL ret = FALSE;
     BOOL do_stretch;
     HICON hObj = 0;
-    HDC screen_dc;
     HDC hdc = 0;
     LONG bmi_width, bmi_height;
     WORD bpp;
@@ -1249,8 +1260,6 @@ static HICON create_icon_from_bmi( const BITMAPINFO *bmi, DWORD maxsize, HMODULE
         hotspot.y = (hotspot.y * height) / (bmi_height / 2);
     }
 
-    if (!(screen_dc = get_screen_dc())) return 0;
-
     if (!(bmi_copy = HeapAlloc( GetProcessHeap(), 0, max( size, FIELD_OFFSET( BITMAPINFO, bmiColors[2] )))))
         return 0;
     if (!(hdc = CreateCompatibleDC( 0 ))) goto done;
@@ -1280,8 +1289,7 @@ static HICON create_icon_from_bmi( const BITMAPINFO *bmi, DWORD maxsize, HMODULE
     else
     {
         if (!(mask = CreateBitmap( width, height, 1, 1, NULL ))) goto done;
-        if (!(color = CreateBitmap( width, height, GetDeviceCaps( screen_dc, PLANES ),
-                                     GetDeviceCaps( screen_dc, BITSPIXEL ), NULL )))
+        if (!(color = create_color_bitmap( width, height )))
         {
             DeleteObject( mask );
             goto done;
@@ -2200,11 +2208,7 @@ INT WINAPI LookupIconIdFromDirectoryEx( LPBYTE xdir, BOOL bIcon,
     if( dir && !dir->idReserved && (dir->idType & 3) )
     {
         const CURSORICONDIRENTRY* entry;
-
-        const HDC hdc = GetDC(0);
-        const int depth = (cFlag & LR_MONOCHROME) ?
-            1 : GetDeviceCaps(hdc, BITSPIXEL);
-        ReleaseDC(0, hdc);
+        int depth = (cFlag & LR_MONOCHROME) ? 1 : get_display_bpp();
 
         if( bIcon )
             entry = CURSORICON_FindBestIconRes( dir, ~0u, width, height, depth, LR_DEFAULTSIZE );
@@ -2538,7 +2542,7 @@ HICON WINAPI CreateIconIndirect(PICONINFO iconinfo)
         height = bmpXor.bmHeight;
         if (bmpXor.bmPlanes * bmpXor.bmBitsPixel != 1 || bmpAnd.bmPlanes * bmpAnd.bmBitsPixel != 1)
         {
-            color = CreateCompatibleBitmap( get_screen_dc(), width, height );
+            color = create_color_bitmap( width, height );
             mask = CreateBitmap( width, height, 1, 1, NULL );
         }
         else mask = CreateBitmap( width, height * 2, 1, 1, NULL );
@@ -2868,7 +2872,6 @@ static HBITMAP BITMAP_Load( HINSTANCE instance, LPCWSTR name,
     DWORD compr_dummy, offbits = 0;
     INT bm_type;
     HDC screen_mem_dc = NULL;
-    HDC screen_dc;
 
     if (!(loadflags & LR_LOADFROMFILE))
     {
@@ -2948,22 +2951,21 @@ static HBITMAP BITMAP_Load( HINSTANCE instance, LPCWSTR name,
 
     if (new_height < 0) new_height = -new_height;
 
-    screen_dc = get_screen_dc();
-    if (!(screen_mem_dc = CreateCompatibleDC( screen_dc ))) goto end;
+    if (!(screen_mem_dc = CreateCompatibleDC( 0 ))) goto end;
 
     bits = (char *)info + (offbits ? offbits : size);
 
     if (loadflags & LR_CREATEDIBSECTION)
     {
         scaled_info->bmiHeader.biCompression = 0; /* DIBSection can't be compressed */
-        hbitmap = CreateDIBSection(screen_dc, scaled_info, DIB_RGB_COLORS, NULL, 0, 0);
+        hbitmap = CreateDIBSection(0, scaled_info, DIB_RGB_COLORS, NULL, 0, 0);
     }
     else
     {
         if (is_dib_monochrome(fix_info))
             hbitmap = CreateBitmap(new_width, new_height, 1, 1, NULL);
         else
-            hbitmap = CreateCompatibleBitmap(screen_dc, new_width, new_height);        
+            hbitmap = create_color_bitmap(new_width, new_height);
     }
 
     orig_bm = SelectObject(screen_mem_dc, hbitmap);
@@ -3042,13 +3044,7 @@ HANDLE WINAPI LoadImageW( HINSTANCE hinst, LPCWSTR name, UINT type,
     case IMAGE_ICON:
     case IMAGE_CURSOR:
         depth = 1;
-        if (!(loadflags & LR_MONOCHROME))
-        {
-            HDC screen_dc;
-
-            if ((screen_dc = get_screen_dc()))
-                depth = GetDeviceCaps( screen_dc, BITSPIXEL );
-        }
+        if (!(loadflags & LR_MONOCHROME)) depth = get_display_bpp();
         return CURSORICON_Load(hinst, name, desiredx, desiredy, depth, (type == IMAGE_CURSOR), loadflags);
     }
     return 0;
@@ -3188,37 +3184,18 @@ HANDLE WINAPI CopyImage( HANDLE hnd, UINT type, INT desiredx,
                 }
 
                 if (monochrome)
-                {
                     res = CreateBitmap(desiredx, desiredy, 1, 1, NULL);
-                }
                 else
-                {
-                    HDC screenDC = GetDC(NULL);
-                    res = CreateCompatibleBitmap(screenDC, desiredx, desiredy);
-                    ReleaseDC(NULL, screenDC);
-                }
+                    res = create_color_bitmap(desiredx, desiredy);
             }
 
             if (res)
             {
                 /* Only copy the bitmap if it's a DIB section or if it's
                    compatible to the screen */
-                BOOL copyContents;
-
-                if (objSize == sizeof(DIBSECTION))
-                {
-                    copyContents = TRUE;
-                }
-                else
-                {
-                    HDC screenDC = GetDC(NULL);
-                    int screen_depth = GetDeviceCaps(screenDC, BITSPIXEL);
-                    ReleaseDC(NULL, screenDC);
-
-                    copyContents = (ds.dsBm.bmBitsPixel == 1 || ds.dsBm.bmBitsPixel == screen_depth);
-                }
-
-                if (copyContents)
+                if (objSize == sizeof(DIBSECTION) ||
+                    ds.dsBm.bmBitsPixel == 1 ||
+                    ds.dsBm.bmBitsPixel == get_display_bpp())
                 {
                     /* The source bitmap may already be selected in a device context,
                        use GetDIBits/StretchDIBits and not StretchBlt  */
@@ -3271,7 +3248,7 @@ HANDLE WINAPI CopyImage( HANDLE hnd, UINT type, INT desiredx,
         {
             struct cursoricon_object *icon;
             HICON res = 0;
-            int depth = (flags & LR_MONOCHROME) ? 1 : GetDeviceCaps( get_screen_dc(), BITSPIXEL );
+            int depth = (flags & LR_MONOCHROME) ? 1 : get_display_bpp();
 
             if (flags & LR_DEFAULTSIZE)
             {

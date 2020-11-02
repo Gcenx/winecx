@@ -1,18 +1,16 @@
 MODULE    = rsaenh.dll
 IMPORTLIB = rsaenh
-IMPORTS   = crypt32 advapi32
+IMPORTS   = bcrypt crypt32 advapi32
 
 C_SRCS = \
 	aes.c \
 	des.c \
 	handle.c \
 	implglue.c \
-	md2.c \
 	mpi.c \
 	rc2.c \
 	rc4.c \
 	rsa.c \
-	rsaenh.c \
-	sha2.c
+	rsaenh.c
 
 RC_SRCS = rsrc.rc

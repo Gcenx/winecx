@@ -163,6 +163,7 @@ static const struct gdi_dc_funcs emfdrv_driver =
     NULL,                            /* pUnrealizePalette */
     EMFDRV_WidenPath,                /* pWidenPath */
     NULL,                            /* wine_get_wgl_driver */
+    NULL,                            /* wine_get_vulkan_driver */
     GDI_PRIORITY_GRAPHICS_DRV        /* priority */
 };
 
@@ -301,6 +302,23 @@ HDC WINAPI CreateEnhMetaFileA(
     return hReturnDC;
 }
 
+static inline BOOL devcap_is_valid( int cap )
+{
+    if (cap >= 0 && cap <= ASPECTXY) return !(cap & 1);
+    if (cap >= PHYSICALWIDTH && cap <= COLORMGMTCAPS) return TRUE;
+    switch (cap)
+    {
+    case LOGPIXELSX:
+    case LOGPIXELSY:
+    case CAPS1:
+    case SIZEPALETTE:
+    case NUMRESERVED:
+    case COLORRES:
+        return TRUE;
+    }
+    return FALSE;
+}
+
 /**********************************************************************
  *          CreateEnhMetaFileW   (GDI32.@)
  */
@@ -312,12 +330,13 @@ HDC WINAPI CreateEnhMetaFileW(
     )
 {
     static const WCHAR displayW[] = {'D','I','S','P','L','A','Y',0};
-    HDC ret;
+    HDC ret, ref_dc;
     DC *dc;
     EMFDRV_PDEVICE *physDev;
     HANDLE hFile;
     DWORD size = 0, length = 0;
     DWORD bytes_written;
+    int cap;
 
     TRACE("(%p %s %s %s)\n", hdc, debugstr_w(filename), wine_dbgstr_rect(rect), debugstr_w(description) );
 
@@ -350,13 +369,20 @@ HDC WINAPI CreateEnhMetaFileW(
     physDev->hFile = 0;
     physDev->dc_brush = 0;
     physDev->dc_pen = 0;
-    physDev->screen_dc = 0;
     physDev->restoring = 0;
     physDev->path = FALSE;
+
     if (hdc)  /* if no ref, use current display */
-        physDev->ref_dc = hdc;
+        ref_dc = hdc;
     else
-        physDev->ref_dc = physDev->screen_dc = CreateDCW( displayW, NULL, NULL, NULL );
+        ref_dc = CreateDCW( displayW, NULL, NULL, NULL );
+
+    memset( physDev->dev_caps, 0, sizeof(physDev->dev_caps) );
+    for (cap = 0; cap < sizeof(physDev->dev_caps) / sizeof(physDev->dev_caps[0]); cap++)
+        if (devcap_is_valid( cap ))
+            physDev->dev_caps[cap] = GetDeviceCaps( ref_dc, cap );
+
+    if (!hdc) DeleteDC( ref_dc );
 
     SetVirtualResolution(physDev->dev.hdc, 0, 0, 0, 0);
 
@@ -390,12 +416,12 @@ HDC WINAPI CreateEnhMetaFileW(
     physDev->emh->nPalEntries = 0; /* I guess this should start at 0 */
 
     /* Size in pixels */
-    physDev->emh->szlDevice.cx = GetDeviceCaps( physDev->ref_dc, HORZRES );
-    physDev->emh->szlDevice.cy = GetDeviceCaps( physDev->ref_dc, VERTRES );
+    physDev->emh->szlDevice.cx = physDev->dev_caps[HORZRES];
+    physDev->emh->szlDevice.cy = physDev->dev_caps[VERTRES];
 
     /* Size in millimeters */
-    physDev->emh->szlMillimeters.cx = GetDeviceCaps( physDev->ref_dc, HORZSIZE );
-    physDev->emh->szlMillimeters.cy = GetDeviceCaps( physDev->ref_dc, VERTSIZE );
+    physDev->emh->szlMillimeters.cx = physDev->dev_caps[HORZSIZE];
+    physDev->emh->szlMillimeters.cy = physDev->dev_caps[VERTSIZE];
 
     /* Size in micrometers */
     physDev->emh->szlMicrometers.cx = physDev->emh->szlMillimeters.cx * 1000;
@@ -457,7 +483,6 @@ HENHMETAFILE WINAPI CloseEnhMetaFile(HDC hdc) /* [in] metafile DC */
 
     if (physDev->dc_brush) DeleteObject( physDev->dc_brush );
     if (physDev->dc_pen) DeleteObject( physDev->dc_pen );
-    if (physDev->screen_dc) DeleteDC( physDev->screen_dc );
 
     emr.emr.iType = EMR_EOF;
     emr.emr.nSize = sizeof(emr);
@@ -504,7 +529,7 @@ HENHMETAFILE WINAPI CloseEnhMetaFile(HDC hdc) /* [in] metafile DC */
         CloseHandle( physDev->hFile );
     }
 
-    hmf = EMF_Create_HENHMETAFILE( physDev->emh, (physDev->hFile != 0) );
+    hmf = EMF_Create_HENHMETAFILE( physDev->emh, physDev->emh->nBytes, (physDev->hFile != 0) );
     physDev->emh = NULL;  /* So it won't be deleted */
     free_dc_ptr( dc );
     return hmf;

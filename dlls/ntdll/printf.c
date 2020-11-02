@@ -410,6 +410,11 @@ static void pf_fixup_exponent( char *buf )
     }
 }
 
+static inline BOOL isDigit(WCHAR c)
+{
+    return c >= '0' && c <= '9';
+}
+
 /*********************************************************************
  *  pf_vsnprintf  (INTERNAL)
  *
@@ -490,7 +495,7 @@ static int pf_vsnprintf( pf_output *out, const WCHAR *format, __ms_va_list valis
             }
             p++;
         }
-        else while( isdigit(*p) )
+        else while( isDigit(*p) )
         {
             flags.FieldLength *= 10;
             flags.FieldLength += *p++ - '0';
@@ -507,7 +512,7 @@ static int pf_vsnprintf( pf_output *out, const WCHAR *format, __ms_va_list valis
                 flags.Precision = va_arg( valist, int );
                 p++;
             }
-            else while( isdigit(*p) )
+            else while( isDigit(*p) )
             {
                 flags.Precision *= 10;
                 flags.Precision += *p++ - '0';
@@ -531,7 +536,7 @@ static int pf_vsnprintf( pf_output *out, const WCHAR *format, __ms_va_list valis
                 }
                 else if( *(p+1) == '3' && *(p+2) == '2' )
                     p += 3;
-                else if( isdigit(*(p+1)) || *(p+1) == 0 )
+                else if( isDigit(*(p+1)) || *(p+1) == 0 )
                     break;
                 else
                     p++;
@@ -704,7 +709,7 @@ int CDECL NTDLL__vsnwprintf( WCHAR *str, SIZE_T len, const WCHAR *format, __ms_v
 /*********************************************************************
  *                  _snprintf   (NTDLL.@)
  */
-int CDECL NTDLL__snprintf( char *str, SIZE_T len, const char *format, ... )
+int WINAPIV NTDLL__snprintf( char *str, SIZE_T len, const char *format, ... )
 {
     int ret;
     __ms_va_list valist;
@@ -719,7 +724,7 @@ int CDECL NTDLL__snprintf( char *str, SIZE_T len, const char *format, ... )
 /***********************************************************************
  *                  _snwprintf   (NTDLL.@)
  */
-int CDECL NTDLL__snwprintf( WCHAR *str, SIZE_T len, const WCHAR *format, ... )
+int WINAPIV NTDLL__snwprintf( WCHAR *str, SIZE_T len, const WCHAR *format, ... )
 {
     int ret;
     __ms_va_list valist;
@@ -743,7 +748,7 @@ int CDECL NTDLL_vsprintf( char *str, const char *format, __ms_va_list args )
 /*********************************************************************
  *                  sprintf   (NTDLL.@)
  */
-int CDECL NTDLL_sprintf( char *str, const char *format, ... )
+int WINAPIV NTDLL_sprintf( char *str, const char *format, ... )
 {
     int ret;
     __ms_va_list valist;
@@ -758,7 +763,7 @@ int CDECL NTDLL_sprintf( char *str, const char *format, ... )
 /***********************************************************************
  *                  swprintf   (NTDLL.@)
  */
-int CDECL NTDLL_swprintf( WCHAR *str, const WCHAR *format, ... )
+int WINAPIV NTDLL_swprintf( WCHAR *str, const WCHAR *format, ... )
 {
     int ret;
     __ms_va_list valist;

@@ -57,15 +57,11 @@ ME_StreamOutRTFText(ME_OutStream *pStream, const WCHAR *text, LONG nChars);
 static ME_OutStream*
 ME_StreamOutInit(ME_TextEditor *editor, EDITSTREAM *stream)
 {
-  ME_OutStream *pStream = ALLOC_OBJ(ME_OutStream);
+  ME_OutStream *pStream = heap_alloc_zero(sizeof(*pStream));
+
   pStream->stream = stream;
   pStream->stream->dwError = 0;
-  pStream->pos = 0;
-  pStream->written = 0;
-  pStream->nFontTblLen = 0;
   pStream->nColorTblLen = 1;
-  pStream->nNestingLevel = 0;
-  memset(&pStream->cur_fmt, 0, sizeof(pStream->cur_fmt));
   pStream->cur_fmt.dwEffects = CFE_AUTOCOLOR | CFE_AUTOBACKCOLOR;
   pStream->cur_fmt.bUnderlineType = CFU_UNDERLINE;
   return pStream;
@@ -101,7 +97,7 @@ ME_StreamOutFree(ME_OutStream *pStream)
   LONG written = pStream->written;
   TRACE("total length = %u\n", written);
 
-  FREE_OBJ(pStream);
+  heap_free(pStream);
   return written;
 }
 
@@ -775,7 +771,7 @@ ME_StreamOutRTFCharProps(ME_OutStream *pStream, CHARFORMAT2W *fmt)
   {
       if (fmt->dwEffects & CFE_AUTOBACKCOLOR) i = 0;
       else find_color_in_colortbl( pStream, fmt->crBackColor, &i );
-      sprintf(props + strlen(props), "\\cb%u", i);
+      sprintf(props + strlen(props), "\\highlight%u", i);
   }
   if ((old_fmt->dwEffects ^ fmt->dwEffects) & CFE_AUTOCOLOR ||
       (!(fmt->dwEffects & CFE_AUTOCOLOR) && old_fmt->crTextColor != fmt->crTextColor))
@@ -951,7 +947,7 @@ static BOOL stream_out_graphics( ME_TextEditor *editor, ME_OutStream *stream,
     SIZE goal, pic;
     ME_Context c;
 
-    hr = IOleObject_QueryInterface( run->ole_obj->poleobj, &IID_IDataObject, (void **)&data );
+    hr = IOleObject_QueryInterface( run->reobj->obj.poleobj, &IID_IDataObject, (void **)&data );
     if (FAILED(hr)) return FALSE;
 
     ME_InitContext( &c, editor, ITextHost_TxGetDC( editor->texthost ) );
@@ -979,8 +975,8 @@ static BOOL stream_out_graphics( ME_TextEditor *editor, ME_OutStream *stream,
                      emf_bits->szlMillimeters.cy * c.dpi.cy * 10 );
 
     /* convert goal size to twips */
-    goal.cx = MulDiv( run->ole_obj->sizel.cx, 144, 254 );
-    goal.cy = MulDiv( run->ole_obj->sizel.cy, 144, 254 );
+    goal.cx = MulDiv( run->reobj->obj.sizel.cx, 144, 254 );
+    goal.cy = MulDiv( run->reobj->obj.sizel.cy, 144, 254 );
 
     if (!ME_StreamOutPrint( stream, "{\\*\\shppict{\\pict\\emfblip\\picw%d\\pich%d\\picwgoal%d\\pichgoal%d\n",
                             pic.cx, pic.cy, goal.cx, goal.cy ))
@@ -1148,8 +1144,7 @@ static BOOL ME_StreamOutText(ME_TextEditor *editor, ME_OutStream *pStream,
         nSize = WideCharToMultiByte(nCodePage, 0, get_text( &cursor.pRun->member.run, cursor.nOffset ),
                                     nLen, NULL, 0, NULL, NULL);
         if (nSize > nBufLen) {
-          FREE_OBJ(buffer);
-          buffer = ALLOC_N_OBJ(char, nSize);
+          buffer = heap_realloc(buffer, nSize);
           nBufLen = nSize;
         }
         WideCharToMultiByte(nCodePage, 0, get_text( &cursor.pRun->member.run, cursor.nOffset ),
@@ -1163,7 +1158,7 @@ static BOOL ME_StreamOutText(ME_TextEditor *editor, ME_OutStream *pStream,
     cursor.pRun = ME_FindItemFwd(cursor.pRun, diRun);
   }
 
-  FREE_OBJ(buffer);
+  heap_free(buffer);
   return success;
 }
 

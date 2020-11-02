@@ -25,6 +25,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(wmp);
 
 HINSTANCE wmp_instance;
+DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
 
 static HRESULT WINAPI ClassFactory_QueryInterface(IClassFactory *iface, REFIID riid, void **ppv)
 {
@@ -91,6 +92,7 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
         break;
     case DLL_PROCESS_DETACH:
         unregister_wmp_class();
+        unregister_player_msg_class();
         break;
     }
 

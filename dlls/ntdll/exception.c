@@ -110,6 +110,7 @@ void wait_suspend( CONTEXT *context )
     LARGE_INTEGER timeout;
     int saved_errno = errno;
     context_t server_context;
+    DWORD flags = context->ContextFlags;
 
     context_to_server( &server_context, context );
 
@@ -130,10 +131,14 @@ void wait_suspend( CONTEXT *context )
     {
         wine_server_set_reply( req, &server_context, sizeof(server_context) );
         wine_server_call( req );
+        if (wine_server_reply_size( reply ))
+        {
+            context_from_server( context, &server_context );
+            context->ContextFlags |= flags;  /* unchanged registers are still available */
+        }
     }
     SERVER_END_REQ;
 
-    context_from_server( context, &server_context );
     errno = saved_errno;
 }
 
@@ -301,6 +306,21 @@ ULONG WINAPI RtlRemoveVectoredExceptionHandler( PVOID handler )
 }
 
 
+/*********************************************************************
+ *         NtContinue   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtContinue( CONTEXT *context, BOOLEAN alert )
+{
+    TRACE( "(%p, %d) stub!\n", context, alert );
+
+    /* NtSetContextThread will not have the intended behavior for a partial context. */
+    if ((context->ContextFlags & CONTEXT_FULL) != CONTEXT_FULL)
+        return STATUS_NOT_IMPLEMENTED;
+
+    return NtSetContextThread( GetCurrentThread(), context );
+}
+
+
 /*************************************************************
  *            __wine_spec_unimplemented_stub
  *
@@ -319,4 +339,9 @@ void __wine_spec_unimplemented_stub( const char *module, const char *function )
     record.ExceptionInformation[0] = (ULONG_PTR)module;
     record.ExceptionInformation[1] = (ULONG_PTR)function;
     for (;;) RtlRaiseException( &record );
+}
+
+void WINAPI RtlSetUnhandledExceptionFilter( void *handler )
+{
+    FIXME( "(%p) stub!\n", handler );
 }

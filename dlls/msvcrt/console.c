@@ -124,7 +124,7 @@ static BOOL handle_enhanced_keys(INPUT_RECORD *ir, unsigned char *ch1, unsigned 
 {
     int i;
 
-    for (i = 0; i < sizeof(enh_map) / sizeof(enh_map[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(enh_map); i++)
     {
         if (ir->Event.KeyEvent.wVirtualScanCode == enh_map[i].vk)
         {
@@ -525,7 +525,7 @@ int CDECL _vcprintf(const char* format, __ms_va_list valist)
 /*********************************************************************
  *		_cprintf (MSVCRT.@)
  */
-int CDECL _cprintf(const char* format, ...)
+int WINAPIV _cprintf(const char* format, ...)
 {
   int retval;
   __ms_va_list valist;
@@ -549,7 +549,7 @@ int CDECL _vcwprintf(const MSVCRT_wchar_t* format, __ms_va_list valist)
 /*********************************************************************
  *		_cwprintf (MSVCRT.@)
  */
-int CDECL _cwprintf(const MSVCRT_wchar_t* format, ...)
+int WINAPIV _cwprintf(const MSVCRT_wchar_t* format, ...)
 {
   int retval;
   __ms_va_list valist;
@@ -561,8 +561,10 @@ int CDECL _cwprintf(const MSVCRT_wchar_t* format, ...)
   return retval;
 }
 
+#if _MSVCR_VER>=140
+
 /*********************************************************************
- *		__conio_common_vcprintf (MSVCRT.@)
+ *		__conio_common_vcprintf (UCRTBASE.@)
  */
 int CDECL MSVCRT__conio_common_vcprintf(unsigned __int64 options, const char* format,
                                         MSVCRT__locale_t locale, __ms_va_list valist)
@@ -574,7 +576,7 @@ int CDECL MSVCRT__conio_common_vcprintf(unsigned __int64 options, const char* fo
 }
 
 /*********************************************************************
- *		__conio_common_vcwprintf (MSVCRT.@)
+ *		__conio_common_vcwprintf (UCRTBASE.@)
  */
 int CDECL MSVCRT__conio_common_vcwprintf(unsigned __int64 options, const MSVCRT_wchar_t* format,
                                          MSVCRT__locale_t locale, __ms_va_list valist)
@@ -584,3 +586,5 @@ int CDECL MSVCRT__conio_common_vcwprintf(unsigned __int64 options, const MSVCRT_
     return pf_printf_w(puts_clbk_console_w, NULL, format, locale,
              options & UCRTBASE_PRINTF_MASK, arg_clbk_valist, NULL, &valist);
 }
+
+#endif /* _MSVCR_VER>=140 */

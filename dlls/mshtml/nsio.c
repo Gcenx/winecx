@@ -198,8 +198,8 @@ HRESULT nsuri_to_url(LPCWSTR nsuri, BOOL ret_empty, BSTR *ret)
 
     static const WCHAR wine_prefixW[] = {'w','i','n','e',':'};
 
-    if(!strncmpW(nsuri, wine_prefixW, sizeof(wine_prefixW)/sizeof(WCHAR)))
-        ptr += sizeof(wine_prefixW)/sizeof(WCHAR);
+    if(!strncmpW(nsuri, wine_prefixW, ARRAY_SIZE(wine_prefixW)))
+        ptr += ARRAY_SIZE(wine_prefixW);
 
     if(*ptr || ret_empty) {
         *ret = SysAllocString(ptr);
@@ -270,8 +270,8 @@ static nsresult before_async_open(nsChannel *channel, NSContainer *container, BO
 HRESULT load_nsuri(HTMLOuterWindow *window, nsWineURI *uri, nsIInputStream *post_stream,
         nsChannelBSC *channelbsc, DWORD flags)
 {
-    nsIDocShellLoadInfo *load_info = NULL;
     nsIWebNavigation *web_navigation;
+    nsIDocShellLoadInfo *load_info;
     nsIDocShell *doc_shell;
     HTMLDocumentNode *doc;
     nsresult nsres;
@@ -289,15 +289,28 @@ HRESULT load_nsuri(HTMLOuterWindow *window, nsWineURI *uri, nsIInputStream *post
         return E_FAIL;
     }
 
-    if(post_stream) {
-        nsres = nsIDocShell_CreateLoadInfo(doc_shell, &load_info);
-        if(NS_FAILED(nsres)) {
-            nsIDocShell_Release(doc_shell);
-            return E_FAIL;
-        }
+    nsres = nsIDocShell_CreateLoadInfo(doc_shell, &load_info);
+    if(NS_FAILED(nsres)) {
+        nsIDocShell_Release(doc_shell);
+        return E_FAIL;
+    }
 
+    nsres = nsIDocShellLoadInfo_SetLoadType(load_info, (flags & LOAD_FLAGS_BYPASS_CACHE) ? loadNormalBypassCache : loadNormal);
+    assert(nsres == NS_OK);
+
+    if(post_stream) {
         nsres = nsIDocShellLoadInfo_SetPostDataStream(load_info, post_stream);
         assert(nsres == NS_OK);
+    }
+
+    if(window->uri_nofrag) {
+        nsWineURI *referrer_uri;
+        nsres = create_nsuri(window->uri_nofrag, window, window->doc_obj ? window->doc_obj->nscontainer : NULL,  NULL, &referrer_uri);
+        if(NS_SUCCEEDED(nsres)) {
+            nsres = nsIDocShellLoadInfo_SetReferrer(load_info, (nsIURI*)&referrer_uri->nsIFileURL_iface);
+            assert(nsres == NS_OK);
+            nsIFileURL_Release(&referrer_uri->nsIFileURL_iface);
+        }
     }
 
     uri->channel_bsc = channelbsc;
@@ -308,8 +321,7 @@ HRESULT load_nsuri(HTMLOuterWindow *window, nsWineURI *uri, nsIInputStream *post
         doc->skip_mutation_notif = FALSE;
     uri->channel_bsc = NULL;
     nsIDocShell_Release(doc_shell);
-    if(load_info)
-        nsIDocShellLoadInfo_Release(load_info);
+    nsIDocShellLoadInfo_Release(load_info);
     if(NS_FAILED(nsres)) {
         WARN("LoadURI failed: %08x\n", nsres);
         return E_FAIL;
@@ -1181,7 +1193,7 @@ static nsresult NSAPI nsChannel_AsyncOpen2(nsIHttpChannel *iface, nsIStreamListe
 static nsresult NSAPI nsChannel_GetContentDisposition(nsIHttpChannel *iface, UINT32 *aContentDisposition)
 {
     nsChannel *This = impl_from_nsIHttpChannel(iface);
-    FIXME("(%p)->(%p)\n", This, aContentDisposition);
+    TRACE("(%p)->(%p) unimplemented\n", This, aContentDisposition);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -1209,7 +1221,7 @@ static nsresult NSAPI nsChannel_SetContentDispositionFilename(nsIHttpChannel *if
 static nsresult NSAPI nsChannel_GetContentDispositionHeader(nsIHttpChannel *iface, nsACString *aContentDispositionHeader)
 {
     nsChannel *This = impl_from_nsIHttpChannel(iface);
-    FIXME("(%p)->(%p)\n", This, aContentDispositionHeader);
+    TRACE("(%p)->(%p) unimplemented\n", This, aContentDispositionHeader);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -1259,7 +1271,7 @@ static nsresult NSAPI nsChannel_SetRequestMethod(nsIHttpChannel *iface,
     TRACE("(%p)->(%s)\n", This, debugstr_nsacstr(aRequestMethod));
 
     nsACString_GetData(aRequestMethod, &method);
-    for(i=0; i < sizeof(request_method_strings)/sizeof(*request_method_strings); i++) {
+    for(i=0; i < ARRAY_SIZE(request_method_strings); i++) {
         if(!strcasecmp(method, request_method_strings[i])) {
             This->request_method = i;
             return NS_OK;
@@ -1294,7 +1306,7 @@ static nsresult NSAPI nsChannel_SetReferrer(nsIHttpChannel *iface, nsIURI *aRefe
 static nsresult NSAPI nsChannel_GetReferrerPolicy(nsIHttpChannel *iface, UINT32 *aReferrerPolicy)
 {
     nsChannel *This = impl_from_nsIHttpChannel(iface);
-    FIXME("(%p)->(%p)\n", This, aReferrerPolicy);
+    TRACE("(%p)->(%p) unimplemented\n", This, aReferrerPolicy);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -1344,7 +1356,7 @@ static nsresult NSAPI nsChannel_SetReferrerWithPolicy(nsIHttpChannel *iface, nsI
 
     hres = IUri_GetDisplayUri(referrer->uri, &referrer_uri);
     if(SUCCEEDED(hres)) {
-        set_http_header(&This->request_headers, refererW, sizeof(refererW)/sizeof(WCHAR), referrer_uri, SysStringLen(referrer_uri));
+        set_http_header(&This->request_headers, refererW, ARRAY_SIZE(refererW), referrer_uri, SysStringLen(referrer_uri));
         SysFreeString(referrer_uri);
     }
 
@@ -1572,7 +1584,7 @@ static nsresult NSAPI nsChannel_IsNoStoreResponse(nsIHttpChannel *iface, cpp_boo
 
     TRACE("(%p)->(%p)\n", This, _retval);
 
-    header = find_http_header(&This->response_headers, cache_controlW, sizeof(cache_controlW)/sizeof(WCHAR));
+    header = find_http_header(&This->response_headers, cache_controlW, ARRAY_SIZE(cache_controlW));
     *_retval = header && !strcmpiW(header->data, no_storeW);
     return NS_OK;
 }
@@ -1744,8 +1756,7 @@ static nsresult NSAPI nsUploadChannel_SetUploadStream(nsIUploadChannel *iface,
             if(!ct)
                 return NS_ERROR_UNEXPECTED;
 
-            set_http_header(&This->request_headers, content_typeW,
-                    sizeof(content_typeW)/sizeof(WCHAR), ct, strlenW(ct));
+            set_http_header(&This->request_headers, content_typeW, ARRAY_SIZE(content_typeW), ct, strlenW(ct));
             heap_free(ct);
             This->post_data_contains_headers = FALSE;
         }
@@ -1823,7 +1834,7 @@ static nsresult NSAPI nsHttpChannelInternal_SetDocumentURI(nsIHttpChannelInterna
 {
     nsChannel *This = impl_from_nsIHttpChannelInternal(iface);
 
-    FIXME("(%p)->()\n", This);
+    TRACE("(%p)->() unimplemented\n", This);
 
     return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -1850,7 +1861,7 @@ static nsresult NSAPI nsHttpChannelInternal_TakeAllSecurityMessages(nsIHttpChann
 {
     nsChannel *This = impl_from_nsIHttpChannelInternal(iface);
 
-    FIXME("(%p)->()\n", This);
+    TRACE("(%p)->(%p) unimplemented\n", This, aMessages);
 
     return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -2113,7 +2124,7 @@ static nsresult NSAPI nsHttpChannelInternal_GetRedirectMode(nsIHttpChannelIntern
 static nsresult NSAPI nsHttpChannelInternal_SetRedirectMode(nsIHttpChannelInternal *iface, UINT32 aRedirectMode)
 {
     nsChannel *This = impl_from_nsIHttpChannelInternal(iface);
-    FIXME("(%p)->(%d)\n", This, aRedirectMode);
+    TRACE("(%p)->(%d) unimplemented\n", This, aRedirectMode);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -2828,7 +2839,7 @@ static nsresult NSAPI nsURI_SchemeIs(nsIFileURL *iface, const char *scheme, cpp_
     if(FAILED(hres))
         return NS_ERROR_UNEXPECTED;
 
-    MultiByteToWideChar(CP_UTF8, 0, scheme, -1, buf, sizeof(buf)/sizeof(WCHAR));
+    MultiByteToWideChar(CP_UTF8, 0, scheme, -1, buf, ARRAY_SIZE(buf));
     *_retval = !strcmpW(scheme_name, buf);
 
     /* CXHACK: We cheat security check for posting data from secure to insecure location for STO. See bug 7867 */
@@ -3294,7 +3305,7 @@ static nsresult NSAPI nsFileURL_GetFile(nsIFileURL *iface, nsIFile **aFile)
 
     TRACE("(%p)->(%p)\n", This, aFile);
 
-    hres = CoInternetParseIUri(This->uri, PARSE_PATH_FROM_URL, 0, path, sizeof(path)/sizeof(WCHAR), &size, 0);
+    hres = CoInternetParseIUri(This->uri, PARSE_PATH_FROM_URL, 0, path, ARRAY_SIZE(path), &size, 0);
     if(FAILED(hres)) {
         WARN("CoInternetParseIUri failed: %08x\n", hres);
         return NS_ERROR_FAILURE;
@@ -3828,7 +3839,7 @@ static BOOL is_gecko_special_uri(const char *spec)
     static const char *special_schemes[] = {"chrome:", "data:", "jar:", "moz-safe-about", "resource:", "javascript:", "wyciwyg:"};
     unsigned int i;
 
-    for(i=0; i < sizeof(special_schemes)/sizeof(*special_schemes); i++) {
+    for(i=0; i < ARRAY_SIZE(special_schemes); i++) {
         if(!strncasecmp(spec, special_schemes[i], strlen(special_schemes[i])))
             return TRUE;
     }
@@ -3892,7 +3903,7 @@ static nsresult NSAPI nsIOServiceHook_NewURI(nsIIOServiceHook *iface, const nsAC
         SysFreeString(charset);
     }
 
-    MultiByteToWideChar(cp, 0, spec, -1, new_spec, sizeof(new_spec)/sizeof(WCHAR));
+    MultiByteToWideChar(cp, 0, spec, -1, new_spec, ARRAY_SIZE(new_spec));
 
     if(base_wine_uri) {
         hres = combine_url(base_wine_uri->uri, new_spec, &urlmon_uri);

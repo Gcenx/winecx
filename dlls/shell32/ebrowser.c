@@ -112,7 +112,7 @@ static void events_unadvise_all(ExplorerBrowserImpl *This)
         TRACE("Removing %p\n", client);
         list_remove(&client->entry);
         IExplorerBrowserEvents_Release(client->pebe);
-        HeapFree(GetProcessHeap(), 0, client);
+        heap_free(client);
     }
 }
 
@@ -184,7 +184,7 @@ static void travellog_remove_entry(ExplorerBrowserImpl *This, travellog_entry *e
 
     list_remove(&entry->entry);
     ILFree(entry->pidl);
-    HeapFree(GetProcessHeap(), 0, entry);
+    heap_free(entry);
     This->travellog_count--;
 }
 
@@ -216,7 +216,7 @@ static void travellog_add_entry(ExplorerBrowserImpl *This, LPITEMIDLIST pidl)
     }
 
     /* Create and add the new entry */
-    new = HeapAlloc(GetProcessHeap(), 0, sizeof(travellog_entry));
+    new = heap_alloc(sizeof(*new));
     new->pidl = ILClone(pidl);
     list_add_tail(&This->travellog, &new->entry);
     This->travellog_cursor = new;
@@ -872,8 +872,7 @@ static ULONG WINAPI IExplorerBrowser_fnRelease(IExplorerBrowser *iface)
 
         IObjectWithSite_SetSite(&This->IObjectWithSite_iface, NULL);
 
-        HeapFree(GetProcessHeap(), 0, This);
-        return 0;
+        heap_free(This);
     }
 
     return ref;
@@ -1038,7 +1037,7 @@ static HRESULT WINAPI IExplorerBrowser_fnAdvise(IExplorerBrowser *iface,
     event_client *client;
     TRACE("%p (%p, %p)\n", This, psbe, pdwCookie);
 
-    client = HeapAlloc(GetProcessHeap(), 0, sizeof(event_client));
+    client = heap_alloc(sizeof(*client));
     client->pebe = psbe;
     client->cookie = ++This->events_next_cookie;
 
@@ -1063,7 +1062,7 @@ static HRESULT WINAPI IExplorerBrowser_fnUnadvise(IExplorerBrowser *iface,
         {
             list_remove(&client->entry);
             IExplorerBrowserEvents_Release(client->pebe);
-            HeapFree(GetProcessHeap(), 0, client);
+            heap_free(client);
             return S_OK;
         }
     }
@@ -1698,14 +1697,14 @@ static HRESULT WINAPI ICommDlgBrowser3_fnGetCurrentFilter(ICommDlgBrowser3 *ifac
     return S_OK;
 }
 
-static HRESULT WINAPI ICommDlgBrowser3_fnOnPreviewCreated(ICommDlgBrowser3 *iface,
+static HRESULT WINAPI ICommDlgBrowser3_fnOnPreViewCreated(ICommDlgBrowser3 *iface,
                                                           IShellView *pshv)
 {
     ExplorerBrowserImpl *This = impl_from_ICommDlgBrowser3(iface);
     TRACE("%p (%p)\n", This, pshv);
 
     if(This->pcdb3_site)
-        return ICommDlgBrowser3_OnPreviewCreated(This->pcdb3_site, pshv);
+        return ICommDlgBrowser3_OnPreViewCreated(This->pcdb3_site, pshv);
 
     return S_OK;
 }
@@ -1722,7 +1721,7 @@ static const ICommDlgBrowser3Vtbl vt_ICommDlgBrowser3 = {
     ICommDlgBrowser3_fnGetViewFlags,
     ICommDlgBrowser3_fnOnColumnClicked,
     ICommDlgBrowser3_fnGetCurrentFilter,
-    ICommDlgBrowser3_fnOnPreviewCreated
+    ICommDlgBrowser3_fnOnPreViewCreated
 };
 
 /**************************************************************************
@@ -2100,7 +2099,7 @@ HRESULT WINAPI ExplorerBrowser_Constructor(IUnknown *pUnkOuter, REFIID riid, voi
     if(pUnkOuter)
         return CLASS_E_NOAGGREGATION;
 
-    eb = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ExplorerBrowserImpl));
+    eb = heap_alloc_zero(sizeof(*eb));
     eb->ref = 1;
     eb->IExplorerBrowser_iface.lpVtbl = &vt_IExplorerBrowser;
     eb->IShellBrowser_iface.lpVtbl    = &vt_IShellBrowser;

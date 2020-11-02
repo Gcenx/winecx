@@ -39,7 +39,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(message);
 
 #define SPY_MAX_MSGNUM   WM_USER
 #define SPY_INDENT_UNIT  4  /* 4 spaces */
-#define ARRAYSIZE(a) ((sizeof(a) / sizeof((a)[0])))
 
 #define DEBUG_SPY 0
 
@@ -490,13 +489,30 @@ static const char * const MessageTypeNames[SPY_MAX_MSGNUM + 1] =
     "WM_ENTERSIZEMOVE",         /* 0x0231 */
     "WM_EXITSIZEMOVE",          /* 0x0232 */
     "WM_DROPFILES",             /* 0x0233 */
-    "WM_MDIREFRESHMENU", NULL, NULL, NULL,
-    /* 0x0238*/
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    "WM_MDIREFRESHMENU",        /* 0x0234 */
+    NULL, NULL, NULL,
+    "WM_POINTERDEVICECHANGE",   /* 0x0238 */
+    "WM_POINTERDEVICEINRANGE",  /* 0x0239 */
+    "WM_POINTERDEVICEOUTOFRANGE", /* 0x023a */
+    NULL, NULL, NULL, NULL, NULL,
 
     /* 0x0240 */
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    "WM_TOUCH",                 /* 0x0240 */
+    "WM_NCPOINTERUPDATE",       /* 0x0241 */
+    "WM_NCPOINTERDOWN",         /* 0x0242 */
+    "WM_NCPOINTERUP",           /* 0x0243 */
+    NULL,
+    "WM_POINTERUPDATE",         /* 0x0245 */
+    "WM_POINTERDOWN",           /* 0x0246 */
+    "WM_POINTERUP",             /* 0x0247 */
+    NULL,
+    "WM_POINTERENTER",          /* 0x0249 */
+    "WM_POINTERLEAVE",          /* 0x024a */
+    "WM_POINTERACTIVATE",       /* 0x024b */
+    "WM_POINTERCAPTURECHANGED", /* 0x024c */
+    "WM_TOUCHHITTESTING",       /* 0x024d */
+    "WM_POINTERWHEEL",          /* 0x024e */
+    "WM_POINTERHWHEEL",         /* 0x024f */
 
     /* 0x0250 */
     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
@@ -569,7 +585,13 @@ static const char * const MessageTypeNames[SPY_MAX_MSGNUM + 1] =
     "WM_TABLET_FIRST+31",       /* 0x02de */
     "WM_TABLET_LAST",           /* 0x02df */
 
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    "WM_DPICHANGED",            /* 0x02e0 */
+    NULL,
+    "WM_DPICHANGED_BEFOREPARENT",/* 0x02e2 */
+    "WM_DPICHANGED_AFTERPARENT",/* 0x02e3 */
+    "WM_GETDPISCALEDSIZE",      /* 0x02e4 */
+    NULL, NULL, NULL,
+
     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
@@ -1755,14 +1777,15 @@ static const USER_MSG richedit_array[] = {
 #undef USM
 
 static const CONTROL_CLASS cc_array[] = {
-    {WC_COMBOBOXEXW,    comboex_array,  ARRAYSIZE(comboex_array) },
-    {WC_PROPSHEETW,     propsht_array,  ARRAYSIZE(propsht_array) },
-    {REBARCLASSNAMEW,   rebar_array,    ARRAYSIZE(rebar_array) },
-    {TOOLBARCLASSNAMEW, toolbar_array,  ARRAYSIZE(toolbar_array) },
-    {TOOLTIPS_CLASSW,   tooltips_array, ARRAYSIZE(tooltips_array) },
-    {UPDOWN_CLASSW,     updown_array,   ARRAYSIZE(updown_array) },
-    {RICHEDIT_CLASS20W, richedit_array, ARRAYSIZE(richedit_array) },
-    {0, 0, 0} };
+    {WC_COMBOBOXEXW,    comboex_array,  ARRAY_SIZE(comboex_array)},
+    {WC_PROPSHEETW,     propsht_array,  ARRAY_SIZE(propsht_array)},
+    {REBARCLASSNAMEW,   rebar_array,    ARRAY_SIZE(rebar_array)},
+    {TOOLBARCLASSNAMEW, toolbar_array,  ARRAY_SIZE(toolbar_array)},
+    {TOOLTIPS_CLASSW,   tooltips_array, ARRAY_SIZE(tooltips_array)},
+    {UPDOWN_CLASSW,     updown_array,   ARRAY_SIZE(updown_array)},
+    {RICHEDIT_CLASS20W, richedit_array, ARRAY_SIZE(richedit_array)},
+    {0, 0, 0}
+};
 
 
 /************************************************************************/
@@ -2104,7 +2127,7 @@ const char *SPY_GetClassLongOffsetName( INT offset )
 {
     INT index;
     if (offset < 0 && offset % 2 == 0 && ((index = -(offset + 8) / 2) <
-	sizeof(ClassLongOffsetNames) / sizeof(*ClassLongOffsetNames)))
+        ARRAY_SIZE(ClassLongOffsetNames)))
     {
         return ClassLongOffsetNames[index];
     }
@@ -2125,7 +2148,7 @@ static void SPY_GetClassName( SPY_INSTANCE *sp_e )
         strcpyW(sp_e->wnd_class, WC_PROPSHEETW);
     }
     else {
-        GetClassNameW(sp_e->msg_hwnd, sp_e->wnd_class, sizeof(sp_e->wnd_class)/sizeof(WCHAR));
+        GetClassNameW(sp_e->msg_hwnd, sp_e->wnd_class, ARRAY_SIZE(sp_e->wnd_class));
     }
 }
 
@@ -2200,12 +2223,12 @@ static void SPY_GetWndName( SPY_INSTANCE *sp_e )
 
     SPY_GetClassName( sp_e );
 
-    len = InternalGetWindowText(sp_e->msg_hwnd, sp_e->wnd_name, sizeof(sp_e->wnd_name)/sizeof(WCHAR));
+    len = InternalGetWindowText(sp_e->msg_hwnd, sp_e->wnd_name, ARRAY_SIZE(sp_e->wnd_name));
     if(!len) /* get class name */
     {
         LPWSTR dst = sp_e->wnd_name;
         LPWSTR src = sp_e->wnd_class;
-        int n = sizeof(sp_e->wnd_name)/sizeof(WCHAR) - 3;
+        int n = ARRAY_SIZE(sp_e->wnd_name) - 3;
         *dst++ = '{';
         while ((n-- > 0) && *src) *dst++ = *src++;
         *dst++ = '}';
@@ -2255,7 +2278,7 @@ const char *SPY_GetVKeyName(WPARAM wParam)
  */
 static const SPY_NOTIFY *SPY_Bsearch_Notify( UINT code)
 {
-    int low = 0, high = ARRAYSIZE(spnfy_array) - 1;
+    int low = 0, high = ARRAY_SIZE(spnfy_array) - 1;
 
     while (low <= high)
     {
@@ -2479,9 +2502,20 @@ static void SPY_DumpStructure(const SPY_INSTANCE *sp_e, BOOL enter)
             }
             break;
         case WM_NCCALCSIZE:
+            if (!sp_e->wParam)
             {
                 RECT *rc = (RECT *)sp_e->lParam;
-                TRACE("Rect (%s)\n", wine_dbgstr_rect(rc));
+                TRACE("Rect %s\n", wine_dbgstr_rect(rc));
+            }
+            else
+            {
+                NCCALCSIZE_PARAMS *nc = (NCCALCSIZE_PARAMS *)sp_e->lParam;
+                TRACE("Rects %s %s %s\n", wine_dbgstr_rect(nc->rgrc),
+                      wine_dbgstr_rect(nc->rgrc + 1), wine_dbgstr_rect(nc->rgrc + 2));
+                if (nc->lppos)
+                    TRACE("WINDOWPOS hwnd=%p, after=%p, at (%d,%d) w=%d h=%d, flags=0x%08x\n",
+                          nc->lppos->hwnd, nc->lppos->hwndInsertAfter, nc->lppos->x, nc->lppos->y,
+                          nc->lppos->cx, nc->lppos->cy, nc->lppos->flags);
             }
             break;
         case WM_NOTIFY:
@@ -2503,8 +2537,7 @@ static void SPY_DumpStructure(const SPY_INSTANCE *sp_e, BOOL enter)
                     if (pnmh->code == NM_CUSTOMDRAW) {
                         /* save and restore error code over the next call */
                         save_error = GetLastError();
-                        GetClassNameW(pnmh->hwndFrom, from_class,
-                                      sizeof(from_class)/sizeof(WCHAR));
+                        GetClassNameW(pnmh->hwndFrom, from_class, ARRAY_SIZE(from_class));
                         SetLastError(save_error);
                         if (strcmpW(TOOLBARCLASSNAMEW, from_class) == 0)
                             dumplen = sizeof(NMTBCUSTOMDRAW)-sizeof(NMHDR);

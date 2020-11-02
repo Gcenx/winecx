@@ -28,6 +28,7 @@
 #include "msscript.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msscript);
@@ -88,6 +89,9 @@ struct ScriptControl {
     IOleClientSite *site;
     SIZEL extent;
     LONG timeout;
+    VARIANT_BOOL allow_ui;
+    VARIANT_BOOL use_safe_subset;
+    ScriptControlStates state;
 
     /* connection points */
     ConnectionPoint *cp_list;
@@ -102,16 +106,6 @@ struct ScriptControl {
 };
 
 static HINSTANCE msscript_instance;
-
-static inline void * __WINE_ALLOC_SIZE(1) heap_alloc(size_t len)
-{
-    return HeapAlloc(GetProcessHeap(), 0, len);
-}
-
-static inline BOOL heap_free(void *mem)
-{
-    return HeapFree(GetProcessHeap(), 0, mem);
-}
 
 typedef enum tid_t {
     IScriptControl_tid,
@@ -175,7 +169,7 @@ static void release_typelib(void)
     if(!typelib)
         return;
 
-    for(i=0; i < sizeof(typeinfos)/sizeof(*typeinfos); i++)
+    for(i = 0; i < ARRAY_SIZE(typeinfos); i++)
         if(typeinfos[i])
             ITypeInfo_Release(typeinfos[i]);
 
@@ -768,15 +762,31 @@ static HRESULT WINAPI ScriptControl_put_Language(IScriptControl *iface, BSTR lan
 static HRESULT WINAPI ScriptControl_get_State(IScriptControl *iface, ScriptControlStates *p)
 {
     ScriptControl *This = impl_from_IScriptControl(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_POINTER;
+
+    if(!This->host)
+        return E_FAIL;
+
+    *p = This->state;
+    return S_OK;
 }
 
 static HRESULT WINAPI ScriptControl_put_State(IScriptControl *iface, ScriptControlStates state)
 {
     ScriptControl *This = impl_from_IScriptControl(iface);
-    FIXME("(%p)->(%x)\n", This, state);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%x)\n", This, state);
+
+    if(!This->host)
+        return E_FAIL;
+
+    if(state != Initialized && state != Connected)
+        return CTL_E_INVALIDPROPERTYVALUE;
+
+    This->state = state;
+    return S_OK;
 }
 
 static HRESULT WINAPI ScriptControl_put_SitehWnd(IScriptControl *iface, LONG hwnd)
@@ -825,29 +835,43 @@ static HRESULT WINAPI ScriptControl_put_Timeout(IScriptControl *iface, LONG time
 static HRESULT WINAPI ScriptControl_get_AllowUI(IScriptControl *iface, VARIANT_BOOL *p)
 {
     ScriptControl *This = impl_from_IScriptControl(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_POINTER;
+
+    *p = This->allow_ui;
+    return S_OK;
 }
 
 static HRESULT WINAPI ScriptControl_put_AllowUI(IScriptControl *iface, VARIANT_BOOL allow_ui)
 {
     ScriptControl *This = impl_from_IScriptControl(iface);
-    FIXME("(%p)->(%x)\n", This, allow_ui);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%x)\n", This, allow_ui);
+
+    This->allow_ui = allow_ui;
+    return S_OK;
 }
 
 static HRESULT WINAPI ScriptControl_get_UseSafeSubset(IScriptControl *iface, VARIANT_BOOL *p)
 {
     ScriptControl *This = impl_from_IScriptControl(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_POINTER;
+
+    *p = This->use_safe_subset;
+    return S_OK;
 }
 
-static HRESULT WINAPI ScriptControl_put_UseSafeSubset(IScriptControl *iface, VARIANT_BOOL v)
+static HRESULT WINAPI ScriptControl_put_UseSafeSubset(IScriptControl *iface, VARIANT_BOOL use_safe_subset)
 {
     ScriptControl *This = impl_from_IScriptControl(iface);
-    FIXME("(%p)->(%x)\n", This, v);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%x)\n", This, use_safe_subset);
+
+    This->use_safe_subset = use_safe_subset;
+    return S_OK;
 }
 
 static HRESULT WINAPI ScriptControl_get_Modules(IScriptControl *iface, IScriptModuleCollection **p)
@@ -1891,6 +1915,9 @@ static HRESULT WINAPI ScriptControl_CreateInstance(IClassFactory *iface, IUnknow
     script_control->timeout = 10000;
     script_control->view_sink_flags = 0;
     script_control->view_sink = NULL;
+    script_control->allow_ui = VARIANT_TRUE;
+    script_control->use_safe_subset = VARIANT_FALSE;
+    script_control->state = Initialized;
 
     ConnectionPoint_Init(&script_control->cp_scsource, script_control, &DIID_DScriptControlSource);
     ConnectionPoint_Init(&script_control->cp_propnotif, script_control, &IID_IPropertyNotifySink);

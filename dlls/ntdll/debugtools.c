@@ -38,7 +38,6 @@
 #include "winternl.h"
 #include "ntdll_misc.h"
 
-WINE_DECLARE_DEBUG_CHANNEL(tid);
 WINE_DECLARE_DEBUG_CHANNEL(pid);
 WINE_DECLARE_DEBUG_CHANNEL(timestamp);
 
@@ -173,9 +172,10 @@ static int NTDLL_dbg_vlog( enum __wine_debug_class cls, struct __wine_debug_chan
         }
         if (TRACE_ON(pid))
             ret += wine_dbg_printf( "%04x:", GetCurrentProcessId() );
-        if (TRACE_ON(tid))
-            ret += wine_dbg_printf( "%04x:", GetCurrentThreadId() );
-        if (cls < sizeof(classes)/sizeof(classes[0]))
+        ret += wine_dbg_printf( "%04x:", GetCurrentThreadId() );
+        if (*format == '\1')  /* special magic to avoid standard prefix */
+            format++;
+        else if (cls < ARRAY_SIZE( classes ))
             ret += wine_dbg_printf( "%s:%s:%s ", classes[cls], channel->name, function );
     }
     if (format)

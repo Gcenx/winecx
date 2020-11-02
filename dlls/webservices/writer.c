@@ -17,6 +17,7 @@
  */
 
 #include "config.h"
+#include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <math.h>
@@ -27,6 +28,7 @@
 #include "webservices.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "wine/list.h"
 #include "wine/unicode.h"
 #include "webservices_private.h"
@@ -37,7 +39,7 @@ static const struct prop_desc writer_props[] =
 {
     { sizeof(ULONG), FALSE },       /* WS_XML_WRITER_PROPERTY_MAX_DEPTH */
     { sizeof(BOOL), FALSE },        /* WS_XML_WRITER_PROPERTY_ALLOW_FRAGMENT */
-    { sizeof(ULONG), FALSE },       /* WS_XML_READER_PROPERTY_MAX_ATTRIBUTES */
+    { sizeof(ULONG), FALSE },       /* WS_XML_WRITER_PROPERTY_MAX_ATTRIBUTES */
     { sizeof(BOOL), FALSE },        /* WS_XML_WRITER_PROPERTY_WRITE_DECLARATION */
     { sizeof(ULONG), FALSE },       /* WS_XML_WRITER_PROPERTY_INDENT */
     { sizeof(ULONG), FALSE },       /* WS_XML_WRITER_PROPERTY_BUFFER_TRIM_SIZE */
@@ -71,19 +73,26 @@ enum writer_state
 
 struct writer
 {
-    ULONG                      magic;
-    CRITICAL_SECTION           cs;
-    ULONG                      write_pos;
-    unsigned char             *write_bufptr;
-    enum writer_state          state;
-    struct node               *root;
-    struct node               *current;
-    WS_XML_STRING             *current_ns;
-    WS_XML_WRITER_OUTPUT_TYPE  output_type;
-    struct xmlbuf             *output_buf;
-    WS_HEAP                   *output_heap;
-    ULONG                      prop_count;
-    struct prop                prop[sizeof(writer_props)/sizeof(writer_props[0])];
+    ULONG                        magic;
+    CRITICAL_SECTION             cs;
+    ULONG                        write_pos;
+    unsigned char               *write_bufptr;
+    enum writer_state            state;
+    struct node                 *root;
+    struct node                 *current;
+    WS_XML_STRING               *current_ns;
+    WS_XML_WRITER_ENCODING_TYPE  output_enc;
+    WS_CHARSET                   output_charset;
+    WS_XML_WRITER_OUTPUT_TYPE    output_type;
+    struct xmlbuf               *output_buf;
+    BOOL                         output_buf_user;
+    WS_HEAP                     *output_heap;
+    const WS_XML_DICTIONARY     *dict;
+    BOOL                         dict_do_lookup;
+    WS_DYNAMIC_STRING_CALLBACK   dict_cb;
+    void                        *dict_cb_state;
+    ULONG                        prop_count;
+    struct prop                  prop[sizeof(writer_props)/sizeof(writer_props[0])];
 };
 
 #define WRITER_MAGIC (('W' << 24) | ('R' << 16) | ('I' << 8) | 'T')
@@ -108,7 +117,7 @@ static struct writer *alloc_writer(void)
 static void free_writer( struct writer *writer )
 {
     destroy_nodes( writer->root );
-    heap_free( writer->current_ns );
+    free_xml_string( writer->current_ns );
     WsFreeHeap( writer->output_heap );
 
     writer->cs.DebugInfo->Spare[0] = 0;
@@ -152,16 +161,22 @@ static HRESULT init_writer( struct writer *writer )
 {
     struct node *node;
 
-    writer->write_pos    = 0;
-    writer->write_bufptr = NULL;
+    writer->write_pos      = 0;
+    writer->write_bufptr   = NULL;
     destroy_nodes( writer->root );
-    writer->root         = writer->current = NULL;
-    heap_free( writer->current_ns );
-    writer->current_ns   = NULL;
+    writer->root           = writer->current = NULL;
+    free_xml_string( writer->current_ns );
+    writer->current_ns     = NULL;
 
     if (!(node = alloc_node( WS_XML_NODE_TYPE_EOF ))) return E_OUTOFMEMORY;
     write_insert_eof( writer, node );
-    writer->state        = WRITER_STATE_INITIAL;
+    writer->state          = WRITER_STATE_INITIAL;
+    writer->output_enc     = WS_XML_WRITER_ENCODING_TYPE_TEXT;
+    writer->output_charset = WS_CHARSET_UTF8;
+    writer->dict           = NULL;
+    writer->dict_do_lookup = FALSE;
+    writer->dict_cb        = NULL;
+    writer->dict_cb_state  = NULL;
     return S_OK;
 }
 
@@ -223,6 +238,7 @@ HRESULT WINAPI WsCreateWriter( const WS_XML_WRITER_PROPERTY *properties, ULONG c
         return hr;
     }
 
+    TRACE( "created %p\n", writer );
     *handle = (WS_XML_WRITER *)writer;
     return S_OK;
 }
@@ -288,11 +304,24 @@ HRESULT WINAPI WsGetWriterProperty( WS_XML_WRITER *handle, WS_XML_WRITER_PROPERT
         if (size != sizeof(*bytes)) hr = E_INVALIDARG;
         else
         {
-            bytes->bytes  = writer->output_buf->ptr;
-            bytes->length = writer->output_buf->size;
+            bytes->bytes  = writer->output_buf->bytes.bytes;
+            bytes->length = writer->output_buf->bytes.length;
         }
         break;
     }
+    case WS_XML_WRITER_PROPERTY_BUFFERS:
+        if (writer->output_buf->bytes.length)
+        {
+            WS_BUFFERS *buffers = buf;
+            if (size != sizeof(*buffers)) hr = E_INVALIDARG;
+            else
+            {
+                buffers->bufferCount = 1;
+                buffers->buffers     = &writer->output_buf->bytes;
+            }
+            break;
+        }
+        /* fall through */
     default:
         hr = prop_get( writer->prop, writer->prop_count, id, buf, size );
     }
@@ -304,13 +333,13 @@ HRESULT WINAPI WsGetWriterProperty( WS_XML_WRITER *handle, WS_XML_WRITER_PROPERT
 static void set_output_buffer( struct writer *writer, struct xmlbuf *xmlbuf )
 {
     /* free current buffer if it's ours */
-    if (writer->output_buf && writer->output_buf->heap == writer->output_heap)
+    if (writer->output_buf && !writer->output_buf_user)
     {
         free_xmlbuf( writer->output_buf );
     }
     writer->output_buf   = xmlbuf;
     writer->output_type  = WS_XML_WRITER_OUTPUT_TYPE_BUFFER;
-    writer->write_bufptr = xmlbuf->ptr;
+    writer->write_bufptr = xmlbuf->bytes.bytes;
     writer->write_pos    = 0;
 }
 
@@ -359,6 +388,18 @@ HRESULT WINAPI WsSetOutput( WS_XML_WRITER *handle, const WS_XML_WRITER_ENCODING 
             hr = E_NOTIMPL;
             goto done;
         }
+        writer->output_enc     = WS_XML_WRITER_ENCODING_TYPE_TEXT;
+        writer->output_charset = WS_CHARSET_UTF8;
+        break;
+    }
+    case WS_XML_WRITER_ENCODING_TYPE_BINARY:
+    {
+        WS_XML_WRITER_BINARY_ENCODING *bin = (WS_XML_WRITER_BINARY_ENCODING *)encoding;
+        writer->output_enc     = WS_XML_WRITER_ENCODING_TYPE_BINARY;
+        writer->output_charset = 0;
+        writer->dict           = bin->staticDictionary;
+        writer->dict_cb        = bin->dynamicStringCallback;
+        writer->dict_cb_state  = bin->dynamicStringCallbackState;
         break;
     }
     default:
@@ -372,9 +413,14 @@ HRESULT WINAPI WsSetOutput( WS_XML_WRITER *handle, const WS_XML_WRITER_ENCODING 
     case WS_XML_WRITER_OUTPUT_TYPE_BUFFER:
     {
         struct xmlbuf *xmlbuf;
-
-        if (!(xmlbuf = alloc_xmlbuf( writer->output_heap ))) hr = WS_E_QUOTA_EXCEEDED;
-        else set_output_buffer( writer, xmlbuf );
+        if (!(xmlbuf = alloc_xmlbuf( writer->output_heap, 0, writer->output_enc, writer->output_charset,
+                                     writer->dict, NULL )))
+        {
+            hr = WS_E_QUOTA_EXCEEDED;
+            goto done;
+        }
+        set_output_buffer( writer, xmlbuf );
+        writer->output_buf_user = FALSE;
         break;
     }
     default:
@@ -425,7 +471,10 @@ HRESULT WINAPI WsSetOutputToBuffer( WS_XML_WRITER *handle, WS_XML_BUFFER *buffer
     }
 
     if ((hr = init_writer( writer )) != S_OK) goto done;
+    writer->output_enc     = xmlbuf->encoding;
+    writer->output_charset = xmlbuf->charset;
     set_output_buffer( writer, xmlbuf );
+    writer->output_buf_user = TRUE;
 
     if (!(node = alloc_node( WS_XML_NODE_TYPE_BOF ))) hr = E_OUTOFMEMORY;
     else write_insert_bof( writer, node );
@@ -441,16 +490,16 @@ static HRESULT write_grow_buffer( struct writer *writer, ULONG size )
     SIZE_T new_size;
     void *tmp;
 
-    if (buf->size_allocated >= writer->write_pos + size)
+    if (buf->size >= writer->write_pos + size)
     {
-        buf->size = writer->write_pos + size;
+        buf->bytes.length = writer->write_pos + size;
         return S_OK;
     }
-    new_size = max( buf->size_allocated * 2, writer->write_pos + size );
-    if (!(tmp = ws_realloc( buf->heap, buf->ptr, buf->size_allocated, new_size ))) return WS_E_QUOTA_EXCEEDED;
-    writer->write_bufptr = buf->ptr = tmp;
-    buf->size_allocated = new_size;
-    buf->size = writer->write_pos + size;
+    new_size = max( buf->size * 2, writer->write_pos + size );
+    if (!(tmp = ws_realloc( buf->heap, buf->bytes.bytes, buf->size, new_size ))) return WS_E_QUOTA_EXCEEDED;
+    writer->write_bufptr = buf->bytes.bytes = tmp;
+    buf->size = new_size;
+    buf->bytes.length = writer->write_pos + size;
     return S_OK;
 }
 
@@ -504,9 +553,19 @@ static HRESULT write_bytes_escape( struct writer *writer, const BYTE *bytes, ULO
     return S_OK;
 }
 
-static HRESULT write_attribute( struct writer *writer, WS_XML_ATTRIBUTE *attr )
+static HRESULT write_attribute_value_text( struct writer *writer, const WS_XML_TEXT *text, BOOL single )
 {
-    WS_XML_UTF8_TEXT *text = (WS_XML_UTF8_TEXT *)attr->value;
+    WS_XML_UTF8_TEXT *utf8 = (WS_XML_UTF8_TEXT *)text;
+    const struct escape *escapes[3];
+
+    escapes[0] = single ? &escape_apos : &escape_quot;
+    escapes[1] = &escape_lt;
+    escapes[2] = &escape_amp;
+    return write_bytes_escape( writer, utf8->value.bytes, utf8->value.length, escapes, 3 );
+}
+
+static HRESULT write_attribute_text( struct writer *writer, const WS_XML_ATTRIBUTE *attr )
+{
     unsigned char quote = attr->singleQuote ? '\'' : '"';
     const WS_XML_STRING *prefix = NULL;
     ULONG size;
@@ -518,7 +577,6 @@ static HRESULT write_attribute( struct writer *writer, WS_XML_ATTRIBUTE *attr )
 
     size = attr->localName->length + 4 /* ' =""' */;
     if (prefix && prefix->length) size += prefix->length + 1 /* ':' */;
-    if (text) size += text->value.length;
     if ((hr = write_grow_buffer( writer, size )) != S_OK) return hr;
 
     write_char( writer, ' ' );
@@ -530,667 +588,211 @@ static HRESULT write_attribute( struct writer *writer, WS_XML_ATTRIBUTE *attr )
     write_bytes( writer, attr->localName->bytes, attr->localName->length );
     write_char( writer, '=' );
     write_char( writer, quote );
-    if (text)
-    {
-        const struct escape *escapes[3];
-        escapes[0] = attr->singleQuote ? &escape_apos : &escape_quot;
-        escapes[1] = &escape_lt;
-        escapes[2] = &escape_amp;
-        hr = write_bytes_escape( writer, text->value.bytes, text->value.length, escapes, 3 );
-    }
+    if (attr->value) hr = write_attribute_value_text( writer, attr->value, attr->singleQuote );
     write_char( writer, quote );
 
     return hr;
 }
 
-static inline BOOL is_current_namespace( struct writer *writer, const WS_XML_STRING *ns )
+static HRESULT write_int31( struct writer *writer, ULONG len )
 {
-    return (WsXmlStringEquals( writer->current_ns, ns, NULL ) == S_OK);
-}
-
-/**************************************************************************
- *          WsGetPrefixFromNamespace		[webservices.@]
- */
-HRESULT WINAPI WsGetPrefixFromNamespace( WS_XML_WRITER *handle, const WS_XML_STRING *ns,
-                                         BOOL required, const WS_XML_STRING **prefix,
-                                         WS_ERROR *error )
-{
-    struct writer *writer = (struct writer *)handle;
-    WS_XML_ELEMENT_NODE *elem;
-    BOOL found = FALSE;
-    HRESULT hr = S_OK;
-
-    TRACE( "%p %s %d %p %p\n", handle, debugstr_xmlstr(ns), required, prefix, error );
-    if (error) FIXME( "ignoring error parameter\n" );
-
-    if (!writer || !ns || !prefix) return E_INVALIDARG;
-
-    EnterCriticalSection( &writer->cs );
-
-    if (writer->magic != WRITER_MAGIC)
-    {
-        LeaveCriticalSection( &writer->cs );
-        return E_INVALIDARG;
-    }
-
-    elem = &writer->current->hdr;
-    if (elem->prefix && is_current_namespace( writer, ns ))
-    {
-        *prefix = elem->prefix;
-        found = TRUE;
-    }
-
-    if (!found)
-    {
-        if (required) hr = WS_E_INVALID_FORMAT;
-        else
-        {
-            *prefix = NULL;
-            hr = S_FALSE;
-        }
-    }
-
-    LeaveCriticalSection( &writer->cs );
-    return hr;
-}
-
-static HRESULT set_current_namespace( struct writer *writer, const WS_XML_STRING *ns )
-{
-    WS_XML_STRING *str;
-    if (!(str = alloc_xml_string( ns->bytes, ns->length ))) return E_OUTOFMEMORY;
-    heap_free( writer->current_ns );
-    writer->current_ns = str;
-    return S_OK;
-}
-
-static HRESULT write_namespace_attribute( struct writer *writer, WS_XML_ATTRIBUTE *attr )
-{
-    unsigned char quote = attr->singleQuote ? '\'' : '"';
-    ULONG size;
     HRESULT hr;
 
-    /* ' xmlns:prefix="namespace"' */
+    if (len > 0x7fffffff) return E_INVALIDARG;
 
-    size = attr->ns->length + 9 /* ' xmlns=""' */;
-    if (attr->prefix) size += attr->prefix->length + 1 /* ':' */;
-    if ((hr = write_grow_buffer( writer, size )) != S_OK) return hr;
-
-    write_bytes( writer, (const BYTE *)" xmlns", 6 );
-    if (attr->prefix)
+    if ((hr = write_grow_buffer( writer, 1 )) != S_OK) return hr;
+    if (len < 0x80)
     {
-        write_char( writer, ':' );
-        write_bytes( writer, attr->prefix->bytes, attr->prefix->length );
-    }
-    write_char( writer, '=' );
-    write_char( writer, quote );
-    write_bytes( writer, attr->ns->bytes, attr->ns->length );
-    write_char( writer, quote );
-
-    return S_OK;
-}
-
-static HRESULT write_add_namespace_attribute( struct writer *writer, const WS_XML_STRING *prefix,
-                                              const WS_XML_STRING *ns, BOOL single )
-{
-    WS_XML_ATTRIBUTE *attr;
-    WS_XML_ELEMENT_NODE *elem = &writer->current->hdr;
-    HRESULT hr;
-
-    if (!(attr = heap_alloc_zero( sizeof(*attr) ))) return E_OUTOFMEMORY;
-
-    attr->singleQuote = !!single;
-    attr->isXmlNs = 1;
-    if (prefix && !(attr->prefix = alloc_xml_string( prefix->bytes, prefix->length )))
-    {
-        free_attribute( attr );
-        return E_OUTOFMEMORY;
-    }
-    if (!(attr->ns = alloc_xml_string( ns->bytes, ns->length )))
-    {
-        free_attribute( attr );
-        return E_OUTOFMEMORY;
-    }
-    if ((hr = append_attribute( elem, attr )) != S_OK)
-    {
-        free_attribute( attr );
-        return hr;
-    }
-    return S_OK;
-}
-
-static inline BOOL str_equal( const WS_XML_STRING *str1, const WS_XML_STRING *str2 )
-{
-    if (!str1 && !str2) return TRUE;
-    return WsXmlStringEquals( str1, str2, NULL ) == S_OK;
-}
-
-static BOOL namespace_in_scope( const WS_XML_ELEMENT_NODE *elem, const WS_XML_STRING *prefix,
-                                const WS_XML_STRING *ns )
-{
-    ULONG i;
-    const struct node *node;
-
-    for (node = (const struct node *)elem; node; node = node->parent)
-    {
-        if (node_type( node ) != WS_XML_NODE_TYPE_ELEMENT) break;
-
-        elem = &node->hdr;
-        for (i = 0; i < elem->attributeCount; i++)
-        {
-            if (!elem->attributes[i]->isXmlNs) continue;
-            if (str_equal( elem->attributes[i]->prefix, prefix ) &&
-                str_equal( elem->attributes[i]->ns, ns )) return TRUE;
-        }
-    }
-    return FALSE;
-}
-
-static HRESULT write_set_element_namespace( struct writer *writer )
-{
-    WS_XML_ELEMENT_NODE *elem = &writer->current->hdr;
-    HRESULT hr;
-
-    if (!elem->ns->length || namespace_in_scope( elem, elem->prefix, elem->ns )) return S_OK;
-
-    if ((hr = write_add_namespace_attribute( writer, elem->prefix, elem->ns, FALSE )) != S_OK)
-        return hr;
-
-    return set_current_namespace( writer, elem->ns );
-}
-
-/**************************************************************************
- *          WsWriteEndAttribute		[webservices.@]
- */
-HRESULT WINAPI WsWriteEndAttribute( WS_XML_WRITER *handle, WS_ERROR *error )
-{
-    struct writer *writer = (struct writer *)handle;
-
-    TRACE( "%p %p\n", handle, error );
-    if (error) FIXME( "ignoring error parameter\n" );
-
-    if (!writer) return E_INVALIDARG;
-
-    EnterCriticalSection( &writer->cs );
-
-    if (writer->magic != WRITER_MAGIC)
-    {
-        LeaveCriticalSection( &writer->cs );
-        return E_INVALIDARG;
-    }
-
-    writer->state = WRITER_STATE_STARTELEMENT;
-
-    LeaveCriticalSection( &writer->cs );
-    return S_OK;
-}
-
-static HRESULT write_startelement( struct writer *writer )
-{
-    WS_XML_ELEMENT_NODE *elem = &writer->current->hdr;
-    ULONG size, i;
-    HRESULT hr;
-
-    /* '<prefix:localname prefix:attr="value"... xmlns:prefix="ns"'... */
-
-    size = elem->localName->length + 1 /* '<' */;
-    if (elem->prefix && elem->prefix->length) size += elem->prefix->length + 1 /* ':' */;
-    if ((hr = write_grow_buffer( writer, size )) != S_OK) return hr;
-
-    write_char( writer, '<' );
-    if (elem->prefix && elem->prefix->length)
-    {
-        write_bytes( writer, elem->prefix->bytes, elem->prefix->length );
-        write_char( writer, ':' );
-    }
-    write_bytes( writer, elem->localName->bytes, elem->localName->length );
-    for (i = 0; i < elem->attributeCount; i++)
-    {
-        if (elem->attributes[i]->isXmlNs) continue;
-        if ((hr = write_attribute( writer, elem->attributes[i] )) != S_OK) return hr;
-    }
-    for (i = 0; i < elem->attributeCount; i++)
-    {
-        if (!elem->attributes[i]->isXmlNs || !elem->attributes[i]->prefix) continue;
-        if ((hr = write_namespace_attribute( writer, elem->attributes[i] )) != S_OK) return hr;
-    }
-    for (i = 0; i < elem->attributeCount; i++)
-    {
-        if (!elem->attributes[i]->isXmlNs || elem->attributes[i]->prefix) continue;
-        if ((hr = write_namespace_attribute( writer, elem->attributes[i] )) != S_OK) return hr;
-    }
-    return S_OK;
-}
-
-static struct node *write_find_startelement( struct writer *writer )
-{
-    struct node *node;
-    for (node = writer->current; node; node = node->parent)
-    {
-        if (node_type( node ) == WS_XML_NODE_TYPE_ELEMENT) return node;
-    }
-    return NULL;
-}
-
-static inline BOOL is_empty_element( const struct node *node )
-{
-    const struct node *head = LIST_ENTRY( list_head( &node->children ), struct node, entry );
-    return node_type( head ) == WS_XML_NODE_TYPE_END_ELEMENT;
-}
-
-static HRESULT write_endelement( struct writer *writer, const WS_XML_ELEMENT_NODE *elem )
-{
-    ULONG size;
-    HRESULT hr;
-
-    /* '/>' */
-
-    if (elem->isEmpty && writer->state != WRITER_STATE_ENDSTARTELEMENT)
-    {
-        if ((hr = write_grow_buffer( writer, 2 )) != S_OK) return hr;
-        write_char( writer, '/' );
-        write_char( writer, '>' );
+        write_char( writer, len );
         return S_OK;
     }
+    write_char( writer, (len & 0x7f) | 0x80 );
 
-    /* '</prefix:localname>' */
-
-    size = elem->localName->length + 3 /* '</>' */;
-    if (elem->prefix && elem->prefix->length) size += elem->prefix->length + 1 /* ':' */;
-    if ((hr = write_grow_buffer( writer, size )) != S_OK) return hr;
-
-    write_char( writer, '<' );
-    write_char( writer, '/' );
-    if (elem->prefix && elem->prefix->length)
-    {
-        write_bytes( writer, elem->prefix->bytes, elem->prefix->length );
-        write_char( writer, ':' );
-    }
-    write_bytes( writer, elem->localName->bytes, elem->localName->length );
-    write_char( writer, '>' );
-    return S_OK;
-}
-
-static HRESULT write_close_element( struct writer *writer, struct node *node )
-{
-    WS_XML_ELEMENT_NODE *elem = &node->hdr;
-    elem->isEmpty = is_empty_element( node );
-    return write_endelement( writer, elem );
-}
-
-static HRESULT write_endelement_node( struct writer *writer )
-{
-    struct node *node;
-    HRESULT hr;
-
-    if (!(node = write_find_startelement( writer ))) return WS_E_INVALID_FORMAT;
-    if (writer->state == WRITER_STATE_STARTELEMENT)
-    {
-        if ((hr = write_set_element_namespace( writer )) != S_OK) return hr;
-        if ((hr = write_startelement( writer )) != S_OK) return hr;
-    }
-    if ((hr = write_close_element( writer, node )) != S_OK) return hr;
-    writer->current = node->parent;
-    writer->state   = WRITER_STATE_ENDELEMENT;
-    return S_OK;
-}
-
-/**************************************************************************
- *          WsWriteEndElement		[webservices.@]
- */
-HRESULT WINAPI WsWriteEndElement( WS_XML_WRITER *handle, WS_ERROR *error )
-{
-    struct writer *writer = (struct writer *)handle;
-    HRESULT hr;
-
-    TRACE( "%p %p\n", handle, error );
-    if (error) FIXME( "ignoring error parameter\n" );
-
-    if (!writer) return E_INVALIDARG;
-
-    EnterCriticalSection( &writer->cs );
-
-    if (writer->magic != WRITER_MAGIC)
-    {
-        LeaveCriticalSection( &writer->cs );
-        return E_INVALIDARG;
-    }
-
-    hr = write_endelement_node( writer );
-
-    LeaveCriticalSection( &writer->cs );
-    return hr;
-}
-
-static HRESULT write_endstartelement( struct writer *writer )
-{
-    HRESULT hr;
     if ((hr = write_grow_buffer( writer, 1 )) != S_OK) return hr;
-    write_char( writer, '>' );
-    return S_OK;
+    if ((len >>= 7) < 0x80)
+    {
+        write_char( writer, len );
+        return S_OK;
+    }
+    write_char( writer, (len & 0x7f) | 0x80 );
+
+    if ((hr = write_grow_buffer( writer, 1 )) != S_OK) return hr;
+    if ((len >>= 7) < 0x80)
+    {
+        write_char( writer, len );
+        return S_OK;
+    }
+    write_char( writer, (len & 0x7f) | 0x80 );
+
+    if ((hr = write_grow_buffer( writer, 1 )) != S_OK) return hr;
+    if ((len >>= 7) < 0x80)
+    {
+        write_char( writer, len );
+        return S_OK;
+    }
+    write_char( writer, (len & 0x7f) | 0x80 );
+
+    if ((hr = write_grow_buffer( writer, 1 )) != S_OK) return hr;
+    if ((len >>= 7) < 0x08)
+    {
+        write_char( writer, len );
+        return S_OK;
+    }
+    return WS_E_INVALID_FORMAT;
 }
 
-/**************************************************************************
- *          WsWriteEndStartElement		[webservices.@]
- */
-HRESULT WINAPI WsWriteEndStartElement( WS_XML_WRITER *handle, WS_ERROR *error )
-{
-    struct writer *writer = (struct writer *)handle;
-    HRESULT hr;
-
-    TRACE( "%p %p\n", handle, error );
-    if (error) FIXME( "ignoring error parameter\n" );
-
-    if (!writer) return E_INVALIDARG;
-
-    EnterCriticalSection( &writer->cs );
-
-    if (writer->magic != WRITER_MAGIC)
-    {
-        LeaveCriticalSection( &writer->cs );
-        return E_INVALIDARG;
-    }
-
-    if (writer->state != WRITER_STATE_STARTELEMENT)
-    {
-        LeaveCriticalSection( &writer->cs );
-        return WS_E_INVALID_OPERATION;
-    }
-
-    if ((hr = write_set_element_namespace( writer )) != S_OK) goto done;
-    if ((hr = write_startelement( writer )) != S_OK) goto done;
-    if ((hr = write_endstartelement( writer )) != S_OK) goto done;
-    writer->state = WRITER_STATE_ENDSTARTELEMENT;
-
-done:
-    LeaveCriticalSection( &writer->cs );
-    return hr;
-}
-
-static HRESULT write_add_attribute( struct writer *writer, const WS_XML_STRING *prefix,
-                                    const WS_XML_STRING *localname, const WS_XML_STRING *ns,
-                                    BOOL single )
-{
-    WS_XML_ATTRIBUTE *attr;
-    WS_XML_ELEMENT_NODE *elem = &writer->current->hdr;
-    HRESULT hr;
-
-    if (!(attr = heap_alloc_zero( sizeof(*attr) ))) return E_OUTOFMEMORY;
-
-    if (!prefix && ns->length > 0) prefix = elem->prefix;
-
-    attr->singleQuote = !!single;
-    if (prefix && !(attr->prefix = alloc_xml_string( prefix->bytes, prefix->length )))
-    {
-        free_attribute( attr );
-        return E_OUTOFMEMORY;
-    }
-    if (!(attr->localName = alloc_xml_string( localname->bytes, localname->length )))
-    {
-        free_attribute( attr );
-        return E_OUTOFMEMORY;
-    }
-    if (!(attr->ns = alloc_xml_string( ns->bytes, ns->length )))
-    {
-        free_attribute( attr );
-        return E_OUTOFMEMORY;
-    }
-    if ((hr = append_attribute( elem, attr )) != S_OK)
-    {
-        free_attribute( attr );
-        return hr;
-    }
-    return S_OK;
-}
-
-/**************************************************************************
- *          WsWriteStartAttribute		[webservices.@]
- */
-HRESULT WINAPI WsWriteStartAttribute( WS_XML_WRITER *handle, const WS_XML_STRING *prefix,
-                                      const WS_XML_STRING *localname, const WS_XML_STRING *ns,
-                                      BOOL single, WS_ERROR *error )
-{
-    struct writer *writer = (struct writer *)handle;
-    HRESULT hr;
-
-    TRACE( "%p %s %s %s %d %p\n", handle, debugstr_xmlstr(prefix), debugstr_xmlstr(localname),
-           debugstr_xmlstr(ns), single, error );
-    if (error) FIXME( "ignoring error parameter\n" );
-
-    if (!writer || !localname || !ns) return E_INVALIDARG;
-
-    EnterCriticalSection( &writer->cs );
-
-    if (writer->magic != WRITER_MAGIC)
-    {
-        LeaveCriticalSection( &writer->cs );
-        return E_INVALIDARG;
-    }
-
-    if (writer->state != WRITER_STATE_STARTELEMENT)
-    {
-        LeaveCriticalSection( &writer->cs );
-        return WS_E_INVALID_OPERATION;
-    }
-
-    if ((hr = write_add_attribute( writer, prefix, localname, ns, single )) == S_OK)
-        writer->state = WRITER_STATE_STARTATTRIBUTE;
-
-    LeaveCriticalSection( &writer->cs );
-    return hr;
-}
-
-/* flush current start element if necessary */
-static HRESULT write_flush( struct writer *writer )
-{
-    if (writer->state == WRITER_STATE_STARTELEMENT)
-    {
-        HRESULT hr;
-        if ((hr = write_set_element_namespace( writer )) != S_OK) return hr;
-        if ((hr = write_startelement( writer )) != S_OK) return hr;
-        if ((hr = write_endstartelement( writer )) != S_OK) return hr;
-        writer->state = WRITER_STATE_ENDSTARTELEMENT;
-    }
-    return S_OK;
-}
-
-static HRESULT write_add_cdata_node( struct writer *writer )
-{
-    struct node *node, *parent;
-    if (!(parent = find_parent( writer ))) return WS_E_INVALID_FORMAT;
-    if (!(node = alloc_node( WS_XML_NODE_TYPE_CDATA ))) return E_OUTOFMEMORY;
-    write_insert_node( writer, parent, node );
-    return S_OK;
-}
-
-static HRESULT write_add_endcdata_node( struct writer *writer )
-{
-    struct node *node;
-    if (!(node = alloc_node( WS_XML_NODE_TYPE_END_CDATA ))) return E_OUTOFMEMORY;
-    node->parent = writer->current;
-    list_add_tail( &node->parent->children, &node->entry );
-    return S_OK;
-}
-
-static HRESULT write_cdata( struct writer *writer )
+static HRESULT write_string( struct writer *writer, const BYTE *bytes, ULONG len )
 {
     HRESULT hr;
-    if ((hr = write_grow_buffer( writer, 9 )) != S_OK) return hr;
-    write_bytes( writer, (const BYTE *)"<![CDATA[", 9 );
+    if ((hr = write_int31( writer, len )) != S_OK) return hr;
+    if ((hr = write_grow_buffer( writer, len )) != S_OK) return hr;
+    write_bytes( writer, bytes, len );
     return S_OK;
 }
 
-static HRESULT write_cdata_node( struct writer *writer )
+static HRESULT write_dict_string( struct writer *writer, ULONG id )
 {
-    HRESULT hr;
-    if ((hr = write_flush( writer )) != S_OK) return hr;
-    if ((hr = write_add_cdata_node( writer )) != S_OK) return hr;
-    if ((hr = write_add_endcdata_node( writer )) != S_OK) return hr;
-    if ((hr = write_cdata( writer )) != S_OK) return hr;
-    writer->state = WRITER_STATE_STARTCDATA;
-    return S_OK;
+    if (id > 0x7fffffff) return E_INVALIDARG;
+    return write_int31( writer, id );
 }
 
-/**************************************************************************
- *          WsWriteStartCData		[webservices.@]
- */
-HRESULT WINAPI WsWriteStartCData( WS_XML_WRITER *handle, WS_ERROR *error )
+static enum record_type get_attr_text_record_type( const WS_XML_TEXT *text, BOOL use_dict )
 {
-    struct writer *writer = (struct writer *)handle;
-    HRESULT hr;
-
-    TRACE( "%p %p\n", handle, error );
-    if (error) FIXME( "ignoring error parameter\n" );
-
-    if (!writer) return E_INVALIDARG;
-
-    EnterCriticalSection( &writer->cs );
-
-    if (writer->magic != WRITER_MAGIC)
+    if (!text) return RECORD_CHARS8_TEXT;
+    switch (text->textType)
     {
-        LeaveCriticalSection( &writer->cs );
-        return E_INVALIDARG;
+    case WS_XML_TEXT_TYPE_UTF8:
+    {
+        const WS_XML_UTF8_TEXT *text_utf8 = (const WS_XML_UTF8_TEXT *)text;
+        if (use_dict) return RECORD_DICTIONARY_TEXT;
+        if (text_utf8->value.length <= MAX_UINT8) return RECORD_CHARS8_TEXT;
+        if (text_utf8->value.length <= MAX_UINT16) return RECORD_CHARS16_TEXT;
+        return RECORD_CHARS32_TEXT;
     }
+    case WS_XML_TEXT_TYPE_UTF16:
+    {
+        const WS_XML_UTF16_TEXT *text_utf16 = (const WS_XML_UTF16_TEXT *)text;
+        int len = text_utf16->byteCount / sizeof(WCHAR);
+        int len_utf8 = WideCharToMultiByte( CP_UTF8, 0, (const WCHAR *)text_utf16->bytes, len, NULL, 0, NULL, NULL );
+        if (len_utf8 <= MAX_UINT8) return RECORD_CHARS8_TEXT;
+        if (len_utf8 <= MAX_UINT16) return RECORD_CHARS16_TEXT;
+        return RECORD_CHARS32_TEXT;
+    }
+    case WS_XML_TEXT_TYPE_BASE64:
+    {
+        const WS_XML_BASE64_TEXT *text_base64 = (const WS_XML_BASE64_TEXT *)text;
+        if (text_base64->length <= MAX_UINT8) return RECORD_BYTES8_TEXT;
+        if (text_base64->length <= MAX_UINT16) return RECORD_BYTES16_TEXT;
+        return RECORD_BYTES32_TEXT;
+    }
+    case WS_XML_TEXT_TYPE_BOOL:
+    {
+        const WS_XML_BOOL_TEXT *text_bool = (const WS_XML_BOOL_TEXT *)text;
+        return text_bool->value ? RECORD_TRUE_TEXT : RECORD_FALSE_TEXT;
+    }
+    case WS_XML_TEXT_TYPE_INT32:
+    {
+        const WS_XML_INT32_TEXT *text_int32 = (const WS_XML_INT32_TEXT *)text;
+        if (!text_int32->value) return RECORD_ZERO_TEXT;
+        if (text_int32->value == 1) return RECORD_ONE_TEXT;
+        if (text_int32->value >= MIN_INT8 && text_int32->value <= MAX_INT8) return RECORD_INT8_TEXT;
+        if (text_int32->value >= MIN_INT16 && text_int32->value <= MAX_INT16) return RECORD_INT16_TEXT;
+        return RECORD_INT32_TEXT;
+    }
+    case WS_XML_TEXT_TYPE_INT64:
+    {
+        const WS_XML_INT64_TEXT *text_int64 = (const WS_XML_INT64_TEXT *)text;
+        if (!text_int64->value) return RECORD_ZERO_TEXT;
+        if (text_int64->value == 1) return RECORD_ONE_TEXT;
+        if (text_int64->value >= MIN_INT8 && text_int64->value <= MAX_INT8) return RECORD_INT8_TEXT;
+        if (text_int64->value >= MIN_INT16 && text_int64->value <= MAX_INT16) return RECORD_INT16_TEXT;
+        if (text_int64->value >= MIN_INT32 && text_int64->value <= MAX_INT32) return RECORD_INT32_TEXT;
+        return RECORD_INT64_TEXT;
+    }
+    case WS_XML_TEXT_TYPE_UINT64:
+    {
+        const WS_XML_UINT64_TEXT *text_uint64 = (const WS_XML_UINT64_TEXT *)text;
+        if (!text_uint64->value) return RECORD_ZERO_TEXT;
+        if (text_uint64->value == 1) return RECORD_ONE_TEXT;
+        if (text_uint64->value <= MAX_INT8) return RECORD_INT8_TEXT;
+        if (text_uint64->value <= MAX_INT16) return RECORD_INT16_TEXT;
+        if (text_uint64->value <= MAX_INT32) return RECORD_INT32_TEXT;
+        if (text_uint64->value <= MAX_INT64) return RECORD_INT64_TEXT;
+        return RECORD_UINT64_TEXT;
+    }
+    case WS_XML_TEXT_TYPE_DOUBLE:
+    {
+        const WS_XML_DOUBLE_TEXT *text_double = (const WS_XML_DOUBLE_TEXT *)text;
+        if (!text_double->value) return RECORD_ZERO_TEXT;
+        if (text_double->value == 1) return RECORD_ONE_TEXT;
+        if (isinf( text_double->value ) || (INT64)text_double->value != text_double->value)
+            return RECORD_DOUBLE_TEXT;
+        if (text_double->value <= MAX_INT8) return RECORD_INT8_TEXT;
+        if (text_double->value <= MAX_INT16) return RECORD_INT16_TEXT;
+        if (text_double->value <= MAX_INT32) return RECORD_INT32_TEXT;
+        return RECORD_INT64_TEXT;
+    }
+    case WS_XML_TEXT_TYPE_GUID:
+        return RECORD_GUID_TEXT;
 
-    hr = write_cdata_node( writer );
+    case WS_XML_TEXT_TYPE_UNIQUE_ID:
+        return RECORD_UNIQUE_ID_TEXT;
 
-    LeaveCriticalSection( &writer->cs );
-    return hr;
+    case WS_XML_TEXT_TYPE_DATETIME:
+        return RECORD_DATETIME_TEXT;
+
+    default:
+        FIXME( "unhandled text type %u\n", text->textType );
+        return 0;
+    }
 }
 
-static HRESULT write_endcdata( struct writer *writer )
+static INT64 get_text_value_int( const WS_XML_TEXT *text )
 {
-    HRESULT hr;
-    if ((hr = write_grow_buffer( writer, 3 )) != S_OK) return hr;
-    write_bytes( writer, (const BYTE *)"]]>", 3 );
-    return S_OK;
+    switch (text->textType)
+    {
+    case WS_XML_TEXT_TYPE_INT32:
+    {
+        const WS_XML_INT32_TEXT *text_int32 = (const WS_XML_INT32_TEXT *)text;
+        return text_int32->value;
+    }
+    case WS_XML_TEXT_TYPE_INT64:
+    {
+        const WS_XML_INT64_TEXT *text_int64 = (const WS_XML_INT64_TEXT *)text;
+        return text_int64->value;
+    }
+    case WS_XML_TEXT_TYPE_UINT64:
+    {
+        const WS_XML_UINT64_TEXT *text_uint64 = (const WS_XML_UINT64_TEXT *)text;
+        return text_uint64->value;
+    }
+    case WS_XML_TEXT_TYPE_DOUBLE:
+    {
+        const WS_XML_DOUBLE_TEXT *text_double = (const WS_XML_DOUBLE_TEXT *)text;
+        return text_double->value;
+    }
+    default:
+        ERR( "unhandled text type %u\n", text->textType );
+        assert(0);
+        return 0;
+    }
 }
 
-static HRESULT write_endcdata_node( struct writer *writer )
+static BOOL get_string_id( struct writer *writer, const WS_XML_STRING *str, ULONG *id )
 {
-    HRESULT hr;
-    if ((hr = write_endcdata( writer )) != S_OK) return hr;
-    writer->current = writer->current->parent;
-    writer->state = WRITER_STATE_ENDCDATA;
-    return S_OK;
-}
-
-/**************************************************************************
- *          WsWriteEndCData		[webservices.@]
- */
-HRESULT WINAPI WsWriteEndCData( WS_XML_WRITER *handle, WS_ERROR *error )
-{
-    struct writer *writer = (struct writer *)handle;
-    HRESULT hr;
-
-    TRACE( "%p %p\n", handle, error );
-    if (error) FIXME( "ignoring error parameter\n" );
-
-    if (!writer) return E_INVALIDARG;
-
-    EnterCriticalSection( &writer->cs );
-
-    if (writer->magic != WRITER_MAGIC)
+    if (writer->dict && str->dictionary == writer->dict)
     {
-        LeaveCriticalSection( &writer->cs );
-        return E_INVALIDARG;
+        *id = str->id << 1;
+        return TRUE;
     }
-
-    if (writer->state != WRITER_STATE_TEXT)
+    if (writer->dict_cb)
     {
-        LeaveCriticalSection( &writer->cs );
-        return WS_E_INVALID_OPERATION;
+        BOOL found = FALSE;
+        writer->dict_cb( writer->dict_cb_state, str, &found, id, NULL );
+        if (found) *id = (*id << 1) | 1;
+        return found;
     }
-
-    hr = write_endcdata_node( writer );
-
-    LeaveCriticalSection( &writer->cs );
-    return hr;
-}
-
-static HRESULT write_add_element_node( struct writer *writer, const WS_XML_STRING *prefix,
-                                       const WS_XML_STRING *localname, const WS_XML_STRING *ns )
-{
-    struct node *node, *parent;
-    WS_XML_ELEMENT_NODE *elem;
-
-    if (!(parent = find_parent( writer ))) return WS_E_INVALID_FORMAT;
-
-    if (!prefix && node_type( parent ) == WS_XML_NODE_TYPE_ELEMENT)
-    {
-        elem = &parent->hdr;
-        if (WsXmlStringEquals( ns, elem->ns, NULL ) == S_OK) prefix = elem->prefix;
-    }
-
-    if (!(node = alloc_node( WS_XML_NODE_TYPE_ELEMENT ))) return E_OUTOFMEMORY;
-    elem = &node->hdr;
-
-    if (prefix && !(elem->prefix = alloc_xml_string( prefix->bytes, prefix->length )))
-    {
-        free_node( node );
-        return E_OUTOFMEMORY;
-    }
-    if (!(elem->localName = alloc_xml_string( localname->bytes, localname->length )))
-    {
-        free_node( node );
-        return E_OUTOFMEMORY;
-    }
-    if (!(elem->ns = alloc_xml_string( ns->bytes, ns->length )))
-    {
-        free_node( node );
-        return E_OUTOFMEMORY;
-    }
-    write_insert_node( writer, parent, node );
-    return S_OK;
-}
-
-static HRESULT write_add_endelement_node( struct writer *writer, struct node *parent )
-{
-    struct node *node;
-    if (!(node = alloc_node( WS_XML_NODE_TYPE_END_ELEMENT ))) return E_OUTOFMEMORY;
-    node->parent = parent;
-    list_add_tail( &parent->children, &node->entry );
-    return S_OK;
-}
-
-static HRESULT write_element_node( struct writer *writer, const WS_XML_STRING *prefix,
-                                   const WS_XML_STRING *localname, const WS_XML_STRING *ns )
-{
-    HRESULT hr;
-    if ((hr = write_flush( writer )) != S_OK) return hr;
-    if ((hr = write_add_element_node( writer, prefix, localname, ns )) != S_OK) return hr;
-    if ((hr = write_add_endelement_node( writer, writer->current )) != S_OK) return hr;
-    writer->state = WRITER_STATE_STARTELEMENT;
-    return S_OK;
-}
-
-/**************************************************************************
- *          WsWriteStartElement		[webservices.@]
- */
-HRESULT WINAPI WsWriteStartElement( WS_XML_WRITER *handle, const WS_XML_STRING *prefix,
-                                    const WS_XML_STRING *localname, const WS_XML_STRING *ns,
-                                    WS_ERROR *error )
-{
-    struct writer *writer = (struct writer *)handle;
-    HRESULT hr;
-
-    TRACE( "%p %s %s %s %p\n", handle, debugstr_xmlstr(prefix), debugstr_xmlstr(localname),
-           debugstr_xmlstr(ns), error );
-    if (error) FIXME( "ignoring error parameter\n" );
-
-    if (!writer || !localname || !ns) return E_INVALIDARG;
-
-    EnterCriticalSection( &writer->cs );
-
-    if (writer->magic != WRITER_MAGIC)
-    {
-        LeaveCriticalSection( &writer->cs );
-        return E_INVALIDARG;
-    }
-
-    hr = write_element_node( writer, prefix, localname, ns );
-
-    LeaveCriticalSection( &writer->cs );
-    return hr;
+    return FALSE;
 }
 
 static ULONG format_bool( const BOOL *ptr, unsigned char *buf )
@@ -1205,16 +807,6 @@ static ULONG format_bool( const BOOL *ptr, unsigned char *buf )
     return sizeof(bool_false);
 }
 
-static ULONG format_int8( const INT8 *ptr, unsigned char *buf )
-{
-    return wsprintfA( (char *)buf, "%d", *ptr );
-}
-
-static ULONG format_int16( const INT16 *ptr, unsigned char *buf )
-{
-    return wsprintfA( (char *)buf, "%d", *ptr );
-}
-
 static ULONG format_int32( const INT32 *ptr, unsigned char *buf )
 {
     return wsprintfA( (char *)buf, "%d", *ptr );
@@ -1223,21 +815,6 @@ static ULONG format_int32( const INT32 *ptr, unsigned char *buf )
 static ULONG format_int64( const INT64 *ptr, unsigned char *buf )
 {
     return wsprintfA( (char *)buf, "%I64d", *ptr );
-}
-
-static ULONG format_uint8( const UINT8 *ptr, unsigned char *buf )
-{
-    return wsprintfA( (char *)buf, "%u", *ptr );
-}
-
-static ULONG format_uint16( const UINT16 *ptr, unsigned char *buf )
-{
-    return wsprintfA( (char *)buf, "%u", *ptr );
-}
-
-static ULONG format_uint32( const UINT32 *ptr, unsigned char *buf )
-{
-    return wsprintfA( (char *)buf, "%u", *ptr );
 }
 
 static ULONG format_uint64( const UINT64 *ptr, unsigned char *buf )
@@ -1414,6 +991,19 @@ static ULONG format_urn( const GUID *ptr, unsigned char *buf )
                     ptr->Data4[4], ptr->Data4[5], ptr->Data4[6], ptr->Data4[7] );
 }
 
+static ULONG format_qname( const WS_XML_STRING *prefix, const WS_XML_STRING *localname, unsigned char *buf )
+{
+    ULONG len = 0;
+    if (prefix && prefix->length)
+    {
+        memcpy( buf, prefix->bytes, prefix->length );
+        len += prefix->length;
+        buf[len++] = ':';
+    }
+    memcpy( buf + len, localname->bytes, localname->length );
+    return len + localname->length;
+}
+
 static ULONG encode_base64( const unsigned char *bin, ULONG len, unsigned char *buf )
 {
     static const char base64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -1446,9 +1036,11 @@ static ULONG encode_base64( const unsigned char *bin, ULONG len, unsigned char *
     return i;
 }
 
-static HRESULT text_to_utf8text( const WS_XML_TEXT *text, const WS_XML_UTF8_TEXT *old, WS_XML_UTF8_TEXT **ret )
+HRESULT text_to_utf8text( const WS_XML_TEXT *text, const WS_XML_UTF8_TEXT *old, ULONG *offset,
+                          WS_XML_UTF8_TEXT **ret )
 {
     ULONG len_old = old ? old->value.length : 0;
+    if (offset) *offset = len_old;
 
     switch (text->textType)
     {
@@ -1570,6 +1162,1220 @@ static HRESULT text_to_utf8text( const WS_XML_TEXT *text, const WS_XML_UTF8_TEXT
         (*ret)->value.length = format_datetime( &dt->value, (*ret)->value.bytes + len_old ) + len_old;
         return S_OK;
     }
+    case WS_XML_TEXT_TYPE_QNAME:
+    {
+        const WS_XML_QNAME_TEXT *qn = (const WS_XML_QNAME_TEXT *)text;
+        ULONG len = qn->localName->length;
+
+        if (qn->prefix && qn->prefix->length) len += qn->prefix->length + 1;
+        if (!(*ret = alloc_utf8_text( NULL, len_old + len ))) return E_OUTOFMEMORY;
+        if (old) memcpy( (*ret)->value.bytes, old->value.bytes, len_old );
+        (*ret)->value.length = format_qname( qn->prefix, qn->localName, (*ret)->value.bytes + len_old ) + len_old;
+        return S_OK;
+    }
+    default:
+        FIXME( "unhandled text type %u\n", text->textType );
+        return E_NOTIMPL;
+    }
+}
+
+static HRESULT write_attribute_value_bin( struct writer *writer, const WS_XML_TEXT *text )
+{
+    enum record_type type;
+    BOOL use_dict = FALSE;
+    HRESULT hr;
+    ULONG id;
+
+    if (text && text->textType == WS_XML_TEXT_TYPE_UTF8)
+    {
+        const WS_XML_UTF8_TEXT *utf8 = (const WS_XML_UTF8_TEXT *)text;
+        use_dict = get_string_id( writer, &utf8->value, &id );
+    }
+    type = get_attr_text_record_type( text, use_dict );
+
+    if ((hr = write_grow_buffer( writer, 1 )) != S_OK) return hr;
+    write_char( writer, type );
+
+    switch (type)
+    {
+    case RECORD_CHARS8_TEXT:
+    {
+        const WS_XML_UTF8_TEXT *text_utf8;
+        WS_XML_UTF8_TEXT *new = NULL;
+        UINT8 len;
+
+        if (!text)
+        {
+            if ((hr = write_grow_buffer( writer, 1 )) != S_OK) return hr;
+            write_char( writer, 0 );
+            return S_OK;
+        }
+        if (text->textType == WS_XML_TEXT_TYPE_UTF8) text_utf8 = (const WS_XML_UTF8_TEXT *)text;
+        else
+        {
+            if ((hr = text_to_utf8text( text, NULL, NULL, &new )) != S_OK) return hr;
+            text_utf8 = new;
+        }
+        len = text_utf8->value.length;
+        if ((hr = write_grow_buffer( writer, sizeof(len) + len )) != S_OK)
+        {
+            heap_free( new );
+            return hr;
+        }
+        write_char( writer, len );
+        write_bytes( writer, text_utf8->value.bytes, len );
+        heap_free( new );
+        return S_OK;
+    }
+    case RECORD_CHARS16_TEXT:
+    {
+        const WS_XML_UTF8_TEXT *text_utf8;
+        WS_XML_UTF8_TEXT *new = NULL;
+        UINT16 len;
+
+        if (text->textType == WS_XML_TEXT_TYPE_UTF8) text_utf8 = (const WS_XML_UTF8_TEXT *)text;
+        else
+        {
+            if ((hr = text_to_utf8text( text, NULL, NULL, &new )) != S_OK) return hr;
+            text_utf8 = new;
+        }
+        len = text_utf8->value.length;
+        if ((hr = write_grow_buffer( writer, sizeof(len) + len )) != S_OK)
+        {
+            heap_free( new );
+            return hr;
+        }
+        write_bytes( writer, (const BYTE *)&len, sizeof(len) );
+        write_bytes( writer, text_utf8->value.bytes, len );
+        heap_free( new );
+        return S_OK;
+    }
+    case RECORD_BYTES8_TEXT:
+    {
+        WS_XML_BASE64_TEXT *text_base64 = (WS_XML_BASE64_TEXT *)text;
+        if ((hr = write_grow_buffer( writer, 1 + text_base64->length )) != S_OK) return hr;
+        write_char( writer, text_base64->length );
+        write_bytes( writer, text_base64->bytes, text_base64->length );
+        return S_OK;
+    }
+    case RECORD_BYTES16_TEXT:
+    {
+        WS_XML_BASE64_TEXT *text_base64 = (WS_XML_BASE64_TEXT *)text;
+        UINT16 len = text_base64->length;
+        if ((hr = write_grow_buffer( writer, sizeof(len) + len )) != S_OK) return hr;
+        write_bytes( writer, (const BYTE *)&len, sizeof(len) );
+        write_bytes( writer, text_base64->bytes, len );
+        return S_OK;
+    }
+    case RECORD_ZERO_TEXT:
+    case RECORD_ONE_TEXT:
+    case RECORD_FALSE_TEXT:
+    case RECORD_TRUE_TEXT:
+        return S_OK;
+
+    case RECORD_INT8_TEXT:
+    {
+        INT8 val = get_text_value_int( text );
+        if ((hr = write_grow_buffer( writer, sizeof(val) )) != S_OK) return hr;
+        write_char( writer, val );
+        return S_OK;
+    }
+    case RECORD_INT16_TEXT:
+    {
+        INT16 val = get_text_value_int( text );
+        if ((hr = write_grow_buffer( writer, sizeof(val) )) != S_OK) return hr;
+        write_bytes( writer, (const BYTE *)&val, sizeof(val) );
+        return S_OK;
+    }
+    case RECORD_INT32_TEXT:
+    {
+        INT32 val = get_text_value_int( text );
+        if ((hr = write_grow_buffer( writer, sizeof(val) )) != S_OK) return hr;
+        write_bytes( writer, (const BYTE *)&val, sizeof(val) );
+        return S_OK;
+    }
+    case RECORD_INT64_TEXT:
+    {
+        INT64 val = get_text_value_int( text );
+        if ((hr = write_grow_buffer( writer, sizeof(val) )) != S_OK) return hr;
+        write_bytes( writer, (const BYTE *)&val, sizeof(val) );
+        return S_OK;
+    }
+    case RECORD_UINT64_TEXT:
+    {
+        WS_XML_UINT64_TEXT *text_uint64 = (WS_XML_UINT64_TEXT *)text;
+        if ((hr = write_grow_buffer( writer, sizeof(text_uint64->value) )) != S_OK) return hr;
+        write_bytes( writer, (const BYTE *)&text_uint64->value, sizeof(text_uint64->value) );
+        return S_OK;
+    }
+    case RECORD_DOUBLE_TEXT:
+    {
+        WS_XML_DOUBLE_TEXT *text_double = (WS_XML_DOUBLE_TEXT *)text;
+        if ((hr = write_grow_buffer( writer, sizeof(text_double->value) )) != S_OK) return hr;
+        write_bytes( writer, (const BYTE *)&text_double->value, sizeof(text_double->value) );
+        return S_OK;
+    }
+    case RECORD_GUID_TEXT:
+    {
+        WS_XML_GUID_TEXT *text_guid = (WS_XML_GUID_TEXT *)text;
+        if ((hr = write_grow_buffer( writer, sizeof(text_guid->value) )) != S_OK) return hr;
+        write_bytes( writer, (const BYTE *)&text_guid->value, sizeof(text_guid->value) );
+        return S_OK;
+    }
+    case RECORD_UNIQUE_ID_TEXT:
+    {
+        WS_XML_UNIQUE_ID_TEXT *text_unique_id = (WS_XML_UNIQUE_ID_TEXT *)text;
+        if ((hr = write_grow_buffer( writer, sizeof(text_unique_id->value) )) != S_OK) return hr;
+        write_bytes( writer, (const BYTE *)&text_unique_id->value, sizeof(text_unique_id->value) );
+        return S_OK;
+    }
+    case RECORD_DATETIME_TEXT:
+    {
+        WS_XML_DATETIME_TEXT *text_datetime = (WS_XML_DATETIME_TEXT *)text;
+        UINT64 val = text_datetime->value.ticks;
+
+        assert( val <= TICKS_MAX );
+        if (text_datetime->value.format == WS_DATETIME_FORMAT_UTC) val |= (UINT64)1 << 62;
+        else if (text_datetime->value.format == WS_DATETIME_FORMAT_LOCAL) val |= (UINT64)1 << 63;
+
+        if ((hr = write_grow_buffer( writer, sizeof(val) )) != S_OK) return hr;
+        write_bytes( writer, (const BYTE *)&val, sizeof(val) );
+        return S_OK;
+    }
+    default:
+        FIXME( "unhandled record type %02x\n", type );
+        return E_NOTIMPL;
+    }
+}
+
+static enum record_type get_attr_record_type( const WS_XML_ATTRIBUTE *attr, BOOL use_dict )
+{
+    if (!attr->prefix || !attr->prefix->length)
+    {
+        if (use_dict) return RECORD_SHORT_DICTIONARY_ATTRIBUTE;
+        return RECORD_SHORT_ATTRIBUTE;
+    }
+    if (attr->prefix->length == 1 && attr->prefix->bytes[0] >= 'a' && attr->prefix->bytes[0] <= 'z')
+    {
+        if (use_dict) return RECORD_PREFIX_DICTIONARY_ATTRIBUTE_A + attr->prefix->bytes[0] - 'a';
+        return RECORD_PREFIX_ATTRIBUTE_A + attr->prefix->bytes[0] - 'a';
+    }
+    if (use_dict) return RECORD_DICTIONARY_ATTRIBUTE;
+    return RECORD_ATTRIBUTE;
+};
+
+static HRESULT write_attribute_bin( struct writer *writer, const WS_XML_ATTRIBUTE *attr )
+{
+    ULONG id;
+    enum record_type type = get_attr_record_type( attr, get_string_id(writer, attr->localName, &id) );
+    HRESULT hr;
+
+    if ((hr = write_grow_buffer( writer, 1 )) != S_OK) return hr;
+    write_char( writer, type );
+
+    if (type >= RECORD_PREFIX_ATTRIBUTE_A && type <= RECORD_PREFIX_ATTRIBUTE_Z)
+    {
+        if ((hr = write_string( writer, attr->localName->bytes, attr->localName->length )) != S_OK) return hr;
+        return write_attribute_value_bin( writer, attr->value );
+    }
+    if (type >= RECORD_PREFIX_DICTIONARY_ATTRIBUTE_A && type <= RECORD_PREFIX_DICTIONARY_ATTRIBUTE_Z)
+    {
+        if ((hr = write_dict_string( writer, id )) != S_OK) return hr;
+        return write_attribute_value_bin( writer, attr->value );
+    }
+
+    switch (type)
+    {
+    case RECORD_SHORT_ATTRIBUTE:
+        if ((hr = write_string( writer, attr->localName->bytes, attr->localName->length )) != S_OK) return hr;
+        break;
+
+    case RECORD_ATTRIBUTE:
+        if ((hr = write_string( writer, attr->prefix->bytes, attr->prefix->length )) != S_OK) return hr;
+        if ((hr = write_string( writer, attr->localName->bytes, attr->localName->length )) != S_OK) return hr;
+        break;
+
+    case RECORD_SHORT_DICTIONARY_ATTRIBUTE:
+        if ((hr = write_dict_string( writer, id )) != S_OK) return hr;
+        break;
+
+    case RECORD_DICTIONARY_ATTRIBUTE:
+        if ((hr = write_string( writer, attr->prefix->bytes, attr->prefix->length )) != S_OK) return hr;
+        if ((hr = write_dict_string( writer, id )) != S_OK) return hr;
+        break;
+
+    default:
+        ERR( "unhandled record type %02x\n", type );
+        return WS_E_NOT_SUPPORTED;
+    }
+
+    return write_attribute_value_bin( writer, attr->value );
+}
+
+static HRESULT write_attribute( struct writer *writer, const WS_XML_ATTRIBUTE *attr )
+{
+    switch (writer->output_enc)
+    {
+    case WS_XML_WRITER_ENCODING_TYPE_TEXT:   return write_attribute_text( writer, attr );
+    case WS_XML_WRITER_ENCODING_TYPE_BINARY: return write_attribute_bin( writer, attr );
+    default:
+        ERR( "unhandled encoding %u\n", writer->output_enc );
+        return WS_E_NOT_SUPPORTED;
+    }
+}
+
+static inline BOOL is_current_namespace( struct writer *writer, const WS_XML_STRING *ns )
+{
+    return (WsXmlStringEquals( writer->current_ns, ns, NULL ) == S_OK);
+}
+
+/**************************************************************************
+ *          WsGetPrefixFromNamespace		[webservices.@]
+ */
+HRESULT WINAPI WsGetPrefixFromNamespace( WS_XML_WRITER *handle, const WS_XML_STRING *ns,
+                                         BOOL required, const WS_XML_STRING **prefix,
+                                         WS_ERROR *error )
+{
+    struct writer *writer = (struct writer *)handle;
+    WS_XML_ELEMENT_NODE *elem;
+    BOOL found = FALSE;
+    HRESULT hr = S_OK;
+
+    TRACE( "%p %s %d %p %p\n", handle, debugstr_xmlstr(ns), required, prefix, error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
+    if (!writer || !ns || !prefix) return E_INVALIDARG;
+
+    EnterCriticalSection( &writer->cs );
+
+    if (writer->magic != WRITER_MAGIC)
+    {
+        LeaveCriticalSection( &writer->cs );
+        return E_INVALIDARG;
+    }
+
+    elem = &writer->current->hdr;
+    if (elem->prefix && is_current_namespace( writer, ns ))
+    {
+        *prefix = elem->prefix;
+        found = TRUE;
+    }
+
+    if (!found)
+    {
+        if (required) hr = WS_E_INVALID_FORMAT;
+        else
+        {
+            *prefix = NULL;
+            hr = S_FALSE;
+        }
+    }
+
+    LeaveCriticalSection( &writer->cs );
+    return hr;
+}
+
+static HRESULT write_namespace_attribute_text( struct writer *writer, const WS_XML_ATTRIBUTE *attr )
+{
+    unsigned char quote = attr->singleQuote ? '\'' : '"';
+    ULONG size;
+    HRESULT hr;
+
+    /* ' xmlns:prefix="namespace"' */
+
+    size = attr->ns->length + 9 /* ' xmlns=""' */;
+    if (attr->prefix && attr->prefix->length) size += attr->prefix->length + 1 /* ':' */;
+    if ((hr = write_grow_buffer( writer, size )) != S_OK) return hr;
+
+    write_bytes( writer, (const BYTE *)" xmlns", 6 );
+    if (attr->prefix && attr->prefix->length)
+    {
+        write_char( writer, ':' );
+        write_bytes( writer, attr->prefix->bytes, attr->prefix->length );
+    }
+    write_char( writer, '=' );
+    write_char( writer, quote );
+    write_bytes( writer, attr->ns->bytes, attr->ns->length );
+    write_char( writer, quote );
+
+    return S_OK;
+}
+
+static enum record_type get_xmlns_record_type( const WS_XML_ATTRIBUTE *attr, BOOL use_dict )
+{
+    if (!attr->prefix || !attr->prefix->length)
+    {
+        if (use_dict) return RECORD_SHORT_DICTIONARY_XMLNS_ATTRIBUTE;
+        return RECORD_SHORT_XMLNS_ATTRIBUTE;
+    }
+    if (use_dict) return RECORD_DICTIONARY_XMLNS_ATTRIBUTE;
+    return RECORD_XMLNS_ATTRIBUTE;
+};
+
+static HRESULT write_namespace_attribute_bin( struct writer *writer, const WS_XML_ATTRIBUTE *attr )
+{
+    ULONG id;
+    enum record_type type = get_xmlns_record_type( attr, get_string_id(writer, attr->ns, &id) );
+    HRESULT hr;
+
+    if ((hr = write_grow_buffer( writer, 1 )) != S_OK) return hr;
+    write_char( writer, type );
+
+    switch (type)
+    {
+    case RECORD_SHORT_XMLNS_ATTRIBUTE:
+        break;
+
+    case RECORD_XMLNS_ATTRIBUTE:
+        if ((hr = write_string( writer, attr->prefix->bytes, attr->prefix->length )) != S_OK) return hr;
+        break;
+
+    case RECORD_SHORT_DICTIONARY_XMLNS_ATTRIBUTE:
+        return write_dict_string( writer, id );
+
+    case RECORD_DICTIONARY_XMLNS_ATTRIBUTE:
+        if ((hr = write_string( writer, attr->prefix->bytes, attr->prefix->length )) != S_OK) return hr;
+        return write_dict_string( writer, id );
+
+    default:
+        ERR( "unhandled record type %02x\n", type );
+        return WS_E_NOT_SUPPORTED;
+    }
+
+    return write_string( writer, attr->ns->bytes, attr->ns->length );
+}
+
+static HRESULT write_namespace_attribute( struct writer *writer, const WS_XML_ATTRIBUTE *attr )
+{
+    switch (writer->output_enc)
+    {
+    case WS_XML_WRITER_ENCODING_TYPE_TEXT:   return write_namespace_attribute_text( writer, attr );
+    case WS_XML_WRITER_ENCODING_TYPE_BINARY: return write_namespace_attribute_bin( writer, attr );
+    default:
+        ERR( "unhandled encoding %u\n", writer->output_enc );
+        return WS_E_NOT_SUPPORTED;
+    }
+}
+
+static HRESULT add_namespace_attribute( struct writer *writer, const WS_XML_STRING *prefix,
+                                        const WS_XML_STRING *ns, BOOL single )
+{
+    WS_XML_ATTRIBUTE *attr;
+    WS_XML_ELEMENT_NODE *elem = &writer->current->hdr;
+    HRESULT hr;
+
+    if (!(attr = heap_alloc_zero( sizeof(*attr) ))) return E_OUTOFMEMORY;
+
+    attr->singleQuote = !!single;
+    attr->isXmlNs = 1;
+    if (prefix && !(attr->prefix = dup_xml_string( prefix, writer->dict_do_lookup )))
+    {
+        free_attribute( attr );
+        return E_OUTOFMEMORY;
+    }
+    if (!(attr->ns = dup_xml_string( ns, writer->dict_do_lookup )))
+    {
+        free_attribute( attr );
+        return E_OUTOFMEMORY;
+    }
+    if ((hr = append_attribute( elem, attr )) != S_OK)
+    {
+        free_attribute( attr );
+        return hr;
+    }
+    return S_OK;
+}
+
+static inline BOOL str_equal( const WS_XML_STRING *str1, const WS_XML_STRING *str2 )
+{
+    if (!str1 && !str2) return TRUE;
+    return WsXmlStringEquals( str1, str2, NULL ) == S_OK;
+}
+
+static BOOL namespace_in_scope( const WS_XML_ELEMENT_NODE *elem, const WS_XML_STRING *prefix,
+                                const WS_XML_STRING *ns )
+{
+    ULONG i;
+    const struct node *node;
+
+    for (node = (const struct node *)elem; node; node = node->parent)
+    {
+        if (node_type( node ) != WS_XML_NODE_TYPE_ELEMENT) break;
+
+        elem = &node->hdr;
+        for (i = 0; i < elem->attributeCount; i++)
+        {
+            if (!elem->attributes[i]->isXmlNs) continue;
+            if (str_equal( elem->attributes[i]->prefix, prefix ) &&
+                str_equal( elem->attributes[i]->ns, ns )) return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static HRESULT set_current_namespace( struct writer *writer, const WS_XML_STRING *ns )
+{
+    WS_XML_STRING *str;
+    if (!(str = dup_xml_string( ns, writer->dict_do_lookup ))) return E_OUTOFMEMORY;
+    free_xml_string( writer->current_ns );
+    writer->current_ns = str;
+    return S_OK;
+}
+
+static HRESULT set_namespaces( struct writer *writer )
+{
+    WS_XML_ELEMENT_NODE *elem = &writer->current->hdr;
+    HRESULT hr;
+    ULONG i;
+
+    if (elem->ns->length && !namespace_in_scope( elem, elem->prefix, elem->ns ))
+    {
+        if ((hr = add_namespace_attribute( writer, elem->prefix, elem->ns, FALSE )) != S_OK) return hr;
+        if ((hr = set_current_namespace( writer, elem->ns )) != S_OK) return hr;
+    }
+
+    for (i = 0; i < elem->attributeCount; i++)
+    {
+        const WS_XML_ATTRIBUTE *attr = elem->attributes[i];
+        if (!attr->ns->length || namespace_in_scope( elem, attr->prefix, attr->ns )) continue;
+        if ((hr = add_namespace_attribute( writer, attr->prefix, attr->ns, FALSE )) != S_OK) return hr;
+    }
+
+    return S_OK;
+}
+
+/**************************************************************************
+ *          WsWriteEndAttribute		[webservices.@]
+ */
+HRESULT WINAPI WsWriteEndAttribute( WS_XML_WRITER *handle, WS_ERROR *error )
+{
+    struct writer *writer = (struct writer *)handle;
+
+    TRACE( "%p %p\n", handle, error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
+    if (!writer) return E_INVALIDARG;
+
+    EnterCriticalSection( &writer->cs );
+
+    if (writer->magic != WRITER_MAGIC)
+    {
+        LeaveCriticalSection( &writer->cs );
+        return E_INVALIDARG;
+    }
+
+    writer->state = WRITER_STATE_STARTELEMENT;
+
+    LeaveCriticalSection( &writer->cs );
+    return S_OK;
+}
+
+static HRESULT write_attributes( struct writer *writer, const WS_XML_ELEMENT_NODE *elem )
+{
+    ULONG i;
+    HRESULT hr;
+    for (i = 0; i < elem->attributeCount; i++)
+    {
+        if (elem->attributes[i]->isXmlNs) continue;
+        if ((hr = write_attribute( writer, elem->attributes[i] )) != S_OK) return hr;
+    }
+    for (i = 0; i < elem->attributeCount; i++)
+    {
+        if (!elem->attributes[i]->isXmlNs || !elem->attributes[i]->prefix) continue;
+        if ((hr = write_namespace_attribute( writer, elem->attributes[i] )) != S_OK) return hr;
+    }
+    for (i = 0; i < elem->attributeCount; i++)
+    {
+        if (!elem->attributes[i]->isXmlNs || elem->attributes[i]->prefix) continue;
+        if ((hr = write_namespace_attribute( writer, elem->attributes[i] )) != S_OK) return hr;
+    }
+    return S_OK;
+}
+
+static HRESULT write_startelement_text( struct writer *writer )
+{
+    const WS_XML_ELEMENT_NODE *elem = &writer->current->hdr;
+    ULONG size;
+    HRESULT hr;
+
+    /* '<prefix:localname prefix:attr="value"... xmlns:prefix="ns"'... */
+
+    size = elem->localName->length + 1 /* '<' */;
+    if (elem->prefix && elem->prefix->length) size += elem->prefix->length + 1 /* ':' */;
+    if ((hr = write_grow_buffer( writer, size )) != S_OK) return hr;
+
+    write_char( writer, '<' );
+    if (elem->prefix && elem->prefix->length)
+    {
+        write_bytes( writer, elem->prefix->bytes, elem->prefix->length );
+        write_char( writer, ':' );
+    }
+    write_bytes( writer, elem->localName->bytes, elem->localName->length );
+    return write_attributes( writer, elem );
+}
+
+static enum record_type get_elem_record_type( const WS_XML_ELEMENT_NODE *elem, BOOL use_dict )
+{
+    if (!elem->prefix || !elem->prefix->length)
+    {
+        if (use_dict) return RECORD_SHORT_DICTIONARY_ELEMENT;
+        return RECORD_SHORT_ELEMENT;
+    }
+    if (elem->prefix->length == 1 && elem->prefix->bytes[0] >= 'a' && elem->prefix->bytes[0] <= 'z')
+    {
+        if (use_dict) return RECORD_PREFIX_DICTIONARY_ELEMENT_A + elem->prefix->bytes[0] - 'a';
+        return RECORD_PREFIX_ELEMENT_A + elem->prefix->bytes[0] - 'a';
+    }
+    if (use_dict) return RECORD_DICTIONARY_ELEMENT;
+    return RECORD_ELEMENT;
+};
+
+static HRESULT write_startelement_bin( struct writer *writer )
+{
+    const WS_XML_ELEMENT_NODE *elem = &writer->current->hdr;
+    ULONG id;
+    enum record_type type = get_elem_record_type( elem, get_string_id(writer, elem->localName, &id) );
+    HRESULT hr;
+
+    if ((hr = write_grow_buffer( writer, 1 )) != S_OK) return hr;
+    write_char( writer, type );
+
+    if (type >= RECORD_PREFIX_ELEMENT_A && type <= RECORD_PREFIX_ELEMENT_Z)
+    {
+        if ((hr = write_string( writer, elem->localName->bytes, elem->localName->length )) != S_OK) return hr;
+        return write_attributes( writer, elem );
+    }
+    if (type >= RECORD_PREFIX_DICTIONARY_ELEMENT_A && type <= RECORD_PREFIX_DICTIONARY_ELEMENT_Z)
+    {
+        if ((hr = write_dict_string( writer, id )) != S_OK) return hr;
+        return write_attributes( writer, elem );
+    }
+
+    switch (type)
+    {
+    case RECORD_SHORT_ELEMENT:
+        if ((hr = write_string( writer, elem->localName->bytes, elem->localName->length )) != S_OK) return hr;
+        break;
+
+    case RECORD_ELEMENT:
+        if ((hr = write_string( writer, elem->prefix->bytes, elem->prefix->length )) != S_OK) return hr;
+        if ((hr = write_string( writer, elem->localName->bytes, elem->localName->length )) != S_OK) return hr;
+        break;
+
+    case RECORD_SHORT_DICTIONARY_ELEMENT:
+        if ((hr = write_dict_string( writer, id )) != S_OK) return hr;
+        break;
+
+    case RECORD_DICTIONARY_ELEMENT:
+        if ((hr = write_string( writer, elem->prefix->bytes, elem->prefix->length )) != S_OK) return hr;
+        if ((hr = write_dict_string( writer, id )) != S_OK) return hr;
+        break;
+
+    default:
+        ERR( "unhandled record type %02x\n", type );
+        return WS_E_NOT_SUPPORTED;
+    }
+
+    return write_attributes( writer, elem );
+}
+
+static HRESULT write_startelement( struct writer *writer )
+{
+    switch (writer->output_enc)
+    {
+    case WS_XML_WRITER_ENCODING_TYPE_TEXT:   return write_startelement_text( writer );
+    case WS_XML_WRITER_ENCODING_TYPE_BINARY: return write_startelement_bin( writer );
+    default:
+        ERR( "unhandled encoding %u\n", writer->output_enc );
+        return WS_E_NOT_SUPPORTED;
+    }
+}
+
+static struct node *write_find_startelement( struct writer *writer )
+{
+    struct node *node;
+    for (node = writer->current; node; node = node->parent)
+    {
+        if (node_type( node ) == WS_XML_NODE_TYPE_ELEMENT) return node;
+    }
+    return NULL;
+}
+
+static inline BOOL is_empty_element( const struct node *node )
+{
+    const struct node *head = LIST_ENTRY( list_head( &node->children ), struct node, entry );
+    return node_type( head ) == WS_XML_NODE_TYPE_END_ELEMENT;
+}
+
+static HRESULT write_endelement_text( struct writer *writer, const WS_XML_ELEMENT_NODE *elem )
+{
+    ULONG size;
+    HRESULT hr;
+
+    /* '/>' */
+
+    if (elem->isEmpty && writer->state != WRITER_STATE_ENDSTARTELEMENT)
+    {
+        if ((hr = write_grow_buffer( writer, 2 )) != S_OK) return hr;
+        write_char( writer, '/' );
+        write_char( writer, '>' );
+        return S_OK;
+    }
+
+    /* '</prefix:localname>' */
+
+    size = elem->localName->length + 3 /* '</>' */;
+    if (elem->prefix && elem->prefix->length) size += elem->prefix->length + 1 /* ':' */;
+    if ((hr = write_grow_buffer( writer, size )) != S_OK) return hr;
+
+    write_char( writer, '<' );
+    write_char( writer, '/' );
+    if (elem->prefix && elem->prefix->length)
+    {
+        write_bytes( writer, elem->prefix->bytes, elem->prefix->length );
+        write_char( writer, ':' );
+    }
+    write_bytes( writer, elem->localName->bytes, elem->localName->length );
+    write_char( writer, '>' );
+    return S_OK;
+}
+
+static HRESULT write_endelement_bin( struct writer *writer )
+{
+    HRESULT hr;
+    if (node_type( writer->current ) == WS_XML_NODE_TYPE_TEXT) return S_OK;
+    if ((hr = write_grow_buffer( writer, 1 )) != S_OK) return hr;
+    write_char( writer, RECORD_ENDELEMENT );
+    return S_OK;
+}
+
+static HRESULT write_endelement( struct writer *writer, const WS_XML_ELEMENT_NODE *elem )
+{
+    switch (writer->output_enc)
+    {
+    case WS_XML_WRITER_ENCODING_TYPE_TEXT:   return write_endelement_text( writer, elem );
+    case WS_XML_WRITER_ENCODING_TYPE_BINARY: return write_endelement_bin( writer );
+    default:
+        ERR( "unhandled encoding %u\n", writer->output_enc );
+        return WS_E_NOT_SUPPORTED;
+    }
+}
+
+static HRESULT write_close_element( struct writer *writer, struct node *node )
+{
+    WS_XML_ELEMENT_NODE *elem = &node->hdr;
+    elem->isEmpty = is_empty_element( node );
+    return write_endelement( writer, elem );
+}
+
+static HRESULT write_endelement_node( struct writer *writer )
+{
+    struct node *node;
+    HRESULT hr;
+
+    if (!(node = write_find_startelement( writer ))) return WS_E_INVALID_FORMAT;
+    if (writer->state == WRITER_STATE_STARTELEMENT)
+    {
+        if ((hr = set_namespaces( writer )) != S_OK) return hr;
+        if ((hr = write_startelement( writer )) != S_OK) return hr;
+    }
+    if ((hr = write_close_element( writer, node )) != S_OK) return hr;
+    writer->current = node->parent;
+    writer->state   = WRITER_STATE_ENDELEMENT;
+    return S_OK;
+}
+
+/**************************************************************************
+ *          WsWriteEndElement		[webservices.@]
+ */
+HRESULT WINAPI WsWriteEndElement( WS_XML_WRITER *handle, WS_ERROR *error )
+{
+    struct writer *writer = (struct writer *)handle;
+    HRESULT hr;
+
+    TRACE( "%p %p\n", handle, error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
+    if (!writer) return E_INVALIDARG;
+
+    EnterCriticalSection( &writer->cs );
+
+    if (writer->magic != WRITER_MAGIC)
+    {
+        LeaveCriticalSection( &writer->cs );
+        return E_INVALIDARG;
+    }
+
+    hr = write_endelement_node( writer );
+
+    LeaveCriticalSection( &writer->cs );
+    return hr;
+}
+
+static HRESULT write_endstartelement_text( struct writer *writer )
+{
+    HRESULT hr;
+    if ((hr = write_grow_buffer( writer, 1 )) != S_OK) return hr;
+    write_char( writer, '>' );
+    return S_OK;
+}
+
+static HRESULT write_endstartelement( struct writer *writer )
+{
+    switch (writer->output_enc)
+    {
+    case WS_XML_WRITER_ENCODING_TYPE_TEXT:   return write_endstartelement_text( writer );
+    case WS_XML_WRITER_ENCODING_TYPE_BINARY: return S_OK;
+    default:
+        ERR( "unhandled encoding %u\n", writer->output_enc );
+        return WS_E_NOT_SUPPORTED;
+    }
+}
+
+/**************************************************************************
+ *          WsWriteEndStartElement		[webservices.@]
+ */
+HRESULT WINAPI WsWriteEndStartElement( WS_XML_WRITER *handle, WS_ERROR *error )
+{
+    struct writer *writer = (struct writer *)handle;
+    HRESULT hr;
+
+    TRACE( "%p %p\n", handle, error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
+    if (!writer) return E_INVALIDARG;
+
+    EnterCriticalSection( &writer->cs );
+
+    if (writer->magic != WRITER_MAGIC)
+    {
+        LeaveCriticalSection( &writer->cs );
+        return E_INVALIDARG;
+    }
+
+    if (writer->state != WRITER_STATE_STARTELEMENT)
+    {
+        LeaveCriticalSection( &writer->cs );
+        return WS_E_INVALID_OPERATION;
+    }
+
+    if ((hr = set_namespaces( writer )) != S_OK) goto done;
+    if ((hr = write_startelement( writer )) != S_OK) goto done;
+    if ((hr = write_endstartelement( writer )) != S_OK) goto done;
+    writer->state = WRITER_STATE_ENDSTARTELEMENT;
+
+done:
+    LeaveCriticalSection( &writer->cs );
+    return hr;
+}
+
+static HRESULT write_add_attribute( struct writer *writer, const WS_XML_STRING *prefix,
+                                    const WS_XML_STRING *localname, const WS_XML_STRING *ns,
+                                    BOOL single )
+{
+    WS_XML_ATTRIBUTE *attr;
+    WS_XML_ELEMENT_NODE *elem = &writer->current->hdr;
+    HRESULT hr;
+
+    if (!(attr = heap_alloc_zero( sizeof(*attr) ))) return E_OUTOFMEMORY;
+
+    if (!prefix && ns->length) prefix = elem->prefix;
+
+    attr->singleQuote = !!single;
+    if (prefix && !(attr->prefix = dup_xml_string( prefix, writer->dict_do_lookup )))
+    {
+        free_attribute( attr );
+        return E_OUTOFMEMORY;
+    }
+    if (!(attr->localName = dup_xml_string( localname, writer->dict_do_lookup )))
+    {
+        free_attribute( attr );
+        return E_OUTOFMEMORY;
+    }
+    if (!(attr->ns = dup_xml_string( ns, writer->dict_do_lookup )))
+    {
+        free_attribute( attr );
+        return E_OUTOFMEMORY;
+    }
+    if ((hr = append_attribute( elem, attr )) != S_OK)
+    {
+        free_attribute( attr );
+        return hr;
+    }
+    return S_OK;
+}
+
+/**************************************************************************
+ *          WsWriteStartAttribute		[webservices.@]
+ */
+HRESULT WINAPI WsWriteStartAttribute( WS_XML_WRITER *handle, const WS_XML_STRING *prefix,
+                                      const WS_XML_STRING *localname, const WS_XML_STRING *ns,
+                                      BOOL single, WS_ERROR *error )
+{
+    struct writer *writer = (struct writer *)handle;
+    HRESULT hr;
+
+    TRACE( "%p %s %s %s %d %p\n", handle, debugstr_xmlstr(prefix), debugstr_xmlstr(localname),
+           debugstr_xmlstr(ns), single, error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
+    if (!writer || !localname || !ns) return E_INVALIDARG;
+
+    EnterCriticalSection( &writer->cs );
+
+    if (writer->magic != WRITER_MAGIC)
+    {
+        LeaveCriticalSection( &writer->cs );
+        return E_INVALIDARG;
+    }
+
+    if (writer->state != WRITER_STATE_STARTELEMENT)
+    {
+        LeaveCriticalSection( &writer->cs );
+        return WS_E_INVALID_OPERATION;
+    }
+
+    if ((hr = write_add_attribute( writer, prefix, localname, ns, single )) == S_OK)
+        writer->state = WRITER_STATE_STARTATTRIBUTE;
+
+    LeaveCriticalSection( &writer->cs );
+    return hr;
+}
+
+/* flush current start element if necessary */
+static HRESULT write_flush( struct writer *writer )
+{
+    if (writer->state == WRITER_STATE_STARTELEMENT)
+    {
+        HRESULT hr;
+        if ((hr = set_namespaces( writer )) != S_OK) return hr;
+        if ((hr = write_startelement( writer )) != S_OK) return hr;
+        if ((hr = write_endstartelement( writer )) != S_OK) return hr;
+        writer->state = WRITER_STATE_ENDSTARTELEMENT;
+    }
+    return S_OK;
+}
+
+static HRESULT write_add_cdata_node( struct writer *writer )
+{
+    struct node *node, *parent;
+    if (!(parent = find_parent( writer ))) return WS_E_INVALID_FORMAT;
+    if (!(node = alloc_node( WS_XML_NODE_TYPE_CDATA ))) return E_OUTOFMEMORY;
+    write_insert_node( writer, parent, node );
+    return S_OK;
+}
+
+static HRESULT write_add_endcdata_node( struct writer *writer )
+{
+    struct node *node;
+    if (!(node = alloc_node( WS_XML_NODE_TYPE_END_CDATA ))) return E_OUTOFMEMORY;
+    node->parent = writer->current;
+    list_add_tail( &node->parent->children, &node->entry );
+    return S_OK;
+}
+
+static HRESULT write_cdata( struct writer *writer )
+{
+    HRESULT hr;
+    if ((hr = write_grow_buffer( writer, 9 )) != S_OK) return hr;
+    write_bytes( writer, (const BYTE *)"<![CDATA[", 9 );
+    return S_OK;
+}
+
+static HRESULT write_cdata_node( struct writer *writer )
+{
+    HRESULT hr;
+    if ((hr = write_flush( writer )) != S_OK) return hr;
+    if ((hr = write_add_cdata_node( writer )) != S_OK) return hr;
+    if ((hr = write_add_endcdata_node( writer )) != S_OK) return hr;
+    if ((hr = write_cdata( writer )) != S_OK) return hr;
+    writer->state = WRITER_STATE_STARTCDATA;
+    return S_OK;
+}
+
+/**************************************************************************
+ *          WsWriteStartCData		[webservices.@]
+ */
+HRESULT WINAPI WsWriteStartCData( WS_XML_WRITER *handle, WS_ERROR *error )
+{
+    struct writer *writer = (struct writer *)handle;
+    HRESULT hr;
+
+    TRACE( "%p %p\n", handle, error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
+    if (!writer) return E_INVALIDARG;
+
+    EnterCriticalSection( &writer->cs );
+
+    if (writer->magic != WRITER_MAGIC)
+    {
+        LeaveCriticalSection( &writer->cs );
+        return E_INVALIDARG;
+    }
+
+    hr = write_cdata_node( writer );
+
+    LeaveCriticalSection( &writer->cs );
+    return hr;
+}
+
+static HRESULT write_endcdata( struct writer *writer )
+{
+    HRESULT hr;
+    if ((hr = write_grow_buffer( writer, 3 )) != S_OK) return hr;
+    write_bytes( writer, (const BYTE *)"]]>", 3 );
+    return S_OK;
+}
+
+static HRESULT write_endcdata_node( struct writer *writer )
+{
+    HRESULT hr;
+    if ((hr = write_endcdata( writer )) != S_OK) return hr;
+    writer->current = writer->current->parent;
+    writer->state = WRITER_STATE_ENDCDATA;
+    return S_OK;
+}
+
+/**************************************************************************
+ *          WsWriteEndCData		[webservices.@]
+ */
+HRESULT WINAPI WsWriteEndCData( WS_XML_WRITER *handle, WS_ERROR *error )
+{
+    struct writer *writer = (struct writer *)handle;
+    HRESULT hr;
+
+    TRACE( "%p %p\n", handle, error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
+    if (!writer) return E_INVALIDARG;
+
+    EnterCriticalSection( &writer->cs );
+
+    if (writer->magic != WRITER_MAGIC)
+    {
+        LeaveCriticalSection( &writer->cs );
+        return E_INVALIDARG;
+    }
+
+    if (writer->state != WRITER_STATE_TEXT)
+    {
+        LeaveCriticalSection( &writer->cs );
+        return WS_E_INVALID_OPERATION;
+    }
+
+    hr = write_endcdata_node( writer );
+
+    LeaveCriticalSection( &writer->cs );
+    return hr;
+}
+
+static HRESULT write_add_element_node( struct writer *writer, const WS_XML_STRING *prefix,
+                                       const WS_XML_STRING *localname, const WS_XML_STRING *ns )
+{
+    struct node *node, *parent;
+    WS_XML_ELEMENT_NODE *elem;
+
+    if (!(parent = find_parent( writer ))) return WS_E_INVALID_FORMAT;
+
+    if (!prefix && node_type( parent ) == WS_XML_NODE_TYPE_ELEMENT)
+    {
+        elem = &parent->hdr;
+        if (WsXmlStringEquals( ns, elem->ns, NULL ) == S_OK) prefix = elem->prefix;
+    }
+
+    if (!(node = alloc_node( WS_XML_NODE_TYPE_ELEMENT ))) return E_OUTOFMEMORY;
+    elem = &node->hdr;
+
+    if (prefix && !(elem->prefix = dup_xml_string( prefix, writer->dict_do_lookup )))
+    {
+        free_node( node );
+        return E_OUTOFMEMORY;
+    }
+    if (!(elem->localName = dup_xml_string( localname, writer->dict_do_lookup )))
+    {
+        free_node( node );
+        return E_OUTOFMEMORY;
+    }
+    if (!(elem->ns = dup_xml_string( ns, writer->dict_do_lookup )))
+    {
+        free_node( node );
+        return E_OUTOFMEMORY;
+    }
+    write_insert_node( writer, parent, node );
+    return S_OK;
+}
+
+static HRESULT write_add_endelement_node( struct writer *writer, struct node *parent )
+{
+    struct node *node;
+    if (!(node = alloc_node( WS_XML_NODE_TYPE_END_ELEMENT ))) return E_OUTOFMEMORY;
+    node->parent = parent;
+    list_add_tail( &parent->children, &node->entry );
+    return S_OK;
+}
+
+static HRESULT write_element_node( struct writer *writer, const WS_XML_STRING *prefix,
+                                   const WS_XML_STRING *localname, const WS_XML_STRING *ns )
+{
+    HRESULT hr;
+    if ((hr = write_flush( writer )) != S_OK) return hr;
+    if ((hr = write_add_element_node( writer, prefix, localname, ns )) != S_OK) return hr;
+    if ((hr = write_add_endelement_node( writer, writer->current )) != S_OK) return hr;
+    writer->state = WRITER_STATE_STARTELEMENT;
+    return S_OK;
+}
+
+/**************************************************************************
+ *          WsWriteStartElement		[webservices.@]
+ */
+HRESULT WINAPI WsWriteStartElement( WS_XML_WRITER *handle, const WS_XML_STRING *prefix,
+                                    const WS_XML_STRING *localname, const WS_XML_STRING *ns,
+                                    WS_ERROR *error )
+{
+    struct writer *writer = (struct writer *)handle;
+    HRESULT hr;
+
+    TRACE( "%p %s %s %s %p\n", handle, debugstr_xmlstr(prefix), debugstr_xmlstr(localname),
+           debugstr_xmlstr(ns), error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
+    if (!writer || !localname || !ns) return E_INVALIDARG;
+
+    EnterCriticalSection( &writer->cs );
+
+    if (writer->magic != WRITER_MAGIC)
+    {
+        LeaveCriticalSection( &writer->cs );
+        return E_INVALIDARG;
+    }
+
+    hr = write_element_node( writer, prefix, localname, ns );
+
+    LeaveCriticalSection( &writer->cs );
+    return hr;
+}
+
+HRESULT text_to_text( const WS_XML_TEXT *text, const WS_XML_TEXT *old, ULONG *offset, WS_XML_TEXT **ret )
+{
+    if (offset) *offset = 0;
+    switch (text->textType)
+    {
+    case WS_XML_TEXT_TYPE_UTF8:
+    {
+        const WS_XML_UTF8_TEXT *utf8 = (const WS_XML_UTF8_TEXT *)text;
+        const WS_XML_UTF8_TEXT *utf8_old = (const WS_XML_UTF8_TEXT *)old;
+        WS_XML_UTF8_TEXT *new;
+        ULONG len = utf8->value.length, len_old = utf8_old ? utf8_old->value.length : 0;
+
+        if (!(new = alloc_utf8_text( NULL, len_old + len ))) return E_OUTOFMEMORY;
+        if (utf8_old) memcpy( new->value.bytes, utf8_old->value.bytes, len_old );
+        memcpy( new->value.bytes + len_old, utf8->value.bytes, len );
+        if (offset) *offset = len_old;
+        *ret = &new->text;
+        return S_OK;
+    }
+    case WS_XML_TEXT_TYPE_UTF16:
+    {
+        const WS_XML_UTF16_TEXT *utf16 = (const WS_XML_UTF16_TEXT *)text;
+        const WS_XML_UTF16_TEXT *utf16_old = (const WS_XML_UTF16_TEXT *)old;
+        WS_XML_UTF16_TEXT *new;
+        ULONG len = utf16->byteCount, len_old = utf16_old ? utf16_old->byteCount : 0;
+
+        if (utf16->byteCount % sizeof(WCHAR)) return E_INVALIDARG;
+        if (!(new = alloc_utf16_text( NULL, len_old + len ))) return E_OUTOFMEMORY;
+        if (utf16_old) memcpy( new->bytes, utf16_old->bytes, len_old );
+        memcpy( new->bytes + len_old, utf16->bytes, len );
+        if (offset) *offset = len_old;
+        *ret = &new->text;
+        return S_OK;
+    }
+    case WS_XML_TEXT_TYPE_BASE64:
+    {
+        const WS_XML_BASE64_TEXT *base64 = (const WS_XML_BASE64_TEXT *)text;
+        const WS_XML_BASE64_TEXT *base64_old = (const WS_XML_BASE64_TEXT *)old;
+        WS_XML_BASE64_TEXT *new;
+        ULONG len = base64->length, len_old = base64_old ? base64_old->length : 0;
+
+        if (!(new = alloc_base64_text( NULL, len_old + len ))) return E_OUTOFMEMORY;
+        if (base64_old) memcpy( new->bytes, base64_old->bytes, len_old );
+        memcpy( new->bytes + len_old, base64->bytes, len );
+        if (offset) *offset = len_old;
+        *ret = &new->text;
+        return S_OK;
+    }
+    case WS_XML_TEXT_TYPE_BOOL:
+    {
+        const WS_XML_BOOL_TEXT *bool_text = (const WS_XML_BOOL_TEXT *)text;
+        WS_XML_BOOL_TEXT *new;
+
+        if (!(new = alloc_bool_text( bool_text->value ))) return E_OUTOFMEMORY;
+        *ret = &new->text;
+        return S_OK;
+    }
+    case WS_XML_TEXT_TYPE_INT32:
+    {
+        const WS_XML_INT32_TEXT *int32_text = (const WS_XML_INT32_TEXT *)text;
+        WS_XML_INT32_TEXT *new;
+
+        if (!(new = alloc_int32_text( int32_text->value ))) return E_OUTOFMEMORY;
+        *ret = &new->text;
+        return S_OK;
+    }
+    case WS_XML_TEXT_TYPE_INT64:
+    {
+        const WS_XML_INT64_TEXT *int64_text = (const WS_XML_INT64_TEXT *)text;
+        WS_XML_INT64_TEXT *new;
+
+        if (!(new = alloc_int64_text( int64_text->value ))) return E_OUTOFMEMORY;
+        *ret = &new->text;
+        return S_OK;
+    }
+    case WS_XML_TEXT_TYPE_UINT64:
+    {
+        const WS_XML_UINT64_TEXT *uint64_text = (const WS_XML_UINT64_TEXT *)text;
+        WS_XML_UINT64_TEXT *new;
+
+        if (!(new = alloc_uint64_text( uint64_text->value ))) return E_OUTOFMEMORY;
+        *ret = &new->text;
+        return S_OK;
+    }
+    case WS_XML_TEXT_TYPE_DOUBLE:
+    {
+        const WS_XML_DOUBLE_TEXT *double_text = (const WS_XML_DOUBLE_TEXT *)text;
+        WS_XML_DOUBLE_TEXT *new;
+
+        if (!(new = alloc_double_text( double_text->value ))) return E_OUTOFMEMORY;
+        *ret = &new->text;
+        return S_OK;
+    }
+    case WS_XML_TEXT_TYPE_GUID:
+    {
+        const WS_XML_GUID_TEXT *id = (const WS_XML_GUID_TEXT *)text;
+        WS_XML_GUID_TEXT *new;
+
+        if (!(new = alloc_guid_text( &id->value ))) return E_OUTOFMEMORY;
+        *ret = &new->text;
+        return S_OK;
+    }
+    case WS_XML_TEXT_TYPE_UNIQUE_ID:
+    {
+        const WS_XML_UNIQUE_ID_TEXT *id = (const WS_XML_UNIQUE_ID_TEXT *)text;
+        WS_XML_UNIQUE_ID_TEXT *new;
+
+        if (!(new = alloc_unique_id_text( &id->value ))) return E_OUTOFMEMORY;
+        *ret = &new->text;
+        return S_OK;
+    }
+    case WS_XML_TEXT_TYPE_DATETIME:
+    {
+        const WS_XML_DATETIME_TEXT *dt = (const WS_XML_DATETIME_TEXT *)text;
+        WS_XML_DATETIME_TEXT *new;
+
+        if (!(new = alloc_datetime_text( &dt->value ))) return E_OUTOFMEMORY;
+        *ret = &new->text;
+        return S_OK;
+    }
     default:
         FIXME( "unhandled text type %u\n", text->textType );
         return E_NOTIMPL;
@@ -1579,7 +2385,6 @@ static HRESULT text_to_utf8text( const WS_XML_TEXT *text, const WS_XML_UTF8_TEXT
 static HRESULT write_set_attribute_value( struct writer *writer, const WS_XML_TEXT *value )
 {
     WS_XML_ELEMENT_NODE *elem = &writer->current->hdr;
-    WS_XML_UTF8_TEXT *new, *old = (WS_XML_UTF8_TEXT *)elem->attributes[elem->attributeCount - 1]->value;
     HRESULT hr;
 
     switch (value->textType)
@@ -1597,7 +2402,7 @@ static HRESULT write_set_attribute_value( struct writer *writer, const WS_XML_TE
     case WS_XML_TEXT_TYPE_GUID:
     case WS_XML_TEXT_TYPE_UNIQUE_ID:
     case WS_XML_TEXT_TYPE_DATETIME:
-        if (old) return WS_E_INVALID_OPERATION;
+        if (elem->attributes[elem->attributeCount - 1]->value) return WS_E_INVALID_OPERATION;
         break;
 
     default:
@@ -1605,10 +2410,28 @@ static HRESULT write_set_attribute_value( struct writer *writer, const WS_XML_TE
         return E_NOTIMPL;
     }
 
-    if ((hr = text_to_utf8text( value, old, &new )) != S_OK) return hr;
-
-    heap_free( old );
-    elem->attributes[elem->attributeCount - 1]->value = &new->text;
+    switch (writer->output_enc)
+    {
+    case WS_XML_WRITER_ENCODING_TYPE_TEXT:
+    {
+        WS_XML_UTF8_TEXT *new, *old = (WS_XML_UTF8_TEXT *)elem->attributes[elem->attributeCount - 1]->value;
+        if ((hr = text_to_utf8text( value, old, NULL, &new )) != S_OK) return hr;
+        heap_free( old );
+        elem->attributes[elem->attributeCount - 1]->value = &new->text;
+        break;
+    }
+    case WS_XML_WRITER_ENCODING_TYPE_BINARY:
+    {
+        WS_XML_TEXT *new, *old = elem->attributes[elem->attributeCount - 1]->value;
+        if ((hr = text_to_text( value, old, NULL, &new )) != S_OK) return hr;
+        heap_free( old );
+        elem->attributes[elem->attributeCount - 1]->value = new;
+        break;
+    }
+    default:
+        FIXME( "unhandled output encoding %u\n", writer->output_enc );
+        return E_NOTIMPL;
+    }
 
     return S_OK;
 }
@@ -1617,7 +2440,6 @@ static HRESULT write_add_text_node( struct writer *writer, const WS_XML_TEXT *va
 {
     struct node *node;
     WS_XML_TEXT_NODE *text;
-    WS_XML_UTF8_TEXT *utf8;
     HRESULT hr;
 
     if (node_type( writer->current ) != WS_XML_NODE_TYPE_ELEMENT &&
@@ -1625,25 +2447,47 @@ static HRESULT write_add_text_node( struct writer *writer, const WS_XML_TEXT *va
         node_type( writer->current ) != WS_XML_NODE_TYPE_CDATA) return WS_E_INVALID_FORMAT;
 
     if (!(node = alloc_node( WS_XML_NODE_TYPE_TEXT ))) return E_OUTOFMEMORY;
-    if ((hr = text_to_utf8text( value, NULL, &utf8 )) != S_OK)
-    {
-        heap_free( node );
-        return hr;
-    }
     text = (WS_XML_TEXT_NODE *)node;
-    text->text = &utf8->text;
+
+    switch (writer->output_enc)
+    {
+    case WS_XML_WRITER_ENCODING_TYPE_TEXT:
+    {
+        WS_XML_UTF8_TEXT *new;
+        if ((hr = text_to_utf8text( value, NULL, NULL, &new )) != S_OK)
+        {
+            heap_free( node );
+            return hr;
+        }
+        text->text = &new->text;
+        break;
+    }
+    case WS_XML_WRITER_ENCODING_TYPE_BINARY:
+    {
+        WS_XML_TEXT *new;
+        if ((hr = text_to_text( value, NULL, NULL, &new )) != S_OK)
+        {
+            heap_free( node );
+            return hr;
+        }
+        text->text = new;
+        break;
+    }
+    default:
+        FIXME( "unhandled output encoding %u\n", writer->output_enc );
+        heap_free( node );
+        return E_NOTIMPL;
+    }
 
     write_insert_node( writer, writer->current, node );
     return S_OK;
 }
 
-static HRESULT write_text( struct writer *writer, ULONG offset )
+static HRESULT write_text_text( struct writer *writer, const WS_XML_TEXT *text, ULONG offset )
 {
-    const WS_XML_TEXT_NODE *text = (const WS_XML_TEXT_NODE *)writer->current;
-    const WS_XML_UTF8_TEXT *utf8 = (const WS_XML_UTF8_TEXT *)text->text;
+    const WS_XML_UTF8_TEXT *utf8 = (const WS_XML_UTF8_TEXT *)text;
     HRESULT hr;
 
-    if (!writer->current->parent) return WS_E_INVALID_FORMAT;
     if (node_type( writer->current->parent ) == WS_XML_NODE_TYPE_ELEMENT)
     {
         const struct escape *escapes[3] = { &escape_lt, &escape_gt, &escape_amp };
@@ -1659,29 +2503,361 @@ static HRESULT write_text( struct writer *writer, ULONG offset )
     return WS_E_INVALID_FORMAT;
 }
 
+static enum record_type get_text_record_type( const WS_XML_TEXT *text, BOOL use_dict )
+{
+    switch (text->textType)
+    {
+    case WS_XML_TEXT_TYPE_UTF8:
+    {
+        const WS_XML_UTF8_TEXT *text_utf8 = (const WS_XML_UTF8_TEXT *)text;
+        if (use_dict) return RECORD_DICTIONARY_TEXT_WITH_ENDELEMENT;
+        if (text_utf8->value.length <= MAX_UINT8) return RECORD_CHARS8_TEXT_WITH_ENDELEMENT;
+        if (text_utf8->value.length <= MAX_UINT16) return RECORD_CHARS16_TEXT_WITH_ENDELEMENT;
+        return RECORD_CHARS32_TEXT_WITH_ENDELEMENT;
+    }
+    case WS_XML_TEXT_TYPE_UTF16:
+    {
+        const WS_XML_UTF16_TEXT *text_utf16 = (const WS_XML_UTF16_TEXT *)text;
+        int len = text_utf16->byteCount / sizeof(WCHAR);
+        int len_utf8 = WideCharToMultiByte( CP_UTF8, 0, (const WCHAR *)text_utf16->bytes, len, NULL, 0, NULL, NULL );
+        if (len_utf8 <= MAX_UINT8) return RECORD_CHARS8_TEXT_WITH_ENDELEMENT;
+        if (len_utf8 <= MAX_UINT16) return RECORD_CHARS16_TEXT_WITH_ENDELEMENT;
+        return RECORD_CHARS32_TEXT_WITH_ENDELEMENT;
+    }
+    case WS_XML_TEXT_TYPE_BASE64:
+    {
+        const WS_XML_BASE64_TEXT *text_base64 = (const WS_XML_BASE64_TEXT *)text;
+        ULONG rem = text_base64->length % 3, len = text_base64->length - rem;
+        if (len <= MAX_UINT8) return RECORD_BYTES8_TEXT;
+        if (len <= MAX_UINT16) return RECORD_BYTES16_TEXT;
+        return RECORD_BYTES32_TEXT;
+    }
+    case WS_XML_TEXT_TYPE_BOOL:
+    {
+        const WS_XML_BOOL_TEXT *text_bool = (const WS_XML_BOOL_TEXT *)text;
+        return text_bool->value ? RECORD_TRUE_TEXT_WITH_ENDELEMENT : RECORD_FALSE_TEXT_WITH_ENDELEMENT;
+    }
+    case WS_XML_TEXT_TYPE_INT32:
+    {
+        const WS_XML_INT32_TEXT *text_int32 = (const WS_XML_INT32_TEXT *)text;
+        if (!text_int32->value) return RECORD_ZERO_TEXT_WITH_ENDELEMENT;
+        if (text_int32->value == 1) return RECORD_ONE_TEXT_WITH_ENDELEMENT;
+        if (text_int32->value >= MIN_INT8 && text_int32->value <= MAX_INT8) return RECORD_INT8_TEXT_WITH_ENDELEMENT;
+        if (text_int32->value >= MIN_INT16 && text_int32->value <= MAX_INT16) return RECORD_INT16_TEXT_WITH_ENDELEMENT;
+        return RECORD_INT32_TEXT_WITH_ENDELEMENT;
+    }
+    case WS_XML_TEXT_TYPE_INT64:
+    {
+        const WS_XML_INT64_TEXT *text_int64 = (const WS_XML_INT64_TEXT *)text;
+        if (!text_int64->value) return RECORD_ZERO_TEXT_WITH_ENDELEMENT;
+        if (text_int64->value == 1) return RECORD_ONE_TEXT_WITH_ENDELEMENT;
+        if (text_int64->value >= MIN_INT8 && text_int64->value <= MAX_INT8) return RECORD_INT8_TEXT_WITH_ENDELEMENT;
+        if (text_int64->value >= MIN_INT16 && text_int64->value <= MAX_INT16) return RECORD_INT16_TEXT_WITH_ENDELEMENT;
+        if (text_int64->value >= MIN_INT32 && text_int64->value <= MAX_INT32) return RECORD_INT32_TEXT_WITH_ENDELEMENT;
+        return RECORD_INT64_TEXT_WITH_ENDELEMENT;
+    }
+    case WS_XML_TEXT_TYPE_UINT64:
+    {
+        const WS_XML_UINT64_TEXT *text_uint64 = (const WS_XML_UINT64_TEXT *)text;
+        if (!text_uint64->value) return RECORD_ZERO_TEXT_WITH_ENDELEMENT;
+        if (text_uint64->value == 1) return RECORD_ONE_TEXT_WITH_ENDELEMENT;
+        if (text_uint64->value <= MAX_INT8) return RECORD_INT8_TEXT_WITH_ENDELEMENT;
+        if (text_uint64->value <= MAX_INT16) return RECORD_INT16_TEXT_WITH_ENDELEMENT;
+        if (text_uint64->value <= MAX_INT32) return RECORD_INT32_TEXT_WITH_ENDELEMENT;
+        if (text_uint64->value <= MAX_INT64) return RECORD_INT64_TEXT_WITH_ENDELEMENT;
+        return RECORD_UINT64_TEXT_WITH_ENDELEMENT;
+    }
+    case WS_XML_TEXT_TYPE_DOUBLE:
+    {
+        const WS_XML_DOUBLE_TEXT *text_double = (const WS_XML_DOUBLE_TEXT *)text;
+        if (!text_double->value) return RECORD_ZERO_TEXT_WITH_ENDELEMENT;
+        if (text_double->value == 1) return RECORD_ONE_TEXT_WITH_ENDELEMENT;
+        if (isinf( text_double->value ) || (INT64)text_double->value != text_double->value)
+            return RECORD_DOUBLE_TEXT_WITH_ENDELEMENT;
+        if (text_double->value <= MAX_INT8) return RECORD_INT8_TEXT_WITH_ENDELEMENT;
+        if (text_double->value <= MAX_INT16) return RECORD_INT16_TEXT_WITH_ENDELEMENT;
+        if (text_double->value <= MAX_INT32) return RECORD_INT32_TEXT_WITH_ENDELEMENT;
+        return RECORD_INT64_TEXT_WITH_ENDELEMENT;
+    }
+    case WS_XML_TEXT_TYPE_GUID:
+        return RECORD_GUID_TEXT_WITH_ENDELEMENT;
+
+    case WS_XML_TEXT_TYPE_UNIQUE_ID:
+        return RECORD_UNIQUE_ID_TEXT_WITH_ENDELEMENT;
+
+    case WS_XML_TEXT_TYPE_DATETIME:
+        return RECORD_DATETIME_TEXT_WITH_ENDELEMENT;
+
+    default:
+        FIXME( "unhandled text type %u\n", text->textType );
+        return 0;
+    }
+}
+
+static HRESULT write_text_bin( struct writer *writer, const WS_XML_TEXT *text, ULONG offset )
+{
+    enum record_type type;
+    BOOL use_dict = FALSE;
+    HRESULT hr;
+    ULONG id;
+
+    if (offset)
+    {
+        FIXME( "no support for appending text in binary mode\n" );
+        return E_NOTIMPL;
+    }
+
+    if (text->textType == WS_XML_TEXT_TYPE_UTF8)
+    {
+        const WS_XML_UTF8_TEXT *utf8 = (const WS_XML_UTF8_TEXT *)text;
+        use_dict = get_string_id( writer, &utf8->value, &id );
+    }
+
+    switch ((type = get_text_record_type( text, use_dict )))
+    {
+    case RECORD_CHARS8_TEXT_WITH_ENDELEMENT:
+    {
+        const WS_XML_UTF8_TEXT *text_utf8;
+        WS_XML_UTF8_TEXT *new = NULL;
+        UINT8 len;
+
+        if (text->textType == WS_XML_TEXT_TYPE_UTF8) text_utf8 = (const WS_XML_UTF8_TEXT *)text;
+        else
+        {
+            if ((hr = text_to_utf8text( text, NULL, NULL, &new )) != S_OK) return hr;
+            text_utf8 = new;
+        }
+        len = text_utf8->value.length;
+        if ((hr = write_grow_buffer( writer, 1 + sizeof(len) + len )) != S_OK)
+        {
+            heap_free( new );
+            return hr;
+        }
+        write_char( writer, type );
+        write_char( writer, len );
+        write_bytes( writer, text_utf8->value.bytes, len );
+        heap_free( new );
+        return S_OK;
+    }
+    case RECORD_CHARS16_TEXT_WITH_ENDELEMENT:
+    {
+        const WS_XML_UTF8_TEXT *text_utf8;
+        WS_XML_UTF8_TEXT *new = NULL;
+        UINT16 len;
+
+        if (text->textType == WS_XML_TEXT_TYPE_UTF8) text_utf8 = (const WS_XML_UTF8_TEXT *)text;
+        else
+        {
+            if ((hr = text_to_utf8text( text, NULL, NULL, &new )) != S_OK) return hr;
+            text_utf8 = new;
+        }
+        len = text_utf8->value.length;
+        if ((hr = write_grow_buffer( writer, 1 + sizeof(len) + len )) != S_OK)
+        {
+            heap_free( new );
+            return hr;
+        }
+        write_char( writer, type );
+        write_bytes( writer, (const BYTE *)&len, sizeof(len) );
+        write_bytes( writer, text_utf8->value.bytes, len );
+        heap_free( new );
+        return S_OK;
+    }
+    case RECORD_BYTES8_TEXT:
+    {
+        const WS_XML_BASE64_TEXT *text_base64 = (const WS_XML_BASE64_TEXT *)text;
+        UINT8 rem = text_base64->length % 3, len = text_base64->length - rem;
+
+        if (len)
+        {
+            if ((hr = write_grow_buffer( writer, 1 + sizeof(len) + len )) != S_OK) return hr;
+            write_char( writer, rem ? RECORD_BYTES8_TEXT : RECORD_BYTES8_TEXT_WITH_ENDELEMENT );
+            write_char( writer, len );
+            write_bytes( writer, text_base64->bytes, len );
+        }
+        if (rem)
+        {
+            if ((hr = write_grow_buffer( writer, 3 )) != S_OK) return hr;
+            write_char( writer, RECORD_BYTES8_TEXT_WITH_ENDELEMENT );
+            write_char( writer, rem );
+            write_bytes( writer, (const BYTE *)text_base64->bytes + len, rem );
+        }
+        return S_OK;
+    }
+    case RECORD_BYTES16_TEXT:
+    {
+        const WS_XML_BASE64_TEXT *text_base64 = (const WS_XML_BASE64_TEXT *)text;
+        UINT16 rem = text_base64->length % 3, len = text_base64->length - rem;
+
+        if (len)
+        {
+            if ((hr = write_grow_buffer( writer, 1 + sizeof(len) + len )) != S_OK) return hr;
+            write_char( writer, rem ? RECORD_BYTES16_TEXT : RECORD_BYTES16_TEXT_WITH_ENDELEMENT );
+            write_bytes( writer, (const BYTE *)&len, sizeof(len) );
+            write_bytes( writer, text_base64->bytes, len );
+        }
+        if (rem)
+        {
+            if ((hr = write_grow_buffer( writer, 3 )) != S_OK) return hr;
+            write_char( writer, RECORD_BYTES8_TEXT_WITH_ENDELEMENT );
+            write_char( writer, rem );
+            write_bytes( writer, (const BYTE *)text_base64->bytes + len, rem );
+        }
+        return S_OK;
+    }
+    case RECORD_ZERO_TEXT_WITH_ENDELEMENT:
+    case RECORD_ONE_TEXT_WITH_ENDELEMENT:
+    case RECORD_FALSE_TEXT_WITH_ENDELEMENT:
+    case RECORD_TRUE_TEXT_WITH_ENDELEMENT:
+    {
+        if ((hr = write_grow_buffer( writer, 1 )) != S_OK) return hr;
+        write_char( writer, type );
+        return S_OK;
+    }
+    case RECORD_INT8_TEXT_WITH_ENDELEMENT:
+    {
+        INT8 val = get_text_value_int( text );
+        if ((hr = write_grow_buffer( writer, 1 + sizeof(val) )) != S_OK) return hr;
+        write_char( writer, type );
+        write_char( writer, val );
+        return S_OK;
+    }
+    case RECORD_INT16_TEXT_WITH_ENDELEMENT:
+    {
+        INT16 val = get_text_value_int( text );
+        if ((hr = write_grow_buffer( writer, 1 + sizeof(val) )) != S_OK) return hr;
+        write_char( writer, type );
+        write_bytes( writer, (const BYTE *)&val, sizeof(val) );
+        return S_OK;
+    }
+    case RECORD_INT32_TEXT_WITH_ENDELEMENT:
+    {
+        INT32 val = get_text_value_int( text );
+        if ((hr = write_grow_buffer( writer, 1 + sizeof(val) )) != S_OK) return hr;
+        write_char( writer, type );
+        write_bytes( writer, (const BYTE *)&val, sizeof(val) );
+        return S_OK;
+    }
+    case RECORD_INT64_TEXT_WITH_ENDELEMENT:
+    {
+        INT64 val = get_text_value_int( text );
+        if ((hr = write_grow_buffer( writer, 1 + sizeof(val) )) != S_OK) return hr;
+        write_char( writer, type );
+        write_bytes( writer, (const BYTE *)&val, sizeof(val) );
+        return S_OK;
+    }
+    case RECORD_UINT64_TEXT_WITH_ENDELEMENT:
+    {
+        WS_XML_UINT64_TEXT *text_uint64 = (WS_XML_UINT64_TEXT *)text;
+        if ((hr = write_grow_buffer( writer, 1 + sizeof(text_uint64->value) )) != S_OK) return hr;
+        write_char( writer, type );
+        write_bytes( writer, (const BYTE *)&text_uint64->value, sizeof(text_uint64->value) );
+        return S_OK;
+    }
+    case RECORD_DOUBLE_TEXT_WITH_ENDELEMENT:
+    {
+        WS_XML_DOUBLE_TEXT *text_double = (WS_XML_DOUBLE_TEXT *)text;
+        if ((hr = write_grow_buffer( writer, 1 + sizeof(text_double->value) )) != S_OK) return hr;
+        write_char( writer, type );
+        write_bytes( writer, (const BYTE *)&text_double->value, sizeof(text_double->value) );
+        return S_OK;
+    }
+    case RECORD_GUID_TEXT_WITH_ENDELEMENT:
+    {
+        WS_XML_GUID_TEXT *text_guid = (WS_XML_GUID_TEXT *)text;
+        if ((hr = write_grow_buffer( writer, 1 + sizeof(text_guid->value) )) != S_OK) return hr;
+        write_char( writer, type );
+        write_bytes( writer, (const BYTE *)&text_guid->value, sizeof(text_guid->value) );
+        return S_OK;
+    }
+    case RECORD_UNIQUE_ID_TEXT_WITH_ENDELEMENT:
+    {
+        WS_XML_UNIQUE_ID_TEXT *text_unique_id = (WS_XML_UNIQUE_ID_TEXT *)text;
+        if ((hr = write_grow_buffer( writer, 1 + sizeof(text_unique_id->value) )) != S_OK) return hr;
+        write_char( writer, type );
+        write_bytes( writer, (const BYTE *)&text_unique_id->value, sizeof(text_unique_id->value) );
+        return S_OK;
+    }
+    case RECORD_DATETIME_TEXT_WITH_ENDELEMENT:
+    {
+        WS_XML_DATETIME_TEXT *text_datetime = (WS_XML_DATETIME_TEXT *)text;
+        UINT64 val = text_datetime->value.ticks;
+
+        assert( val <= TICKS_MAX );
+        if (text_datetime->value.format == WS_DATETIME_FORMAT_UTC) val |= (UINT64)1 << 62;
+        else if (text_datetime->value.format == WS_DATETIME_FORMAT_LOCAL) val |= (UINT64)1 << 63;
+
+        if ((hr = write_grow_buffer( writer, 1 + sizeof(val) )) != S_OK) return hr;
+        write_char( writer, type );
+        write_bytes( writer, (const BYTE *)&val, sizeof(val) );
+        return S_OK;
+    }
+    case RECORD_DICTIONARY_TEXT_WITH_ENDELEMENT:
+    {
+        if ((hr = write_grow_buffer( writer, 1 )) != S_OK) return hr;
+        write_char( writer, type );
+        return write_dict_string( writer, id );
+    }
+    default:
+        FIXME( "unhandled record type %02x\n", type );
+        return E_NOTIMPL;
+    }
+}
+
+static HRESULT write_text( struct writer *writer, const WS_XML_TEXT *text, ULONG offset )
+{
+    if (!writer->current->parent) return WS_E_INVALID_FORMAT;
+
+    switch (writer->output_enc)
+    {
+    case WS_XML_WRITER_ENCODING_TYPE_TEXT:   return write_text_text( writer, text, offset );
+    case WS_XML_WRITER_ENCODING_TYPE_BINARY: return write_text_bin( writer, text, offset );
+    default:
+        ERR( "unhandled encoding %u\n", writer->output_enc );
+        return WS_E_NOT_SUPPORTED;
+    }
+}
+
 static HRESULT write_text_node( struct writer *writer, const WS_XML_TEXT *text )
 {
-    ULONG offset;
+    WS_XML_TEXT_NODE *node = (WS_XML_TEXT_NODE *)writer->current;
+    ULONG offset = 0;
     HRESULT hr;
 
     if ((hr = write_flush( writer )) != S_OK) return hr;
     if (node_type( writer->current ) != WS_XML_NODE_TYPE_TEXT)
     {
-        offset = 0;
         if ((hr = write_add_text_node( writer, text )) != S_OK) return hr;
+        node = (WS_XML_TEXT_NODE *)writer->current;
     }
     else
     {
-        WS_XML_TEXT_NODE *node = (WS_XML_TEXT_NODE *)writer->current;
-        WS_XML_UTF8_TEXT *new, *old = (WS_XML_UTF8_TEXT *)node->text;
-
-        offset = old->value.length;
-        if ((hr = text_to_utf8text( text, old, &new )) != S_OK) return hr;
-        heap_free( old );
-        node->text = &new->text;
+        switch (writer->output_enc)
+        {
+        case WS_XML_WRITER_ENCODING_TYPE_TEXT:
+        {
+            WS_XML_UTF8_TEXT *new, *old = (WS_XML_UTF8_TEXT *)node->text;
+            offset = old->value.length;
+            if ((hr = text_to_utf8text( text, old, &offset, &new )) != S_OK) return hr;
+            heap_free( old );
+            node->text = &new->text;
+            break;
+        }
+        case WS_XML_WRITER_ENCODING_TYPE_BINARY:
+        {
+            WS_XML_TEXT *new, *old = node->text;
+            if ((hr = text_to_text( text, old, &offset, &new )) != S_OK) return hr;
+            heap_free( old );
+            node->text = new;
+            break;
+        }
+        default:
+            FIXME( "unhandled output encoding %u\n", writer->output_enc );
+            return E_NOTIMPL;
+        }
     }
 
-    if ((hr = write_text( writer, offset )) != S_OK) return hr;
+    if ((hr = write_text( writer, node->text, offset )) != S_OK) return hr;
 
     writer->state = WRITER_STATE_TEXT;
     return S_OK;
@@ -1873,7 +3049,7 @@ static HRESULT write_add_nil_attribute( struct writer *writer )
 
     if ((hr = write_add_attribute( writer, &prefix, &localname, &ns, FALSE )) != S_OK) return hr;
     if ((hr = write_set_attribute_value( writer, &value.text )) != S_OK) return hr;
-    return write_add_namespace_attribute( writer, &prefix, &ns, FALSE );
+    return add_namespace_attribute( writer, &prefix, &ns, FALSE );
 }
 
 static HRESULT get_value_ptr( WS_WRITE_OPTION option, const void *value, ULONG size, ULONG expected_size,
@@ -1905,8 +3081,7 @@ static HRESULT write_type_bool( struct writer *writer, WS_TYPE_MAPPING mapping,
                                 const WS_BOOL_DESCRIPTION *desc, WS_WRITE_OPTION option,
                                 const BOOL *value, ULONG size )
 {
-    WS_XML_UTF8_TEXT utf8;
-    unsigned char buf[6]; /* "false" */
+    WS_XML_BOOL_TEXT text_bool;
     const BOOL *ptr;
     HRESULT hr;
 
@@ -1920,18 +3095,16 @@ static HRESULT write_type_bool( struct writer *writer, WS_TYPE_MAPPING mapping,
     if ((hr = get_value_ptr( option, value, size, sizeof(BOOL), (const void **)&ptr )) != S_OK) return hr;
     if (option == WS_WRITE_NILLABLE_POINTER && !ptr) return write_add_nil_attribute( writer );
 
-    utf8.text.textType = WS_XML_TEXT_TYPE_UTF8;
-    utf8.value.bytes   = buf;
-    utf8.value.length  = format_bool( ptr, buf );
-    return write_type_text( writer, mapping, &utf8.text );
+    text_bool.text.textType = WS_XML_TEXT_TYPE_BOOL;
+    text_bool.value         = *ptr;
+    return write_type_text( writer, mapping, &text_bool.text );
 }
 
 static HRESULT write_type_int8( struct writer *writer, WS_TYPE_MAPPING mapping,
                                 const WS_INT8_DESCRIPTION *desc, WS_WRITE_OPTION option,
                                 const BOOL *value, ULONG size )
 {
-    WS_XML_UTF8_TEXT utf8;
-    unsigned char buf[5]; /* "-128" */
+    WS_XML_INT32_TEXT text_int32;
     const INT8 *ptr;
     HRESULT hr;
 
@@ -1945,18 +3118,16 @@ static HRESULT write_type_int8( struct writer *writer, WS_TYPE_MAPPING mapping,
     if ((hr = get_value_ptr( option, value, size, sizeof(INT8), (const void **)&ptr )) != S_OK) return hr;
     if (option == WS_WRITE_NILLABLE_POINTER && !ptr) return write_add_nil_attribute( writer );
 
-    utf8.text.textType = WS_XML_TEXT_TYPE_UTF8;
-    utf8.value.bytes   = buf;
-    utf8.value.length  = format_int8( ptr, buf );
-    return write_type_text( writer, mapping, &utf8.text );
+    text_int32.text.textType = WS_XML_TEXT_TYPE_INT32;
+    text_int32.value         = *ptr;
+    return write_type_text( writer, mapping, &text_int32.text );
 }
 
 static HRESULT write_type_int16( struct writer *writer, WS_TYPE_MAPPING mapping,
                                  const WS_INT16_DESCRIPTION *desc, WS_WRITE_OPTION option,
                                  const BOOL *value, ULONG size )
 {
-    WS_XML_UTF8_TEXT utf8;
-    unsigned char buf[7]; /* "-32768" */
+    WS_XML_INT32_TEXT text_int32;
     const INT16 *ptr;
     HRESULT hr;
 
@@ -1970,18 +3141,16 @@ static HRESULT write_type_int16( struct writer *writer, WS_TYPE_MAPPING mapping,
     if ((hr = get_value_ptr( option, value, size, sizeof(INT16), (const void **)&ptr )) != S_OK) return hr;
     if (option == WS_WRITE_NILLABLE_POINTER && !ptr) return write_add_nil_attribute( writer );
 
-    utf8.text.textType = WS_XML_TEXT_TYPE_UTF8;
-    utf8.value.bytes   = buf;
-    utf8.value.length  = format_int16( ptr, buf );
-    return write_type_text( writer, mapping, &utf8.text );
+    text_int32.text.textType = WS_XML_TEXT_TYPE_INT32;
+    text_int32.value         = *ptr;
+    return write_type_text( writer, mapping, &text_int32.text );
 }
 
 static HRESULT write_type_int32( struct writer *writer, WS_TYPE_MAPPING mapping,
                                  const WS_INT32_DESCRIPTION *desc, WS_WRITE_OPTION option,
                                  const void *value, ULONG size )
 {
-    WS_XML_UTF8_TEXT utf8;
-    unsigned char buf[12]; /* "-2147483648" */
+    WS_XML_INT32_TEXT text_int32;
     const INT32 *ptr;
     HRESULT hr;
 
@@ -1995,18 +3164,16 @@ static HRESULT write_type_int32( struct writer *writer, WS_TYPE_MAPPING mapping,
     if ((hr = get_value_ptr( option, value, size, sizeof(INT32), (const void **)&ptr )) != S_OK) return hr;
     if (option == WS_WRITE_NILLABLE_POINTER && !ptr) return write_add_nil_attribute( writer );
 
-    utf8.text.textType = WS_XML_TEXT_TYPE_UTF8;
-    utf8.value.bytes   = buf;
-    utf8.value.length  = format_int32( ptr, buf );
-    return write_type_text( writer, mapping, &utf8.text );
+    text_int32.text.textType = WS_XML_TEXT_TYPE_INT32;
+    text_int32.value         = *ptr;
+    return write_type_text( writer, mapping, &text_int32.text );
 }
 
 static HRESULT write_type_int64( struct writer *writer, WS_TYPE_MAPPING mapping,
                                  const WS_INT64_DESCRIPTION *desc, WS_WRITE_OPTION option,
                                  const void *value, ULONG size )
 {
-    WS_XML_UTF8_TEXT utf8;
-    unsigned char buf[21]; /* "-9223372036854775808" */
+    WS_XML_INT64_TEXT text_int64;
     const INT64 *ptr;
     HRESULT hr;
 
@@ -2020,18 +3187,16 @@ static HRESULT write_type_int64( struct writer *writer, WS_TYPE_MAPPING mapping,
     if ((hr = get_value_ptr( option, value, size, sizeof(INT64), (const void **)&ptr )) != S_OK) return hr;
     if (option == WS_WRITE_NILLABLE_POINTER && !ptr) return write_add_nil_attribute( writer );
 
-    utf8.text.textType = WS_XML_TEXT_TYPE_UTF8;
-    utf8.value.bytes   = buf;
-    utf8.value.length  = format_int64( ptr, buf );
-    return write_type_text( writer, mapping, &utf8.text );
+    text_int64.text.textType = WS_XML_TEXT_TYPE_INT64;
+    text_int64.value         = *ptr;
+    return write_type_text( writer, mapping, &text_int64.text );
 }
 
 static HRESULT write_type_uint8( struct writer *writer, WS_TYPE_MAPPING mapping,
                                  const WS_UINT8_DESCRIPTION *desc, WS_WRITE_OPTION option,
                                  const void *value, ULONG size )
 {
-    WS_XML_UTF8_TEXT utf8;
-    unsigned char buf[4]; /* "255" */
+    WS_XML_UINT64_TEXT text_uint64;
     const UINT8 *ptr;
     HRESULT hr;
 
@@ -2045,18 +3210,16 @@ static HRESULT write_type_uint8( struct writer *writer, WS_TYPE_MAPPING mapping,
     if ((hr = get_value_ptr( option, value, size, sizeof(UINT8), (const void **)&ptr )) != S_OK) return hr;
     if (option == WS_WRITE_NILLABLE_POINTER && !ptr) return write_add_nil_attribute( writer );
 
-    utf8.text.textType = WS_XML_TEXT_TYPE_UTF8;
-    utf8.value.bytes   = buf;
-    utf8.value.length  = format_uint8( ptr, buf );
-    return write_type_text( writer, mapping, &utf8.text );
+    text_uint64.text.textType = WS_XML_TEXT_TYPE_UINT64;
+    text_uint64.value         = *ptr;
+    return write_type_text( writer, mapping, &text_uint64.text );
 }
 
 static HRESULT write_type_uint16( struct writer *writer, WS_TYPE_MAPPING mapping,
                                   const WS_UINT16_DESCRIPTION *desc, WS_WRITE_OPTION option,
                                   const void *value, ULONG size )
 {
-    WS_XML_UTF8_TEXT utf8;
-    unsigned char buf[6]; /* "65535" */
+    WS_XML_UINT64_TEXT text_uint64;
     const UINT16 *ptr;
     HRESULT hr;
 
@@ -2070,18 +3233,16 @@ static HRESULT write_type_uint16( struct writer *writer, WS_TYPE_MAPPING mapping
     if ((hr = get_value_ptr( option, value, size, sizeof(UINT16), (const void **)&ptr )) != S_OK) return hr;
     if (option == WS_WRITE_NILLABLE_POINTER && !ptr) return write_add_nil_attribute( writer );
 
-    utf8.text.textType = WS_XML_TEXT_TYPE_UTF8;
-    utf8.value.bytes   = buf;
-    utf8.value.length  = format_uint16( ptr, buf );
-    return write_type_text( writer, mapping, &utf8.text );
+    text_uint64.text.textType = WS_XML_TEXT_TYPE_UINT64;
+    text_uint64.value         = *ptr;
+    return write_type_text( writer, mapping, &text_uint64.text );
 }
 
 static HRESULT write_type_uint32( struct writer *writer, WS_TYPE_MAPPING mapping,
                                   const WS_UINT32_DESCRIPTION *desc, WS_WRITE_OPTION option,
                                   const void *value, ULONG size )
 {
-    WS_XML_UTF8_TEXT utf8;
-    unsigned char buf[11]; /* "4294967295" */
+    WS_XML_UINT64_TEXT text_uint64;
     const UINT32 *ptr;
     HRESULT hr;
 
@@ -2095,18 +3256,16 @@ static HRESULT write_type_uint32( struct writer *writer, WS_TYPE_MAPPING mapping
     if ((hr = get_value_ptr( option, value, size, sizeof(UINT32), (const void **)&ptr )) != S_OK) return hr;
     if (option == WS_WRITE_NILLABLE_POINTER && !ptr) return write_add_nil_attribute( writer );
 
-    utf8.text.textType = WS_XML_TEXT_TYPE_UTF8;
-    utf8.value.bytes   = buf;
-    utf8.value.length  = format_uint32( ptr, buf );
-    return write_type_text( writer, mapping, &utf8.text );
+    text_uint64.text.textType = WS_XML_TEXT_TYPE_UINT64;
+    text_uint64.value         = *ptr;
+    return write_type_text( writer, mapping, &text_uint64.text );
 }
 
 static HRESULT write_type_uint64( struct writer *writer, WS_TYPE_MAPPING mapping,
                                   const WS_UINT64_DESCRIPTION *desc, WS_WRITE_OPTION option,
                                   const void *value, ULONG size )
 {
-    WS_XML_UTF8_TEXT utf8;
-    unsigned char buf[21]; /* "18446744073709551615" */
+    WS_XML_UINT64_TEXT text_uint64;
     const UINT64 *ptr;
     HRESULT hr;
 
@@ -2120,18 +3279,39 @@ static HRESULT write_type_uint64( struct writer *writer, WS_TYPE_MAPPING mapping
     if ((hr = get_value_ptr( option, value, size, sizeof(UINT64), (const void **)&ptr )) != S_OK) return hr;
     if (option == WS_WRITE_NILLABLE_POINTER && !ptr) return write_add_nil_attribute( writer );
 
-    utf8.text.textType = WS_XML_TEXT_TYPE_UTF8;
-    utf8.value.bytes   = buf;
-    utf8.value.length  = format_uint64( ptr, buf );
-    return write_type_text( writer, mapping, &utf8.text );
+    text_uint64.text.textType = WS_XML_TEXT_TYPE_UINT64;
+    text_uint64.value         = *ptr;
+    return write_type_text( writer, mapping, &text_uint64.text );
+}
+
+static HRESULT write_type_double( struct writer *writer, WS_TYPE_MAPPING mapping,
+                                  const WS_DOUBLE_DESCRIPTION *desc, WS_WRITE_OPTION option,
+                                  const void *value, ULONG size )
+{
+    WS_XML_DOUBLE_TEXT text_double;
+    const double *ptr;
+    HRESULT hr;
+
+    if (desc)
+    {
+        FIXME( "description not supported\n" );
+        return E_NOTIMPL;
+    }
+
+    if (!option || option == WS_WRITE_NILLABLE_VALUE) return E_INVALIDARG;
+    if ((hr = get_value_ptr( option, value, size, sizeof(double), (const void **)&ptr )) != S_OK) return hr;
+    if (option == WS_WRITE_NILLABLE_POINTER && !ptr) return write_add_nil_attribute( writer );
+
+    text_double.text.textType = WS_XML_TEXT_TYPE_DOUBLE;
+    text_double.value         = *ptr;
+    return write_type_text( writer, mapping, &text_double.text );
 }
 
 static HRESULT write_type_datetime( struct writer *writer, WS_TYPE_MAPPING mapping,
                                     const WS_DATETIME_DESCRIPTION *desc, WS_WRITE_OPTION option,
                                     const void *value, ULONG size )
 {
-    WS_XML_UTF8_TEXT utf8;
-    unsigned char buf[34]; /* "0000-00-00T00:00:00.0000000-00:00" */
+    WS_XML_DATETIME_TEXT text_datetime;
     const WS_DATETIME *ptr;
     HRESULT hr;
 
@@ -2146,18 +3326,16 @@ static HRESULT write_type_datetime( struct writer *writer, WS_TYPE_MAPPING mappi
     if (option == WS_WRITE_NILLABLE_POINTER && !ptr) return write_add_nil_attribute( writer );
     if (ptr->ticks > TICKS_MAX || ptr->format > WS_DATETIME_FORMAT_NONE) return WS_E_INVALID_FORMAT;
 
-    utf8.text.textType = WS_XML_TEXT_TYPE_UTF8;
-    utf8.value.bytes   = buf;
-    utf8.value.length  = format_datetime( ptr, buf );
-    return write_type_text( writer, mapping, &utf8.text );
+    text_datetime.text.textType = WS_XML_TEXT_TYPE_DATETIME;
+    text_datetime.value         = *ptr;
+    return write_type_text( writer, mapping, &text_datetime.text );
 }
 
 static HRESULT write_type_guid( struct writer *writer, WS_TYPE_MAPPING mapping,
                                 const WS_GUID_DESCRIPTION *desc, WS_WRITE_OPTION option,
                                 const void *value, ULONG size )
 {
-    WS_XML_UTF8_TEXT utf8;
-    unsigned char buf[37]; /* "00000000-0000-0000-0000-000000000000" */
+    WS_XML_GUID_TEXT text_guid;
     const GUID *ptr;
     HRESULT hr;
 
@@ -2171,10 +3349,41 @@ static HRESULT write_type_guid( struct writer *writer, WS_TYPE_MAPPING mapping,
     if ((hr = get_value_ptr( option, value, size, sizeof(GUID), (const void **)&ptr )) != S_OK) return hr;
     if (option == WS_WRITE_NILLABLE_POINTER && !ptr) return write_add_nil_attribute( writer );
 
-    utf8.text.textType = WS_XML_TEXT_TYPE_UTF8;
-    utf8.value.bytes   = buf;
-    utf8.value.length  = format_guid( ptr, buf );
-    return write_type_text( writer, mapping, &utf8.text );
+    text_guid.text.textType = WS_XML_TEXT_TYPE_GUID;
+    text_guid.value         = *ptr;
+    return write_type_text( writer, mapping, &text_guid.text );
+}
+
+static HRESULT write_type_unique_id( struct writer *writer, WS_TYPE_MAPPING mapping,
+                                     const WS_UNIQUE_ID_DESCRIPTION *desc, WS_WRITE_OPTION option,
+                                     const void *value, ULONG size )
+{
+    WS_XML_UNIQUE_ID_TEXT text_unique_id;
+    WS_XML_UTF16_TEXT text_utf16;
+    const WS_UNIQUE_ID *ptr;
+    HRESULT hr;
+
+    if (desc)
+    {
+        FIXME( "description not supported\n" );
+        return E_NOTIMPL;
+    }
+
+    if (!option || option == WS_WRITE_NILLABLE_VALUE) return E_INVALIDARG;
+    if ((hr = get_value_ptr( option, value, size, sizeof(*ptr), (const void **)&ptr )) != S_OK) return hr;
+    if (option == WS_WRITE_NILLABLE_POINTER && !ptr) return write_add_nil_attribute( writer );
+
+    if (ptr->uri.length)
+    {
+        text_utf16.text.textType = WS_XML_TEXT_TYPE_UTF16;
+        text_utf16.bytes         = (BYTE *)ptr->uri.chars;
+        text_utf16.byteCount     = ptr->uri.length * sizeof(WCHAR);
+        return write_type_text( writer, mapping, &text_utf16.text );
+    }
+
+    text_unique_id.text.textType = WS_XML_TEXT_TYPE_UNIQUE_ID;
+    text_unique_id.value         = ptr->guid;
+    return write_type_text( writer, mapping, &text_unique_id.text );
 }
 
 static HRESULT write_type_string( struct writer *writer, WS_TYPE_MAPPING mapping,
@@ -2280,6 +3489,53 @@ static HRESULT write_type_xml_string( struct writer *writer, WS_TYPE_MAPPING map
     return write_type_text( writer, mapping, &utf8.text );
 }
 
+static HRESULT find_prefix( struct writer *writer, const WS_XML_STRING *ns, const WS_XML_STRING **prefix )
+{
+    const struct node *node;
+    for (node = writer->current; node_type( node ) == WS_XML_NODE_TYPE_ELEMENT; node = node->parent)
+    {
+        const WS_XML_ELEMENT_NODE *elem = &node->hdr;
+        ULONG i;
+        for (i = 0; i < elem->attributeCount; i++)
+        {
+            if (!elem->attributes[i]->isXmlNs) continue;
+            if (WsXmlStringEquals( elem->attributes[i]->ns, ns, NULL ) != S_OK) continue;
+            *prefix = elem->attributes[i]->prefix;
+            return S_OK;
+        }
+    }
+    return WS_E_INVALID_FORMAT;
+}
+
+static HRESULT write_type_qname( struct writer *writer, WS_TYPE_MAPPING mapping,
+                                 const WS_XML_QNAME_DESCRIPTION *desc, WS_WRITE_OPTION option,
+                                 const void *value, ULONG size )
+{
+    WS_XML_QNAME_TEXT qname;
+    const WS_XML_QNAME *ptr;
+    const WS_XML_STRING *prefix;
+    HRESULT hr;
+
+    if (desc)
+    {
+        FIXME( "description not supported\n" );
+        return E_NOTIMPL;
+    }
+
+    if (!option) return E_INVALIDARG;
+    if ((hr = get_value_ptr( option, value, size, sizeof(*ptr), (const void **)&ptr )) != S_OK) return hr;
+    if (option == WS_WRITE_NILLABLE_POINTER && !ptr) return write_add_nil_attribute( writer );
+    if (option == WS_WRITE_NILLABLE_VALUE && is_nil_value( value, size )) return write_add_nil_attribute( writer );
+
+    if (((hr = find_prefix( writer, &ptr->ns, &prefix )) != S_OK)) return hr;
+
+    qname.text.textType = WS_XML_TEXT_TYPE_QNAME;
+    qname.prefix        = (WS_XML_STRING *)prefix;
+    qname.localName     = (WS_XML_STRING *)&ptr->localName;
+    qname.ns            = (WS_XML_STRING *)&ptr->ns;
+    return write_type_text( writer, mapping, &qname.text );
+}
+
 static WS_WRITE_OPTION get_field_write_option( WS_TYPE type, ULONG options )
 {
     if (options & WS_FIELD_POINTER)
@@ -2302,11 +3558,14 @@ static WS_WRITE_OPTION get_field_write_option( WS_TYPE type, ULONG options )
     case WS_DOUBLE_TYPE:
     case WS_DATETIME_TYPE:
     case WS_GUID_TYPE:
+    case WS_UNIQUE_ID_TYPE:
     case WS_STRING_TYPE:
     case WS_BYTES_TYPE:
     case WS_XML_STRING_TYPE:
+    case WS_XML_QNAME_TYPE:
     case WS_STRUCT_TYPE:
     case WS_ENUM_TYPE:
+    case WS_UNION_TYPE:
         if (options & (WS_FIELD_OPTIONAL|WS_FIELD_NILLABLE)) return WS_WRITE_NILLABLE_VALUE;
         return WS_WRITE_REQUIRED_VALUE;
 
@@ -2321,11 +3580,52 @@ static WS_WRITE_OPTION get_field_write_option( WS_TYPE type, ULONG options )
     }
 }
 
+static HRESULT write_type_field( struct writer *, const WS_FIELD_DESCRIPTION *, const char *, ULONG );
+
 static HRESULT write_type( struct writer *, WS_TYPE_MAPPING, WS_TYPE, const void *, WS_WRITE_OPTION,
                            const void *, ULONG );
 
-static HRESULT write_type_repeating_element( struct writer *writer, const WS_FIELD_DESCRIPTION *desc,
-                                             const char *buf, ULONG count )
+static HRESULT write_type_union( struct writer *writer, const WS_UNION_DESCRIPTION *desc, WS_WRITE_OPTION option,
+                                 const void *value, ULONG size )
+{
+    ULONG i, offset;
+    const void *ptr;
+    int enum_value;
+    HRESULT hr;
+
+    if ((hr = get_value_ptr( option, value, size, desc->size, &ptr )) != S_OK) return hr;
+
+    if (size < sizeof(enum_value)) return E_INVALIDARG;
+    if ((enum_value = *(int *)(char *)ptr + desc->enumOffset) == desc->noneEnumValue)
+    {
+        switch (option)
+        {
+        case WS_WRITE_REQUIRED_VALUE:
+            return WS_E_INVALID_FORMAT;
+
+        case WS_WRITE_NILLABLE_VALUE:
+            return S_OK;
+
+        default:
+            ERR( "unhandled write option %u\n", option );
+            return E_INVALIDARG;
+        }
+    }
+
+    for (i = 0; i < desc->fieldCount; i++)
+    {
+        if (desc->fields[i]->value == enum_value)
+        {
+            offset = desc->fields[i]->field.offset;
+            return write_type_field( writer, &desc->fields[i]->field, ptr, offset );
+        }
+    }
+
+    return E_INVALIDARG;
+}
+
+static HRESULT write_type_array( struct writer *writer, const WS_FIELD_DESCRIPTION *desc, const char *buf,
+                                 ULONG count )
 {
     HRESULT hr = S_OK;
     ULONG i, size, offset = 0;
@@ -2344,10 +3644,18 @@ static HRESULT write_type_repeating_element( struct writer *writer, const WS_FIE
 
     for (i = 0; i < count; i++)
     {
-        if ((hr = write_element_node( writer, NULL, desc->itemLocalName, desc->itemNs )) != S_OK) return hr;
-        if ((hr = write_type( writer, WS_ELEMENT_TYPE_MAPPING, desc->type, desc->typeDescription, option,
-                              buf + offset, size )) != S_OK) return hr;
-        if ((hr = write_endelement_node( writer )) != S_OK) return hr;
+        if (desc->type == WS_UNION_TYPE)
+        {
+            if ((hr = write_type_union( writer, desc->typeDescription, option, buf + offset, size )) != S_OK)
+                return hr;
+        }
+        else
+        {
+            if ((hr = write_element_node( writer, NULL, desc->itemLocalName, desc->itemNs )) != S_OK) return hr;
+            if ((hr = write_type( writer, WS_ELEMENT_TYPE_MAPPING, desc->type, desc->typeDescription, option,
+                                  buf + offset, size )) != S_OK) return hr;
+            if ((hr = write_endelement_node( writer )) != S_OK) return hr;
+        }
         offset += size;
     }
 
@@ -2355,8 +3663,8 @@ static HRESULT write_type_repeating_element( struct writer *writer, const WS_FIE
     return hr;
 }
 
-static HRESULT write_type_struct_field( struct writer *writer, const WS_FIELD_DESCRIPTION *desc,
-                                        const char *buf, ULONG offset )
+static HRESULT write_type_field( struct writer *writer, const WS_FIELD_DESCRIPTION *desc, const char *buf,
+                                 ULONG offset )
 {
     HRESULT hr;
     WS_TYPE_MAPPING mapping;
@@ -2386,7 +3694,11 @@ static HRESULT write_type_struct_field( struct writer *writer, const WS_FIELD_DE
             if (field_options & WS_FIELD_POINTER) option = WS_WRITE_NILLABLE_POINTER;
             else option = WS_WRITE_NILLABLE_VALUE;
         }
-        else return E_INVALIDARG;
+        else
+        {
+            if (field_options & WS_FIELD_POINTER) option = WS_WRITE_REQUIRED_POINTER;
+            else option = WS_WRITE_REQUIRED_VALUE;
+        }
     }
     else
     {
@@ -2410,9 +3722,15 @@ static HRESULT write_type_struct_field( struct writer *writer, const WS_FIELD_DE
         mapping = WS_ELEMENT_TYPE_MAPPING;
         break;
 
+    case WS_ELEMENT_CHOICE_FIELD_MAPPING:
+        if (desc->type != WS_UNION_TYPE || !desc->typeDescription) return E_INVALIDARG;
+        option = (field_options & WS_FIELD_OPTIONAL) ? WS_WRITE_NILLABLE_VALUE : WS_WRITE_REQUIRED_VALUE;
+        return write_type_union( writer, desc->typeDescription, option, ptr, size );
+
     case WS_REPEATING_ELEMENT_FIELD_MAPPING:
+    case WS_REPEATING_ELEMENT_CHOICE_FIELD_MAPPING:
         count = *(const ULONG *)(buf + desc->countOffset);
-        return write_type_repeating_element( writer, desc, *(const char **)ptr, count );
+        return write_type_array( writer, desc, *(const char **)ptr, count );
 
     case WS_TEXT_FIELD_MAPPING:
         switch (writer->state)
@@ -2471,13 +3789,11 @@ static HRESULT write_type_struct( struct writer *writer, WS_TYPE_MAPPING mapping
     for (i = 0; i < desc->fieldCount; i++)
     {
         offset = desc->fields[i]->offset;
-        if ((hr = write_type_struct_field( writer, desc->fields[i], ptr, offset )) != S_OK)
-            return hr;
+        if ((hr = write_type_field( writer, desc->fields[i], ptr, offset )) != S_OK) return hr;
     }
 
     return S_OK;
 }
-
 
 static HRESULT write_type( struct writer *writer, WS_TYPE_MAPPING mapping, WS_TYPE type,
                            const void *desc, WS_WRITE_OPTION option, const void *value,
@@ -2512,11 +3828,17 @@ static HRESULT write_type( struct writer *writer, WS_TYPE_MAPPING mapping, WS_TY
     case WS_UINT64_TYPE:
         return write_type_uint64( writer, mapping, desc, option, value, size );
 
+    case WS_DOUBLE_TYPE:
+        return write_type_double( writer, mapping, desc, option, value, size );
+
     case WS_DATETIME_TYPE:
         return write_type_datetime( writer, mapping, desc, option, value, size );
 
     case WS_GUID_TYPE:
         return write_type_guid( writer, mapping, desc, option, value, size );
+
+    case WS_UNIQUE_ID_TYPE:
+        return write_type_unique_id( writer, mapping, desc, option, value, size );
 
     case WS_STRING_TYPE:
         return write_type_string( writer, mapping, desc, option, value, size );
@@ -2529,6 +3851,9 @@ static HRESULT write_type( struct writer *writer, WS_TYPE_MAPPING mapping, WS_TY
 
     case WS_XML_STRING_TYPE:
         return write_type_xml_string( writer, mapping, desc, option, value, size );
+
+    case WS_XML_QNAME_TYPE:
+        return write_type_qname( writer, mapping, desc, option, value, size );
 
     case WS_STRUCT_TYPE:
         return write_type_struct( writer, mapping, desc, option, value, size );
@@ -2651,10 +3976,6 @@ HRESULT WINAPI WsWriteType( WS_XML_WRITER *handle, WS_TYPE_MAPPING mapping, WS_T
 
     case WS_ELEMENT_TYPE_MAPPING:
     case WS_ELEMENT_CONTENT_TYPE_MAPPING:
-        if (writer->state != WRITER_STATE_STARTELEMENT) hr = WS_E_INVALID_FORMAT;
-        else hr = write_type( writer, mapping, type, desc, option, value, size );
-        break;
-
     case WS_ANY_ELEMENT_TYPE_MAPPING:
         hr = write_type( writer, mapping, type, desc, option, value, size );
         break;
@@ -2818,9 +4139,16 @@ HRESULT WINAPI WsWriteXmlBuffer( WS_XML_WRITER *handle, WS_XML_BUFFER *buffer, W
         return E_INVALIDARG;
     }
 
+    if (xmlbuf->encoding != writer->output_enc || xmlbuf->charset != writer->output_charset)
+    {
+        FIXME( "no support for different encoding and/or charset\n" );
+        hr = E_NOTIMPL;
+        goto done;
+    }
+
     if ((hr = write_flush( writer )) != S_OK) goto done;
-    if ((hr = write_grow_buffer( writer, xmlbuf->size )) != S_OK) goto done;
-    write_bytes( writer, xmlbuf->ptr, xmlbuf->size );
+    if ((hr = write_grow_buffer( writer, xmlbuf->bytes.length )) != S_OK) goto done;
+    write_bytes( writer, xmlbuf->bytes.bytes, xmlbuf->bytes.length );
 
 done:
     LeaveCriticalSection( &writer->cs );
@@ -2868,12 +4196,12 @@ HRESULT WINAPI WsWriteXmlBufferToBytes( WS_XML_WRITER *handle, WS_XML_BUFFER *bu
         if (hr != S_OK) goto done;
     }
 
-    if (!(buf = ws_alloc( heap, xmlbuf->size ))) hr = WS_E_QUOTA_EXCEEDED;
+    if (!(buf = ws_alloc( heap, xmlbuf->bytes.length ))) hr = WS_E_QUOTA_EXCEEDED;
     else
     {
-        memcpy( buf, xmlbuf->ptr, xmlbuf->size );
+        memcpy( buf, xmlbuf->bytes.bytes, xmlbuf->bytes.length );
         *bytes = buf;
-        *size = xmlbuf->size;
+        *size = xmlbuf->bytes.length;
     }
 
 done:
@@ -2911,43 +4239,27 @@ HRESULT WINAPI WsWriteXmlnsAttribute( WS_XML_WRITER *handle, const WS_XML_STRING
     }
 
     if (!namespace_in_scope( &writer->current->hdr, prefix, ns ))
-        hr = write_add_namespace_attribute( writer, prefix, ns, single );
+        hr = add_namespace_attribute( writer, prefix, ns, single );
 
     LeaveCriticalSection( &writer->cs );
     return hr;
 }
 
-static HRESULT find_prefix( struct writer *writer, const WS_XML_STRING *ns, const WS_XML_STRING **prefix )
-{
-    const struct node *node;
-    for (node = writer->current; node_type( node ) == WS_XML_NODE_TYPE_ELEMENT; node = node->parent)
-    {
-        const WS_XML_ELEMENT_NODE *elem = &node->hdr;
-        ULONG i;
-        for (i = 0; i < elem->attributeCount; i++)
-        {
-            if (!elem->attributes[i]->isXmlNs) continue;
-            if (WsXmlStringEquals( elem->attributes[i]->ns, ns, NULL ) != S_OK) continue;
-            *prefix = elem->attributes[i]->prefix;
-            return S_OK;
-        }
-    }
-    return WS_E_INVALID_FORMAT;
-}
-
 static HRESULT write_qualified_name( struct writer *writer, const WS_XML_STRING *prefix,
-                                     const WS_XML_STRING *localname )
+                                     const WS_XML_STRING *localname, const WS_XML_STRING *ns )
 {
+    WS_XML_QNAME_TEXT qname = {{WS_XML_TEXT_TYPE_QNAME}};
     HRESULT hr;
-    if (prefix->length)
-    {
-        if ((hr = write_grow_buffer( writer, prefix->length + localname->length + 1 )) != S_OK) return hr;
-        write_bytes( writer, prefix->bytes, prefix->length );
-        write_char( writer, ':' );
-    }
-    else if ((hr = write_grow_buffer( writer, localname->length )) != S_OK) return hr;
-    write_bytes( writer, localname->bytes, localname->length );
-    return S_OK;
+
+    if ((hr = write_flush( writer )) != S_OK) return hr;
+    if (!prefix && ((hr = find_prefix( writer, ns, &prefix )) != S_OK)) return hr;
+
+    qname.prefix    = (WS_XML_STRING *)prefix;
+    qname.localName = (WS_XML_STRING *)localname;
+    qname.ns        = (WS_XML_STRING *)ns;
+
+    if ((hr = write_add_text_node( writer, &qname.text )) != S_OK) return hr;
+    return write_text( writer, ((const WS_XML_TEXT_NODE *)writer->current)->text, 0 );
 }
 
 /**************************************************************************
@@ -2992,11 +4304,8 @@ HRESULT WINAPI WsWriteQualifiedName( WS_XML_WRITER *handle, const WS_XML_STRING 
         return E_INVALIDARG;
     }
 
-    if ((hr = write_flush( writer )) != S_OK) goto done;
-    if (!prefix && ((hr = find_prefix( writer, ns, &prefix )) != S_OK)) goto done;
-    hr = write_qualified_name( writer, prefix, localname );
+    hr = write_qualified_name( writer, prefix, localname, ns );
 
-done:
     LeaveCriticalSection( &writer->cs );
     return hr;
 }
@@ -3191,7 +4500,7 @@ static HRESULT write_add_comment_node( struct writer *writer, const WS_XML_STRIN
     return S_OK;
 }
 
-static HRESULT write_comment( struct writer *writer )
+static HRESULT write_comment_text( struct writer *writer )
 {
     const WS_XML_COMMENT_NODE *comment = (const WS_XML_COMMENT_NODE *)writer->current;
     HRESULT hr;
@@ -3201,6 +4510,28 @@ static HRESULT write_comment( struct writer *writer )
     write_bytes( writer, comment->value.bytes, comment->value.length );
     write_bytes( writer, (const BYTE *)"-->", 3 );
     return S_OK;
+}
+
+static HRESULT write_comment_bin( struct writer *writer )
+{
+    const WS_XML_COMMENT_NODE *comment = (const WS_XML_COMMENT_NODE *)writer->current;
+    HRESULT hr;
+
+    if ((hr = write_grow_buffer( writer, 1 )) != S_OK) return hr;
+    write_char( writer, RECORD_COMMENT );
+    return write_string( writer, comment->value.bytes, comment->value.length );
+}
+
+static HRESULT write_comment( struct writer *writer )
+{
+    switch (writer->output_enc)
+    {
+    case WS_XML_WRITER_ENCODING_TYPE_TEXT:   return write_comment_text( writer );
+    case WS_XML_WRITER_ENCODING_TYPE_BINARY: return write_comment_bin( writer );
+    default:
+        ERR( "unhandled encoding %u\n", writer->output_enc );
+        return WS_E_NOT_SUPPORTED;
+    }
 }
 
 static HRESULT write_comment_node( struct writer *writer, const WS_XML_STRING *value )
@@ -3220,9 +4551,20 @@ static HRESULT write_set_attributes( struct writer *writer, WS_XML_ATTRIBUTE **a
 
     for (i = 0; i < count; i++)
     {
-        if ((hr = write_add_attribute( writer, attrs[i]->prefix, attrs[i]->localName, attrs[i]->ns,
-                                       attrs[i]->singleQuote )) != S_OK) return hr;
-        if ((hr = write_set_attribute_value( writer, attrs[i]->value )) != S_OK) return hr;
+        const WS_XML_STRING *prefix = attrs[i]->prefix;
+        const WS_XML_STRING *localname = attrs[i]->localName;
+        const WS_XML_STRING *ns = attrs[i]->ns;
+        BOOL single = attrs[i]->singleQuote;
+
+        if (attrs[i]->isXmlNs)
+        {
+            if ((hr = add_namespace_attribute( writer, prefix, ns, single )) != S_OK) return hr;
+        }
+        else
+        {
+            if ((hr = write_add_attribute( writer, prefix, localname, ns, single )) != S_OK) return hr;
+            if ((hr = write_set_attribute_value( writer, attrs[i]->value )) != S_OK) return hr;
+        }
     }
     return S_OK;
 }
@@ -3317,7 +4659,7 @@ static HRESULT write_tree_node( struct writer *writer )
     case WS_XML_NODE_TYPE_TEXT:
         if (writer->state == WRITER_STATE_STARTELEMENT && (hr = write_endstartelement( writer )) != S_OK)
             return hr;
-        if ((hr = write_text( writer, 0 )) != S_OK) return hr;
+        if ((hr = write_text( writer, ((const WS_XML_TEXT_NODE *)writer->current)->text, 0 )) != S_OK) return hr;
         writer->state = WRITER_STATE_TEXT;
         return S_OK;
 
@@ -3418,13 +4760,15 @@ HRESULT WINAPI WsCopyNode( WS_XML_WRITER *handle, WS_XML_READER *reader, WS_ERRO
         return WS_E_INVALID_FORMAT;
     }
 
-    if ((hr = copy_node( reader, &node )) != S_OK) goto done;
+    if ((hr = copy_node( reader, writer->output_enc, &node )) != S_OK) goto done;
     current = writer->current;
     write_insert_node( writer, parent, node );
 
     write_rewind( writer );
     if ((hr = write_tree( writer )) != S_OK) goto done;
     writer->current = current;
+
+    WsMoveReader( reader, WS_MOVE_TO_NEXT_NODE, NULL, NULL );
 
 done:
     LeaveCriticalSection( &writer->cs );
@@ -3433,7 +4777,7 @@ done:
 
 static HRESULT write_param( struct writer *writer, const WS_FIELD_DESCRIPTION *desc, const void *value )
 {
-    return write_type_struct_field( writer, desc, value, 0 );
+    return write_type_field( writer, desc, value, 0 );
 }
 
 static ULONG get_array_len( const WS_PARAMETER_DESCRIPTION *params, ULONG count, ULONG index, const void **args )
@@ -3452,7 +4796,7 @@ static ULONG get_array_len( const WS_PARAMETER_DESCRIPTION *params, ULONG count,
 static HRESULT write_param_array( struct writer *writer, const WS_FIELD_DESCRIPTION *desc, const void *value,
                                   ULONG len )
 {
-    return write_type_repeating_element( writer, desc, value, len );
+    return write_type_array( writer, desc, value, len );
 }
 
 HRESULT write_input_params( WS_XML_WRITER *handle, const WS_ELEMENT_DESCRIPTION *desc,
@@ -3503,4 +4847,41 @@ HRESULT write_input_params( WS_XML_WRITER *handle, const WS_ELEMENT_DESCRIPTION 
 done:
     LeaveCriticalSection( &writer->cs );
     return hr;
+}
+
+HRESULT writer_set_lookup( WS_XML_WRITER *handle, BOOL enable )
+{
+    struct writer *writer = (struct writer *)handle;
+
+    EnterCriticalSection( &writer->cs );
+
+    if (writer->magic != WRITER_MAGIC)
+    {
+        LeaveCriticalSection( &writer->cs );
+        return E_INVALIDARG;
+    }
+
+    writer->dict_do_lookup = enable;
+
+    LeaveCriticalSection( &writer->cs );
+    return S_OK;
+}
+
+HRESULT writer_set_dict_callback( WS_XML_WRITER *handle, WS_DYNAMIC_STRING_CALLBACK cb, void *state )
+{
+    struct writer *writer = (struct writer *)handle;
+
+    EnterCriticalSection( &writer->cs );
+
+    if (writer->magic != WRITER_MAGIC)
+    {
+        LeaveCriticalSection( &writer->cs );
+        return E_INVALIDARG;
+    }
+
+    writer->dict_cb        = cb;
+    writer->dict_cb_state  = state;
+
+    LeaveCriticalSection( &writer->cs );
+    return S_OK;
 }

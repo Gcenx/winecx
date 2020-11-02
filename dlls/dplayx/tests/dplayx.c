@@ -767,7 +767,7 @@ static BOOL CALLBACK callback_providersA(GUID* guid, char *name, DWORD major, DW
 
     if (!prov) return TRUE;
 
-    if (prov->call_count < sizeof(prov->guid_data) / sizeof(prov->guid_data[0]))
+    if (prov->call_count < ARRAY_SIZE(prov->guid_data))
     {
         prov->guid_ptr[prov->call_count] = guid;
         prov->guid_data[prov->call_count] = *guid;
@@ -786,7 +786,7 @@ static BOOL CALLBACK callback_providersW(GUID* guid, WCHAR *name, DWORD major, D
 
     if (!prov) return TRUE;
 
-    if (prov->call_count < sizeof(prov->guid_data) / sizeof(prov->guid_data[0]))
+    if (prov->call_count < ARRAY_SIZE(prov->guid_data))
     {
         prov->guid_ptr[prov->call_count] = guid;
         prov->guid_data[prov->call_count] = *guid;
@@ -896,7 +896,7 @@ static BOOL CALLBACK EnumAddress_cb2( REFGUID guidDataType,
     {
         BOOL found = FALSE;
         int i;
-        for( i=0; i < sizeof(sps) / sizeof(sps[0]) && !found; i++ )
+        for( i=0; i < ARRAY_SIZE(sps) && !found; i++ )
             found = IsEqualGUID( sps[i], lpData );
         ok( found, "Unknown Address type found %s\n", wine_dbgstr_guid(lpData) );
     }
@@ -1262,7 +1262,7 @@ static void test_Open(void)
 
     /* Regular operation */
     hr = IDirectPlayX_Open( pDP_server, &dpsd_server, DPOPEN_CREATE );
-    checkHR( DP_OK, hr );
+    todo_wine checkHR( DP_OK, hr );
 
     /* Opening twice */
     hr = IDirectPlayX_Open( pDP_server, &dpsd_server, DPOPEN_CREATE );
@@ -1288,15 +1288,15 @@ static void test_Open(void)
     /* - Checking how strict dplay is with sizes */
     dpsd.dwSize = 0;
     hr = IDirectPlayX_Open( pDP, &dpsd, DPOPEN_JOIN );
-    todo_wine checkHR( DPERR_INVALIDPARAMS, hr );
+    checkHR( DPERR_INVALIDPARAMS, hr );
 
     dpsd.dwSize = sizeof(DPSESSIONDESC2)-1;
     hr = IDirectPlayX_Open( pDP, &dpsd, DPOPEN_JOIN );
-    todo_wine checkHR( DPERR_INVALIDPARAMS, hr );
+    checkHR( DPERR_INVALIDPARAMS, hr );
 
     dpsd.dwSize = sizeof(DPSESSIONDESC2)+1;
     hr = IDirectPlayX_Open( pDP, &dpsd, DPOPEN_JOIN );
-    todo_wine checkHR( DPERR_INVALIDPARAMS, hr );
+    checkHR( DPERR_INVALIDPARAMS, hr );
 
     dpsd.dwSize = sizeof(DPSESSIONDESC2);
     hr = IDirectPlayX_Open( pDP, &dpsd, DPOPEN_JOIN );
@@ -1331,7 +1331,7 @@ static void test_Open(void)
     dpsd_server.dwSize = 0;
 
     hr = IDirectPlayX_Open( pDP_server, &dpsd_server, DPOPEN_CREATE );
-    todo_wine checkHR( DPERR_INVALIDPARAMS, hr );
+    checkHR( DPERR_INVALIDPARAMS, hr );
 
     dpsd_server.dwSize = sizeof(DPSESSIONDESC2);
 
@@ -6808,7 +6808,7 @@ static HRESULT set_firewall( enum firewall_op op )
     hr = INetFwPolicy_get_CurrentProfile( policy, &profile );
     if (hr != S_OK) goto done;
 
-    INetFwProfile_get_AuthorizedApplications( profile, &apps );
+    hr = INetFwProfile_get_AuthorizedApplications( profile, &apps );
     ok( hr == S_OK, "got %08x\n", hr );
     if (hr != S_OK) goto done;
 
@@ -6951,7 +6951,7 @@ START_TEST(dplayx)
     if (!winetest_interactive)
     {
         skip("Run in interactive mode to run all dplayx tests.\n");
-        return;
+        goto done;
     }
 
     trace("Running in interactive mode, tests will take a while\n");
@@ -6991,6 +6991,8 @@ START_TEST(dplayx)
     test_remote_data_replication();
     test_host_migration();
 
+done:
     FreeLibrary(module);
     CoUninitialize();
+    if (firewall_enabled) set_firewall(APP_REMOVE);
 }

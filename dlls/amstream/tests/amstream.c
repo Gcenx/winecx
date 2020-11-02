@@ -258,6 +258,7 @@ static void test_media_streams(void)
     {
         IAMMediaStream* am_media_stream;
         IMultiMediaStream *multi_media_stream;
+        IPin *pin = NULL;
         IAudioMediaStream* audio_media_stream;
         IDirectDrawMediaStream *ddraw_stream = NULL;
         IDirectDrawStreamSample *ddraw_sample = NULL;
@@ -276,6 +277,11 @@ static void test_media_streams(void)
         IMultiMediaStream_Release(multi_media_stream);
 
         IAMMediaStream_Release(am_media_stream);
+
+        hr = IMediaStream_QueryInterface(video_stream, &IID_IPin, (void **)&pin);
+        ok(hr == S_OK, "IMediaStream_QueryInterface returned: %x\n", hr);
+
+        IPin_Release(pin);
 
         hr = IMediaStream_QueryInterface(video_stream, &IID_IAudioMediaStream, (LPVOID*)&audio_media_stream);
         ok(hr == E_NOINTERFACE, "IMediaStream_QueryInterface returned: %x\n", hr);
@@ -368,6 +374,7 @@ static void test_media_streams(void)
     {
         IAMMediaStream* am_media_stream;
         IMultiMediaStream *multi_media_stream;
+        IPin *pin = NULL;
         IDirectDrawMediaStream* ddraw_stream = NULL;
         IAudioMediaStream* audio_media_stream = NULL;
         IAudioStreamSample *audio_sample = NULL;
@@ -386,6 +393,11 @@ static void test_media_streams(void)
         IMultiMediaStream_Release(multi_media_stream);
 
         IAMMediaStream_Release(am_media_stream);
+
+        hr = IMediaStream_QueryInterface(audio_stream, &IID_IPin, (void **)&pin);
+        ok(hr == S_OK, "IMediaStream_QueryInterface returned: %x\n", hr);
+
+        IPin_Release(pin);
 
         hr = IMediaStream_QueryInterface(audio_stream, &IID_IDirectDrawMediaStream, (LPVOID*)&ddraw_stream);
         ok(hr == E_NOINTERFACE, "IMediaStream_QueryInterface returned: %x\n", hr);
@@ -456,7 +468,7 @@ static void test_media_streams(void)
 
                 /* Pin name is "I{guid MSPID_PrimaryVideo or MSPID_PrimaryAudio}" */
                 id[0] = 'I';
-                StringFromGUID2(i ? &MSPID_PrimaryAudio : &MSPID_PrimaryVideo, id + 1, 40);
+                StringFromGUID2(i ? &MSPID_PrimaryAudio : &MSPID_PrimaryVideo, id + 1, 39);
 
                 hr = IPin_ConnectedTo(pins[i], &pin);
                 ok(hr == VFW_E_NOT_CONNECTED, "IPin_ConnectedTo returned: %x\n", hr);
@@ -467,10 +479,14 @@ static void test_media_streams(void)
                 ok(!lstrcmpW(info.achName, id), "Pin name is %s instead of %s\n", wine_dbgstr_w(info.achName), wine_dbgstr_w(id));
                 hr = IPin_EnumMediaTypes(pins[i], &enum_media_types);
                 ok(hr == S_OK, "IPin_EnumMediaTypes returned: %x\n", hr);
-                hr = IEnumMediaTypes_Next(enum_media_types, sizeof(media_types) / sizeof(media_types[0]), media_types, &nb_media_types);
+                hr = IEnumMediaTypes_Next(enum_media_types, ARRAY_SIZE(media_types), media_types, &nb_media_types);
                 ok(SUCCEEDED(hr), "IEnumMediaTypes_Next returned: %x\n", hr);
                 ok(nb_media_types > 0, "nb_media_types should be >0\n");
                 IEnumMediaTypes_Release(enum_media_types);
+                hr = IMediaStream_QueryInterface(i ? audio_stream : video_stream, &IID_IPin, (void **)&pin);
+                ok(hr == S_OK, "IMediaStream_QueryInterface returned: %x\n", hr);
+                ok(pin == pins[i], "Pin is %p instead of %p\n", pins[i], pin);
+                IPin_Release(pin);
                 IPin_Release(pins[i]);
             }
             IEnumPins_Release(enum_pins);
@@ -535,8 +551,9 @@ static void test_IDirectDrawStreamSample(void)
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(ddraw == ddraw2, "got %p, %p\n", ddraw, ddraw2);
 
-    hr = IDirectDraw_QueryInterface(ddraw, &IID_IDirectDraw7, (void**)&ddraw7);
+    hr = IDirectDraw_QueryInterface(ddraw, &IID_IDirectDraw7, (void **)&ddraw7);
     ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(ddraw7 == pdd7, "Got IDirectDraw instance %p, expected %p.\n", ddraw7, pdd7);
     IDirectDraw7_Release(ddraw7);
 
     IDirectDraw_Release(ddraw2);
@@ -550,7 +567,7 @@ static void test_IDirectDrawStreamSample(void)
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(surface != NULL, "got %p\n", surface);
 
-    hr = IDirectDrawSurface_QueryInterface(surface, &IID_IDirectDrawSurface7, (void**)&surface7);
+    hr = IDirectDrawSurface_QueryInterface(surface, &IID_IDirectDrawSurface7, (void **)&surface7);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     IDirectDrawSurface7_Release(surface7);
 
@@ -563,7 +580,7 @@ static void test_IDirectDrawStreamSample(void)
     IDirectDrawSurface_Release(surface);
     IDirectDrawStreamSample_Release(pddsample);
 
-    hr = IDirectDrawSurface7_QueryInterface(pdds7, &IID_IDirectDrawSurface, (void**)&surface);
+    hr = IDirectDrawSurface7_QueryInterface(pdds7, &IID_IDirectDrawSurface, (void **)&surface);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     EXPECT_REF(surface, 1);

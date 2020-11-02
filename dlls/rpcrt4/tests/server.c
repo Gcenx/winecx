@@ -41,7 +41,7 @@
 static const char *progname;
 static BOOL old_windows_version;
 
-static HANDLE stop_event;
+static HANDLE stop_event, stop_wait_event;
 
 static void (WINAPI *pNDRSContextMarshall2)(RPC_BINDING_HANDLE, NDR_SCONTEXT, void*, NDR_RUNDOWN, void*, ULONG);
 static NDR_SCONTEXT (WINAPI *pNDRSContextUnmarshall2)(RPC_BINDING_HANDLE, void*, ULONG, void*, ULONG);
@@ -313,7 +313,7 @@ void __cdecl s_get_number_array(int x[20], int *n)
 {
   int c[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
   memcpy(x, c, sizeof(c));
-  *n = sizeof(c)/sizeof(c[0]);
+  *n = ARRAY_SIZE(c);
 }
 
 int __cdecl s_sum_cs(cs_t *cs)
@@ -830,9 +830,35 @@ void __cdecl s_full_pointer_null_test(int *a, int *b)
 
 void __cdecl s_stop(void)
 {
-  ok(RPC_S_OK == RpcMgmtStopServerListening(NULL), "RpcMgmtStopServerListening\n");
-  ok(RPC_S_OK == RpcServerUnregisterIf(NULL, NULL, FALSE), "RpcServerUnregisterIf\n");
+  if (!stop_wait_event)
+  {
+    ok(RPC_S_OK == RpcMgmtStopServerListening(NULL), "RpcMgmtStopServerListening\n");
+    ok(RPC_S_OK == RpcServerUnregisterIf(NULL, NULL, FALSE), "RpcServerUnregisterIf\n");
+  }
   ok(SetEvent(stop_event), "SetEvent\n");
+  if (stop_wait_event)
+  {
+    DWORD ret;
+    ret = WaitForSingleObject(stop_wait_event, 10000);
+    ok(WAIT_OBJECT_0 == ret, "WaitForSingleObject\n");
+  }
+}
+
+void __cdecl s_stop_autolisten(void)
+{
+    RPC_STATUS status;
+    status = RpcServerUnregisterIf(NULL, NULL, FALSE);
+todo_wine
+    ok(status == RPC_S_UNKNOWN_MGR_TYPE, "got %u\n", status);
+}
+
+void __cdecl s_ip_test(ipu_t *a)
+{
+    STATSTG st;
+    HRESULT hr;
+
+    hr = IStream_Stat(a->tagged_union.stream, &st, STATFLAG_NONAME);
+    ok(hr == S_OK, "got %#x\n", hr);
 }
 
 static void
@@ -903,7 +929,7 @@ basic_tests(void)
   x = sum_double_int(-78, 148.46);
   ok(x == 70, "RPC sum_double_int got %d\n", x);
   y = sum_hyper((hyper)0x12345678 << 16, (hyper)0x33557799 << 16);
-  ok(y == (hyper)0x4589ce11 << 16, "RPC hyper got %x%08x\n", (DWORD)(y >> 32), (DWORD)y);
+  ok(y == (hyper)0x4589ce11 << 16, "RPC hyper got %s\n", wine_dbgstr_longlong(y));
   x = sum_hyper_int((hyper)0x24242424 << 16, -((hyper)0x24241212 << 16));
   ok(x == 0x12120000, "RPC hyper_int got 0x%x\n", x);
   x = sum_char_hyper( 12, ((hyper)0x42424242 << 32) | 0x33334444 );
@@ -1035,6 +1061,8 @@ union_tests(void)
   encu_t eu;
   unencu_t uneu;
   sun_t su;
+  ipu_t ipu;
+  LONG ref;
   int i;
 
   su.s = SUN_I;
@@ -1075,6 +1103,15 @@ union_tests(void)
   eue.t = E2;
   eue.tagged_union.f2 = 10.0;
   ok(square_encue(&eue) == 100.0, "RPC square_encue\n");
+
+  CoInitializeEx(NULL, COINIT_MULTITHREADED);
+
+  CreateStreamOnHGlobal(NULL, TRUE, &ipu.tagged_union.stream);
+  ip_test(&ipu);
+  ref = IStream_Release(ipu.tagged_union.stream);
+  ok(!ref, "got %u refs\n", ref);
+
+  CoUninitialize();
 }
 
 static test_list_t *
@@ -1651,6 +1688,22 @@ client(const char *test)
     ok(RPC_S_OK == RpcStringFreeA(&binding), "RpcStringFree\n");
     ok(RPC_S_OK == RpcBindingFree(&IServer_IfHandle), "RpcBindingFree\n");
   }
+  else if (strcmp(test, "ncalrpc_autolisten") == 0)
+  {
+    ok(RPC_S_OK == RpcStringBindingComposeA(NULL, ncalrpc, NULL, guid, NULL, &binding), "RpcStringBindingCompose\n");
+    ok(RPC_S_OK == RpcBindingFromStringBindingA(binding, &IServer_IfHandle), "RpcBindingFromStringBinding\n");
+
+    run_tests();
+    authinfo_test(RPC_PROTSEQ_LRPC, 0);
+todo_wine
+    test_is_server_listening(IServer_IfHandle, RPC_S_NOT_LISTENING);
+
+    stop_autolisten();
+    ok(int_return() == INT_CODE, "RPC int_return\n");
+
+    ok(RPC_S_OK == RpcStringFreeA(&binding), "RpcStringFree\n");
+    ok(RPC_S_OK == RpcBindingFree(&IServer_IfHandle), "RpcBindingFree\n");
+  }
   else if (strcmp(test, "ncalrpc_secure") == 0)
   {
     ok(RPC_S_OK == RpcStringBindingComposeA(NULL, ncalrpc, NULL, guid, NULL, &binding), "RpcStringBindingCompose\n");
@@ -1691,6 +1744,9 @@ server(void)
   static unsigned char guid[] = "00000000-4114-0704-2301-000000000000";
   RPC_STATUS status, iptcp_status, np_status, ncalrpc_status;
   DWORD ret;
+
+  /* needed for tests involving interface pointers */
+  CoInitializeEx(NULL, COINIT_MULTITHREADED);
 
   iptcp_status = RpcServerUseProtseqEpA(iptcp, 20, port, NULL);
   ok(iptcp_status == RPC_S_OK, "RpcServerUseProtseqEp(ncacn_ip_tcp) failed with status %d\n", iptcp_status);
@@ -1757,12 +1813,104 @@ server(void)
 
   CloseHandle(stop_event);
   stop_event = NULL;
+
+  if (pRpcServerRegisterIfEx)
+  {
+    status = pRpcServerRegisterIfEx(s_IServer_v0_0_s_ifspec, NULL, NULL,
+        RPC_IF_ALLOW_CALLBACKS_WITH_NO_AUTH | RPC_IF_AUTOLISTEN,
+        RPC_C_LISTEN_MAX_CALLS_DEFAULT, NULL);
+    ok(status == RPC_S_OK, "RpcServerRegisterIf() failed: %u\n", status);
+
+    run_client("ncalrpc_autolisten");
+
+    status = RpcServerUnregisterIf(s_IServer_v0_0_s_ifspec, NULL, TRUE);
+    ok(status == RPC_S_OK, "RpcServerUnregisterIf() failed: %u\n", status);
+  }
+
+  CoUninitialize();
+}
+
+static DWORD WINAPI listen_test_client_thread(void *binding)
+{
+    RPC_STATUS status;
+
+    status = RpcBindingFromStringBindingA(binding, &IServer_IfHandle);
+    ok(status == RPC_S_OK, "RpcBindingFromStringBinding\n");
+
+    test_is_server_listening(IServer_IfHandle, RPC_S_OK);
+    stop();
+    trace("stopped\n");
+
+    status = RpcBindingFree(&IServer_IfHandle);
+    ok(status == RPC_S_OK, "RpcBindingFree\n");
+    return 0;
+}
+
+static DWORD WINAPI wait_listen_proc(void *arg)
+{
+    RPC_STATUS status;
+
+    trace("waiting\n");
+    status = RpcMgmtWaitServerListen();
+    ok(status == RPC_S_OK, "RpcMgmtWaitServerListening failed with status %d\n", status);
+    trace("done\n");
+
+    return 0;
+}
+
+static void test_stop_wait_for_call(unsigned char *binding)
+{
+    HANDLE client_thread, wait_listen_thread;
+    RPC_STATUS status;
+    DWORD ret;
+
+    status = RpcServerListen(1, 20, TRUE);
+    ok(status == RPC_S_OK, "RpcServerListen failed with status %d\n", status);
+    test_is_server_listening(NULL, RPC_S_OK);
+
+    stop_wait_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    ok(stop_wait_event != NULL, "CreateEvent failed with error %d\n", GetLastError());
+    stop_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    ok(stop_event != NULL, "CreateEvent failed with error %d\n", GetLastError());
+
+    wait_listen_thread = CreateThread(NULL, 0, wait_listen_proc, 0, 0, NULL);
+    ok(wait_listen_thread != NULL, "CreateThread failed\n");
+
+    client_thread = CreateThread(NULL, 0, listen_test_client_thread, binding, 0, NULL);
+    ok(client_thread != NULL, "CreateThread failed\n");
+    CloseHandle(client_thread);
+
+    ret = WaitForSingleObject(stop_event, 10000);
+    ok(WAIT_OBJECT_0 == ret, "WaitForSingleObject\n");
+
+    status = RpcMgmtStopServerListening(NULL);
+    ok(status == RPC_S_OK, "RpcMgmtStopServerListening\n");
+    test_is_server_listening(NULL, RPC_S_NOT_LISTENING);
+
+    ret = WaitForSingleObject(wait_listen_thread, 500);
+    ok(WAIT_TIMEOUT == ret, "WaitForSingleObject\n");
+
+    SetEvent(stop_wait_event);
+
+    ret = WaitForSingleObject(wait_listen_thread, 10000);
+    ok(WAIT_OBJECT_0 == ret, "WaitForSingleObject returned %u\n", ret);
+
+    CloseHandle(wait_listen_thread);
+
+    CloseHandle(stop_wait_event);
+    stop_wait_event = NULL;
+    CloseHandle(stop_event);
+    stop_event = NULL;
 }
 
 static void test_server_listening(void)
 {
     static unsigned char np[] = "ncacn_np";
+    static unsigned char address_np[] = "\\\\.";
     static unsigned char pipe[] = PIPE "listen_test";
+    static unsigned char ncalrpc[] = "ncalrpc";
+    static unsigned char guid[] = "00000000-4114-0704-2302-000000000000";
+    unsigned char *binding;
     RPC_STATUS status;
 
     status = RpcServerUseProtseqEpA(np, 0, pipe, NULL);
@@ -1788,6 +1936,27 @@ static void test_server_listening(void)
 
     status = RpcMgmtWaitServerListen();
     ok(status == RPC_S_NOT_LISTENING, "RpcMgmtWaitServerListening failed with status %d\n", status);
+
+    /* test that server stop waits for a call in progress */
+    status = RpcStringBindingComposeA(NULL, np, address_np, pipe, NULL, &binding);
+    ok(status == RPC_S_OK, "RpcStringBindingCompose\n");
+
+    test_stop_wait_for_call(binding);
+
+    status = RpcStringFreeA(&binding);
+    ok(status == RPC_S_OK, "RpcStringFree\n");
+
+    /* repeat the test using ncalrpc */
+    status = RpcServerUseProtseqEpA(ncalrpc, 0, guid, NULL);
+    ok(status == RPC_S_OK, "RpcServerUseProtseqEp(ncalrpc) failed with status %d\n", status);
+
+    status = RpcStringBindingComposeA(NULL, ncalrpc, NULL, guid, NULL, &binding);
+    ok(status == RPC_S_OK, "RpcStringBindingCompose\n");
+
+    test_stop_wait_for_call(binding);
+
+    status = RpcStringFreeA(&binding);
+    ok(status == RPC_S_OK, "RpcStringFree\n");
 }
 
 static BOOL is_process_elevated(void)
@@ -1875,7 +2044,7 @@ static HRESULT set_firewall( enum firewall_op op )
     hr = INetFwPolicy_get_CurrentProfile( policy, &profile );
     if (hr != S_OK) goto done;
 
-    INetFwProfile_get_AuthorizedApplications( profile, &apps );
+    hr = INetFwProfile_get_AuthorizedApplications( profile, &apps );
     ok( hr == S_OK, "got %08x\n", hr );
     if (hr != S_OK) goto done;
 

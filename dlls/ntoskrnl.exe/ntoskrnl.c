@@ -43,7 +43,7 @@
 #include "wine/unicode.h"
 #include "wine/server.h"
 #include "wine/debug.h"
-
+#include "wine/heap.h"
 #include "wine/rbtree.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntoskrnl);
@@ -68,6 +68,7 @@ typedef struct _KSERVICE_TABLE_DESCRIPTOR
 KSERVICE_TABLE_DESCRIPTOR KeServiceDescriptorTable[4] = { { 0 } };
 
 typedef void (WINAPI *PCREATE_PROCESS_NOTIFY_ROUTINE)(HANDLE,HANDLE,BOOLEAN);
+typedef void (WINAPI *PCREATE_PROCESS_NOTIFY_ROUTINE_EX)(PEPROCESS,HANDLE,PPS_CREATE_NOTIFY_INFO);
 typedef void (WINAPI *PCREATE_THREAD_NOTIFY_ROUTINE)(HANDLE,HANDLE,BOOLEAN);
 
 static const WCHAR servicesW[] = {'\\','R','e','g','i','s','t','r','y',
@@ -599,6 +600,34 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
 
 
 /***********************************************************************
+ *           ExAcquireFastMutexUnsafe  (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL1_ENTRYPOINT
+DEFINE_FASTCALL1_ENTRYPOINT(ExAcquireFastMutexUnsafe)
+void WINAPI __regs_ExAcquireFastMutexUnsafe(PFAST_MUTEX FastMutex)
+#else
+void WINAPI ExAcquireFastMutexUnsafe(PFAST_MUTEX FastMutex)
+#endif
+{
+    FIXME("(%p): stub\n", FastMutex);
+}
+
+
+/***********************************************************************
+ *           ExReleaseFastMutexUnsafe  (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL1_ENTRYPOINT
+DEFINE_FASTCALL1_ENTRYPOINT(ExReleaseFastMutexUnsafe)
+void WINAPI __regs_ExReleaseFastMutexUnsafe(PFAST_MUTEX FastMutex)
+#else
+void WINAPI ExReleaseFastMutexUnsafe(PFAST_MUTEX FastMutex)
+#endif
+{
+    FIXME("(%p): stub\n", FastMutex);
+}
+
+
+/***********************************************************************
  *           IoAcquireCancelSpinLock  (NTOSKRNL.EXE.@)
  */
 void WINAPI IoAcquireCancelSpinLock(PKIRQL irql)
@@ -610,9 +639,9 @@ void WINAPI IoAcquireCancelSpinLock(PKIRQL irql)
 /***********************************************************************
  *           IoReleaseCancelSpinLock  (NTOSKRNL.EXE.@)
  */
-void WINAPI IoReleaseCancelSpinLock(PKIRQL irql)
+void WINAPI IoReleaseCancelSpinLock(KIRQL irql)
 {
-    FIXME("(%p): stub\n", irql);
+    FIXME("(%u): stub\n", irql);
 }
 
 
@@ -1164,6 +1193,73 @@ NTSTATUS WINAPI IoDeleteSymbolicLink( UNICODE_STRING *name )
 
 
 /***********************************************************************
+ *           IoSetDeviceInterfaceState   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI IoSetDeviceInterfaceState( UNICODE_STRING *name, BOOLEAN enable )
+{
+    const WCHAR DeviceClassesW[] = {'\\','R','E','G','I','S','T','R','Y','\\',
+        'M','a','c','h','i','n','e','\\','S','y','s','t','e','m','\\',
+        'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
+        'C','o','n','t','r','o','l','\\',
+        'D','e','v','i','c','e','C','l','a','s','s','e','s','\\',0};
+    const WCHAR controlW[] = {'C','o','n','t','r','o','l',0};
+    const WCHAR linkedW[] = {'L','i','n','k','e','d',0};
+    const WCHAR slashW[] = {'\\',0};
+    const WCHAR hashW[] = {'#',0};
+
+    size_t namelen = name->Length / sizeof(WCHAR);
+    HANDLE iface_key, control_key;
+    OBJECT_ATTRIBUTES attr = {0};
+    WCHAR *path, *refstr, *p;
+    UNICODE_STRING string;
+    NTSTATUS ret;
+    size_t len;
+
+    TRACE("(%s, %d)\n", debugstr_us(name), enable);
+
+    refstr = memrchrW(name->Buffer + 4, '\\', namelen - 4);
+
+    len = strlenW(DeviceClassesW) + 38 + 1 + namelen + 2;
+
+    if (!(path = heap_alloc( len * sizeof(WCHAR) )))
+        return STATUS_NO_MEMORY;
+
+    strcpyW( path, DeviceClassesW );
+    lstrcpynW( path + strlenW( path ), (refstr ? refstr : name->Buffer + namelen) - 38, 39 );
+    strcatW( path, slashW );
+    p = path + strlenW( path );
+    lstrcpynW( path + strlenW( path ), name->Buffer, (refstr ? (refstr - name->Buffer) : namelen) + 1 );
+    p[0] = p[1] = p[3] = '#';
+    strcatW( path, slashW );
+    strcatW( path, hashW );
+    if (refstr)
+        lstrcpynW( path + strlenW( path ), refstr, name->Buffer + namelen - refstr + 1 );
+
+    attr.Length = sizeof(attr);
+    attr.ObjectName = &string;
+    RtlInitUnicodeString( &string, path );
+    ret = NtOpenKey( &iface_key, KEY_CREATE_SUB_KEY, &attr );
+    if (!ret)
+    {
+        attr.RootDirectory = iface_key;
+        RtlInitUnicodeString( &string, controlW );
+        ret = NtCreateKey( &control_key, KEY_SET_VALUE, &attr, 0, NULL, 0, NULL );
+        if (!ret)
+        {
+            DWORD data = enable;
+            RtlInitUnicodeString( &string, linkedW );
+            ret = NtSetValueKey( control_key, &string, 0, REG_DWORD, &data, sizeof(data) );
+            NtClose( control_key );
+        }
+        NtClose( iface_key );
+    }
+
+    heap_free( path );
+    return ret;
+}
+
+
+/***********************************************************************
  *           IoGetDeviceInterfaces   (NTOSKRNL.EXE.@)
  */
 NTSTATUS WINAPI IoGetDeviceInterfaces( const GUID *InterfaceClassGuid,
@@ -1295,15 +1391,12 @@ NTSTATUS WINAPI IoCallDriver( DEVICE_OBJECT *device, IRP *irp )
     irpsp = --irp->Tail.Overlay.s.u2.CurrentStackLocation;
     dispatch = device->DriverObject->MajorFunction[irpsp->MajorFunction];
 
-    if (TRACE_ON(relay))
-        DPRINTF( "%04x:Call driver dispatch %p (device=%p,irp=%p)\n",
-                 GetCurrentThreadId(), dispatch, device, irp );
+    TRACE_(relay)( "\1Call driver dispatch %p (device=%p,irp=%p)\n", dispatch, device, irp );
 
     status = dispatch( device, irp );
 
-    if (TRACE_ON(relay))
-        DPRINTF( "%04x:Ret  driver dispatch %p (device=%p,irp=%p) retval=%08x\n",
-                 GetCurrentThreadId(), dispatch, device, irp, status );
+    TRACE_(relay)( "\1Ret  driver dispatch %p (device=%p,irp=%p) retval=%08x\n",
+                   dispatch, device, irp, status );
 
     return status;
 }
@@ -1314,7 +1407,7 @@ NTSTATUS WINAPI IoCallDriver( DEVICE_OBJECT *device, IRP *irp )
  */
 #ifdef DEFINE_FASTCALL2_ENTRYPOINT
 DEFINE_FASTCALL2_ENTRYPOINT( IofCallDriver )
-NTSTATUS WINAPI __regs_IofCallDriver( DEVICE_OBJECT *device, IRP *irp )
+NTSTATUS WINAPI DECLSPEC_HIDDEN __regs_IofCallDriver( DEVICE_OBJECT *device, IRP *irp )
 #else
 NTSTATUS WINAPI IofCallDriver( DEVICE_OBJECT *device, IRP *irp )
 #endif
@@ -1531,7 +1624,7 @@ VOID WINAPI IoCompleteRequest( IRP *irp, UCHAR priority_boost )
  */
 #ifdef DEFINE_FASTCALL2_ENTRYPOINT
 DEFINE_FASTCALL2_ENTRYPOINT( IofCompleteRequest )
-void WINAPI __regs_IofCompleteRequest( IRP *irp, UCHAR priority_boost )
+void WINAPI DECLSPEC_HIDDEN __regs_IofCompleteRequest( IRP *irp, UCHAR priority_boost )
 #else
 void WINAPI IofCompleteRequest( IRP *irp, UCHAR priority_boost )
 #endif
@@ -1546,7 +1639,7 @@ void WINAPI IofCompleteRequest( IRP *irp, UCHAR priority_boost )
  */
 #ifdef DEFINE_FASTCALL3_ENTRYPOINT
 DEFINE_FASTCALL3_ENTRYPOINT( NTOSKRNL_InterlockedCompareExchange )
-LONG WINAPI __regs_NTOSKRNL_InterlockedCompareExchange( LONG volatile *dest, LONG xchg, LONG compare )
+LONG WINAPI DECLSPEC_HIDDEN __regs_NTOSKRNL_InterlockedCompareExchange( LONG volatile *dest, LONG xchg, LONG compare )
 #else
 LONG WINAPI NTOSKRNL_InterlockedCompareExchange( LONG volatile *dest, LONG xchg, LONG compare )
 #endif
@@ -1560,7 +1653,7 @@ LONG WINAPI NTOSKRNL_InterlockedCompareExchange( LONG volatile *dest, LONG xchg,
  */
 #ifdef DEFINE_FASTCALL1_ENTRYPOINT
 DEFINE_FASTCALL1_ENTRYPOINT( NTOSKRNL_InterlockedDecrement )
-LONG WINAPI __regs_NTOSKRNL_InterlockedDecrement( LONG volatile *dest )
+LONG WINAPI DECLSPEC_HIDDEN __regs_NTOSKRNL_InterlockedDecrement( LONG volatile *dest )
 #else
 LONG WINAPI NTOSKRNL_InterlockedDecrement( LONG volatile *dest )
 #endif
@@ -1574,7 +1667,7 @@ LONG WINAPI NTOSKRNL_InterlockedDecrement( LONG volatile *dest )
  */
 #ifdef DEFINE_FASTCALL2_ENTRYPOINT
 DEFINE_FASTCALL2_ENTRYPOINT( NTOSKRNL_InterlockedExchange )
-LONG WINAPI __regs_NTOSKRNL_InterlockedExchange( LONG volatile *dest, LONG val )
+LONG WINAPI DECLSPEC_HIDDEN __regs_NTOSKRNL_InterlockedExchange( LONG volatile *dest, LONG val )
 #else
 LONG WINAPI NTOSKRNL_InterlockedExchange( LONG volatile *dest, LONG val )
 #endif
@@ -1588,7 +1681,7 @@ LONG WINAPI NTOSKRNL_InterlockedExchange( LONG volatile *dest, LONG val )
  */
 #ifdef DEFINE_FASTCALL2_ENTRYPOINT
 DEFINE_FASTCALL2_ENTRYPOINT( NTOSKRNL_InterlockedExchangeAdd )
-LONG WINAPI __regs_NTOSKRNL_InterlockedExchangeAdd( LONG volatile *dest, LONG incr )
+LONG WINAPI DECLSPEC_HIDDEN __regs_NTOSKRNL_InterlockedExchangeAdd( LONG volatile *dest, LONG incr )
 #else
 LONG WINAPI NTOSKRNL_InterlockedExchangeAdd( LONG volatile *dest, LONG incr )
 #endif
@@ -1602,7 +1695,7 @@ LONG WINAPI NTOSKRNL_InterlockedExchangeAdd( LONG volatile *dest, LONG incr )
  */
 #ifdef DEFINE_FASTCALL1_ENTRYPOINT
 DEFINE_FASTCALL1_ENTRYPOINT( NTOSKRNL_InterlockedIncrement )
-LONG WINAPI __regs_NTOSKRNL_InterlockedIncrement( LONG volatile *dest )
+LONG WINAPI DECLSPEC_HIDDEN __regs_NTOSKRNL_InterlockedIncrement( LONG volatile *dest )
 #else
 LONG WINAPI NTOSKRNL_InterlockedIncrement( LONG volatile *dest )
 #endif
@@ -1616,9 +1709,23 @@ LONG WINAPI NTOSKRNL_InterlockedIncrement( LONG volatile *dest )
  */
 #ifdef DEFINE_FASTCALL1_ENTRYPOINT
 DEFINE_FASTCALL1_ENTRYPOINT( NTOSKRNL_InterlockedPopEntrySList )
-PSLIST_ENTRY WINAPI __regs_NTOSKRNL_InterlockedPopEntrySList( PSLIST_HEADER list )
+PSLIST_ENTRY WINAPI DECLSPEC_HIDDEN __regs_NTOSKRNL_InterlockedPopEntrySList( PSLIST_HEADER list )
 #else
 PSLIST_ENTRY WINAPI NTOSKRNL_InterlockedPopEntrySList( PSLIST_HEADER list )
+#endif
+{
+    return InterlockedPopEntrySList( list );
+}
+
+
+/***********************************************************************
+ *           ExInterlockedPopEntrySList   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL2_ENTRYPOINT
+DEFINE_FASTCALL2_ENTRYPOINT( NTOSKRNL_ExInterlockedPopEntrySList )
+PSLIST_ENTRY WINAPI __regs_NTOSKRNL_ExInterlockedPopEntrySList( PSLIST_HEADER list, PKSPIN_LOCK lock )
+#else
+PSLIST_ENTRY WINAPI NTOSKRNL_ExInterlockedPopEntrySList( PSLIST_HEADER list, PKSPIN_LOCK lock )
 #endif
 {
     return InterlockedPopEntrySList( list );
@@ -1630,7 +1737,8 @@ PSLIST_ENTRY WINAPI NTOSKRNL_InterlockedPopEntrySList( PSLIST_HEADER list )
  */
 #ifdef DEFINE_FASTCALL2_ENTRYPOINT
 DEFINE_FASTCALL2_ENTRYPOINT( NTOSKRNL_InterlockedPushEntrySList )
-PSLIST_ENTRY WINAPI __regs_NTOSKRNL_InterlockedPushEntrySList( PSLIST_HEADER list, PSLIST_ENTRY entry )
+PSLIST_ENTRY WINAPI DECLSPEC_HIDDEN __regs_NTOSKRNL_InterlockedPushEntrySList( PSLIST_HEADER list,
+                                                                               PSLIST_ENTRY entry )
 #else
 PSLIST_ENTRY WINAPI NTOSKRNL_InterlockedPushEntrySList( PSLIST_HEADER list, PSLIST_ENTRY entry )
 #endif
@@ -1638,6 +1746,20 @@ PSLIST_ENTRY WINAPI NTOSKRNL_InterlockedPushEntrySList( PSLIST_HEADER list, PSLI
     return InterlockedPushEntrySList( list, entry );
 }
 
+/***********************************************************************
+ *           ExInterlockedPushEntrySList   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL3_ENTRYPOINT
+DEFINE_FASTCALL3_ENTRYPOINT( NTOSKRNL_ExInterlockedPushEntrySList )
+PSLIST_ENTRY WINAPI DECLSPEC_HIDDEN __regs_NTOSKRNL_ExInterlockedPushEntrySList( PSLIST_HEADER list,
+                                                                               PSLIST_ENTRY entry,
+                                                                               PKSPIN_LOCK lock )
+#else
+PSLIST_ENTRY WINAPI NTOSKRNL_ExInterlockedPushEntrySList( PSLIST_HEADER list, PSLIST_ENTRY entry, PKSPIN_LOCK lock )
+#endif
+{
+    return InterlockedPushEntrySList( list, entry );
+}
 
 /***********************************************************************
  *           ExAllocatePool   (NTOSKRNL.EXE.@)
@@ -1868,6 +1990,9 @@ void WINAPI KeInitializeSpinLock( PKSPIN_LOCK SpinLock )
 void WINAPI KeInitializeTimerEx( PKTIMER Timer, TIMER_TYPE Type )
 {
     FIXME( "stub: %p %d\n", Timer, Type );
+
+    RtlZeroMemory(Timer, sizeof(KTIMER));
+    Timer->Header.Type = Type ? 9 : 8;
 }
 
 
@@ -2109,7 +2234,7 @@ void WINAPI MmFreeNonCachedMemory( void *addr, SIZE_T size )
 BOOLEAN WINAPI MmIsAddressValid(PVOID VirtualAddress)
 {
     TRACE("(%p)\n", VirtualAddress);
-    return !IsBadWritePtr(VirtualAddress, 1);
+    return !IsBadReadPtr(VirtualAddress, 1);
 }
 
 /***********************************************************************
@@ -2204,7 +2329,11 @@ NTSTATUS WINAPI ObReferenceObjectByHandle( HANDLE obj, ACCESS_MASK access,
                                            POBJECT_HANDLE_INFORMATION info)
 {
     FIXME( "stub: %p %x %p %d %p %p\n", obj, access, type, mode, ptr, info);
-    return STATUS_NOT_IMPLEMENTED;
+
+    if(ptr)
+        *ptr = UlongToHandle(0xdeadbeaf);
+
+    return STATUS_SUCCESS;
 }
 
  /***********************************************************************
@@ -2259,6 +2388,19 @@ static void ObReferenceObject( void *obj )
 
 
 /***********************************************************************
+ *           ObReferenceObjectByPointer   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI ObReferenceObjectByPointer(void *obj, ACCESS_MASK access,
+                                           POBJECT_TYPE type,
+                                           KPROCESSOR_MODE mode)
+{
+    FIXME("(%p, %x, %p, %d): stub\n", obj, access, type, mode);
+
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/***********************************************************************
  *           ObDereferenceObject   (NTOSKRNL.EXE.@)
  */
 void WINAPI ObDereferenceObject( void *obj )
@@ -2272,7 +2414,7 @@ void WINAPI ObDereferenceObject( void *obj )
  */
 #ifdef DEFINE_FASTCALL1_ENTRYPOINT
 DEFINE_FASTCALL1_ENTRYPOINT( ObfReferenceObject )
-void WINAPI __regs_ObfReferenceObject( void *obj )
+void WINAPI DECLSPEC_HIDDEN __regs_ObfReferenceObject( void *obj )
 #else
 void WINAPI ObfReferenceObject( void *obj )
 #endif
@@ -2286,7 +2428,7 @@ void WINAPI ObfReferenceObject( void *obj )
  */
 #ifdef DEFINE_FASTCALL1_ENTRYPOINT
 DEFINE_FASTCALL1_ENTRYPOINT( ObfDereferenceObject )
-void WINAPI __regs_ObfDereferenceObject( void *obj )
+void WINAPI DECLSPEC_HIDDEN __regs_ObfDereferenceObject( void *obj )
 #else
 void WINAPI ObfDereferenceObject( void *obj )
 #endif
@@ -2294,6 +2436,46 @@ void WINAPI ObfDereferenceObject( void *obj )
     ObDereferenceObject( obj );
 }
 
+/***********************************************************************
+ *           ObRegisterCallbacks (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI ObRegisterCallbacks(POB_CALLBACK_REGISTRATION *callBack, void **handle)
+{
+    FIXME( "stub: %p %p\n", callBack, handle );
+
+    if(handle)
+        *handle = UlongToHandle(0xdeadbeaf);
+
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *           ObUnRegisterCallbacks (NTOSKRNL.EXE.@)
+ */
+void WINAPI ObUnRegisterCallbacks(void *handle)
+{
+    FIXME( "stub: %p\n", handle );
+}
+
+/***********************************************************************
+ *           ObGetFilterVersion (NTOSKRNL.EXE.@)
+ */
+USHORT WINAPI ObGetFilterVersion(void)
+{
+    FIXME( "stub:\n" );
+
+    return OB_FLT_REGISTRATION_VERSION;
+}
+
+/***********************************************************************
+ *           ObGetObjectType (NTOSKRNL.EXE.@)
+ */
+POBJECT_TYPE WINAPI ObGetObjectType(void *object)
+{
+    FIXME("stub: %p\n", object);
+
+    return NULL;
+}
 
 /***********************************************************************
  *           IoGetAttachedDeviceReference   (NTOSKRNL.EXE.@)
@@ -2384,6 +2566,16 @@ NTSTATUS WINAPI PsImpersonateClient(PETHREAD Thread, PACCESS_TOKEN Token, BOOLEA
  *           PsSetCreateProcessNotifyRoutine   (NTOSKRNL.EXE.@)
  */
 NTSTATUS WINAPI PsSetCreateProcessNotifyRoutine( PCREATE_PROCESS_NOTIFY_ROUTINE callback, BOOLEAN remove )
+{
+    FIXME( "stub: %p %d\n", callback, remove );
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *           PsSetCreateProcessNotifyRoutineEx   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI PsSetCreateProcessNotifyRoutineEx( PCREATE_PROCESS_NOTIFY_ROUTINE_EX callback, BOOLEAN remove )
 {
     FIXME( "stub: %p %d\n", callback, remove );
     return STATUS_SUCCESS;
@@ -2610,7 +2802,7 @@ BOOLEAN WINAPI Ke386SetIoAccessMap(ULONG flag, PVOID buffer)
 PKEVENT WINAPI IoCreateSynchronizationEvent(PUNICODE_STRING name, PHANDLE handle)
 {
     FIXME("(%p %p) stub\n", name, handle);
-    return NULL;
+    return (KEVENT *)0xdeadbeaf;
 }
 
 /*****************************************************
@@ -2638,6 +2830,15 @@ NTSTATUS WINAPI IoRegisterPlugPlayNotification(IO_NOTIFICATION_EVENT_CATEGORY ca
                                                PVOID context, PVOID *notification)
 {
     FIXME("(%u %u %p %p %p %p %p) stub\n", category, flags, data, driver, callback, context, notification);
+    return STATUS_SUCCESS;
+}
+
+/*****************************************************
+ *           IoUnregisterPlugPlayNotification    (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI IoUnregisterPlugPlayNotification(PVOID notification)
+{
+    FIXME("stub: %p\n", notification);
     return STATUS_SUCCESS;
 }
 
@@ -2685,7 +2886,7 @@ PLIST_ENTRY WINAPI ExInterlockedRemoveHeadList(PLIST_ENTRY head, PKSPIN_LOCK loc
  */
 #ifdef DEFINE_FASTCALL2_ENTRYPOINT
 DEFINE_FASTCALL2_ENTRYPOINT( ExfInterlockedRemoveHeadList )
-PLIST_ENTRY WINAPI __regs_ExfInterlockedRemoveHeadList(PLIST_ENTRY head, PKSPIN_LOCK lock)
+PLIST_ENTRY WINAPI DECLSPEC_HIDDEN __regs_ExfInterlockedRemoveHeadList(PLIST_ENTRY head, PKSPIN_LOCK lock)
 #else
 PLIST_ENTRY WINAPI ExfInterlockedRemoveHeadList(PLIST_ENTRY head, PKSPIN_LOCK lock)
 #endif
@@ -3222,7 +3423,8 @@ VOID WINAPI KeClearEvent(PRKEVENT event)
  */
 #ifdef DEFINE_FASTCALL2_ENTRYPOINT
 DEFINE_FASTCALL2_ENTRYPOINT( KeAcquireInStackQueuedSpinLock )
-void WINAPI __regs_KeAcquireInStackQueuedSpinLock( KSPIN_LOCK *spinlock, KLOCK_QUEUE_HANDLE *handle )
+void WINAPI DECLSPEC_HIDDEN __regs_KeAcquireInStackQueuedSpinLock( KSPIN_LOCK *spinlock,
+                                                                   KLOCK_QUEUE_HANDLE *handle )
 #else
 void WINAPI KeAcquireInStackQueuedSpinLock( KSPIN_LOCK *spinlock, KLOCK_QUEUE_HANDLE *handle )
 #endif
@@ -3235,10 +3437,195 @@ void WINAPI KeAcquireInStackQueuedSpinLock( KSPIN_LOCK *spinlock, KLOCK_QUEUE_HA
  */
 #ifdef DEFINE_FASTCALL1_ENTRYPOINT
 DEFINE_FASTCALL1_ENTRYPOINT( KeReleaseInStackQueuedSpinLock )
-void WINAPI __regs_KeReleaseInStackQueuedSpinLock( KLOCK_QUEUE_HANDLE *handle )
+void WINAPI DECLSPEC_HIDDEN __regs_KeReleaseInStackQueuedSpinLock( KLOCK_QUEUE_HANDLE *handle )
 #else
 void WINAPI KeReleaseInStackQueuedSpinLock( KLOCK_QUEUE_HANDLE *handle )
 #endif
 {
-    FIXME( "stub: %p\n", handle);
+    FIXME( "stub: %p\n", handle );
+}
+
+/***********************************************************************
+ *           KeAcquireSpinLockRaiseToDpc (NTOSKRNL.EXE.@)
+ */
+KIRQL WINAPI KeAcquireSpinLockRaiseToDpc(KSPIN_LOCK *spinlock)
+{
+    FIXME( "stub: %p\n", spinlock );
+    return 0;
+}
+
+/***********************************************************************
+ *           KeReleaseSpinLock (NTOSKRNL.EXE.@)
+ */
+void WINAPI KeReleaseSpinLock( KSPIN_LOCK *spinlock, KIRQL irql )
+{
+    FIXME( "stub: %p %u\n", spinlock, irql );
+}
+
+/***********************************************************************
+ *           IoCreateNotificationEvent (NTOSKRNL.EXE.@)
+ */
+PKEVENT WINAPI IoCreateNotificationEvent(UNICODE_STRING *name, HANDLE *handle)
+{
+    FIXME( "stub: %s %p\n", debugstr_us(name), handle );
+    return NULL;
+}
+
+
+/*********************************************************************
+ *                  memcpy   (NTOSKRNL.@)
+ *
+ * NOTES
+ *  Behaves like memmove.
+ */
+void * __cdecl NTOSKRNL_memcpy( void *dst, const void *src, size_t n )
+{
+    return memmove( dst, src, n );
+}
+
+/*********************************************************************
+ *                  memset   (NTOSKRNL.@)
+ */
+void * __cdecl NTOSKRNL_memset( void *dst, int c, size_t n )
+{
+    return memset( dst, c, n );
+}
+
+/*********************************************************************
+ *                  _stricmp   (NTOSKRNL.@)
+ */
+int __cdecl NTOSKRNL__stricmp( LPCSTR str1, LPCSTR str2 )
+{
+    return strcasecmp( str1, str2 );
+}
+
+/*********************************************************************
+ *                  _strnicmp   (NTOSKRNL.@)
+ */
+int __cdecl NTOSKRNL__strnicmp( LPCSTR str1, LPCSTR str2, size_t n )
+{
+    return strncasecmp( str1, str2, n );
+}
+
+/*********************************************************************
+ *           _wcsnicmp    (NTOSKRNL.@)
+ */
+INT __cdecl NTOSKRNL__wcsnicmp( LPCWSTR str1, LPCWSTR str2, INT n )
+{
+    return strncmpiW( str1, str2, n );
+}
+
+/*********************************************************************
+ *           wcsncmp    (NTOSKRNL.@)
+ */
+INT __cdecl NTOSKRNL_wcsncmp( LPCWSTR str1, LPCWSTR str2, INT n )
+{
+    return strncmpW( str1, str2, n );
+}
+
+
+#ifdef __x86_64__
+/**************************************************************************
+ *		__chkstk (NTOSKRNL.@)
+ *
+ * Supposed to touch all the stack pages, but we shouldn't need that.
+ */
+__ASM_GLOBAL_FUNC( __chkstk, "ret" );
+
+#elif defined(__i386__)
+/**************************************************************************
+ *           _chkstk   (NTOSKRNL.@)
+ */
+__ASM_STDCALL_FUNC( _chkstk, 0,
+                   "negl %eax\n\t"
+                   "addl %esp,%eax\n\t"
+                   "xchgl %esp,%eax\n\t"
+                   "movl 0(%eax),%eax\n\t"  /* copy return address from old location */
+                   "movl %eax,0(%esp)\n\t"
+                   "ret" )
+#elif defined(__arm__)
+/**************************************************************************
+ *		__chkstk (NTDLL.@)
+ *
+ * Incoming r4 contains words to allocate, converting to bytes then return
+ */
+__ASM_GLOBAL_FUNC( __chkstk, "lsl r4, r4, #2\n\t"
+                             "bx lr" )
+#endif
+
+/*********************************************************************
+ *           PsAcquireProcessExitSynchronization    (NTOSKRNL.@)
+*/
+NTSTATUS WINAPI PsAcquireProcessExitSynchronization(PEPROCESS process)
+{
+    FIXME("stub: %p\n", process);
+
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/*********************************************************************
+ *           PsReleaseProcessExitSynchronization    (NTOSKRNL.@)
+ */
+void WINAPI PsReleaseProcessExitSynchronization(PEPROCESS process)
+{
+    FIXME("stub: %p\n", process);
+}
+
+typedef struct _EX_PUSH_LOCK_WAIT_BLOCK *PEX_PUSH_LOCK_WAIT_BLOCK;
+/*********************************************************************
+ *           ExfUnblockPushLock    (NTOSKRNL.@)
+ */
+#ifdef DEFINE_FASTCALL2_ENTRYPOINT
+DEFINE_FASTCALL2_ENTRYPOINT( ExfUnblockPushLock )
+void WINAPI DECLSPEC_HIDDEN __regs_ExfUnblockPushLock( EX_PUSH_LOCK *lock,
+                                                       PEX_PUSH_LOCK_WAIT_BLOCK block)
+#else
+void WINAPI ExfUnblockPushLock( EX_PUSH_LOCK *lock, PEX_PUSH_LOCK_WAIT_BLOCK block )
+#endif
+{
+    FIXME( "stub: %p, %p\n", lock, block );
+}
+
+/*********************************************************************
+ *           PsGetProcessId    (NTOSKRNL.@)
+ */
+HANDLE WINAPI PsGetProcessId(PEPROCESS process)
+{
+    FIXME("stub: %p\n", process);
+
+    return 0;
+}
+
+/*********************************************************************
+ *           FsRtlRegisterFileSystemFilterCallbacks    (NTOSKRNL.@)
+ */
+NTSTATUS WINAPI FsRtlRegisterFileSystemFilterCallbacks( DRIVER_OBJECT *object, PFS_FILTER_CALLBACKS callbacks)
+{
+    FIXME("stub: %p %p\n", object, callbacks);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/*********************************************************************
+ *           SeSinglePrivilegeCheck    (NTOSKRNL.@)
+ */
+BOOLEAN WINAPI SeSinglePrivilegeCheck(LUID privilege, KPROCESSOR_MODE mode)
+{
+    FIXME("stub: %08x%08x %u\n", privilege.HighPart, privilege.LowPart, mode);
+    return TRUE;
+}
+
+/*********************************************************************
+ *           KeFlushQueuedDpcs    (NTOSKRNL.@)
+ */
+void WINAPI KeFlushQueuedDpcs(void)
+{
+    FIXME("stub!\n");
+}
+
+/*********************************************************************
+ *           IoReleaseRemoveLockAndWaitEx    (NTOSKRNL.@)
+ */
+void WINAPI IoReleaseRemoveLockAndWaitEx(PIO_REMOVE_LOCK lock, PVOID tag, ULONG size)
+{
+    FIXME("stub: %p %p %u\n", lock, tag, size);
 }

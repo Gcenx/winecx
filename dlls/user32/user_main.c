@@ -169,7 +169,7 @@ static const WCHAR *get_default_desktop(void)
     static const WCHAR app_defaultsW[] = {'S','o','f','t','w','a','r','e','\\',
                                           'W','i','n','e','\\',
                                           'A','p','p','D','e','f','a','u','l','t','s',0};
-    static WCHAR buffer[MAX_PATH + sizeof(explorerW)/sizeof(WCHAR)];
+    static WCHAR buffer[MAX_PATH + ARRAY_SIZE(explorerW)];
     WCHAR *p, *appname = buffer;
     const WCHAR *ret = defaultW;
     DWORD len;
@@ -208,6 +208,74 @@ static const WCHAR *get_default_desktop(void)
         RegCloseKey( appkey );
     }
     return ret;
+}
+
+
+/***********************************************************************
+ *           dpiaware_init
+ *
+ * Initialize the DPI awareness style.
+ */
+static void dpiaware_init(void)
+{
+    WCHAR buffer[256];
+    DWORD option;
+    static const WCHAR dpiAwareW[] = {'d','p','i','A','w','a','r','e',0};
+    static const WCHAR dpiAwarenessW[] = {'d','p','i','A','w','a','r','e','n','e','s','s',0};
+    static const WCHAR namespace2005W[] = {'h','t','t','p',':','/','/','s','c','h','e','m','a','s','.','m','i','c','r','o','s','o','f','t','.','c','o','m','/','S','M','I','/','2','0','0','5','/','W','i','n','d','o','w','s','S','e','t','t','i','n','g','s',0};
+    static const WCHAR namespace2016W[] = {'h','t','t','p',':','/','/','s','c','h','e','m','a','s','.','m','i','c','r','o','s','o','f','t','.','c','o','m','/','S','M','I','/','2','0','1','6','/','W','i','n','d','o','w','s','S','e','t','t','i','n','g','s',0};
+
+    if (!LdrQueryImageFileExecutionOptions( &NtCurrentTeb()->Peb->ProcessParameters->ImagePathName,
+                                            dpiAwarenessW, REG_DWORD, &option, sizeof(option), NULL ))
+    {
+        TRACE( "got option %x\n", option );
+        if (option <= 2)
+        {
+            SetProcessDpiAwarenessContext( (DPI_AWARENESS_CONTEXT)~(ULONG_PTR)option );
+            return;
+        }
+    }
+
+    if (QueryActCtxSettingsW( 0, NULL, namespace2016W, dpiAwarenessW, buffer, ARRAY_SIZE(buffer), NULL ))
+    {
+        static const WCHAR unawareW[] = {'u','n','a','w','a','r','e',0};
+        static const WCHAR systemW[] = {'s','y','s','t','e','m',0};
+        static const WCHAR permonW[] = {'p','e','r','m','o','n','i','t','o','r',0};
+        static const WCHAR permonv2W[] = {'p','e','r','m','o','n','i','t','o','r','v','2',0};
+        static const WCHAR spacesW[] = {' ','\t','\r','\n',0};
+        static const WCHAR * const types[] = { unawareW, systemW, permonW, permonv2W };
+        WCHAR *p, *start = buffer, *end;
+        ULONG_PTR i;
+
+        TRACE( "got dpiAwareness=%s\n", debugstr_w(buffer) );
+        for (start = buffer; *start; start = end)
+        {
+            start += strspnW( start, spacesW );
+            if (!(end = strchrW( start, ',' ))) end = start + strlenW(start);
+            else *end++ = 0;
+            if ((p = strpbrkW( start, spacesW ))) *p = 0;
+            for (i = 0; i < ARRAY_SIZE(types); i++)
+            {
+                if (strcmpiW( start, types[i] )) continue;
+                SetProcessDpiAwarenessContext( (DPI_AWARENESS_CONTEXT)~i );
+                return;
+            }
+        }
+    }
+    else if (QueryActCtxSettingsW( 0, NULL, namespace2005W, dpiAwareW, buffer, ARRAY_SIZE(buffer), NULL ))
+    {
+        static const WCHAR trueW[] = {'t','r','u','e',0};
+        static const WCHAR truepmW[] = {'t','r','u','e','/','p','m',0};
+        static const WCHAR permonW[] = {'p','e','r',' ','m','o','n','i','t','o','r',0};
+
+        TRACE( "got dpiAware=%s\n", debugstr_w(buffer) );
+        if (!strcmpiW( buffer, trueW ))
+            SetProcessDpiAwarenessContext( DPI_AWARENESS_CONTEXT_SYSTEM_AWARE );
+        else if (!strcmpiW( buffer, truepmW ) || !strcmpiW( buffer, permonW ))
+            SetProcessDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
+        else
+            SetProcessDpiAwarenessContext( DPI_AWARENESS_CONTEXT_UNAWARE );
+    }
 }
 
 
@@ -272,6 +340,7 @@ static void winstation_init(void)
  */
 static BOOL process_attach(void)
 {
+    dpiaware_init();
     winstation_init();
 
     /* Initialize system colors and metrics */
@@ -305,8 +374,7 @@ static void thread_detach(void)
     WDML_NotifyThreadDetach();
     USER_Driver->pThreadDetach();
 
-    if (thread_info->top_window) WIN_DestroyThreadWindows( thread_info->top_window );
-    if (thread_info->msg_window) WIN_DestroyThreadWindows( thread_info->msg_window );
+    destroy_thread_windows();
     CloseHandle( thread_info->server_queue );
     HeapFree( GetProcessHeap(), 0, thread_info->wmchar_data );
     HeapFree( GetProcessHeap(), 0, thread_info->key_state );
@@ -365,7 +433,7 @@ BOOL WINAPI ExitWindowsEx( UINT flags, DWORD reason )
     STARTUPINFOW si;
     void *redir;
 
-    GetSystemDirectoryW( app, MAX_PATH - sizeof(winebootW)/sizeof(WCHAR) );
+    GetSystemDirectoryW( app, MAX_PATH - ARRAY_SIZE( winebootW ));
     strcatW( app, winebootW );
     strcpyW( cmdline, app );
 

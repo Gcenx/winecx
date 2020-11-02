@@ -610,7 +610,7 @@ static HRESULT WINAPI BindCallbackRedirect_Redirect(IBindCallbackRedirect *iface
         SysFreeString(frame_name);
     }
 
-    *vbCancel = cancel ? VARIANT_TRUE : VARIANT_FALSE;
+    *vbCancel = variant_bool(cancel);
     return hres;
 }
 
@@ -728,13 +728,13 @@ static void parse_content_type(nsChannelBSC *This, const WCHAR *value)
         ptr++;
 
     len = strlenW(value);
-    if(ptr + sizeof(charsetW)/sizeof(WCHAR) < value+len && !memicmpW(ptr, charsetW, sizeof(charsetW)/sizeof(WCHAR))) {
+    if(ptr + ARRAY_SIZE(charsetW) < value+len && !memicmpW(ptr, charsetW, ARRAY_SIZE(charsetW))) {
         size_t charset_len, lena;
         nsACString charset_str;
         const WCHAR *charset;
         char *charseta;
 
-        ptr += sizeof(charsetW)/sizeof(WCHAR);
+        ptr += ARRAY_SIZE(charsetW);
 
         if(*ptr == '\'') {
             FIXME("Quoted value\n");
@@ -1003,9 +1003,16 @@ static HRESULT on_start_nsrequest(nsChannelBSC *This)
     }
 
     if(This->is_doc_channel) {
+        HRESULT hres;
+
         if(!This->bsc.window)
             return E_ABORT; /* Binding aborted in OnStartRequest call. */
-        update_window_doc(This->bsc.window);
+        hres = update_window_doc(This->bsc.window);
+        if(FAILED(hres))
+            return hres;
+
+        if(This->bsc.binding)
+            process_document_response_headers(This->bsc.window->doc, This->bsc.binding);
         if(This->bsc.window->base.outer_window->readystate != READYSTATE_LOADING)
             set_ready_state(This->bsc.window->base.outer_window, READYSTATE_LOADING);
     }
@@ -2238,11 +2245,45 @@ HRESULT super_navigate(HTMLOuterWindow *window, IUri *uri, DWORD flags, const WC
 
 HRESULT navigate_new_window(HTMLOuterWindow *window, IUri *uri, const WCHAR *name, request_data_t *request_data, IHTMLWindow2 **ret)
 {
+    INewWindowManager *new_window_mgr;
+    BSTR display_uri, context_url;
     IWebBrowser2 *web_browser;
     IHTMLWindow2 *new_window;
     IBindCtx *bind_ctx;
     nsChannelBSC *bsc;
     HRESULT hres;
+
+    if (window->doc_obj->client) {
+        hres = do_query_service((IUnknown*)window->doc_obj->client, &SID_SNewWindowManager,
+                                &IID_INewWindowManager, (void**)&new_window_mgr);
+        if (FAILED(hres)) {
+            FIXME("No INewWindowManager\n");
+            return hres;
+        }
+
+        hres = IUri_GetDisplayUri(window->uri_nofrag, &context_url);
+        if(FAILED(hres))
+            return hres;
+
+        hres = IUri_GetDisplayUri(uri, &display_uri);
+        if(FAILED(hres)) {
+            SysFreeString(context_url);
+            return hres;
+        }
+
+        hres = INewWindowManager_EvaluateNewWindow(new_window_mgr, display_uri, name, context_url,
+                NULL, FALSE, window->doc_obj->has_popup ? 0 : NWMF_FIRST, 0);
+        window->doc_obj->has_popup = TRUE;
+        SysFreeString(display_uri);
+        SysFreeString(context_url);
+        INewWindowManager_Release(new_window_mgr);
+        if(FAILED(hres)) {
+            if(ret)
+                *ret = NULL;
+            return S_OK;
+        }
+    }
+
 
     if(request_data)
         hres = create_channelbsc(NULL, request_data->headers,

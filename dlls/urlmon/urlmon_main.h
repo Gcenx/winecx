@@ -32,6 +32,7 @@
 #include "wininet.h"
 
 #include "wine/unicode.h"
+#include "wine/heap.h"
 #include "wine/list.h"
 
 extern HINSTANCE hProxyDll DECLSPEC_HIDDEN;
@@ -65,7 +66,7 @@ static inline void URLMON_UnlockModule(void) { InterlockedDecrement( &URLMON_ref
 extern HINSTANCE urlmon_instance;
 
 IInternetProtocolInfo *get_protocol_info(LPCWSTR) DECLSPEC_HIDDEN;
-HRESULT get_protocol_handler(IUri*,CLSID*,BOOL*,IClassFactory**) DECLSPEC_HIDDEN;
+HRESULT get_protocol_handler(IUri*,CLSID*,IClassFactory**) DECLSPEC_HIDDEN;
 IInternetProtocol *get_mime_filter(LPCWSTR) DECLSPEC_HIDDEN;
 BOOL is_registered_protocol(LPCWSTR) DECLSPEC_HIDDEN;
 HRESULT register_namespace(IClassFactory*,REFIID,LPCWSTR,BOOL) DECLSPEC_HIDDEN;
@@ -171,13 +172,11 @@ typedef struct {
     IInternetPriority     IInternetPriority_iface;
     IServiceProvider      IServiceProvider_iface;
     IInternetProtocolSink IInternetProtocolSink_iface;
-    IWinInetHttpInfo      IWinInetHttpInfo_iface;
 
     LONG ref;
 
+    IUnknown *protocol_unk;
     IInternetProtocol *protocol;
-    IWinInetInfo *wininet_info;
-    IWinInetHttpInfo *wininet_http_info;
 
     IInternetBindInfo *bind_info;
     IInternetProtocolSink *protocol_sink;
@@ -195,7 +194,6 @@ typedef struct {
 
     BOOL reported_result;
     BOOL reported_mime;
-    BOOL from_urlmon;
     DWORD pi;
 
     DWORD bscf;
@@ -216,7 +214,7 @@ typedef struct {
     BSTR display_uri;
 }  BindProtocol;
 
-HRESULT create_binding_protocol(BOOL,BindProtocol**) DECLSPEC_HIDDEN;
+HRESULT create_binding_protocol(BindProtocol**) DECLSPEC_HIDDEN;
 void set_binding_sink(BindProtocol*,IInternetProtocolSink*,IInternetBindInfo*) DECLSPEC_HIDDEN;
 
 typedef struct {
@@ -234,29 +232,9 @@ void release_notif_hwnd(HWND) DECLSPEC_HIDDEN;
 
 const char *debugstr_bindstatus(ULONG) DECLSPEC_HIDDEN;
 
-static inline void* __WINE_ALLOC_SIZE(1) heap_alloc(size_t size)
-{
-    return HeapAlloc(GetProcessHeap(), 0, size);
-}
-
-static inline void* __WINE_ALLOC_SIZE(1) heap_alloc_zero(size_t size)
-{
-    return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
-}
-
-static inline void* __WINE_ALLOC_SIZE(2) heap_realloc(void *mem, size_t size)
-{
-    return HeapReAlloc(GetProcessHeap(), 0, mem, size);
-}
-
 static inline void* __WINE_ALLOC_SIZE(2) heap_realloc_zero(void *mem, size_t size)
 {
     return HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, mem, size);
-}
-
-static inline BOOL heap_free(void *mem)
-{
-    return HeapFree(GetProcessHeap(), 0, mem);
 }
 
 static inline LPWSTR heap_strdupW(LPCWSTR str)

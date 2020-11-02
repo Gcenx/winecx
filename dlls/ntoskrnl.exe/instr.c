@@ -117,12 +117,29 @@ static void store_reg_byte( CONTEXT *context, BYTE regmodrm, const BYTE *addr )
     }
 }
 
+static DWORD *get_reg_address( CONTEXT *context, BYTE rm )
+{
+    switch (rm & 7)
+    {
+    case 0: return &context->Eax;
+    case 1: return &context->Ecx;
+    case 2: return &context->Edx;
+    case 3: return &context->Ebx;
+    case 4: return &context->Esp;
+    case 5: return &context->Ebp;
+    case 6: return &context->Esi;
+    case 7: return &context->Edi;
+    }
+    return NULL;
+}
+
+
 /***********************************************************************
  *           INSTR_GetOperandAddr
  *
  * Return the address of an instruction operand (from the mod/rm byte).
  */
-static BYTE *INSTR_GetOperandAddr( CONTEXT *context, BYTE *instr,
+static void *INSTR_GetOperandAddr( CONTEXT *context, BYTE *instr,
                                    int long_addr, int segprefix, int *len )
 {
     int mod, rm, base = 0, index = 0, ss = 0, off;
@@ -135,20 +152,7 @@ static BYTE *INSTR_GetOperandAddr( CONTEXT *context, BYTE *instr,
     rm = mod & 7;
     mod >>= 6;
 
-    if (mod == 3)
-    {
-        switch(rm)
-        {
-        case 0: return (BYTE *)&context->Eax;
-        case 1: return (BYTE *)&context->Ecx;
-        case 2: return (BYTE *)&context->Edx;
-        case 3: return (BYTE *)&context->Ebx;
-        case 4: return (BYTE *)&context->Esp;
-        case 5: return (BYTE *)&context->Ebp;
-        case 6: return (BYTE *)&context->Esi;
-        case 7: return (BYTE *)&context->Edi;
-        }
-    }
+    if (mod == 3) return get_reg_address( context, rm );
 
     if (long_addr)
     {
@@ -254,7 +258,7 @@ static BYTE *INSTR_GetOperandAddr( CONTEXT *context, BYTE *instr,
         base &= 0xffff;
     }
     /* FIXME: we assume that all segments have a base of 0 */
-    return (BYTE *)(base + (index << ss));
+    return (void *)(base + (index << ss));
 #undef GET_VAL
 }
 
@@ -267,6 +271,7 @@ static BYTE *INSTR_GetOperandAddr( CONTEXT *context, BYTE *instr,
  */
 static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
 {
+    static const char *reg_names[8] = { "eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi" };
     int prefix, segprefix, prefixlen, len, long_op, long_addr;
     BYTE *instr;
 
@@ -331,97 +336,78 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
     case 0x0f: /* extended instruction */
         switch(instr[1])
         {
-        case 0x22: /* mov eax, crX */
-            switch (instr[2])
+        case 0x20: /* mov crX, Rd */
             {
-            case 0xc0:
-                TRACE("mov eax,cr0 at 0x%08x, EAX=0x%08x\n", context->Eip,context->Eax );
-                context->Eip += prefixlen+3;
-                return ExceptionContinueExecution;
-            case 0xe0:
-                TRACE("mov eax,cr4 at 0x%08x, EAX=0x%08x\n", context->Eip,context->Eax );
-                context->Eip += prefixlen+3;
-                return ExceptionContinueExecution;
-            default:
-                break; /*fallthrough to bad instruction handling */
-            }
-            ERR("Unsupported EAX -> CR register, eip+2 is %02x\n", instr[2]);
-            break; /*fallthrough to bad instruction handling */
-        case 0x20: /* mov crX, eax */
-            switch (instr[2])
-            {
-            case 0xe0: /* mov cr4, eax */
-                /* CR4 register . See linux/arch/i386/mm/init.c, X86_CR4_ defs
-                 * bit 0: VME	Virtual Mode Exception ?
-                 * bit 1: PVI	Protected mode Virtual Interrupt
-                 * bit 2: TSD	Timestamp disable
-                 * bit 3: DE	Debugging extensions
-                 * bit 4: PSE	Page size extensions
-                 * bit 5: PAE   Physical address extension
-                 * bit 6: MCE	Machine check enable
-                 * bit 7: PGE   Enable global pages
-                 * bit 8: PCE	Enable performance counters at IPL3
-                 */
-                TRACE("mov cr4,eax at 0x%08x\n",context->Eip);
-                context->Eax = 0;
-                context->Eip += prefixlen+3;
-                return ExceptionContinueExecution;
-            case 0xc0: /* mov cr0, eax */
-                TRACE("mov cr0,eax at 0x%08x\n",context->Eip);
-                context->Eax = 0x10; /* FIXME: set more bits ? */
-                context->Eip += prefixlen+3;
-                return ExceptionContinueExecution;
-            default: /* fallthrough to illegal instruction */
-                break;
-            }
-            /* fallthrough to illegal instruction */
-            break;
-        case 0x21: /* mov drX, eax */
-            switch (instr[2])
-            {
-            case 0xc8: /* mov dr1, eax */
-                TRACE("mov dr1,eax at 0x%08x\n",context->Eip);
-                context->Eax = context->Dr1;
-                context->Eip += prefixlen+3;
-                return ExceptionContinueExecution;
-            case 0xf8: /* mov dr7, eax */
-                TRACE("mov dr7,eax at 0x%08x\n",context->Eip);
-                context->Eax = 0x400;
-                context->Eip += prefixlen+3;
+                int reg = (instr[2] >> 3) & 7;
+                DWORD *data = get_reg_address( context, instr[2] );
+                TRACE( "mov cr%u,%s at 0x%08x\n", reg, reg_names[instr[2] & 7], context->Eip );
+                switch (reg)
+                {
+                case 0: *data = 0x10; break; /* FIXME: set more bits ? */
+                case 2: *data = 0; break;
+                case 3: *data = 0; break;
+                case 4: *data = 0; break;
+                default: return ExceptionContinueSearch;
+                }
+                context->Eip += prefixlen + 3;
                 return ExceptionContinueExecution;
             }
-            ERR("Unsupported DR register -> EAX, eip+2 is %02x\n", instr[2]);
-            /* fallthrough to illegal instruction */
-            break;
-        case 0x23: /* mov eax drX */
-            switch (instr[2])
+        case 0x21: /* mov drX, Rd */
             {
-            case 0xc0: /* mov eax, dr0 */
-                context->Dr0 = context->Eax;
-                context->Eip += prefixlen+3;
-                return ExceptionContinueExecution;
-            case 0xc8: /* mov eax, dr1 */
-                context->Dr1 = context->Eax;
-                context->Eip += prefixlen+3;
-                return ExceptionContinueExecution;
-            case 0xd0: /* mov eax, dr2 */
-                context->Dr2 = context->Eax;
-                context->Eip += prefixlen+3;
-                return ExceptionContinueExecution;
-            case 0xd8: /* mov eax, dr3 */
-                context->Dr3 = context->Eax;
-                context->Eip += prefixlen+3;
-                return ExceptionContinueExecution;
-            case 0xf8: /* mov eax, dr7 */
-                context->Dr7 = context->Eax;
-                context->Eip += prefixlen+3;
+                int reg = (instr[2] >> 3) & 7;
+                DWORD *data = get_reg_address( context, instr[2] );
+                TRACE( "mov dr%u,%s at 0x%08x\n", reg, reg_names[instr[2] & 7], context->Eip );
+                switch (reg)
+                {
+                case 0: *data = context->Dr0; break;
+                case 1: *data = context->Dr1; break;
+                case 2: *data = context->Dr2; break;
+                case 3: *data = context->Dr3; break;
+                case 6: *data = context->Dr6; break;
+                case 7: *data = 0x400; break;
+                default: return ExceptionContinueSearch;
+                }
+                context->Eip += prefixlen + 3;
                 return ExceptionContinueExecution;
             }
-            ERR("Unsupported EAX -> DR register, eip+2 is %02x\n", instr[2]);
-            /* fallthrough to illegal instruction */
-            break;
+        case 0x22: /* mov Rd, crX */
+            {
+                int reg = (instr[2] >> 3) & 7;
+                DWORD *data = get_reg_address( context, instr[2] );
+                TRACE( "mov %s,cr%u at 0x%08x, %s=%08x\n", reg_names[instr[2] & 7],
+                       reg, context->Eip, reg_names[instr[2] & 7], *data );
+                switch (reg)
+                {
+                case 0: break;
+                case 2: break;
+                case 3: break;
+                case 4: break;
+                default: return ExceptionContinueSearch;
+                }
+                context->Eip += prefixlen + 3;
+                return ExceptionContinueExecution;
+            }
+        case 0x23: /* mov Rd, drX */
+            {
+                int reg = (instr[2] >> 3) & 7;
+                DWORD *data = get_reg_address( context, instr[2] );
+                TRACE( "mov %s,dr%u at 0x%08x %s=%08x\n", reg_names[instr[2] & 7],
+                       reg, context->Eip, reg_names[instr[2] & 7], *data );
+                switch (reg)
+                {
+                case 0: context->Dr0 = *data; break;
+                case 1: context->Dr1 = *data; break;
+                case 2: context->Dr2 = *data; break;
+                case 3: context->Dr3 = *data; break;
+                case 6: context->Dr6 = *data; break;
+                case 7: context->Dr7 = *data; break;
+                default: return ExceptionContinueSearch;
+                }
+                context->Eip += prefixlen + 3;
+                return ExceptionContinueExecution;
+            }
         }
-        break;  /* Unable to emulate it */
+        break;
 
     case 0x8a: /* mov Eb, Gb */
     case 0x8b: /* mov Ev, Gv */
@@ -495,8 +481,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(int);
 #define SIB_INDEX( sib, rex )   (((sib) >> 3) & 7) | (((rex) & REX_X) ? 8 : 0)
 #define SIB_BASE( sib, rex )    (((sib) & 7) | (((rex) & REX_B) ? 8 : 0))
 
-/* keep in sync with dlls/ntdll/thread.c:thread_init */
-static const BYTE *wine_user_shared_data = (BYTE *)0x7ffe0000;
+extern BYTE* CDECL __wine_user_shared_data(void);
 static const BYTE *user_shared_data      = (BYTE *)0xfffff78000000000;
 
 static inline DWORD64 *get_int_reg( CONTEXT *context, int index )
@@ -608,6 +593,8 @@ static BYTE *INSTR_GetOperandAddr( CONTEXT *context, BYTE *instr,
  */
 static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
 {
+    static const char *reg_names[16] = { "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi",
+                                         "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15" };
     int prefix, segprefix, prefixlen, len, long_op, long_addr, rex;
     BYTE *instr;
 
@@ -649,20 +636,33 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
         case 0x67:
             long_addr = !long_addr;  /* addr size prefix */
             break;
+        case 0x40:  /* rex */
+        case 0x41:
+        case 0x42:
+        case 0x43:
+        case 0x44:
+        case 0x45:
+        case 0x46:
+        case 0x47:
+        case 0x48:
+        case 0x49:
+        case 0x4a:
+        case 0x4b:
+        case 0x4c:
+        case 0x4d:
+        case 0x4e:
+        case 0x4f:
+            rex = *instr;
+            break;
         case 0xf0:  /* lock */
-        break;
+            break;
         case 0xf2:  /* repne */
-        break;
+            break;
         case 0xf3:  /* repe */
             break;
         default:
             prefix = 0;  /* no more prefixes */
             break;
-        }
-        if (*instr >= 0x40 && *instr < 0x50)  /* rex */
-        {
-            rex = *instr;
-            prefix = TRUE;
         }
         if (prefix)
         {
@@ -678,6 +678,84 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
     case 0x0f: /* extended instruction */
         switch(instr[1])
         {
+        case 0x20: /* mov crX, Rd */
+        {
+            int reg = REGMODRM_REG( instr[2], rex );
+            int rm = REGMODRM_RM( instr[2], rex );
+            DWORD64 *data = get_int_reg( context, rm );
+            TRACE( "mov cr%u,%s at %lx\n", reg, reg_names[rm], context->Rip );
+            switch (reg)
+            {
+            case 0: *data = 0x10; break; /* FIXME: set more bits ? */
+            case 2: *data = 0; break;
+            case 3: *data = 0; break;
+            case 4: *data = 0; break;
+            case 8: *data = 0; break;
+            default: return ExceptionContinueSearch;
+            }
+            context->Rip += prefixlen + 3;
+            return ExceptionContinueExecution;
+        }
+        case 0x21: /* mov drX, Rd */
+        {
+            int reg = REGMODRM_REG( instr[2], rex );
+            int rm = REGMODRM_RM( instr[2], rex );
+            DWORD64 *data = get_int_reg( context, rm );
+            TRACE( "mov dr%u,%s at %lx\n", reg, reg_names[rm], context->Rip );
+            switch (reg)
+            {
+            case 0: *data = context->Dr0; break;
+            case 1: *data = context->Dr1; break;
+            case 2: *data = context->Dr2; break;
+            case 3: *data = context->Dr3; break;
+            case 4:  /* dr4 and dr5 are obsolete aliases for dr6 and dr7 */
+            case 6: *data = context->Dr6; break;
+            case 5:
+            case 7: *data = 0x400; break;
+            default: return ExceptionContinueSearch;
+            }
+            context->Rip += prefixlen + 3;
+            return ExceptionContinueExecution;
+        }
+        case 0x22: /* mov Rd, crX */
+        {
+            int reg = REGMODRM_REG( instr[2], rex );
+            int rm = REGMODRM_RM( instr[2], rex );
+            DWORD64 *data = get_int_reg( context, rm );
+            TRACE( "mov %s,cr%u at %lx, %s=%lx\n", reg_names[rm], reg, context->Rip, reg_names[rm], *data );
+            switch (reg)
+            {
+            case 0: break;
+            case 2: break;
+            case 3: break;
+            case 4: break;
+            case 8: break;
+            default: return ExceptionContinueSearch;
+            }
+            context->Rip += prefixlen + 3;
+            return ExceptionContinueExecution;
+        }
+        case 0x23: /* mov Rd, drX */
+        {
+            int reg = REGMODRM_REG( instr[2], rex );
+            int rm = REGMODRM_RM( instr[2], rex );
+            DWORD64 *data = get_int_reg( context, rm );
+            TRACE( "mov %s,dr%u at %lx, %s=%lx\n", reg_names[rm], reg, context->Rip, reg_names[rm], *data );
+            switch (reg)
+            {
+            case 0: context->Dr0 = *data; break;
+            case 1: context->Dr1 = *data; break;
+            case 2: context->Dr2 = *data; break;
+            case 3: context->Dr3 = *data; break;
+            case 4:  /* dr4 and dr5 are obsolete aliases for dr6 and dr7 */
+            case 6: context->Dr6 = *data; break;
+            case 5:
+            case 7: context->Dr7 = *data; break;
+            default: return ExceptionContinueSearch;
+            }
+            context->Rip += prefixlen + 3;
+            return ExceptionContinueExecution;
+        }
         case 0xb6: /* movzx Eb, Gv */
         case 0xb7: /* movzx Ew, Gv */
         {
@@ -689,7 +767,7 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
             if (offset <= sizeof(KSHARED_USER_DATA) - data_size)
             {
                 ULONGLONG temp = 0;
-                memcpy( &temp, wine_user_shared_data + offset, data_size );
+                memcpy( &temp, __wine_user_shared_data() + offset, data_size );
                 store_reg_word( context, instr[2], (BYTE *)&temp, long_op, rex );
                 context->Rip += prefixlen + len + 2;
                 return ExceptionContinueExecution;
@@ -711,8 +789,8 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
         {
             switch (*instr)
             {
-            case 0x8a: store_reg_byte( context, instr[1], wine_user_shared_data + offset, rex ); break;
-            case 0x8b: store_reg_word( context, instr[1], wine_user_shared_data + offset, long_op, rex ); break;
+            case 0x8a: store_reg_byte( context, instr[1], __wine_user_shared_data() + offset, rex ); break;
+            case 0x8b: store_reg_word( context, instr[1], __wine_user_shared_data() + offset, long_op, rex ); break;
             }
             context->Rip += prefixlen + len + 1;
             return ExceptionContinueExecution;
@@ -730,12 +808,17 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
 
         if (offset <= sizeof(KSHARED_USER_DATA) - data_size)
         {
-            memcpy( &context->Rax, wine_user_shared_data + offset, data_size );
+            memcpy( &context->Rax, __wine_user_shared_data() + offset, data_size );
             context->Rip += prefixlen + len + 1;
             return ExceptionContinueExecution;
         }
         break;  /* Unable to emulate it */
     }
+
+    case 0xfa: /* cli */
+    case 0xfb: /* sti */
+        context->Rip += prefixlen + 1;
+        return ExceptionContinueExecution;
     }
     return ExceptionContinueSearch;  /* Unable to emulate it */
 }
@@ -752,8 +835,9 @@ LONG CALLBACK vectored_handler( EXCEPTION_POINTERS *ptrs )
     EXCEPTION_RECORD *record = ptrs->ExceptionRecord;
     CONTEXT *context = ptrs->ContextRecord;
 
-    if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
-        record->ExceptionInformation[0] == EXCEPTION_READ_FAULT)
+    if (record->ExceptionCode == EXCEPTION_PRIV_INSTRUCTION ||
+        (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+         record->ExceptionInformation[0] == EXCEPTION_READ_FAULT))
     {
         if (emulate_instruction( record, context ) == ExceptionContinueExecution)
         {

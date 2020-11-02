@@ -69,6 +69,7 @@
 #include "shlwapi.h"
 #include "comctl32.h"
 #include "wine/debug.h"
+#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(commctrl);
 
@@ -93,6 +94,59 @@ static const WCHAR strCC32SubclassInfo[] = {
     'C','C','3','2','S','u','b','c','l','a','s','s','I','n','f','o',0
 };
 
+static void unregister_versioned_classes(void)
+{
+#define VERSION "6.0.2600.2982!"
+    static const char *classes[] =
+    {
+        VERSION WC_BUTTONA,
+        VERSION WC_COMBOBOXA,
+        VERSION "ComboLBox",
+        VERSION WC_EDITA,
+        VERSION WC_LISTBOXA,
+        VERSION WC_STATICA,
+    };
+    int i;
+
+    for (i = 0; i < ARRAY_SIZE(classes); i++)
+        UnregisterClassA(classes[i], NULL);
+
+#undef VERSION
+}
+
+BOOL WINAPI RegisterClassNameW(const WCHAR *class)
+{
+    static const struct
+    {
+        const WCHAR nameW[16];
+        void (*fn_register)(void);
+    }
+    classes[] =
+    {
+        { {'B','u','t','t','o','n',0}, BUTTON_Register },
+        { {'C','o','m','b','o','B','o','x',0}, COMBO_Register },
+        { {'C','o','m','b','o','L','B','o','x',0}, COMBOLBOX_Register },
+        { {'E','d','i','t',0}, EDIT_Register },
+        { {'L','i','s','t','B','o','x',0}, LISTBOX_Register },
+        { {'S','t','a','t','i','c',0}, STATIC_Register },
+    };
+
+    int min = 0, max = ARRAY_SIZE(classes) - 1;
+
+    while (min <= max)
+    {
+        int res, pos = (min + max) / 2;
+        if (!(res = strcmpiW(class, classes[pos].nameW)))
+        {
+            classes[pos].fn_register();
+            return TRUE;
+        }
+        if (res < 0) max = pos - 1;
+        else min = pos + 1;
+    }
+
+    return FALSE;
+}
 
 /***********************************************************************
  * DllMain [Internal]
@@ -185,6 +239,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
             TREEVIEW_Unregister ();
             UPDOWN_Unregister ();
 
+            unregister_versioned_classes ();
+
             /* delete local pattern brush */
             DeleteObject (COMCTL32_hPattern55AABrush);
             DeleteObject (COMCTL32_hPattern55AABitmap);
@@ -259,7 +315,7 @@ MenuHelp (UINT uMsg, WPARAM wParam, LPARAM lParam, HMENU hMainMenu,
 		if (uMenuID) {
 		    WCHAR szText[256];
 
-		    if (!LoadStringW (hInst, uMenuID, szText, sizeof(szText)/sizeof(szText[0])))
+		    if (!LoadStringW (hInst, uMenuID, szText, ARRAY_SIZE(szText)))
 			szText[0] = '\0';
 
 		    SendMessageW (hwndStatus, SB_SETTEXTW,
@@ -431,20 +487,24 @@ void WINAPI DrawStatusTextW (HDC hdc, LPCRECT lprc, LPCWSTR text, UINT style)
 {
     RECT r = *lprc;
     UINT border = BDR_SUNKENOUTER;
+    COLORREF oldbkcolor;
 
     if (style & SBT_POPOUT)
         border = BDR_RAISEDOUTER;
     else if (style & SBT_NOBORDERS)
         border = 0;
 
-    DrawEdge (hdc, &r, border, BF_RECT|BF_ADJUST);
+    oldbkcolor = SetBkColor (hdc, comctl32_color.clrBtnFace);
+    DrawEdge (hdc, &r, border, BF_MIDDLE|BF_RECT|BF_ADJUST);
 
     /* now draw text */
     if (text) {
         int oldbkmode = SetBkMode (hdc, TRANSPARENT);
+        COLORREF oldtextcolor;
         UINT align = DT_LEFT;
         int strCnt = 0;
 
+        oldtextcolor = SetTextColor (hdc, comctl32_color.clrBtnText);
         if (style & SBT_RTLREADING)
             FIXME("Unsupported RTL style!\n");
         r.left += 3;
@@ -464,8 +524,11 @@ void WINAPI DrawStatusTextW (HDC hdc, LPCRECT lprc, LPCWSTR text, UINT style)
         } while(*text++);
 
         if (strCnt) DrawTextW (hdc, text - strCnt, -1, &r, align|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
-	SetBkMode(hdc, oldbkmode);
+        SetBkMode (hdc, oldbkmode);
+        SetTextColor (hdc, oldtextcolor);
     }
+
+    SetBkColor (hdc, oldbkcolor);
 }
 
 
@@ -1402,7 +1465,7 @@ void COMCTL32_DrawInsertMark(HDC hDC, const RECT *lpRect, COLORREF clrInsertMark
         {lCentre + 1, l2 - 3},
     };
     hOldPen = SelectObject(hDC, hPen);
-    PolyPolyline(hDC, aptInsertMark, adwPolyPoints, sizeof(adwPolyPoints)/sizeof(adwPolyPoints[0]));
+    PolyPolyline(hDC, aptInsertMark, adwPolyPoints, ARRAY_SIZE(adwPolyPoints));
     SelectObject(hDC, hOldPen);
     DeleteObject(hPen);
 }

@@ -56,7 +56,7 @@ struct Imports {
     } ibn;
     char dllname[0x10];
 };
-#define EXIT_PROCESS (VA_START+RVA_IDATA+FIELD_OFFSET(struct Imports, thunks[0]))
+#define EXIT_PROCESS (VA_START+RVA_IDATA+FIELD_OFFSET(struct Imports, thunks))
 
 static struct _PeImage {
     IMAGE_DOS_HEADER dos_header;
@@ -70,9 +70,9 @@ static struct _PeImage {
     char __alignment3[FILE_TOTAL-FILE_IDATA-sizeof(struct Imports)];
 } bin = {
     /* dos header */
-    {IMAGE_DOS_SIGNATURE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {}, 0, 0, {}, FILE_PE_START},
+    {IMAGE_DOS_SIGNATURE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0}, 0, 0, {0}, FILE_PE_START},
     /* alignment before PE header */
-    {},
+    {0},
     /* nt headers */
     {IMAGE_NT_SIGNATURE,
         /* basic headers - 3 sections, no symbols, EXE file */
@@ -99,7 +99,7 @@ static struct _PeImage {
             0, 0, 0, IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE}
     },
     /* alignment before first section */
-    {},
+    {0},
     /* .text section */
     {
         0x31, 0xC0, /* xor eax, eax */
@@ -122,7 +122,7 @@ static struct _PeImage {
         "KERNEL32.DLL"
     },
     /* final alignment */
-    {}
+    {0}
 };
 #include <poppack.h>
 
@@ -219,12 +219,13 @@ static const struct expected_blob b1[] = {
     {FILE_IDATA-FILE_TEXT, &bin.text_section},
     {sizeof(bin.idata_section.descriptors[0].u.OriginalFirstThunk),
         &bin.idata_section.descriptors[0].u.OriginalFirstThunk},
-    {FIELD_OFFSET(struct Imports, thunks)-FIELD_OFFSET(struct Imports, descriptors[0].Name),
+    {FIELD_OFFSET(struct Imports, thunks)-
+        (FIELD_OFFSET(struct Imports, descriptors)+FIELD_OFFSET(IMAGE_IMPORT_DESCRIPTOR, Name)),
         &bin.idata_section.descriptors[0].Name},
     {FILE_TOTAL-FILE_IDATA-FIELD_OFFSET(struct Imports, ibn),
         &bin.idata_section.ibn}
 };
-static const struct expected_update_accum a1 = { sizeof(b1) / sizeof(b1[0]), b1, TRUE };
+static const struct expected_update_accum a1 = { ARRAY_SIZE(b1), b1, TRUE };
 
 static const struct expected_blob b2[] = {
     {FILE_PE_START,  &bin},
@@ -234,7 +235,7 @@ static const struct expected_blob b2[] = {
     {FILE_IDATA-FILE_TEXT, &bin.text_section},
     {FILE_TOTAL-FILE_IDATA, &bin.idata_section}
 };
-static const struct expected_update_accum a2 = { sizeof(b2) / sizeof(b2[0]), b2, FALSE };
+static const struct expected_update_accum a2 = { ARRAY_SIZE(b2), b2, FALSE };
 
 /* Creates a test file and returns a handle to it.  The file's path is returned
  * in temp_file, which must be at least MAX_PATH characters in length.

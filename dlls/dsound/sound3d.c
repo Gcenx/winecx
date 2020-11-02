@@ -111,7 +111,13 @@ static inline D3DVALUE AngleBetweenVectorsRad (const D3DVECTOR *a, const D3DVECT
 		return 0;
 
 	cos = product/(la*lb);
-	angle = acos(cos);
+	if(cos > 1.f){
+		angle = 0;
+	}else if(cos < -1.f){
+		angle = M_PI;
+	}else{
+		angle = acos(cos);
+	}
 	TRACE("angle between (%f,%f,%f) and (%f,%f,%f) = %f radians (%f degrees)\n",  a->x, a->y, a->z, b->x,
 	      b->y, b->z, angle, RadToDeg(angle));
 	return angle;	
@@ -730,7 +736,7 @@ static HRESULT WINAPI IDirectSound3DListenerImpl_QueryInterface(IDirectSound3DLi
 
         TRACE("(%p,%s,%p)\n", iface, debugstr_guid(riid), ppobj);
 
-        return IDirectSoundBuffer_QueryInterface(&This->IDirectSoundBuffer8_iface, riid, ppobj);
+        return IDirectSoundBuffer8_QueryInterface(&This->IDirectSoundBuffer8_iface, riid, ppobj);
 }
 
 static ULONG WINAPI IDirectSound3DListenerImpl_AddRef(IDirectSound3DListener *iface)

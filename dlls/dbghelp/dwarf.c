@@ -820,9 +820,9 @@ compute_location(dwarf2_traverse_context_t* ctx, struct location* loc,
             if (hproc)
             {
                 DWORD_PTR addr = stack[stk--];
-                DWORD_PTR deref;
+                DWORD_PTR deref = 0;
 
-                if (!ReadProcessMemory(hproc, (void*)addr, &deref, sizeof(deref), NULL))
+                if (!ReadProcessMemory(hproc, (void*)addr, &deref, ctx->word_size, NULL))
                 {
                     WARN("Couldn't read memory at %lx\n", addr);
                     return loc_err_cant_read;
@@ -942,6 +942,7 @@ static BOOL dwarf2_compute_location_attr(dwarf2_parse_context_t* ctx,
             *ptr = xloc.u.block.size;
             memcpy(ptr + 1, xloc.u.block.ptr, xloc.u.block.size);
             loc->offset = (unsigned long)ptr;
+            compute_location(&lctx, loc, NULL, frame);
         }
     }
     return TRUE;
@@ -1822,7 +1823,7 @@ static void dwarf2_parse_subprogram_block(dwarf2_subprogram_t* subpgm,
 
     if (!dwarf2_read_range(subpgm->ctx, di, &low_pc, &high_pc))
     {
-        FIXME("no range\n");
+        WARN("no range\n");
         return;
     }
 
@@ -3007,25 +3008,27 @@ static void execute_cfa_instructions(dwarf2_traverse_context_t* ctx,
 }
 
 /* retrieve a context register from its dwarf number */
-static ULONG_PTR get_context_reg(CONTEXT *context, ULONG_PTR dw_reg)
+static DWORD64 get_context_reg(struct cpu_stack_walk *csw, union ctx *context,
+    ULONG_PTR dw_reg)
 {
-    unsigned regno = dbghelp_current_cpu->map_dwarf_register(dw_reg, TRUE), sz;
-    ULONG_PTR* ptr = dbghelp_current_cpu->fetch_context_reg(context, regno, &sz);
+    unsigned regno = csw->cpu->map_dwarf_register(dw_reg, TRUE), sz;
+    void* ptr = csw->cpu->fetch_context_reg(context, regno, &sz);
 
-    if (sz != sizeof(ULONG_PTR))
-    {
-        FIXME("reading register %lu/%u of wrong size %u\n", dw_reg, regno, sz);
-        return 0;
-    }
-    return *ptr;
+    if (sz == 8)
+        return *(DWORD64 *)ptr;
+    else if (sz == 4)
+        return *(DWORD *)ptr;
+
+    FIXME("unhandled size %d\n", sz);
+    return 0;
 }
 
 /* set a context register from its dwarf number */
-static void set_context_reg(struct cpu_stack_walk* csw, CONTEXT *context, ULONG_PTR dw_reg,
-                            ULONG_PTR val, BOOL isdebuggee)
+static void set_context_reg(struct cpu_stack_walk* csw, union ctx *context,
+    ULONG_PTR dw_reg, ULONG_PTR val, BOOL isdebuggee)
 {
-    unsigned regno = dbghelp_current_cpu->map_dwarf_register(dw_reg, TRUE), sz;
-    ULONG_PTR* ptr = dbghelp_current_cpu->fetch_context_reg(context, regno, &sz);
+    unsigned regno = csw->cpu->map_dwarf_register(dw_reg, TRUE), sz;
+    ULONG_PTR* ptr = csw->cpu->fetch_context_reg(context, regno, &sz);
 
     if (isdebuggee)
     {
@@ -3055,12 +3058,14 @@ static void set_context_reg(struct cpu_stack_walk* csw, CONTEXT *context, ULONG_
 }
 
 /* copy a register from one context to another using dwarf number */
-static void copy_context_reg(CONTEXT *dstcontext, ULONG_PTR dwregdst, CONTEXT* srccontext, ULONG_PTR dwregsrc)
+static void copy_context_reg(struct cpu_stack_walk *csw,
+    union ctx *dstcontext, ULONG_PTR dwregdst,
+    union ctx *srccontext, ULONG_PTR dwregsrc)
 {
-    unsigned regdstno = dbghelp_current_cpu->map_dwarf_register(dwregdst, TRUE), szdst;
-    unsigned regsrcno = dbghelp_current_cpu->map_dwarf_register(dwregsrc, TRUE), szsrc;
-    ULONG_PTR* ptrdst = dbghelp_current_cpu->fetch_context_reg(dstcontext, regdstno, &szdst);
-    ULONG_PTR* ptrsrc = dbghelp_current_cpu->fetch_context_reg(srccontext, regsrcno, &szsrc);
+    unsigned regdstno = csw->cpu->map_dwarf_register(dwregdst, TRUE), szdst;
+    unsigned regsrcno = csw->cpu->map_dwarf_register(dwregsrc, TRUE), szsrc;
+    ULONG_PTR* ptrdst = csw->cpu->fetch_context_reg(dstcontext, regdstno, &szdst);
+    ULONG_PTR* ptrsrc = csw->cpu->fetch_context_reg(srccontext, regsrcno, &szsrc);
 
     if (szdst != szsrc)
     {
@@ -3072,10 +3077,11 @@ static void copy_context_reg(CONTEXT *dstcontext, ULONG_PTR dwregdst, CONTEXT* s
 }
 
 static ULONG_PTR eval_expression(const struct module* module, struct cpu_stack_walk* csw,
-                                 const unsigned char* zp, CONTEXT *context)
+                                 const unsigned char* zp, union ctx *context)
 {
     dwarf2_traverse_context_t    ctx;
-    ULONG_PTR reg, sz, tmp, stack[64];
+    ULONG_PTR reg, sz, tmp;
+    DWORD64 stack[64];
     int sp = -1;
     ULONG_PTR len;
 
@@ -3092,9 +3098,10 @@ static ULONG_PTR eval_expression(const struct module* module, struct cpu_stack_w
         if (opcode >= DW_OP_lit0 && opcode <= DW_OP_lit31)
             stack[++sp] = opcode - DW_OP_lit0;
         else if (opcode >= DW_OP_reg0 && opcode <= DW_OP_reg31)
-            stack[++sp] = get_context_reg(context, opcode - DW_OP_reg0);
+            stack[++sp] = get_context_reg(csw, context, opcode - DW_OP_reg0);
         else if (opcode >= DW_OP_breg0 && opcode <= DW_OP_breg31)
-            stack[++sp] = get_context_reg(context, opcode - DW_OP_breg0) + dwarf2_leb128_as_signed(&ctx);
+            stack[++sp] = get_context_reg(csw, context, opcode - DW_OP_breg0)
+                          + dwarf2_leb128_as_signed(&ctx);
         else switch (opcode)
         {
         case DW_OP_nop:         break;
@@ -3110,9 +3117,10 @@ static ULONG_PTR eval_expression(const struct module* module, struct cpu_stack_w
         case DW_OP_constu:      stack[++sp] = dwarf2_leb128_as_unsigned(&ctx); break;
         case DW_OP_consts:      stack[++sp] = dwarf2_leb128_as_signed(&ctx); break;
         case DW_OP_deref:
-            if (!sw_read_mem(csw, stack[sp], &tmp, sizeof(tmp)))
+            tmp = 0;
+            if (!sw_read_mem(csw, stack[sp], &tmp, ctx.word_size))
             {
-                ERR("Couldn't read memory at %lx\n", stack[sp]);
+                ERR("Couldn't read memory at %s\n", wine_dbgstr_longlong(stack[sp]));
                 tmp = 0;
             }
             stack[sp] = tmp;
@@ -3151,18 +3159,18 @@ static ULONG_PTR eval_expression(const struct module* module, struct cpu_stack_w
             stack[++sp] = dwarf2_parse_augmentation_ptr(&ctx, tmp);
             break;
         case DW_OP_regx:
-            stack[++sp] = get_context_reg(context, dwarf2_leb128_as_unsigned(&ctx));
+            stack[++sp] = get_context_reg(csw, context, dwarf2_leb128_as_unsigned(&ctx));
             break;
         case DW_OP_bregx:
             reg = dwarf2_leb128_as_unsigned(&ctx);
             tmp = dwarf2_leb128_as_signed(&ctx);
-            stack[++sp] = get_context_reg(context, reg) + tmp;
+            stack[++sp] = get_context_reg(csw, context, reg) + tmp;
             break;
         case DW_OP_deref_size:
             sz = dwarf2_parse_byte(&ctx);
             if (!sw_read_mem(csw, stack[sp], &tmp, sz))
             {
-                ERR("Couldn't read memory at %lx\n", stack[sp]);
+                ERR("Couldn't read memory at %s\n", wine_dbgstr_longlong(stack[sp]));
                 tmp = 0;
             }
             /* do integral promotion */
@@ -3183,19 +3191,19 @@ static ULONG_PTR eval_expression(const struct module* module, struct cpu_stack_w
 }
 
 static void apply_frame_state(const struct module* module, struct cpu_stack_walk* csw,
-                              CONTEXT *context, struct frame_state *state, ULONG_PTR* cfa)
+                              union ctx *context, struct frame_state *state, DWORD64 *cfa)
 {
     unsigned int i;
     ULONG_PTR value;
-    CONTEXT new_context = *context;
+    union ctx new_context = *context;
 
     switch (state->cfa_rule)
     {
     case RULE_EXPRESSION:
         *cfa = eval_expression(module, csw, (const unsigned char*)state->cfa_offset, context);
-        if (!sw_read_mem(csw, *cfa, cfa, sizeof(*cfa)))
+        if (!sw_read_mem(csw, *cfa, cfa, csw->cpu->word_size))
         {
-            WARN("Couldn't read memory at %p\n", (void*)*cfa);
+            WARN("Couldn't read memory at %s\n", wine_dbgstr_longlong(*cfa));
             return;
         }
         break;
@@ -3203,7 +3211,7 @@ static void apply_frame_state(const struct module* module, struct cpu_stack_walk
         *cfa = eval_expression(module, csw, (const unsigned char*)state->cfa_offset, context);
         break;
     default:
-        *cfa = get_context_reg(context, state->cfa_reg) + state->cfa_offset;
+        *cfa = get_context_reg(csw, context, state->cfa_reg) + state->cfa_offset;
         break;
     }
     if (!*cfa) return;
@@ -3220,7 +3228,7 @@ static void apply_frame_state(const struct module* module, struct cpu_stack_walk
             set_context_reg(csw, &new_context, i, *cfa + state->regs[i], TRUE);
             break;
         case RULE_OTHER_REG:
-            copy_context_reg(&new_context, i, context, state->regs[i]);
+            copy_context_reg(csw, &new_context, i, context, state->regs[i]);
             break;
         case RULE_EXPRESSION:
             value = eval_expression(module, csw, (const unsigned char*)state->regs[i], context);
@@ -3239,7 +3247,8 @@ static void apply_frame_state(const struct module* module, struct cpu_stack_walk
  *           dwarf2_virtual_unwind
  *
  */
-BOOL dwarf2_virtual_unwind(struct cpu_stack_walk* csw, ULONG_PTR ip, CONTEXT* context, ULONG_PTR* cfa)
+BOOL dwarf2_virtual_unwind(struct cpu_stack_walk *csw, ULONG_PTR ip,
+    union ctx *context, DWORD64 *cfa)
 {
     struct module_pair pair;
     struct frame_info info;
@@ -3279,7 +3288,7 @@ BOOL dwarf2_virtual_unwind(struct cpu_stack_walk* csw, ULONG_PTR ip, CONTEXT* co
 
     TRACE("function %lx/%lx code_align %lu data_align %ld retaddr %s\n",
           ip, info.ip, info.code_align, info.data_align,
-          dbghelp_current_cpu->fetch_regname(dbghelp_current_cpu->map_dwarf_register(info.retaddr_reg, TRUE)));
+          csw->cpu->fetch_regname(csw->cpu->map_dwarf_register(info.retaddr_reg, TRUE)));
 
     /* if at very beginning of function, return and use default unwinder */
     if (ip == info.ip) return FALSE;

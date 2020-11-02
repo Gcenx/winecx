@@ -27,6 +27,7 @@
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "explorer_private.h"
 #include "resource.h"
 
@@ -54,7 +55,7 @@ static int default_width;
 static int default_height;
 
 
-static const WCHAR EXPLORER_CLASS[] = {'W','I','N','E','_','E','X','P','L','O','R','E','R','\0'};
+static const WCHAR EXPLORER_CLASS[] = {'E','x','p','l','o','r','e','r','W','C','l','a','s','s',0};
 static const WCHAR PATH_BOX_NAME[] = {'\0'};
 
 HINSTANCE explorer_hInstance;
@@ -262,10 +263,32 @@ static void update_path_box(explorer_info *info)
 static HRESULT WINAPI IExplorerBrowserEventsImpl_fnOnNavigationComplete(IExplorerBrowserEvents *iface, PCIDLIST_ABSOLUTE pidl)
 {
     IExplorerBrowserEventsImpl *This = impl_from_IExplorerBrowserEvents(iface);
+    IShellFolder *parent;
+    PCUITEMID_CHILD child_pidl;
+    HRESULT hres;
+    STRRET strret;
+    WCHAR *name;
+
     ILFree(This->info->pidl);
     This->info->pidl = ILClone(pidl);
     update_path_box(This->info);
-    return S_OK;
+
+    hres = SHBindToParent(pidl, &IID_IShellFolder, (void **)&parent, &child_pidl);
+    if (SUCCEEDED(hres))
+    {
+        hres = IShellFolder_GetDisplayNameOf(parent, child_pidl, SHGDN_FORADDRESSBAR, &strret);
+        if (SUCCEEDED(hres))
+            hres = StrRetToStrW(&strret, child_pidl, &name);
+        if (SUCCEEDED(hres))
+        {
+            SetWindowTextW(This->info->main_window, name);
+            CoTaskMemFree(name);
+        }
+
+        IShellFolder_Release(parent);
+    }
+
+    return hres;
 }
 
 static HRESULT WINAPI IExplorerBrowserEventsImpl_fnOnNavigationFailed(IExplorerBrowserEvents *iface, PCIDLIST_ABSOLUTE pidl)
@@ -612,7 +635,9 @@ static IShellFolder* get_starting_shell_folder(parameters_struct* params)
 {
     IShellFolder* desktop,*folder;
     LPITEMIDLIST root_pidl;
+    WCHAR *fullpath = NULL;
     HRESULT hres;
+    DWORD size;
     WCHAR *root = params->root;
 
 #ifdef __ANDROID__
@@ -629,9 +654,17 @@ static IShellFolder* get_starting_shell_folder(parameters_struct* params)
     {
         return desktop;
     }
+
+    size = GetFullPathNameW(root, 0, fullpath, NULL);
+    if (!size)
+        return desktop;
+    fullpath = heap_alloc(size * sizeof(WCHAR));
+    GetFullPathNameW(root, size, fullpath, NULL);
+
     hres = IShellFolder_ParseDisplayName(desktop,NULL,NULL,
-                                         root,NULL,
+                                         fullpath,NULL,
                                          &root_pidl,NULL);
+    heap_free(fullpath);
 
     if(FAILED(hres))
     {
@@ -649,7 +682,7 @@ static IShellFolder* get_starting_shell_folder(parameters_struct* params)
     return folder;
 }
 
-static int copy_path_string(LPWSTR target, LPWSTR source)
+static WCHAR *copy_path_string(WCHAR *target, WCHAR *source)
 {
     INT i = 0;
 
@@ -658,10 +691,9 @@ static int copy_path_string(LPWSTR target, LPWSTR source)
     if (*source == '\"')
     {
         source ++;
-        while (*source != '\"') target[i++] = *source++;
+        while (*source && *source != '\"') target[i++] = *source++;
         target[i] = 0;
-        source ++;
-        i+=2;
+        if (*source) source++;
     }
     else
     {
@@ -669,7 +701,7 @@ static int copy_path_string(LPWSTR target, LPWSTR source)
         target[i] = 0;
     }
     PathRemoveBackslashW(target);
-    return i;
+    return source;
 }
 
 
@@ -732,12 +764,12 @@ static void parse_command_line(LPWSTR commandline,parameters_struct *parameters)
         else if (strncmpW(p, arg_root, sizeof(arg_root)/sizeof(WCHAR))==0)
         {
             p += sizeof(arg_root)/sizeof(WCHAR);
-            p+=copy_path_string(parameters->root,p);
+            p = copy_path_string(parameters->root,p);
         }
         else if (strncmpW(p, arg_select, sizeof(arg_select)/sizeof(WCHAR))==0)
         {
             p += sizeof(arg_select)/sizeof(WCHAR);
-            p+=copy_path_string(parameters->selection,p);
+            p = copy_path_string(parameters->selection,p);
             if (!parameters->root[0])
                 copy_path_root(parameters->root,
                                parameters->selection);

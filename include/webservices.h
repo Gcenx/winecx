@@ -56,6 +56,7 @@ typedef struct _WS_OPERATION_DESCRIPTION WS_OPERATION_DESCRIPTION;
 typedef struct _WS_PARAMETER_DESCRIPTION WS_PARAMETER_DESCRIPTION;
 typedef struct _WS_OPERATION_CONTEXT WS_OPERATION_CONTEXT;
 typedef struct _WS_CALL_PROPERTY WS_CALL_PROPERTY;
+typedef struct _WS_FLOAT_DESCRIPTION WS_FLOAT_DESCRIPTION;
 typedef struct _WS_DOUBLE_DESCRIPTION WS_DOUBLE_DESCRIPTION;
 typedef struct _WS_DATETIME WS_DATETIME;
 typedef struct _WS_XML_DATETIME_TEXT WS_XML_DATETIME_TEXT;
@@ -211,15 +212,45 @@ typedef enum {
     WS_CHARSET_UTF16BE
 } WS_CHARSET;
 
+typedef struct _WS_XML_DICTIONARY {
+    GUID                   guid;
+    struct _WS_XML_STRING *strings;
+    ULONG                  stringCount;
+    BOOL                   isConst;
+} WS_XML_DICTIONARY;
+
+typedef struct _WS_XML_STRING {
+    ULONG              length;
+    BYTE              *bytes;
+    WS_XML_DICTIONARY *dictionary;
+    ULONG              id;
+} WS_XML_STRING;
+
 typedef struct _WS_XML_READER_TEXT_ENCODING {
     WS_XML_READER_ENCODING encoding;
     WS_CHARSET charSet;
 } WS_XML_READER_TEXT_ENCODING;
 
+typedef struct _WS_XML_READER_BINARY_ENCODING {
+    WS_XML_READER_ENCODING encoding;
+    WS_XML_DICTIONARY *staticDictionary;
+    WS_XML_DICTIONARY *dynamicDictionary;
+} WS_XML_READER_BINARY_ENCODING;
+
 typedef struct _WS_XML_WRITER_TEXT_ENCODING {
     WS_XML_WRITER_ENCODING encoding;
     WS_CHARSET charSet;
 } WS_XML_WRITER_TEXT_ENCODING;
+
+typedef HRESULT (CALLBACK *WS_DYNAMIC_STRING_CALLBACK)
+    (void*, const WS_XML_STRING*, BOOL*, ULONG*, WS_ERROR*);
+
+typedef struct _WS_XML_WRITER_BINARY_ENCODING {
+    WS_XML_WRITER_ENCODING encoding;
+    WS_XML_DICTIONARY *staticDictionary;
+    WS_DYNAMIC_STRING_CALLBACK dynamicStringCallback;
+    void *dynamicStringCallbackState;
+} WS_XML_WRITER_BINARY_ENCODING;
 
 typedef enum {
     WS_XML_READER_INPUT_TYPE_BUFFER = 1,
@@ -273,20 +304,6 @@ typedef struct _WS_XML_READER_STREAM_INPUT {
     WS_READ_CALLBACK readCallback;
     void *readCallbackState;
 } WS_XML_READER_STREAM_INPUT;
-
-typedef struct _WS_XML_DICTIONARY {
-    GUID                   guid;
-    struct _WS_XML_STRING *strings;
-    ULONG                  stringCount;
-    BOOL                   isConst;
-} WS_XML_DICTIONARY;
-
-typedef struct _WS_XML_STRING {
-    ULONG              length;
-    BYTE              *bytes;
-    WS_XML_DICTIONARY *dictionary;
-    ULONG              id;
-} WS_XML_STRING;
 
 typedef enum {
     WS_ELEMENT_TYPE_MAPPING         = 1,
@@ -407,6 +424,13 @@ typedef struct _WS_XML_STRING_DESCRIPTION {
     ULONG maxByteCount;
 } WS_XML_STRING_DESCRIPTION;
 
+typedef struct _WS_XML_QNAME_DESCRIPTION {
+    ULONG minLocalNameByteCount;
+    ULONG maxLocalNameByteCount;
+    ULONG minNsByteCount;
+    ULONG maxNsByteCount;
+} WS_XML_QNAME_DESCRIPTION;
+
 struct _WS_ENUM_VALUE {
     int value;
     WS_XML_STRING *name;
@@ -417,6 +441,11 @@ struct _WS_ENUM_DESCRIPTION {
     ULONG valueCount;
     ULONG maxByteCount;
     ULONG *nameIndices;
+};
+
+struct _WS_FLOAT_DESCRIPTION {
+    float minValue;
+    float maxValue;
 };
 
 struct _WS_DOUBLE_DESCRIPTION {
@@ -507,6 +536,21 @@ typedef struct _WS_STRUCT_DESCRIPTION {
     ULONG subTypeCount;
     ULONG structOptions;
 } WS_STRUCT_DESCRIPTION;
+
+typedef struct _WS_UNION_FIELD_DESCRIPTION {
+    int value;
+    WS_FIELD_DESCRIPTION field;
+} WS_UNION_FIELD_DESCRIPTION;
+
+typedef struct _WS_UNION_DESCRIPTION {
+    ULONG size;
+    ULONG alignment;
+    WS_UNION_FIELD_DESCRIPTION **fields;
+    ULONG fieldCount;
+    ULONG enumOffset;
+    int noneEnumValue;
+    ULONG *valueIndices;
+} WS_UNION_DESCRIPTION;
 
 typedef struct _WS_ATTRIBUTE_DESCRIPTION {
     WS_XML_STRING *attributeLocalName;
@@ -616,6 +660,11 @@ typedef struct _WS_XML_UINT64_TEXT {
     unsigned __int64 DECLSPEC_ALIGN(8) value;
 } WS_XML_UINT64_TEXT;
 
+typedef struct _WS_XML_FLOAT_TEXT {
+    WS_XML_TEXT text;
+    float value;
+} WS_XML_FLOAT_TEXT;
+
 typedef struct _WS_XML_DOUBLE_TEXT {
     WS_XML_TEXT text;
     double DECLSPEC_ALIGN(8) value;
@@ -630,6 +679,13 @@ typedef struct _WS_XML_UNIQUE_ID_TEXT {
     WS_XML_TEXT text;
     GUID value;
 } WS_XML_UNIQUE_ID_TEXT;
+
+typedef struct _WS_XML_QNAME_TEXT {
+    WS_XML_TEXT text;
+    WS_XML_STRING *prefix;
+    WS_XML_STRING *localName;
+    WS_XML_STRING *ns;
+} WS_XML_QNAME_TEXT;
 
 typedef enum {
     WS_BOOL_VALUE_TYPE,
@@ -683,6 +739,11 @@ typedef struct _WS_XML_NODE_POSITION {
     WS_XML_BUFFER *buffer;
     void *node;
 } WS_XML_NODE_POSITION;
+
+typedef struct _WS_XML_QNAME {
+    WS_XML_STRING localName;
+    WS_XML_STRING ns;
+} WS_XML_QNAME;
 
 typedef enum {
     WS_SERVICE_PROXY_STATE_CREATED,
@@ -1023,6 +1084,11 @@ typedef enum {
     WS_REPLY_TO_HEADER      = 6,
     WS_FAULT_TO_HEADER      = 7
 } WS_HEADER_TYPE;
+
+typedef enum {
+    WS_REPEATING_HEADER = 1,
+    WS_SINGLETON_HEADER = 2
+} WS_REPEATING_HEADER_OPTION;
 
 typedef enum {
     WS_DNS_ENDPOINT_IDENTITY_TYPE       = 1,
@@ -1568,10 +1634,17 @@ void WINAPI WsFreeReader(WS_XML_READER*);
 void WINAPI WsFreeServiceProxy(WS_SERVICE_PROXY*);
 void WINAPI WsFreeWriter(WS_XML_WRITER*);
 HRESULT WINAPI WsGetChannelProperty(WS_CHANNEL*, WS_CHANNEL_PROPERTY_ID, void*, ULONG, WS_ERROR*);
+HRESULT WINAPI WsGetCustomHeader(WS_MESSAGE*, const WS_ELEMENT_DESCRIPTION*, WS_REPEATING_HEADER_OPTION,
+                                 ULONG, WS_READ_OPTION, WS_HEAP*, void*, ULONG, ULONG*, WS_ERROR*);
+HRESULT WINAPI WsGetDictionary(WS_ENCODING, WS_XML_DICTIONARY**, WS_ERROR*);
 HRESULT WINAPI WsGetErrorProperty(WS_ERROR*, WS_ERROR_PROPERTY_ID, void*, ULONG);
 HRESULT WINAPI WsGetErrorString(WS_ERROR*, ULONG, WS_STRING*);
+HRESULT WINAPI WsGetHeader(WS_MESSAGE*, WS_HEADER_TYPE, WS_TYPE, WS_READ_OPTION, WS_HEAP*, void*,
+                           ULONG, WS_ERROR*);
 HRESULT WINAPI WsGetHeapProperty(WS_HEAP*, WS_HEAP_PROPERTY_ID, void*, ULONG, WS_ERROR*);
 HRESULT WINAPI WsGetListenerProperty(WS_LISTENER*, WS_LISTENER_PROPERTY_ID, void*, ULONG, WS_ERROR*);
+HRESULT WINAPI WsGetMappedHeader(WS_MESSAGE*, const WS_XML_STRING*, WS_REPEATING_HEADER_OPTION,
+                                 ULONG, WS_TYPE, WS_READ_OPTION, WS_HEAP*, void*, ULONG, WS_ERROR*);
 HRESULT WINAPI WsGetMessageProperty(WS_MESSAGE*, WS_MESSAGE_PROPERTY_ID, void*, ULONG, WS_ERROR*);
 HRESULT WINAPI WsGetNamespaceFromPrefix(WS_XML_READER*, const WS_XML_STRING*, BOOL,
                                         const WS_XML_STRING**, WS_ERROR*);
@@ -1659,6 +1732,7 @@ HRESULT WINAPI WsSetOutputToBuffer(WS_XML_WRITER*, WS_XML_BUFFER*, const WS_XML_
                                    ULONG, WS_ERROR*);
 HRESULT WINAPI WsSetReaderPosition(WS_XML_READER*, const WS_XML_NODE_POSITION*, WS_ERROR*);
 HRESULT WINAPI WsSetWriterPosition(WS_XML_WRITER*, const WS_XML_NODE_POSITION*, WS_ERROR*);
+HRESULT WINAPI WsShutdownSessionChannel(WS_CHANNEL*, const WS_ASYNC_CONTEXT*, WS_ERROR*);
 HRESULT WINAPI WsSkipNode(WS_XML_READER*, WS_ERROR*);
 HRESULT WINAPI WsWriteArray(WS_XML_WRITER*, const WS_XML_STRING*, const WS_XML_STRING*, WS_VALUE_TYPE,
                             const void*, ULONG, ULONG, ULONG, WS_ERROR*);

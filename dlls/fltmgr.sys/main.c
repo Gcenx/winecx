@@ -25,9 +25,8 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
-#include "ddk/ntddk.h"
-#include "ddk/ntifs.h"
-#include "ddk/wdm.h"
+#include "ddk/fltkernel.h"
+
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(fltmgr);
@@ -42,4 +41,41 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
 void WINAPI FltInitializePushLock( EX_PUSH_LOCK *lock )
 {
     FIXME( "(%p): stub\n", lock );
+}
+
+NTSTATUS WINAPI FltRegisterFilter( PDRIVER_OBJECT driver, const FLT_REGISTRATION *reg, PFLT_FILTER *filter )
+{
+    FIXME( "(%p,%p,%p): stub\n", driver, reg, filter );
+
+    if(filter)
+        *filter = UlongToHandle(0xdeadbeaf);
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI FltStartFiltering( PFLT_FILTER filter )
+{
+    FIXME( "(%p): stub\n", filter );
+
+    return STATUS_SUCCESS;
+}
+
+void WINAPI FltUnregisterFilter( PFLT_FILTER filter )
+{
+    FIXME( "(%p): stub\n", filter );
+}
+
+void* WINAPI FltGetRoutineAddress(LPCSTR name)
+{
+    static const WCHAR fltmgrW[] = {'f','l','t','m','g','r','.','s','y','s',0};
+    HMODULE mod = GetModuleHandleW(fltmgrW);
+    void *func;
+
+    func = GetProcAddress(mod, name);
+    if (func)
+        TRACE( "%s -> %p\n", debugstr_a(name), func );
+    else
+        FIXME( "%s not found\n", debugstr_a(name) );
+
+    return func;
 }

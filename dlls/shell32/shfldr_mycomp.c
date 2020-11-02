@@ -80,14 +80,13 @@ static inline IMyComputerFolderImpl *impl_from_IPersistFolder2(IPersistFolder2 *
 *   IShellFolder [MyComputer] implementation
 */
 
-static const shvheader mycomputer_header[] = {
-    {IDS_SHV_COLUMN1, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 15},
-    {IDS_SHV_COLUMN3, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 10},
-    {IDS_SHV_COLUMN6, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 10},
-    {IDS_SHV_COLUMN7, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 10},
+static const shvheader mycomputer_header[] =
+{
+    { &FMTID_Storage, PID_STG_NAME, IDS_SHV_COLUMN1, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 15 },
+    { &FMTID_Storage, PID_STG_STORAGETYPE, IDS_SHV_COLUMN3, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 10 },
+    { NULL, 0, IDS_SHV_COLUMN6, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 10 },
+    { NULL, 0, IDS_SHV_COLUMN7, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 10 },
 };
-
-#define MYCOMPUTERSHELLVIEWCOLUMNS sizeof(mycomputer_header)/sizeof(shvheader)
 
 /**************************************************************************
 *    ISF_MyComputer_Constructor
@@ -327,7 +326,7 @@ static BOOL CreateMyCompEnumList(IEnumIDListImpl *list, DWORD dwFlags)
                     DWORD size;
                     LONG r;
 
-                    size = sizeof(iid) / sizeof(iid[0]);
+                    size = ARRAY_SIZE(iid);
                     r = RegEnumKeyExW(hkey, i, iid, &size, 0, NULL, NULL, NULL);
                     if (ERROR_SUCCESS == r)
                     {
@@ -700,8 +699,8 @@ static HRESULT WINAPI ISF_MyComputer_fnGetDisplayNameOf (IShellFolder2 *iface,
                 static const WCHAR wszCloseBracket[] = {')',0};
                 WCHAR wszDrive[32 /* label */ + 6 /* ' (C:)'\0 */] = {0};
 
-                GetVolumeInformationW (pszPath, wszDrive, sizeof(wszDrive)/sizeof(wszDrive[0]) - 5,
-                        NULL, NULL, NULL, NULL, 0);
+                GetVolumeInformationW (pszPath, wszDrive, ARRAY_SIZE(wszDrive) - 5, NULL, NULL,
+                        NULL, NULL, 0);
 
                 /* Display unix path if volume has no label */
                 if (!wszDrive[0])
@@ -786,11 +785,10 @@ static HRESULT WINAPI ISF_MyComputer_fnSetNameOf (
     return E_FAIL;
 }
 
-static HRESULT WINAPI ISF_MyComputer_fnGetDefaultSearchGUID (
-               IShellFolder2 * iface, GUID * pguid)
+static HRESULT WINAPI ISF_MyComputer_fnGetDefaultSearchGUID(IShellFolder2 *iface, GUID *guid)
 {
     IMyComputerFolderImpl *This = impl_from_IShellFolder2(iface);
-    FIXME ("(%p)\n", This);
+    TRACE("(%p)->(%p)\n", This, guid);
     return E_NOTIMPL;
 }
 static HRESULT WINAPI ISF_MyComputer_fnEnumSearches (
@@ -800,19 +798,17 @@ static HRESULT WINAPI ISF_MyComputer_fnEnumSearches (
     FIXME ("(%p)\n", This);
     return E_NOTIMPL;
 }
-static HRESULT WINAPI ISF_MyComputer_fnGetDefaultColumn (
-               IShellFolder2 *iface, DWORD dwRes, ULONG *pSort, ULONG *pDisplay)
+
+static HRESULT WINAPI ISF_MyComputer_fnGetDefaultColumn(IShellFolder2 *iface, DWORD reserved,
+        ULONG *sort, ULONG *display)
 {
     IMyComputerFolderImpl *This = impl_from_IShellFolder2(iface);
 
-    TRACE ("(%p)\n", This);
+    TRACE("(%p)->(%#x, %p, %p)\n", This, reserved, sort, display);
 
-    if (pSort)
-         *pSort = 0;
-    if (pDisplay)
-        *pDisplay = 0;
-    return S_OK;
+    return E_NOTIMPL;
 }
+
 static HRESULT WINAPI ISF_MyComputer_fnGetDefaultColumnState (
                IShellFolder2 * iface, UINT iColumn, DWORD * pcsFlags)
 {
@@ -820,7 +816,7 @@ static HRESULT WINAPI ISF_MyComputer_fnGetDefaultColumnState (
 
     TRACE ("(%p)->(%d %p)\n", This, iColumn, pcsFlags);
 
-    if (!pcsFlags || iColumn >= MYCOMPUTERSHELLVIEWCOLUMNS)
+    if (!pcsFlags || iColumn >= ARRAY_SIZE(mycomputer_header))
         return E_INVALIDARG;
 
     *pcsFlags = mycomputer_header[iColumn].pcsFlags;
@@ -847,7 +843,7 @@ static HRESULT WINAPI ISF_MyComputer_fnGetDetailsOf (IShellFolder2 *iface,
 
     TRACE ("(%p)->(%p %i %p)\n", This, pidl, iColumn, psd);
 
-    if (!psd || iColumn >= MYCOMPUTERSHELLVIEWCOLUMNS)
+    if (!psd || iColumn >= ARRAY_SIZE(mycomputer_header))
         return E_INVALIDARG;
 
     if (!pidl)
@@ -886,12 +882,16 @@ static HRESULT WINAPI ISF_MyComputer_fnGetDetailsOf (IShellFolder2 *iface,
     return hr;
 }
 
-static HRESULT WINAPI ISF_MyComputer_fnMapColumnToSCID (
-               IShellFolder2 * iface, UINT column, SHCOLUMNID * pscid)
+static HRESULT WINAPI ISF_MyComputer_fnMapColumnToSCID (IShellFolder2 *iface, UINT column, SHCOLUMNID *scid)
 {
     IMyComputerFolderImpl *This = impl_from_IShellFolder2(iface);
-    FIXME ("(%p)\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%u %p)\n", This, column, scid);
+
+    if (column >= ARRAY_SIZE(mycomputer_header))
+        return E_INVALIDARG;
+
+    return shellfolder_map_column_to_scid(mycomputer_header, column, scid);
 }
 
 static const IShellFolder2Vtbl vt_ShellFolder2 =

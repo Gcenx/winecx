@@ -54,7 +54,7 @@ static HRESULT d3d11_input_layout_to_wined3d_declaration(const D3D11_INPUT_ELEME
         return E_FAIL;
     }
 
-    if (!(*wined3d_elements = d3d11_calloc(element_count, sizeof(**wined3d_elements))))
+    if (!(*wined3d_elements = heap_calloc(element_count, sizeof(**wined3d_elements))))
     {
         ERR("Failed to allocate wined3d vertex element array memory.\n");
         shader_free_signature(&is);
@@ -134,7 +134,7 @@ static ULONG STDMETHODCALLTYPE d3d11_input_layout_AddRef(ID3D11InputLayout *ifac
 
     if (refcount == 1)
     {
-        ID3D11Device_AddRef(layout->device);
+        ID3D11Device2_AddRef(layout->device);
         wined3d_mutex_lock();
         wined3d_vertex_declaration_incref(layout->wined3d_decl);
         wined3d_mutex_unlock();
@@ -152,13 +152,13 @@ static ULONG STDMETHODCALLTYPE d3d11_input_layout_Release(ID3D11InputLayout *ifa
 
     if (!refcount)
     {
-        ID3D11Device *device = layout->device;
+        ID3D11Device2 *device = layout->device;
 
         wined3d_mutex_lock();
         wined3d_vertex_declaration_decref(layout->wined3d_decl);
         wined3d_mutex_unlock();
 
-        ID3D11Device_Release(device);
+        ID3D11Device2_Release(device);
     }
 
     return refcount;
@@ -171,7 +171,7 @@ static void STDMETHODCALLTYPE d3d11_input_layout_GetDevice(ID3D11InputLayout *if
 
     TRACE("iface %p, device %p.\n", iface, device);
 
-    ID3D11Device_AddRef(*device = layout->device);
+    ID3D11Device_AddRef(*device = (ID3D11Device *)layout->device);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_input_layout_GetPrivateData(ID3D11InputLayout *iface,
@@ -262,7 +262,7 @@ static void STDMETHODCALLTYPE d3d10_input_layout_GetDevice(ID3D10InputLayout *if
 
     TRACE("iface %p, device %p.\n", iface, device);
 
-    ID3D11Device_QueryInterface(layout->device, &IID_ID3D10Device, (void **)device);
+    ID3D11Device2_QueryInterface(layout->device, &IID_ID3D10Device, (void **)device);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_input_layout_GetPrivateData(ID3D10InputLayout *iface,
@@ -315,7 +315,7 @@ static void STDMETHODCALLTYPE d3d_input_layout_wined3d_object_destroyed(void *pa
     struct d3d_input_layout *layout = parent;
 
     wined3d_private_store_cleanup(&layout->private_store);
-    HeapFree(GetProcessHeap(), 0, parent);
+    heap_free(parent);
 }
 
 static const struct wined3d_parent_ops d3d_input_layout_wined3d_parent_ops =
@@ -347,7 +347,7 @@ static HRESULT d3d_input_layout_init(struct d3d_input_layout *layout, struct d3d
 
     hr = wined3d_vertex_declaration_create(device->wined3d_device, wined3d_elements, element_count,
             layout, &d3d_input_layout_wined3d_parent_ops, &layout->wined3d_decl);
-    HeapFree(GetProcessHeap(), 0, wined3d_elements);
+    heap_free(wined3d_elements);
     if (FAILED(hr))
     {
         WARN("Failed to create wined3d vertex declaration, hr %#x.\n", hr);
@@ -357,7 +357,7 @@ static HRESULT d3d_input_layout_init(struct d3d_input_layout *layout, struct d3d
     }
     wined3d_mutex_unlock();
 
-    ID3D11Device_AddRef(layout->device = &device->ID3D11Device_iface);
+    ID3D11Device2_AddRef(layout->device = &device->ID3D11Device2_iface);
 
     return S_OK;
 }
@@ -370,15 +370,14 @@ HRESULT d3d_input_layout_create(struct d3d_device *device,
     struct d3d_input_layout *object;
     HRESULT hr;
 
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
-    if (!object)
+    if (!(object = heap_alloc_zero(sizeof(*object))))
         return E_OUTOFMEMORY;
 
     if (FAILED(hr = d3d_input_layout_init(object, device, element_descs, element_count,
             shader_byte_code, shader_byte_code_length)))
     {
         WARN("Failed to initialize input layout, hr %#x.\n", hr);
-        HeapFree(GetProcessHeap(), 0, object);
+        heap_free(object);
         return hr;
     }
 

@@ -183,6 +183,7 @@ static int (CDECL *p__clearfp)(void);
 static _locale_t (__cdecl *p_wcreate_locale)(int, const wchar_t *);
 static void (__cdecl *p_free_locale)(_locale_t);
 static unsigned short (__cdecl *p_wctype)(const char*);
+static int (__cdecl *p_vsscanf)(const char*, const char *, __ms_va_list valist);
 
 /* make sure we use the correct errno */
 #undef errno
@@ -240,6 +241,7 @@ static BOOL init(void)
     SET(p_wctype, "wctype");
     SET(p_fegetenv, "fegetenv");
     SET(p__clearfp, "_clearfp");
+    SET(p_vsscanf, "vsscanf");
     if(sizeof(void*) == 8) { /* 64-bit initialization */
         SET(p_critical_section_ctor,
                 "??0critical_section@Concurrency@@QEAA@XZ");
@@ -406,7 +408,7 @@ static void test_lconv(void)
         "Japanese", "Korean", "Spanish"
     };
 
-    for(i = 0; i < sizeof(locstrs) / sizeof(char *); i ++)
+    for(i = 0; i < ARRAY_SIZE(locstrs); i ++)
         test_lconv_helper(locstrs[i]);
 }
 
@@ -443,7 +445,7 @@ static void test__dpcomp(void)
     };
     int i, ret;
 
-    for(i=0; i<sizeof(tests)/sizeof(*tests); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         ret = p__dpcomp(tests[i].x, tests[i].y);
         ok(ret == tests[i].ret, "%d) dpcomp(%f, %f) = %x\n", i, tests[i].x, tests[i].y, ret);
     }
@@ -471,7 +473,7 @@ static void test____lc_locale_name_func(void)
     int i, j;
     wchar_t **lc_names;
 
-    for(i=0; i<sizeof(tests)/sizeof(*tests); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         if(!p_setlocale(LC_ALL, tests[i].locale))
             continue;
 
@@ -534,12 +536,11 @@ static void test__W_Gettnames(void)
     else
         ok(size==0x164, "structure size: %x\n", size);
 
-    for(i=0; i<sizeof(str)/sizeof(*str); i++) {
+    for(i=0; i<ARRAY_SIZE(str); i++) {
         ok(!strcmp(ret->str[i], str[i]), "ret->str[%d] = %s, expected %s\n",
                 i, ret->str[i], str[i]);
 
-        MultiByteToWideChar(CP_ACP, 0, str[i], strlen(str[i])+1,
-                buf, sizeof(buf)/sizeof(*buf));
+        MultiByteToWideChar(CP_ACP, 0, str[i], strlen(str[i])+1, buf, ARRAY_SIZE(buf));
         ok(!lstrcmpW(ret->wstr[i], buf), "ret->wstr[%d] = %s, expected %s\n",
                 i, wine_dbgstr_w(ret->wstr[i]), wine_dbgstr_w(buf));
     }
@@ -638,7 +639,7 @@ static void test_remainder(void)
     if(sizeof(void*) != 8) /* errno handling slightly different on 32-bit */
         return;
 
-    for(i=0; i<sizeof(tests)/sizeof(*tests); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         errno = -1;
         r = p_remainder(tests[i].x, tests[i].y);
         e = errno;
@@ -905,10 +906,33 @@ static void test_wctype(void)
     };
     int i, ret;
 
-    for(i=0; i<sizeof(properties)/sizeof(properties[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(properties); i++) {
         ret = p_wctype(properties[i].name);
         ok(properties[i].mask == ret, "%d - Expected %x, got %x\n", i, properties[i].mask, ret);
     }
+}
+
+static int WINAPIV _vsscanf_wrapper(const char *buffer, const char *format, ...)
+{
+    int ret;
+    __ms_va_list valist;
+    __ms_va_start(valist, format);
+    ret = p_vsscanf(buffer, format, valist);
+    __ms_va_end(valist);
+    return ret;
+}
+
+static void test_vsscanf(void)
+{
+    static const char *fmt = "%d";
+    char buff[16];
+    int ret, v;
+
+    v = 0;
+    strcpy(buff, "10");
+    ret = _vsscanf_wrapper(buff, fmt, &v);
+    ok(ret == 1, "Unexpected ret %d.\n", ret);
+    ok(v == 10, "got %d.\n", v);
 }
 
 START_TEST(msvcr120)
@@ -928,4 +952,5 @@ START_TEST(msvcr120)
     test__wcreate_locale();
     test__Condition_variable();
     test_wctype();
+    test_vsscanf();
 }

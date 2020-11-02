@@ -29,11 +29,11 @@
 #include "msxml2.h"
 #include "mscoree.h"
 #include "corhdr.h"
+#include "corerror.h"
 #include "metahost.h"
 #include "cordebug.h"
 #include "wine/list.h"
 #include "mscoree_private.h"
-#include "shlwapi.h"
 
 #include "wine/debug.h"
 
@@ -59,6 +59,192 @@ typedef struct ConfigFileHandler
     int statenum;
     parsed_config_file *result;
 } ConfigFileHandler;
+
+typedef struct
+{
+    IStream IStream_iface;
+    LONG ref;
+    HANDLE file;
+} ConfigStream;
+
+static inline ConfigStream *impl_from_IStream(IStream *iface)
+{
+    return CONTAINING_RECORD(iface, ConfigStream, IStream_iface);
+}
+
+static HRESULT WINAPI ConfigStream_QueryInterface(IStream *iface, REFIID riid, void **ppv)
+{
+    ConfigStream *This = impl_from_IStream(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppv);
+
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IStream))
+        *ppv = &This->IStream_iface;
+    else
+    {
+        WARN("Not supported iface %s\n", debugstr_guid(riid));
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI ConfigStream_AddRef(IStream *iface)
+{
+    ConfigStream *This = impl_from_IStream(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%u\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI ConfigStream_Release(IStream *iface)
+{
+    ConfigStream *This = impl_from_IStream(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%u\n",This, ref);
+
+    if (!ref)
+    {
+        CloseHandle(This->file);
+        HeapFree(GetProcessHeap(), 0, This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI ConfigStream_Read(IStream *iface, void *buf, ULONG size, ULONG *ret_read)
+{
+    ConfigStream *This = impl_from_IStream(iface);
+    DWORD read = 0;
+
+    TRACE("(%p)->(%p %u %p)\n", This, buf, size, ret_read);
+
+    if (!ReadFile(This->file, buf, size, &read, NULL))
+    {
+        WARN("error %d reading file\n", GetLastError());
+        return HRESULT_FROM_WIN32(GetLastError());
+    }
+
+    if (ret_read) *ret_read = read;
+    return S_OK;
+}
+
+static HRESULT WINAPI ConfigStream_Write(IStream *iface, const void *buf, ULONG size, ULONG *written)
+{
+    ConfigStream *This = impl_from_IStream(iface);
+    TRACE("(%p)->(%p %u %p)\n", This, buf, size, written);
+    return E_FAIL;
+}
+
+static HRESULT WINAPI ConfigStream_Seek(IStream *iface, LARGE_INTEGER dlibMove,
+                                        DWORD dwOrigin, ULARGE_INTEGER *pNewPos)
+{
+    ConfigStream *This = impl_from_IStream(iface);
+    TRACE("(%p)->(%d %d %p)\n", This, dlibMove.u.LowPart, dwOrigin, pNewPos);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ConfigStream_SetSize(IStream *iface, ULARGE_INTEGER libNewSize)
+{
+    ConfigStream *This = impl_from_IStream(iface);
+    TRACE("(%p)->(%d)\n", This, libNewSize.u.LowPart);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ConfigStream_CopyTo(IStream *iface, IStream *stream, ULARGE_INTEGER size,
+                                          ULARGE_INTEGER *read, ULARGE_INTEGER *written)
+{
+    ConfigStream *This = impl_from_IStream(iface);
+    FIXME("(%p)->(%p %d %p %p)\n", This, stream, size.u.LowPart, read, written);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ConfigStream_Commit(IStream *iface, DWORD flags)
+{
+    ConfigStream *This = impl_from_IStream(iface);
+    FIXME("(%p,%d)\n", This, flags);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ConfigStream_Revert(IStream *iface)
+{
+    ConfigStream *This = impl_from_IStream(iface);
+    TRACE("(%p)\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ConfigStream_LockUnlockRegion(IStream *iface, ULARGE_INTEGER libOffset,
+                                                    ULARGE_INTEGER cb, DWORD dwLockType)
+{
+    ConfigStream *This = impl_from_IStream(iface);
+    TRACE("(%p,%d,%d,%d)\n", This, libOffset.u.LowPart, cb.u.LowPart, dwLockType);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ConfigStream_Stat(IStream *iface, STATSTG *lpStat, DWORD grfStatFlag)
+{
+    ConfigStream *This = impl_from_IStream(iface);
+    FIXME("(%p,%p,%d)\n", This, lpStat, grfStatFlag);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ConfigStream_Clone(IStream *iface, IStream **ppstm)
+{
+    ConfigStream *This = impl_from_IStream(iface);
+    TRACE("(%p)\n",This);
+    return E_NOTIMPL;
+}
+
+static const IStreamVtbl ConfigStreamVtbl = {
+  ConfigStream_QueryInterface,
+  ConfigStream_AddRef,
+  ConfigStream_Release,
+  ConfigStream_Read,
+  ConfigStream_Write,
+  ConfigStream_Seek,
+  ConfigStream_SetSize,
+  ConfigStream_CopyTo,
+  ConfigStream_Commit,
+  ConfigStream_Revert,
+  ConfigStream_LockUnlockRegion,
+  ConfigStream_LockUnlockRegion,
+  ConfigStream_Stat,
+  ConfigStream_Clone
+};
+
+HRESULT WINAPI CreateConfigStream(const WCHAR *filename, IStream **stream)
+{
+    ConfigStream *config_stream;
+    HANDLE file;
+
+    TRACE("(%s, %p)\n", debugstr_w(filename), stream);
+
+    if (!stream)
+        return COR_E_NULLREFERENCE;
+
+    file = CreateFileW(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0);
+    if (file == INVALID_HANDLE_VALUE)
+        return GetLastError() == ERROR_FILE_NOT_FOUND ? COR_E_FILENOTFOUND : E_FAIL;
+
+    config_stream = HeapAlloc(GetProcessHeap(), 0, sizeof(*config_stream));
+    if (!config_stream)
+    {
+        CloseHandle(file);
+        return E_OUTOFMEMORY;
+    }
+
+    config_stream->IStream_iface.lpVtbl = &ConfigStreamVtbl;
+    config_stream->ref = 1;
+    config_stream->file = file;
+
+    *stream = &config_stream->IStream_iface;
+    return S_OK;
+}
 
 static inline ConfigFileHandler *impl_from_ISAXContentHandler(ISAXContentHandler *iface)
 {
@@ -231,7 +417,7 @@ static HRESULT WINAPI ConfigFileHandler_startElement(ISAXContentHandler *iface,
     TRACE("%s %s %s\n", debugstr_wn(pNamespaceUri,nNamespaceUri),
         debugstr_wn(pLocalName,nLocalName), debugstr_wn(pQName,nQName));
 
-    if (This->statenum == sizeof(This->states) / sizeof(This->states[0]) - 1)
+    if (This->statenum == ARRAY_SIZE(This->states) - 1)
     {
         ERR("file has too much nesting\n");
         return E_FAIL;
@@ -240,8 +426,7 @@ static HRESULT WINAPI ConfigFileHandler_startElement(ISAXContentHandler *iface,
     switch (This->states[This->statenum])
     {
     case STATE_ROOT:
-        if (nLocalName == sizeof(configuration)/sizeof(WCHAR)-1 &&
-            lstrcmpW(pLocalName, configuration) == 0)
+        if (nLocalName == ARRAY_SIZE(configuration) - 1 && lstrcmpW(pLocalName, configuration) == 0)
         {
             This->states[++This->statenum] = STATE_CONFIGURATION;
             break;
@@ -249,15 +434,13 @@ static HRESULT WINAPI ConfigFileHandler_startElement(ISAXContentHandler *iface,
         else
             goto unknown;
     case STATE_CONFIGURATION:
-        if (nLocalName == sizeof(startup)/sizeof(WCHAR)-1 &&
-            lstrcmpW(pLocalName, startup) == 0)
+        if (nLocalName == ARRAY_SIZE(startup) - 1 && lstrcmpW(pLocalName, startup) == 0)
         {
             hr = parse_startup(This, pAttr);
             This->states[++This->statenum] = STATE_STARTUP;
             break;
         }
-        else if (nLocalName == sizeof(runtime)/sizeof(WCHAR)-1 &&
-            lstrcmpW(pLocalName, runtime) == 0)
+        else if (nLocalName == ARRAY_SIZE(runtime) - 1 && lstrcmpW(pLocalName, runtime) == 0)
         {
             This->states[++This->statenum] = STATE_RUNTIME;
             break;
@@ -265,7 +448,7 @@ static HRESULT WINAPI ConfigFileHandler_startElement(ISAXContentHandler *iface,
         else
             goto unknown;
     case STATE_RUNTIME:
-        if (nLocalName == sizeof(assemblyBinding)/sizeof(WCHAR)-1 &&
+        if (nLocalName == ARRAY_SIZE(assemblyBinding) - 1 &&
             lstrcmpW(pLocalName, assemblyBinding) == 0)
         {
             This->states[++This->statenum] = STATE_ASSEMBLY_BINDING;
@@ -274,8 +457,7 @@ static HRESULT WINAPI ConfigFileHandler_startElement(ISAXContentHandler *iface,
         else
             goto unknown;
     case STATE_ASSEMBLY_BINDING:
-        if (nLocalName == sizeof(probing)/sizeof(WCHAR)-1 &&
-            lstrcmpW(pLocalName, probing) == 0)
+        if (nLocalName == ARRAY_SIZE(probing) - 1 && lstrcmpW(pLocalName, probing) == 0)
         {
             hr = parse_probing(This, pAttr);
             This->states[++This->statenum] = STATE_PROBING;
@@ -284,7 +466,7 @@ static HRESULT WINAPI ConfigFileHandler_startElement(ISAXContentHandler *iface,
         else
             goto unknown;
     case STATE_STARTUP:
-        if (nLocalName == sizeof(supportedRuntime)/sizeof(WCHAR)-1 &&
+        if (nLocalName == ARRAY_SIZE(supportedRuntime) - 1 &&
             lstrcmpW(pLocalName, supportedRuntime) == 0)
         {
             hr = parse_supported_runtime(This, pAttr);
@@ -477,20 +659,18 @@ HRESULT parse_config_file(LPCWSTR filename, parsed_config_file *result)
 
     init_config(result);
 
+
+    hr = CreateConfigStream(filename, &stream);
+    if (FAILED(hr))
+        return hr;
+
     initresult = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    V_VT(&var) = VT_UNKNOWN;
+    V_UNKNOWN(&var) = (IUnknown*)stream;
 
-    hr = SHCreateStreamOnFileW(filename, STGM_SHARE_DENY_WRITE | STGM_READ | STGM_FAILIFTHERE, &stream);
+    hr = parse_config(var, result);
 
-    if (SUCCEEDED(hr))
-    {
-        V_VT(&var) = VT_UNKNOWN;
-        V_UNKNOWN(&var) = (IUnknown*)stream;
-
-        hr = parse_config(var, result);
-
-        IStream_Release(stream);
-    }
-
+    IStream_Release(stream);
     if (SUCCEEDED(initresult))
         CoUninitialize();
 

@@ -31,7 +31,6 @@ STRINGTABLE
     IDS_PATHBOX_LABEL   "Location:"
     IDS_START_LABEL     "Start"
     IDS_RUN             "&Run..."
-    IDS_QUIT            "Quit"
 }
 
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL

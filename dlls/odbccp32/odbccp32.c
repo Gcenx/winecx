@@ -31,6 +31,7 @@
 #include "winnls.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 #include "odbcinst.h"
 
@@ -70,7 +71,7 @@ static const WCHAR odbc_error_invalid_keyword[] = {'I','n','v','a','l','i','d','
 /* Push an error onto the error stack, taking care of ranges etc. */
 static void push_error(int code, LPCWSTR msg)
 {
-    if (num_errors < sizeof error_code/sizeof error_code[0])
+    if (num_errors < ARRAY_SIZE(error_code))
     {
         error_code[num_errors] = code;
         error_msg[num_errors] = msg;
@@ -82,16 +83,6 @@ static void push_error(int code, LPCWSTR msg)
 static void clear_errors(void)
 {
     num_errors = 0;
-}
-
-static inline void* __WINE_ALLOC_SIZE(1) heap_alloc(size_t size)
-{
-    return HeapAlloc(GetProcessHeap(), 0, size);
-}
-
-static inline BOOL heap_free(void *mem)
-{
-    return HeapFree(GetProcessHeap(), 0, mem);
 }
 
 static inline WCHAR *heap_strdupAtoW(const char *str)
@@ -268,19 +259,25 @@ static HMODULE load_config_driver(const WCHAR *driver)
         if ((ret = RegOpenKeyW(hkey, driver, &hkeydriver)) == ERROR_SUCCESS)
         {
             ret = RegGetValueW(hkeydriver, NULL, reg_driver, RRF_RT_REG_SZ, &type, NULL, &size);
-            if(ret == ERROR_MORE_DATA)
+            if(ret != ERROR_SUCCESS || type != REG_SZ)
             {
-                filename = HeapAlloc(GetProcessHeap(), 0, size);
-                if(!filename)
-                {
-                    RegCloseKey(hkeydriver);
-                    RegCloseKey(hkey);
-                    push_error(ODBC_ERROR_OUT_OF_MEM, odbc_error_out_of_mem);
+                RegCloseKey(hkeydriver);
+                RegCloseKey(hkey);
+                push_error(ODBC_ERROR_INVALID_DSN, odbc_error_invalid_dsn);
 
-                    return NULL;
-                }
-                ret = RegGetValueW(hkeydriver, NULL, driver, RRF_RT_REG_SZ, &type, filename, &size);
+                return NULL;
             }
+
+            filename = HeapAlloc(GetProcessHeap(), 0, size);
+            if(!filename)
+            {
+                RegCloseKey(hkeydriver);
+                RegCloseKey(hkey);
+                push_error(ODBC_ERROR_OUT_OF_MEM, odbc_error_out_of_mem);
+
+                return NULL;
+            }
+            ret = RegGetValueW(hkeydriver, NULL, reg_driver, RRF_RT_REG_SZ, &type, filename, &size);
 
             RegCloseKey(hkeydriver);
         }
@@ -491,99 +488,106 @@ BOOL WINAPI SQLGetConfigMode(UWORD *pwConfigMode)
     return TRUE;
 }
 
-/* This is implemented sensibly rather than according to exact conformance to Microsoft's buggy implementations
- * e.g. The Microsoft one occasionally actually adds a third nul character (possibly beyond the buffer).
- * e.g. If the key has no drivers then version 3.525.1117.0 does not modify the buffer at all, not even a nul character.
- */
-BOOL WINAPI SQLGetInstalledDriversW(LPWSTR lpszBuf, WORD cbBufMax,
-               WORD *pcbBufOut)
+BOOL WINAPI SQLGetInstalledDriversW(WCHAR *buf, WORD size, WORD *sizeout)
 {
-    HKEY hDrivers; /* Registry handle to the Drivers key */
-    LONG reg_ret; /* Return code from registry functions */
-    BOOL success = FALSE; /* The value we will return */
+    WORD written = 0;
+    DWORD index = 0;
+    BOOL ret = TRUE;
+    DWORD valuelen;
+    WCHAR *value;
+    HKEY drivers;
+    DWORD len;
+    LONG res;
 
     clear_errors();
 
-    TRACE("%p %d %p\n", lpszBuf, cbBufMax, pcbBufOut);
+    TRACE("%p %d %p\n", buf, size, sizeout);
 
-    if (!lpszBuf || cbBufMax == 0)
+    if (!buf || !size)
     {
         push_error(ODBC_ERROR_INVALID_BUFF_LEN, odbc_error_invalid_buff_len);
+        return FALSE;
     }
-    else if ((reg_ret = RegOpenKeyExW (HKEY_LOCAL_MACHINE /* The drivers does not depend on the config mode */,
-            drivers_key, 0, KEY_READ /* Maybe overkill */,
-            &hDrivers)) == ERROR_SUCCESS)
+
+    res = RegOpenKeyExW(HKEY_LOCAL_MACHINE, drivers_key, 0, KEY_QUERY_VALUE, &drivers);
+    if (res)
     {
-        DWORD index = 0;
-        cbBufMax--;
-        success = TRUE;
-        while (cbBufMax > 0)
-        {
-            DWORD size_name;
-            size_name = cbBufMax;
-            if ((reg_ret = RegEnumValueW(hDrivers, index, lpszBuf, &size_name, NULL, NULL, NULL, NULL)) == ERROR_SUCCESS)
-            {
-                index++;
-                assert (size_name < cbBufMax && *(lpszBuf + size_name) == 0);
-                size_name++;
-                cbBufMax-= size_name;
-                lpszBuf+=size_name;
-            }
-            else
-            {
-                if (reg_ret != ERROR_NO_MORE_ITEMS)
-                {
-                    success = FALSE;
-                    push_error(ODBC_ERROR_GENERAL_ERR, odbc_error_general_err);
-                }
-                break;
-            }
-        }
-        *lpszBuf = 0;
-        if ((reg_ret = RegCloseKey (hDrivers)) != ERROR_SUCCESS)
-            TRACE ("Error %d closing ODBC Drivers key\n", reg_ret);
-    }
-    else
-    {
-        /* MSDN states that it returns failure with COMPONENT_NOT_FOUND in this case.
-         * Version 3.525.1117.0 (Windows 2000) does not; it actually returns success.
-         * I doubt if it will actually be an issue.
-         */
         push_error(ODBC_ERROR_COMPONENT_NOT_FOUND, odbc_error_component_not_found);
+        return FALSE;
     }
-    return success;
+
+    valuelen = 256;
+    value = heap_alloc(valuelen * sizeof(WCHAR));
+
+    size--;
+
+    while (1)
+    {
+        len = valuelen;
+        res = RegEnumValueW(drivers, index, value, &len, NULL, NULL, NULL, NULL);
+        while (res == ERROR_MORE_DATA)
+        {
+            value = heap_realloc(value, ++len * sizeof(WCHAR));
+            res = RegEnumValueW(drivers, index, value, &len, NULL, NULL, NULL, NULL);
+        }
+        if (res == ERROR_SUCCESS)
+        {
+            lstrcpynW(buf + written, value, size - written);
+            written += min(len + 1, size - written);
+        }
+        else if (res == ERROR_NO_MORE_ITEMS)
+            break;
+        else
+        {
+            push_error(ODBC_ERROR_GENERAL_ERR, odbc_error_general_err);
+            ret = FALSE;
+            break;
+        }
+        index++;
+    }
+
+    buf[written++] = 0;
+
+    heap_free(value);
+    RegCloseKey(drivers);
+    if (sizeout)
+        *sizeout = written;
+    return ret;
 }
 
-BOOL WINAPI SQLGetInstalledDrivers(LPSTR lpszBuf, WORD cbBufMax,
-               WORD *pcbBufOut)
+BOOL WINAPI SQLGetInstalledDrivers(char *buf, WORD size, WORD *sizeout)
 {
+    WORD written;
+    WCHAR *wbuf;
     BOOL ret;
-    int size_wbuf = cbBufMax;
-    LPWSTR wbuf;
-    WORD size_used;
 
-    TRACE("%p %d %p\n", lpszBuf, cbBufMax, pcbBufOut);
+    TRACE("%p %d %p\n", buf, size, sizeout);
 
-    wbuf = HeapAlloc(GetProcessHeap(), 0, size_wbuf*sizeof(WCHAR));
-    if (wbuf)
+    if (!buf || !size)
     {
-        ret = SQLGetInstalledDriversW(wbuf, size_wbuf, &size_used);
-        if (ret)
-        {
-            if (!(ret = SQLInstall_narrow(2, lpszBuf, wbuf, size_used, cbBufMax, pcbBufOut)))
-            {
-                push_error(ODBC_ERROR_GENERAL_ERR, odbc_error_general_err);
-            }
-        }
-        HeapFree(GetProcessHeap(), 0, wbuf);
-        /* ignore failure; we have achieved the aim */
+        push_error(ODBC_ERROR_INVALID_BUFF_LEN, odbc_error_invalid_buff_len);
+        return FALSE;
     }
-    else
+
+    wbuf = heap_alloc(size * sizeof(WCHAR));
+    if (!wbuf)
     {
         push_error(ODBC_ERROR_OUT_OF_MEM, odbc_error_out_of_mem);
-        ret = FALSE;
+        return FALSE;
     }
-    return ret;
+
+    ret = SQLGetInstalledDriversW(wbuf, size, &written);
+    if (!ret)
+    {
+        heap_free(wbuf);
+        return FALSE;
+    }
+
+    *sizeout = WideCharToMultiByte(CP_ACP, 0, wbuf, written, NULL, 0, NULL, NULL);
+    WideCharToMultiByte(CP_ACP, 0, wbuf, written, buf, size, NULL, NULL);
+
+    heap_free(wbuf);
+    return TRUE;
 }
 
 static HKEY get_privateprofile_sectionkey(LPCWSTR section, LPCWSTR filename)
@@ -1563,6 +1567,7 @@ BOOL WINAPI SQLWriteFileDSN(LPCSTR lpszFileName, LPCSTR lpszAppName,
 BOOL WINAPI SQLWritePrivateProfileStringW(LPCWSTR lpszSection, LPCWSTR lpszEntry,
                LPCWSTR lpszString, LPCWSTR lpszFilename)
 {
+    static const WCHAR empty[] = {0};
     LONG ret;
     HKEY hkey;
 
@@ -1586,7 +1591,10 @@ BOOL WINAPI SQLWritePrivateProfileStringW(LPCWSTR lpszSection, LPCWSTR lpszEntry
 
               if ((ret = RegCreateKeyW(hkeyfilename, lpszSection, &hkey_section)) == ERROR_SUCCESS)
               {
-                  ret = RegSetValueExW(hkey_section, lpszEntry, 0, REG_SZ, (BYTE*)lpszString, (lstrlenW(lpszString)+1)*sizeof(WCHAR));
+                  if(lpszString)
+                      ret = RegSetValueExW(hkey_section, lpszEntry, 0, REG_SZ, (BYTE*)lpszString, (lstrlenW(lpszString)+1)*sizeof(WCHAR));
+                  else
+                      ret = RegSetValueExW(hkey_section, lpszEntry, 0, REG_SZ, (BYTE*)empty, sizeof(empty));
                   RegCloseKey(hkey_section);
               }
 

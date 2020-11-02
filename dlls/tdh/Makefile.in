@@ -1,4 +1,6 @@
-MODULE = tdh.dll
+MODULE    = tdh.dll
 
 C_SRCS = \
-	main.c
+	tdh_main.c
+
+RC_SRCS = version.rc

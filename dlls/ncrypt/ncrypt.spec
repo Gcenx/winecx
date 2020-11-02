@@ -1,5 +1,5 @@
-@ stub BCryptAddContextFunction
-@ stub BCryptAddContextFunctionProvider
+@ stdcall BCryptAddContextFunction(long wstr long wstr long) bcrypt.BCryptAddContextFunction
+@ stdcall BCryptAddContextFunctionProvider(long wstr long wstr wstr long) bcrypt.BCryptAddContextFunctionProvider
 @ stdcall BCryptCloseAlgorithmProvider(ptr long) bcrypt.BCryptCloseAlgorithmProvider
 @ stub BCryptConfigureContext
 @ stub BCryptConfigureContextFunction
@@ -14,7 +14,7 @@
 @ stdcall BCryptDestroyKey(ptr) bcrypt.BCryptDestroyKey
 @ stub BCryptDestroySecret
 @ stdcall BCryptDuplicateHash(ptr ptr ptr long long) bcrypt.BCryptDuplicateHash
-@ stub BCryptDuplicateKey
+@ stdcall BCryptDuplicateKey(ptr ptr ptr long long) bcrypt.BCryptDuplicateKey
 @ stdcall BCryptEncrypt(ptr ptr long ptr ptr long ptr long ptr long) bcrypt.BCryptEncrypt
 @ stdcall BCryptEnumAlgorithms(long ptr ptr long) bcrypt.BCryptEnumAlgorithms
 @ stub BCryptEnumContextFunctionProviders
@@ -22,7 +22,7 @@
 @ stub BCryptEnumContexts
 @ stub BCryptEnumProviders
 @ stub BCryptEnumRegisteredProviders
-@ stub BCryptExportKey
+@ stdcall BCryptExportKey(ptr ptr wstr ptr long ptr long) bcrypt.BCryptExportKey
 @ stub BCryptFinalizeKeyPair
 @ stdcall BCryptFinishHash(ptr ptr long long) bcrypt.BCryptFinishHash
 @ stub BCryptFreeBuffer
@@ -33,8 +33,8 @@
 @ stdcall BCryptGetProperty(ptr wstr ptr long ptr long) bcrypt.BCryptGetProperty
 @ stdcall BCryptHash(ptr ptr long ptr long ptr long) bcrypt.BCryptHash
 @ stdcall BCryptHashData(ptr ptr long long) bcrypt.BCryptHashData
-@ stub BCryptImportKey
-@ stub BCryptImportKeyPair
+@ stdcall BCryptImportKey(ptr ptr wstr ptr ptr long ptr long long) bcrypt.BCryptImportKey
+@ stdcall BCryptImportKeyPair(ptr ptr wstr ptr ptr long long) bcrypt.BCryptImportKeyPair
 @ stub BCryptKeyDerivation
 @ stdcall BCryptOpenAlgorithmProvider(ptr wstr wstr long) bcrypt.BCryptOpenAlgorithmProvider
 @ stub BCryptQueryContextConfiguration
@@ -42,9 +42,9 @@
 @ stub BCryptQueryContextFunctionProperty
 @ stub BCryptQueryProviderRegistration
 @ stub BCryptRegisterConfigChangeNotify
-@ stub BCryptRegisterProvider
-@ stub BCryptRemoveContextFunction
-@ stub BCryptRemoveContextFunctionProvider
+@ stdcall BCryptRegisterProvider(wstr long ptr) bcrypt.BCryptRegisterProvider
+@ stdcall BCryptRemoveContextFunction(long wstr long wstr) bcrypt.BCryptRemoveContextFunction
+@ stdcall BCryptRemoveContextFunctionProvider(long wstr long wstr wstr) bcrypt.BCryptRemoveContextFunctionProvider
 @ stub BCryptResolveProviders
 @ stub BCryptSecretAgreement
 @ stub BCryptSetAuditingInterface
@@ -52,8 +52,8 @@
 @ stdcall BCryptSetProperty(ptr wstr ptr long long) bcrypt.BCryptSetProperty
 @ stub BCryptSignHash
 @ stub BCryptUnregisterConfigChangeNotify
-@ stub BCryptUnregisterProvider
-@ stub BCryptVerifySignature
+@ stdcall BCryptUnregisterProvider(wstr) bcrypt.BCryptUnregisterProvider
+@ stdcall BCryptVerifySignature(ptr ptr ptr long ptr long long) bcrypt.BCryptVerifySignature
 @ stub GetIsolationServerInterface
 @ stub GetKeyStorageInterface
 @ stub GetSChannelInterface

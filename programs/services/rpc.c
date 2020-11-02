@@ -920,6 +920,9 @@ DWORD __cdecl svcctl_ChangeServiceConfig2W( SC_RPC_HANDLE hService, SC_RPC_CONFI
         {
             WCHAR *descr = NULL;
 
+            if (!config.u.descr->lpDescription)
+                break;
+
             if (config.u.descr->lpDescription[0])
             {
                 if (!(descr = strdupW( config.u.descr->lpDescription )))
@@ -970,27 +973,32 @@ DWORD __cdecl svcctl_QueryServiceConfig2W( SC_RPC_HANDLE hService, DWORD level,
     switch (level)
     {
     case SERVICE_CONFIG_DESCRIPTION:
-        {
-            SERVICE_DESCRIPTIONW *descr = (SERVICE_DESCRIPTIONW *)buffer;
+    {
+        struct service_description *desc = (struct service_description *)buffer;
+        DWORD total_size = sizeof(*desc);
 
-            service_lock(service->service_entry);
-            *needed = sizeof(*descr);
+        service_lock(service->service_entry);
+        if (service->service_entry->description)
+            total_size += strlenW(service->service_entry->description) * sizeof(WCHAR);
+
+        *needed = total_size;
+        if (size >= total_size)
+        {
             if (service->service_entry->description)
-                *needed += (strlenW(service->service_entry->description) + 1) * sizeof(WCHAR);
-            if (size >= *needed)
             {
-                if (service->service_entry->description)
-                {
-                    /* store a buffer offset instead of a pointer */
-                    descr->lpDescription = (WCHAR *)((BYTE *)(descr + 1) - buffer);
-                    strcpyW( (WCHAR *)(descr + 1), service->service_entry->description );
-                }
-                else descr->lpDescription = NULL;
+                strcpyW( desc->description, service->service_entry->description );
+                desc->size = total_size - FIELD_OFFSET(struct service_description, description);
             }
-            else err = ERROR_INSUFFICIENT_BUFFER;
-            service_unlock(service->service_entry);
+            else
+            {
+                desc->description[0] = 0;
+                desc->size           = 0;
+            }
         }
-        break;
+        else err = ERROR_INSUFFICIENT_BUFFER;
+        service_unlock(service->service_entry);
+    }
+    break;
 
     case SERVICE_CONFIG_PRESHUTDOWN_INFO:
         service_lock(service->service_entry);
@@ -1204,7 +1212,7 @@ DWORD __cdecl svcctl_StartServiceW(
     if (service->service_entry->config.dwStartType == SERVICE_DISABLED)
         return ERROR_SERVICE_DISABLED;
 
-    if (!scmdatabase_lock_startup(service->service_entry->db))
+    if (!scmdatabase_lock_startup(service->service_entry->db, 3000))
         return ERROR_SERVICE_DATABASE_LOCKED;
 
     err = service_start(service->service_entry, dwNumServiceArgs, lpServiceArgVectors);
@@ -1366,7 +1374,7 @@ DWORD __cdecl svcctl_LockServiceDatabase(
     if ((err = validate_scm_handle(hSCManager, SC_MANAGER_LOCK, &manager)) != ERROR_SUCCESS)
         return err;
 
-    if (!scmdatabase_lock_startup(manager->db))
+    if (!scmdatabase_lock_startup(manager->db, 0))
         return ERROR_SERVICE_DATABASE_LOCKED;
 
     lock = HeapAlloc(GetProcessHeap(), 0, sizeof(struct sc_lock));
@@ -1425,11 +1433,10 @@ DWORD __cdecl svcctl_EnumServicesStatusW(
     LPDWORD returned,
     LPDWORD resume)
 {
-    DWORD err, sz, total_size, num_services;
-    DWORD_PTR offset;
+    DWORD err, sz, total_size, num_services, offset;
     struct sc_manager_handle *manager;
     struct service_entry *service;
-    ENUM_SERVICE_STATUSW *s;
+    struct enum_service_status *s;
 
     WINE_TRACE("(%p, 0x%x, 0x%x, %p, %u, %p, %p, %p)\n", hmngr, type, state, buffer, size, needed, returned, resume);
 
@@ -1449,7 +1456,7 @@ DWORD __cdecl svcctl_EnumServicesStatusW(
     {
         if ((service->status.dwServiceType & type) && map_state(service->status.dwCurrentState, state))
         {
-            total_size += sizeof(ENUM_SERVICE_STATUSW);
+            total_size += sizeof(*s);
             total_size += (strlenW(service->name) + 1) * sizeof(WCHAR);
             if (service->config.lpDisplayName)
             {
@@ -1465,26 +1472,26 @@ DWORD __cdecl svcctl_EnumServicesStatusW(
         scmdatabase_unlock(manager->db);
         return ERROR_MORE_DATA;
     }
-    s = (ENUM_SERVICE_STATUSW *)buffer;
-    offset = num_services * sizeof(ENUM_SERVICE_STATUSW);
+    s = (struct enum_service_status *)buffer;
+    offset = num_services * sizeof(struct enum_service_status);
     LIST_FOR_EACH_ENTRY(service, &manager->db->services, struct service_entry, entry)
     {
         if ((service->status.dwServiceType & type) && map_state(service->status.dwCurrentState, state))
         {
             sz = (strlenW(service->name) + 1) * sizeof(WCHAR);
             memcpy(buffer + offset, service->name, sz);
-            s->lpServiceName = (WCHAR *)offset; /* store a buffer offset instead of a pointer */
+            s->service_name = offset;
             offset += sz;
 
-            if (!service->config.lpDisplayName) s->lpDisplayName = NULL;
+            if (!service->config.lpDisplayName) s->display_name = 0;
             else
             {
                 sz = (strlenW(service->config.lpDisplayName) + 1) * sizeof(WCHAR);
                 memcpy(buffer + offset, service->config.lpDisplayName, sz);
-                s->lpDisplayName = (WCHAR *)offset;
+                s->display_name = offset;
                 offset += sz;
             }
-            s->ServiceStatus = service->status;
+            s->service_status = service->status;
             s++;
         }
     }
@@ -1545,7 +1552,7 @@ DWORD __cdecl svcctl_EnumServicesStatusExW(
     DWORD_PTR offset;
     struct sc_manager_handle *manager;
     struct service_entry *service;
-    ENUM_SERVICE_STATUS_PROCESSW *s;
+    struct enum_service_status_process *s;
 
     WINE_TRACE("(%p, 0x%x, 0x%x, %p, %u, %p, %p, %s)\n", hmngr, type, state, buffer, size,
                needed, returned, wine_dbgstr_w(group));
@@ -1573,7 +1580,7 @@ DWORD __cdecl svcctl_EnumServicesStatusExW(
         if ((service->status.dwServiceType & type) && map_state(service->status.dwCurrentState, state)
             && match_group(service->config.lpLoadOrderGroup, group))
         {
-            total_size += sizeof(ENUM_SERVICE_STATUS_PROCESSW);
+            total_size += sizeof(*s);
             total_size += (strlenW(service->name) + 1) * sizeof(WCHAR);
             if (service->config.lpDisplayName)
             {
@@ -1589,8 +1596,8 @@ DWORD __cdecl svcctl_EnumServicesStatusExW(
         scmdatabase_unlock(manager->db);
         return ERROR_MORE_DATA;
     }
-    s = (ENUM_SERVICE_STATUS_PROCESSW *)buffer;
-    offset = num_services * sizeof(ENUM_SERVICE_STATUS_PROCESSW);
+    s = (struct enum_service_status_process *)buffer;
+    offset = num_services * sizeof(*s);
     LIST_FOR_EACH_ENTRY(service, &manager->db->services, struct service_entry, entry)
     {
         if ((service->status.dwServiceType & type) && map_state(service->status.dwCurrentState, state)
@@ -1598,18 +1605,18 @@ DWORD __cdecl svcctl_EnumServicesStatusExW(
         {
             sz = (strlenW(service->name) + 1) * sizeof(WCHAR);
             memcpy(buffer + offset, service->name, sz);
-            s->lpServiceName = (WCHAR *)offset; /* store a buffer offset instead of a pointer */
+            s->service_name = offset;
             offset += sz;
 
-            if (!service->config.lpDisplayName) s->lpDisplayName = NULL;
+            if (!service->config.lpDisplayName) s->display_name = 0;
             else
             {
                 sz = (strlenW(service->config.lpDisplayName) + 1) * sizeof(WCHAR);
                 memcpy(buffer + offset, service->config.lpDisplayName, sz);
-                s->lpDisplayName = (WCHAR *)offset;
+                s->display_name = offset;
                 offset += sz;
             }
-            fill_status_process(&s->ServiceStatusProcess, service);
+            fill_status_process(&s->service_status_process, service);
             s++;
         }
     }

@@ -63,7 +63,7 @@ static inline HTMLElement *elem_from_HTMLDOMNode(HTMLDOMNode *iface)
     return CONTAINING_RECORD(iface, HTMLElement, node);
 }
 
-static IHTMLElementCollection *HTMLElementCollection_Create(HTMLElement **elems, DWORD len);
+static IHTMLElementCollection *HTMLElementCollection_Create(HTMLElement**,DWORD,compat_mode_t);
 
 static void elem_vector_add(elem_vector_t *buf, HTMLElement *elem)
 {
@@ -377,18 +377,18 @@ static BOOL is_elem_name(HTMLElement *elem, LPCWSTR name)
 
     static const PRUnichar nameW[] = {'n','a','m','e',0};
 
-    if(!elem->nselem)
+    if(!elem->dom_element)
         return FALSE;
 
     nsAString_Init(&nsstr, NULL);
-    nsIDOMHTMLElement_GetId(elem->nselem, &nsstr);
+    nsIDOMElement_GetId(elem->dom_element, &nsstr);
     nsAString_GetData(&nsstr, &str);
     if(!strcmpiW(str, name)) {
         nsAString_Finish(&nsstr);
         return TRUE;
     }
 
-    nsres = get_elem_attr_value(elem->nselem, nameW, &nsstr, &str);
+    nsres = get_elem_attr_value(elem->dom_element, nameW, &nsstr, &str);
     if(NS_SUCCEEDED(nsres)) {
         ret = !strcmpiW(str, name);
         nsAString_Finish(&nsstr);
@@ -421,7 +421,7 @@ static HRESULT WINAPI HTMLElementCollection_item(IHTMLElementCollection *iface,
     case VT_I4:
     case VT_INT:
         if(V_I4(&name) < 0)
-            return E_INVALIDARG;
+            return dispex_compat_mode(&This->dispex) < COMPAT_MODE_IE9 ? E_INVALIDARG : S_OK;
         hres = get_item_idx(This, V_I4(&name), pdisp);
         break;
 
@@ -462,7 +462,8 @@ static HRESULT WINAPI HTMLElementCollection_item(IHTMLElementCollection *iface,
 
             if(buf.len > 1) {
                 elem_vector_normalize(&buf);
-                *pdisp = (IDispatch*)HTMLElementCollection_Create(buf.buf, buf.len);
+                *pdisp = (IDispatch*)HTMLElementCollection_Create(buf.buf, buf.len,
+                                                                  dispex_compat_mode(&This->dispex));
             }else {
                 if(buf.len == 1) {
                     /* Already AddRef-ed */
@@ -506,10 +507,10 @@ static HRESULT WINAPI HTMLElementCollection_tags(IHTMLElementCollection *iface,
     nsAString_Init(&tag_str, NULL);
 
     for(i=0; i<This->len; i++) {
-        if(!This->elems[i]->nselem)
+        if(!This->elems[i]->dom_element)
             continue;
 
-        nsIDOMHTMLElement_GetTagName(This->elems[i]->nselem, &tag_str);
+        nsIDOMElement_GetTagName(This->elems[i]->dom_element, &tag_str);
         nsAString_GetData(&tag_str, &tag);
 
         if(CompareStringW(LOCALE_SYSTEM_DEFAULT, NORM_IGNORECASE, tag, -1,
@@ -524,7 +525,8 @@ static HRESULT WINAPI HTMLElementCollection_tags(IHTMLElementCollection *iface,
 
     TRACE("fount %d tags\n", buf.len);
 
-    *pdisp = (IDispatch*)HTMLElementCollection_Create(buf.buf, buf.len);
+    *pdisp = (IDispatch*)HTMLElementCollection_Create(buf.buf, buf.len,
+                                                      dispex_compat_mode(&This->dispex));
     return S_OK;
 }
 
@@ -624,7 +626,7 @@ static dispex_static_data_t HTMLElementCollection_dispex = {
     HTMLElementCollection_iface_tids
 };
 
-static void create_all_list(HTMLDocumentNode *doc, HTMLDOMNode *elem, elem_vector_t *buf)
+static void create_all_list(HTMLDOMNode *elem, elem_vector_t *buf)
 {
     nsIDOMNodeList *nsnode_list;
     nsIDOMNode *iter;
@@ -652,14 +654,14 @@ static void create_all_list(HTMLDocumentNode *doc, HTMLDOMNode *elem, elem_vecto
         if(is_elem_node(iter)) {
             HTMLDOMNode *node;
 
-            hres = get_node(doc, iter, TRUE, &node);
+            hres = get_node(iter, TRUE, &node);
             if(FAILED(hres)) {
                 FIXME("get_node failed: %08x\n", hres);
                 continue;
             }
 
             elem_vector_add(buf, elem_from_HTMLDOMNode(node));
-            create_all_list(doc, node, buf);
+            create_all_list(node, buf);
         }
     }
 }
@@ -674,13 +676,14 @@ IHTMLElementCollection *create_all_collection(HTMLDOMNode *node, BOOL include_ro
         node_addref(node);
         elem_vector_add(&buf, elem_from_HTMLDOMNode(node));
     }
-    create_all_list(node->doc, node, &buf);
+    create_all_list(node, &buf);
     elem_vector_normalize(&buf);
 
-    return HTMLElementCollection_Create(buf.buf, buf.len);
+    return HTMLElementCollection_Create(buf.buf, buf.len,
+                                        dispex_compat_mode(&node->event_target.dispex));
 }
 
-IHTMLElementCollection *create_collection_from_nodelist(HTMLDocumentNode *doc, nsIDOMNodeList *nslist)
+IHTMLElementCollection *create_collection_from_nodelist(nsIDOMNodeList *nslist, compat_mode_t compat_mode)
 {
     UINT32 length = 0, i;
     HTMLDOMNode *node;
@@ -699,7 +702,7 @@ IHTMLElementCollection *create_collection_from_nodelist(HTMLDocumentNode *doc, n
         for(i=0; i<length; i++) {
             nsIDOMNodeList_Item(nslist, i, &nsnode);
             if(is_elem_node(nsnode)) {
-                hres = get_node(doc, nsnode, TRUE, &node);
+                hres = get_node(nsnode, TRUE, &node);
                 if(FAILED(hres))
                     continue;
                 buf.buf[buf.len++] = elem_from_HTMLDOMNode(node);
@@ -712,10 +715,10 @@ IHTMLElementCollection *create_collection_from_nodelist(HTMLDocumentNode *doc, n
         buf.buf = NULL;
     }
 
-    return HTMLElementCollection_Create(buf.buf, buf.len);
+    return HTMLElementCollection_Create(buf.buf, buf.len, compat_mode);
 }
 
-IHTMLElementCollection *create_collection_from_htmlcol(HTMLDocumentNode *doc, nsIDOMHTMLCollection *nscol)
+IHTMLElementCollection *create_collection_from_htmlcol(nsIDOMHTMLCollection *nscol, compat_mode_t compat_mode)
 {
     UINT32 length = 0, i;
     elem_vector_t buf;
@@ -733,7 +736,7 @@ IHTMLElementCollection *create_collection_from_htmlcol(HTMLDocumentNode *doc, ns
 
         for(i=0; i<length; i++) {
             nsIDOMHTMLCollection_Item(nscol, i, &nsnode);
-            hres = get_node(doc, nsnode, TRUE, &node);
+            hres = get_node(nsnode, TRUE, &node);
             nsIDOMNode_Release(nsnode);
             if(FAILED(hres))
                 break;
@@ -748,7 +751,7 @@ IHTMLElementCollection *create_collection_from_htmlcol(HTMLDocumentNode *doc, ns
         return NULL;
     }
 
-    return HTMLElementCollection_Create(buf.buf, buf.len);
+    return HTMLElementCollection_Create(buf.buf, buf.len, compat_mode);
 }
 
 HRESULT get_elem_source_index(HTMLElement *elem, LONG *ret)
@@ -789,11 +792,10 @@ HRESULT get_elem_source_index(HTMLElement *elem, LONG *ret)
         return S_OK;
     }
 
-    hres = get_node(elem->node.doc, parent_node, TRUE, &node);
+    hres = get_node(parent_node, TRUE, &node);
     nsIDOMNode_Release(parent_node);
     if(FAILED(hres))
         return hres;
-
 
     /* Create all children collection and find the element in it.
      * This could be optimized if we ever find the reason. */
@@ -803,7 +805,7 @@ HRESULT get_elem_source_index(HTMLElement *elem, LONG *ret)
         return E_OUTOFMEMORY;
     }
 
-    create_all_list(elem->node.doc, node, &buf);
+    create_all_list(node, &buf);
 
     for(i=0; i < buf.len; i++) {
         if(buf.buf[i] == elem)
@@ -820,7 +822,8 @@ HRESULT get_elem_source_index(HTMLElement *elem, LONG *ret)
     return S_OK;
 }
 
-static IHTMLElementCollection *HTMLElementCollection_Create(HTMLElement **elems, DWORD len)
+static IHTMLElementCollection *HTMLElementCollection_Create(HTMLElement **elems, DWORD len,
+                                                            compat_mode_t compat_mode)
 {
     HTMLElementCollection *ret = heap_alloc_zero(sizeof(HTMLElementCollection));
 
@@ -832,8 +835,8 @@ static IHTMLElementCollection *HTMLElementCollection_Create(HTMLElement **elems,
     ret->elems = elems;
     ret->len = len;
 
-    init_dispex(&ret->dispex, (IUnknown*)&ret->IHTMLElementCollection_iface,
-            &HTMLElementCollection_dispex);
+    init_dispex_with_compat_mode(&ret->dispex, (IUnknown*)&ret->IHTMLElementCollection_iface,
+                                 &HTMLElementCollection_dispex, compat_mode);
 
     TRACE("ret=%p len=%d\n", ret, len);
 

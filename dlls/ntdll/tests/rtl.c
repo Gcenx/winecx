@@ -24,6 +24,7 @@
 #include <stdlib.h>
 
 #include "ntdll_test.h"
+#include "in6addr.h"
 #include "inaddr.h"
 
 #ifndef __WINE_WINTERNL_H
@@ -88,9 +89,17 @@ static IMAGE_BASE_RELOCATION *(WINAPI *pLdrProcessRelocationBlock)(void*,UINT,US
 static CHAR *    (WINAPI *pRtlIpv4AddressToStringA)(const IN_ADDR *, LPSTR);
 static NTSTATUS  (WINAPI *pRtlIpv4AddressToStringExA)(const IN_ADDR *, USHORT, LPSTR, PULONG);
 static NTSTATUS  (WINAPI *pRtlIpv4StringToAddressA)(PCSTR, BOOLEAN, PCSTR *, IN_ADDR *);
+static NTSTATUS  (WINAPI *pRtlIpv4StringToAddressExA)(PCSTR, BOOLEAN, IN_ADDR *, PUSHORT);
+static CHAR *    (WINAPI *pRtlIpv6AddressToStringA)(struct in6_addr *, PSTR);
+static NTSTATUS  (WINAPI *pRtlIpv6AddressToStringExA)(struct in6_addr *, ULONG, USHORT, PCHAR, PULONG);
+static NTSTATUS  (WINAPI *pRtlIpv6StringToAddressA)(PCSTR, PCSTR *, struct in6_addr *);
+static NTSTATUS  (WINAPI *pRtlIpv6StringToAddressW)(PCWSTR, PCWSTR *, struct in6_addr *);
+static NTSTATUS  (WINAPI *pRtlIpv6StringToAddressExA)(PCSTR, struct in6_addr *, PULONG, PUSHORT);
+static NTSTATUS  (WINAPI *pRtlIpv6StringToAddressExW)(PCWSTR, struct in6_addr *, PULONG, PUSHORT);
 static NTSTATUS  (WINAPI *pLdrAddRefDll)(ULONG, HMODULE);
 static NTSTATUS  (WINAPI *pLdrLockLoaderLock)(ULONG, ULONG*, ULONG_PTR*);
 static NTSTATUS  (WINAPI *pLdrUnlockLoaderLock)(ULONG, ULONG_PTR);
+static NTSTATUS  (WINAPI *pRtlMultiByteToUnicodeN)(LPWSTR, DWORD, LPDWORD, LPCSTR, DWORD);
 static NTSTATUS  (WINAPI *pRtlGetCompressionWorkSpaceSize)(USHORT, PULONG, PULONG);
 static NTSTATUS  (WINAPI *pRtlDecompressBuffer)(USHORT, PUCHAR, ULONG, const UCHAR*, ULONG, PULONG);
 static NTSTATUS  (WINAPI *pRtlDecompressFragment)(USHORT, PUCHAR, ULONG, const UCHAR*, ULONG, ULONG, PULONG, PVOID);
@@ -99,6 +108,10 @@ static BOOL      (WINAPI *pRtlIsCriticalSectionLocked)(CRITICAL_SECTION *);
 static BOOL      (WINAPI *pRtlIsCriticalSectionLockedByThread)(CRITICAL_SECTION *);
 static NTSTATUS  (WINAPI *pRtlInitializeCriticalSectionEx)(CRITICAL_SECTION *, ULONG, ULONG);
 static NTSTATUS  (WINAPI *pLdrEnumerateLoadedModules)(void *, void *, void *);
+static NTSTATUS  (WINAPI *pRtlMakeSelfRelativeSD)(PSECURITY_DESCRIPTOR,PSECURITY_DESCRIPTOR,LPDWORD);
+static NTSTATUS  (WINAPI *pRtlAbsoluteToSelfRelativeSD)(PSECURITY_DESCRIPTOR,PSECURITY_DESCRIPTOR,PULONG);
+static NTSTATUS  (WINAPI *pLdrRegisterDllNotification)(ULONG, PLDR_DLL_NOTIFICATION_FUNCTION, void *, void **);
+static NTSTATUS  (WINAPI *pLdrUnregisterDllNotification)(void *);
 
 static HMODULE hkernel32 = 0;
 static BOOL      (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
@@ -106,10 +119,15 @@ static BOOL      (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
 
 #define LEN 16
 static const char* src_src = "This is a test!"; /* 16 bytes long, incl NUL */
+static WCHAR ws2_32dllW[] = {'w','s','2','_','3','2','.','d','l','l',0};
+static WCHAR nsidllW[]    = {'n','s','i','.','d','l','l',0};
+static WCHAR wintrustdllW[] = {'w','i','n','t','r','u','s','t','.','d','l','l',0};
+static WCHAR crypt32dllW[] = {'c','r','y','p','t','3','2','.','d','l','l',0};
 static ULONG src_aligned_block[4];
 static ULONG dest_aligned_block[32];
 static const char *src = (const char*)src_aligned_block;
 static char* dest = (char*)dest_aligned_block;
+const WCHAR *expected_dll = nsidllW;
 
 static void InitFunctionPtrs(void)
 {
@@ -142,9 +160,17 @@ static void InitFunctionPtrs(void)
         pRtlIpv4AddressToStringA = (void *)GetProcAddress(hntdll, "RtlIpv4AddressToStringA");
         pRtlIpv4AddressToStringExA = (void *)GetProcAddress(hntdll, "RtlIpv4AddressToStringExA");
         pRtlIpv4StringToAddressA = (void *)GetProcAddress(hntdll, "RtlIpv4StringToAddressA");
+        pRtlIpv4StringToAddressExA = (void *)GetProcAddress(hntdll, "RtlIpv4StringToAddressExA");
+        pRtlIpv6AddressToStringA = (void *)GetProcAddress(hntdll, "RtlIpv6AddressToStringA");
+        pRtlIpv6AddressToStringExA = (void *)GetProcAddress(hntdll, "RtlIpv6AddressToStringExA");
+        pRtlIpv6StringToAddressA = (void *)GetProcAddress(hntdll, "RtlIpv6StringToAddressA");
+        pRtlIpv6StringToAddressW = (void *)GetProcAddress(hntdll, "RtlIpv6StringToAddressW");
+        pRtlIpv6StringToAddressExA = (void *)GetProcAddress(hntdll, "RtlIpv6StringToAddressExA");
+        pRtlIpv6StringToAddressExW = (void *)GetProcAddress(hntdll, "RtlIpv6StringToAddressExW");
         pLdrAddRefDll = (void *)GetProcAddress(hntdll, "LdrAddRefDll");
         pLdrLockLoaderLock = (void *)GetProcAddress(hntdll, "LdrLockLoaderLock");
         pLdrUnlockLoaderLock = (void *)GetProcAddress(hntdll, "LdrUnlockLoaderLock");
+        pRtlMultiByteToUnicodeN = (void *)GetProcAddress(hntdll, "RtlMultiByteToUnicodeN");
         pRtlGetCompressionWorkSpaceSize = (void *)GetProcAddress(hntdll, "RtlGetCompressionWorkSpaceSize");
         pRtlDecompressBuffer = (void *)GetProcAddress(hntdll, "RtlDecompressBuffer");
         pRtlDecompressFragment = (void *)GetProcAddress(hntdll, "RtlDecompressFragment");
@@ -153,6 +179,10 @@ static void InitFunctionPtrs(void)
         pRtlIsCriticalSectionLockedByThread = (void *)GetProcAddress(hntdll, "RtlIsCriticalSectionLockedByThread");
         pRtlInitializeCriticalSectionEx = (void *)GetProcAddress(hntdll, "RtlInitializeCriticalSectionEx");
         pLdrEnumerateLoadedModules = (void *)GetProcAddress(hntdll, "LdrEnumerateLoadedModules");
+        pRtlMakeSelfRelativeSD = (void *)GetProcAddress(hntdll, "RtlMakeSelfRelativeSD");
+        pRtlAbsoluteToSelfRelativeSD = (void *)GetProcAddress(hntdll, "RtlAbsoluteToSelfRelativeSD");
+        pLdrRegisterDllNotification = (void *)GetProcAddress(hntdll, "LdrRegisterDllNotification");
+        pLdrUnregisterDllNotification = (void *)GetProcAddress(hntdll, "LdrUnregisterDllNotification");
     }
     hkernel32 = LoadLibraryA("kernel32.dll");
     ok(hkernel32 != 0, "LoadLibrary failed\n");
@@ -360,8 +390,8 @@ static void test_RtlUlonglongByteSwap(void)
 
     result = pRtlUlonglongByteSwap( ((ULONGLONG)0x76543210 << 32) | 0x87654321 );
     ok( (((ULONGLONG)0x21436587 << 32) | 0x10325476) == result,
-       "RtlUlonglongByteSwap(0x7654321087654321) returns 0x%x%08x, expected 0x2143658710325476\n",
-       (DWORD)(result >> 32), (DWORD)result);
+       "RtlUlonglongByteSwap(0x7654321087654321) returns 0x%s, expected 0x2143658710325476\n",
+       wine_dbgstr_longlong(result));
 }
 
 
@@ -602,11 +632,11 @@ static void test_RtlUniform(void)
         seed_bak = seed;
         result = pRtlUniform(&seed);
         ok(result == expected,
-                "test: 0x%x%08x RtlUniform(&seed (seed == %x)) returns %x, expected %x\n",
-                (DWORD)(num >> 32), (DWORD)num, seed_bak, result, expected);
+                "test: 0x%s RtlUniform(&seed (seed == %x)) returns %x, expected %x\n",
+                wine_dbgstr_longlong(num), seed_bak, result, expected);
         ok(seed == expected,
-                "test: 0x%x%08x RtlUniform(&seed (seed == %x)) sets seed to %x, expected %x\n",
-                (DWORD)(num >> 32), (DWORD)num, seed_bak, result, expected);
+                "test: 0x%s RtlUniform(&seed (seed == %x)) sets seed to %x, expected %x\n",
+                wine_dbgstr_longlong(num), seed_bak, result, expected);
     } /* for */
 /*
  * Further investigation shows: In the different regions the highest bit
@@ -649,11 +679,11 @@ static void test_RtlUniform(void)
         seed_bak = seed;
         result = pRtlUniform(&seed);
         ok(result == expected,
-                "test: 0x%x%08x RtlUniform(&seed (seed == %x)) returns %x, expected %x\n",
-                (DWORD)(num >> 32), (DWORD)num, seed_bak, result, expected);
+                "test: 0x%s RtlUniform(&seed (seed == %x)) returns %x, expected %x\n",
+                wine_dbgstr_longlong(num), seed_bak, result, expected);
         ok(seed == expected,
-                "test: 0x%x%08x RtlUniform(&seed (seed == %x)) sets seed to %x, expected %x\n",
-                (DWORD)(num >> 32), (DWORD)num, seed_bak, result, expected);
+                "test: 0x%s RtlUniform(&seed (seed == %x)) sets seed to %x, expected %x\n",
+                wine_dbgstr_longlong(num), seed_bak, result, expected);
     } /* for */
 /*
  * More tests show that RtlUniform does not return 0x7ffffffd for seed values
@@ -676,7 +706,7 @@ static void test_RtlRandom(void)
     }
 
     seed = 0;
-    for (i = 0; i < sizeof(res) / sizeof(res[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(res); i++)
     {
         res[i] = pRtlRandom(&seed);
         ok(seed != res[i], "%i: seed is same as res %x\n", i, seed);
@@ -704,7 +734,6 @@ static const all_accesses_t all_accesses[] = {
     {0xFEDCBA76, 0xC8C4B242, 1},
     {0xC8C4B242, 0xFEDCBA76, 0},
 };
-#define NB_ALL_ACCESSES (sizeof(all_accesses)/sizeof(*all_accesses))
 
 
 static void test_RtlAreAllAccessesGranted(void)
@@ -718,7 +747,7 @@ static void test_RtlAreAllAccessesGranted(void)
         return;
     }
 
-    for (test_num = 0; test_num < NB_ALL_ACCESSES; test_num++) {
+    for (test_num = 0; test_num < ARRAY_SIZE(all_accesses); test_num++) {
 	result = pRtlAreAllAccessesGranted(all_accesses[test_num].GrantedAccess,
 					   all_accesses[test_num].DesiredAccess);
 	ok(all_accesses[test_num].result == result,
@@ -747,7 +776,6 @@ static const any_accesses_t any_accesses[] = {
     {0xFEDCBA76, 0x00040000, 1},
     {0xFED8BA76, 0x00040000, 0},
 };
-#define NB_ANY_ACCESSES (sizeof(any_accesses)/sizeof(*any_accesses))
 
 
 static void test_RtlAreAnyAccessesGranted(void)
@@ -761,7 +789,7 @@ static void test_RtlAreAnyAccessesGranted(void)
         return;
     }
 
-    for (test_num = 0; test_num < NB_ANY_ACCESSES; test_num++) {
+    for (test_num = 0; test_num < ARRAY_SIZE(any_accesses); test_num++) {
 	result = pRtlAreAnyAccessesGranted(any_accesses[test_num].GrantedAccess,
 					   any_accesses[test_num].DesiredAccess);
 	ok(any_accesses[test_num].result == result,
@@ -1132,97 +1160,107 @@ static void test_RtlIpv4AddressToStringEx(void)
         res, size, buffer);
 }
 
+static struct
+{
+    PCSTR address;
+    NTSTATUS res;
+    int terminator_offset;
+    int ip[4];
+    enum { normal_4, strict_diff_4 = 1, ex_fail_4 = 2 } flags;
+    NTSTATUS res_strict;
+    int terminator_offset_strict;
+    int ip_strict[4];
+} ipv4_tests[] =
+{
+    { "",                       STATUS_INVALID_PARAMETER,  0, { -1 } },
+    { " ",                      STATUS_INVALID_PARAMETER,  0, { -1 } },
+    { "1.1.1.1",                STATUS_SUCCESS,            7, {   1,   1,   1,   1 } },
+    { "0.0.0.0",                STATUS_SUCCESS,            7, {   0,   0,   0,   0 } },
+    { "255.255.255.255",        STATUS_SUCCESS,           15, { 255, 255, 255, 255 } },
+    { "255.255.255.255:123",    STATUS_SUCCESS,           15, { 255, 255, 255, 255 } },
+    { "255.255.255.256",        STATUS_INVALID_PARAMETER, 15, { -1 } },
+    { "255.255.255.4294967295", STATUS_INVALID_PARAMETER, 22, { -1 } },
+    { "255.255.255.4294967296", STATUS_INVALID_PARAMETER, 21, { -1 } },
+    { "255.255.255.4294967297", STATUS_INVALID_PARAMETER, 21, { -1 } },
+    { "a",                      STATUS_INVALID_PARAMETER,  0, { -1 } },
+    { "1.1.1.0xaA",             STATUS_SUCCESS,           10, {   1,   1,   1, 170 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  8, { -1 } },
+    { "1.1.1.0XaA",             STATUS_SUCCESS,           10, {   1,   1,   1, 170 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  8, { -1 } },
+    { "1.1.1.0x",               STATUS_INVALID_PARAMETER,  8, { -1 } },
+    { "1.1.1.0xff",             STATUS_SUCCESS,           10, {   1,   1,   1, 255 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  8, { -1 } },
+    { "1.1.1.0x100",            STATUS_INVALID_PARAMETER, 11, { -1 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  8, { -1 } },
+    { "1.1.1.0xffffffff",       STATUS_INVALID_PARAMETER, 16, { -1 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  8, { -1 } },
+    { "1.1.1.0x100000000",      STATUS_INVALID_PARAMETER, 16, { -1, 0, 0, 0 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  8, { -1 } },
+    { "1.1.1.010",              STATUS_SUCCESS,            9, {   1,   1,   1,   8 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  7, { -1 } },
+    { "1.1.1.00",               STATUS_SUCCESS,            8, {   1,   1,   1,   0 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  7, { -1 } },
+    { "1.1.1.007",              STATUS_SUCCESS,            9, {   1,   1,   1,   7 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  7, { -1 } },
+    { "1.1.1.08",               STATUS_INVALID_PARAMETER,  7, { -1 } },
+    { "1.1.1.008",              STATUS_SUCCESS,            8, {   1,   1,   1,   0 }, strict_diff_4 | ex_fail_4,
+                                STATUS_INVALID_PARAMETER,  7, { -1 } },
+    { "1.1.1.0a",               STATUS_SUCCESS,            7, {   1,   1,   1,   0 }, ex_fail_4 },
+    { "1.1.1.0o10",             STATUS_SUCCESS,            7, {   1,   1,   1,   0 }, ex_fail_4 },
+    { "1.1.1.0b10",             STATUS_SUCCESS,            7, {   1,   1,   1,   0 }, ex_fail_4 },
+    { "1.1.1.-2",               STATUS_INVALID_PARAMETER,  6, { -1 } },
+    { "1",                      STATUS_SUCCESS,            1, {   0,   0,   0,   1 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  1, { -1 } },
+    { "-1",                     STATUS_INVALID_PARAMETER,  0, { -1 } },
+    { "203569230",              STATUS_SUCCESS,            9, {  12,  34,  56,  78 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  9, { -1 } },
+    { "1.223756",               STATUS_SUCCESS,            8, {   1,   3, 106,  12 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  8, { -1 } },
+    { "3.4.756",                STATUS_SUCCESS,            7, {   3,   4,   2, 244 }, strict_diff_4,
+                                STATUS_INVALID_PARAMETER,  7, { -1 } },
+    { "3.4.756.1",              STATUS_INVALID_PARAMETER,  9, { -1 } },
+    { "3.4.65536",              STATUS_INVALID_PARAMETER,  9, { -1 } },
+    { "3.4.5.6.7",              STATUS_INVALID_PARAMETER,  7, { -1 } },
+    { "3.4.5.+6",               STATUS_INVALID_PARAMETER,  6, { -1 } },
+    { " 3.4.5.6",               STATUS_INVALID_PARAMETER,  0, { -1 } },
+    { "\t3.4.5.6",              STATUS_INVALID_PARAMETER,  0, { -1 } },
+    { "3.4.5.6 ",               STATUS_SUCCESS,            7, {   3,   4,   5,   6 }, ex_fail_4 },
+    { "3. 4.5.6",               STATUS_INVALID_PARAMETER,  2, { -1 } },
+    { ".",                      STATUS_INVALID_PARAMETER,  1, { -1 } },
+    { "..",                     STATUS_INVALID_PARAMETER,  1, { -1 } },
+    { "1.",                     STATUS_INVALID_PARAMETER,  2, { -1 } },
+    { "1..",                    STATUS_INVALID_PARAMETER,  3, { -1 } },
+    { ".1",                     STATUS_INVALID_PARAMETER,  1, { -1 } },
+    { ".1.",                    STATUS_INVALID_PARAMETER,  1, { -1 } },
+    { ".1.2.3",                 STATUS_INVALID_PARAMETER,  1, { -1 } },
+    { "0.1.2.3",                STATUS_SUCCESS,            7, {   0,   1,   2,   3 } },
+    { "0.1.2.3.",               STATUS_INVALID_PARAMETER,  7, { -1 } },
+    { "[0.1.2.3]",              STATUS_INVALID_PARAMETER,  0, { -1 } },
+    { "::1",                    STATUS_INVALID_PARAMETER,  0, { -1 } },
+    { ":1",                     STATUS_INVALID_PARAMETER,  0, { -1 } },
+};
+
+static void init_ip4(IN_ADDR* addr, const int src[4])
+{
+    if (!src || src[0] == -1)
+    {
+        addr->S_un.S_addr = 0xabababab;
+    }
+    else
+    {
+        addr->S_un.S_un_b.s_b1 = src[0];
+        addr->S_un.S_un_b.s_b2 = src[1];
+        addr->S_un.S_un_b.s_b3 = src[2];
+        addr->S_un.S_un_b.s_b4 = src[3];
+    }
+}
+
 static void test_RtlIpv4StringToAddress(void)
 {
     NTSTATUS res;
     IN_ADDR ip, expected_ip;
     PCSTR terminator;
     CHAR dummy;
-    struct
-    {
-        PCSTR address;
-        NTSTATUS res;
-        int terminator_offset;
-        int ip[4];
-        BOOL strict_is_different;
-        NTSTATUS res_strict;
-        int terminator_offset_strict;
-        int ip_strict[4];
-    } tests[] =
-    {
-        { "",                STATUS_INVALID_PARAMETER,  0, { -1 } },
-        { " ",               STATUS_INVALID_PARAMETER,  0, { -1 } },
-        { "1.1.1.1",         STATUS_SUCCESS,            7, {   1,   1,   1,   1 } },
-        { "0.0.0.0",         STATUS_SUCCESS,            7, {   0,   0,   0,   0 } },
-        { "255.255.255.255", STATUS_SUCCESS,           15, { 255, 255, 255, 255 } },
-        { "255.255.255.255:123",
-                             STATUS_SUCCESS,           15, { 255, 255, 255, 255 } },
-        { "255.255.255.256", STATUS_INVALID_PARAMETER, 15, { -1 } },
-        { "255.255.255.4294967295",
-                             STATUS_INVALID_PARAMETER, 22, { -1 } },
-        { "255.255.255.4294967296",
-                             STATUS_INVALID_PARAMETER, 21, { -1 } },
-        { "255.255.255.4294967297",
-                             STATUS_INVALID_PARAMETER, 21, { -1 } },
-        { "a",               STATUS_INVALID_PARAMETER,  0, { -1 } },
-        { "1.1.1.0xaA",      STATUS_SUCCESS,           10, {   1,   1,   1, 170 },
-                       TRUE, STATUS_INVALID_PARAMETER,  8, { -1 } },
-        { "1.1.1.0XaA",      STATUS_SUCCESS,           10, {   1,   1,   1, 170 },
-                       TRUE, STATUS_INVALID_PARAMETER,  8, { -1 } },
-        { "1.1.1.0x",        STATUS_INVALID_PARAMETER,  8, { -1 } },
-        { "1.1.1.0xff",      STATUS_SUCCESS,           10, {   1,   1,   1, 255 },
-                       TRUE, STATUS_INVALID_PARAMETER,  8, { -1 } },
-        { "1.1.1.0x100",     STATUS_INVALID_PARAMETER, 11, { -1 },
-                       TRUE, STATUS_INVALID_PARAMETER,  8, { -1 } },
-        { "1.1.1.0xffffffff",STATUS_INVALID_PARAMETER, 16, { -1 },
-                       TRUE, STATUS_INVALID_PARAMETER,  8, { -1 } },
-        { "1.1.1.0x100000000",
-                             STATUS_INVALID_PARAMETER, 16, { -1, 0, 0, 0 },
-                       TRUE, STATUS_INVALID_PARAMETER,  8, { -1 } },
-        { "1.1.1.010",       STATUS_SUCCESS,            9, {   1,   1,   1,   8 },
-                       TRUE, STATUS_INVALID_PARAMETER,  7, { -1 } },
-        { "1.1.1.00",        STATUS_SUCCESS,            8, {   1,   1,   1,   0 },
-                       TRUE, STATUS_INVALID_PARAMETER,  7, { -1 } },
-        { "1.1.1.007",       STATUS_SUCCESS,            9, {   1,   1,   1,   7 },
-                       TRUE, STATUS_INVALID_PARAMETER,  7, { -1 } },
-        { "1.1.1.08",        STATUS_INVALID_PARAMETER,  7, { -1 } },
-        { "1.1.1.008",       STATUS_SUCCESS,            8, {   1,   1,   1,   0 },
-                       TRUE, STATUS_INVALID_PARAMETER,  7, { -1 } },
-        { "1.1.1.0a",        STATUS_SUCCESS,            7, {   1,   1,   1,   0 } },
-        { "1.1.1.0o10",      STATUS_SUCCESS,            7, {   1,   1,   1,   0 } },
-        { "1.1.1.0b10",      STATUS_SUCCESS,            7, {   1,   1,   1,   0 } },
-        { "1.1.1.-2",        STATUS_INVALID_PARAMETER,  6, { -1 } },
-        { "1",               STATUS_SUCCESS,            1, {   0,   0,   0,   1 },
-                       TRUE, STATUS_INVALID_PARAMETER,  1, { -1 } },
-        { "-1",              STATUS_INVALID_PARAMETER,  0, { -1 } },
-        { "203569230",       STATUS_SUCCESS,            9, {  12,  34,  56,  78 },
-                       TRUE, STATUS_INVALID_PARAMETER,  9, { -1 } },
-        { "1.223756",        STATUS_SUCCESS,            8, {   1,   3, 106,  12 },
-                       TRUE, STATUS_INVALID_PARAMETER,  8, { -1 } },
-        { "3.4.756",         STATUS_SUCCESS,            7, {   3,   4,   2, 244 },
-                       TRUE, STATUS_INVALID_PARAMETER,  7, { -1 } },
-        { "3.4.756.1",       STATUS_INVALID_PARAMETER,  9, { -1 } },
-        { "3.4.65536",       STATUS_INVALID_PARAMETER,  9, { -1 } },
-        { "3.4.5.6.7",       STATUS_INVALID_PARAMETER,  7, { -1 } },
-        { "3.4.5.+6",        STATUS_INVALID_PARAMETER,  6, { -1 } },
-        { " 3.4.5.6",        STATUS_INVALID_PARAMETER,  0, { -1 } },
-        { "\t3.4.5.6",       STATUS_INVALID_PARAMETER,  0, { -1 } },
-        { "3.4.5.6 ",        STATUS_SUCCESS,            7, {   3,   4,   5,   6 } },
-        { "3. 4.5.6",        STATUS_INVALID_PARAMETER,  2, { -1 } },
-        { ".",               STATUS_INVALID_PARAMETER,  1, { -1 } },
-        { "..",              STATUS_INVALID_PARAMETER,  1, { -1 } },
-        { "1.",              STATUS_INVALID_PARAMETER,  2, { -1 } },
-        { "1..",             STATUS_INVALID_PARAMETER,  3, { -1 } },
-        { ".1",              STATUS_INVALID_PARAMETER,  1, { -1 } },
-        { ".1.",             STATUS_INVALID_PARAMETER,  1, { -1 } },
-        { ".1.2.3",          STATUS_INVALID_PARAMETER,  1, { -1 } },
-        { "0.1.2.3",         STATUS_SUCCESS,            7, {   0,   1,   2,   3 } },
-        { "0.1.2.3.",        STATUS_INVALID_PARAMETER,  7, { -1 } },
-        { "[0.1.2.3]",       STATUS_INVALID_PARAMETER,  0, { -1 } },
-        { "::1",             STATUS_INVALID_PARAMETER,  0, { -1 } },
-        { ":1",              STATUS_INVALID_PARAMETER,  0, { -1 } },
-    };
-    const int testcount = sizeof(tests) / sizeof(tests[0]);
     int i;
 
     if (!pRtlIpv4StringToAddressA)
@@ -1245,62 +1283,1090 @@ static void test_RtlIpv4StringToAddress(void)
         */
     }
 
-    for (i = 0; i < testcount; i++)
+    for (i = 0; i < ARRAY_SIZE(ipv4_tests); i++)
     {
         /* non-strict */
         terminator = &dummy;
         ip.S_un.S_addr = 0xabababab;
-        res = pRtlIpv4StringToAddressA(tests[i].address, FALSE, &terminator, &ip);
-        ok(res == tests[i].res,
+        res = pRtlIpv4StringToAddressA(ipv4_tests[i].address, FALSE, &terminator, &ip);
+        ok(res == ipv4_tests[i].res,
            "[%s] res = 0x%08x, expected 0x%08x\n",
-           tests[i].address, res, tests[i].res);
-        ok(terminator == tests[i].address + tests[i].terminator_offset,
+           ipv4_tests[i].address, res, ipv4_tests[i].res);
+        ok(terminator == ipv4_tests[i].address + ipv4_tests[i].terminator_offset,
            "[%s] terminator = %p, expected %p\n",
-           tests[i].address, terminator, tests[i].address + tests[i].terminator_offset);
-        if (tests[i].ip[0] == -1)
-            expected_ip.S_un.S_addr = 0xabababab;
-        else
-        {
-            expected_ip.S_un.S_un_b.s_b1 = tests[i].ip[0];
-            expected_ip.S_un.S_un_b.s_b2 = tests[i].ip[1];
-            expected_ip.S_un.S_un_b.s_b3 = tests[i].ip[2];
-            expected_ip.S_un.S_un_b.s_b4 = tests[i].ip[3];
-        }
+           ipv4_tests[i].address, terminator, ipv4_tests[i].address + ipv4_tests[i].terminator_offset);
+
+        init_ip4(&expected_ip, ipv4_tests[i].ip);
         ok(ip.S_un.S_addr == expected_ip.S_un.S_addr,
            "[%s] ip = %08x, expected %08x\n",
-           tests[i].address, ip.S_un.S_addr, expected_ip.S_un.S_addr);
+           ipv4_tests[i].address, ip.S_un.S_addr, expected_ip.S_un.S_addr);
 
-        if (!tests[i].strict_is_different)
+        if (!(ipv4_tests[i].flags & strict_diff_4))
         {
-            tests[i].res_strict = tests[i].res;
-            tests[i].terminator_offset_strict = tests[i].terminator_offset;
-            tests[i].ip_strict[0] = tests[i].ip[0];
-            tests[i].ip_strict[1] = tests[i].ip[1];
-            tests[i].ip_strict[2] = tests[i].ip[2];
-            tests[i].ip_strict[3] = tests[i].ip[3];
+            ipv4_tests[i].res_strict = ipv4_tests[i].res;
+            ipv4_tests[i].terminator_offset_strict = ipv4_tests[i].terminator_offset;
+            ipv4_tests[i].ip_strict[0] = ipv4_tests[i].ip[0];
+            ipv4_tests[i].ip_strict[1] = ipv4_tests[i].ip[1];
+            ipv4_tests[i].ip_strict[2] = ipv4_tests[i].ip[2];
+            ipv4_tests[i].ip_strict[3] = ipv4_tests[i].ip[3];
         }
         /* strict */
         terminator = &dummy;
         ip.S_un.S_addr = 0xabababab;
-        res = pRtlIpv4StringToAddressA(tests[i].address, TRUE, &terminator, &ip);
-        ok(res == tests[i].res_strict,
+        res = pRtlIpv4StringToAddressA(ipv4_tests[i].address, TRUE, &terminator, &ip);
+        ok(res == ipv4_tests[i].res_strict,
            "[%s] res = 0x%08x, expected 0x%08x\n",
-           tests[i].address, res, tests[i].res_strict);
-        ok(terminator == tests[i].address + tests[i].terminator_offset_strict,
+           ipv4_tests[i].address, res, ipv4_tests[i].res_strict);
+        ok(terminator == ipv4_tests[i].address + ipv4_tests[i].terminator_offset_strict,
            "[%s] terminator = %p, expected %p\n",
-           tests[i].address, terminator, tests[i].address + tests[i].terminator_offset_strict);
-        if (tests[i].ip_strict[0] == -1)
-            expected_ip.S_un.S_addr = 0xabababab;
-        else
-        {
-            expected_ip.S_un.S_un_b.s_b1 = tests[i].ip_strict[0];
-            expected_ip.S_un.S_un_b.s_b2 = tests[i].ip_strict[1];
-            expected_ip.S_un.S_un_b.s_b3 = tests[i].ip_strict[2];
-            expected_ip.S_un.S_un_b.s_b4 = tests[i].ip_strict[3];
-        }
+           ipv4_tests[i].address, terminator, ipv4_tests[i].address + ipv4_tests[i].terminator_offset_strict);
+
+        init_ip4(&expected_ip, ipv4_tests[i].ip_strict);
         ok(ip.S_un.S_addr == expected_ip.S_un.S_addr,
            "[%s] ip = %08x, expected %08x\n",
-           tests[i].address, ip.S_un.S_addr, expected_ip.S_un.S_addr);
+           ipv4_tests[i].address, ip.S_un.S_addr, expected_ip.S_un.S_addr);
+    }
+}
+
+static void test_RtlIpv4StringToAddressEx(void)
+{
+    NTSTATUS res;
+    IN_ADDR ip, expected_ip;
+    USHORT port;
+    static const struct
+    {
+        PCSTR address;
+        NTSTATUS res;
+        int ip[4];
+        USHORT port;
+    } ipv4_ex_tests[] =
+    {
+        { "",               STATUS_INVALID_PARAMETER,   { -1 },         0xdead },
+        { " ",              STATUS_INVALID_PARAMETER,   { -1 },         0xdead },
+        { "1.1.1.1:",       STATUS_INVALID_PARAMETER,   { 1, 1, 1, 1 }, 0xdead },
+        { "1.1.1.1+",       STATUS_INVALID_PARAMETER,   { 1, 1, 1, 1 }, 0xdead },
+        { "1.1.1.1:1",      STATUS_SUCCESS,             { 1, 1, 1, 1 }, 0x100 },
+        { "256.1.1.1:1",    STATUS_INVALID_PARAMETER,   { -1 },         0xdead },
+        { "-1.1.1.1:1",     STATUS_INVALID_PARAMETER,   { -1 },         0xdead },
+        { "0.0.0.0:0",      STATUS_INVALID_PARAMETER,   { 0, 0, 0, 0 }, 0xdead },
+        { "0.0.0.0:1",      STATUS_SUCCESS,             { 0, 0, 0, 0 }, 0x100 },
+        { "1.2.3.4:65535",  STATUS_SUCCESS,             { 1, 2, 3, 4 }, 65535 },
+        { "1.2.3.4:65536",  STATUS_INVALID_PARAMETER,   { 1, 2, 3, 4 }, 0xdead },
+        { "1.2.3.4:0xffff", STATUS_SUCCESS,             { 1, 2, 3, 4 }, 65535 },
+        { "1.2.3.4:0XfFfF", STATUS_SUCCESS,             { 1, 2, 3, 4 }, 65535 },
+        { "1.2.3.4:011064", STATUS_SUCCESS,             { 1, 2, 3, 4 }, 0x3412 },
+        { "1.2.3.4:1234a",  STATUS_INVALID_PARAMETER,   { 1, 2, 3, 4 }, 0xdead },
+        { "1.2.3.4:1234+",  STATUS_INVALID_PARAMETER,   { 1, 2, 3, 4 }, 0xdead },
+        { "1.2.3.4: 1234",  STATUS_INVALID_PARAMETER,   { 1, 2, 3, 4 }, 0xdead },
+        { "1.2.3.4:\t1234", STATUS_INVALID_PARAMETER,   { 1, 2, 3, 4 }, 0xdead },
+    };
+    unsigned int i;
+    BOOLEAN strict;
+
+    if (!pRtlIpv4StringToAddressExA)
+    {
+        skip("RtlIpv4StringToAddressEx not available\n");
+        return;
+    }
+
+    /* do not crash, and do not touch the ip / port. */
+    ip.S_un.S_addr = 0xabababab;
+    port = 0xdead;
+    res = pRtlIpv4StringToAddressExA(NULL, FALSE, &ip, &port);
+    ok(res == STATUS_INVALID_PARAMETER, "[null address] res = 0x%08x, expected 0x%08x\n",
+       res, STATUS_INVALID_PARAMETER);
+    ok(ip.S_un.S_addr == 0xabababab, "RtlIpv4StringToAddressExA should not touch the ip!, ip == %x\n", ip.S_un.S_addr);
+    ok(port == 0xdead, "RtlIpv4StringToAddressExA should not touch the port!, port == %x\n", port);
+
+    port = 0xdead;
+    res = pRtlIpv4StringToAddressExA("1.1.1.1", FALSE, NULL, &port);
+    ok(res == STATUS_INVALID_PARAMETER, "[null ip] res = 0x%08x, expected 0x%08x\n",
+       res, STATUS_INVALID_PARAMETER);
+    ok(port == 0xdead, "RtlIpv4StringToAddressExA should not touch the port!, port == %x\n", port);
+
+    ip.S_un.S_addr = 0xabababab;
+    port = 0xdead;
+    res = pRtlIpv4StringToAddressExA("1.1.1.1", FALSE, &ip, NULL);
+    ok(res == STATUS_INVALID_PARAMETER, "[null port] res = 0x%08x, expected 0x%08x\n",
+       res, STATUS_INVALID_PARAMETER);
+    ok(ip.S_un.S_addr == 0xabababab, "RtlIpv4StringToAddressExA should not touch the ip!, ip == %x\n", ip.S_un.S_addr);
+    ok(port == 0xdead, "RtlIpv4StringToAddressExA should not touch the port!, port == %x\n", port);
+
+    /* first we run the non-ex testcases on the ex function */
+    for (i = 0; i < ARRAY_SIZE(ipv4_tests); i++)
+    {
+        NTSTATUS expect_res = (ipv4_tests[i].flags & ex_fail_4) ? STATUS_INVALID_PARAMETER : ipv4_tests[i].res;
+
+        /* non-strict */
+        port = 0xdead;
+        ip.S_un.S_addr = 0xabababab;
+        res = pRtlIpv4StringToAddressExA(ipv4_tests[i].address, FALSE, &ip, &port);
+        ok(res == expect_res, "[%s] res = 0x%08x, expected 0x%08x\n",
+           ipv4_tests[i].address, res, expect_res);
+
+        init_ip4(&expected_ip, ipv4_tests[i].ip);
+        ok(ip.S_un.S_addr == expected_ip.S_un.S_addr, "[%s] ip = %08x, expected %08x\n",
+           ipv4_tests[i].address, ip.S_un.S_addr, expected_ip.S_un.S_addr);
+
+        if (!(ipv4_tests[i].flags & strict_diff_4))
+        {
+            ipv4_tests[i].res_strict = ipv4_tests[i].res;
+            ipv4_tests[i].terminator_offset_strict = ipv4_tests[i].terminator_offset;
+            ipv4_tests[i].ip_strict[0] = ipv4_tests[i].ip[0];
+            ipv4_tests[i].ip_strict[1] = ipv4_tests[i].ip[1];
+            ipv4_tests[i].ip_strict[2] = ipv4_tests[i].ip[2];
+            ipv4_tests[i].ip_strict[3] = ipv4_tests[i].ip[3];
+        }
+        /* strict */
+        expect_res = (ipv4_tests[i].flags & ex_fail_4) ? STATUS_INVALID_PARAMETER : ipv4_tests[i].res_strict;
+        port = 0xdead;
+        ip.S_un.S_addr = 0xabababab;
+        res = pRtlIpv4StringToAddressExA(ipv4_tests[i].address, TRUE, &ip, &port);
+        ok(res == expect_res, "[%s] res = 0x%08x, expected 0x%08x\n",
+           ipv4_tests[i].address, res, expect_res);
+
+        init_ip4(&expected_ip, ipv4_tests[i].ip_strict);
+        ok(ip.S_un.S_addr == expected_ip.S_un.S_addr, "[%s] ip = %08x, expected %08x\n",
+           ipv4_tests[i].address, ip.S_un.S_addr, expected_ip.S_un.S_addr);
+    }
+
+
+    for (i = 0; i < ARRAY_SIZE(ipv4_ex_tests); i++)
+    {
+        /* Strict is only relevant for the ip address, so make sure that it does not influence the port */
+        for (strict = 0; strict < 2; strict++)
+        {
+            ip.S_un.S_addr = 0xabababab;
+            port = 0xdead;
+            res = pRtlIpv4StringToAddressExA(ipv4_ex_tests[i].address, strict, &ip, &port);
+            ok(res == ipv4_ex_tests[i].res, "[%s] res = 0x%08x, expected 0x%08x\n",
+               ipv4_ex_tests[i].address, res, ipv4_ex_tests[i].res);
+
+            init_ip4(&expected_ip, ipv4_ex_tests[i].ip);
+            ok(ip.S_un.S_addr == expected_ip.S_un.S_addr, "[%s] ip = %08x, expected %08x\n",
+               ipv4_ex_tests[i].address, ip.S_un.S_addr, expected_ip.S_un.S_addr);
+            ok(port == ipv4_ex_tests[i].port, "[%s] port = %u, expected %u\n",
+               ipv4_ex_tests[i].address, port, ipv4_ex_tests[i].port);
+        }
+    }
+}
+
+/* ipv6 addresses based on the set from https://github.com/beaugunderson/javascript-ipv6/tree/master/test/data */
+static const struct
+{
+    PCSTR address;
+    NTSTATUS res;
+    int terminator_offset;
+    int ip[8];
+    /* win_broken: older versions of windows do not handle this correct
+        ex_fail: Ex function does need the string to be terminated, non-Ex does not.
+        ex_skip: test doesnt make sense for Ex (f.e. it's invalid for non-Ex but valid for Ex) */
+    enum { normal_6, win_broken_6 = 1, ex_fail_6 = 2, ex_skip_6 = 4 } flags;
+} ipv6_tests[] =
+{
+    { "0000:0000:0000:0000:0000:0000:0000:0000",        STATUS_SUCCESS,             39,
+            { 0, 0, 0, 0, 0, 0, 0, 0 } },
+    { "0000:0000:0000:0000:0000:0000:0000:0001",        STATUS_SUCCESS,             39,
+            { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
+    { "0:0:0:0:0:0:0:0",                                STATUS_SUCCESS,             15,
+            { 0, 0, 0, 0, 0, 0, 0, 0 } },
+    { "0:0:0:0:0:0:0:1",                                STATUS_SUCCESS,             15,
+            { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
+    { "0:0:0:0:0:0:0::",                                STATUS_SUCCESS,             13,
+            { 0, 0, 0, 0, 0, 0, 0, 0 }, win_broken_6 },
+    { "0:0:0:0:0:0:13.1.68.3",                          STATUS_SUCCESS,             21,
+            { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 } },
+    { "0:0:0:0:0:0::",                                  STATUS_SUCCESS,             13,
+            { 0, 0, 0, 0, 0, 0, 0, 0 } },
+    { "0:0:0:0:0::",                                    STATUS_SUCCESS,             11,
+            { 0, 0, 0, 0, 0, 0, 0, 0 } },
+    { "0:0:0:0:0:FFFF:129.144.52.38",                   STATUS_SUCCESS,             28,
+            { 0, 0, 0, 0, 0, 0xffff, 0x9081, 0x2634 } },
+    { "0::",                                            STATUS_SUCCESS,             3,
+            { 0, 0, 0, 0, 0, 0, 0, 0 } },
+    { "0:1:2:3:4:5:6:7",                                STATUS_SUCCESS,             15,
+            { 0, 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0x700 } },
+    { "1080:0:0:0:8:800:200c:417a",                     STATUS_SUCCESS,             26,
+            { 0x8010, 0, 0, 0, 0x800, 0x8, 0x0c20, 0x7a41 } },
+    { "0:a:b:c:d:e:f::",                                STATUS_SUCCESS,             13,
+            { 0, 0xa00, 0xb00, 0xc00, 0xd00, 0xe00, 0xf00, 0 }, win_broken_6 },
+    { "1111:2222:3333:4444:5555:6666:123.123.123.123",  STATUS_SUCCESS,             45,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
+    { "1111:2222:3333:4444:5555:6666:7777:8888",        STATUS_SUCCESS,             39,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888 } },
+    { "1111:2222:3333:4444:0x5555:6666:7777:8888",      STATUS_INVALID_PARAMETER,   21,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1111:2222:3333:4444:x555:6666:7777:8888",        STATUS_INVALID_PARAMETER,   20,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1111:2222:3333:4444:0r5555:6666:7777:8888",      STATUS_INVALID_PARAMETER,   21,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1111:2222:3333:4444:r5555:6666:7777:8888",       STATUS_INVALID_PARAMETER,   20,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1111:2222:3333:4444:5555:6666:7777::",           STATUS_SUCCESS,             34,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0 }, win_broken_6 },
+    { "1111:2222:3333:4444:5555:6666::",                STATUS_SUCCESS,             31,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0, 0 } },
+    { "1111:2222:3333:4444:5555:6666::8888",            STATUS_SUCCESS,             35,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0, 0x8888 } },
+    { "1111:2222:3333:4444:5555::",                     STATUS_SUCCESS,             26,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0, 0 } },
+    { "1111:2222:3333:4444:5555::123.123.123.123",      STATUS_SUCCESS,             41,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0x7b7b, 0x7b7b } },
+    { "1111:2222:3333:4444:5555::0x1.123.123.123",      STATUS_SUCCESS,             27,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0, 0x100 }, ex_fail_6 },
+    { "1111:2222:3333:4444:5555::0x88",                 STATUS_SUCCESS,             27,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0, 0x8800 }, ex_fail_6 },
+    { "1111:2222:3333:4444:5555::0X88",                 STATUS_SUCCESS,             27,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0, 0x8800 }, ex_fail_6 },
+    { "1111:2222:3333:4444:5555::0X",                   STATUS_SUCCESS,             27,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0, 0 }, ex_fail_6 },
+    { "1111:2222:3333:4444:5555::0X88:7777",            STATUS_SUCCESS,             27,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0, 0x8800 }, ex_fail_6 },
+    { "1111:2222:3333:4444:5555::0x8888",               STATUS_SUCCESS,             27,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0, 0x8888 }, ex_fail_6 },
+    { "1111:2222:3333:4444:5555::08888",                STATUS_INVALID_PARAMETER,   31,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0xabab, 0xabab, 0xabab } },
+    { "1111:2222:3333:4444:5555::fffff",                STATUS_INVALID_PARAMETER,   31,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0xabab, 0xabab, 0xabab } },
+    { "1111:2222:3333:4444::fffff",                     STATUS_INVALID_PARAMETER,   26,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1111:2222:3333::fffff",                          STATUS_INVALID_PARAMETER,   21,
+            { 0x1111, 0x2222, 0x3333, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1111:2222:3333:4444:5555::7777:8888",            STATUS_SUCCESS,             35,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0x7777, 0x8888 } },
+    { "1111:2222:3333:4444:5555::8888",                 STATUS_SUCCESS,             30,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0, 0x8888 } },
+    { "1111::",                                         STATUS_SUCCESS,             6,
+            { 0x1111, 0, 0, 0, 0, 0, 0, 0 } },
+    { "1111::123.123.123.123",                          STATUS_SUCCESS,             21,
+            { 0x1111, 0, 0, 0, 0, 0, 0x7b7b, 0x7b7b } },
+    { "1111::3333:4444:5555:6666:123.123.123.123",      STATUS_SUCCESS,             41,
+            { 0x1111, 0, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
+    { "1111::3333:4444:5555:6666:7777:8888",            STATUS_SUCCESS,             35,
+            { 0x1111, 0, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888 } },
+    { "1111::4444:5555:6666:123.123.123.123",           STATUS_SUCCESS,             36,
+            { 0x1111, 0, 0, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
+    { "1111::4444:5555:6666:7777:8888",                 STATUS_SUCCESS,             30,
+            { 0x1111, 0, 0, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888 } },
+    { "1111::5555:6666:123.123.123.123",                STATUS_SUCCESS,             31,
+            { 0x1111, 0, 0, 0, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
+    { "1111::5555:6666:7777:8888",                      STATUS_SUCCESS,             25,
+            { 0x1111, 0, 0, 0, 0x5555, 0x6666, 0x7777, 0x8888 } },
+    { "1111::6666:123.123.123.123",                     STATUS_SUCCESS,             26,
+            { 0x1111, 0, 0, 0, 0, 0x6666, 0x7b7b, 0x7b7b } },
+    { "1111::6666:7777:8888",                           STATUS_SUCCESS,             20,
+            { 0x1111, 0, 0, 0, 0, 0x6666, 0x7777, 0x8888 } },
+    { "1111::7777:8888",                                STATUS_SUCCESS,             15,
+            { 0x1111, 0, 0, 0, 0, 0, 0x7777, 0x8888 } },
+    { "1111::8888",                                     STATUS_SUCCESS,             10,
+            { 0x1111, 0, 0, 0, 0, 0, 0, 0x8888 } },
+    { "1:2:3:4:5:6:1.2.3.4",                            STATUS_SUCCESS,             19,
+            { 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0x201, 0x403 } },
+    { "1:2:3:4:5:6:7:8",                                STATUS_SUCCESS,             15,
+            { 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0x700, 0x800 } },
+    { "1:2:3:4:5:6::",                                  STATUS_SUCCESS,             13,
+            { 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0, 0 } },
+    { "1:2:3:4:5:6::8",                                 STATUS_SUCCESS,             14,
+            { 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0, 0x800 } },
+    { "2001:0000:1234:0000:0000:C1C0:ABCD:0876",        STATUS_SUCCESS,             39,
+            { 0x120, 0, 0x3412, 0, 0, 0xc0c1, 0xcdab, 0x7608 } },
+    { "2001:0000:4136:e378:8000:63bf:3fff:fdd2",        STATUS_SUCCESS,             39,
+            { 0x120, 0, 0x3641, 0x78e3, 0x80, 0xbf63, 0xff3f, 0xd2fd } },
+    { "2001:0db8:0:0:0:0:1428:57ab",                    STATUS_SUCCESS,             27,
+            { 0x120, 0xb80d, 0, 0, 0, 0, 0x2814, 0xab57 } },
+    { "2001:0db8:1234:ffff:ffff:ffff:ffff:ffff",        STATUS_SUCCESS,             39,
+            { 0x120, 0xb80d, 0x3412, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff } },
+    { "2001::CE49:7601:2CAD:DFFF:7C94:FFFE",            STATUS_SUCCESS,             35,
+            { 0x120, 0, 0x49ce, 0x176, 0xad2c, 0xffdf, 0x947c, 0xfeff } },
+    { "2001:db8:85a3::8a2e:370:7334",                   STATUS_SUCCESS,             28,
+            { 0x120, 0xb80d, 0xa385, 0, 0, 0x2e8a, 0x7003, 0x3473 } },
+    { "3ffe:0b00:0000:0000:0001:0000:0000:000a",        STATUS_SUCCESS,             39,
+            { 0xfe3f, 0xb, 0, 0, 0x100, 0, 0, 0xa00 } },
+    { "::",                                             STATUS_SUCCESS,             2,
+            { 0, 0, 0, 0, 0, 0, 0, 0 } },
+    { "::%16",                                          STATUS_SUCCESS,             2,
+            { 0, 0, 0, 0, 0, 0, 0, 0 } },
+    { "::/16",                                          STATUS_SUCCESS,             2,
+            { 0, 0, 0, 0, 0, 0, 0, 0 }, ex_fail_6 },
+    { "::0",                                            STATUS_SUCCESS,             3,
+            { 0, 0, 0, 0, 0, 0, 0, 0 } },
+    { "::0:0",                                          STATUS_SUCCESS,             5,
+            { 0, 0, 0, 0, 0, 0, 0, 0 } },
+    { "::0:0:0",                                        STATUS_SUCCESS,             7,
+            { 0, 0, 0, 0, 0, 0, 0, 0 } },
+    { "::0:0:0:0",                                      STATUS_SUCCESS,             9,
+            { 0, 0, 0, 0, 0, 0, 0, 0 } },
+    { "::0:0:0:0:0",                                    STATUS_SUCCESS,             11,
+            { 0, 0, 0, 0, 0, 0, 0, 0 } },
+    { "::0:0:0:0:0:0",                                  STATUS_SUCCESS,             13,
+            { 0, 0, 0, 0, 0, 0, 0, 0 } },
+    /* this one and the next one are incorrectly parsed by windows,
+        it adds one zero too many in front, cutting off the last digit. */
+    { "::0:0:0:0:0:0:0",                                STATUS_SUCCESS,             13,
+            { 0, 0, 0, 0, 0, 0, 0, 0 }, ex_fail_6 },
+    { "::0:a:b:c:d:e:f",                                STATUS_SUCCESS,             13,
+            { 0, 0, 0, 0xa00, 0xb00, 0xc00, 0xd00, 0xe00 }, ex_fail_6 },
+    { "::123.123.123.123",                              STATUS_SUCCESS,             17,
+            { 0, 0, 0, 0, 0, 0, 0x7b7b, 0x7b7b } },
+    { "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",        STATUS_SUCCESS,             39,
+            { 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff } },
+
+    { "':10.0.0.1",                                     STATUS_INVALID_PARAMETER,   0,
+            { -1 } },
+    { "-1",                                             STATUS_INVALID_PARAMETER,   0,
+            { -1 } },
+    { "02001:0000:1234:0000:0000:C1C0:ABCD:0876",       STATUS_INVALID_PARAMETER,   -1,
+            { -1 } },
+    { "2001:00000:1234:0000:0000:C1C0:ABCD:0876",       STATUS_INVALID_PARAMETER,   -1,
+            { 0x120, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "2001:0000:01234:0000:0000:C1C0:ABCD:0876",       STATUS_INVALID_PARAMETER,   -1,
+            { 0x120, 0, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1.2.3.4",                                        STATUS_INVALID_PARAMETER,   7,
+            { 0x201, 0xab03, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1.2.3.4:1111::5555",                             STATUS_INVALID_PARAMETER,   7,
+            { 0x201, 0xab03, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1.2.3.4::5555",                                  STATUS_INVALID_PARAMETER,   7,
+            { 0x201, 0xab03, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "11112222:3333:4444:5555:6666:1.2.3.4",           STATUS_INVALID_PARAMETER,   -1,
+            { -1 } },
+    { "11112222:3333:4444:5555:6666:7777:8888",         STATUS_INVALID_PARAMETER,   -1,
+            { -1 } },
+    { "1111",                                           STATUS_INVALID_PARAMETER,   4,
+            { -1 } },
+    { "1111:22223333:4444:5555:6666:1.2.3.4",           STATUS_INVALID_PARAMETER,   -1,
+            { 0x1111, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1111:22223333:4444:5555:6666:7777:8888",         STATUS_INVALID_PARAMETER,   -1,
+            { 0x1111, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1111:2222:",                                     STATUS_INVALID_PARAMETER,   10,
+            { 0x1111, 0x2222, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1111:2222:1.2.3.4",                              STATUS_INVALID_PARAMETER,   17,
+            { 0x1111, 0x2222, 0x201, 0xab03, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1111:2222:3333",                                 STATUS_INVALID_PARAMETER,   14,
+            { 0x1111, 0x2222, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1111:2222:3333:4444:5555:6666:7777:1.2.3.4",     STATUS_SUCCESS,             36,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x100 }, ex_fail_6 },
+    { "1111:2222:3333:4444:5555:6666:7777:8888:",       STATUS_SUCCESS,             39,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888 }, ex_fail_6 },
+    { "1111:2222:3333:4444:5555:6666:7777:8888:1.2.3.4",STATUS_SUCCESS,             39,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888 }, ex_fail_6 },
+    { "1111:2222:3333:4444:5555:6666:7777:8888:9999",   STATUS_SUCCESS,             39,
+            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888 }, ex_fail_6 },
+    { "1111:2222:::",                                   STATUS_SUCCESS,             11,
+            { 0x1111, 0x2222, 0, 0, 0, 0, 0, 0 }, ex_fail_6 },
+    { "1111::5555:",                                    STATUS_INVALID_PARAMETER,   11,
+            { 0x1111, 0x5555, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1111::3333:4444:5555:6666:7777::",               STATUS_SUCCESS,             30,
+            { 0x1111, 0, 0, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777 }, ex_fail_6 },
+    { "1111:2222:::4444:5555:6666:1.2.3.4",             STATUS_SUCCESS,             11,
+            { 0x1111, 0x2222, 0, 0, 0, 0, 0, 0 }, ex_fail_6 },
+    { "1111::3333::5555:6666:1.2.3.4",                  STATUS_SUCCESS,             10,
+            { 0x1111, 0, 0, 0, 0, 0, 0, 0x3333 }, ex_fail_6 },
+    { "12345::6:7:8",                                   STATUS_INVALID_PARAMETER,   -1,
+            { -1 } },
+    { "1::1.2.256.4",                                   STATUS_INVALID_PARAMETER,   -1,
+            { 0x100, 0x201, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1::1.2.3.256",                                   STATUS_INVALID_PARAMETER,   12,
+            { 0x100, 0x201, 0xab03, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1::1.2.3.300",                                   STATUS_INVALID_PARAMETER,   12,
+            { 0x100, 0x201, 0xab03, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1::1.2::1",                                      STATUS_INVALID_PARAMETER,   6,
+            { 0x100, 0xab01, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1::1.2.3.4::1",                                  STATUS_SUCCESS,             10,
+            { 0x100, 0, 0, 0, 0, 0, 0x201, 0x403 }, ex_fail_6 },
+    { "1::1.",                                          STATUS_INVALID_PARAMETER,   5,
+            { 0x100, 0xab01, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1::1.2",                                         STATUS_INVALID_PARAMETER,   6,
+            { 0x100, 0xab01, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1::1.2.",                                        STATUS_INVALID_PARAMETER,   7,
+            { 0x100, 0x201, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1::1.2.3",                                       STATUS_INVALID_PARAMETER,   8,
+            { 0x100, 0x201, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1::1.2.3.",                                      STATUS_INVALID_PARAMETER,   9,
+            { 0x100, 0x201, 0xab03, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1::1.2.3.4",                                     STATUS_SUCCESS,             10,
+            { 0x100, 0, 0, 0, 0, 0, 0x201, 0x403 } },
+    { "1::1.2.3.900",                                   STATUS_INVALID_PARAMETER,   12,
+            { 0x100, 0x201, 0xab03, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1::1.2.300.4",                                   STATUS_INVALID_PARAMETER,   -1,
+            { 0x100, 0x201, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1::1.256.3.4",                                   STATUS_INVALID_PARAMETER,   -1,
+            { 0x100, 0xab01, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1::256.2.3.4",                                   STATUS_INVALID_PARAMETER,   -1,
+            { 0x100, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "1::2::3",                                        STATUS_SUCCESS,             4,
+            { 0x100, 0, 0, 0, 0, 0, 0, 0x200 }, ex_fail_6 },
+    { "2001:0000:1234: 0000:0000:C1C0:ABCD:0876",       STATUS_INVALID_PARAMETER,   15,
+            { 0x120, 0, 0x3412, 0xabab, 0xabab, 0xabab, 0xabab, 0xabab } },
+    { "2001:0000:1234:0000:0000:C1C0:ABCD:0876  0",     STATUS_SUCCESS,             39,
+            { 0x120, 0, 0x3412, 0, 0, 0xc0c1, 0xcdab, 0x7608 }, ex_fail_6 },
+    { "2001:1:1:1:1:1:255Z255X255Y255",                 STATUS_INVALID_PARAMETER,   18,
+            { 0x120, 0x100, 0x100, 0x100, 0x100, 0x100, 0xabab, 0xabab } },
+    { "2001::FFD3::57ab",                               STATUS_SUCCESS,             10,
+            { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff }, ex_fail_6 },
+    { ":",                                              STATUS_INVALID_PARAMETER,   0,
+            { -1 } },
+    { ":1111:2222:3333:4444:5555:6666:1.2.3.4",         STATUS_INVALID_PARAMETER,   0,
+            { -1 } },
+    { ":1111:2222:3333:4444:5555:6666:7777:8888",       STATUS_INVALID_PARAMETER,   0,
+            { -1 } },
+    { ":1111::",                                        STATUS_INVALID_PARAMETER,   0,
+            { -1 } },
+    { "::-1",                                           STATUS_SUCCESS,             2,
+            { 0, 0, 0, 0, 0, 0, 0, 0 }, ex_fail_6 },
+    { "::.",                                            STATUS_SUCCESS,             2,
+            { 0, 0, 0, 0, 0, 0, 0, 0 }, ex_fail_6 },
+    { "::..",                                           STATUS_SUCCESS,             2,
+            { 0, 0, 0, 0, 0, 0, 0, 0 }, ex_fail_6 },
+    { "::...",                                          STATUS_SUCCESS,             2,
+            { 0, 0, 0, 0, 0, 0, 0, 0 }, ex_fail_6 },
+    { "XXXX:XXXX:XXXX:XXXX:XXXX:XXXX:1.2.3.4",          STATUS_INVALID_PARAMETER,   0,
+            { -1 } },
+    { "[::]",                                           STATUS_INVALID_PARAMETER,   0,
+            { -1 }, ex_skip_6 },
+};
+
+static void init_ip6(IN6_ADDR* addr, const int src[8])
+{
+    unsigned int j;
+    if (!src || src[0] == -1)
+    {
+        for (j = 0; j < 8; ++j)
+            addr->s6_words[j] = 0xabab;
+    }
+    else
+    {
+        for (j = 0; j < 8; ++j)
+            addr->s6_words[j] = src[j];
+    }
+}
+
+static void test_RtlIpv6AddressToString(void)
+{
+    CHAR buffer[50];
+    LPCSTR result;
+    IN6_ADDR ip;
+    DWORD_PTR len;
+    struct
+    {
+        PCSTR address;
+        int ip[8];
+    } tests[] =
+    {
+        /* ipv4 addresses & ISATAP addresses */
+        { "::13.1.68.3",                                { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 } },
+        { "::ffff:13.1.68.3",                           { 0, 0, 0, 0, 0, 0xffff, 0x10d, 0x344 } },
+        { "::feff:d01:4403",                            { 0, 0, 0, 0, 0, 0xfffe, 0x10d, 0x344 } },
+        { "::fffe:d01:4403",                            { 0, 0, 0, 0, 0, 0xfeff, 0x10d, 0x344 } },
+        { "::100:d01:4403",                             { 0, 0, 0, 0, 0, 1, 0x10d, 0x344 } },
+        { "::1:d01:4403",                               { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 } },
+        { "::ffff:0:4403",                              { 0, 0, 0, 0, 0, 0xffff, 0, 0x344 } },
+        { "::ffff:13.1.0.0",                            { 0, 0, 0, 0, 0, 0xffff, 0x10d, 0 } },
+        { "::ffff:0:0",                                 { 0, 0, 0, 0, 0, 0xffff, 0, 0 } },
+        { "::ffff:0:13.1.68.3",                         { 0, 0, 0, 0, 0xffff, 0, 0x10d, 0x344 } },
+        { "::ffff:ffff:d01:4403",                       { 0, 0, 0, 0, 0xffff, 0xffff, 0x10d, 0x344 } },
+        { "::ffff:0:0:d01:4403",                        { 0, 0, 0, 0xffff, 0, 0, 0x10d, 0x344 } },
+        { "::ffff:255.255.255.255",                     { 0, 0, 0, 0, 0, 0xffff, 0xffff, 0xffff } },
+        { "::ffff:129.144.52.38",                       { 0, 0, 0, 0, 0, 0xffff, 0x9081, 0x2634 } },
+        { "::5efe:129.144.52.38",                       { 0, 0, 0, 0, 0, 0xfe5e, 0x9081, 0x2634 } },
+        { "1111:2222:3333:4444:0:5efe:129.144.52.38",   { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 } },
+        { "1111:2222:3333::5efe:129.144.52.38",         { 0x1111, 0x2222, 0x3333, 0, 0, 0xfe5e, 0x9081, 0x2634 } },
+        { "1111:2222::5efe:129.144.52.38",              { 0x1111, 0x2222, 0, 0, 0, 0xfe5e, 0x9081, 0x2634 } },
+        { "1111::5efe:129.144.52.38",                   { 0x1111, 0, 0, 0, 0, 0xfe5e, 0x9081, 0x2634 } },
+        { "::200:5efe:129.144.52.38",                   { 0, 0, 0, 0, 2, 0xfe5e, 0x9081, 0x2634 } },
+        { "::100:5efe:8190:3426",                       { 0, 0, 0, 0, 1, 0xfe5e, 0x9081, 0x2634 } },
+        /* 'normal' addresses */
+        { "::1",                                        { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
+        { "0:1:2:3:4:5:6:7",                            { 0, 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0x700 } },
+        { "1080::8:800:200c:417a",                      { 0x8010, 0, 0, 0, 0x800, 0x8, 0x0c20, 0x7a41 } },
+        { "1111:2222:3333:4444:5555:6666:7b7b:7b7b",    { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
+        { "1111:2222:3333:4444:5555:6666:7777:8888",    { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888 } },
+        { "1111:2222:3333:4444:5555:6666::",            { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0, 0 } },
+        { "1111:2222:3333:4444:5555:6666:0:8888",       { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0, 0x8888 } },
+        { "1111:2222:3333:4444:5555::",                 { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0, 0 } },
+        { "1111:2222:3333:4444:5555:0:7b7b:7b7b",       { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0x7b7b, 0x7b7b } },
+        { "1111:2222:3333:4444:5555:0:7777:8888",       { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0x7777, 0x8888 } },
+        { "1111:2222:3333:4444:5555::8888",             { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0, 0, 0x8888 } },
+        { "1111::",                                     { 0x1111, 0, 0, 0, 0, 0, 0, 0 } },
+        { "1111::7b7b:7b7b",                            { 0x1111, 0, 0, 0, 0, 0, 0x7b7b, 0x7b7b } },
+        { "1111:0:3333:4444:5555:6666:7b7b:7b7b",       { 0x1111, 0, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
+        { "1111:0:3333:4444:5555:6666:7777:8888",       { 0x1111, 0, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888 } },
+        { "1111::4444:5555:6666:7b7b:7b7b",             { 0x1111, 0, 0, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
+        { "1111::4444:5555:6666:7777:8888",             { 0x1111, 0, 0, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888 } },
+        { "1111::5555:6666:7b7b:7b7b",                  { 0x1111, 0, 0, 0, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
+        { "1111::5555:6666:7777:8888",                  { 0x1111, 0, 0, 0, 0x5555, 0x6666, 0x7777, 0x8888 } },
+        { "1111::6666:7b7b:7b7b",                       { 0x1111, 0, 0, 0, 0, 0x6666, 0x7b7b, 0x7b7b } },
+        { "1111::6666:7777:8888",                       { 0x1111, 0, 0, 0, 0, 0x6666, 0x7777, 0x8888 } },
+        { "1111::7777:8888",                            { 0x1111, 0, 0, 0, 0, 0, 0x7777, 0x8888 } },
+        { "1111::8888",                                 { 0x1111, 0, 0, 0, 0, 0, 0, 0x8888 } },
+        { "1:2:3:4:5:6:102:304",                        { 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0x201, 0x403 } },
+        { "1:2:3:4:5:6:7:8",                            { 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0x700, 0x800 } },
+        { "1:2:3:4:5:6::",                              { 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0, 0 } },
+        { "1:2:3:4:5:6:0:8",                            { 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0, 0x800 } },
+        { "2001:0:1234::c1c0:abcd:876",                 { 0x120, 0, 0x3412, 0, 0, 0xc0c1, 0xcdab, 0x7608 } },
+        { "2001:0:4136:e378:8000:63bf:3fff:fdd2",       { 0x120, 0, 0x3641, 0x78e3, 0x80, 0xbf63, 0xff3f, 0xd2fd } },
+        { "2001:db8::1428:57ab",                        { 0x120, 0xb80d, 0, 0, 0, 0, 0x2814, 0xab57 } },
+        { "2001:db8:1234:ffff:ffff:ffff:ffff:ffff",     { 0x120, 0xb80d, 0x3412, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff } },
+        { "2001:0:ce49:7601:2cad:dfff:7c94:fffe",       { 0x120, 0, 0x49ce, 0x176, 0xad2c, 0xffdf, 0x947c, 0xfeff } },
+        { "2001:db8:85a3::8a2e:370:7334",               { 0x120, 0xb80d, 0xa385, 0, 0, 0x2e8a, 0x7003, 0x3473 } },
+        { "3ffe:b00::1:0:0:a",                          { 0xfe3f, 0xb, 0, 0, 0x100, 0, 0, 0xa00 } },
+        { "::a:b:c:d:e",                                { 0, 0, 0, 0xa00, 0xb00, 0xc00, 0xd00, 0xe00 } },
+        { "::123.123.123.123",                          { 0, 0, 0, 0, 0, 0, 0x7b7b, 0x7b7b } },
+        { "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",    { 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff } },
+        { "1111:2222:3333:4444:5555:6666:7777:1",       { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x100 } },
+        { "1111:2222:3333:4444:5555:6666:7777:8888",    { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777, 0x8888 } },
+        { "1111:2222::",                                { 0x1111, 0x2222, 0, 0, 0, 0, 0, 0 } },
+        { "1111::3333:4444:5555:6666:7777",             { 0x1111, 0, 0, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777 } },
+        { "1111:2222::",                                { 0x1111, 0x2222, 0, 0, 0, 0, 0, 0 } },
+        { "1111::3333",                                 { 0x1111, 0, 0, 0, 0, 0, 0, 0x3333 } },
+        { "2001:0:1234::c1c0:abcd:876",                 { 0x120, 0, 0x3412, 0, 0, 0xc0c1, 0xcdab, 0x7608 } },
+        { "2001::ffd3",                                 { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff } },
+    };
+    unsigned int i;
+
+    if (!pRtlIpv6AddressToStringA)
+    {
+        skip("RtlIpv6AddressToStringA not available\n");
+        return;
+    }
+
+    memset(buffer, '#', sizeof(buffer));
+    buffer[sizeof(buffer)-1] = 0;
+    memset(&ip, 0, sizeof(ip));
+    result = pRtlIpv6AddressToStringA(&ip, buffer);
+
+    len = strlen(buffer);
+    ok(result == (buffer + len) && !strcmp(buffer, "::"),
+       "got %p with '%s' (expected %p with '::')\n", result, buffer, buffer + len);
+
+    result = pRtlIpv6AddressToStringA(&ip, NULL);
+    ok(result == (LPCSTR)~0 || broken(result == (LPCSTR)len) /* WinXP / Win2k3 */,
+       "got %p, expected %p\n", result, (LPCSTR)~0);
+
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
+    {
+        init_ip6(&ip, tests[i].ip);
+        memset(buffer, '#', sizeof(buffer));
+        buffer[sizeof(buffer)-1] = 0;
+
+        result = pRtlIpv6AddressToStringA(&ip, buffer);
+        len = strlen(buffer);
+        ok(result == (buffer + len) && !strcmp(buffer, tests[i].address),
+           "got %p with '%s' (expected %p with '%s')\n", result, buffer, buffer + len, tests[i].address);
+
+        ok(buffer[45] == 0 || broken(buffer[45] != 0) /* WinXP / Win2k3 */,
+           "expected data at buffer[45] to always be NULL\n");
+        ok(buffer[46] == '#', "expected data at buffer[46] not to change\n");
+    }
+}
+
+static void test_RtlIpv6AddressToStringEx(void)
+{
+    CHAR buffer[70];
+    NTSTATUS res;
+    IN6_ADDR ip;
+    ULONG len;
+    struct
+    {
+        PCSTR address;
+        ULONG scopeid;
+        USHORT port;
+        int ip[8];
+    } tests[] =
+    {
+        /* ipv4 addresses & ISATAP addresses */
+        { "::13.1.68.3",                                                0,          0, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 } },
+        { "::13.1.68.3%1",                                              1,          0, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 } },
+        { "::13.1.68.3%4294949819",                                     0xffffbbbb, 0, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 } },
+        { "[::13.1.68.3%4294949819]:65518",                             0xffffbbbb, 0xeeff, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 } },
+        { "[::13.1.68.3%4294949819]:256",                               0xffffbbbb, 1, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 } },
+        { "[::13.1.68.3]:256",                                          0,          1, { 0, 0, 0, 0, 0, 0, 0x10d, 0x344 } },
+
+        { "::1:d01:4403",                                               0,          0, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 } },
+        { "::1:d01:4403%1",                                             1,          0, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 } },
+        { "::1:d01:4403%4294949819",                                    0xffffbbbb, 0, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 } },
+        { "[::1:d01:4403%4294949819]:65518",                            0xffffbbbb, 0xeeff, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 } },
+        { "[::1:d01:4403%4294949819]:256",                              0xffffbbbb, 1, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 } },
+        { "[::1:d01:4403]:256",                                         0,          1, { 0, 0, 0, 0, 0, 0x100, 0x10d, 0x344 } },
+
+        { "1111:2222:3333:4444:0:5efe:129.144.52.38",                   0,          0, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 } },
+        { "1111:2222:3333:4444:0:5efe:129.144.52.38%1",                 1,          0, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 } },
+        { "1111:2222:3333:4444:0:5efe:129.144.52.38%4294949819",        0xffffbbbb, 0, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 } },
+        { "[1111:2222:3333:4444:0:5efe:129.144.52.38%4294949819]:65518",0xffffbbbb, 0xeeff, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 } },
+        { "[1111:2222:3333:4444:0:5efe:129.144.52.38%4294949819]:256",  0xffffbbbb, 1, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 } },
+        { "[1111:2222:3333:4444:0:5efe:129.144.52.38]:256",             0,          1, { 0x1111, 0x2222, 0x3333, 0x4444, 0, 0xfe5e, 0x9081, 0x2634 } },
+
+        { "::1",                                                        0,          0, { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
+        { "::1%1",                                                      1,          0, { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
+        { "::1%4294949819",                                             0xffffbbbb, 0, { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
+        { "[::1%4294949819]:65518",                                     0xffffbbbb, 0xeeff, { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
+        { "[::1%4294949819]:256",                                       0xffffbbbb, 1, { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
+        { "[::1]:256",                                                  0,          1, { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
+
+        { "1111:2222:3333:4444:5555:6666:7b7b:7b7b",                    0,          0, { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
+        { "1111:2222:3333:4444:5555:6666:7b7b:7b7b%1",                  1,          0, { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
+        { "1111:2222:3333:4444:5555:6666:7b7b:7b7b%4294949819",         0xffffbbbb, 0, { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
+        { "[1111:2222:3333:4444:5555:6666:7b7b:7b7b%4294949819]:65518", 0xffffbbbb, 0xeeff, { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
+        { "[1111:2222:3333:4444:5555:6666:7b7b:7b7b%4294949819]:256",   0xffffbbbb, 1, { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
+        { "[1111:2222:3333:4444:5555:6666:7b7b:7b7b]:256",              0,          1, { 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7b7b, 0x7b7b } },
+
+        { "1111::",                                                     0,          0, { 0x1111, 0, 0, 0, 0, 0, 0, 0 } },
+        { "1111::%1",                                                   1,          0, { 0x1111, 0, 0, 0, 0, 0, 0, 0 } },
+        { "1111::%4294949819",                                          0xffffbbbb, 0, { 0x1111, 0, 0, 0, 0, 0, 0, 0 } },
+        { "[1111::%4294949819]:65518",                                  0xffffbbbb, 0xeeff, { 0x1111, 0, 0, 0, 0, 0, 0, 0 } },
+        { "[1111::%4294949819]:256",                                    0xffffbbbb, 1, { 0x1111, 0, 0, 0, 0, 0, 0, 0 } },
+        { "[1111::]:256",                                               0,          1, { 0x1111, 0, 0, 0, 0, 0, 0, 0 } },
+
+        { "2001::ffd3",                                                 0,          0, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff } },
+        { "2001::ffd3%1",                                               1,          0, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff } },
+        { "2001::ffd3%4294949819",                                      0xffffbbbb, 0, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff } },
+        { "[2001::ffd3%4294949819]:65518",                              0xffffbbbb, 0xeeff, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff } },
+        { "[2001::ffd3%4294949819]:256",                                0xffffbbbb, 1, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff } },
+        { "[2001::ffd3]:256",                                           0,          1, { 0x120, 0, 0, 0, 0, 0, 0, 0xd3ff } },
+    };
+    unsigned int i;
+
+    if (!pRtlIpv6AddressToStringExA)
+    {
+        skip("RtlIpv6AddressToStringExA not available\n");
+        return;
+    }
+
+    memset(buffer, '#', sizeof(buffer));
+    buffer[sizeof(buffer)-1] = 0;
+    memset(&ip, 0, sizeof(ip));
+    len = sizeof(buffer);
+    res = pRtlIpv6AddressToStringExA(&ip, 0, 0, buffer, &len);
+
+    ok(res == STATUS_SUCCESS, "[validate] res = 0x%08x, expected STATUS_SUCCESS\n", res);
+    ok(len == 3 && !strcmp(buffer, "::"),
+        "got len %d with '%s' (expected 3 with '::')\n", len, buffer);
+
+    memset(buffer, '#', sizeof(buffer));
+    buffer[sizeof(buffer)-1] = 0;
+
+    len = sizeof(buffer);
+    res = pRtlIpv6AddressToStringExA(NULL, 0, 0, buffer, &len);
+    ok(res == STATUS_INVALID_PARAMETER, "[null ip] res = 0x%08x, expected STATUS_INVALID_PARAMETER\n", res);
+
+    len = sizeof(buffer);
+    res = pRtlIpv6AddressToStringExA(&ip, 0, 0, NULL, &len);
+    ok(res == STATUS_INVALID_PARAMETER, "[null buffer] res = 0x%08x, expected STATUS_INVALID_PARAMETER\n", res);
+
+    res = pRtlIpv6AddressToStringExA(&ip, 0, 0, buffer, NULL);
+    ok(res == STATUS_INVALID_PARAMETER, "[null length] res = 0x%08x, expected STATUS_INVALID_PARAMETER\n", res);
+
+    len = 2;
+    memset(buffer, '#', sizeof(buffer));
+    buffer[sizeof(buffer)-1] = 0;
+    res = pRtlIpv6AddressToStringExA(&ip, 0, 0, buffer, &len);
+    ok(res == STATUS_INVALID_PARAMETER, "[null length] res = 0x%08x, expected STATUS_INVALID_PARAMETER\n", res);
+    ok(buffer[0] == '#', "got first char %c (expected '#')\n", buffer[0]);
+    ok(len == 3, "got len %d (expected len 3)\n", len);
+
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
+    {
+        init_ip6(&ip, tests[i].ip);
+        len = sizeof(buffer);
+        memset(buffer, '#', sizeof(buffer));
+        buffer[sizeof(buffer)-1] = 0;
+
+        res = pRtlIpv6AddressToStringExA(&ip, tests[i].scopeid, tests[i].port, buffer, &len);
+
+        ok(res == STATUS_SUCCESS, "[validate] res = 0x%08x, expected STATUS_SUCCESS\n", res);
+        ok(len == (strlen(tests[i].address) + 1) && !strcmp(buffer, tests[i].address),
+           "got len %d with '%s' (expected %d with '%s')\n", len, buffer, (int)strlen(tests[i].address), tests[i].address);
+    }
+}
+
+static void compare_RtlIpv6StringToAddressW(PCSTR name_a, int terminator_offset_a,
+                                            const struct in6_addr *addr_a, NTSTATUS res_a)
+{
+    WCHAR name[512];
+    NTSTATUS res;
+    IN6_ADDR ip;
+    PCWSTR terminator;
+
+    if (!pRtlIpv6StringToAddressW)
+        return;
+
+    pRtlMultiByteToUnicodeN(name, sizeof(name), NULL, name_a, strlen(name_a) + 1);
+
+    init_ip6(&ip, NULL);
+    terminator = (void *)0xdeadbeef;
+    res = pRtlIpv6StringToAddressW(name, &terminator, &ip);
+    ok(res == res_a, "[W:%s] res = 0x%08x, expected 0x%08x\n", name_a, res, res_a);
+
+    if (terminator_offset_a < 0)
+    {
+        ok(terminator == (void *)0xdeadbeef,
+           "[W:%s] terminator = %p, expected it not to change\n",
+           name_a, terminator);
+    }
+    else
+    {
+        ok(terminator == name + terminator_offset_a,
+           "[W:%s] terminator = %p, expected %p\n",
+           name_a, terminator, name + terminator_offset_a);
+    }
+
+    ok(!memcmp(&ip, addr_a, sizeof(ip)),
+       "[W:%s] ip = %x:%x:%x:%x:%x:%x:%x:%x, expected %x:%x:%x:%x:%x:%x:%x:%x\n",
+       name_a,
+       ip.s6_words[0], ip.s6_words[1], ip.s6_words[2], ip.s6_words[3],
+       ip.s6_words[4], ip.s6_words[5], ip.s6_words[6], ip.s6_words[7],
+       addr_a->s6_words[0], addr_a->s6_words[1], addr_a->s6_words[2], addr_a->s6_words[3],
+       addr_a->s6_words[4], addr_a->s6_words[5], addr_a->s6_words[6], addr_a->s6_words[7]);
+}
+
+static void test_RtlIpv6StringToAddress(void)
+{
+    NTSTATUS res;
+    IN6_ADDR ip, expected_ip;
+    PCSTR terminator;
+    unsigned int i;
+
+    if (!pRtlIpv6StringToAddressW)
+    {
+        skip("RtlIpv6StringToAddressW not available\n");
+        /* we can continue, just not test W */
+    }
+
+    if (!pRtlIpv6StringToAddressA)
+    {
+        skip("RtlIpv6StringToAddressA not available\n");
+        return; /* all tests are centered around A, we cannot continue */
+    }
+
+    res = pRtlIpv6StringToAddressA("::", &terminator, &ip);
+    ok(res == STATUS_SUCCESS, "[validate] res = 0x%08x, expected STATUS_SUCCESS\n", res);
+    if (0)
+    {
+        /* any of these crash */
+        res = pRtlIpv6StringToAddressA(NULL, &terminator, &ip);
+        ok(res == STATUS_INVALID_PARAMETER, "[null string] res = 0x%08x, expected STATUS_INVALID_PARAMETER\n", res);
+        res = pRtlIpv6StringToAddressA("::", NULL, &ip);
+        ok(res == STATUS_INVALID_PARAMETER, "[null terminator] res = 0x%08x, expected STATUS_INVALID_PARAMETER\n", res);
+        res = pRtlIpv6StringToAddressA("::", &terminator, NULL);
+        ok(res == STATUS_INVALID_PARAMETER, "[null result] res = 0x%08x, expected STATUS_INVALID_PARAMETER\n", res);
+    }
+
+    /* sanity check */
+    ok(sizeof(ip) == sizeof(USHORT)* 8, "sizeof(ip)\n");
+
+    for (i = 0; i < ARRAY_SIZE(ipv6_tests); i++)
+    {
+        init_ip6(&ip, NULL);
+        terminator = (void *)0xdeadbeef;
+        res = pRtlIpv6StringToAddressA(ipv6_tests[i].address, &terminator, &ip);
+        compare_RtlIpv6StringToAddressW(ipv6_tests[i].address, (terminator != (void *)0xdeadbeef) ?
+                                        (terminator - ipv6_tests[i].address) : -1, &ip, res);
+
+        if (ipv6_tests[i].flags & win_broken_6)
+        {
+            ok(res == ipv6_tests[i].res || broken(res == STATUS_INVALID_PARAMETER),
+               "[%s] res = 0x%08x, expected 0x%08x\n",
+               ipv6_tests[i].address, res, ipv6_tests[i].res);
+
+            if (res == STATUS_INVALID_PARAMETER)
+                continue;
+        }
+        else
+        {
+            ok(res == ipv6_tests[i].res,
+               "[%s] res = 0x%08x, expected 0x%08x\n",
+               ipv6_tests[i].address, res, ipv6_tests[i].res);
+        }
+
+        if (ipv6_tests[i].terminator_offset < 0)
+        {
+            ok(terminator == (void *)0xdeadbeef,
+               "[%s] terminator = %p, expected it not to change\n",
+               ipv6_tests[i].address, terminator);
+        }
+        else if (ipv6_tests[i].flags & win_broken_6)
+        {
+            PCSTR expected = ipv6_tests[i].address + ipv6_tests[i].terminator_offset;
+            ok(terminator == expected || broken(terminator == expected + 2),
+               "[%s] terminator = %p, expected %p\n",
+               ipv6_tests[i].address, terminator, expected);
+        }
+        else
+        {
+            ok(terminator == ipv6_tests[i].address + ipv6_tests[i].terminator_offset,
+               "[%s] terminator = %p, expected %p\n",
+               ipv6_tests[i].address, terminator, ipv6_tests[i].address + ipv6_tests[i].terminator_offset);
+        }
+
+        init_ip6(&expected_ip, ipv6_tests[i].ip);
+        ok(!memcmp(&ip, &expected_ip, sizeof(ip)),
+           "[%s] ip = %x:%x:%x:%x:%x:%x:%x:%x, expected %x:%x:%x:%x:%x:%x:%x:%x\n",
+           ipv6_tests[i].address,
+           ip.s6_words[0], ip.s6_words[1], ip.s6_words[2], ip.s6_words[3],
+           ip.s6_words[4], ip.s6_words[5], ip.s6_words[6], ip.s6_words[7],
+           expected_ip.s6_words[0], expected_ip.s6_words[1], expected_ip.s6_words[2], expected_ip.s6_words[3],
+           expected_ip.s6_words[4], expected_ip.s6_words[5], expected_ip.s6_words[6], expected_ip.s6_words[7]);
+    }
+}
+
+static void compare_RtlIpv6StringToAddressExW(PCSTR name_a, const struct in6_addr *addr_a, HRESULT res_a, ULONG scope_a, USHORT port_a)
+{
+    WCHAR name[512];
+    NTSTATUS res;
+    IN6_ADDR ip;
+    ULONG scope = 0xbadf00d;
+    USHORT port = 0xbeef;
+
+    if (!pRtlIpv6StringToAddressExW)
+        return;
+
+    pRtlMultiByteToUnicodeN(name, sizeof(name), NULL, name_a, strlen(name_a) + 1);
+
+    init_ip6(&ip, NULL);
+    res = pRtlIpv6StringToAddressExW(name, &ip, &scope, &port);
+
+    ok(res == res_a, "[W:%s] res = 0x%08x, expected 0x%08x\n", name_a, res, res_a);
+    ok(scope == scope_a, "[W:%s] scope = 0x%08x, expected 0x%08x\n", name_a, scope, scope_a);
+    ok(port == port_a, "[W:%s] port = 0x%08x, expected 0x%08x\n", name_a, port, port_a);
+
+    ok(!memcmp(&ip, addr_a, sizeof(ip)),
+       "[W:%s] ip = %x:%x:%x:%x:%x:%x:%x:%x, expected %x:%x:%x:%x:%x:%x:%x:%x\n",
+       name_a,
+       ip.s6_words[0], ip.s6_words[1], ip.s6_words[2], ip.s6_words[3],
+       ip.s6_words[4], ip.s6_words[5], ip.s6_words[6], ip.s6_words[7],
+       addr_a->s6_words[0], addr_a->s6_words[1], addr_a->s6_words[2], addr_a->s6_words[3],
+       addr_a->s6_words[4], addr_a->s6_words[5], addr_a->s6_words[6], addr_a->s6_words[7]);
+}
+
+static void test_RtlIpv6StringToAddressEx(void)
+{
+    NTSTATUS res;
+    IN6_ADDR ip, expected_ip;
+    ULONG scope;
+    USHORT port;
+    static const struct
+    {
+        PCSTR address;
+        NTSTATUS res;
+        ULONG scope;
+        USHORT port;
+        int ip[8];
+    } ipv6_ex_tests[] =
+    {
+        { "[::]",                                           STATUS_SUCCESS,             0,          0,
+            { 0, 0, 0, 0, 0, 0, 0, 0 } },
+        { "[::1]:8080",                                     STATUS_SUCCESS,             0,          0x901f,
+            { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
+        { "[::1]:0x80",                                     STATUS_SUCCESS,             0,          0x8000,
+            { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
+        { "[::1]:0X80",                                     STATUS_SUCCESS,             0,          0x8000,
+            { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
+        { "[::1]:080",                                      STATUS_INVALID_PARAMETER,   0xbadf00d,  0xbeef,
+            { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
+        { "[::1]:800000000080",                             STATUS_INVALID_PARAMETER,   0xbadf00d,  0xbeef,
+            { 0, 0, 0, 0, 0, 0, 0, 0x100 } },
+        { "[FEDC:BA98:7654:3210:FEDC:BA98:7654:3210]:80",   STATUS_SUCCESS,             0,          0x5000,
+            { 0xdcfe, 0x98ba, 0x5476, 0x1032, 0xdcfe, 0x98ba, 0x5476, 0x1032 } },
+        { "[1080:0:0:0:8:800:200C:417A]:1234",              STATUS_SUCCESS,             0,          0xd204,
+            { 0x8010, 0, 0, 0, 0x800, 8, 0xc20, 0x7a41 } },
+        { "[3ffe:2a00:100:7031::1]:8080",                   STATUS_SUCCESS,             0,          0x901f,
+            { 0xfe3f, 0x2a, 1, 0x3170, 0, 0, 0, 0x100 } },
+        { "[ 3ffe:2a00:100:7031::1]:8080",                  STATUS_INVALID_PARAMETER,   0xbadf00d,  0xbeef,
+            { -1 } },
+        { "[3ffe:2a00:100:7031::1 ]:8080",                  STATUS_INVALID_PARAMETER,   0xbadf00d,  0xbeef,
+            { 0xfe3f, 0x2a, 1, 0x3170, 0, 0, 0, 0x100 } },
+        { "[3ffe:2a00:100:7031::1].8080",                   STATUS_INVALID_PARAMETER,   0xbadf00d,  0xbeef,
+            { 0xfe3f, 0x2a, 1, 0x3170, 0, 0, 0, 0x100 } },
+        { "[1080::8:800:200C:417A]:8080",                   STATUS_SUCCESS,             0,          0x901f,
+            { 0x8010, 0, 0, 0, 0x800, 8, 0xc20, 0x7a41 } },
+        { "[1080::8:800:200C:417A]!8080",                   STATUS_INVALID_PARAMETER,   0xbadf00d,  0xbeef,
+            { 0x8010, 0, 0, 0, 0x800, 8, 0xc20, 0x7a41 } },
+        { "[::FFFF:129.144.52.38]:80",                      STATUS_SUCCESS,             0,          0x5000,
+            { 0, 0, 0, 0, 0, 0xffff, 0x9081, 0x2634 } },
+        { "[::FFFF:129.144.52.38]:-80",                     STATUS_INVALID_PARAMETER,   0xbadf00d,  0xbeef,
+            { 0, 0, 0, 0, 0, 0xffff, 0x9081, 0x2634 } },
+        { "[::FFFF:129.144.52.38]:999999999999",            STATUS_INVALID_PARAMETER,   0xbadf00d,  0xbeef,
+            { 0, 0, 0, 0, 0, 0xffff, 0x9081, 0x2634 } },
+        { "[::FFFF:129.144.52.38%-8]:80",                   STATUS_INVALID_PARAMETER,   0xbadf00d,  0xbeef,
+            { 0, 0, 0, 0, 0, 0xffff, 0x9081, 0x2634 } },
+        { "[::FFFF:129.144.52.38]:80",                      STATUS_SUCCESS,             0,          0x5000,
+            { 0, 0, 0, 0, 0, 0xffff, 0x9081, 0x2634 } },
+        { "[12345::6:7:8]:80",                              STATUS_INVALID_PARAMETER,   0xbadf00d,  0xbeef,
+            { -1 } },
+        { "[ff01::8:800:200C:417A%16]:8080",                STATUS_SUCCESS,             16,         0x901f,
+            { 0x1ff, 0, 0, 0, 0x800, 8, 0xc20, 0x7a41 } },
+        { "[ff01::8:800:200C:417A%100]:8080",               STATUS_SUCCESS,             100,        0x901f,
+            { 0x1ff, 0, 0, 0, 0x800, 8, 0xc20, 0x7a41 } },
+        { "[ff01::8:800:200C:417A%1000]:8080",              STATUS_SUCCESS,             1000,       0x901f,
+            { 0x1ff, 0, 0, 0, 0x800, 8, 0xc20, 0x7a41 } },
+        { "[ff01::8:800:200C:417A%10000]:8080",             STATUS_SUCCESS,             10000,      0x901f,
+            { 0x1ff, 0, 0, 0, 0x800, 8, 0xc20, 0x7a41 } },
+        { "[ff01::8:800:200C:417A%1000000]:8080",           STATUS_SUCCESS,             1000000,    0x901f,
+            { 0x1ff, 0, 0, 0, 0x800, 8, 0xc20, 0x7a41 } },
+        { "[ff01::8:800:200C:417A%4294967295]:8080",        STATUS_SUCCESS,             0xffffffff, 0x901f,
+            { 0x1ff, 0, 0, 0, 0x800, 8, 0xc20, 0x7a41 } },
+        { "[ff01::8:800:200C:417A%4294967296]:8080",        STATUS_INVALID_PARAMETER,   0xbadf00d,  0xbeef,
+            { 0x1ff, 0, 0, 0, 0x800, 8, 0xc20, 0x7a41 } },
+        { "[ff01::8:800:200C:417A%-1]:8080",                STATUS_INVALID_PARAMETER,   0xbadf00d,  0xbeef,
+            { 0x1ff, 0, 0, 0, 0x800, 8, 0xc20, 0x7a41 } },
+        { "[ff01::8:800:200C:417A%0]:8080",                 STATUS_SUCCESS,             0,          0x901f,
+            { 0x1ff, 0, 0, 0, 0x800, 8, 0xc20, 0x7a41 } },
+        { "[ff01::8:800:200C:417A%1",                       STATUS_INVALID_PARAMETER,   0xbadf00d,  0xbeef,
+            { 0x1ff, 0, 0, 0, 0x800, 8, 0xc20, 0x7a41 } },
+        { "[ff01::8:800:200C:417A%0x1000]:8080",            STATUS_INVALID_PARAMETER,   0xbadf00d,  0xbeef,
+            { 0x1ff, 0, 0, 0, 0x800, 8, 0xc20, 0x7a41 } },
+        { "[ff01::8:800:200C:417A/16]:8080",                STATUS_INVALID_PARAMETER,   0xbadf00d,  0xbeef,
+            { 0x1ff, 0, 0, 0, 0x800, 8, 0xc20, 0x7a41 } },
+    };
+    const char *simple_ip = "::";
+    unsigned int i;
+
+    if (!pRtlIpv6StringToAddressExW)
+    {
+        skip("RtlIpv6StringToAddressExW not available\n");
+        /* we can continue, just not test W */
+    }
+
+    if (!pRtlIpv6StringToAddressExA)
+    {
+        skip("RtlIpv6StringToAddressExA not available\n");
+        return;
+    }
+
+    res = pRtlIpv6StringToAddressExA(simple_ip, &ip, &scope, &port);
+    ok(res == STATUS_SUCCESS, "[validate] res = 0x%08x, expected STATUS_SUCCESS\n", res);
+
+    init_ip6(&ip, NULL);
+    init_ip6(&expected_ip, NULL);
+    scope = 0xbadf00d;
+    port = 0xbeef;
+    res = pRtlIpv6StringToAddressExA(NULL, &ip, &scope, &port);
+    ok(res == STATUS_INVALID_PARAMETER,
+       "[null string] res = 0x%08x, expected STATUS_INVALID_PARAMETER\n", res);
+    ok(scope == 0xbadf00d, "[null string] scope = 0x%08x, expected 0xbadf00d\n", scope);
+    ok(port == 0xbeef, "[null string] port = 0x%08x, expected 0xbeef\n", port);
+    ok(!memcmp(&ip, &expected_ip, sizeof(ip)),
+       "[null string] ip is changed, expected it not to change\n");
+
+
+    init_ip6(&ip, NULL);
+    scope = 0xbadf00d;
+    port = 0xbeef;
+    res = pRtlIpv6StringToAddressExA(simple_ip, NULL, &scope, &port);
+    ok(res == STATUS_INVALID_PARAMETER,
+       "[null result] res = 0x%08x, expected STATUS_INVALID_PARAMETER\n", res);
+    ok(scope == 0xbadf00d, "[null result] scope = 0x%08x, expected 0xbadf00d\n", scope);
+    ok(port == 0xbeef, "[null result] port = 0x%08x, expected 0xbeef\n", port);
+    ok(!memcmp(&ip, &expected_ip, sizeof(ip)),
+       "[null result] ip is changed, expected it not to change\n");
+
+    init_ip6(&ip, NULL);
+    scope = 0xbadf00d;
+    port = 0xbeef;
+    res = pRtlIpv6StringToAddressExA(simple_ip, &ip, NULL, &port);
+    ok(res == STATUS_INVALID_PARAMETER,
+       "[null scope] res = 0x%08x, expected STATUS_INVALID_PARAMETER\n", res);
+    ok(scope == 0xbadf00d, "[null scope] scope = 0x%08x, expected 0xbadf00d\n", scope);
+    ok(port == 0xbeef, "[null scope] port = 0x%08x, expected 0xbeef\n", port);
+    ok(!memcmp(&ip, &expected_ip, sizeof(ip)),
+       "[null scope] ip is changed, expected it not to change\n");
+
+    init_ip6(&ip, NULL);
+    scope = 0xbadf00d;
+    port = 0xbeef;
+    res = pRtlIpv6StringToAddressExA(simple_ip, &ip, &scope, NULL);
+    ok(res == STATUS_INVALID_PARAMETER,
+       "[null port] res = 0x%08x, expected STATUS_INVALID_PARAMETER\n", res);
+    ok(scope == 0xbadf00d, "[null port] scope = 0x%08x, expected 0xbadf00d\n", scope);
+    ok(port == 0xbeef, "[null port] port = 0x%08x, expected 0xbeef\n", port);
+    ok(!memcmp(&ip, &expected_ip, sizeof(ip)),
+       "[null port] ip is changed, expected it not to change\n");
+
+    /* sanity check */
+    ok(sizeof(ip) == sizeof(USHORT)* 8, "sizeof(ip)\n");
+
+    /* first we run all ip related tests, to make sure someone didnt accidentally reimplement instead of re-use. */
+    for (i = 0; i < ARRAY_SIZE(ipv6_tests); i++)
+    {
+        ULONG scope = 0xbadf00d;
+        USHORT port = 0xbeef;
+        NTSTATUS expect_ret = (ipv6_tests[i].flags & ex_fail_6) ? STATUS_INVALID_PARAMETER : ipv6_tests[i].res;
+
+        if (ipv6_tests[i].flags & ex_skip_6)
+            continue;
+
+        init_ip6(&ip, NULL);
+        res = pRtlIpv6StringToAddressExA(ipv6_tests[i].address, &ip, &scope, &port);
+        compare_RtlIpv6StringToAddressExW(ipv6_tests[i].address, &ip, res, scope, port);
+
+        /* make sure nothing was changed if this function fails. */
+        if (res == STATUS_INVALID_PARAMETER)
+        {
+            ok(scope == 0xbadf00d, "[%s] scope = 0x%08x, expected 0xbadf00d\n",
+               ipv6_tests[i].address, scope);
+            ok(port == 0xbeef, "[%s] port = 0x%08x, expected 0xbeef\n",
+               ipv6_tests[i].address, port);
+        }
+        else
+        {
+            ok(scope != 0xbadf00d, "[%s] scope = 0x%08x, not expected 0xbadf00d\n",
+               ipv6_tests[i].address, scope);
+            ok(port != 0xbeef, "[%s] port = 0x%08x, not expected 0xbeef\n",
+               ipv6_tests[i].address, port);
+        }
+
+        if (ipv6_tests[i].flags & win_broken_6)
+        {
+            ok(res == expect_ret || broken(res == STATUS_INVALID_PARAMETER),
+               "[%s] res = 0x%08x, expected 0x%08x\n", ipv6_tests[i].address, res, expect_ret);
+
+            if (res == STATUS_INVALID_PARAMETER)
+                continue;
+        }
+        else
+        {
+            ok(res == expect_ret, "[%s] res = 0x%08x, expected 0x%08x\n",
+               ipv6_tests[i].address, res, expect_ret);
+        }
+
+        /* If ex fails but non-ex does not we cannot check if the part that is converted
+           before it failed was correct, since there is no data for it in the table. */
+        if (res == expect_ret)
+        {
+            init_ip6(&expected_ip, ipv6_tests[i].ip);
+            ok(!memcmp(&ip, &expected_ip, sizeof(ip)),
+               "[%s] ip = %x:%x:%x:%x:%x:%x:%x:%x, expected %x:%x:%x:%x:%x:%x:%x:%x\n",
+               ipv6_tests[i].address,
+               ip.s6_words[0], ip.s6_words[1], ip.s6_words[2], ip.s6_words[3],
+               ip.s6_words[4], ip.s6_words[5], ip.s6_words[6], ip.s6_words[7],
+               expected_ip.s6_words[0], expected_ip.s6_words[1], expected_ip.s6_words[2], expected_ip.s6_words[3],
+               expected_ip.s6_words[4], expected_ip.s6_words[5], expected_ip.s6_words[6], expected_ip.s6_words[7]);
+        }
+    }
+
+    /* now we run scope / port related tests */
+    for (i = 0; i < ARRAY_SIZE(ipv6_ex_tests); i++)
+    {
+        scope = 0xbadf00d;
+        port = 0xbeef;
+        init_ip6(&ip, NULL);
+        res = pRtlIpv6StringToAddressExA(ipv6_ex_tests[i].address, &ip, &scope, &port);
+        compare_RtlIpv6StringToAddressExW(ipv6_ex_tests[i].address, &ip, res, scope, port);
+
+        ok(res == ipv6_ex_tests[i].res, "[%s] res = 0x%08x, expected 0x%08x\n",
+           ipv6_ex_tests[i].address, res, ipv6_ex_tests[i].res);
+        ok(scope == ipv6_ex_tests[i].scope, "[%s] scope = 0x%08x, expected 0x%08x\n",
+           ipv6_ex_tests[i].address, scope, ipv6_ex_tests[i].scope);
+        ok(port == ipv6_ex_tests[i].port, "[%s] port = 0x%08x, expected 0x%08x\n",
+           ipv6_ex_tests[i].address, port, ipv6_ex_tests[i].port);
+
+        init_ip6(&expected_ip, ipv6_ex_tests[i].ip);
+        ok(!memcmp(&ip, &expected_ip, sizeof(ip)),
+           "[%s] ip = %x:%x:%x:%x:%x:%x:%x:%x, expected %x:%x:%x:%x:%x:%x:%x:%x\n",
+           ipv6_ex_tests[i].address,
+           ip.s6_words[0], ip.s6_words[1], ip.s6_words[2], ip.s6_words[3],
+           ip.s6_words[4], ip.s6_words[5], ip.s6_words[6], ip.s6_words[7],
+           expected_ip.s6_words[0], expected_ip.s6_words[1], expected_ip.s6_words[2], expected_ip.s6_words[3],
+           expected_ip.s6_words[4], expected_ip.s6_words[5], expected_ip.s6_words[6], expected_ip.s6_words[7]);
     }
 }
 
@@ -1783,7 +2849,7 @@ static void test_RtlDecompressBuffer(void)
     ok(final_size == 0xdeadbeef, "got wrong final_size %u\n", final_size);
 
     /* regular tests for RtlDecompressBuffer */
-    for (i = 0; i < sizeof(test_lznt) / sizeof(test_lznt[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(test_lznt); i++)
     {
         trace("Running test %d (compressed_size=%u, uncompressed_size=%u, status=0x%08x)\n",
               i, test_lznt[i].compressed_size, test_lznt[i].uncompressed_size, test_lznt[i].status);
@@ -2121,7 +3187,7 @@ static void test_RtlLeaveCriticalSection(void)
     ok(!cs.OwningThread, "unexpected OwningThread %p\n", cs.OwningThread);
 
     /*
-     * Trying to leave a section that wasn't acquired modifies RecusionCount to an invalid value,
+     * Trying to leave a section that wasn't acquired modifies RecursionCount to an invalid value,
      * but doesn't modify LockCount so that an attempt to enter the section later will work.
      */
     status = RtlLeaveCriticalSection(&cs);
@@ -2209,6 +3275,303 @@ static void test_LdrEnumerateLoadedModules(void)
     ok(status == STATUS_INVALID_PARAMETER, "expected STATUS_INVALID_PARAMETER, got 0x%08x\n", status);
 }
 
+static void test_RtlMakeSelfRelativeSD(void)
+{
+    char buf[sizeof(SECURITY_DESCRIPTOR_RELATIVE) + 4];
+    SECURITY_DESCRIPTOR_RELATIVE *sd_rel = (SECURITY_DESCRIPTOR_RELATIVE *)buf;
+    SECURITY_DESCRIPTOR sd;
+    NTSTATUS status;
+    DWORD len;
+
+    if (!pRtlMakeSelfRelativeSD || !pRtlAbsoluteToSelfRelativeSD)
+    {
+        win_skip( "RtlMakeSelfRelativeSD/RtlAbsoluteToSelfRelativeSD not available\n" );
+        return;
+    }
+
+    memset( &sd, 0, sizeof(sd) );
+    sd.Revision = SECURITY_DESCRIPTOR_REVISION;
+
+    len = 0;
+    status = pRtlMakeSelfRelativeSD( &sd, NULL, &len );
+    ok( status == STATUS_BUFFER_TOO_SMALL, "got %08x\n", status );
+    ok( len == sizeof(*sd_rel), "got %u\n", len );
+
+    len += 4;
+    status = pRtlMakeSelfRelativeSD( &sd, sd_rel, &len );
+    ok( status == STATUS_SUCCESS, "got %08x\n", status );
+    ok( len == sizeof(*sd_rel) + 4, "got %u\n", len );
+
+    len = 0;
+    status = pRtlAbsoluteToSelfRelativeSD( &sd, NULL, &len );
+    ok( status == STATUS_BUFFER_TOO_SMALL, "got %08x\n", status );
+    ok( len == sizeof(*sd_rel), "got %u\n", len );
+
+    len += 4;
+    status = pRtlAbsoluteToSelfRelativeSD( &sd, sd_rel, &len );
+    ok( status == STATUS_SUCCESS, "got %08x\n", status );
+    ok( len == sizeof(*sd_rel) + 4, "got %u\n", len );
+
+    sd.Control = SE_SELF_RELATIVE;
+    status = pRtlMakeSelfRelativeSD( &sd, sd_rel, &len );
+    ok( status == STATUS_SUCCESS, "got %08x\n", status );
+    ok( len == sizeof(*sd_rel) + 4, "got %u\n", len );
+
+    status = pRtlAbsoluteToSelfRelativeSD( &sd, sd_rel, &len );
+    ok( status == STATUS_BAD_DESCRIPTOR_FORMAT, "got %08x\n", status );
+}
+
+static DWORD (CALLBACK *orig_entry)(HMODULE,DWORD,LPVOID);
+static DWORD *dll_main_data;
+
+static inline void *get_rva( HMODULE module, DWORD va )
+{
+    return (void *)((char *)module + va);
+}
+
+static void CALLBACK ldr_notify_callback1(ULONG reason, LDR_DLL_NOTIFICATION_DATA *data, void *context)
+{
+    const IMAGE_IMPORT_DESCRIPTOR *imports;
+    const IMAGE_THUNK_DATA *import_list;
+    IMAGE_THUNK_DATA *thunk_list;
+    DWORD *calls = context;
+    LIST_ENTRY *mark;
+    LDR_MODULE *mod;
+    ULONG size;
+    int i, j;
+
+    *calls <<= 4;
+    *calls |= reason;
+
+    if (!lstrcmpiW(data->Loaded.BaseDllName->Buffer, expected_dll))
+        return;
+
+    ok(data->Loaded.Flags == 0, "Expected flags 0, got %x\n", data->Loaded.Flags);
+    ok(!lstrcmpiW(data->Loaded.BaseDllName->Buffer, expected_dll), "Expected %s, got %s\n",
+       wine_dbgstr_w(expected_dll), wine_dbgstr_w(data->Loaded.BaseDllName->Buffer));
+    ok(!!data->Loaded.DllBase, "Expected non zero base address\n");
+    ok(data->Loaded.SizeOfImage, "Expected non zero image size\n");
+
+    /* expect module to be last module listed in LdrData load order list */
+    mark = &NtCurrentTeb()->Peb->LdrData->InMemoryOrderModuleList;
+    mod = CONTAINING_RECORD(mark->Blink, LDR_MODULE, InMemoryOrderModuleList);
+    ok(mod->BaseAddress == data->Loaded.DllBase, "Expected base address %p, got %p\n",
+       data->Loaded.DllBase, mod->BaseAddress);
+    ok(!lstrcmpiW(mod->BaseDllName.Buffer, expected_dll), "Expected %s, got %s\n",
+       wine_dbgstr_w(expected_dll), wine_dbgstr_w(mod->BaseDllName.Buffer));
+
+    /* show that imports have already been resolved */
+    imports = RtlImageDirectoryEntryToData(data->Loaded.DllBase, TRUE, IMAGE_DIRECTORY_ENTRY_IMPORT, &size);
+    ok(!!imports, "Expected dll to have imports\n");
+
+    for (i = 0; imports[i].Name; i++)
+    {
+        thunk_list = get_rva(data->Loaded.DllBase, (DWORD)imports[i].FirstThunk);
+        if (imports[i].OriginalFirstThunk)
+            import_list = get_rva(data->Loaded.DllBase, (DWORD)imports[i].OriginalFirstThunk);
+        else
+            import_list = thunk_list;
+
+        for (j = 0; import_list[j].u1.Ordinal; j++)
+        {
+            ok(thunk_list[j].u1.AddressOfData > data->Loaded.SizeOfImage,
+               "Import has not been resolved: %p\n", (void*)thunk_list[j].u1.Function);
+        }
+    }
+}
+
+static void CALLBACK ldr_notify_callback2(ULONG reason, LDR_DLL_NOTIFICATION_DATA *data, void *context)
+{
+    DWORD *calls = context;
+    *calls <<= 4;
+    *calls |= reason + 2;
+}
+
+static BOOL WINAPI fake_dll_main(HINSTANCE instance, DWORD reason, void* reserved)
+{
+    if (reason == DLL_PROCESS_ATTACH)
+    {
+        *dll_main_data <<= 4;
+        *dll_main_data |= 3;
+    }
+    else if (reason == DLL_PROCESS_DETACH)
+    {
+        *dll_main_data <<= 4;
+        *dll_main_data |= 4;
+    }
+    return orig_entry(instance, reason, reserved);
+}
+
+static void CALLBACK ldr_notify_callback_dll_main(ULONG reason, LDR_DLL_NOTIFICATION_DATA *data, void *context)
+{
+    DWORD *calls = context;
+    LIST_ENTRY *mark;
+    LDR_MODULE *mod;
+
+    *calls <<= 4;
+    *calls |= reason;
+
+    if (reason != LDR_DLL_NOTIFICATION_REASON_LOADED)
+        return;
+
+    mark = &NtCurrentTeb()->Peb->LdrData->InMemoryOrderModuleList;
+    mod = CONTAINING_RECORD(mark->Blink, LDR_MODULE, InMemoryOrderModuleList);
+    ok(mod->BaseAddress == data->Loaded.DllBase, "Expected base address %p, got %p\n",
+       data->Loaded.DllBase, mod->BaseAddress);
+    if (mod->BaseAddress != data->Loaded.DllBase)
+       return;
+
+    orig_entry = mod->EntryPoint;
+    mod->EntryPoint = fake_dll_main;
+    dll_main_data = calls;
+}
+
+static BOOL WINAPI fake_dll_main_fail(HINSTANCE instance, DWORD reason, void* reserved)
+{
+    if (reason == DLL_PROCESS_ATTACH)
+    {
+        *dll_main_data <<= 4;
+        *dll_main_data |= 3;
+    }
+    else if (reason == DLL_PROCESS_DETACH)
+    {
+        *dll_main_data <<= 4;
+        *dll_main_data |= 4;
+    }
+    return FALSE;
+}
+
+static void CALLBACK ldr_notify_callback_fail(ULONG reason, LDR_DLL_NOTIFICATION_DATA *data, void *context)
+{
+    DWORD *calls = context;
+    LIST_ENTRY *mark;
+    LDR_MODULE *mod;
+
+    *calls <<= 4;
+    *calls |= reason;
+
+    if (reason != LDR_DLL_NOTIFICATION_REASON_LOADED)
+        return;
+
+    mark = &NtCurrentTeb()->Peb->LdrData->InMemoryOrderModuleList;
+    mod = CONTAINING_RECORD(mark->Blink, LDR_MODULE, InMemoryOrderModuleList);
+    ok(mod->BaseAddress == data->Loaded.DllBase, "Expected base address %p, got %p\n",
+       data->Loaded.DllBase, mod->BaseAddress);
+    if (mod->BaseAddress != data->Loaded.DllBase)
+       return;
+
+    orig_entry = mod->EntryPoint;
+    mod->EntryPoint = fake_dll_main_fail;
+    dll_main_data = calls;
+}
+
+static void CALLBACK ldr_notify_callback_imports(ULONG reason, LDR_DLL_NOTIFICATION_DATA *data, void *context)
+{
+    DWORD *calls = context;
+
+    if (reason != LDR_DLL_NOTIFICATION_REASON_LOADED)
+        return;
+
+    if (!lstrcmpiW(data->Loaded.BaseDllName->Buffer, crypt32dllW))
+    {
+        *calls <<= 4;
+        *calls |= 1;
+    }
+
+    if (!lstrcmpiW(data->Loaded.BaseDllName->Buffer, wintrustdllW))
+    {
+        *calls <<= 4;
+        *calls |= 2;
+    }
+}
+
+static void test_LdrRegisterDllNotification(void)
+{
+    void *cookie, *cookie2;
+    NTSTATUS status;
+    HMODULE mod;
+    DWORD calls;
+
+    if (!pLdrRegisterDllNotification || !pLdrUnregisterDllNotification)
+    {
+        win_skip("Ldr(Un)RegisterDllNotification not available\n");
+        return;
+    }
+
+    mod = LoadLibraryW(expected_dll);
+    if(mod)
+        FreeLibrary(mod);
+    else
+        expected_dll = ws2_32dllW; /* XP Default */
+
+    /* generic test */
+    status = pLdrRegisterDllNotification(0, ldr_notify_callback1, &calls, &cookie);
+    ok(!status, "Expected STATUS_SUCCESS, got %08x\n", status);
+
+    calls = 0;
+    mod = LoadLibraryW(expected_dll);
+    ok(!!mod, "Failed to load library: %d\n", GetLastError());
+    ok(calls == LDR_DLL_NOTIFICATION_REASON_LOADED, "Expected LDR_DLL_NOTIFICATION_REASON_LOADED, got %x\n", calls);
+
+    calls = 0;
+    FreeLibrary(mod);
+    ok(calls == LDR_DLL_NOTIFICATION_REASON_UNLOADED, "Expected LDR_DLL_NOTIFICATION_REASON_UNLOADED, got %x\n", calls);
+
+    /* test order of callbacks */
+    status = pLdrRegisterDllNotification(0, ldr_notify_callback2, &calls, &cookie2);
+    ok(!status, "Expected STATUS_SUCCESS, got %08x\n", status);
+
+    calls = 0;
+    mod = LoadLibraryW(expected_dll);
+    ok(!!mod, "Failed to load library: %d\n", GetLastError());
+    ok(calls == 0x13, "Expected order 0x13, got %x\n", calls);
+
+    calls = 0;
+    FreeLibrary(mod);
+    ok(calls == 0x24, "Expected order 0x24, got %x\n", calls);
+
+    pLdrUnregisterDllNotification(cookie2);
+    pLdrUnregisterDllNotification(cookie);
+
+    /* test dll main order */
+    status = pLdrRegisterDllNotification(0, ldr_notify_callback_dll_main, &calls, &cookie);
+    ok(!status, "Expected STATUS_SUCCESS, got %08x\n", status);
+
+    calls = 0;
+    mod = LoadLibraryW(expected_dll);
+    ok(!!mod, "Failed to load library: %d\n", GetLastError());
+    ok(calls == 0x13, "Expected order 0x13, got %x\n", calls);
+
+    calls = 0;
+    FreeLibrary(mod);
+    ok(calls == 0x42, "Expected order 0x42, got %x\n", calls);
+
+    pLdrUnregisterDllNotification(cookie);
+
+    /* test dll main order */
+    status = pLdrRegisterDllNotification(0, ldr_notify_callback_fail, &calls, &cookie);
+    ok(!status, "Expected STATUS_SUCCESS, got %08x\n", status);
+
+    calls = 0;
+    mod = LoadLibraryW(expected_dll);
+    ok(!mod, "Expected library to fail loading\n");
+    ok(calls == 0x1342, "Expected order 0x1342, got %x\n", calls);
+
+    pLdrUnregisterDllNotification(cookie);
+
+    /* test dll with dependencies */
+    status = pLdrRegisterDllNotification(0, ldr_notify_callback_imports, &calls, &cookie);
+    ok(!status, "Expected STATUS_SUCCESS, got %08x\n", status);
+
+    calls = 0;
+    mod = LoadLibraryW(wintrustdllW);
+    ok(!!mod, "Failed to load library: %d\n", GetLastError());
+    ok(calls == 0x12 || calls == 0x21, "got %x\n", calls);
+
+    FreeLibrary(mod);
+    pLdrUnregisterDllNotification(cookie);
+}
+
 START_TEST(rtl)
 {
     InitFunctionPtrs();
@@ -2233,6 +3596,11 @@ START_TEST(rtl)
     test_RtlIpv4AddressToString();
     test_RtlIpv4AddressToStringEx();
     test_RtlIpv4StringToAddress();
+    test_RtlIpv4StringToAddressEx();
+    test_RtlIpv6AddressToString();
+    test_RtlIpv6AddressToStringEx();
+    test_RtlIpv6StringToAddress();
+    test_RtlIpv6StringToAddressEx();
     test_LdrAddRefDll();
     test_LdrLockLoaderLock();
     test_RtlCompressBuffer();
@@ -2242,4 +3610,6 @@ START_TEST(rtl)
     test_RtlInitializeCriticalSectionEx();
     test_RtlLeaveCriticalSection();
     test_LdrEnumerateLoadedModules();
+    test_RtlMakeSelfRelativeSD();
+    test_LdrRegisterDllNotification();
 }

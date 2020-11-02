@@ -57,6 +57,7 @@ struct thread
     struct debug_ctx      *debug_ctx;     /* debugger context if this thread is a debugger */
     struct debug_event    *debug_event;   /* debug event being sent to debugger */
     int                    debug_break;   /* debug breakpoint pending? */
+    unsigned int           system_regs;   /* which system regs have been set */
     struct msg_queue      *queue;         /* message queue */
     struct thread_wait    *wait;          /* current wait condition if sleeping */
     struct list            system_apc;    /* queue of system async procedure calls */
@@ -119,7 +120,7 @@ extern void remove_queue( struct object *obj, struct wait_queue_entry *entry );
 extern void kill_thread( struct thread *thread, int violent_death );
 extern void break_thread( struct thread *thread );
 extern void wake_up( struct object *obj, int max );
-extern int thread_queue_apc( struct thread *thread, struct object *owner, const apc_call_t *call_data );
+extern int thread_queue_apc( struct process *process, struct thread *thread, struct object *owner, const apc_call_t *call_data );
 extern void thread_cancel_apc( struct thread *thread, struct object *owner, enum apc_type type );
 extern int thread_add_inflight_fd( struct thread *thread, int client, int server );
 extern int thread_get_inflight_fd( struct thread *thread, int client );
@@ -127,10 +128,12 @@ extern struct thread_snapshot *thread_snap( int *count );
 extern struct token *thread_get_impersonation_token( struct thread *thread );
 extern int set_thread_affinity( struct thread *thread, affinity_t affinity );
 extern int is_cpu_supported( enum cpu_type cpu );
+extern unsigned int get_supported_cpu_mask(void);
 
 /* ptrace functions */
 
 extern void sigchld_callback(void);
+extern void init_thread_context( struct thread *thread );
 extern void get_thread_context( struct thread *thread, context_t *context, unsigned int flags );
 extern void set_thread_context( struct thread *thread, const context_t *context, unsigned int flags );
 extern int send_thread_signal( struct thread *thread, int sig );

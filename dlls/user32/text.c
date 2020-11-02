@@ -41,6 +41,7 @@
 #include "usp10.h"
 #include "user_private.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(text);
 
@@ -365,7 +366,7 @@ static void TEXT_WordBreak (HDC hdc, WCHAR *str, unsigned int max_str,
     assert (format & DT_WORDBREAK);
     assert (chars_fit < *len_str);
 
-    sla = HeapAlloc(GetProcessHeap(), 0, sizeof(SCRIPT_LOGATTR) * *len_str);
+    sla = heap_alloc(sizeof(SCRIPT_LOGATTR) * *len_str);
 
     memset(&sa, 0, sizeof(SCRIPT_ANALYSIS));
     sa.eScript = SCRIPT_UNDEFINED;
@@ -445,7 +446,7 @@ static void TEXT_WordBreak (HDC hdc, WCHAR *str, unsigned int max_str,
     }
     /* Remeasure the string */
     GetTextExtentExPointW (hdc, str, *len_str, 0, NULL, NULL, size);
-    HeapFree(GetProcessHeap(),0, sla);
+    heap_free(sla);
 }
 
 /*********************************************************************
@@ -605,7 +606,7 @@ static BOOL remainder_is_none_or_newline (int num_chars, const WCHAR *str)
  */
 static const WCHAR *TEXT_NextLineW( HDC hdc, const WCHAR *str, int *count,
                                  WCHAR *dest, int *len, int width, DWORD format,
-                                 SIZE *retsize, int last_line, WCHAR **p_retstr,
+                                 SIZE *retsize, int last_line, WCHAR *modstr,
                                  int tabwidth, int *pprefix_offset,
                                  ellipsis_data *pellip)
 {
@@ -721,7 +722,7 @@ static const WCHAR *TEXT_NextLineW( HDC hdc, const WCHAR *str, int *count,
         if (!line_fits && (format & DT_PATH_ELLIPSIS))
         {
             TEXT_PathEllipsify (hdc, dest + seg_j, maxl-seg_j, &j_in_seg,
-                                max_seg_width, &size, *p_retstr, pellip);
+                                max_seg_width, &size, modstr, pellip);
             line_fits = (size.cx <= max_seg_width);
             ellipsified = TRUE;
         }
@@ -734,7 +735,7 @@ static const WCHAR *TEXT_NextLineW( HDC hdc, const WCHAR *str, int *count,
         {
             int before, len_ellipsis;
             TEXT_Ellipsify (hdc, dest + seg_j, maxl-seg_j, &j_in_seg,
-                            max_seg_width, &size, *p_retstr, &before, &len_ellipsis);
+                            max_seg_width, &size, modstr, &before, &len_ellipsis);
             if (before > pellip->before)
             {
                 /* We must have done a path ellipsis too */
@@ -871,7 +872,7 @@ INT WINAPI DrawTextExW( HDC hdc, LPWSTR str, INT i_count,
 {
     SIZE size;
     const WCHAR *strPtr;
-    WCHAR *retstr, *p_retstr;
+    WCHAR *retstr;
     size_t size_retstr;
     WCHAR line[MAX_BUFFER];
     int len, lh, count=i_count;
@@ -885,6 +886,7 @@ INT WINAPI DrawTextExW( HDC hdc, LPWSTR str, INT i_count,
     int prefix_offset;
     ellipsis_data ellip;
     BOOL invert_y=FALSE;
+    int ret = 0;
 
     TRACE("%s, %d, [%s] %08x\n", debugstr_wn (str, count), count,
         wine_dbgstr_rect(rect), flags);
@@ -941,6 +943,7 @@ INT WINAPI DrawTextExW( HDC hdc, LPWSTR str, INT i_count,
     {
         lmargin = dtp->iLeftMargin;
         rmargin = dtp->iRightMargin;
+        width -= lmargin + rmargin;
         if (!(flags & (DT_CENTER | DT_RIGHT)))
             x += lmargin;
         dtp->uiLengthDrawn = 0;     /* This param RECEIVES number of chars processed */
@@ -957,7 +960,7 @@ INT WINAPI DrawTextExW( HDC hdc, LPWSTR str, INT i_count,
     if (flags & DT_MODIFYSTRING)
     {
         size_retstr = (count + 4) * sizeof (WCHAR);
-        retstr = HeapAlloc(GetProcessHeap(), 0, size_retstr);
+        retstr = heap_alloc(size_retstr);
         if (!retstr) return 0;
         memcpy (retstr, str, size_retstr);
     }
@@ -966,20 +969,20 @@ INT WINAPI DrawTextExW( HDC hdc, LPWSTR str, INT i_count,
         size_retstr = 0;
         retstr = NULL;
     }
-    p_retstr = retstr;
 
     do
     {
-	len = sizeof(line)/sizeof(line[0]);
+        len = ARRAY_SIZE(line);
 	if (invert_y)
             last_line = !(flags & DT_NOCLIP) && y - ((flags & DT_EDITCONTROL) ? 2*lh-1 : lh) < rect->bottom;
 	else
             last_line = !(flags & DT_NOCLIP) && y + ((flags & DT_EDITCONTROL) ? 2*lh-1 : lh) > rect->bottom;
-	strPtr = TEXT_NextLineW(hdc, strPtr, &count, line, &len, width, flags, &size, last_line, &p_retstr, tabwidth, &prefix_offset, &ellip);
+	strPtr = TEXT_NextLineW(hdc, strPtr, &count, line, &len, width, flags, &size, last_line, retstr, tabwidth, &prefix_offset, &ellip);
 
-	if (flags & DT_CENTER) x = (rect->left + rect->right -
-				    size.cx) / 2;
-	else if (flags & DT_RIGHT) x = rect->right - size.cx;
+        if (flags & DT_CENTER)
+            x = (rect->left + lmargin + rect->right - rmargin - size.cx) / 2;
+        else if (flags & DT_RIGHT)
+            x = rect->right - size.cx - rmargin;
 
 	if (flags & DT_SINGLELINE)
 	{
@@ -1001,11 +1004,7 @@ INT WINAPI DrawTextExW( HDC hdc, LPWSTR str, INT i_count,
                     const WCHAR *p;
                     p = str; while (p < str+len && *p != TAB) p++;
                     len_seg = p - str;
-                    if (len_seg != len && !GetTextExtentPointW(hdc, str, len_seg, &size))
-                    {
-                        HeapFree (GetProcessHeap(), 0, retstr);
-                        return 0;
-                    }
+                    if (len_seg != len && !GetTextExtentPointW(hdc, str, len_seg, &size)) goto done;
                 }
                 else
                     len_seg = len;
@@ -1014,10 +1013,7 @@ INT WINAPI DrawTextExW( HDC hdc, LPWSTR str, INT i_count,
                                  ((flags & DT_NOCLIP) ? 0 : ETO_CLIPPED) |
                                  ((flags & DT_RTLREADING) ? ETO_RTLREADING : 0),
                                  rect, str, len_seg, NULL ))
-                {
-                    HeapFree (GetProcessHeap(), 0, retstr);
-                    return 0;
-                }
+                    goto done;
                 if (prefix_offset != -1 && prefix_offset < len_seg)
                 {
                     TEXT_DrawUnderscore (hdc, xseg, y + tm.tmAscent + 1, str, prefix_offset, (flags & DT_NOCLIP) ? NULL : rect);
@@ -1066,12 +1062,14 @@ INT WINAPI DrawTextExW( HDC hdc, LPWSTR str, INT i_count,
         if (dtp)
             rect->right += lmargin + rmargin;
     }
-    if (retstr)
-    {
-        memcpy (str, retstr, size_retstr);
-        HeapFree (GetProcessHeap(), 0, retstr);
-    }
-    return y - rect->top;
+
+    if (retstr) memcpy(str, retstr, size_retstr);
+
+    ret = y - rect->top;
+    if (ret == 0) ret = 1;
+done:
+    heap_free(retstr);
+    return ret;
 }
 
 /***********************************************************************
@@ -1128,7 +1126,7 @@ INT WINAPI DrawTextExA( HDC hdc, LPSTR str, INT count,
         wmax += 4;
         amax += 4;
    }
-   wstr = HeapAlloc(GetProcessHeap(), 0, wmax * sizeof(WCHAR));
+   wstr = heap_alloc(wmax * sizeof(WCHAR));
    if (wstr)
    {
        MultiByteToWideChar( cp, 0, str, count, wstr, wcount );
@@ -1147,7 +1145,7 @@ INT WINAPI DrawTextExA( HDC hdc, LPSTR str, INT count,
             for (i=4, p=wstr+wcount; i-- && *p != 0xFFFE; p++) wcount++;
             WideCharToMultiByte( cp, 0, wstr, wcount, str, amax, NULL, NULL );
        }
-       HeapFree(GetProcessHeap(), 0, wstr);
+       heap_free(wstr);
    }
    return ret;
 }
@@ -1417,11 +1415,11 @@ LONG WINAPI TabbedTextOutA( HDC hdc, INT x, INT y, LPCSTR lpstr, INT count,
 {
     LONG ret;
     DWORD len = MultiByteToWideChar( CP_ACP, 0, lpstr, count, NULL, 0 );
-    LPWSTR strW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+    LPWSTR strW = heap_alloc( len * sizeof(WCHAR) );
     if (!strW) return 0;
     MultiByteToWideChar( CP_ACP, 0, lpstr, count, strW, len );
     ret = TabbedTextOutW( hdc, x, y, strW, len, cTabStops, lpTabPos, nTabOrg );
-    HeapFree( GetProcessHeap(), 0, strW );
+    heap_free( strW );
     return ret;
 }
 
@@ -1470,11 +1468,11 @@ DWORD WINAPI GetTabbedTextExtentA( HDC hdc, LPCSTR lpstr, INT count,
 {
     LONG ret;
     DWORD len = MultiByteToWideChar( CP_ACP, 0, lpstr, count, NULL, 0 );
-    LPWSTR strW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+    LPWSTR strW = heap_alloc( len * sizeof(WCHAR) );
     if (!strW) return 0;
     MultiByteToWideChar( CP_ACP, 0, lpstr, count, strW, len );
     ret = GetTabbedTextExtentW( hdc, strW, len, cTabStops, lpTabPos );
-    HeapFree( GetProcessHeap(), 0, strW );
+    heap_free( strW );
     return ret;
 }
 

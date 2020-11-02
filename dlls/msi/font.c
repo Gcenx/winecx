@@ -279,7 +279,7 @@ static UINT ITERATE_RegisterFonts(MSIRECORD *row, LPVOID param)
     if (p) p++;
     else p = uipath;
     MSI_RecordSetStringW( uirow, 1, p );
-    msi_ui_actiondata( package, szRegisterFonts, uirow );
+    MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
     msiobj_release( &uirow->hdr );
     msi_free( uipath );
     /* FIXME: call msi_ui_progress? */
@@ -293,6 +293,9 @@ UINT ACTION_RegisterFonts(MSIPACKAGE *package)
         'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ','`','F','o','n','t','`',0};
     MSIQUERY *view;
     UINT rc;
+
+    if (package->script == SCRIPT_NONE)
+        return msi_schedule_action(package, SCRIPT_INSTALL, szRegisterFonts);
 
     rc = MSI_DatabaseOpenViewW(package->db, query, &view);
     if (rc != ERROR_SUCCESS)
@@ -359,7 +362,7 @@ static UINT ITERATE_UnregisterFonts( MSIRECORD *row, LPVOID param )
     if (p) p++;
     else p = uipath;
     MSI_RecordSetStringW( uirow, 1, p );
-    msi_ui_actiondata( package, szUnregisterFonts, uirow );
+    MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
     msiobj_release( &uirow->hdr );
     msi_free( uipath );
     /* FIXME: call msi_ui_progress? */
@@ -373,6 +376,9 @@ UINT ACTION_UnregisterFonts( MSIPACKAGE *package )
         'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ','`','F','o','n','t','`',0};
     MSIQUERY *view;
     UINT r;
+
+    if (package->script == SCRIPT_NONE)
+        return msi_schedule_action(package, SCRIPT_INSTALL, szUnregisterFonts);
 
     r = MSI_DatabaseOpenViewW( package->db, query, &view );
     if (r != ERROR_SUCCESS)

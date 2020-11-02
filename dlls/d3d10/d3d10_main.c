@@ -63,6 +63,8 @@ HRESULT WINAPI D3D10CreateDevice(IDXGIAdapter *adapter, D3D10_DRIVER_TYPE driver
 
         switch (driver_type)
         {
+            case D3D10_DRIVER_TYPE_WARP:
+                FIXME("WARP driver not implemented, falling back to hardware.\n");
             case D3D10_DRIVER_TYPE_HARDWARE:
             {
                 hr = IDXGIFactory_EnumAdapters(factory, 0, &adapter);
@@ -222,8 +224,7 @@ HRESULT WINAPI D3D10CreateEffectFromMemory(void *data, SIZE_T data_size, UINT fl
     FIXME("data %p, data_size %lu, flags %#x, device %p, effect_pool %p, effect %p stub!\n",
             data, data_size, flags, device, effect_pool, effect);
 
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
-    if (!object)
+    if (!(object = heap_alloc_zero(sizeof(*object))))
     {
         ERR("Failed to allocate D3D10 effect object memory\n");
         return E_OUTOFMEMORY;
@@ -254,17 +255,13 @@ HRESULT WINAPI D3D10CompileEffectFromMemory(void *data, SIZE_T data_size, const 
         const D3D10_SHADER_MACRO *defines, ID3D10Include *include, UINT hlsl_flags, UINT fx_flags,
         ID3D10Blob **effect, ID3D10Blob **errors)
 {
-    FIXME("data %p, data_size %lu, filename %s, defines %p, include %p,"
-            " hlsl_flags %#x, fx_flags %#x, effect %p, errors %p stub!\n",
+    TRACE("data %p, data_size %lu, filename %s, defines %p, include %p, "
+            "hlsl_flags %#x, fx_flags %#x, effect %p, errors %p.\n",
             data, data_size, wine_dbgstr_a(filename), defines, include,
             hlsl_flags, fx_flags, effect, errors);
 
-    if (effect)
-        *effect = NULL;
-    if (errors)
-        *errors = NULL;
-
-    return E_NOTIMPL;
+    return D3DCompile(data, data_size, filename, defines, include,
+            NULL, "fx_4_0", hlsl_flags, fx_flags, effect, errors);
 }
 
 HRESULT WINAPI D3D10CreateEffectPoolFromMemory(void *data, SIZE_T data_size, UINT fx_flags,
@@ -303,8 +300,7 @@ HRESULT WINAPI D3D10ReflectShader(const void *data, SIZE_T data_size, ID3D10Shad
 
     FIXME("data %p, data_size %lu, reflector %p stub!\n", data, data_size, reflector);
 
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
-    if (!object)
+    if (!(object = heap_alloc_zero(sizeof(*object))))
     {
         ERR("Failed to allocate D3D10 shader reflection object memory\n");
         return E_OUTOFMEMORY;

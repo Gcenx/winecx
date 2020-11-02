@@ -34,7 +34,8 @@
 #include "oleauto.h"
 
 #include "msipriv.h"
-#include "msiserver.h"
+#include "winemsi.h"
+#include "wine/exception.h"
 #include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msi);
@@ -242,7 +243,7 @@ static WCHAR *deformat_file( FORMAT *format, FORMSTR *str, BOOL shortname, int *
         if ((ret = strdupW( file->TargetPath ))) len = strlenW( ret );
         goto done;
     }
-    if ((len = GetShortPathNameW(file->TargetPath, NULL, 0)) <= 0)
+    if (!(len = GetShortPathNameW(file->TargetPath, NULL, 0)))
     {
         if ((ret = strdupW( file->TargetPath ))) len = strlenW( ret );
         goto done;
@@ -276,7 +277,7 @@ static WCHAR *deformat_environment( FORMAT *format, FORMSTR *str, int *ret_len )
 }
 
 static WCHAR *deformat_literal( FORMAT *format, FORMSTR *str, BOOL *propfound,
-                                BOOL *nonprop, int *type, int *len )
+                                int *type, int *len )
 {
     LPCWSTR data = get_formstr_data(format, str);
     WCHAR *replaced = NULL;
@@ -339,63 +340,28 @@ static WCHAR *deformat_literal( FORMAT *format, FORMSTR *str, BOOL *propfound,
     return replaced;
 }
 
-static LPWSTR build_default_format(const MSIRECORD* record)
+static WCHAR *build_default_format( const MSIRECORD *record )
 {
-    int i;  
-    int count;
-    LPWSTR rc, buf;
-    static const WCHAR fmt[] = {'%','i',':',' ','%','s',' ',0};
-    static const WCHAR fmt_null[] = {'%','i',':',' ',' ',0};
-    static const WCHAR fmt_index[] = {'%','i',0};
-    LPCWSTR str;
-    WCHAR index[10];
-    DWORD size, max_len, len;
+    static const WCHAR fmt[] = {'%','i',':',' ','[','%','i',']',' ',0};
+    int i, count = MSI_RecordGetFieldCount( record );
+    WCHAR *ret, *tmp, buf[26];
+    DWORD size = 1;
 
-    count = MSI_RecordGetFieldCount(record);
+    if (!(ret = msi_alloc( sizeof(*ret) ))) return NULL;
+    ret[0] = 0;
 
-    max_len = MAX_PATH;
-    buf = msi_alloc((max_len + 1) * sizeof(WCHAR));
-
-    rc = NULL;
-    size = 1;
     for (i = 1; i <= count; i++)
     {
-        sprintfW(index, fmt_index, i);
-        str = MSI_RecordGetString(record, i);
-        len = (str) ? lstrlenW(str) : 0;
-        len += (sizeof(fmt_null)/sizeof(fmt_null[0]) - 3) + lstrlenW(index);
-        size += len;
-
-        if (len > max_len)
+        size += sprintfW( buf, fmt, i, i );
+        if (!(tmp = msi_realloc( ret, size * sizeof(*ret) )))
         {
-            max_len = len;
-            buf = msi_realloc(buf, (max_len + 1) * sizeof(WCHAR));
-            if (!buf)
-            {
-                msi_free(rc);
-                return NULL;
-            }
+            msi_free( ret );
+            return NULL;
         }
-
-        if (str)
-            sprintfW(buf, fmt, i, str);
-        else
-            sprintfW(buf, fmt_null, i);
-
-        if (!rc)
-        {
-            rc = msi_alloc(size * sizeof(WCHAR));
-            lstrcpyW(rc, buf);
-        }
-        else
-        {
-            rc = msi_realloc(rc, size * sizeof(WCHAR));
-            lstrcatW(rc, buf);
-        }
+        ret = tmp;
+        strcatW( ret, buf );
     }
-
-    msi_free(buf);
-    return rc;
+    return ret;
 }
 
 static BOOL format_is_number(WCHAR x)
@@ -685,7 +651,7 @@ static WCHAR *replace_stack_prop( FORMAT *format, STACK *values,
     content->len = *oldsize - 2;
     content->type = *type;
 
-    if (*type == FORMAT_NUMBER)
+    if (*type == FORMAT_NUMBER && format->record)
     {
         replaced = deformat_index( format, content, len );
         if (replaced)
@@ -699,7 +665,7 @@ static WCHAR *replace_stack_prop( FORMAT *format, STACK *values,
     }
     else if (format->package)
     {
-        replaced = deformat_literal( format, content, propfound, nonprop, type, len );
+        replaced = deformat_literal( format, content, propfound, type, len );
     }
     else
     {
@@ -791,7 +757,7 @@ static BOOL verify_format(LPWSTR data)
 
 static DWORD deformat_string_internal(MSIPACKAGE *package, LPCWSTR ptr, 
                                       WCHAR** data, DWORD *len,
-                                      MSIRECORD* record, INT* failcount)
+                                      MSIRECORD* record)
 {
     FORMAT format;
     FORMSTR *str = NULL;
@@ -874,18 +840,37 @@ static DWORD deformat_string_internal(MSIPACKAGE *package, LPCWSTR ptr,
 UINT MSI_FormatRecordW( MSIPACKAGE* package, MSIRECORD* record, LPWSTR buffer,
                         LPDWORD size )
 {
-    WCHAR *format, *deformated;
+    WCHAR *format, *deformated = NULL;
     UINT rc = ERROR_INVALID_PARAMETER;
     DWORD len;
+    MSIRECORD *record_deformated;
+    int field_count, i;
 
     TRACE("%p %p %p %p\n", package, record, buffer, size);
+    dump_record(record);
 
     if (!(format = msi_dup_record_field( record, 0 )))
         format = build_default_format( record );
 
-    TRACE("%s\n", debugstr_w(format));
+    field_count = MSI_RecordGetFieldCount(record);
+    record_deformated = MSI_CloneRecord(record);
+    if (!record_deformated)
+    {
+        rc = ERROR_OUTOFMEMORY;
+        goto end;
+    }
+    MSI_RecordSetStringW(record_deformated, 0, format);
+    for (i = 1; i <= field_count; i++)
+    {
+        if (MSI_RecordGetString(record, i))
+        {
+            deformat_string_internal(package, MSI_RecordGetString(record, i), &deformated, &len, NULL);
+            MSI_RecordSetStringW(record_deformated, i, deformated);
+            msi_free(deformated);
+        }
+    }
 
-    deformat_string_internal( package, format, &deformated, &len, record, NULL );
+    deformat_string_internal(package, format, &deformated, &len, record_deformated);
     if (buffer)
     {
         if (*size>len)
@@ -907,6 +892,8 @@ UINT MSI_FormatRecordW( MSIPACKAGE* package, MSIRECORD* record, LPWSTR buffer,
     else rc = ERROR_SUCCESS;
 
     *size = len;
+    msiobj_release(&record_deformated->hdr);
+end:
     msi_free( format );
     msi_free( deformated );
     return rc;
@@ -921,46 +908,37 @@ UINT WINAPI MsiFormatRecordW( MSIHANDLE hInstall, MSIHANDLE hRecord,
 
     TRACE("%d %d %p %p\n", hInstall, hRecord, szResult, sz);
 
+    record = msihandle2msiinfo(hRecord, MSIHANDLETYPE_RECORD);
+    if (!record)
+        return ERROR_INVALID_HANDLE;
+
     package = msihandle2msiinfo( hInstall, MSIHANDLETYPE_PACKAGE );
     if (!package)
     {
-        HRESULT hr;
-        IWineMsiRemotePackage *remote_package;
-        BSTR value = NULL;
-        awstring wstr;
+        LPWSTR value = NULL;
+        MSIHANDLE remote;
 
-        remote_package = (IWineMsiRemotePackage *)msi_get_remote( hInstall );
-        if (remote_package)
+        if ((remote = msi_get_remote(hInstall)))
         {
-            hr = IWineMsiRemotePackage_FormatRecord( remote_package, hRecord,
-                                                     &value );
-            if (FAILED(hr))
-                goto done;
-
-            wstr.unicode = TRUE;
-            wstr.str.w = szResult;
-            r = msi_strcpy_to_awstring( value, SysStringLen(value), &wstr, sz );
-
-done:
-            IWineMsiRemotePackage_Release( remote_package );
-            SysFreeString( value );
-
-            if (FAILED(hr))
+            __TRY
             {
-                if (HRESULT_FACILITY(hr) == FACILITY_WIN32)
-                    return HRESULT_CODE(hr);
-
-                return ERROR_FUNCTION_FAILED;
+                r = remote_FormatRecord(remote, (struct wire_record *)&record->count, &value);
             }
+            __EXCEPT(rpc_filter)
+            {
+                r = GetExceptionCode();
+            }
+            __ENDTRY
 
+            if (!r)
+                r = msi_strncpyW(value, -1, szResult, sz);
+
+            midl_user_free(value);
+            msiobj_release(&record->hdr);
             return r;
         }
     }
 
-    record = msihandle2msiinfo( hRecord, MSIHANDLETYPE_RECORD );
-
-    if (!record)
-        return ERROR_INVALID_HANDLE;
     if (!sz)
     {
         msiobj_release( &record->hdr );
@@ -977,52 +955,63 @@ done:
     return r;
 }
 
-UINT WINAPI MsiFormatRecordA( MSIHANDLE hInstall, MSIHANDLE hRecord,
-                              LPSTR szResult, LPDWORD sz )
+UINT WINAPI MsiFormatRecordA(MSIHANDLE hinst, MSIHANDLE hrec, char *buf, DWORD *sz)
 {
-    UINT r;
-    DWORD len, save;
+    MSIPACKAGE *package;
+    MSIRECORD *rec;
     LPWSTR value;
+    DWORD len;
+    UINT r;
 
-    TRACE("%d %d %p %p\n", hInstall, hRecord, szResult, sz);
+    TRACE("%d %d %p %p\n", hinst, hrec, buf, sz);
 
-    if (!hRecord)
+    rec = msihandle2msiinfo(hrec, MSIHANDLETYPE_RECORD);
+    if (!rec)
         return ERROR_INVALID_HANDLE;
 
-    if (!sz)
+    package = msihandle2msiinfo(hinst, MSIHANDLETYPE_PACKAGE);
+    if (!package)
     {
-        if (szResult)
-            return ERROR_INVALID_PARAMETER;
-        else
-            return ERROR_SUCCESS;
+        LPWSTR value = NULL;
+        MSIHANDLE remote;
+
+        if ((remote = msi_get_remote(hinst)))
+        {
+            __TRY
+            {
+                r = remote_FormatRecord(remote, (struct wire_record *)&rec->count, &value);
+            }
+            __EXCEPT(rpc_filter)
+            {
+                r = GetExceptionCode();
+            }
+            __ENDTRY
+
+            if (!r)
+                r = msi_strncpyWtoA(value, -1, buf, sz, TRUE);
+
+            midl_user_free(value);
+            msiobj_release(&rec->hdr);
+            return r;
+        }
     }
 
-    r = MsiFormatRecordW( hInstall, hRecord, NULL, &len );
+    r = MSI_FormatRecordW(package, rec, NULL, &len);
     if (r != ERROR_SUCCESS)
         return r;
 
     value = msi_alloc(++len * sizeof(WCHAR));
     if (!value)
-        return ERROR_OUTOFMEMORY;
-
-    r = MsiFormatRecordW( hInstall, hRecord, value, &len );
-    if (r != ERROR_SUCCESS)
         goto done;
 
-    save = len + 1;
-    len = WideCharToMultiByte(CP_ACP, 0, value, len + 1, NULL, 0, NULL, NULL);
-    WideCharToMultiByte(CP_ACP, 0, value, len, szResult, *sz, NULL, NULL);
+    r = MSI_FormatRecordW(package, rec, value, &len);
+    if (!r)
+        r = msi_strncpyWtoA(value, len, buf, sz, FALSE);
 
-    if (szResult && len > *sz)
-    {
-        if (*sz) szResult[*sz - 1] = '\0';
-        r = ERROR_MORE_DATA;
-    }
-
-    *sz = save - 1;
-
-done:
     msi_free(value);
+done:
+    msiobj_release(&rec->hdr);
+    if (package) msiobj_release(&package->hdr);
     return r;
 }
 

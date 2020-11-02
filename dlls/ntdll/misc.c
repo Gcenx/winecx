@@ -359,6 +359,14 @@ HANDLE WINAPI WinSqmStartSession(GUID *sessionguid, DWORD sessionid, DWORD unkno
     return INVALID_HANDLE_VALUE;
 }
 
+/***********************************************************************
+ *          WinSqmSetDWORD (NTDLL.@)
+ */
+void WINAPI WinSqmSetDWORD(HANDLE session, DWORD datapoint_id, DWORD datapoint_value)
+{
+    FIXME("(%p, %d, %d): stub\n", session, datapoint_id, datapoint_value);
+}
+
 /******************************************************************************
  *                  EtwEventRegister (NTDLL.@)
  */
@@ -475,4 +483,24 @@ ULONG WINAPI EtwEventWrite( REGHANDLE handle, const EVENT_DESCRIPTOR *descriptor
 {
     FIXME("(%s, %p, %u, %p): stub\n", wine_dbgstr_longlong(handle), descriptor, count, data);
     return ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *		    DbgUiRemoteBreakin (NTDLL.@)
+ */
+void WINAPI DbgUiRemoteBreakin( void *arg )
+{
+    FIXME("stub\n");
+}
+
+NTSTATUS WINAPI NtCreateLowBoxToken(HANDLE *token_handle, HANDLE existing_token_handle, ACCESS_MASK desired_access,
+                                    OBJECT_ATTRIBUTES *object_attributes, SID *package_sid, ULONG capability_count,
+                                    SID_AND_ATTRIBUTES *capabilities, ULONG handle_count, HANDLE *handle)
+{
+    FIXME("(%p, %p, %x, %p, %p, %u, %p, %u, %p): stub\n", token_handle, existing_token_handle, desired_access,
+            object_attributes, package_sid, capability_count, capabilities, handle_count, handle);
+
+    /* We need to return a NULL handle since later it will be passed to CloseHandle and that must not fail */
+    *token_handle = NULL;
+    return STATUS_SUCCESS;
 }

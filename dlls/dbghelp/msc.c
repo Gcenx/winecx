@@ -2893,7 +2893,7 @@ static BOOL pdb_process_file(const struct process* pcs,
         msc_dbg->module->module.PdbAge = pdb_info->pdb_files[0].age;
         MultiByteToWideChar(CP_ACP, 0, pdb_lookup->filename, -1,
                             msc_dbg->module->module.LoadedPdbName,
-                            sizeof(msc_dbg->module->module.LoadedPdbName) / sizeof(WCHAR));
+                            ARRAY_SIZE(msc_dbg->module->module.LoadedPdbName));
         /* FIXME: we could have a finer grain here */
         msc_dbg->module->module.LineNumbers = TRUE;
         msc_dbg->module->module.GlobalSymbols = TRUE;
@@ -3089,10 +3089,10 @@ static BOOL  pev_binop(struct pevaluator* pev, char op)
 static BOOL  pev_deref(struct pevaluator* pev)
 {
     char        res[PEV_MAX_LEN];
-    DWORD_PTR   v1, v2;
+    DWORD_PTR   v1, v2 = 0;
 
     if (!pev_pop_val(pev, &v1)) return FALSE;
-    if (!sw_read_mem(pev->csw, v1, &v2, sizeof(v2)))
+    if (!sw_read_mem(pev->csw, v1, &v2, pev->csw->cpu->word_size))
         return PEV_ERROR1(pev, "deref: cannot read mem at %lx\n", v1);
     snprintf(res, sizeof(res), "%ld", v2);
     pev_push(pev, res);
@@ -3196,8 +3196,8 @@ done:
     return FALSE;
 }
 
-BOOL         pdb_virtual_unwind(struct cpu_stack_walk* csw, DWORD_PTR ip,
-                                CONTEXT* context, struct pdb_cmd_pair* cpair)
+BOOL pdb_virtual_unwind(struct cpu_stack_walk *csw, DWORD_PTR ip,
+    union ctx *context, struct pdb_cmd_pair *cpair)
 {
     struct module_pair          pair;
     struct pdb_module_info*     pdb_info;

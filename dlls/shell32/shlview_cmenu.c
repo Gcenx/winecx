@@ -25,7 +25,6 @@
 #define NONAMELESSUNION
 
 #include "winerror.h"
-#include "wine/debug.h"
 
 #include "windef.h"
 #include "wingdi.h"
@@ -39,12 +38,18 @@
 #include "shellfolder.h"
 
 #include "shresdef.h"
+#include "shlwapi.h"
+
+#include "wine/heap.h"
+#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
 typedef struct
 {
     IContextMenu3 IContextMenu3_iface;
+    IShellExtInit IShellExtInit_iface;
+    IObjectWithSite IObjectWithSite_iface;
     LONG ref;
 
     IShellFolder* parent;
@@ -64,6 +69,16 @@ static inline ContextMenu *impl_from_IContextMenu3(IContextMenu3 *iface)
     return CONTAINING_RECORD(iface, ContextMenu, IContextMenu3_iface);
 }
 
+static inline ContextMenu *impl_from_IShellExtInit(IShellExtInit *iface)
+{
+    return CONTAINING_RECORD(iface, ContextMenu, IShellExtInit_iface);
+}
+
+static inline ContextMenu *impl_from_IObjectWithSite(IObjectWithSite *iface)
+{
+    return CONTAINING_RECORD(iface, ContextMenu, IObjectWithSite_iface);
+}
+
 static HRESULT WINAPI ContextMenu_QueryInterface(IContextMenu3 *iface, REFIID riid, LPVOID *ppvObj)
 {
     ContextMenu *This = impl_from_IContextMenu3(iface);
@@ -79,9 +94,13 @@ static HRESULT WINAPI ContextMenu_QueryInterface(IContextMenu3 *iface, REFIID ri
     {
         *ppvObj = &This->IContextMenu3_iface;
     }
-    else if (IsEqualIID(riid, &IID_IShellExtInit))  /*IShellExtInit*/
+    else if (IsEqualIID(riid, &IID_IShellExtInit))
     {
-        FIXME("-- LPSHELLEXTINIT pointer requested\n");
+        *ppvObj = &This->IShellExtInit_iface;
+    }
+    else if (IsEqualIID(riid, &IID_IObjectWithSite))
+    {
+        *ppvObj = &This->IObjectWithSite_iface;
     }
 
     if(*ppvObj)
@@ -117,7 +136,7 @@ static ULONG WINAPI ContextMenu_Release(IContextMenu3 *iface)
         SHFree(This->pidl);
         _ILFreeaPidl(This->apidl, This->cidl);
 
-        HeapFree(GetProcessHeap(), 0, This);
+        heap_free(This);
     }
 
     return ref;
@@ -284,6 +303,318 @@ static BOOL CALLBACK Properties_AddPropSheetCallback(HPROPSHEETPAGE hpage, LPARA
 	return TRUE;
 }
 
+static BOOL format_date(FILETIME *time, WCHAR *buffer, DWORD size)
+{
+    FILETIME ft;
+    SYSTEMTIME st;
+    int ret;
+
+    if (!FileTimeToLocalFileTime(time, &ft))
+        return FALSE;
+
+    if (!FileTimeToSystemTime(&ft, &st))
+        return FALSE;
+
+    ret = GetDateFormatW(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buffer, size);
+    if (ret)
+    {
+        buffer[ret - 1] = ' ';
+        ret = GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &st, NULL, buffer + ret , size - ret);
+    }
+    return ret != 0;
+}
+
+static BOOL get_program_description(WCHAR *path, WCHAR *buffer, DWORD size)
+{
+    static const WCHAR translationW[] = {
+        '\\','V','a','r','F','i','l','e','I','n','f','o',
+        '\\','T','r','a','n','s','l','a','t','i','o','n',0
+    };
+    static const WCHAR fileDescFmtW[] = {
+        '\\','S','t','r','i','n','g','F','i','l','e','I','n','f','o',
+        '\\','%','0','4','x','%','0','4','x',
+        '\\','F','i','l','e','D','e','s','c','r','i','p','t','i','o','n',0
+    };
+    WCHAR fileDescW[41], *desc;
+    DWORD versize, *lang;
+    UINT dlen, llen, i;
+    BOOL ret = FALSE;
+    PVOID data;
+
+    versize = GetFileVersionInfoSizeW(path, NULL);
+    if (!versize) return FALSE;
+
+    data = heap_alloc(versize);
+    if (!data) return FALSE;
+
+    if (!GetFileVersionInfoW(path, 0, versize, data))
+        goto out;
+
+    if (!VerQueryValueW(data, translationW, (LPVOID *)&lang, &llen))
+        goto out;
+
+    for (i = 0; i < llen / sizeof(DWORD); i++)
+    {
+        sprintfW(fileDescW, fileDescFmtW, LOWORD(lang[i]), HIWORD(lang[i]));
+        if (VerQueryValueW(data, fileDescW, (LPVOID *)&desc, &dlen))
+        {
+            if (dlen > size - 1) dlen = size - 1;
+            memcpy(buffer, desc, dlen * sizeof(WCHAR));
+            buffer[dlen] = 0;
+            ret = TRUE;
+            break;
+        }
+    }
+
+out:
+    heap_free(data);
+    return ret;
+}
+
+struct file_properties_info
+{
+    WCHAR path[MAX_PATH];
+    WCHAR dir[MAX_PATH];
+    WCHAR *filename;
+    DWORD attrib;
+};
+
+static void init_file_properties_dlg(HWND hwndDlg, struct file_properties_info *props)
+{
+    WCHAR buffer[MAX_PATH], buffer2[MAX_PATH];
+    WIN32_FILE_ATTRIBUTE_DATA exinfo;
+    SHFILEINFOW shinfo;
+
+    SetDlgItemTextW(hwndDlg, IDC_FPROP_PATH, props->filename);
+    SetDlgItemTextW(hwndDlg, IDC_FPROP_LOCATION, props->dir);
+
+    if (SHGetFileInfoW(props->path, 0, &shinfo, sizeof(shinfo), SHGFI_TYPENAME|SHGFI_ICON))
+    {
+        if (shinfo.hIcon)
+        {
+            SendDlgItemMessageW(hwndDlg, IDC_FPROP_ICON, STM_SETICON, (WPARAM)shinfo.hIcon, 0);
+            DestroyIcon(shinfo.hIcon);
+        }
+        if (shinfo.szTypeName[0])
+            SetDlgItemTextW(hwndDlg, IDC_FPROP_TYPE, shinfo.szTypeName);
+    }
+
+    if (!GetFileAttributesExW(props->path, GetFileExInfoStandard, &exinfo))
+        return;
+
+    if (format_date(&exinfo.ftCreationTime, buffer, ARRAY_SIZE(buffer)))
+        SetDlgItemTextW(hwndDlg, IDC_FPROP_CREATED, buffer);
+
+    if (exinfo.dwFileAttributes & FILE_ATTRIBUTE_READONLY)
+        SendDlgItemMessageW(hwndDlg, IDC_FPROP_READONLY, BM_SETCHECK, BST_CHECKED, 0);
+    if (exinfo.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN)
+        SendDlgItemMessageW(hwndDlg, IDC_FPROP_HIDDEN, BM_SETCHECK, BST_CHECKED, 0);
+    if (exinfo.dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE)
+        SendDlgItemMessageW(hwndDlg, IDC_FPROP_ARCHIVE, BM_SETCHECK, BST_CHECKED, 0);
+
+    if (exinfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+    {
+        static const WCHAR unknownW[] = {'(','u','n','k','n','o','w','n',')',0};
+        SetDlgItemTextW(hwndDlg, IDC_FPROP_SIZE, unknownW);
+
+        /* TODO: Implement counting for directories */
+        return;
+    }
+
+    /* Information about files only */
+    StrFormatByteSizeW(((LONGLONG)exinfo.nFileSizeHigh << 32) | exinfo.nFileSizeLow,
+                       buffer, ARRAY_SIZE(buffer));
+    SetDlgItemTextW(hwndDlg, IDC_FPROP_SIZE, buffer);
+
+    if (format_date(&exinfo.ftLastWriteTime, buffer, ARRAY_SIZE(buffer)))
+        SetDlgItemTextW(hwndDlg, IDC_FPROP_MODIFIED, buffer);
+    if (format_date(&exinfo.ftLastAccessTime, buffer, ARRAY_SIZE(buffer)))
+        SetDlgItemTextW(hwndDlg, IDC_FPROP_ACCESSED, buffer);
+
+    if (FindExecutableW(props->path, NULL, buffer) <= (HINSTANCE)32)
+        return;
+
+    /* Information about executables */
+    if (SHGetFileInfoW(buffer, 0, &shinfo, sizeof(shinfo), SHGFI_ICON | SHGFI_SMALLICON) && shinfo.hIcon)
+        SendDlgItemMessageW(hwndDlg, IDC_FPROP_PROG_ICON, STM_SETICON, (WPARAM)shinfo.hIcon, 0);
+
+    if (get_program_description(buffer, buffer2, ARRAY_SIZE(buffer2)))
+        SetDlgItemTextW(hwndDlg, IDC_FPROP_PROG_NAME, buffer2);
+    else
+    {
+        WCHAR *p = strrchrW(buffer, '\\');
+        SetDlgItemTextW(hwndDlg, IDC_FPROP_PROG_NAME, p ? ++p : buffer);
+    }
+}
+
+static INT_PTR CALLBACK file_properties_proc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMsg)
+    {
+        case WM_INITDIALOG:
+        {
+            LPPROPSHEETPAGEW page = (LPPROPSHEETPAGEW)lParam;
+            SetWindowLongPtrW(hwndDlg, DWLP_USER, (LONG_PTR)page->lParam);
+            init_file_properties_dlg(hwndDlg, (struct file_properties_info *)page->lParam);
+            break;
+        }
+
+        case WM_COMMAND:
+            if (LOWORD(wParam) == IDC_FPROP_PROG_CHANGE)
+            {
+                /* TODO: Implement file association dialog */
+                MessageBoxA(hwndDlg, "Not implemented yet.", "Error", MB_OK | MB_ICONEXCLAMATION);
+            }
+            else if (LOWORD(wParam) == IDC_FPROP_READONLY ||
+                     LOWORD(wParam) == IDC_FPROP_HIDDEN ||
+                     LOWORD(wParam) == IDC_FPROP_ARCHIVE)
+            {
+                SendMessageW(GetParent(hwndDlg), PSM_CHANGED, (WPARAM)hwndDlg, 0);
+            }
+            else if (LOWORD(wParam) == IDC_FPROP_PATH && HIWORD(wParam) == EN_CHANGE)
+            {
+                SendMessageW(GetParent(hwndDlg), PSM_CHANGED, (WPARAM)hwndDlg, 0);
+            }
+            break;
+
+        case WM_NOTIFY:
+            {
+                LPPSHNOTIFY notify = (LPPSHNOTIFY)lParam;
+                if (notify->hdr.code == PSN_APPLY)
+                {
+                    struct file_properties_info *props = (struct file_properties_info *)GetWindowLongPtrW(hwndDlg, DWLP_USER);
+                    WCHAR newname[MAX_PATH], newpath[MAX_PATH];
+                    DWORD attributes;
+
+                    attributes = GetFileAttributesW(props->path);
+                    if (attributes != INVALID_FILE_ATTRIBUTES)
+                    {
+                        attributes &= ~(FILE_ATTRIBUTE_READONLY|FILE_ATTRIBUTE_HIDDEN|FILE_ATTRIBUTE_ARCHIVE);
+
+                        if (SendDlgItemMessageW(hwndDlg, IDC_FPROP_READONLY, BM_GETCHECK, 0, 0) == BST_CHECKED)
+                            attributes |= FILE_ATTRIBUTE_READONLY;
+                        if (SendDlgItemMessageW(hwndDlg, IDC_FPROP_HIDDEN, BM_GETCHECK, 0, 0) == BST_CHECKED)
+                            attributes |= FILE_ATTRIBUTE_HIDDEN;
+                        if (SendDlgItemMessageW(hwndDlg, IDC_FPROP_ARCHIVE, BM_GETCHECK, 0, 0) == BST_CHECKED)
+                            attributes |= FILE_ATTRIBUTE_ARCHIVE;
+
+                        if (!SetFileAttributesW(props->path, attributes))
+                            ERR("failed to update file attributes of %s\n", debugstr_w(props->path));
+                    }
+
+                    /* Update filename if it was changed */
+                    if (GetDlgItemTextW(hwndDlg, IDC_FPROP_PATH, newname, ARRAY_SIZE(newname)) &&
+                        strcmpW(props->filename, newname) &&
+                        strlenW(props->dir) + strlenW(newname) + 2 < ARRAY_SIZE(newpath))
+                    {
+                        static const WCHAR slash[] = {'\\', 0};
+                        strcpyW(newpath, props->dir);
+                        strcatW(newpath, slash);
+                        strcatW(newpath, newname);
+
+                        if (!MoveFileW(props->path, newpath))
+                            ERR("failed to move file %s to %s\n", debugstr_w(props->path), debugstr_w(newpath));
+                        else
+                        {
+                            WCHAR *p;
+                            strcpyW(props->path, newpath);
+                            strcpyW(props->dir, newpath);
+                            if ((p = strrchrW(props->dir, '\\')))
+                            {
+                                *p = 0;
+                                props->filename = p + 1;
+                            }
+                            else
+                                props->filename = props->dir;
+                            SetDlgItemTextW(hwndDlg, IDC_FPROP_LOCATION, props->dir);
+                        }
+                    }
+
+                    return TRUE;
+                }
+            }
+            break;
+
+        default:
+            break;
+    }
+    return FALSE;
+}
+
+static UINT CALLBACK file_properties_callback(HWND hwnd, UINT uMsg, LPPROPSHEETPAGEW page)
+{
+    struct file_properties_info *props = (struct file_properties_info *)page->lParam;
+    if (uMsg == PSPCB_RELEASE)
+    {
+        heap_free(props);
+    }
+    return 1;
+}
+
+static void init_file_properties_pages(IDataObject *dataobject, LPFNADDPROPSHEETPAGE lpfnAddPage, LPARAM lParam)
+{
+    struct file_properties_info *props;
+    HPROPSHEETPAGE general_page;
+    PROPSHEETPAGEW propsheet;
+    FORMATETC format;
+    STGMEDIUM stgm;
+    HRESULT hr;
+    WCHAR *p;
+
+    props = heap_alloc(sizeof(*props));
+    if (!props) return;
+
+    format.cfFormat = CF_HDROP;
+    format.ptd      = NULL;
+    format.dwAspect = DVASPECT_CONTENT;
+    format.lindex   = -1;
+    format.tymed    = TYMED_HGLOBAL;
+
+    hr = IDataObject_GetData(dataobject, &format, &stgm);
+    if (FAILED(hr)) goto error;
+
+    if (!DragQueryFileW((HDROP)stgm.u.hGlobal, 0, props->path, ARRAY_SIZE(props->path)))
+    {
+        ReleaseStgMedium(&stgm);
+        goto error;
+    }
+
+    ReleaseStgMedium(&stgm);
+
+    props->attrib = GetFileAttributesW(props->path);
+    if (props->attrib == INVALID_FILE_ATTRIBUTES)
+        goto error;
+
+    strcpyW(props->dir, props->path);
+    if ((p = strrchrW(props->dir, '\\')))
+    {
+        *p = 0;
+        props->filename = p + 1;
+    }
+    else
+        props->filename = props->dir;
+
+    memset(&propsheet, 0, sizeof(propsheet));
+    propsheet.dwSize        = sizeof(propsheet);
+    propsheet.dwFlags       = PSP_DEFAULT | PSP_USECALLBACK;
+    propsheet.hInstance     = shell32_hInstance;
+    if (props->attrib & FILE_ATTRIBUTE_DIRECTORY)
+        propsheet.u.pszTemplate = (LPWSTR)MAKEINTRESOURCE(IDD_FOLDER_PROPERTIES);
+    else
+        propsheet.u.pszTemplate = (LPWSTR)MAKEINTRESOURCE(IDD_FILE_PROPERTIES);
+    propsheet.pfnDlgProc    = file_properties_proc;
+    propsheet.pfnCallback   = file_properties_callback;
+    propsheet.lParam        = (LPARAM)props;
+
+    general_page = CreatePropertySheetPageW(&propsheet);
+    if (general_page)
+        lpfnAddPage(general_page, lParam);
+    return;
+
+error:
+    heap_free(props);
+}
+
 #define MAX_PROP_PAGES 99
 
 static void DoOpenProperties(ContextMenu *This, HWND hwnd)
@@ -365,6 +696,8 @@ static void DoOpenProperties(ContextMenu *This, HWND hwnd)
 
 	if (SUCCEEDED(ret))
 	{
+            init_file_properties_pages(lpDo, Properties_AddPropSheetCallback, (LPARAM)&psh);
+
 	    hpsxa = SHCreatePropSheetExtArrayEx(HKEY_CLASSES_ROOT, wszFiletype, MAX_PROP_PAGES - psh.nPages, lpDo);
 	    if (hpsxa != NULL)
 	    {
@@ -443,13 +776,13 @@ static HRESULT WINAPI ItemMenu_InvokeCommand(
 
     TRACE("(%p)->(invcom=%p verb=%p wnd=%p)\n",This,lpcmi,lpcmi->lpVerb, lpcmi->hwnd);
 
-    if( HIWORD(lpcmi->lpVerb)==0 && LOWORD(lpcmi->lpVerb) > FCIDM_SHVIEWLAST)
+    if (IS_INTRESOURCE(lpcmi->lpVerb) && LOWORD(lpcmi->lpVerb) > FCIDM_SHVIEWLAST)
     {
-        TRACE("Invalid Verb %x\n",LOWORD(lpcmi->lpVerb));
+        TRACE("Invalid Verb %x\n", LOWORD(lpcmi->lpVerb));
         return E_INVALIDARG;
     }
 
-    if (HIWORD(lpcmi->lpVerb) == 0)
+    if (IS_INTRESOURCE(lpcmi->lpVerb))
     {
         switch(LOWORD(lpcmi->lpVerb))
         {
@@ -521,111 +854,80 @@ static HRESULT WINAPI ItemMenu_InvokeCommand(
     return S_OK;
 }
 
-static HRESULT WINAPI ItemMenu_GetCommandString(
-	IContextMenu3 *iface,
-	UINT_PTR idCommand,
-	UINT uFlags,
-	UINT* lpReserved,
-	LPSTR lpszName,
-	UINT uMaxNameLen)
+static HRESULT WINAPI ItemMenu_GetCommandString(IContextMenu3 *iface, UINT_PTR cmdid, UINT flags,
+    UINT *reserved, LPSTR name, UINT maxlen)
 {
-	ContextMenu *This = impl_from_IContextMenu3(iface);
-	HRESULT hr = E_INVALIDARG;
+    static const WCHAR openW[] = {'o','p','e','n',0};
+    static const WCHAR exploreW[] = {'e','x','p','l','o','r','e',0};
+    static const WCHAR cutW[] = {'c','u','t',0};
+    static const WCHAR copyW[] = {'c','o','p','y',0};
+    static const WCHAR linkW[] = {'l','i','n','k',0};
+    static const WCHAR deleteW[] = {'d','e','l','e','t','e',0};
+    static const WCHAR propertiesW[] = {'p','r','o','p','e','r','t','i','e','s',0};
+    static const WCHAR renameW[] = {'r','e','n','a','m','e',0};
+    ContextMenu *This = impl_from_IContextMenu3(iface);
+    const WCHAR *cmdW = NULL;
+    HRESULT hr = S_OK;
 
-	TRACE("(%p)->(%lx flags=%x %p name=%p len=%x)\n", This, idCommand, uFlags, lpReserved, lpszName, uMaxNameLen);
+    TRACE("(%p)->(%lx, %#x, %p, %p, %u)\n", This, cmdid, flags, reserved, name, maxlen);
 
-	switch(uFlags)
-	{
-	  case GCS_HELPTEXTA:
-	  case GCS_HELPTEXTW:
-	    hr = E_NOTIMPL;
-	    break;
+    switch (flags)
+    {
+    case GCS_HELPTEXTA:
+    case GCS_HELPTEXTW:
+        hr = E_NOTIMPL;
+        break;
 
-	  case GCS_VERBA:
-	    switch(idCommand)
-	    {
-            case FCIDM_SHVIEW_OPEN:
-                strcpy(lpszName, "open");
-                hr = S_OK;
-                break;
-            case FCIDM_SHVIEW_EXPLORE:
-                strcpy(lpszName, "explore");
-                hr = S_OK;
-                break;
-            case FCIDM_SHVIEW_CUT:
-                strcpy(lpszName, "cut");
-                hr = S_OK;
-                break;
-            case FCIDM_SHVIEW_COPY:
-                strcpy(lpszName, "copy");
-                hr = S_OK;
-                break;
-            case FCIDM_SHVIEW_CREATELINK:
-                strcpy(lpszName, "link");
-                hr = S_OK;
-                break;
-            case FCIDM_SHVIEW_DELETE:
-                strcpy(lpszName, "delete");
-                hr = S_OK;
-                break;
-            case FCIDM_SHVIEW_PROPERTIES:
-                strcpy(lpszName, "properties");
-                hr = S_OK;
-                break;
-	    case FCIDM_SHVIEW_RENAME:
-	        strcpy(lpszName, "rename");
-	        hr = S_OK;
-	        break;
-	    }
-	    break;
+    case GCS_VERBA:
+    case GCS_VERBW:
+        switch (cmdid)
+        {
+        case FCIDM_SHVIEW_OPEN:
+            cmdW = openW;
+            break;
+        case FCIDM_SHVIEW_EXPLORE:
+            cmdW = exploreW;
+            break;
+        case FCIDM_SHVIEW_CUT:
+            cmdW = cutW;
+            break;
+        case FCIDM_SHVIEW_COPY:
+            cmdW = copyW;
+            break;
+        case FCIDM_SHVIEW_CREATELINK:
+            cmdW = linkW;
+            break;
+        case FCIDM_SHVIEW_DELETE:
+            cmdW = deleteW;
+            break;
+        case FCIDM_SHVIEW_PROPERTIES:
+            cmdW = propertiesW;
+            break;
+        case FCIDM_SHVIEW_RENAME:
+            cmdW = renameW;
+            break;
+        }
 
-	     /* NT 4.0 with IE 3.0x or no IE will always call This with GCS_VERBW. In This
-	     case, you need to do the lstrcpyW to the pointer passed.*/
-	  case GCS_VERBW:
-	    switch(idCommand)
-	    {
-            case FCIDM_SHVIEW_OPEN:
-                MultiByteToWideChar(CP_ACP, 0, "open", -1, (LPWSTR)lpszName, uMaxNameLen);
-                hr = S_OK;
-                break;
-            case FCIDM_SHVIEW_EXPLORE:
-                MultiByteToWideChar(CP_ACP, 0, "explore", -1, (LPWSTR)lpszName, uMaxNameLen);
-                hr = S_OK;
-                break;
-            case FCIDM_SHVIEW_CUT:
-                MultiByteToWideChar(CP_ACP, 0, "cut", -1, (LPWSTR)lpszName, uMaxNameLen);
-                hr = S_OK;
-                break;
-            case FCIDM_SHVIEW_COPY:
-                MultiByteToWideChar(CP_ACP, 0, "copy", -1, (LPWSTR)lpszName, uMaxNameLen);
-                hr = S_OK;
-                break;
-            case FCIDM_SHVIEW_CREATELINK:
-                MultiByteToWideChar(CP_ACP, 0, "link", -1, (LPWSTR)lpszName, uMaxNameLen);
-                hr = S_OK;
-                break;
-            case FCIDM_SHVIEW_DELETE:
-                MultiByteToWideChar(CP_ACP, 0, "delete", -1, (LPWSTR)lpszName, uMaxNameLen);
-                hr = S_OK;
-                break;
-            case FCIDM_SHVIEW_PROPERTIES:
-                MultiByteToWideChar(CP_ACP, 0, "properties", -1, (LPWSTR)lpszName, uMaxNameLen);
-                hr = S_OK;
-                break;
-	    case FCIDM_SHVIEW_RENAME:
-                MultiByteToWideChar( CP_ACP, 0, "rename", -1, (LPWSTR)lpszName, uMaxNameLen );
-	        hr = S_OK;
-	        break;
-	    }
-	    break;
+        if (!cmdW)
+        {
+            hr = E_INVALIDARG;
+            break;
+        }
 
-	  case GCS_VALIDATEA:
-	  case GCS_VALIDATEW:
-	    hr = S_OK;
-	    break;
-	}
-	TRACE("-- (%p)->(name=%s)\n", This, lpszName);
-	return hr;
+        if (flags == GCS_VERBA)
+            WideCharToMultiByte(CP_ACP, 0, cmdW, -1, name, maxlen, NULL, NULL);
+        else
+            lstrcpynW((WCHAR *)name, cmdW, maxlen);
+
+        TRACE("name %s\n", flags == GCS_VERBA ? debugstr_a(name) : debugstr_w((WCHAR *)name));
+        break;
+
+    case GCS_VALIDATEA:
+    case GCS_VALIDATEW:
+        break;
+    }
+
+    return hr;
 }
 
 /**************************************************************************
@@ -661,6 +963,87 @@ static const IContextMenu3Vtbl ItemContextMenuVtbl =
     ContextMenu_HandleMenuMsg2
 };
 
+static HRESULT WINAPI ShellExtInit_QueryInterface(IShellExtInit *iface, REFIID riid, void **obj)
+{
+    ContextMenu *This = impl_from_IShellExtInit(iface);
+    return IContextMenu3_QueryInterface(&This->IContextMenu3_iface, riid, obj);
+}
+
+static ULONG WINAPI ShellExtInit_AddRef(IShellExtInit *iface)
+{
+    ContextMenu *This = impl_from_IShellExtInit(iface);
+    return IContextMenu3_AddRef(&This->IContextMenu3_iface);
+}
+
+static ULONG WINAPI ShellExtInit_Release(IShellExtInit *iface)
+{
+    ContextMenu *This = impl_from_IShellExtInit(iface);
+    return IContextMenu3_Release(&This->IContextMenu3_iface);
+}
+
+static HRESULT WINAPI ShellExtInit_Initialize(IShellExtInit *iface, LPCITEMIDLIST folder,
+    IDataObject *dataobj, HKEY progidkey)
+{
+    ContextMenu *This = impl_from_IShellExtInit(iface);
+
+    FIXME("(%p)->(%p %p %p): stub\n", This, folder, dataobj, progidkey);
+
+    return E_NOTIMPL;
+}
+
+static const IShellExtInitVtbl ShellExtInitVtbl =
+{
+    ShellExtInit_QueryInterface,
+    ShellExtInit_AddRef,
+    ShellExtInit_Release,
+    ShellExtInit_Initialize
+};
+
+static HRESULT WINAPI ObjectWithSite_QueryInterface(IObjectWithSite *iface, REFIID riid, void **obj)
+{
+    ContextMenu *This = impl_from_IObjectWithSite(iface);
+    return IContextMenu3_QueryInterface(&This->IContextMenu3_iface, riid, obj);
+}
+
+static ULONG WINAPI ObjectWithSite_AddRef(IObjectWithSite *iface)
+{
+    ContextMenu *This = impl_from_IObjectWithSite(iface);
+    return IContextMenu3_AddRef(&This->IContextMenu3_iface);
+}
+
+static ULONG WINAPI ObjectWithSite_Release(IObjectWithSite *iface)
+{
+    ContextMenu *This = impl_from_IObjectWithSite(iface);
+    return IContextMenu3_Release(&This->IContextMenu3_iface);
+}
+
+static HRESULT WINAPI ObjectWithSite_SetSite(IObjectWithSite *iface, IUnknown *site)
+{
+    ContextMenu *This = impl_from_IObjectWithSite(iface);
+
+    FIXME("(%p)->(%p): stub\n", This, site);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ObjectWithSite_GetSite(IObjectWithSite *iface, REFIID riid, void **site)
+{
+    ContextMenu *This = impl_from_IObjectWithSite(iface);
+
+    FIXME("(%p)->(%s %p): stub\n", This, debugstr_guid(riid), site);
+
+    return E_NOTIMPL;
+}
+
+static const IObjectWithSiteVtbl ObjectWithSiteVtbl =
+{
+    ObjectWithSite_QueryInterface,
+    ObjectWithSite_AddRef,
+    ObjectWithSite_Release,
+    ObjectWithSite_SetSite,
+    ObjectWithSite_GetSite,
+};
+
 HRESULT ItemMenu_Constructor(IShellFolder *parent, LPCITEMIDLIST pidl, const LPCITEMIDLIST *apidl, UINT cidl,
     REFIID riid, void **pObj)
 {
@@ -668,10 +1051,12 @@ HRESULT ItemMenu_Constructor(IShellFolder *parent, LPCITEMIDLIST pidl, const LPC
     HRESULT hr;
     UINT i;
 
-    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    This = heap_alloc(sizeof(*This));
     if (!This) return E_OUTOFMEMORY;
 
     This->IContextMenu3_iface.lpVtbl = &ItemContextMenuVtbl;
+    This->IShellExtInit_iface.lpVtbl = &ShellExtInitVtbl;
+    This->IObjectWithSite_iface.lpVtbl = &ObjectWithSiteVtbl;
     This->ref = 1;
     This->parent = parent;
     if (parent) IShellFolder_AddRef(parent);
@@ -976,10 +1361,12 @@ HRESULT BackgroundMenu_Constructor(IShellFolder *parent, BOOL desktop, REFIID ri
     ContextMenu *This;
     HRESULT hr;
 
-    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    This = heap_alloc(sizeof(*This));
     if (!This) return E_OUTOFMEMORY;
 
     This->IContextMenu3_iface.lpVtbl = &BackgroundContextMenuVtbl;
+    This->IShellExtInit_iface.lpVtbl = &ShellExtInitVtbl;
+    This->IObjectWithSite_iface.lpVtbl = &ObjectWithSiteVtbl;
     This->ref = 1;
     This->parent = parent;
 

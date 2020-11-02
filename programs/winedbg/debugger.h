@@ -24,6 +24,8 @@
 #include <assert.h>
 #include <stdarg.h>
 
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #define WIN32_LEAN_AND_MEAN
@@ -37,7 +39,7 @@
 #include "oaidl.h"
 #include <wine/list.h>
 
-#define ADDRSIZE        (be_cpu->pointer_size)
+#define ADDRSIZE        (dbg_curr_process->be_cpu->pointer_size)
 #define ADDRWIDTH       (ADDRSIZE * 2)
 
 /* the debugger uses these exceptions for its internal use */
@@ -84,6 +86,7 @@ enum dbg_internal_types
     dbg_itype_astring,
     dbg_itype_ustring,
     dbg_itype_segptr,     /* hack for segmented pointers */
+    dbg_itype_m128a,      /* 128-bit (XMM) registers */
     dbg_itype_none              = 0xffffffff
 };
 
@@ -167,6 +170,12 @@ typedef struct tagTHREADNAME_INFO
    DWORD   dwFlags;    /* Reserved for future use.  Must be zero. */
 } THREADNAME_INFO;
 
+typedef union dbg_ctx
+{
+    CONTEXT ctx;
+    WOW64_CONTEXT x86;
+} dbg_ctx_t;
+
 struct dbg_thread
 {
     struct list                 entry;
@@ -193,7 +202,7 @@ struct dbg_thread
         DWORD_PTR               linear_pc;
         DWORD_PTR               linear_frame;
         DWORD_PTR               linear_stack;
-        CONTEXT                 context;        /* context we got out of stackwalk for this frame */
+        dbg_ctx_t               context;        /* context we got out of stackwalk for this frame */
         BOOL                    is_ctx_valid;   /* is the context above valid */
     }*                          frames;
     int                         num_frames;
@@ -225,6 +234,7 @@ struct dbg_process
     void*                       pio_data;
     const WCHAR*		imageName;
     struct list           	threads;
+    struct backend_cpu*         be_cpu;
     BOOL                        continue_on_first_exception : 1,
                                 active_debuggee : 1;
     struct dbg_breakpoint       bp[MAX_BREAKPOINTS];
@@ -251,7 +261,7 @@ extern	struct dbg_process*	dbg_curr_process;
 extern	DWORD_PTR	        dbg_curr_pid;
 extern	struct dbg_thread*	dbg_curr_thread;
 extern	DWORD_PTR	        dbg_curr_tid;
-extern  CONTEXT 	        dbg_context;
+extern  dbg_ctx_t               dbg_context;
 extern  BOOL                    dbg_interactiveP;
 extern  HANDLE                  dbg_houtput;
 
@@ -392,7 +402,7 @@ extern void             stack_backtrace(DWORD threadID);
 extern BOOL             stack_set_frame(int newframe);
 extern BOOL             stack_get_current_frame(IMAGEHLP_STACK_FRAME* ihsf);
 extern BOOL             stack_get_register_frame(const struct dbg_internal_var* div, DWORD_PTR** pval);
-extern unsigned         stack_fetch_frames(const CONTEXT* ctx);
+extern unsigned         stack_fetch_frames(const dbg_ctx_t *ctx);
 extern BOOL             stack_get_current_symbol(SYMBOL_INFO* sym);
 
   /* symbol.c */

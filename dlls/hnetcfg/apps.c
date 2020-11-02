@@ -29,6 +29,7 @@
 #include "netfw.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "wine/unicode.h"
 #include "hnetcfg_private.h"
 
@@ -38,6 +39,7 @@ typedef struct fw_app
 {
     INetFwAuthorizedApplication INetFwAuthorizedApplication_iface;
     LONG refs;
+    BSTR filename;
 } fw_app;
 
 static inline fw_app *impl_from_INetFwAuthorizedApplication( INetFwAuthorizedApplication *iface )
@@ -60,6 +62,7 @@ static ULONG WINAPI fw_app_Release(
     if (!refs)
     {
         TRACE("destroying %p\n", fw_app);
+        SysFreeString( fw_app->filename );
         HeapFree( GetProcessHeap(), 0, fw_app );
     }
     return refs;
@@ -154,7 +157,7 @@ void release_typelib(void)
 {
     unsigned i;
 
-    for (i = 0; i < sizeof(typeinfo)/sizeof(*typeinfo); i++)
+    for (i = 0; i < ARRAY_SIZE(typeinfo); i++)
         if (typeinfo[i])
             ITypeInfo_Release(typeinfo[i]);
 
@@ -252,17 +255,66 @@ static HRESULT WINAPI fw_app_get_ProcessImageFileName(
     fw_app *This = impl_from_INetFwAuthorizedApplication( iface );
 
     FIXME("%p, %p\n", This, imageFileName);
-    return E_NOTIMPL;
+
+    if (!imageFileName)
+        return E_POINTER;
+
+    *imageFileName = SysAllocString( This->filename );
+    return *imageFileName || !This->filename ? S_OK : E_OUTOFMEMORY;
 }
 
 static HRESULT WINAPI fw_app_put_ProcessImageFileName(
-    INetFwAuthorizedApplication *iface,
-    BSTR imageFileName )
+    INetFwAuthorizedApplication *iface, BSTR image )
 {
     fw_app *This = impl_from_INetFwAuthorizedApplication( iface );
+    UNIVERSAL_NAME_INFOW *info;
+    DWORD sz, longsz;
+    WCHAR *path;
+    DWORD res;
 
-    FIXME("%p, %s\n", This, debugstr_w(imageFileName));
-    return S_OK;
+    FIXME("%p, %s\n", This, debugstr_w(image));
+
+    if (!image || !image[0])
+        return E_INVALIDARG;
+
+    sz = 0;
+    res = WNetGetUniversalNameW(image, UNIVERSAL_NAME_INFO_LEVEL, NULL, &sz);
+    if (res == WN_MORE_DATA)
+    {
+        if (!(path = heap_alloc(sz)))
+            return E_OUTOFMEMORY;
+
+        info = (UNIVERSAL_NAME_INFOW *)&path;
+        res = WNetGetUniversalNameW(image, UNIVERSAL_NAME_INFO_LEVEL, &info, &sz);
+        if (res == NO_ERROR)
+        {
+            SysFreeString(This->filename);
+            This->filename = SysAllocString(info->lpUniversalName);
+        }
+        heap_free(path);
+        return HRESULT_FROM_WIN32(res);
+    }
+
+    sz = GetFullPathNameW(image, 0, NULL, NULL);
+    if (!(path = heap_alloc(++sz * sizeof(WCHAR))))
+        return E_OUTOFMEMORY;
+    GetFullPathNameW(image, sz, path, NULL);
+
+    longsz = GetLongPathNameW(path, path, sz);
+    if (longsz > sz)
+    {
+        if (!(path = heap_realloc(path, longsz * sizeof(WCHAR))))
+        {
+            heap_free(path);
+            return E_OUTOFMEMORY;
+        }
+        GetLongPathNameW(path, path, longsz);
+    }
+
+    SysFreeString( This->filename );
+    This->filename = SysAllocString(path);
+    heap_free(path);
+    return This->filename ? S_OK : E_OUTOFMEMORY;
 }
 
 static HRESULT WINAPI fw_app_get_IpVersion(
@@ -385,6 +437,7 @@ HRESULT NetFwAuthorizedApplication_create( IUnknown *pUnkOuter, LPVOID *ppObj )
 
     fa->INetFwAuthorizedApplication_iface.lpVtbl = &fw_app_vtbl;
     fa->refs = 1;
+    fa->filename = NULL;
 
     *ppObj = &fa->INetFwAuthorizedApplication_iface;
 

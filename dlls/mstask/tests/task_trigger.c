@@ -2,6 +2,7 @@
  * Test suite for Task interface
  *
  * Copyright (C) 2008 Google (Roy Shea)
+ * Copyright (C) 2018 Dmitry Timoshkov
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -26,41 +27,12 @@
 #include "wine/test.h"
 
 static ITaskScheduler *test_task_scheduler;
-static ITask *test_task;
-static ITaskTrigger *test_trigger;
-static WORD trigger_index;
 
-static BOOL setup_trigger(void)
+static DWORD obj_refcount(void *obj_to_check)
 {
-    HRESULT hres;
-    const WCHAR task_name[] = {'T','e','s','t','i','n','g', 0};
-
-    hres = CoCreateInstance(&CLSID_CTaskScheduler, NULL, CLSCTX_INPROC_SERVER,
-            &IID_ITaskScheduler, (void **) &test_task_scheduler);
-    if(hres != S_OK)
-        return FALSE;
-    hres = ITaskScheduler_NewWorkItem(test_task_scheduler, task_name,
-            &CLSID_CTask, &IID_ITask, (IUnknown**)&test_task);
-    if(hres != S_OK)
-    {
-        ITaskScheduler_Release(test_task_scheduler);
-        return FALSE;
-    }
-    hres = ITask_CreateTrigger(test_task, &trigger_index, &test_trigger);
-    if(hres != S_OK)
-    {
-        ITask_Release(test_task);
-        ITaskScheduler_Release(test_task_scheduler);
-        return FALSE;
-    }
-    return TRUE;
-}
-
-static void cleanup_trigger(void)
-{
-    ITaskTrigger_Release(test_trigger);
-    ITask_Release(test_task);
-    ITaskScheduler_Release(test_task_scheduler);
+    IUnknown *obj = obj_to_check;
+    IUnknown_AddRef(obj);
+    return IUnknown_Release(obj);
 }
 
 static BOOL compare_trigger_state(TASK_TRIGGER found_state,
@@ -139,8 +111,11 @@ static BOOL compare_trigger_state(TASK_TRIGGER found_state,
 
 static void test_SetTrigger_GetTrigger(void)
 {
-    BOOL setup;
+    static const WCHAR task_name[] = { 'T','e','s','t','i','n','g',0 };
+    ITask *test_task;
+    ITaskTrigger *test_trigger;
     HRESULT hres;
+    WORD idx;
     TASK_TRIGGER trigger_state;
     TASK_TRIGGER empty_trigger_state = {
         sizeof(trigger_state), 0,
@@ -161,13 +136,18 @@ static void test_SetTrigger_GetTrigger(void)
     };
     SYSTEMTIME time;
 
-    setup = setup_trigger();
-    ok(setup, "Failed to setup test_task\n");
-    if (!setup)
-    {
-        skip("Failed to create task.  Skipping tests.\n");
-        return;
-    }
+    hres = ITaskScheduler_NewWorkItem(test_task_scheduler, task_name, &CLSID_CTask,
+                                      &IID_ITask, (IUnknown **)&test_task);
+    ok(hres == S_OK, "got %#x\n", hres);
+
+    hres = ITask_CreateTrigger(test_task, &idx, &test_trigger);
+    ok(hres == S_OK, "got %#x\n", hres);
+
+    hres = ITaskTrigger_SetTrigger(test_trigger, NULL);
+    ok(hres == E_INVALIDARG, "got %#x\n", hres);
+
+    hres = ITaskTrigger_GetTrigger(test_trigger, NULL);
+    ok(hres == E_INVALIDARG, "got %#x\n", hres);
 
     /* Setup a trigger with base values for this test run */
     GetLocalTime(&time);
@@ -371,15 +351,438 @@ static void test_SetTrigger_GetTrigger(void)
     ok(compare_trigger_state(trigger_state, normal_trigger_state),
             "Invalid state\n");
 
-
-    cleanup_trigger();
-    return;
+    ITaskTrigger_Release(test_trigger);
+    ITask_Release(test_task);
 }
 
+static void test_task_trigger(void)
+{
+    static const WCHAR task_name[] = { 'T','e','s','t','i','n','g',0 };
+    HRESULT hr;
+    ITask *task;
+    ITaskTrigger *trigger, *trigger2;
+    WORD count, idx;
+    DWORD ref;
+
+    hr = ITaskScheduler_NewWorkItem(test_task_scheduler, task_name, &CLSID_CTask,
+                                    &IID_ITask, (IUnknown **)&task);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    count = 0xdead;
+    hr = ITask_GetTriggerCount(task, &count);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(count == 0, "got %u\n", count);
+
+    hr = ITask_DeleteTrigger(task, 0);
+    ok(hr == SCHED_E_TRIGGER_NOT_FOUND, "got %#x\n", hr);
+
+    hr = ITask_GetTrigger(task, 0, &trigger);
+    ok(hr == SCHED_E_TRIGGER_NOT_FOUND, "got %#x\n", hr);
+
+    idx = 0xdead;
+    hr = ITask_CreateTrigger(task, &idx, &trigger);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(idx == 0, "got %u\n", idx);
+
+    hr = ITask_GetTrigger(task, 0, &trigger2);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(trigger != trigger2, "%p != %p\n", trigger, trigger2);
+
+    ref = ITaskTrigger_Release(trigger2);
+    ok(ref == 0, "got %u\n", ref);
+
+    ref = ITaskTrigger_Release(trigger);
+    ok(ref == 0, "got %u\n", ref);
+
+    count = 0xdead;
+    hr = ITask_GetTriggerCount(task, &count);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(count == 1, "got %u\n", count);
+
+    hr = ITask_DeleteTrigger(task, 0);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    idx = 0xdead;
+    hr = ITask_CreateTrigger(task, &idx, &trigger);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(idx == 0, "got %u\n", idx);
+
+    hr = ITask_DeleteTrigger(task, 0);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    count = 0xdead;
+    hr = ITask_GetTriggerCount(task, &count);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(count == 0, "got %u\n", count);
+
+    ref = ITaskTrigger_Release(trigger);
+    ok(ref == 0, "got %u\n", ref);
+
+    ref = ITask_Release(task);
+    ok(ref == 0, "got %u\n", ref);
+}
+
+static void time_add_ms(SYSTEMTIME *st, DWORD ms)
+{
+    union
+    {
+        FILETIME ft;
+        ULONGLONG ll;
+    } ftll;
+    BOOL ret;
+
+    trace("old: %u/%u/%u wday %u %u:%02u:%02u.%03u\n",
+          st->wDay, st->wMonth, st->wYear, st->wDayOfWeek,
+          st->wHour, st->wMinute, st->wSecond, st->wMilliseconds);
+    ret = SystemTimeToFileTime(st, &ftll.ft);
+    ok(ret, "SystemTimeToFileTime error %u\n", GetLastError());
+
+    ftll.ll += ms * (ULONGLONG)10000;
+    ret = FileTimeToSystemTime(&ftll.ft, st);
+    ok(ret, "FileTimeToSystemTime error %u\n", GetLastError());
+    trace("new: %u/%u/%u wday %u %u:%02u:%02u.%03u\n",
+          st->wDay, st->wMonth, st->wYear, st->wDayOfWeek,
+          st->wHour, st->wMinute, st->wSecond, st->wMilliseconds);
+}
+
+static void trigger_add_ms(TASK_TRIGGER *data, DWORD ms, SYSTEMTIME *ret)
+{
+    SYSTEMTIME st;
+
+    st.wYear = data->wBeginYear;
+    st.wMonth = data->wBeginMonth;
+    st.wDayOfWeek = 0;
+    st.wDay = data->wBeginDay;
+    st.wHour = data->wStartHour;
+    st.wMinute = data->wStartMinute;
+    st.wSecond = 0;
+    st.wMilliseconds = 0;
+
+    time_add_ms(&st, ms);
+
+    data->wBeginYear = st.wYear;
+    data->wBeginMonth = st.wMonth;
+    data->wBeginDay = st.wDay;
+    data->wStartHour = st.wHour;
+    data->wStartMinute = st.wMinute;
+
+    *ret = st;
+}
+
+static void test_GetNextRunTime(void)
+{
+    static const WCHAR task_name[] = { 'T','e','s','t','i','n','g',0 };
+    static const SYSTEMTIME st_empty;
+    HRESULT hr;
+    ITask *task;
+    ITaskTrigger *trigger;
+    TASK_TRIGGER data;
+    WORD idx, i;
+    SYSTEMTIME st, cmp;
+
+    hr = ITaskScheduler_NewWorkItem(test_task_scheduler, task_name, &CLSID_CTask,
+                                    &IID_ITask, (IUnknown **)&task);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    if (0) /* crashes under Windows */
+        hr = ITask_GetNextRunTime(task, NULL);
+
+    hr = ITask_SetFlags(task, TASK_FLAG_DISABLED);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    memset(&st, 0xff, sizeof(st));
+    hr = ITask_GetNextRunTime(task, &st);
+    ok(hr == SCHED_S_TASK_DISABLED, "got %#x\n", hr);
+    ok(!memcmp(&st, &st_empty, sizeof(st)), "got %u/%u/%u wday %u %u:%02u:%02u\n",
+       st.wDay, st.wMonth, st.wYear, st.wDayOfWeek,
+       st.wHour, st.wMinute, st.wSecond);
+
+    hr = ITask_SetFlags(task, 0);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    memset(&st, 0xff, sizeof(st));
+    hr = ITask_GetNextRunTime(task, &st);
+    ok(hr == SCHED_S_TASK_NO_VALID_TRIGGERS, "got %#x\n", hr);
+    ok(!memcmp(&st, &st_empty, sizeof(st)), "got %u/%u/%u wday %u %u:%02u:%02u\n",
+       st.wDay, st.wMonth, st.wYear, st.wDayOfWeek,
+       st.wHour, st.wMinute, st.wSecond);
+
+    hr = ITask_CreateTrigger(task, &idx, &trigger);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    memset(&st, 0xff, sizeof(st));
+    hr = ITask_GetNextRunTime(task, &st);
+    ok(hr == SCHED_S_TASK_NO_VALID_TRIGGERS, "got %#x\n", hr);
+    ok(!memcmp(&st, &st_empty, sizeof(st)), "got %u/%u/%u wday %u %u:%02u:%02u\n",
+       st.wDay, st.wMonth, st.wYear, st.wDayOfWeek,
+       st.wHour, st.wMinute, st.wSecond);
+
+    /* TASK_TIME_TRIGGER_ONCE */
+
+    hr = ITaskTrigger_GetTrigger(trigger, &data);
+    ok(hr == S_OK, "got %#x\n", hr);
+    data.rgFlags &= ~TASK_TRIGGER_FLAG_DISABLED;
+    data.TriggerType = TASK_TIME_TRIGGER_ONCE;
+    /* add 5 minutes to avoid races */
+    trigger_add_ms(&data, 5 * 60 * 1000, &cmp);
+    hr = ITaskTrigger_SetTrigger(trigger, &data);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    memset(&st, 0xff, sizeof(st));
+    hr = ITask_GetNextRunTime(task, &st);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(!memcmp(&st, &cmp, sizeof(st)), "got %u/%u/%u wday %u %u:%02u:%02u\n",
+       st.wDay, st.wMonth, st.wYear, st.wDayOfWeek,
+       st.wHour, st.wMinute, st.wSecond);
+
+    /* TASK_TIME_TRIGGER_DAILY */
+
+    hr = ITaskTrigger_GetTrigger(trigger, &data);
+    ok(hr == S_OK, "got %#x\n", hr);
+    data.rgFlags &= ~TASK_TRIGGER_FLAG_DISABLED;
+    data.TriggerType = TASK_TIME_TRIGGER_DAILY;
+    data.Type.Daily.DaysInterval = 1;
+    hr = ITaskTrigger_SetTrigger(trigger, &data);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    memset(&st, 0xff, sizeof(st));
+    hr = ITask_GetNextRunTime(task, &st);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(!memcmp(&st, &cmp, sizeof(st)), "got %u/%u/%u wday %u %u:%02u:%02u\n",
+       st.wDay, st.wMonth, st.wYear, st.wDayOfWeek,
+       st.wHour, st.wMinute, st.wSecond);
+
+    /* TASK_TIME_TRIGGER_WEEKLY */
+
+    hr = ITaskTrigger_GetTrigger(trigger, &data);
+    ok(hr == S_OK, "got %#x\n", hr);
+    data.rgFlags &= ~TASK_TRIGGER_FLAG_DISABLED;
+    data.TriggerType = TASK_TIME_TRIGGER_WEEKLY;
+    data.Type.Weekly.WeeksInterval = 1;
+    /* add 3 days */
+    time_add_ms(&cmp, 3 * 24 * 60 * 60 * 1000);
+    /* bits: TASK_SUNDAY = 1, TASK_MONDAY = 2, TASK_TUESDAY = 4, etc. */
+    data.Type.Weekly.rgfDaysOfTheWeek = 1 << cmp.wDayOfWeek; /* wDayOfWeek is 0 based */
+    hr = ITaskTrigger_SetTrigger(trigger, &data);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    memset(&st, 0xff, sizeof(st));
+    hr = ITask_GetNextRunTime(task, &st);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(!memcmp(&st, &cmp, sizeof(st)), "got %u/%u/%u wday %u %u:%02u:%02u\n",
+       st.wDay, st.wMonth, st.wYear, st.wDayOfWeek,
+       st.wHour, st.wMinute, st.wSecond);
+
+    /* FIXME: TASK_TIME_TRIGGER_MONTHLYDATE */
+    /* FIXME: TASK_TIME_TRIGGER_MONTHLYDOW */
+
+    ITaskTrigger_Release(trigger);
+    /* do not delete a valid trigger */
+
+    idx = 0xdead;
+    hr = ITask_CreateTrigger(task, &idx, &trigger);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(idx == 1, "got %u\n", idx);
+
+    /* TASK_EVENT_TRIGGER_ON_IDLE = 5
+     * TASK_EVENT_TRIGGER_AT_SYSTEMSTART = 6
+     * TASK_EVENT_TRIGGER_AT_LOGON = 7
+     */
+    for (i = 5; i <= 7; i++)
+    {
+        hr = ITaskTrigger_GetTrigger(trigger, &data);
+        ok(hr == S_OK, "got %#x\n", hr);
+        data.rgFlags &= ~TASK_TRIGGER_FLAG_DISABLED;
+        data.TriggerType = i;
+        hr = ITaskTrigger_SetTrigger(trigger, &data);
+        ok(hr == S_OK, "got %#x\n", hr);
+
+        memset(&st, 0xff, sizeof(st));
+        hr = ITask_GetNextRunTime(task, &st);
+        ok(hr == S_OK, "got %#x\n", hr);
+        ok(!memcmp(&st, &cmp, sizeof(st)), "got %u/%u/%u wday %u %u:%02u:%02u\n",
+           st.wDay, st.wMonth, st.wYear, st.wDayOfWeek,
+           st.wHour, st.wMinute, st.wSecond);
+    }
+
+    ITaskTrigger_Release(trigger);
+
+    hr = ITask_DeleteTrigger(task, 0);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    hr = ITask_GetTrigger(task, 0, &trigger);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    for (i = 5; i <= 7; i++)
+    {
+        hr = ITaskTrigger_GetTrigger(trigger, &data);
+        ok(hr == S_OK, "got %#x\n", hr);
+        data.rgFlags &= ~TASK_TRIGGER_FLAG_DISABLED;
+        data.TriggerType = i;
+        hr = ITaskTrigger_SetTrigger(trigger, &data);
+        ok(hr == S_OK, "got %#x\n", hr);
+
+        memset(&st, 0xff, sizeof(st));
+        hr = ITask_GetNextRunTime(task, &st);
+        ok(hr == SCHED_S_EVENT_TRIGGER, "got %#x\n", hr);
+        ok(!memcmp(&st, &st_empty, sizeof(st)), "got %u/%u/%u wday %u %u:%02u:%02u\n",
+           st.wDay, st.wMonth, st.wYear, st.wDayOfWeek,
+           st.wHour, st.wMinute, st.wSecond);
+    }
+
+    ITaskTrigger_Release(trigger);
+    ITask_Release(task);
+}
+
+static HRESULT get_task_trigger(ITask *task, WORD idx, TASK_TRIGGER *state)
+{
+    HRESULT hr;
+    ITaskTrigger *trigger;
+
+    hr = ITask_GetTrigger(task, idx, &trigger);
+    if (hr != S_OK) return hr;
+
+    memset(state, 0x11, sizeof(*state));
+    hr = ITaskTrigger_GetTrigger(trigger, state);
+
+    ITaskTrigger_Release(trigger);
+    return hr;
+}
+
+static void test_trigger_manager(void)
+{
+    static const WCHAR task_name[] = { 'T','e','s','t','i','n','g',0 };
+    HRESULT hr;
+    ITask *task;
+    ITaskTrigger *trigger0, *trigger1;
+    TASK_TRIGGER state0, state1, state;
+    WORD count, idx;
+    DWORD ref;
+
+    hr = ITaskScheduler_NewWorkItem(test_task_scheduler, task_name, &CLSID_CTask,
+                                    &IID_ITask, (IUnknown **)&task);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(obj_refcount(task) == 1, "got %u\n", obj_refcount(task));
+
+    count = 0xdead;
+    hr = ITask_GetTriggerCount(task, &count);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(count == 0, "got %u\n", count);
+
+    idx = 0xdead;
+    hr = ITask_CreateTrigger(task, &idx, &trigger0);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(idx == 0, "got %u\n", idx);
+    ok(obj_refcount(task) == 2, "got %u\n", obj_refcount(task));
+
+    idx = 0xdead;
+    hr = ITask_CreateTrigger(task, &idx, &trigger1);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(idx == 1, "got %u\n", idx);
+    ok(obj_refcount(task) == 3, "got %u\n", obj_refcount(task));
+
+    count = 0xdead;
+    hr = ITask_GetTriggerCount(task, &count);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(count == 2, "got %u\n", count);
+
+    hr = ITaskTrigger_GetTrigger(trigger0, &state0);
+    ok(hr == S_OK, "got %#x\n", hr);
+    state0.wBeginYear = 3000;
+    state0.rgFlags = 0;
+    state0.TriggerType = TASK_TIME_TRIGGER_ONCE;
+    hr = ITaskTrigger_SetTrigger(trigger0, &state0);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    hr = get_task_trigger(task, 0, &state);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(state.wBeginYear == 3000, "got %u\n", state.wBeginYear);
+    ok(state.TriggerType == TASK_TIME_TRIGGER_ONCE, "got %u\n", state.TriggerType);
+
+    hr = ITaskTrigger_GetTrigger(trigger1, &state1);
+    ok(hr == S_OK, "got %#x\n", hr);
+    state1.wBeginYear = 2000;
+    state1.rgFlags = 0;
+    state1.TriggerType = TASK_TIME_TRIGGER_DAILY;
+    hr = ITaskTrigger_SetTrigger(trigger1, &state1);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    hr = get_task_trigger(task, 1, &state);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(state.wBeginYear == 2000, "got %u\n", state.wBeginYear);
+    ok(state.TriggerType == TASK_TIME_TRIGGER_DAILY, "got %u\n", state.TriggerType);
+
+    ref = ITaskTrigger_Release(trigger0);
+    ok(ref == 0, "got %u\n", ref);
+    ref = ITaskTrigger_Release(trigger1);
+    ok(ref == 0, "got %u\n", ref);
+
+    ok(obj_refcount(task) == 1, "got %u\n", obj_refcount(task));
+
+    hr = get_task_trigger(task, 0, &state);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(state.wBeginYear == 3000, "got %u\n", state.wBeginYear);
+    ok(state.TriggerType == TASK_TIME_TRIGGER_ONCE, "got %u\n", state.TriggerType);
+
+    hr = get_task_trigger(task, 1, &state);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(state.wBeginYear == 2000, "got %u\n", state.wBeginYear);
+    ok(state.TriggerType == TASK_TIME_TRIGGER_DAILY, "got %u\n", state.TriggerType);
+
+    hr = ITask_GetTrigger(task, 0, &trigger0);
+    ok(hr == S_OK, "got %#x\n", hr);
+    hr = ITask_GetTrigger(task, 1, &trigger1);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    hr = ITask_DeleteTrigger(task, 0);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    hr = get_task_trigger(task, 0, &state);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(state.wBeginYear == 2000, "got %u\n", state.wBeginYear);
+    ok(state.TriggerType == TASK_TIME_TRIGGER_DAILY, "got %u\n", state.TriggerType);
+
+    hr = get_task_trigger(task, 1, &state);
+    ok(hr == SCHED_E_TRIGGER_NOT_FOUND, "got %#x\n", hr);
+
+    hr = ITaskTrigger_SetTrigger(trigger0, &state0);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    hr = ITaskTrigger_SetTrigger(trigger1, &state1);
+    ok(hr == E_FAIL, "got %#x\n", hr);
+
+    count = 0xdead;
+    hr = ITask_GetTriggerCount(task, &count);
+    ok(hr == S_OK, "got %#x\n", hr);
+    ok(count == 1, "got %u\n", count);
+
+    ok(obj_refcount(task) == 3, "got %u\n", obj_refcount(task));
+
+    ref = ITaskTrigger_Release(trigger0);
+    ok(ref == 0, "got %u\n", ref);
+
+    ref = ITaskTrigger_Release(trigger1);
+    ok(ref == 0, "got %u\n", ref);
+
+    ref = ITask_Release(task);
+    ok(ref == 0, "got %u\n", ref);
+}
 
 START_TEST(task_trigger)
 {
+    HRESULT hr;
+
     CoInitialize(NULL);
+
+    hr = CoCreateInstance(&CLSID_CTaskScheduler, NULL, CLSCTX_INPROC_SERVER,
+                          &IID_ITaskScheduler, (void **)&test_task_scheduler);
+    ok(hr == S_OK, "error creating TaskScheduler instance %#x\n", hr);
+
     test_SetTrigger_GetTrigger();
+    test_task_trigger();
+    test_GetNextRunTime();
+    test_trigger_manager();
+
+    ITaskScheduler_Release(test_task_scheduler);
     CoUninitialize();
 }

@@ -1032,7 +1032,52 @@ static const WCHAR WC_BUTTONW[] = { 'B','u','t','t','o','n',0 };
 #define BCN_FIRST               (0U-1250U)
 #define BCN_LAST                (0U-1350U)
 
-#define BCN_HOTITEMCHANGE       (BCN_FIRST + 0x0001)
+#define BCN_HOTITEMCHANGE       (BCN_FIRST + 1)
+#define BCN_DROPDOWN            (BCN_FIRST + 2)
+#define NM_GETCUSTOMSPLITRECT   (BCN_FIRST + 3)
+
+#define BCM_FIRST               0x1600
+#define BCM_GETIDEALSIZE        (BCM_FIRST + 1)
+#define BCM_SETIMAGELIST        (BCM_FIRST + 2)
+#define BCM_GETIMAGELIST        (BCM_FIRST + 3)
+#define BCM_SETTEXTMARGIN       (BCM_FIRST + 4)
+#define BCM_GETTEXTMARGIN       (BCM_FIRST + 5)
+#define BCM_SETDROPDOWNSTATE    (BCM_FIRST + 6)
+#define BCM_SETSPLITINFO        (BCM_FIRST + 7)
+#define BCM_GETSPLITINFO        (BCM_FIRST + 8)
+#define BCM_SETNOTE             (BCM_FIRST + 9)
+#define BCM_GETNOTE             (BCM_FIRST + 10)
+#define BCM_GETNOTELENGTH       (BCM_FIRST + 11)
+#define BCM_SETSHIELD           (BCM_FIRST + 12)
+
+#define BUTTON_IMAGELIST_ALIGN_LEFT      0
+#define BUTTON_IMAGELIST_ALIGN_RIGHT     1
+#define BUTTON_IMAGELIST_ALIGN_TOP       2
+#define BUTTON_IMAGELIST_ALIGN_BOTTOM    3
+#define BUTTON_IMAGELIST_ALIGN_CENTER    4
+
+#define BCCL_NOGLYPH    (HIMAGELIST)(-1)
+
+typedef struct
+{
+    HIMAGELIST himl;
+    RECT margin;
+    UINT uAlign;
+} BUTTON_IMAGELIST, *PBUTTON_IMAGELIST;
+
+typedef struct tagBUTTON_SPLITINFO
+{
+    UINT mask;
+    HIMAGELIST himlGlyph;
+    UINT uSplitStyle;
+    SIZE size;
+} BUTTON_SPLITINFO, *PBUTTON_SPLITINFO;
+
+typedef struct tagNMBCDROPDOWN
+{
+    NMHDR hdr;
+    RECT rcButton;
+} NMBCDROPDOWN;
 
 typedef struct tagNMBCHOTITEM
 {
@@ -1041,12 +1086,29 @@ typedef struct tagNMBCHOTITEM
 } NMBCHOTITEM, *LPNMBCHOTITEM;
 
 #define BST_HOT                 0x0200
+#define BST_DROPDOWNPUSHED      0x0400
 
 /* Button control styles for _WIN32_WINNT >= 0x600 */
 #define BS_SPLITBUTTON          0x0000000C
 #define BS_DEFSPLITBUTTON       0x0000000D
 #define BS_COMMANDLINK          0x0000000E
 #define BS_DEFCOMMANDLINK       0x0000000F
+
+/* Button macros */
+#define Button_SetNote(button, note)  \
+  (BOOL)SNDMSG(button, BCM_SETNOTE, 0, (LPARAM)(note))
+#define Button_GetNote(button, buffer, size)  \
+  (BOOL)SNDMSG(button, BCM_GETNOTE, (WPARAM)(size), (LPARAM)(buffer))
+#define Button_GetNoteLength(button)  \
+  (LRESULT)SNDMSG(button, BCM_GETNOTELENGTH, 0, 0)
+#define Button_GetImageList(button, image_list)  \
+  (BOOL)SNDMSG(button, BCM_GETIMAGELIST, 0, (LPARAM)(image_list))
+#define Button_SetImageList(button, image_list)  \
+  (BOOL)SNDMSG(button, BCM_SETIMAGELIST, 0, (LPARAM)(image_list))
+#define Button_GetTextMargin(button, margin)  \
+  (BOOL)SNDMSG(button, BCM_GETTEXTMARGIN, 0, (LPARAM)(margin))
+#define Button_SetTextMargin(button, margin)  \
+  (BOOL)SNDMSG(button, BCM_SETTEXTMARGIN, 0, (LPARAM)(margin))
 
 /* Toolbar */
 
@@ -1735,6 +1797,7 @@ static const WCHAR TOOLTIPS_CLASSW[] = { 't','o','o','l','t','i','p','s','_',
 #define TTN_GETDISPINFO         WINELIB_NAME_AW(TTN_GETDISPINFO)
 #define TTN_SHOW                (TTN_FIRST-1)
 #define TTN_POP                 (TTN_FIRST-2)
+#define TTN_LINKCLICK           (TTN_FIRST-3)
 
 #define TTN_NEEDTEXT		TTN_GETDISPINFO
 #define TTN_NEEDTEXTA 		TTN_GETDISPINFOA
@@ -2165,6 +2228,7 @@ static const WCHAR TRACKBAR_CLASSW[] = { 'm','s','c','t','l','s','_',
 #define TBM_SETTIPSIDE          (WM_USER+31)
 #define TBM_SETBUDDY            (WM_USER+32)
 #define TBM_GETBUDDY            (WM_USER+33)
+#define TBM_SETPOSNOTIFY        (WM_USER+34)
 #define TBM_SETUNICODEFORMAT    CCM_SETUNICODEFORMAT
 #define TBM_GETUNICODEFORMAT    CCM_GETUNICODEFORMAT
 
@@ -2227,6 +2291,7 @@ static const WCHAR WC_PAGESCROLLERW[] = { 'S','y','s','P','a','g','e','r',0 };
 #define PGN_LAST                (0U-950U)
 #define PGN_SCROLL              (PGN_FIRST-1)
 #define PGN_CALCSIZE            (PGN_FIRST-2)
+#define PGN_HOTITEMCHANGE       (PGN_FIRST-3)
 
 #include <pshpack1.h>
 
@@ -2727,7 +2792,7 @@ typedef struct tagTVITEMCHANGE
     UINT uStateNew;
     UINT uStateOld;
     LPARAM lParam;
-} NVTVITEMCHANGE;
+} NMTVITEMCHANGE;
 
 typedef struct tagNMTVASYNCDRAW
 {
@@ -3285,6 +3350,14 @@ static const WCHAR WC_LISTVIEWW[] = { 'S','y','s',
 #define LVM_MAPINDEXTOID        (LVM_FIRST + 180)
 #define LVM_MAPIDTOINDEX        (LVM_FIRST + 181)
 #define LVM_ISITEMVISIBLE       (LVM_FIRST + 182)
+#define LVM_GETEMPTYTEXT        (LVM_FIRST + 204)
+#define LVM_GETFOOTERRECT       (LVM_FIRST + 205)
+#define LVM_GETFOOTERINFO       (LVM_FIRST + 206)
+#define LVM_GETFOOTERITEMRECT   (LVM_FIRST + 207)
+#define LVM_GETFOOTERITEM       (LVM_FIRST + 208)
+#define LVM_GETITEMINDEXRECT    (LVM_FIRST + 209)
+#define LVM_SETITEMINDEXSTATE   (LVM_FIRST + 210)
+#define LVM_GETNEXTITEMINDEX    (LVM_FIRST + 211)
 
 #define LVN_FIRST               (0U-100U)
 #define LVN_LAST                (0U-199U)
@@ -4653,6 +4726,7 @@ static const WCHAR MONTHCAL_CLASSW[] = { 'S','y','s',
 
 /* Notifications */
 
+#define MCN_VIEWCHANGE        MCN_FIRST
 #define MCN_SELCHANGE         (MCN_FIRST + 1)
 #define MCN_GETDAYSTATE       (MCN_FIRST + 3)
 #define MCN_SELECT            (MCN_FIRST + 4)
@@ -4955,6 +5029,8 @@ DECL_WINELIB_TYPE_AW(LPNMDATETIMEFORMATQUERY)
   SNDMSG (hdp, DTM_SETMCFONT, (WPARAM)hfont, (LPARAM)fRedraw)
 #define DateTime_GetMonthCalFont(hdp) \
   SNDMSG (hdp, DTM_GETMCFONT, 0, 0)
+#define DateTime_GetIdealSize(hdp, sz) \
+  (BOOL) SNDMSG (hdp, DTM_GETIDEALSIZE, 0, (LPARAM)sz)
 
 #define DA_LAST         (0x7fffffff)
 #define DPA_APPEND      (0x7fffffff)
@@ -5138,6 +5214,12 @@ static const WCHAR WC_COMBOBOXW[] = { 'C','o','m','b','o','B','o','x',0 };
 #endif
 #define WC_COMBOBOX               WINELIB_NAME_AW(WC_COMBOBOX)
 
+#define CBM_FIRST                 0x1700
+#define CB_SETMINVISIBLE          (CBM_FIRST + 1)
+#define CB_GETMINVISIBLE          (CBM_FIRST + 2)
+#define CB_SETCUEBANNER           (CBM_FIRST + 3)
+#define CB_GETCUEBANNER           (CBM_FIRST + 4)
+
 /**************************************************************************
  * Edit control
  */
@@ -5151,6 +5233,24 @@ static const WCHAR WC_COMBOBOXW[] = { 'C','o','m','b','o','B','o','x',0 };
 static const WCHAR WC_EDITW[] = { 'E','d','i','t',0 };
 #endif
 #define WC_EDIT                   WINELIB_NAME_AW(WC_EDIT)
+
+typedef struct _tagEDITBALLOONTIP
+{
+    DWORD cbStruct;
+    LPCWSTR pszTitle;
+    LPCWSTR pszText;
+    INT ttiIcon;
+} EDITBALLOONTIP, *PEDITBALLOONTIP;
+
+#define ECM_FIRST                 0x1500
+#define EM_SETCUEBANNER           (ECM_FIRST + 1)
+#define EM_GETCUEBANNER           (ECM_FIRST + 2)
+#define EM_SHOWBALLOONTIP         (ECM_FIRST + 3)
+#define EM_HIDEBALLOONTIP         (ECM_FIRST + 4)
+#define EM_SETHILITE              (ECM_FIRST + 5)
+#define EM_GETHILITE              (ECM_FIRST + 6)
+#define EM_NOSETFOCUS             (ECM_FIRST + 7)
+#define EM_TAKEFOCUS              (ECM_FIRST + 8)
 
 /**************************************************************************
  * Listbox control
@@ -5211,6 +5311,59 @@ enum _TASKDIALOG_FLAGS
 };
 typedef int TASKDIALOG_FLAGS;
 
+typedef enum _TASKDIALOG_MESSAGES
+{
+    TDM_NAVIGATE_PAGE                       = WM_USER + 101,
+    TDM_CLICK_BUTTON                        = WM_USER + 102,
+    TDM_SET_MARQUEE_PROGRESS_BAR            = WM_USER + 103,
+    TDM_SET_PROGRESS_BAR_STATE              = WM_USER + 104,
+    TDM_SET_PROGRESS_BAR_RANGE              = WM_USER + 105,
+    TDM_SET_PROGRESS_BAR_POS                = WM_USER + 106,
+    TDM_SET_PROGRESS_BAR_MARQUEE            = WM_USER + 107,
+    TDM_SET_ELEMENT_TEXT                    = WM_USER + 108,
+    TDM_CLICK_RADIO_BUTTON                  = WM_USER + 110,
+    TDM_ENABLE_BUTTON                       = WM_USER + 111,
+    TDM_ENABLE_RADIO_BUTTON                 = WM_USER + 112,
+    TDM_CLICK_VERIFICATION                  = WM_USER + 113,
+    TDM_UPDATE_ELEMENT_TEXT                 = WM_USER + 114,
+    TDM_SET_BUTTON_ELEVATION_REQUIRED_STATE = WM_USER + 115,
+    TDM_UPDATE_ICON                         = WM_USER + 116,
+} TASKDIALOG_MESSAGES;
+
+typedef enum _TASKDIALOG_NOTIFICATIONS
+{
+    TDN_CREATED,
+    TDN_NAVIGATED,
+    TDN_BUTTON_CLICKED,
+    TDN_HYPERLINK_CLICKED,
+    TDN_TIMER,
+    TDN_DESTROYED,
+    TDN_RADIO_BUTTON_CLICKED,
+    TDN_DIALOG_CONSTRUCTED,
+    TDN_VERIFICATION_CLICKED,
+    TDN_HELP,
+    TDN_EXPANDO_BUTTON_CLICKED,
+} TASKDIALOG_NOTIFICATIONS;
+
+typedef enum _TASKDIALOG_ELEMENTS
+{
+    TDE_CONTENT,
+    TDE_EXPANDED_INFORMATION,
+    TDE_FOOTER,
+    TDE_MAIN_INSTRUCTION,
+} TASKDIALOG_ELEMENTS;
+
+typedef enum _TASKDIALOG_ICON_ELEMENTS
+{
+    TDIE_ICON_MAIN,
+    TDIE_ICON_FOOTER,
+} TASKDIALOG_ICON_ELEMENTS;
+
+#define TD_WARNING_ICON        MAKEINTRESOURCEW(-1)
+#define TD_ERROR_ICON          MAKEINTRESOURCEW(-2)
+#define TD_INFORMATION_ICON    MAKEINTRESOURCEW(-3)
+#define TD_SHIELD_ICON         MAKEINTRESOURCEW(-4)
+
 enum _TASKDIALOG_COMMON_BUTTON_FLAGS
 {
     TDCBF_OK_BUTTON     = 0x0001,
@@ -5266,6 +5419,8 @@ typedef struct _TASKDIALOGCONFIG
     UINT        cxWidth;
 } TASKDIALOGCONFIG;
 
+HRESULT WINAPI TaskDialog(HWND owner, HINSTANCE hinst, const WCHAR *title, const WCHAR *main_instruction,
+        const WCHAR *content, TASKDIALOG_COMMON_BUTTON_FLAGS common_buttons, const WCHAR *icon, int *button);
 HRESULT WINAPI TaskDialogIndirect(const TASKDIALOGCONFIG *, int *, int *, BOOL *);
 
 #include <poppack.h>

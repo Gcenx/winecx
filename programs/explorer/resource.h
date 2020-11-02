@@ -25,6 +25,5 @@
 #define IDS_PATHBOX_LABEL 2
 #define IDS_START_LABEL 3
 #define IDS_RUN 4
-#define IDS_QUIT 5
 
 #endif

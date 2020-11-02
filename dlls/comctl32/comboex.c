@@ -18,16 +18,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
- *
- * NOTE
- * 
- * This code was audited for completeness against the documented features
- * of Comctl32.dll version 6.0 on Sep. 9, 2002, by Dimitrie O. Paun.
- * 
- * Unless otherwise noted, we believe this code to be complete, as per
- * the specification mentioned above.
- * If you discover missing features, or bugs, please note them below.
- * 
  */
 
 #include <stdarg.h>
@@ -1512,10 +1502,10 @@ static void COMBOEX_ResetContent (COMBOEX_INFO *infoPtr)
 static LRESULT COMBOEX_Destroy (COMBOEX_INFO *infoPtr)
 {
     if (infoPtr->hwndCombo)
-        RemoveWindowSubclass(infoPtr->hwndCombo, COMBOEX_ComboWndProc, COMBO_SUBCLASSID);
+        SetWindowSubclass(infoPtr->hwndCombo, COMBOEX_ComboWndProc, COMBO_SUBCLASSID, 0);
 
     if (infoPtr->hwndEdit)
-        RemoveWindowSubclass(infoPtr->hwndEdit, COMBOEX_EditWndProc, EDIT_SUBCLASSID);
+        SetWindowSubclass(infoPtr->hwndEdit, COMBOEX_EditWndProc, EDIT_SUBCLASSID, 0);
 
     COMBOEX_FreeText (&infoPtr->edit);
     COMBOEX_ResetContent (infoPtr);
@@ -1678,7 +1668,11 @@ COMBOEX_EditWndProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
     TRACE("hwnd=%p msg=%x wparam=%lx lParam=%lx, info_ptr=%p\n",
 	  hwnd, uMsg, wParam, lParam, infoPtr);
 
-    if (!infoPtr) return 0;
+    if (uMsg == WM_NCDESTROY)
+        RemoveWindowSubclass(hwnd, COMBOEX_EditWndProc, EDIT_SUBCLASSID);
+
+    if (!infoPtr)
+        return DefSubclassProc(hwnd, uMsg, wParam, lParam);
 
     switch (uMsg)
     {
@@ -1833,11 +1827,14 @@ COMBOEX_ComboWndProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
     TRACE("hwnd=%p msg=%x wparam=%lx lParam=%lx, info_ptr=%p\n",
 	  hwnd, uMsg, wParam, lParam, infoPtr);
 
-    if (!infoPtr) return 0;
+    if (uMsg == WM_NCDESTROY)
+        RemoveWindowSubclass(hwnd, COMBOEX_ComboWndProc, COMBO_SUBCLASSID);
+
+    if (!infoPtr)
+        return DefSubclassProc(hwnd, uMsg, wParam, lParam);
 
     switch (uMsg)
     {
-
     case WM_DRAWITEM:
 	    /*
 	     * The only way this message should come is from the
@@ -1845,7 +1842,7 @@ COMBOEX_ComboWndProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 	     * that ComboEx knows this is listbox.
 	     */
 	    ((DRAWITEMSTRUCT *)lParam)->itemState |= ODS_COMBOEXLBOX;
-	    return DefSubclassProc(hwnd, uMsg, wParam, lParam);
+	    break;
 
     case WM_ERASEBKGND:
             hDC = (HDC) wParam;
@@ -1854,7 +1851,7 @@ COMBOEX_ComboWndProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
             TRACE("erasing (%s)\n", wine_dbgstr_rect(&rect));
 	    ExtTextOutW (hDC, 0, 0, ETO_OPAQUE, &rect, 0, 0, 0);
             SetBkColor (hDC, obkc);
-	    return DefSubclassProc(hwnd, uMsg, wParam, lParam);
+	    break;
 
     case WM_SETCURSOR:
 	    /*
@@ -1868,7 +1865,7 @@ COMBOEX_ComboWndProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 	    nmmse.pt.y = 0;
 	    nmmse.dwHitInfo = lParam;
 	    COMBOEX_Notify (infoPtr, NM_SETCURSOR, (NMHDR *)&nmmse);
-	    return DefSubclassProc(hwnd, uMsg, wParam, lParam);
+	    break;
 
     case WM_LBUTTONDOWN:
 	    GetClientRect (hwnd, &rect);
@@ -1878,15 +1875,15 @@ COMBOEX_ComboWndProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 	    pt.x = (short)LOWORD(lParam);
 	    pt.y = (short)HIWORD(lParam);
 	    if (PtInRect(&rect, pt))
-		return DefSubclassProc(hwnd, uMsg, wParam, lParam);
+		break;
 
 	    infoPtr->flags |= WCBE_MOUSECAPTURED;
 	    SetCapture(hwnd);
-	    break;
+	    return 0;
 
     case WM_LBUTTONUP:
 	    if (!(infoPtr->flags & WCBE_MOUSECAPTURED))
-		return DefSubclassProc(hwnd, uMsg, wParam, lParam);
+		break;
 
 	    ReleaseCapture();
 	    infoPtr->flags &= ~WCBE_MOUSECAPTURED;
@@ -1895,7 +1892,7 @@ COMBOEX_ComboWndProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 	    } else {
 		SendMessageW(hwnd, CB_SHOWDROPDOWN, TRUE, 0);
 	    }
-	    break;
+	    return 0;
 
     case WM_MOUSEMOVE:
 	    if ( (infoPtr->flags & WCBE_MOUSECAPTURED) &&
@@ -1904,7 +1901,7 @@ COMBOEX_ComboWndProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 		COMBOEX_NotifyDragBegin(infoPtr, edit_text);
 		infoPtr->flags |= WCBE_MOUSEDRAGGED;
 	    }
-	    return DefSubclassProc(hwnd, uMsg, wParam, lParam);
+	    break;
 
     case WM_COMMAND:
 	    switch (HIWORD(wParam)) {
@@ -1985,9 +1982,10 @@ COMBOEX_ComboWndProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 		break;
 	    }/* fall through */
     default:
-	    return DefSubclassProc(hwnd, uMsg, wParam, lParam);
+        ;
     }
-    return 0;
+
+    return DefSubclassProc(hwnd, uMsg, wParam, lParam);
 }
 
 

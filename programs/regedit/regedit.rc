@@ -41,8 +41,6 @@ BEGIN
     END
     POPUP "&Edit"
     BEGIN
-        MENUITEM "&Modify...",                  ID_EDIT_MODIFY
-        MENUITEM SEPARATOR
         POPUP "&New"
         BEGIN
             MENUITEM "&Key",                        ID_EDIT_NEW_KEY
@@ -59,8 +57,8 @@ BEGIN
         MENUITEM SEPARATOR
         MENUITEM "&Copy Key Name",              ID_EDIT_COPYKEYNAME
         MENUITEM SEPARATOR
-        MENUITEM "&Find...\tCtrl+F",            ID_EDIT_FIND, GRAYED
-        MENUITEM "Find Ne&xt\tF3",              ID_EDIT_FINDNEXT, GRAYED
+        MENUITEM "&Find...\tCtrl+F",            ID_EDIT_FIND
+        MENUITEM "Find Ne&xt\tF3",              ID_EDIT_FINDNEXT
     END
     POPUP "&View"
     BEGIN
@@ -84,14 +82,37 @@ END
 
 IDR_POPUP_MENUS MENU
 BEGIN
+  /* PM_COMPUTER */
   POPUP ""
   BEGIN
-	MENUITEM "&Modify...",                  ID_EDIT_MODIFY
-	MENUITEM "Modify Binary Data...",       ID_EDIT_MODIFY_BIN
-	MENUITEM SEPARATOR
-	MENUITEM "&Delete\tDel",                ID_EDIT_DELETE
-	MENUITEM "&Rename",                     ID_EDIT_RENAME
+        MENUITEM "Expand",                      ID_TREE_EXPAND_COLLAPSE
+        MENUITEM SEPARATOR
+        MENUITEM "&Export...",                  ID_EDIT_EXPORT
   END
+  /* PM_TREEVIEW */
+  POPUP ""
+  BEGIN
+        MENUITEM "Expand"                       ID_TREE_EXPAND_COLLAPSE
+        POPUP "&New"
+        BEGIN
+            MENUITEM "&Key",                        ID_EDIT_NEW_KEY
+            MENUITEM SEPARATOR
+            MENUITEM "&String Value",               ID_EDIT_NEW_STRINGVALUE
+            MENUITEM "&Binary Value",               ID_EDIT_NEW_BINARYVALUE
+            MENUITEM "&DWORD Value",                ID_EDIT_NEW_DWORDVALUE
+            MENUITEM "&Multi-String Value",         ID_EDIT_NEW_MULTI_STRINGVALUE
+            MENUITEM "&Expandable String Value",    ID_EDIT_NEW_EXPANDVALUE
+        END
+        MENUITEM "&Find...\tCtrl+F",            ID_EDIT_FIND
+        MENUITEM SEPARATOR
+        MENUITEM "&Delete\tDel",                ID_EDIT_DELETE
+        MENUITEM "&Rename\tF2",                 ID_EDIT_RENAME
+        MENUITEM SEPARATOR
+        MENUITEM "&Export...",                  ID_EDIT_EXPORT
+        MENUITEM SEPARATOR
+        MENUITEM "&Copy Key Name",              ID_EDIT_COPYKEYNAME
+  END
+  /* PM_NEW_VALUE */
   POPUP ""
   BEGIN
         POPUP "&New"
@@ -104,14 +125,15 @@ BEGIN
             MENUITEM "&Multi-String Value",         ID_EDIT_NEW_MULTI_STRINGVALUE
             MENUITEM "&Expandable String Value",    ID_EDIT_NEW_EXPANDVALUE
         END
-        MENUITEM SEPARATOR
-        MENUITEM "&Delete\tDel",                ID_EDIT_DELETE
-        MENUITEM "&Rename\tF2",                 ID_EDIT_RENAME
-        MENUITEM SEPARATOR
-        MENUITEM "&Export...",                  ID_EDIT_EXPORT
-        MENUITEM "&Copy Key Name",              ID_EDIT_COPYKEYNAME
-        MENUITEM SEPARATOR
-        MENUITEM "&Find...\tCtrl+F",            ID_EDIT_FIND, GRAYED
+  END
+  /* PM_MODIFY_VALUE */
+  POPUP ""
+  BEGIN
+	MENUITEM "&Modify...",                  ID_EDIT_MODIFY
+	MENUITEM "Modify &Binary Data...",      ID_EDIT_MODIFY_BIN
+	MENUITEM SEPARATOR
+	MENUITEM "&Delete\tDel",                ID_EDIT_DELETE
+	MENUITEM "&Rename\tF2",                 ID_EDIT_RENAME
   END
 END
 
@@ -137,40 +159,43 @@ BEGIN
     ID_EDIT_MENU            "Contains commands for editing values or keys"
     ID_VIEW_MENU            "Contains commands for customizing the registry window"
     ID_FAVORITES_MENU       "Contains commands for accessing frequently used keys"
-    ID_HELP_MENU            "Contains commands for displaying help and information about registry editor"
+    ID_HELP_MENU            "Contains commands for displaying Help and information about Registry Editor"
     ID_EDIT_NEW_MENU        "Contains commands for creating new keys or values"
 END
 
 STRINGTABLE
 BEGIN
     ID_EDIT_MODIFY          "Modifies the value's data"
+    ID_EDIT_MODIFY_BIN      "Modifies the value's data in binary form"
     ID_EDIT_NEW_KEY         "Adds a new key"
     ID_EDIT_NEW_STRINGVALUE "Adds a new string value"
     ID_EDIT_NEW_BINARYVALUE "Adds a new binary value"
-    ID_EDIT_NEW_DWORDVALUE  "Adds a new double word value"
+    ID_EDIT_NEW_DWORDVALUE  "Adds a new 32-bit value"
     ID_EDIT_NEW_MULTI_STRINGVALUE "Adds a new multi-string value"
+    ID_EDIT_NEW_EXPANDVALUE "Adds a new expandable string value"
     ID_REGISTRY_IMPORTREGISTRYFILE "Imports a text file into the registry"
     ID_REGISTRY_EXPORTREGISTRYFILE
                             "Exports all or part of the registry to a text file"
     ID_REGISTRY_PRINT       "Prints all or part of the registry"
-/*    ID_HELP_HELPTOPICS      "Opens registry editor help" */
+    ID_HELP_HELPTOPICS      "Opens Registry Editor Help"
     ID_HELP_ABOUT           "Displays program information, version number and copyright"
 END
 
 STRINGTABLE
 BEGIN
-    ID_REGISTRY_EXIT        "Quits the registry editor"
+    ID_REGISTRY_EXIT        "Quits the Registry Editor"
     ID_FAVORITES_ADDTOFAVORITES "Adds keys to the favorites list"
     ID_FAVORITES_REMOVEFAVORITE "Removes keys from the favorites list"
     ID_VIEW_STATUSBAR       "Shows or hides the status bar"
-    ID_VIEW_SPLIT           "Change position of split between two panes"
+    ID_VIEW_SPLIT           "Changes the position of the split between two panes"
     ID_VIEW_REFRESH         "Refreshes the window"
     ID_EDIT_DELETE          "Deletes the selection"
     ID_EDIT_RENAME          "Renames the selection"
     ID_EDIT_COPYKEYNAME     "Copies the name of the selected key to the clipboard"
     ID_EDIT_FIND            "Finds a text string in a key, value or data"
     ID_EDIT_FINDNEXT        "Finds next occurrence of text specified in previous search"
-    ID_EDIT_EXPORT          "Exports selected branch of the registry to a text file"
+    ID_EDIT_EXPORT          "Exports the selected branch of the registry to a text file"
+    ID_TREE_EXPAND_COLLAPSE "Expands or collapses the selected node"
 END
 
 STRINGTABLE
@@ -181,10 +206,10 @@ BEGIN
     IDS_UNSUPPORTED_TYPE    "Unable to edit registry keys of this type (%1!u!)."
     IDS_TOO_BIG_VALUE       "The value is too big (%1!u!)."
     IDS_DELETE_VALUE_TITLE  "Confirm Value Delete"
-    IDS_DELETE_VALUE_TEXT   "Are you sure you want to delete the registry value '%1'?"
+    IDS_DELETE_VALUE_TEXT   "Are you sure you want to delete the selected registry value?"
     IDS_DELETE_VALUE_TEXT_MULTIPLE "Are you sure you want to delete these values?"
     IDS_DELETE_KEY_TITLE    "Confirm Key Delete"
-    IDS_DELETE_KEY_TEXT     "Are you sure you want to delete the registry key '%1' and all of its subkeys?"
+    IDS_DELETE_KEY_TEXT     "Are you sure you want to delete this registry key and all of its subkeys?"
     IDS_NEWKEY              "New Key #%d"
     IDS_NEWVALUE            "New Value #%d"
     IDS_NOTFOUND            "Search complete. The string '%1' was not found."
@@ -197,6 +222,14 @@ BEGIN
     IDS_FILEDIALOG_FILTER_REG     "Registry files (*.reg)"
     IDS_FILEDIALOG_FILTER_REG4    "Win9x/NT4 Registry files (REGEDIT4)"
     IDS_FILEDIALOG_FILTER_ALL     "All files (*.*)"
+END
+
+STRINGTABLE
+BEGIN
+    IDS_EXPAND                    "Expand"
+    IDS_COLLAPSE                  "Collapse"
+    IDS_EDIT_MODIFY               "&Modify..."
+    IDS_EDIT_MODIFY_BIN           "Modify &Binary Data..."
 END
 
 STRINGTABLE
@@ -303,17 +336,17 @@ BEGIN
     PUSHBUTTON   "Cancel",IDCANCEL,160,81,45,15,WS_GROUP
 END
 
-IDD_EDIT_BINARY DIALOG  22, 17, 170, 100
+IDD_EDIT_BINARY DIALOG  22, 17, 250, 200
 STYLE DS_MODALFRAME | DS_NOIDLEMSG | WS_CAPTION | WS_SYSMENU
 CAPTION "Edit Binary"
 FONT 8, "MS Shell Dlg"
 BEGIN
     LTEXT           "Value name:",IDC_STATIC,5,5,119,8
-    EDITTEXT        IDC_VALUE_NAME,5,15,160,12, WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL| WS_DISABLED
+    EDITTEXT        IDC_VALUE_NAME,5,15,240,12, WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL| WS_DISABLED
     LTEXT           "Value data:",IDC_STATIC,5,30,90,8
-    CONTROL         "",IDC_VALUE_DATA,"HexEdit",WS_TABSTOP,5,40,160,40
-    DEFPUSHBUTTON   "OK",IDOK,70,83,45,15,WS_GROUP
-    PUSHBUTTON   "Cancel",IDCANCEL,120,83,45,15,WS_GROUP
+    CONTROL         "",IDC_VALUE_DATA,"HexEdit",WS_TABSTOP,5,40,240,140
+    DEFPUSHBUTTON   "OK",IDOK,70,183,45,15,WS_GROUP
+    PUSHBUTTON   "Cancel",IDCANCEL,120,183,45,15,WS_GROUP
 END
 
 IDD_EDIT_MULTI_STRING DIALOG  22, 17, 210, 175
@@ -371,7 +404,7 @@ STRINGTABLE
 \Usage examples:\n\
 \  regedit \"import.reg\"\n\
 \  regedit /E \"export.reg\" \"HKEY_CURRENT_USER\\Console\"\n\
-\  regedit /D \"HKEY_LOCAL_MACHINE\\Error\\Path\"\n"
+\  regedit /D \"HKEY_LOCAL_MACHINE\\Key\\Path\"\n"
     STRING_INVALID_SWITCH, "regedit: Invalid or unrecognized switch [%1]\n"
     STRING_HELP, "Type \"regedit /?\" for help.\n"
     STRING_NO_FILENAME, "regedit: No filename was specified.\n"
@@ -383,16 +416,16 @@ STRINGTABLE
     STRING_INVALID_HEX, "regedit: Invalid hexadecimal value.\n"
     STRING_CSV_HEX_ERROR, "regedit: Unable to convert hexadecimal data. An invalid value was encountered at '%1'.\n"
     STRING_ESCAPE_SEQUENCE, "regedit: Unrecognized escape sequence [\\%1!c!]\n"
-    STRING_UNKNOWN_DATA_FORMAT, "regedit: Unsupported registry data type [%1]\n"
+    STRING_UNKNOWN_DATA_FORMAT, "regedit: Unsupported registry data type [0x%1!x!]\n"
     STRING_UNEXPECTED_EOL, "regedit: Unexpected end of line in '%1'.\n"
     STRING_UNRECOGNIZED_LINE, "regedit: The line '%1' was not recognized.\n"
     STRING_SETVALUE_FAILED, "regedit: Unable to add the registry value '%1' to '%2'.\n"
     STRING_OPEN_KEY_FAILED, "regedit: Unable to open the registry key '%1'.\n"
-    STRING_UNSUPPORTED_TYPE, "regedit: Unsupported registry data type [%1] encountered in '%2'.\n"
+    STRING_UNSUPPORTED_TYPE, "regedit: Unsupported registry data type [0x%1!x!] encountered in '%2'.\n"
     STRING_EXPORT_AS_BINARY, "regedit: The registry value '%1' will be exported as binary data.\n"
-    STRING_INCORRECT_REG_CLASS, "regedit: Incorrect registry class specification in '%1'.\n"
+    STRING_INVALID_SYSTEM_KEY, "regedit: Invalid system key [%1]\n"
     STRING_REG_KEY_NOT_FOUND, "regedit: Unable to export '%1'. The specified registry key was not found.\n"
-    STRING_DELETE_REG_CLASS_FAILED, "regedit: Unable to delete the registry class '%1'.\n"
+    STRING_DELETE_FAILED, "regedit: Unable to delete the registry key '%1'.\n"
     STRING_UNKNOWN_TYPE, "Unknown Type"
     STRING_INVALID_LINE_SYNTAX, "regedit: The line contains invalid syntax.\n"
 }

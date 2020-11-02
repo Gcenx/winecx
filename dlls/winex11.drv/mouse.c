@@ -819,58 +819,58 @@ cleanup:
 struct system_cursors
 {
     WORD id;
-    const char *name;
+    const char *names[8];
 };
 
 static const struct system_cursors user32_cursors[] =
 {
-    { OCR_NORMAL,      "left_ptr" },
-    { OCR_IBEAM,       "xterm" },
-    { OCR_WAIT,        "watch" },
-    { OCR_CROSS,       "cross" },
-    { OCR_UP,          "center_ptr" },
-    { OCR_SIZE,        "fleur" },
-    { OCR_SIZEALL,     "fleur" },
-    { OCR_ICON,        "icon" },
-    { OCR_SIZENWSE,    "nwse-resize" },
-    { OCR_SIZENESW,    "nesw-resize" },
-    { OCR_SIZEWE,      "ew-resize" },
-    { OCR_SIZENS,      "ns-resize" },
-    { OCR_NO,          "not-allowed" },
-    { OCR_HAND,        "hand2" },
-    { OCR_APPSTARTING, "left_ptr_watch" },
-    { OCR_HELP,        "question_arrow" },
+    { OCR_NORMAL,      { "left_ptr" }},
+    { OCR_IBEAM,       { "xterm", "text" }},
+    { OCR_WAIT,        { "watch", "wait" }},
+    { OCR_CROSS,       { "cross" }},
+    { OCR_UP,          { "center_ptr" }},
+    { OCR_SIZE,        { "fleur", "size_all" }},
+    { OCR_SIZEALL,     { "fleur", "size_all" }},
+    { OCR_ICON,        { "icon" }},
+    { OCR_SIZENWSE,    { "top_left_corner", "nw-resize" }},
+    { OCR_SIZENESW,    { "top_right_corner", "ne-resize" }},
+    { OCR_SIZEWE,      { "h_double_arrow", "size_hor", "ew-resize" }},
+    { OCR_SIZENS,      { "v_double_arrow", "size_ver", "ns-resize" }},
+    { OCR_NO,          { "not-allowed", "forbidden", "no-drop" }},
+    { OCR_HAND,        { "hand2", "pointer", "pointing-hand" }},
+    { OCR_APPSTARTING, { "left_ptr_watch" }},
+    { OCR_HELP,        { "question_arrow", "help" }},
     { 0 }
 };
 
 static const struct system_cursors comctl32_cursors[] =
 {
-    { 102, "move" },
-    { 104, "copy" },
-    { 105, "left_ptr" },
-    { 106, "col-resize" },
-    { 107, "col-resize" },
-    { 108, "hand2" },
-    { 135, "row-resize" },
+    { 102, { "move", "dnd-move" }},
+    { 104, { "copy", "dnd-copy" }},
+    { 105, { "left_ptr" }},
+    { 106, { "col-resize", "split_v" }},
+    { 107, { "col-resize", "split_v" }},
+    { 108, { "hand2", "pointer", "pointing-hand" }},
+    { 135, { "row-resize", "split_h" }},
     { 0 }
 };
 
 static const struct system_cursors ole32_cursors[] =
 {
-    { 1, "no-drop" },
-    { 2, "move" },
-    { 3, "copy" },
-    { 4, "alias" },
+    { 1, { "no-drop", "dnd-no-drop" }},
+    { 2, { "move", "dnd-move" }},
+    { 3, { "copy", "dnd-copy" }},
+    { 4, { "alias", "dnd-link" }},
     { 0 }
 };
 
 static const struct system_cursors riched20_cursors[] =
 {
-    { 105, "hand2" },
-    { 107, "right_ptr" },
-    { 109, "copy" },
-    { 110, "move" },
-    { 111, "no-drop" },
+    { 105, { "hand2", "pointer", "pointing-hand" }},
+    { 107, { "right_ptr" }},
+    { 109, { "copy", "dnd-copy" }},
+    { 110, { "move", "dnd-move" }},
+    { 111, { "no-drop", "dnd-no-drop" }},
     { 0 }
 };
 
@@ -924,6 +924,7 @@ static const struct cursor_font_fallback fallbacks[] =
     { "fleur",               XC_fleur },
     { "gobbler",             XC_gobbler },
     { "gumby",               XC_gumby },
+    { "h_double_arrow",      XC_sb_h_double_arrow },
     { "hand1",               XC_hand1 },
     { "hand2",               XC_hand2 },
     { "heart",               XC_heart },
@@ -971,6 +972,7 @@ static const struct cursor_font_fallback fallbacks[] =
     { "ul_angle",            XC_ul_angle },
     { "umbrella",            XC_umbrella },
     { "ur_angle",            XC_ur_angle },
+    { "v_double_arrow",      XC_sb_v_double_arrow },
     { "watch",               XC_watch },
     { "xterm",               XC_xterm }
 };
@@ -1004,6 +1006,7 @@ static Cursor create_xcursor_system_cursor( const ICONINFOEXW *info )
     Cursor cursor = 0;
     HMODULE module;
     HKEY key;
+    const char * const *names = NULL;
     WCHAR *p, name[MAX_PATH * 2], valueW[64];
     char valueA[64];
     DWORD ret;
@@ -1044,7 +1047,8 @@ static Cursor create_xcursor_system_cursor( const ICONINFOEXW *info )
     for (i = 0; cursors[i].id; i++)
         if (cursors[i].id == info->wResID)
         {
-            strcpy( valueA, cursors[i].name );
+            strcpy( valueA, cursors[i].names[0] );
+            names = cursors[i].names;
             break;
         }
 
@@ -1052,7 +1056,13 @@ done:
     if (valueA[0])
     {
 #ifdef SONAME_LIBXCURSOR
-        if (pXcursorLibraryLoadCursor) cursor = pXcursorLibraryLoadCursor( gdi_display, valueA );
+        if (pXcursorLibraryLoadCursor)
+        {
+            if (!names)
+                cursor = pXcursorLibraryLoadCursor( gdi_display, valueA );
+            else
+                while (*names && !cursor) cursor = pXcursorLibraryLoadCursor( gdi_display, *names++ );
+        }
 #endif
         if (!cursor)
         {
@@ -1156,6 +1166,43 @@ static Cursor create_xlib_monochrome_cursor( HDC hdc, const ICONINFOEXW *icon, i
 
 done:
     HeapFree( GetProcessHeap(), 0, mask_bits );
+    return cursor;
+}
+
+/***********************************************************************
+ *		create_xlib_load_mono_cursor
+ *
+ * Create a monochrome X cursor from a color Windows one by trying to load the monochrome resource.
+ */
+static Cursor create_xlib_load_mono_cursor( HDC hdc, HANDLE handle, int width, int height )
+{
+    Cursor cursor = None;
+    HANDLE mono;
+    ICONINFOEXW info;
+    BITMAP bm;
+
+    if (!(mono = CopyImage( handle, IMAGE_CURSOR, width, height, LR_MONOCHROME | LR_COPYFROMRESOURCE )))
+        return None;
+
+    info.cbSize = sizeof(info);
+    if (GetIconInfoExW( mono, &info ))
+    {
+        if (!info.hbmColor)
+        {
+            GetObjectW( info.hbmMask, sizeof(bm), &bm );
+            bm.bmHeight = max( 1, bm.bmHeight / 2 );
+            /* make sure hotspot is valid */
+            if (info.xHotspot >= bm.bmWidth || info.yHotspot >= bm.bmHeight)
+            {
+                info.xHotspot = bm.bmWidth / 2;
+                info.yHotspot = bm.bmHeight / 2;
+            }
+            cursor = create_xlib_monochrome_cursor( hdc, &info, bm.bmWidth, bm.bmHeight );
+        }
+        else DeleteObject( info.hbmColor );
+        DeleteObject( info.hbmMask );
+    }
+    DestroyCursor( mono );
     return cursor;
 }
 
@@ -1334,6 +1381,7 @@ static Cursor create_cursor( HANDLE handle )
         if (pXcursorImagesLoadCursor)
             cursor = create_xcursor_cursor( hdc, &info, handle, bm.bmWidth, bm.bmHeight );
 #endif
+        if (!cursor) cursor = create_xlib_load_mono_cursor( hdc, handle, bm.bmWidth, bm.bmHeight );
         if (!cursor) cursor = create_xlib_color_cursor( hdc, &info, bm.bmWidth, bm.bmHeight );
         DeleteObject( info.hbmColor );
     }

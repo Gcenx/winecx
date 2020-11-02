@@ -649,17 +649,17 @@ static void test_constant_table(const char *test_name, const DWORD *ctable_fn,
 static void test_constant_tables(void)
 {
     test_constant_table("test_basic", ctab_basic, ctab_basic_expected,
-            sizeof(ctab_basic_expected)/sizeof(*ctab_basic_expected));
+            ARRAY_SIZE(ctab_basic_expected));
     test_constant_table("test_matrices", ctab_matrices, ctab_matrices_expected,
-            sizeof(ctab_matrices_expected)/sizeof(*ctab_matrices_expected));
+            ARRAY_SIZE(ctab_matrices_expected));
     test_constant_table("test_matrices2", ctab_matrices2, ctab_matrices2_expected,
-            sizeof(ctab_matrices2_expected)/sizeof(*ctab_matrices2_expected));
+            ARRAY_SIZE(ctab_matrices2_expected));
     test_constant_table("test_arrays", ctab_arrays, ctab_arrays_expected,
-            sizeof(ctab_arrays_expected)/sizeof(*ctab_arrays_expected));
+            ARRAY_SIZE(ctab_arrays_expected));
     test_constant_table("test_default_values", ctab_with_default_values, ctab_with_default_values_expected,
-            sizeof(ctab_with_default_values_expected)/sizeof(*ctab_with_default_values_expected));
+            ARRAY_SIZE(ctab_with_default_values_expected));
     test_constant_table("test_samplers", ctab_samplers, ctab_samplers_expected,
-            sizeof(ctab_samplers_expected)/sizeof(*ctab_samplers_expected));
+            ARRAY_SIZE(ctab_samplers_expected));
 }
 
 static void test_setting_basic_table(IDirect3DDevice9 *device)
@@ -1844,7 +1844,7 @@ static void test_get_shader_constant_variables(void)
     ctab = ID3DXConstantTable_GetBufferPointer(ctable);
     ok(ctab[0] == test_get_shader_constant_variables_blob[3], "ID3DXConstantTable_GetBufferPointer failed\n");
 
-    for (i = 0; i < sizeof(test_get_shader_constant_variables_data) / sizeof(*test_get_shader_constant_variables_data); ++i)
+    for (i = 0; i < ARRAY_SIZE(test_get_shader_constant_variables_data); ++i)
     {
         const char *fullname = test_get_shader_constant_variables_data[i].fullname;
         const D3DXCONSTANT_DESC *expected_desc = &test_get_shader_constant_variables_data[i].desc;
@@ -5675,267 +5675,190 @@ static const struct
 registerset_data[] =
 {
     /* scalar */
-    {"float", "f", 0, D3DXRS_FLOAT4, registerset_blob_scalar, registerset_test_scalar_float,
-        sizeof(registerset_test_scalar_float) / sizeof(*registerset_test_scalar_float),
-        registerset_constants_scalar_float,
-        sizeof(registerset_constants_scalar_float) / sizeof(*registerset_constants_scalar_float)},
-    {"int", "n", 0, D3DXRS_INT4, registerset_blob_scalar, registerset_test_scalar_int,
-        sizeof(registerset_test_scalar_int) / sizeof(*registerset_test_scalar_int),
-        registerset_constants_scalar_int,
-        sizeof(registerset_constants_scalar_int) / sizeof(*registerset_constants_scalar_int)},
-    {"int float", "nf", 4, D3DXRS_FLOAT4, registerset_blob_scalar, registerset_test_scalar_int_float,
-        sizeof(registerset_test_scalar_int_float) / sizeof(*registerset_test_scalar_int_float),
-        registerset_constants_scalar_int_float,
-        sizeof(registerset_constants_scalar_int_float) / sizeof(*registerset_constants_scalar_int_float)},
-    {"bool float", "bf", 8, D3DXRS_FLOAT4, registerset_blob_scalar, registerset_test_scalar_bool_float,
-        sizeof(registerset_test_scalar_bool_float) / sizeof(*registerset_test_scalar_bool_float),
-        registerset_constants_scalar_bool_float,
-        sizeof(registerset_constants_scalar_bool_float) / sizeof(*registerset_constants_scalar_bool_float)},
-    {"bool", "b", 0, D3DXRS_BOOL, registerset_blob_scalar, registerset_test_scalar_bool,
-        sizeof(registerset_test_scalar_bool) / sizeof(*registerset_test_scalar_bool),
-        registerset_constants_scalar_bool,
-        sizeof(registerset_constants_scalar_bool) / sizeof(*registerset_constants_scalar_bool)},
+    {"float", "f", 0, D3DXRS_FLOAT4, registerset_blob_scalar,
+        registerset_test_scalar_float, ARRAY_SIZE(registerset_test_scalar_float),
+        registerset_constants_scalar_float, ARRAY_SIZE(registerset_constants_scalar_float)},
+    {"int", "n", 0, D3DXRS_INT4, registerset_blob_scalar,
+        registerset_test_scalar_int, ARRAY_SIZE(registerset_test_scalar_int),
+        registerset_constants_scalar_int, ARRAY_SIZE(registerset_constants_scalar_int)},
+    {"int float", "nf", 4, D3DXRS_FLOAT4, registerset_blob_scalar,
+        registerset_test_scalar_int_float, ARRAY_SIZE(registerset_test_scalar_int_float),
+        registerset_constants_scalar_int_float, ARRAY_SIZE(registerset_constants_scalar_int_float)},
+    {"bool float", "bf", 8, D3DXRS_FLOAT4, registerset_blob_scalar,
+        registerset_test_scalar_bool_float, ARRAY_SIZE(registerset_test_scalar_bool_float),
+        registerset_constants_scalar_bool_float, ARRAY_SIZE(registerset_constants_scalar_bool_float)},
+    {"bool", "b", 0, D3DXRS_BOOL, registerset_blob_scalar,
+        registerset_test_scalar_bool, ARRAY_SIZE(registerset_test_scalar_bool),
+        registerset_constants_scalar_bool, ARRAY_SIZE(registerset_constants_scalar_bool)},
     /* scalar array */
-    {"float [2]", "af", 0, D3DXRS_FLOAT4, registerset_blob_scalar_array, registerset_test_scalar_array_float,
-        sizeof(registerset_test_scalar_array_float) / sizeof(*registerset_test_scalar_array_float),
-        registerset_constants_scalar_array_float,
-        sizeof(registerset_constants_scalar_array_float) / sizeof(*registerset_constants_scalar_array_float)},
-    {"int [2]", "an", 0, D3DXRS_INT4, registerset_blob_scalar_array, registerset_test_scalar_array_int,
-        sizeof(registerset_test_scalar_array_int) / sizeof(*registerset_test_scalar_array_int),
-        registerset_constants_scalar_array_int,
-        sizeof(registerset_constants_scalar_array_int) / sizeof(*registerset_constants_scalar_array_int)},
-    {"bool [2]", "ab", 0, D3DXRS_BOOL, registerset_blob_scalar_array, registerset_test_scalar_array_bool,
-        sizeof(registerset_test_scalar_array_bool) / sizeof(*registerset_test_scalar_array_bool),
-        registerset_constants_scalar_array_bool,
-        sizeof(registerset_constants_scalar_array_bool) / sizeof(*registerset_constants_scalar_array_bool)},
+    {"float [2]", "af", 0, D3DXRS_FLOAT4, registerset_blob_scalar_array,
+        registerset_test_scalar_array_float, ARRAY_SIZE(registerset_test_scalar_array_float),
+        registerset_constants_scalar_array_float, ARRAY_SIZE(registerset_constants_scalar_array_float)},
+    {"int [2]", "an", 0, D3DXRS_INT4, registerset_blob_scalar_array,
+        registerset_test_scalar_array_int, ARRAY_SIZE(registerset_test_scalar_array_int),
+        registerset_constants_scalar_array_int, ARRAY_SIZE(registerset_constants_scalar_array_int)},
+    {"bool [2]", "ab", 0, D3DXRS_BOOL, registerset_blob_scalar_array,
+        registerset_test_scalar_array_bool, ARRAY_SIZE(registerset_test_scalar_array_bool),
+        registerset_constants_scalar_array_bool, ARRAY_SIZE(registerset_constants_scalar_array_bool)},
     {"int float [2]", "anf", 8, D3DXRS_FLOAT4, registerset_blob_scalar_array,
-        registerset_test_scalar_array_int_float,
-        sizeof(registerset_test_scalar_array_int_float) / sizeof(*registerset_test_scalar_array_int_float),
-        registerset_constants_scalar_array_int_float,
-        sizeof(registerset_constants_scalar_array_int_float) / sizeof(*registerset_constants_scalar_array_int_float)},
+        registerset_test_scalar_array_int_float, ARRAY_SIZE(registerset_test_scalar_array_int_float),
+        registerset_constants_scalar_array_int_float, ARRAY_SIZE(registerset_constants_scalar_array_int_float)},
     {"bool float [2]", "abf", 16, D3DXRS_FLOAT4, registerset_blob_scalar_array,
-        registerset_test_scalar_array_bool_float,
-        sizeof(registerset_test_scalar_array_bool_float) / sizeof(*registerset_test_scalar_array_bool_float),
-        registerset_constants_scalar_array_bool_float,
-        sizeof(registerset_constants_scalar_array_bool_float) / sizeof(*registerset_constants_scalar_array_bool_float)},
+        registerset_test_scalar_array_bool_float, ARRAY_SIZE(registerset_test_scalar_array_bool_float),
+        registerset_constants_scalar_array_bool_float, ARRAY_SIZE(registerset_constants_scalar_array_bool_float)},
     /* vector */
-    {"float 3", "vf", 0, D3DXRS_FLOAT4, registerset_blob_vector, registerset_test_vector_float,
-        sizeof(registerset_test_vector_float) / sizeof(*registerset_test_vector_float),
-        registerset_constants_vector_float,
-        sizeof(registerset_constants_vector_float) / sizeof(*registerset_constants_vector_float)},
-    {"int 3", "vn", 0, D3DXRS_INT4, registerset_blob_vector, registerset_test_vector_int,
-        sizeof(registerset_test_vector_int) / sizeof(*registerset_test_vector_int),
-        registerset_constants_vector_int,
-        sizeof(registerset_constants_vector_int) / sizeof(*registerset_constants_vector_int)},
-    {"bool 3", "vb", 0, D3DXRS_BOOL, registerset_blob_vector, registerset_test_vector_bool,
-        sizeof(registerset_test_vector_bool) / sizeof(*registerset_test_vector_bool),
-        registerset_constants_vector_bool,
-        sizeof(registerset_constants_vector_bool) / sizeof(*registerset_constants_vector_bool)},
-    {"bool float 3", "vbf", 8, D3DXRS_FLOAT4, registerset_blob_vector, registerset_test_vector_bool_float,
-        sizeof(registerset_test_vector_bool_float) / sizeof(*registerset_test_vector_bool_float),
-        registerset_constants_vector_bool_float,
-        sizeof(registerset_constants_vector_bool_float) / sizeof(*registerset_constants_vector_bool_float)},
-    {"int float 3", "vnf", 4, D3DXRS_FLOAT4, registerset_blob_vector, registerset_test_vector_int_float,
-        sizeof(registerset_test_vector_int_float) / sizeof(*registerset_test_vector_int_float),
-        registerset_constants_vector_int_float,
-        sizeof(registerset_constants_vector_int_float) / sizeof(*registerset_constants_vector_int_float)},
+    {"float 3", "vf", 0, D3DXRS_FLOAT4, registerset_blob_vector,
+        registerset_test_vector_float, ARRAY_SIZE(registerset_test_vector_float),
+        registerset_constants_vector_float, ARRAY_SIZE(registerset_constants_vector_float)},
+    {"int 3", "vn", 0, D3DXRS_INT4, registerset_blob_vector,
+        registerset_test_vector_int, ARRAY_SIZE(registerset_test_vector_int),
+        registerset_constants_vector_int, ARRAY_SIZE(registerset_constants_vector_int)},
+    {"bool 3", "vb", 0, D3DXRS_BOOL, registerset_blob_vector,
+        registerset_test_vector_bool, ARRAY_SIZE(registerset_test_vector_bool),
+        registerset_constants_vector_bool, ARRAY_SIZE(registerset_constants_vector_bool)},
+    {"bool float 3", "vbf", 8, D3DXRS_FLOAT4, registerset_blob_vector,
+        registerset_test_vector_bool_float, ARRAY_SIZE(registerset_test_vector_bool_float),
+        registerset_constants_vector_bool_float, ARRAY_SIZE(registerset_constants_vector_bool_float)},
+    {"int float 3", "vnf", 4, D3DXRS_FLOAT4, registerset_blob_vector,
+        registerset_test_vector_int_float, ARRAY_SIZE(registerset_test_vector_int_float),
+        registerset_constants_vector_int_float, ARRAY_SIZE(registerset_constants_vector_int_float)},
     /* vector array */
-    {"float 3 [2]", "vaf", 0, D3DXRS_FLOAT4, registerset_blob_vector_array, registerset_test_vector_array_float,
-        sizeof(registerset_test_vector_array_float) / sizeof(*registerset_test_vector_array_float),
-        registerset_constants_vector_array_float,
-        sizeof(registerset_constants_vector_array_float) / sizeof(*registerset_constants_vector_array_float)},
-    {"int 3 [2]", "van", 0, D3DXRS_INT4, registerset_blob_vector_array, registerset_test_vector_array_int,
-        sizeof(registerset_test_vector_array_int) / sizeof(*registerset_test_vector_array_int),
-        registerset_constants_vector_array_int,
-        sizeof(registerset_constants_vector_array_int) / sizeof(*registerset_constants_vector_array_int)},
-    {"bool 3 [2]", "vab", 0, D3DXRS_BOOL, registerset_blob_vector_array, registerset_test_vector_array_bool,
-        sizeof(registerset_test_vector_array_bool) / sizeof(*registerset_test_vector_array_bool),
-        registerset_constants_vector_array_bool,
-        sizeof(registerset_constants_vector_array_bool) / sizeof(*registerset_constants_vector_array_bool)},
+    {"float 3 [2]", "vaf", 0, D3DXRS_FLOAT4, registerset_blob_vector_array,
+        registerset_test_vector_array_float, ARRAY_SIZE(registerset_test_vector_array_float),
+        registerset_constants_vector_array_float, ARRAY_SIZE(registerset_constants_vector_array_float)},
+    {"int 3 [2]", "van", 0, D3DXRS_INT4, registerset_blob_vector_array,
+        registerset_test_vector_array_int, ARRAY_SIZE(registerset_test_vector_array_int),
+        registerset_constants_vector_array_int, ARRAY_SIZE(registerset_constants_vector_array_int)},
+    {"bool 3 [2]", "vab", 0, D3DXRS_BOOL, registerset_blob_vector_array,
+        registerset_test_vector_array_bool, ARRAY_SIZE(registerset_test_vector_array_bool),
+        registerset_constants_vector_array_bool, ARRAY_SIZE(registerset_constants_vector_array_bool)},
     {"bool float 3 [2]", "vabf", 16, D3DXRS_FLOAT4, registerset_blob_vector_array,
-        registerset_test_vector_array_bool_float,
-        sizeof(registerset_test_vector_array_bool_float) / sizeof(*registerset_test_vector_array_bool_float),
-        registerset_constants_vector_array_bool_float,
-        sizeof(registerset_constants_vector_array_bool_float) / sizeof(*registerset_constants_vector_array_bool_float)},
+        registerset_test_vector_array_bool_float, ARRAY_SIZE(registerset_test_vector_array_bool_float),
+        registerset_constants_vector_array_bool_float, ARRAY_SIZE(registerset_constants_vector_array_bool_float)},
     {"int float 3 [2]", "vanf", 8, D3DXRS_FLOAT4, registerset_blob_vector_array,
-        registerset_test_vector_array_int_float,
-        sizeof(registerset_test_vector_array_int_float) / sizeof(*registerset_test_vector_array_int_float),
-        registerset_constants_vector_array_int_float,
-        sizeof(registerset_constants_vector_array_int_float) / sizeof(*registerset_constants_vector_array_int_float)},
+        registerset_test_vector_array_int_float, ARRAY_SIZE(registerset_test_vector_array_int_float),
+        registerset_constants_vector_array_int_float, ARRAY_SIZE(registerset_constants_vector_array_int_float)},
     /* matrix column */
-    {"float c3x2", "cf", 0, D3DXRS_FLOAT4, registerset_blob_column, registerset_test_column_float,
-        sizeof(registerset_test_column_float) / sizeof(*registerset_test_column_float),
-        registerset_constants_column_float,
-        sizeof(registerset_constants_column_float) / sizeof(*registerset_constants_column_float)},
-    {"int c3x2", "cn", 0, D3DXRS_INT4, registerset_blob_column, registerset_test_column_int,
-        sizeof(registerset_test_column_int) / sizeof(*registerset_test_column_int),
-        registerset_constants_column_int,
-        sizeof(registerset_constants_column_int) / sizeof(*registerset_constants_column_int)},
-    {"bool c3x2", "cb", 0, D3DXRS_BOOL, registerset_blob_column, registerset_test_column_bool,
-        sizeof(registerset_test_column_bool) / sizeof(*registerset_test_column_bool),
-        registerset_constants_column_bool,
-        sizeof(registerset_constants_column_bool) / sizeof(*registerset_constants_column_bool)},
+    {"float c3x2", "cf", 0, D3DXRS_FLOAT4, registerset_blob_column,
+        registerset_test_column_float, ARRAY_SIZE(registerset_test_column_float),
+        registerset_constants_column_float, ARRAY_SIZE(registerset_constants_column_float)},
+    {"int c3x2", "cn", 0, D3DXRS_INT4, registerset_blob_column,
+        registerset_test_column_int, ARRAY_SIZE(registerset_test_column_int),
+        registerset_constants_column_int, ARRAY_SIZE(registerset_constants_column_int)},
+    {"bool c3x2", "cb", 0, D3DXRS_BOOL, registerset_blob_column,
+        registerset_test_column_bool, ARRAY_SIZE(registerset_test_column_bool),
+        registerset_constants_column_bool, ARRAY_SIZE(registerset_constants_column_bool)},
     {"bool float c3x2", "cbf", 8, D3DXRS_FLOAT4, registerset_blob_column,
-        registerset_test_column_bool_float,
-        sizeof(registerset_test_column_bool_float) / sizeof(*registerset_test_column_bool_float),
-        registerset_constants_column_bool_float,
-        sizeof(registerset_constants_column_bool_float) / sizeof(*registerset_constants_column_bool_float)},
+        registerset_test_column_bool_float, ARRAY_SIZE(registerset_test_column_bool_float),
+        registerset_constants_column_bool_float, ARRAY_SIZE(registerset_constants_column_bool_float)},
     {"int float c3x2", "cnf", 16, D3DXRS_FLOAT4, registerset_blob_column,
-        registerset_test_column_int_float,
-        sizeof(registerset_test_column_int_float) / sizeof(*registerset_test_column_int_float),
-        registerset_constants_column_int_float,
-        sizeof(registerset_constants_column_int_float) / sizeof(*registerset_constants_column_int_float)},
+        registerset_test_column_int_float, ARRAY_SIZE(registerset_test_column_int_float),
+        registerset_constants_column_int_float, ARRAY_SIZE(registerset_constants_column_int_float)},
     /* matrix column array */
-    {"float c3x2 [2]", "caf", 0, D3DXRS_FLOAT4, registerset_blob_column_array, registerset_test_column_array_float,
-        sizeof(registerset_test_column_array_float) / sizeof(*registerset_test_column_array_float),
-        registerset_constants_column_array_float,
-        sizeof(registerset_constants_column_array_float) / sizeof(*registerset_constants_column_array_float)},
-    {"int c3x2 [2]", "can", 0, D3DXRS_INT4, registerset_blob_column_array, registerset_test_column_array_int,
-        sizeof(registerset_test_column_array_int) / sizeof(*registerset_test_column_array_int),
-        registerset_constants_column_array_int,
-        sizeof(registerset_constants_column_array_int) / sizeof(*registerset_constants_column_array_int)},
-    {"bool c3x2 [2]", "cab", 0, D3DXRS_BOOL, registerset_blob_column_array, registerset_test_column_array_bool,
-        sizeof(registerset_test_column_array_bool) / sizeof(*registerset_test_column_array_bool),
-        registerset_constants_column_array_bool,
-        sizeof(registerset_constants_column_array_bool) / sizeof(*registerset_constants_column_array_bool)},
+    {"float c3x2 [2]", "caf", 0, D3DXRS_FLOAT4, registerset_blob_column_array,
+        registerset_test_column_array_float, ARRAY_SIZE(registerset_test_column_array_float),
+        registerset_constants_column_array_float, ARRAY_SIZE(registerset_constants_column_array_float)},
+    {"int c3x2 [2]", "can", 0, D3DXRS_INT4, registerset_blob_column_array,
+        registerset_test_column_array_int, ARRAY_SIZE(registerset_test_column_array_int),
+        registerset_constants_column_array_int, ARRAY_SIZE(registerset_constants_column_array_int)},
+    {"bool c3x2 [2]", "cab", 0, D3DXRS_BOOL, registerset_blob_column_array,
+        registerset_test_column_array_bool, ARRAY_SIZE(registerset_test_column_array_bool),
+        registerset_constants_column_array_bool, ARRAY_SIZE(registerset_constants_column_array_bool)},
     {"bool float c3x2 [2]", "cabf", 16, D3DXRS_FLOAT4, registerset_blob_column_array,
-        registerset_test_column_array_bool_float,
-        sizeof(registerset_test_column_array_bool_float) / sizeof(*registerset_test_column_array_bool_float),
-        registerset_constants_column_array_bool_float,
-        sizeof(registerset_constants_column_array_bool_float) / sizeof(*registerset_constants_column_array_bool_float)},
+        registerset_test_column_array_bool_float, ARRAY_SIZE(registerset_test_column_array_bool_float),
+        registerset_constants_column_array_bool_float, ARRAY_SIZE(registerset_constants_column_array_bool_float)},
     {"int float c3x2 [2]", "canf", 32, D3DXRS_FLOAT4, registerset_blob_column_array,
-        registerset_test_column_array_int_float,
-        sizeof(registerset_test_column_array_int_float) / sizeof(*registerset_test_column_array_int_float),
-        registerset_constants_column_array_int_float,
-        sizeof(registerset_constants_column_array_int_float) / sizeof(*registerset_constants_column_array_int_float)},
+        registerset_test_column_array_int_float, ARRAY_SIZE(registerset_test_column_array_int_float),
+        registerset_constants_column_array_int_float, ARRAY_SIZE(registerset_constants_column_array_int_float)},
     /* matrix row */
-    {"float r3x2", "rf", 0, D3DXRS_FLOAT4, registerset_blob_row, registerset_test_row_float,
-        sizeof(registerset_test_row_float) / sizeof(*registerset_test_row_float),
-        registerset_constants_row_float,
-        sizeof(registerset_constants_row_float) / sizeof(*registerset_constants_row_float)},
-    {"int r3x2", "rn", 0, D3DXRS_INT4, registerset_blob_row, registerset_test_row_int,
-        sizeof(registerset_test_row_int) / sizeof(*registerset_test_row_int),
-        registerset_constants_row_int,
-        sizeof(registerset_constants_row_int) / sizeof(*registerset_constants_row_int)},
-    {"bool r3x2", "rb", 0, D3DXRS_BOOL, registerset_blob_row, registerset_test_row_bool,
-        sizeof(registerset_test_row_bool) / sizeof(*registerset_test_row_bool),
-        registerset_constants_row_bool,
-        sizeof(registerset_constants_row_bool) / sizeof(*registerset_constants_row_bool)},
+    {"float r3x2", "rf", 0, D3DXRS_FLOAT4, registerset_blob_row,
+        registerset_test_row_float, ARRAY_SIZE(registerset_test_row_float),
+        registerset_constants_row_float, ARRAY_SIZE(registerset_constants_row_float)},
+    {"int r3x2", "rn", 0, D3DXRS_INT4, registerset_blob_row,
+        registerset_test_row_int, ARRAY_SIZE(registerset_test_row_int),
+        registerset_constants_row_int, ARRAY_SIZE(registerset_constants_row_int)},
+    {"bool r3x2", "rb", 0, D3DXRS_BOOL, registerset_blob_row,
+        registerset_test_row_bool, ARRAY_SIZE(registerset_test_row_bool),
+        registerset_constants_row_bool, ARRAY_SIZE(registerset_constants_row_bool)},
     {"bool float r3x2", "rbf", 12, D3DXRS_FLOAT4, registerset_blob_row,
-        registerset_test_row_bool_float,
-        sizeof(registerset_test_row_bool_float) / sizeof(*registerset_test_row_bool_float),
-        registerset_constants_row_bool_float,
-        sizeof(registerset_constants_row_bool_float) / sizeof(*registerset_constants_row_bool_float)},
+        registerset_test_row_bool_float, ARRAY_SIZE(registerset_test_row_bool_float),
+        registerset_constants_row_bool_float, ARRAY_SIZE(registerset_constants_row_bool_float)},
     {"int float r3x2", "rnf", 24, D3DXRS_FLOAT4, registerset_blob_row,
-        registerset_test_row_int_float,
-        sizeof(registerset_test_row_int_float) / sizeof(*registerset_test_row_int_float),
-        registerset_constants_row_int_float,
-        sizeof(registerset_constants_row_int_float) / sizeof(*registerset_constants_row_int_float)},
+        registerset_test_row_int_float, ARRAY_SIZE(registerset_test_row_int_float),
+        registerset_constants_row_int_float, ARRAY_SIZE(registerset_constants_row_int_float)},
     /* matrix row array */
-    {"float 3x2 [2]", "raf", 0, D3DXRS_FLOAT4, registerset_blob_row_array, registerset_test_row_array_float,
-        sizeof(registerset_test_row_array_float) / sizeof(*registerset_test_row_array_float),
-        registerset_constants_row_array_float,
-        sizeof(registerset_constants_row_array_float) / sizeof(*registerset_constants_row_array_float)},
-    {"int 3x2 [2]", "ran", 0, D3DXRS_INT4, registerset_blob_row_array, registerset_test_row_array_int,
-        sizeof(registerset_test_row_array_int) / sizeof(*registerset_test_row_array_int),
-        registerset_constants_row_array_int,
-        sizeof(registerset_constants_row_array_int) / sizeof(*registerset_constants_row_array_int)},
-    {"bool 3x2 [2]", "rab", 0, D3DXRS_BOOL, registerset_blob_row_array, registerset_test_row_array_bool,
-        sizeof(registerset_test_row_array_bool) / sizeof(*registerset_test_row_array_bool),
-        registerset_constants_row_array_bool,
-        sizeof(registerset_constants_row_array_bool) / sizeof(*registerset_constants_row_array_bool)},
+    {"float 3x2 [2]", "raf", 0, D3DXRS_FLOAT4, registerset_blob_row_array,
+        registerset_test_row_array_float, ARRAY_SIZE(registerset_test_row_array_float),
+        registerset_constants_row_array_float, ARRAY_SIZE(registerset_constants_row_array_float)},
+    {"int 3x2 [2]", "ran", 0, D3DXRS_INT4, registerset_blob_row_array,
+        registerset_test_row_array_int, ARRAY_SIZE(registerset_test_row_array_int),
+        registerset_constants_row_array_int, ARRAY_SIZE(registerset_constants_row_array_int)},
+    {"bool 3x2 [2]", "rab", 0, D3DXRS_BOOL, registerset_blob_row_array,
+        registerset_test_row_array_bool, ARRAY_SIZE(registerset_test_row_array_bool),
+        registerset_constants_row_array_bool, ARRAY_SIZE(registerset_constants_row_array_bool)},
     {"bool float 3x2 [2]", "rabf", 24, D3DXRS_FLOAT4, registerset_blob_row_array,
-        registerset_test_row_array_bool_float,
-        sizeof(registerset_test_row_array_bool_float) / sizeof(*registerset_test_row_array_bool_float),
-        registerset_constants_row_array_bool_float,
-        sizeof(registerset_constants_row_array_bool_float) / sizeof(*registerset_constants_row_array_bool_float)},
+        registerset_test_row_array_bool_float, ARRAY_SIZE(registerset_test_row_array_bool_float),
+        registerset_constants_row_array_bool_float, ARRAY_SIZE(registerset_constants_row_array_bool_float)},
     {"int float 3x2 [2]", "ranf", 48, D3DXRS_FLOAT4, registerset_blob_row_array,
-        registerset_test_row_array_int_float,
-        sizeof(registerset_test_row_array_int_float) / sizeof(*registerset_test_row_array_int_float),
-        registerset_constants_row_array_int_float,
-        sizeof(registerset_constants_row_array_int_float) / sizeof(*registerset_constants_row_array_int_float)},
+        registerset_test_row_array_int_float, ARRAY_SIZE(registerset_test_row_array_int_float),
+        registerset_constants_row_array_int_float, ARRAY_SIZE(registerset_constants_row_array_int_float)},
     /* struct */
-    {"struct float", "sf", 0, D3DXRS_FLOAT4, registerset_blob_struct, registerset_test_struct_float,
-        sizeof(registerset_test_struct_float) / sizeof(*registerset_test_struct_float),
-        registerset_constants_struct_float,
-        sizeof(registerset_constants_struct_float) / sizeof(*registerset_constants_struct_float)},
-    {"struct int", "sn", 0, D3DXRS_INT4, registerset_blob_struct, registerset_test_struct_int,
-        sizeof(registerset_test_struct_int) / sizeof(*registerset_test_struct_int),
-        registerset_constants_struct_int,
-        sizeof(registerset_constants_struct_int) / sizeof(*registerset_constants_struct_int)},
-    {"struct bool", "sb", 0, D3DXRS_BOOL, registerset_blob_struct, registerset_test_struct_bool,
-        sizeof(registerset_test_struct_bool) / sizeof(*registerset_test_struct_bool),
-        registerset_constants_struct_bool,
-        sizeof(registerset_constants_struct_bool) / sizeof(*registerset_constants_struct_bool)},
+    {"struct float", "sf", 0, D3DXRS_FLOAT4, registerset_blob_struct,
+        registerset_test_struct_float, ARRAY_SIZE(registerset_test_struct_float),
+        registerset_constants_struct_float, ARRAY_SIZE(registerset_constants_struct_float)},
+    {"struct int", "sn", 0, D3DXRS_INT4, registerset_blob_struct,
+        registerset_test_struct_int, ARRAY_SIZE(registerset_test_struct_int),
+        registerset_constants_struct_int, ARRAY_SIZE(registerset_constants_struct_int)},
+    {"struct bool", "sb", 0, D3DXRS_BOOL, registerset_blob_struct,
+        registerset_test_struct_bool, ARRAY_SIZE(registerset_test_struct_bool),
+        registerset_constants_struct_bool, ARRAY_SIZE(registerset_constants_struct_bool)},
     {"struct bool float", "sbf", 16, D3DXRS_FLOAT4, registerset_blob_struct,
-        registerset_test_struct_bool_float,
-        sizeof(registerset_test_struct_bool_float) / sizeof(*registerset_test_struct_bool_float),
-        registerset_constants_struct_bool_float,
-        sizeof(registerset_constants_struct_bool_float) / sizeof(*registerset_constants_struct_bool_float)},
+        registerset_test_struct_bool_float, ARRAY_SIZE(registerset_test_struct_bool_float),
+        registerset_constants_struct_bool_float, ARRAY_SIZE(registerset_constants_struct_bool_float)},
     {"struct int float", "snf", 8, D3DXRS_FLOAT4, registerset_blob_struct,
-        registerset_test_struct_int_float,
-        sizeof(registerset_test_struct_int_float) / sizeof(*registerset_test_struct_int_float),
-        registerset_constants_struct_int_float,
-        sizeof(registerset_constants_struct_int_float) / sizeof(*registerset_constants_struct_int_float)},
+        registerset_test_struct_int_float, ARRAY_SIZE(registerset_test_struct_int_float),
+        registerset_constants_struct_int_float, ARRAY_SIZE(registerset_constants_struct_int_float)},
     /* struct array */
-    {"struct float [2]", "saf", 0, D3DXRS_FLOAT4, registerset_blob_struct_array, registerset_test_struct_array_float,
-        sizeof(registerset_test_struct_array_float) / sizeof(*registerset_test_struct_array_float),
-        registerset_constants_struct_array_float,
-        sizeof(registerset_constants_struct_array_float) / sizeof(*registerset_constants_struct_array_float)},
-    {"struct int [2]", "san", 0, D3DXRS_INT4, registerset_blob_struct_array, registerset_test_struct_array_int,
-        sizeof(registerset_test_struct_array_int) / sizeof(*registerset_test_struct_array_int),
-        registerset_constants_struct_array_int,
-        sizeof(registerset_constants_struct_array_int) / sizeof(*registerset_constants_struct_array_int)},
-    {"struct bool [2]", "sab", 0, D3DXRS_BOOL, registerset_blob_struct_array, registerset_test_struct_array_bool,
-        sizeof(registerset_test_struct_array_bool) / sizeof(*registerset_test_struct_array_bool),
-        registerset_constants_struct_array_bool,
-        sizeof(registerset_constants_struct_array_bool) / sizeof(*registerset_constants_struct_array_bool)},
+    {"struct float [2]", "saf", 0, D3DXRS_FLOAT4, registerset_blob_struct_array,
+        registerset_test_struct_array_float, ARRAY_SIZE(registerset_test_struct_array_float),
+        registerset_constants_struct_array_float, ARRAY_SIZE(registerset_constants_struct_array_float)},
+    {"struct int [2]", "san", 0, D3DXRS_INT4, registerset_blob_struct_array,
+        registerset_test_struct_array_int, ARRAY_SIZE(registerset_test_struct_array_int),
+        registerset_constants_struct_array_int, ARRAY_SIZE(registerset_constants_struct_array_int)},
+    {"struct bool [2]", "sab", 0, D3DXRS_BOOL, registerset_blob_struct_array,
+        registerset_test_struct_array_bool, ARRAY_SIZE(registerset_test_struct_array_bool),
+        registerset_constants_struct_array_bool, ARRAY_SIZE(registerset_constants_struct_array_bool)},
     {"struct bool float [2]", "sabf", 32, D3DXRS_FLOAT4, registerset_blob_struct_array,
-        registerset_test_struct_array_bool_float,
-        sizeof(registerset_test_struct_array_bool_float) / sizeof(*registerset_test_struct_array_bool_float),
-        registerset_constants_struct_array_bool_float,
-        sizeof(registerset_constants_struct_array_bool_float) / sizeof(*registerset_constants_struct_array_bool_float)},
+        registerset_test_struct_array_bool_float, ARRAY_SIZE(registerset_test_struct_array_bool_float),
+        registerset_constants_struct_array_bool_float, ARRAY_SIZE(registerset_constants_struct_array_bool_float)},
     {"struct int float [2]", "sanf", 16, D3DXRS_FLOAT4, registerset_blob_struct_array,
-        registerset_test_struct_array_int_float,
-        sizeof(registerset_test_struct_array_int_float) / sizeof(*registerset_test_struct_array_int_float),
-        registerset_constants_struct_array_int_float,
-        sizeof(registerset_constants_struct_array_int_float) / sizeof(*registerset_constants_struct_array_int_float)},
+        registerset_test_struct_array_int_float, ARRAY_SIZE(registerset_test_struct_array_int_float),
+        registerset_constants_struct_array_int_float, ARRAY_SIZE(registerset_constants_struct_array_int_float)},
     /* struct struct */
-    {"struct struct float", "ssf", 0, D3DXRS_FLOAT4, registerset_blob_struct_struct, registerset_test_struct_struct_float,
-        sizeof(registerset_test_struct_struct_float) / sizeof(*registerset_test_struct_struct_float),
-        registerset_constants_struct_struct_float,
-        sizeof(registerset_constants_struct_struct_float) / sizeof(*registerset_constants_struct_struct_float)},
-    {"struct struct int", "ssn", 0, D3DXRS_INT4, registerset_blob_struct_struct, registerset_test_struct_struct_int,
-        sizeof(registerset_test_struct_struct_int) / sizeof(*registerset_test_struct_struct_int),
-        registerset_constants_struct_struct_int,
-        sizeof(registerset_constants_struct_struct_int) / sizeof(*registerset_constants_struct_struct_int)},
-    {"struct struct bool", "ssb", 0, D3DXRS_BOOL, registerset_blob_struct_struct, registerset_test_struct_struct_bool,
-        sizeof(registerset_test_struct_struct_bool) / sizeof(*registerset_test_struct_struct_bool),
-        registerset_constants_struct_struct_bool,
-        sizeof(registerset_constants_struct_struct_bool) / sizeof(*registerset_constants_struct_struct_bool)},
+    {"struct struct float", "ssf", 0, D3DXRS_FLOAT4, registerset_blob_struct_struct,
+        registerset_test_struct_struct_float, ARRAY_SIZE(registerset_test_struct_struct_float),
+        registerset_constants_struct_struct_float, ARRAY_SIZE(registerset_constants_struct_struct_float)},
+    {"struct struct int", "ssn", 0, D3DXRS_INT4, registerset_blob_struct_struct,
+        registerset_test_struct_struct_int, ARRAY_SIZE(registerset_test_struct_struct_int),
+        registerset_constants_struct_struct_int, ARRAY_SIZE(registerset_constants_struct_struct_int)},
+    {"struct struct bool", "ssb", 0, D3DXRS_BOOL, registerset_blob_struct_struct,
+        registerset_test_struct_struct_bool, ARRAY_SIZE(registerset_test_struct_struct_bool),
+        registerset_constants_struct_struct_bool, ARRAY_SIZE(registerset_constants_struct_struct_bool)},
     {"struct struct bool float", "ssbf", 32, D3DXRS_FLOAT4, registerset_blob_struct_struct,
-        registerset_test_struct_struct_bool_float,
-        sizeof(registerset_test_struct_struct_bool_float) / sizeof(*registerset_test_struct_struct_bool_float),
-        registerset_constants_struct_struct_bool_float,
-        sizeof(registerset_constants_struct_struct_bool_float) / sizeof(*registerset_constants_struct_struct_bool_float)},
+        registerset_test_struct_struct_bool_float, ARRAY_SIZE(registerset_test_struct_struct_bool_float),
+        registerset_constants_struct_struct_bool_float, ARRAY_SIZE(registerset_constants_struct_struct_bool_float)},
     {"struct struct int float", "ssnf", 16, D3DXRS_FLOAT4, registerset_blob_struct_struct,
-        registerset_test_struct_struct_int_float,
-        sizeof(registerset_test_struct_struct_int_float) / sizeof(*registerset_test_struct_struct_int_float),
-        registerset_constants_struct_struct_int_float,
-        sizeof(registerset_constants_struct_struct_int_float) / sizeof(*registerset_constants_struct_struct_int_float)},
+        registerset_test_struct_struct_int_float, ARRAY_SIZE(registerset_test_struct_struct_int_float),
+        registerset_constants_struct_struct_int_float, ARRAY_SIZE(registerset_constants_struct_struct_int_float)},
     /* special */
     {"int ran", "ran", 0, D3DXRS_INT4, registerset_blob_special_int, NULL, 0,
-        registerset_constants_special_int,
-        sizeof(registerset_constants_special_int) / sizeof(*registerset_constants_special_int)},
-    {"bigvec", "vaf", 0, D3DXRS_FLOAT4, registerset_blob_bigvec, registerset_test_bigvec_float,
-        sizeof(registerset_test_bigvec_float) / sizeof(*registerset_test_bigvec_float),
-        registerset_constants_bigvec_float,
-        sizeof(registerset_constants_bigvec_float) / sizeof(*registerset_constants_bigvec_float)},
+        registerset_constants_special_int, ARRAY_SIZE(registerset_constants_special_int)},
+    {"bigvec", "vaf", 0, D3DXRS_FLOAT4, registerset_blob_bigvec,
+        registerset_test_bigvec_float, ARRAY_SIZE(registerset_test_bigvec_float),
+        registerset_constants_bigvec_float, ARRAY_SIZE(registerset_constants_bigvec_float)},
     {"cf", "cf", 0, D3DXRS_FLOAT4, registerset_blob_matrix_column_clamp,
-        registerset_test_matrix_column_clamp,
-        sizeof(registerset_test_matrix_column_clamp) / sizeof(*registerset_test_matrix_column_clamp),
-        registerset_constants_matrix_column_clamp,
-        sizeof(registerset_constants_matrix_column_clamp) / sizeof(*registerset_constants_matrix_column_clamp)},
+        registerset_test_matrix_column_clamp, ARRAY_SIZE(registerset_test_matrix_column_clamp),
+        registerset_constants_matrix_column_clamp, ARRAY_SIZE(registerset_constants_matrix_column_clamp)},
 };
 
 static void registerset_clear(IDirect3DDevice9 *device)
@@ -6025,7 +5948,7 @@ static UINT registerset_compare_all(IDirect3DDevice9 *device, BOOL is_vs, D3DXRE
     D3DXREGISTER_SET regsets[] = {D3DXRS_BOOL, D3DXRS_INT4, D3DXRS_FLOAT4};
     UINT err = 0, i;
 
-    for (i = 0; i < sizeof(regsets) / sizeof(*regsets); i++)
+    for (i = 0; i < ARRAY_SIZE(regsets); i++)
     {
         if (regset == regsets[i])
             err += registerset_compare(device, is_vs, regset, start, in_count, expected);
@@ -6137,7 +6060,7 @@ static void test_registerset(void)
         return;
     }
 
-    for (k = 0; k < sizeof(registerset_data) / sizeof(*registerset_data); ++k)
+    for (k = 0; k < ARRAY_SIZE(registerset_data); ++k)
     {
         const char *tablename = registerset_data[k].name;
         const char *name = registerset_data[k].var;
@@ -6442,7 +6365,7 @@ static void test_registerset_defaults(void)
         return;
     }
 
-    for (k = 0; k < sizeof(registerset_defaults_data) / sizeof(*registerset_defaults_data); ++k)
+    for (k = 0; k < ARRAY_SIZE(registerset_defaults_data); ++k)
     {
         const char *tablename = registerset_defaults_data[k].name;
         ID3DXConstantTable *ctable;
@@ -6489,6 +6412,168 @@ static void test_registerset_defaults(void)
     if (wnd) DestroyWindow(wnd);
 }
 
+static void test_shader_semantics(void)
+{
+    static const DWORD invalid_1[] =
+    {
+        0x00000200
+    },
+    invalid_2[] =
+    {
+        0xfffe0400
+    },
+    invalid_3[] =
+    {
+        0xfffe0000
+    },
+    vs_1_1[] =
+    {
+        0xfffe0101,                         /* vs_1_1 */
+        0x0000001f, 0x80000000, 0x900f0000, /* dcl_position v0 */
+        0x0000001f, 0x80000003, 0x900f0001, /* dcl_normal v1 */
+        0x0000001f, 0x8001000a, 0x900f0002, /* dcl_color1 v2 */
+        0x0000001f, 0x80000005, 0x900f0003, /* dcl_texcoord0 v3 */
+        0x00000001, 0xc00f0000, 0x90e40000, /* mov oPos, v0 */
+        0x00000001, 0xd00f0001, 0x90e40002, /* mov oD1, v2 */
+        0x00000001, 0xe0070000, 0x90e40001, /* mov oT0.xyz, v1 */
+        0x00000001, 0xc00f0001, 0x90ff0002, /* mov oFog, v2.w */
+        0x00000001, 0xc00f0002, 0x90ff0001, /* mov oPts, v1.w */
+        0x0000ffff
+    },
+    vs_2_0[] =
+    {
+        0xfffe0200,                         /* vs_2_0 */
+        0x0200001f, 0x80000000, 0x900f0000, /* dcl_position v0 */
+        0x0200001f, 0x80000003, 0x900f0001, /* dcl_normal v1 */
+        0x0200001f, 0x8001000a, 0x900f0002, /* dcl_color1 v2 */
+        0x0200001f, 0x80000005, 0x900f0003, /* dcl_texcoord0 v3 */
+        0x02000001, 0xc00f0000, 0x90e40000, /* mov oPos, v0 */
+        0x02000001, 0xd00f0001, 0x90e40002, /* mov oD1, v2 */
+        0x02000001, 0xe0070000, 0x90e40003, /* mov oT0.xyz, v3 */
+        0x02000001, 0xc00f0001, 0x90ff0002, /* mov oFog, v2.w */
+        0x02000001, 0xc00f0002, 0x90ff0001, /* mov oPts, v1.w */
+        0x0000ffff
+    },
+    vs_3_0[] =
+    {
+        0xfffe0300,                         /* vs_3_0 */
+        0x0200001f, 0x80000000, 0x900f0000, /* dcl_position v0 */
+        0x0200001f, 0x80000003, 0x900f0001, /* dcl_normal v1 */
+        0x0200001f, 0x8001000a, 0x900f0002, /* dcl_color1 v2 */
+        0x0200001f, 0x80000005, 0x900f0003, /* dcl_texcoord0 v3 */
+        0x0200001f, 0x80000000, 0xe00f0000, /* dcl_position o0 */
+        0x0200001f, 0x8001000a, 0xe00f0001, /* dcl_color1 o1 */
+        0x0200001f, 0x80000005, 0xe00f0002, /* dcl_texcoord0 o2 */
+        0x0200001f, 0x8000000b, 0xe00f0003, /* dcl_fog o3 */
+        0x0200001f, 0x80000004, 0xe00f0004, /* dcl_psize o4 */
+        0x02000001, 0xe00f0000, 0x90e40000, /* mov o0, v0 */
+        0x02000001, 0xe00f0001, 0x90e40002, /* mov o1, v2 */
+        0x02000001, 0xe0070002, 0x90e40003, /* mov o2.xyz, v3 */
+        0x02000001, 0xe00f0003, 0x90ff0002, /* mov o3, v2.w */
+        0x02000001, 0xe00f0004, 0x90ff0001, /* mov o4, v1.w */
+        0x0000ffff
+    },
+    ps_1_1[] =
+    {
+        0xffff0101,                                     /* ps_1_1 */
+        0x00000042, 0xb00f0000,                         /* tex t0 */
+        0x00000002, 0x800f0000, 0x90e40000, 0xb0e40000, /* add r0, v0, t0 */
+        0x0000ffff
+    },
+    ps_2_0[] =
+    {
+        0xffff0200,                         /* ps_2_0 */
+        0x0200001f, 0x80000000, 0x900f0000, /* dcl v0 */
+        0x0200001f, 0x80000000, 0xb00f0000, /* dcl t0 */
+        0x02000001, 0x800f0800, 0x90e40000, /* mov oC0, v0 */
+        0x0000ffff
+    },
+    ps_3_0[] =
+    {
+        0xffff0300,                                                             /* ps_3_0 */
+        0x0200001f, 0x8001000a, 0x900f0000,                                     /* dcl_color1 v0 */
+        0x0200001f, 0x80000003, 0x900f0001,                                     /* dcl_normal v1 */
+        0x0200001f, 0x80000005, 0x900f0002,                                     /* dcl_texcoord0 v2 */
+        0x0200001f, 0x8000000b, 0x900f0003,                                     /* dcl_fog v3 */
+        0x0200001f, 0x80000000, 0x90031000,                                     /* dcl vPos.xy */
+        0x0200001f, 0x80000000, 0x900f1001,                                     /* dcl vFace */
+        0x05000051, 0xa00f0000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, /* def c0, 0.0, 0.0, 0.0, 0.0 */
+        0x02000001, 0x800f0000, 0x90e40000,                                     /* mov r0, v0 */
+        0x03000002, 0x800f0800, 0x80e40000, 0x90e40003,                         /* add oC0, r0, v3 */
+        0x02000001, 0x800f0001, 0x90e40001,                                     /* mov r1, v1 */
+        0x03000005, 0x800f0801, 0x80e40001, 0x90e40002,                         /* mul oC1, r1, v2 */
+        0x02000001, 0x800f0802, 0x90441000,                                     /* mov oC2, vPos.xyxy */
+        0x04000058, 0x800f0803, 0x90e41001, 0x90e40000, 0xa0e40000,             /* cmp oC3, vFace, v0, c0 */
+        0x02000001, 0x900f0800, 0x90ff0001,                                     /* mov oDepth, v1.w */
+        0x0000ffff
+    };
+    static const struct
+    {
+        const DWORD *shader;
+        D3DXSEMANTIC expected_input[MAXD3DDECLLENGTH];
+        D3DXSEMANTIC expected_output[MAXD3DDECLLENGTH];
+    }
+    tests[] =
+    {
+        {vs_1_1, {{0, 0}, {3, 0}, {10, 1}, {5, 0}, {~0, ~0}}, {{5, 0}, {10, 1}, {0, 0}, {11, 0}, {4, 0}, {~0, ~0}}},
+        {vs_2_0, {{0, 0}, {3, 0}, {10, 1}, {5, 0}, {~0, ~0}}, {{5, 0}, {10, 1}, {0, 0}, {11, 0}, {4, 0}, {~0, ~0}}},
+        {vs_3_0, {{0, 0}, {3, 0}, {10, 1}, {5, 0}, {~0, ~0}}, {{0, 0}, {10, 1}, {5, 0}, {11, 0}, {4, 0}, {~0, ~0}}},
+        {ps_1_1, {{5, 0}, {10, 0}, {~0, ~0}}, {{10, 0}, {~0, ~0}}},
+        {ps_2_0, {{10, 0}, {5, 0}, {~0, ~0}}, {{10, 0}, {~0, ~0}}},
+        {ps_3_0, {{10, 1}, {3,0}, {5, 0}, {11, 0}, {~0, ~0}}, {{10, 0}, {10, 1}, {10, 2}, {10, 3}, {12, 0}, {~0, ~0}}},
+    };
+    D3DXSEMANTIC semantics[MAXD3DDECLLENGTH];
+    unsigned int count, count2;
+    unsigned int i, j;
+    HRESULT hr;
+
+    hr = D3DXGetShaderInputSemantics(invalid_1, NULL, NULL);
+    ok(hr == D3DXERR_INVALIDDATA, "Unexpected hr %#x.\n", hr);
+    hr = D3DXGetShaderInputSemantics(invalid_2, NULL, NULL);
+    ok(hr == D3D_OK, "Unexpected hr %#x.\n", hr);
+    hr = D3DXGetShaderInputSemantics(invalid_3, NULL, NULL);
+    ok(hr == D3D_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = D3DXGetShaderInputSemantics(vs_1_1, NULL, NULL);
+    ok(hr == D3D_OK, "Unexpected hr %#x.\n", hr);
+    hr = D3DXGetShaderInputSemantics(vs_1_1, semantics, NULL);
+    ok(hr == D3D_OK, "Unexpected hr %#x.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
+    {
+        const DWORD *shader = tests[i].shader;
+
+        hr = D3DXGetShaderInputSemantics(shader, NULL, &count);
+        ok(hr == D3D_OK, "Unexpected hr %#x.\n", hr);
+        hr = D3DXGetShaderInputSemantics(shader, semantics, &count2);
+        ok(hr == D3D_OK, "Unexpected hr %#x.\n", hr);
+        ok(count == count2, "Semantics count %u differs from previous count %u.\n", count2, count);
+        for (j = 0; j < count; ++j)
+        {
+            ok(semantics[j].Usage == tests[i].expected_input[j].Usage
+                    && semantics[j].UsageIndex == tests[i].expected_input[j].UsageIndex,
+                    "Unexpected semantic %u, %u, test %u, idx %u.\n",
+                    semantics[j].Usage, semantics[j].UsageIndex, i, j);
+        }
+        ok(tests[i].expected_input[j].Usage == ~0 && tests[i].expected_input[j].UsageIndex == ~0,
+                "Unexpected semantics count %u.\n", count);
+        hr = D3DXGetShaderOutputSemantics(shader, NULL, &count);
+        ok(hr == D3D_OK, "Unexpected hr %#x.\n", hr);
+        hr = D3DXGetShaderOutputSemantics(shader, semantics, &count2);
+        ok(hr == D3D_OK, "Unexpected hr %#x.\n", hr);
+        ok(count == count2, "Semantics count %u differs from previous count %u.\n", count2, count);
+        for (j = 0; j < count; ++j)
+        {
+            ok(semantics[j].Usage == tests[i].expected_output[j].Usage
+                    && semantics[j].UsageIndex == tests[i].expected_output[j].UsageIndex,
+                    "Unexpected semantic %u, %u, test %u, idx %u.\n",
+                    semantics[j].Usage, semantics[j].UsageIndex, i, j);
+        }
+        ok(tests[i].expected_output[j].Usage == ~0 && tests[i].expected_output[j].UsageIndex == ~0,
+                "Unexpected semantics count %u.\n", count);
+    }
+}
+
 START_TEST(shader)
 {
     test_get_shader_size();
@@ -6502,4 +6587,5 @@ START_TEST(shader)
     test_get_shader_constant_variables();
     test_registerset();
     test_registerset_defaults();
+    test_shader_semantics();
 }

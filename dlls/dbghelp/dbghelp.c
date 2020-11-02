@@ -245,9 +245,8 @@ static BOOL WINAPI process_invade_cb(PCWSTR name, ULONG64 base, ULONG size, PVOI
     WCHAR       tmp[MAX_PATH];
     HANDLE      hProcess = user;
 
-    if (!GetModuleFileNameExW(hProcess, (HMODULE)(DWORD_PTR)base,
-			      tmp, sizeof(tmp) / sizeof(WCHAR)))
-        lstrcpynW(tmp, name, sizeof(tmp) / sizeof(WCHAR));
+    if (!GetModuleFileNameExW(hProcess, (HMODULE)(DWORD_PTR)base, tmp, ARRAY_SIZE(tmp)))
+        lstrcpynW(tmp, name, ARRAY_SIZE(tmp));
 
     SymLoadModuleExW(hProcess, 0, tmp, name, base, size, NULL, 0);
     return TRUE;
@@ -295,6 +294,7 @@ static BOOL check_live_target(struct process* pcs)
 BOOL WINAPI SymInitializeW(HANDLE hProcess, PCWSTR UserSearchPath, BOOL fInvadeProcess)
 {
     struct process*     pcs;
+    BOOL wow64, child_wow64;
 
     TRACE("(%p %s %u)\n", hProcess, debugstr_w(UserSearchPath), fInvadeProcess);
 
@@ -311,6 +311,12 @@ BOOL WINAPI SymInitializeW(HANDLE hProcess, PCWSTR UserSearchPath, BOOL fInvadeP
     if (!pcs) return FALSE;
 
     pcs->handle = hProcess;
+
+    IsWow64Process(GetCurrentProcess(), &wow64);
+
+    if (!IsWow64Process(hProcess, &child_wow64))
+        return FALSE;
+    pcs->is_64bit = (sizeof(void *) == 8 || wow64) && !child_wow64;
 
     if (UserSearchPath)
     {

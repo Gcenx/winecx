@@ -181,17 +181,22 @@ static nsrefcnt NSAPI XMLHttpReqEventListener_Release(nsIDOMEventListener *iface
     return ref;
 }
 
-static nsresult NSAPI XMLHttpReqEventListener_HandleEvent(nsIDOMEventListener *iface, nsIDOMEvent *event)
+static nsresult NSAPI XMLHttpReqEventListener_HandleEvent(nsIDOMEventListener *iface, nsIDOMEvent *nsevent)
 {
     XMLHttpReqEventListener *This = impl_from_nsIDOMEventListener(iface);
+    DOMEvent *event;
+    HRESULT hres;
 
     TRACE("(%p)\n", This);
 
     if(!This->xhr)
         return NS_OK;
 
-    call_event_handlers(NULL, NULL, &This->xhr->event_target, NULL, EVENTID_READYSTATECHANGE,
-            (IDispatch*)&This->xhr->IHTMLXMLHttpRequest_iface);
+    hres = create_event_from_nsevent(nsevent, &event);
+    if(SUCCEEDED(hres) ){
+        dispatch_event(&This->xhr->event_target, event);
+        IDOMEvent_Release(&event->IDOMEvent_iface);
+    }
     return NS_OK;
 }
 
@@ -223,12 +228,8 @@ static HRESULT WINAPI HTMLXMLHttpRequest_QueryInterface(IHTMLXMLHttpRequest *ifa
         *ppv = &This->IProvideClassInfo2_iface;
     }else if(IsEqualGUID(&IID_IProvideClassInfo2, riid)) {
         *ppv = &This->IProvideClassInfo2_iface;
-    }else if(dispex_query_interface(&This->event_target.dispex, riid, ppv)) {
-        return *ppv ? S_OK : E_NOINTERFACE;
     }else {
-        *ppv = NULL;
-        WARN("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
-        return E_NOINTERFACE;
+        return EventTarget_QI(&This->event_target, riid, ppv);
     }
 
     IUnknown_AddRef((IUnknown*)*ppv);
@@ -737,7 +738,13 @@ static inline HTMLXMLHttpRequest *impl_from_DispatchEx(DispatchEx *iface)
     return CONTAINING_RECORD(iface, HTMLXMLHttpRequest, event_target.dispex);
 }
 
-static void HTMLXMLHttpRequest_bind_event(DispatchEx *dispex, int eid)
+static nsISupports *HTMLXMLHttpRequest_get_gecko_target(DispatchEx *dispex)
+{
+    HTMLXMLHttpRequest *This = impl_from_DispatchEx(dispex);
+    return (nsISupports*)This->nsxhr;
+}
+
+static void HTMLXMLHttpRequest_bind_event(DispatchEx *dispex, eventid_t eid)
 {
     HTMLXMLHttpRequest *This = impl_from_DispatchEx(dispex);
     nsIDOMEventTarget *nstarget;
@@ -748,9 +755,7 @@ static void HTMLXMLHttpRequest_bind_event(DispatchEx *dispex, int eid)
 
     TRACE("(%p)\n", This);
 
-    assert(eid == EVENTID_READYSTATECHANGE);
-
-    if(This->event_listener)
+    if(eid != EVENTID_READYSTATECHANGE || This->event_listener)
         return;
 
     This->event_listener = heap_alloc(sizeof(*This->event_listener));
@@ -772,12 +777,9 @@ static void HTMLXMLHttpRequest_bind_event(DispatchEx *dispex, int eid)
         ERR("AddEventListener failed: %08x\n", nsres);
 }
 
-static dispex_static_data_vtbl_t HTMLXMLHttpRequest_dispex_vtbl = {
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
+static event_target_vtbl_t HTMLXMLHttpRequest_event_target_vtbl = {
+    {NULL},
+    HTMLXMLHttpRequest_get_gecko_target,
     HTMLXMLHttpRequest_bind_event
 };
 
@@ -786,9 +788,10 @@ static const tid_t HTMLXMLHttpRequest_iface_tids[] = {
     0
 };
 static dispex_static_data_t HTMLXMLHttpRequest_dispex = {
-    &HTMLXMLHttpRequest_dispex_vtbl,
+    &HTMLXMLHttpRequest_event_target_vtbl.dispex_vtbl,
     DispHTMLXMLHttpRequest_tid,
-    HTMLXMLHttpRequest_iface_tids
+    HTMLXMLHttpRequest_iface_tids,
+    EventTarget_init_dispex_info
 };
 
 
@@ -900,9 +903,8 @@ static HRESULT WINAPI HTMLXMLHttpRequestFactory_create(IHTMLXMLHttpRequestFactor
 
     ret->IHTMLXMLHttpRequest_iface.lpVtbl = &HTMLXMLHttpRequestVtbl;
     ret->IProvideClassInfo2_iface.lpVtbl = &ProvideClassInfo2Vtbl;
-    init_event_target(&ret->event_target);
-    init_dispex(&ret->event_target.dispex, (IUnknown*)&ret->IHTMLXMLHttpRequest_iface,
-            &HTMLXMLHttpRequest_dispex);
+    EventTarget_Init(&ret->event_target, (IUnknown*)&ret->IHTMLXMLHttpRequest_iface,
+                     &HTMLXMLHttpRequest_dispex, This->window->doc->document_mode);
     ret->ref = 1;
 
     *p = &ret->IHTMLXMLHttpRequest_iface;

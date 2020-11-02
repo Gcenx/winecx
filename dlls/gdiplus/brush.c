@@ -230,9 +230,9 @@ static const char HatchBrushes[][8] = {
     { 0x00, 0x00, 0xff, 0xff, 0x00, 0x00, 0xff, 0xff }, /* HatchStyleDarkHorizontal */
 };
 
-GpStatus get_hatch_data(HatchStyle hatchstyle, const char **result)
+GpStatus get_hatch_data(GpHatchStyle hatchstyle, const char **result)
 {
-    if (hatchstyle < sizeof(HatchBrushes) / sizeof(HatchBrushes[0]))
+    if (hatchstyle < ARRAY_SIZE(HatchBrushes))
     {
         *result = HatchBrushes[hatchstyle];
         return Ok;
@@ -244,11 +244,14 @@ GpStatus get_hatch_data(HatchStyle hatchstyle, const char **result)
 /******************************************************************************
  * GdipCreateHatchBrush [GDIPLUS.@]
  */
-GpStatus WINGDIPAPI GdipCreateHatchBrush(HatchStyle hatchstyle, ARGB forecol, ARGB backcol, GpHatch **brush)
+GpStatus WINGDIPAPI GdipCreateHatchBrush(GpHatchStyle hatchstyle, ARGB forecol, ARGB backcol, GpHatch **brush)
 {
     TRACE("(%d, %d, %d, %p)\n", hatchstyle, forecol, backcol, brush);
 
     if(!brush)  return InvalidParameter;
+
+    if(hatchstyle < HatchStyleMin || hatchstyle > HatchStyleMax)
+        return InvalidParameter;
 
     *brush = heap_alloc_zero(sizeof(GpHatch));
     if (!*brush) return OutOfMemory;
@@ -478,8 +481,11 @@ GpStatus WINGDIPAPI GdipCreateLineBrushFromRectWithAngle(GDIPCONST GpRectF* rect
     TRACE("(%p, %x, %x, %.2f, %d, %d, %p)\n", rect, startcolor, endcolor, angle, isAngleScalable,
           wrap, line);
 
-    if (!rect || !rect->Width || !rect->Height)
+    if (!rect || !line || wrap == WrapModeClamp)
         return InvalidParameter;
+
+    if (!rect->Width || !rect->Height)
+        return OutOfMemory;
 
     angle = fmodf(angle, 360);
     if (angle < 0)
@@ -938,7 +944,7 @@ GpStatus WINGDIPAPI GdipGetHatchForegroundColor(GpHatch *brush, ARGB *forecol)
     return Ok;
 }
 
-GpStatus WINGDIPAPI GdipGetHatchStyle(GpHatch *brush, HatchStyle *hatchstyle)
+GpStatus WINGDIPAPI GdipGetHatchStyle(GpHatch *brush, GpHatchStyle *hatchstyle)
 {
     TRACE("(%p, %p)\n", brush, hatchstyle);
 
@@ -1678,6 +1684,18 @@ GpStatus WINGDIPAPI GdipSetPathGradientGammaCorrection(GpPathGradient *grad,
     grad->gamma = gamma;
 
     return Ok;
+}
+
+GpStatus WINGDIPAPI GdipSetPathGradientPath(GpPathGradient *grad, GDIPCONST GpPath *path)
+{
+    static int calls;
+
+    TRACE("(%p, %p)\n", grad, path);
+
+    if (!(calls++))
+        FIXME("not implemented\n");
+
+    return NotImplemented;
 }
 
 GpStatus WINGDIPAPI GdipSetPathGradientSigmaBlend(GpPathGradient *grad,

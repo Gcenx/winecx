@@ -72,8 +72,6 @@ static const struct
 #endif
 };
 
-#define NB_VERSIONS (sizeof(win_versions)/sizeof(win_versions[0]))
-
 static const char szKey9x[] = "Software\\Microsoft\\Windows\\CurrentVersion";
 static const char szKeyNT[] = "Software\\Microsoft\\Windows NT\\CurrentVersion";
 static const char szKeyProdNT[] = "System\\CurrentControlSet\\Control\\ProductOptions";
@@ -113,7 +111,7 @@ static int get_registry_version(void)
     }
     major = atoi(ver);
 
-    for (i = 0; i < NB_VERSIONS; i++)
+    for (i = 0; i < ARRAY_SIZE(win_versions); i++)
     {
         if (win_versions[i].dwPlatformId != platform) continue;
         if (win_versions[i].dwMajorVersion != major) continue;
@@ -151,7 +149,7 @@ static void update_comboboxes(HWND dialog)
     WINE_TRACE("winver is %s\n", winver);
 
     /* normalize the version strings */
-    for (i = 0; i < NB_VERSIONS; i++)
+    for (i = 0; i < ARRAY_SIZE(win_versions); i++)
     {
         if (!strcasecmp (win_versions[i].szVersion, winver))
         {
@@ -176,12 +174,11 @@ init_comboboxes (HWND dialog)
     if (current_app)
     {
         WCHAR str[256];
-        LoadStringW (GetModuleHandleW(NULL), IDS_USE_GLOBAL_SETTINGS, str,
-            sizeof(str)/sizeof(str[0]));
+        LoadStringW(GetModuleHandleW(NULL), IDS_USE_GLOBAL_SETTINGS, str, ARRAY_SIZE(str));
         SendDlgItemMessageW (dialog, IDC_WINVER, CB_ADDSTRING, 0, (LPARAM)str);
     }
 
-    for (i = 0; i < NB_VERSIONS; i++)
+    for (i = 0; i < ARRAY_SIZE(win_versions); i++)
     {
       SendDlgItemMessageA(dialog, IDC_WINVER, CB_ADDSTRING,
                           0, (LPARAM) win_versions[i].szDescription);
@@ -218,21 +215,20 @@ static void init_appsheet(HWND dialog)
 
   /* we use the lparam field of the item so we can alter the presentation later and not change code
    * for instance, to use the tile view or to display the EXEs embedded 'display name' */
-  LoadStringW (GetModuleHandleW(NULL), IDS_DEFAULT_SETTINGS, appname,
-      sizeof(appname)/sizeof(appname[0]));
+  LoadStringW(GetModuleHandleW(NULL), IDS_DEFAULT_SETTINGS, appname, ARRAY_SIZE(appname));
   add_listview_item(listview, appname, NULL);
 
   /* because this list is only populated once, it's safe to bypass the settings list here  */
   if (RegOpenKeyA(config_key, "AppDefaults", &key) == ERROR_SUCCESS)
   {
       i = 0;
-      size = sizeof(appname)/sizeof(appname[0]);
+      size = ARRAY_SIZE(appname);
       while (RegEnumKeyExW (key, i, appname, &size, NULL, NULL, NULL, NULL) == ERROR_SUCCESS)
       {
           add_listview_item(listview, appname, strdupW(appname));
 
           i++;
-          size = sizeof(appname)/sizeof(appname[0]);
+          size = ARRAY_SIZE(appname);
       }
 
       RegCloseKey(key);
@@ -333,19 +329,19 @@ static void on_add_app_click(HWND dialog)
                        0, 0, NULL, 0, NULL };
 
   LoadStringW (GetModuleHandleW(NULL), IDS_SELECT_EXECUTABLE, selectExecutableStr,
-      sizeof(selectExecutableStr)/sizeof(selectExecutableStr[0]));
+      ARRAY_SIZE(selectExecutableStr));
   LoadStringW (GetModuleHandleW(NULL), IDS_EXECUTABLE_FILTER, programsFilter,
-      sizeof(programsFilter)/sizeof(programsFilter[0]));
+      ARRAY_SIZE(programsFilter));
   snprintfW( filter, MAX_PATH, filterW, programsFilter, 0, 0 );
 
   ofn.lpstrTitle = selectExecutableStr;
   ofn.lpstrFilter = filter;
   ofn.lpstrFileTitle = filetitle;
   ofn.lpstrFileTitle[0] = '\0';
-  ofn.nMaxFileTitle = sizeof(filetitle)/sizeof(filetitle[0]);
+  ofn.nMaxFileTitle = ARRAY_SIZE(filetitle);
   ofn.lpstrFile = file;
   ofn.lpstrFile[0] = '\0';
-  ofn.nMaxFile = sizeof(file)/sizeof(file[0]);
+  ofn.nMaxFile = ARRAY_SIZE(file);
 
   if (GetOpenFileNameW (&ofn))
   {

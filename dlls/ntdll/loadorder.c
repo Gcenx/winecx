@@ -253,7 +253,7 @@ static void init_load_order(void)
     entry = strW.Buffer;
     while (*entry)
     {
-        while (*entry && *entry == ';') entry++;
+        while (*entry == ';') entry++;
         if (!*entry) break;
         next = strchrW( entry, ';' );
         if (next) *next++ = 0;
@@ -434,7 +434,6 @@ enum loadorder get_load_order( const WCHAR *app_name, const WCHAR *path )
     enum loadorder ret = LO_INVALID;
     HANDLE std_key, app_key = 0;
     WCHAR *module, *basename;
-    UNICODE_STRING path_str;
     int len;
 
     if (!init_done) init_load_order();
@@ -445,10 +444,9 @@ enum loadorder get_load_order( const WCHAR *app_name, const WCHAR *path )
 
     /* Strip path information if the module resides in the system directory
      */
-    RtlInitUnicodeString( &path_str, path );
-    if (RtlPrefixUnicodeString( &system_dir, &path_str, TRUE ))
+    if (!strncmpiW( system_dir, path, strlenW( system_dir )))
     {
-        const WCHAR *p = path + system_dir.Length / sizeof(WCHAR);
+        const WCHAR *p = path + strlenW( system_dir );
         while (*p == '\\' || *p == '/') p++;
         if (!strchrW( p, '\\' ) && !strchrW( p, '/' )) path = p;
     }

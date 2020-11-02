@@ -56,6 +56,7 @@ static void* (__cdecl *pmemcpy)(void *, const void *, size_t n);
 static int (__cdecl *p_memcpy_s)(void *, size_t, const void *, size_t);
 static int (__cdecl *p_memmove_s)(void *, size_t, const void *, size_t);
 static int* (__cdecl *pmemcmp)(void *, const void *, size_t n);
+static int (__cdecl *p_strcpy)(char *dst, const char *src);
 static int (__cdecl *pstrcpy_s)(char *dst, size_t len, const char *src);
 static int (__cdecl *pstrcat_s)(char *dst, size_t len, const char *src);
 static int (__cdecl *p_mbscat_s)(unsigned char *dst, size_t size, const unsigned char *src);
@@ -97,6 +98,8 @@ static int (__cdecl *p__strnset_s)(char*,size_t,int,size_t);
 static int (__cdecl *p__wcsset_s)(wchar_t*,size_t,wchar_t);
 static size_t (__cdecl *p__mbsnlen)(const unsigned char*, size_t);
 static int (__cdecl *p__mbccpy_s)(unsigned char*, size_t, int*, const unsigned char*);
+static int (__cdecl *p__memicmp)(const char*, const char*, size_t);
+static int (__cdecl *p__memicmp_l)(const char*, const char*, size_t, _locale_t);
 
 #define SETNOFAIL(x,y) x = (void*)GetProcAddress(hMsvcrt,y)
 #define SET(x,y) SETNOFAIL(x,y); ok(x != NULL, "Export '%s' not found\n", y)
@@ -543,8 +546,8 @@ static void test_strdup(void)
 static void test_strcpy_s(void)
 {
     char dest[8];
-    const char *small = "small";
-    const char *big = "atoolongstringforthislittledestination";
+    const char small[] = "small";
+    const char big[] = "atoolongstringforthislittledestination";
     int ret;
 
     if(!pstrcpy_s)
@@ -593,9 +596,16 @@ static void test_strcpy_s(void)
 
     ret = pstrcpy_s(NULL, sizeof(dest), small);
     ok(ret == EINVAL, "Copying a big string a NULL dest returned %d, expected EINVAL\n", ret);
-}
 
-#define NUMELMS(array) (sizeof(array)/sizeof((array)[0]))
+    /* strcpy overlapping buffers test */
+    memset(dest, 'X', sizeof(dest));
+    memcpy(dest+1, small, sizeof(small));
+    p_strcpy(dest, dest+1);
+    ok(dest[0] == 's' && dest[1] == 'm' && dest[2] == 'a' && dest[3] == 'l' &&
+            dest[4] == 'l' && dest[5] == '\0' && dest[6] == '\0' && dest[7] == 'X',
+            "Unexpected return data from strcpy: 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x\n",
+            dest[0], dest[1], dest[2], dest[3], dest[4], dest[5], dest[6], dest[7]);
+}
 
 #define okchars(dst, b0, b1, b2, b3, b4, b5, b6, b7) \
     ok(dst[0] == b0 && dst[1] == b1 && dst[2] == b2 && dst[3] == b3 && \
@@ -605,7 +615,7 @@ static void test_strcpy_s(void)
 
 static void test_memcpy_s(void)
 {
-    static char dest[8];
+    static char dest[8], buf[32];
     static const char tiny[] = {'T',0,'I','N','Y',0};
     static const char big[] = {'a','t','o','o','l','o','n','g','s','t','r','i','n','g',0};
     int ret;
@@ -616,14 +626,14 @@ static void test_memcpy_s(void)
 
     /* Normal */
     memset(dest, 'X', sizeof(dest));
-    ret = p_memcpy_s(dest, NUMELMS(dest), tiny, NUMELMS(tiny));
+    ret = p_memcpy_s(dest, ARRAY_SIZE(dest), tiny, ARRAY_SIZE(tiny));
     ok(ret == 0, "Copying a buffer into a big enough destination returned %d, expected 0\n", ret);
     okchars(dest, tiny[0], tiny[1], tiny[2], tiny[3], tiny[4], tiny[5], 'X', 'X');
 
     /* Vary source size */
     errno = 0xdeadbeef;
     memset(dest, 'X', sizeof(dest));
-    ret = p_memcpy_s(dest, NUMELMS(dest), big, NUMELMS(big));
+    ret = p_memcpy_s(dest, ARRAY_SIZE(dest), big, ARRAY_SIZE(big));
     ok(ret == ERANGE, "Copying a big buffer to a small destination returned %d, expected ERANGE\n", ret);
     ok(errno == ERANGE, "errno is %d, expected ERANGE\n", errno);
     okchars(dest, 0, 0, 0, 0, 0, 0, 0, 0);
@@ -631,7 +641,7 @@ static void test_memcpy_s(void)
     /* Replace source with NULL */
     errno = 0xdeadbeef;
     memset(dest, 'X', sizeof(dest));
-    ret = p_memcpy_s(dest, NUMELMS(dest), NULL, NUMELMS(tiny));
+    ret = p_memcpy_s(dest, ARRAY_SIZE(dest), NULL, ARRAY_SIZE(tiny));
     ok(ret == EINVAL, "Copying a NULL source buffer returned %d, expected EINVAL\n", ret);
     ok(errno == EINVAL, "errno is %d, expected EINVAL\n", errno);
     okchars(dest, 0, 0, 0, 0, 0, 0, 0, 0);
@@ -639,24 +649,36 @@ static void test_memcpy_s(void)
     /* Vary dest size */
     errno = 0xdeadbeef;
     memset(dest, 'X', sizeof(dest));
-    ret = p_memcpy_s(dest, 0, tiny, NUMELMS(tiny));
+    ret = p_memcpy_s(dest, 0, tiny, ARRAY_SIZE(tiny));
     ok(ret == ERANGE, "Copying into a destination of size 0 returned %d, expected ERANGE\n", ret);
     ok(errno == ERANGE, "errno is %d, expected ERANGE\n", errno);
     okchars(dest, 'X', 'X', 'X', 'X', 'X', 'X', 'X', 'X');
 
     /* Replace dest with NULL */
     errno = 0xdeadbeef;
-    ret = p_memcpy_s(NULL, NUMELMS(dest), tiny, NUMELMS(tiny));
+    ret = p_memcpy_s(NULL, ARRAY_SIZE(dest), tiny, ARRAY_SIZE(tiny));
     ok(ret == EINVAL, "Copying a tiny buffer to a big NULL destination returned %d, expected EINVAL\n", ret);
     ok(errno == EINVAL, "errno is %d, expected EINVAL\n", errno);
 
     /* Combinations */
     errno = 0xdeadbeef;
     memset(dest, 'X', sizeof(dest));
-    ret = p_memcpy_s(dest, 0, NULL, NUMELMS(tiny));
+    ret = p_memcpy_s(dest, 0, NULL, ARRAY_SIZE(tiny));
     ok(ret == EINVAL, "Copying a NULL buffer into a destination of size 0 returned %d, expected EINVAL\n", ret);
     ok(errno == EINVAL, "errno is %d, expected EINVAL\n", errno);
     okchars(dest, 'X', 'X', 'X', 'X', 'X', 'X', 'X', 'X');
+
+    ret = p_memcpy_s(buf, ARRAY_SIZE(buf), big, ARRAY_SIZE(big));
+    ok(!ret, "memcpy_s returned %d\n", ret);
+    ok(!memcmp(buf, big, sizeof(big)), "unexpected buf\n");
+
+    ret = p_memcpy_s(buf + 1, ARRAY_SIZE(buf) - 1, buf, ARRAY_SIZE(big));
+    ok(!ret, "memcpy_s returned %d\n", ret);
+    ok(!memcmp(buf + 1, big, sizeof(big)), "unexpected buf\n");
+
+    ret = p_memcpy_s(buf, ARRAY_SIZE(buf), buf + 1, ARRAY_SIZE(big));
+    ok(!ret, "memcpy_s returned %d\n", ret);
+    ok(!memcmp(buf, big, sizeof(big)), "unexpected buf\n");
 }
 
 static void test_memmove_s(void)
@@ -672,20 +694,20 @@ static void test_memmove_s(void)
 
     /* Normal */
     memset(dest, 'X', sizeof(dest));
-    ret = p_memmove_s(dest, NUMELMS(dest), tiny, NUMELMS(tiny));
+    ret = p_memmove_s(dest, ARRAY_SIZE(dest), tiny, ARRAY_SIZE(tiny));
     ok(ret == 0, "Moving a buffer into a big enough destination returned %d, expected 0\n", ret);
     okchars(dest, tiny[0], tiny[1], tiny[2], tiny[3], tiny[4], tiny[5], 'X', 'X');
 
     /* Overlapping */
     memcpy(dest, big, sizeof(dest));
-    ret = p_memmove_s(dest+1, NUMELMS(dest)-1, dest, NUMELMS(dest)-1);
+    ret = p_memmove_s(dest+1, ARRAY_SIZE(dest)-1, dest, ARRAY_SIZE(dest)-1);
     ok(ret == 0, "Moving a buffer up one char returned %d, expected 0\n", ret);
     okchars(dest, big[0], big[0], big[1], big[2], big[3], big[4], big[5], big[6]);
 
     /* Vary source size */
     errno = 0xdeadbeef;
     memset(dest, 'X', sizeof(dest));
-    ret = p_memmove_s(dest, NUMELMS(dest), big, NUMELMS(big));
+    ret = p_memmove_s(dest, ARRAY_SIZE(dest), big, ARRAY_SIZE(big));
     ok(ret == ERANGE, "Moving a big buffer to a small destination returned %d, expected ERANGE\n", ret);
     ok(errno == ERANGE, "errno is %d, expected ERANGE\n", errno);
     okchars(dest, 'X', 'X', 'X', 'X', 'X', 'X', 'X', 'X');
@@ -693,7 +715,7 @@ static void test_memmove_s(void)
     /* Replace source with NULL */
     errno = 0xdeadbeef;
     memset(dest, 'X', sizeof(dest));
-    ret = p_memmove_s(dest, NUMELMS(dest), NULL, NUMELMS(tiny));
+    ret = p_memmove_s(dest, ARRAY_SIZE(dest), NULL, ARRAY_SIZE(tiny));
     ok(ret == EINVAL, "Moving a NULL source buffer returned %d, expected EINVAL\n", ret);
     ok(errno == EINVAL, "errno is %d, expected EINVAL\n", errno);
     okchars(dest, 'X', 'X', 'X', 'X', 'X', 'X', 'X', 'X');
@@ -701,21 +723,21 @@ static void test_memmove_s(void)
     /* Vary dest size */
     errno = 0xdeadbeef;
     memset(dest, 'X', sizeof(dest));
-    ret = p_memmove_s(dest, 0, tiny, NUMELMS(tiny));
+    ret = p_memmove_s(dest, 0, tiny, ARRAY_SIZE(tiny));
     ok(ret == ERANGE, "Moving into a destination of size 0 returned %d, expected ERANGE\n", ret);
     ok(errno == ERANGE, "errno is %d, expected ERANGE\n", errno);
     okchars(dest, 'X', 'X', 'X', 'X', 'X', 'X', 'X', 'X');
 
     /* Replace dest with NULL */
     errno = 0xdeadbeef;
-    ret = p_memmove_s(NULL, NUMELMS(dest), tiny, NUMELMS(tiny));
+    ret = p_memmove_s(NULL, ARRAY_SIZE(dest), tiny, ARRAY_SIZE(tiny));
     ok(ret == EINVAL, "Moving a tiny buffer to a big NULL destination returned %d, expected EINVAL\n", ret);
     ok(errno == EINVAL, "errno is %d, expected EINVAL\n", errno);
 
     /* Combinations */
     errno = 0xdeadbeef;
     memset(dest, 'X', sizeof(dest));
-    ret = p_memmove_s(dest, 0, NULL, NUMELMS(tiny));
+    ret = p_memmove_s(dest, 0, NULL, ARRAY_SIZE(tiny));
     ok(ret == EINVAL, "Moving a NULL buffer into a destination of size 0 returned %d, expected EINVAL\n", ret);
     ok(errno == EINVAL, "errno is %d, expected EINVAL\n", errno);
     okchars(dest, 'X', 'X', 'X', 'X', 'X', 'X', 'X', 'X');
@@ -1004,7 +1026,7 @@ static void test_wcscpy_s(void)
         return;
     }
 
-    ret = p_wcsncpy_s(NULL, 18, szLongText, sizeof(szLongText)/sizeof(WCHAR));
+    ret = p_wcsncpy_s(NULL, 18, szLongText, ARRAY_SIZE(szLongText));
     ok(ret == EINVAL, "p_wcsncpy_s expect EINVAL got %d\n", ret);
 
     szDest[0] = 'A';
@@ -1018,16 +1040,16 @@ static void test_wcscpy_s(void)
     ok(szDest[0] == 0, "szDest[0] not 0\n");
 
     szDest[0] = 'A';
-    ret = p_wcsncpy_s(szDest, 0, szLongText, sizeof(szLongText)/sizeof(WCHAR));
+    ret = p_wcsncpy_s(szDest, 0, szLongText, ARRAY_SIZE(szLongText));
     ok(ret == ERANGE || ret == EINVAL, "expected ERANGE/EINVAL got %d\n", ret);
     ok(szDest[0] == 0 || ret == EINVAL, "szDest[0] not 0\n");
 
-    ret = p_wcsncpy_s(szDest, 18, szLongText, sizeof(szLongText)/sizeof(WCHAR));
+    ret = p_wcsncpy_s(szDest, 18, szLongText, ARRAY_SIZE(szLongText));
     ok(ret == 0, "expected 0 got %d\n", ret);
     ok(lstrcmpW(szDest, szLongText) == 0, "szDest != szLongText\n");
 
     szDest[0] = 'A';
-    ret = p_wcsncpy_s(szDestShort, 8, szLongText, sizeof(szLongText)/sizeof(WCHAR));
+    ret = p_wcsncpy_s(szDestShort, 8, szLongText, ARRAY_SIZE(szLongText));
     ok(ret == ERANGE || ret == EINVAL, "expected ERANGE/EINVAL got %d\n", ret);
     ok(szDestShort[0] == 0, "szDestShort[0] not 0\n");
 
@@ -1055,7 +1077,7 @@ static void test__wcsupr_s(void)
     static const WCHAR expectedString[] = {'M', 'I', 'X', 'E', 'D', 'L', 'O',
                                            'W', 'E', 'R', 'U', 'P', 'P', 'E',
                                            'R', 0};
-    WCHAR testBuffer[2*sizeof(mixedString)/sizeof(WCHAR)];
+    WCHAR testBuffer[2*ARRAY_SIZE(mixedString)];
     int ret;
 
     if (!p_wcsupr_s)
@@ -1072,7 +1094,7 @@ static void test__wcsupr_s(void)
 
     /* Test NULL input string and valid size. */
     errno = EBADF;
-    ret = p_wcsupr_s(NULL, sizeof(testBuffer)/sizeof(WCHAR));
+    ret = p_wcsupr_s(NULL, ARRAY_SIZE(testBuffer));
     ok(ret == EINVAL, "Expected _wcsupr_s to fail with EINVAL, got %d\n", ret);
     ok(errno == EINVAL, "Expected errno to be EINVAL, got %d\n", errno);
 
@@ -1116,21 +1138,21 @@ static void test__wcsupr_s(void)
 
     /* Test normal string uppercasing. */
     wcscpy(testBuffer, mixedString);
-    ret = p_wcsupr_s(testBuffer, sizeof(mixedString)/sizeof(WCHAR));
+    ret = p_wcsupr_s(testBuffer, ARRAY_SIZE(mixedString));
     ok(ret == 0, "Expected _wcsupr_s to succeed, got %d\n", ret);
     ok(!wcscmp(testBuffer, expectedString), "Expected the string to be fully upper-case\n");
 
     /* Test uppercasing with a shorter buffer size count. */
     wcscpy(testBuffer, mixedString);
     errno = EBADF;
-    ret = p_wcsupr_s(testBuffer, sizeof(mixedString)/sizeof(WCHAR) - 1);
+    ret = p_wcsupr_s(testBuffer, ARRAY_SIZE(mixedString) - 1);
     ok(ret == EINVAL, "Expected _wcsupr_s to fail with EINVAL, got %d\n", ret);
     ok(errno == EINVAL, "Expected errno to be EINVAL, got %d\n", errno);
     ok(testBuffer[0] == '\0', "Expected the first buffer character to be null\n");
 
     /* Test uppercasing with a longer buffer size count. */
     wcscpy(testBuffer, mixedString);
-    ret = p_wcsupr_s(testBuffer, sizeof(testBuffer)/sizeof(WCHAR));
+    ret = p_wcsupr_s(testBuffer, ARRAY_SIZE(testBuffer));
     ok(ret == 0, "Expected _wcsupr_s to succeed, got %d\n", ret);
     ok(!wcscmp(testBuffer, expectedString), "Expected the string to be fully upper-case\n");
 }
@@ -1142,7 +1164,7 @@ static void test__wcslwr_s(void)
     static const WCHAR expectedString[] = {'m', 'i', 'x', 'e', 'd', 'l', 'o',
                                            'w', 'e', 'r', 'u', 'p', 'p', 'e',
                                            'r', 0};
-    WCHAR buffer[2*sizeof(mixedString)/sizeof(WCHAR)];
+    WCHAR buffer[2*ARRAY_SIZE(mixedString)];
     int ret;
 
     if (!p_wcslwr_s)
@@ -1159,7 +1181,7 @@ static void test__wcslwr_s(void)
 
     /* Test NULL input string and valid size. */
     errno = EBADF;
-    ret = p_wcslwr_s(NULL, sizeof(buffer)/sizeof(buffer[0]));
+    ret = p_wcslwr_s(NULL, ARRAY_SIZE(buffer));
     ok(ret == EINVAL, "expected EINVAL, got %d\n", ret);
     ok(errno == EINVAL, "expected errno EINVAL, got %d\n", errno);
 
@@ -1203,21 +1225,21 @@ static void test__wcslwr_s(void)
 
     /* Test normal string uppercasing. */
     wcscpy(buffer, mixedString);
-    ret = p_wcslwr_s(buffer, sizeof(mixedString)/sizeof(WCHAR));
+    ret = p_wcslwr_s(buffer, ARRAY_SIZE(mixedString));
     ok(ret == 0, "expected 0, got %d\n", ret);
     ok(!wcscmp(buffer, expectedString), "expected lowercase\n");
 
     /* Test uppercasing with a shorter buffer size count. */
     wcscpy(buffer, mixedString);
     errno = EBADF;
-    ret = p_wcslwr_s(buffer, sizeof(mixedString)/sizeof(WCHAR) - 1);
+    ret = p_wcslwr_s(buffer, ARRAY_SIZE(mixedString) - 1);
     ok(ret == EINVAL, "expected EINVAL, got %d\n", ret);
     ok(errno == EINVAL, "expected errno to be EINVAL, got %d\n", errno);
     ok(buffer[0] == '\0', "expected empty string\n");
 
     /* Test uppercasing with a longer buffer size count. */
     wcscpy(buffer, mixedString);
-    ret = p_wcslwr_s(buffer, sizeof(buffer)/sizeof(WCHAR));
+    ret = p_wcslwr_s(buffer, ARRAY_SIZE(buffer));
     ok(ret == 0, "expected 0, got %d\n", ret);
     ok(!wcscmp(buffer, expectedString), "expected lowercase\n");
 }
@@ -1233,7 +1255,7 @@ static void test_mbcjisjms(void)
     unsigned int i, j;
     int prev_cp = _getmbcp();
 
-    for (i = 0; i < sizeof(cp)/sizeof(cp[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(cp); i++)
     {
         _setmbcp(cp[i]);
         for (j = 0; jisjms[j][0] != 0; j++)
@@ -1261,7 +1283,7 @@ static void test_mbcjmsjis(void)
     unsigned int i, j;
     int prev_cp = _getmbcp();
 
-    for (i = 0; i < sizeof(cp)/sizeof(cp[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(cp); i++)
     {
         _setmbcp(cp[i]);
         for (j = 0; jmsjis[j][0] != 0; j++)
@@ -1288,7 +1310,7 @@ static void test_mbctohira(void)
     unsigned int prev_cp = _getmbcp();
 
     _setmbcp(_MB_CP_SBCS);
-    for (i = 0; i < sizeof(mbchira_932)/sizeof(mbchira_932[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(mbchira_932); i++)
     {
         int ret, exp = mbchira_932[i][0];
         ret = _mbctohira(mbchira_932[i][0]);
@@ -1296,7 +1318,7 @@ static void test_mbctohira(void)
     }
 
     _setmbcp(932);
-    for (i = 0; i < sizeof(mbchira_932)/sizeof(mbchira_932[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(mbchira_932); i++)
     {
         unsigned int ret, exp;
         ret = _mbctohira(mbchira_932[i][0]);
@@ -1317,7 +1339,7 @@ static void test_mbctokata(void)
     unsigned int prev_cp = _getmbcp();
 
     _setmbcp(_MB_CP_SBCS);
-    for (i = 0; i < sizeof(mbckata_932)/sizeof(mbckata_932[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(mbckata_932); i++)
     {
         int ret, exp = mbckata_932[i][0];
         ret = _mbctokata(mbckata_932[i][0]);
@@ -1325,7 +1347,7 @@ static void test_mbctokata(void)
     }
 
     _setmbcp(932);
-    for (i = 0; i < sizeof(mbckata_932)/sizeof(mbckata_932[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(mbckata_932); i++)
     {
         unsigned int ret, exp;
         ret = _mbctokata(mbckata_932[i][0]);
@@ -1346,7 +1368,7 @@ static void test_mbbtombc(void)
     int i, j;
     int prev_cp = _getmbcp();
 
-    for (i = 0; i < sizeof(cp)/sizeof(cp[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(cp); i++)
     {
         _setmbcp(cp[i]);
         for (j = 0; mbbmbc[j][0] != 0; j++)
@@ -1399,13 +1421,13 @@ static void test_ismbckata(void) {
     unsigned int i;
 
     _setmbcp(_MB_CP_SBCS);
-    for (i = 0; i < sizeof(tests)/sizeof(tests[0]); i++) {
+    for (i = 0; i < ARRAY_SIZE(tests); i++) {
         ret = _ismbckata(tests[i].c);
         ok(!ret, "expected 0, got %d for %04x\n", ret, tests[i].c);
     }
 
     _setmbcp(932);
-    for (i = 0; i < sizeof(tests)/sizeof(tests[0]); i++) {
+    for (i = 0; i < ARRAY_SIZE(tests); i++) {
         ret = _ismbckata(tests[i].c);
         ok(!!ret == tests[i].exp, "expected %d, got %d for %04x\n",
            tests[i].exp, !!ret, tests[i].c);
@@ -1883,8 +1905,10 @@ static void test_mbstowcs(void)
 {
     static const wchar_t wSimple[] = { 't','e','x','t',0 };
     static const wchar_t wHiragana[] = { 0x3042,0x3043,0 };
+    static const wchar_t wEmpty[] = { 0 };
     static const char mSimple[] = "text";
     static const char mHiragana[] = { 0x82,0xa0,0x82,0xa1,0 };
+    static const char mEmpty[] = { 0 };
 
     const wchar_t *pwstr;
     wchar_t wOut[6];
@@ -1913,6 +1937,13 @@ static void test_mbstowcs(void)
     ok(!memcmp(wOut, wSimple, 4*sizeof(wchar_t)), "wOut = %s\n", wine_dbgstr_w(wOut));
     ok(wOut[4] == '!', "wOut[4] != \'!\'\n");
 
+    ret = mbstowcs(NULL, mEmpty, 1);
+    ok(ret == 0, "mbstowcs did not return 0, got %d\n", (int)ret);
+
+    ret = mbstowcs(wOut, mEmpty, 1);
+    ok(ret == 0, "mbstowcs did not return 0, got %d\n", (int)ret);
+    ok(!memcmp(wOut, wEmpty, sizeof(wEmpty)), "wOut = %s\n", wine_dbgstr_w(wOut));
+
     ret = wcstombs(NULL, wSimple, 0);
     ok(ret == 4, "wcstombs did not return 4\n");
 
@@ -1924,6 +1955,13 @@ static void test_mbstowcs(void)
     ok(ret == 2, "wcstombs did not return 2\n");
     ok(!memcmp(mOut, mSimple, 5*sizeof(char)), "mOut = %s\n", mOut);
 
+    ret = wcstombs(NULL, wEmpty, 1);
+    ok(ret == 0, "wcstombs did not return 0, got %d\n", (int)ret);
+
+    ret = wcstombs(mOut, wEmpty, 1);
+    ok(ret == 0, "wcstombs did not return 0, got %d\n", (int)ret);
+    ok(!memcmp(mOut, mEmpty, sizeof(mEmpty)), "mOut = %s\n", mOut);
+
     if(!setlocale(LC_ALL, "Japanese_Japan.932")) {
         win_skip("Japanese_Japan.932 locale not available\n");
         return;
@@ -1933,9 +1971,17 @@ static void test_mbstowcs(void)
     ok(ret == 2, "mbstowcs did not return 2\n");
     ok(!memcmp(wOut, wHiragana, sizeof(wHiragana)), "wOut = %s\n", wine_dbgstr_w(wOut));
 
+    ret = mbstowcs(wOut, mEmpty, 6);
+    ok(ret == 0, "mbstowcs did not return 0, got %d\n", (int)ret);
+    ok(!memcmp(wOut, wEmpty, sizeof(wEmpty)), "wOut = %s\n", wine_dbgstr_w(wOut));
+
     ret = wcstombs(mOut, wHiragana, 6);
     ok(ret == 4, "wcstombs did not return 4\n");
     ok(!memcmp(mOut, mHiragana, sizeof(mHiragana)), "mOut = %s\n", mOut);
+
+    ret = wcstombs(mOut, wEmpty, 6);
+    ok(ret == 0, "wcstombs did not return 0, got %d\n", (int)ret);
+    ok(!memcmp(mOut, mEmpty, sizeof(mEmpty)), "mOut = %s\n", mOut);
 
     if(!pmbstowcs_s || !pwcstombs_s) {
         setlocale(LC_ALL, "C");
@@ -1953,6 +1999,11 @@ static void test_mbstowcs(void)
     ok(ret == 3, "mbstowcs_s did not return 3\n");
     ok(!memcmp(wOut, wHiragana, sizeof(wHiragana)), "wOut = %s\n", wine_dbgstr_w(wOut));
 
+    err = pmbstowcs_s(&ret, wOut, 6, mEmpty, _TRUNCATE);
+    ok(err == 0, "err = %d\n", err);
+    ok(ret == 1, "mbstowcs_s did not return 1, got %d\n", (int)ret);
+    ok(!memcmp(wOut, wEmpty, sizeof(wEmpty)), "wOut = %s\n", wine_dbgstr_w(wOut));
+
     err = pmbstowcs_s(&ret, NULL, 0, mHiragana, 1);
     ok(err == 0, "err = %d\n", err);
     ok(ret == 3, "mbstowcs_s did not return 3\n");
@@ -1966,6 +2017,11 @@ static void test_mbstowcs(void)
     ok(err == 0, "err = %d\n", err);
     ok(ret == 5, "wcstombs_s did not return 5\n");
     ok(!memcmp(mOut, mHiragana, sizeof(mHiragana)), "mOut = %s\n", mOut);
+
+    err = pwcstombs_s(&ret, mOut, 6, wEmpty, _TRUNCATE);
+    ok(err == 0, "err = %d\n", err);
+    ok(ret == 1, "wcstombs_s did not return 1, got %d\n", (int)ret);
+    ok(!memcmp(mOut, mEmpty, sizeof(mEmpty)), "mOut = %s\n", mOut);
 
     err = pwcstombs_s(&ret, NULL, 0, wHiragana, 1);
     ok(err == 0, "err = %d\n", err);
@@ -2949,7 +3005,7 @@ static void test__wcstoi64(void)
     ok(ures == 071, "ures != 071\n");
 
     /* Test various unicode digits */
-    for (i = 0; i < sizeof(zeros) / sizeof(zeros[0]); ++i) {
+    for (i = 0; i < ARRAY_SIZE(zeros); ++i) {
         WCHAR tmp[] = {zeros[i] + 4, zeros[i], zeros[i] + 5, 0};
         res = p_wcstoi64(tmp, NULL, 0);
         ok(res == 405, "with zero = U+%04X: got %d, expected 405\n", zeros[i], (int)res);
@@ -3199,6 +3255,150 @@ static void test__mbscmp(void)
     ok(ret == 1, "got %d\n", ret);
 }
 
+static void test__ismbclx(void)
+{
+    int cp, ret;
+
+    ret = _ismbcl0(0);
+    ok(!ret, "got %d\n", ret);
+
+    cp = _setmbcp(1252);
+
+    ret = _ismbcl0(0x8140);
+    ok(!ret, "got %d\n", ret);
+
+    _setmbcp(932);
+
+    ret = _ismbcl0(0);
+    ok(!ret, "got %d\n", ret);
+
+    ret = _ismbcl0(0x8140);
+    ok(ret, "got %d\n", ret);
+
+    _setmbcp(cp);
+}
+
+static void test__memicmp(void)
+{
+    static const char *s1 = "abc";
+    static const char *s2 = "aBd";
+    int ret;
+
+    ret = p__memicmp(NULL, NULL, 0);
+    ok(!ret, "got %d\n", ret);
+
+    ret = p__memicmp(s1, s2, 2);
+    ok(!ret, "got %d\n", ret);
+
+    ret = p__memicmp(s1, s2, 3);
+    ok(ret == -1, "got %d\n", ret);
+
+    if (!p__memicmp_l)
+        return;
+
+    /* Following calls crash on WinXP/W2k3. */
+    errno = 0xdeadbeef;
+    ret = p__memicmp(NULL, NULL, 1);
+    ok(ret == _NLSCMPERROR, "got %d\n", ret);
+    ok(errno == EINVAL, "errno is %d, expected EINVAL\n", errno);
+
+    errno = 0xdeadbeef;
+    ret = p__memicmp(s1, NULL, 1);
+    ok(ret == _NLSCMPERROR, "got %d\n", ret);
+    ok(errno == EINVAL, "errno is %d, expected EINVAL\n", errno);
+
+    errno = 0xdeadbeef;
+    ret = p__memicmp(NULL, s2, 1);
+    ok(ret == _NLSCMPERROR, "got %d\n", ret);
+    ok(errno == EINVAL, "errno is %d, expected EINVAL\n", errno);
+}
+
+static void test__memicmp_l(void)
+{
+    static const char *s1 = "abc";
+    static const char *s2 = "aBd";
+    int ret;
+
+    if (!p__memicmp_l)
+    {
+        win_skip("_memicmp_l not found.\n");
+        return;
+    }
+
+    errno = 0xdeadbeef;
+    ret = p__memicmp_l(NULL, NULL, 0, NULL);
+    ok(!ret, "got %d\n", ret);
+    ok(errno == 0xdeadbeef, "errno is %d, expected 0xdeadbeef\n", errno);
+
+    errno = 0xdeadbeef;
+    ret = p__memicmp_l(NULL, NULL, 1, NULL);
+    ok(ret == _NLSCMPERROR, "got %d\n", ret);
+    ok(errno == EINVAL, "errno is %d, expected EINVAL\n", errno);
+
+    errno = 0xdeadbeef;
+    ret = p__memicmp_l(s1, NULL, 1, NULL);
+    ok(ret == _NLSCMPERROR, "got %d\n", ret);
+    ok(errno == EINVAL, "errno is %d, expected EINVAL\n", errno);
+
+    errno = 0xdeadbeef;
+    ret = p__memicmp_l(NULL, s2, 1, NULL);
+    ok(ret == _NLSCMPERROR, "got %d\n", ret);
+    ok(errno == EINVAL, "errno is %d, expected EINVAL\n", errno);
+
+    errno = 0xdeadbeef;
+    ret = p__memicmp_l(s1, s2, 2, NULL);
+    ok(!ret, "got %d\n", ret);
+    ok(errno == 0xdeadbeef, "errno is %d, expected 0xdeadbeef\n", errno);
+
+    errno = 0xdeadbeef;
+    ret = p__memicmp_l(s1, s2, 3, NULL);
+    ok(ret == -1, "got %d\n", ret);
+    ok(errno == 0xdeadbeef, "errno is %d, expected 0xdeadbeef\n", errno);
+}
+
+static void test__strupr(void)
+{
+    const char str[] = "123";
+    char str2[4];
+    char *mem, *p;
+    DWORD prot;
+
+    mem = VirtualAlloc(NULL, sizeof(str), MEM_COMMIT, PAGE_READWRITE);
+    ok(mem != NULL, "VirtualAlloc failed\n");
+    memcpy(mem, str, sizeof(str));
+    ok(VirtualProtect(mem, sizeof(str), PAGE_READONLY, &prot), "VirtualProtect failed\n");
+
+    strcpy(str2, "aBc");
+    p = _strupr(str2);
+    ok(p == str2, "_strupr returned %p\n", p);
+    ok(!strcmp(str2, "ABC"), "str2 = %s\n", str2);
+
+    p = _strupr(mem);
+    ok(p == mem, "_strupr returned %p\n", p);
+    ok(!strcmp(mem, "123"), "mem = %s\n", mem);
+
+    if(!setlocale(LC_ALL, "english")) {
+        VirtualFree(mem, sizeof(str), MEM_RELEASE);
+        win_skip("English locale _strupr tests\n");
+        return;
+    }
+
+    strcpy(str2, "aBc");
+    p = _strupr(str2);
+    ok(p == str2, "_strupr returned %p\n", p);
+    ok(!strcmp(str2, "ABC"), "str2 = %s\n", str2);
+
+    if (0) /* crashes on Windows */
+    {
+        p = _strupr(mem);
+        ok(p == mem, "_strupr returned %p\n", p);
+        ok(!strcmp(mem, "123"), "mem = %s\n", mem);
+    }
+
+    setlocale(LC_ALL, "C");
+    VirtualFree(mem, sizeof(str), MEM_RELEASE);
+}
+
 START_TEST(string)
 {
     char mem[100];
@@ -3215,6 +3415,7 @@ START_TEST(string)
     SET(pmemcmp,"memcmp");
     SET(p_mbctype,"_mbctype");
     SET(p__mb_cur_max,"__mb_cur_max");
+    SET(p_strcpy, "strcpy");
     pstrcpy_s = (void *)GetProcAddress( hMsvcrt,"strcpy_s" );
     pstrcat_s = (void *)GetProcAddress( hMsvcrt,"strcat_s" );
     p_mbscat_s = (void*)GetProcAddress( hMsvcrt, "_mbscat_s" );
@@ -3254,6 +3455,8 @@ START_TEST(string)
     p__wcsset_s = (void*)GetProcAddress(hMsvcrt, "_wcsset_s");
     p__mbsnlen = (void*)GetProcAddress(hMsvcrt, "_mbsnlen");
     p__mbccpy_s = (void*)GetProcAddress(hMsvcrt, "_mbccpy_s");
+    p__memicmp = (void*)GetProcAddress(hMsvcrt, "_memicmp");
+    p__memicmp_l = (void*)GetProcAddress(hMsvcrt, "_memicmp_l");
 
     /* MSVCRT memcpy behaves like memmove for overlapping moves,
        MFC42 CString::Insert seems to rely on that behaviour */
@@ -3315,4 +3518,8 @@ START_TEST(string)
     test__strnset_s();
     test__wcsset_s();
     test__mbscmp();
+    test__ismbclx();
+    test__memicmp();
+    test__memicmp_l();
+    test__strupr();
 }

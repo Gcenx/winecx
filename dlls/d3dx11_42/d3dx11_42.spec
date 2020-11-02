@@ -1,27 +1,27 @@
 @ stdcall D3DX11CheckVersion(long long)
 @ stdcall D3DX11CompileFromFileA(str ptr ptr str str long long ptr ptr ptr ptr)
 @ stdcall D3DX11CompileFromFileW(wstr ptr ptr str str long long ptr ptr ptr ptr)
-@ stdcall D3DX11CompileFromMemory(str long str ptr ptr str str long long ptr ptr ptr ptr)
+@ stdcall D3DX11CompileFromMemory(ptr long str ptr ptr str str long long ptr ptr ptr ptr)
 @ stub D3DX11CompileFromResourceA
 @ stub D3DX11CompileFromResourceW
 @ stub D3DX11ComputeNormalMap
 @ stub D3DX11CreateAsyncCompilerProcessor
-@ stub D3DX11CreateAsyncFileLoaderA
-@ stub D3DX11CreateAsyncFileLoaderW
-@ stub D3DX11CreateAsyncMemoryLoader
-@ stub D3DX11CreateAsyncResourceLoaderA
-@ stub D3DX11CreateAsyncResourceLoaderW
+@ stdcall D3DX11CreateAsyncFileLoaderA(str ptr) d3dx11_43.D3DX11CreateAsyncFileLoaderA
+@ stdcall D3DX11CreateAsyncFileLoaderW(wstr ptr) d3dx11_43.D3DX11CreateAsyncFileLoaderW
+@ stdcall D3DX11CreateAsyncMemoryLoader(ptr long ptr) d3dx11_43.D3DX11CreateAsyncMemoryLoader
+@ stdcall D3DX11CreateAsyncResourceLoaderA(long str ptr) d3dx11_43.D3DX11CreateAsyncResourceLoaderA
+@ stdcall D3DX11CreateAsyncResourceLoaderW(long wstr ptr) d3dx11_43.D3DX11CreateAsyncResourceLoaderW
 @ stub D3DX11CreateAsyncShaderPreprocessProcessor
 @ stub D3DX11CreateAsyncShaderResourceViewProcessor
 @ stub D3DX11CreateAsyncTextureInfoProcessor
 @ stub D3DX11CreateAsyncTextureProcessor
 @ stub D3DX11CreateShaderResourceViewFromFileA
 @ stub D3DX11CreateShaderResourceViewFromFileW
-@ stub D3DX11CreateShaderResourceViewFromMemory(ptr ptr long ptr ptr ptr ptr)
+@ stdcall D3DX11CreateShaderResourceViewFromMemory(ptr ptr long ptr ptr ptr ptr) d3dx11_43.D3DX11CreateShaderResourceViewFromMemory
 @ stub D3DX11CreateShaderResourceViewFromResourceA
 @ stub D3DX11CreateShaderResourceViewFromResourceW
-@ stub D3DX11CreateTextureFromFileA
-@ stub D3DX11CreateTextureFromFileW
+@ stdcall D3DX11CreateTextureFromFileA(ptr str ptr ptr ptr ptr) d3dx11_43.D3DX11CreateTextureFromFileA
+@ stdcall D3DX11CreateTextureFromFileW(ptr wstr ptr ptr ptr ptr) d3dx11_43.D3DX11CreateTextureFromFileW
 @ stdcall D3DX11CreateTextureFromMemory(ptr ptr long ptr ptr ptr ptr)
 @ stub D3DX11CreateTextureFromResourceA
 @ stub D3DX11CreateTextureFromResourceW

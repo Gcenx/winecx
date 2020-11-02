@@ -24,6 +24,7 @@
 #include "webservices.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "wine/list.h"
 #include "webservices_private.h"
 
@@ -102,6 +103,7 @@ HRESULT WINAPI WsCreateError( const WS_ERROR_PROPERTY *properties, ULONG count, 
         }
     }
 
+    TRACE( "created %p\n", error );
     *handle = (WS_ERROR *)error;
     return S_OK;
 }

@@ -1,6 +1,6 @@
 #! /usr/bin/perl -w
 #
-# Render SVG files containing one or more images into an ICO, BMP, or PNG.
+# Render SVG files containing one or more images into an ICO or BMP.
 #
 # Copyright (C) 2010 Joel Holdsworth
 #
@@ -20,14 +20,13 @@
 
 use strict;
 use warnings;
-use XML::Parser;
+use XML::LibXML;
 use MIME::Base64;
 use File::Copy;
 
 # Parse the parameters
 my $svgFileName = $ARGV[0];
 my $outFileName = $ARGV[1];
-my $optSize;
 
 die "Cannot open SVG file" unless defined($svgFileName);
 die "Cannot open output file" unless defined($outFileName);
@@ -35,37 +34,36 @@ die "Cannot open output file" unless defined($outFileName);
 $outFileName =~ m/(.*)\.(.*)/;
 my $outName = $1;
 my $ext = lc($2);
-die "Only BMP, ICO, and PNG outputs are supported" unless $ext eq "bmp" or $ext eq "ico" or $ext eq "png";
-
-if (defined($ARGV[2]) && ($ARGV[2] eq "--size") && defined($ARGV[3]))
-{
-    $ARGV[3] =~ m/(\d+)/;
-    $optSize = $1;
-}
-
-die "You must specify a size with -s SIZE for PNG output." if ($ext eq "png" && !defined($optSize));
+die "Only BMP, ICO and CUR outputs are supported" unless $ext eq "bmp" or $ext eq "ico" or $ext eq "cur";
 
 my $renderedSVGFileName = "$svgFileName.png";
 my @pngFiles;
-my @pngFilesRaw;
+my @hotspot;
 
 # Get the programs from the environment variables
 my $convert = $ENV{"CONVERT"} || "convert";
-my $rsvg = $ENV{"RSVG"} || "rsvg";
-my $icotool = $ENV{"ICOTOOL"} || "icotool";
+my $rsvg = $ENV{"RSVG"} || "rsvg-convert";
+my @icotool_args = ($ENV{"ICOTOOL"} || "icotool", "--create",
+                    $ext eq "cur" ? "--cursor" : "--icon", "-o", $outFileName);
 
 # Be ready to abort
 sub cleanup()
 {
     unlink $renderedSVGFileName;
     unlink $_ foreach(@pngFiles);
-    unlink $_ foreach(@pngFilesRaw);
 }
 
 $SIG{"INT"} = "cleanup";
 $SIG{"HUP"} = "cleanup";
 $SIG{"TERM"} = "cleanup";
 $SIG{"__DIE__"} = "cleanup";
+
+my %label =
+(
+ 'ico' => 'icon:(\d*)-(\d*)',
+ 'cur' => 'cursor:(\d*)-(\d*)',
+ 'bmp' => 'bitmap:(\d*)-(\d*)',
+);
 
 # run a shell command and die on error
 sub shell(@)
@@ -74,79 +72,18 @@ sub shell(@)
     system(@args) == 0 or die "@args failed: $?";
 }
 
-sub svg_element_start
+# add an image to the icon/cursor
+sub add_image($$)
 {
-    my($expat, $element, %attr) = @_;
-
-    # Parse the id for icon/bitmap render directives
-    my $id = $attr{'id'};
-    return unless defined($id);
-
-    my $size = 0;
-    my $depth = 0;
-    my $width = 0;
-    my $height = 0;
-
-    if($ext eq "ico" or $ext eq "png") {
-        return unless $id =~ /icon:(\d*)-(\d*)/;
-        $size = $1;
-        $depth = $2;
-    } elsif($ext eq "bmp") {
-        return unless $id =~ /bitmap:(\d*)-(\d*)/;
-        $size = $1;
-        $depth = $2;
-    }
-
-    return unless defined($size) and defined($depth);
-
-    warn "Unexpected icon depth" unless
-        $depth == 4 or $depth == 8 or $depth == 24 or $depth == 32;
-    my $pngFileName = "$outName-$size-$depth.png";
-
-    if($element eq "svg") {
-
-        # The whole file is tagged
-        copy($renderedSVGFileName, $pngFileName) or die "File could not be copied";
-
-    } elsif($element eq "rect") {
-
-        # Extract SVG vector images
-        my $x = $attr{'x'};
-        my $y = $attr{'y'};
-        $width = $attr{'width'};
-        $height = $attr{'height'};
-
-        if(defined($x) and defined($y)) {
-            if($x =~ /\d*/ and $y =~ /\d*/) {
-                shell $convert, $renderedSVGFileName, "-crop", "${width}x${height}+$x+$y", $pngFileName;
-            }
-        }
-
-    } elsif($element eq "image" ) {
-
-        # Extract Base64 encoded PNG data to files
-        my $xlinkHref = $attr{'xlink:href'};
-        if(defined($xlinkHref)) {
-            $xlinkHref =~ /data:image\/png;base64(.*)/;
-            my $imageEncodedData = $1;
-            if(defined $imageEncodedData) {
-                open(FILE, '>' . $pngFileName) or die "$!";
-                print FILE decode_base64($imageEncodedData);
-                close FILE;
-            }
-        }
-    } else {
-        return;
-    }
-
-    if ($width >= 128 && $height >= 128 && $ext ne "png")
+    my ($file, $size) = @_;
+    
+    if (defined $hotspot[$size])
     {
-        push(@pngFilesRaw, $pngFileName);
+        my @coords = @{$hotspot[$size]};
+        push @icotool_args, "--hotspot-x=$coords[0]", "--hotspot-y=$coords[1]";
     }
-    else
-    {
-        push(@pngFiles, $pngFileName);
-    }
+    push @icotool_args, $size >= 128 ? "--raw=$file" : $file;
+    push @pngFiles, $file;
 }
 
 # Render the SVG image
@@ -158,77 +95,71 @@ push(@rsvgCmd, $renderedSVGFileName);
 shell @rsvgCmd;
 
 # Render the images in the SVG
-my $parser = new XML::Parser(
-    Handlers => {Start => \&svg_element_start});
-$parser->parsefile("$svgFileName");
+my $xml = XML::LibXML->load_xml( location => $svgFileName );
+my $xc = XML::LibXML::XPathContext->new($xml);
+$xc->registerNs('x', 'http://www.w3.org/2000/svg');
 
-# If no render directives were found, take the full image as-is
-unless (@pngFiles || @pngFilesRaw) {
-    my $pngFileName = "bmp$renderedSVGFileName";
-    copy($renderedSVGFileName, $pngFileName) or die "File could not be copied";
-    push(@pngFiles, $pngFileName);
-}
-
-# Combine the renderings into the output file
-if($ext eq "ico") {
-
-    # Place images into the ICO
-    shell $icotool, "-c", "-o", $outFileName, @pngFiles, map { "--raw=$_"; } @pngFilesRaw;
-
-} elsif($ext eq "bmp") {
-
-    # Only the first image becomes the final BMP
-    my $pngFile = $pngFiles[0];
-    $pngFile =~ /.*-\d*-(\d*)\.png/;
-    my $depth = $1;
-
-    # Convert it into a bmp
-    if($depth == 24) {
-        shell $convert, "png:$pngFile", "+matte", $outFileName;
-    } else {
-        shell $convert, "png:$pngFile", $outFileName;
-    }
-
-} elsif($ext eq "png") {
-
-    my $depth;
-    my $diff;
-    my $size;
-    my $bestFitDepth;
-    my $bestFitDiff;
-    my $bestFitFile;
-    my $bestFitSize = 0;
-
-    foreach my $file (@pngFiles) {
-        $file =~ /.*-(\d*)-(\d*)\.png/;
-        $size = $1;
-        $depth = $2;
-
-        $diff = abs($size - $optSize);
-
-        if (!defined($bestFitDiff) || $diff <= $bestFitDiff)
-        {
-            $bestFitDiff = $diff;
-
-            if($bestFitSize != $size)
-            {
-                $bestFitSize = $size;
-                $bestFitDepth = 0;
-            }
-
-            if ($depth > $bestFitDepth)
-            {
-                $bestFitDepth = $depth;
-                $bestFitFile = $file;
-            }
-        }
-    }
-    copy($bestFitFile, $outFileName) or die "Could not copy $bestFitFile to $outFileName";
-    if ($bestFitSize != $optSize)
+if ($ext eq "bmp")
+{
+    foreach my $element ($xc->findnodes("/x:svg"))
     {
-        warn "No $optSize x $optSize icon found in $svgFileName: using $bestFitSize x $bestFitSize instead.";
+        next unless $element->{id} =~ /bitmap:(\d*)-(\d*)/;
+        my $size = $1;
+        my $depth = $2;
+        if ($depth == 24) {
+            shell $convert, $renderedSVGFileName, "+matte", $outFileName;
+        } else {
+            shell $convert, $renderedSVGFileName, $outFileName;
+        }
+        cleanup();
+        exit(0);
     }
 }
+
+# fetch hotspot rectangles for the various sizes
+
+if ($ext eq "cur")
+{
+    foreach my $element ($xc->findnodes("/x:svg/x:rect"))
+    {
+        next unless $element->{id} =~ /hotspot:(\d*)/;
+        $hotspot[$1] = [ $element->{x}, $element->{y} ];
+    }
+}
+
+# extract rectangles from the rendered svg
+
+foreach my $element ($xc->findnodes("/x:svg/*[\@id]"))
+{
+    next unless $element->{id} =~ /$label{$ext}/;
+    my $size = $1;
+    my $depth = $2;
+    warn "Unexpected depth" unless
+        $depth == 1 or $depth == 4 or $depth == 8 or $depth == 24 or $depth == 32;
+    my $file = "$outName-$size-$depth.png";
+
+    my $x = $element->{x};
+    my $y = $element->{y};
+    my $width = $element->{width};
+    my $height = $element->{height};
+    if ($element->{'xlink:href'})
+    {
+        # extract base64-encoded png image
+        (my $data = $element->{'xlink:href'}) =~ s/data:image\/png;base64//;
+        open FILE, ">$file" or die "$!";
+        print FILE decode_base64($data);
+        close FILE;
+    }
+    else
+    {
+        shell $convert, $renderedSVGFileName, "-crop", "${width}x${height}+$x+$y", "-depth", $depth, $file;
+    }
+    add_image( $file, $size );
+}
+
+die "no render directive found in $svgFileName" unless @pngFiles;
+
+shell @icotool_args;
 
 # Delete the intermediate images
 cleanup();

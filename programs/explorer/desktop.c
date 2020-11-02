@@ -599,6 +599,8 @@ static BOOL start_screensaver( void )
     return FALSE;
 }
 
+static WNDPROC desktop_orig_wndproc;
+
 /* window procedure for the desktop window */
 static LRESULT WINAPI desktop_wnd_proc( HWND hwnd, UINT message, WPARAM wp, LPARAM lp )
 {
@@ -660,10 +662,9 @@ static LRESULT WINAPI desktop_wnd_proc( HWND hwnd, UINT message, WPARAM wp, LPAR
             EndPaint( hwnd, &ps );
         }
         return 0;
-
-    default:
-        return DefWindowProcW( hwnd, message, wp, lp );
     }
+
+    return desktop_orig_wndproc( hwnd, message, wp, lp );
 }
 
 /* create the desktop and the associated driver window, and make it the current desktop */
@@ -903,6 +904,11 @@ static void set_desktop_window_title( HWND hwnd, const WCHAR *name )
     HeapFree( GetProcessHeap(), 0, window_titleW );
 }
 
+static inline BOOL is_whitespace(WCHAR c)
+{
+    return c == ' ' || c == '\t';
+}
+
 /* main desktop management function */
 void manage_desktop( WCHAR *arg )
 {
@@ -919,11 +925,11 @@ void manage_desktop( WCHAR *arg )
     BOOL enable_shell = FALSE;
 
     /* get the rest of the command line (if any) */
-    while (*p && !isspace(*p)) p++;
+    while (*p && !is_whitespace(*p)) p++;
     if (*p)
     {
         *p++ = 0;
-        while (*p && isspace(*p)) p++;
+        while (*p && is_whitespace(*p)) p++;
         if (*p) cmdline = p;
     }
 
@@ -973,8 +979,9 @@ void manage_desktop( WCHAR *arg )
         CreateWindowExW( 0, messageW, NULL, WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
                          0, 0, 100, 100, 0, 0, 0, NULL );
 
+        desktop_orig_wndproc = (WNDPROC)SetWindowLongPtrW( hwnd, GWLP_WNDPROC,
+            (LONG_PTR)desktop_wnd_proc );
         using_root = !desktop || !create_desktop( graphics_driver, name, width, height );
-        SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)desktop_wnd_proc );
         SendMessageW( hwnd, WM_SETICON, ICON_BIG, (LPARAM)LoadIconW( 0, MAKEINTRESOURCEW(OIC_WINLOGO)));
         if (name) set_desktop_window_title( hwnd, name );
         SetWindowPos( hwnd, 0, GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),

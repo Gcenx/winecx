@@ -794,12 +794,6 @@ static HRESULT WINAPI QT_GetState(IBaseFilter *iface, DWORD dwMilliSecsTimeout, 
     return S_OK;
 }
 
-static HRESULT WINAPI QT_FindPin(IBaseFilter *iface, LPCWSTR Id, IPin **ppPin)
-{
-    FIXME("(%p)->(%s,%p) stub\n", iface, debugstr_w(Id), ppPin);
-    return E_NOTIMPL;
-}
-
 static const IBaseFilterVtbl QT_Vtbl = {
     QT_QueryInterface,
     BaseFilterImpl_AddRef,
@@ -812,7 +806,7 @@ static const IBaseFilterVtbl QT_Vtbl = {
     BaseFilterImpl_SetSyncSource,
     BaseFilterImpl_GetSyncSource,
     BaseFilterImpl_EnumPins,
-    QT_FindPin,
+    BaseFilterImpl_FindPin,
     BaseFilterImpl_QueryFilterInfo,
     BaseFilterImpl_JoinFilterGraph,
     BaseFilterImpl_QueryVendorInfo
@@ -1388,6 +1382,12 @@ static ULONG WINAPI QTOutPin_Release(IPin *iface)
     return refCount;
 }
 
+static HRESULT WINAPI QTOutPin_CheckMediaType(BasePin *base, const AM_MEDIA_TYPE *amt)
+{
+    FIXME("(%p) stub\n", base);
+    return S_OK;
+}
+
 static HRESULT WINAPI QTOutPin_GetMediaType(BasePin *iface, int iPosition, AM_MEDIA_TYPE *pmt)
 {
     QTOutPin *This = impl_QTOutPin_from_BasePin(iface);
@@ -1516,7 +1516,7 @@ static const IQualityControlVtbl QTOutPin_QualityControl_Vtbl = {
 
 static const BaseOutputPinFuncTable output_BaseOutputFuncTable = {
     {
-        NULL,
+        QTOutPin_CheckMediaType,
         BaseOutputPinImpl_AttemptConnection,
         BasePinImpl_GetMediaTypeVersion,
         QTOutPin_GetMediaType

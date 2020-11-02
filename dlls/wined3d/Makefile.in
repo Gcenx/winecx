@@ -3,6 +3,7 @@ IMPORTLIB = wined3d
 IMPORTS   = opengl32 user32 gdi32 advapi32
 
 C_SRCS = \
+	adapter_gl.c \
 	arb_program_shader.c \
 	ati_fragment_shader.c \
 	buffer.c \
@@ -10,7 +11,6 @@ C_SRCS = \
 	cs.c \
 	device.c \
 	directx.c \
-	drawprim.c \
 	gl_compat.c \
 	glsl_shader.c \
 	nvidia_texture_shader.c \

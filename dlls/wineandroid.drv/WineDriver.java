@@ -555,8 +555,6 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         static protected final int HWND_NOTOPMOST = 0xfffffffe;
         static protected final int HWND_MESSAGE = 0xfffffffd;
         static protected final int SWP_NOZORDER = 0x04;
-        static protected final int SWP_SHOWWINDOW = 0x40;
-        static protected final int SWP_HIDEWINDOW = 0x80;
         static protected final int WS_POPUP = 0x80000000;
         static protected final int WS_CHILD = 0x40000000;
         static protected final int WS_MINIMIZE = 0x20000000;
@@ -1064,8 +1062,8 @@ public class WineDriver extends Object implements ClipboardManager.OnPrimaryClip
         public void pos_changed( int flags, int insert_after, int new_owner, int style,
                                  Rect window_rect, Rect client_rect, Rect visible_rect )
         {
-            boolean show = !visible && ((flags & SWP_SHOWWINDOW) != 0);
-            boolean hide = visible && ((flags & SWP_HIDEWINDOW) != 0);
+            boolean show = !visible && (style & WS_VISIBLE) != 0;
+            boolean hide = visible && (style & WS_VISIBLE) == 0;
 
             if (!show && (!visible || hide))
             {

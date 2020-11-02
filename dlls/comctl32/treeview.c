@@ -64,6 +64,7 @@
 #include "wine/unicode.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(treeview);
 
@@ -552,7 +553,7 @@ TREEVIEW_TVItemFromItem(const TREEVIEW_INFO *infoPtr, UINT mask, TVITEMW *tvItem
         if (!infoPtr->bNtfUnicode)
         {
             tvItem->cchTextMax = WideCharToMultiByte( CP_ACP, 0, item->pszText, -1, NULL, 0, NULL, NULL );
-            tvItem->pszText = Alloc (tvItem->cchTextMax);
+            tvItem->pszText = heap_alloc (tvItem->cchTextMax);
             WideCharToMultiByte( CP_ACP, 0, item->pszText, -1, (LPSTR)tvItem->pszText, tvItem->cchTextMax, 0, 0 );
 	}
         else
@@ -593,8 +594,8 @@ TREEVIEW_SendTreeviewNotify(const TREEVIEW_INFO *infoPtr, UINT code, UINT action
     ret = TREEVIEW_SendRealNotify(infoPtr, code, &nmhdr.hdr);
     if (!infoPtr->bNtfUnicode)
     {
-	Free(nmhdr.itemOld.pszText);
-	Free(nmhdr.itemNew.pszText);
+        heap_free(nmhdr.itemOld.pszText);
+        heap_free(nmhdr.itemNew.pszText);
     }
     return ret;
 }
@@ -693,7 +694,7 @@ TREEVIEW_BeginLabelEditNotify(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *editI
     ret = TREEVIEW_SendRealNotify(infoPtr, TVN_BEGINLABELEDITW, &tvdi.hdr);
 
     if (!infoPtr->bNtfUnicode)
-	Free(tvdi.item.pszText);
+        heap_free(tvdi.item.pszText);
 
     return ret;
 }
@@ -739,7 +740,7 @@ TREEVIEW_UpdateDispInfo(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *item,
 					   (LPSTR)callback.item.pszText, -1,
                                            NULL, 0);
 	    buflen = max((len)*sizeof(WCHAR), TEXT_CALLBACK_SIZE);
-            newText = ReAlloc(item->pszText, buflen);
+            newText = heap_realloc(item->pszText, buflen);
 
 	    TRACE("returned str %s, len=%d, buflen=%d\n",
 		  debugstr_a((LPSTR)callback.item.pszText), len, buflen);
@@ -752,12 +753,12 @@ TREEVIEW_UpdateDispInfo(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *item,
 				     item->pszText, buflen/sizeof(WCHAR));
 		item->cchTextMax = buflen/sizeof(WCHAR);
 	    }
-	    /* If ReAlloc fails we have nothing to do, but keep original text */
+	    /* If realloc fails we have nothing to do, but keep original text */
 	}
 	else {
 	    int len = max(lstrlenW(callback.item.pszText) + 1,
 			  TEXT_CALLBACK_SIZE);
-	    LPWSTR newText = ReAlloc(item->pszText, len);
+	    LPWSTR newText = heap_realloc(item->pszText, len);
 
 	    TRACE("returned wstr %s, len=%d\n",
 		  debugstr_w(callback.item.pszText), len);
@@ -768,7 +769,7 @@ TREEVIEW_UpdateDispInfo(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *item,
 		strcpyW(item->pszText, callback.item.pszText);
 		item->cchTextMax = len;
 	    }
-	    /* If ReAlloc fails we have nothing to do, but keep original text */
+	    /* If realloc fails we have nothing to do, but keep original text */
 	}
     }
     else if (mask & TVIF_TEXT) {
@@ -780,7 +781,7 @@ TREEVIEW_UpdateDispInfo(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *item,
 					  (LPSTR)callback.item.pszText, -1,
                                            NULL, 0);
 	    buflen = max((len)*sizeof(WCHAR), TEXT_CALLBACK_SIZE);
-            newText = Alloc(buflen);
+            newText = heap_alloc(buflen);
 
 	    TRACE("same buffer str %s, len=%d, buflen=%d\n",
 		  debugstr_a((LPSTR)callback.item.pszText), len, buflen);
@@ -793,7 +794,7 @@ TREEVIEW_UpdateDispInfo(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *item,
 				     (LPSTR)callback.item.pszText, -1,
 				     item->pszText, buflen/sizeof(WCHAR));
 		item->cchTextMax = buflen/sizeof(WCHAR);
-		Free(oldText);
+		heap_free(oldText);
 	    }
 	}
     }
@@ -949,7 +950,7 @@ TREEVIEW_RecalculateVisibleOrder(TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *start)
 
     infoPtr->maxVisibleOrder = order;
 
-    for (item = start; item != NULL;
+    for (item = infoPtr->root->firstChild; item != NULL;
 	 item = TREEVIEW_GetNextListItem(infoPtr, item))
     {
 	TREEVIEW_ComputeItemRect(infoPtr, item);
@@ -1001,7 +1002,7 @@ TREEVIEW_UpdateSubTree(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *root)
 static TREEVIEW_ITEM *
 TREEVIEW_AllocateItem(const TREEVIEW_INFO *infoPtr)
 {
-    TREEVIEW_ITEM *newItem = Alloc(sizeof(TREEVIEW_ITEM));
+    TREEVIEW_ITEM *newItem = heap_alloc_zero(sizeof(*newItem));
 
     if (!newItem)
 	return NULL;
@@ -1017,8 +1018,8 @@ TREEVIEW_AllocateItem(const TREEVIEW_INFO *infoPtr)
 
     if (DPA_InsertPtr(infoPtr->items, INT_MAX, newItem) == -1)
     {
-	Free(newItem);
-	return NULL;
+        heap_free(newItem);
+        return NULL;
     }
 
     return newItem;
@@ -1042,7 +1043,7 @@ TREEVIEW_FreeItem(TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *item)
         infoPtr->dropItem = NULL;
     if (infoPtr->insertMarkItem == item)
         infoPtr->insertMarkItem = NULL;
-    Free(item);
+    heap_free(item);
 }
 
 
@@ -1124,8 +1125,10 @@ TREEVIEW_DoSetItemT(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *item,
     if (tvItem->mask & TVIF_TEXT)
     {
         item->textWidth = 0; /* force width recalculation */
-	if (tvItem->pszText != LPSTR_TEXTCALLBACKW && tvItem->pszText != NULL) /* covers != TEXTCALLBACKA too, and undocumented: pszText of NULL also means TEXTCALLBACK */
-	{
+
+        /* Covers != TEXTCALLBACKA too, and undocumented: pszText of NULL also means TEXTCALLBACK */
+        if (tvItem->pszText != LPSTR_TEXTCALLBACKW && tvItem->pszText != NULL)
+        {
             int len;
             LPWSTR newText;
             if (isW)
@@ -1133,12 +1136,14 @@ TREEVIEW_DoSetItemT(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *item,
             else
                 len = MultiByteToWideChar(CP_ACP, 0, (LPSTR)tvItem->pszText, -1, NULL, 0);
 
-            newText  = ReAlloc(item->pszText, len * sizeof(WCHAR));
+            /* Allocate new block to make pointer comparison in item_changed() work. */
+            newText = heap_alloc(len * sizeof(WCHAR));
 
             if (newText == NULL) return FALSE;
 
             callbackClear |= TVIF_TEXT;
 
+            heap_free(item->pszText);
             item->pszText = newText;
             item->cchTextMax = len;
             if (isW)
@@ -1151,10 +1156,8 @@ TREEVIEW_DoSetItemT(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *item,
         }
 	else
 	{
-	    callbackSet |= TVIF_TEXT;
-
-	    item->pszText = ReAlloc(item->pszText,
-                                        TEXT_CALLBACK_SIZE * sizeof(WCHAR));
+            callbackSet |= TVIF_TEXT;
+            item->pszText = heap_realloc(item->pszText, TEXT_CALLBACK_SIZE * sizeof(WCHAR));
 	    item->cchTextMax = TEXT_CALLBACK_SIZE;
 	    TRACE("setting callback, item %p\n", item);
 	}
@@ -1499,7 +1502,7 @@ TREEVIEW_RemoveItem(TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *item)
     infoPtr->uNumItems--;
 
     if (item->pszText != LPSTR_TEXTCALLBACKW)
-	Free(item->pszText);
+        heap_free(item->pszText);
 
     TREEVIEW_FreeItem(infoPtr, item);
 }
@@ -2200,7 +2203,7 @@ TREEVIEW_SetItemT(TREEVIEW_INFO *infoPtr, const TVITEMEXW *tvItem, BOOL isW)
     if (!TREEVIEW_ValidItem(infoPtr, item))
 	return FALSE;
 
-    /* store the original item values */
+    /* Store the original item values. Text buffer will be freed in TREEVIEW_DoSetItemT() below. */
     originalItem = *item;
 
     if (!TREEVIEW_DoSetItemT(infoPtr, item, tvItem, isW))
@@ -2641,7 +2644,9 @@ TREEVIEW_DrawItem(const TREEVIEW_INFO *infoPtr, HDC hdc, TREEVIEW_ITEM *item)
 
             ImageList_DrawEx(infoPtr->himlNormal, imageIndex, hdc,
                          item->imageOffset, centery - infoPtr->normalImageHeight / 2,
-                         0, 0, infoPtr->clrBk, item->state & TVIS_CUT ? GETBKCOLOR(infoPtr->clrBk) : CLR_DEFAULT,
+                         0, 0,
+                         TREEVIEW_IsFullRowSelect(infoPtr) ? nmcdhdr.clrTextBk : infoPtr->clrBk,
+                         item->state & TVIS_CUT ? GETBKCOLOR(infoPtr->clrBk) : CLR_DEFAULT,
                          style);
 	}
     }
@@ -3830,7 +3835,7 @@ TREEVIEW_Command(TREEVIEW_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
 
 	    infoPtr->bLabelChanged = TRUE;
 
-	    GetWindowTextW(infoPtr->hwndEdit, buffer, sizeof(buffer)/sizeof(buffer[0]));
+	    GetWindowTextW(infoPtr->hwndEdit, buffer, ARRAY_SIZE(buffer));
 
 	    /* Select font to get the right dimension of the string */
 	    hFont = (HFONT)SendMessageW(infoPtr->hwndEdit, WM_GETFONT, 0, 0);
@@ -4031,18 +4036,18 @@ TREEVIEW_EndEditLabelNow(TREEVIEW_INFO *infoPtr, BOOL bCancel)
         if (!infoPtr->bNtfUnicode)
         {
             DWORD len = MultiByteToWideChar( CP_ACP, 0, (LPSTR)tmpText, -1, NULL, 0 );
-            newText = Alloc(len * sizeof(WCHAR));
+            newText = heap_alloc(len * sizeof(WCHAR));
             MultiByteToWideChar( CP_ACP, 0, (LPSTR)tmpText, -1, newText, len );
             iLength = len - 1;
         }
 
         if (strcmpW(newText, editedItem->pszText) != 0)
         {
-            WCHAR *ptr = ReAlloc(editedItem->pszText, sizeof(WCHAR)*(iLength + 1));
+            WCHAR *ptr = heap_realloc(editedItem->pszText, sizeof(WCHAR)*(iLength + 1));
             if (ptr == NULL)
             {
                 ERR("OutOfMemory, cannot allocate space for label\n");
-                if(newText != tmpText) Free(newText);
+                if (newText != tmpText) heap_free(newText);
                 DestroyWindow(infoPtr->hwndEdit);
                 infoPtr->hwndEdit = 0;
                 infoPtr->editItem = NULL;
@@ -4056,7 +4061,7 @@ TREEVIEW_EndEditLabelNow(TREEVIEW_INFO *infoPtr, BOOL bCancel)
                 TREEVIEW_ComputeTextWidth(infoPtr, editedItem, 0);
             }
         }
-        if(newText != tmpText) Free(newText);
+        if (newText != tmpText) heap_free(newText);
     }
 
     ShowWindow(infoPtr->hwndEdit, SW_HIDE);
@@ -4640,7 +4645,7 @@ static INT TREEVIEW_ProcessLetterKeys(TREEVIEW_INFO *infoPtr, WPARAM charCode, L
     /* update the search parameters */
     infoPtr->lastKeyPressTimestamp=timestamp;
     if (elapsed < KEY_DELAY) {
-        if (infoPtr->nSearchParamLength < sizeof(infoPtr->szSearchParam) / sizeof(WCHAR)) {
+        if (infoPtr->nSearchParamLength < ARRAY_SIZE(infoPtr->szSearchParam)) {
             infoPtr->szSearchParam[infoPtr->nSearchParamLength++]=charCode;
         }
         if (infoPtr->charCode != charCode) {
@@ -4689,7 +4694,7 @@ static INT TREEVIEW_ProcessLetterKeys(TREEVIEW_INFO *infoPtr, WPARAM charCode, L
         item.mask = TVIF_TEXT;
         item.hItem = idx;
         item.pszText = buffer;
-        item.cchTextMax = sizeof(buffer);
+        item.cchTextMax = ARRAY_SIZE(buffer);
         TREEVIEW_GetItemT( infoPtr, &item, TRUE );
 
         /* check for a match */
@@ -5078,7 +5083,7 @@ TREEVIEW_Create(HWND hwnd, const CREATESTRUCTW *lpcs)
 
     TRACE("wnd %p, style 0x%x\n", hwnd, GetWindowLongW(hwnd, GWL_STYLE));
 
-    infoPtr = Alloc(sizeof(TREEVIEW_INFO));
+    infoPtr = heap_alloc_zero(sizeof(TREEVIEW_INFO));
 
     if (infoPtr == NULL)
     {
@@ -5188,8 +5193,6 @@ TREEVIEW_Destroy(TREEVIEW_INFO *infoPtr)
     TREEVIEW_FreeItem(infoPtr, infoPtr->root);
     DPA_Destroy(infoPtr->items);
 
-    /* tool tip is automatically destroyed: we are its owner */
-
     /* Restore original wndproc */
     if (infoPtr->hwndEdit)
 	SetWindowLongPtrW(infoPtr->hwndEdit, GWLP_WNDPROC,
@@ -5204,7 +5207,8 @@ TREEVIEW_Destroy(TREEVIEW_INFO *infoPtr)
     DeleteObject(infoPtr->hBoldFont);
     DeleteObject(infoPtr->hUnderlineFont);
     DeleteObject(infoPtr->hBoldUnderlineFont);
-    Free(infoPtr);
+    DestroyWindow(infoPtr->hwndToolTip);
+    heap_free(infoPtr);
 
     return 0;
 }

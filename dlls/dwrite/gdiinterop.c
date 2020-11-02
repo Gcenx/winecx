@@ -43,7 +43,7 @@ struct rendertarget {
     ID2D1SimplifiedGeometrySink ID2D1SimplifiedGeometrySink_iface;
     LONG ref;
 
-    IDWriteFactory *factory;
+    IDWriteFactory5 *factory;
     DWRITE_TEXT_ANTIALIAS_MODE antialiasmode;
     FLOAT ppdip;
     DWRITE_MATRIX m;
@@ -247,7 +247,7 @@ static ULONG WINAPI rendertarget_Release(IDWriteBitmapRenderTarget1 *iface)
 
     if (!ref)
     {
-        IDWriteFactory_Release(This->factory);
+        IDWriteFactory5_Release(This->factory);
         DeleteDC(This->hdc);
         heap_free(This);
     }
@@ -326,9 +326,11 @@ static HRESULT WINAPI rendertarget_DrawGlyphRun(IDWriteBitmapRenderTarget1 *ifac
 {
     struct rendertarget *This = impl_from_IDWriteBitmapRenderTarget1(iface);
     IDWriteGlyphRunAnalysis *analysis;
-    DWRITE_RENDERING_MODE rendermode;
+    DWRITE_RENDERING_MODE1 rendermode;
+    DWRITE_GRID_FIT_MODE gridfitmode;
     DWRITE_TEXTURE_TYPE texturetype;
-    IDWriteFontFace1 *fontface1;
+    DWRITE_GLYPH_RUN scaled_run;
+    IDWriteFontFace3 *fontface;
     RECT target, bounds;
     HRESULT hr;
 
@@ -340,23 +342,24 @@ static HRESULT WINAPI rendertarget_DrawGlyphRun(IDWriteBitmapRenderTarget1 *ifac
     if (!This->dib.ptr)
         return S_OK;
 
-    hr = IDWriteFontFace_QueryInterface(run->fontFace, &IID_IDWriteFontFace1, (void**)&fontface1);
-    if (hr == S_OK) {
-        hr = IDWriteFontFace1_GetRecommendedRenderingMode(fontface1, run->fontEmSize, This->ppdip * 96.0f,
-            This->ppdip * 96.0f, NULL, run->isSideways, DWRITE_OUTLINE_THRESHOLD_ALIASED, measuring_mode,
-            &rendermode);
-        IDWriteFontFace1_Release(fontface1);
-    }
-    else
-        hr = IDWriteFontFace_GetRecommendedRenderingMode(run->fontFace, run->fontEmSize,
-            This->ppdip, measuring_mode, params, &rendermode);
+    if (!params)
+        return E_INVALIDARG;
 
+    if (FAILED(hr = IDWriteFontFace_QueryInterface(run->fontFace, &IID_IDWriteFontFace3, (void **)&fontface))) {
+        WARN("Failed to get IDWriteFontFace2 interface, hr %#x.\n", hr);
+        return hr;
+    }
+
+    hr = IDWriteFontFace3_GetRecommendedRenderingMode(fontface, run->fontEmSize, This->ppdip * 96.0f,
+            This->ppdip * 96.0f, NULL /* FIXME */, run->isSideways, DWRITE_OUTLINE_THRESHOLD_ALIASED, measuring_mode,
+            params, &rendermode, &gridfitmode);
+    IDWriteFontFace3_Release(fontface);
     if (FAILED(hr))
         return hr;
 
     SetRect(&target, 0, 0, This->size.cx, This->size.cy);
 
-    if (rendermode == DWRITE_RENDERING_MODE_OUTLINE) {
+    if (rendermode == DWRITE_RENDERING_MODE1_OUTLINE) {
         static const XFORM identity = { 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
         const DWRITE_MATRIX *m = &This->m;
         XFORM xform;
@@ -406,9 +409,10 @@ static HRESULT WINAPI rendertarget_DrawGlyphRun(IDWriteBitmapRenderTarget1 *ifac
         return hr;
     }
 
-    hr = IDWriteFactory_CreateGlyphRunAnalysis(This->factory,
-        run, This->ppdip, &This->m, rendermode, measuring_mode,
-        originX, originY, &analysis);
+    scaled_run = *run;
+    scaled_run.fontEmSize *= This->ppdip;
+    hr = IDWriteFactory5_CreateGlyphRunAnalysis(This->factory, &scaled_run, &This->m, rendermode, measuring_mode,
+            gridfitmode, This->antialiasmode, originX, originY, &analysis);
     if (FAILED(hr)) {
         WARN("failed to create analysis instance, 0x%08x\n", hr);
         return hr;
@@ -563,7 +567,7 @@ static const IDWriteBitmapRenderTarget1Vtbl rendertargetvtbl = {
     rendertarget_SetTextAntialiasMode
 };
 
-static HRESULT create_rendertarget(IDWriteFactory *factory, HDC hdc, UINT32 width, UINT32 height, IDWriteBitmapRenderTarget **ret)
+static HRESULT create_rendertarget(IDWriteFactory5 *factory, HDC hdc, UINT32 width, UINT32 height, IDWriteBitmapRenderTarget **ret)
 {
     struct rendertarget *target;
     HRESULT hr;
@@ -589,7 +593,7 @@ static HRESULT create_rendertarget(IDWriteFactory *factory, HDC hdc, UINT32 widt
     target->ppdip = GetDeviceCaps(target->hdc, LOGPIXELSX) / 96.0f;
     target->antialiasmode = DWRITE_TEXT_ANTIALIAS_MODE_CLEARTYPE;
     target->factory = factory;
-    IDWriteFactory_AddRef(factory);
+    IDWriteFactory5_AddRef(factory);
 
     *ret = (IDWriteBitmapRenderTarget*)&target->IDWriteBitmapRenderTarget1_iface;
 
@@ -795,7 +799,7 @@ static HRESULT WINAPI gdiinterop_CreateBitmapRenderTarget(IDWriteGdiInterop1 *if
 {
     struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
     TRACE("(%p)->(%p %u %u %p)\n", This, hdc, width, height, target);
-    return create_rendertarget((IDWriteFactory*)This->factory, hdc, width, height, target);
+    return create_rendertarget(This->factory, hdc, width, height, target);
 }
 
 static HRESULT WINAPI gdiinterop1_CreateFontFromLOGFONT(IDWriteGdiInterop1 *iface,
@@ -850,51 +854,22 @@ static HRESULT WINAPI gdiinterop1_GetFontSignature_(IDWriteGdiInterop1 *iface, I
     FONTSIGNATURE *fontsig)
 {
     struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
-    struct file_stream_desc stream_desc;
-    IDWriteFontFileStream *stream;
-    IDWriteFontFile *file;
-    UINT32 count;
-    HRESULT hr;
 
     TRACE("(%p)->(%p %p)\n", This, fontface, fontsig);
 
-    memset(fontsig, 0, sizeof(*fontsig));
-
-    count = 1;
-    hr = IDWriteFontFace_GetFiles(fontface, &count, &file);
-    hr = get_filestream_from_file(file, &stream);
-    IDWriteFontFile_Release(file);
-    if (FAILED(hr))
-        return hr;
-
-    stream_desc.stream = stream;
-    stream_desc.face_type = IDWriteFontFace_GetType(fontface);
-    stream_desc.face_index = IDWriteFontFace_GetIndex(fontface);
-    hr = opentype_get_font_signature(&stream_desc, fontsig);
-    IDWriteFontFileStream_Release(stream);
-    return hr;
+    return get_fontsig_from_fontface(fontface, fontsig);
 }
 
 static HRESULT WINAPI gdiinterop1_GetFontSignature(IDWriteGdiInterop1 *iface, IDWriteFont *font, FONTSIGNATURE *fontsig)
 {
     struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
-    IDWriteFontFace *fontface;
-    HRESULT hr;
 
     TRACE("(%p)->(%p %p)\n", This, font, fontsig);
 
     if (!font)
         return E_INVALIDARG;
 
-    memset(fontsig, 0, sizeof(*fontsig));
-
-    hr = IDWriteFont_CreateFontFace(font, &fontface);
-    if (FAILED(hr))
-        return hr;
-
-    hr = IDWriteGdiInterop1_GetFontSignature_(iface, fontface, fontsig);
-    IDWriteFontFace_Release(fontface);
-    return hr;
+    return get_fontsig_from_font(font, fontsig);
 }
 
 static HRESULT WINAPI gdiinterop1_GetMatchingFontsByLOGFONT(IDWriteGdiInterop1 *iface, LOGFONTW const *logfont,

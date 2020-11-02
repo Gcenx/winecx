@@ -302,7 +302,7 @@ static HRESULT WINAPI HTMLLinkElement_get_disabled(IHTMLLinkElement *iface, VARI
     if(NS_FAILED(nsres))
         return E_FAIL;
 
-    *p = ret ? VARIANT_TRUE : VARIANT_FALSE;
+    *p = variant_bool(ret);
     return S_OK;
 }
 
@@ -430,7 +430,6 @@ static const NodeImplVtbl HTMLLinkElementImplVtbl = {
     HTMLElement_handle_event,
     HTMLElement_get_attr_col,
     NULL,
-    NULL,
     HTMLLinkElementImpl_put_disabled,
     HTMLLinkElementImpl_get_disabled,
     NULL,
@@ -454,7 +453,7 @@ static dispex_static_data_t HTMLLinkElement_dispex = {
     HTMLElement_init_dispex_info
 };
 
-HRESULT HTMLLinkElement_Create(HTMLDocumentNode *doc, nsIDOMHTMLElement *nselem, HTMLElement **elem)
+HRESULT HTMLLinkElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTMLElement **elem)
 {
     HTMLLinkElement *ret;
     nsresult nsres;
@@ -468,7 +467,7 @@ HRESULT HTMLLinkElement_Create(HTMLDocumentNode *doc, nsIDOMHTMLElement *nselem,
 
     HTMLElement_Init(&ret->element, doc, nselem, &HTMLLinkElement_dispex);
 
-    nsres = nsIDOMHTMLElement_QueryInterface(nselem, &IID_nsIDOMHTMLLinkElement, (void**)&ret->nslink);
+    nsres = nsIDOMElement_QueryInterface(nselem, &IID_nsIDOMHTMLLinkElement, (void**)&ret->nslink);
     assert(nsres == NS_OK);
 
     *elem = &ret->element;

@@ -77,7 +77,6 @@ static void test_GetWindowTheme(void)
 {
     HTHEME    hTheme;
     HWND      hWnd;
-    BOOL    bDestroyed;
 
     SetLastError(0xdeadbeef);
     hTheme = GetWindowTheme(NULL);
@@ -89,7 +88,7 @@ static void test_GetWindowTheme(void)
 
     /* Only do the bare minimum to get a valid hwnd */
     hWnd = CreateWindowExA(0, "static", "", WS_POPUP, 0,0,100,100,0, 0, 0, NULL);
-    if (!hWnd) return;
+    ok(hWnd != NULL, "Failed to create a test window.\n");
 
     SetLastError(0xdeadbeef);
     hTheme = GetWindowTheme(hWnd);
@@ -98,17 +97,13 @@ static void test_GetWindowTheme(void)
         "Expected 0xdeadbeef, got 0x%08x\n",
         GetLastError());
 
-    bDestroyed = DestroyWindow(hWnd);
-    if (!bDestroyed)
-        trace("Window %p couldn't be destroyed : 0x%08x\n",
-            hWnd, GetLastError());
+    DestroyWindow(hWnd);
 }
 
 static void test_SetWindowTheme(void)
 {
     HRESULT hRes;
     HWND    hWnd;
-    BOOL    bDestroyed;
 
     hRes = SetWindowTheme(NULL, NULL, NULL);
 todo_wine
@@ -116,15 +111,12 @@ todo_wine
 
     /* Only do the bare minimum to get a valid hwnd */
     hWnd = CreateWindowExA(0, "static", "", WS_POPUP, 0,0,100,100,0, 0, 0, NULL);
-    if (!hWnd) return;
+    ok(hWnd != NULL, "Failed to create a test window.\n");
 
     hRes = SetWindowTheme(hWnd, NULL, NULL);
     ok( hRes == S_OK, "Expected S_OK, got 0x%08x\n", hRes);
 
-    bDestroyed = DestroyWindow(hWnd);
-    if (!bDestroyed)
-        trace("Window %p couldn't be destroyed : 0x%08x\n",
-            hWnd, GetLastError());
+    DestroyWindow(hWnd);
 }
 
 static void test_OpenThemeData(void)
@@ -133,7 +125,6 @@ static void test_OpenThemeData(void)
     HWND      hWnd;
     BOOL      bThemeActive;
     HRESULT   hRes;
-    BOOL      bDestroyed;
     BOOL      bTPDefined;
 
     WCHAR szInvalidClassList[] = {'D','E','A','D','B','E','E','F', 0 };
@@ -274,10 +265,7 @@ static void test_OpenThemeData(void)
             GetLastError());
     }
 
-    bDestroyed = DestroyWindow(hWnd);
-    if (!bDestroyed)
-        trace("Window %p couldn't be destroyed : 0x%08x\n",
-            hWnd, GetLastError());
+    DestroyWindow(hWnd);
 }
 
 static void test_OpenThemeDataEx(void)
@@ -285,7 +273,6 @@ static void test_OpenThemeDataEx(void)
     HTHEME    hTheme;
     HWND      hWnd;
     BOOL      bThemeActive;
-    BOOL      bDestroyed;
 
     WCHAR szInvalidClassList[] = {'D','E','A','D','B','E','E','F', 0 };
     WCHAR szButtonClassList[]  = {'B','u','t','t','o','n', 0 };
@@ -419,10 +406,7 @@ static void test_OpenThemeDataEx(void)
             "Expected ERROR_SUCCESS, got 0x%08x\n",
             GetLastError());
 
-    bDestroyed = DestroyWindow(hWnd);
-    if (!bDestroyed)
-        trace("Window %p couldn't be destroyed : 0x%08x\n",
-            hWnd, GetLastError());
+    DestroyWindow(hWnd);
 }
 
 static void test_GetCurrentThemeName(void)
@@ -459,9 +443,8 @@ static void test_GetCurrentThemeName(void)
         ok( hRes == E_PROP_ID_UNSUPPORTED, "Expected E_PROP_ID_UNSUPPORTED, got 0x%08x\n", hRes);
 
     /* The same is true if the number of characters is too small for Color and/or Size */
-    hRes = GetCurrentThemeName(currentTheme, sizeof(currentTheme) / sizeof(WCHAR),
-                                currentColor, 2,
-                                currentSize,  sizeof(currentSize)  / sizeof(WCHAR));
+    hRes = GetCurrentThemeName(currentTheme, ARRAY_SIZE(currentTheme), currentColor, 2,
+                               currentSize,  ARRAY_SIZE(currentSize));
     if (bThemeActive)
         todo_wine
             ok(hRes == E_NOT_SUFFICIENT_BUFFER ||
@@ -471,7 +454,7 @@ static void test_GetCurrentThemeName(void)
         ok( hRes == E_PROP_ID_UNSUPPORTED, "Expected E_PROP_ID_UNSUPPORTED, got 0x%08x\n", hRes);
 
     /* Given number of characters is correct */
-    hRes = GetCurrentThemeName(currentTheme, sizeof(currentTheme) / sizeof(WCHAR), NULL, 0, NULL, 0);
+    hRes = GetCurrentThemeName(currentTheme, ARRAY_SIZE(currentTheme), NULL, 0, NULL, 0);
     if (bThemeActive)
         ok( hRes == S_OK, "Expected S_OK, got 0x%08x\n", hRes);
     else
@@ -487,26 +470,23 @@ static void test_GetCurrentThemeName(void)
             "Expected E_PROP_ID_UNSUPPORTED, got 0x%08x\n", hRes);
  
     /* The too large case is only for the theme name, not for color name or size name */
-    hRes = GetCurrentThemeName(currentTheme, sizeof(currentTheme) / sizeof(WCHAR),
-                                currentColor, sizeof(currentTheme),
-                                currentSize,  sizeof(currentSize)  / sizeof(WCHAR));
+    hRes = GetCurrentThemeName(currentTheme, ARRAY_SIZE(currentTheme), currentColor,
+                               sizeof(currentTheme), currentSize,  ARRAY_SIZE(currentSize));
     if (bThemeActive)
         ok( hRes == S_OK, "Expected S_OK, got 0x%08x\n", hRes);
     else
         ok( hRes == E_PROP_ID_UNSUPPORTED, "Expected E_PROP_ID_UNSUPPORTED, got 0x%08x\n", hRes);
 
-    hRes = GetCurrentThemeName(currentTheme, sizeof(currentTheme) / sizeof(WCHAR),
-                                currentColor, sizeof(currentTheme) / sizeof(WCHAR),
-                                currentSize,  sizeof(currentSize));
+    hRes = GetCurrentThemeName(currentTheme, ARRAY_SIZE(currentTheme), currentColor,
+                               ARRAY_SIZE(currentTheme), currentSize,  sizeof(currentSize));
     if (bThemeActive)
         ok( hRes == S_OK, "Expected S_OK, got 0x%08x\n", hRes);
     else
         ok( hRes == E_PROP_ID_UNSUPPORTED, "Expected E_PROP_ID_UNSUPPORTED, got 0x%08x\n", hRes);
 
     /* Correct call */
-    hRes = GetCurrentThemeName(currentTheme, sizeof(currentTheme) / sizeof(WCHAR),
-                                currentColor, sizeof(currentColor) / sizeof(WCHAR),
-                                currentSize,  sizeof(currentSize)  / sizeof(WCHAR));
+    hRes = GetCurrentThemeName(currentTheme, ARRAY_SIZE(currentTheme), currentColor,
+                               ARRAY_SIZE(currentColor), currentSize,  ARRAY_SIZE(currentSize));
     if (bThemeActive)
         ok( hRes == S_OK, "Expected S_OK, got 0x%08x\n", hRes);
     else
@@ -687,7 +667,7 @@ todo_wine
     hr = pGetBufferedPaintBits(NULL, &bits, &row);
     ok(hr == E_FAIL, "Unexpected return code %#x\n", hr);
     ok(row == 10, "Unexpected row count %d\n", row);
-    ok(bits == (void *)0xdeadbeef, "Unepexpected data pointer %p\n", bits);
+    ok(bits == (void *)0xdeadbeef, "Unexpected data pointer %p\n", bits);
 
     hr = pGetBufferedPaintBits(NULL, NULL, NULL);
     ok(hr == E_POINTER, "Unexpected return code %#x\n", hr);

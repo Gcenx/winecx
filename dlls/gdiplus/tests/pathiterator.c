@@ -80,7 +80,8 @@ static void test_hascurve(void)
 
     GdipDeletePathIter(iter);
 
-    GdipAddPathEllipse(path, 0.0, 0.0, 35.0, 70.0);
+    stat = GdipAddPathEllipse(path, 0.0, 0.0, 35.0, 70.0);
+    expect(Ok, stat);
 
     stat = GdipCreatePathIter(&iter, path);
     expect(Ok, stat);
@@ -330,9 +331,12 @@ static void test_isvalid(void)
     GdipDeletePathIter(iter);
 
     /* no markers */
-    GdipAddPathLine(path, 50.0, 50.0, 110.0, 40.0);
-    GdipCreatePathIter(&iter, path);
-    GdipPathIterNextMarker(iter, &result, &start, &end);
+    stat = GdipAddPathLine(path, 50.0, 50.0, 110.0, 40.0);
+    expect(Ok, stat);
+    stat = GdipCreatePathIter(&iter, path);
+    expect(Ok, stat);
+    stat = GdipPathIterNextMarker(iter, &result, &start, &end);
+    expect(Ok, stat);
     isvalid = FALSE;
     stat = GdipPathIterIsValid(iter, &isvalid);
     expect(Ok, stat);
@@ -527,7 +531,8 @@ static void test_nextpathtype(void)
     todo_wine expect(0, result);
     GdipDeletePathIter(iter);
 
-    GdipAddPathEllipse(path, 0.0, 0.0, 35.0, 70.0);
+    stat = GdipAddPathEllipse(path, 0.0, 0.0, 35.0, 70.0);
+    expect(Ok, stat);
     GdipCreatePathIter(&iter, path);
     start = end = result = (INT)0xdeadbeef;
     type = 255; /* out of range */
@@ -559,6 +564,13 @@ START_TEST(pathiterator)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
     ULONG_PTR gdiplusToken;
+    HMODULE hmsvcrt;
+    int (CDECL * _controlfp_s)(unsigned int *cur, unsigned int newval, unsigned int mask);
+
+    /* Enable all FP exceptions except _EM_INEXACT, which gdi32 can trigger */
+    hmsvcrt = LoadLibraryA("msvcrt");
+    _controlfp_s = (void*)GetProcAddress(hmsvcrt, "_controlfp_s");
+    if (_controlfp_s) _controlfp_s(0, 0, 0x0008001e);
 
     gdiplusStartupInput.GdiplusVersion              = 1;
     gdiplusStartupInput.DebugEventCallback          = NULL;

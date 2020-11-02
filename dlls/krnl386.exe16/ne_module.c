@@ -788,9 +788,9 @@ static BOOL NE_LoadDLLs( NE_MODULE *pModule )
             /* its handle in the list of DLLs to initialize.   */
             HMODULE16 hDLL;
 
-            /* Append .DLL to name if no extension present */
+            /* Append .DLL (Windows >= 3.00) or .EXE (Windows < 3.00) to name if no extension present */
             if (!(p = strrchr( buffer, '.')) || strchr( p, '/' ) || strchr( p, '\\'))
-                    strcat( buffer, ".DLL" );
+                    strcat( buffer, (GetExeVersion16() >= 0x0300) ? ".DLL" : ".EXE" );
 
             if ((hDLL = MODULE_LoadModule16( buffer, TRUE, TRUE )) < 32)
             {
@@ -988,7 +988,7 @@ static HINSTANCE16 MODULE_LoadModule16( LPCSTR libname, BOOL implicit, BOOL lib_
 
         strcpy( dllname, basename );
         q = strrchr( dllname, '.' );
-        if (!q) strcat( dllname, ".dll" );
+        if (!q) strcat( dllname, (GetExeVersion16() >= 0x0300) ? ".dll" : ".exe" );
         for (q = dllname; *q; q++) if (*q >= 'A' && *q <= 'Z') *q += 32;
 
         strcpy( q, "16" );
@@ -1244,7 +1244,7 @@ DWORD NE_StartTask(void)
             sp = pSegTable[SELECTOROF(pModule->ne_sssp)-1].minsize + pModule->ne_stack;
         sp &= ~1;
         sp -= sizeof(STACK16FRAME);
-        NtCurrentTeb()->WOW32Reserved = (void *)MAKESEGPTR( GlobalHandleToSel16(hInstance), sp );
+        NtCurrentTeb()->SystemReserved1[0] = (void *)MAKESEGPTR( GlobalHandleToSel16(hInstance), sp );
 
         /* Registers at initialization must be:
          * ax   zero
@@ -1274,8 +1274,8 @@ DWORD NE_StartTask(void)
 
         TRACE("Starting main program: cs:ip=%04x:%04x ds=%04x ss:sp=%04x:%04x\n",
               context.SegCs, context.Eip, context.SegDs,
-              SELECTOROF(NtCurrentTeb()->WOW32Reserved),
-              OFFSETOF(NtCurrentTeb()->WOW32Reserved) );
+              SELECTOROF(NtCurrentTeb()->SystemReserved1[0]),
+              OFFSETOF(NtCurrentTeb()->SystemReserved1[0]) );
 
         WOWCallback16Ex( 0, WCB16_REGS, 0, NULL, (DWORD *)&context );
         ExitThread( LOWORD(context.Eax) );

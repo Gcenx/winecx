@@ -174,7 +174,7 @@ static TW_UINT16 TWAIN_GetSupportedCaps(pTW_CAPABILITY pCapability)
         TW_UINT32 i;
         a = GlobalLock (pCapability->hContainer);
         a->ItemType = TWTY_UINT16;
-        a->NumItems = sizeof(supported_caps) / sizeof(supported_caps[0]);
+        a->NumItems = ARRAY_SIZE(supported_caps);
         u = (UINT16 *) a->ItemList;
         for (i = 0; i < a->NumItems; i++)
             u[i] = supported_caps[i];
@@ -203,7 +203,7 @@ static TW_UINT16 SANE_ICAPXferMech (pTW_CAPABILITY pCapability, TW_UINT16 action
             break;
 
         case MSG_GET:
-            twCC = msg_get_enum(pCapability, possible_values, sizeof(possible_values) / sizeof(possible_values[0]),
+            twCC = msg_get_enum(pCapability, possible_values, ARRAY_SIZE(possible_values),
                     TWTY_UINT16, activeDS.capXferMech, TWSX_NATIVE);
             break;
 
@@ -482,7 +482,7 @@ static TW_UINT16 SANE_ICAPBitDepth(pTW_CAPABILITY pCapability, TW_UINT16 action)
             break;
 
         case MSG_GET:
-            twCC = msg_get_enum(pCapability, possible_values, sizeof(possible_values) / sizeof(possible_values[0]),
+            twCC = msg_get_enum(pCapability, possible_values, ARRAY_SIZE(possible_values),
                     TWTY_UINT16, activeDS.sane_param.depth, activeDS.sane_param.depth);
             break;
 
@@ -536,7 +536,7 @@ static TW_UINT16 SANE_ICAPCompression (pTW_CAPABILITY pCapability, TW_UINT16 act
             break;
 
         case MSG_GET:
-            twCC = msg_get_enum(pCapability, possible_values, sizeof(possible_values) / sizeof(possible_values[0]),
+            twCC = msg_get_enum(pCapability, possible_values, ARRAY_SIZE(possible_values),
                     TWTY_UINT16, TWCP_NONE, TWCP_NONE);
             FIXME("Partial stub:  We don't attempt to support compression\n");
             break;
@@ -731,7 +731,7 @@ static TW_UINT16 SANE_ICAPPixelFlavor (pTW_CAPABILITY pCapability, TW_UINT16 act
             break;
 
         case MSG_GET:
-            twCC = msg_get_enum(pCapability, possible_values, sizeof(possible_values) / sizeof(possible_values[0]),
+            twCC = msg_get_enum(pCapability, possible_values, ARRAY_SIZE(possible_values),
                     TWTY_UINT16, flavor, flavor);
             break;
 
@@ -844,7 +844,6 @@ static const supported_size_t supported_sizes[] =
     { TWSS_USEXECUTIVE, 184.15, 266.7   },
     { TWSS_A3,          297,    420     },
 };
-#define SUPPORTED_SIZE_COUNT (sizeof(supported_sizes) / sizeof(supported_sizes[0]))
 
 static TW_UINT16 get_default_paper_size(const supported_size_t *s, int n)
 {
@@ -920,11 +919,11 @@ static TW_UINT16 SANE_ICAPSupportedSizes (pTW_CAPABILITY pCapability, TW_UINT16 
     TW_UINT16 twCC = TWCC_BADCAP;
 #ifdef SONAME_LIBSANE
 
-    static TW_UINT32 possible_values[SUPPORTED_SIZE_COUNT];
+    static TW_UINT32 possible_values[ARRAY_SIZE(supported_sizes)];
     unsigned int i;
     TW_UINT32 val;
-    TW_UINT16 default_size = get_default_paper_size(supported_sizes, SUPPORTED_SIZE_COUNT);
-    TW_UINT16 current_size = get_current_paper_size(supported_sizes, SUPPORTED_SIZE_COUNT);
+    TW_UINT16 default_size = get_default_paper_size(supported_sizes, ARRAY_SIZE(supported_sizes));
+    TW_UINT16 current_size = get_current_paper_size(supported_sizes, ARRAY_SIZE(supported_sizes));
 
     TRACE("ICAP_SUPPORTEDSIZES\n");
 
@@ -936,9 +935,9 @@ static TW_UINT16 SANE_ICAPSupportedSizes (pTW_CAPABILITY pCapability, TW_UINT16 
             break;
 
         case MSG_GET:
-            for (i = 0; i < sizeof(supported_sizes) / sizeof(supported_sizes[0]); i++)
+            for (i = 0; i < ARRAY_SIZE(supported_sizes); i++)
                 possible_values[i] = supported_sizes[i].size;
-            twCC = msg_get_enum(pCapability, possible_values, sizeof(possible_values) / sizeof(possible_values[0]),
+            twCC = msg_get_enum(pCapability, possible_values, ARRAY_SIZE(possible_values),
                     TWTY_UINT16, current_size, default_size);
             WARN("Partial Stub:  our supported size selection is a bit thin.\n");
             break;
@@ -946,7 +945,7 @@ static TW_UINT16 SANE_ICAPSupportedSizes (pTW_CAPABILITY pCapability, TW_UINT16 
         case MSG_SET:
             twCC = msg_set(pCapability, &val);
             if (twCC == TWCC_SUCCESS)
-                for (i = 1; i < SUPPORTED_SIZE_COUNT; i++)
+                for (i = 1; i < ARRAY_SIZE(supported_sizes); i++)
                     if (supported_sizes[i].size == val)
                         return set_width_height(supported_sizes[i].x, supported_sizes[i].y);
 
@@ -960,7 +959,7 @@ static TW_UINT16 SANE_ICAPSupportedSizes (pTW_CAPABILITY pCapability, TW_UINT16 
 
         case MSG_RESET:
             twCC = TWCC_BADCAP;
-            for (i = 1; i < SUPPORTED_SIZE_COUNT; i++)
+            for (i = 1; i < ARRAY_SIZE(supported_sizes); i++)
                 if (supported_sizes[i].size == default_size)
                 {
                     twCC = set_width_height(supported_sizes[i].x, supported_sizes[i].y);
@@ -976,7 +975,6 @@ static TW_UINT16 SANE_ICAPSupportedSizes (pTW_CAPABILITY pCapability, TW_UINT16 
             break;
     }
 
-#undef SUPPORTED_SIZE_COUNT
 #endif
     return twCC;
 }

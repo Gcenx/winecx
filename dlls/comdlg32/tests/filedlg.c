@@ -939,29 +939,27 @@ static void test_resizable2(void)
     ofn.hInstance = GetModuleHandleA(NULL);
     ofn.lpTemplateName = "template1";
     ofn.Flags = OFN_EXPLORER;
-#define ISSIZABLE TRUE
     ret = GetOpenFileNameA(&ofn);
-    ok( ret == ISSIZABLE, "File Dialog should have been sizable\n");
+    ok( ret == TRUE, "File Dialog should have been sizable\n");
     ret = CommDlgExtendedError();
     ok(!ret, "CommDlgExtendedError returned %#x\n", ret);
     ofn.Flags = OFN_EXPLORER | OFN_ENABLETEMPLATE;
     ret = GetOpenFileNameA(&ofn);
-    ok( ret != ISSIZABLE, "File Dialog should NOT have been sizable\n");
+    ok( !ret, "File Dialog should NOT have been sizable\n");
     ret = CommDlgExtendedError();
     ok(!ret, "CommDlgExtendedError returned %#x\n", ret);
     ofn.Flags = OFN_EXPLORER | OFN_ENABLETEMPLATEHANDLE;
     ofn.hInstance = LoadResource( GetModuleHandleA(NULL), FindResourceA( GetModuleHandleA(NULL), "template1", (LPSTR)RT_DIALOG));
     ofn.lpTemplateName = NULL;
     ret = GetOpenFileNameA(&ofn);
-    ok( ret != ISSIZABLE, "File Dialog should NOT have been sizable\n");
+    ok( !ret, "File Dialog should NOT have been sizable\n");
     ret = CommDlgExtendedError();
     ok(!ret, "CommDlgExtendedError returned %#x\n", ret);
     ofn.Flags = OFN_EXPLORER | OFN_ENABLEHOOK;
     ret = GetOpenFileNameA(&ofn);
-    ok( ret != ISSIZABLE, "File Dialog should NOT have been sizable\n");
+    ok( !ret, "File Dialog should NOT have been sizable\n");
     ret = CommDlgExtendedError();
     ok(!ret, "CommDlgExtendedError returned %#x\n", ret);
-#undef ISSIZABLE
 }
 
 static void test_mru(void)
@@ -1027,8 +1025,6 @@ static UINT_PTR WINAPI test_extension_wndproc(HWND dlg, UINT msg, WPARAM wParam,
     }
     return FALSE;
 }
-
-#define ARRAY_SIZE(a) (sizeof(a)/sizeof((a)[0]))
 
 static void test_extension_helper(OPENFILENAMEA* ofn, const char *filter,
                                   const char *expected_filename)
@@ -1119,9 +1115,6 @@ static void test_extension(void)
     test_extension_helper(&ofn, "TestFilter (.abc.def)\0.abc.def\0", "deadbeef.abc.def");
     test_extension_helper(&ofn, "TestFilter (*.*.def)\0*.*.def\0", "deadbeef.xyz");
 }
-
-#undef ARRAY_SIZE
-
 
 static BOOL WINAPI test_null_enum(HWND hwnd, LPARAM lParam)
 {

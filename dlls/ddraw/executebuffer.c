@@ -124,13 +124,20 @@ HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *buffer,
 
                 if (buffer->index_size < index_count)
                 {
-                    struct wined3d_buffer *new_buffer;
                     unsigned int new_size = max(buffer->index_size * 2, index_count);
+                    struct wined3d_buffer *new_buffer;
+                    struct wined3d_buffer_desc desc;
 
-                    hr = wined3d_buffer_create_ib(device->wined3d_device, new_size * sizeof(*indices),
-                            WINED3DUSAGE_DYNAMIC | WINED3DUSAGE_WRITEONLY, WINED3D_POOL_DEFAULT,
-                            NULL, &ddraw_null_wined3d_parent_ops, &new_buffer);
-                    if (FAILED(hr))
+                    desc.byte_width = new_size * sizeof(*indices);
+                    desc.usage = WINED3DUSAGE_DYNAMIC | WINED3DUSAGE_WRITEONLY | WINED3DUSAGE_STATICDECL;
+                    desc.bind_flags = WINED3D_BIND_INDEX_BUFFER;
+                    desc.access = WINED3D_RESOURCE_ACCESS_GPU
+                            | WINED3D_RESOURCE_ACCESS_MAP_R | WINED3D_RESOURCE_ACCESS_MAP_W;
+                    desc.misc_flags = 0;
+                    desc.structure_byte_stride = 0;
+
+                    if (FAILED(hr = wined3d_buffer_create(device->wined3d_device, &desc,
+                            NULL, NULL, &ddraw_null_wined3d_parent_ops, &new_buffer)))
                         return hr;
 
                     buffer->index_size = new_size;
@@ -146,9 +153,8 @@ HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *buffer,
 
                 box.left = index_pos * sizeof(*indices);
                 box.right = (index_pos + index_count) * sizeof(*indices);
-                hr = wined3d_resource_map(wined3d_buffer_get_resource(buffer->index_buffer), 0,
-                        &map_desc, &box, index_pos ? WINED3D_MAP_NOOVERWRITE : WINED3D_MAP_DISCARD);
-                if (FAILED(hr))
+                if (FAILED(hr = wined3d_resource_map(wined3d_buffer_get_resource(buffer->index_buffer), 0, &map_desc,
+                        &box, WINED3D_MAP_WRITE | (index_pos ? WINED3D_MAP_NOOVERWRITE : WINED3D_MAP_DISCARD))))
                     return hr;
                 indices = map_desc.data;
 
@@ -339,7 +345,7 @@ HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *buffer,
                             wined3d_device_copy_sub_resource_region(device->wined3d_device,
                                     wined3d_buffer_get_resource(buffer->dst_vertex_buffer), 0,
                                     ci->wDest * sizeof(D3DTLVERTEX), 0, 0,
-                                    wined3d_buffer_get_resource(buffer->src_vertex_buffer), 0, &box);
+                                    wined3d_buffer_get_resource(buffer->src_vertex_buffer), 0, &box, 0);
                             break;
 
                         default:
@@ -502,7 +508,7 @@ static ULONG WINAPI d3d_execute_buffer_Release(IDirect3DExecuteBuffer *iface)
     if (!ref)
     {
         if (buffer->need_free)
-            HeapFree(GetProcessHeap(), 0, buffer->desc.lpData);
+            heap_free(buffer->desc.lpData);
         if (buffer->index_buffer)
             wined3d_buffer_decref(buffer->index_buffer);
         if (buffer->dst_vertex_buffer)
@@ -510,7 +516,7 @@ static ULONG WINAPI d3d_execute_buffer_Release(IDirect3DExecuteBuffer *iface)
             wined3d_buffer_decref(buffer->src_vertex_buffer);
             wined3d_buffer_decref(buffer->dst_vertex_buffer);
         }
-        HeapFree(GetProcessHeap(), 0, buffer);
+        heap_free(buffer);
     }
 
     return ref;
@@ -601,8 +607,15 @@ static HRESULT WINAPI d3d_execute_buffer_SetExecuteData(IDirect3DExecuteBuffer *
     struct wined3d_map_desc map_desc;
     struct wined3d_box box = {0};
     HRESULT hr;
+    DWORD buf_size = buffer->desc.dwBufferSize, copy_size;
 
     TRACE("iface %p, data %p.\n", iface, data);
+
+    if (data->dwSize != sizeof(*data))
+    {
+        WARN("data->dwSize is %u, returning DDERR_INVALIDPARAMS.\n", data->dwSize);
+        return DDERR_INVALIDPARAMS;
+    }
 
     /* Skip past previous vertex data. */
     buffer->src_vertex_pos += buffer->data.dwVertexCount;
@@ -611,17 +624,25 @@ static HRESULT WINAPI d3d_execute_buffer_SetExecuteData(IDirect3DExecuteBuffer *
     {
         unsigned int new_size = max(data->dwVertexCount, buffer->vertex_size * 2);
         struct wined3d_buffer *src_buffer, *dst_buffer;
+        struct wined3d_buffer_desc desc;
 
-        hr = wined3d_buffer_create_vb(buffer->d3ddev->wined3d_device, new_size * sizeof(D3DVERTEX),
-                WINED3DUSAGE_DYNAMIC | WINED3DUSAGE_WRITEONLY, WINED3D_POOL_SYSTEM_MEM,
-                NULL, &ddraw_null_wined3d_parent_ops, &src_buffer);
-        if (FAILED(hr))
+        desc.byte_width = new_size * sizeof(D3DVERTEX);
+        desc.usage = 0;
+        desc.bind_flags = WINED3D_BIND_VERTEX_BUFFER;
+        desc.access = WINED3D_RESOURCE_ACCESS_CPU | WINED3D_RESOURCE_ACCESS_MAP_R | WINED3D_RESOURCE_ACCESS_MAP_W;
+        desc.misc_flags = 0;
+        desc.structure_byte_stride = 0;
+
+        if (FAILED(hr = wined3d_buffer_create(buffer->d3ddev->wined3d_device, &desc,
+                NULL, NULL, &ddraw_null_wined3d_parent_ops, &src_buffer)))
             return hr;
 
-        hr = wined3d_buffer_create_vb(buffer->d3ddev->wined3d_device, new_size * sizeof(D3DTLVERTEX),
-                WINED3DUSAGE_STATICDECL, WINED3D_POOL_DEFAULT,
-                NULL, &ddraw_null_wined3d_parent_ops, &dst_buffer);
-        if (FAILED(hr))
+        desc.byte_width = new_size * sizeof(D3DTLVERTEX);
+        desc.usage = WINED3DUSAGE_STATICDECL;
+        desc.access = WINED3D_RESOURCE_ACCESS_GPU | WINED3D_RESOURCE_ACCESS_MAP_R | WINED3D_RESOURCE_ACCESS_MAP_W;
+
+        if (FAILED(hr = wined3d_buffer_create(buffer->d3ddev->wined3d_device, &desc,
+                NULL, NULL, &ddraw_null_wined3d_parent_ops, &dst_buffer)))
         {
             wined3d_buffer_decref(src_buffer);
             return hr;
@@ -642,17 +663,19 @@ static HRESULT WINAPI d3d_execute_buffer_SetExecuteData(IDirect3DExecuteBuffer *
         buffer->src_vertex_pos = 0;
     }
 
-    if (data->dwVertexCount)
+    if (data->dwVertexCount && (!buf_size || data->dwVertexOffset < buf_size))
     {
         box.left = buffer->src_vertex_pos * sizeof(D3DVERTEX);
         box.right = box.left + data->dwVertexCount * sizeof(D3DVERTEX);
-        hr = wined3d_resource_map(wined3d_buffer_get_resource(buffer->src_vertex_buffer), 0,
-                &map_desc, &box, buffer->src_vertex_pos ? WINED3D_MAP_NOOVERWRITE : WINED3D_MAP_DISCARD);
-        if (FAILED(hr))
+        if (FAILED(hr = wined3d_resource_map(wined3d_buffer_get_resource(buffer->src_vertex_buffer),
+                0, &map_desc, &box, WINED3D_MAP_WRITE)))
             return hr;
 
-        memcpy(map_desc.data, ((BYTE *)buffer->desc.lpData) + data->dwVertexOffset,
-                data->dwVertexCount * sizeof(D3DVERTEX));
+        copy_size = data->dwVertexCount * sizeof(D3DVERTEX);
+        if (buf_size)
+            copy_size = min(copy_size, buf_size - data->dwVertexOffset);
+
+        memcpy(map_desc.data, ((BYTE *)buffer->desc.lpData) + data->dwVertexOffset, copy_size);
 
         wined3d_resource_unmap(wined3d_buffer_get_resource(buffer->src_vertex_buffer), 0);
     }
@@ -680,12 +703,11 @@ static HRESULT WINAPI d3d_execute_buffer_SetExecuteData(IDirect3DExecuteBuffer *
 static HRESULT WINAPI d3d_execute_buffer_GetExecuteData(IDirect3DExecuteBuffer *iface, D3DEXECUTEDATA *data)
 {
     struct d3d_execute_buffer *buffer = impl_from_IDirect3DExecuteBuffer(iface);
-    DWORD dwSize;
 
     TRACE("iface %p, data %p.\n", iface, data);
 
-    dwSize = data->dwSize;
-    memcpy(data, &buffer->data, dwSize);
+    /* Tests show that dwSize is ignored. */
+    memcpy(data, &buffer->data, sizeof(*data));
 
     if (TRACE_ON(ddraw))
     {
@@ -778,8 +800,7 @@ HRESULT d3d_execute_buffer_init(struct d3d_execute_buffer *execute_buffer,
     if (!execute_buffer->desc.lpData && execute_buffer->desc.dwBufferSize)
     {
         execute_buffer->need_free = TRUE;
-        execute_buffer->desc.lpData = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, execute_buffer->desc.dwBufferSize);
-        if (!execute_buffer->desc.lpData)
+        if (!(execute_buffer->desc.lpData = heap_alloc_zero(execute_buffer->desc.dwBufferSize)))
         {
             ERR("Failed to allocate execute buffer data.\n");
             return DDERR_OUTOFMEMORY;

@@ -663,8 +663,10 @@ static void test_SHCreateStreamOnFileEx_CopyTo(void)
     static const WCHAR prefix[] = { 'T', 'S', 'T', 0 };
 
     GetTempPathW(MAX_PATH, tmpPath);
-    GetTempFileNameW(tmpPath, prefix, 0, srcFileName);
-    GetTempFileNameW(tmpPath, prefix, 0, dstFileName);
+    ret = GetTempFileNameW(tmpPath, prefix, 0, srcFileName);
+    ok(ret != 0, "GetTempFileName failed, got error %d\n", GetLastError());
+    ret = GetTempFileNameW(tmpPath, prefix, 0, dstFileName);
+    ok(ret != 0, "GetTempFileName failed, got error %d\n", GetLastError());
 
     ret = SHCreateStreamOnFileEx(srcFileName, STGM_CREATE | STGM_READWRITE | STGM_DELETEONRELEASE, FILE_ATTRIBUTE_TEMPORARY, FALSE, NULL, &src);
     ok(SUCCEEDED(ret), "SHCreateStreamOnFileEx failed with ret=0x%08x\n", ret);
@@ -724,12 +726,12 @@ START_TEST(istream)
 
     int i, j, k;
 
-    for (i = 0; i != sizeof(stgm_access)/sizeof(stgm_access[0]); i++) {
-        for (j = 0; j != sizeof(stgm_sharing)/sizeof(stgm_sharing[0]); j ++) {
+    for (i = 0; i != ARRAY_SIZE(stgm_access); i++) {
+        for (j = 0; j != ARRAY_SIZE(stgm_sharing); j ++) {
             test_SHCreateStreamOnFileA(stgm_access[i], stgm_sharing[j]);
             test_SHCreateStreamOnFileW(stgm_access[i], stgm_sharing[j]);
 
-            for (k = 0; k != sizeof(stgm_flags)/sizeof(stgm_flags[0]); k++)
+            for (k = 0; k != ARRAY_SIZE(stgm_flags); k++)
                 test_SHCreateStreamOnFileEx(stgm_access[i], stgm_sharing[j] | stgm_flags[k]);
         }
     }

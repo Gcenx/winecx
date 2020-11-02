@@ -1,3 +1,4 @@
+# 1000 stub ADVAPI32_1000
 @ stdcall A_SHAFinal(ptr ptr)
 @ stdcall A_SHAInit(ptr)
 @ stdcall A_SHAUpdate(ptr ptr long)
@@ -30,7 +31,6 @@
 # @ stub AddUsersToEncryptedFileEx
 @ stdcall AdjustTokenGroups(long long ptr long ptr ptr)
 @ stdcall AdjustTokenPrivileges(long long ptr long ptr ptr)
-# @ stub ADVAPI32_1000
 @ stdcall AllocateAndInitializeSid(ptr long long long long long long long long long ptr)
 @ stdcall AllocateLocallyUniqueId(ptr)
 @ stdcall AreAllAccessesGranted(long long)
@@ -318,6 +318,7 @@
 @ stdcall GetAuditedPermissionsFromAclW(ptr ptr ptr ptr)
 @ stdcall GetCurrentHwProfileA(ptr)
 @ stdcall GetCurrentHwProfileW(ptr)
+@ stdcall GetDynamicTimeZoneInformationEffectiveYears(ptr ptr ptr) kernel32.GetDynamicTimeZoneInformationEffectiveYears
 @ stdcall GetEffectiveRightsFromAclA(ptr ptr ptr)
 @ stdcall GetEffectiveRightsFromAclW(ptr ptr ptr)
 # @ stub GetEncryptedFileMetadata
@@ -359,7 +360,6 @@
 @ stdcall GetSecurityInfo (long long long ptr ptr ptr ptr ptr)
 @ stdcall GetSecurityInfoExA (long long long str str ptr ptr ptr ptr)
 @ stdcall GetSecurityInfoExW (long long long wstr wstr ptr ptr ptr ptr)
-# @ stub GetDynamicTimeZoneInformationEffectiveYears
 @ stdcall GetServiceDisplayNameA(ptr str ptr ptr)
 @ stdcall GetServiceDisplayNameW(ptr wstr ptr ptr)
 @ stdcall GetServiceKeyNameA(long str ptr ptr)
@@ -468,8 +468,8 @@
 # @ stub LsaICLookupSidsWithCreds
 @ stdcall LsaLookupNames(long long ptr ptr ptr)
 @ stdcall LsaLookupNames2(ptr long long ptr ptr ptr)
-@ stub LsaLookupPrivilegeDisplayName
-# @ stub LsaLookupPrivilegeName
+@ stdcall LsaLookupPrivilegeDisplayName(long ptr ptr ptr)
+@ stdcall LsaLookupPrivilegeName(long ptr ptr)
 # @ stub LsaLookupPrivilegeValue
 @ stdcall LsaLookupSids(ptr long ptr ptr ptr)
 # @ stub LsaLookupSids2
@@ -553,11 +553,11 @@
 # @ stub OperationStart
 # @ stub PerfAddCounters
 # @ stub PerfCloseQueryHandle
-# @ stub PerfCreateInstance
+@ stdcall PerfCreateInstance(long ptr wstr long)
 # @ stub PerfDecrementULongCounterValue
 # @ stub PerfDecrementULongLongCounterValue
 # @ stub PerfDeleteCounters
-# @ stub PerfDeleteInstance
+@ stdcall PerfDeleteInstance(long ptr)
 # @ stub PerfEnumerateCounterSet
 # @ stub PerfEnumerateCounterSetInstances
 # @ stub PerfIncrementULongCounterValue
@@ -573,13 +573,13 @@
 # @ stub PerfRegQueryInfoKey
 # @ stub PerfRegQueryValue
 # @ stub PerfRegSetValue
-# @ stub PerfSetCounterRefValue
-# @ stub PerfSetCounterSetInfo
+@ stdcall PerfSetCounterRefValue(long ptr long ptr)
+@ stdcall PerfSetCounterSetInfo(long ptr long)
 # @ stub PerfSetULongCounterValue
 # @ stub PerfSetULongLongCounterValue
-# @ stub PerfStartProvider
-# @ stub PerfStartProviderEx
-# @ stub PerfStopProvider
+@ stdcall PerfStartProvider(ptr ptr ptr)
+@ stdcall PerfStartProviderEx(ptr ptr ptr)
+@ stdcall PerfStopProvider(long)
 @ stdcall PrivilegeCheck(ptr ptr ptr)
 @ stdcall PrivilegedServiceAuditAlarmA(str str long ptr long)
 @ stdcall PrivilegedServiceAuditAlarmW(wstr wstr long ptr long)

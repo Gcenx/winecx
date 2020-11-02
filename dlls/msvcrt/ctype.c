@@ -469,6 +469,7 @@ int CDECL MSVCRT__tolower(int c)
     return c + 0x20;  /* sic */
 }
 
+#if _MSVCR_VER>=120
 /*********************************************************************
  *              wctype (MSVCR120.@)
  */
@@ -492,9 +493,10 @@ unsigned short __cdecl wctype(const char *property)
     };
     unsigned int i;
 
-    for(i=0; i<sizeof(properties)/sizeof(properties[0]); i++)
+    for(i=0; i<ARRAY_SIZE(properties); i++)
         if(!strcmp(property, properties[i].name))
             return properties[i].mask;
 
     return 0;
 }
+#endif

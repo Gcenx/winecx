@@ -3,7 +3,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: Wine\n"
-"Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
+"Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
 "PO-Revision-Date: N/A\n"
 "Last-Translator: Ivan Vojtko\n"
@@ -48,7 +48,7 @@ msgstr ""
 msgid "&Support Information"
 msgstr "&Informácie o podpore"
 
-#: appwiz.rc:68 regedit.rc:45 regedit.rc:90
+#: appwiz.rc:68 regedit.rc:133 regedit.rc:232
 msgid "&Modify..."
 msgstr "&Zmeniť..."
 
@@ -61,20 +61,20 @@ msgstr "&Odstrániť"
 msgid "Support Information"
 msgstr "Informácie o podpore"
 
-#: appwiz.rc:78 avifil32.rc:54 comctl32.rc:65 comctl32.rc:55 comdlg32.rc:232
+#: appwiz.rc:78 avifil32.rc:54 comctl32.rc:71 comctl32.rc:55 comdlg32.rc:232
 #: comdlg32.rc:262 comdlg32.rc:305 comdlg32.rc:359 comdlg32.rc:398
 #: comdlg32.rc:452 credui.rc:52 cryptui.rc:263 cryptui.rc:275 cryptui.rc:365
 #: dinput.rc:46 ieframe.rc:96 localui.rc:44 localui.rc:57 mpr.rc:49
 #: msacm32.rc:53 mshtml.rc:47 mshtml.rc:57 msvfw32.rc:36 oledlg.rc:62
 #: oledlg.rc:94 serialui.rc:41 setupapi.rc:59 shell32.rc:276 shell32.rc:300
-#: shell32.rc:322 shell32.rc:341 shlwapi.rc:44 user32.rc:83 user32.rc:98
-#: wininet.rc:51 wininet.rc:71 winspool.rc:42 net.rc:47 notepad.rc:117
-#: oleview.rc:161 oleview.rc:174 progman.rc:106 progman.rc:124 progman.rc:142
-#: progman.rc:158 progman.rc:180 progman.rc:199 progman.rc:216 regedit.rc:263
-#: regedit.rc:274 regedit.rc:287 regedit.rc:303 regedit.rc:316 regedit.rc:329
-#: taskmgr.rc:442 taskmgr.rc:517 winecfg.rc:214 winecfg.rc:224
+#: shell32.rc:322 shell32.rc:341 shlwapi.rc:44 twain.rc:32 user32.rc:83
+#: user32.rc:98 wininet.rc:51 wininet.rc:71 winspool.rc:42 net.rc:47
+#: notepad.rc:117 oleview.rc:161 oleview.rc:174 progman.rc:106 progman.rc:124
+#: progman.rc:142 progman.rc:158 progman.rc:180 progman.rc:199 progman.rc:216
+#: regedit.rc:296 regedit.rc:307 regedit.rc:320 regedit.rc:336 regedit.rc:349
+#: regedit.rc:362 taskmgr.rc:442 taskmgr.rc:517 winecfg.rc:214 winecfg.rc:224
 #: wineconsole.rc:135 winefile.rc:128 winefile.rc:151 winefile.rc:181
-#: winemine.rc:71 winemine.rc:81 winemine.rc:95 wordpad.rc:215 wordpad.rc:226
+#: winemine.rc:73 winemine.rc:84 winemine.rc:98 wordpad.rc:215 wordpad.rc:226
 #: wordpad.rc:244 wordpad.rc:257
 msgid "OK"
 msgstr "OK"
@@ -128,7 +128,7 @@ msgid ""
 "install it for you.\n"
 "\n"
 "Note: it is recommended to use your distribution's packages instead. See <a "
-"href=\"http://wiki.winehq.org/Gecko\">http://wiki.winehq.org/Gecko</a> for "
+"href=\"https://wiki.winehq.org/Gecko\">https://wiki.winehq.org/Gecko</a> for "
 "details."
 msgstr ""
 "Wine nemohol nájsť balíček Gecko ktorý je potrebný pre aplikácie, obsahujúce "
@@ -136,30 +136,30 @@ msgstr ""
 "nainštalovať pre Vás.\n"
 "\n"
 "Poznámka: odporúča sa použiť balíček Vašej distribúcie. Pozrite <a href="
-"\"http://wiki.winehq.org/Gecko\">http://wiki.winehq.org/Gecko</a> pre "
+"\"https://wiki.winehq.org/Gecko\">https://wiki.winehq.org/Gecko</a> pre "
 "bližšie informácie."
 
 #: appwiz.rc:109 appwiz.rc:124
 msgid "&Install"
 msgstr "&Inštalovať"
 
-#: appwiz.rc:110 appwiz.rc:125 avifil32.rc:55 browseui.rc:40 comctl32.rc:66
-#: comctl32.rc:81 comctl32.rc:56 comdlg32.rc:171 comdlg32.rc:193
+#: appwiz.rc:110 appwiz.rc:125 avifil32.rc:55 browseui.rc:40 comctl32.rc:72
+#: comctl32.rc:87 comctl32.rc:56 comdlg32.rc:171 comdlg32.rc:193
 #: comdlg32.rc:211 comdlg32.rc:233 comdlg32.rc:263 comdlg32.rc:306
 #: comdlg32.rc:328 comdlg32.rc:348 comdlg32.rc:360 comdlg32.rc:399
-#: comdlg32.rc:453 comdlg32.rc:478 comdlg32.rc:501 credui.rc:53 cryptui.rc:264
-#: cryptui.rc:276 cryptui.rc:366 dinput.rc:47 ieframe.rc:97 inetcpl.rc:81
-#: localui.rc:45 localui.rc:58 mpr.rc:50 msacm32.rc:54 mshtml.rc:48
-#: mshtml.rc:58 msvfw32.rc:37 oledlg.rc:63 oledlg.rc:95 serialui.rc:42
-#: setupapi.rc:42 setupapi.rc:60 shell32.rc:277 shell32.rc:301 shell32.rc:312
-#: shell32.rc:342 shlwapi.rc:45 user32.rc:84 user32.rc:99 wininet.rc:52
-#: wininet.rc:72 winspool.rc:43 notepad.rc:118 oleview.rc:162 oleview.rc:175
-#: progman.rc:107 progman.rc:125 progman.rc:143 progman.rc:159 progman.rc:181
-#: progman.rc:200 progman.rc:217 regedit.rc:264 regedit.rc:275 regedit.rc:288
-#: regedit.rc:304 regedit.rc:317 regedit.rc:330 taskmgr.rc:443 taskmgr.rc:518
-#: wineboot.rc:34 winecfg.rc:215 winecfg.rc:225 wineconsole.rc:136
-#: winefile.rc:129 winefile.rc:152 winefile.rc:182 winemine.rc:96
-#: wordpad.rc:216 wordpad.rc:227 wordpad.rc:245 wordpad.rc:258
+#: comdlg32.rc:453 comdlg32.rc:478 comdlg32.rc:504 comdlg32.rc:527 credui.rc:53
+#: cryptui.rc:264 cryptui.rc:276 cryptui.rc:366 dinput.rc:47 ieframe.rc:97
+#: inetcpl.rc:81 localui.rc:45 localui.rc:58 mpr.rc:50 msacm32.rc:54
+#: mshtml.rc:48 mshtml.rc:58 msvfw32.rc:37 oledlg.rc:63 oledlg.rc:95
+#: serialui.rc:42 setupapi.rc:42 setupapi.rc:60 shell32.rc:277 shell32.rc:301
+#: shell32.rc:312 shell32.rc:342 shlwapi.rc:45 twain.rc:33 user32.rc:84
+#: user32.rc:99 wininet.rc:52 wininet.rc:72 winspool.rc:43 notepad.rc:118
+#: oleview.rc:162 oleview.rc:175 progman.rc:107 progman.rc:125 progman.rc:143
+#: progman.rc:159 progman.rc:181 progman.rc:200 progman.rc:217 regedit.rc:297
+#: regedit.rc:308 regedit.rc:321 regedit.rc:337 regedit.rc:350 regedit.rc:363
+#: taskmgr.rc:443 taskmgr.rc:518 wineboot.rc:34 winecfg.rc:215 winecfg.rc:225
+#: wineconsole.rc:136 winefile.rc:129 winefile.rc:152 winefile.rc:182
+#: winemine.rc:99 wordpad.rc:216 wordpad.rc:227 wordpad.rc:245 wordpad.rc:258
 msgid "Cancel"
 msgstr "Zrušiť"
 
@@ -177,14 +177,15 @@ msgstr "Wine Gecko inštalátor"
 #| "install it for you.\n"
 #| "\n"
 #| "Note: it is recommended to use your distribution's packages instead. See "
-#| "<a href=\"http://wiki.winehq.org/Gecko\">http://wiki.winehq.org/Gecko</a> "
-#| "for details."
+#| "<a href=\"https://wiki.winehq.org/Gecko\">https://wiki.winehq.org/Gecko</"
+#| "a> for details."
 msgid ""
-"Wine could not find a Mono package which is needed for .NET applications to "
-"work correctly. Wine can automatically download and install it for you.\n"
+"Wine could not find a wine-mono package which is needed for .NET "
+"applications to work correctly. Wine can automatically download and install "
+"it for you.\n"
 "\n"
 "Note: it is recommended to use your distribution's packages instead. See <a "
-"href=\"http://wiki.winehq.org/Mono\">http://wiki.winehq.org/Mono</a> for "
+"href=\"https://wiki.winehq.org/Mono\">https://wiki.winehq.org/Mono</a> for "
 "details."
 msgstr ""
 "Wine nemohol nájsť balíček Gecko ktorý je potrebný pre aplikácie, obsahujúce "
@@ -192,7 +193,7 @@ msgstr ""
 "nainštalovať pre Vás.\n"
 "\n"
 "Poznámka: odporúča sa použiť balíček Vašej distribúcie. Pozrite <a href="
-"\"http://wiki.winehq.org/Gecko\">http://wiki.winehq.org/Gecko</a> pre "
+"\"https://wiki.winehq.org/Gecko\">https://wiki.winehq.org/Gecko</a> pre "
 "bližšie informácie."
 
 #: appwiz.rc:31
@@ -223,7 +224,7 @@ msgstr ""
 msgid "Not specified"
 msgstr "Nešpecifikovaný"
 
-#: appwiz.rc:38 shell32.rc:144 shell32.rc:241 regedit.rc:125 winefile.rc:107
+#: appwiz.rc:38 shell32.rc:144 shell32.rc:241 regedit.rc:147 winefile.rc:107
 msgid "Name"
 msgstr "Názov"
 
@@ -244,7 +245,7 @@ msgid "Programs (*.exe)"
 msgstr "Programy (*.exe)"
 
 #: appwiz.rc:43 avifil32.rc:33 cryptui.rc:83 shell32.rc:199 notepad.rc:76
-#: oleview.rc:103 progman.rc:82 regedit.rc:200 winedbg.rc:42 winhlp32.rc:90
+#: oleview.rc:103 progman.rc:82 regedit.rc:225 winedbg.rc:43 winhlp32.rc:90
 msgid "All files (*.*)"
 msgstr "Všetky súbory (*.*)"
 
@@ -324,78 +325,78 @@ msgstr "nekomprimované"
 msgid "Canceling..."
 msgstr "Ruším..."
 
-#: comctl32.rc:62 winefile.rc:157
+#: comctl32.rc:68 winefile.rc:157
 msgid "Properties for %s"
 msgstr "Vlastnosti pre %s"
 
-#: comctl32.rc:67 comdlg32.rc:264
+#: comctl32.rc:73 comdlg32.rc:264
 msgid "&Apply"
 msgstr "&Použiť"
 
-#: comctl32.rc:68 comctl32.rc:82 comdlg32.rc:307 user32.rc:88
+#: comctl32.rc:74 comctl32.rc:88 comdlg32.rc:307 user32.rc:88
 msgid "Help"
 msgstr "Pomocník"
 
-#: comctl32.rc:75
+#: comctl32.rc:81
 msgid "Wizard"
 msgstr "Sprievodca"
 
-#: comctl32.rc:78
+#: comctl32.rc:84
 msgid "< &Back"
 msgstr "< &Naspäť"
 
-#: comctl32.rc:79
+#: comctl32.rc:85
 msgid "&Next >"
 msgstr "&Ďalej >"
 
-#: comctl32.rc:80
+#: comctl32.rc:86
 msgid "Finish"
 msgstr "Dokončiť"
 
-#: comctl32.rc:91
+#: comctl32.rc:97
 msgid "Customize Toolbar"
 msgstr "Prispôsobenie panela nástrojov"
 
-#: comctl32.rc:94 comctl32.rc:57 cryptui.rc:351 ieframe.rc:43 oleview.rc:83
+#: comctl32.rc:100 comctl32.rc:57 cryptui.rc:351 ieframe.rc:43 oleview.rc:83
 #: oleview.rc:187 oleview.rc:200 oleview.rc:212 taskmgr.rc:139
 msgid "&Close"
 msgstr "&Zavrieť"
 
-#: comctl32.rc:95
+#: comctl32.rc:101
 msgid "R&eset"
 msgstr "Pr&edvolené"
 
-#: comctl32.rc:96 comdlg32.rc:172 comdlg32.rc:194 comdlg32.rc:265
+#: comctl32.rc:102 comdlg32.rc:172 comdlg32.rc:194 comdlg32.rc:265
 #: comdlg32.rc:329 comdlg32.rc:349 comdlg32.rc:361 comdlg32.rc:479
-#: comdlg32.rc:502 ieframe.rc:58 msacm32.rc:52 oledlg.rc:96 shell32.rc:128
-#: clock.rc:44 notepad.rc:60 notepad.rc:119 oleview.rc:72 progman.rc:55
-#: progman.rc:108 progman.rc:126 progman.rc:144 progman.rc:160 progman.rc:184
-#: progman.rc:202 progman.rc:219 regedit.rc:79 taskmgr.rc:87 winefile.rc:82
-#: winemine.rc:51 winhlp32.rc:57 wordpad.rc:102
+#: comdlg32.rc:505 comdlg32.rc:528 ieframe.rc:58 msacm32.rc:52 oledlg.rc:96
+#: shell32.rc:128 clock.rc:44 notepad.rc:60 notepad.rc:119 oleview.rc:72
+#: progman.rc:55 progman.rc:108 progman.rc:126 progman.rc:144 progman.rc:160
+#: progman.rc:184 progman.rc:202 progman.rc:219 regedit.rc:77 taskmgr.rc:87
+#: winefile.rc:82 winemine.rc:53 winhlp32.rc:57 wordpad.rc:102
 msgid "&Help"
 msgstr "&Pomoc"
 
-#: comctl32.rc:97
+#: comctl32.rc:103
 msgid "Move &Up"
 msgstr "Posunúť na&hor"
 
-#: comctl32.rc:98
+#: comctl32.rc:104
 msgid "Move &Down"
 msgstr "Posunúť na&dol"
 
-#: comctl32.rc:99
+#: comctl32.rc:105
 msgid "A&vailable buttons:"
 msgstr "D&ostuné tlačidlá:"
 
-#: comctl32.rc:101
+#: comctl32.rc:107
 msgid "&Add ->"
 msgstr "Prid&ať ->"
 
-#: comctl32.rc:102
+#: comctl32.rc:108
 msgid "<- &Remove"
 msgstr "<- Odob&rať"
 
-#: comctl32.rc:103
+#: comctl32.rc:109
 msgid "&Toolbar buttons:"
 msgstr "&Tlačidlá panela:"
 
@@ -420,8 +421,20 @@ msgstr "&Nie"
 msgid "&Retry"
 msgstr "&Skúsiť znova"
 
-#: comctl32.rc:31 cryptui.rc:230 regedit.rc:253 taskmgr.rc:434 winedbg.rc:60
-#: winedbg.rc:75 wordpad.rc:180
+#: comctl32.rc:62
+#, fuzzy
+#| msgid "Details"
+msgid "Hide details"
+msgstr "Detaily"
+
+#: comctl32.rc:63
+#, fuzzy
+#| msgid "Details"
+msgid "See details"
+msgstr "Detaily"
+
+#: comctl32.rc:31 cryptui.rc:230 regedit.rc:286 taskmgr.rc:434 winedbg.rc:61
+#: winedbg.rc:76 wordpad.rc:180
 msgid "Close"
 msgstr "Zavrieť"
 
@@ -433,8 +446,8 @@ msgstr "Dnes:"
 msgid "Go to today"
 msgstr "Choď na dnešok"
 
-#: comdlg32.rc:157 comdlg32.rc:170 comdlg32.rc:459 comdlg32.rc:485
-#: shell32.rc:167 oleview.rc:101
+#: comdlg32.rc:157 comdlg32.rc:170 comdlg32.rc:459 comdlg32.rc:484
+#: comdlg32.rc:511 shell32.rc:167 oleview.rc:101
 msgid "Open"
 msgstr "Otvoriť"
 
@@ -454,7 +467,8 @@ msgstr "&Typ zobrazených súborov:"
 msgid "Dri&ves:"
 msgstr "&Diskové jednotky:"
 
-#: comdlg32.rc:173 comdlg32.rc:195 winefile.rc:173
+#: comdlg32.rc:173 comdlg32.rc:195 shell32.rc:370 shell32.rc:407
+#: winefile.rc:173
 msgid "&Read Only"
 msgstr "&Len na čítanie"
 
@@ -479,7 +493,7 @@ msgstr "Tlačiareň:"
 msgid "Print range"
 msgstr "Rozsah tlače"
 
-#: comdlg32.rc:207 comdlg32.rc:384 regedit.rc:235
+#: comdlg32.rc:207 comdlg32.rc:384 regedit.rc:268
 msgid "&All"
 msgstr "Vytlačiť &všetko"
 
@@ -649,7 +663,7 @@ msgstr "Prid&ať medzi vlastné farby"
 msgid "&Define Custom Colors >>"
 msgstr "&Definovať vlastné farby >>"
 
-#: comdlg32.rc:316 regedit.rc:242 regedit.rc:252
+#: comdlg32.rc:316 regedit.rc:275 regedit.rc:285
 msgid "Find"
 msgstr "Hľadanie"
 
@@ -802,31 +816,31 @@ msgstr "&Spodné:"
 msgid "P&rinter..."
 msgstr "T&lačiareň..."
 
-#: comdlg32.rc:462
+#: comdlg32.rc:462 comdlg32.rc:487
 msgid "Look &in:"
 msgstr "Hľadať &v:"
 
-#: comdlg32.rc:468
+#: comdlg32.rc:468 comdlg32.rc:494
 msgid "File &name:"
 msgstr "&Názov súboru:"
 
-#: comdlg32.rc:472
+#: comdlg32.rc:472 comdlg32.rc:498
 msgid "Files of &type:"
 msgstr "&Súbory typu:"
 
-#: comdlg32.rc:475
+#: comdlg32.rc:475 comdlg32.rc:501
 msgid "Open as &read-only"
 msgstr "Otvo&riť iba na čítanie"
 
-#: comdlg32.rc:477 comdlg32.rc:495 shdoclc.rc:127 shell32.rc:99
+#: comdlg32.rc:477 comdlg32.rc:503 comdlg32.rc:521 shdoclc.rc:127 shell32.rc:99
 msgid "&Open"
 msgstr "&Otvoriť"
 
-#: comdlg32.rc:488
+#: comdlg32.rc:514
 msgid "File name:"
 msgstr "Súbor:"
 
-#: comdlg32.rc:491
+#: comdlg32.rc:517
 msgid "Files of type:"
 msgstr "Súbory typu:"
 
@@ -2095,7 +2109,7 @@ msgstr ""
 msgid "Notice Text="
 msgstr ""
 
-#: cryptui.rc:180 cryptui.rc:235 inetcpl.rc:46
+#: cryptui.rc:180 cryptui.rc:235 inetcpl.rc:46 shell32.rc:348 shell32.rc:377
 msgid "General"
 msgstr ""
 
@@ -2217,7 +2231,7 @@ msgstr ""
 msgid "&File name:"
 msgstr "&Súbor:"
 
-#: cryptui.rc:296 cryptui.rc:318 cryptui.rc:432 winecfg.rc:309
+#: cryptui.rc:296 cryptui.rc:318 cryptui.rc:432 winecfg.rc:313
 msgid "B&rowse..."
 msgstr "P&rechádzaj..."
 
@@ -2277,7 +2291,7 @@ msgstr ""
 msgid "&Import..."
 msgstr "&Importovať..."
 
-#: cryptui.rc:345 regedit.rc:112
+#: cryptui.rc:345 regedit.rc:91 regedit.rc:112
 msgid "&Export..."
 msgstr "&Exportovať..."
 
@@ -2290,7 +2304,7 @@ msgid "Certificate intended purposes"
 msgstr ""
 
 #: cryptui.rc:350 ieframe.rc:45 shell32.rc:43 shell32.rc:120 oleview.rc:59
-#: oleview.rc:61 oleview.rc:85 regedit.rc:66 taskmgr.rc:52 winefile.rc:48
+#: oleview.rc:61 oleview.rc:85 regedit.rc:64 taskmgr.rc:52 winefile.rc:48
 #: wordpad.rc:69
 msgid "&View"
 msgstr "&Ukáž"
@@ -2888,22 +2902,6 @@ msgstr ""
 msgid "Note: The private key for this certificate is not exportable."
 msgstr ""
 
-#: devenum.rc:33
-msgid "Default DirectSound"
-msgstr ""
-
-#: devenum.rc:34
-msgid "DirectSound: %s"
-msgstr ""
-
-#: devenum.rc:35
-msgid "Default WaveOut Device"
-msgstr ""
-
-#: devenum.rc:36
-msgid "Default MidiOut Device"
-msgstr ""
-
 #: dinput.rc:43
 msgid "Configure Devices"
 msgstr "Nastaviť zariadenia"
@@ -3202,7 +3200,7 @@ msgstr ""
 msgid "&File"
 msgstr "&Súbor"
 
-#: ieframe.rc:30 regedit.rc:47 regedit.rc:98
+#: ieframe.rc:30 regedit.rc:45 regedit.rc:97 regedit.rc:119
 msgid "&New"
 msgstr "&Nový"
 
@@ -3242,11 +3240,11 @@ msgstr ""
 msgid "&Address bar"
 msgstr ""
 
-#: ieframe.rc:53 regedit.rc:74
+#: ieframe.rc:53 regedit.rc:72
 msgid "&Favorites"
 msgstr "&Obľúbené"
 
-#: ieframe.rc:55 regedit.rc:76
+#: ieframe.rc:55 regedit.rc:74
 msgid "&Add to Favorites..."
 msgstr "&Pridať k obľúbeným..."
 
@@ -3396,6 +3394,45 @@ msgstr "Certifikáty..."
 #: inetcpl.rc:115
 msgid "Publishers..."
 msgstr "Distribútori..."
+
+#: inetcpl.rc:123
+#, fuzzy
+#| msgid "Activation"
+msgid "Connections"
+msgstr "Aktivácia"
+
+#: inetcpl.rc:125
+#, fuzzy
+msgid "Automatic configuration"
+msgstr "Informácie"
+
+#: inetcpl.rc:126
+msgid "Use Web Proxy Auto-Discovery (WPAD)"
+msgstr ""
+
+#: inetcpl.rc:127
+msgid "Use Proxy Auto-Config (PAC) script"
+msgstr ""
+
+#: inetcpl.rc:128 inetcpl.rc:132
+#, fuzzy
+#| msgid "Address"
+msgid "Address:"
+msgstr "Adresa"
+
+#: inetcpl.rc:130
+#, fuzzy
+#| msgid "&Local server"
+msgid "Proxy server"
+msgstr "Lokálny server"
+
+#: inetcpl.rc:131
+msgid "Use a proxy server"
+msgstr ""
+
+#: inetcpl.rc:134
+msgid "Port:"
+msgstr ""
 
 #: inetcpl.rc:31
 msgid "Internet Settings"
@@ -3660,6 +3697,24 @@ msgstr ""
 msgid "Array object expected"
 msgstr ""
 
+#: jscript.rc:69
+msgid ""
+"'writable' attribute on the property descriptor cannot be set to 'true' on "
+"this object"
+msgstr ""
+
+#: jscript.rc:70
+msgid "Cannot redefine non-configurable property '|'"
+msgstr ""
+
+#: jscript.rc:71
+msgid "Cannot modify non-writable property '|'"
+msgstr ""
+
+#: jscript.rc:72
+msgid "Property cannot have both accessors and a value"
+msgstr ""
+
 #: ../../include/wine/wine_common_ver.rc:129
 msgid "Wine kernel DLL"
 msgstr ""
@@ -3668,3018 +3723,3022 @@ msgstr ""
 msgid "Wine"
 msgstr "Wine"
 
-#: winerror.mc:26
+#: winerror.mc:28
 msgid "Success.\n"
 msgstr "Úspech.\n"
 
-#: winerror.mc:31
+#: winerror.mc:33
 msgid "Invalid function.\n"
 msgstr "Nesprávna funkcia.\n"
 
-#: winerror.mc:36
+#: winerror.mc:38
 msgid "File not found.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:41
+#: winerror.mc:43
 msgid "Path not found.\n"
 msgstr "Cesta nenájdená.\n"
 
-#: winerror.mc:46
+#: winerror.mc:48
 msgid "Too many open files.\n"
 msgstr "Prílš veľa otvorení súborov.\n"
 
-#: winerror.mc:51
+#: winerror.mc:53
 msgid "Access denied.\n"
 msgstr "Prístup zamietnutý.\n"
 
-#: winerror.mc:56
+#: winerror.mc:58
 msgid "Invalid handle.\n"
 msgstr ""
 
-#: winerror.mc:61
+#: winerror.mc:63
 msgid "Memory trashed.\n"
 msgstr ""
 
-#: winerror.mc:66
+#: winerror.mc:68
 msgid "Not enough memory.\n"
 msgstr "Nedostatok pamäte.\n"
 
-#: winerror.mc:71
+#: winerror.mc:73
 msgid "Invalid block.\n"
 msgstr ""
 
-#: winerror.mc:76
+#: winerror.mc:78
 msgid "Bad environment.\n"
 msgstr ""
 
-#: winerror.mc:81
+#: winerror.mc:83
 msgid "Bad format.\n"
 msgstr "Zlý formát.\n"
 
-#: winerror.mc:86
+#: winerror.mc:88
 msgid "Invalid access.\n"
 msgstr "Nesprávny prístup.\n"
 
-#: winerror.mc:91
+#: winerror.mc:93
 msgid "Invalid data.\n"
 msgstr "Nesprávne údaje.\n"
 
-#: winerror.mc:96
+#: winerror.mc:98
 msgid "Out of memory.\n"
 msgstr "Nedostatok pamäte.\n"
 
-#: winerror.mc:101
+#: winerror.mc:103
 msgid "Invalid drive.\n"
 msgstr "Nesprávne zariadenie.\n"
 
-#: winerror.mc:106
+#: winerror.mc:108
 msgid "Can't delete current directory.\n"
 msgstr "Nemôžem zmazať aktuálny priečinok.\n"
 
-#: winerror.mc:111
+#: winerror.mc:113
 msgid "Not same device.\n"
 msgstr ""
 
-#: winerror.mc:116
+#: winerror.mc:118
 msgid "No more files.\n"
 msgstr ""
 
-#: winerror.mc:121
+#: winerror.mc:123
 msgid "Write protected.\n"
 msgstr "Ochrana proti zápisu.\n"
 
-#: winerror.mc:126
+#: winerror.mc:128
 msgid "Bad unit.\n"
 msgstr ""
 
-#: winerror.mc:131
+#: winerror.mc:133
 msgid "Not ready.\n"
 msgstr "Nepripravené.\n"
 
-#: winerror.mc:136
+#: winerror.mc:138
 msgid "Bad command.\n"
 msgstr ""
 
-#: winerror.mc:141
+#: winerror.mc:143
 msgid "CRC error.\n"
 msgstr ""
 
-#: winerror.mc:146
+#: winerror.mc:148
 msgid "Bad length.\n"
 msgstr "Zlá dĺžka.\n"
 
-#: winerror.mc:151 winerror.mc:526
+#: winerror.mc:153 winerror.mc:528
 msgid "Seek error.\n"
 msgstr ""
 
-#: winerror.mc:156
+#: winerror.mc:158
 msgid "Not DOS disk.\n"
 msgstr ""
 
-#: winerror.mc:161
+#: winerror.mc:163
 msgid "Sector not found.\n"
 msgstr "Sektor nenájdený.\n"
 
-#: winerror.mc:166
+#: winerror.mc:168
 msgid "Out of paper.\n"
 msgstr "Chýba papier; .\n"
 
-#: winerror.mc:171
+#: winerror.mc:173
 msgid "Write fault.\n"
 msgstr "Chyba zapisovania.\n"
 
-#: winerror.mc:176
+#: winerror.mc:178
 msgid "Read fault.\n"
 msgstr "Chyba čítania.\n"
 
-#: winerror.mc:181
+#: winerror.mc:183
 msgid "General failure.\n"
 msgstr "Všeobecná chyba.\n"
 
-#: winerror.mc:186
+#: winerror.mc:188
 msgid "Sharing violation.\n"
 msgstr ""
 
-#: winerror.mc:191
+#: winerror.mc:193
 msgid "Lock violation.\n"
 msgstr ""
 
-#: winerror.mc:196
+#: winerror.mc:198
 msgid "Wrong disk.\n"
 msgstr ""
 
-#: winerror.mc:201
+#: winerror.mc:203
 msgid "Sharing buffer exceeded.\n"
 msgstr ""
 
-#: winerror.mc:206
+#: winerror.mc:208
 msgid "End of file.\n"
 msgstr "Koniec súboru.\n"
 
-#: winerror.mc:211 winerror.mc:436
+#: winerror.mc:213 winerror.mc:438
 msgid "Disk full.\n"
 msgstr ""
 
-#: winerror.mc:216
+#: winerror.mc:218
 msgid "Request not supported.\n"
 msgstr ""
 
-#: winerror.mc:221
+#: winerror.mc:223
 msgid "Remote machine not listening.\n"
 msgstr ""
 
-#: winerror.mc:226
+#: winerror.mc:228
 msgid "Duplicate network name.\n"
 msgstr ""
 
-#: winerror.mc:231
+#: winerror.mc:233
 msgid "Bad network path.\n"
 msgstr "Zlá sieťová cesta.\n"
 
-#: winerror.mc:236
+#: winerror.mc:238
 msgid "Network busy.\n"
 msgstr "Sieť zaneprázdnená.\n"
 
-#: winerror.mc:241
+#: winerror.mc:243
 msgid "Device does not exist.\n"
 msgstr "Zariadenie neexistuje.\n"
 
-#: winerror.mc:246
+#: winerror.mc:248
 msgid "Too many commands.\n"
 msgstr ""
 
-#: winerror.mc:251
+#: winerror.mc:253
 msgid "Adapter hardware error.\n"
 msgstr ""
 
-#: winerror.mc:256
+#: winerror.mc:258
 msgid "Bad network response.\n"
 msgstr "Zlá odpoveď siete.\n"
 
-#: winerror.mc:261
+#: winerror.mc:263
 msgid "Unexpected network error.\n"
 msgstr "Neočakávaná sieťová chyba.\n"
 
-#: winerror.mc:266
+#: winerror.mc:268
 msgid "Bad remote adapter.\n"
 msgstr ""
 
-#: winerror.mc:271
+#: winerror.mc:273
 msgid "Print queue full.\n"
 msgstr "Fronta na tlač je plná.\n"
 
-#: winerror.mc:276
+#: winerror.mc:278
 msgid "No spool space.\n"
 msgstr ""
 
-#: winerror.mc:281
+#: winerror.mc:283
 msgid "Print canceled.\n"
 msgstr "Tlač zrušená.\n"
 
-#: winerror.mc:286
+#: winerror.mc:288
 msgid "Network name deleted.\n"
 msgstr "Sieťové meno odstránené.\n"
 
-#: winerror.mc:291
+#: winerror.mc:293
 msgid "Network access denied.\n"
 msgstr ""
 
-#: winerror.mc:296
+#: winerror.mc:298
 msgid "Bad device type.\n"
 msgstr "Zlý druh zariadenia.\n"
 
-#: winerror.mc:301
+#: winerror.mc:303
 msgid "Bad network name.\n"
 msgstr "Zlé sieťové meno.\n"
 
-#: winerror.mc:306
+#: winerror.mc:308
 msgid "Too many network names.\n"
 msgstr ""
 
-#: winerror.mc:311
+#: winerror.mc:313
 msgid "Too many network sessions.\n"
 msgstr ""
 
-#: winerror.mc:316
+#: winerror.mc:318
 msgid "Sharing paused.\n"
 msgstr ""
 
-#: winerror.mc:321
+#: winerror.mc:323
 msgid "Request not accepted.\n"
 msgstr ""
 
-#: winerror.mc:326
+#: winerror.mc:328
 msgid "Redirector paused.\n"
 msgstr ""
 
-#: winerror.mc:331
+#: winerror.mc:333
 msgid "File exists.\n"
 msgstr "Súbor existuje.\n"
 
-#: winerror.mc:336
+#: winerror.mc:338
 msgid "Cannot create.\n"
 msgstr "Nemožno vytvoriť.\n"
 
-#: winerror.mc:341
+#: winerror.mc:343
 msgid "Int24 failure.\n"
 msgstr ""
 
-#: winerror.mc:346
+#: winerror.mc:348
 msgid "Out of structures.\n"
 msgstr ""
 
-#: winerror.mc:351
+#: winerror.mc:353
 msgid "Already assigned.\n"
 msgstr ""
 
-#: winerror.mc:356 winerror.mc:1711
+#: winerror.mc:358 winerror.mc:1713
 msgid "Invalid password.\n"
 msgstr "Nesprávne heslo.\n"
 
-#: winerror.mc:361
+#: winerror.mc:363
 msgid "Invalid parameter.\n"
 msgstr "Nesprávny parameter.\n"
 
-#: winerror.mc:366
+#: winerror.mc:368
 msgid "Net write fault.\n"
 msgstr ""
 
-#: winerror.mc:371
+#: winerror.mc:373
 msgid "No process slots.\n"
 msgstr ""
 
-#: winerror.mc:376
+#: winerror.mc:378
 msgid "Too many semaphores.\n"
 msgstr ""
 
-#: winerror.mc:381
+#: winerror.mc:383
 msgid "Exclusive semaphore already owned.\n"
 msgstr ""
 
-#: winerror.mc:386
+#: winerror.mc:388
 msgid "Semaphore is set.\n"
 msgstr ""
 
-#: winerror.mc:391
+#: winerror.mc:393
 msgid "Too many semaphore requests.\n"
 msgstr ""
 
-#: winerror.mc:396
+#: winerror.mc:398
 msgid "Invalid at interrupt time.\n"
 msgstr ""
 
-#: winerror.mc:401
+#: winerror.mc:403
 msgid "Semaphore owner died.\n"
 msgstr ""
 
-#: winerror.mc:406
+#: winerror.mc:408
 msgid "Semaphore user limit.\n"
 msgstr ""
 
-#: winerror.mc:411
+#: winerror.mc:413
 msgid "Insert disk for drive %1.\n"
 msgstr ""
 
-#: winerror.mc:416
+#: winerror.mc:418
 msgid "Drive locked.\n"
 msgstr ""
 
-#: winerror.mc:421
+#: winerror.mc:423
 msgid "Broken pipe.\n"
 msgstr ""
 
-#: winerror.mc:426
+#: winerror.mc:428
 msgid "Open failed.\n"
 msgstr "Otvorenie sa nepodarilo.\n"
 
-#: winerror.mc:431
+#: winerror.mc:433
 msgid "Buffer overflow.\n"
 msgstr "Pretečenie zásobníka.\n"
 
-#: winerror.mc:441
+#: winerror.mc:443
 msgid "No more search handles.\n"
 msgstr ""
 
-#: winerror.mc:446
+#: winerror.mc:448
 msgid "Invalid target handle.\n"
 msgstr ""
 
-#: winerror.mc:451
+#: winerror.mc:453
 msgid "Invalid IOCTL.\n"
 msgstr ""
 
-#: winerror.mc:456
+#: winerror.mc:458
 msgid "Invalid verify switch.\n"
 msgstr ""
 
-#: winerror.mc:461
+#: winerror.mc:463
 msgid "Bad driver level.\n"
 msgstr ""
 
-#: winerror.mc:466
+#: winerror.mc:468
 msgid "Call not implemented.\n"
 msgstr "Volanie neimplementované.\n"
 
-#: winerror.mc:471
+#: winerror.mc:473
 msgid "Semaphore timeout.\n"
 msgstr ""
 
-#: winerror.mc:476
+#: winerror.mc:478
 #, fuzzy
 msgid "Insufficient buffer.\n"
 msgstr "Digi&tálne.\n"
 
-#: winerror.mc:481
+#: winerror.mc:483
 msgid "Invalid name.\n"
 msgstr "Nesprávny názov.\n"
 
-#: winerror.mc:486
+#: winerror.mc:488
 msgid "Invalid level.\n"
 msgstr ""
 
-#: winerror.mc:491
+#: winerror.mc:493
 msgid "No volume label.\n"
 msgstr ""
 
-#: winerror.mc:496
+#: winerror.mc:498
 msgid "Module not found.\n"
 msgstr "Modul nenájdený.\n"
 
-#: winerror.mc:501
+#: winerror.mc:503
 #, fuzzy
 msgid "Procedure not found.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:506
+#: winerror.mc:508
 msgid "No children to wait for.\n"
 msgstr ""
 
-#: winerror.mc:511
+#: winerror.mc:513
 msgid "Child process has not completed.\n"
 msgstr ""
 
-#: winerror.mc:516
+#: winerror.mc:518
 msgid "Invalid use of direct access handle.\n"
 msgstr ""
 
-#: winerror.mc:521
+#: winerror.mc:523
 msgid "Negative seek.\n"
 msgstr ""
 
-#: winerror.mc:531
+#: winerror.mc:533
 msgid "Drive is a JOIN target.\n"
 msgstr ""
 
-#: winerror.mc:536
+#: winerror.mc:538
 msgid "Drive is already JOINed.\n"
 msgstr ""
 
-#: winerror.mc:541
+#: winerror.mc:543
 msgid "Drive is already SUBSTed.\n"
 msgstr ""
 
-#: winerror.mc:546
+#: winerror.mc:548
 msgid "Drive is not JOINed.\n"
 msgstr ""
 
-#: winerror.mc:551
+#: winerror.mc:553
 msgid "Drive is not SUBSTed.\n"
 msgstr ""
 
-#: winerror.mc:556
+#: winerror.mc:558
 msgid "Attempt to JOIN onto a JOINed drive.\n"
 msgstr ""
 
-#: winerror.mc:561
+#: winerror.mc:563
 msgid "Attempt to SUBST onto a SUBSTed drive.\n"
 msgstr ""
 
-#: winerror.mc:566
+#: winerror.mc:568
 msgid "Attempt to JOIN to a SUBSTed drive.\n"
 msgstr ""
 
-#: winerror.mc:571
+#: winerror.mc:573
 msgid "Attempt to SUBST to a JOINed drive.\n"
 msgstr ""
 
-#: winerror.mc:576
+#: winerror.mc:578
 msgid "Drive is busy.\n"
 msgstr "Zariadenei je zaneprázdnené.\n"
 
-#: winerror.mc:581
+#: winerror.mc:583
 msgid "Same drive.\n"
 msgstr ""
 
-#: winerror.mc:586
+#: winerror.mc:588
 msgid "Not top-level directory.\n"
 msgstr ""
 
-#: winerror.mc:591
+#: winerror.mc:593
 msgid "Directory is not empty.\n"
 msgstr ""
 
-#: winerror.mc:596
+#: winerror.mc:598
 msgid "Path is in use as a SUBST.\n"
 msgstr ""
 
-#: winerror.mc:601
+#: winerror.mc:603
 msgid "Path is in use as a JOIN.\n"
 msgstr ""
 
-#: winerror.mc:606
+#: winerror.mc:608
 msgid "Path is busy.\n"
 msgstr ""
 
-#: winerror.mc:611
+#: winerror.mc:613
 msgid "Already a SUBST target.\n"
 msgstr ""
 
-#: winerror.mc:616
+#: winerror.mc:618
 msgid "System trace not specified or disallowed.\n"
 msgstr ""
 
-#: winerror.mc:621
+#: winerror.mc:623
 msgid "Event count for DosMuxSemWait incorrect.\n"
 msgstr ""
 
-#: winerror.mc:626
+#: winerror.mc:628
 msgid "Too many waiters for DosMuxSemWait.\n"
 msgstr ""
 
-#: winerror.mc:631
+#: winerror.mc:633
 msgid "DosSemMuxWait list invalid.\n"
 msgstr ""
 
-#: winerror.mc:636
+#: winerror.mc:638
 msgid "Volume label too long.\n"
 msgstr ""
 
-#: winerror.mc:641
+#: winerror.mc:643
 msgid "Too many TCBs.\n"
 msgstr ""
 
-#: winerror.mc:646
+#: winerror.mc:648
 msgid "Signal refused.\n"
 msgstr ""
 
-#: winerror.mc:651
+#: winerror.mc:653
 msgid "Segment discarded.\n"
 msgstr ""
 
-#: winerror.mc:656
+#: winerror.mc:658
 msgid "Segment not locked.\n"
 msgstr ""
 
-#: winerror.mc:661
+#: winerror.mc:663
 msgid "Bad thread ID address.\n"
 msgstr ""
 
-#: winerror.mc:666
+#: winerror.mc:668
 msgid "Bad arguments to DosExecPgm.\n"
 msgstr ""
 
-#: winerror.mc:671
+#: winerror.mc:673
 msgid "Path is invalid.\n"
 msgstr ""
 
-#: winerror.mc:676
+#: winerror.mc:678
 msgid "Signal pending.\n"
 msgstr ""
 
-#: winerror.mc:681
+#: winerror.mc:683
 msgid "Max system-wide thread count reached.\n"
 msgstr ""
 
-#: winerror.mc:686
+#: winerror.mc:688
 msgid "Lock failed.\n"
 msgstr ""
 
-#: winerror.mc:691
+#: winerror.mc:693
 msgid "Resource in use.\n"
 msgstr "Zdroj sa používa.\n"
 
-#: winerror.mc:696
+#: winerror.mc:698
 #, fuzzy
 msgid "Cancel violation.\n"
 msgstr "Informácie.\n"
 
-#: winerror.mc:701
+#: winerror.mc:703
 msgid "Atomic locks not supported.\n"
 msgstr ""
 
-#: winerror.mc:706
+#: winerror.mc:708
 msgid "Invalid segment number.\n"
 msgstr ""
 
-#: winerror.mc:711
+#: winerror.mc:713
 msgid "Invalid ordinal for %1.\n"
 msgstr ""
 
-#: winerror.mc:716
+#: winerror.mc:718
 msgid "File already exists.\n"
 msgstr "Súbor už existuje.\n"
 
-#: winerror.mc:721
+#: winerror.mc:723
 msgid "Invalid flag number.\n"
 msgstr ""
 
-#: winerror.mc:726
+#: winerror.mc:728
 msgid "Semaphore name not found.\n"
 msgstr ""
 
-#: winerror.mc:731
+#: winerror.mc:733
 msgid "Invalid starting code segment for %1.\n"
 msgstr ""
 
-#: winerror.mc:736
+#: winerror.mc:738
 msgid "Invalid starting stack segment for %1.\n"
 msgstr ""
 
-#: winerror.mc:741
+#: winerror.mc:743
 msgid "Invalid module type for %1.\n"
 msgstr ""
 
-#: winerror.mc:746
+#: winerror.mc:748
 msgid "Invalid EXE signature in %1.\n"
 msgstr ""
 
-#: winerror.mc:751
+#: winerror.mc:753
 msgid "EXE %1 is marked invalid.\n"
 msgstr ""
 
-#: winerror.mc:756
+#: winerror.mc:758
 msgid "Bad EXE format for %1.\n"
 msgstr ""
 
-#: winerror.mc:761
+#: winerror.mc:763
 msgid "Iterated data exceeds 64k in %1.\n"
 msgstr ""
 
-#: winerror.mc:766
+#: winerror.mc:768
 msgid "Invalid MinAllocSize in %1.\n"
 msgstr ""
 
-#: winerror.mc:771
+#: winerror.mc:773
 msgid "Dynlink from invalid ring.\n"
 msgstr ""
 
-#: winerror.mc:776
+#: winerror.mc:778
 msgid "IOPL not enabled.\n"
 msgstr ""
 
-#: winerror.mc:781
+#: winerror.mc:783
 msgid "Invalid SEGDPL in %1.\n"
 msgstr ""
 
-#: winerror.mc:786
+#: winerror.mc:788
 msgid "Auto data segment exceeds 64k.\n"
 msgstr ""
 
-#: winerror.mc:791
+#: winerror.mc:793
 msgid "Ring 2 segment must be movable.\n"
 msgstr ""
 
-#: winerror.mc:796
+#: winerror.mc:798
 msgid "Relocation chain exceeds segment limit in %1.\n"
 msgstr ""
 
-#: winerror.mc:801
+#: winerror.mc:803
 msgid "Infinite loop in relocation chain in %1.\n"
 msgstr ""
 
-#: winerror.mc:806
+#: winerror.mc:808
 msgid "Environment variable not found.\n"
 msgstr ""
 
-#: winerror.mc:811
+#: winerror.mc:813
 msgid "No signal sent.\n"
 msgstr ""
 
-#: winerror.mc:816
+#: winerror.mc:818
 msgid "File name is too long.\n"
 msgstr ""
 
-#: winerror.mc:821
+#: winerror.mc:823
 msgid "Ring 2 stack in use.\n"
 msgstr ""
 
-#: winerror.mc:826
+#: winerror.mc:828
 msgid "Error in use of filename wildcards.\n"
 msgstr ""
 
-#: winerror.mc:831
+#: winerror.mc:833
 msgid "Invalid signal number.\n"
 msgstr ""
 
-#: winerror.mc:836
+#: winerror.mc:838
 msgid "Error setting signal handler.\n"
 msgstr ""
 
-#: winerror.mc:841
+#: winerror.mc:843
 msgid "Segment locked.\n"
 msgstr ""
 
-#: winerror.mc:846
+#: winerror.mc:848
 msgid "Too many modules.\n"
 msgstr "Príliš veľa modulov.\n"
 
-#: winerror.mc:851
+#: winerror.mc:853
 msgid "Nesting LoadModule calls not allowed.\n"
 msgstr ""
 
-#: winerror.mc:856
+#: winerror.mc:858
 msgid "Machine type mismatch.\n"
 msgstr ""
 
-#: winerror.mc:861
+#: winerror.mc:863
 msgid "Bad pipe.\n"
 msgstr ""
 
-#: winerror.mc:866
+#: winerror.mc:868
 msgid "Pipe busy.\n"
 msgstr ""
 
-#: winerror.mc:871
+#: winerror.mc:873
 msgid "Pipe closed.\n"
 msgstr ""
 
-#: winerror.mc:876
+#: winerror.mc:878
 #, fuzzy
 msgid "Pipe not connected.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:881
+#: winerror.mc:883
 #, fuzzy
 msgid "More data available.\n"
 msgstr "Nie je k dispozícii; .\n"
 
-#: winerror.mc:886
+#: winerror.mc:888
 #, fuzzy
 msgid "Session canceled.\n"
 msgstr "Otvoriť súbor.\n"
 
-#: winerror.mc:891
+#: winerror.mc:893
 msgid "Invalid extended attribute name.\n"
 msgstr ""
 
-#: winerror.mc:896
+#: winerror.mc:898
 msgid "Extended attribute list inconsistent.\n"
 msgstr ""
 
-#: winerror.mc:901
+#: winerror.mc:903
 #, fuzzy
 msgid "No more data available.\n"
 msgstr "Nie je k dispozícii; .\n"
 
-#: winerror.mc:906
+#: winerror.mc:908
 msgid "Cannot use Copy API.\n"
 msgstr ""
 
-#: winerror.mc:911
+#: winerror.mc:913
 msgid "Directory name invalid.\n"
 msgstr ""
 
-#: winerror.mc:916
+#: winerror.mc:918
 msgid "Extended attributes didn't fit.\n"
 msgstr ""
 
-#: winerror.mc:921
+#: winerror.mc:923
 msgid "Extended attribute file corrupt.\n"
 msgstr ""
 
-#: winerror.mc:926
+#: winerror.mc:928
 msgid "Extended attribute table full.\n"
 msgstr ""
 
-#: winerror.mc:931
+#: winerror.mc:933
 msgid "Invalid extended attribute handle.\n"
 msgstr ""
 
-#: winerror.mc:936
+#: winerror.mc:938
 msgid "Extended attributes not supported.\n"
 msgstr ""
 
-#: winerror.mc:941
+#: winerror.mc:943
 msgid "Mutex not owned by caller.\n"
 msgstr ""
 
-#: winerror.mc:946
+#: winerror.mc:948
 msgid "Too many posts to semaphore.\n"
 msgstr ""
 
-#: winerror.mc:951
+#: winerror.mc:953
 msgid "Read/WriteProcessMemory partially completed.\n"
 msgstr ""
 
-#: winerror.mc:956
+#: winerror.mc:958
 msgid "The oplock wasn't granted.\n"
 msgstr ""
 
-#: winerror.mc:961
+#: winerror.mc:963
 msgid "Invalid oplock message received.\n"
 msgstr ""
 
-#: winerror.mc:966
+#: winerror.mc:968
 msgid "Message 0x%1 not found in file %2.\n"
 msgstr ""
 
-#: winerror.mc:971
+#: winerror.mc:973
 msgid "Invalid address.\n"
 msgstr ""
 
-#: winerror.mc:976
+#: winerror.mc:978
 msgid "Arithmetic overflow.\n"
 msgstr ""
 
-#: winerror.mc:981
+#: winerror.mc:983
 msgid "Pipe connected.\n"
 msgstr ""
 
-#: winerror.mc:986
+#: winerror.mc:988
 msgid "Pipe listening.\n"
 msgstr ""
 
-#: winerror.mc:991
+#: winerror.mc:993
 msgid "Extended attribute access denied.\n"
 msgstr ""
 
-#: winerror.mc:996
+#: winerror.mc:998
 msgid "I/O operation aborted.\n"
 msgstr ""
 
-#: winerror.mc:1001
+#: winerror.mc:1003
 msgid "Overlapped I/O incomplete.\n"
 msgstr ""
 
-#: winerror.mc:1006
+#: winerror.mc:1008
 msgid "Overlapped I/O pending.\n"
 msgstr ""
 
-#: winerror.mc:1011
+#: winerror.mc:1013
 msgid "No access to memory location.\n"
 msgstr ""
 
-#: winerror.mc:1016
+#: winerror.mc:1018
 msgid "Swap error.\n"
 msgstr ""
 
-#: winerror.mc:1021
+#: winerror.mc:1023
 msgid "Stack overflow.\n"
 msgstr ""
 
-#: winerror.mc:1026
+#: winerror.mc:1028
 msgid "Invalid message.\n"
 msgstr ""
 
-#: winerror.mc:1031
+#: winerror.mc:1033
 msgid "Cannot complete.\n"
 msgstr ""
 
-#: winerror.mc:1036
+#: winerror.mc:1038
 msgid "Invalid flags.\n"
 msgstr ""
 
-#: winerror.mc:1041
+#: winerror.mc:1043
 msgid "Unrecognized volume.\n"
 msgstr ""
 
-#: winerror.mc:1046
+#: winerror.mc:1048
 msgid "File invalid.\n"
 msgstr ""
 
-#: winerror.mc:1051
+#: winerror.mc:1053
 msgid "Cannot run full-screen.\n"
 msgstr ""
 
-#: winerror.mc:1056
+#: winerror.mc:1058
 msgid "Nonexistent token.\n"
 msgstr ""
 
-#: winerror.mc:1061
+#: winerror.mc:1063
 msgid "Registry corrupt.\n"
 msgstr ""
 
-#: winerror.mc:1066
+#: winerror.mc:1068
 msgid "Invalid key.\n"
 msgstr ""
 
-#: winerror.mc:1071
+#: winerror.mc:1073
 #, fuzzy
 msgid "Can't open registry key.\n"
 msgstr "Súbory pomoci (*.hlp).\n"
 
-#: winerror.mc:1076
+#: winerror.mc:1078
 msgid "Can't read registry key.\n"
 msgstr ""
 
-#: winerror.mc:1081
+#: winerror.mc:1083
 msgid "Can't write registry key.\n"
 msgstr ""
 
-#: winerror.mc:1086
+#: winerror.mc:1088
 msgid "Registry has been recovered.\n"
 msgstr ""
 
-#: winerror.mc:1091
+#: winerror.mc:1093
 #, fuzzy
 msgid "Registry is corrupt.\n"
 msgstr "Súbory pomoci (*.hlp).\n"
 
-#: winerror.mc:1096
+#: winerror.mc:1098
 msgid "I/O to registry failed.\n"
 msgstr ""
 
-#: winerror.mc:1101
+#: winerror.mc:1103
 #, fuzzy
 msgid "Not registry file.\n"
 msgstr "Súbory pomoci (*.hlp).\n"
 
-#: winerror.mc:1106
+#: winerror.mc:1108
 msgid "Key deleted.\n"
 msgstr ""
 
-#: winerror.mc:1111
+#: winerror.mc:1113
 msgid "No registry log space.\n"
 msgstr ""
 
-#: winerror.mc:1116
+#: winerror.mc:1118
 msgid "Registry key has subkeys.\n"
 msgstr ""
 
-#: winerror.mc:1121
+#: winerror.mc:1123
 msgid "Subkey must be volatile.\n"
 msgstr ""
 
-#: winerror.mc:1126
+#: winerror.mc:1128
 msgid "Notify change request in progress.\n"
 msgstr ""
 
-#: winerror.mc:1131
+#: winerror.mc:1133
 msgid "Dependent services are running.\n"
 msgstr ""
 
-#: winerror.mc:1136
+#: winerror.mc:1138
 msgid "Invalid service control.\n"
 msgstr ""
 
-#: winerror.mc:1141
+#: winerror.mc:1143
 msgid "Service request timeout.\n"
 msgstr ""
 
-#: winerror.mc:1146
+#: winerror.mc:1148
 msgid "Cannot create service thread.\n"
 msgstr ""
 
-#: winerror.mc:1151
+#: winerror.mc:1153
 msgid "Service database locked.\n"
 msgstr ""
 
-#: winerror.mc:1156
+#: winerror.mc:1158
 msgid "Service already running.\n"
 msgstr ""
 
-#: winerror.mc:1161
+#: winerror.mc:1163
 msgid "Invalid service account.\n"
 msgstr ""
 
-#: winerror.mc:1166
+#: winerror.mc:1168
 msgid "Service is disabled.\n"
 msgstr ""
 
-#: winerror.mc:1171
+#: winerror.mc:1173
 msgid "Circular dependency.\n"
 msgstr ""
 
-#: winerror.mc:1176
+#: winerror.mc:1178
 #, fuzzy
 msgid "Service does not exist.\n"
 msgstr "Súbor neexistuje.\n"
 
-#: winerror.mc:1181
+#: winerror.mc:1183
 msgid "Service cannot accept control message.\n"
 msgstr ""
 
-#: winerror.mc:1186
+#: winerror.mc:1188
 msgid "Service not active.\n"
 msgstr ""
 
-#: winerror.mc:1191
+#: winerror.mc:1193
 msgid "Service controller connect failed.\n"
 msgstr ""
 
-#: winerror.mc:1196
+#: winerror.mc:1198
 msgid "Exception in service.\n"
 msgstr ""
 
-#: winerror.mc:1201
+#: winerror.mc:1203
 #, fuzzy
 msgid "Database does not exist.\n"
 msgstr "Cesta neexistuje.\n"
 
-#: winerror.mc:1206
+#: winerror.mc:1208
 msgid "Service-specific error.\n"
 msgstr ""
 
-#: winerror.mc:1211
+#: winerror.mc:1213
 msgid "Process aborted.\n"
 msgstr ""
 
-#: winerror.mc:1216
+#: winerror.mc:1218
 msgid "Service dependency failed.\n"
 msgstr ""
 
-#: winerror.mc:1221
+#: winerror.mc:1223
 msgid "Service login failed.\n"
 msgstr ""
 
-#: winerror.mc:1226
+#: winerror.mc:1228
 msgid "Service start-hang.\n"
 msgstr ""
 
-#: winerror.mc:1231
+#: winerror.mc:1233
 msgid "Invalid service lock.\n"
 msgstr ""
 
-#: winerror.mc:1236
+#: winerror.mc:1238
 msgid "Service marked for delete.\n"
 msgstr ""
 
-#: winerror.mc:1241
+#: winerror.mc:1243
 msgid "Service exists.\n"
 msgstr ""
 
-#: winerror.mc:1246
+#: winerror.mc:1248
 msgid "System running last-known-good config.\n"
 msgstr ""
 
-#: winerror.mc:1251
+#: winerror.mc:1253
 msgid "Service dependency deleted.\n"
 msgstr ""
 
-#: winerror.mc:1256
+#: winerror.mc:1258
 msgid "Boot already accepted as last-good config.\n"
 msgstr ""
 
-#: winerror.mc:1261
+#: winerror.mc:1263
 msgid "Service not started since last boot.\n"
 msgstr ""
 
-#: winerror.mc:1266
+#: winerror.mc:1268
 msgid "Duplicate service name.\n"
 msgstr ""
 
-#: winerror.mc:1271
+#: winerror.mc:1273
 msgid "Different service account.\n"
 msgstr ""
 
-#: winerror.mc:1276
+#: winerror.mc:1278
 msgid "Driver failure cannot be detected.\n"
 msgstr ""
 
-#: winerror.mc:1281
+#: winerror.mc:1283
 msgid "Process abort cannot be detected.\n"
 msgstr ""
 
-#: winerror.mc:1286
+#: winerror.mc:1288
 msgid "No recovery program for service.\n"
 msgstr ""
 
-#: winerror.mc:1291
+#: winerror.mc:1293
 #, fuzzy
 msgid "Service not implemented by exe.\n"
 msgstr "Neimplementované.\n"
 
-#: winerror.mc:1296
+#: winerror.mc:1298
 msgid "End of media.\n"
 msgstr ""
 
-#: winerror.mc:1301
+#: winerror.mc:1303
 msgid "Filemark detected.\n"
 msgstr ""
 
-#: winerror.mc:1306
+#: winerror.mc:1308
 msgid "Beginning of media.\n"
 msgstr ""
 
-#: winerror.mc:1311
+#: winerror.mc:1313
 msgid "Setmark detected.\n"
 msgstr ""
 
-#: winerror.mc:1316
+#: winerror.mc:1318
 msgid "No data detected.\n"
 msgstr ""
 
-#: winerror.mc:1321
+#: winerror.mc:1323
 msgid "Partition failure.\n"
 msgstr ""
 
-#: winerror.mc:1326
+#: winerror.mc:1328
 msgid "Invalid block length.\n"
 msgstr ""
 
-#: winerror.mc:1331
+#: winerror.mc:1333
 msgid "Device not partitioned.\n"
 msgstr ""
 
-#: winerror.mc:1336
+#: winerror.mc:1338
 msgid "Unable to lock media.\n"
 msgstr ""
 
-#: winerror.mc:1341
+#: winerror.mc:1343
 msgid "Unable to unload media.\n"
 msgstr ""
 
-#: winerror.mc:1346
+#: winerror.mc:1348
 msgid "Media changed.\n"
 msgstr ""
 
-#: winerror.mc:1351
+#: winerror.mc:1353
 msgid "I/O bus reset.\n"
 msgstr ""
 
-#: winerror.mc:1356
+#: winerror.mc:1358
 msgid "No media in drive.\n"
 msgstr ""
 
-#: winerror.mc:1361
+#: winerror.mc:1363
 msgid "No Unicode translation.\n"
 msgstr ""
 
-#: winerror.mc:1366
+#: winerror.mc:1368
 #, fuzzy
 msgid "DLL initialization failed.\n"
 msgstr "Otvoriť súbor.\n"
 
-#: winerror.mc:1371
+#: winerror.mc:1373
 msgid "Shutdown in progress.\n"
 msgstr ""
 
-#: winerror.mc:1376
+#: winerror.mc:1378
 msgid "No shutdown in progress.\n"
 msgstr ""
 
-#: winerror.mc:1381
+#: winerror.mc:1383
 msgid "I/O device error.\n"
 msgstr ""
 
-#: winerror.mc:1386
+#: winerror.mc:1388
 msgid "No serial devices found.\n"
 msgstr ""
 
-#: winerror.mc:1391
+#: winerror.mc:1393
 msgid "Shared IRQ busy.\n"
 msgstr ""
 
-#: winerror.mc:1396
+#: winerror.mc:1398
 msgid "Serial I/O completed.\n"
 msgstr ""
 
-#: winerror.mc:1401
+#: winerror.mc:1403
 msgid "Serial I/O counter timeout.\n"
 msgstr ""
 
-#: winerror.mc:1406
+#: winerror.mc:1408
 msgid "Floppy ID address mark not found.\n"
 msgstr ""
 
-#: winerror.mc:1411
+#: winerror.mc:1413
 msgid "Floppy reports wrong cylinder.\n"
 msgstr ""
 
-#: winerror.mc:1416
+#: winerror.mc:1418
 msgid "Unknown floppy error.\n"
 msgstr ""
 
-#: winerror.mc:1421
+#: winerror.mc:1423
 msgid "Floppy registers inconsistent.\n"
 msgstr ""
 
-#: winerror.mc:1426
+#: winerror.mc:1428
 msgid "Hard disk recalibrate failed.\n"
 msgstr ""
 
-#: winerror.mc:1431
+#: winerror.mc:1433
 msgid "Hard disk operation failed.\n"
 msgstr ""
 
-#: winerror.mc:1436
+#: winerror.mc:1438
 msgid "Hard disk reset failed.\n"
 msgstr ""
 
-#: winerror.mc:1441
+#: winerror.mc:1443
 msgid "End of tape media.\n"
 msgstr ""
 
-#: winerror.mc:1446
+#: winerror.mc:1448
 msgid "Not enough server memory.\n"
 msgstr ""
 
-#: winerror.mc:1451
+#: winerror.mc:1453
 msgid "Possible deadlock.\n"
 msgstr ""
 
-#: winerror.mc:1456
+#: winerror.mc:1458
 msgid "Incorrect alignment.\n"
 msgstr ""
 
-#: winerror.mc:1461
+#: winerror.mc:1463
 msgid "Set-power-state vetoed.\n"
 msgstr ""
 
-#: winerror.mc:1466
+#: winerror.mc:1468
 msgid "Set-power-state failed.\n"
 msgstr ""
 
-#: winerror.mc:1471
+#: winerror.mc:1473
 msgid "Too many links.\n"
 msgstr ""
 
-#: winerror.mc:1476
+#: winerror.mc:1478
 msgid "Newer windows version needed.\n"
 msgstr ""
 
-#: winerror.mc:1481
+#: winerror.mc:1483
 msgid "Wrong operating system.\n"
 msgstr ""
 
-#: winerror.mc:1486
+#: winerror.mc:1488
 msgid "Single-instance application.\n"
 msgstr ""
 
-#: winerror.mc:1491
+#: winerror.mc:1493
 msgid "Real-mode application.\n"
 msgstr ""
 
-#: winerror.mc:1496
+#: winerror.mc:1498
 msgid "Invalid DLL.\n"
 msgstr ""
 
-#: winerror.mc:1501
+#: winerror.mc:1503
 msgid "No associated application.\n"
 msgstr ""
 
-#: winerror.mc:1506
+#: winerror.mc:1508
 msgid "DDE failure.\n"
 msgstr ""
 
-#: winerror.mc:1511
+#: winerror.mc:1513
 msgid "DLL not found.\n"
 msgstr "DLL nenájdené.\n"
 
-#: winerror.mc:1516
+#: winerror.mc:1518
 #, fuzzy
 msgid "Out of user handles.\n"
 msgstr "Nedostatok pamäte.\n"
 
-#: winerror.mc:1521
+#: winerror.mc:1523
 msgid "Message can only be used in synchronous calls.\n"
 msgstr ""
 
-#: winerror.mc:1526
+#: winerror.mc:1528
 msgid "The source element is empty.\n"
 msgstr ""
 
-#: winerror.mc:1531
+#: winerror.mc:1533
 msgid "The destination element is full.\n"
 msgstr ""
 
-#: winerror.mc:1536
+#: winerror.mc:1538
 msgid "The element address is invalid.\n"
 msgstr ""
 
-#: winerror.mc:1541
+#: winerror.mc:1543
 msgid "The magazine is not present.\n"
 msgstr ""
 
-#: winerror.mc:1546
+#: winerror.mc:1548
 msgid "The device needs reinitialization.\n"
 msgstr ""
 
-#: winerror.mc:1551
+#: winerror.mc:1553
 #, fuzzy
 msgid "The device requires cleaning.\n"
 msgstr "Ovládač zariadenia nie je pripravený."
 
-#: winerror.mc:1556
+#: winerror.mc:1558
 msgid "The device door is open.\n"
 msgstr "Dvierka zariadenia sú otvorené; .\n"
 
-#: winerror.mc:1561
+#: winerror.mc:1563
 msgid "The device is not connected.\n"
 msgstr "Zariadenie je nepripojené.\n"
 
-#: winerror.mc:1566
+#: winerror.mc:1568
 #, fuzzy
 msgid "Element not found.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:1571
+#: winerror.mc:1573
 #, fuzzy
 msgid "No match found.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:1576
+#: winerror.mc:1578
 #, fuzzy
 msgid "Property set not found.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:1581
+#: winerror.mc:1583
 #, fuzzy
 msgid "Point not found.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:1586
+#: winerror.mc:1588
 msgid "No running tracking service.\n"
 msgstr ""
 
-#: winerror.mc:1591
+#: winerror.mc:1593
 msgid "No such volume ID.\n"
 msgstr ""
 
-#: winerror.mc:1596
+#: winerror.mc:1598
 msgid "Unable to remove the file to be replaced.\n"
 msgstr ""
 
-#: winerror.mc:1601
+#: winerror.mc:1603
 msgid "Unable to move the replacement file into place.\n"
 msgstr ""
 
-#: winerror.mc:1606
+#: winerror.mc:1608
 msgid "Moving the replacement file failed.\n"
 msgstr ""
 
-#: winerror.mc:1611
+#: winerror.mc:1613
 msgid "The journal is being deleted.\n"
 msgstr ""
 
-#: winerror.mc:1616
+#: winerror.mc:1618
 msgid "The journal is not active.\n"
 msgstr ""
 
-#: winerror.mc:1621
+#: winerror.mc:1623
 msgid "Potential matching file found.\n"
 msgstr ""
 
-#: winerror.mc:1626
+#: winerror.mc:1628
 msgid "The journal entry was deleted.\n"
 msgstr ""
 
-#: winerror.mc:1631
+#: winerror.mc:1633
 msgid "Invalid device name.\n"
 msgstr ""
 
-#: winerror.mc:1636
+#: winerror.mc:1638
 msgid "Connection unavailable.\n"
 msgstr "Pripojenie nedostupné.\n"
 
-#: winerror.mc:1641
+#: winerror.mc:1643
 msgid "Device already remembered.\n"
 msgstr ""
 
-#: winerror.mc:1646
+#: winerror.mc:1648
 msgid "No network or bad path.\n"
 msgstr ""
 
-#: winerror.mc:1651
+#: winerror.mc:1653
 msgid "Invalid network provider name.\n"
 msgstr ""
 
-#: winerror.mc:1656
+#: winerror.mc:1658
 msgid "Cannot open network connection profile.\n"
 msgstr ""
 
-#: winerror.mc:1661
+#: winerror.mc:1663
 msgid "Corrupt network connection profile.\n"
 msgstr ""
 
-#: winerror.mc:1666
+#: winerror.mc:1668
 msgid "Not a container.\n"
 msgstr ""
 
-#: winerror.mc:1671
+#: winerror.mc:1673
 msgid "Extended error.\n"
 msgstr ""
 
-#: winerror.mc:1676
+#: winerror.mc:1678
 msgid "Invalid group name.\n"
 msgstr ""
 
-#: winerror.mc:1681
+#: winerror.mc:1683
 msgid "Invalid computer name.\n"
 msgstr ""
 
-#: winerror.mc:1686
+#: winerror.mc:1688
 msgid "Invalid event name.\n"
 msgstr ""
 
-#: winerror.mc:1691
+#: winerror.mc:1693
 msgid "Invalid domain name.\n"
 msgstr ""
 
-#: winerror.mc:1696
+#: winerror.mc:1698
 msgid "Invalid service name.\n"
 msgstr ""
 
-#: winerror.mc:1701
+#: winerror.mc:1703
 msgid "Invalid network name.\n"
 msgstr ""
 
-#: winerror.mc:1706
+#: winerror.mc:1708
 msgid "Invalid share name.\n"
 msgstr ""
 
-#: winerror.mc:1716
+#: winerror.mc:1718
 msgid "Invalid message name.\n"
 msgstr ""
 
-#: winerror.mc:1721
+#: winerror.mc:1723
 msgid "Invalid message destination.\n"
 msgstr ""
 
-#: winerror.mc:1726
+#: winerror.mc:1728
 msgid "Session credential conflict.\n"
 msgstr ""
 
-#: winerror.mc:1731
+#: winerror.mc:1733
 msgid "Remote session limit exceeded.\n"
 msgstr ""
 
-#: winerror.mc:1736
+#: winerror.mc:1738
 msgid "Duplicate domain or workgroup name.\n"
 msgstr ""
 
-#: winerror.mc:1741
+#: winerror.mc:1743
 msgid "No network.\n"
 msgstr ""
 
-#: winerror.mc:1746
+#: winerror.mc:1748
 msgid "Operation canceled by user.\n"
 msgstr "Operácia prerušená užívateľom.\n"
 
-#: winerror.mc:1751
+#: winerror.mc:1753
 msgid "File has a user-mapped section.\n"
 msgstr ""
 
-#: winerror.mc:1756 winerror.mc:3751
+#: winerror.mc:1758 winerror.mc:3753
 msgid "Connection refused.\n"
 msgstr ""
 
-#: winerror.mc:1761
+#: winerror.mc:1763
 msgid "Connection gracefully closed.\n"
 msgstr ""
 
-#: winerror.mc:1766
+#: winerror.mc:1768
 msgid "Address already associated with transport endpoint.\n"
 msgstr ""
 
-#: winerror.mc:1771
+#: winerror.mc:1773
 msgid "Address not associated with transport endpoint.\n"
 msgstr ""
 
-#: winerror.mc:1776
+#: winerror.mc:1778
 msgid "Connection invalid.\n"
 msgstr ""
 
-#: winerror.mc:1781
+#: winerror.mc:1783
 msgid "Connection is active.\n"
 msgstr "Pripojenie je aktícne.\n"
 
-#: winerror.mc:1786
+#: winerror.mc:1788
 msgid "Network unreachable.\n"
 msgstr "Sieť nedosiahnuteľná.\n"
 
-#: winerror.mc:1791
+#: winerror.mc:1793
 msgid "Host unreachable.\n"
 msgstr ""
 
-#: winerror.mc:1796
+#: winerror.mc:1798
 msgid "Protocol unreachable.\n"
 msgstr ""
 
-#: winerror.mc:1801
+#: winerror.mc:1803
 msgid "Port unreachable.\n"
 msgstr ""
 
-#: winerror.mc:1806
+#: winerror.mc:1808
 msgid "Request aborted.\n"
 msgstr ""
 
-#: winerror.mc:1811
+#: winerror.mc:1813
 msgid "Connection aborted.\n"
 msgstr ""
 
-#: winerror.mc:1816
+#: winerror.mc:1818
 msgid "Please retry operation.\n"
 msgstr ""
 
-#: winerror.mc:1821
+#: winerror.mc:1823
 msgid "Connection count limit reached.\n"
 msgstr ""
 
-#: winerror.mc:1826
+#: winerror.mc:1828
 msgid "Login time restriction.\n"
 msgstr ""
 
-#: winerror.mc:1831
+#: winerror.mc:1833
 msgid "Login workstation restriction.\n"
 msgstr ""
 
-#: winerror.mc:1836
+#: winerror.mc:1838
 msgid "Incorrect network address.\n"
 msgstr ""
 
-#: winerror.mc:1841
+#: winerror.mc:1843
 msgid "Service already registered.\n"
 msgstr ""
 
-#: winerror.mc:1846
+#: winerror.mc:1848
 msgid "Service not found.\n"
 msgstr "Služba nenájdená.\n"
 
-#: winerror.mc:1851
+#: winerror.mc:1853
 msgid "User not authenticated.\n"
 msgstr ""
 
-#: winerror.mc:1856
+#: winerror.mc:1858
 msgid "User not logged on.\n"
 msgstr ""
 
-#: winerror.mc:1861
+#: winerror.mc:1863
 msgid "Continue work in progress.\n"
 msgstr ""
 
-#: winerror.mc:1866
+#: winerror.mc:1868
 msgid "Already initialized.\n"
 msgstr ""
 
-#: winerror.mc:1871
+#: winerror.mc:1873
 msgid "No more local devices.\n"
 msgstr ""
 
-#: winerror.mc:1876
+#: winerror.mc:1878
 #, fuzzy
 msgid "The site does not exist.\n"
 msgstr "Súbor neexistuje.\n"
 
-#: winerror.mc:1881
+#: winerror.mc:1883
 #, fuzzy
 msgid "The domain controller already exists.\n"
 msgstr "Súbor neexistuje.\n"
 
-#: winerror.mc:1886
+#: winerror.mc:1888
 #, fuzzy
 msgid "Supported only when connected.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:1891
+#: winerror.mc:1893
 msgid "Perform operation even when nothing changed.\n"
 msgstr ""
 
-#: winerror.mc:1896
+#: winerror.mc:1898
 msgid "The user profile is invalid.\n"
 msgstr ""
 
-#: winerror.mc:1901
+#: winerror.mc:1903
 msgid "Not supported on Small Business Server.\n"
 msgstr ""
 
-#: winerror.mc:1906
+#: winerror.mc:1908
 msgid "Not all privileges assigned.\n"
 msgstr ""
 
-#: winerror.mc:1911
+#: winerror.mc:1913
 msgid "Some security IDs not mapped.\n"
 msgstr ""
 
-#: winerror.mc:1916
+#: winerror.mc:1918
 msgid "No quotas for account.\n"
 msgstr ""
 
-#: winerror.mc:1921
+#: winerror.mc:1923
 msgid "Local user session key.\n"
 msgstr ""
 
-#: winerror.mc:1926
+#: winerror.mc:1928
 msgid "Password too complex for LM.\n"
 msgstr ""
 
-#: winerror.mc:1931
+#: winerror.mc:1933
 msgid "Unknown revision.\n"
 msgstr ""
 
-#: winerror.mc:1936
+#: winerror.mc:1938
 msgid "Incompatible revision levels.\n"
 msgstr ""
 
-#: winerror.mc:1941
+#: winerror.mc:1943
 msgid "Invalid owner.\n"
 msgstr ""
 
-#: winerror.mc:1946
+#: winerror.mc:1948
 msgid "Invalid primary group.\n"
 msgstr ""
 
-#: winerror.mc:1951
+#: winerror.mc:1953
 msgid "No impersonation token.\n"
 msgstr ""
 
-#: winerror.mc:1956
+#: winerror.mc:1958
 msgid "Can't disable mandatory group.\n"
 msgstr ""
 
-#: winerror.mc:1961
+#: winerror.mc:1963
 msgid "No logon servers available.\n"
 msgstr ""
 
-#: winerror.mc:1966
+#: winerror.mc:1968
 msgid "No such logon session.\n"
 msgstr ""
 
-#: winerror.mc:1971
+#: winerror.mc:1973
 msgid "No such privilege.\n"
 msgstr ""
 
-#: winerror.mc:1976
+#: winerror.mc:1978
 msgid "Privilege not held.\n"
 msgstr ""
 
-#: winerror.mc:1981
+#: winerror.mc:1983
 msgid "Invalid account name.\n"
 msgstr ""
 
-#: winerror.mc:1986
+#: winerror.mc:1988
 msgid "User already exists.\n"
 msgstr "Užívateľ už existuje.\n"
 
-#: winerror.mc:1991
+#: winerror.mc:1993
 msgid "No such user.\n"
 msgstr "Neexistujúci užívateľ.\n"
 
-#: winerror.mc:1996
+#: winerror.mc:1998
 msgid "Group already exists.\n"
 msgstr "Skupina už existuje.\n"
 
-#: winerror.mc:2001
+#: winerror.mc:2003
 msgid "No such group.\n"
 msgstr "Neexistujúca skupina.\n"
 
-#: winerror.mc:2006
+#: winerror.mc:2008
 msgid "User already in group.\n"
 msgstr "Užívateľ už je v skupine.\n"
 
-#: winerror.mc:2011
+#: winerror.mc:2013
 msgid "User not in group.\n"
 msgstr "Užívateľ nie je v skupine.\n"
 
-#: winerror.mc:2016
+#: winerror.mc:2018
 msgid "Can't delete last admin user.\n"
 msgstr "Nemožno zmazať posledného admin používateľa.\n"
 
-#: winerror.mc:2021
+#: winerror.mc:2023
 msgid "Wrong password.\n"
 msgstr "Nesprávne heslo.\n"
 
-#: winerror.mc:2026
+#: winerror.mc:2028
 msgid "Ill-formed password.\n"
 msgstr ""
 
-#: winerror.mc:2031
+#: winerror.mc:2033
 msgid "Password restriction.\n"
 msgstr ""
 
-#: winerror.mc:2036
+#: winerror.mc:2038
 msgid "Logon failure.\n"
 msgstr ""
 
-#: winerror.mc:2041
+#: winerror.mc:2043
 msgid "Account restriction.\n"
 msgstr ""
 
-#: winerror.mc:2046
+#: winerror.mc:2048
 msgid "Invalid logon hours.\n"
 msgstr ""
 
-#: winerror.mc:2051
+#: winerror.mc:2053
 msgid "Invalid workstation.\n"
 msgstr ""
 
-#: winerror.mc:2056
+#: winerror.mc:2058
 msgid "Password expired.\n"
 msgstr "Heslo vypršalo.\n"
 
-#: winerror.mc:2061
+#: winerror.mc:2063
 msgid "Account disabled.\n"
 msgstr "Účet zablokovaný.\n"
 
-#: winerror.mc:2066
+#: winerror.mc:2068
 msgid "No security ID mapped.\n"
 msgstr ""
 
-#: winerror.mc:2071
+#: winerror.mc:2073
 msgid "Too many LUIDs requested.\n"
 msgstr ""
 
-#: winerror.mc:2076
+#: winerror.mc:2078
 msgid "LUIDs exhausted.\n"
 msgstr ""
 
-#: winerror.mc:2081
+#: winerror.mc:2083
 msgid "Invalid sub authority.\n"
 msgstr ""
 
-#: winerror.mc:2086
+#: winerror.mc:2088
 msgid "Invalid ACL.\n"
 msgstr ""
 
-#: winerror.mc:2091
+#: winerror.mc:2093
 msgid "Invalid SID.\n"
 msgstr ""
 
-#: winerror.mc:2096
+#: winerror.mc:2098
 msgid "Invalid security descriptor.\n"
 msgstr ""
 
-#: winerror.mc:2101
+#: winerror.mc:2103
 msgid "Bad inherited ACL.\n"
 msgstr ""
 
-#: winerror.mc:2106
+#: winerror.mc:2108
 msgid "Server disabled.\n"
 msgstr "Server zablokovaný.\n"
 
-#: winerror.mc:2111
+#: winerror.mc:2113
 msgid "Server not disabled.\n"
 msgstr "Server nezablokovaný.\n"
 
-#: winerror.mc:2116
+#: winerror.mc:2118
 msgid "Invalid ID authority.\n"
 msgstr ""
 
-#: winerror.mc:2121
+#: winerror.mc:2123
 msgid "Allotted space exceeded.\n"
 msgstr ""
 
-#: winerror.mc:2126
+#: winerror.mc:2128
 msgid "Invalid group attributes.\n"
 msgstr ""
 
-#: winerror.mc:2131
+#: winerror.mc:2133
 msgid "Bad impersonation level.\n"
 msgstr ""
 
-#: winerror.mc:2136
+#: winerror.mc:2138
 msgid "Can't open anonymous security token.\n"
 msgstr ""
 
-#: winerror.mc:2141
+#: winerror.mc:2143
 msgid "Bad validation class.\n"
 msgstr ""
 
-#: winerror.mc:2146
+#: winerror.mc:2148
 msgid "Bad token type.\n"
 msgstr ""
 
-#: winerror.mc:2151
+#: winerror.mc:2153
 msgid "No security on object.\n"
 msgstr ""
 
-#: winerror.mc:2156
+#: winerror.mc:2158
 msgid "Can't access domain information.\n"
 msgstr ""
 
-#: winerror.mc:2161
+#: winerror.mc:2163
 msgid "Invalid server state.\n"
 msgstr ""
 
-#: winerror.mc:2166
+#: winerror.mc:2168
 msgid "Invalid domain state.\n"
 msgstr ""
 
-#: winerror.mc:2171
+#: winerror.mc:2173
 msgid "Invalid domain role.\n"
 msgstr ""
 
-#: winerror.mc:2176
+#: winerror.mc:2178
 msgid "No such domain.\n"
 msgstr ""
 
-#: winerror.mc:2181
+#: winerror.mc:2183
 msgid "Domain already exists.\n"
 msgstr ""
 
-#: winerror.mc:2186
+#: winerror.mc:2188
 msgid "Domain limit exceeded.\n"
 msgstr ""
 
-#: winerror.mc:2191
+#: winerror.mc:2193
 msgid "Internal database corruption.\n"
 msgstr ""
 
-#: winerror.mc:2196
+#: winerror.mc:2198
 msgid "Internal error.\n"
 msgstr "Vnútorná chyba.\n"
 
-#: winerror.mc:2201
+#: winerror.mc:2203
 msgid "Generic access types not mapped.\n"
 msgstr ""
 
-#: winerror.mc:2206
+#: winerror.mc:2208
 msgid "Bad descriptor format.\n"
 msgstr ""
 
-#: winerror.mc:2211
+#: winerror.mc:2213
 msgid "Not a logon process.\n"
 msgstr ""
 
-#: winerror.mc:2216
+#: winerror.mc:2218
 msgid "Logon session ID exists.\n"
 msgstr ""
 
-#: winerror.mc:2221
+#: winerror.mc:2223
 msgid "Unknown authentication package.\n"
 msgstr ""
 
-#: winerror.mc:2226
+#: winerror.mc:2228
 msgid "Bad logon session state.\n"
 msgstr ""
 
-#: winerror.mc:2231
+#: winerror.mc:2233
 msgid "Logon session ID collision.\n"
 msgstr ""
 
-#: winerror.mc:2236
+#: winerror.mc:2238
 msgid "Invalid logon type.\n"
 msgstr ""
 
-#: winerror.mc:2241
+#: winerror.mc:2243
 #, fuzzy
 msgid "Cannot impersonate.\n"
 msgstr "Nemožno nájsť tlačiareň.\n"
 
-#: winerror.mc:2246
+#: winerror.mc:2248
 msgid "Invalid transaction state.\n"
 msgstr ""
 
-#: winerror.mc:2251
+#: winerror.mc:2253
 msgid "Security DB commit failure.\n"
 msgstr ""
 
-#: winerror.mc:2256
+#: winerror.mc:2258
 msgid "Account is built-in.\n"
 msgstr ""
 
-#: winerror.mc:2261
+#: winerror.mc:2263
 msgid "Group is built-in.\n"
 msgstr ""
 
-#: winerror.mc:2266
+#: winerror.mc:2268
 msgid "User is built-in.\n"
 msgstr ""
 
-#: winerror.mc:2271
+#: winerror.mc:2273
 msgid "Group is primary for user.\n"
 msgstr ""
 
-#: winerror.mc:2276
+#: winerror.mc:2278
 msgid "Token already in use.\n"
 msgstr ""
 
-#: winerror.mc:2281
+#: winerror.mc:2283
 msgid "No such local group.\n"
 msgstr ""
 
-#: winerror.mc:2286
+#: winerror.mc:2288
 msgid "User not in local group.\n"
 msgstr ""
 
-#: winerror.mc:2291
+#: winerror.mc:2293
 msgid "User already in local group.\n"
 msgstr ""
 
-#: winerror.mc:2296
+#: winerror.mc:2298
 msgid "Local group already exists.\n"
 msgstr ""
 
-#: winerror.mc:2301 winerror.mc:2326
+#: winerror.mc:2303 winerror.mc:2328
 msgid "Logon type not granted.\n"
 msgstr ""
 
-#: winerror.mc:2306
+#: winerror.mc:2308
 msgid "Too many secrets.\n"
 msgstr ""
 
-#: winerror.mc:2311
+#: winerror.mc:2313
 msgid "Secret too long.\n"
 msgstr ""
 
-#: winerror.mc:2316
+#: winerror.mc:2318
 msgid "Internal security DB error.\n"
 msgstr ""
 
-#: winerror.mc:2321
+#: winerror.mc:2323
 msgid "Too many context IDs.\n"
 msgstr ""
 
-#: winerror.mc:2331
+#: winerror.mc:2333
 msgid "Cross-encrypted NT password required.\n"
 msgstr ""
 
-#: winerror.mc:2336
+#: winerror.mc:2338
 msgid "No such member.\n"
 msgstr ""
 
-#: winerror.mc:2341
+#: winerror.mc:2343
 msgid "Invalid member.\n"
 msgstr ""
 
-#: winerror.mc:2346
+#: winerror.mc:2348
 msgid "Too many SIDs.\n"
 msgstr ""
 
-#: winerror.mc:2351
+#: winerror.mc:2353
 msgid "Cross-encrypted LM password required.\n"
 msgstr ""
 
-#: winerror.mc:2356
+#: winerror.mc:2358
 msgid "No inheritable components.\n"
 msgstr ""
 
-#: winerror.mc:2361
+#: winerror.mc:2363
 msgid "File or directory corrupt.\n"
 msgstr ""
 
-#: winerror.mc:2366
+#: winerror.mc:2368
 msgid "Disk is corrupt.\n"
 msgstr ""
 
-#: winerror.mc:2371
+#: winerror.mc:2373
 msgid "No user session key.\n"
 msgstr ""
 
-#: winerror.mc:2376
+#: winerror.mc:2378
 msgid "License quota exceeded.\n"
 msgstr ""
 
-#: winerror.mc:2381
+#: winerror.mc:2383
 msgid "Wrong target name.\n"
 msgstr ""
 
-#: winerror.mc:2386
+#: winerror.mc:2388
 msgid "Mutual authentication failed.\n"
 msgstr ""
 
-#: winerror.mc:2391
+#: winerror.mc:2393
 msgid "Time skew between client and server.\n"
 msgstr ""
 
-#: winerror.mc:2396
+#: winerror.mc:2398
 msgid "Invalid window handle.\n"
 msgstr ""
 
-#: winerror.mc:2401
+#: winerror.mc:2403
 msgid "Invalid menu handle.\n"
 msgstr ""
 
-#: winerror.mc:2406
+#: winerror.mc:2408
 msgid "Invalid cursor handle.\n"
 msgstr ""
 
-#: winerror.mc:2411
+#: winerror.mc:2413
 msgid "Invalid accelerator table handle.\n"
 msgstr ""
 
-#: winerror.mc:2416
+#: winerror.mc:2418
 msgid "Invalid hook handle.\n"
 msgstr ""
 
-#: winerror.mc:2421
+#: winerror.mc:2423
 msgid "Invalid DWP handle.\n"
 msgstr ""
 
-#: winerror.mc:2426
+#: winerror.mc:2428
 msgid "Can't create top-level child window.\n"
 msgstr ""
 
-#: winerror.mc:2431
+#: winerror.mc:2433
 msgid "Can't find window class.\n"
 msgstr ""
 
-#: winerror.mc:2436
+#: winerror.mc:2438
 msgid "Window owned by another thread.\n"
 msgstr ""
 
-#: winerror.mc:2441
+#: winerror.mc:2443
 msgid "Hotkey already registered.\n"
 msgstr ""
 
-#: winerror.mc:2446
+#: winerror.mc:2448
 msgid "Class already exists.\n"
 msgstr ""
 
-#: winerror.mc:2451
+#: winerror.mc:2453
 #, fuzzy
 msgid "Class does not exist.\n"
 msgstr "Cesta neexistuje.\n"
 
-#: winerror.mc:2456
+#: winerror.mc:2458
 msgid "Class has open windows.\n"
 msgstr ""
 
-#: winerror.mc:2461
+#: winerror.mc:2463
 msgid "Invalid index.\n"
 msgstr ""
 
-#: winerror.mc:2466
+#: winerror.mc:2468
 msgid "Invalid icon handle.\n"
 msgstr ""
 
-#: winerror.mc:2471
+#: winerror.mc:2473
 msgid "Private dialog index.\n"
 msgstr ""
 
-#: winerror.mc:2476
+#: winerror.mc:2478
 #, fuzzy
 msgid "List box ID not found.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:2481
+#: winerror.mc:2483
 msgid "No wildcard characters.\n"
 msgstr ""
 
-#: winerror.mc:2486
+#: winerror.mc:2488
 #, fuzzy
 msgid "Clipboard not open.\n"
 msgstr "Nemôžem vytvoriť alebo použiť okno."
 
-#: winerror.mc:2491
+#: winerror.mc:2493
 msgid "Hotkey not registered.\n"
 msgstr ""
 
-#: winerror.mc:2496
+#: winerror.mc:2498
 msgid "Not a dialog window.\n"
 msgstr ""
 
-#: winerror.mc:2501
+#: winerror.mc:2503
 #, fuzzy
 msgid "Control ID not found.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:2506
+#: winerror.mc:2508
 msgid "Invalid combo box message.\n"
 msgstr ""
 
-#: winerror.mc:2511
+#: winerror.mc:2513
 msgid "Not a combo box window.\n"
 msgstr ""
 
-#: winerror.mc:2516
+#: winerror.mc:2518
 msgid "Invalid edit height.\n"
 msgstr ""
 
-#: winerror.mc:2521
+#: winerror.mc:2523
 #, fuzzy
 msgid "DC not found.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:2526
+#: winerror.mc:2528
 msgid "Invalid hook filter.\n"
 msgstr ""
 
-#: winerror.mc:2531
+#: winerror.mc:2533
 msgid "Invalid filter procedure.\n"
 msgstr ""
 
-#: winerror.mc:2536
+#: winerror.mc:2538
 msgid "Hook procedure needs module handle.\n"
 msgstr ""
 
-#: winerror.mc:2541
+#: winerror.mc:2543
 msgid "Global-only hook procedure.\n"
 msgstr ""
 
-#: winerror.mc:2546
+#: winerror.mc:2548
 msgid "Journal hook already set.\n"
 msgstr ""
 
-#: winerror.mc:2551
+#: winerror.mc:2553
 msgid "Hook procedure not installed.\n"
 msgstr ""
 
-#: winerror.mc:2556
+#: winerror.mc:2558
 msgid "Invalid list box message.\n"
 msgstr ""
 
-#: winerror.mc:2561
+#: winerror.mc:2563
 msgid "Invalid LB_SETCOUNT sent.\n"
 msgstr ""
 
-#: winerror.mc:2566
+#: winerror.mc:2568
 msgid "No tab stops on this list box.\n"
 msgstr ""
 
-#: winerror.mc:2571
+#: winerror.mc:2573
 msgid "Can't destroy object owned by another thread.\n"
 msgstr ""
 
-#: winerror.mc:2576
+#: winerror.mc:2578
 msgid "Child window menus not allowed.\n"
 msgstr ""
 
-#: winerror.mc:2581
+#: winerror.mc:2583
 msgid "Window has no system menu.\n"
 msgstr ""
 
-#: winerror.mc:2586
+#: winerror.mc:2588
 msgid "Invalid message box style.\n"
 msgstr ""
 
-#: winerror.mc:2591
+#: winerror.mc:2593
 msgid "Invalid SPI parameter.\n"
 msgstr ""
 
-#: winerror.mc:2596
+#: winerror.mc:2598
 msgid "Screen already locked.\n"
 msgstr ""
 
-#: winerror.mc:2601
+#: winerror.mc:2603
 msgid "Window handles have different parents.\n"
 msgstr ""
 
-#: winerror.mc:2606
+#: winerror.mc:2608
 msgid "Not a child window.\n"
 msgstr ""
 
-#: winerror.mc:2611
+#: winerror.mc:2613
 msgid "Invalid GW command.\n"
 msgstr ""
 
-#: winerror.mc:2616
+#: winerror.mc:2618
 msgid "Invalid thread ID.\n"
 msgstr ""
 
-#: winerror.mc:2621
+#: winerror.mc:2623
 msgid "Not an MDI child window.\n"
 msgstr ""
 
-#: winerror.mc:2626
+#: winerror.mc:2628
 msgid "Popup menu already active.\n"
 msgstr ""
 
-#: winerror.mc:2631
+#: winerror.mc:2633
 msgid "No scrollbars.\n"
 msgstr ""
 
-#: winerror.mc:2636
+#: winerror.mc:2638
 msgid "Invalid scrollbar range.\n"
 msgstr ""
 
-#: winerror.mc:2641
+#: winerror.mc:2643
 msgid "Invalid ShowWin command.\n"
 msgstr ""
 
-#: winerror.mc:2646
+#: winerror.mc:2648
 msgid "No system resources.\n"
 msgstr ""
 
-#: winerror.mc:2651
+#: winerror.mc:2653
 msgid "No non-paged system resources.\n"
 msgstr ""
 
-#: winerror.mc:2656
+#: winerror.mc:2658
 msgid "No paged system resources.\n"
 msgstr ""
 
-#: winerror.mc:2661
+#: winerror.mc:2663
 msgid "No working set quota.\n"
 msgstr ""
 
-#: winerror.mc:2666
+#: winerror.mc:2668
 msgid "No page file quota.\n"
 msgstr ""
 
-#: winerror.mc:2671
+#: winerror.mc:2673
 msgid "Exceeded commitment limit.\n"
 msgstr ""
 
-#: winerror.mc:2676
+#: winerror.mc:2678
 msgid "Menu item not found.\n"
 msgstr "Položka menu nenájdená.\n"
 
-#: winerror.mc:2681
+#: winerror.mc:2683
 msgid "Invalid keyboard handle.\n"
 msgstr ""
 
-#: winerror.mc:2686
+#: winerror.mc:2688
 msgid "Hook type not allowed.\n"
 msgstr ""
 
-#: winerror.mc:2691
+#: winerror.mc:2693
 msgid "Interactive window station required.\n"
 msgstr ""
 
-#: winerror.mc:2696
+#: winerror.mc:2698
 msgid "Timeout.\n"
 msgstr ""
 
-#: winerror.mc:2701
+#: winerror.mc:2703
 msgid "Invalid monitor handle.\n"
 msgstr ""
 
-#: winerror.mc:2706
+#: winerror.mc:2708
 msgid "Event log file corrupt.\n"
 msgstr ""
 
-#: winerror.mc:2711
+#: winerror.mc:2713
 msgid "Event log can't start.\n"
 msgstr ""
 
-#: winerror.mc:2716
+#: winerror.mc:2718
 msgid "Event log file full.\n"
 msgstr ""
 
-#: winerror.mc:2721
+#: winerror.mc:2723
 msgid "Event log file changed.\n"
 msgstr ""
 
-#: winerror.mc:2726
+#: winerror.mc:2728
 #, fuzzy
 msgid "Installer service failed.\n"
 msgstr "Veľkosť k dispozícii.\n"
 
-#: winerror.mc:2731
+#: winerror.mc:2733
 msgid "Installation aborted by user.\n"
 msgstr "Prerušenie inštalácie užívateľom.\n"
 
-#: winerror.mc:2736
+#: winerror.mc:2738
 msgid "Installation failure.\n"
 msgstr ""
 
-#: winerror.mc:2741
+#: winerror.mc:2743
 msgid "Installation suspended.\n"
 msgstr ""
 
-#: winerror.mc:2746
+#: winerror.mc:2748
 msgid "Unknown product.\n"
 msgstr "Neznámy produkt.\n"
 
-#: winerror.mc:2751
+#: winerror.mc:2753
 #, fuzzy
 msgid "Unknown feature.\n"
 msgstr "Neznámy ovládač tlačiarne.\n"
 
-#: winerror.mc:2756
+#: winerror.mc:2758
 #, fuzzy
 msgid "Unknown component.\n"
 msgstr "Neznámy ovládač tlačiarne.\n"
 
-#: winerror.mc:2761
+#: winerror.mc:2763
 #, fuzzy
 msgid "Unknown property.\n"
 msgstr "Neznámy ovládač tlačiarne.\n"
 
-#: winerror.mc:2766
+#: winerror.mc:2768
 msgid "Invalid handle state.\n"
 msgstr ""
 
-#: winerror.mc:2771
+#: winerror.mc:2773
 msgid "Bad configuration.\n"
 msgstr "Zlé nastavenie.\n"
 
-#: winerror.mc:2776
+#: winerror.mc:2778
 msgid "Index is missing.\n"
 msgstr ""
 
-#: winerror.mc:2781
+#: winerror.mc:2783
 msgid "Installation source is missing.\n"
 msgstr ""
 
-#: winerror.mc:2786
+#: winerror.mc:2788
 msgid "Wrong installation package version.\n"
 msgstr ""
 
-#: winerror.mc:2791
+#: winerror.mc:2793
 msgid "Product uninstalled.\n"
 msgstr ""
 
-#: winerror.mc:2796
+#: winerror.mc:2798
 msgid "Invalid query syntax.\n"
 msgstr ""
 
-#: winerror.mc:2801
+#: winerror.mc:2803
 msgid "Invalid field.\n"
 msgstr ""
 
-#: winerror.mc:2806
+#: winerror.mc:2808
 msgid "Device removed.\n"
 msgstr "Zariadenie odstránené.\n"
 
-#: winerror.mc:2811
+#: winerror.mc:2813
 msgid "Installation already running.\n"
 msgstr ""
 
-#: winerror.mc:2816
+#: winerror.mc:2818
 msgid "Installation package failed to open.\n"
 msgstr ""
 
-#: winerror.mc:2821
+#: winerror.mc:2823
 msgid "Installation package is invalid.\n"
 msgstr ""
 
-#: winerror.mc:2826
+#: winerror.mc:2828
 msgid "Installer user interface failed.\n"
 msgstr ""
 
-#: winerror.mc:2831
+#: winerror.mc:2833
 msgid "Failed to open installation log file.\n"
 msgstr ""
 
-#: winerror.mc:2836
+#: winerror.mc:2838
 msgid "Installation language not supported.\n"
 msgstr ""
 
-#: winerror.mc:2841
+#: winerror.mc:2843
 msgid "Installation transform failed to apply.\n"
 msgstr ""
 
-#: winerror.mc:2846
+#: winerror.mc:2848
 msgid "Installation package rejected.\n"
 msgstr ""
 
-#: winerror.mc:2851
+#: winerror.mc:2853
 msgid "Function could not be called.\n"
 msgstr ""
 
-#: winerror.mc:2856
+#: winerror.mc:2858
 #, fuzzy
 msgid "Function failed.\n"
 msgstr "Otvoriť súbor.\n"
 
-#: winerror.mc:2861
+#: winerror.mc:2863
 msgid "Invalid table.\n"
 msgstr ""
 
-#: winerror.mc:2866
+#: winerror.mc:2868
 msgid "Data type mismatch.\n"
 msgstr ""
 
-#: winerror.mc:2871 winerror.mc:3081
+#: winerror.mc:2873 winerror.mc:3083
 msgid "Unsupported type.\n"
 msgstr "Nepodporovaný typ.\n"
 
-#: winerror.mc:2876
+#: winerror.mc:2878
 #, fuzzy
 msgid "Creation failed.\n"
 msgstr "Otvoriť súbor.\n"
 
-#: winerror.mc:2881
+#: winerror.mc:2883
 msgid "Temporary directory not writable.\n"
 msgstr ""
 
-#: winerror.mc:2886
+#: winerror.mc:2888
 msgid "Installation platform not supported.\n"
 msgstr ""
 
-#: winerror.mc:2891
+#: winerror.mc:2893
 msgid "Installer not used.\n"
 msgstr "Inštalátor nepoužitý.\n"
 
-#: winerror.mc:2896
+#: winerror.mc:2898
 msgid "Failed to open the patch package.\n"
 msgstr ""
 
-#: winerror.mc:2901
+#: winerror.mc:2903
 msgid "Invalid patch package.\n"
 msgstr ""
 
-#: winerror.mc:2906
+#: winerror.mc:2908
 msgid "Unsupported patch package.\n"
 msgstr ""
 
-#: winerror.mc:2911
+#: winerror.mc:2913
 msgid "Another version is installed.\n"
 msgstr ""
 
-#: winerror.mc:2916
+#: winerror.mc:2918
 msgid "Invalid command line.\n"
 msgstr ""
 
-#: winerror.mc:2921
+#: winerror.mc:2923
 msgid "Remote installation not allowed.\n"
 msgstr ""
 
-#: winerror.mc:2926
+#: winerror.mc:2928
 msgid "Reboot initiated after successful install.\n"
 msgstr ""
 
-#: winerror.mc:2931
+#: winerror.mc:2933
 msgid "Invalid string binding.\n"
 msgstr ""
 
-#: winerror.mc:2936
+#: winerror.mc:2938
 msgid "Wrong kind of binding.\n"
 msgstr ""
 
-#: winerror.mc:2941
+#: winerror.mc:2943
 msgid "Invalid binding.\n"
 msgstr ""
 
-#: winerror.mc:2946
+#: winerror.mc:2948
 msgid "RPC protocol sequence not supported.\n"
 msgstr ""
 
-#: winerror.mc:2951
+#: winerror.mc:2953
 msgid "Invalid RPC protocol sequence.\n"
 msgstr ""
 
-#: winerror.mc:2956
+#: winerror.mc:2958
 msgid "Invalid string UUID.\n"
 msgstr ""
 
-#: winerror.mc:2961
+#: winerror.mc:2963
 msgid "Invalid endpoint format.\n"
 msgstr ""
 
-#: winerror.mc:2966
+#: winerror.mc:2968
 msgid "Invalid network address.\n"
 msgstr "Nesprávna sieťová adresa.\n"
 
-#: winerror.mc:2971
+#: winerror.mc:2973
 #, fuzzy
 msgid "No endpoint found.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:2976
+#: winerror.mc:2978
 msgid "Invalid timeout value.\n"
 msgstr ""
 
-#: winerror.mc:2981
+#: winerror.mc:2983
 #, fuzzy
 msgid "Object UUID not found.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:2986
+#: winerror.mc:2988
 msgid "UUID already registered.\n"
 msgstr ""
 
-#: winerror.mc:2991
+#: winerror.mc:2993
 msgid "UUID type already registered.\n"
 msgstr ""
 
-#: winerror.mc:2996
+#: winerror.mc:2998
 msgid "Server already listening.\n"
 msgstr ""
 
-#: winerror.mc:3001
+#: winerror.mc:3003
 msgid "No protocol sequences registered.\n"
 msgstr ""
 
-#: winerror.mc:3006
+#: winerror.mc:3008
 msgid "RPC server not listening.\n"
 msgstr ""
 
-#: winerror.mc:3011
+#: winerror.mc:3013
 msgid "Unknown manager type.\n"
 msgstr ""
 
-#: winerror.mc:3016
+#: winerror.mc:3018
 #, fuzzy
 msgid "Unknown interface.\n"
 msgstr "Neznámy ovládač tlačiarne.\n"
 
-#: winerror.mc:3021
+#: winerror.mc:3023
 msgid "No bindings.\n"
 msgstr ""
 
-#: winerror.mc:3026
+#: winerror.mc:3028
 msgid "No protocol sequences.\n"
 msgstr ""
 
-#: winerror.mc:3031
+#: winerror.mc:3033
 msgid "Can't create endpoint.\n"
 msgstr ""
 
-#: winerror.mc:3036
+#: winerror.mc:3038
 #, fuzzy
 msgid "Out of resources.\n"
 msgstr "Nedostatok pamäte.\n"
 
-#: winerror.mc:3041
+#: winerror.mc:3043
 msgid "RPC server unavailable.\n"
 msgstr ""
 
-#: winerror.mc:3046
+#: winerror.mc:3048
 msgid "RPC server too busy.\n"
 msgstr ""
 
-#: winerror.mc:3051
+#: winerror.mc:3053
 msgid "Invalid network options.\n"
 msgstr ""
 
-#: winerror.mc:3056
+#: winerror.mc:3058
 msgid "No RPC call active.\n"
 msgstr ""
 
-#: winerror.mc:3061
+#: winerror.mc:3063
 msgid "RPC call failed.\n"
 msgstr ""
 
-#: winerror.mc:3066
+#: winerror.mc:3068
 msgid "RPC call failed and didn't execute.\n"
 msgstr ""
 
-#: winerror.mc:3071
+#: winerror.mc:3073
 msgid "RPC protocol error.\n"
 msgstr ""
 
-#: winerror.mc:3076
+#: winerror.mc:3078
 msgid "Unsupported transfer syntax.\n"
 msgstr ""
 
-#: winerror.mc:3086
+#: winerror.mc:3088
 msgid "Invalid tag.\n"
 msgstr ""
 
-#: winerror.mc:3091
+#: winerror.mc:3093
 msgid "Invalid array bounds.\n"
 msgstr ""
 
-#: winerror.mc:3096
+#: winerror.mc:3098
 msgid "No entry name.\n"
 msgstr ""
 
-#: winerror.mc:3101
+#: winerror.mc:3103
 msgid "Invalid name syntax.\n"
 msgstr ""
 
-#: winerror.mc:3106
+#: winerror.mc:3108
 msgid "Unsupported name syntax.\n"
 msgstr ""
 
-#: winerror.mc:3111
+#: winerror.mc:3113
 msgid "No network address.\n"
 msgstr ""
 
-#: winerror.mc:3116
+#: winerror.mc:3118
 msgid "Duplicate endpoint.\n"
 msgstr ""
 
-#: winerror.mc:3121
+#: winerror.mc:3123
 msgid "Unknown authentication type.\n"
 msgstr ""
 
-#: winerror.mc:3126
+#: winerror.mc:3128
 msgid "Maximum calls too low.\n"
 msgstr ""
 
-#: winerror.mc:3131
+#: winerror.mc:3133
 msgid "String too long.\n"
 msgstr ""
 
-#: winerror.mc:3136
+#: winerror.mc:3138
 msgid "Protocol sequence not found.\n"
 msgstr ""
 
-#: winerror.mc:3141
+#: winerror.mc:3143
 msgid "Procedure number out of range.\n"
 msgstr ""
 
-#: winerror.mc:3146
+#: winerror.mc:3148
 msgid "Binding has no authentication data.\n"
 msgstr ""
 
-#: winerror.mc:3151
+#: winerror.mc:3153
 msgid "Unknown authentication service.\n"
 msgstr ""
 
-#: winerror.mc:3156
+#: winerror.mc:3158
 msgid "Unknown authentication level.\n"
 msgstr ""
 
-#: winerror.mc:3161
+#: winerror.mc:3163
 msgid "Invalid authentication identity.\n"
 msgstr ""
 
-#: winerror.mc:3166
+#: winerror.mc:3168
 msgid "Unknown authorization service.\n"
 msgstr ""
 
-#: winerror.mc:3171
+#: winerror.mc:3173
 msgid "Invalid entry.\n"
 msgstr ""
 
-#: winerror.mc:3176
+#: winerror.mc:3178
 msgid "Can't perform operation.\n"
 msgstr ""
 
-#: winerror.mc:3181
+#: winerror.mc:3183
 msgid "Endpoints not registered.\n"
 msgstr ""
 
-#: winerror.mc:3186
+#: winerror.mc:3188
 msgid "Nothing to export.\n"
 msgstr ""
 
-#: winerror.mc:3191
+#: winerror.mc:3193
 msgid "Incomplete name.\n"
 msgstr ""
 
-#: winerror.mc:3196
+#: winerror.mc:3198
 msgid "Invalid version option.\n"
 msgstr ""
 
-#: winerror.mc:3201
+#: winerror.mc:3203
 msgid "No more members.\n"
 msgstr ""
 
-#: winerror.mc:3206
+#: winerror.mc:3208
 msgid "Not all objects unexported.\n"
 msgstr ""
 
-#: winerror.mc:3211
+#: winerror.mc:3213
 #, fuzzy
 msgid "Interface not found.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:3216
+#: winerror.mc:3218
 msgid "Entry already exists.\n"
 msgstr ""
 
-#: winerror.mc:3221
+#: winerror.mc:3223
 #, fuzzy
 msgid "Entry not found.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:3226
+#: winerror.mc:3228
 #, fuzzy
 msgid "Name service unavailable.\n"
 msgstr "Veľkosť k dispozícii.\n"
 
-#: winerror.mc:3231
+#: winerror.mc:3233
 msgid "Invalid network address family.\n"
 msgstr ""
 
-#: winerror.mc:3236
+#: winerror.mc:3238
 msgid "Operation not supported.\n"
 msgstr ""
 
-#: winerror.mc:3241
+#: winerror.mc:3243
 msgid "No security context available.\n"
 msgstr ""
 
-#: winerror.mc:3246
+#: winerror.mc:3248
 #, fuzzy
 msgid "RPCInternal error.\n"
 msgstr "Nedefinovaná externá chyba."
 
-#: winerror.mc:3251
+#: winerror.mc:3253
 msgid "RPC divide-by-zero.\n"
 msgstr ""
 
-#: winerror.mc:3256
+#: winerror.mc:3258
 msgid "Address error.\n"
 msgstr ""
 
-#: winerror.mc:3261
+#: winerror.mc:3263
 msgid "Floating-point divide-by-zero.\n"
 msgstr ""
 
-#: winerror.mc:3266
+#: winerror.mc:3268
 msgid "Floating-point underflow.\n"
 msgstr ""
 
-#: winerror.mc:3271
+#: winerror.mc:3273
 msgid "Floating-point overflow.\n"
 msgstr ""
 
-#: winerror.mc:3276
+#: winerror.mc:3278
 msgid "No more entries.\n"
 msgstr ""
 
-#: winerror.mc:3281
+#: winerror.mc:3283
 msgid "Character translation table open failed.\n"
 msgstr ""
 
-#: winerror.mc:3286
+#: winerror.mc:3288
 msgid "Character translation table file too small.\n"
 msgstr ""
 
-#: winerror.mc:3291
+#: winerror.mc:3293
 msgid "Null context handle.\n"
 msgstr ""
 
-#: winerror.mc:3296
+#: winerror.mc:3298
 msgid "Context handle damaged.\n"
 msgstr ""
 
-#: winerror.mc:3301
+#: winerror.mc:3303
 msgid "Binding handle mismatch.\n"
 msgstr ""
 
-#: winerror.mc:3306
+#: winerror.mc:3308
 msgid "Cannot get call handle.\n"
 msgstr ""
 
-#: winerror.mc:3311
+#: winerror.mc:3313
 msgid "Null reference pointer.\n"
 msgstr ""
 
-#: winerror.mc:3316
+#: winerror.mc:3318
 msgid "Enumeration value out of range.\n"
 msgstr ""
 
-#: winerror.mc:3321
+#: winerror.mc:3323
 msgid "Byte count too small.\n"
 msgstr ""
 
-#: winerror.mc:3326
+#: winerror.mc:3328
 msgid "Bad stub data.\n"
 msgstr ""
 
-#: winerror.mc:3331
+#: winerror.mc:3333
 msgid "Invalid user buffer.\n"
 msgstr ""
 
-#: winerror.mc:3336
+#: winerror.mc:3338
 msgid "Unrecognized media.\n"
 msgstr ""
 
-#: winerror.mc:3341
+#: winerror.mc:3343
 msgid "No trust secret.\n"
 msgstr ""
 
-#: winerror.mc:3346
+#: winerror.mc:3348
 msgid "No trust SAM account.\n"
 msgstr ""
 
-#: winerror.mc:3351
+#: winerror.mc:3353
 msgid "Trusted domain failure.\n"
 msgstr ""
 
-#: winerror.mc:3356
+#: winerror.mc:3358
 msgid "Trusted relationship failure.\n"
 msgstr ""
 
-#: winerror.mc:3361
+#: winerror.mc:3363
 msgid "Trust logon failure.\n"
 msgstr ""
 
-#: winerror.mc:3366
+#: winerror.mc:3368
 msgid "RPC call already in progress.\n"
 msgstr ""
 
-#: winerror.mc:3371
+#: winerror.mc:3373
 msgid "NETLOGON is not started.\n"
 msgstr ""
 
-#: winerror.mc:3376
+#: winerror.mc:3378
 msgid "Account expired.\n"
 msgstr ""
 
-#: winerror.mc:3381
+#: winerror.mc:3383
 msgid "Redirector has open handles.\n"
 msgstr ""
 
-#: winerror.mc:3386
+#: winerror.mc:3388
 msgid "Printer driver already installed.\n"
 msgstr ""
 
-#: winerror.mc:3391
+#: winerror.mc:3393
 #, fuzzy
 msgid "Unknown port.\n"
 msgstr "Neznámy ovládač tlačiarne.\n"
 
-#: winerror.mc:3396
+#: winerror.mc:3398
 #, fuzzy
 msgid "Unknown printer driver.\n"
 msgstr "Neznámy ovládač tlačiarne.\n"
 
-#: winerror.mc:3401
+#: winerror.mc:3403
 #, fuzzy
 msgid "Unknown print processor.\n"
 msgstr "Neznámy ovládač tlačiarne.\n"
 
-#: winerror.mc:3406
+#: winerror.mc:3408
 msgid "Invalid separator file.\n"
 msgstr ""
 
-#: winerror.mc:3411
+#: winerror.mc:3413
 msgid "Invalid priority.\n"
 msgstr ""
 
-#: winerror.mc:3416
+#: winerror.mc:3418
 msgid "Invalid printer name.\n"
 msgstr ""
 
-#: winerror.mc:3421
+#: winerror.mc:3423
 msgid "Printer already exists.\n"
 msgstr ""
 
-#: winerror.mc:3426
+#: winerror.mc:3428
 msgid "Invalid printer command.\n"
 msgstr ""
 
-#: winerror.mc:3431
+#: winerror.mc:3433
 msgid "Invalid data type.\n"
 msgstr ""
 
-#: winerror.mc:3436
+#: winerror.mc:3438
 msgid "Invalid environment.\n"
 msgstr ""
 
-#: winerror.mc:3441
+#: winerror.mc:3443
 msgid "No more bindings.\n"
 msgstr ""
 
-#: winerror.mc:3446
+#: winerror.mc:3448
 msgid "Can't log on with inter-domain trust account.\n"
 msgstr ""
 
-#: winerror.mc:3451
+#: winerror.mc:3453
 msgid "Can't log on with workstation trust account.\n"
 msgstr ""
 
-#: winerror.mc:3456
+#: winerror.mc:3458
 msgid "Can't log on with server trust account.\n"
 msgstr ""
 
-#: winerror.mc:3461
+#: winerror.mc:3463
 msgid "Domain trust information inconsistent.\n"
 msgstr ""
 
-#: winerror.mc:3466
+#: winerror.mc:3468
 msgid "Server has open handles.\n"
 msgstr ""
 
-#: winerror.mc:3471
+#: winerror.mc:3473
 msgid "Resource data not found.\n"
 msgstr ""
 
-#: winerror.mc:3476
+#: winerror.mc:3478
 msgid "Resource type not found.\n"
 msgstr ""
 
-#: winerror.mc:3481
+#: winerror.mc:3483
 msgid "Resource name not found.\n"
 msgstr ""
 
-#: winerror.mc:3486
+#: winerror.mc:3488
 msgid "Resource language not found.\n"
 msgstr ""
 
-#: winerror.mc:3491
+#: winerror.mc:3493
 msgid "Not enough quota.\n"
 msgstr ""
 
-#: winerror.mc:3496
+#: winerror.mc:3498
 msgid "No interfaces.\n"
 msgstr ""
 
-#: winerror.mc:3501
+#: winerror.mc:3503
 msgid "RPC call canceled.\n"
 msgstr ""
 
-#: winerror.mc:3506
+#: winerror.mc:3508
 #, fuzzy
 msgid "Binding incomplete.\n"
 msgstr "Neimplementované.\n"
 
-#: winerror.mc:3511
+#: winerror.mc:3513
 msgid "RPC comm failure.\n"
 msgstr ""
 
-#: winerror.mc:3516
+#: winerror.mc:3518
 msgid "Unsupported authorization level.\n"
 msgstr ""
 
-#: winerror.mc:3521
+#: winerror.mc:3523
 msgid "No principal name registered.\n"
 msgstr ""
 
-#: winerror.mc:3526
+#: winerror.mc:3528
 msgid "Not an RPC error.\n"
 msgstr ""
 
-#: winerror.mc:3531
+#: winerror.mc:3533
 msgid "UUID is local only.\n"
 msgstr ""
 
-#: winerror.mc:3536
+#: winerror.mc:3538
 msgid "Security package error.\n"
 msgstr ""
 
-#: winerror.mc:3541
+#: winerror.mc:3543
 #, fuzzy
 msgid "Thread not canceled.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:3546
+#: winerror.mc:3548
 msgid "Invalid handle operation.\n"
 msgstr ""
 
-#: winerror.mc:3551
+#: winerror.mc:3553
 msgid "Wrong serializing package version.\n"
 msgstr ""
 
-#: winerror.mc:3556
+#: winerror.mc:3558
 msgid "Wrong stub version.\n"
 msgstr ""
 
-#: winerror.mc:3561
+#: winerror.mc:3563
 msgid "Invalid pipe object.\n"
 msgstr ""
 
-#: winerror.mc:3566
+#: winerror.mc:3568
 msgid "Wrong pipe order.\n"
 msgstr ""
 
-#: winerror.mc:3571
+#: winerror.mc:3573
 msgid "Wrong pipe version.\n"
 msgstr ""
 
-#: winerror.mc:3576
+#: winerror.mc:3578
 msgid "Group member not found.\n"
 msgstr ""
 
-#: winerror.mc:3581
+#: winerror.mc:3583
 msgid "Can't create endpoint mapper DB.\n"
 msgstr ""
 
-#: winerror.mc:3586
+#: winerror.mc:3588
 msgid "Invalid object.\n"
 msgstr ""
 
-#: winerror.mc:3591
+#: winerror.mc:3593
 msgid "Invalid time.\n"
 msgstr ""
 
-#: winerror.mc:3596
+#: winerror.mc:3598
 msgid "Invalid form name.\n"
 msgstr ""
 
-#: winerror.mc:3601
+#: winerror.mc:3603
 msgid "Invalid form size.\n"
 msgstr ""
 
-#: winerror.mc:3606
+#: winerror.mc:3608
 msgid "Already awaiting printer handle.\n"
 msgstr ""
 
-#: winerror.mc:3611
+#: winerror.mc:3613
 msgid "Printer deleted.\n"
 msgstr ""
 
-#: winerror.mc:3616
+#: winerror.mc:3618
 msgid "Invalid printer state.\n"
 msgstr ""
 
-#: winerror.mc:3621
+#: winerror.mc:3623
 msgid "User must change password.\n"
 msgstr ""
 
-#: winerror.mc:3626
+#: winerror.mc:3628
 #, fuzzy
 msgid "Domain controller not found.\n"
 msgstr "Súbor nenájdený.\n"
 
-#: winerror.mc:3631
+#: winerror.mc:3633
 msgid "Account locked out.\n"
 msgstr ""
 
-#: winerror.mc:3636
+#: winerror.mc:3638
 msgid "Invalid pixel format.\n"
 msgstr ""
 
-#: winerror.mc:3641
+#: winerror.mc:3643
 msgid "Invalid driver.\n"
 msgstr ""
 
-#: winerror.mc:3646
+#: winerror.mc:3648
 msgid "Invalid object resolver set.\n"
 msgstr ""
 
-#: winerror.mc:3651
+#: winerror.mc:3653
 msgid "Incomplete RPC send.\n"
 msgstr ""
 
-#: winerror.mc:3656
+#: winerror.mc:3658
 msgid "Invalid asynchronous RPC handle.\n"
 msgstr ""
 
-#: winerror.mc:3661
+#: winerror.mc:3663
 msgid "Invalid asynchronous RPC call.\n"
 msgstr ""
 
-#: winerror.mc:3666
+#: winerror.mc:3668
 msgid "RPC pipe closed.\n"
 msgstr ""
 
-#: winerror.mc:3671
+#: winerror.mc:3673
 msgid "Discipline error on RPC pipe.\n"
 msgstr ""
 
-#: winerror.mc:3676
+#: winerror.mc:3678
 msgid "No data on RPC pipe.\n"
 msgstr ""
 
-#: winerror.mc:3681
+#: winerror.mc:3683
 #, fuzzy
 msgid "No site name available.\n"
 msgstr "Nie je k dispozícii; .\n"
 
-#: winerror.mc:3686
+#: winerror.mc:3688
 msgid "The file cannot be accessed.\n"
 msgstr ""
 
-#: winerror.mc:3691
+#: winerror.mc:3693
 msgid "The filename cannot be resolved.\n"
 msgstr ""
 
-#: winerror.mc:3696
+#: winerror.mc:3698
 msgid "RPC entry type mismatch.\n"
 msgstr ""
 
-#: winerror.mc:3701
+#: winerror.mc:3703
 msgid "Not all objects could be exported.\n"
 msgstr ""
 
-#: winerror.mc:3706
+#: winerror.mc:3708
 msgid "The interface could not be exported.\n"
 msgstr ""
 
-#: winerror.mc:3711
+#: winerror.mc:3713
 msgid "The profile could not be added.\n"
 msgstr ""
 
-#: winerror.mc:3716
+#: winerror.mc:3718
 msgid "The profile element could not be added.\n"
 msgstr ""
 
-#: winerror.mc:3721
+#: winerror.mc:3723
 msgid "The profile element could not be removed.\n"
 msgstr ""
 
-#: winerror.mc:3726
+#: winerror.mc:3728
 msgid "The group element could not be added.\n"
 msgstr ""
 
-#: winerror.mc:3731
+#: winerror.mc:3733
 msgid "The group element could not be removed.\n"
 msgstr ""
 
-#: winerror.mc:3736
+#: winerror.mc:3738
 msgid "The username could not be found.\n"
 msgstr ""
 
-#: winerror.mc:3741
+#: winerror.mc:3743
 #, fuzzy
 msgid "This network connection does not exist.\n"
 msgstr "Súbor neexistuje.\n"
 
-#: winerror.mc:3746
+#: winerror.mc:3748
 #, fuzzy
 #| msgid "Connection is active.\n"
 msgid "Connection reset by peer.\n"
 msgstr "Pripojenie je aktícne.\n"
+
+#: winerror.mc:3760
+msgid "No Signature found in file.\n"
+msgstr ""
 
 #: localspl.rc:31 localui.rc:31 winspool.rc:30
 msgid "Local Port"
@@ -6761,7 +6820,7 @@ msgstr ""
 msgid "Sound Selection"
 msgstr ""
 
-#: msacm32.rc:39 winedbg.rc:71
+#: msacm32.rc:39 winedbg.rc:77
 #, fuzzy
 msgid "&Save As..."
 msgstr "Uložiť ako"
@@ -6872,436 +6931,475 @@ msgstr ""
 msgid "choose which folder contains %s"
 msgstr ""
 
-#: msi.rc:71
-msgid "Action %s: [1]. [2]"
-msgstr ""
-
-#: msi.rc:72
-msgid "Info [1]. "
-msgstr ""
-
-#: msi.rc:78
-msgid "Action start %s: [1]."
-msgstr ""
-
-#: msi.rc:79
-msgid "Action ended %s: [1]. Return value [2]."
-msgstr ""
-
-#: msi.rc:85
+#: msi.rc:90
 msgid "Allocating registry space"
 msgstr ""
 
-#: msi.rc:86
+#: msi.rc:91
 msgid "Searching for installed applications"
 msgstr ""
 
-#: msi.rc:87
+#: msi.rc:92
 msgid "Binding executables"
 msgstr ""
 
-#: msi.rc:88 msi.rc:131
+#: msi.rc:93 msi.rc:136
 #, fuzzy
 #| msgid "Searching for %s"
 msgid "Searching for qualifying products"
 msgstr "Hľadanie %s"
 
-#: msi.rc:89 msi.rc:90 msi.rc:95
+#: msi.rc:94 msi.rc:95 msi.rc:100
 msgid "Computing space requirements"
 msgstr ""
 
-#: msi.rc:91
+#: msi.rc:96
 #, fuzzy
 #| msgid "Create New Folder"
 msgid "Creating folders"
 msgstr "Vytvoriť nový adresár"
 
-#: msi.rc:92
+#: msi.rc:97
 msgid "Creating shortcuts"
 msgstr ""
 
-#: msi.rc:93
+#: msi.rc:98
 msgid "Deleting services"
 msgstr ""
 
-#: msi.rc:94
+#: msi.rc:99
 #, fuzzy
 msgid "Creating duplicate files"
 msgstr "&Dátum"
 
-#: msi.rc:96
+#: msi.rc:101
 #, fuzzy
 #| msgid "Searching for %s"
 msgid "Searching for related applications"
 msgstr "Hľadanie %s"
 
-#: msi.rc:97
+#: msi.rc:102
 msgid "Copying network install files"
 msgstr ""
 
-#: msi.rc:98
+#: msi.rc:103
 #, fuzzy
 #| msgid "Copying Files..."
 msgid "Copying new files"
 msgstr "Kopírovanie súborov..."
 
-#: msi.rc:99
+#: msi.rc:104
 msgid "Installing ODBC components"
 msgstr ""
 
-#: msi.rc:100
+#: msi.rc:105
 #, fuzzy
 msgid "Installing new services"
 msgstr "Veľkosť k dispozícii.\n"
 
-#: msi.rc:101
+#: msi.rc:106
 #, fuzzy
 #| msgid "Install/Uninstall"
 msgid "Installing system catalog"
 msgstr "Inštalovať/Odinštalovať"
 
-#: msi.rc:102
+#: msi.rc:107
 msgid "Validating install"
 msgstr ""
 
-#: msi.rc:103
+#: msi.rc:108
 msgid "Evaluating launch conditions"
 msgstr ""
 
-#: msi.rc:104
+#: msi.rc:109
 msgid "Migrating feature states from related applications"
 msgstr ""
 
-#: msi.rc:105
+#: msi.rc:110
 #, fuzzy
 #| msgid "Icon files"
 msgid "Moving files"
 msgstr "Súbory ikon"
 
-#: msi.rc:106
+#: msi.rc:111
 #, fuzzy
 #| msgid "Version information"
 msgid "Publishing assembly information"
 msgstr "Informácie o verzii"
 
-#: msi.rc:107
+#: msi.rc:112
 msgid "Unpublishing assembly information"
 msgstr ""
 
-#: msi.rc:108
+#: msi.rc:113
 #, fuzzy
 #| msgid "Icon files"
 msgid "Patching files"
 msgstr "Súbory ikon"
 
-#: msi.rc:109
+#: msi.rc:114
 msgid "Updating component registration"
 msgstr ""
 
-#: msi.rc:110
+#: msi.rc:115
 msgid "Publishing Qualified Components"
 msgstr ""
 
-#: msi.rc:111
+#: msi.rc:116
 msgid "Publishing Product Features"
 msgstr ""
 
-#: msi.rc:112
+#: msi.rc:117
 #, fuzzy
 #| msgid "Version information"
 msgid "Publishing product information"
 msgstr "Informácie o verzii"
 
-#: msi.rc:113
+#: msi.rc:118
 msgid "Registering Class servers"
 msgstr ""
 
-#: msi.rc:114
+#: msi.rc:119
 msgid "Registering COM+ Applications and Components"
 msgstr ""
 
-#: msi.rc:115
+#: msi.rc:120
 msgid "Registering extension servers"
 msgstr ""
 
-#: msi.rc:116
+#: msi.rc:121
 msgid "Registering fonts"
 msgstr ""
 
-#: msi.rc:117
+#: msi.rc:122
 #, fuzzy
 #| msgid "Registry Editor"
 msgid "Registering MIME info"
 msgstr "Editor registrov"
 
-#: msi.rc:118
+#: msi.rc:123
 #, fuzzy
 msgid "Registering product"
 msgstr "Súbory pomoci (*.hlp).\n"
 
-#: msi.rc:119
+#: msi.rc:124
 msgid "Registering program identifiers"
 msgstr ""
 
-#: msi.rc:120
+#: msi.rc:125
 msgid "Registering type libraries"
 msgstr ""
 
-#: msi.rc:121
+#: msi.rc:126
 #, fuzzy
 #| msgid "Resource in use.\n"
 msgid "Registering user"
 msgstr "Zdroj sa používa.\n"
 
-#: msi.rc:122
+#: msi.rc:127
 #, fuzzy
 msgid "Removing duplicated files"
 msgstr "&Skomentovať..."
 
-#: msi.rc:123 msi.rc:147
+#: msi.rc:128 msi.rc:152
 msgid "Updating environment strings"
 msgstr ""
 
-#: msi.rc:124
+#: msi.rc:129
 #, fuzzy
 #| msgid "&Remove application"
 msgid "Removing applications"
 msgstr "&Odstrániť aplikáciu"
 
-#: msi.rc:125
+#: msi.rc:130
 #, fuzzy
 #| msgid "Icon files"
 msgid "Removing files"
 msgstr "Súbory ikon"
 
-#: msi.rc:126
+#: msi.rc:131
 msgid "Removing folders"
 msgstr ""
 
-#: msi.rc:127
+#: msi.rc:132
 msgid "Removing INI files entries"
 msgstr ""
 
-#: msi.rc:128
+#: msi.rc:133
 msgid "Removing ODBC components"
 msgstr ""
 
-#: msi.rc:129
+#: msi.rc:134
 #, fuzzy
 #| msgid "Error: Unable to terminate process \"%1\".\n"
 msgid "Removing system registry values"
 msgstr "Chyba: Nemožno ukončiť proces \"%1\".\n"
 
-#: msi.rc:130
+#: msi.rc:135
 msgid "Removing shortcuts"
 msgstr ""
 
-#: msi.rc:132
+#: msi.rc:137
 msgid "Registering modules"
 msgstr ""
 
-#: msi.rc:133
+#: msi.rc:138
 msgid "Unregistering modules"
 msgstr ""
 
-#: msi.rc:134
+#: msi.rc:139
 #, fuzzy
 #| msgid "Initializing; "
 msgid "Initializing ODBC directories"
 msgstr "Inicializácia; "
 
-#: msi.rc:135
+#: msi.rc:140
 #, fuzzy
 #| msgid "Starting Wordpad failed"
 msgid "Starting services"
 msgstr "Spustenie Wordpad sa nepodarilo"
 
-#: msi.rc:136
+#: msi.rc:141
 msgid "Stopping services"
 msgstr ""
 
-#: msi.rc:137
+#: msi.rc:142
 msgid "Unpublishing Qualified Components"
 msgstr ""
 
-#: msi.rc:138
+#: msi.rc:143
 msgid "Unpublishing Product Features"
 msgstr ""
 
-#: msi.rc:139
+#: msi.rc:144
 msgid "Unpublishing product information"
 msgstr ""
 
-#: msi.rc:140
+#: msi.rc:145
 msgid "Unregister Class servers"
 msgstr ""
 
-#: msi.rc:141
+#: msi.rc:146
 msgid "Unregistering COM+ Applications and Components"
 msgstr ""
 
-#: msi.rc:142
+#: msi.rc:147
 msgid "Unregistering extension servers"
 msgstr ""
 
-#: msi.rc:143
+#: msi.rc:148
 msgid "Unregistering fonts"
 msgstr ""
 
-#: msi.rc:144
+#: msi.rc:149
 msgid "Unregistering MIME info"
 msgstr ""
 
-#: msi.rc:145
+#: msi.rc:150
 msgid "Unregistering program identifiers"
 msgstr ""
 
-#: msi.rc:146
+#: msi.rc:151
 msgid "Unregistering type libraries"
 msgstr ""
 
-#: msi.rc:148
+#: msi.rc:153
 msgid "Writing INI files values"
 msgstr ""
 
-#: msi.rc:149
+#: msi.rc:154
 msgid "Writing system registry values"
 msgstr ""
 
-#: msi.rc:155
+#: msi.rc:160
 msgid "Free space: [1]"
 msgstr ""
 
-#: msi.rc:156
+#: msi.rc:161
 msgid "Property: [1], Signature: [2]"
 msgstr ""
 
-#: msi.rc:157
+#: msi.rc:162
 #, fuzzy
 msgid "File: [1]"
 msgstr "Súbor"
 
-#: msi.rc:158 msi.rc:185
+#: msi.rc:163 msi.rc:190
 #, fuzzy
 msgid "Folder: [1]"
 msgstr "Systémové adresáre"
 
-#: msi.rc:159 msi.rc:188
+#: msi.rc:164 msi.rc:193
 msgid "Shortcut: [1]"
 msgstr ""
 
-#: msi.rc:160 msi.rc:191 msi.rc:192
+#: msi.rc:165 msi.rc:196 msi.rc:197
 #, fuzzy
 #| msgid "De&vice:"
 msgid "Service: [1]"
 msgstr "Za&riadenie:"
 
-#: msi.rc:161 msi.rc:164 msi.rc:168
+#: msi.rc:166 msi.rc:169 msi.rc:173
 msgid "File: [1],  Directory: [9],  Size: [6]"
 msgstr ""
 
-#: msi.rc:162
+#: msi.rc:167
 #, fuzzy
 #| msgid "&Remove application"
 msgid "Found application: [1]"
 msgstr "&Odstrániť aplikáciu"
 
-#: msi.rc:163
+#: msi.rc:168
 msgid "File: [1], Directory: [9], Size: [6]"
 msgstr ""
 
-#: msi.rc:165
+#: msi.rc:170
 #, fuzzy
 #| msgid "De&vice:"
 msgid "Service: [2]"
 msgstr "Za&riadenie:"
 
-#: msi.rc:166
+#: msi.rc:171
 msgid "File: [1],  Dependencies: [2]"
 msgstr ""
 
-#: msi.rc:167
+#: msi.rc:172
 #, fuzzy
 #| msgid "Applications"
 msgid "Application: [1]"
 msgstr "Aplikácie"
 
-#: msi.rc:169 msi.rc:170
+#: msi.rc:174 msi.rc:175
 msgid "Application Context:[1], Assembly Name:[2]"
 msgstr ""
 
-#: msi.rc:171
+#: msi.rc:176
 msgid "File: [1],  Directory: [2],  Size: [3]"
 msgstr ""
 
-#: msi.rc:172 msi.rc:193
+#: msi.rc:177 msi.rc:198
 msgid "Component ID: [1], Qualifier: [2]"
 msgstr ""
 
-#: msi.rc:173 msi.rc:194
+#: msi.rc:178 msi.rc:199
 msgid "Feature: [1]"
 msgstr ""
 
-#: msi.rc:174 msi.rc:195
+#: msi.rc:179 msi.rc:200
 msgid "Class Id: [1]"
 msgstr ""
 
-#: msi.rc:175
+#: msi.rc:180
 msgid "AppId: [1]{{, AppType: [2], Users: [3], RSN: [4]}}"
 msgstr ""
 
-#: msi.rc:176 msi.rc:197
+#: msi.rc:181 msi.rc:202
 msgid "Extension: [1]"
 msgstr ""
 
-#: msi.rc:177 msi.rc:198
-#, fuzzy
-#| msgid "&Font:"
+#: msi.rc:182 msi.rc:203
 msgid "Font: [1]"
-msgstr "&Písmo:"
+msgstr "Písmo: [1]"
 
-#: msi.rc:178 msi.rc:199
+#: msi.rc:183 msi.rc:204
 msgid "MIME Content Type: [1], Extension: [2]"
 msgstr ""
 
-#: msi.rc:179 msi.rc:200
+#: msi.rc:184 msi.rc:205
 msgid "ProgId: [1]"
 msgstr ""
 
-#: msi.rc:180 msi.rc:201
+#: msi.rc:185 msi.rc:206
 msgid "LibID: [1]"
 msgstr ""
 
-#: msi.rc:181 msi.rc:184
+#: msi.rc:186 msi.rc:189
 msgid "File: [1], Directory: [9]"
 msgstr ""
 
-#: msi.rc:182 msi.rc:202
+#: msi.rc:187 msi.rc:207
 msgid "Name: [1], Value: [2], Action [3]"
 msgstr ""
 
-#: msi.rc:183
+#: msi.rc:188
 msgid "Application: [1], Command line: [2]"
 msgstr ""
 
-#: msi.rc:186 msi.rc:203
+#: msi.rc:191 msi.rc:208
 msgid "File: [1],  Section: [2],  Key: [3], Value: [4]"
 msgstr ""
 
-#: msi.rc:187
+#: msi.rc:192
 msgid "Key: [1], Name: [2]"
 msgstr ""
 
-#: msi.rc:189 msi.rc:190
+#: msi.rc:194 msi.rc:195
 msgid "File: [1], Folder: [2]"
 msgstr ""
 
-#: msi.rc:196
+#: msi.rc:201
 msgid "AppId: [1]{{, AppType: [2]}}"
 msgstr ""
 
-#: msi.rc:204
+#: msi.rc:209
 msgid "Key: [1], Name: [2], Value: [3]"
+msgstr ""
+
+#: msi.rc:71
+msgid "{{Fatal error: }}"
+msgstr ""
+
+#: msi.rc:72
+msgid "{{Error [1]. }}"
+msgstr ""
+
+#: msi.rc:73
+msgid "Warning [1]."
+msgstr ""
+
+#: msi.rc:74
+msgid "Info [1]."
+msgstr ""
+
+#: msi.rc:75
+msgid ""
+"The installer has encountered an unexpected error installing this package. "
+"This may indicate a problem with this package. The error code is [1]. {{The "
+"arguments are: [2], [3], [4]}}"
+msgstr ""
+
+#: msi.rc:76
+msgid "{{Disk full: }}"
+msgstr ""
+
+#: msi.rc:77
+msgid "Action [Time]: [1]. [2]"
+msgstr ""
+
+#: msi.rc:78
+msgid "Message type: [1], Argument: [2]{, [3]}"
+msgstr ""
+
+#: msi.rc:81
+msgid "=== Logging started: [Date]  [Time] ==="
+msgstr ""
+
+#: msi.rc:79
+msgid "Action start [Time]: [1]."
+msgstr ""
+
+#: msi.rc:80
+msgid "Action ended [Time]: [1]. Return value [2]."
+msgstr ""
+
+#: msi.rc:83
+msgid "Please insert the disk: [2]"
+msgstr ""
+
+#: msi.rc:84
+msgid ""
+"Source file not found{{(cabinet)}}: [2]. Verify that the file exists and "
+"that you can access it."
 msgstr ""
 
 #: msrle32.rc:31
@@ -7983,7 +8081,7 @@ msgstr ""
 msgid "Inserts the contents of the clipboard into your document."
 msgstr ""
 
-#: oledlg.rc:48 regedit.rc:397
+#: oledlg.rc:48 regedit.rc:430
 msgid "Unknown Type"
 msgstr ""
 
@@ -8465,12 +8563,12 @@ msgstr ""
 msgid "Create &Link"
 msgstr ""
 
-#: shell32.rc:106 regedit.rc:94
+#: shell32.rc:106
 msgid "&Rename"
 msgstr ""
 
 #: shell32.rc:117 notepad.rc:39 oleview.rc:38 regedit.rc:41 view.rc:34
-#: winefile.rc:40 winemine.rc:49 winhlp32.rc:37 wordpad.rc:40
+#: winefile.rc:40 winemine.rc:51 winhlp32.rc:37 wordpad.rc:40
 msgid "E&xit"
 msgstr "U&končiť"
 
@@ -8536,11 +8634,67 @@ msgstr ""
 msgid "&Browse..."
 msgstr ""
 
+#: shell32.rc:355 shell32.rc:384
+#, fuzzy
+msgid "File type:"
+msgstr "Súbor"
+
+#: shell32.rc:359 shell32.rc:392 urlmon.rc:37 explorer.rc:32
+#, fuzzy
+msgid "Location:"
+msgstr "Informácie"
+
+#: shell32.rc:361 shell32.rc:394 winefile.rc:170
+msgid "Size:"
+msgstr "Veľkosť:"
+
+#: shell32.rc:365 shell32.rc:398
+#, fuzzy
+msgid "Creation date:"
+msgstr "&Dátum"
+
+#: shell32.rc:369 shell32.rc:406
+#, fuzzy
+msgid "Attributes:"
+msgstr "Atribúty"
+
+#: shell32.rc:371 shell32.rc:408 winefile.rc:174
+msgid "H&idden"
+msgstr "S&kryté"
+
+#: shell32.rc:372 shell32.rc:409 winefile.rc:175
+msgid "&Archive"
+msgstr ""
+
+#: shell32.rc:386
+#, fuzzy
+#| msgid "Open:"
+msgid "Open with:"
+msgstr "Otvoriť:"
+
+#: shell32.rc:389
+#, fuzzy
+#| msgid "Change &icon..."
+msgid "&Change..."
+msgstr "Zmeniť &ikonu..."
+
+#: shell32.rc:400
+#, fuzzy
+#| msgid "Modified"
+msgid "Last modified:"
+msgstr "Modifikovaný"
+
+#: shell32.rc:402
+#, fuzzy
+#| msgid "Last Change:"
+msgid "Last accessed:"
+msgstr "Posledná zmena:"
+
 #: shell32.rc:138 shell32.rc:142 winefile.rc:108
 msgid "Size"
 msgstr "Veľkosť"
 
-#: shell32.rc:139 regedit.rc:126
+#: shell32.rc:139 regedit.rc:148
 msgid "Type"
 msgstr "Typ"
 
@@ -8582,7 +8736,7 @@ msgctxt "display name"
 msgid "Desktop"
 msgstr "Pracovná plocha"
 
-#: shell32.rc:157 regedit.rc:205
+#: shell32.rc:157 regedit.rc:238
 msgid "My Computer"
 msgstr "Tento počítač"
 
@@ -8907,7 +9061,7 @@ msgstr "Wine Pomoc"
 msgid "Trash"
 msgstr ""
 
-#: shlwapi.rc:38 user32.rc:71 regedit.rc:179 winecfg.rc:87 winefile.rc:97
+#: shlwapi.rc:38 user32.rc:71 regedit.rc:204 winecfg.rc:87 winefile.rc:97
 msgid "Error"
 msgstr ""
 
@@ -8938,6 +9092,12 @@ msgctxt "time unit: seconds"
 msgid " sec"
 msgstr " s"
 
+#: twain.rc:29
+#, fuzzy
+#| msgid "Select &All"
+msgid "Select Source"
+msgstr "&Označiť všetko"
+
 #: urlmon.rc:32 wininet.rc:77
 msgid "Security Warning"
 msgstr ""
@@ -8945,11 +9105,6 @@ msgstr ""
 #: urlmon.rc:35
 msgid "Do you want to install this software?"
 msgstr ""
-
-#: urlmon.rc:37 explorer.rc:32
-#, fuzzy
-msgid "Location:"
-msgstr "Informácie"
 
 #: urlmon.rc:39
 #, fuzzy
@@ -9145,6 +9300,60 @@ msgstr ""
 #: wininet.rc:32
 msgid ""
 "There is at least one unspecified security problem with this certificate."
+msgstr ""
+
+#: winineterror.mc:26
+msgid "The request has timed out.\n"
+msgstr ""
+
+#: winineterror.mc:31
+#, fuzzy
+#| msgid "A printer error occurred."
+msgid "An internal error has occurred.\n"
+msgstr "Chyba tlačiarne."
+
+#: winineterror.mc:36
+msgid "The URL is invalid.\n"
+msgstr ""
+
+#: winineterror.mc:41
+msgid "The URL scheme could not be recognized or is not supported.\n"
+msgstr ""
+
+#: winineterror.mc:46
+msgid "The server name could not be resolved.\n"
+msgstr ""
+
+#: winineterror.mc:51
+msgid "The requested operation is invalid.\n"
+msgstr ""
+
+#: winineterror.mc:56
+msgid ""
+"The operation was canceled, usually because the handle on which the request "
+"was operating was closed before the operation completed.\n"
+msgstr ""
+
+#: winineterror.mc:61
+msgid "The requested item could not be located.\n"
+msgstr ""
+
+#: winineterror.mc:66
+msgid "The attempt to connect to the server failed.\n"
+msgstr ""
+
+#: winineterror.mc:71
+msgid "The connection with the server has been terminated.\n"
+msgstr ""
+
+#: winineterror.mc:76
+msgid ""
+"SSL certificate date that was received from the server is bad. The "
+"certificate is expired.\n"
+msgstr ""
+
+#: winineterror.mc:81
+msgid "SSL certificate common name (host name field) is incorrect.\n"
 msgstr ""
 
 #: winmm.rc:32
@@ -9904,13 +10113,13 @@ msgstr ""
 msgid "Referral hop limit exceeded"
 msgstr ""
 
-#: attrib.rc:30 cmd.rc:361
+#: attrib.rc:30 cmd.rc:373
 msgid ""
 "Not Yet Implemented\n"
 "\n"
 msgstr ""
 
-#: attrib.rc:31 cmd.rc:364
+#: attrib.rc:31 cmd.rc:376
 #, fuzzy
 msgid "%1: File Not Found\n"
 msgstr "Súbor nenájdený"
@@ -9945,7 +10154,7 @@ msgstr "Ana&lógové"
 msgid "Digi&tal"
 msgstr "Digi&tálne"
 
-#: clock.rc:35 notepad.rc:53 winecfg.rc:303 winefile.rc:63 wordpad.rc:84
+#: clock.rc:35 notepad.rc:53 winecfg.rc:307 winefile.rc:63 wordpad.rc:84
 msgid "&Font..."
 msgstr ""
 
@@ -10324,13 +10533,27 @@ msgid ""
 "CHOICE is mainly used to build a menu selection in a batch file.\n"
 msgstr ""
 
+#: cmd.rc:324
+msgid ""
+"Create a symbolic link.\n"
+"\n"
+"Syntax: MKLINK [options] link_name target\n"
+"\n"
+"Options:\n"
+"/d             Create a directory symbolic link.\n"
+"/h             Create a hard link.\n"
+"/j             Create a directory junction.\n"
+"link_name is the name of the new symbolic link.\n"
+"target is the path that link_name points to.\n"
+msgstr ""
+
 #: cmd.rc:312
 msgid ""
 "EXIT terminates the current command session and returns to the operating\n"
 "system or shell from which you invoked cmd.\n"
 msgstr ""
 
-#: cmd.rc:351
+#: cmd.rc:364
 msgid ""
 "CMD built-in commands are:\n"
 "ASSOC\t\tShow or modify file extension associations\n"
@@ -10349,6 +10572,7 @@ msgid ""
 "FTYPE\t\tShow or modify open commands associated with file types\n"
 "HELP\t\tShow brief help details on a topic\n"
 "MD (MKDIR)\tCreate a subdirectory\n"
+"MKLINK\tCreate a symbolic link\n"
 "MORE\t\tDisplay output in pages\n"
 "MOVE\t\tMove a file, set of files or directory tree\n"
 "PATH\t\tSet or show the search path\n"
@@ -10372,91 +10596,91 @@ msgid ""
 "Enter HELP <command> for further information on any of the above commands.\n"
 msgstr ""
 
-#: cmd.rc:353
+#: cmd.rc:365
 msgid "Are you sure?"
 msgstr ""
 
-#: cmd.rc:354 reg.rc:50 xcopy.rc:43
+#: cmd.rc:366 reg.rc:50 xcopy.rc:43
 msgctxt "Yes key"
 msgid "Y"
 msgstr "O"
 
-#: cmd.rc:355 reg.rc:51 xcopy.rc:44
+#: cmd.rc:367 reg.rc:51 xcopy.rc:44
 msgctxt "No key"
 msgid "N"
 msgstr "N"
 
-#: cmd.rc:356
+#: cmd.rc:368
 msgid "File association missing for extension %1\n"
 msgstr ""
 
-#: cmd.rc:357
+#: cmd.rc:369
 msgid "No open command associated with file type '%1'\n"
 msgstr ""
 
-#: cmd.rc:358
+#: cmd.rc:370
 msgid "Overwrite %1?"
 msgstr ""
 
-#: cmd.rc:359
+#: cmd.rc:371
 msgid "More..."
 msgstr ""
 
-#: cmd.rc:360
+#: cmd.rc:372
 msgid "Line in Batch processing possibly truncated. Using:\n"
 msgstr ""
 
-#: cmd.rc:362
+#: cmd.rc:374
 msgid "Argument missing\n"
 msgstr ""
 
-#: cmd.rc:363
+#: cmd.rc:375
 msgid "Syntax error\n"
 msgstr ""
 
-#: cmd.rc:365
+#: cmd.rc:377
 #, fuzzy
 msgid "No help available for %1\n"
 msgstr "Nie je k dispozícii; "
 
-#: cmd.rc:366
+#: cmd.rc:378
 msgid "Target to GOTO not found\n"
 msgstr ""
 
-#: cmd.rc:367
+#: cmd.rc:379
 msgid "Current Date is %1\n"
 msgstr ""
 
-#: cmd.rc:368
+#: cmd.rc:380
 msgid "Current Time is %1\n"
 msgstr ""
 
-#: cmd.rc:369
+#: cmd.rc:381
 msgid "Enter new date: "
 msgstr ""
 
-#: cmd.rc:370
+#: cmd.rc:382
 msgid "Enter new time: "
 msgstr ""
 
-#: cmd.rc:371
+#: cmd.rc:383
 msgid "Environment variable %1 not defined\n"
 msgstr ""
 
-#: cmd.rc:372 xcopy.rc:41
+#: cmd.rc:384 xcopy.rc:41
 msgid "Failed to open '%1'\n"
 msgstr ""
 
-#: cmd.rc:373
+#: cmd.rc:385
 msgid "Cannot call batch label outside of a batch script\n"
 msgstr ""
 
-#: cmd.rc:374 xcopy.rc:45
+#: cmd.rc:386 xcopy.rc:45
 msgctxt "All key"
 msgid "A"
 msgstr "V"
 
-#: cmd.rc:375
+#: cmd.rc:387
 #, fuzzy
 msgid "Delete %1?"
 msgstr ""
@@ -10465,96 +10689,96 @@ msgstr ""
 "#-#-#-#-#  sk.po (Wine)  #-#-#-#-#\n"
 "&Vymazať"
 
-#: cmd.rc:376
+#: cmd.rc:388
 msgid "Echo is %1\n"
 msgstr ""
 
-#: cmd.rc:377
+#: cmd.rc:389
 msgid "Verify is %1\n"
 msgstr ""
 
-#: cmd.rc:378
+#: cmd.rc:390
 msgid "Verify must be ON or OFF\n"
 msgstr ""
 
-#: cmd.rc:379
+#: cmd.rc:391
 msgid "Parameter error\n"
 msgstr ""
 
-#: cmd.rc:380
+#: cmd.rc:392
 msgid ""
 "Volume Serial Number is %1!04x!-%2!04x!\n"
 "\n"
 msgstr ""
 
-#: cmd.rc:381
+#: cmd.rc:393
 msgid "Volume label (11 characters, <Enter> for none)?"
 msgstr ""
 
-#: cmd.rc:382
+#: cmd.rc:394
 msgid "PATH not found\n"
 msgstr ""
 
-#: cmd.rc:383
+#: cmd.rc:395
 msgid "Press any key to continue... "
 msgstr ""
 
-#: cmd.rc:384
+#: cmd.rc:396
 msgid "Wine Command Prompt"
 msgstr ""
 
-#: cmd.rc:385
+#: cmd.rc:397
 msgid "Microsoft Windows %1!S!\n"
 msgstr ""
 
-#: cmd.rc:386
+#: cmd.rc:398
 msgid "More? "
 msgstr ""
 
-#: cmd.rc:387
+#: cmd.rc:399
 msgid "The input line is too long.\n"
 msgstr ""
 
-#: cmd.rc:388
+#: cmd.rc:400
 msgid "Volume in drive %1!c! is %2\n"
 msgstr ""
 
-#: cmd.rc:389
+#: cmd.rc:401
 msgid "Volume in drive %1!c! has no label.\n"
 msgstr ""
 
-#: cmd.rc:390 reg.rc:49
+#: cmd.rc:402 reg.rc:49
 msgid " (Yes|No)"
 msgstr " (Áno|Nie)"
 
-#: cmd.rc:391
+#: cmd.rc:403
 msgid " (Yes|No|All)"
 msgstr " (Áno|Nie|Všetky)"
 
-#: cmd.rc:392
+#: cmd.rc:404
 msgid ""
 "Can't recognize '%1' as an internal or external command, or batch script.\n"
 msgstr ""
 
-#: cmd.rc:393
+#: cmd.rc:405
 msgid "Division by zero error.\n"
 msgstr ""
 
-#: cmd.rc:394
+#: cmd.rc:406
 msgid "Expected an operand.\n"
 msgstr ""
 
-#: cmd.rc:395
+#: cmd.rc:407
 #, fuzzy
 #| msgid "Unexpected network error.\n"
 msgid "Expected an operator.\n"
 msgstr "Neočakávaná sieťová chyba.\n"
 
-#: cmd.rc:396
+#: cmd.rc:408
 msgid "Mismatch in parentheses.\n"
 msgstr ""
 
-#: cmd.rc:397
+#: cmd.rc:409
 msgid ""
 "Badly formed number - must be one of decimal (12),\n"
 " hexadecimal (0x34) or octal (056).\n"
@@ -10971,7 +11195,7 @@ msgstr "&Kopírovať\tCtrl+C"
 msgid "&Paste\tCtrl+V"
 msgstr "&Vložiť\tCtrl+V"
 
-#: notepad.rc:47 progman.rc:37 regedit.rc:58 regedit.rc:93 regedit.rc:109
+#: notepad.rc:47 progman.rc:37 regedit.rc:56 regedit.rc:109 regedit.rc:136
 #: winefile.rc:32
 msgid "&Delete\tDel"
 msgstr "&Zmazať\tDel"
@@ -11000,7 +11224,7 @@ msgstr "&Nájsť ďalšie\tF3"
 msgid "&Replace...\tCtrl+H"
 msgstr "&Nahradiť...\tCtrl+H"
 
-#: notepad.rc:61 progman.rc:56 regedit.rc:81 winefile.rc:83
+#: notepad.rc:61 progman.rc:56 regedit.rc:79 winefile.rc:83
 msgid "&Contents\tF1"
 msgstr ""
 
@@ -11046,7 +11270,7 @@ msgctxt "accelerator Copy"
 msgid "C"
 msgstr "C"
 
-#: notepad.rc:134 regedit.rc:339 wordpad.rc:287
+#: notepad.rc:134 regedit.rc:372 wordpad.rc:287
 msgctxt "accelerator Find"
 msgid "F"
 msgstr "F"
@@ -11066,7 +11290,7 @@ msgctxt "accelerator Open"
 msgid "O"
 msgstr "O"
 
-#: notepad.rc:138 regedit.rc:340 wordpad.rc:300
+#: notepad.rc:138 regedit.rc:373 wordpad.rc:300
 msgctxt "accelerator Print"
 msgid "P"
 msgstr "P"
@@ -11107,7 +11331,7 @@ msgstr "CHYBA"
 msgid "Untitled"
 msgstr "Nepomenovaný"
 
-#: notepad.rc:77 winedbg.rc:41
+#: notepad.rc:77 winedbg.rc:42
 msgid "Text files (*.txt)"
 msgstr "Textové súbory (*.txt)"
 
@@ -11228,7 +11452,7 @@ msgstr "&Panel nástrojov"
 msgid "&Status Bar"
 msgstr ""
 
-#: oleview.rc:70 regedit.rc:72 winefile.rc:79
+#: oleview.rc:70 regedit.rc:70 winefile.rc:79
 msgid "&Refresh\tF5"
 msgstr "&Obnoviť\tF5"
 
@@ -11707,7 +11931,7 @@ msgid ""
 "  REG [operation] [parameters]\n"
 "\n"
 "Supported operations:\n"
-"  ADD | DELETE | QUERY\n"
+"  ADD | DELETE | IMPORT | EXPORT | QUERY\n"
 "\n"
 "For help on a specific operation, type:\n"
 "  REG [operation] /?\n"
@@ -11787,11 +12011,11 @@ msgstr ""
 msgid "The registry operation was cancelled\n"
 msgstr ""
 
-#: reg.rc:53 regedit.rc:206
+#: reg.rc:53 regedit.rc:239
 msgid "(Default)"
 msgstr "(Predvolené)"
 
-#: reg.rc:54 regedit.rc:185
+#: reg.rc:54
 #, fuzzy
 #| msgid "Are you sure you want to delete these values?"
 msgid "Are you sure you want to delete the registry value '%1'?"
@@ -11847,9 +12071,49 @@ msgstr ""
 msgid "Type \"REG %1 /?\" for help.\n"
 msgstr ""
 
-#: reg.rc:65 regedit.rc:207
+#: reg.rc:65 regedit.rc:240
 msgid "(value not set)"
 msgstr ""
+
+#: reg.rc:66
+msgid "REG IMPORT file.reg\n"
+msgstr ""
+
+#: reg.rc:67
+#, fuzzy
+#| msgid "No command was specified."
+msgid "reg: The file '%1' was not found.\n"
+msgstr "Nebol špecifikovaný žiadny príkaz."
+
+#: reg.rc:68
+#, fuzzy
+#| msgid "Error: Unable to terminate process \"%1\".\n"
+msgid "reg: Unable to open the registry key '%1'.\n"
+msgstr "Chyba: Nemožno ukončiť proces \"%1\".\n"
+
+#: reg.rc:69
+msgid "reg: Unrecognized escape sequence [\\%1!c!]\n"
+msgstr ""
+
+#: reg.rc:70
+msgid "REG EXPORT key_name file.reg [/y]\n"
+msgstr ""
+
+#: reg.rc:71
+#, fuzzy
+#| msgid "Invalid name.\n"
+msgid "reg: Invalid system key [%1]\n"
+msgstr "Nesprávny názov.\n"
+
+#: reg.rc:72
+#, fuzzy
+#| msgid ""
+#| "File already exists.\n"
+#| "Do you want to replace it?"
+msgid "The file '%1' already exists. Do you want to overwrite it?"
+msgstr ""
+"Súbor už existuje.\n"
+"Prajete si ho prepísať?"
 
 #: regedit.rc:34
 msgid "&Registry"
@@ -11863,264 +12127,268 @@ msgstr "&Importuj súbor registrov..."
 msgid "&Export Registry File..."
 msgstr "&Exportuj súbor registrov..."
 
-#: regedit.rc:49 regedit.rc:100
+#: regedit.rc:47 regedit.rc:99 regedit.rc:121
 msgid "&Key"
 msgstr "&Kľúč"
 
-#: regedit.rc:51 regedit.rc:102
+#: regedit.rc:49 regedit.rc:101 regedit.rc:123
 msgid "&String Value"
 msgstr "&Reťazcová hodnota"
 
-#: regedit.rc:52 regedit.rc:103
+#: regedit.rc:50 regedit.rc:102 regedit.rc:124
 msgid "&Binary Value"
 msgstr "&Binárna hodnota"
 
-#: regedit.rc:53 regedit.rc:104
+#: regedit.rc:51 regedit.rc:103 regedit.rc:125
 msgid "&DWORD Value"
 msgstr "&DWORD hodnota"
 
-#: regedit.rc:54 regedit.rc:105
+#: regedit.rc:52 regedit.rc:104 regedit.rc:126
 msgid "&Multi-String Value"
 msgstr "&Viac reťazcová hodnota"
 
-#: regedit.rc:55 regedit.rc:106
+#: regedit.rc:53 regedit.rc:105 regedit.rc:127
 msgid "&Expandable String Value"
 msgstr ""
 
-#: regedit.rc:59 regedit.rc:110
+#: regedit.rc:57 regedit.rc:110 regedit.rc:137
 msgid "&Rename\tF2"
 msgstr ""
 
-#: regedit.rc:61 regedit.rc:113
+#: regedit.rc:59 regedit.rc:114
 msgid "&Copy Key Name"
 msgstr ""
 
-#: regedit.rc:63 regedit.rc:115 wordpad.rc:53
+#: regedit.rc:61 regedit.rc:107 wordpad.rc:53
 msgid "&Find...\tCtrl+F"
 msgstr "&Nájdi...\tCtrl+F"
 
-#: regedit.rc:64
+#: regedit.rc:62
 msgid "Find Ne&xt\tF3"
 msgstr "Nájdi ďa&lšie\tF3"
 
-#: regedit.rc:68
+#: regedit.rc:66
 msgid "Status &Bar"
 msgstr ""
 
-#: regedit.rc:70 winefile.rc:49
+#: regedit.rc:68 winefile.rc:49
 msgid "Sp&lit"
 msgstr "Sp&ojiť"
 
-#: regedit.rc:77
+#: regedit.rc:75
 msgid "&Remove Favorite..."
 msgstr "&Odstrániť obľúbené..."
 
-#: regedit.rc:82
+#: regedit.rc:80
 msgid "&About Registry Editor"
 msgstr "&O programe Registry Editor"
 
-#: regedit.rc:91
-msgid "Modify Binary Data..."
+#: regedit.rc:89 regedit.rc:96 regedit.rc:230
+msgid "Expand"
 msgstr ""
 
-#: regedit.rc:234
+#: regedit.rc:134 regedit.rc:233
+msgid "Modify &Binary Data..."
+msgstr ""
+
+#: regedit.rc:267
 msgid "Export registry"
 msgstr "Exportuj registry"
 
-#: regedit.rc:236
+#: regedit.rc:269
 msgid "S&elected branch:"
 msgstr ""
 
-#: regedit.rc:245
+#: regedit.rc:278
 msgid "Find:"
 msgstr "Hľadať:"
 
-#: regedit.rc:247
+#: regedit.rc:280
 msgid "Find in:"
 msgstr "Hľadať v:"
 
-#: regedit.rc:248
+#: regedit.rc:281
 msgid "Keys"
 msgstr "Kľúče"
 
-#: regedit.rc:249
+#: regedit.rc:282
 msgid "Value names"
 msgstr "Náov hodnoty"
 
-#: regedit.rc:250
+#: regedit.rc:283
 msgid "Value content"
 msgstr "Obsah hodnoty"
 
-#: regedit.rc:251
+#: regedit.rc:284
 msgid "Whole string only"
 msgstr "Len celý reťazec"
 
-#: regedit.rc:258
+#: regedit.rc:291
 msgid "Add Favorite"
 msgstr "Pridať obľúbené"
 
-#: regedit.rc:261 regedit.rc:272
+#: regedit.rc:294 regedit.rc:305
 msgid "Name:"
 msgstr "Súbor:"
 
-#: regedit.rc:269
+#: regedit.rc:302
 msgid "Remove Favorite"
 msgstr "Odstrániť obľúbené"
 
-#: regedit.rc:280
+#: regedit.rc:313
 msgid "Edit String"
 msgstr "Upraviť reťazec"
 
-#: regedit.rc:283 regedit.rc:296 regedit.rc:312 regedit.rc:325
+#: regedit.rc:316 regedit.rc:329 regedit.rc:345 regedit.rc:358
 msgid "Value name:"
 msgstr "Názov hodnoty:"
 
-#: regedit.rc:285 regedit.rc:298 regedit.rc:314 regedit.rc:327
+#: regedit.rc:318 regedit.rc:331 regedit.rc:347 regedit.rc:360
 msgid "Value data:"
 msgstr ""
 
-#: regedit.rc:293
+#: regedit.rc:326
 msgid "Edit DWORD"
 msgstr ""
 
-#: regedit.rc:300
+#: regedit.rc:333
 msgid "Base"
 msgstr ""
 
-#: regedit.rc:301
+#: regedit.rc:334
 msgid "Hexadecimal"
 msgstr ""
 
-#: regedit.rc:302
+#: regedit.rc:335
 msgid "Decimal"
 msgstr ""
 
-#: regedit.rc:309
+#: regedit.rc:342
 #, fuzzy
 msgid "Edit Binary"
 msgstr "&Upraviť"
 
-#: regedit.rc:322
+#: regedit.rc:355
 msgid "Edit Multi-String"
 msgstr ""
 
-#: regedit.rc:137
+#: regedit.rc:159
 msgid "Contains commands for working with the whole registry"
 msgstr ""
 
-#: regedit.rc:138
+#: regedit.rc:160
 msgid "Contains commands for editing values or keys"
 msgstr ""
 
-#: regedit.rc:139
+#: regedit.rc:161
 msgid "Contains commands for customizing the registry window"
 msgstr ""
 
-#: regedit.rc:140
+#: regedit.rc:162
 msgid "Contains commands for accessing frequently used keys"
 msgstr ""
 
-#: regedit.rc:141
+#: regedit.rc:163
 msgid ""
-"Contains commands for displaying help and information about registry editor"
+"Contains commands for displaying Help and information about Registry Editor"
 msgstr ""
 
-#: regedit.rc:142
+#: regedit.rc:164
 msgid "Contains commands for creating new keys or values"
 msgstr ""
 
-#: regedit.rc:127
+#: regedit.rc:149
 msgid "Data"
 msgstr ""
 
-#: regedit.rc:132
+#: regedit.rc:154
 msgid "Registry Editor"
 msgstr "Editor registrov"
 
-#: regedit.rc:196
+#: regedit.rc:221
 msgid "Import Registry File"
 msgstr "Importuj súbor registrov"
 
-#: regedit.rc:197
+#: regedit.rc:222
 msgid "Export Registry File"
 msgstr "Exportuje súbor registrov"
 
-#: regedit.rc:198
+#: regedit.rc:223
 msgid "Registry files (*.reg)"
 msgstr "Súbory registrov (*.reg)"
 
-#: regedit.rc:199
+#: regedit.rc:224
 msgid "Win9x/NT4 Registry files (REGEDIT4)"
 msgstr "Win9x/NT4 súbory registrov (REGEDIT4)"
 
-#: regedit.rc:208
+#: regedit.rc:241
 msgid "(cannot display value)"
 msgstr "(nemôžem zobraziť hodnotu)"
 
-#: regedit.rc:209
+#: regedit.rc:242
 msgid "(unknown %d)"
 msgstr "(neznáme %d)"
 
-#: regedit.rc:214
+#: regedit.rc:247
 #, fuzzy
 #| msgid "Error: Unable to terminate process \"%1\".\n"
 msgid "Unable to modify the selected registry value."
 msgstr "Chyba: Nemožno ukončiť proces \"%1\".\n"
 
-#: regedit.rc:215
+#: regedit.rc:248
 #, fuzzy
 #| msgid "Error: Unable to terminate process \"%1\".\n"
 msgid "Unable to create a new registry key."
 msgstr "Chyba: Nemožno ukončiť proces \"%1\".\n"
 
-#: regedit.rc:216
+#: regedit.rc:249
 #, fuzzy
 #| msgid "Error: Unable to terminate process \"%1\".\n"
 msgid "Unable to create a new registry value."
 msgstr "Chyba: Nemožno ukončiť proces \"%1\".\n"
 
-#: regedit.rc:217
+#: regedit.rc:250
 msgid ""
 "Unable to rename the key '%1'.\n"
 "The specified key name already exists."
 msgstr ""
 
-#: regedit.rc:218
+#: regedit.rc:251
 msgid ""
 "Unable to rename the value '%1'.\n"
 "The specified value name already exists."
 msgstr ""
 
-#: regedit.rc:219
+#: regedit.rc:252
 #, fuzzy
 #| msgid "Error: Unable to terminate process \"%1\".\n"
 msgid "Unable to delete the selected registry key."
 msgstr "Chyba: Nemožno ukončiť proces \"%1\".\n"
 
-#: regedit.rc:220
+#: regedit.rc:253
 #, fuzzy
 #| msgid "Error: Unable to terminate process \"%1\".\n"
 msgid "Unable to rename the selected registry key."
 msgstr "Chyba: Nemožno ukončiť proces \"%1\".\n"
 
-#: regedit.rc:221
+#: regedit.rc:254
 #, fuzzy
 #| msgid "Error: Unable to terminate process \"%1\".\n"
 msgid "Unable to rename the selected registry value."
 msgstr "Chyba: Nemožno ukončiť proces \"%1\".\n"
 
-#: regedit.rc:222
+#: regedit.rc:255
 msgid ""
 "The keys and values contained in %1 were successfully added to the registry."
 msgstr ""
 
-#: regedit.rc:223
+#: regedit.rc:256
 #, fuzzy
 #| msgid "Error: Unable to terminate process \"%1\".\n"
 msgid "Unable to import %1. The specified file is not a valid registry file."
 msgstr "Chyba: Nemožno ukončiť proces \"%1\".\n"
 
-#: regedit.rc:375
+#: regedit.rc:408
 msgid ""
 "Usage:\n"
 "  regedit [options] [filename] [reg_key]\n"
@@ -12148,266 +12416,307 @@ msgid ""
 "Usage examples:\n"
 "  regedit \"import.reg\"\n"
 "  regedit /E \"export.reg\" \"HKEY_CURRENT_USER\\Console\"\n"
-"  regedit /D \"HKEY_LOCAL_MACHINE\\Error\\Path\"\n"
+"  regedit /D \"HKEY_LOCAL_MACHINE\\Key\\Path\"\n"
 msgstr ""
 
-#: regedit.rc:376
+#: regedit.rc:409
 msgid "regedit: Invalid or unrecognized switch [%1]\n"
 msgstr ""
 
-#: regedit.rc:377
+#: regedit.rc:410
 msgid "Type \"regedit /?\" for help.\n"
 msgstr ""
 
-#: regedit.rc:378
+#: regedit.rc:411
 #, fuzzy
 #| msgid "No command was specified."
 msgid "regedit: No filename was specified.\n"
 msgstr "Nebol špecifikovaný žiadny príkaz."
 
-#: regedit.rc:379
+#: regedit.rc:412
 msgid "regedit: No registry key was specified for removal.\n"
 msgstr ""
 
-#: regedit.rc:380
+#: regedit.rc:413
 msgid "regedit: The file '%1' was not found.\n"
 msgstr ""
 
-#: regedit.rc:381
+#: regedit.rc:414
 #, fuzzy
 #| msgid "Error: Unable to terminate process \"%1\".\n"
 msgid "regedit: Unable to open the file '%1'.\n"
 msgstr "Chyba: Nemožno ukončiť proces \"%1\".\n"
 
-#: regedit.rc:382
+#: regedit.rc:415
 msgid "regedit: Unhandled action.\n"
 msgstr ""
 
-#: regedit.rc:383
+#: regedit.rc:416
 msgid "regedit: Out of memory! (%1!S!, line %2!u!)\n"
 msgstr ""
 
-#: regedit.rc:384
+#: regedit.rc:417
 #, fuzzy
 #| msgid "Invalid name.\n"
 msgid "regedit: Invalid hexadecimal value.\n"
 msgstr "Nesprávny názov.\n"
 
-#: regedit.rc:385
+#: regedit.rc:418
 msgid ""
 "regedit: Unable to convert hexadecimal data. An invalid value was "
 "encountered at '%1'.\n"
 msgstr ""
 
-#: regedit.rc:386
+#: regedit.rc:419
 msgid "regedit: Unrecognized escape sequence [\\%1!c!]\n"
 msgstr ""
 
-#: regedit.rc:387
+#: regedit.rc:420
 #, fuzzy
 #| msgid "Unsupported type.\n"
-msgid "regedit: Unsupported registry data type [%1]\n"
+msgid "regedit: Unsupported registry data type [0x%1!x!]\n"
 msgstr "Nepodporovaný typ.\n"
 
-#: regedit.rc:388
+#: regedit.rc:421
 #, fuzzy
 #| msgid "Error: Unable to terminate process \"%1\".\n"
 msgid "regedit: Unexpected end of line in '%1'.\n"
 msgstr "Chyba: Nemožno ukončiť proces \"%1\".\n"
 
-#: regedit.rc:389
+#: regedit.rc:422
 #, fuzzy
 #| msgid "No command was specified."
 msgid "regedit: The line '%1' was not recognized.\n"
 msgstr "Nebol špecifikovaný žiadny príkaz."
 
-#: regedit.rc:390
+#: regedit.rc:423
 #, fuzzy
 #| msgid "Error: Unable to terminate process \"%1\".\n"
 msgid "regedit: Unable to add the registry value '%1' to '%2'.\n"
 msgstr "Chyba: Nemožno ukončiť proces \"%1\".\n"
 
-#: regedit.rc:391
+#: regedit.rc:424
 #, fuzzy
 #| msgid "Error: Unable to terminate process \"%1\".\n"
 msgid "regedit: Unable to open the registry key '%1'.\n"
 msgstr "Chyba: Nemožno ukončiť proces \"%1\".\n"
 
-#: regedit.rc:392
+#: regedit.rc:425
 #, fuzzy
 #| msgid "Unsupported type.\n"
-msgid "regedit: Unsupported registry data type [%1] encountered in '%2'.\n"
+msgid ""
+"regedit: Unsupported registry data type [0x%1!x!] encountered in '%2'.\n"
 msgstr "Nepodporovaný typ.\n"
 
-#: regedit.rc:393
+#: regedit.rc:426
 msgid "regedit: The registry value '%1' will be exported as binary data.\n"
 msgstr ""
 
-#: regedit.rc:394
-msgid "regedit: Incorrect registry class specification in '%1'.\n"
-msgstr ""
+#: regedit.rc:427
+#, fuzzy
+#| msgid "Invalid name.\n"
+msgid "regedit: Invalid system key [%1]\n"
+msgstr "Nesprávny názov.\n"
 
-#: regedit.rc:395
+#: regedit.rc:428
 msgid ""
 "regedit: Unable to export '%1'. The specified registry key was not found.\n"
 msgstr ""
 
-#: regedit.rc:396
+#: regedit.rc:429
 #, fuzzy
 #| msgid "Error: Unable to terminate process \"%1\".\n"
-msgid "regedit: Unable to delete the registry class '%1'.\n"
+msgid "regedit: Unable to delete the registry key '%1'.\n"
 msgstr "Chyba: Nemožno ukončiť proces \"%1\".\n"
 
-#: regedit.rc:398
+#: regedit.rc:431
 #, fuzzy
 #| msgid "No command was specified."
 msgid "regedit: The line contains invalid syntax.\n"
 msgstr "Nebol špecifikovaný žiadny príkaz."
 
-#: regedit.rc:163
-msgid "Quits the registry editor"
+#: regedit.rc:187
+#, fuzzy
+#| msgid "Quits the registry editor"
+msgid "Quits the Registry Editor"
 msgstr "Ukončí editor registrov"
 
-#: regedit.rc:164
+#: regedit.rc:188
 msgid "Adds keys to the favorites list"
 msgstr "Pridá kľúče k obľúbeným"
 
-#: regedit.rc:165
+#: regedit.rc:189
 msgid "Removes keys from the favorites list"
 msgstr "Odstráni kľúče z obľúbených"
 
-#: regedit.rc:166
+#: regedit.rc:190
 msgid "Shows or hides the status bar"
 msgstr "Ukáže alebo schová stavový riadok"
 
-#: regedit.rc:167
-msgid "Change position of split between two panes"
+#: regedit.rc:191
+msgid "Changes the position of the split between two panes"
 msgstr ""
 
-#: regedit.rc:168
+#: regedit.rc:192
 msgid "Refreshes the window"
 msgstr "Obnoví okno"
 
-#: regedit.rc:169
+#: regedit.rc:193
 msgid "Deletes the selection"
 msgstr "Zmaže výber"
 
-#: regedit.rc:170
+#: regedit.rc:194
 msgid "Renames the selection"
 msgstr "Premenuje výber"
 
-#: regedit.rc:171
+#: regedit.rc:195
 msgid "Copies the name of the selected key to the clipboard"
 msgstr "Skopíruje názov zvoleného kľúča do schránky"
 
-#: regedit.rc:172
+#: regedit.rc:196
 msgid "Finds a text string in a key, value or data"
 msgstr ""
 
-#: regedit.rc:173
+#: regedit.rc:197
 msgid "Finds next occurrence of text specified in previous search"
 msgstr ""
 
-#: regedit.rc:147
+#: regedit.rc:169
 msgid "Modifies the value's data"
 msgstr ""
 
-#: regedit.rc:148
+#: regedit.rc:171
 msgid "Adds a new key"
 msgstr "Pridá nový kľúč"
 
-#: regedit.rc:149
+#: regedit.rc:172
 msgid "Adds a new string value"
 msgstr "Pridá novú textovú hodnotu"
 
-#: regedit.rc:150
+#: regedit.rc:173
 msgid "Adds a new binary value"
 msgstr "Pridá novú binárnu hodnotu"
 
-#: regedit.rc:151
-msgid "Adds a new double word value"
-msgstr "Pridá novú dvojslovnú hodnotu"
+#: regedit.rc:174
+#, fuzzy
+#| msgid "Adds a new binary value"
+msgid "Adds a new 32-bit value"
+msgstr "Pridá novú binárnu hodnotu"
 
-#: regedit.rc:153
+#: regedit.rc:177
 msgid "Imports a text file into the registry"
 msgstr "Importovať textový súbor do registrov"
 
-#: regedit.rc:155
+#: regedit.rc:179
 msgid "Exports all or part of the registry to a text file"
 msgstr "Exportovať všetky alebo časť registrov do textového súboru"
 
-#: regedit.rc:156
+#: regedit.rc:180
 msgid "Prints all or part of the registry"
 msgstr "Vytlačiť všetky alebo časť registrov"
 
-#: regedit.rc:158
+#: regedit.rc:181
+#, fuzzy
+#| msgid "Registry Editor"
+msgid "Opens Registry Editor Help"
+msgstr "Editor registrov"
+
+#: regedit.rc:182
 msgid "Displays program information, version number and copyright"
 msgstr ""
 
-#: regedit.rc:181
+#: regedit.rc:206
 #, fuzzy
 #| msgid "Error: Unable to terminate process \"%1\".\n"
 msgid "Unable to query the registry value '%1'."
 msgstr "Chyba: Nemožno ukončiť proces \"%1\".\n"
 
-#: regedit.rc:182
+#: regedit.rc:207
 msgid "Unable to edit registry keys of this type (%1!u!)."
 msgstr ""
 
-#: regedit.rc:183
+#: regedit.rc:208
 #, fuzzy
 #| msgid "Value is too big (%u)"
 msgid "The value is too big (%1!u!)."
 msgstr "Hodnota je príliš veľká (%u)"
 
-#: regedit.rc:184
+#: regedit.rc:209
 msgid "Confirm Value Delete"
 msgstr "Potvrdenie zmazania hodnoty"
 
-#: regedit.rc:191
+#: regedit.rc:210
+#, fuzzy
+#| msgid "Are you sure you want to delete these values?"
+msgid "Are you sure you want to delete the selected registry value?"
+msgstr "Ste si istý že chcete zmazať tieto hodnoty?"
+
+#: regedit.rc:216
 #, fuzzy
 #| msgid "Search string '%s' not found"
 msgid "Search complete. The string '%1' was not found."
 msgstr "Hľadaný výraz '%s' nebol nájdený"
 
-#: regedit.rc:186
+#: regedit.rc:211
 msgid "Are you sure you want to delete these values?"
 msgstr "Ste si istý že chcete zmazať tieto hodnoty?"
 
-#: regedit.rc:189
+#: regedit.rc:214
 msgid "New Key #%d"
 msgstr "Nový kľúč #%d"
 
-#: regedit.rc:190
+#: regedit.rc:215
 msgid "New Value #%d"
 msgstr "Nová hodnota #%d"
 
-#: regedit.rc:180
+#: regedit.rc:205
 #, fuzzy
 #| msgid "Error: Unable to terminate process \"%1\".\n"
 msgid "Unable to query the registry key '%1'."
 msgstr "Chyba: Nemožno ukončiť proces \"%1\".\n"
 
-#: regedit.rc:152
+#: regedit.rc:170
+msgid "Modifies the value's data in binary form"
+msgstr ""
+
+#: regedit.rc:175
 msgid "Adds a new multi-string value"
 msgstr ""
 
-#: regedit.rc:174
-msgid "Exports selected branch of the registry to a text file"
-msgstr ""
+#: regedit.rc:198
+#, fuzzy
+#| msgid "Exports all or part of the registry to a text file"
+msgid "Exports the selected branch of the registry to a text file"
+msgstr "Exportovať všetky alebo časť registrov do textového súboru"
 
-#: regedit.rc:187
+#: regedit.rc:176
+#, fuzzy
+#| msgid "Adds a new string value"
+msgid "Adds a new expandable string value"
+msgstr "Pridá novú textovú hodnotu"
+
+#: regedit.rc:212
 #, fuzzy
 #| msgid "Confirm Value Delete"
 msgid "Confirm Key Delete"
 msgstr "Potvrdenie zmazania hodnoty"
 
-#: regedit.rc:188
+#: regedit.rc:213
 #, fuzzy
 #| msgid "Are you sure you want to delete these values?"
 msgid ""
-"Are you sure you want to delete the registry key '%1' and all of its subkeys?"
+"Are you sure you want to delete this registry key and all of its subkeys?"
 msgstr "Ste si istý že chcete zmazať tieto hodnoty?"
+
+#: regedit.rc:199
+msgid "Expands or collapses the selected node"
+msgstr ""
+
+#: regedit.rc:231
+#, fuzzy
+#| msgid "C&ollate"
+msgid "Collapse"
+msgstr "Z&oradiť"
 
 #: regsvr32.rc:32
 msgid ""
@@ -13670,11 +13979,19 @@ msgid "C&olor:"
 msgstr ""
 
 #: winecfg.rc:304
+msgid "MIME types"
+msgstr ""
+
+#: winecfg.rc:305
+msgid "Manage file &associations"
+msgstr ""
+
+#: winecfg.rc:308
 #, fuzzy
 msgid "Folders"
 msgstr "Systémové adresáre"
 
-#: winecfg.rc:307
+#: winecfg.rc:311
 msgid "&Link to:"
 msgstr ""
 
@@ -14223,7 +14540,7 @@ msgid ""
 "\n"
 msgstr ""
 
-#: winedbg.rc:49
+#: winedbg.rc:50 winedbg.rc:38
 #, fuzzy
 msgid "Program Error"
 msgstr ""
@@ -14232,13 +14549,13 @@ msgstr ""
 "#-#-#-#-#  sk.po (Wine)  #-#-#-#-#\n"
 "&Properties"
 
-#: winedbg.rc:54
+#: winedbg.rc:55
 msgid ""
 "The program %s has encountered a serious problem and needs to close. We are "
 "sorry for the inconvenience."
 msgstr ""
 
-#: winedbg.rc:56
+#: winedbg.rc:59
 msgid ""
 "This can be caused by a problem in the program or a deficiency in Wine. You "
 "may want to check <a href=\"http://www.codeweavers.com/compatibility/"
@@ -14246,12 +14563,12 @@ msgid ""
 "application."
 msgstr ""
 
-#: winedbg.rc:59
+#: winedbg.rc:62
 #, fuzzy
 msgid "Show &Details"
 msgstr "&Detaily"
 
-#: winedbg.rc:64
+#: winedbg.rc:67
 #, fuzzy
 msgid "Program Error Details"
 msgstr ""
@@ -14260,7 +14577,7 @@ msgstr ""
 "#-#-#-#-#  sk.po (Wine)  #-#-#-#-#\n"
 "&Properties"
 
-#: winedbg.rc:68
+#: winedbg.rc:74
 msgid ""
 "If this problem is not present under Windows and has not been reported yet, "
 "you can save the detailed information to a file using the \"Save As\" "
@@ -14268,24 +14585,22 @@ msgid ""
 "\">file a bug report</a> and attach that file to the report."
 msgstr ""
 
-#: winedbg.rc:38
-msgid "Wine program crash"
-msgstr ""
-
-#: winedbg.rc:39
-msgid "Internal errors - invalid parameters received"
-msgstr ""
-
 #: winedbg.rc:40
+msgid ""
+"A program on your system has crashed, but WineDbg was unable to attach to "
+"the process to obtain a backtrace."
+msgstr ""
+
+#: winedbg.rc:41
 msgid "(unidentified)"
 msgstr ""
 
-#: winedbg.rc:43
+#: winedbg.rc:44
 #, fuzzy
 msgid "Saving failed"
 msgstr "Otvoriť súbor"
 
-#: winedbg.rc:44
+#: winedbg.rc:45
 msgid "Loading detailed information, please wait..."
 msgstr ""
 
@@ -14425,18 +14740,6 @@ msgstr "Posledná zmena:"
 msgid "Cop&yright:"
 msgstr ""
 
-#: winefile.rc:170
-msgid "Size:"
-msgstr "Veľkosť:"
-
-#: winefile.rc:174
-msgid "H&idden"
-msgstr "S&kryté"
-
-#: winefile.rc:175
-msgid "&Archive"
-msgstr ""
-
 #: winefile.rc:176
 msgid "&System"
 msgstr "&Systém"
@@ -14506,84 +14809,94 @@ msgstr ""
 msgid "%1 of %2 free"
 msgstr ""
 
-#: winemine.rc:37
+#: winemine.rc:39
 msgid "&Game"
 msgstr "&Hra"
 
-#: winemine.rc:38
+#: winemine.rc:40
 msgid "&New\tF2"
 msgstr "&Nová\tF2"
 
-#: winemine.rc:40
+#: winemine.rc:42
 msgid "Question &Marks"
 msgstr "&Otázniky"
 
-#: winemine.rc:42
+#: winemine.rc:44
 msgid "&Beginner"
 msgstr "&Začiatočník"
 
-#: winemine.rc:43
+#: winemine.rc:45
 msgid "&Advanced"
 msgstr "&Pokročilý"
 
-#: winemine.rc:44
+#: winemine.rc:46
 msgid "&Expert"
 msgstr "&Skúsený"
 
-#: winemine.rc:45
+#: winemine.rc:47
 msgid "&Custom..."
 msgstr "&Vlastná..."
 
-#: winemine.rc:47
+#: winemine.rc:49
 msgid "&Fastest Times"
 msgstr "&Najrýchlejšie časy"
 
-#: winemine.rc:52
+#: winemine.rc:54
 msgid "&About WineMine"
 msgstr "&O programe WineMine"
 
-#: winemine.rc:59
+#: winemine.rc:61
 msgid "Fastest Times"
 msgstr "Najrýchlejšie časy"
 
-#: winemine.rc:61
+#: winemine.rc:63
 msgid "Fastest times"
 msgstr "Najrýchlejšie časy"
 
-#: winemine.rc:62
+#: winemine.rc:64
 msgid "Beginner"
 msgstr "Začiatočník"
 
-#: winemine.rc:63
+#: winemine.rc:65
 msgid "Advanced"
 msgstr "Pokročilý"
 
-#: winemine.rc:64
+#: winemine.rc:66
 msgid "Expert"
 msgstr "Skúsený"
 
-#: winemine.rc:77
+#: winemine.rc:74 winemine.rc:33
+#, fuzzy
+#| msgid "Activation"
+msgid "Reset Results"
+msgstr "Aktivácia"
+
+#: winemine.rc:80
 msgid "Congratulations!"
 msgstr "Gratulujem!"
 
-#: winemine.rc:79
+#: winemine.rc:82
 msgid "Please enter your name"
 msgstr "Prosím vložte svoje meno"
 
-#: winemine.rc:87
+#: winemine.rc:90
 msgid "Custom Game"
 msgstr "Vlastná hra"
 
-#: winemine.rc:89
+#: winemine.rc:92
 msgid "Rows"
 msgstr "Riadky"
 
-#: winemine.rc:90
+#: winemine.rc:93
 msgid "Columns"
 msgstr "Stĺpce"
 
-#: winemine.rc:91
+#: winemine.rc:94
 msgid "Mines"
+msgstr ""
+
+#: winemine.rc:34
+msgid "All results will be lost. Are you sure?"
 msgstr ""
 
 #: winemine.rc:30
@@ -15153,7 +15466,7 @@ msgctxt "Directory key"
 msgid "D"
 msgstr ""
 
-#: xcopy.rc:80
+#: xcopy.rc:81
 msgid ""
 "XCOPY - Copies source files or directory trees to a destination.\n"
 "\n"
@@ -15183,6 +15496,7 @@ msgid ""
 "[/A]  Only copy files with archive attribute set.\n"
 "[/M]  Only copy files with archive attribute set, removes the\n"
 "\tarchive attribute.\n"
+"[/K]  Copy file attributes, without this attributes are not preserved.\n"
 "[/D | /D:m-d-y] Copy new files or those modified after the supplied date.\n"
 "\t\tIf no date is supplied, only copy if destination is older\n"
 "\t\tthan source.\n"

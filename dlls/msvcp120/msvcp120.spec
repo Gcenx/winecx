@@ -271,9 +271,9 @@
 @ cdecl -arch=arm ??0Init@ios_base@std@@QAA@XZ(ptr) ios_base_Init_ctor
 @ thiscall -arch=i386 ??0Init@ios_base@std@@QAE@XZ(ptr) ios_base_Init_ctor
 @ cdecl -arch=win64 ??0Init@ios_base@std@@QEAA@XZ(ptr) ios_base_Init_ctor
-@ stub -arch=arm ??0_Concurrent_queue_base_v4@details@Concurrency@@IAA@I@Z
-@ stub -arch=i386 ??0_Concurrent_queue_base_v4@details@Concurrency@@IAE@I@Z
-@ stub -arch=win64 ??0_Concurrent_queue_base_v4@details@Concurrency@@IEAA@_K@Z
+@ cdecl -arch=arm ??0_Concurrent_queue_base_v4@details@Concurrency@@IAA@I@Z(ptr long) _Concurrent_queue_base_v4_ctor
+@ thiscall -arch=i386 ??0_Concurrent_queue_base_v4@details@Concurrency@@IAE@I@Z(ptr long) _Concurrent_queue_base_v4_ctor
+@ cdecl -arch=win64 ??0_Concurrent_queue_base_v4@details@Concurrency@@IEAA@_K@Z(ptr long) _Concurrent_queue_base_v4_ctor
 @ stub -arch=arm ??0_Concurrent_queue_iterator_base_v4@details@Concurrency@@IAA@ABV_Concurrent_queue_base_v4@12@@Z
 @ stub -arch=i386 ??0_Concurrent_queue_iterator_base_v4@details@Concurrency@@IAE@ABV_Concurrent_queue_base_v4@12@@Z
 @ stub -arch=win64 ??0_Concurrent_queue_iterator_base_v4@details@Concurrency@@IEAA@AEBV_Concurrent_queue_base_v4@12@@Z
@@ -316,12 +316,12 @@
 @ cdecl -arch=arm ??0_Pad@std@@QAA@XZ(ptr) _Pad_ctor
 @ thiscall -arch=i386 ??0_Pad@std@@QAE@XZ(ptr) _Pad_ctor
 @ cdecl -arch=win64 ??0_Pad@std@@QEAA@XZ(ptr) _Pad_ctor
-@ stub -arch=arm ??0_Runtime_object@details@Concurrency@@QAA@H@Z
-@ stub -arch=i386 ??0_Runtime_object@details@Concurrency@@QAE@H@Z
-@ stub -arch=win64 ??0_Runtime_object@details@Concurrency@@QEAA@H@Z
-@ stub -arch=arm ??0_Runtime_object@details@Concurrency@@QAA@XZ
-@ stub -arch=i386 ??0_Runtime_object@details@Concurrency@@QAE@XZ
-@ stub -arch=win64 ??0_Runtime_object@details@Concurrency@@QEAA@XZ
+@ cdecl -arch=arm ??0_Runtime_object@details@Concurrency@@QAA@H@Z(ptr long) _Runtime_object_ctor_id
+@ thiscall -arch=i386 ??0_Runtime_object@details@Concurrency@@QAE@H@Z(ptr long) _Runtime_object_ctor_id
+@ cdecl -arch=win64 ??0_Runtime_object@details@Concurrency@@QEAA@H@Z(ptr long) _Runtime_object_ctor_id
+@ cdecl -arch=arm ??0_Runtime_object@details@Concurrency@@QAA@XZ(ptr) _Runtime_object_ctor
+@ thiscall -arch=i386 ??0_Runtime_object@details@Concurrency@@QAE@XZ(ptr) _Runtime_object_ctor
+@ cdecl -arch=win64 ??0_Runtime_object@details@Concurrency@@QEAA@XZ(ptr) _Runtime_object_ctor
 @ cdecl -arch=arm ??0_Timevec@std@@QAA@ABV01@@Z(ptr ptr) _Timevec_copy_ctor
 @ thiscall -arch=i386 ??0_Timevec@std@@QAE@ABV01@@Z(ptr ptr) _Timevec_copy_ctor
 @ cdecl -arch=win64 ??0_Timevec@std@@QEAA@AEBV01@@Z(ptr ptr) _Timevec_copy_ctor
@@ -448,7 +448,7 @@
 @ cdecl -arch=arm ??1?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@MAA@XZ(ptr) num_put_wchar_dtor
 @ thiscall -arch=i386 ??1?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@MAE@XZ(ptr) num_put_wchar_dtor
 @ cdecl -arch=win64 ??1?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@MEAA@XZ(ptr) num_put_wchar_dtor
-@ stub -arch=arm ??1?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MAA@XZ
+@ cdecl -arch=arm ??1?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MAA@XZ(ptr) time_get_char_dtor
 @ thiscall -arch=win32 ??1?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MAE@XZ(ptr) time_get_char_dtor
 @ cdecl -arch=win64 ??1?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MEAA@XZ(ptr) time_get_char_dtor
 @ stub -arch=arm ??1?$time_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MAA@XZ
@@ -469,15 +469,15 @@
 @ cdecl -arch=arm ??1Init@ios_base@std@@QAA@XZ(ptr) ios_base_Init_dtor
 @ thiscall -arch=i386 ??1Init@ios_base@std@@QAE@XZ(ptr) ios_base_Init_dtor
 @ cdecl -arch=win64 ??1Init@ios_base@std@@QEAA@XZ(ptr) ios_base_Init_dtor
-@ stub -arch=arm ??1_Concurrent_queue_base_v4@details@Concurrency@@MAA@XZ
-@ stub -arch=i386 ??1_Concurrent_queue_base_v4@details@Concurrency@@MAE@XZ
-@ stub -arch=win64 ??1_Concurrent_queue_base_v4@details@Concurrency@@MEAA@XZ
+@ cdecl -arch=arm ??1_Concurrent_queue_base_v4@details@Concurrency@@MAA@XZ(ptr) _Concurrent_queue_base_v4_dtor
+@ thiscall -arch=i386 ??1_Concurrent_queue_base_v4@details@Concurrency@@MAE@XZ(ptr) _Concurrent_queue_base_v4_dtor
+@ cdecl -arch=win64 ??1_Concurrent_queue_base_v4@details@Concurrency@@MEAA@XZ(ptr) _Concurrent_queue_base_v4_dtor
 @ stub -arch=arm ??1_Concurrent_queue_iterator_base_v4@details@Concurrency@@IAA@XZ
 @ stub -arch=i386 ??1_Concurrent_queue_iterator_base_v4@details@Concurrency@@IAE@XZ
 @ stub -arch=win64 ??1_Concurrent_queue_iterator_base_v4@details@Concurrency@@IEAA@XZ
-@ stub -arch=arm ??1_Concurrent_vector_base_v4@details@Concurrency@@IAA@XZ
-@ stub -arch=i386 ??1_Concurrent_vector_base_v4@details@Concurrency@@IAE@XZ
-@ stub -arch=win64 ??1_Concurrent_vector_base_v4@details@Concurrency@@IEAA@XZ
+@ cdecl -arch=arm ??1_Concurrent_vector_base_v4@details@Concurrency@@IAA@XZ(ptr) _Concurrent_vector_base_v4_dtor
+@ thiscall -arch=i386 ??1_Concurrent_vector_base_v4@details@Concurrency@@IAE@XZ(ptr) _Concurrent_vector_base_v4_dtor
+@ cdecl -arch=win64 ??1_Concurrent_vector_base_v4@details@Concurrency@@IEAA@XZ(ptr) _Concurrent_vector_base_v4_dtor
 @ cdecl -arch=arm ??1_Container_base12@std@@QAA@XZ(ptr) _Container_base12_dtor
 @ thiscall -arch=i386 ??1_Container_base12@std@@QAE@XZ(ptr) _Container_base12_dtor
 @ cdecl -arch=win64 ??1_Container_base12@std@@QEAA@XZ(ptr) _Container_base12_dtor
@@ -1032,7 +1032,7 @@
 @ cdecl -arch=arm ??_F?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@QAAXXZ(ptr) num_put_wchar_ctor
 @ thiscall -arch=i386 ??_F?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@QAEXXZ(ptr) num_put_wchar_ctor
 @ cdecl -arch=win64 ??_F?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@QEAAXXZ(ptr) num_put_wchar_ctor
-@ stub -arch=arm ??_F?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QAAXXZ
+@ cdecl -arch=arm ??_F?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QAAXXZ(ptr) time_get_char_ctor
 @ thiscall -arch=win32 ??_F?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QAEXXZ(ptr) time_get_char_ctor
 @ cdecl -arch=win64 ??_F?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEAAXXZ(ptr) time_get_char_ctor
 @ stub -arch=arm ??_F?$time_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QAAXXZ
@@ -1443,66 +1443,66 @@
 @ stub -arch=win64 ?_Init_locks_ctor@_Init_locks@std@@CAXPEAV12@@Z
 @ stub -arch=win32 ?_Init_locks_dtor@_Init_locks@std@@CAXPAV12@@Z
 @ stub -arch=win64 ?_Init_locks_dtor@_Init_locks@std@@CAXPEAV12@@Z
-@ stub -arch=arm ?_Internal_assign@_Concurrent_vector_base_v4@details@Concurrency@@IAAXABV123@IP6AXPAXI@ZP6AX1PBXI@Z4@Z
-@ stub -arch=i386 ?_Internal_assign@_Concurrent_vector_base_v4@details@Concurrency@@IAEXABV123@IP6AXPAXI@ZP6AX1PBXI@Z4@Z
-@ stub -arch=win64 ?_Internal_assign@_Concurrent_vector_base_v4@details@Concurrency@@IEAAXAEBV123@_KP6AXPEAX1@ZP6AX2PEBX1@Z5@Z
-@ stub -arch=arm ?_Internal_capacity@_Concurrent_vector_base_v4@details@Concurrency@@IBAIXZ
-@ stub -arch=i386 ?_Internal_capacity@_Concurrent_vector_base_v4@details@Concurrency@@IBEIXZ
-@ stub -arch=win64 ?_Internal_capacity@_Concurrent_vector_base_v4@details@Concurrency@@IEBA_KXZ
-@ stub -arch=arm ?_Internal_clear@_Concurrent_vector_base_v4@details@Concurrency@@IAAIP6AXPAXI@Z@Z
-@ stub -arch=i386 ?_Internal_clear@_Concurrent_vector_base_v4@details@Concurrency@@IAEIP6AXPAXI@Z@Z
-@ stub -arch=win64 ?_Internal_clear@_Concurrent_vector_base_v4@details@Concurrency@@IEAA_KP6AXPEAX_K@Z@Z
-@ stub -arch=arm ?_Internal_compact@_Concurrent_vector_base_v4@details@Concurrency@@IAAPAXIPAXP6AX0I@ZP6AX0PBXI@Z@Z
-@ stub -arch=i386 ?_Internal_compact@_Concurrent_vector_base_v4@details@Concurrency@@IAEPAXIPAXP6AX0I@ZP6AX0PBXI@Z@Z
-@ stub -arch=win64 ?_Internal_compact@_Concurrent_vector_base_v4@details@Concurrency@@IEAAPEAX_KPEAXP6AX10@ZP6AX1PEBX0@Z@Z
-@ stub -arch=arm ?_Internal_copy@_Concurrent_vector_base_v4@details@Concurrency@@IAAXABV123@IP6AXPAXPBXI@Z@Z
-@ stub -arch=i386 ?_Internal_copy@_Concurrent_vector_base_v4@details@Concurrency@@IAEXABV123@IP6AXPAXPBXI@Z@Z
-@ stub -arch=win64 ?_Internal_copy@_Concurrent_vector_base_v4@details@Concurrency@@IEAAXAEBV123@_KP6AXPEAXPEBX1@Z@Z
-@ stub -arch=arm ?_Internal_empty@_Concurrent_queue_base_v4@details@Concurrency@@IBA_NXZ
-@ stub -arch=i386 ?_Internal_empty@_Concurrent_queue_base_v4@details@Concurrency@@IBE_NXZ
-@ stub -arch=win64 ?_Internal_empty@_Concurrent_queue_base_v4@details@Concurrency@@IEBA_NXZ
-@ stub -arch=arm ?_Internal_finish_clear@_Concurrent_queue_base_v4@details@Concurrency@@IAAXXZ
-@ stub -arch=i386 ?_Internal_finish_clear@_Concurrent_queue_base_v4@details@Concurrency@@IAEXXZ
-@ stub -arch=win64 ?_Internal_finish_clear@_Concurrent_queue_base_v4@details@Concurrency@@IEAAXXZ
-@ stub -arch=arm ?_Internal_grow_by@_Concurrent_vector_base_v4@details@Concurrency@@IAAIIIP6AXPAXPBXI@Z1@Z
-@ stub -arch=i386 ?_Internal_grow_by@_Concurrent_vector_base_v4@details@Concurrency@@IAEIIIP6AXPAXPBXI@Z1@Z
-@ stub -arch=win64 ?_Internal_grow_by@_Concurrent_vector_base_v4@details@Concurrency@@IEAA_K_K0P6AXPEAXPEBX0@Z2@Z
-@ stub -arch=arm ?_Internal_grow_to_at_least_with_result@_Concurrent_vector_base_v4@details@Concurrency@@IAAIIIP6AXPAXPBXI@Z1@Z
-@ stub -arch=i386 ?_Internal_grow_to_at_least_with_result@_Concurrent_vector_base_v4@details@Concurrency@@IAEIIIP6AXPAXPBXI@Z1@Z
-@ stub -arch=win64 ?_Internal_grow_to_at_least_with_result@_Concurrent_vector_base_v4@details@Concurrency@@IEAA_K_K0P6AXPEAXPEBX0@Z2@Z
-@ stub -arch=arm ?_Internal_move_push@_Concurrent_queue_base_v4@details@Concurrency@@IAAXPAX@Z
-@ stub -arch=i386 ?_Internal_move_push@_Concurrent_queue_base_v4@details@Concurrency@@IAEXPAX@Z
-@ stub -arch=win64 ?_Internal_move_push@_Concurrent_queue_base_v4@details@Concurrency@@IEAAXPEAX@Z
-@ stub -arch=arm ?_Internal_pop_if_present@_Concurrent_queue_base_v4@details@Concurrency@@IAA_NPAX@Z
-@ stub -arch=i386 ?_Internal_pop_if_present@_Concurrent_queue_base_v4@details@Concurrency@@IAE_NPAX@Z
-@ stub -arch=win64 ?_Internal_pop_if_present@_Concurrent_queue_base_v4@details@Concurrency@@IEAA_NPEAX@Z
-@ stub -arch=arm ?_Internal_push@_Concurrent_queue_base_v4@details@Concurrency@@IAAXPBX@Z
-@ stub -arch=i386 ?_Internal_push@_Concurrent_queue_base_v4@details@Concurrency@@IAEXPBX@Z
-@ stub -arch=win64 ?_Internal_push@_Concurrent_queue_base_v4@details@Concurrency@@IEAAXPEBX@Z
-@ stub -arch=arm ?_Internal_push_back@_Concurrent_vector_base_v4@details@Concurrency@@IAAPAXIAAI@Z
-@ stub -arch=i386 ?_Internal_push_back@_Concurrent_vector_base_v4@details@Concurrency@@IAEPAXIAAI@Z
-@ stub -arch=win64 ?_Internal_push_back@_Concurrent_vector_base_v4@details@Concurrency@@IEAAPEAX_KAEA_K@Z
-@ stub -arch=arm ?_Internal_reserve@_Concurrent_vector_base_v4@details@Concurrency@@IAAXIII@Z
-@ stub -arch=i386 ?_Internal_reserve@_Concurrent_vector_base_v4@details@Concurrency@@IAEXIII@Z
-@ stub -arch=win64 ?_Internal_reserve@_Concurrent_vector_base_v4@details@Concurrency@@IEAAX_K00@Z
-@ stub -arch=arm ?_Internal_resize@_Concurrent_vector_base_v4@details@Concurrency@@IAAXIIIP6AXPAXI@ZP6AX0PBXI@Z2@Z
-@ stub -arch=i386 ?_Internal_resize@_Concurrent_vector_base_v4@details@Concurrency@@IAEXIIIP6AXPAXI@ZP6AX0PBXI@Z2@Z
-@ stub -arch=win64 ?_Internal_resize@_Concurrent_vector_base_v4@details@Concurrency@@IEAAX_K00P6AXPEAX0@ZP6AX1PEBX0@Z3@Z
-@ stub -arch=arm ?_Internal_size@_Concurrent_queue_base_v4@details@Concurrency@@IBAIXZ
-@ stub -arch=i386 ?_Internal_size@_Concurrent_queue_base_v4@details@Concurrency@@IBEIXZ
-@ stub -arch=win64 ?_Internal_size@_Concurrent_queue_base_v4@details@Concurrency@@IEBA_KXZ
-@ stub -arch=arm ?_Internal_swap@_Concurrent_queue_base_v4@details@Concurrency@@IAAXAAV123@@Z
-@ stub -arch=i386 ?_Internal_swap@_Concurrent_queue_base_v4@details@Concurrency@@IAEXAAV123@@Z
-@ stub -arch=win64 ?_Internal_swap@_Concurrent_queue_base_v4@details@Concurrency@@IEAAXAEAV123@@Z
-@ stub -arch=arm ?_Internal_swap@_Concurrent_vector_base_v4@details@Concurrency@@IAAXAAV123@@Z
-@ stub -arch=i386 ?_Internal_swap@_Concurrent_vector_base_v4@details@Concurrency@@IAEXAAV123@@Z
-@ stub -arch=win64 ?_Internal_swap@_Concurrent_vector_base_v4@details@Concurrency@@IEAAXAEAV123@@Z
-@ stub -arch=arm ?_Internal_throw_exception@_Concurrent_queue_base_v4@details@Concurrency@@IBAXXZ
-@ stub -arch=i386 ?_Internal_throw_exception@_Concurrent_queue_base_v4@details@Concurrency@@IBEXXZ
-@ stub -arch=win64 ?_Internal_throw_exception@_Concurrent_queue_base_v4@details@Concurrency@@IEBAXXZ
-@ stub -arch=arm ?_Internal_throw_exception@_Concurrent_vector_base_v4@details@Concurrency@@IBAXI@Z
-@ stub -arch=i386 ?_Internal_throw_exception@_Concurrent_vector_base_v4@details@Concurrency@@IBEXI@Z
-@ stub -arch=win64 ?_Internal_throw_exception@_Concurrent_vector_base_v4@details@Concurrency@@IEBAX_K@Z
+@ cdecl -arch=arm ?_Internal_assign@_Concurrent_vector_base_v4@details@Concurrency@@IAAXABV123@IP6AXPAXI@ZP6AX1PBXI@Z4@Z(ptr ptr long ptr ptr ptr) _Concurrent_vector_base_v4__Internal_assign
+@ thiscall -arch=i386 ?_Internal_assign@_Concurrent_vector_base_v4@details@Concurrency@@IAEXABV123@IP6AXPAXI@ZP6AX1PBXI@Z4@Z(ptr ptr long ptr ptr ptr) _Concurrent_vector_base_v4__Internal_assign
+@ cdecl -arch=win64 ?_Internal_assign@_Concurrent_vector_base_v4@details@Concurrency@@IEAAXAEBV123@_KP6AXPEAX1@ZP6AX2PEBX1@Z5@Z(ptr ptr long ptr ptr ptr) _Concurrent_vector_base_v4__Internal_assign
+@ cdecl -arch=arm ?_Internal_capacity@_Concurrent_vector_base_v4@details@Concurrency@@IBAIXZ(ptr) _Concurrent_vector_base_v4__Internal_capacity
+@ thiscall -arch=i386 ?_Internal_capacity@_Concurrent_vector_base_v4@details@Concurrency@@IBEIXZ(ptr) _Concurrent_vector_base_v4__Internal_capacity
+@ cdecl -arch=win64 ?_Internal_capacity@_Concurrent_vector_base_v4@details@Concurrency@@IEBA_KXZ(ptr) _Concurrent_vector_base_v4__Internal_capacity
+@ cdecl -arch=arm ?_Internal_clear@_Concurrent_vector_base_v4@details@Concurrency@@IAAIP6AXPAXI@Z@Z(ptr ptr) _Concurrent_vector_base_v4__Internal_clear
+@ thiscall -arch=i386 ?_Internal_clear@_Concurrent_vector_base_v4@details@Concurrency@@IAEIP6AXPAXI@Z@Z(ptr ptr) _Concurrent_vector_base_v4__Internal_clear
+@ cdecl -arch=win64 ?_Internal_clear@_Concurrent_vector_base_v4@details@Concurrency@@IEAA_KP6AXPEAX_K@Z@Z(ptr ptr) _Concurrent_vector_base_v4__Internal_clear
+@ cdecl -arch=arm ?_Internal_compact@_Concurrent_vector_base_v4@details@Concurrency@@IAAPAXIPAXP6AX0I@ZP6AX0PBXI@Z@Z(ptr long ptr ptr ptr) _Concurrent_vector_base_v4__Internal_compact
+@ thiscall -arch=i386 ?_Internal_compact@_Concurrent_vector_base_v4@details@Concurrency@@IAEPAXIPAXP6AX0I@ZP6AX0PBXI@Z@Z(ptr long ptr ptr ptr) _Concurrent_vector_base_v4__Internal_compact
+@ cdecl -arch=win64 ?_Internal_compact@_Concurrent_vector_base_v4@details@Concurrency@@IEAAPEAX_KPEAXP6AX10@ZP6AX1PEBX0@Z@Z(ptr long ptr ptr ptr) _Concurrent_vector_base_v4__Internal_compact
+@ cdecl -arch=arm ?_Internal_copy@_Concurrent_vector_base_v4@details@Concurrency@@IAAXABV123@IP6AXPAXPBXI@Z@Z(ptr ptr long ptr) _Concurrent_vector_base_v4__Internal_copy
+@ thiscall -arch=i386 ?_Internal_copy@_Concurrent_vector_base_v4@details@Concurrency@@IAEXABV123@IP6AXPAXPBXI@Z@Z(ptr ptr long ptr) _Concurrent_vector_base_v4__Internal_copy
+@ cdecl -arch=win64 ?_Internal_copy@_Concurrent_vector_base_v4@details@Concurrency@@IEAAXAEBV123@_KP6AXPEAXPEBX1@Z@Z(ptr ptr long ptr) _Concurrent_vector_base_v4__Internal_copy
+@ cdecl -arch=arm ?_Internal_empty@_Concurrent_queue_base_v4@details@Concurrency@@IBA_NXZ(ptr) _Concurrent_queue_base_v4__Internal_empty
+@ thiscall -arch=i386 ?_Internal_empty@_Concurrent_queue_base_v4@details@Concurrency@@IBE_NXZ(ptr) _Concurrent_queue_base_v4__Internal_empty
+@ cdecl -arch=win64 ?_Internal_empty@_Concurrent_queue_base_v4@details@Concurrency@@IEBA_NXZ(ptr) _Concurrent_queue_base_v4__Internal_empty
+@ cdecl -arch=arm ?_Internal_finish_clear@_Concurrent_queue_base_v4@details@Concurrency@@IAAXXZ(ptr) _Concurrent_queue_base_v4__Internal_finish_clear
+@ thiscall -arch=i386 ?_Internal_finish_clear@_Concurrent_queue_base_v4@details@Concurrency@@IAEXXZ(ptr) _Concurrent_queue_base_v4__Internal_finish_clear
+@ cdecl -arch=win64 ?_Internal_finish_clear@_Concurrent_queue_base_v4@details@Concurrency@@IEAAXXZ(ptr) _Concurrent_queue_base_v4__Internal_finish_clear
+@ cdecl -arch=arm ?_Internal_grow_by@_Concurrent_vector_base_v4@details@Concurrency@@IAAIIIP6AXPAXPBXI@Z1@Z(ptr long long ptr ptr) _Concurrent_vector_base_v4__Internal_grow_by
+@ thiscall -arch=i386 ?_Internal_grow_by@_Concurrent_vector_base_v4@details@Concurrency@@IAEIIIP6AXPAXPBXI@Z1@Z(ptr long long ptr ptr) _Concurrent_vector_base_v4__Internal_grow_by
+@ cdecl -arch=win64 ?_Internal_grow_by@_Concurrent_vector_base_v4@details@Concurrency@@IEAA_K_K0P6AXPEAXPEBX0@Z2@Z(ptr long long ptr ptr) _Concurrent_vector_base_v4__Internal_grow_by
+@ cdecl -arch=arm ?_Internal_grow_to_at_least_with_result@_Concurrent_vector_base_v4@details@Concurrency@@IAAIIIP6AXPAXPBXI@Z1@Z(ptr long long ptr ptr) _Concurrent_vector_base_v4__Internal_grow_to_at_least_with_result
+@ thiscall -arch=i386 ?_Internal_grow_to_at_least_with_result@_Concurrent_vector_base_v4@details@Concurrency@@IAEIIIP6AXPAXPBXI@Z1@Z(ptr long long ptr ptr) _Concurrent_vector_base_v4__Internal_grow_to_at_least_with_result
+@ cdecl -arch=win64 ?_Internal_grow_to_at_least_with_result@_Concurrent_vector_base_v4@details@Concurrency@@IEAA_K_K0P6AXPEAXPEBX0@Z2@Z(ptr long long ptr ptr) _Concurrent_vector_base_v4__Internal_grow_to_at_least_with_result
+@ cdecl -arch=arm ?_Internal_move_push@_Concurrent_queue_base_v4@details@Concurrency@@IAAXPAX@Z(ptr ptr) _Concurrent_queue_base_v4__Internal_move_push
+@ thiscall -arch=i386 ?_Internal_move_push@_Concurrent_queue_base_v4@details@Concurrency@@IAEXPAX@Z(ptr ptr) _Concurrent_queue_base_v4__Internal_move_push
+@ cdecl -arch=win64 ?_Internal_move_push@_Concurrent_queue_base_v4@details@Concurrency@@IEAAXPEAX@Z(ptr ptr) _Concurrent_queue_base_v4__Internal_move_push
+@ cdecl -arch=arm ?_Internal_pop_if_present@_Concurrent_queue_base_v4@details@Concurrency@@IAA_NPAX@Z(ptr ptr) _Concurrent_queue_base_v4__Internal_pop_if_present
+@ thiscall -arch=i386 ?_Internal_pop_if_present@_Concurrent_queue_base_v4@details@Concurrency@@IAE_NPAX@Z(ptr ptr) _Concurrent_queue_base_v4__Internal_pop_if_present
+@ cdecl -arch=win64 ?_Internal_pop_if_present@_Concurrent_queue_base_v4@details@Concurrency@@IEAA_NPEAX@Z(ptr ptr) _Concurrent_queue_base_v4__Internal_pop_if_present
+@ cdecl -arch=arm ?_Internal_push@_Concurrent_queue_base_v4@details@Concurrency@@IAAXPBX@Z(ptr ptr) _Concurrent_queue_base_v4__Internal_push
+@ thiscall -arch=i386 ?_Internal_push@_Concurrent_queue_base_v4@details@Concurrency@@IAEXPBX@Z(ptr ptr) _Concurrent_queue_base_v4__Internal_push
+@ cdecl -arch=win64 ?_Internal_push@_Concurrent_queue_base_v4@details@Concurrency@@IEAAXPEBX@Z(ptr ptr) _Concurrent_queue_base_v4__Internal_push
+@ cdecl -arch=arm ?_Internal_push_back@_Concurrent_vector_base_v4@details@Concurrency@@IAAPAXIAAI@Z(ptr long long) _Concurrent_vector_base_v4__Internal_push_back
+@ thiscall -arch=i386 ?_Internal_push_back@_Concurrent_vector_base_v4@details@Concurrency@@IAEPAXIAAI@Z(ptr long long) _Concurrent_vector_base_v4__Internal_push_back
+@ cdecl -arch=win64 ?_Internal_push_back@_Concurrent_vector_base_v4@details@Concurrency@@IEAAPEAX_KAEA_K@Z(ptr long long) _Concurrent_vector_base_v4__Internal_push_back
+@ cdecl -arch=arm ?_Internal_reserve@_Concurrent_vector_base_v4@details@Concurrency@@IAAXIII@Z(ptr long long long) _Concurrent_vector_base_v4__Internal_reserve
+@ thiscall -arch=i386 ?_Internal_reserve@_Concurrent_vector_base_v4@details@Concurrency@@IAEXIII@Z(ptr long long long) _Concurrent_vector_base_v4__Internal_reserve
+@ cdecl -arch=win64 ?_Internal_reserve@_Concurrent_vector_base_v4@details@Concurrency@@IEAAX_K00@Z(ptr long long long) _Concurrent_vector_base_v4__Internal_reserve
+@ cdecl -arch=arm ?_Internal_resize@_Concurrent_vector_base_v4@details@Concurrency@@IAAXIIIP6AXPAXI@ZP6AX0PBXI@Z2@Z(ptr long long long ptr ptr ptr) _Concurrent_vector_base_v4__Internal_resize
+@ thiscall -arch=i386 ?_Internal_resize@_Concurrent_vector_base_v4@details@Concurrency@@IAEXIIIP6AXPAXI@ZP6AX0PBXI@Z2@Z(ptr long long long ptr ptr ptr) _Concurrent_vector_base_v4__Internal_resize
+@ cdecl -arch=win64 ?_Internal_resize@_Concurrent_vector_base_v4@details@Concurrency@@IEAAX_K00P6AXPEAX0@ZP6AX1PEBX0@Z3@Z(ptr long long long ptr ptr ptr) _Concurrent_vector_base_v4__Internal_resize
+@ cdecl -arch=arm ?_Internal_size@_Concurrent_queue_base_v4@details@Concurrency@@IBAIXZ(ptr) _Concurrent_queue_base_v4__Internal_size
+@ thiscall -arch=i386 ?_Internal_size@_Concurrent_queue_base_v4@details@Concurrency@@IBEIXZ(ptr) _Concurrent_queue_base_v4__Internal_size
+@ cdecl -arch=win64 ?_Internal_size@_Concurrent_queue_base_v4@details@Concurrency@@IEBA_KXZ(ptr) _Concurrent_queue_base_v4__Internal_size
+@ cdecl -arch=arm ?_Internal_swap@_Concurrent_queue_base_v4@details@Concurrency@@IAAXAAV123@@Z(ptr ptr) _Concurrent_queue_base_v4__Internal_swap
+@ thiscall -arch=i386 ?_Internal_swap@_Concurrent_queue_base_v4@details@Concurrency@@IAEXAAV123@@Z(ptr ptr) _Concurrent_queue_base_v4__Internal_swap
+@ cdecl -arch=win64 ?_Internal_swap@_Concurrent_queue_base_v4@details@Concurrency@@IEAAXAEAV123@@Z(ptr ptr) _Concurrent_queue_base_v4__Internal_swap
+@ cdecl -arch=arm ?_Internal_swap@_Concurrent_vector_base_v4@details@Concurrency@@IAAXAAV123@@Z(ptr ptr) _Concurrent_vector_base_v4__Internal_swap
+@ thiscall -arch=i386 ?_Internal_swap@_Concurrent_vector_base_v4@details@Concurrency@@IAEXAAV123@@Z(ptr ptr) _Concurrent_vector_base_v4__Internal_swap
+@ cdecl -arch=win64 ?_Internal_swap@_Concurrent_vector_base_v4@details@Concurrency@@IEAAXAEAV123@@Z(ptr ptr) _Concurrent_vector_base_v4__Internal_swap
+@ cdecl -arch=arm ?_Internal_throw_exception@_Concurrent_queue_base_v4@details@Concurrency@@IBAXXZ(ptr) _Concurrent_queue_base_v4__Internal_throw_exception
+@ thiscall -arch=i386 ?_Internal_throw_exception@_Concurrent_queue_base_v4@details@Concurrency@@IBEXXZ(ptr) _Concurrent_queue_base_v4__Internal_throw_exception
+@ cdecl -arch=win64 ?_Internal_throw_exception@_Concurrent_queue_base_v4@details@Concurrency@@IEBAXXZ(ptr) _Concurrent_queue_base_v4__Internal_throw_exception
+@ cdecl -arch=arm ?_Internal_throw_exception@_Concurrent_vector_base_v4@details@Concurrency@@IBAXI@Z(ptr long) _vector_base_v4__Internal_throw_exception
+@ thiscall -arch=i386 ?_Internal_throw_exception@_Concurrent_vector_base_v4@details@Concurrency@@IBEXI@Z(ptr long) _vector_base_v4__Internal_throw_exception
+@ cdecl -arch=win64 ?_Internal_throw_exception@_Concurrent_vector_base_v4@details@Concurrency@@IEBAX_K@Z(ptr long) _vector_base_v4__Internal_throw_exception
 @ cdecl -arch=win32 ?_Ios_base_dtor@ios_base@std@@CAXPAV12@@Z(ptr) ios_base_Ios_base_dtor
 @ cdecl -arch=win64 ?_Ios_base_dtor@ios_base@std@@CAXPEAV12@@Z(ptr) ios_base_Ios_base_dtor
 @ cdecl -arch=arm ?_Ipfx@?$basic_istream@DU?$char_traits@D@std@@@std@@QAA_N_N@Z(ptr long) basic_istream_char__Ipfx
@@ -1522,19 +1522,19 @@
 @ cdecl -arch=win64 ?_Iput@?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@AEBA?AV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@2@V32@AEAVios_base@2@_WPEAD_K@Z(ptr ptr ptr ptr long ptr long) num_put_wchar__Iput
 @ cdecl -arch=win32 ?_Last_write_time@sys@tr2@std@@YAXPBD_J@Z(str int64) tr2_sys__Last_write_time_set
 @ cdecl -arch=win64 ?_Last_write_time@sys@tr2@std@@YAXPEBD_J@Z(str int64) tr2_sys__Last_write_time_set
-@ stub -arch=win32 ?_Last_write_time@sys@tr2@std@@YAXPB_W_J@Z
-@ stub -arch=win64 ?_Last_write_time@sys@tr2@std@@YAXPEB_W_J@Z
+@ cdecl -arch=win32 ?_Last_write_time@sys@tr2@std@@YAXPB_W_J@Z(wstr int64) tr2_sys__Last_write_time_set_wchar
+@ cdecl -arch=win64 ?_Last_write_time@sys@tr2@std@@YAXPEB_W_J@Z(wstr int64) tr2_sys__Last_write_time_set_wchar
 @ cdecl -ret64 -arch=win32 ?_Last_write_time@sys@tr2@std@@YA_JPBD@Z(str) tr2_sys__Last_write_time
 @ cdecl -ret64 -arch=win64 ?_Last_write_time@sys@tr2@std@@YA_JPEBD@Z(str) tr2_sys__Last_write_time
-@ stub -arch=win32 ?_Last_write_time@sys@tr2@std@@YA_JPB_W@Z
-@ stub -arch=win64 ?_Last_write_time@sys@tr2@std@@YA_JPEB_W@Z
+@ cdecl -ret64 -arch=win32 ?_Last_write_time@sys@tr2@std@@YA_JPB_W@Z(wstr) tr2_sys__Last_write_time_wchar
+@ cdecl -ret64 -arch=win64 ?_Last_write_time@sys@tr2@std@@YA_JPEB_W@Z(wstr) tr2_sys__Last_write_time_wchar
 @ cdecl -arch=arm ?_Launch@_Pad@std@@QAAXPAU_Thrd_imp_t@@@Z(ptr ptr) _Pad__Launch
 @ thiscall -arch=i386 ?_Launch@_Pad@std@@QAEXPAU_Thrd_imp_t@@@Z(ptr ptr) _Pad__Launch
 @ cdecl -arch=win64 ?_Launch@_Pad@std@@QEAAXPEAU_Thrd_imp_t@@@Z(ptr ptr) _Pad__Launch
 @ cdecl -arch=win32 ?_Link@sys@tr2@std@@YAHPBD0@Z(str str) tr2_sys__Link
 @ cdecl -arch=win64 ?_Link@sys@tr2@std@@YAHPEBD0@Z(str str) tr2_sys__Link
-@ stub -arch=win32 ?_Link@sys@tr2@std@@YAHPB_W0@Z
-@ stub -arch=win64 ?_Link@sys@tr2@std@@YAHPEB_W0@Z
+@ cdecl -arch=win32 ?_Link@sys@tr2@std@@YAHPB_W0@Z(wstr wstr) tr2_sys__Link_wchar
+@ cdecl -arch=win64 ?_Link@sys@tr2@std@@YAHPEB_W0@Z(wstr wstr) tr2_sys__Link_wchar
 @ cdecl -arch=win32 ?_Locimp_Addfac@_Locimp@locale@std@@CAXPAV123@PAVfacet@23@I@Z(ptr ptr long) locale__Locimp__Locimp_Addfac
 @ cdecl -arch=win64 ?_Locimp_Addfac@_Locimp@locale@std@@CAXPEAV123@PEAVfacet@23@_K@Z(ptr ptr long) locale__Locimp__Locimp_Addfac
 @ cdecl -arch=win32 ?_Locimp_ctor@_Locimp@locale@std@@CAXPAV123@ABV123@@Z(ptr ptr) locale__Locimp__Locimp_ctor
@@ -1669,8 +1669,8 @@
 @ cdecl -arch=win64 ?_Put@?$num_put@GV?$ostreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@AEBA?AV?$ostreambuf_iterator@GU?$char_traits@G@std@@@2@V32@PEBG_K@Z(ptr ptr ptr ptr long) num_put_wchar__Put
 @ cdecl -arch=win32 ?_Put@?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@ABA?AV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@2@V32@PB_WI@Z(ptr ptr long ptr wstr long) num_put_wchar__Put
 @ cdecl -arch=win64 ?_Put@?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@AEBA?AV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@2@V32@PEB_W_K@Z(ptr ptr ptr wstr long) num_put_wchar__Put
-@ stub -arch=win32 ?_Raise_handler@std@@3P6AXABVexception@stdext@@@ZA
-@ stub -arch=win64 ?_Raise_handler@std@@3P6AXAEBVexception@stdext@@@ZEA
+@ extern -arch=win32 ?_Raise_handler@std@@3P6AXABVexception@stdext@@@ZA _Raise_handler
+@ extern -arch=win64 ?_Raise_handler@std@@3P6AXAEBVexception@stdext@@@ZEA _Raise_handler
 @ cdecl ?_Random_device@std@@YAIXZ() _Random_device
 @ cdecl -arch=win32 ?_Read_dir@sys@tr2@std@@YAPADAAY0BAE@DPAXAAW4file_type@123@@Z(ptr ptr ptr) tr2_sys__Read_dir
 @ cdecl -arch=win64 ?_Read_dir@sys@tr2@std@@YAPEADAEAY0BAE@DPEAXAEAW4file_type@123@@Z(ptr ptr ptr) tr2_sys__Read_dir
@@ -1696,8 +1696,8 @@
 @ stub ?_Rethrow_future_exception@std@@YAXVexception_ptr@1@@Z
 @ stub -arch=win32 ?_Rng_abort@std@@YAXPBD@Z
 @ stub -arch=win64 ?_Rng_abort@std@@YAXPEBD@Z
-@ stub -arch=win32 ?_Segment_index_of@_Concurrent_vector_base_v4@details@Concurrency@@KAII@Z
-@ stub -arch=win64 ?_Segment_index_of@_Concurrent_vector_base_v4@details@Concurrency@@KA_K_K@Z
+@ cdecl -arch=win32 ?_Segment_index_of@_Concurrent_vector_base_v4@details@Concurrency@@KAII@Z(long) _vector_base_v4__Segment_index_of
+@ cdecl -arch=win64 ?_Segment_index_of@_Concurrent_vector_base_v4@details@Concurrency@@KA_K_K@Z(long) _vector_base_v4__Segment_index_of
 @ cdecl -arch=win32 ?_Setgloballocale@locale@std@@CAXPAX@Z(ptr) locale__Setgloballocale
 @ cdecl -arch=win64 ?_Setgloballocale@locale@std@@CAXPEAX@Z(ptr) locale__Setgloballocale
 @ stub -arch=win32 ?_Src@?1??_Getffldx@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@ABAHPADAAV?$istreambuf_iterator@DU?$char_traits@D@std@@@3@1AAVios_base@3@PAH@Z@4QBDB
@@ -1734,11 +1734,11 @@
 @ cdecl -arch=win64 ?_Swap_all@_Container_base12@std@@QEAAXAEAU12@@Z(ptr ptr) _Container_base12__Swap_all
 @ cdecl -arch=win32 ?_Symlink@sys@tr2@std@@YAHPBD0@Z(str str) tr2_sys__Symlink
 @ cdecl -arch=win64 ?_Symlink@sys@tr2@std@@YAHPEBD0@Z(str str) tr2_sys__Symlink
-@ stub -arch=win32 ?_Symlink@sys@tr2@std@@YAHPB_W0@Z
-@ stub -arch=win64 ?_Symlink@sys@tr2@std@@YAHPEB_W0@Z
+@ cdecl -arch=win32 ?_Symlink@sys@tr2@std@@YAHPB_W0@Z(wstr wstr) tr2_sys__Symlink_wchar
+@ cdecl -arch=win64 ?_Symlink@sys@tr2@std@@YAHPEB_W0@Z(wstr wstr) tr2_sys__Symlink_wchar
 @ extern ?_Sync@ios_base@std@@0_NA ios_base_Sync
-@ stub -arch=win32 ?_Syserror_map@std@@YAPBDH@Z
-@ stub -arch=win64 ?_Syserror_map@std@@YAPEBDH@Z
+@ cdecl -arch=win32 ?_Syserror_map@std@@YAPBDH@Z(long) _Syserror_map
+@ cdecl -arch=win64 ?_Syserror_map@std@@YAPEBDH@Z(long) _Syserror_map
 @ stub ?_Throw_C_error@std@@YAXH@Z
 @ stub ?_Throw_Cpp_error@std@@YAXH@Z
 @ stub -arch=win32 ?_Throw_future_error@std@@YAXABVerror_code@1@@Z
@@ -1768,8 +1768,8 @@
 @ cdecl -arch=win64 ?_Tidy@ios_base@std@@AEAAXXZ(ptr) ios_base_Tidy
 @ cdecl -arch=win32 ?_Unlink@sys@tr2@std@@YAHPBD@Z(str) tr2_sys__Unlink
 @ cdecl -arch=win64 ?_Unlink@sys@tr2@std@@YAHPEBD@Z(str) tr2_sys__Unlink
-@ stub -arch=win32 ?_Unlink@sys@tr2@std@@YAHPB_W@Z
-@ stub -arch=win64 ?_Unlink@sys@tr2@std@@YAHPEB_W@Z
+@ cdecl -arch=win32 ?_Unlink@sys@tr2@std@@YAHPB_W@Z(wstr) tr2_sys__Unlink_wchar
+@ cdecl -arch=win64 ?_Unlink@sys@tr2@std@@YAHPEB_W@Z(wstr) tr2_sys__Unlink_wchar
 @ cdecl -arch=arm ?_Unlock@?$basic_streambuf@DU?$char_traits@D@std@@@std@@UAAXXZ(ptr) basic_streambuf_char__Unlock
 @ thiscall -arch=i386 ?_Unlock@?$basic_streambuf@DU?$char_traits@D@std@@@std@@UAEXXZ(ptr) basic_streambuf_char__Unlock
 @ cdecl -arch=win64 ?_Unlock@?$basic_streambuf@DU?$char_traits@D@std@@@std@@UEAAXXZ(ptr) basic_streambuf_char__Unlock
@@ -3804,12 +3804,12 @@
 @ stub _Strxfrm
 @ stub _Thrd_abort
 @ cdecl _Thrd_create(ptr ptr ptr)
-@ cdecl _Thrd_current()
-@ cdecl _Thrd_detach(ptr)
-@ cdecl _Thrd_equal(ptr ptr)
+@ cdecl -norelay _Thrd_current()
+@ cdecl _Thrd_detach(int64)
+@ cdecl _Thrd_equal(int64 int64)
 @ stub _Thrd_exit
-@ cdecl _Thrd_join(ptr long)
-@ cdecl _Thrd_lt(ptr ptr)
+@ cdecl _Thrd_join(int64 long)
+@ cdecl _Thrd_lt(int64 int64)
 @ cdecl _Thrd_sleep(ptr)
 @ cdecl _Thrd_start(ptr ptr ptr)
 @ cdecl _Thrd_yield()

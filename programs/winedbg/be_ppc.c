@@ -23,13 +23,13 @@
 
 #if defined(__powerpc__)
 
-static BOOL be_ppc_get_addr(HANDLE hThread, const CONTEXT* ctx,
+static BOOL be_ppc_get_addr(HANDLE hThread, const dbg_ctx_t *ctx,
                             enum be_cpu_addr bca, ADDRESS64* addr)
 {
     switch (bca)
     {
     case be_cpu_addr_pc:
-        return be_cpu_build_addr(hThread, ctx, addr, 0, ctx->Iar);
+        return be_cpu_build_addr(hThread, ctx, addr, 0, ctx->ctx.Iar);
     default:
     case be_cpu_addr_stack:
     case be_cpu_addr_frame:
@@ -44,21 +44,21 @@ static BOOL be_ppc_get_register_info(int regno, enum be_cpu_addr* kind)
     return FALSE;
 }
 
-static void be_ppc_single_step(CONTEXT* ctx, BOOL enable)
+static void be_ppc_single_step(dbg_ctx_t *ctx, BOOL enable)
 {
 #ifndef MSR_SE
 # define MSR_SE (1<<10)
 #endif 
-    if (enable) ctx->Msr |= MSR_SE;
-    else ctx->Msr &= ~MSR_SE;
+    if (enable) ctx->ctx.Msr |= MSR_SE;
+    else ctx->ctx.Msr &= ~MSR_SE;
 }
 
-static void be_ppc_print_context(HANDLE hThread, const CONTEXT* ctx, int all_regs)
+static void be_ppc_print_context(HANDLE hThread, const dbg_ctx_t *ctx, int all_regs)
 {
     dbg_printf("Context printing for PPC not done yet\n");
 }
 
-static void be_ppc_print_segment_info(HANDLE hThread, const CONTEXT* ctx)
+static void be_ppc_print_segment_info(HANDLE hThread, const dbg_ctx_t *ctx)
 {
 }
 
@@ -102,7 +102,7 @@ static void be_ppc_disasm_one_insn(ADDRESS64* addr, int display)
 }
 
 static BOOL be_ppc_insert_Xpoint(HANDLE hProcess, const struct be_process_io* pio,
-                                 CONTEXT* ctx, enum be_xpoint_type type,
+                                 dbg_ctx_t *ctx, enum be_xpoint_type type,
                                  void* addr, unsigned long* val, unsigned size)
 {
     unsigned long       xbp;
@@ -124,7 +124,7 @@ static BOOL be_ppc_insert_Xpoint(HANDLE hProcess, const struct be_process_io* pi
 }
 
 static BOOL be_ppc_remove_Xpoint(HANDLE hProcess, const struct be_process_io* pio,
-                                 CONTEXT* ctx, enum be_xpoint_type type,
+                                 dbg_ctx_t *ctx, enum be_xpoint_type type,
                                  void* addr, unsigned long val, unsigned size)
 {
     SIZE_T              sz;
@@ -142,18 +142,18 @@ static BOOL be_ppc_remove_Xpoint(HANDLE hProcess, const struct be_process_io* pi
     return TRUE;
 }
 
-static BOOL be_ppc_is_watchpoint_set(const CONTEXT* ctx, unsigned idx)
+static BOOL be_ppc_is_watchpoint_set(const dbg_ctx_t *ctx, unsigned idx)
 {
     dbg_printf("not done\n");
     return FALSE;
 }
 
-static void be_ppc_clear_watchpoint(CONTEXT* ctx, unsigned idx)
+static void be_ppc_clear_watchpoint(dbg_ctx_t *ctx, unsigned idx)
 {
     dbg_printf("not done\n");
 }
 
-static int be_ppc_adjust_pc_for_break(CONTEXT* ctx, BOOL way)
+static int be_ppc_adjust_pc_for_break(dbg_ctx_t *ctx, BOOL way)
 {
     dbg_printf("not done\n");
     return 0;
@@ -179,6 +179,95 @@ static BOOL be_ppc_store_integer(const struct dbg_lvalue* lvalue, unsigned size,
     dbg_printf("be_ppc_store_integer: not done\n");
     return FALSE;
 }
+
+static BOOL be_ppc_get_context(HANDLE thread, dbg_ctx_t *ctx)
+{
+    ctx->ctx.ContextFlags = CONTEXT_ALL;
+    return GetThreadContext(thread, &ctx->ctx);
+}
+
+static BOOL be_ppc_set_context(HANDLE thread, const dbg_ctx_t *ctx)
+{
+    return SetThreadContext(thread, &ctx->ctx);
+}
+
+#define REG(r,gs,m)  {FIELD_OFFSET(CONTEXT, r), sizeof(((CONTEXT*)NULL)->r), gs, m}
+
+static struct gdb_register be_ppc_gdb_register_map[] = {
+    REG(Gpr0,  4),
+    REG(Gpr1,  4),
+    REG(Gpr2,  4),
+    REG(Gpr3,  4),
+    REG(Gpr4,  4),
+    REG(Gpr5,  4),
+    REG(Gpr6,  4),
+    REG(Gpr7,  4),
+    REG(Gpr8,  4),
+    REG(Gpr9,  4),
+    REG(Gpr10, 4),
+    REG(Gpr11, 4),
+    REG(Gpr12, 4),
+    REG(Gpr13, 4),
+    REG(Gpr14, 4),
+    REG(Gpr15, 4),
+    REG(Gpr16, 4),
+    REG(Gpr17, 4),
+    REG(Gpr18, 4),
+    REG(Gpr19, 4),
+    REG(Gpr20, 4),
+    REG(Gpr21, 4),
+    REG(Gpr22, 4),
+    REG(Gpr23, 4),
+    REG(Gpr24, 4),
+    REG(Gpr25, 4),
+    REG(Gpr26, 4),
+    REG(Gpr27, 4),
+    REG(Gpr28, 4),
+    REG(Gpr29, 4),
+    REG(Gpr30, 4),
+    REG(Gpr31, 4),
+    REG(Fpr0,  4),
+    REG(Fpr1,  4),
+    REG(Fpr2,  4),
+    REG(Fpr3,  4),
+    REG(Fpr4,  4),
+    REG(Fpr5,  4),
+    REG(Fpr6,  4),
+    REG(Fpr7,  4),
+    REG(Fpr8,  4),
+    REG(Fpr9,  4),
+    REG(Fpr10, 4),
+    REG(Fpr11, 4),
+    REG(Fpr12, 4),
+    REG(Fpr13, 4),
+    REG(Fpr14, 4),
+    REG(Fpr15, 4),
+    REG(Fpr16, 4),
+    REG(Fpr17, 4),
+    REG(Fpr18, 4),
+    REG(Fpr19, 4),
+    REG(Fpr20, 4),
+    REG(Fpr21, 4),
+    REG(Fpr22, 4),
+    REG(Fpr23, 4),
+    REG(Fpr24, 4),
+    REG(Fpr25, 4),
+    REG(Fpr26, 4),
+    REG(Fpr27, 4),
+    REG(Fpr28, 4),
+    REG(Fpr29, 4),
+    REG(Fpr30, 4),
+    REG(Fpr31, 4),
+
+    REG(Iar, 4),
+    REG(Msr, 4),
+    REG(Cr, 4),
+    REG(Lr, 4),
+    REG(Ctr, 4),
+    REG(Xer, 4),
+    /* FIXME: MQ is missing? FIELD_OFFSET(CONTEXT, Mq), */
+    /* see gdb/nlm/ppc.c */
+};
 
 struct backend_cpu be_ppc =
 {
@@ -206,5 +295,9 @@ struct backend_cpu be_ppc =
     be_ppc_fetch_integer,
     be_ppc_fetch_float,
     be_ppc_store_integer,
+    be_ppc_get_context,
+    be_ppc_set_context,
+    be_ppc_gdb_register_map,
+    ARRAY_SIZE(be_ppc_gdb_register_map),
 };
 #endif

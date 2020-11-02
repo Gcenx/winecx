@@ -31,6 +31,7 @@
 #include "oledb_private.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(oledb);
 
@@ -343,6 +344,11 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
         case DBTYPE_UI4:         hr = VarR4FromUI4(*(DWORD*)src, d);             break;
         case DBTYPE_I8:          hr = VarR4FromI8(*(LONGLONG*)src, d);           break;
         case DBTYPE_UI8:         hr = VarR4FromUI8(*(ULONGLONG*)src, d);         break;
+        case DBTYPE_VARIANT:
+            VariantInit(&tmp);
+            if ((hr = VariantChangeType(&tmp, (VARIANT*)src, 0, VT_R4)) == S_OK)
+                *d = V_R4(&tmp);
+            break;
         default: FIXME("Unimplemented conversion %04x -> R4\n", src_type); return E_NOTIMPL;
         }
         break;
@@ -470,10 +476,13 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
         }
         break;
         case DBTYPE_VARIANT:
-            if( V_VT((VARIANT*)src) == VT_DATE)
+        {
+            VariantInit(&tmp);
+
+            if ((hr = VariantChangeType(&tmp, (VARIANT*)src, 0, VT_DATE)) == S_OK)
             {
                 SYSTEMTIME st;
-                hr = (VariantTimeToSystemTime( V_DATE((VARIANT*)src), &st) ? S_OK : E_FAIL);
+                hr = (VariantTimeToSystemTime( V_DATE(&tmp), &st) ? S_OK : E_FAIL);
                 d->year = st.wYear;
                 d->month = st.wMonth;
                 d->day = st.wDay;
@@ -484,6 +493,7 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
                 return E_NOTIMPL;
             }
             break;
+        }
         default: FIXME("Unimplemented conversion %04x -> DBDATE\n", src_type); return  E_NOTIMPL;
         }
         break;
@@ -641,6 +651,25 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
             }
         }
         break;
+        case DBTYPE_DBTIMESTAMP:
+        {
+            WCHAR szBuff[64];
+            static const WCHAR format1[] = {
+                  '%','0','4','d','-','%','0','2','d','-','%','0','2','d',' ','%','0','2','d',':','%','0','2','d',
+                  ':','%','0','2','d', 0};
+            static const WCHAR format2[] = {
+                  '%','0','4','d','-','%','0','2','d','-','%','0','2','d',' ','%','0','2','d',':','%','0','2','d',
+                  ':','%','0','2','d','.','%','0','9','d', 0};
+            DBTIMESTAMP *ts = (DBTIMESTAMP *)src;
+
+            if(ts->fraction == 0)
+                wsprintfW(szBuff, format1, ts->year, ts->month, ts->day, ts->hour, ts->minute, ts->second);
+            else
+                wsprintfW(szBuff, format2, ts->year, ts->month, ts->day, ts->hour, ts->minute, ts->second, ts->fraction );
+            *d = SysAllocString(szBuff);
+            hr = *d ? S_OK : E_OUTOFMEMORY;
+            break;
+        }
         case DBTYPE_VARIANT:
             VariantInit(&tmp);
             if ((hr = VariantChangeType(&tmp, (VARIANT*)src, 0, VT_BSTR)) == S_OK)
@@ -1081,7 +1110,10 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
         }
         break;
     }
-    break;
+
+    case DBTYPE_NUMERIC:
+        FIXME("Unimplemented conversion %04x -> DBTYPE_NUMERIC\n", src_type);
+        return E_NOTIMPL;
 
     default:
         FIXME("Unimplemented conversion %04x -> %04x\n", src_type, dst_type);
@@ -1371,6 +1403,8 @@ static HRESULT WINAPI convert_GetConversionSize(IDataConvert* iface,
     if ((*dst_len = get_length(dst_type)))
         return S_OK;
 
+    *dst_len = 110;
+
     if(src_type == DBTYPE_VARIANT && V_VT((VARIANT*)src) == VT_NULL)
         return S_OK;
 
@@ -1393,6 +1427,21 @@ static HRESULT WINAPI convert_GetConversionSize(IDataConvert* iface,
                 return hr;
         }
         break;
+        case DBTYPE_DATE:
+        case DBTYPE_DECIMAL:
+        case DBTYPE_EMPTY:
+        case DBTYPE_I1:
+        case DBTYPE_I2:
+        case DBTYPE_UI2:
+        case DBTYPE_I4:
+        case DBTYPE_UI4:
+        case DBTYPE_I8:
+        case DBTYPE_UI8:
+        case DBTYPE_R4:
+        case DBTYPE_DBDATE:
+        case DBTYPE_DBTIMESTAMP:
+        case DBTYPE_DBTIME:
+            break;
         default:
             FIXME("unimplemented for %04x -> DBTYPE_STR\n", src_type);
             return E_NOTIMPL;
@@ -1424,6 +1473,21 @@ static HRESULT WINAPI convert_GetConversionSize(IDataConvert* iface,
                 *dst_len = (*src_len) + sizeof(WCHAR);
             else
                 *dst_len = (lstrlenW(src) + 1) * sizeof(WCHAR);
+            break;
+        case DBTYPE_DATE:
+        case DBTYPE_DECIMAL:
+        case DBTYPE_EMPTY:
+        case DBTYPE_I1:
+        case DBTYPE_I2:
+        case DBTYPE_UI2:
+        case DBTYPE_I4:
+        case DBTYPE_UI4:
+        case DBTYPE_I8:
+        case DBTYPE_UI8:
+        case DBTYPE_R4:
+        case DBTYPE_DBDATE:
+        case DBTYPE_DBTIMESTAMP:
+        case DBTYPE_DBTIME:
             break;
         default:
             FIXME("unimplemented for %04x -> DBTYPE_WSTR\n", src_type);

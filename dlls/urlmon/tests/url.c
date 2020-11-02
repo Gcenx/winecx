@@ -160,7 +160,7 @@ static WCHAR BSCBHolder[] = { '_','B','S','C','B','_','H','o','l','d','e','r','_
 static const WCHAR wszWineHQSite[] =
     {'w','w','w','.','w','i','n','e','h','q','.','o','r','g',0};
 static const WCHAR wszWineHQIP[] =
-    {'2','0','9','.','3','2','.','1','4','1','.','3',0};
+    {'4','.','1','5','.','1','8','4','.','7','7',0};
 static const CHAR wszIndexHtmlA[] = "index.html";
 static const WCHAR cache_fileW[] = {'c',':','\\','c','a','c','h','e','.','h','t','m',0};
 static const CHAR dwl_htmlA[] = "dwl.html";
@@ -2402,8 +2402,8 @@ static HRESULT WINAPI ProtocolCF_CreateInstance(IClassFactory *iface, IUnknown *
     if(IsEqualGUID(&IID_IInternetProtocolInfo, riid))
         return E_NOINTERFACE;
 
-    todo_wine ok(outer != NULL, "outer == NULL\n");
-    todo_wine ok(IsEqualGUID(&IID_IUnknown, riid), "unexpected riid %s\n", wine_dbgstr_guid(riid));
+    ok(outer != NULL, "outer == NULL\n");
+    ok(IsEqualGUID(&IID_IUnknown, riid), "unexpected riid %s\n", wine_dbgstr_guid(riid));
     *ppv = &Protocol;
     return S_OK;
 }
@@ -2891,7 +2891,7 @@ static void init_bind_test(int protocol, DWORD flags, DWORD t)
         url_a = "its:test.chm::/blank.html";
         break;
     case HTTPS_TEST:
-        url_a = (flags & BINDTEST_INVALID_CN) ? "https://209.46.25.134/favicon.ico" : "https://test.winehq.org/tests/hello.html";
+        url_a = (flags & BINDTEST_INVALID_CN) ? "https://4.15.184.77/favicon.ico" : "https://test.winehq.org/tests/hello.html";
         break;
     case FTP_TEST:
         url_a = "ftp://ftp.winehq.org/welcome.msg";
@@ -2901,7 +2901,7 @@ static void init_bind_test(int protocol, DWORD flags, DWORD t)
     }
 
     if(url_a)
-        MultiByteToWideChar(CP_ACP, 0, url_a, -1, current_url, sizeof(current_url)/sizeof(*current_url));
+        MultiByteToWideChar(CP_ACP, 0, url_a, -1, current_url, ARRAY_SIZE(current_url));
 
     test_redirect = (flags & BINDTEST_REDIRECT) != 0;
     use_cache_file = (flags & BINDTEST_USE_CACHE) != 0;

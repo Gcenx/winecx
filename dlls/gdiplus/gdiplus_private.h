@@ -30,6 +30,7 @@
 #include "objbase.h"
 #include "ocidl.h"
 #include "wincodecsdk.h"
+#include "wine/heap.h"
 #include "wine/list.h"
 
 #include "gdiplus.h"
@@ -49,25 +50,6 @@
 #define GIF_DISPOSE_RESTORE_TO_BKGND 2
 #define GIF_DISPOSE_RESTORE_TO_PREV 3
 
-static inline void* __WINE_ALLOC_SIZE(1) heap_alloc(size_t size)
-{
-    return HeapAlloc(GetProcessHeap(), 0, size);
-}
-
-static inline void* __WINE_ALLOC_SIZE(1) heap_alloc_zero(size_t size)
-{
-    return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
-}
-
-static inline void* __WINE_ALLOC_SIZE(2) heap_realloc(void *mem, size_t size)
-{
-    return HeapReAlloc(GetProcessHeap(), 0, mem, size);
-}
-
-static inline BOOL heap_free(void *mem)
-{
-    return HeapFree(GetProcessHeap(), 0, mem);
-}
 
 COLORREF ARGB2COLORREF(ARGB color) DECLSPEC_HIDDEN;
 HBITMAP ARGB2BMP(ARGB color) DECLSPEC_HIDDEN;
@@ -140,7 +122,7 @@ extern GpStatus trace_path(GpGraphics *graphics, GpPath *path) DECLSPEC_HIDDEN;
 typedef struct region_element region_element;
 extern void delete_element(region_element *element) DECLSPEC_HIDDEN;
 
-extern GpStatus get_hatch_data(HatchStyle hatchstyle, const char **result) DECLSPEC_HIDDEN;
+extern GpStatus get_hatch_data(GpHatchStyle hatchstyle, const char **result) DECLSPEC_HIDDEN;
 
 static inline INT gdip_round(REAL x)
 {
@@ -263,6 +245,7 @@ struct GpGraphics{
     INT origin_x, origin_y;
     INT gdi_transform_acquire_count, gdi_transform_save;
     GpMatrix gdi_transform;
+    HRGN gdi_clip;
     /* For giving the caller an HDC when we technically can't: */
     HBITMAP temp_hbitmap;
     int temp_hbitmap_width;
@@ -277,7 +260,7 @@ struct GpBrush{
 
 struct GpHatch{
     GpBrush brush;
-    HatchStyle hatchstyle;
+    GpHatchStyle hatchstyle;
     ARGB forecol;
     ARGB backcol;
 };
@@ -358,6 +341,9 @@ struct GpCustomLineCap{
 
 struct GpAdjustableArrowCap{
     GpCustomLineCap cap;
+    REAL middle_inset;
+    REAL height;
+    REAL width;
 };
 
 struct GpImage{
@@ -480,6 +466,12 @@ struct color_remap_table{
     ColorMap *colormap;
 };
 
+enum imageattr_noop{
+    IMAGEATTR_NOOP_UNDEFINED,
+    IMAGEATTR_NOOP_SET,
+    IMAGEATTR_NOOP_CLEAR,
+};
+
 struct GpImageAttributes{
     WrapMode wrap;
     ARGB outside_color;
@@ -489,6 +481,7 @@ struct GpImageAttributes{
     struct color_remap_table colorremaptables[ColorAdjustTypeCount];
     BOOL gamma_enabled[ColorAdjustTypeCount];
     REAL gamma[ColorAdjustTypeCount];
+    enum imageattr_noop noop[ColorAdjustTypeCount];
 };
 
 struct GpFont{

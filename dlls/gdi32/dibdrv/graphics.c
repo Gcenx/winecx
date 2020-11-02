@@ -74,7 +74,7 @@ static BOOL brush_rect( dibdrv_physdev *pdev, dib_brush *brush, const RECT *rect
 
     if (!get_clipped_rects( &pdev->dib, rect, clip, &clipped_rects )) return TRUE;
     ret = brush->rects( pdev, brush, &pdev->dib, clipped_rects.count, clipped_rects.rects,
-                        dc->ROPmode );
+                        &dc->brush_org, dc->ROPmode );
     free_clipped_rects( &clipped_rects );
     return ret;
 }
@@ -319,7 +319,7 @@ static BOOL draw_arc( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
 {
     dibdrv_physdev *pdev = get_dibdrv_pdev( dev );
     DC *dc = get_physdev_dc( dev );
-    RECT rect;
+    RECT rect, rc;
     POINT pt[2], *points;
     int width, height, count;
     BOOL ret = TRUE;
@@ -370,8 +370,10 @@ static BOOL draw_arc( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
         return FALSE;
     }
 
-    if (pdev->brush.style != BS_NULL && extra_lines > 0 &&
-        !(interior = CreatePolygonRgn( points, count, WINDING )))
+    if (pdev->brush.style != BS_NULL &&
+        extra_lines > 0 &&
+        get_dib_rect( &pdev->dib, &rc ) &&
+        !(interior = create_polypolygon_region( points, &count, 1, WINDING, &rc )))
     {
         HeapFree( GetProcessHeap(), 0, points );
         if (outline) DeleteObject( outline );
@@ -1108,6 +1110,7 @@ COLORREF dibdrv_GetPixel( PHYSDEV dev, INT x, INT y )
     dibdrv_physdev *pdev = get_dibdrv_pdev( dev );
     DC *dc = get_physdev_dc( dev );
     POINT pt;
+    RECT rect;
     DWORD pixel;
 
     TRACE( "(%p, %d, %d)\n", dev, x, y );
@@ -1115,10 +1118,11 @@ COLORREF dibdrv_GetPixel( PHYSDEV dev, INT x, INT y )
     pt.x = x;
     pt.y = y;
     lp_to_dp( dc, &pt, 1 );
-
-    if (pt.x < 0 || pt.x >= pdev->dib.rect.right - pdev->dib.rect.left ||
-        pt.y < 0 || pt.y >= pdev->dib.rect.bottom - pdev->dib.rect.top)
-        return CLR_INVALID;
+    rect.left = pt.x;
+    rect.top =  pt.y;
+    rect.right = rect.left + 1;
+    rect.bottom = rect.top + 1;
+    if (!clip_rect_to_dib( &pdev->dib, &rect )) return CLR_INVALID;
 
     pixel = pdev->dib.funcs->get_pixel( &pdev->dib, pt.x, pt.y );
     return pdev->dib.funcs->pixel_to_colorref( &pdev->dib, pixel );
@@ -1174,6 +1178,7 @@ BOOL dibdrv_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop )
 {
     dibdrv_physdev *pdev = get_dibdrv_pdev(dev);
     dib_brush *brush = &pdev->brush;
+    DC *dc = get_physdev_dc( dev );
     int rop2 = get_rop2_from_rop( rop );
     struct clipped_rects clipped_rects;
     DWORD and = 0, xor = 0;
@@ -1196,7 +1201,8 @@ BOOL dibdrv_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop )
     case R2_NOP:
         break;
     default:
-        ret = brush->rects( pdev, brush, &pdev->dib, clipped_rects.count, clipped_rects.rects, rop2 );
+        ret = brush->rects( pdev, brush, &pdev->dib, clipped_rects.count, clipped_rects.rects,
+                            &dc->brush_org, rop2 );
         break;
     }
     free_clipped_rects( &clipped_rects );
@@ -1242,6 +1248,7 @@ BOOL dibdrv_PolyPolygon( PHYSDEV dev, const POINT *pt, const INT *counts, DWORD 
     dibdrv_physdev *pdev = get_dibdrv_pdev(dev);
     DC *dc = get_physdev_dc( dev );
     DWORD total, i, pos;
+    RECT rc;
     BOOL ret = TRUE;
     POINT pt_buf[32];
     POINT *points = pt_buf;
@@ -1262,7 +1269,8 @@ BOOL dibdrv_PolyPolygon( PHYSDEV dev, const POINT *pt, const INT *counts, DWORD 
     lp_to_dp( dc, points, total );
 
     if (pdev->brush.style != BS_NULL &&
-        !(interior = CreatePolyPolygonRgn( points, counts, polygons, dc->polyFillMode )))
+        get_dib_rect( &pdev->dib, &rc ) &&
+        !(interior = create_polypolygon_region( points, counts, polygons, dc->polyFillMode, &rc )))
     {
         ret = FALSE;
         goto done;
@@ -1601,7 +1609,7 @@ COLORREF dibdrv_SetPixel( PHYSDEV dev, INT x, INT y, COLORREF color )
     color = pdev->dib.funcs->pixel_to_colorref( &pdev->dib, pixel );
 
     if (!get_clipped_rects( &pdev->dib, &rect, pdev->clip, &clipped_rects )) return color;
-    pdev->dib.funcs->solid_rects( &pdev->dib, clipped_rects.count, clipped_rects.rects, 0, pixel );
+    fill_with_pixel( dc, &pdev->dib, pixel, clipped_rects.count, clipped_rects.rects, dc->ROPmode );
     free_clipped_rects( &clipped_rects );
     return color;
 }

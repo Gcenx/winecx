@@ -15,7 +15,7 @@
 @ cdecl _ctime64(ptr) ucrtbase._ctime64
 @ cdecl _ctime64_s(str long ptr) ucrtbase._ctime64_s
 @ cdecl _difftime32(long long) ucrtbase._difftime32
-@ cdecl _difftime64(long long) ucrtbase._difftime64
+@ cdecl _difftime64(int64 int64) ucrtbase._difftime64
 @ cdecl _ftime32(ptr) ucrtbase._ftime32
 @ cdecl _ftime32_s(ptr) ucrtbase._ftime32_s
 @ cdecl _ftime64(ptr) ucrtbase._ftime64
@@ -47,8 +47,8 @@
 @ cdecl _strtime_s(ptr long) ucrtbase._strtime_s
 @ cdecl _time32(ptr) ucrtbase._time32
 @ cdecl _time64(ptr) ucrtbase._time64
-@ stub _timespec32_get
-@ stub _timespec64_get
+@ cdecl _timespec32_get(ptr long) ucrtbase._timespec32_get
+@ cdecl _timespec64_get(ptr long) ucrtbase._timespec64_get
 @ cdecl _tzset() ucrtbase._tzset
 @ cdecl _utime32(str ptr) ucrtbase._utime32
 @ cdecl _utime64(str ptr) ucrtbase._utime64

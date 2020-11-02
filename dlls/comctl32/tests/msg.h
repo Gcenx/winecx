@@ -20,6 +20,7 @@
 
 #include <assert.h>
 #include <windows.h>
+#include "wine/heap.h"
 #include "wine/test.h"
 
 /* undocumented SWP flags - from SDK 3.1 */
@@ -68,16 +69,13 @@ static void add_message(struct msg_sequence **seq, int sequence_index,
     if (!msg_seq->sequence)
     {
         msg_seq->size = 10;
-        msg_seq->sequence = HeapAlloc(GetProcessHeap(), 0,
-                                      msg_seq->size * sizeof (struct message));
+        msg_seq->sequence = heap_alloc(msg_seq->size * sizeof (*msg_seq->sequence));
     }
 
     if (msg_seq->count == msg_seq->size)
     {
         msg_seq->size *= 2;
-        msg_seq->sequence = HeapReAlloc(GetProcessHeap(), 0,
-                                        msg_seq->sequence,
-                                        msg_seq->size * sizeof (struct message));
+        msg_seq->sequence = heap_realloc(msg_seq->sequence, msg_seq->size * sizeof (*msg_seq->sequence));
     }
 
     assert(msg_seq->sequence);
@@ -89,7 +87,7 @@ static void add_message(struct msg_sequence **seq, int sequence_index,
 static inline void flush_sequence(struct msg_sequence **seg, int sequence_index)
 {
     struct msg_sequence *msg_seq = seg[sequence_index];
-    HeapFree(GetProcessHeap(), 0, msg_seq->sequence);
+    heap_free(msg_seq->sequence);
     msg_seq->sequence = NULL;
     msg_seq->count = msg_seq->size = 0;
 }
@@ -165,11 +163,12 @@ static void dump_sequence( struct msg_sequence **seq, int sequence_index,
 }
 
 static void ok_sequence_(struct msg_sequence **seq, int sequence_index,
-    const struct message *expected, const char *context, BOOL todo,
+    const struct message *expected_list, const char *context, BOOL todo,
     const char *file, int line)
 {
-    struct msg_sequence *msg_seq = seq[sequence_index];
     static const struct message end_of_sequence = {0, 0, 0, 0};
+    struct msg_sequence *msg_seq = seq[sequence_index];
+    const struct message *expected = expected_list;
     const struct message *actual, *sequence;
     int failcount = 0, dump = 0;
 
@@ -379,7 +378,7 @@ static void ok_sequence_(struct msg_sequence **seq, int sequence_index,
     }
 
 done:
-    if (dump) dump_sequence( seq, sequence_index, expected, context, file, line );
+    if (dump) dump_sequence( seq, sequence_index, expected_list, context, file, line );
     flush_sequence(seq, sequence_index);
 }
 
@@ -392,5 +391,5 @@ static void init_msg_sequences(struct msg_sequence **seq, int n)
     int i;
 
     for (i = 0; i < n; i++)
-        seq[i] = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct msg_sequence));
+        seq[i] = heap_alloc_zero(sizeof(*seq[i]));
 }

@@ -17,18 +17,7 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  *
- * NOTES
- *
- * This code was audited for completeness against the documented features
- * of Comctl32.dll version 6.0 on Oct. 4, 2004, by Dimitrie O. Paun.
- * 
- * Unless otherwise noted, we believe this code to be complete, as per
- * the specification mentioned above.
- * If you discover missing features, or bugs, please note them below.
- * 
  * TODO:
- *   - ComboBox_[GS]etMinVisible()
- *   - CB_GETMINVISIBLE, CB_SETMINVISIBLE
  *   - CB_SETTOPINDEX
  */
 
@@ -703,8 +692,6 @@ static void CBPaintText(
    INT	id, size = 0;
    LPWSTR pText = NULL;
 
-   if( lphc->wState & CBF_NOREDRAW ) return;
-
    TRACE("\n");
 
    /* follow Windows combobox that sends a bunch of text
@@ -722,19 +709,17 @@ static void CBPaintText(
 	    pText[size] = '\0';	/* just in case */
 	} else return;
    }
-   else
-       if( !CB_OWNERDRAWN(lphc) )
-	   return;
 
    if( lphc->wState & CBF_EDIT )
    {
         static const WCHAR empty_stringW[] = { 0 };
 	if( CB_HASSTRINGS(lphc) ) SetWindowTextW( lphc->hWndEdit, pText ? pText : empty_stringW );
 	if( lphc->wState & CBF_FOCUSED )
-           SendMessageW(lphc->hWndEdit, EM_SETSEL, 0, -1);
+           SendMessageW(lphc->hWndEdit, EM_SETSEL, 0, MAXLONG);
    }
-   else if( IsWindowVisible( lphc->self )) /* paint text field ourselves */
+   else if(!(lphc->wState & CBF_NOREDRAW) && IsWindowVisible( lphc->self ))
    {
+     /* paint text field ourselves */
      HDC hdc = hdc_paint ? hdc_paint : GetDC(lphc->self);
      UINT itemState = ODS_COMBOBOXEDIT;
      HFONT hPrevFont = (lphc->hFont) ? SelectObject(hdc, lphc->hFont) : 0;

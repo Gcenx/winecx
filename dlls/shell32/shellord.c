@@ -433,12 +433,12 @@ int WINAPIV ShellMessageBoxW(
 	    hInstance,hWnd,lpText,lpCaption,uType);
 
 	if (IS_INTRESOURCE(lpCaption))
-	  LoadStringW(hInstance, LOWORD(lpCaption), szTitle, sizeof(szTitle)/sizeof(szTitle[0]));
+	  LoadStringW(hInstance, LOWORD(lpCaption), szTitle, ARRAY_SIZE(szTitle));
 	else
 	  pszTitle = lpCaption;
 
 	if (IS_INTRESOURCE(lpText))
-	  LoadStringW(hInstance, LOWORD(lpText), szText, sizeof(szText)/sizeof(szText[0]));
+	  LoadStringW(hInstance, LOWORD(lpText), szText, ARRAY_SIZE(szText));
 	else
 	  pszText = lpText;
 
@@ -1350,7 +1350,7 @@ BOOL WINAPI IsUserAnAdmin(VOID)
         }
     }
 
-    lpGroups = HeapAlloc(GetProcessHeap(), 0, dwSize);
+    lpGroups = heap_alloc(dwSize);
     if (lpGroups == NULL)
     {
         CloseHandle(hToken);
@@ -1359,7 +1359,7 @@ BOOL WINAPI IsUserAnAdmin(VOID)
 
     if (!GetTokenInformation(hToken, TokenGroups, lpGroups, dwSize, &dwSize))
     {
-        HeapFree(GetProcessHeap(), 0, lpGroups);
+        heap_free(lpGroups);
         CloseHandle(hToken);
         return FALSE;
     }
@@ -1369,7 +1369,7 @@ BOOL WINAPI IsUserAnAdmin(VOID)
                                   DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0,
                                   &lpSid))
     {
-        HeapFree(GetProcessHeap(), 0, lpGroups);
+        heap_free(lpGroups);
         return FALSE;
     }
 
@@ -1383,7 +1383,7 @@ BOOL WINAPI IsUserAnAdmin(VOID)
     }
 
     FreeSid(lpSid);
-    HeapFree(GetProcessHeap(), 0, lpGroups);
+    heap_free(lpGroups);
     return bResult;
 }
 
@@ -1553,7 +1553,7 @@ DWORD WINAPI DoEnvironmentSubstA(LPSTR pszString, UINT cchString)
 
     TRACE("(%s, %d)\n", debugstr_a(pszString), cchString);
 
-    if ((dst = HeapAlloc(GetProcessHeap(), 0, cchString * sizeof(CHAR))))
+    if ((dst = heap_alloc(cchString * sizeof(CHAR))))
     {
         len = ExpandEnvironmentStringsA(pszString, dst, cchString);
         /* len includes the terminating 0 */
@@ -1565,7 +1565,7 @@ DWORD WINAPI DoEnvironmentSubstA(LPSTR pszString, UINT cchString)
         else
             len = cchString;
 
-        HeapFree(GetProcessHeap(), 0, dst);
+        heap_free(dst);
     }
     return MAKELONG(len, res);
 }
@@ -1597,7 +1597,7 @@ DWORD WINAPI DoEnvironmentSubstW(LPWSTR pszString, UINT cchString)
 
     TRACE("(%s, %d)\n", debugstr_w(pszString), cchString);
 
-    if ((cchString < MAXLONG) && (dst = HeapAlloc(GetProcessHeap(), 0, cchString * sizeof(WCHAR))))
+    if ((cchString < MAXLONG) && (dst = heap_alloc(cchString * sizeof(WCHAR))))
     {
         len = ExpandEnvironmentStringsW(pszString, dst, cchString);
         /* len includes the terminating 0 */
@@ -1609,7 +1609,7 @@ DWORD WINAPI DoEnvironmentSubstW(LPWSTR pszString, UINT cchString)
         else
             len = cchString;
 
-        HeapFree(GetProcessHeap(), 0, dst);
+        heap_free(dst);
     }
     return MAKELONG(len, res);
 }
@@ -1774,7 +1774,7 @@ HPSXA WINAPI SHCreatePropSheetExtArrayEx(HKEY hKey, LPCWSTR pszSubKey, UINT max_
             dwIndex = 0;
             do
             {
-                dwHandlerLen = sizeof(szHandler) / sizeof(szHandler[0]);
+                dwHandlerLen = ARRAY_SIZE(szHandler);
                 lRet = RegEnumKeyExW(hkPropSheetHandlers, dwIndex++, szHandler, &dwHandlerLen, NULL, NULL, NULL, NULL);
                 if (lRet != ERROR_SUCCESS)
                 {
@@ -1793,7 +1793,7 @@ HPSXA WINAPI SHCreatePropSheetExtArrayEx(HKEY hKey, LPCWSTR pszSubKey, UINT max_
                     if (SHGetValueW(hkPropSheetHandlers, szHandler, NULL, NULL, szClsidHandler, &dwClsidSize) == ERROR_SUCCESS)
                     {
                         /* Force a NULL-termination and convert the string */
-                        szClsidHandler[(sizeof(szClsidHandler) / sizeof(szClsidHandler[0])) - 1] = 0;
+                        szClsidHandler[ARRAY_SIZE(szClsidHandler) - 1] = 0;
                         lRet = SHCLSIDFromStringW(szClsidHandler, &clsid);
                     }
                 }
@@ -2132,32 +2132,4 @@ BOOL WINAPI LinkWindow_UnregisterClass(void)
  */
 void WINAPI SHFlushSFCache(void)
 {
-}
-
-/*************************************************************************
- *              SHGetImageList (SHELL32.727)
- *
- * Returns a copy of a shell image list.
- *
- * NOTES
- *   Windows XP features 4 sizes of image list, and Vista 5. Wine currently
- *   only supports the traditional small and large image lists, so requests
- *   for the others will currently fail.
- */
-HRESULT WINAPI SHGetImageList(int iImageList, REFIID riid, void **ppv)
-{
-    HIMAGELIST hLarge, hSmall;
-    HIMAGELIST hNew;
-
-    /* Wine currently only maintains large and small image lists */
-    if ((iImageList != SHIL_LARGE) && (iImageList != SHIL_SMALL) && (iImageList != SHIL_SYSSMALL))
-    {
-        FIXME("Unsupported image list %i requested\n", iImageList);
-        return E_FAIL;
-    }
-
-    Shell_GetImageLists(&hLarge, &hSmall);
-    hNew = (iImageList == SHIL_LARGE) ? hLarge : hSmall;
-
-    return HIMAGELIST_QueryInterface(hNew, riid, ppv);
 }

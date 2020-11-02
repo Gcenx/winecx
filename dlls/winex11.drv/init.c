@@ -259,6 +259,7 @@ static INT X11DRV_ExtEscape( PHYSDEV dev, INT escape, INT in_count, LPCVOID in_d
                     RECT rect = physDev->dc_rect;
 
                     OffsetRect( &rect, -physDev->dc_rect.left, -physDev->dc_rect.top );
+                    if (data->flush) XFlush( gdi_display );
                     XSetFunction( gdi_display, physDev->gc, GXcopy );
                     XCopyArea( gdi_display, data->gl_drawable, physDev->drawable, physDev->gc,
                                0, 0, rect.right, rect.bottom,
@@ -341,6 +342,21 @@ static struct opengl_funcs * X11DRV_wine_get_wgl_driver( PHYSDEV dev, UINT versi
     {
         dev = GET_NEXT_PHYSDEV( dev, wine_get_wgl_driver );
         ret = dev->funcs->wine_get_wgl_driver( dev, version );
+    }
+    return ret;
+}
+
+/**********************************************************************
+ *           X11DRV_wine_get_vulkan_driver
+ */
+static const struct vulkan_funcs * X11DRV_wine_get_vulkan_driver( PHYSDEV dev, UINT version )
+{
+    const struct vulkan_funcs *ret;
+
+    if (!(ret = get_vulkan_driver( version )))
+    {
+        dev = GET_NEXT_PHYSDEV( dev, wine_get_vulkan_driver );
+        ret = dev->funcs->wine_get_vulkan_driver( dev, version );
     }
     return ret;
 }
@@ -475,6 +491,7 @@ static const struct gdi_dc_funcs x11drv_funcs =
     X11DRV_UnrealizePalette,            /* pUnrealizePalette */
     NULL,                               /* pWidenPath */
     X11DRV_wine_get_wgl_driver,         /* wine_get_wgl_driver */
+    X11DRV_wine_get_vulkan_driver,      /* wine_get_vulkan_driver */
     GDI_PRIORITY_GRAPHICS_DRV           /* priority */
 };
 

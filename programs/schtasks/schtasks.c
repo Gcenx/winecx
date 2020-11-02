@@ -172,7 +172,7 @@ static int change_command(int argc, WCHAR *argv[])
             argv += 2;
         }else {
             FIXME("Unsupported arguments %s\n", debugstr_w(argv[0]));
-            return 0; /* CXHACK: 15702 */
+            return 1;
         }
     }
 
@@ -257,7 +257,7 @@ static int create_command(int argc, WCHAR *argv[])
             argv += 2;
         }else {
             FIXME("Unsupported argument %s\n", debugstr_w(argv[0]));
-            return 0; /* CXHACK: 15702 */
+            return 1;
         }
     }
 
@@ -323,7 +323,7 @@ static int delete_command(int argc, WCHAR *argv[])
             argv += 2;
         }else {
             FIXME("Unsupported argument %s\n", debugstr_w(argv[0]));
-            return 0; /* CXHACK: 15702 */
+            return 1;
         }
     }
 

@@ -338,22 +338,27 @@ static inline void fixup_rva_dwords( DWORD *ptr, int delta, unsigned int count )
 }
 
 
+/* fixup an array of name/ordinal RVAs by adding the specified delta */
+static inline void fixup_rva_names( UINT_PTR *ptr, int delta )
+{
+    while (*ptr)
+    {
+        if (!(*ptr & IMAGE_ORDINAL_FLAG)) *ptr += delta;
+        ptr++;
+    }
+}
+
+
 /* fixup RVAs in the import directory */
 static void fixup_imports( IMAGE_IMPORT_DESCRIPTOR *dir, BYTE *base, int delta )
 {
-    UINT_PTR *ptr;
-
     while (dir->Name)
     {
         fixup_rva_dwords( &dir->u.OriginalFirstThunk, delta, 1 );
         fixup_rva_dwords( &dir->Name, delta, 1 );
         fixup_rva_dwords( &dir->FirstThunk, delta, 1 );
-        ptr = (UINT_PTR *)(base + (dir->u.OriginalFirstThunk ? dir->u.OriginalFirstThunk : dir->FirstThunk));
-        while (*ptr)
-        {
-            if (!(*ptr & IMAGE_ORDINAL_FLAG)) *ptr += delta;
-            ptr++;
-        }
+        if (dir->u.OriginalFirstThunk) fixup_rva_names( (UINT_PTR *)(base + dir->u.OriginalFirstThunk), delta );
+        if (dir->FirstThunk) fixup_rva_names( (UINT_PTR *)(base + dir->FirstThunk), delta );
         dir++;
     }
 }
@@ -400,11 +405,15 @@ static void *map_dll( const IMAGE_NT_HEADERS *nt_descr )
     IMAGE_NT_HEADERS *nt;
     IMAGE_SECTION_HEADER *sec;
     BYTE *addr;
-    DWORD code_start, data_start, data_end;
+    DWORD code_start, code_end, data_start, data_end;
     const size_t page_size = sysconf( _SC_PAGESIZE );
     const size_t page_mask = page_size - 1;
     int delta, nb_sections = 2;  /* code + data */
     unsigned int i;
+#ifdef __APPLE__
+    Dl_info dli;
+    unsigned long data_size;
+#endif
 
     size_t size = (sizeof(IMAGE_DOS_HEADER)
                    + sizeof(IMAGE_NT_HEADERS)
@@ -413,8 +422,12 @@ static void *map_dll( const IMAGE_NT_HEADERS *nt_descr )
     assert( size <= page_size );
 
     /* module address must be aligned on 64K boundary */
-    addr = (BYTE *)((nt_descr->OptionalHeader.ImageBase + 0xffff) & ~0xffff);
-    if (wine_anon_mmap( addr, page_size, PROT_READ|PROT_WRITE, MAP_FIXED ) != addr) return NULL;
+    addr = *(BYTE **)&nt_descr->OptionalHeader.DataDirectory[15];
+    if (!addr || ((ULONG_PTR)addr & 0xffff) || mprotect( addr, page_size, PROT_READ | PROT_WRITE ))
+    {
+        addr = (BYTE *)((nt_descr->OptionalHeader.ImageBase + 0xffff) & ~0xffff);
+        if (wine_anon_mmap( addr, page_size, PROT_READ|PROT_WRITE, MAP_FIXED ) != addr) return NULL;
+    }
 
     dos    = (IMAGE_DOS_HEADER *)addr;
     nt     = (IMAGE_NT_HEADERS *)(dos + 1);
@@ -438,7 +451,15 @@ static void *map_dll( const IMAGE_NT_HEADERS *nt_descr )
     delta      = (const BYTE *)nt_descr - addr;
     code_start = page_size;
     data_start = delta & ~page_mask;
+#ifdef __APPLE__
+    /* Need the mach_header, not the PE header, to give to getsegmentdata(3) */
+    dladdr(addr, &dli);
+    code_end   = getsegmentdata(dli.dli_fbase, "__DATA", &data_size) - addr;
+    data_end   = (code_end + data_size + page_mask) & ~page_mask;
+#else
+    code_end   = data_start;
     data_end   = (nt->OptionalHeader.SizeOfImage + delta + page_mask) & ~page_mask;
+#endif
 
     fixup_rva_ptrs( &nt->OptionalHeader.AddressOfEntryPoint, addr, 1 );
 
@@ -447,19 +468,28 @@ static void *map_dll( const IMAGE_NT_HEADERS *nt_descr )
 #ifndef _WIN64
     nt->OptionalHeader.BaseOfData                  = data_start;
 #endif
-    nt->OptionalHeader.SizeOfCode                  = data_start - code_start;
+    nt->OptionalHeader.SizeOfCode                  = code_end - code_start;
     nt->OptionalHeader.SizeOfInitializedData       = data_end - data_start;
     nt->OptionalHeader.SizeOfUninitializedData     = 0;
     nt->OptionalHeader.SizeOfImage                 = data_end;
     nt->OptionalHeader.ImageBase                   = (ULONG_PTR)addr;
 
+    /* Clear DataDirectory[15] */
+
+    nt->OptionalHeader.DataDirectory[15].VirtualAddress = 0;
+    nt->OptionalHeader.DataDirectory[15].Size = 0;
+
     /* Build the code section */
 
     memcpy( sec->Name, ".text", sizeof(".text") );
-    sec->SizeOfRawData = data_start - code_start;
+    sec->SizeOfRawData = code_end - code_start;
     sec->Misc.VirtualSize = sec->SizeOfRawData;
     sec->VirtualAddress   = code_start;
-    sec->PointerToRawData = code_start;
+#ifdef _WIN64
+    sec->PointerToRawData = 0x400; /* file alignment */
+#else
+    sec->PointerToRawData = 0x200; /* file alignment */
+#endif
     sec->Characteristics  = (IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ);
     sec++;
 
@@ -1020,6 +1050,15 @@ static jstring wine_init_jni( JNIEnv *env, jobject obj, jobjectArray cmdline, jo
                     void (*update_func)( const char * ) = dlsym( RTLD_DEFAULT,
                                                                  "android_update_LD_LIBRARY_PATH" );
                     if (update_func) update_func( val );
+                }
+                else if (!strcmp( var, "WINEDEBUGLOG" ))
+                {
+                    int fd = open( val, O_WRONLY | O_CREAT | O_APPEND, 0666 );
+                    if (fd != -1)
+                    {
+                        dup2( fd, 2 );
+                        close( fd );
+                    }
                 }
                 (*env)->ReleaseStringUTFChars( env, val_obj, val );
             }

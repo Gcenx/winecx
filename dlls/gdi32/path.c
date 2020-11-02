@@ -1749,6 +1749,9 @@ static struct gdi_path *PATH_WidenPath(DC *dc)
                 break;
             default:
                 ERR("Got path flag %c\n", flat_path->flags[i]);
+                for(i = 0; i < numStrokes; i++) free_gdi_path(pStrokes[i]);
+                HeapFree(GetProcessHeap(), 0, pStrokes);
+                free_gdi_path(flat_path);
                 return NULL;
         }
     }
@@ -2245,5 +2248,6 @@ const struct gdi_dc_funcs path_driver =
     NULL,                               /* pUnrealizePalette */
     NULL,                               /* pWidenPath */
     NULL,                               /* wine_get_wgl_driver */
+    NULL,                               /* wine_get_vulkan_driver */
     GDI_PRIORITY_PATH_DRV               /* priority */
 };

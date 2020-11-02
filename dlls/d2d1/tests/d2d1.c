@@ -19,12 +19,21 @@
 #define COBJMACROS
 #include <limits.h>
 #include <math.h>
-#include "d2d1.h"
+#include "d2d1_1.h"
 #include "wincrypt.h"
 #include "wine/test.h"
 #include "initguid.h"
 #include "dwrite.h"
 #include "wincodec.h"
+#include "wine/heap.h"
+
+static BOOL use_mt = TRUE;
+
+static struct test_entry
+{
+    void (*test)(void);
+} *mt_tests;
+size_t mt_tests_size, mt_test_count;
 
 struct resource_readback
 {
@@ -82,6 +91,63 @@ struct expected_geometry_figure
     unsigned int segment_count;
     const struct geometry_segment *segments;
 };
+
+static void queue_test(void (*test)(void))
+{
+    if (mt_test_count >= mt_tests_size)
+    {
+        mt_tests_size = max(16, mt_tests_size * 2);
+        mt_tests = heap_realloc(mt_tests, mt_tests_size * sizeof(*mt_tests));
+    }
+    mt_tests[mt_test_count++].test = test;
+}
+
+static DWORD WINAPI thread_func(void *ctx)
+{
+    LONG *i = ctx, j;
+
+    while (*i < mt_test_count)
+    {
+        j = *i;
+        if (InterlockedCompareExchange(i, j + 1, j) == j)
+            mt_tests[j].test();
+    }
+
+    return 0;
+}
+
+static void run_queued_tests(void)
+{
+    unsigned int thread_count, i;
+    HANDLE *threads;
+    SYSTEM_INFO si;
+    LONG test_idx;
+
+    if (!use_mt)
+    {
+        for (i = 0; i < mt_test_count; ++i)
+        {
+            mt_tests[i].test();
+        }
+
+        return;
+    }
+
+    GetSystemInfo(&si);
+    thread_count = si.dwNumberOfProcessors;
+    threads = heap_calloc(thread_count, sizeof(*threads));
+    for (i = 0, test_idx = 0; i < thread_count; ++i)
+    {
+        threads[i] = CreateThread(NULL, 0, thread_func, &test_idx, 0, NULL);
+        ok(!!threads[i], "Failed to create thread %u.\n", i);
+    }
+    WaitForMultipleObjects(thread_count, threads, TRUE, INFINITE);
+    for (i = 0; i < thread_count; ++i)
+    {
+        CloseHandle(threads[i]);
+    }
+    heap_free(threads);
+}
 
 static void set_point(D2D1_POINT_2F *point, float x, float y)
 {
@@ -1212,9 +1278,8 @@ static void test_state_block(void)
     ok(drawing_state.textAntialiasMode == D2D1_TEXT_ANTIALIAS_MODE_DEFAULT,
             "Got unexpected text antialias mode %#x.\n", drawing_state.textAntialiasMode);
     ID2D1RenderTarget_GetTags(rt, &drawing_state.tag1, &drawing_state.tag2);
-    ok(!drawing_state.tag1 && !drawing_state.tag2, "Got unexpected tags %08x%08x:%08x%08x.\n",
-            (unsigned int)(drawing_state.tag1 >> 32), (unsigned int)(drawing_state.tag1),
-            (unsigned int)(drawing_state.tag2 >> 32), (unsigned int)(drawing_state.tag2));
+    ok(!drawing_state.tag1 && !drawing_state.tag2, "Got unexpected tags %s:%s.\n",
+            wine_dbgstr_longlong(drawing_state.tag1), wine_dbgstr_longlong(drawing_state.tag2));
     ID2D1RenderTarget_GetTransform(rt, &drawing_state.transform);
     ok(!memcmp(&drawing_state.transform, &identity, sizeof(drawing_state.transform)),
             "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
@@ -1230,9 +1295,8 @@ static void test_state_block(void)
             "Got unexpected antialias mode %#x.\n", drawing_state.antialiasMode);
     ok(drawing_state.textAntialiasMode == D2D1_TEXT_ANTIALIAS_MODE_DEFAULT,
             "Got unexpected text antialias mode %#x.\n", drawing_state.textAntialiasMode);
-    ok(!drawing_state.tag1 && !drawing_state.tag2, "Got unexpected tags %08x%08x:%08x%08x.\n",
-            (unsigned int)(drawing_state.tag1 >> 32), (unsigned int)(drawing_state.tag1),
-            (unsigned int)(drawing_state.tag2 >> 32), (unsigned int)(drawing_state.tag2));
+    ok(!drawing_state.tag1 && !drawing_state.tag2, "Got unexpected tags %s:%s.\n",
+            wine_dbgstr_longlong(drawing_state.tag1), wine_dbgstr_longlong(drawing_state.tag2));
     ok(!memcmp(&drawing_state.transform, &identity, sizeof(drawing_state.transform)),
             "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
             drawing_state.transform._11, drawing_state.transform._12, drawing_state.transform._21,
@@ -1254,9 +1318,8 @@ static void test_state_block(void)
             "Got unexpected antialias mode %#x.\n", drawing_state.antialiasMode);
     ok(drawing_state.textAntialiasMode == D2D1_TEXT_ANTIALIAS_MODE_ALIASED,
             "Got unexpected text antialias mode %#x.\n", drawing_state.textAntialiasMode);
-    ok(drawing_state.tag1 == 0xdead && drawing_state.tag2 == 0xbeef, "Got unexpected tags %08x%08x:%08x%08x.\n",
-            (unsigned int)(drawing_state.tag1 >> 32), (unsigned int)(drawing_state.tag1),
-            (unsigned int)(drawing_state.tag2 >> 32), (unsigned int)(drawing_state.tag2));
+    ok(drawing_state.tag1 == 0xdead && drawing_state.tag2 == 0xbeef, "Got unexpected tags %s:%s.\n",
+            wine_dbgstr_longlong(drawing_state.tag1), wine_dbgstr_longlong(drawing_state.tag2));
     ok(!memcmp(&drawing_state.transform, &transform1, sizeof(drawing_state.transform)),
             "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
             drawing_state.transform._11, drawing_state.transform._12, drawing_state.transform._21,
@@ -1275,9 +1338,8 @@ static void test_state_block(void)
     ok(drawing_state.textAntialiasMode == D2D1_TEXT_ANTIALIAS_MODE_ALIASED,
             "Got unexpected text antialias mode %#x.\n", drawing_state.textAntialiasMode);
     ID2D1RenderTarget_GetTags(rt, &drawing_state.tag1, &drawing_state.tag2);
-    ok(drawing_state.tag1 == 0xdead && drawing_state.tag2 == 0xbeef, "Got unexpected tags %08x%08x:%08x%08x.\n",
-            (unsigned int)(drawing_state.tag1 >> 32), (unsigned int)(drawing_state.tag1),
-            (unsigned int)(drawing_state.tag2 >> 32), (unsigned int)(drawing_state.tag2));
+    ok(drawing_state.tag1 == 0xdead && drawing_state.tag2 == 0xbeef, "Got unexpected tags %s:%s.\n",
+            wine_dbgstr_longlong(drawing_state.tag1), wine_dbgstr_longlong(drawing_state.tag2));
     ID2D1RenderTarget_GetTransform(rt, &drawing_state.transform);
     ok(!memcmp(&drawing_state.transform, &transform1, sizeof(drawing_state.transform)),
             "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
@@ -1301,9 +1363,8 @@ static void test_state_block(void)
     ok(drawing_state.textAntialiasMode == D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
             "Got unexpected text antialias mode %#x.\n", drawing_state.textAntialiasMode);
     ID2D1RenderTarget_GetTags(rt, &drawing_state.tag1, &drawing_state.tag2);
-    ok(drawing_state.tag1 == 1 && drawing_state.tag2 == 2, "Got unexpected tags %08x%08x:%08x%08x.\n",
-            (unsigned int)(drawing_state.tag1 >> 32), (unsigned int)(drawing_state.tag1),
-            (unsigned int)(drawing_state.tag2 >> 32), (unsigned int)(drawing_state.tag2));
+    ok(drawing_state.tag1 == 1 && drawing_state.tag2 == 2, "Got unexpected tags %s:%s.\n",
+            wine_dbgstr_longlong(drawing_state.tag1), wine_dbgstr_longlong(drawing_state.tag2));
     ID2D1RenderTarget_GetTransform(rt, &drawing_state.transform);
     ok(!memcmp(&drawing_state.transform, &transform2, sizeof(drawing_state.transform)),
             "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
@@ -1319,9 +1380,8 @@ static void test_state_block(void)
             "Got unexpected antialias mode %#x.\n", drawing_state.antialiasMode);
     ok(drawing_state.textAntialiasMode == D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
             "Got unexpected text antialias mode %#x.\n", drawing_state.textAntialiasMode);
-    ok(drawing_state.tag1 == 1 && drawing_state.tag2 == 2, "Got unexpected tags %08x%08x:%08x%08x.\n",
-            (unsigned int)(drawing_state.tag1 >> 32), (unsigned int)(drawing_state.tag1),
-            (unsigned int)(drawing_state.tag2 >> 32), (unsigned int)(drawing_state.tag2));
+    ok(drawing_state.tag1 == 1 && drawing_state.tag2 == 2, "Got unexpected tags %s:%s.\n",
+            wine_dbgstr_longlong(drawing_state.tag1), wine_dbgstr_longlong(drawing_state.tag2));
     ok(!memcmp(&drawing_state.transform, &transform2, sizeof(drawing_state.transform)),
             "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
             drawing_state.transform._11, drawing_state.transform._12, drawing_state.transform._21,
@@ -1342,9 +1402,8 @@ static void test_state_block(void)
             "Got unexpected antialias mode %#x.\n", drawing_state.antialiasMode);
     ok(drawing_state.textAntialiasMode == D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE,
             "Got unexpected text antialias mode %#x.\n", drawing_state.textAntialiasMode);
-    ok(drawing_state.tag1 == 3 && drawing_state.tag2 == 4, "Got unexpected tags %08x%08x:%08x%08x.\n",
-            (unsigned int)(drawing_state.tag1 >> 32), (unsigned int)(drawing_state.tag1),
-            (unsigned int)(drawing_state.tag2 >> 32), (unsigned int)(drawing_state.tag2));
+    ok(drawing_state.tag1 == 3 && drawing_state.tag2 == 4, "Got unexpected tags %s:%s.\n",
+            wine_dbgstr_longlong(drawing_state.tag1), wine_dbgstr_longlong(drawing_state.tag2));
     ok(!memcmp(&drawing_state.transform, &transform1, sizeof(drawing_state.transform)),
             "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
             drawing_state.transform._11, drawing_state.transform._12, drawing_state.transform._21,
@@ -1483,6 +1542,7 @@ static void test_bitmap_brush(void)
     IDXGISurface *surface;
     ID2D1Factory *factory;
     D2D1_COLOR_F color;
+    ID2D1Image *image;
     D2D1_SIZE_U size;
     unsigned int i;
     ULONG refcount;
@@ -1541,6 +1601,11 @@ static void test_bitmap_brush(void)
     bitmap_desc.dpiY = 96.0f;
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, bitmap_data, 4 * sizeof(*bitmap_data), &bitmap_desc, &bitmap);
     ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+
+    hr = ID2D1Bitmap_QueryInterface(bitmap, &IID_ID2D1Image, (void **)&image);
+    ok(SUCCEEDED(hr) || broken(hr == E_NOINTERFACE) /* Vista */, "Failed to get ID2D1Image, hr %#x.\n", hr);
+    if (hr == S_OK)
+        ID2D1Image_Release(image);
 
     /* Creating a brush with a NULL bitmap crashes on Vista, but works fine on
      * Windows 7+. */
@@ -1619,7 +1684,7 @@ static void test_bitmap_brush(void)
     ID2D1RenderTarget_Clear(rt, &color);
 
     ID2D1BitmapBrush_SetOpacity(brush, 1.0f);
-    for (i = 0; i < sizeof(extend_mode_tests) / sizeof(*extend_mode_tests); ++i)
+    for (i = 0; i < ARRAY_SIZE(extend_mode_tests); ++i)
     {
         ID2D1BitmapBrush_SetExtendModeX(brush, extend_mode_tests[i].extend_mode_x);
         extend_mode = ID2D1BitmapBrush_GetExtendModeX(brush);
@@ -1751,7 +1816,7 @@ static void test_linear_brush(void)
         {200, 150, 0xffc03e00}, {240, 150, 0xffffffff}, {280, 150, 0xffffffff}, {320, 150, 0xffffffff},
         {240, 180, 0xffffffff}, {280, 180, 0xffff4040}, {320, 180, 0xffff4040}, {380, 180, 0xffffffff},
         {200, 210, 0xffffffff}, {240, 210, 0xffa99640}, {280, 210, 0xffb28d40}, {320, 210, 0xffbb8440},
-        {360, 210, 0xffc47b40}, {400, 210, 0xffffffff}, {200, 240, 0xffffffff}, {280, 240, 0xff41fd40},
+        {360, 210, 0xffc47b40}, {400, 210, 0xffffffff}, {200, 240, 0xffffffff}, {280, 240, 0xff41fe40},
         {320, 240, 0xff49f540}, {360, 240, 0xff52ec40}, {440, 240, 0xffffffff}, {240, 270, 0xffffffff},
         {280, 270, 0xff408eb0}, {320, 270, 0xff4097a7}, {360, 270, 0xff40a19e}, {440, 270, 0xffffffff},
         {280, 300, 0xffffffff}, {320, 300, 0xff4040ff}, {360, 300, 0xff4040ff}, {400, 300, 0xff406ad4},
@@ -1777,7 +1842,7 @@ static void test_linear_brush(void)
     ID2D1RenderTarget_SetDpi(rt, 192.0f, 48.0f);
     ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
 
-    hr = ID2D1RenderTarget_CreateGradientStopCollection(rt, stops, sizeof(stops) / sizeof(*stops),
+    hr = ID2D1RenderTarget_CreateGradientStopCollection(rt, stops, ARRAY_SIZE(stops),
             D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gradient);
     ok(SUCCEEDED(hr), "Failed to create stop collection, hr %#x.\n", hr);
 
@@ -1814,7 +1879,7 @@ static void test_linear_brush(void)
     ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
 
     get_surface_readback(surface, &rb);
-    for (i = 0; i < sizeof(test1) / sizeof(*test1); ++i)
+    for (i = 0; i < ARRAY_SIZE(test1); ++i)
     {
         DWORD colour;
 
@@ -1887,7 +1952,7 @@ static void test_linear_brush(void)
     ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
 
     get_surface_readback(surface, &rb);
-    for (i = 0; i < sizeof(test2) / sizeof(*test2); ++i)
+    for (i = 0; i < ARRAY_SIZE(test2); ++i)
     {
         DWORD colour;
 
@@ -1983,7 +2048,7 @@ static void test_radial_brush(void)
     ID2D1RenderTarget_SetDpi(rt, 192.0f, 48.0f);
     ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
 
-    hr = ID2D1RenderTarget_CreateGradientStopCollection(rt, stops, sizeof(stops) / sizeof(*stops),
+    hr = ID2D1RenderTarget_CreateGradientStopCollection(rt, stops, ARRAY_SIZE(stops),
             D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gradient);
     ok(SUCCEEDED(hr), "Failed to create stop collection, hr %#x.\n", hr);
 
@@ -2026,7 +2091,7 @@ static void test_radial_brush(void)
     ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
 
     get_surface_readback(surface, &rb);
-    for (i = 0; i < sizeof(test1) / sizeof(*test1); ++i)
+    for (i = 0; i < ARRAY_SIZE(test1); ++i)
     {
         DWORD colour;
 
@@ -2101,7 +2166,7 @@ static void test_radial_brush(void)
     ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
 
     get_surface_readback(surface, &rb);
-    for (i = 0; i < sizeof(test2) / sizeof(*test2); ++i)
+    for (i = 0; i < ARRAY_SIZE(test2); ++i)
     {
         DWORD colour;
 
@@ -3623,7 +3688,7 @@ static void test_bitmap_formats(void)
 
     bitmap_desc.dpiX = 96.0f;
     bitmap_desc.dpiY = 96.0f;
-    for (i = 0; i < sizeof(bitmap_formats) / sizeof(*bitmap_formats); ++i)
+    for (i = 0; i < ARRAY_SIZE(bitmap_formats); ++i)
     {
         for (j = 0; j < 4; ++j)
         {
@@ -4407,7 +4472,7 @@ static void test_create_target(void)
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
     ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
 
-    for (i = 0; i < sizeof(create_dpi_tests) / sizeof(*create_dpi_tests); ++i)
+    for (i = 0; i < ARRAY_SIZE(create_dpi_tests); ++i)
     {
         ID2D1GdiInteropRenderTarget *interop;
         D2D1_RENDER_TARGET_PROPERTIES desc;
@@ -4596,7 +4661,7 @@ todo_wine
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
     ok(hr == S_OK, "EndDraw failure expected, hr %#x.\n", hr);
 
-    for (i = 0; i < sizeof(antialias_mode_tests)/sizeof(*antialias_mode_tests); i++)
+    for (i = 0; i < ARRAY_SIZE(antialias_mode_tests); ++i)
     {
         IDWriteRenderingParams *rendering_params;
 
@@ -4692,7 +4757,7 @@ static void test_dc_target(void)
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
     ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
 
-    for (i = 0; i < sizeof(invalid_formats) / sizeof(*invalid_formats); ++i)
+    for (i = 0; i < ARRAY_SIZE(invalid_formats); ++i)
     {
         desc.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
         desc.pixelFormat = invalid_formats[i];
@@ -4810,7 +4875,7 @@ static void test_dc_target(void)
     ok(SUCCEEDED(hr), "EndDraw() failed, hr %#x.\n", hr);
 
     clr = GetPixel(hdc, 0, 0);
-    ok(clr == RGB(255, 0, 0), "Got color %#x\n", clr);
+    ok(clr == RGB(255, 0, 0), "Unexpected color 0x%08x.\n", clr);
 
     hdc2 = CreateCompatibleDC(NULL);
     ok(hdc2 != NULL, "Failed to create an HDC.\n");
@@ -4821,7 +4886,7 @@ static void test_dc_target(void)
     ok(hr == S_OK, "BindDC() returned %#x.\n", hr);
 
     clr = GetPixel(hdc2, 0, 0);
-    ok(clr == 0, "Got color %#x\n", clr);
+    ok(clr == 0, "Unexpected color 0x%08x.\n", clr);
 
     set_color(&color, 0.0f, 1.0f, 0.0f, 1.0f);
     hr = ID2D1DCRenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush);
@@ -4840,10 +4905,42 @@ static void test_dc_target(void)
     ID2D1SolidColorBrush_Release(brush);
 
     clr = GetPixel(hdc2, 0, 0);
-    ok(clr == RGB(0, 255, 0), "Got color %#x\n", clr);
+    ok(clr == RGB(0, 255, 0), "Unexpected color 0x%08x.\n", clr);
 
     clr = GetPixel(hdc2, 10, 0);
-    ok(clr == 0, "Got color %#x\n", clr);
+    ok(clr == 0, "Unexpected color 0x%08x.\n", clr);
+
+    /* Invalid DC. */
+    hr = ID2D1DCRenderTarget_BindDC(rt, (HDC)0xdeadbeef, &rect);
+todo_wine
+    ok(hr == E_INVALIDARG, "BindDC() returned %#x.\n", hr);
+
+    ID2D1DCRenderTarget_BeginDraw(rt);
+
+    set_color(&color, 1.0f, 0.0f, 0.0f, 1.0f);
+    ID2D1DCRenderTarget_Clear(rt, &color);
+
+    hr = ID2D1DCRenderTarget_EndDraw(rt, NULL, NULL);
+    ok(SUCCEEDED(hr), "EndDraw() failed, hr %#x.\n", hr);
+
+    clr = GetPixel(hdc2, 0, 0);
+todo_wine
+    ok(clr == RGB(255, 0, 0), "Unexpected color 0x%08x.\n", clr);
+
+    hr = ID2D1DCRenderTarget_BindDC(rt, NULL, &rect);
+    ok(hr == E_INVALIDARG, "BindDC() returned %#x.\n", hr);
+
+    ID2D1DCRenderTarget_BeginDraw(rt);
+
+    set_color(&color, 0.0f, 0.0f, 1.0f, 1.0f);
+    ID2D1DCRenderTarget_Clear(rt, &color);
+
+    hr = ID2D1DCRenderTarget_EndDraw(rt, NULL, NULL);
+    ok(SUCCEEDED(hr), "EndDraw() failed, hr %#x.\n", hr);
+
+    clr = GetPixel(hdc2, 0, 0);
+todo_wine
+    ok(clr == RGB(0, 0, 255), "Unexpected color 0x%08x.\n", clr);
 
     DeleteDC(hdc);
     DeleteDC(hdc2);
@@ -5190,6 +5287,8 @@ static void test_stroke_style(void)
     desc.dashStyle = D2D1_DASH_STYLE_CUSTOM;
     desc.dashOffset = 0.0f;
 
+    ID2D1StrokeStyle_Release(style);
+
     hr = ID2D1Factory_CreateStrokeStyle(factory, &desc, NULL, 0, &style);
     ok(hr == E_INVALIDARG, "Unexpected return value, %#x.\n", hr);
 
@@ -5218,7 +5317,7 @@ static void test_stroke_style(void)
     desc.miterLimit = 1.5f;
     desc.dashOffset = 0.0f;
 
-    for (i = 0; i < sizeof(dash_style_tests)/sizeof(dash_style_tests[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(dash_style_tests); ++i)
     {
         float dashes[10];
         UINT dash_count;
@@ -5231,7 +5330,7 @@ static void test_stroke_style(void)
         dash_count = ID2D1StrokeStyle_GetDashesCount(style);
         ok(dash_count == dash_style_tests[i].dash_count, "%u: unexpected dash count %u, expected %u.\n",
                 i, dash_count, dash_style_tests[i].dash_count);
-        ok(dash_count < sizeof(dashes)/sizeof(dashes[0]), "%u: unexpectedly large dash count %u.\n", i, dash_count);
+        ok(dash_count < ARRAY_SIZE(dashes), "%u: unexpectedly large dash count %u.\n", i, dash_count);
         if (dash_count == dash_style_tests[i].dash_count)
         {
             unsigned int j;
@@ -5242,11 +5341,11 @@ static void test_stroke_style(void)
 
             /* Ask for more dashes than style actually has. */
             memset(dashes, 0xcc, sizeof(dashes));
-            ID2D1StrokeStyle_GetDashes(style, dashes, sizeof(dashes)/sizeof(dashes[0]));
+            ID2D1StrokeStyle_GetDashes(style, dashes, ARRAY_SIZE(dashes));
             ok(!memcmp(dashes, dash_style_tests[i].dashes, sizeof(*dashes) * dash_count),
                     "%u: unexpected dash array.\n", i);
 
-            for (j = dash_count; j < sizeof(dashes)/sizeof(dashes[0]); j++)
+            for (j = dash_count; j < ARRAY_SIZE(dashes); ++j)
                 ok(dashes[j] == 0.0f, "%u: unexpected dash value at %u.\n", i, j);
         }
 
@@ -5307,9 +5406,9 @@ static void test_gradient(void)
     set_color(&stops[0].color, 1.0f, 0.5f, 0.4f, 1.0f);
     color = stops[0].color;
     stops[2] = stops[1] = stops[0];
-    ID2D1GradientStopCollection_GetGradientStops(gradient, stops, sizeof(stops)/sizeof(stops[0]));
+    ID2D1GradientStopCollection_GetGradientStops(gradient, stops, ARRAY_SIZE(stops));
     ok(!memcmp(stops, stops2, sizeof(*stops) * count), "Unexpected gradient stops array.\n");
-    for (i = count; i < sizeof(stops)/sizeof(stops[0]); i++)
+    for (i = count; i < ARRAY_SIZE(stops); ++i)
     {
         ok(stops[i].position == 123.4f, "%u: unexpected stop position %f.\n", i, stops[i].position);
         ok(!memcmp(&stops[i].color, &color, sizeof(color)), "%u: unexpected stop color.\n", i);
@@ -6389,32 +6488,170 @@ static void test_bezier_intersect(void)
     DestroyWindow(window);
 }
 
+static void test_create_device(void)
+{
+    ID3D10Device1 *d3d_device;
+    IDXGIDevice *dxgi_device;
+    ID2D1Factory1 *factory;
+    ID2D1Factory *factory2;
+    ID2D1Device *device;
+    ULONG refcount;
+    HRESULT hr;
+
+    if (!(d3d_device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+
+    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory1, NULL, (void **)&factory)))
+    {
+        win_skip("ID2D1Factory1 is not supported.\n");
+        ID3D10Device1_Release(d3d_device);
+        return;
+    }
+
+    hr = ID3D10Device1_QueryInterface(d3d_device, &IID_IDXGIDevice, (void **)&dxgi_device);
+    ok(SUCCEEDED(hr), "Failed to get IDXGIDevice interface, hr %#x.\n", hr);
+
+    hr = ID2D1Factory1_CreateDevice(factory, dxgi_device, &device);
+    ok(SUCCEEDED(hr), "Failed to get ID2D1Device, hr %#x.\n", hr);
+
+    ID2D1Device_GetFactory(device, &factory2);
+    ok(factory2 == (ID2D1Factory *)factory, "Got unexpected factory %p, expected %p.\n", factory2, factory);
+    ID2D1Factory_Release(factory2);
+    ID2D1Device_Release(device);
+
+    IDXGIDevice_Release(dxgi_device);
+    ID3D10Device1_Release(d3d_device);
+
+    refcount = ID2D1Factory1_Release(factory);
+    ok(!refcount, "Factory has %u references left.\n", refcount);
+}
+
+static void test_invert_matrix(void)
+{
+    static const struct
+    {
+        D2D1_MATRIX_3X2_F matrix;
+        D2D1_MATRIX_3X2_F inverse;
+        BOOL invertible;
+    }
+    invert_tests[] =
+    {
+        { { 0 }, { 0 }, FALSE },
+        {
+            {
+               1.0f, 2.0f,
+               1.0f, 2.0f,
+               4.0f, 8.0f
+            },
+            {
+               1.0f, 2.0f,
+               1.0f, 2.0f,
+               4.0f, 8.0f
+            },
+            FALSE
+        },
+        {
+            {
+               2.0f, 0.0f,
+               0.0f, 2.0f,
+               4.0f, 8.0f
+            },
+            {
+               0.5f, -0.0f,
+              -0.0f,  0.5f,
+              -2.0f, -4.0f
+            },
+            TRUE
+        },
+        {
+            {
+               2.0f, 1.0f,
+               2.0f, 2.0f,
+               4.0f, 8.0f
+            },
+            {
+               1.0f, -0.5f,
+              -1.0f,  1.0f,
+               4.0f, -6.0f
+            },
+            TRUE
+        },
+        {
+            {
+               2.0f, 1.0f,
+               3.0f, 1.0f,
+               4.0f, 8.0f
+            },
+            {
+              -1.0f,  1.0f,
+               3.0f, -2.0f,
+             -20.0f, 12.0f
+            },
+            TRUE
+        },
+    };
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(invert_tests); ++i)
+    {
+        D2D1_MATRIX_3X2_F m;
+        BOOL ret;
+
+        m = invert_tests[i].matrix;
+        ret = D2D1InvertMatrix(&m);
+        ok(ret == invert_tests[i].invertible, "%u: unexpected return value %d.\n", i, ret);
+        ok(!memcmp(&m, &invert_tests[i].inverse, sizeof(m)),
+                "%u: unexpected matrix value {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n", i,
+                m._11, m._12, m._21, m._22, m._31, m._32);
+
+        ret = D2D1IsMatrixInvertible(&invert_tests[i].matrix);
+        ok(ret == invert_tests[i].invertible, "%u: unexpected return value %d.\n", i, ret);
+    }
+}
+
 START_TEST(d2d1)
 {
-    test_clip();
-    test_state_block();
-    test_color_brush();
-    test_bitmap_brush();
-    test_linear_brush();
-    test_radial_brush();
-    test_path_geometry();
-    test_rectangle_geometry();
-    test_rounded_rectangle_geometry();
-    test_bitmap_formats();
-    test_alpha_mode();
-    test_shared_bitmap();
-    test_bitmap_updates();
-    test_opacity_brush();
-    test_create_target();
-    test_draw_text_layout();
-    test_dc_target();
-    test_hwnd_target();
-    test_bitmap_target();
-    test_desktop_dpi();
-    test_stroke_style();
-    test_gradient();
-    test_draw_geometry();
-    test_gdi_interop();
-    test_layer();
-    test_bezier_intersect();
+    unsigned int argc, i;
+    char **argv;
+
+    argc = winetest_get_mainargs(&argv);
+    for (i = 2; i < argc; ++i)
+    {
+        if (!strcmp(argv[i], "--single"))
+            use_mt = FALSE;
+    }
+
+    queue_test(test_clip);
+    queue_test(test_state_block);
+    queue_test(test_color_brush);
+    queue_test(test_bitmap_brush);
+    queue_test(test_linear_brush);
+    queue_test(test_radial_brush);
+    queue_test(test_path_geometry);
+    queue_test(test_rectangle_geometry);
+    queue_test(test_rounded_rectangle_geometry);
+    queue_test(test_bitmap_formats);
+    queue_test(test_alpha_mode);
+    queue_test(test_shared_bitmap);
+    queue_test(test_bitmap_updates);
+    queue_test(test_opacity_brush);
+    queue_test(test_create_target);
+    queue_test(test_draw_text_layout);
+    queue_test(test_dc_target);
+    queue_test(test_hwnd_target);
+    queue_test(test_bitmap_target);
+    queue_test(test_desktop_dpi);
+    queue_test(test_stroke_style);
+    queue_test(test_gradient);
+    queue_test(test_draw_geometry);
+    queue_test(test_gdi_interop);
+    queue_test(test_layer);
+    queue_test(test_bezier_intersect);
+    queue_test(test_create_device);
+    queue_test(test_invert_matrix);
+
+    run_queued_tests();
 }

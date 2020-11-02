@@ -562,6 +562,18 @@ BOOL WINAPI IsThemeActive(void)
     return bThemeActive;
 }
 
+/************************************************************
+*       IsCompositionActive   (UXTHEME.@)
+*/
+BOOL WINAPI IsCompositionActive(void)
+{
+    FIXME(": stub\n");
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+
+    return FALSE;
+}
+
 /***********************************************************************
  *      EnableTheming                                       (UXTHEME.@)
  *
@@ -706,6 +718,16 @@ HRESULT WINAPI SetWindowTheme(HWND hwnd, LPCWSTR pszSubAppName,
     if(SUCCEEDED(hr))
 	UXTHEME_broadcast_msg (hwnd, WM_THEMECHANGED);
     return hr;
+}
+
+/***********************************************************************
+ *      SetWindowThemeAttribute                             (UXTHEME.@)
+ */
+HRESULT WINAPI SetWindowThemeAttribute(HWND hwnd, enum WINDOWTHEMEATTRIBUTETYPE type,
+                                       PVOID attribute, DWORD size)
+{
+   FIXME("(%p,%d,%p,%d): stub\n", hwnd, type, attribute, size);
+   return E_NOTIMPL;
 }
 
 /***********************************************************************

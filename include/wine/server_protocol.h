@@ -155,12 +155,16 @@ typedef struct
                  unsigned char regs[80]; } i386_regs;
         struct { struct { unsigned __int64 low, high; } fpregs[32]; } x86_64_regs;
         struct { double fpr[32], fpscr; } powerpc_regs;
+        struct { unsigned __int64 d[32]; unsigned int fpscr; } arm_regs;
+        struct { unsigned __int64 d[64]; unsigned int fpcr, fpsr; } arm64_regs;
     } fp;
     union
     {
         struct { unsigned int dr0, dr1, dr2, dr3, dr6, dr7; } i386_regs;
         struct { unsigned __int64 dr0, dr1, dr2, dr3, dr6, dr7; } x86_64_regs;
         struct { unsigned int dr[8]; } powerpc_regs;
+        struct { unsigned int bvr[8], bcr[8], wvr[1], wcr[1]; } arm_regs;
+        struct { unsigned __int64 bvr[8], wvr[2]; unsigned int bcr[8], wcr[2]; } arm64_regs;
     } debug;
     union
     {
@@ -697,6 +701,11 @@ typedef struct
     unsigned int   file_size;
     unsigned int   checksum;
 } pe_image_info_t;
+#define IMAGE_FLAGS_ComPlusNativeReady        0x01
+#define IMAGE_FLAGS_ComPlusILOnly             0x02
+#define IMAGE_FLAGS_ImageDynamicallyRelocated 0x04
+#define IMAGE_FLAGS_ImageMappedFlat           0x08
+#define IMAGE_FLAGS_BaseBelow4gb              0x10
 
 struct rawinput_device
 {
@@ -799,6 +808,8 @@ struct init_process_done_request
 struct init_process_done_reply
 {
     struct reply_header __header;
+    int          suspend;
+    char __pad_12[4];
 };
 
 
@@ -825,7 +836,7 @@ struct init_thread_reply
     data_size_t  info_size;
     int          version;
     unsigned int all_cpus;
-    char __pad_36[4];
+    int          suspend;
 };
 
 
@@ -989,9 +1000,9 @@ struct get_dll_info_reply
 {
     struct reply_header __header;
     client_ptr_t entry_point;
-    data_size_t  size;
     data_size_t  filename_len;
     /* VARARG(filename,unicode_str); */
+    char __pad_20[4];
 };
 
 
@@ -1027,14 +1038,12 @@ struct resume_thread_reply
 struct load_dll_request
 {
     struct request_header __header;
-    obj_handle_t mapping;
+    data_size_t  dbg_offset;
     mod_handle_t base;
     client_ptr_t name;
-    data_size_t  size;
-    int          dbg_offset;
-    int          dbg_size;
+    data_size_t  dbg_size;
     /* VARARG(filename,unicode_str); */
-    char __pad_44[4];
+    char __pad_36[4];
 };
 struct load_dll_reply
 {
@@ -1536,6 +1545,33 @@ struct flush_reply
 };
 
 
+struct get_file_info_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    unsigned int info_class;
+    char __pad_20[4];
+};
+struct get_file_info_reply
+{
+    struct reply_header __header;
+    /* VARARG(data,bytes); */
+};
+
+
+struct get_volume_info_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    unsigned int info_class;
+    char __pad_20[4];
+};
+struct get_volume_info_reply
+{
+    struct reply_header __header;
+    /* VARARG(data,bytes); */
+};
+
 
 struct lock_file_request
 {
@@ -1799,6 +1835,22 @@ struct open_console_reply
     struct reply_header __header;
     obj_handle_t handle;
     char __pad_12[4];
+};
+
+
+
+struct attach_console_request
+{
+    struct request_header __header;
+    process_id_t pid;
+};
+struct attach_console_reply
+{
+    struct reply_header __header;
+    obj_handle_t std_in;
+    obj_handle_t std_out;
+    obj_handle_t std_err;
+    char __pad_20[4];
 };
 
 
@@ -2174,7 +2226,7 @@ struct create_mapping_request
     struct request_header __header;
     unsigned int access;
     unsigned int flags;
-    unsigned int protect;
+    unsigned int file_access;
     mem_size_t   size;
     obj_handle_t file_handle;
     /* VARARG(objattr,object_attributes); */
@@ -2186,20 +2238,6 @@ struct create_mapping_reply
     obj_handle_t handle;
     char __pad_12[4];
 };
-
-#define VPROT_READ       0x01
-#define VPROT_WRITE      0x02
-#define VPROT_EXEC       0x04
-#define VPROT_WRITECOPY  0x08
-#define VPROT_GUARD      0x10
-#define VPROT_NOCACHE    0x20
-#define VPROT_COMMITTED  0x40
-#define VPROT_WRITEWATCH 0x80
-
-#define VPROT_IMAGE      0x0100
-#define VPROT_SYSTEM     0x0200
-#define VPROT_VALLOC     0x0400
-#define VPROT_NOEXEC     0x0800
 
 
 
@@ -2232,10 +2270,38 @@ struct get_mapping_info_reply
     struct reply_header __header;
     mem_size_t   size;
     unsigned int flags;
-    int          protect;
-    obj_handle_t mapping;
     obj_handle_t shared_file;
     /* VARARG(image,pe_image_info); */
+};
+
+
+
+struct map_view_request
+{
+    struct request_header __header;
+    obj_handle_t mapping;
+    unsigned int access;
+    char __pad_20[4];
+    client_ptr_t base;
+    mem_size_t   size;
+    file_pos_t   start;
+};
+struct map_view_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct unmap_view_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    client_ptr_t base;
+};
+struct unmap_view_reply
+{
+    struct reply_header __header;
 };
 
 
@@ -2243,7 +2309,8 @@ struct get_mapping_info_reply
 struct get_mapping_committed_range_request
 {
     struct request_header __header;
-    obj_handle_t handle;
+    char __pad_12[4];
+    client_ptr_t base;
     file_pos_t   offset;
 };
 struct get_mapping_committed_range_reply
@@ -2259,11 +2326,26 @@ struct get_mapping_committed_range_reply
 struct add_mapping_committed_range_request
 {
     struct request_header __header;
-    obj_handle_t handle;
+    char __pad_12[4];
+    client_ptr_t base;
     file_pos_t   offset;
     mem_size_t   size;
 };
 struct add_mapping_committed_range_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct is_same_mapping_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+    client_ptr_t base1;
+    client_ptr_t base2;
+};
+struct is_same_mapping_reply
 {
     struct reply_header __header;
 };
@@ -3377,6 +3459,8 @@ struct create_window_request
     user_handle_t  owner;
     atom_t         atom;
     mod_handle_t   instance;
+    int            dpi;
+    int            awareness;
     /* VARARG(class,unicode_str); */
 };
 struct create_window_reply
@@ -3387,6 +3471,8 @@ struct create_window_reply
     user_handle_t  owner;
     int            extra;
     client_ptr_t   class_ptr;
+    int            dpi;
+    int            awareness;
 };
 
 
@@ -3447,6 +3533,8 @@ struct get_window_info_reply
     thread_id_t    tid;
     atom_t         atom;
     int            is_unicode;
+    int            dpi;
+    int            awareness;
 };
 
 
@@ -3499,6 +3587,8 @@ struct set_parent_reply
     struct reply_header __header;
     user_handle_t  old_parent;
     user_handle_t  full_parent;
+    int            dpi;
+    int            awareness;
 };
 
 
@@ -3608,7 +3698,6 @@ struct get_window_rectangles_reply
 {
     struct reply_header __header;
     rectangle_t    window;
-    rectangle_t    visible;
     rectangle_t    client;
 };
 enum coords_relative
@@ -3629,7 +3718,9 @@ struct get_window_text_request
 struct get_window_text_reply
 {
     struct reply_header __header;
+    data_size_t    length;
     /* VARARG(text,unicode_str); */
+    char __pad_12[4];
 };
 
 
@@ -4405,7 +4496,9 @@ struct create_class_request
     int            extra;
     int            win_extra;
     client_ptr_t   client_ptr;
+    data_size_t    name_offset;
     /* VARARG(name,unicode_str); */
+    char __pad_52[4];
 };
 struct create_class_reply
 {
@@ -4448,11 +4541,13 @@ struct set_class_info_reply
 {
     struct reply_header __header;
     atom_t         old_atom;
+    atom_t         base_atom;
+    mod_handle_t   old_instance;
+    lparam_t       old_extra_value;
     unsigned int   old_style;
     int            old_extra;
     int            old_win_extra;
-    mod_handle_t   old_instance;
-    lparam_t       old_extra_value;
+    char __pad_44[4];
 };
 #define SET_CLASS_ATOM      0x0001
 #define SET_CLASS_STYLE     0x0002
@@ -5302,6 +5397,7 @@ struct set_fd_compl_info_reply
 {
     struct reply_header __header;
 };
+#define COMPLETION_SKIP_ON_SUCCESS 0x01
 
 
 
@@ -5630,6 +5726,8 @@ enum request
     REQ_get_handle_fd,
     REQ_get_directory_cache_entry,
     REQ_flush,
+    REQ_get_file_info,
+    REQ_get_volume_info,
     REQ_lock_file,
     REQ_unlock_file,
     REQ_create_socket,
@@ -5644,6 +5742,7 @@ enum request
     REQ_free_console,
     REQ_get_console_renderer_events,
     REQ_open_console,
+    REQ_attach_console,
     REQ_get_console_wait_event,
     REQ_get_console_mode,
     REQ_set_console_mode,
@@ -5666,8 +5765,11 @@ enum request
     REQ_create_mapping,
     REQ_open_mapping,
     REQ_get_mapping_info,
+    REQ_map_view,
+    REQ_unmap_view,
     REQ_get_mapping_committed_range,
     REQ_add_mapping_committed_range,
+    REQ_is_same_mapping,
     REQ_create_snapshot,
     REQ_next_process,
     REQ_next_thread,
@@ -5923,6 +6025,8 @@ union generic_request
     struct get_handle_fd_request get_handle_fd_request;
     struct get_directory_cache_entry_request get_directory_cache_entry_request;
     struct flush_request flush_request;
+    struct get_file_info_request get_file_info_request;
+    struct get_volume_info_request get_volume_info_request;
     struct lock_file_request lock_file_request;
     struct unlock_file_request unlock_file_request;
     struct create_socket_request create_socket_request;
@@ -5937,6 +6041,7 @@ union generic_request
     struct free_console_request free_console_request;
     struct get_console_renderer_events_request get_console_renderer_events_request;
     struct open_console_request open_console_request;
+    struct attach_console_request attach_console_request;
     struct get_console_wait_event_request get_console_wait_event_request;
     struct get_console_mode_request get_console_mode_request;
     struct set_console_mode_request set_console_mode_request;
@@ -5959,8 +6064,11 @@ union generic_request
     struct create_mapping_request create_mapping_request;
     struct open_mapping_request open_mapping_request;
     struct get_mapping_info_request get_mapping_info_request;
+    struct map_view_request map_view_request;
+    struct unmap_view_request unmap_view_request;
     struct get_mapping_committed_range_request get_mapping_committed_range_request;
     struct add_mapping_committed_range_request add_mapping_committed_range_request;
+    struct is_same_mapping_request is_same_mapping_request;
     struct create_snapshot_request create_snapshot_request;
     struct next_process_request next_process_request;
     struct next_thread_request next_thread_request;
@@ -6214,6 +6322,8 @@ union generic_reply
     struct get_handle_fd_reply get_handle_fd_reply;
     struct get_directory_cache_entry_reply get_directory_cache_entry_reply;
     struct flush_reply flush_reply;
+    struct get_file_info_reply get_file_info_reply;
+    struct get_volume_info_reply get_volume_info_reply;
     struct lock_file_reply lock_file_reply;
     struct unlock_file_reply unlock_file_reply;
     struct create_socket_reply create_socket_reply;
@@ -6228,6 +6338,7 @@ union generic_reply
     struct free_console_reply free_console_reply;
     struct get_console_renderer_events_reply get_console_renderer_events_reply;
     struct open_console_reply open_console_reply;
+    struct attach_console_reply attach_console_reply;
     struct get_console_wait_event_reply get_console_wait_event_reply;
     struct get_console_mode_reply get_console_mode_reply;
     struct set_console_mode_reply set_console_mode_reply;
@@ -6250,8 +6361,11 @@ union generic_reply
     struct create_mapping_reply create_mapping_reply;
     struct open_mapping_reply open_mapping_reply;
     struct get_mapping_info_reply get_mapping_info_reply;
+    struct map_view_reply map_view_reply;
+    struct unmap_view_reply unmap_view_reply;
     struct get_mapping_committed_range_reply get_mapping_committed_range_reply;
     struct add_mapping_committed_range_reply add_mapping_committed_range_reply;
+    struct is_same_mapping_reply is_same_mapping_reply;
     struct create_snapshot_reply create_snapshot_reply;
     struct next_process_reply next_process_reply;
     struct next_thread_reply next_thread_reply;
@@ -6454,6 +6568,6 @@ union generic_reply
     struct terminate_job_reply terminate_job_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 537
+#define SERVER_PROTOCOL_VERSION 559
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

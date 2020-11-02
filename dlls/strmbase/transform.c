@@ -51,11 +51,6 @@ static inline BaseInputPin *impl_BaseInputPin_from_BasePin( BasePin *iface )
     return CONTAINING_RECORD(iface, BaseInputPin, pin);
 }
 
-static inline BasePin *impl_BasePin_from_IPin( IPin *iface )
-{
-    return CONTAINING_RECORD(iface, BasePin, IPin_iface);
-}
-
 static inline BaseInputPin *impl_BaseInputPin_from_IPin( IPin *iface )
 {
     return CONTAINING_RECORD(iface, BaseInputPin, pin.IPin_iface);
@@ -120,12 +115,10 @@ static HRESULT WINAPI TransformFilter_Input_Receive(BaseInputPin *This, IMediaSa
     return hr;
 }
 
-static HRESULT WINAPI TransformFilter_Output_QueryAccept(IPin *iface, const AM_MEDIA_TYPE * pmt)
+static HRESULT WINAPI TransformFilter_Output_CheckMediaType(BasePin *This, const AM_MEDIA_TYPE *pmt)
 {
-    BasePin *This = impl_BasePin_from_IPin(iface);
     TransformFilter *pTransformFilter = impl_from_IBaseFilter(This->pinInfo.pFilter);
     AM_MEDIA_TYPE* outpmt = &pTransformFilter->pmt;
-    TRACE("%p\n", iface);
 
     if (IsEqualIID(&pmt->majortype, &outpmt->majortype)
         && (IsEqualIID(&pmt->subtype, &outpmt->subtype) || IsEqualIID(&outpmt->subtype, &GUID_NULL)))
@@ -186,7 +179,7 @@ static const BaseInputPinFuncTable tf_input_BaseInputFuncTable = {
 
 static const BaseOutputPinFuncTable tf_output_BaseOutputFuncTable = {
     {
-        NULL,
+        TransformFilter_Output_CheckMediaType,
         BaseOutputPinImpl_AttemptConnection,
         BasePinImpl_GetMediaTypeVersion,
         TransformFilter_Output_GetMediaType
@@ -429,15 +422,6 @@ HRESULT WINAPI TransformFilterImpl_Notify(TransformFilter *iface, IBaseFilter *s
 
 /** IBaseFilter implementation **/
 
-HRESULT WINAPI TransformFilterImpl_FindPin(IBaseFilter * iface, LPCWSTR Id, IPin **ppPin)
-{
-    TransformFilter *This = impl_from_IBaseFilter(iface);
-
-    TRACE("(%p/%p)->(%s,%p)\n", This, iface, debugstr_w(Id), ppPin);
-
-    return E_NOTIMPL;
-}
-
 static HRESULT WINAPI TransformFilter_InputPin_EndOfStream(IPin * iface)
 {
     BaseInputPin* This = impl_BaseInputPin_from_IPin(iface);
@@ -571,7 +555,7 @@ static const IPinVtbl TransformFilter_InputPin_Vtbl =
     BasePinImpl_QueryPinInfo,
     BasePinImpl_QueryDirection,
     BasePinImpl_QueryId,
-    BaseInputPinImpl_QueryAccept,
+    BasePinImpl_QueryAccept,
     BasePinImpl_EnumMediaTypes,
     BasePinImpl_QueryInternalConnections,
     TransformFilter_InputPin_EndOfStream,
@@ -593,7 +577,7 @@ static const IPinVtbl TransformFilter_OutputPin_Vtbl =
     BasePinImpl_QueryPinInfo,
     BasePinImpl_QueryDirection,
     BasePinImpl_QueryId,
-    TransformFilter_Output_QueryAccept,
+    BasePinImpl_QueryAccept,
     BasePinImpl_EnumMediaTypes,
     BasePinImpl_QueryInternalConnections,
     BaseOutputPinImpl_EndOfStream,

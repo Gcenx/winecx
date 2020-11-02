@@ -25,25 +25,6 @@ struct _RTF_Info;
 
 extern HANDLE me_heap DECLSPEC_HIDDEN;
 
-static inline void * __WINE_ALLOC_SIZE(1) heap_alloc( size_t len )
-{
-    return HeapAlloc( me_heap, 0, len );
-}
-
-static inline BOOL heap_free( void *ptr )
-{
-    return HeapFree( me_heap, 0, ptr );
-}
-
-static inline void * __WINE_ALLOC_SIZE(2) heap_realloc( void *ptr, size_t len )
-{
-    return HeapReAlloc( me_heap, 0, ptr, len );
-}
-
-#define ALLOC_OBJ(type) heap_alloc(sizeof(type))
-#define ALLOC_N_OBJ(type, count) heap_alloc((count)*sizeof(type))
-#define FREE_OBJ(ptr) heap_free(ptr)
-
 #define RUN_IS_HIDDEN(run) ((run)->style->fmt.dwMask & CFM_HIDDEN \
                              && (run)->style->fmt.dwEffects & CFE_HIDDEN)
 
@@ -80,8 +61,8 @@ void ME_SaveTempStyle(ME_TextEditor *editor, ME_Style *style) DECLSPEC_HIDDEN;
 void ME_ClearTempStyle(ME_TextEditor *editor) DECLSPEC_HIDDEN;
 void ME_DumpStyleToBuf(CHARFORMAT2W *pFmt, char buf[2048]) DECLSPEC_HIDDEN;
 void ME_DumpStyle(ME_Style *s) DECLSPEC_HIDDEN;
-CHARFORMAT2W *ME_ToCF2W(CHARFORMAT2W *to, CHARFORMAT2W *from) DECLSPEC_HIDDEN;
-void ME_CopyToCFAny(CHARFORMAT2W *to, CHARFORMAT2W *from) DECLSPEC_HIDDEN;
+BOOL cfany_to_cf2w(CHARFORMAT2W *to, const CHARFORMAT2W *from) DECLSPEC_HIDDEN;
+BOOL cf2w_to_cfany(CHARFORMAT2W *to, const CHARFORMAT2W *from) DECLSPEC_HIDDEN;
 void ME_CopyCharFormat(CHARFORMAT2W *pDest, const CHARFORMAT2W *pSrc) DECLSPEC_HIDDEN; /* only works with 2W structs */
 void ME_CharFormatFromLogFont(HDC hDC, const LOGFONTW *lf, CHARFORMAT2W *fmt) DECLSPEC_HIDDEN; /* ditto */
 
@@ -248,14 +229,14 @@ int ME_GetParaBorderWidth(const ME_Context *c, int flags) DECLSPEC_HIDDEN;
 
 /* richole.c */
 LRESULT CreateIRichEditOle(IUnknown *outer_unk, ME_TextEditor *editor, LPVOID *ppvObj) DECLSPEC_HIDDEN;
-void ME_DrawOLE(ME_Context *c, int x, int y, ME_Run* run, ME_Paragraph *para, BOOL selected) DECLSPEC_HIDDEN;
+void ME_DrawOLE(ME_Context *c, int x, int y, ME_Run* run, BOOL selected) DECLSPEC_HIDDEN;
 void ME_GetOLEObjectSize(const ME_Context *c, ME_Run *run, SIZE *pSize) DECLSPEC_HIDDEN;
-void ME_CopyReObject(REOBJECT* dst, const REOBJECT* src) DECLSPEC_HIDDEN;
-void ME_DeleteReObject(REOBJECT* reo) DECLSPEC_HIDDEN;
+void ME_CopyReObject(REOBJECT *dst, const REOBJECT *src, DWORD flags) DECLSPEC_HIDDEN;
+void ME_DeleteReObject(struct re_object *re_object) DECLSPEC_HIDDEN;
 void ME_GetITextDocumentInterface(IRichEditOle *iface, LPVOID *ppvObj) DECLSPEC_HIDDEN;
 
 /* editor.c */
-ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10, DWORD csStyle) DECLSPEC_HIDDEN;
+ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10) DECLSPEC_HIDDEN;
 void ME_DestroyEditor(ME_TextEditor *editor) DECLSPEC_HIDDEN;
 LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
                          LPARAM lParam, BOOL unicode, HRESULT* phresult) DECLSPEC_HIDDEN;

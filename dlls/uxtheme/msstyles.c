@@ -36,6 +36,7 @@
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(uxtheme);
 
@@ -175,7 +176,7 @@ HRESULT MSSTYLES_OpenThemeFile(LPCWSTR lpThemeFile, LPCWSTR pszColorName, LPCWST
         goto invalid_theme;
     }
 
-    *tf = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(THEME_FILE));
+    *tf = heap_alloc_zero(sizeof(THEME_FILE));
     (*tf)->hTheme = hTheme;
     
     GetFullPathNameW(lpThemeFile, MAX_PATH, (*tf)->szThemeFile, NULL);
@@ -188,6 +189,7 @@ HRESULT MSSTYLES_OpenThemeFile(LPCWSTR lpThemeFile, LPCWSTR pszColorName, LPCWST
     return S_OK;
 
 invalid_theme:
+    *tf = NULL;
     if(hTheme) FreeLibrary(hTheme);
     return hr;
 }
@@ -213,13 +215,13 @@ void MSSTYLES_CloseThemeFile(PTHEME_FILE tf)
                         while(ps->properties) {
                             PTHEME_PROPERTY prop = ps->properties;
                             ps->properties = prop->next;
-                            HeapFree(GetProcessHeap(), 0, prop);
+                            heap_free(prop);
                         }
 
                         pcls->partstate = ps->next;
-                        HeapFree(GetProcessHeap(), 0, ps);
+                        heap_free(ps);
                     }
-                    HeapFree(GetProcessHeap(), 0, pcls);
+                    heap_free(pcls);
                 }
             }
             while (tf->images)
@@ -227,9 +229,9 @@ void MSSTYLES_CloseThemeFile(PTHEME_FILE tf)
                 PTHEME_IMAGE img = tf->images;
                 tf->images = img->next;
                 DeleteObject (img->image);
-                HeapFree (GetProcessHeap(), 0, img);
+                heap_free(img);
             }
-            HeapFree(GetProcessHeap(), 0, tf);
+            heap_free(tf);
         }
     }
 }
@@ -449,7 +451,7 @@ static PTHEME_CLASS MSSTYLES_AddClass(PTHEME_FILE tf, LPCWSTR pszAppName, LPCWST
     PTHEME_CLASS cur = MSSTYLES_FindClass(tf, pszAppName, pszClassName);
     if(cur) return cur;
 
-    cur = HeapAlloc(GetProcessHeap(), 0, sizeof(THEME_CLASS));
+    cur = heap_alloc(sizeof(*cur));
     cur->hTheme = tf->hTheme;
     lstrcpyW(cur->szAppName, pszAppName);
     lstrcpyW(cur->szClassName, pszClassName);
@@ -506,7 +508,7 @@ static PTHEME_PARTSTATE MSSTYLES_AddPartState(PTHEME_CLASS tc, int iPartId, int 
     PTHEME_PARTSTATE cur = MSSTYLES_FindPartState(tc, iPartId, iStateId, NULL);
     if(cur) return cur;
 
-    cur = HeapAlloc(GetProcessHeap(), 0, sizeof(THEME_PARTSTATE));
+    cur = heap_alloc(sizeof(*cur));
     cur->iPartId = iPartId;
     cur->iStateId = iStateId;
     cur->properties = NULL;
@@ -623,7 +625,7 @@ static PTHEME_PROPERTY MSSTYLES_AddProperty(PTHEME_PARTSTATE ps, int iPropertyPr
     /* Should duplicate properties overwrite the original, or be ignored? */
     if(cur) return cur;
 
-    cur = HeapAlloc(GetProcessHeap(), 0, sizeof(THEME_PROPERTY));
+    cur = heap_alloc(sizeof(*cur));
     cur->iPrimitiveType = iPropertyPrimitive;
     cur->iPropertyId = iPropertyId;
     cur->lpValue = lpValue;
@@ -664,7 +666,7 @@ static PTHEME_PROPERTY MSSTYLES_AddMetric(PTHEME_FILE tf, int iPropertyPrimitive
     /* Should duplicate properties overwrite the original, or be ignored? */
     if(cur) return cur;
 
-    cur = HeapAlloc(GetProcessHeap(), 0, sizeof(THEME_PROPERTY));
+    cur = heap_alloc(sizeof(*cur));
     cur->iPrimitiveType = iPropertyPrimitive;
     cur->iPropertyId = iPropertyId;
     cur->lpValue = lpValue;
@@ -1139,7 +1141,7 @@ HBITMAP MSSTYLES_LoadBitmap (PTHEME_CLASS tc, LPCWSTR lpFilename, BOOL* hasAlpha
         img = img->next;
     }
     /* Not found? Load from resources */
-    img = HeapAlloc (GetProcessHeap(), 0, sizeof (THEME_IMAGE));
+    img = heap_alloc(sizeof(*img));
     img->image = LoadImageW(tc->hTheme, szFile, IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION);
     prepare_alpha (img->image, hasAlpha);
     img->hasAlpha = *hasAlpha;
@@ -1175,19 +1177,24 @@ static BOOL MSSTYLES_GetNextInteger(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, 
     return TRUE;
 }
 
+static inline BOOL isSpace(WCHAR c)
+{
+    return c == ' ' || c == '\f' || c == '\n' || c == '\r' || c == '\t' || c == '\v';
+}
+
 static BOOL MSSTYLES_GetNextToken(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, LPWSTR lpBuff, DWORD buffSize) {
     LPCWSTR cur = lpStringStart;
     LPCWSTR start;
     LPCWSTR end;
 
-    while(cur < lpStringEnd && (isspace(*cur) || *cur == ',')) cur++;
+    while(cur < lpStringEnd && (isSpace(*cur) || *cur == ',')) cur++;
     if(cur >= lpStringEnd) {
         return FALSE;
     }
     start = cur;
     while(cur < lpStringEnd && *cur != ',') cur++;
     end = cur;
-    while(isspace(*end)) end--;
+    while(isSpace(*end)) end--;
 
     lstrcpynW(lpBuff, start, min(buffSize, end-start+1));
 

@@ -62,6 +62,7 @@
 #include "commctrl.h"
 #include "comctl32.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(pager);
 
@@ -70,6 +71,7 @@ typedef struct
     HWND   hwndSelf;   /* handle of the control wnd */
     HWND   hwndChild;  /* handle of the contained wnd */
     HWND   hwndNotify; /* handle of the parent wnd */
+    BOOL   bUnicode;   /* send notifications in Unicode */
     DWORD  dwStyle;    /* styles for this control */
     COLORREF clrBk;    /* background color */
     INT    nBorder;    /* border size for the control */
@@ -88,6 +90,17 @@ typedef struct
 #define TIMERID2         2
 #define INITIAL_DELAY    500
 #define REPEAT_DELAY     50
+
+/* Text field conversion behavior flags for PAGER_SendConvertedNotify() */
+enum conversion_flags
+{
+    /* Convert Unicode text to ANSI for parent before sending. If not set, do nothing */
+    CONVERT_SEND = 0x01,
+    /* Convert ANSI text from parent back to Unicode for children */
+    CONVERT_RECEIVE = 0x02,
+    /* Send empty text to parent if text is NULL. Original text pointer still remains NULL */
+    SEND_EMPTY_IF_NULL = 0x04
+};
 
 static void
 PAGER_GetButtonRects(const PAGER_INFO* infoPtr, RECT* prcTopLeft, RECT* prcBottomRight, BOOL bClientCoords)
@@ -554,9 +567,10 @@ static LRESULT
 PAGER_Create (HWND hwnd, const CREATESTRUCTW *lpcs)
 {
     PAGER_INFO *infoPtr;
+    INT ret;
 
     /* allocate memory for info structure */
-    infoPtr = Alloc (sizeof(PAGER_INFO));
+    infoPtr = heap_alloc_zero (sizeof(*infoPtr));
     if (!infoPtr) return -1;
     SetWindowLongPtrW (hwnd, 0, (DWORD_PTR)infoPtr);
 
@@ -580,6 +594,9 @@ PAGER_Create (HWND hwnd, const CREATESTRUCTW *lpcs)
     if (infoPtr->dwStyle & PGS_DRAGNDROP)
         FIXME("[%p] Drag and Drop style is not implemented yet.\n", infoPtr->hwndSelf);
 
+    ret = SendMessageW(infoPtr->hwndNotify, WM_NOTIFYFORMAT, (WPARAM)infoPtr->hwndSelf, NF_QUERY);
+    infoPtr->bUnicode = (ret == NFR_UNICODE);
+
     return 0;
 }
 
@@ -588,7 +605,7 @@ static LRESULT
 PAGER_Destroy (PAGER_INFO *infoPtr)
 {
     SetWindowLongPtrW (infoPtr->hwndSelf, 0, 0);
-    Free (infoPtr);  /* free pager info data */
+    heap_free (infoPtr);
     return 0;
 }
 
@@ -997,6 +1014,106 @@ PAGER_StyleChanged(PAGER_INFO *infoPtr, WPARAM wStyleType, const STYLESTRUCT *lp
     return 0;
 }
 
+static LRESULT PAGER_NotifyFormat(PAGER_INFO *infoPtr, INT command)
+{
+    INT ret;
+    switch (command)
+    {
+    case NF_REQUERY:
+        ret = SendMessageW(infoPtr->hwndNotify, WM_NOTIFYFORMAT, (WPARAM)infoPtr->hwndSelf, NF_QUERY);
+        infoPtr->bUnicode = (ret == NFR_UNICODE);
+        return ret;
+    case NF_QUERY:
+        /* Pager always wants Unicode notifications from children */
+        return NFR_UNICODE;
+    default:
+        return 0;
+    }
+}
+
+static UINT PAGER_GetAnsiNtfCode(UINT code)
+{
+    switch (code)
+    {
+    /* Toolbar */
+    case TBN_GETBUTTONINFOW: return TBN_GETBUTTONINFOA;
+    case TBN_GETINFOTIPW: return TBN_GETINFOTIPA;
+    }
+    return code;
+}
+
+static LRESULT PAGER_SendConvertedNotify(PAGER_INFO *infoPtr, NMHDR *hdr, WCHAR **text, INT *textMax, DWORD flags)
+{
+    CHAR *sendBuffer = NULL;
+    CHAR *receiveBuffer;
+    INT bufferSize;
+    WCHAR *oldText;
+    INT oldTextMax;
+    LRESULT ret = NO_ERROR;
+
+    oldText = *text;
+    oldTextMax = textMax ? *textMax : 0;
+
+    hdr->code = PAGER_GetAnsiNtfCode(hdr->code);
+
+    if (oldTextMax < 0) goto done;
+
+    if ((*text && (flags & CONVERT_SEND)) || (!*text && (flags & SEND_EMPTY_IF_NULL)))
+    {
+        bufferSize = textMax ? *textMax : lstrlenW(*text) + 1;
+        sendBuffer = heap_alloc_zero(bufferSize);
+        if (!sendBuffer) goto done;
+        WideCharToMultiByte(CP_ACP, 0, *text, -1, sendBuffer, bufferSize, NULL, FALSE);
+        *text = (WCHAR *)sendBuffer;
+    }
+
+    ret = SendMessageW(infoPtr->hwndNotify, WM_NOTIFY, hdr->idFrom, (LPARAM)hdr);
+
+    if (*text && oldText && (flags & CONVERT_RECEIVE))
+    {
+        /* MultiByteToWideChar requires that source and destination are not the same buffer */
+        if (*text == oldText)
+        {
+            bufferSize = lstrlenA((CHAR *)*text)  + 1;
+            receiveBuffer = heap_alloc(bufferSize);
+            if (!receiveBuffer) goto done;
+            memcpy(receiveBuffer, *text, bufferSize);
+            MultiByteToWideChar(CP_ACP, 0, receiveBuffer, bufferSize, oldText, oldTextMax);
+            heap_free(receiveBuffer);
+        }
+        else
+            MultiByteToWideChar(CP_ACP, 0, (CHAR *)*text, -1, oldText, oldTextMax);
+    }
+
+done:
+    heap_free(sendBuffer);
+    *text = oldText;
+    return ret;
+}
+
+static LRESULT PAGER_Notify(PAGER_INFO *infoPtr, NMHDR *hdr)
+{
+    if (infoPtr->bUnicode) return SendMessageW(infoPtr->hwndNotify, WM_NOTIFY, hdr->idFrom, (LPARAM)hdr);
+
+    switch (hdr->code)
+    {
+    /* Toolbar */
+    case TBN_GETBUTTONINFOW:
+    {
+        NMTOOLBARW *nmtb = (NMTOOLBARW *)hdr;
+        return PAGER_SendConvertedNotify(infoPtr, hdr, &nmtb->pszText, &nmtb->cchText,
+                                         SEND_EMPTY_IF_NULL | CONVERT_SEND | CONVERT_RECEIVE);
+    }
+    case TBN_GETINFOTIPW:
+    {
+        NMTBGETINFOTIPW *nmtbgit = (NMTBGETINFOTIPW *)hdr;
+        return PAGER_SendConvertedNotify(infoPtr, hdr, &nmtbgit->pszText, &nmtbgit->cchTextMax, CONVERT_RECEIVE);
+    }
+    }
+    /* Other notifications, no need to convert */
+    return SendMessageW(infoPtr->hwndNotify, WM_NOTIFY, hdr->idFrom, (LPARAM)hdr);
+}
+
 static LRESULT WINAPI
 PAGER_WindowProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -1088,7 +1205,12 @@ PAGER_WindowProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         case WM_TIMER:
             return PAGER_Timer (infoPtr, (INT)wParam);
 
+        case WM_NOTIFYFORMAT:
+            return PAGER_NotifyFormat (infoPtr, lParam);
+
         case WM_NOTIFY:
+            return PAGER_Notify (infoPtr, (NMHDR *)lParam);
+
         case WM_COMMAND:
             return SendMessageW (infoPtr->hwndNotify, uMsg, wParam, lParam);
 

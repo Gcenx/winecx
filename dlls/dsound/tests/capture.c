@@ -114,7 +114,7 @@ static void IDirectSoundCapture_test(LPDIRECTSOUNDCAPTURE dsco,
     ok(rc==DS_OK, "IDirectSoundCapture_QueryInterface(IID_IUnknown) "
        "failed: %08x\n", rc);
     if (rc==DS_OK)
-        IDirectSoundCapture_Release(unknown);
+        IUnknown_Release(unknown);
 
     rc=IDirectSoundCapture_QueryInterface(dsco, &IID_IDirectSoundCapture,
                                           (LPVOID*)&dsc);
@@ -162,7 +162,7 @@ static void IDirectSoundCapture_test(LPDIRECTSOUNDCAPTURE dsco,
     ZeroMemory(&dsccaps, sizeof(dsccaps));
 
     /* DSOUND: Error: Invalid caps buffer */
-    rc=IDirectSound_GetCaps(dsco, &dsccaps);
+    rc=IDirectSoundCapture_GetCaps(dsco, &dsccaps);
     ok(rc==DSERR_INVALIDPARAM, "IDirectSound_GetCaps() "
        "should have returned DSERR_INVALIDPARAM, returned: %08x\n", rc);
 
@@ -549,7 +549,7 @@ static BOOL WINAPI dscenum_callback(LPGUID lpGuid, LPCSTR lpcstrDescription,
            "should have 0\n",ref);
     }
 
-    for (f=0;f<NB_FORMATS;f++) {
+    for (f = 0; f < ARRAY_SIZE(formats); f++) {
 	dscbo=NULL;
 	init_format(&wfx,WAVE_FORMAT_PCM,formats[f][0],formats[f][1],
                     formats[f][2]);

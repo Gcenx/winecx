@@ -1,15 +1,17 @@
 TESTDLL   = comctl32.dll
-IMPORTS   = comctl32 ole32 user32 gdi32 advapi32
+IMPORTS   = ole32 user32 gdi32 advapi32
 
 C_SRCS = \
 	animate.c \
 	button.c \
-	comboex.c \
+	combo.c \
 	datetime.c \
 	dpa.c \
+	edit.c \
 	header.c \
 	imagelist.c \
 	ipaddress.c \
+	listbox.c \
 	listview.c \
 	misc.c \
 	monthcal.c \
@@ -18,6 +20,7 @@ C_SRCS = \
 	progress.c \
 	propsheet.c \
 	rebar.c \
+	static.c \
 	status.c \
 	subclass.c \
 	syslink.c \

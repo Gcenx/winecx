@@ -73,6 +73,7 @@
 #include "typelib.h"
 #include "wine/debug.h"
 #include "variant.h"
+#include "wine/heap.h"
 #include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
@@ -471,6 +472,9 @@ HRESULT WINAPI LoadTypeLibEx(
     HRESULT res;
 
     TRACE("(%s,%d,%p)\n",debugstr_w(szFile), regkind, pptLib);
+
+    if (!szFile || !pptLib)
+        return E_INVALIDARG;
 
     *pptLib = NULL;
 
@@ -2423,7 +2427,7 @@ MSFT_DoFuncs(TLBContext*     pcx,
         ptfd->funcdesc.callconv   =  (pFuncRec->FKCCIC) >> 8 & 0xF;
         ptfd->funcdesc.cParams    =   pFuncRec->nrargs  ;
         ptfd->funcdesc.cParamsOpt =   pFuncRec->nroargs ;
-        ptfd->funcdesc.oVft       =   pFuncRec->VtableOffset & ~1;
+        ptfd->funcdesc.oVft       =   (pFuncRec->VtableOffset & ~1) * sizeof(void *) / pTI->pTypeLib->ptr_size;
         ptfd->funcdesc.wFuncFlags =   LOWORD(pFuncRec->Flags) ;
 
         /* nameoffset is sometimes -1 on the second half of a propget/propput
@@ -2671,7 +2675,7 @@ static ITypeInfoImpl * MSFT_DoTypeInfo(
     ptiRet->typeattr.wMajorVerNum = LOWORD(tiBase.version);
     ptiRet->typeattr.wMinorVerNum = HIWORD(tiBase.version);
     ptiRet->typeattr.cImplTypes = tiBase.cImplTypes;
-    ptiRet->typeattr.cbSizeVft = tiBase.cbSizeVft; /* FIXME: this is only the non inherited part */
+    ptiRet->typeattr.cbSizeVft = tiBase.cbSizeVft;
     if (ptiRet->typeattr.typekind == TKIND_ALIAS) {
         TYPEDESC tmp;
         MSFT_GetTdesc(pcx, tiBase.datatype1, &tmp);
@@ -4157,7 +4161,7 @@ static void SLTG_DoFuncs(char *pBlk, char *pFirstItem, ITypeInfoImpl *pTI,
 	pFuncDesc->funcdesc.callconv = pFunc->nacc & 0x7;
 	pFuncDesc->funcdesc.cParams = pFunc->nacc >> 3;
 	pFuncDesc->funcdesc.cParamsOpt = (pFunc->retnextopt & 0x7e) >> 1;
-	pFuncDesc->funcdesc.oVft = pFunc->vtblpos & ~1;
+	pFuncDesc->funcdesc.oVft = (pFunc->vtblpos & ~1) * sizeof(void *) / pTI->pTypeLib->ptr_size;
 
 	if(pFunc->magic & SLTG_FUNCTION_FLAGS_PRESENT)
 	    pFuncDesc->funcdesc.wFuncFlags = pFunc->funcflags;
@@ -4725,10 +4729,9 @@ static ULONG WINAPI ITypeLib2_fnRelease( ITypeLib2 *iface)
     if (!ref)
     {
       TLBImpLib *pImpLib, *pImpLibNext;
-      TLBRefType *ref_type;
+      TLBRefType *ref_type, *ref_type_next;
       TLBString *tlbstr, *tlbstr_next;
       TLBGuid *tlbguid, *tlbguid_next;
-      void *cursor2;
       int i;
 
       /* remove cache entry */
@@ -4778,7 +4781,7 @@ static ULONG WINAPI ITypeLib2_fnRelease( ITypeLib2 *iface)
           heap_free(pImpLib);
       }
 
-      LIST_FOR_EACH_ENTRY_SAFE(ref_type, cursor2, &This->ref_list, TLBRefType, entry)
+      LIST_FOR_EACH_ENTRY_SAFE(ref_type, ref_type_next, &This->ref_list, TLBRefType, entry)
       {
           list_remove(&ref_type->entry);
           heap_free(ref_type);
@@ -6304,6 +6307,7 @@ static HRESULT WINAPI ITypeInfo_fnGetIDsOfNames( ITypeInfo2 *iface,
 #ifdef __i386__
 
 extern LONGLONG call_method( void *func, int nb_args, const DWORD *args, int *stack_offset );
+extern double call_double_method( void *func, int nb_args, const DWORD *args, int *stack_offset );
 __ASM_GLOBAL_FUNC( call_method,
                    "pushl %ebp\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
@@ -6338,9 +6342,8 @@ __ASM_GLOBAL_FUNC( call_method,
                    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
                    __ASM_CFI(".cfi_same_value %ebp\n\t")
                    "ret" )
-
-/* same function but returning floating point */
-static double (* const call_double_method)(void*,int,const DWORD*,int*) = (void *)call_method;
+__ASM_GLOBAL_FUNC( call_double_method,
+                   "jmp " __ASM_NAME("call_method") )
 
 /* ITypeInfo::Invoke
  *
@@ -6377,6 +6380,7 @@ _invoke(FARPROC func,CALLCONV callconv, int nrargs, DWORD *args) {
 #elif defined(__x86_64__)
 
 extern DWORD_PTR CDECL call_method( void *func, int nb_args, const DWORD_PTR *args );
+extern double CDECL call_double_method( void *func, int nb_args, const DWORD_PTR *args );
 __ASM_GLOBAL_FUNC( call_method,
                    "pushq %rbp\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t")
@@ -6416,11 +6420,50 @@ __ASM_GLOBAL_FUNC( call_method,
                    __ASM_CFI(".cfi_adjust_cfa_offset -8\n\t")
                    __ASM_CFI(".cfi_same_value %rbp\n\t")
                    "ret")
+__ASM_GLOBAL_FUNC( call_double_method,
+                   "jmp " __ASM_NAME("call_method") )
 
-/* same function but returning floating point */
-static double (CDECL * const call_double_method)(void*,int,const DWORD_PTR*) = (void *)call_method;
+#elif defined(__arm__)
 
-#endif  /* __x86_64__ */
+extern LONGLONG CDECL call_method( void *func, int nb_stk_args, const DWORD *stk_args, const DWORD *reg_args );
+extern float CDECL call_float_method( void *func, int nb_stk_args, const DWORD *stk_args, const DWORD *reg_args );
+extern double CDECL call_double_method( void *func, int nb_stk_args, const DWORD *stk_args, const DWORD *reg_args );
+__ASM_GLOBAL_FUNC( call_method,
+                    /* r0 = *func
+                     * r1 = nb_stk_args
+                     * r2 = *stk_args (pointer to 'nb_stk_args' DWORD values to push on stack)
+                     * r3 = *reg_args (pointer to 8, 64-bit d0-d7 (double) values OR as 16, 32-bit s0-s15 (float) values, followed by 4, 32-bit (DWORD) r0-r3 values)
+                     */
+
+                    "push {fp, lr}\n\t"             /* Save frame pointer and return address (stack still aligned to 8 bytes) */
+                    "mov fp, sp\n\t"                /* Save stack pointer as our frame for cleaning the stack on return */
+
+                    "lsls r1, r1, #2\n\t"           /* r1 = nb_stk_args * sizeof(DWORD) */
+                    "beq 1f\n\t"                    /* Skip allocation if no stack args */
+                    "add r2, r2, r1\n"              /* Calculate ending address of incoming stack data */
+                    "2:\tldr ip, [r2, #-4]!\n\t"    /* Get next value */
+                    "str ip, [sp, #-4]!\n\t"        /* Push it on the stack */
+                    "subs r1, r1, #4\n\t"           /* Decrement count */
+                    "bgt 2b\n\t"                    /* Loop till done */
+
+                    "1:\n\t"
+#ifndef __SOFTFP__
+                    "vldm r3!, {s0-s15}\n\t"        /* Load the s0-s15/d0-d7 arguments */
+#endif
+                    "mov ip, r0\n\t"                /* Save the function call address to ip before we nuke r0 with arguments to pass */
+                    "ldm r3, {r0-r3}\n\t"           /* Load the r0-r3 arguments */
+
+                    "blx ip\n\t"                    /* Call the target function */
+
+                    "mov sp, fp\n\t"                /* Clean the stack using fp */
+                    "pop {fp, pc}\n\t"              /* Restore fp and return */
+                )
+__ASM_GLOBAL_FUNC( call_float_method,
+                   "b " __ASM_NAME("call_method") )
+__ASM_GLOBAL_FUNC( call_double_method,
+                   "b " __ASM_NAME("call_method") )
+
+#endif  /* __arm__ */
 
 static HRESULT userdefined_to_variantvt(ITypeInfo *tinfo, const TYPEDESC *tdesc, VARTYPE *vt)
 {
@@ -6451,7 +6494,6 @@ static HRESULT userdefined_to_variantvt(ITypeInfo *tinfo, const TYPEDESC *tdesc,
         break;
 
     case TKIND_ALIAS:
-        tdesc = &tattr->tdescAlias;
         hr = typedescvt_to_variantvt(tinfo2, &tattr->tdescAlias, vt);
         break;
 
@@ -6805,6 +6847,182 @@ DispCallFunc(
         return E_INVALIDARG;
     default:
         V_UI8(pvargResult) = call_method( func, argspos - 1, args + 1 );
+        break;
+    }
+    heap_free( args );
+    if (vtReturn != VT_VARIANT) V_VT(pvargResult) = vtReturn;
+    TRACE("retval: %s\n", debugstr_variant(pvargResult));
+    return S_OK;
+
+#elif defined(__arm__)
+    int argspos;
+    void *func;
+    UINT i;
+    DWORD *args;
+    struct {
+#ifndef __SOFTFP__
+        union {
+            float s[16];
+            double d[8];
+        } sd;
+#endif
+        DWORD r[4];
+    } regs;
+    int rcount;     /* 32-bit register index count */
+#ifndef __SOFTFP__
+    int scount = 0; /* single-precision float register index count */
+    int dcount = 0; /* double-precision float register index count */
+#endif
+
+    TRACE("(%p, %ld, %d, %d, %d, %p, %p, %p (vt=%d))\n",
+        pvInstance, oVft, cc, vtReturn, cActuals, prgvt, prgpvarg, pvargResult, V_VT(pvargResult));
+
+    if (cc != CC_STDCALL && cc != CC_CDECL)
+    {
+        FIXME("unsupported calling convention %d\n",cc);
+        return E_INVALIDARG;
+    }
+
+    argspos = 0;
+    rcount = 0;
+
+    /* Determine if we need to pass a pointer for the return value as arg 0.  If so, do that */
+    /*  first as it will need to be in the 'r' registers:                                    */
+    switch (vtReturn)
+    {
+    case VT_DECIMAL:
+    case VT_VARIANT:
+        regs.r[rcount++] = (DWORD)pvargResult;  /* arg 0 is a pointer to the result */
+        break;
+    case VT_HRESULT:
+        WARN("invalid return type %u\n", vtReturn);
+        return E_INVALIDARG;
+    default:                    /* And all others are in 'r', 's', or 'd' registers or have no return value */
+        break;
+    }
+
+    if (pvInstance)
+    {
+        const FARPROC *vtable = *(FARPROC **)pvInstance;
+        func = vtable[oVft/sizeof(void *)];
+        regs.r[rcount++] = (DWORD)pvInstance; /* the This pointer is always the first parameter */
+    }
+    else func = (void *)oVft;
+
+    /* maximum size for an argument is sizeof(VARIANT).  Also allow for return pointer and stack alignment. */
+    args = heap_alloc( sizeof(VARIANT) * cActuals + sizeof(DWORD) * 4 );
+
+    for (i = 0; i < cActuals; i++)
+    {
+        VARIANT *arg = prgpvarg[i];
+        DWORD *pdwarg = (DWORD *)(arg);     /* a reinterpret_cast of the variant, used for copying structures when they are split between registers and stack */
+        int ntemp;              /* Used for counting words split between registers and stack */
+
+        switch (prgvt[i])
+        {
+        case VT_EMPTY:
+            break;
+        case VT_R8:             /* these must be 8-byte aligned, and put in 'd' regs or stack, as they are double-floats */
+        case VT_DATE:
+#ifndef __SOFTFP__
+            dcount = max( (scount + 1) / 2, dcount );
+            if (dcount < 8)
+            {
+                regs.sd.d[dcount++] = V_R8(arg);
+            }
+            else
+            {
+                argspos += (argspos % 2);   /* align argspos to 8-bytes */
+                memcpy( &args[argspos], &V_R8(arg), sizeof(V_R8(arg)) );
+                argspos += sizeof(V_R8(arg)) / sizeof(DWORD);
+            }
+            break;
+#endif
+        case VT_I8:             /* these must be 8-byte aligned, and put in 'r' regs or stack, as they are long-longs */
+        case VT_UI8:
+        case VT_CY:
+            if (rcount < 3)
+            {
+                rcount += (rcount % 2);     /* align rcount to 8-byte register pair */
+                memcpy( &regs.r[rcount], &V_UI8(arg), sizeof(V_UI8(arg)) );
+                rcount += sizeof(V_UI8(arg)) / sizeof(DWORD);
+            }
+            else
+            {
+                rcount = 4;                 /* Make sure we flag that all 'r' regs are full */
+                argspos += (argspos % 2);   /* align argspos to 8-bytes */
+                memcpy( &args[argspos], &V_UI8(arg), sizeof(V_UI8(arg)) );
+                argspos += sizeof(V_UI8(arg)) / sizeof(DWORD);
+            }
+            break;
+        case VT_DECIMAL:        /* these structures are 8-byte aligned, and put in 'r' regs or stack, can be split between the two */
+        case VT_VARIANT:
+            /* 8-byte align 'r' and/or stack: */
+            if (rcount < 3)
+                rcount += (rcount % 2);
+            else
+            {
+                rcount = 4;
+                argspos += (argspos % 2);
+            }
+            ntemp = sizeof(*arg) / sizeof(DWORD);
+            while (ntemp > 0)
+            {
+                if (rcount < 4)
+                    regs.r[rcount++] = *pdwarg++;
+                else
+                    args[argspos++] = *pdwarg++;
+                --ntemp;
+            }
+            break;
+        case VT_BOOL:  /* VT_BOOL is 16-bit but BOOL is 32-bit, needs to be extended */
+            if (rcount < 4)
+                regs.r[rcount++] = V_BOOL(arg);
+            else
+                args[argspos++] = V_BOOL(arg);
+            break;
+        case VT_R4:             /* these must be 4-byte aligned, and put in 's' regs or stack, as they are single-floats */
+#ifndef __SOFTFP__
+            if (!(scount % 2)) scount = max( scount, dcount * 2 );
+            if (scount < 16)
+                regs.sd.s[scount++] = V_R4(arg);
+            else
+                args[argspos++] = V_UI4(arg);
+            break;
+#endif
+        default:
+            if (rcount < 4)
+                regs.r[rcount++] = V_UI4(arg);
+            else
+                args[argspos++] = V_UI4(arg);
+            break;
+        }
+        TRACE("arg %u: type %s %s\n", i, debugstr_vt(prgvt[i]), debugstr_variant(arg));
+    }
+
+    argspos += (argspos % 2);   /* Make sure stack function alignment is 8-byte */
+
+    switch (vtReturn)
+    {
+    case VT_EMPTY:      /* EMPTY = no return value */
+    case VT_DECIMAL:    /* DECIMAL and VARIANT already have a pointer argument passed (see above) */
+    case VT_VARIANT:
+        call_method( func, argspos, args, (DWORD*)&regs );
+        break;
+    case VT_R4:
+        V_R4(pvargResult) = call_float_method( func, argspos, args, (DWORD*)&regs );
+        break;
+    case VT_R8:
+    case VT_DATE:
+        V_R8(pvargResult) = call_double_method( func, argspos, args, (DWORD*)&regs );
+        break;
+    case VT_I8:
+    case VT_UI8:
+    case VT_CY:
+        V_UI8(pvargResult) = call_method( func, argspos, args, (DWORD*)&regs );
+        break;
+    default:
+        V_UI4(pvargResult) = call_method( func, argspos, args, (DWORD*)&regs );
         break;
     }
     heap_free( args );

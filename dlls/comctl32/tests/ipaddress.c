@@ -22,6 +22,7 @@
 #include <commctrl.h>
 
 #include "wine/test.h"
+#include "v6util.h"
 
 #define expect(expected, got) ok(expected == got, "expected %d, got %d\n", expected,got)
 
@@ -49,44 +50,29 @@ static void test_get_set_text(void)
     }
 
     /* check text just after creation */
-    r = GetWindowTextA(hwnd, ip, sizeof(ip)/sizeof(CHAR));
+    r = GetWindowTextA(hwnd, ip, ARRAY_SIZE(ip));
     expect(7, r);
     ok(strcmp(ip, "0.0.0.0") == 0, "Expected null IP address, got %s\n", ip);
 
     SendMessageA(hwnd, IPM_SETADDRESS, 0, MAKEIPADDRESS(127, 0, 0, 1));
-    r = GetWindowTextA(hwnd, ip, sizeof(ip)/sizeof(CHAR));
+    r = GetWindowTextA(hwnd, ip, ARRAY_SIZE(ip));
     expect(9, r);
     ok(strcmp(ip, "127.0.0.1") == 0, "Expected 127.0.0.1, got %s\n", ip);
 
     DestroyWindow(hwnd);
 }
 
-static BOOL init(void)
-{
-    HMODULE hComctl32;
-    BOOL (WINAPI *pInitCommonControlsEx)(const INITCOMMONCONTROLSEX*);
-    INITCOMMONCONTROLSEX iccex;
-
-    hComctl32 = GetModuleHandleA("comctl32.dll");
-    pInitCommonControlsEx = (void*)GetProcAddress(hComctl32, "InitCommonControlsEx");
-    if (!pInitCommonControlsEx)
-    {
-        win_skip("InitCommonControlsEx() is missing.\n");
-        return FALSE;
-    }
-
-    iccex.dwSize = sizeof(iccex);
-    /* W2K and below need ICC_INTERNET_CLASSES for the IP Address Control */
-    iccex.dwICC  = ICC_INTERNET_CLASSES;
-    pInitCommonControlsEx(&iccex);
-
-    return TRUE;
-}
-
 START_TEST(ipaddress)
 {
-    if (!init())
+    ULONG_PTR cookie;
+    HANDLE ctxt;
+
+    test_get_set_text();
+
+    if (!load_v6_module(&cookie, &ctxt))
         return;
 
     test_get_set_text();
+
+    unload_v6_module(cookie, ctxt);
 }

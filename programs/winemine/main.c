@@ -112,7 +112,7 @@ static void LoadBoard( BOARD *p_board )
         size = sizeof( data );
         if( RegQueryValueExW( hkey, key_name, NULL, &type,
                 (LPBYTE) data, &size ) == ERROR_SUCCESS )
-            lstrcpynW( p_board->best_name[i], data, sizeof(p_board->best_name[i])/sizeof(WCHAR) );
+            lstrcpynW( p_board->best_name[i], data, ARRAY_SIZE(p_board->best_name[i]));
         else
             LoadStringW( p_board->hInst, IDS_NOBODY, p_board->best_name[i], MAX_PLAYER_NAME_SIZE+1 );
     }
@@ -146,7 +146,17 @@ static void InitBoard( BOARD *p_board )
     CheckLevel( p_board );
 }
 
-static void SaveBoard( BOARD *p_board )
+void ResetResults( BOARD *p_board )
+{
+    unsigned i;
+
+    for( i = 0; i < 3; i++ ) {
+        LoadStringW( p_board->hInst, IDS_NOBODY, p_board->best_name[i], MAX_PLAYER_NAME_SIZE+1 );
+        p_board->best_time[i] = 999;
+    }
+}
+
+void SaveBoard( BOARD *p_board )
 {
     HKEY hkey;
     unsigned i;
@@ -169,7 +179,7 @@ static void SaveBoard( BOARD *p_board )
 
     for( i = 0; i < 3; i++ ) {
         wsprintfW( key_name, nameW, i+1 );
-        lstrcpynW( data, p_board->best_name[i], sizeof(data)/sizeof(WCHAR) );
+        lstrcpynW( data, p_board->best_name[i], ARRAY_SIZE(data));
         RegSetValueExW( hkey, key_name, 0, REG_SZ, (LPBYTE) data, (lstrlenW(data)+1) * sizeof(WCHAR) );
     }
 
@@ -178,6 +188,8 @@ static void SaveBoard( BOARD *p_board )
         RegSetValueExW( hkey, key_name, 0, REG_DWORD, (LPBYTE) &p_board->best_time[i], sizeof(p_board->best_time[i]) );
     }
     RegCloseKey( hkey );
+
+    WINE_TRACE("Board has been saved.\n");
 }
 
 static void DestroyBoard( BOARD *p_board )
@@ -743,9 +755,9 @@ static void TestMines( BOARD *p_board, POINT pt, int msg )
     case WM_RBUTTONDOWN:
         AddFlag( p_board, col, row );
         break;
-    default:
-        WINE_TRACE("Unknown message type received in TestMines\n");
-        break;
+
+    case WM_RBUTTONUP:
+        return;
     }
 
     if( draw )
@@ -800,7 +812,7 @@ static void TestBoard( HWND hWnd, BOARD *p_board, int x, int y, int msg )
         p_board->press.y = 0;
     }
 
-    if( p_board->boxes_left == 0 ) {
+    if( p_board->boxes_left == 0 && p_board->status != WON ) {
         p_board->status = WON;
 
         if (p_board->num_flags < p_board->mines) {
@@ -823,6 +835,7 @@ static void TestBoard( HWND hWnd, BOARD *p_board, int x, int y, int msg )
 
             DialogBoxParamW( p_board->hInst, MAKEINTRESOURCEW(DLG_CONGRATS), hWnd,
                              CongratsDlgProc, (LPARAM) p_board);
+            SaveBoard( p_board );
             DialogBoxParamW( p_board->hInst, MAKEINTRESOURCEW(DLG_TIMES), hWnd,
                              TimesDlgProc, (LPARAM) p_board);
         }
@@ -990,8 +1003,8 @@ static LRESULT WINAPI MainProc( HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
         case IDM_ABOUT:
         {
             WCHAR appname[256], other[256];
-            LoadStringW( board.hInst, IDS_APPNAME, appname, sizeof(appname)/sizeof(WCHAR) );
-            LoadStringW( board.hInst, IDS_ABOUT, other, sizeof(other)/sizeof(WCHAR) );
+            LoadStringW( board.hInst, IDS_APPNAME, appname, ARRAY_SIZE(appname));
+            LoadStringW( board.hInst, IDS_ABOUT, other, ARRAY_SIZE(other));
             ShellAboutW( hWnd, appname, other,
                          LoadImageW(board.hInst, MAKEINTRESOURCEW(IDI_WINEMINE), IMAGE_ICON, 48, 48, LR_SHARED));
             return 0;
@@ -1012,7 +1025,7 @@ int WINAPI wWinMain( HINSTANCE hInst, HINSTANCE hPrevInst, LPWSTR cmdline, int c
     HACCEL haccel;
     WCHAR appname[20];
 
-    LoadStringW( hInst, IDS_APPNAME, appname, sizeof(appname)/sizeof(WCHAR));
+    LoadStringW( hInst, IDS_APPNAME, appname, ARRAY_SIZE(appname));
 
     wc.cbSize = sizeof(wc);
     wc.style = 0;

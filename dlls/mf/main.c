@@ -15,12 +15,20 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+
 #include "config.h"
 
 #include <stdarg.h>
 
+#define COBJMACROS
+
 #include "windef.h"
 #include "winbase.h"
+#include "mfidl.h"
+
+#include "wine/debug.h"
+
+WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
@@ -34,4 +42,35 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
     }
 
     return TRUE;
+}
+
+/***********************************************************************
+ *      MFGetSupportedMimeTypes (mf.@)
+ */
+HRESULT WINAPI MFGetSupportedMimeTypes(PROPVARIANT *array)
+{
+    FIXME("(%p) stub\n", array);
+
+    return E_NOTIMPL;
+}
+
+/***********************************************************************
+ *      MFGetService (mf.@)
+ */
+HRESULT WINAPI MFGetService(IUnknown *object, REFGUID service, REFIID riid, void **obj)
+{
+    IMFGetService *gs;
+    HRESULT hr;
+
+    TRACE("(%p, %s, %s, %p)\n", object, debugstr_guid(service), debugstr_guid(riid), obj);
+
+    if (!object)
+        return E_POINTER;
+
+    if (FAILED(hr = IUnknown_QueryInterface(object, &IID_IMFGetService, (void **)&gs)))
+        return hr;
+
+    hr = IMFGetService_GetService(gs, service, riid, obj);
+    IMFGetService_Release(gs);
+    return hr;
 }

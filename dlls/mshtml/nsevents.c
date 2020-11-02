@@ -181,7 +181,7 @@ static nsresult NSAPI handle_keypress(nsIDOMEventListener *iface,
 
     TRACE("(%p)->(%p)\n", doc, event);
 
-    update_doc(&doc_obj->basedoc, UPDATE_UI);
+    update_doc(doc_obj, UPDATE_UI);
     if(doc_obj->usermode == EDITMODE)
         handle_edit_event(&doc_obj->basedoc, event);
 
@@ -234,7 +234,8 @@ static nsresult NSAPI handle_load(nsIDOMEventListener *iface, nsIDOMEvent *event
     nsEventListener *This = impl_from_nsIDOMEventListener(iface);
     HTMLDocumentNode *doc = This->This->doc;
     HTMLDocumentObj *doc_obj = NULL;
-    nsresult nsres = NS_OK;
+    DOMEvent *load_event;
+    HRESULT hres;
 
     TRACE("(%p)\n", doc);
 
@@ -267,42 +268,37 @@ static nsresult NSAPI handle_load(nsIDOMEventListener *iface, nsIDOMEvent *event
                 &doc->basedoc.window->base.IHTMLWindow2_iface, 0);
 
     if(doc->nsdoc) {
-        nsIDOMHTMLElement *nsbody;
-
-        flush_pending_tasks(doc->basedoc.task_magic);
-
-        nsres = nsIDOMHTMLDocument_GetBody(doc->nsdoc, &nsbody);
-        if(NS_SUCCEEDED(nsres) && nsbody) {
-            HTMLDOMNode *node;
-            HRESULT hres;
-
-            hres = get_node(doc, (nsIDOMNode*)nsbody, TRUE, &node);
-            nsIDOMHTMLElement_Release(nsbody);
-            if(SUCCEEDED(hres)) {
-                fire_event(doc, EVENTID_LOAD, TRUE, node, event,
-                        (IDispatch*)&doc->window->base.IDispatchEx_iface);
-                node_release(node);
-            }
+        hres = create_document_event(doc, EVENTID_LOAD, &load_event);
+        if(SUCCEEDED(hres)) {
+            dispatch_event(&doc->node.event_target, load_event);
+            IDOMEvent_Release(&load_event->IDOMEvent_iface);
         }
     }else {
-        ERR("NULL nsdoc\n");
-        nsres = NS_ERROR_FAILURE;
+        WARN("no nsdoc\n");
+    }
+
+    if(doc->window) {
+        hres = create_event_from_nsevent(event, &load_event);
+        if(SUCCEEDED(hres)) {
+            dispatch_event(&doc->window->event_target, load_event);
+            IDOMEvent_Release(&load_event->IDOMEvent_iface);
+        }
+    }else {
+        WARN("no window\n");
     }
 
     htmldoc_release(&doc->basedoc);
-    return nsres;
+    return NS_OK;
 }
 
-static nsresult NSAPI handle_htmlevent(nsIDOMEventListener *iface, nsIDOMEvent *event)
+static nsresult NSAPI handle_htmlevent(nsIDOMEventListener *iface, nsIDOMEvent *nsevent)
 {
     nsEventListener *This = impl_from_nsIDOMEventListener(iface);
     HTMLDocumentNode *doc = This->This->doc;
-    const PRUnichar *type;
     nsIDOMEventTarget *event_target;
     nsIDOMNode *nsnode;
-    nsAString type_str;
     HTMLDOMNode *node;
-    eventid_t eid;
+    DOMEvent *event;
     nsresult nsres;
     HRESULT hres;
 
@@ -313,13 +309,7 @@ static nsresult NSAPI handle_htmlevent(nsIDOMEventListener *iface, nsIDOMEvent *
         return NS_OK;
     }
 
-    nsAString_Init(&type_str, NULL);
-    nsIDOMEvent_GetType(event, &type_str);
-    nsAString_GetData(&type_str, &type);
-    eid = str_to_eid(type);
-    nsAString_Finish(&type_str);
-
-    nsres = nsIDOMEvent_GetTarget(event, &event_target);
+    nsres = nsIDOMEvent_GetTarget(nsevent, &event_target);
     if(NS_FAILED(nsres) || !event_target) {
         ERR("GetEventTarget failed: %08x\n", nsres);
         return NS_OK;
@@ -332,27 +322,31 @@ static nsresult NSAPI handle_htmlevent(nsIDOMEventListener *iface, nsIDOMEvent *
         return NS_OK;
     }
 
-    hres = get_node(doc, nsnode, TRUE, &node);
+    hres = get_node(nsnode, TRUE, &node);
     nsIDOMNode_Release(nsnode);
     if(FAILED(hres))
         return NS_OK;
 
-    /* If we fine need for more special cases here, we may consider handling it in a more generic way. */
-    switch(eid) {
-    case EVENTID_FOCUS:
-        if(doc->event_vector[EVENTID_FOCUSIN])
-            fire_event(doc, EVENTID_FOCUSIN, TRUE, node, NULL, NULL);
-        break;
-    case EVENTID_BLUR:
-        if(doc->event_vector[EVENTID_FOCUSOUT])
-            fire_event(doc, EVENTID_FOCUSOUT, TRUE, node, NULL, NULL);
-        break;
-    default:
-        break;
+    hres = create_event_from_nsevent(nsevent, &event);
+    if(FAILED(hres)) {
+        node_release(node);
+        return NS_OK;
     }
 
-    fire_event(doc, eid, TRUE, node, event, NULL);
+    /* If we fine need for more special cases here, we may consider handling it in a more generic way. */
+    if(event->event_id == EVENTID_FOCUS || event->event_id == EVENTID_BLUR) {
+        DOMEvent *focus_event;
 
+        hres = create_document_event(doc, event->event_id == EVENTID_FOCUS ? EVENTID_FOCUSIN : EVENTID_FOCUSOUT, &focus_event);
+        if(SUCCEEDED(hres)) {
+            dispatch_event(&node->event_target, focus_event);
+            IDOMEvent_Release(&focus_event->IDOMEvent_iface);
+        }
+    }
+
+    dispatch_event(&node->event_target, event);
+
+    IDOMEvent_Release(&event->IDOMEvent_iface);
     node_release(node);
     return NS_OK;
 }

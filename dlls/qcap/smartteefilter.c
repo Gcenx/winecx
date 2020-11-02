@@ -149,9 +149,7 @@ static HRESULT WINAPI SmartTeeFilter_Stop(IBaseFilter *iface)
     SmartTeeFilter *This = impl_from_IBaseFilter(iface);
     TRACE("(%p)\n", This);
     EnterCriticalSection(&This->filter.csFilter);
-    if(This->filter.state != State_Stopped) {
-        This->filter.state = State_Stopped;
-    }
+    This->filter.state = State_Stopped;
     LeaveCriticalSection(&This->filter.csFilter);
     return S_OK;
 }
@@ -167,7 +165,7 @@ static HRESULT WINAPI SmartTeeFilter_Run(IBaseFilter *iface, REFERENCE_TIME tSta
 {
     SmartTeeFilter *This = impl_from_IBaseFilter(iface);
     HRESULT hr = S_OK;
-    TRACE("(%p, %x%08x)\n", This, (ULONG)(tStart >> 32), (ULONG)tStart);
+    TRACE("(%p, %s)\n", This, wine_dbgstr_longlong(tStart));
     EnterCriticalSection(&This->filter.csFilter);
     if(This->filter.state != State_Running) {
         /* We share an allocator among all pins, an allocator can only get committed
@@ -182,26 +180,6 @@ static HRESULT WINAPI SmartTeeFilter_Run(IBaseFilter *iface, REFERENCE_TIME tSta
     return hr;
 }
 
-static HRESULT WINAPI SmartTeeFilter_FindPin(IBaseFilter *iface, LPCWSTR Id, IPin **ppPin)
-{
-    SmartTeeFilter *This = impl_from_IBaseFilter(iface);
-    TRACE("(%p)->(%s, %p)\n", This, debugstr_w(Id), ppPin);
-    if (lstrcmpW(Id, This->input->pin.pinInfo.achName) == 0) {
-        *ppPin = &This->input->pin.IPin_iface;
-        IPin_AddRef(*ppPin);
-        return S_OK;
-    } else if (lstrcmpW(Id, This->capture->pin.pinInfo.achName) == 0) {
-        *ppPin = &This->capture->pin.IPin_iface;
-        IPin_AddRef(*ppPin);
-        return S_OK;
-    } else if (lstrcmpW(Id, This->preview->pin.pinInfo.achName) == 0) {
-        *ppPin = &This->preview->pin.IPin_iface;
-        IPin_AddRef(*ppPin);
-        return S_OK;
-    }
-    return VFW_E_NOT_FOUND;
-}
-
 static const IBaseFilterVtbl SmartTeeFilterVtbl = {
     SmartTeeFilter_QueryInterface,
     SmartTeeFilter_AddRef,
@@ -214,7 +192,7 @@ static const IBaseFilterVtbl SmartTeeFilterVtbl = {
     BaseFilterImpl_SetSyncSource,
     BaseFilterImpl_GetSyncSource,
     BaseFilterImpl_EnumPins,
-    SmartTeeFilter_FindPin,
+    BaseFilterImpl_FindPin,
     BaseFilterImpl_QueryFilterInfo,
     BaseFilterImpl_JoinFilterGraph,
     BaseFilterImpl_QueryVendorInfo
@@ -501,6 +479,12 @@ static const IPinVtbl SmartTeeFilterCaptureVtbl = {
     BasePinImpl_NewSegment
 };
 
+static HRESULT WINAPI SmartTeeFilterCapture_CheckMediaType(BasePin *base, const AM_MEDIA_TYPE *amt)
+{
+    FIXME("(%p) stub\n", base);
+    return S_OK;
+}
+
 static LONG WINAPI SmartTeeFilterCapture_GetMediaTypeVersion(BasePin *base)
 {
     SmartTeeFilter *This = impl_from_BasePin(base);
@@ -537,7 +521,7 @@ static HRESULT WINAPI SmartTeeFilterCapture_BreakConnect(BaseOutputPin *base)
 
 static const BaseOutputPinFuncTable SmartTeeFilterCaptureFuncs = {
     {
-        NULL,
+        SmartTeeFilterCapture_CheckMediaType,
         BaseOutputPinImpl_AttemptConnection,
         SmartTeeFilterCapture_GetMediaTypeVersion,
         SmartTeeFilterCapture_GetMediaType
@@ -594,6 +578,12 @@ static const IPinVtbl SmartTeeFilterPreviewVtbl = {
     BasePinImpl_NewSegment
 };
 
+static HRESULT WINAPI SmartTeeFilterPreview_CheckMediaType(BasePin *base, const AM_MEDIA_TYPE *amt)
+{
+    FIXME("(%p) stub\n", base);
+    return S_OK;
+}
+
 static LONG WINAPI SmartTeeFilterPreview_GetMediaTypeVersion(BasePin *base)
 {
     SmartTeeFilter *This = impl_from_BasePin(base);
@@ -630,7 +620,7 @@ static HRESULT WINAPI SmartTeeFilterPreview_BreakConnect(BaseOutputPin *base)
 
 static const BaseOutputPinFuncTable SmartTeeFilterPreviewFuncs = {
     {
-        NULL,
+        SmartTeeFilterPreview_CheckMediaType,
         BaseOutputPinImpl_AttemptConnection,
         SmartTeeFilterPreview_GetMediaTypeVersion,
         SmartTeeFilterPreview_GetMediaType

@@ -1,0 +1,12 @@
+MODULE  = opcservices.dll
+IMPORTS = uuid ole32 advapi32 urlmon xmllite oleaut32
+EXTRALIBS = $(Z_LIBS)
+
+C_SRCS = \
+	compress.c \
+	factory.c \
+	package.c \
+	uri.c
+
+IDL_SRCS = \
+	opcservices.idl

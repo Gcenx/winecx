@@ -2340,7 +2340,7 @@ UINT WINAPI D3DXGetDeclVertexSize(const D3DVERTEXELEMENT9 *decl, DWORD stream_id
 
         if (element->Stream != stream_idx) continue;
 
-        if (element->Type >= sizeof(d3dx_decltype_size) / sizeof(*d3dx_decltype_size))
+        if (element->Type >= ARRAY_SIZE(d3dx_decltype_size))
         {
             FIXME("Unhandled element type %#x, size will be incorrect.\n", element->Type);
             continue;
@@ -4565,7 +4565,7 @@ HRESULT WINAPI D3DXCreatePolygon(struct IDirect3DDevice9 *device, float length, 
     struct vertex *vertices;
     WORD (*faces)[3];
     DWORD (*adjacency_buf)[3];
-    float scale;
+    float angle, scale;
     unsigned int i;
 
     TRACE("device %p, length %f, sides %u, mesh %p, adjacency %p.\n",
@@ -4593,7 +4593,9 @@ HRESULT WINAPI D3DXCreatePolygon(struct IDirect3DDevice9 *device, float length, 
         return hr;
     }
 
-    scale = 0.5f * length / sinf(D3DX_PI / sides);
+    angle = D3DX_PI / sides;
+    scale = 0.5f * length / sinf(angle);
+    angle *= 2.0f;
 
     vertices[0].position.x = 0.0f;
     vertices[0].position.y = 0.0f;
@@ -4604,8 +4606,8 @@ HRESULT WINAPI D3DXCreatePolygon(struct IDirect3DDevice9 *device, float length, 
 
     for (i = 0; i < sides; ++i)
     {
-        vertices[i + 1].position.x = cosf(2.0f * D3DX_PI * i / sides) * scale;
-        vertices[i + 1].position.y = sinf(2.0f * D3DX_PI * i / sides) * scale;
+        vertices[i + 1].position.x = cosf(angle * i) * scale;
+        vertices[i + 1].position.y = sinf(angle * i) * scale;
         vertices[i + 1].position.z = 0.0f;
         vertices[i + 1].normal.x = 0.0f;
         vertices[i + 1].normal.y = 0.0f;
@@ -5164,9 +5166,9 @@ HRESULT WINAPI D3DXCreateCylinder(struct IDirect3DDevice9 *device, float radius1
 HRESULT WINAPI D3DXCreateTeapot(struct IDirect3DDevice9 *device,
         struct ID3DXMesh **mesh, struct ID3DXBuffer **adjacency)
 {
-    FIXME("(%p, %p, %p): stub\n", device, mesh, adjacency);
+    FIXME("device %p, mesh %p, adjacency %p semi-stub.\n", device, mesh, adjacency);
 
-    return E_NOTIMPL;
+    return D3DXCreateSphere(device, 1.0f, 4, 4, mesh, adjacency);
 }
 
 HRESULT WINAPI D3DXCreateTextA(struct IDirect3DDevice9 *device, HDC hdc, const char *text, float deviation,
@@ -7554,4 +7556,84 @@ HRESULT WINAPI D3DXConvertMeshSubsetToSingleStrip(struct ID3DXBaseMesh *mesh_in,
             mesh_in, attribute_id, ib_flags, index_buffer, index_count);
 
     return E_NOTIMPL;
+}
+
+struct frame_node
+{
+    struct list entry;
+    D3DXFRAME *frame;
+};
+
+static BOOL queue_frame_node(struct list *queue, D3DXFRAME *frame)
+{
+    struct frame_node *node;
+
+    if (!frame->pFrameFirstChild)
+        return TRUE;
+
+    node = HeapAlloc(GetProcessHeap(), 0, sizeof(*node));
+    if (!node)
+        return FALSE;
+
+    node->frame = frame;
+    list_add_tail(queue, &node->entry);
+
+    return TRUE;
+}
+
+static void empty_frame_queue(struct list *queue)
+{
+    struct frame_node *cur, *cur2;
+    LIST_FOR_EACH_ENTRY_SAFE(cur, cur2, queue, struct frame_node, entry)
+    {
+        list_remove(&cur->entry);
+        HeapFree(GetProcessHeap(), 0, cur);
+    }
+}
+
+D3DXFRAME * WINAPI D3DXFrameFind(const D3DXFRAME *root, const char *name)
+{
+    D3DXFRAME *found = NULL, *frame;
+    struct list queue;
+
+    TRACE("root frame %p, name %s.\n", root, debugstr_a(name));
+
+    if (!root)
+        return NULL;
+
+    list_init(&queue);
+
+    frame = (D3DXFRAME *)root;
+
+    for (;;)
+    {
+        struct frame_node *node;
+
+        while (frame)
+        {
+            if ((name && frame->Name && !strcmp(frame->Name, name)) || (!name && !frame->Name))
+            {
+                found = frame;
+                goto cleanup;
+            }
+
+            if (!queue_frame_node(&queue, frame))
+                goto cleanup;
+
+            frame = frame->pFrameSibling;
+        }
+
+        if (list_empty(&queue))
+            break;
+
+        node = LIST_ENTRY(list_head(&queue), struct frame_node, entry);
+        list_remove(&node->entry);
+        frame = node->frame->pFrameFirstChild;
+        HeapFree(GetProcessHeap(), 0, node);
+    }
+
+cleanup:
+    empty_frame_queue(&queue);
+
+    return found;
 }

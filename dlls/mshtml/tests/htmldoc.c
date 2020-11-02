@@ -906,7 +906,7 @@ static HRESULT WINAPI NewWindowManager_QueryInterface(INewWindowManager *iface, 
         return S_OK;
     }
 
-    trace("NewWindowManager_QueryInterface %s\n", wine_dbgstr_guid(riid));
+    if(winetest_debug > 1) trace("NewWindowManager_QueryInterface %s\n", wine_dbgstr_guid(riid));
     *ppv = NULL;
     return E_NOINTERFACE;
 }
@@ -1248,7 +1248,7 @@ static HRESULT WINAPI Binding_QueryInterface(IBinding *iface, REFIID riid, void 
         return E_NOINTERFACE;
     }
 
-    trace("Binding::QI(%s)\n", wine_dbgstr_guid(riid));
+    if(winetest_debug > 1) trace("Binding::QI(%s)\n", wine_dbgstr_guid(riid));
     *ppv = NULL;
     return E_NOINTERFACE;
 }
@@ -2727,7 +2727,7 @@ static HRESULT WINAPI CustomDocHostUIHandler_QueryInterface(IDocHostUIHandler2 *
     if(IsEqualGUID(&IID_IDocHostShowUI, riid))
         return E_NOINTERFACE; /* TODO */
 
-    trace("CustomDocHostUIHandler::QI(%s)\n", wine_dbgstr_guid(riid));
+    if(winetest_debug > 1) trace("CustomDocHostUIHandler::QI(%s)\n", wine_dbgstr_guid(riid));
     return E_NOINTERFACE;
 }
 
@@ -5051,6 +5051,7 @@ static HRESULT wb_qi(REFIID riid, void **ppv)
 {
     static const IID IID_IWebBrowserPriv2IE7 = {0x1af32b6c, 0xa3ba,0x48b9,{0xb2,0x4e,0x8a,0xa9,0xc4,0x1f,0x6e,0xcd}};
     static const IID IID_IWebBrowserPriv2IE8XP = {0x486f6159,0x9f3f,0x4827,{0x82,0xd4,0x28,0x3c,0xef,0x39,0x77,0x33}};
+    static const IID IID_WB_undoc = {0xd9befc84,0xf21e,0x4166,{0x87,0x4b,0xa8,0xd3,0x01,0x0d,0xc7,0x64}};
 
     *ppv = NULL;
 
@@ -5089,7 +5090,8 @@ static HRESULT wb_qi(REFIID riid, void **ppv)
         return E_NOINTERFACE;
     }
 
-    ok(0, "unexpected call %s\n", wine_dbgstr_guid(riid));
+    if(!IsEqualGUID(riid, &IID_WB_undoc))
+        ok(0, "unexpected call %s\n", wine_dbgstr_guid(riid));
     return E_NOINTERFACE;
 }
 
@@ -5326,7 +5328,7 @@ static HRESULT QueryInterface(REFIID riid, void **ppv)
         return E_NOINTERFACE; /* IE10 */
     else if(IsEqualGUID(&IID_IDocHostUIHandlerPriv, riid))
         return E_NOINTERFACE; /* ? */
-    else
+    else if(winetest_debug > 1)
         trace("QI(%s)\n", wine_dbgstr_guid(riid));
 
     if(*ppv)
@@ -6275,6 +6277,7 @@ static void test_open_window(IHTMLDocument2 *doc, BOOL do_block)
     if(support_wbapp)
         SET_EXPECT(get_LocationURL);
     SET_EXPECT(TranslateUrl);
+    SET_EXPECT(GetOverrideKeyPath);
     SET_EXPECT(EvaluateNewWindow);
 
     hres = IHTMLWindow2_open(window, url, name, NULL, VARIANT_FALSE, &new_window);
@@ -6286,6 +6289,7 @@ static void test_open_window(IHTMLDocument2 *doc, BOOL do_block)
         todo_wine CHECK_CALLED_BROKEN(get_LocationURL);
     todo_wine
     CHECK_CALLED(TranslateUrl);
+    CLEAR_CALLED(GetOverrideKeyPath);
 
     if(!called_EvaluateNewWindow) {
         win_skip("INewWindowManager not supported\n");
@@ -6297,6 +6301,10 @@ static void test_open_window(IHTMLDocument2 *doc, BOOL do_block)
     CHECK_CALLED(EvaluateNewWindow);
 
     ok(hres == S_OK, "open failed: %08x\n", hres);
+    if (hres != S_OK) {
+        IHTMLWindow2_Release(window);
+        return;
+    }
 
     if(do_block) {
         ok(!new_window, "new_window != NULL\n");
@@ -6448,7 +6456,7 @@ static void test_MSHTML_QueryStatus(IHTMLDocument2 *doc, DWORD cmdf)
 static void test_OleCommandTarget(IHTMLDocument2 *doc)
 {
     IOleCommandTarget *cmdtrg;
-    OLECMD cmds[sizeof(expect_cmds)/sizeof(*expect_cmds)-1];
+    OLECMD cmds[ARRAY_SIZE(expect_cmds)-1];
     int i;
     HRESULT hres;
 
@@ -6457,19 +6465,19 @@ static void test_OleCommandTarget(IHTMLDocument2 *doc)
     if(FAILED(hres))
         return;
 
-    for(i=0; i < sizeof(cmds)/sizeof(*cmds); i++) {
+    for(i=0; i < ARRAY_SIZE(cmds); i++) {
         cmds[i].cmdID = i+1;
         cmds[i].cmdf = 0xf0f0;
     }
 
     SET_EXPECT(QueryStatus_OPEN);
     SET_EXPECT(QueryStatus_NEW);
-    hres = IOleCommandTarget_QueryStatus(cmdtrg, NULL, sizeof(cmds)/sizeof(cmds[0]), cmds, NULL);
+    hres = IOleCommandTarget_QueryStatus(cmdtrg, NULL, ARRAY_SIZE(cmds), cmds, NULL);
     ok(hres == S_OK, "QueryStatus failed: %08x\n", hres);
     CHECK_CALLED(QueryStatus_OPEN);
     CHECK_CALLED(QueryStatus_NEW);
 
-    for(i=0; i < sizeof(cmds)/sizeof(*cmds); i++) {
+    for(i=0; i < ARRAY_SIZE(cmds); i++) {
         ok(cmds[i].cmdID == i+1, "cmds[%d].cmdID canged to %x\n", i, cmds[i].cmdID);
         if(i+1 == OLECMDID_FIND)
             continue;
@@ -7324,7 +7332,7 @@ static void test_enum_objects(IOleContainer *container)
     ok(enum_unknown != NULL, "enum_unknown == NULL\n");
 
     fetched = 0xdeadbeef;
-    hres = IEnumUnknown_Next(enum_unknown, sizeof(buf)/sizeof(*buf), buf, &fetched);
+    hres = IEnumUnknown_Next(enum_unknown, ARRAY_SIZE(buf), buf, &fetched);
     ok(hres == S_FALSE, "Next returned %08x\n", hres);
     ok(!fetched, "fetched = %d\n", fetched);
     ok(buf[0] == (void*)0xdeadbeef, "buf[0] = %p\n", buf[0]);
@@ -7756,7 +7764,7 @@ static void test_cookies(IHTMLDocument2 *doc)
     hres = IHTMLDocument2_get_cookie(doc, &str);
     ok(hres == S_OK, "get_cookie failed: %08x\n", hres);
     if(str) {
-        size = sizeof(buf)/sizeof(WCHAR);
+        size = ARRAY_SIZE(buf);
         b = InternetGetCookieW(http_urlW, NULL, buf, &size);
         ok(b, "InternetGetCookieW failed: %08x\n", GetLastError());
         ok(!lstrcmpW(buf, str), "cookie = %s, expected %s\n", wine_dbgstr_w(str), wine_dbgstr_w(buf));
@@ -7771,7 +7779,7 @@ static void test_cookies(IHTMLDocument2 *doc)
     hres = IHTMLDocument2_get_cookie(doc, &str2);
     ok(hres == S_OK, "get_cookie failed: %08x\n", hres);
     ok(str2 != NULL, "cookie = NULL\n");
-    size = sizeof(buf)/sizeof(WCHAR);
+    size = ARRAY_SIZE(buf);
     b = InternetGetCookieW(http_urlW, NULL, buf, &size);
     ok(b, "InternetGetCookieW failed: %08x\n", GetLastError());
     ok(!lstrcmpW(buf, str2), "cookie = %s, expected %s\n", wine_dbgstr_w(str2), wine_dbgstr_w(buf));
@@ -7788,7 +7796,7 @@ static void test_cookies(IHTMLDocument2 *doc)
     hres = IHTMLDocument2_get_cookie(doc, &str2);
     ok(hres == S_OK, "get_cookie failed: %08x\n", hres);
     ok(str2 != NULL, "cookie = NULL\n");
-    size = sizeof(buf)/sizeof(WCHAR);
+    size = ARRAY_SIZE(buf);
     b = InternetGetCookieW(http_urlW, NULL, buf, &size);
     ok(b, "InternetGetCookieW failed: %08x\n", GetLastError());
     ok(!lstrcmpW(buf, str2), "cookie = %s, expected %s\n", wine_dbgstr_w(str2), wine_dbgstr_w(buf));

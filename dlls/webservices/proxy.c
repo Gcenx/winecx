@@ -24,6 +24,7 @@
 #include "webservices.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "wine/list.h"
 #include "webservices_private.h"
 
@@ -135,9 +136,13 @@ HRESULT WINAPI WsCreateServiceProxy( const WS_CHANNEL_TYPE type, const WS_CHANNE
                                NULL )) != S_OK) return hr;
 
     if ((hr = create_proxy( channel, proxy_props, proxy_props_count, handle )) != S_OK)
+    {
         WsFreeChannel( channel );
+        return hr;
+    }
 
-    return hr;
+    TRACE( "created %p\n", *handle );
+    return S_OK;
 }
 
 /**************************************************************************
@@ -194,8 +199,14 @@ HRESULT WINAPI WsCreateServiceProxyFromTemplate( WS_CHANNEL_TYPE channel_type,
     if ((hr = WsCreateChannel( channel_type, binding, channel_props, channel_props_count, NULL,
                                &channel, NULL )) != S_OK) return hr;
 
-    if ((hr = create_proxy( channel, properties, count, handle )) != S_OK) WsFreeChannel( channel );
-    return hr;
+    if ((hr = create_proxy( channel, properties, count, handle )) != S_OK)
+    {
+        WsFreeChannel( channel );
+        return hr;
+    }
+
+    TRACE( "created %p\n", *handle );
+    return S_OK;
 }
 
 /**************************************************************************
@@ -398,6 +409,13 @@ static HRESULT write_message( WS_MESSAGE *msg, WS_XML_WRITER *writer, const WS_E
     if ((hr = WsWriteEnvelopeStart( msg, writer, NULL, NULL, NULL )) != S_OK) return hr;
     if ((hr = write_input_params( writer, desc, params, count, args )) != S_OK) return hr;
     return WsWriteEnvelopeEnd( msg, NULL );
+}
+
+static HRESULT set_output( WS_XML_WRITER *writer )
+{
+    WS_XML_WRITER_TEXT_ENCODING text = { {WS_XML_WRITER_ENCODING_TYPE_TEXT}, WS_CHARSET_UTF8 };
+    WS_XML_WRITER_BUFFER_OUTPUT buf = { {WS_XML_WRITER_OUTPUT_TYPE_BUFFER} };
+    return WsSetOutput( writer, &text.encoding, &buf.output, NULL, 0, NULL );
 }
 
 static HRESULT send_message( WS_CHANNEL *channel, WS_MESSAGE *msg, WS_MESSAGE_DESCRIPTION *desc,

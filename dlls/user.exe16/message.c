@@ -228,6 +228,7 @@ WNDPROC16 WINPROC_GetProc16( WNDPROC proc, BOOL unicode )
 static LRESULT call_window_proc16( HWND16 hwnd, UINT16 msg, WPARAM16 wParam, LPARAM lParam,
                                    LRESULT *result, void *arg )
 {
+    DPI_AWARENESS_CONTEXT awareness;
     WNDPROC16 func = arg;
     int index = winproc_to_index( func );
     CONTEXT context;
@@ -248,13 +249,13 @@ static LRESULT call_window_proc16( HWND16 hwnd, UINT16 msg, WPARAM16 wParam, LPA
     /* Window procedures want ax = hInstance, ds = es = ss */
 
     memset(&context, 0, sizeof(context));
-    context.SegDs = context.SegEs = SELECTOROF(NtCurrentTeb()->WOW32Reserved);
+    context.SegDs = context.SegEs = SELECTOROF(NtCurrentTeb()->SystemReserved1[0]);
     context.SegFs = wine_get_fs();
     context.SegGs = wine_get_gs();
     if (!(context.Eax = GetWindowWord( HWND_32(hwnd), GWLP_HINSTANCE ))) context.Eax = context.SegDs;
     context.SegCs = SELECTOROF(func);
     context.Eip   = OFFSETOF(func);
-    context.Ebp   = OFFSETOF(NtCurrentTeb()->WOW32Reserved) + FIELD_OFFSET(STACK16FRAME, bp);
+    context.Ebp   = OFFSETOF(NtCurrentTeb()->SystemReserved1[0]) + FIELD_OFFSET(STACK16FRAME, bp);
 
     if (lParam)
     {
@@ -277,10 +278,11 @@ static LRESULT call_window_proc16( HWND16 hwnd, UINT16 msg, WPARAM16 wParam, LPA
         if (size)
         {
             memcpy( &args.u, MapSL(lParam), size );
-            lParam = PtrToUlong(NtCurrentTeb()->WOW32Reserved) - size;
+            lParam = PtrToUlong(NtCurrentTeb()->SystemReserved1[0]) - size;
         }
     }
 
+    awareness = SetThreadDpiAwarenessContext( GetWindowDpiAwarenessContext( HWND_32(hwnd) ));
     args.params[4] = hwnd;
     args.params[3] = msg;
     args.params[2] = wParam;
@@ -288,6 +290,7 @@ static LRESULT call_window_proc16( HWND16 hwnd, UINT16 msg, WPARAM16 wParam, LPA
     args.params[0] = LOWORD(lParam);
     WOWCallback16Ex( 0, WCB16_REGS, sizeof(args.params) + size, &args, (DWORD *)&context );
     *result = MAKELONG( LOWORD(context.Eax), LOWORD(context.Edx) );
+    SetThreadDpiAwarenessContext( awareness );
     return *result;
 }
 
@@ -2100,7 +2103,7 @@ static LRESULT combo_proc16( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, 
 
 static void edit_lock_buffer( HWND hwnd )
 {
-    STACK16FRAME* stack16 = MapSL(PtrToUlong(NtCurrentTeb()->WOW32Reserved));
+    STACK16FRAME* stack16 = MapSL(PtrToUlong(NtCurrentTeb()->SystemReserved1[0]));
     HLOCAL16 hloc16 = GetWindowWord( hwnd, GWW_HANDLE16 );
     HANDLE16 oldDS;
     HLOCAL hloc32;
@@ -2126,7 +2129,7 @@ static void edit_lock_buffer( HWND hwnd )
 
 static void edit_unlock_buffer( HWND hwnd )
 {
-    STACK16FRAME* stack16 = MapSL(PtrToUlong(NtCurrentTeb()->WOW32Reserved));
+    STACK16FRAME* stack16 = MapSL(PtrToUlong(NtCurrentTeb()->SystemReserved1[0]));
     HLOCAL16 hloc16 = GetWindowWord( hwnd, GWW_HANDLE16 );
     HANDLE16 oldDS;
     HLOCAL hloc32;
@@ -2163,7 +2166,7 @@ static HLOCAL16 edit_get_handle( HWND hwnd )
     if (!(hloc = (HLOCAL)wow_handlers32.edit_proc( hwnd, EM_GETHANDLE, 0, 0, FALSE ))) return 0;
     alloc_size = LocalSize( hloc );
 
-    stack16 = MapSL(PtrToUlong(NtCurrentTeb()->WOW32Reserved));
+    stack16 = MapSL(PtrToUlong(NtCurrentTeb()->SystemReserved1[0]));
     oldDS = stack16->ds;
     stack16->ds = GetWindowLongPtrW( hwnd, GWLP_HINSTANCE );
 
@@ -2201,7 +2204,7 @@ done:
 
 static void edit_set_handle( HWND hwnd, HLOCAL16 hloc16 )
 {
-    STACK16FRAME* stack16 = MapSL(PtrToUlong(NtCurrentTeb()->WOW32Reserved));
+    STACK16FRAME* stack16 = MapSL(PtrToUlong(NtCurrentTeb()->SystemReserved1[0]));
     HINSTANCE16 hInstance = GetWindowLongPtrW( hwnd, GWLP_HINSTANCE );
     HANDLE16 oldDS = stack16->ds;
     HLOCAL hloc32;
@@ -2231,7 +2234,7 @@ static void edit_destroy_handle( HWND hwnd )
     HLOCAL16 hloc16 = GetWindowWord( hwnd, GWW_HANDLE16 );
     if (hloc16)
     {
-        STACK16FRAME* stack16 = MapSL(PtrToUlong(NtCurrentTeb()->WOW32Reserved));
+        STACK16FRAME* stack16 = MapSL(PtrToUlong(NtCurrentTeb()->SystemReserved1[0]));
         HANDLE16 oldDS = stack16->ds;
 
         stack16->ds = GetWindowLongPtrW( hwnd, GWLP_HINSTANCE );

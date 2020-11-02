@@ -33,146 +33,71 @@
 
 #include <stdio.h>
 
-/* Function prototypes copied from dlls/advapi32/crypt_md4.c */
-VOID WINAPI MD4Init( MD4_CTX *ctx );
-VOID WINAPI MD4Update( MD4_CTX *ctx, const unsigned char *buf, unsigned int len );
-VOID WINAPI MD4Final( MD4_CTX *ctx );
-/* Function prototypes copied from dlls/advapi32/crypt_md5.c */
-VOID WINAPI MD5Init( MD5_CTX *ctx );
-VOID WINAPI MD5Update( MD5_CTX *ctx, const unsigned char *buf, unsigned int len );
-VOID WINAPI MD5Final( MD5_CTX *ctx );
-/* Function prototypes copied from dlls/advapi32/crypt_sha.c */
-VOID WINAPI A_SHAInit(PSHA_CTX Context);
-VOID WINAPI A_SHAUpdate(PSHA_CTX Context, const unsigned char *Buffer, UINT BufferSize);
-VOID WINAPI A_SHAFinal(PSHA_CTX Context, PULONG Result);
 /* Function prototype copied from dlls/advapi32/crypt.c */
 BOOL WINAPI SystemFunction036(PVOID pbBuffer, ULONG dwLen);
         
 BOOL init_hash_impl(ALG_ID aiAlgid, HASH_CONTEXT *pHashContext) 
 {
+    BCRYPT_ALG_HANDLE provider;
+    NTSTATUS status;
+
     switch (aiAlgid) 
     {
         case CALG_MD2:
-            md2_init(&pHashContext->md2);
+            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_MD2_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
             break;
         
         case CALG_MD4:
-            MD4Init(&pHashContext->md4);
+            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_MD4_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
             break;
         
         case CALG_MD5:
-            MD5Init(&pHashContext->md5);
+            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_MD5_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
             break;
         
         case CALG_SHA:
-            A_SHAInit(&pHashContext->sha);
+            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_SHA1_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
             break;
 
         case CALG_SHA_256:
-            SHA256_Init(&pHashContext->sha256);
+            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_SHA256_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
             break;
 
         case CALG_SHA_384:
-            SHA384_Init(&pHashContext->sha384);
+            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_SHA384_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
             break;
 
         case CALG_SHA_512:
-            SHA512_Init(&pHashContext->sha512);
-            break;
-    }
-
-    return TRUE;
-}
-
-BOOL update_hash_impl(ALG_ID aiAlgid, HASH_CONTEXT *pHashContext, const BYTE *pbData,
-                      DWORD dwDataLen) 
-{
-    switch (aiAlgid)
-    {
-        case CALG_MD2:
-            md2_process(&pHashContext->md2, pbData, dwDataLen);
-            break;
-        
-        case CALG_MD4:
-            MD4Update(&pHashContext->md4, pbData, dwDataLen);
-            break;
-    
-        case CALG_MD5:
-            MD5Update(&pHashContext->md5, pbData, dwDataLen);
-            break;
-        
-        case CALG_SHA:
-            A_SHAUpdate(&pHashContext->sha, pbData, dwDataLen);
-            break;
-        
-        case CALG_SHA_256:
-            SHA256_Update(&pHashContext->sha256, pbData, dwDataLen);
-            break;
-
-        case CALG_SHA_384:
-            SHA384_Update(&pHashContext->sha384, pbData, dwDataLen);
-            break;
-
-        case CALG_SHA_512:
-            SHA512_Update(&pHashContext->sha512, pbData, dwDataLen);
+            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_SHA512_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
             break;
 
         default:
-            SetLastError(NTE_BAD_ALGID);
-            return FALSE;
+            return TRUE;
     }
 
+    if (status) return FALSE;
+
+    status = BCryptCreateHash(provider, &pHashContext->bcrypt_hash, NULL, 0, NULL, 0, 0);
+    BCryptCloseAlgorithmProvider(provider, 0);
+    return !status;
+}
+
+BOOL update_hash_impl(HASH_CONTEXT *pHashContext, const BYTE *pbData, DWORD dwDataLen)
+{
+    BCryptHashData(pHashContext->bcrypt_hash, (UCHAR*)pbData, dwDataLen, 0);
     return TRUE;
 }
 
-BOOL finalize_hash_impl(ALG_ID aiAlgid, HASH_CONTEXT *pHashContext, BYTE *pbHashValue) 
+BOOL finalize_hash_impl(HASH_CONTEXT *pHashContext, BYTE *pbHashValue)
 {
-    switch (aiAlgid)
-    {
-        case CALG_MD2:
-            md2_done(&pHashContext->md2, pbHashValue);
-            break;
-        
-        case CALG_MD4:
-            MD4Final(&pHashContext->md4);
-            memcpy(pbHashValue, pHashContext->md4.digest, 16);
-            break;
-        
-        case CALG_MD5:
-            MD5Final(&pHashContext->md5);
-            memcpy(pbHashValue, pHashContext->md5.digest, 16);
-            break;
-        
-        case CALG_SHA:
-            A_SHAFinal(&pHashContext->sha, (PULONG)pbHashValue);
-            break;
-        
-        case CALG_SHA_256:
-            SHA256_Final(pbHashValue, &pHashContext->sha256);
-            break;
-
-        case CALG_SHA_384:
-            SHA384_Final(pbHashValue, &pHashContext->sha384);
-            break;
-
-        case CALG_SHA_512:
-            SHA512_Final(pbHashValue, &pHashContext->sha512);
-            break;
-
-        default:
-            SetLastError(NTE_BAD_ALGID);
-            return FALSE;
-    }
-
+    BCryptFinishHash(pHashContext->bcrypt_hash, pbHashValue, RSAENH_MAX_HASH_SIZE, 0);
+    BCryptDestroyHash(pHashContext->bcrypt_hash);
     return TRUE;
 }
 
-BOOL duplicate_hash_impl(ALG_ID aiAlgid, const HASH_CONTEXT *pSrcHashContext,
-                         HASH_CONTEXT *pDestHashContext) 
+BOOL duplicate_hash_impl(const HASH_CONTEXT *pSrcHashContext, HASH_CONTEXT *pDestHashContext)
 {
-    *pDestHashContext = *pSrcHashContext;
-
-    return TRUE;
+    return !BCryptDuplicateHash(pSrcHashContext->bcrypt_hash, &pDestHashContext->bcrypt_hash, NULL, 0, 0);
 }
 
 BOOL new_key_impl(ALG_ID aiAlgid, KEY_CONTEXT *pKeyContext, DWORD dwKeyLen) 

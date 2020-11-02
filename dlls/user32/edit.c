@@ -20,21 +20,7 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  *
- * NOTES
- *
- * This code was audited for completeness against the documented features
- * of Comctl32.dll version 6.0 on Oct. 8, 2004, by Dimitrie O. Paun.
- * 
- * Unless otherwise noted, we believe this code to be complete, as per
- * the specification mentioned above.
- * If you discover missing features, or bugs, please note them below.
- *
  * TODO:
- *   - EDITBALLOONTIP structure
- *   - EM_GETCUEBANNER/Edit_GetCueBannerText
- *   - EM_HIDEBALLOONTIP/Edit_HideBalloonTip
- *   - EM_SETCUEBANNER/Edit_SetCueBannerText
- *   - EM_SHOWBALLOONTIP/Edit_ShowBalloonTip
  *   - EM_GETIMESTATUS, EM_SETIMESTATUS
  *   - EN_ALIGN_LTR_EC
  *   - EN_ALIGN_RTL_EC
@@ -176,7 +162,6 @@ typedef struct
 		     (LPARAM)(es->hwndSelf)); \
 	} while(0)
 
-static const WCHAR empty_stringW[] = {0};
 static LRESULT EDIT_EM_PosFromChar(EDITSTATE *es, INT index, BOOL after_wrap);
 
 /*********************************************************************
@@ -343,9 +328,10 @@ static INT EDIT_CallWordBreakProc(EDITSTATE *es, INT start, INT index, INT count
 	    {
 		EDITWORDBREAKPROCW wbpW = (EDITWORDBREAKPROCW)es->word_break_proc;
 
-		TRACE_(relay)("(UNICODE wordbrk=%p,str=%s,idx=%d,cnt=%d,act=%d)\n",
+		TRACE_(relay)("\1Call wordbreakW %p (str=%s,idx=%d,cnt=%d,act=%d)\n",
 			es->word_break_proc, debugstr_wn(es->text + start, count), index, count, action);
 		ret = wbpW(es->text + start, index, count, action);
+		TRACE_(relay)("\1Ret wordbreakW %p retval=%d\n", es->word_break_proc, ret );
 	    }
 	    else
 	    {
@@ -356,10 +342,11 @@ static INT EDIT_CallWordBreakProc(EDITSTATE *es, INT start, INT index, INT count
 		countA = WideCharToMultiByte(CP_ACP, 0, es->text + start, count, NULL, 0, NULL, NULL);
 		textA = HeapAlloc(GetProcessHeap(), 0, countA);
 		WideCharToMultiByte(CP_ACP, 0, es->text + start, count, textA, countA, NULL, NULL);
-		TRACE_(relay)("(ANSI wordbrk=%p,str=%s,idx=%d,cnt=%d,act=%d)\n",
+		TRACE_(relay)("\1Call wordbreakA %p(str=%s,idx=%d,cnt=%d,act=%d)\n",
 			es->word_break_proc, debugstr_an(textA, countA), index, countA, action);
 		ret = wbpA(textA, index, countA, action);
 		HeapFree(GetProcessHeap(), 0, textA);
+		TRACE_(relay)("\1Ret wordbreakA %p retval=%d\n", es->word_break_proc, ret );
 	    }
         }
 	else
@@ -411,7 +398,7 @@ static SCRIPT_STRING_ANALYSIS EDIT_UpdateUniscribeData_linedef(EDITSTATE *es, HD
 			old_font = SelectObject(udc, es->font);
 
 		tabdef.cTabStops = es->tabs_count;
-		tabdef.iScale = 0;
+		tabdef.iScale = GdiGetCharDimensions(udc, NULL, NULL);
 		tabdef.pTabStops = es->tabs;
 		tabdef.iTabOrigin = 0;
 
@@ -1263,8 +1250,6 @@ static inline void text_buffer_changed(EDITSTATE *es)
  */
 static void EDIT_LockBuffer(EDITSTATE *es)
 {
-        if (es->hlocapp) return;
-
 	if (!es->text) {
 
 	    if(!es->hloc32W) return;
@@ -1305,8 +1290,6 @@ static void EDIT_LockBuffer(EDITSTATE *es)
  */
 static void EDIT_UnlockBuffer(EDITSTATE *es, BOOL force)
 {
-        if (es->hlocapp) return;
-
 	/* Edit window might be already destroyed */
 	if(!IsWindow(es->hwndSelf))
 	{
@@ -1322,7 +1305,6 @@ static void EDIT_UnlockBuffer(EDITSTATE *es, BOOL force)
 		ERR("es->text == 0 ... please report\n");
 		return;
 	}
-
 	if (force || (es->lock_count == 1)) {
 	    if (es->hloc32W) {
 		UINT countA = 0;
@@ -2560,9 +2542,9 @@ static LRESULT EDIT_EM_GetSel(const EDITSTATE *es, PUINT start, PUINT end)
  *	FIXME: handle ES_NUMBER and ES_OEMCONVERT here
  *
  */
-static void EDIT_EM_ReplaceSel(EDITSTATE *es, BOOL can_undo, LPCWSTR lpsz_replace, BOOL send_update, BOOL honor_limit)
+static void EDIT_EM_ReplaceSel(EDITSTATE *es, BOOL can_undo, const WCHAR *lpsz_replace, UINT strl,
+                               BOOL send_update, BOOL honor_limit)
 {
-	UINT strl = strlenW(lpsz_replace);
 	UINT tl = get_text_length(es);
 	UINT utl;
 	UINT s;
@@ -2575,7 +2557,7 @@ static void EDIT_EM_ReplaceSel(EDITSTATE *es, BOOL can_undo, LPCWSTR lpsz_replac
 	UINT bufl;
 
 	TRACE("%s, can_undo %d, send_update %d\n",
-	    debugstr_w(lpsz_replace), can_undo, send_update);
+	    debugstr_wn(lpsz_replace, strl), can_undo, send_update);
 
 	s = es->selection_start;
 	e = es->selection_end;
@@ -3043,7 +3025,7 @@ static BOOL EDIT_EM_Undo(EDITSTATE *es)
 
 	EDIT_EM_SetSel(es, es->undo_position, es->undo_position + es->undo_insert_count, FALSE);
 	EDIT_EM_EmptyUndoBuffer(es);
-	EDIT_EM_ReplaceSel(es, TRUE, utext, TRUE, TRUE);
+	EDIT_EM_ReplaceSel(es, TRUE, utext, ulength, TRUE, TRUE);
 	EDIT_EM_SetSel(es, es->undo_position, es->undo_position + es->undo_insert_count, FALSE);
         /* send the notification after the selection start and end are set */
         EDIT_NOTIFY_PARENT(es, EN_CHANGE);
@@ -3077,7 +3059,8 @@ static inline BOOL EDIT_IsInsideDialog(EDITSTATE *es)
 static void EDIT_WM_Paste(EDITSTATE *es)
 {
 	HGLOBAL hsrc;
-	LPWSTR src;
+	LPWSTR src, ptr;
+	int len;
 
 	/* Protect read-only edit control from modification */
 	if(es->style & ES_READONLY)
@@ -3086,12 +3069,19 @@ static void EDIT_WM_Paste(EDITSTATE *es)
 	OpenClipboard(es->hwndSelf);
 	if ((hsrc = GetClipboardData(CF_UNICODETEXT))) {
 		src = GlobalLock(hsrc);
-		EDIT_EM_ReplaceSel(es, TRUE, src, TRUE, TRUE);
+                len = strlenW(src);
+		/* Protect single-line edit against pasting new line character */
+		if (!(es->style & ES_MULTILINE) && ((ptr = strchrW(src, '\n')))) {
+			len = ptr - src;
+			if (len && src[len - 1] == '\r')
+				--len;
+		}
+                EDIT_EM_ReplaceSel(es, TRUE, src, len, TRUE, TRUE);
 		GlobalUnlock(hsrc);
 	}
         else if (es->style & ES_PASSWORD) {
             /* clear selected text in password edit box even with empty clipboard */
-            EDIT_EM_ReplaceSel(es, TRUE, empty_stringW, TRUE, TRUE);
+            EDIT_EM_ReplaceSel(es, TRUE, NULL, 0, TRUE, TRUE);
         }
 	CloseClipboard();
 }
@@ -3137,7 +3127,7 @@ static inline void EDIT_WM_Clear(EDITSTATE *es)
 	if(es->style & ES_READONLY)
 	    return;
 
-	EDIT_EM_ReplaceSel(es, TRUE, empty_stringW, TRUE, TRUE);
+	EDIT_EM_ReplaceSel(es, TRUE, NULL, 0, TRUE, TRUE);
 }
 
 
@@ -3179,18 +3169,18 @@ static LRESULT EDIT_WM_Char(EDITSTATE *es, WCHAR c)
 				EDIT_MoveHome(es, FALSE, FALSE);
 				EDIT_MoveDown_ML(es, FALSE);
 			} else {
-				static const WCHAR cr_lfW[] = {'\r','\n',0};
-				EDIT_EM_ReplaceSel(es, TRUE, cr_lfW, TRUE, TRUE);
+				static const WCHAR cr_lfW[] = {'\r','\n'};
+				EDIT_EM_ReplaceSel(es, TRUE, cr_lfW, 2, TRUE, TRUE);
 			}
 		}
 		break;
 	case '\t':
 		if ((es->style & ES_MULTILINE) && !(es->style & ES_READONLY))
 		{
-			static const WCHAR tabW[] = {'\t',0};
+			static const WCHAR tabW[] = {'\t'};
                         if (EDIT_IsInsideDialog(es))
                             break;
-			EDIT_EM_ReplaceSel(es, TRUE, tabW, TRUE, TRUE);
+			EDIT_EM_ReplaceSel(es, TRUE, tabW, 1, TRUE, TRUE);
 		}
 		break;
 	case VK_BACK:
@@ -3227,12 +3217,8 @@ static LRESULT EDIT_WM_Char(EDITSTATE *es, WCHAR c)
 		if( (es->style & ES_NUMBER) && !( c >= '0' && c <= '9') )
 			break;
 			
-		if (!(es->style & ES_READONLY) && (c >= ' ') && (c != 127)) {
-			WCHAR str[2];
- 			str[0] = c;
- 			str[1] = '\0';
- 			EDIT_EM_ReplaceSel(es, TRUE, str, TRUE, TRUE);
- 		}
+		if (!(es->style & ES_READONLY) && (c >= ' ') && (c != 127))
+ 			EDIT_EM_ReplaceSel(es, TRUE, &c, 1, TRUE, TRUE);
 		break;
 	}
     return 1;
@@ -3890,14 +3876,14 @@ static void EDIT_WM_SetText(EDITSTATE *es, LPCWSTR text, BOOL unicode)
     if (text) 
     {
 	TRACE("%s\n", debugstr_w(text));
-	EDIT_EM_ReplaceSel(es, FALSE, text, FALSE, FALSE);
+	EDIT_EM_ReplaceSel(es, FALSE, text, strlenW(text), FALSE, FALSE);
 	if(!unicode)
 	    HeapFree(GetProcessHeap(), 0, textW);
     } 
     else 
     {
 	TRACE("<NULL>\n");
-	EDIT_EM_ReplaceSel(es, FALSE, empty_stringW, FALSE, FALSE);
+	EDIT_EM_ReplaceSel(es, FALSE, NULL, 0, FALSE, FALSE);
     }
     es->x_offset = 0;
     es->flags &= ~EF_MODIFIED;
@@ -4311,7 +4297,7 @@ static void EDIT_GetCompositionStr(HIMC hIMC, LPARAM CompFlag, EDITSTATE *es)
         return;
     }
 
-    lpCompStr = HeapAlloc(GetProcessHeap(),0,buflen + sizeof(WCHAR));
+    lpCompStr = HeapAlloc(GetProcessHeap(),0,buflen);
     if (!lpCompStr)
     {
         ERR("Unable to allocate IME CompositionString\n");
@@ -4320,7 +4306,6 @@ static void EDIT_GetCompositionStr(HIMC hIMC, LPARAM CompFlag, EDITSTATE *es)
 
     if (buflen)
         ImmGetCompositionStringW(hIMC, GCS_COMPSTR, lpCompStr, buflen);
-    lpCompStr[buflen/sizeof(WCHAR)] = 0;
 
     if (CompFlag & GCS_COMPATTR)
     {
@@ -4357,7 +4342,7 @@ static void EDIT_GetCompositionStr(HIMC hIMC, LPARAM CompFlag, EDITSTATE *es)
     else
         es->selection_end = es->selection_start;
 
-    EDIT_EM_ReplaceSel(es, FALSE, lpCompStr, TRUE, TRUE);
+    EDIT_EM_ReplaceSel(es, FALSE, lpCompStr, buflen / sizeof(WCHAR), TRUE, TRUE);
     es->composition_len = abs(es->composition_start - es->selection_end);
 
     es->selection_start = es->composition_start;
@@ -4378,7 +4363,7 @@ static void EDIT_GetResultStr(HIMC hIMC, EDITSTATE *es)
         return;
     }
 
-    lpResultStr = HeapAlloc(GetProcessHeap(),0, buflen+sizeof(WCHAR));
+    lpResultStr = HeapAlloc(GetProcessHeap(),0, buflen);
     if (!lpResultStr)
     {
         ERR("Unable to alloc buffer for IME string\n");
@@ -4386,7 +4371,6 @@ static void EDIT_GetResultStr(HIMC hIMC, EDITSTATE *es)
     }
 
     ImmGetCompositionStringW(hIMC, GCS_RESULTSTR, lpResultStr, buflen);
-    lpResultStr[buflen/sizeof(WCHAR)] = 0;
 
     /* check for change in composition start */
     if (es->selection_end < es->composition_start)
@@ -4394,7 +4378,7 @@ static void EDIT_GetResultStr(HIMC hIMC, EDITSTATE *es)
 
     es->selection_start = es->composition_start;
     es->selection_end = es->composition_start + es->composition_len;
-    EDIT_EM_ReplaceSel(es, TRUE, lpResultStr, TRUE, TRUE);
+    EDIT_EM_ReplaceSel(es, TRUE, lpResultStr, buflen / sizeof(WCHAR), TRUE, TRUE);
     es->composition_start = es->selection_end;
     es->composition_len = 0;
 
@@ -4408,7 +4392,7 @@ static void EDIT_ImeComposition(HWND hwnd, LPARAM CompFlag, EDITSTATE *es)
 
     if (es->composition_len == 0 && es->selection_start != es->selection_end)
     {
-        EDIT_EM_ReplaceSel(es, TRUE, empty_stringW, TRUE, TRUE);
+        EDIT_EM_ReplaceSel(es, TRUE, NULL, 0, TRUE, TRUE);
         es->composition_start = es->selection_end;
     }
 
@@ -4573,7 +4557,7 @@ static LRESULT EDIT_WM_Create(EDITSTATE *es, LPCWSTR name)
         EDIT_SetRectNP(es, &clientRect);
 
        if (name && *name) {
-	   EDIT_EM_ReplaceSel(es, FALSE, name, FALSE, FALSE);
+	   EDIT_EM_ReplaceSel(es, FALSE, name, strlenW(name), FALSE, FALSE);
 	   /* if we insert text to the editline, the text scrolls out
             * of the window, as the caret is placed after the insert
             * pos normally; thus we reset es->selection... to 0 and
@@ -4757,7 +4741,7 @@ LRESULT EditWndProc_common( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, B
                     MultiByteToWideChar(CP_ACP, 0, textA, -1, textW, countW);
 		}
 
-		EDIT_EM_ReplaceSel(es, (BOOL)wParam, textW, TRUE, TRUE);
+		EDIT_EM_ReplaceSel(es, (BOOL)wParam, textW, strlenW(textW), TRUE, TRUE);
 		result = 1;
 
 		if(!unicode)
@@ -4841,6 +4825,7 @@ LRESULT EditWndProc_common( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, B
 
 	case EM_SETWORDBREAKPROC:
 		EDIT_EM_SetWordBreakProc(es, (void *)lParam);
+		result = 1;
 		break;
 
 	case EM_GETWORDBREAKPROC:
@@ -5161,7 +5146,7 @@ LRESULT EditWndProc_common( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, B
 	case WM_IME_ENDCOMPOSITION:
                 if (es->composition_len > 0)
                 {
-                        EDIT_EM_ReplaceSel(es, TRUE, empty_stringW, TRUE, TRUE);
+                        EDIT_EM_ReplaceSel(es, TRUE, NULL, 0, TRUE, TRUE);
                         es->selection_end = es->selection_start;
                         es->composition_len= 0;
                 }
@@ -5202,7 +5187,8 @@ LRESULT EditWndProc_common( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, B
 		break;
 	}
 
-	if (IsWindow(hwnd) && es) EDIT_UnlockBuffer(es, FALSE);
+        if (IsWindow(hwnd) && es && msg != EM_GETHANDLE)
+            EDIT_UnlockBuffer(es, FALSE);
 
         TRACE("hwnd=%p msg=%x (%s) -- 0x%08lx\n", hwnd, msg, SPY_GetMsgName(msg, hwnd), result);
 

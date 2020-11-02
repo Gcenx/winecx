@@ -37,6 +37,327 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
+typedef struct {
+    IPropertyBag  IPropertyBag_iface;
+    IPropertyBag2 IPropertyBag2_iface;
+
+    LONG ref;
+
+    struct list props;
+} PropertyBag;
+
+typedef struct {
+    struct list entry;
+    WCHAR *name;
+    WCHAR *value;
+} param_prop_t;
+
+static void free_prop(param_prop_t *prop)
+{
+    list_remove(&prop->entry);
+
+    heap_free(prop->name);
+    heap_free(prop->value);
+    heap_free(prop);
+}
+
+static param_prop_t *find_prop(PropertyBag *prop_bag, const WCHAR *name)
+{
+    param_prop_t *iter;
+
+    LIST_FOR_EACH_ENTRY(iter, &prop_bag->props, param_prop_t, entry) {
+        if(!strcmpiW(iter->name, name))
+            return iter;
+    }
+
+    return NULL;
+}
+
+static HRESULT add_prop(PropertyBag *prop_bag, const WCHAR *name, const WCHAR *value)
+{
+    param_prop_t *prop;
+
+    if(!name || !value)
+        return S_OK;
+
+    TRACE("%p %s %s\n", prop_bag, debugstr_w(name), debugstr_w(value));
+
+    prop = heap_alloc(sizeof(*prop));
+    if(!prop)
+        return E_OUTOFMEMORY;
+
+    prop->name = heap_strdupW(name);
+    prop->value = heap_strdupW(value);
+    if(!prop->name || !prop->value) {
+        list_init(&prop->entry);
+        free_prop(prop);
+        return E_OUTOFMEMORY;
+    }
+
+    list_add_tail(&prop_bag->props, &prop->entry);
+    return S_OK;
+}
+
+static inline PropertyBag *impl_from_IPropertyBag(IPropertyBag *iface)
+{
+    return CONTAINING_RECORD(iface, PropertyBag, IPropertyBag_iface);
+}
+
+static HRESULT WINAPI PropertyBag_QueryInterface(IPropertyBag *iface, REFIID riid, void **ppv)
+{
+    PropertyBag *This = impl_from_IPropertyBag(iface);
+
+    if(IsEqualGUID(&IID_IUnknown, riid)) {
+        TRACE("(%p)->(IID_IUnknown %p)\n", This, ppv);
+        *ppv = &This->IPropertyBag_iface;
+    }else if(IsEqualGUID(&IID_IPropertyBag, riid)) {
+        TRACE("(%p)->(IID_IPropertyBag %p)\n", This, ppv);
+        *ppv = &This->IPropertyBag_iface;
+    }else if(IsEqualGUID(&IID_IPropertyBag2, riid)) {
+        TRACE("(%p)->(IID_IPropertyBag2 %p)\n", This, ppv);
+        *ppv = &This->IPropertyBag2_iface;
+    }else {
+        WARN("Unsopported interface %s\n", debugstr_guid(riid));
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI PropertyBag_AddRef(IPropertyBag *iface)
+{
+    PropertyBag *This = impl_from_IPropertyBag(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI PropertyBag_Release(IPropertyBag *iface)
+{
+    PropertyBag *This = impl_from_IPropertyBag(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    if(!ref) {
+        while(!list_empty(&This->props))
+            free_prop(LIST_ENTRY(This->props.next, param_prop_t, entry));
+        heap_free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI PropertyBag_Read(IPropertyBag *iface, LPCOLESTR pszPropName, VARIANT *pVar, IErrorLog *pErrorLog)
+{
+    PropertyBag *This = impl_from_IPropertyBag(iface);
+    param_prop_t *prop;
+    VARIANT v;
+
+    TRACE("(%p)->(%s %p %p)\n", This, debugstr_w(pszPropName), pVar, pErrorLog);
+
+    prop = find_prop(This, pszPropName);
+    if(!prop) {
+        TRACE("Not found\n");
+        return E_INVALIDARG;
+    }
+
+    V_BSTR(&v) = SysAllocString(prop->value);
+    if(!V_BSTR(&v))
+        return E_OUTOFMEMORY;
+
+    if(V_VT(pVar) != VT_BSTR) {
+        HRESULT hres;
+
+        V_VT(&v) = VT_BSTR;
+        hres = VariantChangeType(pVar, &v, 0, V_VT(pVar));
+        SysFreeString(V_BSTR(&v));
+        return hres;
+    }
+
+    V_BSTR(pVar) = V_BSTR(&v);
+    return S_OK;
+}
+
+static HRESULT WINAPI PropertyBag_Write(IPropertyBag *iface, LPCOLESTR pszPropName, VARIANT *pVar)
+{
+    PropertyBag *This = impl_from_IPropertyBag(iface);
+    FIXME("(%p)->(%s %s)\n", This, debugstr_w(pszPropName), debugstr_variant(pVar));
+    return E_NOTIMPL;
+}
+
+static const IPropertyBagVtbl PropertyBagVtbl = {
+    PropertyBag_QueryInterface,
+    PropertyBag_AddRef,
+    PropertyBag_Release,
+    PropertyBag_Read,
+    PropertyBag_Write
+};
+
+static inline PropertyBag *impl_from_IPropertyBag2(IPropertyBag2 *iface)
+{
+    return CONTAINING_RECORD(iface, PropertyBag, IPropertyBag2_iface);
+}
+
+static HRESULT WINAPI PropertyBag2_QueryInterface(IPropertyBag2 *iface, REFIID riid, void **ppv)
+{
+    PropertyBag *This = impl_from_IPropertyBag2(iface);
+    return IPropertyBag_QueryInterface(&This->IPropertyBag_iface, riid, ppv);
+}
+
+static ULONG WINAPI PropertyBag2_AddRef(IPropertyBag2 *iface)
+{
+    PropertyBag *This = impl_from_IPropertyBag2(iface);
+    return IPropertyBag_AddRef(&This->IPropertyBag_iface);
+}
+
+static ULONG WINAPI PropertyBag2_Release(IPropertyBag2 *iface)
+{
+    PropertyBag *This = impl_from_IPropertyBag2(iface);
+    return IPropertyBag_Release(&This->IPropertyBag_iface);
+}
+
+static HRESULT WINAPI PropertyBag2_Read(IPropertyBag2 *iface, ULONG cProperties, PROPBAG2 *pPropBag,
+        IErrorLog *pErrLog, VARIANT *pvarValue, HRESULT *phrError)
+{
+    PropertyBag *This = impl_from_IPropertyBag2(iface);
+    FIXME("(%p)->(%d %p %p %p %p)\n", This, cProperties, pPropBag, pErrLog, pvarValue, phrError);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI PropertyBag2_Write(IPropertyBag2 *iface, ULONG cProperties, PROPBAG2 *pPropBag, VARIANT *pvarValue)
+{
+    PropertyBag *This = impl_from_IPropertyBag2(iface);
+    FIXME("(%p)->(%d %p %s)\n", This, cProperties, pPropBag, debugstr_variant(pvarValue));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI PropertyBag2_CountProperties(IPropertyBag2 *iface, ULONG *pcProperties)
+{
+    PropertyBag *This = impl_from_IPropertyBag2(iface);
+    FIXME("(%p)->(%p)\n", This, pcProperties);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI PropertyBag2_GetPropertyInfo(IPropertyBag2 *iface, ULONG iProperty, ULONG cProperties,
+        PROPBAG2 *pPropBag, ULONG *pcProperties)
+{
+    PropertyBag *This = impl_from_IPropertyBag2(iface);
+    FIXME("(%p)->(%u %u %p %p)\n", This, iProperty, cProperties, pPropBag, pcProperties);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI PropertyBag2_LoadObject(IPropertyBag2 *iface, LPCOLESTR pstrName, DWORD dwHint,
+        IUnknown *pUnkObject, IErrorLog *pErrLog)
+{
+    PropertyBag *This = impl_from_IPropertyBag2(iface);
+    FIXME("(%p)->(%s %x %p %p)\n", This, debugstr_w(pstrName), dwHint, pUnkObject, pErrLog);
+    return E_NOTIMPL;
+}
+
+static const IPropertyBag2Vtbl PropertyBag2Vtbl = {
+    PropertyBag2_QueryInterface,
+    PropertyBag2_AddRef,
+    PropertyBag2_Release,
+    PropertyBag2_Read,
+    PropertyBag2_Write,
+    PropertyBag2_CountProperties,
+    PropertyBag2_GetPropertyInfo,
+    PropertyBag2_LoadObject
+};
+
+static HRESULT fill_props(nsIDOMElement *nselem, PropertyBag *prop_bag)
+{
+    const PRUnichar *name, *value;
+    nsAString name_str, value_str;
+    nsIDOMHTMLCollection *params;
+    nsIDOMElement *param_elem;
+    UINT32 length, i;
+    nsIDOMNode *nsnode;
+    nsresult nsres;
+    HRESULT hres = S_OK;
+
+    static const PRUnichar nameW[] = {'n','a','m','e',0};
+    static const PRUnichar paramW[] = {'p','a','r','a','m',0};
+    static const PRUnichar valueW[] = {'v','a','l','u','e',0};
+
+    nsAString_InitDepend(&name_str, paramW);
+    nsres = nsIDOMElement_GetElementsByTagName(nselem, &name_str, &params);
+    nsAString_Finish(&name_str);
+    if(NS_FAILED(nsres))
+        return E_FAIL;
+
+    nsres = nsIDOMHTMLCollection_GetLength(params, &length);
+    if(NS_FAILED(nsres))
+        length = 0;
+
+    for(i=0; i < length; i++) {
+        nsres = nsIDOMHTMLCollection_Item(params, i, &nsnode);
+        if(NS_FAILED(nsres)) {
+            hres = E_FAIL;
+            break;
+        }
+
+        nsres = nsIDOMNode_QueryInterface(nsnode, &IID_nsIDOMElement, (void**)&param_elem);
+        nsIDOMNode_Release(nsnode);
+        if(NS_FAILED(nsres)) {
+            hres = E_FAIL;
+            break;
+        }
+
+        nsres = get_elem_attr_value(param_elem, nameW, &name_str, &name);
+        if(NS_SUCCEEDED(nsres)) {
+            nsres = get_elem_attr_value(param_elem, valueW, &value_str, &value);
+            if(NS_SUCCEEDED(nsres)) {
+                hres = add_prop(prop_bag, name, value);
+                nsAString_Finish(&value_str);
+            }
+
+            nsAString_Finish(&name_str);
+        }
+
+        nsIDOMElement_Release(param_elem);
+        if(FAILED(hres))
+            break;
+        if(NS_FAILED(nsres)) {
+            hres = E_FAIL;
+            break;
+        }
+    }
+
+    nsIDOMHTMLCollection_Release(params);
+    return hres;
+}
+
+static HRESULT create_param_prop_bag(nsIDOMElement *nselem, IPropertyBag **ret)
+{
+    PropertyBag *prop_bag;
+    HRESULT hres;
+
+    prop_bag = heap_alloc(sizeof(*prop_bag));
+    if(!prop_bag)
+        return E_OUTOFMEMORY;
+
+    prop_bag->IPropertyBag_iface.lpVtbl  = &PropertyBagVtbl;
+    prop_bag->IPropertyBag2_iface.lpVtbl = &PropertyBag2Vtbl;
+    prop_bag->ref = 1;
+
+    list_init(&prop_bag->props);
+    hres = fill_props(nselem, prop_bag);
+    if(FAILED(hres) || list_empty(&prop_bag->props)) {
+        IPropertyBag_Release(&prop_bag->IPropertyBag_iface);
+        *ret = NULL;
+        return hres;
+    }
+
+    *ret = &prop_bag->IPropertyBag_iface;
+    return S_OK;
+}
+
 static BOOL check_load_safety(PluginHost *host)
 {
     DWORD policy_size, policy;
@@ -132,7 +453,7 @@ static void load_prop_bag(PluginHost *host, IPersistPropertyBag *persist_prop_ba
     IPropertyBag *prop_bag;
     HRESULT hres;
 
-    hres = create_param_prop_bag(host->element->element.nselem, &prop_bag);
+    hres = create_param_prop_bag(host->element->element.dom_element, &prop_bag);
     if(FAILED(hres))
         return;
 
@@ -821,6 +1142,317 @@ void bind_activex_event(HTMLDocumentNode *doc, HTMLPluginContainer *plugin_conta
         return;
 
     add_sink_handler(plugin_host->sink, id, disp);
+}
+
+typedef struct {
+    IOleInPlaceFrame IOleInPlaceFrame_iface;
+    LONG ref;
+} InPlaceFrame;
+
+static inline InPlaceFrame *impl_from_IOleInPlaceFrame(IOleInPlaceFrame *iface)
+{
+    return CONTAINING_RECORD(iface, InPlaceFrame, IOleInPlaceFrame_iface);
+}
+
+static HRESULT WINAPI InPlaceFrame_QueryInterface(IOleInPlaceFrame *iface,
+                                                  REFIID riid, void **ppv)
+{
+    InPlaceFrame *This = impl_from_IOleInPlaceFrame(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+
+    if(IsEqualGUID(&IID_IUnknown, riid)) {
+        *ppv = &This->IOleInPlaceFrame_iface;
+    }else if(IsEqualGUID(&IID_IOleWindow, riid)) {
+        *ppv = &This->IOleInPlaceFrame_iface;
+    }else if(IsEqualGUID(&IID_IOleInPlaceUIWindow, riid)) {
+        *ppv = &This->IOleInPlaceFrame_iface;
+    }else if(IsEqualGUID(&IID_IOleInPlaceFrame, riid)) {
+        *ppv = &This->IOleInPlaceFrame_iface;
+    }else {
+        WARN("Unsopported interface %s\n", debugstr_mshtml_guid(riid));
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI InPlaceFrame_AddRef(IOleInPlaceFrame *iface)
+{
+    InPlaceFrame *This = impl_from_IOleInPlaceFrame(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI InPlaceFrame_Release(IOleInPlaceFrame *iface)
+{
+    InPlaceFrame *This = impl_from_IOleInPlaceFrame(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    if(!ref)
+        heap_free(This);
+
+    return ref;
+}
+
+static HRESULT WINAPI InPlaceFrame_GetWindow(IOleInPlaceFrame *iface, HWND *phwnd)
+{
+    InPlaceFrame *This = impl_from_IOleInPlaceFrame(iface);
+    FIXME("(%p)->(%p)\n", This, phwnd);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceFrame_ContextSensitiveHelp(IOleInPlaceFrame *iface,
+                                                        BOOL fEnterMode)
+{
+    InPlaceFrame *This = impl_from_IOleInPlaceFrame(iface);
+    FIXME("(%p)->(%x)\n", This, fEnterMode);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceFrame_GetBorder(IOleInPlaceFrame *iface, LPRECT lprectBorder)
+{
+    InPlaceFrame *This = impl_from_IOleInPlaceFrame(iface);
+    FIXME("(%p)->(%p)\n", This, lprectBorder);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceFrame_RequestBorderSpace(IOleInPlaceFrame *iface,
+                                                      LPCBORDERWIDTHS pborderwidths)
+{
+    InPlaceFrame *This = impl_from_IOleInPlaceFrame(iface);
+    FIXME("(%p)->(%p)\n", This, pborderwidths);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceFrame_SetBorderSpace(IOleInPlaceFrame *iface,
+                                                  LPCBORDERWIDTHS pborderwidths)
+{
+    InPlaceFrame *This = impl_from_IOleInPlaceFrame(iface);
+    FIXME("(%p)->(%p)\n", This, pborderwidths);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceFrame_SetActiveObject(IOleInPlaceFrame *iface,
+        IOleInPlaceActiveObject *pActiveObject, LPCOLESTR pszObjName)
+{
+    InPlaceFrame *This = impl_from_IOleInPlaceFrame(iface);
+    FIXME("(%p)->(%p %s)\n", This, pActiveObject, debugstr_w(pszObjName));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceFrame_InsertMenus(IOleInPlaceFrame *iface, HMENU hmenuShared,
+        LPOLEMENUGROUPWIDTHS lpMenuWidths)
+{
+    InPlaceFrame *This = impl_from_IOleInPlaceFrame(iface);
+    FIXME("(%p)->(%p %p)\n", This, hmenuShared, lpMenuWidths);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceFrame_SetMenu(IOleInPlaceFrame *iface, HMENU hmenuShared,
+        HOLEMENU holemenu, HWND hwndActiveObject)
+{
+    InPlaceFrame *This = impl_from_IOleInPlaceFrame(iface);
+    FIXME("(%p)->(%p %p %p)\n", This, hmenuShared, holemenu, hwndActiveObject);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceFrame_RemoveMenus(IOleInPlaceFrame *iface, HMENU hmenuShared)
+{
+    InPlaceFrame *This = impl_from_IOleInPlaceFrame(iface);
+    FIXME("(%p)->(%p)\n", This, hmenuShared);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceFrame_SetStatusText(IOleInPlaceFrame *iface,
+                                                 LPCOLESTR pszStatusText)
+{
+    InPlaceFrame *This = impl_from_IOleInPlaceFrame(iface);
+    FIXME("(%p)->(%s)\n", This, debugstr_w(pszStatusText));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceFrame_EnableModeless(IOleInPlaceFrame *iface, BOOL fEnable)
+{
+    InPlaceFrame *This = impl_from_IOleInPlaceFrame(iface);
+    FIXME("(%p)->(%x)\n", This, fEnable);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceFrame_TranslateAccelerator(IOleInPlaceFrame *iface, LPMSG lpmsg,
+                                                        WORD wID)
+{
+    InPlaceFrame *This = impl_from_IOleInPlaceFrame(iface);
+    FIXME("(%p)->(%p %d)\n", This, lpmsg, wID);
+    return E_NOTIMPL;
+}
+
+static const IOleInPlaceFrameVtbl OleInPlaceFrameVtbl = {
+    InPlaceFrame_QueryInterface,
+    InPlaceFrame_AddRef,
+    InPlaceFrame_Release,
+    InPlaceFrame_GetWindow,
+    InPlaceFrame_ContextSensitiveHelp,
+    InPlaceFrame_GetBorder,
+    InPlaceFrame_RequestBorderSpace,
+    InPlaceFrame_SetBorderSpace,
+    InPlaceFrame_SetActiveObject,
+    InPlaceFrame_InsertMenus,
+    InPlaceFrame_SetMenu,
+    InPlaceFrame_RemoveMenus,
+    InPlaceFrame_SetStatusText,
+    InPlaceFrame_EnableModeless,
+    InPlaceFrame_TranslateAccelerator
+};
+
+static HRESULT create_ip_frame(IOleInPlaceFrame **ret)
+{
+    InPlaceFrame *frame;
+
+    frame = heap_alloc_zero(sizeof(*frame));
+    if(!frame)
+        return E_OUTOFMEMORY;
+
+    frame->IOleInPlaceFrame_iface.lpVtbl = &OleInPlaceFrameVtbl;
+    frame->ref = 1;
+
+    *ret = &frame->IOleInPlaceFrame_iface;
+    return S_OK;
+}
+
+typedef struct {
+    IOleInPlaceUIWindow IOleInPlaceUIWindow_iface;
+    LONG ref;
+} InPlaceUIWindow;
+
+static inline InPlaceUIWindow *impl_from_IOleInPlaceUIWindow(IOleInPlaceUIWindow *iface)
+{
+    return CONTAINING_RECORD(iface, InPlaceUIWindow, IOleInPlaceUIWindow_iface);
+}
+
+static HRESULT WINAPI InPlaceUIWindow_QueryInterface(IOleInPlaceUIWindow *iface, REFIID riid, void **ppv)
+{
+    InPlaceUIWindow *This = impl_from_IOleInPlaceUIWindow(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+
+    if(IsEqualGUID(&IID_IUnknown, riid)) {
+        *ppv = &This->IOleInPlaceUIWindow_iface;
+    }else if(IsEqualGUID(&IID_IOleWindow, riid)) {
+        *ppv = &This->IOleInPlaceUIWindow_iface;
+    }else if(IsEqualGUID(&IID_IOleInPlaceUIWindow, riid)) {
+        *ppv = &This->IOleInPlaceUIWindow_iface;
+    }else {
+        WARN("Unsopported interface %s\n", debugstr_mshtml_guid(riid));
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI InPlaceUIWindow_AddRef(IOleInPlaceUIWindow *iface)
+{
+    InPlaceUIWindow *This = impl_from_IOleInPlaceUIWindow(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI InPlaceUIWindow_Release(IOleInPlaceUIWindow *iface)
+{
+    InPlaceUIWindow *This = impl_from_IOleInPlaceUIWindow(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    if(!ref)
+        heap_free(This);
+
+    return ref;
+}
+
+static HRESULT WINAPI InPlaceUIWindow_GetWindow(IOleInPlaceUIWindow *iface, HWND *phwnd)
+{
+    InPlaceUIWindow *This = impl_from_IOleInPlaceUIWindow(iface);
+    FIXME("(%p)->(%p)\n", This, phwnd);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceUIWindow_ContextSensitiveHelp(IOleInPlaceUIWindow *iface,
+        BOOL fEnterMode)
+{
+    InPlaceUIWindow *This = impl_from_IOleInPlaceUIWindow(iface);
+    FIXME("(%p)->(%x)\n", This, fEnterMode);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceUIWindow_GetBorder(IOleInPlaceUIWindow *iface, LPRECT lprectBorder)
+{
+    InPlaceUIWindow *This = impl_from_IOleInPlaceUIWindow(iface);
+    FIXME("(%p)->(%p)\n", This, lprectBorder);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceUIWindow_RequestBorderSpace(IOleInPlaceUIWindow *iface,
+        LPCBORDERWIDTHS pborderwidths)
+{
+    InPlaceUIWindow *This = impl_from_IOleInPlaceUIWindow(iface);
+    FIXME("(%p)->(%p)\n", This, pborderwidths);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceUIWindow_SetBorderSpace(IOleInPlaceUIWindow *iface,
+        LPCBORDERWIDTHS pborderwidths)
+{
+    InPlaceUIWindow *This = impl_from_IOleInPlaceUIWindow(iface);
+    FIXME("(%p)->(%p)\n", This, pborderwidths);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InPlaceUIWindow_SetActiveObject(IOleInPlaceUIWindow *iface,
+        IOleInPlaceActiveObject *pActiveObject, LPCOLESTR pszObjName)
+{
+    InPlaceUIWindow *This = impl_from_IOleInPlaceUIWindow(iface);
+    FIXME("(%p)->(%p %s)\n", This, pActiveObject, debugstr_w(pszObjName));
+    return E_NOTIMPL;
+}
+
+static const IOleInPlaceUIWindowVtbl OleInPlaceUIWindowVtbl = {
+    InPlaceUIWindow_QueryInterface,
+    InPlaceUIWindow_AddRef,
+    InPlaceUIWindow_Release,
+    InPlaceUIWindow_GetWindow,
+    InPlaceUIWindow_ContextSensitiveHelp,
+    InPlaceUIWindow_GetBorder,
+    InPlaceUIWindow_RequestBorderSpace,
+    InPlaceUIWindow_SetBorderSpace,
+    InPlaceUIWindow_SetActiveObject,
+};
+
+static HRESULT create_ip_window(IOleInPlaceUIWindow **ret)
+{
+    InPlaceUIWindow *uiwindow;
+
+    uiwindow = heap_alloc_zero(sizeof(*uiwindow));
+    if(!uiwindow)
+        return E_OUTOFMEMORY;
+
+    uiwindow->IOleInPlaceUIWindow_iface.lpVtbl = &OleInPlaceUIWindowVtbl;
+    uiwindow->ref = 1;
+
+    *ret = &uiwindow->IOleInPlaceUIWindow_iface;
+    return S_OK;
 }
 
 static inline PluginHost *impl_from_IOleClientSite(IOleClientSite *iface)
@@ -1637,10 +2269,10 @@ static BOOL parse_classid(const PRUnichar *classid, CLSID *clsid)
 
     static const PRUnichar clsidW[] = {'c','l','s','i','d',':'};
 
-    if(strncmpiW(classid, clsidW, sizeof(clsidW)/sizeof(WCHAR)))
+    if(strncmpiW(classid, clsidW, ARRAY_SIZE(clsidW)))
         return FALSE;
 
-    ptr = classid + sizeof(clsidW)/sizeof(WCHAR);
+    ptr = classid + ARRAY_SIZE(clsidW);
     len = strlenW(ptr);
 
     if(len == 38) {
@@ -1660,7 +2292,7 @@ static BOOL parse_classid(const PRUnichar *classid, CLSID *clsid)
     return SUCCEEDED(hres);
 }
 
-static BOOL get_elem_clsid(nsIDOMHTMLElement *elem, CLSID *clsid)
+static BOOL get_elem_clsid(nsIDOMElement *elem, CLSID *clsid)
 {
     const PRUnichar *val;
     nsAString val_str;
@@ -1895,7 +2527,7 @@ static void install_codebase(const WCHAR *url)
         WARN("FAILED: %08x\n", hres);
 }
 
-static void check_codebase(HTMLInnerWindow *window, nsIDOMHTMLElement *nselem)
+static void check_codebase(HTMLInnerWindow *window, nsIDOMElement *nselem)
 {
     BOOL is_on_list = FALSE;
     install_entry_t *iter;
@@ -1958,7 +2590,7 @@ static void check_codebase(HTMLInnerWindow *window, nsIDOMHTMLElement *nselem)
     IUri_Release(uri);
 }
 
-static IUnknown *create_activex_object(HTMLDocumentNode *doc, nsIDOMHTMLElement *nselem, CLSID *clsid)
+static IUnknown *create_activex_object(HTMLDocumentNode *doc, nsIDOMElement *nselem, CLSID *clsid)
 {
     IClassFactoryEx *cfex;
     IClassFactory *cf;
@@ -2069,7 +2701,7 @@ HRESULT create_plugin_host(HTMLDocumentNode *doc, HTMLPluginContainer *container
 
     assert(!container->plugin_host);
 
-    unk = create_activex_object(doc, container->element.nselem, &clsid);
+    unk = create_activex_object(doc, container->element.dom_element, &clsid);
     if(!unk)
         return E_FAIL;
 

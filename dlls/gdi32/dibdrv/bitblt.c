@@ -737,10 +737,12 @@ static DWORD create_tmp_dib( const dib_info *copy, int width, int height, dib_in
 }
 
 static DWORD execute_rop( dibdrv_physdev *pdev, const RECT *dst_rect, dib_info *src,
-                          const RECT *src_rect, const struct clipped_rects *clipped_rects, DWORD rop )
+                          const RECT *src_rect, const struct clipped_rects *clipped_rects,
+                          const POINT *brush_org, DWORD rop )
 {
     dib_info *dibs[3], *result = src, tmp;
     RECT rects[3];
+    POINT origin;
     int width  = dst_rect->right - dst_rect->left;
     int height = dst_rect->bottom - dst_rect->top;
     const BYTE *opcode = BITBLT_Opcodes[(rop >> 16) & 0xff];
@@ -784,10 +786,13 @@ static DWORD execute_rop( dibdrv_physdev *pdev, const RECT *dst_rect, dib_info *
             break;
         case OP_ARGS(PAT,DST):
             pdev->brush.rects( pdev, &pdev->brush, dibs[DST], clipped_rects->count, clipped_rects->rects,
-                               OP_ROP(*opcode) );
+                               brush_org, OP_ROP(*opcode) );
             break;
         case OP_ARGS(PAT,SRC):
-            pdev->brush.rects( pdev, &pdev->brush, dibs[SRC], 1, &rects[SRC], OP_ROP(*opcode) );
+            /* offset the brush origin to match the final dest rectangle */
+            origin.x = brush_org->x + rects[DST].left - rects[SRC].left;
+            origin.y = brush_org->y + rects[DST].top - rects[SRC].top;
+            pdev->brush.rects( pdev, &pdev->brush, dibs[SRC], 1, &rects[SRC], &origin, OP_ROP(*opcode) );
             break;
         }
     }
@@ -1026,7 +1031,8 @@ DWORD dibdrv_PutImage( PHYSDEV dev, HRGN clip, BITMAPINFO *info,
                 mask_rect( &pdev->dib, &dst->visrect, &src_dib, &src->visrect, &clipped_rects, rop2 );
         }
         else
-            ret = execute_rop( pdev, &dst->visrect, &src_dib, &src->visrect, &clipped_rects, rop );
+            ret = execute_rop( pdev, &dst->visrect, &src_dib, &src->visrect, &clipped_rects,
+                               &dc->brush_org, rop );
         free_clipped_rects( &clipped_rects );
     }
     if (tmp_rgn) DeleteObject( tmp_rgn );

@@ -1,7 +1,7 @@
 MODULE    = winemac.drv
 IMPORTS   = uuid user32 gdi32 advapi32
 DELAYIMPORTS = ole32 shell32 imm32
-EXTRALIBS = -framework AppKit -framework Carbon -framework Security -framework OpenGL -framework IOKit -framework CoreVideo
+EXTRALIBS = -framework AppKit -framework Carbon -framework Security -framework OpenGL -framework IOKit -framework CoreVideo $(METAL_LIBS)
 
 C_SRCS = \
 	clipboard.c \
@@ -17,6 +17,7 @@ C_SRCS = \
 	opengl.c \
 	surface.c \
 	systray.c \
+	vulkan.c \
 	window.c
 
 OBJC_SRCS = \

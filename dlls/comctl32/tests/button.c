@@ -32,6 +32,8 @@
 static BOOL (WINAPI *pSetWindowSubclass)(HWND, SUBCLASSPROC, UINT_PTR, DWORD_PTR);
 static BOOL (WINAPI *pRemoveWindowSubclass)(HWND, SUBCLASSPROC, UINT_PTR);
 static LRESULT (WINAPI *pDefSubclassProc)(HWND, UINT, WPARAM, LPARAM);
+static HIMAGELIST(WINAPI *pImageList_Create)(int, int, UINT, int, int);
+static int(WINAPI *pImageList_Add)(HIMAGELIST, HBITMAP, HBITMAP);
 
 /****************** button message test *************************/
 #define ID_BUTTON 0x000e
@@ -54,20 +56,14 @@ struct wndclass_redirect_data
 /* returned pointer is valid as long as activation context is alive */
 static WCHAR* get_versioned_classname(const WCHAR *name)
 {
-    BOOL (WINAPI *pFindActCtxSectionStringW)(DWORD,const GUID *,ULONG,LPCWSTR,PACTCTX_SECTION_KEYED_DATA);
     struct wndclass_redirect_data *wnddata;
     ACTCTX_SECTION_KEYED_DATA data;
     BOOL ret;
 
-    pFindActCtxSectionStringW = (void*)GetProcAddress(GetModuleHandleA("kernel32"), "FindActCtxSectionStringW");
-
     memset(&data, 0, sizeof(data));
     data.cbSize = sizeof(data);
-
-    ret = pFindActCtxSectionStringW(0, NULL,
-                                    ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION,
-                                    name, &data);
-    ok(ret, "got %d, error %u\n", ret, GetLastError());
+    ret = FindActCtxSectionStringW(0, NULL, ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION, name, &data);
+    ok(ret, "Failed to find class redirection section, error %u\n", GetLastError());
     wnddata = (struct wndclass_redirect_data*)data.lpData;
     return (WCHAR*)((BYTE*)wnddata + wnddata->name_offset);
 }
@@ -82,6 +78,11 @@ static void init_functions(void)
     MAKEFUNC_ORD(RemoveWindowSubclass, 412);
     MAKEFUNC_ORD(DefSubclassProc, 413);
 #undef MAKEFUNC_ORD
+
+#define X(f) p##f = (void *)GetProcAddress(hmod, #f);
+    X(ImageList_Create);
+    X(ImageList_Add);
+#undef X
 }
 
 /* try to make sure pending X events have been processed before continuing */
@@ -164,17 +165,6 @@ static LRESULT WINAPI test_parent_wndproc(HWND hwnd, UINT message, WPARAM wParam
         message == WM_DRAWITEM || message == WM_COMMAND ||
         message == WM_IME_SETCONTEXT)
     {
-        switch (message)
-        {
-            /* ignore */
-            case WM_NCHITTEST:
-                return HTCLIENT;
-            case WM_SETCURSOR:
-            case WM_MOUSEMOVE:
-            case WM_NCMOUSEMOVE:
-                return 0;
-        }
-
         msg.message = message;
         msg.flags = sent|parent|wparam|lparam;
         if (defwndproc_counter) msg.flags |= defwinproc;
@@ -367,8 +357,6 @@ static const struct message setstate_seq[] =
     { BM_SETSTATE, sent },
     { WM_APP, sent|wparam|lparam, 0, 0 },
     { WM_PAINT, sent },
-    { WM_NCPAINT, sent|optional }, /* FIXME: Wine sends it */
-    { WM_ERASEBKGND, sent|defwinproc|optional },
     { WM_PAINT, sent|optional },
     { 0 }
 };
@@ -389,8 +377,6 @@ static const struct message setstate_user_seq[] =
     { WM_COMMAND, sent|wparam|parent, MAKEWPARAM(ID_BUTTON, BN_HILITE) },
     { WM_APP, sent|wparam|lparam, 0, 0 },
     { WM_PAINT, sent },
-    { WM_NCPAINT, sent|optional }, /* FIXME: Wine sends it */
-    { WM_ERASEBKGND, sent|defwinproc|optional },
     { 0 }
 };
 
@@ -461,8 +447,7 @@ static const struct message setcheck_radio_redraw_seq[] =
     { WM_STYLECHANGED, sent|wparam|defwinproc, GWL_STYLE },
     { WM_APP, sent|wparam|lparam, 0, 0 },
     { WM_PAINT, sent },
-    { WM_NCPAINT, sent|optional }, /* FIXME: Wine sends it */
-    { WM_ERASEBKGND, sent|defwinproc|optional },
+    { WM_NCPAINT, sent|defwinproc|optional }, /* FIXME: Wine sends it */
     { 0 }
 };
 
@@ -476,7 +461,7 @@ static HWND create_button(DWORD style, HWND parent)
         style |= WS_CHILD|BS_NOTIFY;
         menuid = (HMENU)ID_BUTTON;
     }
-    hwnd = CreateWindowExA(0, "Button", "test", style, 0, 0, 50, 14, parent, menuid, 0, NULL);
+    hwnd = CreateWindowExA(0, WC_BUTTONA, "test", style, 0, 0, 50, 14, parent, menuid, 0, NULL);
     ok(hwnd != NULL, "failed to create a button, 0x%08x, %p\n", style, parent);
     pSetWindowSubclass(hwnd, button_subclass_proc, 0, 0);
     return hwnd;
@@ -528,12 +513,25 @@ static void test_button_messages(void)
         { BS_OWNERDRAW, DLGC_BUTTON,
           setfocus_ownerdraw_seq, killfocus_ownerdraw_seq, setstyle_ownerdraw_seq,
           setstate_ownerdraw_seq, clearstate_ownerdraw_seq, setcheck_ignored_seq },
+        { BS_SPLITBUTTON, DLGC_BUTTON | DLGC_UNDEFPUSHBUTTON | DLGC_WANTARROWS,
+          setfocus_seq, killfocus_seq, setstyle_seq,
+          setstate_seq, setstate_seq, setcheck_ignored_seq },
+        { BS_DEFSPLITBUTTON, DLGC_BUTTON | DLGC_DEFPUSHBUTTON | DLGC_WANTARROWS,
+          setfocus_seq, killfocus_seq, setstyle_seq,
+          setstate_seq, setstate_seq, setcheck_ignored_seq },
+        { BS_COMMANDLINK, DLGC_BUTTON | DLGC_UNDEFPUSHBUTTON,
+          setfocus_seq, killfocus_seq, setstyle_seq,
+          setstate_seq, setstate_seq, setcheck_ignored_seq },
+        { BS_DEFCOMMANDLINK, DLGC_BUTTON | DLGC_DEFPUSHBUTTON,
+          setfocus_seq, killfocus_seq, setstyle_seq,
+          setstate_seq, setstate_seq, setcheck_ignored_seq },
     };
+    LOGFONTA logfont = { 0 };
     const struct message *seq;
+    HFONT zfont, hfont2;
     unsigned int i;
     HWND hwnd, parent;
     DWORD dlg_code;
-    HFONT zfont;
     BOOL todo;
 
     /* selection with VK_SPACE should capture button window */
@@ -550,13 +548,22 @@ static void test_button_messages(void)
                              100, 100, 200, 200, 0, 0, 0, NULL);
     ok(parent != 0, "Failed to create parent window\n");
 
-    for (i = 0; i < sizeof(button)/sizeof(button[0]); i++)
+    logfont.lfHeight = -12;
+    logfont.lfWeight = FW_NORMAL;
+    strcpy(logfont.lfFaceName, "Tahoma");
+
+    hfont2 = CreateFontIndirectA(&logfont);
+    ok(hfont2 != NULL, "Failed to create Tahoma font\n");
+
+    for (i = 0; i < ARRAY_SIZE(button); i++)
     {
+        HFONT prevfont, hfont;
         MSG msg;
         DWORD style, state;
+        HDC hdc;
 
-        trace("%d: button test sequence\n", i);
         hwnd = create_button(button[i].style, parent);
+        ok(hwnd != NULL, "Failed to create a button.\n");
 
         style = GetWindowLongA(hwnd, GWL_STYLE);
         style &= ~(WS_CHILD | BS_NOTIFY);
@@ -567,7 +574,15 @@ static void test_button_messages(void)
             ok(style == button[i].style, "expected style %x got %x\n", button[i].style, style);
 
         dlg_code = SendMessageA(hwnd, WM_GETDLGCODE, 0, 0);
-        ok(dlg_code == button[i].dlg_code, "%u: wrong dlg_code %08x\n", i, dlg_code);
+        if (button[i].style == BS_SPLITBUTTON ||
+                button[i].style == BS_DEFSPLITBUTTON ||
+                button[i].style == BS_COMMANDLINK ||
+                button[i].style == BS_DEFCOMMANDLINK)
+        {
+            ok(dlg_code == button[i].dlg_code || broken(dlg_code == DLGC_BUTTON) /* WinXP */, "%u: wrong dlg_code %08x\n", i, dlg_code);
+        }
+        else
+            ok(dlg_code == button[i].dlg_code, "%u: wrong dlg_code %08x\n", i, dlg_code);
 
         ShowWindow(hwnd, SW_SHOW);
         UpdateWindow(hwnd);
@@ -593,7 +608,8 @@ static void test_button_messages(void)
         SendMessageA(hwnd, BM_SETSTYLE, button[i].style | BS_BOTTOM, TRUE);
         SendMessageA(hwnd, WM_APP, 0, 0); /* place a separator mark here */
         while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
-        ok_sequence(sequences, COMBINED_SEQ_INDEX, button[i].setstyle, "BM_SETSTYLE on a button", TRUE);
+        todo = button[i].style == BS_OWNERDRAW;
+        ok_sequence(sequences, COMBINED_SEQ_INDEX, button[i].setstyle, "BM_SETSTYLE on a button", todo);
 
         style = GetWindowLongA(hwnd, GWL_STYLE);
         style &= ~(WS_VISIBLE | WS_CHILD | BS_NOTIFY);
@@ -608,7 +624,7 @@ static void test_button_messages(void)
         SendMessageA(hwnd, BM_SETSTATE, TRUE, 0);
         SendMessageA(hwnd, WM_APP, 0, 0); /* place a separator mark here */
         while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
-        ok_sequence(sequences, COMBINED_SEQ_INDEX, button[i].setstate, "BM_SETSTATE/TRUE on a button", TRUE);
+        ok_sequence(sequences, COMBINED_SEQ_INDEX, button[i].setstate, "BM_SETSTATE/TRUE on a button", FALSE);
 
         state = SendMessageA(hwnd, BM_GETSTATE, 0, 0);
         ok(state == BST_PUSHED, "expected state 0x0004, got %04x\n", state);
@@ -622,7 +638,7 @@ static void test_button_messages(void)
         SendMessageA(hwnd, BM_SETSTATE, FALSE, 0);
         SendMessageA(hwnd, WM_APP, 0, 0); /* place a separator mark here */
         while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
-        ok_sequence(sequences, COMBINED_SEQ_INDEX, button[i].clearstate, "BM_SETSTATE/FALSE on a button", TRUE);
+        ok_sequence(sequences, COMBINED_SEQ_INDEX, button[i].clearstate, "BM_SETSTATE/FALSE on a button", FALSE);
 
         state = SendMessageA(hwnd, BM_GETSTATE, 0, 0);
         ok(state == 0, "expected state 0, got %04x\n", state);
@@ -640,17 +656,14 @@ static void test_button_messages(void)
             button[i].style == BS_AUTORADIOBUTTON)
         {
             seq = setcheck_radio_seq;
-            todo = TRUE;
         }
         else
-        {
             seq = setcheck_ignored_seq;
-            todo = FALSE;
-        }
+
         SendMessageA(hwnd, BM_SETCHECK, BST_UNCHECKED, 0);
         SendMessageA(hwnd, WM_APP, 0, 0); /* place a separator mark here */
         while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
-        ok_sequence(sequences, COMBINED_SEQ_INDEX, seq, "BM_SETCHECK on a button", todo);
+        ok_sequence(sequences, COMBINED_SEQ_INDEX, seq, "BM_SETCHECK on a button", FALSE);
 
         state = SendMessageA(hwnd, BM_GETCHECK, 0, 0);
         ok(state == BST_UNCHECKED, "expected BST_UNCHECKED, got %04x\n", state);
@@ -664,23 +677,23 @@ static void test_button_messages(void)
         SendMessageA(hwnd, BM_SETCHECK, BST_CHECKED, 0);
         SendMessageA(hwnd, WM_APP, 0, 0); /* place a separator mark here */
         while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
+        ok_sequence(sequences, COMBINED_SEQ_INDEX, button[i].setcheck, "BM_SETCHECK on a button", FALSE);
 
+        state = SendMessageA(hwnd, BM_GETCHECK, 0, 0);
         if (button[i].style == BS_PUSHBUTTON ||
             button[i].style == BS_DEFPUSHBUTTON ||
             button[i].style == BS_GROUPBOX ||
             button[i].style == BS_USERBUTTON ||
-            button[i].style == BS_OWNERDRAW)
+            button[i].style == BS_OWNERDRAW ||
+            button[i].style == BS_SPLITBUTTON ||
+            button[i].style == BS_DEFSPLITBUTTON ||
+            button[i].style == BS_COMMANDLINK ||
+            button[i].style == BS_DEFCOMMANDLINK)
         {
-            ok_sequence(sequences, COMBINED_SEQ_INDEX, button[i].setcheck, "BM_SETCHECK on a button", FALSE);
-            state = SendMessageA(hwnd, BM_GETCHECK, 0, 0);
             ok(state == BST_UNCHECKED, "expected check BST_UNCHECKED, got %04x\n", state);
         }
         else
-        {
-            ok_sequence(sequences, COMBINED_SEQ_INDEX, button[i].setcheck, "BM_SETCHECK on a button", TRUE);
-            state = SendMessageA(hwnd, BM_GETCHECK, 0, 0);
             ok(state == BST_CHECKED, "expected check BST_CHECKED, got %04x\n", state);
-        }
 
         style = GetWindowLongA(hwnd, GWL_STYLE);
         style &= ~(WS_CHILD | BS_NOTIFY | WS_VISIBLE);
@@ -690,9 +703,32 @@ static void test_button_messages(void)
         else
             ok(style == button[i].style, "expected style %04x got %04x\n", button[i].style, style);
 
+        /* Test that original font is not selected back after painting */
+        hfont = (HFONT)SendMessageA(hwnd, WM_GETFONT, 0, 0);
+        ok(hfont == NULL, "Unexpected control font.\n");
+
+        SendMessageA(hwnd, WM_SETFONT, (WPARAM)GetStockObject(SYSTEM_FONT), 0);
+
+        hdc = CreateCompatibleDC(0);
+
+        prevfont = SelectObject(hdc, hfont2);
+        SendMessageA(hwnd, WM_PRINTCLIENT, (WPARAM)hdc, 0);
+        ok(hfont2 != GetCurrentObject(hdc, OBJ_FONT) || broken(hfont2 == GetCurrentObject(hdc, OBJ_FONT)) /* WinXP */,
+            "button[%u]: unexpected font selected after WM_PRINTCLIENT\n", i);
+        SelectObject(hdc, prevfont);
+
+        prevfont = SelectObject(hdc, hfont2);
+        SendMessageA(hwnd, WM_PAINT, (WPARAM)hdc, 0);
+        ok(hfont2 != GetCurrentObject(hdc, OBJ_FONT) || broken(hfont2 == GetCurrentObject(hdc, OBJ_FONT)) /* WinXP */,
+            "button[%u]: unexpected font selected after WM_PAINT\n", i);
+        SelectObject(hdc, prevfont);
+
+        DeleteDC(hdc);
+
         DestroyWindow(hwnd);
     }
 
+    DeleteObject(hfont2);
     DestroyWindow(parent);
 
     hwnd = create_button(BS_PUSHBUTTON, NULL);
@@ -732,21 +768,22 @@ static void test_button_class(void)
 
     ret = GetClassInfoExA(NULL, WC_BUTTONA, &exA);
     ok(ret, "got %d\n", ret);
-todo_wine
     ok(IS_WNDPROC_HANDLE(exA.lpfnWndProc), "got %p\n", exA.lpfnWndProc);
+    ok(exA.cbClsExtra == 0, "Unexpected class bytes %d.\n", exA.cbClsExtra);
+    ok(exA.cbWndExtra == sizeof(void *), "Unexpected window bytes %d.\n", exA.cbWndExtra);
 
     ret = GetClassInfoExW(NULL, WC_BUTTONW, &exW);
     ok(ret, "got %d\n", ret);
     ok(!IS_WNDPROC_HANDLE(exW.lpfnWndProc), "got %p\n", exW.lpfnWndProc);
+    ok(exW.cbClsExtra == 0, "Unexpected class bytes %d.\n", exW.cbClsExtra);
+    ok(exW.cbWndExtra == sizeof(void *), "Unexpected window bytes %d.\n", exW.cbWndExtra);
 
     /* check that versioned class is also accessible */
     nameW = get_versioned_classname(WC_BUTTONW);
     ok(lstrcmpW(nameW, WC_BUTTONW), "got %s\n", wine_dbgstr_w(nameW));
 
     ret = GetClassInfoExW(NULL, nameW, &ex2W);
-todo_wine
     ok(ret, "got %d\n", ret);
-if (ret) /* TODO: remove once Wine is fixed */
     ok(ex2W.lpfnWndProc == exW.lpfnWndProc, "got %p, %p\n", exW.lpfnWndProc, ex2W.lpfnWndProc);
 
     /* Check reported class name */
@@ -762,10 +799,8 @@ if (ret) /* TODO: remove once Wine is fixed */
 
     /* explicitly create with versioned class name */
     hwnd = CreateWindowExW(0, nameW, testW, BS_CHECKBOX, 0, 0, 50, 14, NULL, 0, 0, NULL);
-todo_wine
     ok(hwnd != NULL, "failed to create a window %s\n", wine_dbgstr_w(nameW));
-if (hwnd)
-{
+
     len = GetClassNameA(hwnd, buffA, sizeof(buffA));
     ok(len == strlen(buffA), "got %d\n", len);
     ok(!strcmp(buffA, "Button"), "got %s\n", buffA);
@@ -776,6 +811,394 @@ if (hwnd)
 
     DestroyWindow(hwnd);
 }
+
+static void test_note(void)
+{
+    HWND hwnd;
+    BOOL ret;
+    WCHAR test_w[] = {'t', 'e', 's', 't', 0};
+    WCHAR tes_w[] = {'t', 'e', 's', 0};
+    WCHAR deadbeef_w[] = {'d', 'e', 'a', 'd', 'b', 'e', 'e', 'f', 0};
+    WCHAR buffer_w[10];
+    DWORD size;
+    DWORD error;
+    INT type;
+
+    hwnd = create_button(BS_COMMANDLINK, NULL);
+    ok(hwnd != NULL, "Expect hwnd not null\n");
+    SetLastError(0xdeadbeef);
+    size = ARRAY_SIZE(buffer_w);
+    ret = SendMessageA(hwnd, BCM_GETNOTE, (WPARAM)&size, (LPARAM)buffer_w);
+    error = GetLastError();
+    if (!ret && error == 0xdeadbeef)
+    {
+        win_skip("BCM_GETNOTE message is unavailable. Skipping note tests\n"); /* xp or 2003 */
+        DestroyWindow(hwnd);
+        return;
+    }
+    DestroyWindow(hwnd);
+
+    for (type = BS_PUSHBUTTON; type <= BS_DEFCOMMANDLINK; type++)
+    {
+        if (type == BS_DEFCOMMANDLINK || type == BS_COMMANDLINK)
+        {
+            hwnd = create_button(type, NULL);
+            ok(hwnd != NULL, "Expect hwnd not null\n");
+
+            /* Get note when note hasn't been not set yet */
+            SetLastError(0xdeadbeef);
+            lstrcpyW(buffer_w, deadbeef_w);
+            size = ARRAY_SIZE(buffer_w);
+            ret = SendMessageA(hwnd, BCM_GETNOTE, (WPARAM)&size, (LPARAM)buffer_w);
+            error = GetLastError();
+            ok(!ret, "Expect BCM_GETNOTE return false\n");
+            ok(!lstrcmpW(buffer_w, deadbeef_w), "Expect note: %s, got: %s\n",
+               wine_dbgstr_w(deadbeef_w), wine_dbgstr_w(buffer_w));
+            ok(size == ARRAY_SIZE(buffer_w), "Got: %d\n", size);
+            ok(error == ERROR_INVALID_PARAMETER, "Expect last error: 0x%08x, got: 0x%08x\n",
+               ERROR_INVALID_PARAMETER, error);
+
+            /* Get note length when note is not set */
+            ret = SendMessageA(hwnd, BCM_GETNOTELENGTH, 0, 0);
+            ok(ret == 0, "Expect note length: %d, got: %d\n", 0, ret);
+
+            /* Successful set note, get note and get note length */
+            SetLastError(0xdeadbeef);
+            ret = SendMessageA(hwnd, BCM_SETNOTE, 0, (LPARAM)test_w);
+            ok(ret, "Expect BCM_SETNOTE return true\n");
+            error = GetLastError();
+            ok(error == NO_ERROR, "Expect last error: 0x%08x, got: 0x%08x\n", NO_ERROR, error);
+
+            SetLastError(0xdeadbeef);
+            lstrcpyW(buffer_w, deadbeef_w);
+            size = ARRAY_SIZE(buffer_w);
+            ret = SendMessageA(hwnd, BCM_GETNOTE, (WPARAM)&size, (LPARAM)buffer_w);
+            ok(ret, "Expect BCM_GETNOTE return true\n");
+            ok(!lstrcmpW(buffer_w, test_w), "Expect note: %s, got: %s\n", wine_dbgstr_w(test_w),
+               wine_dbgstr_w(buffer_w));
+            ok(size == ARRAY_SIZE(buffer_w), "Got: %d\n", size);
+            error = GetLastError();
+            ok(error == NO_ERROR, "Expect last error: 0x%08x, got: 0x%08x\n", NO_ERROR, error);
+
+            ret = SendMessageA(hwnd, BCM_GETNOTELENGTH, 0, 0);
+            ok(ret == ARRAY_SIZE(test_w) - 1, "Got: %d\n", ret);
+
+            /* Insufficient buffer, return partial string */
+            SetLastError(0xdeadbeef);
+            lstrcpyW(buffer_w, deadbeef_w);
+            size = ARRAY_SIZE(test_w) - 1;
+            ret = SendMessageA(hwnd, BCM_GETNOTE, (WPARAM)&size, (LPARAM)buffer_w);
+            ok(!ret, "Expect BCM_GETNOTE return false\n");
+            ok(!lstrcmpW(buffer_w, tes_w), "Expect note: %s, got: %s\n", wine_dbgstr_w(tes_w),
+               wine_dbgstr_w(buffer_w));
+            ok(size == ARRAY_SIZE(test_w), "Got: %d\n", size);
+            error = GetLastError();
+            ok(error == ERROR_INSUFFICIENT_BUFFER, "Expect last error: 0x%08x, got: 0x%08x\n",
+               ERROR_INSUFFICIENT_BUFFER, error);
+
+            /* Set note with NULL buffer */
+            SetLastError(0xdeadbeef);
+            ret = SendMessageA(hwnd, BCM_SETNOTE, 0, 0);
+            ok(ret, "Expect BCM_SETNOTE return false\n");
+            error = GetLastError();
+            ok(error == NO_ERROR, "Expect last error: 0x%08x, got: 0x%08x\n", NO_ERROR, error);
+
+            /* Check that set note with NULL buffer make note empty */
+            SetLastError(0xdeadbeef);
+            lstrcpyW(buffer_w, deadbeef_w);
+            size = ARRAY_SIZE(buffer_w);
+            ret = SendMessageA(hwnd, BCM_GETNOTE, (WPARAM)&size, (LPARAM)buffer_w);
+            ok(ret, "Expect BCM_GETNOTE return true\n");
+            ok(lstrlenW(buffer_w) == 0, "Expect note length 0\n");
+            ok(size == ARRAY_SIZE(buffer_w), "Got: %d\n", size);
+            error = GetLastError();
+            ok(error == NO_ERROR, "Expect last error: 0x%08x, got: 0x%08x\n", NO_ERROR, error);
+            ret = SendMessageA(hwnd, BCM_GETNOTELENGTH, 0, 0);
+            ok(ret == 0, "Expect note length: %d, got: %d\n", 0, ret);
+
+            /* Get note with NULL buffer */
+            SetLastError(0xdeadbeef);
+            size = ARRAY_SIZE(buffer_w);
+            ret = SendMessageA(hwnd, BCM_GETNOTE, (WPARAM)&size, 0);
+            ok(!ret, "Expect BCM_SETNOTE return false\n");
+            ok(size == ARRAY_SIZE(buffer_w), "Got: %d\n", size);
+            error = GetLastError();
+            ok(error == ERROR_INVALID_PARAMETER, "Expect last error: 0x%08x, got: 0x%08x\n",
+               ERROR_INVALID_PARAMETER, error);
+
+            /* Get note with NULL size */
+            SetLastError(0xdeadbeef);
+            lstrcpyW(buffer_w, deadbeef_w);
+            ret = SendMessageA(hwnd, BCM_GETNOTE, 0, (LPARAM)buffer_w);
+            ok(!ret, "Expect BCM_SETNOTE return false\n");
+            ok(!lstrcmpW(buffer_w, deadbeef_w), "Expect note: %s, got: %s\n",
+               wine_dbgstr_w(deadbeef_w), wine_dbgstr_w(buffer_w));
+            error = GetLastError();
+            ok(error == ERROR_INVALID_PARAMETER, "Expect last error: 0x%08x, got: 0x%08x\n",
+               ERROR_INVALID_PARAMETER, error);
+
+            /* Get note with zero size */
+            SetLastError(0xdeadbeef);
+            size = 0;
+            lstrcpyW(buffer_w, deadbeef_w);
+            ret = SendMessageA(hwnd, BCM_GETNOTE, (WPARAM)&size, (LPARAM)buffer_w);
+            ok(!ret, "Expect BCM_GETNOTE return false\n");
+            ok(!lstrcmpW(buffer_w, deadbeef_w), "Expect note: %s, got: %s\n",
+               wine_dbgstr_w(deadbeef_w), wine_dbgstr_w(buffer_w));
+            ok(size == 1, "Got: %d\n", size);
+            error = GetLastError();
+            ok(error == ERROR_INSUFFICIENT_BUFFER, "Expect last error: 0x%08x, got: 0x%08x\n",
+               ERROR_INSUFFICIENT_BUFFER, error);
+
+            DestroyWindow(hwnd);
+        }
+        else
+        {
+            hwnd = create_button(type, NULL);
+            ok(hwnd != NULL, "Expect hwnd not null\n");
+            SetLastError(0xdeadbeef);
+            size = ARRAY_SIZE(buffer_w);
+            ret = SendMessageA(hwnd, BCM_GETNOTE, (WPARAM)&size, (LPARAM)buffer_w);
+            ok(!ret, "Expect BCM_GETNOTE return false\n");
+            error = GetLastError();
+            ok(error == ERROR_NOT_SUPPORTED, "Expect last error: 0x%08x, got: 0x%08x\n",
+               ERROR_NOT_SUPPORTED, error);
+            DestroyWindow(hwnd);
+        }
+    }
+}
+
+static void test_bm_get_set_image(void)
+{
+    HWND hwnd;
+    HDC hdc;
+    HBITMAP hbmp1x1;
+    HBITMAP hbmp2x2;
+    HBITMAP hmask2x2;
+    ICONINFO icon_info2x2;
+    HICON hicon2x2;
+    HBITMAP hbmp;
+    HICON hicon;
+    ICONINFO icon_info;
+    BITMAP bm;
+    static const DWORD default_style = BS_PUSHBUTTON | WS_TABSTOP | WS_POPUP | WS_VISIBLE;
+
+    hdc = GetDC(0);
+    hbmp1x1 = CreateCompatibleBitmap(hdc, 1, 1);
+    hbmp2x2 = CreateCompatibleBitmap(hdc, 2, 2);
+    ZeroMemory(&bm, sizeof(bm));
+    ok(GetObjectW(hbmp1x1, sizeof(bm), &bm), "Expect GetObjectW() success\n");
+    ok(bm.bmWidth == 1 && bm.bmHeight == 1, "Expect bitmap size: %d,%d, got: %d,%d\n", 1, 1,
+       bm.bmWidth, bm.bmHeight);
+    ZeroMemory(&bm, sizeof(bm));
+    ok(GetObjectW(hbmp2x2, sizeof(bm), &bm), "Expect GetObjectW() success\n");
+    ok(bm.bmWidth == 2 && bm.bmHeight == 2, "Expect bitmap size: %d,%d, got: %d,%d\n", 2, 2,
+       bm.bmWidth, bm.bmHeight);
+
+    hmask2x2 = CreateCompatibleBitmap(hdc, 2, 2);
+    ZeroMemory(&icon_info2x2, sizeof(icon_info2x2));
+    icon_info2x2.fIcon = TRUE;
+    icon_info2x2.hbmMask = hmask2x2;
+    icon_info2x2.hbmColor = hbmp2x2;
+    hicon2x2 = CreateIconIndirect(&icon_info2x2);
+    ok(hicon2x2 !=NULL, "Expect CreateIconIndirect() success\n");
+
+    ZeroMemory(&icon_info, sizeof(icon_info));
+    ok(GetIconInfo(hicon2x2, &icon_info), "Expect GetIconInfo() success\n");
+    ZeroMemory(&bm, sizeof(bm));
+    ok(GetObjectW(icon_info.hbmColor, sizeof(bm), &bm), "Expect GetObjectW() success\n");
+    ok(bm.bmWidth == 2 && bm.bmHeight == 2, "Expect bitmap size: %d,%d, got: %d,%d\n", 2, 2,
+       bm.bmWidth, bm.bmHeight);
+    DeleteObject(icon_info.hbmColor);
+    DeleteObject(icon_info.hbmMask);
+
+    hwnd = CreateWindowA(WC_BUTTONA, "test", default_style | BS_BITMAP, 0, 0, 100, 100, 0, 0,
+                         0, 0);
+    ok(hwnd != NULL, "Expect hwnd to be not NULL\n");
+    /* Get image when image is not set */
+    hbmp = (HBITMAP)SendMessageA(hwnd, BM_GETIMAGE, IMAGE_BITMAP, 0);
+    ok(hbmp == 0, "Expect hbmp == 0\n");
+    /* Set image */
+    hbmp = (HBITMAP)SendMessageA(hwnd, BM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hbmp1x1);
+    ok(hbmp == 0, "Expect hbmp == 0\n");
+    hbmp = (HBITMAP)SendMessageA(hwnd, BM_GETIMAGE, IMAGE_BITMAP, 0);
+    ok(hbmp != 0, "Expect hbmp != 0\n");
+    /* Set null resets image */
+    hbmp = (HBITMAP)SendMessageA(hwnd, BM_SETIMAGE, IMAGE_BITMAP, 0);
+    ok(hbmp != 0, "Expect hbmp != 0\n");
+    hbmp = (HBITMAP)SendMessageA(hwnd, BM_GETIMAGE, IMAGE_BITMAP, 0);
+    ok(hbmp == 0, "Expect hbmp == 0\n");
+    DestroyWindow(hwnd);
+
+    /* Set bitmap with BS_BITMAP */
+    hwnd = CreateWindowA(WC_BUTTONA, "test", default_style | BS_BITMAP, 0, 0, 100, 100, 0, 0,
+                         0, 0);
+    ok(hwnd != NULL, "Expect hwnd to be not NULL\n");
+    hbmp = (HBITMAP)SendMessageA(hwnd, BM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hbmp1x1);
+    ok(hbmp == 0, "Expect hbmp == 0\n");
+    hbmp = (HBITMAP)SendMessageA(hwnd, BM_GETIMAGE, IMAGE_BITMAP, 0);
+    ok(hbmp != 0, "Expect hbmp != 0\n");
+    ZeroMemory(&bm, sizeof(bm));
+    ok(GetObjectW(hbmp, sizeof(bm), &bm), "Expect GetObjectW() success\n");
+    ok(bm.bmWidth == 1 && bm.bmHeight == 1, "Expect bitmap size: %d,%d, got: %d,%d\n", 1, 1,
+       bm.bmWidth, bm.bmHeight);
+    DestroyWindow(hwnd);
+
+    /* Set bitmap without BS_BITMAP */
+    hwnd = CreateWindowA(WC_BUTTONA, "test", default_style, 0, 0, 100, 100, 0, 0, 0, 0);
+    ok(hwnd != NULL, "Expect hwnd to be not NULL\n");
+    hbmp = (HBITMAP)SendMessageA(hwnd, BM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hbmp1x1);
+    ok(hbmp == 0, "Expect hbmp == 0\n");
+    hbmp = (HBITMAP)SendMessageA(hwnd, BM_GETIMAGE, IMAGE_BITMAP, 0);
+    if (hbmp == 0)
+    {
+        /* on xp or 2003*/
+        win_skip("Show both image and text is not supported. Skip following tests.\n");
+        DestroyWindow(hwnd);
+        goto done;
+    }
+    ok(hbmp != 0, "Expect hbmp != 0\n");
+    ZeroMemory(&bm, sizeof(bm));
+    ok(GetObjectW(hbmp, sizeof(bm), &bm), "Expect GetObjectW() success\n");
+    ok(bm.bmWidth == 1 && bm.bmHeight == 1, "Expect bitmap size: %d,%d, got: %d,%d\n", 1, 1,
+       bm.bmWidth, bm.bmHeight);
+    DestroyWindow(hwnd);
+
+    /* Set icon with BS_ICON */
+    hwnd = CreateWindowA(WC_BUTTONA, "test", default_style | BS_ICON, 0, 0, 100, 100, 0, 0, 0,
+                         0);
+    ok(hwnd != NULL, "Expect hwnd to be not NULL\n");
+    hicon = (HICON)SendMessageA(hwnd, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hicon2x2);
+    ok(hicon == 0, "Expect hicon == 0\n");
+    hicon = (HICON)SendMessageA(hwnd, BM_GETIMAGE, IMAGE_ICON, 0);
+    ok(hicon != 0, "Expect hicon != 0\n");
+    ZeroMemory(&icon_info, sizeof(icon_info));
+    ok(GetIconInfo(hicon, &icon_info), "Expect GetIconInfo() success\n");
+    ZeroMemory(&bm, sizeof(bm));
+    ok(GetObjectW(icon_info.hbmColor, sizeof(bm), &bm), "Expect GetObjectW() success\n");
+    ok(bm.bmWidth == 2 && bm.bmHeight == 2, "Expect bitmap size: %d,%d, got: %d,%d\n", 2, 2,
+       bm.bmWidth, bm.bmHeight);
+    DeleteObject(icon_info.hbmColor);
+    DeleteObject(icon_info.hbmMask);
+    DestroyWindow(hwnd);
+
+    /* Set icon without BS_ICON */
+    hwnd = CreateWindowA(WC_BUTTONA, "test", default_style, 0, 0, 100, 100, 0, 0, 0, 0);
+    ok(hwnd != NULL, "Expect hwnd to be not NULL\n");
+    hicon = (HICON)SendMessageA(hwnd, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hicon2x2);
+    ok(hicon == 0, "Expect hicon == 0\n");
+    hicon = (HICON)SendMessageA(hwnd, BM_GETIMAGE, IMAGE_ICON, 0);
+    ok(hicon != 0, "Expect hicon != 0\n");
+    ZeroMemory(&icon_info, sizeof(icon_info));
+    ok(GetIconInfo(hicon, &icon_info), "Expect GetIconInfo() success\n");
+    ZeroMemory(&bm, sizeof(bm));
+    ok(GetObjectW(icon_info.hbmColor, sizeof(bm), &bm), "Expect GetObjectW() success\n");
+    ok(bm.bmWidth == 2 && bm.bmHeight == 2, "Expect bitmap size: %d,%d, got: %d,%d\n", 2, 2,
+       bm.bmWidth, bm.bmHeight);
+    DeleteObject(icon_info.hbmColor);
+    DeleteObject(icon_info.hbmMask);
+    DestroyWindow(hwnd);
+
+    /* Set icon with BS_BITMAP */
+    hwnd = CreateWindowA(WC_BUTTONA, "test", default_style | BS_BITMAP, 0, 0, 100, 100, 0, 0,
+                         0, 0);
+    ok(hwnd != NULL, "Expect hwnd to be not NULL\n");
+    hicon = (HICON)SendMessageA(hwnd, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hicon2x2);
+    ok(hicon == 0, "Expect hicon == 0\n");
+    hicon = (HICON)SendMessageA(hwnd, BM_GETIMAGE, IMAGE_ICON, 0);
+    ok(hicon != 0, "Expect hicon != 0\n");
+    ZeroMemory(&icon_info, sizeof(icon_info));
+    ok(GetIconInfo(hicon, &icon_info), "Expect GetIconInfo() success\n");
+    ZeroMemory(&bm, sizeof(bm));
+    ok(GetObjectW(icon_info.hbmColor, sizeof(bm), &bm), "Expect GetObjectW() success\n");
+    ok(bm.bmWidth == 2 && bm.bmHeight == 2, "Expect bitmap size: %d,%d, got: %d,%d\n", 2, 2,
+       bm.bmWidth, bm.bmHeight);
+    DeleteObject(icon_info.hbmColor);
+    DeleteObject(icon_info.hbmMask);
+    DestroyWindow(hwnd);
+
+    /* Set bitmap with BS_ICON */
+    hwnd = CreateWindowA(WC_BUTTONA, "test", default_style | BS_ICON, 0, 0, 100, 100, 0, 0, 0,
+                         0);
+    ok(hwnd != NULL, "Expect hwnd to be not NULL\n");
+    hbmp = (HBITMAP)SendMessageA(hwnd, BM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hbmp1x1);
+    ok(hbmp == 0, "Expect hbmp == 0\n");
+    hbmp = (HBITMAP)SendMessageA(hwnd, BM_GETIMAGE, IMAGE_BITMAP, 0);
+    ok(hbmp != 0, "Expect hbmp != 0\n");
+    ZeroMemory(&bm, sizeof(bm));
+    ok(GetObjectW(hbmp, sizeof(bm), &bm), "Expect GetObjectW() success\n");
+    ok(bm.bmWidth == 1 && bm.bmHeight == 1, "Expect bitmap size: %d,%d, got: %d,%d\n", 1, 1,
+       bm.bmWidth, bm.bmHeight);
+    DestroyWindow(hwnd);
+
+    /* Set bitmap with BS_BITMAP and IMAGE_ICON*/
+    hwnd = CreateWindowA(WC_BUTTONA, "test", default_style | BS_BITMAP, 0, 0, 100, 100, 0, 0,
+                         0, 0);
+    ok(hwnd != NULL, "Expect hwnd to be not NULL\n");
+    hbmp = (HBITMAP)SendMessageA(hwnd, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hbmp1x1);
+    ok(hbmp == 0, "Expect hbmp == 0\n");
+    hbmp = (HBITMAP)SendMessageA(hwnd, BM_GETIMAGE, IMAGE_ICON, 0);
+    ok(hbmp != 0, "Expect hbmp != 0\n");
+    ZeroMemory(&bm, sizeof(bm));
+    ok(GetObjectW(hbmp, sizeof(bm), &bm), "Expect GetObjectW() success\n");
+    ok(bm.bmWidth == 1 && bm.bmHeight == 1, "Expect bitmap size: %d,%d, got: %d,%d\n", 1, 1,
+       bm.bmWidth, bm.bmHeight);
+    DestroyWindow(hwnd);
+
+    /* Set icon with BS_ICON and IMAGE_BITMAP */
+    hwnd = CreateWindowA(WC_BUTTONA, "test", default_style | BS_ICON, 0, 0, 100, 100, 0, 0, 0,
+                         0);
+    ok(hwnd != NULL, "Expect hwnd to be not NULL\n");
+    hicon = (HICON)SendMessageA(hwnd, BM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hicon2x2);
+    ok(hicon == 0, "Expect hicon == 0\n");
+    hicon = (HICON)SendMessageA(hwnd, BM_GETIMAGE, IMAGE_BITMAP, 0);
+    ok(hicon != 0, "Expect hicon != 0\n");
+    ZeroMemory(&icon_info, sizeof(icon_info));
+    ok(GetIconInfo(hicon, &icon_info), "Expect GetIconInfo() success\n");
+    ZeroMemory(&bm, sizeof(bm));
+    ok(GetObjectW(icon_info.hbmColor, sizeof(BITMAP), &bm), "Expect GetObjectW() success\n");
+    ok(bm.bmWidth == 2 && bm.bmHeight == 2, "Expect bitmap size: %d,%d, got: %d,%d\n", 2, 2,
+       bm.bmWidth, bm.bmHeight);
+    DeleteObject(icon_info.hbmColor);
+    DeleteObject(icon_info.hbmMask);
+    DestroyWindow(hwnd);
+
+    /* Set bitmap with BS_ICON and IMAGE_ICON */
+    hwnd = CreateWindowA(WC_BUTTONA, "test", default_style | BS_ICON, 0, 0, 100, 100, 0, 0, 0, 0);
+    ok(hwnd != NULL, "Expect hwnd to be not NULL\n");
+    hbmp = (HBITMAP)SendMessageA(hwnd, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hbmp1x1);
+    ok(hbmp == 0, "Expect hbmp == 0\n");
+    hbmp = (HBITMAP)SendMessageA(hwnd, BM_GETIMAGE, IMAGE_ICON, 0);
+    ok(hbmp != 0, "Expect hbmp != 0\n");
+    ZeroMemory(&bm, sizeof(bm));
+    ok(GetObjectW(hbmp, sizeof(bm), &bm), "Expect GetObjectW() success\n");
+    ok(bm.bmWidth == 1 && bm.bmHeight == 1, "Expect bitmap size: %d,%d, got: %d,%d\n", 1, 1,
+       bm.bmWidth, bm.bmHeight);
+    DestroyWindow(hwnd);
+
+    /* Set icon with BS_BITMAP and IMAGE_BITMAP */
+    hwnd = CreateWindowA(WC_BUTTONA, "test", default_style | BS_BITMAP, 0, 0, 100, 100, 0, 0, 0, 0);
+    ok(hwnd != NULL, "Expect hwnd to be not NULL\n");
+    hicon = (HICON)SendMessageA(hwnd, BM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hicon2x2);
+    ok(hicon == 0, "Expect hicon == 0\n");
+    hicon = (HICON)SendMessageA(hwnd, BM_GETIMAGE, IMAGE_BITMAP, 0);
+    ok(hicon != 0, "Expect hicon != 0\n");
+    ZeroMemory(&icon_info, sizeof(icon_info));
+    ok(GetIconInfo(hicon, &icon_info), "Expect GetIconInfo() success\n");
+    ZeroMemory(&bm, sizeof(bm));
+    ok(GetObjectW(icon_info.hbmColor, sizeof(BITMAP), &bm), "Expect GetObjectW() success\n");
+    ok(bm.bmWidth == 2 && bm.bmHeight == 2, "Expect bitmap size: %d,%d, got: %d,%d\n", 2, 2,
+       bm.bmWidth, bm.bmHeight);
+    DeleteObject(icon_info.hbmColor);
+    DeleteObject(icon_info.hbmMask);
+    DestroyWindow(hwnd);
+
+done:
+    DestroyIcon(hicon2x2);
+    DeleteObject(hmask2x2);
+    DeleteObject(hbmp2x2);
+    DeleteObject(hbmp1x1);
+    ReleaseDC(0, hdc);
 }
 
 static void register_parent_class(void)
@@ -795,6 +1218,190 @@ static void register_parent_class(void)
     RegisterClassA(&cls);
 }
 
+static void test_button_data(void)
+{
+    static const DWORD styles[] =
+    {
+        BS_PUSHBUTTON,
+        BS_DEFPUSHBUTTON,
+        BS_CHECKBOX,
+        BS_AUTOCHECKBOX,
+        BS_RADIOBUTTON,
+        BS_3STATE,
+        BS_AUTO3STATE,
+        BS_GROUPBOX,
+        BS_USERBUTTON,
+        BS_AUTORADIOBUTTON,
+        BS_OWNERDRAW,
+        BS_SPLITBUTTON,
+        BS_DEFSPLITBUTTON,
+        BS_COMMANDLINK,
+        BS_DEFCOMMANDLINK,
+    };
+
+    struct button_desc
+    {
+        HWND self;
+        HWND parent;
+        LONG style;
+    };
+    unsigned int i;
+    HWND parent;
+
+    parent = CreateWindowExA(0, "TestParentClass", "Test parent", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                             100, 100, 200, 200, 0, 0, 0, NULL);
+    ok(parent != 0, "Failed to create parent window\n");
+
+    for (i = 0; i < ARRAY_SIZE(styles); i++)
+    {
+        struct button_desc *desc;
+        HWND hwnd;
+
+        hwnd = create_button(styles[i], parent);
+        ok(hwnd != NULL, "Failed to create a button.\n");
+
+        desc = (void *)GetWindowLongPtrA(hwnd, 0);
+        ok(desc != NULL, "Expected window data.\n");
+
+        if (desc)
+        {
+            ok(desc->self == hwnd, "Unexpected 'self' field.\n");
+            ok(desc->parent == parent, "Unexpected 'parent' field.\n");
+            ok(desc->style == (WS_CHILD | BS_NOTIFY | styles[i]), "Unexpected 'style' field.\n");
+        }
+
+        DestroyWindow(hwnd);
+    }
+
+    DestroyWindow(parent);
+}
+
+static void test_get_set_imagelist(void)
+{
+    HWND hwnd;
+    HIMAGELIST himl;
+    BUTTON_IMAGELIST biml = {0};
+    HDC hdc;
+    HBITMAP hbmp;
+    INT width = 16;
+    INT height = 16;
+    INT index;
+    DWORD type;
+    BOOL ret;
+
+    hdc = GetDC(0);
+    hbmp = CreateCompatibleBitmap(hdc, width, height);
+    ok(hbmp != NULL, "Expect hbmp not null\n");
+
+    himl = pImageList_Create(width, height, ILC_COLOR, 1, 0);
+    ok(himl != NULL, "Expect himl not null\n");
+    index = pImageList_Add(himl, hbmp, NULL);
+    ok(index == 0, "Expect index == 0\n");
+    DeleteObject(hbmp);
+    ReleaseDC(0, hdc);
+
+    for (type = BS_PUSHBUTTON; type <= BS_DEFCOMMANDLINK; type++)
+    {
+        hwnd = create_button(type, NULL);
+        ok(hwnd != NULL, "Expect hwnd not null\n");
+
+        /* Get imagelist when imagelist is unset yet */
+        ret = SendMessageA(hwnd, BCM_GETIMAGELIST, 0, (LPARAM)&biml);
+        ok(ret, "Expect BCM_GETIMAGELIST return true\n");
+        ok(biml.himl == 0 && IsRectEmpty(&biml.margin) && biml.uAlign == 0,
+           "Expect BUTTON_IMAGELIST is empty\n");
+
+        /* Set imagelist with himl null */
+        biml.himl = 0;
+        biml.uAlign = BUTTON_IMAGELIST_ALIGN_CENTER;
+        ret = SendMessageA(hwnd, BCM_SETIMAGELIST, 0, (LPARAM)&biml);
+        ok(ret || broken(!ret), /* xp or 2003 */
+           "Expect BCM_SETIMAGELIST return true\n");
+
+        /* Set imagelist with uAlign invalid */
+        biml.himl = himl;
+        biml.uAlign = -1;
+        ret = SendMessageA(hwnd, BCM_SETIMAGELIST, 0, (LPARAM)&biml);
+        ok(ret, "Expect BCM_SETIMAGELIST return true\n");
+
+        /* Successful get and set imagelist */
+        biml.himl = himl;
+        biml.uAlign = BUTTON_IMAGELIST_ALIGN_CENTER;
+        ret = SendMessageA(hwnd, BCM_SETIMAGELIST, 0, (LPARAM)&biml);
+        ok(ret, "Expect BCM_SETIMAGELIST return true\n");
+        ret = SendMessageA(hwnd, BCM_GETIMAGELIST, 0, (LPARAM)&biml);
+        ok(ret, "Expect BCM_GETIMAGELIST return true\n");
+        ok(biml.himl == himl, "Expect himl to be same\n");
+        ok(biml.uAlign == BUTTON_IMAGELIST_ALIGN_CENTER, "Expect uAlign to be %x\n",
+           BUTTON_IMAGELIST_ALIGN_CENTER);
+
+        /* BCM_SETIMAGELIST null pointer handling */
+        ret = SendMessageA(hwnd, BCM_SETIMAGELIST, 0, 0);
+        ok(!ret, "Expect BCM_SETIMAGELIST return false\n");
+        ret = SendMessageA(hwnd, BCM_GETIMAGELIST, 0, (LPARAM)&biml);
+        ok(ret, "Expect BCM_GETIMAGELIST return true\n");
+        ok(biml.himl == himl, "Expect himl to be same\n");
+
+        /* BCM_GETIMAGELIST null pointer handling */
+        biml.himl = himl;
+        biml.uAlign = BUTTON_IMAGELIST_ALIGN_CENTER;
+        ret = SendMessageA(hwnd, BCM_SETIMAGELIST, 0, (LPARAM)&biml);
+        ok(ret, "Expect BCM_SETIMAGELIST return true\n");
+        ret = SendMessageA(hwnd, BCM_GETIMAGELIST, 0, 0);
+        ok(!ret, "Expect BCM_GETIMAGELIST return false\n");
+
+        DestroyWindow(hwnd);
+    }
+}
+
+static void test_get_set_textmargin(void)
+{
+    HWND hwnd;
+    RECT margin_in;
+    RECT margin_out;
+    BOOL ret;
+    DWORD type;
+
+    margin_in.top = 1;
+    margin_in.left = 2;
+    margin_in.right = 3;
+    margin_in.bottom = 4;
+    for (type = BS_PUSHBUTTON; type <= BS_DEFCOMMANDLINK; type++)
+    {
+        hwnd = create_button(type, NULL);
+        ok(hwnd != NULL, "Expect hwnd not null\n");
+
+        /* Get text margin when it is unset */
+        ret = SendMessageA(hwnd, BCM_GETTEXTMARGIN, 0, (LPARAM)&margin_out);
+        ok(ret, "Expect ret to be true\n");
+        ok(IsRectEmpty(&margin_out), "Expect margin empty\n");
+
+        /* Successful get and set text margin */
+        ret = SendMessageA(hwnd, BCM_SETTEXTMARGIN, 0, (LPARAM)&margin_in);
+        ok(ret, "Expect ret to be true\n");
+        SetRectEmpty(&margin_out);
+        ret = SendMessageA(hwnd, BCM_GETTEXTMARGIN, 0, (LPARAM)&margin_out);
+        ok(ret, "Expect ret to be true\n");
+        ok(EqualRect(&margin_in, &margin_out), "Expect margins to be equal\n");
+
+        /* BCM_SETTEXTMARGIN null pointer handling */
+        ret = SendMessageA(hwnd, BCM_SETTEXTMARGIN, 0, 0);
+        ok(!ret, "Expect ret to be false\n");
+        SetRectEmpty(&margin_out);
+        ret = SendMessageA(hwnd, BCM_GETTEXTMARGIN, 0, (LPARAM)&margin_out);
+        ok(ret, "Expect ret to be true\n");
+        ok(EqualRect(&margin_in, &margin_out), "Expect margins to be equal\n");
+
+        /* BCM_GETTEXTMARGIN null pointer handling */
+        ret = SendMessageA(hwnd, BCM_SETTEXTMARGIN, 0, (LPARAM)&margin_in);
+        ok(ret, "Expect ret to be true\n");
+        ret = SendMessageA(hwnd, BCM_GETTEXTMARGIN, 0, 0);
+        ok(!ret, "Expect ret to be true\n");
+
+        DestroyWindow(hwnd);
+    }
+}
+
 START_TEST(button)
 {
     ULONG_PTR ctx_cookie;
@@ -810,6 +1417,11 @@ START_TEST(button)
 
     test_button_class();
     test_button_messages();
+    test_note();
+    test_button_data();
+    test_bm_get_set_image();
+    test_get_set_imagelist();
+    test_get_set_textmargin();
 
     unload_v6_module(ctx_cookie, hCtx);
 }

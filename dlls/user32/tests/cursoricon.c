@@ -1031,6 +1031,12 @@ static const unsigned char gif4pixel[42] = {
 0x02,0x00,0x00,0x02,0x03,0x14,0x16,0x05,0x00,0x3b
 };
 
+/* An invalid cursor with an invalid dwDIBOffset */
+static const unsigned char invalid_dwDIBOffset[] = {
+  0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x00, 0x00
+};
+
 static const DWORD biSize_tests[] = {
     0,
     sizeof(BITMAPCOREHEADER) - 1,
@@ -1046,8 +1052,6 @@ static const DWORD biSize_tests[] = {
     0xdeadbeef,
     0xffffffff
 };
-
-#define ARRAY_SIZE(a) (sizeof(a)/sizeof((a)[0]))
 
 static void test_LoadImageBitmap(const char * test_desc, HBITMAP hbm)
 {
@@ -1070,6 +1074,8 @@ static void test_LoadImageBitmap(const char * test_desc, HBITMAP hbm)
     ok(ret == bm.bmHeight, "%s: %d lines were converted, not %d\n", test_desc, ret, bm.bmHeight);
 
     ok(color_match(pixel, 0x00ffffff), "%s: Pixel is 0x%08x\n", test_desc, pixel);
+
+    ReleaseDC(NULL, hdc);
 }
 
 static void test_LoadImageFile(const char * test_desc, const unsigned char * image_data,
@@ -1318,9 +1324,9 @@ static void test_LoadImage(void)
         test_LoadImageFile("BMP (broken biSize)", bmpimage, sizeof(bmpimage), "bmp", 0);
     }
     bitmap_header->biSize = sizeof(BITMAPINFOHEADER);
-}
 
-#undef ARRAY_SIZE
+    test_LoadImageFile("Cursor (invalid dwDIBOffset)", invalid_dwDIBOffset, sizeof(invalid_dwDIBOffset), "cur", 0);
+}
 
 static void test_CreateIconFromResource(void)
 {
@@ -2527,7 +2533,7 @@ static void test_PrivateExtractIcons(void)
 
     static const test_icon_entries_t icon_desc[] = {{0,0,TRUE}, {16,16,TRUE}, {32,32}, {64,64,TRUE}};
 
-    create_ico_file("extract.ico", icon_desc, sizeof(icon_desc)/sizeof(*icon_desc));
+    create_ico_file("extract.ico", icon_desc, ARRAY_SIZE(icon_desc));
 
     ret = PrivateExtractIconsA("extract.ico", 0, 32, 32, &icon, NULL, 1, 0);
     ok(ret == 1, "PrivateExtractIconsA returned %u\n", ret);

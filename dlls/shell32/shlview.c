@@ -385,8 +385,9 @@ static void ShellView_InitList(IShellViewImpl *This)
     SHELLDETAILS sd;
     WCHAR nameW[50];
     HRESULT hr;
-    int dpix;
-    HDC parent_dc;
+    HFONT list_font, old_font;
+    HDC list_dc;
+    TEXTMETRICW tm;
 
     TRACE("(%p)\n", This);
 
@@ -408,9 +409,12 @@ static void ShellView_InitList(IShellViewImpl *This)
         }
     }
 
-    parent_dc = GetDC(This->hWndParent);
-    dpix = GetDeviceCaps(parent_dc, LOGPIXELSX);
-    ReleaseDC(This->hWndParent, parent_dc);
+    list_font = (HFONT)SendMessageW(This->hWndList, WM_GETFONT, 0, 0);
+    list_dc = GetDC(This->hWndList);
+    old_font = SelectObject(list_dc, list_font);
+    GetTextMetricsW(list_dc, &tm);
+    SelectObject(list_dc, old_font);
+    ReleaseDC(This->hWndList, list_dc);
 
     for (This->columns = 0;; This->columns++)
     {
@@ -421,9 +425,9 @@ static void ShellView_InitList(IShellViewImpl *This)
         if (FAILED(hr)) break;
 
         lvColumn.fmt = sd.fmt;
-	lvColumn.cx = MulDiv(sd.cxChar*8, dpix, USER_DEFAULT_SCREEN_DPI); /* chars->pixel */
-	StrRetToStrNW(nameW, sizeof(nameW)/sizeof(WCHAR), &sd.str, NULL);
-	SendMessageW(This->hWndList, LVM_INSERTCOLUMNW, This->columns, (LPARAM)&lvColumn);
+        lvColumn.cx = MulDiv(sd.cxChar, tm.tmAveCharWidth * 3, 2); /* chars->pixel */
+        StrRetToStrNW(nameW, ARRAY_SIZE(nameW), &sd.str, NULL);
+        SendMessageW(This->hWndList, LVM_INSERTCOLUMNW, This->columns, (LPARAM)&lvColumn);
     }
 
     if (details) IShellDetails_Release(details);
@@ -1551,7 +1555,7 @@ static LRESULT ShellView_OnNotify(IShellViewImpl * This, UINT CtlID, LPNMHDR lpn
 		  }
 
 		  /* allocate memory for the pidl array */
-		  pItems = HeapAlloc(GetProcessHeap(), 0, sizeof(LPITEMIDLIST) * count);
+		  pItems = heap_alloc(sizeof(LPITEMIDLIST) * count);
 
 		  /* retrieve all selected items */
 		  i = 0;
@@ -1577,7 +1581,7 @@ static LRESULT ShellView_OnNotify(IShellViewImpl * This, UINT CtlID, LPNMHDR lpn
 		  ISFHelper_Release(psfhlp);
 
 		  /* free pidl array memory */
-		  HeapFree(GetProcessHeap(), 0, pItems);
+		  heap_free(pItems);
                 }
 		break;
 
@@ -1799,7 +1803,7 @@ static ULONG WINAPI IShellView_fnRelease(IShellView3 *iface)
 	  if(This->pAdvSink)
 	    IAdviseSink_Release(This->pAdvSink);
 
-	  HeapFree(GetProcessHeap(),0,This);
+	  heap_free(This);
 	}
 	return refCount;
 }
@@ -3724,7 +3728,7 @@ IShellView *IShellView_Constructor(IShellFolder *folder)
 {
     IShellViewImpl *sv;
 
-    sv = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IShellViewImpl));
+    sv = heap_alloc_zero(sizeof(*sv));
     if (!sv)
         return NULL;
 

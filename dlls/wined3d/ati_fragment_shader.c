@@ -21,7 +21,6 @@
 #include "config.h"
 #include "wine/port.h"
 
-#include <math.h>
 #include <stdio.h>
 
 #include "wined3d_private.h"
@@ -342,9 +341,8 @@ static GLuint find_tmpreg(const struct texture_stage_op op[MAX_TEXTURES])
             lowest_read = i;
         }
 
-        if(lowest_write == -1 && op[i].dst == tempreg) {
+        if (lowest_write == -1 && op[i].tmp_dst)
             lowest_write = i;
-        }
 
         if(op[i].carg1 == WINED3DTA_TEXTURE || op[i].carg2 == WINED3DTA_TEXTURE || op[i].carg0 == WINED3DTA_TEXTURE ||
            op[i].aarg1 == WINED3DTA_TEXTURE || op[i].aarg2 == WINED3DTA_TEXTURE || op[i].aarg0 == WINED3DTA_TEXTURE) {
@@ -506,16 +504,13 @@ static GLuint gen_ati_shader(const struct texture_stage_op op[MAX_TEXTURES],
 
         TRACE("glSampleMapATI(GL_REG_%d_ATI, GL_TEXTURE_%d_ARB, GL_SWIZZLE_STR_ATI)\n",
               stage, stage);
-        GL_EXTCALL(glSampleMapATI(GL_REG_0_ATI + stage,
-                   GL_TEXTURE0_ARB + stage,
-                   GL_SWIZZLE_STR_ATI));
-        if(op[stage + 1].projected == proj_none) {
+        GL_EXTCALL(glSampleMapATI(GL_REG_0_ATI + stage, GL_TEXTURE0_ARB + stage, GL_SWIZZLE_STR_ATI));
+        if (op[stage + 1].projected == WINED3D_PROJECTION_NONE)
             swizzle = GL_SWIZZLE_STR_ATI;
-        } else if(op[stage + 1].projected == proj_count4) {
+        else if (op[stage + 1].projected == WINED3D_PROJECTION_COUNT4)
             swizzle = GL_SWIZZLE_STQ_DQ_ATI;
-        } else {
+        else
             swizzle = GL_SWIZZLE_STR_DR_ATI;
-        }
         TRACE("glPassTexCoordATI(GL_REG_%d_ATI, GL_TEXTURE_%d_ARB, %s)\n",
               stage + 1, stage + 1, debug_swizzle(swizzle));
         GL_EXTCALL(glPassTexCoordATI(GL_REG_0_ATI + stage + 1,
@@ -580,13 +575,12 @@ static GLuint gen_ati_shader(const struct texture_stage_op op[MAX_TEXTURES],
         if (op[stage].cop == WINED3D_TOP_DISABLE)
             break;
 
-        if(op[stage].projected == proj_none) {
+        if (op[stage].projected == WINED3D_PROJECTION_NONE)
             swizzle = GL_SWIZZLE_STR_ATI;
-        } else if(op[stage].projected == proj_count3) {
+        else if (op[stage].projected == WINED3D_PROJECTION_COUNT3)
             swizzle = GL_SWIZZLE_STR_DR_ATI;
-        } else {
+        else
             swizzle = GL_SWIZZLE_STQ_DQ_ATI;
-        }
 
         if (op_reads_texture(&op[stage]))
         {
@@ -625,14 +619,18 @@ static GLuint gen_ati_shader(const struct texture_stage_op op[MAX_TEXTURES],
             break;
         }
 
-        if(op[stage].dst == tempreg) {
-            /* If we're writing to D3DTA_TEMP, but never reading from it we don't have to write there in the first place.
-             * skip the entire stage, this saves some GPU time
-             */
-            if(tmparg == GL_NONE) continue;
+        if (op[stage].tmp_dst)
+        {
+            /* If we're writing to D3DTA_TEMP, but never reading from it we
+             * don't have to write there in the first place. Skip the entire
+             * stage, this saves some GPU time. */
+            if (tmparg == GL_NONE)
+                continue;
 
             dstreg = tmparg;
-        } else {
+        }
+        else
+        {
             dstreg = GL_REG_0_ATI;
         }
 
@@ -1026,8 +1024,9 @@ static void set_tex_op_atifs(struct wined3d_context *context, const struct wined
     desc = (const struct atifs_ffp_desc *)find_ffp_frag_shader(&priv->fragment_shaders, &settings);
     if (!desc)
     {
-        struct atifs_ffp_desc *new_desc = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*new_desc));
-        if (!new_desc)
+        struct atifs_ffp_desc *new_desc;
+
+        if (!(new_desc = heap_alloc_zero(sizeof(*new_desc))))
         {
             ERR("Out of memory\n");
             return;
@@ -1321,7 +1320,7 @@ static void *atifs_alloc(const struct wined3d_shader_backend_ops *shader_backend
 {
     struct atifs_private_data *priv;
 
-    if (!(priv = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*priv))))
+    if (!(priv = heap_alloc_zero(sizeof(*priv))))
         return NULL;
 
     wine_rb_init(&priv->fragment_shaders, wined3d_ffp_frag_program_key_compare);
@@ -1336,7 +1335,7 @@ static void atifs_free_ffpshader(struct wine_rb_entry *entry, void *cb_ctx)
 
     GL_EXTCALL(glDeleteFragmentShaderATI(entry_ati->shader));
     checkGLcall("glDeleteFragmentShaderATI(entry->shader)");
-    HeapFree(GetProcessHeap(), 0, entry_ati);
+    heap_free(entry_ati);
 }
 
 /* Context activation is done by the caller. */
@@ -1346,34 +1345,22 @@ static void atifs_free(struct wined3d_device *device)
 
     wine_rb_destroy(&priv->fragment_shaders, atifs_free_ffpshader, &device->adapter->gl_info);
 
-    HeapFree(GetProcessHeap(), 0, priv);
+    heap_free(priv);
     device->fragment_priv = NULL;
 }
 
 static BOOL atifs_color_fixup_supported(struct color_fixup_desc fixup)
 {
-    if (TRACE_ON(d3d_shader) && TRACE_ON(d3d))
-    {
-        TRACE("Checking support for fixup:\n");
-        dump_color_fixup_desc(fixup);
-    }
-
     /* We only support sign fixup of the first two channels. */
-    if (is_identity_fixup(fixup) || is_same_fixup(fixup, color_fixup_rg)
-            || is_same_fixup(fixup, color_fixup_rgl) || is_same_fixup(fixup, color_fixup_rgba))
-    {
-        TRACE("[OK]\n");
-        return TRUE;
-    }
-
-    TRACE("[FAILED]\n");
-    return FALSE;
+    return is_identity_fixup(fixup) || is_same_fixup(fixup, color_fixup_rg)
+            || is_same_fixup(fixup, color_fixup_rgl) || is_same_fixup(fixup, color_fixup_rgba);
 }
 
 static BOOL atifs_alloc_context_data(struct wined3d_context *context)
 {
-    struct atifs_context_private_data *priv = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*priv));
-    if (!priv)
+    struct atifs_context_private_data *priv;
+
+    if (!(priv = heap_alloc_zero(sizeof(*priv))))
         return FALSE;
     context->fragment_pipe_data = priv;
     return TRUE;
@@ -1381,7 +1368,7 @@ static BOOL atifs_alloc_context_data(struct wined3d_context *context)
 
 static void atifs_free_context_data(struct wined3d_context *context)
 {
-    HeapFree(GetProcessHeap(), 0, context->fragment_pipe_data);
+    heap_free(context->fragment_pipe_data);
 }
 
 const struct fragment_pipeline atifs_fragment_pipeline = {

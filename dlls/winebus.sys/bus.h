@@ -16,9 +16,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-/* Busses */
+typedef int(*enum_func)(DEVICE_OBJECT *device, void *context);
+
+/* Buses */
 NTSTATUS WINAPI udev_driver_init(DRIVER_OBJECT *driver, UNICODE_STRING *registry_path) DECLSPEC_HIDDEN;
 NTSTATUS WINAPI iohid_driver_init(DRIVER_OBJECT *driver, UNICODE_STRING *registry_path) DECLSPEC_HIDDEN;
+NTSTATUS WINAPI sdl_driver_init(DRIVER_OBJECT *driver, UNICODE_STRING *registry_path) DECLSPEC_HIDDEN;
 
 /* Native device function table */
 typedef struct
@@ -43,3 +46,8 @@ DEVICE_OBJECT *bus_find_hid_device(const platform_vtbl *vtbl, void *platform_dev
 void bus_remove_hid_device(DEVICE_OBJECT *device) DECLSPEC_HIDDEN;
 NTSTATUS WINAPI hid_internal_dispatch(DEVICE_OBJECT *device, IRP *irp) DECLSPEC_HIDDEN;
 void process_hid_report(DEVICE_OBJECT *device, BYTE *report, DWORD length) DECLSPEC_HIDDEN;
+DEVICE_OBJECT* bus_enumerate_hid_devices(const platform_vtbl *vtbl, enum_func function, void* context) DECLSPEC_HIDDEN;
+
+/* General Bus Functions */
+DWORD check_bus_option(UNICODE_STRING *registry_path, const UNICODE_STRING *option, DWORD default_value) DECLSPEC_HIDDEN;
+BOOL is_xbox_gamepad(WORD vid, WORD pid) DECLSPEC_HIDDEN;

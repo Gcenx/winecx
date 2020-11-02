@@ -19,23 +19,28 @@
 #ifndef __MSTASK_PRIVATE_H__
 #define __MSTASK_PRIVATE_H__
 
-#include <stdarg.h>
-
-#define COBJMACROS
-
-#include "windef.h"
-#include "winbase.h"
-#include "winuser.h"
-#include "ole2.h"
-#include "mstask.h"
+#include "wine/heap.h"
+#include "wine/unicode.h"
 
 extern LONG dll_ref DECLSPEC_HIDDEN;
 
 typedef struct ClassFactoryImpl ClassFactoryImpl;
 extern ClassFactoryImpl MSTASK_ClassFactory DECLSPEC_HIDDEN;
 
-extern HRESULT TaskTriggerConstructor(LPVOID *ppObj) DECLSPEC_HIDDEN;
+extern HRESULT TaskTriggerConstructor(ITask *task, WORD idx, ITaskTrigger **trigger) DECLSPEC_HIDDEN;
 extern HRESULT TaskSchedulerConstructor(LPVOID *ppObj) DECLSPEC_HIDDEN;
-extern HRESULT TaskConstructor(LPCWSTR pwszTaskName, LPVOID *ppObj) DECLSPEC_HIDDEN;
+extern HRESULT TaskConstructor(ITaskService *service, const WCHAR *task_name, ITask **task) DECLSPEC_HIDDEN;
+extern HRESULT task_set_trigger(ITask *task, WORD idx, const TASK_TRIGGER *trigger) DECLSPEC_HIDDEN;
+extern HRESULT task_get_trigger(ITask *task, WORD idx, TASK_TRIGGER *trigger) DECLSPEC_HIDDEN;
+
+static inline WCHAR *heap_strdupW(const WCHAR *src)
+{
+    WCHAR *dst;
+    unsigned len;
+    if (!src) return NULL;
+    len = (strlenW(src) + 1) * sizeof(WCHAR);
+    if ((dst = heap_alloc(len))) memcpy(dst, src, len);
+    return dst;
+}
 
 #endif /* __MSTASK_PRIVATE_H__ */

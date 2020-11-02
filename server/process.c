@@ -597,6 +597,7 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
     list_init( &process->locks );
     list_init( &process->asyncs );
     list_init( &process->classes );
+    list_init( &process->views );
     list_init( &process->dlls );
     list_init( &process->rawinput_devices );
 
@@ -658,7 +659,7 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
  error:
     if (process) release_object( process );
     /* if we failed to start our first process, close everything down */
-    if (!running_processes) close_master_socket( 0 );
+    if (!running_processes && master_socket_timeout != TIMEOUT_INFINITE) close_master_socket( 0 );
     return NULL;
 }
 
@@ -794,9 +795,8 @@ static inline struct process_dll *find_process_dll( struct process *process, mod
 }
 
 /* add a dll to a process list */
-static struct process_dll *process_load_dll( struct process *process, struct mapping *mapping,
-                                             mod_handle_t base, const WCHAR *filename,
-                                             data_size_t name_len )
+static struct process_dll *process_load_dll( struct process *process, mod_handle_t base,
+                                             const WCHAR *filename, data_size_t name_len )
 {
     struct process_dll *dll;
 
@@ -809,7 +809,6 @@ static struct process_dll *process_load_dll( struct process *process, struct map
 
     if ((dll = mem_alloc( sizeof(*dll) )))
     {
-        dll->mapping = NULL;
         dll->base = base;
         dll->filename = NULL;
         dll->namelen  = name_len;
@@ -818,7 +817,6 @@ static struct process_dll *process_load_dll( struct process *process, struct map
             free( dll );
             return NULL;
         }
-        if (mapping) dll->mapping = grab_mapping_unless_removable( mapping );
         list_add_tail( &process->dlls, &dll->entry );
     }
     return dll;
@@ -831,7 +829,6 @@ static void process_unload_dll( struct process *process, mod_handle_t base )
 
     if (dll && (&dll->entry != list_head( &process->dlls )))  /* main exe can't be unloaded */
     {
-        if (dll->mapping) release_object( dll->mapping );
         free( dll->filename );
         list_remove( &dll->entry );
         free( dll );
@@ -928,12 +925,12 @@ static void process_killed( struct process *process )
     while ((ptr = list_head( &process->dlls )))
     {
         struct process_dll *dll = LIST_ENTRY( ptr, struct process_dll, entry );
-        if (dll->mapping) release_object( dll->mapping );
         free( dll->filename );
         list_remove( &dll->entry );
         free( dll );
     }
     destroy_process_classes( process );
+    free_mapped_views( process );
     free_process_user_handles( process );
     remove_process_locks( process );
     set_process_startup_state( process, STARTUP_ABORTED );
@@ -1385,8 +1382,8 @@ DECL_HANDLER(init_process_done)
     set_process_startup_state( process, STARTUP_DONE );
 
     if (req->gui) process->idle_event = create_event( NULL, NULL, 0, 1, 0, NULL );
-    stop_thread_if_suspended( current );
     if (process->debugger) set_process_debug_flag( process, 1 );
+    reply->suspend = (current->suspend || process->suspend);
 }
 
 /* open a handle to a process */
@@ -1466,9 +1463,12 @@ DECL_HANDLER(get_process_vm_counters)
                     reply->peak_working_set_size = (mem_size_t)value * 1024;
                 else if (sscanf( line, "VmRSS: %lu", &value ))
                     reply->working_set_size = (mem_size_t)value * 1024;
+                else if (sscanf( line, "RssAnon: %lu", &value ))
+                    reply->pagefile_usage += (mem_size_t)value * 1024;
                 else if (sscanf( line, "VmSwap: %lu", &value ))
-                    reply->peak_pagefile_usage = reply->pagefile_usage = (mem_size_t)value * 1024;
+                    reply->pagefile_usage += (mem_size_t)value * 1024;
             }
+            reply->peak_pagefile_usage = reply->pagefile_usage;
             fclose( f );
         }
         else set_error( STATUS_ACCESS_DENIED );
@@ -1549,15 +1549,9 @@ DECL_HANDLER(write_process_memory)
 DECL_HANDLER(load_dll)
 {
     struct process_dll *dll;
-    struct mapping *mapping = NULL;
 
-    if (req->mapping && !(mapping = get_mapping_obj( current->process, req->mapping, SECTION_QUERY )))
-        return;
-
-    if ((dll = process_load_dll( current->process, mapping, req->base,
-                                 get_req_data(), get_req_data_size() )))
+    if ((dll = process_load_dll( current->process, req->base, get_req_data(), get_req_data_size() )))
     {
-        dll->size       = req->size;
         dll->dbg_offset = req->dbg_offset;
         dll->dbg_size   = req->dbg_size;
         dll->name       = req->name;
@@ -1565,7 +1559,6 @@ DECL_HANDLER(load_dll)
         if (is_process_init_done( current->process ))
             generate_debug_event( current, LOAD_DLL_DEBUG_EVENT, dll );
     }
-    if (mapping) release_object( mapping );
 }
 
 /* notify the server that a dll is being unloaded */
@@ -1591,7 +1584,6 @@ DECL_HANDLER(get_dll_info)
 
         if (dll)
         {
-            reply->size = dll->size;
             reply->entry_point = 0; /* FIXME */
             reply->filename_len = dll->namelen;
             if (dll->filename)

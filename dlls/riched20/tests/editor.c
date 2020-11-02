@@ -20,6 +20,8 @@
 * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
 */
 
+#define COBJMACROS
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <assert.h>
@@ -30,6 +32,7 @@
 #include <winnls.h>
 #include <ole2.h>
 #include <richedit.h>
+#include <richole.h>
 #include <commdlg.h>
 #include <time.h>
 #include <wine/test.h>
@@ -68,6 +71,10 @@ static HWND new_windowW(LPCWSTR lpClassName, DWORD dwStyle, HWND parent) {
 
 static HWND new_richedit(HWND parent) {
   return new_window(RICHEDIT_CLASS20A, ES_MULTILINE, parent);
+}
+
+static HWND new_richedit_with_style(HWND parent, DWORD style) {
+  return new_window(RICHEDIT_CLASS20A, style, parent);
 }
 
 static HWND new_richeditW(HWND parent) {
@@ -333,14 +340,12 @@ static void test_EM_FINDTEXT(BOOL unicode)
        hwndRichEdit = new_richedit(NULL);
 
   /* Empty rich edit control */
-  run_tests_EM_FINDTEXT(hwndRichEdit, "1", find_tests,
-      sizeof(find_tests)/sizeof(struct find_s), unicode);
+  run_tests_EM_FINDTEXT(hwndRichEdit, "1", find_tests, ARRAY_SIZE(find_tests), unicode);
 
   SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)haystack);
 
   /* Haystack text */
-  run_tests_EM_FINDTEXT(hwndRichEdit, "2", find_tests2,
-      sizeof(find_tests2)/sizeof(struct find_s), unicode);
+  run_tests_EM_FINDTEXT(hwndRichEdit, "2", find_tests2, ARRAY_SIZE(find_tests2), unicode);
 
   /* Setting a format on an arbitrary range should have no effect in search
      results. This tests correct offset reporting across runs. */
@@ -352,8 +357,7 @@ static void test_EM_FINDTEXT(BOOL unicode)
   SendMessageA(hwndRichEdit, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf2);
 
   /* Haystack text, again */
-  run_tests_EM_FINDTEXT(hwndRichEdit, "2-bis", find_tests2,
-      sizeof(find_tests2)/sizeof(struct find_s), unicode);
+  run_tests_EM_FINDTEXT(hwndRichEdit, "2-bis", find_tests2, ARRAY_SIZE(find_tests2), unicode);
 
   /* Yet another range */
   cf2.dwMask = CFM_BOLD | cf2.dwMask;
@@ -362,8 +366,7 @@ static void test_EM_FINDTEXT(BOOL unicode)
   SendMessageA(hwndRichEdit, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf2);
 
   /* Haystack text, again */
-  run_tests_EM_FINDTEXT(hwndRichEdit, "2-bisbis", find_tests2,
-      sizeof(find_tests2)/sizeof(struct find_s), unicode);
+  run_tests_EM_FINDTEXT(hwndRichEdit, "2-bisbis", find_tests2, ARRAY_SIZE(find_tests2), unicode);
 
   DestroyWindow(hwndRichEdit);
 }
@@ -397,7 +400,7 @@ static void test_EM_GETLINE(void)
   SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)text);
 
   memset(origdest, 0xBB, nBuf);
-  for (i = 0; i < sizeof(gl)/sizeof(struct getline_s); i++)
+  for (i = 0; i < ARRAY_SIZE(gl); i++)
   {
     int nCopied;
     int expected_nCopied = min(gl[i].buffer_len, strlen(gl[i].text));
@@ -502,7 +505,7 @@ static void test_EM_LINELENGTH(void)
            {15, 4}, /* Line 3: |wine */
     };
     SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)text1);
-    for (i = 0; i < sizeof(offset_test1)/sizeof(offset_test1[0]); i++) {
+    for (i = 0; i < ARRAY_SIZE(offset_test1); i++) {
       result = SendMessageA(hwndRichEdit, EM_LINELENGTH, offset_test1[i][0], 0);
       ok(result == offset_test1[i][1], "Length of line at offset %d is %ld, expected %d\n",
          offset_test1[i][0], result, offset_test1[i][1]);
@@ -2042,7 +2045,7 @@ static void test_EM_AUTOURLDETECT(void)
   urlRet=SendMessageA(hwndRichEdit, EM_AUTOURLDETECT, (WPARAM)"h", (LPARAM)"h");
   ok(urlRet==E_INVALIDARG, "Bad wParam2: urlRet is: %d\n", urlRet);
   /* for each url, check the text to see if CFE_LINK effect is present */
-  for (i = 0; i < sizeof(urls)/sizeof(struct urls_s); i++) {
+  for (i = 0; i < ARRAY_SIZE(urls); i++) {
 
     SendMessageA(hwndRichEdit, EM_AUTOURLDETECT, FALSE, 0);
     SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)urls[i].text);
@@ -2056,10 +2059,10 @@ static void test_EM_AUTOURLDETECT(void)
   DestroyWindow(hwndRichEdit);
 
   /* Test detection of URLs within normal text - WM_SETTEXT case. */
-  for (i = 0; i < sizeof(urls)/sizeof(struct urls_s); i++) {
+  for (i = 0; i < ARRAY_SIZE(urls); i++) {
     hwndRichEdit = new_richedit(parent);
 
-    for (j = 0; j < sizeof(templates_delim) / sizeof(const char *); j++) {
+    for (j = 0; j < ARRAY_SIZE(templates_delim); j++) {
       char * at_pos;
       int at_offset;
       int end_offset;
@@ -2110,7 +2113,7 @@ static void test_EM_AUTOURLDETECT(void)
       }
     }
 
-    for (j = 0; j < sizeof(templates_non_delim) / sizeof(const char *); j++) {
+    for (j = 0; j < ARRAY_SIZE(templates_non_delim); j++) {
       char * at_pos;
       int at_offset;
       int end_offset;
@@ -2151,7 +2154,7 @@ static void test_EM_AUTOURLDETECT(void)
       }
     }
 
-    for (j = 0; j < sizeof(templates_xten_delim) / sizeof(const char *); j++) {
+    for (j = 0; j < ARRAY_SIZE(templates_xten_delim); j++) {
       char * at_pos;
       int at_offset;
       int end_offset;
@@ -2206,7 +2209,7 @@ static void test_EM_AUTOURLDETECT(void)
       }
     }
 
-    for (j = 0; j < sizeof(templates_neutral_delim) / sizeof(const char *); j++) {
+    for (j = 0; j < ARRAY_SIZE(templates_neutral_delim); j++) {
       char * at_pos, * end_pos;
       int at_offset;
       int end_offset;
@@ -2414,7 +2417,7 @@ static void test_EM_AUTOURLDETECT(void)
      */
 
     /* Set entire text in one go, like WM_SETTEXT */
-    for (j = 0; j < sizeof(templates_delim) / sizeof(const char *); j++) {
+    for (j = 0; j < ARRAY_SIZE(templates_delim); j++) {
       char * at_pos;
       int at_offset;
       int end_offset;
@@ -2469,7 +2472,7 @@ static void test_EM_AUTOURLDETECT(void)
     }
 
     /* Set selection with X to the URL */
-    for (j = 0; j < sizeof(templates_delim) / sizeof(const char *); j++) {
+    for (j = 0; j < ARRAY_SIZE(templates_delim); j++) {
       char * at_pos;
       int at_offset;
       int end_offset;
@@ -2523,7 +2526,7 @@ static void test_EM_AUTOURLDETECT(void)
     }
 
     /* Set selection with X to the first character of the URL, then the rest */
-    for (j = 0; j < sizeof(templates_delim) / sizeof(const char *); j++) {
+    for (j = 0; j < ARRAY_SIZE(templates_delim); j++) {
       char * at_pos;
       int at_offset;
       int end_offset;
@@ -2591,7 +2594,7 @@ static void test_EM_AUTOURLDETECT(void)
     hwndRichEdit = new_richedit(parent);
 
     /* Set selection with X to the URL */
-    for (j = 0; j < sizeof(templates_delim) / sizeof(const char *); j++) {
+    for (j = 0; j < ARRAY_SIZE(templates_delim); j++) {
       char * at_pos;
       int at_offset;
       int end_offset;
@@ -2642,7 +2645,7 @@ static void test_EM_AUTOURLDETECT(void)
     }
 
     /* Set selection with X to the first character of the URL, then the rest */
-    for (j = 0; j < sizeof(templates_delim) / sizeof(const char *); j++) {
+    for (j = 0; j < ARRAY_SIZE(templates_delim); j++) {
       char * at_pos;
       int at_offset;
       int end_offset;
@@ -3748,6 +3751,20 @@ static void test_WM_SETTEXT(void)
   TEST_SETTEXTW(urtftextW, urtftextW) /* interpreted as ascii text */
   DestroyWindow(hwndRichEdit);
 #undef TEST_SETTEXTW
+
+  /* Single-line richedit */
+  hwndRichEdit = new_richedit_with_style(NULL, 0);
+  result = SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"line1\r\nline2");
+  ok(result == 1, "WM_SETTEXT returned %ld, expected 12\n", result);
+  result = SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buf);
+  ok(result == 5, "WM_GETTEXT returned %ld, expected 5\n", result);
+  ok(!strcmp(buf, "line1"), "WM_GETTEXT returned incorrect string '%s'\n", buf);
+  result = SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"{\\rtf1 ABC\\rtlpar\\par DEF\\par HIJ\\pard\\par}");
+  ok(result == 1, "WM_SETTEXT returned %ld, expected 1\n", result);
+  result = SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buf);
+  ok(result == 3, "WM_GETTEXT returned %ld, expected 3\n", result);
+  ok(!strcmp(buf, "ABC"), "WM_GETTEXT returned incorrect string '%s'\n", buf);
+  DestroyWindow(hwndRichEdit);
 }
 
 /* Set *pcb to one to show that the remaining cb-1 bytes are not
@@ -4406,6 +4423,17 @@ static void test_EM_SETTEXTEX(void)
   }
 
   DestroyWindow(hwndRichEdit);
+
+  /* Single-line richedit */
+  hwndRichEdit = new_richedit_with_style(NULL, 0);
+  setText.flags = ST_DEFAULT;
+  setText.codepage = CP_ACP;
+  result = SendMessageA(hwndRichEdit, EM_SETTEXTEX, (WPARAM)&setText, (LPARAM)"line1\r\nline2");
+  ok(result == 1, "EM_SETTEXTEX incorrectly returned %d, expected 1\n", result);
+  result = SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)bufACP);
+  ok(result == 5, "WM_GETTEXT incorrectly returned %d, expected 5\n", result);
+  ok(!strcmp(bufACP, "line1"), "EM_SETTEXTEX: Test single-line text: Result: %s\n", bufACP);
+  DestroyWindow(hwndRichEdit);
 }
 
 static void test_EM_LIMITTEXT(void)
@@ -4901,7 +4929,7 @@ static void test_EM_EXSETSEL(void)
 {
     HWND hwndRichEdit = new_richedit(NULL);
     int i;
-    const int num_tests = sizeof(exsetsel_tests)/sizeof(struct exsetsel_s);
+    const int num_tests = ARRAY_SIZE(exsetsel_tests);
 
     /* sending some text to the window */
     SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"testing selection");
@@ -4956,7 +4984,7 @@ static void test_EM_SETSEL(void)
     char buffA[32] = {0};
     HWND hwndRichEdit = new_richedit(NULL);
     int i;
-    const int num_tests = sizeof(exsetsel_tests)/sizeof(struct exsetsel_s);
+    const int num_tests = ARRAY_SIZE(exsetsel_tests);
 
     /* sending some text to the window */
     SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"testing selection");
@@ -5351,6 +5379,15 @@ static void test_EM_REPLACESEL(int redraw)
         SendMessageA(hwndRichEdit, WM_SETREDRAW, TRUE, 0);
 
     DestroyWindow(hwndRichEdit);
+
+    /* Single-line richedit */
+    hwndRichEdit = new_richedit_with_style(NULL, 0);
+    r = SendMessageA(hwndRichEdit, EM_REPLACESEL, 0, (LPARAM)"line1\r\nline2");
+    ok(r == 12, "EM_REPLACESEL returned %d, expected 12\n", r);
+    r = SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
+    ok(r == 5, "WM_GETTEXT returned %d, expected 5\n", r);
+    ok(!strcmp(buffer, "line1"), "WM_GETTEXT returned incorrect string '%s'\n", buffer);
+    DestroyWindow(hwndRichEdit);
 }
 
 /* Native riched20 inspects the keyboard state (e.g. GetKeyState)
@@ -5498,6 +5535,39 @@ static void test_WM_PASTE(void)
         "test paste: strcmp = %i, actual = '%s'\n", result, buffer);
     release_key(VK_CONTROL);
 
+    /* Copy multiline text to clipboard for future use */
+    SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)text3);
+    SendMessageA(hwndRichEdit, EM_SETSEL, 0, -1);
+    SendMessageA(hwndRichEdit, WM_COPY, 0, 0);
+    SendMessageA(hwndRichEdit, EM_SETSEL, 0, 0);
+
+    /* Paste into read-only control */
+    result = SendMessageA(hwndRichEdit, EM_SETREADONLY, TRUE, 0);
+    SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
+    SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
+    result = strcmp(buffer, text3);
+    ok(result == 0,
+        "test paste: strcmp = %i, actual = '%s'\n", result, buffer);
+
+    /* Cut from read-only control */
+    SendMessageA(hwndRichEdit, EM_SETSEL, 0, -1);
+    SendMessageA(hwndRichEdit, WM_CUT, 0, 0);
+    SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
+    result = strcmp(buffer, text3);
+    ok(result == 0,
+        "test paste: strcmp = %i, actual = '%s'\n", result, buffer);
+
+    /* FIXME: Wine doesn't flush Ole clipboard when window is destroyed so do it manually */
+    OleFlushClipboard();
+    DestroyWindow(hwndRichEdit);
+
+    /* Paste multi-line text into single-line control */
+    hwndRichEdit = new_richedit_with_style(NULL, 0);
+    SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
+    SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
+    result = strcmp(buffer, "testing paste");
+    ok(result == 0,
+        "test paste: strcmp = %i, actual = '%s'\n", result, buffer);
     DestroyWindow(hwndRichEdit);
 }
 
@@ -5549,7 +5619,7 @@ static void test_EM_FORMATRANGE(void)
 
   SendMessageA(hwndRichEdit, EM_FORMATRANGE, FALSE, 0);
 
-  for (i = 0; i < sizeof(fmtstrings)/sizeof(fmtstrings[0]); i++)
+  for (i = 0; i < ARRAY_SIZE(fmtstrings); i++)
   {
     GETTEXTLENGTHEX gtl;
     SIZE stringsize;
@@ -5757,7 +5827,7 @@ static void test_EM_STREAMIN(void)
   };
 
   const WCHAR streamText5[] = { 'T', 'e', 's', 't', 'S', 'o', 'm', 'e', 'T', 'e', 'x', 't' };
-  int length5 = sizeof(streamText5) / sizeof(WCHAR);
+  int length5 = ARRAY_SIZE(streamText5);
   struct StringWithLength cookieForStream5 = {
       sizeof(streamText5),
       (char *)streamText5,
@@ -5958,6 +6028,18 @@ static void test_EM_STREAMIN(void)
   ok(es.dwError == 0, "EM_STREAMIN: Test 5 set error %d, expected %d\n", es.dwError, 0);
 
   DestroyWindow(hwndRichEdit);
+
+  /* Single-line richedit */
+  hwndRichEdit = new_richedit_with_style(NULL, 0);
+  ptr = "line1\r\nline2";
+  es.dwCookie = (DWORD_PTR)&ptr;
+  es.dwError = 0;
+  es.pfnCallback = test_EM_STREAMIN_esCallback;
+  result = SendMessageA(hwndRichEdit, EM_STREAMIN, SF_TEXT, (LPARAM)&es);
+  ok(result == 12, "got %ld, expected %d\n", result, 12);
+  result = SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
+  ok (!strcmp(buffer, "line1"),
+      "EM_STREAMIN: Unexpected text '%s'\n", buffer);
 }
 
 static void test_EM_StreamIn_Undo(void)
@@ -6782,7 +6864,7 @@ static void test_EN_LINK(void)
     GetCursorPos(&orig_cursor_pos);
     SetCursorPos(0, 0);
 
-    for (i = 0; i < sizeof(link_notify_tests)/sizeof(link_notify_tests[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(link_notify_tests); i++)
     {
         link_notify_test("cursor position simulated", i, hwnd, parent,
                          link_notify_tests[i].msg, link_notify_tests[i].wParam, link_notify_tests[i].lParam,
@@ -6792,7 +6874,7 @@ static void test_EN_LINK(void)
     ClientToScreen(hwnd, &cursor_screen_pos);
     SetCursorPos(cursor_screen_pos.x, cursor_screen_pos.y);
 
-    for (i = 0; i < sizeof(link_notify_tests)/sizeof(link_notify_tests[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(link_notify_tests); i++)
     {
         link_notify_test("cursor position set", i, hwnd, parent,
                          link_notify_tests[i].msg, link_notify_tests[i].wParam, link_notify_tests[i].lParam,
@@ -8092,7 +8174,7 @@ static void test_EM_FINDWORDBREAK_W(void)
     int i;
     HWND hwndRichEdit = new_richeditW(NULL);
     ok(IsWindowUnicode(hwndRichEdit), "window should be unicode\n");
-    for (i = 0; i < sizeof(delimiter_tests)/sizeof(delimiter_tests[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(delimiter_tests); i++)
     {
         WCHAR wbuf[2];
         int result;
@@ -8126,7 +8208,7 @@ static void test_EM_FINDWORDBREAK_A(void)
     HWND hwndRichEdit = new_richedit(NULL);
 
     ok(!IsWindowUnicode(hwndRichEdit), "window should not be unicode\n");
-    for (i = 0; i < sizeof(delimiter_tests)/sizeof(delimiter_tests[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(delimiter_tests); i++)
     {
         int result;
         char buf[2];
@@ -8170,7 +8252,7 @@ static void test_enter(void)
   HWND hwndRichEdit = new_richedit(NULL);
   UINT i,j;
 
-  for (i = 0; i < sizeof(testenteritems)/sizeof(testenteritems[0]); i++) {
+  for (i = 0; i < ARRAY_SIZE(testenteritems); i++) {
 
     char buf[1024] = {0};
     LRESULT result;
@@ -8452,7 +8534,7 @@ static void test_alignment_style(void)
     EDITSTREAM es;
     int i;
 
-    for (i = 0; i < sizeof(align_style) / sizeof(align_style[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(align_style); i++)
     {
         DWORD dwStyle, new_align;
 
@@ -8537,27 +8619,31 @@ static void test_WM_GETTEXTLENGTH(void)
     DestroyWindow(hwndRichEdit);
 }
 
-static void test_rtf_specials(void)
+static void test_rtf(void)
 {
     const char *specials = "{\\rtf1\\emspace\\enspace\\bullet\\lquote"
         "\\rquote\\ldblquote\\rdblquote\\ltrmark\\rtlmark\\zwj\\zwnj}";
     const WCHAR expect_specials[] = {' ',' ',0x2022,0x2018,0x2019,0x201c,
                                      0x201d,0x200e,0x200f,0x200d,0x200c};
     const char *pard = "{\\rtf1 ABC\\rtlpar\\par DEF\\par HIJ\\pard\\par}";
+    const char *highlight = "{\\rtf1{\\colortbl;\\red0\\green0\\blue0;\\red128\\green128\\blue128;\\red192\\green192\\blue192;}\\cf2\\highlight3 foo\\par}";
+
     HWND edit = new_richeditW( NULL );
     EDITSTREAM es;
     WCHAR buf[80];
     LRESULT result;
     PARAFORMAT2 fmt;
+    CHARFORMAT2W cf;
 
+    /* Test rtf specials */
     es.dwCookie = (DWORD_PTR)&specials;
     es.dwError = 0;
     es.pfnCallback = test_EM_STREAMIN_esCallback;
     result = SendMessageA( edit, EM_STREAMIN, SF_RTF, (LPARAM)&es );
     ok( result == 11, "got %ld\n", result );
 
-    result = SendMessageW( edit, WM_GETTEXT, sizeof(buf)/sizeof(buf[0]), (LPARAM)buf );
-    ok( result == sizeof(expect_specials)/sizeof(expect_specials[0]), "got %ld\n", result );
+    result = SendMessageW( edit, WM_GETTEXT, ARRAY_SIZE(buf), (LPARAM)buf );
+    ok( result == ARRAY_SIZE(expect_specials), "got %ld\n", result );
     ok( !memcmp( buf, expect_specials, sizeof(expect_specials) ), "got %s\n", wine_dbgstr_w(buf) );
 
     /* Show that \rtlpar propagates to the second paragraph and is
@@ -8579,6 +8665,18 @@ static void test_rtf_specials(void)
     SendMessageW( edit, EM_GETPARAFORMAT, 0, (LPARAM)&fmt );
     ok( fmt.dwMask & PFM_RTLPARA, "rtl para mask not set\n" );
     ok( !(fmt.wEffects & PFE_RTLPARA), "rtl para set\n" );
+
+    /* Test \highlight */
+    es.dwCookie = (DWORD_PTR)&highlight;
+    result = SendMessageA( edit, EM_STREAMIN, SF_RTF, (LPARAM)&es );
+    ok( result == 3, "got %ld\n", result );
+    SendMessageW( edit, EM_SETSEL, 1, 1 );
+    memset( &cf, 0, sizeof(cf) );
+    cf.cbSize = sizeof(cf);
+    SendMessageW( edit, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf );
+    ok( (cf.dwEffects & (CFE_AUTOCOLOR | CFE_AUTOBACKCOLOR)) == 0, "got %08x\n", cf.dwEffects );
+    ok( cf.crTextColor == RGB(128,128,128), "got %08x\n", cf.crTextColor );
+    ok( cf.crBackColor == RGB(192,192,192), "got %08x\n", cf.crBackColor );
 
     DestroyWindow( edit );
 }
@@ -8699,6 +8797,94 @@ static void test_para_numbering(void)
     DestroyWindow( edit );
 }
 
+static void fill_reobject_struct(REOBJECT *reobj, LONG cp, LPOLEOBJECT poleobj,
+                                 LPSTORAGE pstg, LPOLECLIENTSITE polesite, LONG sizel_cx,
+                                 LONG sizel_cy, DWORD aspect, DWORD flags, DWORD user)
+{
+    reobj->cbStruct = sizeof(*reobj);
+    reobj->clsid = CLSID_NULL;
+    reobj->cp = cp;
+    reobj->poleobj = poleobj;
+    reobj->pstg = pstg;
+    reobj->polesite = polesite;
+    reobj->sizel.cx = sizel_cx;
+    reobj->sizel.cy = sizel_cy;
+    reobj->dvaspect = aspect;
+    reobj->dwFlags = flags;
+    reobj->dwUser = user;
+}
+
+static void test_EM_SELECTIONTYPE(void)
+{
+    HWND hwnd = new_richedit(NULL);
+    IRichEditOle *reole = NULL;
+    static const char text1[] = "abcdefg\n";
+    int result;
+    REOBJECT reo1, reo2;
+    IOleClientSite *clientsite;
+    HRESULT hr;
+
+    SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)text1);
+    SendMessageA(hwnd, EM_GETOLEINTERFACE, 0, (LPARAM)&reole);
+
+    SendMessageA(hwnd, EM_SETSEL, 1, 1);
+    result = SendMessageA(hwnd, EM_SELECTIONTYPE, 0, 0);
+    ok(result == SEL_EMPTY, "got wrong selection type: %x.\n", result);
+
+    SendMessageA(hwnd, EM_SETSEL, 1, 2);
+    result = SendMessageA(hwnd, EM_SELECTIONTYPE, 0, 0);
+    ok(result == SEL_TEXT, "got wrong selection type: %x.\n", result);
+
+    SendMessageA(hwnd, EM_SETSEL, 2, 5);
+    result = SendMessageA(hwnd, EM_SELECTIONTYPE, 0, 0);
+    ok(result == (SEL_TEXT | SEL_MULTICHAR), "got wrong selection type: %x.\n", result);
+
+    SendMessageA(hwnd, EM_SETSEL, 0, 1);
+    hr = IRichEditOle_GetClientSite(reole, &clientsite);
+    ok(hr == S_OK, "IRichEditOle_GetClientSite failed: 0x%08x\n", hr);
+    fill_reobject_struct(&reo1, REO_CP_SELECTION, NULL, NULL, clientsite, 10, 10,
+                         DVASPECT_CONTENT, 0, 1);
+    hr = IRichEditOle_InsertObject(reole, &reo1);
+    ok(hr == S_OK, "IRichEditOle_InsertObject failed: 0x%08x\n", hr);
+    IOleClientSite_Release(clientsite);
+
+    SendMessageA(hwnd, EM_SETSEL, 0, 1);
+    result = SendMessageA(hwnd, EM_SELECTIONTYPE, 0, 0);
+    ok(result == SEL_OBJECT, "got wrong selection type: %x.\n", result);
+
+    SendMessageA(hwnd, EM_SETSEL, 0, 2);
+    result = SendMessageA(hwnd, EM_SELECTIONTYPE, 0, 0);
+    ok(result == (SEL_TEXT | SEL_OBJECT), "got wrong selection type: %x.\n", result);
+
+    SendMessageA(hwnd, EM_SETSEL, 0, 3);
+    result = SendMessageA(hwnd, EM_SELECTIONTYPE, 0, 0);
+    ok(result == (SEL_TEXT | SEL_MULTICHAR | SEL_OBJECT), "got wrong selection type: %x.\n", result);
+
+    SendMessageA(hwnd, EM_SETSEL, 2, 3);
+    hr = IRichEditOle_GetClientSite(reole, &clientsite);
+    ok(hr == S_OK, "IRichEditOle_GetClientSite failed: 0x%08x\n", hr);
+    fill_reobject_struct(&reo2, REO_CP_SELECTION, NULL, NULL, clientsite, 10, 10,
+                         DVASPECT_CONTENT, 0, 2);
+    hr = IRichEditOle_InsertObject(reole, &reo2);
+    ok(hr == S_OK, "IRichEditOle_InsertObject failed: 0x%08x\n", hr);
+    IOleClientSite_Release(clientsite);
+
+    SendMessageA(hwnd, EM_SETSEL, 0, 2);
+    result = SendMessageA(hwnd, EM_SELECTIONTYPE, 0, 0);
+    ok(result == (SEL_OBJECT | SEL_TEXT), "got wrong selection type: %x.\n", result);
+
+    SendMessageA(hwnd, EM_SETSEL, 0, 3);
+    result = SendMessageA(hwnd, EM_SELECTIONTYPE, 0, 0);
+    ok(result == (SEL_OBJECT | SEL_MULTIOBJECT | SEL_TEXT), "got wrong selection type: %x.\n", result);
+
+    SendMessageA(hwnd, EM_SETSEL, 0, 4);
+    result = SendMessageA(hwnd, EM_SELECTIONTYPE, 0, 0);
+    ok(result == (SEL_TEXT| SEL_MULTICHAR | SEL_OBJECT | SEL_MULTIOBJECT), "got wrong selection type: %x.\n", result);
+
+    IRichEditOle_Release(reole);
+    DestroyWindow(hwnd);
+}
+
 START_TEST( editor )
 {
   BOOL ret;
@@ -8769,10 +8955,11 @@ START_TEST( editor )
   test_EM_SETREADONLY();
   test_EM_SETFONTSIZE();
   test_alignment_style();
-  test_rtf_specials();
+  test_rtf();
   test_background();
   test_eop_char_fmt();
   test_para_numbering();
+  test_EM_SELECTIONTYPE();
 
   /* Set the environment variable WINETEST_RICHED20 to keep windows
    * responsive and open for 30 seconds. This is useful for debugging.

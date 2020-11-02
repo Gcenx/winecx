@@ -49,6 +49,7 @@
 #include "x11drv.h"
 #include "xcomposite.h"
 #include "wine/server.h"
+#include "wine/unicode.h"
 #include "wine/debug.h"
 #include "wine/library.h"
 
@@ -86,6 +87,7 @@ BOOL use_egl = FALSE;
 DWORD thread_data_tls_index = TLS_OUT_OF_INDEXES;
 int xrender_error_base = 0;
 HMODULE x11drv_module = 0;
+char *process_name = NULL;
 
 static x11drv_error_callback err_callback;   /* current callback for error */
 static Display *err_callback_display;        /* display callback is set for */
@@ -330,7 +332,9 @@ static inline DWORD get_config_key( HKEY defkey, HKEY appkey, const char *name,
  */
 static void setup_options(void)
 {
-    char buffer[MAX_PATH+16];
+    static const WCHAR x11driverW[] = {'\\','X','1','1',' ','D','r','i','v','e','r',0};
+    char buffer[64];
+    WCHAR bufferW[MAX_PATH+16];
     HKEY hkey, appkey = 0;
     DWORD len;
 
@@ -339,18 +343,22 @@ static void setup_options(void)
 
     /* open the app-specific key */
 
-    len = (GetModuleFileNameA( 0, buffer, MAX_PATH ));
+    len = (GetModuleFileNameW( 0, bufferW, MAX_PATH ));
     if (len && len < MAX_PATH)
     {
         HKEY tmpkey;
-        char *p, *appname = buffer;
-        if ((p = strrchr( appname, '/' ))) appname = p + 1;
-        if ((p = strrchr( appname, '\\' ))) appname = p + 1;
-        strcat( appname, "\\X11 Driver" );
+        WCHAR *p, *appname = bufferW;
+        if ((p = strrchrW( appname, '/' ))) appname = p + 1;
+        if ((p = strrchrW( appname, '\\' ))) appname = p + 1;
+        CharLowerW(appname);
+        len = WideCharToMultiByte( CP_UNIXCP, 0, appname, -1, NULL, 0, NULL, NULL );
+        if ((process_name = HeapAlloc( GetProcessHeap(), 0, len )))
+            WideCharToMultiByte( CP_UNIXCP, 0, appname, -1, process_name, len, NULL, NULL );
+        strcatW( appname, x11driverW );
         /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe\X11 Driver */
         if (!RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\AppDefaults", &tmpkey ))
         {
-            if (RegOpenKeyA( tmpkey, appname, &appkey )) appkey = 0;
+            if (RegOpenKeyW( tmpkey, appname, &appkey )) appkey = 0;
             RegCloseKey( tmpkey );
         }
     }
@@ -495,11 +503,29 @@ static void init_visuals( Display *display, int screen )
     int count;
     XVisualInfo *info;
 
+    argb_visual.screen     = screen;
+    argb_visual.class      = TrueColor;
+    argb_visual.depth      = 32;
+    argb_visual.red_mask   = 0xff0000;
+    argb_visual.green_mask = 0x00ff00;
+    argb_visual.blue_mask  = 0x0000ff;
+
+    if ((info = XGetVisualInfo( display, VisualScreenMask | VisualDepthMask | VisualClassMask |
+                                VisualRedMaskMask | VisualGreenMaskMask | VisualBlueMaskMask,
+                                &argb_visual, &count )))
+    {
+        argb_visual = *info;
+        XFree( info );
+    }
+
     default_visual.screen = screen;
     if (default_visual.depth)  /* depth specified */
     {
-        info = XGetVisualInfo( display, VisualScreenMask | VisualDepthMask, &default_visual, &count );
-        if (info)
+        if (default_visual.depth == 32 && argb_visual.visual)
+        {
+            default_visual = argb_visual;
+        }
+        else if ((info = XGetVisualInfo( display, VisualScreenMask | VisualDepthMask, &default_visual, &count )))
         {
             default_visual = *info;
             XFree( info );
@@ -521,20 +547,6 @@ static void init_visuals( Display *display, int screen )
     }
     default_colormap = XCreateColormap( display, root_window, default_visual.visual, AllocNone );
 
-    argb_visual.screen     = screen;
-    argb_visual.class      = TrueColor;
-    argb_visual.depth      = 32;
-    argb_visual.red_mask   = 0xff0000;
-    argb_visual.green_mask = 0x00ff00;
-    argb_visual.blue_mask  = 0x0000ff;
-
-    if ((info = XGetVisualInfo( display, VisualScreenMask | VisualDepthMask | VisualClassMask |
-                                VisualRedMaskMask | VisualGreenMaskMask | VisualBlueMaskMask,
-                                &argb_visual, &count )))
-    {
-        argb_visual = *info;
-        XFree( info );
-    }
     TRACE( "default visual %lx class %u argb %lx\n",
            default_visual.visualid, default_visual.class, argb_visual.visualid );
 }

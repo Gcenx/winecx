@@ -2,6 +2,7 @@
  * Object Linking and Embedding Tests
  *
  * Copyright 2005 Robert Shearman
+ * Copyright 2017 Dmitry Timoshkov
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -36,6 +37,7 @@
 
 DEFINE_GUID(CLSID_Picture_Metafile,0x315,0,0,0xc0,0,0,0,0,0,0,0x46);
 DEFINE_GUID(CLSID_Picture_Dib,0x316,0,0,0xc0,0,0,0,0,0,0,0x46);
+DEFINE_GUID(CLSID_Picture_EnhMetafile,0x319,0,0,0xc0,0,0,0,0,0,0,0x46);
 
 #define ok_ole_success(hr, func) ok(hr == S_OK, func " failed with error 0x%08x\n", hr)
 
@@ -65,9 +67,15 @@ DEFINE_GUID(CLSID_Picture_Dib,0x316,0,0,0xc0,0,0,0,0,0,0,0x46);
 
 DEFINE_EXPECT(Storage_Stat);
 DEFINE_EXPECT(Storage_OpenStream_CompObj);
+DEFINE_EXPECT(Storage_OpenStream_OlePres);
 DEFINE_EXPECT(Storage_SetClass);
 DEFINE_EXPECT(Storage_CreateStream_CompObj);
+DEFINE_EXPECT(Storage_CreateStream_OlePres);
 DEFINE_EXPECT(Storage_OpenStream_Ole);
+DEFINE_EXPECT(Storage_DestroyElement);
+
+static const CLSID *Storage_SetClass_CLSID;
+static int Storage_DestroyElement_limit;
 
 static IPersistStorage OleObjectPersistStg;
 static IOleCache *cache;
@@ -104,6 +112,7 @@ struct expected_method
 {
     const char *method;
     unsigned int flags;
+    FORMATETC fmt;
 };
 
 static const struct expected_method *expected_method_list;
@@ -115,6 +124,8 @@ static HRESULT g_GetMiscStatusFailsWith = S_OK;
 static HRESULT g_QIFailsWith;
 
 static UINT cf_test_1, cf_test_2, cf_test_3;
+
+static FORMATETC *g_dataobject_fmts;
 
 /****************************************************************************
  * PresentationDataHeader
@@ -132,37 +143,54 @@ typedef struct PresentationDataHeader
      *  DWORD length;
      *  CHAR format_name[length]; (null-terminated)
      */
-    DWORD unknown3; /* 4, possibly TYMED_ISTREAM */
+    DWORD tdSize; /* This is actually a truncated DVTARGETDEVICE, if tdSize > sizeof(DWORD)
+                     then there are tdSize - sizeof(DWORD) more bytes before dvAspect */
     DVASPECT dvAspect;
     DWORD lindex;
-    DWORD tymed;
+    DWORD advf;
     DWORD unknown7; /* 0 */
     DWORD dwObjectExtentX;
     DWORD dwObjectExtentY;
     DWORD dwSize;
 } PresentationDataHeader;
 
-#define CHECK_EXPECTED_METHOD(method_name) \
-    do { \
-        trace("%s\n", method_name); \
-        ok(expected_method_list->method != NULL, "Extra method %s called\n", method_name); \
-        if (!strcmp(expected_method_list->method, "WINE_EXTRA")) \
-        { \
-            todo_wine ok(0, "Too many method calls.\n"); \
-            break; \
-        } \
-        if (expected_method_list->method) \
-        { \
-            while (expected_method_list->flags & TEST_OPTIONAL && \
-                   strcmp(expected_method_list->method, method_name) != 0) \
-                expected_method_list++; \
-            todo_wine_if (expected_method_list->flags & TEST_TODO) \
-                ok(!strcmp(expected_method_list->method, method_name), \
-                   "Expected %s to be called instead of %s\n", \
-                   expected_method_list->method, method_name); \
-            expected_method_list++; \
-        } \
-    } while(0)
+static void inline check_expected_method_fmt(const char *method_name, const FORMATETC *fmt)
+{
+    trace("%s\n", method_name);
+    ok(expected_method_list->method != NULL, "Extra method %s called\n", method_name);
+    if (!strcmp(expected_method_list->method, "WINE_EXTRA"))
+    {
+        todo_wine ok(0, "Too many method calls.\n");
+        return;
+    }
+    if (expected_method_list->method)
+    {
+        while (expected_method_list->flags & TEST_OPTIONAL &&
+               strcmp(expected_method_list->method, method_name) != 0)
+            expected_method_list++;
+        todo_wine_if (expected_method_list->flags & TEST_TODO)
+        {
+            ok(!strcmp(expected_method_list->method, method_name),
+               "Expected %s to be called instead of %s\n",
+               expected_method_list->method, method_name);
+            if (fmt)
+            {
+                ok(fmt->cfFormat == expected_method_list->fmt.cfFormat, "got cf %04x vs %04x\n",
+                   fmt->cfFormat, expected_method_list->fmt.cfFormat );
+                ok(fmt->dwAspect == expected_method_list->fmt.dwAspect, "got aspect %d vs %d\n",
+                   fmt->dwAspect, expected_method_list->fmt.dwAspect );
+                ok(fmt->lindex == expected_method_list->fmt.lindex, "got lindex %d vs %d\n",
+                   fmt->lindex, expected_method_list->fmt.lindex );
+                ok(fmt->tymed == expected_method_list->fmt.tymed, "got tymed %d vs %d\n",
+                   fmt->tymed, expected_method_list->fmt.tymed );
+            }
+        }
+        expected_method_list++;
+    }
+}
+
+#define CHECK_EXPECTED_METHOD(method_name) check_expected_method_fmt(method_name, NULL)
+#define CHECK_EXPECTED_METHOD_FMT(method_name, fmt) check_expected_method_fmt(method_name, fmt)
 
 #define CHECK_NO_EXTRA_METHODS() \
     do { \
@@ -170,6 +198,79 @@ typedef struct PresentationDataHeader
             expected_method_list++; \
         ok(!expected_method_list->method, "Method sequence starting from %s not called\n", expected_method_list->method); \
     } while (0)
+
+/* 2 x 1 x 32 bpp dib. PelsPerMeter = 200x400 */
+static const BYTE dib[] =
+{
+    0x28, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x20, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xc8, 0x00, 0x00, 0x00, 0x90, 0x01, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
+};
+
+static void create_dib( STGMEDIUM *med )
+{
+    void *ptr;
+
+    med->tymed = TYMED_HGLOBAL;
+    U(med)->hGlobal = GlobalAlloc( GMEM_MOVEABLE, sizeof(dib) );
+    ptr = GlobalLock( U(med)->hGlobal );
+    memcpy( ptr, dib, sizeof(dib) );
+    GlobalUnlock( U(med)->hGlobal );
+    med->pUnkForRelease = NULL;
+}
+
+static void create_bitmap( STGMEDIUM *med )
+{
+    med->tymed = TYMED_GDI;
+    U(med)->hBitmap = CreateBitmap( 1, 1, 1, 1, NULL );
+    med->pUnkForRelease = NULL;
+}
+
+static void create_emf(STGMEDIUM *med)
+{
+    HDC hdc = CreateEnhMetaFileW(NULL, NULL, NULL, NULL);
+
+    Rectangle(hdc, 0, 0, 150, 300);
+    med->tymed = TYMED_ENHMF;
+    U(med)->hEnhMetaFile = CloseEnhMetaFile(hdc);
+    med->pUnkForRelease = NULL;
+}
+
+static void create_mfpict(STGMEDIUM *med)
+{
+    METAFILEPICT *mf;
+    HDC hdc = CreateMetaFileW(NULL);
+
+    Rectangle(hdc, 0, 0, 100, 200);
+
+    med->tymed = TYMED_MFPICT;
+    U(med)->hMetaFilePict = GlobalAlloc(GMEM_MOVEABLE, sizeof(METAFILEPICT));
+    mf = GlobalLock(U(med)->hMetaFilePict);
+    mf->mm = MM_ANISOTROPIC;
+    mf->xExt = 100;
+    mf->yExt = 200;
+    mf->hMF = CloseMetaFile(hdc);
+    GlobalUnlock(U(med)->hMetaFilePict);
+    med->pUnkForRelease = NULL;
+}
+
+static void create_text(STGMEDIUM *med)
+{
+    HGLOBAL handle;
+    char *p;
+
+    handle = GlobalAlloc(GMEM_DDESHARE|GMEM_MOVEABLE, 5);
+    p = GlobalLock(handle);
+    strcpy(p, "test");
+    GlobalUnlock(handle);
+
+    med->tymed = TYMED_HGLOBAL;
+    U(med)->hGlobal = handle;
+    med->pUnkForRelease = NULL;
+}
 
 static HRESULT WINAPI OleObject_QueryInterface(IOleObject *iface, REFIID riid, void **ppv)
 {
@@ -1173,7 +1274,7 @@ static void test_OleLoad(IStorage *pStorage)
         IStorage *stg;
         IStream *stream;
         IUnknown *obj;
-        DWORD data, i, tymed, data_size;
+        DWORD data, i, data_size;
         PresentationDataHeader header;
         HDC hdc;
         HGDIOBJ hobj;
@@ -1222,12 +1323,10 @@ static void test_OleLoad(IStorage *pStorage)
                 break;
             }
 
-            tymed = 1 << i;
-
-            header.unknown3 = 4;
+            header.tdSize = sizeof(header.tdSize);
             header.dvAspect = DVASPECT_CONTENT;
             header.lindex = -1;
-            header.tymed = tymed;
+            header.advf = 1 << i;
             header.unknown7 = 0;
             header.dwObjectExtentX = 1;
             header.dwObjectExtentY = 1;
@@ -1247,19 +1346,19 @@ static void test_OleLoad(IStorage *pStorage)
                 IStorage_Release(stg);
                 continue;
             }
-            ok(hr == S_OK, "OleLoad error %#x: cfFormat = %u, tymed = %u\n", hr, fmt, tymed);
+            ok(hr == S_OK, "OleLoad error %#x: cfFormat = %u, advf = %#x\n", hr, fmt, header.advf);
 
             hdc = CreateCompatibleDC(0);
             SetRect(&rc, 0, 0, 100, 100);
             hr = OleDraw(obj, DVASPECT_CONTENT, hdc, &rc);
             DeleteDC(hdc);
             if (fmt == CF_METAFILEPICT)
-                ok(hr == S_OK, "OleDraw error %#x: cfFormat = %u, tymed = %u\n", hr, fmt, tymed);
+                ok(hr == S_OK, "OleDraw error %#x: cfFormat = %u, advf = %#x\n", hr, fmt, header.advf);
             else if (fmt == CF_ENHMETAFILE)
 todo_wine
-                ok(hr == S_OK, "OleDraw error %#x: cfFormat = %u, tymed = %u\n", hr, fmt, tymed);
+                ok(hr == S_OK, "OleDraw error %#x: cfFormat = %u, advf = %#x\n", hr, fmt, header.advf);
             else
-                ok(hr == OLE_E_BLANK || hr == OLE_E_NOTRUNNING || hr == E_FAIL, "OleDraw should fail: %#x, cfFormat = %u, tymed = %u\n", hr, fmt, header.tymed);
+                ok(hr == OLE_E_BLANK || hr == OLE_E_NOTRUNNING || hr == E_FAIL, "OleDraw should fail: %#x, cfFormat = %u, advf = %#x\n", hr, fmt, header.advf);
 
             IUnknown_Release(obj);
             IStorage_Release(stg);
@@ -1379,13 +1478,46 @@ static ULONG WINAPI DataObject_Release(
     return 1;
 }
 
-static HRESULT WINAPI DataObject_GetData(
-        IDataObject*     iface,
-        LPFORMATETC      pformatetcIn,
-        STGMEDIUM*       pmedium)
+static inline BOOL fmtetc_equal( const FORMATETC *a, const FORMATETC *b )
 {
-    CHECK_EXPECTED_METHOD("DataObject_GetData");
-    return E_NOTIMPL;
+    /* FIXME ptd */
+    return a->cfFormat == b->cfFormat && a->dwAspect == b->dwAspect &&
+        a->lindex == b->lindex && a->tymed == b->tymed;
+
+}
+
+static HRESULT WINAPI DataObject_GetData( IDataObject *iface, FORMATETC *fmt_in,
+                                          STGMEDIUM *med )
+{
+    FORMATETC *fmt;
+
+    CHECK_EXPECTED_METHOD_FMT("DataObject_GetData", fmt_in);
+
+    for (fmt = g_dataobject_fmts; fmt && fmt->cfFormat != 0; fmt++)
+    {
+        if (fmtetc_equal( fmt_in, fmt ))
+        {
+            switch (fmt->cfFormat)
+            {
+            case CF_DIB:
+                create_dib( med );
+                return S_OK;
+            case CF_BITMAP:
+                create_bitmap( med );
+                return S_OK;
+            case CF_ENHMETAFILE:
+                create_emf( med );
+                return S_OK;
+            case CF_TEXT:
+                create_text( med );
+                return S_OK;
+            default:
+                trace( "unhandled fmt %d\n", fmt->cfFormat );
+            }
+        }
+    }
+
+    return S_FALSE;
 }
 
 static HRESULT WINAPI DataObject_GetDataHere(
@@ -1397,12 +1529,16 @@ static HRESULT WINAPI DataObject_GetDataHere(
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI DataObject_QueryGetData(
-        IDataObject*     iface,
-        LPFORMATETC      pformatetc)
+static HRESULT WINAPI DataObject_QueryGetData( IDataObject *iface, FORMATETC *fmt_in )
 {
-    CHECK_EXPECTED_METHOD("DataObject_QueryGetData");
-    return S_OK;
+    FORMATETC *fmt;
+
+    CHECK_EXPECTED_METHOD_FMT("DataObject_QueryGetData", fmt_in);
+
+    for (fmt = g_dataobject_fmts; fmt && fmt->cfFormat != 0; fmt++)
+        if (fmtetc_equal( fmt_in, fmt )) return S_OK;
+
+    return S_FALSE;
 }
 
 static HRESULT WINAPI DataObject_GetCanonicalFormatEtc(
@@ -1522,13 +1658,46 @@ static const IUnknownVtbl UnknownVtbl =
 
 static IUnknown unknown = { &UnknownVtbl };
 
+static void check_enum_cache(IOleCache2 *cache, const STATDATA *expect, int num)
+{
+    IEnumSTATDATA *enum_stat;
+    STATDATA stat;
+    HRESULT hr;
+
+    hr = IOleCache2_EnumCache( cache, &enum_stat );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    while (IEnumSTATDATA_Next(enum_stat, 1, &stat, NULL) == S_OK)
+    {
+        ok( stat.formatetc.cfFormat == expect->formatetc.cfFormat, "got %d expect %d\n",
+            stat.formatetc.cfFormat, expect->formatetc.cfFormat );
+        ok( !stat.formatetc.ptd == !expect->formatetc.ptd, "got %p expect %p\n",
+            stat.formatetc.ptd, expect->formatetc.ptd );
+        ok( stat.formatetc.dwAspect == expect->formatetc.dwAspect, "got %d expect %d\n",
+            stat.formatetc.dwAspect, expect->formatetc.dwAspect );
+        ok( stat.formatetc.lindex == expect->formatetc.lindex, "got %d expect %d\n",
+            stat.formatetc.lindex, expect->formatetc.lindex );
+        ok( stat.formatetc.tymed == expect->formatetc.tymed, "got %d expect %d\n",
+            stat.formatetc.tymed, expect->formatetc.tymed );
+        ok( stat.advf == expect->advf, "got %d expect %d\n", stat.advf, expect->advf );
+        ok( stat.pAdvSink == 0, "got %p\n", stat.pAdvSink );
+        ok( stat.dwConnection == expect->dwConnection, "got %d expect %d\n", stat.dwConnection, expect->dwConnection );
+        num--;
+        expect++;
+    }
+
+    ok( num == 0, "incorrect number. num %d\n", num );
+
+    IEnumSTATDATA_Release( enum_stat );
+}
+
 static void test_data_cache(void)
 {
     HRESULT hr;
     IOleCache2 *pOleCache;
     IOleCache *olecache;
     IStorage *pStorage;
-    IUnknown *unk;
+    IUnknown *unk, *unk2;
     IPersistStorage *pPS;
     IViewObject *pViewObject;
     IOleCacheControl *pOleCacheControl;
@@ -1562,9 +1731,9 @@ static void test_data_cache(void)
         { "draw_continue", 1 },
         { "draw_continue", 1 },
         { "draw_continue", 1 },
-        { "DataObject_GetData", 0 },
-        { "DataObject_GetData", 0 },
-        { "DataObject_GetData", 0 },
+        { "DataObject_GetData", 0, { CF_DIB,          NULL, DVASPECT_THUMBNAIL, -1, TYMED_HGLOBAL} },
+        { "DataObject_GetData", 0, { CF_BITMAP,       NULL, DVASPECT_THUMBNAIL, -1, TYMED_GDI} },
+        { "DataObject_GetData", 0, { CF_METAFILEPICT, NULL, DVASPECT_ICON,      -1, TYMED_MFPICT} },
         { NULL, 0 }
     };
     static const struct expected_method methods_cachethenrun[] =
@@ -1572,7 +1741,6 @@ static void test_data_cache(void)
         { "DataObject_DAdvise", 0 },
         { "DataObject_DAdvise", 0 },
         { "DataObject_DAdvise", 0 },
-        { "DataObject_QueryGetData", 1 }, /* called by win9x and nt4 */
         { "DataObject_DAdvise", 0 },
         { "DataObject_DUnadvise", 0 },
         { "DataObject_DUnadvise", 0 },
@@ -1581,7 +1749,7 @@ static void test_data_cache(void)
         { NULL, 0 }
     };
 
-    GetSystemDirectoryA(szSystemDir, sizeof(szSystemDir)/sizeof(szSystemDir[0]));
+    GetSystemDirectoryA(szSystemDir, ARRAY_SIZE(szSystemDir));
 
     expected_method_list = methods_cacheinitnew;
 
@@ -1619,10 +1787,12 @@ static void test_data_cache(void)
     ok(hr == S_OK, "got 0x%08x\n", hr);
     hr = IUnknown_QueryInterface(unk, &IID_IOleCache2, (void**)&pOleCache);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-todo_wine {
+    hr = IUnknown_QueryInterface(unk, &IID_IUnknown, (void**)&unk2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(unk == (IUnknown*)olecache, "got %p, expected %p\n", olecache, unk);
     ok(unk == (IUnknown*)pOleCache, "got %p, expected %p\n", pOleCache, unk);
-}
+    ok(unk == unk2, "got %p, expected %p\n", unk2, unk);
+    IUnknown_Release(unk2);
     IOleCache2_Release(pOleCache);
     IOleCache_Release(olecache);
     IUnknown_Release(unk);
@@ -1711,7 +1881,7 @@ todo_wine {
     hr = IOleCache2_Cache(pOleCache, &fmtetc, 0, &dwConnection);
     ok_ole_success(hr, "IOleCache_Cache");
 
-    MultiByteToWideChar(CP_ACP, 0, szSystemDir, -1, wszPath, sizeof(wszPath)/sizeof(wszPath[0]));
+    MultiByteToWideChar(CP_ACP, 0, szSystemDir, -1, wszPath, ARRAY_SIZE(wszPath));
     memcpy(wszPath+lstrlenW(wszPath), wszShell32, sizeof(wszShell32));
 
     fmtetc.cfFormat = CF_METAFILEPICT;
@@ -1838,18 +2008,14 @@ todo_wine {
 
     DeleteDC(hdcMem);
 
-    todo_wine {
     hr = IOleCache2_InitCache(pOleCache, &DataObject);
     ok(hr == CACHE_E_NOCACHE_UPDATED, "IOleCache_InitCache should have returned CACHE_E_NOCACHE_UPDATED instead of 0x%08x\n", hr);
-    }
 
     IPersistStorage_Release(pPS);
     IViewObject_Release(pViewObject);
     IOleCache2_Release(pOleCache);
 
-    todo_wine {
     CHECK_NO_EXTRA_METHODS();
-    }
 
     hr = CreateDataCache(NULL, &CLSID_NULL, &IID_IOleCache2, (LPVOID *)&pOleCache);
     ok_ole_success(hr, "CreateDataCache");
@@ -1917,21 +2083,17 @@ todo_wine {
     IStorage_Release(pStorage);
 }
 
-
 static const WCHAR CONTENTS[] = {'C','O','N','T','E','N','T','S',0};
 
 /* 2 x 1 x 32 bpp dib. PelsPerMeter = 200x400 */
-static BYTE dib[] =
+static BYTE file_dib[] =
 {
     0x42, 0x4d, 0x3e, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x36, 0x00, 0x00, 0x00, 0x28, 0x00,
-
     0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00,
     0x00, 0x00, 0x01, 0x00, 0x20, 0x00, 0x00, 0x00,
-
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc8, 0x00,
     0x00, 0x00, 0x90, 0x01, 0x00, 0x00, 0x00, 0x00,
-
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff,
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff
 };
@@ -1951,10 +2113,10 @@ static IStorage *create_storage( int num )
     ok( hr == S_OK, "got %08x\n", hr);
     if (num == 1) /* Set biXPelsPerMeter = 0 */
     {
-        dib[0x26] = 0;
-        dib[0x27] = 0;
+        file_dib[0x26] = 0;
+        file_dib[0x27] = 0;
     }
-    hr = IStream_Write( stm, dib, sizeof(dib), &written );
+    hr = IStream_Write( stm, file_dib, sizeof(file_dib), &written );
     ok( hr == S_OK, "got %08x\n", hr);
     IStream_Release( stm );
     return stg;
@@ -1968,10 +2130,18 @@ static void test_data_cache_dib_contents_stream(int num)
     IDataObject *data;
     IViewObject2 *view;
     IStorage *stg;
+    IOleCache2 *cache;
     FORMATETC fmt = {CF_DIB, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
     STGMEDIUM med;
     CLSID cls;
     SIZEL sz;
+    BYTE *ptr;
+    BITMAPINFOHEADER expect_info;
+    STATDATA enum_expect[] =
+    {
+        {{ CF_DIB,          0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL }, 0, NULL, 1 },
+        {{ CF_BITMAP,       0, DVASPECT_CONTENT, -1, TYMED_GDI },     0, NULL, 1 },
+    };
 
     hr = CreateDataCache( NULL, &CLSID_Picture_Metafile, &IID_IUnknown, (void **)&unk );
     ok( SUCCEEDED(hr), "got %08x\n", hr );
@@ -1980,6 +2150,8 @@ static void test_data_cache_dib_contents_stream(int num)
     hr = IUnknown_QueryInterface( unk, &IID_IDataObject, (void **)&data );
     ok( SUCCEEDED(hr), "got %08x\n", hr );
     hr = IUnknown_QueryInterface( unk, &IID_IViewObject2, (void **)&view );
+    ok( SUCCEEDED(hr), "got %08x\n", hr );
+    hr = IUnknown_QueryInterface( unk, &IID_IOleCache2, (void **)&cache );
     ok( SUCCEEDED(hr), "got %08x\n", hr );
 
     stg = create_storage( num );
@@ -1994,11 +2166,26 @@ static void test_data_cache_dib_contents_stream(int num)
 
     hr = IDataObject_GetData( data, &fmt, &med );
     ok( SUCCEEDED(hr), "got %08x\n", hr );
-    if (SUCCEEDED(hr))
+    ok( med.tymed == TYMED_HGLOBAL, "got %x\n", med.tymed );
+    ok( GlobalSize( U(med).hGlobal ) >= sizeof(dib) - sizeof(BITMAPFILEHEADER),
+        "got %lu\n", GlobalSize( U(med).hGlobal ) );
+    ptr = GlobalLock( U(med).hGlobal );
+
+    expect_info = *(BITMAPINFOHEADER *)(file_dib + sizeof(BITMAPFILEHEADER));
+    if (expect_info.biXPelsPerMeter == 0 || expect_info.biYPelsPerMeter == 0)
     {
-        ok( med.tymed == TYMED_HGLOBAL, "got %x\n", med.tymed );
-        ReleaseStgMedium( &med );
+        HDC hdc = GetDC( 0 );
+        expect_info.biXPelsPerMeter = MulDiv( GetDeviceCaps( hdc, LOGPIXELSX ), 10000, 254 );
+        expect_info.biYPelsPerMeter = MulDiv( GetDeviceCaps( hdc, LOGPIXELSY ), 10000, 254 );
+        ReleaseDC( 0, hdc );
     }
+    ok( !memcmp( ptr, &expect_info, sizeof(expect_info) ), "mismatch\n" );
+    ok( !memcmp( ptr + sizeof(expect_info), file_dib + sizeof(BITMAPFILEHEADER) + sizeof(expect_info),
+                 sizeof(file_dib) - sizeof(BITMAPFILEHEADER) - sizeof(expect_info) ), "mismatch\n" );
+    GlobalUnlock( U(med).hGlobal );
+    ReleaseStgMedium( &med );
+
+    check_enum_cache( cache, enum_expect, 2 );
 
     hr = IViewObject2_GetExtent( view, DVASPECT_CONTENT, -1, NULL, &sz );
     ok( SUCCEEDED(hr), "got %08x\n", hr );
@@ -2018,10 +2205,743 @@ static void test_data_cache_dib_contents_stream(int num)
         ReleaseDC( 0, hdc );
     }
 
+    IOleCache2_Release( cache );
     IViewObject2_Release( view );
     IDataObject_Release( data );
     IPersistStorage_Release( persist );
     IUnknown_Release( unk );
+}
+
+static void check_bitmap_size( HBITMAP h, int cx, int cy )
+{
+    BITMAP bm;
+
+    GetObjectW( h, sizeof(bm), &bm );
+    ok( bm.bmWidth == cx, "got %d expect %d\n", bm.bmWidth, cx );
+    ok( bm.bmHeight == cy, "got %d expect %d\n", bm.bmHeight, cy );
+}
+
+static void check_dib_size( HGLOBAL h, int cx, int cy )
+{
+    BITMAPINFO *info;
+
+    info = GlobalLock( h );
+    ok( info->bmiHeader.biWidth == cx, "got %d expect %d\n", info->bmiHeader.biWidth, cx );
+    ok( info->bmiHeader.biHeight == cy, "got %d expect %d\n", info->bmiHeader.biHeight, cy );
+    GlobalUnlock( h );
+}
+
+static void test_data_cache_cache(void)
+{
+    HRESULT hr;
+    IOleCache2 *cache;
+    IDataObject *data;
+    FORMATETC fmt;
+    DWORD conn;
+    STGMEDIUM med;
+    STATDATA expect[] =
+    {
+        {{ CF_DIB,          0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL }, 0, NULL, 0 },
+        {{ CF_BITMAP,       0, DVASPECT_CONTENT, -1, TYMED_GDI },     0, NULL, 0 },
+        {{ CF_METAFILEPICT, 0, DVASPECT_CONTENT, -1, TYMED_MFPICT },  0, NULL, 0 },
+        {{ CF_ENHMETAFILE,  0, DVASPECT_CONTENT, -1, TYMED_ENHMF },   0, NULL, 0 }
+    };
+    STATDATA view_caching[] =
+    {
+        {{ 0,               0, DVASPECT_CONTENT,   -1, TYMED_ENHMF },   0, NULL, 0 },
+        {{ 0,               0, DVASPECT_THUMBNAIL, -1, TYMED_HGLOBAL }, 0, NULL, 0 },
+        {{ 0,               0, DVASPECT_DOCPRINT,  -1, TYMED_HGLOBAL }, 0, NULL, 0 },
+        {{ CF_METAFILEPICT, 0, DVASPECT_ICON,      -1, TYMED_MFPICT },  0, NULL, 0 }
+    };
+
+    hr = CreateDataCache( NULL, &CLSID_NULL, &IID_IOleCache2, (void **)&cache );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* create a dib entry which will also create a bitmap entry too */
+    fmt.cfFormat = CF_DIB;
+    fmt.ptd = NULL;
+    fmt.dwAspect = DVASPECT_CONTENT;
+    fmt.lindex = -1;
+    fmt.tymed = TYMED_HGLOBAL;
+
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( conn == 2, "got %d\n", conn );
+    expect[0].dwConnection = conn;
+    expect[1].dwConnection = conn;
+
+    check_enum_cache( cache, expect, 2 );
+
+    /* now try to add a bitmap */
+    fmt.cfFormat = CF_BITMAP;
+    fmt.tymed = TYMED_GDI;
+
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == CACHE_S_SAMECACHE, "got %08x\n", hr );
+
+    /* metafile */
+    fmt.cfFormat = CF_METAFILEPICT;
+    fmt.tymed = TYMED_MFPICT;
+
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( conn == 3, "got %d\n", conn );
+    expect[2].dwConnection = conn;
+
+    check_enum_cache( cache, expect,  3);
+
+    /* enhmetafile */
+    fmt.cfFormat = CF_ENHMETAFILE;
+    fmt.tymed = TYMED_ENHMF;
+
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( conn == 4, "got %d\n", conn );
+    expect[3].dwConnection = conn;
+
+    check_enum_cache( cache, expect, 4 );
+
+    /* uncache everything */
+    hr = IOleCache2_Uncache( cache, expect[3].dwConnection );
+    ok( hr == S_OK, "got %08x\n", hr );
+    hr = IOleCache2_Uncache( cache, expect[2].dwConnection );
+    ok( hr == S_OK, "got %08x\n", hr );
+    hr = IOleCache2_Uncache( cache, expect[0].dwConnection );
+    ok( hr == S_OK, "got %08x\n", hr );
+    hr = IOleCache2_Uncache( cache, expect[0].dwConnection );
+    ok( hr == OLE_E_NOCONNECTION, "got %08x\n", hr );
+
+    check_enum_cache( cache, expect, 0 );
+
+    /* just create a bitmap entry which again adds both dib and bitmap */
+    fmt.cfFormat = CF_BITMAP;
+    fmt.tymed = TYMED_GDI;
+
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    expect[0].dwConnection = conn;
+    expect[1].dwConnection = conn;
+
+    check_enum_cache( cache, expect, 2 );
+
+    /* Try setting a 1x1 bitmap */
+    hr = IOleCache2_QueryInterface( cache, &IID_IDataObject, (void **) &data );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    create_bitmap( &med );
+
+    hr = IOleCache2_SetData( cache, &fmt, &med, TRUE );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = IDataObject_GetData( data, &fmt, &med );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( med.tymed == TYMED_GDI, "got %d\n", med.tymed );
+    check_bitmap_size( U(med).hBitmap, 1, 1 );
+    ReleaseStgMedium( &med );
+
+    fmt.cfFormat = CF_DIB;
+    fmt.tymed = TYMED_HGLOBAL;
+    hr = IDataObject_GetData( data, &fmt, &med );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( med.tymed == TYMED_HGLOBAL, "got %d\n", med.tymed );
+    check_dib_size( U(med).hGlobal, 1, 1 );
+    ReleaseStgMedium( &med );
+
+    /* Now set a 2x1 dib */
+    fmt.cfFormat = CF_DIB;
+    fmt.tymed = TYMED_HGLOBAL;
+    create_dib( &med );
+
+    hr = IOleCache2_SetData( cache, &fmt, &med, TRUE );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    fmt.cfFormat = CF_BITMAP;
+    fmt.tymed = TYMED_GDI;
+    hr = IDataObject_GetData( data, &fmt, &med );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( med.tymed == TYMED_GDI, "got %d\n", med.tymed );
+    check_bitmap_size( U(med).hBitmap, 2, 1 );
+    ReleaseStgMedium( &med );
+
+    fmt.cfFormat = CF_DIB;
+    fmt.tymed = TYMED_HGLOBAL;
+    hr = IDataObject_GetData( data, &fmt, &med );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( med.tymed == TYMED_HGLOBAL, "got %d\n", med.tymed );
+    check_dib_size( U(med).hGlobal, 2, 1 );
+    ReleaseStgMedium( &med );
+
+    /* uncache everything */
+    hr = IOleCache2_Uncache( cache, conn );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* view caching */
+    fmt.cfFormat = 0;
+    fmt.tymed = TYMED_ENHMF;
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == S_OK, "got %08x\n", hr );
+    view_caching[0].dwConnection = conn;
+
+    fmt.tymed = TYMED_HGLOBAL;
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == CACHE_S_SAMECACHE, "got %08x\n", hr );
+
+    fmt.dwAspect = DVASPECT_THUMBNAIL;
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == S_OK, "got %08x\n", hr );
+    view_caching[1].dwConnection = conn;
+
+    fmt.dwAspect = DVASPECT_DOCPRINT;
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == S_OK, "got %08x\n", hr );
+    view_caching[2].dwConnection = conn;
+
+    /* DVASPECT_ICON view cache gets mapped to CF_METAFILEPICT */
+    fmt.dwAspect = DVASPECT_ICON;
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == S_OK, "got %08x\n", hr );
+    view_caching[3].dwConnection = conn;
+
+    check_enum_cache( cache, view_caching, 4 );
+
+    /* uncache everything */
+    hr = IOleCache2_Uncache( cache, view_caching[3].dwConnection );
+    ok( hr == S_OK, "got %08x\n", hr );
+    hr = IOleCache2_Uncache( cache, view_caching[2].dwConnection );
+    ok( hr == S_OK, "got %08x\n", hr );
+    hr = IOleCache2_Uncache( cache, view_caching[1].dwConnection );
+    ok( hr == S_OK, "got %08x\n", hr );
+    hr = IOleCache2_Uncache( cache, view_caching[0].dwConnection );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* Only able to set cfFormat == CF_METAFILEPICT (or == 0, see above) for DVASPECT_ICON */
+    fmt.dwAspect = DVASPECT_ICON;
+    fmt.cfFormat = CF_DIB;
+    fmt.tymed = TYMED_HGLOBAL;
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == DV_E_FORMATETC, "got %08x\n", hr );
+    fmt.cfFormat = CF_BITMAP;
+    fmt.tymed = TYMED_GDI;
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == DV_E_FORMATETC, "got %08x\n", hr );
+    fmt.cfFormat = CF_ENHMETAFILE;
+    fmt.tymed = TYMED_ENHMF;
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == DV_E_FORMATETC, "got %08x\n", hr );
+    fmt.cfFormat = CF_METAFILEPICT;
+    fmt.tymed = TYMED_MFPICT;
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* uncache everything */
+    hr = IOleCache2_Uncache( cache, conn );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* tymed == 0 */
+    fmt.cfFormat = CF_ENHMETAFILE;
+    fmt.dwAspect = DVASPECT_CONTENT;
+    fmt.tymed = 0;
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == DV_E_TYMED, "got %08x\n", hr );
+
+    IDataObject_Release( data );
+    IOleCache2_Release( cache );
+
+    /* tests for a static class cache */
+    hr = CreateDataCache( NULL, &CLSID_Picture_Dib, &IID_IOleCache2, (void **)&cache );
+
+    fmt.cfFormat = CF_DIB;
+    fmt.dwAspect = DVASPECT_CONTENT;
+    fmt.tymed = TYMED_HGLOBAL;
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == CACHE_S_SAMECACHE, "got %08x\n", hr );
+
+    /* aspect other than DVASPECT_CONTENT should fail */
+    fmt.dwAspect = DVASPECT_THUMBNAIL;
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( FAILED(hr), "got %08x\n", hr );
+
+    fmt.dwAspect = DVASPECT_DOCPRINT;
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( FAILED(hr), "got %08x\n", hr );
+
+    /* try caching another clip format */
+    fmt.cfFormat = CF_METAFILEPICT;
+    fmt.dwAspect = DVASPECT_CONTENT;
+    fmt.tymed = TYMED_MFPICT;
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( FAILED(hr), "got %08x\n", hr );
+
+    /* As an exception, it's possible to add an icon aspect */
+    fmt.cfFormat = CF_METAFILEPICT;
+    fmt.dwAspect = DVASPECT_ICON;
+    fmt.tymed = TYMED_MFPICT;
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    IOleCache2_Release( cache );
+}
+
+/* The CLSID_Picture_ classes automatically create appropriate cache entries */
+static void test_data_cache_init(void)
+{
+    HRESULT hr;
+    IOleCache2 *cache;
+    IPersistStorage *persist;
+    int i;
+    CLSID clsid;
+    static const STATDATA enum_expect[] =
+    {
+        {{ CF_DIB,          0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL }, 0, NULL, 1 },
+        {{ CF_BITMAP,       0, DVASPECT_CONTENT, -1, TYMED_GDI },     0, NULL, 1 },
+        {{ CF_METAFILEPICT, 0, DVASPECT_CONTENT, -1, TYMED_MFPICT },  0, NULL, 1 },
+        {{ CF_ENHMETAFILE,  0, DVASPECT_CONTENT, -1, TYMED_ENHMF },   0, NULL, 1 }
+    };
+    static const struct
+    {
+        const CLSID *clsid;
+        int enum_start, enum_num;
+    } data[] =
+    {
+        { &CLSID_NULL, 0, 0 },
+        { &CLSID_WineTestOld, 0, 0 },
+        { &CLSID_Picture_Dib, 0, 2 },
+        { &CLSID_Picture_Metafile, 2, 1 },
+        { &CLSID_Picture_EnhMetafile, 3, 1 }
+    };
+
+    for (i = 0; i < ARRAY_SIZE(data); i++)
+    {
+        hr = CreateDataCache( NULL, data[i].clsid, &IID_IOleCache2, (void **)&cache );
+        ok( hr == S_OK, "got %08x\n", hr );
+
+        check_enum_cache( cache, enum_expect + data[i].enum_start , data[i].enum_num );
+
+        IOleCache2_QueryInterface( cache, &IID_IPersistStorage, (void **) &persist );
+        hr = IPersistStorage_GetClassID( persist, &clsid );
+        ok( hr == S_OK, "got %08x\n", hr );
+        ok( IsEqualCLSID( &clsid, data[i].clsid ), "class id mismatch %s %s\n", wine_dbgstr_guid( &clsid ),
+            wine_dbgstr_guid( data[i].clsid ) );
+
+        IPersistStorage_Release( persist );
+        IOleCache2_Release( cache );
+    }
+}
+
+static void test_data_cache_initnew(void)
+{
+    HRESULT hr;
+    IOleCache2 *cache;
+    IPersistStorage *persist;
+    IStorage *stg_dib, *stg_mf, *stg_wine;
+    CLSID clsid;
+    static const STATDATA initnew_expect[] =
+    {
+        {{ CF_DIB,          0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL }, 0, NULL, 1 },
+        {{ CF_BITMAP,       0, DVASPECT_CONTENT, -1, TYMED_GDI },     0, NULL, 1 },
+    };
+    static const STATDATA initnew2_expect[] =
+    {
+        {{ CF_METAFILEPICT, 0, DVASPECT_CONTENT, -1, TYMED_MFPICT },  0, NULL, 1 },
+        {{ CF_DIB,          0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL }, 0, NULL, 2 },
+        {{ CF_BITMAP,       0, DVASPECT_CONTENT, -1, TYMED_GDI },     0, NULL, 2 },
+    };
+    static const STATDATA initnew3_expect[] =
+    {
+        {{ CF_DIB,          0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL }, 0, NULL, 1 },
+        {{ CF_BITMAP,       0, DVASPECT_CONTENT, -1, TYMED_GDI },     0, NULL, 1 },
+        {{ CF_DIB,          0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL }, 0, NULL, 2 },
+        {{ CF_BITMAP,       0, DVASPECT_CONTENT, -1, TYMED_GDI },     0, NULL, 2 },
+        {{ CF_METAFILEPICT, 0, DVASPECT_CONTENT, -1, TYMED_MFPICT },  0, NULL, 3 },
+    };
+    static const STATDATA initnew4_expect[] =
+    {
+        {{ CF_DIB,          0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL }, 0, NULL, 2 },
+        {{ CF_BITMAP,       0, DVASPECT_CONTENT, -1, TYMED_GDI },     0, NULL, 2 },
+        {{ CF_METAFILEPICT, 0, DVASPECT_CONTENT, -1, TYMED_MFPICT },  0, NULL, 3 },
+        {{ CF_DIB,          0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL }, 0, NULL, 4 },
+        {{ CF_BITMAP,       0, DVASPECT_CONTENT, -1, TYMED_GDI },     0, NULL, 4 },
+    };
+
+    hr = StgCreateDocfile( NULL, STGM_READWRITE | STGM_SHARE_EXCLUSIVE | STGM_CREATE | STGM_DELETEONRELEASE, 0, &stg_dib );
+    ok( hr == S_OK, "got %08x\n", hr);
+    hr = IStorage_SetClass( stg_dib, &CLSID_Picture_Dib );
+    ok( hr == S_OK, "got %08x\n", hr);
+
+    hr = StgCreateDocfile( NULL, STGM_READWRITE | STGM_SHARE_EXCLUSIVE | STGM_CREATE | STGM_DELETEONRELEASE, 0, &stg_mf );
+    ok( hr == S_OK, "got %08x\n", hr);
+    hr = IStorage_SetClass( stg_mf, &CLSID_Picture_Metafile );
+    ok( hr == S_OK, "got %08x\n", hr);
+
+    hr = StgCreateDocfile( NULL, STGM_READWRITE | STGM_SHARE_EXCLUSIVE | STGM_CREATE | STGM_DELETEONRELEASE, 0, &stg_wine );
+    ok( hr == S_OK, "got %08x\n", hr);
+    hr = IStorage_SetClass( stg_wine, &CLSID_WineTestOld );
+    ok( hr == S_OK, "got %08x\n", hr);
+
+    hr = CreateDataCache( NULL, &CLSID_WineTestOld, &IID_IOleCache2, (void **)&cache );
+    ok( hr == S_OK, "got %08x\n", hr );
+    IOleCache2_QueryInterface( cache, &IID_IPersistStorage, (void **) &persist );
+
+    hr = IPersistStorage_InitNew( persist, stg_dib );
+    ok( hr == S_OK, "got %08x\n", hr);
+
+    hr = IPersistStorage_GetClassID( persist, &clsid );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( IsEqualCLSID( &clsid, &CLSID_Picture_Dib ), "got %s\n", wine_dbgstr_guid( &clsid ) );
+
+    check_enum_cache( cache, initnew_expect, 2 );
+
+    hr = IPersistStorage_InitNew( persist, stg_mf );
+    ok( hr == CO_E_ALREADYINITIALIZED, "got %08x\n", hr);
+
+    hr = IPersistStorage_HandsOffStorage( persist );
+    ok( hr == S_OK, "got %08x\n", hr);
+
+    hr = IPersistStorage_GetClassID( persist, &clsid );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( IsEqualCLSID( &clsid, &CLSID_Picture_Dib ), "got %s\n", wine_dbgstr_guid( &clsid ) );
+
+    hr = IPersistStorage_InitNew( persist, stg_mf );
+    ok( hr == S_OK, "got %08x\n", hr);
+
+    hr = IPersistStorage_GetClassID( persist, &clsid );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( IsEqualCLSID( &clsid, &CLSID_Picture_Metafile ), "got %s\n", wine_dbgstr_guid( &clsid ) );
+
+    check_enum_cache( cache, initnew2_expect, 3 );
+
+    hr = IPersistStorage_HandsOffStorage( persist );
+    ok( hr == S_OK, "got %08x\n", hr);
+
+    hr = IPersistStorage_InitNew( persist, stg_dib );
+    ok( hr == S_OK, "got %08x\n", hr);
+
+    hr = IPersistStorage_GetClassID( persist, &clsid );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( IsEqualCLSID( &clsid, &CLSID_Picture_Dib ), "got %s\n", wine_dbgstr_guid( &clsid ) );
+
+    check_enum_cache( cache, initnew3_expect, 5 );
+
+    hr = IPersistStorage_HandsOffStorage( persist );
+    ok( hr == S_OK, "got %08x\n", hr);
+
+    hr = IPersistStorage_InitNew( persist, stg_wine );
+    ok( hr == S_OK, "got %08x\n", hr);
+
+    hr = IPersistStorage_GetClassID( persist, &clsid );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( IsEqualCLSID( &clsid, &CLSID_WineTestOld ), "got %s\n", wine_dbgstr_guid( &clsid ) );
+
+    check_enum_cache( cache, initnew4_expect, 5 );
+
+    IStorage_Release( stg_wine );
+    IStorage_Release( stg_mf );
+    IStorage_Release( stg_dib );
+
+    IPersistStorage_Release( persist );
+    IOleCache2_Release( cache );
+}
+
+static void test_data_cache_updatecache( void )
+{
+    HRESULT hr;
+    IOleCache2 *cache;
+    FORMATETC fmt;
+    DWORD conn[4];
+
+    static const struct expected_method methods_dib[] =
+    {
+        { "DataObject_GetData", 0, { CF_DIB,          NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL } },
+        { "DataObject_GetData", 0, { CF_BITMAP,       NULL, DVASPECT_CONTENT, -1, TYMED_GDI } },
+        { NULL }
+    };
+
+    static const struct expected_method methods_dib_emf[] =
+    {
+        { "DataObject_GetData", 0, { CF_DIB,          NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL } },
+        { "DataObject_GetData", 0, { CF_ENHMETAFILE,  NULL, DVASPECT_CONTENT, -1, TYMED_ENHMF } },
+        { "DataObject_GetData", 0, { CF_METAFILEPICT, NULL, DVASPECT_CONTENT, -1, TYMED_MFPICT } },
+        { NULL }
+    };
+    static const struct expected_method methods_dib_wmf[] =
+    {
+        { "DataObject_GetData", 0, { CF_DIB,          NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL } },
+        { "DataObject_GetData", 0, { CF_METAFILEPICT, NULL, DVASPECT_CONTENT, -1, TYMED_MFPICT } },
+        { NULL }
+    };
+    static const struct expected_method methods_viewcache[] =
+    {
+        { "DataObject_QueryGetData", 0, { CF_METAFILEPICT, NULL, DVASPECT_CONTENT, -1, TYMED_MFPICT } },
+        { "DataObject_QueryGetData", 0, { CF_ENHMETAFILE,  NULL, DVASPECT_CONTENT, -1, TYMED_ENHMF } },
+        { "DataObject_QueryGetData", 0, { CF_DIB,          NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL } },
+        { "DataObject_QueryGetData", 0, { CF_BITMAP,       NULL, DVASPECT_CONTENT, -1, TYMED_GDI } },
+        { NULL }
+    };
+    static const struct expected_method methods_viewcache_with_dib[] =
+    {
+        { "DataObject_QueryGetData", 0, { CF_METAFILEPICT, NULL, DVASPECT_CONTENT, -1, TYMED_MFPICT } },
+        { "DataObject_QueryGetData", 0, { CF_ENHMETAFILE,  NULL, DVASPECT_CONTENT, -1, TYMED_ENHMF } },
+        { "DataObject_QueryGetData", 0, { CF_DIB,          NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL } },
+        { "DataObject_GetData",      0, { CF_DIB,          NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL } },
+        { NULL }
+    };
+    static const struct expected_method methods_flags_all[] =
+    {
+        { "DataObject_GetData", 0, { CF_DIB,          NULL, DVASPECT_CONTENT,   -1, TYMED_HGLOBAL } },
+        { "DataObject_GetData", 0, { CF_ENHMETAFILE,  NULL, DVASPECT_CONTENT,   -1, TYMED_ENHMF } },
+        { "DataObject_GetData", 0, { CF_METAFILEPICT, NULL, DVASPECT_CONTENT,   -1, TYMED_MFPICT } },
+        { "DataObject_GetData", 0, { CF_METAFILEPICT, NULL, DVASPECT_CONTENT,   -1, TYMED_MFPICT } },
+        { NULL }
+    };
+    static const struct expected_method methods_flags_ifblank_1[] =
+    {
+        { "DataObject_GetData", 0, { CF_METAFILEPICT, NULL, DVASPECT_CONTENT,   -1, TYMED_MFPICT } },
+        { NULL }
+    };
+    static const struct expected_method methods_flags_ifblank_2[] =
+    {
+        { "DataObject_GetData", 0, { CF_DIB,          NULL, DVASPECT_CONTENT,   -1, TYMED_HGLOBAL } },
+        { "DataObject_GetData", 0, { CF_METAFILEPICT, NULL, DVASPECT_CONTENT,   -1, TYMED_MFPICT } },
+        { NULL }
+    };
+    static const struct expected_method methods_flags_normal[] =
+    {
+        { "DataObject_GetData", 0, { CF_DIB,          NULL, DVASPECT_CONTENT,   -1, TYMED_HGLOBAL } },
+        { NULL }
+    };
+    static const struct expected_method methods_initcache[] =
+    {
+        { "DataObject_GetData", 0, { CF_DIB,          NULL, DVASPECT_CONTENT,   -1, TYMED_HGLOBAL } },
+        { "DataObject_GetData", 0, { CF_METAFILEPICT, NULL, DVASPECT_CONTENT,   -1, TYMED_MFPICT } },
+        { NULL }
+    };
+    static const struct expected_method methods_empty[] =
+    {
+        { NULL }
+    };
+
+    static STATDATA view_cache[] =
+    {
+        {{ 0,          0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL }, 0, NULL, 0 }
+    };
+    static STATDATA view_cache_after_dib[] =
+    {
+        {{ CF_DIB,          0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL }, 0, NULL, 0 },
+        {{ CF_BITMAP,       0, DVASPECT_CONTENT, -1, TYMED_GDI },     0, NULL, 0 }
+    };
+
+    static FORMATETC dib_fmt[] =
+    {
+        { CF_DIB,       NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL },
+        { 0 }
+    };
+
+    hr = CreateDataCache( NULL, &CLSID_WineTestOld, &IID_IOleCache2, (void **)&cache );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* No cache slots */
+    g_dataobject_fmts = NULL;
+    expected_method_list = NULL;
+
+    hr = IOleCache2_UpdateCache( cache, &DataObject, UPDFCACHE_ALL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* A dib cache slot */
+    fmt.cfFormat = CF_DIB;
+    fmt.ptd = NULL;
+    fmt.dwAspect = DVASPECT_CONTENT;
+    fmt.lindex = -1;
+    fmt.tymed = TYMED_HGLOBAL;
+
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn[0] );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    expected_method_list = methods_dib;
+
+    hr = IOleCache2_UpdateCache( cache, &DataObject, UPDFCACHE_ALL, NULL );
+    ok( hr == CACHE_E_NOCACHE_UPDATED, "got %08x\n", hr );
+
+    CHECK_NO_EXTRA_METHODS();
+
+    /* Now with a dib available */
+    g_dataobject_fmts = dib_fmt;
+    expected_method_list = methods_dib;
+
+    hr = IOleCache2_UpdateCache( cache, &DataObject, UPDFCACHE_ALL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* Add an EMF cache slot */
+    fmt.cfFormat = CF_ENHMETAFILE;
+    fmt.ptd = NULL;
+    fmt.dwAspect = DVASPECT_CONTENT;
+    fmt.lindex = -1;
+    fmt.tymed = TYMED_ENHMF;
+
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn[1] );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    g_dataobject_fmts = dib_fmt;
+    expected_method_list = methods_dib_emf;
+
+    /* Two slots to fill, only the dib will succeed */
+    hr = IOleCache2_UpdateCache( cache, &DataObject, UPDFCACHE_ALL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    CHECK_NO_EXTRA_METHODS();
+
+    /* Replace the emf slot with a wmf */
+    hr = IOleCache2_Uncache( cache, conn[1] );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    fmt.cfFormat = CF_METAFILEPICT;
+    fmt.ptd = NULL;
+    fmt.dwAspect = DVASPECT_CONTENT;
+    fmt.lindex = -1;
+    fmt.tymed = TYMED_MFPICT;
+
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn[1] );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    g_dataobject_fmts = dib_fmt;
+    expected_method_list = methods_dib_wmf;
+
+    hr = IOleCache2_UpdateCache( cache, &DataObject, UPDFCACHE_ALL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = IOleCache2_Uncache( cache, conn[1] );
+    ok( hr == S_OK, "got %08x\n", hr );
+    hr = IOleCache2_Uncache( cache, conn[0] );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* View caching */
+    fmt.cfFormat = 0;
+    fmt.ptd = NULL;
+    fmt.dwAspect = DVASPECT_CONTENT;
+    fmt.lindex = -1;
+    fmt.tymed = TYMED_HGLOBAL;
+
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn[0] );
+    ok( hr == S_OK, "got %08x\n", hr );
+    view_cache[0].dwConnection = conn[0];
+
+    g_dataobject_fmts = NULL;
+    expected_method_list = methods_viewcache;
+
+    hr = IOleCache2_UpdateCache( cache, &DataObject, UPDFCACHE_ALL, NULL );
+    ok( hr == CACHE_E_NOCACHE_UPDATED, "got %08x\n", hr );
+
+    CHECK_NO_EXTRA_METHODS();
+    check_enum_cache( cache, view_cache, 1 );
+
+    g_dataobject_fmts = dib_fmt;
+    expected_method_list = methods_viewcache_with_dib;
+
+    hr = IOleCache2_UpdateCache( cache, &DataObject, UPDFCACHE_ALL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    CHECK_NO_EXTRA_METHODS();
+    view_cache_after_dib[0].dwConnection = view_cache_after_dib[1].dwConnection = view_cache[0].dwConnection;
+    check_enum_cache( cache, view_cache_after_dib, 2 );
+
+    hr = IOleCache2_Uncache( cache, conn[0] );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* Try some different flags */
+
+    fmt.cfFormat = CF_DIB;
+    fmt.ptd = NULL;
+    fmt.dwAspect = DVASPECT_CONTENT;
+    fmt.lindex = -1;
+    fmt.tymed = TYMED_HGLOBAL;
+
+    hr = IOleCache2_Cache( cache, &fmt, 0, &conn[0] );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    fmt.cfFormat = CF_ENHMETAFILE;
+    fmt.ptd = NULL;
+    fmt.dwAspect = DVASPECT_CONTENT;
+    fmt.lindex = -1;
+    fmt.tymed = TYMED_ENHMF;
+
+    hr = IOleCache2_Cache( cache, &fmt, ADVF_NODATA, &conn[1] );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    fmt.cfFormat = CF_METAFILEPICT;
+    fmt.ptd = NULL;
+    fmt.dwAspect = DVASPECT_CONTENT;
+    fmt.lindex = -1;
+    fmt.tymed = TYMED_MFPICT;
+
+    hr = IOleCache2_Cache( cache, &fmt, ADVFCACHE_ONSAVE, &conn[2] );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    g_dataobject_fmts = dib_fmt;
+    expected_method_list = methods_flags_all;
+
+    hr = IOleCache2_UpdateCache( cache, &DataObject, UPDFCACHE_ALL, NULL );
+
+    CHECK_NO_EXTRA_METHODS();
+
+    expected_method_list = methods_flags_all;
+
+    hr = IOleCache2_UpdateCache( cache, &DataObject, UPDFCACHE_ALL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    CHECK_NO_EXTRA_METHODS();
+
+    expected_method_list = methods_flags_ifblank_1;
+
+    hr = IOleCache2_UpdateCache( cache, &DataObject, UPDFCACHE_IFBLANK , NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    CHECK_NO_EXTRA_METHODS();
+
+    hr = IOleCache2_DiscardCache( cache, DISCARDCACHE_NOSAVE );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    expected_method_list = methods_flags_ifblank_2;
+
+    hr = IOleCache2_UpdateCache( cache, &DataObject, UPDFCACHE_IFBLANK , NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    CHECK_NO_EXTRA_METHODS();
+
+    hr = IOleCache2_DiscardCache( cache, DISCARDCACHE_NOSAVE );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    expected_method_list = methods_flags_all;
+
+    hr = IOleCache2_UpdateCache( cache, &DataObject, UPDFCACHE_IFBLANK | UPDFCACHE_NODATACACHE, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    CHECK_NO_EXTRA_METHODS();
+
+    expected_method_list = methods_empty;
+
+    hr = IOleCache2_UpdateCache( cache, &DataObject, UPDFCACHE_ONLYIFBLANK | UPDFCACHE_NORMALCACHE, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    CHECK_NO_EXTRA_METHODS();
+
+    hr = IOleCache2_DiscardCache( cache, DISCARDCACHE_NOSAVE );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    expected_method_list = methods_flags_normal;
+
+    hr = IOleCache2_UpdateCache( cache, &DataObject, UPDFCACHE_ONLYIFBLANK | UPDFCACHE_NORMALCACHE, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    CHECK_NO_EXTRA_METHODS();
+
+    expected_method_list = methods_initcache;
+
+    hr = IOleCache2_InitCache( cache, &DataObject );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    CHECK_NO_EXTRA_METHODS();
+
+    IOleCache2_Release( cache );
 }
 
 static void test_default_handler(void)
@@ -2384,9 +3304,12 @@ static void test_OleDraw(void)
     ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
 }
 
+static const WCHAR olepres0W[] = {2,'O','l','e','P','r','e','s','0','0','0',0};
 static const WCHAR comp_objW[] = {1,'C','o','m','p','O','b','j',0};
 static IStream *comp_obj_stream;
 static IStream *ole_stream;
+static IStream *olepres_stream;
+static IStream *contents_stream;
 
 static HRESULT WINAPI Storage_QueryInterface(IStorage *iface, REFIID riid, void **ppvObject)
 {
@@ -2412,18 +3335,40 @@ static HRESULT WINAPI Storage_CreateStream(IStorage *iface, LPCOLESTR pwcsName, 
     LARGE_INTEGER pos = {{0}};
     HRESULT hr;
 
-    CHECK_EXPECT(Storage_CreateStream_CompObj);
-    ok(!lstrcmpW(pwcsName, comp_objW), "pwcsName = %s\n", wine_dbgstr_w(pwcsName));
-    todo_wine ok(grfMode == (STGM_CREATE|STGM_SHARE_EXCLUSIVE|STGM_READWRITE), "grfMode = %x\n", grfMode);
+    if (!lstrcmpW(pwcsName, comp_objW))
+    {
+        CHECK_EXPECT(Storage_CreateStream_CompObj);
+        *ppstm = comp_obj_stream;
+
+        todo_wine ok(grfMode == (STGM_CREATE|STGM_SHARE_EXCLUSIVE|STGM_READWRITE), "grfMode = %x\n", grfMode);
+    }
+    else if (!lstrcmpW(pwcsName, olepres0W))
+    {
+        CHECK_EXPECT(Storage_CreateStream_OlePres);
+        *ppstm = olepres_stream;
+
+        todo_wine ok(grfMode == (STGM_SHARE_EXCLUSIVE|STGM_READWRITE), "grfMode = %x\n", grfMode);
+    }
+    else
+    {
+todo_wine
+        ok(0, "unexpected stream name %s\n", wine_dbgstr_w(pwcsName));
+#if 0   /* FIXME: return NULL once Wine is fixed */
+        *ppstm = NULL;
+        return E_NOTIMPL;
+#else
+        *ppstm = contents_stream;
+#endif
+    }
+
     ok(!reserved1, "reserved1 = %x\n", reserved1);
     ok(!reserved2, "reserved2 = %x\n", reserved2);
     ok(!!ppstm, "ppstm = NULL\n");
 
-    *ppstm = comp_obj_stream;
-    IStream_AddRef(comp_obj_stream);
-    hr = IStream_Seek(comp_obj_stream, pos, STREAM_SEEK_SET, NULL);
+    IStream_AddRef(*ppstm);
+    hr = IStream_Seek(*ppstm, pos, STREAM_SEEK_SET, NULL);
     ok(hr == S_OK, "IStream_Seek returned %x\n", hr);
-    hr = IStream_SetSize(comp_obj_stream, size);
+    hr = IStream_SetSize(*ppstm, size);
     ok(hr == S_OK, "IStream_SetSize returned %x\n", hr);
     return S_OK;
 }
@@ -2450,11 +3395,30 @@ static HRESULT WINAPI Storage_OpenStream(IStorage *iface, LPCOLESTR pwcsName, vo
         return S_OK;
     }else if(!lstrcmpW(pwcsName, ole1W)) {
         CHECK_EXPECT(Storage_OpenStream_Ole);
+
+        if (!ole_stream)
+        {
+            ok(grfMode == (STGM_SHARE_EXCLUSIVE|STGM_READ), "grfMode = %x\n", grfMode);
+
+            *ppstm = NULL;
+            return STG_E_FILENOTFOUND;
+        }
+
         ok(grfMode == (STGM_SHARE_EXCLUSIVE|STGM_READWRITE), "grfMode = %x\n", grfMode);
 
         *ppstm = ole_stream;
         IStream_AddRef(ole_stream);
         hr = IStream_Seek(ole_stream, pos, STREAM_SEEK_SET, NULL);
+        ok(hr == S_OK, "IStream_Seek returned %x\n", hr);
+        return S_OK;
+
+    }else if(!lstrcmpW(pwcsName, olepres0W)) {
+        CHECK_EXPECT(Storage_OpenStream_OlePres);
+        ok(grfMode == (STGM_SHARE_EXCLUSIVE|STGM_READWRITE), "grfMode = %x\n", grfMode);
+
+        *ppstm = olepres_stream;
+        IStream_AddRef(olepres_stream);
+        hr = IStream_Seek(olepres_stream, pos, STREAM_SEEK_SET, NULL);
         ok(hr == S_OK, "IStream_Seek returned %x\n", hr);
         return S_OK;
     }
@@ -2507,8 +3471,20 @@ static HRESULT WINAPI Storage_EnumElements(IStorage *iface, DWORD reserved1, voi
 
 static HRESULT WINAPI Storage_DestroyElement(IStorage *iface, LPCOLESTR pwcsName)
 {
-    ok(0, "unexpected call to DestroyElement\n");
-    return E_NOTIMPL;
+    char name[32];
+    int stream_n, cmp;
+
+    CHECK_EXPECT2(Storage_DestroyElement);
+    cmp = CompareStringW(LOCALE_NEUTRAL, 0, pwcsName, 8, olepres0W, 8);
+    ok(cmp == CSTR_EQUAL,
+       "unexpected call to DestroyElement(%s)\n", wine_dbgstr_w(pwcsName));
+
+    WideCharToMultiByte(CP_ACP, 0, pwcsName, -1, name, sizeof(name), NULL, NULL);
+    stream_n = atol(name + 8);
+    if (stream_n <= Storage_DestroyElement_limit)
+        return S_OK;
+
+    return STG_E_FILENOTFOUND;
 }
 
 static HRESULT WINAPI Storage_RenameElement(IStorage *iface, LPCOLESTR pwcsOldName, LPCOLESTR pwcsNewName)
@@ -2526,7 +3502,8 @@ static HRESULT WINAPI Storage_SetElementTimes(IStorage *iface, LPCOLESTR pwcsNam
 static HRESULT WINAPI Storage_SetClass(IStorage *iface, REFCLSID clsid)
 {
     CHECK_EXPECT(Storage_SetClass);
-    ok(IsEqualIID(clsid, &CLSID_WineTest), "clsid = %s\n", wine_dbgstr_guid(clsid));
+    ok(IsEqualIID(clsid, Storage_SetClass_CLSID), "expected %s, got %s\n",
+       wine_dbgstr_guid(Storage_SetClass_CLSID), wine_dbgstr_guid(clsid));
     return S_OK;
 }
 
@@ -2741,6 +3718,1071 @@ static void test_OleDoAutoConvert(void)
     RegCloseKey(root);
 }
 
+/* 1x1 pixel bmp */
+static const unsigned char bmpimage[] =
+{
+    0x42,0x4d,0x42,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x3e,0x00,0x00,0x00,0x28,0x00,
+    0x00,0x00,0x01,0x00,0x00,0x00,0x01,0x00,
+    0x00,0x00,0x01,0x00,0x01,0x00,0x00,0x00,
+    0x00,0x00,0x04,0x00,0x00,0x00,0x12,0x0b,
+    0x00,0x00,0x12,0x0b,0x00,0x00,0x02,0x00,
+    0x00,0x00,0x02,0x00,0x00,0x00,0xff,0xff,
+    0xff,0x00,0xff,0xff,0xff,0x00,0x00,0x00,
+    0x00,0x00
+};
+
+static const unsigned char mf_blank_bits[] =
+{
+    0x01,0x00,0x09,0x00,0x00,0x03,0x0c,0x00,
+    0x00,0x00,0x00,0x00,0x03,0x00,0x00,0x00,
+    0x00,0x00,0x03,0x00,0x00,0x00,0x00,0x00
+};
+
+static void test_data_cache_save(void)
+{
+    static const WCHAR contentsW[] = { 'C','o','n','t','e','n','t','s',0 };
+    HRESULT hr;
+    ILockBytes *ilb;
+    IStorage *doc;
+    IStream *stm;
+    IOleCache2 *cache;
+    IPersistStorage *stg;
+    DWORD clipformat[2];
+    PresentationDataHeader hdr;
+
+    hr = CreateILockBytesOnHGlobal(0, TRUE, &ilb);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+    hr = StgCreateDocfileOnILockBytes(ilb, STGM_CREATE | STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0,  &doc);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+
+    ILockBytes_Release(ilb);
+
+    hr = IStorage_SetClass(doc, &CLSID_WineTest);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+
+    hr = IStorage_CreateStream(doc, contentsW, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stm);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+    hr = IStream_Write(stm, bmpimage, sizeof(bmpimage), NULL);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+    IStream_Release(stm);
+
+    hr = IStorage_CreateStream(doc, olepres0W, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stm);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+
+    clipformat[0] = -1;
+    clipformat[1] = CF_METAFILEPICT;
+    hr = IStream_Write(stm, clipformat, sizeof(clipformat), NULL);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+
+    hdr.tdSize = sizeof(hdr.tdSize);
+    hdr.dvAspect = DVASPECT_CONTENT;
+    hdr.lindex = -1;
+    hdr.advf = ADVF_PRIMEFIRST;
+    hdr.unknown7 = 0;
+    hdr.dwObjectExtentX = 0;
+    hdr.dwObjectExtentY = 0;
+    hdr.dwSize = sizeof(mf_blank_bits);
+    hr = IStream_Write(stm, &hdr, sizeof(hdr), NULL);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+    hr = IStream_Write(stm, mf_blank_bits, sizeof(mf_blank_bits), NULL);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+
+    IStream_Release(stm);
+
+    hr = CreateDataCache(NULL, &CLSID_NULL, &IID_IUnknown, (void **)&cache);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+    hr = IOleCache2_QueryInterface(cache, &IID_IPersistStorage, (void **)&stg);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+    hr = IPersistStorage_Load(stg, doc);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+
+    IStorage_Release(doc);
+
+    hr = IPersistStorage_IsDirty(stg);
+    ok(hr == S_FALSE, "unexpected %#x\n", hr);
+
+    ole_stream = NULL;
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &olepres_stream);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+
+    /* FIXME: remove this stream once Wine is fixed */
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &contents_stream);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+
+    SET_EXPECT(Storage_CreateStream_OlePres);
+    SET_EXPECT(Storage_OpenStream_OlePres);
+    SET_EXPECT(Storage_OpenStream_Ole);
+    SET_EXPECT(Storage_DestroyElement);
+    Storage_DestroyElement_limit = 50;
+    Storage_SetClass_CLSID = &CLSID_NULL;
+    trace("IPersistStorage_Save:\n");
+    hr = IPersistStorage_Save(stg, &Storage, FALSE);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+    CHECK_CALLED(Storage_CreateStream_OlePres);
+todo_wine
+    CHECK_CALLED(Storage_OpenStream_OlePres);
+todo_wine
+    CHECK_CALLED(Storage_OpenStream_Ole);
+todo_wine
+    CHECK_CALLED(Storage_DestroyElement);
+
+    IStream_Release(olepres_stream);
+    IStream_Release(contents_stream);
+
+    IPersistStorage_Release(stg);
+    IOleCache2_Release(cache);
+}
+
+#define MAX_STREAM 16
+
+struct stream_def
+{
+    const char *name;
+    int cf;
+    DVASPECT dvAspect;
+    ADVF advf;
+    const void *data;
+    size_t data_size;
+};
+
+struct storage_def
+{
+    const CLSID *clsid;
+    int stream_count;
+    struct stream_def stream[MAX_STREAM];
+};
+
+static const struct storage_def stg_def_0 =
+{
+    &CLSID_NULL, 1,
+    {{ "Contents", -1, 0, 0, bmpimage, sizeof(bmpimage) }}
+};
+static const struct storage_def stg_def_0_saved =
+{
+    &CLSID_NULL, 0, {{ 0 }}
+};
+static const struct storage_def stg_def_1 =
+{
+    &CLSID_NULL, 2,
+    {{ "Contents", -1, 0, 0, NULL, 0 },
+    { "\2OlePres000", 0, DVASPECT_ICON, ADVF_PRIMEFIRST | ADVF_ONLYONCE, NULL, 0 }}
+};
+static const struct storage_def stg_def_1_saved =
+{
+    &CLSID_NULL, 1,
+    {{ "\2OlePres000", 0, DVASPECT_ICON, ADVF_PRIMEFIRST | ADVF_ONLYONCE, NULL, 0 }}
+};
+static const struct storage_def stg_def_2 =
+{
+    &CLSID_ManualResetEvent, 2,
+    {{ "Contents", -1, 0, 0, bmpimage, sizeof(bmpimage) },
+    { "\2OlePres000", 0, DVASPECT_ICON, ADVF_PRIMEFIRST | ADVF_ONLYONCE, NULL, 0 }}
+};
+static const struct storage_def stg_def_2_saved =
+{
+    &CLSID_NULL, 1,
+    {{ "\2OlePres000", 0, DVASPECT_ICON, ADVF_PRIMEFIRST | ADVF_ONLYONCE, NULL, 0 }}
+};
+static const struct storage_def stg_def_3 =
+{
+    &CLSID_NULL, 5,
+    {{ "Contents", -1, 0, 0, bmpimage, sizeof(bmpimage) },
+    { "\2OlePres000", 0, DVASPECT_ICON, ADVF_PRIMEFIRST | ADVF_ONLYONCE, NULL, 0 },
+    { "\2OlePres001", CF_METAFILEPICT, DVASPECT_CONTENT, ADVF_PRIMEFIRST, mf_blank_bits, sizeof(mf_blank_bits) },
+    { "\2OlePres002", CF_DIB, DVASPECT_CONTENT, ADVF_PRIMEFIRST, bmpimage, sizeof(bmpimage) },
+    { "MyStream", -1, 0, 0, "Hello World!", 13 }}
+};
+static const struct storage_def stg_def_3_saved =
+{
+    &CLSID_NULL, 3,
+    {{ "\2OlePres000", 0, DVASPECT_ICON, ADVF_PRIMEFIRST | ADVF_ONLYONCE, NULL, 0 },
+    { "\2OlePres001", CF_METAFILEPICT, DVASPECT_CONTENT, ADVF_PRIMEFIRST, mf_blank_bits, sizeof(mf_blank_bits) },
+    { "\2OlePres002", CF_DIB, DVASPECT_CONTENT, ADVF_PRIMEFIRST, bmpimage, sizeof(bmpimage) }}
+};
+static const struct storage_def stg_def_4 =
+{
+    &CLSID_Picture_EnhMetafile, 5,
+    {{ "Contents", -1, 0, 0, bmpimage, sizeof(bmpimage) },
+    { "\2OlePres000", 0, DVASPECT_ICON, ADVF_PRIMEFIRST | ADVF_ONLYONCE, NULL, 0 },
+    { "\2OlePres001", CF_METAFILEPICT, DVASPECT_CONTENT, ADVF_PRIMEFIRST, mf_blank_bits, sizeof(mf_blank_bits) },
+    { "\2OlePres002", CF_DIB, DVASPECT_CONTENT, ADVF_PRIMEFIRST, bmpimage, sizeof(bmpimage) },
+    { "MyStream", -1, 0, 0, "Hello World!", 13 }}
+};
+static const struct storage_def stg_def_4_saved =
+{
+    &CLSID_NULL, 1,
+    {{ "\2OlePres000", 0, DVASPECT_ICON, ADVF_PRIMEFIRST | ADVF_ONLYONCE, NULL, 0 }}
+};
+static const struct storage_def stg_def_5 =
+{
+    &CLSID_Picture_Dib, 5,
+    {{ "Contents", -1, 0, 0, bmpimage, sizeof(bmpimage) },
+    { "\2OlePres002", CF_DIB, DVASPECT_CONTENT, ADVF_PRIMEFIRST, bmpimage, sizeof(bmpimage) },
+    { "\2OlePres001", CF_METAFILEPICT, DVASPECT_CONTENT, ADVF_PRIMEFIRST, mf_blank_bits, sizeof(mf_blank_bits) },
+    { "\2OlePres000", 0, DVASPECT_ICON, ADVF_PRIMEFIRST | ADVF_ONLYONCE, NULL, 0 },
+    { "MyStream", -1, 0, 0, "Hello World!", 13 }}
+};
+static const struct storage_def stg_def_5_saved =
+{
+    &CLSID_NULL, 1,
+    {{ "\2OlePres000", 0, DVASPECT_ICON, ADVF_PRIMEFIRST | ADVF_ONLYONCE, NULL, 0 }}
+};
+static const struct storage_def stg_def_6 =
+{
+    &CLSID_Picture_Metafile, 5,
+    {{ "Contents", -1, 0, 0, bmpimage, sizeof(bmpimage) },
+    { "\2OlePres001", CF_METAFILEPICT, DVASPECT_CONTENT, ADVF_PRIMEFIRST, mf_blank_bits, sizeof(mf_blank_bits) },
+    { "\2OlePres000", 0, DVASPECT_ICON, ADVF_PRIMEFIRST | ADVF_ONLYONCE, NULL, 0 },
+    { "\2OlePres002", CF_DIB, DVASPECT_CONTENT, ADVF_PRIMEFIRST, bmpimage, sizeof(bmpimage) },
+    { "MyStream", -1, 0, 0, "Hello World!", 13 }}
+};
+static const struct storage_def stg_def_6_saved =
+{
+    &CLSID_NULL, 1,
+    {{ "\2OlePres000", 0, DVASPECT_ICON, ADVF_PRIMEFIRST | ADVF_ONLYONCE, NULL, 0 }}
+};
+static const struct storage_def stg_def_7 =
+{
+    &CLSID_Picture_Dib, 1,
+    {{ "Contents", -1, 0, 0, bmpimage, sizeof(bmpimage) }}
+};
+static const struct storage_def stg_def_7_saved =
+{
+    &CLSID_NULL, 0, {{ 0 }}
+};
+static const struct storage_def stg_def_8 =
+{
+    &CLSID_Picture_Metafile, 1,
+    {{ "Contents", -1, 0, 0, mf_blank_bits, sizeof(mf_blank_bits) }}
+};
+static const struct storage_def stg_def_8_saved =
+{
+    &CLSID_NULL, 0, {{ 0 }}
+};
+static const struct storage_def stg_def_9 =
+{
+    &CLSID_Picture_EnhMetafile, 1,
+    {{ "Contents", -1, 0, 0, bmpimage, sizeof(bmpimage) }}
+};
+static const struct storage_def stg_def_9_saved =
+{
+    &CLSID_NULL, 0, {{ 0 }}
+};
+
+static int read_clipformat(IStream *stream)
+{
+    HRESULT hr;
+    ULONG bytes;
+    int length, clipformat = -2;
+
+    hr = IStream_Read(stream, &length, sizeof(length), &bytes);
+    if (hr != S_OK || bytes != sizeof(length))
+        return -2;
+    if (length == 0)
+        return 0;
+    if (length == -1)
+    {
+        hr = IStream_Read(stream, &clipformat, sizeof(clipformat), &bytes);
+        if (hr != S_OK || bytes != sizeof(clipformat))
+            return -2;
+    }
+    else
+        ok(0, "unhandled clipformat length %d\n", length);
+
+    return clipformat;
+}
+
+static void check_storage_contents(IStorage *stg, const struct storage_def *stg_def,
+        int *enumerated_streams, int *matched_streams)
+{
+    HRESULT hr;
+    IEnumSTATSTG *enumstg;
+    IStream *stream;
+    STATSTG stat;
+    int i, seen_stream[MAX_STREAM] = { 0 };
+
+    if (winetest_debug > 1)
+        trace("check_storage_contents:\n=============================================\n");
+
+    *enumerated_streams = 0;
+    *matched_streams = 0;
+
+    hr = IStorage_Stat(stg, &stat, STATFLAG_NONAME);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+    ok(IsEqualCLSID(stg_def->clsid, &stat.clsid), "expected %s, got %s\n",
+       wine_dbgstr_guid(stg_def->clsid), wine_dbgstr_guid(&stat.clsid));
+
+    hr = IStorage_EnumElements(stg, 0, NULL, 0, &enumstg);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+
+    for (;;)
+    {
+        ULONG bytes;
+        int clipformat = -1;
+        PresentationDataHeader header;
+        char name[32];
+        BYTE data[1024];
+
+        memset(&header, 0, sizeof(header));
+
+        hr = IEnumSTATSTG_Next(enumstg, 1, &stat, NULL);
+        if(hr == S_FALSE) break;
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+
+        if (winetest_debug > 1)
+            trace("name %s, type %u, size %d, clsid %s\n",
+                wine_dbgstr_w(stat.pwcsName), stat.type, stat.cbSize.u.LowPart, wine_dbgstr_guid(&stat.clsid));
+
+        ok(stat.type == STGTY_STREAM, "unexpected %#x\n", stat.type);
+
+        WideCharToMultiByte(CP_ACP, 0, stat.pwcsName, -1, name, sizeof(name), NULL, NULL);
+
+        hr = IStorage_OpenStream(stg, stat.pwcsName, NULL, STGM_READ | STGM_SHARE_EXCLUSIVE, 0, &stream);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+
+        if (!memcmp(name, "\2OlePres", 8))
+        {
+            ULONG header_size = sizeof(header);
+
+            clipformat = read_clipformat(stream);
+
+            if (clipformat == 0) /* view cache */
+                header_size = FIELD_OFFSET(PresentationDataHeader, unknown7);
+
+            hr = IStream_Read(stream, &header, header_size, &bytes);
+            ok(hr == S_OK, "unexpected %#x\n", hr);
+            ok(bytes == header_size, "read %u bytes, expected %u\n", bytes, header_size);
+
+            if (winetest_debug > 1)
+                trace("header: tdSize %#x, dvAspect %#x, lindex %#x, advf %#x, unknown7 %#x, dwObjectExtentX %#x, dwObjectExtentY %#x, dwSize %#x\n",
+                    header.tdSize, header.dvAspect, header.lindex, header.advf, header.unknown7,
+                    header.dwObjectExtentX, header.dwObjectExtentY, header.dwSize);
+        }
+
+        memset(data, 0, sizeof(data));
+        hr = IStream_Read(stream, data, sizeof(data), &bytes);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+        if (winetest_debug > 1)
+            trace("stream data (%u bytes): %02x %02x %02x %02x\n", bytes, data[0], data[1], data[2], data[3]);
+
+        for (i = 0; i < stg_def->stream_count; i++)
+        {
+            if (seen_stream[i]) continue;
+
+            if (winetest_debug > 1)
+                trace("%s/%s, %d/%d, %d/%d, %d/%d\n",
+                    stg_def->stream[i].name, name,
+                    stg_def->stream[i].cf, clipformat,
+                    stg_def->stream[i].dvAspect, header.dvAspect,
+                    stg_def->stream[i].advf, header.advf);
+
+            if (!strcmp(stg_def->stream[i].name, name) &&
+                stg_def->stream[i].cf == clipformat &&
+                stg_def->stream[i].dvAspect == header.dvAspect &&
+                stg_def->stream[i].advf == header.advf &&
+                stg_def->stream[i].data_size <= bytes &&
+                (!stg_def->stream[i].data_size ||
+                    (!memcmp(stg_def->stream[i].data, data, min(stg_def->stream[i].data_size, bytes)))))
+            {
+                if (winetest_debug > 1)
+                    trace("stream %d matches def stream %d\n", *enumerated_streams, i);
+                seen_stream[i] = 1;
+                *matched_streams += 1;
+            }
+        }
+
+        CoTaskMemFree(stat.pwcsName);
+        IStream_Release(stream);
+
+        *enumerated_streams += 1;
+    }
+}
+
+static HRESULT stgmedium_cmp(const STGMEDIUM *med1, STGMEDIUM *med2)
+{
+    BYTE *data1, *data2;
+    ULONG datasize1, datasize2;
+
+    if (med1->tymed != med2->tymed)
+        return E_FAIL;
+
+    if (med1->tymed == TYMED_MFPICT)
+    {
+        METAFILEPICT *mfpict1 = GlobalLock(U(med1)->hMetaFilePict);
+        METAFILEPICT *mfpict2 = GlobalLock(U(med2)->hMetaFilePict);
+
+        datasize1 = GetMetaFileBitsEx(mfpict1->hMF, 0, NULL);
+        datasize2 = GetMetaFileBitsEx(mfpict2->hMF, 0, NULL);
+        if (datasize1 == datasize2)
+        {
+            data1 = HeapAlloc(GetProcessHeap(), 0, datasize1);
+            data2 = HeapAlloc(GetProcessHeap(), 0, datasize2);
+            GetMetaFileBitsEx(mfpict1->hMF, datasize1, data1);
+            GetMetaFileBitsEx(mfpict2->hMF, datasize2, data2);
+        }
+        else return E_FAIL;
+    }
+    else if (med1->tymed == TYMED_ENHMF)
+    {
+        datasize1 = GetEnhMetaFileBits(med1->hEnhMetaFile, 0, NULL);
+        datasize2 = GetEnhMetaFileBits(med2->hEnhMetaFile, 0, NULL);
+        if (datasize1 == datasize2)
+        {
+            data1 = HeapAlloc(GetProcessHeap(), 0, datasize1);
+            data2 = HeapAlloc(GetProcessHeap(), 0, datasize2);
+            GetEnhMetaFileBits(med1->hEnhMetaFile, datasize1, data1);
+            GetEnhMetaFileBits(med2->hEnhMetaFile, datasize2, data2);
+        }
+        else return E_FAIL;
+    }
+    else if (med1->tymed == TYMED_HGLOBAL)
+    {
+        datasize1 = GlobalSize(med1->hGlobal);
+        datasize2 = GlobalSize(med2->hGlobal);
+
+        if (datasize1 == datasize2)
+        {
+            data1 = GlobalLock(med1->hGlobal);
+            data2 = GlobalLock(med2->hGlobal);
+        }
+        else
+            return E_FAIL;
+    }
+    else
+        return E_NOTIMPL;
+
+    if (memcmp(data1, data2, datasize1) != 0)
+        return E_FAIL;
+
+    if (med1->tymed == TYMED_HGLOBAL)
+    {
+        GlobalUnlock(U(med1)->hGlobal);
+        GlobalUnlock(U(med2)->hGlobal);
+    }
+    else if (med1->tymed == TYMED_MFPICT)
+    {
+        HeapFree(GetProcessHeap(), 0, data1);
+        HeapFree(GetProcessHeap(), 0, data2);
+        GlobalUnlock(U(med1)->hMetaFilePict);
+        GlobalUnlock(U(med2)->hMetaFilePict);
+    }
+    else
+    {
+        HeapFree(GetProcessHeap(), 0, data1);
+        HeapFree(GetProcessHeap(), 0, data2);
+    }
+
+    return S_OK;
+}
+
+static IStorage *create_storage_from_def(const struct storage_def *stg_def)
+{
+    HRESULT hr;
+    IStorage *stg;
+    IStream *stm;
+    int i;
+
+    hr = StgCreateDocfile(NULL, STGM_CREATE | STGM_READWRITE | STGM_SHARE_EXCLUSIVE | STGM_DELETEONRELEASE, 0, &stg);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+
+    hr = IStorage_SetClass(stg, stg_def->clsid);
+    ok(hr == S_OK, "unexpected %#x\n", hr);
+
+    for (i = 0; i < stg_def->stream_count; i++)
+    {
+        WCHAR name[32];
+
+        MultiByteToWideChar(CP_ACP, 0, stg_def->stream[i].name, -1, name, 32);
+        hr = IStorage_CreateStream(stg, name, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stm);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+
+        if (stg_def->stream[i].cf != -1)
+        {
+            int clipformat[2];
+            PresentationDataHeader hdr;
+
+            if (stg_def->stream[i].cf)
+            {
+                clipformat[0] = -1;
+                clipformat[1] = stg_def->stream[i].cf;
+                hr = IStream_Write(stm, clipformat, sizeof(clipformat), NULL);
+            }
+            else
+            {
+                clipformat[0] = 0;
+                hr = IStream_Write(stm, &clipformat[0], sizeof(clipformat[0]), NULL);
+            }
+            ok(hr == S_OK, "unexpected %#x\n", hr);
+
+            hdr.tdSize = sizeof(hdr.tdSize);
+            hdr.dvAspect = stg_def->stream[i].dvAspect;
+            hdr.lindex = -1;
+            hdr.advf = stg_def->stream[i].advf;
+            hdr.unknown7 = 0;
+            hdr.dwObjectExtentX = 0;
+            hdr.dwObjectExtentY = 0;
+            hdr.dwSize = stg_def->stream[i].data_size;
+            hr = IStream_Write(stm, &hdr, sizeof(hdr), NULL);
+            ok(hr == S_OK, "unexpected %#x\n", hr);
+        }
+
+        if (stg_def->stream[i].data_size)
+        {
+            hr = IStream_Write(stm, stg_def->stream[i].data, stg_def->stream[i].data_size, NULL);
+            ok(hr == S_OK, "unexpected %#x\n", hr);
+        }
+
+        IStream_Release(stm);
+    }
+
+    return stg;
+}
+
+static const BYTE dib_inf[] =
+{
+    0x42, 0x4d, 0x3e, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x36, 0x00, 0x00, 0x00
+};
+
+static const BYTE mf_rec[] =
+{
+    0xd7, 0xcd, 0xc6, 0x9a, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x16, 0x00, 0x2d, 0x00, 0x40, 0x02,
+    0x00, 0x00, 0x00, 0x00, 0x6a, 0x55
+};
+
+static void get_stgdef(struct storage_def *stg_def, CLIPFORMAT cf, STGMEDIUM *stg_med, int stm_idx)
+{
+    BYTE *data;
+    int data_size;
+    METAFILEPICT *mfpict;
+    HDC hdc;
+
+    switch (cf)
+    {
+    case CF_DIB:
+        data_size = sizeof(dib);
+        if (!strcmp(stg_def->stream[stm_idx].name, "CONTENTS"))
+        {
+            data_size += sizeof(dib_inf);
+            data = HeapAlloc(GetProcessHeap(), 0, data_size);
+            memcpy(data, dib_inf, sizeof(dib_inf));
+            memcpy(data + sizeof(dib_inf), dib, sizeof(dib));
+        }
+        else
+        {
+            data = HeapAlloc(GetProcessHeap(), 0, data_size);
+            memcpy(data, dib, sizeof(dib));
+        }
+        stg_def->stream[stm_idx].data = data;
+        stg_def->stream[stm_idx].data_size = data_size;
+        break;
+    case CF_METAFILEPICT:
+        mfpict = GlobalLock(U(stg_med)->hMetaFilePict);
+        data_size = GetMetaFileBitsEx(mfpict->hMF, 0, NULL);
+        if (!strcmp(stg_def->stream[stm_idx].name, "CONTENTS"))
+        {
+            data = HeapAlloc(GetProcessHeap(), 0, data_size + sizeof(mf_rec));
+            memcpy(data, mf_rec, sizeof(mf_rec));
+            GetMetaFileBitsEx(mfpict->hMF, data_size, data + sizeof(mf_rec));
+            data_size += sizeof(mf_rec);
+        }
+        else
+        {
+            data = HeapAlloc(GetProcessHeap(), 0, data_size);
+            GetMetaFileBitsEx(mfpict->hMF, data_size, data);
+        }
+        GlobalUnlock(U(stg_med)->hMetaFilePict);
+        stg_def->stream[stm_idx].data_size = data_size;
+        stg_def->stream[stm_idx].data = data;
+        break;
+    case CF_ENHMETAFILE:
+        if (!strcmp(stg_def->stream[stm_idx].name, "CONTENTS"))
+        {
+            data_size = GetEnhMetaFileBits(U(stg_med)->hEnhMetaFile, 0, NULL);
+            data = HeapAlloc(GetProcessHeap(), 0, sizeof(DWORD) + sizeof(ENHMETAHEADER) + data_size);
+            *((DWORD *)data) = sizeof(ENHMETAHEADER);
+            GetEnhMetaFileBits(U(stg_med)->hEnhMetaFile, data_size, data + sizeof(DWORD) + sizeof(ENHMETAHEADER));
+            memcpy(data + sizeof(DWORD), data + sizeof(DWORD) + sizeof(ENHMETAHEADER), sizeof(ENHMETAHEADER));
+            data_size += sizeof(DWORD) + sizeof(ENHMETAHEADER);
+        }
+        else
+        {
+            hdc = GetDC(NULL);
+            data_size = GetWinMetaFileBits(U(stg_med)->hEnhMetaFile, 0, NULL, MM_ANISOTROPIC, hdc);
+            data = HeapAlloc(GetProcessHeap(), 0, data_size);
+            GetWinMetaFileBits(U(stg_med)->hEnhMetaFile, data_size, data, MM_ANISOTROPIC, hdc);
+            ReleaseDC(NULL, hdc);
+        }
+        stg_def->stream[stm_idx].data_size = data_size;
+        stg_def->stream[stm_idx].data = data;
+        break;
+    }
+}
+
+static void get_stgmedium(CLIPFORMAT cfFormat, STGMEDIUM *stgmedium)
+{
+    switch (cfFormat)
+    {
+    case CF_DIB:
+        create_dib(stgmedium);
+        break;
+    case CF_METAFILEPICT:
+        create_mfpict(stgmedium);
+        break;
+    case CF_ENHMETAFILE:
+        create_emf(stgmedium);
+        break;
+    default:
+        ok(0, "cf %x not implemented\n", cfFormat);
+    }
+}
+
+#define MAX_FMTS 5
+static void test_data_cache_save_data(void)
+{
+    HRESULT hr;
+    STGMEDIUM stgmed;
+    ILockBytes *ilb;
+    IStorage *doc;
+    IOleCache2 *cache;
+    IPersistStorage *persist;
+    IDataObject *odata;
+    int enumerated_streams, matched_streams, i;
+    DWORD dummy;
+    STGMEDIUM stgmeds[MAX_FMTS];
+    struct tests_data_cache
+    {
+        FORMATETC fmts[MAX_FMTS];
+        int num_fmts, num_set;
+        const CLSID *clsid;
+        struct storage_def stg_def;
+    };
+
+    static struct tests_data_cache *pdata, data[] =
+    {
+        {
+            {
+                { CF_DIB, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL },
+                { CF_METAFILEPICT, 0, DVASPECT_CONTENT, -1, TYMED_MFPICT },
+                { CF_ENHMETAFILE, 0, DVASPECT_CONTENT, -1, TYMED_ENHMF },
+                { 0, 0, DVASPECT_DOCPRINT, -1, TYMED_HGLOBAL },
+            },
+            4, 3, &CLSID_WineTest,
+            {
+                &CLSID_WineTestOld, 4, { { "\2OlePres000", CF_DIB, DVASPECT_CONTENT, 0, NULL, 0 },
+                                         { "\2OlePres001", CF_METAFILEPICT, DVASPECT_CONTENT, 0, NULL, 0 },
+                                         { "\2OlePres002", CF_ENHMETAFILE, DVASPECT_CONTENT, 0, NULL, 0 },
+                                         { "\2OlePres003", 0, DVASPECT_DOCPRINT, 0, NULL, 0 } }
+            }
+        },
+        /* without setting data */
+        {
+            {
+                { CF_DIB, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL },
+                { CF_METAFILEPICT, 0, DVASPECT_CONTENT, -1, TYMED_MFPICT },
+                { CF_ENHMETAFILE, 0, DVASPECT_CONTENT, -1, TYMED_ENHMF },
+            },
+            3, 0, &CLSID_WineTest,
+            {
+                &CLSID_WineTestOld, 3, { { "\2OlePres000", CF_DIB, DVASPECT_CONTENT, 0, NULL, 0 },
+                                         { "\2OlePres001", CF_METAFILEPICT, DVASPECT_CONTENT, 0, NULL, 0 },
+                                         { "\2OlePres002", CF_ENHMETAFILE, DVASPECT_CONTENT, 0, NULL, 0 } }
+            }
+        },
+        /* static picture clsids */
+        {
+            {
+                { CF_DIB, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL },
+            },
+            1, 1, &CLSID_Picture_Dib,
+            {
+                &CLSID_WineTestOld, 1, { { "CONTENTS", -1, 0, 0, NULL, 0 } }
+            }
+        },
+        {
+            {
+                { CF_METAFILEPICT, 0, DVASPECT_CONTENT, -1, TYMED_MFPICT },
+            },
+            1, 1, &CLSID_Picture_Metafile,
+            {
+                &CLSID_WineTestOld, 1, { { "CONTENTS", -1, 0, 0, NULL, 0 } }
+            }
+        },
+        {
+            {
+                { CF_ENHMETAFILE, 0, DVASPECT_CONTENT, -1, TYMED_ENHMF },
+            },
+            1, 1, &CLSID_Picture_EnhMetafile,
+            {
+                &CLSID_WineTestOld, 1, { { "CONTENTS", -1, 0, 0, NULL, 0 } }
+            }
+        },
+        /* static picture clsids without setting any data */
+        {
+            {
+                { CF_DIB, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL },
+            },
+            1, 0, &CLSID_Picture_Dib,
+            {
+                &CLSID_WineTestOld, 1, { { "CONTENTS", -1, 0, 0, NULL, 0 } }
+            }
+        },
+        {
+            {
+                { CF_METAFILEPICT, 0, DVASPECT_CONTENT, -1, TYMED_MFPICT },
+            },
+            1, 0, &CLSID_Picture_Metafile,
+            {
+                &CLSID_WineTestOld, 1, { { "CONTENTS", -1, 0, 0, NULL, 0 } }
+            }
+        },
+        {
+            {
+                { CF_ENHMETAFILE, 0, DVASPECT_CONTENT, -1, TYMED_ENHMF },
+            },
+            1, 0, &CLSID_Picture_EnhMetafile,
+            {
+                &CLSID_WineTestOld, 1, { { "CONTENTS", -1, 0, 0, NULL, 0 } }
+            }
+        },
+        {
+            {
+                { 0 }
+            }
+        }
+    };
+
+    /* test _Save after caching directly through _Cache + _SetData */
+    for (pdata = data; pdata->clsid != NULL; pdata++)
+    {
+        hr = CreateDataCache(NULL, pdata->clsid, &IID_IOleCache2, (void **)&cache);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+
+        for (i = 0; i < pdata->num_fmts; i++)
+        {
+            hr = IOleCache2_Cache(cache, &pdata->fmts[i], 0, &dummy);
+            ok(SUCCEEDED(hr), "unexpected %#x\n", hr);
+            if (i < pdata->num_set)
+            {
+                get_stgmedium(pdata->fmts[i].cfFormat, &stgmeds[i]);
+                get_stgdef(&pdata->stg_def, pdata->fmts[i].cfFormat, &stgmeds[i], i);
+                hr = IOleCache2_SetData(cache, &pdata->fmts[i], &stgmeds[i], FALSE);
+                ok(hr == S_OK, "unexpected %#x\n", hr);
+            }
+        }
+
+        /* create Storage in memory where we'll save cache */
+        hr = CreateILockBytesOnHGlobal(0, TRUE, &ilb);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+        hr = StgCreateDocfileOnILockBytes(ilb, STGM_CREATE | STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, &doc);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+        ILockBytes_Release(ilb);
+        hr = IStorage_SetClass(doc, &CLSID_WineTestOld);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+
+        hr = IOleCache2_QueryInterface(cache, &IID_IPersistStorage, (void **)&persist);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+
+        /* cache entries are dirty. test saving them to stg */
+        trace("IPersistStorage_Save:\n");
+        hr = IPersistStorage_Save(persist, doc, FALSE);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+
+        hr = IPersistStorage_IsDirty(persist);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+
+        check_storage_contents(doc, &pdata->stg_def, &enumerated_streams, &matched_streams);
+        ok(enumerated_streams == matched_streams, "enumerated %d != matched %d\n",
+           enumerated_streams, matched_streams);
+        ok(enumerated_streams == pdata->stg_def.stream_count, "created %d != def streams %d\n",
+           enumerated_streams, pdata->stg_def.stream_count);
+
+        IPersistStorage_Release(persist);
+        IOleCache2_Release(cache);
+
+        /* now test _Load/_GetData using the storage we used for _Save */
+        hr = CreateDataCache(NULL, pdata->clsid, &IID_IOleCache2, (void **)&cache);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+        hr = IOleCache2_QueryInterface(cache, &IID_IPersistStorage, (void **)&persist);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+
+        hr = IStorage_SetClass(doc, pdata->clsid);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+        trace("IPersistStorage_Load\n");
+        hr = IPersistStorage_Load(persist, doc);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+
+        hr = IOleCache2_QueryInterface(cache, &IID_IDataObject, (void **)&odata);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+        for (i = 0; i < pdata->num_set; i++)
+        {
+            hr = IDataObject_GetData(odata, &pdata->fmts[i], &stgmed);
+            ok(hr == S_OK, "unexpected %#x\n", hr);
+
+            hr = stgmedium_cmp(&stgmeds[i], &stgmed);
+            ok(hr == S_OK, "unexpected %#x\n", hr);
+            ReleaseStgMedium(&stgmed);
+            ReleaseStgMedium(&stgmeds[i]);
+        }
+
+        IDataObject_Release(odata);
+        IPersistStorage_Release(persist);
+        IStorage_Release(doc);
+        IOleCache2_Release(cache);
+        for (i = 0; i < pdata->num_set; i++)
+            HeapFree(GetProcessHeap(), 0, (void *)pdata->stg_def.stream[i].data);
+
+    }
+}
+
+static void test_data_cache_contents(void)
+{
+    HRESULT hr;
+    IStorage *doc1, *doc2;
+    IOleCache2 *cache;
+    IPersistStorage *stg;
+    int i, enumerated_streams, matched_streams;
+    static const struct
+    {
+        const struct storage_def *in;
+        const struct storage_def *out;
+    } test_data[] =
+    {
+        { &stg_def_0, &stg_def_0_saved },
+        { &stg_def_1, &stg_def_1_saved },
+        { &stg_def_2, &stg_def_2_saved },
+        { &stg_def_3, &stg_def_3_saved },
+        { &stg_def_4, &stg_def_4_saved },
+        { &stg_def_5, &stg_def_5_saved },
+        { &stg_def_6, &stg_def_6_saved },
+        { &stg_def_7, &stg_def_7_saved },
+        { &stg_def_8, &stg_def_8_saved },
+        { &stg_def_9, &stg_def_9_saved },
+    };
+
+    for (i = 0; i < ARRAY_SIZE(test_data); i++)
+    {
+        if (winetest_debug > 1)
+            trace("start testing storage def %d\n", i);
+
+        doc1 = create_storage_from_def(test_data[i].in);
+        if (!doc1) continue;
+
+        enumerated_streams = matched_streams = -1;
+        check_storage_contents(doc1, test_data[i].in, &enumerated_streams, &matched_streams);
+        ok(enumerated_streams == matched_streams, "%d in: enumerated %d != matched %d\n", i,
+           enumerated_streams, matched_streams);
+        ok(enumerated_streams == test_data[i].in->stream_count, "%d: created %d != def streams %d\n", i,
+           enumerated_streams, test_data[i].in->stream_count);
+
+        hr = CreateDataCache(NULL, &CLSID_NULL, &IID_IUnknown, (void **)&cache);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+        hr = IOleCache2_QueryInterface(cache, &IID_IPersistStorage, (void **)&stg);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+        hr = IPersistStorage_Load(stg, doc1);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+
+        IStorage_Release(doc1);
+
+        hr = StgCreateDocfile(NULL, STGM_CREATE | STGM_READWRITE | STGM_SHARE_EXCLUSIVE | STGM_DELETEONRELEASE, 0, &doc2);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+
+        hr = IPersistStorage_IsDirty(stg);
+        ok(hr == S_FALSE, "%d: unexpected %#x\n", i, hr);
+
+        hr = IPersistStorage_Save(stg, doc2, FALSE);
+        ok(hr == S_OK, "unexpected %#x\n", hr);
+
+        IPersistStorage_Release(stg);
+
+        enumerated_streams = matched_streams = -1;
+        check_storage_contents(doc2, test_data[i].out, &enumerated_streams, &matched_streams);
+todo_wine_if(!(test_data[i].in == &stg_def_0 || test_data[i].in == &stg_def_1 || test_data[i].in == &stg_def_2))
+        ok(enumerated_streams == matched_streams, "%d out: enumerated %d != matched %d\n", i,
+           enumerated_streams, matched_streams);
+todo_wine_if(!(test_data[i].in == &stg_def_0 || test_data[i].in == &stg_def_4 || test_data[i].in == &stg_def_5
+                 || test_data[i].in == &stg_def_6))
+        ok(enumerated_streams == test_data[i].out->stream_count, "%d: saved streams %d != def streams %d\n", i,
+            enumerated_streams, test_data[i].out->stream_count);
+
+        IStorage_Release(doc2);
+
+        if (winetest_debug > 1)
+            trace("done testing storage def %d\n", i);
+    }
+}
+
+static void test_OleCreateStaticFromData(void)
+{
+    HRESULT hr;
+    IOleObject *ole_obj = NULL;
+    IStorage *storage;
+    ILockBytes *ilb;
+    IPersist *presist;
+    CLSID clsid;
+    STATSTG statstg;
+    int enumerated_streams, matched_streams;
+    STGMEDIUM stgmed;
+    static FORMATETC dib_fmt[] =
+    {
+        { CF_DIB, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL },
+        { 0 }
+    };
+    static FORMATETC emf_fmt[] =
+    {
+        { CF_ENHMETAFILE, NULL, DVASPECT_CONTENT, -1, TYMED_ENHMF },
+        { 0 }
+    };
+    static FORMATETC text_fmt[] =
+    {
+        { CF_TEXT, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL },
+        { 0 }
+    };
+    static const struct expected_method methods_create_from_dib[] =
+    {
+        { "DataObject_EnumFormatEtc", TEST_TODO },
+        { "DataObject_GetDataHere", 0 },
+        { "DataObject_QueryGetData", 0, { CF_METAFILEPICT, NULL, DVASPECT_CONTENT, -1, TYMED_ISTORAGE } },
+        { NULL }
+    };
+    static const struct expected_method methods_createstatic_from_dib[] =
+    {
+        { "DataObject_GetData", 0, { CF_DIB, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL } },
+        { NULL }
+    };
+    static const struct expected_method methods_createstatic_from_emf[] =
+    {
+        { "DataObject_GetData", 0, { CF_ENHMETAFILE, NULL, DVASPECT_CONTENT, -1, TYMED_ENHMF } },
+        { NULL }
+    };
+    static const struct expected_method methods_createstatic_from_text[] =
+    {
+        { "DataObject_GetData", 0, { CF_TEXT, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL } },
+        { NULL }
+    };
+    static struct storage_def stg_def_dib =
+    {
+        &CLSID_Picture_Dib, 3,
+        {{ "\1Ole", -1, 0, 0, NULL, 0 },
+         { "\1CompObj", -1, 0, 0, NULL, 0 },
+         { "CONTENTS", -1, 0, 0, NULL, 0 }}
+    };
+    static struct storage_def stg_def_emf =
+    {
+        &CLSID_Picture_EnhMetafile, 3,
+        {{ "\1Ole", -1, 0, 0, NULL, 0 },
+         { "\1CompObj", -1, 0, 0, NULL, 0 },
+         { "CONTENTS", -1, 0, 0, NULL, 0 }}
+    };
+
+
+    hr = CreateILockBytesOnHGlobal(NULL, TRUE, &ilb);
+    ok(hr == S_OK, "CreateILockBytesOnHGlobal failed: 0x%08x.\n", hr);
+    hr = StgCreateDocfileOnILockBytes(ilb, STGM_SHARE_EXCLUSIVE | STGM_CREATE | STGM_READWRITE,
+                                      0, &storage);
+    ok(hr == S_OK, "StgCreateDocfileOnILockBytes failed: 0x%08x.\n", hr);
+    ILockBytes_Release(ilb);
+
+    hr = OleCreateStaticFromData(&DataObject, &IID_IOleObject, OLERENDER_FORMAT,
+                                 dib_fmt, NULL, NULL, (void **)&ole_obj);
+    ok(hr == E_INVALIDARG, "OleCreateStaticFromData should fail: 0x%08x.\n", hr);
+
+    hr = OleCreateStaticFromData(&DataObject, &IID_IOleObject, OLERENDER_FORMAT,
+                                 dib_fmt, NULL, storage, NULL);
+    ok(hr == E_INVALIDARG, "OleCreateStaticFromData should fail: 0x%08x.\n", hr);
+
+    /* CF_DIB */
+    g_dataobject_fmts = dib_fmt;
+    expected_method_list = methods_createstatic_from_dib;
+    hr = OleCreateStaticFromData(&DataObject, &IID_IOleObject, OLERENDER_FORMAT,
+                                 dib_fmt, NULL, storage, (void **)&ole_obj);
+    ok(hr == S_OK, "OleCreateStaticFromData failed: 0x%08x.\n", hr);
+    hr = IOleObject_QueryInterface(ole_obj, &IID_IPersist, (void **)&presist);
+    ok(hr == S_OK, "IOleObject_QueryInterface failed: 0x%08x.\n", hr);
+    hr = IPersist_GetClassID(presist, &clsid);
+    ok(hr == S_OK, "IPersist_GetClassID failed: 0x%08x.\n", hr);
+    ok(IsEqualCLSID(&clsid, &CLSID_Picture_Dib), "Got wrong clsid: %s, expected: %s.\n",
+       wine_dbgstr_guid(&clsid), wine_dbgstr_guid(&CLSID_Picture_Dib));
+    hr = IStorage_Stat(storage, &statstg, STATFLAG_NONAME);
+    ok_ole_success(hr, "IStorage_Stat");
+    ok(IsEqualCLSID(&CLSID_Picture_Dib, &statstg.clsid), "Wrong CLSID in storage.\n");
+    enumerated_streams = matched_streams = -1;
+    get_stgmedium(CF_DIB, &stgmed);
+    get_stgdef(&stg_def_dib, CF_DIB, &stgmed, 2);
+    check_storage_contents(storage, &stg_def_dib, &enumerated_streams, &matched_streams);
+    ok(enumerated_streams == matched_streams, "enumerated %d != matched %d\n",
+       enumerated_streams, matched_streams);
+    ok(enumerated_streams == stg_def_dib.stream_count, "created %d != def streams %d\n",
+       enumerated_streams, stg_def_dib.stream_count);
+    ReleaseStgMedium(&stgmed);
+    IPersist_Release(presist);
+    IStorage_Release(storage);
+    IOleObject_Release(ole_obj);
+
+    /* CF_ENHMETAFILE */
+    hr = CreateILockBytesOnHGlobal(NULL, TRUE, &ilb);
+    ok(hr == S_OK, "CreateILockBytesOnHGlobal failed: 0x%08x.\n", hr);
+    hr = StgCreateDocfileOnILockBytes(ilb, STGM_SHARE_EXCLUSIVE | STGM_CREATE | STGM_READWRITE,
+                                      0, &storage);
+    ok(hr == S_OK, "StgCreateDocfileOnILockBytes failed: 0x%08x.\n", hr);
+    ILockBytes_Release(ilb);
+    g_dataobject_fmts = emf_fmt;
+    expected_method_list = methods_createstatic_from_emf;
+    hr = OleCreateStaticFromData(&DataObject, &IID_IOleObject, OLERENDER_FORMAT,
+                                 emf_fmt, NULL, storage, (void **)&ole_obj);
+    ok(hr == S_OK, "OleCreateStaticFromData failed: 0x%08x.\n", hr);
+    hr = IOleObject_QueryInterface(ole_obj, &IID_IPersist, (void **)&presist);
+    ok(hr == S_OK, "IOleObject_QueryInterface failed: 0x%08x.\n", hr);
+    hr = IPersist_GetClassID(presist, &clsid);
+    ok(hr == S_OK, "IPersist_GetClassID failed: 0x%08x.\n", hr);
+    ok(IsEqualCLSID(&clsid, &CLSID_Picture_EnhMetafile), "Got wrong clsid: %s, expected: %s.\n",
+       wine_dbgstr_guid(&clsid), wine_dbgstr_guid(&CLSID_Picture_EnhMetafile));
+    hr = IStorage_Stat(storage, &statstg, STATFLAG_NONAME);
+    ok_ole_success(hr, "IStorage_Stat");
+    ok(IsEqualCLSID(&CLSID_Picture_EnhMetafile, &statstg.clsid), "Wrong CLSID in storage.\n");
+    enumerated_streams = matched_streams = -1;
+    get_stgmedium(CF_ENHMETAFILE, &stgmed);
+    get_stgdef(&stg_def_emf, CF_ENHMETAFILE, &stgmed, 2);
+    check_storage_contents(storage, &stg_def_emf, &enumerated_streams, &matched_streams);
+    ok(enumerated_streams == matched_streams, "enumerated %d != matched %d\n",
+       enumerated_streams, matched_streams);
+    ok(enumerated_streams == stg_def_emf.stream_count, "created %d != def streams %d\n",
+       enumerated_streams, stg_def_emf.stream_count);
+    ReleaseStgMedium(&stgmed);
+    IPersist_Release(presist);
+    IStorage_Release(storage);
+    IOleObject_Release(ole_obj);
+
+    /* CF_TEXT */
+    hr = CreateILockBytesOnHGlobal(NULL, TRUE, &ilb);
+    ok(hr == S_OK, "CreateILockBytesOnHGlobal failed: 0x%08x.\n", hr);
+    hr = StgCreateDocfileOnILockBytes(ilb, STGM_SHARE_EXCLUSIVE | STGM_CREATE | STGM_READWRITE,
+                                      0, &storage);
+    ok(hr == S_OK, "StgCreateDocfileOnILockBytes failed: 0x%08x.\n", hr);
+    ILockBytes_Release(ilb);
+    g_dataobject_fmts = text_fmt;
+    expected_method_list = methods_createstatic_from_text;
+    hr = OleCreateStaticFromData(&DataObject, &IID_IOleObject, OLERENDER_FORMAT,
+                                 text_fmt, NULL, storage, (void **)&ole_obj);
+    ok(hr == DV_E_CLIPFORMAT, "OleCreateStaticFromData should fail: 0x%08x.\n", hr);
+    IStorage_Release(storage);
+
+    hr = CreateILockBytesOnHGlobal(NULL, TRUE, &ilb);
+    ok(hr == S_OK, "CreateILockBytesOnHGlobal failed: 0x%08x.\n", hr);
+    hr = StgCreateDocfileOnILockBytes(ilb, STGM_SHARE_EXCLUSIVE | STGM_CREATE | STGM_READWRITE,
+                                      0, &storage);
+    ok(hr == S_OK, "StgCreateDocfileOnILockBytes failed: 0x%08x.\n", hr);
+    ILockBytes_Release(ilb);
+    g_dataobject_fmts = dib_fmt;
+    expected_method_list = methods_create_from_dib;
+    hr = OleCreateFromData(&DataObject, &IID_IOleObject, OLERENDER_FORMAT, dib_fmt, NULL,
+                           storage, (void **)&ole_obj);
+    todo_wine ok(hr == DV_E_FORMATETC, "OleCreateFromData should failed: 0x%08x.\n", hr);
+    IStorage_Release(storage);
+}
+
 START_TEST(ole2)
 {
     DWORD dwRegister;
@@ -2773,15 +4815,25 @@ START_TEST(ole2)
     hr = CoRevokeClassObject(dwRegister);
     ok_ole_success(hr, "CoRevokeClassObject");
 
+    Storage_SetClass_CLSID = &CLSID_WineTest;
+
     test_data_cache();
     test_data_cache_dib_contents_stream( 0 );
     test_data_cache_dib_contents_stream( 1 );
+    test_data_cache_cache();
+    test_data_cache_init();
+    test_data_cache_initnew();
+    test_data_cache_updatecache();
     test_default_handler();
     test_runnable();
     test_OleRun();
     test_OleLockRunning();
     test_OleDraw();
     test_OleDoAutoConvert();
+    test_data_cache_save();
+    test_data_cache_save_data();
+    test_data_cache_contents();
+    test_OleCreateStaticFromData();
 
     CoUninitialize();
 }

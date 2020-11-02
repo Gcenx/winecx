@@ -20,19 +20,16 @@
 #define __WINE_D2D1_PRIVATE_H
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 #include <assert.h>
 #include <limits.h>
 #define COBJMACROS
-#include "d2d1.h"
+#include "d2d1_1.h"
 #ifdef D2D1_INIT_GUID
 #include "initguid.h"
 #endif
 #include "dwrite_2.h"
-
-#ifndef ARRAY_SIZE
-#define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
-#endif
 
 enum d2d_brush_type
 {
@@ -52,11 +49,17 @@ enum d2d_shape_type
     D2D_SHAPE_TYPE_COUNT,
 };
 
+struct d2d_settings
+{
+    unsigned int max_version_factory;
+};
+extern struct d2d_settings d2d_settings DECLSPEC_HIDDEN;
+
 struct d2d_clip_stack
 {
     D2D1_RECT_F *stack;
-    unsigned int size;
-    unsigned int count;
+    size_t size;
+    size_t count;
 };
 
 struct d2d_error_state
@@ -114,9 +117,9 @@ struct d2d_ps_cb
     struct d2d_brush_cb opacity_brush;
 };
 
-struct d2d_d3d_render_target
+struct d2d_device_context
 {
-    ID2D1RenderTarget ID2D1RenderTarget_iface;
+    ID2D1DeviceContext ID2D1DeviceContext_iface;
     ID2D1GdiInteropRenderTarget ID2D1GdiInteropRenderTarget_iface;
     IDWriteTextRenderer IDWriteTextRenderer_iface;
     LONG refcount;
@@ -207,7 +210,7 @@ struct d2d_bitmap_render_target
 };
 
 HRESULT d2d_bitmap_render_target_init(struct d2d_bitmap_render_target *render_target,
-        const struct d2d_d3d_render_target *parent_target, const D2D1_SIZE_F *size,
+        const struct d2d_device_context *parent_target, const D2D1_SIZE_F *size,
         const D2D1_SIZE_U *pixel_size, const D2D1_PIXEL_FORMAT *format,
         D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS options) DECLSPEC_HIDDEN;
 
@@ -279,7 +282,7 @@ HRESULT d2d_bitmap_brush_create(ID2D1Factory *factory, ID2D1Bitmap *bitmap,
         struct d2d_brush **brush) DECLSPEC_HIDDEN;
 void d2d_brush_bind_resources(struct d2d_brush *brush, ID3D10Device *device, unsigned int brush_idx) DECLSPEC_HIDDEN;
 HRESULT d2d_brush_get_ps_cb(struct d2d_brush *brush, struct d2d_brush *opacity_brush, BOOL outline,
-        struct d2d_d3d_render_target *render_target, ID3D10Buffer **ps_cb) DECLSPEC_HIDDEN;
+        struct d2d_device_context *render_target, ID3D10Buffer **ps_cb) DECLSPEC_HIDDEN;
 struct d2d_brush *unsafe_impl_from_ID2D1Brush(ID2D1Brush *iface) DECLSPEC_HIDDEN;
 
 struct d2d_stroke_style
@@ -319,7 +322,7 @@ HRESULT d2d_mesh_create(ID2D1Factory *factory, struct d2d_mesh **mesh) DECLSPEC_
 
 struct d2d_bitmap
 {
-    ID2D1Bitmap ID2D1Bitmap_iface;
+    ID2D1Bitmap1 ID2D1Bitmap1_iface;
     LONG refcount;
 
     ID2D1Factory *factory;
@@ -332,7 +335,7 @@ struct d2d_bitmap
 
 HRESULT d2d_bitmap_create(ID2D1Factory *factory, ID3D10Device *device, D2D1_SIZE_U size, const void *src_data,
         UINT32 pitch, const D2D1_BITMAP_PROPERTIES *desc, struct d2d_bitmap **bitmap) DECLSPEC_HIDDEN;
-HRESULT d2d_bitmap_create_shared(ID2D1RenderTarget *render_target, ID3D10Device *device, REFIID iid, void *data,
+HRESULT d2d_bitmap_create_shared(ID2D1DeviceContext *context, ID3D10Device *device, REFIID iid, void *data,
         const D2D1_BITMAP_PROPERTIES *desc, struct d2d_bitmap **bitmap) DECLSPEC_HIDDEN;
 HRESULT d2d_bitmap_create_from_wic_bitmap(ID2D1Factory *factory, ID3D10Device *device, IWICBitmapSource *bitmap_source,
         const D2D1_BITMAP_PROPERTIES *desc, struct d2d_bitmap **bitmap) DECLSPEC_HIDDEN;
@@ -469,6 +472,42 @@ HRESULT d2d_rectangle_geometry_init(struct d2d_geometry *geometry,
 void d2d_transformed_geometry_init(struct d2d_geometry *geometry, ID2D1Factory *factory,
         ID2D1Geometry *src_geometry, const D2D_MATRIX_3X2_F *transform) DECLSPEC_HIDDEN;
 struct d2d_geometry *unsafe_impl_from_ID2D1Geometry(ID2D1Geometry *iface) DECLSPEC_HIDDEN;
+
+struct d2d_device
+{
+    ID2D1Device ID2D1Device_iface;
+    LONG refcount;
+    ID2D1Factory1 *factory;
+    IDXGIDevice *dxgi_device;
+};
+
+void d2d_device_init(struct d2d_device *device, ID2D1Factory1 *factory, IDXGIDevice *dxgi_device) DECLSPEC_HIDDEN;
+
+static inline BOOL d2d_array_reserve(void **elements, size_t *capacity, size_t count, size_t size)
+{
+    size_t new_capacity, max_capacity;
+    void *new_elements;
+
+    if (count <= *capacity)
+        return TRUE;
+
+    max_capacity = ~(SIZE_T)0 / size;
+    if (count > max_capacity)
+        return FALSE;
+
+    new_capacity = max(4, *capacity);
+    while (new_capacity < count && new_capacity <= max_capacity / 2)
+        new_capacity *= 2;
+    if (new_capacity < count)
+        new_capacity = max_capacity;
+
+    if (!(new_elements = heap_realloc(*elements, new_capacity * size)))
+        return FALSE;
+
+    *elements = new_elements;
+    *capacity = new_capacity;
+    return TRUE;
+}
 
 static inline void d2d_matrix_multiply(D2D_MATRIX_3X2_F *a, const D2D_MATRIX_3X2_F *b)
 {

@@ -60,6 +60,10 @@
 #  else
 #   define __stdcall __attribute__((ms_abi))
 #  endif
+# elif defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__)
+#   define __stdcall __attribute__((pcs("aapcs-vfp")))
+# elif defined(__aarch64__) && defined (__GNUC__)
+#  define __stdcall __attribute__((ms_abi))
 # else  /* __i386__ */
 #  define __stdcall
 # endif  /* __i386__ */
@@ -78,13 +82,17 @@
 #  else
 #   define __cdecl __attribute__((ms_abi))
 #  endif
+# elif defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__)
+#   define __cdecl __attribute__((pcs("aapcs-vfp")))
+# elif defined(__aarch64__) && defined (__GNUC__)
+#  define __cdecl __attribute__((ms_abi))
 # elif !defined(_MSC_VER)
 #  define __cdecl
 # endif
 #endif /* __cdecl */
 
 #ifndef __ms_va_list
-# if defined(__x86_64__) && defined (__GNUC__)
+# if (defined(__x86_64__) || defined(__aarch64__)) && defined (__GNUC__)
 #  define __ms_va_list __builtin_ms_va_list
 #  define __ms_va_start(list,arg) __builtin_ms_va_start(list,arg)
 #  define __ms_va_end(list) __builtin_ms_va_end(list)
@@ -98,6 +106,14 @@
 #  else
 #   define __ms_va_copy(dest,src) ((dest) = (src))
 #  endif
+# endif
+#endif
+
+#ifndef WINAPIV
+# if defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__)
+#  define WINAPIV __attribute__((pcs("aapcs")))
+# else
+#  define WINAPIV __cdecl
 # endif
 #endif
 

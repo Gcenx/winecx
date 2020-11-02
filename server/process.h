@@ -36,10 +36,8 @@ enum startup_state { STARTUP_IN_PROGRESS, STARTUP_DONE, STARTUP_ABORTED };
 struct process_dll
 {
     struct list          entry;           /* entry in per-process dll list */
-    struct mapping      *mapping;         /* dll file */
     mod_handle_t         base;            /* dll base address (in process addr space) */
     client_ptr_t         name;            /* ptr to ptr to name (in process addr space) */
-    data_size_t          size;            /* dll size */
     int                  dbg_offset;      /* debug info offset */
     int                  dbg_size;        /* debug info size */
     data_size_t          namelen;         /* length of dll file name */
@@ -88,6 +86,7 @@ struct process
     obj_handle_t         winstation;      /* main handle to process window station */
     obj_handle_t         desktop;         /* handle to desktop to use for new threads */
     struct token        *token;           /* security token associated with this process */
+    struct list          views;           /* list of memory views */
     struct list          dlls;            /* list of loaded dlls */
     client_ptr_t         peb;             /* PEB address in client address space */
     client_ptr_t         ldt_copy;        /* pointer to LDT copy in client addr space */

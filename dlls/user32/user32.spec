@@ -2,6 +2,7 @@
 @ stdcall AddClipboardFormatListener(long)
 @ stdcall AdjustWindowRect(ptr long long)
 @ stdcall AdjustWindowRectEx(ptr long long long)
+@ stdcall AdjustWindowRectExForDpi(ptr long long long long)
 @ stdcall AlignRects(ptr long long long)
 # @ stub AllowForegroundActivation
 @ stdcall AllowSetForegroundWindow (long)
@@ -9,6 +10,7 @@
 @ stdcall AnyPopup()
 @ stdcall AppendMenuA(long long long ptr)
 @ stdcall AppendMenuW(long long long ptr)
+@ stdcall AreDpiAwarenessContextsEqual(long long)
 @ stdcall ArrangeIconicWindows(long)
 @ stdcall AttachThreadInput(long long long)
 @ stdcall BeginDeferWindowPos(long)
@@ -22,7 +24,7 @@
 @ stdcall BroadcastSystemMessageW(long ptr long long long)
 # @ stub BuildReasonArray
 @ stdcall CalcChildScroll(long long)
-# @ stub CalcMenuBar
+@ stdcall CalcMenuBar(long long long long ptr) CalcMenuBar
 @ stdcall CallMsgFilter(ptr long) CallMsgFilterA
 @ stdcall CallMsgFilterA(ptr long)
 @ stdcall CallMsgFilterW(ptr long)
@@ -73,6 +75,7 @@
 @ stdcall ClipCursor(ptr)
 @ stdcall CloseClipboard()
 @ stdcall CloseDesktop(long)
+@ stdcall CloseTouchInputHandle(long)
 @ stdcall CloseWindow(long)
 @ stdcall CloseWindowStation(long)
 @ stdcall CopyAcceleratorTableA(long ptr long)
@@ -201,6 +204,7 @@
 @ stdcall EditWndProc(long long long long) EditWndProcA
 @ stdcall EmptyClipboard()
 @ stdcall EnableMenuItem(long long long)
+@ stdcall EnableMouseInPointer(long)
 @ stdcall EnableScrollBar(long long long)
 @ stdcall EnableWindow(long long)
 @ stdcall EndDeferWindowPos(long)
@@ -252,6 +256,7 @@
 @ stdcall GetAppCompatFlags2(long)
 @ stdcall GetAsyncKeyState(long)
 @ stdcall GetAutoRotationState(ptr)
+@ stdcall GetAwarenessFromDpiAwarenessContext(long)
 @ stdcall GetCapture()
 @ stdcall GetCaretBlinkTime()
 @ stdcall GetCaretPos(ptr)
@@ -291,9 +296,13 @@
 @ stdcall GetDlgItemTextA(long long ptr long)
 @ stdcall GetDlgItemTextW(long long ptr long)
 @ stdcall GetDoubleClickTime()
+@ stdcall GetDpiForMonitorInternal(long long ptr ptr)
+@ stdcall GetDpiForSystem()
+@ stdcall GetDpiForWindow(long)
 @ stdcall GetFocus()
 @ stdcall GetForegroundWindow()
 @ stdcall GetGestureConfig(long long long ptr ptr long)
+@ stdcall GetGestureInfo(long ptr)
 @ stdcall GetGUIThreadInfo(long ptr)
 @ stdcall GetGuiResources(long long)
 @ stdcall GetIconInfo(long ptr)
@@ -344,8 +353,11 @@
 # @ stub GetNextQueueWindow
 @ stdcall GetOpenClipboardWindow()
 @ stdcall GetParent(long)
+@ stdcall GetPhysicalCursorPos(ptr)
+@ stdcall GetPointerDevices(ptr ptr)
 @ stdcall GetPriorityClipboardFormat(ptr long)
 @ stdcall GetProcessDefaultLayout(ptr)
+@ stdcall GetProcessDpiAwarenessInternal(long ptr)
 @ stdcall GetProcessWindowStation()
 @ stdcall GetProgmanWindow ()
 @ stdcall GetPropA(long str)
@@ -368,12 +380,15 @@
 @ stdcall GetSysColorBrush(long)
 @ stdcall GetSystemMenu(long long)
 @ stdcall GetSystemMetrics(long)
+@ stdcall GetSystemMetricsForDpi(long long)
 @ stdcall GetTabbedTextExtentA(long str long long ptr)
 @ stdcall GetTabbedTextExtentW(long wstr long long ptr)
 @ stdcall GetTaskmanWindow ()
 @ stdcall GetThreadDesktop(long)
+@ stdcall GetThreadDpiAwarenessContext()
 @ stdcall GetTitleBarInfo(long ptr)
 @ stdcall GetTopWindow(long)
+@ stdcall GetTouchInputInfo(long long ptr long)
 @ stdcall GetUpdateRect(long ptr long)
 @ stdcall GetUpdateRgn(long long long)
 @ stdcall GetUpdatedClipboardFormats(ptr long ptr)
@@ -384,6 +399,8 @@
 @ stdcall GetWindow(long long)
 @ stdcall GetWindowContextHelpId(long)
 @ stdcall GetWindowDC(long)
+@ stdcall GetWindowDisplayAffinity(long ptr)
+@ stdcall GetWindowDpiAwarenessContext(long)
 @ stdcall GetWindowInfo(long ptr)
 @ stdcall GetWindowLongA(long long)
 @ stdcall -arch=win64 GetWindowLongPtrA(long long)
@@ -453,6 +470,7 @@
 @ stdcall IsRectEmpty(ptr)
 # @ stub IsServerSideWindow
 @ stdcall IsTouchWindow(long ptr)
+@ stdcall IsValidDpiAwarenessContext(long)
 @ stdcall IsWinEventHookInstalled(long)
 @ stdcall IsWindow(long)
 @ stdcall IsWindowEnabled(long)
@@ -490,6 +508,8 @@
 @ stub LockWindowStation
 @ stdcall LockWindowUpdate(long)
 @ stdcall LockWorkStation()
+@ stdcall LogicalToPhysicalPoint(long ptr)
+@ stdcall LogicalToPhysicalPointForPerMonitorDPI(long ptr)
 @ stdcall LookupIconIdFromDirectory(ptr long)
 @ stdcall LookupIconIdFromDirectoryEx(ptr long long long long)
 @ stub MBToWCSEx
@@ -540,6 +560,8 @@
 # @ stub PaintMenuBar
 @ stdcall PeekMessageA(ptr long long long long)
 @ stdcall PeekMessageW(ptr long long long long)
+@ stdcall PhysicalToLogicalPoint(long ptr)
+@ stdcall PhysicalToLogicalPointForPerMonitorDPI(long ptr)
 @ stub PlaySoundEvent
 @ stdcall PostMessageA(long long long long)
 @ stdcall PostMessageW(long long long long)
@@ -577,12 +599,14 @@
 @ stdcall RegisterLogonProcess(long long)
 # @ stub RegisterMessagePumpHook
 @ stub RegisterNetworkCapabilities
+@ stdcall RegisterPointerDeviceNotifications(long long)
 @ stdcall RegisterPowerSettingNotification(long ptr long)
 @ stdcall RegisterRawInputDevices(ptr long long)
 @ stdcall RegisterServicesProcess(long)
 @ stdcall RegisterShellHookWindow (long)
 @ stdcall RegisterSystemThread(long long)
 @ stdcall RegisterTasklist (long)
+@ stdcall RegisterTouchHitTestingWindow(long long)
 @ stdcall RegisterTouchWindow(long long)
 # @ stub RegisterUserApiHook
 @ stdcall RegisterWindowMessageA(str)
@@ -658,8 +682,11 @@
 @ stdcall SetMessageExtraInfo(long)
 @ stdcall SetMessageQueue(long)
 @ stdcall SetParent(long long)
-@ stdcall SetProcessDefaultLayout(long)
+@ stdcall SetPhysicalCursorPos(long long)
 @ stdcall SetProcessDPIAware()
+@ stdcall SetProcessDefaultLayout(long)
+@ stdcall SetProcessDpiAwarenessContext(long)
+@ stdcall SetProcessDpiAwarenessInternal(long)
 @ stdcall SetProcessWindowStation(long)
 @ stdcall SetProgmanWindow (long)
 @ stdcall SetPropA(long str long)
@@ -678,12 +705,14 @@
 @ stdcall SetSystemTimer(long long long ptr)
 @ stdcall SetTaskmanWindow (long)
 @ stdcall SetThreadDesktop(long)
+@ stdcall SetThreadDpiAwarenessContext(ptr)
 @ stdcall SetTimer(long long long ptr)
 @ stdcall SetUserObjectInformationA(long long ptr long)
 @ stdcall SetUserObjectInformationW(long long ptr long)
 @ stdcall SetUserObjectSecurity(long ptr ptr)
 @ stdcall SetWinEventHook(long long long ptr long long long)
 @ stdcall SetWindowContextHelpId(long long)
+@ stdcall SetWindowDisplayAffinity(long long)
 @ stub SetWindowFullScreenState
 @ stdcall SetWindowLongA(long long long)
 @ stdcall -arch=win64 SetWindowLongPtrA(long long long)
@@ -716,6 +745,7 @@
 @ stdcall SwitchToThisWindow(long long)
 # @ stub SysErrorBox
 @ stdcall SystemParametersInfoA(long long ptr long)
+@ stdcall SystemParametersInfoForDpi(long long ptr long long)
 @ stdcall SystemParametersInfoW(long long ptr long)
 @ stdcall TabbedTextOutA(long long long str long long ptr long)
 @ stdcall TabbedTextOutW(long long long wstr long long ptr long)
@@ -747,6 +777,7 @@
 @ stdcall UnregisterHotKey(long long)
 # @ stub UnregisterMessagePumpHook
 @ stdcall UnregisterPowerSettingNotification(ptr)
+@ stdcall UnregisterTouchWindow(long)
 # @ stub UnregisterUserApiHook
 @ stdcall UpdateLayeredWindow(long long ptr ptr long ptr long ptr long)
 @ stdcall UpdateLayeredWindowIndirect(long ptr)

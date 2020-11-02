@@ -355,7 +355,6 @@ static const NodeImplVtbl HTMLStyleElementImplVtbl = {
     NULL,
     NULL,
     NULL,
-    NULL,
     HTMLStyleElement_traverse,
     HTMLStyleElement_unlink
 };
@@ -372,7 +371,7 @@ static dispex_static_data_t HTMLStyleElement_dispex = {
     HTMLElement_init_dispex_info
 };
 
-HRESULT HTMLStyleElement_Create(HTMLDocumentNode *doc, nsIDOMHTMLElement *nselem, HTMLElement **elem)
+HRESULT HTMLStyleElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTMLElement **elem)
 {
     HTMLStyleElement *ret;
     nsresult nsres;
@@ -386,7 +385,7 @@ HRESULT HTMLStyleElement_Create(HTMLDocumentNode *doc, nsIDOMHTMLElement *nselem
 
     HTMLElement_Init(&ret->element, doc, nselem, &HTMLStyleElement_dispex);
 
-    nsres = nsIDOMHTMLElement_QueryInterface(nselem, &IID_nsIDOMHTMLStyleElement, (void**)&ret->nsstyle);
+    nsres = nsIDOMElement_QueryInterface(nselem, &IID_nsIDOMHTMLStyleElement, (void**)&ret->nsstyle);
     assert(nsres == NS_OK);
 
     *elem = &ret->element;

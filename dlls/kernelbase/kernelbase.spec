@@ -19,7 +19,7 @@
 @ stdcall AddAuditAccessAce(ptr long long ptr long long) advapi32.AddAuditAccessAce
 @ stdcall AddAuditAccessAceEx(ptr long long long ptr long long) advapi32.AddAuditAccessAceEx
 @ stdcall AddAuditAccessObjectAce(ptr long long long ptr ptr ptr long long) advapi32.AddAuditAccessObjectAce
-@ stub AddDllDirectory
+@ stdcall AddDllDirectory(wstr) kernel32.AddDllDirectory
 @ stdcall AddMandatoryAce(ptr long long long ptr) advapi32.AddMandatoryAce
 @ stdcall AddRefActCtx(ptr) kernel32.AddRefActCtx
 # @ stub AddResourceAttributeAce
@@ -44,10 +44,10 @@
 # @ stub AppPolicyGetCreateFileAccess
 # @ stub AppPolicyGetLifecycleManagement
 # @ stub AppPolicyGetMediaFoundationCodecLoading
-# @ stub AppPolicyGetProcessTerminationMethod
-# @ stub AppPolicyGetShowDeveloperDiagnostic
-# @ stub AppPolicyGetThreadInitializationType
-# @ stub AppPolicyGetWindowingModel
+@ stdcall AppPolicyGetProcessTerminationMethod(ptr ptr)
+@ stdcall AppPolicyGetShowDeveloperDiagnostic(ptr ptr)
+@ stdcall AppPolicyGetThreadInitializationType(ptr ptr)
+@ stdcall AppPolicyGetWindowingModel(ptr ptr)
 # @ stub AppXFreeMemory
 # @ stub AppXGetApplicationData
 # @ stub AppXGetDevelopmentMode
@@ -212,7 +212,7 @@
 # @ stub CreateProcessInternalW
 @ stdcall CreateProcessW(wstr wstr ptr ptr long long ptr wstr ptr ptr) kernel32.CreateProcessW
 @ stdcall CreateRemoteThread(long ptr long ptr long long ptr) kernel32.CreateRemoteThread
-@ stub CreateRemoteThreadEx
+@ stdcall CreateRemoteThreadEx(long ptr long ptr ptr long ptr ptr) kernel32.CreateRemoteThreadEx
 @ stdcall CreateRestrictedToken(long long long ptr long ptr long ptr ptr) advapi32.CreateRestrictedToken
 @ stdcall CreateSemaphoreExW(ptr long long wstr long long) kernel32.CreateSemaphoreExW
 @ stdcall CreateSemaphoreW(ptr long long wstr) kernel32.CreateSemaphoreW
@@ -225,7 +225,7 @@
 @ stdcall CreateThread(ptr long ptr long long ptr) kernel32.CreateThread
 @ stdcall CreateThreadpool(ptr) kernel32.CreateThreadpool
 @ stdcall CreateThreadpoolCleanupGroup() kernel32.CreateThreadpoolCleanupGroup
-@ stub CreateThreadpoolIo
+@ stdcall CreateThreadpoolIo(ptr ptr ptr ptr) kernel32.CreateThreadpoolIo
 @ stdcall CreateThreadpoolTimer(ptr ptr ptr) kernel32.CreateThreadpoolTimer
 @ stdcall CreateThreadpoolWait(ptr ptr ptr) kernel32.CreateThreadpoolWait
 @ stdcall CreateThreadpoolWork(ptr ptr ptr) kernel32.CreateThreadpoolWork
@@ -448,7 +448,7 @@
 @ stdcall GetConsoleScreenBufferInfo(long ptr) kernel32.GetConsoleScreenBufferInfo
 @ stdcall GetConsoleScreenBufferInfoEx(long ptr) kernel32.GetConsoleScreenBufferInfoEx
 @ stdcall GetConsoleTitleW(ptr long) kernel32.GetConsoleTitleW
-@ stub GetCurrencyFormatEx
+@ stdcall GetCurrencyFormatEx(wstr long wstr ptr ptr long) kernel32.GetCurrencyFormatEx
 @ stdcall GetCurrencyFormatW(long long str ptr str long) kernel32.GetCurrencyFormatW
 @ stdcall GetCurrentActCtx(ptr) kernel32.GetCurrentActCtx
 # @ stub GetCurrentApplicationUserModelId
@@ -487,11 +487,11 @@
 @ stdcall GetDriveTypeW(wstr) kernel32.GetDriveTypeW
 # @ stub GetDurationFormatEx
 @ stdcall GetDynamicTimeZoneInformation(ptr) kernel32.GetDynamicTimeZoneInformation
-# @ stub GetDynamicTimeZoneInformationEffectiveYears
+@ stdcall GetDynamicTimeZoneInformationEffectiveYears(ptr ptr ptr) kernel32.GetDynamicTimeZoneInformationEffectiveYears
 # @ stub GetEffectivePackageStatusForUser
 # @ stub GetEightBitStringToUnicodeSizeRoutine
 # @ stub GetEightBitStringToUnicodeStringRoutine
-# @ stub GetEnabledXStateFeatures
+@ stdcall -ret64 -arch=i386,x86_64 GetEnabledXStateFeatures() kernel32.GetEnabledXStateFeatures
 @ stdcall GetEnvironmentStrings() kernel32.GetEnvironmentStrings
 @ stdcall GetEnvironmentStringsA() kernel32.GetEnvironmentStringsA
 @ stdcall GetEnvironmentStringsW() kernel32.GetEnvironmentStringsW
@@ -575,7 +575,7 @@
 @ stdcall GetNativeSystemInfo(ptr) kernel32.GetNativeSystemInfo
 # @ stub GetNextFgPolicyRefreshInfoInternal
 @ stdcall GetNumaHighestNodeNumber(ptr) kernel32.GetNumaHighestNodeNumber
-# @ stub GetNumaNodeProcessorMaskEx
+@ stdcall GetNumaNodeProcessorMaskEx(long ptr) kernel32.GetNumaNodeProcessorMaskEx
 # @ stub GetNumaProximityNodeEx
 @ stdcall GetNumberFormatEx(wstr long wstr ptr ptr long) kernel32.GetNumberFormatEx
 @ stdcall GetNumberFormatW(long long wstr ptr ptr long) kernel32.GetNumberFormatW
@@ -637,7 +637,7 @@
 @ stdcall GetProcessShutdownParameters(ptr ptr) kernel32.GetProcessShutdownParameters
 @ stdcall GetProcessTimes(long ptr ptr ptr ptr) kernel32.GetProcessTimes
 @ stdcall GetProcessVersion(long) kernel32.GetProcessVersion
-# @ stub GetProcessWorkingSetSizeEx
+@ stdcall GetProcessWorkingSetSizeEx(long ptr ptr ptr) kernel32.GetProcessWorkingSetSizeEx
 # @ stub GetProcessorSystemCycleTime
 @ stdcall GetProductInfo(long long long long ptr) kernel32.GetProductInfo
 @ stub GetPtrCalData
@@ -1029,8 +1029,8 @@
 @ stdcall PathAppendW(wstr wstr) shlwapi.PathAppendW
 @ stdcall PathCanonicalizeA(ptr str) shlwapi.PathCanonicalizeA
 @ stdcall PathCanonicalizeW(ptr wstr) shlwapi.PathCanonicalizeW
-# @ stub PathCchAddBackslash
-# @ stub PathCchAddBackslashEx
+@ stdcall PathCchAddBackslash(wstr long)
+@ stdcall PathCchAddBackslashEx(wstr long ptr ptr)
 # @ stub PathCchAddExtension
 # @ stub PathCchAppend
 # @ stub PathCchAppendEx
@@ -1144,20 +1144,20 @@
 @ stdcall PeekConsoleInputA(ptr ptr long ptr) kernel32.PeekConsoleInputA
 @ stdcall PeekConsoleInputW(ptr ptr long ptr) kernel32.PeekConsoleInputW
 @ stdcall PeekNamedPipe(long ptr long ptr ptr ptr) kernel32.PeekNamedPipe
-# @ stub PerfCreateInstance
+@ stdcall PerfCreateInstance(long ptr wstr long) advapi32.PerfCreateInstance
 # @ stub PerfDecrementULongCounterValue
 # @ stub PerfDecrementULongLongCounterValue
-# @ stub PerfDeleteInstance
+@ stdcall PerfDeleteInstance(long ptr) advapi32.PerfDeleteInstance
 # @ stub PerfIncrementULongCounterValue
 # @ stub PerfIncrementULongLongCounterValue
 # @ stub PerfQueryInstance
-# @ stub PerfSetCounterRefValue
-# @ stub PerfSetCounterSetInfo
+@ stdcall PerfSetCounterRefValue(long ptr long ptr) advapi32.PerfSetCounterRefValue
+@ stdcall PerfSetCounterSetInfo(long ptr long) advapi32.PerfSetCounterSetInfo
 # @ stub PerfSetULongCounterValue
 # @ stub PerfSetULongLongCounterValue
-# @ stub PerfStartProvider
-# @ stub PerfStartProviderEx
-# @ stub PerfStopProvider
+@ stdcall PerfStartProvider(ptr ptr ptr) advapi32.PerfStartProvider
+@ stdcall PerfStartProviderEx(ptr ptr ptr) advapi32.PerfStartProviderEx
+@ stdcall PerfStopProvider(long) advapi32.PerfStopProvider
 # @ stub PoolPerAppKeyStateInternal
 @ stdcall PostQueuedCompletionStatus(long long ptr ptr) kernel32.PostQueuedCompletionStatus
 # @ stub PrefetchVirtualMemory
@@ -1191,7 +1191,7 @@
 @ stdcall PulseEvent(long) kernel32.PulseEvent
 @ stdcall PurgeComm(long long) kernel32.PurgeComm
 @ stdcall QISearch(long long long long) shlwapi.QISearch
-# @ stub QueryActCtxSettingsW
+@ stdcall QueryActCtxSettingsW(long ptr wstr wstr ptr long ptr) kernel32.QueryActCtxSettingsW
 @ stdcall QueryActCtxW(long ptr ptr long ptr long ptr) kernel32.QueryActCtxW
 @ stdcall QueryDepthSList(ptr) kernel32.QueryDepthSList
 @ stdcall QueryDosDeviceW(wstr ptr long) kernel32.QueryDosDeviceW
@@ -1206,7 +1206,7 @@
 @ stdcall QueryPerformanceCounter(ptr) kernel32.QueryPerformanceCounter
 @ stdcall QueryPerformanceFrequency(ptr) kernel32.QueryPerformanceFrequency
 @ stub QueryProcessAffinityUpdateMode
-# @ stub QueryProcessCycleTime
+@ stdcall QueryProcessCycleTime(long ptr) kernel32.QueryProcessCycleTime
 # @ stub QueryProtectedPolicy
 @ stub QuerySecurityAccessMask
 # @ stub QueryStateAtomValueInfo
@@ -1223,7 +1223,7 @@
 @ stdcall QueueUserWorkItem(ptr ptr long) kernel32.QueueUserWorkItem
 # @ stub QuirkGetData
 # @ stub QuirkGetData2
-# @ stub QuirkIsEnabled
+@ stdcall QuirkIsEnabled(ptr)
 # @ stub QuirkIsEnabled2
 @ stdcall QuirkIsEnabled3(ptr ptr)
 # @ stub QuirkIsEnabledForPackage
@@ -1233,7 +1233,7 @@
 # @ stub QuirkIsEnabledForProcess
 @ stdcall RaiseException(long long long ptr) kernel32.RaiseException
 # @ stub RaiseFailFastException
-# @ stub ReOpenFile
+@ stdcall ReOpenFile(ptr long long long) kernel32.ReOpenFile
 @ stdcall ReadConsoleA(long ptr long ptr ptr) kernel32.ReadConsoleA
 @ stdcall ReadConsoleInputA(long ptr long ptr) kernel32.ReadConsoleInputA
 @ stub ReadConsoleInputExA
@@ -1333,7 +1333,7 @@
 # @ stub RemapPredefinedHandleInternal
 @ stdcall RemoveDirectoryA(str) kernel32.RemoveDirectoryA
 @ stdcall RemoveDirectoryW(wstr) kernel32.RemoveDirectoryW
-@ stub RemoveDllDirectory
+@ stdcall RemoveDllDirectory(ptr) kernel32.RemoveDllDirectory
 # @ stub RemovePackageStatus
 # @ stub RemovePackageStatusForUser
 @ stdcall RemoveVectoredContinueHandler(ptr) kernel32.RemoveVectoredContinueHandler
@@ -1452,11 +1452,11 @@
 @ stdcall SetPriorityClass(long long) kernel32.SetPriorityClass
 @ stdcall SetPrivateObjectSecurity(long ptr ptr ptr long) advapi32.SetPrivateObjectSecurity
 @ stub SetPrivateObjectSecurityEx
-@ stub SetProcessAffinityUpdateMode
+@ stdcall SetProcessAffinityUpdateMode(long long) kernel32.SetProcessAffinityUpdateMode
 # @ stub SetProcessDefaultCpuSets
 # @ stub SetProcessGroupAffinity
 # @ stub SetProcessInformation
-# @ stub SetProcessMitigationPolicy
+@ stdcall SetProcessMitigationPolicy(long ptr long) kernel32.SetProcessMitigationPolicy
 # @ stub SetProcessPreferredUILanguages
 @ stdcall SetProcessPriorityBoost(long long) kernel32.SetProcessPriorityBoost
 @ stdcall SetProcessShutdownParameters(long long) kernel32.SetProcessShutdownParameters
@@ -1482,7 +1482,7 @@
 @ stdcall SetThreadErrorMode(long ptr) kernel32.SetThreadErrorMode
 @ stdcall SetThreadGroupAffinity(long ptr ptr) kernel32.SetThreadGroupAffinity
 @ stdcall SetThreadIdealProcessor(long long) kernel32.SetThreadIdealProcessor
-# @ stub SetThreadIdealProcessorEx
+@ stdcall SetThreadIdealProcessorEx(long ptr ptr) kernel32.SetThreadIdealProcessorEx
 # @ stub SetThreadInformation
 @ stdcall SetThreadLocale(long) kernel32.SetThreadLocale
 @ stdcall SetThreadPreferredUILanguages(long ptr ptr) kernel32.SetThreadPreferredUILanguages

@@ -74,7 +74,7 @@ static struct object *file_open_file( struct object *obj, unsigned int access,
 static void file_destroy( struct object *obj );
 
 static int file_get_poll_events( struct fd *fd );
-static obj_handle_t file_flush( struct fd *fd, struct async *async );
+static int file_flush( struct fd *fd, struct async *async );
 static enum server_fd_type file_get_fd_type( struct fd *fd );
 
 static const struct object_ops file_ops =
@@ -107,6 +107,8 @@ static const struct fd_ops file_fd_ops =
     no_fd_read,                   /* read */
     no_fd_write,                  /* write */
     file_flush,                   /* flush */
+    no_fd_get_file_info,          /* get_file_info */
+    no_fd_get_volume_info,        /* get_volume_info */
     default_fd_ioctl,             /* ioctl */
     default_fd_queue_async,       /* queue_async */
     default_fd_reselect_async     /* reselect_async */
@@ -265,12 +267,6 @@ done:
     return obj;
 }
 
-/* check if two file objects point to the same file */
-int is_same_file( struct file *file1, struct file *file2 )
-{
-    return is_same_file_fd( file1->fd, file2->fd );
-}
-
 static void file_dump( struct object *obj, int verbose )
 {
     struct file *file = (struct file *)obj;
@@ -295,11 +291,15 @@ static int file_get_poll_events( struct fd *fd )
     return events;
 }
 
-static obj_handle_t file_flush( struct fd *fd, struct async *async )
+static int file_flush( struct fd *fd, struct async *async )
 {
     int unix_fd = get_unix_fd( fd );
-    if (unix_fd != -1 && fsync( unix_fd ) == -1) file_set_error();
-    return 0;
+    if (unix_fd != -1 && fsync( unix_fd ) == -1)
+    {
+        file_set_error();
+        return 0;
+    }
+    return 1;
 }
 
 static enum server_fd_type file_get_fd_type( struct fd *fd )
@@ -671,6 +671,7 @@ void file_set_error(void)
     case EFBIG:     set_error( STATUS_SECTION_TOO_BIG ); break;
     case ENODEV:    set_error( STATUS_NO_SUCH_DEVICE ); break;
     case ENXIO:     set_error( STATUS_NO_SUCH_DEVICE ); break;
+    case EXDEV:     set_error( STATUS_NOT_SAME_DEVICE ); break;
 #ifdef EOVERFLOW
     case EOVERFLOW: set_error( STATUS_INVALID_PARAMETER ); break;
 #endif

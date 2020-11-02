@@ -32,6 +32,7 @@
 #include "winperf.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "wine/list.h"
 #include "wine/unicode.h"
 
@@ -46,21 +47,6 @@ static CRITICAL_SECTION_DEBUG pdh_handle_cs_debug =
       0, 0, { (DWORD_PTR)(__FILE__ ": pdh_handle_cs") }
 };
 static CRITICAL_SECTION pdh_handle_cs = { &pdh_handle_cs_debug, -1, 0, 0, 0, 0 };
-
-static inline void* __WINE_ALLOC_SIZE(1) heap_alloc(size_t size)
-{
-    return HeapAlloc(GetProcessHeap(), 0, size);
-}
-
-static inline void* __WINE_ALLOC_SIZE(1) heap_alloc_zero(size_t size)
-{
-    return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
-}
-
-static inline BOOL heap_free(void *mem)
-{
-    return HeapFree(GetProcessHeap(), 0, mem);
-}
 
 static inline WCHAR *pdh_strdup( const WCHAR *src )
 {
@@ -224,7 +210,7 @@ static const struct source counter_sources[] =
 static BOOL is_local_machine( const WCHAR *name, DWORD len )
 {
     WCHAR buf[MAX_COMPUTERNAME_LENGTH + 1];
-    DWORD buflen = sizeof(buf) / sizeof(buf[0]);
+    DWORD buflen = ARRAY_SIZE(buf);
 
     if (!GetComputerNameW( buf, &buflen )) return FALSE;
     return len == buflen && !memicmpW( name, buf, buflen );
@@ -288,7 +274,7 @@ PDH_STATUS WINAPI PdhAddCounterW( PDH_HQUERY hquery, LPCWSTR path,
     }
 
     *hcounter = NULL;
-    for (i = 0; i < sizeof(counter_sources) / sizeof(counter_sources[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(counter_sources); i++)
     {
         if (pdh_match_path( counter_sources[i].path, path ))
         {
@@ -881,7 +867,7 @@ PDH_STATUS WINAPI PdhLookupPerfIndexByNameW( LPCWSTR machine, LPCWSTR name, LPDW
         FIXME("remote machine not supported\n");
         return PDH_CSTATUS_NO_MACHINE;
     }
-    for (i = 0; i < sizeof(counter_sources) / sizeof(counter_sources[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(counter_sources); i++)
     {
         if (pdh_match_path( counter_sources[i].path, name ))
         {
@@ -900,7 +886,7 @@ PDH_STATUS WINAPI PdhLookupPerfNameByIndexA( LPCSTR machine, DWORD index, LPSTR 
     PDH_STATUS ret;
     WCHAR *machineW = NULL;
     WCHAR bufferW[PDH_MAX_COUNTER_NAME];
-    DWORD sizeW = sizeof(bufferW) / sizeof(WCHAR);
+    DWORD sizeW = ARRAY_SIZE(bufferW);
 
     TRACE("%s %d %p %p\n", debugstr_a(machine), index, buffer, size);
 
@@ -939,7 +925,7 @@ PDH_STATUS WINAPI PdhLookupPerfNameByIndexW( LPCWSTR machine, DWORD index, LPWST
     if (!buffer || !size) return PDH_INVALID_ARGUMENT;
     if (!index) return ERROR_SUCCESS;
 
-    for (i = 0; i < sizeof(counter_sources) / sizeof(counter_sources[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(counter_sources); i++)
     {
         if (counter_sources[i].index == index)
         {
@@ -1091,7 +1077,7 @@ PDH_STATUS WINAPI PdhValidatePathW( LPCWSTR path )
 
     if ((ret = validate_path( path ))) return ret;
 
-    for (i = 0; i < sizeof(counter_sources) / sizeof(counter_sources[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(counter_sources); i++)
         if (pdh_match_path( counter_sources[i].path, path )) return ERROR_SUCCESS;
 
     return PDH_CSTATUS_NO_COUNTER;

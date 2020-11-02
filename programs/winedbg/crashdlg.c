@@ -34,13 +34,32 @@
 
 static char *crash_log;
 
-int msgbox_res_id(HWND hwnd, UINT textId, UINT captionId, UINT uType)
+int msgbox_res_id(HWND hwnd, UINT textid, UINT captionid, UINT type)
 {
-    WCHAR caption[256];
-    WCHAR text[256];
-    LoadStringW(GetModuleHandleW(NULL), captionId, caption, sizeof(caption)/sizeof(caption[0]));
-    LoadStringW(GetModuleHandleW(NULL), textId, text, sizeof(text)/sizeof(text[0]));
-    return MessageBoxW(hwnd, text, caption, uType);
+    if (DBG_IVAR(ShowCrashDialog))
+    {
+        WCHAR caption[256];
+        WCHAR text[256];
+        LoadStringW(GetModuleHandleW(NULL), captionid, caption, ARRAY_SIZE(caption));
+        LoadStringW(GetModuleHandleW(NULL), textid, text, ARRAY_SIZE(text));
+        return MessageBoxW(hwnd, text, caption, type);
+    }
+
+    return IDCANCEL;
+}
+
+static BOOL is_visible(void)
+{
+    USEROBJECTFLAGS flags;
+    HWINSTA winstation;
+
+    if (!(winstation = GetProcessWindowStation()))
+        return FALSE;
+
+    if (!(GetUserObjectInformationA(winstation, UOI_FLAGS, &flags, sizeof(flags), NULL)))
+        return FALSE;
+
+    return flags.dwFlags & WSF_VISIBLE;
 }
 
 static WCHAR *get_program_name(HANDLE hProcess)
@@ -116,8 +135,7 @@ static void set_message_with_filename(HWND hDlg)
     WCHAR originalText[1000];
     WCHAR newText[1000 + MAX_PROGRAM_NAME_LENGTH];
 
-    GetDlgItemTextW(hDlg, IDC_STATIC_TXT1, originalText,
-            sizeof(originalText)/sizeof(originalText[0]));
+    GetDlgItemTextW(hDlg, IDC_STATIC_TXT1, originalText, ARRAY_SIZE(originalText));
     wsprintfW(newText, originalText, g_ProgramName);
     SetDlgItemTextW(hDlg, IDC_STATIC_TXT1, newText);
 }
@@ -150,11 +168,11 @@ static void save_crash_log( HWND hwnd )
     memset( &save, 0, sizeof(save) );
     lstrcpyW( path, default_name );
 
-    LoadStringW( GetModuleHandleW(0), IDS_TEXT_FILES, buffer, sizeof(buffer)/sizeof(buffer[0]) );
+    LoadStringW( GetModuleHandleW(0), IDS_TEXT_FILES, buffer, ARRAY_SIZE(buffer));
     p = buffer + lstrlenW(buffer) + 1;
     lstrcpyW(p, txt_files);
     p += lstrlenW(p) + 1;
-    LoadStringW( GetModuleHandleW(0), IDS_ALL_FILES, p, sizeof(buffer)/sizeof(buffer[0]) - (p - buffer) );
+    LoadStringW( GetModuleHandleW(0), IDS_ALL_FILES, p, ARRAY_SIZE(buffer) - (p - buffer) );
     p += lstrlenW(p) + 1;
     lstrcpyW(p, all_files);
     p += lstrlenW(p) + 1;
@@ -189,7 +207,7 @@ static void save_crash_log( HWND hwnd )
     }
     else err = GetLastError();
 
-    LoadStringW( GetModuleHandleW(0), IDS_SAVE_ERROR, buffer, sizeof(buffer)/sizeof(WCHAR) );
+    LoadStringW( GetModuleHandleW(0), IDS_SAVE_ERROR, buffer, ARRAY_SIZE(buffer));
     FormatMessageW( FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
                     NULL, err, 0, (LPWSTR)&p, 0, NULL);
     MessageBoxW( 0, p, buffer, MB_OK | MB_ICONERROR);
@@ -358,7 +376,7 @@ int display_crash_dialog(void)
     /* dbg_curr_process->handle is not set */
     HANDLE hProcess;
 
-    if (!DBG_IVAR(ShowCrashDialog))
+    if (!DBG_IVAR(ShowCrashDialog) || !is_visible())
         return TRUE;
 
     hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, dbg_curr_pid);

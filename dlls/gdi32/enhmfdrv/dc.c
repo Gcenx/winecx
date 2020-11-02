@@ -479,13 +479,21 @@ BOOL EMFDRV_SelectClipPath( PHYSDEV dev, INT iMode )
 {
     PHYSDEV next = GET_NEXT_PHYSDEV( dev, pSelectClipPath );
     EMRSELECTCLIPPATH emr;
+    BOOL ret = FALSE;
+    HRGN hrgn;
 
     emr.emr.iType = EMR_SELECTCLIPPATH;
     emr.emr.nSize = sizeof(emr);
     emr.iMode = iMode;
 
     if (!EMFDRV_WriteRecord( dev, &emr.emr )) return FALSE;
-    return next->funcs->pSelectClipPath( next, iMode );
+    hrgn = PathToRegion( dev->hdc );
+    if (hrgn)
+    {
+        ret = next->funcs->pExtSelectClipRgn( next, hrgn, iMode );
+        DeleteObject( hrgn );
+    }
+    return ret;
 }
 
 BOOL EMFDRV_WidenPath( PHYSDEV dev )
@@ -502,7 +510,9 @@ INT EMFDRV_GetDeviceCaps(PHYSDEV dev, INT cap)
 {
     EMFDRV_PDEVICE *physDev = get_emf_physdev( dev );
 
-    return GetDeviceCaps( physDev->ref_dc, cap );
+    if (cap >= 0 && cap < sizeof(physDev->dev_caps) / sizeof(physDev->dev_caps[0]))
+        return physDev->dev_caps[cap];
+    return 0;
 }
 
 
@@ -940,5 +950,6 @@ static const struct gdi_dc_funcs emfpath_driver =
     NULL,                               /* pUnrealizePalette */
     NULL,                               /* pWidenPath */
     NULL,                               /* wine_get_wgl_driver */
+    NULL,                               /* wine_get_vulkan_driver */
     GDI_PRIORITY_PATH_DRV + 1           /* priority */
 };

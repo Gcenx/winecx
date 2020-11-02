@@ -22,6 +22,7 @@
 #include "d3dx9_private.h"
 
 #include <float.h>
+#include <assert.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3dx);
 
@@ -37,12 +38,17 @@ enum pres_ops
     PRESHADER_OP_RSQ,
     PRESHADER_OP_SIN,
     PRESHADER_OP_COS,
+    PRESHADER_OP_ASIN,
+    PRESHADER_OP_ACOS,
+    PRESHADER_OP_ATAN,
     PRESHADER_OP_MIN,
     PRESHADER_OP_MAX,
     PRESHADER_OP_LT,
     PRESHADER_OP_GE,
     PRESHADER_OP_ADD,
     PRESHADER_OP_MUL,
+    PRESHADER_OP_ATAN2,
+    PRESHADER_OP_DIV,
     PRESHADER_OP_CMP,
     PRESHADER_OP_DOT,
     PRESHADER_OP_DOTSWIZ6,
@@ -50,6 +56,21 @@ enum pres_ops
 };
 
 typedef double (*pres_op_func)(double *args, int n);
+
+static double to_signed_nan(double v)
+{
+    static const union
+    {
+        ULONG64 ulong64_value;
+        double double_value;
+    }
+    signed_nan =
+    {
+        0xfff8000000000000
+    };
+
+    return isnan(v) ? signed_nan.double_value : v;
+}
 
 static double pres_mov(double *args, int n) {return args[0];}
 static double pres_add(double *args, int n) {return args[0] + args[1];}
@@ -82,7 +103,7 @@ static double pres_ge(double *args, int n)  {return args[0] >= args[1] ? 1.0 : 0
 static double pres_frc(double *args, int n) {return args[0] - floor(args[0]);}
 static double pres_min(double *args, int n) {return fmin(args[0], args[1]);}
 static double pres_max(double *args, int n) {return fmax(args[0], args[1]);}
-static double pres_cmp(double *args, int n) {return args[0] < 0.0 ? args[2] : args[1];}
+static double pres_cmp(double *args, int n) {return args[0] >= 0.0 ? args[1] : args[2];}
 static double pres_sin(double *args, int n) {return sin(args[0]);}
 static double pres_cos(double *args, int n) {return cos(args[0]);}
 static double pres_rsq(double *args, int n)
@@ -110,6 +131,14 @@ static double pres_log(double *args, int n)
         return log(v) / log(2);
 #endif
 }
+static double pres_asin(double *args, int n) {return to_signed_nan(asin(args[0]));}
+static double pres_acos(double *args, int n) {return to_signed_nan(acos(args[0]));}
+static double pres_atan(double *args, int n) {return atan(args[0]);}
+static double pres_atan2(double *args, int n) {return atan2(args[0], args[1]);}
+
+/* According to the test results 'div' operation always returns 0. Compiler does not seem to ever
+ * generate it, using rcp + mul instead, so probably it is not implemented in native d3dx. */
+static double pres_div(double *args, int n) {return 0.0;}
 
 #define PRES_OPCODE_MASK 0x7ff00000
 #define PRES_OPCODE_SHIFT 20
@@ -143,12 +172,17 @@ static const struct op_info pres_op_info[] =
     {0x107, "rsq", 1, 0, pres_rsq}, /* PRESHADER_OP_RSQ */
     {0x108, "sin", 1, 0, pres_sin}, /* PRESHADER_OP_SIN */
     {0x109, "cos", 1, 0, pres_cos}, /* PRESHADER_OP_COS */
+    {0x10a, "asin", 1, 0, pres_asin}, /* PRESHADER_OP_ASIN */
+    {0x10b, "acos", 1, 0, pres_acos}, /* PRESHADER_OP_ACOS */
+    {0x10c, "atan", 1, 0, pres_atan}, /* PRESHADER_OP_ATAN */
     {0x200, "min", 2, 0, pres_min}, /* PRESHADER_OP_MIN */
     {0x201, "max", 2, 0, pres_max}, /* PRESHADER_OP_MAX */
     {0x202, "lt",  2, 0, pres_lt }, /* PRESHADER_OP_LT  */
     {0x203, "ge",  2, 0, pres_ge }, /* PRESHADER_OP_GE  */
     {0x204, "add", 2, 0, pres_add}, /* PRESHADER_OP_ADD */
     {0x205, "mul", 2, 0, pres_mul}, /* PRESHADER_OP_MUL */
+    {0x206, "atan2", 2, 0, pres_atan2}, /* PRESHADER_OP_ATAN2 */
+    {0x208, "div", 2, 0, pres_div}, /* PRESHADER_OP_DIV */
     {0x300, "cmp", 3, 0, pres_cmp}, /* PRESHADER_OP_CMP */
     {0x500, "dot", 2, 1, pres_dot}, /* PRESHADER_OP_DOT */
     {0x70e, "d3ds_dotswiz", 6, 0, pres_dotswiz6}, /* PRESHADER_OP_DOTSWIZ6 */
@@ -160,24 +194,24 @@ enum pres_value_type
     PRES_VT_FLOAT,
     PRES_VT_DOUBLE,
     PRES_VT_INT,
-    PRES_VT_BOOL
+    PRES_VT_BOOL,
+    PRES_VT_COUNT
 };
 
 static const struct
 {
     unsigned int component_size;
-    unsigned int reg_component_count;
     enum pres_value_type type;
 }
 table_info[] =
 {
-    {sizeof(double), 4, PRES_VT_DOUBLE}, /* PRES_REGTAB_IMMED */
-    {sizeof(float),  4, PRES_VT_FLOAT }, /* PRES_REGTAB_CONST */
-    {sizeof(float),  4, PRES_VT_FLOAT }, /* PRES_REGTAB_OCONST */
-    {sizeof(BOOL),   1, PRES_VT_BOOL  }, /* PRES_REGTAB_OBCONST */
-    {sizeof(int),    4, PRES_VT_INT,  }, /* PRES_REGTAB_OICONST */
+    {sizeof(double), PRES_VT_DOUBLE}, /* PRES_REGTAB_IMMED */
+    {sizeof(float),  PRES_VT_FLOAT }, /* PRES_REGTAB_CONST */
+    {sizeof(float),  PRES_VT_FLOAT }, /* PRES_REGTAB_OCONST */
+    {sizeof(BOOL),   PRES_VT_BOOL  }, /* PRES_REGTAB_OBCONST */
+    {sizeof(int),    PRES_VT_INT,  }, /* PRES_REGTAB_OICONST */
     /* TODO: use double precision for 64 bit */
-    {sizeof(float),  4, PRES_VT_FLOAT }  /* PRES_REGTAB_TEMP */
+    {sizeof(float),  PRES_VT_FLOAT }  /* PRES_REGTAB_TEMP */
 };
 
 static const char *table_symbol[] =
@@ -228,27 +262,58 @@ struct d3dx_pres_ins
     struct d3dx_pres_operand output;
 };
 
+struct const_upload_info
+{
+    BOOL transpose;
+    unsigned int major, minor;
+    unsigned int major_stride;
+    unsigned int major_count;
+    unsigned int count;
+    unsigned int minor_remainder;
+};
+
+static enum pres_value_type table_type_from_param_type(D3DXPARAMETER_TYPE type)
+{
+    switch (type)
+    {
+        case D3DXPT_FLOAT:
+            return PRES_VT_FLOAT;
+        case D3DXPT_INT:
+            return PRES_VT_INT;
+        case D3DXPT_BOOL:
+            return PRES_VT_BOOL;
+        default:
+            FIXME("Unsupported type %u.\n", type);
+            return PRES_VT_COUNT;
+    }
+}
+
 static unsigned int get_reg_offset(unsigned int table, unsigned int offset)
 {
-    return offset / table_info[table].reg_component_count;
+    return table == PRES_REGTAB_OBCONST ? offset : offset >> 2;
+}
+
+static unsigned int get_offset_reg(unsigned int table, unsigned int reg_idx)
+{
+    return table == PRES_REGTAB_OBCONST ? reg_idx : reg_idx << 2;
+}
+
+static unsigned int get_reg_components(unsigned int table)
+{
+    return get_offset_reg(table, 1);
 }
 
 #define PRES_BITMASK_BLOCK_SIZE (sizeof(unsigned int) * 8)
-
-static HRESULT init_set_constants(struct d3dx_const_tab *const_tab, ID3DXConstantTable *ctab);
 
 static HRESULT regstore_alloc_table(struct d3dx_regstore *rs, unsigned int table)
 {
     unsigned int size;
 
-    size = rs->table_sizes[table] * table_info[table].reg_component_count * table_info[table].component_size;
+    size = get_offset_reg(table, rs->table_sizes[table]) * table_info[table].component_size;
     if (size)
     {
         rs->tables[table] = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
-        rs->table_value_set[table] = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-                sizeof(*rs->table_value_set[table]) *
-                ((rs->table_sizes[table] + PRES_BITMASK_BLOCK_SIZE - 1) / PRES_BITMASK_BLOCK_SIZE));
-        if (!rs->tables[table] || !rs->table_value_set[table])
+        if (!rs->tables[table])
             return E_OUTOFMEMORY;
     }
     return D3D_OK;
@@ -261,47 +326,20 @@ static void regstore_free_tables(struct d3dx_regstore *rs)
     for (i = 0; i < PRES_REGTAB_COUNT; ++i)
     {
         HeapFree(GetProcessHeap(), 0, rs->tables[i]);
-        HeapFree(GetProcessHeap(), 0, rs->table_value_set[i]);
     }
 }
 
-static void regstore_set_values(struct d3dx_regstore *rs, unsigned int table, void *data,
+static void regstore_set_values(struct d3dx_regstore *rs, unsigned int table, const void *data,
         unsigned int start_offset, unsigned int count)
 {
-    unsigned int block_idx, start, end, start_block, end_block;
+    BYTE *dst = rs->tables[table];
+    const BYTE *src = data;
+    unsigned int size;
 
-    if (!count)
-        return;
-
-    memcpy((BYTE *)rs->tables[table] + start_offset * table_info[table].component_size,
-            data, count * table_info[table].component_size);
-
-    start = get_reg_offset(table, start_offset);
-    start_block = start / PRES_BITMASK_BLOCK_SIZE;
-    start -= start_block * PRES_BITMASK_BLOCK_SIZE;
-    end = get_reg_offset(table, start_offset + count - 1);
-    end_block = end / PRES_BITMASK_BLOCK_SIZE;
-    end = (end_block + 1) * PRES_BITMASK_BLOCK_SIZE - 1 - end;
-
-    if (start_block == end_block)
-    {
-        rs->table_value_set[table][start_block] |= (~0u << start) & (~0u >> end);
-    }
-    else
-    {
-        rs->table_value_set[table][start_block] |= ~0u << start;
-
-        for (block_idx = start_block + 1; block_idx < end_block; ++block_idx)
-            rs->table_value_set[table][block_idx] = ~0u;
-
-        rs->table_value_set[table][end_block] |= ~0u >> end;
-    }
-}
-
-static unsigned int regstore_is_val_set_reg(struct d3dx_regstore *rs, unsigned int table, unsigned int reg_idx)
-{
-    return rs->table_value_set[table][reg_idx / PRES_BITMASK_BLOCK_SIZE] &
-            (1u << (reg_idx % PRES_BITMASK_BLOCK_SIZE));
+    dst += start_offset * table_info[table].component_size;
+    size = count * table_info[table].component_size;
+    assert((src < dst && size <= dst - src) || (src > dst && size <= src - dst));
+    memcpy(dst, src, size);
 }
 
 static double regstore_get_double(struct d3dx_regstore *rs, unsigned int table, unsigned int offset)
@@ -324,7 +362,6 @@ static double regstore_get_double(struct d3dx_regstore *rs, unsigned int table, 
 static void regstore_set_double(struct d3dx_regstore *rs, unsigned int table, unsigned int offset, double v)
 {
     BYTE *p;
-    unsigned int reg_idx;
 
     p = (BYTE *)rs->tables[table] + table_info[table].component_size * offset;
     switch (table_info[table].type)
@@ -333,22 +370,10 @@ static void regstore_set_double(struct d3dx_regstore *rs, unsigned int table, un
         case PRES_VT_DOUBLE: *(double *)p = v; break;
         case PRES_VT_INT   : *(int *)p = lrint(v); break;
         case PRES_VT_BOOL  : *(BOOL *)p = !!v; break;
+        default:
+            FIXME("Bad type %u.\n", table_info[table].type);
+            break;
     }
-    reg_idx = get_reg_offset(table, offset);
-    rs->table_value_set[table][reg_idx / PRES_BITMASK_BLOCK_SIZE] |=
-            1u << (reg_idx % PRES_BITMASK_BLOCK_SIZE);
-}
-
-static void regstore_reset_table(struct d3dx_regstore *rs, unsigned int table)
-{
-    unsigned int size;
-
-    size = rs->table_sizes[table] * table_info[table].reg_component_count * table_info[table].component_size;
-
-    memset(rs->tables[table], 0, size);
-    memset(rs->table_value_set[table], 0,
-            sizeof(*rs->table_value_set[table]) *
-            ((rs->table_sizes[table] + PRES_BITMASK_BLOCK_SIZE - 1) / PRES_BITMASK_BLOCK_SIZE));
 }
 
 static void dump_bytecode(void *data, unsigned int size)
@@ -496,32 +521,342 @@ static unsigned int *parse_pres_ins(unsigned int *ptr, unsigned int count, struc
         FIXME("Relative addressing in output register not supported.\n");
         return NULL;
     }
-
+    if (get_reg_offset(ins->output.reg.table, ins->output.reg.offset
+            + (pres_op_info[ins->op].func_all_comps ? 0 : ins->component_count - 1))
+            != get_reg_offset(ins->output.reg.table, ins->output.reg.offset))
+    {
+        FIXME("Instructions outputting multiple registers are not supported.\n");
+        return NULL;
+    }
     return ptr;
 }
 
-static HRESULT get_ctab_constant_desc(ID3DXConstantTable *ctab, D3DXHANDLE hc, D3DXCONSTANT_DESC *desc)
+static HRESULT get_ctab_constant_desc(ID3DXConstantTable *ctab, D3DXHANDLE hc, D3DXCONSTANT_DESC *desc,
+        WORD *constantinfo_reserved)
 {
-    D3DXCONSTANT_DESC buffer[2];
-    HRESULT hr;
-    unsigned int count;
+    const struct ctab_constant *constant = d3dx_shader_get_ctab_constant(ctab, hc);
 
-    count = ARRAY_SIZE(buffer);
-    if (FAILED(hr = ID3DXConstantTable_GetConstantDesc(ctab, hc, buffer, &count)))
+    if (!constant)
     {
-        FIXME("Could not get constant desc, hr %#x.\n", hr);
-        return hr;
-    }
-    else if (count != 1)
-    {
-        FIXME("Unexpected constant descriptors count %u.\n", count);
+        FIXME("Could not get constant desc.\n");
+        if (constantinfo_reserved)
+            *constantinfo_reserved = 0;
         return D3DERR_INVALIDCALL;
     }
-    *desc = buffer[0];
+    *desc = constant->desc;
+    if (constantinfo_reserved)
+        *constantinfo_reserved = constant->constantinfo_reserved;
     return D3D_OK;
 }
 
-static HRESULT get_constants_desc(unsigned int *byte_code, struct d3dx_const_tab *out, struct d3dx9_base_effect *base)
+static void get_const_upload_info(struct d3dx_const_param_eval_output *const_set,
+        struct const_upload_info *info)
+{
+    struct d3dx_parameter *param = const_set->param;
+    unsigned int table = const_set->table;
+
+    info->transpose = (const_set->constant_class == D3DXPC_MATRIX_COLUMNS && param->class == D3DXPC_MATRIX_ROWS)
+            || (param->class == D3DXPC_MATRIX_COLUMNS && const_set->constant_class == D3DXPC_MATRIX_ROWS);
+    if (const_set->constant_class == D3DXPC_MATRIX_COLUMNS)
+    {
+        info->major = param->columns;
+        info->minor = param->rows;
+    }
+    else
+    {
+        info->major = param->rows;
+        info->minor = param->columns;
+    }
+
+    if (get_reg_components(table) == 1)
+    {
+        unsigned int const_length = get_offset_reg(table, const_set->register_count);
+
+        info->major_stride = info->minor;
+        info->major_count = const_length / info->major_stride;
+        info->minor_remainder = const_length % info->major_stride;
+    }
+    else
+    {
+        info->major_stride = get_reg_components(table);
+        info->major_count = const_set->register_count;
+        info->minor_remainder = 0;
+    }
+    info->count = info->major_count * info->minor + info->minor_remainder;
+}
+
+#define INITIAL_CONST_SET_SIZE 16
+
+static HRESULT append_const_set(struct d3dx_const_tab *const_tab, struct d3dx_const_param_eval_output *set)
+{
+    if (const_tab->const_set_count >= const_tab->const_set_size)
+    {
+        unsigned int new_size;
+        struct d3dx_const_param_eval_output *new_alloc;
+
+        if (!const_tab->const_set_size)
+        {
+            new_size = INITIAL_CONST_SET_SIZE;
+            new_alloc = HeapAlloc(GetProcessHeap(), 0, sizeof(*const_tab->const_set) * new_size);
+            if (!new_alloc)
+            {
+                ERR("Out of memory.\n");
+                return E_OUTOFMEMORY;
+            }
+        }
+        else
+        {
+            new_size = const_tab->const_set_size * 2;
+            new_alloc = HeapReAlloc(GetProcessHeap(), 0, const_tab->const_set,
+                    sizeof(*const_tab->const_set) * new_size);
+            if (!new_alloc)
+            {
+                ERR("Out of memory.\n");
+                return E_OUTOFMEMORY;
+            }
+        }
+        const_tab->const_set = new_alloc;
+        const_tab->const_set_size = new_size;
+    }
+    const_tab->const_set[const_tab->const_set_count++] = *set;
+    return D3D_OK;
+}
+
+static void append_pres_const_sets_for_shader_input(struct d3dx_const_tab *const_tab,
+        struct d3dx_preshader *pres)
+{
+    unsigned int i;
+    struct d3dx_const_param_eval_output const_set = {NULL};
+
+    for (i = 0; i < pres->ins_count; ++i)
+    {
+        const struct d3dx_pres_ins *ins = &pres->ins[i];
+        const struct d3dx_pres_reg *reg = &ins->output.reg;
+
+        if (reg->table == PRES_REGTAB_TEMP)
+            continue;
+
+        const_set.register_index = get_reg_offset(reg->table, reg->offset);
+        const_set.register_count = 1;
+        const_set.table = reg->table;
+        const_set.constant_class = D3DXPC_FORCE_DWORD;
+        const_set.element_count = 1;
+        append_const_set(const_tab, &const_set);
+    }
+}
+
+static int compare_const_set(const void *a, const void *b)
+{
+    const struct d3dx_const_param_eval_output *r1 = a;
+    const struct d3dx_const_param_eval_output *r2 = b;
+
+    if (r1->table != r2->table)
+        return r1->table - r2->table;
+    return r1->register_index - r2->register_index;
+}
+
+static HRESULT merge_const_set_entries(struct d3dx_const_tab *const_tab,
+        struct d3dx_parameter *param, unsigned int index)
+{
+    unsigned int i, start_index = index;
+    DWORD *current_data;
+    enum pres_reg_tables current_table;
+    unsigned int current_start_offset, element_count;
+    struct d3dx_const_param_eval_output *first_const;
+
+    if (!const_tab->const_set_count)
+        return D3D_OK;
+
+    while (index < const_tab->const_set_count - 1)
+    {
+        first_const = &const_tab->const_set[index];
+        current_data = first_const->param->data;
+        current_table = first_const->table;
+        current_start_offset = get_offset_reg(current_table, first_const->register_index);
+        element_count = 0;
+        for (i = index; i < const_tab->const_set_count; ++i)
+        {
+            struct d3dx_const_param_eval_output *const_set = &const_tab->const_set[i];
+            unsigned int count = get_offset_reg(const_set->table,
+                    const_set->register_count * const_set->element_count);
+            unsigned int start_offset = get_offset_reg(const_set->table, const_set->register_index);
+
+            if (!(const_set->table == current_table && current_start_offset == start_offset
+                    && const_set->direct_copy == first_const->direct_copy
+                    && current_data == const_set->param->data
+                    && (const_set->direct_copy || (first_const->param->type == const_set->param->type
+                    && first_const->param->class == const_set->param->class
+                    && first_const->param->columns == const_set->param->columns
+                    && first_const->param->rows == const_set->param->rows
+                    && first_const->register_count == const_set->register_count
+                    && (i == const_tab->const_set_count - 1
+                    || first_const->param->element_count == const_set->param->element_count)))))
+                break;
+
+            current_start_offset += count;
+            current_data += const_set->direct_copy ? count : const_set->param->rows
+                    * const_set->param->columns * const_set->element_count;
+            element_count += const_set->element_count;
+        }
+
+        if (i > index + 1)
+        {
+            TRACE("Merging %u child parameters for %s, not merging %u, direct_copy %#x.\n", i - index,
+                    debugstr_a(param->name), const_tab->const_set_count - i, first_const->direct_copy);
+
+            first_const->element_count = element_count;
+            if (first_const->direct_copy)
+            {
+                first_const->element_count = 1;
+                if (index == start_index
+                        && !(param->type == D3DXPT_VOID && param->class == D3DXPC_STRUCT))
+                {
+                    if (table_type_from_param_type(param->type) == PRES_VT_COUNT)
+                        return D3DERR_INVALIDCALL;
+                    first_const->param = param;
+                }
+                first_const->register_count = get_reg_offset(current_table, current_start_offset)
+                        - first_const->register_index;
+            }
+            memmove(&const_tab->const_set[index + 1], &const_tab->const_set[i],
+                    sizeof(*const_tab->const_set) * (const_tab->const_set_count - i));
+            const_tab->const_set_count -= i - index - 1;
+        }
+        else
+        {
+            TRACE("Not merging %u child parameters for %s, direct_copy %#x.\n",
+                    const_tab->const_set_count - i, debugstr_a(param->name), first_const->direct_copy);
+        }
+        index = i;
+    }
+    return D3D_OK;
+}
+
+static HRESULT init_set_constants_param(struct d3dx_const_tab *const_tab, ID3DXConstantTable *ctab,
+        D3DXHANDLE hc, struct d3dx_parameter *param)
+{
+    D3DXCONSTANT_DESC desc;
+    unsigned int const_count, param_count, i;
+    BOOL get_element;
+    struct d3dx_const_param_eval_output const_set;
+    struct const_upload_info info;
+    enum pres_value_type table_type;
+    HRESULT hr;
+
+    if (FAILED(get_ctab_constant_desc(ctab, hc, &desc, NULL)))
+        return D3DERR_INVALIDCALL;
+
+    if (param->element_count)
+    {
+        param_count = param->element_count;
+        const_count = desc.Elements;
+        get_element = TRUE;
+    }
+    else
+    {
+        if (desc.Elements > 1)
+        {
+            FIXME("Unexpected number of constant elements %u.\n", desc.Elements);
+            return D3DERR_INVALIDCALL;
+        }
+        param_count = param->member_count;
+        const_count = desc.StructMembers;
+        get_element = FALSE;
+    }
+    if (const_count != param_count)
+    {
+        FIXME("Number of elements or struct members differs between parameter (%u) and constant (%u).\n",
+                param_count, const_count);
+        return D3DERR_INVALIDCALL;
+    }
+    if (const_count)
+    {
+        HRESULT ret = D3D_OK;
+        D3DXHANDLE hc_element;
+        unsigned int index = const_tab->const_set_count;
+
+        for (i = 0; i < const_count; ++i)
+        {
+            if (get_element)
+                hc_element = ID3DXConstantTable_GetConstantElement(ctab, hc, i);
+            else
+                hc_element = ID3DXConstantTable_GetConstant(ctab, hc, i);
+            if (!hc_element)
+            {
+                FIXME("Could not get constant.\n");
+                hr = D3DERR_INVALIDCALL;
+            }
+            else
+            {
+                hr = init_set_constants_param(const_tab, ctab, hc_element, &param->members[i]);
+            }
+            if (FAILED(hr))
+                ret = hr;
+        }
+        if (FAILED(ret))
+            return ret;
+        return merge_const_set_entries(const_tab, param, index);
+    }
+
+    TRACE("Constant %s, rows %u, columns %u, class %u, bytes %u.\n",
+            debugstr_a(desc.Name), desc.Rows, desc.Columns, desc.Class, desc.Bytes);
+    TRACE("Parameter %s, rows %u, columns %u, class %u, flags %#x, bytes %u.\n",
+            debugstr_a(param->name), param->rows, param->columns, param->class,
+            param->flags, param->bytes);
+
+    const_set.element_count = 1;
+    const_set.param = param;
+    const_set.constant_class = desc.Class;
+    if (desc.RegisterSet >= ARRAY_SIZE(shad_regset2table))
+    {
+        FIXME("Unknown register set %u.\n", desc.RegisterSet);
+        return D3DERR_INVALIDCALL;
+    }
+    const_set.register_index = desc.RegisterIndex;
+    const_set.table = const_tab->regset2table[desc.RegisterSet];
+    if (const_set.table >= PRES_REGTAB_COUNT)
+    {
+        ERR("Unexpected register set %u.\n", desc.RegisterSet);
+        return D3DERR_INVALIDCALL;
+    }
+    assert(table_info[const_set.table].component_size == sizeof(unsigned int));
+    assert(param->bytes / (param->rows * param->columns) == sizeof(unsigned int));
+    const_set.register_count = desc.RegisterCount;
+    table_type = table_info[const_set.table].type;
+    get_const_upload_info(&const_set, &info);
+    if (!info.count)
+    {
+        TRACE("%s has zero count, skipping.\n", debugstr_a(param->name));
+        return D3D_OK;
+    }
+
+    if (table_type_from_param_type(param->type) == PRES_VT_COUNT)
+        return D3DERR_INVALIDCALL;
+
+    const_set.direct_copy = table_type_from_param_type(param->type) == table_type
+            && !info.transpose && info.minor == info.major_stride
+            && info.count == get_offset_reg(const_set.table, const_set.register_count)
+            && info.count * sizeof(unsigned int) <= param->bytes;
+    if (info.minor_remainder && !const_set.direct_copy && !info.transpose)
+        FIXME("Incomplete last row for not transposed matrix which cannot be directly copied, parameter %s.\n",
+                debugstr_a(param->name));
+
+    if (info.major_count > info.major
+            || (info.major_count == info.major && info.minor_remainder))
+    {
+        WARN("Constant dimensions exceed parameter size.\n");
+        return D3DERR_INVALIDCALL;
+    }
+
+    if (FAILED(hr = append_const_set(const_tab, &const_set)))
+        return hr;
+
+    return D3D_OK;
+}
+
+static HRESULT get_constants_desc(unsigned int *byte_code, struct d3dx_const_tab *out,
+        struct d3dx9_base_effect *base, const char **skip_constants,
+        unsigned int skip_constants_count, struct d3dx_preshader *pres)
 {
     ID3DXConstantTable *ctab;
     D3DXCONSTANT_DESC *cdesc;
@@ -529,12 +864,8 @@ static HRESULT get_constants_desc(unsigned int *byte_code, struct d3dx_const_tab
     D3DXCONSTANTTABLE_DESC desc;
     HRESULT hr;
     D3DXHANDLE hc;
-    unsigned int i;
+    unsigned int i, j;
 
-    out->inputs = cdesc = NULL;
-    out->inputs_param = NULL;
-    out->input_count = 0;
-    inputs_param = NULL;
     hr = D3DXGetShaderConstantTable(byte_code, &ctab);
     if (FAILED(hr) || !ctab)
     {
@@ -545,44 +876,128 @@ static HRESULT get_constants_desc(unsigned int *byte_code, struct d3dx_const_tab
     if (FAILED(hr = ID3DXConstantTable_GetDesc(ctab, &desc)))
     {
         FIXME("Could not get CTAB desc, hr %#x.\n", hr);
-        goto err_out;
+        goto cleanup;
     }
 
-    cdesc = HeapAlloc(GetProcessHeap(), 0, sizeof(*cdesc) * desc.Constants);
-    inputs_param = HeapAlloc(GetProcessHeap(), 0, sizeof(*inputs_param) * desc.Constants);
+    out->inputs = cdesc = HeapAlloc(GetProcessHeap(), 0, sizeof(*cdesc) * desc.Constants);
+    out->inputs_param = inputs_param = HeapAlloc(GetProcessHeap(), 0, sizeof(*inputs_param) * desc.Constants);
     if (!cdesc || !inputs_param)
     {
         hr = E_OUTOFMEMORY;
-        goto err_out;
+        goto cleanup;
     }
 
     for (i = 0; i < desc.Constants; ++i)
     {
+        unsigned int index = out->input_count;
+        WORD constantinfo_reserved;
+
         hc = ID3DXConstantTable_GetConstant(ctab, NULL, i);
         if (!hc)
         {
             FIXME("Null constant handle.\n");
-            goto err_out;
+            goto cleanup;
         }
-        if (FAILED(hr = get_ctab_constant_desc(ctab, hc, &cdesc[i])))
-            goto err_out;
-        inputs_param[i] = get_parameter_by_name(base, NULL, cdesc[i].Name);
-        if (cdesc[i].Class == D3DXPC_OBJECT)
-            TRACE("Object %s, parameter %p.\n", cdesc[i].Name, inputs_param[i]);
-        else if (!inputs_param[i])
-            WARN("Could not find parameter %s in effect.\n", cdesc[i].Name);
+        if (FAILED(hr = get_ctab_constant_desc(ctab, hc, &cdesc[index], &constantinfo_reserved)))
+            goto cleanup;
+        inputs_param[index] = get_parameter_by_name(base, NULL, cdesc[index].Name);
+        if (!inputs_param[index])
+        {
+            WARN("Could not find parameter %s in effect.\n", cdesc[index].Name);
+            continue;
+        }
+        if (cdesc[index].Class == D3DXPC_OBJECT)
+        {
+            TRACE("Object %s, parameter %p.\n", cdesc[index].Name, inputs_param[index]);
+            if (cdesc[index].RegisterSet != D3DXRS_SAMPLER || inputs_param[index]->class != D3DXPC_OBJECT
+                    || !is_param_type_sampler(inputs_param[index]->type))
+            {
+                WARN("Unexpected object type, constant %s.\n", debugstr_a(cdesc[index].Name));
+                hr = D3DERR_INVALIDCALL;
+                goto cleanup;
+            }
+            if (max(inputs_param[index]->element_count, 1) < cdesc[index].RegisterCount)
+            {
+                WARN("Register count exceeds parameter size, constant %s.\n", debugstr_a(cdesc[index].Name));
+                hr = D3DERR_INVALIDCALL;
+                goto cleanup;
+            }
+        }
+        if (!is_top_level_parameter(inputs_param[index]))
+        {
+            WARN("Expected top level parameter '%s'.\n", debugstr_a(cdesc[index].Name));
+            hr = E_FAIL;
+            goto cleanup;
+        }
+
+        for (j = 0; j < skip_constants_count; ++j)
+        {
+            if (!strcmp(cdesc[index].Name, skip_constants[j]))
+            {
+                if (!constantinfo_reserved)
+                {
+                    WARN("skip_constants parameter %s is not register bound.\n",
+                            cdesc[index].Name);
+                    hr = D3DERR_INVALIDCALL;
+                    goto cleanup;
+                }
+                TRACE("Skipping constant %s.\n", cdesc[index].Name);
+                break;
+            }
+        }
+        if (j < skip_constants_count)
+            continue;
+        ++out->input_count;
+        if (inputs_param[index]->class == D3DXPC_OBJECT)
+            continue;
+        if (FAILED(hr = init_set_constants_param(out, ctab, hc, inputs_param[index])))
+            goto cleanup;
     }
-    out->input_count = desc.Constants;
-    out->inputs = cdesc;
-    out->inputs_param = inputs_param;
-    hr = init_set_constants(out, ctab);
+    if (pres)
+        append_pres_const_sets_for_shader_input(out, pres);
+    if (out->const_set_count)
+    {
+        struct d3dx_const_param_eval_output *new_alloc;
+
+        qsort(out->const_set, out->const_set_count, sizeof(*out->const_set), compare_const_set);
+
+        i = 0;
+        while (i < out->const_set_count - 1)
+        {
+            if (out->const_set[i].constant_class == D3DXPC_FORCE_DWORD
+                    && out->const_set[i + 1].constant_class == D3DXPC_FORCE_DWORD
+                    && out->const_set[i].table == out->const_set[i + 1].table
+                    && out->const_set[i].register_index + out->const_set[i].register_count
+                    >= out->const_set[i + 1].register_index)
+            {
+                assert(out->const_set[i].register_index + out->const_set[i].register_count
+                        <= out->const_set[i + 1].register_index + 1);
+                out->const_set[i].register_count = out->const_set[i + 1].register_index + 1
+                        - out->const_set[i].register_index;
+                memmove(&out->const_set[i + 1], &out->const_set[i + 2], sizeof(out->const_set[i])
+                        * (out->const_set_count - i - 2));
+                --out->const_set_count;
+            }
+            else
+            {
+                ++i;
+            }
+        }
+
+        new_alloc = HeapReAlloc(GetProcessHeap(), 0, out->const_set,
+                sizeof(*out->const_set) * out->const_set_count);
+        if (new_alloc)
+        {
+            out->const_set = new_alloc;
+            out->const_set_size = out->const_set_count;
+        }
+        else
+        {
+            WARN("Out of memory.\n");
+        }
+    }
+cleanup:
     ID3DXConstantTable_Release(ctab);
-    return hr;
-err_out:
-    HeapFree(GetProcessHeap(), 0, cdesc);
-    HeapFree(GetProcessHeap(), 0, inputs_param);
-    if (ctab)
-        ID3DXConstantTable_Release(ctab);
     return hr;
 }
 
@@ -633,8 +1048,7 @@ static void dump_arg(struct d3dx_regstore *rs, const struct d3dx_pres_operand *a
             index_reg = get_reg_offset(arg->index_reg.table, arg->index_reg.offset);
             TRACE("%s[%u + %s%u.%c].", table_symbol[table], get_reg_offset(table, arg->reg.offset),
                     table_symbol[arg->index_reg.table], index_reg,
-                    xyzw_str[arg->index_reg.offset
-                    - index_reg * table_info[arg->index_reg.table].reg_component_count]);
+                    xyzw_str[arg->index_reg.offset - get_offset_reg(arg->index_reg.table, index_reg)]);
         }
         for (i = 0; i < component_count; ++i)
             TRACE("%c", xyzw_str[(arg->reg.offset + i) % 4]);
@@ -758,19 +1172,18 @@ static HRESULT parse_preshader(struct d3dx_preshader *pres, unsigned int *ptr, u
 
     saved_word = *ptr;
     *ptr = 0xfffe0000;
-    hr = get_constants_desc(ptr, &pres->inputs, base);
+    hr = get_constants_desc(ptr, &pres->inputs, base, NULL, 0, NULL);
     *ptr = saved_word;
     if (FAILED(hr))
         return hr;
 
-    if (const_count % table_info[PRES_REGTAB_IMMED].reg_component_count)
+    if (const_count % get_reg_components(PRES_REGTAB_IMMED))
     {
         FIXME("const_count %u is not a multiple of %u.\n", const_count,
-                table_info[PRES_REGTAB_IMMED].reg_component_count);
+                get_reg_components(PRES_REGTAB_IMMED));
         return D3DXERR_INVALIDDATA;
     }
-    pres->regs.table_sizes[PRES_REGTAB_IMMED] = const_count
-            / table_info[PRES_REGTAB_IMMED].reg_component_count;
+    pres->regs.table_sizes[PRES_REGTAB_IMMED] = get_reg_offset(PRES_REGTAB_IMMED, const_count);
 
     update_table_sizes_consts(pres->regs.table_sizes, &pres->inputs);
     for (i = 0; i < pres->ins_count; ++i)
@@ -796,14 +1209,14 @@ static HRESULT parse_preshader(struct d3dx_preshader *pres, unsigned int *ptr, u
             }
             if (reg_idx >= pres->regs.table_sizes[table])
             {
-                FIXME("Out of bounds register index, i %u, j %u, table %u, reg_idx %u.",
+                /* Native accepts these broken preshaders. */
+                FIXME("Out of bounds register index, i %u, j %u, table %u, reg_idx %u, preshader parsing failed.\n",
                         i, j, table, reg_idx);
                 return D3DXERR_INVALIDDATA;
             }
         }
         update_table_size(pres->regs.table_sizes, pres->ins[i].output.reg.table,
-                get_reg_offset(pres->ins[i].output.reg.table,
-                pres->ins[i].output.reg.offset + pres->ins[i].component_count - 1));
+                get_reg_offset(pres->ins[i].output.reg.table, pres->ins[i].output.reg.offset));
     }
     if (FAILED(regstore_alloc_table(&pres->regs, PRES_REGTAB_IMMED)))
         return E_OUTOFMEMORY;
@@ -812,15 +1225,16 @@ static HRESULT parse_preshader(struct d3dx_preshader *pres, unsigned int *ptr, u
     return D3D_OK;
 }
 
-void d3dx_create_param_eval(struct d3dx9_base_effect *base_effect, void *byte_code, unsigned int byte_code_size,
-        D3DXPARAMETER_TYPE type, struct d3dx_param_eval **peval_out)
+HRESULT d3dx_create_param_eval(struct d3dx9_base_effect *base_effect, void *byte_code, unsigned int byte_code_size,
+        D3DXPARAMETER_TYPE type, struct d3dx_param_eval **peval_out, ULONG64 *version_counter,
+        const char **skip_constants, unsigned int skip_constants_count)
 {
     struct d3dx_param_eval *peval;
-    unsigned int *ptr;
-    HRESULT hr;
+    unsigned int *ptr, *shader_ptr = NULL;
     unsigned int i;
     BOOL shader;
     unsigned int count, pres_size;
+    HRESULT ret;
 
     TRACE("base_effect %p, byte_code %p, byte_code_size %u, type %u, peval_out %p.\n",
             base_effect, byte_code, byte_code_size, type, peval_out);
@@ -829,12 +1243,16 @@ void d3dx_create_param_eval(struct d3dx9_base_effect *base_effect, void *byte_co
     if (!byte_code || !count)
     {
         *peval_out = NULL;
-        return;
+        return D3D_OK;
     }
 
     peval = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*peval));
     if (!peval)
+    {
+        ret = E_OUTOFMEMORY;
         goto err_out;
+    }
+    peval->version_counter = version_counter;
 
     peval->param_type = type;
     switch (type)
@@ -855,16 +1273,11 @@ void d3dx_create_param_eval(struct d3dx9_base_effect *base_effect, void *byte_co
         if ((*ptr & 0xfffe0000) != 0xfffe0000)
         {
             FIXME("Invalid shader signature %#x.\n", *ptr);
+            ret = D3DXERR_INVALIDDATA;
             goto err_out;
         }
         TRACE("Shader version %#x.\n", *ptr & 0xffff);
-
-        if (FAILED(hr = get_constants_desc(ptr, &peval->shader_inputs, base_effect)))
-        {
-            FIXME("Could not get shader constant table, hr %#x.\n", hr);
-            goto err_out;
-        }
-        update_table_sizes_consts(peval->pres.regs.table_sizes, &peval->shader_inputs);
+        shader_ptr = ptr;
         ptr = find_bytecode_comment(ptr + 1, count - 1, FOURCC_PRES, &pres_size);
         if (!ptr)
             TRACE("No preshader found.\n");
@@ -874,16 +1287,27 @@ void d3dx_create_param_eval(struct d3dx9_base_effect *base_effect, void *byte_co
         pres_size = count;
     }
 
-    if (ptr && FAILED(parse_preshader(&peval->pres, ptr, pres_size, base_effect)))
+    if (ptr && FAILED(ret = parse_preshader(&peval->pres, ptr, pres_size, base_effect)))
     {
         FIXME("Failed parsing preshader, byte code for analysis follows.\n");
         dump_bytecode(byte_code, byte_code_size);
         goto err_out;
     }
 
+    if (shader)
+    {
+        if (FAILED(ret = get_constants_desc(shader_ptr, &peval->shader_inputs, base_effect,
+                skip_constants, skip_constants_count, &peval->pres)))
+        {
+            TRACE("Could not get shader constant table, hr %#x.\n", ret);
+            goto err_out;
+        }
+        update_table_sizes_consts(peval->pres.regs.table_sizes, &peval->shader_inputs);
+    }
+
     for (i = PRES_REGTAB_FIRST_SHADER; i < PRES_REGTAB_COUNT; ++i)
     {
-        if (FAILED(regstore_alloc_table(&peval->pres.regs, i)))
+        if (FAILED(ret = regstore_alloc_table(&peval->pres.regs, i)))
             goto err_out;
     }
 
@@ -899,12 +1323,16 @@ void d3dx_create_param_eval(struct d3dx9_base_effect *base_effect, void *byte_co
     }
     *peval_out = peval;
     TRACE("Created parameter evaluator %p.\n", *peval_out);
-    return;
+    return D3D_OK;
 
 err_out:
-    FIXME("Error creating parameter evaluator.\n");
+    WARN("Error creating parameter evaluator.\n");
+    if (TRACE_ON(d3dx))
+        dump_bytecode(byte_code, byte_code_size);
+
     d3dx_free_param_eval(peval);
     *peval_out = NULL;
+    return ret;
 }
 
 static void d3dx_free_const_tab(struct d3dx_const_tab *ctab)
@@ -934,264 +1362,243 @@ void d3dx_free_param_eval(struct d3dx_param_eval *peval)
     HeapFree(GetProcessHeap(), 0, peval);
 }
 
-static void set_constants(struct d3dx_regstore *rs, struct d3dx_const_tab *const_tab, BOOL update_all)
+static void pres_int_from_float(void *out, const void *in, unsigned int count)
+{
+    unsigned int i;
+    const float *in_float = in;
+    int *out_int = out;
+
+    for (i = 0; i < count; ++i)
+        out_int[i] = in_float[i];
+}
+
+static void pres_bool_from_value(void *out, const void *in, unsigned int count)
+{
+    unsigned int i;
+    const DWORD *in_dword = in;
+    BOOL *out_bool = out;
+
+    for (i = 0; i < count; ++i)
+        out_bool[i] = !!in_dword[i];
+}
+
+static void pres_float_from_int(void *out, const void *in, unsigned int count)
+{
+    unsigned int i;
+    const int *in_int = in;
+    float *out_float = out;
+
+    for (i = 0; i < count; ++i)
+        out_float[i] = in_int[i];
+}
+
+static void pres_float_from_bool(void *out, const void *in, unsigned int count)
+{
+    unsigned int i;
+    const BOOL *in_bool = in;
+    float *out_float = out;
+
+    for (i = 0; i < count; ++i)
+        out_float[i] = !!in_bool[i];
+}
+
+static void pres_int_from_bool(void *out, const void *in, unsigned int count)
+{
+    unsigned int i;
+    const float *in_bool = in;
+    int *out_int = out;
+
+    for (i = 0; i < count; ++i)
+        out_int[i] = !!in_bool[i];
+}
+
+static void regstore_set_data(struct d3dx_regstore *rs, unsigned int table,
+        unsigned int offset, const unsigned int *in, unsigned int count, enum pres_value_type param_type)
+{
+    typedef void (*conv_func)(void *out, const void *in, unsigned int count);
+    static const conv_func set_const_funcs[PRES_VT_COUNT][PRES_VT_COUNT] =
+    {
+        {NULL,                 NULL, pres_int_from_float, pres_bool_from_value},
+        {NULL,                 NULL, NULL,                NULL},
+        {pres_float_from_int,  NULL, NULL,                pres_bool_from_value},
+        {pres_float_from_bool, NULL, pres_int_from_bool,  NULL}
+    };
+    enum pres_value_type table_type = table_info[table].type;
+
+    if (param_type == table_type)
+    {
+        regstore_set_values(rs, table, in, offset, count);
+        return;
+    }
+
+    set_const_funcs[param_type][table_type]((unsigned int *)rs->tables[table] + offset, in, count);
+}
+
+static HRESULT set_constants_device(ID3DXEffectStateManager *manager, struct IDirect3DDevice9 *device,
+        D3DXPARAMETER_TYPE type, enum pres_reg_tables table, void *ptr,
+        unsigned int start, unsigned int count)
+{
+    if (type == D3DXPT_VERTEXSHADER)
+    {
+        switch(table)
+        {
+            case PRES_REGTAB_OCONST:
+                return SET_D3D_STATE_(manager, device, SetVertexShaderConstantF, start, ptr, count);
+            case PRES_REGTAB_OICONST:
+                return SET_D3D_STATE_(manager, device, SetVertexShaderConstantI, start, ptr, count);
+            case PRES_REGTAB_OBCONST:
+                return SET_D3D_STATE_(manager, device, SetVertexShaderConstantB, start, ptr, count);
+            default:
+                FIXME("Unexpected register table %u.\n", table);
+                return D3DERR_INVALIDCALL;
+        }
+    }
+    else if (type == D3DXPT_PIXELSHADER)
+    {
+        switch(table)
+        {
+            case PRES_REGTAB_OCONST:
+                return SET_D3D_STATE_(manager, device, SetPixelShaderConstantF, start, ptr, count);
+            case PRES_REGTAB_OICONST:
+                return SET_D3D_STATE_(manager, device, SetPixelShaderConstantI, start, ptr, count);
+            case PRES_REGTAB_OBCONST:
+                return SET_D3D_STATE_(manager, device, SetPixelShaderConstantB, start, ptr, count);
+            default:
+                FIXME("Unexpected register table %u.\n", table);
+                return D3DERR_INVALIDCALL;
+        }
+    }
+    else
+    {
+        FIXME("Unexpected parameter type %u.\n", type);
+        return D3DERR_INVALIDCALL;
+    }
+}
+
+static HRESULT set_constants(struct d3dx_regstore *rs, struct d3dx_const_tab *const_tab,
+        ULONG64 new_update_version, ID3DXEffectStateManager *manager, struct IDirect3DDevice9 *device,
+        D3DXPARAMETER_TYPE type, BOOL device_update_all, BOOL pres_dirty)
 {
     unsigned int const_idx;
+    unsigned int current_start = 0, current_count = 0;
+    enum pres_reg_tables current_table = PRES_REGTAB_COUNT;
+    BOOL update_device = manager || device;
+    HRESULT hr, result = D3D_OK;
+    ULONG64 update_version = const_tab->update_version;
 
     for (const_idx = 0; const_idx < const_tab->const_set_count; ++const_idx)
     {
         struct d3dx_const_param_eval_output *const_set = &const_tab->const_set[const_idx];
-        unsigned int table = const_set->table;
+        enum pres_reg_tables table = const_set->table;
         struct d3dx_parameter *param = const_set->param;
-        enum pres_value_type table_type = table_info[table].type;
-        unsigned int i, j, n, start_offset;
-        unsigned int minor, major, major_stride, param_offset;
-        BOOL transpose;
-        unsigned int count;
+        unsigned int element, i, j, start_offset;
+        struct const_upload_info info;
+        unsigned int *data;
+        enum pres_value_type param_type;
 
-        if (!(update_all || is_param_dirty(param)))
+        if (!(param && is_param_dirty(param, update_version)))
             continue;
 
-        transpose = (const_set->constant_class == D3DXPC_MATRIX_COLUMNS && param->class == D3DXPC_MATRIX_ROWS)
-                || (param->class == D3DXPC_MATRIX_COLUMNS && const_set->constant_class == D3DXPC_MATRIX_ROWS);
-        if (const_set->constant_class == D3DXPC_MATRIX_COLUMNS)
+        data = param->data;
+        start_offset = get_offset_reg(table, const_set->register_index);
+        if (const_set->direct_copy)
         {
-            major = param->columns;
-            minor = param->rows;
-        }
-        else
-        {
-            major = param->rows;
-            minor = param->columns;
-        }
-        start_offset = const_set->register_index * table_info[table].reg_component_count;
-        major_stride = max(minor, table_info[table].reg_component_count);
-        n = min(major * major_stride,
-                const_set->register_count * table_info[table].reg_component_count + major_stride - 1) / major_stride;
-        count = n * minor;
-        if (((param->type == D3DXPT_FLOAT && table_type == PRES_VT_FLOAT)
-                || (param->type == D3DXPT_INT && table_type == PRES_VT_INT)
-                || (param->type == D3DXPT_BOOL && table_type == PRES_VT_BOOL))
-                && !transpose && minor == major_stride
-                && count == table_info[table].reg_component_count * const_set->register_count
-                && count * sizeof(unsigned int) <= param->bytes)
-        {
-            regstore_set_values(rs, table, param->data, start_offset, count);
+            regstore_set_values(rs, table, data, start_offset,
+                    get_offset_reg(table, const_set->register_count));
             continue;
         }
-
-        for (i = 0; i < n; ++i)
+        param_type = table_type_from_param_type(param->type);
+        if (const_set->constant_class == D3DXPC_SCALAR || const_set->constant_class == D3DXPC_VECTOR)
         {
-            for (j = 0; j < minor; ++j)
+            unsigned int count = max(param->rows, param->columns);
+
+            if (count >= get_reg_components(table))
             {
-                unsigned int out;
-                unsigned int *in;
-                unsigned int offset;
-
-                offset = start_offset + i * major_stride + j;
-                if (offset / table_info[table].reg_component_count >= rs->table_sizes[table])
-                {
-                    if (table_info[table].reg_component_count != 1)
-                        FIXME("Output offset exceeds table size, name %s, component %u.\n",
-                                debugstr_a(param->name), i);
-                    break;
-                }
-                if (transpose)
-                    param_offset = i + j * major;
-                else
-                    param_offset = i * minor + j;
-                if (param_offset * sizeof(unsigned int) >= param->bytes)
-                {
-                    WARN("Parameter data is too short, name %s, component %u.\n", debugstr_a(param->name), i);
-                    break;
-                }
-
-                in = (unsigned int *)param->data + param_offset;
-                switch (table_type)
-                {
-                    case PRES_VT_FLOAT: set_number(&out, D3DXPT_FLOAT, in, param->type); break;
-                    case PRES_VT_INT: set_number(&out, D3DXPT_INT, in, param->type); break;
-                    case PRES_VT_BOOL: set_number(&out, D3DXPT_BOOL, in, param->type); break;
-                    default:
-                        FIXME("Unexpected type %#x.\n", table_info[table].type);
-                        break;
-                }
-                regstore_set_values(rs, table, &out, offset, 1);
-            }
-        }
-    }
-}
-
-#define INITIAL_CONST_SET_SIZE 16
-
-static HRESULT append_const_set(struct d3dx_const_tab *const_tab, struct d3dx_const_param_eval_output *set)
-{
-    if (const_tab->const_set_count >= const_tab->const_set_size)
-    {
-        unsigned int new_size;
-        struct d3dx_const_param_eval_output *new_alloc;
-
-        if (!const_tab->const_set_size)
-        {
-            new_size = INITIAL_CONST_SET_SIZE;
-            new_alloc = HeapAlloc(GetProcessHeap(), 0, sizeof(*const_tab->const_set) * new_size);
-            if (!new_alloc)
-            {
-                ERR("Out of memory.\n");
-                return E_OUTOFMEMORY;
-            }
-        }
-        else
-        {
-            new_size = const_tab->const_set_size * 2;
-            new_alloc = HeapReAlloc(GetProcessHeap(), 0, const_tab->const_set,
-                    sizeof(*const_tab->const_set) * new_size);
-            if (!new_alloc)
-            {
-                ERR("Out of memory.\n");
-                return E_OUTOFMEMORY;
-            }
-        }
-        const_tab->const_set = new_alloc;
-        const_tab->const_set_size = new_size;
-    }
-    const_tab->const_set[const_tab->const_set_count++] = *set;
-    return D3D_OK;
-}
-
-static HRESULT init_set_constants_param(struct d3dx_const_tab *const_tab, ID3DXConstantTable *ctab,
-        D3DXHANDLE hc, struct d3dx_parameter *param)
-{
-    D3DXCONSTANT_DESC desc;
-    unsigned int const_count, param_count, i;
-    BOOL get_element;
-    struct d3dx_const_param_eval_output const_set;
-    HRESULT hr;
-
-    if (FAILED(get_ctab_constant_desc(ctab, hc, &desc)))
-        return D3DERR_INVALIDCALL;
-
-    if (param->element_count)
-    {
-        param_count = param->element_count;
-        const_count = desc.Elements;
-        get_element = TRUE;
-    }
-    else
-    {
-        if (desc.Elements > 1)
-        {
-            FIXME("Unexpected number of constant elements %u.\n", desc.Elements);
-            return D3DERR_INVALIDCALL;
-        }
-        param_count = param->member_count;
-        const_count = desc.StructMembers;
-        get_element = FALSE;
-    }
-    if (const_count != param_count)
-    {
-        FIXME("Number of elements or struct members differs between parameter (%u) and constant (%u).\n",
-                param_count, const_count);
-        return D3DERR_INVALIDCALL;
-    }
-    if (const_count)
-    {
-        HRESULT ret;
-        D3DXHANDLE hc_element;
-
-        ret = D3D_OK;
-        for (i = 0; i < const_count; ++i)
-        {
-            if (get_element)
-                hc_element = ID3DXConstantTable_GetConstantElement(ctab, hc, i);
-            else
-                hc_element = ID3DXConstantTable_GetConstant(ctab, hc, i);
-            if (!hc_element)
-            {
-                FIXME("Could not get constant.\n");
-                hr = D3DERR_INVALIDCALL;
+                regstore_set_data(rs, table, start_offset, data,
+                        count * const_set->element_count, param_type);
             }
             else
             {
-                hr = init_set_constants_param(const_tab, ctab, hc_element, &param->members[i]);
+                for (element = 0; element < const_set->element_count; ++element)
+                    regstore_set_data(rs, table, start_offset + get_offset_reg(table, element),
+                            &data[element * count], count, param_type);
             }
-            if (FAILED(hr))
-                ret = hr;
-        }
-        return ret;
-    }
-
-    TRACE("Constant %s, rows %u, columns %u, class %u, bytes %u.\n",
-            debugstr_a(desc.Name), desc.Rows, desc.Columns, desc.Class, desc.Bytes);
-    TRACE("Parameter %s, rows %u, columns %u, class %u, flags %#x, bytes %u.\n",
-            debugstr_a(param->name), param->rows, param->columns, param->class,
-            param->flags, param->bytes);
-
-    const_set.param = param;
-    const_set.constant_class = desc.Class;
-    if (desc.RegisterSet >= ARRAY_SIZE(shad_regset2table))
-    {
-        FIXME("Unknown register set %u.\n", desc.RegisterSet);
-        return D3DERR_INVALIDCALL;
-    }
-    const_set.register_index = desc.RegisterIndex;
-    const_set.table = const_tab->regset2table[desc.RegisterSet];
-    if (const_set.table >= PRES_REGTAB_COUNT)
-    {
-        ERR("Unexpected register set %u.\n", desc.RegisterSet);
-        return D3DERR_INVALIDCALL;
-    }
-    const_set.register_count = desc.RegisterCount;
-    if (FAILED(hr = append_const_set(const_tab, &const_set)))
-        return hr;
-
-    return D3D_OK;
-}
-
-static HRESULT init_set_constants(struct d3dx_const_tab *const_tab, ID3DXConstantTable *ctab)
-{
-    unsigned int i;
-    HRESULT hr, ret;
-    D3DXHANDLE hc;
-
-    ret = D3D_OK;
-    for (i = 0; i < const_tab->input_count; ++i)
-    {
-        if (!const_tab->inputs_param[i] || const_tab->inputs_param[i]->class == D3DXPC_OBJECT)
             continue;
-        hc = ID3DXConstantTable_GetConstant(ctab, NULL, i);
-        if (hc)
-        {
-            hr = init_set_constants_param(const_tab, ctab, hc, const_tab->inputs_param[i]);
         }
-        else
+        get_const_upload_info(const_set, &info);
+        for (element = 0; element < const_set->element_count; ++element)
         {
-            FIXME("Could not get constant, index %u.\n", i);
-            hr = D3DERR_INVALIDCALL;
-        }
-        if (FAILED(hr))
-            ret = hr;
-    }
+            unsigned int *out = (unsigned int *)rs->tables[table] + start_offset;
 
-    if (const_tab->const_set_count)
-    {
-        const_tab->const_set = HeapReAlloc(GetProcessHeap(), 0, const_tab->const_set,
-                sizeof(*const_tab->const_set) * const_tab->const_set_count);
-        if (!const_tab->const_set)
-        {
-            ERR("Out of memory.\n");
-            return E_OUTOFMEMORY;
+            /* Store reshaped but (possibly) not converted yet data temporarily in the same constants buffer.
+             * All the supported types of parameters and table values have the same size. */
+            if (info.transpose)
+            {
+                for (i = 0; i < info.major_count; ++i)
+                    for (j = 0; j < info.minor; ++j)
+                        out[i * info.major_stride + j] = data[i + j * info.major];
+
+                for (j = 0; j < info.minor_remainder; ++j)
+                    out[i * info.major_stride + j] = data[i + j * info.major];
+            }
+            else
+            {
+                for (i = 0; i < info.major_count; ++i)
+                    for (j = 0; j < info.minor; ++j)
+                        out[i * info.major_stride + j] = data[i * info.minor + j];
+            }
+            start_offset += get_offset_reg(table, const_set->register_count);
+            data += param->rows * param->columns;
         }
-        const_tab->const_set_size = const_tab->const_set_count;
+        start_offset = get_offset_reg(table, const_set->register_index);
+        if (table_info[table].type != param_type)
+            regstore_set_data(rs, table, start_offset, (unsigned int *)rs->tables[table] + start_offset,
+                    get_offset_reg(table, const_set->register_count) * const_set->element_count, param_type);
     }
-    return ret;
+    const_tab->update_version = new_update_version;
+    if (!update_device)
+        return D3D_OK;
+
+    for (const_idx = 0; const_idx < const_tab->const_set_count; ++const_idx)
+    {
+        struct d3dx_const_param_eval_output *const_set = &const_tab->const_set[const_idx];
+
+        if (device_update_all || (const_set->param
+                ? is_param_dirty(const_set->param, update_version) : pres_dirty))
+        {
+            enum pres_reg_tables table = const_set->table;
+
+            if (table == current_table && current_start + current_count == const_set->register_index)
+            {
+                current_count += const_set->register_count * const_set->element_count;
+            }
+            else
+            {
+                if (current_count)
+                {
+                    if (FAILED(hr = set_constants_device(manager, device, type, current_table,
+                            (DWORD *)rs->tables[current_table]
+                            + get_offset_reg(current_table, current_start), current_start, current_count)))
+                        result = hr;
+                }
+                current_table = table;
+                current_start = const_set->register_index;
+                current_count = const_set->register_count * const_set->element_count;
+            }
+        }
+    }
+    if (current_count)
+    {
+        if (FAILED(hr = set_constants_device(manager, device, type, current_table,
+                (DWORD *)rs->tables[current_table]
+                + get_offset_reg(current_table, current_start), current_start, current_count)))
+            result = hr;
+    }
+    return result;
 }
 
 static double exec_get_reg_value(struct d3dx_regstore *rs, enum pres_reg_tables table, unsigned int offset)
 {
-    if (!regstore_is_val_set_reg(rs, table, offset / table_info[table].reg_component_count))
-        WARN("Using uninitialized input, table %u, offset %u.\n", table, offset);
-
     return regstore_get_double(rs, table, offset);
 }
 
@@ -1206,8 +1613,8 @@ static double exec_get_arg(struct d3dx_regstore *rs, const struct d3dx_pres_oper
     else
         base_index = lrint(exec_get_reg_value(rs, opr->index_reg.table, opr->index_reg.offset));
 
-    offset = base_index * table_info[table].reg_component_count + opr->reg.offset + comp;
-    reg_index = offset / table_info[table].reg_component_count;
+    offset = get_offset_reg(table, base_index) + opr->reg.offset + comp;
+    reg_index = get_reg_offset(table, offset);
 
     if (reg_index >= rs->table_sizes[table])
     {
@@ -1231,8 +1638,7 @@ static double exec_get_arg(struct d3dx_regstore *rs, const struct d3dx_pres_oper
         if (reg_index >= rs->table_sizes[table])
             return 0.0;
 
-        offset = reg_index * table_info[table].reg_component_count
-                + offset % table_info[table].reg_component_count;
+        offset = get_offset_reg(table, reg_index) + offset % get_reg_components(table);
     }
 
     return exec_get_reg_value(rs, table, offset);
@@ -1288,26 +1694,29 @@ static HRESULT execute_preshader(struct d3dx_preshader *pres)
     return D3D_OK;
 }
 
-static BOOL is_const_tab_input_dirty(struct d3dx_const_tab *ctab)
+static BOOL is_const_tab_input_dirty(struct d3dx_const_tab *ctab, ULONG64 update_version)
 {
     unsigned int i;
 
-    for (i = 0; i < ctab->const_set_count; ++i)
+    if (update_version == ULONG64_MAX)
+        update_version = ctab->update_version;
+    for (i = 0; i < ctab->input_count; ++i)
     {
-        if (is_param_dirty(ctab->const_set[i].param))
+        if (is_top_level_param_dirty(top_level_parameter_from_parameter(ctab->inputs_param[i]),
+                update_version))
             return TRUE;
     }
     return FALSE;
 }
 
-BOOL is_param_eval_input_dirty(struct d3dx_param_eval *peval)
+BOOL is_param_eval_input_dirty(struct d3dx_param_eval *peval, ULONG64 update_version)
 {
-    return is_const_tab_input_dirty(&peval->pres.inputs)
-            || is_const_tab_input_dirty(&peval->shader_inputs);
+    return is_const_tab_input_dirty(&peval->pres.inputs, update_version)
+            || is_const_tab_input_dirty(&peval->shader_inputs, update_version);
 }
 
 HRESULT d3dx_evaluate_parameter(struct d3dx_param_eval *peval, const struct d3dx_parameter *param,
-        void *param_value, BOOL update_all)
+        void *param_value)
 {
     HRESULT hr;
     unsigned int i;
@@ -1316,13 +1725,17 @@ HRESULT d3dx_evaluate_parameter(struct d3dx_param_eval *peval, const struct d3dx
 
     TRACE("peval %p, param %p, param_value %p.\n", peval, param, param_value);
 
-    set_constants(&peval->pres.regs, &peval->pres.inputs, update_all);
+    if (is_const_tab_input_dirty(&peval->pres.inputs, ULONG64_MAX))
+    {
+        set_constants(&peval->pres.regs, &peval->pres.inputs,
+                next_update_version(peval->version_counter),
+                NULL, NULL, peval->param_type, FALSE, FALSE);
 
-    if (FAILED(hr = execute_preshader(&peval->pres)))
-        return hr;
+        if (FAILED(hr = execute_preshader(&peval->pres)))
+            return hr;
+    }
 
-    elements_table = table_info[PRES_REGTAB_OCONST].reg_component_count
-            * peval->pres.regs.table_sizes[PRES_REGTAB_OCONST];
+    elements_table = get_offset_reg(PRES_REGTAB_OCONST, peval->pres.regs.table_sizes[PRES_REGTAB_OCONST]);
     elements_param = param->bytes / sizeof(unsigned int);
     elements = min(elements_table, elements_param);
     oc = (float *)peval->pres.regs.tables[PRES_REGTAB_OCONST];
@@ -1331,105 +1744,26 @@ HRESULT d3dx_evaluate_parameter(struct d3dx_param_eval *peval, const struct d3dx
     return D3D_OK;
 }
 
-static HRESULT set_shader_constants_device(ID3DXEffectStateManager *manager, struct IDirect3DDevice9 *device,
-        struct d3dx_regstore *rs, D3DXPARAMETER_TYPE type, enum pres_reg_tables table)
-{
-    unsigned int start, count;
-    void *ptr;
-    HRESULT hr, result;
-
-    result = D3D_OK;
-    start = 0;
-    while (start < rs->table_sizes[table])
-    {
-        count = 0;
-        while (start < rs->table_sizes[table] && !regstore_is_val_set_reg(rs, table, start))
-            ++start;
-        while (start + count < rs->table_sizes[table] && regstore_is_val_set_reg(rs, table, start + count))
-            ++count;
-        if (!count)
-            break;
-        TRACE("Setting %u constants at %u.\n", count, start);
-        ptr = (BYTE *)rs->tables[table] + start * table_info[table].reg_component_count
-                * table_info[table].component_size;
-        if (type == D3DXPT_VERTEXSHADER)
-        {
-            switch(table)
-            {
-                case PRES_REGTAB_OCONST:
-                    hr = SET_D3D_STATE_(manager, device, SetVertexShaderConstantF, start, (const float *)ptr, count);
-                    break;
-                case PRES_REGTAB_OICONST:
-                    hr = SET_D3D_STATE_(manager, device, SetVertexShaderConstantI, start, (const int *)ptr, count);
-                    break;
-                case PRES_REGTAB_OBCONST:
-                    hr = SET_D3D_STATE_(manager, device, SetVertexShaderConstantB, start, (const BOOL *)ptr, count);
-                    break;
-                default:
-                    FIXME("Unexpected register table %u.\n", table);
-                    return D3DERR_INVALIDCALL;
-            }
-        }
-        else if (type == D3DXPT_PIXELSHADER)
-        {
-            switch(table)
-            {
-                case PRES_REGTAB_OCONST:
-                    hr = SET_D3D_STATE_(manager, device, SetPixelShaderConstantF, start, (const float *)ptr, count);
-                    break;
-                case PRES_REGTAB_OICONST:
-                    hr = SET_D3D_STATE_(manager, device, SetPixelShaderConstantI, start, (const int *)ptr, count);
-                    break;
-                case PRES_REGTAB_OBCONST:
-                    hr = SET_D3D_STATE_(manager, device, SetPixelShaderConstantB, start, (const BOOL *)ptr, count);
-                    break;
-                default:
-                    FIXME("Unexpected register table %u.\n", table);
-                    return D3DERR_INVALIDCALL;
-            }
-        }
-        else
-        {
-            FIXME("Unexpected parameter type %u.\n", type);
-            return D3DERR_INVALIDCALL;
-        }
-
-        if (FAILED(hr))
-        {
-            ERR("Setting constants failed, type %u, table %u, hr %#x.\n", type, table, hr);
-            result = hr;
-        }
-        start += count;
-    }
-    regstore_reset_table(rs, table);
-    return result;
-}
-
 HRESULT d3dx_param_eval_set_shader_constants(ID3DXEffectStateManager *manager, struct IDirect3DDevice9 *device,
         struct d3dx_param_eval *peval, BOOL update_all)
 {
-    static const enum pres_reg_tables set_tables[] =
-            {PRES_REGTAB_OCONST, PRES_REGTAB_OICONST, PRES_REGTAB_OBCONST};
-    HRESULT hr, result;
+    HRESULT hr;
     struct d3dx_preshader *pres = &peval->pres;
     struct d3dx_regstore *rs = &pres->regs;
-    unsigned int i;
+    ULONG64 new_update_version = next_update_version(peval->version_counter);
+    BOOL pres_dirty = FALSE;
 
     TRACE("device %p, peval %p, param_type %u.\n", device, peval, peval->param_type);
 
-    if (update_all || is_const_tab_input_dirty(&pres->inputs))
+    if (is_const_tab_input_dirty(&pres->inputs, ULONG64_MAX))
     {
-        set_constants(rs, &pres->inputs, update_all);
+        set_constants(rs, &pres->inputs, new_update_version,
+                NULL, NULL, peval->param_type, FALSE, FALSE);
         if (FAILED(hr = execute_preshader(pres)))
             return hr;
+        pres_dirty = TRUE;
     }
 
-    set_constants(rs, &peval->shader_inputs, update_all);
-    result = D3D_OK;
-    for (i = 0; i < ARRAY_SIZE(set_tables); ++i)
-    {
-        if (FAILED(hr = set_shader_constants_device(manager, device, rs, peval->param_type, set_tables[i])))
-            result = hr;
-    }
-    return result;
+    return set_constants(rs, &peval->shader_inputs, new_update_version,
+            manager, device, peval->param_type, update_all, pres_dirty);
 }

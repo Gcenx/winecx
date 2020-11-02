@@ -59,6 +59,7 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
+WINE_DECLARE_DEBUG_CHANNEL(relay);
 
 static pthread_key_t teb_key;
 
@@ -267,9 +268,26 @@ void WINAPI RtlCaptureContext( CONTEXT *context )
  *
  * Set the new CPU context.
  */
-void set_cpu_context( const CONTEXT *context )
+static void set_cpu_context( const CONTEXT *context )
 {
     FIXME("not implemented\n");
+}
+
+
+/***********************************************************************
+ *           get_server_context_flags
+ *
+ * Convert CPU-specific flags to generic server flags
+ */
+static unsigned int get_server_context_flags( DWORD flags )
+{
+    unsigned int ret = 0;
+
+    if (flags & CONTEXT_CONTROL) ret |= SERVER_CTX_CONTROL;
+    if (flags & CONTEXT_INTEGER) ret |= SERVER_CTX_INTEGER;
+    if (flags & CONTEXT_FLOATING_POINT) ret |= SERVER_CTX_FLOATING_POINT;
+    if (flags & CONTEXT_DEBUG_REGISTERS) ret |= SERVER_CTX_DEBUG_REGISTERS;
+    return ret;
 }
 
 
@@ -278,7 +296,7 @@ void set_cpu_context( const CONTEXT *context )
  *
  * Copy a register context according to the flags.
  */
-void copy_context( CONTEXT *to, const CONTEXT *from, DWORD flags )
+static void copy_context( CONTEXT *to, const CONTEXT *from, DWORD flags )
 {
     if (flags & CONTEXT_CONTROL)
     {
@@ -563,6 +581,54 @@ NTSTATUS context_from_server( CONTEXT *to, const context_t *from )
         to->Fpr30 = from->fp.powerpc_regs.fpr[30];
         to->Fpr31 = from->fp.powerpc_regs.fpr[31];
         to->Fpscr = from->fp.powerpc_regs.fpscr;
+    }
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *              NtSetContextThread  (NTDLL.@)
+ *              ZwSetContextThread  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
+{
+    NTSTATUS ret;
+    BOOL self;
+    context_t server_context;
+
+    context_to_server( &server_context, context );
+    ret = set_thread_context( handle, &server_context, &self );
+    if (self && ret == STATUS_SUCCESS) set_cpu_context( context );
+    return ret;
+}
+
+
+/***********************************************************************
+ *              NtGetContextThread  (NTDLL.@)
+ *              ZwGetContextThread  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
+{
+    NTSTATUS ret;
+    DWORD needed_flags = context->ContextFlags;
+    BOOL self = (handle == GetCurrentThread());
+
+    if (!self)
+    {
+        context_t server_context;
+        unsigned int server_flags = get_server_context_flags( context->ContextFlags );
+
+        if ((ret = get_thread_context( handle, &server_context, server_flags, &self ))) return ret;
+        if ((ret = context_from_server( context, &server_context ))) return ret;
+        needed_flags &= ~context->ContextFlags;
+    }
+
+    if (self && needed_flags)
+    {
+        CONTEXT ctx;
+        RtlCaptureContext( &ctx );
+        copy_context( context, &ctx, ctx.ContextFlags & needed_flags );
+        context->ContextFlags |= ctx.ContextFlags & needed_flags;
     }
     return STATUS_SUCCESS;
 }
@@ -940,7 +1006,7 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
  */
 int CDECL __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
 {
-    if (sig >= sizeof(handlers) / sizeof(handlers[0])) return -1;
+    if (sig >= ARRAY_SIZE(handlers)) return -1;
     if (handlers[sig] != NULL) return -2;
     handlers[sig] = wsh;
     return 0;
@@ -981,14 +1047,8 @@ NTSTATUS signal_alloc_thread( TEB **teb )
  */
 void signal_free_thread( TEB *teb )
 {
-    SIZE_T size;
+    SIZE_T size = 0;
 
-    if (teb->DeallocationStack)
-    {
-        size = 0;
-        NtFreeVirtualMemory( GetCurrentProcess(), &teb->DeallocationStack, &size, MEM_RELEASE );
-    }
-    size = 0;
     NtFreeVirtualMemory( NtCurrentProcess(), (void **)&teb, &size, MEM_RELEASE );
 }
 
@@ -1049,14 +1109,6 @@ void signal_init_process(void)
 }
 
 
-/**********************************************************************
- *              __wine_enter_vm86   (NTDLL.@)
- */
-void __wine_enter_vm86( CONTEXT *context )
-{
-    MESSAGE("vm86 mode not supported on this platform\n");
-}
-
 /***********************************************************************
  *            RtlUnwind  (NTDLL.@)
  */
@@ -1101,11 +1153,12 @@ USHORT WINAPI RtlCaptureStackBackTrace( ULONG skip, ULONG count, PVOID *buffer, 
 /***********************************************************************
  *           call_thread_entry_point
  */
-void call_thread_entry_point( LPTHREAD_START_ROUTINE entry, void *arg )
+static void WINAPI call_thread_entry_point( LPTHREAD_START_ROUTINE entry, void *arg )
 {
     __TRY
     {
-        exit_thread( entry( arg ));
+        TRACE_(relay)( "\1Starting thread proc %p (arg=%p)\n", entry, arg );
+        RtlExitUserThread( entry( arg ));
     }
     __EXCEPT(unhandled_exception_filter)
     {
@@ -1115,20 +1168,79 @@ void call_thread_entry_point( LPTHREAD_START_ROUTINE entry, void *arg )
     abort();  /* should not be reached */
 }
 
+typedef void (WINAPI *thread_start_func)(LPTHREAD_START_ROUTINE,void *);
+
+struct startup_info
+{
+    thread_start_func      start;
+    LPTHREAD_START_ROUTINE entry;
+    void                  *arg;
+    BOOL                   suspend;
+};
+
 /***********************************************************************
- *           RtlExitUserThread  (NTDLL.@)
+ *           thread_startup
  */
-void WINAPI RtlExitUserThread( ULONG status )
+static void thread_startup( void *param )
+{
+    CONTEXT context = { 0 };
+    struct startup_info *info = param;
+
+    /* build the initial context */
+    context.ContextFlags = CONTEXT_FULL;
+    context.Gpr1 = (DWORD)NtCurrentTeb()->Tib.StackBase;
+    context.Gpr3 = (DWORD)info->entry;
+    context.Gpr4 = (DWORD)info->arg;
+    context.Iar  = (DWORD)info->start;
+
+    if (info->suspend) wait_suspend( &context );
+    LdrInitializeThunk( &context, (ULONG_PTR *)&context.Gpr3, 0, 0 );
+
+    ((thread_start_func)context.Iar)( (LPTHREAD_START_ROUTINE)context.Gpr3, (void *)context.Gpr4 );
+}
+
+/***********************************************************************
+ *           signal_start_thread
+ *
+ * Thread startup sequence:
+ * signal_start_thread()
+ *   -> thread_startup()
+ *     -> call_thread_entry_point()
+ */
+void signal_start_thread( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend )
+{
+    struct startup_info info = { call_thread_entry_point, entry, arg, suspend };
+    wine_switch_to_stack( thread_startup, &info, NtCurrentTeb()->Tib.StackBase );
+}
+
+/**********************************************************************
+ *		signal_start_process
+ *
+ * Process startup sequence:
+ * signal_start_process()
+ *   -> thread_startup()
+ *     -> kernel32_start_process()
+ */
+void signal_start_process( LPTHREAD_START_ROUTINE entry, BOOL suspend )
+{
+    struct startup_info info = { kernel32_start_process, entry, NtCurrentTeb()->Peb, suspend };
+    wine_switch_to_stack( thread_startup, &info, NtCurrentTeb()->Tib.StackBase );
+}
+
+/***********************************************************************
+ *           signal_exit_thread
+ */
+void signal_exit_thread( int status )
 {
     exit_thread( status );
 }
 
 /***********************************************************************
- *           abort_thread
+ *           signal_exit_process
  */
-void abort_thread( int status )
+void signal_exit_process( int status )
 {
-    terminate_thread( status );
+    exit( status );
 }
 
 /**********************************************************************

@@ -31,6 +31,7 @@
 #include "urlmon.h"
 
 #include "initguid.h"
+#include "wine/heap.h"
 
 DEFINE_GUID(CLSID_AboutProtocol, 0x3050F406, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 
@@ -84,13 +85,8 @@ static HRESULT (WINAPI *pIEInstallScope)(DWORD*);
 static int strcmp_wa(const WCHAR *strw, const char *stra)
 {
     WCHAR buf[512];
-    MultiByteToWideChar(CP_ACP, 0, stra, -1, buf, sizeof(buf)/sizeof(WCHAR));
+    MultiByteToWideChar(CP_ACP, 0, stra, -1, buf, ARRAY_SIZE(buf));
     return lstrcmpW(strw, buf);
-}
-
-static void heap_free(void *mem)
-{
-    HeapFree(GetProcessHeap(), 0, mem);
 }
 
 static WCHAR *a2w(const char *str)
@@ -103,6 +99,21 @@ static WCHAR *a2w(const char *str)
 
     len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
     ret = HeapAlloc(GetProcessHeap(), 0, len*sizeof(WCHAR));
+    MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
+
+    return ret;
+}
+
+static WCHAR *a2co(const char *str)
+{
+    WCHAR *ret;
+    int len;
+
+    if(!str)
+        return NULL;
+
+    len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
+    ret = CoTaskMemAlloc(len*sizeof(WCHAR));
     MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
 
     return ret;
@@ -356,23 +367,23 @@ static void test_CoInternetParseUrl(void)
             3, &size, 0);
     ok(hres == E_POINTER, "schema failed: %08x, expected E_POINTER\n", hres);
 
-    for(i=0; i < sizeof(parse_tests)/sizeof(parse_tests[0]); i++) {
+    for(i = 0; i < ARRAY_SIZE(parse_tests); i++) {
         memset(buf, 0xf0, sizeof(buf));
         hres = pCoInternetParseUrl(parse_tests[i].url, PARSE_SECURITY_URL, 0, buf,
-                sizeof(buf)/sizeof(WCHAR), &size, 0);
+                ARRAY_SIZE(buf), &size, 0);
         ok(hres == parse_tests[i].secur_hres, "[%d] security url failed: %08x, expected %08x\n",
                 i, hres, parse_tests[i].secur_hres);
 
         memset(buf, 0xf0, sizeof(buf));
         hres = pCoInternetParseUrl(parse_tests[i].url, PARSE_ENCODE, 0, buf,
-                sizeof(buf)/sizeof(WCHAR), &size, 0);
+                ARRAY_SIZE(buf), &size, 0);
         ok(hres == S_OK, "[%d] encoding failed: %08x\n", i, hres);
         ok(size == lstrlenW(parse_tests[i].encoded_url), "[%d] wrong size\n", i);
         ok(!lstrcmpW(parse_tests[i].encoded_url, buf), "[%d] wrong encoded url\n", i);
 
         memset(buf, 0xf0, sizeof(buf));
         hres = pCoInternetParseUrl(parse_tests[i].url, PARSE_PATH_FROM_URL, 0, buf,
-                sizeof(buf)/sizeof(WCHAR), &size, 0);
+                ARRAY_SIZE(buf), &size, 0);
         ok(hres == parse_tests[i].path_hres, "[%d] path failed: %08x, expected %08x\n",
                 i, hres, parse_tests[i].path_hres);
         if(parse_tests[i].path) {
@@ -382,7 +393,7 @@ static void test_CoInternetParseUrl(void)
 
         memset(buf, 0xf0, sizeof(buf));
         hres = pCoInternetParseUrl(parse_tests[i].url, PARSE_SCHEMA, 0, buf,
-                sizeof(buf)/sizeof(WCHAR), &size, 0);
+                ARRAY_SIZE(buf), &size, 0);
         ok(hres == S_OK, "[%d] schema failed: %08x\n", i, hres);
         ok(size == lstrlenW(parse_tests[i].schema), "[%d] wrong size\n", i);
         ok(!lstrcmpW(parse_tests[i].schema, buf), "[%d] wrong schema\n", i);
@@ -391,7 +402,7 @@ static void test_CoInternetParseUrl(void)
                 && memcmp(parse_tests[i].url, wszAbout, 5*sizeof(WCHAR))) {
             memset(buf, 0xf0, sizeof(buf));
             hres = pCoInternetParseUrl(parse_tests[i].url, PARSE_DOMAIN, 0, buf,
-                    sizeof(buf)/sizeof(WCHAR), &size, 0);
+                    ARRAY_SIZE(buf), &size, 0);
             ok(hres == parse_tests[i].domain_hres, "[%d] domain failed: %08x\n", i, hres);
             if(parse_tests[i].domain)
                 ok(!lstrcmpW(parse_tests[i].domain, buf), "[%d] wrong domain, received %s\n", i, wine_dbgstr_w(buf));
@@ -399,7 +410,7 @@ static void test_CoInternetParseUrl(void)
 
         memset(buf, 0xf0, sizeof(buf));
         hres = pCoInternetParseUrl(parse_tests[i].url, PARSE_ROOTDOCUMENT, 0, buf,
-                sizeof(buf)/sizeof(WCHAR), &size, 0);
+                ARRAY_SIZE(buf), &size, 0);
         ok(hres == parse_tests[i].rootdocument_hres, "[%d] rootdocument failed: %08x\n", i, hres);
         if(parse_tests[i].rootdocument)
             ok(!lstrcmpW(parse_tests[i].rootdocument, buf), "[%d] wrong rootdocument, received %s\n", i, wine_dbgstr_w(buf));
@@ -440,7 +451,7 @@ static void test_CoInternetQueryInfo(void)
     DWORD cb, i;
     HRESULT hres;
 
-    for(i=0; i < sizeof(query_info_tests)/sizeof(query_info_tests[0]); i++) {
+    for(i = 0; i < ARRAY_SIZE(query_info_tests); i++) {
         cb = 0xdeadbeef;
         memset(buf, '?', sizeof(buf));
         hres = pCoInternetQueryInfo(query_info_tests[0].url, QUERY_USES_NETWORK, 0, buf, sizeof(buf), &cb, 0);
@@ -713,7 +724,7 @@ static void test_FindMimeFromData(void)
     static const WCHAR text_htmlW[] = {'t','e','x','t','/','h','t','m','l',0};
     static const WCHAR text_plainW[] = {'t','e','x','t','/','p','l','a','i','n',0};
 
-    for(i=0; i<sizeof(mime_tests)/sizeof(mime_tests[0]); i++) {
+    for(i = 0; i < ARRAY_SIZE(mime_tests); i++) {
         mime = (LPWSTR)0xf0f0f0f0;
         url = a2w(mime_tests[i].url);
         hres = pFindMimeFromData(NULL, url, NULL, 0, NULL, 0, &mime, 0);
@@ -746,7 +757,7 @@ static void test_FindMimeFromData(void)
         heap_free(url);
     }
 
-    for(i=0; i < sizeof(mime_tests2)/sizeof(mime_tests2[0]); i++) {
+    for(i = 0; i < ARRAY_SIZE(mime_tests2); i++) {
         url = a2w(mime_tests2[i].url);
         proposed_mime = a2w(mime_tests2[i].proposed_mime);
         hres = pFindMimeFromData(NULL, url, mime_tests2[i].data, mime_tests2[i].size,
@@ -868,9 +879,9 @@ static HRESULT WINAPI InternetProtocolInfo_ParseUrl(IInternetProtocolInfo *iface
 
     if(ParseAction == PARSE_SECURITY_URL) {
         if(pcchResult)
-            *pcchResult = sizeof(url1)/sizeof(WCHAR);
+            *pcchResult = ARRAY_SIZE(url1);
 
-        if(cchResult<sizeof(url1)/sizeof(WCHAR))
+        if(cchResult < ARRAY_SIZE(url1))
             return S_FALSE;
 
         memcpy(pwzResult, url1, sizeof(url1));
@@ -1021,8 +1032,7 @@ static void test_NameSpace(void)
     SET_EXPECT(CreateInstance);
     SET_EXPECT(ParseUrl);
 
-    hres = pCoInternetParseUrl(url8, PARSE_ENCODE, 0, buf, sizeof(buf)/sizeof(WCHAR),
-                              &size, 0);
+    hres = pCoInternetParseUrl(url8, PARSE_ENCODE, 0, buf, ARRAY_SIZE(buf), &size, 0);
     ok(hres == S_OK, "CoInternetParseUrl failed: %08x\n", hres);
 
     CHECK_CALLED(QI_IInternetProtocolInfo);
@@ -1033,8 +1043,7 @@ static void test_NameSpace(void)
     SET_EXPECT(QI_IInternetProtocolInfo);
     SET_EXPECT(ParseUrl);
 
-    hres = pCoInternetParseUrl(url8, PARSE_ENCODE, 0, buf, sizeof(buf)/sizeof(WCHAR),
-                              &size, 0);
+    hres = pCoInternetParseUrl(url8, PARSE_ENCODE, 0, buf, ARRAY_SIZE(buf), &size, 0);
     ok(hres == S_OK, "CoInternetParseUrl failed: %08x\n", hres);
 
     CHECK_CALLED(QI_IInternetProtocolInfo);
@@ -1043,11 +1052,10 @@ static void test_NameSpace(void)
     SET_EXPECT(QI_IInternetProtocolInfo);
     SET_EXPECT(ParseUrl);
 
-    hres = pCoInternetParseUrl(url8, PARSE_SECURITY_URL, 0, buf,
-            sizeof(buf)/sizeof(WCHAR), &size, 0);
+    hres = pCoInternetParseUrl(url8, PARSE_SECURITY_URL, 0, buf, ARRAY_SIZE(buf), &size, 0);
     ok(hres == S_OK, "CoInternetParseUrl failed: %08x\n", hres);
-    ok(size == sizeof(url1)/sizeof(WCHAR), "Size = %d\n", size);
-    if(size == sizeof(url1)/sizeof(WCHAR))
+    ok(size == ARRAY_SIZE(url1), "Size = %d\n", size);
+    if(size == ARRAY_SIZE(url1))
         ok(!memcmp(buf, url1, sizeof(url1)), "Encoded url = %s\n", wine_dbgstr_w(buf));
 
     CHECK_CALLED(QI_IInternetProtocolInfo);
@@ -1060,7 +1068,7 @@ static void test_NameSpace(void)
         hres = pCoInternetGetSecurityUrl(url8, &sec_url, PSU_SECURITY_URL_ONLY, 0);
         ok(hres == S_OK, "CoInternetGetSecurityUrl failed: %08x\n", hres);
         if(hres == S_OK) {
-            ok(lstrlenW(sec_url)>sizeof(wszFile)/sizeof(WCHAR) &&
+            ok(lstrlenW(sec_url) > ARRAY_SIZE(wszFile) &&
                     !memcmp(sec_url, wszFile, sizeof(wszFile)-sizeof(WCHAR)),
                     "Encoded url = %s\n", wine_dbgstr_w(sec_url));
             CoTaskMemFree(sec_url);
@@ -1073,8 +1081,7 @@ static void test_NameSpace(void)
     hres = IInternetSession_UnregisterNameSpace(session, &test_protocol_cf, wszTest);
     ok(hres == S_OK, "UnregisterNameSpace failed: %08x\n", hres);
 
-    hres = pCoInternetParseUrl(url8, PARSE_ENCODE, 0, buf, sizeof(buf)/sizeof(WCHAR),
-                              &size, 0);
+    hres = pCoInternetParseUrl(url8, PARSE_ENCODE, 0, buf, ARRAY_SIZE(buf), &size, 0);
     ok(hres == S_OK, "CoInternetParseUrl failed: %08x\n", hres);
 
     hres = IInternetSession_RegisterNameSpace(session, &test_protocol_cf2, &IID_NULL,
@@ -1092,8 +1099,7 @@ static void test_NameSpace(void)
     SET_EXPECT(QI_IInternetProtocolInfo);
     SET_EXPECT(ParseUrl);
 
-    hres = pCoInternetParseUrl(url8, PARSE_ENCODE, 0, buf, sizeof(buf)/sizeof(WCHAR),
-                              &size, 0);
+    hres = pCoInternetParseUrl(url8, PARSE_ENCODE, 0, buf, ARRAY_SIZE(buf), &size, 0);
     ok(hres == S_OK, "CoInternetParseUrl failed: %08x\n", hres);
 
     CHECK_CALLED(QI_IInternetProtocolInfo);
@@ -1105,8 +1111,7 @@ static void test_NameSpace(void)
     SET_EXPECT(QI_IInternetProtocolInfo);
     SET_EXPECT(ParseUrl);
 
-    hres = pCoInternetParseUrl(url8, PARSE_ENCODE, 0, buf, sizeof(buf)/sizeof(WCHAR),
-                              &size, 0);
+    hres = pCoInternetParseUrl(url8, PARSE_ENCODE, 0, buf, ARRAY_SIZE(buf), &size, 0);
     ok(hres == S_OK, "CoInternetParseUrl failed: %08x\n", hres);
 
     CHECK_CALLED(QI_IInternetProtocolInfo);
@@ -1119,8 +1124,7 @@ static void test_NameSpace(void)
     SET_EXPECT(QI_IInternetProtocolInfo);
     SET_EXPECT(ParseUrl);
 
-    hres = pCoInternetParseUrl(url8, PARSE_ENCODE, 0, buf, sizeof(buf)/sizeof(WCHAR),
-                              &size, 0);
+    hres = pCoInternetParseUrl(url8, PARSE_ENCODE, 0, buf, ARRAY_SIZE(buf), &size, 0);
     ok(hres == S_OK, "CoInternetParseUrl failed: %08x\n", hres);
 
     CHECK_CALLED(QI_IInternetProtocolInfo);
@@ -1138,8 +1142,7 @@ static void test_NameSpace(void)
     hres = IInternetSession_UnregisterNameSpace(session, &test_protocol_cf2, wszTest);
     ok(hres == S_OK, "UnregisterNameSpace failed: %08x\n", hres);
 
-    hres = pCoInternetParseUrl(url8, PARSE_ENCODE, 0, buf, sizeof(buf)/sizeof(WCHAR),
-                              &size, 0);
+    hres = pCoInternetParseUrl(url8, PARSE_ENCODE, 0, buf, ARRAY_SIZE(buf), &size, 0);
     ok(hres == S_OK, "CoInternetParseUrl failed: %08x\n", hres);
 
     IInternetSession_Release(session);
@@ -1616,7 +1619,7 @@ static void test_MkParseDisplayNameEx(void)
 
     CreateBindCtx(0, &bctx);
 
-    for (i = 0; i < sizeof(invalid_parameters)/sizeof(invalid_parameters[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(invalid_parameters); i++)
     {
         eaten = 0xdeadbeef;
         mon = (IMoniker *)0xdeadbeef;
@@ -1632,7 +1635,7 @@ static void test_MkParseDisplayNameEx(void)
 
     hres = MkParseDisplayNameEx(bctx, url9, &eaten, &mon);
     ok(hres == S_OK, "MkParseDisplayNameEx failed: %08x\n", hres);
-    ok(eaten == sizeof(url9)/sizeof(WCHAR)-1, "eaten=%d\n", eaten);
+    ok(eaten == ARRAY_SIZE(url9)-1, "eaten=%d\n", eaten);
     ok(mon != NULL, "mon == NULL\n");
 
     hres = IMoniker_GetDisplayName(mon, NULL, 0, &name);
@@ -1648,7 +1651,7 @@ static void test_MkParseDisplayNameEx(void)
 
     hres = MkParseDisplayNameEx(bctx, clsid_nameW, &eaten, &mon);
     ok(hres == S_OK, "MkParseDisplayNameEx failed: %08x\n", hres);
-    ok(eaten == sizeof(clsid_nameW)/sizeof(WCHAR)-1, "eaten=%d\n", eaten);
+    ok(eaten == ARRAY_SIZE(clsid_nameW)-1, "eaten=%d\n", eaten);
     ok(mon != NULL, "mon == NULL\n");
 
     hres = IMoniker_IsSystemMoniker(mon, &issys);
@@ -1722,7 +1725,7 @@ static void test_internet_feature_defaults(void) {
     HRESULT hres;
     DWORD i;
 
-    for(i = 0; i < sizeof(default_feature_tests)/sizeof(default_feature_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(default_feature_tests); ++i) {
         hres = pCoInternetIsFeatureEnabled(default_feature_tests[i].feature, default_feature_tests[i].get_flags);
         todo_wine_if (default_feature_tests[i].todo)
             ok(hres == default_feature_tests[i].expected, "CoInternetIsFeatureEnabled returned %08x, expected %08x on test %d\n",
@@ -1869,7 +1872,7 @@ static void test_CoInternetSetFeatureEnabled(void) {
     hres = pCoInternetSetFeatureEnabled(FEATURE_ENTRY_COUNT,SET_FEATURE_ON_PROCESS,TRUE);
     ok(hres == E_FAIL, "CoInternetSetFeatureEnabled returned %08x, expected E_FAIL\n", hres);
 
-    for(i = 0; i < sizeof(internet_feature_tests)/sizeof(internet_feature_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(internet_feature_tests); ++i) {
         hres = pCoInternetSetFeatureEnabled(internet_feature_tests[i].feature, internet_feature_tests[i].set_flags,
                                             internet_feature_tests[i].enable);
         todo_wine_if (internet_feature_tests[i].set_todo)
@@ -1924,6 +1927,713 @@ static void test_internet_features(void) {
     test_CoInternetSetFeatureEnabled();
 }
 
+static BINDINFO rem_bindinfo = { sizeof(rem_bindinfo) }, in_bindinfo;
+static DWORD rem_bindf;
+
+static HRESULT WINAPI BindStatusCallback_QueryInterface(IBindStatusCallbackEx *iface, REFIID riid, void **ppv)
+{
+    if(IsEqualGUID(&IID_IBindStatusCallbackEx, riid)
+       || IsEqualGUID(&IID_IBindStatusCallback, riid)
+       || IsEqualGUID(&IID_IUnknown, riid)) {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI BindStatusCallback_AddRef(IBindStatusCallbackEx *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI BindStatusCallback_Release(IBindStatusCallbackEx *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI BindStatusCallback_OnStartBinding(IBindStatusCallbackEx *iface,
+        DWORD dwReserved, IBinding *pib)
+{
+    ok(0, "unexpected call\n");
+    return S_OK;
+}
+
+static HRESULT WINAPI BindStatusCallback_GetPriority(IBindStatusCallbackEx *iface, LONG *pnPriority)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BindStatusCallback_OnLowResource(IBindStatusCallbackEx *iface, DWORD reserved)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI BindStatusCallback_OnProgress(IBindStatusCallbackEx *iface, ULONG ulProgress,
+        ULONG ulProgressMax, ULONG ulStatusCode, LPCWSTR szStatusText)
+{
+    ok(0, "unexpected call\n");
+    return S_OK;
+}
+
+static HRESULT WINAPI BindStatusCallback_OnStopBinding(IBindStatusCallbackEx *iface, HRESULT hresult, LPCWSTR szError)
+{
+    ok(0, "unexpected call\n");
+    return S_OK;
+}
+
+static HRESULT WINAPI BindStatusCallback_GetBindInfo(IBindStatusCallbackEx *iface, DWORD *grfBINDF, BINDINFO *pbindinfo)
+{
+    in_bindinfo = *pbindinfo;
+    *grfBINDF = rem_bindf;
+    *pbindinfo = rem_bindinfo;
+    return S_OK;
+}
+
+static STGMEDIUM in_stgmed, rem_stgmed;
+
+static HRESULT WINAPI BindStatusCallback_OnDataAvailable(IBindStatusCallbackEx *iface, DWORD grfBSCF,
+        DWORD dwSize, FORMATETC* pformatetc, STGMEDIUM* pstgmed)
+{
+    in_stgmed = *pstgmed;
+    *pstgmed = rem_stgmed;
+    return S_OK;
+}
+
+static HRESULT WINAPI BindStatusCallback_OnObjectAvailable(IBindStatusCallbackEx *iface, REFIID riid, IUnknown *punk)
+{
+    ok(0, "unexpected call\n");
+    return S_OK;
+}
+
+static HRESULT WINAPI BindStatusCallbackEx_GetBindInfoEx(IBindStatusCallbackEx *iface, DWORD *grfBINDF,
+        BINDINFO *pbindinfo, DWORD *grfBINDF2, DWORD *pdwReserved)
+{
+    in_bindinfo = *pbindinfo;
+    *grfBINDF = rem_bindf;
+    *pbindinfo = rem_bindinfo;
+    *grfBINDF2 = 11;
+    *pdwReserved = 12;
+    return S_OK;
+}
+
+static const IBindStatusCallbackExVtbl BindStatusCallbackExVtbl = {
+    BindStatusCallback_QueryInterface,
+    BindStatusCallback_AddRef,
+    BindStatusCallback_Release,
+    BindStatusCallback_OnStartBinding,
+    BindStatusCallback_GetPriority,
+    BindStatusCallback_OnLowResource,
+    BindStatusCallback_OnProgress,
+    BindStatusCallback_OnStopBinding,
+    BindStatusCallback_GetBindInfo,
+    BindStatusCallback_OnDataAvailable,
+    BindStatusCallback_OnObjectAvailable,
+    BindStatusCallbackEx_GetBindInfoEx
+};
+
+static IBindStatusCallbackEx BindStatusCallback = { &BindStatusCallbackExVtbl };
+
+typedef struct {
+    IUnknown IUnknown_iface;
+    LONG ref;
+} RefUnk;
+
+static inline RefUnk *impl_from_IUnknown(IUnknown *iface)
+{
+    return CONTAINING_RECORD(iface, RefUnk, IUnknown_iface);
+}
+
+static HRESULT WINAPI RefUnk_QueryInterface(IUnknown *iface, REFIID riid, void **ppv)
+{
+    if(!IsEqualGUID(&IID_IUnknown, riid)) {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef(iface);
+    *ppv = iface;
+    return S_OK;
+}
+
+static ULONG WINAPI RefUnk_AddRef(IUnknown *iface)
+{
+    RefUnk *This = impl_from_IUnknown(iface);
+    return InterlockedIncrement(&This->ref);
+}
+
+static ULONG WINAPI RefUnk_Release(IUnknown *iface)
+{
+    RefUnk *This = impl_from_IUnknown(iface);
+    return InterlockedDecrement(&This->ref);
+}
+
+static const IUnknownVtbl RefUnkVtbl = {
+    RefUnk_QueryInterface,
+    RefUnk_AddRef,
+    RefUnk_Release
+};
+
+static RefUnk unk_in = {{&RefUnkVtbl}}, unk_out = {{&RefUnkVtbl}};
+
+static HANDLE thread_ready;
+
+static DWORD WINAPI bsc_thread(void *arg)
+{
+    IStream *stream = arg;
+    LARGE_INTEGER zero;
+    MSG msg;
+    HRESULT hres;
+
+    CoInitialize(NULL);
+
+    hres = CoMarshalInterface(stream, &IID_IBindStatusCallback, (IUnknown*)&BindStatusCallback,
+                              MSHCTX_INPROC, NULL, MSHLFLAGS_NORMAL);
+    ok(hres == S_OK, "CoMarshalInterface failed: %08x\n", hres);
+
+    zero.QuadPart = 0;
+    hres = IStream_Seek(stream, zero, STREAM_SEEK_SET, NULL);
+    ok(hres == S_OK, "Seek failed: 0x%08x\n", hres);
+
+    SetEvent(thread_ready);
+
+    while(GetMessageW(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
+    CoUninitialize();
+    return 0;
+}
+
+static void test_bsc_marshaling(void)
+{
+    FORMATETC formatetc = {0, NULL, 1, -1, TYMED_ISTREAM};
+    IBindStatusCallbackEx *callbackex;
+    IBindStatusCallback *bsc;
+    BINDINFO bindinfo;
+    IStream *stream, *binding_stream;
+    HANDLE thread;
+    WCHAR *extra_info_out;
+    WCHAR *verb_out;
+    LARGE_INTEGER zero;
+    STGMEDIUM stgmed;
+    void *buf;
+    DWORD bindf;
+    HRESULT hres;
+
+    hres = CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    ok(hres == S_OK, "CreateStreamOnHGlobal returned: %08x\n", hres);
+
+    thread_ready = CreateEventW(NULL, TRUE, FALSE, NULL);
+    thread = CreateThread(NULL, 0, bsc_thread, stream, 0, NULL);
+    WaitForSingleObject(thread_ready, INFINITE);
+
+    hres = CoUnmarshalInterface(stream, &IID_IBindStatusCallback, (void**)&bsc);
+    ok(hres == S_OK, "CoUnmarshalInterface failed: %08x\n", hres);
+
+    hres = CreateStreamOnHGlobal(NULL, TRUE, &binding_stream);
+    ok(hres == S_OK, "CreateStreamOnHGlobal returned: %08x\n", hres);
+    hres = IStream_Write(binding_stream, "xxx", 3, NULL);
+    ok(hres == S_OK, "Write failed: %08x\n", hres);
+
+    rem_bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA;
+    bindf = 0xdeadbeef;
+
+    memset(&bindinfo, 0, sizeof(bindinfo));
+    bindinfo.cbSize = sizeof(bindinfo);
+    bindinfo.grfBindInfoF = 12;
+    bindinfo.dwBindVerb = 13;
+    bindinfo.cbstgmedData = 19;
+    bindinfo.dwOptions = 14;
+    bindinfo.dwOptionsFlags = 15;
+    bindinfo.dwCodePage = 16;
+    bindinfo.securityAttributes.nLength = 30;
+    bindinfo.securityAttributes.lpSecurityDescriptor = (void*)0xdead0001;
+    bindinfo.securityAttributes.bInheritHandle = 31;
+    bindinfo.iid.Data1 = 17;
+    bindinfo.pUnk = (IUnknown*)0xdeadbeef;
+    bindinfo.dwReserved = 18;
+    bindinfo.stgmedData.pUnkForRelease = &unk_in.IUnknown_iface;
+    unk_in.ref = 1;
+
+    memset(&rem_bindinfo, 0, sizeof(bindinfo));
+    rem_bindinfo.cbSize = sizeof(rem_bindinfo);
+    rem_bindinfo.szExtraInfo = extra_info_out = a2co("extra info out");
+    rem_bindinfo.grfBindInfoF = 22;
+    rem_bindinfo.dwBindVerb = 23;
+    rem_bindinfo.szCustomVerb = verb_out = a2co("custom verb out");
+    rem_bindinfo.cbstgmedData = 29;
+    rem_bindinfo.dwOptions = 24;
+    rem_bindinfo.dwOptionsFlags = 25;
+    rem_bindinfo.dwCodePage = 16;
+    rem_bindinfo.securityAttributes.nLength = 40;
+    rem_bindinfo.securityAttributes.lpSecurityDescriptor = (void*)0xdead0002;
+    rem_bindinfo.securityAttributes.bInheritHandle = 41;
+    rem_bindinfo.iid.Data1 = 27;
+    rem_bindinfo.pUnk = (IUnknown*)0xdeadbeef;
+    rem_bindinfo.dwReserved = 18;
+    rem_bindinfo.stgmedData.pUnkForRelease = &unk_out.IUnknown_iface;
+    unk_out.ref = 1;
+
+    hres = IBindStatusCallback_GetBindInfo(bsc, &bindf, &bindinfo);
+    ok(hres == S_OK, "GetBindInfo failed: %08x\n", hres);
+    ok(bindf == rem_bindf, "bindf = %x, expected %x\n", bindf, rem_bindf);
+
+    ok(in_bindinfo.cbSize == sizeof(in_bindinfo), "cbSize = %u\n", in_bindinfo.cbSize);
+    ok(!in_bindinfo.szExtraInfo, "szExtraInfo = %s\n", wine_dbgstr_w(in_bindinfo.szExtraInfo));
+    ok(in_bindinfo.grfBindInfoF == 12, "cbSize = %u\n", in_bindinfo.grfBindInfoF);
+    ok(in_bindinfo.dwBindVerb == 13, "dwBindVerb = %u\n", in_bindinfo.dwBindVerb);
+    ok(!in_bindinfo.szCustomVerb, "szCustomVerb = %s\n", wine_dbgstr_w(in_bindinfo.szCustomVerb));
+    ok(in_bindinfo.cbstgmedData == 19, "cbstgmedData = %u\n", in_bindinfo.cbstgmedData);
+    ok(!in_bindinfo.dwOptions, "dwOptions = %u\n", in_bindinfo.dwOptions);
+    ok(!in_bindinfo.dwOptionsFlags, "dwOptionsFlags = %u\n", in_bindinfo.dwOptionsFlags);
+    ok(!in_bindinfo.dwCodePage, "dwCodePage = %u\n", in_bindinfo.dwCodePage);
+    ok(!in_bindinfo.iid.Data1, "iid.Data1 = %u\n", in_bindinfo.iid.Data1);
+    ok(!in_bindinfo.pUnk, "pUnk = %p\n", in_bindinfo.pUnk);
+    ok(!in_bindinfo.dwReserved, "dwReserved = %u\n", in_bindinfo.dwReserved);
+    ok(!in_bindinfo.securityAttributes.nLength, "securityAttributes.nLength = %u\n",
+       in_bindinfo.securityAttributes.nLength);
+    ok(!in_bindinfo.securityAttributes.lpSecurityDescriptor,
+       "securityAttributes.lpSecurityDescriptor = %p\n",
+       in_bindinfo.securityAttributes.lpSecurityDescriptor);
+    ok(!in_bindinfo.securityAttributes.bInheritHandle, "securityAttributes.bInheritHandle = %u\n",
+       in_bindinfo.securityAttributes.bInheritHandle);
+    ok(!in_bindinfo.stgmedData.pUnkForRelease, "pUnkForRelease = %p\n",
+       in_bindinfo.stgmedData.pUnkForRelease);
+
+    ok(bindinfo.cbSize == sizeof(rem_bindinfo), "cbSize = %u\n", rem_bindinfo.cbSize);
+    ok(!strcmp_wa(bindinfo.szExtraInfo, "extra info out"),
+       "szExtraInfo = %s\n", wine_dbgstr_w(bindinfo.szExtraInfo));
+    ok(bindinfo.grfBindInfoF == 22, "grfBindInfoF = %u\n", rem_bindinfo.grfBindInfoF);
+    ok(bindinfo.dwBindVerb == 23, "dwBindVerb = %u\n", bindinfo.dwBindVerb);
+    ok(bindinfo.szCustomVerb != verb_out, "szCustomVerb == inbuf\n");
+    ok(!strcmp_wa(bindinfo.szCustomVerb, "custom verb out"), "szCustomVerb = %s\n",
+       wine_dbgstr_w(bindinfo.szCustomVerb));
+    ok(bindinfo.cbstgmedData == 29, "cbstgmedData = %u\n", bindinfo.cbstgmedData);
+    ok(bindinfo.dwOptions == 24, "dwOptions = %u\n", bindinfo.dwOptions);
+    ok(bindinfo.dwOptionsFlags == 25, "dwOptionsFlags = %u\n", bindinfo.dwOptionsFlags);
+    ok(bindinfo.dwCodePage, "dwCodePage = %u\n", bindinfo.dwCodePage);
+    ok(!bindinfo.iid.Data1, "iid.Data1 = %u\n", bindinfo.iid.Data1);
+    ok(!bindinfo.pUnk, "pUnk = %p\n", bindinfo.pUnk);
+    ok(bindinfo.dwReserved == 18, "dwReserved = %u\n", bindinfo.dwReserved);
+    ok(bindinfo.securityAttributes.nLength == 30, "securityAttributes.nLength = %u\n",
+       bindinfo.securityAttributes.nLength);
+    ok(bindinfo.securityAttributes.lpSecurityDescriptor == (void*)0xdead0001,
+       "securityAttributes.lpSecurityDescriptor = %p\n",
+       bindinfo.securityAttributes.lpSecurityDescriptor);
+    ok(bindinfo.securityAttributes.bInheritHandle == 31, "securityAttributes.bInheritHandle = %u\n",
+       bindinfo.securityAttributes.bInheritHandle);
+    ok(bindinfo.stgmedData.pUnkForRelease == &unk_in.IUnknown_iface, "pUnkForRelease = %p\n",
+       bindinfo.stgmedData.pUnkForRelease);
+    ok(unk_out.ref == 1, "unk_out.ref = %u\n", unk_out.ref);
+
+    bindinfo.stgmedData.pUnkForRelease = NULL;
+    ReleaseBindInfo(&bindinfo);
+
+    zero.QuadPart = 0;
+    hres = IStream_Seek(binding_stream, zero, STREAM_SEEK_SET, NULL);
+    ok(hres == S_OK, "Seek failed: 0x%08x\n", hres);
+
+    /* Return IStream stgmed from GetBindInfo, it's not marshaled back */
+    rem_bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA;
+    bindf = 0xdeadbeef;
+
+    memset(&bindinfo, 0, sizeof(bindinfo));
+    bindinfo.cbSize = sizeof(bindinfo);
+
+    memset(&rem_bindinfo, 0, sizeof(rem_bindinfo));
+    rem_bindinfo.cbSize = sizeof(rem_bindinfo);
+
+    rem_bindinfo.stgmedData.tymed = TYMED_ISTREAM;
+    rem_bindinfo.stgmedData.u.pstm = binding_stream;
+    rem_bindinfo.cbstgmedData = 3;
+    IStream_AddRef(binding_stream);
+
+    hres = IBindStatusCallback_GetBindInfo(bsc, &bindf, &bindinfo);
+    ok(hres == S_OK, "GetBindInfo failed: %08x\n", hres);
+    ok(bindf == rem_bindf, "bindf = %x, expected %x\n", bindf, rem_bindf);
+
+    ok(in_bindinfo.cbSize == sizeof(in_bindinfo), "cbSize = %u\n", in_bindinfo.cbSize);
+    ok(!in_bindinfo.pUnk, "pUnk = %p\n", in_bindinfo.pUnk);
+    ok(in_bindinfo.stgmedData.tymed == TYMED_NULL, "tymed = %u\n",
+       in_bindinfo.stgmedData.tymed);
+
+    ok(bindinfo.cbSize == sizeof(bindinfo), "cbSize = %u\n", bindinfo.cbSize);
+    ok(!bindinfo.pUnk, "pUnk = %p\n", bindinfo.pUnk);
+    ok(bindinfo.stgmedData.tymed == TYMED_NULL, "tymed = %u\n",
+       bindinfo.stgmedData.tymed);
+    ok(!bindinfo.stgmedData.u.pstm, "stm = %p\n",
+       bindinfo.stgmedData.u.pstm);
+    ok(!bindinfo.stgmedData.pUnkForRelease, "pUnkForRelease = %p\n",
+       bindinfo.stgmedData.pUnkForRelease);
+    ok(bindinfo.cbstgmedData == 3, "cbstgmedData = %u\n", bindinfo.cbstgmedData);
+
+    ReleaseBindInfo(&bindinfo);
+
+    /* Same, but with pUnkForRelease, it's not marshaled back */
+    rem_bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA;
+    bindf = 0xdeadbeef;
+
+    memset(&bindinfo, 0, sizeof(bindinfo));
+    bindinfo.cbSize = sizeof(bindinfo);
+
+    memset(&rem_bindinfo, 0, sizeof(rem_bindinfo));
+    rem_bindinfo.cbSize = sizeof(rem_bindinfo);
+
+    rem_bindinfo.stgmedData.tymed = TYMED_ISTREAM;
+    rem_bindinfo.stgmedData.u.pstm = binding_stream;
+    rem_bindinfo.stgmedData.pUnkForRelease = &unk_out.IUnknown_iface;
+    unk_out.ref = 1;
+    rem_bindinfo.cbstgmedData = 3;
+    IStream_AddRef(binding_stream);
+
+    hres = IBindStatusCallback_GetBindInfo(bsc, &bindf, &bindinfo);
+    ok(hres == S_OK, "GetBindInfo failed: %08x\n", hres);
+    ok(bindf == rem_bindf, "bindf = %x, expected %x\n", bindf, rem_bindf);
+
+    ok(in_bindinfo.cbSize == sizeof(in_bindinfo), "cbSize = %u\n", in_bindinfo.cbSize);
+    ok(!in_bindinfo.pUnk, "pUnk = %p\n", in_bindinfo.pUnk);
+    ok(in_bindinfo.stgmedData.tymed == TYMED_NULL, "tymed = %u\n",
+       in_bindinfo.stgmedData.tymed);
+
+    ok(bindinfo.cbSize == sizeof(bindinfo), "cbSize = %u\n", bindinfo.cbSize);
+    ok(!bindinfo.pUnk, "pUnk = %p\n", bindinfo.pUnk);
+    ok(bindinfo.stgmedData.tymed == TYMED_NULL, "tymed = %u\n",
+       bindinfo.stgmedData.tymed);
+    ok(!bindinfo.stgmedData.u.pstm, "stm = %p\n",
+       bindinfo.stgmedData.u.pstm);
+    ok(!bindinfo.stgmedData.pUnkForRelease, "pUnkForRelease = %p\n",
+       bindinfo.stgmedData.pUnkForRelease);
+    ok(bindinfo.cbstgmedData == 3, "cbstgmedData = %u\n", bindinfo.cbstgmedData);
+
+    ReleaseBindInfo(&bindinfo);
+
+    /* Return HGLOBAL stgmed from GetBindInfo, it's not marshaled back */
+    rem_bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA;
+    bindf = 0xdeadbeef;
+
+    memset(&bindinfo, 0, sizeof(bindinfo));
+    bindinfo.cbSize = sizeof(bindinfo);
+
+    memset(&rem_bindinfo, 0, sizeof(rem_bindinfo));
+    rem_bindinfo.cbSize = sizeof(rem_bindinfo);
+
+    rem_bindinfo.stgmedData.tymed = TYMED_HGLOBAL;
+
+    buf = GlobalAlloc(0, 5);
+    strcpy(buf, "test");
+    rem_bindinfo.stgmedData.u.hGlobal = buf;
+    rem_bindinfo.cbstgmedData = 5;
+
+    hres = IBindStatusCallback_GetBindInfo(bsc, &bindf, &bindinfo);
+    ok(hres == S_OK, "GetBindInfo failed: %08x\n", hres);
+    ok(bindf == rem_bindf, "bindf = %x, expected %x\n", bindf, rem_bindf);
+
+    ok(in_bindinfo.cbSize == sizeof(in_bindinfo), "cbSize = %u\n", in_bindinfo.cbSize);
+    ok(!in_bindinfo.pUnk, "pUnk = %p\n", in_bindinfo.pUnk);
+    ok(in_bindinfo.stgmedData.tymed == TYMED_NULL, "tymed = %u\n",
+       in_bindinfo.stgmedData.tymed);
+
+    ok(bindinfo.cbSize == sizeof(bindinfo), "cbSize = %u\n", bindinfo.cbSize);
+    ok(!bindinfo.pUnk, "pUnk = %p\n", bindinfo.pUnk);
+    ok(bindinfo.stgmedData.tymed == TYMED_NULL, "tymed = %u\n",
+       bindinfo.stgmedData.tymed);
+    ok(!bindinfo.stgmedData.u.pstm, "stm = %p\n",
+       bindinfo.stgmedData.u.pstm);
+    ok(!bindinfo.stgmedData.pUnkForRelease, "pUnkForRelease = %p\n",
+       bindinfo.stgmedData.pUnkForRelease);
+    ok(bindinfo.cbstgmedData == 5, "cbstgmedData = %u\n", bindinfo.cbstgmedData);
+
+    ReleaseBindInfo(&bindinfo);
+
+    /* Same with GetBindInfoEx */
+    hres = IBindStatusCallback_QueryInterface(bsc, &IID_IBindStatusCallbackEx, (void**)&callbackex);
+    if(SUCCEEDED(hres)) {
+        DWORD bindf2, reserved;
+
+        rem_bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA;
+        bindf = bindf2 = reserved = 0xdeadbeef;
+
+        memset(&bindinfo, 0, sizeof(bindinfo));
+        bindinfo.cbSize = sizeof(bindinfo);
+        bindinfo.grfBindInfoF = 12;
+        bindinfo.dwBindVerb = 13;
+        bindinfo.cbstgmedData = 19;
+        bindinfo.dwOptions = 14;
+        bindinfo.dwOptionsFlags = 15;
+        bindinfo.dwCodePage = 16;
+        bindinfo.securityAttributes.nLength = 30;
+        bindinfo.securityAttributes.lpSecurityDescriptor = (void*)0xdead0001;
+        bindinfo.securityAttributes.bInheritHandle = 31;
+        bindinfo.iid.Data1 = 17;
+        bindinfo.pUnk = (IUnknown*)0xdeadbeef;
+        bindinfo.dwReserved = 18;
+        bindinfo.stgmedData.pUnkForRelease = &unk_in.IUnknown_iface;
+        unk_in.ref = 1;
+
+        memset(&rem_bindinfo, 0, sizeof(bindinfo));
+        rem_bindinfo.cbSize = sizeof(rem_bindinfo);
+        rem_bindinfo.szExtraInfo = extra_info_out = a2co("extra info out");
+        rem_bindinfo.grfBindInfoF = 22;
+        rem_bindinfo.dwBindVerb = 23;
+        rem_bindinfo.szCustomVerb = verb_out = a2co("custom verb out");
+        rem_bindinfo.cbstgmedData = 29;
+        rem_bindinfo.dwOptions = 24;
+        rem_bindinfo.dwOptionsFlags = 25;
+        rem_bindinfo.dwCodePage = 16;
+        rem_bindinfo.securityAttributes.nLength = 40;
+        rem_bindinfo.securityAttributes.lpSecurityDescriptor = (void*)0xdead0002;
+        rem_bindinfo.securityAttributes.bInheritHandle = 41;
+        rem_bindinfo.iid.Data1 = 27;
+        rem_bindinfo.pUnk = (IUnknown*)0xdeadbeef;
+        rem_bindinfo.dwReserved = 18;
+        rem_bindinfo.stgmedData.pUnkForRelease = &unk_out.IUnknown_iface;
+        unk_out.ref = 1;
+
+        hres = IBindStatusCallbackEx_GetBindInfoEx(callbackex, &bindf, &bindinfo, &bindf2, &reserved);
+        ok(hres == S_OK, "GetBindInfo failed: %08x\n", hres);
+        ok(bindf == rem_bindf, "bindf = %x, expected %x\n", bindf, rem_bindf);
+        ok(bindf2 == 11, "bindf2 = %x\n", bindf);
+        ok(reserved == 12, "reserved = %x\n", reserved);
+
+        ok(in_bindinfo.cbSize == sizeof(in_bindinfo), "cbSize = %u\n", in_bindinfo.cbSize);
+        ok(!in_bindinfo.szExtraInfo, "szExtraInfo = %s\n", wine_dbgstr_w(in_bindinfo.szExtraInfo));
+        ok(in_bindinfo.grfBindInfoF == 12, "cbSize = %u\n", in_bindinfo.grfBindInfoF);
+        ok(in_bindinfo.dwBindVerb == 13, "dwBindVerb = %u\n", in_bindinfo.dwBindVerb);
+        ok(!in_bindinfo.szCustomVerb, "szCustomVerb = %s\n", wine_dbgstr_w(in_bindinfo.szCustomVerb));
+        ok(in_bindinfo.cbstgmedData == 19, "cbstgmedData = %u\n", in_bindinfo.cbstgmedData);
+        ok(!in_bindinfo.dwOptions, "dwOptions = %u\n", in_bindinfo.dwOptions);
+        ok(!in_bindinfo.dwOptionsFlags, "dwOptionsFlags = %u\n", in_bindinfo.dwOptionsFlags);
+        ok(!in_bindinfo.dwCodePage, "dwCodePage = %u\n", in_bindinfo.dwCodePage);
+        ok(!in_bindinfo.iid.Data1, "iid.Data1 = %u\n", in_bindinfo.iid.Data1);
+        ok(!in_bindinfo.pUnk, "pUnk = %p\n", in_bindinfo.pUnk);
+        ok(!in_bindinfo.dwReserved, "dwReserved = %u\n", in_bindinfo.dwReserved);
+        ok(!in_bindinfo.securityAttributes.nLength, "securityAttributes.nLength = %u\n",
+           in_bindinfo.securityAttributes.nLength);
+        ok(!in_bindinfo.securityAttributes.lpSecurityDescriptor,
+           "securityAttributes.lpSecurityDescriptor = %p\n",
+           in_bindinfo.securityAttributes.lpSecurityDescriptor);
+        ok(!in_bindinfo.securityAttributes.bInheritHandle, "securityAttributes.bInheritHandle = %u\n",
+           in_bindinfo.securityAttributes.bInheritHandle);
+        ok(!in_bindinfo.stgmedData.pUnkForRelease, "pUnkForRelease = %p\n",
+           in_bindinfo.stgmedData.pUnkForRelease);
+
+        ok(bindinfo.cbSize == sizeof(rem_bindinfo), "cbSize = %u\n", rem_bindinfo.cbSize);
+        ok(!strcmp_wa(bindinfo.szExtraInfo, "extra info out"),
+           "szExtraInfo = %s\n", wine_dbgstr_w(bindinfo.szExtraInfo));
+        ok(bindinfo.grfBindInfoF == 22, "grfBindInfoF = %u\n", rem_bindinfo.grfBindInfoF);
+        ok(bindinfo.dwBindVerb == 23, "dwBindVerb = %u\n", bindinfo.dwBindVerb);
+        ok(bindinfo.szCustomVerb != verb_out, "szCustomVerb == inbuf\n");
+        ok(!strcmp_wa(bindinfo.szCustomVerb, "custom verb out"), "szCustomVerb = %s\n",
+           wine_dbgstr_w(bindinfo.szCustomVerb));
+        ok(bindinfo.cbstgmedData == 29, "cbstgmedData = %u\n", bindinfo.cbstgmedData);
+        ok(bindinfo.dwOptions == 24, "dwOptions = %u\n", bindinfo.dwOptions);
+        ok(bindinfo.dwOptionsFlags == 25, "dwOptionsFlags = %u\n", bindinfo.dwOptionsFlags);
+        ok(bindinfo.dwCodePage, "dwCodePage = %u\n", bindinfo.dwCodePage);
+        ok(!bindinfo.iid.Data1, "iid.Data1 = %u\n", bindinfo.iid.Data1);
+        ok(!bindinfo.pUnk, "pUnk = %p\n", bindinfo.pUnk);
+        ok(bindinfo.dwReserved == 18, "dwReserved = %u\n", bindinfo.dwReserved);
+        ok(bindinfo.securityAttributes.nLength == 30, "securityAttributes.nLength = %u\n",
+           bindinfo.securityAttributes.nLength);
+        ok(bindinfo.securityAttributes.lpSecurityDescriptor == (void*)0xdead0001,
+           "securityAttributes.lpSecurityDescriptor = %p\n",
+           bindinfo.securityAttributes.lpSecurityDescriptor);
+        ok(bindinfo.securityAttributes.bInheritHandle == 31, "securityAttributes.bInheritHandle = %u\n",
+           bindinfo.securityAttributes.bInheritHandle);
+        ok(bindinfo.stgmedData.pUnkForRelease == &unk_in.IUnknown_iface, "pUnkForRelease = %p\n",
+           bindinfo.stgmedData.pUnkForRelease);
+        ok(unk_out.ref == 1, "unk_out.ref = %u\n", unk_out.ref);
+
+        bindinfo.stgmedData.pUnkForRelease = NULL;
+        ReleaseBindInfo(&bindinfo);
+
+        zero.QuadPart = 0;
+        hres = IStream_Seek(binding_stream, zero, STREAM_SEEK_SET, NULL);
+        ok(hres == S_OK, "Seek failed: 0x%08x\n", hres);
+
+        /* Return IStream stgmed from GetBindInfoEx, it's not marshaled back */
+        rem_bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA;
+        bindf = bindf2 = reserved = 0xdeadbeef;
+
+        memset(&bindinfo, 0, sizeof(bindinfo));
+        bindinfo.cbSize = sizeof(bindinfo);
+
+        memset(&rem_bindinfo, 0, sizeof(rem_bindinfo));
+        rem_bindinfo.cbSize = sizeof(rem_bindinfo);
+
+        rem_bindinfo.stgmedData.tymed = TYMED_ISTREAM;
+        rem_bindinfo.stgmedData.u.pstm = binding_stream;
+        rem_bindinfo.cbstgmedData = 3;
+        IStream_AddRef(binding_stream);
+
+        hres = IBindStatusCallbackEx_GetBindInfoEx(callbackex, &bindf, &bindinfo, &bindf2, &reserved);
+        ok(hres == S_OK, "GetBindInfoEx failed: %08x\n", hres);
+        ok(bindf == rem_bindf, "bindf = %x, expected %x\n", bindf, rem_bindf);
+
+        ok(in_bindinfo.cbSize == sizeof(in_bindinfo), "cbSize = %u\n", in_bindinfo.cbSize);
+        ok(!in_bindinfo.pUnk, "pUnk = %p\n", in_bindinfo.pUnk);
+        ok(in_bindinfo.stgmedData.tymed == TYMED_NULL, "tymed = %u\n",
+           in_bindinfo.stgmedData.tymed);
+
+        ok(bindinfo.cbSize == sizeof(bindinfo), "cbSize = %u\n", bindinfo.cbSize);
+        ok(!bindinfo.pUnk, "pUnk = %p\n", bindinfo.pUnk);
+        ok(bindinfo.stgmedData.tymed == TYMED_NULL, "tymed = %u\n",
+           bindinfo.stgmedData.tymed);
+        ok(!bindinfo.stgmedData.u.pstm, "stm = %p\n",
+           bindinfo.stgmedData.u.pstm);
+        ok(!bindinfo.stgmedData.pUnkForRelease, "pUnkForRelease = %p\n",
+           bindinfo.stgmedData.pUnkForRelease);
+        ok(bindinfo.cbstgmedData == 3, "cbstgmedData = %u\n", bindinfo.cbstgmedData);
+
+        ReleaseBindInfo(&bindinfo);
+
+        /* Same, but with pUnkForRelease, it's not marshaled back */
+        rem_bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA;
+        bindf = bindf2 = reserved = 0xdeadbeef;
+
+        memset(&bindinfo, 0, sizeof(bindinfo));
+        bindinfo.cbSize = sizeof(bindinfo);
+
+        memset(&rem_bindinfo, 0, sizeof(rem_bindinfo));
+        rem_bindinfo.cbSize = sizeof(rem_bindinfo);
+
+        rem_bindinfo.stgmedData.tymed = TYMED_ISTREAM;
+        rem_bindinfo.stgmedData.u.pstm = binding_stream;
+        rem_bindinfo.stgmedData.pUnkForRelease = &unk_out.IUnknown_iface;
+        unk_out.ref = 1;
+        rem_bindinfo.cbstgmedData = 3;
+        IStream_AddRef(binding_stream);
+
+        hres = IBindStatusCallbackEx_GetBindInfoEx(callbackex, &bindf, &bindinfo, &bindf2, &reserved);
+        ok(hres == S_OK, "GetBindInfoEx failed: %08x\n", hres);
+        ok(bindf == rem_bindf, "bindf = %x, expected %x\n", bindf, rem_bindf);
+
+        ok(in_bindinfo.cbSize == sizeof(in_bindinfo), "cbSize = %u\n", in_bindinfo.cbSize);
+        ok(!in_bindinfo.pUnk, "pUnk = %p\n", in_bindinfo.pUnk);
+        ok(in_bindinfo.stgmedData.tymed == TYMED_NULL, "tymed = %u\n",
+           in_bindinfo.stgmedData.tymed);
+
+        ok(bindinfo.cbSize == sizeof(bindinfo), "cbSize = %u\n", bindinfo.cbSize);
+        ok(!bindinfo.pUnk, "pUnk = %p\n", bindinfo.pUnk);
+        ok(bindinfo.stgmedData.tymed == TYMED_NULL, "tymed = %u\n",
+           bindinfo.stgmedData.tymed);
+        ok(!bindinfo.stgmedData.u.pstm, "stm = %p\n",
+           bindinfo.stgmedData.u.pstm);
+        ok(!bindinfo.stgmedData.pUnkForRelease, "pUnkForRelease = %p\n",
+           bindinfo.stgmedData.pUnkForRelease);
+        ok(bindinfo.cbstgmedData == 3, "cbstgmedData = %u\n", bindinfo.cbstgmedData);
+
+        ReleaseBindInfo(&bindinfo);
+
+        /* Return HGLOBAL stgmed from GetBindInfoEx, it's not marshaled back */
+        rem_bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA;
+        bindf = bindf2 = reserved = 0xdeadbeef;
+
+        memset(&bindinfo, 0, sizeof(bindinfo));
+        bindinfo.cbSize = sizeof(bindinfo);
+
+        memset(&rem_bindinfo, 0, sizeof(rem_bindinfo));
+        rem_bindinfo.cbSize = sizeof(rem_bindinfo);
+
+        rem_bindinfo.stgmedData.tymed = TYMED_HGLOBAL;
+
+        buf = GlobalAlloc(0, 5);
+        strcpy(buf, "test");
+        rem_bindinfo.stgmedData.u.hGlobal = buf;
+        rem_bindinfo.cbstgmedData = 5;
+
+        hres = IBindStatusCallbackEx_GetBindInfoEx(callbackex, &bindf, &bindinfo, &bindf2, &reserved);
+        ok(hres == S_OK, "GetBindInfoEx failed: %08x\n", hres);
+        ok(bindf == rem_bindf, "bindf = %x, expected %x\n", bindf, rem_bindf);
+
+        ok(in_bindinfo.cbSize == sizeof(in_bindinfo), "cbSize = %u\n", in_bindinfo.cbSize);
+        ok(!in_bindinfo.pUnk, "pUnk = %p\n", in_bindinfo.pUnk);
+        ok(in_bindinfo.stgmedData.tymed == TYMED_NULL, "tymed = %u\n",
+           in_bindinfo.stgmedData.tymed);
+
+        ok(bindinfo.cbSize == sizeof(bindinfo), "cbSize = %u\n", bindinfo.cbSize);
+        ok(!bindinfo.pUnk, "pUnk = %p\n", bindinfo.pUnk);
+        ok(bindinfo.stgmedData.tymed == TYMED_NULL, "tymed = %u\n",
+           bindinfo.stgmedData.tymed);
+        ok(!bindinfo.stgmedData.u.pstm, "stm = %p\n",
+           bindinfo.stgmedData.u.pstm);
+        ok(!bindinfo.stgmedData.pUnkForRelease, "pUnkForRelease = %p\n",
+           bindinfo.stgmedData.pUnkForRelease);
+        ok(bindinfo.cbstgmedData == 5, "cbstgmedData = %u\n", bindinfo.cbstgmedData);
+
+        ReleaseBindInfo(&bindinfo);
+
+        IBindStatusCallbackEx_Release(callbackex);
+    }else {
+        win_skip("IBindStatusCallbackEx not supported\n");
+    }
+
+    /* Test marshaling stgmed from OnDataAvailable */
+    memset(&in_stgmed, 0xcc, sizeof(in_stgmed));
+    stgmed.tymed = TYMED_ISTREAM;
+    stgmed.u.pstm = binding_stream;
+    stgmed.pUnkForRelease = NULL;
+
+    hres = IBindStatusCallback_OnDataAvailable(bsc, 1, 10, &formatetc, &stgmed);
+    ok(hres == S_OK, "OnDataAvailable failed: %08x\n", hres);
+
+    ok(in_stgmed.tymed == TYMED_ISTREAM, "tymed = %u\n", in_stgmed.tymed);
+    ok(in_stgmed.u.pstm != NULL, "pstm = NULL\n");
+    ok(!in_stgmed.pUnkForRelease, "pUnkForRelease = %p\n", in_stgmed.pUnkForRelease);
+
+    /* OnDataAvailable with both IStream and pUnkForRelease */
+    memset(&in_stgmed, 0xcc, sizeof(in_stgmed));
+    stgmed.tymed = TYMED_ISTREAM;
+    stgmed.u.pstm = binding_stream;
+    stgmed.pUnkForRelease = &unk_in.IUnknown_iface;
+    unk_in.ref = 1;
+
+    hres = IBindStatusCallback_OnDataAvailable(bsc, 1, 10, &formatetc, &stgmed);
+    ok(hres == S_OK, "OnDataAvailable failed: %08x\n", hres);
+
+    ok(in_stgmed.tymed == TYMED_ISTREAM, "tymed = %u\n", in_stgmed.tymed);
+    ok(in_stgmed.u.pstm != NULL, "pstm = NULL\n");
+    ok(in_stgmed.pUnkForRelease != NULL, "pUnkForRelease = %p\n", in_stgmed.pUnkForRelease);
+    ok(unk_in.ref > 1, "ref = %u\n", unk_in.ref);
+
+    /* OnDataAvailable with TYMED_ISTREAM, but NULL stream */
+    memset(&in_stgmed, 0xcc, sizeof(in_stgmed));
+    stgmed.tymed = TYMED_ISTREAM;
+    stgmed.u.pstm = binding_stream;
+    stgmed.pUnkForRelease = NULL;
+
+    hres = IBindStatusCallback_OnDataAvailable(bsc, 1, 10, &formatetc, &stgmed);
+    ok(hres == S_OK, "OnDataAvailable failed: %08x\n", hres);
+
+    ok(in_stgmed.tymed == TYMED_ISTREAM, "tymed = %u\n", in_stgmed.tymed);
+    ok(in_stgmed.u.pstm != NULL, "pstm = NULL\n");
+    ok(!in_stgmed.pUnkForRelease, "pUnkForRelease = %p\n", in_stgmed.pUnkForRelease);
+
+    /* OnDataAvailable with TYMED_NULL and pUnkForRelease */
+    memset(&in_stgmed, 0xcc, sizeof(in_stgmed));
+    stgmed.tymed = TYMED_NULL;
+    stgmed.u.pstm = binding_stream;
+    stgmed.pUnkForRelease = &unk_in.IUnknown_iface;
+    unk_in.ref = 1;
+
+    hres = IBindStatusCallback_OnDataAvailable(bsc, 1, 10, &formatetc, &stgmed);
+    ok(hres == S_OK, "OnDataAvailable failed: %08x\n", hres);
+
+    ok(in_stgmed.tymed == TYMED_NULL, "tymed = %u\n", in_stgmed.tymed);
+    ok(!in_stgmed.u.pstm, "pstm != NULL\n");
+    ok(in_stgmed.pUnkForRelease != NULL, "pUnkForRelease = %p\n", in_stgmed.pUnkForRelease);
+    ok(unk_in.ref == 1, "ref = %u\n", unk_in.ref);
+
+    IStream_Release(binding_stream);
+    IBindStatusCallback_Release(bsc);
+
+    TerminateThread(thread, 0);
+}
+
 START_TEST(misc)
 {
     HMODULE hurlmon;
@@ -1975,6 +2685,7 @@ START_TEST(misc)
         test_user_agent();
         test_MkParseDisplayNameEx();
         test_IsValidURL();
+        test_bsc_marshaling();
     }
 
     test_internet_features();

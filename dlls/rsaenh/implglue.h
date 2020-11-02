@@ -24,43 +24,13 @@
 #ifndef __WINE_IMPLGLUE_H
 #define __WINE_IMPLGLUE_H
 
+#include "bcrypt.h"
 #include "tomcrypt.h"
-#include "sha2.h"
 
-/* Next typedef copied from dlls/advapi32/crypt_md4.c */
-typedef struct tagMD4_CTX {
-    unsigned int buf[4];
-    unsigned int i[2];
-    unsigned char in[64];
-    unsigned char digest[16];
-} MD4_CTX;
-
-/* Next typedef copied from dlls/advapi32/crypt_md5.c */
-typedef struct tagMD5_CTX
-{
-    unsigned int i[2];
-    unsigned int buf[4];
-    unsigned char in[64];
-    unsigned char digest[16];
-} MD5_CTX;
-
-/* Next typedef copied form dlls/advapi32/crypt_sha.c */
-typedef struct tagSHA_CTX
-{
-    ULONG Unknown[6];
-    ULONG State[5];
-    ULONG Count[2];
-    UCHAR Buffer[64];
-} SHA_CTX, *PSHA_CTX;
+#define RSAENH_MAX_HASH_SIZE        104
 
 typedef union tagHASH_CONTEXT {
-    md2_state md2;
-    MD4_CTX md4;
-    MD5_CTX md5;
-    SHA_CTX sha;
-    SHA256_CTX sha256;
-    SHA384_CTX sha384;
-    SHA512_CTX sha512;
+    BCRYPT_HASH_HANDLE bcrypt_hash;
 } HASH_CONTEXT;
 
 typedef union tagKEY_CONTEXT {
@@ -73,10 +43,10 @@ typedef union tagKEY_CONTEXT {
 } KEY_CONTEXT;
 
 BOOL init_hash_impl(ALG_ID aiAlgid, HASH_CONTEXT *pHashContext) DECLSPEC_HIDDEN;
-BOOL update_hash_impl(ALG_ID aiAlgid, HASH_CONTEXT *pHashContext, const BYTE *pbData,
+BOOL update_hash_impl(HASH_CONTEXT *pHashContext, const BYTE *pbData,
                       DWORD dwDataLen) DECLSPEC_HIDDEN;
-BOOL finalize_hash_impl(ALG_ID aiAlgid, HASH_CONTEXT *pHashContext, BYTE *pbHashValue) DECLSPEC_HIDDEN;
-BOOL duplicate_hash_impl(ALG_ID aiAlgid, const HASH_CONTEXT *pSrcHashContext,
+BOOL finalize_hash_impl(HASH_CONTEXT *pHashContext, BYTE *pbHashValue) DECLSPEC_HIDDEN;
+BOOL duplicate_hash_impl(const HASH_CONTEXT *pSrcHashContext,
                          HASH_CONTEXT *pDestHashContext) DECLSPEC_HIDDEN;
 
 BOOL new_key_impl(ALG_ID aiAlgid, KEY_CONTEXT *pKeyContext, DWORD dwKeyLen) DECLSPEC_HIDDEN;

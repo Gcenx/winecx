@@ -23,8 +23,8 @@
 @ stub WSDCreateHttpTransport
 @ stub WSDCreateMetadataAgent
 @ stub WSDCreateOutboundAttachment
-@ stub WSDCreateUdpAddress
-@ stub WSDCreateUdpMessageParameters
+@ stdcall WSDCreateUdpAddress(ptr)
+@ stdcall WSDCreateUdpMessageParameters(ptr)
 @ stub WSDCreateUdpTransport
 @ stdcall WSDDetachLinkedMemory(ptr)
 @ stdcall WSDFreeLinkedMemory(ptr)
@@ -38,8 +38,8 @@
 @ stub WSDUriEncode
 @ stdcall WSDXMLAddChild(ptr ptr)
 @ stdcall WSDXMLAddSibling(ptr ptr)
-@ stdcall WSDXMLBuildAnyForSingleElement(ptr ptr ptr)
+@ stdcall WSDXMLBuildAnyForSingleElement(ptr wstr ptr)
 @ stdcall WSDXMLCleanupElement(ptr)
-@ stub WSDXMLCreateContext
+@ stdcall WSDXMLCreateContext(ptr)
 @ stub WSDXMLGetNameFromBuiltinNamespace
-@ stub WSDXMLGetValueFromAny
+@ stdcall WSDXMLGetValueFromAny(wstr wstr ptr ptr)

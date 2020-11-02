@@ -361,7 +361,7 @@ static void scmdatabase_autostart_services(struct scmdatabase *db)
 
     scmdatabase_unlock(db);
     qsort(services_list, size, sizeof(services_list[0]), compare_tags);
-    while (!scmdatabase_lock_startup(db)) Sleep(10);
+    scmdatabase_lock_startup(db, INFINITE);
 
     for (i = 0; i < size; i++)
     {
@@ -619,9 +619,18 @@ static DWORD scmdatabase_load_services(struct scmdatabase *db)
     return ERROR_SUCCESS;
 }
 
-BOOL scmdatabase_lock_startup(struct scmdatabase *db)
+BOOL scmdatabase_lock_startup(struct scmdatabase *db, int timeout)
 {
-    return !InterlockedCompareExchange(&db->service_start_lock, TRUE, FALSE);
+    while (InterlockedCompareExchange(&db->service_start_lock, TRUE, FALSE))
+    {
+        if (timeout != INFINITE)
+        {
+            timeout -= 10;
+            if (timeout <= 0) return FALSE;
+        }
+        Sleep(10);
+    }
+    return TRUE;
 }
 
 void scmdatabase_unlock_startup(struct scmdatabase *db)
@@ -714,7 +723,7 @@ static DWORD get_service_binary_path(const struct service_entry *service_entry, 
     return ERROR_SUCCESS;
 }
 
-static DWORD get_winedevice_binary_path(WCHAR **path, BOOL *is_wow64)
+static DWORD get_winedevice_binary_path(struct service_entry *service_entry, WCHAR **path, BOOL *is_wow64)
 {
     static const WCHAR winedeviceW[] = {'\\','w','i','n','e','d','e','v','i','c','e','.','e','x','e',0};
     WCHAR system_dir[MAX_PATH];
@@ -725,7 +734,7 @@ static DWORD get_winedevice_binary_path(WCHAR **path, BOOL *is_wow64)
     else if (GetBinaryTypeW(*path, &type))
         *is_wow64 = (type == SCS_32BIT_BINARY);
     else
-        return GetLastError();
+        *is_wow64 = service_entry->is_wow64;
 
     GetSystemDirectoryW(system_dir, MAX_PATH);
     HeapFree(GetProcessHeap(), 0, *path);
@@ -848,7 +857,7 @@ static DWORD service_start_process(struct service_entry *service_entry, struct p
         struct service_entry *winedevice_entry;
         WCHAR *group;
 
-        if ((err = get_winedevice_binary_path(&path, &is_wow64)))
+        if ((err = get_winedevice_binary_path(service_entry, &path, &is_wow64)))
         {
             service_unlock(service_entry);
             HeapFree(GetProcessHeap(), 0, path);

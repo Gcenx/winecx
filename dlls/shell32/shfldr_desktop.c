@@ -85,15 +85,14 @@ static inline IDesktopFolderImpl *impl_from_IPersistFolder2( IPersistFolder2 *if
     return CONTAINING_RECORD(iface, IDesktopFolderImpl, IPersistFolder2_iface);
 }
 
-static const shvheader desktop_header[] = {
-    {IDS_SHV_COLUMN1, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 15},
-    {IDS_SHV_COLUMN2, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 10},
-    {IDS_SHV_COLUMN3, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 10},
-    {IDS_SHV_COLUMN4, SHCOLSTATE_TYPE_DATE | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 12},
-    {IDS_SHV_COLUMN5, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 5}
+static const shvheader desktop_header[] =
+{
+    { &FMTID_Storage, PID_STG_NAME, IDS_SHV_COLUMN1, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT,  LVCFMT_RIGHT, 15 },
+    { &FMTID_Storage, PID_STG_SIZE, IDS_SHV_COLUMN2, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT,  LVCFMT_RIGHT, 10 },
+    { &FMTID_Storage, PID_STG_STORAGETYPE, IDS_SHV_COLUMN3, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT,  LVCFMT_RIGHT, 10 },
+    { &FMTID_Storage, PID_STG_WRITETIME, IDS_SHV_COLUMN4, SHCOLSTATE_TYPE_DATE | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 12 },
+    { &FMTID_Storage, PID_STG_ATTRIBUTES, IDS_SHV_COLUMN5, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT,  LVCFMT_RIGHT, 5  },
 };
-
-#define DESKTOPSHELLVIEWCOLUMNS sizeof(desktop_header)/sizeof(shvheader)
 
 /**************************************************************************
  *    ISF_Desktop_fnQueryInterface
@@ -288,14 +287,14 @@ static void add_shell_namespace_extensions(IEnumIDListImpl *list, HKEY root)
     static const WCHAR clsidfmtW[] = {'C','L','S','I','D','\\','%','s','\\',
         'S','h','e','l','l','F','o','l','d','e','r',0};
     static const WCHAR attributesW[] = {'A','t','t','r','i','b','u','t','e','s',0};
-    WCHAR guid[39], clsidkeyW[sizeof(clsidfmtW)/sizeof(*clsidfmtW) + 39];
+    WCHAR guid[39], clsidkeyW[ARRAY_SIZE(clsidfmtW) + 39];
     DWORD size, i = 0;
     HKEY hkey;
 
     if (RegOpenKeyExW(root, Desktop_NameSpaceW, 0, KEY_READ, &hkey))
         return;
 
-    size = sizeof(guid)/sizeof(guid[0]);
+    size = ARRAY_SIZE(guid);
     while (!RegEnumKeyExW(hkey, i++, guid, &size, 0, NULL, NULL, NULL))
     {
         DWORD attributes, value_size = sizeof(attributes);
@@ -307,7 +306,7 @@ static void add_shell_namespace_extensions(IEnumIDListImpl *list, HKEY root)
 
         if (!(attributes & SFGAO_NONENUMERATED))
             AddToEnumList(list, _ILCreateGuidFromStrW(guid));
-        size = sizeof(guid)/sizeof(guid[0]);
+        size = ARRAY_SIZE(guid);
     }
 
     RegCloseKey(hkey);
@@ -752,11 +751,10 @@ static HRESULT WINAPI ISF_Desktop_fnSetNameOf (IShellFolder2 * iface,
     return E_FAIL;
 }
 
-static HRESULT WINAPI ISF_Desktop_fnGetDefaultSearchGUID(IShellFolder2 *iface,
-                GUID * pguid)
+static HRESULT WINAPI ISF_Desktop_fnGetDefaultSearchGUID(IShellFolder2 *iface, GUID *guid)
 {
     IDesktopFolderImpl *This = impl_from_IShellFolder2(iface);
-    FIXME ("(%p)->(%p) stub\n", This, pguid);
+    TRACE("(%p)->(%p)\n", This, guid);
     return E_NOTIMPL;
 }
 
@@ -768,20 +766,15 @@ static HRESULT WINAPI ISF_Desktop_fnEnumSearches (IShellFolder2 *iface,
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI ISF_Desktop_fnGetDefaultColumn (IShellFolder2 * iface,
-                DWORD reserved, ULONG * pSort, ULONG * pDisplay)
+static HRESULT WINAPI ISF_Desktop_fnGetDefaultColumn(IShellFolder2 *iface, DWORD reserved, ULONG *sort, ULONG *display)
 {
     IDesktopFolderImpl *This = impl_from_IShellFolder2(iface);
 
-    TRACE ("(%p)->(%d %p %p)\n", This, reserved, pSort, pDisplay);
+    TRACE ("(%p)->(%#x, %p, %p)\n", This, reserved, sort, display);
 
-    if (pSort)
-        *pSort = 0;
-    if (pDisplay)
-        *pDisplay = 0;
-
-    return S_OK;
+    return E_NOTIMPL;
 }
+
 static HRESULT WINAPI ISF_Desktop_fnGetDefaultColumnState (
                 IShellFolder2 * iface, UINT iColumn, DWORD * pcsFlags)
 {
@@ -789,8 +782,8 @@ static HRESULT WINAPI ISF_Desktop_fnGetDefaultColumnState (
 
     TRACE ("(%p)->(%d %p)\n", This, iColumn, pcsFlags);
 
-    if (!pcsFlags || iColumn >= DESKTOPSHELLVIEWCOLUMNS)
-    return E_INVALIDARG;
+    if (!pcsFlags || iColumn >= ARRAY_SIZE(desktop_header))
+        return E_INVALIDARG;
 
     *pcsFlags = desktop_header[iColumn].pcsFlags;
 
@@ -814,7 +807,7 @@ static HRESULT WINAPI ISF_Desktop_fnGetDetailsOf (IShellFolder2 * iface,
 
     TRACE ("(%p)->(%p %i %p)\n", This, pidl, iColumn, psd);
 
-    if (!psd || iColumn >= DESKTOPSHELLVIEWCOLUMNS)
+    if (!psd || iColumn >= ARRAY_SIZE(desktop_header))
         return E_INVALIDARG;
 
     if (!pidl)
@@ -845,12 +838,16 @@ static HRESULT WINAPI ISF_Desktop_fnGetDetailsOf (IShellFolder2 * iface,
     return hr;
 }
 
-static HRESULT WINAPI ISF_Desktop_fnMapColumnToSCID (
-                IShellFolder2 * iface, UINT column, SHCOLUMNID * pscid)
+static HRESULT WINAPI ISF_Desktop_fnMapColumnToSCID(IShellFolder2 *iface, UINT column, SHCOLUMNID *scid)
 {
     IDesktopFolderImpl *This = impl_from_IShellFolder2(iface);
-    FIXME ("(%p)->(%d %p) stub\n", This, column, pscid);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%u %p)\n", This, column, scid);
+
+    if (column >= ARRAY_SIZE(desktop_header))
+        return E_INVALIDARG;
+
+    return shellfolder_map_column_to_scid(desktop_header, column, scid);
 }
 
 static const IShellFolder2Vtbl vt_MCFldr_ShellFolder2 =

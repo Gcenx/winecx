@@ -87,16 +87,6 @@ static inline BOOL is_signaled( HANDLE obj )
     return WaitForSingleObject( obj, 0 ) == WAIT_OBJECT_0;
 }
 
-static const char* debugstr_longlong(ULONGLONG ll)
-{
-    static char str[17];
-    if (sizeof(ll) > sizeof(unsigned long) && ll >> 32)
-        sprintf(str, "%lx%08lx", (unsigned long)(ll >> 32), (unsigned long)ll);
-    else
-        sprintf(str, "%lx", (unsigned long)ll);
-    return str;
-}
-
 #define TEST_BUF_LEN 3
 
 static HANDLE create_temp_file( ULONG flags )
@@ -573,7 +563,7 @@ static void delete_file_test(void)
 	ok(0, "couldn't get temp dir\n");
 	return;
     }
-    if (ret + sizeof(testdirW)/sizeof(WCHAR)-1 + sizeof(subdirW)/sizeof(WCHAR)-1 >= MAX_PATH)
+    if (ret + ARRAY_SIZE(testdirW)-1 + ARRAY_SIZE(subdirW)-1 >= MAX_PATH)
     {
 	ok(0, "MAX_PATH exceeded in constructing paths\n");
 	return;
@@ -1055,7 +1045,6 @@ static void test_iocp_fileio(HANDLE h)
 
         /* using APCs on handle with associated completion port is not allowed */
         res = NtReadFile( hPipeSrv, NULL, apc, &apc_count, &iosb, recv_buf, sizeof(recv_buf), NULL, NULL );
-        todo_wine
         ok(res == STATUS_INVALID_PARAMETER, "NtReadFile returned %x\n", res);
     }
 
@@ -1104,7 +1093,6 @@ static void test_iocp_fileio(HANDLE h)
 
         /* using APCs on handle with associated completion port is not allowed */
         res = NtReadFile( hPipeSrv, NULL, apc, &apc_count, &iosb, recv_buf, sizeof(recv_buf), NULL, NULL );
-        todo_wine
         ok(res == STATUS_INVALID_PARAMETER, "NtReadFile returned %x\n", res);
     }
 
@@ -1134,10 +1122,10 @@ static void test_file_full_size_information(void)
     /* Test for FileFsSizeInformation */
     ok(fsi.TotalAllocationUnits.QuadPart > 0,
         "[fsi] TotalAllocationUnits expected positive, got 0x%s\n",
-        debugstr_longlong(fsi.TotalAllocationUnits.QuadPart));
+        wine_dbgstr_longlong(fsi.TotalAllocationUnits.QuadPart));
     ok(fsi.AvailableAllocationUnits.QuadPart > 0,
         "[fsi] AvailableAllocationUnits expected positive, got 0x%s\n",
-        debugstr_longlong(fsi.AvailableAllocationUnits.QuadPart));
+        wine_dbgstr_longlong(fsi.AvailableAllocationUnits.QuadPart));
 
     /* Assume file system is NTFS */
     ok(fsi.BytesPerSector == 512, "[fsi] BytesPerSector expected 512, got %d\n",fsi.BytesPerSector);
@@ -1147,21 +1135,21 @@ static void test_file_full_size_information(void)
     {
     ok(ffsi.TotalAllocationUnits.QuadPart > 0,
         "[ffsi] TotalAllocationUnits expected positive, got negative value 0x%s\n",
-        debugstr_longlong(ffsi.TotalAllocationUnits.QuadPart));
+        wine_dbgstr_longlong(ffsi.TotalAllocationUnits.QuadPart));
     ok(ffsi.CallerAvailableAllocationUnits.QuadPart > 0,
         "[ffsi] CallerAvailableAllocationUnits expected positive, got negative value 0x%s\n",
-        debugstr_longlong(ffsi.CallerAvailableAllocationUnits.QuadPart));
+        wine_dbgstr_longlong(ffsi.CallerAvailableAllocationUnits.QuadPart));
     ok(ffsi.ActualAvailableAllocationUnits.QuadPart > 0,
         "[ffsi] ActualAvailableAllocationUnits expected positive, got negative value 0x%s\n",
-        debugstr_longlong(ffsi.ActualAvailableAllocationUnits.QuadPart));
+        wine_dbgstr_longlong(ffsi.ActualAvailableAllocationUnits.QuadPart));
     ok(ffsi.TotalAllocationUnits.QuadPart == fsi.TotalAllocationUnits.QuadPart,
         "[ffsi] TotalAllocationUnits error fsi:0x%s, ffsi:0x%s\n",
-        debugstr_longlong(fsi.TotalAllocationUnits.QuadPart),
-        debugstr_longlong(ffsi.TotalAllocationUnits.QuadPart));
+        wine_dbgstr_longlong(fsi.TotalAllocationUnits.QuadPart),
+        wine_dbgstr_longlong(ffsi.TotalAllocationUnits.QuadPart));
     ok(ffsi.CallerAvailableAllocationUnits.QuadPart == fsi.AvailableAllocationUnits.QuadPart,
         "[ffsi] CallerAvailableAllocationUnits error fsi:0x%s, ffsi: 0x%s\n",
-        debugstr_longlong(fsi.AvailableAllocationUnits.QuadPart),
-        debugstr_longlong(ffsi.CallerAvailableAllocationUnits.QuadPart));
+        wine_dbgstr_longlong(fsi.AvailableAllocationUnits.QuadPart),
+        wine_dbgstr_longlong(ffsi.CallerAvailableAllocationUnits.QuadPart));
     }
 
     /* Assume file system is NTFS */
@@ -3094,7 +3082,7 @@ static void test_file_completion_information(void)
     CloseHandle(h);
     if (!(h = create_temp_file(FILE_FLAG_OVERLAPPED))) return;
 
-    info.Flags = ~0u;
+    info.Flags = ~0U;
     status = pNtQueryInformationFile(h, &io, &info, sizeof(info), FileIoCompletionNotificationInformation);
     ok(status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %08x\n", status);
     ok(!(info.Flags & FILE_SKIP_COMPLETION_PORT_ON_SUCCESS), "got %08x\n", info.Flags);
@@ -3405,7 +3393,7 @@ static void test_NtCreateFile(void)
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
 
-    for (i = 0; i < sizeof(td)/sizeof(td[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(td); i++)
     {
         status = pNtCreateFile(&handle, GENERIC_READ, &attr, &io, NULL,
                                td[i].attrib_in, FILE_SHARE_READ|FILE_SHARE_WRITE,
@@ -4205,6 +4193,7 @@ static void test_read_write(void)
 static void test_ioctl(void)
 {
     HANDLE event = CreateEventA(NULL, TRUE, FALSE, NULL);
+    FILE_PIPE_PEEK_BUFFER peek_buf;
     IO_STATUS_BLOCK iosb;
     HANDLE file;
     NTSTATUS status;
@@ -4220,6 +4209,13 @@ static void test_ioctl(void)
 
     status = pNtFsControlFile(file, (HANDLE)0xdeadbeef, NULL, NULL, &iosb, 0xdeadbeef, 0, 0, 0, 0);
     ok(status == STATUS_INVALID_HANDLE, "NtFsControlFile returned %x\n", status);
+
+    memset(&iosb, 0x55, sizeof(iosb));
+    status = NtFsControlFile(file, NULL, NULL, NULL, &iosb, FSCTL_PIPE_PEEK, NULL, 0,
+                             &peek_buf, sizeof(peek_buf));
+    todo_wine
+    ok(status == STATUS_INVALID_DEVICE_REQUEST, "NtFsControlFile failed: %x\n", status);
+    ok(iosb.Status == 0x55555555, "iosb.Status = %x\n", iosb.Status);
 
     CloseHandle(event);
     CloseHandle(file);

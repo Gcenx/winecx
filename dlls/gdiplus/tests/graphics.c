@@ -29,6 +29,8 @@
 #define expectf_(expected, got, precision) ok(fabs((expected) - (got)) <= (precision), "Expected %f, got %f\n", (expected), (got))
 #define expectf(expected, got) expectf_((expected), (got), 0.001)
 
+static GpStatus (WINAPI *pGdipGraphicsSetAbort)(GpGraphics*,GdiplusAbort*);
+
 static const REAL mm_per_inch = 25.4;
 static const REAL point_per_inch = 72.0;
 static HWND hwnd;
@@ -363,7 +365,8 @@ static void test_save_restore(void)
     log_state(state_a, &state_log);
 
     /* BeginContainer and SaveGraphics use the same stack. */
-    GdipCreateFromHDC(hdc, &graphics1);
+    stat = GdipCreateFromHDC(hdc, &graphics1);
+    expect(Ok, stat);
     GdipSetInterpolationMode(graphics1, InterpolationModeBilinear);
     stat = GdipBeginContainer2(graphics1, &state_a);
     expect(Ok, stat);
@@ -729,7 +732,8 @@ static void test_BeginContainer2(void)
     status = GdipCreateMatrix(&transform);
     expect(Ok, status);
     GdipGetWorldTransform(graphics, transform);
-    GdipGetMatrixElements(transform, elems);
+    status = GdipGetMatrixElements(transform, elems);
+    expect(Ok, status);
     ok(fabs(defTrans[0] - elems[0]) < 0.0001 &&
             fabs(defTrans[1] - elems[1]) < 0.0001 &&
             fabs(defTrans[2] - elems[2]) < 0.0001 &&
@@ -1535,6 +1539,52 @@ static void test_GdipFillClosedCurveI(void)
     ReleaseDC(hwnd, hdc);
 }
 
+static void test_GdipFillPath(void)
+{
+    GpStatus status;
+    GpGraphics *graphics;
+    GpSolidFill *brush;
+    GpPath *path;
+    HDC hdc = GetDC(hwnd);
+
+    ok(hdc != NULL, "Expected HDC to be initialized\n");
+    status = GdipCreateFromHDC(hdc, &graphics);
+    expect(Ok, status);
+    ok(graphics != NULL, "Expected graphics to be initialized\n");
+    status = GdipCreateSolidFill((ARGB)0xffffffff, &brush);
+    expect(Ok, status);
+    ok(brush != NULL, "Expected brush to be initialized\n");
+    status = GdipCreatePath(FillModeAlternate, &path);
+    expect(Ok, status);
+    ok(path != NULL, "Expected path to be initialized\n");
+
+    /* Empty path */
+    GdipResetPath(path);
+    status = GdipFillPath(graphics, (GpBrush *)brush, path);
+    expect(Ok, status);
+
+    /* Not closed path */
+    GdipResetPath(path);
+    status = GdipAddPathLineI(path, 0, 0, 2, 2);
+    expect(Ok, status);
+    status = GdipAddPathLineI(path, 2, 2, 4, 0);
+    expect(Ok, status);
+    status = GdipFillPath(graphics, (GpBrush *)brush, path);
+    expect(Ok, status);
+
+    /* Closed path */
+    GdipResetPath(path);
+    status = GdipAddPathRectangle(path, 0, 0, 4, 4);
+    expect(Ok, status);
+    status = GdipFillPath(graphics, (GpBrush *)brush, path);
+    expect(Ok, status);
+
+    GdipDeletePath(path);
+    GdipDeleteBrush((GpBrush *)brush);
+    GdipDeleteGraphics(graphics);
+    ReleaseDC(hwnd, hdc);
+}
+
 static void test_Get_Release_DC(void)
 {
     GpStatus status;
@@ -1598,10 +1648,12 @@ static void test_Get_Release_DC(void)
 
     status = GdipCreateMatrix(&m);
     expect(Ok, status);
-    GdipCreateRegion(&region);
+    status = GdipCreateRegion(&region);
+    expect(Ok, status);
     GdipCreateSolidFill((ARGB)0xdeadbeef, &brush);
     GdipCreatePath(FillModeAlternate, &path);
-    GdipCreateRegion(&clip);
+    status = GdipCreateRegion(&clip);
+    expect(Ok, status);
 
     status = GdipCreateFromHDC(hdc, &graphics);
     expect(Ok, status);
@@ -2051,6 +2103,98 @@ static void test_get_set_clip(void)
     GdipDeleteRegion(clip);
 
     GdipDeleteGraphics(graphics);
+    ReleaseDC(hwnd, hdc);
+}
+
+static void test_clip_xform(void)
+{
+    GpStatus status;
+    GpGraphics *graphics = NULL;
+    HDC hdc = GetDC( hwnd );
+    GpRegion *clip;
+    COLORREF color;
+    UINT region_data_size;
+    struct {
+        DWORD size;
+        DWORD checksum;
+        DWORD magic;
+        DWORD num_children;
+        DWORD element_type;
+        REAL x;
+        REAL y;
+        REAL width;
+        REAL height;
+    } region_data;
+
+    status = GdipCreateFromHDC(hdc, &graphics);
+    expect(Ok, status);
+    status = GdipCreateRegion(&clip);
+    expect(Ok, status);
+
+    status = GdipGraphicsClear(graphics, 0xff000000);
+    expect(Ok, status);
+
+    status = GdipSetClipRect(graphics, 10, 10, -10, -10, CombineModeReplace);
+    expect(Ok, status);
+    status = GdipGetClip(graphics, clip);
+    expect(Ok, status);
+    status = GdipGetRegionData(clip, (BYTE*)&region_data, sizeof(region_data), &region_data_size);
+    expect(Ok, status);
+    expect(36, region_data_size);
+    expect(28, region_data.size);
+    expect(0, region_data.num_children);
+    expect(0x10000000 /* RegionDataRect */, region_data.element_type);
+    expectf(0.0, region_data.x);
+    expectf(0.0, region_data.y);
+    expectf(10.0, region_data.width);
+    expectf(10.0, region_data.height);
+
+    /* No effect with negative width/height */
+    status = GdipGraphicsClear(graphics, 0xffff0000);
+    expect(Ok, status);
+    color = GetPixel(hdc, 5, 5);
+    expect(0, color);
+
+    status = GdipScaleWorldTransform(graphics, 2.0, 2.0, MatrixOrderAppend);
+    expect(Ok, status);
+
+    status = GdipGraphicsClear(graphics, 0xffff0000);
+    expect(Ok, status);
+    color = GetPixel(hdc, 5, 5);
+    expect(0, color);
+
+    status = GdipResetClip(graphics);
+    expect(Ok, status);
+    status = GdipResetWorldTransform(graphics);
+    expect(Ok, status);
+    status = GdipGraphicsClear(graphics, 0xff000000);
+    expect(Ok, status);
+
+    status = GdipScaleWorldTransform(graphics, 2.0, 2.0, MatrixOrderAppend);
+    expect(Ok, status);
+
+    status = GdipSetClipRect(graphics, 5, 5, -5, -5, CombineModeReplace);
+    expect(Ok, status);
+    status = GdipGetClip(graphics, clip);
+    expect(Ok, status);
+    status = GdipGetRegionData(clip, (BYTE*)&region_data, sizeof(region_data), &region_data_size);
+    expect(Ok, status);
+    expect(36, region_data_size);
+    expect(28, region_data.size);
+    expect(0, region_data.num_children);
+    expect(0x10000000 /* RegionDataRect */, region_data.element_type);
+    expectf(0.0, region_data.x);
+    expectf(0.0, region_data.y);
+    expectf(5.0, region_data.width);
+    expectf(5.0, region_data.height);
+
+    status = GdipGraphicsClear(graphics, 0xffff0000);
+    expect(Ok, status);
+    color = GetPixel(hdc, 5, 5);
+    expect(0xff, color);
+
+    GdipDeleteGraphics(graphics);
+    GdipDeleteRegion(clip);
     ReleaseDC(hwnd, hdc);
 }
 
@@ -3624,7 +3768,7 @@ static void test_GdipMeasureString(void)
     expect(Ok, status);
     expect(UnitPixel, font_unit);
 
-    for (i = 0; i < sizeof(td)/sizeof(td[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(td); i++)
     {
         GpImage *image;
 
@@ -3702,7 +3846,7 @@ todo_wine
         expect(Ok, status);
         expect(unit, font_unit);
 
-        for (i = 0; i < sizeof(td)/sizeof(td[0]); i++)
+        for (i = 0; i < ARRAY_SIZE(td); i++)
         {
             REAL unit_scale;
             GpImage *image;
@@ -3786,7 +3930,7 @@ todo_wine
     }
 
     /* Font with units = UnitWorld */
-    for (i = 0; i < sizeof(td)/sizeof(td[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(td); i++)
     {
         GpPointF pt = {0.0, 100.0};
         GpImage* image;
@@ -3875,7 +4019,7 @@ static void test_transform(void)
     GpPointF ptf[2];
     UINT i;
 
-    for (i = 0; i < sizeof(td)/sizeof(td[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(td); i++)
     {
         graphics = create_graphics(td[i].res_x, td[i].res_y, td[i].unit, td[i].scale, &image);
         ptf[0].X = td[i].in[0].X;
@@ -3935,7 +4079,7 @@ static void test_pen_thickness(void)
     BitmapData bd;
     INT min, max, size;
 
-    for (i = 0; i < sizeof(td)/sizeof(td[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(td); i++)
     {
         status = GdipCreateBitmapFromScan0(100, 100, 0, PixelFormat24bppRGB, NULL, &u.bitmap);
         expect(Ok, status);
@@ -6168,6 +6312,34 @@ static void test_container_rects(void)
     ReleaseDC(hwnd, hdc);
 }
 
+static void test_GdipGraphicsSetAbort(void)
+{
+    HDC hdc;
+    GpStatus status;
+    GpGraphics *graphics;
+
+    if (!pGdipGraphicsSetAbort)
+    {
+        win_skip("GdipGraphicsSetAbort() is not supported.\n");
+        return;
+    }
+
+    hdc = GetDC(hwnd);
+
+    status = GdipCreateFromHDC(hdc, &graphics);
+    expect(Ok, status);
+
+    status = pGdipGraphicsSetAbort(NULL, NULL);
+    expect(InvalidParameter, status);
+
+    status = pGdipGraphicsSetAbort(graphics, NULL);
+    expect(Ok, status);
+
+    GdipDeleteGraphics(graphics);
+
+    ReleaseDC(hwnd, hdc);
+}
+
 #define BLUE_COLOR (0xff0000ff)
 #define is_blue_color(color) ( ((color) & 0x00ffffff) == 0xff )
 #define get_bitmap_pixel(x,y) pixel[(y)*(width) + (x)]
@@ -6193,11 +6365,6 @@ static DWORD* GetBitmapPixelBuffer(HDC hdc, HBITMAP hbmp, int width, int height)
     ok(lines == height, "Expected GetDIBits:%p,%d->%d,%d\n", buffer, height, lines, GetLastError());
 
     return buffer;
-}
-
-static void ReleaseBitmapPixelBuffer(DWORD* buffer)
-{
-    if (buffer) GdipFree(buffer);
 }
 
 static void test_GdipFillRectanglesOnMemoryDCSolidBrush(void)
@@ -6249,7 +6416,7 @@ static void test_GdipFillRectanglesOnMemoryDCSolidBrush(void)
     ok(is_blue_color(color[0]) && is_blue_color(color[1]) && is_blue_color(color[2]) &&
        color[3] == 0 && color[4] == 0 && color[5] == 0,
        "Expected GdipFillRectangleI take effect!\n" );
-    ReleaseBitmapPixelBuffer(pixel);
+    GdipFree(pixel);
 
     SelectObject(hdc, old);
     DeleteObject(bmp);
@@ -6334,7 +6501,7 @@ static void test_GdipFillRectanglesOnMemoryDCTextureBrush(void)
     ok(is_blue_color(color[0]) && is_blue_color(color[1]) && is_blue_color(color[2]) &&
        color[3] == 0 && color[4] == 0 && color[5] == 0,
       "Expected GdipFillRectangleI take effect!\n" );
-    ReleaseBitmapPixelBuffer(pixel);
+    GdipFree(pixel);
 
     SelectObject(hdc, old);
     DeleteObject(bmp);
@@ -6491,7 +6658,7 @@ static void test_GdipDrawImagePointsRectOnMemoryDC(void)
     ok(is_blue_color(color[0]) && is_blue_color(color[1]) && is_blue_color(color[2]) &&
        color[3] == 0 && color[4] == 0 && color[5] == 0,
        "Expected GdipDrawImageRectRectI take effect!\n" );
-    ReleaseBitmapPixelBuffer(pixel);
+    GdipFree(pixel);
 
     SelectObject(hdc, old);
     DeleteObject(bmp);
@@ -6544,11 +6711,90 @@ static void test_cliphrgn_transform(void)
     ReleaseDC(hwnd, hdc);
 }
 
+static void test_hdc_caching(void)
+{
+    GpStatus status;
+    HDC hdc;
+    HBITMAP hbm;
+    GpGraphics *graphics;
+    ULONG *bits;
+    BITMAPINFO bmi;
+    HRGN hrgn;
+    GpBrush *brush;
+
+    hdc = CreateCompatibleDC(0);
+    ok(hdc != NULL, "CreateCompatibleDC failed\n");
+    bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
+    bmi.bmiHeader.biHeight = -5;
+    bmi.bmiHeader.biWidth = 5;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    bmi.bmiHeader.biClrUsed = 0;
+
+    hbm = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, (void**)&bits, NULL, 0);
+    ok(hbm != NULL, "CreateDIBSection failed\n");
+
+    SelectObject(hdc, hbm);
+
+    SetViewportOrgEx(hdc, 1, 1, NULL);
+
+    hrgn = CreateRectRgn(0, 0, 3, 3);
+    SelectClipRgn(hdc, hrgn);
+    DeleteObject(hrgn);
+
+    status = GdipCreateSolidFill((ARGB)0xffaaaaaa, (GpSolidFill**)&brush);
+    expect(Ok, status);
+
+    status = GdipCreateFromHDC(hdc, &graphics);
+    expect(Ok, status);
+
+    memset(bits, 0, sizeof(*bits) * 25);
+    status = GdipFillRectangleI(graphics, brush, 0, 0, 4, 4);
+    expect(Ok, status);
+
+    expect(0, bits[0]);
+    expect(0xffaaaaaa, bits[6]);
+    expect(0xffaaaaaa, bits[12]);
+    expect(0, bits[18]);
+    expect(0, bits[24]);
+
+    SetViewportOrgEx(hdc, 0, 0, NULL);
+    OffsetClipRgn(hdc, 2, 2);
+
+    memset(bits, 0, sizeof(*bits) * 25);
+    status = GdipFillRectangleI(graphics, brush, 0, 0, 4, 4);
+    expect(Ok, status);
+
+    expect(0, bits[0]);
+    expect(0xffaaaaaa, bits[6]);
+    expect(0xffaaaaaa, bits[12]);
+    expect(0, bits[18]);
+    expect(0, bits[24]);
+
+    GdipDeleteGraphics(graphics);
+
+    GdipDeleteBrush(brush);
+
+    DeleteDC(hdc);
+    DeleteObject(hbm);
+}
+
 START_TEST(graphics)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
     ULONG_PTR gdiplusToken;
     WNDCLASSA class;
+    HMODULE gdiplus_mod = GetModuleHandleA("gdiplus.dll");
+    HMODULE hmsvcrt;
+    int (CDECL * _controlfp_s)(unsigned int *cur, unsigned int newval, unsigned int mask);
+
+    /* Enable all FP exceptions except _EM_INEXACT, which gdi32 can trigger */
+    hmsvcrt = LoadLibraryA("msvcrt");
+    _controlfp_s = (void*)GetProcAddress(hmsvcrt, "_controlfp_s");
+    if (_controlfp_s) _controlfp_s(0, 0, 0x0008001e);
+
+    pGdipGraphicsSetAbort = (void*)GetProcAddress(gdiplus_mod, "GdipGraphicsSetAbort");
 
     memset( &class, 0, sizeof(class) );
     class.lpszClassName = "gdiplus_test";
@@ -6596,6 +6842,7 @@ START_TEST(graphics)
     test_GdipDrawImagePointsRect();
     test_GdipFillClosedCurve();
     test_GdipFillClosedCurveI();
+    test_GdipFillPath();
     test_GdipDrawString();
     test_GdipGetNearestColor();
     test_GdipGetVisibleClipBounds();
@@ -6605,6 +6852,7 @@ START_TEST(graphics)
     test_BeginContainer2();
     test_transformpoints();
     test_get_set_clip();
+    test_clip_xform();
     test_isempty();
     test_clear();
     test_textcontrast();
@@ -6622,7 +6870,9 @@ START_TEST(graphics)
     test_GdipFillRectanglesOnBitmapTextureBrush();
     test_GdipDrawImagePointsRectOnMemoryDC();
     test_container_rects();
+    test_GdipGraphicsSetAbort();
     test_cliphrgn_transform();
+    test_hdc_caching();
 
     GdiplusShutdown(gdiplusToken);
     DestroyWindow( hwnd );

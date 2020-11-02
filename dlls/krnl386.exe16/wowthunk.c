@@ -46,18 +46,10 @@ extern void WINAPI wine_call_to_16_regs( CONTEXT *context, DWORD cbArgs, PEXCEPT
 extern void __wine_call_to_16_ret(void);
 extern void CALL32_CBClient_Ret(void);
 extern void CALL32_CBClientEx_Ret(void);
-extern void DPMI_PendingEventCheck(void);
-extern void DPMI_PendingEventCheck_Cleanup(void);
-extern void DPMI_PendingEventCheck_Return(void);
 extern BYTE __wine_call16_start[];
 extern BYTE __wine_call16_end[];
 
 static SEGPTR call16_ret_addr;  /* segptr to __wine_call_to_16_ret routine */
-
-static WORD  dpmi_checker_selector;
-static DWORD dpmi_checker_offset_call;
-static DWORD dpmi_checker_offset_cleanup;
-static DWORD dpmi_checker_offset_return;
 
 /***********************************************************************
  *           WOWTHUNK_Init
@@ -82,12 +74,6 @@ BOOL WOWTHUNK_Init(void)
         MAKESEGPTR( codesel, (BYTE *)CALL32_CBClient_Ret - __wine_call16_start );
     CALL32_CBClientEx_RetAddr =
         MAKESEGPTR( codesel, (BYTE *)CALL32_CBClientEx_Ret - __wine_call16_start );
-
-    /* Prepare selector and offsets for DPMI event checking. */
-    dpmi_checker_selector = codesel;
-    dpmi_checker_offset_call = (BYTE *)DPMI_PendingEventCheck - __wine_call16_start;
-    dpmi_checker_offset_cleanup = (BYTE *)DPMI_PendingEventCheck_Cleanup - __wine_call16_start;
-    dpmi_checker_offset_return = (BYTE *)DPMI_PendingEventCheck_Return - __wine_call16_start;
 
     if (TRACE_ON(relay) || TRACE_ON(snoop)) RELAY16_InitDebugLists();
 
@@ -138,79 +124,6 @@ static BOOL fix_selector( CONTEXT *context )
 
 
 /*************************************************************
- *            insert_event_check
- *
- * Make resuming the context check for pending DPMI events
- * before the original context is restored. This is required
- * because DPMI events are asynchronous, they are blocked while 
- * Wine 32-bit code is being executed and we want to prevent 
- * a race when returning back to 16-bit or 32-bit DPMI context.
- */
-static void insert_event_check( CONTEXT *context )
-{
-    char *stack = wine_ldt_get_ptr( context->SegSs, context->Esp );
-
-    /* don't do event check while in system code */
-    if (wine_ldt_is_system(context->SegCs))
-        return;
-
-    if(context->SegCs == dpmi_checker_selector &&
-       context->Eip   >= dpmi_checker_offset_call && 
-       context->Eip   <= dpmi_checker_offset_cleanup)
-    {
-        /*
-         * Nested call. Stack will be preserved. 
-         */
-    }
-    else if(context->SegCs == dpmi_checker_selector &&
-            context->Eip   == dpmi_checker_offset_return)
-    {
-        /*
-         * Nested call. We have just finished popping the fs
-         * register, lets put it back into stack.
-         */
-
-        stack -= sizeof(WORD);
-        *(WORD*)stack = context->SegFs;
-
-        context->Esp -= 2;
-    }
-    else
-    {
-        /*
-         * Call is not nested.
-         * Push modified registers into stack.
-         * These will be popped by the assembler stub.
-         */
-
-        stack -= sizeof(DWORD);
-        *(DWORD*)stack = context->EFlags;
-   
-        stack -= sizeof(DWORD);
-        *(DWORD*)stack = context->SegCs;
-
-        stack -= sizeof(DWORD);
-        *(DWORD*)stack = context->Eip;
-
-        stack -= sizeof(WORD);
-        *(WORD*)stack = context->SegFs;
-
-        context->Esp  -= 14;
-    }
-
-    /*
-     * Modify the context so that we jump into assembler stub.
-     * TEB access is made easier by providing the stub
-     * with the correct fs register value.
-     */
-
-    context->SegCs = dpmi_checker_selector;
-    context->Eip   = dpmi_checker_offset_call;
-    context->SegFs = wine_get_fs();
-}
-
-
-/*************************************************************
  *            call16_handler
  *
  * Handler for exceptions occurring in 16-bit code.
@@ -222,7 +135,7 @@ static DWORD call16_handler( EXCEPTION_RECORD *record, EXCEPTION_REGISTRATION_RE
     {
         /* unwinding: restore the stack pointer in the TEB, and leave the Win16 mutex */
         STACK32FRAME *frame32 = CONTAINING_RECORD(frame, STACK32FRAME, frame);
-        NtCurrentTeb()->WOW32Reserved = (void *)frame32->frame16;
+        NtCurrentTeb()->SystemReserved1[0] = (void *)frame32->frame16;
         _LeaveWin16Lock();
     }
     else if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION ||
@@ -236,15 +149,6 @@ static DWORD call16_handler( EXCEPTION_RECORD *record, EXCEPTION_REGISTRATION_RE
         {
             SEGPTR gpHandler;
             DWORD ret = __wine_emulate_instruction( record, context );
-
-            /*
-             * Insert check for pending DPMI events. Note that this 
-             * check must be inserted after instructions have been 
-             * emulated because the instruction emulation requires
-             * original CS:IP and the emulation may change TEB.dpmi_vif.
-             */
-            if(get_vm86_teb_info()->dpmi_vif)
-                insert_event_check( context );
 
             if (ret != ExceptionContinueSearch) return ret;
 
@@ -267,31 +171,6 @@ static DWORD call16_handler( EXCEPTION_RECORD *record, EXCEPTION_REGISTRATION_RE
             }
         }
     }
-    else if (record->ExceptionCode == EXCEPTION_VM86_STI)
-    {
-        insert_event_check( context );
-    }
-    return ExceptionContinueSearch;
-}
-
-
-/*************************************************************
- *            vm86_handler
- *
- * Handler for exceptions occurring in vm86 code.
- */
-static DWORD vm86_handler( EXCEPTION_RECORD *record, EXCEPTION_REGISTRATION_RECORD *frame,
-                           CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **pdispatcher )
-{
-    if (record->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND))
-        return ExceptionContinueSearch;
-
-    if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION ||
-        record->ExceptionCode == EXCEPTION_PRIV_INSTRUCTION)
-    {
-        return __wine_emulate_instruction( record, context );
-    }
-
     return ExceptionContinueSearch;
 }
 
@@ -538,81 +417,46 @@ BOOL WINAPI K32WOWCallback16Ex( DWORD vpfn16, DWORD dwFlags,
             DWORD count = cbArgs / sizeof(WORD);
             WORD * wstack = (WORD *)stack;
 
-            DPRINTF("%04x:CallTo16(func=%04x:%04x,ds=%04x",
-                    GetCurrentThreadId(),
-                    context->SegCs, LOWORD(context->Eip), context->SegDs );
-            while (count) DPRINTF( ",%04x", wstack[--count] );
-            DPRINTF(") ss:sp=%04x:%04x",
-                    SELECTOROF(NtCurrentTeb()->WOW32Reserved), OFFSETOF(NtCurrentTeb()->WOW32Reserved) );
-            DPRINTF(" ax=%04x bx=%04x cx=%04x dx=%04x si=%04x di=%04x bp=%04x es=%04x fs=%04x\n",
-                    (WORD)context->Eax, (WORD)context->Ebx, (WORD)context->Ecx,
-                    (WORD)context->Edx, (WORD)context->Esi, (WORD)context->Edi,
-                    (WORD)context->Ebp, (WORD)context->SegEs, (WORD)context->SegFs );
+            TRACE_(relay)( "\1CallTo16(func=%04x:%04x", context->SegCs, LOWORD(context->Eip) );
+            while (count) TRACE_(relay)( ",%04x", wstack[--count] );
+            TRACE_(relay)( ") ss:sp=%04x:%04x ax=%04x bx=%04x cx=%04x dx=%04x si=%04x di=%04x bp=%04x ds=%04x es=%04x\n",
+                           SELECTOROF(NtCurrentTeb()->SystemReserved1[0]),
+                           OFFSETOF(NtCurrentTeb()->SystemReserved1[0]),
+                           (WORD)context->Eax, (WORD)context->Ebx, (WORD)context->Ecx,
+                           (WORD)context->Edx, (WORD)context->Esi, (WORD)context->Edi,
+                           (WORD)context->Ebp, (WORD)context->SegDs, (WORD)context->SegEs );
             SYSLEVEL_CheckNotLevel( 2 );
         }
 
-        if (context->EFlags & 0x00020000)  /* v86 mode */
+        assert( !(context->EFlags & 0x00020000) ); /* vm86 mode no longer supported */
+
+        /* push return address */
+        if (dwFlags & WCB16_REGS_LONG)
         {
-            EXCEPTION_REGISTRATION_RECORD frame;
-            frame.Handler = vm86_handler;
-            errno = 0;
-            __wine_push_frame( &frame );
-            __wine_enter_vm86( context );
-            __wine_pop_frame( &frame );
-            if (errno != 0)  /* enter_vm86 will fail with ENOSYS on x64 kernels */
-            {
-                WARN("__wine_enter_vm86 failed (errno=%d)\n", errno);
-                if (errno == ENOSYS)
-                    SetLastError(ERROR_NOT_SUPPORTED);
-                else
-                    SetLastError(ERROR_GEN_FAILURE);
-                return FALSE;
-            }
+            stack -= sizeof(DWORD);
+            *((DWORD *)stack) = HIWORD(call16_ret_addr);
+            stack -= sizeof(DWORD);
+            *((DWORD *)stack) = LOWORD(call16_ret_addr);
+            cbArgs += 2 * sizeof(DWORD);
         }
         else
         {
-            /* push return address */
-            if (dwFlags & WCB16_REGS_LONG)
-            {
-                stack -= sizeof(DWORD);
-                *((DWORD *)stack) = HIWORD(call16_ret_addr);
-                stack -= sizeof(DWORD);
-                *((DWORD *)stack) = LOWORD(call16_ret_addr);
-                cbArgs += 2 * sizeof(DWORD);
-            }
-            else
-            {
-                stack -= sizeof(SEGPTR);
-                *((SEGPTR *)stack) = call16_ret_addr;
-                cbArgs += sizeof(SEGPTR);
-            }
-
-            /*
-             * Start call by checking for pending events.
-             * Note that wine_call_to_16_regs overwrites context stack
-             * pointer so we may modify it here without a problem.
-             */
-            if (get_vm86_teb_info()->dpmi_vif)
-            {
-                context->SegSs = wine_get_ds();
-                context->Esp   = (DWORD)stack;
-                insert_event_check( context );
-                cbArgs += (DWORD)stack - context->Esp;
-            }
-
-            _EnterWin16Lock();
-            wine_call_to_16_regs( context, cbArgs, call16_handler );
-            _LeaveWin16Lock();
+            stack -= sizeof(SEGPTR);
+            *((SEGPTR *)stack) = call16_ret_addr;
+            cbArgs += sizeof(SEGPTR);
         }
+
+        _EnterWin16Lock();
+        wine_call_to_16_regs( context, cbArgs, call16_handler );
+        _LeaveWin16Lock();
 
         if (TRACE_ON(relay))
         {
-            DPRINTF("%04x:RetFrom16() ss:sp=%04x:%04x ",
-                    GetCurrentThreadId(), SELECTOROF(NtCurrentTeb()->WOW32Reserved),
-                    OFFSETOF(NtCurrentTeb()->WOW32Reserved));
-            DPRINTF(" ax=%04x bx=%04x cx=%04x dx=%04x bp=%04x sp=%04x\n",
-                    (WORD)context->Eax, (WORD)context->Ebx, (WORD)context->Ecx,
-                    (WORD)context->Edx, (WORD)context->Ebp, (WORD)context->Esp );
+            TRACE_(relay)( "\1RetFrom16() ss:sp=%04x:%04x ax=%04x bx=%04x cx=%04x dx=%04x bp=%04x sp=%04x\n",
+                           SELECTOROF(NtCurrentTeb()->SystemReserved1[0]),
+                           OFFSETOF(NtCurrentTeb()->SystemReserved1[0]),
+                           (WORD)context->Eax, (WORD)context->Ebx, (WORD)context->Ecx,
+                           (WORD)context->Edx, (WORD)context->Ebp, (WORD)context->Esp );
             SYSLEVEL_CheckNotLevel( 2 );
         }
     }
@@ -625,12 +469,11 @@ BOOL WINAPI K32WOWCallback16Ex( DWORD vpfn16, DWORD dwFlags,
             DWORD count = cbArgs / sizeof(WORD);
             WORD * wstack = (WORD *)stack;
 
-            DPRINTF("%04x:CallTo16(func=%04x:%04x,ds=%04x",
-                    GetCurrentThreadId(), HIWORD(vpfn16), LOWORD(vpfn16),
-                    SELECTOROF(NtCurrentTeb()->WOW32Reserved) );
-            while (count) DPRINTF( ",%04x", wstack[--count] );
-            DPRINTF(") ss:sp=%04x:%04x\n",
-                    SELECTOROF(NtCurrentTeb()->WOW32Reserved), OFFSETOF(NtCurrentTeb()->WOW32Reserved) );
+            TRACE_(relay)( "\1CallTo16(func=%04x:%04x,ds=%04x",
+                           HIWORD(vpfn16), LOWORD(vpfn16), SELECTOROF(NtCurrentTeb()->SystemReserved1[0]) );
+            while (count) TRACE_(relay)( ",%04x", wstack[--count] );
+            TRACE_(relay)( ") ss:sp=%04x:%04x\n", SELECTOROF(NtCurrentTeb()->SystemReserved1[0]),
+                           OFFSETOF(NtCurrentTeb()->SystemReserved1[0]) );
             SYSLEVEL_CheckNotLevel( 2 );
         }
 
@@ -652,9 +495,9 @@ BOOL WINAPI K32WOWCallback16Ex( DWORD vpfn16, DWORD dwFlags,
 
         if (TRACE_ON(relay))
         {
-            DPRINTF("%04x:RetFrom16() ss:sp=%04x:%04x retval=%08x\n",
-                    GetCurrentThreadId(), SELECTOROF(NtCurrentTeb()->WOW32Reserved),
-                    OFFSETOF(NtCurrentTeb()->WOW32Reserved), ret);
+            TRACE_(relay)( "\1RetFrom16() ss:sp=%04x:%04x retval=%08x\n",
+                           SELECTOROF(NtCurrentTeb()->SystemReserved1[0]),
+                           OFFSETOF(NtCurrentTeb()->SystemReserved1[0]), ret );
             SYSLEVEL_CheckNotLevel( 2 );
         }
     }

@@ -74,6 +74,7 @@ static const UINT max_entry_size = offsetof( FILE_BOTH_DIRECTORY_INFORMATION, Fi
 static BOOL oem_file_apis;
 
 static const WCHAR wildcardsW[] = { '*','?',0 };
+static const WCHAR krnl386W[] = {'k','r','n','l','3','8','6','.','e','x','e','1','6',0};
 
 /***********************************************************************
  *              create_file_OF
@@ -441,8 +442,8 @@ BOOL WINAPI ReadFile( HANDLE hFile, LPVOID buffer, DWORD bytesToRead,
         io_status = (PIO_STATUS_BLOCK)overlapped;
         if (((ULONG_PTR)hEvent & 1) == 0) cvalue = overlapped;
     }
+    else io_status->Information = 0;
     io_status->u.Status = STATUS_PENDING;
-    io_status->Information = 0;
 
     status = NtReadFile(hFile, hEvent, NULL, cvalue, io_status, buffer, bytesToRead, poffset, NULL);
 
@@ -452,8 +453,8 @@ BOOL WINAPI ReadFile( HANDLE hFile, LPVOID buffer, DWORD bytesToRead,
         status = io_status->u.Status;
     }
 
-    if (status != STATUS_PENDING && bytesRead)
-        *bytesRead = io_status->Information;
+    if (bytesRead)
+        *bytesRead = overlapped && status ? 0 : io_status->Information;
 
     if (status == STATUS_END_OF_FILE)
     {
@@ -564,8 +565,8 @@ BOOL WINAPI WriteFile( HANDLE hFile, LPCVOID buffer, DWORD bytesToWrite,
         piosb = (PIO_STATUS_BLOCK)overlapped;
         if (((ULONG_PTR)hEvent & 1) == 0) cvalue = overlapped;
     }
+    else piosb->Information = 0;
     piosb->u.Status = STATUS_PENDING;
-    piosb->Information = 0;
 
     status = NtWriteFile(hFile, hEvent, NULL, cvalue, piosb,
                          buffer, bytesToWrite, poffset, NULL);
@@ -576,8 +577,8 @@ BOOL WINAPI WriteFile( HANDLE hFile, LPCVOID buffer, DWORD bytesToWrite,
         status = piosb->u.Status;
     }
 
-    if (status != STATUS_PENDING && bytesWritten)
-        *bytesWritten = piosb->Information;
+    if (bytesWritten)
+        *bytesWritten = overlapped && status ? 0 : piosb->Information;
 
     if (status && status != STATUS_TIMEOUT)
     {
@@ -1074,12 +1075,10 @@ BOOL WINAPI SetFileCompletionNotificationModes( HANDLE file, UCHAR flags )
     IO_STATUS_BLOCK io;
     NTSTATUS status;
 
-    TRACE( "%p %x\n", file, flags );
-
     info.Flags = flags;
     status = NtSetInformationFile( file, &io, &info, sizeof(info), FileIoCompletionNotificationInformation );
     if (status == STATUS_SUCCESS) return TRUE;
-    SetLastError( RtlNtStatusToDosError( status ) );
+    SetLastError( RtlNtStatusToDosError(status) );
     return FALSE;
 }
 
@@ -1521,7 +1520,7 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
         static const WCHAR conW[] = {'C','O','N'};
 
         if (LOWORD(dosdev) == sizeof(conW) &&
-            !memicmpW( filename + HIWORD(dosdev)/sizeof(WCHAR), conW, sizeof(conW)/sizeof(WCHAR)))
+            !memicmpW( filename + HIWORD(dosdev)/sizeof(WCHAR), conW, ARRAY_SIZE( conW )))
         {
             switch (access & (GENERIC_READ|GENERIC_WRITE))
             {
@@ -1568,6 +1567,8 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
         options |= FILE_SYNCHRONOUS_IO_NONALERT;
     if (attributes & FILE_FLAG_RANDOM_ACCESS)
         options |= FILE_RANDOM_ACCESS;
+    if (attributes & FILE_FLAG_WRITE_THROUGH)
+        options |= FILE_WRITE_THROUGH;
     attributes &= FILE_ATTRIBUTE_VALID_FLAGS;
 
     attr.Length = sizeof(attr);
@@ -1596,7 +1597,7 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
         if (vxd_name && vxd_name[0])
         {
             static HANDLE (*vxd_open)(LPCWSTR,DWORD,SECURITY_ATTRIBUTES*);
-            if (!vxd_open) vxd_open = (void *)GetProcAddress( GetModuleHandleA("krnl386.exe16"),
+            if (!vxd_open) vxd_open = (void *)GetProcAddress( GetModuleHandleW(krnl386W),
                                                               "__wine_vxd_open" );
             if (vxd_open && (ret = vxd_open( vxd_name, access, sa ))) goto done;
         }
@@ -2622,7 +2623,7 @@ BOOL WINAPI DeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode,
         static DeviceIoProc (*vxd_get_proc)(HANDLE);
         DeviceIoProc proc = NULL;
 
-        if (!vxd_get_proc) vxd_get_proc = (void *)GetProcAddress( GetModuleHandleA("krnl386.exe16"),
+        if (!vxd_get_proc) vxd_get_proc = (void *)GetProcAddress( GetModuleHandleW(krnl386W),
                                                                   "__wine_vxd_get_proc" );
         if (vxd_get_proc) proc = vxd_get_proc( hDevice );
         if (proc) return proc( dwIoControlCode, lpvInBuffer, cbInBuffer,
@@ -2826,6 +2827,16 @@ HANDLE WINAPI OpenFileById( HANDLE handle, LPFILE_ID_DESCRIPTOR id, DWORD access
         return INVALID_HANDLE_VALUE;
     }
     return result;
+}
+
+/***********************************************************************
+ *             ReOpenFile (KERNEL32.@)
+ */
+HANDLE WINAPI ReOpenFile(HANDLE handle_original, DWORD access, DWORD sharing, DWORD flags)
+{
+    FIXME("(%p, %d, %d, %d): stub\n", handle_original, access, sharing, flags);
+
+    return INVALID_HANDLE_VALUE;
 }
 
 

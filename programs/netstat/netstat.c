@@ -70,7 +70,7 @@ static const WCHAR tcpstatesW[][16] = {
  *  and hence required WriteConsoleW to output it, however if file i/o is
  *  redirected, it needs to be WriteFile'd using OEM (not ANSI) format
  * ========================================================================= */
-static int __cdecl NETSTAT_wprintf(const WCHAR *format, ...)
+static int WINAPIV NETSTAT_wprintf(const WCHAR *format, ...)
 {
     static WCHAR *output_bufW = NULL;
     static char  *output_bufA = NULL;
@@ -144,7 +144,7 @@ static WCHAR *NETSTAT_load_message(UINT id) {
     static WCHAR msg[2048];
     static const WCHAR failedW[]  = {'F','a','i','l','e','d','!','\0'};
 
-    if (!LoadStringW(GetModuleHandleW(NULL), id, msg, sizeof(msg)/sizeof(WCHAR))) {
+    if (!LoadStringW(GetModuleHandleW(NULL), id, msg, ARRAY_SIZE(msg))) {
         WINE_FIXME("LoadString failed with %d\n", GetLastError());
         strcpyW(msg, failedW);
     }

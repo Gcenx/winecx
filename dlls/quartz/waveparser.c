@@ -43,9 +43,8 @@ typedef struct WAVEParserImpl
     ParserImpl Parser;
     LONGLONG StartOfFile; /* in media time */
     LONGLONG EndOfFile;
-    DWORD dwSampleSize;
-    DWORD nSamplesPerSec;
-    DWORD dwLength;
+    DWORD nAvgBytesPerSec;
+    DWORD nBlockAlign;
 } WAVEParserImpl;
 
 static inline WAVEParserImpl *impl_from_IMediaSeeking( IMediaSeeking *iface )
@@ -62,7 +61,7 @@ static LONGLONG bytepos_to_duration(WAVEParserImpl *This, LONGLONG bytepos)
 {
     LONGLONG duration = BYTES_FROM_MEDIATIME(bytepos - This->StartOfFile);
     duration *= 10000000;
-    duration /= (This->dwSampleSize * This->nSamplesPerSec);
+    duration /= This->nAvgBytesPerSec;
 
     return duration;
 }
@@ -71,11 +70,11 @@ static LONGLONG duration_to_bytepos(WAVEParserImpl *This, LONGLONG duration)
 {
     LONGLONG bytepos;
 
-    bytepos = (This->dwSampleSize * This->nSamplesPerSec);
+    bytepos = This->nAvgBytesPerSec;
     bytepos *= duration;
     bytepos /= 10000000;
+    bytepos -= bytepos % This->nBlockAlign;
     bytepos += BYTES_FROM_MEDIATIME(This->StartOfFile);
-    bytepos -= bytepos % This->dwSampleSize;
 
     return MEDIATIME_FROM_BYTES(bytepos);
 }
@@ -207,13 +206,15 @@ static HRESULT WINAPI WAVEParserImpl_seek(IMediaSeeking *iface)
 
     if (newpos > endpos)
     {
-        WARN("Requesting position %x%08x beyond end of stream %x%08x\n", (DWORD)(newpos>>32), (DWORD)newpos, (DWORD)(endpos>>32), (DWORD)endpos);
+        WARN("Requesting position %s beyond end of stream %s\n",
+             wine_dbgstr_longlong(newpos), wine_dbgstr_longlong(endpos));
         return E_INVALIDARG;
     }
 
     if (curpos/1000000 == newpos/1000000)
     {
-        TRACE("Requesting position %x%08x same as current position %x%08x\n", (DWORD)(newpos>>32), (DWORD)newpos, (DWORD)(curpos>>32), (DWORD)curpos);
+        TRACE("Requesting position %s same as current position %s\n",
+              wine_dbgstr_longlong(newpos), wine_dbgstr_longlong(curpos));
         return S_OK;
     }
 
@@ -252,12 +253,11 @@ static HRESULT WAVEParser_InputPin_PreConnect(IPin * iface, IPin * pConnectPin, 
     PIN_INFO piOutput;
     AM_MEDIA_TYPE amt;
     WAVEParserImpl * pWAVEParser = impl_from_IBaseFilter(This->pin.pinInfo.pFilter);
-    LONGLONG length, avail;
 
     piOutput.dir = PINDIR_OUTPUT;
     piOutput.pFilter = &pWAVEParser->Parser.filter.IBaseFilter_iface;
-    lstrcpynW(piOutput.achName, wcsOutputPinName, sizeof(piOutput.achName) / sizeof(piOutput.achName[0]));
-    
+    lstrcpynW(piOutput.achName, wcsOutputPinName, ARRAY_SIZE(piOutput.achName));
+
     hr = IAsyncReader_SyncRead(This->pReader, pos, sizeof(list), (BYTE *)&list);
     pos += sizeof(list);
 
@@ -308,23 +308,18 @@ static HRESULT WAVEParser_InputPin_PreConnect(IPin * iface, IPin * pConnectPin, 
         return E_FAIL;
     }
 
-    if (hr == S_OK)
-    {
-        pWAVEParser->StartOfFile = MEDIATIME_FROM_BYTES(pos + sizeof(RIFFCHUNK));
-        pWAVEParser->EndOfFile = MEDIATIME_FROM_BYTES(pos + chunk.cb + sizeof(RIFFCHUNK));
-    }
-
     if (hr != S_OK)
         return E_FAIL;
+
+    pWAVEParser->StartOfFile = MEDIATIME_FROM_BYTES(pos + sizeof(RIFFCHUNK));
+    pWAVEParser->EndOfFile = MEDIATIME_FROM_BYTES(pos + chunk.cb + sizeof(RIFFCHUNK));
 
     props->cbAlign = ((WAVEFORMATEX*)amt.pbFormat)->nBlockAlign;
     props->cbPrefix = 0;
     props->cbBuffer = 4096;
     props->cBuffers = 3;
-    pWAVEParser->dwSampleSize = ((WAVEFORMATEX*)amt.pbFormat)->nBlockAlign;
-    IAsyncReader_Length(This->pReader, &length, &avail);
-    pWAVEParser->dwLength = length / (ULONGLONG)pWAVEParser->dwSampleSize;
-    pWAVEParser->nSamplesPerSec = ((WAVEFORMATEX*)amt.pbFormat)->nSamplesPerSec;
+    pWAVEParser->nBlockAlign = ((WAVEFORMATEX*)amt.pbFormat)->nBlockAlign;
+    pWAVEParser->nAvgBytesPerSec = ((WAVEFORMATEX*)amt.pbFormat)->nAvgBytesPerSec;
     hr = Parser_AddPin(&(pWAVEParser->Parser), &piOutput, props, &amt);
     CoTaskMemFree(amt.pbFormat);
 
@@ -414,7 +409,7 @@ static const IBaseFilterVtbl WAVEParser_Vtbl =
     Parser_SetSyncSource,
     Parser_GetSyncSource,
     Parser_EnumPins,
-    Parser_FindPin,
+    BaseFilterImpl_FindPin,
     Parser_QueryFilterInfo,
     Parser_JoinFilterGraph,
     Parser_QueryVendorInfo

@@ -237,7 +237,7 @@ __ASM_GLOBAL_FUNC(_chkesp,
                   __ASM_CFI(".cfi_same_value %ebp\n\t")
                   "ret")
 
-void CDECL MSVCRT_chkesp_fail(void)
+void CDECL DECLSPEC_HIDDEN MSVCRT_chkesp_fail(void)
 {
   ERR("Stack pointer incorrect after last function call - Bad prototype/spec entry?\n");
   DebugBreak();
@@ -426,8 +426,10 @@ int CDECL MSVCRT__resetstkoflw(void)
     return VirtualProtect(&stack_addr, 1, PAGE_GUARD|PAGE_READWRITE, &oldprot);
 }
 
+#if _MSVCR_VER>=80 && _MSVCR_VER<=90
+
 /*********************************************************************
- *  _decode_pointer (MSVCR90.@)
+ *  _decode_pointer (MSVCR80.@)
  */
 void * CDECL MSVCRT_decode_pointer(void * ptr)
 {
@@ -435,15 +437,18 @@ void * CDECL MSVCRT_decode_pointer(void * ptr)
 }
 
 /*********************************************************************
- *  _encode_pointer (MSVCR90.@)
+ *  _encode_pointer (MSVCR80.@)
  */
 void * CDECL MSVCRT_encode_pointer(void * ptr)
 {
     return EncodePointer(ptr);
 }
 
+#endif /* _MSVCR_VER>=80 && _MSVCR_VER<=90 */
+
+#if _MSVCR_VER>=80 && _MSVCR_VER<=100
 /*********************************************************************
- *  _encoded_null (MSVCR100.@)
+ *  _encoded_null (MSVCR80.@)
  */
 void * CDECL _encoded_null(void)
 {
@@ -451,18 +456,23 @@ void * CDECL _encoded_null(void)
 
     return EncodePointer(NULL);
 }
+#endif
 
+#if _MSVCR_VER>=70
 /*********************************************************************
- * _CRT_RTC_INIT (MSVCR100.@)
+ * _CRT_RTC_INIT (MSVCR70.@)
  */
 void* CDECL _CRT_RTC_INIT(void *unk1, void *unk2, int unk3, int unk4, int unk5)
 {
     TRACE("%p %p %x %x %x\n", unk1, unk2, unk3, unk4, unk5);
     return NULL;
 }
+#endif
+
+#if _MSVCR_VER>=80
 
 /*********************************************************************
- * _CRT_RTC_INITW (MSVCR100.@)
+ * _CRT_RTC_INITW (MSVCR80.@)
  */
 void* CDECL _CRT_RTC_INITW(void *unk1, void *unk2, int unk3, int unk4, int unk5)
 {
@@ -471,7 +481,7 @@ void* CDECL _CRT_RTC_INITW(void *unk1, void *unk2, int unk3, int unk4, int unk5)
 }
 
 /*********************************************************************
- * _byteswap_ushort (MSVCR100.@)
+ * _byteswap_ushort (MSVCR80.@)
  */
 unsigned short CDECL _byteswap_ushort(unsigned short s)
 {
@@ -479,7 +489,7 @@ unsigned short CDECL _byteswap_ushort(unsigned short s)
 }
 
 /*********************************************************************
- * _byteswap_ulong (MSVCR100.@)
+ * _byteswap_ulong (MSVCR80.@)
  */
 ULONG CDECL MSVCRT__byteswap_ulong(ULONG l)
 {
@@ -487,13 +497,17 @@ ULONG CDECL MSVCRT__byteswap_ulong(ULONG l)
 }
 
 /*********************************************************************
- * _byteswap_uint64 (MSVCR100.@)
+ * _byteswap_uint64 (MSVCR80.@)
  */
 unsigned __int64 CDECL _byteswap_uint64(unsigned __int64 i)
 {
     return (i<<56) + ((i&0xFF00)<<40) + ((i&0xFF0000)<<24) + ((i&0xFF000000)<<8) +
         ((i>>8)&0xFF000000) + ((i>>24)&0xFF0000) + ((i>>40)&0xFF00) + (i>>56);
 }
+
+#endif /* _MSVCR_VER>=80 */
+
+#if _MSVCR_VER>=110
 
 /*********************************************************************
  *  __crtGetShowWindowMode (MSVCR110.@)
@@ -517,6 +531,9 @@ BOOL CDECL MSVCR110__crtInitializeCriticalSectionEx(
     return InitializeCriticalSectionEx(cs, spin_count, flags);
 }
 
+#endif /* _MSVCR_VER>=110 */
+
+#if _MSVCR_VER>=120
 /*********************************************************************
  * _vacopy (MSVCR120.@)
  */
@@ -524,7 +541,9 @@ void CDECL MSVCR120__vacopy(__ms_va_list *dest, __ms_va_list src)
 {
     __ms_va_copy(*dest, src);
 }
+#endif
 
+#if _MSVCR_VER>=80
 /*********************************************************************
  * _crt_debugger_hook (MSVCR80.@)
  */
@@ -532,7 +551,9 @@ void CDECL MSVCRT__crt_debugger_hook(int reserved)
 {
     WARN("(%x)\n", reserved);
 }
+#endif
 
+#if _MSVCR_VER>=110
 /*********************************************************************
  *  __crtUnhandledException (MSVCR110.@)
  */
@@ -543,6 +564,14 @@ LONG CDECL MSVCRT__crtUnhandledException(EXCEPTION_POINTERS *ep)
     return UnhandledExceptionFilter(ep);
 }
 
+/* ?_Trace_agents@Concurrency@@YAXW4Agents_EventType@1@_JZZ */
+void WINAPIV _Trace_agents(/*enum Concurrency::Agents_EventType*/int type, __int64 id, ...)
+{
+    FIXME("(%d %s)\n", type, wine_dbgstr_longlong(id));
+}
+#endif
+
+#if _MSVCR_VER>=120
 /*********************************************************************
  *		__crtSleep (MSVCR120.@)
  */
@@ -551,3 +580,12 @@ void CDECL MSVCRT__crtSleep(DWORD timeout)
   TRACE("(%u)\n", timeout);
   Sleep(timeout);
 }
+
+/*********************************************************************
+ * _SetWinRTOutOfMemoryExceptionCallback (MSVCR120.@)
+ */
+void CDECL MSVCR120__SetWinRTOutOfMemoryExceptionCallback(void *callback)
+{
+    FIXME("(%p): stub\n", callback);
+}
+#endif

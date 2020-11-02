@@ -53,11 +53,10 @@ extern void wait_suspend( CONTEXT *context ) DECLSPEC_HIDDEN;
 extern NTSTATUS send_debug_event( EXCEPTION_RECORD *rec, int first_chance, CONTEXT *context ) DECLSPEC_HIDDEN;
 extern LONG call_vectored_handlers( EXCEPTION_RECORD *rec, CONTEXT *context ) DECLSPEC_HIDDEN;
 extern void raise_status( NTSTATUS status, EXCEPTION_RECORD *rec ) DECLSPEC_NORETURN DECLSPEC_HIDDEN;
-extern void set_cpu_context( const CONTEXT *context ) DECLSPEC_HIDDEN;
-extern void copy_context( CONTEXT *to, const CONTEXT *from, DWORD flags ) DECLSPEC_HIDDEN;
 extern NTSTATUS context_to_server( context_t *to, const CONTEXT *from ) DECLSPEC_HIDDEN;
 extern NTSTATUS context_from_server( CONTEXT *to, const context_t *from ) DECLSPEC_HIDDEN;
-extern void call_thread_entry_point( LPTHREAD_START_ROUTINE entry, void *arg ) DECLSPEC_NORETURN DECLSPEC_HIDDEN;
+extern NTSTATUS set_thread_context( HANDLE handle, const context_t *context, BOOL *self ) DECLSPEC_HIDDEN;
+extern NTSTATUS get_thread_context( HANDLE handle, context_t *context, unsigned int flags, BOOL *self ) DECLSPEC_HIDDEN;
 
 /* debug helpers */
 extern LPCSTR debugstr_us( const UNICODE_STRING *str ) DECLSPEC_HIDDEN;
@@ -68,6 +67,10 @@ extern NTSTATUS signal_alloc_thread( TEB **teb ) DECLSPEC_HIDDEN;
 extern void signal_free_thread( TEB *teb ) DECLSPEC_HIDDEN;
 extern void signal_init_thread( TEB *teb ) DECLSPEC_HIDDEN;
 extern void signal_init_process(void) DECLSPEC_HIDDEN;
+extern void signal_start_thread( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend ) DECLSPEC_HIDDEN;
+extern void signal_start_process( LPTHREAD_START_ROUTINE entry, BOOL suspend ) DECLSPEC_HIDDEN;
+extern void DECLSPEC_NORETURN signal_exit_thread( int status ) DECLSPEC_HIDDEN;
+extern void DECLSPEC_NORETURN signal_exit_process( int status ) DECLSPEC_HIDDEN;
 extern void version_init( const WCHAR *appname ) DECLSPEC_HIDDEN;
 extern void debug_init(void) DECLSPEC_HIDDEN;
 extern HANDLE thread_init(void) DECLSPEC_HIDDEN;
@@ -82,12 +85,12 @@ extern timeout_t server_start_time DECLSPEC_HIDDEN;
 extern unsigned int server_cpus DECLSPEC_HIDDEN;
 extern BOOL is_wow64 DECLSPEC_HIDDEN;
 extern void server_init_process(void) DECLSPEC_HIDDEN;
-extern NTSTATUS server_init_process_done(void) DECLSPEC_HIDDEN;
-extern size_t server_init_thread( void *entry_point ) DECLSPEC_HIDDEN;
+extern void server_init_process_done(void) DECLSPEC_HIDDEN;
+extern size_t server_init_thread( void *entry_point, BOOL *suspend ) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN abort_thread( int status ) DECLSPEC_HIDDEN;
-extern void DECLSPEC_NORETURN terminate_thread( int status ) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN exit_thread( int status ) DECLSPEC_HIDDEN;
 extern sigset_t server_block_set DECLSPEC_HIDDEN;
+extern unsigned int server_call_unlocked( void *req_ptr ) DECLSPEC_HIDDEN;
 extern void server_enter_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset ) DECLSPEC_HIDDEN;
 extern void server_leave_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset ) DECLSPEC_HIDDEN;
 extern unsigned int server_select( const select_op_t *select_op, data_size_t size,
@@ -103,17 +106,17 @@ extern NTSTATUS validate_open_object_attributes( const OBJECT_ATTRIBUTES *attr )
 
 /* module handling */
 extern LIST_ENTRY tls_links DECLSPEC_HIDDEN;
-extern NTSTATUS MODULE_DllThreadAttach( LPVOID lpReserved ) DECLSPEC_HIDDEN;
 extern FARPROC RELAY_GetProcAddress( HMODULE module, const IMAGE_EXPORT_DIRECTORY *exports,
                                      DWORD exp_size, FARPROC proc, DWORD ordinal, const WCHAR *user ) DECLSPEC_HIDDEN;
 extern FARPROC SNOOP_GetProcAddress( HMODULE hmod, const IMAGE_EXPORT_DIRECTORY *exports, DWORD exp_size,
                                      FARPROC origfun, DWORD ordinal, const WCHAR *user ) DECLSPEC_HIDDEN;
 extern void RELAY_SetupDLL( HMODULE hmod ) DECLSPEC_HIDDEN;
 extern void SNOOP_SetupDLL( HMODULE hmod ) DECLSPEC_HIDDEN;
-extern UNICODE_STRING system_dir DECLSPEC_HIDDEN;
+extern const WCHAR system_dir[] DECLSPEC_HIDDEN;
 
 typedef LONG (WINAPI *PUNHANDLED_EXCEPTION_FILTER)(PEXCEPTION_POINTERS);
 extern PUNHANDLED_EXCEPTION_FILTER unhandled_exception_filter DECLSPEC_HIDDEN;
+extern void (WINAPI *kernel32_start_process)(LPTHREAD_START_ROUTINE,void*) DECLSPEC_HIDDEN;
 
 /* redefine these to make sure we don't reference kernel symbols */
 #define GetProcessHeap()       (NtCurrentTeb()->Peb->ProcessHeap)
@@ -151,7 +154,7 @@ extern int get_file_info( const char *path, struct stat *st, ULONG *attr ) DECLS
 extern NTSTATUS fill_file_info( const struct stat *st, ULONG attr, void *ptr,
                                 FILE_INFORMATION_CLASS class ) DECLSPEC_HIDDEN;
 extern NTSTATUS server_get_unix_name( HANDLE handle, ANSI_STRING *unix_name ) DECLSPEC_HIDDEN;
-extern void DIR_init_windows_dir( const WCHAR *windir, const WCHAR *sysdir ) DECLSPEC_HIDDEN;
+extern void init_directories(void) DECLSPEC_HIDDEN;
 extern BOOL DIR_is_hidden_file( const UNICODE_STRING *name ) DECLSPEC_HIDDEN;
 extern NTSTATUS DIR_unmount_device( HANDLE handle ) DECLSPEC_HIDDEN;
 extern NTSTATUS DIR_get_unix_cwd( char **cwd ) DECLSPEC_HIDDEN;
@@ -161,21 +164,31 @@ extern NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, ANSI_S
                                            UINT disposition ) DECLSPEC_HIDDEN;
 
 /* virtual memory */
+extern NTSTATUS virtual_map_section( HANDLE handle, PVOID *addr_ptr, ULONG zero_bits, SIZE_T commit_size,
+                                     const LARGE_INTEGER *offset_ptr, SIZE_T *size_ptr, ULONG protect,
+                                     pe_image_info_t *image_info ) DECLSPEC_HIDDEN;
 extern void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info ) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_create_builtin_view( void *base ) DECLSPEC_HIDDEN;
-extern NTSTATUS virtual_alloc_thread_stack( TEB *teb, SIZE_T reserve_size, SIZE_T commit_size ) DECLSPEC_HIDDEN;
-extern void virtual_clear_thread_stack(void) DECLSPEC_HIDDEN;
+extern NTSTATUS virtual_alloc_thread_stack( TEB *teb, SIZE_T reserve_size,
+                                            SIZE_T commit_size, SIZE_T *pthread_size ) DECLSPEC_HIDDEN;
+extern void virtual_clear_thread_stack( void *stack_end ) DECLSPEC_HIDDEN;
 extern BOOL virtual_handle_stack_fault( void *addr ) DECLSPEC_HIDDEN;
 extern BOOL virtual_is_valid_code_address( const void *addr, SIZE_T size ) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_handle_fault( LPCVOID addr, DWORD err, BOOL on_signal_stack ) DECLSPEC_HIDDEN;
+extern unsigned int virtual_locked_server_call( void *req_ptr ) DECLSPEC_HIDDEN;
+extern ssize_t virtual_locked_read( int fd, void *addr, size_t size ) DECLSPEC_HIDDEN;
+extern ssize_t virtual_locked_pread( int fd, void *addr, size_t size, off_t offset ) DECLSPEC_HIDDEN;
 extern BOOL virtual_check_buffer_for_read( const void *ptr, SIZE_T size ) DECLSPEC_HIDDEN;
 extern BOOL virtual_check_buffer_for_write( void *ptr, SIZE_T size ) DECLSPEC_HIDDEN;
 extern SIZE_T virtual_uninterrupted_read_memory( const void *addr, void *buffer, SIZE_T size ) DECLSPEC_HIDDEN;
-extern SIZE_T virtual_uninterrupted_write_memory( void *addr, const void *buffer, SIZE_T size ) DECLSPEC_HIDDEN;
+extern NTSTATUS virtual_uninterrupted_write_memory( void *addr, const void *buffer, SIZE_T size ) DECLSPEC_HIDDEN;
 extern void VIRTUAL_SetForceExec( BOOL enable ) DECLSPEC_HIDDEN;
 extern void virtual_release_address_space(void) DECLSPEC_HIDDEN;
 extern void virtual_set_large_address_space(void) DECLSPEC_HIDDEN;
 extern struct _KUSER_SHARED_DATA *user_shared_data DECLSPEC_HIDDEN;
+extern struct _KUSER_SHARED_DATA *user_shared_data_external DECLSPEC_HIDDEN;
+extern void create_user_shared_data_thread(void) DECLSPEC_HIDDEN;
+extern BYTE* CDECL __wine_user_shared_data(void);
 
 /* completion */
 extern NTSTATUS NTDLL_AddCompletion( HANDLE hFile, ULONG_PTR CompletionValue,
@@ -212,53 +225,27 @@ struct debug_info
     char  output[1024];  /* current output line */
 };
 
-/* thread private data, stored in NtCurrentTeb()->SpareBytes1 */
+/* thread private data, stored in NtCurrentTeb()->GdiTebBatch */
 struct ntdll_thread_data
 {
-#ifdef __i386__
-    DWORD              dr0;           /* 1bc Debug registers */
-    DWORD              dr1;           /* 1c0 */
-    DWORD              dr2;           /* 1c4 */
-    DWORD              dr3;           /* 1c8 */
-    DWORD              dr6;           /* 1cc */
-    DWORD              dr7;           /* 1d0 */
-    DWORD              fs;            /* 1d4 TEB selector */
-    DWORD              gs;            /* 1d8 libc selector; update winebuild if you move this! */
-    void              *vm86_ptr;      /* 1dc data for vm86 mode */
-#else
-    void              *exit_frame;    /*    /2e8 exit frame pointer */
-#endif
-    struct debug_info *debug_info;    /* 1e0/2f0 info for debugstr functions */
-    int                request_fd;    /* 1e4/2f8 fd for sending server requests */
-    int                reply_fd;      /* 1e8/2fc fd for receiving server replies */
-    int                wait_fd[2];    /* 1ec/300 fd for sleeping server requests */
-    BOOL               wow64_redir;   /* 1f4/308 Wow64 filesystem redirection flag */
-    pthread_t          pthread_id;    /* 1f8/310 pthread thread id */
-#ifdef __i386__
-    WINE_VM86_TEB_INFO vm86;          /* 1fc vm86 private data */
-    void              *exit_frame;    /* 204 exit frame pointer */
-#endif
+    struct debug_info *debug_info;    /* info for debugstr functions */
+    void              *start_stack;   /* stack for thread startup */
+    int                request_fd;    /* fd for sending server requests */
+    int                reply_fd;      /* fd for receiving server replies */
+    int                wait_fd[2];    /* fd for sleeping server requests */
+    BOOL               wow64_redir;   /* Wow64 filesystem redirection flag */
+    pthread_t          pthread_id;    /* pthread thread id */
 };
+
+C_ASSERT( sizeof(struct ntdll_thread_data) <= sizeof(((TEB *)0)->GdiTebBatch) );
 
 static inline struct ntdll_thread_data *ntdll_get_thread_data(void)
 {
-    return (struct ntdll_thread_data *)NtCurrentTeb()->SpareBytes1;
+    return (struct ntdll_thread_data *)&NtCurrentTeb()->GdiTebBatch;
 }
 
 extern mode_t FILE_umask DECLSPEC_HIDDEN;
 extern HANDLE keyed_event DECLSPEC_HIDDEN;
-
-/* Register functions */
-
-#ifdef __i386__
-#define DEFINE_REGS_ENTRYPOINT( name, args ) \
-    __ASM_GLOBAL_FUNC( name, \
-                       ".byte 0x68\n\t"  /* pushl $__regs_func */       \
-                       ".long " __ASM_NAME("__regs_") #name "-.-11\n\t" \
-                       ".byte 0x6a," #args "\n\t" /* pushl $args */     \
-                       "call " __ASM_NAME("__wine_call_from_regs") "\n\t" \
-                       "ret $(4*" #args ")" ) /* fake ret to make copy protections happy */
-#endif
 
 #define HASH_STRING_ALGORITHM_DEFAULT  0
 #define HASH_STRING_ALGORITHM_X65599   1

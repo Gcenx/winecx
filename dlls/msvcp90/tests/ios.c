@@ -186,6 +186,13 @@ typedef struct {
     locale *loc;
 } basic_streambuf_char;
 
+/* class istreambuf_iterator<char> */
+typedef struct {
+    basic_streambuf_char *strbuf;
+    MSVCP_bool      got;
+    char            val;
+} istreambuf_iterator_char;
+
 /* class basic_streambuf<wchar> */
 typedef struct {
     const vtable_ptr *vtable;
@@ -435,6 +442,23 @@ typedef struct {
     double imag;
 } complex_double;
 
+typedef enum {
+    DATEORDER_no_order,
+    DATEORDER_dmy,
+    DATEORDER_mdy,
+    DATEORDER_ymd,
+    DATEORDER_ydm
+} dateorder;
+
+/* class time_get<char> */
+typedef struct {
+    locale_facet facet;
+    const char *days;
+    const char *months;
+    dateorder dateorder;
+    _Cvtvec cvt;
+} time_get_char;
+
 /* stringstream */
 static basic_stringstream_char* (*__thiscall p_basic_stringstream_char_ctor)(basic_stringstream_char*);
 static basic_stringstream_char* (*__thiscall p_basic_stringstream_char_ctor_str)(basic_stringstream_char*, const basic_string_char*, int, MSVCP_bool);
@@ -496,10 +520,14 @@ static basic_ostream_wchar* (*__thiscall p_basic_ostream_short_print_ushort)(bas
 
 /* basic_ios */
 static locale*  (*__thiscall p_basic_ios_char_imbue)(basic_ios_char*, locale*, const locale*);
+static basic_ios_char* (*__thiscall p_basic_ios_char_ctor)(basic_ios_char*);
+static char (*__thiscall p_basic_ios_char_widen)(basic_ios_char*, char);
+static void (*__thiscall p_basic_ios_char_dtor)(basic_ios_char*);
 
 static locale*  (*__thiscall p_basic_ios_wchar_imbue)(basic_ios_wchar*, locale*, const locale*);
 
 /* ios_base */
+static void          (*__thiscall p_ios_base__Init)(ios_base*);
 static IOSB_iostate  (*__thiscall p_ios_base_rdstate)(const ios_base*);
 static IOSB_fmtflags (*__thiscall p_ios_base_setf_mask)(ios_base*, IOSB_fmtflags, IOSB_fmtflags);
 static void          (*__thiscall p_ios_base_unsetf)(ios_base*, IOSB_fmtflags);
@@ -518,6 +546,17 @@ static basic_string_wchar* (__thiscall *p_basic_string_wchar_ctor_cstr)(basic_st
 static const wchar_t* (__thiscall *p_basic_string_wchar_cstr)(basic_string_wchar*);
 static void (__thiscall *p_basic_string_wchar_dtor)(basic_string_wchar*);
 
+/* basic_istringstream */
+static basic_istringstream_char* (__thiscall *p_basic_istringstream_char_ctor_str)(
+        basic_istringstream_char*, const basic_string_char*, int, MSVCP_bool);
+static void (__thiscall *p_basic_istringstream_char_dtor)(basic_ios_char*);
+
+/* time_get */
+static time_get_char* (__thiscall *p_time_get_char_ctor)(time_get_char*);
+static void (__thiscall *p_time_get_char_dtor)(time_get_char*);
+static int (__cdecl *p_time_get_char__Getint)(const time_get_char*,
+        istreambuf_iterator_char*, istreambuf_iterator_char*, int, int, int*);
+
 static int invalid_parameter = 0;
 static void __cdecl test_invalid_parameter_handler(const wchar_t *expression,
         const wchar_t *function, const wchar_t *file,
@@ -529,19 +568,6 @@ static void __cdecl test_invalid_parameter_handler(const wchar_t *expression,
     ok(line == 0, "line = %u\n", line);
     ok(arg == 0, "arg = %lx\n", (UINT_PTR)arg);
     invalid_parameter++;
-}
-
-static inline const char* debugstr_longlong(ULONGLONG ll)
-{
-    /* return a different string if called up to 4 times in the same ok() */
-    static char string[4][17];
-    static int which;
-
-    if (sizeof(ll) > sizeof(unsigned long) && ll >> 32)
-        sprintf(string[which & 3], "%lx%08lx", (unsigned long)(ll >> 32), (unsigned long)ll);
-    else
-        sprintf(string[which & 3], "%lx", (unsigned long)ll);
-    return string[which++ & 3];
 }
 
 /* Emulate a __thiscall */
@@ -737,6 +763,8 @@ static BOOL init(void)
         SET(p_basic_ostream_char_print_complex_ldouble,
             "??$?6ODU?$char_traits@D@std@@@std@@YAAEAV?$basic_ostream@DU?$char_traits@D@std@@@0@AEAV10@AEBV?$complex@O@0@@Z");
 
+        SET(p_ios_base__Init,
+            "?_Init@ios_base@std@@IEAAXXZ");
         SET(p_ios_base_rdstate,
             "?rdstate@ios_base@std@@QEBAHXZ");
         SET(p_ios_base_setf_mask,
@@ -748,6 +776,12 @@ static BOOL init(void)
 
         SET(p_basic_ios_char_imbue,
             "?imbue@?$basic_ios@DU?$char_traits@D@std@@@std@@QEAA?AVlocale@2@AEBV32@@Z");
+        SET(p_basic_ios_char_ctor,
+            "??0?$basic_ios@DU?$char_traits@D@std@@@std@@IEAA@XZ");
+        SET(p_basic_ios_char_widen,
+            "?widen@?$basic_ios@DU?$char_traits@D@std@@@std@@QEBADD@Z");
+        SET(p_basic_ios_char_dtor,
+            "??1?$basic_ios@DU?$char_traits@D@std@@@std@@UEAA@XZ");
 
         SET(p_basic_ios_wchar_imbue,
             "?imbue@?$basic_ios@_WU?$char_traits@_W@std@@@std@@QEAA?AVlocale@2@AEBV32@@Z");
@@ -770,6 +804,19 @@ static BOOL init(void)
                 "?c_str@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEBAPEB_WXZ");
         SET(p_basic_string_wchar_dtor,
                 "??1?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAA@XZ");
+
+        SET(p_basic_istringstream_char_ctor_str,
+                "??0?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@AEBV?"
+                "$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z");
+        SET(p_basic_istringstream_char_dtor,
+                "??1?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@UEAA@XZ");
+        SET(p_time_get_char_ctor,
+                "??_F?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEAAXXZ");
+        SET(p_time_get_char_dtor,
+                "??1?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MEAA@XZ");
+        SET(p_time_get_char__Getint,
+                "?_Getint@?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std"
+                "@@AEBAHAEAV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@0HHAEAH@Z");
     } else {
 #ifdef __arm__
         SET(p_basic_stringstream_char_ctor,
@@ -869,6 +916,8 @@ static BOOL init(void)
         SET(p_basic_ostream_char_print_complex_ldouble,
             "??$?6ODU?$char_traits@D@std@@@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@0@AAV10@ABV?$complex@O@0@@Z");
 
+        SET(p_ios_base__Init,
+            "?_Init@ios_base@std@@IAAXXZ");
         SET(p_ios_base_rdstate,
             "?rdstate@ios_base@std@@QBAHXZ");
         SET(p_ios_base_setf_mask,
@@ -880,6 +929,12 @@ static BOOL init(void)
 
         SET(p_basic_ios_char_imbue,
             "?imbue@?$basic_ios@DU?$char_traits@D@std@@@std@@QAA?AVlocale@2@ABV32@@Z");
+        SET(p_basic_ios_char_ctor,
+            "??0?$basic_ios@DU?$char_traits@D@std@@@std@@IAA@XZ");
+        SET(p_basic_ios_char_widen,
+            "?widen@?$basic_ios@DU?$char_traits@D@std@@@std@@QBADD@Z");
+        SET(p_basic_ios_char_dtor,
+            "??1?$basic_ios@DU?$char_traits@D@std@@@std@@UAA@XZ");
 
         SET(p_basic_ios_wchar_imbue,
             "?imbue@?$basic_ios@_WU?$char_traits@_W@std@@@std@@QAA?AVlocale@2@ABV32@@Z");
@@ -902,6 +957,16 @@ static BOOL init(void)
                 "?c_str@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QBEPB_WXZ");
         SET(p_basic_string_wchar_dtor,
                 "??1?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAE@XZ");
+
+        SET(p_basic_istringstream_char_ctor_str,
+                "??0?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@"
+                "QAA@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z");
+        SET(p_basic_istringstream_char_dtor,
+                "??1?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@UAA@XZ");
+        SET(p_time_get_char_ctor,
+                "??_F?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QAAXXZ");
+        SET(p_time_get_char_dtor,
+                "??1?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MAA@XZ");
 #else
         SET(p_basic_stringstream_char_ctor,
             "??_F?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXXZ");
@@ -1000,6 +1065,8 @@ static BOOL init(void)
         SET(p_basic_ostream_char_print_complex_ldouble,
             "??$?6ODU?$char_traits@D@std@@@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@0@AAV10@ABV?$complex@O@0@@Z");
 
+        SET(p_ios_base__Init,
+            "?_Init@ios_base@std@@IAEXXZ");
         SET(p_ios_base_rdstate,
             "?rdstate@ios_base@std@@QBEHXZ");
         SET(p_ios_base_setf_mask,
@@ -1011,6 +1078,12 @@ static BOOL init(void)
 
         SET(p_basic_ios_char_imbue,
             "?imbue@?$basic_ios@DU?$char_traits@D@std@@@std@@QAE?AVlocale@2@ABV32@@Z");
+        SET(p_basic_ios_char_ctor,
+            "??0?$basic_ios@DU?$char_traits@D@std@@@std@@IAE@XZ");
+        SET(p_basic_ios_char_widen,
+            "?widen@?$basic_ios@DU?$char_traits@D@std@@@std@@QBEDD@Z");
+        SET(p_basic_ios_char_dtor,
+            "??1?$basic_ios@DU?$char_traits@D@std@@@std@@UAE@XZ");
 
         SET(p_basic_ios_wchar_imbue,
             "?imbue@?$basic_ios@_WU?$char_traits@_W@std@@@std@@QAE?AVlocale@2@ABV32@@Z");
@@ -1033,7 +1106,20 @@ static BOOL init(void)
                 "?c_str@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QBEPB_WXZ");
         SET(p_basic_string_wchar_dtor,
                 "??1?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAE@XZ");
+
+        SET(p_basic_istringstream_char_ctor_str,
+                "??0?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@"
+                "QAE@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z");
+        SET(p_basic_istringstream_char_dtor,
+                "??1?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@UAE@XZ");
+        SET(p_time_get_char_ctor,
+                "??_F?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QAEXXZ");
+        SET(p_time_get_char_dtor,
+                "??1?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MAE@XZ");
 #endif
+        SET(p_time_get_char__Getint,
+                "?_Getint@?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std"
+                "@@ABAHAAV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@0HHAAH@Z");
     }
 
     init_thiscall_thunk();
@@ -1122,7 +1208,7 @@ static void test_num_get_get_uint64(void)
         { "0xx10",   NULL, FMTFLAG_hex, IOSTATE_failbit, 42, EOF },
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func2(p_basic_string_char_ctor_cstr, &str, tests[i].str);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
@@ -1145,8 +1231,8 @@ static void test_num_get_get_uint64(void)
         }
 
         ok(tests[i].state == state, "wrong state, expected = %x found = %x\n", tests[i].state, state);
-        ok(tests[i].val   == val,   "wrong val, expected = %lx%08lx found %lx%08lx\n", (unsigned long)(tests[i].val >> 32),
-                (unsigned long)tests[i].val, (unsigned long)(val >> 32), (unsigned long)val);
+        ok(tests[i].val   == val,   "wrong val, expected = %s found %s\n", wine_dbgstr_longlong(tests[i].val),
+                wine_dbgstr_longlong(val));
         ok(tests[i].next  == next,  "wrong next, expected = %c (%i) found = %c (%i)\n", tests[i].next, tests[i].next, next, next);
 
         if(tests[i].lcl)
@@ -1172,8 +1258,8 @@ static void test_num_get_get_uint64(void)
         nextus = (unsigned short)(int)call_func1(p_basic_istream_wchar_get, &wss.base.base1);
 
         ok(tests[i].state == state, "wrong state, expected = %x found = %x\n", tests[i].state, state);
-        ok(tests[i].val == val, "wrong val, expected = %lx%08lx found %lx%08lx\n", (unsigned long)(tests[i].val >> 32),
-                (unsigned long)tests[i].val, (unsigned long)(val >> 32), (unsigned long)val);
+        ok(tests[i].val == val, "wrong val, expected = %s found %s\n", wine_dbgstr_longlong(tests[i].val),
+                wine_dbgstr_longlong(val));
         testus = tests[i].next == EOF ? WEOF : (unsigned short)tests[i].next;
         ok(testus == nextus, "wrong next, expected = %c (%i) found = %c (%i)\n", testus, testus, nextus, nextus);
 
@@ -1272,7 +1358,7 @@ static void test_num_get_get_double(void)
         { "1.0e1,0", NULL,      IOSTATE_goodbit, 10.0,  ',' }, /* group in exponent */
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func2(p_basic_string_char_ctor_cstr, &str, tests[i].str);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
@@ -1391,7 +1477,7 @@ static void test_num_put_put_double(void)
         { -1.23456789e-9, NULL, 9, FMTFLAG_fixed, "-0.000000001"       }
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func1(p_basic_stringstream_char_ctor, &ss);
 
@@ -1457,7 +1543,8 @@ static void test_istream_ipfx(void)
     basic_string_char str;
     IOSB_iostate state;
     wchar_t wide[64];
-    int i, ret, next;
+    int i, next;
+    MSVCP_bool ret;
 
     /* makes tables narrower */
     const IOSB_iostate IOSTATE_faileof = IOSTATE_failbit|IOSTATE_eofbit;
@@ -1466,7 +1553,7 @@ static void test_istream_ipfx(void)
         const char  *str;
         int          unset_skipws;
         int          noskip;
-        int          ret;
+        MSVCP_bool   ret;
         IOSB_iostate state;
         int          next;
     } tests[] = {
@@ -1483,7 +1570,7 @@ static void test_istream_ipfx(void)
         { "\n\t ws",    TRUE,  FALSE, TRUE,  IOSTATE_goodbit, '\n' },
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func2(p_basic_string_char_ctor_cstr, &str, tests[i].str);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
@@ -1492,7 +1579,7 @@ static void test_istream_ipfx(void)
         if(tests[i].unset_skipws)
             call_func2(p_ios_base_unsetf, &ss.basic_ios.base, TRUE);
 
-        ret   = (int)call_func2(p_basic_istream_char_ipfx, &ss.base.base1, tests[i].noskip);
+        ret   = (MSVCP_bool)(INT_PTR)call_func2(p_basic_istream_char_ipfx, &ss.base.base1, tests[i].noskip);
         state = (IOSB_iostate)call_func1(p_ios_base_rdstate, &ss.basic_ios.base);
         next  = (int)call_func1(p_basic_istream_char_get, &ss.base.base1);
 
@@ -1512,7 +1599,7 @@ static void test_istream_ipfx(void)
         if(tests[i].unset_skipws)
             call_func2(p_ios_base_unsetf, &wss.basic_ios.base, TRUE);
 
-        ret    = (int)call_func2(p_basic_istream_wchar_ipfx, &wss.base.base1, tests[i].noskip);
+        ret    = (MSVCP_bool)(INT_PTR)call_func2(p_basic_istream_wchar_ipfx, &wss.base.base1, tests[i].noskip);
         state  = (IOSB_iostate)call_func1(p_ios_base_rdstate, &wss.basic_ios.base);
         nextus = (unsigned short)(int)call_func1(p_basic_istream_wchar_get, &wss.base.base1);
 
@@ -1563,7 +1650,7 @@ static void test_istream_ignore(void)
         { "ABC ",         42, ' ',  IOSTATE_goodbit, EOF }, /* delim at end */
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func2(p_basic_string_char_ctor_cstr, &str, tests[i].str);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
@@ -1627,7 +1714,7 @@ static void test_istream_seekg(void)
         { "",            0, SEEKDIR_beg, IOSTATE_failbit, EOF },
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func2(p_basic_string_char_ctor_cstr, &str, tests[i].str);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
@@ -1686,7 +1773,7 @@ static void test_istream_seekg_fpos(void)
         { "",           0,  IOSTATE_failbit, EOF },
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func2(p_basic_string_char_ctor_cstr, &str, tests[i].str);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
@@ -1747,7 +1834,7 @@ static void test_istream_peek(void)
         { "ABCDEF", 'A', 'A', IOSTATE_goodbit },
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func2(p_basic_string_char_ctor_cstr, &str, tests[i].str);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
@@ -1818,7 +1905,7 @@ static void test_istream_tellg(void)
         { "ABCDEFGHIJ", -6, -1, -1,  0 }
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* stringstream<char> version */
         call_func2(p_basic_string_char_ctor_cstr, &str, tests[i].str);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
@@ -1839,8 +1926,12 @@ static void test_istream_tellg(void)
         if (tests[i].telloff_ss != -1 && spos.off != -1) /* check if tell == seek but only if not hit EOF */
             ok(spos.off == tpos.off, "tell doesn't match seek, seek = %ld tell = %ld\n", spos.off, tpos.off);
         ok(rpos == &tpos, "wrong return fpos, expected = %p found = %p\n", rpos, &tpos);
-        ok(tpos.pos == 0, "wrong position, expected = 0 found = %s\n", debugstr_longlong(tpos.pos));
+        ok(tpos.pos == 0, "wrong position, expected = 0 found = %s\n", wine_dbgstr_longlong(tpos.pos));
         ok(tpos.state == 0, "wrong state, expected = 0 found = %d\n", tpos.state);
+        if(tests[i].seekoff == -1) {
+            ok(ss.basic_ios.base.state == IOSTATE_goodbit,
+                    "ss.basic_ios.base.state = %x\n", ss.basic_ios.base.state);
+        }
 
         call_func1(p_basic_stringstream_char_vbase_dtor, &ss);
         call_func1(p_basic_string_char_dtor, &str);
@@ -1866,8 +1957,12 @@ static void test_istream_tellg(void)
         if (tests[i].telloff_ss != -1 && spos.off != -1) /* check if tell == seek but only if not hit EOF */
             ok(spos.off == tpos.off, "tell doesn't match seek, seek = %ld tell = %ld\n", spos.off, tpos.off);
         ok(rpos == &tpos, "wrong return fpos, expected = %p found = %p\n", rpos, &tpos);
-        ok(tpos.pos == 0, "wrong position, expected = 0 found = %s\n", debugstr_longlong(tpos.pos));
+        ok(tpos.pos == 0, "wrong position, expected = 0 found = %s\n", wine_dbgstr_longlong(tpos.pos));
         ok(tpos.state == 0, "wrong state, expected = 0 found = %d\n", tpos.state);
+        if(tests[i].seekoff == -1) {
+            ok(ss.basic_ios.base.state == IOSTATE_goodbit,
+                    "ss.basic_ios.base.state = %x\n", ss.basic_ios.base.state);
+        }
 
         call_func1(p_basic_stringstream_wchar_vbase_dtor, &wss);
         call_func1(p_basic_string_wchar_dtor, &wstr);
@@ -1893,7 +1988,7 @@ static void test_istream_tellg(void)
         rpos = call_func2(p_basic_istream_char_tellg, &fs.base.base1, &tpos);
 
         ok(tests[i].tellpos == tpos.pos, "wrong filepos, expected = %s found = %s\n",
-            debugstr_longlong(tests[i].tellpos), debugstr_longlong(tpos.pos));
+            wine_dbgstr_longlong(tests[i].tellpos), wine_dbgstr_longlong(tpos.pos));
         ok(rpos == &tpos, "wrong return fpos, expected = %p found = %p\n", rpos, &tpos);
         ok(tpos.off == tests[i].telloff_fs, "wrong offset, expected %ld found %ld\n", tests[i].telloff_fs, tpos.off);
         ok(tpos.state == 0, "wrong state, expected = 0 found = %d\n", tpos.state);
@@ -1916,7 +2011,7 @@ static void test_istream_tellg(void)
         rpos = call_func2(p_basic_istream_wchar_tellg, &wfs.base.base1, &tpos);
 
         ok(tests[i].tellpos == tpos.pos, "wrong filepos, expected = %s found = %s\n",
-            debugstr_longlong(tests[i].tellpos), debugstr_longlong(tpos.pos));
+            wine_dbgstr_longlong(tests[i].tellpos), wine_dbgstr_longlong(tpos.pos));
         ok(rpos == &tpos, "wrong return fpos, expected = %p found = %p\n", rpos, &tpos);
         ok(tpos.off == tests[i].telloff_fs, "wrong offset, expected %ld found %ld\n", tests[i].telloff_fs, tpos.off);
         ok(tpos.state == 0, "wrong state, expected = 0 found = %d\n", tpos.state);
@@ -1964,7 +2059,7 @@ static void test_istream_getline(void)
         { "this is some text\n", "this is some text\n", '\0', IOSTATE_eofbit,  "this is some text\n", '\n', IOSTATE_faileof },
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func2(p_basic_string_char_ctor_cstr, &str, tests[i].str);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
@@ -2192,7 +2287,7 @@ static void test_ostream_print_complex_float(void)
         { {-1.23456789e-9,2.3456789e9}, NULL, 9, FMTFLAG_fixed, "(-0.000000001,2345678848.000000000)"    }
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         call_func1(p_basic_stringstream_char_ctor, &ss);
 
         if(tests[i].lcl) {
@@ -2315,7 +2410,7 @@ static void test_istream_read_complex_double(void)
         { "(1.0eE10, 3)" , NULL, deadbeef, IOSTATE_failbit, ""},
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         call_func2(p_basic_string_char_ctor_cstr, &str, deadbeef_str);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
         p_basic_istream_char_read_complex_double(&ss.base.base1, &val);
@@ -2344,6 +2439,71 @@ static void test_istream_read_complex_double(void)
     }
 }
 
+static void test_basic_ios(void)
+{
+    basic_ios_char bi;
+    char c;
+
+    call_func1(p_basic_ios_char_ctor, &bi);
+    call_func1(p_ios_base__Init, &bi.base);
+
+    c = (UINT_PTR)call_func2(p_basic_ios_char_widen, &bi, 'a');
+    ok(c == 'a', "basic_ios::widen('a') returned %x\n", c);
+
+    call_func1(p_basic_ios_char_dtor, &bi);
+}
+
+static void test_time_get__Getint(void)
+{
+    const struct {
+        const char *str;
+        int min;
+        int max;
+        int ret;
+        int val;
+    } tests[] = {
+        { "0", 0, 0, IOSTATE_eofbit, 0 },
+        { "0000", 0, 0, IOSTATE_eofbit, 0 },
+        { "1234", 0, 2000, IOSTATE_eofbit, 1234 },
+        { "+016", 0, 20, IOSTATE_eofbit, 16 },
+        { "0x12", 0, 20, IOSTATE_goodbit, 0 },
+        { " 0", 0, 0, IOSTATE_failbit, -1 },
+        { "0 ", 0, 0, IOSTATE_goodbit, 0 },
+        { "-13", -50, -12, IOSTATE_eofbit, -13 }
+    };
+
+    struct {
+        basic_istringstream_char basic_istringstream;
+        basic_ios_char basic_ios;
+    } ss;
+    istreambuf_iterator_char beg, end;
+    basic_string_char str;
+    time_get_char time_get;
+    int i, ret, v;
+
+    call_func1(p_time_get_char_ctor, &time_get);
+    for(i=0; i<ARRAY_SIZE(tests); i++)
+    {
+        memset(&beg, 0, sizeof(beg));
+        memset(&end, 0, sizeof(end));
+        v = -1;
+
+        call_func2(p_basic_string_char_ctor_cstr, &str, tests[i].str);
+        call_func4(p_basic_istringstream_char_ctor_str, &ss.basic_istringstream, &str, 0, TRUE);
+        call_func1(p_basic_string_char_dtor, &str);
+        beg.strbuf = &ss.basic_istringstream.strbuf.base;
+
+        ret = p_time_get_char__Getint(&time_get, &beg, &end,
+                tests[i].min, tests[i].max, &v);
+        ok(ret == tests[i].ret, "%d) ret = %d, expected %d\n", i, ret, tests[i].ret);
+        ok(v == tests[i].val, "%d) v = %d, expected %d\n", i, v, tests[i].val);
+
+        call_func1(p_basic_istringstream_char_dtor, &ss.basic_ios);
+        call_func1(p_basic_ios_char_dtor, &ss.basic_ios);
+    }
+    call_func1(p_time_get_char_dtor, &time_get);
+}
+
 START_TEST(ios)
 {
     if(!init())
@@ -2369,6 +2529,8 @@ START_TEST(ios)
     test_ostream_print_complex_double();
     test_ostream_print_complex_ldouble();
     test_istream_read_complex_double();
+    test_basic_ios();
+    test_time_get__Getint();
 
     ok(!invalid_parameter, "invalid_parameter_handler was invoked too many times\n");
 

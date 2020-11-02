@@ -283,7 +283,7 @@ static void test_PathCreateFromUrl(void)
     ok(len == 0xdeca, "got %x expected 0xdeca\n", len);
 
     /* Test the decoding itself */
-    for(i = 0; i < sizeof(TEST_PATHFROMURL) / sizeof(TEST_PATHFROMURL[0]); i++) {
+    for (i = 0; i < ARRAY_SIZE(TEST_PATHFROMURL); i++) {
         len = INTERNET_MAX_URL_LENGTH;
         ret = pPathCreateFromUrlA(TEST_PATHFROMURL[i].url, ret_path, &len, 0);
         todo_wine_if (TEST_PATHFROMURL[i].todo & 0x1)
@@ -350,7 +350,7 @@ static void test_PathIsUrl(void)
     size_t i;
     BOOL ret;
 
-    for(i = 0; i < sizeof(TEST_PATH_IS_URL)/sizeof(TEST_PATH_IS_URL[0]); i++) {
+    for (i = 0; i < ARRAY_SIZE(TEST_PATH_IS_URL); i++) {
         ret = PathIsURLA(TEST_PATH_IS_URL[i].path);
         ok(ret == TEST_PATH_IS_URL[i].expect,
            "returned %d from path %s, expected %d\n", ret, TEST_PATH_IS_URL[i].path,
@@ -1403,7 +1403,7 @@ static void test_PathCommonPrefixA(void)
 static void test_PathUnquoteSpaces(void)
 {
     int i;
-    for(i = 0; i < sizeof(TEST_PATH_UNQUOTE_SPACES) / sizeof(TEST_PATH_UNQUOTE_SPACES[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(TEST_PATH_UNQUOTE_SPACES); i++)
     {
         char *path = strdupA(TEST_PATH_UNQUOTE_SPACES[i].path);
         WCHAR *pathW = GetWideString(TEST_PATH_UNQUOTE_SPACES[i].path);
@@ -1429,6 +1429,11 @@ static void test_PathGetDriveNumber(void)
     static const CHAR test2A[] = "file:////b:\\test.file";
     static const CHAR test3A[] = "file:///c:\\test.file";
     static const CHAR test4A[] = "file:\\\\c:\\test.file";
+    static const CHAR test5A[] = "\\\\?\\C:\\dir\\file.txt";
+    static const WCHAR test1W[] =
+        {'a',':','\\',0};
+    static const WCHAR test5W[] =
+        {'\\','\\','?','\\','C',':','\\','d','i','r','\\','f','i','l','e',0};
     int ret;
 
     SetLastError(0xdeadbeef);
@@ -1438,12 +1443,19 @@ static void test_PathGetDriveNumber(void)
 
     ret = PathGetDriveNumberA(test1A);
     ok(ret == 0, "got %d\n", ret);
+    ret = PathGetDriveNumberW(test1W);
+    ok(ret == 0, "got %d\n", ret);
     ret = PathGetDriveNumberA(test2A);
     ok(ret == -1, "got %d\n", ret);
     ret = PathGetDriveNumberA(test3A);
     ok(ret == -1, "got %d\n", ret);
     ret = PathGetDriveNumberA(test4A);
     ok(ret == -1, "got %d\n", ret);
+
+    ret = PathGetDriveNumberA(test5A);
+    ok(ret == -1, "got %d\n", ret);
+    ret = PathGetDriveNumberW(test5W);
+    ok(ret == 2 || broken(ret == -1) /* winxp */, "got = %d\n", ret);
 }
 
 static void test_PathUnExpandEnvStrings(void)
@@ -1451,10 +1463,11 @@ static void test_PathUnExpandEnvStrings(void)
     static const WCHAR sysrootW[] = {'%','S','y','s','t','e','m','R','o','o','t','%',0};
     static const WCHAR sysdriveW[] = {'%','S','y','s','t','e','m','D','r','i','v','e','%',0};
     static const WCHAR nonpathW[] = {'p','a','t','h',0};
+    static const WCHAR computernameW[] = {'C','O','M','P','U','T','E','R','N','A','M','E',0};
     static const char sysrootA[] = "%SystemRoot%";
     static const char sysdriveA[] = "%SystemDrive%";
-    WCHAR pathW[MAX_PATH], buffW[MAX_PATH], sysdrvW[3];
-    char path[MAX_PATH], buff[MAX_PATH], sysdrvA[3], envvarA[10];
+    WCHAR pathW[MAX_PATH], buffW[MAX_PATH], sysdrvW[3], envvarW[30];
+    char path[MAX_PATH], buff[MAX_PATH], sysdrvA[3], envvarA[30];
     BOOL ret;
     UINT len;
 
@@ -1463,6 +1476,19 @@ static void test_PathUnExpandEnvStrings(void)
         win_skip("PathUnExpandEnvStrings not available\n");
         return;
     }
+
+    /* The value of ComputerName is not a path */
+    ret = GetEnvironmentVariableA("COMPUTERNAME", envvarA, sizeof(envvarA));
+    ok(ret, "got %d\n", ret);
+    SetLastError(0xdeadbeef);
+    ret = pPathUnExpandEnvStringsA(envvarA, buff, sizeof(buff));
+    ok(!ret && GetLastError() == 0xdeadbeef, "got %d, error %d\n", ret, GetLastError());
+
+    ret = GetEnvironmentVariableW(computernameW, envvarW, ARRAY_SIZE(envvarW));
+    ok(ret, "got %d\n", ret);
+    SetLastError(0xdeadbeef);
+    ret = pPathUnExpandEnvStringsW(envvarW, buffW, ARRAY_SIZE(buffW));
+    ok(!ret && GetLastError() == 0xdeadbeef, "got %d, error %d\n", ret, GetLastError());
 
     /* something that can't be represented with env var */
     strcpy(path, "somepath_name");
@@ -1533,7 +1559,7 @@ static void test_PathUnExpandEnvStrings(void)
     lstrcpyW(pathW, nonpathW);
     buffW[0] = 'x'; buffW[1] = 0;
     SetLastError(0xdeadbeef);
-    ret = pPathUnExpandEnvStringsW(pathW, buffW, sizeof(buffW)/sizeof(WCHAR));
+    ret = pPathUnExpandEnvStringsW(pathW, buffW, ARRAY_SIZE(buffW));
     ok(!ret && GetLastError() == 0xdeadbeef, "got %d, error %d\n", ret, GetLastError());
     ok(buffW[0] == 'x', "wrong return string %s\n", wine_dbgstr_w(buffW));
 
@@ -1554,13 +1580,13 @@ static void test_PathUnExpandEnvStrings(void)
     /* buffer size is enough to hold variable name only */
     buffW[0] = 'x'; buffW[1] = 0;
     SetLastError(0xdeadbeef);
-    ret = pPathUnExpandEnvStringsW(pathW, buffW, sizeof(sysrootW)/sizeof(WCHAR));
+    ret = pPathUnExpandEnvStringsW(pathW, buffW, ARRAY_SIZE(sysrootW));
     ok(!ret && GetLastError() == 0xdeadbeef, "got %d, error %d\n", ret, GetLastError());
     ok(buffW[0] == 'x', "wrong return string %s\n", wine_dbgstr_w(buffW));
 
     /* enough size */
     buffW[0] = 0;
-    ret = pPathUnExpandEnvStringsW(pathW, buffW, sizeof(buffW)/sizeof(WCHAR));
+    ret = pPathUnExpandEnvStringsW(pathW, buffW, ARRAY_SIZE(buffW));
     ok(ret, "got %d\n", ret);
     ok(!memcmp(buffW, sysrootW, sizeof(sysrootW) - sizeof(WCHAR)), "wrong return string %s\n", wine_dbgstr_w(buffW));
 
@@ -1569,7 +1595,7 @@ static void test_PathUnExpandEnvStrings(void)
     buffW[0] = 0;
     lstrcpyW(pathW, sysdrvW);
     lstrcatW(pathW, sysdrvW);
-    ret = pPathUnExpandEnvStringsW(pathW, buffW, sizeof(buff)/sizeof(WCHAR));
+    ret = pPathUnExpandEnvStringsW(pathW, buffW, ARRAY_SIZE(buffW));
     ok(ret, "got %d\n", ret);
     /* expected string */
     lstrcpyW(pathW, sysdriveW);
@@ -1600,7 +1626,7 @@ static void test_PathIsRelativeA(void)
         return;
     }
 
-    num = sizeof(test_path_is_relative) / sizeof(test_path_is_relative[0]);
+    num = ARRAY_SIZE(test_path_is_relative);
     for (i = 0; i < num; i++) {
         ret = pPathIsRelativeA(test_path_is_relative[i].path);
         ok(ret == test_path_is_relative[i].expect,
@@ -1620,7 +1646,7 @@ static void test_PathIsRelativeW(void)
         return;
     }
 
-    num = sizeof(test_path_is_relative) / sizeof(test_path_is_relative[0]);
+    num = ARRAY_SIZE(test_path_is_relative);
     for (i = 0; i < num; i++) {
         path = GetWideString(test_path_is_relative[i].path);
 

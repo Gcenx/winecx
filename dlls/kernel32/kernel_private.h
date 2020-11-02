@@ -55,8 +55,8 @@ static inline obj_handle_t console_handle_unmap(HANDLE h)
 extern HMODULE kernel32_handle DECLSPEC_HIDDEN;
 extern SYSTEM_BASIC_INFORMATION system_info DECLSPEC_HIDDEN;
 
-extern const WCHAR *DIR_Windows DECLSPEC_HIDDEN;
-extern const WCHAR *DIR_System DECLSPEC_HIDDEN;
+extern const WCHAR DIR_Windows[] DECLSPEC_HIDDEN;
+extern const WCHAR DIR_System[] DECLSPEC_HIDDEN;
 extern const WCHAR *DIR_SysWow64 DECLSPEC_HIDDEN;
 
 extern void FILE_SetDosError(void) DECLSPEC_HIDDEN;
@@ -84,12 +84,12 @@ struct binary_info
     enum binary_type type;
     DWORD            arch;
     DWORD            flags;
-    void            *res_start;
-    void            *res_end;
+    ULONGLONG        res_start;
+    ULONGLONG        res_end;
 };
 
 /* module.c */
-extern WCHAR *MODULE_get_dll_load_path( LPCWSTR module ) DECLSPEC_HIDDEN;
+extern WCHAR *MODULE_get_dll_load_path( LPCWSTR module, int safe_mode ) DECLSPEC_HIDDEN;
 extern void MODULE_get_binary_info( HANDLE hfile, struct binary_info *info ) DECLSPEC_HIDDEN;
 
 extern BOOL NLS_IsUnicodeOnlyLcid(LCID) DECLSPEC_HIDDEN;
@@ -104,10 +104,10 @@ extern void COMPUTERNAME_Init(void) DECLSPEC_HIDDEN;
 extern void LOCALE_Init(void) DECLSPEC_HIDDEN;
 extern void LOCALE_InitRegistry(void) DECLSPEC_HIDDEN;
 
+/* time.c */
+extern void TIMEZONE_InitRegistry(void) DECLSPEC_HIDDEN;
+
 /* oldconfig.c */
 extern void convert_old_config(void) DECLSPEC_HIDDEN;
-
-/* returns directory handle for named objects */
-extern HANDLE get_BaseNamedObjects_handle(void) DECLSPEC_HIDDEN;
 
 #endif

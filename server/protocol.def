@@ -171,12 +171,16 @@ typedef struct
                  unsigned char regs[80]; } i386_regs;
         struct { struct { unsigned __int64 low, high; } fpregs[32]; } x86_64_regs;
         struct { double fpr[32], fpscr; } powerpc_regs;
+        struct { unsigned __int64 d[32]; unsigned int fpscr; } arm_regs;
+        struct { unsigned __int64 d[64]; unsigned int fpcr, fpsr; } arm64_regs;
     } fp;  /* selected by SERVER_CTX_FLOATING_POINT */
     union
     {
         struct { unsigned int dr0, dr1, dr2, dr3, dr6, dr7; } i386_regs;
         struct { unsigned __int64 dr0, dr1, dr2, dr3, dr6, dr7; } x86_64_regs;
         struct { unsigned int dr[8]; } powerpc_regs;
+        struct { unsigned int bvr[8], bcr[8], wvr[1], wcr[1]; } arm_regs;
+        struct { unsigned __int64 bvr[8], wvr[2]; unsigned int bcr[8], wcr[2]; } arm64_regs;
     } debug;  /* selected by SERVER_CTX_DEBUG_REGISTERS */
     union
     {
@@ -713,6 +717,11 @@ typedef struct
     unsigned int   file_size;
     unsigned int   checksum;
 } pe_image_info_t;
+#define IMAGE_FLAGS_ComPlusNativeReady        0x01
+#define IMAGE_FLAGS_ComPlusILOnly             0x02
+#define IMAGE_FLAGS_ImageDynamicallyRelocated 0x04
+#define IMAGE_FLAGS_ImageMappedFlat           0x08
+#define IMAGE_FLAGS_BaseBelow4gb              0x10
 
 struct rawinput_device
 {
@@ -785,6 +794,8 @@ struct rawinput_device
     mod_handle_t module;       /* main module base address */
     client_ptr_t ldt_copy;     /* address of LDT copy (in thread address space) */
     client_ptr_t entry;        /* process entry point */
+@REPLY
+    int          suspend;      /* is process suspended? */
 @END
 
 
@@ -805,6 +816,7 @@ struct rawinput_device
     data_size_t  info_size;    /* total size of startup info */
     int          version;      /* protocol version */
     unsigned int all_cpus;     /* bitset of supported CPUs */
+    int          suspend;      /* is thread suspended? */
 @END
 
 
@@ -853,8 +865,8 @@ struct rawinput_device
     mem_size_t virtual_size;                    /* virtual memory in bytes */
     mem_size_t peak_working_set_size;           /* peak real memory in bytes */
     mem_size_t working_set_size;                /* real memory in bytes */
-    mem_size_t pagefile_usage;                  /* swapped-out memory in bytes */
-    mem_size_t peak_pagefile_usage;             /* peak swapped-out memory in bytes */
+    mem_size_t pagefile_usage;                  /* commit charge in bytes */
+    mem_size_t peak_pagefile_usage;             /* peak commit charge in bytes */
 @END
 
 
@@ -915,7 +927,6 @@ struct rawinput_device
     mod_handle_t base_address; /* base address of module */
 @REPLY
     client_ptr_t entry_point;
-    data_size_t  size;            /* module size */
     data_size_t  filename_len;    /* buffer len in bytes required to store filename */
     VARARG(filename,unicode_str); /* file name of module */
 @END
@@ -939,12 +950,10 @@ struct rawinput_device
 
 /* Notify the server that a dll has been loaded */
 @REQ(load_dll)
-    obj_handle_t mapping;      /* file mapping handle */
+    data_size_t  dbg_offset;   /* debug info offset */
     mod_handle_t base;         /* base address */
     client_ptr_t name;         /* ptr to ptr to name (in process addr space) */
-    data_size_t  size;         /* dll size */
-    int          dbg_offset;   /* debug info offset */
-    int          dbg_size;     /* debug info size */
+    data_size_t  dbg_size;     /* debug info size */
     VARARG(filename,unicode_str); /* file name of dll */
 @END
 
@@ -1260,6 +1269,21 @@ enum server_fd_type
     obj_handle_t event;         /* event set when finished */
 @END
 
+/* Query file information */
+@REQ(get_file_info)
+    obj_handle_t handle;        /* handle to the file */
+    unsigned int info_class;    /* queried information class */
+@REPLY
+    VARARG(data,bytes);         /* file info data */
+@END
+
+/* Query volume information */
+@REQ(get_volume_info)
+    obj_handle_t handle;        /* handle to the file */
+    unsigned int info_class;    /* queried information class */
+@REPLY
+    VARARG(data,bytes);         /* volume info data */
+@END
 
 /* Lock a region of a file */
 @REQ(lock_file)
@@ -1436,6 +1460,16 @@ struct console_renderer_event
     int          share;         /* share mask (only for output handles) */
 @REPLY
     obj_handle_t handle;        /* handle to the console */
+@END
+
+
+/* Attach to a other process's console */
+@REQ(attach_console)
+    process_id_t pid;           /* pid of attached console process */
+@REPLY
+    obj_handle_t std_in;        /* attached stdin */
+    obj_handle_t std_out;       /* attached stdout */
+    obj_handle_t std_err;       /* attached stderr */
 @END
 
 
@@ -1691,27 +1725,13 @@ enum char_info_mode
 @REQ(create_mapping)
     unsigned int access;        /* wanted access rights */
     unsigned int flags;         /* SEC_* flags */
-    unsigned int protect;       /* protection flags (see below) */
+    unsigned int file_access;   /* file access rights */
     mem_size_t   size;          /* mapping size */
     obj_handle_t file_handle;   /* file handle */
     VARARG(objattr,object_attributes); /* object attributes */
 @REPLY
     obj_handle_t handle;        /* handle to the mapping */
 @END
-/* per-page protection flags */
-#define VPROT_READ       0x01
-#define VPROT_WRITE      0x02
-#define VPROT_EXEC       0x04
-#define VPROT_WRITECOPY  0x08
-#define VPROT_GUARD      0x10
-#define VPROT_NOCACHE    0x20
-#define VPROT_COMMITTED  0x40
-#define VPROT_WRITEWATCH 0x80
-/* per-mapping protection flags */
-#define VPROT_IMAGE      0x0100  /* mapping for an exe image */
-#define VPROT_SYSTEM     0x0200  /* system view (underlying mmap not under our control) */
-#define VPROT_VALLOC     0x0400  /* allocated by VirtualAlloc */
-#define VPROT_NOEXEC     0x0800  /* don't force exec permission */
 
 
 /* Open a mapping */
@@ -1732,16 +1752,30 @@ enum char_info_mode
 @REPLY
     mem_size_t   size;          /* mapping size */
     unsigned int flags;         /* SEC_* flags */
-    int          protect;       /* protection flags */
-    obj_handle_t mapping;       /* duplicate mapping handle unless removable */
     obj_handle_t shared_file;   /* shared mapping file handle */
     VARARG(image,pe_image_info);/* image info for SEC_IMAGE mappings */
 @END
 
 
+/* Add a memory view in the current process */
+@REQ(map_view)
+    obj_handle_t mapping;       /* file mapping handle */
+    unsigned int access;        /* wanted access rights */
+    client_ptr_t base;          /* view base address (page-aligned) */
+    mem_size_t   size;          /* view size */
+    file_pos_t   start;         /* start offset in mapping */
+@END
+
+
+/* Unmap a memory view from the current process */
+@REQ(unmap_view)
+    client_ptr_t base;          /* view base address */
+@END
+
+
 /* Get a range of committed pages in a file mapping */
 @REQ(get_mapping_committed_range)
-    obj_handle_t handle;        /* handle to the mapping */
+    client_ptr_t base;          /* view base address */
     file_pos_t   offset;        /* starting offset (page-aligned, in bytes) */
 @REPLY
     mem_size_t   size;          /* size of range starting at offset (page-aligned, in bytes) */
@@ -1751,9 +1785,16 @@ enum char_info_mode
 
 /* Add a range to the committed pages in a file mapping */
 @REQ(add_mapping_committed_range)
-    obj_handle_t handle;        /* handle to the mapping */
+    client_ptr_t base;          /* view base address */
     file_pos_t   offset;        /* starting offset (page-aligned, in bytes) */
     mem_size_t   size;          /* size to set (page-aligned, in bytes) or 0 if only retrieving */
+@END
+
+
+/* Check if two memory maps are for the same file */
+@REQ(is_same_mapping)
+    client_ptr_t base1;         /* first view base address */
+    client_ptr_t base2;         /* second view base address */
 @END
 
 
@@ -2445,6 +2486,8 @@ enum message_type
     user_handle_t  owner;       /* owner window */
     atom_t         atom;        /* class atom */
     mod_handle_t   instance;    /* module instance */
+    int            dpi;         /* system DPI */
+    int            awareness;   /* thread DPI awareness */
     VARARG(class,unicode_str);  /* class name */
 @REPLY
     user_handle_t  handle;      /* created window */
@@ -2452,6 +2495,8 @@ enum message_type
     user_handle_t  owner;       /* full handle of owner */
     int            extra;       /* number of extra bytes */
     client_ptr_t   class_ptr;   /* pointer to class in client address space */
+    int            dpi;         /* window DPI if not per-monitor aware */
+    int            awareness;   /* window DPI awareness */
 @END
 
 
@@ -2490,6 +2535,8 @@ enum message_type
     thread_id_t    tid;         /* thread owning the window */
     atom_t         atom;        /* class atom */
     int            is_unicode;  /* ANSI or unicode */
+    int            dpi;         /* window DPI */
+    int            awareness;   /* DPI awareness */
 @END
 
 
@@ -2530,6 +2577,8 @@ enum message_type
 @REPLY
     user_handle_t  old_parent;  /* old parent window */
     user_handle_t  full_parent; /* full handle of new parent */
+    int            dpi;         /* new window DPI if not per-monitor aware */
+    int            awareness;   /* new DPI awareness */
 @END
 
 
@@ -2604,7 +2653,6 @@ enum message_type
     int            relative;      /* coords relative to (see below) */
 @REPLY
     rectangle_t    window;        /* window rectangle */
-    rectangle_t    visible;       /* visible part of the window rectangle */
     rectangle_t    client;        /* client rectangle */
 @END
 enum coords_relative
@@ -2620,6 +2668,7 @@ enum coords_relative
 @REQ(get_window_text)
     user_handle_t  handle;        /* handle to the window */
 @REPLY
+    data_size_t    length;        /* total length in WCHARs */
     VARARG(text,unicode_str);     /* window text */
 @END
 
@@ -3110,6 +3159,7 @@ enum caret_state
     int            extra;          /* number of extra class bytes */
     int            win_extra;      /* number of window extra bytes */
     client_ptr_t   client_ptr;     /* pointer to class in client address space */
+    data_size_t    name_offset;    /* base class name offset for specified atom */
     VARARG(name,unicode_str);      /* class name */
 @REPLY
     atom_t         atom;           /* resulting class atom */
@@ -3139,11 +3189,12 @@ enum caret_state
     lparam_t       extra_value;    /* value to set in extra bytes */
 @REPLY
     atom_t         old_atom;       /* previous class atom */
+    atom_t         base_atom;      /* base class atom */
+    mod_handle_t   old_instance;   /* previous module instance */
+    lparam_t       old_extra_value; /* old value in extra bytes */
     unsigned int   old_style;      /* previous class style */
     int            old_extra;      /* previous number of class extra bytes */
     int            old_win_extra;  /* previous number of window extra bytes */
-    mod_handle_t   old_instance;   /* previous module instance */
-    lparam_t       old_extra_value; /* old value in extra bytes */
 @END
 #define SET_CLASS_ATOM      0x0001
 #define SET_CLASS_STYLE     0x0002
@@ -3659,13 +3710,14 @@ struct handle_info
     obj_handle_t handle;          /* handle to a file or directory */
     int          flags;           /* completion flags (see below) */
 @END
+#define COMPLETION_SKIP_ON_SUCCESS 0x01
 
 
 /* get fd completion information */
 @REQ(get_fd_compl_info)
     obj_handle_t handle;          /* handle to a file or directory */
 @REPLY
-    int          flags;           /* completion flags */
+    int          flags;           /* completion flags (see below) */
 @END
 
 

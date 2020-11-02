@@ -10,6 +10,7 @@
 
 #include <crtdefs.h>
 #include <stdarg.h>
+#include <string.h>
 
 #include <pshpack8.h>
 
@@ -271,9 +272,9 @@ intptr_t __cdecl _wfindfirsti64(const wchar_t*, struct _wfinddatai64_t*);
 int      __cdecl _wfindnext(intptr_t,struct _wfinddata_t*);
 int      __cdecl _wfindnexti64(intptr_t, struct _wfinddatai64_t*);
 wchar_t* __cdecl _wmktemp(wchar_t*);
-int      __cdecl _wopen(const wchar_t*,int,...);
+int      WINAPIV _wopen(const wchar_t*,int,...);
 int      __cdecl _wrename(const wchar_t*,const wchar_t*);
-int      __cdecl _wsopen(const wchar_t*,int,int,...);
+int      WINAPIV _wsopen(const wchar_t*,int,int,...);
 int      __cdecl _wunlink(const wchar_t*);
 #endif /* _WIO_DEFINED */
 
@@ -284,18 +285,18 @@ wchar_t* __cdecl _wsetlocale(int,const wchar_t*);
 
 #ifndef _WPROCESS_DEFINED
 #define _WPROCESS_DEFINED
-int      __cdecl _wexecl(const wchar_t*,const wchar_t*,...);
-int      __cdecl _wexecle(const wchar_t*,const wchar_t*,...);
-int      __cdecl _wexeclp(const wchar_t*,const wchar_t*,...);
-int      __cdecl _wexeclpe(const wchar_t*,const wchar_t*,...);
+int      WINAPIV _wexecl(const wchar_t*,const wchar_t*,...);
+int      WINAPIV _wexecle(const wchar_t*,const wchar_t*,...);
+int      WINAPIV _wexeclp(const wchar_t*,const wchar_t*,...);
+int      WINAPIV _wexeclpe(const wchar_t*,const wchar_t*,...);
 int      __cdecl _wexecv(const wchar_t*,const wchar_t* const *);
 int      __cdecl _wexecve(const wchar_t*,const wchar_t* const *,const wchar_t* const *);
 int      __cdecl _wexecvp(const wchar_t*,const wchar_t* const *);
 int      __cdecl _wexecvpe(const wchar_t*,const wchar_t* const *,const wchar_t* const *);
-int      __cdecl _wspawnl(int,const wchar_t*,const wchar_t*,...);
-int      __cdecl _wspawnle(int,const wchar_t*,const wchar_t*,...);
-int      __cdecl _wspawnlp(int,const wchar_t*,const wchar_t*,...);
-int      __cdecl _wspawnlpe(int,const wchar_t*,const wchar_t*,...);
+int      WINAPIV _wspawnl(int,const wchar_t*,const wchar_t*,...);
+int      WINAPIV _wspawnle(int,const wchar_t*,const wchar_t*,...);
+int      WINAPIV _wspawnlp(int,const wchar_t*,const wchar_t*,...);
+int      WINAPIV _wspawnlpe(int,const wchar_t*,const wchar_t*,...);
 int      __cdecl _wspawnv(int,const wchar_t*,const wchar_t* const *);
 int      __cdecl _wspawnve(int,const wchar_t*,const wchar_t* const *,const wchar_t* const *);
 int      __cdecl _wspawnvp(int,const wchar_t*,const wchar_t* const *);
@@ -321,9 +322,9 @@ wint_t   __cdecl _getwc_nolock(FILE*);
 wchar_t* __cdecl _getws(wchar_t*);
 wint_t   __cdecl _putwc_nolock(wint_t,FILE*);
 int      __cdecl _putws(const wchar_t*);
-int      __cdecl _snwprintf(wchar_t*,size_t,const wchar_t*,...);
-int      __cdecl _snwprintf_s(wchar_t*,size_t,size_t,const wchar_t*,...);
-int      __cdecl _scwprintf(const wchar_t*,...);
+int      WINAPIV _snwprintf(wchar_t*,size_t,const wchar_t*,...);
+int      WINAPIV _snwprintf_s(wchar_t*,size_t,size_t,const wchar_t*,...);
+int      WINAPIV _scwprintf(const wchar_t*,...);
 wint_t   __cdecl _ungetwc_nolock(wint_t,FILE*);
 int      __cdecl _vscwprintf(const wchar_t*,__ms_va_list);
 int      __cdecl _vscwprintf_p_l(const wchar_t*,_locale_t,__ms_va_list);
@@ -345,21 +346,21 @@ wint_t   __cdecl fgetwc(FILE*);
 wchar_t* __cdecl fgetws(wchar_t*,int,FILE*);
 wint_t   __cdecl fputwc(wint_t,FILE*);
 int      __cdecl fputws(const wchar_t*,FILE*);
-int      __cdecl fwprintf(FILE*,const wchar_t*,...);
-int      __cdecl fwprintf_s(FILE*,const wchar_t*,...);
+int      WINAPIV fwprintf(FILE*,const wchar_t*,...);
+int      WINAPIV fwprintf_s(FILE*,const wchar_t*,...);
 int      __cdecl fputws(const wchar_t*,FILE*);
-int      __cdecl fwscanf(FILE*,const wchar_t*,...);
-int      __cdecl fwscanf_s(FILE*,const wchar_t*,...);
+int      WINAPIV fwscanf(FILE*,const wchar_t*,...);
+int      WINAPIV fwscanf_s(FILE*,const wchar_t*,...);
 wint_t   __cdecl getwc(FILE*);
 wint_t   __cdecl getwchar(void);
 wchar_t* __cdecl getws(wchar_t*);
 wint_t   __cdecl putwc(wint_t,FILE*);
 wint_t   __cdecl putwchar(wint_t);
 int      __cdecl putws(const wchar_t*);
-int      __cdecl swprintf(wchar_t*,const wchar_t*,...);
-int      __cdecl swprintf_s(wchar_t*,size_t,const wchar_t*,...);
-int      __cdecl swscanf(const wchar_t*,const wchar_t*,...);
-int      __cdecl swscanf_s(const wchar_t*,const wchar_t*,...);
+int      WINAPIV swprintf(wchar_t*,const wchar_t*,...);
+int      WINAPIV swprintf_s(wchar_t*,size_t,const wchar_t*,...);
+int      WINAPIV swscanf(const wchar_t*,const wchar_t*,...);
+int      WINAPIV swscanf_s(const wchar_t*,const wchar_t*,...);
 wint_t   __cdecl ungetwc(wint_t,FILE*);
 int      __cdecl vfwprintf(FILE*,const wchar_t*,__ms_va_list);
 int      __cdecl vfwprintf_s(FILE*,const wchar_t*,__ms_va_list);
@@ -367,10 +368,10 @@ int      __cdecl vswprintf(wchar_t*,const wchar_t*,__ms_va_list);
 int      __cdecl vswprintf_s(wchar_t*,size_t,const wchar_t*,__ms_va_list);
 int      __cdecl vwprintf(const wchar_t*,__ms_va_list);
 int      __cdecl vwprintf_s(const wchar_t*,__ms_va_list);
-int      __cdecl wprintf(const wchar_t*,...);
-int      __cdecl wprintf_s(const wchar_t*,...);
-int      __cdecl wscanf(const wchar_t*,...);
-int      __cdecl wscanf_s(const wchar_t*,...);
+int      WINAPIV wprintf(const wchar_t*,...);
+int      WINAPIV wprintf_s(const wchar_t*,...);
+int      WINAPIV wscanf(const wchar_t*,...);
+int      WINAPIV wscanf_s(const wchar_t*,...);
 #endif /* _WSTDIO_DEFINED */
 
 #ifndef _WSTDLIB_DEFINED
@@ -398,6 +399,7 @@ __msvcrt_long __cdecl _wtol(const wchar_t*);
 size_t        __cdecl mbstowcs(wchar_t*,const char*,size_t);
 errno_t       __cdecl mbstowcs_s(size_t*,wchar_t*,size_t,const char*,size_t);
 int           __cdecl mbtowc(wchar_t*,const char*,size_t);
+float         __cdecl wcstof(const wchar_t*,wchar_t**);
 double        __cdecl wcstod(const wchar_t*,wchar_t**);
 __msvcrt_long __cdecl wcstol(const wchar_t*,wchar_t**,int);
 size_t        __cdecl wcstombs(char*,const wchar_t*,size_t);
@@ -474,6 +476,43 @@ size_t  __cdecl mbsrtowcs(wchar_t*,const char**,size_t,mbstate_t*);
 size_t  __cdecl wcrtomb(char*,wchar_t,mbstate_t*);
 size_t  __cdecl wcsrtombs(char*,const wchar_t**,size_t,mbstate_t*);
 int     __cdecl wctob(wint_t);
+
+static inline wchar_t *wmemchr(const wchar_t *s, wchar_t c, size_t n)
+{
+    const wchar_t *end;
+    for (end = s + n; s < end; s++)
+        if (*s == c) return (wchar_t*)s;
+    return NULL;
+}
+
+static inline int wmemcmp(const wchar_t *s1, const wchar_t *s2, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; i++)
+    {
+        if (s1[i] > s2[i]) return 1;
+        if (s1[i] < s2[i]) return -1;
+    }
+    return 0;
+}
+
+static inline wchar_t* __cdecl wmemcpy(wchar_t *dst, const wchar_t *src, size_t n)
+{
+    return memcpy(dst, src, n * sizeof(wchar_t));
+}
+
+static inline wchar_t* __cdecl wmemmove(wchar_t *dst, const wchar_t *src, size_t n)
+{
+    return memmove(dst, src, n * sizeof(wchar_t));
+}
+
+static inline wchar_t* __cdecl wmemset(wchar_t *s, wchar_t c, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; i++)
+        s[i] = c;
+    return s;
+}
 
 #ifdef __cplusplus
 }

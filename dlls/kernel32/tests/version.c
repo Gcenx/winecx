@@ -26,12 +26,17 @@
 #include "winternl.h"
 
 static BOOL (WINAPI * pGetProductInfo)(DWORD, DWORD, DWORD, DWORD, DWORD *);
-static BOOL (WINAPI * pVerifyVersionInfoA)(LPOSVERSIONINFOEXA, DWORD, DWORDLONG);
-static ULONGLONG (WINAPI * pVerSetConditionMask)(ULONGLONG, DWORD, BYTE);
+static UINT (WINAPI * pGetSystemFirmwareTable)(DWORD, DWORD, void *, DWORD);
+static NTSTATUS (WINAPI * pNtQuerySystemInformation)(SYSTEM_INFORMATION_CLASS, void *, ULONG, ULONG *);
 static NTSTATUS (WINAPI * pRtlGetVersion)(RTL_OSVERSIONINFOEXW *);
 
 #define GET_PROC(func)                                     \
     p##func = (void *)GetProcAddress(hmod, #func);
+
+/* Firmware table providers */
+#define ACPI 0x41435049
+#define FIRM 0x4649524D
+#define RSMB 0x52534D42
 
 static void init_function_pointers(void)
 {
@@ -40,11 +45,11 @@ static void init_function_pointers(void)
     hmod = GetModuleHandleA("kernel32.dll");
 
     GET_PROC(GetProductInfo);
-    GET_PROC(VerifyVersionInfoA);
-    GET_PROC(VerSetConditionMask);
+    GET_PROC(GetSystemFirmwareTable);
 
     hmod = GetModuleHandleA("ntdll.dll");
 
+    GET_PROC(NtQuerySystemInformation);
     GET_PROC(RtlGetVersion);
 }
 
@@ -87,7 +92,7 @@ static void test_GetProductInfo(void)
         res = pGetProductInfo(entry[0], entry[1], entry[2], entry[3], &product);
 
         if (entry[0] >= 6)
-            ok(res && (product > PRODUCT_UNDEFINED) && (product <= PRODUCT_PROFESSIONAL_WMC),
+            ok(res && (product > PRODUCT_UNDEFINED) && (product <= PRODUCT_ENTERPRISE_S_N_EVALUATION),
                "got %d and 0x%x (expected TRUE and a valid PRODUCT_* value)\n", res, product);
         else
             ok(!res && !product && (GetLastError() == 0xdeadbeef),
@@ -153,9 +158,7 @@ static void test_GetVersionEx(void)
     SetLastError(0xdeadbeef);
     infoExA.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXA);
     ret = GetVersionExA((OSVERSIONINFOA *)&infoExA);
-    ok(ret ||
-       broken(ret == 0), /* win95 */
-       "Expected GetVersionExA to succeed\n");
+    ok(ret, "GetVersionExA failed.\n");
 
     if (!infoExA.wServicePackMajor && !infoExA.wServicePackMinor)
         ok(!infoExA.szCSDVersion[0], "got '%s'\n", infoExA.szCSDVersion);
@@ -163,15 +166,431 @@ static void test_GetVersionEx(void)
 
 static void test_VerifyVersionInfo(void)
 {
-    OSVERSIONINFOEXA info;
-    BOOL ret;
-    DWORD servicepack, error;
-
-    if(!pVerifyVersionInfoA || !pVerSetConditionMask)
+    enum srcversion_mode
     {
-        win_skip("Needed functions not available\n");
-        return;
-    }
+        SRCVERSION_ZERO         = 0,
+        SRCVERSION_CURRENT      = 1,
+        SRCVERSION_INC_MINOR    = 2,
+        SRCVERSION_INC_SP_MINOR = 3,
+        SRCVERSION_INC_SP_MAJOR = 4,
+        SRCVERSION_DEC_SP_MAJOR = 5,
+        SRCVERSION_DEC_MAJOR    = 6,
+        SRCVERSION_INC_BUILD    = 7,
+        SRCVERSION_REQUIRES_SP  = 0x1000,
+    };
+
+    struct verify_version_test
+    {
+        DWORD verifymask; /* Type mask for VerifyVersionInfo() */
+        DWORD srcinfo;    /* The way current version info is modified. */
+        DWORD err;        /* Error code on failure, 0 on success. */
+
+        DWORD typemask1;
+        DWORD condition1;
+        DWORD typemask2;
+        DWORD condition2;
+        DWORD typemask3;
+        DWORD condition3;
+        DWORD typemask4;
+        DWORD condition4;
+
+        BOOL todo;
+    } verify_version_tests[] =
+    {
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_MINOR,
+            0,
+
+            VER_MAJORVERSION, VER_EQUAL,
+            VER_MINORVERSION, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_MINOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MAJORVERSION, VER_GREATER_EQUAL,
+            VER_MINORVERSION, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_CURRENT,
+            0,
+
+            VER_MAJORVERSION, VER_GREATER_EQUAL,
+            VER_MINORVERSION, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_CURRENT,
+            0,
+
+            VER_MAJORVERSION, VER_GREATER_EQUAL,
+            VER_MINORVERSION, VER_AND,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_MINOR,
+            0,
+
+            VER_MAJORVERSION, VER_LESS_EQUAL,
+            VER_MINORVERSION, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_MINOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MAJORVERSION, VER_AND,
+            VER_MINORVERSION, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_MINOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MAJORVERSION, VER_OR,
+            VER_MINORVERSION, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MINOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MINORVERSION, VER_EQUAL,
+            VER_SERVICEPACKMINOR, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MINOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MAJORVERSION, VER_EQUAL,
+            VER_SERVICEPACKMINOR, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MAJOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MAJORVERSION, VER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_EQUAL,
+        },
+        {
+            VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MINOR,
+            0,
+
+            VER_SERVICEPACKMAJOR, VER_EQUAL,
+            VER_SERVICEPACKMINOR, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MINOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_SERVICEPACKMAJOR, VER_EQUAL,
+            VER_SERVICEPACKMINOR, VER_LESS,
+        },
+        {
+            VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MINOR,
+            0,
+
+            VER_MINORVERSION, VER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_EQUAL,
+            VER_SERVICEPACKMINOR, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MINOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MINORVERSION, VER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_EQUAL,
+            VER_SERVICEPACKMINOR, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MINOR,
+            0,
+
+            VER_MAJORVERSION, VER_EQUAL,
+            VER_MINORVERSION, VER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_EQUAL,
+            VER_SERVICEPACKMINOR, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MINOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MAJORVERSION, VER_EQUAL,
+            VER_MINORVERSION, VER_GREATER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_EQUAL,
+            VER_SERVICEPACKMINOR, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MAJOR,
+            0,
+
+            VER_MAJORVERSION, VER_LESS_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_GREATER,
+        },
+        {
+            VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MAJOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MAJORVERSION, VER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MAJOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MINORVERSION, VER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MAJOR,
+            0,
+
+            VER_MAJORVERSION, VER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MAJOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MAJORVERSION, VER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MAJOR,
+            0,
+
+            VER_MAJORVERSION, VER_EQUAL,
+            VER_MINORVERSION, VER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MAJOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MAJORVERSION, VER_GREATER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_DEC_MAJOR,
+            0,
+
+            VER_MAJORVERSION, VER_GREATER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_CURRENT,
+            0,
+
+            VER_MAJORVERSION, VER_GREATER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MAJOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MAJORVERSION, VER_GREATER_EQUAL,
+            VER_MINORVERSION, VER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_LESS,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MAJOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MAJORVERSION, VER_GREATER_EQUAL,
+            VER_MINORVERSION, VER_GREATER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_LESS_EQUAL,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MAJOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MAJORVERSION, VER_GREATER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_AND,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION,
+            SRCVERSION_ZERO,
+            0,
+
+            VER_MAJORVERSION, VER_GREATER_EQUAL,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_BUILDNUMBER,
+            SRCVERSION_ZERO,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MAJORVERSION, VER_GREATER_EQUAL,
+        },
+        {
+            VER_SUITENAME,
+            SRCVERSION_ZERO,
+            0,
+
+            VER_SUITENAME, VER_AND,
+        },
+        {
+            VER_SUITENAME,
+            SRCVERSION_ZERO,
+            0,
+
+            VER_SUITENAME, VER_OR,
+        },
+        {
+            VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MINOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MINORVERSION, VER_GREATER_EQUAL,
+        },
+        {
+            VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MAJOR,
+            0,
+
+            VER_MINORVERSION, VER_LESS,
+        },
+        {
+            VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MAJOR,
+            0,
+
+            VER_MINORVERSION, VER_LESS_EQUAL,
+        },
+        {
+            VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MAJOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MINORVERSION, VER_EQUAL,
+        },
+        {
+            VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_SP_MAJOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MINORVERSION, VER_GREATER_EQUAL,
+        },
+        {
+            VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_MINOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MINORVERSION, VER_GREATER_EQUAL,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_MINOR,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MINORVERSION, VER_GREATER_EQUAL,
+        },
+        {
+            VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_CURRENT,
+            0,
+
+            VER_MINORVERSION, VER_GREATER_EQUAL,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_BUILD,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MINORVERSION, VER_GREATER_EQUAL,
+        },
+        {
+            VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_INC_BUILD,
+            0,
+
+            VER_MINORVERSION, VER_GREATER_EQUAL,
+        },
+        {
+            VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_DEC_SP_MAJOR | SRCVERSION_REQUIRES_SP,
+            0,
+
+            VER_MINORVERSION, VER_GREATER,
+        },
+        {
+            VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_DEC_SP_MAJOR | SRCVERSION_REQUIRES_SP,
+            0,
+
+            VER_MINORVERSION, VER_GREATER_EQUAL,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_DEC_SP_MAJOR | SRCVERSION_REQUIRES_SP,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_MAJORVERSION, VER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_GREATER,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_DEC_SP_MAJOR | SRCVERSION_REQUIRES_SP,
+            0,
+
+            VER_MAJORVERSION, VER_GREATER_EQUAL,
+            VER_MINORVERSION, VER_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_GREATER,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_DEC_SP_MAJOR | SRCVERSION_REQUIRES_SP,
+            0,
+
+            VER_MAJORVERSION, VER_GREATER_EQUAL,
+            VER_MINORVERSION, VER_LESS_EQUAL,
+            VER_SERVICEPACKMAJOR, VER_GREATER,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_DEC_SP_MAJOR | SRCVERSION_REQUIRES_SP,
+            0,
+
+            VER_MAJORVERSION, VER_GREATER_EQUAL,
+            VER_MINORVERSION, VER_AND,
+            VER_SERVICEPACKMAJOR, VER_GREATER,
+        },
+        {
+            VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            SRCVERSION_DEC_SP_MAJOR | SRCVERSION_REQUIRES_SP,
+            ERROR_OLD_WIN_VERSION,
+
+            VER_SERVICEPACKMAJOR, VER_GREATER,
+            VER_SERVICEPACKMINOR, VER_EQUAL,
+        },
+    };
+
+    OSVERSIONINFOEXA info;
+    DWORD servicepack;
+    unsigned int i;
+    BOOL ret;
 
     /* Before we start doing some tests we should check what the version of
      * the ServicePack is. Tests on a box with no ServicePack will fail otherwise.
@@ -179,13 +598,15 @@ static void test_VerifyVersionInfo(void)
     info.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXA);
     GetVersionExA((OSVERSIONINFOA *)&info);
     servicepack = info.wServicePackMajor;
+    if (servicepack == 0)
+        skip("There is no ServicePack on this system. Some tests will be skipped.\n");
 
     /* Win8.1+ returns Win8 version in GetVersionEx when there's no app manifest targeting 8.1 */
     if (info.dwMajorVersion == 6 && info.dwMinorVersion == 2)
     {
         RTL_OSVERSIONINFOEXW rtlinfo;
         rtlinfo.dwOSVersionInfoSize = sizeof(RTL_OSVERSIONINFOEXW);
-        ok(SUCCEEDED(pRtlGetVersion(&rtlinfo)), "RtlGetVersion failed\n");
+        ok(!pRtlGetVersion(&rtlinfo), "RtlGetVersion failed\n");
 
         if (rtlinfo.dwMajorVersion != 6 || rtlinfo.dwMinorVersion != 2)
         {
@@ -194,175 +615,140 @@ static void test_VerifyVersionInfo(void)
         }
     }
 
-    memset(&info, 0, sizeof(info));
+    for (i = 0; i < ARRAY_SIZE(verify_version_tests); i++)
+    {
+        struct verify_version_test *test = &verify_version_tests[i];
+        DWORD srcinfo = test->srcinfo;
+        ULONGLONG mask;
 
-    ret = pVerifyVersionInfoA(&info, VER_MAJORVERSION | VER_MINORVERSION,
-        pVerSetConditionMask(0, VER_MAJORVERSION, VER_GREATER_EQUAL));
-    ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
+        if (servicepack == 0 && srcinfo & SRCVERSION_REQUIRES_SP)
+            continue;
+        srcinfo &= ~SRCVERSION_REQUIRES_SP;
 
-    SetLastError(0xdeadbeef);
-    ret = pVerifyVersionInfoA(&info, VER_BUILDNUMBER | VER_MAJORVERSION |
-        VER_MINORVERSION/* | VER_PLATFORMID | VER_SERVICEPACKMAJOR |
-        VER_SERVICEPACKMINOR | VER_SUITENAME | VER_PRODUCT_TYPE */,
-        pVerSetConditionMask(0, VER_MAJORVERSION, VER_GREATER_EQUAL));
-    error = GetLastError();
-    ok(!ret, "VerifyVersionInfoA succeeded\n");
-    ok(error == ERROR_OLD_WIN_VERSION,
-       "VerifyVersionInfoA should have failed with ERROR_OLD_WIN_VERSION instead of %d\n", error);
+        info.dwOSVersionInfoSize = sizeof(info);
+        GetVersionExA((OSVERSIONINFOA *)&info);
 
-    /* tests special handling of VER_SUITENAME */
+        switch (srcinfo)
+        {
+        case SRCVERSION_ZERO:
+            memset(&info, 0, sizeof(info));
+            break;
+        case SRCVERSION_INC_MINOR:
+            info.dwMinorVersion++;
+            break;
+        case SRCVERSION_INC_SP_MINOR:
+            info.wServicePackMinor++;
+            break;
+        case SRCVERSION_INC_SP_MAJOR:
+            info.wServicePackMajor++;
+            break;
+        case SRCVERSION_DEC_SP_MAJOR:
+            info.wServicePackMajor--;
+            break;
+        case SRCVERSION_DEC_MAJOR:
+            info.dwMajorVersion--;
+            break;
+        case SRCVERSION_INC_BUILD:
+            info.dwBuildNumber++;
+            break;
+        default:
+            ;
+        }
 
-    ret = pVerifyVersionInfoA(&info, VER_SUITENAME,
-        pVerSetConditionMask(0, VER_SUITENAME, VER_AND));
-    ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
+        mask = VerSetConditionMask(0, test->typemask1, test->condition1);
+        if (test->typemask2)
+            mask = VerSetConditionMask(mask, test->typemask2, test->condition2);
+        if (test->typemask3)
+            mask = VerSetConditionMask(mask, test->typemask3, test->condition3);
+        if (test->typemask4)
+            mask = VerSetConditionMask(mask, test->typemask4, test->condition4);
 
-    ret = pVerifyVersionInfoA(&info, VER_SUITENAME,
-        pVerSetConditionMask(0, VER_SUITENAME, VER_OR));
-    ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
+        SetLastError(0xdeadbeef);
+        ret = VerifyVersionInfoA(&info, test->verifymask, mask);
+    todo_wine_if(test->todo)
+    {
+        ok(test->err ? !ret : ret, "%u: unexpected return value %d.\n", i, ret);
+        if (!ret)
+            ok(GetLastError() == test->err, "%u: unexpected error code %d, expected %d.\n", i, GetLastError(), test->err);
+    }
+    }
 
     /* test handling of version numbers */
-    
     /* v3.10 is always less than v4.x even
      * if the minor version is tested */
     info.dwMajorVersion = 3;
     info.dwMinorVersion = 10;
-    ret = pVerifyVersionInfoA(&info, VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-        pVerSetConditionMask(pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL),
+    ret = VerifyVersionInfoA(&info, VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+        VerSetConditionMask(VerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL),
             VER_MAJORVERSION, VER_GREATER_EQUAL));
     ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
 
     info.dwMinorVersion = 0;
     info.wServicePackMajor = 10;
-    ret = pVerifyVersionInfoA(&info, VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-        pVerSetConditionMask(pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL),
+    ret = VerifyVersionInfoA(&info, VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+        VerSetConditionMask(VerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL),
             VER_MAJORVERSION, VER_GREATER_EQUAL));
     ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
 
     info.wServicePackMajor = 0;
     info.wServicePackMinor = 10;
-    ret = pVerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-        pVerSetConditionMask(pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL),
+    ret = VerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+        VerSetConditionMask(VerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL),
             VER_MAJORVERSION, VER_GREATER_EQUAL));
     ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
-
-    info.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXA);
-    GetVersionExA((OSVERSIONINFOA *)&info);
-    info.wServicePackMinor++;
-    SetLastError(0xdeadbeef);
-    ret = pVerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-        pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL));
-    error = GetLastError();
-    ok(!ret, "VerifyVersionInfoA succeeded\n");
-    ok(error == ERROR_OLD_WIN_VERSION || broken(error == ERROR_BAD_ARGUMENTS) /* some wink2 */,
-       "VerifyVersionInfoA should have failed with ERROR_OLD_WIN_VERSION instead of %d\n", error);
-
-    if (servicepack == 0)
-    {
-        skip("There is no ServicePack on this system\n");
-    }
-    else
-    {
-        info.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXA);
-        GetVersionExA((OSVERSIONINFOA *)&info);
-        info.wServicePackMajor--;
-        ret = pVerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-            pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER));
-        ok(ret || broken(!ret) /* some win2k */, "VerifyVersionInfoA failed with error %d\n", GetLastError());
-
-        info.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXA);
-        GetVersionExA((OSVERSIONINFOA *)&info);
-        info.wServicePackMajor--;
-        ret = pVerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-            pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL));
-        ok(ret || broken(!ret) /* some win2k */, "VerifyVersionInfoA failed with error %d\n", GetLastError());
-    }
-
-    info.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXA);
-    GetVersionExA((OSVERSIONINFOA *)&info);
-    info.wServicePackMajor++;
-    ret = pVerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-        pVerSetConditionMask(0, VER_MINORVERSION, VER_LESS));
-    ok(ret || broken(!ret) /* some win2k */, "VerifyVersionInfoA failed with error %d\n", GetLastError());
-
-    info.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXA);
-    GetVersionExA((OSVERSIONINFOA *)&info);
-    info.wServicePackMajor++;
-    ret = pVerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-        pVerSetConditionMask(0, VER_MINORVERSION, VER_LESS_EQUAL));
-    ok(ret || broken(!ret) /* some win2k */, "VerifyVersionInfoA failed with error %d\n", GetLastError());
-
-    info.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXA);
-    GetVersionExA((OSVERSIONINFOA *)&info);
-    info.wServicePackMajor--;
-    SetLastError(0xdeadbeef);
-    ret = pVerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-        pVerSetConditionMask(0, VER_MINORVERSION, VER_EQUAL));
-    error = GetLastError();
-    ok(!ret, "VerifyVersionInfoA succeeded\n");
-    ok(error == ERROR_OLD_WIN_VERSION || broken(error == ERROR_BAD_ARGUMENTS) /* some win2k */,
-       "VerifyVersionInfoA should have failed with ERROR_OLD_WIN_VERSION instead of %d\n", error);
-
-    /* test the failure hierarchy for the four version fields */
-
-    info.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXA);
-    GetVersionExA((OSVERSIONINFOA *)&info);
-    info.wServicePackMajor++;
-    SetLastError(0xdeadbeef);
-    ret = pVerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-        pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL));
-    error = GetLastError();
-    ok(!ret, "VerifyVersionInfoA succeeded\n");
-    ok(error == ERROR_OLD_WIN_VERSION || broken(error == ERROR_BAD_ARGUMENTS) /* some win2k */,
-       "VerifyVersionInfoA should have failed with ERROR_OLD_WIN_VERSION instead of %d\n", error);
-
-    info.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXA);
-    GetVersionExA((OSVERSIONINFOA *)&info);
-    info.dwMinorVersion++;
-    SetLastError(0xdeadbeef);
-    ret = pVerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-        pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL));
-    error = GetLastError();
-    ok(!ret, "VerifyVersionInfoA succeeded\n");
-    ok(error == ERROR_OLD_WIN_VERSION || broken(error == ERROR_BAD_ARGUMENTS) /* some win2k */,
-       "VerifyVersionInfoA should have failed with ERROR_OLD_WIN_VERSION instead of %d\n", error);
-
-    info.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXA);
-    GetVersionExA((OSVERSIONINFOA *)&info);
-    info.dwMajorVersion++;
-    SetLastError(0xdeadbeef);
-    ret = pVerifyVersionInfoA(&info, VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-        pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL));
-    error = GetLastError();
-    ok(!ret, "VerifyVersionInfoA succeeded\n");
-    ok(error == ERROR_OLD_WIN_VERSION || broken(error == ERROR_BAD_ARGUMENTS) /* some win2k */,
-       "VerifyVersionInfoA should have failed with ERROR_OLD_WIN_VERSION instead of %d\n", error);
-
-    ret = pVerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-        pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL));
-    ok(ret || broken(!ret) /* some win2k */, "VerifyVersionInfoA failed with error %d\n", GetLastError());
-
-    info.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXA);
-    GetVersionExA((OSVERSIONINFOA *)&info);
-    info.dwBuildNumber++;
-    SetLastError(0xdeadbeef);
-    ret = pVerifyVersionInfoA(&info, VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-        pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL));
-    error = GetLastError();
-    ok(!ret, "VerifyVersionInfoA succeeded\n");
-    ok(error == ERROR_OLD_WIN_VERSION || broken(error == ERROR_BAD_ARGUMENTS) /* some win2k */,
-       "VerifyVersionInfoA should have failed with ERROR_OLD_WIN_VERSION instead of %d\n", error);
-
-    ret = pVerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-        pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL));
-    ok(ret || broken(!ret) /* some win2k */, "VerifyVersionInfoA failed with error %d\n", GetLastError());
 
     /* test bad dwOSVersionInfoSize */
     info.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXA);
     GetVersionExA((OSVERSIONINFOA *)&info);
     info.dwOSVersionInfoSize = 0;
-    ret = pVerifyVersionInfoA(&info, VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-        pVerSetConditionMask(0, VER_MAJORVERSION, VER_GREATER_EQUAL));
-    ok(ret || broken(!ret) /* some win2k */, "VerifyVersionInfoA failed with error %d\n", GetLastError());
+    ret = VerifyVersionInfoA(&info, VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+        VerSetConditionMask(0, VER_MAJORVERSION, VER_GREATER_EQUAL));
+    ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
+}
+
+static void test_GetSystemFirmwareTable(void)
+{
+    static const ULONG min_sfti_len = FIELD_OFFSET(SYSTEM_FIRMWARE_TABLE_INFORMATION, TableBuffer);
+    ULONG expected_len;
+    UINT len;
+    SYSTEM_FIRMWARE_TABLE_INFORMATION *sfti;
+    UCHAR *smbios_table;
+
+    if (!pGetSystemFirmwareTable)
+    {
+        win_skip("GetSystemFirmwareTable not available\n");
+        return;
+    }
+
+    sfti = HeapAlloc(GetProcessHeap(), 0, min_sfti_len);
+    ok(!!sfti, "Failed to allocate memory\n");
+    sfti->ProviderSignature = RSMB;
+    sfti->Action = SystemFirmwareTable_Get;
+    sfti->TableID = 0;
+    pNtQuerySystemInformation(SystemFirmwareTableInformation, sfti, min_sfti_len, &expected_len);
+    if (expected_len == 0) /* xp, 2003 */
+    {
+        win_skip("SystemFirmwareTableInformation is not available\n");
+        HeapFree(GetProcessHeap(), 0, sfti);
+        return;
+    }
+    sfti = HeapReAlloc(GetProcessHeap(), 0, sfti, expected_len);
+    ok(!!sfti, "Failed to allocate memory\n");
+    pNtQuerySystemInformation(SystemFirmwareTableInformation, sfti, expected_len, &expected_len);
+
+    expected_len -= min_sfti_len;
+    smbios_table = HeapAlloc(GetProcessHeap(), 0, expected_len);
+    len = pGetSystemFirmwareTable(RSMB, 0, smbios_table, expected_len);
+    ok(len == expected_len, "Expected length %u, got %u\n", expected_len, len);
+    ok(len == 0 || !memcmp(smbios_table, sfti->TableBuffer, 6),
+       "Expected prologue %02x %02x %02x %02x %02x %02x, got %02x %02x %02x %02x %02x %02x\n",
+       sfti->TableBuffer[0], sfti->TableBuffer[1], sfti->TableBuffer[2],
+       sfti->TableBuffer[3], sfti->TableBuffer[4], sfti->TableBuffer[5],
+       smbios_table[0], smbios_table[1], smbios_table[2],
+       smbios_table[3], smbios_table[4], smbios_table[5]);
+
+    HeapFree(GetProcessHeap(), 0, sfti);
+    HeapFree(GetProcessHeap(), 0, smbios_table);
 }
 
 START_TEST(version)
@@ -372,4 +758,5 @@ START_TEST(version)
     test_GetProductInfo();
     test_GetVersionEx();
     test_VerifyVersionInfo();
+    test_GetSystemFirmwareTable();
 }

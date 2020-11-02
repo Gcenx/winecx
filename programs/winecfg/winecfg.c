@@ -62,14 +62,12 @@ void set_window_title(HWND dialog)
     if (current_app)
     {
         WCHAR apptitle[256];
-        LoadStringW (GetModuleHandleW(NULL), IDS_WINECFG_TITLE_APP, apptitle,
-            sizeof(apptitle)/sizeof(apptitle[0]));
+        LoadStringW(GetModuleHandleW(NULL), IDS_WINECFG_TITLE_APP, apptitle, ARRAY_SIZE(apptitle));
         wsprintfW (newtitle, apptitle, current_app);
     }
     else
     {
-        LoadStringW (GetModuleHandleW(NULL), IDS_WINECFG_TITLE, newtitle,
-            sizeof(newtitle)/sizeof(newtitle[0]));
+        LoadStringW(GetModuleHandleW(NULL), IDS_WINECFG_TITLE, newtitle, ARRAY_SIZE(newtitle));
     }
 
     WINE_TRACE("setting title to %s\n", wine_dbgstr_w (newtitle));
@@ -83,7 +81,7 @@ WCHAR* load_string (UINT id)
     int len;
     WCHAR* newStr;
 
-    LoadStringW (GetModuleHandleW(NULL), id, buf, sizeof(buf)/sizeof(buf[0]));
+    LoadStringW(GetModuleHandleW(NULL), id, buf, ARRAY_SIZE(buf));
 
     len = lstrlenW (buf);
     newStr = HeapAlloc (GetProcessHeap(), 0, (len + 1) * sizeof (WCHAR));
@@ -477,7 +475,7 @@ static WCHAR **enumerate_valuesW(HKEY root, WCHAR *path)
         while (TRUE)
         {
             WCHAR name[1024];
-            DWORD namesize = sizeof(name)/sizeof(name[0]);
+            DWORD namesize = ARRAY_SIZE(name);
             BOOL removed = FALSE;
 
             /* find out the needed size, allocate a buffer, read the value  */
@@ -571,7 +569,7 @@ char **enumerate_values(HKEY root, char *path)
     WCHAR *wpath;
     WCHAR **wret;
     char **ret=NULL;
-    int i=0, len=0;
+    int i=0, len=0, size;
 
     wpath = HeapAlloc(GetProcessHeap(), 0, (strlen(path)+1)*sizeof(WCHAR));
     MultiByteToWideChar(CP_ACP, 0, path, -1, wpath, strlen(path)+1);
@@ -586,11 +584,13 @@ char **enumerate_values(HKEY root, char *path)
         /* convert WCHAR ** to char ** and HeapFree each WCHAR * element on our way */
         for (i=0; i<len; i++)
         {
-            ret[i] = HeapAlloc(GetProcessHeap(), 0,
-                               (lstrlenW(wret[i]) + 1) * sizeof(char));
-            WideCharToMultiByte(CP_ACP, 0, wret[i], -1, ret[i],
-                                lstrlenW(wret[i]) + 1, NULL, NULL);
-            HeapFree(GetProcessHeap(), 0, wret[i]);
+            size = WideCharToMultiByte(CP_ACP, 0, wret[i], -1, NULL, 0, NULL, NULL);
+            if(size)
+            {
+                ret[i] = HeapAlloc(GetProcessHeap(), 0, size);
+                WideCharToMultiByte(CP_ACP, 0, wret[i], -1, ret[i], size, NULL, NULL);
+                HeapFree(GetProcessHeap(), 0, wret[i]);
+            }
         }
         ret[len] = NULL;
     }

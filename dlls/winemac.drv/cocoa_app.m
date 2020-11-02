@@ -291,6 +291,13 @@ static NSString* WineLocalizedString(unsigned int stringID)
 
             [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
             [NSApp activateIgnoringOtherApps:YES];
+#if defined(MAC_OS_X_VERSION_10_9) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_9
+            if (!enable_app_nap && [NSProcessInfo instancesRespondToSelector:@selector(beginActivityWithOptions:reason:)])
+            {
+                [[[NSProcessInfo processInfo] beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep
+                                                                reason:@"Running Windows program"] retain]; // intentional leak
+            }
+#endif
 
             /* CrossOver Hack #15388 */
             static BOOL created_main_menu;
@@ -924,7 +931,6 @@ static NSString* WineLocalizedString(unsigned int stringID)
         }
         else
         {
-            BOOL active = [NSApp isActive];
             CGDisplayModeRef currentMode;
             NSArray* modes;
 
@@ -946,6 +952,10 @@ static NSString* WineLocalizedString(unsigned int stringID)
             modes = [self modesMatchingMode:mode forDisplay:displayID];
             if (!modes.count)
                 return FALSE;
+
+            [self transformProcessToForeground];
+
+            BOOL active = [NSApp isActive];
 
             if ([originalDisplayModes count] || displaysCapturedForFullscreen ||
                 !active || CGCaptureAllDisplays() == CGDisplayNoErr)
@@ -1073,12 +1083,14 @@ static NSString* WineLocalizedString(unsigned int stringID)
     {
         NSDictionary* frame = [cursorFrames objectAtIndex:cursorFrame];
         CGImageRef cgimage = (CGImageRef)[frame objectForKey:@"image"];
-        NSImage* image = [[NSImage alloc] initWithCGImage:cgimage size:NSZeroSize];
+        CGSize size = CGSizeMake(CGImageGetWidth(cgimage), CGImageGetHeight(cgimage));
+        NSImage* image = [[NSImage alloc] initWithCGImage:cgimage size:NSSizeFromCGSize(cgsize_mac_from_win(size))];
         CFDictionaryRef hotSpotDict = (CFDictionaryRef)[frame objectForKey:@"hotSpot"];
         CGPoint hotSpot;
 
         if (!CGPointMakeWithDictionaryRepresentation(hotSpotDict, &hotSpot))
             hotSpot = CGPointZero;
+        hotSpot = cgpoint_mac_from_win(hotSpot);
         self.cursor = [[[NSCursor alloc] initWithImage:image hotSpot:NSPointFromCGPoint(hotSpot)] autorelease];
         [image release];
         [self unhideCursor];

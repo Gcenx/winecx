@@ -303,7 +303,7 @@ static const style_tbl_entry_t style_tbl[] = {
     {attrZIndex,               DISPID_IHTMLSTYLE_ZINDEX}
 };
 
-C_ASSERT(sizeof(style_tbl)/sizeof(*style_tbl) == STYLEID_MAX_VALUE);
+C_ASSERT(ARRAY_SIZE(style_tbl) == STYLEID_MAX_VALUE);
 
 static const WCHAR valLineThrough[] =
     {'l','i','n','e','-','t','h','r','o','u','g','h',0};
@@ -323,7 +323,7 @@ static const WCHAR emptyW[] = {0};
 
 static const style_tbl_entry_t *lookup_style_tbl(const WCHAR *name)
 {
-    int c, i, min = 0, max = sizeof(style_tbl)/sizeof(*style_tbl)-1;
+    int c, i, min = 0, max = ARRAY_SIZE(style_tbl)-1;
 
     while(min <= max) {
         i = (min+max)/2;
@@ -388,7 +388,7 @@ static LPWSTR fix_url_value(LPCWSTR val)
 
     static const WCHAR urlW[] = {'u','r','l','('};
 
-    if(strncmpW(val, urlW, sizeof(urlW)/sizeof(WCHAR)) || !strchrW(val, '\\'))
+    if(strncmpW(val, urlW, ARRAY_SIZE(urlW)) || !strchrW(val, '\\'))
         return NULL;
 
     ret = heap_strdupW(val);
@@ -628,7 +628,7 @@ static HRESULT check_style_attr_value(HTMLStyle *This, styleid_t sid, LPCWSTR ex
     get_nsstyle_attr_nsval(This->nsstyle, sid, &str_value);
 
     nsAString_GetData(&str_value, &value);
-    *p = strcmpW(value, exval) ? VARIANT_FALSE : VARIANT_TRUE;
+    *p = variant_bool(!strcmpW(value, exval));
     nsAString_Finish(&str_value);
 
     TRACE("%s -> %x\n", debugstr_w(style_tbl[sid].name), *p);
@@ -1250,7 +1250,7 @@ static HRESULT WINAPI HTMLStyle_put_backgroundPositionY(IHTMLStyle *iface, VARIA
 
             TRACE("no space in %s\n", debugstr_w(pos));
             pos = zero_pxW;
-            space = pos + sizeof(zero_pxW)/sizeof(WCHAR)-1;
+            space = pos + ARRAY_SIZE(zero_pxW)-1;
         }
 
         posx_len = space-pos;
@@ -2718,7 +2718,7 @@ static void update_filter(HTMLStyle *This)
             continue;
         }
 
-        if(ptr2 + sizeof(alphaW)/sizeof(WCHAR) == ptr && !memcmp(ptr2, alphaW, sizeof(alphaW))) {
+        if(ptr2 + ARRAY_SIZE(alphaW) == ptr && !memcmp(ptr2, alphaW, sizeof(alphaW))) {
             static const WCHAR formatW[] = {'%','f',0};
             static const WCHAR opacityW[] = {'o','p','a','c','i','t','y','='};
 
@@ -2735,11 +2735,11 @@ static void update_filter(HTMLStyle *This)
                     break;
                 }
 
-                if(ptr-ptr2 > sizeof(opacityW)/sizeof(WCHAR) && !memcmp(ptr2, opacityW, sizeof(opacityW))) {
+                if(ptr-ptr2 > ARRAY_SIZE(opacityW) && !memcmp(ptr2, opacityW, sizeof(opacityW))) {
                     float fval = 0.0f, e = 0.1f;
                     WCHAR buf[32];
 
-                    ptr2 += sizeof(opacityW)/sizeof(WCHAR);
+                    ptr2 += ARRAY_SIZE(opacityW);
 
                     while(isdigitW(*ptr2))
                         fval = fval*10.0f + (float)(*ptr2++ - '0');
@@ -2915,19 +2915,19 @@ static HRESULT WINAPI HTMLStyle_removeAttribute(IHTMLStyle *iface, BSTR strAttri
             return S_OK;
         }
 
-        for(i=0; i < sizeof(style_tbl)/sizeof(*style_tbl); i++) {
+        for(i=0; i < ARRAY_SIZE(style_tbl); i++) {
             if(dispid == style_tbl[i].dispid)
                 break;
         }
 
-        if(i == sizeof(style_tbl)/sizeof(*style_tbl))
+        if(i == ARRAY_SIZE(style_tbl))
             return remove_attribute(&This->dispex, dispid, pfSuccess);
         style_entry = style_tbl+i;
     }
 
     /* filter property is a special case */
     if(style_entry->dispid == DISPID_IHTMLSTYLE_FILTER) {
-        *pfSuccess = This->elem->filter && *This->elem->filter ? VARIANT_TRUE : VARIANT_FALSE;
+        *pfSuccess = variant_bool(This->elem->filter && *This->elem->filter);
         heap_free(This->elem->filter);
         This->elem->filter = NULL;
         update_filter(This);
@@ -2940,7 +2940,7 @@ static HRESULT WINAPI HTMLStyle_removeAttribute(IHTMLStyle *iface, BSTR strAttri
     if(NS_SUCCEEDED(nsres)) {
         const PRUnichar *ret;
         nsAString_GetData(&ret_str, &ret);
-        *pfSuccess = *ret ? VARIANT_TRUE : VARIANT_FALSE;
+        *pfSuccess = variant_bool(*ret);
     }else {
         ERR("RemoveProperty failed: %08x\n", nsres);
     }
@@ -3256,7 +3256,7 @@ static HRESULT WINAPI HTMLStyle2_put_behavior(IHTMLStyle2 *iface, BSTR v)
 {
     HTMLStyle *This = impl_from_IHTMLStyle2(iface);
     FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLStyle2_get_behavior(IHTMLStyle2 *iface, BSTR *p)
@@ -4701,12 +4701,12 @@ static HRESULT get_style_from_elem(HTMLElement *elem, nsIDOMCSSStyleDeclaration 
     nsIDOMElementCSSInlineStyle *nselemstyle;
     nsresult nsres;
 
-    if(!elem->nselem) {
-        FIXME("NULL nselem\n");
+    if(!elem->dom_element) {
+        FIXME("comment element\n");
         return E_NOTIMPL;
     }
 
-    nsres = nsIDOMHTMLElement_QueryInterface(elem->nselem, &IID_nsIDOMElementCSSInlineStyle,
+    nsres = nsIDOMElement_QueryInterface(elem->dom_element, &IID_nsIDOMElementCSSInlineStyle,
             (void**)&nselemstyle);
     assert(nsres == NS_OK);
 

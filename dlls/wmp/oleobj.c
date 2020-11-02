@@ -20,6 +20,7 @@
 #include "olectl.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wmp);
 
@@ -219,6 +220,8 @@ static HRESULT WINAPI OleObject_QueryInterface(IOleObject *iface, REFIID riid, v
 {
     WindowsMediaPlayer *This = impl_from_IOleObject(iface);
 
+    *ppv = NULL;
+
     if(IsEqualGUID(riid, &IID_IUnknown)) {
         TRACE("(%p)->(IID_IUnknown %p)\n", This, ppv);
         *ppv = &This->IOleObject_iface;
@@ -261,15 +264,23 @@ static HRESULT WINAPI OleObject_QueryInterface(IOleObject *iface, REFIID riid, v
     }else if(IsEqualGUID(riid, &IID_IWMPPlayer4)) {
         TRACE("(%p)->(IID_IWMPPlayer4 %p)\n", This, ppv);
         *ppv = &This->IWMPPlayer4_iface;
+    }else if(IsEqualGUID(riid, &IID_IWMPPlayer)) {
+        TRACE("(%p)->(IID_IWMPPlayer %p)\n", This, ppv);
+        *ppv = &This->IWMPPlayer_iface;
     }else if(IsEqualGUID(riid, &IID_IWMPSettings)) {
         TRACE("(%p)->(IID_IWMPSettings %p)\n", This, ppv);
         *ppv = &This->IWMPSettings_iface;
     }else if(IsEqualGUID(riid, &IID_IOleControl)) {
         TRACE("(%p)->(IID_IOleControl %p)\n", This, ppv);
         *ppv = &This->IOleControl_iface;
+    }else if(IsEqualGUID(riid, &IID_IMarshal)) {
+        TRACE("(%p)->(IID_IMarshal %p)\n", This, ppv);
+        return E_NOINTERFACE;
+    }else if(IsEqualGUID(riid, &IID_IQuickActivate)) {
+        TRACE("(%p)->(IID_IQuickActivate %p)\n", This, ppv);
+        return E_NOINTERFACE;
     }else {
         FIXME("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppv);
-        *ppv = NULL;
         return E_NOINTERFACE;
     }
 
@@ -296,6 +307,8 @@ static ULONG WINAPI OleObject_Release(IOleObject *iface)
 
     if(!ref) {
         release_client_site(This);
+        destroy_player(This);
+        ConnectionPointContainer_Destroy(This);
         heap_free(This);
     }
 
@@ -457,15 +470,27 @@ static HRESULT WINAPI OleObject_GetUserType(IOleObject *iface, DWORD dwFormOfTyp
 static HRESULT WINAPI OleObject_SetExtent(IOleObject *iface, DWORD dwDrawAspect, SIZEL *psizel)
 {
     WindowsMediaPlayer *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%d %p)\n", This, dwDrawAspect, psizel);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%d %p)\n", This, dwDrawAspect, psizel);
+
+    if(dwDrawAspect != DVASPECT_CONTENT)
+        return DV_E_DVASPECT;
+
+    This->extent = *psizel;
+    return S_OK;
 }
 
 static HRESULT WINAPI OleObject_GetExtent(IOleObject *iface, DWORD dwDrawAspect, SIZEL *psizel)
 {
     WindowsMediaPlayer *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%d %p)\n", This, dwDrawAspect, psizel);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%d %p)\n", This, dwDrawAspect, psizel);
+
+    if(dwDrawAspect != DVASPECT_CONTENT)
+        return E_FAIL;
+
+    *psizel = This->extent;
+    return S_OK;
 }
 
 static HRESULT WINAPI OleObject_Advise(IOleObject *iface, IAdviseSink *pAdvSink, DWORD *pdwConnection)
@@ -852,59 +877,12 @@ static const IPersistStreamInitVtbl PersistStreamInitVtbl = {
     PersistStreamInit_InitNew
 };
 
-static inline WindowsMediaPlayer *impl_from_IConnectionPointContainer(IConnectionPointContainer *iface)
-{
-    return CONTAINING_RECORD(iface, WindowsMediaPlayer, IConnectionPointContainer_iface);
-}
-
-static HRESULT WINAPI ConnectionPointContainer_QueryInterface(IConnectionPointContainer *iface,
-        REFIID riid, LPVOID *ppv)
-{
-    WindowsMediaPlayer *This = impl_from_IConnectionPointContainer(iface);
-    return IOleObject_QueryInterface(&This->IOleObject_iface, riid, ppv);
-}
-
-static ULONG WINAPI ConnectionPointContainer_AddRef(IConnectionPointContainer *iface)
-{
-    WindowsMediaPlayer *This = impl_from_IConnectionPointContainer(iface);
-    return IOleObject_AddRef(&This->IOleObject_iface);
-}
-
-static ULONG WINAPI ConnectionPointContainer_Release(IConnectionPointContainer *iface)
-{
-    WindowsMediaPlayer *This = impl_from_IConnectionPointContainer(iface);
-    return IOleObject_Release(&This->IOleObject_iface);
-}
-
-static HRESULT WINAPI ConnectionPointContainer_EnumConnectionPoints(IConnectionPointContainer *iface,
-        IEnumConnectionPoints **ppEnum)
-{
-    WindowsMediaPlayer *This = impl_from_IConnectionPointContainer(iface);
-    FIXME("(%p)->(%p)\n", This, ppEnum);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI ConnectionPointContainer_FindConnectionPoint(IConnectionPointContainer *iface,
-        REFIID riid, IConnectionPoint **ppCP)
-{
-    WindowsMediaPlayer *This = impl_from_IConnectionPointContainer(iface);
-    FIXME("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppCP);
-    return CONNECT_E_NOCONNECTION;
-}
-
-static const IConnectionPointContainerVtbl ConnectionPointContainerVtbl =
-{
-    ConnectionPointContainer_QueryInterface,
-    ConnectionPointContainer_AddRef,
-    ConnectionPointContainer_Release,
-    ConnectionPointContainer_EnumConnectionPoints,
-    ConnectionPointContainer_FindConnectionPoint
-};
-
 HRESULT WINAPI WMPFactory_CreateInstance(IClassFactory *iface, IUnknown *outer,
         REFIID riid, void **ppv)
 {
     WindowsMediaPlayer *wmp;
+    DWORD dpi_x, dpi_y;
+    HDC hdc;
     HRESULT hres;
 
     TRACE("(%p %s %p)\n", outer, debugstr_guid(riid), ppv);
@@ -917,14 +895,24 @@ HRESULT WINAPI WMPFactory_CreateInstance(IClassFactory *iface, IUnknown *outer,
     wmp->IProvideClassInfo2_iface.lpVtbl = &ProvideClassInfo2Vtbl;
     wmp->IPersistStreamInit_iface.lpVtbl = &PersistStreamInitVtbl;
     wmp->IOleInPlaceObjectWindowless_iface.lpVtbl = &OleInPlaceObjectWindowlessVtbl;
-    wmp->IConnectionPointContainer_iface.lpVtbl = &ConnectionPointContainerVtbl;
     wmp->IOleControl_iface.lpVtbl = &OleControlVtbl;
 
     wmp->ref = 1;
 
-    init_player_ifaces(wmp);
+    if (init_player(wmp)) {
+        ConnectionPointContainer_Init(wmp);
+        hdc = GetDC(0);
+        dpi_x = GetDeviceCaps(hdc, LOGPIXELSX);
+        dpi_y = GetDeviceCaps(hdc, LOGPIXELSY);
+        ReleaseDC(0, hdc);
 
-    hres = IOleObject_QueryInterface(&wmp->IOleObject_iface, riid, ppv);
+        wmp->extent.cx = MulDiv(192, 2540, dpi_x);
+        wmp->extent.cy = MulDiv(192, 2540, dpi_y);
+
+        hres = IOleObject_QueryInterface(&wmp->IOleObject_iface, riid, ppv);
+    } else {
+        hres = E_FAIL;
+    }
     IOleObject_Release(&wmp->IOleObject_iface);
     return hres;
 }

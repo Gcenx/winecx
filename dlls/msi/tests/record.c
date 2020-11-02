@@ -138,7 +138,7 @@ static void test_msirecord(void)
     ok(buf[0] == 0, "MsiRecordGetStringA returned the wrong string\n");
     ok(sz == 0, "MsiRecordGetStringA returned the wrong length\n");
     bufW[0] = 0;
-    sz = sizeof bufW / sizeof bufW[0];
+    sz = ARRAY_SIZE(bufW);
     r = MsiRecordGetStringW(h, 0, bufW, &sz);
     ok(r == ERROR_SUCCESS, "Failed to get string at 0\n");
     ok(bufW[0] == 0, "MsiRecordGetStringW returned the wrong string\n");
@@ -156,11 +156,26 @@ static void test_msirecord(void)
     ok(buf[0] == 0, "MsiRecordGetStringA returned the wrong string\n");
     ok(sz == 0, "MsiRecordGetStringA returned the wrong length\n");
     bufW[0] = 0;
-    sz = sizeof bufW / sizeof bufW[0];
+    sz = ARRAY_SIZE(bufW);
     r = MsiRecordGetStringW(h, 0, bufW, &sz);
     ok(r == ERROR_SUCCESS, "Failed to get string at 0\n");
     ok(bufW[0] == 0, "MsiRecordGetStringW returned the wrong string\n");
     ok(sz == 0, "MsiRecordGetStringW returned the wrong length\n");
+
+    /* same record, but add a null integer to it */
+    r = MsiRecordSetInteger(h, 0, 1);
+    ok(r == ERROR_SUCCESS, "Failed to set integer at 0\n");
+    r = MsiRecordIsNull(h, 0);
+    ok(r == FALSE, "expected field to be non-null\n");
+    r = MsiRecordSetInteger(h, 0, MSI_NULL_INTEGER);
+    ok(r == ERROR_SUCCESS, "Failed to set integer at 0\n");
+    r = MsiRecordIsNull(h, 0);
+    ok(r == TRUE, "expected field to be null\n");
+    sz = sizeof buf;
+    r = MsiRecordGetStringA(h, 0, buf, &sz);
+    ok(r == ERROR_SUCCESS, "Failed to get string at 0\n");
+    ok(buf[0] == 0, "MsiRecordGetStringA returned the wrong string\n");
+    ok(sz == 0, "MsiRecordGetStringA returned the wrong length\n");
 
     /* same record, but add a string to it */
     r = MsiRecordSetStringA(h,0,str);
@@ -431,7 +446,7 @@ static void test_MsiRecordGetString(void)
     r = MsiRecordGetStringA(rec, 1, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "5"), "Expected \"5\", got \"%s\"\n", buf);
-    ok(sz == 1, "Expectd 1, got %d\n", sz);
+    ok(sz == 1, "Expected 1, got %d\n", sz);
 
     r = MsiRecordSetInteger(rec, 1, -5);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -441,7 +456,7 @@ static void test_MsiRecordGetString(void)
     r = MsiRecordGetStringA(rec, 1, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "-5"), "Expected \"-5\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expectd 2, got %d\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     MsiCloseHandle(rec);
 }
@@ -495,7 +510,7 @@ static void test_fieldzero(void)
     r = MsiRecordGetStringA(rec, 0, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expectd 0, got %d\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     r = MsiRecordIsNull(rec, 0);
     ok(r == TRUE, "Expected TRUE, got %d\n", r);
@@ -514,7 +529,7 @@ static void test_fieldzero(void)
     r = MsiRecordGetStringA(rec, 0, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expectd 0, got %d\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     r = MsiRecordIsNull(rec, 0);
     ok(r == TRUE, "Expected TRUE, got %d\n", r);
@@ -533,7 +548,7 @@ static void test_fieldzero(void)
     r = MsiRecordGetStringA(rec, 0, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expectd 0, got %d\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     r = MsiRecordIsNull(rec, 0);
     ok(r == TRUE, "Expected TRUE, got %d\n", r);
@@ -543,7 +558,7 @@ static void test_fieldzero(void)
     r = MsiRecordGetStringA(rec, 1, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "bologna"), "Expected \"bologna\", got \"%s\"\n", buf);
-    ok(sz == 7, "Expectd 7, got %d\n", sz);
+    ok(sz == 7, "Expected 7, got %d\n", sz);
 
     MsiCloseHandle(rec);
 
@@ -584,7 +599,7 @@ static void test_fieldzero(void)
     r = MsiRecordGetStringA(rec, 0, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "drone"), "Expected \"drone\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expectd 5, got %d\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     r = MsiRecordIsNull(rec, 0);
     ok(r == FALSE, "Expected FALSE, got %d\n", r);

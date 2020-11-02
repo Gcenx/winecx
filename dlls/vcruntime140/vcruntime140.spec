@@ -6,19 +6,19 @@
 @ stub _NLG_Dispatch2
 @ stub _NLG_Return
 @ stub _NLG_Return2
-@ stub _SetWinRTOutOfMemoryExceptionCallback
+@ cdecl _SetWinRTOutOfMemoryExceptionCallback(ptr) ucrtbase._SetWinRTOutOfMemoryExceptionCallback
 @ cdecl __AdjustPointer(ptr ptr) ucrtbase.__AdjustPointer
 @ stub __BuildCatchObject
 @ stub __BuildCatchObjectHelper
 @ stdcall -arch=x86_64 __C_specific_handler(ptr long ptr ptr) ucrtbase.__C_specific_handler
 @ stub __C_specific_handler_noexcept
-@ cdecl -arch=i386,x86_64,arm __CxxDetectRethrow(ptr) ucrtbase.__CxxDetectRethrow
-@ cdecl -arch=i386,x86_64,arm __CxxExceptionFilter(ptr ptr long ptr) ucrtbase.__CxxExceptionFilter
-@ cdecl -arch=i386,x86_64,arm -norelay __CxxFrameHandler(ptr ptr ptr ptr) ucrtbase.__CxxFrameHandler
-@ cdecl -arch=i386,x86_64,arm -norelay __CxxFrameHandler2(ptr ptr ptr ptr) ucrtbase.__CxxFrameHandler2
-@ cdecl -arch=i386,x86_64,arm -norelay __CxxFrameHandler3(ptr ptr ptr ptr) ucrtbase.__CxxFrameHandler3
+@ cdecl -arch=i386,x86_64,arm,arm64 __CxxDetectRethrow(ptr) ucrtbase.__CxxDetectRethrow
+@ cdecl -arch=i386,x86_64,arm,arm64 __CxxExceptionFilter(ptr ptr long ptr) ucrtbase.__CxxExceptionFilter
+@ cdecl -arch=i386,x86_64,arm,arm64 -norelay __CxxFrameHandler(ptr ptr ptr ptr) ucrtbase.__CxxFrameHandler
+@ cdecl -arch=i386,x86_64,arm,arm64 -norelay __CxxFrameHandler2(ptr ptr ptr ptr) ucrtbase.__CxxFrameHandler2
+@ cdecl -arch=i386,x86_64,arm,arm64 -norelay __CxxFrameHandler3(ptr ptr ptr ptr) ucrtbase.__CxxFrameHandler3
 @ stdcall -arch=i386 __CxxLongjmpUnwind(ptr) ucrtbase.__CxxLongjmpUnwind
-@ cdecl -arch=i386,x86_64,arm __CxxQueryExceptionSize() ucrtbase.__CxxQueryExceptionSize
+@ cdecl -arch=i386,x86_64,arm,arm64 __CxxQueryExceptionSize() ucrtbase.__CxxQueryExceptionSize
 @ cdecl __CxxRegisterExceptionObject(ptr ptr) ucrtbase.__CxxRegisterExceptionObject
 @ cdecl __CxxUnregisterExceptionObject(ptr long) ucrtbase.__CxxUnregisterExceptionObject
 @ cdecl __DestructExceptionObject(ptr) ucrtbase.__DestructExceptionObject
@@ -31,10 +31,10 @@
 @ cdecl __RTtypeid(ptr) ucrtbase.__RTtypeid
 @ stub __TypeMatch
 @ cdecl __current_exception() ucrtbase.__current_exception
-@ stub __current_exception_context
-@ cdecl -arch=i386,x86_64,arm -norelay __intrinsic_setjmp(ptr) ucrtbase.__intrinsic_setjmp
-@ stub __intrinsic_setjmpex
-@ stub __processing_throw
+@ cdecl __current_exception_context() ucrtbase.__current_exception_context
+@ cdecl -arch=i386,x86_64,arm,arm64 -norelay __intrinsic_setjmp(ptr) ucrtbase.__intrinsic_setjmp
+@ cdecl -arch=x86_64,arm64 -norelay __intrinsic_setjmpex(ptr ptr) ucrtbase.__intrinsic_setjmpex
+@ cdecl __processing_throw() ucrtbase.__processing_throw
 @ stub __report_gsfailure
 @ cdecl __std_exception_copy(ptr ptr) ucrtbase.__std_exception_copy
 @ cdecl __std_exception_destroy(ptr) ucrtbase.__std_exception_destroy
@@ -48,7 +48,7 @@
 @ cdecl __unDName(ptr str long ptr ptr long) ucrtbase.__unDName
 @ cdecl __unDNameEx(ptr str long ptr ptr ptr long) ucrtbase.__unDNameEx
 @ cdecl __uncaught_exception() ucrtbase.__uncaught_exception
-@ stub __uncaught_exceptions
+@ cdecl __uncaught_exceptions()
 @ stub __vcrt_GetModuleFileNameW
 @ stub __vcrt_GetModuleHandleW
 @ cdecl __vcrt_InitializeCriticalSectionEx(ptr long long)
@@ -57,7 +57,7 @@
 @ cdecl -arch=i386 _except_handler2(ptr ptr ptr ptr) ucrtbase._except_handler2
 @ cdecl -arch=i386 _except_handler3(ptr ptr ptr ptr) ucrtbase._except_handler3
 @ cdecl -arch=i386 _except_handler4_common(ptr ptr ptr ptr ptr ptr) ucrtbase._except_handler4_common
-@ stub _get_purecall_handler
+@ cdecl _get_purecall_handler() ucrtbase._get_purecall_handler
 @ cdecl _get_unexpected() ucrtbase._get_unexpected
 @ cdecl -arch=i386 _global_unwind2(ptr) ucrtbase._global_unwind2
 @ stub _is_exception_typeof
@@ -71,7 +71,7 @@
 @ cdecl _set_purecall_handler(ptr) ucrtbase._set_purecall_handler
 @ cdecl _set_se_translator(ptr) ucrtbase._set_se_translator
 @ cdecl -arch=i386 -norelay _setjmp3(ptr long) ucrtbase._setjmp3
-@ cdecl -arch=i386,x86_64,arm longjmp(ptr long) ucrtbase.longjmp
+@ cdecl -arch=i386,x86_64,arm,arm64 longjmp(ptr long) ucrtbase.longjmp
 @ cdecl memchr(ptr long long) ucrtbase.memchr
 @ cdecl memcmp(ptr ptr long) ucrtbase.memcmp
 @ cdecl memcpy(ptr ptr long) ucrtbase.memcpy

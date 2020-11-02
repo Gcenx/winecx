@@ -334,7 +334,7 @@ static HRESULT show_msgbox(script_ctx_t *ctx, BSTR prompt, unsigned type, BSTR o
                 return E_OUTOFMEMORY;
 
             memcpy(title_buf, vbscriptW, sizeof(vbscriptW));
-            ptr = title_buf + sizeof(vbscriptW)/sizeof(WCHAR)-1;
+            ptr = title_buf + ARRAY_SIZE(vbscriptW)-1;
 
             *ptr++ = ':';
             *ptr++ = ' ';
@@ -822,8 +822,40 @@ static HRESULT Global_LBound(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VA
 
 static HRESULT Global_UBound(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    SAFEARRAY *sa;
+    HRESULT hres;
+    LONG ubound;
+    int dim;
+
+    assert(args_cnt == 1 || args_cnt == 2);
+
+    TRACE("%s %s\n", debugstr_variant(arg), args_cnt == 2 ? debugstr_variant(arg + 1) : "1");
+
+    switch(V_VT(arg)) {
+    case VT_VARIANT|VT_ARRAY:
+        sa = V_ARRAY(arg);
+        break;
+    case VT_VARIANT|VT_ARRAY|VT_BYREF:
+        sa = *V_ARRAYREF(arg);
+        break;
+    default:
+        FIXME("arg %s not supported\n", debugstr_variant(arg));
+        return E_NOTIMPL;
+    }
+
+    if(args_cnt == 2) {
+        hres = to_int(arg + 1, &dim);
+        if(FAILED(hres))
+            return hres;
+    }else {
+        dim = 1;
+    }
+
+    hres = SafeArrayGetUBound(sa, dim, &ubound);
+    if(FAILED(hres))
+        return hres;
+
+    return return_int(res, ubound);
 }
 
 static HRESULT Global_RGB(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
@@ -1792,8 +1824,44 @@ static HRESULT Global_TypeName(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, 
 
 static HRESULT Global_Array(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    SAFEARRAYBOUND bounds;
+    SAFEARRAY *sa;
+    VARIANT *data;
+    HRESULT hres;
+    unsigned i;
+
+    TRACE("arg_cnt=%u\n", args_cnt);
+
+    bounds.lLbound = 0;
+    bounds.cElements = args_cnt;
+    sa = SafeArrayCreate(VT_VARIANT, 1, &bounds);
+    if(!sa)
+        return E_OUTOFMEMORY;
+
+    hres = SafeArrayAccessData(sa, (void**)&data);
+    if(FAILED(hres)) {
+        SafeArrayDestroy(sa);
+        return hres;
+    }
+
+    for(i=0; i<args_cnt; i++) {
+        hres = VariantCopyInd(data+i, arg+i);
+        if(FAILED(hres)) {
+            SafeArrayUnaccessData(sa);
+            SafeArrayDestroy(sa);
+            return hres;
+        }
+    }
+    SafeArrayUnaccessData(sa);
+
+    if(res) {
+        V_VT(res) = VT_ARRAY|VT_VARIANT;
+        V_ARRAY(res) = sa;
+    }else {
+        SafeArrayDestroy(sa);
+    }
+
+    return S_OK;
 }
 
 static HRESULT Global_Erase(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
@@ -2220,7 +2288,7 @@ static const builtin_prop_t global_props[] = {
     {DISPID_GLOBAL_RND,                       Global_Rnd, 0, 1},
     {DISPID_GLOBAL_TIMER,                     Global_Timer, 0, 0},
     {DISPID_GLOBAL_LBOUND,                    Global_LBound, 0, 1},
-    {DISPID_GLOBAL_UBOUND,                    Global_UBound, 0, 1},
+    {DISPID_GLOBAL_UBOUND,                    Global_UBound, 0, 1, 2},
     {DISPID_GLOBAL_RGB,                       Global_RGB, 0, 3},
     {DISPID_GLOBAL_LEN,                       Global_Len, 0, 1},
     {DISPID_GLOBAL_LENB,                      Global_LenB, 0, 1},
@@ -2272,7 +2340,7 @@ static const builtin_prop_t global_props[] = {
     {DISPID_GLOBAL_DATEDIFF,                  Global_DateDiff, 0, 3, 5},
     {DISPID_GLOBAL_DATEPART,                  Global_DatePart, 0, 2, 4},
     {DISPID_GLOBAL_TYPENAME,                  Global_TypeName, 0, 1},
-    {DISPID_GLOBAL_ARRAY,                     Global_Array, 0, 1},
+    {DISPID_GLOBAL_ARRAY,                     Global_Array, 0, 0, MAXDWORD},
     {DISPID_GLOBAL_ERASE,                     Global_Erase, 0, 1},
     {DISPID_GLOBAL_FILTER,                    Global_Filter, 0, 2, 4},
     {DISPID_GLOBAL_JOIN,                      Global_Join, 0, 1, 2},
@@ -2378,7 +2446,7 @@ HRESULT init_global(script_ctx_t *ctx)
     HRESULT hres;
 
     ctx->global_desc.ctx = ctx;
-    ctx->global_desc.builtin_prop_cnt = sizeof(global_props)/sizeof(*global_props);
+    ctx->global_desc.builtin_prop_cnt = ARRAY_SIZE(global_props);
     ctx->global_desc.builtin_props = global_props;
 
     hres = get_typeinfo(GlobalObj_tid, &ctx->global_desc.typeinfo);
@@ -2394,7 +2462,7 @@ HRESULT init_global(script_ctx_t *ctx)
         return hres;
 
     ctx->err_desc.ctx = ctx;
-    ctx->err_desc.builtin_prop_cnt = sizeof(err_props)/sizeof(*err_props);
+    ctx->err_desc.builtin_prop_cnt = ARRAY_SIZE(err_props);
     ctx->err_desc.builtin_props = err_props;
 
     hres = get_typeinfo(ErrObj_tid, &ctx->err_desc.typeinfo);

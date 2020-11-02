@@ -39,7 +39,7 @@
 #include "winbase.h"
 #include "lm.h"
 #include "lmaccess.h"
-#include "lmat.h"
+#include "atsvc.h"
 #include "lmapibuf.h"
 #include "lmbrowsr.h"
 #include "lmshare.h"
@@ -923,7 +923,7 @@ static NET_API_STATUS wksta_getinfo(  LMSTR servername, DWORD level, LPBYTE *buf
 static BOOL NETAPI_IsLocalComputer( LMCSTR name )
 {
     WCHAR buf[MAX_COMPUTERNAME_LENGTH + 1];
-    DWORD size = sizeof(buf) / sizeof(buf[0]);
+    DWORD size = ARRAY_SIZE(buf);
     BOOL ret;
 
     if (!name || !name[0]) return TRUE;
@@ -1141,23 +1141,39 @@ NET_API_STATUS WINAPI NetUseEnum(LMSTR server, DWORD level, LPBYTE* bufptr, DWOR
 
 NET_API_STATUS WINAPI NetScheduleJobAdd(LPCWSTR server, LPBYTE bufptr, LPDWORD jobid)
 {
-    FIXME("stub (%s, %p, %p)\n", debugstr_w(server), bufptr, jobid);
-    return NERR_Success;
+    TRACE("(%s, %p, %p)\n", debugstr_w(server), bufptr, jobid);
+    return NetrJobAdd(server, (AT_INFO *)bufptr, jobid);
 }
 
 NET_API_STATUS WINAPI NetScheduleJobDel(LPCWSTR server, DWORD minjobid, DWORD maxjobid)
 {
-    FIXME("stub (%s, %d, %d)\n", debugstr_w(server), minjobid, maxjobid);
-    return NERR_Success;
+    TRACE("(%s, %u, %u)\n", debugstr_w(server), minjobid, maxjobid);
+    return NetrJobDel(server, minjobid, maxjobid);
 }
 
 NET_API_STATUS WINAPI NetScheduleJobEnum(LPCWSTR server, LPBYTE* bufptr, DWORD prefmaxsize, LPDWORD entriesread,
                                          LPDWORD totalentries, LPDWORD resumehandle)
 {
-    FIXME("stub (%s, %p, %d, %p, %p, %p)\n", debugstr_w(server), bufptr, prefmaxsize, entriesread, totalentries, resumehandle);
-    *entriesread = 0;
-    *totalentries = 0;
-    return NERR_Success;
+    AT_ENUM_CONTAINER container;
+    NET_API_STATUS ret;
+
+    TRACE("(%s, %p, %u, %p, %p, %p)\n", debugstr_w(server), bufptr, prefmaxsize, entriesread, totalentries, resumehandle);
+
+    container.EntriesRead = 0;
+    container.Buffer = NULL;
+    ret = NetrJobEnum(server, &container, prefmaxsize, totalentries, resumehandle);
+    if (ret == ERROR_SUCCESS)
+    {
+        *bufptr = (LPBYTE)container.Buffer;
+        *entriesread = container.EntriesRead;
+    }
+    return ret;
+}
+
+NET_API_STATUS WINAPI NetScheduleJobGetInfo(LPCWSTR server, DWORD jobid, LPBYTE *bufptr)
+{
+    TRACE("(%s, %u, %p)\n", debugstr_w(server), jobid, bufptr);
+    return NetrJobGetInfo(server, jobid, (LPAT_INFO *)bufptr);
 }
 
 NET_API_STATUS WINAPI NetUseGetInfo(LMSTR server, LMSTR name, DWORD level, LPBYTE *bufptr)
@@ -1188,7 +1204,7 @@ NET_API_STATUS WINAPI NetApiBufferAllocate(DWORD ByteCount, LPVOID* Buffer)
 NET_API_STATUS WINAPI NetApiBufferFree(LPVOID Buffer)
 {
     TRACE("(%p)\n", Buffer);
-    HeapFree(GetProcessHeap(), 0, Buffer);
+    MIDL_user_free(Buffer);
     return NERR_Success;
 }
 
@@ -2344,7 +2360,7 @@ NetUserEnum(LPCWSTR servername, DWORD level, DWORD filter, LPBYTE* bufptr,
 {
     NET_API_STATUS status;
     WCHAR user[UNLEN + 1];
-    DWORD size, len = sizeof(user)/sizeof(user[0]);
+    DWORD size, len = ARRAY_SIZE(user);
 
     TRACE("(%s, %u, 0x%x, %p, %u, %p, %p, %p)\n", debugstr_w(servername), level,
           filter, bufptr, prefmaxlen, entriesread, totalentries, resume_handle);
@@ -3461,8 +3477,8 @@ DWORD WINAPI DavGetUNCFromHTTPPath(const WCHAR *http_path, WCHAR *buf, DWORD *bu
     TRACE("(%s %p %p)\n", debugstr_w(http_path), buf, buflen);
 
     while (*p && *p != ':') { p++; len++; };
-    if (len == sizeof(httpW)/sizeof(httpW[0]) && !memicmpW( http_path, httpW, len )) ssl = FALSE;
-    else if (len == sizeof(httpsW)/sizeof(httpsW[0]) && !memicmpW( http_path, httpsW, len )) ssl = TRUE;
+    if (len == ARRAY_SIZE(httpW) && !memicmpW( http_path, httpW, len )) ssl = FALSE;
+    else if (len == ARRAY_SIZE(httpsW) && !memicmpW( http_path, httpsW, len )) ssl = TRUE;
     else return ERROR_INVALID_PARAMETER;
 
     if (p[0] != ':' || p[1] != '/' || p[2] != '/') return ERROR_INVALID_PARAMETER;
@@ -3490,7 +3506,7 @@ DWORD WINAPI DavGetUNCFromHTTPPath(const WCHAR *http_path, WCHAR *buf, DWORD *bu
     len = len_server + 2; /* \\ */
     if (ssl) len += 4; /* @SSL */
     if (port) len += len_port + 1 /* @ */;
-    len += sizeof(davrootW)/sizeof(davrootW[0]);
+    len += ARRAY_SIZE(davrootW);
     len += len_path + 1; /* nul */
 
     if (*buflen < len)
@@ -3515,7 +3531,7 @@ DWORD WINAPI DavGetUNCFromHTTPPath(const WCHAR *http_path, WCHAR *buf, DWORD *bu
         buf += len_port;
     }
     memcpy( buf, davrootW, sizeof(davrootW) );
-    buf += sizeof(davrootW)/sizeof(davrootW[0]);
+    buf += ARRAY_SIZE(davrootW);
     for (i = 0; i < len_path; i++)
     {
         if (path[i] == '/') *buf++ = '\\';
@@ -3526,4 +3542,51 @@ DWORD WINAPI DavGetUNCFromHTTPPath(const WCHAR *http_path, WCHAR *buf, DWORD *bu
     *buflen = len;
 
     return ERROR_SUCCESS;
+}
+
+/************************************************************
+ *  DsEnumerateDomainTrustsA (NETAPI32.@)
+ */
+DWORD WINAPI DsEnumerateDomainTrustsA(LPSTR server, ULONG flags, PDS_DOMAIN_TRUSTSA* domains, PULONG count)
+{
+    FIXME("(%s, 0x%04x, %p, %p): stub\n", debugstr_a(server), flags, domains, count);
+    return ERROR_NO_LOGON_SERVERS;
+}
+
+/************************************************************
+ *  DsEnumerateDomainTrustsW (NETAPI32.@)
+ */
+DWORD WINAPI DsEnumerateDomainTrustsW(LPWSTR server, ULONG flags, PDS_DOMAIN_TRUSTSW* domains, PULONG count)
+{
+    FIXME("(%s, 0x%04x, %p, %p): stub\n", debugstr_w(server), flags, domains, count);
+    return ERROR_NO_LOGON_SERVERS;
+}
+
+DECLSPEC_HIDDEN void __RPC_FAR *__RPC_USER MIDL_user_allocate(SIZE_T n)
+{
+    return HeapAlloc(GetProcessHeap(), 0, n);
+}
+
+DECLSPEC_HIDDEN void __RPC_USER MIDL_user_free(void __RPC_FAR *p)
+{
+    HeapFree(GetProcessHeap(), 0, p);
+}
+
+DECLSPEC_HIDDEN handle_t __RPC_USER ATSVC_HANDLE_bind(ATSVC_HANDLE str)
+{
+    static unsigned char ncalrpc[] = "ncalrpc";
+    unsigned char *binding_str;
+    handle_t rpc_handle = 0;
+
+    if (RpcStringBindingComposeA(NULL, ncalrpc, NULL, NULL, NULL, &binding_str) == RPC_S_OK)
+    {
+        RpcBindingFromStringBindingA(binding_str, &rpc_handle);
+        RpcStringFreeA(&binding_str);
+    }
+    return rpc_handle;
+}
+
+DECLSPEC_HIDDEN void __RPC_USER ATSVC_HANDLE_unbind(ATSVC_HANDLE ServerName, handle_t rpc_handle)
+{
+    RpcBindingFree(&rpc_handle);
 }

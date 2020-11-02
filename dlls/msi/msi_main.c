@@ -38,13 +38,15 @@ WINE_DEFAULT_DEBUG_CHANNEL(msi);
 static LONG dll_count;
 
 /* the UI level */
-INSTALLUILEVEL           gUILevel         = INSTALLUILEVEL_BASIC;
+INSTALLUILEVEL           gUILevel         = INSTALLUILEVEL_DEFAULT;
 HWND                     gUIhwnd          = 0;
 INSTALLUI_HANDLERA       gUIHandlerA      = NULL;
 INSTALLUI_HANDLERW       gUIHandlerW      = NULL;
 INSTALLUI_HANDLER_RECORD gUIHandlerRecord = NULL;
 DWORD                    gUIFilter        = 0;
+DWORD                    gUIFilterRecord  = 0;
 LPVOID                   gUIContext       = NULL;
+LPVOID                   gUIContextRecord = NULL;
 WCHAR                   *gszLogFile       = NULL;
 HINSTANCE msi_hInstance;
 
@@ -164,8 +166,6 @@ static const IClassFactoryVtbl MsiCF_Vtbl =
 };
 
 static IClassFactoryImpl MsiServer_CF = { { &MsiCF_Vtbl }, create_msiserver };
-static IClassFactoryImpl WineMsiCustomRemote_CF = { { &MsiCF_Vtbl }, create_msi_custom_remote };
-static IClassFactoryImpl WineMsiRemotePackage_CF = { { &MsiCF_Vtbl }, create_msi_remote_package };
 
 /******************************************************************
  * DllGetClassObject          [MSI.@]
@@ -177,18 +177,6 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
     if ( IsEqualCLSID (rclsid, &CLSID_MsiInstaller) )
     {
         *ppv = &MsiServer_CF;
-        return S_OK;
-    }
-
-    if ( IsEqualCLSID (rclsid, &CLSID_WineMsiRemoteCustomAction) )
-    {
-        *ppv = &WineMsiCustomRemote_CF;
-        return S_OK;
-    }
-
-    if ( IsEqualCLSID (rclsid, &CLSID_WineMsiRemotePackage) )
-    {
-        *ppv = &WineMsiRemotePackage_CF;
         return S_OK;
     }
 

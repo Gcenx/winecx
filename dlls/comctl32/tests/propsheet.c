@@ -29,10 +29,22 @@
 static HWND parenthwnd;
 static HWND sheethwnd;
 
+static BOOL rtl;
 static LONG active_page = -1;
 
 #define IDC_APPLY_BUTTON 12321
 
+static HPROPSHEETPAGE (WINAPI *pCreatePropertySheetPageA)(const PROPSHEETPAGEA *desc);
+static HPROPSHEETPAGE (WINAPI *pCreatePropertySheetPageW)(const PROPSHEETPAGEW *desc);
+static BOOL (WINAPI *pDestroyPropertySheetPage)(HPROPSHEETPAGE proppage);
+static INT_PTR (WINAPI *pPropertySheetA)(const PROPSHEETHEADERA *header);
+
+static void detect_locale(void)
+{
+    DWORD reading_layout;
+    rtl = GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_IREADINGLAYOUT | LOCALE_RETURN_NUMBER,
+            (void *)&reading_layout, sizeof(reading_layout)) && reading_layout == 1;
+}
 
 /* try to make sure pending X events have been processed before continuing */
 static void flush_events(void)
@@ -133,7 +145,7 @@ static void test_title(void)
     psp.pfnDlgProc = page_dlg_proc;
     psp.lParam = 0;
 
-    hpsp[0] = CreatePropertySheetPageA(&psp);
+    hpsp[0] = pCreatePropertySheetPageA(&psp);
 
     memset(&psh, 0, sizeof(psh));
     psh.dwSize = PROPSHEETHEADERA_V1_SIZE;
@@ -144,7 +156,7 @@ static void test_title(void)
     U3(psh).phpage = hpsp;
     psh.pfnCallback = sheet_callback;
 
-    hdlg = (HWND)PropertySheetA(&psh);
+    hdlg = (HWND)pPropertySheetA(&psh);
     ok(hdlg != INVALID_HANDLE_VALUE, "got invalid handle value %p\n", hdlg);
 
     style = GetWindowLongA(hdlg, GWL_STYLE);
@@ -172,7 +184,7 @@ static void test_nopage(void)
     psp.pfnDlgProc = page_dlg_proc;
     psp.lParam = 0;
 
-    hpsp[0] = CreatePropertySheetPageA(&psp);
+    hpsp[0] = pCreatePropertySheetPageA(&psp);
 
     memset(&psh, 0, sizeof(psh));
     psh.dwSize = PROPSHEETHEADERA_V1_SIZE;
@@ -183,7 +195,7 @@ static void test_nopage(void)
     U3(psh).phpage = hpsp;
     psh.pfnCallback = sheet_callback;
 
-    hdlg = (HWND)PropertySheetA(&psh);
+    hdlg = (HWND)pPropertySheetA(&psh);
     ok(hdlg != INVALID_HANDLE_VALUE, "got invalid handle value %p\n", hdlg);
 
     ShowWindow(hdlg,SW_NORMAL);
@@ -252,7 +264,7 @@ static void test_disableowner(void)
     psp.pfnDlgProc = NULL;
     psp.lParam = 0;
 
-    hpsp[0] = CreatePropertySheetPageA(&psp);
+    hpsp[0] = pCreatePropertySheetPageA(&psp);
 
     memset(&psh, 0, sizeof(psh));
     psh.dwSize = PROPSHEETHEADERA_V1_SIZE;
@@ -263,7 +275,7 @@ static void test_disableowner(void)
     U3(psh).phpage = hpsp;
     psh.pfnCallback = disableowner_callback;
 
-    p = PropertySheetA(&psh);
+    p = pPropertySheetA(&psh);
     todo_wine
     ok(p == 0, "Expected 0, got %ld\n", p);
     ok(IsWindowEnabled(parenthwnd) != 0, "parent window should be enabled\n");
@@ -349,25 +361,25 @@ static void test_wiznavigation(void)
     psp[0].hInstance = GetModuleHandleA(NULL);
     U(psp[0]).pszTemplate = (LPCSTR)MAKEINTRESOURCE(IDD_PROP_PAGE_INTRO);
     psp[0].pfnDlgProc = nav_page_proc;
-    hpsp[0] = CreatePropertySheetPageA(&psp[0]);
+    hpsp[0] = pCreatePropertySheetPageA(&psp[0]);
 
     psp[1].dwSize = sizeof(PROPSHEETPAGEA);
     psp[1].hInstance = GetModuleHandleA(NULL);
     U(psp[1]).pszTemplate = (LPCSTR)MAKEINTRESOURCE(IDD_PROP_PAGE_EDIT);
     psp[1].pfnDlgProc = nav_page_proc;
-    hpsp[1] = CreatePropertySheetPageA(&psp[1]);
+    hpsp[1] = pCreatePropertySheetPageA(&psp[1]);
 
     psp[2].dwSize = sizeof(PROPSHEETPAGEA);
     psp[2].hInstance = GetModuleHandleA(NULL);
     U(psp[2]).pszTemplate = (LPCSTR)MAKEINTRESOURCE(IDD_PROP_PAGE_RADIO);
     psp[2].pfnDlgProc = nav_page_proc;
-    hpsp[2] = CreatePropertySheetPageA(&psp[2]);
+    hpsp[2] = pCreatePropertySheetPageA(&psp[2]);
 
     psp[3].dwSize = sizeof(PROPSHEETPAGEA);
     psp[3].hInstance = GetModuleHandleA(NULL);
     U(psp[3]).pszTemplate = (LPCSTR)MAKEINTRESOURCE(IDD_PROP_PAGE_EXIT);
     psp[3].pfnDlgProc = nav_page_proc;
-    hpsp[3] = CreatePropertySheetPageA(&psp[3]);
+    hpsp[3] = pCreatePropertySheetPageA(&psp[3]);
 
     /* set up the property sheet dialog */
     memset(&psh, 0, sizeof(psh));
@@ -377,7 +389,7 @@ static void test_wiznavigation(void)
     psh.nPages = 4;
     psh.hwndParent = GetDesktopWindow();
     U3(psh).phpage = hpsp;
-    hdlg = (HWND)PropertySheetA(&psh);
+    hdlg = (HWND)pPropertySheetA(&psh);
     ok(hdlg != INVALID_HANDLE_VALUE, "got invalid handle %p\n", hdlg);
 
     ok(active_page == 0, "Active page should be 0. Is: %d\n", active_page);
@@ -472,7 +484,7 @@ static void test_buttons(void)
     psp.pfnDlgProc = page_dlg_proc;
     psp.lParam = 0;
 
-    hpsp[0] = CreatePropertySheetPageA(&psp);
+    hpsp[0] = pCreatePropertySheetPageA(&psp);
 
     memset(&psh, 0, sizeof(psh));
     psh.dwSize = PROPSHEETHEADERA_V1_SIZE;
@@ -483,7 +495,7 @@ static void test_buttons(void)
     U3(psh).phpage = hpsp;
     psh.pfnCallback = sheet_callback;
 
-    hdlg = (HWND)PropertySheetA(&psh);
+    hdlg = (HWND)pPropertySheetA(&psh);
     ok(hdlg != INVALID_HANDLE_VALUE, "got null handle\n");
 
     /* OK button */
@@ -496,19 +508,28 @@ static void test_buttons(void)
     button = GetDlgItem(hdlg, IDCANCEL);
     GetWindowRect(button, &rc);
     ok(rc.top == top, "Cancel button should have same top as OK button\n");
-    ok(rc.left > prevRight, "Cancel button should be to the right of OK button\n");
+    if (rtl)
+        ok(rc.left < prevRight, "Cancel button should be to the left of OK button\n");
+    else
+        ok(rc.left > prevRight, "Cancel button should be to the right of OK button\n");
     prevRight = rc.right;
 
     button = GetDlgItem(hdlg, IDC_APPLY_BUTTON);
     GetWindowRect(button, &rc);
     ok(rc.top == top, "Apply button should have same top as OK button\n");
-    ok(rc.left > prevRight, "Apply button should be to the right of Cancel button\n");
+    if (rtl)
+        ok(rc.left < prevRight, "Apply button should be to the left of Cancel button\n");
+    else
+        ok(rc.left > prevRight, "Apply button should be to the right of Cancel button\n");
     prevRight = rc.right;
 
     button = GetDlgItem(hdlg, IDHELP);
     GetWindowRect(button, &rc);
     ok(rc.top == top, "Help button should have same top as OK button\n");
-    ok(rc.left > prevRight, "Help button should be to the right of Apply button\n");
+    if (rtl)
+        ok(rc.left < prevRight, "Help button should be to the left of Apply button\n");
+    else
+        ok(rc.left > prevRight, "Help button should be to the right of Apply button\n");
 
     DestroyWindow(hdlg);
 }
@@ -570,7 +591,7 @@ static void test_custom_default_button(void)
     add_button_has_been_pressed = FALSE;
 
     /* Create the modeless property sheet. */
-    hdlg = (HWND)PropertySheetA(&psh);
+    hdlg = (HWND)pPropertySheetA(&psh);
     ok(hdlg != INVALID_HANDLE_VALUE, "Cannot create the property sheet\n");
 
     /* Set the Add button as the default button. */
@@ -781,7 +802,7 @@ static void test_messages(void)
     psp.pfnDlgProc = page_dlg_proc_messages;
     psp.lParam = 0;
 
-    hpsp[0] = CreatePropertySheetPageA(&psp);
+    hpsp[0] = pCreatePropertySheetPageA(&psp);
 
     memset(&psh, 0, sizeof(psh));
     psh.dwSize = PROPSHEETHEADERA_V1_SIZE;
@@ -793,7 +814,7 @@ static void test_messages(void)
     U3(psh).phpage = hpsp;
     psh.pfnCallback = sheet_callback_messages;
 
-    hdlg = (HWND)PropertySheetA(&psh);
+    hdlg = (HWND)pPropertySheetA(&psh);
     ok(hdlg != INVALID_HANDLE_VALUE, "got invalid handle %p\n", hdlg);
 
     ShowWindow(hdlg,SW_NORMAL);
@@ -822,15 +843,15 @@ static void test_PSM_ADDPAGE(void)
     psp.lParam = 0;
 
     /* multiple pages with the same data */
-    hpsp[0] = CreatePropertySheetPageA(&psp);
-    hpsp[1] = CreatePropertySheetPageA(&psp);
-    hpsp[2] = CreatePropertySheetPageA(&psp);
+    hpsp[0] = pCreatePropertySheetPageA(&psp);
+    hpsp[1] = pCreatePropertySheetPageA(&psp);
+    hpsp[2] = pCreatePropertySheetPageA(&psp);
 
     U(psp).pszTemplate = (LPCSTR)MAKEINTRESOURCE(IDD_PROP_PAGE_ERROR);
-    hpsp[3] = CreatePropertySheetPageA(&psp);
+    hpsp[3] = pCreatePropertySheetPageA(&psp);
 
     psp.dwFlags = PSP_PREMATURE;
-    hpsp[4] = CreatePropertySheetPageA(&psp);
+    hpsp[4] = pCreatePropertySheetPageA(&psp);
 
     memset(&psh, 0, sizeof(psh));
     psh.dwSize = PROPSHEETHEADERA_V1_SIZE;
@@ -840,7 +861,7 @@ static void test_PSM_ADDPAGE(void)
     psh.hwndParent = GetDesktopWindow();
     U3(psh).phpage = hpsp;
 
-    hdlg = (HWND)PropertySheetA(&psh);
+    hdlg = (HWND)pPropertySheetA(&psh);
     ok(hdlg != INVALID_HANDLE_VALUE, "got invalid handle %p\n", hdlg);
 
     /* add pages one by one */
@@ -889,7 +910,7 @@ if (0)
     r = SendMessageA(tab, TCM_GETITEMCOUNT, 0, 0);
     ok(r == 3, "got %d\n", r);
 
-    DestroyPropertySheetPage(hpsp[4]);
+    pDestroyPropertySheetPage(hpsp[4]);
     DestroyWindow(hdlg);
 }
 
@@ -912,15 +933,15 @@ static void test_PSM_INSERTPAGE(void)
     psp.lParam = 0;
 
     /* multiple pages with the same data */
-    hpsp[0] = CreatePropertySheetPageA(&psp);
-    hpsp[1] = CreatePropertySheetPageA(&psp);
-    hpsp[2] = CreatePropertySheetPageA(&psp);
+    hpsp[0] = pCreatePropertySheetPageA(&psp);
+    hpsp[1] = pCreatePropertySheetPageA(&psp);
+    hpsp[2] = pCreatePropertySheetPageA(&psp);
 
     U(psp).pszTemplate = (LPCSTR)MAKEINTRESOURCE(IDD_PROP_PAGE_ERROR);
-    hpsp[3] = CreatePropertySheetPageA(&psp);
+    hpsp[3] = pCreatePropertySheetPageA(&psp);
 
     psp.dwFlags = PSP_PREMATURE;
-    hpsp[4] = CreatePropertySheetPageA(&psp);
+    hpsp[4] = pCreatePropertySheetPageA(&psp);
 
     memset(&psh, 0, sizeof(psh));
     psh.dwSize = PROPSHEETHEADERA_V1_SIZE;
@@ -930,7 +951,7 @@ static void test_PSM_INSERTPAGE(void)
     psh.hwndParent = GetDesktopWindow();
     U3(psh).phpage = hpsp;
 
-    hdlg = (HWND)PropertySheetA(&psh);
+    hdlg = (HWND)pPropertySheetA(&psh);
     ok(hdlg != INVALID_HANDLE_VALUE, "got invalid handle %p\n", hdlg);
 
     /* add pages one by one */
@@ -983,7 +1004,7 @@ if (0)
     r = SendMessageA(tab, TCM_GETITEMCOUNT, 0, 0);
     ok(r == 3, "got %d\n", r);
 
-    DestroyPropertySheetPage(hpsp[4]);
+    pDestroyPropertySheetPage(hpsp[4]);
     DestroyWindow(hdlg);
 }
 
@@ -1073,7 +1094,7 @@ static void test_CreatePropertySheetPage(void)
     for (page.u.pageA.dwSize = PROPSHEETPAGEA_V1_SIZE - 1; page.u.pageA.dwSize <= PROPSHEETPAGEA_V4_SIZE + 1; page.u.pageA.dwSize++)
     {
         page.addref_called = 0;
-        hpsp = CreatePropertySheetPageA(&page.u.pageA);
+        hpsp = pCreatePropertySheetPageA(&page.u.pageA);
 
         if (page.u.pageA.dwSize < PROPSHEETPAGEA_V1_SIZE)
             ok(hpsp == NULL, "Expected failure, size %u\n", page.u.pageA.dwSize);
@@ -1086,7 +1107,7 @@ static void test_CreatePropertySheetPage(void)
         if (hpsp)
         {
             page.release_called = 0;
-            ret = DestroyPropertySheetPage(hpsp);
+            ret = pDestroyPropertySheetPage(hpsp);
             ok(ret, "Failed to destroy a page\n");
             ok(page.release_called == 1, "Expected RELEASE callback message\n");
         }
@@ -1102,7 +1123,7 @@ static void test_CreatePropertySheetPage(void)
     for (page.u.pageW.dwSize = PROPSHEETPAGEW_V1_SIZE - 1; page.u.pageW.dwSize <= PROPSHEETPAGEW_V4_SIZE + 1; page.u.pageW.dwSize++)
     {
         page.addref_called = 0;
-        hpsp = CreatePropertySheetPageW(&page.u.pageW);
+        hpsp = pCreatePropertySheetPageW(&page.u.pageW);
 
         if (page.u.pageW.dwSize < PROPSHEETPAGEW_V1_SIZE)
             ok(hpsp == NULL, "Expected failure, size %u\n", page.u.pageW.dwSize);
@@ -1115,15 +1136,38 @@ static void test_CreatePropertySheetPage(void)
         if (hpsp)
         {
             page.release_called = 0;
-            ret = DestroyPropertySheetPage(hpsp);
+            ret = pDestroyPropertySheetPage(hpsp);
             ok(ret, "Failed to destroy a page\n");
             ok(page.release_called == 1, "Expected RELEASE callback message\n");
         }
     }
 }
 
+static void init_functions(void)
+{
+    HMODULE hComCtl32 = LoadLibraryA("comctl32.dll");
+
+#define X(f) p##f = (void*)GetProcAddress(hComCtl32, #f);
+    X(CreatePropertySheetPageA);
+    X(CreatePropertySheetPageW);
+    X(DestroyPropertySheetPage);
+    X(PropertySheetA);
+#undef X
+}
+
 START_TEST(propsheet)
 {
+    detect_locale();
+    if (rtl)
+    {
+        /* use locale-specific RTL resources when on an RTL locale */
+        /* without this, propsheets on RTL locales use English LTR resources */
+        trace("RTL locale detected\n");
+        SetProcessDefaultLayout(LAYOUT_RTL);
+    }
+
+    init_functions();
+
     test_title();
     test_nopage();
     test_disableowner();

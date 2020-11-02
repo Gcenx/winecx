@@ -73,6 +73,7 @@
 #endif
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
+WINE_DECLARE_DEBUG_CHANNEL(relay);
 
 struct _DISPATCHER_CONTEXT;
 
@@ -307,6 +308,27 @@ typedef void (*raise_func)( EXCEPTION_RECORD *rec, CONTEXT *context );
 typedef int (*wine_signal_handler)(unsigned int sig);
 
 static wine_signal_handler handlers[256];
+
+struct amd64_thread_data
+{
+    DWORD_PTR dr0;           /* debug registers */
+    DWORD_PTR dr1;
+    DWORD_PTR dr2;
+    DWORD_PTR dr3;
+    DWORD_PTR dr6;
+    DWORD_PTR dr7;
+    void     *exit_frame;    /* exit frame pointer */
+};
+
+C_ASSERT( sizeof(struct amd64_thread_data) <= sizeof(((TEB *)0)->SystemReserved2) );
+C_ASSERT( offsetof( TEB, SystemReserved2 ) + offsetof( struct amd64_thread_data, exit_frame ) == 0x330 );
+
+static inline struct amd64_thread_data *amd64_thread_data(void)
+{
+    return (struct amd64_thread_data *)NtCurrentTeb()->SystemReserved2;
+}
+
+extern void DECLSPEC_NORETURN __wine_syscall_dispatcher( void );
 
 /***********************************************************************
  * Dynamic unwind table
@@ -1154,30 +1176,30 @@ static void set_context_reg( CONTEXT *context, ULONG_PTR dw_reg, void *val )
     case 14: context->R14 = *(ULONG64 *)val; break;
     case 15: context->R15 = *(ULONG64 *)val; break;
     case 16: context->Rip = *(ULONG64 *)val; break;
-    case 17: context->u.s.Xmm0  = *(M128A *)val; break;
-    case 18: context->u.s.Xmm1  = *(M128A *)val; break;
-    case 19: context->u.s.Xmm2  = *(M128A *)val; break;
-    case 20: context->u.s.Xmm3  = *(M128A *)val; break;
-    case 21: context->u.s.Xmm4  = *(M128A *)val; break;
-    case 22: context->u.s.Xmm5  = *(M128A *)val; break;
-    case 23: context->u.s.Xmm6  = *(M128A *)val; break;
-    case 24: context->u.s.Xmm7  = *(M128A *)val; break;
-    case 25: context->u.s.Xmm8  = *(M128A *)val; break;
-    case 26: context->u.s.Xmm9  = *(M128A *)val; break;
-    case 27: context->u.s.Xmm10 = *(M128A *)val; break;
-    case 28: context->u.s.Xmm11 = *(M128A *)val; break;
-    case 29: context->u.s.Xmm12 = *(M128A *)val; break;
-    case 30: context->u.s.Xmm13 = *(M128A *)val; break;
-    case 31: context->u.s.Xmm14 = *(M128A *)val; break;
-    case 32: context->u.s.Xmm15 = *(M128A *)val; break;
-    case 33: context->u.s.Legacy[0] = *(M128A *)val; break;
-    case 34: context->u.s.Legacy[1] = *(M128A *)val; break;
-    case 35: context->u.s.Legacy[2] = *(M128A *)val; break;
-    case 36: context->u.s.Legacy[3] = *(M128A *)val; break;
-    case 37: context->u.s.Legacy[4] = *(M128A *)val; break;
-    case 38: context->u.s.Legacy[5] = *(M128A *)val; break;
-    case 39: context->u.s.Legacy[6] = *(M128A *)val; break;
-    case 40: context->u.s.Legacy[7] = *(M128A *)val; break;
+    case 17: memcpy( &context->u.s.Xmm0, val, sizeof(M128A) ); break;
+    case 18: memcpy( &context->u.s.Xmm1, val, sizeof(M128A) ); break;
+    case 19: memcpy( &context->u.s.Xmm2, val, sizeof(M128A) ); break;
+    case 20: memcpy( &context->u.s.Xmm3, val, sizeof(M128A) ); break;
+    case 21: memcpy( &context->u.s.Xmm4, val, sizeof(M128A) ); break;
+    case 22: memcpy( &context->u.s.Xmm5, val, sizeof(M128A) ); break;
+    case 23: memcpy( &context->u.s.Xmm6, val, sizeof(M128A) ); break;
+    case 24: memcpy( &context->u.s.Xmm7, val, sizeof(M128A) ); break;
+    case 25: memcpy( &context->u.s.Xmm8, val, sizeof(M128A) ); break;
+    case 26: memcpy( &context->u.s.Xmm9, val, sizeof(M128A) ); break;
+    case 27: memcpy( &context->u.s.Xmm10, val, sizeof(M128A) ); break;
+    case 28: memcpy( &context->u.s.Xmm11, val, sizeof(M128A) ); break;
+    case 29: memcpy( &context->u.s.Xmm12, val, sizeof(M128A) ); break;
+    case 30: memcpy( &context->u.s.Xmm13, val, sizeof(M128A) ); break;
+    case 31: memcpy( &context->u.s.Xmm14, val, sizeof(M128A) ); break;
+    case 32: memcpy( &context->u.s.Xmm15, val, sizeof(M128A) ); break;
+    case 33: memcpy( &context->u.s.Legacy[0], val, sizeof(M128A) ); break;
+    case 34: memcpy( &context->u.s.Legacy[1], val, sizeof(M128A) ); break;
+    case 35: memcpy( &context->u.s.Legacy[2], val, sizeof(M128A) ); break;
+    case 36: memcpy( &context->u.s.Legacy[3], val, sizeof(M128A) ); break;
+    case 37: memcpy( &context->u.s.Legacy[4], val, sizeof(M128A) ); break;
+    case 38: memcpy( &context->u.s.Legacy[5], val, sizeof(M128A) ); break;
+    case 39: memcpy( &context->u.s.Legacy[6], val, sizeof(M128A) ); break;
+    case 40: memcpy( &context->u.s.Legacy[7], val, sizeof(M128A) ); break;
     }
 }
 
@@ -1649,7 +1671,7 @@ static inline BOOL is_inside_signal_stack( void *ptr )
  */
 static void save_context( CONTEXT *context, const ucontext_t *sigcontext )
 {
-    context->ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_SEGMENTS;
+    context->ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_SEGMENTS | CONTEXT_DEBUG_REGISTERS;
     context->Rax    = RAX_sig(sigcontext);
     context->Rcx    = RCX_sig(sigcontext);
     context->Rdx    = RDX_sig(sigcontext);
@@ -1686,6 +1708,12 @@ static void save_context( CONTEXT *context, const ucontext_t *sigcontext )
 #else
     __asm__("movw %%ss,%0" : "=m" (context->SegSs));
 #endif
+    context->Dr0    = amd64_thread_data()->dr0;
+    context->Dr1    = amd64_thread_data()->dr1;
+    context->Dr2    = amd64_thread_data()->dr2;
+    context->Dr3    = amd64_thread_data()->dr3;
+    context->Dr6    = amd64_thread_data()->dr6;
+    context->Dr7    = amd64_thread_data()->dr7;
     if (FPU_sig(sigcontext))
     {
         context->ContextFlags |= CONTEXT_FLOATING_POINT;
@@ -1702,6 +1730,12 @@ static void save_context( CONTEXT *context, const ucontext_t *sigcontext )
  */
 static void restore_context( const CONTEXT *context, ucontext_t *sigcontext )
 {
+    amd64_thread_data()->dr0 = context->Dr0;
+    amd64_thread_data()->dr1 = context->Dr1;
+    amd64_thread_data()->dr2 = context->Dr2;
+    amd64_thread_data()->dr3 = context->Dr3;
+    amd64_thread_data()->dr6 = context->Dr6;
+    amd64_thread_data()->dr7 = context->Dr7;
     RAX_sig(sigcontext) = context->Rax;
     RCX_sig(sigcontext) = context->Rcx;
     RDX_sig(sigcontext) = context->Rdx;
@@ -1858,9 +1892,19 @@ __ASM_GLOBAL_FUNC( set_full_cpu_context,
  *
  * Set the new CPU context. Used by NtSetContextThread.
  */
-void set_cpu_context( const CONTEXT *context )
+void DECLSPEC_HIDDEN set_cpu_context( const CONTEXT *context )
 {
     DWORD flags = context->ContextFlags & ~CONTEXT_AMD64;
+
+    if (flags & CONTEXT_DEBUG_REGISTERS)
+    {
+        amd64_thread_data()->dr0 = context->Dr0;
+        amd64_thread_data()->dr1 = context->Dr1;
+        amd64_thread_data()->dr2 = context->Dr2;
+        amd64_thread_data()->dr3 = context->Dr3;
+        amd64_thread_data()->dr6 = context->Dr6;
+        amd64_thread_data()->dr7 = context->Dr7;
+    }
     if (flags & CONTEXT_FULL)
     {
         if (!(flags & CONTEXT_CONTROL))
@@ -1872,11 +1916,30 @@ void set_cpu_context( const CONTEXT *context )
 
 
 /***********************************************************************
+ *           get_server_context_flags
+ *
+ * Convert CPU-specific flags to generic server flags
+ */
+static unsigned int get_server_context_flags( DWORD flags )
+{
+    unsigned int ret = 0;
+
+    flags &= ~CONTEXT_AMD64;  /* get rid of CPU id */
+    if (flags & CONTEXT_CONTROL) ret |= SERVER_CTX_CONTROL;
+    if (flags & CONTEXT_INTEGER) ret |= SERVER_CTX_INTEGER;
+    if (flags & CONTEXT_SEGMENTS) ret |= SERVER_CTX_SEGMENTS;
+    if (flags & CONTEXT_FLOATING_POINT) ret |= SERVER_CTX_FLOATING_POINT;
+    if (flags & CONTEXT_DEBUG_REGISTERS) ret |= SERVER_CTX_DEBUG_REGISTERS;
+    return ret;
+}
+
+
+/***********************************************************************
  *           copy_context
  *
  * Copy a register context according to the flags.
  */
-void copy_context( CONTEXT *to, const CONTEXT *from, DWORD flags )
+static void copy_context( CONTEXT *to, const CONTEXT *from, DWORD flags )
 {
     flags &= ~CONTEXT_AMD64;  /* get rid of CPU id */
     if (flags & CONTEXT_CONTROL)
@@ -2060,6 +2123,268 @@ NTSTATUS context_from_server( CONTEXT *to, const context_t *from )
         to->Dr7 = from->debug.x86_64_regs.dr7;
     }
     return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *              NtSetContextThread  (NTDLL.@)
+ *              ZwSetContextThread  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
+{
+    NTSTATUS ret = STATUS_SUCCESS;
+    BOOL self = (handle == GetCurrentThread());
+
+    /* debug registers require a server call */
+    if (self && (context->ContextFlags & (CONTEXT_DEBUG_REGISTERS & ~CONTEXT_AMD64)))
+        self = (amd64_thread_data()->dr0 == context->Dr0 &&
+                amd64_thread_data()->dr1 == context->Dr1 &&
+                amd64_thread_data()->dr2 == context->Dr2 &&
+                amd64_thread_data()->dr3 == context->Dr3 &&
+                amd64_thread_data()->dr6 == context->Dr6 &&
+                amd64_thread_data()->dr7 == context->Dr7);
+
+    if (!self)
+    {
+        context_t server_context;
+        context_to_server( &server_context, context );
+        ret = set_thread_context( handle, &server_context, &self );
+    }
+    if (self && ret == STATUS_SUCCESS) set_cpu_context( context );
+    return ret;
+}
+
+
+/***********************************************************************
+ *              NtGetContextThread  (NTDLL.@)
+ *              ZwGetContextThread  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
+{
+    NTSTATUS ret;
+    DWORD needed_flags;
+    BOOL self = (handle == GetCurrentThread());
+
+    if (!context) return STATUS_INVALID_PARAMETER;
+
+    needed_flags = context->ContextFlags;
+
+    /* debug registers require a server call */
+    if (context->ContextFlags & (CONTEXT_DEBUG_REGISTERS & ~CONTEXT_AMD64)) self = FALSE;
+
+    if (!self)
+    {
+        context_t server_context;
+        unsigned int server_flags = get_server_context_flags( context->ContextFlags );
+
+        if ((ret = get_thread_context( handle, &server_context, server_flags, &self ))) return ret;
+        if ((ret = context_from_server( context, &server_context ))) return ret;
+        needed_flags &= ~context->ContextFlags;
+    }
+
+    if (self)
+    {
+        if (needed_flags)
+        {
+            CONTEXT ctx;
+            RtlCaptureContext( &ctx );
+            copy_context( context, &ctx, ctx.ContextFlags & needed_flags );
+            context->ContextFlags |= ctx.ContextFlags & needed_flags;
+        }
+        /* update the cached version of the debug registers */
+        if (context->ContextFlags & (CONTEXT_DEBUG_REGISTERS & ~CONTEXT_AMD64))
+        {
+            amd64_thread_data()->dr0 = context->Dr0;
+            amd64_thread_data()->dr1 = context->Dr1;
+            amd64_thread_data()->dr2 = context->Dr2;
+            amd64_thread_data()->dr3 = context->Dr3;
+            amd64_thread_data()->dr6 = context->Dr6;
+            amd64_thread_data()->dr7 = context->Dr7;
+        }
+    }
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *           wow64_get_server_context_flags
+ */
+static unsigned int wow64_get_server_context_flags( DWORD flags )
+{
+    unsigned int ret = 0;
+
+    flags &= ~WOW64_CONTEXT_i386;  /* get rid of CPU id */
+    if (flags & WOW64_CONTEXT_CONTROL) ret |= SERVER_CTX_CONTROL;
+    if (flags & WOW64_CONTEXT_INTEGER) ret |= SERVER_CTX_INTEGER;
+    if (flags & WOW64_CONTEXT_SEGMENTS) ret |= SERVER_CTX_SEGMENTS;
+    if (flags & WOW64_CONTEXT_FLOATING_POINT) ret |= SERVER_CTX_FLOATING_POINT;
+    if (flags & WOW64_CONTEXT_DEBUG_REGISTERS) ret |= SERVER_CTX_DEBUG_REGISTERS;
+    if (flags & WOW64_CONTEXT_EXTENDED_REGISTERS) ret |= SERVER_CTX_EXTENDED_REGISTERS;
+    return ret;
+}
+
+/***********************************************************************
+ *           wow64_context_from_server
+ */
+static NTSTATUS wow64_context_from_server( WOW64_CONTEXT *to, const context_t *from )
+{
+    if (from->cpu != CPU_x86) return STATUS_INVALID_PARAMETER;
+
+    to->ContextFlags = WOW64_CONTEXT_i386;
+    if (from->flags & SERVER_CTX_CONTROL)
+    {
+        to->ContextFlags |= WOW64_CONTEXT_CONTROL;
+        to->Ebp    = from->ctl.i386_regs.ebp;
+        to->Esp    = from->ctl.i386_regs.esp;
+        to->Eip    = from->ctl.i386_regs.eip;
+        to->SegCs  = from->ctl.i386_regs.cs;
+        to->SegSs  = from->ctl.i386_regs.ss;
+        to->EFlags = from->ctl.i386_regs.eflags;
+    }
+    if (from->flags & SERVER_CTX_INTEGER)
+    {
+        to->ContextFlags |= WOW64_CONTEXT_INTEGER;
+        to->Eax = from->integer.i386_regs.eax;
+        to->Ebx = from->integer.i386_regs.ebx;
+        to->Ecx = from->integer.i386_regs.ecx;
+        to->Edx = from->integer.i386_regs.edx;
+        to->Esi = from->integer.i386_regs.esi;
+        to->Edi = from->integer.i386_regs.edi;
+    }
+    if (from->flags & SERVER_CTX_SEGMENTS)
+    {
+        to->ContextFlags |= WOW64_CONTEXT_SEGMENTS;
+        to->SegDs = from->seg.i386_regs.ds;
+        to->SegEs = from->seg.i386_regs.es;
+        to->SegFs = from->seg.i386_regs.fs;
+        to->SegGs = from->seg.i386_regs.gs;
+    }
+    if (from->flags & SERVER_CTX_FLOATING_POINT)
+    {
+        to->ContextFlags |= WOW64_CONTEXT_FLOATING_POINT;
+        to->FloatSave.ControlWord   = from->fp.i386_regs.ctrl;
+        to->FloatSave.StatusWord    = from->fp.i386_regs.status;
+        to->FloatSave.TagWord       = from->fp.i386_regs.tag;
+        to->FloatSave.ErrorOffset   = from->fp.i386_regs.err_off;
+        to->FloatSave.ErrorSelector = from->fp.i386_regs.err_sel;
+        to->FloatSave.DataOffset    = from->fp.i386_regs.data_off;
+        to->FloatSave.DataSelector  = from->fp.i386_regs.data_sel;
+        to->FloatSave.Cr0NpxState   = from->fp.i386_regs.cr0npx;
+        memcpy( to->FloatSave.RegisterArea, from->fp.i386_regs.regs, sizeof(to->FloatSave.RegisterArea) );
+    }
+    if (from->flags & SERVER_CTX_DEBUG_REGISTERS)
+    {
+        to->ContextFlags |= WOW64_CONTEXT_DEBUG_REGISTERS;
+        to->Dr0 = from->debug.i386_regs.dr0;
+        to->Dr1 = from->debug.i386_regs.dr1;
+        to->Dr2 = from->debug.i386_regs.dr2;
+        to->Dr3 = from->debug.i386_regs.dr3;
+        to->Dr6 = from->debug.i386_regs.dr6;
+        to->Dr7 = from->debug.i386_regs.dr7;
+    }
+    if (from->flags & SERVER_CTX_EXTENDED_REGISTERS)
+    {
+        to->ContextFlags |= WOW64_CONTEXT_EXTENDED_REGISTERS;
+        memcpy( to->ExtendedRegisters, from->ext.i386_regs, sizeof(to->ExtendedRegisters) );
+    }
+    return STATUS_SUCCESS;
+}
+
+/***********************************************************************
+ *           wow64_context_to_server
+ */
+static void wow64_context_to_server( context_t *to, const WOW64_CONTEXT *from )
+{
+    DWORD flags = from->ContextFlags & ~WOW64_CONTEXT_i386;  /* get rid of CPU id */
+
+    memset( to, 0, sizeof(*to) );
+    to->cpu = CPU_x86;
+
+    if (flags & WOW64_CONTEXT_CONTROL)
+    {
+        to->flags |= SERVER_CTX_CONTROL;
+        to->ctl.i386_regs.ebp    = from->Ebp;
+        to->ctl.i386_regs.esp    = from->Esp;
+        to->ctl.i386_regs.eip    = from->Eip;
+        to->ctl.i386_regs.cs     = from->SegCs;
+        to->ctl.i386_regs.ss     = from->SegSs;
+        to->ctl.i386_regs.eflags = from->EFlags;
+    }
+    if (flags & WOW64_CONTEXT_INTEGER)
+    {
+        to->flags |= SERVER_CTX_INTEGER;
+        to->integer.i386_regs.eax = from->Eax;
+        to->integer.i386_regs.ebx = from->Ebx;
+        to->integer.i386_regs.ecx = from->Ecx;
+        to->integer.i386_regs.edx = from->Edx;
+        to->integer.i386_regs.esi = from->Esi;
+        to->integer.i386_regs.edi = from->Edi;
+    }
+    if (flags & WOW64_CONTEXT_SEGMENTS)
+    {
+        to->flags |= SERVER_CTX_SEGMENTS;
+        to->seg.i386_regs.ds = from->SegDs;
+        to->seg.i386_regs.es = from->SegEs;
+        to->seg.i386_regs.fs = from->SegFs;
+        to->seg.i386_regs.gs = from->SegGs;
+    }
+    if (flags & WOW64_CONTEXT_FLOATING_POINT)
+    {
+        to->flags |= SERVER_CTX_FLOATING_POINT;
+        to->fp.i386_regs.ctrl     = from->FloatSave.ControlWord;
+        to->fp.i386_regs.status   = from->FloatSave.StatusWord;
+        to->fp.i386_regs.tag      = from->FloatSave.TagWord;
+        to->fp.i386_regs.err_off  = from->FloatSave.ErrorOffset;
+        to->fp.i386_regs.err_sel  = from->FloatSave.ErrorSelector;
+        to->fp.i386_regs.data_off = from->FloatSave.DataOffset;
+        to->fp.i386_regs.data_sel = from->FloatSave.DataSelector;
+        to->fp.i386_regs.cr0npx   = from->FloatSave.Cr0NpxState;
+        memcpy( to->fp.i386_regs.regs, from->FloatSave.RegisterArea, sizeof(to->fp.i386_regs.regs) );
+    }
+    if (flags & WOW64_CONTEXT_DEBUG_REGISTERS)
+    {
+        to->flags |= SERVER_CTX_DEBUG_REGISTERS;
+        to->debug.i386_regs.dr0 = from->Dr0;
+        to->debug.i386_regs.dr1 = from->Dr1;
+        to->debug.i386_regs.dr2 = from->Dr2;
+        to->debug.i386_regs.dr3 = from->Dr3;
+        to->debug.i386_regs.dr6 = from->Dr6;
+        to->debug.i386_regs.dr7 = from->Dr7;
+    }
+    if (flags & WOW64_CONTEXT_EXTENDED_REGISTERS)
+    {
+        to->flags |= SERVER_CTX_EXTENDED_REGISTERS;
+        memcpy( to->ext.i386_regs, from->ExtendedRegisters, sizeof(to->ext.i386_regs) );
+    }
+}
+
+
+/******************************************************************************
+ *              RtlWow64GetThreadContext  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlWow64GetThreadContext( HANDLE handle, WOW64_CONTEXT *context )
+{
+    BOOL self;
+    NTSTATUS ret;
+    context_t server_context;
+    unsigned int server_flags = wow64_get_server_context_flags( context->ContextFlags );
+
+    if ((ret = get_thread_context( handle, &server_context, server_flags, &self ))) return ret;
+    if (self) return STATUS_INVALID_PARAMETER;
+    return wow64_context_from_server( context, &server_context );
+}
+
+
+/******************************************************************************
+ *              RtlWow64SetThreadContext  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlWow64SetThreadContext( HANDLE handle, const WOW64_CONTEXT *context )
+{
+    BOOL self;
+    context_t server_context;
+
+    wow64_context_to_server( &server_context, context );
+    return set_thread_context( handle, &server_context, &self );
 }
 
 
@@ -2466,11 +2791,9 @@ static NTSTATUS call_stack_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_contex
 
 
 /*******************************************************************
- *		raise_exception
- *
- * Implementation of NtRaiseException.
+ *		NtRaiseException (NTDLL.@)
  */
-static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_chance )
+NTSTATUS WINAPI NtRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_chance )
 {
     NTSTATUS status;
 
@@ -2506,17 +2829,15 @@ static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL f
                   context->R12, context->R13, context->R14, context->R15 );
         }
         status = send_debug_event( rec, TRUE, context );
-        if (status == DBG_CONTINUE || status == DBG_EXCEPTION_HANDLED)
-            return STATUS_SUCCESS;
+        if (status == DBG_CONTINUE || status == DBG_EXCEPTION_HANDLED) goto done;
 
         /* fix up instruction pointer in context for EXCEPTION_BREAKPOINT */
         if (rec->ExceptionCode == EXCEPTION_BREAKPOINT) context->Rip--;
 
-        if (call_vectored_handlers( rec, context ) == EXCEPTION_CONTINUE_EXECUTION)
-            return STATUS_SUCCESS;
+        if (call_vectored_handlers( rec, context ) == EXCEPTION_CONTINUE_EXECUTION) goto done;
 
-        if ((status = call_stack_handlers( rec, context )) != STATUS_UNHANDLED_EXCEPTION)
-            return status;
+        if ((status = call_stack_handlers( rec, context )) == STATUS_SUCCESS) goto done;
+        if (status != STATUS_UNHANDLED_EXCEPTION) return status;
     }
 
     /* last chance exception */
@@ -2533,7 +2854,9 @@ static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL f
                 rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress );
         NtTerminateProcess( NtCurrentProcess(), rec->ExceptionCode );
     }
-    return STATUS_SUCCESS;
+
+done:
+    return NtSetContextThread( GetCurrentThread(), context );
 }
 
 
@@ -2561,14 +2884,42 @@ static void raise_segv_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
             case 3: /* BREAKPOINT_LOAD_SYMBOLS */
             case 4: /* BREAKPOINT_UNLOAD_SYMBOLS */
             case 5: /* BREAKPOINT_COMMAND_STRING (>= Win2003) */
-                goto done;
+                set_cpu_context( context );
         }
         break;
     }
-    status = raise_exception( rec, context, TRUE );
-    if (status) raise_status( status, rec );
-done:
-    set_cpu_context( context );
+    status = NtRaiseException( rec, context, TRUE );
+    raise_status( status, rec );
+}
+
+
+/**********************************************************************
+ *		raise_trap_exception
+ */
+static void raise_trap_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
+{
+    NTSTATUS status;
+
+    if (rec->ExceptionCode == EXCEPTION_SINGLE_STEP)
+    {
+        /* when single stepping can't tell whether this is a hw bp or a
+         * single step interrupt. try to avoid as much overhead as possible
+         * and only do a server call if there is any hw bp enabled. */
+
+        if( !(context->EFlags & 0x100) || (amd64_thread_data()->dr7 & 0xff) )
+        {
+            /* (possible) hardware breakpoint, fetch the debug registers */
+            DWORD saved_flags = context->ContextFlags;
+            context->ContextFlags = CONTEXT_DEBUG_REGISTERS;
+            NtGetContextThread(GetCurrentThread(), context);
+            context->ContextFlags |= saved_flags;  /* restore flags */
+        }
+
+        context->EFlags &= ~0x100;  /* clear single-step flag */
+    }
+
+    status = NtRaiseException( rec, context, TRUE );
+    raise_status( status, rec );
 }
 
 
@@ -2579,9 +2930,88 @@ done:
  */
 static void raise_generic_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
 {
-    NTSTATUS status = raise_exception( rec, context, TRUE );
-    if (status) raise_status( status, rec );
-    set_cpu_context( context );
+    NTSTATUS status = NtRaiseException( rec, context, TRUE );
+    raise_status( status, rec );
+}
+
+
+/***********************************************************************
+ *           is_privileged_instr
+ *
+ * Check if the fault location is a privileged instruction.
+ */
+static inline DWORD is_privileged_instr( CONTEXT *context )
+{
+    const BYTE *instr = (BYTE *)context->Rip;
+    unsigned int prefix_count = 0;
+
+    for (;;) switch(*instr)
+    {
+    /* instruction prefixes */
+    case 0x2e:  /* %cs: */
+    case 0x36:  /* %ss: */
+    case 0x3e:  /* %ds: */
+    case 0x26:  /* %es: */
+    case 0x40:  /* rex */
+    case 0x41:  /* rex */
+    case 0x42:  /* rex */
+    case 0x43:  /* rex */
+    case 0x44:  /* rex */
+    case 0x45:  /* rex */
+    case 0x46:  /* rex */
+    case 0x47:  /* rex */
+    case 0x48:  /* rex */
+    case 0x49:  /* rex */
+    case 0x4a:  /* rex */
+    case 0x4b:  /* rex */
+    case 0x4c:  /* rex */
+    case 0x4d:  /* rex */
+    case 0x4e:  /* rex */
+    case 0x4f:  /* rex */
+    case 0x64:  /* %fs: */
+    case 0x65:  /* %gs: */
+    case 0x66:  /* opcode size */
+    case 0x67:  /* addr size */
+    case 0xf0:  /* lock */
+    case 0xf2:  /* repne */
+    case 0xf3:  /* repe */
+        if (++prefix_count >= 15) return EXCEPTION_ILLEGAL_INSTRUCTION;
+        instr++;
+        continue;
+
+    case 0x0f: /* extended instruction */
+        switch(instr[1])
+        {
+        case 0x06: /* clts */
+        case 0x08: /* invd */
+        case 0x09: /* wbinvd */
+        case 0x20: /* mov crX, reg */
+        case 0x21: /* mov drX, reg */
+        case 0x22: /* mov reg, crX */
+        case 0x23: /* mov reg drX */
+            return EXCEPTION_PRIV_INSTRUCTION;
+        }
+        return 0;
+    case 0x6c: /* insb (%dx) */
+    case 0x6d: /* insl (%dx) */
+    case 0x6e: /* outsb (%dx) */
+    case 0x6f: /* outsl (%dx) */
+    case 0xcd: /* int $xx */
+    case 0xe4: /* inb al,XX */
+    case 0xe5: /* in (e)ax,XX */
+    case 0xe6: /* outb XX,al */
+    case 0xe7: /* out XX,(e)ax */
+    case 0xec: /* inb (%dx),%al */
+    case 0xed: /* inl (%dx),%eax */
+    case 0xee: /* outb %al,(%dx) */
+    case 0xef: /* outl %eax,(%dx) */
+    case 0xf4: /* hlt */
+    case 0xfa: /* cli */
+    case 0xfb: /* sti */
+        return EXCEPTION_PRIV_INSTRUCTION;
+    default:
+        return 0;
+    }
 }
 
 
@@ -2594,6 +3024,9 @@ static inline BOOL handle_interrupt( unsigned int interrupt, EXCEPTION_RECORD *r
 {
     switch(interrupt)
     {
+    case 0x2c:
+        rec->ExceptionCode = STATUS_ASSERTION_FAILURE;
+        return TRUE;
     case 0x2d:
         context->Rip += 3;
         rec->ExceptionCode = EXCEPTION_BREAKPOINT;
@@ -2655,15 +3088,18 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
         {
             CONTEXT *win_context = get_exception_context( rec );
             WORD err = ERROR_sig(ucontext);
+            if (!err && (rec->ExceptionCode = is_privileged_instr( win_context ))) break;
             if ((err & 7) == 2 && handle_interrupt( err >> 3, rec, win_context )) break;
-            rec->ExceptionCode = err ? EXCEPTION_ACCESS_VIOLATION : EXCEPTION_PRIV_INSTRUCTION;
             rec->ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
+            rec->NumberParameters = 2;
+            rec->ExceptionInformation[0] = 0;
+            rec->ExceptionInformation[1] = 0xffffffffffffffff;
         }
         break;
     case TRAP_x86_PAGEFLT:  /* Page fault */
         rec->ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
         rec->NumberParameters = 2;
-        rec->ExceptionInformation[0] = (ERROR_sig(ucontext) & 2) != 0;
+        rec->ExceptionInformation[0] = (ERROR_sig(ucontext) >> 1) & 0x09;
         rec->ExceptionInformation[1] = (ULONG_PTR)siginfo->si_addr;
         break;
     case TRAP_x86_ALIGNFLT:  /* Alignment check exception */
@@ -2690,7 +3126,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
  */
 static void trap_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
-    EXCEPTION_RECORD *rec = setup_exception( sigcontext, raise_generic_exception );
+    EXCEPTION_RECORD *rec = setup_exception( sigcontext, raise_trap_exception );
 
     switch (siginfo->si_code)
     {
@@ -2699,6 +3135,12 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *sigcontext )
         rec->ExceptionCode = EXCEPTION_SINGLE_STEP;
         break;
     case TRAP_BRKPT:   /* Breakpoint exception */
+        /* Check if this is actuallly icebp instruction */
+        if (((unsigned char *)rec->ExceptionAddress)[-1] == 0xF1)
+        {
+            rec->ExceptionCode = EXCEPTION_SINGLE_STEP;
+            break;
+        }
         rec->ExceptionAddress = (char *)rec->ExceptionAddress - 1;  /* back up over the int3 instruction */
         /* fall through */
     default:
@@ -2807,7 +3249,7 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *ucontext )
  */
 int CDECL __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
 {
-    if (sig >= sizeof(handlers) / sizeof(handlers[0])) return -1;
+    if (sig >= ARRAY_SIZE(handlers)) return -1;
     if (handlers[sig] != NULL) return -2;
     handlers[sig] = wsh;
     return 0;
@@ -2840,6 +3282,7 @@ NTSTATUS signal_alloc_thread( TEB **teb )
     {
         (*teb)->Tib.Self = &(*teb)->Tib;
         (*teb)->Tib.ExceptionList = (void *)~0UL;
+        (*teb)->WOW32Reserved = __wine_syscall_dispatcher;
     }
     return status;
 }
@@ -2850,14 +3293,8 @@ NTSTATUS signal_alloc_thread( TEB **teb )
  */
 void signal_free_thread( TEB *teb )
 {
-    SIZE_T size;
+    SIZE_T size = 0;
 
-    if (teb->DeallocationStack)
-    {
-        size = 0;
-        NtFreeVirtualMemory( GetCurrentProcess(), &teb->DeallocationStack, &size, MEM_RELEASE );
-    }
-    size = 0;
     NtFreeVirtualMemory( NtCurrentProcess(), (void **)&teb, &size, MEM_RELEASE );
 }
 
@@ -2923,6 +3360,7 @@ static void *mac_thread_gsbase(void)
     return ret;
 }
 #endif
+
 
 /**********************************************************************
  *		signal_init_thread
@@ -3892,28 +4330,9 @@ EXCEPTION_DISPOSITION WINAPI __C_specific_handler( EXCEPTION_RECORD *rec,
 }
 
 
-/*******************************************************************
- *		NtRaiseException (NTDLL.@)
- */
-NTSTATUS WINAPI NtRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_chance )
-{
-    NTSTATUS status = raise_exception( rec, context, first_chance );
-    if (status == STATUS_SUCCESS) NtSetContextThread( GetCurrentThread(), context );
-    return status;
-}
-
-
 /***********************************************************************
  *		RtlRaiseException (NTDLL.@)
  */
-void WINAPI __regs_RtlRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context )
-{
-    NTSTATUS status;
-
-    rec->ExceptionAddress = (void *)context->Rip;
-    status = raise_exception( rec, context, TRUE );
-    if (status != STATUS_SUCCESS) raise_status( status, rec );
-}
 __ASM_GLOBAL_FUNC( RtlRaiseException,
                    "movq %rcx,8(%rsp)\n\t"
                    "sub $0x4f8,%rsp\n\t"
@@ -3921,15 +4340,17 @@ __ASM_GLOBAL_FUNC( RtlRaiseException,
                    "leaq 0x20(%rsp),%rcx\n\t"
                    "call " __ASM_NAME("RtlCaptureContext") "\n\t"
                    "leaq 0x20(%rsp),%rdx\n\t"   /* context pointer */
-                   "movq 0x4f8(%rsp),%rax\n\t"  /* return address */
-                   "movq %rax,0xf8(%rdx)\n\t"   /* context->Rip */
                    "leaq 0x500(%rsp),%rax\n\t"  /* orig stack pointer */
                    "movq %rax,0x98(%rdx)\n\t"   /* context->Rsp */
                    "movq (%rax),%rcx\n\t"       /* original first parameter */
                    "movq %rcx,0x80(%rdx)\n\t"   /* context->Rcx */
-                   "call " __ASM_NAME("__regs_RtlRaiseException") "\n\t"
-                   "leaq 0x20(%rsp),%rdi\n\t"   /* context pointer */
-                   "call " __ASM_NAME("set_cpu_context") /* does not return */ );
+                   "movq 0x4f8(%rsp),%rax\n\t"  /* return address */
+                   "movq %rax,0xf8(%rdx)\n\t"   /* context->Rip */
+                   "movq %rax,0x10(%rcx)\n\t"   /* rec->ExceptionAddress */
+                   "movl $1,%r8d\n\t"
+                   "call " __ASM_NAME("NtRaiseException") "\n\t"
+                   "movq %rax,%rcx\n\t"
+                   "call " __ASM_NAME("RtlRaiseStatus") /* does not return */ );
 
 
 /*************************************************************************
@@ -3945,11 +4366,11 @@ USHORT WINAPI RtlCaptureStackBackTrace( ULONG skip, ULONG count, PVOID *buffer, 
 /***********************************************************************
  *           call_thread_func
  */
-void call_thread_func( LPTHREAD_START_ROUTINE entry, void *arg, void *frame )
+static void WINAPI call_thread_func( LPTHREAD_START_ROUTINE entry, void *arg )
 {
-    ntdll_get_thread_data()->exit_frame = frame;
     __TRY
     {
+        TRACE_(relay)( "\1Starting thread proc %p (arg=%p)\n", entry, arg );
         RtlExitUserThread( entry( arg ));
     }
     __EXCEPT(unhandled_exception_filter)
@@ -3960,8 +4381,10 @@ void call_thread_func( LPTHREAD_START_ROUTINE entry, void *arg, void *frame )
     abort();  /* should not be reached */
 }
 
-extern void DECLSPEC_NORETURN call_thread_entry_point( LPTHREAD_START_ROUTINE entry, void *arg );
-__ASM_GLOBAL_FUNC( call_thread_entry_point,
+
+extern void DECLSPEC_NORETURN start_thread( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend,
+                                            void *relay );
+__ASM_GLOBAL_FUNC( start_thread,
                    "subq $56,%rsp\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset 56\n\t")
                    "movq %rbp,48(%rsp)\n\t"
@@ -3976,11 +4399,33 @@ __ASM_GLOBAL_FUNC( call_thread_entry_point,
                    __ASM_CFI(".cfi_rel_offset %r14,16\n\t")
                    "movq %r15,8(%rsp)\n\t"
                    __ASM_CFI(".cfi_rel_offset %r15,8\n\t")
-                   "movq %rsp,%rdx\n\t"
-                   "call " __ASM_NAME("call_thread_func") );
+                   /* store exit frame */
+                   "movq %gs:0x30,%rax\n\t"
+                   "movq %rsp,0x330(%rax)\n\t"      /* amd64_thread_data()->exit_frame */
+                   /* switch to thread stack */
+                   "movq 8(%rax),%rax\n\t"          /* NtCurrentTeb()->Tib.StackBase */
+                   "leaq -0x1000(%rax),%rsp\n\t"
+                   /* attach dlls */
+                   "call " __ASM_NAME("attach_thread") "\n\t"
+                   "movq %rax,%rsp\n\t"
+                   /* clear the stack */
+                   "andq $~0xfff,%rax\n\t"  /* round down to page size */
+                   "movq %rax,%rdi\n\t"
+                   "call " __ASM_NAME("virtual_clear_thread_stack") "\n\t"
+                   /* switch to the initial context */
+                   "movq %rsp,%rdi\n\t"
+                   "call " __ASM_NAME("set_cpu_context") )
 
-extern void DECLSPEC_NORETURN call_thread_exit_func( int status, void (*func)(int), void *frame );
+extern void DECLSPEC_NORETURN call_thread_exit_func( int status, void (*func)(int) );
 __ASM_GLOBAL_FUNC( call_thread_exit_func,
+                   /* fetch exit frame */
+                   "movq %gs:0x30,%rax\n\t"
+                   "movq 0x330(%rax),%rdx\n\t"      /* amd64_thread_data()->exit_frame */
+                   "testq %rdx,%rdx\n\t"
+                   "jnz 1f\n\t"
+                   "jmp *%rsi\n"
+                   /* switch to exit frame stack */
+                   "1:\tmovq $0,0x330(%rax)\n\t"
                    "movq %rdx,%rsp\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset 56\n\t")
                    __ASM_CFI(".cfi_rel_offset %rbp,48\n\t")
@@ -3989,32 +4434,96 @@ __ASM_GLOBAL_FUNC( call_thread_exit_func,
                    __ASM_CFI(".cfi_rel_offset %r13,24\n\t")
                    __ASM_CFI(".cfi_rel_offset %r14,16\n\t")
                    __ASM_CFI(".cfi_rel_offset %r15,8\n\t")
-                   "call *%rsi" );
+                   "call *%rsi" )
+
 
 /***********************************************************************
- *           RtlExitUserThread  (NTDLL.@)
+ *           init_thread_context
  */
-void WINAPI RtlExitUserThread( ULONG status )
+static void init_thread_context( CONTEXT *context, LPTHREAD_START_ROUTINE entry, void *arg, void *relay )
 {
-    if (!ntdll_get_thread_data()->exit_frame) exit_thread( status );
-    call_thread_exit_func( status, exit_thread, ntdll_get_thread_data()->exit_frame );
+    __asm__( "movw %%cs,%0" : "=m" (context->SegCs) );
+    __asm__( "movw %%ss,%0" : "=m" (context->SegSs) );
+    __asm__( "fxsave %0" : "=m" (context->u.FltSave) );
+    context->Rcx    = (ULONG_PTR)entry;
+    context->Rdx    = (ULONG_PTR)arg;
+    context->Rsp    = (ULONG_PTR)NtCurrentTeb()->Tib.StackBase - 0x28;
+    context->Rip    = (ULONG_PTR)relay;
+    context->EFlags = 0x200;
 }
 
+
 /***********************************************************************
- *           abort_thread
+ *           attach_thread
  */
-void abort_thread( int status )
+PCONTEXT DECLSPEC_HIDDEN attach_thread( LPTHREAD_START_ROUTINE entry, void *arg,
+                                        BOOL suspend, void *relay )
 {
-    if (!ntdll_get_thread_data()->exit_frame) terminate_thread( status );
-    call_thread_exit_func( status, terminate_thread, ntdll_get_thread_data()->exit_frame );
+    CONTEXT *ctx;
+
+    if (suspend)
+    {
+        CONTEXT context = { 0 };
+
+        context.ContextFlags = CONTEXT_ALL;
+        init_thread_context( &context, entry, arg, relay );
+        wait_suspend( &context );
+        ctx = (CONTEXT *)((ULONG_PTR)context.Rsp & ~15) - 1;
+        *ctx = context;
+    }
+    else
+    {
+        ctx = (CONTEXT *)((char *)NtCurrentTeb()->Tib.StackBase - 0x30) - 1;
+        init_thread_context( ctx, entry, arg, relay );
+    }
+    ctx->ContextFlags = CONTEXT_FULL;
+    LdrInitializeThunk( ctx, (ULONG_PTR)&ctx->Rcx, 0, 0 );
+    return ctx;
 }
+
+
+/***********************************************************************
+ *           signal_start_thread
+ *
+ * Thread startup sequence:
+ * signal_start_thread()
+ *   -> start_thread()
+ *     -> call_thread_func()
+ */
+void signal_start_thread( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend )
+{
+    start_thread( entry, arg, suspend, call_thread_func );
+}
+
 
 /**********************************************************************
- *              __wine_enter_vm86   (NTDLL.@)
+ *		signal_start_process
+ *
+ * Process startup sequence:
+ * signal_start_process()
+ *   -> start_thread()
+ *     -> kernel32_start_process()
  */
-void __wine_enter_vm86( CONTEXT *context )
+void signal_start_process( LPTHREAD_START_ROUTINE entry, BOOL suspend )
 {
-    MESSAGE("vm86 mode not supported on this platform\n");
+    start_thread( entry, NtCurrentTeb()->Peb, suspend, kernel32_start_process );
+}
+
+
+/***********************************************************************
+ *           signal_exit_thread
+ */
+void signal_exit_thread( int status )
+{
+    call_thread_exit_func( status, exit_thread );
+}
+
+/***********************************************************************
+ *           signal_exit_process
+ */
+void signal_exit_process( int status )
+{
+    call_thread_exit_func( status, exit );
 }
 
 /**********************************************************************

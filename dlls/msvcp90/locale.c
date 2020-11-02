@@ -786,11 +786,11 @@ int __cdecl _Getdateorder(void)
 
 #if _MSVCP_VER < 110
     if(!GetLocaleInfoW(___lc_handle_func()[LC_TIME], LOCALE_ILDATE,
-                date_fmt, sizeof(date_fmt)/sizeof(*date_fmt)))
+                date_fmt, ARRAY_SIZE(date_fmt)))
         return DATEORDER_no_order;
 #else
     if(!GetLocaleInfoEx(___lc_locale_name_func()[LC_TIME], LOCALE_ILDATE,
-                date_fmt, sizeof(date_fmt)/sizeof(*date_fmt)))
+                date_fmt, ARRAY_SIZE(date_fmt)))
         return DATEORDER_no_order;
 #endif
 
@@ -7555,7 +7555,7 @@ DEFINE_THISCALL_WRAPPER(num_put_char_do_put_long, 32)
 ostreambuf_iterator_char* __thiscall num_put_char_do_put_long(const num_put *this, ostreambuf_iterator_char *ret,
         ostreambuf_iterator_char dest, ios_base *base, char fill, LONG v)
 {
-    char tmp[48]; /* 22(8^22>2^64)*2(separators beetwen every digit) + 3(strlen("+0x"))+1 */
+    char tmp[48]; /* 22(8^22>2^64)*2(separators between every digit) + 3(strlen("+0x"))+1 */
     char fmt[7]; /* strlen("%+#lld")+1 */
 
     TRACE("(%p %p %p %d %d)\n", this, ret, base, fill, v);
@@ -7597,7 +7597,7 @@ DEFINE_THISCALL_WRAPPER(num_put_char_do_put_ulong, 32)
 ostreambuf_iterator_char* __thiscall num_put_char_do_put_ulong(const num_put *this, ostreambuf_iterator_char *ret,
         ostreambuf_iterator_char dest, ios_base *base, char fill, ULONG v)
 {
-    char tmp[48]; /* 22(8^22>2^64)*2(separators beetwen every digit) + 3(strlen("+0x"))+1 */
+    char tmp[48]; /* 22(8^22>2^64)*2(separators between every digit) + 3(strlen("+0x"))+1 */
     char fmt[7]; /* strlen("%+#lld")+1 */
 
     TRACE("(%p %p %p %d %d)\n", this, ret, base, fill, v);
@@ -7724,7 +7724,7 @@ DEFINE_THISCALL_WRAPPER(num_put_char_do_put_ptr, 32)
 ostreambuf_iterator_char* __thiscall num_put_char_do_put_ptr(const num_put *this, ostreambuf_iterator_char *ret,
         ostreambuf_iterator_char dest, ios_base *base, char fill, const void *v)
 {
-    char tmp[17]; /* 8(16^8==2^64)*2(separators beetwen every digit) + 1 */
+    char tmp[17]; /* 8(16^8==2^64)*2(separators between every digit) + 1 */
 
     TRACE("(%p %p %p %d %p)\n", this, ret, base, fill, v);
 
@@ -7764,7 +7764,7 @@ DEFINE_THISCALL_WRAPPER(num_put_char_do_put_int64, 36)
 ostreambuf_iterator_char* __thiscall num_put_char_do_put_int64(const num_put *this, ostreambuf_iterator_char *ret,
         ostreambuf_iterator_char dest, ios_base *base, char fill, __int64 v)
 {
-    char tmp[48]; /* 22(8^22>2^64)*2(separators beetwen every digit) + 3(strlen("+0x"))+1 */
+    char tmp[48]; /* 22(8^22>2^64)*2(separators between every digit) + 3(strlen("+0x"))+1 */
     char fmt[7]; /* strlen("%+#lld")+1 */
 
     TRACE("(%p %p %p %d)\n", this, ret, base, fill);
@@ -7806,7 +7806,7 @@ DEFINE_THISCALL_WRAPPER(num_put_char_do_put_uint64, 36)
 ostreambuf_iterator_char* __thiscall num_put_char_do_put_uint64(const num_put *this, ostreambuf_iterator_char *ret,
         ostreambuf_iterator_char dest, ios_base *base, char fill, unsigned __int64 v)
 {
-    char tmp[48]; /* 22(8^22>2^64)*2(separators beetwen every digit) + 3(strlen("+0x"))+1 */
+    char tmp[48]; /* 22(8^22>2^64)*2(separators between every digit) + 3(strlen("+0x"))+1 */
     char fmt[7]; /* strlen("%+#lld")+1 */
 
     TRACE("(%p %p %p %d)\n", this, ret, base, fill);
@@ -8470,7 +8470,7 @@ DEFINE_THISCALL_WRAPPER(num_put_wchar_do_put_long, 32)
 ostreambuf_iterator_wchar* __thiscall num_put_wchar_do_put_long(const num_put *this, ostreambuf_iterator_wchar *ret,
         ostreambuf_iterator_wchar dest, ios_base *base, wchar_t fill, LONG v)
 {
-    char tmp[48]; /* 22(8^22>2^64)*2(separators beetwen every digit) + 3(strlen("+0x"))+1 */
+    char tmp[48]; /* 22(8^22>2^64)*2(separators between every digit) + 3(strlen("+0x"))+1 */
     char fmt[7]; /* strlen("%+#lld")+1 */
 
     TRACE("(%p %p %p %d %d)\n", this, ret, base, fill, v);
@@ -8489,7 +8489,7 @@ DEFINE_THISCALL_WRAPPER(num_put_short_do_put_long, 32)
 ostreambuf_iterator_wchar* __thiscall num_put_short_do_put_long(const num_put *this, ostreambuf_iterator_wchar *ret,
         ostreambuf_iterator_wchar dest, ios_base *base, wchar_t fill, LONG v)
 {
-    char tmp[48]; /* 22(8^22>2^64)*2(separators beetwen every digit) + 3(strlen("+0x"))+1 */
+    char tmp[48]; /* 22(8^22>2^64)*2(separators between every digit) + 3(strlen("+0x"))+1 */
     char fmt[7]; /* strlen("%+#lld")+1 */
 
     TRACE("(%p %p %p %d %d)\n", this, ret, base, fill, v);
@@ -8533,7 +8533,7 @@ DEFINE_THISCALL_WRAPPER(num_put_wchar_do_put_ulong, 32)
 ostreambuf_iterator_wchar* __thiscall num_put_wchar_do_put_ulong(const num_put *this, ostreambuf_iterator_wchar *ret,
         ostreambuf_iterator_wchar dest, ios_base *base, wchar_t fill, ULONG v)
 {
-    char tmp[48]; /* 22(8^22>2^64)*2(separators beetwen every digit) + 3(strlen("+0x"))+1 */
+    char tmp[48]; /* 22(8^22>2^64)*2(separators between every digit) + 3(strlen("+0x"))+1 */
     char fmt[7]; /* strlen("%+#lld")+1 */
 
     TRACE("(%p %p %p %d %d)\n", this, ret, base, fill, v);
@@ -8552,7 +8552,7 @@ DEFINE_THISCALL_WRAPPER(num_put_short_do_put_ulong, 32)
 ostreambuf_iterator_wchar* __thiscall num_put_short_do_put_ulong(const num_put *this, ostreambuf_iterator_wchar *ret,
         ostreambuf_iterator_wchar dest, ios_base *base, wchar_t fill, ULONG v)
 {
-    char tmp[48]; /* 22(8^22>2^64)*2(separators beetwen every digit) + 3(strlen("+0x"))+1 */
+    char tmp[48]; /* 22(8^22>2^64)*2(separators between every digit) + 3(strlen("+0x"))+1 */
     char fmt[7]; /* strlen("%+#lld")+1 */
 
     TRACE("(%p %p %p %d %d)\n", this, ret, base, fill, v);
@@ -8713,7 +8713,7 @@ DEFINE_THISCALL_WRAPPER(num_put_wchar_do_put_ptr, 32)
 ostreambuf_iterator_wchar* __thiscall num_put_wchar_do_put_ptr(const num_put *this, ostreambuf_iterator_wchar *ret,
         ostreambuf_iterator_wchar dest, ios_base *base, wchar_t fill, const void *v)
 {
-    char tmp[17]; /* 8(16^8==2^64)*2(separators beetwen every digit) + 1 */
+    char tmp[17]; /* 8(16^8==2^64)*2(separators between every digit) + 1 */
 
     TRACE("(%p %p %p %d %p)\n", this, ret, base, fill, v);
 
@@ -8730,7 +8730,7 @@ DEFINE_THISCALL_WRAPPER(num_put_short_do_put_ptr, 32)
 ostreambuf_iterator_wchar* __thiscall num_put_short_do_put_ptr(const num_put *this, ostreambuf_iterator_wchar *ret,
         ostreambuf_iterator_wchar dest, ios_base *base, wchar_t fill, const void *v)
 {
-    char tmp[17]; /* 8(16^8==2^64)*2(separators beetwen every digit) + 1 */
+    char tmp[17]; /* 8(16^8==2^64)*2(separators between every digit) + 1 */
 
     TRACE("(%p %p %p %d %p)\n", this, ret, base, fill, v);
 
@@ -8772,7 +8772,7 @@ DEFINE_THISCALL_WRAPPER(num_put_wchar_do_put_int64, 36)
 ostreambuf_iterator_wchar* __thiscall num_put_wchar_do_put_int64(const num_put *this, ostreambuf_iterator_wchar *ret,
         ostreambuf_iterator_wchar dest, ios_base *base, wchar_t fill, __int64 v)
 {
-    char tmp[48]; /* 22(8^22>2^64)*2(separators beetwen every digit) + 3(strlen("+0x"))+1 */
+    char tmp[48]; /* 22(8^22>2^64)*2(separators between every digit) + 3(strlen("+0x"))+1 */
     char fmt[7]; /* strlen("%+#lld")+1 */
 
     TRACE("(%p %p %p %d)\n", this, ret, base, fill);
@@ -8791,7 +8791,7 @@ DEFINE_THISCALL_WRAPPER(num_put_short_do_put_int64, 36)
 ostreambuf_iterator_wchar* __thiscall num_put_short_do_put_int64(const num_put *this, ostreambuf_iterator_wchar *ret,
         ostreambuf_iterator_wchar dest, ios_base *base, wchar_t fill, __int64 v)
 {
-    char tmp[48]; /* 22(8^22>2^64)*2(separators beetwen every digit) + 3(strlen("+0x"))+1 */
+    char tmp[48]; /* 22(8^22>2^64)*2(separators between every digit) + 3(strlen("+0x"))+1 */
     char fmt[7]; /* strlen("%+#lld")+1 */
 
     TRACE("(%p %p %p %d)\n", this, ret, base, fill);
@@ -8835,7 +8835,7 @@ DEFINE_THISCALL_WRAPPER(num_put_wchar_do_put_uint64, 36)
 ostreambuf_iterator_wchar* __thiscall num_put_wchar_do_put_uint64(const num_put *this, ostreambuf_iterator_wchar *ret,
         ostreambuf_iterator_wchar dest, ios_base *base, wchar_t fill, unsigned __int64 v)
 {
-    char tmp[48]; /* 22(8^22>2^64)*2(separators beetwen every digit) + 3(strlen("+0x"))+1 */
+    char tmp[48]; /* 22(8^22>2^64)*2(separators between every digit) + 3(strlen("+0x"))+1 */
     char fmt[7]; /* strlen("%+#lld")+1 */
 
     TRACE("(%p %p %p %d)\n", this, ret, base, fill);
@@ -8854,7 +8854,7 @@ DEFINE_THISCALL_WRAPPER(num_put_short_do_put_uint64, 36)
 ostreambuf_iterator_wchar* __thiscall num_put_short_do_put_uint64(const num_put *this, ostreambuf_iterator_wchar *ret,
         ostreambuf_iterator_wchar dest, ios_base *base, wchar_t fill, unsigned __int64 v)
 {
-    char tmp[48]; /* 22(8^22>2^64)*2(separators beetwen every digit) + 3(strlen("+0x"))+1 */
+    char tmp[48]; /* 22(8^22>2^64)*2(separators between every digit) + 3(strlen("+0x"))+1 */
     char fmt[7]; /* strlen("%+#lld")+1 */
 
     TRACE("(%p %p %p %d)\n", this, ret, base, fill);
@@ -9946,10 +9946,55 @@ static time_get_char* time_get_char_use_facet(const locale *loc)
 /* ?_Getint@?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@AEBAHAEAV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@0HHAEAH@Z */
 int __cdecl time_get_char__Getint(const time_get_char *this,
         istreambuf_iterator_char *b, istreambuf_iterator_char *e,
-        int unk1, int unk2, int *val)
+        int min_val, int max_val, int *val)
 {
-    FIXME("(%p %p %p %d %d %p) stub\n", this, b, e, unk1, unk2, val);
-    return 0;
+    BOOL got_digit = FALSE;
+    int len = 0, ret = 0;
+    char buf[16];
+
+    TRACE("(%p %p %p %d %d %p)\n", this, b, e, min_val, max_val, val);
+
+    istreambuf_iterator_char_val(b);
+    if(b->strbuf && (b->val == '-' || b->val == '+'))
+    {
+        buf[len++] = b->val;
+        istreambuf_iterator_char_inc(b);
+    }
+
+    if (b->strbuf && b->val == '0')
+    {
+        got_digit = TRUE;
+        buf[len++] = '0';
+        istreambuf_iterator_char_inc(b);
+    }
+    while (b->strbuf && b->val == '0')
+        istreambuf_iterator_char_inc(b);
+
+    for (; b->strbuf && b->val >= '0' && b->val <= '9';
+            istreambuf_iterator_char_inc(b))
+    {
+        if(len < ARRAY_SIZE(buf)-1)
+            buf[len] = b->val;
+        got_digit = TRUE;
+        len++;
+    }
+
+    if (!b->strbuf)
+        ret |= IOSTATE_eofbit;
+    if (got_digit && len < ARRAY_SIZE(buf)-1)
+    {
+        int v, err;
+
+        buf[len] = 0;
+        v = _Stolx(buf, NULL, 10, &err);
+        if(err || v < min_val || v > max_val)
+            ret |= IOSTATE_failbit;
+        else
+            *val = v;
+    }
+    else
+        ret |= IOSTATE_failbit;
+    return ret;
 }
 
 /* ?do_date_order@?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MBE?AW4dateorder@time_base@2@XZ */
@@ -9994,8 +10039,8 @@ istreambuf_iterator_char* __thiscall time_get_char_do_get(const time_get_char *t
     return NULL;
 }
 
-/* ?get@?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHPAUtm@@@Z */
-/* ?get@?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHPEAUtm@@@Z */
+/* ?get@?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHPAUtm@@DD@Z */
+/* ?get@?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHPEAUtm@@DD@Z */
 DEFINE_THISCALL_WRAPPER(time_get_char_get, 44)
 istreambuf_iterator_char* __thiscall time_get_char_get(const time_get_char *this,
         istreambuf_iterator_char *ret, istreambuf_iterator_char s, istreambuf_iterator_char e,
@@ -10045,6 +10090,52 @@ istreambuf_iterator_char* __thiscall time_get_char_get_date(const time_get_char 
     return call_time_get_char_do_get_date(this, ret, s, e, base, err, t);
 }
 
+static int find_longest_match(istreambuf_iterator_char *iter, const char *str)
+{
+    int i, len = 0, last_match = -1, match = -1;
+    const char *p, *end;
+    char buf[64];
+
+    for(istreambuf_iterator_char_val(iter); iter->strbuf && len<ARRAY_SIZE(buf);
+            istreambuf_iterator_char_inc(iter))
+    {
+        BOOL got_prefix = FALSE;
+
+        buf[len++] = iter->val;
+        last_match = match;
+        match = -1;
+        for(p=str+1, i=0; *p; p = (*end ? end+1 : end), i++)
+        {
+            end = strchr(p, ':');
+            if (!end)
+                end = p + strlen(p);
+
+            if (end-p >= len && !memcmp(p, buf, len))
+            {
+                if (end-p == len)
+                    match = i;
+                else
+                    got_prefix = TRUE;
+            }
+        }
+
+        if (!got_prefix)
+        {
+            if (match != -1)
+            {
+                istreambuf_iterator_char_inc(iter);
+                return match;
+            }
+            break;
+        }
+    }
+    if (len == ARRAY_SIZE(buf))
+        FIXME("temporary buffer is too small\n");
+    if (!iter->strbuf)
+        return match;
+    return last_match;
+}
+
 /* ?do_get_monthname@?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHPAUtm@@@Z */
 /* ?do_get_monthname@?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHPEAUtm@@@Z */
 DEFINE_THISCALL_WRAPPER(time_get_char_do_get_monthname, 36) /* virtual */
@@ -10061,8 +10152,17 @@ istreambuf_iterator_char* __thiscall time_get_char_do_get_monthname(const time_g
         istreambuf_iterator_char *ret, istreambuf_iterator_char s, istreambuf_iterator_char e,
         ios_base *base, int *err, struct tm *t)
 {
-    FIXME("(%p %p %p %p %p) stub\n", this, ret, base, err, t);
-    return NULL;
+    int match;
+
+    TRACE("(%p %p %p %p %p)\n", this, ret, base, err, t);
+
+    if ((match = find_longest_match(&s, this->months)) != -1)
+        t->tm_mon = match / 2;
+    else
+        *err |= IOSTATE_failbit;
+
+    *ret = s;
+    return ret;
 }
 
 /* ?get_monthname@?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHPAUtm@@@Z */
@@ -10091,8 +10191,28 @@ istreambuf_iterator_char* __thiscall time_get_char_do_get_time(const time_get_ch
         istreambuf_iterator_char *ret, istreambuf_iterator_char s, istreambuf_iterator_char e,
         ios_base *base, int *err, struct tm *t)
 {
-    FIXME("(%p %p %p %p %p) stub\n", this, ret, base, err, t);
-    return NULL;
+    TRACE("(%p %p %p %p %p)\n", this, ret, base, err, t);
+
+    *err |= time_get_char__Getint(this, &s, &e, 0, 23, &t->tm_hour);
+    if (*err || istreambuf_iterator_char_val(&s)!=':')
+        *err |= IOSTATE_failbit;
+
+    if (!*err)
+    {
+        istreambuf_iterator_char_inc(&s);
+        *err |= time_get_char__Getint(this, &s, &e, 0, 59, &t->tm_min);
+    }
+    if (*err || istreambuf_iterator_char_val(&s)!=':')
+        *err |= IOSTATE_failbit;
+
+    if (!*err)
+    {
+        istreambuf_iterator_char_inc(&s);
+        *err |= time_get_char__Getint(this, &s, &e, 0, 59, &t->tm_sec);
+    }
+
+    *ret = s;
+    return ret;
 }
 
 /* ?get_time@?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHPAUtm@@@Z */
@@ -10121,8 +10241,17 @@ istreambuf_iterator_char* __thiscall time_get_char_do_get_weekday(const time_get
         istreambuf_iterator_char *ret, istreambuf_iterator_char s, istreambuf_iterator_char e,
         ios_base *base, int *err, struct tm *t)
 {
-    FIXME("(%p %p %p %p %p) stub\n", this, ret, base, err, t);
-    return NULL;
+    int match;
+
+    TRACE("(%p %p %p %p %p)\n", this, ret, base, err, t);
+
+    if ((match = find_longest_match(&s, this->days)) != -1)
+        t->tm_wday = match / 2;
+    else
+        *err |= IOSTATE_failbit;
+
+    *ret = s;
+    return ret;
 }
 
 /* ?get_weekday@?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHPAUtm@@@Z */
@@ -10151,8 +10280,24 @@ istreambuf_iterator_char* __thiscall time_get_char_do_get_year(const time_get_ch
         istreambuf_iterator_char *ret, istreambuf_iterator_char s, istreambuf_iterator_char e,
         ios_base *base, int *err, struct tm *t)
 {
-    FIXME("(%p %p %p %p %p) stub\n", this, ret, base, err, t);
-    return NULL;
+    int year;
+
+    TRACE("(%p %p %p %p %p)\n", this, ret, base, err, t);
+
+    /* The function supports only dates from [1900-2035] range */
+    *err |= time_get_char__Getint(this, &s, &e, 0, 2035, &year);
+    if (!(*err & IOSTATE_failbit))
+    {
+        if (year >= 1900)
+            year -= 1900;
+        if (year > 135)
+            *err |= IOSTATE_failbit;
+        else
+            t->tm_year = year;
+    }
+
+    *ret = s;
+    return ret;
 }
 
 /* ?get_year@?$time_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHPAUtm@@@Z */
@@ -10614,7 +10759,7 @@ void __cdecl locale__Locimp__Makewloc(const _Locinfo *locinfo, category cat, loc
 /* ?_Makexloc@_Locimp@locale@std@@CAXABV_Locinfo@3@HPAV123@PBV23@@Z */
 /* ?_Makexloc@_Locimp@locale@std@@CAXAEBV_Locinfo@3@HPEAV123@PEBV23@@Z */
 /* List of missing facets:
- * messages, money_get, money_put, moneypunct, moneypunct, time_get
+ * messages, money_get, money_put, moneypunct, moneypunct
  */
 void __cdecl locale__Locimp__Makexloc(const _Locinfo *locinfo, category cat, locale__Locimp *locimp, const locale *loc)
 {
@@ -11274,10 +11419,6 @@ int __cdecl _To_byte(const wchar_t *src, char *dst)
 int __cdecl _To_wide(const char *src, wchar_t *dst)
 {
     TRACE("(%s %p)\n", debugstr_a(src), dst);
-
-    if (!src || !dst)
-        return 0;
-
     return MultiByteToWideChar(CP_ACP, 0, src, -1, dst, MAX_PATH);
 }
 

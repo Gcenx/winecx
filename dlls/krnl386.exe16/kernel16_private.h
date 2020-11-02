@@ -168,7 +168,7 @@ extern THHOOK *pThhook DECLSPEC_HIDDEN;
     (((offset)+(size) <= pModule->mapping_size) ? \
      (memcpy( buffer, (const char *)pModule->mapping + (offset), (size) ), TRUE) : FALSE)
 
-#define CURRENT_STACK16 ((STACK16FRAME*)MapSL(PtrToUlong(NtCurrentTeb()->WOW32Reserved)))
+#define CURRENT_STACK16 ((STACK16FRAME*)MapSL(PtrToUlong(NtCurrentTeb()->SystemReserved1[0])))
 #define CURRENT_DS      (CURRENT_STACK16->ds)
 
 /* push bytes on the 16-bit stack of a thread; return a segptr to the first pushed byte */
@@ -176,8 +176,8 @@ static inline SEGPTR stack16_push( int size )
 {
     STACK16FRAME *frame = CURRENT_STACK16;
     memmove( (char*)frame - size, frame, sizeof(*frame) );
-    NtCurrentTeb()->WOW32Reserved = (char *)NtCurrentTeb()->WOW32Reserved - size;
-    return (SEGPTR)((char *)NtCurrentTeb()->WOW32Reserved + sizeof(*frame));
+    NtCurrentTeb()->SystemReserved1[0] = (char *)NtCurrentTeb()->SystemReserved1[0] - size;
+    return (SEGPTR)((char *)NtCurrentTeb()->SystemReserved1[0] + sizeof(*frame));
 }
 
 /* pop bytes from the 16-bit stack of a thread */
@@ -185,7 +185,7 @@ static inline void stack16_pop( int size )
 {
     STACK16FRAME *frame = CURRENT_STACK16;
     memmove( (char*)frame + size, frame, sizeof(*frame) );
-    NtCurrentTeb()->WOW32Reserved = (char *)NtCurrentTeb()->WOW32Reserved + size;
+    NtCurrentTeb()->SystemReserved1[0] = (char *)NtCurrentTeb()->SystemReserved1[0] + size;
 }
 
 /* dosmem.c */
@@ -271,11 +271,12 @@ struct tagSYSLEVEL;
 
 struct kernel_thread_data
 {
+    void               *reserved;       /* stack segment pointer */
     WORD                stack_sel;      /* 16-bit stack selector */
     WORD                htask16;        /* Win16 task handle */
     DWORD               sys_count[4];   /* syslevel mutex entry counters */
     struct tagSYSLEVEL *sys_mutex[4];   /* syslevel mutex pointers */
-    void               *pad[45];        /* change this if you add fields! */
+    void               *pad[44];        /* change this if you add fields! */
 };
 
 static inline struct kernel_thread_data *kernel_get_thread_data(void)
@@ -283,12 +284,39 @@ static inline struct kernel_thread_data *kernel_get_thread_data(void)
     return (struct kernel_thread_data *)NtCurrentTeb()->SystemReserved1;
 }
 
-#define DEFINE_REGS_ENTRYPOINT( name, args ) \
-    __ASM_GLOBAL_FUNC( name, \
-                       ".byte 0x68\n\t"  /* pushl $__regs_func */       \
-                       ".long " __ASM_NAME("__regs_") #name "-.-11\n\t" \
-                       ".byte 0x6a," #args "\n\t" /* pushl $args */     \
-                       "call " __ASM_NAME("__wine_call_from_regs") "\n\t" \
-                       "ret $(4*" #args ")" ) /* fake ret to make copy protections happy */
+/* Push a DWORD on the 32-bit stack */
+static inline void stack32_push( CONTEXT *context, DWORD val )
+{
+    context->Esp -= sizeof(DWORD);
+    *(DWORD *)context->Esp = val;
+}
+
+/* Pop a DWORD from the 32-bit stack */
+static inline DWORD stack32_pop( CONTEXT *context )
+{
+    DWORD ret = *(DWORD *)context->Esp;
+    context->Esp += sizeof(DWORD);
+    return ret;
+}
+
+#define DEFINE_REGS_ENTRYPOINT(name) \
+    __ASM_STDCALL_FUNC( name, 0,                                        \
+                        "pushl %ebp\n\t"                                \
+                        __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")       \
+                        __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")         \
+                        "movl %esp,%ebp\n\t"                            \
+                        __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")     \
+                        "leal -(0x2cc+4)(%esp),%esp\n\t"  /* sizeof(CONTEXT) + space for %eax */ \
+                        "movl %eax,-4(%ebp)\n\t"                        \
+                        "pushl %esp\n\t"             /* context */      \
+                        "call " __ASM_NAME("RtlCaptureContext") __ASM_STDCALL(4) "\n\t" \
+                        "movl -4(%ebp),%eax\n\t"                        \
+                        "movl %eax,0xb0(%esp)\n\t"   /* context->Eax */ \
+                        "pushl %esp\n\t"             /* context */      \
+                        "call " __ASM_NAME("__regs_") #name __ASM_STDCALL(4) "\n\t" \
+                        "pushl %esp\n\t"             /* context */      \
+                        "pushl $-2\n\t"   /* GetCurrentThread() */      \
+                        "call " __ASM_NAME("NtSetContextThread") __ASM_STDCALL(8) "\n\t" \
+                        "ret" ) /* fake ret to make copy protections happy */
 
 #endif  /* __WINE_KERNEL16_PRIVATE_H */

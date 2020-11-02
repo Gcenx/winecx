@@ -31,6 +31,24 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(twain);
 
+extern HINSTANCE DSM_hinstance;
+
+BOOL WINAPI DllMain (HINSTANCE hinstance, DWORD reason, LPVOID reserved)
+{
+    TRACE("%p,%x,%p\n", hinstance, reason, reserved);
+
+    switch (reason)
+    {
+        case DLL_PROCESS_ATTACH:
+            DisableThreadLibraryCalls(hinstance);
+            DSM_hinstance = hinstance;
+            break;
+        case DLL_PROCESS_DETACH:
+            break;
+    }
+    return TRUE;
+}
+
 /* A helper function that looks up a destination identity in the active
    source list */
 static activeDS *TWAIN_LookupSource (const TW_IDENTITY *pDest)
@@ -142,6 +160,19 @@ DSM_Entry (pTW_IDENTITY pOrigin,
 
     TRACE("(DG=%d DAT=%d MSG=%d)\n", DG, DAT, MSG);
 
+    if (DG == DG_CONTROL && DAT == DAT_NULL)
+    {
+        activeDS *pSource = TWAIN_LookupSource (pOrigin);
+        if (!pSource)
+        {
+            ERR("No source associated with pSource %p\n", pDest);
+            DSM_twCC = TWCC_BADPROTOCOL;
+            return TWRC_FAILURE;
+        }
+
+        return TWAIN_ControlNull (pOrigin, pDest, pSource, MSG, pData);
+    }
+
     if (pDest)
     {
         activeDS *pSource = TWAIN_LookupSource (pDest);
@@ -152,6 +183,21 @@ DSM_Entry (pTW_IDENTITY pOrigin,
 	    DSM_twCC = TWCC_BADDEST;
 	    return TWRC_FAILURE;
 	}
+
+        if (DG == DG_CONTROL && DAT == DAT_EVENT && MSG == MSG_PROCESSEVENT)
+        {
+            twRC = TWAIN_ProcessEvent(pOrigin, pSource, pData);
+            if (twRC == TWRC_DSEVENT)
+                return twRC;
+        }
+
+        if (DG == DG_CONTROL && DAT == DAT_USERINTERFACE &&
+            (MSG == MSG_ENABLEDS || MSG == MSG_ENABLEDSUIONLY) &&
+            pData != NULL)
+        {
+            pSource->ui_window = ((TW_USERINTERFACE*)pData)->hParent;
+        }
+
 	DSM_twCC = TWCC_SUCCESS;
         TRACE("Forwarding %d/%d/%d/%p to DS.\n", DG, DAT, MSG, pData);
 	twRC = pSource->dsEntry(pOrigin, DG, DAT, MSG, pData);

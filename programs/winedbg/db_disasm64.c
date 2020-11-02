@@ -270,6 +270,26 @@ static const struct inst db_inst_0f0x[] = {
 /*0f*/	{ "",      FALSE, NONE,  0,	      0 },
 };
 
+static const struct inst db_inst_0f1x[] = {
+/*10*/	{ "movups",TRUE,  NONE,  op2(E, XMM), 0 },
+/*11*/	{ "movups",TRUE,  NONE,  op2(XMM, E), 0 },
+/*12*/	{ "",      FALSE, NONE,  0,	      0 },
+/*13*/	{ "",      FALSE, NONE,  0,	      0 },
+/*14*/	{ "",      FALSE, NONE,  0,	      0 },
+/*15*/	{ "",      FALSE, NONE,  0,	      0 },
+/*16*/	{ "",      FALSE, NONE,  0,	      0 },
+/*17*/	{ "",      FALSE, NONE,  0,	      0 },
+
+/*18*/	{ "",      FALSE, NONE,  0,	      0 },
+/*19*/	{ "",      FALSE, NONE,  0,	      0 },
+/*1a*/	{ "",      FALSE, NONE,  0,	      0 },
+/*1b*/	{ "",      FALSE, NONE,  0,	      0 },
+/*1c*/	{ "",      FALSE, NONE,  0,	      0 },
+/*1d*/	{ "",      FALSE, NONE,  0,	      0 },
+/*1e*/	{ "",      FALSE, NONE,  0,	      0 },
+/*1f*/	{ "",      FALSE, NONE,  0,	      0 },
+};
+
 static const struct inst db_inst_0f2x[] = {
 /*20*/	{ "mov",   TRUE,  LONG,  op2(CR,El),  0 },
 /*21*/	{ "mov",   TRUE,  LONG,  op2(DR,El),  0 },
@@ -280,8 +300,8 @@ static const struct inst db_inst_0f2x[] = {
 /*26*/	{ "mov",   TRUE,  LONG,  op2(El,TR),  0 },
 /*27*/	{ "",      FALSE, NONE,  0,	      0 },
 
-/*28*/	{ "",      FALSE, NONE,  0,	      0 },
-/*29*/	{ "",      FALSE, NONE,  0,	      0 },
+/*28*/	{ "movaps",TRUE,  NONE,  op2(E, XMM), 0 },
+/*29*/	{ "movaps",TRUE,  NONE,  op2(XMM, E), 0 },
 /*2a*/	{ "",      FALSE, NONE,  0,	      0 },
 /*2b*/	{ "",      FALSE, NONE,  0,	      0 },
 /*2c*/	{ "",      FALSE, NONE,  0,	      0 },
@@ -331,23 +351,23 @@ static const struct inst db_inst_0f4x[] = {
 };
 
 static const struct inst db_inst_0f5x[] = {
-/*50*/	{ "movmskps",TRUE, NONE, op2(E, XMM), 0 },
-/*51*/	{ "sqrtps",  TRUE, NONE, op2(XMM, EXMM), 0 },
-/*52*/	{ "rsqrtps", TRUE, NONE, op2(XMM, EXMM), 0 },
-/*53*/	{ "rcpps",   TRUE, NONE, op2(XMM, EXMM), 0 },
-/*54*/	{ "andps",   TRUE, NONE, op2(XMM, EXMM), 0 },
-/*55*/	{ "andnps",  TRUE, NONE, op2(XMM, EXMM), 0 },
-/*56*/	{ "orps",    TRUE, NONE, op2(XMM, EXMM), 0 },
-/*57*/	{ "xorps",   TRUE, NONE, op2(XMM, EXMM), 0 },
+/*50*/	{ "movmskps",TRUE, NONE, op2(EXMM, R),   0 },
+/*51*/	{ "sqrtps",  TRUE, NONE, op2(EXMM, XMM), 0 },
+/*52*/	{ "rsqrtps", TRUE, NONE, op2(EXMM, XMM), 0 },
+/*53*/	{ "rcpps",   TRUE, NONE, op2(EXMM, XMM), 0 },
+/*54*/	{ "andps",   TRUE, NONE, op2(EXMM, XMM), 0 },
+/*55*/	{ "andnps",  TRUE, NONE, op2(EXMM, XMM), 0 },
+/*56*/	{ "orps",    TRUE, NONE, op2(EXMM, XMM), 0 },
+/*57*/	{ "xorps",   TRUE, NONE, op2(EXMM, XMM), 0 },
 
-/*58*/	{ "addps",   TRUE, NONE, op2(XMM, EXMM), 0 },
-/*59*/	{ "mulps",   TRUE, NONE, op2(XMM, EXMM), 0 },
-/*5a*/	{ "(bad)",   FALSE, NONE,  0,   0 },
-/*5b*/	{ "(bad)",   FALSE, NONE,  0,   0 },
-/*5c*/	{ "subps",   TRUE, NONE, op2(XMM, EXMM), 0 },
-/*5d*/	{ "minps",   TRUE, NONE, op2(XMM, EXMM), 0 },
-/*5e*/	{ "divps",   TRUE, NONE, op2(XMM, EXMM), 0 },
-/*5f*/	{ "maxps",   TRUE, NONE, op2(XMM, EXMM), 0 },
+/*58*/	{ "addps",   TRUE, NONE, op2(EXMM, XMM), 0 },
+/*59*/	{ "mulps",   TRUE, NONE, op2(EXMM, XMM), 0 },
+/*5a*/	{ "cvtps2pd",TRUE, NONE, op2(EXMM, XMM), 0 },
+/*5b*/	{ "cvtdq2ps",TRUE, NONE, op2(EXMM, XMM), 0 },
+/*5c*/	{ "subps",   TRUE, NONE, op2(EXMM, XMM), 0 },
+/*5d*/	{ "minps",   TRUE, NONE, op2(EXMM, XMM), 0 },
+/*5e*/	{ "divps",   TRUE, NONE, op2(EXMM, XMM), 0 },
+/*5f*/	{ "maxps",   TRUE, NONE, op2(EXMM, XMM), 0 },
 };
 
 static const struct inst db_inst_0f6x[] = {
@@ -491,7 +511,7 @@ static const struct inst db_inst_0fcx[] = {
 
 static const struct inst * const db_inst_0f[] = {
 	db_inst_0f0x,
-	0,
+	db_inst_0f1x,
 	db_inst_0f2x,
 	db_inst_0f3x,
 	db_inst_0f4x,

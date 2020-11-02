@@ -53,9 +53,6 @@ typedef struct
 typedef struct
 {
     CDROM_DEVICE_HEADER hdr;
-    WINEDEV_THUNK thunk;
-
-    WORD  cdrom_segment;        /* Real mode segment for CDROM_HEAP */
     WORD  cdrom_selector;	/* Protected mode selector for CDROM_HEAP */
 } CDROM_HEAP;
 
@@ -141,26 +138,8 @@ void WINAPI DOSVM_Int2fHandler( CONTEXT *context )
         break;
 
     case 0x43:
-#if 1
-       switch (LOBYTE(context->Eax))
-       {
-       case 0x00:   /* XMS v2+ installation check */
-           WARN("XMS is not fully implemented\n");
-           SET_AL( context, 0x80 );
-           break;
-       case 0x10:   /* XMS v2+ get driver address */
-       {
-            context->SegEs = DOSVM_dpmi_segments->xms_seg;
-            SET_BX( context, 0 );
-            break;
-       }
-       default:
-           INT_BARF( context, 0x2f );
-       }
-#else
        FIXME("check for XMS (not supported)\n");
        SET_AL( context, 0x42 ); /* != 0x80 */
-#endif
        break;
 
     case 0x45:
@@ -401,7 +380,7 @@ static void do_int2f_16( CONTEXT *context )
             SET_CL( context, si.wProcessorLevel );
             SET_DX( context, 0x005a ); /* DPMI major/minor 0.90 */
             SET_SI( context, 0 );      /* # of para. of DOS extended private data */
-            context->SegEs = DOSVM_dpmi_segments->dpmi_seg;
+            context->SegEs = 0;  /* no DPMI switch */
             SET_DI( context, 0 );      /* ES:DI is DPMI switch entry point */
             break;
         }
@@ -421,48 +400,6 @@ static void do_int2f_16( CONTEXT *context )
  * Note: PTR_AT can be used as an l-value
  */
 #define        PTR_AT(_ptr, _ofs, _typ)        (*((_typ*)(((char*)_ptr)+(_ofs))))
-
-/* Use #if 1 if you want full int 2f debug... normal users can leave it at 0 */
-#if 0
-/**********************************************************************
- *         MSCDEX_Dump                                 [internal]
- *
- * Dumps mscdex requests to int debug channel.
- */
-static void    MSCDEX_Dump(char* pfx, BYTE* req, int dorealmode)
-{
-    int        i;
-    BYTE       buf[2048];
-    BYTE*      ptr;
-    BYTE*      ios;
-
-    ptr = buf;
-    ptr += sprintf(ptr, "%s\tCommand => ", pfx);
-    for (i = 0; i < req[0]; i++) {
-       ptr += sprintf(ptr, "%02x ", req[i]);
-    }
-
-    switch (req[2]) {
-    case 3:
-    case 12:
-       ptr += sprintf(ptr, "\n\t\t\t\tIO_struct => ");
-       ios = (dorealmode) ? PTR_REAL_TO_LIN( PTR_AT(req, 16, WORD), PTR_AT(req, 14, WORD)) :
-                             MapSL(MAKESEGPTR(PTR_AT(req, 16, WORD), PTR_AT(req, 14, WORD)));
-
-       for (i = 0; i < PTR_AT(req, 18, WORD); i++) {
-           ptr += sprintf(ptr, "%02x ", ios[i]);
-           if ((i & 0x1F) == 0x1F) {
-               *ptr++ = '\n';
-               *ptr = 0;
-           }
-       }
-       break;
-    }
-    TRACE("%s\n", buf);
-}
-#else
-#define MSCDEX_Dump(pfx, req, drm)
-#endif
 
 #define CDFRAMES_PERSEC                 75
 #define CDFRAMES_PERMIN                 (CDFRAMES_PERSEC * 60)
@@ -522,15 +459,10 @@ static CDROM_HEAP *CDROM_GetHeap( void )
 
     if ( !heap_pointer )
     {
-        WORD heap_segment;
         WORD heap_selector;
 
         /* allocate a new DOS data segment */
-        heap_pointer = DOSVM_AllocDataUMB( sizeof(CDROM_HEAP),
-                                           &heap_segment,
-                                           &heap_selector );
-
-        heap_pointer->cdrom_segment  = heap_segment;
+        heap_pointer = DOSVM_AllocDataUMB( sizeof(CDROM_HEAP), &heap_selector );
         heap_pointer->cdrom_selector = heap_selector;
         CDROM_FillHeap( heap_pointer );
     }
@@ -538,7 +470,7 @@ static CDROM_HEAP *CDROM_GetHeap( void )
     return heap_pointer;
 }
 
-static void MSCDEX_Request(BYTE *driver_request, BOOL dorealmode)
+static void MSCDEX_Request(BYTE *driver_request)
 {
     BYTE*       io_stru;
     BYTE        Error = 255; /* No Error */
@@ -555,8 +487,6 @@ static void MSCDEX_Request(BYTE *driver_request, BOOL dorealmode)
      * tray to be closed with a CD inside
      */
     TRACE("CDROM device driver -> command <%d>\n", driver_request[2]);
-
-    MSCDEX_Dump("Beg", driver_request, dorealmode);
 
     /* set status to 0 */
     PTR_AT(driver_request, 3, WORD) = 0;
@@ -595,9 +525,7 @@ static void MSCDEX_Request(BYTE *driver_request, BOOL dorealmode)
 
     switch (driver_request[2]) {
     case 3:
-        io_stru = (dorealmode) ?
-            PTR_REAL_TO_LIN( PTR_AT(driver_request, 16, WORD), PTR_AT(driver_request, 14, WORD) ) :
-            MapSL( MAKESEGPTR(PTR_AT(driver_request, 16, WORD), PTR_AT(driver_request, 14, WORD)));
+        io_stru = MapSL( MAKESEGPTR(PTR_AT(driver_request, 16, WORD), PTR_AT(driver_request, 14, WORD)));
 
         TRACE(" --> IOCTL INPUT <%d>\n", io_stru[0]);
         switch (io_stru[0]) {
@@ -763,9 +691,7 @@ static void MSCDEX_Request(BYTE *driver_request, BOOL dorealmode)
         break;
 
     case 12:
-        io_stru = (dorealmode) ?
-            PTR_REAL_TO_LIN( PTR_AT(driver_request, 16, WORD), PTR_AT(driver_request, 14, WORD)) :
-            MapSL( MAKESEGPTR(PTR_AT(driver_request, 16, WORD), PTR_AT(driver_request, 14, WORD)));
+        io_stru = MapSL( MAKESEGPTR(PTR_AT(driver_request, 16, WORD), PTR_AT(driver_request, 14, WORD)));
 
         TRACE(" --> IOCTL OUTPUT <%d>\n", io_stru[0]);
         switch (io_stru[0]) {
@@ -944,8 +870,6 @@ static void MSCDEX_Request(BYTE *driver_request, BOOL dorealmode)
      */
     driver_request[4] |=
         (data.CurrentPosition.Header.AudioStatus == AUDIO_STATUS_IN_PROGRESS) ? 3 : 1;
-
-    MSCDEX_Dump("End", driver_request, dorealmode);
 }
 
 static void MSCDEX_Handler(CONTEXT* context)
@@ -972,11 +896,7 @@ static void MSCDEX_Handler(CONTEXT* context)
        {
            CDROM_HEAP*          cdrom_heap = CDROM_GetHeap();
            CDROM_DEVICE_HEADER* dev = &cdrom_heap->hdr;
-           SEGPTR ptr_dev = ISV86(context)
-               ? MAKESEGPTR( cdrom_heap->cdrom_segment,
-                             FIELD_OFFSET(CDROM_HEAP, hdr) )
-               : MAKESEGPTR( cdrom_heap->cdrom_selector,
-                             FIELD_OFFSET(CDROM_HEAP, hdr) );
+           SEGPTR ptr_dev = MAKESEGPTR( cdrom_heap->cdrom_selector, FIELD_OFFSET(CDROM_HEAP, hdr) );
 
            p = CTX_SEG_OFF_TO_LIN(context, context->SegEs, context->Ebx);
            for (drive = 0; drive < dev->units; drive++) {
@@ -1033,66 +953,11 @@ static void MSCDEX_Handler(CONTEXT* context)
            }
 
            driver_request[1] = CX_reg(context) - cdrom_heap->hdr.drive;
-           MSCDEX_Request(driver_request, ISV86(context));
+           MSCDEX_Request(driver_request);
        }
        break;
     default:
        FIXME("Unimplemented MSCDEX function 0x%02X.\n", LOBYTE(context->Eax));
        break;
     }
-}
-
-/* prototypes */
-static void WINAPI cdrom_strategy(CONTEXT*ctx);
-static void WINAPI cdrom_interrupt(CONTEXT*ctx);
-
-/* device info */
-static const WINEDEV cdromdev =
-{
-    "WINE_CD_",
-    ATTR_CHAR|ATTR_REMOVABLE|ATTR_IOCTL,
-    cdrom_strategy, cdrom_interrupt
-};
-
-static REQUEST_HEADER *cdrom_driver_request;
-
-/* Return to caller */
-static void do_lret(CONTEXT*ctx)
-{
-    WORD *stack = CTX_SEG_OFF_TO_LIN(ctx, ctx->SegSs, ctx->Esp);
-
-    ctx->Eip   = *(stack++);
-    ctx->SegCs = *(stack++);
-    ctx->Esp  += 2*sizeof(WORD);
-}
-
-static void WINAPI cdrom_strategy(CONTEXT*ctx)
-{
-    cdrom_driver_request = CTX_SEG_OFF_TO_LIN(ctx, ctx->SegEs, ctx->Ebx);
-    do_lret( ctx );
-}
-
-static void WINAPI cdrom_interrupt(CONTEXT*ctx)
-{
-    if (cdrom_driver_request->unit > CDROM_GetHeap()->hdr.units)
-        cdrom_driver_request->status = STAT_ERROR | 1; /* unknown unit */
-    else
-        MSCDEX_Request((BYTE*)cdrom_driver_request, ISV86(ctx));
-
-    do_lret( ctx );
-}
-
-/**********************************************************************
- *         MSCDEX_InstallCDROM  [internal]
- *
- * Install the CDROM driver into the DOS device driver chain.
- */
-void MSCDEX_InstallCDROM(void)
-{
-    CDROM_HEAP *cdrom_heap = CDROM_GetHeap();
-
-    DOSDEV_SetupDevice( &cdromdev,
-                        cdrom_heap->cdrom_segment,
-                        FIELD_OFFSET(CDROM_HEAP, hdr),
-                        FIELD_OFFSET(CDROM_HEAP, thunk) );
 }

@@ -70,6 +70,7 @@ struct window
     user_handle_t    last_active;     /* last active popup */
     rectangle_t      window_rect;     /* window rectangle (relative to parent client area) */
     rectangle_t      visible_rect;    /* visible part of window rect (relative to parent client area) */
+    rectangle_t      surface_rect;    /* window surface rectangle (relative to parent client area) */
     rectangle_t      client_rect;     /* client rectangle (relative to parent client area) */
     struct region   *win_region;      /* region for shaped windows (relative to window rect) */
     struct region   *update_region;   /* update region (relative to window rect) */
@@ -83,6 +84,8 @@ struct window
     unsigned int     color_key;       /* color key for a layered window */
     unsigned int     alpha;           /* alpha value for a layered window */
     unsigned int     layered_flags;   /* flags for a layered window */
+    unsigned int     dpi;             /* window DPI or 0 if per-monitor aware */
+    DPI_AWARENESS    dpi_awareness;   /* DPI awareness mode */
     lparam_t         user_data;       /* user-specific data */
     WCHAR           *text;            /* window caption text */
     unsigned int     paint_flags;     /* various painting flags */
@@ -111,6 +114,8 @@ struct user_handle_array
     int            count;
     int            total;
 };
+
+static const rectangle_t empty_rect;
 
 /* global window pointers */
 static struct window *shell_window;
@@ -172,6 +177,14 @@ static inline void update_pixel_format_flags( struct window *win )
 {
     for (win = win->parent; win && win->parent; win = win->parent)
         win->paint_flags |= PAINT_PIXEL_FORMAT_CHILD;
+}
+
+/* get the per-monitor DPI for a window */
+static unsigned int get_monitor_dpi( struct window *win )
+{
+    /* FIXME: we return the desktop window DPI for now */
+    while (!is_desktop_window( win )) win = win->parent;
+    return win->dpi ? win->dpi : USER_DEFAULT_SCREEN_DPI;
 }
 
 /* link a window at the right place in the siblings list */
@@ -248,6 +261,12 @@ static int set_parent_window( struct window *win, struct window *parent )
     {
         win->parent = parent;
         link_window( win, WINPTR_TOP );
+
+        if (!is_desktop_window( parent ))
+        {
+            win->dpi = parent->dpi;
+            win->dpi_awareness = parent->dpi_awareness;
+        }
 
         /* if parent belongs to a different thread and the window isn't */
         /* top-level, attach the two threads */
@@ -415,8 +434,7 @@ struct process *get_top_window_owner( struct desktop *desktop )
 void get_top_window_rectangle( struct desktop *desktop, rectangle_t *rect )
 {
     struct window *win = desktop->top_window;
-    if (!win) rect->left = rect->top = rect->right = rect->bottom = 0;
-    else *rect = win->window_rect;
+    *rect = win ? win->window_rect : empty_rect;
 }
 
 /* post a message to the desktop window */
@@ -431,7 +449,6 @@ void post_desktop_message( struct desktop *desktop, unsigned int message,
 static struct window *create_window( struct window *parent, struct window *owner,
                                      atom_t atom, mod_handle_t instance )
 {
-    static const rectangle_t empty_rect;
     int extra_bytes;
     struct window *win = NULL;
     struct desktop *desktop;
@@ -485,6 +502,8 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->is_unicode     = 1;
     win->is_linked      = 0;
     win->is_layered     = 0;
+    win->dpi_awareness  = DPI_AWARENESS_PER_MONITOR_AWARE;
+    win->dpi            = 0;
     win->user_data      = 0;
     win->text           = NULL;
     win->paint_flags    = 0;
@@ -492,7 +511,7 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->prop_alloc     = 0;
     win->properties     = NULL;
     win->nb_extra_bytes = extra_bytes;
-    win->window_rect = win->visible_rect = win->client_rect = empty_rect;
+    win->window_rect = win->visible_rect = win->surface_rect = win->client_rect = empty_rect;
     memset( win->extra_bytes, 0, extra_bytes );
     list_init( &win->children );
     list_init( &win->unlinked );
@@ -647,8 +666,7 @@ static inline int is_point_in_window( struct window *win, int x, int y )
         return 0;  /* disabled child */
     if ((win->ex_style & (WS_EX_LAYERED|WS_EX_TRANSPARENT)) == (WS_EX_LAYERED|WS_EX_TRANSPARENT))
         return 0;  /* transparent */
-    if (x < win->visible_rect.left || x >= win->visible_rect.right ||
-        y < win->visible_rect.top || y >= win->visible_rect.bottom)
+    if (!point_in_rect( &win->visible_rect, x, y ))
         return 0;  /* not in window */
     if (win->win_region &&
         !point_in_region( win->win_region, x - win->window_rect.left, y - win->window_rect.top ))
@@ -692,9 +710,7 @@ static struct window *child_window_from_point( struct window *parent, int x, int
         if (ptr->style & (WS_MINIMIZE|WS_DISABLED)) return ptr;
 
         /* if point is not in client area, return at once */
-        if (x < ptr->client_rect.left || x >= ptr->client_rect.right ||
-            y < ptr->client_rect.top || y >= ptr->client_rect.bottom)
-            return ptr;
+        if (!point_in_rect( &ptr->client_rect, x, y )) return ptr;
 
         return child_window_from_point( ptr, x - ptr->client_rect.left, y - ptr->client_rect.top );
     }
@@ -712,9 +728,7 @@ static int get_window_children_from_point( struct window *parent, int x, int y,
         if (!is_point_in_window( ptr, x, y )) continue;  /* skip it */
 
         /* if point is in client area, and window is not minimized or disabled, check children */
-        if (!(ptr->style & (WS_MINIMIZE|WS_DISABLED)) &&
-            x >= ptr->client_rect.left && x < ptr->client_rect.right &&
-            y >= ptr->client_rect.top && y < ptr->client_rect.bottom)
+        if (!(ptr->style & (WS_MINIMIZE|WS_DISABLED)) && point_in_rect( &ptr->client_rect, x, y ))
         {
             if (!get_window_children_from_point( ptr, x - ptr->client_rect.left,
                                                  y - ptr->client_rect.top, array ))
@@ -776,9 +790,7 @@ static int all_windows_from_point( struct window *top, int x, int y, struct user
     if (!is_point_in_window( top, x, y )) return 1;
 
     /* if point is in client area, and window is not minimized or disabled, check children */
-    if (!(top->style & (WS_MINIMIZE|WS_DISABLED)) &&
-        x >= top->client_rect.left && x < top->client_rect.right &&
-        y >= top->client_rect.top && y < top->client_rect.bottom)
+    if (!(top->style & (WS_MINIMIZE|WS_DISABLED)) && point_in_rect( &top->client_rect, x, y ))
     {
         if (!is_desktop_window(top))
         {
@@ -889,12 +901,7 @@ static inline void client_to_screen( struct window *win, int *x, int *y )
 static inline void client_to_screen_rect( struct window *win, rectangle_t *rect )
 {
     for ( ; win && !is_desktop_window(win); win = win->parent)
-    {
-        rect->left   += win->client_rect.left;
-        rect->right  += win->client_rect.left;
-        rect->top    += win->client_rect.top;
-        rect->bottom += win->client_rect.top;
-    }
+        offset_rect( rect, win->client_rect.left, win->client_rect.top );
 }
 
 /* map the region from window to screen coordinates */
@@ -938,22 +945,23 @@ static struct region *clip_children( struct window *parent, struct window *last,
 }
 
 
-/* offset the coordinates of a rectangle */
-static inline void offset_rect( rectangle_t *rect, int offset_x, int offset_y )
-{
-    rect->left   += offset_x;
-    rect->top    += offset_y;
-    rect->right  += offset_x;
-    rect->bottom += offset_y;
-}
-
-
 /* set the region to the client rect clipped by the window rect, in parent-relative coordinates */
 static void set_region_client_rect( struct region *region, struct window *win )
 {
     rectangle_t rect;
 
     intersect_rect( &rect, &win->window_rect, &win->client_rect );
+    intersect_rect( &rect, &rect, &win->surface_rect );
+    set_region_rect( region, &rect );
+}
+
+
+/* set the region to the visible rect clipped by the window surface, in parent-relative coordinates */
+static void set_region_visible_rect( struct region *region, struct window *win )
+{
+    rectangle_t rect;
+
+    intersect_rect( &rect, &win->visible_rect, &win->surface_rect );
     set_region_rect( region, &rect );
 }
 
@@ -979,16 +987,22 @@ static struct region *get_visible_region( struct window *win, unsigned int flags
 
     if (!is_visible( win )) return region;  /* empty region */
 
+    if (is_desktop_window( win ))
+    {
+        set_region_rect( region, &win->window_rect );
+        return region;
+    }
+
     /* create a region relative to the window itself */
 
-    if ((flags & DCX_PARENTCLIP) && win->parent && !is_desktop_window(win->parent))
+    if ((flags & DCX_PARENTCLIP) && !is_desktop_window( win->parent ))
     {
         set_region_client_rect( region, win->parent );
         offset_region( region, -win->parent->client_rect.left, -win->parent->client_rect.top );
     }
     else if (flags & DCX_WINDOW)
     {
-        set_region_rect( region, &win->visible_rect );
+        set_region_visible_rect( region, win );
         if (win->win_region && !intersect_window_region( region, win )) goto error;
     }
     else
@@ -1001,42 +1015,29 @@ static struct region *get_visible_region( struct window *win, unsigned int flags
 
     if (flags & DCX_CLIPCHILDREN)
     {
-        if (is_desktop_window(win)) offset_x = offset_y = 0;
-        else
-        {
-            offset_x = win->client_rect.left;
-            offset_y = win->client_rect.top;
-        }
-        if (!clip_children( win, NULL, region, offset_x, offset_y )) goto error;
+        if (!clip_children( win, NULL, region, win->client_rect.left, win->client_rect.top )) goto error;
     }
 
     /* clip siblings of ancestors */
 
-    if (is_desktop_window(win)) offset_x = offset_y = 0;
-    else
-    {
-        offset_x = win->window_rect.left;
-        offset_y = win->window_rect.top;
-    }
+    offset_x = win->window_rect.left;
+    offset_y = win->window_rect.top;
 
     if ((tmp = create_empty_region()) != NULL)
     {
-        while (win->parent)
+        while (!is_desktop_window( win->parent ))
         {
             /* we don't clip out top-level siblings as that's up to the native windowing system */
-            if ((win->style & WS_CLIPSIBLINGS) && !is_desktop_window( win->parent ))
+            if (win->style & WS_CLIPSIBLINGS)
             {
                 if (!clip_children( win->parent, win, region, 0, 0 )) goto error;
                 if (is_region_empty( region )) break;
             }
             /* clip to parent client area */
             win = win->parent;
-            if (!is_desktop_window(win))
-            {
-                offset_x += win->client_rect.left;
-                offset_y += win->client_rect.top;
-                offset_region( region, win->client_rect.left, win->client_rect.top );
-            }
+            offset_x += win->client_rect.left;
+            offset_y += win->client_rect.top;
+            offset_region( region, win->client_rect.left, win->client_rect.top );
             set_region_client_rect( tmp, win );
             if (win->win_region && !intersect_window_region( tmp, win )) goto error;
             if (!intersect_region( region, region, tmp )) goto error;
@@ -1145,27 +1146,20 @@ struct window_class* get_window_class( user_handle_t window )
 /* the returned rectangle is in window coordinates; return 0 if rectangle is empty */
 static int get_window_visible_rect( struct window *win, rectangle_t *rect, int frame )
 {
-    int offset_x = 0, offset_y = 0;
-
-    if (!(win->style & WS_VISIBLE)) return 0;
+    int offset_x = win->window_rect.left, offset_y = win->window_rect.top;
 
     *rect = frame ? win->window_rect : win->client_rect;
-    if (!is_desktop_window(win))
-    {
-        offset_x = win->window_rect.left;
-        offset_y = win->window_rect.top;
-    }
 
-    while (win->parent)
+    if (!(win->style & WS_VISIBLE)) return 0;
+    if (is_desktop_window( win )) return 1;
+
+    while (!is_desktop_window( win->parent ))
     {
         win = win->parent;
         if (!(win->style & WS_VISIBLE) || win->style & WS_MINIMIZE) return 0;
-        if (!is_desktop_window(win))
-        {
-            offset_x += win->client_rect.left;
-            offset_y += win->client_rect.top;
-            offset_rect( rect, win->client_rect.left, win->client_rect.top );
-        }
+        offset_x += win->client_rect.left;
+        offset_y += win->client_rect.top;
+        offset_rect( rect, win->client_rect.left, win->client_rect.top );
         if (!intersect_rect( rect, rect, &win->client_rect )) return 0;
         if (!intersect_rect( rect, rect, &win->window_rect )) return 0;
     }
@@ -1635,7 +1629,7 @@ static struct region *expose_window( struct window *win, const rectangle_t *old_
 static void set_window_pos( struct window *win, struct window *previous,
                             unsigned int swp_flags, const rectangle_t *window_rect,
                             const rectangle_t *client_rect, const rectangle_t *visible_rect,
-                            const rectangle_t *valid_rects )
+                            const rectangle_t *surface_rect, const rectangle_t *valid_rect )
 {
     struct region *old_vis_rgn = NULL, *exposed_rgn = NULL;
     const rectangle_t old_window_rect = win->window_rect;
@@ -1653,6 +1647,7 @@ static void set_window_pos( struct window *win, struct window *previous,
 
     win->window_rect  = *window_rect;
     win->visible_rect = *visible_rect;
+    win->surface_rect = *surface_rect;
     win->client_rect  = *client_rect;
     if (!(swp_flags & SWP_NOZORDER) && win->parent) link_window( win, previous );
     if (swp_flags & SWP_SHOWWINDOW) win->style |= WS_VISIBLE;
@@ -1669,6 +1664,7 @@ static void set_window_pos( struct window *win, struct window *previous,
         {
             offset_rect( &child->window_rect, new_size - old_size, 0 );
             offset_rect( &child->visible_rect, new_size - old_size, 0 );
+            offset_rect( &child->surface_rect, new_size - old_size, 0 );
             offset_rect( &child->client_rect, new_size - old_size, 0 );
         }
     }
@@ -1749,8 +1745,7 @@ static void set_window_pos( struct window *win, struct window *previous,
                           client_rect->right  - old_client_rect.right  != x_offset ||
                           client_rect->top    - old_client_rect.top    != y_offset ||
                           client_rect->bottom - old_client_rect.bottom != y_offset ||
-                          !valid_rects ||
-                          memcmp( &valid_rects[0], client_rect, sizeof(*client_rect) ));
+                          memcmp( valid_rect, client_rect, sizeof(*client_rect) ));
     }
 
     if (frame_changed || client_changed)
@@ -1758,13 +1753,13 @@ static void set_window_pos( struct window *win, struct window *previous,
         struct region *win_rgn = old_vis_rgn;  /* reuse previous region */
 
         set_region_rect( win_rgn, window_rect );
-        if (valid_rects)
+        if (!is_rect_empty( valid_rect ))
         {
             /* subtract the valid portion of client rect from the total region */
             struct region *tmp = create_empty_region();
             if (tmp)
             {
-                set_region_rect( tmp, &valid_rects[0] );
+                set_region_rect( tmp, valid_rect );
                 /* subtract update region since invalid parts of the valid rect won't be copied */
                 if (win->update_region)
                 {
@@ -1910,10 +1905,23 @@ DECL_HANDLER(create_window)
 
     if (!(win = create_window( parent, owner, atom, req->instance ))) return;
 
+    if (parent && !is_desktop_window( parent ))
+    {
+        win->dpi_awareness = parent->dpi_awareness;
+        win->dpi = parent->dpi;
+    }
+    else if (!parent || req->awareness != DPI_AWARENESS_PER_MONITOR_AWARE)
+    {
+        win->dpi_awareness = req->awareness;
+        win->dpi = req->dpi;
+    }
+
     reply->handle    = win->handle;
     reply->parent    = win->parent ? win->parent->handle : 0;
     reply->owner     = win->owner;
     reply->extra     = win->nb_extra_bytes;
+    reply->dpi       = win->dpi;
+    reply->awareness = win->dpi_awareness;
     reply->class_ptr = get_class_client_ptr( win->class );
 }
 
@@ -1934,6 +1942,8 @@ DECL_HANDLER(set_parent)
     reply->old_parent  = win->parent->handle;
     reply->full_parent = parent ? parent->handle : 0;
     set_parent_window( win, parent );
+    reply->dpi       = win->dpi;
+    reply->awareness = win->dpi_awareness;
 }
 
 
@@ -2022,20 +2032,19 @@ DECL_HANDLER(get_window_info)
 {
     struct window *win = get_window( req->handle );
 
-    reply->full_handle = 0;
-    reply->tid = reply->pid = 0;
-    if (win)
+    if (!win) return;
+
+    reply->full_handle = win->handle;
+    reply->last_active = win->handle;
+    reply->is_unicode  = win->is_unicode;
+    reply->awareness   = win->dpi_awareness;
+    reply->dpi         = win->dpi ? win->dpi : get_monitor_dpi( win );
+    if (get_user_object( win->last_active, USER_WINDOW )) reply->last_active = win->last_active;
+    if (win->thread)
     {
-        reply->full_handle = win->handle;
-        reply->last_active = win->handle;
-        reply->is_unicode  = win->is_unicode;
-        if (get_user_object( win->last_active, USER_WINDOW )) reply->last_active = win->last_active;
-        if (win->thread)
-        {
-            reply->tid  = get_thread_id( win->thread );
-            reply->pid  = get_process_id( win->thread->process );
-            reply->atom = win->class ? get_class_atom( win->class ) : DESKTOP_ATOM;
-        }
+        reply->tid  = get_thread_id( win->thread );
+        reply->pid  = get_process_id( win->thread->process );
+        reply->atom = win->class ? get_class_atom( win->class ) : DESKTOP_ATOM;
     }
 }
 
@@ -2220,7 +2229,8 @@ DECL_HANDLER(get_window_tree)
 /* set the position and Z order of a window */
 DECL_HANDLER(set_window_pos)
 {
-    rectangle_t window_rect, client_rect, visible_rect;
+    rectangle_t window_rect, client_rect, visible_rect, surface_rect, valid_rect;
+    const rectangle_t *extra_rects = get_req_data();
     struct window *previous = NULL;
     struct window *top, *win = get_window( req->handle );
     unsigned int flags = req->swp_flags;
@@ -2267,32 +2277,28 @@ DECL_HANDLER(set_window_pos)
         return;
     }
 
-    window_rect = visible_rect = req->window;
+    window_rect = req->window;
     client_rect = req->client;
-    if (get_req_data_size() >= sizeof(rectangle_t))
-        memcpy( &visible_rect, get_req_data(), sizeof(rectangle_t) );
+    if (get_req_data_size() >= sizeof(rectangle_t)) visible_rect = extra_rects[0];
+    else visible_rect = window_rect;
+    if (get_req_data_size() >= 2 * sizeof(rectangle_t)) surface_rect = extra_rects[1];
+    else surface_rect = visible_rect;
+    if (get_req_data_size() >= 3 * sizeof(rectangle_t)) valid_rect = extra_rects[2];
+    else valid_rect = empty_rect;
     if (win->parent && win->parent->ex_style & WS_EX_LAYOUTRTL)
     {
         mirror_rect( &win->parent->client_rect, &window_rect );
         mirror_rect( &win->parent->client_rect, &visible_rect );
         mirror_rect( &win->parent->client_rect, &client_rect );
+        mirror_rect( &win->parent->client_rect, &surface_rect );
+        mirror_rect( &win->parent->client_rect, &valid_rect );
     }
 
     win->paint_flags = (win->paint_flags & ~PAINT_CLIENT_FLAGS) | (req->paint_flags & PAINT_CLIENT_FLAGS);
     if (win->paint_flags & PAINT_HAS_PIXEL_FORMAT) update_pixel_format_flags( win );
 
-    if (get_req_data_size() >= 3 * sizeof(rectangle_t))
-    {
-        rectangle_t valid_rects[2];
-        memcpy( valid_rects, (const rectangle_t *)get_req_data() + 1, 2 * sizeof(rectangle_t) );
-        if (win->parent && win->parent->ex_style & WS_EX_LAYOUTRTL)
-        {
-            mirror_rect( &win->parent->client_rect, &valid_rects[0] );
-            mirror_rect( &win->parent->client_rect, &valid_rects[1] );
-        }
-        set_window_pos( win, previous, flags, &window_rect, &client_rect, &visible_rect, valid_rects );
-    }
-    else set_window_pos( win, previous, flags, &window_rect, &client_rect, &visible_rect, NULL );
+    set_window_pos( win, previous, flags, &window_rect, &client_rect,
+                    &visible_rect, &surface_rect, &valid_rect );
 
     reply->new_style = win->style;
     reply->new_ex_style = win->ex_style;
@@ -2314,42 +2320,29 @@ DECL_HANDLER(get_window_rectangles)
     if (!win) return;
 
     reply->window  = win->window_rect;
-    reply->visible = win->visible_rect;
     reply->client  = win->client_rect;
 
     switch (req->relative)
     {
     case COORDS_CLIENT:
         offset_rect( &reply->window, -win->client_rect.left, -win->client_rect.top );
-        offset_rect( &reply->visible, -win->client_rect.left, -win->client_rect.top );
         offset_rect( &reply->client, -win->client_rect.left, -win->client_rect.top );
-        if (win->ex_style & WS_EX_LAYOUTRTL)
-        {
-            mirror_rect( &win->client_rect, &reply->window );
-            mirror_rect( &win->client_rect, &reply->visible );
-        }
+        if (win->ex_style & WS_EX_LAYOUTRTL) mirror_rect( &win->client_rect, &reply->window );
         break;
     case COORDS_WINDOW:
         offset_rect( &reply->window, -win->window_rect.left, -win->window_rect.top );
-        offset_rect( &reply->visible, -win->window_rect.left, -win->window_rect.top );
         offset_rect( &reply->client, -win->window_rect.left, -win->window_rect.top );
-        if (win->ex_style & WS_EX_LAYOUTRTL)
-        {
-            mirror_rect( &win->window_rect, &reply->visible );
-            mirror_rect( &win->window_rect, &reply->client );
-        }
+        if (win->ex_style & WS_EX_LAYOUTRTL) mirror_rect( &win->window_rect, &reply->client );
         break;
     case COORDS_PARENT:
         if (win->parent && win->parent->ex_style & WS_EX_LAYOUTRTL)
         {
             mirror_rect( &win->parent->client_rect, &reply->window );
-            mirror_rect( &win->parent->client_rect, &reply->visible );
             mirror_rect( &win->parent->client_rect, &reply->client );
         }
         break;
     case COORDS_SCREEN:
         client_to_screen_rect( win->parent, &reply->window );
-        client_to_screen_rect( win->parent, &reply->visible );
         client_to_screen_rect( win->parent, &reply->client );
         break;
     default:
@@ -2366,9 +2359,8 @@ DECL_HANDLER(get_window_text)
 
     if (win && win->text)
     {
-        data_size_t len = strlenW( win->text ) * sizeof(WCHAR);
-        if (len > get_reply_max_size()) len = get_reply_max_size();
-        set_reply_data( win->text, len );
+        reply->length = strlenW( win->text );
+        set_reply_data( win->text, min( reply->length * sizeof(WCHAR), get_reply_max_size() ));
     }
 }
 
@@ -2453,7 +2445,7 @@ DECL_HANDLER(get_visible_region)
         if (data) set_reply_data_ptr( data, reply->total_size );
     }
     reply->top_win  = top->handle;
-    reply->top_rect = top->visible_rect;
+    reply->top_rect = top->surface_rect;
 
     if (!is_desktop_window(win))
     {
@@ -2482,13 +2474,10 @@ DECL_HANDLER(get_surface_region)
 
     if ((region = get_surface_region( win )))
     {
-        rectangle_t *data;
-        if (win->parent) map_win_region_to_screen( win->parent, region );
-        data = get_region_data_and_free( region, get_reply_max_size(), &reply->total_size );
+        rectangle_t *data = get_region_data_and_free( region, get_reply_max_size(), &reply->total_size );
         if (data) set_reply_data_ptr( data, reply->total_size );
     }
     reply->visible_rect = win->visible_rect;
-    if (win->parent) client_to_screen_rect( win->parent, &reply->visible_rect );
 }
 
 
@@ -2652,13 +2641,23 @@ DECL_HANDLER(update_window_zorder)
 /* mark parts of a window as needing a redraw */
 DECL_HANDLER(redraw_window)
 {
+    unsigned int flags = req->flags;
     struct region *region = NULL;
-    struct window *win = get_window( req->window );
+    struct window *win;
 
-    if (!win) return;
+    if (!req->window)
+    {
+        if (!(win = get_desktop_window( current ))) return;
+    }
+    else
+    {
+        if (!(win = get_window( req->window ))) return;
+        if (is_desktop_window( win )) flags &= ~RDW_ALLCHILDREN;
+    }
+
     if (!is_visible( win )) return;  /* nothing to do */
 
-    if (req->flags & (RDW_VALIDATE|RDW_INVALIDATE))
+    if (flags & (RDW_VALIDATE|RDW_INVALIDATE))
     {
         if (get_req_data_size())  /* no data means whole rectangle */
         {
@@ -2668,8 +2667,7 @@ DECL_HANDLER(redraw_window)
         }
     }
 
-    redraw_window( win, region, (req->flags & RDW_INVALIDATE) && (req->flags & RDW_FRAME),
-                   req->flags );
+    redraw_window( win, region, (flags & RDW_INVALIDATE) && (flags & RDW_FRAME), flags );
     if (region) free_region( region );
 }
 

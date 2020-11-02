@@ -398,20 +398,9 @@ static HRESULT WINAPI JpegDecoder_GetContainerFormat(IWICBitmapDecoder *iface,
 static HRESULT WINAPI JpegDecoder_GetDecoderInfo(IWICBitmapDecoder *iface,
     IWICBitmapDecoderInfo **ppIDecoderInfo)
 {
-    HRESULT hr;
-    IWICComponentInfo *compinfo;
-
     TRACE("(%p,%p)\n", iface, ppIDecoderInfo);
 
-    hr = CreateComponentInfo(&CLSID_WICJpegDecoder, &compinfo);
-    if (FAILED(hr)) return hr;
-
-    hr = IWICComponentInfo_QueryInterface(compinfo, &IID_IWICBitmapDecoderInfo,
-        (void**)ppIDecoderInfo);
-
-    IWICComponentInfo_Release(compinfo);
-
-    return hr;
+    return get_decoder_info(&CLSID_WICJpegDecoder, ppIDecoderInfo);
 }
 
 static HRESULT WINAPI JpegDecoder_CopyPalette(IWICBitmapDecoder *iface,
@@ -624,7 +613,7 @@ static HRESULT WINAPI JpegDecoder_Frame_CopyPixels(IWICBitmapFrameDecode *iface,
     else if (This->cinfo.out_color_space == JCS_CMYK) bpp = 32;
     else bpp = 24;
 
-    stride = bpp * This->cinfo.output_width;
+    stride = (bpp * This->cinfo.output_width + 7) / 8;
     data_size = stride * This->cinfo.output_height;
 
     max_row_needed = prc->Y + prc->Height;
@@ -680,9 +669,15 @@ static HRESULT WINAPI JpegDecoder_Frame_CopyPixels(IWICBitmapFrameDecode *iface,
         }
 
         if (This->cinfo.out_color_space == JCS_CMYK && This->cinfo.saw_Adobe_marker)
+        {
+            DWORD *pDwordData = (DWORD*) (This->image_data + stride * first_scanline);
+            DWORD *pDwordDataEnd = (DWORD*) (This->image_data + This->cinfo.output_scanline * stride);
+
             /* Adobe JPEG's have inverted CMYK data. */
-            for (i=0; i<data_size; i++)
-                This->image_data[i] ^= 0xff;
+            while(pDwordData < pDwordDataEnd)
+                *pDwordData++ ^= 0xffffffff;
+        }
+
     }
 
     LeaveCriticalSection(&This->lock);
@@ -868,6 +863,8 @@ typedef struct JpegEncoder {
     double xres, yres;
     const jpeg_compress_format *format;
     IStream *stream;
+    WICColor palette[256];
+    UINT colors;
     CRITICAL_SECTION lock;
     BYTE dest_buffer[1024];
 } JpegEncoder;
@@ -1070,10 +1067,24 @@ static HRESULT WINAPI JpegEncoder_Frame_SetColorContexts(IWICBitmapFrameEncode *
 }
 
 static HRESULT WINAPI JpegEncoder_Frame_SetPalette(IWICBitmapFrameEncode *iface,
-    IWICPalette *pIPalette)
+    IWICPalette *palette)
 {
-    FIXME("(%p,%p): stub\n", iface, pIPalette);
-    return WINCODEC_ERR_UNSUPPORTEDOPERATION;
+    JpegEncoder *This = impl_from_IWICBitmapFrameEncode(iface);
+    HRESULT hr;
+
+    TRACE("(%p,%p)\n", iface, palette);
+
+    if (!palette) return E_INVALIDARG;
+
+    EnterCriticalSection(&This->lock);
+
+    if (This->frame_initialized)
+        hr = IWICPalette_GetColors(palette, 256, This->palette, &This->colors);
+    else
+        hr = WINCODEC_ERR_NOTINITIALIZED;
+
+    LeaveCriticalSection(&This->lock);
+    return hr;
 }
 
 static HRESULT WINAPI JpegEncoder_Frame_SetThumbnail(IWICBitmapFrameEncode *iface,
@@ -1393,8 +1404,18 @@ static HRESULT WINAPI JpegEncoder_SetColorContexts(IWICBitmapEncoder *iface,
 
 static HRESULT WINAPI JpegEncoder_SetPalette(IWICBitmapEncoder *iface, IWICPalette *pIPalette)
 {
+    JpegEncoder *This = impl_from_IWICBitmapEncoder(iface);
+    HRESULT hr;
+
     TRACE("(%p,%p)\n", iface, pIPalette);
-    return WINCODEC_ERR_UNSUPPORTEDOPERATION;
+
+    EnterCriticalSection(&This->lock);
+
+    hr = This->initialized ? WINCODEC_ERR_UNSUPPORTEDOPERATION : WINCODEC_ERR_NOTINITIALIZED;
+
+    LeaveCriticalSection(&This->lock);
+
+    return hr;
 }
 
 static HRESULT WINAPI JpegEncoder_SetThumbnail(IWICBitmapEncoder *iface, IWICBitmapSource *pIThumbnail)
@@ -1414,7 +1435,15 @@ static HRESULT WINAPI JpegEncoder_CreateNewFrame(IWICBitmapEncoder *iface,
 {
     JpegEncoder *This = impl_from_IWICBitmapEncoder(iface);
     HRESULT hr;
-    PROPBAG2 opts[6] = {{0}};
+    static const PROPBAG2 opts[6] =
+    {
+        { PROPBAG2_TYPE_DATA, VT_R4,            0, 0, (LPOLESTR)wszImageQuality },
+        { PROPBAG2_TYPE_DATA, VT_UI1,           0, 0, (LPOLESTR)wszBitmapTransform },
+        { PROPBAG2_TYPE_DATA, VT_I4 | VT_ARRAY, 0, 0, (LPOLESTR)wszLuminance },
+        { PROPBAG2_TYPE_DATA, VT_I4 | VT_ARRAY, 0, 0, (LPOLESTR)wszChrominance },
+        { PROPBAG2_TYPE_DATA, VT_UI1,           0, 0, (LPOLESTR)wszJpegYCrCbSubsampling },
+        { PROPBAG2_TYPE_DATA, VT_BOOL,          0, 0, (LPOLESTR)wszSuppressApp0 },
+    };
 
     TRACE("(%p,%p,%p)\n", iface, ppIFrameEncode, ppIEncoderOptions);
 
@@ -1432,30 +1461,14 @@ static HRESULT WINAPI JpegEncoder_CreateNewFrame(IWICBitmapEncoder *iface,
         return WINCODEC_ERR_NOTINITIALIZED;
     }
 
-    opts[0].pstrName = (LPOLESTR)wszImageQuality;
-    opts[0].vt = VT_R4;
-    opts[0].dwType = PROPBAG2_TYPE_DATA;
-    opts[1].pstrName = (LPOLESTR)wszBitmapTransform;
-    opts[1].vt = VT_UI1;
-    opts[1].dwType = PROPBAG2_TYPE_DATA;
-    opts[2].pstrName = (LPOLESTR)wszLuminance;
-    opts[2].vt = VT_I4|VT_ARRAY;
-    opts[2].dwType = PROPBAG2_TYPE_DATA;
-    opts[3].pstrName = (LPOLESTR)wszChrominance;
-    opts[3].vt = VT_I4|VT_ARRAY;
-    opts[3].dwType = PROPBAG2_TYPE_DATA;
-    opts[4].pstrName = (LPOLESTR)wszJpegYCrCbSubsampling;
-    opts[4].vt = VT_UI1;
-    opts[4].dwType = PROPBAG2_TYPE_DATA;
-    opts[5].pstrName = (LPOLESTR)wszSuppressApp0;
-    opts[5].vt = VT_BOOL;
-    opts[5].dwType = PROPBAG2_TYPE_DATA;
-
-    hr = CreatePropertyBag2(opts, 6, ppIEncoderOptions);
-    if (FAILED(hr))
+    if (ppIEncoderOptions)
     {
-        LeaveCriticalSection(&This->lock);
-        return hr;
+        hr = CreatePropertyBag2(opts, ARRAY_SIZE(opts), ppIEncoderOptions);
+        if (FAILED(hr))
+        {
+            LeaveCriticalSection(&This->lock);
+            return hr;
+        }
     }
 
     This->frame_count = 1;
@@ -1543,6 +1556,7 @@ HRESULT JpegEncoder_CreateInstance(REFIID iid, void** ppv)
     This->xres = This->yres = 0.0;
     This->format = NULL;
     This->stream = NULL;
+    This->colors = 0;
     InitializeCriticalSection(&This->lock);
     This->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": JpegEncoder.lock");
 

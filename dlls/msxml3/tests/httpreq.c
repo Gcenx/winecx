@@ -35,6 +35,7 @@
 #include "objsafe.h"
 #include "mshtml.h"
 
+#include "wine/heap.h"
 #include "wine/test.h"
 
 #define EXPECT_HR(hr,hr_exp) \
@@ -48,6 +49,9 @@ static void _expect_ref(IUnknown* obj, ULONG ref, int line)
     rc = IUnknown_Release(obj);
     ok_(__FILE__, line)(rc == ref, "expected refcount %d, got %d\n", ref, rc);
 }
+
+static const char xmltestA[] = "http://test.winehq.org/tests/xmltest.xml";
+static const CHAR xmltestbodyA[] = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<a>TEST</a>\n";
 
 DEFINE_GUID(SID_SContainerDispatch, 0xb722be00, 0x4e68, 0x101b, 0xa2, 0xbc, 0x00, 0xaa, 0x00, 0x40, 0x47, 0x70);
 DEFINE_GUID(SID_UnknownSID, 0x75dd09cb, 0x6c40, 0x11d5, 0x85, 0x43, 0x00, 0xc0, 0x4f, 0xa0, 0xfb, 0xa3);
@@ -90,6 +94,13 @@ DEFINE_EXPECT(collection_get_length);
 
 static int g_unexpectedcall, g_expectedcall;
 
+static int strcmp_wa(const WCHAR *strw, const char *stra)
+{
+    WCHAR buf[512];
+    MultiByteToWideChar(CP_ACP, 0, stra, -1, buf, ARRAY_SIZE(buf));
+    return lstrcmpW(strw, buf);
+}
+
 static BSTR alloc_str_from_narrow(const char *str)
 {
     int len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
@@ -106,7 +117,7 @@ static BSTR _bstr_(const char *str)
     if(!str)
         return NULL;
 
-    assert(alloced_bstrs_count < sizeof(alloced_bstrs)/sizeof(alloced_bstrs[0]));
+    assert(alloced_bstrs_count < ARRAY_SIZE(alloced_bstrs));
     alloced_bstrs[alloced_bstrs_count] = alloc_str_from_narrow(str);
     return alloced_bstrs[alloced_bstrs_count++];
 }
@@ -1243,7 +1254,7 @@ static ULONG WINAPI dispevent_Release(IDispatch *iface)
     ULONG ref = InterlockedDecrement( &This->ref );
 
     if (ref == 0)
-        HeapFree(GetProcessHeap(), 0, This);
+        heap_free(This);
 
     return ref;
 }
@@ -1320,7 +1331,7 @@ static const IDispatchVtbl dispeventVtbl =
 
 static IDispatch* create_dispevent(void)
 {
-    dispevent *event = HeapAlloc(GetProcessHeap(), 0, sizeof(*event));
+    dispevent *event = heap_alloc(sizeof(*event));
 
     event->IDispatch_iface.lpVtbl = &dispeventVtbl;
     event->ref = 1;
@@ -1335,6 +1346,16 @@ static IXMLHttpRequest *create_xhr(void)
 
     hr = CoCreateInstance(&CLSID_XMLHTTPRequest, NULL, CLSCTX_INPROC_SERVER,
         &IID_IXMLHttpRequest, (void**)&ret);
+
+    return SUCCEEDED(hr) ? ret : NULL;
+}
+
+static IServerXMLHTTPRequest *create_server_xhr(void)
+{
+    IServerXMLHTTPRequest *ret;
+    HRESULT hr;
+
+    hr = CoCreateInstance(&CLSID_ServerXMLHTTP30, NULL, CLSCTX_INPROC_SERVER, &IID_IServerXMLHTTPRequest, (void **)&ret);
 
     return SUCCEEDED(hr) ? ret : NULL;
 }
@@ -1420,14 +1441,26 @@ static void _test_open(unsigned line, IXMLHttpRequest *xhr, const char *method, 
     ok_(__FILE__,line)(hr == exhres, "open(%s %s) failed: %08x, expected %08x\n", method, url, hr, exhres);
 }
 
+#define test_server_open(a,b,c,d) _test_server_open(__LINE__,a,b,c,d)
+static void _test_server_open(unsigned line, IServerXMLHTTPRequest *xhr, const char *method, const char *url, HRESULT exhres)
+{
+    VARIANT empty, vfalse;
+    HRESULT hr;
+
+    V_VT(&empty) = VT_EMPTY;
+    V_VT(&vfalse) = VT_BOOL;
+    V_BOOL(&vfalse) = VARIANT_FALSE;
+
+    hr = IServerXMLHTTPRequest_open(xhr, _bstr_(method), _bstr_(url), vfalse, empty, empty);
+    ok_(__FILE__,line)(hr == exhres, "open(%s %s) failed: %08x, expected %08x\n", method, url, hr, exhres);
+}
+
 static void test_XMLHTTP(void)
 {
     static const char bodyA[] = "mode=Test";
     static const char urlA[] = "http://test.winehq.org/tests/post.php";
-    static const char xmltestA[] = "http://test.winehq.org/tests/xmltest.xml";
     static const char referertesturl[] = "http://test.winehq.org/tests/referer.php";
     static const WCHAR wszExpectedResponse[] = {'F','A','I','L','E','D',0};
-    static const CHAR xmltestbodyA[] = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<a>TEST</a>\n";
     static const WCHAR norefererW[] = {'n','o',' ','r','e','f','e','r','e','r',' ','s','e','t',0};
 
     IXMLHttpRequest *xhr;
@@ -1754,6 +1787,62 @@ static void test_XMLHTTP(void)
     SysFreeString(str);
 
     IXMLHttpRequest_Release(xhr);
+
+    /* invalid host */
+    xhr = create_xhr();
+
+    test_open(xhr, "GET", "http://invalid.host.test.winehq.org/test/path", S_OK);
+
+    V_VT(&varbody) = VT_EMPTY;
+    hr = IXMLHttpRequest_send(xhr, varbody);
+    todo_wine
+    ok(hr == INET_E_RESOURCE_NOT_FOUND, "send to invalid host returned %#x.\n", hr);
+
+    IXMLHttpRequest_Release(xhr);
+    free_bstrs();
+}
+
+static void test_server_xhr(void)
+{
+    IServerXMLHTTPRequest *xhr;
+    BSTR response;
+    VARIANT body;
+    HRESULT hr;
+
+    /* GET request */
+    xhr = create_server_xhr();
+
+    test_server_open(xhr, "GET", xmltestA, S_OK);
+
+    V_VT(&body) = VT_EMPTY;
+
+    hr = IServerXMLHTTPRequest_send(xhr, body);
+    if (hr == INET_E_RESOURCE_NOT_FOUND)
+    {
+        skip("No connection could be made with test.winehq.org\n");
+        IServerXMLHTTPRequest_Release(xhr);
+        return;
+    }
+    ok(hr == S_OK, "send failed: %08x\n", hr);
+
+    hr = IServerXMLHTTPRequest_get_responseText(xhr, &response);
+    ok(hr == S_OK, "get_responseText failed: %08x\n", hr);
+    ok(!strcmp_wa(response, xmltestbodyA), "got %s\n", wine_dbgstr_w(response));
+    SysFreeString(response);
+
+    IServerXMLHTTPRequest_Release(xhr);
+
+    /* invalid host */
+    xhr = create_server_xhr();
+
+    test_server_open(xhr, "GET", "http://invalid.host.test.winehq.org/test/path", S_OK);
+
+    V_VT(&body) = VT_EMPTY;
+    hr = IServerXMLHTTPRequest_send(xhr, body);
+    todo_wine
+    ok(hr == WININET_E_NAME_NOT_RESOLVED, "send to invalid host returned %#x.\n", hr);
+
+    IServerXMLHTTPRequest_Release(xhr);
     free_bstrs();
 }
 
@@ -1777,20 +1866,68 @@ static void test_safe_httpreq(void)
     free_bstrs();
 }
 
+static void test_supporterrorinfo(void)
+{
+    HRESULT hr;
+    IXMLHttpRequest *xhr;
+    IServerXMLHTTPRequest *server_xhr;
+    ISupportErrorInfo *errorinfo, *errorinfo2;
+
+    xhr = create_xhr();
+
+    EXPECT_REF(xhr, 1);
+    hr = IXMLHttpRequest_QueryInterface(xhr, &IID_ISupportErrorInfo, (void **)&errorinfo);
+    ok(hr == S_OK, "Failed to get ISupportErrorInfo, hr %#x.\n", hr);
+    EXPECT_REF(xhr, 2);
+
+    hr = IXMLHttpRequest_QueryInterface(xhr, &IID_ISupportErrorInfo, (void **)&errorinfo2);
+    ok(hr == S_OK, "Failed to get ISupportErrorInfo, hr %#x.\n", hr);
+    ok(errorinfo == errorinfo2, "Unexpected error info instance.\n");
+    EXPECT_REF(xhr, 3);
+
+    ISupportErrorInfo_Release(errorinfo2);
+    ISupportErrorInfo_Release(errorinfo);
+
+    IXMLHttpRequest_Release(xhr);
+
+    /* ServerXMLHTTP */
+    server_xhr = create_server_xhr();
+
+    EXPECT_REF(server_xhr, 1);
+    hr = IServerXMLHTTPRequest_QueryInterface(server_xhr, &IID_ISupportErrorInfo, (void **)&errorinfo);
+    ok(hr == S_OK, "Failed to get ISupportErrorInfo, hr %#x.\n", hr);
+    EXPECT_REF(server_xhr, 2);
+
+    hr = IServerXMLHTTPRequest_QueryInterface(server_xhr, &IID_ISupportErrorInfo, (void **)&errorinfo2);
+    ok(hr == S_OK, "Failed to get ISupportErrorInfo, hr %#x.\n", hr);
+    ok(errorinfo == errorinfo2, "Unexpected error info instance.\n");
+    EXPECT_REF(server_xhr, 3);
+
+    ISupportErrorInfo_Release(errorinfo2);
+    ISupportErrorInfo_Release(errorinfo);
+
+    IServerXMLHTTPRequest_Release(server_xhr);
+}
+
 START_TEST(httpreq)
 {
     IXMLHttpRequest *xhr;
 
     CoInitialize(NULL);
 
-    if((xhr = create_xhr())) {
-        IXMLHttpRequest_Release(xhr);
-
-        test_XMLHTTP();
-        test_safe_httpreq();
-    }else {
+    if (!(xhr = create_xhr()))
+    {
         win_skip("IXMLHTTPRequest is not available\n");
+        CoUninitialize();
+        return;
     }
+
+    IXMLHttpRequest_Release(xhr);
+
+    test_XMLHTTP();
+    test_server_xhr();
+    test_safe_httpreq();
+    test_supporterrorinfo();
 
     CoUninitialize();
 }

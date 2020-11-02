@@ -34,6 +34,19 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
+typedef struct {
+    IUnknown          IUnknown_inner;
+    IInternetProtocol IInternetProtocol_iface;
+
+    LONG ref;
+
+    BYTE *data;
+    ULONG data_len;
+    ULONG cur;
+
+    IUnknown *outer;
+} InternetProtocol;
+
 /********************************************************************
  * common ProtocolFactory implementation
  */
@@ -132,70 +145,50 @@ static HRESULT WINAPI ClassFactory_LockServer(IClassFactory *iface, BOOL dolock)
     return S_OK;
 }
 
-/********************************************************************
- * AboutProtocol implementation
- */
-
-typedef struct {
-    IInternetProtocol IInternetProtocol_iface;
-
-    LONG ref;
-
-    BYTE *data;
-    ULONG data_len;
-    ULONG cur;
-
-    IUnknown *pUnkOuter;
-} AboutProtocol;
-
-static inline AboutProtocol *AboutProtocol_from_IInternetProtocol(IInternetProtocol *iface)
+static inline InternetProtocol *impl_from_IUnknown(IUnknown *iface)
 {
-    return CONTAINING_RECORD(iface, AboutProtocol, IInternetProtocol_iface);
+    return CONTAINING_RECORD(iface, InternetProtocol, IUnknown_inner);
 }
 
-static HRESULT WINAPI AboutProtocol_QueryInterface(IInternetProtocol *iface, REFIID riid, void **ppv)
+static inline InternetProtocol *impl_from_IInternetProtocol(IInternetProtocol *iface)
 {
-    AboutProtocol *This = AboutProtocol_from_IInternetProtocol(iface);
+    return CONTAINING_RECORD(iface, InternetProtocol, IInternetProtocol_iface);
+}
 
-    *ppv = NULL;
+static HRESULT WINAPI Protocol_QueryInterface(IUnknown *iface, REFIID riid, void **ppv)
+{
+    InternetProtocol *This = impl_from_IUnknown(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
 
     if(IsEqualGUID(&IID_IUnknown, riid)) {
-        TRACE("(%p)->(IID_IUnknown %p)\n", iface, ppv);
-        if(This->pUnkOuter)
-            return IUnknown_QueryInterface(This->pUnkOuter, riid, ppv);
-        *ppv = &This->IInternetProtocol_iface;
+        *ppv = &This->IUnknown_inner;
     }else if(IsEqualGUID(&IID_IInternetProtocolRoot, riid)) {
-        TRACE("(%p)->(IID_IInternetProtocolRoot %p)\n", iface, ppv);
         *ppv = &This->IInternetProtocol_iface;
     }else if(IsEqualGUID(&IID_IInternetProtocol, riid)) {
-        TRACE("(%p)->(IID_IInternetProtocol %p)\n", iface, ppv);
         *ppv = &This->IInternetProtocol_iface;
-    }else if(IsEqualGUID(&IID_IServiceProvider, riid)) {
-        FIXME("IServiceProvider is not implemented\n");
+    }else {
+        if(IsEqualGUID(&IID_IServiceProvider, riid))
+            FIXME("IServiceProvider is not implemented\n");
+        *ppv = NULL;
         return E_NOINTERFACE;
     }
 
-    if(!*ppv) {
-        TRACE("unknown interface %s\n", debugstr_guid(riid));
-        return E_NOINTERFACE;
-    }
-
-    IInternetProtocol_AddRef(iface);
+    IUnknown_AddRef((IUnknown*)*ppv);
     return S_OK;
 }
 
-static ULONG WINAPI AboutProtocol_AddRef(IInternetProtocol *iface)
+static ULONG WINAPI Protocol_AddRef(IUnknown *iface)
 {
-    AboutProtocol *This = AboutProtocol_from_IInternetProtocol(iface);
+    InternetProtocol *This = impl_from_IUnknown(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
     TRACE("(%p) ref=%d\n", iface, ref);
-    return This->pUnkOuter ? IUnknown_AddRef(This->pUnkOuter) : ref;
+    return ref;
 }
 
-static ULONG WINAPI AboutProtocol_Release(IInternetProtocol *iface)
+static ULONG WINAPI Protocol_Release(IUnknown *iface)
 {
-    AboutProtocol *This = AboutProtocol_from_IInternetProtocol(iface);
-    IUnknown *pUnkOuter = This->pUnkOuter;
+    InternetProtocol *This = impl_from_IUnknown(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p) ref=%x\n", iface, ref);
@@ -205,14 +198,146 @@ static ULONG WINAPI AboutProtocol_Release(IInternetProtocol *iface)
         heap_free(This);
     }
 
-    return pUnkOuter ? IUnknown_Release(pUnkOuter) : ref;
+    return ref;
 }
+
+static const IUnknownVtbl ProtocolUnkVtbl = {
+    Protocol_QueryInterface,
+    Protocol_AddRef,
+    Protocol_Release
+};
+
+static HRESULT WINAPI InternetProtocol_QueryInterface(IInternetProtocol *iface, REFIID riid, void **ppv)
+{
+    InternetProtocol *This = impl_from_IInternetProtocol(iface);
+    return IUnknown_QueryInterface(This->outer, riid, ppv);
+}
+
+static ULONG WINAPI InternetProtocol_AddRef(IInternetProtocol *iface)
+{
+    InternetProtocol *This = impl_from_IInternetProtocol(iface);
+    return IUnknown_AddRef(This->outer);
+}
+
+static ULONG WINAPI InternetProtocol_Release(IInternetProtocol *iface)
+{
+    InternetProtocol *This = impl_from_IInternetProtocol(iface);
+    return IUnknown_Release(This->outer);
+}
+
+static HRESULT WINAPI InternetProtocol_Continue(IInternetProtocol *iface, PROTOCOLDATA* pProtocolData)
+{
+    InternetProtocol *This = impl_from_IInternetProtocol(iface);
+    FIXME("(%p)->(%p)\n", This, pProtocolData);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InternetProtocol_Abort(IInternetProtocol *iface, HRESULT hrReason,
+        DWORD dwOptions)
+{
+    InternetProtocol *This = impl_from_IInternetProtocol(iface);
+    FIXME("(%p)->(%08x %08x)\n", This, hrReason, dwOptions);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InternetProtocol_Terminate(IInternetProtocol *iface, DWORD dwOptions)
+{
+    InternetProtocol *This = impl_from_IInternetProtocol(iface);
+    TRACE("(%p)->(%08x)\n", This, dwOptions);
+    return S_OK;
+}
+
+static HRESULT WINAPI InternetProtocol_Suspend(IInternetProtocol *iface)
+{
+    InternetProtocol *This = impl_from_IInternetProtocol(iface);
+    FIXME("(%p)\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InternetProtocol_Resume(IInternetProtocol *iface)
+{
+    InternetProtocol *This = impl_from_IInternetProtocol(iface);
+    FIXME("(%p)\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InternetProtocol_Read(IInternetProtocol *iface, void* pv, ULONG cb, ULONG* pcbRead)
+{
+    InternetProtocol *This = impl_from_IInternetProtocol(iface);
+
+    TRACE("(%p)->(%p %u %p)\n", This, pv, cb, pcbRead);
+
+    if(!This->data)
+        return E_FAIL;
+
+    *pcbRead = (cb > This->data_len-This->cur ? This->data_len-This->cur : cb);
+
+    if(!*pcbRead)
+        return S_FALSE;
+
+    memcpy(pv, This->data+This->cur, *pcbRead);
+    This->cur += *pcbRead;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI InternetProtocol_Seek(IInternetProtocol *iface, LARGE_INTEGER dlibMove,
+        DWORD dwOrigin, ULARGE_INTEGER* plibNewPosition)
+{
+    InternetProtocol *This = impl_from_IInternetProtocol(iface);
+    FIXME("(%p)->(%d %d %p)\n", This, dlibMove.u.LowPart, dwOrigin, plibNewPosition);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI InternetProtocol_LockRequest(IInternetProtocol *iface, DWORD dwOptions)
+{
+    InternetProtocol *This = impl_from_IInternetProtocol(iface);
+
+    TRACE("(%p)->(%d)\n", This, dwOptions);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI InternetProtocol_UnlockRequest(IInternetProtocol *iface)
+{
+    InternetProtocol *This = impl_from_IInternetProtocol(iface);
+
+    TRACE("(%p)\n", This);
+
+    return S_OK;
+}
+
+static HRESULT create_protocol_instance(const IInternetProtocolVtbl *protocol_vtbl,
+                                        IUnknown *outer, REFIID riid, void **ppv)
+{
+    InternetProtocol *protocol;
+    HRESULT hres;
+
+    if(outer && !IsEqualGUID(&IID_IUnknown, riid)) {
+        *ppv = NULL;
+        return E_INVALIDARG;
+    }
+
+    protocol = heap_alloc_zero(sizeof(InternetProtocol));
+    protocol->IUnknown_inner.lpVtbl = &ProtocolUnkVtbl;
+    protocol->IInternetProtocol_iface.lpVtbl = protocol_vtbl;
+    protocol->outer = outer ? outer : &protocol->IUnknown_inner;
+    protocol->ref = 1;
+
+    hres = IUnknown_QueryInterface(&protocol->IUnknown_inner, riid, ppv);
+    IUnknown_Release(&protocol->IUnknown_inner);
+    return hres;
+}
+
+/********************************************************************
+ * about protocol implementation
+ */
 
 static HRESULT WINAPI AboutProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
         IInternetProtocolSink* pOIProtSink, IInternetBindInfo* pOIBindInfo,
         DWORD grfPI, HANDLE_PTR dwReserved)
 {
-    AboutProtocol *This = AboutProtocol_from_IInternetProtocol(iface);
+    InternetProtocol *This = impl_from_IInternetProtocol(iface);
     BINDINFO bindinfo;
     DWORD grfBINDF = 0;
     LPCWSTR text = NULL;
@@ -245,8 +370,8 @@ static HRESULT WINAPI AboutProtocol_Start(IInternetProtocol *iface, LPCWSTR szUr
 
     TRACE("bindf %x\n", grfBINDF);
 
-    if(strlenW(szUrl)>=sizeof(wszAbout)/sizeof(WCHAR) && !memcmp(wszAbout, szUrl, sizeof(wszAbout))) {
-        text = szUrl + sizeof(wszAbout)/sizeof(WCHAR);
+    if(strlenW(szUrl) >= ARRAY_SIZE(wszAbout) && !memcmp(wszAbout, szUrl, sizeof(wszAbout))) {
+        text = szUrl + ARRAY_SIZE(wszAbout);
         if(!strcmpW(wszBlank, text))
             text = NULL;
     }
@@ -265,7 +390,7 @@ static HRESULT WINAPI AboutProtocol_Start(IInternetProtocol *iface, LPCWSTR szUr
     if(text)
         strcatW((LPWSTR)This->data, text);
     strcatW((LPWSTR)This->data, html_end);
-    
+
     This->cur = 0;
 
     IInternetProtocolSink_ReportProgress(pOIProtSink, BINDSTATUS_MIMETYPEAVAILABLE, wszTextHtml);
@@ -279,135 +404,28 @@ static HRESULT WINAPI AboutProtocol_Start(IInternetProtocol *iface, LPCWSTR szUr
     return S_OK;
 }
 
-static HRESULT WINAPI AboutProtocol_Continue(IInternetProtocol *iface, PROTOCOLDATA* pProtocolData)
-{
-    AboutProtocol *This = AboutProtocol_from_IInternetProtocol(iface);
-    FIXME("(%p)->(%p)\n", This, pProtocolData);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI AboutProtocol_Abort(IInternetProtocol *iface, HRESULT hrReason,
-        DWORD dwOptions)
-{
-    AboutProtocol *This = AboutProtocol_from_IInternetProtocol(iface);
-    FIXME("(%p)->(%08x %08x)\n", This, hrReason, dwOptions);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI AboutProtocol_Terminate(IInternetProtocol *iface, DWORD dwOptions)
-{
-    AboutProtocol *This = AboutProtocol_from_IInternetProtocol(iface);
-    TRACE("(%p)->(%08x)\n", This, dwOptions);
-    return S_OK;
-}
-
-static HRESULT WINAPI AboutProtocol_Suspend(IInternetProtocol *iface)
-{
-    AboutProtocol *This = AboutProtocol_from_IInternetProtocol(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI AboutProtocol_Resume(IInternetProtocol *iface)
-{
-    AboutProtocol *This = AboutProtocol_from_IInternetProtocol(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI AboutProtocol_Read(IInternetProtocol *iface, void* pv, ULONG cb, ULONG* pcbRead)
-{
-    AboutProtocol *This = AboutProtocol_from_IInternetProtocol(iface);
-
-    TRACE("(%p)->(%p %u %p)\n", This, pv, cb, pcbRead);
-
-    if(!This->data)
-        return E_FAIL;
-
-    *pcbRead = (cb > This->data_len-This->cur ? This->data_len-This->cur : cb);
-
-    if(!*pcbRead)
-        return S_FALSE;
-
-    memcpy(pv, This->data+This->cur, *pcbRead);
-    This->cur += *pcbRead;
-
-    return S_OK;
-}
-
-static HRESULT WINAPI AboutProtocol_Seek(IInternetProtocol *iface, LARGE_INTEGER dlibMove,
-        DWORD dwOrigin, ULARGE_INTEGER* plibNewPosition)
-{
-    AboutProtocol *This = AboutProtocol_from_IInternetProtocol(iface);
-    FIXME("(%p)->(%d %d %p)\n", This, dlibMove.u.LowPart, dwOrigin, plibNewPosition);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI AboutProtocol_LockRequest(IInternetProtocol *iface, DWORD dwOptions)
-{
-    AboutProtocol *This = AboutProtocol_from_IInternetProtocol(iface);
-
-    TRACE("(%p)->(%d)\n", This, dwOptions);
-
-    return S_OK;
-}
-
-static HRESULT WINAPI AboutProtocol_UnlockRequest(IInternetProtocol *iface)
-{
-    AboutProtocol *This = AboutProtocol_from_IInternetProtocol(iface);
-
-    TRACE("(%p)\n", This);
-
-    return S_OK;
-}
-
 static const IInternetProtocolVtbl AboutProtocolVtbl = {
-    AboutProtocol_QueryInterface,
-    AboutProtocol_AddRef,
-    AboutProtocol_Release,
+    InternetProtocol_QueryInterface,
+    InternetProtocol_AddRef,
+    InternetProtocol_Release,
     AboutProtocol_Start,
-    AboutProtocol_Continue,
-    AboutProtocol_Abort,
-    AboutProtocol_Terminate,
-    AboutProtocol_Suspend,
-    AboutProtocol_Resume,
-    AboutProtocol_Read,
-    AboutProtocol_Seek,
-    AboutProtocol_LockRequest,
-    AboutProtocol_UnlockRequest
+    InternetProtocol_Continue,
+    InternetProtocol_Abort,
+    InternetProtocol_Terminate,
+    InternetProtocol_Suspend,
+    InternetProtocol_Resume,
+    InternetProtocol_Read,
+    InternetProtocol_Seek,
+    InternetProtocol_LockRequest,
+    InternetProtocol_UnlockRequest
 };
 
 static HRESULT WINAPI AboutProtocolFactory_CreateInstance(IClassFactory *iface, IUnknown *pUnkOuter,
         REFIID riid, void **ppv)
 {
-    AboutProtocol *ret;
-    HRESULT hres = S_OK;
-
     TRACE("(%p)->(%p %s %p)\n", iface, pUnkOuter, debugstr_guid(riid), ppv);
 
-    ret = heap_alloc(sizeof(AboutProtocol));
-    ret->IInternetProtocol_iface.lpVtbl = &AboutProtocolVtbl;
-    ret->ref = 0;
-
-    ret->data = NULL;
-    ret->data_len = 0;
-    ret->cur = 0;
-    ret->pUnkOuter = pUnkOuter;
-
-    if(pUnkOuter) {
-        ret->ref = 1;
-        if(IsEqualGUID(&IID_IUnknown, riid))
-            *ppv = &ret->IInternetProtocol_iface;
-        else
-            hres = E_INVALIDARG;
-    }else {
-        hres = IInternetProtocol_QueryInterface(&ret->IInternetProtocol_iface, riid, ppv);
-    }
-
-    if(FAILED(hres))
-        heap_free(ret);
-
-    return hres;
+    return create_protocol_instance(&AboutProtocolVtbl, pUnkOuter, riid, ppv);
 }
 
 static HRESULT WINAPI AboutProtocolInfo_ParseUrl(IInternetProtocolInfo *iface, LPCWSTR pwzUrl,
@@ -515,85 +533,14 @@ static ProtocolFactory AboutProtocolFactory = {
 };
 
 /********************************************************************
- * ResProtocol implementation
+ * res protocol implementation
  */
-
-typedef struct {
-    IInternetProtocol IInternetProtocol_iface;
-    LONG ref;
-
-    BYTE *data;
-    ULONG data_len;
-    ULONG cur;
-
-    IUnknown *pUnkOuter;
-} ResProtocol;
-
-static inline ResProtocol *ResProtocol_from_IInternetProtocol(IInternetProtocol *iface)
-{
-    return CONTAINING_RECORD(iface, ResProtocol, IInternetProtocol_iface);
-}
-
-static HRESULT WINAPI ResProtocol_QueryInterface(IInternetProtocol *iface, REFIID riid, void **ppv)
-{
-    ResProtocol *This = ResProtocol_from_IInternetProtocol(iface);
-
-    *ppv = NULL;
-
-    if(IsEqualGUID(&IID_IUnknown, riid)) {
-        TRACE("(%p)->(IID_IUnknown %p)\n", iface, ppv);
-        if(This->pUnkOuter)
-            return IUnknown_QueryInterface(This->pUnkOuter, &IID_IUnknown, ppv);
-        *ppv = &This->IInternetProtocol_iface;
-    }else if(IsEqualGUID(&IID_IInternetProtocolRoot, riid)) {
-        TRACE("(%p)->(IID_IInternetProtocolRoot %p)\n", iface, ppv);
-        *ppv = &This->IInternetProtocol_iface;
-    }else if(IsEqualGUID(&IID_IInternetProtocol, riid)) {
-        TRACE("(%p)->(IID_IInternetProtocol %p)\n", iface, ppv);
-        *ppv = &This->IInternetProtocol_iface;
-    }else if(IsEqualGUID(&IID_IServiceProvider, riid)) {
-        FIXME("IServiceProvider is not implemented\n");
-        return E_NOINTERFACE;
-    }
-
-    if(!*ppv) {
-        TRACE("unknown interface %s\n", debugstr_guid(riid));
-        return E_NOINTERFACE;
-    }
-
-    IInternetProtocol_AddRef(iface);
-    return S_OK;
-}
-
-static ULONG WINAPI ResProtocol_AddRef(IInternetProtocol *iface)
-{
-    ResProtocol *This = ResProtocol_from_IInternetProtocol(iface);
-    ULONG ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p) ref=%d\n", iface, ref);
-    return This->pUnkOuter ? IUnknown_AddRef(This->pUnkOuter) : ref;
-}
-
-static ULONG WINAPI ResProtocol_Release(IInternetProtocol *iface)
-{
-    ResProtocol *This = ResProtocol_from_IInternetProtocol(iface);
-    IUnknown *pUnkOuter = This->pUnkOuter;
-    ULONG ref = InterlockedDecrement(&This->ref);
-
-    TRACE("(%p) ref=%x\n", iface, ref);
-
-    if(!ref) {
-        heap_free(This->data);
-        heap_free(This);
-    }
-
-    return pUnkOuter ? IUnknown_Release(pUnkOuter) : ref;
-}
 
 static HRESULT WINAPI ResProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
         IInternetProtocolSink* pOIProtSink, IInternetBindInfo* pOIBindInfo,
         DWORD grfPI, HANDLE_PTR dwReserved)
 {
-    ResProtocol *This = ResProtocol_from_IInternetProtocol(iface);
+    InternetProtocol *This = impl_from_IInternetProtocol(iface);
     WCHAR *url_dll, *url_file, *url, *mime, *res_type = (LPWSTR)RT_HTML, *ptr;
     DWORD grfBINDF = 0, len;
     BINDINFO bindinfo;
@@ -623,14 +570,14 @@ static HRESULT WINAPI ResProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
         return hres;
     }
 
-    if(len < sizeof(wszRes)/sizeof(wszRes[0]) || memcmp(url, wszRes, sizeof(wszRes))) {
+    if(len < ARRAY_SIZE(wszRes) || memcmp(url, wszRes, sizeof(wszRes))) {
         WARN("Wrong protocol of url: %s\n", debugstr_w(url));
         IInternetProtocolSink_ReportResult(pOIProtSink, E_INVALIDARG, 0, NULL);
         heap_free(url);
         return E_INVALIDARG;
     }
 
-    url_dll = url + sizeof(wszRes)/sizeof(wszRes[0]);
+    url_dll = url + ARRAY_SIZE(wszRes);
     if(!(res_type = strchrW(url_dll, '/'))) {
         WARN("wrong url: %s\n", debugstr_w(url));
         IInternetProtocolSink_ReportResult(pOIProtSink, MK_E_SYNTAX, 0, NULL);
@@ -706,139 +653,28 @@ static HRESULT WINAPI ResProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
     return S_OK;
 }
 
-static HRESULT WINAPI ResProtocol_Continue(IInternetProtocol *iface, PROTOCOLDATA* pProtocolData)
-{
-    ResProtocol *This = ResProtocol_from_IInternetProtocol(iface);
-    FIXME("(%p)->(%p)\n", This, pProtocolData);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI ResProtocol_Abort(IInternetProtocol *iface, HRESULT hrReason,
-        DWORD dwOptions)
-{
-    ResProtocol *This = ResProtocol_from_IInternetProtocol(iface);
-    FIXME("(%p)->(%08x %08x)\n", This, hrReason, dwOptions);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI ResProtocol_Terminate(IInternetProtocol *iface, DWORD dwOptions)
-{
-    ResProtocol *This = ResProtocol_from_IInternetProtocol(iface);
-
-    TRACE("(%p)->(%08x)\n", This, dwOptions);
-
-    /* test show that we don't have to do anything here */
-    return S_OK;
-}
-
-static HRESULT WINAPI ResProtocol_Suspend(IInternetProtocol *iface)
-{
-    ResProtocol *This = ResProtocol_from_IInternetProtocol(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI ResProtocol_Resume(IInternetProtocol *iface)
-{
-    ResProtocol *This = ResProtocol_from_IInternetProtocol(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI ResProtocol_Read(IInternetProtocol *iface, void* pv, ULONG cb, ULONG* pcbRead)
-{
-    ResProtocol *This = ResProtocol_from_IInternetProtocol(iface);
-
-    TRACE("(%p)->(%p %u %p)\n", This, pv, cb, pcbRead);
-
-    if(!This->data)
-        return E_FAIL;
-
-    *pcbRead = (cb > This->data_len-This->cur ? This->data_len-This->cur : cb);
-
-    if(!*pcbRead)
-        return S_FALSE;
-
-    memcpy(pv, This->data+This->cur, *pcbRead);
-    This->cur += *pcbRead;
-
-    return S_OK;
-}
-
-static HRESULT WINAPI ResProtocol_Seek(IInternetProtocol *iface, LARGE_INTEGER dlibMove,
-        DWORD dwOrigin, ULARGE_INTEGER* plibNewPosition)
-{
-    ResProtocol *This = ResProtocol_from_IInternetProtocol(iface);
-    FIXME("(%p)->(%d %d %p)\n", This, dlibMove.u.LowPart, dwOrigin, plibNewPosition);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI ResProtocol_LockRequest(IInternetProtocol *iface, DWORD dwOptions)
-{
-    ResProtocol *This = ResProtocol_from_IInternetProtocol(iface);
-
-    TRACE("(%p)->(%d)\n", This, dwOptions);
-
-    /* test show that we don't have to do anything here */
-    return S_OK;
-}
-
-static HRESULT WINAPI ResProtocol_UnlockRequest(IInternetProtocol *iface)
-{
-    ResProtocol *This = ResProtocol_from_IInternetProtocol(iface);
-
-    TRACE("(%p)\n", This);
-
-    /* test show that we don't have to do anything here */
-    return S_OK;
-}
-
 static const IInternetProtocolVtbl ResProtocolVtbl = {
-    ResProtocol_QueryInterface,
-    ResProtocol_AddRef,
-    ResProtocol_Release,
+    InternetProtocol_QueryInterface,
+    InternetProtocol_AddRef,
+    InternetProtocol_Release,
     ResProtocol_Start,
-    ResProtocol_Continue,
-    ResProtocol_Abort,
-    ResProtocol_Terminate,
-    ResProtocol_Suspend,
-    ResProtocol_Resume,
-    ResProtocol_Read,
-    ResProtocol_Seek,
-    ResProtocol_LockRequest,
-    ResProtocol_UnlockRequest
+    InternetProtocol_Continue,
+    InternetProtocol_Abort,
+    InternetProtocol_Terminate,
+    InternetProtocol_Suspend,
+    InternetProtocol_Resume,
+    InternetProtocol_Read,
+    InternetProtocol_Seek,
+    InternetProtocol_LockRequest,
+    InternetProtocol_UnlockRequest
 };
 
 static HRESULT WINAPI ResProtocolFactory_CreateInstance(IClassFactory *iface, IUnknown *pUnkOuter,
         REFIID riid, void **ppv)
 {
-    ResProtocol *ret;
-    HRESULT hres = S_OK;
-
     TRACE("(%p)->(%p %s %p)\n", iface, pUnkOuter, debugstr_guid(riid), ppv);
 
-    ret = heap_alloc(sizeof(ResProtocol));
-    ret->IInternetProtocol_iface.lpVtbl = &ResProtocolVtbl;
-    ret->ref = 0;
-    ret->data = NULL;
-    ret->data_len = 0;
-    ret->cur = 0;
-    ret->pUnkOuter = pUnkOuter;
-
-    if(pUnkOuter) {
-        ret->ref = 1;
-        if(IsEqualGUID(&IID_IUnknown, riid))
-            *ppv = &ret->IInternetProtocol_iface;
-        else
-            hres = E_FAIL;
-    }else {
-        hres = IInternetProtocol_QueryInterface(&ret->IInternetProtocol_iface, riid, ppv);
-    }
-
-    if(FAILED(hres))
-        heap_free(ret);
-
-    return hres;
+    return create_protocol_instance(&ResProtocolVtbl, pUnkOuter, riid, ppv);
 }
 
 static HRESULT WINAPI ResProtocolInfo_ParseUrl(IInternetProtocolInfo *iface, LPCWSTR pwzUrl,
@@ -856,23 +692,23 @@ static HRESULT WINAPI ResProtocolInfo_ParseUrl(IInternetProtocolInfo *iface, LPC
         static const WCHAR wszFile[] = {'f','i','l','e',':','/','/'};
         static const WCHAR wszRes[] = {'r','e','s',':','/','/'};
 
-        if(strlenW(pwzUrl) <= sizeof(wszRes)/sizeof(WCHAR) || memcmp(pwzUrl, wszRes, sizeof(wszRes)))
+        if(strlenW(pwzUrl) <= ARRAY_SIZE(wszRes) || memcmp(pwzUrl, wszRes, sizeof(wszRes)))
             return E_INVALIDARG;
 
-        ptr = strchrW(pwzUrl + sizeof(wszRes)/sizeof(WCHAR), '/');
+        ptr = strchrW(pwzUrl + ARRAY_SIZE(wszRes), '/');
         if(!ptr)
             return E_INVALIDARG;
 
-        len = ptr - (pwzUrl + sizeof(wszRes)/sizeof(WCHAR));
-        if(len >= sizeof(file_part)/sizeof(WCHAR)) {
+        len = ptr - (pwzUrl + ARRAY_SIZE(wszRes));
+        if(len >= ARRAY_SIZE(file_part)) {
             FIXME("Too long URL\n");
             return MK_E_SYNTAX;
         }
 
-        memcpy(file_part, pwzUrl + sizeof(wszRes)/sizeof(WCHAR), len*sizeof(WCHAR));
+        memcpy(file_part, pwzUrl + ARRAY_SIZE(wszRes), len*sizeof(WCHAR));
         file_part[len] = 0;
 
-        len = SearchPathW(NULL, file_part, NULL, sizeof(full_path)/sizeof(WCHAR), full_path, NULL);
+        len = SearchPathW(NULL, file_part, NULL, ARRAY_SIZE(full_path), full_path, NULL);
         if(!len) {
             HMODULE module;
 
@@ -884,20 +720,20 @@ static HRESULT WINAPI ResProtocolInfo_ParseUrl(IInternetProtocolInfo *iface, LPC
                 return MK_E_SYNTAX;
             }
 
-            len = GetModuleFileNameW(module, full_path, sizeof(full_path)/sizeof(WCHAR));
+            len = GetModuleFileNameW(module, full_path, ARRAY_SIZE(full_path));
             FreeLibrary(module);
             if(!len)
                 return E_FAIL;
         }
 
-        size = sizeof(wszFile)/sizeof(WCHAR) + len + 1;
+        size = ARRAY_SIZE(wszFile) + len + 1;
         if(pcchResult)
             *pcchResult = size;
         if(size > cchResult)
             return S_FALSE;
 
         memcpy(pwzResult, wszFile, sizeof(wszFile));
-        memcpy(pwzResult + sizeof(wszFile)/sizeof(WCHAR), full_path, (len+1)*sizeof(WCHAR));
+        memcpy(pwzResult + ARRAY_SIZE(wszFile), full_path, (len+1)*sizeof(WCHAR));
         return S_OK;
     }
 

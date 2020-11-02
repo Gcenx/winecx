@@ -149,10 +149,8 @@ static void TestDceErrorInqText (void)
                          */
     DWORD dwCount;
 
-    dwCount = FormatMessageA (FORMAT_MESSAGE_FROM_SYSTEM | 
-              FORMAT_MESSAGE_IGNORE_INSERTS,
-              NULL, RPC_S_NOT_RPC_ERROR, 0, bufferInvalid,
-              sizeof(bufferInvalid)/sizeof(bufferInvalid[0]), NULL);
+    dwCount = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL,
+            RPC_S_NOT_RPC_ERROR, 0, bufferInvalid, ARRAY_SIZE(bufferInvalid), NULL);
 
     /* A random sample of DceErrorInqText */
     /* 0 is success */
@@ -1146,7 +1144,7 @@ static HRESULT set_firewall( enum firewall_op op )
     hr = INetFwPolicy_get_CurrentProfile( policy, &profile );
     if (hr != S_OK) goto done;
 
-    INetFwProfile_get_AuthorizedApplications( profile, &apps );
+    hr = INetFwProfile_get_AuthorizedApplications( profile, &apps );
     ok( hr == S_OK, "got %08x\n", hr );
     if (hr != S_OK) goto done;
 

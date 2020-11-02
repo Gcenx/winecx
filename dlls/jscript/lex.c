@@ -135,7 +135,7 @@ static int check_keyword(parser_ctx_t *ctx, const WCHAR *word, const WCHAR **lva
         return 1;
 
     if(lval)
-        *lval = ctx->ptr;
+        *lval = word;
     ctx->ptr = p1;
     return 0;
 }
@@ -162,7 +162,7 @@ static int hex_to_int(WCHAR c)
 
 static int check_keywords(parser_ctx_t *ctx, const WCHAR **lval)
 {
-    int min = 0, max = sizeof(keywords)/sizeof(keywords[0])-1, r, i;
+    int min = 0, max = ARRAY_SIZE(keywords)-1, r, i;
 
     while(min <= max) {
         i = (min+max)/2;
@@ -487,18 +487,18 @@ static BOOL parse_numeric_literal(parser_ctx_t *ctx, double *ret)
     HRESULT hres;
 
     if(*ctx->ptr == '0') {
-        LONG d, l = 0;
-
         ctx->ptr++;
 
         if(*ctx->ptr == 'x' || *ctx->ptr == 'X') {
+            double r = 0;
+            int d;
             if(++ctx->ptr == ctx->end) {
                 ERR("unexpected end of file\n");
                 return FALSE;
             }
 
             while(ctx->ptr < ctx->end && (d = hex_to_int(*ctx->ptr)) != -1) {
-                l = l*16 + d;
+                r = r*16 + d;
                 ctx->ptr++;
             }
 
@@ -508,7 +508,7 @@ static BOOL parse_numeric_literal(parser_ctx_t *ctx, double *ret)
                 return FALSE;
             }
 
-            *ret = l;
+            *ret = r;
             return TRUE;
         }
 

@@ -40,6 +40,8 @@ static CCHAR (WINAPI *pRtlFindMostSignificantBit)(ULONGLONG);
 static CCHAR (WINAPI *pRtlFindLeastSignificantBit)(ULONGLONG);
 static ULONG (WINAPI *pRtlFindSetRuns)(PRTL_BITMAP,PRTL_BITMAP_RUN,ULONG,BOOLEAN);
 static ULONG (WINAPI *pRtlFindClearRuns)(PRTL_BITMAP,PRTL_BITMAP_RUN,ULONG,BOOLEAN);
+static ULONG (WINAPI *pRtlFindNextForwardRunSet)(PRTL_BITMAP,ULONG,PULONG);
+static ULONG (WINAPI *pRtlFindNextForwardRunClear)(PRTL_BITMAP,ULONG,PULONG);
 static ULONG (WINAPI *pRtlNumberOfSetBits)(PRTL_BITMAP);
 static ULONG (WINAPI *pRtlNumberOfClearBits)(PRTL_BITMAP);
 static ULONG (WINAPI *pRtlFindLongestRunSet)(PRTL_BITMAP,PULONG);
@@ -69,6 +71,8 @@ static void InitFunctionPtrs(void)
     pRtlFindLeastSignificantBit = (void *)GetProcAddress(hntdll, "RtlFindLeastSignificantBit");
     pRtlFindSetRuns = (void *)GetProcAddress(hntdll, "RtlFindSetRuns");
     pRtlFindClearRuns = (void *)GetProcAddress(hntdll, "RtlFindClearRuns");
+    pRtlFindNextForwardRunSet = (void *)GetProcAddress(hntdll, "RtlFindNextForwardRunSet");
+    pRtlFindNextForwardRunClear = (void *)GetProcAddress(hntdll, "RtlFindNextForwardRunClear");
     pRtlFindLongestRunSet = (void *)GetProcAddress(hntdll, "RtlFindLongestRunSet");
     pRtlFindLongestRunClear = (void *)GetProcAddress(hntdll, "RtlFindLongestRunClear");
   }
@@ -425,15 +429,15 @@ static void test_RtlFindMostSignificantBit(void)
     ulLong <<= i;
 
     cPos = pRtlFindMostSignificantBit(ulLong);
-    ok (cPos == i, "didn't find MSB 0x%x%08x %d %d\n",
-        (DWORD)(ulLong >> 32), (DWORD)ulLong, i, cPos);
+    ok (cPos == i, "didn't find MSB 0x%s %d %d\n",
+        wine_dbgstr_longlong(ulLong ), i, cPos);
 
     /* Set all bits lower than bit i */
     ulLong = ((ulLong - 1) << 1) | 1;
 
     cPos = pRtlFindMostSignificantBit(ulLong);
-    ok (cPos == i, "didn't find MSB 0x%x%08x %d %d\n",
-        (DWORD)(ulLong >> 32), (DWORD)ulLong, i, cPos);
+    ok (cPos == i, "didn't find MSB 0x%s %d %d\n",
+        wine_dbgstr_longlong(ulLong ), i, cPos);
   }
   cPos = pRtlFindMostSignificantBit(0);
   ok (cPos == -1, "found bit when not set\n");
@@ -453,14 +457,14 @@ static void test_RtlFindLeastSignificantBit(void)
     ulLong = (ULONGLONG)1 << i;
 
     cPos = pRtlFindLeastSignificantBit(ulLong);
-    ok (cPos == i, "didn't find LSB 0x%x%08x %d %d\n",
-        (DWORD)(ulLong >> 32), (DWORD)ulLong, i, cPos);
+    ok (cPos == i, "didn't find LSB 0x%s %d %d\n",
+        wine_dbgstr_longlong(ulLong ), i, cPos);
 
     ulLong = ~((ULONGLONG)0) << i;
 
     cPos = pRtlFindLeastSignificantBit(ulLong);
-    ok (cPos == i, "didn't find LSB 0x%x%08x %d %d\n",
-        (DWORD)(ulLong >> 32), (DWORD)ulLong, i, cPos);
+    ok (cPos == i, "didn't find LSB 0x%s %d %d\n",
+        wine_dbgstr_longlong(ulLong ), i, cPos);
   }
   cPos = pRtlFindLeastSignificantBit(0);
   ok (cPos == -1, "found bit when not set\n");
@@ -620,6 +624,35 @@ static void test_RtlFindClearRuns(void)
   }
 
 }
+
+static void test_RtlFindNextForwardRunSet(void)
+{
+  BYTE mask[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff };
+  ULONG ulStart = 0;
+  ULONG ulCount, lpPos;
+  if (!pRtlFindNextForwardRunSet)
+    return;
+
+  pRtlInitializeBitMap(&bm, mask, 62);
+  ulCount = pRtlFindNextForwardRunSet(&bm, ulStart, &lpPos);
+  ok(ulCount == 6, "Invalid length of found set run: %d, expected 6\n", ulCount);
+  ok(lpPos == 56, "Invalid position of found set run: %d, expected 56\n", lpPos);
+}
+
+static void test_RtlFindNextForwardRunClear(void)
+{
+  BYTE mask[8] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00 };
+  ULONG ulStart = 0;
+  ULONG ulCount, lpPos;
+  if (!pRtlFindNextForwardRunClear)
+    return;
+
+  pRtlInitializeBitMap(&bm, mask, 62);
+  ulCount = pRtlFindNextForwardRunClear(&bm, ulStart, &lpPos);
+  ok(ulCount == 6, "Invalid length of found clear run: %d, expected 6\n", ulCount);
+  ok(lpPos == 56, "Invalid position of found clear run: %d, expected 56\n", lpPos);
+}
+
 #endif
 
 START_TEST(rtlbitmap)
@@ -645,6 +678,8 @@ START_TEST(rtlbitmap)
     test_RtlFindLeastSignificantBit();
     test_RtlFindSetRuns();
     test_RtlFindClearRuns();
+    test_RtlFindNextForwardRunSet();
+    test_RtlFindNextForwardRunClear();
   }
 #endif
 }

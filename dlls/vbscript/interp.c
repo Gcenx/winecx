@@ -99,6 +99,7 @@ static HRESULT lookup_identifier(exec_ctx_t *ctx, BSTR name, vbdisp_invoke_type_
 {
     named_item_t *item;
     function_t *func;
+    IDispatch *disp;
     unsigned i;
     DISPID id;
     HRESULT hres;
@@ -153,6 +154,16 @@ static HRESULT lookup_identifier(exec_ctx_t *ctx, BSTR name, vbdisp_invoke_type_
         }
     }
 
+    if(ctx->func->code_ctx->context) {
+        hres = disp_get_id(ctx->func->code_ctx->context, name, invoke_type, TRUE, &id);
+        if(SUCCEEDED(hres)) {
+            ref->type = REF_DISP;
+            ref->u.d.disp = ctx->func->code_ctx->context;
+            ref->u.d.id = id;
+            return S_OK;
+        }
+    }
+
     if(ctx->func->type != FUNC_GLOBAL && lookup_dynamic_vars(ctx->script->global_vars, name, ref))
         return S_OK;
 
@@ -178,29 +189,11 @@ static HRESULT lookup_identifier(exec_ctx_t *ctx, BSTR name, vbdisp_invoke_type_
         return S_OK;
     }
 
-    LIST_FOR_EACH_ENTRY(item, &ctx->script->named_items, named_item_t, entry) {
-        if((item->flags & SCRIPTITEM_ISVISIBLE) && !strcmpiW(item->name, name)) {
-            if(!item->disp) {
-                IUnknown *unk;
-
-                hres = IActiveScriptSite_GetItemInfo(ctx->script->site, item->name, SCRIPTINFO_IUNKNOWN, &unk, NULL);
-                if(FAILED(hres)) {
-                    WARN("GetItemInfo failed: %08x\n", hres);
-                    continue;
-                }
-
-                hres = IUnknown_QueryInterface(unk, &IID_IDispatch, (void**)&item->disp);
-                IUnknown_Release(unk);
-                if(FAILED(hres)) {
-                    WARN("object does not implement IDispatch\n");
-                    continue;
-                }
-            }
-
-            ref->type = REF_OBJ;
-            ref->u.obj = item->disp;
-            return S_OK;
-        }
+    disp = lookup_named_item(ctx->script, name, SCRIPTITEM_ISVISIBLE);
+    if(disp) {
+        ref->type = REF_OBJ;
+        ref->u.obj = disp;
+        return S_OK;
     }
 
     LIST_FOR_EACH_ENTRY(item, &ctx->script->named_items, named_item_t, entry) {
@@ -481,10 +474,8 @@ static void vbstack_to_dp(exec_ctx_t *ctx, unsigned arg_cnt, BOOL is_propput, DI
 
 static HRESULT array_access(exec_ctx_t *ctx, SAFEARRAY *array, DISPPARAMS *dp, VARIANT **ret)
 {
-    unsigned cell_off = 0, dim_size = 1, i;
-    unsigned argc = arg_cnt(dp);
-    VARIANT *data;
-    LONG idx;
+    unsigned i, argc = arg_cnt(dp);
+    LONG *indices;
     HRESULT hres;
 
     if(!array) {
@@ -492,34 +483,35 @@ static HRESULT array_access(exec_ctx_t *ctx, SAFEARRAY *array, DISPPARAMS *dp, V
         return E_FAIL;
     }
 
-    if(array->cDims != argc) {
-        FIXME("argc %d does not match cDims %d\n", dp->cArgs, array->cDims);
-        return E_FAIL;
-    }
-
-    for(i=0; i < argc; i++) {
-        hres = to_int(get_arg(dp, i), &idx);
-        if(FAILED(hres))
-            return hres;
-
-        idx -= array->rgsabound[i].lLbound;
-        if(idx >= array->rgsabound[i].cElements) {
-            FIXME("out of bound element %d in dim %d of size %d\n", idx, i+1, array->rgsabound[i].cElements);
-            return E_FAIL;
-        }
-
-        cell_off += idx*dim_size;
-        dim_size *= array->rgsabound[i].cElements;
-    }
-
-    hres = SafeArrayAccessData(array, (void**)&data);
+    hres = SafeArrayLock(array);
     if(FAILED(hres))
         return hres;
 
-    *ret = data+cell_off;
+    if(array->cDims != argc) {
+        FIXME("argc %d does not match cDims %d\n", dp->cArgs, array->cDims);
+        SafeArrayUnlock(array);
+        return E_FAIL;
+    }
 
-    SafeArrayUnaccessData(array);
-    return S_OK;
+    indices = heap_alloc(sizeof(*indices) * argc);
+    if(!indices) {
+        SafeArrayUnlock(array);
+        return E_OUTOFMEMORY;
+    }
+
+    for(i=0; i<argc; i++) {
+        hres = to_int(get_arg(dp, i), indices+i);
+        if(FAILED(hres)) {
+            heap_free(indices);
+            SafeArrayUnlock(array);
+            return hres;
+        }
+    }
+
+    hres = SafeArrayPtrOfIndex(array, indices, (void**)ret);
+    SafeArrayUnlock(array);
+    heap_free(indices);
+    return hres;
 }
 
 static HRESULT do_icall(exec_ctx_t *ctx, VARIANT *res)
@@ -1149,6 +1141,18 @@ static HRESULT interp_newenum(exec_ctx_t *ctx)
         V_UNKNOWN(r) = (IUnknown*)iter;
         break;
     }
+    case VT_VARIANT|VT_ARRAY:
+    case VT_VARIANT|VT_ARRAY|VT_BYREF: {
+        IEnumVARIANT *iter;
+
+        hres = create_safearray_iter(V_ISBYREF(v.v) ? *V_ARRAYREF(v.v) : V_ARRAY(v.v), &iter);
+        if(FAILED(hres))
+            return hres;
+
+        V_VT(r) = VT_UNKNOWN;
+        V_UNKNOWN(r) = (IUnknown*)iter;
+        break;
+    }
     default:
         FIXME("Unsupported for %s\n", debugstr_variant(v.v));
         release_val(&v);
@@ -1192,7 +1196,7 @@ static HRESULT interp_enumnext(exec_ctx_t *ctx)
     if(do_continue) {
         ctx->instr++;
     }else {
-        stack_pop(ctx);
+        stack_popn(ctx, 1);
         instr_jmp(ctx, loop_end);
     }
     return S_OK;

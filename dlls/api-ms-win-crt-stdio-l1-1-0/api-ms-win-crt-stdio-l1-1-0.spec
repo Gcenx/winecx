@@ -3,16 +3,16 @@
 @ cdecl __p__fmode() ucrtbase.__p__fmode
 @ cdecl __stdio_common_vfprintf(int64 ptr str ptr ptr) ucrtbase.__stdio_common_vfprintf
 @ stub __stdio_common_vfprintf_p
-@ stub __stdio_common_vfprintf_s
+@ cdecl __stdio_common_vfprintf_s(int64 ptr str ptr ptr) ucrtbase.__stdio_common_vfprintf_s
 @ cdecl __stdio_common_vfscanf(int64 ptr str ptr ptr) ucrtbase.__stdio_common_vfscanf
 @ cdecl __stdio_common_vfwprintf(int64 ptr wstr ptr ptr) ucrtbase.__stdio_common_vfwprintf
 @ stub __stdio_common_vfwprintf_p
-@ stub __stdio_common_vfwprintf_s
+@ cdecl __stdio_common_vfwprintf_s(int64 ptr wstr ptr ptr) ucrtbase.__stdio_common_vfwprintf_s
 @ cdecl __stdio_common_vfwscanf(int64 ptr wstr ptr ptr) ucrtbase.__stdio_common_vfwscanf
 @ cdecl __stdio_common_vsnprintf_s(int64 ptr long long str ptr ptr) ucrtbase.__stdio_common_vsnprintf_s
 @ cdecl __stdio_common_vsnwprintf_s(int64 ptr long long wstr ptr ptr) ucrtbase.__stdio_common_vsnwprintf_s
 @ cdecl __stdio_common_vsprintf(int64 ptr long str ptr ptr) ucrtbase.__stdio_common_vsprintf
-@ stub __stdio_common_vsprintf_p
+@ cdecl __stdio_common_vsprintf_p(int64 ptr long str ptr ptr) ucrtbase.__stdio_common_vsprintf_p
 @ cdecl __stdio_common_vsprintf_s(int64 ptr long str ptr ptr) ucrtbase.__stdio_common_vsprintf_s
 @ cdecl __stdio_common_vsscanf(int64 ptr long str ptr ptr) ucrtbase.__stdio_common_vsscanf
 @ cdecl __stdio_common_vswprintf(int64 ptr long wstr ptr ptr) ucrtbase.__stdio_common_vswprintf
@@ -113,7 +113,7 @@
 @ cdecl _wtmpnam(ptr) ucrtbase._wtmpnam
 @ cdecl _wtmpnam_s(ptr long) ucrtbase._wtmpnam_s
 @ cdecl clearerr(ptr) ucrtbase.clearerr
-@ stub clearerr_s
+@ cdecl clearerr_s(ptr) ucrtbase.clearerr_s
 @ cdecl fclose(ptr) ucrtbase.fclose
 @ cdecl feof(ptr) ucrtbase.feof
 @ cdecl ferror(ptr) ucrtbase.ferror
@@ -140,7 +140,7 @@
 @ cdecl getc(ptr) ucrtbase.getc
 @ cdecl getchar() ucrtbase.getchar
 @ cdecl gets(str) ucrtbase.gets
-@ stub gets_s
+@ cdecl gets_s(ptr long) ucrtbase.gets_s
 @ cdecl getwc(ptr) ucrtbase.getwc
 @ cdecl getwchar() ucrtbase.getwchar
 @ cdecl putc(long ptr) ucrtbase.putc

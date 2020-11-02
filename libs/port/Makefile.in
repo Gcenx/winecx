@@ -96,11 +96,13 @@ C_SRCS = \
 	pread.c \
 	pwrite.c \
 	readlink.c \
+	rint.c \
 	spawn.c \
 	statvfs.c \
 	strcasecmp.c \
 	strerror.c \
 	strncasecmp.c \
+	strnlen.c \
 	symlink.c \
 	usleep.c \
 	utf8.c \

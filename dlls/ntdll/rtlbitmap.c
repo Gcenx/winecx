@@ -156,8 +156,8 @@ VOID WINAPI RtlSetBits(PRTL_BITMAP lpBits, ULONG ulStart, ULONG ulCount)
       /* Set from the start bit, possibly into the next byte also */
       USHORT initialWord = NTDLL_maskBits[ulCount] << (ulStart & 7);
 
-      *lpOut++ |= (initialWord & 0xff);
-      *lpOut |= (initialWord >> 8);
+      *lpOut |= (initialWord & 0xff);
+      if (initialWord >> 8) lpOut[1] |= (initialWord >> 8);
       return;
     }
   }
@@ -217,8 +217,8 @@ VOID WINAPI RtlClearBits(PRTL_BITMAP lpBits, ULONG ulStart, ULONG ulCount)
       /* Clear from the start bit, possibly into the next byte also */
       USHORT initialWord = ~(NTDLL_maskBits[ulCount] << (ulStart & 7));
 
-      *lpOut++ &= (initialWord & 0xff);
-      *lpOut &= (initialWord >> 8);
+      *lpOut &= (initialWord & 0xff);
+      if ((initialWord >> 8) != 0xff) lpOut[1] &= (initialWord >> 8);
       return;
     }
   }
@@ -731,6 +731,12 @@ static ULONG NTDLL_FindSetRun(PCRTL_BITMAP lpBits, ULONG ulStart, PULONG lpSize)
       return ~0U;
   }
 
+  /* Check if reached the end of bitmap */
+  if (ulStart >= lpBits->SizeOfBitMap) {
+    *lpSize = ulCount - (ulStart - lpBits->SizeOfBitMap);
+    return ulFoundAt;
+  }
+
   /* Count blocks of 8 set bits */
   while (*lpOut == 0xff)
   {
@@ -820,6 +826,12 @@ static ULONG NTDLL_FindClearRun(PCRTL_BITMAP lpBits, ULONG ulStart, PULONG lpSiz
     lpOut++;
     if (ulStart >= lpBits->SizeOfBitMap)
       return ~0U;
+  }
+
+  /* Check if reached the end of bitmap */
+  if (ulStart >= lpBits->SizeOfBitMap) {
+    *lpSize = ulCount - (ulStart - lpBits->SizeOfBitMap);
+    return ulFoundAt;
   }
 
   /* Count blocks of 8 clear bits */

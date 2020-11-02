@@ -60,6 +60,14 @@ typedef struct _ldiv_t {
     __msvcrt_long rem;
 } ldiv_t;
 
+typedef struct _lldiv_t {
+    __int64 quot;
+    __int64 rem;
+} lldiv_t;
+
+
+#define _countof(x) (sizeof(x)/sizeof((x)[0]))
+
 #define __max(a,b) (((a) > (b)) ? (a) : (b))
 #define __min(a,b) (((a) < (b)) ? (a) : (b))
 #ifndef __cplusplus
@@ -176,6 +184,7 @@ errno_t       __cdecl _ui64toa_s(unsigned __int64,char*,size_t,int);
 char*         __cdecl _ultoa(__msvcrt_ulong,char*,int);
 errno_t       __cdecl _ultoa_s(__msvcrt_ulong,char*,size_t,int);
 
+void          __cdecl _Exit(int);
 void          __cdecl _exit(int);
 void          __cdecl abort(void);
 int           __cdecl abs(int);
@@ -184,15 +193,18 @@ double        __cdecl atof(const char*);
 int           __cdecl atoi(const char*);
 int           __cdecl _atoi_l(const char*,_locale_t);
 __msvcrt_long __cdecl atol(const char*);
+__int64       __cdecl atoll(const char*);
 void*         __cdecl calloc(size_t,size_t);
 #ifndef __i386__
 div_t  __cdecl div(int,int);
 ldiv_t __cdecl ldiv(__msvcrt_long,__msvcrt_long);
 #endif
+lldiv_t       __cdecl lldiv(__int64,__int64);
 void          __cdecl exit(int);
 void          __cdecl free(void*);
 char*         __cdecl getenv(const char*);
 __msvcrt_long __cdecl labs(__msvcrt_long);
+__int64       __cdecl llabs(__int64);
 void*         __cdecl malloc(size_t);
 int           __cdecl mblen(const char*,size_t);
 void          __cdecl perror(const char*);
@@ -200,9 +212,15 @@ int           __cdecl rand(void);
 errno_t       __cdecl rand_s(unsigned int*);
 void*         __cdecl realloc(void*,size_t);
 void          __cdecl srand(unsigned int);
+float         __cdecl strtof(const char*,char**);
 double        __cdecl strtod(const char*,char**);
+double        __cdecl strtold(const char*,char**);
 __msvcrt_long __cdecl strtol(const char*,char**,int);
 __msvcrt_ulong __cdecl strtoul(const char*,char**,int);
+__int64       __cdecl strtoll(const char*,char**,int);
+__int64       __cdecl strtoll_l(const char*,char**,int,_locale_t);
+unsigned __int64 __cdecl strtoull(const char*,char**,int);
+unsigned __int64 __cdecl strtoull_l(const char*,char**,int,_locale_t);
 __int64       __cdecl _strtoi64(const char*,char**,int);
 __int64       __cdecl _strtoi64_l(const char*,char**,int,_locale_t);
 unsigned __int64 __cdecl _strtoui64(const char*,char**,int);
@@ -237,6 +255,7 @@ __msvcrt_long __cdecl _wtol(const wchar_t*);
 size_t        __cdecl mbstowcs(wchar_t*,const char*,size_t);
 errno_t       __cdecl mbstowcs_s(size_t*,wchar_t*,size_t,const char*,size_t);
 int           __cdecl mbtowc(wchar_t*,const char*,size_t);
+float         __cdecl wcstof(const wchar_t*,wchar_t**);
 double        __cdecl wcstod(const wchar_t*,wchar_t**);
 __msvcrt_long __cdecl wcstol(const wchar_t*,wchar_t**,int);
 size_t        __cdecl wcstombs(char*,const wchar_t*,size_t);

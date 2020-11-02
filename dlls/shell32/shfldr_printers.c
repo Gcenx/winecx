@@ -55,15 +55,13 @@ static inline IPrintersFolderImpl *impl_from_IPersistFolder2(IPersistFolder2 *if
 }
 
 static const shvheader printers_header[] = {
-    { IDS_SHV_COLUMN8,      SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 20 },
-    { IDS_SHV_COL_DOCS,     SHCOLSTATE_TYPE_INT | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 12 },
-    { IDS_SHV_COL_STATUS,   SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 12 },
-    { IDS_SHV_COLUMN9,      SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 30 },
-    { IDS_SHV_COL_LOCATION, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 20 },
-    { IDS_SHV_COL_MODEL,    SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 20 }
+    { &FMTID_Storage, PID_STG_NAME, IDS_SHV_COLUMN8, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 20 },
+    { NULL, 0, IDS_SHV_COL_DOCS, SHCOLSTATE_TYPE_INT | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 12 },
+    { NULL, 0, IDS_SHV_COL_STATUS, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 12 },
+    { &FMTID_SummaryInformation, PIDSI_COMMENTS, IDS_SHV_COLUMN9, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 30 },
+    { NULL, 0, IDS_SHV_COL_LOCATION, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 20 },
+    { NULL, 0, IDS_SHV_COL_MODEL, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 20 }
 };
-
-#define PRINTERS_FOLDER_COL_NUM sizeof(printers_header)/sizeof(shvheader)
 
 static HRESULT WINAPI IShellFolder_Printers_fnQueryInterface(IShellFolder2 *iface,
                REFIID riid, LPVOID *ppvObj)
@@ -251,11 +249,10 @@ static HRESULT WINAPI IShellFolder_Printers_fnSetNameOf (
     return E_FAIL;
 }
 
-static HRESULT WINAPI IShellFolder_Printers_fnGetDefaultSearchGUID (
-               IShellFolder2 * iface, GUID * pguid)
+static HRESULT WINAPI IShellFolder_Printers_fnGetDefaultSearchGUID(IShellFolder2 *iface, GUID *guid)
 {
     IPrintersFolderImpl *This = impl_from_IShellFolder2(iface);
-    FIXME ("(%p) stub\n", This);
+    TRACE("(%p)->(%p)\n", This, guid);
     return E_NOTIMPL;
 }
 
@@ -267,11 +264,13 @@ static HRESULT WINAPI IShellFolder_Printers_fnEnumSearches (
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IShellFolder_Printers_fnGetDefaultColumn (
-               IShellFolder2 *iface, DWORD dwRes, ULONG *pSort, ULONG *pDisplay)
+static HRESULT WINAPI IShellFolder_Printers_fnGetDefaultColumn(IShellFolder2 *iface, DWORD reserved,
+        ULONG *sort, ULONG *display)
 {
     IPrintersFolderImpl *This = impl_from_IShellFolder2(iface);
-    FIXME("(%p) stub\n", This);
+
+    TRACE("(%p)->(%#x, %p, %p)\n", This, reserved, sort, display);
+
     return E_NOTIMPL;
 }
 
@@ -282,7 +281,7 @@ static HRESULT WINAPI IShellFolder_Printers_fnGetDefaultColumnState (
 
     TRACE("(%p)->(%d %p)\n", This, iColumn, pcsFlags);
 
-    if (iColumn >= PRINTERS_FOLDER_COL_NUM)
+    if (iColumn >= ARRAY_SIZE(printers_header))
         return E_INVALIDARG;
 
     *pcsFlags = printers_header[iColumn].pcsFlags;
@@ -305,7 +304,7 @@ static HRESULT WINAPI IShellFolder_Printers_fnGetDetailsOf (IShellFolder2 *iface
 
     TRACE("(%p)->(%p %i %p)\n", This, pidl, iColumn, psd);
 
-    if (iColumn >= PRINTERS_FOLDER_COL_NUM)
+    if (iColumn >= ARRAY_SIZE(printers_header))
         return E_NOTIMPL;
 
     if (!pidl)
@@ -316,12 +315,16 @@ static HRESULT WINAPI IShellFolder_Printers_fnGetDetailsOf (IShellFolder2 *iface
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IShellFolder_Printers_fnMapColumnToSCID (
-               IShellFolder2 * iface, UINT column, SHCOLUMNID * pscid)
+static HRESULT WINAPI IShellFolder_Printers_fnMapColumnToSCID (IShellFolder2 *iface, UINT column, SHCOLUMNID *scid)
 {
     IPrintersFolderImpl *This = impl_from_IShellFolder2(iface);
-    FIXME ("(%p)->(%u %p) stub\n", This, column, pscid);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%u %p)\n", This, column, scid);
+
+    if (column >= ARRAY_SIZE(printers_header))
+        return E_INVALIDARG;
+
+    return shellfolder_map_column_to_scid(printers_header, column, scid);
 }
 
 static const IShellFolder2Vtbl vtbl_ShellFolder2 =

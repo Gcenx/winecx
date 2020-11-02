@@ -29,6 +29,7 @@
 #include "winreg.h"
 #include "ole2.h"
 #include "shlguid.h"
+#include "wininet.h"
 
 #include "mshtml_private.h"
 #include "htmlscript.h"
@@ -130,22 +131,14 @@ static PRUnichar *handle_insert_comment(HTMLDocumentNode *doc, const PRUnichar *
     ptr += 2;
 
     len = strlenW(ptr);
-    if(len < sizeof(endifW)/sizeof(WCHAR))
+    if(len < ARRAY_SIZE(endifW))
         return NULL;
 
-    end = ptr + len-sizeof(endifW)/sizeof(WCHAR);
+    end = ptr + len - ARRAY_SIZE(endifW);
     if(memcmp(end, endifW, sizeof(endifW)))
         return NULL;
 
     compat_version = compat_mode_info[doc->document_mode].ie_version;
-    if(compat_version > 8) {
-        /*
-         * Ideally we should handle higher versions, but right now it would cause more problems than it's worth.
-         * We should revisit that once more IE9 features are implemented, most notably new events APIs.
-         */
-        WARN("Using compat version 8\n");
-        compat_version = 8;
-    }
 
     switch(cmpt) {
     case CMP_EQ:
@@ -230,7 +223,7 @@ static nsresult run_bind_to_tree(HTMLDocumentNode *doc, nsISupports *nsiface, ns
     if(NS_FAILED(nsres))
         return nsres;
 
-    hres = get_node(doc, nsnode, TRUE, &node);
+    hres = get_node(nsnode, TRUE, &node);
     nsIDOMNode_Release(nsnode);
     if(FAILED(hres)) {
         ERR("Could not get node\n");
@@ -334,7 +327,7 @@ static nsresult run_insert_script(HTMLDocumentNode *doc, nsISupports *script_ifa
         }
     }
 
-    hres = script_elem_from_nsscript(doc, nsscript, &script_elem);
+    hres = script_elem_from_nsscript(nsscript, &script_elem);
     nsIDOMHTMLScriptElement_Release(nsscript);
     if(FAILED(hres))
         return NS_ERROR_FAILURE;
@@ -370,33 +363,54 @@ static nsresult run_insert_script(HTMLDocumentNode *doc, nsISupports *script_ifa
     return NS_OK;
 }
 
-static void set_document_mode(HTMLDocumentNode *doc, compat_mode_t document_mode)
+/*
+ * We may change document mode only in early stage of document lifetime.
+ * Later attempts will not have an effect.
+ */
+compat_mode_t lock_document_mode(HTMLDocumentNode *doc)
 {
-    TRACE("%p: %d\n", doc, document_mode);
-    doc->document_mode = document_mode;
+    TRACE("%p: %d\n", doc, doc->document_mode);
+
+    doc->document_mode_locked = TRUE;
+    return doc->document_mode;
 }
 
-static BOOL parse_ua_compatible(const WCHAR *p, compat_mode_t *r)
+static void set_document_mode(HTMLDocumentNode *doc, compat_mode_t document_mode, BOOL lock)
 {
-    int v = 0;
+    compat_mode_t max_compat_mode;
 
-    static const WCHAR edgeW[] = {'e','d','g','e',0};
-
-    if(p[0] != 'I' || p[1] != 'E' || p[2] != '=')
-        return FALSE;
-    p += 3;
-
-    if(!strcmpiW(p, edgeW)) {
-        *r = COMPAT_MODE_IE11;
-        return TRUE;
+    if(doc->document_mode_locked) {
+        WARN("attempting to set document mode %d on locked document %p\n", document_mode, doc);
+        return;
     }
 
-    while('0' <= *p && *p <= '9')
-        v = v*10 + *(p++)-'0';
-    if(*p || !v)
+    TRACE("%p: %d\n", doc, document_mode);
+
+    max_compat_mode = doc->window && doc->window->base.outer_window
+        ? get_max_compat_mode(doc->window->base.outer_window->uri)
+        : COMPAT_MODE_IE11;
+    if(max_compat_mode < document_mode) {
+        WARN("Tried to set compat mode %u higher than maximal configured %u\n",
+             document_mode, max_compat_mode);
+        document_mode = max_compat_mode;
+    }
+
+    doc->document_mode = document_mode;
+    if(lock)
+        lock_document_mode(doc);
+}
+
+BOOL parse_compat_version(const WCHAR *version_string, compat_mode_t *r)
+{
+    DWORD version = 0;
+    const WCHAR *p;
+
+    for(p = version_string; '0' <= *p && *p <= '9'; p++)
+        version = version * 10 + *p-'0';
+    if(*p || p == version_string)
         return FALSE;
 
-    switch(v){
+    switch(version){
     case 5:
     case 6:
         *r = COMPAT_MODE_IE5;
@@ -414,10 +428,61 @@ static BOOL parse_ua_compatible(const WCHAR *p, compat_mode_t *r)
         *r = COMPAT_MODE_IE10;
         break;
     default:
-        *r = v < 5 ? COMPAT_MODE_QUIRKS : COMPAT_MODE_IE11;
+        *r = version < 5 ? COMPAT_MODE_QUIRKS : COMPAT_MODE_IE11;
+    }
+    return TRUE;
+}
+
+static BOOL parse_ua_compatible(const WCHAR *p, compat_mode_t *r)
+{
+    static const WCHAR ie_eqW[] = {'I','E','='};
+    static const WCHAR edgeW[] = {'e','d','g','e',0};
+
+    TRACE("%s\n", debugstr_w(p));
+
+    if(strncmpiW(ie_eqW, p, ARRAY_SIZE(ie_eqW)))
+        return FALSE;
+    p += 3;
+
+    if(!strcmpiW(p, edgeW)) {
+        *r = COMPAT_MODE_IE11;
+        return TRUE;
     }
 
-    return TRUE;
+    return parse_compat_version(p, r);
+}
+
+void process_document_response_headers(HTMLDocumentNode *doc, IBinding *binding)
+{
+    IWinInetHttpInfo *http_info;
+    char buf[1024];
+    DWORD size;
+    HRESULT hres;
+
+    hres = IBinding_QueryInterface(binding, &IID_IWinInetHttpInfo, (void**)&http_info);
+    if(FAILED(hres)) {
+        TRACE("No IWinInetHttpInfo\n");
+        return;
+    }
+
+    size = sizeof(buf);
+    strcpy(buf, "X-UA-Compatible");
+    hres = IWinInetHttpInfo_QueryInfo(http_info, HTTP_QUERY_CUSTOM, buf, &size, NULL, NULL);
+    if(hres == S_OK && size) {
+        compat_mode_t document_mode;
+        WCHAR *header;
+
+        TRACE("size %u\n", size);
+
+        header = heap_strdupAtoW(buf);
+        if(header && parse_ua_compatible(header, &document_mode)) {
+            TRACE("setting document mode %d\n", document_mode);
+            set_document_mode(doc, document_mode, FALSE);
+        }
+        heap_free(header);
+    }
+
+    IWinInetHttpInfo_Release(http_info);
 }
 
 static void process_meta_element(HTMLDocumentNode *doc, nsIDOMHTMLMetaElement *meta_element)
@@ -444,7 +509,7 @@ static void process_meta_element(HTMLDocumentNode *doc, nsIDOMHTMLMetaElement *m
         if(!strcmpiW(http_equiv, x_ua_compatibleW)) {
             compat_mode_t document_mode;
             if(parse_ua_compatible(content, &document_mode))
-                set_document_mode(doc, document_mode);
+                set_document_mode(doc, document_mode, TRUE);
             else
                 FIXME("Unsupported document mode %s\n", debugstr_w(content));
         }
@@ -734,38 +799,58 @@ static void NSAPI nsDocumentObserver_BindToDocument(nsIDocumentObserver *iface, 
     nsIDOMHTMLFrameElement *nsframe;
     nsIDOMHTMLScriptElement *nsscript;
     nsIDOMHTMLMetaElement *nsmeta;
-    nsIDOMHTMLElement *nselem;
+    nsIDOMElement *nselem;
     nsIDOMComment *nscomment;
     nsresult nsres;
 
     TRACE("(%p)->(%p %p)\n", This, aDocument, aContent);
 
-    nsres = nsIContent_QueryInterface(aContent, &IID_nsIDOMComment, (void**)&nscomment);
-    if(NS_SUCCEEDED(nsres)) {
-        TRACE("comment node\n");
+    if(This->document_mode < COMPAT_MODE_IE10) {
+        nsres = nsIContent_QueryInterface(aContent, &IID_nsIDOMComment, (void**)&nscomment);
+        if(NS_SUCCEEDED(nsres)) {
+            TRACE("comment node\n");
 
-        add_script_runner(This, run_insert_comment, (nsISupports*)nscomment, NULL);
-        nsIDOMComment_Release(nscomment);
-        return;
+            add_script_runner(This, run_insert_comment, (nsISupports*)nscomment, NULL);
+            nsIDOMComment_Release(nscomment);
+            return;
+        }
     }
 
     if(This->document_mode == COMPAT_MODE_QUIRKS) {
         nsIDOMDocumentType *nsdoctype;
         nsres = nsIContent_QueryInterface(aContent, &IID_nsIDOMDocumentType, (void**)&nsdoctype);
         if(NS_SUCCEEDED(nsres)) {
+            compat_mode_t mode = COMPAT_MODE_IE7;
+
             TRACE("doctype node\n");
-            /* FIXME: We should set it to something higher for internet zone. */
-            set_document_mode(This, COMPAT_MODE_IE7);
+
+            if(This->window && This->window->base.outer_window) {
+                HTMLOuterWindow *window = This->window->base.outer_window;
+                DWORD zone;
+                HRESULT hres;
+
+                /*
+                 * Internet URL zone is treated differently. Native defaults to latest supported
+                 * mode. We default to IE8. Ideally, we'd sync that with version used for IE=edge
+                 * X-UA-Compatible version, allow configuration and default to higher version
+                 * (once it's well supported).
+                 */
+                hres = IInternetSecurityManager_MapUrlToZone(window->secmgr, window->url, &zone, 0);
+                if(SUCCEEDED(hres) && zone == URLZONE_INTERNET)
+                    mode = COMPAT_MODE_IE8;
+            }
+
+            set_document_mode(This, mode, FALSE);
             nsIDOMDocumentType_Release(nsdoctype);
         }
     }
 
-    nsres = nsIContent_QueryInterface(aContent, &IID_nsIDOMHTMLElement, (void**)&nselem);
+    nsres = nsIContent_QueryInterface(aContent, &IID_nsIDOMElement, (void**)&nselem);
     if(NS_FAILED(nsres))
         return;
 
     check_event_attr(This, nselem);
-    nsIDOMHTMLElement_Release(nselem);
+    nsIDOMElement_Release(nselem);
 
     nsres = nsIContent_QueryInterface(aContent, &IID_nsIDOMHTMLIFrameElement, (void**)&nsiframe);
     if(NS_SUCCEEDED(nsres)) {
@@ -814,6 +899,7 @@ static void NSAPI nsDocumentObserver_AttemptToExecuteScript(nsIDocumentObserver 
     if(NS_SUCCEEDED(nsres)) {
         TRACE("script node\n");
 
+        lock_document_mode(This);
         add_script_runner(This, run_insert_script, (nsISupports*)nsscript, (nsISupports*)aParser);
         nsIDOMHTMLScriptElement_Release(nsscript);
     }

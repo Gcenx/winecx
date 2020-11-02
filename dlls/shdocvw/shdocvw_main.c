@@ -386,7 +386,7 @@ DWORD WINAPI ParseURLFromOutsideSourceW(LPCWSTR url, LPWSTR out, LPDWORD plen, L
             plen ? *plen : 0, unknown ? *unknown : 0);
 
     if (!PathIsURLW(ptr)) {
-        len = sizeof(buffer_in) / sizeof(buffer_in[0]);
+        len = ARRAY_SIZE(buffer_in);
         buffer_in[0] = 0;
         hr = UrlApplySchemeW(ptr, buffer_in, &len, URL_APPLY_GUESSSCHEME | URL_APPLY_DEFAULT);
         TRACE("got 0x%x with %s\n", hr, debugstr_w(buffer_in));
@@ -400,7 +400,7 @@ DWORD WINAPI ParseURLFromOutsideSourceW(LPCWSTR url, LPWSTR out, LPDWORD plen, L
         }
     }
 
-    len = sizeof(buffer_out) / sizeof(buffer_out[0]);
+    len = ARRAY_SIZE(buffer_out);
     buffer_out[0] = '\0';
     hr = UrlCanonicalizeW(ptr, buffer_out, &len, URL_ESCAPE_SPACES_ONLY);
     needed = lstrlenW(buffer_out)+1;
@@ -442,7 +442,7 @@ DWORD WINAPI ParseURLFromOutsideSourceA(LPCSTR url, LPSTR out, LPDWORD plen, LPD
         MultiByteToWideChar(CP_ACP, 0, url, -1, urlW, len);
     }
 
-    len = sizeof(buffer) / sizeof(buffer[0]);
+    len = ARRAY_SIZE(buffer);
     ParseURLFromOutsideSourceW(urlW, buffer, &len, unknown);
     HeapFree(GetProcessHeap(), 0, urlW);
 
@@ -559,4 +559,33 @@ BOOL WINAPI DoFileDownload(LPWSTR filename)
 {
     FIXME("(%s) stub\n", debugstr_w(filename));
     return FALSE;
+}
+
+/******************************************************************
+ * DoOrganizeFavDlgW (SHDOCVW.@)
+ */
+BOOL WINAPI DoOrganizeFavDlgW(HWND hwnd, LPCWSTR initDir)
+{
+    FIXME("(%p %s) stub\n", hwnd, debugstr_w(initDir));
+    return FALSE;
+}
+
+/******************************************************************
+ * DoOrganizeFavDlg (SHDOCVW.@)
+ */
+BOOL WINAPI DoOrganizeFavDlg(HWND hwnd, LPCSTR initDir)
+{
+    LPWSTR initDirW = NULL;
+    BOOL res;
+
+    TRACE("(%p %s)\n", hwnd, debugstr_a(initDir));
+
+    if (initDir) {
+        DWORD len = MultiByteToWideChar(CP_ACP, 0, initDir, -1, NULL, 0);
+        initDirW = heap_alloc(len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, initDir, -1, initDirW, len);
+    }
+    res = DoOrganizeFavDlgW(hwnd, initDirW);
+    heap_free(initDirW);
+    return res;
 }

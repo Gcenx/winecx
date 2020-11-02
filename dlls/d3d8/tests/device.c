@@ -1052,7 +1052,7 @@ static void test_cursor_pos(void)
     wc.lpfnWndProc = test_cursor_proc;
     wc.lpszClassName = "d3d8_test_cursor_wc";
     ok(RegisterClassA(&wc), "Failed to register window class.\n");
-    window = CreateWindowA("d3d8_test_cursor_wc", "d3d8_test", WS_OVERLAPPEDWINDOW,
+    window = CreateWindowA("d3d8_test_cursor_wc", "d3d8_test", WS_POPUP | WS_SYSMENU,
             0, 0, 320, 240, NULL, NULL, NULL, NULL);
     ShowWindow(window, SW_SHOW);
     d3d8 = Direct3DCreate8(D3D_SDK_VERSION);
@@ -1205,7 +1205,7 @@ static void test_display_formats(void)
     d3d8 = Direct3DCreate8(D3D_SDK_VERSION);
     ok(!!d3d8, "Failed to create a D3D object.\n");
 
-    for (display = 0; display < sizeof(formats) / sizeof(*formats); ++display)
+    for (display = 0; display < ARRAY_SIZE(formats); ++display)
     {
         for (i = 0, has_modes = FALSE; SUCCEEDED(IDirect3D8_EnumAdapterModes(d3d8, D3DADAPTER_DEFAULT, i, &mode)); ++i)
         {
@@ -1218,7 +1218,7 @@ static void test_display_formats(void)
 
         for (windowed = 0; windowed <= 1; ++windowed)
         {
-            for (backbuffer = 0; backbuffer < sizeof(formats) / sizeof(*formats); ++backbuffer)
+            for (backbuffer = 0; backbuffer < ARRAY_SIZE(formats); ++backbuffer)
             {
                 should_pass = FALSE;
 
@@ -1312,7 +1312,7 @@ static void test_reset(void)
     UINT mode_count = 0;
     DEVMODEW devmode;
     IDirect3D8 *d3d8;
-    RECT winrect;
+    RECT winrect, client_rect;
     D3DVIEWPORT8 vp;
     D3DCAPS8 caps;
     DWORD shader;
@@ -1579,6 +1579,9 @@ static void test_reset(void)
                     SWP_NOMOVE|SWP_NOZORDER),
        "SetWindowPos failed\n");
 
+    /* Windows 10 gives us a different size than we requested with some DPI scaling settings (e.g. 172%). */
+    GetClientRect(window, &client_rect);
+
     memset(&d3dpp, 0, sizeof(d3dpp));
     d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
     d3dpp.Windowed = TRUE;
@@ -1614,8 +1617,10 @@ static void test_reset(void)
     {
         ok(vp.X == 0, "D3DVIEWPORT->X = %u, expected 0.\n", vp.X);
         ok(vp.Y == 0, "D3DVIEWPORT->Y = %u, expected 0.\n", vp.Y);
-        ok(vp.Width == 200, "D3DVIEWPORT->Width = %u, expected 200.\n", vp.Width);
-        ok(vp.Height == 150, "D3DVIEWPORT->Height = %u, expected 150.\n", vp.Height);
+        ok(vp.Width == client_rect.right, "D3DVIEWPORT->Width = %d, expected %d\n",
+                vp.Width, client_rect.right);
+        ok(vp.Height == client_rect.bottom, "D3DVIEWPORT->Height = %d, expected %d\n",
+                vp.Height, client_rect.bottom);
         ok(vp.MinZ == 0, "D3DVIEWPORT->MinZ = %.8e, expected 0.\n", vp.MinZ);
         ok(vp.MaxZ == 1, "D3DVIEWPORT->MaxZ = %.8e, expected 1.\n", vp.MaxZ);
     }
@@ -1627,8 +1632,10 @@ static void test_reset(void)
     ok(surface_desc.Format == d3ddm.Format, "Got unexpected Format %#x, expected %#x.\n",
             surface_desc.Format, d3ddm.Format);
     ok(!surface_desc.MultiSampleType, "Got unexpected MultiSampleType %u.\n", d3dpp.MultiSampleType);
-    ok(surface_desc.Width == 200, "Back buffer width is %u, expected 200.\n", surface_desc.Width);
-    ok(surface_desc.Height == 150, "Back buffer height is %u, expected 150.\n", surface_desc.Height);
+    ok(surface_desc.Width == client_rect.right,
+            "Back buffer width is %u, expected %d.\n", surface_desc.Width, client_rect.right);
+    ok(surface_desc.Height == client_rect.bottom,
+            "Back buffer height is %u, expected %d.\n", surface_desc.Height, client_rect.bottom);
     IDirect3DSurface8_Release(surface);
 
     memset(&d3dpp, 0, sizeof(d3dpp));
@@ -2428,6 +2435,7 @@ struct message
     enum message_window window;
     BOOL check_wparam;
     WPARAM expect_wparam;
+    WINDOWPOS *store_wp;
 };
 
 static const struct message *expect_messages;
@@ -2475,6 +2483,9 @@ static LRESULT CALLBACK test_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM
                 ok(wparam == expect_messages->expect_wparam,
                         "Got unexpected wparam %lx for message %x, expected %lx.\n",
                         wparam, message, expect_messages->expect_wparam);
+
+            if (expect_messages->store_wp)
+                *expect_messages->store_wp = *(WINDOWPOS *)lparam;
 
             ++expect_messages;
         }
@@ -2542,8 +2553,9 @@ static void test_wndproc(void)
     D3DDISPLAYMODE d3ddm;
     DWORD d3d_width = 0, d3d_height = 0, user32_width = 0, user32_height = 0;
     DEVMODEW devmode;
-    LONG change_ret;
+    LONG change_ret, device_style;
     BOOL ret;
+    WINDOWPOS windowpos;
 
     static const struct message create_messages[] =
     {
@@ -2640,6 +2652,31 @@ static void test_wndproc(void)
         {WM_WINDOWPOSCHANGED,   FOCUS_WINDOW,   FALSE,  0},
         {WM_MOVE,               FOCUS_WINDOW,   FALSE,  0},
         {WM_SIZE,               FOCUS_WINDOW,   TRUE,   SIZE_MAXIMIZED},
+        {0,                     0,              FALSE,  0},
+    };
+    struct message mode_change_messages[] =
+    {
+        {WM_WINDOWPOSCHANGING,  DEVICE_WINDOW,  FALSE,  0},
+        {WM_WINDOWPOSCHANGED,   DEVICE_WINDOW,  FALSE,  0},
+        {WM_SIZE,               DEVICE_WINDOW,  FALSE,  0},
+        /* TODO: WM_DISPLAYCHANGE is sent to the focus window too, but the order is
+         * differs between Wine and Windows. */
+        /* TODO 2: Windows sends a second WM_WINDOWPOSCHANGING(SWP_NOMOVE | SWP_NOSIZE
+         * | SWP_NOACTIVATE) in this situation, suggesting a difference in their ShowWindow
+         * implementation. This SetWindowPos call could in theory affect the Z order. Wine's
+         * ShowWindow does not send such a message because the window is already visible. */
+        {0,                     0,              FALSE,  0},
+    };
+    struct message mode_change_messages_hidden[] =
+    {
+        {WM_WINDOWPOSCHANGING,  DEVICE_WINDOW,  FALSE,  0},
+        {WM_WINDOWPOSCHANGED,   DEVICE_WINDOW,  FALSE,  0},
+        {WM_SIZE,               DEVICE_WINDOW,  FALSE,  0},
+        {WM_SHOWWINDOW,         DEVICE_WINDOW,  FALSE,  0},
+        {WM_WINDOWPOSCHANGING,  DEVICE_WINDOW,  FALSE,  0, &windowpos},
+        {WM_WINDOWPOSCHANGED,   DEVICE_WINDOW,  FALSE,  0},
+        /* TODO: WM_DISPLAYCHANGE is sent to the focus window too, but the order is
+         * differs between Wine and Windows. */
         {0,                     0,              FALSE,  0},
     };
 
@@ -2849,7 +2886,11 @@ static void test_wndproc(void)
     hr = reset_device(device, &device_desc);
     ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
 
-    ShowWindow(device_window, SW_HIDE);
+    /* Remove the WS_VISIBLE flag to test hidden windows. This is enough to trigger d3d's hidden
+     * window codepath, but does not actually hide the window without a SetWindowPos(SWP_FRAMECHANGED)
+     * call. This way we avoid focus changes and random failures on focus follows mouse WMs. */
+    device_style = GetWindowLongA(device_window, GWL_STYLE);
+    SetWindowLongA(device_window, GWL_STYLE, device_style & ~WS_VISIBLE);
     flush_events();
 
     expect_messages = focus_loss_messages_hidden;
@@ -3003,13 +3044,63 @@ static void test_wndproc(void)
 
     ref = IDirect3DDevice8_Release(device);
     ok(ref == 0, "The device was not properly freed: refcount %u.\n", ref);
+    filter_messages = NULL;
 
+    ShowWindow(device_window, SW_RESTORE);
+    SetForegroundWindow(focus_window);
+    flush_events();
+
+    filter_messages = focus_window;
     device_desc.device_window = device_window;
     if (!(device = create_device(d3d8, focus_window, &device_desc)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
         goto done;
     }
+    filter_messages = NULL;
+    flush_events();
+
+    device_desc.width = user32_width;
+    device_desc.height = user32_height;
+
+    expect_messages = mode_change_messages;
+    filter_messages = focus_window;
+    hr = reset_device(device, &device_desc);
+    ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
+    filter_messages = NULL;
+
+    flush_events();
+    ok(!expect_messages->message, "Expected message %#x for window %#x, but didn't receive it, i=%u.\n",
+            expect_messages->message, expect_messages->window, i);
+
+    /* World of Warplanes hides the window by removing WS_VISIBLE and expects Reset() to show it again. */
+    device_style = GetWindowLongA(device_window, GWL_STYLE);
+    SetWindowLongA(device_window, GWL_STYLE, device_style & ~WS_VISIBLE);
+
+    flush_events();
+    device_desc.width = d3d_width;
+    device_desc.height = d3d_height;
+    memset(&windowpos, 0, sizeof(windowpos));
+
+    expect_messages = mode_change_messages_hidden;
+    filter_messages = focus_window;
+    hr = reset_device(device, &device_desc);
+    ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
+    filter_messages = NULL;
+
+    flush_events();
+    ok(!expect_messages->message, "Expected message %#x for window %#x, but didn't receive it.\n",
+            expect_messages->message, expect_messages->window);
+
+    ok(windowpos.hwnd == device_window && !windowpos.hwndInsertAfter
+            && !windowpos.x && !windowpos.y && !windowpos.cx && !windowpos.cy
+            && windowpos.flags == (SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE),
+            "Got unexpected WINDOWPOS hwnd=%p, insertAfter=%p, x=%d, y=%d, cx=%d, cy=%d, flags=%x\n",
+            windowpos.hwnd, windowpos.hwndInsertAfter, windowpos.x, windowpos.y, windowpos.cx,
+            windowpos.cy, windowpos.flags);
+
+    device_style = GetWindowLongA(device_window, GWL_STYLE);
+    ok(device_style & WS_VISIBLE, "Expected the device window to be visible.\n");
 
     proc = SetWindowLongPtrA(focus_window, GWLP_WNDPROC, (LONG_PTR)DefWindowProcA);
     ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx.\n", (LONG_PTR)test_proc);
@@ -4450,7 +4541,7 @@ static void test_vb_lock_flags(void)
     hr = IDirect3DDevice8_CreateVertexBuffer(device, 1024, D3DUSAGE_DYNAMIC, 0, D3DPOOL_DEFAULT, &buffer);
     ok(SUCCEEDED(hr), "Failed to create vertex buffer, hr %#x.\n", hr);
 
-    for (i = 0; i < (sizeof(test_data) / sizeof(*test_data)); ++i)
+    for (i = 0; i < ARRAY_SIZE(test_data); ++i)
     {
         hr = IDirect3DVertexBuffer8_Lock(buffer, 0, 0, &data, test_data[i].flags);
         ok(hr == test_data[i].result, "Got unexpected hr %#x for %s.\n",
@@ -4855,7 +4946,7 @@ static void test_lockrect_invalid(void)
         return;
     }
 
-    for (r = 0; r < sizeof(resources) / sizeof(*resources); ++r)
+    for (r = 0; r < ARRAY_SIZE(resources); ++r)
     {
         texture = NULL;
         cube_texture = NULL;
@@ -4895,7 +4986,7 @@ static void test_lockrect_invalid(void)
         hr = IDirect3DSurface8_UnlockRect(surface);
         ok(hr == expected_hr, "Got hr %#x, expected %#x, type %s.\n", hr, expected_hr, resources[r].name);
 
-        for (i = 0; i < (sizeof(valid) / sizeof(*valid)); ++i)
+        for (i = 0; i < ARRAY_SIZE(valid); ++i)
         {
             const RECT *rect = &valid[i];
 
@@ -4945,7 +5036,7 @@ static void test_lockrect_invalid(void)
             }
         }
 
-        for (i = 0; i < (sizeof(invalid) / sizeof(*invalid)); ++i)
+        for (i = 0; i < ARRAY_SIZE(invalid); ++i)
         {
             const RECT *rect = &invalid[i];
 
@@ -5416,7 +5507,7 @@ static void test_surface_double_unlock(void)
         return;
     }
 
-    for (i = 0; i < (sizeof(pools) / sizeof(*pools)); ++i)
+    for (i = 0; i < ARRAY_SIZE(pools); ++i)
     {
         switch (pools[i])
         {
@@ -5578,7 +5669,7 @@ static void test_surface_blocks(void)
         tex_pow2 = !(caps.TextureCaps & D3DPTEXTURECAPS_NONPOW2CONDITIONAL);
     cube_pow2 = !!(caps.TextureCaps & D3DPTEXTURECAPS_CUBEMAP_POW2);
 
-    for (i = 0; i < (sizeof(formats) / sizeof(*formats)); ++i)
+    for (i = 0; i < ARRAY_SIZE(formats); ++i)
     {
         BOOL tex_support, cube_support, surface_support, format_known;
 
@@ -5614,7 +5705,7 @@ static void test_surface_blocks(void)
 
                 size_is_pow2 = !(w & (w - 1) || h & (h - 1));
 
-                for (j = 0; j < sizeof(create_tests) / sizeof(*create_tests); j++)
+                for (j = 0; j < ARRAY_SIZE(create_tests); j++)
                 {
                     BOOL support, pow2;
                     HRESULT expect_hr;
@@ -5709,7 +5800,7 @@ static void test_surface_blocks(void)
             continue;
         }
 
-        for (j = 0; j < (sizeof(pools) / sizeof(*pools)); ++j)
+        for (j = 0; j < ARRAY_SIZE(pools); ++j)
         {
             hr = IDirect3DDevice8_CreateTexture(device, 128, 128, 1,
                     pools[j].pool == D3DPOOL_DEFAULT ? D3DUSAGE_DYNAMIC : 0,
@@ -5773,7 +5864,7 @@ static void test_surface_blocks(void)
                 }
             }
 
-            for (k = 0; k < sizeof(invalid) / sizeof(*invalid); ++k)
+            for (k = 0; k < ARRAY_SIZE(invalid); ++k)
             {
                 hr = IDirect3DSurface8_LockRect(surface, &locked_rect, &invalid[k], 0);
                 ok(FAILED(hr) == !pools[j].success, "Invalid lock %s(%#x), expected %s, format %s, pool %s, case %u.\n",
@@ -5857,7 +5948,7 @@ static void test_set_palette(void)
         return;
     }
 
-    for (i = 0; i < sizeof(pal) / sizeof(*pal); i++)
+    for (i = 0; i < ARRAY_SIZE(pal); i++)
     {
         pal[i].peRed = i;
         pal[i].peGreen = i;
@@ -5869,7 +5960,7 @@ static void test_set_palette(void)
 
     hr = IDirect3DDevice8_GetDeviceCaps(device, &caps);
     ok(SUCCEEDED(hr), "Failed to get device caps, hr %#x.\n", hr);
-    for (i = 0; i < sizeof(pal) / sizeof(*pal); i++)
+    for (i = 0; i < ARRAY_SIZE(pal); i++)
     {
         pal[i].peRed = i;
         pal[i].peGreen = i;
@@ -6101,7 +6192,7 @@ static void test_npot_textures(void)
     ok(cube_pow2 == tex_pow2, "Cube texture and 2d texture pow2 restrictions mismatch.\n");
     ok(vol_pow2 == tex_pow2, "Volume texture and 2d texture pow2 restrictions mismatch.\n");
 
-    for (i = 0; i < sizeof(pools) / sizeof(*pools); i++)
+    for (i = 0; i < ARRAY_SIZE(pools); i++)
     {
         for (levels = 0; levels <= 2; levels++)
         {
@@ -6224,7 +6315,7 @@ static void test_volume_locking(void)
         goto out;
     }
 
-    for (i = 0; i < sizeof(tests) / sizeof(*tests); i++)
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
     {
         hr = IDirect3DDevice8_CreateVolumeTexture(device, 4, 4, 4, 1, tests[i].usage,
                 D3DFMT_A8R8G8B8, tests[i].pool, &texture);
@@ -6331,7 +6422,7 @@ static void test_update_volumetexture(void)
         goto out;
     }
 
-    for (i = 0; i < sizeof(tests) / sizeof(*tests); i++)
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
     {
         DWORD src_usage = tests[i].src_pool == D3DPOOL_DEFAULT ? D3DUSAGE_DYNAMIC : 0;
         DWORD dst_usage = tests[i].dst_pool == D3DPOOL_DEFAULT ? D3DUSAGE_DYNAMIC : 0;
@@ -6372,7 +6463,7 @@ static void test_update_volumetexture(void)
         goto out;
     }
 
-    for (i = 0; i < sizeof(tests2) / sizeof(*tests2); i++)
+    for (i = 0; i < ARRAY_SIZE(tests2); i++)
     {
         hr = IDirect3DDevice8_CreateVolumeTexture(device,
                 tests2[i].src_size, tests2[i].src_size, tests2[i].src_size,
@@ -6543,7 +6634,7 @@ static void test_volume_blocks(void)
     ok(SUCCEEDED(hr), "Failed to get caps, hr %#x.\n", hr);
     pow2 = !!(caps.TextureCaps & D3DPTEXTURECAPS_VOLUMEMAP_POW2);
 
-    for (i = 0; i < sizeof(formats) / sizeof(*formats); i++)
+    for (i = 0; i < ARRAY_SIZE(formats); i++)
     {
         hr = IDirect3D8_CheckDeviceFormat(d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8,
                 0, D3DRTYPE_VOLUMETEXTURE, formats[i].fmt);
@@ -6565,7 +6656,7 @@ static void test_volume_blocks(void)
 
                     size_is_pow2 = !((w & (w - 1)) || (h & (h - 1)) || (d & (d - 1)));
 
-                    for (j = 0; j < sizeof(create_tests) / sizeof(*create_tests); j++)
+                    for (j = 0; j < ARRAY_SIZE(create_tests); j++)
                     {
                         BOOL may_succeed = FALSE;
 
@@ -6613,7 +6704,7 @@ static void test_volume_blocks(void)
         ok(SUCCEEDED(hr), "Failed to create volume texture, hr %#x.\n", hr);
 
         /* Test lockrect offset */
-        for (j = 0; j < sizeof(offset_tests) / sizeof(*offset_tests); j++)
+        for (j = 0; j < ARRAY_SIZE(offset_tests); j++)
         {
             unsigned int bytes_per_pixel;
             bytes_per_pixel = formats[i].block_size / (formats[i].block_width * formats[i].block_height);
@@ -6861,7 +6952,7 @@ static void test_lockbox_invalid(void)
     hr = IDirect3DVolumeTexture8_UnlockBox(texture, 0);
     ok(SUCCEEDED(hr), "Failed to unlock volume texture, hr %#x.\n", hr);
 
-    for (i = 0; i < (sizeof(test_data) / sizeof(*test_data)); ++i)
+    for (i = 0; i < ARRAY_SIZE(test_data); ++i)
     {
         unsigned int offset, expected_offset;
         const D3DBOX *box = &test_data[i].box;
@@ -7718,7 +7809,7 @@ static void test_resource_priority(void)
         return;
     }
 
-    for (i = 0; i < sizeof(test_data) / sizeof(*test_data); i++)
+    for (i = 0; i < ARRAY_SIZE(test_data); i++)
     {
         hr = IDirect3DDevice8_CreateTexture(device, 16, 16, 0, 0, D3DFMT_X8R8G8B8,
                 test_data[i].pool, &texture);
@@ -7772,11 +7863,12 @@ static void test_resource_priority(void)
 
 static void test_swapchain_parameters(void)
 {
-    IDirect3DDevice8 *device;
-    IDirect3D8 *d3d;
     IDirect3DSurface8 *backbuffer;
+    IDirect3DDevice8 *device;
+    HRESULT hr, expected_hr;
+    IDirect3D8 *d3d;
+    D3DCAPS8 caps;
     HWND window;
-    HRESULT hr;
     unsigned int i, j;
     D3DPRESENT_PARAMETERS present_parameters, present_parameters_windowed = {0};
     static const struct
@@ -7840,6 +7932,8 @@ static void test_swapchain_parameters(void)
         DestroyWindow(window);
         return;
     }
+    hr = IDirect3DDevice8_GetDeviceCaps(device, &caps);
+    ok(SUCCEEDED(hr), "Failed to get device caps, hr %#x.\n", hr);
     IDirect3DDevice8_Release(device);
 
     present_parameters_windowed.BackBufferWidth = registry_mode.dmPelsWidth;
@@ -7850,7 +7944,7 @@ static void test_swapchain_parameters(void)
     present_parameters_windowed.Windowed = TRUE;
     present_parameters_windowed.BackBufferCount = 1;
 
-    for (i = 0; i < sizeof(tests) / sizeof(*tests); ++i)
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
         UINT bb_count = tests[i].backbuffer_count ? tests[i].backbuffer_count : 1;
 
@@ -7919,17 +8013,70 @@ static void test_swapchain_parameters(void)
         IDirect3DDevice8_Release(device);
     }
 
+    for (i = 0; i < 10; ++i)
+    {
+        memset(&present_parameters, 0, sizeof(present_parameters));
+        present_parameters.BackBufferWidth = registry_mode.dmPelsWidth;
+        present_parameters.BackBufferHeight = registry_mode.dmPelsHeight;
+        present_parameters.hDeviceWindow = window;
+        present_parameters.BackBufferFormat = D3DFMT_X8R8G8B8;
+        present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
+        present_parameters.Windowed = FALSE;
+        present_parameters.BackBufferCount = 2;
+
+        present_parameters.FullScreen_PresentationInterval = i;
+        switch (present_parameters.FullScreen_PresentationInterval)
+        {
+            case D3DPRESENT_INTERVAL_ONE:
+            case D3DPRESENT_INTERVAL_TWO:
+            case D3DPRESENT_INTERVAL_THREE:
+            case D3DPRESENT_INTERVAL_FOUR:
+                if (!(caps.PresentationIntervals & present_parameters.FullScreen_PresentationInterval))
+                    continue;
+                /* Fall through */
+            case D3DPRESENT_INTERVAL_DEFAULT:
+                expected_hr = D3D_OK;
+                break;
+            default:
+                expected_hr = D3DERR_INVALIDCALL;
+                break;
+        }
+
+        hr = IDirect3D8_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window,
+                D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device);
+        ok(hr == expected_hr, "Got unexpected hr %#x, test %u.\n", hr, i);
+        if (SUCCEEDED(hr))
+            IDirect3DDevice8_Release(device);
+    }
+
     IDirect3D8_Release(d3d);
     DestroyWindow(window);
 }
 
 static void test_check_device_format(void)
 {
+    D3DDEVTYPE device_type;
     IDirect3D8 *d3d;
     HRESULT hr;
 
     d3d = Direct3DCreate8(D3D_SDK_VERSION);
     ok(!!d3d, "Failed to create a D3D object.\n");
+
+    for (device_type = D3DDEVTYPE_HAL; device_type <= D3DDEVTYPE_SW; ++device_type)
+    {
+        hr = IDirect3D8_CheckDeviceFormat(d3d, 0, device_type, D3DFMT_UNKNOWN,
+                0, D3DRTYPE_SURFACE, D3DFMT_A8R8G8B8);
+        ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x, device type %#x.\n", hr, device_type);
+        hr = IDirect3D8_CheckDeviceFormat(d3d, 0, device_type, D3DFMT_UNKNOWN,
+                0, D3DRTYPE_TEXTURE, D3DFMT_A8R8G8B8);
+        ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x, device type %#x.\n", hr, device_type);
+        hr = IDirect3D8_CheckDeviceFormat(d3d, 0, device_type, D3DFMT_UNKNOWN,
+                0, D3DRTYPE_SURFACE, D3DFMT_X8R8G8B8);
+        ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x, device type %#x.\n", hr, device_type);
+        hr = IDirect3D8_CheckDeviceFormat(d3d, 0, device_type, D3DFMT_UNKNOWN,
+                0, D3DRTYPE_TEXTURE, D3DFMT_X8R8G8B8);
+        ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x, device type %#x.\n", hr, device_type);
+    }
 
     hr = IDirect3D8_CheckDeviceFormat(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8,
             0, D3DRTYPE_VERTEXBUFFER, D3DFMT_VERTEXDATA);
@@ -8013,7 +8160,7 @@ static void test_miptree_layout(void)
         base_dimension = 256;
     }
 
-    for (format_idx = 0; format_idx < sizeof(formats) / sizeof(*formats); ++format_idx)
+    for (format_idx = 0; format_idx < ARRAY_SIZE(formats); ++format_idx)
     {
         if (FAILED(hr = IDirect3D8_CheckDeviceFormat(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
                 D3DFMT_X8R8G8B8, 0, D3DRTYPE_TEXTURE, formats[format_idx].format)))
@@ -8022,7 +8169,7 @@ static void test_miptree_layout(void)
             continue;
         }
 
-        for (pool_idx = 0; pool_idx < sizeof(pools) / sizeof(*pools); ++pool_idx)
+        for (pool_idx = 0; pool_idx < ARRAY_SIZE(pools); ++pool_idx)
         {
             hr = IDirect3DDevice8_CreateTexture(device, base_dimension, base_dimension, 0, 0,
                     formats[format_idx].format, pools[pool_idx].pool, &texture_2d);
@@ -8059,7 +8206,7 @@ static void test_miptree_layout(void)
             continue;
         }
 
-        for (pool_idx = 0; pool_idx < sizeof(pools) / sizeof(*pools); ++pool_idx)
+        for (pool_idx = 0; pool_idx < ARRAY_SIZE(pools); ++pool_idx)
         {
             hr = IDirect3DDevice8_CreateCubeTexture(device, base_dimension, 0, 0,
                     formats[format_idx].format, pools[pool_idx].pool, &texture_cube);
@@ -8260,9 +8407,342 @@ static void test_format_unknown(void)
     DestroyWindow(window);
 }
 
+static void test_destroyed_window(void)
+{
+    IDirect3DDevice8 *device;
+    IDirect3D8 *d3d8;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+
+    /* No WS_VISIBLE. */
+    window = CreateWindowA("static", "d3d8_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    ok(!!window, "Failed to create a window.\n");
+
+    d3d8 = Direct3DCreate8(D3D_SDK_VERSION);
+    ok(!!d3d8, "Failed to create a D3D object.\n");
+    device = create_device(d3d8, window, NULL);
+    IDirect3D8_Release(d3d8);
+    DestroyWindow(window);
+    if (!device)
+    {
+        skip("Failed to create a 3D device, skipping test.\n");
+        return;
+    }
+
+    hr = IDirect3DDevice8_BeginScene(device);
+    ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0x00000000, 0.0f, 0);
+    ok(SUCCEEDED(hr), "Failed to clear, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_EndScene(device);
+    ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_Present(device, NULL, NULL, NULL, NULL);
+    todo_wine ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+}
+
+static void test_clip_planes_limits(void)
+{
+    static const DWORD device_flags[] = {0, CREATE_DEVICE_SWVP_ONLY};
+    IDirect3DDevice8 *device;
+    struct device_desc desc;
+    unsigned int i, j;
+    IDirect3D8 *d3d;
+    ULONG refcount;
+    float plane[4];
+    D3DCAPS8 caps;
+    DWORD state;
+    HWND window;
+    HRESULT hr;
+
+    window = CreateWindowA("static", "d3d8_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    d3d = Direct3DCreate8(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create a D3D object.\n");
+
+    for (i = 0; i < ARRAY_SIZE(device_flags); ++i)
+    {
+        desc.device_window = window;
+        desc.width = 640;
+        desc.height = 480;
+        desc.flags = device_flags[i];
+        if (!(device = create_device(d3d, window, &desc)))
+        {
+            skip("Failed to create D3D device, flags %#x.\n", desc.flags);
+            continue;
+        }
+
+        memset(&caps, 0, sizeof(caps));
+        hr = IDirect3DDevice8_GetDeviceCaps(device, &caps);
+        ok(hr == D3D_OK, "Failed to get caps, hr %#x.\n", hr);
+
+        trace("Max user clip planes: %u.\n", caps.MaxUserClipPlanes);
+
+        for (j = 0; j < caps.MaxUserClipPlanes; ++j)
+        {
+            memset(plane, 0xff, sizeof(plane));
+            hr = IDirect3DDevice8_GetClipPlane(device, j, plane);
+            ok(hr == D3D_OK, "Failed to get clip plane %u, hr %#x.\n", j, hr);
+            ok(!plane[0] && !plane[1] && !plane[2] && !plane[3],
+                    "Got unexpected plane %u: %.8e, %.8e, %.8e, %.8e.\n",
+                    j, plane[0], plane[1], plane[2], plane[3]);
+        }
+
+        plane[0] = 2.0f;
+        plane[1] = 8.0f;
+        plane[2] = 5.0f;
+        for (j = 0; j < caps.MaxUserClipPlanes; ++j)
+        {
+            plane[3] = j;
+            hr = IDirect3DDevice8_SetClipPlane(device, j, plane);
+            ok(hr == D3D_OK, "Failed to set clip plane %u, hr %#x.\n", j, hr);
+        }
+        for (j = 0; j < caps.MaxUserClipPlanes; ++j)
+        {
+            memset(plane, 0xff, sizeof(plane));
+            hr = IDirect3DDevice8_GetClipPlane(device, j, plane);
+            ok(hr == D3D_OK, "Failed to get clip plane %u, hr %#x.\n", j, hr);
+            ok(plane[0] == 2.0f && plane[1] == 8.0f && plane[2] == 5.0f && plane[3] == j,
+                    "Got unexpected plane %u: %.8e, %.8e, %.8e, %.8e.\n",
+                    j, plane[0], plane[1], plane[2], plane[3]);
+        }
+
+        hr = IDirect3DDevice8_SetRenderState(device, D3DRS_CLIPPLANEENABLE, 0xffffffff);
+        ok(SUCCEEDED(hr), "Failed to set render state, hr %#x.\n", hr);
+        hr = IDirect3DDevice8_GetRenderState(device, D3DRS_CLIPPLANEENABLE, &state);
+        ok(SUCCEEDED(hr), "Failed to get render state, hr %#x.\n", hr);
+        ok(state == 0xffffffff, "Got unexpected state %#x.\n", state);
+        hr = IDirect3DDevice8_SetRenderState(device, D3DRS_CLIPPLANEENABLE, 0x80000000);
+        ok(SUCCEEDED(hr), "Failed to set render state, hr %#x.\n", hr);
+        hr = IDirect3DDevice8_GetRenderState(device, D3DRS_CLIPPLANEENABLE, &state);
+        ok(SUCCEEDED(hr), "Failed to get render state, hr %#x.\n", hr);
+        ok(state == 0x80000000, "Got unexpected state %#x.\n", state);
+
+        refcount = IDirect3DDevice8_Release(device);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+
+    IDirect3D8_Release(d3d);
+    DestroyWindow(window);
+}
+
+static void test_swapchain_multisample_reset(void)
+{
+    D3DPRESENT_PARAMETERS present_parameters;
+    IDirect3DDevice8 *device;
+    IDirect3D8 *d3d;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+
+    window = CreateWindowA("d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    ok(!!window, "Failed to create a window.\n");
+    d3d = Direct3DCreate8(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create D3D object.\n");
+
+    if (IDirect3D8_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            D3DFMT_A8R8G8B8, TRUE, D3DMULTISAMPLE_2_SAMPLES) == D3DERR_NOTAVAILABLE)
+    {
+        skip("Multisampling not supported for D3DFMT_A8R8G8B8.\n");
+        IDirect3D8_Release(d3d);
+        DestroyWindow(window);
+        return;
+    }
+
+    if (!(device = create_device(d3d, window, NULL)))
+    {
+        skip("Failed to create 3D device.\n");
+        IDirect3D8_Release(d3d);
+        DestroyWindow(window);
+        return;
+    }
+
+    hr = IDirect3DDevice8_Clear(device, 0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0xffffffff, 1.0f, 0);
+    ok(hr == D3D_OK, "Failed to clear, hr %#x.\n", hr);
+
+    memset(&present_parameters, 0, sizeof(present_parameters));
+    present_parameters.BackBufferWidth = 640;
+    present_parameters.BackBufferHeight = 480;
+    present_parameters.BackBufferFormat = D3DFMT_A8R8G8B8;
+    present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    present_parameters.hDeviceWindow = NULL;
+    present_parameters.Windowed = TRUE;
+    present_parameters.MultiSampleType = D3DMULTISAMPLE_2_SAMPLES;
+    hr = IDirect3DDevice8_Reset(device, &present_parameters);
+    ok(hr == D3D_OK, "Failed to reset device, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffffffff, 0.0f, 0);
+    ok(hr == D3D_OK, "Failed to clear, hr %#x.\n", hr);
+
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    IDirect3D8_Release(d3d);
+    DestroyWindow(window);
+}
+
+static void test_device_caps(void)
+{
+    IDirect3DDevice8 *device;
+    IDirect3D8 *d3d;
+    ULONG refcount;
+    D3DCAPS8 caps;
+    HWND window;
+    HRESULT hr;
+
+    window = CreateWindowA("static", "d3d8_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    d3d = Direct3DCreate8(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create a D3D object.\n");
+    if (!(device = create_device(d3d, window, NULL)))
+    {
+        skip("Failed to create a D3D device.\n");
+        IDirect3D8_Release(d3d);
+        DestroyWindow(window);
+        return;
+    }
+
+    hr = IDirect3DDevice8_GetDeviceCaps(device, &caps);
+    ok(SUCCEEDED(hr), "Failed to get caps, hr %#x.\n", hr);
+
+    ok(!(caps.Caps & ~D3DCAPS_READ_SCANLINE), "Caps field has unexpected flags %#x.\n", caps.Caps);
+    ok(!(caps.Caps2 & ~(D3DCAPS2_CANCALIBRATEGAMMA | D3DCAPS2_CANRENDERWINDOWED
+            | D3DCAPS2_CANMANAGERESOURCE | D3DCAPS2_DYNAMICTEXTURES | D3DCAPS2_FULLSCREENGAMMA
+            | D3DCAPS2_NO2DDURING3DSCENE | D3DCAPS2_RESERVED)),
+            "Caps2 field has unexpected flags %#x.\n", caps.Caps2);
+    /* Nvidia returns that 0x400 flag, which is probably Vista+
+     * D3DCAPS3_DXVAHD from d3d9caps.h */
+    /* AMD doesn't filter all the ddraw / d3d9 caps. Consider that behavior
+     * broken. */
+    ok(!(caps.Caps3 & ~(D3DCAPS3_ALPHA_FULLSCREEN_FLIP_OR_DISCARD | D3DCAPS3_RESERVED | 0x400))
+            || broken(!(caps.Caps3 & ~(D3DCAPS3_ALPHA_FULLSCREEN_FLIP_OR_DISCARD | 0x80))),
+            "Caps3 field has unexpected flags %#x.\n", caps.Caps3);
+    ok(!(caps.PrimitiveMiscCaps & ~(D3DPMISCCAPS_MASKZ | D3DPMISCCAPS_LINEPATTERNREP
+            | D3DPMISCCAPS_CULLNONE | D3DPMISCCAPS_CULLCW | D3DPMISCCAPS_CULLCCW
+            | D3DPMISCCAPS_COLORWRITEENABLE | D3DPMISCCAPS_CLIPPLANESCALEDPOINTS
+            | D3DPMISCCAPS_CLIPTLVERTS | D3DPMISCCAPS_TSSARGTEMP | D3DPMISCCAPS_BLENDOP
+            | D3DPMISCCAPS_NULLREFERENCE))
+            || broken(!(caps.PrimitiveMiscCaps & ~0x003fdff6)),
+            "PrimitiveMiscCaps field has unexpected flags %#x.\n", caps.PrimitiveMiscCaps);
+    /* AMD includes an unknown 0x2 flag. */
+    ok(!(caps.RasterCaps & ~(D3DPRASTERCAPS_DITHER | D3DPRASTERCAPS_PAT | D3DPRASTERCAPS_ZTEST
+            | D3DPRASTERCAPS_FOGVERTEX | D3DPRASTERCAPS_FOGTABLE | D3DPRASTERCAPS_ANTIALIASEDGES
+            | D3DPRASTERCAPS_MIPMAPLODBIAS | D3DPRASTERCAPS_ZBIAS | D3DPRASTERCAPS_ZBUFFERLESSHSR
+            | D3DPRASTERCAPS_FOGRANGE | D3DPRASTERCAPS_ANISOTROPY | D3DPRASTERCAPS_WBUFFER
+            | D3DPRASTERCAPS_WFOG | D3DPRASTERCAPS_ZFOG | D3DPRASTERCAPS_COLORPERSPECTIVE
+            | D3DPRASTERCAPS_STRETCHBLTMULTISAMPLE))
+            || broken(!(caps.RasterCaps & ~0x0ff7f19b)),
+            "RasterCaps field has unexpected flags %#x.\n", caps.RasterCaps);
+    ok(!(caps.SrcBlendCaps & ~(D3DPBLENDCAPS_ZERO | D3DPBLENDCAPS_ONE | D3DPBLENDCAPS_SRCCOLOR
+            | D3DPBLENDCAPS_INVSRCCOLOR | D3DPBLENDCAPS_SRCALPHA | D3DPBLENDCAPS_INVSRCALPHA
+            | D3DPBLENDCAPS_DESTALPHA | D3DPBLENDCAPS_INVDESTALPHA | D3DPBLENDCAPS_DESTCOLOR
+            | D3DPBLENDCAPS_INVDESTCOLOR | D3DPBLENDCAPS_SRCALPHASAT | D3DPBLENDCAPS_BOTHSRCALPHA
+            | D3DPBLENDCAPS_BOTHINVSRCALPHA)),
+            "SrcBlendCaps field has unexpected flags %#x.\n", caps.SrcBlendCaps);
+    ok(!(caps.DestBlendCaps & ~(D3DPBLENDCAPS_ZERO | D3DPBLENDCAPS_ONE | D3DPBLENDCAPS_SRCCOLOR
+            | D3DPBLENDCAPS_INVSRCCOLOR | D3DPBLENDCAPS_SRCALPHA | D3DPBLENDCAPS_INVSRCALPHA
+            | D3DPBLENDCAPS_DESTALPHA | D3DPBLENDCAPS_INVDESTALPHA | D3DPBLENDCAPS_DESTCOLOR
+            | D3DPBLENDCAPS_INVDESTCOLOR | D3DPBLENDCAPS_SRCALPHASAT | D3DPBLENDCAPS_BOTHSRCALPHA
+            | D3DPBLENDCAPS_BOTHINVSRCALPHA)),
+            "DestBlendCaps field has unexpected flags %#x.\n", caps.DestBlendCaps);
+    ok(!(caps.TextureCaps & ~(D3DPTEXTURECAPS_PERSPECTIVE | D3DPTEXTURECAPS_POW2
+            | D3DPTEXTURECAPS_ALPHA | D3DPTEXTURECAPS_SQUAREONLY
+            | D3DPTEXTURECAPS_TEXREPEATNOTSCALEDBYSIZE | D3DPTEXTURECAPS_ALPHAPALETTE
+            | D3DPTEXTURECAPS_NONPOW2CONDITIONAL | D3DPTEXTURECAPS_PROJECTED
+            | D3DPTEXTURECAPS_CUBEMAP | D3DPTEXTURECAPS_VOLUMEMAP | D3DPTEXTURECAPS_MIPMAP
+            | D3DPTEXTURECAPS_MIPVOLUMEMAP | D3DPTEXTURECAPS_MIPCUBEMAP
+            | D3DPTEXTURECAPS_CUBEMAP_POW2 | D3DPTEXTURECAPS_VOLUMEMAP_POW2)),
+            "TextureCaps field has unexpected flags %#x.\n", caps.TextureCaps);
+    ok(!(caps.TextureFilterCaps & ~(D3DPTFILTERCAPS_MINFPOINT | D3DPTFILTERCAPS_MINFLINEAR
+            | D3DPTFILTERCAPS_MINFANISOTROPIC | D3DPTFILTERCAPS_MIPFPOINT
+            | D3DPTFILTERCAPS_MIPFLINEAR | D3DPTFILTERCAPS_MAGFPOINT | D3DPTFILTERCAPS_MAGFLINEAR
+            | D3DPTFILTERCAPS_MAGFANISOTROPIC | D3DPTFILTERCAPS_MAGFAFLATCUBIC
+            | D3DPTFILTERCAPS_MAGFGAUSSIANCUBIC))
+            || broken(!(caps.TextureFilterCaps & ~0x0703073f)),
+            "TextureFilterCaps field has unexpected flags %#x.\n", caps.TextureFilterCaps);
+    ok(!(caps.CubeTextureFilterCaps & ~(D3DPTFILTERCAPS_MINFPOINT | D3DPTFILTERCAPS_MINFLINEAR
+            | D3DPTFILTERCAPS_MINFANISOTROPIC | D3DPTFILTERCAPS_MIPFPOINT
+            | D3DPTFILTERCAPS_MIPFLINEAR | D3DPTFILTERCAPS_MAGFPOINT | D3DPTFILTERCAPS_MAGFLINEAR
+            | D3DPTFILTERCAPS_MAGFANISOTROPIC | D3DPTFILTERCAPS_MAGFAFLATCUBIC
+            | D3DPTFILTERCAPS_MAGFGAUSSIANCUBIC)),
+            "CubeTextureFilterCaps field has unexpected flags %#x.\n", caps.CubeTextureFilterCaps);
+    ok(!(caps.VolumeTextureFilterCaps & ~(D3DPTFILTERCAPS_MINFPOINT | D3DPTFILTERCAPS_MINFLINEAR
+            | D3DPTFILTERCAPS_MINFANISOTROPIC | D3DPTFILTERCAPS_MIPFPOINT
+            | D3DPTFILTERCAPS_MIPFLINEAR | D3DPTFILTERCAPS_MAGFPOINT | D3DPTFILTERCAPS_MAGFLINEAR
+            | D3DPTFILTERCAPS_MAGFANISOTROPIC | D3DPTFILTERCAPS_MAGFAFLATCUBIC
+            | D3DPTFILTERCAPS_MAGFGAUSSIANCUBIC)),
+            "VolumeTextureFilterCaps field has unexpected flags %#x.\n", caps.VolumeTextureFilterCaps);
+    ok(!(caps.LineCaps & ~(D3DLINECAPS_TEXTURE | D3DLINECAPS_ZTEST | D3DLINECAPS_BLEND
+            | D3DLINECAPS_ALPHACMP | D3DLINECAPS_FOG)),
+            "LineCaps field has unexpected flags %#x.\n", caps.LineCaps);
+    ok(!(caps.StencilCaps & ~(D3DSTENCILCAPS_KEEP | D3DSTENCILCAPS_ZERO | D3DSTENCILCAPS_REPLACE
+            | D3DSTENCILCAPS_INCRSAT | D3DSTENCILCAPS_DECRSAT | D3DSTENCILCAPS_INVERT
+            | D3DSTENCILCAPS_INCR | D3DSTENCILCAPS_DECR)),
+            "StencilCaps field has unexpected flags %#x.\n", caps.StencilCaps);
+    ok(!(caps.VertexProcessingCaps & ~(D3DVTXPCAPS_TEXGEN | D3DVTXPCAPS_MATERIALSOURCE7
+            | D3DVTXPCAPS_DIRECTIONALLIGHTS | D3DVTXPCAPS_POSITIONALLIGHTS | D3DVTXPCAPS_LOCALVIEWER
+            | D3DVTXPCAPS_TWEENING | D3DVTXPCAPS_NO_VSDT_UBYTE4)),
+            "VertexProcessingCaps field has unexpected flags %#x.\n", caps.VertexProcessingCaps);
+    /* Both Nvidia and AMD give 10 here. */
+    ok(caps.MaxActiveLights <= 10,
+            "MaxActiveLights field has unexpected value %u.\n", caps.MaxActiveLights);
+    /* AMD gives 6, Nvidia returns 8. */
+    ok(caps.MaxUserClipPlanes <= 8,
+            "MaxUserClipPlanes field has unexpected value %u.\n", caps.MaxUserClipPlanes);
+
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    IDirect3D8_Release(d3d);
+    DestroyWindow(window);
+}
+
+static void test_get_info(void)
+{
+    IDirect3DDevice8 *device;
+    IDirect3D8 *d3d;
+    BYTE info[1024];
+    ULONG refcount;
+    unsigned int i;
+    HWND window;
+    HRESULT hr;
+
+    window = CreateWindowA("static", "d3d8_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    d3d = Direct3DCreate8(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create a D3D object.\n");
+    if (!(device = create_device(d3d, window, NULL)))
+    {
+        skip("Failed to create a D3D device.\n");
+        IDirect3D8_Release(d3d);
+        DestroyWindow(window);
+        return;
+    }
+
+    /* As called by Chessmaster 9000 (bug 42118). */
+    hr = IDirect3DDevice8_GetInfo(device, 4, info, 16);
+    ok(hr == S_FALSE, "Unexpected hr %#x.\n", hr);
+
+    for (i = 0; i < 256; ++i)
+    {
+        hr = IDirect3DDevice8_GetInfo(device, i, info, sizeof(info));
+        if (i <= 4)
+            ok(hr == (i < 4 ? E_FAIL : S_FALSE), "info_id %u, unexpected hr %#x.\n", i, hr);
+        else
+            ok(hr == E_FAIL || hr == S_FALSE, "info_id %u, unexpected hr %#x.\n", i, hr);
+    }
+
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    IDirect3D8_Release(d3d);
+    DestroyWindow(window);
+}
+
 START_TEST(device)
 {
-    HMODULE d3d8_handle = LoadLibraryA( "d3d8.dll" );
+    HMODULE d3d8_handle = GetModuleHandleA("d3d8.dll");
     WNDCLASSA wc = {0};
     IDirect3D8 *d3d8;
     DEVMODEW current_mode;
@@ -8366,6 +8846,11 @@ START_TEST(device)
     test_miptree_layout();
     test_render_target_device_mismatch();
     test_format_unknown();
+    test_destroyed_window();
+    test_clip_planes_limits();
+    test_swapchain_multisample_reset();
+    test_device_caps();
+    test_get_info();
 
     UnregisterClassA("d3d8_test_wc", GetModuleHandleA(NULL));
 }

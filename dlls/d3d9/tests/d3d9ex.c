@@ -697,7 +697,7 @@ static void test_create_depth_stencil_surface_ex(void)
     warp = adapter_is_warp(&identifier);
     IDirect3D9_Release(d3d);
 
-    for (i = 0; i < sizeof(tests) / sizeof(*tests); ++i)
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
         surface = (IDirect3DSurface9 *)0xdeadbeef;
         hr = IDirect3DDevice9Ex_CreateDepthStencilSurfaceEx(device, 64, 64, D3DFMT_D24S8,
@@ -934,7 +934,7 @@ static void test_reset(void)
     DWORD value;
     HWND window;
     HRESULT hr;
-    RECT rect;
+    RECT rect, client_rect;
     LONG ret;
     struct
     {
@@ -1194,6 +1194,9 @@ static void test_reset(void)
     ok(SetWindowPos(window, NULL, 0, 0, rect.right - rect.left, rect.bottom - rect.top,
             SWP_NOMOVE | SWP_NOZORDER), "Failed to set window position.\n");
 
+    /* Windows 10 gives us a different size than we requested with some DPI scaling settings (e.g. 172%). */
+    ok(GetClientRect(window, &client_rect), "Failed to get client rect.\n");
+
     memset(&d3dpp, 0, sizeof(d3dpp));
     d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
     d3dpp.Windowed = TRUE;
@@ -1205,8 +1208,10 @@ static void test_reset(void)
     hr = IDirect3DDevice9Ex_TestCooperativeLevel(device);
     ok(hr == D3D_OK, "Got unexpected cooperative level %#x.\n", hr);
 
-    ok(d3dpp.BackBufferWidth == 200, "Got unexpected BackBufferWidth %u.\n", d3dpp.BackBufferWidth);
-    ok(d3dpp.BackBufferHeight == 150, "Got unexpected BackBufferHeight %u.\n", d3dpp.BackBufferHeight);
+    ok(d3dpp.BackBufferWidth == client_rect.right,
+            "Got unexpected BackBufferWidth %u, expected %d.\n", d3dpp.BackBufferWidth, client_rect.right);
+    ok(d3dpp.BackBufferHeight == client_rect.bottom,
+            "Got unexpected BackBufferHeight %u, expected %d.\n", d3dpp.BackBufferHeight, client_rect.bottom);
     ok(d3dpp.BackBufferFormat == d3ddm.Format, "Got unexpected BackBufferFormat %#x, expected %#x.\n",
             d3dpp.BackBufferFormat, d3ddm.Format);
     ok(d3dpp.BackBufferCount == 1, "Got unexpected BackBufferCount %u.\n", d3dpp.BackBufferCount);
@@ -1224,15 +1229,16 @@ static void test_reset(void)
 
     hr = IDirect3DDevice9Ex_GetScissorRect(device, &rect);
     ok(SUCCEEDED(hr), "Failed to get scissor rect, hr %#x.\n", hr);
-    ok(rect.left == 0 && rect.top == 0 && rect.right == 200 && rect.bottom == 150,
-            "Got unexpected scissor rect %s.\n", wine_dbgstr_rect(&rect));
+    ok(EqualRect(&rect, &client_rect), "Got unexpected scissor rect %s.\n", wine_dbgstr_rect(&rect));
 
     hr = IDirect3DDevice9Ex_GetViewport(device, &vp);
     ok(SUCCEEDED(hr), "Failed to get viewport, hr %#x.\n", hr);
     ok(vp.X == 0, "Got unexpected vp.X %u.\n", vp.X);
     ok(vp.Y == 0, "Got unexpected vp.Y %u.\n", vp.Y);
-    ok(vp.Width == 200, "Got unexpected vp.Width %u.\n", vp.Width);
-    ok(vp.Height == 150, "Got unexpected vp.Height %u.\n", vp.Height);
+    ok(vp.Width == client_rect.right, "Got unexpected vp.Width %u, expected %d.\n",
+            vp.Width, client_rect.right);
+    ok(vp.Height == client_rect.bottom, "Got unexpected vp.Height %u, expected %d.\n",
+            vp.Height, client_rect.bottom);
     ok(vp.MinZ == 2.0f, "Got unexpected vp.MinZ %.8e.\n", vp.MinZ);
     ok(vp.MaxZ == 3.0f, "Got unexpected vp.MaxZ %.8e.\n", vp.MaxZ);
 
@@ -1240,8 +1246,10 @@ static void test_reset(void)
     ok(SUCCEEDED(hr), "Failed to get swapchain, hr %#x.\n", hr);
     hr = IDirect3DSwapChain9_GetPresentParameters(swapchain, &d3dpp);
     ok(SUCCEEDED(hr), "Failed to get present parameters, hr %#x.\n", hr);
-    ok(d3dpp.BackBufferWidth == 200, "Got unexpected backbuffer width %u.\n", d3dpp.BackBufferWidth);
-    ok(d3dpp.BackBufferHeight == 150, "Got unexpected backbuffer height %u.\n", d3dpp.BackBufferHeight);
+    ok(d3dpp.BackBufferWidth == client_rect.right, "Got unexpected backbuffer width %u, expected %d.\n",
+            d3dpp.BackBufferWidth, client_rect.right);
+    ok(d3dpp.BackBufferHeight == client_rect.bottom, "Got unexpected backbuffer height %u, expected %d.\n",
+            d3dpp.BackBufferHeight, client_rect.bottom);
     ok(d3dpp.BackBufferFormat == d3ddm.Format, "Got unexpected BackBufferFormat %#x, expected %#x.\n",
             d3dpp.BackBufferFormat, d3ddm.Format);
     ok(d3dpp.BackBufferCount == 1, "Got unexpected BackBufferCount %u.\n", d3dpp.BackBufferCount);
@@ -1403,7 +1411,7 @@ static void test_reset_ex(void)
     DWORD value;
     HWND window;
     HRESULT hr;
-    RECT rect;
+    RECT rect, client_rect;
     LONG ret;
 
     window = create_window();
@@ -1728,6 +1736,9 @@ static void test_reset_ex(void)
     ok(SetWindowPos(window, NULL, 0, 0, rect.right - rect.left, rect.bottom - rect.top,
             SWP_NOMOVE | SWP_NOZORDER), "Failed to set window position.\n");
 
+    /* Windows 10 gives us a different size than we requested with some DPI scaling settings (e.g. 172%). */
+    ok(GetClientRect(window, &client_rect), "Failed to get client rect.\n");
+
     memset(&d3dpp, 0, sizeof(d3dpp));
     d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
     d3dpp.Windowed = TRUE;
@@ -1739,8 +1750,10 @@ static void test_reset_ex(void)
     hr = IDirect3DDevice9Ex_TestCooperativeLevel(device);
     ok(hr == D3D_OK, "Got unexpected cooperative level %#x.\n", hr);
 
-    ok(d3dpp.BackBufferWidth == 200, "Got unexpected BackBufferWidth %u.\n", d3dpp.BackBufferWidth);
-    ok(d3dpp.BackBufferHeight == 150, "Got unexpected BackBufferHeight %u.\n", d3dpp.BackBufferHeight);
+    ok(d3dpp.BackBufferWidth == client_rect.right,
+            "Got unexpected BackBufferWidth %u, expected %d.\n", d3dpp.BackBufferWidth, client_rect.right);
+    ok(d3dpp.BackBufferHeight == client_rect.bottom,
+            "Got unexpected BackBufferHeight %u, expected %d.\n", d3dpp.BackBufferHeight, client_rect.bottom);
     ok(d3dpp.BackBufferFormat == mode.Format, "Got unexpected BackBufferFormat %#x, expected %#x.\n",
             d3dpp.BackBufferFormat, mode.Format);
     ok(d3dpp.BackBufferCount == 1, "Got unexpected BackBufferCount %u.\n", d3dpp.BackBufferCount);
@@ -1758,15 +1771,17 @@ static void test_reset_ex(void)
 
     hr = IDirect3DDevice9Ex_GetScissorRect(device, &rect);
     ok(SUCCEEDED(hr), "Failed to get scissor rect, hr %#x.\n", hr);
-    ok(rect.left == 0 && rect.top == 0 && rect.right == 200 && rect.bottom == 150,
-            "Got unexpected scissor rect %s.\n", wine_dbgstr_rect(&rect));
+    ok(EqualRect(&rect, &client_rect), "Got unexpected scissor rect %s, expected %s.\n",
+            wine_dbgstr_rect(&rect), wine_dbgstr_rect(&client_rect));
 
     hr = IDirect3DDevice9Ex_GetViewport(device, &vp);
     ok(SUCCEEDED(hr), "Failed to get viewport, hr %#x.\n", hr);
     ok(vp.X == 0, "Got unexpected vp.X %u.\n", vp.X);
     ok(vp.Y == 0, "Got unexpected vp.Y %u.\n", vp.Y);
-    ok(vp.Width == 200, "Got unexpected vp.Width %u.\n", vp.Width);
-    ok(vp.Height == 150, "Got unexpected vp.Height %u.\n", vp.Height);
+    ok(vp.Width == client_rect.right, "Got unexpected vp.Width %u, expected %d.\n",
+            vp.Width, client_rect.right);
+    ok(vp.Height == client_rect.bottom, "Got unexpected vp.Height %u, expected %d.\n",
+            vp.Height, client_rect.bottom);
     ok(vp.MinZ == 2.0f, "Got unexpected vp.MinZ %.8e.\n", vp.MinZ);
     ok(vp.MaxZ == 3.0f, "Got unexpected vp.MaxZ %.8e.\n", vp.MaxZ);
 
@@ -1774,8 +1789,10 @@ static void test_reset_ex(void)
     ok(SUCCEEDED(hr), "Failed to get swapchain, hr %#x.\n", hr);
     hr = IDirect3DSwapChain9_GetPresentParameters(swapchain, &d3dpp);
     ok(SUCCEEDED(hr), "Failed to get present parameters, hr %#x.\n", hr);
-    ok(d3dpp.BackBufferWidth == 200, "Got unexpected backbuffer width %u.\n", d3dpp.BackBufferWidth);
-    ok(d3dpp.BackBufferHeight == 150, "Got unexpected backbuffer height %u.\n", d3dpp.BackBufferHeight);
+    ok(d3dpp.BackBufferWidth == client_rect.right,
+            "Got unexpected backbuffer width %u, expected %d.\n", d3dpp.BackBufferWidth, client_rect.right);
+    ok(d3dpp.BackBufferHeight == client_rect.bottom,
+            "Got unexpected backbuffer height %u, expected %d.\n", d3dpp.BackBufferHeight, client_rect.bottom);
     ok(d3dpp.BackBufferFormat == mode.Format, "Got unexpected BackBufferFormat %#x, expected %#x.\n",
             d3dpp.BackBufferFormat, mode.Format);
     ok(d3dpp.BackBufferCount == 1, "Got unexpected BackBufferCount %u.\n", d3dpp.BackBufferCount);
@@ -2453,6 +2470,7 @@ struct message
     enum message_window window;
     BOOL check_wparam;
     WPARAM expect_wparam;
+    WINDOWPOS *store_wp;
 };
 
 static const struct message *expect_messages;
@@ -2500,6 +2518,9 @@ static LRESULT CALLBACK test_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM
                 ok(wparam == expect_messages->expect_wparam,
                         "Got unexpected wparam %lx for message %x, expected %lx.\n",
                         wparam, message, expect_messages->expect_wparam);
+
+            if (expect_messages->store_wp)
+                *expect_messages->store_wp = *(WINDOWPOS *)lparam;
 
             ++expect_messages;
         }
@@ -2568,9 +2589,10 @@ static void test_wndproc(void)
     D3DDISPLAYMODE d3ddm;
     DWORD d3d_width = 0, d3d_height = 0, user32_width = 0, user32_height = 0;
     DEVMODEW devmode;
-    LONG change_ret;
+    LONG change_ret, device_style;
     BOOL ret;
     IDirect3D9Ex *d3d9ex;
+    WINDOWPOS windowpos;
 
     static const struct message create_messages[] =
     {
@@ -2663,16 +2685,59 @@ static void test_wndproc(void)
         /* WM_SIZE(SIZE_MAXIMIZED) is unreliable on native. */
         {0,                     0,              FALSE,  0},
     };
-    static const struct
+    struct message mode_change_messages[] =
+    {
+        {WM_WINDOWPOSCHANGING,  DEVICE_WINDOW,  FALSE,  0},
+        {WM_WINDOWPOSCHANGED,   DEVICE_WINDOW,  FALSE,  0},
+        {WM_SIZE,               DEVICE_WINDOW,  FALSE,  0},
+        /* TODO: WM_DISPLAYCHANGE is sent to the focus window too, but the order is
+         * differs between Wine and Windows. */
+        /* TODO 2: Windows sends a second WM_WINDOWPOSCHANGING(SWP_NOMOVE | SWP_NOSIZE
+         * | SWP_NOACTIVATE) in this situation, suggesting a difference in their ShowWindow
+         * implementation. This SetWindowPos call could in theory affect the Z order. Wine's
+         * ShowWindow does not send such a message because the window is already visible. */
+        {0,                     0,              FALSE,  0},
+    };
+    struct message mode_change_messages_hidden[] =
+    {
+        {WM_WINDOWPOSCHANGING,  DEVICE_WINDOW,  FALSE,  0},
+        {WM_WINDOWPOSCHANGED,   DEVICE_WINDOW,  FALSE,  0},
+        {WM_SIZE,               DEVICE_WINDOW,  FALSE,  0},
+        {WM_SHOWWINDOW,         DEVICE_WINDOW,  FALSE,  0},
+        {WM_WINDOWPOSCHANGING,  DEVICE_WINDOW,  FALSE,  0, &windowpos},
+        {WM_WINDOWPOSCHANGED,   DEVICE_WINDOW,  FALSE,  0},
+        /* TODO: WM_DISPLAYCHANGE is sent to the focus window too, but the order is
+         * differs between Wine and Windows. */
+        {0,                     0,              FALSE,  0},
+    };
+    static const struct message mode_change_messages_nowc[] =
+    {
+        {WM_DISPLAYCHANGE,      FOCUS_WINDOW,   FALSE,  0},
+        {0,                     0,              FALSE,  0},
+    };
+    struct
     {
         DWORD create_flags;
         const struct message *focus_loss_messages;
+        const struct message *mode_change_messages, *mode_change_messages_hidden;
         BOOL iconic;
     }
     tests[] =
     {
-        {0,                               focus_loss_messages,          TRUE},
-        {CREATE_DEVICE_NOWINDOWCHANGES,   focus_loss_messages_nowc,     FALSE},
+        {
+            0,
+            focus_loss_messages,
+            mode_change_messages,
+            mode_change_messages_hidden,
+            TRUE
+        },
+        {
+            CREATE_DEVICE_NOWINDOWCHANGES,
+            focus_loss_messages_nowc,
+            mode_change_messages_nowc,
+            mode_change_messages_nowc,
+            FALSE
+        },
     };
 
     hr = pDirect3DCreate9Ex(D3D_SDK_VERSION, &d3d9ex);
@@ -2744,7 +2809,7 @@ static void test_wndproc(void)
     memset(&devmode, 0, sizeof(devmode));
     devmode.dmSize = sizeof(devmode);
 
-    for (i = 0; i < sizeof(tests) / sizeof(*tests); ++i)
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
         devmode.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
         devmode.dmPelsWidth = user32_width;
@@ -2826,11 +2891,13 @@ static void test_wndproc(void)
         change_ret = ChangeDisplaySettingsW(&devmode, CDS_FULLSCREEN);
         ok(change_ret == DISP_CHANGE_SUCCESSFUL, "Failed to change display mode, ret %#x, i=%u.\n", change_ret, i);
 
-        /* Native needs a present call to pick up the mode change. */
+        /* Native needs a present call to pick up the mode change. Windows 10 15.07 never picks up the mode change
+         * in these calls and returns S_OK. This is a regression from Windows 8 and has been fixed in later Win10
+         * builds. */
         hr = IDirect3DDevice9Ex_Present(device, NULL, NULL, NULL, NULL);
-        todo_wine ok(hr == S_PRESENT_MODE_CHANGED, "Got unexpected hr %#x, i=%u.\n", hr, i);
+        todo_wine ok(hr == S_PRESENT_MODE_CHANGED || broken(hr == S_OK), "Got unexpected hr %#x, i=%u.\n", hr, i);
         hr = IDirect3DDevice9Ex_CheckDeviceState(device, device_window);
-        todo_wine ok(hr == S_PRESENT_MODE_CHANGED, "Got unexpected hr %#x, i=%u.\n", hr, i);
+        todo_wine ok(hr == S_PRESENT_MODE_CHANGED || broken(hr == S_OK), "Got unexpected hr %#x, i=%u.\n", hr, i);
 
         expect_messages = tests[i].focus_loss_messages;
         /* SetForegroundWindow is a poor replacement for the user pressing alt-tab or
@@ -2887,7 +2954,11 @@ static void test_wndproc(void)
         hr = reset_device(device, &device_desc);
         ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
 
-        ShowWindow(device_window, SW_HIDE);
+        /* Remove the WS_VISIBLE flag to test hidden windows. This is enough to trigger d3d's hidden
+         * window codepath, but does not actually hide the window without a SetWindowPos(SWP_FRAMECHANGED)
+         * call. This way we avoid focus changes and random failures on focus follows mouse WMs. */
+        device_style = GetWindowLongA(device_window, GWL_STYLE);
+        SetWindowLongA(device_window, GWL_STYLE, device_style & ~WS_VISIBLE);
         flush_events();
 
         expect_messages = focus_loss_messages_hidden;
@@ -3033,6 +3104,68 @@ static void test_wndproc(void)
         {
             skip("Failed to create a D3D device, skipping tests.\n");
             goto done;
+        }
+        filter_messages = NULL;
+        flush_events();
+
+        device_desc.width = user32_width;
+        device_desc.height = user32_height;
+
+        expect_messages = tests[i].mode_change_messages;
+        filter_messages = focus_window;
+        hr = reset_device(device, &device_desc);
+        ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
+        filter_messages = NULL;
+
+        /* The WINDOWPOS structure passed to the first WM_WINDOWPOSCHANGING differs between windows versions.
+         * Prior to Win10 17.03 it is consistent with a MoveWindow(0, 0, width, height) call. Since Windows
+         * 10 17.03 it has x = 0, y = 0, width = 0, height = 0, flags = SWP_NOCLIENTMOVE | SWP_NOCLIENTSIZE
+         * | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER (0x1837). Visually
+         * it is clear that the window has not been resized. In previous Windows version the window is resized. */
+
+        flush_events();
+        ok(!expect_messages->message, "Expected message %#x for window %#x, but didn't receive it, i=%u.\n",
+                expect_messages->message, expect_messages->window, i);
+
+        /* World of Warplanes hides the window by removing WS_VISIBLE and expects Reset() to show it again. */
+        device_style = GetWindowLongA(device_window, GWL_STYLE);
+        SetWindowLongA(device_window, GWL_STYLE, device_style & ~WS_VISIBLE);
+
+        flush_events();
+        device_desc.width = d3d_width;
+        device_desc.height = d3d_height;
+        memset(&windowpos, 0, sizeof(windowpos));
+
+        expect_messages = tests[i].mode_change_messages_hidden;
+        filter_messages = focus_window;
+        hr = reset_device(device, &device_desc);
+        ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
+        filter_messages = NULL;
+
+        flush_events();
+        ok(!expect_messages->message, "Expected message %#x for window %#x, but didn't receive it, i=%u.\n",
+                expect_messages->message, expect_messages->window, i);
+
+        if (!(tests[i].create_flags & CREATE_DEVICE_NOWINDOWCHANGES))
+        {
+            ok(windowpos.hwnd == device_window && !windowpos.hwndInsertAfter
+                    && !windowpos.x && !windowpos.y && !windowpos.cx && !windowpos.cy
+                    && windowpos.flags == (SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE),
+                    "Got unexpected WINDOWPOS hwnd=%p, insertAfter=%p, x=%d, y=%d, cx=%d, cy=%d, flags=%x\n",
+                    windowpos.hwnd, windowpos.hwndInsertAfter, windowpos.x, windowpos.y, windowpos.cx,
+                    windowpos.cy, windowpos.flags);
+        }
+
+        device_style = GetWindowLongA(device_window, GWL_STYLE);
+        if (tests[i].create_flags & CREATE_DEVICE_NOWINDOWCHANGES)
+        {
+            todo_wine ok(!(device_style & WS_VISIBLE), "Expected the device window to be hidden, i=%u.\n", i);
+            ShowWindow(device_window, SW_MINIMIZE);
+            ShowWindow(device_window, SW_RESTORE);
+        }
+        else
+        {
+            ok(device_style & WS_VISIBLE, "Expected the device window to be visible, i=%u.\n", i);
         }
 
         proc = SetWindowLongPtrA(focus_window, GWLP_WNDPROC, (LONG_PTR)DefWindowProcA);
@@ -3291,7 +3424,7 @@ static void test_window_style(void)
 
     SetRect(&fullscreen_rect, 0, 0, registry_mode.dmPelsWidth, registry_mode.dmPelsHeight);
 
-    for (i = 0; i < sizeof(tests) / sizeof(*tests); ++i)
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
         focus_window = CreateWindowA("d3d9_test_wc", "d3d9_test", WS_OVERLAPPEDWINDOW | tests[i].style_flags,
                 0, 0, registry_mode.dmPelsWidth / 2, registry_mode.dmPelsHeight / 2, 0, 0, 0, 0);
@@ -3535,7 +3668,7 @@ static void test_swapchain_parameters(void)
     mode.Format = D3DFMT_X8R8G8B8;
     mode.ScanLineOrdering = 0;
 
-    for (i = 0; i < sizeof(tests) / sizeof(*tests); ++i)
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
         memset(&present_parameters, 0, sizeof(present_parameters));
         present_parameters.BackBufferWidth = registry_mode.dmPelsWidth;
@@ -3776,6 +3909,183 @@ static void test_format_unknown(void)
     DestroyWindow(window);
 }
 
+static void test_device_caps(void)
+{
+    IDirect3DDevice9Ex *device;
+    ULONG refcount;
+    D3DCAPS9 caps;
+    HWND window;
+    HRESULT hr;
+
+    window = create_window();
+    if (!(device = create_device(window, NULL)))
+    {
+        skip("Failed to create a D3D device.\n");
+        DestroyWindow(window);
+        return;
+    }
+
+    hr = IDirect3DDevice9Ex_GetDeviceCaps(device, &caps);
+    ok(SUCCEEDED(hr), "Failed to get caps, hr %#x.\n", hr);
+
+    ok(!(caps.Caps & ~(D3DCAPS_OVERLAY | D3DCAPS_READ_SCANLINE)),
+            "Caps field has unexpected flags %#x.\n", caps.Caps);
+    ok(!(caps.Caps2 & ~(D3DCAPS2_NO2DDURING3DSCENE | D3DCAPS2_FULLSCREENGAMMA
+            | D3DCAPS2_CANRENDERWINDOWED | D3DCAPS2_CANCALIBRATEGAMMA | D3DCAPS2_RESERVED
+            | D3DCAPS2_CANMANAGERESOURCE | D3DCAPS2_DYNAMICTEXTURES | D3DCAPS2_CANAUTOGENMIPMAP
+            | D3DCAPS2_CANSHARERESOURCE)),
+            "Caps2 field has unexpected flags %#x.\n", caps.Caps2);
+    /* AMD doesn't filter all the ddraw / d3d9 caps. Consider that behavior
+     * broken. */
+    ok(!(caps.Caps3 & ~(D3DCAPS3_ALPHA_FULLSCREEN_FLIP_OR_DISCARD
+            | D3DCAPS3_LINEAR_TO_SRGB_PRESENTATION | D3DCAPS3_COPY_TO_VIDMEM
+            | D3DCAPS3_COPY_TO_SYSTEMMEM | D3DCAPS3_DXVAHD | D3DCAPS3_DXVAHD_LIMITED
+            | D3DCAPS3_RESERVED)),
+            "Caps3 field has unexpected flags %#x.\n", caps.Caps3);
+    ok(!(caps.PrimitiveMiscCaps & ~(D3DPMISCCAPS_MASKZ | D3DPMISCCAPS_LINEPATTERNREP
+            | D3DPMISCCAPS_CULLNONE | D3DPMISCCAPS_CULLCW | D3DPMISCCAPS_CULLCCW
+            | D3DPMISCCAPS_COLORWRITEENABLE | D3DPMISCCAPS_CLIPPLANESCALEDPOINTS
+            | D3DPMISCCAPS_CLIPTLVERTS | D3DPMISCCAPS_TSSARGTEMP | D3DPMISCCAPS_BLENDOP
+            | D3DPMISCCAPS_NULLREFERENCE | D3DPMISCCAPS_INDEPENDENTWRITEMASKS
+            | D3DPMISCCAPS_PERSTAGECONSTANT | D3DPMISCCAPS_FOGANDSPECULARALPHA
+            | D3DPMISCCAPS_SEPARATEALPHABLEND | D3DPMISCCAPS_MRTINDEPENDENTBITDEPTHS
+            | D3DPMISCCAPS_MRTPOSTPIXELSHADERBLENDING | D3DPMISCCAPS_FOGVERTEXCLAMPED
+            | D3DPMISCCAPS_POSTBLENDSRGBCONVERT)),
+            "PrimitiveMiscCaps field has unexpected flags %#x.\n", caps.PrimitiveMiscCaps);
+    ok(!(caps.RasterCaps & ~(D3DPRASTERCAPS_DITHER | D3DPRASTERCAPS_PAT | D3DPRASTERCAPS_ZTEST
+            | D3DPRASTERCAPS_FOGVERTEX | D3DPRASTERCAPS_FOGTABLE | D3DPRASTERCAPS_ANTIALIASEDGES
+            | D3DPRASTERCAPS_MIPMAPLODBIAS | D3DPRASTERCAPS_ZBIAS | D3DPRASTERCAPS_ZBUFFERLESSHSR
+            | D3DPRASTERCAPS_FOGRANGE | D3DPRASTERCAPS_ANISOTROPY | D3DPRASTERCAPS_WBUFFER
+            | D3DPRASTERCAPS_WFOG | D3DPRASTERCAPS_ZFOG | D3DPRASTERCAPS_COLORPERSPECTIVE
+            | D3DPRASTERCAPS_SCISSORTEST | D3DPRASTERCAPS_SLOPESCALEDEPTHBIAS
+            | D3DPRASTERCAPS_DEPTHBIAS | D3DPRASTERCAPS_MULTISAMPLE_TOGGLE)),
+            "RasterCaps field has unexpected flags %#x.\n", caps.RasterCaps);
+    /* D3DPBLENDCAPS_SRCCOLOR2 and D3DPBLENDCAPS_INVSRCCOLOR2 are only
+     * advertised on the reference rasterizer and WARP. */
+    ok(!(caps.SrcBlendCaps & ~(D3DPBLENDCAPS_ZERO | D3DPBLENDCAPS_ONE | D3DPBLENDCAPS_SRCCOLOR
+            | D3DPBLENDCAPS_INVSRCCOLOR | D3DPBLENDCAPS_SRCALPHA | D3DPBLENDCAPS_INVSRCALPHA
+            | D3DPBLENDCAPS_DESTALPHA | D3DPBLENDCAPS_INVDESTALPHA | D3DPBLENDCAPS_DESTCOLOR
+            | D3DPBLENDCAPS_INVDESTCOLOR | D3DPBLENDCAPS_SRCALPHASAT | D3DPBLENDCAPS_BOTHSRCALPHA
+            | D3DPBLENDCAPS_BOTHINVSRCALPHA | D3DPBLENDCAPS_BLENDFACTOR))
+            || broken(!(caps.SrcBlendCaps & ~(D3DPBLENDCAPS_ZERO | D3DPBLENDCAPS_ONE | D3DPBLENDCAPS_SRCCOLOR
+            | D3DPBLENDCAPS_INVSRCCOLOR | D3DPBLENDCAPS_SRCALPHA | D3DPBLENDCAPS_INVSRCALPHA
+            | D3DPBLENDCAPS_DESTALPHA | D3DPBLENDCAPS_INVDESTALPHA | D3DPBLENDCAPS_DESTCOLOR
+            | D3DPBLENDCAPS_INVDESTCOLOR | D3DPBLENDCAPS_SRCALPHASAT | D3DPBLENDCAPS_BOTHSRCALPHA
+            | D3DPBLENDCAPS_BOTHINVSRCALPHA | D3DPBLENDCAPS_BLENDFACTOR
+            | D3DPBLENDCAPS_SRCCOLOR2 | D3DPBLENDCAPS_INVSRCCOLOR2))),
+            "SrcBlendCaps field has unexpected flags %#x.\n", caps.SrcBlendCaps);
+    ok(!(caps.DestBlendCaps & ~(D3DPBLENDCAPS_ZERO | D3DPBLENDCAPS_ONE | D3DPBLENDCAPS_SRCCOLOR
+            | D3DPBLENDCAPS_INVSRCCOLOR | D3DPBLENDCAPS_SRCALPHA | D3DPBLENDCAPS_INVSRCALPHA
+            | D3DPBLENDCAPS_DESTALPHA | D3DPBLENDCAPS_INVDESTALPHA | D3DPBLENDCAPS_DESTCOLOR
+            | D3DPBLENDCAPS_INVDESTCOLOR | D3DPBLENDCAPS_SRCALPHASAT | D3DPBLENDCAPS_BOTHSRCALPHA
+            | D3DPBLENDCAPS_BOTHINVSRCALPHA | D3DPBLENDCAPS_BLENDFACTOR))
+            || broken(!(caps.SrcBlendCaps & ~(D3DPBLENDCAPS_ZERO | D3DPBLENDCAPS_ONE | D3DPBLENDCAPS_SRCCOLOR
+            | D3DPBLENDCAPS_INVSRCCOLOR | D3DPBLENDCAPS_SRCALPHA | D3DPBLENDCAPS_INVSRCALPHA
+            | D3DPBLENDCAPS_DESTALPHA | D3DPBLENDCAPS_INVDESTALPHA | D3DPBLENDCAPS_DESTCOLOR
+            | D3DPBLENDCAPS_INVDESTCOLOR | D3DPBLENDCAPS_SRCALPHASAT | D3DPBLENDCAPS_BOTHSRCALPHA
+            | D3DPBLENDCAPS_BOTHINVSRCALPHA | D3DPBLENDCAPS_BLENDFACTOR
+            | D3DPBLENDCAPS_SRCCOLOR2 | D3DPBLENDCAPS_INVSRCCOLOR2))),
+            "DestBlendCaps field has unexpected flags %#x.\n", caps.DestBlendCaps);
+    ok(!(caps.TextureCaps & ~(D3DPTEXTURECAPS_PERSPECTIVE | D3DPTEXTURECAPS_POW2
+            | D3DPTEXTURECAPS_ALPHA | D3DPTEXTURECAPS_SQUAREONLY
+            | D3DPTEXTURECAPS_TEXREPEATNOTSCALEDBYSIZE | D3DPTEXTURECAPS_ALPHAPALETTE
+            | D3DPTEXTURECAPS_NONPOW2CONDITIONAL | D3DPTEXTURECAPS_PROJECTED
+            | D3DPTEXTURECAPS_CUBEMAP | D3DPTEXTURECAPS_VOLUMEMAP | D3DPTEXTURECAPS_MIPMAP
+            | D3DPTEXTURECAPS_MIPVOLUMEMAP | D3DPTEXTURECAPS_MIPCUBEMAP
+            | D3DPTEXTURECAPS_CUBEMAP_POW2 | D3DPTEXTURECAPS_VOLUMEMAP_POW2
+            | D3DPTEXTURECAPS_NOPROJECTEDBUMPENV)),
+            "TextureCaps field has unexpected flags %#x.\n", caps.TextureCaps);
+    ok(!(caps.TextureFilterCaps & ~(D3DPTFILTERCAPS_MINFPOINT | D3DPTFILTERCAPS_MINFLINEAR
+            | D3DPTFILTERCAPS_MINFANISOTROPIC | D3DPTFILTERCAPS_MINFPYRAMIDALQUAD
+            | D3DPTFILTERCAPS_MINFGAUSSIANQUAD | D3DPTFILTERCAPS_MIPFPOINT
+            | D3DPTFILTERCAPS_MIPFLINEAR | D3DPTFILTERCAPS_CONVOLUTIONMONO
+            | D3DPTFILTERCAPS_MAGFPOINT | D3DPTFILTERCAPS_MAGFLINEAR
+            | D3DPTFILTERCAPS_MAGFANISOTROPIC | D3DPTFILTERCAPS_MAGFPYRAMIDALQUAD
+            | D3DPTFILTERCAPS_MAGFGAUSSIANQUAD)),
+            "TextureFilterCaps field has unexpected flags %#x.\n", caps.TextureFilterCaps);
+    ok(!(caps.CubeTextureFilterCaps & ~(D3DPTFILTERCAPS_MINFPOINT | D3DPTFILTERCAPS_MINFLINEAR
+            | D3DPTFILTERCAPS_MINFANISOTROPIC | D3DPTFILTERCAPS_MINFPYRAMIDALQUAD
+            | D3DPTFILTERCAPS_MINFGAUSSIANQUAD | D3DPTFILTERCAPS_MIPFPOINT
+            | D3DPTFILTERCAPS_MIPFLINEAR | D3DPTFILTERCAPS_MAGFPOINT | D3DPTFILTERCAPS_MAGFLINEAR
+            | D3DPTFILTERCAPS_MAGFANISOTROPIC | D3DPTFILTERCAPS_MAGFPYRAMIDALQUAD
+            | D3DPTFILTERCAPS_MAGFGAUSSIANQUAD)),
+            "CubeTextureFilterCaps field has unexpected flags %#x.\n", caps.CubeTextureFilterCaps);
+    ok(!(caps.VolumeTextureFilterCaps & ~(D3DPTFILTERCAPS_MINFPOINT | D3DPTFILTERCAPS_MINFLINEAR
+            | D3DPTFILTERCAPS_MINFANISOTROPIC | D3DPTFILTERCAPS_MINFPYRAMIDALQUAD
+            | D3DPTFILTERCAPS_MINFGAUSSIANQUAD | D3DPTFILTERCAPS_MIPFPOINT
+            | D3DPTFILTERCAPS_MIPFLINEAR | D3DPTFILTERCAPS_MAGFPOINT | D3DPTFILTERCAPS_MAGFLINEAR
+            | D3DPTFILTERCAPS_MAGFANISOTROPIC | D3DPTFILTERCAPS_MAGFPYRAMIDALQUAD
+            | D3DPTFILTERCAPS_MAGFGAUSSIANQUAD)),
+            "VolumeTextureFilterCaps field has unexpected flags %#x.\n", caps.VolumeTextureFilterCaps);
+    ok(!(caps.LineCaps & ~(D3DLINECAPS_TEXTURE | D3DLINECAPS_ZTEST | D3DLINECAPS_BLEND
+            | D3DLINECAPS_ALPHACMP | D3DLINECAPS_FOG | D3DLINECAPS_ANTIALIAS)),
+            "LineCaps field has unexpected flags %#x.\n", caps.LineCaps);
+    ok(!(caps.StencilCaps & ~(D3DSTENCILCAPS_KEEP | D3DSTENCILCAPS_ZERO | D3DSTENCILCAPS_REPLACE
+            | D3DSTENCILCAPS_INCRSAT | D3DSTENCILCAPS_DECRSAT | D3DSTENCILCAPS_INVERT
+            | D3DSTENCILCAPS_INCR | D3DSTENCILCAPS_DECR | D3DSTENCILCAPS_TWOSIDED)),
+            "StencilCaps field has unexpected flags %#x.\n", caps.StencilCaps);
+    ok(!(caps.VertexProcessingCaps & ~(D3DVTXPCAPS_TEXGEN | D3DVTXPCAPS_MATERIALSOURCE7
+            | D3DVTXPCAPS_DIRECTIONALLIGHTS | D3DVTXPCAPS_POSITIONALLIGHTS | D3DVTXPCAPS_LOCALVIEWER
+            | D3DVTXPCAPS_TWEENING | D3DVTXPCAPS_TEXGEN_SPHEREMAP
+            | D3DVTXPCAPS_NO_TEXGEN_NONLOCALVIEWER)),
+            "VertexProcessingCaps field has unexpected flags %#x.\n", caps.VertexProcessingCaps);
+    /* Both Nvidia and AMD give 10 here. */
+    ok(caps.MaxActiveLights <= 10,
+            "MaxActiveLights field has unexpected value %u.\n", caps.MaxActiveLights);
+    /* AMD gives 6, Nvidia returns 8. */
+    ok(caps.MaxUserClipPlanes <= 8,
+            "MaxUserClipPlanes field has unexpected value %u.\n", caps.MaxUserClipPlanes);
+
+    refcount = IDirect3DDevice9Ex_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    DestroyWindow(window);
+}
+
+static void test_frame_latency(void)
+{
+    IDirect3DDevice9Ex *device;
+    ULONG refcount;
+    UINT latency;
+    HWND window;
+    HRESULT hr;
+
+    window = create_window();
+    if (!(device = create_device(window, NULL)))
+    {
+        skip("Failed to create a D3D device.\n");
+        DestroyWindow(window);
+        return;
+    }
+
+    hr = IDirect3DDevice9Ex_GetMaximumFrameLatency(device, &latency);
+    ok(SUCCEEDED(hr), "Failed to get max frame latency, hr %#x.\n", hr);
+    ok(latency == 3, "Unexpected default max frame latency %u.\n", latency);
+
+    hr = IDirect3DDevice9Ex_SetMaximumFrameLatency(device, 1);
+    ok(SUCCEEDED(hr), "Failed to set max frame latency, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9Ex_GetMaximumFrameLatency(device, &latency);
+    ok(SUCCEEDED(hr), "Failed to get max frame latency, hr %#x.\n", hr);
+    ok(latency == 1, "Unexpected max frame latency %u.\n", latency);
+
+    hr = IDirect3DDevice9Ex_SetMaximumFrameLatency(device, 0);
+    ok(SUCCEEDED(hr), "Failed to set max frame latency, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9Ex_GetMaximumFrameLatency(device, &latency);
+    ok(SUCCEEDED(hr), "Failed to get max frame latency, hr %#x.\n", hr);
+    ok(latency == 3, "Unexpected default max frame latency %u.\n", latency);
+
+    hr = IDirect3DDevice9Ex_SetMaximumFrameLatency(device, 30);
+    ok(SUCCEEDED(hr), "Failed to set max frame latency, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9Ex_SetMaximumFrameLatency(device, 31);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    refcount = IDirect3DDevice9Ex_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    DestroyWindow(window);
+}
+
 START_TEST(d3d9ex)
 {
     DEVMODEW current_mode;
@@ -3825,4 +4135,6 @@ START_TEST(d3d9ex)
     test_swapchain_parameters();
     test_backbuffer_resize();
     test_format_unknown();
+    test_device_caps();
+    test_frame_latency();
 }

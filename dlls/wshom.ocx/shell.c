@@ -24,6 +24,7 @@
 #include "dispex.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wshom);
@@ -130,7 +131,7 @@ static ULONG WINAPI WshExec_Release(IWshExec *iface)
     if (!ref) {
         CloseHandle(This->info.hThread);
         CloseHandle(This->info.hProcess);
-        HeapFree(GetProcessHeap(), 0, This);
+        heap_free(This);
     }
 
     return ref;
@@ -325,7 +326,7 @@ static HRESULT WshExec_create(BSTR command, IWshExec **ret)
 
     *ret = NULL;
 
-    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    This = heap_alloc(sizeof(*This));
     if (!This)
         return E_OUTOFMEMORY;
 
@@ -333,7 +334,7 @@ static HRESULT WshExec_create(BSTR command, IWshExec **ret)
     This->ref = 1;
 
     if (!CreateProcessW(NULL, command, NULL, NULL, FALSE, 0, NULL, NULL, &si, &This->info)) {
-        HeapFree(GetProcessHeap(), 0, This);
+        heap_free(This);
         return HRESULT_FROM_WIN32(GetLastError());
     }
 
@@ -383,7 +384,7 @@ static ULONG WINAPI WshEnvironment_Release(IWshEnvironment *iface)
     TRACE("(%p) ref = %d\n", This, ref);
 
     if (!ref)
-        HeapFree(GetProcessHeap(), 0, This);
+        heap_free(This);
 
     return ref;
 }
@@ -519,7 +520,7 @@ static HRESULT WshEnvironment_Create(IWshEnvironment **env)
 {
     WshEnvironment *This;
 
-    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    This = heap_alloc(sizeof(*This));
     if (!This) return E_OUTOFMEMORY;
 
     This->IWshEnvironment_iface.lpVtbl = &WshEnvironmentVtbl;
@@ -572,7 +573,7 @@ static ULONG WINAPI WshCollection_Release(IWshCollection *iface)
     TRACE("(%p) ref = %d\n", This, ref);
 
     if (!ref)
-        HeapFree(GetProcessHeap(), 0, This);
+        heap_free(This);
 
     return ref;
 }
@@ -721,7 +722,7 @@ static HRESULT WshCollection_Create(IWshCollection **collection)
 {
     WshCollection *This;
 
-    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    This = heap_alloc(sizeof(*This));
     if (!This) return E_OUTOFMEMORY;
 
     This->IWshCollection_iface.lpVtbl = &WshCollectionVtbl;
@@ -778,7 +779,7 @@ static ULONG WINAPI WshShortcut_Release(IWshShortcut *iface)
     {
         SysFreeString(This->path_link);
         IShellLinkW_Release(This->link);
-        HeapFree(GetProcessHeap(), 0, This);
+        heap_free(This);
     }
 
     return ref;
@@ -859,7 +860,7 @@ static HRESULT WINAPI WshShortcut_get_Arguments(IWshShortcut *iface, BSTR *Argum
 
     *Arguments = NULL;
 
-    hr = IShellLinkW_GetArguments(This->link, buffW, sizeof(buffW)/sizeof(WCHAR));
+    hr = IShellLinkW_GetArguments(This->link, buffW, ARRAY_SIZE(buffW));
     if (FAILED(hr))
         return hr;
 
@@ -917,7 +918,7 @@ static HRESULT WINAPI WshShortcut_get_IconLocation(IWshShortcut *iface, BSTR *Ic
     if (!IconPath)
         return E_POINTER;
 
-    hr = IShellLinkW_GetIconLocation(This->link, buffW, sizeof(buffW)/sizeof(WCHAR), &icon);
+    hr = IShellLinkW_GetIconLocation(This->link, buffW, ARRAY_SIZE(buffW), &icon);
     if (FAILED(hr)) return hr;
 
     sprintfW(pathW, fmtW, buffW, icon);
@@ -1006,7 +1007,7 @@ static HRESULT WINAPI WshShortcut_get_WorkingDirectory(IWshShortcut *iface, BSTR
         return E_POINTER;
 
     *WorkingDirectory = NULL;
-    hr = IShellLinkW_GetWorkingDirectory(This->link, buffW, sizeof(buffW)/sizeof(WCHAR));
+    hr = IShellLinkW_GetWorkingDirectory(This->link, buffW, ARRAY_SIZE(buffW));
     if (FAILED(hr)) return hr;
 
     *WorkingDirectory = SysAllocString(buffW);
@@ -1077,7 +1078,7 @@ static HRESULT WshShortcut_Create(const WCHAR *path, IDispatch **shortcut)
 
     *shortcut = NULL;
 
-    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    This = heap_alloc(sizeof(*This));
     if (!This) return E_OUTOFMEMORY;
 
     This->IWshShortcut_iface.lpVtbl = &WshShortcutVtbl;
@@ -1087,7 +1088,7 @@ static HRESULT WshShortcut_Create(const WCHAR *path, IDispatch **shortcut)
             &IID_IShellLinkW, (void**)&This->link);
     if (FAILED(hr))
     {
-        HeapFree(GetProcessHeap(), 0, This);
+        heap_free(This);
         return hr;
     }
 
@@ -1095,7 +1096,7 @@ static HRESULT WshShortcut_Create(const WCHAR *path, IDispatch **shortcut)
     if (!This->path_link)
     {
         IShellLinkW_Release(This->link);
-        HeapFree(GetProcessHeap(), 0, This);
+        heap_free(This);
         return E_OUTOFMEMORY;
     }
 
@@ -1192,7 +1193,7 @@ static HRESULT WINAPI WshShell3_Invoke(IWshShell3 *iface, DISPID dispIdMember, R
     hr = get_typeinfo(IWshShell3_tid, &typeinfo);
     if(SUCCEEDED(hr))
     {
-        hr = ITypeInfo_Invoke(typeinfo, &WshShell3, dispIdMember, wFlags,
+        hr = ITypeInfo_Invoke(typeinfo, &WshShell3.IWshShell3_iface, dispIdMember, wFlags,
                 pDispParams, pVarResult, pExcepInfo, puArgErr);
         ITypeInfo_Release(typeinfo);
     }
@@ -1275,11 +1276,81 @@ static HRESULT WINAPI WshShell3_Run(IWshShell3 *iface, BSTR cmd, VARIANT *style,
     }
 }
 
-static HRESULT WINAPI WshShell3_Popup(IWshShell3 *iface, BSTR Text, VARIANT* SecondsToWait, VARIANT *Title, VARIANT *Type, int *button)
+struct popup_thread_param
 {
-    FIXME("(%s %s %s %s %p): stub\n", debugstr_w(Text), debugstr_variant(SecondsToWait),
-        debugstr_variant(Title), debugstr_variant(Type), button);
-    return E_NOTIMPL;
+    WCHAR *text;
+    VARIANT title;
+    VARIANT type;
+    INT button;
+};
+
+static DWORD WINAPI popup_thread_proc(void *arg)
+{
+    static const WCHAR defaulttitleW[] = {'W','i','n','d','o','w','s',' ','S','c','r','i','p','t',' ','H','o','s','t',0};
+    struct popup_thread_param *param = (struct popup_thread_param *)arg;
+
+    param->button = MessageBoxW(NULL, param->text, is_optional_argument(&param->title) ?
+            defaulttitleW : V_BSTR(&param->title), V_I4(&param->type));
+    return 0;
+}
+
+static HRESULT WINAPI WshShell3_Popup(IWshShell3 *iface, BSTR text, VARIANT *seconds_to_wait, VARIANT *title,
+        VARIANT *type, int *button)
+{
+    struct popup_thread_param param;
+    DWORD tid, status;
+    VARIANT timeout;
+    HANDLE hthread;
+    HRESULT hr;
+
+    TRACE("(%s %s %s %s %p)\n", debugstr_w(text), debugstr_variant(seconds_to_wait), debugstr_variant(title),
+        debugstr_variant(type), button);
+
+    if (!seconds_to_wait || !title || !type || !button)
+        return E_POINTER;
+
+    VariantInit(&timeout);
+    if (!is_optional_argument(seconds_to_wait))
+    {
+        hr = VariantChangeType(&timeout, seconds_to_wait, 0, VT_I4);
+        if (FAILED(hr))
+            return hr;
+    }
+
+    VariantInit(&param.type);
+    if (!is_optional_argument(type))
+    {
+        hr = VariantChangeType(&param.type, type, 0, VT_I4);
+        if (FAILED(hr))
+            return hr;
+    }
+
+    if (is_optional_argument(title))
+        param.title = *title;
+    else
+    {
+        VariantInit(&param.title);
+        hr = VariantChangeType(&param.title, title, 0, VT_BSTR);
+        if (FAILED(hr))
+            return hr;
+    }
+
+    param.text = text;
+    param.button = -1;
+    hthread = CreateThread(NULL, 0, popup_thread_proc, &param, 0, &tid);
+    status = MsgWaitForMultipleObjects(1, &hthread, FALSE, V_I4(&timeout) ? V_I4(&timeout) * 1000: INFINITE, 0);
+    if (status == WAIT_TIMEOUT)
+    {
+        PostThreadMessageW(tid, WM_QUIT, 0, 0);
+        MsgWaitForMultipleObjects(1, &hthread, FALSE, INFINITE, 0);
+        param.button = -1;
+    }
+    *button = param.button;
+
+    VariantClear(&param.title);
+    CloseHandle(hthread);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI WshShell3_CreateShortcut(IWshShell3 *iface, BSTR PathLink, IDispatch** Shortcut)
@@ -1325,7 +1396,7 @@ static HKEY get_root_key(const WCHAR *path)
     };
     int i;
 
-    for (i = 0; i < sizeof(rootkeys)/sizeof(rootkeys[0]); i++) {
+    for (i = 0; i < ARRAY_SIZE(rootkeys); i++) {
         if (!strncmpW(path, rootkeys[i].full, strlenW(rootkeys[i].full)))
             return rootkeys[i].hkey;
         if (rootkeys[i].abbrev[0] && !strncmpW(path, rootkeys[i].abbrev, strlenW(rootkeys[i].abbrev)))
@@ -1356,7 +1427,7 @@ static HRESULT split_reg_path(const WCHAR *path, WCHAR **subkey, WCHAR **value)
             unsigned int len = *value - *subkey - 1;
             WCHAR *ret;
 
-            ret = HeapAlloc(GetProcessHeap(), 0, (len+1)*sizeof(WCHAR));
+            ret = heap_alloc((len + 1)*sizeof(WCHAR));
             if (!ret)
                 return E_OUTOFMEMORY;
 
@@ -1396,7 +1467,7 @@ static HRESULT WINAPI WshShell3_RegRead(IWshShell3 *iface, BSTR name, VARIANT *v
     if (ret == ERROR_SUCCESS) {
         void *data;
 
-        data = HeapAlloc(GetProcessHeap(), 0, datalen);
+        data = heap_alloc(datalen);
         if (!data) {
             hr = E_OUTOFMEMORY;
             goto fail;
@@ -1404,7 +1475,7 @@ static HRESULT WINAPI WshShell3_RegRead(IWshShell3 *iface, BSTR name, VARIANT *v
 
         ret = RegGetValueW(root, subkey, val, RRF_RT_ANY, &type, data, &datalen);
         if (ret) {
-            HeapFree(GetProcessHeap(), 0, data);
+            heap_free(data);
             hr = HRESULT_FROM_WIN32(ret);
             goto fail;
         }
@@ -1494,7 +1565,7 @@ static HRESULT WINAPI WshShell3_RegRead(IWshShell3 *iface, BSTR name, VARIANT *v
             hr = E_FAIL;
         };
 
-        HeapFree(GetProcessHeap(), 0, data);
+        heap_free(data);
         if (FAILED(hr))
             VariantInit(value);
     }
@@ -1503,7 +1574,7 @@ static HRESULT WINAPI WshShell3_RegRead(IWshShell3 *iface, BSTR name, VARIANT *v
 
 fail:
     if (val)
-        HeapFree(GetProcessHeap(), 0, subkey);
+        heap_free(subkey);
     return hr;
 }
 
@@ -1591,7 +1662,7 @@ static HRESULT WINAPI WshShell3_RegWrite(IWshShell3 *iface, BSTR name, VARIANT *
 fail:
     VariantClear(&v);
     if (val)
-        HeapFree(GetProcessHeap(), 0, subkey);
+        heap_free(subkey);
     return hr;
 }
 

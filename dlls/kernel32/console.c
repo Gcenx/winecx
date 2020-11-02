@@ -1156,7 +1156,7 @@ static enum read_console_input_return bare_console_fetch_input(HANDLE handle, in
                 break;
             case -1:
                 /* we haven't found the string into key-db, push full input string into server */
-                idxw = MultiByteToWideChar(CP_UNIXCP, 0, input, idx, inputw, sizeof(inputw) / sizeof(inputw[0]));
+                idxw = MultiByteToWideChar(CP_UNIXCP, 0, input, idx, inputw, ARRAY_SIZE(inputw));
 
                 /* we cannot translate yet... likely we need more chars (wait max 1/2s for next char) */
                 if (idxw == 0)
@@ -1831,7 +1831,7 @@ BOOL WINAPI SetConsoleInputExeNameW(LPCWSTR name)
     }
 
     RtlEnterCriticalSection(&CONSOLE_CritSect);
-    if (strlenW(name) < sizeof(input_exe)/sizeof(WCHAR)) strcpyW(input_exe, name);
+    if (strlenW(name) < ARRAY_SIZE(input_exe)) strcpyW(input_exe, name);
     RtlLeaveCriticalSection(&CONSOLE_CritSect);
 
     return TRUE;
@@ -2909,8 +2909,23 @@ BOOL WINAPI ScrollConsoleScreenBufferW(HANDLE hConsoleOutput, LPSMALL_RECT lpScr
  */
 BOOL WINAPI AttachConsole(DWORD dwProcessId)
 {
-    FIXME("stub %x\n",dwProcessId);
-    return TRUE;
+    BOOL ret;
+
+    TRACE("(%x)\n", dwProcessId);
+
+    SERVER_START_REQ( attach_console )
+    {
+        req->pid = dwProcessId;
+        ret = !wine_server_call_err( req );
+        if (ret)
+        {
+            SetStdHandle(STD_INPUT_HANDLE,  wine_server_ptr_handle(reply->std_in));
+            SetStdHandle(STD_OUTPUT_HANDLE, wine_server_ptr_handle(reply->std_out));
+            SetStdHandle(STD_ERROR_HANDLE,  wine_server_ptr_handle(reply->std_err));
+        }
+    }
+    SERVER_END_REQ;
+    return ret;
 }
 
 /******************************************************************

@@ -19,6 +19,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define NONAMELESSSTRUCT
 #define NONAMELESSUNION
 
 #include "debugger.h"
@@ -30,23 +31,23 @@ WINE_DEFAULT_DEBUG_CHANNEL(winedbg);
 
 #define STEP_FLAG 0x00000100 /* single step flag */
 
-static BOOL be_x86_64_get_addr(HANDLE hThread, const CONTEXT* ctx,
+static BOOL be_x86_64_get_addr(HANDLE hThread, const dbg_ctx_t *ctx,
                                enum be_cpu_addr bca, ADDRESS64* addr)
 {
     addr->Mode = AddrModeFlat;
     switch (bca)
     {
     case be_cpu_addr_pc:
-        addr->Segment = ctx->SegCs;
-        addr->Offset = ctx->Rip;
+        addr->Segment = ctx->ctx.SegCs;
+        addr->Offset = ctx->ctx.Rip;
         return TRUE;
     case be_cpu_addr_stack:
-        addr->Segment = ctx->SegSs;
-        addr->Offset = ctx->Rsp;
+        addr->Segment = ctx->ctx.SegSs;
+        addr->Offset = ctx->ctx.Rsp;
         return TRUE;
     case be_cpu_addr_frame:
-        addr->Segment = ctx->SegSs;
-        addr->Offset = ctx->Rbp;
+        addr->Segment = ctx->ctx.SegSs;
+        addr->Offset = ctx->ctx.Rbp;
         return TRUE;
     default:
         addr->Mode = -1;
@@ -66,10 +67,10 @@ static BOOL be_x86_64_get_register_info(int regno, enum be_cpu_addr* kind)
     return FALSE;
 }
 
-static void be_x86_64_single_step(CONTEXT* ctx, BOOL enable)
+static void be_x86_64_single_step(dbg_ctx_t *ctx, BOOL enable)
 {
-    if (enable) ctx->EFlags |= STEP_FLAG;
-    else ctx->EFlags &= ~STEP_FLAG;
+    if (enable) ctx->ctx.EFlags |= STEP_FLAG;
+    else ctx->ctx.EFlags &= ~STEP_FLAG;
 }
 
 static inline long double m128a_to_longdouble(const M128A m)
@@ -80,12 +81,13 @@ static inline long double m128a_to_longdouble(const M128A m)
     return *(long double*)&m;
 }
 
-static void be_x86_64_print_context(HANDLE hThread, const CONTEXT* ctx,
+static void be_x86_64_print_context(HANDLE hThread, const dbg_ctx_t *pctx,
                                     int all_regs)
 {
     static const char mxcsr_flags[16][4] = { "IE", "DE", "ZE", "OE", "UE", "PE", "DAZ", "IM",
                                              "DM", "ZM", "OM", "UM", "PM", "R-", "R+", "FZ" };
     static const char flags[] = "aVR-N--ODITSZ-A-P-C";
+    const CONTEXT *ctx = &pctx->ctx;
     char buf[33];
     int i;
 
@@ -182,7 +184,7 @@ static void be_x86_64_print_context(HANDLE hThread, const CONTEXT* ctx,
     }
 }
 
-static void be_x86_64_print_segment_info(HANDLE hThread, const CONTEXT* ctx)
+static void be_x86_64_print_segment_info(HANDLE hThread, const dbg_ctx_t *ctx)
 {
 }
 
@@ -237,6 +239,30 @@ static struct dbg_internal_var be_x86_64_ctx[] =
     {CV_AMD64_R13,      "R13",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R13),     dbg_itype_unsigned_long_int},
     {CV_AMD64_R14,      "R14",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R14),     dbg_itype_unsigned_long_int},
     {CV_AMD64_R15,      "R15",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R15),     dbg_itype_unsigned_long_int},
+    {CV_AMD64_ST0,      "ST0",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.FltSave.FloatRegisters[0]), dbg_itype_long_real},
+    {CV_AMD64_ST0+1,    "ST1",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.FltSave.FloatRegisters[1]), dbg_itype_long_real},
+    {CV_AMD64_ST0+2,    "ST2",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.FltSave.FloatRegisters[2]), dbg_itype_long_real},
+    {CV_AMD64_ST0+3,    "ST3",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.FltSave.FloatRegisters[3]), dbg_itype_long_real},
+    {CV_AMD64_ST0+4,    "ST4",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.FltSave.FloatRegisters[4]), dbg_itype_long_real},
+    {CV_AMD64_ST0+5,    "ST5",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.FltSave.FloatRegisters[5]), dbg_itype_long_real},
+    {CV_AMD64_ST0+6,    "ST6",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.FltSave.FloatRegisters[6]), dbg_itype_long_real},
+    {CV_AMD64_ST0+7,    "ST7",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.FltSave.FloatRegisters[7]), dbg_itype_long_real},
+    {CV_AMD64_XMM0,     "XMM0",         (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.s.Xmm0),  dbg_itype_m128a},
+    {CV_AMD64_XMM0+1,   "XMM1",         (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.s.Xmm1),  dbg_itype_m128a},
+    {CV_AMD64_XMM0+2,   "XMM2",         (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.s.Xmm2),  dbg_itype_m128a},
+    {CV_AMD64_XMM0+3,   "XMM3",         (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.s.Xmm3),  dbg_itype_m128a},
+    {CV_AMD64_XMM0+4,   "XMM4",         (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.s.Xmm4),  dbg_itype_m128a},
+    {CV_AMD64_XMM0+5,   "XMM5",         (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.s.Xmm5),  dbg_itype_m128a},
+    {CV_AMD64_XMM0+6,   "XMM6",         (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.s.Xmm6),  dbg_itype_m128a},
+    {CV_AMD64_XMM0+7,   "XMM7",         (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.s.Xmm7),  dbg_itype_m128a},
+    {CV_AMD64_XMM8,     "XMM8",         (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.s.Xmm8),  dbg_itype_m128a},
+    {CV_AMD64_XMM8+1,   "XMM9",         (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.s.Xmm9),  dbg_itype_m128a},
+    {CV_AMD64_XMM8+2,   "XMM10",        (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.s.Xmm10), dbg_itype_m128a},
+    {CV_AMD64_XMM8+3,   "XMM11",        (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.s.Xmm11), dbg_itype_m128a},
+    {CV_AMD64_XMM8+4,   "XMM12",        (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.s.Xmm12), dbg_itype_m128a},
+    {CV_AMD64_XMM8+5,   "XMM13",        (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.s.Xmm13), dbg_itype_m128a},
+    {CV_AMD64_XMM8+6,   "XMM14",        (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.s.Xmm14), dbg_itype_m128a},
+    {CV_AMD64_XMM8+7,   "XMM15",        (DWORD_PTR*)FIELD_OFFSET(CONTEXT, u.s.Xmm15), dbg_itype_m128a},
     {0,                 NULL,           0,                                          dbg_itype_none}
 };
 
@@ -365,7 +391,7 @@ static BOOL be_x86_64_is_func_call(const void* insn, ADDRESS64* callee)
 
     /* that's the only mode we support anyway */
     callee->Mode = AddrModeFlat;
-    callee->Segment = dbg_context.SegCs;
+    callee->Segment = dbg_context.ctx.SegCs;
 
     switch (ch)
     {
@@ -410,14 +436,14 @@ static BOOL be_x86_64_is_func_call(const void* insn, ADDRESS64* callee)
         default:
             switch (f_rm(ch))
             {
-            case 0x00: dst = dbg_context.Rax; break;
-            case 0x01: dst = dbg_context.Rcx; break;
-            case 0x02: dst = dbg_context.Rdx; break;
-            case 0x03: dst = dbg_context.Rbx; break;
-            case 0x04: dst = dbg_context.Rsp; break;
-            case 0x05: dst = dbg_context.Rbp; break;
-            case 0x06: dst = dbg_context.Rsi; break;
-            case 0x07: dst = dbg_context.Rdi; break;
+            case 0x00: dst = dbg_context.ctx.Rax; break;
+            case 0x01: dst = dbg_context.ctx.Rcx; break;
+            case 0x02: dst = dbg_context.ctx.Rdx; break;
+            case 0x03: dst = dbg_context.ctx.Rbx; break;
+            case 0x04: dst = dbg_context.ctx.Rsp; break;
+            case 0x05: dst = dbg_context.ctx.Rbp; break;
+            case 0x06: dst = dbg_context.ctx.Rsi; break;
+            case 0x07: dst = dbg_context.ctx.Rdi; break;
             }
             if (f_mod(ch) != 0x03)
                 WINE_FIXME("Unsupported yet call insn (0xFF 0x%02x) at %p\n", ch, insn);
@@ -469,8 +495,10 @@ extern void be_x86_64_disasm_one_insn(ADDRESS64* addr, int display);
 #define	DR7_ENABLE_MASK(dr)	(1<<(DR7_LOCAL_ENABLE_SHIFT+DR7_ENABLE_SIZE*(dr)))
 #define	IS_DR7_SET(ctrl,dr) 	((ctrl)&DR7_ENABLE_MASK(dr))
 
-static inline int be_x86_64_get_unused_DR(CONTEXT* ctx, DWORD64** r)
+static inline int be_x86_64_get_unused_DR(dbg_ctx_t *pctx, DWORD64** r)
 {
+    CONTEXT *ctx = &pctx->ctx;
+
     if (!IS_DR7_SET(ctx->Dr7, 0))
     {
         *r = &ctx->Dr0;
@@ -497,7 +525,7 @@ static inline int be_x86_64_get_unused_DR(CONTEXT* ctx, DWORD64** r)
 }
 
 static BOOL be_x86_64_insert_Xpoint(HANDLE hProcess, const struct be_process_io* pio,
-                                    CONTEXT* ctx, enum be_xpoint_type type,
+                                    dbg_ctx_t *ctx, enum be_xpoint_type type,
                                     void* addr, unsigned long* val, unsigned size)
 {
     unsigned char       ch;
@@ -536,10 +564,10 @@ static BOOL be_x86_64_insert_Xpoint(HANDLE hProcess, const struct be_process_io*
         }
         *val = reg;
         /* clear old values */
-        ctx->Dr7 &= ~(0x0F << (DR7_CONTROL_SHIFT + DR7_CONTROL_SIZE * reg));
+        ctx->ctx.Dr7 &= ~(0x0F << (DR7_CONTROL_SHIFT + DR7_CONTROL_SIZE * reg));
         /* set the correct ones */
-        ctx->Dr7 |= bits << (DR7_CONTROL_SHIFT + DR7_CONTROL_SIZE * reg);
-	ctx->Dr7 |= DR7_ENABLE_MASK(reg) | DR7_LOCAL_SLOWDOWN;
+        ctx->ctx.Dr7 |= bits << (DR7_CONTROL_SHIFT + DR7_CONTROL_SIZE * reg);
+        ctx->ctx.Dr7 |= DR7_ENABLE_MASK(reg) | DR7_LOCAL_SLOWDOWN;
         break;
     default:
         dbg_printf("Unknown bp type %c\n", type);
@@ -549,7 +577,7 @@ static BOOL be_x86_64_insert_Xpoint(HANDLE hProcess, const struct be_process_io*
 }
 
 static BOOL be_x86_64_remove_Xpoint(HANDLE hProcess, const struct be_process_io* pio,
-                                    CONTEXT* ctx, enum be_xpoint_type type,
+                                    dbg_ctx_t *ctx, enum be_xpoint_type type,
                                     void* addr, unsigned long val, unsigned size)
 {
     SIZE_T              sz;
@@ -569,7 +597,7 @@ static BOOL be_x86_64_remove_Xpoint(HANDLE hProcess, const struct be_process_io*
     case be_xpoint_watch_read:
     case be_xpoint_watch_write:
         /* simply disable the entry */
-        ctx->Dr7 &= ~DR7_ENABLE_MASK(val);
+        ctx->ctx.Dr7 &= ~DR7_ENABLE_MASK(val);
         break;
     default:
         dbg_printf("Unknown bp type %c\n", type);
@@ -578,24 +606,24 @@ static BOOL be_x86_64_remove_Xpoint(HANDLE hProcess, const struct be_process_io*
     return TRUE;
 }
 
-static BOOL be_x86_64_is_watchpoint_set(const CONTEXT* ctx, unsigned idx)
+static BOOL be_x86_64_is_watchpoint_set(const dbg_ctx_t *ctx, unsigned idx)
 {
-    return ctx->Dr6 & (1 << idx);
+    return ctx->ctx.Dr6 & (1 << idx);
 }
 
-static void be_x86_64_clear_watchpoint(CONTEXT* ctx, unsigned idx)
+static void be_x86_64_clear_watchpoint(dbg_ctx_t *ctx, unsigned idx)
 {
-    ctx->Dr6 &= ~(1 << idx);
+    ctx->ctx.Dr6 &= ~(1 << idx);
 }
 
-static int be_x86_64_adjust_pc_for_break(CONTEXT* ctx, BOOL way)
+static int be_x86_64_adjust_pc_for_break(dbg_ctx_t *ctx, BOOL way)
 {
     if (way)
     {
-        ctx->Rip--;
+        ctx->ctx.Rip--;
         return -1;
     }
-    ctx->Rip++;
+    ctx->ctx.Rip++;
     return 1;
 }
 
@@ -631,9 +659,9 @@ static BOOL be_x86_64_fetch_float(const struct dbg_lvalue* lvalue, unsigned size
     if (!memory_read_value(lvalue, size, tmp)) return FALSE;
 
     /* float & double types have to be promoted to a long double */
-    if (size == sizeof(float)) *ret = *(float*)tmp;
-    else if (size == sizeof(double)) *ret = *(double*)tmp;
-    else if (size == sizeof(long double)) *ret = *(long double*)tmp;
+    if (size == 4) *ret = *(float*)tmp;
+    else if (size == 8) *ret = *(double*)tmp;
+    else if (size == 10) *ret = *(long double*)tmp;
     else return FALSE;
 
     return TRUE;
@@ -645,6 +673,79 @@ static BOOL be_x86_64_store_integer(const struct dbg_lvalue* lvalue, unsigned si
     /* this is simple as we're on a little endian CPU */
     return memory_write_value(lvalue, size, &val);
 }
+
+static BOOL be_x86_64_get_context(HANDLE thread, dbg_ctx_t *ctx)
+{
+    ctx->ctx.ContextFlags = CONTEXT_ALL;
+    return GetThreadContext(thread, &ctx->ctx);
+}
+
+static BOOL be_x86_64_set_context(HANDLE thread, const dbg_ctx_t *ctx)
+{
+    return SetThreadContext(thread, &ctx->ctx);
+}
+
+#define REG(r,gs)  {FIELD_OFFSET(CONTEXT, r), sizeof(((CONTEXT*)NULL)->r), gs}
+
+static struct gdb_register be_x86_64_gdb_register_map[] = {
+    REG(Rax, 8),
+    REG(Rbx, 8),
+    REG(Rcx, 8),
+    REG(Rdx, 8),
+    REG(Rsi, 8),
+    REG(Rdi, 8),
+    REG(Rbp, 8),
+    REG(Rsp, 8),
+    REG(R8,  8),
+    REG(R9,  8),
+    REG(R10, 8),
+    REG(R11, 8),
+    REG(R12, 8),
+    REG(R13, 8),
+    REG(R14, 8),
+    REG(R15, 8),
+    REG(Rip, 8),
+    REG(EFlags, 4),
+    REG(SegCs, 4),
+    REG(SegSs, 4),
+    REG(SegDs, 4),
+    REG(SegEs, 4),
+    REG(SegFs, 4),
+    REG(SegGs, 4),
+    { FIELD_OFFSET(CONTEXT, u.FltSave.FloatRegisters[ 0]), 10, 10 },
+    { FIELD_OFFSET(CONTEXT, u.FltSave.FloatRegisters[ 1]), 10, 10 },
+    { FIELD_OFFSET(CONTEXT, u.FltSave.FloatRegisters[ 2]), 10, 10 },
+    { FIELD_OFFSET(CONTEXT, u.FltSave.FloatRegisters[ 3]), 10, 10 },
+    { FIELD_OFFSET(CONTEXT, u.FltSave.FloatRegisters[ 4]), 10, 10 },
+    { FIELD_OFFSET(CONTEXT, u.FltSave.FloatRegisters[ 5]), 10, 10 },
+    { FIELD_OFFSET(CONTEXT, u.FltSave.FloatRegisters[ 6]), 10, 10 },
+    { FIELD_OFFSET(CONTEXT, u.FltSave.FloatRegisters[ 7]), 10, 10 },
+    REG(u.FltSave.ControlWord, 4),
+    REG(u.FltSave.StatusWord, 4),
+    REG(u.FltSave.TagWord, 4),
+    REG(u.FltSave.ErrorSelector, 4),
+    REG(u.FltSave.ErrorOffset, 4),
+    REG(u.FltSave.DataSelector, 4),
+    REG(u.FltSave.DataOffset, 4),
+    REG(u.FltSave.ErrorOpcode, 4),
+    REG(u.s.Xmm0, 16),
+    REG(u.s.Xmm1, 16),
+    REG(u.s.Xmm2, 16),
+    REG(u.s.Xmm3, 16),
+    REG(u.s.Xmm4, 16),
+    REG(u.s.Xmm5, 16),
+    REG(u.s.Xmm6, 16),
+    REG(u.s.Xmm7, 16),
+    REG(u.s.Xmm8, 16),
+    REG(u.s.Xmm9, 16),
+    REG(u.s.Xmm10, 16),
+    REG(u.s.Xmm11, 16),
+    REG(u.s.Xmm12, 16),
+    REG(u.s.Xmm13, 16),
+    REG(u.s.Xmm14, 16),
+    REG(u.s.Xmm15, 16),
+    REG(u.FltSave.MxCsr, 4),
+};
 
 struct backend_cpu be_x86_64 =
 {
@@ -672,5 +773,9 @@ struct backend_cpu be_x86_64 =
     be_x86_64_fetch_integer,
     be_x86_64_fetch_float,
     be_x86_64_store_integer,
+    be_x86_64_get_context,
+    be_x86_64_set_context,
+    be_x86_64_gdb_register_map,
+    ARRAY_SIZE(be_x86_64_gdb_register_map),
 };
 #endif

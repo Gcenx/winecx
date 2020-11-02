@@ -44,9 +44,6 @@ typedef struct {
 
     LONG ref;
 
-    /* FIXME: implement weak reference */
-    HTMLDocumentNode *doc;
-
     nsIDOMNodeList *nslist;
 } HTMLDOMChildrenCollection;
 
@@ -136,7 +133,7 @@ static HRESULT WINAPI HTMLDOMChildrenCollectionEnum_Next(IEnumVARIANT *iface, UL
         nsres = nsIDOMNodeList_Item(This->col->nslist, This->iter+fetched, &nsnode);
         assert(nsres == NS_OK);
 
-        hres = get_node(This->col->doc, nsnode, TRUE, &node);
+        hres = get_node(nsnode, TRUE, &node);
         nsIDOMNode_Release(nsnode);
         if(FAILED(hres)) {
             ERR("get_node failed: %08x\n", hres);
@@ -244,7 +241,6 @@ static ULONG WINAPI HTMLDOMChildrenCollection_Release(IHTMLDOMChildrenCollection
     TRACE("(%p) ref=%d\n", This, ref);
 
     if(!ref) {
-        htmldoc_release(&This->doc->basedoc);
         nsIDOMNodeList_Release(This->nslist);
         heap_free(This);
     }
@@ -342,7 +338,7 @@ static HRESULT WINAPI HTMLDOMChildrenCollection_item(IHTMLDOMChildrenCollection 
         return E_FAIL;
     }
 
-    hres = get_node(This->doc, nsnode, TRUE, &node);
+    hres = get_node(nsnode, TRUE, &node);
     if(FAILED(hres))
         return hres;
 
@@ -436,10 +432,11 @@ static const tid_t HTMLDOMChildrenCollection_iface_tids[] = {
 static dispex_static_data_t HTMLDOMChildrenCollection_dispex = {
     &HTMLDOMChildrenCollection_dispex_vtbl,
     DispDOMChildrenCollection_tid,
-    HTMLDOMChildrenCollection_iface_tids
+    HTMLDOMChildrenCollection_iface_tids,
+    HTMLDOMNode_init_dispex_info
 };
 
-IHTMLDOMChildrenCollection *create_child_collection(HTMLDocumentNode *doc, nsIDOMNodeList *nslist)
+IHTMLDOMChildrenCollection *create_child_collection(nsIDOMNodeList *nslist)
 {
     HTMLDOMChildrenCollection *ret;
 
@@ -452,9 +449,6 @@ IHTMLDOMChildrenCollection *create_child_collection(HTMLDocumentNode *doc, nsIDO
 
     nsIDOMNodeList_AddRef(nslist);
     ret->nslist = nslist;
-
-    htmldoc_addref(&doc->basedoc);
-    ret->doc = doc;
 
     init_dispex(&ret->dispex, (IUnknown*)&ret->IHTMLDOMChildrenCollection_iface,
             &HTMLDOMChildrenCollection_dispex);
@@ -588,7 +582,7 @@ static HRESULT WINAPI HTMLDOMNode_get_parentNode(IHTMLDOMNode *iface, IHTMLDOMNo
         return S_OK;
     }
 
-    hres = get_node(This->doc, nsnode, TRUE, &node);
+    hres = get_node(nsnode, TRUE, &node);
     nsIDOMNode_Release(nsnode);
     if(FAILED(hres))
         return hres;
@@ -609,7 +603,7 @@ static HRESULT WINAPI HTMLDOMNode_hasChildNodes(IHTMLDOMNode *iface, VARIANT_BOO
     if(NS_FAILED(nsres))
         ERR("HasChildNodes failed: %08x\n", nsres);
 
-    *fChildren = has_child ? VARIANT_TRUE : VARIANT_FALSE;
+    *fChildren = variant_bool(has_child);
     return S_OK;
 }
 
@@ -627,7 +621,7 @@ static HRESULT WINAPI HTMLDOMNode_get_childNodes(IHTMLDOMNode *iface, IDispatch 
         return E_FAIL;
     }
 
-    *p = (IDispatch*)create_child_collection(This->doc, nslist);
+    *p = (IDispatch*)create_child_collection(nslist);
     nsIDOMNodeList_Release(nslist);
 
     return *p ? S_OK : E_OUTOFMEMORY;
@@ -711,7 +705,7 @@ static HRESULT WINAPI HTMLDOMNode_insertBefore(IHTMLDOMNode *iface, IHTMLDOMNode
     if(FAILED(hres))
         return hres;
 
-    hres = get_node(This->doc, nsnode, TRUE, &node_obj);
+    hres = get_node(nsnode, TRUE, &node_obj);
     nsIDOMNode_Release(nsnode);
     if(FAILED(hres))
         return hres;
@@ -742,7 +736,7 @@ static HRESULT WINAPI HTMLDOMNode_removeChild(IHTMLDOMNode *iface, IHTMLDOMNode 
         return E_FAIL;
     }
 
-    hres = get_node(This->doc, nsnode, TRUE, &node_obj);
+    hres = get_node(nsnode, TRUE, &node_obj);
     nsIDOMNode_Release(nsnode);
     if(FAILED(hres))
         return hres;
@@ -779,7 +773,7 @@ static HRESULT WINAPI HTMLDOMNode_replaceChild(IHTMLDOMNode *iface, IHTMLDOMNode
     if(NS_FAILED(nsres))
         return E_FAIL;
 
-    hres = get_node(This->doc, nsnode, TRUE, &ret_node);
+    hres = get_node(nsnode, TRUE, &ret_node);
     nsIDOMNode_Release(nsnode);
     if(FAILED(hres))
         return hres;
@@ -859,7 +853,7 @@ static HRESULT WINAPI HTMLDOMNode_appendChild(IHTMLDOMNode *iface, IHTMLDOMNode 
         return E_FAIL;
     }
 
-    hres = get_node(This->doc, nsnode, TRUE, &node_obj);
+    hres = get_node(nsnode, TRUE, &node_obj);
     nsIDOMNode_Release(nsnode);
     if(FAILED(hres))
         return hres;
@@ -945,7 +939,7 @@ static HRESULT WINAPI HTMLDOMNode_get_firstChild(IHTMLDOMNode *iface, IHTMLDOMNo
         return S_OK;
     }
 
-    hres = get_node(This->doc, nschild, TRUE, &node);
+    hres = get_node(nschild, TRUE, &node);
     nsIDOMNode_Release(nschild);
     if(FAILED(hres))
         return hres;
@@ -969,7 +963,7 @@ static HRESULT WINAPI HTMLDOMNode_get_lastChild(IHTMLDOMNode *iface, IHTMLDOMNod
         return S_OK;
     }
 
-    hres = get_node(This->doc, nschild, TRUE, &node);
+    hres = get_node(nschild, TRUE, &node);
     nsIDOMNode_Release(nschild);
     if(FAILED(hres))
         return hres;
@@ -993,7 +987,7 @@ static HRESULT WINAPI HTMLDOMNode_get_previousSibling(IHTMLDOMNode *iface, IHTML
         return S_OK;
     }
 
-    hres = get_node(This->doc, nschild, TRUE, &node);
+    hres = get_node(nschild, TRUE, &node);
     nsIDOMNode_Release(nschild);
     if(FAILED(hres))
         return hres;
@@ -1017,7 +1011,7 @@ static HRESULT WINAPI HTMLDOMNode_get_nextSibling(IHTMLDOMNode *iface, IHTMLDOMN
         return S_OK;
     }
 
-    hres = get_node(This->doc, nssibling, TRUE, &node);
+    hres = get_node(nssibling, TRUE, &node);
     nsIDOMNode_Release(nssibling);
     if(FAILED(hres))
         return hres;
@@ -1153,6 +1147,248 @@ static const IHTMLDOMNode2Vtbl HTMLDOMNode2Vtbl = {
     HTMLDOMNode2_get_ownerDocument
 };
 
+static inline HTMLDOMNode *impl_from_IHTMLDOMNode3(IHTMLDOMNode3 *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLDOMNode, IHTMLDOMNode3_iface);
+}
+
+static HRESULT WINAPI HTMLDOMNode3_QueryInterface(IHTMLDOMNode3 *iface, REFIID riid, void **ppv)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    return IHTMLDOMNode_QueryInterface(&This->IHTMLDOMNode_iface, riid, ppv);
+}
+
+static ULONG WINAPI HTMLDOMNode3_AddRef(IHTMLDOMNode3 *iface)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+
+    return IHTMLDOMNode_AddRef(&This->IHTMLDOMNode_iface);
+}
+
+static ULONG WINAPI HTMLDOMNode3_Release(IHTMLDOMNode3 *iface)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+
+    return IHTMLDOMNode_Release(&This->IHTMLDOMNode_iface);
+}
+
+static HRESULT WINAPI HTMLDOMNode3_GetTypeInfoCount(IHTMLDOMNode3 *iface, UINT *pctinfo)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    return IDispatchEx_GetTypeInfoCount(&This->event_target.dispex.IDispatchEx_iface, pctinfo);
+}
+
+static HRESULT WINAPI HTMLDOMNode3_GetTypeInfo(IHTMLDOMNode3 *iface, UINT iTInfo,
+        LCID lcid, ITypeInfo **ppTInfo)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    return IDispatchEx_GetTypeInfo(&This->event_target.dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
+}
+
+static HRESULT WINAPI HTMLDOMNode3_GetIDsOfNames(IHTMLDOMNode3 *iface, REFIID riid,
+                                                LPOLESTR *rgszNames, UINT cNames,
+                                                LCID lcid, DISPID *rgDispId)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    return IDispatchEx_GetIDsOfNames(&This->event_target.dispex.IDispatchEx_iface, riid, rgszNames, cNames,
+            lcid, rgDispId);
+}
+
+static HRESULT WINAPI HTMLDOMNode3_Invoke(IHTMLDOMNode3 *iface, DISPID dispIdMember,
+        REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
+        VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    return IDispatchEx_Invoke(&This->event_target.dispex.IDispatchEx_iface, dispIdMember, riid, lcid,
+            wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+}
+
+static HRESULT WINAPI HTMLDOMNode3_put_prefix(IHTMLDOMNode3 *iface, VARIANT v)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLDOMNode3_get_prefix(IHTMLDOMNode3 *iface, VARIANT *p)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLDOMNode3_get_localName(IHTMLDOMNode3 *iface, VARIANT *p)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLDOMNode3_get_namespaceURI(IHTMLDOMNode3 *iface, VARIANT *p)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLDOMNode3_put_textContent(IHTMLDOMNode3 *iface, VARIANT v)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    nsAString nsstr;
+    nsresult nsres;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&v));
+
+    if(V_VT(&v) != VT_BSTR) {
+        FIXME("unsupported argument %s\n", debugstr_variant(&v));
+        return E_NOTIMPL;
+    }
+
+    nsAString_Init(&nsstr, V_BSTR(&v));
+    nsres = nsIDOMNode_SetTextContent(This->nsnode, &nsstr);
+    nsAString_Finish(&nsstr);
+    if(NS_FAILED(nsres)) {
+        ERR("SetTextContent failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLDOMNode3_get_textContent(IHTMLDOMNode3 *iface, VARIANT *p)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    nsAString nsstr;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    nsAString_Init(&nsstr, NULL);
+    nsres = nsIDOMNode_GetTextContent(This->nsnode, &nsstr);
+    return return_nsstr_variant(nsres, &nsstr, p);
+}
+
+static HRESULT WINAPI HTMLDOMNode3_isEqualNode(IHTMLDOMNode3 *iface, IHTMLDOMNode3 *otherNode, VARIANT_BOOL *isEqual)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    FIXME("(%p)->()\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLDOMNode3_lookupNamespaceURI(IHTMLDOMNode3 *iface, VARIANT *prefix, VARIANT *namespaceURI)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    FIXME("(%p)->(%s %p)\n", This, debugstr_variant(prefix), namespaceURI);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLDOMNode3_lookupPrefix(IHTMLDOMNode3 *iface, VARIANT *namespaceURI, VARIANT *prefix)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    FIXME("(%p)->(%s %p)\n", This, debugstr_variant(namespaceURI), prefix);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLDOMNode3_isDefaultNamespace(IHTMLDOMNode3 *iface, VARIANT *namespace, VARIANT_BOOL *pfDefaultNamespace)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    FIXME("(%p)->()\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLDOMNode3_appendChild(IHTMLDOMNode3 *iface, IHTMLDOMNode *newChild, IHTMLDOMNode **node)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    TRACE("(%p)->()\n", This);
+    return IHTMLDOMNode_appendChild(&This->IHTMLDOMNode_iface, newChild, node);
+}
+
+static HRESULT WINAPI HTMLDOMNode3_insertBefore(IHTMLDOMNode3 *iface, IHTMLDOMNode *newChild, VARIANT refChild, IHTMLDOMNode **node)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    TRACE("(%p)->(%p %s %p)\n", This, newChild, debugstr_variant(&refChild), node);
+    return IHTMLDOMNode_insertBefore(&This->IHTMLDOMNode_iface, newChild, refChild, node);
+}
+
+static HRESULT WINAPI HTMLDOMNode3_removeChild(IHTMLDOMNode3 *iface, IHTMLDOMNode *oldChild, IHTMLDOMNode **node)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    TRACE("(%p)->(%p %p)\n", This, oldChild, node);
+    return IHTMLDOMNode_removeChild(&This->IHTMLDOMNode_iface, oldChild, node);
+}
+
+static HRESULT WINAPI HTMLDOMNode3_replaceChild(IHTMLDOMNode3 *iface, IHTMLDOMNode *newChild, IHTMLDOMNode *oldChild, IHTMLDOMNode **node)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    TRACE("(%p)->(%p %p %p)\n", This, newChild, oldChild, node);
+    return IHTMLDOMNode_replaceChild(&This->IHTMLDOMNode_iface, newChild, oldChild, node);
+}
+
+static HRESULT WINAPI HTMLDOMNode3_isSameNode(IHTMLDOMNode3 *iface, IHTMLDOMNode3 *otherNode, VARIANT_BOOL *isSame)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    FIXME("(%p)->()\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLDOMNode3_compareDocumentPosition(IHTMLDOMNode3 *iface, IHTMLDOMNode *otherNode, USHORT *flags)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    HTMLDOMNode *other;
+    UINT16 position;
+    nsresult nsres;
+
+    TRACE("(%p)->()\n", This);
+
+    other = get_node_obj(otherNode);
+    if(!other)
+        return E_INVALIDARG;
+
+    nsres = nsIDOMNode_CompareDocumentPosition(This->nsnode, other->nsnode, &position);
+    IHTMLDOMNode_Release(&other->IHTMLDOMNode_iface);
+    if(NS_FAILED(nsres)) {
+        ERR("failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    *flags = position;
+    return S_OK;
+}
+
+static HRESULT WINAPI HTMLDOMNode3_isSupported(IHTMLDOMNode3 *iface, BSTR feature, VARIANT version, VARIANT_BOOL *pfisSupported)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode3(iface);
+    FIXME("(%p)->(%s %s %p)\n", This, debugstr_w(feature), debugstr_variant(&version), pfisSupported);
+    return E_NOTIMPL;
+}
+
+static const IHTMLDOMNode3Vtbl HTMLDOMNode3Vtbl = {
+    HTMLDOMNode3_QueryInterface,
+    HTMLDOMNode3_AddRef,
+    HTMLDOMNode3_Release,
+    HTMLDOMNode3_GetTypeInfoCount,
+    HTMLDOMNode3_GetTypeInfo,
+    HTMLDOMNode3_GetIDsOfNames,
+    HTMLDOMNode3_Invoke,
+    HTMLDOMNode3_put_prefix,
+    HTMLDOMNode3_get_prefix,
+    HTMLDOMNode3_get_localName,
+    HTMLDOMNode3_get_namespaceURI,
+    HTMLDOMNode3_put_textContent,
+    HTMLDOMNode3_get_textContent,
+    HTMLDOMNode3_isEqualNode,
+    HTMLDOMNode3_lookupNamespaceURI,
+    HTMLDOMNode3_lookupPrefix,
+    HTMLDOMNode3_isDefaultNamespace,
+    HTMLDOMNode3_appendChild,
+    HTMLDOMNode3_insertBefore,
+    HTMLDOMNode3_removeChild,
+    HTMLDOMNode3_replaceChild,
+    HTMLDOMNode3_isSameNode,
+    HTMLDOMNode3_compareDocumentPosition,
+    HTMLDOMNode3_isSupported
+};
+
 HRESULT HTMLDOMNode_QI(HTMLDOMNode *This, REFIID riid, void **ppv)
 {
     TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
@@ -1165,18 +1401,16 @@ HRESULT HTMLDOMNode_QI(HTMLDOMNode *This, REFIID riid, void **ppv)
         *ppv = &This->IHTMLDOMNode_iface;
     }else if(IsEqualGUID(&IID_IHTMLDOMNode2, riid)) {
         *ppv = &This->IHTMLDOMNode2_iface;
+    }else if(IsEqualGUID(&IID_IHTMLDOMNode3, riid)) {
+        *ppv = &This->IHTMLDOMNode3_iface;
     }else if(IsEqualGUID(&IID_nsXPCOMCycleCollectionParticipant, riid)) {
         *ppv = &node_ccp;
         return S_OK;
     }else if(IsEqualGUID(&IID_nsCycleCollectionISupports, riid)) {
         *ppv = &This->IHTMLDOMNode_iface;
         return S_OK;
-    }else if(dispex_query_interface(&This->event_target.dispex, riid, ppv)) {
-        return *ppv ? S_OK : E_NOINTERFACE;
     }else {
-        *ppv = NULL;
-        WARN("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
-        return E_NOINTERFACE;
+        return EventTarget_QI(&This->event_target, riid, ppv);
     }
 
     IUnknown_AddRef((IUnknown*)*ppv);
@@ -1197,6 +1431,14 @@ static HRESULT HTMLDOMNode_clone(HTMLDOMNode *This, nsIDOMNode *nsnode, HTMLDOMN
     return create_node(This->doc, nsnode, ret);
 }
 
+void HTMLDOMNode_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
+{
+    if(mode >= COMPAT_MODE_IE9)
+        dispex_info_add_interface(info, IHTMLDOMNode3_tid, NULL);
+
+    EventTarget_init_dispex_info(info, mode);
+}
+
 static const cpc_entry_t HTMLDOMNode_cpc[] = {{NULL}};
 
 static const NodeImplVtbl HTMLDOMNodeImplVtbl = {
@@ -1207,15 +1449,16 @@ static const NodeImplVtbl HTMLDOMNodeImplVtbl = {
     HTMLDOMNode_clone
 };
 
-void HTMLDOMNode_Init(HTMLDocumentNode *doc, HTMLDOMNode *node, nsIDOMNode *nsnode)
+void HTMLDOMNode_Init(HTMLDocumentNode *doc, HTMLDOMNode *node, nsIDOMNode *nsnode, dispex_static_data_t *dispex_data)
 {
     nsresult nsres;
 
     node->IHTMLDOMNode_iface.lpVtbl = &HTMLDOMNodeVtbl;
     node->IHTMLDOMNode2_iface.lpVtbl = &HTMLDOMNode2Vtbl;
+    node->IHTMLDOMNode3_iface.lpVtbl = &HTMLDOMNode3Vtbl;
 
     ccref_init(&node->ccref, 1);
-    init_event_target(&node->event_target);
+    EventTarget_Init(&node->event_target, (IUnknown*)&node->IHTMLDOMNode_iface, dispex_data, doc->document_mode);
 
     if(&doc->node != node)
         htmldoc_addref(&doc->basedoc);
@@ -1227,6 +1470,17 @@ void HTMLDOMNode_Init(HTMLDocumentNode *doc, HTMLDOMNode *node, nsIDOMNode *nsno
     nsres = nsIDOMNode_SetMshtmlNode(nsnode, (nsISupports*)&node->IHTMLDOMNode_iface);
     assert(nsres == NS_OK);
 }
+
+static const tid_t HTMLDOMNode_iface_tids[] = {
+    IHTMLDOMNode_tid,
+    0
+};
+static dispex_static_data_t HTMLDOMNode_dispex = {
+    NULL,
+    IHTMLDOMNode_tid,
+    HTMLDOMNode_iface_tids,
+    HTMLDOMNode_init_dispex_info
+};
 
 static HRESULT create_node(HTMLDocumentNode *doc, nsIDOMNode *nsnode, HTMLDOMNode **ret)
 {
@@ -1265,12 +1519,14 @@ static HRESULT create_node(HTMLDocumentNode *doc, nsIDOMNode *nsnode, HTMLDOMNod
     default: {
         HTMLDOMNode *node;
 
+        FIXME("unimplemented node type %u\n", node_type);
+
         node = heap_alloc_zero(sizeof(HTMLDOMNode));
         if(!node)
             return E_OUTOFMEMORY;
 
         node->vtbl = &HTMLDOMNodeImplVtbl;
-        HTMLDOMNode_Init(doc, node, nsnode);
+        HTMLDOMNode_Init(doc, node, nsnode, &HTMLDOMNode_dispex);
         *ret = node;
     }
     }
@@ -1351,10 +1607,13 @@ void init_node_cc(void)
     ccp_init(&node_ccp, &node_ccp_callback);
 }
 
-HRESULT get_node(HTMLDocumentNode *This, nsIDOMNode *nsnode, BOOL create, HTMLDOMNode **ret)
+HRESULT get_node(nsIDOMNode *nsnode, BOOL create, HTMLDOMNode **ret)
 {
+    nsIDOMDocument *dom_document;
+    HTMLDocumentNode *document;
     nsISupports *unk = NULL;
     nsresult nsres;
+    HRESULT hres;
 
     nsres = nsIDOMNode_GetMshtmlNode(nsnode, &unk);
     assert(nsres == NS_OK);
@@ -1370,5 +1629,18 @@ HRESULT get_node(HTMLDocumentNode *This, nsIDOMNode *nsnode, BOOL create, HTMLDO
         return S_OK;
     }
 
-    return create_node(This, nsnode, ret);
+    nsres = nsIDOMNode_GetOwnerDocument(nsnode, &dom_document);
+    if(NS_FAILED(nsres) || !dom_document) {
+        ERR("GetOwnerDocument failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    hres = get_document_node(dom_document, &document);
+    nsIDOMDocument_Release(dom_document);
+    if(!document)
+        return E_FAIL;
+
+    hres = create_node(document, nsnode, ret);
+    htmldoc_release(&document->basedoc);
+    return hres;
 }

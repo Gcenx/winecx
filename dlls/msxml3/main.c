@@ -39,6 +39,9 @@
 #  include <libxslt/xsltutils.h>
 #  include <libxslt/variables.h>
 #  include <libxslt/xsltInternals.h>
+#  include <libxslt/documents.h>
+#  include <libxslt/extensions.h>
+#  include <libxslt/extra.h>
 # endif
 #endif
 
@@ -66,7 +69,7 @@ void wineXmlCallbackLog(char const* caller, xmlErrorLevel lvl, char const* msg, 
 {
     enum __wine_debug_class dbcl;
     char buff[200];
-    const int max_size = sizeof(buff) / sizeof(buff[0]);
+    const int max_size = ARRAY_SIZE(buff);
     int len;
 
     switch (lvl)
@@ -171,11 +174,14 @@ DECL_FUNCPTR(xsltApplyStylesheetUser);
 DECL_FUNCPTR(xsltCleanupGlobals);
 DECL_FUNCPTR(xsltFreeStylesheet);
 DECL_FUNCPTR(xsltFreeTransformContext);
+DECL_FUNCPTR(xsltFunctionNodeSet);
 DECL_FUNCPTR(xsltNewTransformContext);
 DECL_FUNCPTR(xsltNextImport);
 DECL_FUNCPTR(xsltParseStylesheetDoc);
 DECL_FUNCPTR(xsltQuoteUserParams);
+DECL_FUNCPTR(xsltRegisterExtModuleFunction);
 DECL_FUNCPTR(xsltSaveResultTo);
+DECL_FUNCPTR(xsltSetLoaderFunc);
 # undef DECL_FUNCPTR
 #endif
 
@@ -197,15 +203,25 @@ static void init_libxslt(void)
     LOAD_FUNCPTR(xsltCleanupGlobals, 1);
     LOAD_FUNCPTR(xsltFreeStylesheet, 1);
     LOAD_FUNCPTR(xsltFreeTransformContext, 1);
+    LOAD_FUNCPTR(xsltFunctionNodeSet, 1);
     LOAD_FUNCPTR(xsltNewTransformContext, 1);
     LOAD_FUNCPTR(xsltNextImport, 1);
     LOAD_FUNCPTR(xsltParseStylesheetDoc, 1);
     LOAD_FUNCPTR(xsltQuoteUserParams, 1);
+    LOAD_FUNCPTR(xsltRegisterExtModuleFunction, 1);
     LOAD_FUNCPTR(xsltSaveResultTo, 1);
+    LOAD_FUNCPTR(xsltSetLoaderFunc, 1);
 #undef LOAD_FUNCPTR
 
     if (pxsltInit)
         pxsltInit();
+
+    pxsltSetLoaderFunc(xslt_doc_default_loader);
+    pxsltRegisterExtModuleFunction(
+        (const xmlChar *)"node-set",
+        (const xmlChar *)"urn:schemas-microsoft-com:xslt",
+        pxsltFunctionNodeSet);
+
     return;
 
  sym_not_found:

@@ -669,18 +669,44 @@ static DWORD CALLBACK RPCRT4_server_thread(LPVOID the_arg)
     {
       /* cleanup */
       cps->ops->free_wait_array(cps, objs);
-      EnterCriticalSection(&cps->cs);
-      for (conn = cps->conn; conn; conn = conn->Next)
-        RPCRT4_CloseConnection(conn);
-      LeaveCriticalSection(&cps->cs);
-
-      if (res == 0 && !std_listen)
-        SetEvent(cps->server_ready_event);
       break;
     }
     else if (res == 0)
       set_ready_event = TRUE;
   }
+
+  TRACE("closing connections\n");
+
+  EnterCriticalSection(&cps->cs);
+  LIST_FOR_EACH_ENTRY(conn, &cps->listeners, RpcConnection, protseq_entry)
+    RPCRT4_CloseConnection(conn);
+  LIST_FOR_EACH_ENTRY(conn, &cps->connections, RpcConnection, protseq_entry)
+  {
+    RPCRT4_GrabConnection(conn);
+    rpcrt4_conn_close_read(conn);
+  }
+  LeaveCriticalSection(&cps->cs);
+
+  if (res == 0 && !std_listen)
+      SetEvent(cps->server_ready_event);
+
+  TRACE("waiting for active connections to close\n");
+
+  EnterCriticalSection(&cps->cs);
+  while (!list_empty(&cps->connections))
+  {
+    conn = LIST_ENTRY(list_head(&cps->connections), RpcConnection, protseq_entry);
+    LeaveCriticalSection(&cps->cs);
+    rpcrt4_conn_release_and_wait(conn);
+    EnterCriticalSection(&cps->cs);
+  }
+  LeaveCriticalSection(&cps->cs);
+
+  EnterCriticalSection(&listen_cs);
+  CloseHandle(cps->server_thread);
+  cps->server_thread = NULL;
+  LeaveCriticalSection(&listen_cs);
+  TRACE("done\n");
   return 0;
 }
 
@@ -704,21 +730,15 @@ static void RPCRT4_sync_with_server_thread(RpcServerProtseq *ps)
 static RPC_STATUS RPCRT4_start_listen_protseq(RpcServerProtseq *ps, BOOL auto_listen)
 {
   RPC_STATUS status = RPC_S_OK;
-  HANDLE server_thread;
 
   EnterCriticalSection(&listen_cs);
-  if (ps->is_listening) goto done;
+  if (ps->server_thread) goto done;
 
   if (!ps->mgr_mutex) ps->mgr_mutex = CreateMutexW(NULL, FALSE, NULL);
   if (!ps->server_ready_event) ps->server_ready_event = CreateEventW(NULL, FALSE, FALSE, NULL);
-  server_thread = CreateThread(NULL, 0, RPCRT4_server_thread, ps, 0, NULL);
-  if (!server_thread)
-  {
+  ps->server_thread = CreateThread(NULL, 0, RPCRT4_server_thread, ps, 0, NULL);
+  if (!ps->server_thread)
     status = RPC_S_OUT_OF_RESOURCES;
-    goto done;
-  }
-  ps->is_listening = TRUE;
-  CloseHandle(server_thread);
 
 done:
   LeaveCriticalSection(&listen_cs);
@@ -786,8 +806,10 @@ static RPC_STATUS RPCRT4_stop_listen(BOOL auto_listen)
 
   if (stop_listen) {
     RpcServerProtseq *cps;
+    EnterCriticalSection(&server_cs);
     LIST_FOR_EACH_ENTRY(cps, &protseqs, RpcServerProtseq, entry)
       RPCRT4_sync_with_server_thread(cps);
+    LeaveCriticalSection(&server_cs);
   }
 
   if (!auto_listen)
@@ -802,14 +824,16 @@ static RPC_STATUS RPCRT4_stop_listen(BOOL auto_listen)
 static BOOL RPCRT4_protseq_is_endpoint_registered(RpcServerProtseq *protseq, const char *endpoint)
 {
   RpcConnection *conn;
+  BOOL registered = FALSE;
   EnterCriticalSection(&protseq->cs);
-  for (conn = protseq->conn; conn; conn = conn->Next)
-  {
-    if (!endpoint || !strcmp(endpoint, conn->Endpoint))
+  LIST_FOR_EACH_ENTRY(conn, &protseq->listeners, RpcConnection, protseq_entry) {
+    if (!endpoint || !strcmp(endpoint, conn->Endpoint)) {
+      registered = TRUE;
       break;
+    }
   }
   LeaveCriticalSection(&protseq->cs);
-  return (conn != NULL);
+  return registered;
 }
 
 static RPC_STATUS RPCRT4_use_protseq(RpcServerProtseq* ps, const char *endpoint)
@@ -858,7 +882,7 @@ RPC_STATUS WINAPI RpcServerInqBindings( RPC_BINDING_VECTOR** BindingVector )
   count = 0;
   LIST_FOR_EACH_ENTRY(ps, &protseqs, RpcServerProtseq, entry) {
     EnterCriticalSection(&ps->cs);
-    for (conn = ps->conn; conn; conn = conn->Next)
+    LIST_FOR_EACH_ENTRY(conn, &ps->listeners, RpcConnection, protseq_entry)
       count++;
     LeaveCriticalSection(&ps->cs);
   }
@@ -871,7 +895,7 @@ RPC_STATUS WINAPI RpcServerInqBindings( RPC_BINDING_VECTOR** BindingVector )
     count = 0;
     LIST_FOR_EACH_ENTRY(ps, &protseqs, RpcServerProtseq, entry) {
       EnterCriticalSection(&ps->cs);
-      for (conn = ps->conn; conn; conn = conn->Next) {
+      LIST_FOR_EACH_ENTRY(conn, &ps->listeners, RpcConnection, protseq_entry) {
        RPCRT4_MakeBinding((RpcBinding**)&(*BindingVector)->BindingH[count],
                           conn);
        count++;
@@ -942,13 +966,10 @@ static RPC_STATUS alloc_serverprotoseq(UINT MaxCalls, const char *Protseq, RpcSe
   (*ps)->MaxCalls = MaxCalls;
   (*ps)->Protseq = RPCRT4_strdupA(Protseq);
   (*ps)->ops = ops;
-  (*ps)->MaxCalls = 0;
-  (*ps)->conn = NULL;
+  list_init(&(*ps)->listeners);
+  list_init(&(*ps)->connections);
   InitializeCriticalSection(&(*ps)->cs);
   (*ps)->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": RpcServerProtseq.cs");
-  (*ps)->is_listening = FALSE;
-  (*ps)->mgr_mutex = NULL;
-  (*ps)->server_ready_event = NULL;
 
   list_add_head(&protseqs, &(*ps)->entry);
 
@@ -1199,7 +1220,8 @@ RPC_STATUS WINAPI RpcServerUnregisterIf( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUuid
 
   EnterCriticalSection(&server_cs);
   LIST_FOR_EACH_ENTRY(cif, &server_interfaces, RpcServerInterface, entry) {
-    if ((!IfSpec || !memcmp(&If->InterfaceId, &cif->If->InterfaceId, sizeof(RPC_SYNTAX_IDENTIFIER))) &&
+    if (((!IfSpec && !(cif->Flags & RPC_IF_AUTOLISTEN)) ||
+        (IfSpec && !memcmp(&If->InterfaceId, &cif->If->InterfaceId, sizeof(RPC_SYNTAX_IDENTIFIER)))) &&
         UuidEqual(MgrTypeUuid, &cif->MgrTypeUuid, &status)) {
       list_remove(&cif->entry);
       TRACE("unregistering cif %p\n", cif);
@@ -1523,7 +1545,8 @@ RPC_STATUS WINAPI RpcServerListen( UINT MinimumCallThreads, UINT MaxCalls, UINT 
  */
 RPC_STATUS WINAPI RpcMgmtWaitServerListen( void )
 {
-  HANDLE event;
+  RpcServerProtseq *protseq;
+  HANDLE event, wait_thread;
 
   TRACE("()\n");
 
@@ -1539,6 +1562,28 @@ RPC_STATUS WINAPI RpcMgmtWaitServerListen( void )
   TRACE( "done waiting\n" );
 
   EnterCriticalSection(&listen_cs);
+  /* wait for server threads to finish */
+  while(1)
+  {
+      if (listen_count)
+          break;
+
+      wait_thread = NULL;
+      EnterCriticalSection(&server_cs);
+      LIST_FOR_EACH_ENTRY(protseq, &protseqs, RpcServerProtseq, entry)
+      {
+          if ((wait_thread = protseq->server_thread))
+              break;
+      }
+      LeaveCriticalSection(&server_cs);
+      if (!wait_thread)
+          break;
+
+      TRACE("waiting for thread %u\n", GetThreadId(wait_thread));
+      LeaveCriticalSection(&listen_cs);
+      WaitForSingleObject(wait_thread, INFINITE);
+      EnterCriticalSection(&listen_cs);
+  }
   if (listen_done_event == event)
   {
       listen_done_event = NULL;

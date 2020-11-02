@@ -367,7 +367,16 @@ struct testanalysissource
 {
     IDWriteTextAnalysisSource IDWriteTextAnalysisSource_iface;
     const WCHAR *text;
+    UINT32 text_length;
     DWRITE_READING_DIRECTION direction;
+};
+
+static void init_textsource(struct testanalysissource *source, const WCHAR *text,
+        DWRITE_READING_DIRECTION direction)
+{
+    source->text = text;
+    source->text_length = lstrlenW(text);
+    source->direction = direction;
 };
 
 static inline struct testanalysissource *impl_from_IDWriteTextAnalysisSource(IDWriteTextAnalysisSource *iface)
@@ -380,7 +389,7 @@ static HRESULT WINAPI analysissource_GetTextAtPosition(IDWriteTextAnalysisSource
 {
     struct testanalysissource *source = impl_from_IDWriteTextAnalysisSource(iface);
 
-    if (position >= lstrlenW(source->text))
+    if (position >= source->text_length)
     {
         *text = NULL;
         *text_len = 0;
@@ -388,7 +397,7 @@ static HRESULT WINAPI analysissource_GetTextAtPosition(IDWriteTextAnalysisSource
     else
     {
         *text = source->text + position;
-        *text_len = lstrlenW(source->text) - position;
+        *text_len = source->text_length - position;
     }
 
     return S_OK;
@@ -475,7 +484,7 @@ static WCHAR *create_testfontfile(const WCHAR *filename)
     HRSRC res;
     void *ptr;
 
-    GetTempPathW(sizeof(pathW)/sizeof(WCHAR), pathW);
+    GetTempPathW(ARRAY_SIZE(pathW), pathW);
     lstrcatW(pathW, filename);
 
     file = CreateFileW(pathW, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
@@ -998,7 +1007,7 @@ static void get_script_analysis(const WCHAR *str, DWRITE_SCRIPT_ANALYSIS *sa)
     IDWriteTextAnalyzer *analyzer;
     HRESULT hr;
 
-    analysissource.text = str;
+    init_textsource(&analysissource, str, DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
     hr = IDWriteFactory_CreateTextAnalyzer(factory, &analyzer);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
@@ -1020,7 +1029,7 @@ static void test_AnalyzeScript(void)
 
     while (*ptr->string)
     {
-        analysissource.text = ptr->string;
+        init_textsource(&analysissource, ptr->string, DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
 
         init_expected_sa(expected_seq, ptr);
         hr = IDWriteTextAnalyzer_AnalyzeScript(analyzer, &analysissource.IDWriteTextAnalysisSource_iface, 0,
@@ -1122,7 +1131,7 @@ static void test_AnalyzeLineBreakpoints(void)
     hr = IDWriteFactory_CreateTextAnalyzer(factory, &analyzer);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
-    analysissource.text = emptyW;
+    init_textsource(&analysissource, emptyW, DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
     hr = IDWriteTextAnalyzer_AnalyzeLineBreakpoints(analyzer, &analysissource.IDWriteTextAnalysisSource_iface, 0, 0,
         &analysissink);
     ok(hr == S_OK, "got 0x%08x\n", hr);
@@ -1131,9 +1140,9 @@ static void test_AnalyzeLineBreakpoints(void)
     {
         UINT32 len;
 
-        analysissource.text = ptr->text;
-        len = lstrlenW(ptr->text);
+        init_textsource(&analysissource, ptr->text, DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
 
+        len = lstrlenW(ptr->text);
         if (len > BREAKPOINT_COUNT) {
             ok(0, "test %u: increase BREAKPOINT_COUNT to at least %u\n", i, len);
             i++;
@@ -1264,7 +1273,7 @@ if (0) { /* crashes on native */
 
     fontface = create_fontface();
 
-    for (i = 0; i < sizeof(textcomplexity_tests)/sizeof(struct textcomplexity_test); i++) {
+    for (i = 0; i < ARRAY_SIZE(textcomplexity_tests); i++) {
        const struct textcomplexity_test *ptr = &textcomplexity_tests[i];
        len = 1;
        simple = !ptr->simple;
@@ -1554,7 +1563,7 @@ todo_wine {
     get_script_analysis(arabicW, &sa);
     memset(tags, 0, sizeof(tags));
     count = 0;
-    hr = IDWriteTextAnalyzer2_GetTypographicFeatures(analyzer2, fontface, sa, NULL, sizeof(tags)/sizeof(tags[0]), &count, tags);
+    hr = IDWriteTextAnalyzer2_GetTypographicFeatures(analyzer2, fontface, sa, NULL, ARRAY_SIZE(tags), &count, tags);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 todo_wine {
     ok(count > 0, "got %u\n", count);
@@ -1566,7 +1575,7 @@ todo_wine {
     get_script_analysis(abcW, &sa);
     memset(tags, 0, sizeof(tags));
     count = 0;
-    hr = IDWriteTextAnalyzer2_GetTypographicFeatures(analyzer2, fontface, sa, NULL, sizeof(tags)/sizeof(tags[0]), &count, tags);
+    hr = IDWriteTextAnalyzer2_GetTypographicFeatures(analyzer2, fontface, sa, NULL, ARRAY_SIZE(tags), &count, tags);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 todo_wine {
     ok(count > 0, "got %u\n", count);
@@ -1811,7 +1820,7 @@ static void test_ApplyCharacterSpacing(void)
         return;
     }
 
-    for (i = 0; i < sizeof(spacing_tests)/sizeof(spacing_tests[0]); i++) {
+    for (i = 0; i < ARRAY_SIZE(spacing_tests); i++) {
         const struct spacing_test *ptr = spacing_tests + i;
         DWRITE_GLYPH_OFFSET offsets[3];
         UINT32 glyph_count;
@@ -1844,7 +1853,7 @@ static void test_ApplyCharacterSpacing(void)
             ptr->leading,
             ptr->trailing,
             ptr->min_advance,
-            sizeof(clustermap)/sizeof(clustermap[0]),
+            ARRAY_SIZE(clustermap),
             glyph_count,
             clustermap,
             ptr->advances,
@@ -1898,7 +1907,7 @@ static void test_ApplyCharacterSpacing(void)
             ptr->leading,
             ptr->trailing,
             ptr->min_advance,
-            sizeof(clustermap)/sizeof(clustermap[0]),
+            ARRAY_SIZE(clustermap),
             glyph_count,
             clustermap,
             advances,
@@ -1994,7 +2003,7 @@ static void test_GetGlyphOrientationTransform(void)
     ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
     ok(m.m11 == 0.0, "got %.2f\n", m.m11);
 
-    for (i = 0; i < sizeof(ot_tests)/sizeof(ot_tests[0]); i++) {
+    for (i = 0; i < ARRAY_SIZE(ot_tests); i++) {
         memset(&m, 0, sizeof(m));
         hr = IDWriteTextAnalyzer1_GetGlyphOrientationTransform(analyzer1, ot_tests[i].angle,
             ot_tests[i].is_sideways, &m);
@@ -2018,7 +2027,7 @@ static void test_GetGlyphOrientationTransform(void)
 
     originx = 50.0;
     originy = 60.0;
-    for (i = 0; i < sizeof(ot_tests)/sizeof(ot_tests[0]); i++) {
+    for (i = 0; i < ARRAY_SIZE(ot_tests); i++) {
         DWRITE_GLYPH_ORIENTATION_ANGLE angle = DWRITE_GLYPH_ORIENTATION_ANGLE_0_DEGREES;
         DWRITE_MATRIX m_exp;
 
@@ -2414,10 +2423,9 @@ static void test_AnalyzeBidi(void)
     {
         UINT32 len;
 
-        analysissource.text = ptr->text;
-        len = lstrlenW(ptr->text);
-        analysissource.direction = ptr->direction;
+        init_textsource(&analysissource, ptr->text, ptr->direction);
 
+        len = lstrlenW(ptr->text);
         if (len > BIDI_LEVELS_COUNT) {
             ok(0, "test %u: increase BIDI_LEVELS_COUNT to at least %u\n", i, len);
             i++;

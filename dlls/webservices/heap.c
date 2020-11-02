@@ -24,6 +24,7 @@
 #include "webservices.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "wine/list.h"
 #include "webservices_private.h"
 
@@ -208,13 +209,14 @@ HRESULT WINAPI WsCreateHeap( SIZE_T max_size, SIZE_T trim_size, const WS_HEAP_PR
     prop_set( heap->prop, heap->prop_count, WS_HEAP_PROPERTY_MAX_SIZE, &max_size, sizeof(max_size) );
     prop_set( heap->prop, heap->prop_count, WS_HEAP_PROPERTY_TRIM_SIZE, &trim_size, sizeof(trim_size) );
 
+    TRACE( "created %p\n", heap );
     *handle = (WS_HEAP *)heap;
     return S_OK;
 }
 
 static void reset_heap( struct heap *heap )
 {
-    HeapDestroy( heap->handle );
+    if (heap->handle) HeapDestroy( heap->handle );
     heap->handle   = NULL;
     heap->max_size = heap->allocated = 0;
 }
@@ -315,26 +317,32 @@ HRESULT WINAPI WsGetHeapProperty( WS_HEAP *handle, WS_HEAP_PROPERTY_ID id, void 
 }
 
 #define XML_BUFFER_INITIAL_ALLOCATED_SIZE 256
-struct xmlbuf *alloc_xmlbuf( WS_HEAP *heap )
+struct xmlbuf *alloc_xmlbuf( WS_HEAP *heap, SIZE_T size, WS_XML_WRITER_ENCODING_TYPE encoding, WS_CHARSET charset,
+                             const WS_XML_DICTIONARY *dict_static, WS_XML_DICTIONARY *dict )
 {
     struct xmlbuf *ret;
 
+    if (!size) size = XML_BUFFER_INITIAL_ALLOCATED_SIZE;
     if (!(ret = ws_alloc( heap, sizeof(*ret) ))) return NULL;
-    if (!(ret->ptr = ws_alloc( heap, XML_BUFFER_INITIAL_ALLOCATED_SIZE )))
+    if (!(ret->bytes.bytes = ws_alloc( heap, size )))
     {
         ws_free( heap, ret, sizeof(*ret) );
         return NULL;
     }
-    ret->heap           = heap;
-    ret->size_allocated = XML_BUFFER_INITIAL_ALLOCATED_SIZE;
-    ret->size           = 0;
+    ret->heap         = heap;
+    ret->size         = size;
+    ret->bytes.length = 0;
+    ret->encoding     = encoding;
+    ret->charset      = charset;
+    ret->dict_static  = dict_static;
+    ret->dict         = dict;
     return ret;
 }
 
 void free_xmlbuf( struct xmlbuf *xmlbuf )
 {
     if (!xmlbuf) return;
-    ws_free( xmlbuf->heap, xmlbuf->ptr, xmlbuf->size_allocated );
+    ws_free( xmlbuf->heap, xmlbuf->bytes.bytes, xmlbuf->size );
     ws_free( xmlbuf->heap, xmlbuf, sizeof(*xmlbuf) );
 }
 
@@ -346,11 +354,18 @@ HRESULT WINAPI WsCreateXmlBuffer( WS_HEAP *heap, const WS_XML_BUFFER_PROPERTY *p
 {
     struct xmlbuf *xmlbuf;
 
+    TRACE( "%p %p %u %p %p\n", heap, properties, count, handle, error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
     if (!heap || !handle) return E_INVALIDARG;
     if (count) FIXME( "properties not implemented\n" );
 
-    if (!(xmlbuf = alloc_xmlbuf( heap ))) return WS_E_QUOTA_EXCEEDED;
+    if (!(xmlbuf = alloc_xmlbuf( heap, 0, WS_XML_WRITER_ENCODING_TYPE_TEXT, WS_CHARSET_UTF8, NULL, NULL )))
+    {
+        return WS_E_QUOTA_EXCEEDED;
+    }
 
+    TRACE( "created %p\n", xmlbuf );
     *handle = (WS_XML_BUFFER *)xmlbuf;
     return S_OK;
 }

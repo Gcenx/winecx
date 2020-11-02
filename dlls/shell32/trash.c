@@ -22,30 +22,27 @@
 
 #include "config.h"
 
-#ifdef HAVE_CORESERVICES_CORESERVICES_H
-#define GetCurrentThread MacGetCurrentThread
-#define LoadResource MacLoadResource
-#include <CoreServices/CoreServices.h>
-#undef GetCurrentThread
-#undef LoadResource
-#undef DPRINTF
-#endif
-
 #include <stdarg.h>
 #include <stdio.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <time.h>
+#include <sys/types.h>
 #ifdef HAVE_SYS_STAT_H
 # include <sys/stat.h>
 #endif
-#include <sys/types.h>
+#ifdef HAVE_SYS_MOUNT_H
+# include <sys/mount.h>
+#endif
 #include <stdlib.h>
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
 #ifdef HAVE_DIRENT_H
 # include <dirent.h>
+#endif
+#ifdef HAVE_PWD_H
+# include <pwd.h>
 #endif
 
 #include "windef.h"
@@ -109,44 +106,116 @@ HRESULT TRASH_UnpackItemID(LPCSHITEMID id, WIN32_FIND_DATAW *data)
     return S_OK;
 }
 
-#ifdef HAVE_CORESERVICES_CORESERVICES_H
+#ifdef __APPLE__
+
+static char *TRASH_GetTrashPath(const char *unix_path, const char **base_name)
+{
+    struct statfs stfs, home_stfs;
+    struct passwd *user = getpwuid(geteuid());
+    char *trash_path;
+    size_t name_size;
+
+    if (statfs(unix_path, &stfs) == -1)
+        return NULL;
+    if (statfs(user->pw_dir, &home_stfs) == -1)
+        return NULL;
+
+    *base_name = strrchr(unix_path, '/');
+    if (!*base_name)
+        *base_name = unix_path;
+    else
+        ++*base_name;
+    name_size = lstrlenA(*base_name);
+
+    /* If the file exists on the same volume as the user's home directory,
+     * we can use the User domain Trash folder. Otherwise, we have to use
+     * <volume>/.Trashes/<uid>.
+     */
+    if (memcmp(&stfs.f_fsid, &home_stfs.f_fsid, sizeof(fsid_t)) == 0)
+    {
+        size_t home_size = lstrlenA(user->pw_dir);
+        trash_path = heap_alloc(home_size + sizeof("/.Trash/") + name_size);
+        if (!trash_path)
+            return NULL;
+        memcpy(trash_path, user->pw_dir, home_size);
+        memcpy(trash_path+home_size, "/.Trash", sizeof("/.Trash"));
+    }
+    else
+    {
+        size_t vol_size = lstrlenA(stfs.f_mntonname);
+        /* 10 for the maximum length of a 32-bit integer + 1 for the \0 */
+        size_t trash_size = vol_size + sizeof("/.Trashes/") + 10 + 1 + name_size + 1;
+        trash_path = heap_alloc(trash_size);
+        if (!trash_path)
+            return NULL;
+        snprintf(trash_path, trash_size, "%s/.Trashes/%u", stfs.f_mntonname, geteuid());
+    }
+    return trash_path;
+}
 
 BOOL TRASH_CanTrashFile(LPCWSTR wszPath)
 {
-    char *unix_path;
-    OSStatus status;
-    FSRef ref;
-    FSCatalogInfo catalogInfo;
+    char *unix_path, *trash_path;
+    const char *base_name;
+    BOOL can_trash;
+    struct stat st;
 
     TRACE("(%s)\n", debugstr_w(wszPath));
+
     if (!(unix_path = wine_get_unix_file_name(wszPath)))
         return FALSE;
-
-    status = FSPathMakeRef((UInt8*)unix_path, &ref, NULL);
-    HeapFree(GetProcessHeap(), 0, unix_path);
-    if (status == noErr)
-        status = FSGetCatalogInfo(&ref, kFSCatInfoVolume, &catalogInfo, NULL,
-                                  NULL, NULL);
-    if (status == noErr)
-        status = FSFindFolder(catalogInfo.volume, kTrashFolderType,
-                              kCreateFolder, &ref);
-
-    return (status == noErr);
+    if (!(trash_path = TRASH_GetTrashPath(unix_path, &base_name)))
+    {
+        heap_free(unix_path);
+        return FALSE;
+    }
+    can_trash = stat(trash_path, &st) == 0;
+    if (!can_trash && errno == ENOENT)
+    {
+        /* Recursively create the Trash folder. */
+        char *p = trash_path;
+        if (*p == '/') ++p;
+        while ((p = strchr(p, '/')) != NULL)
+        {
+            *p = '\0';
+            if (mkdir(trash_path, 0755) == -1 && errno != EEXIST)
+            {
+                heap_free(unix_path);
+                heap_free(trash_path);
+                return FALSE;
+            }
+            *p++ = '/';
+        }
+        can_trash = TRUE;
+    }
+    heap_free(unix_path);
+    heap_free(trash_path);
+    return can_trash;
 }
 
 BOOL TRASH_TrashFile(LPCWSTR wszPath)
 {
-    char *unix_path;
-    OSStatus status;
+    char *unix_path, *trash_path;
+    const char *base_name;
+    int res;
 
     TRACE("(%s)\n", debugstr_w(wszPath));
     if (!(unix_path = wine_get_unix_file_name(wszPath)))
         return FALSE;
+    if (!(trash_path = TRASH_GetTrashPath(unix_path, &base_name)))
+    {
+        heap_free(unix_path);
+        return FALSE;
+    }
 
-    status = FSPathMoveObjectToTrashSync(unix_path, NULL, kFSFileOperationSkipPreflight);
+    lstrcatA(trash_path, "/");
+    lstrcatA(trash_path, base_name);
 
-    HeapFree(GetProcessHeap(), 0, unix_path);
-    return (status == noErr);
+    res = rename(unix_path, trash_path);
+
+    heap_free(unix_path);
+    heap_free(trash_path);
+    return (res != -1);
 }
 
 /* TODO:
@@ -171,7 +240,7 @@ HRESULT TRASH_GetDetails(const char *trash_path, const char *name, WIN32_FIND_DA
     memcpy(path+trash_path_length+1, name, name_length+1);
 
     ret = lstat(path, &stats);
-    HeapFree(GetProcessHeap(), 0, path);
+    heap_free(path);
     if(ret == -1) return S_FALSE;
     memset(data, 0, sizeof(*data));
     data->nFileSizeHigh = stats.st_size>>32;
@@ -186,10 +255,8 @@ HRESULT TRASH_GetDetails(const char *trash_path, const char *name, WIN32_FIND_DA
 HRESULT TRASH_EnumItems(const WCHAR *path, LPITEMIDLIST **pidls, int *count)
 {
     WCHAR volume_path[MAX_PATH];
-    char *unix_path, trash_path[MAX_PATH];
-    FSCatalogInfo catalog_info;
-    OSStatus status;
-    FSRef ref;
+    char *unix_path, *trash_path;
+    const char *base_name;
     struct dirent *entry;
     DIR *dir;
     LPITEMIDLIST *ret;
@@ -211,18 +278,11 @@ HRESULT TRASH_EnumItems(const WCHAR *path, LPITEMIDLIST **pidls, int *count)
     if(!(unix_path = wine_get_unix_file_name(volume_path)))
         return E_OUTOFMEMORY;
 
-    status = FSPathMakeRef((UInt8*)unix_path, &ref, NULL);
-    HeapFree(GetProcessHeap(), 0, unix_path);
-    if(status != noErr) return E_FAIL;
-    status = FSGetCatalogInfo(&ref, kFSCatInfoVolume, &catalog_info, NULL, NULL, NULL);
-    if(status != noErr) return E_FAIL;
-    status = FSFindFolder(catalog_info.volume, kTrashFolderType, kCreateFolder, &ref);
-    if(status != noErr) return E_FAIL;
-    status = FSRefMakePath(&ref, (UInt8*)trash_path, MAX_PATH);
-    if(status != noErr) return E_FAIL;
+    if(!(trash_path = TRASH_GetTrashPath(unix_path, &base_name)))
+        return E_OUTOFMEMORY;
 
     if(!(dir = opendir(trash_path))) return E_FAIL;
-    ret = HeapAlloc(GetProcessHeap(), 0, ret_size * sizeof(*ret));
+    ret = heap_alloc(ret_size * sizeof(*ret));
     if(!ret) {
         closedir(dir);
         return E_OUTOFMEMORY;
@@ -237,7 +297,7 @@ HRESULT TRASH_EnumItems(const WCHAR *path, LPITEMIDLIST **pidls, int *count)
         if(i == ret_size) {
             LPITEMIDLIST *resized;
             ret_size *= 2;
-            resized = HeapReAlloc(GetProcessHeap(), 0, ret, ret_size * sizeof(*ret));
+            resized = heap_realloc(ret, ret_size * sizeof(*ret));
             if(!resized) hr = E_OUTOFMEMORY;
             else ret = resized;
         }
@@ -250,7 +310,7 @@ HRESULT TRASH_EnumItems(const WCHAR *path, LPITEMIDLIST **pidls, int *count)
             hr = TRASH_CreateSimplePIDL(entry->d_name, &data, ret+i);
         if(FAILED(hr)) {
             while(i>0) SHFree(ret+(--i));
-            HeapFree(GetProcessHeap(), 0, ret);
+            heap_free(ret);
             closedir(dir);
             return hr;
         }
@@ -261,12 +321,12 @@ HRESULT TRASH_EnumItems(const WCHAR *path, LPITEMIDLIST **pidls, int *count)
     *pidls = SHAlloc(sizeof(**pidls) * i);
     if(!*pidls) {
         while(i>0) SHFree(ret+(--i));
-        HeapFree(GetProcessHeap(), 0, ret);
+        heap_free(ret);
         return E_OUTOFMEMORY;
     }
     *count = i;
     for(i--; i>=0; i--) (*pidls)[i] = ret[i];
-    HeapFree(GetProcessHeap(), 0, ret);
+    heap_free(ret);
     return S_OK;
 }
 
@@ -282,7 +342,7 @@ HRESULT TRASH_EraseItem(LPCITEMIDLIST pidl)
     return E_NOTIMPL;
 }
 
-#else /* HAVE_CORESERVICES_CORESERVICES_H */
+#else /* __APPLE__ */
 
 static CRITICAL_SECTION TRASH_Creating;
 static CRITICAL_SECTION_DEBUG TRASH_Creating_Debug =
@@ -384,17 +444,16 @@ BOOL TRASH_CanTrashFile(LPCWSTR wszPath)
 {
     struct stat file_stat;
     char *unix_path;
-    
+    int ret;
+
     TRACE("(%s)\n", debugstr_w(wszPath));
     if (!TRASH_EnsureInitialized()) return FALSE;
     if (!(unix_path = wine_get_unix_file_name(wszPath)))
         return FALSE;
-    if (lstat(unix_path, &file_stat)==-1)
-    {
-        HeapFree(GetProcessHeap(), 0, unix_path);
+    ret = lstat(unix_path, &file_stat);
+    heap_free(unix_path);
+    if (ret == -1)
         return FALSE;
-    }
-    HeapFree(GetProcessHeap(), 0, unix_path);
     return file_good_for_bucket(home_trash, &file_stat);
 }
 
@@ -542,7 +601,7 @@ BOOL TRASH_TrashFile(LPCWSTR wszPath)
     if (!(unix_path = wine_get_unix_file_name(wszPath)))
         return FALSE;
     result = TRASH_MoveFileToBucket(home_trash, unix_path);
-    HeapFree(GetProcessHeap(), 0, unix_path);
+    heap_free(unix_path);
     return result;
 }
 
@@ -760,7 +819,7 @@ HRESULT TRASH_RestoreItem(LPCITEMIDLIST pidl){
     else
         WARN("could not erase %s from the trash (errno=%i)\n",filename,errno);
     SHFree(file_path);
-    HeapFree(GetProcessHeap(), 0, restore_path);
+    heap_free(restore_path);
     return S_OK;
 }
 
@@ -791,4 +850,4 @@ HRESULT TRASH_EraseItem(LPCITEMIDLIST pidl)
     return S_OK;
 }
 
-#endif /* HAVE_CORESERVICES_CORESERVICES_H */
+#endif /* __APPLE__ */

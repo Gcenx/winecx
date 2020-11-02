@@ -89,6 +89,12 @@ static void test_heap(void)
     HGLOBAL hsecond;
     SIZE_T  size, size2;
     const SIZE_T max_size = 1024, init_size = 10;
+    /* use function pointers to avoid warnings for invalid parameter tests */
+    LPVOID (WINAPI *pHeapAlloc)(HANDLE,DWORD,SIZE_T);
+    LPVOID (WINAPI *pHeapReAlloc)(HANDLE,DWORD,LPVOID,SIZE_T);
+
+    pHeapAlloc = (void *)GetProcAddress( GetModuleHandleA("kernel32"), "HeapAlloc" );
+    pHeapReAlloc = (void *)GetProcAddress( GetModuleHandleA("kernel32"), "HeapReAlloc" );
 
     /* Heap*() functions */
     mem = HeapAlloc(GetProcessHeap(), 0, 0);
@@ -111,12 +117,12 @@ static void test_heap(void)
     /* test some border cases of HeapAlloc and HeapReAlloc */
     mem = HeapAlloc(GetProcessHeap(), 0, 0);
     ok(mem != NULL, "memory not allocated for size 0\n");
-    msecond = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, mem, ~(SIZE_T)0 - 7);
+    msecond = pHeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, mem, ~(SIZE_T)0 - 7);
     ok(msecond == NULL, "HeapReAlloc(~0 - 7) should have failed\n");
-    msecond = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, mem, ~(SIZE_T)0);
+    msecond = pHeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, mem, ~(SIZE_T)0);
     ok(msecond == NULL, "HeapReAlloc(~0) should have failed\n");
     HeapFree(GetProcessHeap(), 0, mem);
-    mem = HeapAlloc(GetProcessHeap(), 0, ~(SIZE_T)0);
+    mem = pHeapAlloc(GetProcessHeap(), 0, ~(SIZE_T)0);
     ok(mem == NULL, "memory allocated for size ~0\n");
     mem = HeapAlloc(GetProcessHeap(), 0, 17);
     msecond = HeapReAlloc(GetProcessHeap(), 0, mem, 0);
@@ -202,7 +208,7 @@ static void test_heap(void)
         ((GetLastError() == ERROR_NOT_LOCKED) || (GetLastError() == MAGIC_DEAD)),
         "returned %d with %d (expected '0' with: ERROR_NOT_LOCKED or "
         "MAGIC_DEAD)\n", res, GetLastError());
- 
+
     GlobalFree(gbl);
     /* invalid handles are caught in windows: */
     SetLastError(MAGIC_DEAD);
@@ -210,6 +216,18 @@ static void test_heap(void)
     ok( (hsecond == gbl) && (GetLastError() == ERROR_INVALID_HANDLE),
         "returned %p with 0x%08x (expected %p with ERROR_INVALID_HANDLE)\n",
         hsecond, GetLastError(), gbl);
+    SetLastError(MAGIC_DEAD);
+    hsecond = GlobalFree(LongToHandle(0xdeadbeef)); /* bogus handle */
+    ok( (hsecond == LongToHandle(0xdeadbeef)) && (GetLastError() == ERROR_INVALID_HANDLE),
+        "returned %p with 0x%08x (expected %p with ERROR_INVALID_HANDLE)\n",
+        hsecond, GetLastError(), LongToHandle(0xdeadbeef));
+    SetLastError(MAGIC_DEAD);
+    hsecond = GlobalFree(LongToHandle(0xdeadbee0)); /* bogus pointer */
+    ok( (hsecond == LongToHandle(0xdeadbee0)) &&
+        ((GetLastError() == ERROR_INVALID_HANDLE) || broken(GetLastError() == ERROR_NOACCESS) /* wvista+ */),
+        "returned %p with 0x%08x (expected %p with ERROR_NOACCESS)\n",
+        hsecond, GetLastError(), LongToHandle(0xdeadbee0));
+
     SetLastError(MAGIC_DEAD);
     flags = GlobalFlags(gbl);
     ok( (flags == GMEM_INVALID_HANDLE) && (GetLastError() == ERROR_INVALID_HANDLE),
@@ -244,7 +262,7 @@ static void test_heap(void)
     ok(mem == NULL, "Expected NULL, got %p\n", mem);
 
     /* invalid free */
-    if (sizeof(void *) != 8)  /* crashes on 64-bit Vista */
+    if (sizeof(void *) != 8)  /* crashes on 64-bit */
     {
         SetLastError(MAGIC_DEAD);
         mem = GlobalFree(gbl);
@@ -562,7 +580,7 @@ static void test_HeapCreate(void)
       ok(HeapFree(heap,0,mem3),"HeapFree didn't pass successfully\n");
     }
 
-    /* Check that HeapRealloc works */
+    /* Check that HeapReAlloc works */
     mem2a=HeapReAlloc(heap,HEAP_ZERO_MEMORY,mem2,memchunk+5*sysInfo.dwPageSize);
     ok(mem2a!=NULL,"HeapReAlloc failed\n");
     if(mem2a) {
@@ -576,7 +594,7 @@ static void test_HeapCreate(void)
       ok(!error,"HeapReAlloc should have zeroed out its allocated memory\n");
     }
 
-    /* Check that HeapRealloc honours HEAP_REALLOC_IN_PLACE_ONLY */
+    /* Check that HeapReAlloc honours HEAP_REALLOC_IN_PLACE_ONLY */
     error=FALSE;
     mem1a=HeapReAlloc(heap,HEAP_REALLOC_IN_PLACE_ONLY,mem1,memchunk+sysInfo.dwPageSize);
     if(mem1a!=NULL) {
@@ -805,7 +823,7 @@ static void test_obsolete_flags(void)
         return;
     }
 
-    for (i = 0; i < sizeof(test_global_flags)/sizeof(test_global_flags[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(test_global_flags); i++)
     {
         gbl = GlobalAlloc(test_global_flags[i].flags, 4);
         ok(gbl != NULL, "GlobalAlloc failed\n");

@@ -268,3 +268,21 @@ HRESULT WINAPI DwmSetPresentParameters(HWND hwnd, DWM_PRESENT_PARAMETERS *params
     FIXME("(%p %p) stub\n", hwnd, params);
     return S_OK;
 };
+
+/**********************************************************************
+ *           DwmSetIconicLivePreviewBitmap         (DWMAPI.@)
+ */
+HRESULT WINAPI DwmSetIconicLivePreviewBitmap(HWND hwnd, HBITMAP hbmp, POINT *pos, DWORD flags)
+{
+    FIXME("(%p %p %p %x) stub\n", hwnd, hbmp, pos, flags);
+    return S_OK;
+};
+
+/**********************************************************************
+ *           DwmSetIconicThumbnail         (DWMAPI.@)
+ */
+HRESULT WINAPI DwmSetIconicThumbnail(HWND hwnd, HBITMAP hbmp, DWORD flags)
+{
+    FIXME("(%p %p %x) stub\n", hwnd, hbmp, flags);
+    return S_OK;
+};

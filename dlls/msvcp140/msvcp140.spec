@@ -1083,7 +1083,7 @@
 @ stub -arch=win64 ??_Ftime_base@std@@QEAAXXZ
 @ stub -arch=win32 ?CaptureCallstack@platform@details@Concurrency@@YAIPAPAXII@Z
 @ stub -arch=win64 ?CaptureCallstack@platform@details@Concurrency@@YA_KPEAPEAX_K1@Z
-@ stub ?GetCurrentThreadId@platform@details@Concurrency@@YAJXZ
+@ cdecl ?GetCurrentThreadId@platform@details@Concurrency@@YAJXZ() kernel32.GetCurrentThreadId
 @ stub ?GetNextAsyncId@platform@details@Concurrency@@YAIXZ
 @ stub -arch=arm ?ReportUnhandledError@_ExceptionHolder@details@Concurrency@@AAAXXZ
 @ stub -arch=i386 ?ReportUnhandledError@_ExceptionHolder@details@Concurrency@@AAEXXZ
@@ -1443,7 +1443,7 @@
 @ cdecl -arch=win32 ?_Iput@?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@ABA?AV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@2@V32@AAVios_base@2@_WPADI@Z(ptr ptr long ptr ptr long ptr long) num_put_wchar__Iput
 @ cdecl -arch=win64 ?_Iput@?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@AEBA?AV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@2@V32@AEAVios_base@2@_WPEAD_K@Z(ptr ptr ptr ptr long ptr long) num_put_wchar__Iput
 @ cdecl ?_IsCurrentOriginSTA@_ContextCallback@details@Concurrency@@CA_NXZ(ptr) _ContextCallback__IsCurrentOriginSTA
-@ stub ?_IsNonBlockingThread@_Task_impl_base@details@Concurrency@@SA_NXZ
+@ cdecl ?_IsNonBlockingThread@_Task_impl_base@details@Concurrency@@SA_NXZ() _Task_impl_base__IsNonBlockingThread
 @ cdecl -arch=win32 ?_Locimp_Addfac@_Locimp@locale@std@@CAXPAV123@PAVfacet@23@I@Z(ptr ptr long) locale__Locimp__Locimp_Addfac
 @ cdecl -arch=win64 ?_Locimp_Addfac@_Locimp@locale@std@@CAXPEAV123@PEAVfacet@23@_K@Z(ptr ptr long) locale__Locimp__Locimp_Addfac
 @ cdecl -arch=win32 ?_Locimp_ctor@_Locimp@locale@std@@CAXPAV123@ABV123@@Z(ptr ptr) locale__Locimp__Locimp_ctor
@@ -1578,8 +1578,8 @@
 @ cdecl -arch=win64 ?_Put@?$num_put@GV?$ostreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@AEBA?AV?$ostreambuf_iterator@GU?$char_traits@G@std@@@2@V32@PEBG_K@Z(ptr ptr ptr ptr long) num_put_wchar__Put
 @ cdecl -arch=win32 ?_Put@?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@ABA?AV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@2@V32@PB_WI@Z(ptr ptr long ptr wstr long) num_put_wchar__Put
 @ cdecl -arch=win64 ?_Put@?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@AEBA?AV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@2@V32@PEB_W_K@Z(ptr ptr ptr wstr long) num_put_wchar__Put
-@ stub -arch=win32 ?_Raise_handler@std@@3P6AXABVexception@stdext@@@ZA
-@ stub -arch=win64 ?_Raise_handler@std@@3P6AXAEBVexception@stdext@@@ZEA
+@ extern -arch=win32 ?_Raise_handler@std@@3P6AXABVexception@stdext@@@ZA _Raise_handler
+@ extern -arch=win64 ?_Raise_handler@std@@3P6AXAEBVexception@stdext@@@ZEA _Raise_handler
 @ cdecl ?_Random_device@std@@YAIXZ() _Random_device
 @ cdecl -arch=win32 ?_Release_chore@details@Concurrency@@YAXPAU_Threadpool_chore@12@@Z(ptr) _Release_chore
 @ cdecl -arch=win64 ?_Release_chore@details@Concurrency@@YAXPEAU_Threadpool_chore@12@@Z(ptr) _Release_chore
@@ -1621,8 +1621,8 @@
 @ stub -arch=win32 ?_Src@?1??_Getifld@?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@ABAHPADAAV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@3@1HABVlocale@3@@Z@4QBDB
 @ stub -arch=win64 ?_Src@?1??_Getifld@?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@AEBAHPEADAEAV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@3@1HAEBVlocale@3@@Z@4QBDB
 @ extern ?_Sync@ios_base@std@@0_NA ios_base_Sync
-@ stub -arch=win32 ?_Syserror_map@std@@YAPBDH@Z
-@ stub -arch=win64 ?_Syserror_map@std@@YAPEBDH@Z
+@ cdecl -arch=win32 ?_Syserror_map@std@@YAPBDH@Z(long) _Syserror_map
+@ cdecl -arch=win64 ?_Syserror_map@std@@YAPEBDH@Z(long) _Syserror_map
 @ stub ?_Throw_C_error@std@@YAXH@Z
 @ stub ?_Throw_Cpp_error@std@@YAXH@Z
 @ stub -arch=win32 ?_Throw_future_error@std@@YAXABVerror_code@1@@Z
@@ -3513,7 +3513,7 @@
 @ thiscall -arch=i386 ?uflow@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MAEGXZ(ptr) basic_streambuf_wchar_uflow
 @ cdecl -arch=win64 ?uflow@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MEAAGXZ(ptr) basic_streambuf_wchar_uflow
 @ cdecl ?uncaught_exception@std@@YA_NXZ() MSVCP__uncaught_exception
-@ stub ?uncaught_exceptions@std@@YAHXZ
+@ cdecl ?uncaught_exceptions@std@@YAHXZ() __uncaught_exceptions
 @ cdecl -arch=arm ?underflow@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAAHXZ(ptr) basic_streambuf_char_underflow
 @ thiscall -arch=i386 ?underflow@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHXZ(ptr) basic_streambuf_char_underflow
 @ cdecl -arch=win64 ?underflow@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MEAAHXZ(ptr) basic_streambuf_char_underflow
@@ -3666,8 +3666,8 @@
 @ extern _LNan _LNan
 @ stub _LSinh
 @ extern _LSnan _LSnan
-@ stub _Last_write_time
-@ stub _Link
+@ cdecl _Last_write_time(int64)
+@ cdecl _Link(wstr wstr) tr2_sys__Link_wchar
 @ cdecl _Lock_shared_ptr_spin_lock()
 @ cdecl _Lstat(wstr ptr)
 @ cdecl _Make_dir(wstr) tr2_sys__Make_dir_wchar
@@ -3693,10 +3693,10 @@
 @ cdecl -ret64 _Query_perf_counter()
 @ cdecl -ret64 _Query_perf_frequency()
 @ cdecl _Read_dir(ptr ptr ptr) tr2_sys__Read_dir_wchar
-@ stub _Remove_dir
-@ stub _Rename
+@ cdecl _Remove_dir(wstr) tr2_sys__Remove_dir_wchar
+@ cdecl _Rename(wstr wstr) tr2_sys__Rename_wchar
 @ stub _Resize
-@ stub _Set_last_write_time
+@ cdecl _Set_last_write_time(wstr int64)
 @ stub _Sinh
 @ extern _Snan _Snan
 @ cdecl _Stat(wstr ptr)
@@ -3716,18 +3716,18 @@
 @ cdecl _Stoulx(ptr ptr long ptr) _Stoulx
 @ cdecl _Strcoll(ptr ptr ptr ptr ptr) _Strcoll
 @ stub _Strxfrm
-@ stub _Symlink
+@ cdecl _Symlink(wstr wstr) tr2_sys__Symlink_wchar
 @ stub _Symlink_get
-@ stub _Temp_get
+@ cdecl _Temp_get(ptr)
 @ stub _Thrd_abort
 @ cdecl _Thrd_create(ptr ptr ptr) _Thrd_create
-@ cdecl _Thrd_current() _Thrd_current
-@ cdecl _Thrd_detach(ptr) _Thrd_detach
-@ cdecl _Thrd_equal(ptr ptr) _Thrd_equal
+@ cdecl -norelay _Thrd_current()
+@ cdecl _Thrd_detach(int64) _Thrd_detach
+@ cdecl _Thrd_equal(int64 int64) _Thrd_equal
 @ stub _Thrd_exit
 @ cdecl _Thrd_hardware_concurrency() _Thrd_hardware_concurrency
 @ cdecl _Thrd_id() _Thrd_id
-@ cdecl _Thrd_join(ptr long) _Thrd_join
+@ cdecl _Thrd_join(int64 long) _Thrd_join
 @ cdecl _Thrd_sleep(ptr) _Thrd_sleep
 @ cdecl _Thrd_start(ptr ptr ptr) _Thrd_start
 @ cdecl _Thrd_yield() _Thrd_yield
@@ -3737,7 +3737,7 @@
 @ cdecl _Toupper(long ptr) _Toupper
 @ cdecl _Towlower(long ptr) _Towlower
 @ cdecl _Towupper(long ptr) _Towupper
-@ stub _Unlink
+@ cdecl _Unlink(wstr) tr2_sys__Unlink_wchar
 @ cdecl _Unlock_shared_ptr_spin_lock()
 @ stub _WStod
 @ stub _WStodx

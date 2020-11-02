@@ -141,6 +141,11 @@
 #define ID_EDIT_NEW_EXPANDVALUE         33102
 #define IDS_DELETE_KEY_TITLE            33103
 #define IDS_DELETE_KEY_TEXT             33104
+#define ID_TREE_EXPAND_COLLAPSE         33105
+#define IDS_EXPAND                      33106
+#define IDS_COLLAPSE                    33107
+#define IDS_EDIT_MODIFY                 33108
+#define IDS_EDIT_MODIFY_BIN             33109
 
 #define IDD_EDIT_STRING			2000
 #define IDC_VALUE_NAME			2001
@@ -191,8 +196,8 @@
 #define STRING_OPEN_KEY_FAILED          3017
 #define STRING_UNSUPPORTED_TYPE         3018
 #define STRING_EXPORT_AS_BINARY         3019
-#define STRING_INCORRECT_REG_CLASS      3020
+#define STRING_INVALID_SYSTEM_KEY       3020
 #define STRING_REG_KEY_NOT_FOUND        3021
-#define STRING_DELETE_REG_CLASS_FAILED  3022
+#define STRING_DELETE_FAILED            3022
 #define STRING_UNKNOWN_TYPE             3023
 #define STRING_INVALID_LINE_SYNTAX      3024

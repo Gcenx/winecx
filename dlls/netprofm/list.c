@@ -38,20 +38,11 @@
 #include "olectl.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "wine/list.h"
 #include "netprofm_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(netprofm);
-
-static inline void* __WINE_ALLOC_SIZE(1) heap_alloc(size_t size)
-{
-    return HeapAlloc(GetProcessHeap(), 0, size);
-}
-
-static inline BOOL heap_free(void *mem)
-{
-    return HeapFree(GetProcessHeap(), 0, mem);
-}
 
 struct network
 {
@@ -75,6 +66,15 @@ struct connection
     VARIANT_BOOL           connected;
 };
 
+struct connection_point
+{
+    IConnectionPoint IConnectionPoint_iface;
+    IConnectionPointContainer *container;
+    IID iid;
+    struct list sinks;
+    DWORD cookie;
+};
+
 struct list_manager
 {
     INetworkListManager INetworkListManager_iface;
@@ -83,14 +83,16 @@ struct list_manager
     LONG                refs;
     struct list         networks;
     struct list         connections;
+    struct connection_point list_mgr_cp;
+    struct connection_point cost_mgr_cp;
+    struct connection_point conn_mgr_cp;
 };
 
-struct connection_point
+struct sink_entry
 {
-    IConnectionPoint IConnectionPoint_iface;
-    IConnectionPointContainer *container;
-    LONG refs;
-    IID iid;
+    struct list entry;
+    DWORD cookie;
+    IUnknown *unk;
 };
 
 static inline struct list_manager *impl_from_IConnectionPointContainer(IConnectionPointContainer *iface)
@@ -137,21 +139,14 @@ static ULONG WINAPI connection_point_AddRef(
     IConnectionPoint *iface )
 {
     struct connection_point *cp = impl_from_IConnectionPoint( iface );
-    return InterlockedIncrement( &cp->refs );
+    return IConnectionPointContainer_AddRef( cp->container );
 }
 
 static ULONG WINAPI connection_point_Release(
     IConnectionPoint *iface )
 {
     struct connection_point *cp = impl_from_IConnectionPoint( iface );
-    LONG refs = InterlockedDecrement( &cp->refs );
-    if (!refs)
-    {
-        TRACE( "destroying %p\n", cp );
-        IConnectionPointContainer_Release( cp->container );
-        heap_free( cp );
-    }
-    return refs;
+    return IConnectionPointContainer_Release( cp->container );
 }
 
 static HRESULT WINAPI connection_point_GetConnectionInterface(
@@ -189,12 +184,40 @@ static HRESULT WINAPI connection_point_Advise(
     DWORD *cookie )
 {
     struct connection_point *cp = impl_from_IConnectionPoint( iface );
-    FIXME( "%p, %p, %p - stub\n", cp, sink, cookie );
+    struct sink_entry *sink_entry;
+    IUnknown *unk;
+    HRESULT hr;
+
+    FIXME( "%p, %p, %p - semi-stub\n", cp, sink, cookie );
 
     if (!sink || !cookie)
         return E_POINTER;
 
-    return CONNECT_E_CANNOTCONNECT;
+    hr = IUnknown_QueryInterface( sink, &cp->iid, (void**)&unk );
+    if (FAILED(hr))
+    {
+        WARN( "iface %s not implemented by sink\n", debugstr_guid(&cp->iid) );
+        return CO_E_FAILEDTOOPENTHREADTOKEN;
+    }
+
+    sink_entry = heap_alloc( sizeof(*sink_entry) );
+    if (!sink_entry)
+    {
+        IUnknown_Release( unk );
+        return E_OUTOFMEMORY;
+    }
+
+    sink_entry->unk = unk;
+    *cookie = sink_entry->cookie = ++cp->cookie;
+    list_add_tail( &cp->sinks, &sink_entry->entry );
+    return S_OK;
+}
+
+static void sink_entry_release( struct sink_entry *entry )
+{
+    list_remove( &entry->entry );
+    IUnknown_Release( entry->unk );
+    heap_free( entry );
 }
 
 static HRESULT WINAPI connection_point_Unadvise(
@@ -202,9 +225,19 @@ static HRESULT WINAPI connection_point_Unadvise(
     DWORD cookie )
 {
     struct connection_point *cp = impl_from_IConnectionPoint( iface );
-    FIXME( "%p, %d - stub\n", cp, cookie );
+    struct sink_entry *iter;
 
-    return E_POINTER;
+    TRACE( "%p, %d\n", cp, cookie );
+
+    LIST_FOR_EACH_ENTRY( iter, &cp->sinks, struct sink_entry, entry )
+    {
+        if (iter->cookie != cookie) continue;
+        sink_entry_release( iter );
+        return S_OK;
+    }
+
+    WARN( "invalid cookie\n" );
+    return OLE_E_NOCONNECTION;
 }
 
 static HRESULT WINAPI connection_point_EnumConnections(
@@ -229,25 +262,22 @@ static const IConnectionPointVtbl connection_point_vtbl =
     connection_point_EnumConnections
 };
 
-static HRESULT connection_point_create(
-    IConnectionPoint **obj,
+static void connection_point_init(
+    struct connection_point *cp,
     REFIID riid,
     IConnectionPointContainer *container )
 {
-    struct connection_point *cp;
-    TRACE( "%p, %s, %p\n", obj, debugstr_guid(riid), container );
-
-    if (!(cp = heap_alloc( sizeof(*cp) ))) return E_OUTOFMEMORY;
     cp->IConnectionPoint_iface.lpVtbl = &connection_point_vtbl;
     cp->container = container;
-    cp->refs = 1;
+    cp->cookie = 0;
+    cp->iid = *riid;
+    list_init( &cp->sinks );
+}
 
-    memcpy( &cp->iid, riid, sizeof(*riid) );
-    IConnectionPointContainer_AddRef( container );
-
-    *obj = &cp->IConnectionPoint_iface;
-    TRACE( "returning iface %p\n", *obj );
-    return S_OK;
+static void connection_point_release( struct connection_point *cp )
+{
+    while (!list_empty( &cp->sinks ))
+        sink_entry_release( LIST_ENTRY( list_head( &cp->sinks ), struct sink_entry, entry ) );
 }
 
 static inline struct network *impl_from_INetwork(
@@ -1082,6 +1112,9 @@ static ULONG WINAPI list_manager_Release(
 
         TRACE( "destroying %p\n", mgr );
 
+        connection_point_release( &mgr->conn_mgr_cp );
+        connection_point_release( &mgr->cost_mgr_cp );
+        connection_point_release( &mgr->list_mgr_cp );
         while ((ptr = list_head( &mgr->networks )))
         {
             struct network *network = LIST_ENTRY( ptr, struct network, entry );
@@ -1352,21 +1385,28 @@ static HRESULT WINAPI ConnectionPointContainer_FindConnectionPoint(IConnectionPo
         REFIID riid, IConnectionPoint **cp)
 {
     struct list_manager *This = impl_from_IConnectionPointContainer( iface );
+    struct connection_point *ret;
 
     TRACE( "%p, %s, %p\n", This, debugstr_guid(riid), cp );
 
     if (!riid || !cp)
         return E_POINTER;
 
-    if (IsEqualGUID( riid, &IID_INetworkListManagerEvents ) ||
-        IsEqualGUID( riid, &IID_INetworkCostManagerEvents ) ||
-        IsEqualGUID( riid, &IID_INetworkConnectionEvents ))
-        return connection_point_create( cp, riid, iface );
+    if (IsEqualGUID( riid, &IID_INetworkListManagerEvents ))
+        ret = &This->list_mgr_cp;
+    else if (IsEqualGUID( riid, &IID_INetworkCostManagerEvents ))
+        ret = &This->cost_mgr_cp;
+    else if (IsEqualGUID( riid, &IID_INetworkConnectionEvents ))
+        ret = &This->conn_mgr_cp;
+    else
+    {
+        FIXME( "interface %s not implemented\n", debugstr_guid(riid) );
+        *cp = NULL;
+        return E_NOINTERFACE;
+    }
 
-    FIXME( "interface %s not implemented\n", debugstr_guid(riid) );
-
-    *cp = NULL;
-    return E_NOINTERFACE;
+    IConnectionPoint_AddRef( *cp = &ret->IConnectionPoint_iface );
+    return S_OK;
 }
 
 static const struct IConnectionPointContainerVtbl cpc_vtbl =
@@ -1741,6 +1781,13 @@ HRESULT list_manager_create( void **obj )
     mgr->IConnectionPointContainer_iface.lpVtbl = &cpc_vtbl;
     init_networks( mgr );
     mgr->refs = 1;
+
+    connection_point_init( &mgr->list_mgr_cp, &IID_INetworkListManagerEvents,
+                           &mgr->IConnectionPointContainer_iface );
+    connection_point_init( &mgr->cost_mgr_cp, &IID_INetworkCostManagerEvents,
+                           &mgr->IConnectionPointContainer_iface);
+    connection_point_init( &mgr->conn_mgr_cp, &IID_INetworkConnectionEvents,
+                           &mgr->IConnectionPointContainer_iface );
 
     *obj = &mgr->INetworkListManager_iface;
     TRACE( "returning iface %p\n", *obj );

@@ -1303,7 +1303,7 @@ static int get_dns_servers( SOCKADDR_STORAGE *servers, int num, BOOL ip4_only )
     for (i = 0, addr = servers; addr < (servers + num) && i < _res.nscount; i++)
     {
 #ifdef HAVE_STRUCT___RES_STATE__U__EXT_NSCOUNT6
-        if (_res._u._ext.nsaddrs[i])
+        if (_res._u._ext.nsaddrs[i] && _res._u._ext.nsaddrs[i]->sin6_family == AF_INET6)
         {
             if (ip4_only) continue;
             sockaddr_in6_to_WS_storage( addr, _res._u._ext.nsaddrs[i] );
@@ -1732,7 +1732,7 @@ DWORD WINAPI GetIfEntry(PMIB_IFROW pIfRow)
  */
 DWORD WINAPI GetIfEntry2( MIB_IF_ROW2 *row2 )
 {
-    DWORD ret, len = sizeof(row2->Description)/sizeof(row2->Description[0]);
+    DWORD ret, len = ARRAY_SIZE(row2->Description);
     char buf[MAX_ADAPTER_NAME], *name;
     MIB_IFROW row;
 
@@ -1815,8 +1815,8 @@ DWORD WINAPI GetIfTable(PMIB_IFTABLE pIfTable, PULONG pdwSize, BOOL bOrder)
 {
   DWORD ret;
 
-  TRACE("pIfTable %p, pdwSize %p, bOrder %d\n", pdwSize, pdwSize,
-   (DWORD)bOrder);
+  TRACE("pIfTable %p, pdwSize %p, bOrder %d\n", pIfTable, pdwSize, bOrder);
+
   if (!pdwSize)
     ret = ERROR_INVALID_PARAMETER;
   else {
@@ -1867,17 +1867,21 @@ DWORD WINAPI GetIfTable(PMIB_IFTABLE pIfTable, PULONG pdwSize, BOOL bOrder)
 }
 
 /******************************************************************
- *    GetIfTable2 (IPHLPAPI.@)
+ *    GetIfTable2Ex (IPHLPAPI.@)
  */
-DWORD WINAPI GetIfTable2( MIB_IF_TABLE2 **table )
+DWORD WINAPI GetIfTable2Ex( MIB_IF_TABLE_LEVEL level, MIB_IF_TABLE2 **table )
 {
     DWORD i, nb_interfaces, size = sizeof(MIB_IF_TABLE2);
     InterfaceIndexTable *index_table;
     MIB_IF_TABLE2 *ret;
 
-    TRACE( "table %p\n", table );
+    TRACE( "level %u, table %p\n", level, table );
 
-    if (!table) return ERROR_INVALID_PARAMETER;
+    if (!table || level > MibIfTableNormalWithoutStatistics)
+        return ERROR_INVALID_PARAMETER;
+
+    if (level != MibIfTableNormal)
+        FIXME("level %u not fully supported\n", level);
 
     if ((nb_interfaces = get_interface_indices( FALSE, NULL )) > 1)
         size += (nb_interfaces - 1) * sizeof(MIB_IF_ROW2);
@@ -1902,6 +1906,15 @@ DWORD WINAPI GetIfTable2( MIB_IF_TABLE2 **table )
     HeapFree( GetProcessHeap(), 0, index_table );
     *table = ret;
     return NO_ERROR;
+}
+
+/******************************************************************
+ *    GetIfTable2 (IPHLPAPI.@)
+ */
+DWORD WINAPI GetIfTable2( MIB_IF_TABLE2 **table )
+{
+    TRACE( "table %p\n", table );
+    return GetIfTable2Ex(MibIfTableNormal, table);
 }
 
 /******************************************************************
@@ -3222,4 +3235,58 @@ DWORD WINAPI ConvertInterfaceNameToLuidW(const WCHAR *name, NET_LUID *luid)
     luid->Info.NetLuidIndex = index;
     luid->Info.IfType       = row.dwType;
     return NO_ERROR;
+}
+
+/******************************************************************
+ *    ConvertLengthToIpv4Mask (IPHLPAPI.@)
+ */
+DWORD WINAPI ConvertLengthToIpv4Mask(ULONG mask_len, ULONG *mask)
+{
+    if (mask_len > 32)
+    {
+        *mask = INADDR_NONE;
+        return ERROR_INVALID_PARAMETER;
+    }
+
+    if (mask_len == 0)
+        *mask = 0;
+    else
+        *mask = htonl(~0u << (32 - mask_len));
+
+    return NO_ERROR;
+}
+
+/******************************************************************
+ *    if_nametoindex (IPHLPAPI.@)
+ */
+IF_INDEX WINAPI IPHLP_if_nametoindex(const char *name)
+{
+    IF_INDEX idx;
+
+    TRACE("(%s)\n", name);
+    if (getInterfaceIndexByName(name, &idx) == NO_ERROR)
+        return idx;
+
+    return 0;
+}
+
+/******************************************************************
+ *    if_indextoname (IPHLPAPI.@)
+ */
+PCHAR WINAPI IPHLP_if_indextoname(NET_IFINDEX index, PCHAR name)
+{
+    TRACE("(%u, %p)\n", index, name);
+
+    return getInterfaceNameByIndex(index, name);
+}
+
+/******************************************************************
+ *    GetIpForwardTable2 (IPHLPAPI.@)
+ */
+DWORD WINAPI GetIpForwardTable2(ADDRESS_FAMILY family, PMIB_IPFORWARD_TABLE2 *table)
+{
+    static int once;
+
+    if (!once++) FIXME("(%u %p): stub\n", family, table);
+    return ERROR_NOT_SUPPORTED;
 }

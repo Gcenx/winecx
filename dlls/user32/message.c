@@ -1858,7 +1858,7 @@ static LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPAR
         return WIN_DestroyWindow( hwnd );
     case WM_WINE_SETWINDOWPOS:
         if (is_desktop_window( hwnd )) return 0;
-        return USER_SetWindowPos( (WINDOWPOS *)lparam );
+        return USER_SetWindowPos( (WINDOWPOS *)lparam, 0, 0 );
     case WM_WINE_SHOWWINDOW:
         if (is_desktop_window( hwnd )) return 0;
         return ShowWindow( hwnd, wparam );
@@ -1871,7 +1871,6 @@ static LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPAR
         if (is_desktop_window( hwnd )) return 0;
         return WIN_SetStyle(hwnd, wparam, lparam);
     case WM_WINE_SETACTIVEWINDOW:
-        if (is_desktop_window( hwnd )) return 0;
         if (!wparam && GetForegroundWindow() == hwnd) return 0;
         return (LRESULT)SetActiveWindow( (HWND)wparam );
     case WM_WINE_KEYBOARD_LL_HOOK:
@@ -2313,7 +2312,7 @@ static BOOL process_rawinput_message( MSG *msg, const struct hardware_msg_data *
         rawinput->data.mouse.usFlags           = MOUSE_MOVE_RELATIVE;
         rawinput->data.mouse.u.s.usButtonFlags = 0;
         rawinput->data.mouse.u.s.usButtonData  = 0;
-        for (i = 1; i < sizeof(button_flags) / sizeof(*button_flags); ++i)
+        for (i = 1; i < ARRAY_SIZE(button_flags); ++i)
         {
             if (msg_data->flags & (1 << i))
                 rawinput->data.mouse.u.s.usButtonFlags |= button_flags[i];
@@ -2490,6 +2489,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     GUITHREADINFO info;
     MOUSEHOOKSTRUCTEX hook;
     BOOL eatMsg;
+    WPARAM wparam;
 
     /* find the window to dispatch this mouse message to */
 
@@ -2502,7 +2502,16 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     }
     else
     {
+        HWND orig = msg->hwnd;
+
         msg->hwnd = WINPOS_WindowFromPoint( msg->hwnd, msg->pt, &hittest );
+        if (!msg->hwnd) /* As a heuristic, try the next window if it's the owner of orig */
+        {
+            HWND next = GetWindow( orig, GW_HWNDNEXT );
+
+            if (next && GetWindow( orig, GW_OWNER ) == next && WIN_IsCurrentThread( next ))
+                msg->hwnd = WINPOS_WindowFromPoint( next, msg->pt, &hittest );
+        }
     }
 
     if (!msg->hwnd || !WIN_IsCurrentThread( msg->hwnd ))
@@ -2523,13 +2532,14 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
 
     pt = msg->pt;
     message = msg->message;
+    wparam = msg->wParam;
     /* Note: windows has no concept of a non-client wheel message */
     if (message != WM_MOUSEWHEEL)
     {
         if (hittest != HTCLIENT)
         {
             message += WM_NCMOUSEMOVE - WM_MOUSEMOVE;
-            msg->wParam = hittest;
+            wparam = hittest;
         }
         else
         {
@@ -2581,6 +2591,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     {
         if (message < first || message > last) return FALSE;
     }
+    msg->wParam = wparam;
 
     /* message is accepted now (but may still get dropped) */
 
@@ -2635,14 +2646,9 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
 
         if (msg->hwnd != info.hwndActive)
         {
-            HWND hwndTop = msg->hwnd;
-            while (hwndTop)
-            {
-                if ((GetWindowLongW( hwndTop, GWL_STYLE ) & (WS_POPUP|WS_CHILD)) != WS_CHILD) break;
-                hwndTop = GetParent( hwndTop );
-            }
+            HWND hwndTop = GetAncestor( msg->hwnd, GA_ROOT );
 
-            if (hwndTop && hwndTop != GetDesktopWindow())
+            if ((GetWindowLongW( hwndTop, GWL_STYLE ) & (WS_POPUP|WS_CHILD)) != WS_CHILD)
             {
                 LONG ret = SendMessageW( msg->hwnd, WM_MOUSEACTIVATE, (WPARAM)hwndTop,
                                          MAKELONG( hittest, msg->message ) );
@@ -2711,15 +2717,11 @@ static inline void call_sendmsg_callback( SENDASYNCPROC callback, HWND hwnd, UIN
 {
     if (!callback) return;
 
-    if (TRACE_ON(relay))
-        DPRINTF( "%04x:Call message callback %p (hwnd=%p,msg=%s,data=%08lx,result=%08lx)\n",
-                 GetCurrentThreadId(), callback, hwnd, SPY_GetMsgName( msg, hwnd ),
-                 data, result );
+    TRACE_(relay)( "\1Call message callback %p (hwnd=%p,msg=%s,data=%08lx,result=%08lx)\n",
+                   callback, hwnd, SPY_GetMsgName( msg, hwnd ), data, result );
     callback( hwnd, msg, data, result );
-    if (TRACE_ON(relay))
-        DPRINTF( "%04x:Ret  message callback %p (hwnd=%p,msg=%s,data=%08lx,result=%08lx)\n",
-                 GetCurrentThreadId(), callback, hwnd, SPY_GetMsgName( msg, hwnd ),
-                 data, result );
+    TRACE_(relay)( "\1Ret  message callback %p (hwnd=%p,msg=%s,data=%08lx,result=%08lx)\n",
+                   callback, hwnd, SPY_GetMsgName( msg, hwnd ), data, result );
 }
 
 
@@ -2835,21 +2837,17 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
                     }
                 }
 
-                if (TRACE_ON(relay))
-                    DPRINTF( "%04x:Call winevent proc %p (hook=%04x,event=%x,hwnd=%p,object_id=%lx,child_id=%lx,tid=%04x,time=%x)\n",
-                             GetCurrentThreadId(), hook_proc,
-                             msg_data->winevent.hook, info.msg.message, info.msg.hwnd, info.msg.wParam,
-                             info.msg.lParam, msg_data->winevent.tid, info.msg.time);
+                TRACE_(relay)( "\1Call winevent proc %p (hook=%04x,event=%x,hwnd=%p,object_id=%lx,child_id=%lx,tid=%04x,time=%x)\n",
+                               hook_proc, msg_data->winevent.hook, info.msg.message, info.msg.hwnd,
+                               info.msg.wParam, info.msg.lParam, msg_data->winevent.tid, info.msg.time);
 
                 hook_proc( wine_server_ptr_handle( msg_data->winevent.hook ), info.msg.message,
                            info.msg.hwnd, info.msg.wParam, info.msg.lParam,
                            msg_data->winevent.tid, info.msg.time );
 
-                if (TRACE_ON(relay))
-                    DPRINTF( "%04x:Ret  winevent proc %p (hook=%04x,event=%x,hwnd=%p,object_id=%lx,child_id=%lx,tid=%04x,time=%x)\n",
-                             GetCurrentThreadId(), hook_proc,
-                             msg_data->winevent.hook, info.msg.message, info.msg.hwnd, info.msg.wParam,
-                             info.msg.lParam, msg_data->winevent.tid, info.msg.time);
+                TRACE_(relay)( "\1Ret  winevent proc %p (hook=%04x,event=%x,hwnd=%p,object_id=%lx,child_id=%lx,tid=%04x,time=%x)\n",
+                               hook_proc, msg_data->winevent.hook, info.msg.message, info.msg.hwnd,
+                               info.msg.wParam, info.msg.lParam, msg_data->winevent.tid, info.msg.time);
 
                 if (free_module) FreeLibrary(free_module);
             }
@@ -3904,7 +3902,7 @@ BOOL WINAPI TranslateMessage( const MSG *msg )
     }
 
     GetKeyboardState( state );
-    len = ToUnicode(msg->wParam, HIWORD(msg->lParam), state, wp, sizeof(wp)/sizeof(WCHAR), 0);
+    len = ToUnicode(msg->wParam, HIWORD(msg->lParam), state, wp, ARRAY_SIZE(wp), 0);
     if (len == -1)
     {
         message = (msg->message == WM_KEYDOWN) ? WM_DEADCHAR : WM_SYSDEADCHAR;

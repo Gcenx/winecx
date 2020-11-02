@@ -1088,6 +1088,13 @@ static LRESULT WINMM_OpenDevice(WINMM_Device *device, WINMM_OpenInfo *info,
     }
 
     if(info->format->wFormatTag == WAVE_FORMAT_PCM){
+
+        if (info->format->nSamplesPerSec == 0)
+        {
+            ret = MMSYSERR_INVALPARAM;
+            goto error;
+        }
+
         /* we aren't guaranteed that the struct in lpFormat is a full
          * WAVEFORMATEX struct, which IAC::IsFormatSupported requires */
         device->orig_fmt = HeapAlloc(GetProcessHeap(), 0, sizeof(WAVEFORMATEX));
@@ -3262,17 +3269,17 @@ UINT WINAPI waveOutMessage(HWAVEOUT hWaveOut, UINT uMessage,
     case DRV_QUERYMAPPABLE:
         return MMSYSERR_NOERROR;
     case DRVM_MAPPER_PREFERRED_GET:
-        if(dwParam1) {
-            if(g_outmmdevices_count > 0)
-                /* Device 0 is always the default device */
-                *(DWORD *)dwParam1 = 0;
-            else
-                *(DWORD *)dwParam1 = -1;
-        }
+        if(!dwParam1 || !dwParam2)
+            return MMSYSERR_INVALPARAM;
 
-        if(dwParam2)
-            /* Status flags */
-            *(DWORD *)dwParam2 = 0;
+        if(g_outmmdevices_count > 0)
+            /* Device 0 is always the default device */
+            *(DWORD *)dwParam1 = 0;
+        else
+            *(DWORD *)dwParam1 = -1;
+
+        /* Status flags */
+        *(DWORD *)dwParam2 = 0;
 
         return MMSYSERR_NOERROR;
     }
@@ -3660,17 +3667,17 @@ UINT WINAPI waveInMessage(HWAVEIN hWaveIn, UINT uMessage,
     case DRV_QUERYMAPPABLE:
         return MMSYSERR_NOERROR;
     case DRVM_MAPPER_PREFERRED_GET:
-        if(dwParam1) {
-            if(g_inmmdevices_count > 0)
-                /* Device 0 is always the default device */
-                *(DWORD *)dwParam1 = 0;
-            else
-                *(DWORD *)dwParam1 = -1;
-        }
+        if(!dwParam1 || !dwParam2)
+            return MMSYSERR_INVALPARAM;
 
-        if(dwParam2)
-            /* Status flags */
-            *(DWORD *)dwParam2 = 0;
+        if(g_inmmdevices_count > 0)
+            /* Device 0 is always the default device */
+            *(DWORD *)dwParam1 = 0;
+        else
+            *(DWORD *)dwParam1 = -1;
+
+        /* Status flags */
+        *(DWORD *)dwParam2 = 0;
 
         return MMSYSERR_NOERROR;
     }

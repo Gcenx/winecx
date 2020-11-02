@@ -13,16 +13,15 @@ Wineはフリーソフトウェアで、GNU LGPLのもとでリリースされ�
 
 2. クイックスタート
 
-ソースからコンパイルするときにはいつでも、Wineをビルドしインストールするのに
-Wine Installerを使うことが推奨されます。（このファイル[訳注: README.jaではなく
-READMEというファイル]を含む）Wineソースのトップレベルディレクトリから、
-以下を実行してください:
+Wineソースのトップレベルディレクトリ（このファイル[訳注:README.jaではなく
+READMEというファイル]を含むディレクトリ）から、以下を実行してください:
 
-./tools/wineinstall
+./configure
+make
 
 "wine program"のようにプログラムを実行してください。更なる情報や
 問題解決については、このファイルの残りの部分、Wineのmanページや、
-特にhttp://www.winehq.orgで見つかる豊富な情報を読んでください。
+特にhttps://www.winehq.orgで見つかる豊富な情報を読んでください。
 
 
 3. 要件
@@ -42,7 +41,7 @@ Wineをコンパイルし実行するには、以下のうち一つを持って�
 
 FreeBSD情報:
   Wineは一般的にFreeBSD 8.0より前のバージョン上で正しく動作しないでしょう。
-  詳細については http://wiki.freebsd.org/Wine を参照してください。
+  詳細については https://wiki.freebsd.org/Wine を参照してください。
 
 Solaris情報:
   GNUツールチェーン（gcc、gasなど）でWineをビルドする必要がある可能性が
@@ -78,18 +77,14 @@ Mac OS X情報:
 オプションのサポートライブラリ:
   configureはオプションのライブラリがシステム上に見つからなかったときに通知を
   表示します。インストールすべきパッケージについてのヒントについては
-  http://wiki.winehq.org/Recommended_Packagesを参照してください。
+  https://wiki.winehq.org/Recommended_Packagesを参照してください。64ビットプ
+  ラットフォームでは、これらライブラリの32ビットバージョンをインストールした
+  ことをよく確認してください。
 
-  64ビットプラットフォームでは、Wineを32ビットでコンパイルした場合（デフォル
-  ト）、これらライブラリの32ビットバージョンをインストールしたことをよく確認
-  してください。詳細はhttp://wiki.winehq.org/WineOn64bitを参照してください。
-  真の64ビットWine（または32ビットと64ビットが混在したWine配置）を必要とする
-  場合は、詳細についてhttp://wiki.winehq.org/Wine64を参照してください。
 
 4. コンパイル
 
-wineinstallを使わないことを選択した場合、Wineをビルドするには以下のコマンドを
-実行してください:
+Wineをビルドするには以下のコマンドを実行してください:
 
 ./configure
 make
@@ -100,6 +95,9 @@ make
 ソースコードをコンパイルしリンクするのに使えます。
 
 コンパイル設定オプションを見るには、./configure --helpを行なってください。
+
+更なる情報はhttps://wiki.winehq.org/Building_Wineを参照してください。
+
 
 5. 設定
 
@@ -112,7 +110,7 @@ make
 または"make uninstall"を試してください。
 
 いったんインストールされると、"winecfg"設定ツールを実行できます。
-設定のヒントについてはhttp://www.winehq.org/におけるサポート領域を
+設定のヒントについてはhttps://www.winehq.org/におけるサポート領域を
 参照してください。
 
 
@@ -139,29 +137,29 @@ Wineは完璧ではないので、いくつかのプログラムはクラッシ�
 
 7. 更なる情報の取得
 
-WWW:	Wineについてのたくさんの情報がhttp://www.winehq.org/にある
+WWW:	Wineについてのたくさんの情報がhttps://www.winehq.org/にある
         WineHQから入手できます。多様なWineガイド、アプリケーションデータベース、
 	バグ追跡。これはおそらく最良の出発点です。
 
-FAQ:	Wine FAQはhttp://www.winehq.org/FAQにあります
+FAQ:	Wine FAQはhttps://www.winehq.org/FAQにあります
 
-Wiki:	Wine Wikiはhttp://wiki.winehq.orgにあります
+Wiki:	Wine Wikiはhttps://wiki.winehq.orgにあります
 
 メーリングリスト:
 	Wineユーザと開発者のためのいくつかのメーリングリストがあります。
-	詳細についてはhttp://www.winehq.org/forumsを参照してください。
+	詳細についてはhttps://www.winehq.org/forumsを参照してください。
 
-バグ:	http://bugs.winehq.orgにあるWine Bugzillaでバグを報告してください。
+バグ:	https://bugs.winehq.orgにあるWine Bugzillaでバグを報告してください。
         バグ報告を投稿する前に問題が既知や修正済みかどうかを調べるために
 	bugzillaデータベースを検索してください。
 
 IRC:	irc.freenode.net上のチャンネル#WineHQでオンラインヘルプを利用できます。
 
 Git:	現在のWine開発ツリーはGitを通して入手できます。
-	詳細についてはhttp://www.winehq.org/gitに行ってください。
+	詳細についてはhttps://www.winehq.org/gitに行ってください。
 
 何かを追加するか、バグを修正するならば、次のリリースに含めるためにパッチ
-（git-format-patchをなるべく使用）をwine-patches@winehq.orgのリストに送って
+（git-format-patchをなるべく使用）をwine-devel@winehq.orgのリストに送って
 ください。
 
 --

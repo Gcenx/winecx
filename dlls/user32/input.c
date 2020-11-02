@@ -310,7 +310,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetCursorPos( INT x, INT y )
     return ret;
 }
 
-
 /**********************************************************************
  *		SetCapture (USER32.@)
  */
@@ -371,6 +370,7 @@ SHORT WINAPI DECLSPEC_HOTPATCH GetAsyncKeyState( INT key )
 {
     struct user_key_state_info *key_state_info = get_user_thread_info()->key_state;
     INT counter = global_key_state_counter;
+    BYTE prev_key_state;
     SHORT ret;
 
     if (key < 0 || key >= 256) return 0;
@@ -398,14 +398,23 @@ SHORT WINAPI DECLSPEC_HOTPATCH GetAsyncKeyState( INT key )
         {
             req->tid = 0;
             req->key = key;
-            if (key_state_info) wine_server_set_reply( req, key_state_info->state,
-                                                       sizeof(key_state_info->state) );
+            if (key_state_info)
+            {
+                prev_key_state = key_state_info->state[key];
+                wine_server_set_reply( req, key_state_info->state, sizeof(key_state_info->state) );
+            }
             if (!wine_server_call( req ))
             {
                 if (reply->state & 0x40) ret |= 0x0001;
                 if (reply->state & 0x80) ret |= 0x8000;
                 if (key_state_info)
                 {
+                    /* force refreshing the key state cache - some multithreaded programs
+                     * (like Adobe Photoshop CS5) expect that changes to the async key state
+                     * are also immediately available in other threads. */
+                    if (prev_key_state != key_state_info->state[key])
+                        counter = interlocked_xchg_add( &global_key_state_counter, 1 ) + 1;
+
                     key_state_info->time    = GetTickCount();
                     key_state_info->counter = counter;
                 }
@@ -908,18 +917,40 @@ DWORD WINAPI OemKeyScan( WORD oem )
 INT WINAPI GetKeyboardType(INT nTypeFlag)
 {
     TRACE_(keyboard)("(%d)\n", nTypeFlag);
-    switch(nTypeFlag)
+    if (LOWORD(GetKeyboardLayout(0)) == MAKELANGID(LANG_JAPANESE, SUBLANG_JAPANESE_JAPAN))
     {
-    case 0:      /* Keyboard type */
-        return 4;    /* AT-101 */
-    case 1:      /* Keyboard Subtype */
-        return 0;    /* There are no defined subtypes */
-    case 2:      /* Number of F-keys */
-        return 12;   /* We're doing an 101 for now, so return 12 F-keys */
-    default:
-        WARN_(keyboard)("Unknown type\n");
-        return 0;    /* The book says 0 here, so 0 */
+        /* scan code for `_', the key left of r-shift, in Japanese 106 keyboard */
+        const UINT JP106_VSC_USCORE = 0x73;
+
+        switch(nTypeFlag)
+        {
+        case 0:      /* Keyboard type */
+            return 7;    /* Japanese keyboard */
+        case 1:      /* Keyboard Subtype */
+            /* Test keyboard mappings to detect Japanese keyboard */
+            if (MapVirtualKeyW(VK_OEM_102, MAPVK_VK_TO_VSC) == JP106_VSC_USCORE
+                && MapVirtualKeyW(JP106_VSC_USCORE, MAPVK_VSC_TO_VK) == VK_OEM_102)
+                return 2;    /* Japanese 106 */
+            else
+                return 0;    /* AT-101 */
+        case 2:      /* Number of F-keys */
+            return 12;   /* It has 12 F-keys */
+        }
     }
+    else
+    {
+        switch(nTypeFlag)
+        {
+        case 0:      /* Keyboard type */
+            return 4;    /* AT-101 */
+        case 1:      /* Keyboard Subtype */
+            return 0;    /* There are no defined subtypes */
+        case 2:      /* Number of F-keys */
+            return 12;   /* We're doing an 101 for now, so return 12 F-keys */
+        }
+    }
+    WARN_(keyboard)("Unknown type\n");
+    return 0;    /* The book says 0 here, so 0 */
 }
 
 /******************************************************************************
@@ -1484,4 +1515,15 @@ int WINAPI GetMouseMovePointsEx(UINT size, LPMOUSEMOVEPOINT ptin, LPMOUSEMOVEPOI
 
     SetLastError(ERROR_POINT_NOT_FOUND);
     return -1;
+}
+
+/***********************************************************************
+ *		EnableMouseInPointer (USER32.@)
+ */
+BOOL WINAPI EnableMouseInPointer(BOOL enable)
+{
+    FIXME("(%#x) stub\n", enable);
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
 }

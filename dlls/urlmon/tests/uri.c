@@ -33,6 +33,7 @@
 #include "wininet.h"
 #include "strsafe.h"
 #include "initguid.h"
+#include <wine/heap.h>
 
 DEFINE_GUID(CLSID_CUri, 0xDF2FCE13, 0x25EC, 0x45BB, 0x9D,0x4C, 0xCE,0xCD,0x47,0xC2,0x43,0x0C);
 
@@ -4798,6 +4799,266 @@ static const uri_properties uri_tests[] = {
             {URL_SCHEME_FILE,S_OK,FALSE},
             {URLZONE_INVALID,E_NOTIMPL,FALSE}
         }
+    },
+    /* Path with Unicode characters. Unicode characters should not be encoded */
+    {/* "http://127.0.0.1/测试/test.txt" with Chinese in UTF-8 encoding */
+        "http://127.0.0.1/\xE6\xB5\x8B\xE8\xAF\x95/test.txt", 0, S_OK, FALSE,
+        {
+            {"http://127.0.0.1/\xE6\xB5\x8B\xE8\xAF\x95/test.txt",S_OK,FALSE},
+            {"127.0.0.1",S_OK,FALSE},
+            {"http://127.0.0.1/\xE6\xB5\x8B\xE8\xAF\x95/test.txt",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {".txt",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"127.0.0.1",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"/\xE6\xB5\x8B\xE8\xAF\x95/test.txt",S_OK,FALSE},
+            {"/\xE6\xB5\x8B\xE8\xAF\x95/test.txt",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"http://127.0.0.1/\xE6\xB5\x8B\xE8\xAF\x95/test.txt",S_OK,FALSE},
+            {"http",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE}
+        },
+        {
+            {Uri_HOST_IPV4,S_OK,FALSE},
+            {80,S_OK,FALSE},
+            {URL_SCHEME_HTTP,S_OK,FALSE},
+            {URLZONE_INVALID,E_NOTIMPL,FALSE}
+        }
+    },
+    {   "file:\xE6\xB5\x8B\xE8\xAF\x95.html", 0, S_OK, FALSE,
+        {
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+            {"file:\xE6\xB5\x8B\xE8\xAF\x95.html",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {".html",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+            {"\xE6\xB5\x8B\xE8\xAF\x95.html",S_OK,FALSE},
+            {"\xE6\xB5\x8B\xE8\xAF\x95.html",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"file:\xE6\xB5\x8B\xE8\xAF\x95.html",S_OK,FALSE},
+            {"file",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE}
+        },
+        {
+            {Uri_HOST_UNKNOWN,S_OK,FALSE},
+            {0,S_FALSE,FALSE},
+            {URL_SCHEME_FILE,S_OK,FALSE},
+            {URLZONE_INVALID,E_NOTIMPL,FALSE}
+        }
+    },
+    /* Username with Unicode characters. Unicode characters should not be encoded */
+    {   "ftp://\xE6\xB5\x8B\xE8\xAF\x95:wine@ftp.winehq.org:9999/dir/foobar.txt", 0, S_OK, FALSE,
+        {
+            {"ftp://\xE6\xB5\x8B\xE8\xAF\x95:wine@ftp.winehq.org:9999/dir/foobar.txt",S_OK,FALSE},
+            {"\xE6\xB5\x8B\xE8\xAF\x95:wine@ftp.winehq.org:9999",S_OK,FALSE},
+            {"ftp://ftp.winehq.org:9999/dir/foobar.txt",S_OK,FALSE},
+            {"winehq.org",S_OK,FALSE},
+            {".txt",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"ftp.winehq.org",S_OK,FALSE},
+            {"wine",S_OK,FALSE},
+            {"/dir/foobar.txt",S_OK,FALSE},
+            {"/dir/foobar.txt",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"ftp://\xE6\xB5\x8B\xE8\xAF\x95:wine@ftp.winehq.org:9999/dir/foobar.txt",S_OK,FALSE},
+            {"ftp",S_OK,FALSE},
+            {"\xE6\xB5\x8B\xE8\xAF\x95:wine",S_OK,FALSE},
+            {"\xE6\xB5\x8B\xE8\xAF\x95",S_OK,FALSE}
+        },
+        {
+            {Uri_HOST_DNS,S_OK,FALSE},
+            {9999,S_OK,FALSE},
+            {URL_SCHEME_FTP,S_OK,FALSE},
+            {URLZONE_INVALID,E_NOTIMPL,FALSE}
+        }
+    },
+    /* Password with Unicode characters. Unicode characters should not be encoded */
+    {   "ftp://winepass:\xE6\xB5\x8B\xE8\xAF\x95@ftp.winehq.org:9999/dir/foobar.txt", 0, S_OK, FALSE,
+        {
+            {"ftp://winepass:\xE6\xB5\x8B\xE8\xAF\x95@ftp.winehq.org:9999/dir/foobar.txt",S_OK,FALSE},
+            {"winepass:\xE6\xB5\x8B\xE8\xAF\x95@ftp.winehq.org:9999",S_OK,FALSE},
+            {"ftp://ftp.winehq.org:9999/dir/foobar.txt",S_OK,FALSE},
+            {"winehq.org",S_OK,FALSE},
+            {".txt",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"ftp.winehq.org",S_OK,FALSE},
+            {"\xE6\xB5\x8B\xE8\xAF\x95",S_OK,FALSE},
+            {"/dir/foobar.txt",S_OK,FALSE},
+            {"/dir/foobar.txt",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"ftp://winepass:\xE6\xB5\x8B\xE8\xAF\x95@ftp.winehq.org:9999/dir/foobar.txt",S_OK,FALSE},
+            {"ftp",S_OK,FALSE},
+            {"winepass:\xE6\xB5\x8B\xE8\xAF\x95",S_OK,FALSE},
+            {"winepass",S_OK,FALSE}
+        },
+        {
+            {Uri_HOST_DNS,S_OK,FALSE},
+            {9999,S_OK,FALSE},
+            {URL_SCHEME_FTP,S_OK,FALSE},
+            {URLZONE_INVALID,E_NOTIMPL,FALSE}
+        }
+    },
+    /* Query with Unicode characters. Unicode characters should not be encoded */
+    {   "http://www.winehq.org/tests/..?query=\xE6\xB5\x8B\xE8\xAF\x95&return=y", 0, S_OK, FALSE,
+        {
+            {"http://www.winehq.org/?query=\xE6\xB5\x8B\xE8\xAF\x95&return=y",S_OK,FALSE},
+            {"www.winehq.org",S_OK,FALSE},
+            {"http://www.winehq.org/?query=\xE6\xB5\x8B\xE8\xAF\x95&return=y",S_OK,FALSE},
+            {"winehq.org",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+            {"www.winehq.org",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"/",S_OK,FALSE},
+            {"/?query=\xE6\xB5\x8B\xE8\xAF\x95&return=y",S_OK,FALSE},
+            {"?query=\xE6\xB5\x8B\xE8\xAF\x95&return=y",S_OK,FALSE},
+            {"http://www.winehq.org/tests/..?query=\xE6\xB5\x8B\xE8\xAF\x95&return=y",S_OK,FALSE},
+            {"http",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE}
+        },
+        {
+            {Uri_HOST_DNS,S_OK,FALSE},
+            {80,S_OK,FALSE},
+            {URL_SCHEME_HTTP,S_OK,FALSE},
+            {URLZONE_INVALID,E_NOTIMPL,FALSE},
+        }
+    },
+    /* Fragment with Unicode characters. Unicode characters should not be encoded */
+    {   "http://www.winehq.org/tests/#\xE6\xB5\x8B\xE8\xAF\x95", 0, S_OK, FALSE,
+        {
+            {"http://www.winehq.org/tests/#\xE6\xB5\x8B\xE8\xAF\x95",S_OK,FALSE},
+            {"www.winehq.org",S_OK,FALSE},
+            {"http://www.winehq.org/tests/#\xE6\xB5\x8B\xE8\xAF\x95",S_OK,FALSE},
+            {"winehq.org",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"#\xE6\xB5\x8B\xE8\xAF\x95",S_OK,FALSE},
+            {"www.winehq.org",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"/tests/",S_OK,FALSE},
+            {"/tests/",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"http://www.winehq.org/tests/#\xE6\xB5\x8B\xE8\xAF\x95",S_OK,FALSE},
+            {"http",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE}
+        },
+        {
+            {Uri_HOST_DNS,S_OK,FALSE},
+            {80,S_OK,FALSE},
+            {URL_SCHEME_HTTP,S_OK,FALSE},
+            {URLZONE_INVALID,E_NOTIMPL,FALSE},
+        }
+    },
+    /* ZERO WIDTH JOINER as non-printing Unicode characters should not be encoded if not preprocessed. */
+    {   "file:a\xE2\x80\x8D.html", Uri_CREATE_NO_PRE_PROCESS_HTML_URI, S_OK, FALSE,
+        {
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+            {"file:a\xE2\x80\x8D.html",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {".html",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+            {"a\xE2\x80\x8D.html",S_OK,FALSE},
+            {"a\xE2\x80\x8D.html",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"file:a\xE2\x80\x8D.html",S_OK,FALSE},
+            {"file",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE}
+        },
+        {
+            {Uri_HOST_UNKNOWN,S_OK,FALSE},
+            {0,S_FALSE,FALSE},
+            {URL_SCHEME_FILE,S_OK,FALSE},
+            {URLZONE_INVALID,E_NOTIMPL,FALSE}
+        }
+    },
+    /* LEFT-TO-RIGHT MARK as non-printing Unicode characters should not be encoded if not preprocessed. */
+    {   "file:ab\xE2\x80\x8E.html", Uri_CREATE_NO_PRE_PROCESS_HTML_URI, S_OK, FALSE,
+        {
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+            {"file:ab\xE2\x80\x8D.html",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {".html",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+            {"ab\xE2\x80\x8D.html",S_OK,FALSE},
+            {"ab\xE2\x80\x8D.html",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"file:ab\xE2\x80\x8D.html",S_OK,FALSE},
+            {"file",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE}
+        },
+        {
+            {Uri_HOST_UNKNOWN,S_OK,FALSE},
+            {0,S_FALSE,FALSE},
+            {URL_SCHEME_FILE,S_OK,FALSE},
+            {URLZONE_INVALID,E_NOTIMPL,FALSE}
+        }
+    },
+    /* Invalid Unicode characters should not be filtered */
+    {   "file:ab\xc3\x28.html", 0, S_OK, FALSE,
+        {
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+            {"file:ab\xc3\x28.html",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {".html",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+            {"ab\xc3\x28.html",S_OK,FALSE},
+            {"ab\xc3\x28.html",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"file:ab\xc3\x28.html",S_OK,FALSE},
+            {"file",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE}
+        },
+        {
+            {Uri_HOST_UNKNOWN,S_OK,FALSE},
+            {0,S_FALSE,FALSE},
+            {URL_SCHEME_FILE,S_OK,FALSE},
+            {URLZONE_INVALID,E_NOTIMPL,FALSE}
+        }
+    },
+    /* Make sure % encoded unicode characters are not decoded. */
+    {   "ftp://%E6%B5%8B%E8%AF%95:%E6%B5%8B%E8%AF%95@ftp.google.com/", 0, S_OK, FALSE,
+        {
+            {"ftp://%E6%B5%8B%E8%AF%95:%E6%B5%8B%E8%AF%95@ftp.google.com/",S_OK,FALSE},
+            {"%E6%B5%8B%E8%AF%95:%E6%B5%8B%E8%AF%95@ftp.google.com",S_OK,FALSE},
+            {"ftp://ftp.google.com/",S_OK,FALSE},
+            {"google.com",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+            {"ftp.google.com",S_OK,FALSE},
+            {"%E6%B5%8B%E8%AF%95",S_OK,FALSE},
+            {"/",S_OK,FALSE},
+            {"/",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"ftp://%E6%B5%8B%E8%AF%95:%E6%B5%8B%E8%AF%95@ftp.google.com/",S_OK,FALSE},
+            {"ftp",S_OK,FALSE},
+            {"%E6%B5%8B%E8%AF%95:%E6%B5%8B%E8%AF%95",S_OK,FALSE},
+            {"%E6%B5%8B%E8%AF%95",S_OK,FALSE}
+        },
+        {
+            {Uri_HOST_DNS,S_OK,FALSE},
+            {21,S_OK,FALSE},
+            {URL_SCHEME_FTP,S_OK,FALSE},
+            {URLZONE_INVALID,E_NOTIMPL,FALSE}
+        }
     }
 };
 
@@ -7389,6 +7650,9 @@ static const uri_parse_test uri_parse_tests[] = {
     {"file:///c:/te%XX t/",0,PARSE_PATH_FROM_URL,0,"c:\\te%XX t\\",S_OK,FALSE},
     {"file://server/test",0,PARSE_PATH_FROM_URL,0,"\\\\server\\test",S_OK,FALSE},
     {"http://google.com/",0,PARSE_PATH_FROM_URL,0,"",E_INVALIDARG,FALSE},
+    {"file:/c:/dir/test.mp3",0,PARSE_PATH_FROM_URL,0,"c:\\dir\\test.mp3",S_OK},
+    {"file:/c:/test.mp3",0,PARSE_PATH_FROM_URL,0,"c:\\test.mp3",S_OK},
+    {"file://c:\\test.mp3",0,PARSE_PATH_FROM_URL,0,"c:\\test.mp3",S_OK},
 
     /* PARSE_URL_FROM_PATH tests. */
     /* This function almost seems to useless (just returns the absolute uri). */
@@ -7425,22 +7689,12 @@ static inline LPWSTR a2w(LPCSTR str) {
     LPWSTR ret = NULL;
 
     if(str) {
-        DWORD len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
+        DWORD len = MultiByteToWideChar(CP_UTF8, 0, str, -1, NULL, 0);
         ret = HeapAlloc(GetProcessHeap(), 0, len*sizeof(WCHAR));
-        MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
+        MultiByteToWideChar(CP_UTF8, 0, str, -1, ret, len);
     }
 
     return ret;
-}
-
-static inline void* __WINE_ALLOC_SIZE(1) heap_alloc(size_t size)
-{
-    return HeapAlloc(GetProcessHeap(), 0, size);
-}
-
-static inline BOOL heap_free(void *mem)
-{
-    return HeapFree(GetProcessHeap(), 0, mem);
 }
 
 static inline DWORD strcmp_aw(LPCSTR strA, LPCWSTR strB) {
@@ -7532,7 +7786,7 @@ static void change_property(IUriBuilder *builder, const uri_builder_property *pr
 static void test_CreateUri_InvalidFlags(void) {
     DWORD i;
 
-    for(i = 0; i < sizeof(invalid_flag_tests)/sizeof(invalid_flag_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(invalid_flag_tests); ++i) {
         HRESULT hr;
         IUri *uri = (void*) 0xdeadbeef;
 
@@ -7571,7 +7825,7 @@ static void test_CreateUri_InvalidArgs(void) {
 static void test_CreateUri_InvalidUri(void) {
     DWORD i;
 
-    for(i = 0; i < sizeof(invalid_uri_tests)/sizeof(invalid_uri_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(invalid_uri_tests); ++i) {
         invalid_uri test = invalid_uri_tests[i];
         IUri *uri = NULL;
         LPWSTR uriW;
@@ -7623,7 +7877,7 @@ static void test_IUri_GetPropertyBSTR(void) {
     }
     if(uri) IUri_Release(uri);
 
-    for(i = 0; i < sizeof(uri_tests)/sizeof(uri_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(uri_tests); ++i) {
         uri_properties test = uri_tests[i];
         LPWSTR uriW;
         uri = NULL;
@@ -7683,7 +7937,7 @@ static void test_IUri_GetPropertyDWORD(void) {
     }
     if(uri) IUri_Release(uri);
 
-    for(i = 0; i < sizeof(uri_tests)/sizeof(uri_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(uri_tests); ++i) {
         uri_properties test = uri_tests[i];
         LPWSTR uriW;
         uri = NULL;
@@ -7698,7 +7952,7 @@ static void test_IUri_GetPropertyDWORD(void) {
             DWORD j;
 
             /* Checks all the DWORD properties of the uri. */
-            for(j = 0; j < sizeof(test.dword_props)/sizeof(test.dword_props[0]); ++j) {
+            for(j = 0; j < ARRAY_SIZE(test.dword_props); ++j) {
                 DWORD received;
                 uri_dword_property prop = test.dword_props[j];
 
@@ -7775,7 +8029,7 @@ static void test_IUri_GetStrProperties(void) {
     }
     if(uri) IUri_Release(uri);
 
-    for(i = 0; i < sizeof(uri_tests)/sizeof(uri_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(uri_tests); ++i) {
         uri_properties test = uri_tests[i];
         LPWSTR uriW;
         uri = NULL;
@@ -8003,7 +8257,7 @@ static void test_IUri_GetDwordProperties(void) {
     }
     if(uri) IUri_Release(uri);
 
-    for(i = 0; i < sizeof(uri_tests)/sizeof(uri_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(uri_tests); ++i) {
         uri_properties test = uri_tests[i];
         LPWSTR uriW;
         uri = NULL;
@@ -8089,7 +8343,7 @@ static void test_IUri_GetPropertyLength(void) {
     }
     if(uri) IUri_Release(uri);
 
-    for(i = 0; i < sizeof(uri_tests)/sizeof(uri_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(uri_tests); ++i) {
         uri_properties test = uri_tests[i];
         LPWSTR uriW;
         uri = NULL;
@@ -8106,8 +8360,12 @@ static void test_IUri_GetPropertyLength(void) {
             for(j = Uri_PROPERTY_STRING_START; j <= Uri_PROPERTY_STRING_LAST; ++j) {
                 DWORD expectedLen, receivedLen;
                 uri_str_property prop = test.str_props[j];
+                LPWSTR expectedValueW;
 
                 expectedLen = lstrlenA(prop.value);
+                /* Value may be unicode encoded */
+                expectedValueW = a2w(prop.value);
+                expectedLen = lstrlenW(expectedValueW);
 
                 /* This won't be necessary once GetPropertyLength is implemented. */
                 receivedLen = -1;
@@ -8168,7 +8426,7 @@ static void test_IUri_GetProperties(void) {
     }
     if(uri) IUri_Release(uri);
 
-    for(i = 0; i < sizeof(uri_tests)/sizeof(uri_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(uri_tests); ++i) {
         uri_properties test = uri_tests[i];
         LPWSTR uriW;
         uri = NULL;
@@ -8217,7 +8475,7 @@ static void test_IUri_HasProperty(void) {
     }
     if(uri) IUri_Release(uri);
 
-    for(i = 0; i < sizeof(uri_tests)/sizeof(uri_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(uri_tests); ++i) {
         uri_properties test = uri_tests[i];
         LPWSTR uriW;
         uri = NULL;
@@ -8282,7 +8540,7 @@ static void test_IUri_IsEqual(void) {
     IUri_Release(uriA);
     IUri_Release(uriB);
 
-    for(i = 0; i < sizeof(equality_tests)/sizeof(equality_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(equality_tests); ++i) {
         uri_equality test = equality_tests[i];
         LPWSTR uriA_W, uriB_W;
 
@@ -8334,7 +8592,7 @@ static void test_CreateUriWithFragment_InvalidArgs(void) {
 static void test_CreateUriWithFragment_InvalidFlags(void) {
     DWORD i;
 
-    for(i = 0; i < sizeof(invalid_flag_tests)/sizeof(invalid_flag_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(invalid_flag_tests); ++i) {
         HRESULT hr;
         IUri *uri = (void*) 0xdeadbeef;
 
@@ -8348,7 +8606,7 @@ static void test_CreateUriWithFragment_InvalidFlags(void) {
 static void test_CreateUriWithFragment(void) {
     DWORD i;
 
-    for(i = 0; i < sizeof(uri_fragment_tests)/sizeof(uri_fragment_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(uri_fragment_tests); ++i) {
         HRESULT hr;
         IUri *uri = NULL;
         LPWSTR uriW, fragW;
@@ -8427,7 +8685,7 @@ static void test_IUriBuilder_CreateUri(IUriBuilder *builder, const uri_builder_t
     if(SUCCEEDED(hr)) {
         DWORD i;
 
-        for(i = 0; i < sizeof(test->expected_str_props)/sizeof(test->expected_str_props[0]); ++i) {
+        for(i = 0; i < ARRAY_SIZE(test->expected_str_props); ++i) {
             uri_builder_str_property prop = test->expected_str_props[i];
             BSTR received = NULL;
 
@@ -8445,7 +8703,7 @@ static void test_IUriBuilder_CreateUri(IUriBuilder *builder, const uri_builder_t
             SysFreeString(received);
         }
 
-        for(i = 0; i < sizeof(test->expected_dword_props)/sizeof(test->expected_dword_props[0]); ++i) {
+        for(i = 0; i < ARRAY_SIZE(test->expected_dword_props); ++i) {
             uri_builder_dword_property prop = test->expected_dword_props[i];
             DWORD received = -2;
 
@@ -8479,7 +8737,7 @@ static void test_IUriBuilder_CreateUriSimple(IUriBuilder *builder, const uri_bui
     if(SUCCEEDED(hr)) {
         DWORD i;
 
-        for(i = 0; i < sizeof(test->expected_str_props)/sizeof(test->expected_str_props[0]); ++i) {
+        for(i = 0; i < ARRAY_SIZE(test->expected_str_props); ++i) {
             uri_builder_str_property prop = test->expected_str_props[i];
             BSTR received = NULL;
 
@@ -8497,7 +8755,7 @@ static void test_IUriBuilder_CreateUriSimple(IUriBuilder *builder, const uri_bui
             SysFreeString(received);
         }
 
-        for(i = 0; i < sizeof(test->expected_dword_props)/sizeof(test->expected_dword_props[0]); ++i) {
+        for(i = 0; i < ARRAY_SIZE(test->expected_dword_props); ++i) {
             uri_builder_dword_property prop = test->expected_dword_props[i];
             DWORD received = -2;
 
@@ -8532,7 +8790,7 @@ static void test_IUriBuilder_CreateUriWithFlags(IUriBuilder *builder, const uri_
     if(SUCCEEDED(hr)) {
         DWORD i;
 
-        for(i = 0; i < sizeof(test->expected_str_props)/sizeof(test->expected_str_props[0]); ++i) {
+        for(i = 0; i < ARRAY_SIZE(test->expected_str_props); ++i) {
             uri_builder_str_property prop = test->expected_str_props[i];
             BSTR received = NULL;
 
@@ -8550,7 +8808,7 @@ static void test_IUriBuilder_CreateUriWithFlags(IUriBuilder *builder, const uri_
             SysFreeString(received);
         }
 
-        for(i = 0; i < sizeof(test->expected_dword_props)/sizeof(test->expected_dword_props[0]); ++i) {
+        for(i = 0; i < ARRAY_SIZE(test->expected_dword_props); ++i) {
             uri_builder_dword_property prop = test->expected_dword_props[i];
             DWORD received = -2;
 
@@ -8793,7 +9051,7 @@ static void test_IUriBuilder_GetFragment(IUriBuilder *builder, const uri_builder
     const uri_builder_property *prop = NULL;
 
     /* Check if the property was set earlier. */
-    for(i = 0; i < sizeof(test->properties)/sizeof(test->properties[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(test->properties); ++i) {
         if(test->properties[i].change && test->properties[i].property == Uri_PROPERTY_FRAGMENT)
             prop = &(test->properties[i]);
     }
@@ -8888,7 +9146,7 @@ static void test_IUriBuilder_GetHost(IUriBuilder *builder, const uri_builder_tes
     const uri_builder_property *prop = NULL;
 
     /* Check if the property was set earlier. */
-    for(i = 0; i < sizeof(test->properties)/sizeof(test->properties[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(test->properties); ++i) {
         if(test->properties[i].change && test->properties[i].property == Uri_PROPERTY_HOST)
             prop = &(test->properties[i]);
     }
@@ -8983,7 +9241,7 @@ static void test_IUriBuilder_GetPassword(IUriBuilder *builder, const uri_builder
     const uri_builder_property *prop = NULL;
 
     /* Check if the property was set earlier. */
-    for(i = 0; i < sizeof(test->properties)/sizeof(test->properties[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(test->properties); ++i) {
         if(test->properties[i].change && test->properties[i].property == Uri_PROPERTY_PASSWORD)
             prop = &(test->properties[i]);
     }
@@ -9078,7 +9336,7 @@ static void test_IUriBuilder_GetPath(IUriBuilder *builder, const uri_builder_tes
     const uri_builder_property *prop = NULL;
 
     /* Check if the property was set earlier. */
-    for(i = 0; i < sizeof(test->properties)/sizeof(test->properties[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(test->properties); ++i) {
         if(test->properties[i].change && test->properties[i].property == Uri_PROPERTY_PATH)
             prop = &(test->properties[i]);
     }
@@ -9240,7 +9498,7 @@ static void test_IUriBuilder_GetQuery(IUriBuilder *builder, const uri_builder_te
     const uri_builder_property *prop = NULL;
 
     /* Check if the property was set earlier. */
-    for(i = 0; i < sizeof(test->properties)/sizeof(test->properties[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(test->properties); ++i) {
         if(test->properties[i].change && test->properties[i].property == Uri_PROPERTY_QUERY)
             prop = &(test->properties[i]);
     }
@@ -9335,7 +9593,7 @@ static void test_IUriBuilder_GetSchemeName(IUriBuilder *builder, const uri_build
     const uri_builder_property *prop = NULL;
 
     /* Check if the property was set earlier. */
-    for(i = 0; i < sizeof(test->properties)/sizeof(test->properties[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(test->properties); ++i) {
         if(test->properties[i].change && test->properties[i].property == Uri_PROPERTY_SCHEME_NAME)
             prop = &(test->properties[i]);
     }
@@ -9430,7 +9688,7 @@ static void test_IUriBuilder_GetUserName(IUriBuilder *builder, const uri_builder
     const uri_builder_property *prop = NULL;
 
     /* Check if the property was set earlier. */
-    for(i = 0; i < sizeof(test->properties)/sizeof(test->properties[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(test->properties); ++i) {
         if(test->properties[i].change && test->properties[i].property == Uri_PROPERTY_USER_NAME)
             prop = &(test->properties[i]);
     }
@@ -9522,7 +9780,7 @@ static void test_IUriBuilder(void) {
     IUriBuilder *builder;
     DWORD i;
 
-    for(i = 0; i < sizeof(uri_builder_tests)/sizeof(uri_builder_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(uri_builder_tests); ++i) {
         IUri *uri = NULL;
         uri_builder_test test = uri_builder_tests[i];
         LPWSTR uriW = NULL;
@@ -9874,7 +10132,7 @@ static void test_IUriBuilder_RemoveProperties(void) {
     }
     if(builder) IUriBuilder_Release(builder);
 
-    for(i = 0; i < sizeof(uri_builder_remove_tests)/sizeof(uri_builder_remove_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(uri_builder_remove_tests); ++i) {
         uri_builder_remove_test test = uri_builder_remove_tests[i];
         IUri *uri = NULL;
         LPWSTR uriW;
@@ -10070,7 +10328,7 @@ static void test_CoInternetCombineIUri(void) {
     if(base) IUri_Release(base);
     if(relative) IUri_Release(relative);
 
-    for(i = 0; i < sizeof(uri_combine_tests)/sizeof(uri_combine_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(uri_combine_tests); ++i) {
         LPWSTR baseW = a2w(uri_combine_tests[i].base_uri);
 
         hr = pCreateUri(baseW, uri_combine_tests[i].base_create_flags, 0, &base);
@@ -10091,7 +10349,7 @@ static void test_CoInternetCombineIUri(void) {
                 if(SUCCEEDED(hr)) {
                     DWORD j;
 
-                    for(j = 0; j < sizeof(uri_combine_tests[i].str_props)/sizeof(uri_combine_tests[i].str_props[0]); ++j) {
+                    for(j = 0; j < ARRAY_SIZE(uri_combine_tests[i].str_props); ++j) {
                         uri_combine_str_property prop = uri_combine_tests[i].str_props[j];
                         BSTR received;
 
@@ -10108,7 +10366,7 @@ static void test_CoInternetCombineIUri(void) {
                         SysFreeString(received);
                     }
 
-                    for(j = 0; j < sizeof(uri_combine_tests[i].dword_props)/sizeof(uri_combine_tests[i].dword_props[0]); ++j) {
+                    for(j = 0; j < ARRAY_SIZE(uri_combine_tests[i].dword_props); ++j) {
                         uri_dword_property prop = uri_combine_tests[i].dword_props[j];
                         DWORD received;
 
@@ -10361,7 +10619,7 @@ static void test_CoInternetCombineUrlEx(void) {
         hr, E_POINTER);
     if(base) IUri_Release(base);
 
-    for(i = 0; i < sizeof(uri_combine_tests)/sizeof(uri_combine_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(uri_combine_tests); ++i) {
         LPWSTR baseW = a2w(uri_combine_tests[i].base_uri);
 
         hr = pCreateUri(baseW, uri_combine_tests[i].base_create_flags, 0, &base);
@@ -10378,7 +10636,7 @@ static void test_CoInternetCombineUrlEx(void) {
             if(SUCCEEDED(hr)) {
                 DWORD j;
 
-                for(j = 0; j < sizeof(uri_combine_tests[i].str_props)/sizeof(uri_combine_tests[i].str_props[0]); ++j) {
+                for(j = 0; j < ARRAY_SIZE(uri_combine_tests[i].str_props); ++j) {
                     uri_combine_str_property prop = uri_combine_tests[i].str_props[j];
                     BSTR received;
                     LPCSTR value = (prop.value_ex) ? prop.value_ex : prop.value;
@@ -10396,7 +10654,7 @@ static void test_CoInternetCombineUrlEx(void) {
                     SysFreeString(received);
                 }
 
-                for(j = 0; j < sizeof(uri_combine_tests[i].dword_props)/sizeof(uri_combine_tests[i].dword_props[0]); ++j) {
+                for(j = 0; j < ARRAY_SIZE(uri_combine_tests[i].dword_props); ++j) {
                     uri_dword_property prop = uri_combine_tests[i].dword_props[j];
                     DWORD received;
 
@@ -10518,7 +10776,7 @@ static void test_CoInternetParseIUri_InvalidArgs(void) {
     len = INTERNET_MAX_URL_LENGTH*2;
     longurl = heap_alloc((len+1)*sizeof(WCHAR));
     memcpy(longurl, http_urlW, sizeof(http_urlW));
-    for(i = sizeof(http_urlW)/sizeof(WCHAR)-1; i < len; i++)
+    for(i = ARRAY_SIZE(http_urlW)-1; i < len; i++)
         longurl[i] = 'x';
     longurl[len] = 0;
 
@@ -10545,7 +10803,7 @@ static void test_CoInternetParseIUri_InvalidArgs(void) {
 static void test_CoInternetParseIUri(void) {
     DWORD i;
 
-    for(i = 0; i < sizeof(uri_parse_tests)/sizeof(uri_parse_tests[0]); ++i) {
+    for(i = 0; i < ARRAY_SIZE(uri_parse_tests); ++i) {
         HRESULT hr;
         IUri *uri;
         LPWSTR uriW;
@@ -10566,11 +10824,11 @@ static void test_CoInternetParseIUri(void) {
             if(SUCCEEDED(hr)) {
                 DWORD len = lstrlenA(test.property);
                 ok(!strcmp_aw(test.property, result) || (test.property2 && !strcmp_aw(test.property2, result)),
-                    "Error: Expected %s but got %s instead on uri_parse_tests[%d].\n",
-                    test.property, wine_dbgstr_w(result), i);
+                    "Error: Expected %s but got %s instead on uri_parse_tests[%d] - %s.\n",
+                    test.property, wine_dbgstr_w(result), i, wine_dbgstr_w(uriW));
                 ok(len == result_len || (test.property2 && lstrlenA(test.property2) == result_len),
-                    "Error: Expected %d, but got %d instead on uri_parse_tests[%d].\n",
-                    len, result_len, i);
+                    "Error: Expected %d, but got %d instead on uri_parse_tests[%d] - %s.\n",
+                    len, result_len, i, wine_dbgstr_w(uriW));
             } else {
                 ok(!result_len,
                     "Error: Expected 'result_len' to be 0, but was %d on uri_parse_tests[%d].\n",
@@ -10743,7 +11001,7 @@ static void test_CreateURLMoniker(void)
     IUri *uri, *base_uri;
     HRESULT hres;
 
-    for(test = create_urlmon_tests; test < create_urlmon_tests + sizeof(create_urlmon_tests)/sizeof(*create_urlmon_tests); test++) {
+    for(test = create_urlmon_tests; test < create_urlmon_tests + ARRAY_SIZE(create_urlmon_tests); test++) {
         url = a2w(test->url);
         base_url = a2w(test->base_url);
 
@@ -10842,7 +11100,7 @@ static void test_IPersistStream(void)
     props_order[Uri_PROPERTY_SCHEME_NAME] = 8;
     props_order[Uri_PROPERTY_USER_NAME] = 9;
 
-    for(i=0; i<sizeof(uri_tests)/sizeof(*uri_tests); i++) {
+    for(i = 0; i < ARRAY_SIZE(uri_tests); i++) {
         const uri_properties *test = uri_tests+i;
         LPWSTR uriW;
         IUri *uri;

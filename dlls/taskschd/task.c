@@ -581,15 +581,14 @@ static HRESULT WINAPI RegistrationInfo_get_Description(IRegistrationInfo *iface,
 static HRESULT WINAPI RegistrationInfo_put_Description(IRegistrationInfo *iface, BSTR description)
 {
     registration_info *reginfo = impl_from_IRegistrationInfo(iface);
+    WCHAR *str = NULL;
 
     TRACE("%p,%s\n", iface, debugstr_w(description));
 
-    if (!description) return E_INVALIDARG;
-
+    if (description && !(str = heap_strdupW(description))) return E_OUTOFMEMORY;
     heap_free(reginfo->description);
-    reginfo->description = heap_strdupW(description);
-    /* FIXME: update XML on the server side */
-    return reginfo->description ? S_OK : E_OUTOFMEMORY;
+    reginfo->description = str;
+    return S_OK;
 }
 
 static HRESULT WINAPI RegistrationInfo_get_Author(IRegistrationInfo *iface, BSTR *author)
@@ -609,15 +608,14 @@ static HRESULT WINAPI RegistrationInfo_get_Author(IRegistrationInfo *iface, BSTR
 static HRESULT WINAPI RegistrationInfo_put_Author(IRegistrationInfo *iface, BSTR author)
 {
     registration_info *reginfo = impl_from_IRegistrationInfo(iface);
+    WCHAR *str = NULL;
 
     TRACE("%p,%s\n", iface, debugstr_w(author));
 
-    if (!author) return E_INVALIDARG;
-
+    if (author && !(str = heap_strdupW(author))) return E_OUTOFMEMORY;
     heap_free(reginfo->author);
-    reginfo->author = heap_strdupW(author);
-    /* FIXME: update XML on the server side */
-    return reginfo->author ? S_OK : E_OUTOFMEMORY;
+    reginfo->author = str;
+    return S_OK;
 }
 
 static HRESULT WINAPI RegistrationInfo_get_Version(IRegistrationInfo *iface, BSTR *version)
@@ -637,15 +635,14 @@ static HRESULT WINAPI RegistrationInfo_get_Version(IRegistrationInfo *iface, BST
 static HRESULT WINAPI RegistrationInfo_put_Version(IRegistrationInfo *iface, BSTR version)
 {
     registration_info *reginfo = impl_from_IRegistrationInfo(iface);
+    WCHAR *str = NULL;
 
     TRACE("%p,%s\n", iface, debugstr_w(version));
 
-    if (!version) return E_INVALIDARG;
-
+    if (version && !(str = heap_strdupW(version))) return E_OUTOFMEMORY;
     heap_free(reginfo->version);
-    reginfo->version = heap_strdupW(version);
-    /* FIXME: update XML on the server side */
-    return reginfo->version ? S_OK : E_OUTOFMEMORY;
+    reginfo->version = str;
+    return S_OK;
 }
 
 static HRESULT WINAPI RegistrationInfo_get_Date(IRegistrationInfo *iface, BSTR *date)
@@ -665,15 +662,14 @@ static HRESULT WINAPI RegistrationInfo_get_Date(IRegistrationInfo *iface, BSTR *
 static HRESULT WINAPI RegistrationInfo_put_Date(IRegistrationInfo *iface, BSTR date)
 {
     registration_info *reginfo = impl_from_IRegistrationInfo(iface);
+    WCHAR *str = NULL;
 
     TRACE("%p,%s\n", iface, debugstr_w(date));
 
-    if (!date) return E_INVALIDARG;
-
+    if (date && !(str = heap_strdupW(date))) return E_OUTOFMEMORY;
     heap_free(reginfo->date);
-    reginfo->date = heap_strdupW(date);
-    /* FIXME: update XML on the server side */
-    return reginfo->date ? S_OK : E_OUTOFMEMORY;
+    reginfo->date = str;
+    return S_OK;
 }
 
 static HRESULT WINAPI RegistrationInfo_get_Documentation(IRegistrationInfo *iface, BSTR *doc)
@@ -693,15 +689,14 @@ static HRESULT WINAPI RegistrationInfo_get_Documentation(IRegistrationInfo *ifac
 static HRESULT WINAPI RegistrationInfo_put_Documentation(IRegistrationInfo *iface, BSTR doc)
 {
     registration_info *reginfo = impl_from_IRegistrationInfo(iface);
+    WCHAR *str = NULL;
 
     TRACE("%p,%s\n", iface, debugstr_w(doc));
 
-    if (!doc) return E_INVALIDARG;
-
+    if (doc && !(str = heap_strdupW(doc))) return E_OUTOFMEMORY;
     heap_free(reginfo->documentation);
-    reginfo->documentation = heap_strdupW(doc);
-    /* FIXME: update XML on the server side */
-    return reginfo->documentation ? S_OK : E_OUTOFMEMORY;
+    reginfo->documentation = str;
+    return S_OK;
 }
 
 static HRESULT WINAPI RegistrationInfo_get_XmlText(IRegistrationInfo *iface, BSTR *xml)
@@ -733,15 +728,14 @@ static HRESULT WINAPI RegistrationInfo_get_URI(IRegistrationInfo *iface, BSTR *u
 static HRESULT WINAPI RegistrationInfo_put_URI(IRegistrationInfo *iface, BSTR uri)
 {
     registration_info *reginfo = impl_from_IRegistrationInfo(iface);
+    WCHAR *str = NULL;
 
     TRACE("%p,%s\n", iface, debugstr_w(uri));
 
-    if (!uri) return E_INVALIDARG;
-
+    if (uri && !(str = heap_strdupW(uri))) return E_OUTOFMEMORY;
     heap_free(reginfo->uri);
-    reginfo->uri = heap_strdupW(uri);
-    /* FIXME: update XML on the server side */
-    return reginfo->uri ? S_OK : E_OUTOFMEMORY;
+    reginfo->uri = str;
+    return S_OK;
 }
 
 static HRESULT WINAPI RegistrationInfo_get_SecurityDescriptor(IRegistrationInfo *iface, VARIANT *sddl)
@@ -773,15 +767,14 @@ static HRESULT WINAPI RegistrationInfo_get_Source(IRegistrationInfo *iface, BSTR
 static HRESULT WINAPI RegistrationInfo_put_Source(IRegistrationInfo *iface, BSTR source)
 {
     registration_info *reginfo = impl_from_IRegistrationInfo(iface);
+    WCHAR *str = NULL;
 
     TRACE("%p,%s\n", iface, debugstr_w(source));
 
-    if (!source) return E_INVALIDARG;
-
+    if (source && !(str = heap_strdupW(source))) return E_OUTOFMEMORY;
     heap_free(reginfo->source);
-    reginfo->source = heap_strdupW(source);
-    /* FIXME: update XML on the server side */
-    return reginfo->source ? S_OK : E_OUTOFMEMORY;
+    reginfo->source = str;
+    return S_OK;
 }
 
 static const IRegistrationInfoVtbl RegistrationInfo_vtbl =
@@ -1677,6 +1670,9 @@ typedef struct
     IExecAction IExecAction_iface;
     LONG ref;
     WCHAR *path;
+    WCHAR *directory;
+    WCHAR *args;
+    WCHAR *id;
 } ExecAction;
 
 static inline ExecAction *impl_from_IExecAction(IExecAction *iface)
@@ -1699,6 +1695,9 @@ static ULONG WINAPI ExecAction_Release(IExecAction *iface)
     {
         TRACE("destroying %p\n", iface);
         heap_free(action->path);
+        heap_free(action->directory);
+        heap_free(action->args);
+        heap_free(action->id);
         heap_free(action);
     }
 
@@ -1755,14 +1754,30 @@ static HRESULT WINAPI ExecAction_Invoke(IExecAction *iface, DISPID dispid, REFII
 
 static HRESULT WINAPI ExecAction_get_Id(IExecAction *iface, BSTR *id)
 {
-    FIXME("%p,%p: stub\n", iface, id);
-    return E_NOTIMPL;
+    ExecAction *action = impl_from_IExecAction(iface);
+
+    TRACE("%p,%p\n", iface, id);
+
+    if (!id) return E_POINTER;
+
+    if (!action->id) *id = NULL;
+    else if (!(*id = SysAllocString(action->id))) return E_OUTOFMEMORY;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI ExecAction_put_Id(IExecAction *iface, BSTR id)
 {
-    FIXME("%p,%s: stub\n", iface, debugstr_w(id));
-    return E_NOTIMPL;
+    ExecAction *action = impl_from_IExecAction(iface);
+    WCHAR *str = NULL;
+
+    TRACE("%p,%s\n", iface, debugstr_w(id));
+
+    if (id && !(str = heap_strdupW((id)))) return E_OUTOFMEMORY;
+    heap_free(action->id);
+    action->id = str;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI ExecAction_get_Type(IExecAction *iface, TASK_ACTION_TYPE *type)
@@ -1806,26 +1821,58 @@ static HRESULT WINAPI ExecAction_put_Path(IExecAction *iface, BSTR path)
 
 static HRESULT WINAPI ExecAction_get_Arguments(IExecAction *iface, BSTR *arguments)
 {
-    FIXME("%p,%p: stub\n", iface, arguments);
-    return E_NOTIMPL;
+    ExecAction *action = impl_from_IExecAction(iface);
+
+    TRACE("%p,%p\n", iface, arguments);
+
+    if (!arguments) return E_POINTER;
+
+    if (!action->args) *arguments = NULL;
+    else if (!(*arguments = SysAllocString(action->args))) return E_OUTOFMEMORY;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI ExecAction_put_Arguments(IExecAction *iface, BSTR arguments)
 {
-    FIXME("%p,%s: stub\n", iface, debugstr_w(arguments));
+    ExecAction *action = impl_from_IExecAction(iface);
+    WCHAR *str = NULL;
+
+    TRACE("%p,%s\n", iface, debugstr_w(arguments));
+
+    if (arguments && !(str = heap_strdupW((arguments)))) return E_OUTOFMEMORY;
+    heap_free(action->args);
+    action->args = str;
+
     return S_OK;
 }
 
 static HRESULT WINAPI ExecAction_get_WorkingDirectory(IExecAction *iface, BSTR *directory)
 {
-    FIXME("%p,%p: stub\n", iface, directory);
-    return E_NOTIMPL;
+    ExecAction *action = impl_from_IExecAction(iface);
+
+    TRACE("%p,%p\n", iface, directory);
+
+    if (!directory) return E_POINTER;
+
+    if (!action->directory) *directory = NULL;
+    else if (!(*directory = SysAllocString(action->directory))) return E_OUTOFMEMORY;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI ExecAction_put_WorkingDirectory(IExecAction *iface, BSTR directory)
 {
-    FIXME("%p,%s: stub\n", iface, debugstr_w(directory));
-    return E_NOTIMPL;
+    ExecAction *action = impl_from_IExecAction(iface);
+    WCHAR *str = NULL;
+
+    TRACE("%p,%s\n", iface, debugstr_w(directory));
+
+    if (directory && !(str = heap_strdupW((directory)))) return E_OUTOFMEMORY;
+    heap_free(action->directory);
+    action->directory = str;
+
+    return S_OK;
 }
 
 static const IExecActionVtbl Action_vtbl =
@@ -1858,6 +1905,9 @@ static HRESULT ExecAction_create(IExecAction **obj)
     action->IExecAction_iface.lpVtbl = &Action_vtbl;
     action->ref = 1;
     action->path = NULL;
+    action->directory = NULL;
+    action->args = NULL;
+    action->id = NULL;
 
     *obj = &action->IExecAction_iface;
 
@@ -3266,6 +3316,36 @@ static HRESULT read_registration_info(IXmlReader *reader, IRegistrationInfo *inf
                 if (hr == S_OK)
                     IRegistrationInfo_put_Description(info, value);
             }
+            else if (!lstrcmpW(name, Version))
+            {
+                hr = read_text_value(reader, &value);
+                if (hr == S_OK)
+                    IRegistrationInfo_put_Version(info, value);
+            }
+            else if (!lstrcmpW(name, Date))
+            {
+                hr = read_text_value(reader, &value);
+                if (hr == S_OK)
+                    IRegistrationInfo_put_Date(info, value);
+            }
+            else if (!lstrcmpW(name, Documentation))
+            {
+                hr = read_text_value(reader, &value);
+                if (hr == S_OK)
+                    IRegistrationInfo_put_Documentation(info, value);
+            }
+            else if (!lstrcmpW(name, URI))
+            {
+                hr = read_text_value(reader, &value);
+                if (hr == S_OK)
+                    IRegistrationInfo_put_URI(info, value);
+            }
+            else if (!lstrcmpW(name, Source))
+            {
+                hr = read_text_value(reader, &value);
+                if (hr == S_OK)
+                    IRegistrationInfo_put_Source(info, value);
+            }
             else
                 FIXME("unhandled RegistrationInfo element %s\n", debugstr_w(name));
 
@@ -3772,7 +3852,7 @@ static HRESULT WINAPI TaskService_Connect(ITaskService *iface, VARIANT server, V
     if (!is_variant_null(&user) || !is_variant_null(&domain) || !is_variant_null(&password))
         FIXME("user/domain/password are ignored\n");
 
-    len = sizeof(comp_name)/sizeof(comp_name[0]);
+    len = ARRAY_SIZE(comp_name);
     if (!GetComputerNameW(comp_name, &len))
         return HRESULT_FROM_WIN32(GetLastError());
 

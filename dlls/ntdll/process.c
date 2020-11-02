@@ -164,9 +164,12 @@ static void fill_VM_COUNTERS(VM_COUNTERS* pvmi)
             pvmi->PeakWorkingSetSize = (ULONG64)value * 1024;
         else if (sscanf(line, "VmRSS: %lu", &value))
             pvmi->WorkingSetSize = (ULONG64)value * 1024;
+        else if (sscanf(line, "RssAnon: %lu", &value))
+            pvmi->PagefileUsage += (ULONG64)value * 1024;
         else if (sscanf(line, "VmSwap: %lu", &value))
-            pvmi->PeakPagefileUsage = pvmi->PagefileUsage = (ULONG64)value * 1024;
+            pvmi->PagefileUsage += (ULONG64)value * 1024;
     }
+    pvmi->PeakPagefileUsage = pvmi->PagefileUsage;
 
     fclose(f);
 }
@@ -214,7 +217,6 @@ NTSTATUS WINAPI NtQueryInformationProcess(
     UNIMPLEMENTED_INFO_CLASS(ProcessWorkingSetWatch);
     UNIMPLEMENTED_INFO_CLASS(ProcessUserModeIOPL);
     UNIMPLEMENTED_INFO_CLASS(ProcessEnableAlignmentFaultFixup);
-    UNIMPLEMENTED_INFO_CLASS(ProcessPriorityClass);
     UNIMPLEMENTED_INFO_CLASS(ProcessWx86Information);
     UNIMPLEMENTED_INFO_CLASS(ProcessPriorityBoost);
     UNIMPLEMENTED_INFO_CLASS(ProcessDeviceMap);
@@ -525,8 +527,8 @@ NTSTATUS WINAPI NtQueryInformationProcess(
         }
         break;
     case ProcessImageFileName:
-        /* FIXME: this will return a DOS path. Windows returns an NT path. Changing this would require also changing kernel32.QueryFullProcessImageName.
-         * The latter may be harder because of the lack of RtlNtPathNameToDosPathName. */
+        /* FIXME: Should return a device path */
+    case ProcessImageFileNameWin32:
         SERVER_START_REQ(get_dll_info)
         {
             UNICODE_STRING *image_file_name_str = ProcessInformation;
@@ -551,6 +553,46 @@ NTSTATUS WINAPI NtQueryInformationProcess(
         len = sizeof(ULONG);
         if (ProcessInformationLength == len)
             *(ULONG *)ProcessInformation = execute_flags;
+        else
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+        break;
+    case ProcessPriorityClass:
+        len = sizeof(PROCESS_PRIORITY_CLASS);
+        if (ProcessInformationLength == len)
+        {
+            if (!ProcessInformation)
+                ret = STATUS_ACCESS_VIOLATION;
+            else if (!ProcessHandle)
+                ret = STATUS_INVALID_HANDLE;
+            else
+            {
+                PROCESS_PRIORITY_CLASS *priority = ProcessInformation;
+
+                SERVER_START_REQ(get_process_info)
+                {
+                    req->handle = wine_server_obj_handle( ProcessHandle );
+                    if ((ret = wine_server_call( req )) == STATUS_SUCCESS)
+                    {
+                        priority->PriorityClass = reply->priority;
+                        /* FIXME: Not yet supported by the wineserver */
+                        priority->Foreground = FALSE;
+                    }
+                }
+                SERVER_END_REQ;
+            }
+        }
+        else
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+        break;
+    case ProcessCookie:
+        FIXME("(%p,info_class=%d,%p,0x%08x,%p) stub\n",
+              ProcessHandle,ProcessInformationClass,
+              ProcessInformation,ProcessInformationLength,
+              ReturnLength);
+
+        len = sizeof(ULONG);
+        if (ProcessInformationLength == len)
+            *(ULONG *)ProcessInformation = 0;
         else
             ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
@@ -662,20 +704,24 @@ NTSTATUS WINAPI NtSetInformationProcess(
  * NtFlushInstructionCache [NTDLL.@]
  * ZwFlushInstructionCache [NTDLL.@]
  */
-NTSTATUS WINAPI NtFlushInstructionCache(
-        IN HANDLE ProcessHandle,
-        IN LPCVOID BaseAddress,
-        IN SIZE_T Size)
+NTSTATUS WINAPI NtFlushInstructionCache( HANDLE handle, const void *addr, SIZE_T size )
 {
-    static int once;
-    if (!once++)
-    {
 #if defined(__x86_64__) || defined(__i386__)
-        TRACE("%p %p %ld - no-op on x86 and x86_64\n", ProcessHandle, BaseAddress, Size );
-#else
-        FIXME("%p %p %ld\n", ProcessHandle, BaseAddress, Size );
-#endif
+    /* no-op */
+#elif defined(HAVE___CLEAR_CACHE)
+    if (handle == GetCurrentProcess())
+    {
+        __clear_cache( (char *)addr, (char *)addr + size );
     }
+    else
+    {
+        static int once;
+        if (!once++) FIXME( "%p %p %ld other process not supported\n", handle, addr, size );
+    }
+#else
+    static int once;
+    if (!once++) FIXME( "%p %p %ld\n", handle, addr, size );
+#endif
     return STATUS_SUCCESS;
 }
 

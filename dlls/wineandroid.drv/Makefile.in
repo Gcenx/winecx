@@ -30,9 +30,7 @@ ANDROID_VALUE_RES_SRCS = \
 
 # Manual dependencies
 
-.PHONY: install-lib
-
-install-lib:: $(JAVA_SRCS:%=$(ANDROID_LIB_DIR)/java/org/winehq/wine/%) \
+wineandroid-aar: $(JAVA_SRCS:%=$(ANDROID_LIB_DIR)/java/org/winehq/wine/%) \
 			 $(ANDROID_TOP_LIB_DIR)/build.gradle \
 			 $(ANDROID_TOP_LIB_DIR)/gradlew \
 			 $(ANDROID_TOP_LIB_DIR)/gradle/wrapper/gradle-wrapper.jar \

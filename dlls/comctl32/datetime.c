@@ -20,15 +20,6 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  *
- * NOTE
- * 
- * This code was audited for completeness against the documented features
- * of Comctl32.dll version 6.0 on Oct. 20, 2004, by Dimitrie O. Paun.
- * 
- * Unless otherwise noted, we believe this code to be complete, as per
- * the specification mentioned above.
- * If you discover missing features, or bugs, please note them below.
- * 
  * TODO:
  *    -- DTS_APPCANPARSE
  *    -- DTS_SHORTDATECENTURYFORMAT
@@ -331,13 +322,15 @@ DATETIME_SetFormatW (DATETIME_INFO *infoPtr, LPCWSTR format)
     if (!format) {
 	DWORD format_item;
 
-	if (infoPtr->dwStyle & DTS_LONGDATEFORMAT)
-	    format_item = LOCALE_SLONGDATE;
-	else if ((infoPtr->dwStyle & DTS_TIMEFORMAT) == DTS_TIMEFORMAT)
-	    format_item = LOCALE_STIMEFORMAT;
+        if ((infoPtr->dwStyle & DTS_SHORTDATECENTURYFORMAT) == DTS_SHORTDATECENTURYFORMAT)
+            format_item = LOCALE_SSHORTDATE;
+        else if ((infoPtr->dwStyle & DTS_LONGDATEFORMAT) == DTS_LONGDATEFORMAT)
+            format_item = LOCALE_SLONGDATE;
+        else if ((infoPtr->dwStyle & DTS_TIMEFORMAT) == DTS_TIMEFORMAT)
+            format_item = LOCALE_STIMEFORMAT;
         else /* DTS_SHORTDATEFORMAT */
 	    format_item = LOCALE_SSHORTDATE;
-	GetLocaleInfoW(LOCALE_USER_DEFAULT, format_item, format_buf, sizeof(format_buf)/sizeof(format_buf[0]));
+	GetLocaleInfoW(LOCALE_USER_DEFAULT, format_item, format_buf, ARRAY_SIZE(format_buf));
 	format = format_buf;
     }
 
@@ -458,8 +451,7 @@ DATETIME_ReturnTxt (const DATETIME_INFO *infoPtr, int count, LPWSTR result, int 
 	    wsprintfW (result, fmt__2dW, date.wMonth);
 	    break;
 	case THREECHARMONTH:
-	    GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_SMONTHNAME1+date.wMonth -1,
-			   buffer, sizeof(buffer)/sizeof(buffer[0]));
+	    GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_SMONTHNAME1+date.wMonth -1, buffer, ARRAY_SIZE(buffer));
 	    wsprintfW (result, fmt__3sW, buffer);
 	    break;
 	case FULLMONTH:
@@ -606,8 +598,7 @@ DATETIME_IncreaseField (DATETIME_INFO *infoPtr, int number, int delta)
     }
 }
 
-static void
-DATETIME_ReturnFieldWidth (const DATETIME_INFO *infoPtr, HDC hdc, int count, SHORT *width)
+static int DATETIME_GetFieldWidth (const DATETIME_INFO *infoPtr, HDC hdc, int count)
 {
     /* fields are a fixed width, determined by the largest possible string */
     /* presumably, these widths should be language dependent */
@@ -621,13 +612,7 @@ DATETIME_ReturnFieldWidth (const DATETIME_INFO *infoPtr, HDC hdc, int count, SHO
     LPCWSTR bufptr;
     SIZE size;
 
-    TRACE ("%d,%d\n", infoPtr->nrFields, count);
-    if (count>infoPtr->nrFields || count < 0) {
-	WARN ("buffer overrun, have %d want %d\n", infoPtr->nrFields, count);
-	return;
-    }
-
-    if (!infoPtr->fieldspec) return;
+    if (!infoPtr->fieldspec) return 0;
 
     spec = infoPtr->fieldspec[count];
     if (spec & DT_STRING) {
@@ -705,7 +690,7 @@ DATETIME_ReturnFieldWidth (const DATETIME_INFO *infoPtr, HDC hdc, int count, SHO
 		for (i = 0; i < max_count; i++)
 		{
 		    if(GetLocaleInfoW(LOCALE_USER_DEFAULT, lctype + i,
-			buffer, lstrlenW(buffer)))
+			buffer, ARRAY_SIZE(buffer)))
 		    {
 			GetTextExtentPoint32W(hdc, buffer, lstrlenW(buffer), &size);
 			if (size.cx > cx) cx = size.cx;
@@ -717,8 +702,7 @@ DATETIME_ReturnFieldWidth (const DATETIME_INFO *infoPtr, HDC hdc, int count, SHO
 		        break;
 		    }
 		}
-		*width = cx;
-		return;
+		return cx;
 	    }
 	    case ONELETTERAMPM:
 	        bufptr = fld_am1;
@@ -732,7 +716,7 @@ DATETIME_ReturnFieldWidth (const DATETIME_INFO *infoPtr, HDC hdc, int count, SHO
         }
     }
     GetTextExtentPoint32W (hdc, bufptr, strlenW(bufptr), &size);
-    *width = size.cx;
+    return size.cx;
 }
 
 static void 
@@ -746,24 +730,22 @@ DATETIME_Refresh (DATETIME_INFO *infoPtr, HDC hdc)
         RECT *rcDraw = &infoPtr->rcDraw;
         SIZE size;
         COLORREF oldTextColor;
-        SHORT fieldWidth = 0;
         HFONT oldFont = SelectObject (hdc, infoPtr->hFont);
         INT oldBkMode = SetBkMode (hdc, TRANSPARENT);
         WCHAR txt[80];
 
-        DATETIME_ReturnTxt (infoPtr, 0, txt, sizeof(txt)/sizeof(txt[0]));
+        DATETIME_ReturnTxt (infoPtr, 0, txt, ARRAY_SIZE(txt));
         GetTextExtentPoint32W (hdc, txt, strlenW(txt), &size);
         rcDraw->bottom = size.cy + 2;
 
         prevright = infoPtr->checkbox.right = ((infoPtr->dwStyle & DTS_SHOWNONE) ? 18 : 2);
 
         for (i = 0; i < infoPtr->nrFields; i++) {
-            DATETIME_ReturnTxt (infoPtr, i, txt, sizeof(txt)/sizeof(txt[0]));
+            DATETIME_ReturnTxt (infoPtr, i, txt, ARRAY_SIZE(txt));
             GetTextExtentPoint32W (hdc, txt, strlenW(txt), &size);
-            DATETIME_ReturnFieldWidth (infoPtr, hdc, i, &fieldWidth);
             field = &infoPtr->fieldRect[i];
             field->left   = prevright;
-            field->right  = prevright + fieldWidth;
+            field->right  = prevright + DATETIME_GetFieldWidth (infoPtr, hdc, i);
             field->top    = rcDraw->top;
             field->bottom = rcDraw->bottom;
             prevright = field->right;
@@ -1462,6 +1444,56 @@ DATETIME_StyleChanged(DATETIME_INFO *infoPtr, WPARAM wStyleType, const STYLESTRU
     return 0;
 }
 
+static BOOL DATETIME_GetIdealSize(DATETIME_INFO *infoPtr, SIZE *size)
+{
+    SIZE field_size;
+    RECT rect;
+    WCHAR txt[80];
+    HDC hdc;
+    HFONT oldFont;
+    int i;
+
+    size->cx = size->cy = 0;
+
+    hdc = GetDC(infoPtr->hwndSelf);
+    oldFont = SelectObject(hdc, infoPtr->hFont);
+
+    /* Get text font height */
+    DATETIME_ReturnTxt(infoPtr, 0, txt, ARRAY_SIZE(txt));
+    GetTextExtentPoint32W(hdc, txt, strlenW(txt), &field_size);
+    size->cy = field_size.cy;
+
+    /* Get text font width */
+    for (i = 0; i < infoPtr->nrFields; i++)
+    {
+        size->cx += DATETIME_GetFieldWidth(infoPtr, hdc, i);
+    }
+
+    SelectObject(hdc, oldFont);
+    ReleaseDC(infoPtr->hwndSelf, hdc);
+
+    if (infoPtr->dwStyle & DTS_UPDOWN)
+    {
+        GetWindowRect(infoPtr->hUpdown, &rect);
+        size->cx += rect.right - rect.left;
+    }
+    else
+    {
+        size->cx += infoPtr->calbutton.right - infoPtr->calbutton.left;
+    }
+
+    if (infoPtr->dwStyle & DTS_SHOWNONE)
+    {
+        size->cx += infoPtr->checkbox.right - infoPtr->checkbox.left;
+    }
+
+    /* Add space between controls for them not to get too close */
+    size->cx += 12;
+    size->cy += 4;
+
+    TRACE("cx=%d cy=%d\n", size->cx, size->cy);
+    return TRUE;
+}
 
 static LRESULT
 DATETIME_SetFont (DATETIME_INFO *infoPtr, HFONT font, BOOL repaint)
@@ -1539,7 +1571,7 @@ DATETIME_GetText (const DATETIME_INFO *infoPtr, INT count, LPWSTR dst)
     dst[0] = 0;
     for (i = 0; i < infoPtr->nrFields; i++)
     {
-        DATETIME_ReturnTxt(infoPtr, i, buf, sizeof(buf)/sizeof(buf[0]));
+        DATETIME_ReturnTxt(infoPtr, i, buf, ARRAY_SIZE(buf));
         if ((strlenW(dst) + strlenW(buf)) < count)
             strcatW(dst, buf);
         else break;
@@ -1592,6 +1624,9 @@ DATETIME_WindowProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
     case DTM_GETMCFONT:
 	return SendMessageW (infoPtr->hMonthCal, WM_GETFONT, wParam, lParam);
+
+    case DTM_GETIDEALSIZE:
+        return DATETIME_GetIdealSize(infoPtr, (SIZE *)lParam);
 
     case WM_NOTIFY:
 	return DATETIME_Notify (infoPtr, (LPNMHDR)lParam);

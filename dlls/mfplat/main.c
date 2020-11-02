@@ -29,6 +29,7 @@
 
 #include "initguid.h"
 #include "mfapi.h"
+#include "mfidl.h"
 #include "mferror.h"
 
 #include "wine/debug.h"
@@ -347,6 +348,20 @@ HRESULT WINAPI MFTEnum(GUID category, UINT32 flags, MFT_REGISTER_TYPE_INFO *inpu
 }
 
 /***********************************************************************
+ *      MFTEnumEx (mfplat.@)
+ */
+HRESULT WINAPI MFTEnumEx(GUID category, UINT32 flags, const MFT_REGISTER_TYPE_INFO *input_type,
+                         const MFT_REGISTER_TYPE_INFO *output_type, IMFActivate ***activate,
+                         UINT32 *pcount)
+{
+    FIXME("(%s, %x, %p, %p, %p, %p): stub\n", debugstr_guid(&category), flags, input_type,
+                                              output_type, activate, pcount);
+
+    *pcount = 0;
+    return S_OK;
+}
+
+/***********************************************************************
  *      MFTUnregister (mfplat.@)
  */
 HRESULT WINAPI MFTUnregister(CLSID clsid)
@@ -389,8 +404,15 @@ HRESULT WINAPI MFTUnregister(CLSID clsid)
  */
 HRESULT WINAPI MFStartup(ULONG version, DWORD flags)
 {
+#define MF_VERSION_XP   MAKELONG( MF_API_VERSION, 1 )
+#define MF_VERSION_WIN7 MAKELONG( MF_API_VERSION, 2 )
+
     FIXME("(%u, %u): stub\n", version, flags);
-    return MF_E_BAD_STARTUP_VERSION;
+
+    if(version != MF_VERSION_XP && version != MF_VERSION_WIN7)
+        return MF_E_BAD_STARTUP_VERSION;
+
+    return S_OK;
 }
 
 /***********************************************************************
@@ -869,7 +891,7 @@ static const IMFAttributesVtbl mfattributes_vtbl =
 };
 
 /***********************************************************************
- *      MFMFCreateAttributes (mfplat.@)
+ *      MFCreateAttributes (mfplat.@)
  */
 HRESULT WINAPI MFCreateAttributes(IMFAttributes **attributes, UINT32 size)
 {
@@ -885,5 +907,1185 @@ HRESULT WINAPI MFCreateAttributes(IMFAttributes **attributes, UINT32 size)
     object->IMFAttributes_iface.lpVtbl = &mfattributes_vtbl;
 
     *attributes = &object->IMFAttributes_iface;
+    return S_OK;
+}
+
+typedef struct _mfsourceresolver
+{
+    IMFSourceResolver IMFSourceResolver_iface;
+    LONG ref;
+} mfsourceresolver;
+
+static inline mfsourceresolver *impl_from_IMFSourceResolver(IMFSourceResolver *iface)
+{
+    return CONTAINING_RECORD(iface, mfsourceresolver, IMFSourceResolver_iface);
+}
+
+static HRESULT WINAPI mfsourceresolver_QueryInterface(IMFSourceResolver *iface, REFIID riid, void **obj)
+{
+    mfsourceresolver *This = impl_from_IMFSourceResolver(iface);
+
+    TRACE("(%p->(%s, %p)\n", This, debugstr_guid(riid), obj);
+
+    if (IsEqualIID(riid, &IID_IMFSourceResolver) ||
+            IsEqualIID(riid, &IID_IUnknown))
+    {
+        *obj = &This->IMFSourceResolver_iface;
+    }
+    else
+    {
+        *obj = NULL;
+        FIXME("unsupported interface %s\n", debugstr_guid(riid));
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown *)*obj);
+    return S_OK;
+}
+
+static ULONG WINAPI mfsourceresolver_AddRef(IMFSourceResolver *iface)
+{
+    mfsourceresolver *This = impl_from_IMFSourceResolver(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p)->(%u)\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI mfsourceresolver_Release(IMFSourceResolver *iface)
+{
+    mfsourceresolver *This = impl_from_IMFSourceResolver(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p)->(%u)\n", This, ref);
+
+    if (!ref)
+        HeapFree(GetProcessHeap(), 0, This);
+
+    return ref;
+}
+
+static HRESULT WINAPI mfsourceresolver_CreateObjectFromURL(IMFSourceResolver *iface, const WCHAR *url,
+    DWORD flags, IPropertyStore *props, MF_OBJECT_TYPE *obj_type, IUnknown **object)
+{
+    mfsourceresolver *This = impl_from_IMFSourceResolver(iface);
+
+    FIXME("(%p)->(%s, %#x, %p, %p, %p): stub\n", This, debugstr_w(url), flags, props, obj_type, object);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfsourceresolver_CreateObjectFromByteStream(IMFSourceResolver *iface, IMFByteStream *stream,
+    const WCHAR *url, DWORD flags, IPropertyStore *props, MF_OBJECT_TYPE *obj_type, IUnknown **object)
+{
+    mfsourceresolver *This = impl_from_IMFSourceResolver(iface);
+
+    FIXME("(%p)->(%p, %s, %#x, %p, %p, %p): stub\n", This, stream, debugstr_w(url), flags, props, obj_type, object);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfsourceresolver_BeginCreateObjectFromURL(IMFSourceResolver *iface, const WCHAR *url,
+    DWORD flags, IPropertyStore *props, IUnknown **cancel_cookie, IMFAsyncCallback *callback, IUnknown *unk_state)
+{
+    mfsourceresolver *This = impl_from_IMFSourceResolver(iface);
+
+    FIXME("(%p)->(%s, %#x, %p, %p, %p, %p): stub\n", This, debugstr_w(url), flags, props, cancel_cookie,
+        callback, unk_state);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfsourceresolver_EndCreateObjectFromURL(IMFSourceResolver *iface, IMFAsyncResult *result,
+    MF_OBJECT_TYPE *obj_type, IUnknown **object)
+{
+    mfsourceresolver *This = impl_from_IMFSourceResolver(iface);
+
+    FIXME("(%p)->(%p, %p, %p): stub\n", This, result, obj_type, object);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfsourceresolver_BeginCreateObjectFromByteStream(IMFSourceResolver *iface, IMFByteStream *stream,
+    const WCHAR *url, DWORD flags, IPropertyStore *props, IUnknown **cancel_cookie, IMFAsyncCallback *callback,
+    IUnknown *unk_state)
+{
+    mfsourceresolver *This = impl_from_IMFSourceResolver(iface);
+
+    FIXME("(%p)->(%p, %s, %#x, %p, %p, %p, %p): stub\n", This, stream, debugstr_w(url), flags, props, cancel_cookie,
+        callback, unk_state);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfsourceresolver_EndCreateObjectFromByteStream(IMFSourceResolver *iface, IMFAsyncResult *result,
+    MF_OBJECT_TYPE *obj_type, IUnknown **object)
+{
+    mfsourceresolver *This = impl_from_IMFSourceResolver(iface);
+
+    FIXME("(%p)->(%p, %p, %p): stub\n", This, result, obj_type, object);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfsourceresolver_CancelObjectCreation(IMFSourceResolver *iface, IUnknown *cancel_cookie)
+{
+    mfsourceresolver *This = impl_from_IMFSourceResolver(iface);
+
+    FIXME("(%p)->(%p): stub\n", This, cancel_cookie);
+
+    return E_NOTIMPL;
+}
+
+static const IMFSourceResolverVtbl mfsourceresolvervtbl =
+{
+   mfsourceresolver_QueryInterface,
+   mfsourceresolver_AddRef,
+   mfsourceresolver_Release,
+   mfsourceresolver_CreateObjectFromURL,
+   mfsourceresolver_CreateObjectFromByteStream,
+   mfsourceresolver_BeginCreateObjectFromURL,
+   mfsourceresolver_EndCreateObjectFromURL,
+   mfsourceresolver_BeginCreateObjectFromByteStream,
+   mfsourceresolver_EndCreateObjectFromByteStream,
+   mfsourceresolver_CancelObjectCreation,
+};
+
+/***********************************************************************
+ *      MFCreateSourceResolver (mfplat.@)
+ */
+HRESULT WINAPI MFCreateSourceResolver(IMFSourceResolver **resolver)
+{
+    mfsourceresolver *object;
+
+    TRACE("%p\n", resolver);
+
+    if (!resolver)
+        return E_POINTER;
+
+    object = HeapAlloc( GetProcessHeap(), 0, sizeof(*object) );
+    if (!object)
+        return E_OUTOFMEMORY;
+
+    object->IMFSourceResolver_iface.lpVtbl = &mfsourceresolvervtbl;
+    object->ref = 1;
+
+    *resolver = &object->IMFSourceResolver_iface;
+    return S_OK;
+}
+
+typedef struct _mfmediatype
+{
+    IMFMediaType IMFMediaType_iface;
+    LONG ref;
+} mfmediatype;
+
+static inline mfmediatype *impl_from_IMFMediaType(IMFMediaType *iface)
+{
+    return CONTAINING_RECORD(iface, mfmediatype, IMFMediaType_iface);
+}
+
+static HRESULT WINAPI mediatype_QueryInterface(IMFMediaType *iface, REFIID riid, void **object)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), object);
+
+    if(IsEqualGUID(riid, &IID_IUnknown) ||
+       IsEqualGUID(riid, &IID_IMFAttributes) ||
+       IsEqualGUID(riid, &IID_IMFMediaType))
+    {
+        *object = &This->IMFMediaType_iface;
+    }
+    else
+    {
+        FIXME("(%s, %p)\n", debugstr_guid(riid), object);
+        *object = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*object);
+    return S_OK;
+}
+
+static ULONG WINAPI mediatype_AddRef(IMFMediaType *iface)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%u\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI mediatype_Release(IMFMediaType *iface)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%u\n", This, ref);
+
+    if (!ref)
+    {
+        HeapFree(GetProcessHeap(), 0, This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI mediatype_GetItem(IMFMediaType *iface, REFGUID key, PROPVARIANT *value)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_GetItemType(IMFMediaType *iface, REFGUID key, MF_ATTRIBUTE_TYPE *type)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), type);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_CompareItem(IMFMediaType *iface, REFGUID key, REFPROPVARIANT value, BOOL *result)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p, %p\n", This, debugstr_guid(key), value, result);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_Compare(IMFMediaType *iface, IMFAttributes *attrs, MF_ATTRIBUTES_MATCH_TYPE type,
+                BOOL *result)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %p, %d, %p\n", This, attrs, type, result);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_GetUINT32(IMFMediaType *iface, REFGUID key, UINT32 *value)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_GetUINT64(IMFMediaType *iface, REFGUID key, UINT64 *value)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_GetDouble(IMFMediaType *iface, REFGUID key, double *value)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_GetGUID(IMFMediaType *iface, REFGUID key, GUID *value)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_GetStringLength(IMFMediaType *iface, REFGUID key, UINT32 *length)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), length);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_GetString(IMFMediaType *iface, REFGUID key, WCHAR *value,
+                UINT32 size, UINT32 *length)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p, %d, %p\n", This, debugstr_guid(key), value, size, length);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_GetAllocatedString(IMFMediaType *iface, REFGUID key,
+                WCHAR **value, UINT32 *length)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p, %p\n", This, debugstr_guid(key), value, length);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_GetBlobSize(IMFMediaType *iface, REFGUID key, UINT32 *size)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_GetBlob(IMFMediaType *iface, REFGUID key, UINT8 *buf,
+                UINT32 bufsize, UINT32 *blobsize)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p, %d, %p\n", This, debugstr_guid(key), buf, bufsize, blobsize);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_GetAllocatedBlob(IMFMediaType *iface, REFGUID key, UINT8 **buf, UINT32 *size)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p, %p\n", This, debugstr_guid(key), buf, size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_GetUnknown(IMFMediaType *iface, REFGUID key, REFIID riid, void **ppv)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %s, %p\n", This, debugstr_guid(key), debugstr_guid(riid), ppv);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_SetItem(IMFMediaType *iface, REFGUID key, REFPROPVARIANT value)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_DeleteItem(IMFMediaType *iface, REFGUID key)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s\n", This, debugstr_guid(key));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_DeleteAllItems(IMFMediaType *iface)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p\n", This);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_SetUINT32(IMFMediaType *iface, REFGUID key, UINT32 value)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %d\n", This, debugstr_guid(key), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_SetUINT64(IMFMediaType *iface, REFGUID key, UINT64 value)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %s\n", This, debugstr_guid(key), wine_dbgstr_longlong(value));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_SetDouble(IMFMediaType *iface, REFGUID key, double value)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %f\n", This, debugstr_guid(key), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_SetGUID(IMFMediaType *iface, REFGUID key, REFGUID value)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %s\n", This, debugstr_guid(key), debugstr_guid(value));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_SetString(IMFMediaType *iface, REFGUID key, const WCHAR *value)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %s\n", This, debugstr_guid(key), debugstr_w(value));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_SetBlob(IMFMediaType *iface, REFGUID key, const UINT8 *buf, UINT32 size)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p, %d\n", This, debugstr_guid(key), buf, size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_SetUnknown(IMFMediaType *iface, REFGUID key, IUnknown *unknown)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), unknown);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_LockStore(IMFMediaType *iface)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p\n", This);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_UnlockStore(IMFMediaType *iface)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p\n", This);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_GetCount(IMFMediaType *iface, UINT32 *items)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %p\n", This, items);
+
+    if(items)
+        *items = 0;
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_GetItemByIndex(IMFMediaType *iface, UINT32 index, GUID *key, PROPVARIANT *value)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %d, %p, %p\n", This, index, key, value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_CopyAllItems(IMFMediaType *iface, IMFAttributes *dest)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %p\n", This, dest);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_GetMajorType(IMFMediaType *iface, GUID *guid)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %p\n", This, guid);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_IsCompressedFormat(IMFMediaType *iface, BOOL *compressed)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %p\n", This, compressed);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_IsEqual(IMFMediaType *iface, IMFMediaType *type, DWORD *flags)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %p, %p\n", This, type, flags);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_GetRepresentation(IMFMediaType *iface, GUID guid, void **representation)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(&guid), representation);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mediatype_FreeRepresentation(IMFMediaType *iface, GUID guid, void *representation)
+{
+    mfmediatype *This = impl_from_IMFMediaType(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(&guid), representation);
+
+    return E_NOTIMPL;
+}
+
+static const IMFMediaTypeVtbl mediatype_vtbl =
+{
+    mediatype_QueryInterface,
+    mediatype_AddRef,
+    mediatype_Release,
+    mediatype_GetItem,
+    mediatype_GetItemType,
+    mediatype_CompareItem,
+    mediatype_Compare,
+    mediatype_GetUINT32,
+    mediatype_GetUINT64,
+    mediatype_GetDouble,
+    mediatype_GetGUID,
+    mediatype_GetStringLength,
+    mediatype_GetString,
+    mediatype_GetAllocatedString,
+    mediatype_GetBlobSize,
+    mediatype_GetBlob,
+    mediatype_GetAllocatedBlob,
+    mediatype_GetUnknown,
+    mediatype_SetItem,
+    mediatype_DeleteItem,
+    mediatype_DeleteAllItems,
+    mediatype_SetUINT32,
+    mediatype_SetUINT64,
+    mediatype_SetDouble,
+    mediatype_SetGUID,
+    mediatype_SetString,
+    mediatype_SetBlob,
+    mediatype_SetUnknown,
+    mediatype_LockStore,
+    mediatype_UnlockStore,
+    mediatype_GetCount,
+    mediatype_GetItemByIndex,
+    mediatype_CopyAllItems,
+    mediatype_GetMajorType,
+    mediatype_IsCompressedFormat,
+    mediatype_IsEqual,
+    mediatype_GetRepresentation,
+    mediatype_FreeRepresentation
+};
+
+/***********************************************************************
+ *      MFCreateMediaType (mfplat.@)
+ */
+HRESULT WINAPI MFCreateMediaType(IMFMediaType **type)
+{
+    mfmediatype *object;
+
+    TRACE("%p\n", type);
+
+    if(!type)
+        return E_INVALIDARG;
+
+    object = HeapAlloc( GetProcessHeap(), 0, sizeof(*object) );
+    if(!object)
+        return E_OUTOFMEMORY;
+
+    object->ref = 1;
+    object->IMFMediaType_iface.lpVtbl = &mediatype_vtbl;
+
+    *type = &object->IMFMediaType_iface;
+    return S_OK;
+}
+
+typedef struct _mfeventqueue
+{
+    IMFMediaEventQueue IMFMediaEventQueue_iface;
+    LONG ref;
+} mfeventqueue;
+
+static inline mfeventqueue *impl_from_IMFMediaEventQueue(IMFMediaEventQueue *iface)
+{
+    return CONTAINING_RECORD(iface, mfeventqueue, IMFMediaEventQueue_iface);
+}
+
+static HRESULT WINAPI mfeventqueue_QueryInterface(IMFMediaEventQueue *iface, REFIID riid, void **out)
+{
+    mfeventqueue *This = impl_from_IMFMediaEventQueue(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), out);
+
+    if(IsEqualGUID(riid, &IID_IUnknown)      ||
+       IsEqualGUID(riid, &IID_IMFMediaEventQueue))
+    {
+        *out = &This->IMFMediaEventQueue_iface;
+    }
+    else
+    {
+        FIXME("(%s, %p)\n", debugstr_guid(riid), out);
+        *out = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*out);
+    return S_OK;
+}
+
+static ULONG WINAPI mfeventqueue_AddRef(IMFMediaEventQueue *iface)
+{
+    mfeventqueue *This = impl_from_IMFMediaEventQueue(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%u\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI mfeventqueue_Release(IMFMediaEventQueue *iface)
+{
+    mfeventqueue *This = impl_from_IMFMediaEventQueue(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%u\n", This, ref);
+
+    if (!ref)
+    {
+        HeapFree(GetProcessHeap(), 0, This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI mfeventqueue_GetEvent(IMFMediaEventQueue *iface, DWORD flags, IMFMediaEvent **event)
+{
+    mfeventqueue *This = impl_from_IMFMediaEventQueue(iface);
+
+    FIXME("%p, %p\n", This, event);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfeventqueue_BeginGetEvent(IMFMediaEventQueue *iface, IMFAsyncCallback *callback, IUnknown *state)
+{
+    mfeventqueue *This = impl_from_IMFMediaEventQueue(iface);
+
+    FIXME("%p, %p, %p\n", This, callback, state);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfeventqueue_EndGetEvent(IMFMediaEventQueue *iface, IMFAsyncResult *result, IMFMediaEvent **event)
+{
+    mfeventqueue *This = impl_from_IMFMediaEventQueue(iface);
+
+    FIXME("%p, %p, %p\n", This, result, event);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfeventqueue_QueueEvent(IMFMediaEventQueue *iface, IMFMediaEvent *event)
+{
+    mfeventqueue *This = impl_from_IMFMediaEventQueue(iface);
+
+    FIXME("%p, %p\n", This, event);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfeventqueue_QueueEventParamVar(IMFMediaEventQueue *iface, MediaEventType met,
+        REFGUID type, HRESULT status, const PROPVARIANT *value)
+{
+    mfeventqueue *This = impl_from_IMFMediaEventQueue(iface);
+
+    FIXME("%p, %d, %s, 0x%08x, %p\n", This, met, debugstr_guid(type), status, value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfeventqueue_QueueEventParamUnk(IMFMediaEventQueue *iface, MediaEventType met, REFGUID type,
+        HRESULT status, IUnknown *unk)
+{
+    mfeventqueue *This = impl_from_IMFMediaEventQueue(iface);
+
+    FIXME("%p, %d, %s, 0x%08x, %p\n", This, met, debugstr_guid(type), status, unk);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfeventqueue_Shutdown(IMFMediaEventQueue *iface)
+{
+    mfeventqueue *This = impl_from_IMFMediaEventQueue(iface);
+
+    FIXME("%p\n", This);
+
+    return E_NOTIMPL;
+}
+
+static const IMFMediaEventQueueVtbl mfeventqueue_vtbl =
+{
+    mfeventqueue_QueryInterface,
+    mfeventqueue_AddRef,
+    mfeventqueue_Release,
+    mfeventqueue_GetEvent,
+    mfeventqueue_BeginGetEvent,
+    mfeventqueue_EndGetEvent,
+    mfeventqueue_QueueEvent,
+    mfeventqueue_QueueEventParamVar,
+    mfeventqueue_QueueEventParamUnk,
+    mfeventqueue_Shutdown
+};
+
+/***********************************************************************
+ *      MFCreateEventQueue (mfplat.@)
+ */
+HRESULT WINAPI MFCreateEventQueue(IMFMediaEventQueue **queue)
+{
+    mfeventqueue *object;
+
+    TRACE("%p\n", queue);
+
+    object = HeapAlloc( GetProcessHeap(), 0, sizeof(*object) );
+    if(!object)
+        return E_OUTOFMEMORY;
+
+    object->ref = 1;
+    object->IMFMediaEventQueue_iface.lpVtbl = &mfeventqueue_vtbl;
+
+    *queue = &object->IMFMediaEventQueue_iface;
+
+    return S_OK;
+}
+
+typedef struct _mfdescriptor
+{
+    IMFStreamDescriptor IMFStreamDescriptor_iface;
+    LONG ref;
+} mfdescriptor;
+
+static inline mfdescriptor *impl_from_IMFStreamDescriptor(IMFStreamDescriptor *iface)
+{
+    return CONTAINING_RECORD(iface, mfdescriptor, IMFStreamDescriptor_iface);
+}
+
+static HRESULT WINAPI mfdescriptor_QueryInterface(IMFStreamDescriptor *iface, REFIID riid, void **out)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), out);
+
+    if(IsEqualGUID(riid, &IID_IUnknown)      ||
+       IsEqualGUID(riid, &IID_IMFAttributes) ||
+       IsEqualGUID(riid, &IID_IMFStreamDescriptor))
+    {
+        *out = &This->IMFStreamDescriptor_iface;
+    }
+    else
+    {
+        FIXME("(%s, %p)\n", debugstr_guid(riid), out);
+        *out = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*out);
+    return S_OK;
+}
+
+static ULONG WINAPI mfdescriptor_AddRef(IMFStreamDescriptor *iface)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%u\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI mfdescriptor_Release(IMFStreamDescriptor *iface)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%u\n", This, ref);
+
+    if (!ref)
+    {
+        HeapFree(GetProcessHeap(), 0, This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI mfdescriptor_GetItem(IMFStreamDescriptor *iface, REFGUID key, PROPVARIANT *value)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_GetItemType(IMFStreamDescriptor *iface, REFGUID key, MF_ATTRIBUTE_TYPE *type)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), type);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_CompareItem(IMFStreamDescriptor *iface, REFGUID key, REFPROPVARIANT value, BOOL *result)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %p, %p\n", This, debugstr_guid(key), value, result);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_Compare(IMFStreamDescriptor *iface, IMFAttributes *theirs, MF_ATTRIBUTES_MATCH_TYPE type,
+                BOOL *result)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %p, %d, %p\n", This, theirs, type, result);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_GetUINT32(IMFStreamDescriptor *iface, REFGUID key, UINT32 *value)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_GetUINT64(IMFStreamDescriptor *iface, REFGUID key, UINT64 *value)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_GetDouble(IMFStreamDescriptor *iface, REFGUID key, double *value)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_GetGUID(IMFStreamDescriptor *iface, REFGUID key, GUID *value)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_GetStringLength(IMFStreamDescriptor *iface, REFGUID key, UINT32 *length)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), length);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_GetString(IMFStreamDescriptor *iface, REFGUID key, WCHAR *value,
+                UINT32 size, UINT32 *length)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %p, %d, %p\n", This, debugstr_guid(key), value, size, length);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_GetAllocatedString(IMFStreamDescriptor *iface, REFGUID key,
+                                      WCHAR **value, UINT32 *length)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %p, %p\n", This, debugstr_guid(key), value, length);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_GetBlobSize(IMFStreamDescriptor *iface, REFGUID key, UINT32 *size)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_GetBlob(IMFStreamDescriptor *iface, REFGUID key, UINT8 *buf,
+                UINT32 bufsize, UINT32 *blobsize)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %p, %d, %p\n", This, debugstr_guid(key), buf, bufsize, blobsize);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_GetAllocatedBlob(IMFStreamDescriptor *iface, REFGUID key, UINT8 **buf, UINT32 *size)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %p, %p\n", This, debugstr_guid(key), buf, size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_GetUnknown(IMFStreamDescriptor *iface, REFGUID key, REFIID riid, void **ppv)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %s, %p\n", This, debugstr_guid(key), debugstr_guid(riid), ppv);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_SetItem(IMFStreamDescriptor *iface, REFGUID key, REFPROPVARIANT Value)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), Value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_DeleteItem(IMFStreamDescriptor *iface, REFGUID key)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s\n", This, debugstr_guid(key));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_DeleteAllItems(IMFStreamDescriptor *iface)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p\n", This);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_SetUINT32(IMFStreamDescriptor *iface, REFGUID key, UINT32 value)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %d\n", This, debugstr_guid(key), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_SetUINT64(IMFStreamDescriptor *iface, REFGUID key, UINT64 value)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %s\n", This, debugstr_guid(key), wine_dbgstr_longlong(value));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_SetDouble(IMFStreamDescriptor *iface, REFGUID key, double value)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %f\n", This, debugstr_guid(key), value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_SetGUID(IMFStreamDescriptor *iface, REFGUID key, REFGUID value)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %s\n", This, debugstr_guid(key), debugstr_guid(value));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_SetString(IMFStreamDescriptor *iface, REFGUID key, const WCHAR *value)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %s\n", This, debugstr_guid(key), debugstr_w(value));
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_SetBlob(IMFStreamDescriptor *iface, REFGUID key, const UINT8 *buf, UINT32 size)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %p, %d\n", This, debugstr_guid(key), buf, size);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_SetUnknown(IMFStreamDescriptor *iface, REFGUID key, IUnknown *unknown)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %s, %p\n", This, debugstr_guid(key), unknown);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_LockStore(IMFStreamDescriptor *iface)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p\n", This);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_UnlockStore(IMFStreamDescriptor *iface)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p\n", This);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_GetCount(IMFStreamDescriptor *iface, UINT32 *items)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %p\n", This, items);
+
+    if(items)
+        *items = 0;
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_GetItemByIndex(IMFStreamDescriptor *iface, UINT32 index, GUID *key, PROPVARIANT *value)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %d, %p, %p\n", This, index, key, value);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_CopyAllItems(IMFStreamDescriptor *iface, IMFAttributes *dest)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %p\n", This, dest);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_GetStreamIdentifier(IMFStreamDescriptor *iface, DWORD *identifier)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %p\n", This, identifier);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI mfdescriptor_GetMediaTypeHandler(IMFStreamDescriptor *iface, IMFMediaTypeHandler **handler)
+{
+    mfdescriptor *This = impl_from_IMFStreamDescriptor(iface);
+
+    FIXME("%p, %p\n", This, handler);
+
+    return E_NOTIMPL;
+}
+
+static const IMFStreamDescriptorVtbl mfdescriptor_vtbl =
+{
+    mfdescriptor_QueryInterface,
+    mfdescriptor_AddRef,
+    mfdescriptor_Release,
+    mfdescriptor_GetItem,
+    mfdescriptor_GetItemType,
+    mfdescriptor_CompareItem,
+    mfdescriptor_Compare,
+    mfdescriptor_GetUINT32,
+    mfdescriptor_GetUINT64,
+    mfdescriptor_GetDouble,
+    mfdescriptor_GetGUID,
+    mfdescriptor_GetStringLength,
+    mfdescriptor_GetString,
+    mfdescriptor_GetAllocatedString,
+    mfdescriptor_GetBlobSize,
+    mfdescriptor_GetBlob,
+    mfdescriptor_GetAllocatedBlob,
+    mfdescriptor_GetUnknown,
+    mfdescriptor_SetItem,
+    mfdescriptor_DeleteItem,
+    mfdescriptor_DeleteAllItems,
+    mfdescriptor_SetUINT32,
+    mfdescriptor_SetUINT64,
+    mfdescriptor_SetDouble,
+    mfdescriptor_SetGUID,
+    mfdescriptor_SetString,
+    mfdescriptor_SetBlob,
+    mfdescriptor_SetUnknown,
+    mfdescriptor_LockStore,
+    mfdescriptor_UnlockStore,
+    mfdescriptor_GetCount,
+    mfdescriptor_GetItemByIndex,
+    mfdescriptor_CopyAllItems,
+    mfdescriptor_GetStreamIdentifier,
+    mfdescriptor_GetMediaTypeHandler
+};
+
+HRESULT WINAPI MFCreateStreamDescriptor(DWORD identifier, DWORD count,
+        IMFMediaType **types, IMFStreamDescriptor **descriptor)
+{
+    mfdescriptor *object;
+
+    TRACE("%d, %d, %p, %p\n", identifier, count, types, descriptor);
+
+    object = HeapAlloc( GetProcessHeap(), 0, sizeof(*object) );
+    if(!object)
+        return E_OUTOFMEMORY;
+
+    object->ref = 1;
+    object->IMFStreamDescriptor_iface.lpVtbl = &mfdescriptor_vtbl;
+
+    *descriptor = &object->IMFStreamDescriptor_iface;
     return S_OK;
 }

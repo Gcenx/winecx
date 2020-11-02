@@ -42,6 +42,7 @@ static NTSTATUS  (WINAPI *pNtGetContextThread)(HANDLE,CONTEXT*);
 static NTSTATUS  (WINAPI *pNtSetContextThread)(HANDLE,CONTEXT*);
 static NTSTATUS  (WINAPI *pRtlRaiseException)(EXCEPTION_RECORD *rec);
 static PVOID     (WINAPI *pRtlUnwind)(PVOID, PVOID, PEXCEPTION_RECORD, PVOID);
+static VOID      (WINAPI *pRtlCaptureContext)(CONTEXT*);
 static PVOID     (WINAPI *pRtlAddVectoredExceptionHandler)(ULONG first, PVECTORED_EXCEPTION_HANDLER func);
 static ULONG     (WINAPI *pRtlRemoveVectoredExceptionHandler)(PVOID handler);
 static PVOID     (WINAPI *pRtlAddVectoredContinueHandler)(ULONG first, PVECTORED_EXCEPTION_HANDLER func);
@@ -51,6 +52,7 @@ static NTSTATUS  (WINAPI *pNtTerminateProcess)(HANDLE handle, LONG exit_code);
 static NTSTATUS  (WINAPI *pNtQueryInformationProcess)(HANDLE, PROCESSINFOCLASS, PVOID, ULONG, PULONG);
 static NTSTATUS  (WINAPI *pNtSetInformationProcess)(HANDLE, PROCESSINFOCLASS, PVOID, ULONG);
 static BOOL      (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
+static NTSTATUS  (WINAPI *pNtClose)(HANDLE);
 
 #if defined(__x86_64__)
 typedef struct
@@ -110,6 +112,36 @@ typedef struct _JUMP_BUFFER
     SETJMP_FLOAT128  Xmm15;
 } _JUMP_BUFFER;
 
+typedef union _UNWIND_CODE
+{
+    struct
+    {
+        BYTE CodeOffset;
+        BYTE UnwindOp : 4;
+        BYTE OpInfo   : 4;
+    } s;
+    USHORT FrameOffset;
+} UNWIND_CODE;
+
+typedef struct _UNWIND_INFO
+{
+    BYTE Version       : 3;
+    BYTE Flags         : 5;
+    BYTE SizeOfProlog;
+    BYTE CountOfCodes;
+    BYTE FrameRegister : 4;
+    BYTE FrameOffset   : 4;
+    UNWIND_CODE UnwindCode[1]; /* actually CountOfCodes (aligned) */
+/*
+ *  union
+ *  {
+ *      OPTIONAL ULONG ExceptionHandler;
+ *      OPTIONAL ULONG FunctionEntry;
+ *  };
+ *  OPTIONAL ULONG ExceptionData[];
+ */
+} UNWIND_INFO;
+
 static BOOLEAN   (CDECL *pRtlAddFunctionTable)(RUNTIME_FUNCTION*, DWORD, DWORD64);
 static BOOLEAN   (CDECL *pRtlDeleteFunctionTable)(RUNTIME_FUNCTION*);
 static BOOLEAN   (CDECL *pRtlInstallFunctionTableCallback)(DWORD64, DWORD64, DWORD, PGET_RUNTIME_FUNCTION_CALLBACK, PVOID, PCWSTR);
@@ -117,6 +149,8 @@ static PRUNTIME_FUNCTION (WINAPI *pRtlLookupFunctionEntry)(ULONG64, ULONG64*, UN
 static EXCEPTION_DISPOSITION (WINAPI *p__C_specific_handler)(EXCEPTION_RECORD*, ULONG64, CONTEXT*, DISPATCHER_CONTEXT*);
 static VOID      (WINAPI *pRtlCaptureContext)(CONTEXT*);
 static VOID      (CDECL *pRtlRestoreContext)(CONTEXT*, EXCEPTION_RECORD*);
+static NTSTATUS  (WINAPI *pRtlWow64GetThreadContext)(HANDLE, WOW64_CONTEXT *);
+static NTSTATUS  (WINAPI *pRtlWow64SetThreadContext)(HANDLE, const WOW64_CONTEXT *);
 static VOID      (CDECL *pRtlUnwindEx)(VOID*, VOID*, EXCEPTION_RECORD*, VOID*, CONTEXT*, UNWIND_HISTORY_TABLE*);
 static int       (CDECL *p_setjmp)(_JUMP_BUFFER*);
 #endif
@@ -609,7 +643,7 @@ static void test_prot_fault(void)
 {
     unsigned int i;
 
-    for (i = 0; i < sizeof(exceptions)/sizeof(exceptions[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(exceptions); i++)
     {
         if (is_wow64 && exceptions[i].wow64_broken && !strcmp( winetest_platform, "windows" ))
         {
@@ -821,12 +855,21 @@ static DWORD int3_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD 
 
 static const BYTE int3_code[] = { 0xCC, 0xc3 };  /* int 3, ret */
 
+static DWORD WINAPI hw_reg_exception_thread( void *arg )
+{
+    int expect = (ULONG_PTR)arg;
+    got_exception = 0;
+    run_exception_test( bpx_handler, NULL, dummy_code, sizeof(dummy_code), 0 );
+    ok( got_exception == expect, "expected %u exceptions, got %d\n", expect, got_exception );
+    return 0;
+}
 
 static void test_exceptions(void)
 {
     CONTEXT ctx;
     NTSTATUS res;
     struct dbgreg_test dreg_test;
+    HANDLE h;
 
     if (!pNtGetContextThread || !pNtSetContextThread)
     {
@@ -880,6 +923,33 @@ static void test_exceptions(void)
 
     /* test int3 handling */
     run_exception_test(int3_handler, NULL, int3_code, sizeof(int3_code), 0);
+
+    /* test that hardware breakpoints are not inherited by created threads */
+    res = pNtSetContextThread( GetCurrentThread(), &ctx );
+    ok( res == STATUS_SUCCESS, "NtSetContextThread failed with %x\n", res );
+
+    h = CreateThread( NULL, 0, hw_reg_exception_thread, 0, 0, NULL );
+    WaitForSingleObject( h, 10000 );
+    CloseHandle( h );
+
+    h = CreateThread( NULL, 0, hw_reg_exception_thread, (void *)4, CREATE_SUSPENDED, NULL );
+    ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+    res = pNtGetContextThread( h, &ctx );
+    ok( res == STATUS_SUCCESS, "NtGetContextThread failed with %x\n", res );
+    ok( ctx.Dr0 == 0, "dr0 %x\n", ctx.Dr0 );
+    ok( ctx.Dr7 == 0, "dr7 %x\n", ctx.Dr7 );
+    ctx.Dr0 = (DWORD)code_mem;
+    ctx.Dr7 = 3;
+    res = pNtSetContextThread( h, &ctx );
+    ok( res == STATUS_SUCCESS, "NtSetContextThread failed with %x\n", res );
+    ResumeThread( h );
+    WaitForSingleObject( h, 10000 );
+    CloseHandle( h );
+
+    ctx.Dr0 = 0;
+    ctx.Dr7 = 0;
+    res = pNtSetContextThread( GetCurrentThread(), &ctx );
+    ok( res == STATUS_SUCCESS, "NtSetContextThread failed with %x\n", res );
 }
 
 static void test_debugger(void)
@@ -1023,6 +1093,16 @@ static void test_debugger(void)
                        "expected Eip = %p, got 0x%x\n", (char *)code_mem_address + 2, ctx.Eip);
 
                     if (stage == 10) continuestatus = DBG_EXCEPTION_NOT_HANDLED;
+                }
+                else if (stage == 11 || stage == 12 || stage == 13)
+                {
+                    ok(de.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_INVALID_HANDLE,
+                       "unexpected exception code %08x, expected %08x\n", de.u.Exception.ExceptionRecord.ExceptionCode,
+                       EXCEPTION_INVALID_HANDLE);
+                    ok(de.u.Exception.ExceptionRecord.NumberParameters == 0,
+                       "unexpected number of parameters %d, expected 0\n", de.u.Exception.ExceptionRecord.NumberParameters);
+
+                    if (stage == 12|| stage == 13) continuestatus = DBG_EXCEPTION_NOT_HANDLED;
                 }
                 else
                     ok(FALSE, "unexpected stage %x\n", stage);
@@ -1416,6 +1496,134 @@ static void test_dpe_exceptions(void)
     ok(stat == STATUS_ACCESS_DENIED, "enabling DEP while permanent: status %08x\n", stat);
 }
 
+static void test_thread_context(void)
+{
+    CONTEXT context;
+    NTSTATUS status;
+    struct expected
+    {
+        DWORD Eax, Ebx, Ecx, Edx, Esi, Edi, Ebp, Esp, Eip,
+            SegCs, SegDs, SegEs, SegFs, SegGs, SegSs, EFlags, prev_frame;
+    } expect;
+    NTSTATUS (*func_ptr)( struct expected *res, void *func, void *arg1, void *arg2 ) = (void *)code_mem;
+
+    static const BYTE call_func[] =
+    {
+        0x55,             /* pushl  %ebp */
+        0x89, 0xe5,       /* mov    %esp,%ebp */
+        0x50,             /* pushl  %eax ; add a bit of offset to the stack */
+        0x50,             /* pushl  %eax */
+        0x50,             /* pushl  %eax */
+        0x50,             /* pushl  %eax */
+        0x8b, 0x45, 0x08, /* mov    0x8(%ebp),%eax */
+        0x8f, 0x00,       /* popl   (%eax) */
+        0x89, 0x58, 0x04, /* mov    %ebx,0x4(%eax) */
+        0x89, 0x48, 0x08, /* mov    %ecx,0x8(%eax) */
+        0x89, 0x50, 0x0c, /* mov    %edx,0xc(%eax) */
+        0x89, 0x70, 0x10, /* mov    %esi,0x10(%eax) */
+        0x89, 0x78, 0x14, /* mov    %edi,0x14(%eax) */
+        0x89, 0x68, 0x18, /* mov    %ebp,0x18(%eax) */
+        0x89, 0x60, 0x1c, /* mov    %esp,0x1c(%eax) */
+        0xff, 0x75, 0x04, /* pushl  0x4(%ebp) */
+        0x8f, 0x40, 0x20, /* popl   0x20(%eax) */
+        0x8c, 0x48, 0x24, /* mov    %cs,0x24(%eax) */
+        0x8c, 0x58, 0x28, /* mov    %ds,0x28(%eax) */
+        0x8c, 0x40, 0x2c, /* mov    %es,0x2c(%eax) */
+        0x8c, 0x60, 0x30, /* mov    %fs,0x30(%eax) */
+        0x8c, 0x68, 0x34, /* mov    %gs,0x34(%eax) */
+        0x8c, 0x50, 0x38, /* mov    %ss,0x38(%eax) */
+        0x9c,             /* pushf */
+        0x8f, 0x40, 0x3c, /* popl   0x3c(%eax) */
+        0xff, 0x75, 0x00, /* pushl  0x0(%ebp) ; previous stack frame */
+        0x8f, 0x40, 0x40, /* popl   0x40(%eax) */
+        0x8b, 0x00,       /* mov    (%eax),%eax */
+        0xff, 0x75, 0x14, /* pushl  0x14(%ebp) */
+        0xff, 0x75, 0x10, /* pushl  0x10(%ebp) */
+        0xff, 0x55, 0x0c, /* call   *0xc(%ebp) */
+        0xc9,             /* leave */
+        0xc3,             /* ret */
+    };
+
+    memcpy( func_ptr, call_func, sizeof(call_func) );
+
+#define COMPARE(reg) \
+    ok( context.reg == expect.reg, "wrong " #reg " %08x/%08x\n", context.reg, expect.reg )
+
+    memset( &context, 0xcc, sizeof(context) );
+    memset( &expect, 0xcc, sizeof(expect) );
+    func_ptr( &expect, pRtlCaptureContext, &context, 0 );
+    trace( "expect: eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x ebp=%08x esp=%08x "
+           "eip=%08x cs=%04x ds=%04x es=%04x fs=%04x gs=%04x ss=%04x flags=%08x prev=%08x\n",
+           expect.Eax, expect.Ebx, expect.Ecx, expect.Edx, expect.Esi, expect.Edi,
+           expect.Ebp, expect.Esp, expect.Eip, expect.SegCs, expect.SegDs, expect.SegEs,
+           expect.SegFs, expect.SegGs, expect.SegSs, expect.EFlags, expect.prev_frame );
+    trace( "actual: eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x ebp=%08x esp=%08x "
+           "eip=%08x cs=%04x ds=%04x es=%04x fs=%04x gs=%04x ss=%04x flags=%08x\n",
+           context.Eax, context.Ebx, context.Ecx, context.Edx, context.Esi, context.Edi,
+           context.Ebp, context.Esp, context.Eip, context.SegCs, context.SegDs, context.SegEs,
+           context.SegFs, context.SegGs, context.SegSs, context.EFlags );
+
+    ok( context.ContextFlags == (CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_SEGMENTS) ||
+        broken( context.ContextFlags == 0xcccccccc ),  /* <= vista */
+        "wrong flags %08x\n", context.ContextFlags );
+    COMPARE( Eax );
+    COMPARE( Ebx );
+    COMPARE( Ecx );
+    COMPARE( Edx );
+    COMPARE( Esi );
+    COMPARE( Edi );
+    COMPARE( Eip );
+    COMPARE( SegCs );
+    COMPARE( SegDs );
+    COMPARE( SegEs );
+    COMPARE( SegFs );
+    COMPARE( SegGs );
+    COMPARE( SegSs );
+    COMPARE( EFlags );
+    /* Ebp is from the previous stackframe */
+    ok( context.Ebp == expect.prev_frame, "wrong Ebp %08x/%08x\n", context.Ebp, expect.prev_frame );
+    /* Esp is the value on entry to the previous stackframe */
+    ok( context.Esp == expect.Ebp + 8, "wrong Esp %08x/%08x\n", context.Esp, expect.Ebp + 8 );
+
+    memset( &context, 0xcc, sizeof(context) );
+    memset( &expect, 0xcc, sizeof(expect) );
+    context.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_SEGMENTS;
+    status = func_ptr( &expect, pNtGetContextThread, (void *)GetCurrentThread(), &context );
+    ok( status == STATUS_SUCCESS, "NtGetContextThread failed %08x\n", status );
+    trace( "expect: eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x ebp=%08x esp=%08x "
+           "eip=%08x cs=%04x ds=%04x es=%04x fs=%04x gs=%04x ss=%04x flags=%08x prev=%08x\n",
+           expect.Eax, expect.Ebx, expect.Ecx, expect.Edx, expect.Esi, expect.Edi,
+           expect.Ebp, expect.Esp, expect.Eip, expect.SegCs, expect.SegDs, expect.SegEs,
+           expect.SegFs, expect.SegGs, expect.SegSs, expect.EFlags, expect.prev_frame );
+    trace( "actual: eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x ebp=%08x esp=%08x "
+           "eip=%08x cs=%04x ds=%04x es=%04x fs=%04x gs=%04x ss=%04x flags=%08x\n",
+           context.Eax, context.Ebx, context.Ecx, context.Edx, context.Esi, context.Edi,
+           context.Ebp, context.Esp, context.Eip, context.SegCs, context.SegDs, context.SegEs,
+           context.SegFs, context.SegGs, context.SegSs, context.EFlags );
+    /* Eax, Ecx, Edx, EFlags are not preserved */
+    COMPARE( Ebx );
+    COMPARE( Esi );
+    COMPARE( Edi );
+    COMPARE( Ebp );
+    /* Esp is the stack upon entry to NtGetContextThread */
+    ok( context.Esp == expect.Esp - 12 || context.Esp == expect.Esp - 16,
+        "wrong Esp %08x/%08x\n", context.Esp, expect.Esp );
+    /* Eip is somewhere close to the NtGetContextThread implementation */
+    ok( (char *)context.Eip >= (char *)pNtGetContextThread - 0x10000 &&
+        (char *)context.Eip <= (char *)pNtGetContextThread + 0x10000,
+        "wrong Eip %08x/%08x\n", context.Eip, (DWORD)pNtGetContextThread );
+    ok( *(WORD *)context.Eip == 0xc483 || *(WORD *)context.Eip == 0x08c2 || *(WORD *)context.Eip == 0x8dc3,
+        "expected 0xc483 or 0x08c2 or 0x8dc3, got %04x\n", *(WORD *)context.Eip );
+    /* segment registers clear the high word */
+    ok( context.SegCs == LOWORD(expect.SegCs), "wrong SegCs %08x/%08x\n", context.SegCs, expect.SegCs );
+    ok( context.SegDs == LOWORD(expect.SegDs), "wrong SegDs %08x/%08x\n", context.SegDs, expect.SegDs );
+    ok( context.SegEs == LOWORD(expect.SegEs), "wrong SegEs %08x/%08x\n", context.SegEs, expect.SegEs );
+    ok( context.SegFs == LOWORD(expect.SegFs), "wrong SegFs %08x/%08x\n", context.SegFs, expect.SegFs );
+    ok( context.SegGs == LOWORD(expect.SegGs), "wrong SegGs %08x/%08x\n", context.SegGs, expect.SegGs );
+    ok( context.SegSs == LOWORD(expect.SegSs), "wrong SegSs %08x/%08x\n", context.SegSs, expect.SegGs );
+#undef COMPARE
+}
+
 #elif defined(__x86_64__)
 
 #define is_wow64 0
@@ -1528,7 +1736,7 @@ static void call_virtual_unwind( int testnum, const struct unwind_test *test )
 
         for (j = 0; j < 16; j++)
         {
-            static const UINT nb_regs = sizeof(test->results[i].regs) / sizeof(test->results[i].regs[0]);
+            static const UINT nb_regs = ARRAY_SIZE(test->results[i].regs);
 
             for (k = 0; k < nb_regs; k++)
             {
@@ -1682,14 +1890,12 @@ static void test_virtual_unwind(void)
 
     static const struct unwind_test tests[] =
     {
-        { function_0, sizeof(function_0), unwind_info_0,
-          results_0, sizeof(results_0)/sizeof(results_0[0]) },
-        { function_1, sizeof(function_1), unwind_info_1,
-          results_1, sizeof(results_1)/sizeof(results_1[0]) }
+        { function_0, sizeof(function_0), unwind_info_0, results_0, ARRAY_SIZE(results_0) },
+        { function_1, sizeof(function_1), unwind_info_1, results_1, ARRAY_SIZE(results_1) }
     };
     unsigned int i;
 
-    for (i = 0; i < sizeof(tests)/sizeof(tests[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
         call_virtual_unwind( i, &tests[i] );
 }
 
@@ -1987,12 +2193,361 @@ static void test___C_specific_handler(void)
     ok(dispatch.ScopeIndex == 1, "dispatch.ScopeIndex = %d\n", dispatch.ScopeIndex);
 }
 
+/* This is heavily based on the i386 exception tests. */
+static const struct exception
+{
+    BYTE     code[18];      /* asm code */
+    BYTE     offset;        /* offset of faulting instruction */
+    BYTE     length;        /* length of faulting instruction */
+    NTSTATUS status;        /* expected status code */
+    DWORD    nb_params;     /* expected number of parameters */
+    ULONG64  params[4];     /* expected parameters */
+    NTSTATUS alt_status;    /* alternative status code */
+    DWORD    alt_nb_params; /* alternative number of parameters */
+    ULONG64  alt_params[4]; /* alternative parameters */
+} exceptions[] =
+{
+/* 0 */
+    /* test some privileged instructions */
+    { { 0xfb, 0xc3 },  /* 0: sti; ret */
+      0, 1, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0x6c, 0xc3 },  /* 1: insb (%dx); ret */
+      0, 1, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0x6d, 0xc3 },  /* 2: insl (%dx); ret */
+      0, 1, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0x6e, 0xc3 },  /* 3: outsb (%dx); ret */
+      0, 1, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0x6f, 0xc3 },  /* 4: outsl (%dx); ret */
+      0, 1, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+/* 5 */
+    { { 0xe4, 0x11, 0xc3 },  /* 5: inb $0x11,%al; ret */
+      0, 2, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0xe5, 0x11, 0xc3 },  /* 6: inl $0x11,%eax; ret */
+      0, 2, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0xe6, 0x11, 0xc3 },  /* 7: outb %al,$0x11; ret */
+      0, 2, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0xe7, 0x11, 0xc3 },  /* 8: outl %eax,$0x11; ret */
+      0, 2, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0xed, 0xc3 },  /* 9: inl (%dx),%eax; ret */
+      0, 1, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+/* 10 */
+    { { 0xee, 0xc3 },  /* 10: outb %al,(%dx); ret */
+      0, 1, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0xef, 0xc3 },  /* 11: outl %eax,(%dx); ret */
+      0, 1, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0xf4, 0xc3 },  /* 12: hlt; ret */
+      0, 1, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0xfa, 0xc3 },  /* 13: cli; ret */
+      0, 1, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+
+    /* test iret to invalid selector */
+    { { 0x6a, 0x00, 0x6a, 0x00, 0x6a, 0x00, 0xcf, 0x83, 0xc4, 0x18, 0xc3 },
+      /* 15: pushq $0; pushq $0; pushq $0; iret; addl $24,%esp; ret */
+      6, 1, STATUS_ACCESS_VIOLATION, 2, { 0, 0xffffffffffffffff } },
+/* 15 */
+    /* test loading an invalid selector */
+    { { 0xb8, 0xef, 0xbe, 0x00, 0x00, 0x8e, 0xe8, 0xc3 },  /* 16: mov $beef,%ax; mov %ax,%gs; ret */
+      5, 2, STATUS_ACCESS_VIOLATION, 2, { 0, 0xbee8 } }, /* 0xbee8 or 0xffffffff */
+
+    /* test overlong instruction (limit is 15 bytes) */
+    { { 0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0xfa,0xc3 },
+      0, 16, STATUS_ILLEGAL_INSTRUCTION, 0, { 0 },
+      STATUS_ACCESS_VIOLATION, 2, { 0, 0xffffffffffffffff } },
+
+    /* test invalid interrupt */
+    { { 0xcd, 0xff, 0xc3 },   /* int $0xff; ret */
+      0, 2, STATUS_ACCESS_VIOLATION, 2, { 0, 0xffffffffffffffff } },
+
+    /* test moves to/from Crx */
+    { { 0x0f, 0x20, 0xc0, 0xc3 },  /* movl %cr0,%eax; ret */
+      0, 3, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0x0f, 0x20, 0xe0, 0xc3 },  /* movl %cr4,%eax; ret */
+      0, 3, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+/* 20 */
+    { { 0x0f, 0x22, 0xc0, 0xc3 },  /* movl %eax,%cr0; ret */
+      0, 3, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0x0f, 0x22, 0xe0, 0xc3 },  /* movl %eax,%cr4; ret */
+      0, 3, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+
+    /* test moves to/from Drx */
+    { { 0x0f, 0x21, 0xc0, 0xc3 },  /* movl %dr0,%eax; ret */
+      0, 3, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0x0f, 0x21, 0xc8, 0xc3 },  /* movl %dr1,%eax; ret */
+      0, 3, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0x0f, 0x21, 0xf8, 0xc3 },  /* movl %dr7,%eax; ret */
+      0, 3, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+/* 25 */
+    { { 0x0f, 0x23, 0xc0, 0xc3 },  /* movl %eax,%dr0; ret */
+      0, 3, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0x0f, 0x23, 0xc8, 0xc3 },  /* movl %eax,%dr1; ret */
+      0, 3, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+    { { 0x0f, 0x23, 0xf8, 0xc3 },  /* movl %eax,%dr7; ret */
+      0, 3, STATUS_PRIVILEGED_INSTRUCTION, 0 },
+
+    /* test memory reads */
+    { { 0xa1, 0xfc, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xc3 },  /* movl 0xfffffffffffffffc,%eax; ret */
+      0, 9, STATUS_ACCESS_VIOLATION, 2, { 0, 0xfffffffffffffffc } },
+    { { 0xa1, 0xfd, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xc3 },  /* movl 0xfffffffffffffffd,%eax; ret */
+      0, 9, STATUS_ACCESS_VIOLATION, 2, { 0, 0xfffffffffffffffd } },
+/* 30 */
+    { { 0xa1, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xc3 },  /* movl 0xfffffffffffffffe,%eax; ret */
+      0, 9, STATUS_ACCESS_VIOLATION, 2, { 0, 0xfffffffffffffffe } },
+    { { 0xa1, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xc3 },  /* movl 0xffffffffffffffff,%eax; ret */
+      0, 9, STATUS_ACCESS_VIOLATION, 2, { 0, 0xffffffffffffffff } },
+
+    /* test memory writes */
+    { { 0xa3, 0xfc, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xc3 },  /* movl %eax,0xfffffffffffffffc; ret */
+      0, 9, STATUS_ACCESS_VIOLATION, 2, { 1, 0xfffffffffffffffc } },
+    { { 0xa3, 0xfd, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xc3 },  /* movl %eax,0xfffffffffffffffd; ret */
+      0, 9, STATUS_ACCESS_VIOLATION, 2, { 1, 0xfffffffffffffffd } },
+    { { 0xa3, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xc3 },  /* movl %eax,0xfffffffffffffffe; ret */
+      0, 9, STATUS_ACCESS_VIOLATION, 2, { 1, 0xfffffffffffffffe } },
+/* 35 */
+    { { 0xa3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xc3 },  /* movl %eax,0xffffffffffffffff; ret */
+      0, 9, STATUS_ACCESS_VIOLATION, 2, { 1, 0xffffffffffffffff } },
+    { { 0xf1, 0x90, 0xc3 },  /* icebp; nop; ret */
+      1, 1, STATUS_SINGLE_STEP, 0 },
+    { { 0xcd, 0x2c, 0xc3 },
+      0, 2, STATUS_ASSERTION_FAILURE, 0 },
+};
+
+static int got_exception;
+
+static void run_exception_test(void *handler, const void* context,
+                               const void *code, unsigned int code_size,
+                               DWORD access)
+{
+    unsigned char buf[8 + 6 + 8 + 8];
+    RUNTIME_FUNCTION runtime_func;
+    UNWIND_INFO *unwind = (UNWIND_INFO *)buf;
+    void (*func)(void) = code_mem;
+    DWORD oldaccess, oldaccess2;
+
+    runtime_func.BeginAddress = 0;
+    runtime_func.EndAddress = code_size;
+    runtime_func.UnwindData = 0x1000;
+
+    unwind->Version = 1;
+    unwind->Flags = UNW_FLAG_EHANDLER;
+    unwind->SizeOfProlog = 0;
+    unwind->CountOfCodes = 0;
+    unwind->FrameRegister = 0;
+    unwind->FrameOffset = 0;
+    *(ULONG *)&buf[4] = 0x1010;
+    *(const void **)&buf[8] = context;
+
+    /* jmp near */
+    buf[16] = 0xff;
+    buf[17] = 0x25;
+    *(ULONG *)&buf[18] = 0;
+    *(void **)&buf[22] = handler;
+
+    memcpy((unsigned char *)code_mem + 0x1000, buf, sizeof(buf));
+    memcpy(code_mem, code, code_size);
+    if(access)
+        VirtualProtect(code_mem, code_size, access, &oldaccess);
+
+    pRtlAddFunctionTable(&runtime_func, 1, (ULONG_PTR)code_mem);
+    func();
+    pRtlDeleteFunctionTable(&runtime_func);
+
+    if(access)
+        VirtualProtect(code_mem, code_size, oldaccess, &oldaccess2);
+}
+
+static DWORD WINAPI handler( EXCEPTION_RECORD *rec, ULONG64 frame,
+                      CONTEXT *context, DISPATCHER_CONTEXT *dispatcher )
+{
+    const struct exception *except = *(const struct exception **)(dispatcher->HandlerData);
+    unsigned int i, parameter_count, entry = except - exceptions;
+
+    got_exception++;
+    trace( "exception %u: %x flags:%x addr:%p\n",
+           entry, rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress );
+
+    ok( rec->ExceptionCode == except->status ||
+        (except->alt_status != 0 && rec->ExceptionCode == except->alt_status),
+        "%u: Wrong exception code %x/%x\n", entry, rec->ExceptionCode, except->status );
+    ok( context->Rip == (DWORD_PTR)code_mem + except->offset,
+        "%u: Unexpected eip %#lx/%#lx\n", entry,
+        context->Rip, (DWORD_PTR)code_mem + except->offset );
+    ok( rec->ExceptionAddress == (char*)context->Rip ||
+        (rec->ExceptionCode == STATUS_BREAKPOINT && rec->ExceptionAddress == (char*)context->Rip + 1),
+        "%u: Unexpected exception address %p/%p\n", entry,
+        rec->ExceptionAddress, (char*)context->Rip );
+
+    if (except->status == STATUS_BREAKPOINT && is_wow64)
+        parameter_count = 1;
+    else if (except->alt_status == 0 || rec->ExceptionCode != except->alt_status)
+        parameter_count = except->nb_params;
+    else
+        parameter_count = except->alt_nb_params;
+
+    ok( rec->NumberParameters == parameter_count,
+        "%u: Unexpected parameter count %u/%u\n", entry, rec->NumberParameters, parameter_count );
+
+    /* Most CPUs (except Intel Core apparently) report a segment limit violation */
+    /* instead of page faults for accesses beyond 0xffffffffffffffff */
+    if (except->nb_params == 2 && except->params[1] >= 0xfffffffffffffffd)
+    {
+        if (rec->ExceptionInformation[0] == 0 && rec->ExceptionInformation[1] == 0xffffffffffffffff)
+            goto skip_params;
+    }
+
+    /* Seems that both 0xbee8 and 0xfffffffffffffffff can be returned in windows */
+    if (except->nb_params == 2 && rec->NumberParameters == 2
+        && except->params[1] == 0xbee8 && rec->ExceptionInformation[1] == 0xffffffffffffffff
+        && except->params[0] == rec->ExceptionInformation[0])
+    {
+        goto skip_params;
+    }
+
+    if (except->alt_status == 0 || rec->ExceptionCode != except->alt_status)
+    {
+        for (i = 0; i < rec->NumberParameters; i++)
+            ok( rec->ExceptionInformation[i] == except->params[i],
+                "%u: Wrong parameter %d: %lx/%lx\n",
+                entry, i, rec->ExceptionInformation[i], except->params[i] );
+    }
+    else
+    {
+        for (i = 0; i < rec->NumberParameters; i++)
+            ok( rec->ExceptionInformation[i] == except->alt_params[i],
+                "%u: Wrong parameter %d: %lx/%lx\n",
+                entry, i, rec->ExceptionInformation[i], except->alt_params[i] );
+    }
+
+skip_params:
+    /* don't handle exception if it's not the address we expected */
+    if (context->Rip != (DWORD_PTR)code_mem + except->offset) return ExceptionContinueSearch;
+
+    context->Rip += except->length;
+    return ExceptionContinueExecution;
+}
+
+static void test_prot_fault(void)
+{
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(exceptions); i++)
+    {
+        got_exception = 0;
+        run_exception_test(handler, &exceptions[i], &exceptions[i].code,
+                           sizeof(exceptions[i].code), 0);
+        ok( got_exception == (exceptions[i].status != 0),
+            "%u: bad exception count %d\n", i, got_exception );
+    }
+}
+
+static LONG CALLBACK dpe_handler(EXCEPTION_POINTERS *info)
+{
+    EXCEPTION_RECORD *rec = info->ExceptionRecord;
+    DWORD old_prot;
+
+    trace("vect. handler %08x addr:%p\n", rec->ExceptionCode, rec->ExceptionAddress);
+
+    got_exception++;
+
+    ok(rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION,
+        "got %#x\n", rec->ExceptionCode);
+    ok(rec->NumberParameters == 2, "got %u params\n", rec->NumberParameters);
+    ok(rec->ExceptionInformation[0] == EXCEPTION_EXECUTE_FAULT,
+        "got %#lx\n", rec->ExceptionInformation[0]);
+    ok((void *)rec->ExceptionInformation[1] == code_mem,
+        "got %p\n", (void *)rec->ExceptionInformation[1]);
+
+    VirtualProtect(code_mem, 1, PAGE_EXECUTE_READWRITE, &old_prot);
+
+    return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+static void test_dpe_exceptions(void)
+{
+    static const BYTE ret[] = {0xc3};
+    DWORD (CDECL *func)(void) = code_mem;
+    DWORD old_prot;
+    void *handler;
+
+    memcpy(code_mem, ret, sizeof(ret));
+
+    handler = pRtlAddVectoredExceptionHandler(TRUE, &dpe_handler);
+    ok(!!handler, "RtlAddVectoredExceptionHandler failed\n");
+
+    VirtualProtect(code_mem, 1, PAGE_NOACCESS, &old_prot);
+
+    got_exception = 0;
+    func();
+    ok(got_exception == 1, "got %u exceptions\n", got_exception);
+
+    VirtualProtect(code_mem, 1, old_prot, &old_prot);
+
+    VirtualProtect(code_mem, 1, PAGE_READWRITE, &old_prot);
+
+    got_exception = 0;
+    func();
+    ok(got_exception == 1, "got %u exceptions\n", got_exception);
+
+    VirtualProtect(code_mem, 1, old_prot, &old_prot);
+
+    pRtlRemoveVectoredExceptionHandler(handler);
+}
+
+static void test_wow64_context(void)
+{
+    char cmdline[] = "C:\\windows\\syswow64\\notepad.exe";
+    PROCESS_INFORMATION pi;
+    STARTUPINFOA si = {0};
+    WOW64_CONTEXT ctx;
+    NTSTATUS ret;
+
+    memset(&ctx, 0x55, sizeof(ctx));
+    ctx.ContextFlags = WOW64_CONTEXT_ALL;
+    ret = pRtlWow64GetThreadContext( GetCurrentThread(), &ctx );
+    ok(ret == STATUS_INVALID_PARAMETER || broken(ret == STATUS_PARTIAL_COPY), "got %#x\n", ret);
+
+    CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
+
+    ret = pRtlWow64GetThreadContext( pi.hThread, &ctx );
+    ok(ret == STATUS_SUCCESS, "got %#x\n", ret);
+    ok(ctx.ContextFlags == WOW64_CONTEXT_ALL, "got context flags %#x\n", ctx.ContextFlags);
+    ok(!ctx.Ebp, "got ebp %08x\n", ctx.Ebp);
+    ok(!ctx.Ecx, "got ecx %08x\n", ctx.Ecx);
+    ok(!ctx.Edx, "got edx %08x\n", ctx.Edx);
+    ok(!ctx.Esi, "got esi %08x\n", ctx.Esi);
+    ok(!ctx.Edi, "got edi %08x\n", ctx.Edi);
+    ok((ctx.EFlags & ~2) == 0x200, "got eflags %08x\n", ctx.EFlags);
+    ok((WORD) ctx.FloatSave.ControlWord == 0x27f, "got control word %08x\n",
+        ctx.FloatSave.ControlWord);
+    ok(*(WORD *)ctx.ExtendedRegisters == 0x27f, "got SSE control word %04x\n",
+       *(WORD *)ctx.ExtendedRegisters);
+
+    ret = pRtlWow64SetThreadContext( pi.hThread, &ctx );
+    ok(ret == STATUS_SUCCESS, "got %#x\n", ret);
+
+    pNtTerminateProcess(pi.hProcess, 0);
+}
+
 #endif  /* __x86_64__ */
 
 #if defined(__i386__) || defined(__x86_64__)
 
-static DWORD WINAPI dummy_thread(void *arg)
+static DWORD WINAPI register_check_thread(void *arg)
 {
+    NTSTATUS status;
+    CONTEXT ctx;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+
+    status = pNtGetContextThread(GetCurrentThread(), &ctx);
+    ok(status == STATUS_SUCCESS, "NtGetContextThread failed with %x\n", status);
+    ok(!ctx.Dr0, "expected 0, got %lx\n", (DWORD_PTR)ctx.Dr0);
+    ok(!ctx.Dr1, "expected 0, got %lx\n", (DWORD_PTR)ctx.Dr1);
+    ok(!ctx.Dr2, "expected 0, got %lx\n", (DWORD_PTR)ctx.Dr2);
+    ok(!ctx.Dr3, "expected 0, got %lx\n", (DWORD_PTR)ctx.Dr3);
+    ok(!ctx.Dr6, "expected 0, got %lx\n", (DWORD_PTR)ctx.Dr6);
+    ok(!ctx.Dr7, "expected 0, got %lx\n", (DWORD_PTR)ctx.Dr7);
+
     return 0;
 }
 
@@ -2012,7 +2567,7 @@ static void test_debug_registers(void)
     HANDLE thread;
     int i;
 
-    for (i = 0; i < sizeof(tests)/sizeof(tests[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
     {
         memset(&ctx, 0, sizeof(ctx));
         ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
@@ -2049,8 +2604,10 @@ static void test_debug_registers(void)
     ctx.Dr7 = 0x00000400;
     status = pNtSetContextThread(GetCurrentThread(), &ctx);
     ok(status == STATUS_SUCCESS, "NtSetContextThread failed with %x\n", status);
-    thread = CreateThread(NULL, 0, dummy_thread, NULL, CREATE_SUSPENDED, NULL);
+
+    thread = CreateThread(NULL, 0, register_check_thread, NULL, CREATE_SUSPENDED, NULL);
     ok(thread != INVALID_HANDLE_VALUE, "CreateThread failed with %d\n", GetLastError());
+
     ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
     status = pNtGetContextThread(thread, &ctx);
     ok(status == STATUS_SUCCESS, "NtGetContextThread failed with %x\n", status);
@@ -2058,9 +2615,11 @@ static void test_debug_registers(void)
     ok(!ctx.Dr1, "expected 0, got %lx\n", (DWORD_PTR)ctx.Dr1);
     ok(!ctx.Dr2, "expected 0, got %lx\n", (DWORD_PTR)ctx.Dr2);
     ok(!ctx.Dr3, "expected 0, got %lx\n", (DWORD_PTR)ctx.Dr3);
-    todo_wine ok(!ctx.Dr6, "expected 0, got %lx\n", (DWORD_PTR)ctx.Dr6);
-    todo_wine ok(!ctx.Dr7, "expected 0, got %lx\n", (DWORD_PTR)ctx.Dr7);
-    TerminateThread(thread, 0);
+    ok(!ctx.Dr6, "expected 0, got %lx\n", (DWORD_PTR)ctx.Dr6);
+    ok(!ctx.Dr7, "expected 0, got %lx\n", (DWORD_PTR)ctx.Dr7);
+
+    ResumeThread(thread);
+    WaitForSingleObject(thread, 10000);
     CloseHandle(thread);
 }
 
@@ -2384,6 +2943,54 @@ static void test_breakpoint(DWORD numexc)
     pRtlRemoveVectoredExceptionHandler(vectored_handler);
 }
 
+static DWORD invalid_handle_exceptions;
+
+static LONG CALLBACK invalid_handle_vectored_handler(EXCEPTION_POINTERS *ExceptionInfo)
+{
+    PEXCEPTION_RECORD rec = ExceptionInfo->ExceptionRecord;
+    trace("vect. handler %08x addr:%p\n", rec->ExceptionCode, rec->ExceptionAddress);
+
+    ok(rec->ExceptionCode == EXCEPTION_INVALID_HANDLE, "ExceptionCode is %08x instead of %08x\n",
+       rec->ExceptionCode, EXCEPTION_INVALID_HANDLE);
+    ok(rec->NumberParameters == 0, "ExceptionParameters is %d instead of 0\n", rec->NumberParameters);
+
+    invalid_handle_exceptions++;
+    return (rec->ExceptionCode == EXCEPTION_INVALID_HANDLE) ? EXCEPTION_CONTINUE_EXECUTION : EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void test_closehandle(DWORD numexc, HANDLE handle)
+{
+    PVOID vectored_handler;
+    NTSTATUS status;
+    DWORD res;
+
+    if (!pRtlAddVectoredExceptionHandler || !pRtlRemoveVectoredExceptionHandler || !pRtlRaiseException)
+    {
+        skip("RtlAddVectoredExceptionHandler or RtlRemoveVectoredExceptionHandler or RtlRaiseException not found\n");
+        return;
+    }
+
+    vectored_handler = pRtlAddVectoredExceptionHandler(TRUE, &invalid_handle_vectored_handler);
+    ok(vectored_handler != 0, "RtlAddVectoredExceptionHandler failed\n");
+
+    invalid_handle_exceptions = 0;
+    res = CloseHandle(handle);
+
+    ok(!res || (is_wow64 && res), "CloseHandle(%p) unexpectedly succeeded\n", handle);
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "wrong error code %d instead of %d\n",
+       GetLastError(), ERROR_INVALID_HANDLE);
+    ok(invalid_handle_exceptions == numexc, "CloseHandle generated %d exceptions, expected %d\n",
+       invalid_handle_exceptions, numexc);
+
+    invalid_handle_exceptions = 0;
+    status = pNtClose(handle);
+    ok(status == STATUS_INVALID_HANDLE || (is_wow64 && status == 0), "NtClose(%p) returned status %08x\n", handle, status);
+    ok(invalid_handle_exceptions == numexc, "NtClose generated %d exceptions, expected %d\n",
+       invalid_handle_exceptions, numexc);
+
+    pRtlRemoveVectoredExceptionHandler(vectored_handler);
+}
+
 static void test_vectored_continue_handler(void)
 {
     PVOID handler1, handler2;
@@ -2438,8 +3045,10 @@ START_TEST(exception)
     pNtGetContextThread  = (void *)GetProcAddress( hntdll, "NtGetContextThread" );
     pNtSetContextThread  = (void *)GetProcAddress( hntdll, "NtSetContextThread" );
     pNtReadVirtualMemory = (void *)GetProcAddress( hntdll, "NtReadVirtualMemory" );
+    pNtClose             = (void *)GetProcAddress( hntdll, "NtClose" );
     pRtlUnwind           = (void *)GetProcAddress( hntdll, "RtlUnwind" );
     pRtlRaiseException   = (void *)GetProcAddress( hntdll, "RtlRaiseException" );
+    pRtlCaptureContext   = (void *)GetProcAddress( hntdll, "RtlCaptureContext" );
     pNtTerminateProcess  = (void *)GetProcAddress( hntdll, "NtTerminateProcess" );
     pRtlAddVectoredExceptionHandler    = (void *)GetProcAddress( hntdll,
                                                                  "RtlAddVectoredExceptionHandler" );
@@ -2508,6 +3117,12 @@ START_TEST(exception)
             test_breakpoint(0);
             test_stage = 10;
             test_breakpoint(1);
+            test_stage = 11;
+            test_closehandle(0, (HANDLE)0xdeadbeef);
+            test_stage = 12;
+            test_closehandle(1, (HANDLE)0xdeadbeef);
+            test_stage = 13;
+            test_closehandle(0, 0); /* Special case. */
         }
         else
             skip( "RtlRaiseException not found\n" );
@@ -2524,12 +3139,14 @@ START_TEST(exception)
     test_ripevent(1);
     test_debug_service(1);
     test_breakpoint(1);
+    test_closehandle(0, (HANDLE)0xdeadbeef);
     test_vectored_continue_handler();
     test_debugger();
     test_simd_exceptions();
     test_fpu_exceptions();
     test_dpe_exceptions();
     test_prot_fault();
+    test_thread_context();
 
 #elif defined(__x86_64__)
     pRtlAddFunctionTable               = (void *)GetProcAddress( hntdll,
@@ -2548,6 +3165,10 @@ START_TEST(exception)
                                                                  "RtlRestoreContext" );
     pRtlUnwindEx                       = (void *)GetProcAddress( hntdll,
                                                                  "RtlUnwindEx" );
+    pRtlWow64GetThreadContext          = (void *)GetProcAddress( hntdll,
+                                                                 "RtlWow64GetThreadContext" );
+    pRtlWow64SetThreadContext          = (void *)GetProcAddress( hntdll,
+                                                                 "RtlWow64SetThreadContext" );
     p_setjmp                           = (void *)GetProcAddress( hmsvcrt,
                                                                  "_setjmp" );
 
@@ -2556,10 +3177,14 @@ START_TEST(exception)
     test_ripevent(1);
     test_debug_service(1);
     test_breakpoint(1);
+    test_closehandle(0, (HANDLE)0xdeadbeef);
     test_vectored_continue_handler();
     test_virtual_unwind();
     test___C_specific_handler();
     test_restore_context();
+    test_prot_fault();
+    test_dpe_exceptions();
+    test_wow64_context();
 
     if (pRtlAddFunctionTable && pRtlDeleteFunctionTable && pRtlInstallFunctionTableCallback && pRtlLookupFunctionEntry)
       test_dynamic_unwind();

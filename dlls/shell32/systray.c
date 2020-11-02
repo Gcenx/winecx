@@ -36,8 +36,10 @@
 #include "winnls.h"
 #include "winuser.h"
 #include "shellapi.h"
+#include "shell32_main.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(systray);
 
@@ -99,7 +101,7 @@ BOOL WINAPI Shell_NotifyIconA(DWORD dwMessage, PNOTIFYICONDATAA pnid)
 
     /* szTip */
     if (pnid->uFlags & NIF_TIP)
-        MultiByteToWideChar(CP_ACP, 0, pnid->szTip, -1, nidW.szTip, sizeof(nidW.szTip)/sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, pnid->szTip, -1, nidW.szTip, ARRAY_SIZE(nidW.szTip));
 
     if (cbSize >= NOTIFYICONDATAA_V2_SIZE)
     {
@@ -109,8 +111,8 @@ BOOL WINAPI Shell_NotifyIconA(DWORD dwMessage, PNOTIFYICONDATAA pnid)
         /* szInfo, szInfoTitle */
         if (pnid->uFlags & NIF_INFO)
         {
-            MultiByteToWideChar(CP_ACP, 0, pnid->szInfo, -1,  nidW.szInfo, sizeof(nidW.szInfo)/sizeof(WCHAR));
-            MultiByteToWideChar(CP_ACP, 0, pnid->szInfoTitle, -1, nidW.szInfoTitle, sizeof(nidW.szInfoTitle)/sizeof(WCHAR));
+            MultiByteToWideChar(CP_ACP, 0, pnid->szInfo, -1,  nidW.szInfo, ARRAY_SIZE(nidW.szInfo));
+            MultiByteToWideChar(CP_ACP, 0, pnid->szInfoTitle, -1, nidW.szInfoTitle, ARRAY_SIZE(nidW.szInfoTitle));
         }
 
         nidW.u.uTimeout = pnid->u.uTimeout;
@@ -187,7 +189,7 @@ BOOL WINAPI Shell_NotifyIconW(DWORD dwMessage, PNOTIFYICONDATAW nid)
         if (iconinfo.hbmColor)
             cbColourBits = (bmColour.bmPlanes * bmColour.bmWidth * bmColour.bmHeight * bmColour.bmBitsPixel + 15) / 16 * 2;
         cds.cbData = sizeof(*data) + cbMaskBits + cbColourBits;
-        buffer = HeapAlloc(GetProcessHeap(), 0, cds.cbData);
+        buffer = heap_alloc(cds.cbData);
         if (!buffer)
         {
             DeleteObject(iconinfo.hbmMask);
@@ -226,7 +228,7 @@ noicon:
     if (data->uFlags & NIF_MESSAGE)
         data->uCallbackMessage = nid->uCallbackMessage;
     if (data->uFlags & NIF_TIP)
-        lstrcpynW( data->szTip, nid->szTip, sizeof(data->szTip)/sizeof(WCHAR) );
+        lstrcpynW( data->szTip, nid->szTip, ARRAY_SIZE(data->szTip));
     if (data->uFlags & NIF_STATE)
     {
         data->dwState     = nid->dwState;
@@ -234,8 +236,8 @@ noicon:
     }
     if (data->uFlags & NIF_INFO)
     {
-        lstrcpynW( data->szInfo, nid->szInfo, sizeof(data->szInfo)/sizeof(WCHAR) );
-        lstrcpynW( data->szInfoTitle, nid->szInfoTitle, sizeof(data->szInfoTitle)/sizeof(WCHAR) );
+        lstrcpynW( data->szInfo, nid->szInfo, ARRAY_SIZE(data->szInfo) );
+        lstrcpynW( data->szInfoTitle, nid->szInfoTitle, ARRAY_SIZE(data->szInfoTitle));
         data->u.uTimeout  = nid->u.uTimeout;
         data->dwInfoFlags = nid->dwInfoFlags;
     }
@@ -276,6 +278,15 @@ noicon:
         close(sock);
     }
 
-    if (data != &data_buffer) HeapFree( GetProcessHeap(), 0, data );
+    if (data != &data_buffer) heap_free( data );
     return ret;
+}
+
+/*************************************************************************
+ * Shell_NotifyIconGetRect		[SHELL32.@]
+ */
+HRESULT WINAPI Shell_NotifyIconGetRect(const NOTIFYICONIDENTIFIER* identifier, RECT* icon_location)
+{
+    FIXME("stub (%p) (%p)\n", identifier, icon_location);
+    return E_NOTIMPL;
 }

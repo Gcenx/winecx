@@ -41,7 +41,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
 
+#if _MSVCR_VER>=70 && _MSVCR_VER<=71
 static MSVCRT_security_error_handler security_error_handler;
+#endif
 
 static MSVCRT___sighandler_t sighandlers[MSVCRT_NSIG] = { MSVCRT_SIG_DFL };
 
@@ -134,8 +136,7 @@ static LONG msvcrt_exception_filter(struct _EXCEPTION_POINTERS *except)
                 int float_signal = MSVCRT__FPE_INVALID;
 
                 sighandlers[MSVCRT_SIGFPE] = MSVCRT_SIG_DFL;
-                for (i = 0; i < sizeof(float_exception_map) /
-                         sizeof(float_exception_map[0]); i++)
+                for (i = 0; i < ARRAY_SIZE(float_exception_map); i++)
                 {
                     if (float_exception_map[i].status ==
                         except->ExceptionRecord->ExceptionCode)
@@ -291,8 +292,10 @@ int CDECL _abnormal_termination(void)
  */
 BOOL CDECL MSVCRT___uncaught_exception(void)
 {
-    return FALSE;
+    return msvcrt_get_thread_data()->processing_throw != 0;
 }
+
+#if _MSVCR_VER>=70 && _MSVCR_VER<=71
 
 /*********************************************************************
  *		_set_security_error_handler (MSVCR70.@)
@@ -321,6 +324,9 @@ void CDECL __security_error_handler(int code, void *data)
     MSVCRT__exit(3);
 }
 
+#endif /* _MSVCR_VER>=70 && _MSVCR_VER<=71 */
+
+#if _MSVCR_VER>=110
 /*********************************************************************
  *  __crtSetUnhandledExceptionFilter (MSVCR110.@)
  */
@@ -328,6 +334,7 @@ LPTOP_LEVEL_EXCEPTION_FILTER CDECL MSVCR110__crtSetUnhandledExceptionFilter(LPTO
 {
     return SetUnhandledExceptionFilter(filter);
 }
+#endif
 
 /*********************************************************************
  * _CreateFrameInfo (MSVCR80.@)
@@ -424,23 +431,24 @@ void CDECL __DestructExceptionObject(EXCEPTION_RECORD *rec)
 /*********************************************************************
  *  __CxxRegisterExceptionObject (MSVCRT.@)
  */
-BOOL CDECL __CxxRegisterExceptionObject(EXCEPTION_RECORD **rec, cxx_frame_info *frame_info)
+BOOL CDECL __CxxRegisterExceptionObject(EXCEPTION_POINTERS *ep, cxx_frame_info *frame_info)
 {
     thread_data_t *data = msvcrt_get_thread_data();
 
-    TRACE("(%p, %p)\n", rec, frame_info);
+    TRACE("(%p, %p)\n", ep, frame_info);
 
-    if (!rec || !*rec)
+    if (!ep || !ep->ExceptionRecord)
     {
         frame_info->rec = (void*)-1;
-        frame_info->unk = (void*)-1;
+        frame_info->context = (void*)-1;
         return TRUE;
     }
 
     frame_info->rec = data->exc_record;
-    frame_info->unk = 0;
-    data->exc_record = *rec;
-    _CreateFrameInfo(&frame_info->frame_info, (void*)(*rec)->ExceptionInformation[1]);
+    frame_info->context = data->ctx_record;
+    data->exc_record = ep->ExceptionRecord;
+    data->ctx_record = ep->ContextRecord;
+    _CreateFrameInfo(&frame_info->frame_info, (void*)ep->ExceptionRecord->ExceptionInformation[1]);
     return TRUE;
 }
 
@@ -461,6 +469,7 @@ void CDECL __CxxUnregisterExceptionObject(cxx_frame_info *frame_info, BOOL in_us
             && _IsExceptionObjectToBeDestroyed((void*)data->exc_record->ExceptionInformation[1]))
         __DestructExceptionObject(data->exc_record);
     data->exc_record = frame_info->rec;
+    data->ctx_record = frame_info->context;
 }
 
 struct __std_exception_data {
@@ -468,8 +477,10 @@ struct __std_exception_data {
     MSVCRT_bool dofree;
 };
 
+#if _MSVCR_VER>=140
+
 /*********************************************************************
- *  __std_exception_copy (MSVCRT.@)
+ *  __std_exception_copy (UCRTBASE.@)
  */
 void CDECL MSVCRT___std_exception_copy(const struct __std_exception_data *src,
                                        struct __std_exception_data *dst)
@@ -486,7 +497,7 @@ void CDECL MSVCRT___std_exception_copy(const struct __std_exception_data *src,
 }
 
 /*********************************************************************
- *  __std_exception_destroy (MSVCRT.@)
+ *  __std_exception_destroy (UCRTBASE.@)
  */
 void CDECL MSVCRT___std_exception_destroy(struct __std_exception_data *data)
 {
@@ -498,7 +509,6 @@ void CDECL MSVCRT___std_exception_destroy(struct __std_exception_data *data)
     data->dofree = 0;
 }
 
-#if _MSVCR_VER>=140
 /*********************************************************************
  *  __current_exception (UCRTBASE.@)
  */
@@ -506,6 +516,24 @@ void** CDECL __current_exception(void)
 {
     TRACE("()\n");
     return (void**)&msvcrt_get_thread_data()->exc_record;
+}
+
+/*********************************************************************
+ *  __current_exception_context (UCRTBASE.@)
+ */
+void** CDECL __current_exception_context(void)
+{
+    TRACE("()\n");
+    return (void**)&msvcrt_get_thread_data()->ctx_record;
+}
+
+/*********************************************************************
+ *  __processing_throw (UCRTBASE.@)
+ */
+int* CDECL __processing_throw(void)
+{
+    TRACE("()\n");
+    return &msvcrt_get_thread_data()->processing_throw;
 }
 
 #endif /* _MSVCR_VER>=140 */

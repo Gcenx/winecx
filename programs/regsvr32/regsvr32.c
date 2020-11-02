@@ -40,7 +40,7 @@ typedef HRESULT (WINAPI *DLLINSTALL)    (BOOL,LPCWSTR);
 
 static BOOL Silent = FALSE;
 
-static void __cdecl output_write(UINT id, ...)
+static void WINAPIV output_write(UINT id, ...)
 {
     WCHAR fmt[1024];
     __ms_va_list va_args;
@@ -49,7 +49,7 @@ static void __cdecl output_write(UINT id, ...)
 
     if (Silent) return;
 
-    if (!LoadStringW(GetModuleHandleW(NULL), id, fmt, sizeof(fmt)/sizeof(fmt[0])))
+    if (!LoadStringW(GetModuleHandleW(NULL), id, fmt, ARRAY_SIZE(fmt)))
     {
         WINE_FIXME("LoadString failed with %d\n", GetLastError());
         return;

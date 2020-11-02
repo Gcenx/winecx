@@ -131,7 +131,8 @@ static HRESULT WINAPI HTMLImgElement_get_isMap(IHTMLImgElement *iface, VARIANT_B
         ERR("Get IsMap failed: %08x\n", nsres);
         return E_FAIL;
     }
-    *p = b ? VARIANT_TRUE : VARIANT_FALSE;
+
+    *p = variant_bool(b);
     return S_OK;
 }
 
@@ -311,7 +312,7 @@ static HRESULT WINAPI HTMLImgElement_get_src(IHTMLImgElement *iface, BSTR *p)
     if(NS_SUCCEEDED(nsres)) {
         nsAString_GetData(&src_str, &src);
 
-        if(!strncmpiW(src, blockedW, sizeof(blockedW)/sizeof(WCHAR)-1)) {
+        if(!strncmpiW(src, blockedW, ARRAY_SIZE(blockedW)-1)) {
             TRACE("returning BLOCKED::\n");
             *p = SysAllocString(blockedW);
             if(!*p)
@@ -391,7 +392,7 @@ static HRESULT WINAPI HTMLImgElement_get_complete(IHTMLImgElement *iface, VARIAN
         return E_FAIL;
     }
 
-    *p = complete ? VARIANT_TRUE : VARIANT_FALSE;
+    *p = variant_bool(complete);
     return S_OK;
 }
 
@@ -718,7 +719,6 @@ static const NodeImplVtbl HTMLImgElementImplVtbl = {
     NULL,
     NULL,
     NULL,
-    NULL,
     HTMLImgElement_get_readystate,
     NULL,
     NULL,
@@ -739,7 +739,7 @@ static dispex_static_data_t HTMLImgElement_dispex = {
     HTMLElement_init_dispex_info
 };
 
-HRESULT HTMLImgElement_Create(HTMLDocumentNode *doc, nsIDOMHTMLElement *nselem, HTMLElement **elem)
+HRESULT HTMLImgElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTMLElement **elem)
 {
     HTMLImg *ret;
     nsresult nsres;
@@ -753,7 +753,7 @@ HRESULT HTMLImgElement_Create(HTMLDocumentNode *doc, nsIDOMHTMLElement *nselem, 
 
     HTMLElement_Init(&ret->element, doc, nselem, &HTMLImgElement_dispex);
 
-    nsres = nsIDOMHTMLElement_QueryInterface(nselem, &IID_nsIDOMHTMLImageElement, (void**)&ret->nsimg);
+    nsres = nsIDOMElement_QueryInterface(nselem, &IID_nsIDOMHTMLImageElement, (void**)&ret->nsimg);
     assert(nsres == NS_OK);
 
     *elem = &ret->element;
@@ -874,7 +874,7 @@ static HRESULT WINAPI HTMLImageElementFactory_create(IHTMLImageElementFactory *i
     HTMLDocumentNode *doc;
     IHTMLImgElement *img;
     HTMLElement *elem;
-    nsIDOMHTMLElement *nselem;
+    nsIDOMElement *nselem;
     LONG l;
     HRESULT hres;
 
@@ -897,7 +897,7 @@ static HRESULT WINAPI HTMLImageElementFactory_create(IHTMLImageElementFactory *i
         return hres;
 
     hres = HTMLElement_Create(doc, (nsIDOMNode*)nselem, FALSE, &elem);
-    nsIDOMHTMLElement_Release(nselem);
+    nsIDOMElement_Release(nselem);
     if(FAILED(hres)) {
         ERR("HTMLElement_Create failed\n");
         return hres;

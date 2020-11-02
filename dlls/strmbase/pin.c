@@ -145,10 +145,7 @@ out:
 
 static void Copy_PinInfo(PIN_INFO * pDest, const PIN_INFO * pSrc)
 {
-    /* Tempting to just do a memcpy, but the name field is
-       128 characters long! We will probably never exceed 10
-       most of the time, so we are better off copying
-       each field manually */
+    /* avoid copying uninitialized data */
     strcpyW(pDest->achName, pSrc->achName);
     pDest->dir = pSrc->dir;
     pDest->pFilter = pSrc->pFilter;
@@ -199,7 +196,7 @@ HRESULT WINAPI BasePinImpl_Disconnect(IPin * iface)
     HRESULT hr;
     BasePin *This = impl_from_IPin(iface);
 
-    TRACE("()\n");
+    TRACE("(%p)->()\n", This);
 
     EnterCriticalSection(This->pCritSec);
     {
@@ -224,7 +221,7 @@ HRESULT WINAPI BasePinImpl_ConnectedTo(IPin * iface, IPin ** ppPin)
     HRESULT hr;
     BasePin *This = impl_from_IPin(iface);
 
-    TRACE("(%p)\n", ppPin);
+    TRACE("(%p)->(%p)\n", This, ppPin);
 
     EnterCriticalSection(This->pCritSec);
     {
@@ -250,7 +247,7 @@ HRESULT WINAPI BasePinImpl_ConnectionMediaType(IPin * iface, AM_MEDIA_TYPE * pmt
     HRESULT hr;
     BasePin *This = impl_from_IPin(iface);
 
-    TRACE("(%p/%p)->(%p)\n", This, iface, pmt);
+    TRACE("(%p)->(%p)\n", This, pmt);
 
     EnterCriticalSection(This->pCritSec);
     {
@@ -274,7 +271,7 @@ HRESULT WINAPI BasePinImpl_QueryPinInfo(IPin * iface, PIN_INFO * pInfo)
 {
     BasePin *This = impl_from_IPin(iface);
 
-    TRACE("(%p/%p)->(%p)\n", This, iface, pInfo);
+    TRACE("(%p)->(%p)\n", This, pInfo);
 
     Copy_PinInfo(pInfo, &This->pinInfo);
     IBaseFilter_AddRef(pInfo->pFilter);
@@ -286,7 +283,7 @@ HRESULT WINAPI BasePinImpl_QueryDirection(IPin * iface, PIN_DIRECTION * pPinDir)
 {
     BasePin *This = impl_from_IPin(iface);
 
-    TRACE("(%p/%p)->(%p)\n", This, iface, pPinDir);
+    TRACE("(%p)->(%p)\n", This, pPinDir);
 
     *pPinDir = This->pinInfo.dir;
 
@@ -297,7 +294,7 @@ HRESULT WINAPI BasePinImpl_QueryId(IPin * iface, LPWSTR * Id)
 {
     BasePin *This = impl_from_IPin(iface);
 
-    TRACE("(%p/%p)->(%p)\n", This, iface, Id);
+    TRACE("(%p)->(%p)\n", This, Id);
 
     *Id = CoTaskMemAlloc((strlenW(This->pinInfo.achName) + 1) * sizeof(WCHAR));
     if (!*Id)
@@ -310,16 +307,18 @@ HRESULT WINAPI BasePinImpl_QueryId(IPin * iface, LPWSTR * Id)
 
 HRESULT WINAPI BasePinImpl_QueryAccept(IPin * iface, const AM_MEDIA_TYPE * pmt)
 {
+    BasePin *This = impl_from_IPin(iface);
+
     TRACE("(%p)->(%p)\n", iface, pmt);
 
-    return S_OK;
+    return (This->pFuncsTable->pfnCheckMediaType(This, pmt) == S_OK ? S_OK : S_FALSE);
 }
 
 HRESULT WINAPI BasePinImpl_EnumMediaTypes(IPin * iface, IEnumMediaTypes ** ppEnum)
 {
     BasePin *This = impl_from_IPin(iface);
 
-    TRACE("(%p/%p)->(%p)\n", This, iface, ppEnum);
+    TRACE("(%p)->(%p)\n", This, ppEnum);
 
     /* override this method to allow enumeration of your types */
 
@@ -330,7 +329,7 @@ HRESULT WINAPI BasePinImpl_QueryInternalConnections(IPin * iface, IPin ** apPin,
 {
     BasePin *This = impl_from_IPin(iface);
 
-    TRACE("(%p/%p)->(%p, %p)\n", This, iface, apPin, cPin);
+    TRACE("(%p)->(%p, %p)\n", This, apPin, cPin);
 
     return E_NOTIMPL; /* to tell caller that all input pins connected to all output pins */
 }
@@ -339,7 +338,7 @@ HRESULT WINAPI BasePinImpl_NewSegment(IPin * iface, REFERENCE_TIME tStart, REFER
 {
     BasePin *This = impl_from_IPin(iface);
 
-    TRACE("(%s, %s, %e)\n", wine_dbgstr_longlong(tStart), wine_dbgstr_longlong(tStop), dRate);
+    TRACE("(%p)->(%s, %s, %e)\n", This, wine_dbgstr_longlong(tStart), wine_dbgstr_longlong(tStop), dRate);
 
     This->tStart = tStart;
     This->tStop = tStop;
@@ -364,7 +363,7 @@ HRESULT WINAPI BaseOutputPinImpl_QueryInterface(IPin * iface, REFIID riid, LPVOI
 {
     BaseOutputPin *This = impl_BaseOutputPin_from_IPin(iface);
 
-    TRACE("(%p/%p)->(%s, %p)\n", This, iface, debugstr_guid(riid), ppv);
+    TRACE("(%p)->(%s, %p)\n", This, debugstr_guid(riid), ppv);
 
     *ppv = NULL;
 
@@ -407,7 +406,7 @@ HRESULT WINAPI BaseOutputPinImpl_Connect(IPin * iface, IPin * pReceivePin, const
     HRESULT hr;
     BaseOutputPin *This = impl_BaseOutputPin_from_IPin(iface);
 
-    TRACE("(%p/%p)->(%p, %p)\n", This, iface, pReceivePin, pmt);
+    TRACE("(%p)->(%p, %p)\n", This, pReceivePin, pmt);
     dump_AM_MEDIA_TYPE(pmt);
 
     if (!pReceivePin)
@@ -487,10 +486,9 @@ HRESULT WINAPI BaseOutputPinImpl_Connect(IPin * iface, IPin * pReceivePin, const
     return hr;
 }
 
-HRESULT WINAPI BaseOutputPinImpl_ReceiveConnection(IPin * iface, IPin * pReceivePin, const AM_MEDIA_TYPE * pmt)
+HRESULT WINAPI BaseOutputPinImpl_ReceiveConnection(IPin *iface, IPin *pin, const AM_MEDIA_TYPE *pmt)
 {
-    ERR("Incoming connection on an output pin! (%p, %p)\n", pReceivePin, pmt);
-
+    ERR("(%p)->(%p, %p) incoming connection on an output pin!\n", iface, pin, pmt);
     return E_UNEXPECTED;
 }
 
@@ -499,7 +497,7 @@ HRESULT WINAPI BaseOutputPinImpl_Disconnect(IPin * iface)
     HRESULT hr;
     BaseOutputPin *This = impl_BaseOutputPin_from_IPin(iface);
 
-    TRACE("()\n");
+    TRACE("(%p)->()\n", This);
 
     EnterCriticalSection(This->pin.pCritSec);
     {
@@ -526,7 +524,7 @@ HRESULT WINAPI BaseOutputPinImpl_Disconnect(IPin * iface)
 
 HRESULT WINAPI BaseOutputPinImpl_EndOfStream(IPin * iface)
 {
-    TRACE("()\n");
+    TRACE("(%p)->()\n", iface);
 
     /* not supposed to do anything in an output pin */
 
@@ -555,7 +553,7 @@ HRESULT WINAPI BaseOutputPinImpl_GetDeliveryBuffer(BaseOutputPin *This, IMediaSa
 {
     HRESULT hr;
 
-    TRACE("(%p, %p, %p, %x)\n", ppSample, tStart, tStop, dwFlags);
+    TRACE("(%p)->(%p, %p, %p, %x)\n", This, ppSample, tStart, tStop, dwFlags);
 
     if (!This->pin.pConnectedTo)
         hr = VFW_E_NOT_CONNECTED;
@@ -715,10 +713,11 @@ HRESULT WINAPI BaseOutputPinImpl_AttemptConnection(BasePin* iface, IPin * pRecei
     HRESULT hr;
     IMemAllocator * pMemAlloc = NULL;
 
-    TRACE("(%p, %p)\n", pReceivePin, pmt);
+    TRACE("(%p)->(%p, %p)\n", This, pReceivePin, pmt);
     dump_AM_MEDIA_TYPE(pmt);
 
-    /* FIXME: call queryacceptproc */
+    if ((hr = This->pFuncsTable->base.pfnCheckMediaType(&This->pin, pmt)) != S_OK)
+        return hr;
 
     This->pin.pConnectedTo = pReceivePin;
     IPin_AddRef(pReceivePin);
@@ -766,7 +765,7 @@ HRESULT WINAPI BaseOutputPinImpl_AttemptConnection(BasePin* iface, IPin * pRecei
 
 static HRESULT OutputPin_Init(const IPinVtbl *OutputPin_Vtbl, const PIN_INFO * pPinInfo, const BaseOutputPinFuncTable* vtbl,  LPCRITICAL_SECTION pCritSec, BaseOutputPin * pPinImpl)
 {
-    TRACE("\n");
+    TRACE("(%p)\n", pPinImpl);
 
     /* Common attributes */
     pPinImpl->pin.IPin_iface.lpVtbl = OutputPin_Vtbl;
@@ -878,10 +877,9 @@ ULONG WINAPI BaseInputPinImpl_Release(IPin * iface)
     return refCount;
 }
 
-HRESULT WINAPI BaseInputPinImpl_Connect(IPin * iface, IPin * pConnector, const AM_MEDIA_TYPE * pmt)
+HRESULT WINAPI BaseInputPinImpl_Connect(IPin *iface, IPin *pin, const AM_MEDIA_TYPE *pmt)
 {
-    ERR("Outgoing connection on an input pin! (%p, %p)\n", pConnector, pmt);
-
+    ERR("(%p)->(%p, %p) outgoing connection on an input pin!\n", iface, pin, pmt);
     return E_UNEXPECTED;
 }
 
@@ -892,7 +890,7 @@ HRESULT WINAPI BaseInputPinImpl_ReceiveConnection(IPin * iface, IPin * pReceiveP
     PIN_DIRECTION pindirReceive;
     HRESULT hr = S_OK;
 
-    TRACE("(%p, %p)\n", pReceivePin, pmt);
+    TRACE("(%p)->(%p, %p)\n", This, pReceivePin, pmt);
     dump_AM_MEDIA_TYPE(pmt);
 
     EnterCriticalSection(This->pin.pCritSec);
@@ -932,21 +930,12 @@ static HRESULT deliver_endofstream(IPin* pin, LPVOID unused)
     return IPin_EndOfStream( pin );
 }
 
-HRESULT WINAPI BaseInputPinImpl_QueryAccept(IPin * iface, const AM_MEDIA_TYPE * pmt)
-{
-    BaseInputPin *This = impl_BaseInputPin_from_IPin(iface);
-
-    TRACE("(%p/%p)->(%p)\n", This, iface, pmt);
-
-    return (This->pin.pFuncsTable->pfnCheckMediaType(&This->pin, pmt) == S_OK ? S_OK : S_FALSE);
-}
-
 HRESULT WINAPI BaseInputPinImpl_EndOfStream(IPin * iface)
 {
     HRESULT hr = S_OK;
     BaseInputPin *This = impl_BaseInputPin_from_IPin(iface);
 
-    TRACE("(%p)\n", This);
+    TRACE("(%p)->()\n", This);
 
     EnterCriticalSection(This->pin.pCritSec);
     if (This->flushing)
@@ -969,7 +958,7 @@ HRESULT WINAPI BaseInputPinImpl_BeginFlush(IPin * iface)
 {
     BaseInputPin *This = impl_BaseInputPin_from_IPin(iface);
     HRESULT hr;
-    TRACE("() semi-stub\n");
+    TRACE("(%p) semi-stub\n", This);
 
     EnterCriticalSection(This->pin.pCritSec);
     This->flushing = TRUE;
@@ -989,7 +978,7 @@ HRESULT WINAPI BaseInputPinImpl_EndFlush(IPin * iface)
 {
     BaseInputPin *This = impl_BaseInputPin_from_IPin(iface);
     HRESULT hr;
-    TRACE("(%p)\n", This);
+    TRACE("(%p)->()\n", This);
 
     EnterCriticalSection(This->pin.pCritSec);
     This->flushing = This->end_of_stream = FALSE;
@@ -1017,7 +1006,7 @@ HRESULT WINAPI BaseInputPinImpl_NewSegment(IPin * iface, REFERENCE_TIME tStart, 
     BaseInputPin *This = impl_BaseInputPin_from_IPin(iface);
     newsegmentargs args;
 
-    TRACE("(%s, %s, %e)\n", wine_dbgstr_longlong(tStart), wine_dbgstr_longlong(tStop), dRate);
+    TRACE("(%p)->(%s, %s, %e)\n", This, wine_dbgstr_longlong(tStart), wine_dbgstr_longlong(tStop), dRate);
 
     args.tStart = This->pin.tStart = tStart;
     args.tStop = This->pin.tStop = tStop;
@@ -1161,7 +1150,7 @@ static HRESULT InputPin_Init(const IPinVtbl *InputPin_Vtbl, const PIN_INFO * pPi
                              const BaseInputPinFuncTable* vtbl,
                              LPCRITICAL_SECTION pCritSec, IMemAllocator *allocator, BaseInputPin * pPinImpl)
 {
-    TRACE("\n");
+    TRACE("(%p)\n", pPinImpl);
 
     /* Common attributes */
     pPinImpl->pin.refCount = 1;

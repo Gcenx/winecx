@@ -248,6 +248,8 @@ static struct interface_filter generic_interface_filter = {
 };
 #endif /* LINUX_BOUND_IF */
 
+extern ssize_t CDECL __wine_locked_recvmsg( int fd, struct msghdr *hdr, int flags );
+
 /*
  * The actual definition of WSASendTo, wrapped in a different function name
  * so that internal calls from ws2_32 itself will not trigger programs like
@@ -640,7 +642,7 @@ static FARPROC blocking_hook = (FARPROC)WSA_DefaultBlockingHook;
 /* function prototypes */
 static struct WS_hostent *WS_create_he(char *name, int aliases, int aliases_size, int addresses, int address_length);
 static struct WS_hostent *WS_dup_he(const struct hostent* p_he);
-static struct WS_protoent *WS_dup_pe(const struct protoent* p_pe);
+static struct WS_protoent *WS_create_pe( const char *name, char **aliases, int prot );
 static struct WS_servent *WS_dup_se(const struct servent* p_se);
 static int ws_protocol_info(SOCKET s, int unicode, WSAPROTOCOL_INFOW *buffer, int *size);
 
@@ -2363,7 +2365,7 @@ static int WS2_recv( int fd, struct ws2_async *wsa, int flags )
     hdr.msg_flags = 0;
 #endif
 
-    while ((n = recvmsg(fd, &hdr, flags)) == -1)
+    while ((n = __wine_locked_recvmsg( fd, &hdr, flags )) == -1)
     {
         if (errno != EINTR)
             return -1;
@@ -3659,7 +3661,13 @@ static BOOL WINAPI WS2_ConnectEx(SOCKET s, const struct WS_sockaddr* name, int n
 
             /* If the connect already failed */
             if (status == STATUS_PIPE_DISCONNECTED)
-                status = _get_sock_error(s, FD_CONNECT_BIT);
+            {
+                ov->Internal = _get_sock_error(s, FD_CONNECT_BIT);
+                ov->InternalHigh = 0;
+                if (cvalue) WS_AddCompletion( s, cvalue, ov->Internal, ov->InternalHigh, FALSE );
+                if (ov->hEvent) NtSetEvent( ov->hEvent, NULL );
+                status = STATUS_PENDING;
+            }
             SetLastError( NtStatusToWSAError(status) );
         }
     }
@@ -4713,12 +4721,24 @@ INT WINAPI WSAIoctl(SOCKET s, DWORD code, LPVOID in_buff, DWORD in_size, LPVOID 
 
     case WS_FIONREAD:
     {
+#if defined(linux)
+        int listening = 0;
+        socklen_t len = sizeof(listening);
+#endif
         if (out_size != sizeof(WS_u_long) || IS_INTRESOURCE(out_buff))
         {
             SetLastError(WSAEFAULT);
             return SOCKET_ERROR;
         }
         if ((fd = get_sock_fd( s, 0, NULL )) == -1) return SOCKET_ERROR;
+
+#if defined(linux)
+        /* On Linux, FIONREAD on listening socket always fails (see tcp(7)).
+           However, it succeeds on native. */
+        if (!getsockopt( fd, SOL_SOCKET, SO_ACCEPTCONN, &listening, &len ) && listening)
+            (*(WS_u_long *) out_buff) = 0;
+        else
+#endif
         if (ioctl(fd, FIONREAD, out_buff ) == -1)
             status = wsaErrno();
         release_sock_fd( s, fd );
@@ -5952,6 +5972,22 @@ int WINAPI WS_setsockopt(SOCKET s, int level, int optname,
             break;
 #endif
 
+        case WS_SO_RANDOMIZE_PORT:
+            FIXME("Ignoring WS_SO_RANDOMIZE_PORT\n");
+            return 0;
+
+        case WS_SO_PORT_SCALABILITY:
+            FIXME("Ignoring WS_SO_PORT_SCALABILITY\n");
+            return 0;
+
+        case WS_SO_REUSE_UNICASTPORT:
+            FIXME("Ignoring WS_SO_REUSE_UNICASTPORT\n");
+            return 0;
+
+        case WS_SO_REUSE_MULTICASTPORT:
+            FIXME("Ignoring WS_SO_REUSE_MULTICASTPORT\n");
+            return 0;
+
         default:
             TRACE("Unknown SOL_SOCKET optname: 0x%08x\n", optname);
             SetLastError(WSAENOPROTOOPT);
@@ -6444,6 +6480,62 @@ struct WS_hostent* WINAPI WS_gethostbyname(const char* name)
 }
 
 
+static const struct { int prot; const char *names[3]; } protocols[] =
+{
+    {   0, { "ip", "IP" }},
+    {   1, { "icmp", "ICMP" }},
+    {   2, { "igmp", "IGMP" }},
+    {   3, { "ggp", "GGP" }},
+    {   6, { "tcp", "TCP" }},
+    {   8, { "egp", "EGP" }},
+    {   9, { "igp", "IGP" }},
+    {  12, { "pup", "PUP" }},
+    {  17, { "udp", "UDP" }},
+    {  20, { "hmp", "HMP" }},
+    {  22, { "xns-idp", "XNS-IDP" }},
+    {  27, { "rdp", "RDP" }},
+    {  29, { "iso-tp4", "ISO-TP4" }},
+    {  33, { "dccp", "DCCP" }},
+    {  36, { "xtp", "XTP" }},
+    {  37, { "ddp", "DDP" }},
+    {  38, { "idpr-cmtp", "IDPR-CMTP" }},
+    {  41, { "ipv6", "IPv6" }},
+    {  43, { "ipv6-route", "IPv6-Route" }},
+    {  44, { "ipv6-frag", "IPv6-Frag" }},
+    {  45, { "idrp", "IDRP" }},
+    {  46, { "rsvp", "RSVP" }},
+    {  47, { "gre", "GRE" }},
+    {  50, { "esp", "ESP" }},
+    {  51, { "ah", "AH" }},
+    {  57, { "skip", "SKIP" }},
+    {  58, { "ipv6-icmp", "IPv6-ICMP" }},
+    {  59, { "ipv6-nonxt", "IPv6-NoNxt" }},
+    {  60, { "ipv6-opts", "IPv6-Opts" }},
+    {  66, { "rvd", "RVD" }},
+    {  73, { "rspf", "RSPF" }},
+    {  81, { "vmtp", "VMTP" }},
+    {  88, { "eigrp", "EIGRP" }},
+    {  89, { "ospf", "OSPFIGP" }},
+    {  93, { "ax.25", "AX.25" }},
+    {  94, { "ipip", "IPIP" }},
+    {  97, { "etherip", "ETHERIP" }},
+    {  98, { "encap", "ENCAP" }},
+    { 103, { "pim", "PIM" }},
+    { 108, { "ipcomp", "IPCOMP" }},
+    { 112, { "vrrp", "VRRP" }},
+    { 115, { "l2tp", "L2TP" }},
+    { 124, { "isis", "ISIS" }},
+    { 132, { "sctp", "SCTP" }},
+    { 133, { "fc", "FC" }},
+    { 135, { "mobility-header", "Mobility-Header" }},
+    { 136, { "udplite", "UDPLite" }},
+    { 137, { "mpls-in-ip", "MPLS-in-IP" }},
+    { 139, { "hip", "HIP" }},
+    { 140, { "shim6", "Shim6" }},
+    { 141, { "wesp", "WESP" }},
+    { 142, { "rohc", "ROHC" }},
+};
+
 /***********************************************************************
  *		getprotobyname		(WS2_32.53)
  */
@@ -6454,16 +6546,25 @@ struct WS_protoent* WINAPI WS_getprotobyname(const char* name)
     struct protoent*     proto;
     EnterCriticalSection( &csWSgetXXXbyYYY );
     if( (proto = getprotobyname(name)) != NULL )
-    {
-        retval = WS_dup_pe(proto);
-    }
-    else {
-        MESSAGE("protocol %s not found; You might want to add "
-                "this to /etc/protocols\n", debugstr_a(name) );
-        SetLastError(WSANO_DATA);
-    }
+        retval = WS_create_pe( proto->p_name, proto->p_aliases, proto->p_proto );
     LeaveCriticalSection( &csWSgetXXXbyYYY );
 #endif
+    if (!retval)
+    {
+        unsigned int i;
+        for (i = 0; i < sizeof(protocols) / sizeof(protocols[0]); i++)
+        {
+            if (strcasecmp( protocols[i].names[0], name )) continue;
+            retval = WS_create_pe( protocols[i].names[0], (char **)protocols[i].names + 1,
+                                   protocols[i].prot );
+            break;
+        }
+    }
+    if (!retval)
+    {
+        WARN( "protocol %s not found\n", debugstr_a(name) );
+        SetLastError(WSANO_DATA);
+    }
     TRACE( "%s ret %p\n", debugstr_a(name), retval );
     return retval;
 }
@@ -6479,16 +6580,25 @@ struct WS_protoent* WINAPI WS_getprotobynumber(int number)
     struct protoent*     proto;
     EnterCriticalSection( &csWSgetXXXbyYYY );
     if( (proto = getprotobynumber(number)) != NULL )
-    {
-        retval = WS_dup_pe(proto);
-    }
-    else {
-        MESSAGE("protocol number %d not found; You might want to add "
-                "this to /etc/protocols\n", number );
-        SetLastError(WSANO_DATA);
-    }
+        retval = WS_create_pe( proto->p_name, proto->p_aliases, proto->p_proto );
     LeaveCriticalSection( &csWSgetXXXbyYYY );
 #endif
+    if (!retval)
+    {
+        unsigned int i;
+        for (i = 0; i < sizeof(protocols) / sizeof(protocols[0]); i++)
+        {
+            if (protocols[i].prot != number) continue;
+            retval = WS_create_pe( protocols[i].names[0], (char **)protocols[i].names + 1,
+                                   protocols[i].prot );
+            break;
+        }
+    }
+    if (!retval)
+    {
+        WARN( "protocol %d not found\n", number );
+        SetLastError(WSANO_DATA);
+    }
     TRACE("%i ret %p\n", number, retval);
     return retval;
 }
@@ -6607,15 +6717,15 @@ static int convert_eai_u2w(int unixret) {
     return unixret;
 }
 
-static char *get_hostname(void)
+static char *get_fqdn(void)
 {
     char *ret;
     DWORD size = 0;
 
-    GetComputerNameExA( ComputerNamePhysicalDnsHostname, NULL, &size );
+    GetComputerNameExA( ComputerNamePhysicalDnsFullyQualified, NULL, &size );
     if (GetLastError() != ERROR_MORE_DATA) return NULL;
     if (!(ret = HeapAlloc( GetProcessHeap(), 0, size ))) return NULL;
-    if (!GetComputerNameExA( ComputerNamePhysicalDnsHostname, ret, &size ))
+    if (!GetComputerNameExA( ComputerNamePhysicalDnsFullyQualified, ret, &size ))
     {
         HeapFree( GetProcessHeap(), 0, ret );
         return NULL;
@@ -6632,8 +6742,9 @@ int WINAPI WS_getaddrinfo(LPCSTR nodename, LPCSTR servname, const struct WS_addr
     struct addrinfo *unixaires = NULL;
     int   result;
     struct addrinfo unixhints, *punixhints = NULL;
-    char *hostname;
+    char *dot, *nodeV6 = NULL, *fqdn;
     const char *node;
+    size_t hostname_len = 0;
 
     *res = NULL;
     if (!nodename && !servname)
@@ -6642,15 +6753,38 @@ int WINAPI WS_getaddrinfo(LPCSTR nodename, LPCSTR servname, const struct WS_addr
         return WSAHOST_NOT_FOUND;
     }
 
-    hostname = get_hostname();
-    if (!hostname) return WSA_NOT_ENOUGH_MEMORY;
+    fqdn = get_fqdn();
+    if (!fqdn) return WSA_NOT_ENOUGH_MEMORY;
+    dot = strchr(fqdn, '.');
+    if (dot)
+        hostname_len = dot - fqdn;
 
     if (!nodename)
         node = NULL;
     else if (!nodename[0])
-        node = hostname;
+        node = fqdn;
     else
+    {
         node = nodename;
+
+        /* Check for [ipv6] or [ipv6]:portnumber, which are supported by Windows */
+        if (!hints || hints->ai_family == WS_AF_UNSPEC || hints->ai_family == WS_AF_INET6)
+        {
+            char *close_bracket;
+
+            if (node[0] == '[' && (close_bracket = strchr(node + 1, ']')))
+            {
+                nodeV6 = HeapAlloc(GetProcessHeap(), 0, close_bracket - node);
+                if (!nodeV6)
+                {
+                    HeapFree(GetProcessHeap(), 0, fqdn);
+                    return WSA_NOT_ENOUGH_MEMORY;
+                }
+                lstrcpynA(nodeV6, node + 1, close_bracket - node);
+                node = nodeV6;
+            }
+        }
+    }
 
     /* servname tweak required by OSX and BSD kernels */
     if (servname && !servname[0]) servname = "0";
@@ -6672,7 +6806,8 @@ int WINAPI WS_getaddrinfo(LPCSTR nodename, LPCSTR servname, const struct WS_addr
         if (punixhints->ai_socktype < 0)
         {
             SetLastError(WSAESOCKTNOSUPPORT);
-            HeapFree(GetProcessHeap(), 0, hostname);
+            HeapFree(GetProcessHeap(), 0, fqdn);
+            HeapFree(GetProcessHeap(), 0, nodeV6);
             return SOCKET_ERROR;
         }
 
@@ -6695,7 +6830,8 @@ int WINAPI WS_getaddrinfo(LPCSTR nodename, LPCSTR servname, const struct WS_addr
     /* getaddrinfo(3) is thread safe, no need to wrap in CS */
     result = getaddrinfo(node, servname, punixhints, &unixaires);
 
-    if (result && !strcmp(hostname, node))
+    if (result && (!hints || !(hints->ai_flags & WS_AI_NUMERICHOST))
+            && (!strcmp(fqdn, node) || (!strncmp(fqdn, node, hostname_len) && !node[hostname_len])))
     {
         /* If it didn't work it means the host name IP is not in /etc/hosts, try again
         * by sending a NULL host and avoid sending a NULL servname too because that
@@ -6704,7 +6840,8 @@ int WINAPI WS_getaddrinfo(LPCSTR nodename, LPCSTR servname, const struct WS_addr
         result = getaddrinfo(NULL, servname ? servname : "0", punixhints, &unixaires);
     }
     TRACE("%s, %s %p -> %p %d\n", debugstr_a(nodename), debugstr_a(servname), hints, res, result);
-    HeapFree(GetProcessHeap(), 0, hostname);
+    HeapFree(GetProcessHeap(), 0, fqdn);
+    HeapFree(GetProcessHeap(), 0, nodeV6);
 
     if (!result) {
         struct addrinfo *xuai = unixaires;
@@ -6910,7 +7047,7 @@ static void WINAPI getaddrinfo_callback(TP_CALLBACK_INSTANCE *instance, void *co
     if (event) SetEvent(event);
 }
 
-int WS_getaddrinfoW(const WCHAR *nodename, const WCHAR *servname, const struct WS_addrinfo *hints, ADDRINFOEXW **res, OVERLAPPED *overlapped)
+static int WS_getaddrinfoW(const WCHAR *nodename, const WCHAR *servname, const struct WS_addrinfo *hints, ADDRINFOEXW **res, OVERLAPPED *overlapped)
 {
     int ret = EAI_MEMORY, len, i;
     char *nodenameA = NULL, *servnameA = NULL;
@@ -7257,7 +7394,10 @@ int WINAPI WSAEnumNetworkEvents(SOCKET s, WSAEVENT hEvent, LPWSANETWORKEVENTS lp
     if (!ret)
     {
         for (i = 0; i < FD_MAX_EVENTS; i++)
-            lpEvent->iErrorCode[i] = NtStatusToWSAError(errors[i]);
+        {
+            if (lpEvent->lNetworkEvents & (1 << i))
+                lpEvent->iErrorCode[i] = NtStatusToWSAError(errors[i]);
+        }
         return 0;
     }
     SetLastError(WSAEINVAL);
@@ -7540,9 +7680,14 @@ SOCKET WINAPI WSASocketW(int af, int type, int protocol,
         if (ipxptype > 0)
             set_ipx_packettype(ret, ipxptype);
 
-        /* ensure IP_DONTFRAGMENT is disabled, in Linux the global default can be enabled */
         if (unixaf == AF_INET || unixaf == AF_INET6)
-            set_dont_fragment(ret, unixaf == AF_INET6 ? IPPROTO_IPV6 : IPPROTO_IP, FALSE);
+        {
+            /* ensure IP_DONTFRAGMENT is disabled for SOCK_DGRAM and SOCK_RAW, enabled for SOCK_STREAM */
+            if (unixtype == SOCK_DGRAM || unixtype == SOCK_RAW) /* in Linux the global default can be enabled */
+                set_dont_fragment(ret, unixaf == AF_INET6 ? IPPROTO_IPV6 : IPPROTO_IP, FALSE);
+            else if (unixtype == SOCK_STREAM)
+                set_dont_fragment(ret, unixaf == AF_INET6 ? IPPROTO_IPV6 : IPPROTO_IP, TRUE);
+        }
 
 #ifdef IPV6_V6ONLY
         if (unixaf == AF_INET6)
@@ -7801,26 +7946,18 @@ static struct WS_hostent *WS_dup_he(const struct hostent* p_he)
 
 /* ----- protoent */
 
-static struct WS_protoent *WS_dup_pe(const struct protoent* p_pe)
+static struct WS_protoent *WS_create_pe( const char *name, char **aliases, int prot )
 {
-    char *p;
-    struct WS_protoent *p_to;
+    struct WS_protoent *ret;
+    unsigned int size = sizeof(*ret) + strlen(name) + sizeof(char *) + list_size(aliases, 0);
 
-    int size = (sizeof(*p_pe) +
-                strlen(p_pe->p_name) + 1 +
-                list_size(p_pe->p_aliases, 0));
-
-    if (!(p_to = check_buffer_pe(size))) return NULL;
-    p_to->p_proto = p_pe->p_proto;
-
-    p = (char *)(p_to + 1);
-    p_to->p_name = p;
-    strcpy(p, p_pe->p_name);
-    p += strlen(p) + 1;
-
-    p_to->p_aliases = (char **)p;
-    list_dup(p_pe->p_aliases, p_to->p_aliases, 0);
-    return p_to;
+    if (!(ret = check_buffer_pe( size ))) return NULL;
+    ret->p_proto = prot;
+    ret->p_name = (char *)(ret + 1);
+    strcpy( ret->p_name, name );
+    ret->p_aliases = (char **)ret->p_name + strlen(name) / sizeof(char *) + 1;
+    list_dup( aliases, ret->p_aliases, 0 );
+    return ret;
 }
 
 /* ----- servent */

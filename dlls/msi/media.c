@@ -32,6 +32,7 @@
 #include "shlwapi.h"
 #include "objidl.h"
 #include "wine/unicode.h"
+#include "resource.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msi);
 
@@ -78,44 +79,22 @@ static BOOL source_matches_volume(MSIMEDIAINFO *mi, LPCWSTR source_root)
 
 static UINT msi_change_media(MSIPACKAGE *package, MSIMEDIAINFO *mi)
 {
-    LPWSTR error, error_dialog;
+    MSIRECORD *record;
     LPWSTR source_dir;
-    UINT r = ERROR_SUCCESS;
+    UINT r = IDRETRY;
 
-    static const WCHAR error_prop[] = {'E','r','r','o','r','D','i','a','l','o','g',0};
-
-    if ((package->ui_level & INSTALLUILEVEL_MASK) == INSTALLUILEVEL_NONE &&
-        !gUIHandlerA && !gUIHandlerW && !gUIHandlerRecord) return ERROR_SUCCESS;
-
-    error = msi_build_error_string(package, 1302, 1, mi->disk_prompt);
-    error_dialog = msi_dup_property(package->db, error_prop);
     source_dir = msi_dup_property(package->db, szSourceDir);
+    record = MSI_CreateRecord(2);
 
-    while (r == ERROR_SUCCESS && !source_matches_volume(mi, source_dir))
+    while (r == IDRETRY && !source_matches_volume(mi, source_dir))
     {
-        r = msi_spawn_error_dialog(package, error_dialog, error);
-
-        if (gUIHandlerW)
-        {
-            gUIHandlerW(gUIContext, MB_RETRYCANCEL | INSTALLMESSAGE_ERROR, error);
-        }
-        else if (gUIHandlerA)
-        {
-            char *msg = strdupWtoA(error);
-            gUIHandlerA(gUIContext, MB_RETRYCANCEL | INSTALLMESSAGE_ERROR, msg);
-            msi_free(msg);
-        }
-        else if (gUIHandlerRecord)
-        {
-            MSIHANDLE rec = MsiCreateRecord(1);
-            MsiRecordSetStringW(rec, 0, error);
-            gUIHandlerRecord(gUIContext, MB_RETRYCANCEL | INSTALLMESSAGE_ERROR, rec);
-            MsiCloseHandle(rec);
-        }
+        MSI_RecordSetStringW(record, 0, NULL);
+        MSI_RecordSetInteger(record, 1, MSIERR_CABNOTFOUND);
+        MSI_RecordSetStringW(record, 2, mi->disk_prompt);
+        r = MSI_ProcessMessage(package, INSTALLMESSAGE_ERROR | MB_RETRYCANCEL, record);
     }
 
-    msi_free(error);
-    msi_free(error_dialog);
+    msiobj_release(&record->hdr);
     msi_free(source_dir);
 
     return r;
@@ -699,6 +678,14 @@ static UINT get_drive_type(const WCHAR *path)
     return GetDriveTypeW(root);
 }
 
+static WCHAR *get_base_url( MSIDATABASE *db )
+{
+    WCHAR *p, *ret = NULL, *orig_db = msi_dup_property( db, szOriginalDatabase );
+    if (UrlIsW( orig_db, URLIS_URL ) && (ret = strdupW( orig_db )) && (p = strrchrW( ret, '/'))) p[1] = 0;
+    msi_free( orig_db );
+    return ret;
+}
+
 UINT msi_load_media_info(MSIPACKAGE *package, UINT Sequence, MSIMEDIAINFO *mi)
 {
     static const WCHAR query[] = {
@@ -706,7 +693,7 @@ UINT msi_load_media_info(MSIPACKAGE *package, UINT Sequence, MSIMEDIAINFO *mi)
         'W','H','E','R','E',' ','`','L','a','s','t','S','e','q','u','e','n','c','e','`',' ',
         '>','=',' ','%','i',' ','O','R','D','E','R',' ','B','Y',' ','`','D','i','s','k','I','d','`',0};
     MSIRECORD *row;
-    LPWSTR source_dir, source;
+    WCHAR *source_dir, *source, *base_url = NULL;
     DWORD options;
 
     if (Sequence <= mi->last_sequence) /* already loaded */
@@ -742,9 +729,9 @@ UINT msi_load_media_info(MSIPACKAGE *package, UINT Sequence, MSIMEDIAINFO *mi)
         source = source_dir;
         options |= MSISOURCETYPE_MEDIA;
     }
-    else if (package->BaseURL && UrlIsW(package->BaseURL, URLIS_URL))
+    else if ((base_url = get_base_url(package->db)))
     {
-        source = package->BaseURL;
+        source = base_url;
         options |= MSISOURCETYPE_URL;
     }
     else
@@ -760,8 +747,10 @@ UINT msi_load_media_info(MSIPACKAGE *package, UINT Sequence, MSIMEDIAINFO *mi)
     msi_package_add_info(package, package->Context,
                          options, INSTALLPROPERTY_LASTUSEDSOURCEW, source);
 
-    msi_free(source_dir);
     TRACE("sequence %u -> cabinet %s disk id %u\n", Sequence, debugstr_w(mi->cabinet), mi->disk_id);
+
+    msi_free(base_url);
+    msi_free(source_dir);
     return ERROR_SUCCESS;
 }
 
@@ -872,6 +861,8 @@ UINT ready_media( MSIPACKAGE *package, BOOL compressed, MSIMEDIAINFO *mi )
 
     if (mi->cabinet)
     {
+        WCHAR *base_url;
+
         /* cabinet is internal, no checks needed */
         if (mi->cabinet[0] == '#') return ERROR_SUCCESS;
 
@@ -879,14 +870,21 @@ UINT ready_media( MSIPACKAGE *package, BOOL compressed, MSIMEDIAINFO *mi )
 
         /* package should be downloaded */
         if (compressed && GetFileAttributesW( cabinet_file ) == INVALID_FILE_ATTRIBUTES &&
-            package->BaseURL && UrlIsW( package->BaseURL, URLIS_URL ))
+            (base_url = get_base_url( package->db )))
         {
-            WCHAR temppath[MAX_PATH], *p;
+            WCHAR temppath[MAX_PATH], *p, *url;
 
-            if ((rc = msi_download_file( cabinet_file, temppath )) != ERROR_SUCCESS)
+            msi_free( cabinet_file );
+            if (!(url = msi_alloc( (strlenW( base_url ) + strlenW( mi->cabinet ) + 1) * sizeof(WCHAR) )))
             {
-                ERR("failed to download %s (%u)\n", debugstr_w(cabinet_file), rc);
-                msi_free( cabinet_file );
+                return ERROR_OUTOFMEMORY;
+            }
+            strcpyW( url, base_url );
+            strcatW( url, mi->cabinet );
+            if ((rc = msi_download_file( url, temppath )) != ERROR_SUCCESS)
+            {
+                ERR("failed to download %s (%u)\n", debugstr_w(url), rc);
+                msi_free( url );
                 return rc;
             }
             if ((p = strrchrW( temppath, '\\' ))) *p = 0;
@@ -894,7 +892,8 @@ UINT ready_media( MSIPACKAGE *package, BOOL compressed, MSIMEDIAINFO *mi )
             PathAddBackslashW( mi->sourcedir );
             msi_free( mi->cabinet );
             mi->cabinet = strdupW( p + 1 );
-            msi_free( cabinet_file );
+
+            msi_free( url );
             return ERROR_SUCCESS;
         }
     }

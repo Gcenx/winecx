@@ -58,7 +58,7 @@ static void msi_file_update_ui( MSIPACKAGE *package, MSIFILE *f, const WCHAR *ac
     MSI_RecordSetStringW( uirow, 1, f->FileName );
     MSI_RecordSetStringW( uirow, 9, f->Component->Directory );
     MSI_RecordSetInteger( uirow, 6, f->FileSize );
-    msi_ui_actiondata( package, action, uirow );
+    MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
     msiobj_release( &uirow->hdr );
     msi_ui_progress( package, 2, f->FileSize, 0, 0 );
 }
@@ -200,8 +200,6 @@ static UINT copy_file(MSIFILE *file, LPWSTR source)
         return GetLastError();
 
     SetFileAttributesW(file->TargetPath, FILE_ATTRIBUTE_NORMAL);
-
-    file->state = msifs_installed;
     return ERROR_SUCCESS;
 }
 
@@ -249,7 +247,6 @@ static UINT copy_install_file(MSIPACKAGE *package, MSIFILE *file, LPWSTR source)
             MoveFileExW(file->TargetPath, NULL, MOVEFILE_DELAY_UNTIL_REBOOT) &&
             MoveFileExW(tmpfileW, file->TargetPath, MOVEFILE_DELAY_UNTIL_REBOOT))
         {
-            file->state = msifs_installed;
             package->need_reboot_at_end = 1;
             gle = ERROR_SUCCESS;
         }
@@ -360,11 +357,18 @@ UINT ACTION_InstallFiles(MSIPACKAGE *package)
     UINT rc = ERROR_SUCCESS;
     MSIFILE *file;
 
+    msi_set_sourcedir_props(package, FALSE);
+
+    if (package->script == SCRIPT_NONE)
+        return msi_schedule_action(package, SCRIPT_INSTALL, szInstallFiles);
+
     schedule_install_files(package);
     mi = msi_alloc_zero( sizeof(MSIMEDIAINFO) );
 
     LIST_FOR_EACH_ENTRY( file, &package->files, MSIFILE, entry )
     {
+        BOOL is_global_assembly = msi_is_global_assembly( file->Component );
+
         msi_file_update_ui( package, file, szInstallFiles );
 
         rc = msi_load_media_info( package, file->Sequence, mi );
@@ -412,7 +416,7 @@ UINT ACTION_InstallFiles(MSIPACKAGE *package)
 
             TRACE("copying %s to %s\n", debugstr_w(source), debugstr_w(file->TargetPath));
 
-            if (!msi_is_global_assembly( file->Component ))
+            if (!is_global_assembly)
             {
                 msi_create_directory(package, file->Component->Directory);
             }
@@ -424,10 +428,11 @@ UINT ACTION_InstallFiles(MSIPACKAGE *package)
                 msi_free(source);
                 goto done;
             }
+            if (!is_global_assembly) file->state = msifs_installed;
             msi_free(source);
         }
-        else if (!msi_is_global_assembly( file->Component ) &&
-                 file->state != msifs_installed && !(file->Attributes & msidbFileAttributesPatchAdded))
+        else if (!is_global_assembly && file->state != msifs_installed &&
+                 !(file->Attributes & msidbFileAttributesPatchAdded))
         {
             ERR("compressed file wasn't installed (%s)\n", debugstr_w(file->File));
             rc = ERROR_INSTALL_FAILURE;
@@ -581,6 +586,9 @@ UINT ACTION_PatchFiles( MSIPACKAGE *package )
     UINT rc = ERROR_SUCCESS;
 
     TRACE("%p\n", package);
+
+    if (package->script == SCRIPT_NONE)
+        return msi_schedule_action(package, SCRIPT_INSTALL, szPatchFiles);
 
     mi = msi_alloc_zero( sizeof(MSIMEDIAINFO) );
 
@@ -980,7 +988,7 @@ done:
     MSI_RecordSetStringW( uirow, 1, MSI_RecordGetString(rec, 1) );
     MSI_RecordSetInteger( uirow, 6, 1 ); /* FIXME */
     MSI_RecordSetStringW( uirow, 9, destdir );
-    msi_ui_actiondata( package, szMoveFiles, uirow );
+    MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
     msiobj_release( &uirow->hdr );
 
     msi_free(sourcedir);
@@ -999,6 +1007,9 @@ UINT ACTION_MoveFiles( MSIPACKAGE *package )
         '`','M','o','v','e','F','i','l','e','`',0};
     MSIQUERY *view;
     UINT rc;
+
+    if (package->script == SCRIPT_NONE)
+        return msi_schedule_action(package, SCRIPT_INSTALL, szMoveFiles);
 
     rc = MSI_DatabaseOpenViewW(package->db, query, &view);
     if (rc != ERROR_SUCCESS)
@@ -1117,7 +1128,7 @@ static UINT ITERATE_DuplicateFiles(MSIRECORD *row, LPVOID param)
     MSI_RecordSetStringW( uirow, 1, MSI_RecordGetString( row, 1 ) );
     MSI_RecordSetInteger( uirow, 6, file->FileSize );
     MSI_RecordSetStringW( uirow, 9, MSI_RecordGetString( row, 5 ) );
-    msi_ui_actiondata( package, szDuplicateFiles, uirow );
+    MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
     msiobj_release( &uirow->hdr );
 
     msi_free(dest);
@@ -1131,6 +1142,9 @@ UINT ACTION_DuplicateFiles(MSIPACKAGE *package)
         '`','D','u','p','l','i','c','a','t','e','F','i','l','e','`',0};
     MSIQUERY *view;
     UINT rc;
+
+    if (package->script == SCRIPT_NONE)
+        return msi_schedule_action(package, SCRIPT_INSTALL, szDuplicateFiles);
 
     rc = MSI_DatabaseOpenViewW(package->db, query, &view);
     if (rc != ERROR_SUCCESS)
@@ -1193,7 +1207,7 @@ static UINT ITERATE_RemoveDuplicateFiles( MSIRECORD *row, LPVOID param )
     uirow = MSI_CreateRecord( 9 );
     MSI_RecordSetStringW( uirow, 1, MSI_RecordGetString( row, 1 ) );
     MSI_RecordSetStringW( uirow, 9, MSI_RecordGetString( row, 5 ) );
-    msi_ui_actiondata( package, szRemoveDuplicateFiles, uirow );
+    MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
     msiobj_release( &uirow->hdr );
 
     msi_free(dest);
@@ -1207,6 +1221,9 @@ UINT ACTION_RemoveDuplicateFiles( MSIPACKAGE *package )
         '`','D','u','p','l','i','c','a','t','e','F','i','l','e','`',0};
     MSIQUERY *view;
     UINT rc;
+
+    if (package->script == SCRIPT_NONE)
+        return msi_schedule_action(package, SCRIPT_INSTALL, szRemoveDuplicateFiles);
 
     rc = MSI_DatabaseOpenViewW( package->db, query, &view );
     if (rc != ERROR_SUCCESS)
@@ -1315,7 +1332,7 @@ done:
     uirow = MSI_CreateRecord( 9 );
     MSI_RecordSetStringW( uirow, 1, MSI_RecordGetString(row, 1) );
     MSI_RecordSetStringW( uirow, 9, dir );
-    msi_ui_actiondata( package, szRemoveFiles, uirow );
+    MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
     msiobj_release( &uirow->hdr );
 
     msi_free(filename);
@@ -1347,6 +1364,9 @@ UINT ACTION_RemoveFiles( MSIPACKAGE *package )
     MSICOMPONENT *comp;
     MSIFILE *file;
     UINT r;
+
+    if (package->script == SCRIPT_NONE)
+        return msi_schedule_action(package, SCRIPT_INSTALL, szRemoveFiles);
 
     r = MSI_DatabaseOpenViewW(package->db, query, &view);
     if (r == ERROR_SUCCESS)
@@ -1405,7 +1425,7 @@ UINT ACTION_RemoveFiles( MSIPACKAGE *package )
         uirow = MSI_CreateRecord( 9 );
         MSI_RecordSetStringW( uirow, 1, file->FileName );
         MSI_RecordSetStringW( uirow, 9, comp->Directory );
-        msi_ui_actiondata( package, szRemoveFiles, uirow );
+        MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
         msiobj_release( &uirow->hdr );
     }
 

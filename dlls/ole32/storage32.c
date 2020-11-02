@@ -2085,7 +2085,7 @@ static HRESULT WINAPI StorageBaseImpl_SetClass(
   HRESULT hRes;
   DirEntry currentEntry;
 
-  TRACE("(%p, %p)\n", iface, clsid);
+  TRACE("(%p, %s)\n", iface, wine_dbgstr_guid(clsid));
 
   if (This->reverted)
     return STG_E_REVERTED;
@@ -5057,7 +5057,7 @@ static HRESULT StorageImpl_LockOne(StorageImpl *This, ULONG start, ULONG end)
 
     if (SUCCEEDED(hr))
     {
-        for (j=0; j<sizeof(This->locked_bytes)/sizeof(This->locked_bytes[0]); j++)
+        for (j = 0; j < ARRAY_SIZE(This->locked_bytes); j++)
         {
             if (This->locked_bytes[j] == 0)
             {
@@ -5200,10 +5200,10 @@ static void StorageImpl_Destroy(StorageBaseImpl* iface)
   BlockChainStream_Destroy(This->rootBlockChain);
   BlockChainStream_Destroy(This->smallBlockDepotChain);
 
-  for (i=0; i<BLOCKCHAIN_CACHE_SIZE; i++)
+  for (i = 0; i < BLOCKCHAIN_CACHE_SIZE; i++)
     BlockChainStream_Destroy(This->blockChainCache[i]);
 
-  for (i=0; i<sizeof(This->locked_bytes)/sizeof(This->locked_bytes[0]); i++)
+  for (i = 0; i < ARRAY_SIZE(This->locked_bytes); i++)
   {
     ULARGE_INTEGER offset, cb;
     cb.QuadPart = 1;
@@ -7267,6 +7267,8 @@ BlockChainStream* BlockChainStream_Construct(
   BlockChainStream* newStream;
 
   newStream = HeapAlloc(GetProcessHeap(), 0, sizeof(BlockChainStream));
+  if(!newStream)
+    return NULL;
 
   newStream->parentStorage           = parentStorage;
   newStream->headOfStreamPlaceHolder = headOfStreamPlaceHolder;
@@ -9367,8 +9369,7 @@ HRESULT WINAPI WriteFmtUserTypeStg(
     /* get the clipboard format name */
     if( cf )
     {
-        n = GetClipboardFormatNameW( cf, szwClipName,
-                sizeof(szwClipName)/sizeof(szwClipName[0]) );
+        n = GetClipboardFormatNameW(cf, szwClipName, ARRAY_SIZE(szwClipName));
         szwClipName[n]=0;
     }
 

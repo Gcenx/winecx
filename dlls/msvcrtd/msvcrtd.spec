@@ -31,8 +31,8 @@
 @ cdecl -arch=win64 ??1type_info@@UEAA@XZ(ptr) msvcrt.??1type_info@@UEAA@XZ
 @ cdecl -arch=win32 ??2@YAPAXI@Z(long) msvcrt.??2@YAPAXI@Z
 @ cdecl -arch=win64 ??2@YAPEAX_K@Z(long) msvcrt.??2@YAPEAX_K@Z
-@ cdecl -arch=win32 ??2@YAPAXIHPBDH@Z(long long str long) MSVCRTD_operator_new_dbg
-@ cdecl -arch=win64 ??2@YAPEAX_KHPEBDH@Z(long long str long) MSVCRTD_operator_new_dbg
+@ cdecl -arch=win32 ??2@YAPAXIHPBDH@Z(long long str long) msvcrt.??2@YAPAXIHPBDH@Z
+@ cdecl -arch=win64 ??2@YAPEAX_KHPEBDH@Z(long long str long) msvcrt.??2@YAPEAX_KHPEBDH@Z
 @ cdecl -arch=win32 ??3@YAXPAX@Z(ptr) msvcrt.??3@YAXPAX@Z
 @ cdecl -arch=win64 ??3@YAXPEAX@Z(ptr) msvcrt.??3@YAXPEAX@Z
 @ thiscall -arch=i386 ??4__non_rtti_object@@QAEAAV0@ABV0@@Z(ptr ptr) msvcrt.??4__non_rtti_object@@QAEAAV0@ABV0@@Z
@@ -124,7 +124,7 @@
 @ extern _HUGE msvcrt._HUGE
 @ cdecl _Strftime(ptr long str ptr ptr) msvcrt._Strftime
 @ cdecl _XcptFilter(long ptr) msvcrt._XcptFilter
-@ cdecl -arch=i386,x86_64,arm -norelay __CxxFrameHandler(ptr ptr ptr ptr) msvcrt.__CxxFrameHandler
+@ cdecl -arch=i386,x86_64,arm,arm64 -norelay __CxxFrameHandler(ptr ptr ptr ptr) msvcrt.__CxxFrameHandler
 @ stdcall -arch=i386 __CxxLongjmpUnwind(ptr) msvcrt.__CxxLongjmpUnwind
 @ cdecl __RTCastToVoid(ptr) msvcrt.__RTCastToVoid
 @ cdecl __RTDynamicCast(ptr long ptr ptr long) msvcrt.__RTDynamicCast
@@ -294,7 +294,7 @@
 @ cdecl _flushall() msvcrt._flushall
 @ extern _fmode msvcrt._fmode
 @ cdecl _fpclass(double) msvcrt._fpclass
-@ cdecl -arch=i386,x86_64,arm _fpieee_flt(long ptr ptr) msvcrt._fpieee_flt
+@ cdecl -arch=i386,x86_64,arm,arm64 _fpieee_flt(long ptr ptr) msvcrt._fpieee_flt
 @ cdecl _fpreset() msvcrt._fpreset
 @ cdecl _fputchar(long) msvcrt._fputchar
 @ cdecl _fputwchar(long) msvcrt._fputwchar
@@ -490,7 +490,7 @@
 @ cdecl _set_error_mode(long) msvcrt._set_error_mode
 @ cdecl _set_sbh_threshold(long) msvcrt._set_sbh_threshold
 @ cdecl _seterrormode(long) msvcrt._seterrormode
-@ cdecl -arch=i386,x86_64,arm -norelay _setjmp(ptr) msvcrt._setjmp
+@ cdecl -arch=i386,x86_64,arm,arm64 -norelay _setjmp(ptr) msvcrt._setjmp
 @ cdecl -arch=i386 -norelay _setjmp3(ptr long) msvcrt._setjmp3
 @ cdecl _setmaxstdio(long) msvcrt._setmaxstdio
 @ cdecl _setmbcp(long) msvcrt._setmbcp
@@ -723,7 +723,7 @@
 @ cdecl localtime(ptr) msvcrt.localtime
 @ cdecl log(double) msvcrt.log
 @ cdecl log10(double) msvcrt.log10
-@ cdecl -arch=i386,x86_64,arm longjmp(ptr long) msvcrt.longjmp
+@ cdecl -arch=i386,x86_64,arm,arm64 longjmp(ptr long) msvcrt.longjmp
 @ cdecl malloc(long) msvcrt.malloc
 @ cdecl mblen(ptr long) msvcrt.mblen
 @ cdecl mbstowcs(ptr str long) msvcrt.mbstowcs

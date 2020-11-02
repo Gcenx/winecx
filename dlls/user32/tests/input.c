@@ -691,14 +691,17 @@ static struct message sent_messages[MAXKEYMESSAGES];
 static UINT sent_messages_cnt;
 
 /* Verify that only specified key state transitions occur */
-static void compare_and_check(int id, BYTE *ks1, BYTE *ks2, const struct sendinput_test_s *test)
+static void compare_and_check(int id, BYTE *ks1, BYTE *ks2,
+    const struct sendinput_test_s *test, BOOL foreground)
 {
     int i, failcount = 0;
     const struct transition_s *t = test->expected_transitions;
     UINT actual_cnt = 0;
     const struct message *expected = test->expected_messages;
 
-    while (t->wVk) {
+    while (t->wVk && foreground) {
+        /* We won't receive any information from GetKeyboardState() if we're
+         * not the foreground window. */
         BOOL matched = ((ks1[t->wVk]&0x80) == (t->before_state&0x80)
                        && (ks2[t->wVk]&0x80) == (~t->before_state&0x80));
 
@@ -781,6 +784,13 @@ static void compare_and_check(int id, BYTE *ks1, BYTE *ks2, const struct sendinp
             expected++;
             continue;
         }
+        else if (!(expected->flags & hook) && !foreground)
+        {
+            /* If we weren't able to receive foreground status, we won't get
+             * any window messages. */
+            expected++;
+            continue;
+        }
         /* NT4 doesn't send SYSKEYDOWN/UP to hooks, only KEYDOWN/UP */
         else if ((expected->flags & hook) &&
                  (expected->message == WM_SYSKEYDOWN || expected->message == WM_SYSKEYUP) &&
@@ -817,7 +827,7 @@ static void compare_and_check(int id, BYTE *ks1, BYTE *ks2, const struct sendinp
         expected++;
     }
     /* skip all optional trailing messages */
-    while (expected->message && (expected->flags & optional))
+    while (expected->message && ((expected->flags & optional) || (!(expected->flags & hook) && !foreground)))
         expected++;
 
 
@@ -848,16 +858,7 @@ static LRESULT CALLBACK WndProc2(HWND hWnd, UINT Msg, WPARAM wParam,
 {
     if (winetest_debug > 1) trace("MSG:  %8x W:%8lx L:%8lx\n", Msg, wParam, lParam);
 
-    if (Msg != WM_PAINT &&
-        Msg != WM_NCPAINT &&
-        Msg != WM_SYNCPAINT &&
-        Msg != WM_ERASEBKGND &&
-        Msg != WM_NCHITTEST &&
-        Msg != WM_GETTEXT &&
-        Msg != WM_GETICON &&
-        Msg != WM_IME_SELECT &&
-        Msg != WM_DEVICECHANGE &&
-        Msg != WM_TIMECHANGE)
+    if ((Msg >= WM_KEYFIRST && Msg <= WM_KEYLAST) || Msg == WM_SYSCOMMAND)
     {
         ok(sent_messages_cnt < MAXKEYMESSAGES, "Too many messages\n");
         if (sent_messages_cnt < MAXKEYMESSAGES)
@@ -906,6 +907,7 @@ static void test_Input_blackbox(void)
     int ii;
     BYTE ks1[256], ks2[256];
     LONG_PTR prevWndProc;
+    BOOL foreground;
     HWND window;
     HHOOK hook;
 
@@ -919,7 +921,9 @@ static void test_Input_blackbox(void)
         NULL, NULL);
     ok(window != NULL, "error: %d\n", (int) GetLastError());
     SetWindowPos( window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE );
-    SetForegroundWindow( window );
+    foreground = SetForegroundWindow( window );
+    if (!foreground)
+        skip("Failed to set foreground window; some tests will be skipped.\n");
 
     if (!(hook = SetWindowsHookExA(WH_KEYBOARD_LL, hook_proc, GetModuleHandleA( NULL ), 0)))
     {
@@ -933,15 +937,13 @@ static void test_Input_blackbox(void)
     empty_message_queue();
 
     prevWndProc = SetWindowLongPtrA(window, GWLP_WNDPROC, (LONG_PTR) WndProc2);
-    ok(prevWndProc != 0 || (prevWndProc == 0 && GetLastError() == 0),
-       "error: %d\n", (int) GetLastError());
+    ok(prevWndProc != 0 || GetLastError() == 0, "error: %d\n", (int) GetLastError());
 
     i.type = INPUT_KEYBOARD;
     i.u.ki.time = 0;
     i.u.ki.dwExtraInfo = 0;
 
-    for (ii = 0; ii < sizeof(sendinput_test)/sizeof(struct sendinput_test_s)-1;
-         ii++) {
+    for (ii = 0; ii < ARRAY_SIZE(sendinput_test)-1; ii++) {
         GetKeyboardState(ks1);
         i.u.ki.wScan = ii+1 /* useful for debugging */;
         i.u.ki.dwFlags = sendinput_test[ii].dwFlags;
@@ -949,15 +951,7 @@ static void test_Input_blackbox(void)
         pSendInput(1, (INPUT*)&i, sizeof(TEST_INPUT));
         empty_message_queue();
         GetKeyboardState(ks2);
-        if (!ii && sent_messages_cnt <= 1 && !memcmp( ks1, ks2, sizeof(ks1) ))
-        {
-            win_skip( "window doesn't receive the queued input\n" );
-            /* release the key */
-            i.u.ki.dwFlags |= KEYEVENTF_KEYUP;
-            pSendInput(1, (INPUT*)&i, sizeof(TEST_INPUT));
-            break;
-        }
-        compare_and_check(ii, ks1, ks2, &sendinput_test[ii]);
+        compare_and_check(ii, ks1, ks2, &sendinput_test[ii], foreground);
     }
 
     empty_message_queue();
@@ -1525,12 +1519,12 @@ static void test_GetRawInputDeviceList(void)
     ok(ret > 0, "expected non-zero\n");
 
     /* check if variable changes from larger to smaller value */
-    devcount = odevcount = sizeof(devices) / sizeof(devices[0]);
+    devcount = odevcount = ARRAY_SIZE(devices);
     oret = ret = pGetRawInputDeviceList(devices, &odevcount, sizeof(devices[0]));
     ok(ret > 0, "expected non-zero\n");
     ok(devcount == odevcount, "expected %d, got %d\n", devcount, odevcount);
     devcount = odevcount;
-    odevcount = sizeof(devices) / sizeof(devices[0]);
+    odevcount = ARRAY_SIZE(devices);
     ret = pGetRawInputDeviceList(NULL, &odevcount, sizeof(devices[0]));
     ok(ret == 0, "expected 0, got %d\n", ret);
     ok(odevcount == oret, "expected %d, got %d\n", oret, odevcount);
@@ -1572,7 +1566,7 @@ static void test_key_map(void)
        "Scan code -> vKey = %x (not VK_RSHIFT)\n", kR);
 
     /* test that MAPVK_VSC_TO_VK prefers the non-numpad vkey if there's ambiguity */
-    for (i = 0; i < sizeof(numpad_collisions)/sizeof(numpad_collisions[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(numpad_collisions); i++)
     {
         UINT numpad_scan = MapVirtualKeyExA(numpad_collisions[i][0],  MAPVK_VK_TO_VSC, kl);
         UINT other_scan  = MapVirtualKeyExA(numpad_collisions[i][1],  MAPVK_VK_TO_VSC, kl);
@@ -1670,7 +1664,7 @@ static void test_ToUnicode(void)
            "ToUnicode didn't null-terminate the buffer when there was room.\n");
     }
 
-    for (i = 0; i < sizeof(utests) / sizeof(utests[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(utests); i++)
     {
         UINT vk = utests[i].vk, mod = utests[i].modifiers, scan;
 
@@ -1813,7 +1807,7 @@ static void test_key_names(void)
     ok( buffer[0] == 0, "wrong string '%s'\n", buffer );
 
     memset( bufferW, 0xcc, sizeof(bufferW) );
-    ret = GetKeyNameTextW( lparam, bufferW, sizeof(bufferW)/sizeof(WCHAR) );
+    ret = GetKeyNameTextW( lparam, bufferW, ARRAY_SIZE(bufferW));
     ok( ret > 0, "wrong len %u for %s\n", ret, wine_dbgstr_w(bufferW) );
     ok( ret == lstrlenW(bufferW), "wrong len %u for %s\n", ret, wine_dbgstr_w(bufferW) );
 
@@ -1929,8 +1923,17 @@ static void test_Input_mouse(void)
     DWORD thread_id;
     POINT pt, pt_org;
     MSG msg;
+    BOOL ret;
 
-    GetCursorPos(&pt_org);
+    SetLastError(0xdeadbeef);
+    ret = GetCursorPos(NULL);
+    ok(!ret, "GetCursorPos succeed\n");
+    ok(GetLastError() == 0xdeadbeef || GetLastError() == ERROR_NOACCESS, "error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = GetCursorPos(&pt_org);
+    ok(ret, "GetCursorPos failed\n");
+    ok(GetLastError() == 0xdeadbeef, "error %u\n", GetLastError());
 
     button_win = CreateWindowA("button", "button", WS_VISIBLE | WS_POPUP,
             100, 100, 100, 100, 0, NULL, NULL, NULL);
@@ -2047,6 +2050,7 @@ static void test_Input_mouse(void)
     }
     SetEvent(thread_data.end_event);
     WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
     ok(hittest_no && hittest_no<50, "expected WM_NCHITTEST message\n");
     ok(!got_button_down, "unexpected WM_RBUTTONDOWN message\n");
     ok(!got_button_up, "unexpected WM_RBUTTONUP message\n");
@@ -2513,7 +2517,11 @@ static void test_OemKeyScan(void)
         ret = OemKeyScan( oem );
 
         oem_char = LOBYTE( oem );
-        if (!OemToCharBuffW( &oem_char, &wchr, 1 ))
+        /* OemKeyScan returns -1 for any character that cannot be mapped,
+         * whereas OemToCharBuff changes unmappable characters to question
+         * marks. The ASCII characters 0-127, including the real question mark
+         * character, are all mappable and are the same in all OEM codepages. */
+        if (!OemToCharBuffW( &oem_char, &wchr, 1 ) || (wchr == '?' && oem_char < 0))
             expect = -1;
         else
         {

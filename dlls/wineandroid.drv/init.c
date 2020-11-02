@@ -528,6 +528,7 @@ static const struct gdi_dc_funcs android_drv_funcs =
     NULL,                               /* pUnrealizePalette */
     NULL,                               /* pWidenPath */
     ANDROID_wine_get_wgl_driver,        /* wine_get_wgl_driver */
+    NULL,                               /* wine_get_vulkan_driver */
     GDI_PRIORITY_GRAPHICS_DRV           /* priority */
 };
 
@@ -848,7 +849,7 @@ static BOOL process_attach(void)
         load_android_libs();
         (*java_vm)->AttachCurrentThread( java_vm, &jni_env, 0 );
         class = (*jni_env)->GetObjectClass( jni_env, object );
-        (*jni_env)->RegisterNatives( jni_env, class, methods, sizeof(methods)/sizeof(methods[0]) );
+        (*jni_env)->RegisterNatives( jni_env, class, methods, ARRAY_SIZE( methods ));
         (*jni_env)->DeleteLocalRef( jni_env, class );
 #ifdef __i386__
         wine_set_fs( old_fs );  /* the Java VM hijacks %fs for its own purposes, restore it */

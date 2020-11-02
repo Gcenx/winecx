@@ -18,12 +18,16 @@
 
 #define WIN32_LEAN_AND_MEAN
 #define COBJMACROS
+#include <stdarg.h>
 #include <initguid.h>
+#include <windef.h>
+#include <winbase.h>
 #include <windows.h>
 #include <wmp.h>
 #include <olectl.h>
 
 #include "wine/test.h"
+#include "wine/heap.h"
 
 #define DEFINE_EXPECT(func) \
     static BOOL expect_ ## func = FALSE, called_ ## func = FALSE
@@ -49,6 +53,12 @@
         expect_ ## func = called_ ## func = FALSE; \
     }while(0)
 
+#define CHECK_CALLED_OR_BROKEN(func) \
+    do { \
+        ok(called_ ## func || broken(1), "expected " #func "\n"); \
+        expect_ ## func = called_ ## func = FALSE; \
+    }while(0)
+
 DEFINE_EXPECT(GetContainer);
 DEFINE_EXPECT(GetExtendedControl);
 DEFINE_EXPECT(GetWindow);
@@ -59,6 +69,32 @@ DEFINE_EXPECT(OnInPlaceDeactivate);
 DEFINE_EXPECT(GetWindowContext);
 DEFINE_EXPECT(ShowObject);
 DEFINE_EXPECT(OnShowWindow_FALSE);
+
+static const WCHAR mp3file[] = {'t','e','s','t','.','m','p','3',0};
+static inline WCHAR *load_resource(const WCHAR *name)
+{
+    static WCHAR pathW[MAX_PATH];
+    DWORD written;
+    HANDLE file;
+    HRSRC res;
+    void *ptr;
+
+    GetTempPathW(ARRAY_SIZE(pathW), pathW);
+    lstrcatW(pathW, name);
+
+    file = CreateFileW(pathW, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
+    ok(file != INVALID_HANDLE_VALUE, "file creation failed, at %s, error %d\n", wine_dbgstr_w(pathW),
+        GetLastError());
+
+    res = FindResourceW(NULL, name, (LPCWSTR)RT_RCDATA);
+    ok( res != 0, "couldn't find resource\n" );
+    ptr = LockResource( LoadResource( GetModuleHandleA(NULL), res ));
+    WriteFile( file, ptr, SizeofResource( GetModuleHandleA(NULL), res ), &written, NULL );
+    ok( written == SizeofResource( GetModuleHandleA(NULL), res ), "couldn't write resource\n" );
+    CloseHandle( file );
+
+    return pathW;
+}
 
 static HWND container_hwnd;
 
@@ -495,6 +531,43 @@ static const IDispatchVtbl DispatchVtbl = {
 
 static IDispatch Dispatch = { &DispatchVtbl };
 
+static HRESULT WINAPI WMPOCXEvents_QueryInterface(IDispatch *iface, REFIID riid, void **ppv)
+{
+    *ppv = NULL;
+
+    if(IsEqualGUID(&IID__WMPOCXEvents, riid) || IsEqualGUID(&IID_IDispatch, riid)) {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    ok(0, "unexpected riid %s\n", wine_dbgstr_guid(riid));
+    return E_NOINTERFACE;
+}
+
+static HRESULT WINAPI WMPOCXEvents_Invoke(IDispatch *iface, DISPID dispIdMember, REFIID riid,
+        LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult,
+        EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    switch(dispIdMember) {
+    default:
+        ok(0, "unexpected call Invoke(%d)\n", dispIdMember);
+    }
+
+    return E_NOTIMPL;
+}
+
+static IDispatchVtbl WMPOcxEventsVtbl = {
+    WMPOCXEvents_QueryInterface,
+    Dispatch_AddRef,
+    Dispatch_Release,
+    Dispatch_GetTypeInfoCount,
+    Dispatch_GetTypeInfo,
+    Dispatch_GetIDsOfNames,
+    WMPOCXEvents_Invoke,
+};
+
+static IDispatch WMPOCXEvents = { &WMPOcxEventsVtbl };
+
 static HRESULT WINAPI InPlaceSiteWindowless_QueryInterface(IOleInPlaceSiteWindowless *iface, REFIID riid, void **ppv)
 {
     return cs_qi(riid, ppv);
@@ -788,14 +861,132 @@ static HRESULT cs_qi(REFIID riid, void **ppv)
     return S_OK;
 }
 
+static void test_ConnectionPoint(IOleObject *unk)
+{
+    IConnectionPointContainer *container;
+    IConnectionPoint *point;
+    HRESULT hres;
+
+    static DWORD dw = 100;
+
+    hres = IOleObject_QueryInterface(unk, &IID_IConnectionPointContainer, (void**)&container);
+    ok(hres == S_OK, "QueryInterface(IID_IConnectionPointContainer) failed: %08x\n", hres);
+    if(FAILED(hres))
+        return;
+
+    hres = IConnectionPointContainer_FindConnectionPoint(container, &IID__WMPOCXEvents, &point);
+    IConnectionPointContainer_Release(container);
+    ok(hres == S_OK, "FindConnectionPoint failed: %08x\n", hres);
+    if(FAILED(hres))
+        return;
+
+    hres = IConnectionPoint_Advise(point, (IUnknown*)&WMPOCXEvents, &dw);
+    ok(hres == S_OK, "Advise failed: %08x\n", hres);
+    ok(dw == 1, "dw=%d, expected 1\n", dw);
+    hres = IConnectionPoint_Unadvise(point, dw);
+    ok(hres == S_OK, "Unadvise failed: %08x\n", hres);
+
+    IConnectionPoint_Release(point);
+}
+
 static void test_wmp_ifaces(IOleObject *oleobj)
 {
     IWMPSettings *settings, *settings_qi;
     IWMPPlayer4 *player4;
+    IWMPPlayer *player;
+    IWMPMedia *media;
+    IWMPControls *controls;
+    VARIANT_BOOL vbool;
+    IWMPNetwork *network;
+    IUnknown *unk;
     HRESULT hres;
+    BSTR filename;
+    BSTR url;
 
     hres = IOleObject_QueryInterface(oleobj, &IID_IWMPPlayer4, (void**)&player4);
     ok(hres == S_OK, "Could not get IWMPPlayer4 iface: %08x\n", hres);
+
+    controls = NULL;
+    hres = IWMPPlayer4_get_controls(player4, &controls);
+    ok(hres == S_OK, "get_controls failed: %08x\n", hres);
+    ok(controls != NULL, "controls = NULL\n");
+
+    player = NULL;
+    hres = IWMPControls_QueryInterface(controls, &IID_IWMPPlayer, (void**)&player);
+    ok(hres == E_NOINTERFACE, "Getting IWMPPlayer from IWMPControls SUCCEEDED\n");
+    ok(player == NULL, "player != NULL\n");
+
+    unk = NULL;
+    hres = IWMPControls_QueryInterface(controls, &IID_IUnknown, (void **)&unk);
+    ok(hres == S_OK, "Failed to get IUnknown, hr %#x.\n", hres);
+    ok(unk != NULL, "Unexpected interface pointer.\n");
+    IUnknown_Release(unk);
+
+    IWMPControls_Release(controls);
+
+    /* IWPNetwork */
+    network = NULL;
+    hres = IWMPPlayer4_get_network(player4, &network);
+    ok(hres == S_OK, "get_network failed: %08x\n", hres);
+    ok(network != NULL, "network = NULL\n");
+
+    player = NULL;
+    hres = IWMPNetwork_QueryInterface(network, &IID_IWMPPlayer, (void**)&player);
+    ok(hres != S_OK, "Getting IWMPPlayer from IWMPNetwork SUCCEEDED\n");
+    ok(player == NULL, "player != NULL\n");
+
+    IWMPNetwork_Release(network);
+
+    media = NULL;
+    hres = IWMPPlayer4_QueryInterface(player4, &IID_IWMPMedia, (void**)&media);
+    ok(hres == E_NOINTERFACE, "get_currentMedia SUCCEEDED: %08x\n", hres);
+    ok(media == NULL, "media != NULL\n");
+
+    /* Test media put/get */
+    media = NULL;
+    hres = IWMPPlayer4_get_currentMedia(player4, &media);
+    ok(hres == S_FALSE, "get_currentMedia SUCCEEDED\n");
+    ok(media == NULL, "media != NULL\n");
+
+    filename = SysAllocString(load_resource(mp3file));
+
+    SET_EXPECT(GetContainer);
+    SET_EXPECT(Invoke_USERMODE);
+    hres = IWMPPlayer4_put_URL(player4, filename);
+    ok(hres == S_OK, "IWMPPlayer4_put_URL failed: %08x\n", hres);
+    todo_wine CHECK_CALLED_OR_BROKEN(GetContainer);
+    todo_wine CHECK_CALLED(Invoke_USERMODE);
+
+    url = NULL;
+    SET_EXPECT(Invoke_USERMODE);
+    hres = IWMPPlayer4_get_URL(player4, &url);
+    ok(hres == S_OK, "IWMPPlayer4_get_URL failed: %08x\n", hres);
+    ok(0 == lstrcmpW(url, filename), "%s != %s\n", wine_dbgstr_w(url), wine_dbgstr_w(filename));
+    todo_wine CHECK_CALLED(Invoke_USERMODE);
+    SysFreeString(url);
+
+    hres = IWMPPlayer4_get_currentMedia(player4, &media);
+    ok(hres == S_OK, "get_currentMedia failed: %08x\n", hres);
+    ok(media != NULL, "media = (%p)\n", media);
+
+    url = NULL;
+    hres = IWMPMedia_get_sourceURL(media, &url);
+    ok(hres == S_OK, "IWMPMedia_get_sourceURL failed: %08x\n", hres);
+    ok(0 == lstrcmpW(url, filename), "%s != %s\n", wine_dbgstr_w(url), wine_dbgstr_w(filename));
+    SysFreeString(url);
+
+    SET_EXPECT(GetContainer);
+    hres = IWMPPlayer4_put_currentMedia(player4, media);
+    ok(hres == S_OK, "put_currentMedia failed: %08x\n", hres);
+    todo_wine CHECK_CALLED_OR_BROKEN(GetContainer);
+
+    IWMPMedia_Release(media);
+
+    hres = IWMPPlayer4_get_currentMedia(player4, &media);
+    ok(hres == S_OK, "get_currentMedia failed: %08x\n", hres);
+    ok(media != NULL, "media = (%p)\n", media);
+
+    IWMPMedia_Release(media);
 
     settings = NULL;
     hres = IWMPPlayer4_get_settings(player4, &settings);
@@ -807,8 +998,54 @@ static void test_wmp_ifaces(IOleObject *oleobj)
     ok(settings == settings_qi, "settings != settings_qi\n");
     IWMPSettings_Release(settings_qi);
 
+    /* Test few settings put/gets */
+    hres = IWMPSettings_get_autoStart(settings, &vbool);
+    ok(hres == S_OK, "Could not get autoStart from IWMPSettings: %08x\n", hres);
+    ok(vbool == VARIANT_TRUE, "autoStart = %x\n", vbool);
+    hres = IWMPSettings_put_autoStart(settings, VARIANT_FALSE);
+    ok(hres == S_OK, "Could not put autoStart in IWMPSettings: %08x\n", hres);
+    hres = IWMPSettings_get_autoStart(settings, &vbool);
+    ok(hres == S_OK, "Could not get autoStart from IWMPSettings: %08x\n", hres);
+    ok(!vbool, "autoStart = %x\n", vbool);
+
+    hres = IWMPSettings_get_invokeURLs(settings, &vbool);
+    ok(hres == S_OK, "Could not get invokeURLs from IWMPSettings: %08x\n", hres);
+    ok(vbool == VARIANT_TRUE, "invokeURLs = %x\n", vbool);
+    hres = IWMPSettings_put_invokeURLs(settings, VARIANT_FALSE);
+    ok(hres == S_OK, "Could not put invokeURLs in IWMPSettings: %08x\n", hres);
+    hres = IWMPSettings_get_invokeURLs(settings, &vbool);
+    ok(hres == S_OK, "Could not get invokeURLs from IWMPSettings: %08x\n", hres);
+    ok(!vbool, "invokeURLs = %x\n", vbool);
+
+    hres = IWMPSettings_get_enableErrorDialogs(settings, &vbool);
+    ok(hres == S_OK, "Could not get enableErrorDialogs from IWMPSettings: %08x\n", hres);
+    ok(vbool == VARIANT_FALSE, "enableErrorDialogs = %x\n", vbool);
+    hres = IWMPSettings_put_enableErrorDialogs(settings, VARIANT_TRUE);
+    ok(hres == S_OK, "Could not put enableErrorDialogs in IWMPSettings: %08x\n", hres);
+    hres = IWMPSettings_get_enableErrorDialogs(settings, &vbool);
+    ok(hres == S_OK, "Could not get enableErrorDialogs from IWMPSettings: %08x\n", hres);
+    ok(vbool == VARIANT_TRUE, "enableErrorDialogs = %x\n", vbool);
+
     IWMPSettings_Release(settings);
     IWMPPlayer4_Release(player4);
+
+    hres = IOleObject_QueryInterface(oleobj, &IID_IWMPPlayer, (void**)&player);
+    ok(hres == S_OK, "Could not get IWMPPlayer iface: %08x\n", hres);
+
+    settings = NULL;
+    hres = IWMPPlayer_get_settings(player, &settings);
+    ok(hres == S_OK, "get_settings failed: %08x\n", hres);
+    ok(settings != NULL, "settings = NULL\n");
+
+    hres = IOleObject_QueryInterface(oleobj, &IID_IWMPSettings, (void**)&settings_qi);
+    ok(hres == S_OK, "Could not get IWMPSettings iface: %08x\n", hres);
+    ok(settings == settings_qi, "settings != settings_qi\n");
+    IWMPSettings_Release(settings_qi);
+
+    IWMPSettings_Release(settings);
+    IWMPPlayer_Release(player);
+    DeleteFileW(filename);
+    SysFreeString(filename);
 }
 
 #define test_rect_size(a,b,c) _test_rect_size(__LINE__,a,b,c)
@@ -848,13 +1085,109 @@ static void test_QI(IUnknown *unk)
     hres = IUnknown_QueryInterface(unk, &IID_IQuickActivate, (void**)&tmp);
     ok(hres == E_NOINTERFACE, "Got IQuickActivate iface when no expected\n");
 
+    hres = IUnknown_QueryInterface(unk, &IID_IMarshal, (void**)&tmp);
+    ok(hres == E_NOINTERFACE, "Could not get IMarshal iface: %08x\n", hres);
+
     hres = IUnknown_QueryInterface(unk, &IID_IOleInPlaceObjectWindowless, (void**)&tmp);
     ok(hres == S_OK, "Could not get IOleInPlaceObjectWindowless iface: %08x\n", hres);
     IUnknown_Release(tmp);
+}
 
-    hres = IUnknown_QueryInterface(unk, &IID_IConnectionPointContainer, (void**)&tmp);
+static void test_IConnectionPointContainer(IOleObject *oleobj)
+{
+    IConnectionPointContainer *container;
+    IConnectionPoint *point;
+    HRESULT hres;
+
+    hres = IOleObject_QueryInterface(oleobj, &IID_IConnectionPointContainer, (void**)&container);
     ok(hres == S_OK, "Could not get IConnectionPointContainer iface: %08x\n", hres);
-    IUnknown_Release(tmp);
+
+    hres = IConnectionPointContainer_FindConnectionPoint(container, &IID_IPropertyNotifySink, &point);
+    ok(hres == CONNECT_E_NOCONNECTION, "got: %08x\n", hres);
+
+    point = NULL;
+    hres = IConnectionPointContainer_FindConnectionPoint(container, &IID_IWMPEvents, &point);
+    todo_wine ok(hres == S_OK, "got: %08x\n", hres);
+    if(point)
+        IConnectionPoint_Release(point);
+
+    point = NULL;
+    hres = IConnectionPointContainer_FindConnectionPoint(container, &IID_IWMPEvents2, &point);
+    todo_wine ok(hres == S_OK, "got: %08x\n", hres);
+    if(point)
+        IConnectionPoint_Release(point);
+
+    point = NULL;
+    hres = IConnectionPointContainer_FindConnectionPoint(container, &IID_IWMPEvents3, &point);
+    if(FAILED(hres))
+        todo_wine win_skip("IWMPEvents3 not supported\n");
+    if(point)
+        IConnectionPoint_Release(point);
+
+    point = NULL;
+    hres = IConnectionPointContainer_FindConnectionPoint(container, &IID_IWMPEvents4, &point);
+    if(FAILED(hres))
+        todo_wine win_skip("IWMPEvents4 not supported\n");
+    if(point)
+        IConnectionPoint_Release(point);
+
+    point = NULL;
+    hres = IConnectionPointContainer_FindConnectionPoint(container, &IID__WMPOCXEvents, &point);
+    ok(hres == S_OK, "got: %08x\n", hres);
+    if(point)
+        IConnectionPoint_Release(point);
+
+    IConnectionPointContainer_Release(container);
+}
+
+static void test_extent(IOleObject *oleobj)
+{
+    SIZE expected, extent;
+    DWORD dpi_x;
+    DWORD dpi_y;
+    HDC hdc;
+    HRESULT hres;
+
+    /* default aspect ratio is 96dpi / 96dpi */
+    hdc = GetDC(0);
+    dpi_x = GetDeviceCaps(hdc, LOGPIXELSX);
+    dpi_y = GetDeviceCaps(hdc, LOGPIXELSY);
+    ReleaseDC(0, hdc);
+    if (dpi_x != 96 || dpi_y != 96)
+        trace("dpi: %d / %d\n", dpi_y, dpi_y);
+
+    extent.cx = extent.cy = 0xdeadbeef;
+    hres = IOleObject_GetExtent(oleobj, DVASPECT_CONTENT, &extent);
+    ok(hres == S_OK, "GetExtent failed: %08x\n", hres);
+    expected.cx = MulDiv(192, 2540, dpi_x);
+    expected.cy = MulDiv(192, 2540, dpi_y);
+    ok(extent.cx == expected.cx && extent.cy == expected.cy, "size = {%d %d} (expected %d %d)\n",
+       extent.cx, extent.cy, expected.cx, expected.cy );
+
+    extent.cx = 800;
+    extent.cy = 700;
+    hres = IOleObject_SetExtent(oleobj, DVASPECT_CONTENT, &extent);
+    ok(hres == S_OK, "SetExtent failed: %08x\n", hres);
+
+    extent.cx = extent.cy = 0xdeadbeef;
+    hres = IOleObject_GetExtent(oleobj, DVASPECT_CONTENT, &extent);
+    ok(hres == S_OK, "GetExtent failed: %08x\n", hres);
+    ok(extent.cx == 800 && extent.cy == 700, "size = {%d %d}\n", extent.cx, extent.cy);
+
+    hres = IOleObject_GetExtent(oleobj, 0, &extent);
+    ok(hres == E_FAIL, "GetExtent failed: %08x\n", hres);
+    hres = IOleObject_GetExtent(oleobj, 7, &extent);
+    ok(hres == E_FAIL, "GetExtent failed: %08x\n", hres);
+
+    extent.cx = 900;
+    extent.cy = 800;
+    hres = IOleObject_SetExtent(oleobj, DVASPECT_CONTENT, &expected);
+    ok(hres == S_OK, "SetExtent failed: %08x\n", hres);
+
+    hres = IOleObject_SetExtent(oleobj, 0, &expected);
+    ok(hres == DV_E_DVASPECT, "SetExtent failed: %08x\n", hres);
+    hres = IOleObject_SetExtent(oleobj, 7, &expected);
+    ok(hres == DV_E_DVASPECT, "SetExtent failed: %08x\n", hres);
 }
 
 static void test_wmp(void)
@@ -902,6 +1235,8 @@ static void test_wmp(void)
     IProvideClassInfo2_Release(class_info);
 
     test_QI((IUnknown*)oleobj);
+    test_IConnectionPointContainer(oleobj);
+    test_extent(oleobj);
 
     hres = IOleObject_GetMiscStatus(oleobj, DVASPECT_CONTENT, &misc_status);
     ok(hres == S_OK, "GetMiscStatus failed: %08x\n", hres);
@@ -997,6 +1332,8 @@ static void test_wmp(void)
     hres = IOleObject_GetClientSite(oleobj, &client_site);
     ok(hres == E_FAIL || broken(hres == S_OK), "GetClientSite failed: %08x\n", hres);
     ok(!client_site, "client_site = %p\n", client_site);
+
+    test_ConnectionPoint(oleobj);
 
     IPersistStreamInit_Release(psi);
     IOleInPlaceObject_Release(ipobj);

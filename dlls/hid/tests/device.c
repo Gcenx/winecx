@@ -167,7 +167,7 @@ static void process_data(HIDP_CAPS Caps, PHIDP_PREPARSED_DATA ppd, CHAR *data, D
         {
             ULONG usage_length = 100;
             status = HidP_GetUsages(HidP_Input, i, 0, button_pages, &usage_length, ppd, data, data_length);
-            ok (status == HIDP_STATUS_SUCCESS || (status != HIDP_STATUS_SUCCESS && usage_length == 0),
+            ok (status == HIDP_STATUS_SUCCESS || usage_length == 0,
                 "HidP_GetUsages failed (%x) but usage length still %i\n", status, usage_length);
             if (usage_length)
             {
@@ -183,7 +183,7 @@ static void process_data(HIDP_CAPS Caps, PHIDP_PREPARSED_DATA ppd, CHAR *data, D
                 {
                     for (j=count; j < count+15 && j < usage_length; j++)
                     {
-                        CHAR btn[5];
+                        CHAR btn[7];
                         sprintf(btn, "%i ", button_pages[j]);
                         strcat(report, btn);
                     }

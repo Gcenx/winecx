@@ -753,6 +753,9 @@ UINT ACTION_RegisterClassInfo(MSIPACKAGE *package)
     MSICLASS *cls;
     UINT r;
 
+    if (package->script == SCRIPT_NONE)
+        return msi_schedule_action(package, SCRIPT_INSTALL, szRegisterClassInfo);
+
     r = load_classes_and_such( package );
     if (r != ERROR_SUCCESS)
         return r;
@@ -902,7 +905,7 @@ UINT ACTION_RegisterClassInfo(MSIPACKAGE *package)
         
         uirow = MSI_CreateRecord(1);
         MSI_RecordSetStringW( uirow, 1, cls->clsid );
-        msi_ui_actiondata( package, szRegisterClassInfo, uirow );
+        MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
         msiobj_release(&uirow->hdr);
     }
     RegCloseKey(hkey);
@@ -917,6 +920,9 @@ UINT ACTION_UnregisterClassInfo( MSIPACKAGE *package )
     MSICLASS *cls;
     HKEY hkey, hkey2;
     UINT r;
+
+    if (package->script == SCRIPT_NONE)
+        return msi_schedule_action(package, SCRIPT_INSTALL, szUnregisterClassInfo);
 
     r = load_classes_and_such( package );
     if (r != ERROR_SUCCESS)
@@ -994,7 +1000,7 @@ UINT ACTION_UnregisterClassInfo( MSIPACKAGE *package )
 
         uirow = MSI_CreateRecord( 1 );
         MSI_RecordSetStringW( uirow, 1, cls->clsid );
-        msi_ui_actiondata( package, szUnregisterClassInfo, uirow );
+        MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
         msiobj_release( &uirow->hdr );
     }
     RegCloseKey( hkey );
@@ -1083,6 +1089,9 @@ UINT ACTION_RegisterProgIdInfo(MSIPACKAGE *package)
     MSIRECORD *uirow;
     UINT r;
 
+    if (package->script == SCRIPT_NONE)
+        return msi_schedule_action(package, SCRIPT_INSTALL, szRegisterProgIdInfo);
+
     r = load_classes_and_such( package );
     if (r != ERROR_SUCCESS)
         return r;
@@ -1100,7 +1109,7 @@ UINT ACTION_RegisterProgIdInfo(MSIPACKAGE *package)
 
         uirow = MSI_CreateRecord( 1 );
         MSI_RecordSetStringW( uirow, 1, progid->ProgID );
-        msi_ui_actiondata( package, szRegisterProgIdInfo, uirow );
+        MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
         msiobj_release( &uirow->hdr );
     }
     return ERROR_SUCCESS;
@@ -1143,6 +1152,9 @@ UINT ACTION_UnregisterProgIdInfo( MSIPACKAGE *package )
     LONG res;
     UINT r;
 
+    if (package->script == SCRIPT_NONE)
+        return msi_schedule_action(package, SCRIPT_INSTALL, szUnregisterProgIdInfo);
+
     r = load_classes_and_such( package );
     if (r != ERROR_SUCCESS)
         return r;
@@ -1163,7 +1175,7 @@ UINT ACTION_UnregisterProgIdInfo( MSIPACKAGE *package )
 
         uirow = MSI_CreateRecord( 1 );
         MSI_RecordSetStringW( uirow, 1, progid->ProgID );
-        msi_ui_actiondata( package, szUnregisterProgIdInfo, uirow );
+        MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
         msiobj_release( &uirow->hdr );
     }
     return ERROR_SUCCESS;
@@ -1254,6 +1266,9 @@ UINT ACTION_RegisterExtensionInfo(MSIPACKAGE *package)
     BOOL install_on_demand = TRUE;
     LONG res;
     UINT r;
+
+    if (package->script == SCRIPT_NONE)
+        return msi_schedule_action(package, SCRIPT_INSTALL, szRegisterExtensionInfo);
 
     r = load_classes_and_such( package );
     if (r != ERROR_SUCCESS)
@@ -1350,7 +1365,7 @@ UINT ACTION_RegisterExtensionInfo(MSIPACKAGE *package)
 
         uirow = MSI_CreateRecord(1);
         MSI_RecordSetStringW( uirow, 1, ext->Extension );
-        msi_ui_actiondata( package, szRegisterExtensionInfo, uirow );
+        MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
         msiobj_release(&uirow->hdr);
     }
     return ERROR_SUCCESS;
@@ -1362,6 +1377,9 @@ UINT ACTION_UnregisterExtensionInfo( MSIPACKAGE *package )
     MSIRECORD *uirow;
     LONG res;
     UINT r;
+
+    if (package->script == SCRIPT_NONE)
+        return msi_schedule_action(package, SCRIPT_INSTALL, szUnregisterExtensionInfo);
 
     r = load_classes_and_such( package );
     if (r != ERROR_SUCCESS)
@@ -1433,7 +1451,7 @@ UINT ACTION_UnregisterExtensionInfo( MSIPACKAGE *package )
 
         uirow = MSI_CreateRecord( 1 );
         MSI_RecordSetStringW( uirow, 1, ext->Extension );
-        msi_ui_actiondata( package, szUnregisterExtensionInfo, uirow );
+        MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
         msiobj_release( &uirow->hdr );
     }
     return ERROR_SUCCESS;
@@ -1445,6 +1463,9 @@ UINT ACTION_RegisterMIMEInfo(MSIPACKAGE *package)
     MSIRECORD *uirow;
     MSIMIME *mt;
     UINT r;
+
+    if (package->script == SCRIPT_NONE)
+        return msi_schedule_action(package, SCRIPT_INSTALL, szRegisterMIMEInfo);
 
     r = load_classes_and_such( package );
     if (r != ERROR_SUCCESS)
@@ -1488,7 +1509,7 @@ UINT ACTION_RegisterMIMEInfo(MSIPACKAGE *package)
         uirow = MSI_CreateRecord( 2 );
         MSI_RecordSetStringW( uirow, 1, mt->ContentType );
         MSI_RecordSetStringW( uirow, 2, mt->suffix );
-        msi_ui_actiondata( package, szRegisterMIMEInfo, uirow );
+        MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
         msiobj_release( &uirow->hdr );
     }
     return ERROR_SUCCESS;
@@ -1499,6 +1520,9 @@ UINT ACTION_UnregisterMIMEInfo( MSIPACKAGE *package )
     MSIRECORD *uirow;
     MSIMIME *mime;
     UINT r;
+
+    if (package->script == SCRIPT_NONE)
+        return msi_schedule_action(package, SCRIPT_INSTALL, szUnregisterMIMEInfo);
 
     r = load_classes_and_such( package );
     if (r != ERROR_SUCCESS)
@@ -1532,7 +1556,7 @@ UINT ACTION_UnregisterMIMEInfo( MSIPACKAGE *package )
         uirow = MSI_CreateRecord( 2 );
         MSI_RecordSetStringW( uirow, 1, mime->ContentType );
         MSI_RecordSetStringW( uirow, 2, mime->suffix );
-        msi_ui_actiondata( package, szUnregisterMIMEInfo, uirow );
+        MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
         msiobj_release( &uirow->hdr );
     }
     return ERROR_SUCCESS;

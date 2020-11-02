@@ -48,7 +48,6 @@ static HINSTANCE instance;
  * CRYPTHASH - hash objects
  */
 #define RSAENH_MAGIC_HASH           0x85938417u
-#define RSAENH_MAX_HASH_SIZE        104
 #define RSAENH_HASHSTATE_HASHING    1
 #define RSAENH_HASHSTATE_FINISHED   2
 typedef struct _RSAENH_TLS1PRF_PARAMS
@@ -636,7 +635,7 @@ static inline BOOL init_hash(CRYPTHASH *pCryptHash) {
                 if (!pAlgInfo) return FALSE;
                 pCryptHash->dwHashSize = pAlgInfo->dwDefaultLen >> 3;
                 init_hash_impl(pCryptHash->pHMACInfo->HashAlgid, &pCryptHash->context);
-                update_hash_impl(pCryptHash->pHMACInfo->HashAlgid, &pCryptHash->context,
+                update_hash_impl(&pCryptHash->context,
                                  pCryptHash->pHMACInfo->pbInnerString, 
                                  pCryptHash->pHMACInfo->cbInnerString);
             }
@@ -672,8 +671,7 @@ static inline void update_hash(CRYPTHASH *pCryptHash, const BYTE *pbData, DWORD 
     {
         case CALG_HMAC:
             if (pCryptHash->pHMACInfo) 
-                update_hash_impl(pCryptHash->pHMACInfo->HashAlgid, &pCryptHash->context, 
-                                 pbData, dwDataLen);
+                update_hash_impl(&pCryptHash->context,  pbData, dwDataLen);
             break;
 
         case CALG_MAC:
@@ -686,7 +684,7 @@ static inline void update_hash(CRYPTHASH *pCryptHash, const BYTE *pbData, DWORD 
             break;
 
         default:
-            update_hash_impl(pCryptHash->aiAlgid, &pCryptHash->context, pbData, dwDataLen);
+            update_hash_impl(&pCryptHash->context, pbData, dwDataLen);
     }
 }
 
@@ -708,17 +706,15 @@ static inline void finalize_hash(CRYPTHASH *pCryptHash) {
             if (pCryptHash->pHMACInfo) {
                 BYTE abHashValue[RSAENH_MAX_HASH_SIZE];
 
-                finalize_hash_impl(pCryptHash->pHMACInfo->HashAlgid, &pCryptHash->context, 
-                                   pCryptHash->abHashValue);
+                finalize_hash_impl(&pCryptHash->context, pCryptHash->abHashValue);
                 memcpy(abHashValue, pCryptHash->abHashValue, pCryptHash->dwHashSize);
                 init_hash_impl(pCryptHash->pHMACInfo->HashAlgid, &pCryptHash->context);
-                update_hash_impl(pCryptHash->pHMACInfo->HashAlgid, &pCryptHash->context,
+                update_hash_impl(&pCryptHash->context,
                                  pCryptHash->pHMACInfo->pbOuterString, 
                                  pCryptHash->pHMACInfo->cbOuterString);
-                update_hash_impl(pCryptHash->pHMACInfo->HashAlgid, &pCryptHash->context,
+                update_hash_impl(&pCryptHash->context,
                                  abHashValue, pCryptHash->dwHashSize);
-                finalize_hash_impl(pCryptHash->pHMACInfo->HashAlgid, &pCryptHash->context,
-                                   pCryptHash->abHashValue);
+                finalize_hash_impl(&pCryptHash->context, pCryptHash->abHashValue);
             } 
             break;
 
@@ -729,7 +725,7 @@ static inline void finalize_hash(CRYPTHASH *pCryptHash) {
             break;
 
         default:
-            finalize_hash_impl(pCryptHash->aiAlgid, &pCryptHash->context, pCryptHash->abHashValue);
+            finalize_hash_impl(&pCryptHash->context, pCryptHash->abHashValue);
     }
 }
 
@@ -1089,7 +1085,7 @@ static void store_key_permissions(HCRYPTKEY hCryptKey, HKEY hKey, DWORD dwKeySpe
  */
 static BOOL create_container_key(KEYCONTAINER *pKeyContainer, REGSAM sam, HKEY *phKey)
 {
-    CHAR szRSABase[MAX_PATH];
+    CHAR szRSABase[sizeof(RSAENH_REGKEY) + MAX_PATH];
     HKEY hRootKey;
 
     sprintf(szRSABase, RSAENH_REGKEY, pKeyContainer->szName);
@@ -1120,7 +1116,7 @@ static BOOL create_container_key(KEYCONTAINER *pKeyContainer, REGSAM sam, HKEY *
  */
 static BOOL open_container_key(LPCSTR pszContainerName, DWORD dwFlags, REGSAM access, HKEY *phKey)
 {
-    CHAR szRSABase[MAX_PATH];
+    CHAR szRSABase[sizeof(RSAENH_REGKEY) + MAX_PATH];
     HKEY hRootKey;
 
     sprintf(szRSABase, RSAENH_REGKEY, pszContainerName);
@@ -1147,24 +1143,21 @@ static BOOL open_container_key(LPCSTR pszContainerName, DWORD dwFlags, REGSAM ac
  */
 static BOOL delete_container_key(LPCSTR pszContainerName, DWORD dwFlags)
 {
-    CHAR szRegKey[MAX_PATH];
+    CHAR szRegKey[sizeof(RSAENH_REGKEY) + MAX_PATH];
+    HKEY hRootKey;
 
-    if (snprintf(szRegKey, MAX_PATH, RSAENH_REGKEY, pszContainerName) >= MAX_PATH) {
-        SetLastError(NTE_BAD_KEYSET_PARAM);
-        return FALSE;
+    sprintf(szRegKey, RSAENH_REGKEY, pszContainerName);
+
+    if (dwFlags & CRYPT_MACHINE_KEYSET)
+        hRootKey = HKEY_LOCAL_MACHINE;
+    else
+        hRootKey = HKEY_CURRENT_USER;
+    if (!RegDeleteKeyA(hRootKey, szRegKey)) {
+        SetLastError(ERROR_SUCCESS);
+        return TRUE;
     } else {
-        HKEY hRootKey;
-        if (dwFlags & CRYPT_MACHINE_KEYSET)
-            hRootKey = HKEY_LOCAL_MACHINE;
-        else
-            hRootKey = HKEY_CURRENT_USER;
-        if (!RegDeleteKeyA(hRootKey, szRegKey)) {
-            SetLastError(ERROR_SUCCESS);
-            return TRUE;
-        } else {
-            SetLastError(NTE_BAD_KEYSET);
-            return FALSE;
-        }
+        SetLastError(NTE_BAD_KEYSET);
+        return FALSE;
     }
 }
 
@@ -2073,7 +2066,7 @@ BOOL WINAPI RSAENH_CPDuplicateHash(HCRYPTPROV hUID, HCRYPTHASH hHash, DWORD *pdw
     if (*phHash != (HCRYPTHASH)INVALID_HANDLE_VALUE)
     {
         *pDestHash = *pSrcHash;
-        duplicate_hash_impl(pSrcHash->aiAlgid, &pSrcHash->context, &pDestHash->context);
+        duplicate_hash_impl(&pSrcHash->context, &pDestHash->context);
         copy_hmac_info(&pDestHash->pHMACInfo, pSrcHash->pHMACInfo);
         copy_data_blob(&pDestHash->tpPRFParams.blobLabel, &pSrcHash->tpPRFParams.blobLabel);
         copy_data_blob(&pDestHash->tpPRFParams.blobSeed, &pSrcHash->tpPRFParams.blobSeed);

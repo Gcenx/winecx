@@ -69,6 +69,7 @@ static nsresult (CDECL *NS_CStringSetData)(nsACString*,const char*,PRUint32);
 static nsresult (CDECL *NS_NewLocalFile)(const nsAString*,cpp_bool,nsIFile**);
 static PRUint32 (CDECL *NS_StringGetData)(const nsAString*,const PRUnichar **,cpp_bool*);
 static PRUint32 (CDECL *NS_CStringGetData)(const nsACString*,const char**,cpp_bool*);
+static cpp_bool (CDECL *NS_StringGetIsVoid)(const nsAString*);
 static void* (CDECL *NS_Alloc)(SIZE_T);
 static void (CDECL *NS_Free)(void*);
 
@@ -241,7 +242,7 @@ static nsresult create_profile_directory(void)
 {
     static const WCHAR wine_geckoW[] = {'\\','w','i','n','e','_','g','e','c','k','o',0};
 
-    WCHAR path[MAX_PATH + sizeof(wine_geckoW)/sizeof(WCHAR)];
+    WCHAR path[MAX_PATH + ARRAY_SIZE(wine_geckoW)];
     cpp_bool exists;
     nsresult nsres;
     HRESULT hres;
@@ -308,7 +309,7 @@ static nsresult NSAPI nsDirectoryServiceProvider2_GetFiles(nsIDirectoryServicePr
         if(!plugin_directory) {
             static const WCHAR gecko_pluginW[] = {'\\','g','e','c','k','o','\\','p','l','u','g','i','n',0};
 
-            len = GetSystemDirectoryW(plugin_path, (sizeof(plugin_path)-sizeof(gecko_pluginW))/sizeof(WCHAR)+1);
+            len = GetSystemDirectoryW(plugin_path, ARRAY_SIZE(plugin_path)-ARRAY_SIZE(gecko_pluginW)+1);
             if(!len)
                 return NS_ERROR_UNEXPECTED;
 
@@ -412,7 +413,7 @@ static BOOL install_wine_gecko(void)
     static const WCHAR argsW[] =
         {' ','a','p','p','w','i','z','.','c','p','l',' ','i','n','s','t','a','l','l','_','g','e','c','k','o',0};
 
-    len = GetSystemDirectoryW(app, MAX_PATH-sizeof(controlW)/sizeof(WCHAR));
+    len = GetSystemDirectoryW(app, MAX_PATH-ARRAY_SIZE(controlW));
     memcpy(app+len, controlW, sizeof(controlW));
 
     args = heap_alloc(len*sizeof(WCHAR) + sizeof(controlW) + sizeof(argsW));
@@ -420,7 +421,7 @@ static BOOL install_wine_gecko(void)
         return FALSE;
 
     memcpy(args, app, len*sizeof(WCHAR) + sizeof(controlW));
-    memcpy(args + len + sizeof(controlW)/sizeof(WCHAR)-1, argsW, sizeof(argsW));
+    memcpy(args + len + ARRAY_SIZE(controlW)-1, argsW, sizeof(argsW));
 
     TRACE("starting %s\n", debugstr_w(args));
 
@@ -518,6 +519,7 @@ static BOOL load_xul(const PRUnichar *gre_path)
     NS_DLSYM(NS_NewLocalFile);
     NS_DLSYM(NS_StringGetData);
     NS_DLSYM(NS_CStringGetData);
+    NS_DLSYM(NS_StringGetIsVoid);
     NS_DLSYM(NS_Alloc);
     NS_DLSYM(NS_Free);
     NS_DLSYM(ccref_incr);
@@ -864,6 +866,38 @@ HRESULT return_nsstr(nsresult nsres, nsAString *nsstr, BSTR *p)
             return E_OUTOFMEMORY;
     }else {
         *p = NULL;
+    }
+
+    nsAString_Finish(nsstr);
+    return S_OK;
+}
+
+HRESULT return_nsstr_variant(nsresult nsres, nsAString *nsstr, VARIANT *p)
+{
+    const PRUnichar *str;
+
+    if(NS_FAILED(nsres)) {
+        ERR("failed: %08x\n", nsres);
+        nsAString_Finish(nsstr);
+        return E_FAIL;
+    }
+
+    if(NS_StringGetIsVoid(nsstr)) {
+        TRACE("ret null\n");
+        V_VT(p) = VT_NULL;
+    }else {
+        nsAString_GetData(nsstr, &str);
+        TRACE("ret %s\n", debugstr_w(str));
+        if(*str) {
+            V_BSTR(p) = SysAllocString(str);
+            if(!V_BSTR(p)) {
+                nsAString_Finish(nsstr);
+                return E_OUTOFMEMORY;
+            }
+        }else {
+            V_BSTR(p) = NULL;
+        }
+        V_VT(p) = VT_BSTR;
     }
 
     nsAString_Finish(nsstr);
@@ -1302,8 +1336,6 @@ static nsrefcnt NSAPI nsWebBrowserChrome_Release(nsIWebBrowserChrome *iface)
     TRACE("(%p) ref=%d\n", This, ref);
 
     if(!ref) {
-        if(This->parent)
-            nsIWebBrowserChrome_Release(&This->parent->nsIWebBrowserChrome_iface);
         if(This->weak_reference) {
             This->weak_reference->nscontainer = NULL;
             nsIWeakReference_Release(&This->weak_reference->nsIWeakReference_iface);
@@ -1452,8 +1484,9 @@ static nsresult NSAPI nsContextMenuListener_OnShowContextMenu(nsIContextMenuList
         UINT32 aContextFlags, nsIDOMEvent *aEvent, nsIDOMNode *aNode)
 {
     NSContainer *This = impl_from_nsIContextMenuListener(iface);
-    nsIDOMMouseEvent *event;
+    nsIDOMMouseEvent *mouse_event;
     HTMLDOMNode *node;
+    DOMEvent *event;
     POINT pt;
     DWORD dwID = CONTEXT_MENU_DEFAULT;
     nsresult nsres;
@@ -1461,18 +1494,22 @@ static nsresult NSAPI nsContextMenuListener_OnShowContextMenu(nsIContextMenuList
 
     TRACE("(%p)->(%08x %p %p)\n", This, aContextFlags, aEvent, aNode);
 
-    hres = get_node(This->doc->basedoc.doc_node, aNode, TRUE, &node);
+    hres = get_node(aNode, TRUE, &node);
     if(FAILED(hres))
         return NS_ERROR_FAILURE;
 
-    fire_event(This->doc->basedoc.doc_node /* FIXME */, EVENTID_CONTEXTMENU, TRUE, node, aEvent, NULL);
+    hres = create_event_from_nsevent(aEvent, &event);
+    if(SUCCEEDED(hres)) {
+        dispatch_event(&node->event_target, event);
+        IDOMEvent_Release(&event->IDOMEvent_iface);
+    }
 
-    nsres = nsIDOMEvent_QueryInterface(aEvent, &IID_nsIDOMMouseEvent, (void**)&event);
+    nsres = nsIDOMEvent_QueryInterface(aEvent, &IID_nsIDOMMouseEvent, (void**)&mouse_event);
     assert(NS_SUCCEEDED(nsres));
 
-    nsIDOMMouseEvent_GetScreenX(event, &pt.x);
-    nsIDOMMouseEvent_GetScreenY(event, &pt.y);
-    nsIDOMMouseEvent_Release(event);
+    nsIDOMMouseEvent_GetScreenX(mouse_event, &pt.x);
+    nsIDOMMouseEvent_GetScreenY(mouse_event, &pt.y);
+    nsIDOMMouseEvent_Release(mouse_event);
 
     switch(aContextFlags) {
     case CONTEXT_NONE:
@@ -2163,7 +2200,6 @@ void NSContainer_Release(NSContainer *This)
  * This will be removed after the next Gecko update, that will change calling convention on Gecko side.
  */
 #ifdef __i386__
-extern void *call_thiscall_func;
 __ASM_GLOBAL_FUNC(call_thiscall_func,
         "popl %eax\n\t"
         "popl %edx\n\t"

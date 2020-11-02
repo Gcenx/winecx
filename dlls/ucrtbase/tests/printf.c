@@ -152,7 +152,7 @@ static BOOL init( void )
     return TRUE;
 }
 
-static int __cdecl vsprintf_wrapper(unsigned __int64 options, char *str,
+static int WINAPIV vsprintf_wrapper(unsigned __int64 options, char *str,
                                     size_t len, const char *format, ...)
 {
     int ret;
@@ -171,7 +171,7 @@ static void test_snprintf (void)
     unsigned int i;
 
     /* Legacy _snprintf style termination */
-    for (i = 0; i < sizeof tests / sizeof tests[0]; i++) {
+    for (i = 0; i < ARRAY_SIZE(tests); i++) {
         const char *fmt  = tests[i];
         const int expect = strlen(fmt) > bufsiz ? -1 : strlen(fmt);
         const int n      = vsprintf_wrapper (UCRTBASE_PRINTF_LEGACY_VSPRINTF_NULL_TERMINATION, buffer, bufsiz, fmt);
@@ -184,7 +184,7 @@ static void test_snprintf (void)
     }
 
     /* C99 snprintf style termination */
-    for (i = 0; i < sizeof tests / sizeof tests[0]; i++) {
+    for (i = 0; i < ARRAY_SIZE(tests); i++) {
         const char *fmt  = tests[i];
         const int expect = strlen(fmt);
         const int n      = vsprintf_wrapper (UCRTBASE_PRINTF_STANDARD_SNPRINTF_BEHAVIOUR, buffer, bufsiz, fmt);
@@ -199,7 +199,7 @@ static void test_snprintf (void)
     }
 
     /* swprintf style termination */
-    for (i = 0; i < sizeof tests / sizeof tests[0]; i++) {
+    for (i = 0; i < ARRAY_SIZE(tests); i++) {
         const char *fmt  = tests[i];
         const int expect = strlen(fmt) >= bufsiz ? -2 : strlen(fmt);
         const int n      = vsprintf_wrapper (0, buffer, bufsiz, fmt);
@@ -215,9 +215,13 @@ static void test_snprintf (void)
 
     ok (vsprintf_wrapper (UCRTBASE_PRINTF_STANDARD_SNPRINTF_BEHAVIOUR, NULL, 0, "abcd") == 4,
         "Failure to snprintf to NULL\n");
+    ok (vsprintf_wrapper (UCRTBASE_PRINTF_LEGACY_VSPRINTF_NULL_TERMINATION, NULL, 0, "abcd") == 4,
+        "Failure to snprintf to NULL\n");
+    ok (vsprintf_wrapper (0, NULL, 0, "abcd") == 4,
+        "Failure to snprintf to NULL\n");
 }
 
-static int __cdecl vswprintf_wrapper(unsigned __int64 options, wchar_t *str,
+static int WINAPIV vswprintf_wrapper(unsigned __int64 options, wchar_t *str,
                                      size_t len, const wchar_t *format, ...)
 {
     int ret;
@@ -238,11 +242,11 @@ static void test_swprintf (void)
 
     wchar_t buffer[8];
     char narrow[8], narrow_fmt[16];
-    const int bufsiz = sizeof buffer / sizeof buffer[0];
+    const int bufsiz = ARRAY_SIZE(buffer);
     unsigned int i;
 
     /* Legacy _snprintf style termination */
-    for (i = 0; i < sizeof tests / sizeof tests[0]; i++) {
+    for (i = 0; i < ARRAY_SIZE(tests); i++) {
         const wchar_t *fmt = tests[i];
         const int expect   = wcslen(fmt) > bufsiz ? -1 : wcslen(fmt);
         const int n        = vswprintf_wrapper (UCRTBASE_PRINTF_LEGACY_VSPRINTF_NULL_TERMINATION, buffer, bufsiz, fmt);
@@ -257,7 +261,7 @@ static void test_swprintf (void)
     }
 
     /* C99 snprintf style termination */
-    for (i = 0; i < sizeof tests / sizeof tests[0]; i++) {
+    for (i = 0; i < ARRAY_SIZE(tests); i++) {
         const wchar_t *fmt = tests[i];
         const int expect   = wcslen(fmt);
         const int n        = vswprintf_wrapper (UCRTBASE_PRINTF_STANDARD_SNPRINTF_BEHAVIOUR, buffer, bufsiz, fmt);
@@ -274,7 +278,7 @@ static void test_swprintf (void)
     }
 
     /* swprintf style termination */
-    for (i = 0; i < sizeof tests / sizeof tests[0]; i++) {
+    for (i = 0; i < ARRAY_SIZE(tests); i++) {
         const wchar_t *fmt = tests[i];
         const int expect   = wcslen(fmt) >= bufsiz ? -2 : wcslen(fmt);
         const int n        = vswprintf_wrapper (0, buffer, bufsiz, fmt);
@@ -289,9 +293,16 @@ static void test_swprintf (void)
         ok (buffer[valid] == '\0',
             "\"%s\": Missing null termination (ret %d) - is %d\n", narrow_fmt, n, buffer[valid]);
     }
+
+    ok (vswprintf_wrapper (UCRTBASE_PRINTF_STANDARD_SNPRINTF_BEHAVIOUR, NULL, 0, str_short) == 5,
+        "Failure to swprintf to NULL\n");
+    ok (vswprintf_wrapper (UCRTBASE_PRINTF_LEGACY_VSPRINTF_NULL_TERMINATION, NULL, 0, str_short) == 5,
+        "Failure to swprintf to NULL\n");
+    ok (vswprintf_wrapper (0, NULL, 0, str_short) == 5,
+        "Failure to swprintf to NULL\n");
 }
 
-static int __cdecl vfprintf_wrapper(FILE *file,
+static int WINAPIV vfprintf_wrapper(FILE *file,
                                     const char *format, ...)
 {
     int ret;
@@ -364,7 +375,7 @@ static void test_fprintf(void)
     unlink(file_name);
 }
 
-static int __cdecl vfwprintf_wrapper(FILE *file,
+static int WINAPIV vfwprintf_wrapper(FILE *file,
                                      const wchar_t *format, ...)
 {
     int ret;
@@ -400,12 +411,12 @@ static void test_fwprintf(void)
     p_fclose(fp);
 
     fp = p_fopen(file_name, "rb");
-    p_fgetws(bufw, sizeof(bufw)/sizeof(bufw[0]), fp);
+    p_fgetws(bufw, ARRAY_SIZE(bufw), fp);
     ret = p_ftell(fp);
     ok(ret == 24, "ftell returned %d\n", ret);
     ok(!wcscmp(bufw, simple), "buf = %s\n", wine_dbgstr_w(bufw));
 
-    p_fgetws(bufw, sizeof(bufw)/sizeof(bufw[0]), fp);
+    p_fgetws(bufw, ARRAY_SIZE(bufw), fp);
     ret = p_ftell(fp);
     ok(ret == 52, "ret = %d\n", ret);
     ok(!memcmp(bufw, cont, 28), "buf = %s\n", wine_dbgstr_w(bufw));
@@ -467,7 +478,7 @@ static void test_fwprintf(void)
             "Cannot reset invalid parameter handler\n");
 }
 
-static int __cdecl _vsnprintf_s_wrapper(char *str, size_t sizeOfBuffer,
+static int WINAPIV _vsnprintf_s_wrapper(char *str, size_t sizeOfBuffer,
                                         size_t count, const char *format, ...)
 {
     int ret;
@@ -519,7 +530,7 @@ static void test_vsnprintf_s(void)
     ok( !strcmp(out1, buffer), "buffer wrong, got=%s\n", buffer);
 }
 
-static int __cdecl _vsnwprintf_s_wrapper(WCHAR *str, size_t sizeOfBuffer,
+static int WINAPIV _vsnwprintf_s_wrapper(WCHAR *str, size_t sizeOfBuffer,
                                         size_t count, const WCHAR *format, ...)
 {
     int ret;

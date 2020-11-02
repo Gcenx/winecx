@@ -46,7 +46,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(reg);
 
-#define SHARED_DATA     ((KSHARED_USER_DATA*)0x7ffe0000)
+extern KSHARED_USER_DATA* CDECL __wine_user_shared_data(void);
 
 /****************************************************************************
  *		QueryPerformanceCounter (KERNEL32.@)
@@ -206,7 +206,7 @@ BOOL WINAPI IsProcessorFeaturePresent (
 	DWORD feature	/* [in] Feature number, (PF_ constants from "winnt.h") */) 
 {
   if (feature < PROCESSOR_FEATURE_MAX)
-    return SHARED_DATA->ProcessorFeatures[feature];
+    return __wine_user_shared_data()->ProcessorFeatures[feature];
   else
     return FALSE;
 }
@@ -302,4 +302,68 @@ SIZE_T WINAPI GetLargePageMinimum(void)
 #endif
     FIXME("Not implemented on your platform/architecture.\n");
     return 0;
+}
+
+/***********************************************************************
+ *           GetActiveProcessorGroupCount (KERNEL32.@)
+ */
+WORD WINAPI GetActiveProcessorGroupCount(void)
+{
+    FIXME("semi-stub, always returning 1\n");
+    return 1;
+}
+
+/***********************************************************************
+ *           GetActiveProcessorCount (KERNEL32.@)
+ */
+DWORD WINAPI GetActiveProcessorCount(WORD group)
+{
+    SYSTEM_INFO si;
+    DWORD cpus;
+
+    GetSystemInfo( &si );
+    cpus = si.dwNumberOfProcessors;
+
+    FIXME("semi-stub, returning %u\n", cpus);
+    return cpus;
+}
+
+/***********************************************************************
+ *           GetEnabledXStateFeatures (KERNEL32.@)
+ */
+DWORD64 WINAPI GetEnabledXStateFeatures(void)
+{
+    FIXME("\n");
+    return 0;
+}
+
+/***********************************************************************
+ *           GetSystemFirmwareTable (KERNEL32.@)
+ */
+UINT WINAPI GetSystemFirmwareTable(DWORD provider, DWORD id, void *buffer, DWORD size)
+{
+    ULONG buffer_size = FIELD_OFFSET(SYSTEM_FIRMWARE_TABLE_INFORMATION, TableBuffer) + size;
+    SYSTEM_FIRMWARE_TABLE_INFORMATION *sfti = HeapAlloc(GetProcessHeap(), 0, buffer_size);
+    NTSTATUS status;
+
+    TRACE("(0x%08x, 0x%08x, %p, %d)\n", provider, id, buffer, size);
+
+    if (!sfti)
+    {
+        SetLastError(ERROR_OUTOFMEMORY);
+        return 0;
+    }
+
+    sfti->ProviderSignature = provider;
+    sfti->Action = SystemFirmwareTable_Get;
+    sfti->TableID = id;
+
+    status = NtQuerySystemInformation(SystemFirmwareTableInformation, sfti, buffer_size, &buffer_size);
+    buffer_size -= FIELD_OFFSET(SYSTEM_FIRMWARE_TABLE_INFORMATION, TableBuffer);
+    if (buffer_size <= size)
+        memcpy(buffer, sfti->TableBuffer, buffer_size);
+
+    if (status) SetLastError(RtlNtStatusToDosError(status));
+    HeapFree(GetProcessHeap(), 0, sfti);
+    return buffer_size;
 }

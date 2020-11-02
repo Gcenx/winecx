@@ -38,6 +38,7 @@ static BOOL   (WINAPI *pFindActCtxSectionStringW)(DWORD,const GUID *,ULONG,LPCWS
 static BOOL   (WINAPI *pGetCurrentActCtx)(HANDLE *);
 static BOOL   (WINAPI *pIsDebuggerPresent)(void);
 static BOOL   (WINAPI *pQueryActCtxW)(DWORD,HANDLE,PVOID,ULONG,PVOID,SIZE_T,SIZE_T*);
+static BOOL   (WINAPI *pQueryActCtxSettingsW)(DWORD,HANDLE,LPCWSTR,LPCWSTR,LPWSTR,SIZE_T,SIZE_T*);
 static VOID   (WINAPI *pReleaseActCtx)(HANDLE);
 static BOOL   (WINAPI *pFindActCtxSectionGuid)(DWORD,const GUID*,ULONG,const GUID*,PACTCTX_SECTION_KEYED_DATA);
 static BOOL   (WINAPI *pZombifyActCtx)(HANDLE);
@@ -244,6 +245,73 @@ static const char manifest5[] =
 "</dependency>"
 "</assembly>";
 
+static const char manifest6[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"<assemblyIdentity version=\"1.0.0.0\"  name=\"Wine.Test\" type=\"win32\"></assemblyIdentity>"
+"<trustInfo xmlns=\"urn:schemas-microsoft-com:asm.v1\">"
+"    <security>"
+"        <requestedPrivileges>"
+"            <requestedExecutionLevel level=\"ASINVOKER\" uiAccess=\"false\"/>"
+"        </requestedPrivileges>"
+"    </security>"
+"</trustInfo>"
+"</assembly>";
+
+static const char manifest7[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"<assemblyIdentity version=\"1.0.0.0\"  name=\"Wine.Test\" type=\"win32\"></assemblyIdentity>"
+"<trustInfo xmlns=\"urn:schemas-microsoft-com:asm.v2\">"
+"    <security>"
+"        <requestedPrivileges>"
+"            <requestedExecutionLevel level=\"requireAdministrator\" uiAccess=\"TRUE\"/>"
+"        </requestedPrivileges>"
+"    </security>"
+"</trustInfo>"
+"</assembly>";
+
+static const char manifest8[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"<assemblyIdentity version=\"1.0.0.0\"  name=\"Wine.Test\" type=\"win32\"></assemblyIdentity>"
+"<trustInfo xmlns=\"urn:schemas-microsoft-com:asm.v2\">"
+"    <security>"
+"        <requestedPrivileges>"
+"            <requestedExecutionLevel level=\"requireAdministrator\" uiAccess=\"true\">"
+"            </requestedExecutionLevel>"
+"        </requestedPrivileges>"
+"    </security>"
+"</trustInfo>"
+"</assembly>";
+
+static const char manifest9[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"<assemblyIdentity version=\"1.0.0.0\"  name=\"Wine.Test\" type=\"win32\"></assemblyIdentity>"
+"<trustInfo xmlns=\"urn:schemas-microsoft-com:asm.v2\">"
+"    <security>"
+"        <requestedPrivileges>"
+"            <requestedExecutionLevel level=\"requireAdministrator\"/>"
+"        </requestedPrivileges>"
+"    </security>"
+"</trustInfo>"
+"<trustInfo xmlns=\"urn:schemas-microsoft-com:asm.v2\">"
+"    <security>"
+"        <requestedPrivileges>"
+"        </requestedPrivileges>"
+"    </security>"
+"</trustInfo>"
+"</assembly>";
+
+static const char manifest10[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" xmlns:asmv2=\"urn:schemas-microsoft-com:asm.v2\" manifestVersion=\"1.0\">"
+"<assemblyIdentity version=\"1.0.0.0\"  name=\"Wine.Test\" type=\"win32\"></assemblyIdentity>"
+"<asmv2:trustInfo>"
+"    <asmv2:security>"
+"        <asmv2:requestedPrivileges>"
+"            <asmv2:requestedExecutionLevel level=\"requireAdministrator\" uiAccess=\"true\"></asmv2:requestedExecutionLevel>"
+"        </asmv2:requestedPrivileges>"
+"    </asmv2:security>"
+"</asmv2:trustInfo>"
+"</assembly>";
+
 static const char testdep_manifest1[] =
 "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
 "<assemblyIdentity type=\"win32\" name=\"testdep\" version=\"6.5.4.3\" processorArchitecture=\"" ARCH "\"/>"
@@ -310,10 +378,139 @@ static const char wrong_manifest8[] =
 "<file></file>"
 "</assembly>";
 
+static const char wrong_manifest9[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"<assemblyIdentity version=\"1.0.0.0\"  name=\"Wine.Test\" type=\"win32\"></assemblyIdentity>"
+"<trustInfo xmlns=\"urn:schemas-microsoft-com:asm.v2\">"
+"    <security>"
+"        <requestedPrivileges>"
+"            <requestedExecutionLevel level=\"requireAdministrator\"/>"
+"            <requestedExecutionLevel uiAccess=\"true\"/>"
+"        </requestedPrivileges>"
+"    </security>"
+"</trustInfo>"
+"</assembly>";
+
+static const char wrong_manifest10[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"<assemblyIdentity version=\"1.0.0.0\"  name=\"Wine.Test\" type=\"win32\"></assemblyIdentity>"
+"<trustInfo xmlns=\"urn:schemas-microsoft-com:asm.v2\">"
+"    <security>"
+"        <requestedPrivileges>"
+"            <requestedExecutionLevel level=\"requireAdministrator\"/>"
+"        </requestedPrivileges>"
+"    </security>"
+"</trustInfo>"
+"<trustInfo xmlns=\"urn:schemas-microsoft-com:asm.v2\">"
+"    <security>"
+"        <requestedPrivileges>"
+"            <requestedExecutionLevel uiAccess=\"true\"/>"
+"        </requestedPrivileges>"
+"    </security>"
+"</trustInfo>"
+"</assembly>";
+
 static const char wrong_depmanifest1[] =
 "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
 "<assemblyIdentity type=\"win32\" name=\"testdep\" version=\"6.5.4.4\" processorArchitecture=\"" ARCH "\" />"
 "</assembly>";
+
+static const char compat_manifest_no_supportedOs[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"   <assemblyIdentity version=\"1.0.0.0\"  name=\"Wine.Test\" type=\"win32\"></assemblyIdentity>"
+"   <compatibility xmlns=\"urn:schemas-microsoft-com:compatibility.v1\">"
+"       <application>"
+"       </application>"
+"   </compatibility>"
+"</assembly>";
+
+static const char compat_manifest_vista[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"   <assemblyIdentity version=\"1.0.0.0\"  name=\"Wine.Test\" type=\"win32\"></assemblyIdentity>"
+"   <compatibility xmlns=\"urn:schemas-microsoft-com:compatibility.v1\">"
+"       <application>"
+"           <supportedOS Id=\"{e2011457-1546-43c5-a5fe-008deee3d3f0}\" />"  /* Windows Vista */
+"       </application>"
+"   </compatibility>"
+"</assembly>";
+
+static const char compat_manifest_vista_7_8_10_81[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"   <assemblyIdentity version=\"1.0.0.0\"  name=\"Wine.Test\" type=\"win32\"></assemblyIdentity>"
+"   <compatibility xmlns=\"urn:schemas-microsoft-com:compatibility.v1\">"
+"       <application>"
+"           <supportedOS Id=\"{e2011457-1546-43c5-a5fe-008deee3d3f0}\" ></supportedOS>"  /* Windows Vista */
+"           <supportedOS Id=\"{35138b9a-5d96-4fbd-8e2d-a2440225f93a}\" />"  /* Windows 7 */
+"           <supportedOS Id=\"{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}\" ></supportedOS>"  /* Windows 8 */
+"           <supportedOS Id=\"{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}\" />"  /* Windows 10 */
+"           <supportedOS Id=\"{1f676c76-80e1-4239-95bb-83d0f6d0da78}\" />"  /* Windows 8.1 */
+"       </application>"
+"   </compatibility>"
+"</assembly>";
+
+static const char compat_manifest_other_guid[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"   <assemblyIdentity version=\"1.0.0.0\"  name=\"Wine.Test\" type=\"win32\"></assemblyIdentity>"
+"   <compatibility xmlns=\"urn:schemas-microsoft-com:compatibility.v1\">"
+"       <application>"
+"           <supportedOS Id=\"{12345566-1111-2222-3333-444444444444}\" />"
+"       </application>"
+"   </compatibility>"
+"</assembly>";
+
+static const char settings_manifest[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"   <assemblyIdentity version=\"1.0.0.0\"  name=\"Wine.Test\" type=\"win32\"></assemblyIdentity>"
+"   <application xmlns=\"urn:schemas-microsoft-com:asm.v3\">"
+"       <windowsSettings>"
+"           <dpiAware xmlns=\"http://schemas.microsoft.com/SMI/2005/WindowsSettings\">true</dpiAware>"
+"           <dpiAwareness xmlns=\"http://schemas.microsoft.com/SMI/2016/WindowsSettings\">true</dpiAwareness>"
+"       </windowsSettings>"
+"   </application>"
+"</assembly>";
+
+static const char settings_manifest2[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"   <assemblyIdentity version=\"1.0.0.0\"  name=\"Wine.Test\" type=\"win32\"></assemblyIdentity>"
+"   <application xmlns=\"urn:schemas-microsoft-com:asm.v3\""
+"                xmlns:ws05=\"http://schemas.microsoft.com/SMI/2005/WindowsSettings\""
+"                xmlns:ws11=\"http://schemas.microsoft.com/SMI/2011/WindowsSettings\""
+"                xmlns:ws16=\"http://schemas.microsoft.com/SMI/2016/WindowsSettings\""
+"                xmlns:ws17=\"http://schemas.microsoft.com/SMI/2017/WindowsSettings\">"
+"       <windowsSettings>"
+"           <ws05:autoElevate>true</ws05:autoElevate>"
+"           <ws05:disableTheming>true</ws05:disableTheming>"
+"           <ws11:disableWindowFiltering>true</ws11:disableWindowFiltering>"
+"           <ws05:dpiAware>true</ws05:dpiAware>"
+"           <ws16:dpiAwareness>true</ws16:dpiAwareness>"
+"           <ws17:gdiScaling>true</ws17:gdiScaling>"
+"           <ws17:highResolutionScrollingAware>true</ws17:highResolutionScrollingAware>"
+"           <ws16:longPathAware>true</ws16:longPathAware>"
+"           <ws17:magicFutureSetting>true</ws17:magicFutureSetting>"
+"           <ws11:printerDriverIsolation>true</ws11:printerDriverIsolation>"
+"           <ws17:ultraHighResolutionScrollingAware>true</ws17:ultraHighResolutionScrollingAware>"
+"       </windowsSettings>"
+"   </application>"
+"</assembly>";
+
+/* broken manifest found in some binaries: asmv3 namespace is used but not declared */
+static const char settings_manifest3[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"   <assemblyIdentity version=\"1.0.0.0\"  name=\"Wine.Test\" type=\"win32\"></assemblyIdentity>"
+"   <asmv3:application>"
+"     <asmv3:windowsSettings xmlns=\"http://schemas.microsoft.com/SMI/2005/WindowsSettings\">"
+"       <dpiAware>true</dpiAware>"
+"     </asmv3:windowsSettings>"
+"   </asmv3:application>"
+"</assembly>";
+
+DEFINE_GUID(VISTA_COMPAT_GUID,      0xe2011457, 0x1546, 0x43c5, 0xa5, 0xfe, 0x00, 0x8d, 0xee, 0xe3, 0xd3, 0xf0);
+DEFINE_GUID(WIN7_COMPAT_GUID,       0x35138b9a, 0x5d96, 0x4fbd, 0x8e, 0x2d, 0xa2, 0x44, 0x02, 0x25, 0xf9, 0x3a);
+DEFINE_GUID(WIN8_COMPAT_GUID,       0x4a2f28e3, 0x53b9, 0x4441, 0xba, 0x9c, 0xd6, 0x9d, 0x4a, 0x4a, 0x6e, 0x38);
+DEFINE_GUID(WIN81_COMPAT_GUID,      0x1f676c76, 0x80e1, 0x4239, 0x95, 0xbb, 0x83, 0xd0, 0xf6, 0xd0, 0xda, 0x78);
+DEFINE_GUID(WIN10_COMPAT_GUID,      0x8e0f7a12, 0xbfb3, 0x4fe8, 0xb9, 0xa5, 0x48, 0xfd, 0x50, 0xa1, 0x5a, 0x9a);
+DEFINE_GUID(OTHER_COMPAT_GUID,      0x12345566, 0x1111, 0x2222, 0x33, 0x33, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44);
+
 
 static const WCHAR testlib_dll[] =
     {'t','e','s','t','l','i','b','.','d','l','l',0};
@@ -336,7 +533,7 @@ static int strcmp_aw(LPCWSTR strw, const char *stra)
     WCHAR buf[1024];
 
     if (!stra) return 1;
-    MultiByteToWideChar(CP_ACP, 0, stra, -1, buf, sizeof(buf)/sizeof(WCHAR));
+    MultiByteToWideChar(CP_ACP, 0, stra, -1, buf, ARRAY_SIZE(buf));
     return lstrcmpW(strw, buf);
 }
 
@@ -353,7 +550,7 @@ static BOOL create_manifest_file(const char *filename, const char *manifest, int
     WCHAR path[MAX_PATH];
 
     MultiByteToWideChar( CP_ACP, 0, filename, -1, path, MAX_PATH );
-    GetFullPathNameW(path, sizeof(manifest_path)/sizeof(WCHAR), manifest_path, NULL);
+    GetFullPathNameW(path, ARRAY_SIZE(manifest_path), manifest_path, NULL);
 
     if (manifest_len == -1)
         manifest_len = strlen(manifest);
@@ -369,7 +566,7 @@ static BOOL create_manifest_file(const char *filename, const char *manifest, int
     if (depmanifest)
     {
         MultiByteToWideChar( CP_ACP, 0, depfile, -1, path, MAX_PATH );
-        GetFullPathNameW(path, sizeof(depmanifest_path)/sizeof(WCHAR), depmanifest_path, NULL);
+        GetFullPathNameW(path, ARRAY_SIZE(depmanifest_path), depmanifest_path, NULL);
         file = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                            FILE_ATTRIBUTE_NORMAL, NULL);
         ok(file != INVALID_HANDLE_VALUE, "CreateFile failed: %u\n", GetLastError());
@@ -732,6 +929,57 @@ static void test_file_info(HANDLE handle, ULONG assid, ULONG fileid, LPCWSTR fil
     HeapFree(GetProcessHeap(), 0, info);
 }
 
+typedef struct {
+    ACTCTX_REQUESTED_RUN_LEVEL run_level;
+    DWORD ui_access;
+} runlevel_info_t;
+
+static const runlevel_info_t runlevel_info0 = {
+    ACTCTX_RUN_LEVEL_UNSPECIFIED, FALSE,
+};
+
+static const runlevel_info_t runlevel_info6 = {
+    ACTCTX_RUN_LEVEL_AS_INVOKER, FALSE,
+};
+
+static const runlevel_info_t runlevel_info7 = {
+    ACTCTX_RUN_LEVEL_REQUIRE_ADMIN, TRUE,
+};
+
+static const runlevel_info_t runlevel_info8 = {
+    ACTCTX_RUN_LEVEL_REQUIRE_ADMIN, TRUE,
+};
+
+static const runlevel_info_t runlevel_info9 = {
+    ACTCTX_RUN_LEVEL_REQUIRE_ADMIN, FALSE,
+};
+
+static void test_runlevel_info(HANDLE handle, const runlevel_info_t *exinfo, int line)
+{
+    ACTIVATION_CONTEXT_RUN_LEVEL_INFORMATION runlevel_info;
+    SIZE_T size, retsize;
+    BOOL b;
+
+    size = sizeof(runlevel_info);
+    b = pQueryActCtxW(0, handle, NULL,
+                      RunlevelInformationInActivationContext, &runlevel_info,
+                      sizeof(runlevel_info), &retsize);
+    if (!b && GetLastError() == ERROR_INVALID_PARAMETER)
+    {
+        win_skip("RunlevelInformationInActivationContext not supported.\n");
+        return;
+    }
+
+    ok_(__FILE__, line)(b, "QueryActCtx failed: %u\n", GetLastError());
+    ok_(__FILE__, line)(retsize == size, "size=%ld, expected %ld\n", retsize, size);
+
+    ok_(__FILE__, line)(runlevel_info.ulFlags == 0, "runlevel_info.ulFlags=%x\n", runlevel_info.ulFlags);
+    ok_(__FILE__, line)(runlevel_info.RunLevel == exinfo->run_level,
+       "runlevel_info.RunLevel=%u, expected %u\n", runlevel_info.RunLevel, exinfo->run_level);
+    ok_(__FILE__, line)(runlevel_info.UiAccess == exinfo->ui_access,
+       "runlevel_info.UiAccess=%u, expected %u\n", runlevel_info.UiAccess, exinfo->ui_access);
+}
+
 static HANDLE test_create(const char *file)
 {
     ACTCTXW actctx;
@@ -763,7 +1011,7 @@ static HANDLE test_create(const char *file)
     return handle;
 }
 
-static void test_create_and_fail(const char *manifest, const char *depmanifest, int todo)
+static void test_create_and_fail(const char *manifest, const char *depmanifest, int todo, BOOL is_broken)
 {
     ACTCTXW actctx;
     HANDLE handle;
@@ -778,8 +1026,14 @@ static void test_create_and_fail(const char *manifest, const char *depmanifest, 
     handle = pCreateActCtxW(&actctx);
     todo_wine_if(todo)
     {
-        ok(handle == INVALID_HANDLE_VALUE, "handle != INVALID_HANDLE_VALUE\n");
-        ok(GetLastError() == ERROR_SXS_CANT_GEN_ACTCTX, "GetLastError == %u\n", GetLastError());
+        if (is_broken)
+            ok(broken(handle != INVALID_HANDLE_VALUE) || handle == INVALID_HANDLE_VALUE,
+                "Unexpected context handle %p.\n", handle);
+        else
+            ok(handle == INVALID_HANDLE_VALUE, "Unexpected context handle %p.\n", handle);
+
+        if (handle == INVALID_HANDLE_VALUE)
+            ok(GetLastError() == ERROR_SXS_CANT_GEN_ACTCTX, "Unexpected error %d.\n", GetLastError());
     }
     if (handle != INVALID_HANDLE_VALUE) pReleaseActCtx( handle );
     DeleteFileA("bad.manifest");
@@ -822,27 +1076,31 @@ static void test_create_fail(void)
     ok(GetLastError() == ERROR_FILE_NOT_FOUND, "GetLastError == %u\n", GetLastError());
 
     trace("wrong_manifest1\n");
-    test_create_and_fail(wrong_manifest1, NULL, 0 );
+    test_create_and_fail(wrong_manifest1, NULL, 0, FALSE);
     trace("wrong_manifest2\n");
-    test_create_and_fail(wrong_manifest2, NULL, 0 );
+    test_create_and_fail(wrong_manifest2, NULL, 0, FALSE);
     trace("wrong_manifest3\n");
-    test_create_and_fail(wrong_manifest3, NULL, 1 );
+    test_create_and_fail(wrong_manifest3, NULL, 1, FALSE);
     trace("wrong_manifest4\n");
-    test_create_and_fail(wrong_manifest4, NULL, 1 );
+    test_create_and_fail(wrong_manifest4, NULL, 1, FALSE);
     trace("wrong_manifest5\n");
-    test_create_and_fail(wrong_manifest5, NULL, 0 );
+    test_create_and_fail(wrong_manifest5, NULL, 0, FALSE);
     trace("wrong_manifest6\n");
-    test_create_and_fail(wrong_manifest6, NULL, 0 );
+    test_create_and_fail(wrong_manifest6, NULL, 0, FALSE);
     trace("wrong_manifest7\n");
-    test_create_and_fail(wrong_manifest7, NULL, 1 );
+    test_create_and_fail(wrong_manifest7, NULL, 1, FALSE);
     trace("wrong_manifest8\n");
-    test_create_and_fail(wrong_manifest8, NULL, 0 );
+    test_create_and_fail(wrong_manifest8, NULL, 0, FALSE);
+    trace("wrong_manifest9\n");
+    test_create_and_fail(wrong_manifest9, NULL, 0, TRUE /* WinXP */);
+    trace("wrong_manifest10\n");
+    test_create_and_fail(wrong_manifest10, NULL, 0, TRUE /* WinXP */);
     trace("UTF-16 manifest1 without BOM\n");
     test_create_wide_and_fail(manifest1, FALSE );
     trace("manifest2\n");
-    test_create_and_fail(manifest2, NULL, 0 );
+    test_create_and_fail(manifest2, NULL, 0, FALSE);
     trace("manifest2+depmanifest1\n");
-    test_create_and_fail(manifest2, wrong_depmanifest1, 0 );
+    test_create_and_fail(manifest2, wrong_depmanifest1, 0, FALSE);
 }
 
 struct strsection_header
@@ -1774,8 +2032,6 @@ static void test_actctx(void)
     HANDLE handle;
     BOOL b;
 
-    test_create_fail();
-
     trace("default actctx\n");
 
     b = pGetCurrentActCtx(&handle);
@@ -1784,6 +2040,7 @@ static void test_actctx(void)
     if(b) {
         test_basic_info(handle, __LINE__);
         test_detailed_info(handle, &detailed_info0, __LINE__);
+        test_runlevel_info(handle, &runlevel_info0, __LINE__);
         pReleaseActCtx(handle);
     }
 
@@ -1954,6 +2211,85 @@ static void test_actctx(void)
         ok(b, "DeactivateActCtx failed: %u\n", GetLastError());
         pReleaseActCtx(handle);
     }
+
+    trace("manifest6\n");
+
+    if(create_manifest_file("test6.manifest", manifest6, -1, NULL, NULL)) {
+        handle = test_create("test6.manifest");
+        ok(handle != INVALID_HANDLE_VALUE || broken(handle == INVALID_HANDLE_VALUE) /* WinXP */,
+            "Unexpected context handle %p.\n", handle);
+        DeleteFileA("test6.manifest");
+        DeleteFileA("testdep.manifest");
+        if(handle != INVALID_HANDLE_VALUE)
+        {
+            test_runlevel_info(handle, &runlevel_info6, __LINE__);
+            pReleaseActCtx(handle);
+        }
+    }
+    else
+        skip("Could not create manifest file 6\n");
+
+    trace("manifest7\n");
+
+    if(create_manifest_file("test7.manifest", manifest7, -1, NULL, NULL)) {
+        handle = test_create("test7.manifest");
+        ok(handle != INVALID_HANDLE_VALUE, "handle == INVALID_HANDLE_VALUE, error %u\n", GetLastError());
+        DeleteFileA("test7.manifest");
+        DeleteFileA("testdep.manifest");
+        if(handle != INVALID_HANDLE_VALUE)
+        {
+            test_runlevel_info(handle, &runlevel_info7, __LINE__);
+            pReleaseActCtx(handle);
+        }
+    }
+    else
+        skip("Could not create manifest file 7\n");
+
+    trace("manifest8\n");
+
+    if(create_manifest_file("test8.manifest", manifest8, -1, NULL, NULL)) {
+        handle = test_create("test8.manifest");
+        ok(handle != INVALID_HANDLE_VALUE, "handle == INVALID_HANDLE_VALUE, error %u\n", GetLastError());
+        DeleteFileA("test8.manifest");
+        DeleteFileA("testdep.manifest");
+        if(handle != INVALID_HANDLE_VALUE)
+        {
+            test_runlevel_info(handle, &runlevel_info8, __LINE__);
+            pReleaseActCtx(handle);
+        }
+    }
+    else
+        skip("Could not create manifest file 8\n");
+
+    trace("manifest9\n");
+
+    if(create_manifest_file("test9.manifest", manifest9, -1, NULL, NULL)) {
+        handle = test_create("test9.manifest");
+        ok(handle != INVALID_HANDLE_VALUE, "handle == INVALID_HANDLE_VALUE, error %u\n", GetLastError());
+        DeleteFileA("test9.manifest");
+        DeleteFileA("testdep.manifest");
+        if(handle != INVALID_HANDLE_VALUE)
+        {
+            test_runlevel_info(handle, &runlevel_info9, __LINE__);
+            pReleaseActCtx(handle);
+        }
+    }
+    else
+        skip("Could not create manifest file 9\n");
+
+    if(create_manifest_file("test10.manifest", manifest10, -1, NULL, NULL)) {
+        handle = test_create("test10.manifest");
+        ok(handle != INVALID_HANDLE_VALUE, "handle == INVALID_HANDLE_VALUE, error %u\n", GetLastError());
+        DeleteFileA("test10.manifest");
+        DeleteFileA("testdep.manifest");
+        if(handle != INVALID_HANDLE_VALUE)
+        {
+            test_runlevel_info(handle, &runlevel_info8, __LINE__);
+            pReleaseActCtx(handle);
+        }
+    }
+    else
+        skip("Could not create manifest file 10\n");
 
     trace("manifest4\n");
 
@@ -2222,7 +2558,7 @@ static void init_paths(void)
     static const WCHAR backslash[] = {'\\',0};
     static const WCHAR subdir[] = {'T','e','s','t','S','u','b','d','i','r','\\',0};
 
-    GetModuleFileNameW(NULL, exe_path, sizeof(exe_path)/sizeof(WCHAR));
+    GetModuleFileNameW(NULL, exe_path, ARRAY_SIZE(exe_path));
     lstrcpyW(app_dir, exe_path);
     for(ptr=app_dir+lstrlenW(app_dir); *ptr != '\\' && *ptr != '/'; ptr--);
     ptr[1] = 0;
@@ -2234,7 +2570,7 @@ static void init_paths(void)
     lstrcpyW(work_dir_subdir, work_dir);
     lstrcatW(work_dir_subdir, subdir);
 
-    GetModuleFileNameW(NULL, app_manifest_path, sizeof(app_manifest_path)/sizeof(WCHAR));
+    GetModuleFileNameW(NULL, app_manifest_path, ARRAY_SIZE(app_manifest_path));
     lstrcpyW(app_manifest_path+lstrlenW(app_manifest_path), dot_manifest);
 }
 
@@ -2244,7 +2580,7 @@ static void write_manifest(const char *filename, const char *manifest)
     DWORD size;
     CHAR path[MAX_PATH];
 
-    GetTempPathA(sizeof(path)/sizeof(CHAR), path);
+    GetTempPathA(ARRAY_SIZE(path), path);
     strcat(path, filename);
 
     file = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -2257,7 +2593,7 @@ static void delete_manifest_file(const char *filename)
 {
     CHAR path[MAX_PATH];
 
-    GetTempPathA(sizeof(path)/sizeof(CHAR), path);
+    GetTempPathA(ARRAY_SIZE(path), path);
     strcat(path, filename);
     DeleteFileA(path);
 }
@@ -2268,7 +2604,7 @@ static void test_CreateActCtx(void)
     ACTCTXA actctx;
     HANDLE handle;
 
-    GetTempPathA(sizeof(path)/sizeof(CHAR), path);
+    GetTempPathA(ARRAY_SIZE(path), path);
     strcat(path, "main_wndcls.manifest");
 
     write_manifest("testdep1.manifest", manifest_wndcls1);
@@ -2285,7 +2621,7 @@ static void test_CreateActCtx(void)
     pReleaseActCtx(handle);
 
     /* with specified directory, that doesn't contain dependent assembly */
-    GetWindowsDirectoryA(dir, sizeof(dir)/sizeof(CHAR));
+    GetWindowsDirectoryA(dir, ARRAY_SIZE(dir));
 
     memset(&actctx, 0, sizeof(ACTCTXA));
     actctx.cbSize = sizeof(ACTCTXA);
@@ -2331,7 +2667,7 @@ todo_wine
 
     /* load manifest from lpAssemblyDirectory directory */
     write_manifest("testdir.manifest", manifest1);
-    GetTempPathA(sizeof(path)/sizeof(path[0]), path);
+    GetTempPathA(ARRAY_SIZE(path), path);
     SetCurrentDirectoryA(path);
     strcat(path, "assembly_dir");
     strcpy(dir, path);
@@ -2406,6 +2742,7 @@ static BOOL init_funcs(void)
     X(ReleaseActCtx);
     X(FindActCtxSectionGuid);
     X(ZombifyActCtx);
+    pQueryActCtxSettingsW = (void *)GetProcAddress( hLibrary, "QueryActCtxSettingsW" );
 
     hLibrary = GetModuleHandleA("ntdll.dll");
     X(RtlFindActivationContextSectionString);
@@ -2487,6 +2824,319 @@ todo_wine
     pReleaseActCtx(handle);
 }
 
+/* Test structure to verify alignment */
+typedef struct _test_act_ctx_compat_info {
+    DWORD ElementCount;
+    COMPATIBILITY_CONTEXT_ELEMENT Elements[10];
+} test_act_ctx_compat_info;
+
+static void test_no_compat(HANDLE handle, int line)
+{
+    test_act_ctx_compat_info compat_info;
+    SIZE_T size;
+    BOOL b;
+
+    memset(&compat_info, 0, sizeof(compat_info));
+    b = pQueryActCtxW(QUERY_ACTCTX_FLAG_NO_ADDREF, handle, NULL,
+                      CompatibilityInformationInActivationContext, &compat_info,
+                      sizeof(compat_info), &size);
+
+    ok_(__FILE__, line)(b, "CompatibilityInformationInActivationContext failed\n");
+    ok_(__FILE__, line)(size == sizeof(DWORD), "size mismatch (got %lu, expected 4)\n", size);
+    ok_(__FILE__, line)(compat_info.ElementCount == 0, "unexpected ElementCount %u\n", compat_info.ElementCount);
+}
+
+static void test_with_compat(HANDLE handle, DWORD num_compat, const GUID* expected_compat[], int line)
+{
+    test_act_ctx_compat_info compat_info;
+    SIZE_T size;
+    SIZE_T expected = sizeof(COMPATIBILITY_CONTEXT_ELEMENT) * num_compat + sizeof(DWORD);
+    DWORD n;
+    BOOL b;
+
+    memset(&compat_info, 0, sizeof(compat_info));
+    b = pQueryActCtxW(QUERY_ACTCTX_FLAG_NO_ADDREF, handle, NULL,
+                      CompatibilityInformationInActivationContext, &compat_info,
+                      sizeof(compat_info), &size);
+
+    ok_(__FILE__, line)(b, "CompatibilityInformationInActivationContext failed\n");
+    ok_(__FILE__, line)(size == expected, "size mismatch (got %lu, expected %lu)\n", size, expected);
+    ok_(__FILE__, line)(compat_info.ElementCount == num_compat, "unexpected ElementCount %u\n", compat_info.ElementCount);
+
+    for (n = 0; n < num_compat; ++n)
+    {
+        ok_(__FILE__, line)(IsEqualGUID(&compat_info.Elements[n].Id, expected_compat[n]),
+                            "got wrong clsid %s, expected %s for %u\n",
+                            wine_dbgstr_guid(&compat_info.Elements[n].Id),
+                            wine_dbgstr_guid(expected_compat[n]),
+                            n);
+        ok_(__FILE__, line)(compat_info.Elements[n].Type == ACTCX_COMPATIBILITY_ELEMENT_TYPE_OS,
+                            "Wrong type, got %u for %u\n", (DWORD)compat_info.Elements[n].Type, n);
+    }
+}
+
+static void test_compatibility(void)
+{
+    HANDLE handle;
+
+    /* No compat results returned */
+    trace("manifest1\n");
+    if(!create_manifest_file("test1.manifest", manifest1, -1, NULL, NULL))
+    {
+        skip("Could not create manifest file\n");
+        return;
+    }
+    handle = test_create("test1.manifest");
+    ok(handle != INVALID_HANDLE_VALUE, "handle == INVALID_HANDLE_VALUE, error %u\n", GetLastError());
+    DeleteFileA("test1.manifest");
+    if(handle != INVALID_HANDLE_VALUE)
+    {
+        char buffer[sizeof(COMPATIBILITY_CONTEXT_ELEMENT) * 2 + sizeof(DWORD)];
+        SIZE_T size;
+        BOOL b;
+
+        memset(buffer, 0, sizeof(buffer));
+        b = pQueryActCtxW(QUERY_ACTCTX_FLAG_NO_ADDREF, handle, NULL,
+                          CompatibilityInformationInActivationContext, buffer,
+                          sizeof(buffer), &size);
+
+        if (!b && GetLastError() == ERROR_INVALID_PARAMETER)
+        {
+            win_skip("CompatibilityInformationInActivationContext not supported.\n");
+            pReleaseActCtx(handle);
+            return;
+        }
+
+        test_basic_info(handle, __LINE__);
+        test_no_compat(handle, __LINE__);
+        pReleaseActCtx(handle);
+    }
+
+    /* Still no compat results returned */
+    trace("no_supportedOs\n");
+    if(!create_manifest_file("no_supportedOs.manifest", compat_manifest_no_supportedOs, -1, NULL, NULL))
+    {
+        skip("Could not create manifest file\n");
+        return;
+    }
+    handle = test_create("no_supportedOs.manifest");
+    ok(handle != INVALID_HANDLE_VALUE, "handle == INVALID_HANDLE_VALUE, error %u\n", GetLastError());
+    DeleteFileA("no_supportedOs.manifest");
+    if(handle != INVALID_HANDLE_VALUE)
+    {
+        test_basic_info(handle, __LINE__);
+        test_no_compat(handle, __LINE__);
+        pReleaseActCtx(handle);
+    }
+
+    /* Just one result returned */
+    trace("manifest_vista\n");
+    if(!create_manifest_file("manifest_vista.manifest", compat_manifest_vista, -1, NULL, NULL))
+    {
+        skip("Could not create manifest file\n");
+        return;
+    }
+    handle = test_create("manifest_vista.manifest");
+    ok(handle != INVALID_HANDLE_VALUE, "handle == INVALID_HANDLE_VALUE, error %u\n", GetLastError());
+    DeleteFileA("manifest_vista.manifest");
+    if(handle != INVALID_HANDLE_VALUE)
+    {
+        static const GUID* expect_manifest[] =
+        {
+            &VISTA_COMPAT_GUID
+        };
+        test_basic_info(handle, __LINE__);
+        test_with_compat(handle, 1, expect_manifest, __LINE__);
+        pReleaseActCtx(handle);
+    }
+
+    /* Show that the order is retained */
+    trace("manifest_vista_7_8_10_81\n");
+    if(!create_manifest_file("manifest_vista_7_8_10_81.manifest", compat_manifest_vista_7_8_10_81, -1, NULL, NULL))
+    {
+        skip("Could not create manifest file\n");
+        return;
+    }
+    handle = test_create("manifest_vista_7_8_10_81.manifest");
+    ok(handle != INVALID_HANDLE_VALUE, "handle == INVALID_HANDLE_VALUE, error %u\n", GetLastError());
+    DeleteFileA("manifest_vista_7_8_10_81.manifest");
+    if(handle != INVALID_HANDLE_VALUE)
+    {
+        static const GUID* expect_manifest[] =
+        {
+            &VISTA_COMPAT_GUID,
+            &WIN7_COMPAT_GUID,
+            &WIN8_COMPAT_GUID,
+            &WIN10_COMPAT_GUID,
+            &WIN81_COMPAT_GUID,
+        };
+        test_basic_info(handle, __LINE__);
+        test_with_compat(handle, 5, expect_manifest, __LINE__);
+        pReleaseActCtx(handle);
+    }
+
+    /* Show that even unknown GUID's are stored */
+    trace("manifest_other_guid\n");
+    if(!create_manifest_file("manifest_other_guid.manifest", compat_manifest_other_guid, -1, NULL, NULL))
+    {
+        skip("Could not create manifest file\n");
+        return;
+    }
+    handle = test_create("manifest_other_guid.manifest");
+    ok(handle != INVALID_HANDLE_VALUE, "handle == INVALID_HANDLE_VALUE, error %u\n", GetLastError());
+    DeleteFileA("manifest_other_guid.manifest");
+    if(handle != INVALID_HANDLE_VALUE)
+    {
+        static const GUID* expect_manifest[] =
+        {
+            &OTHER_COMPAT_GUID,
+        };
+        test_basic_info(handle, __LINE__);
+        test_with_compat(handle, 1, expect_manifest, __LINE__);
+        pReleaseActCtx(handle);
+    }
+}
+
+static void test_settings(void)
+{
+    static const WCHAR dpiAwareW[] = {'d','p','i','A','w','a','r','e',0};
+    static const WCHAR dpiAwarenessW[] = {'d','p','i','A','w','a','r','e','n','e','s','s',0};
+    static const WCHAR dummyW[] = {'d','u','m','m','y',0};
+    static const WCHAR trueW[] = {'t','r','u','e',0};
+    static const WCHAR namespace2005W[] = {'h','t','t','p',':','/','/','s','c','h','e','m','a','s','.','m','i','c','r','o','s','o','f','t','.','c','o','m','/','S','M','I','/','2','0','0','5','/','W','i','n','d','o','w','s','S','e','t','t','i','n','g','s',0};
+    static const WCHAR namespace2016W[] = {'h','t','t','p',':','/','/','s','c','h','e','m','a','s','.','m','i','c','r','o','s','o','f','t','.','c','o','m','/','S','M','I','/','2','0','1','6','/','W','i','n','d','o','w','s','S','e','t','t','i','n','g','s',0};
+    WCHAR buffer[80];
+    SIZE_T size;
+    HANDLE handle;
+    BOOL ret;
+
+    if (!pQueryActCtxSettingsW)
+    {
+        win_skip( "QueryActCtxSettingsW is missing\n" );
+        return;
+    }
+    create_manifest_file( "manifest_settings.manifest", settings_manifest, -1, NULL, NULL );
+    handle = test_create("manifest_settings.manifest");
+    ok( handle != INVALID_HANDLE_VALUE, "handle == INVALID_HANDLE_VALUE, error %u\n", GetLastError() );
+    DeleteFileA( "manifest_settings.manifest" );
+
+    SetLastError( 0xdeadbeef );
+    ret = pQueryActCtxSettingsW( 1, handle, NULL, dpiAwareW, buffer, 80, &size );
+    ok( !ret, "QueryActCtxSettingsW failed err %u\n", GetLastError() );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %u\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    ret = pQueryActCtxSettingsW( 0, handle, dummyW, dpiAwareW, buffer, 80, &size );
+    ok( !ret, "QueryActCtxSettingsW failed err %u\n", GetLastError() );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %u\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    size = 0xdead;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    ret = pQueryActCtxSettingsW( 0, handle, NULL, dpiAwareW, buffer, 80, &size );
+    ok( ret, "QueryActCtxSettingsW failed err %u\n", GetLastError() );
+    ok( !lstrcmpW( buffer, trueW ), "got %s\n", wine_dbgstr_w(buffer) );
+    ok( size == lstrlenW( buffer ) + 1, "wrong len %lu\n", size );
+    SetLastError( 0xdeadbeef );
+    size = 0xdead;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    ret = pQueryActCtxSettingsW( 0, handle, NULL, dummyW, buffer, 80, &size );
+    ok( !ret, "QueryActCtxSettingsW succeeded\n" );
+    ok( GetLastError() == ERROR_SXS_KEY_NOT_FOUND, "wrong error %u\n", GetLastError() );
+    ok( buffer[0] == 0xcccc, "got %s\n", wine_dbgstr_w(buffer) );
+    SetLastError( 0xdeadbeef );
+    size = 0xdead;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    ret = pQueryActCtxSettingsW( 0, handle, namespace2005W, dpiAwareW, buffer, 80, &size );
+    ok( ret, "QueryActCtxSettingsW failed err %u\n", GetLastError() );
+    ok( !lstrcmpW( buffer, trueW ), "got %s\n", wine_dbgstr_w(buffer) );
+    ok( size == ARRAY_SIZE(trueW), "wrong len %lu\n", size );
+    SetLastError( 0xdeadbeef );
+    size = 0xdead;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    ret = pQueryActCtxSettingsW( 0, handle, namespace2005W, dpiAwareW, buffer, lstrlenW(trueW) + 1, &size );
+    ok( ret, "QueryActCtxSettingsW failed err %u\n", GetLastError() );
+    ok( !lstrcmpW( buffer, trueW ), "got %s\n", wine_dbgstr_w(buffer) );
+    ok( size == ARRAY_SIZE(trueW), "wrong len %lu\n", size );
+    SetLastError( 0xdeadbeef );
+    size = 0xdead;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    ret = pQueryActCtxSettingsW( 0, handle, namespace2016W, dpiAwareW, buffer, lstrlenW(trueW) + 1, &size );
+    ok( !ret, "QueryActCtxSettingsW succeeded\n" );
+    ok( GetLastError() == ERROR_SXS_KEY_NOT_FOUND || broken( GetLastError() == ERROR_INVALID_PARAMETER ),
+        "wrong error %u\n", GetLastError() );
+    ok( buffer[0] == 0xcccc, "got %s\n", wine_dbgstr_w(buffer) );
+    SetLastError( 0xdeadbeef );
+    size = 0xdead;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    ret = pQueryActCtxSettingsW( 0, handle, NULL, dpiAwarenessW, buffer, lstrlenW(trueW) + 1, &size );
+    ok( !ret, "QueryActCtxSettingsW succeeded\n" );
+    ok( GetLastError() == ERROR_SXS_KEY_NOT_FOUND, "wrong error %u\n", GetLastError() );
+    ok( buffer[0] == 0xcccc, "got %s\n", wine_dbgstr_w(buffer) );
+    SetLastError( 0xdeadbeef );
+    size = 0xdead;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    ret = pQueryActCtxSettingsW( 0, handle, namespace2005W, dpiAwarenessW, buffer, lstrlenW(trueW) + 1, &size );
+    ok( !ret, "QueryActCtxSettingsW succeeded\n" );
+    ok( GetLastError() == ERROR_SXS_KEY_NOT_FOUND, "wrong error %u\n", GetLastError() );
+    ok( buffer[0] == 0xcccc, "got %s\n", wine_dbgstr_w(buffer) );
+    SetLastError( 0xdeadbeef );
+    size = 0xdead;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    ret = pQueryActCtxSettingsW( 0, handle, namespace2016W, dpiAwarenessW, buffer, lstrlenW(trueW) + 1, &size );
+    ok( ret  || broken( GetLastError() == ERROR_INVALID_PARAMETER ),
+        "QueryActCtxSettingsW failed err %u\n", GetLastError() );
+    if (ret)
+    {
+        ok( !lstrcmpW( buffer, trueW ), "got %s\n", wine_dbgstr_w(buffer) );
+        ok( size == ARRAY_SIZE(trueW), "wrong len %lu\n", size );
+    }
+    else ok( buffer[0] == 0xcccc, "got %s\n", wine_dbgstr_w(buffer) );
+    SetLastError( 0xdeadbeef );
+    size = 0xdead;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    ret = pQueryActCtxSettingsW( 0, handle, NULL, dpiAwareW, buffer, lstrlenW(trueW), &size );
+    ok( ret, "QueryActCtxSettingsW failed err %u\n", GetLastError() );
+    ok( !lstrcmpW( buffer, trueW ), "got %s\n", wine_dbgstr_w(buffer) );
+    ok( size == ARRAY_SIZE(trueW), "wrong len %lu\n", size );
+    SetLastError( 0xdeadbeef );
+    size = 0xdead;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    ret = pQueryActCtxSettingsW( 0, handle, NULL, dpiAwareW, buffer, lstrlenW(trueW) - 1, &size );
+    ok( !ret, "QueryActCtxSettingsW failed err %u\n", GetLastError() );
+    ok( GetLastError() == ERROR_INSUFFICIENT_BUFFER, "wrong error %u\n", GetLastError() );
+    ok( buffer[0] == 0xcccc, "got %s\n", wine_dbgstr_w(buffer) );
+    ok( size == ARRAY_SIZE(trueW), "wrong len %lu\n", size );
+    pReleaseActCtx(handle);
+
+    create_manifest_file( "manifest_settings2.manifest", settings_manifest2, -1, NULL, NULL );
+    handle = test_create("manifest_settings2.manifest");
+    ok( handle != INVALID_HANDLE_VALUE || broken( handle == INVALID_HANDLE_VALUE ), /* <= vista */
+        "handle == INVALID_HANDLE_VALUE, error %u\n", GetLastError() );
+    DeleteFileA( "manifest_settings2.manifest" );
+    if (handle != INVALID_HANDLE_VALUE)
+    {
+        SetLastError( 0xdeadbeef );
+        size = 0xdead;
+        memset( buffer, 0xcc, sizeof(buffer) );
+        ret = pQueryActCtxSettingsW( 0, handle, NULL, dpiAwareW, buffer, 80, &size );
+        ok( ret, "QueryActCtxSettingsW failed err %u\n", GetLastError() );
+        ok( !lstrcmpW( buffer, trueW ), "got %s\n", wine_dbgstr_w(buffer) );
+        ok( size == lstrlenW( buffer ) + 1, "wrong len %lu\n", size );
+        pReleaseActCtx(handle);
+    }
+
+    create_manifest_file( "manifest_settings3.manifest", settings_manifest3, -1, NULL, NULL );
+    handle = test_create("manifest_settings3.manifest");
+    ok( handle != INVALID_HANDLE_VALUE, "handle == INVALID_HANDLE_VALUE, error %u\n", GetLastError() );
+    DeleteFileA( "manifest_settings3.manifest" );
+    SetLastError( 0xdeadbeef );
+    size = 0xdead;
+    memset( buffer, 0xcc, sizeof(buffer) );
+    ret = pQueryActCtxSettingsW( 0, handle, NULL, dpiAwareW, buffer, 80, &size );
+    ok( !ret, "QueryActCtxSettingsW succeeded\n" );
+    ok( GetLastError() == ERROR_SXS_KEY_NOT_FOUND, "wrong error %u\n", GetLastError() );
+    pReleaseActCtx(handle);
+}
+
 START_TEST(actctx)
 {
     int argc;
@@ -2507,8 +3157,11 @@ START_TEST(actctx)
     }
 
     test_actctx();
+    test_create_fail();
     test_CreateActCtx();
     test_findsectionstring();
     test_ZombifyActCtx();
     run_child_process();
+    test_compatibility();
+    test_settings();
 }

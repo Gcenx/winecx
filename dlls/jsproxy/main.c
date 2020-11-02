@@ -51,6 +51,7 @@
 #include "dispex.h"
 #include "activscp.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "wine/unicode.h"
 
 static HINSTANCE instance;
@@ -85,16 +86,6 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
         break;
     }
     return TRUE;
-}
-
-static inline void* __WINE_ALLOC_SIZE(1) heap_alloc(size_t size)
-{
-    return HeapAlloc(GetProcessHeap(), 0, size);
-}
-
-static inline BOOL heap_free(void *mem)
-{
-    return HeapFree(GetProcessHeap(), 0, mem);
 }
 
 static inline WCHAR *strdupAW( const char *src, int len )
@@ -188,20 +179,15 @@ BOOL WINAPI JSPROXY_InternetInitializeAutoProxyDll( DWORD version, LPSTR tmpfile
 
     if (buffer && buffer->dwStructSize == sizeof(*buffer) && buffer->lpszScriptBuffer)
     {
-        DWORD i, len = 0;
-        for (i = 0; i < buffer->dwScriptBufferSize; i++)
-        {
-            if (!buffer->lpszScriptBuffer[i]) break;
-            len++;
-        }
-        if (len == buffer->dwScriptBufferSize)
+        if (!buffer->dwScriptBufferSize)
         {
             SetLastError( ERROR_INVALID_PARAMETER );
             LeaveCriticalSection( &cs_jsproxy );
             return FALSE;
         }
         heap_free( global_script->text );
-        if ((global_script->text = strdupAW( buffer->lpszScriptBuffer, len ))) ret = TRUE;
+        if ((global_script->text = strdupAW( buffer->lpszScriptBuffer,
+                        buffer->dwScriptBufferSize ))) ret = TRUE;
     }
     else
     {

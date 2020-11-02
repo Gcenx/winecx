@@ -60,13 +60,13 @@
 @ stdcall WsFreeServiceProxy(ptr)
 @ stdcall WsFreeWriter(ptr)
 @ stdcall WsGetChannelProperty(ptr long ptr long ptr)
-@ stub WsGetCustomHeader
-@ stub WsGetDictionary
+@ stdcall WsGetCustomHeader(ptr ptr long long long ptr ptr long ptr ptr)
+@ stdcall WsGetDictionary(long ptr ptr)
 @ stdcall WsGetErrorProperty(ptr long ptr long)
 @ stdcall WsGetErrorString(ptr long ptr)
 @ stub WsGetFaultErrorDetail
 @ stub WsGetFaultErrorProperty
-@ stub WsGetHeader
+@ stdcall WsGetHeader(ptr long long long ptr ptr long ptr)
 @ stub WsGetHeaderAttributes
 @ stdcall WsGetHeapProperty(ptr long ptr long ptr)
 @ stdcall WsGetListenerProperty(ptr long ptr long ptr)
@@ -144,7 +144,7 @@
 @ stub WsRevokeSecurityContext
 @ stub WsSendFaultMessageForError
 @ stdcall WsSendMessage(ptr ptr ptr long ptr long ptr ptr)
-@ stub WsSendReplyMessage
+@ stdcall WsSendReplyMessage(ptr ptr ptr long ptr long ptr ptr ptr)
 @ stdcall WsSetChannelProperty(ptr long ptr long ptr)
 @ stdcall WsSetErrorProperty(ptr long ptr long)
 @ stub WsSetFaultErrorDetail
@@ -158,8 +158,8 @@
 @ stdcall WsSetOutputToBuffer(ptr ptr ptr long ptr)
 @ stdcall WsSetReaderPosition(ptr ptr ptr)
 @ stdcall WsSetWriterPosition(ptr ptr ptr)
-@ stub WsShutdownSessionChannel
-@ stub WsSkipNode
+@ stdcall WsShutdownSessionChannel(ptr ptr ptr)
+@ stdcall WsSkipNode(ptr ptr)
 @ stub WsStartReaderCanonicalization
 @ stub WsStartWriterCanonicalization
 @ stub WsTrimXmlWhitespace

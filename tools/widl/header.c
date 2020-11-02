@@ -805,17 +805,17 @@ const var_t *get_func_handle_var( const type_t *iface, const var_t *func,
         if (!is_attr( var->attrs, ATTR_IN ) && is_attr( var->attrs, ATTR_OUT )) continue;
         if (type_get_type( var->type ) == TYPE_BASIC && type_basic_get_type( var->type ) == TYPE_BASIC_HANDLE)
         {
-            *explicit_fc = RPC_FC_BIND_PRIMITIVE;
+            *explicit_fc = FC_BIND_PRIMITIVE;
             return var;
         }
         if (get_explicit_generic_handle_type( var ))
         {
-            *explicit_fc = RPC_FC_BIND_GENERIC;
+            *explicit_fc = FC_BIND_GENERIC;
             return var;
         }
         if (is_context_handle( var->type ))
         {
-            *explicit_fc = RPC_FC_BIND_CONTEXT;
+            *explicit_fc = FC_BIND_CONTEXT;
             return var;
         }
     }
@@ -824,13 +824,13 @@ const var_t *get_func_handle_var( const type_t *iface, const var_t *func,
     {
         if (type_get_type( var->type ) == TYPE_BASIC &&
             type_basic_get_type( var->type ) == TYPE_BASIC_HANDLE)
-            *implicit_fc = RPC_FC_BIND_PRIMITIVE;
+            *implicit_fc = FC_BIND_PRIMITIVE;
         else
-            *implicit_fc = RPC_FC_BIND_GENERIC;
+            *implicit_fc = FC_BIND_GENERIC;
         return var;
     }
 
-    *implicit_fc = RPC_FC_AUTO_HANDLE;
+    *implicit_fc = FC_AUTO_HANDLE;
     return NULL;
 }
 
@@ -960,7 +960,7 @@ static void write_method_macro(FILE *header, const type_t *iface, const type_t *
     if (is_override_method(iface, child, func))
       continue;
 
-    if (!is_callas(func->attrs) && !is_aggregate_return(func)) {
+    if (!is_callas(func->attrs)) {
       const var_t *arg;
 
       fprintf(header, "#define %s_%s(This", name, get_name(func));
@@ -968,6 +968,12 @@ static void write_method_macro(FILE *header, const type_t *iface, const type_t *
           LIST_FOR_EACH_ENTRY( arg, type_get_function_args(func->type), const var_t, entry )
               fprintf(header, ",%s", arg->name);
       fprintf(header, ") ");
+
+      if (is_aggregate_return(func))
+      {
+        fprintf(header, "%s_%s_define_WIDL_C_INLINE_WRAPPERS_for_aggregate_return_support\n", name, get_name(func));
+        continue;
+      }
 
       fprintf(header, "(This)->lpVtbl->%s(This", get_vtbl_entry_name(iface, func));
       if (type_get_function_args(func->type))
@@ -1043,13 +1049,62 @@ static void write_cpp_method_def(FILE *header, const type_t *iface)
     const var_t *func = stmt->u.var;
     if (!is_callas(func->attrs)) {
       const char *callconv = get_attrp(func->type->attrs, ATTR_CALLCONV);
+      const var_list_t *args = type_get_function_args(func->type);
+      const var_t *arg;
+
       if (!callconv) callconv = "STDMETHODCALLTYPE";
+
+      if (is_aggregate_return(func)) {
+        fprintf(header, "#ifdef WIDL_EXPLICIT_AGGREGATE_RETURNS\n");
+
+        indent(header, 0);
+        fprintf(header, "virtual ");
+        write_type_decl_left(header, type_function_get_rettype(func->type));
+        fprintf(header, "* %s %s(\n", callconv, get_name(func));
+        ++indentation;
+        indent(header, 0);
+        write_type_decl_left(header, type_function_get_rettype(func->type));
+        fprintf(header, " *__ret");
+        --indentation;
+        if (args) {
+          fprintf(header, ",\n");
+          write_args(header, args, iface->name, 2, TRUE);
+        }
+        fprintf(header, ") = 0;\n");
+
+        indent(header, 0);
+        write_type_decl_left(header, type_function_get_rettype(func->type));
+        fprintf(header, " %s %s(\n", callconv, get_name(func));
+        write_args(header, args, iface->name, 2, TRUE);
+        fprintf(header, ")\n");
+        indent(header, 0);
+        fprintf(header, "{\n");
+        ++indentation;
+        indent(header, 0);
+        write_type_decl_left(header, type_function_get_rettype(func->type));
+        fprintf(header, " __ret;\n");
+        indent(header, 0);
+        fprintf(header, "return *%s(&__ret", get_name(func));
+        if (args)
+            LIST_FOR_EACH_ENTRY(arg, args, const var_t, entry)
+                fprintf(header, ", %s", arg->name);
+        fprintf(header, ");\n");
+        --indentation;
+        indent(header, 0);
+        fprintf(header, "}\n");
+
+        fprintf(header, "#else\n");
+      }
+
       indent(header, 0);
       fprintf(header, "virtual ");
       write_type_decl_left(header, type_function_get_rettype(func->type));
       fprintf(header, " %s %s(\n", callconv, get_name(func));
-      write_args(header, type_get_function_args(func->type), iface->name, 2, TRUE);
+      write_args(header, args, iface->name, 2, TRUE);
       fprintf(header, ") = 0;\n");
+
+      if (is_aggregate_return(func))
+        fprintf(header, "#endif\n");
       fprintf(header, "\n");
     }
   }

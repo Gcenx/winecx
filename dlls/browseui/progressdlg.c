@@ -36,6 +36,7 @@
 #include "shlguid.h"
 #include "shlobj.h"
 
+#include "wine/heap.h"
 #include "wine/unicode.h"
 
 #include "browseui.h"
@@ -113,7 +114,7 @@ static LPWSTR load_string(HINSTANCE hInstance, UINT uiResourceId)
     WCHAR string[256];
     LPWSTR ret;
 
-    LoadStringW(hInstance, uiResourceId, string, sizeof(string)/sizeof(string[0]));
+    LoadStringW(hInstance, uiResourceId, string, ARRAY_SIZE(string));
     ret = HeapAlloc(GetProcessHeap(), 0, (strlenW(string) + 1) * sizeof(WCHAR));
     strcpyW(ret, string);
     return ret;
@@ -402,7 +403,16 @@ static HRESULT WINAPI ProgressDialog_SetTitle(IProgressDialog *iface, LPCWSTR pw
 
 static HRESULT WINAPI ProgressDialog_SetAnimation(IProgressDialog *iface, HINSTANCE hInstance, UINT uiResourceId)
 {
-    FIXME("(%p, %p, %d) - stub\n", iface, hInstance, uiResourceId);
+    ProgressDialog *This = impl_from_IProgressDialog(iface);
+
+    TRACE("(%p, %p, %u)\n", iface, hInstance, uiResourceId);
+
+    if (IS_INTRESOURCE(uiResourceId))
+    {
+        if (!SendDlgItemMessageW(This->hwnd, IDC_ANIMATION, ACM_OPENW, (WPARAM)hInstance, uiResourceId))
+            WARN("Failed to load animation\n");
+    }
+
     return S_OK;
 }
 

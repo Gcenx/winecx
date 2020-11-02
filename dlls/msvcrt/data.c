@@ -32,17 +32,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 int MSVCRT___argc = 0;
 static int argc_expand;
 static int wargc_expand;
-unsigned int MSVCRT_basemajor = 0;/* FIXME: */
-unsigned int MSVCRT_baseminor = 0;/* FIXME: */
-unsigned int MSVCRT_baseversion = 0; /* FIXME: */
 unsigned int MSVCRT__commode = 0;
 unsigned int MSVCRT__fmode = 0;
-unsigned int MSVCRT_osmajor = 0;/* FIXME: */
-unsigned int MSVCRT_osminor = 0;/* FIXME: */
-unsigned int MSVCRT_osmode = 0;/* FIXME: */
 unsigned int MSVCRT__osver = 0;
 unsigned int MSVCRT__osplatform = 0;
-unsigned int MSVCRT_osversion = 0; /* FIXME: */
 unsigned int MSVCRT__winmajor = 0;
 unsigned int MSVCRT__winminor = 0;
 unsigned int MSVCRT__winver = 0;
@@ -338,16 +331,8 @@ void msvcrt_init_args(void)
   MSVCRT__winminor   = osvi.dwMinorVersion;
   MSVCRT__osver      = osvi.dwBuildNumber;
   MSVCRT__osplatform = osvi.dwPlatformId;
-  MSVCRT_osversion   = MSVCRT__winver;
-  MSVCRT_osmajor     = MSVCRT__winmajor;
-  MSVCRT_osminor     = MSVCRT__winminor;
-  MSVCRT_baseversion = MSVCRT__osver;
-  MSVCRT_baseminor   = MSVCRT_baseversion & 0xFF;
-  MSVCRT_basemajor   = (MSVCRT_baseversion >> 8) & 0xFF;
-  TRACE( "winver %08x winmajor %08x winminor %08x osver%08x baseversion %08x basemajor %08x baseminor %08x\n",
-          MSVCRT__winver, MSVCRT__winmajor, MSVCRT__winminor, MSVCRT__osver, MSVCRT_baseversion,
-          MSVCRT_basemajor, MSVCRT_baseminor);
-  TRACE( "osversion %08x osmajor %08x osminor %08x\n", MSVCRT_osversion, MSVCRT_osmajor, MSVCRT_osminor);
+  TRACE( "winver %08x winmajor %08x winminor %08x osver %08x\n",
+          MSVCRT__winver, MSVCRT__winmajor, MSVCRT__winminor, MSVCRT__osver);
 
   MSVCRT__HUGE = HUGE_VAL;
   MSVCRT___setlc_active = 0;
@@ -641,6 +626,8 @@ void CDECL MSVCRT___set_app_type(int app_type)
   MSVCRT_app_type = app_type;
 }
 
+#if _MSVCR_VER>=140
+
 /*********************************************************************
  *		_get_initial_narrow_environment (UCRTBASE.@)
  */
@@ -745,4 +732,36 @@ MSVCRT_wchar_t* CDECL _get_wide_winmain_command_line(void)
       s++;
 
   return wide_command_line = s;
+}
+
+#endif /* _MSVCR_VER>=140 */
+
+/*********************************************************************
+ *    _get_winmajor (MSVCRT.@)
+ */
+int CDECL MSVCRT__get_winmajor(int* value)
+{
+    if (!MSVCRT_CHECK_PMT(value != NULL)) return MSVCRT_EINVAL;
+    *value = MSVCRT__winmajor;
+    return 0;
+}
+
+/*********************************************************************
+ *    _get_winminor (MSVCRT.@)
+ */
+int CDECL MSVCRT__get_winminor(int* value)
+{
+    if (!MSVCRT_CHECK_PMT(value != NULL)) return MSVCRT_EINVAL;
+    *value = MSVCRT__winminor;
+    return 0;
+}
+
+/*********************************************************************
+ *    _get_osver (MSVCRT.@)
+ */
+int CDECL MSVCRT__get_osver(int* value)
+{
+    if (!MSVCRT_CHECK_PMT(value != NULL)) return MSVCRT_EINVAL;
+    *value = MSVCRT__osver;
+    return 0;
 }

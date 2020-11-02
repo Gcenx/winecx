@@ -59,6 +59,14 @@ void minidump_write(const char* file, const EXCEPTION_RECORD* rec)
     MINIDUMP_EXCEPTION_INFORMATION      mei;
     EXCEPTION_POINTERS                  ep;
 
+#ifdef __x86_64__
+    if (dbg_curr_process->be_cpu->machine != IMAGE_FILE_MACHINE_AMD64)
+    {
+        FIXME("Cannot write minidump for 32-bit process using 64-bit winedbg\n");
+        return;
+    }
+#endif
+
     hFile = CreateFileA(file, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                         FILE_ATTRIBUTE_NORMAL, NULL);
 
@@ -69,7 +77,7 @@ void minidump_write(const char* file, const EXCEPTION_RECORD* rec)
         mei.ThreadId = dbg_curr_thread->tid;
         mei.ExceptionPointers = &ep;
         ep.ExceptionRecord = (EXCEPTION_RECORD*)rec;
-        ep.ContextRecord = &dbg_context;
+        ep.ContextRecord = &dbg_context.ctx;
         mei.ClientPointers = FALSE;
     }
     MiniDumpWriteDump(dbg_curr_process->handle, dbg_curr_process->pid,
@@ -477,9 +485,9 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
                    min(sizeof(dbg_context), mes->ThreadContext.DataSize));
             memory_get_current_pc(&addr);
             stack_fetch_frames(&dbg_context);
-            be_cpu->print_context(dbg_curr_thread->handle, &dbg_context, 0);
+            dbg_curr_process->be_cpu->print_context(dbg_curr_thread->handle, &dbg_context, 0);
             stack_info(-1);
-            be_cpu->print_segment_info(dbg_curr_thread->handle, &dbg_context);
+            dbg_curr_process->be_cpu->print_segment_info(dbg_curr_thread->handle, &dbg_context);
             stack_backtrace(mes->ThreadId);
             source_list_from_addr(&addr, 0);
         }

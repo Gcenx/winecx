@@ -44,6 +44,18 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     return TRUE;
 }
 
+EVT_HANDLE WINAPI EvtOpenSession(EVT_LOGIN_CLASS login_class, void *login, DWORD timeout, DWORD flags)
+{
+    FIXME("(%u %p %u %u) stub\n", login_class, login, timeout, flags);
+    return NULL;
+}
+
+EVT_HANDLE WINAPI EvtOpenLog(EVT_HANDLE session, const WCHAR *path, DWORD flags)
+{
+    FIXME("(%p %s %u) stub\n", session, debugstr_w(path), flags);
+    return NULL;
+}
+
 BOOL WINAPI EvtGetChannelConfigProperty(EVT_HANDLE ChannelConfig,
                                         EVT_CHANNEL_CONFIG_PROPERTY_ID PropertyId,
                                         DWORD Flags,
@@ -74,9 +86,27 @@ EVT_HANDLE WINAPI EvtSubscribe(EVT_HANDLE Session, HANDLE SignalEvent, LPCWSTR C
     return NULL;
 }
 
+EVT_HANDLE WINAPI EvtOpenChannelEnum(EVT_HANDLE session, DWORD flags)
+{
+    FIXME("(%p %u) stub\n", session, flags);
+    return NULL;
+}
+
+BOOL WINAPI EvtNextChannelPath(EVT_HANDLE channel_enum, DWORD buffer_len, WCHAR *buffer, DWORD *used)
+{
+    FIXME("(%p %u %p %p) stub\n", channel_enum, buffer_len, buffer, used);
+    return FALSE;
+}
+
 EVT_HANDLE WINAPI EvtOpenChannelConfig(EVT_HANDLE Session, LPCWSTR ChannelPath, DWORD Flags)
 {
     FIXME("(%p %s %u) stub\n", Session, debugstr_w(ChannelPath), Flags);
+    return NULL;
+}
+
+EVT_HANDLE WINAPI EvtQuery(EVT_HANDLE session, const WCHAR *path, const WCHAR *query, DWORD flags)
+{
+    FIXME("(%p %s %s %u) stub\n", session, debugstr_w(path), debugstr_w(query), flags);
     return NULL;
 }
 
@@ -84,4 +114,18 @@ BOOL WINAPI EvtClose(EVT_HANDLE handle)
 {
     FIXME("(%p) stub\n", handle);
     return TRUE;
+}
+
+BOOL WINAPI EvtNext(EVT_HANDLE result_set, DWORD size, EVT_HANDLE *array, DWORD timeout, DWORD flags, DWORD *ret_count)
+{
+    FIXME("(%p %u %p %u %#x %p) stub!\n", result_set, size, array, timeout, flags, ret_count);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+BOOL WINAPI EvtExportLog(EVT_HANDLE session, const WCHAR *path, const WCHAR *query, const WCHAR *file, DWORD flags)
+{
+    FIXME("(%p %s %s %s %#x) stub!\n", session, debugstr_w(path), debugstr_w(query), debugstr_w(file), flags);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
 }

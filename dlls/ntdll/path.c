@@ -325,9 +325,8 @@ ULONG WINAPI RtlIsDosDeviceName_U( PCWSTR dos_name )
     return 0;
 }
 
-
 /**************************************************************************
- *                 RtlDosPathNameToNtPathName_U		[NTDLL.@]
+ *                 RtlDosPathNameToNtPathName_U_WithStatus    [NTDLL.@]
  *
  * dos_path: a DOS path name (fully qualified or not)
  * ntpath:   pointer to a UNICODE_STRING to hold the converted
@@ -338,18 +337,15 @@ ULONG WINAPI RtlIsDosDeviceName_U( PCWSTR dos_name )
  * FIXME:
  *      + fill the cd structure
  */
-BOOLEAN  WINAPI RtlDosPathNameToNtPathName_U(PCWSTR dos_path,
-                                             PUNICODE_STRING ntpath,
-                                             PWSTR* file_part,
-                                             CURDIR* cd)
+NTSTATUS WINAPI RtlDosPathNameToNtPathName_U_WithStatus(const WCHAR *dos_path, UNICODE_STRING *ntpath,
+    WCHAR **file_part, CURDIR *cd)
 {
     static const WCHAR LongFileNamePfxW[] = {'\\','\\','?','\\'};
     ULONG sz, offset;
     WCHAR local[MAX_PATH];
     LPWSTR ptr;
 
-    TRACE("(%s,%p,%p,%p)\n",
-          debugstr_w(dos_path), ntpath, file_part, cd);
+    TRACE("(%s,%p,%p,%p)\n", debugstr_w(dos_path), ntpath, file_part, cd);
 
     if (cd)
     {
@@ -357,14 +353,15 @@ BOOLEAN  WINAPI RtlDosPathNameToNtPathName_U(PCWSTR dos_path,
         memset(cd, 0, sizeof(*cd));
     }
 
-    if (!dos_path || !*dos_path) return FALSE;
+    if (!dos_path || !*dos_path)
+        return STATUS_OBJECT_NAME_INVALID;
 
     if (!strncmpW(dos_path, LongFileNamePfxW, 4))
     {
         ntpath->Length = strlenW(dos_path) * sizeof(WCHAR);
         ntpath->MaximumLength = ntpath->Length + sizeof(WCHAR);
         ntpath->Buffer = RtlAllocateHeap(GetProcessHeap(), 0, ntpath->MaximumLength);
-        if (!ntpath->Buffer) return FALSE;
+        if (!ntpath->Buffer) return STATUS_NO_MEMORY;
         memcpy( ntpath->Buffer, dos_path, ntpath->MaximumLength );
         ntpath->Buffer[1] = '?';  /* change \\?\ to \??\ */
         if (file_part)
@@ -372,22 +369,23 @@ BOOLEAN  WINAPI RtlDosPathNameToNtPathName_U(PCWSTR dos_path,
             if ((ptr = strrchrW( ntpath->Buffer, '\\' )) && ptr[1]) *file_part = ptr + 1;
             else *file_part = NULL;
         }
-        return TRUE;
+        return STATUS_SUCCESS;
     }
 
     ptr = local;
     sz = RtlGetFullPathName_U(dos_path, sizeof(local), ptr, file_part);
-    if (sz == 0) return FALSE;
+    if (sz == 0) return STATUS_OBJECT_NAME_INVALID;
+
     if (sz > sizeof(local))
     {
-        if (!(ptr = RtlAllocateHeap(GetProcessHeap(), 0, sz))) return FALSE;
+        if (!(ptr = RtlAllocateHeap(GetProcessHeap(), 0, sz))) return STATUS_NO_MEMORY;
         sz = RtlGetFullPathName_U(dos_path, sz, ptr, file_part);
     }
     sz += (1 /* NUL */ + 4 /* unc\ */ + 4 /* \??\ */) * sizeof(WCHAR);
     if (sz > MAXWORD)
     {
         if (ptr != local) RtlFreeHeap(GetProcessHeap(), 0, ptr);
-        return FALSE;
+        return STATUS_OBJECT_NAME_INVALID;
     }
 
     ntpath->MaximumLength = sz;
@@ -395,7 +393,7 @@ BOOLEAN  WINAPI RtlDosPathNameToNtPathName_U(PCWSTR dos_path,
     if (!ntpath->Buffer)
     {
         if (ptr != local) RtlFreeHeap(GetProcessHeap(), 0, ptr);
-        return FALSE;
+        return STATUS_NO_MEMORY;
     }
 
     strcpyW(ntpath->Buffer, NTDosPrefixW);
@@ -422,7 +420,48 @@ BOOLEAN  WINAPI RtlDosPathNameToNtPathName_U(PCWSTR dos_path,
     /* FIXME: cd filling */
 
     if (ptr != local) RtlFreeHeap(GetProcessHeap(), 0, ptr);
-    return TRUE;
+    return STATUS_SUCCESS;
+}
+
+/**************************************************************************
+ *                 RtlDosPathNameToNtPathName_U    [NTDLL.@]
+ *
+ * See RtlDosPathNameToNtPathName_U_WithStatus
+ */
+BOOLEAN  WINAPI RtlDosPathNameToNtPathName_U(PCWSTR dos_path,
+                                             PUNICODE_STRING ntpath,
+                                             PWSTR* file_part,
+                                             CURDIR* cd)
+{
+    return RtlDosPathNameToNtPathName_U_WithStatus(dos_path, ntpath, file_part, cd) == STATUS_SUCCESS;
+}
+
+/**************************************************************************
+ *        RtlDosPathNameToRelativeNtPathName_U_WithStatus [NTDLL.@]
+ *
+ * See RtlDosPathNameToNtPathName_U_WithStatus (except the last parameter)
+ */
+NTSTATUS WINAPI RtlDosPathNameToRelativeNtPathName_U_WithStatus(const WCHAR *dos_path,
+    UNICODE_STRING *ntpath, WCHAR **file_part, RTL_RELATIVE_NAME *relative)
+{
+    TRACE("(%s,%p,%p,%p)\n", debugstr_w(dos_path), ntpath, file_part, relative);
+
+    if (relative)
+    {
+        FIXME("Unsupported parameter\n");
+        memset(relative, 0, sizeof(*relative));
+    }
+
+    /* FIXME: fill parameter relative */
+
+    return RtlDosPathNameToNtPathName_U_WithStatus(dos_path, ntpath, file_part, NULL);
+}
+
+/**************************************************************************
+ *        RtlReleaseRelativeName [NTDLL.@]
+ */
+void WINAPI RtlReleaseRelativeName(RTL_RELATIVE_NAME *relative)
+{
 }
 
 /******************************************************************
@@ -913,7 +952,7 @@ BOOLEAN WINAPI RtlIsNameLegalDOS8Dot3( const UNICODE_STRING *unicode,
  *		RtlGetCurrentDirectory_U (NTDLL.@)
  *
  */
-NTSTATUS WINAPI RtlGetCurrentDirectory_U(ULONG buflen, LPWSTR buf)
+ULONG WINAPI RtlGetCurrentDirectory_U(ULONG buflen, LPWSTR buf)
 {
     UNICODE_STRING*     us;
     ULONG               len;
@@ -1077,12 +1116,12 @@ NTSTATUS CDECL wine_unix_to_nt_file_name( const ANSI_STRING *name, UNICODE_STRIN
                 goto done;
             }
             memcpy( nt->Buffer, unix_prefixW, sizeof(unix_prefixW) );
-            ntdll_umbstowcs( 0, path, lenA, nt->Buffer + sizeof(unix_prefixW)/sizeof(WCHAR), lenW );
-            lenW += sizeof(unix_prefixW)/sizeof(WCHAR);
+            ntdll_umbstowcs( 0, path, lenA, nt->Buffer + ARRAY_SIZE( unix_prefixW ), lenW );
+            lenW += ARRAY_SIZE( unix_prefixW );
             nt->Buffer[lenW] = 0;
             nt->Length = lenW * sizeof(WCHAR);
             nt->MaximumLength = nt->Length + sizeof(WCHAR);
-            for (p = nt->Buffer + sizeof(unix_prefixW)/sizeof(WCHAR); *p; p++) if (*p == '/') *p = '\\';
+            for (p = nt->Buffer + ARRAY_SIZE( unix_prefixW ); *p; p++) if (*p == '/') *p = '\\';
             status = STATUS_SUCCESS;
         }
         goto done;
@@ -1099,12 +1138,12 @@ NTSTATUS CDECL wine_unix_to_nt_file_name( const ANSI_STRING *name, UNICODE_STRIN
 
     memcpy( nt->Buffer, prefixW, sizeof(prefixW) );
     nt->Buffer[4] += drive;
-    ntdll_umbstowcs( 0, path, lenA, nt->Buffer + sizeof(prefixW)/sizeof(WCHAR), lenW );
-    lenW += sizeof(prefixW)/sizeof(WCHAR);
+    ntdll_umbstowcs( 0, path, lenA, nt->Buffer + ARRAY_SIZE( prefixW ), lenW );
+    lenW += ARRAY_SIZE( prefixW );
     nt->Buffer[lenW] = 0;
     nt->Length = lenW * sizeof(WCHAR);
     nt->MaximumLength = nt->Length + sizeof(WCHAR);
-    for (p = nt->Buffer + sizeof(prefixW)/sizeof(WCHAR); *p; p++) if (*p == '/') *p = '\\';
+    for (p = nt->Buffer + ARRAY_SIZE( prefixW ); *p; p++) if (*p == '/') *p = '\\';
 
 done:
     RtlFreeHeap( GetProcessHeap(), 0, cwd );

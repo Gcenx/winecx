@@ -330,14 +330,8 @@ static HRESULT WINAPI OLEClipbrd_IEnumFORMATETC_Next
 
     for(i = 0; i < cfetch; i++)
     {
-      rgelt[i] = This->data->entries[This->pos++].fmtetc;
-      if(rgelt[i].ptd)
-      {
-        DVTARGETDEVICE *target = rgelt[i].ptd;
-        rgelt[i].ptd = CoTaskMemAlloc(target->tdSize);
-        if(!rgelt[i].ptd) return E_OUTOFMEMORY;
-        memcpy(rgelt[i].ptd, target, target->tdSize);
-      }
+      hres = copy_formatetc(rgelt + i, &This->data->entries[This->pos++].fmtetc);
+      if(FAILED(hres)) return hres;
     }
   }
   else
@@ -1203,7 +1197,7 @@ static HRESULT get_priv_data(ole_priv_data **data)
         for(cf = 0; (cf = EnumClipboardFormats(cf)) != 0; count++)
         {
             WCHAR buf[256];
-            if (GetClipboardFormatNameW(cf, buf, sizeof(buf) / sizeof(WCHAR)))
+            if (GetClipboardFormatNameW(cf, buf, ARRAY_SIZE(buf)))
                 TRACE("cf %04x %s\n", cf, debugstr_w(buf));
             else
                 TRACE("cf %04x\n", cf);

@@ -28,6 +28,7 @@
 #include "winnls.h"
 #include "mssip.h"
 #include "winuser.h"
+#include "crypt32_private.h"
 
 #include "wine/debug.h"
 #include "wine/list.h"
@@ -440,7 +441,7 @@ BOOL WINAPI CryptSIPRetrieveSubjectGuid
         WCHAR subKeyName[MAX_PATH];
 
         do {
-            size = sizeof(subKeyName) / sizeof(subKeyName[0]);
+            size = ARRAY_SIZE(subKeyName);
             r = RegEnumKeyExW(key, index++, subKeyName, &size, NULL, NULL,
              NULL, NULL);
             if (r == ERROR_SUCCESS)
@@ -478,7 +479,7 @@ BOOL WINAPI CryptSIPRetrieveSubjectGuid
             WCHAR subKeyName[MAX_PATH];
 
             do {
-                size = sizeof(subKeyName) / sizeof(subKeyName[0]);
+                size = ARRAY_SIZE(subKeyName);
                 r = RegEnumKeyExW(key, index++, subKeyName, &size, NULL, NULL,
                  NULL, NULL);
                 if (r == ERROR_SUCCESS)
@@ -800,4 +801,14 @@ BOOL WINAPI CryptSIPVerifyIndirectData(SIP_SUBJECTINFO* pSubjectInfo,
         ret = sip->info.pfVerify(pSubjectInfo, pIndirectData);
     TRACE("returning %d\n", ret);
     return ret;
+}
+
+/***********************************************************************
+ *             CryptSIPRetrieveSubjectGuidForCatalogFile (CRYPT32.@)
+ */
+BOOL WINAPI CryptSIPRetrieveSubjectGuidForCatalogFile(LPCWSTR filename, HANDLE handle, GUID *subject)
+{
+    FIXME("(%s %p %p)\n", debugstr_w(filename), handle, subject);
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
 }

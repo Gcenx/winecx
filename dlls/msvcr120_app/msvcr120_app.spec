@@ -30,9 +30,9 @@
 @ cdecl -arch=arm ??0_NonReentrantBlockingLock@details@Concurrency@@QAA@XZ(ptr) msvcr120.??0_NonReentrantBlockingLock@details@Concurrency@@QAA@XZ
 @ thiscall -arch=i386 ??0_NonReentrantBlockingLock@details@Concurrency@@QAE@XZ(ptr) msvcr120.??0_NonReentrantBlockingLock@details@Concurrency@@QAE@XZ
 @ cdecl -arch=win64 ??0_NonReentrantBlockingLock@details@Concurrency@@QEAA@XZ(ptr) msvcr120.??0_NonReentrantBlockingLock@details@Concurrency@@QEAA@XZ
-@ stub -arch=arm ??0_NonReentrantPPLLock@details@Concurrency@@QAA@XZ
-@ stub -arch=i386 ??0_NonReentrantPPLLock@details@Concurrency@@QAE@XZ
-@ stub -arch=win64 ??0_NonReentrantPPLLock@details@Concurrency@@QEAA@XZ
+@ cdecl -arch=arm ??0_NonReentrantPPLLock@details@Concurrency@@QAA@XZ(ptr) msvcr120.??0_NonReentrantPPLLock@details@Concurrency@@QAA@XZ
+@ thiscall -arch=i386 ??0_NonReentrantPPLLock@details@Concurrency@@QAE@XZ(ptr) msvcr120.??0_NonReentrantPPLLock@details@Concurrency@@QAE@XZ
+@ cdecl -arch=win64 ??0_NonReentrantPPLLock@details@Concurrency@@QEAA@XZ(ptr) msvcr120.??0_NonReentrantPPLLock@details@Concurrency@@QEAA@XZ
 @ stub -arch=arm ??0_ReaderWriterLock@details@Concurrency@@QAA@XZ
 @ stub -arch=i386 ??0_ReaderWriterLock@details@Concurrency@@QAE@XZ
 @ stub -arch=win64 ??0_ReaderWriterLock@details@Concurrency@@QEAA@XZ
@@ -42,18 +42,18 @@
 @ stub -arch=arm ??0_ReentrantLock@details@Concurrency@@QAA@XZ
 @ stub -arch=i386 ??0_ReentrantLock@details@Concurrency@@QAE@XZ
 @ stub -arch=win64 ??0_ReentrantLock@details@Concurrency@@QEAA@XZ
-@ stub -arch=arm ??0_ReentrantPPLLock@details@Concurrency@@QAA@XZ
-@ stub -arch=i386 ??0_ReentrantPPLLock@details@Concurrency@@QAE@XZ
-@ stub -arch=win64 ??0_ReentrantPPLLock@details@Concurrency@@QEAA@XZ
+@ cdecl -arch=arm ??0_ReentrantPPLLock@details@Concurrency@@QAA@XZ(ptr) msvcr120.??0_ReentrantPPLLock@details@Concurrency@@QAA@XZ
+@ thiscall -arch=i386 ??0_ReentrantPPLLock@details@Concurrency@@QAE@XZ(ptr) msvcr120.??0_ReentrantPPLLock@details@Concurrency@@QAE@XZ
+@ cdecl -arch=win64 ??0_ReentrantPPLLock@details@Concurrency@@QEAA@XZ(ptr) msvcr120.??0_ReentrantPPLLock@details@Concurrency@@QEAA@XZ
 @ cdecl -arch=arm ??0_Scheduler@details@Concurrency@@QAA@PAVScheduler@2@@Z(ptr ptr) msvcr120.??0_Scheduler@details@Concurrency@@QAA@PAVScheduler@2@@Z
 @ thiscall -arch=i386 ??0_Scheduler@details@Concurrency@@QAE@PAVScheduler@2@@Z(ptr ptr) msvcr120.??0_Scheduler@details@Concurrency@@QAE@PAVScheduler@2@@Z
 @ cdecl -arch=win64 ??0_Scheduler@details@Concurrency@@QEAA@PEAVScheduler@2@@Z(ptr ptr) msvcr120.??0_Scheduler@details@Concurrency@@QEAA@PEAVScheduler@2@@Z
 @ stub -arch=arm ??0_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QAA@AAV123@@Z
 @ stub -arch=i386 ??0_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QAE@AAV123@@Z
 @ stub -arch=win64 ??0_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QEAA@AEAV123@@Z
-@ stub -arch=arm ??0_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAA@AAV123@@Z
-@ stub -arch=i386 ??0_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAE@AAV123@@Z
-@ stub -arch=win64 ??0_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QEAA@AEAV123@@Z
+@ cdecl -arch=arm ??0_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAA@AAV123@@Z(ptr ptr) msvcr120.??0_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAA@AAV123@@Z
+@ thiscall -arch=i386 ??0_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAE@AAV123@@Z(ptr ptr) msvcr120.??0_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAE@AAV123@@Z
+@ cdecl -arch=win64 ??0_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QEAA@AEAV123@@Z(ptr ptr) msvcr120.??0_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QEAA@AEAV123@@Z
 @ stub -arch=arm ??0_SpinLock@details@Concurrency@@QAA@ACJ@Z
 @ stub -arch=i386 ??0_SpinLock@details@Concurrency@@QAE@ACJ@Z
 @ stub -arch=win64 ??0_SpinLock@details@Concurrency@@QEAA@AECJ@Z
@@ -282,9 +282,9 @@
 @ stub -arch=arm ??1_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QAA@XZ
 @ stub -arch=i386 ??1_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QAE@XZ
 @ stub -arch=win64 ??1_Scoped_lock@_NonReentrantPPLLock@details@Concurrency@@QEAA@XZ
-@ stub -arch=arm ??1_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAA@XZ
-@ stub -arch=i386 ??1_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAE@XZ
-@ stub -arch=win64 ??1_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QEAA@XZ
+@ cdecl -arch=arm ??1_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAA@XZ(ptr) msvcr120.??1_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAA@XZ
+@ thiscall -arch=i386 ??1_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAE@XZ(ptr) msvcr120.??1_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAE@XZ
+@ cdecl -arch=win64 ??1_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QEAA@XZ(ptr) msvcr120.??1_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QEAA@XZ
 @ stub -arch=arm ??1_SpinLock@details@Concurrency@@QAA@XZ
 @ stub -arch=i386 ??1_SpinLock@details@Concurrency@@QAE@XZ
 @ stub -arch=win64 ??1_SpinLock@details@Concurrency@@QEAA@XZ
@@ -416,7 +416,7 @@
 @ cdecl -arch=win64 ?Free@Concurrency@@YAXPEAX@Z(ptr) msvcr120.?Free@Concurrency@@YAXPEAX@Z
 @ cdecl -arch=win32 ?Get@CurrentScheduler@Concurrency@@SAPAVScheduler@2@XZ() msvcr120.?Get@CurrentScheduler@Concurrency@@SAPAVScheduler@2@XZ
 @ cdecl -arch=win64 ?Get@CurrentScheduler@Concurrency@@SAPEAVScheduler@2@XZ() msvcr120.?Get@CurrentScheduler@Concurrency@@SAPEAVScheduler@2@XZ
-@ stub ?GetCurrentThreadId@platform@details@Concurrency@@YAJXZ
+@ cdecl ?GetCurrentThreadId@platform@details@Concurrency@@YAJXZ() msvcr120.?GetCurrentThreadId@platform@details@Concurrency@@YAJXZ
 @ stub ?GetExecutionContextId@Concurrency@@YAIXZ
 @ cdecl ?GetNumberOfVirtualProcessors@CurrentScheduler@Concurrency@@SAIXZ() msvcr120.?GetNumberOfVirtualProcessors@CurrentScheduler@Concurrency@@SAIXZ
 @ stub ?GetOSVersion@Concurrency@@YA?AW4OSVersion@IResourceManager@1@XZ
@@ -461,18 +461,18 @@
 @ cdecl -arch=arm ?_Acquire@_NonReentrantBlockingLock@details@Concurrency@@QAAXXZ(ptr) msvcr120.?_Acquire@_NonReentrantBlockingLock@details@Concurrency@@QAAXXZ
 @ thiscall -arch=i386 ?_Acquire@_NonReentrantBlockingLock@details@Concurrency@@QAEXXZ(ptr) msvcr120.?_Acquire@_NonReentrantBlockingLock@details@Concurrency@@QAEXXZ
 @ cdecl -arch=win64 ?_Acquire@_NonReentrantBlockingLock@details@Concurrency@@QEAAXXZ(ptr) msvcr120.?_Acquire@_NonReentrantBlockingLock@details@Concurrency@@QEAAXXZ
-@ stub -arch=arm ?_Acquire@_NonReentrantPPLLock@details@Concurrency@@QAAXPAX@Z
-@ stub -arch=i386 ?_Acquire@_NonReentrantPPLLock@details@Concurrency@@QAEXPAX@Z
-@ stub -arch=win64 ?_Acquire@_NonReentrantPPLLock@details@Concurrency@@QEAAXPEAX@Z
+@ cdecl -arch=arm ?_Acquire@_NonReentrantPPLLock@details@Concurrency@@QAAXPAX@Z(ptr ptr) msvcr120.?_Acquire@_NonReentrantPPLLock@details@Concurrency@@QAAXPAX@Z
+@ thiscall -arch=i386 ?_Acquire@_NonReentrantPPLLock@details@Concurrency@@QAEXPAX@Z(ptr ptr) msvcr120.?_Acquire@_NonReentrantPPLLock@details@Concurrency@@QAEXPAX@Z
+@ cdecl -arch=win64 ?_Acquire@_NonReentrantPPLLock@details@Concurrency@@QEAAXPEAX@Z(ptr ptr) msvcr120.?_Acquire@_NonReentrantPPLLock@details@Concurrency@@QEAAXPEAX@Z
 @ cdecl -arch=arm ?_Acquire@_ReentrantBlockingLock@details@Concurrency@@QAAXXZ(ptr) msvcr120.?_Acquire@_ReentrantBlockingLock@details@Concurrency@@QAAXXZ
 @ thiscall -arch=i386 ?_Acquire@_ReentrantBlockingLock@details@Concurrency@@QAEXXZ(ptr) msvcr120.?_Acquire@_ReentrantBlockingLock@details@Concurrency@@QAEXXZ
 @ cdecl -arch=win64 ?_Acquire@_ReentrantBlockingLock@details@Concurrency@@QEAAXXZ(ptr) msvcr120.?_Acquire@_ReentrantBlockingLock@details@Concurrency@@QEAAXXZ
 @ stub -arch=arm ?_Acquire@_ReentrantLock@details@Concurrency@@QAAXXZ
 @ stub -arch=i386 ?_Acquire@_ReentrantLock@details@Concurrency@@QAEXXZ
 @ stub -arch=win64 ?_Acquire@_ReentrantLock@details@Concurrency@@QEAAXXZ
-@ stub -arch=arm ?_Acquire@_ReentrantPPLLock@details@Concurrency@@QAAXPAX@Z
-@ stub -arch=i386 ?_Acquire@_ReentrantPPLLock@details@Concurrency@@QAEXPAX@Z
-@ stub -arch=win64 ?_Acquire@_ReentrantPPLLock@details@Concurrency@@QEAAXPEAX@Z
+@ cdecl -arch=arm ?_Acquire@_ReentrantPPLLock@details@Concurrency@@QAAXPAX@Z(ptr ptr) msvcr120.?_Acquire@_ReentrantPPLLock@details@Concurrency@@QAAXPAX@Z
+@ thiscall -arch=i386 ?_Acquire@_ReentrantPPLLock@details@Concurrency@@QAEXPAX@Z(ptr ptr) msvcr120.?_Acquire@_ReentrantPPLLock@details@Concurrency@@QAEXPAX@Z
+@ cdecl -arch=win64 ?_Acquire@_ReentrantPPLLock@details@Concurrency@@QEAAXPEAX@Z(ptr ptr) msvcr120.?_Acquire@_ReentrantPPLLock@details@Concurrency@@QEAAXPEAX@Z
 @ stub -arch=arm ?_AcquireRead@_ReaderWriterLock@details@Concurrency@@QAAXXZ
 @ stub -arch=i386 ?_AcquireRead@_ReaderWriterLock@details@Concurrency@@QAEXXZ
 @ stub -arch=win64 ?_AcquireRead@_ReaderWriterLock@details@Concurrency@@QEAAXXZ
@@ -558,18 +558,18 @@
 @ cdecl -arch=arm ?_Release@_NonReentrantBlockingLock@details@Concurrency@@QAAXXZ(ptr) msvcr120.?_Release@_NonReentrantBlockingLock@details@Concurrency@@QAAXXZ
 @ thiscall -arch=i386 ?_Release@_NonReentrantBlockingLock@details@Concurrency@@QAEXXZ(ptr) msvcr120.?_Release@_NonReentrantBlockingLock@details@Concurrency@@QAEXXZ
 @ cdecl -arch=win64 ?_Release@_NonReentrantBlockingLock@details@Concurrency@@QEAAXXZ(ptr) msvcr120.?_Release@_NonReentrantBlockingLock@details@Concurrency@@QEAAXXZ
-@ stub -arch=arm ?_Release@_NonReentrantPPLLock@details@Concurrency@@QAAXXZ
-@ stub -arch=i386 ?_Release@_NonReentrantPPLLock@details@Concurrency@@QAEXXZ
-@ stub -arch=win64 ?_Release@_NonReentrantPPLLock@details@Concurrency@@QEAAXXZ
+@ cdecl -arch=arm ?_Release@_NonReentrantPPLLock@details@Concurrency@@QAAXXZ(ptr) msvcr120.?_Release@_NonReentrantPPLLock@details@Concurrency@@QAAXXZ
+@ thiscall -arch=i386 ?_Release@_NonReentrantPPLLock@details@Concurrency@@QAEXXZ(ptr) msvcr120.?_Release@_NonReentrantPPLLock@details@Concurrency@@QAEXXZ
+@ cdecl -arch=win64 ?_Release@_NonReentrantPPLLock@details@Concurrency@@QEAAXXZ(ptr) msvcr120.?_Release@_NonReentrantPPLLock@details@Concurrency@@QEAAXXZ
 @ cdecl -arch=arm ?_Release@_ReentrantBlockingLock@details@Concurrency@@QAAXXZ(ptr) msvcr120.?_Release@_ReentrantBlockingLock@details@Concurrency@@QAAXXZ
 @ thiscall -arch=i386 ?_Release@_ReentrantBlockingLock@details@Concurrency@@QAEXXZ(ptr) msvcr120.?_Release@_ReentrantBlockingLock@details@Concurrency@@QAEXXZ
 @ cdecl -arch=win64 ?_Release@_ReentrantBlockingLock@details@Concurrency@@QEAAXXZ(ptr) msvcr120.?_Release@_ReentrantBlockingLock@details@Concurrency@@QEAAXXZ
 @ stub -arch=arm ?_Release@_ReentrantLock@details@Concurrency@@QAAXXZ
 @ stub -arch=i386 ?_Release@_ReentrantLock@details@Concurrency@@QAEXXZ
 @ stub -arch=win64 ?_Release@_ReentrantLock@details@Concurrency@@QEAAXXZ
-@ stub -arch=arm ?_Release@_ReentrantPPLLock@details@Concurrency@@QAAXXZ
-@ stub -arch=i386 ?_Release@_ReentrantPPLLock@details@Concurrency@@QAEXXZ
-@ stub -arch=win64 ?_Release@_ReentrantPPLLock@details@Concurrency@@QEAAXXZ
+@ cdecl -arch=arm ?_Release@_ReentrantPPLLock@details@Concurrency@@QAAXXZ(ptr) msvcr120.?_Release@_ReentrantPPLLock@details@Concurrency@@QAAXXZ
+@ thiscall -arch=i386 ?_Release@_ReentrantPPLLock@details@Concurrency@@QAEXXZ(ptr) msvcr120.?_Release@_ReentrantPPLLock@details@Concurrency@@QAEXXZ
+@ cdecl -arch=win64 ?_Release@_ReentrantPPLLock@details@Concurrency@@QEAAXXZ(ptr) msvcr120.?_Release@_ReentrantPPLLock@details@Concurrency@@QEAAXXZ
 @ cdecl -arch=arm ?_Release@_Scheduler@details@Concurrency@@QAAIXZ(ptr) msvcr120.?_Release@_Scheduler@details@Concurrency@@QAAIXZ
 @ thiscall -arch=i386 ?_Release@_Scheduler@details@Concurrency@@QAEIXZ(ptr) msvcr120.?_Release@_Scheduler@details@Concurrency@@QAEIXZ
 @ cdecl -arch=win64 ?_Release@_Scheduler@details@Concurrency@@QEAAIXZ(ptr) msvcr120.?_Release@_Scheduler@details@Concurrency@@QEAAIXZ
@@ -635,7 +635,7 @@
 @ stub -arch=arm ?_Tidy@exception@std@@AAAXXZ
 @ stub -arch=i386 ?_Tidy@exception@std@@AAEXXZ
 @ stub -arch=win64 ?_Tidy@exception@std@@AEAAXXZ
-@ stub ?_Trace_agents@Concurrency@@YAXW4Agents_EventType@1@_JZZ
+@ varargs ?_Trace_agents@Concurrency@@YAXW4Agents_EventType@1@_JZZ(long int64) msvcr120.?_Trace_agents@Concurrency@@YAXW4Agents_EventType@1@_JZZ
 @ cdecl -arch=win32 ?_Trace_ppl_function@Concurrency@@YAXABU_GUID@@EW4ConcRT_EventType@1@@Z(ptr long long) msvcr120.?_Trace_ppl_function@Concurrency@@YAXABU_GUID@@EW4ConcRT_EventType@1@@Z
 @ cdecl -arch=win64 ?_Trace_ppl_function@Concurrency@@YAXAEBU_GUID@@EW4ConcRT_EventType@1@@Z(ptr long long) msvcr120.?_Trace_ppl_function@Concurrency@@YAXAEBU_GUID@@EW4ConcRT_EventType@1@@Z
 @ cdecl -arch=arm ?_TryAcquire@_NonReentrantBlockingLock@details@Concurrency@@QAA_NXZ(ptr) msvcr120.?_TryAcquire@_NonReentrantBlockingLock@details@Concurrency@@QAA_NXZ
@@ -838,7 +838,7 @@
 @ stub -arch=i386 _NLG_Return
 @ stub -arch=i386 _NLG_Return2
 @ stub -arch=arm,win64 __NLG_Return2
-@ stub _SetWinRTOutOfMemoryExceptionCallback
+@ cdecl _SetWinRTOutOfMemoryExceptionCallback(ptr) msvcr120._SetWinRTOutOfMemoryExceptionCallback
 @ stub -arch=win64 _SetImageBase
 @ stub -arch=win64 _SetThrowImageBase
 @ cdecl _Strftime(ptr long str ptr ptr) msvcr120._Strftime
@@ -851,14 +851,14 @@
 @ stub __BuildCatchObject
 @ stub __BuildCatchObjectHelper
 @ stdcall -arch=x86_64 __C_specific_handler(ptr long ptr ptr) msvcr120.__C_specific_handler
-@ cdecl -arch=i386,x86_64,arm __CppXcptFilter(long ptr) msvcr120.__CppXcptFilter
-@ cdecl -arch=i386,x86_64,arm __CxxDetectRethrow(ptr) msvcr120.__CxxDetectRethrow
-@ cdecl -arch=i386,x86_64,arm __CxxExceptionFilter(ptr ptr long ptr) msvcr120.__CxxExceptionFilter
-@ cdecl -arch=i386,x86_64,arm -norelay __CxxFrameHandler(ptr ptr ptr ptr) msvcr120.__CxxFrameHandler
-@ cdecl -arch=i386,x86_64,arm -norelay __CxxFrameHandler2(ptr ptr ptr ptr) msvcr120.__CxxFrameHandler2
-@ cdecl -arch=i386,x86_64,arm -norelay __CxxFrameHandler3(ptr ptr ptr ptr) msvcr120.__CxxFrameHandler3
+@ cdecl -arch=i386,x86_64,arm,arm64 __CppXcptFilter(long ptr) msvcr120.__CppXcptFilter
+@ cdecl -arch=i386,x86_64,arm,arm64 __CxxDetectRethrow(ptr) msvcr120.__CxxDetectRethrow
+@ cdecl -arch=i386,x86_64,arm,arm64 __CxxExceptionFilter(ptr ptr long ptr) msvcr120.__CxxExceptionFilter
+@ cdecl -arch=i386,x86_64,arm,arm64 -norelay __CxxFrameHandler(ptr ptr ptr ptr) msvcr120.__CxxFrameHandler
+@ cdecl -arch=i386,x86_64,arm,arm64 -norelay __CxxFrameHandler2(ptr ptr ptr ptr) msvcr120.__CxxFrameHandler2
+@ cdecl -arch=i386,x86_64,arm,arm64 -norelay __CxxFrameHandler3(ptr ptr ptr ptr) msvcr120.__CxxFrameHandler3
 @ stdcall -arch=i386 __CxxLongjmpUnwind(ptr) msvcr120.__CxxLongjmpUnwind
-@ cdecl -arch=i386,x86_64,arm __CxxQueryExceptionSize() msvcr120.__CxxQueryExceptionSize
+@ cdecl -arch=i386,x86_64,arm,arm64 __CxxQueryExceptionSize() msvcr120.__CxxQueryExceptionSize
 @ cdecl __CxxRegisterExceptionObject(ptr ptr) msvcr120.__CxxRegisterExceptionObject
 @ cdecl __CxxUnregisterExceptionObject(ptr long) msvcr120.__CxxUnregisterExceptionObject
 @ cdecl __DestructExceptionObject(ptr) msvcr120.__DestructExceptionObject
@@ -882,9 +882,9 @@
 @ extern __badioinfo msvcr120.__badioinfo
 @ cdecl __clean_type_info_names_internal(ptr) msvcr120.__clean_type_info_names_internal
 @ cdecl -arch=i386 __control87_2(long long ptr ptr) msvcr120.__control87_2
-@ stub __create_locale
-@ stub -arch=win64 __crtCaptureCurrentContext
-@ stub -arch=win64 __crtCapturePreviousContext
+@ cdecl __create_locale(long str) msvcr120.__create_locale
+@ cdecl -arch=win64 -norelay __crtCaptureCurrentContext(ptr) msvcr120.__crtCaptureCurrentContext
+@ cdecl -arch=x86_64 -norelay __crtCapturePreviousContext(ptr) msvcr120.__crtCapturePreviousContext
 @ stub __crtCloseWinRTThreadHandle
 @ cdecl __crtCompareStringA(long long str long str long) msvcr120.__crtCompareStringA
 @ cdecl __crtCompareStringW(long long wstr long wstr long) msvcr120.__crtCompareStringW
@@ -902,8 +902,8 @@
 @ cdecl __doserrno() msvcr120.__doserrno
 @ cdecl __dstbias() msvcr120.__dstbias
 @ cdecl __fpecode() msvcr120.__fpecode
-@ stub __free_locale
-@ stub __get_current_locale
+@ cdecl __free_locale(ptr) msvcr120.__free_locale
+@ cdecl __get_current_locale() msvcr120.__get_current_locale
 @ stub __get_flsindex
 @ stub __get_tlsindex
 @ cdecl __getmainargs(ptr ptr ptr long ptr) msvcr120.__getmainargs
@@ -1006,9 +1006,9 @@
 @ cdecl _atoflt(ptr str) msvcr120._atoflt
 @ cdecl _atoflt_l(ptr str ptr) msvcr120._atoflt_l
 @ cdecl -ret64 _atoi64(str) msvcr120._atoi64
-@ stub _atoi64_l
+@ cdecl _atoi64_l(str ptr) msvcr120._atoi64_l
 @ cdecl _atoi_l(str ptr) msvcr120._atoi_l
-@ stub _atol_l
+@ cdecl _atol_l(str ptr) msvcr120._atol_l
 @ cdecl _atoldbl(ptr str) msvcr120._atoldbl
 @ stub _atoldbl_l
 @ cdecl -ret64 _atoll_l(str ptr) msvcr120._atoll_l
@@ -1047,7 +1047,7 @@
 @ extern _daylight msvcr120._daylight
 @ cdecl _dclass(double) msvcr120._dclass
 @ cdecl _difftime32(long long) msvcr120._difftime32
-@ cdecl _difftime64(long long) msvcr120._difftime64
+@ cdecl _difftime64(int64 int64) msvcr120._difftime64
 @ stub _dosmaperr
 @ cdecl _dpcomp(double double) msvcr120._dpcomp
 @ cdecl _dsign(double) msvcr120._dsign
@@ -1094,13 +1094,13 @@
 @ cdecl _findnext64(long ptr) msvcr120._findnext64
 @ cdecl _findnext64i32(long ptr) msvcr120._findnext64i32
 @ cdecl _finite(double) msvcr120._finite
-@ cdecl -arch=arm,x86_64 _finitef(float) msvcr120._finitef
+@ cdecl -arch=arm,x86_64,arm64 _finitef(float) msvcr120._finitef
 @ cdecl _flsbuf(long ptr) msvcr120._flsbuf
 @ cdecl _flushall() msvcr120._flushall
 @ extern _fmode msvcr120._fmode
 @ cdecl _fpclass(double) msvcr120._fpclass
 # stub -arch=x86_64 _fpclassf
-@ cdecl -arch=i386,x86_64,arm _fpieee_flt(long ptr ptr) msvcr120._fpieee_flt
+@ cdecl -arch=i386,x86_64,arm,arm64 _fpieee_flt(long ptr ptr) msvcr120._fpieee_flt
 @ cdecl _fpreset() msvcr120._fpreset
 @ stub _fprintf_l
 @ stub _fprintf_p
@@ -1158,7 +1158,7 @@
 @ cdecl _get_output_format() msvcr120._get_output_format
 @ cdecl _get_pgmptr(ptr) msvcr120._get_pgmptr
 @ cdecl _get_printf_count_output() msvcr120._get_printf_count_output
-@ stub _get_purecall_handler
+@ cdecl _get_purecall_handler() msvcr120._get_purecall_handler
 @ cdecl _get_terminate() msvcr120._get_terminate
 @ cdecl _get_timezone(ptr) msvcr120._get_timezone
 @ cdecl _get_tzname(ptr str long long) msvcr120._get_tzname
@@ -1227,7 +1227,7 @@
 @ cdecl _ismbbtrail(long) msvcr120._ismbbtrail
 @ stub _ismbbtrail_l
 @ cdecl _isnan(double) msvcr120._isnan
-@ cdecl -arch=arm,x86_64 _isnanf(float) msvcr120._isnanf
+@ cdecl -arch=x86_64 _isnanf(float) msvcr120._isnanf
 @ cdecl _isprint_l(long ptr) msvcr120._isprint_l
 @ stub _ispunct_l
 @ cdecl _isspace_l(long ptr) msvcr120._isspace_l
@@ -1283,7 +1283,7 @@
 @ cdecl _lock_file(ptr) msvcr120._lock_file
 @ cdecl _locking(long long long) msvcr120._locking
 @ cdecl _logb(double) msvcr120._logb
-@ cdecl -arch=arm,x86_64 _logbf(float) msvcr120._logbf
+@ cdecl -arch=arm,x86_64,arm64 _logbf(float) msvcr120._logbf
 @ cdecl -arch=i386 _longjmpex(ptr long) msvcr120._longjmpex
 @ cdecl _lrotl(long long) msvcr120._lrotl
 @ cdecl _lrotr(long long) msvcr120._lrotr
@@ -1310,7 +1310,7 @@
 @ cdecl _mbtowc_l(ptr str long ptr) msvcr120._mbtowc_l
 @ cdecl _memccpy(ptr ptr long long) msvcr120._memccpy
 @ cdecl _memicmp(str str long) msvcr120._memicmp
-@ stub _memicmp_l
+@ cdecl _memicmp_l(str str long ptr) msvcr120._memicmp_l
 @ cdecl _mkdir(str) msvcr120._mkdir
 @ cdecl _mkgmtime32(ptr) msvcr120._mkgmtime32
 @ cdecl _mkgmtime64(ptr) msvcr120._mkgmtime64
@@ -1320,7 +1320,7 @@
 @ cdecl _mktime64(ptr) msvcr120._mktime64
 @ cdecl _msize(ptr) msvcr120._msize
 @ cdecl _nextafter(double double) msvcr120._nextafter
-@ cdecl -arch=arm,x86_64 _nextafterf(float float) msvcr120._nextafterf
+@ cdecl -arch=x86_64 _nextafterf(float float) msvcr120._nextafterf
 @ cdecl _onexit(ptr) msvcr120._onexit
 @ varargs _open(str long) msvcr120._open
 @ cdecl _open_osfhandle(long long) msvcr120._open_osfhandle
@@ -1348,7 +1348,7 @@
 @ cdecl _rotr(long long) msvcr120._rotr
 @ cdecl -ret64 _rotr64(int64 long) msvcr120._rotr64
 @ cdecl _scalb(double long) msvcr120._scalb
-@ cdecl -arch=arm,x86_64 _scalbf(float long) msvcr120._scalbf
+@ cdecl -arch=x86_64 _scalbf(float long) msvcr120._scalbf
 @ varargs _scanf_l(str ptr) msvcr120._scanf_l
 @ varargs _scanf_s_l(str ptr) msvcr120._scanf_s_l
 @ varargs _scprintf(str) msvcr120._scprintf
@@ -1373,7 +1373,7 @@
 @ cdecl _set_output_format(long) msvcr120._set_output_format
 @ cdecl _set_printf_count_output(long) msvcr120._set_printf_count_output
 @ cdecl _set_purecall_handler(ptr) msvcr120._set_purecall_handler
-@ cdecl -arch=i386,x86_64,arm -norelay _setjmp(ptr) msvcr120._setjmp
+@ cdecl -arch=i386,x86_64,arm,arm64 -norelay _setjmp(ptr) msvcr120._setjmp
 @ cdecl -arch=i386 -norelay _setjmp3(ptr long) msvcr120._setjmp3
 @ cdecl -arch=x86_64,arm -norelay _setjmpex(ptr ptr) msvcr120._setjmpex
 @ cdecl _setmaxstdio(long) msvcr120._setmaxstdio
@@ -1502,14 +1502,14 @@
 @ cdecl _utime32(str ptr) msvcr120._utime32
 @ cdecl _utime64(str ptr) msvcr120._utime64
 @ cdecl _vacopy(ptr ptr) msvcr120._vacopy
-@ stub _vfprintf_l
-@ stub _vfprintf_p
-@ stub _vfprintf_p_l
-@ stub _vfprintf_s_l
+@ cdecl _vfprintf_l(ptr str ptr ptr) msvcr120._vfprintf_l
+@ cdecl _vfprintf_p(ptr str ptr) msvcr120._vfprintf_p
+@ cdecl _vfprintf_p_l(ptr str ptr ptr) msvcr120._vfprintf_p_l
+@ cdecl _vfprintf_s_l(ptr str ptr ptr) msvcr120._vfprintf_s_l
 @ cdecl _vfwprintf_l(ptr wstr ptr ptr) msvcr120._vfwprintf_l
-@ stub _vfwprintf_p
-@ stub _vfwprintf_p_l
-@ stub _vfwprintf_s_l
+@ cdecl _vfwprintf_p(ptr wstr ptr) msvcr120._vfwprintf_p
+@ cdecl _vfwprintf_p_l(ptr wstr ptr ptr) msvcr120._vfwprintf_p_l
+@ cdecl _vfwprintf_s_l(ptr wstr ptr ptr) msvcr120._vfwprintf_s_l
 @ stub _vprintf_l
 @ stub _vprintf_p
 @ stub _vprintf_p_l
@@ -1580,7 +1580,7 @@
 @ cdecl _wcsrev(wstr) msvcr120._wcsrev
 @ cdecl _wcsset(wstr long) msvcr120._wcsset
 @ cdecl _wcsset_s(wstr long long) msvcr120._wcsset_s
-@ cdecl _wcstod_l(wstr ptr) msvcr120._wcstod_l
+@ cdecl _wcstod_l(wstr ptr long) msvcr120._wcstod_l
 @ cdecl _wcstof_l(wstr ptr ptr) msvcr120._wcstof_l
 @ cdecl -ret64 _wcstoi64(wstr ptr long) msvcr120._wcstoi64
 @ cdecl -ret64 _wcstoi64_l(wstr ptr long ptr) msvcr120._wcstoi64_l
@@ -1676,24 +1676,24 @@
 @ cdecl abort() msvcr120.abort
 @ cdecl abs(long) msvcr120.abs
 @ cdecl acos(double) msvcr120.acos
-@ cdecl -arch=arm,x86_64 acosf(float) msvcr120.acosf
-@ stub acosh
-@ stub acoshf
-@ stub acoshl
+@ cdecl -arch=arm,x86_64,arm64 acosf(float) msvcr120.acosf
+@ cdecl acosh(double) msvcr120.acosh
+@ cdecl acoshf(float) msvcr120.acoshf
+@ cdecl acoshl(double) msvcr120.acoshl
 @ cdecl asctime(ptr) msvcr120.asctime
 @ cdecl asctime_s(ptr long ptr) msvcr120.asctime_s
 @ cdecl asin(double) msvcr120.asin
-@ cdecl -arch=arm,x86_64 asinf(float) msvcr120.asinf
-@ cdecl asinh(double double) msvcr120.asinh
-@ cdecl asinhf(float float) msvcr120.asinhf
-@ cdecl asinhl(double double) msvcr120.asinhl
+@ cdecl -arch=arm,x86_64,arm64 asinf(float) msvcr120.asinf
+@ cdecl asinh(double) msvcr120.asinh
+@ cdecl asinhf(float) msvcr120.asinhf
+@ cdecl asinhl(double) msvcr120.asinhl
 @ cdecl atan(double) msvcr120.atan
-@ cdecl -arch=arm,x86_64 atanf(float) msvcr120.atanf
+@ cdecl -arch=arm,x86_64,arm64 atanf(float) msvcr120.atanf
 @ cdecl atan2(double double) msvcr120.atan2
-@ cdecl -arch=arm,x86_64 atan2f(float float) msvcr120.atan2f
-@ stub atanh
-@ stub atanhf
-@ stub atanhl
+@ cdecl -arch=arm,x86_64,arm64 atan2f(float float) msvcr120.atan2f
+@ cdecl atanh(double) msvcr120.atanh
+@ cdecl atanhf(float) msvcr120.atanhf
+@ cdecl atanhl(double) msvcr120.atanhl
 @ cdecl -private atexit(ptr) msvcr120.atexit
 @ cdecl atof(str) msvcr120.atof
 @ cdecl atoi(str) msvcr120.atoi
@@ -1737,7 +1737,7 @@
 @ stub ccoshl
 @ stub ccosl
 @ cdecl ceil(double) msvcr120.ceil
-@ cdecl -arch=arm,x86_64 ceilf(float) msvcr120.ceilf
+@ cdecl -arch=arm,x86_64,arm64 ceilf(float) msvcr120.ceilf
 @ stub cexp
 @ stub cexpf
 @ stub cexpl
@@ -1745,7 +1745,7 @@
 @ stub cimagf
 @ stub cimagl
 @ cdecl clearerr(ptr) msvcr120.clearerr
-@ stub clearerr_s
+@ cdecl clearerr_s(ptr) msvcr120.clearerr_s
 @ cdecl clock() msvcr120.clock
 @ stub clog
 @ stub clog10
@@ -1760,9 +1760,9 @@
 @ cdecl copysignf(float float) msvcr120.copysignf
 @ cdecl copysignl(double double) msvcr120.copysignl
 @ cdecl cos(double) msvcr120.cos
-@ cdecl -arch=arm,x86_64 cosf(float) msvcr120.cosf
+@ cdecl -arch=arm,x86_64,arm64 cosf(float) msvcr120.cosf
 @ cdecl cosh(double) msvcr120.cosh
-@ cdecl -arch=arm,x86_64 coshf(float) msvcr120.coshf
+@ cdecl -arch=arm,x86_64,arm64 coshf(float) msvcr120.coshf
 @ stub cpow
 @ stub cpowf
 @ stub cpowl
@@ -1789,22 +1789,22 @@
 @ stub ctanl
 @ cdecl -ret64 div(long long) msvcr120.div
 @ cdecl erf(double) msvcr120.erf
-@ stub erfc
-@ stub erfcf
-@ stub erfcl
-@ cdecl erff(double) msvcr120.erff
+@ cdecl erfc(double) msvcr120.erfc
+@ cdecl erfcf(float) msvcr120.erfcf
+@ cdecl erfcl(double) msvcr120.erfcl
+@ cdecl erff(float) msvcr120.erff
 @ cdecl erfl(double) msvcr120.erfl
 @ cdecl exit(long) msvcr120.exit
 @ cdecl exp(double) msvcr120.exp
 @ cdecl exp2(double) msvcr120.exp2
 @ cdecl exp2f(float) msvcr120.exp2f
 @ cdecl exp2l(double) msvcr120.exp2l
-@ cdecl -arch=arm,x86_64 expf(float) msvcr120.expf
-@ stub expm1
-@ stub expm1f
-@ stub expm1l
+@ cdecl -arch=arm,x86_64,arm64 expf(float) msvcr120.expf
+@ cdecl expm1(double) msvcr120.expm1
+@ cdecl expm1f(float) msvcr120.expm1f
+@ cdecl expm1l(double) msvcr120.expm1l
 @ cdecl fabs(double) msvcr120.fabs
-@ cdecl -arch=arm,x86_64 fabsf(float) msvcr120.fabsf
+@ cdecl -arch=arm,x86_64,arm64 fabsf(float) msvcr120.fabsf
 @ cdecl fclose(ptr) msvcr120.fclose
 @ stub fdim
 @ stub fdimf
@@ -1829,7 +1829,7 @@
 @ cdecl fgetwc(ptr) msvcr120.fgetwc
 @ cdecl fgetws(ptr long ptr) msvcr120.fgetws
 @ cdecl floor(double) msvcr120.floor
-@ cdecl -arch=arm,x86_64 floorf(float) msvcr120.floorf
+@ cdecl -arch=arm,x86_64,arm64 floorf(float) msvcr120.floorf
 @ stub fma
 @ stub fmaf
 @ stub fmal
@@ -1840,7 +1840,7 @@
 @ cdecl fminf(float float) msvcr120.fminf
 @ cdecl fminl(double double) msvcr120.fminl
 @ cdecl fmod(double double) msvcr120.fmod
-@ cdecl -arch=arm,x86_64 fmodf(float float) msvcr120.fmodf
+@ cdecl -arch=arm,x86_64,arm64 fmodf(float float) msvcr120.fmodf
 @ cdecl fopen(str str) msvcr120.fopen
 @ cdecl fopen_s(ptr str str) msvcr120.fopen_s
 @ varargs fprintf(ptr str) msvcr120.fprintf
@@ -1868,7 +1868,7 @@
 @ cdecl getc(ptr) msvcr120.getc
 @ cdecl getchar() msvcr120.getchar
 @ cdecl gets(str) msvcr120.gets
-@ stub gets_s
+@ cdecl gets_s(ptr long) msvcr120.gets_s
 @ cdecl getwc(ptr) msvcr120.getwc
 @ cdecl getwchar() msvcr120.getwchar
 @ stub ilogb
@@ -1919,19 +1919,19 @@
 @ cdecl -ret64 llroundl(double) msvcr120.llroundl
 @ cdecl localeconv() msvcr120.localeconv
 @ cdecl log(double) msvcr120.log
-@ cdecl -arch=arm,x86_64 logf(float) msvcr120.logf
+@ cdecl -arch=arm,x86_64,arm64 logf(float) msvcr120.logf
 @ cdecl log10(double) msvcr120.log10
-@ cdecl -arch=arm,x86_64 log10f(float) msvcr120.log10f
-@ stub log1p
-@ stub log1pf
-@ stub log1pl
+@ cdecl -arch=arm,x86_64,arm64 log10f(float) msvcr120.log10f
+@ cdecl log1p(double) msvcr120.log1p
+@ cdecl log1pf(float) msvcr120.log1pf
+@ cdecl log1pl(double) msvcr120.log1pl
 @ cdecl log2(double) msvcr120.log2
 @ cdecl log2f(float) msvcr120.log2f
 @ cdecl log2l(double) msvcr120.log2l
 @ stub logb
 @ stub logbf
 @ stub logbl
-@ cdecl -arch=i386,x86_64,arm longjmp(ptr long) msvcr120.longjmp
+@ cdecl -arch=i386,x86_64,arm,arm64 longjmp(ptr long) msvcr120.longjmp
 @ cdecl lrint(double) msvcr120.lrint
 @ cdecl lrintf(float) msvcr120.lrintf
 @ cdecl lrintl(double) msvcr120.lrintl
@@ -1955,7 +1955,7 @@
 @ cdecl memmove_s(ptr long ptr long) msvcr120.memmove_s
 @ cdecl memset(ptr long long) msvcr120.memset
 @ cdecl modf(double ptr) msvcr120.modf
-@ cdecl -arch=arm,x86_64 modff(float ptr) msvcr120.modff
+@ cdecl -arch=arm,x86_64,arm64 modff(float ptr) msvcr120.modff
 @ cdecl nan(str) msvcr120.nan
 @ cdecl nanf(str) msvcr120.nanf
 @ cdecl nanl(str) msvcr120.nanl
@@ -1973,7 +1973,7 @@
 @ stub norml
 @ cdecl perror(str) msvcr120.perror
 @ cdecl pow(double double) msvcr120.pow
-@ cdecl -arch=arm,x86_64 powf(float float) msvcr120.powf
+@ cdecl -arch=arm,x86_64,arm64 powf(float float) msvcr120.powf
 @ varargs printf(str) msvcr120.printf
 @ varargs printf_s(str) msvcr120.printf_s
 @ cdecl putc(long ptr) msvcr120.putc
@@ -2016,13 +2016,13 @@
 @ cdecl setvbuf(ptr str long long) msvcr120.setvbuf
 @ cdecl signal(long long) msvcr120.signal
 @ cdecl sin(double) msvcr120.sin
-@ cdecl -arch=arm,x86_64 sinf(float) msvcr120.sinf
+@ cdecl -arch=arm,x86_64,arm64 sinf(float) msvcr120.sinf
 @ cdecl sinh(double) msvcr120.sinh
-@ cdecl -arch=arm,x86_64 sinhf(float) msvcr120.sinhf
+@ cdecl -arch=arm,x86_64,arm64 sinhf(float) msvcr120.sinhf
 @ varargs sprintf(ptr str) msvcr120.sprintf
 @ varargs sprintf_s(ptr long str) msvcr120.sprintf_s
 @ cdecl sqrt(double) msvcr120.sqrt
-@ cdecl -arch=arm,x86_64 sqrtf(float) msvcr120.sqrtf
+@ cdecl -arch=arm,x86_64,arm64 sqrtf(float) msvcr120.sqrtf
 @ cdecl srand(long) msvcr120.srand
 @ varargs sscanf(str str) msvcr120.sscanf
 @ varargs sscanf_s(str str) msvcr120.sscanf_s
@@ -2064,9 +2064,9 @@
 @ varargs swscanf(wstr wstr) msvcr120.swscanf
 @ varargs swscanf_s(wstr wstr) msvcr120.swscanf_s
 @ cdecl tan(double) msvcr120.tan
-@ cdecl -arch=arm,x86_64 tanf(float) msvcr120.tanf
+@ cdecl -arch=arm,x86_64,arm64 tanf(float) msvcr120.tanf
 @ cdecl tanh(double) msvcr120.tanh
-@ cdecl -arch=arm,x86_64 tanhf(float) msvcr120.tanhf
+@ cdecl -arch=arm,x86_64,arm64 tanhf(float) msvcr120.tanhf
 @ stub tgamma
 @ stub tgammaf
 @ stub tgammal
@@ -2098,10 +2098,10 @@
 @ stub vscanf_s
 @ cdecl vsprintf(ptr str ptr) msvcr120.vsprintf
 @ cdecl vsprintf_s(ptr long str ptr) msvcr120.vsprintf_s
-@ stub vsscanf
+@ cdecl vsscanf(ptr str ptr) msvcr120.vsscanf
 @ stub vsscanf_s
 @ cdecl vswprintf_s(ptr long wstr ptr) msvcr120.vswprintf_s
-@ stub vswscanf
+@ cdecl vswscanf(ptr wstr ptr) msvcr120.vswscanf
 @ stub vswscanf_s
 @ cdecl vwprintf(wstr ptr) msvcr120.vwprintf
 @ cdecl vwprintf_s(wstr ptr) msvcr120.vwprintf_s

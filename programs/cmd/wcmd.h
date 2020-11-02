@@ -75,9 +75,9 @@ void WCMD_if (WCHAR *, CMD_LIST **cmdList);
 void WCMD_leave_paged_mode(void);
 void WCMD_more (WCHAR *);
 void WCMD_move (void);
-WCHAR* CDECL WCMD_format_string (const WCHAR *format, ...);
-void CDECL WCMD_output (const WCHAR *format, ...);
-void CDECL WCMD_output_stderr (const WCHAR *format, ...);
+WCHAR* WINAPIV WCMD_format_string (const WCHAR *format, ...);
+void WINAPIV WCMD_output (const WCHAR *format, ...);
+void WINAPIV WCMD_output_stderr (const WCHAR *format, ...);
 void WCMD_output_asis (const WCHAR *message);
 void WCMD_output_asis_stderr (const WCHAR *message);
 void WCMD_pause (void);
@@ -95,12 +95,13 @@ void WCMD_setshow_path (const WCHAR *args);
 void WCMD_setshow_prompt (void);
 void WCMD_setshow_time (void);
 void WCMD_shift (const WCHAR *args);
-void WCMD_start (const WCHAR *args);
+void WCMD_start (WCHAR *args);
 void WCMD_title (const WCHAR *);
 void WCMD_type (WCHAR *);
 void WCMD_verify (const WCHAR *args);
 void WCMD_version (void);
 int  WCMD_volume (BOOL set_label, const WCHAR *args);
+void WCMD_mklink(WCHAR *args);
 
 static inline BOOL WCMD_is_console_handle(HANDLE h)
 {
@@ -203,7 +204,7 @@ typedef struct _FOR_CONTEXT {
  * (uppercased and concatenated) and parameters entered, with environment
  * variables and batch parameters substitution already done.
  */
-extern WCHAR quals[MAX_PATH], param1[MAXSTRING], param2[MAXSTRING];
+extern WCHAR quals[MAXSTRING], param1[MAXSTRING], param2[MAXSTRING];
 extern DWORD errorlevel;
 extern BATCH_CONTEXT *context;
 extern FOR_CONTEXT forloopcontext;
@@ -266,9 +267,10 @@ extern BOOL delayedsubst;
 #define WCMD_FTYPE    42
 #define WCMD_MORE     43
 #define WCMD_CHOICE   44
+#define WCMD_MKLINK   45
 
 /* Must be last in list */
-#define WCMD_EXIT     45
+#define WCMD_EXIT     46
 
 /* Some standard messages */
 extern const WCHAR newlineW[];

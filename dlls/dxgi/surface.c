@@ -74,7 +74,7 @@ static ULONG STDMETHODCALLTYPE dxgi_surface_inner_Release(IUnknown *iface)
     if (!refcount)
     {
         wined3d_private_store_cleanup(&surface->private_store);
-        HeapFree(GetProcessHeap(), 0, surface);
+        heap_free(surface);
     }
 
     return refcount;
@@ -90,23 +90,23 @@ static inline struct dxgi_surface *impl_from_IDXGISurface1(IDXGISurface1 *iface)
 static HRESULT STDMETHODCALLTYPE dxgi_surface_QueryInterface(IDXGISurface1 *iface, REFIID riid,
         void **object)
 {
-    struct dxgi_surface *This = impl_from_IDXGISurface1(iface);
+    struct dxgi_surface *surface = impl_from_IDXGISurface1(iface);
     TRACE("Forwarding to outer IUnknown\n");
-    return IUnknown_QueryInterface(This->outer_unknown, riid, object);
+    return IUnknown_QueryInterface(surface->outer_unknown, riid, object);
 }
 
 static ULONG STDMETHODCALLTYPE dxgi_surface_AddRef(IDXGISurface1 *iface)
 {
-    struct dxgi_surface *This = impl_from_IDXGISurface1(iface);
+    struct dxgi_surface *surface = impl_from_IDXGISurface1(iface);
     TRACE("Forwarding to outer IUnknown\n");
-    return IUnknown_AddRef(This->outer_unknown);
+    return IUnknown_AddRef(surface->outer_unknown);
 }
 
 static ULONG STDMETHODCALLTYPE dxgi_surface_Release(IDXGISurface1 *iface)
 {
-    struct dxgi_surface *This = impl_from_IDXGISurface1(iface);
+    struct dxgi_surface *surface = impl_from_IDXGISurface1(iface);
     TRACE("Forwarding to outer IUnknown\n");
-    return IUnknown_Release(This->outer_unknown);
+    return IUnknown_Release(surface->outer_unknown);
 }
 
 /* IDXGIObject methods */
@@ -143,22 +143,22 @@ static HRESULT STDMETHODCALLTYPE dxgi_surface_GetPrivateData(IDXGISurface1 *ifac
 
 static HRESULT STDMETHODCALLTYPE dxgi_surface_GetParent(IDXGISurface1 *iface, REFIID riid, void **parent)
 {
-    struct dxgi_surface *This = impl_from_IDXGISurface1(iface);
+    struct dxgi_surface *surface = impl_from_IDXGISurface1(iface);
 
     TRACE("iface %p, riid %s, parent %p.\n", iface, debugstr_guid(riid), parent);
 
-    return IDXGIDevice_QueryInterface(This->device, riid, parent);
+    return IDXGIDevice_QueryInterface(surface->device, riid, parent);
 }
 
 /* IDXGIDeviceSubObject methods */
 
 static HRESULT STDMETHODCALLTYPE dxgi_surface_GetDevice(IDXGISurface1 *iface, REFIID riid, void **device)
 {
-    struct dxgi_surface *This = impl_from_IDXGISurface1(iface);
+    struct dxgi_surface *surface = impl_from_IDXGISurface1(iface);
 
     TRACE("iface %p, riid %s, device %p.\n", iface, debugstr_guid(riid), device);
 
-    return IDXGIDevice_QueryInterface(This->device, riid, device);
+    return IDXGIDevice_QueryInterface(surface->device, riid, device);
 }
 
 /* IDXGISurface methods */
@@ -182,16 +182,43 @@ static HRESULT STDMETHODCALLTYPE dxgi_surface_GetDesc(IDXGISurface1 *iface, DXGI
 
 static HRESULT STDMETHODCALLTYPE dxgi_surface_Map(IDXGISurface1 *iface, DXGI_MAPPED_RECT *mapped_rect, UINT flags)
 {
-    FIXME("iface %p, mapped_rect %p, flags %#x stub!\n", iface, mapped_rect, flags);
+    struct dxgi_surface *surface = impl_from_IDXGISurface1(iface);
+    struct wined3d_map_desc wined3d_map_desc;
+    DWORD wined3d_map_flags = 0;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, mapped_rect %p, flags %#x.\n", iface, mapped_rect, flags);
+
+    if (flags & DXGI_MAP_READ)
+        wined3d_map_flags |= WINED3D_MAP_READ;
+    if (flags & DXGI_MAP_WRITE)
+        wined3d_map_flags |= WINED3D_MAP_WRITE;
+    if (flags & DXGI_MAP_DISCARD)
+        wined3d_map_flags |= WINED3D_MAP_DISCARD;
+
+    wined3d_mutex_lock();
+    if (SUCCEEDED(hr = wined3d_resource_map(wined3d_texture_get_resource(surface->wined3d_texture), 0,
+            &wined3d_map_desc, NULL, wined3d_map_flags)))
+    {
+        mapped_rect->Pitch = wined3d_map_desc.row_pitch;
+        mapped_rect->pBits = wined3d_map_desc.data;
+    }
+    wined3d_mutex_unlock();
+
+    return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE dxgi_surface_Unmap(IDXGISurface1 *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct dxgi_surface *surface = impl_from_IDXGISurface1(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p.\n", iface);
+
+    wined3d_mutex_lock();
+    wined3d_resource_unmap(wined3d_texture_get_resource(surface->wined3d_texture), 0);
+    wined3d_mutex_unlock();
+
+    return S_OK;
 }
 
 /* IDXGISurface1 methods */

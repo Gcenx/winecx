@@ -1259,6 +1259,7 @@ static void load_string(IHTMLDocument2 *doc, const char *str)
 {
     IPersistStreamInit *init;
     IStream *stream;
+    HRESULT hres;
     HGLOBAL mem;
     SIZE_T len;
 
@@ -1266,9 +1267,11 @@ static void load_string(IHTMLDocument2 *doc, const char *str)
     len = strlen(str);
     mem = GlobalAlloc(0, len);
     memcpy(mem, str, len);
-    CreateStreamOnHGlobal(mem, TRUE, &stream);
+    hres = CreateStreamOnHGlobal(mem, TRUE, &stream);
+    ok(hres == S_OK, "Failed to create a stream, hr %#x.\n", hres);
 
-    IHTMLDocument2_QueryInterface(doc, &IID_IPersistStreamInit, (void**)&init);
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IPersistStreamInit, (void**)&init);
+    ok(hres == S_OK, "Failed to get IPersistStreamInit, hr %#x.\n", hres);
 
     IPersistStreamInit_Load(init, stream);
     IPersistStreamInit_Release(init);
@@ -2325,7 +2328,8 @@ static void test_script_run(void)
 
     V_VT(&var) = VT_BSTR;
     V_BSTR(&var) = NULL;
-    dispex_propput(document, id, 0, &var, NULL);
+    hres = dispex_propput(document, id, 0, &var, NULL);
+    ok(hres == S_OK, "dispex_propput failed: %08x\n", hres);
 
     VariantInit(&var);
     memset(&dp, 0, sizeof(dp));
@@ -2823,7 +2827,8 @@ static void report_data(ProtocolHandler *This)
     IServiceProvider_Release(service_provider);
     ok(hres == S_OK, "Could not get IHttpNegotiate interface: %08x\n", hres);
 
-    IUri_GetDisplayUri(This->uri, &url);
+    hres = IUri_GetDisplayUri(This->uri, &url);
+    ok(hres == S_OK, "Failed to get display uri: %08x\n", hres);
     hres = IHttpNegotiate_BeginningTransaction(http_negotiate, url, emptyW, 0, &addl_headers);
     ok(hres == S_OK, "BeginningTransaction failed: %08x\n", hres);
     SysFreeString(url);
@@ -3373,9 +3378,9 @@ static void run_js_script(const char *test_name)
     trace("running %s...\n", test_name);
 
     ptr = url + lstrlenW(url);
-    ptr += GetModuleFileNameW(NULL, ptr, url + sizeof(url)/sizeof(WCHAR) - ptr);
+    ptr += GetModuleFileNameW(NULL, ptr, url + ARRAY_SIZE(url) - ptr);
     *ptr++ = '/';
-    MultiByteToWideChar(CP_ACP, 0, test_name, -1, ptr, url + sizeof(url)/sizeof(WCHAR) - ptr);
+    MultiByteToWideChar(CP_ACP, 0, test_name, -1, ptr, url + ARRAY_SIZE(url) - ptr);
 
     hres = CreateURLMoniker(NULL, url, &mon);
     ok(hres == S_OK, "CreateURLMoniker failed: %08x\n", hres);
@@ -3420,7 +3425,7 @@ static void run_script_as_http_with_mode(const char *script, const char *opt, co
             "  </body>\n"
             "</html>\n",
             document_mode ? "<!DOCTYPE html>\n" : "",
-            document_mode ? "<meta http-equiv=\"x-ua-compatible\" content=\"IE=" : "",
+            document_mode ? "<meta http-equiv=\"x-ua-compatible\" content=\"Ie=" : "",
             document_mode ? document_mode : "",
             document_mode ? "\">" : "",
             script);
@@ -3459,6 +3464,9 @@ static void run_js_tests(void)
     init_protocol_handler();
 
     run_script_as_http_with_mode("xhr.js", NULL, "11");
+    run_script_as_http_with_mode("elements.js", NULL, "11");
+    run_script_as_http_with_mode("es5.js", NULL, "11");
+    run_script_as_http_with_mode("events.js", NULL, "9");
     run_script_as_http_with_mode("navigation.js", NULL, NULL);
     run_script_as_http_with_mode("navigation.js", NULL, "11");
 

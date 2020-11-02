@@ -25,6 +25,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "windows.h"
+#include "sddl.h"
 
 #define KEY      "ProfileInt"
 #define SECTION  "Test"
@@ -70,7 +71,7 @@ static void test_profile_int(void)
          { SECTION, KEY,  "B4294967297", TESTFILE, -1, 0          , 0},
          { SECTION, KEY,  "B4294967297", TESTFILE,  1, 0          , 0},
     };
-    int i, num_test = (sizeof(profileInt)/sizeof(struct _profileInt));
+    int i, num_test = ARRAY_SIZE(profileInt);
     UINT res;
 
     DeleteFileA( TESTFILE);
@@ -143,8 +144,7 @@ static void test_profile_string(void)
     CloseHandle( h);
 
     /* works only in unicode, ascii crashes */
-    ret=GetPrivateProfileStringW(emptyW, keyW, emptyW, bufW,
-                                 sizeof(bufW)/sizeof(bufW[0]), TESTFILE2W);
+    ret=GetPrivateProfileStringW(emptyW, keyW, emptyW, bufW, ARRAY_SIZE(bufW), TESTFILE2W);
     todo_wine
     ok(ret == 13, "expected 13, got %u\n", ret);
     todo_wine
@@ -152,8 +152,7 @@ static void test_profile_string(void)
         wine_dbgstr_w(valsectionW), wine_dbgstr_w(bufW) );
 
     /* works only in unicode, ascii crashes */
-    ret=GetPrivateProfileStringW(sW, emptyW, emptyW, bufW,
-                                 sizeof(bufW)/sizeof(bufW[0]), TESTFILE2W);
+    ret=GetPrivateProfileStringW(sW, emptyW, emptyW, bufW, ARRAY_SIZE(bufW), TESTFILE2W);
     todo_wine
     ok(ret == 10, "expected 10, got %u\n", ret);
     todo_wine
@@ -170,7 +169,7 @@ static void test_profile_sections(void)
     DWORD count;
     char buf[100];
     char *p;
-    static const char content[]="[section1]\r\nname1=val1\r\nname2=\r\nname3\r\nname4=val4\r\n[section2]\r\n";
+    static const char content[]="[section1]\r\nname1=val1\r\nname2=\r\nname3\r\nname4=val4\r\n[section2]\r\n[section3]\r\n=val5\r\n";
     static const char testfile4[]=".\\testwine4.ini";
     BOOL on_win98 = FALSE;
 
@@ -234,6 +233,19 @@ static void test_profile_sections(void)
     for( p = buf + strlen(buf) + 1; *p;p += strlen(p)+1)
         p[-1] = ',';
     ok( ret == 35 && !strcmp( buf, "name1=val1,name2=,name3,name4=val4"), "wrong section returned(%d): %s\n",
+            ret, buf);
+    ok( buf[ret-1] == 0 && buf[ret] == 0, "returned buffer not terminated with double-null\n" );
+    ok( GetLastError() == ERROR_SUCCESS ||
+        broken(GetLastError() == 0xdeadbeef), /* Win9x, WinME */
+        "expected ERROR_SUCCESS, got %d\n", GetLastError());
+
+    /* Existing section with no keys but has values */
+    SetLastError(0xdeadbeef);
+    ret=GetPrivateProfileSectionA("section3", buf, sizeof(buf), testfile4);
+    trace("section3 return: %s\n", buf);
+    for( p = buf + strlen(buf) + 1; *p;p += strlen(p)+1)
+        p[-1] = ',';
+    ok( ret == 6 && !strcmp( buf, "=val5"), "wrong section returned(%d): %s\n",
             ret, buf);
     ok( buf[ret-1] == 0 && buf[ret] == 0, "returned buffer not terminated with double-null\n" );
     ok( GetLastError() == ERROR_SUCCESS ||
@@ -380,7 +392,7 @@ static void test_profile_existing(void)
     HANDLE h = 0;
     char buffer[MAX_PATH];
 
-    for (i=0; i < sizeof(pe)/sizeof(pe[0]); i++)
+    for (i=0; i < ARRAY_SIZE(pe); i++)
     {
         h = CreateFileA(testfile1, pe[i].dwDesiredAccess, pe[i].dwShareMode, NULL,
                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -420,7 +432,7 @@ static void test_profile_existing(void)
     ok( WriteFile( h, buffer, strlen(buffer), &size, NULL ), "failed to write\n" );
     CloseHandle( h );
 
-    for (i=0; i < sizeof(pe)/sizeof(pe[0]); i++)
+    for (i=0; i < ARRAY_SIZE(pe); i++)
     {
         h = CreateFileA(testfile2, pe[i].dwDesiredAccess, pe[i].dwShareMode, NULL,
                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -532,6 +544,41 @@ static BOOL emptystr_ok(CHAR emptystr[MAX_PATH])
         }
 
     return TRUE;
+}
+
+static void test_profile_directory_readonly(void)
+{
+    BOOL ret;
+    CHAR path_folder[MAX_PATH];
+    CHAR path_file[MAX_PATH];
+    const char *sddl_string_everyone_readonly = "D:PAI(A;;0x1200a9;;;WD)";
+    SECURITY_ATTRIBUTES attributes = {0};
+    char lpStruct[] = { 's', 't', 'r', 'i', 'n', 'g' };
+
+    attributes.nLength = sizeof(attributes);
+    ret = ConvertStringSecurityDescriptorToSecurityDescriptorA(sddl_string_everyone_readonly, SDDL_REVISION_1, &attributes.lpSecurityDescriptor, NULL);
+    ok(ret == TRUE, "ConvertStringSecurityDescriptorToSecurityDescriptor failed: %d\n", GetLastError());
+
+    GetTempPathA(MAX_PATH, path_folder);
+    lstrcatA(path_folder, "wine-test");
+
+    strcpy(path_file, path_folder);
+    lstrcatA(path_file, "\\tmp.ini");
+
+    ret = CreateDirectoryA(path_folder, &attributes);
+    ok(ret == TRUE, "CreateDirectoryA failed: %d\n", GetLastError());
+
+    ret = WritePrivateProfileStringA("App", "key", "string", path_file);
+    ok(ret == FALSE, "Expected FALSE, got %d\n", ret);
+
+    ret = WritePrivateProfileSectionA("App", "key=string", path_file);
+    ok(ret == FALSE, "Expected FALSE, got %d\n", ret);
+
+    ret = WritePrivateProfileStructA("App", "key", lpStruct, sizeof(lpStruct), path_file);
+    ok(ret == FALSE, "Expected FALSE, got %d\n", ret);
+
+    ret = RemoveDirectoryA(path_folder);
+    ok(ret == TRUE, "RemoveDirectoryA failed: %d\n", GetLastError());
 }
 
 static void test_GetPrivateProfileString(const char *content, const char *descript)
@@ -907,6 +954,7 @@ static void test_WritePrivateProfileString(void)
     LPCSTR data;
     CHAR path[MAX_PATH];
     CHAR temp[MAX_PATH];
+    HANDLE file;
 
     SetLastError(0xdeadbeef);
     ret = WritePrivateProfileStringW(NULL, NULL, NULL, NULL);
@@ -1020,12 +1068,14 @@ static void test_WritePrivateProfileString(void)
        "Expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
 
     /* Relative paths are relative to X:\\%WINDIR% */
-    GetWindowsDirectoryA(temp, MAX_PATH);
-    GetTempFileNameA(temp, "win", 1, path);
-    if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES)
+    GetWindowsDirectoryA(path, MAX_PATH);
+    strcat(path, "\\win1.tmp");
+    file = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (!ret && GetLastError() == ERROR_ACCESS_DENIED)
         skip("Not allowed to create a file in the Windows directory\n");
     else
     {
+        CloseHandle(file);
         DeleteFileA(path);
 
         data = "[App]\r\n"
@@ -1132,6 +1182,7 @@ START_TEST(profile)
     test_profile_existing();
     test_profile_delete_on_close();
     test_profile_refresh();
+    test_profile_directory_readonly();
     test_GetPrivateProfileString(
         "[section1]\r\n"
         "name1=val1\r\n"

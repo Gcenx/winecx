@@ -20,13 +20,15 @@
 
 #include "wine/test.h"
 #include <windows.h>
+#include <stdio.h>
 #include <psapi.h>
 
 static DWORD (WINAPI *pGetDllDirectoryA)(DWORD,LPSTR);
 static DWORD (WINAPI *pGetDllDirectoryW)(DWORD,LPWSTR);
 static BOOL (WINAPI *pSetDllDirectoryA)(LPCSTR);
-static BOOL (WINAPI *pGetModuleHandleExA)(DWORD,LPCSTR,HMODULE*);
-static BOOL (WINAPI *pGetModuleHandleExW)(DWORD,LPCWSTR,HMODULE*);
+static DLL_DIRECTORY_COOKIE (WINAPI *pAddDllDirectory)(const WCHAR*);
+static BOOL (WINAPI *pRemoveDllDirectory)(DLL_DIRECTORY_COOKIE);
+static BOOL (WINAPI *pSetDefaultDllDirectories)(DWORD);
 static BOOL (WINAPI *pK32GetModuleInformation)(HANDLE process, HMODULE module,
                                                MODULEINFO *modinfo, DWORD cb);
 
@@ -37,9 +39,92 @@ static BOOL cmpStrAW(const char* a, const WCHAR* b, DWORD lenA, DWORD lenB)
     WCHAR       aw[1024];
 
     DWORD len = MultiByteToWideChar( AreFileApisANSI() ? CP_ACP : CP_OEMCP, 0,
-                                     a, lenA, aw, sizeof(aw) / sizeof(aw[0]) );
+                                     a, lenA, aw, ARRAY_SIZE(aw));
     if (len != lenB) return FALSE;
     return memcmp(aw, b, len * sizeof(WCHAR)) == 0;
+}
+
+static const struct
+{
+    IMAGE_DOS_HEADER dos;
+    IMAGE_NT_HEADERS nt;
+    IMAGE_SECTION_HEADER section;
+} dll_image =
+{
+    { IMAGE_DOS_SIGNATURE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, { 0 }, 0, 0, { 0 },
+      sizeof(IMAGE_DOS_HEADER) },
+    {
+        IMAGE_NT_SIGNATURE, /* Signature */
+        {
+#if defined __i386__
+            IMAGE_FILE_MACHINE_I386, /* Machine */
+#elif defined __x86_64__
+            IMAGE_FILE_MACHINE_AMD64, /* Machine */
+#elif defined __powerpc__
+            IMAGE_FILE_MACHINE_POWERPC, /* Machine */
+#elif defined __arm__
+            IMAGE_FILE_MACHINE_ARMNT, /* Machine */
+#elif defined __aarch64__
+            IMAGE_FILE_MACHINE_ARM64, /* Machine */
+#else
+# error You must specify the machine type
+#endif
+            1, /* NumberOfSections */
+            0, /* TimeDateStamp */
+            0, /* PointerToSymbolTable */
+            0, /* NumberOfSymbols */
+            sizeof(IMAGE_OPTIONAL_HEADER), /* SizeOfOptionalHeader */
+            IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_DLL /* Characteristics */
+        },
+        { IMAGE_NT_OPTIONAL_HDR_MAGIC, /* Magic */
+          1, /* MajorLinkerVersion */
+          0, /* MinorLinkerVersion */
+          0, /* SizeOfCode */
+          0, /* SizeOfInitializedData */
+          0, /* SizeOfUninitializedData */
+          0, /* AddressOfEntryPoint */
+          0x1000, /* BaseOfCode */
+#ifndef _WIN64
+          0, /* BaseOfData */
+#endif
+          0x10000000, /* ImageBase */
+          0x1000, /* SectionAlignment */
+          0x1000, /* FileAlignment */
+          4, /* MajorOperatingSystemVersion */
+          0, /* MinorOperatingSystemVersion */
+          1, /* MajorImageVersion */
+          0, /* MinorImageVersion */
+          4, /* MajorSubsystemVersion */
+          0, /* MinorSubsystemVersion */
+          0, /* Win32VersionValue */
+          0x2000, /* SizeOfImage */
+          sizeof(IMAGE_DOS_HEADER) + sizeof(IMAGE_NT_HEADERS), /* SizeOfHeaders */
+          0, /* CheckSum */
+          IMAGE_SUBSYSTEM_WINDOWS_CUI, /* Subsystem */
+          0, /* DllCharacteristics */
+          0, /* SizeOfStackReserve */
+          0, /* SizeOfStackCommit */
+          0, /* SizeOfHeapReserve */
+          0, /* SizeOfHeapCommit */
+          0, /* LoaderFlags */
+          0, /* NumberOfRvaAndSizes */
+          { { 0 } } /* DataDirectory[IMAGE_NUMBEROF_DIRECTORY_ENTRIES] */
+        }
+    },
+    { ".rodata", { 0 }, 0x1000, 0x1000, 0, 0, 0, 0, 0,
+      IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ }
+};
+
+static void create_test_dll( const char *name )
+{
+    DWORD dummy;
+    HANDLE handle = CreateFileA( name, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, 0, 0 );
+
+    ok( handle != INVALID_HANDLE_VALUE, "failed to create file err %u\n", GetLastError() );
+    WriteFile( handle, &dll_image, sizeof(dll_image), &dummy, NULL );
+    SetFilePointer( handle, dll_image.nt.OptionalHeader.SizeOfImage, NULL, FILE_BEGIN );
+    SetEndOfFile( handle );
+    CloseHandle( handle );
 }
 
 static void testGetModuleFileName(const char* name)
@@ -64,7 +149,7 @@ static void testGetModuleFileName(const char* name)
     {
         memset(bufW, '-', sizeof(bufW));
         SetLastError(0xdeadbeef);
-        len1W = GetModuleFileNameW(hMod, bufW, sizeof(bufW) / sizeof(WCHAR));
+        len1W = GetModuleFileNameW(hMod, bufW, ARRAY_SIZE(bufW));
         ok(GetLastError() == ERROR_SUCCESS ||
            broken(GetLastError() == 0xdeadbeef), /* <= XP SP3 */
            "LastError was not reset: %u\n", GetLastError());
@@ -93,8 +178,7 @@ static void testGetModuleFileName(const char* name)
         ok(len1W / 2 == len2W, "Correct length in GetModuleFilenameW with buffer too small (%d/%d)\n", len1W / 2, len2W);
     }
 
-    ok(len1A / 2 == len2A || 
-       len1A / 2 == len2A + 1, /* Win9x */
+    ok(len1A / 2 == len2A,
        "Correct length in GetModuleFilenameA with buffer too small (%d/%d)\n", len1A / 2, len2A);
 }
 
@@ -107,15 +191,14 @@ static void testGetModuleFileName_Wrong(void)
     if (is_unicode_enabled)
     {
         bufW[0] = '*';
-        ok(GetModuleFileNameW((void*)0xffffffff, bufW, sizeof(bufW) / sizeof(WCHAR)) == 0, "Unexpected success in module handle\n");
+        ok(GetModuleFileNameW((void*)0xffffffff, bufW, ARRAY_SIZE(bufW)) == 0,
+           "Unexpected success in module handle\n");
         ok(bufW[0] == '*', "When failing, buffer shouldn't be written to\n");
     }
 
     bufA[0] = '*';
     ok(GetModuleFileNameA((void*)0xffffffff, bufA, sizeof(bufA)) == 0, "Unexpected success in module handle\n");
-    ok(bufA[0] == '*' ||
-       bufA[0] == 0 /* Win9x */,
-       "When failing, buffer shouldn't be written to\n");
+    ok(bufA[0] == '*', "When failing, buffer shouldn't be written to\n");
 }
 
 static void testLoadLibraryA(void)
@@ -134,14 +217,10 @@ static void testLoadLibraryA(void)
 
     SetLastError(0xdeadbeef);
     hModule1 = LoadLibraryA("kernel32   ");
-    /* Only winNT does this */
-    if (GetLastError() != ERROR_DLL_NOT_FOUND)
-    {
-        ok( hModule1 != NULL, "\"kernel32   \" should be loadable\n");
-        ok( GetLastError() == 0xdeadbeef, "GetLastError should be 0xdeadbeef but is %d\n", GetLastError());
-        ok( hModule == hModule1, "Loaded wrong module\n");
-        FreeLibrary(hModule1);
-    }
+    ok( hModule1 != NULL, "\"kernel32   \" should be loadable\n" );
+    ok( GetLastError() == 0xdeadbeef, "GetLastError should be 0xdeadbeef but is %d\n", GetLastError() );
+    ok( hModule == hModule1, "Loaded wrong module\n" );
+    FreeLibrary(hModule1);
     FreeLibrary(hModule);
 }
 
@@ -166,7 +245,7 @@ static void testNestedLoadLibraryA(void)
     hModule1 = LoadLibraryA(path1);
     if (!hModule1)
     {
-        /* We must be on Windows NT, so we cannot test */
+        /* We must be on Windows, so we cannot test */
         return;
     }
 
@@ -174,12 +253,7 @@ static void testNestedLoadLibraryA(void)
     strcat(path2, "\\system32\\");
     strcat(path2, dllname);
     hModule2 = LoadLibraryA(path2);
-    if (!hModule2)
-    {
-        /* We must be on Windows 9x, so we cannot test */
-        ok(FreeLibrary(hModule1), "FreeLibrary() failed\n");
-        return;
-    }
+    ok(hModule2 != NULL, "LoadLibrary(%s) failed\n", path2);
 
     /* The first LoadLibrary() call may have registered the dll under the
      * system32 path. So load it, again, under the '...\system\...' path so
@@ -209,8 +283,7 @@ static void testLoadLibraryA_Wrong(void)
     SetLastError(0xdeadbeef);
     hModule = LoadLibraryA("non_ex_pv.dll");
     ok( !hModule, "non_ex_pv.dll should be not loadable\n");
-    ok( GetLastError() == ERROR_MOD_NOT_FOUND || GetLastError() == ERROR_DLL_NOT_FOUND, 
-        "Expected ERROR_MOD_NOT_FOUND or ERROR_DLL_NOT_FOUND (win9x), got %d\n", GetLastError());
+    ok( GetLastError() == ERROR_MOD_NOT_FOUND, "Expected ERROR_MOD_NOT_FOUND, got %d\n", GetLastError() );
 
     /* Just in case */
     FreeLibrary(hModule);
@@ -223,14 +296,12 @@ static void testGetProcAddress_Wrong(void)
     SetLastError(0xdeadbeef);
     fp = GetProcAddress(NULL, "non_ex_call");
     ok( !fp, "non_ex_call should not be found\n");
-    ok( GetLastError() == ERROR_PROC_NOT_FOUND || GetLastError() == ERROR_INVALID_HANDLE,
-        "Expected ERROR_PROC_NOT_FOUND or ERROR_INVALID_HANDLE(win9x), got %d\n", GetLastError());
+    ok( GetLastError() == ERROR_PROC_NOT_FOUND, "Expected ERROR_PROC_NOT_FOUND, got %d\n", GetLastError() );
 
     SetLastError(0xdeadbeef);
     fp = GetProcAddress((HMODULE)0xdeadbeef, "non_ex_call");
     ok( !fp, "non_ex_call should not be found\n");
-    ok( GetLastError() == ERROR_MOD_NOT_FOUND || GetLastError() == ERROR_INVALID_HANDLE,
-        "Expected ERROR_MOD_NOT_FOUND or ERROR_INVALID_HANDLE(win9x), got %d\n", GetLastError());
+    ok( GetLastError() == ERROR_MOD_NOT_FOUND, "Expected ERROR_MOD_NOT_FOUND, got %d\n", GetLastError() );
 }
 
 static void testLoadLibraryEx(void)
@@ -246,28 +317,20 @@ static void testLoadLibraryEx(void)
     ok(hfile != INVALID_HANDLE_VALUE, "Expected a valid file handle\n");
 
     /* NULL lpFileName */
-    if (is_unicode_enabled)
-    {
-        SetLastError(0xdeadbeef);
-        hmodule = LoadLibraryExA(NULL, NULL, 0);
-        ok(hmodule == 0, "Expected 0, got %p\n", hmodule);
-        ok(GetLastError() == ERROR_MOD_NOT_FOUND ||
-           GetLastError() == ERROR_INVALID_PARAMETER, /* win9x */
-           "Expected ERROR_MOD_NOT_FOUND or ERROR_INVALID_PARAMETER, got %d\n",
-           GetLastError());
-    }
-    else
-        win_skip("NULL filename crashes on WinMe\n");
+    SetLastError(0xdeadbeef);
+    hmodule = LoadLibraryExA(NULL, NULL, 0);
+    ok(hmodule == 0, "Expected 0, got %p\n", hmodule);
+    ok(GetLastError() == ERROR_MOD_NOT_FOUND ||
+       GetLastError() == ERROR_INVALID_PARAMETER,
+       "Expected ERROR_MOD_NOT_FOUND or ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
 
     /* empty lpFileName */
     SetLastError(0xdeadbeef);
     hmodule = LoadLibraryExA("", NULL, 0);
     ok(hmodule == 0, "Expected 0, got %p\n", hmodule);
     ok(GetLastError() == ERROR_MOD_NOT_FOUND ||
-       GetLastError() == ERROR_DLL_NOT_FOUND /* win9x */ ||
        GetLastError() == ERROR_INVALID_PARAMETER /* win8 */,
-       "Expected ERROR_MOD_NOT_FOUND or ERROR_DLL_NOT_FOUND, got %d\n",
-       GetLastError());
+       "Expected ERROR_MOD_NOT_FOUND or ERROR_DLL_NOT_FOUND, got %d\n", GetLastError());
 
     /* hFile is non-NULL */
     SetLastError(0xdeadbeef);
@@ -276,8 +339,7 @@ static void testLoadLibraryEx(void)
     todo_wine
     {
         ok(GetLastError() == ERROR_SHARING_VIOLATION ||
-           GetLastError() == ERROR_INVALID_PARAMETER || /* win2k3 */
-           GetLastError() == ERROR_FILE_NOT_FOUND, /* win9x */
+           GetLastError() == ERROR_INVALID_PARAMETER, /* win2k3 */
            "Unexpected last error, got %d\n", GetLastError());
     }
 
@@ -287,8 +349,7 @@ static void testLoadLibraryEx(void)
     todo_wine
     {
         ok(GetLastError() == ERROR_SHARING_VIOLATION ||
-           GetLastError() == ERROR_INVALID_PARAMETER || /* win2k3 */
-           GetLastError() == ERROR_FILE_NOT_FOUND, /* win9x */
+           GetLastError() == ERROR_INVALID_PARAMETER, /* win2k3 */
            "Unexpected last error, got %d\n", GetLastError());
     }
 
@@ -298,10 +359,8 @@ static void testLoadLibraryEx(void)
     ok(hmodule == 0, "Expected 0, got %p\n", hmodule);
     todo_wine
     {
-        ok(GetLastError() == ERROR_SHARING_VIOLATION ||
-           GetLastError() == ERROR_FILE_NOT_FOUND, /* win9x */
-           "Expected ERROR_SHARING_VIOLATION or ERROR_FILE_NOT_FOUND, got %d\n",
-           GetLastError());
+        ok(GetLastError() == ERROR_SHARING_VIOLATION,
+           "Expected ERROR_SHARING_VIOLATION, got %d\n", GetLastError());
     }
 
     /* lpFileName does not matter */
@@ -312,8 +371,7 @@ static void testLoadLibraryEx(void)
         ok(hmodule == 0, "Expected 0, got %p\n", hmodule);
         ok(GetLastError() == ERROR_MOD_NOT_FOUND ||
            GetLastError() == ERROR_INVALID_PARAMETER, /* win2k3 */
-           "Expected ERROR_MOD_NOT_FOUND or ERROR_INVALID_PARAMETER, got %d\n",
-           GetLastError());
+           "Expected ERROR_MOD_NOT_FOUND or ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
     }
 
     CloseHandle(hfile);
@@ -324,10 +382,8 @@ static void testLoadLibraryEx(void)
     ok(hmodule == 0, "Expected 0, got %p\n", hmodule);
     todo_wine
     {
-        ok(GetLastError() == ERROR_FILE_INVALID ||
-           GetLastError() == ERROR_BAD_FORMAT, /* win9x */
-           "Expected ERROR_FILE_INVALID or ERROR_BAD_FORMAT, got %d\n",
-           GetLastError());
+        ok(GetLastError() == ERROR_FILE_INVALID,
+           "Expected ERROR_FILE_INVALID, got %d\n", GetLastError());
     }
 
     DeleteFileA("testfile.dll");
@@ -342,7 +398,7 @@ static void testLoadLibraryEx(void)
     hmodule = LoadLibraryExA(path, NULL, LOAD_LIBRARY_AS_DATAFILE);
     ok(hmodule != 0, "Expected valid module handle\n");
     ok(GetLastError() == 0xdeadbeef ||
-       GetLastError() == ERROR_SUCCESS, /* win9x */
+       GetLastError() == ERROR_SUCCESS,
        "Expected 0xdeadbeef or ERROR_SUCCESS, got %d\n", GetLastError());
 
     /* try invalid file handle */
@@ -357,9 +413,7 @@ static void testLoadLibraryEx(void)
     SetLastError(0xdeadbeef);
     hmodule = LoadLibraryExA("kernel32.dll", NULL, LOAD_LIBRARY_AS_DATAFILE);
     ok(hmodule != 0, "Expected valid module handle\n");
-    ok(GetLastError() == 0xdeadbeef ||
-       GetLastError() == ERROR_SUCCESS, /* win9x */
-       "Expected 0xdeadbeef or ERROR_SUCCESS, got %d\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
 
     FreeLibrary(hmodule);
 
@@ -375,8 +429,7 @@ static void testLoadLibraryEx(void)
     {
         ok(hmodule == 0, "Expected 0, got %p\n", hmodule);
     }
-    ok(GetLastError() == ERROR_FILE_NOT_FOUND ||
-       broken(GetLastError() == ERROR_INVALID_HANDLE),  /* nt4 */
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND,
        "Expected ERROR_FILE_NOT_FOUND, got %d\n", GetLastError());
 
     /* Free the loaded dll when it's the first time this dll is loaded
@@ -407,6 +460,132 @@ static void testLoadLibraryEx(void)
     FreeLibrary(hmodule);
 }
 
+static void test_LoadLibraryEx_search_flags(void)
+{
+    static const struct
+    {
+        int add_dirs[4];
+        int dll_dir;
+        int expect;
+    } tests[] =
+    {
+        { { 1, 2, 3 }, 4, 3 }, /* 0 */
+        { { 1, 3, 2 }, 4, 2 },
+        { { 3, 1 },    4, 1 },
+        { { 5, 6 },    4, 4 },
+        { { 5, 2 },    4, 2 },
+        { { 0 },       4, 4 }, /* 5 */
+        { { 0 },       0, 0 },
+        { { 6, 5 },    5, 0 },
+        { { 1, 1, 2 }, 0, 2 },
+    };
+    char *p, path[MAX_PATH], buf[MAX_PATH];
+    WCHAR bufW[MAX_PATH];
+    DLL_DIRECTORY_COOKIE cookies[4];
+    unsigned int i, j, k;
+    BOOL ret;
+    HMODULE mod;
+
+    if (!pAddDllDirectory || !pSetDllDirectoryA) return;
+
+    GetTempPathA( sizeof(path), path );
+    GetTempFileNameA( path, "tmp", 0, buf );
+    DeleteFileA( buf );
+    ret = CreateDirectoryA( buf, NULL );
+    ok( ret, "CreateDirectory failed err %u\n", GetLastError() );
+    p = buf + strlen( buf );
+    for (i = 1; i <= 6; i++)
+    {
+        sprintf( p, "\\%u", i );
+        ret = CreateDirectoryA( buf, NULL );
+        ok( ret, "CreateDirectory failed err %u\n", GetLastError() );
+        if (i >= 5) continue;  /* dirs 5 and 6 are left empty */
+        sprintf( p, "\\%u\\winetestdll.dll", i );
+        create_test_dll( buf );
+    }
+    SetLastError( 0xdeadbeef );
+    mod = LoadLibraryExA( "winetestdll.dll", 0, LOAD_LIBRARY_SEARCH_APPLICATION_DIR );
+    ok( !mod, "LoadLibrary succeeded\n" );
+    ok( GetLastError() == ERROR_MOD_NOT_FOUND, "wrong error %u\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    mod = LoadLibraryExA( "winetestdll.dll", 0, LOAD_LIBRARY_SEARCH_USER_DIRS );
+    ok( !mod, "LoadLibrary succeeded\n" );
+    ok( GetLastError() == ERROR_MOD_NOT_FOUND || broken(GetLastError() == ERROR_NOT_ENOUGH_MEMORY),
+        "wrong error %u\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    mod = LoadLibraryExA( "winetestdll.dll", 0, LOAD_LIBRARY_SEARCH_SYSTEM32 );
+    ok( !mod, "LoadLibrary succeeded\n" );
+    ok( GetLastError() == ERROR_MOD_NOT_FOUND, "wrong error %u\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    mod = LoadLibraryExA( "winetestdll.dll", 0, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR );
+    ok( !mod, "LoadLibrary succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %u\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    mod = LoadLibraryExA( "winetestdll.dll", 0, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32 );
+    ok( !mod, "LoadLibrary succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %u\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    mod = LoadLibraryExA( "foo\\winetestdll.dll", 0, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR );
+    ok( !mod, "LoadLibrary succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %u\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    mod = LoadLibraryExA( "\\windows\\winetestdll.dll", 0, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR );
+    ok( !mod, "LoadLibrary succeeded\n" );
+    ok( GetLastError() == ERROR_MOD_NOT_FOUND, "wrong error %u\n", GetLastError() );
+
+    for (j = 0; j < ARRAY_SIZE(tests); j++)
+    {
+        for (k = 0; tests[j].add_dirs[k]; k++)
+        {
+            sprintf( p, "\\%u", tests[j].add_dirs[k] );
+            MultiByteToWideChar( CP_ACP, 0, buf, -1, bufW, MAX_PATH );
+            cookies[k] = pAddDllDirectory( bufW );
+            ok( cookies[k] != NULL, "failed to add %s\n", buf );
+        }
+        if (tests[j].dll_dir)
+        {
+            sprintf( p, "\\%u", tests[j].dll_dir );
+            pSetDllDirectoryA( buf );
+        }
+        else pSetDllDirectoryA( NULL );
+
+        SetLastError( 0xdeadbeef );
+        mod = LoadLibraryExA( "winetestdll.dll", 0, LOAD_LIBRARY_SEARCH_USER_DIRS );
+        if (tests[j].expect)
+        {
+            ok( mod != NULL, "%u: LoadLibrary failed err %u\n", j, GetLastError() );
+            GetModuleFileNameA( mod, path, MAX_PATH );
+            sprintf( p, "\\%u\\winetestdll.dll", tests[j].expect );
+            ok( !lstrcmpiA( path, buf ), "%u: wrong module %s expected %s\n", j, path, buf );
+        }
+        else
+        {
+            ok( !mod, "%u: LoadLibrary succeeded\n", j );
+            ok( GetLastError() == ERROR_MOD_NOT_FOUND || broken(GetLastError() == ERROR_NOT_ENOUGH_MEMORY),
+                "%u: wrong error %u\n", j, GetLastError() );
+        }
+        FreeLibrary( mod );
+
+        for (k = 0; tests[j].add_dirs[k]; k++) pRemoveDllDirectory( cookies[k] );
+    }
+
+    for (i = 1; i <= 6; i++)
+    {
+        sprintf( p, "\\%u\\winetestdll.dll", i );
+        DeleteFileA( buf );
+        sprintf( p, "\\%u", i );
+        RemoveDirectoryA( buf );
+    }
+    *p = 0;
+    RemoveDirectoryA( buf );
+}
+
 static void testGetDllDirectory(void)
 {
     CHAR bufferA[MAX_PATH];
@@ -420,7 +599,7 @@ static void testGetDllDirectory(void)
         "C:\\Some\\Path\\",
         "Q:\\A\\Long\\Path with spaces that\\probably\\doesn't exist!",
     };
-    const int test_count = sizeof(dll_directories) / sizeof(dll_directories[0]);
+    const int test_count = ARRAY_SIZE(dll_directories);
 
     if (!pGetDllDirectoryA || !pGetDllDirectoryW)
     {
@@ -515,22 +694,18 @@ static void init_pointers(void)
     MAKEFUNC(GetDllDirectoryA);
     MAKEFUNC(GetDllDirectoryW);
     MAKEFUNC(SetDllDirectoryA);
-    MAKEFUNC(GetModuleHandleExA);
-    MAKEFUNC(GetModuleHandleExW);
+    MAKEFUNC(AddDllDirectory);
+    MAKEFUNC(RemoveDllDirectory);
+    MAKEFUNC(SetDefaultDllDirectories);
     MAKEFUNC(K32GetModuleInformation);
 #undef MAKEFUNC
 
-    /* not all Windows versions export this in kernel32 */
+    /* before Windows 7 this was not exported in kernel32 */
     if (!pK32GetModuleInformation)
     {
         HMODULE hPsapi = LoadLibraryA("psapi.dll");
-        if (hPsapi)
-        {
-            pK32GetModuleInformation = (void *)GetProcAddress(hPsapi, "GetModuleInformation");
-            if (!pK32GetModuleInformation) FreeLibrary(hPsapi);
-        }
+        pK32GetModuleInformation = (void *)GetProcAddress(hPsapi, "GetModuleInformation");
     }
-
 }
 
 static void testGetModuleHandleEx(void)
@@ -541,113 +716,107 @@ static void testGetModuleHandleEx(void)
     DWORD error;
     HMODULE mod, mod_kernel32;
 
-    if (!pGetModuleHandleExA || !pGetModuleHandleExW)
-    {
-        win_skip( "GetModuleHandleEx not available\n" );
-        return;
-    }
-
     SetLastError( 0xdeadbeef );
-    ret = pGetModuleHandleExA( 0, NULL, NULL );
+    ret = GetModuleHandleExA( 0, NULL, NULL );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_INVALID_PARAMETER, "got %u\n", error );
 
     SetLastError( 0xdeadbeef );
-    ret = pGetModuleHandleExA( 0, "kernel32", NULL );
+    ret = GetModuleHandleExA( 0, "kernel32", NULL );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_INVALID_PARAMETER, "got %u\n", error );
 
     SetLastError( 0xdeadbeef );
     mod = (HMODULE)0xdeadbeef;
-    ret = pGetModuleHandleExA( 0, "kernel32", &mod );
+    ret = GetModuleHandleExA( 0, "kernel32", &mod );
     ok( ret, "unexpected failure %u\n", GetLastError() );
     ok( mod != (HMODULE)0xdeadbeef, "got %p\n", mod );
     FreeLibrary( mod );
 
     SetLastError( 0xdeadbeef );
     mod = (HMODULE)0xdeadbeef;
-    ret = pGetModuleHandleExA( 0, "nosuchmod", &mod );
+    ret = GetModuleHandleExA( 0, "nosuchmod", &mod );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_MOD_NOT_FOUND, "got %u\n", error );
     ok( mod == NULL, "got %p\n", mod );
 
     SetLastError( 0xdeadbeef );
-    ret = pGetModuleHandleExW( 0, NULL, NULL );
+    ret = GetModuleHandleExW( 0, NULL, NULL );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_INVALID_PARAMETER, "got %u\n", error );
 
     SetLastError( 0xdeadbeef );
-    ret = pGetModuleHandleExW( 0, kernel32W, NULL );
+    ret = GetModuleHandleExW( 0, kernel32W, NULL );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_INVALID_PARAMETER, "got %u\n", error );
 
     SetLastError( 0xdeadbeef );
     mod = (HMODULE)0xdeadbeef;
-    ret = pGetModuleHandleExW( 0, kernel32W, &mod );
+    ret = GetModuleHandleExW( 0, kernel32W, &mod );
     ok( ret, "unexpected failure %u\n", GetLastError() );
     ok( mod != (HMODULE)0xdeadbeef, "got %p\n", mod );
     FreeLibrary( mod );
 
     SetLastError( 0xdeadbeef );
     mod = (HMODULE)0xdeadbeef;
-    ret = pGetModuleHandleExW( 0, nosuchmodW, &mod );
+    ret = GetModuleHandleExW( 0, nosuchmodW, &mod );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_MOD_NOT_FOUND, "got %u\n", error );
     ok( mod == NULL, "got %p\n", mod );
 
     SetLastError( 0xdeadbeef );
-    ret = pGetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, NULL, NULL );
+    ret = GetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, NULL, NULL );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_INVALID_PARAMETER, "got %u\n", error );
 
     SetLastError( 0xdeadbeef );
-    ret = pGetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, "kernel32", NULL );
+    ret = GetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, "kernel32", NULL );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_INVALID_PARAMETER, "got %u\n", error );
 
     SetLastError( 0xdeadbeef );
     mod = (HMODULE)0xdeadbeef;
-    ret = pGetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, "kernel32", &mod );
+    ret = GetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, "kernel32", &mod );
     ok( ret, "unexpected failure %u\n", GetLastError() );
     ok( mod != (HMODULE)0xdeadbeef, "got %p\n", mod );
 
     SetLastError( 0xdeadbeef );
     mod = (HMODULE)0xdeadbeef;
-    ret = pGetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, "nosuchmod", &mod );
+    ret = GetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, "nosuchmod", &mod );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_MOD_NOT_FOUND, "got %u\n", error );
     ok( mod == NULL, "got %p\n", mod );
 
     SetLastError( 0xdeadbeef );
-    ret = pGetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, NULL, NULL );
+    ret = GetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, NULL, NULL );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_INVALID_PARAMETER, "got %u\n", error );
 
     SetLastError( 0xdeadbeef );
-    ret = pGetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, kernel32W, NULL );
+    ret = GetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, kernel32W, NULL );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_INVALID_PARAMETER, "got %u\n", error );
 
     SetLastError( 0xdeadbeef );
     mod = (HMODULE)0xdeadbeef;
-    ret = pGetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, kernel32W, &mod );
+    ret = GetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, kernel32W, &mod );
     ok( ret, "unexpected failure %u\n", GetLastError() );
     ok( mod != (HMODULE)0xdeadbeef, "got %p\n", mod );
 
     SetLastError( 0xdeadbeef );
     mod = (HMODULE)0xdeadbeef;
-    ret = pGetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, nosuchmodW, &mod );
+    ret = GetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, nosuchmodW, &mod );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_MOD_NOT_FOUND, "got %u\n", error );
@@ -656,54 +825,54 @@ static void testGetModuleHandleEx(void)
     mod_kernel32 = LoadLibraryA( "kernel32" );
 
     SetLastError( 0xdeadbeef );
-    ret = pGetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, NULL, NULL );
+    ret = GetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, NULL, NULL );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_INVALID_PARAMETER, "got %u\n", error );
 
     SetLastError( 0xdeadbeef );
-    ret = pGetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCSTR)mod_kernel32, NULL );
+    ret = GetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCSTR)mod_kernel32, NULL );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_INVALID_PARAMETER, "got %u\n", error );
 
     SetLastError( 0xdeadbeef );
     mod = (HMODULE)0xdeadbeef;
-    ret = pGetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCSTR)mod_kernel32, &mod );
+    ret = GetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCSTR)mod_kernel32, &mod );
     ok( ret, "unexpected failure %u\n", GetLastError() );
     ok( mod == mod_kernel32, "got %p\n", mod );
     FreeLibrary( mod );
 
     SetLastError( 0xdeadbeef );
     mod = (HMODULE)0xdeadbeef;
-    ret = pGetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCSTR)0xbeefdead, &mod );
+    ret = GetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCSTR)0xbeefdead, &mod );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_MOD_NOT_FOUND, "got %u\n", error );
     ok( mod == NULL, "got %p\n", mod );
 
     SetLastError( 0xdeadbeef );
-    ret = pGetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, NULL, NULL );
+    ret = GetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, NULL, NULL );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_INVALID_PARAMETER, "got %u\n", error );
 
     SetLastError( 0xdeadbeef );
-    ret = pGetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)mod_kernel32, NULL );
+    ret = GetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)mod_kernel32, NULL );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_INVALID_PARAMETER, "got %u\n", error );
 
     SetLastError( 0xdeadbeef );
     mod = (HMODULE)0xdeadbeef;
-    ret = pGetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)mod_kernel32, &mod );
+    ret = GetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)mod_kernel32, &mod );
     ok( ret, "unexpected failure %u\n", GetLastError() );
     ok( mod == mod_kernel32, "got %p\n", mod );
     FreeLibrary( mod );
 
     SetLastError( 0xdeadbeef );
     mod = (HMODULE)0xdeadbeef;
-    ret = pGetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)0xbeefdead, &mod );
+    ret = GetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)0xbeefdead, &mod );
     error = GetLastError();
     ok( !ret, "unexpected success\n" );
     ok( error == ERROR_MOD_NOT_FOUND, "got %u\n", error );
@@ -718,12 +887,6 @@ static void testK32GetModuleInformation(void)
     HMODULE mod;
     BOOL ret;
 
-    if (!pK32GetModuleInformation)
-    {
-        win_skip("K32GetModuleInformation not available\n");
-        return;
-    }
-
     mod = GetModuleHandleA(NULL);
     memset(&info, 0xAA, sizeof(info));
     ret = pK32GetModuleInformation(GetCurrentProcess(), mod, &info, sizeof(info));
@@ -737,6 +900,119 @@ static void testK32GetModuleInformation(void)
     ok(ret, "K32GetModuleInformation failed for kernel32 module\n");
     ok(info.lpBaseOfDll == mod, "Wrong info.lpBaseOfDll = %p, expected %p\n", info.lpBaseOfDll, mod);
     ok(info.EntryPoint != NULL, "Expected nonzero entrypoint\n");
+}
+
+static void test_AddDllDirectory(void)
+{
+    static const WCHAR tmpW[] = {'t','m','p',0};
+    static const WCHAR dotW[] = {'.','\\','.',0};
+    static const WCHAR rootW[] = {'\\',0};
+    WCHAR path[MAX_PATH], buf[MAX_PATH];
+    DLL_DIRECTORY_COOKIE cookie;
+    BOOL ret;
+
+    if (!pAddDllDirectory || !pRemoveDllDirectory)
+    {
+        win_skip( "AddDllDirectory not available\n" );
+        return;
+    }
+
+    buf[0] = '\0';
+    GetTempPathW(ARRAY_SIZE(path), path );
+    ret = GetTempFileNameW( path, tmpW, 0, buf );
+    ok( ret, "GetTempFileName failed err %u\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    cookie = pAddDllDirectory( buf );
+    ok( cookie != NULL, "AddDllDirectory failed err %u\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    ret = pRemoveDllDirectory( cookie );
+    ok( ret, "RemoveDllDirectory failed err %u\n", GetLastError() );
+
+    DeleteFileW( buf );
+    SetLastError( 0xdeadbeef );
+    cookie = pAddDllDirectory( buf );
+    ok( !cookie, "AddDllDirectory succeeded\n" );
+    ok( GetLastError() == ERROR_FILE_NOT_FOUND, "wrong error %u\n", GetLastError() );
+    cookie = pAddDllDirectory( dotW );
+    ok( !cookie, "AddDllDirectory succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %u\n", GetLastError() );
+    cookie = pAddDllDirectory( rootW );
+    ok( cookie != NULL, "AddDllDirectory failed err %u\n", GetLastError() );
+    SetLastError( 0xdeadbeef );
+    ret = pRemoveDllDirectory( cookie );
+    ok( ret, "RemoveDllDirectory failed err %u\n", GetLastError() );
+    GetWindowsDirectoryW( buf, MAX_PATH );
+    lstrcpyW( buf + 2, tmpW );
+    cookie = pAddDllDirectory( buf );
+    ok( !cookie, "AddDllDirectory succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %u\n", GetLastError() );
+}
+
+static void test_SetDefaultDllDirectories(void)
+{
+    HMODULE mod;
+    BOOL ret;
+
+    if (!pSetDefaultDllDirectories)
+    {
+        win_skip( "SetDefaultDllDirectories not available\n" );
+        return;
+    }
+
+    mod = LoadLibraryA( "authz.dll" );
+    ok( mod != NULL, "loading authz failed\n" );
+    FreeLibrary( mod );
+    ret = pSetDefaultDllDirectories( LOAD_LIBRARY_SEARCH_USER_DIRS );
+    ok( ret, "SetDefaultDllDirectories failed err %u\n", GetLastError() );
+    mod = LoadLibraryA( "authz.dll" );
+    todo_wine ok( !mod, "loading authz succeeded\n" );
+    FreeLibrary( mod );
+    ret = pSetDefaultDllDirectories( LOAD_LIBRARY_SEARCH_SYSTEM32 );
+    ok( ret, "SetDefaultDllDirectories failed err %u\n", GetLastError() );
+    mod = LoadLibraryA( "authz.dll" );
+    ok( mod != NULL, "loading authz failed\n" );
+    FreeLibrary( mod );
+    mod = LoadLibraryExA( "authz.dll", 0, LOAD_LIBRARY_SEARCH_APPLICATION_DIR );
+    todo_wine ok( !mod, "loading authz succeeded\n" );
+    FreeLibrary( mod );
+    ret = pSetDefaultDllDirectories( LOAD_LIBRARY_SEARCH_APPLICATION_DIR );
+    ok( ret, "SetDefaultDllDirectories failed err %u\n", GetLastError() );
+    mod = LoadLibraryA( "authz.dll" );
+    todo_wine ok( !mod, "loading authz succeeded\n" );
+    FreeLibrary( mod );
+    ret = pSetDefaultDllDirectories( LOAD_LIBRARY_SEARCH_DEFAULT_DIRS );
+    ok( ret, "SetDefaultDllDirectories failed err %u\n", GetLastError() );
+    mod = LoadLibraryA( "authz.dll" );
+    ok( mod != NULL, "loading authz failed\n" );
+    FreeLibrary( mod );
+
+    SetLastError( 0xdeadbeef );
+    ret = pSetDefaultDllDirectories( 0 );
+    ok( !ret, "SetDefaultDllDirectories succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %u\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ret = pSetDefaultDllDirectories( 3 );
+    ok( !ret, "SetDefaultDllDirectories succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %u\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ret = pSetDefaultDllDirectories( LOAD_LIBRARY_SEARCH_APPLICATION_DIR | 0x8000 );
+    ok( !ret, "SetDefaultDllDirectories succeeded\n" );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %u\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ret = pSetDefaultDllDirectories( LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR );
+    ok( !ret || broken(ret) /* win7 */, "SetDefaultDllDirectories succeeded\n" );
+    if (!ret) ok( GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %u\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ret = pSetDefaultDllDirectories( LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_USER_DIRS );
+    ok( !ret || broken(ret) /* win7 */, "SetDefaultDllDirectories succeeded\n" );
+    if (!ret) ok( GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %u\n", GetLastError() );
+
+    /* restore some sane defaults */
+    pSetDefaultDllDirectories( LOAD_LIBRARY_SEARCH_DEFAULT_DIRS );
 }
 
 START_TEST(module)
@@ -766,6 +1042,9 @@ START_TEST(module)
     testLoadLibraryA_Wrong();
     testGetProcAddress_Wrong();
     testLoadLibraryEx();
+    test_LoadLibraryEx_search_flags();
     testGetModuleHandleEx();
     testK32GetModuleInformation();
+    test_AddDllDirectory();
+    test_SetDefaultDllDirectories();
 }

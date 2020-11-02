@@ -91,7 +91,7 @@ extern HRESULT IcnsEncoder_CreateInstance(REFIID iid, void** ppv) DECLSPEC_HIDDE
 extern HRESULT TgaDecoder_CreateInstance(REFIID iid, void** ppv) DECLSPEC_HIDDEN;
 
 extern HRESULT BitmapImpl_Create(UINT uiWidth, UINT uiHeight,
-    UINT stride, UINT datasize, BYTE *bits,
+    UINT stride, UINT datasize, void *view, UINT offset,
     REFWICPixelFormatGUID pixelFormat, WICBitmapCreateCacheOption option,
     IWICBitmap **ppIBitmap) DECLSPEC_HIDDEN;
 extern HRESULT BitmapScaler_Create(IWICBitmapScaler **scaler) DECLSPEC_HIDDEN;
@@ -120,12 +120,13 @@ extern void reverse_bgr8(UINT bytesperpixel, LPBYTE bits, UINT width, UINT heigh
 
 extern HRESULT get_pixelformat_bpp(const GUID *pixelformat, UINT *bpp) DECLSPEC_HIDDEN;
 
-extern HRESULT CreatePropertyBag2(PROPBAG2 *options, UINT count,
+extern HRESULT CreatePropertyBag2(const PROPBAG2 *options, UINT count,
                                   IPropertyBag2 **property) DECLSPEC_HIDDEN;
 
 extern HRESULT CreateComponentInfo(REFCLSID clsid, IWICComponentInfo **ppIInfo) DECLSPEC_HIDDEN;
 extern void ReleaseComponentInfos(void) DECLSPEC_HIDDEN;
 extern HRESULT CreateComponentEnumerator(DWORD componentTypes, DWORD options, IEnumUnknown **ppIEnumUnknown) DECLSPEC_HIDDEN;
+extern HRESULT get_decoder_info(REFCLSID clsid, IWICBitmapDecoderInfo **info) DECLSPEC_HIDDEN;
 
 typedef struct BmpDecoder BmpDecoder;
 

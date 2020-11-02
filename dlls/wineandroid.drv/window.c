@@ -283,10 +283,16 @@ jboolean motion_event( JNIEnv *env, jobject obj, jint win, jint action, jint x, 
 
     if (!( mask == AMOTION_EVENT_ACTION_DOWN ||
            mask == AMOTION_EVENT_ACTION_UP ||
+           mask == AMOTION_EVENT_ACTION_CANCEL ||
            mask == AMOTION_EVENT_ACTION_SCROLL ||
            mask == AMOTION_EVENT_ACTION_MOVE ||
-           mask == AMOTION_EVENT_ACTION_HOVER_MOVE ))
+           mask == AMOTION_EVENT_ACTION_HOVER_MOVE ||
+           mask == AMOTION_EVENT_ACTION_BUTTON_PRESS ||
+           mask == AMOTION_EVENT_ACTION_BUTTON_RELEASE ))
         return JNI_FALSE;
+
+    /* make sure a subsequent AMOTION_EVENT_ACTION_UP is not treated as a touch event */
+    if (mask == AMOTION_EVENT_ACTION_BUTTON_RELEASE) state |= 0x80000000;
 
     prev_state = InterlockedExchange( &button_state, state );
 
@@ -302,6 +308,7 @@ jboolean motion_event( JNIEnv *env, jobject obj, jint win, jint action, jint x, 
     switch (action & AMOTION_EVENT_ACTION_MASK)
     {
     case AMOTION_EVENT_ACTION_DOWN:
+    case AMOTION_EVENT_ACTION_BUTTON_PRESS:
         if ((state & ~prev_state) & AMOTION_EVENT_BUTTON_PRIMARY)
             data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
         if ((state & ~prev_state) & AMOTION_EVENT_BUTTON_SECONDARY)
@@ -312,6 +319,8 @@ jboolean motion_event( JNIEnv *env, jobject obj, jint win, jint action, jint x, 
             data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
         break;
     case AMOTION_EVENT_ACTION_UP:
+    case AMOTION_EVENT_ACTION_CANCEL:
+    case AMOTION_EVENT_ACTION_BUTTON_RELEASE:
         if ((prev_state & ~state) & AMOTION_EVENT_BUTTON_PRIMARY)
             data.motion.input.u.mi.dwFlags |= MOUSEEVENTF_LEFTUP;
         if ((prev_state & ~state) & AMOTION_EVENT_BUTTON_SECONDARY)
@@ -1429,17 +1438,15 @@ static struct android_win_data *create_win_data( HWND hwnd, const RECT *window_r
 }
 
 
-static inline RECT get_surface_rect( const RECT *visible_rect )
+static inline BOOL get_surface_rect( const RECT *visible_rect, RECT *surface_rect )
 {
-    RECT rect;
-
-    IntersectRect( &rect, visible_rect, &virtual_screen_rect );
-    OffsetRect( &rect, -visible_rect->left, -visible_rect->top );
-    rect.left &= ~31;
-    rect.top  &= ~31;
-    rect.right  = max( rect.left + 32, (rect.right + 31) & ~31 );
-    rect.bottom = max( rect.top + 32, (rect.bottom + 31) & ~31 );
-    return rect;
+    if (!IntersectRect( surface_rect, visible_rect, &virtual_screen_rect )) return FALSE;
+    OffsetRect( surface_rect, -visible_rect->left, -visible_rect->top );
+    surface_rect->left &= ~31;
+    surface_rect->top  &= ~31;
+    surface_rect->right  = max( surface_rect->left + 32, (surface_rect->right + 31) & ~31 );
+    surface_rect->bottom = max( surface_rect->top + 32, (surface_rect->bottom + 31) & ~31 );
+    return TRUE;
 }
 
 
@@ -1470,8 +1477,8 @@ void CDECL ANDROID_WindowPosChanging( HWND hwnd, HWND insert_after, UINT swp_fla
     if (data->parent) goto done;
     if (swp_flags & SWP_HIDEWINDOW) goto done;
     if (is_argb_surface( data->surface )) goto done;
+    if (!get_surface_rect( visible_rect, &surface_rect )) goto done;
 
-    surface_rect = get_surface_rect( visible_rect );
     if (data->surface)
     {
         if (!memcmp( &data->surface->rect, &surface_rect, sizeof(surface_rect) ))
@@ -1523,10 +1530,11 @@ void CDECL ANDROID_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flag
     }
     is_child = (data->parent != 0);
 
-    TRACE( "win %p window %s client %s style %08x flags %08x\n",
-           hwnd, wine_dbgstr_rect(window_rect), wine_dbgstr_rect(client_rect), new_style, swp_flags );
-
     release_win_data( data );
+
+    TRACE( "win %p window %s client %s style %08x after %p flags %08x\n", hwnd,
+           wine_dbgstr_rect(window_rect), wine_dbgstr_rect(client_rect),
+           new_style, insert_after, swp_flags );
 
     if (is_child)
     {

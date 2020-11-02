@@ -20,16 +20,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
- *
- * NOTE
- * 
- * This code was audited for completeness against the documented features
- * of Comctl32.dll version 6.0 on Sep. 9, 2002, by Dimitrie O. Paun.
- * 
- * Unless otherwise noted, we believe this code to be complete, as per
- * the specification mentioned above.
- * If you discover missing features, or bugs, please note them below.
- * 
  */
 
 #include <ctype.h>
@@ -50,6 +40,7 @@
 #include "vssym32.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ipaddress);
 
@@ -228,7 +219,7 @@ static LRESULT IPADDRESS_Create (HWND hwnd, const CREATESTRUCTA *lpCreate)
     SetWindowLongW (hwnd, GWL_STYLE,
 		    GetWindowLongW(hwnd, GWL_STYLE) & ~WS_BORDER);
 
-    infoPtr = Alloc (sizeof(IPADDRESS_INFO));
+    infoPtr = heap_alloc_zero (sizeof(*infoPtr));
     if (!infoPtr) return -1;
     SetWindowLongPtrW (hwnd, 0, (DWORD_PTR)infoPtr);
 
@@ -287,7 +278,7 @@ static LRESULT IPADDRESS_Destroy (IPADDRESS_INFO *infoPtr)
     }
 
     SetWindowLongPtrW (infoPtr->Self, 0, 0);
-    Free (infoPtr);
+    heap_free (infoPtr);
     return 0;
 }
 

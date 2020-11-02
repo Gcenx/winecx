@@ -43,8 +43,8 @@ typedef struct tagWND
     WNDPROC        winproc;       /* Window procedure */
     DWORD          tid;           /* Owner thread id */
     HINSTANCE      hInstance;     /* Window hInstance (from CreateWindow) */
-    RECT           rectClient;    /* Client area rel. to parent client area */
-    RECT           rectWindow;    /* Whole window rel. to parent client area */
+    RECT           client_rect;   /* Client area rel. to parent client area */
+    RECT           window_rect;   /* Whole window rel. to parent client area */
     RECT           visible_rect;  /* Visible part of the whole rect, rel. to parent client area */
     RECT           normal_rect;   /* Normal window rect saved when maximized/minimized */
     POINT          min_pos;       /* Position for minimized window */
@@ -61,6 +61,8 @@ typedef struct tagWND
     HICON          hIcon;         /* window's icon */
     HICON          hIconSmall;    /* window's small icon */
     HICON          hIconSmall2;   /* window's secondary small icon, derived from hIcon */
+    UINT           dpi;           /* window DPI */
+    DPI_AWARENESS  dpi_awareness; /* DPI awareness */
     struct window_surface *surface; /* Window surface if any */
     struct tagDIALOGINFO *dlgInfo;/* Dialog additional info (dialogs only) */
     int            pixel_format;  /* Pixel format set by the graphics driver */
@@ -95,7 +97,7 @@ extern ULONG WIN_SetStyle( HWND hwnd, ULONG set_bits, ULONG clear_bits ) DECLSPE
 extern BOOL WIN_GetRectangles( HWND hwnd, enum coords_relative relative, RECT *rectWindow, RECT *rectClient ) DECLSPEC_HIDDEN;
 extern void map_window_region( HWND from, HWND to, HRGN hrgn ) DECLSPEC_HIDDEN;
 extern LRESULT WIN_DestroyWindow( HWND hwnd ) DECLSPEC_HIDDEN;
-extern void WIN_DestroyThreadWindows( HWND hwnd ) DECLSPEC_HIDDEN;
+extern void destroy_thread_windows(void) DECLSPEC_HIDDEN;
 extern HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module, BOOL unicode ) DECLSPEC_HIDDEN;
 extern BOOL WIN_IsWindowDrawable( HWND hwnd, BOOL ) DECLSPEC_HIDDEN;
 extern HWND *WIN_ListChildren( HWND hwnd ) DECLSPEC_HIDDEN;
@@ -119,14 +121,15 @@ static inline void WIN_ReleasePtr( WND *ptr )
 extern LRESULT HOOK_CallHooks( INT id, INT code, WPARAM wparam, LPARAM lparam, BOOL unicode ) DECLSPEC_HIDDEN;
 
 extern BOOL WINPOS_RedrawIconTitle( HWND hWnd ) DECLSPEC_HIDDEN;
-extern void WINPOS_GetMinMaxInfo( HWND hwnd, POINT *maxSize, POINT *maxPos, POINT *minTrack,
-                                  POINT *maxTrack ) DECLSPEC_HIDDEN;
+extern MINMAXINFO WINPOS_GetMinMaxInfo( HWND hwnd ) DECLSPEC_HIDDEN;
 extern LONG WINPOS_HandleWindowPosChanging(HWND hwnd, WINDOWPOS *winpos) DECLSPEC_HIDDEN;
 extern HWND WINPOS_WindowFromPoint( HWND hwndScope, POINT pt, INT *hittest ) DECLSPEC_HIDDEN;
 extern void WINPOS_ActivateOtherWindow( HWND hwnd ) DECLSPEC_HIDDEN;
 extern UINT WINPOS_MinMaximize( HWND hwnd, UINT cmd, LPRECT rect ) DECLSPEC_HIDDEN;
 extern void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam ) DECLSPEC_HIDDEN;
 
+extern UINT get_monitor_dpi( HMONITOR monitor ) DECLSPEC_HIDDEN;
+extern UINT get_win_monitor_dpi( HWND hwnd ) DECLSPEC_HIDDEN;
 extern BOOL set_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
                             const RECT *window_rect, const RECT *client_rect,
                             const RECT *valid_rects ) DECLSPEC_HIDDEN;

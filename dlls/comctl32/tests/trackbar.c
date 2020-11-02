@@ -23,6 +23,7 @@
 
 #include "wine/test.h"
 #include "msg.h"
+#include "v6util.h"
 
 #define expect(expected, got) ok(got == expected, "Expected %d, got %d\n", expected, got)
 #define NUM_MSG_SEQUENCE 2
@@ -575,6 +576,58 @@ static void test_page_size(void)
 
     hWndTrackbar = create_trackbar(defaultstyle, hWndParent);
     ok(hWndTrackbar != NULL, "Expected non NULL value\n");
+
+    r = SendMessageA(hWndTrackbar, TBM_GETPAGESIZE, 0, 0);
+    ok(r == 20, "Unexpected page size %d.\n", r);
+
+    SendMessageA(hWndTrackbar, TBM_SETRANGE, 0, MAKELPARAM(0, 65));
+
+    r = SendMessageA(hWndTrackbar, TBM_GETPAGESIZE, 0, 0);
+    ok(r == 13, "Unexpected page size %d.\n", r);
+
+    SendMessageA(hWndTrackbar, TBM_SETRANGEMIN, 0, 10);
+
+    r = SendMessageA(hWndTrackbar, TBM_GETPAGESIZE, 0, 0);
+    ok(r == 11, "Unexpected page size %d.\n", r);
+
+    SendMessageA(hWndTrackbar, TBM_SETRANGEMAX, 0, 50);
+
+    r = SendMessageA(hWndTrackbar, TBM_GETPAGESIZE, 0, 0);
+    ok(r == 8, "Unexpected page size %d.\n", r);
+
+    r = SendMessageA(hWndTrackbar, TBM_SETPAGESIZE, 0, 10);
+    ok(r == 8, "Unexpected page size %d.\n", r);
+
+    SendMessageA(hWndTrackbar, TBM_SETRANGE, 0, MAKELPARAM(0, 30));
+
+    r = SendMessageA(hWndTrackbar, TBM_GETPAGESIZE, 0, 0);
+    ok(r == 10, "Unexpected page size %d.\n", r);
+
+    SendMessageA(hWndTrackbar, TBM_SETRANGEMIN, 0, 5);
+
+    r = SendMessageA(hWndTrackbar, TBM_GETPAGESIZE, 0, 0);
+    ok(r == 10, "Unexpected page size %d.\n", r);
+
+    SendMessageA(hWndTrackbar, TBM_SETRANGEMAX, 0, 40);
+
+    r = SendMessageA(hWndTrackbar, TBM_GETPAGESIZE, 0, 0);
+    ok(r == 10, "Unexpected page size %d.\n", r);
+
+    r = SendMessageA(hWndTrackbar, TBM_SETPAGESIZE, 0, -1);
+    ok(r == 10, "Unexpected page size %d.\n", r);
+
+    r = SendMessageA(hWndTrackbar, TBM_GETPAGESIZE, 0, 0);
+    ok(r == 7, "Unexpected page size %d.\n", r);
+
+    SendMessageA(hWndTrackbar, TBM_SETRANGEMAX, 0, 100);
+
+    r = SendMessageA(hWndTrackbar, TBM_GETPAGESIZE, 0, 0);
+    ok(r == 19, "Unexpected page size %d.\n", r);
+
+    DestroyWindow(hWndTrackbar);
+
+    hWndTrackbar = create_trackbar(defaultstyle, hWndParent);
+    ok(hWndTrackbar != NULL, "Failed to create trackbar window.\n");
 
     flush_sequences(sequences, NUM_MSG_SEQUENCE);
 
@@ -1296,8 +1349,12 @@ static void test_create(void)
 
 START_TEST(trackbar)
 {
+    ULONG_PTR cookie;
+    HANDLE ctxt;
+
+    LoadLibraryA("comctl32.dll");
+
     init_msg_sequences(sequences, NUM_MSG_SEQUENCE);
-    InitCommonControls();
 
     /* create parent window */
     hWndParent = create_parent_window();
@@ -1323,6 +1380,26 @@ START_TEST(trackbar)
     test_TBS_AUTOTICKS();
     test_ignore_selection();
     test_initial_state();
+
+    if (!load_v6_module(&cookie, &ctxt))
+        return;
+
+    test_trackbar_buddy();
+    test_line_size();
+    test_page_size();
+    test_position();
+    test_range();
+    test_selection();
+    test_thumb_length();
+    test_tic_settings();
+    test_tic_placement();
+    test_tool_tips();
+    test_unicode();
+    test_TBS_AUTOTICKS();
+    test_ignore_selection();
+    test_initial_state();
+
+    unload_v6_module(cookie, ctxt);
 
     DestroyWindow(hWndParent);
 }

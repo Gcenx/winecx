@@ -26,17 +26,18 @@
 #include "wine/test.h"
 #include "wsdapi.h"
 
+static LPWSTR largeText;
+static const int largeTextSize = 10000 * sizeof(WCHAR);
+
 static void BuildAnyForSingleElement_tests(void)
 {
     WSDXML_ELEMENT *element;
     WSDXML_NAME name;
     WSDXML_NAMESPACE ns;
     WCHAR nameText[] = {'E','l','1',0};
-    WCHAR text[] = {'H','e','l','l','o',0};
+    static const WCHAR text[] = {'H','e','l','l','o',0};
     static const WCHAR uri[] = {'h','t','t','p',':','/','/','t','e','s','t','.','t','e','s','t','/',0};
     static const WCHAR prefix[] = {'t',0};
-    LPWSTR largeText;
-    const int largeTextSize = 10000 * sizeof(WCHAR);
     HRESULT hr;
 
     /* Populate structures */
@@ -54,9 +55,6 @@ static void BuildAnyForSingleElement_tests(void)
     ok(hr == E_POINTER, "BuildAnyForSingleElement failed with %08x\n", hr);
 
     /* Test calling the function with a text size that exceeds 8192 characters */
-    largeText = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, largeTextSize + sizeof(WCHAR));
-    memset(largeText, 'a', largeTextSize);
-
     hr = WSDXMLBuildAnyForSingleElement(&name, largeText, &element);
     ok(hr == E_INVALIDARG, "BuildAnyForSingleElement failed with %08x\n", hr);
 
@@ -66,9 +64,9 @@ static void BuildAnyForSingleElement_tests(void)
     ok(hr == S_OK, "BuildAnyForSingleElement failed with %08x\n", hr);
 
     ok(element->Name != &name, "element->Name has not been duplicated\n");
-    todo_wine ok(element->Name->Space != name.Space, "element->Name->Space has not been duplicated\n");
+    ok(element->Name->Space != name.Space, "element->Name->Space has not been duplicated\n");
     ok(element->Name->LocalName != name.LocalName, "element->LocalName has not been duplicated\n");
-    ok(lstrcmpW(element->Name->LocalName, name.LocalName) == 0, "element->LocalName = '%s', expected '%s'\n",
+    ok(lstrcmpW(element->Name->LocalName, name.LocalName) == 0, "element->LocalName = %s, expected %s\n",
         wine_dbgstr_w(element->Name->LocalName), wine_dbgstr_w(name.LocalName));
     ok(element->FirstChild == NULL, "element->FirstChild == %p\n", element->FirstChild);
     ok(element->Node.Next == NULL, "element->Node.Next == %p\n", element->Node.Next);
@@ -82,9 +80,9 @@ static void BuildAnyForSingleElement_tests(void)
     ok(hr == S_OK, "BuildAnyForSingleElement failed with %08x\n", hr);
 
     ok(element->Name != &name, "element->Name has not been duplicated\n");
-    todo_wine ok(element->Name->Space != name.Space, "element->Name->Space has not been duplicated\n");
+    ok(element->Name->Space != name.Space, "element->Name->Space has not been duplicated\n");
     ok(element->Name->LocalName != name.LocalName, "element->LocalName has not been duplicated\n");
-    ok(lstrcmpW(element->Name->LocalName, name.LocalName) == 0, "element->LocalName = '%s', expected '%s'\n",
+    ok(lstrcmpW(element->Name->LocalName, name.LocalName) == 0, "element->LocalName = %s, expected %s\n",
         wine_dbgstr_w(element->Name->LocalName), wine_dbgstr_w(name.LocalName));
     ok(element->FirstChild != NULL, "element->FirstChild == %p\n", element->FirstChild);
     ok(element->Node.Next == NULL, "element->Node.Next == %p\n", element->Node.Next);
@@ -96,7 +94,7 @@ static void BuildAnyForSingleElement_tests(void)
         ok(element->FirstChild->Next == NULL, "element->FirstChild.Next == %p\n", element->FirstChild->Next);
         ok(element->FirstChild->Type == TextType, "element->FirstChild.Type == %d\n", element->Node.Type);
         ok(((WSDXML_TEXT *)element->FirstChild)->Text != NULL, "element->FirstChild.Text is null\n");
-        ok(lstrcmpW(((WSDXML_TEXT *)element->FirstChild)->Text, text) == 0, "element->FirstChild->Text = '%s', expected '%s'\n",
+        ok(lstrcmpW(((WSDXML_TEXT *)element->FirstChild)->Text, text) == 0, "element->FirstChild->Text = %s, expected %s\n",
             wine_dbgstr_w(((WSDXML_TEXT *)element->FirstChild)->Text), wine_dbgstr_w(text));
     }
 
@@ -117,12 +115,6 @@ static void AddChild_tests(void)
 
     /* Test invalid values */
     hr = WSDXMLAddChild(NULL, NULL);
-    ok(hr == E_INVALIDARG, "WSDXMLAddChild failed with %08x\n", hr);
-
-    hr = WSDXMLAddChild(parent, NULL);
-    ok(hr == E_INVALIDARG, "WSDXMLAddChild failed with %08x\n", hr);
-
-    hr = WSDXMLAddChild(NULL, child1);
     ok(hr == E_INVALIDARG, "WSDXMLAddChild failed with %08x\n", hr);
 
     /* Populate structures */
@@ -210,12 +202,6 @@ static void AddSibling_tests(void)
     hr = WSDXMLAddSibling(NULL, NULL);
     ok(hr == E_INVALIDARG, "WSDXMLAddSibling failed with %08x\n", hr);
 
-    hr = WSDXMLAddSibling(child1, NULL);
-    ok(hr == E_INVALIDARG, "WSDXMLAddSibling failed with %08x\n", hr);
-
-    hr = WSDXMLAddSibling(NULL, child2);
-    ok(hr == E_INVALIDARG, "WSDXMLAddSibling failed with %08x\n", hr);
-
     /* Populate structures */
     ns.Uri = uri;
     ns.PreferredPrefix = prefix;
@@ -282,9 +268,360 @@ static void AddSibling_tests(void)
     WSDFreeLinkedMemory(parent);
 }
 
+static void GetValueFromAny_tests(void)
+{
+    WSDXML_ELEMENT *parent, *child1, *child2, *child3;
+    WSDXML_NAME parentName, child1Name, child2Name, child3Name;
+    WSDXML_NAMESPACE ns, ns2;
+    WCHAR parentNameText[] = {'D','a','d',0};
+    WCHAR child1NameText[] = {'T','i','m',0};
+    WCHAR child2NameText[] = {'B','o','b',0};
+    WCHAR child3NameText[] = {'J','o','e',0};
+    static const WCHAR child1Value[] = {'V','1',0};
+    static const WCHAR child2Value[] = {'V','2',0};
+    static const WCHAR uri[] = {'h','t','t','p',':','/','/','t','e','s','t','.','t','e','s','t','/',0};
+    static const WCHAR uri2[] = {'h','t','t','p',':','/','/','t','e','s','t','2','.','t','e','s','t','/',0};
+    static const WCHAR prefix[] = {'t',0};
+    static const WCHAR prefix2[] = {'u',0};
+    LPCWSTR returnedValue = NULL, oldReturnedValue;
+    HRESULT hr;
+
+    /* Populate structures */
+    ns.Uri = uri;
+    ns.PreferredPrefix = prefix;
+
+    ns2.Uri = uri2;
+    ns2.PreferredPrefix = prefix2;
+
+    parentName.LocalName = parentNameText;
+    parentName.Space = &ns;
+
+    child1Name.LocalName = child1NameText;
+    child1Name.Space = &ns2;
+
+    child2Name.LocalName = child2NameText;
+    child2Name.Space = &ns;
+
+    child3Name.LocalName = child3NameText;
+    child3Name.Space = &ns;
+
+    /* Create some elements */
+    hr = WSDXMLBuildAnyForSingleElement(&parentName, NULL, &parent);
+    ok(hr == S_OK, "BuildAnyForSingleElement failed with %08x\n", hr);
+
+    hr = WSDXMLBuildAnyForSingleElement(&child1Name, child1Value, &child1);
+    ok(hr == S_OK, "BuildAnyForSingleElement failed with %08x\n", hr);
+
+    hr = WSDXMLBuildAnyForSingleElement(&child2Name, child2Value, &child2);
+    ok(hr == S_OK, "BuildAnyForSingleElement failed with %08x\n", hr);
+
+    hr = WSDXMLBuildAnyForSingleElement(&child3Name, NULL, &child3);
+    ok(hr == S_OK, "BuildAnyForSingleElement failed with %08x\n", hr);
+
+    /* Attach them to the parent element */
+    hr = WSDXMLAddChild(parent, child1);
+    ok(hr == S_OK, "AddChild failed with %08x\n", hr);
+
+    hr = WSDXMLAddChild(parent, child2);
+    ok(hr == S_OK, "AddChild failed with %08x\n", hr);
+
+    hr = WSDXMLAddChild(parent, child3);
+    ok(hr == S_OK, "AddChild failed with %08x\n", hr);
+
+    /* Test invalid arguments */
+    hr = WSDXMLGetValueFromAny(NULL, NULL, NULL, NULL);
+    ok(hr == E_INVALIDARG, "GetValueFromAny returned unexpected result: %08x\n", hr);
+
+    hr = WSDXMLGetValueFromAny(NULL, NULL, NULL, &returnedValue);
+    ok(hr == E_INVALIDARG, "GetValueFromAny returned unexpected result: %08x\n", hr);
+
+    hr = WSDXMLGetValueFromAny(NULL, NULL, parent, NULL);
+    ok(hr == E_POINTER, "GetValueFromAny returned unexpected result: %08x\n", hr);
+
+    hr = WSDXMLGetValueFromAny(uri, NULL, parent, NULL);
+    ok(hr == E_POINTER, "GetValueFromAny returned unexpected result: %08x\n", hr);
+
+    hr = WSDXMLGetValueFromAny(uri, child2NameText, parent, NULL);
+    ok(hr == E_POINTER, "GetValueFromAny returned unexpected result: %08x\n", hr);
+
+    /* Test calling the function with a text size that exceeds 8192 characters */
+    hr = WSDXMLGetValueFromAny(largeText, child2NameText, parent, &returnedValue);
+    ok(hr == E_INVALIDARG, "GetValueFromAny returned unexpected result: %08x\n", hr);
+
+    hr = WSDXMLGetValueFromAny(uri, largeText, parent, &returnedValue);
+    ok(hr == E_INVALIDARG, "GetValueFromAny returned unexpected result: %08x\n", hr);
+
+    /* Test with valid parameters */
+    hr = WSDXMLGetValueFromAny(uri, child2NameText, child1, &returnedValue);
+    ok(hr == S_OK, "GetValueFromAny failed with %08x\n", hr);
+    ok(returnedValue != NULL, "returnedValue == NULL\n");
+    ok(lstrcmpW(returnedValue, child2Value) == 0, "returnedValue ('%s') != '%s'\n", wine_dbgstr_w(returnedValue), wine_dbgstr_w(child2Value));
+
+    hr = WSDXMLGetValueFromAny(uri2, child1NameText, child1, &returnedValue);
+    ok(hr == S_OK, "GetValueFromAny failed with %08x\n", hr);
+    ok(returnedValue != NULL, "returnedValue == NULL\n");
+    ok(lstrcmpW(returnedValue, child1Value) == 0, "returnedValue ('%s') != '%s'\n", wine_dbgstr_w(returnedValue), wine_dbgstr_w(child1Value));
+
+    oldReturnedValue = returnedValue;
+
+    hr = WSDXMLGetValueFromAny(uri2, child2NameText, child1, &returnedValue);
+    ok(hr == E_FAIL, "GetValueFromAny returned unexpected value: %08x\n", hr);
+    ok(returnedValue == oldReturnedValue, "returnedValue == %p\n", returnedValue);
+
+    oldReturnedValue = returnedValue;
+
+    hr = WSDXMLGetValueFromAny(uri, child3NameText, child1, &returnedValue);
+    ok(hr == E_FAIL, "GetValueFromAny failed with %08x\n", hr);
+    ok(returnedValue == oldReturnedValue, "returnedValue == %p\n", returnedValue);
+
+    WSDFreeLinkedMemory(parent);
+}
+
+static void XMLContext_AddNamespace_tests(void)
+{
+    static const WCHAR ns1Uri[] = {'h','t','t','p',':','/','/','t','e','s','t','.','t','e','s','t',0};
+    static const WCHAR ns2Uri[] = {'h','t','t','p',':','/','/','w','i','n','e','.','r','o','c','k','s',0};
+    static const WCHAR ns3Uri[] = {'h','t','t','p',':','/','/','t','e','s','t','.','a','g','a','i','n',0};
+    static const WCHAR ns4Uri[] = {'h','t','t','p',':','/','/','o','n','e','.','m','o','r','e',0};
+    static const WCHAR prefix1[] = {'t','s','t',0};
+    static const WCHAR prefix2[] = {'w','i','n','e',0};
+    static const WCHAR unPrefix0[] = {'u','n','0',0};
+    static const WCHAR unPrefix1[] = {'u','n','1',0};
+    static const WCHAR unPrefix2[] = {'u','n','2',0};
+
+    IWSDXMLContext *context;
+    WSDXML_NAMESPACE *ns1 = NULL, *ns2 = NULL;
+    HRESULT hr;
+
+    hr = WSDXMLCreateContext(&context);
+    ok(hr == S_OK, "WSDXMLCreateContext failed with %08x\n", hr);
+    ok(context != NULL, "context == NULL\n");
+
+    /* Test calling AddNamespace with invalid arguments */
+    hr = IWSDXMLContext_AddNamespace(context, NULL, NULL, NULL);
+    ok(hr == E_INVALIDARG, "AddNamespace failed with %08x\n", hr);
+
+    hr = IWSDXMLContext_AddNamespace(context, ns1Uri, NULL, NULL);
+    ok(hr == E_INVALIDARG, "AddNamespace failed with %08x\n", hr);
+
+    hr = IWSDXMLContext_AddNamespace(context, NULL, prefix1, NULL);
+    ok(hr == E_INVALIDARG, "AddNamespace failed with %08x\n", hr);
+
+    /* Test calling AddNamespace without the ppNamespace parameter */
+    hr = IWSDXMLContext_AddNamespace(context, ns1Uri, prefix1, NULL);
+    ok(hr == S_OK, "AddNamespace failed with %08x\n", hr);
+
+    /* Now retrieve the created namespace */
+    hr = IWSDXMLContext_AddNamespace(context, ns1Uri, prefix1, &ns1);
+    ok(hr == S_OK, "AddNamespace failed with %08x\n", hr);
+
+    /* Check the returned structure */
+    ok(ns1 != NULL, "ns1 == NULL\n");
+
+    if (ns1 != NULL)
+    {
+        ok(lstrcmpW(ns1->Uri, ns1Uri) == 0, "URI returned by AddNamespace is not as expected (%s)\n", wine_dbgstr_w(ns1->Uri));
+        ok(lstrcmpW(ns1->PreferredPrefix, prefix1) == 0, "PreferredPrefix returned by AddNamespace is not as expected (%s)\n", wine_dbgstr_w(ns1->PreferredPrefix));
+        ok(ns1->Names == NULL, "Names array is not empty\n");
+        ok(ns1->NamesCount == 0, "NamesCount is not 0 (value = %d)\n", ns1->NamesCount);
+        ok(ns1->Uri != ns1Uri, "URI has not been cloned\n");
+        ok(ns1->PreferredPrefix != prefix1, "URI has not been cloned\n");
+    }
+
+    /* Test calling AddNamespace with parameters that are too large */
+    hr = IWSDXMLContext_AddNamespace(context, largeText, prefix2, &ns2);
+    ok(hr == E_INVALIDARG, "AddNamespace failed with %08x\n", hr);
+
+    hr = IWSDXMLContext_AddNamespace(context, ns2Uri, largeText, &ns2);
+    ok(hr == E_INVALIDARG, "AddNamespace failed with %08x\n", hr);
+
+    hr = IWSDXMLContext_AddNamespace(context, largeText, largeText, &ns2);
+    ok(hr == E_INVALIDARG, "AddNamespace failed with %08x\n", hr);
+
+    /* Test calling AddNamespace with a conflicting prefix */
+    hr = IWSDXMLContext_AddNamespace(context, ns2Uri, prefix1, &ns2);
+    ok(hr == S_OK, "AddNamespace failed with %08x\n", hr);
+
+    /* Check the returned structure */
+    ok(ns2 != NULL, "ns2 == NULL\n");
+
+    if (ns2 != NULL)
+    {
+        ok(lstrcmpW(ns2->Uri, ns2Uri) == 0, "URI returned by AddNamespace is not as expected (%s)\n", wine_dbgstr_w(ns2->Uri));
+        ok(lstrcmpW(ns2->PreferredPrefix, unPrefix0) == 0, "PreferredPrefix returned by AddNamespace is not as expected (%s)\n", wine_dbgstr_w(ns2->PreferredPrefix));
+        ok(ns2->Names == NULL, "Names array is not empty\n");
+        ok(ns2->NamesCount == 0, "NamesCount is not 0 (value = %d)\n", ns2->NamesCount);
+        ok(ns2->Uri != ns2Uri, "URI has not been cloned\n");
+        ok(ns2->PreferredPrefix != prefix2, "URI has not been cloned\n");
+    }
+
+    WSDFreeLinkedMemory(ns1);
+    WSDFreeLinkedMemory(ns2);
+
+    /* Try explicitly creating a prefix called 'un1' */
+    hr = IWSDXMLContext_AddNamespace(context, ns4Uri, unPrefix1, &ns2);
+    ok(hr == S_OK, "AddNamespace failed with %08x\n", hr);
+
+    /* Check the returned structure */
+    ok(ns2 != NULL, "ns2 == NULL\n");
+
+    if (ns2 != NULL)
+    {
+        ok(lstrcmpW(ns2->PreferredPrefix, unPrefix1) == 0, "PreferredPrefix returned by AddNamespace is not as expected (%s)\n", wine_dbgstr_w(ns2->PreferredPrefix));
+    }
+
+    WSDFreeLinkedMemory(ns2);
+
+    /* Test with one more conflicting prefix */
+    hr = IWSDXMLContext_AddNamespace(context, ns3Uri, prefix1, &ns2);
+    ok(hr == S_OK, "AddNamespace failed with %08x\n", hr);
+
+    /* Check the returned structure */
+    ok(ns2 != NULL, "ns2 == NULL\n");
+
+    if (ns2 != NULL)
+    {
+        ok(lstrcmpW(ns2->PreferredPrefix, unPrefix2) == 0, "PreferredPrefix returned by AddNamespace is not as expected (%s)\n", wine_dbgstr_w(ns2->PreferredPrefix));
+    }
+
+    WSDFreeLinkedMemory(ns2);
+
+    /* Try renaming a prefix */
+    hr = IWSDXMLContext_AddNamespace(context, ns3Uri, prefix2, &ns2);
+    ok(hr == S_OK, "AddNamespace failed with %08x\n", hr);
+
+    /* Check the returned structure */
+    ok(ns2 != NULL, "ns2 == NULL\n");
+
+    if (ns2 != NULL)
+    {
+        ok(lstrcmpW(ns2->Uri, ns3Uri) == 0, "Uri returned by AddNamespace is not as expected (%s)\n", wine_dbgstr_w(ns2->Uri));
+        ok(lstrcmpW(ns2->PreferredPrefix, prefix2) == 0, "PreferredPrefix returned by AddNamespace is not as expected (%s)\n", wine_dbgstr_w(ns2->PreferredPrefix));
+    }
+
+    WSDFreeLinkedMemory(ns2);
+
+    IWSDXMLContext_Release(context);
+}
+
+static void XMLContext_AddNameToNamespace_tests(void)
+{
+    static const WCHAR ns1Uri[] = {'h','t','t','p',':','/','/','t','e','s','t','.','t','e','s','t',0};
+    static const WCHAR ns2Uri[] = {'h','t','t','p',':','/','/','w','i','n','e','.','r','o','c','k','s',0};
+    static const WCHAR prefix2[] = {'w','i','n','e',0};
+    static const WCHAR unPrefix0[] = {'u','n','0',0};
+    static const WCHAR name1Text[] = {'B','o','b',0};
+    static const WCHAR name2Text[] = {'T','i','m',0};
+    IWSDXMLContext *context;
+    WSDXML_NAMESPACE *ns2 = NULL;
+    WSDXML_NAME *name1 = NULL, *name2 = NULL;
+    HRESULT hr;
+
+    hr = WSDXMLCreateContext(&context);
+    ok(hr == S_OK, "WSDXMLCreateContext failed with %08x\n", hr);
+
+    /* Test calling AddNameToNamespace with invalid arguments */
+    hr = IWSDXMLContext_AddNameToNamespace(context, NULL, NULL, NULL);
+    ok(hr == E_INVALIDARG, "AddNameToNamespace failed with %08x\n", hr);
+
+    hr = IWSDXMLContext_AddNameToNamespace(context, ns1Uri, NULL, NULL);
+    ok(hr == E_INVALIDARG, "AddNameToNamespace failed with %08x\n", hr);
+
+    hr = IWSDXMLContext_AddNameToNamespace(context, NULL, name1Text, NULL);
+    ok(hr == E_INVALIDARG, "AddNameToNamespace failed with %08x\n", hr);
+
+    /* Test calling AddNameToNamespace without the ppName parameter */
+    hr = IWSDXMLContext_AddNameToNamespace(context, ns1Uri, name1Text, NULL);
+    ok(hr == S_OK, "AddNameToNamespace failed with %08x\n", hr);
+
+    /* Now retrieve the created name */
+    hr = IWSDXMLContext_AddNameToNamespace(context, ns1Uri, name1Text, &name1);
+    ok(hr == S_OK, "AddNameToNamespace failed with %08x\n", hr);
+
+    /* Check the returned structure */
+    ok(name1 != NULL, "name1 == NULL\n");
+
+    if (name1 != NULL)
+    {
+        ok(lstrcmpW(name1->LocalName, name1Text) == 0, "LocalName returned by AddNameToNamespace is not as expected (%s)\n", wine_dbgstr_w(name1->LocalName));
+        ok(name1->LocalName != name1Text, "LocalName has not been cloned\n");
+
+        ok(name1->Space != NULL, "Space returned by AddNameToNamespace is null\n");
+        ok(lstrcmpW(name1->Space->Uri, ns1Uri) == 0, "URI returned by AddNameToNamespace is not as expected (%s)\n", wine_dbgstr_w(name1->Space->Uri));
+        ok(lstrcmpW(name1->Space->PreferredPrefix, unPrefix0) == 0, "PreferredPrefix returned by AddName is not as expected (%s)\n", wine_dbgstr_w(name1->Space->PreferredPrefix));
+        ok(name1->Space->Names == NULL, "Names array is not empty\n");
+        ok(name1->Space->NamesCount == 0, "NamesCount is not 0 (value = %d)\n", name1->Space->NamesCount);
+        ok(name1->Space->Uri != ns1Uri, "URI has not been cloned\n");
+    }
+
+    /* Test calling AddNamespace with parameters that are too large */
+    hr = IWSDXMLContext_AddNameToNamespace(context, largeText, name1Text, &name2);
+    ok(hr == E_INVALIDARG, "AddNameToNamespace failed with %08x\n", hr);
+
+    hr = IWSDXMLContext_AddNameToNamespace(context, ns1Uri, largeText, &name2);
+    ok(hr == E_INVALIDARG, "AddNameToNamespace failed with %08x\n", hr);
+
+    /* Try creating a namespace explicitly */
+    hr = IWSDXMLContext_AddNamespace(context, ns2Uri, prefix2, &ns2);
+    ok(hr == S_OK, "AddNamespace failed with %08x\n", hr);
+
+    /* Now add a name to it */
+    hr = IWSDXMLContext_AddNameToNamespace(context, ns2Uri, name2Text, &name2);
+    ok(hr == S_OK, "AddNameToNamespace failed with %08x\n", hr);
+
+    /* Check the returned structure */
+    ok(name2 != NULL, "name2 == NULL\n");
+
+    if (name2 != NULL)
+    {
+        ok(lstrcmpW(name2->LocalName, name2Text) == 0, "LocalName returned by AddNameToNamespace is not as expected (%s)\n", wine_dbgstr_w(name2->LocalName));
+        ok(name2->LocalName != name2Text, "LocalName has not been cloned\n");
+
+        ok(name2->Space != NULL, "Space returned by AddNameToNamespace is null\n");
+        ok(name2->Space != ns2, "Space returned by AddNameToNamespace is equal to the namespace returned by AddNamespace\n");
+        ok(lstrcmpW(name2->Space->Uri, ns2Uri) == 0, "URI returned by AddNameToNamespace is not as expected (%s)\n", wine_dbgstr_w(name2->Space->Uri));
+        ok(lstrcmpW(name2->Space->PreferredPrefix, prefix2) == 0, "PreferredPrefix returned by AddNameToNamespace is not as expected (%s)\n", wine_dbgstr_w(name2->Space->PreferredPrefix));
+        ok(name2->Space->Names == NULL, "Names array is not empty\n");
+        ok(name2->Space->NamesCount == 0, "NamesCount is not 0 (value = %d)\n", name2->Space->NamesCount);
+        ok(name2->Space->Uri != ns2Uri, "URI has not been cloned\n");
+    }
+
+    WSDFreeLinkedMemory(name1);
+    WSDFreeLinkedMemory(name2);
+    WSDFreeLinkedMemory(ns2);
+
+    /* Now re-retrieve ns2 */
+    hr = IWSDXMLContext_AddNamespace(context, ns2Uri, prefix2, &ns2);
+    ok(hr == S_OK, "AddNamespace failed with %08x\n", hr);
+
+    /* Check the returned structure */
+    ok(ns2 != NULL, "ns2 == NULL\n");
+
+    if (ns2 != NULL)
+    {
+        ok(lstrcmpW(ns2->Uri, ns2Uri) == 0, "URI returned by AddNamespace is not as expected (%s)\n", wine_dbgstr_w(ns2->Uri));
+
+        /* Apparently wsdapi always leaves the namespace names array as empty */
+        ok(ns2->Names == NULL, "Names array is not empty\n");
+        ok(ns2->NamesCount == 0, "NamesCount is not 0 (value = %d)\n", ns2->NamesCount);
+    }
+
+    IWSDXMLContext_Release(context);
+}
+
 START_TEST(xml)
 {
+    /* Allocate a large text buffer for use in tests */
+    largeText = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, largeTextSize + sizeof(WCHAR));
+    memset(largeText, 'a', largeTextSize);
+
     BuildAnyForSingleElement_tests();
     AddChild_tests();
     AddSibling_tests();
+    GetValueFromAny_tests();
+
+    XMLContext_AddNamespace_tests();
+    XMLContext_AddNameToNamespace_tests();
+
+    HeapFree(GetProcessHeap(), 0, largeText);
 }

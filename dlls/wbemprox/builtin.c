@@ -49,6 +49,7 @@
 #include "wbemcli.h"
 #include "wbemprov.h"
 #include "iphlpapi.h"
+#include "netioapi.h"
 #include "tlhelp32.h"
 #include "d3d10.h"
 #include "winternl.h"
@@ -58,6 +59,7 @@
 #include "sddl.h"
 #include "ntsecapi.h"
 #include "winspool.h"
+#include "setupapi.h"
 
 #include "wine/debug.h"
 #include "wbemprox_private.h"
@@ -103,6 +105,8 @@ static const WCHAR class_physicalmediaW[] =
     {'W','i','n','3','2','_','P','h','y','s','i','c','a','l','M','e','d','i','a',0};
 static const WCHAR class_physicalmemoryW[] =
     {'W','i','n','3','2','_','P','h','y','s','i','c','a','l','M','e','m','o','r','y',0};
+static const WCHAR class_pnpentityW[] =
+    {'W','i','n','3','2','_','P','n','P','E','n','t','i','t','y',0};
 static const WCHAR class_printerW[] =
     {'W','i','n','3','2','_','P','r','i','n','t','e','r',0};
 static const WCHAR class_process_getowner_outW[] =
@@ -139,6 +143,8 @@ static const WCHAR prop_adaptertypeW[] =
     {'A','d','a','p','t','e','r','T','y','p','e',0};
 static const WCHAR prop_addresswidthW[] =
     {'A','d','d','r','e','s','s','W','i','d','t','h',0};
+static const WCHAR prop_architectureW[] =
+    {'A','r','c','h','i','t','e','c','t','u','r','e',0};
 static const WCHAR prop_attributesW[] =
     {'A','t','t','r','i','b','u','t','e','s',0};
 static const WCHAR prop_availabilityW[] =
@@ -163,6 +169,8 @@ static const WCHAR prop_codesetW[] =
     {'C','o','d','e','S','e','t',0};
 static const WCHAR prop_commandlineW[] =
     {'C','o','m','m','a','n','d','L','i','n','e',0};
+static const WCHAR prop_configmanagererrorcodeW[] =
+    {'C','o','n','f','i','g','M','a','n','a','g','e','r','E','r','r','o','r','C','o','d','e',0};
 static const WCHAR prop_countrycodeW[] =
     {'C','o','u','n','t','r','y','C','o','d','e',0};
 static const WCHAR prop_cpustatusW[] =
@@ -211,6 +219,8 @@ static const WCHAR prop_domainroleW[] =
     {'D','o','m','a','i','n','R','o','l','e',0};
 static const WCHAR prop_driveW[] =
     {'D','r','i','v','e',0};
+static const WCHAR prop_driverdateW[] =
+    {'D','r','i','v','e','r','D','a','t','e',0};
 static const WCHAR prop_drivernameW[] =
     {'D','r','i','v','e','r','N','a','m','e',0};
 static const WCHAR prop_driverversionW[] =
@@ -225,6 +235,8 @@ static const WCHAR prop_flavorW[] =
     {'F','l','a','v','o','r',0};
 static const WCHAR prop_freespaceW[] =
     {'F','r','e','e','S','p','a','c','e',0};
+static const WCHAR prop_freephysicalmemoryW[] =
+    {'F','r','e','e','P','h','y','s','i','c','a','l','M','e','m','o','r','y',0};
 static const WCHAR prop_handleW[] =
     {'H','a','n','d','l','e',0};
 static const WCHAR prop_horizontalresolutionW[] =
@@ -239,24 +251,34 @@ static const WCHAR prop_indexW[] =
     {'I','n','d','e','x',0};
 static const WCHAR prop_installdateW[] =
     {'I','n','s','t','a','l','l','D','a','t','e',0};
+static const WCHAR prop_installeddisplaydriversW[]=
+    {'I','n','s','t','a','l','l','e','d','D','i','s','p','l','a','y','D','r','i','v','e','r','s',0};
 static const WCHAR prop_interfaceindexW[] =
     {'I','n','t','e','r','f','a','c','e','I','n','d','e','x',0};
 static const WCHAR prop_interfacetypeW[] =
     {'I','n','t','e','r','f','a','c','e','T','y','p','e',0};
 static const WCHAR prop_intvalueW[] =
     {'I','n','t','e','g','e','r','V','a','l','u','e',0};
+static const WCHAR prop_ipaddressW[] =
+    {'I','P','A','d','d','r','e','s','s',0};
 static const WCHAR prop_ipconnectionmetricW[] =
     {'I','P','C','o','n','n','e','c','t','i','o','n','M','e','t','r','i','c',0};
 static const WCHAR prop_ipenabledW[] =
     {'I','P','E','n','a','b','l','e','d',0};
+static const WCHAR prop_ipsubnet[] =
+    {'I','P','S','u','b','n','e','t',0};
 static const WCHAR prop_lastbootuptimeW[] =
     {'L','a','s','t','B','o','o','t','U','p','T','i','m','e',0};
+static const WCHAR prop_levelW[] =
+    {'L','e','v','e','l',0};
 static const WCHAR prop_localW[] =
     {'L','o','c','a','l',0};
 static const WCHAR prop_localdatetimeW[] =
     {'L','o','c','a','l','D','a','t','e','T','i','m','e',0};
 static const WCHAR prop_localeW[] =
     {'L','o','c','a','l','e',0};
+static const WCHAR prop_locationW[] =
+    {'L','o','c','a','t','i','o','n',0};
 static const WCHAR prop_lockpresentW[] =
     {'L','o','c','k','P','r','e','s','e','n','t',0};
 static const WCHAR prop_macaddressW[] =
@@ -303,6 +325,8 @@ static const WCHAR prop_pixelsperxlogicalinchW[] =
     {'P','i','x','e','l','s','P','e','r','X','L','o','g','i','c','a','l','I','n','c','h',0};
 static const WCHAR prop_pnpdeviceidW[] =
     {'P','N','P','D','e','v','i','c','e','I','D',0};
+static const WCHAR prop_portnameW[] =
+    {'P','o','r','t','N','a','m','e',0};
 static const WCHAR prop_pprocessidW[] =
     {'P','a','r','e','n','t','P','r','o','c','e','s','s','I','D',0};
 static const WCHAR prop_primaryW[] =
@@ -321,6 +345,8 @@ static const WCHAR prop_referenceddomainnameW[] =
     {'R','e','f','e','r','e','n','c','e','d','D','o','m','a','i','n','N','a','m','e',0};
 static const WCHAR prop_releasedateW[] =
     {'R','e','l','e','a','s','e','D','a','t','e',0};
+static const WCHAR prop_revisionW[] =
+    {'R','e','v','i','s','i','o','n',0};
 static const WCHAR prop_serialnumberW[] =
     {'S','e','r','i','a','l','N','u','m','b','e','r',0};
 static const WCHAR prop_servicepackmajorW[] =
@@ -331,8 +357,14 @@ static const WCHAR prop_servicetypeW[] =
     {'S','e','r','v','i','c','e','T','y','p','e',0};
 static const WCHAR prop_settingidW[] =
     {'S','e','t','t','i','n','g','I','D',0};
+static const WCHAR prop_skunumberW[] =
+    {'S','K','U','N','u','m','b','e','r',0};
 static const WCHAR prop_smbiosbiosversionW[] =
     {'S','M','B','I','O','S','B','I','O','S','V','e','r','s','i','o','n',0};
+static const WCHAR prop_smbiosmajorversionW[] =
+    {'S','M','B','I','O','S','M','a','j','o','r','V','e','r','s','i','o','n',0};
+static const WCHAR prop_smbiosminorversionW[] =
+    {'S','M','B','I','O','S','M','i','n','o','r','V','e','r','s','i','o','n',0};
 static const WCHAR prop_startmodeW[] =
     {'S','t','a','r','t','M','o','d','e',0};
 static const WCHAR prop_sidW[] =
@@ -347,6 +379,8 @@ static const WCHAR prop_startingoffsetW[] =
     {'S','t','a','r','t','i','n','g','O','f','f','s','e','t',0};
 static const WCHAR prop_stateW[] =
     {'S','t','a','t','e',0};
+static const WCHAR prop_statusW[] =
+    {'S','t','a','t','u','s',0};
 static const WCHAR prop_statusinfoW[] =
     {'S','t','a','t','u','s','I','n','f','o',0};
 static const WCHAR prop_strvalueW[] =
@@ -377,6 +411,8 @@ static const WCHAR prop_uuidW[] =
     {'U','U','I','D',0};
 static const WCHAR prop_varianttypeW[] =
     {'V','a','r','i','a','n','t','T','y','p','e',0};
+static const WCHAR prop_vendorW[] =
+    {'V','e','n','d','o','r',0};
 static const WCHAR prop_versionW[] =
     {'V','e','r','s','i','o','n',0};
 static const WCHAR prop_videoarchitectureW[] =
@@ -414,6 +450,8 @@ static const struct column col_bios[] =
     { prop_releasedateW,        CIM_DATETIME },
     { prop_serialnumberW,       CIM_STRING },
     { prop_smbiosbiosversionW,  CIM_STRING },
+    { prop_smbiosmajorversionW, CIM_UINT16, VT_I4 },
+    { prop_smbiosminorversionW, CIM_UINT16, VT_I4 },
     { prop_versionW,            CIM_STRING|COL_FLAG_KEY }
 };
 static const struct column col_cdromdrive[] =
@@ -440,7 +478,11 @@ static const struct column col_compsys[] =
 static const struct column col_compsysproduct[] =
 {
     { prop_identifyingnumberW,  CIM_STRING|COL_FLAG_KEY },
-    { prop_uuidW,               CIM_STRING|COL_FLAG_DYNAMIC }
+    { prop_nameW,               CIM_STRING|COL_FLAG_KEY },
+    { prop_skunumberW,          CIM_STRING },
+    { prop_uuidW,               CIM_STRING|COL_FLAG_DYNAMIC },
+    { prop_vendorW,             CIM_STRING },
+    { prop_versionW,            CIM_STRING|COL_FLAG_KEY }
 };
 static const struct column col_datafile[] =
 {
@@ -519,8 +561,10 @@ static const struct column col_networkadapterconfig[] =
     { prop_dnshostnameW,          CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_dnsserversearchorderW, CIM_STRING|CIM_FLAG_ARRAY|COL_FLAG_DYNAMIC },
     { prop_indexW,                CIM_UINT32|COL_FLAG_KEY, VT_I4 },
+    { prop_ipaddressW,            CIM_STRING|CIM_FLAG_ARRAY|COL_FLAG_DYNAMIC },
     { prop_ipconnectionmetricW,   CIM_UINT32, VT_I4 },
     { prop_ipenabledW,            CIM_BOOLEAN },
+    { prop_ipsubnet,              CIM_STRING|CIM_FLAG_ARRAY|COL_FLAG_DYNAMIC },
     { prop_macaddressW,           CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_settingidW,            CIM_STRING|COL_FLAG_DYNAMIC }
 };
@@ -531,6 +575,7 @@ static const struct column col_os[] =
     { prop_codesetW,                CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_countrycodeW,            CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_csdversionW,             CIM_STRING|COL_FLAG_DYNAMIC },
+    { prop_freephysicalmemoryW,     CIM_UINT64 },
     { prop_installdateW,            CIM_DATETIME },
     { prop_lastbootuptimeW,         CIM_DATETIME|COL_FLAG_DYNAMIC },
     { prop_localdatetimeW,          CIM_DATETIME|COL_FLAG_DYNAMIC },
@@ -570,14 +615,21 @@ static const struct column col_physicalmemory[] =
     { prop_capacityW,   CIM_UINT64 },
     { prop_memorytypeW, CIM_UINT16, VT_I4 }
 };
+static const struct column col_pnpentity[] =
+{
+    { prop_deviceidW, CIM_STRING|COL_FLAG_DYNAMIC },
+};
 static const struct column col_printer[] =
 {
     { prop_attributesW,           CIM_UINT32 },
+    { prop_deviceidW,             CIM_STRING|COL_FLAG_DYNAMIC|COL_FLAG_KEY },
     { prop_drivernameW,           CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_horizontalresolutionW, CIM_UINT32 },
     { prop_localW,                CIM_BOOLEAN },
+    { prop_locationW,             CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_nameW,                 CIM_STRING|COL_FLAG_DYNAMIC },
-    { prop_networkW,              CIM_BOOLEAN }
+    { prop_networkW,              CIM_BOOLEAN },
+    { prop_portnameW,             CIM_STRING|COL_FLAG_DYNAMIC },
 };
 static const struct column col_process[] =
 {
@@ -596,6 +648,7 @@ static const struct column col_process[] =
 static const struct column col_processor[] =
 {
     { prop_addresswidthW,         CIM_UINT16, VT_I4 },
+    { prop_architectureW,         CIM_UINT16, VT_I4 },
     { prop_captionW,              CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_cpustatusW,            CIM_UINT16 },
     { prop_currentclockspeedW,    CIM_UINT32, VT_I4 },
@@ -603,6 +656,7 @@ static const struct column col_processor[] =
     { prop_descriptionW,          CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_deviceidW,             CIM_STRING|COL_FLAG_DYNAMIC|COL_FLAG_KEY },
     { prop_familyW,               CIM_UINT16, VT_I4 },
+    { prop_levelW,                CIM_UINT16, VT_I4 },
     { prop_manufacturerW,         CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_maxclockspeedW,        CIM_UINT32, VT_I4 },
     { prop_nameW,                 CIM_STRING|COL_FLAG_DYNAMIC },
@@ -610,6 +664,7 @@ static const struct column col_processor[] =
     { prop_numlogicalprocessorsW, CIM_UINT32, VT_I4 },
     { prop_processoridW,          CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_processortypeW,        CIM_UINT16, VT_I4 },
+    { prop_revisionW,             CIM_UINT16, VT_I4 },
     { prop_uniqueidW,             CIM_STRING },
     { prop_versionW,              CIM_STRING|COL_FLAG_DYNAMIC }
 };
@@ -677,24 +732,28 @@ static const struct column col_systemsecurity[] =
 };
 static const struct column col_videocontroller[] =
 {
-    { prop_adapterdactypeW,       CIM_STRING },
-    { prop_adapterramW,           CIM_UINT32, VT_I4 },
-    { prop_availabilityW,         CIM_UINT16 },
-    { prop_captionW,              CIM_STRING|COL_FLAG_DYNAMIC },
-    { prop_currentbitsperpixelW,  CIM_UINT32, VT_I4 },
-    { prop_currenthorizontalresW, CIM_UINT32, VT_I4 },
-    { prop_currentrefreshrateW,   CIM_UINT32, VT_I4 },
-    { prop_currentscanmodeW,      CIM_UINT16, VT_I4 },
-    { prop_currentverticalresW,   CIM_UINT32, VT_I4 },
-    { prop_descriptionW,          CIM_STRING|COL_FLAG_DYNAMIC },
-    { prop_deviceidW,             CIM_STRING|COL_FLAG_KEY },
-    { prop_driverversionW,        CIM_STRING },
-    { prop_nameW,                 CIM_STRING|COL_FLAG_DYNAMIC },
-    { prop_pnpdeviceidW,          CIM_STRING|COL_FLAG_DYNAMIC },
-    { prop_videoarchitectureW,    CIM_UINT16, VT_I4 },
-    { prop_videomemorytypeW,      CIM_UINT16, VT_I4 },
-    { prop_videomodedescriptionW, CIM_STRING|COL_FLAG_DYNAMIC },
-    { prop_videoprocessorW,       CIM_STRING|COL_FLAG_DYNAMIC }
+    { prop_adapterdactypeW,         CIM_STRING },
+    { prop_adapterramW,             CIM_UINT32, VT_I4 },
+    { prop_availabilityW,           CIM_UINT16 },
+    { prop_captionW,                CIM_STRING|COL_FLAG_DYNAMIC },
+    { prop_configmanagererrorcodeW, CIM_UINT32, VT_I4 },
+    { prop_currentbitsperpixelW,    CIM_UINT32, VT_I4 },
+    { prop_currenthorizontalresW,   CIM_UINT32, VT_I4 },
+    { prop_currentrefreshrateW,     CIM_UINT32, VT_I4 },
+    { prop_currentscanmodeW,        CIM_UINT16, VT_I4 },
+    { prop_currentverticalresW,     CIM_UINT32, VT_I4 },
+    { prop_descriptionW,            CIM_STRING|COL_FLAG_DYNAMIC },
+    { prop_deviceidW,               CIM_STRING|COL_FLAG_KEY },
+    { prop_driverdateW,             CIM_DATETIME },
+    { prop_driverversionW,          CIM_STRING },
+    { prop_installeddisplaydriversW,CIM_STRING },
+    { prop_nameW,                   CIM_STRING|COL_FLAG_DYNAMIC },
+    { prop_pnpdeviceidW,            CIM_STRING|COL_FLAG_DYNAMIC },
+    { prop_statusW,                 CIM_STRING },
+    { prop_videoarchitectureW,      CIM_UINT16, VT_I4 },
+    { prop_videomemorytypeW,        CIM_UINT16, VT_I4 },
+    { prop_videomodedescriptionW,   CIM_STRING|COL_FLAG_DYNAMIC },
+    { prop_videoprocessorW,         CIM_STRING|COL_FLAG_DYNAMIC },
 };
 
 static const WCHAR baseboard_manufacturerW[] =
@@ -738,9 +797,15 @@ static const WCHAR compsys_modelW[] =
     {'W','i','n','e',0};
 static const WCHAR compsysproduct_identifyingnumberW[] =
     {'0',0};
+static const WCHAR compsysproduct_nameW[] =
+    {'W','i','n','e',0};
 static const WCHAR compsysproduct_uuidW[] =
     {'d','e','a','d','d','e','a','d','-','d','e','a','d','-','d','e','a','d','-','d','e','a','d','-',
      'd','e','a','d','d','e','a','d','d','e','a','d',0};
+static const WCHAR compsysproduct_vendorW[] =
+    {'T','h','e',' ','W','i','n','e',' ','P','r','o','j','e','c','t',0};
+static const WCHAR compsysproduct_versionW[] =
+    {'1','.','0',0};
 static const WCHAR diskdrive_interfacetypeW[] =
     {'I','D','E',0};
 static const WCHAR diskdrive_manufacturerW[] =
@@ -781,8 +846,12 @@ static const WCHAR videocontroller_dactypeW[] =
     {'I','n','t','e','g','r','a','t','e','d',' ','R','A','M','D','A','C',0};
 static const WCHAR videocontroller_deviceidW[] =
     {'V','i','d','e','o','C','o','n','t','r','o','l','l','e','r','1',0};
+static const WCHAR videocontroller_driverdateW[] =
+    {'2','0','1','7','0','1','0','1','0','0','0','0','0','0','.','0','0','0','0','0','0','+','0','0','0',0};
 static const WCHAR videocontroller_driverversionW[] =
     {'1','.','0',0};
+static const WCHAR videocontroller_statusW[] =
+    {'O','K',0};
 
 #include "pshpack1.h"
 struct record_baseboard
@@ -804,6 +873,8 @@ struct record_bios
     const WCHAR *releasedate;
     const WCHAR *serialnumber;
     const WCHAR *smbiosbiosversion;
+    UINT16       smbiosmajorversion;
+    UINT16       smbiosminorversion;
     const WCHAR *version;
 };
 struct record_cdromdrive
@@ -830,7 +901,11 @@ struct record_computersystem
 struct record_computersystemproduct
 {
     const WCHAR *identifyingnumber;
+    const WCHAR *name;
+    const WCHAR *skunumber;
     const WCHAR *uuid;
+    const WCHAR *vendor;
+    const WCHAR *version;
 };
 struct record_datafile
 {
@@ -909,8 +984,10 @@ struct record_networkadapterconfig
     const WCHAR        *dnshostname;
     const struct array *dnsserversearchorder;
     UINT32              index;
+    const struct array *ipaddress;
     UINT32              ipconnectionmetric;
     int                 ipenabled;
+    const struct array *ipsubnet;
     const WCHAR        *mac_address;
     const WCHAR        *settingid;
 };
@@ -921,6 +998,7 @@ struct record_operatingsystem
     const WCHAR *codeset;
     const WCHAR *countrycode;
     const WCHAR *csdversion;
+    UINT64       freephysicalmemory;
     const WCHAR *installdate;
     const WCHAR *lastbootuptime;
     const WCHAR *localdatetime;
@@ -960,14 +1038,21 @@ struct record_physicalmemory
     UINT64 capacity;
     UINT16 memorytype;
 };
+struct record_pnpentity
+{
+    const WCHAR *device_id;
+};
 struct record_printer
 {
     UINT32       attributes;
+    const WCHAR *device_id;
     const WCHAR *drivername;
     UINT32       horizontalresolution;
     int          local;
+    const WCHAR *location;
     const WCHAR *name;
     int          network;
+    const WCHAR *portname;
 };
 struct record_process
 {
@@ -986,6 +1071,7 @@ struct record_process
 struct record_processor
 {
     UINT16       addresswidth;
+    UINT16       architecture;
     const WCHAR *caption;
     UINT16       cpu_status;
     UINT32       currentclockspeed;
@@ -993,6 +1079,7 @@ struct record_processor
     const WCHAR *description;
     const WCHAR *device_id;
     UINT16       family;
+    UINT16       level;
     const WCHAR *manufacturer;
     UINT32       maxclockspeed;
     const WCHAR *name;
@@ -1000,6 +1087,7 @@ struct record_processor
     UINT32       num_logical_processors;
     const WCHAR *processor_id;
     UINT16       processortype;
+    UINT16       revision;
     const WCHAR *unique_id;
     const WCHAR *version;
 };
@@ -1071,6 +1159,7 @@ struct record_videocontroller
     UINT32       adapter_ram;
     UINT16       availability;
     const WCHAR *caption;
+    UINT32       config_errorcode;
     UINT32       current_bitsperpixel;
     UINT32       current_horizontalres;
     UINT32       current_refreshrate;
@@ -1078,9 +1167,12 @@ struct record_videocontroller
     UINT32       current_verticalres;
     const WCHAR *description;
     const WCHAR *device_id;
+    const WCHAR *driverdate;
     const WCHAR *driverversion;
+    const WCHAR *installeddriver;
     const WCHAR *name;
     const WCHAR *pnpdevice_id;
+    const WCHAR *status;
     UINT16       videoarchitecture;
     UINT16       videomemorytype;
     const WCHAR *videomodedescription;
@@ -1095,7 +1187,7 @@ static const struct record_baseboard data_baseboard[] =
 static const struct record_bios data_bios[] =
 {
     { bios_descriptionW, NULL, bios_manufacturerW, bios_nameW, bios_releasedateW, bios_serialnumberW,
-      bios_smbiosbiosversionW, bios_versionW }
+      bios_smbiosbiosversionW, 1, 0, bios_versionW }
 };
 static const struct record_param data_param[] =
 {
@@ -1304,6 +1396,15 @@ static UINT64 get_total_physical_memory(void)
     return status.ullTotalPhys;
 }
 
+static UINT64 get_available_physical_memory(void)
+{
+    MEMORYSTATUSEX status;
+
+    status.dwLength = sizeof(status);
+    if (!GlobalMemoryStatusEx( &status )) return 1024 * 1024 * 1024;
+    return status.ullAvailPhys;
+}
+
 static WCHAR *get_computername(void)
 {
     WCHAR *ret;
@@ -1417,7 +1518,11 @@ static enum fill_status fill_compsysproduct( struct table *table, const struct e
 
     rec = (struct record_computersystemproduct *)table->data;
     rec->identifyingnumber = compsysproduct_identifyingnumberW;
+    rec->name              = compsysproduct_nameW;
+    rec->skunumber         = NULL;
     rec->uuid              = get_compsysproduct_uuid();
+    rec->vendor            = compsysproduct_vendorW;
+    rec->version           = compsysproduct_versionW;
     if (!match_row( table, row, cond, &status )) free_row_values( table, row );
     else row++;
 
@@ -2070,7 +2175,7 @@ static enum fill_status fill_ip4routetable( struct table *table, const struct ex
         heap_free( forwards );
         return FILL_STATUS_FAILED;
     }
-    if (!resize_table( table, forwards->dwNumEntries, sizeof(*rec) ))
+    if (!resize_table( table, max(forwards->dwNumEntries, 1), sizeof(*rec) ))
     {
         heap_free( forwards );
         return FILL_STATUS_FAILED;
@@ -2341,6 +2446,90 @@ static struct array *get_dnsserversearchorder( IP_ADAPTER_DNS_SERVER_ADDRESS *li
     ret->ptr   = ptr;
     return ret;
 }
+static struct array *get_ipaddress( IP_ADAPTER_UNICAST_ADDRESS_LH *list )
+{
+    IP_ADAPTER_UNICAST_ADDRESS_LH *address;
+    struct array *ret;
+    ULONG buflen, i = 0, count = 0;
+    WCHAR **ptr, buf[54]; /* max IPv6 address length */
+
+    if (!list) return NULL;
+    for (address = list; address; address = address->Next) count++;
+
+    if (!(ret = heap_alloc( sizeof(*ret) ))) return NULL;
+    if (!(ptr = heap_alloc( sizeof(*ptr) * count )))
+    {
+        heap_free( ret );
+        return NULL;
+    }
+    for (address = list; address; address = address->Next)
+    {
+        buflen = sizeof(buf)/sizeof(buf[0]);
+        if (WSAAddressToStringW( address->Address.lpSockaddr, address->Address.iSockaddrLength,
+                                 NULL, buf, &buflen) || !(ptr[i++] = heap_strdupW( buf )))
+        {
+            for (; i > 0; i--) heap_free( ptr[i - 1] );
+            heap_free( ptr );
+            heap_free( ret );
+            return NULL;
+        }
+    }
+    ret->count = count;
+    ret->ptr   = ptr;
+    return ret;
+}
+static struct array *get_ipsubnet( IP_ADAPTER_UNICAST_ADDRESS_LH *list )
+{
+    IP_ADAPTER_UNICAST_ADDRESS_LH *address;
+    struct array *ret;
+    ULONG i = 0, count = 0;
+    WCHAR **ptr;
+
+    if (!list) return NULL;
+    for (address = list; address; address = address->Next) count++;
+
+    if (!(ret = heap_alloc( sizeof(*ret) ))) return NULL;
+    if (!(ptr = heap_alloc( sizeof(*ptr) * count )))
+    {
+        heap_free( ret );
+        return NULL;
+    }
+    for (address = list; address; address = address->Next)
+    {
+        if (address->Address.lpSockaddr->sa_family == AF_INET)
+        {
+            WCHAR buf[INET_ADDRSTRLEN];
+            SOCKADDR_IN addr;
+            ULONG buflen = sizeof(buf)/sizeof(buf[0]);
+
+            memset( &addr, 0, sizeof(addr) );
+            addr.sin_family = AF_INET;
+            if (ConvertLengthToIpv4Mask( address->OnLinkPrefixLength, &addr.sin_addr.S_un.S_addr ) != NO_ERROR
+                    || WSAAddressToStringW( (SOCKADDR*)&addr, sizeof(addr), NULL, buf, &buflen))
+                ptr[i] = NULL;
+            else
+                ptr[i] = heap_strdupW( buf );
+        }
+        else
+        {
+            static const WCHAR fmtW[] = {'%','u',0};
+            WCHAR buf[11];
+
+            sprintfW(buf, fmtW, address->OnLinkPrefixLength);
+            ptr[i] = heap_strdupW( buf );
+        }
+        if (!ptr[i++])
+        {
+            for (; i > 0; i--) heap_free( ptr[i - 1] );
+            heap_free( ptr );
+            heap_free( ret );
+            return NULL;
+        }
+    }
+    ret->count = count;
+    ret->ptr   = ptr;
+    return ret;
+}
 static WCHAR *get_settingid( UINT32 index )
 {
     GUID guid;
@@ -2390,8 +2579,10 @@ static enum fill_status fill_networkadapterconfig( struct table *table, const st
         rec->dnshostname          = get_dnshostname( aa->FirstUnicastAddress );
         rec->dnsserversearchorder = get_dnsserversearchorder( aa->FirstDnsServerAddress );
         rec->index                = aa->u.s.IfIndex;
+        rec->ipaddress            = get_ipaddress( aa->FirstUnicastAddress );
         rec->ipconnectionmetric   = 20;
         rec->ipenabled            = -1;
+        rec->ipsubnet             = get_ipsubnet( aa->FirstUnicastAddress );
         rec->mac_address          = get_mac_address( aa->PhysicalAddress, aa->PhysicalAddressLength );
         rec->settingid            = get_settingid( rec->index );
         if (!match_row( table, row, cond, &status ))
@@ -2428,12 +2619,61 @@ static enum fill_status fill_physicalmemory( struct table *table, const struct e
     return status;
 }
 
+static enum fill_status fill_pnpentity( struct table *table, const struct expr *cond )
+{
+    struct record_pnpentity *rec;
+    enum fill_status status = FILL_STATUS_UNFILTERED;
+    HDEVINFO device_info_set;
+    SP_DEVINFO_DATA devinfo = {0};
+    DWORD idx;
+
+    device_info_set = SetupDiGetClassDevsW( NULL, NULL, NULL, DIGCF_ALLCLASSES|DIGCF_PRESENT );
+
+    devinfo.cbSize = sizeof(devinfo);
+
+    idx = 0;
+    while (SetupDiEnumDeviceInfo( device_info_set, idx++, &devinfo ))
+    {
+        /* noop */
+    }
+
+    resize_table( table, idx, sizeof(*rec) );
+    table->num_rows = 0;
+    rec = (struct record_pnpentity *)table->data;
+
+    idx = 0;
+    while (SetupDiEnumDeviceInfo( device_info_set, idx++, &devinfo ))
+    {
+        WCHAR device_id[MAX_PATH];
+        if (SetupDiGetDeviceInstanceIdW( device_info_set, &devinfo, device_id,
+                    ARRAY_SIZE(device_id), NULL ))
+        {
+            rec->device_id = heap_strdupW( device_id );
+
+            table->num_rows++;
+            if (!match_row( table, table->num_rows - 1, cond, &status ))
+            {
+                free_row_values( table, table->num_rows - 1 );
+                table->num_rows--;
+            }
+            else
+                rec++;
+        }
+    }
+
+    SetupDiDestroyDeviceInfoList( device_info_set );
+
+    return status;
+}
+
 static enum fill_status fill_printer( struct table *table, const struct expr *cond )
 {
+    static const WCHAR fmtW[] = {'P','r','i','n','t','e','r','%','d',0};
     struct record_printer *rec;
     enum fill_status status = FILL_STATUS_UNFILTERED;
     PRINTER_INFO_2W *info;
     DWORD i, offset = 0, count = 0, size = 0, num_rows = 0;
+    WCHAR id[20];
 
     EnumPrintersW( PRINTER_ENUM_LOCAL, NULL, 2, NULL, 0, &size, &count );
     if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) return FILL_STATUS_FAILED;
@@ -2454,11 +2694,15 @@ static enum fill_status fill_printer( struct table *table, const struct expr *co
     {
         rec = (struct record_printer *)(table->data + offset);
         rec->attributes           = info[i].Attributes;
+        sprintfW( id, fmtW, i );
+        rec->device_id            = heap_strdupW( id );
         rec->drivername           = heap_strdupW( info[i].pDriverName );
         rec->horizontalresolution = info[i].pDevMode->u1.s1.dmPrintQuality;
         rec->local                = -1;
+        rec->location             = heap_strdupW( info[i].pLocation );
         rec->name                 = heap_strdupW( info[i].pPrinterName );
         rec->network              = 0;
+        rec->portname             = heap_strdupW( info[i].pPortName );
         if (!match_row( table, i, cond, &status ))
         {
             free_row_values( table, i );
@@ -2575,6 +2819,12 @@ static void get_processor_version( WCHAR *version )
     do_cpuid( 1, regs );
     sprintfW( version, fmtW, (regs[0] & (15 << 4)) >> 4, regs[0] & 15 );
 }
+static UINT16 get_processor_revision(void)
+{
+    unsigned int regs[4] = {0, 0, 0, 0};
+    do_cpuid( 1, regs );
+    return regs[0];
+}
 static void get_processor_id( WCHAR *processor_id )
 {
     static const WCHAR fmtW[] = {'%','0','8','X','%','0','8','X',0};
@@ -2669,6 +2919,7 @@ static enum fill_status fill_processor( struct table *table, const struct expr *
     {
         rec = (struct record_processor *)(table->data + offset);
         rec->addresswidth           = get_osarchitecture() == os_32bitW ? 32 : 64;
+        rec->architecture           = get_osarchitecture() == os_32bitW ? 0 : 9;
         rec->caption                = heap_strdupW( caption );
         rec->cpu_status             = 1; /* CPU Enabled */
         rec->currentclockspeed      = get_processor_currentclockspeed( i );
@@ -2677,6 +2928,7 @@ static enum fill_status fill_processor( struct table *table, const struct expr *
         sprintfW( device_id, fmtW, i );
         rec->device_id              = heap_strdupW( device_id );
         rec->family                 = 2; /* Unknown */
+        rec->level                  = 15;
         rec->manufacturer           = heap_strdupW( manufacturer );
         rec->maxclockspeed          = get_processor_maxclockspeed( i );
         rec->name                   = heap_strdupW( name );
@@ -2684,6 +2936,7 @@ static enum fill_status fill_processor( struct table *table, const struct expr *
         rec->num_logical_processors = num_logical_processors;
         rec->processor_id           = heap_strdupW( processor_id );
         rec->processortype          = 3; /* central processor */
+        rec->revision               = get_processor_revision();
         rec->unique_id              = NULL;
         rec->version                = heap_strdupW( version );
         if (!match_row( table, i, cond, &status ))
@@ -2870,6 +3123,7 @@ static enum fill_status fill_os( struct table *table, const struct expr *cond )
     rec->codeset                = get_codeset();
     rec->countrycode            = get_countrycode();
     rec->csdversion             = ver.szCSDVersion[0] ? heap_strdupW( ver.szCSDVersion ) : NULL;
+    rec->freephysicalmemory     = get_available_physical_memory() / 1024;
     rec->installdate            = os_installdateW;
     rec->lastbootuptime         = get_lastbootuptime();
     rec->localdatetime          = get_localdatetime();
@@ -3172,6 +3426,29 @@ static WCHAR *get_pnpdeviceid( DXGI_ADAPTER_DESC *desc )
     return ret;
 }
 
+#define HW_VENDOR_AMD    0x1002
+#define HW_VENDOR_NVIDIA 0x10de
+#define HW_VENDOR_VMWARE 0x15ad
+#define HW_VENDOR_INTEL  0x8086
+
+static const WCHAR *get_installeddriver( UINT vendorid )
+{
+    static const WCHAR driver_amdW[] = {'a','t','i','c','f','x','3','2','.','d','l','l',0};
+    static const WCHAR driver_intelW[] = {'i','g','d','u','m','d','i','m','3','2','.','d','l','l',0};
+    static const WCHAR driver_nvidiaW[] = {'n','v','d','3','d','u','m','.','d','l','l',0};
+    static const WCHAR driver_wineW[] = {'w','i','n','e','.','d','l','l',0};
+
+    /* FIXME: wined3d has a better table, but we cannot access this information through dxgi */
+
+    if (vendorid == HW_VENDOR_AMD)
+        return driver_amdW;
+    else if (vendorid == HW_VENDOR_NVIDIA)
+        return driver_nvidiaW;
+    else if (vendorid == HW_VENDOR_INTEL)
+        return driver_intelW;
+    return driver_wineW;
+}
+
 static enum fill_status fill_videocontroller( struct table *table, const struct expr *cond )
 {
     static const WCHAR fmtW[] = {'%','u',' ','x',' ','%','u',' ','x',' ','%','I','6','4','u',' ','c','o','l','o','r','s',0};
@@ -3206,6 +3483,7 @@ done:
     rec->adapter_dactype       = videocontroller_dactypeW;
     rec->adapter_ram           = vidmem;
     rec->availability          = 3; /* Running or Full Power */
+    rec->config_errorcode      = 0; /* no error */
     rec->caption               = heap_strdupW( name );
     rec->current_bitsperpixel  = get_bits_per_pixel( &hres, &vres );
     rec->current_horizontalres = hres;
@@ -3214,9 +3492,12 @@ done:
     rec->current_verticalres   = vres;
     rec->description           = heap_strdupW( name );
     rec->device_id             = videocontroller_deviceidW;
+    rec->driverdate            = videocontroller_driverdateW;
     rec->driverversion         = videocontroller_driverversionW;
+    rec->installeddriver       = get_installeddriver( desc.VendorId );
     rec->name                  = heap_strdupW( name );
     rec->pnpdevice_id          = get_pnpdeviceid( &desc );
+    rec->status                = videocontroller_statusW;
     rec->videoarchitecture     = 2; /* Unknown */
     rec->videomemorytype       = 2; /* Unknown */
     wsprintfW( mode, fmtW, hres, vres, (UINT64)1 << rec->current_bitsperpixel );
@@ -3254,6 +3535,7 @@ static struct table builtin_classes[] =
     { class_paramsW, SIZEOF(col_param), col_param, SIZEOF(data_param), 0, (BYTE *)data_param },
     { class_physicalmediaW, SIZEOF(col_physicalmedia), col_physicalmedia, SIZEOF(data_physicalmedia), 0, (BYTE *)data_physicalmedia },
     { class_physicalmemoryW, SIZEOF(col_physicalmemory), col_physicalmemory, 0, 0, NULL, fill_physicalmemory },
+    { class_pnpentityW, SIZEOF(col_pnpentity), col_pnpentity, 0, 0, NULL, fill_pnpentity },
     { class_printerW, SIZEOF(col_printer), col_printer, 0, 0, NULL, fill_printer },
     { class_processW, SIZEOF(col_process), col_process, 0, 0, NULL, fill_process },
     { class_processorW, SIZEOF(col_processor), col_processor, 0, 0, NULL, fill_processor },

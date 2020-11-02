@@ -23,6 +23,13 @@
 
 #include "config.h"
 
+#include <IOKit/pwr_mgt/IOPMLib.h>
+#define GetCurrentThread Mac_GetCurrentThread
+#define LoadResource Mac_LoadResource
+#include <CoreServices/CoreServices.h>
+#undef GetCurrentThread
+#undef LoadResource
+
 #include "macdrv.h"
 #include "winuser.h"
 #include "wine/unicode.h"
@@ -721,10 +728,10 @@ static void create_cocoa_window(struct macdrv_win_data *data)
     set_cocoa_window_properties(data);
 
     /* set the window text */
-    if (!InternalGetWindowText(data->hwnd, text, sizeof(text)/sizeof(WCHAR))) text[0] = 0;
+    if (!InternalGetWindowText(data->hwnd, text, ARRAY_SIZE(text))) text[0] = 0;
     /* CrossOver Hack #15388 */
     if (quicken_signin_hack && !text[0] &&
-        !InternalGetWindowText(GetAncestor(data->hwnd, GA_ROOT), text, sizeof(text)/sizeof(WCHAR)))
+        !InternalGetWindowText(GetAncestor(data->hwnd, GA_ROOT), text, ARRAY_SIZE(text)))
         text[0] = 0;
     macdrv_set_cocoa_window_title(data->cocoa_window, text, strlenW(text));
 
@@ -1651,13 +1658,44 @@ BOOL CDECL macdrv_CreateDesktopWindow(HWND hwnd)
 }
 
 
+static WNDPROC desktop_orig_wndproc;
+
+#define WM_WINE_NOTIFY_ACTIVITY WM_USER
+
+static LRESULT CALLBACK desktop_wndproc_wrapper( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
+{
+    switch (msg)
+    {
+    case WM_WINE_NOTIFY_ACTIVITY:
+    {
+        /* This wakes from display sleep, but doesn't affect the screen saver. */
+        static IOPMAssertionID assertion;
+        IOPMAssertionDeclareUserActivity(CFSTR("Wine user input"), kIOPMUserActiveLocal, &assertion);
+
+        /* This prevents the screen saver, but doesn't wake from display sleep. */
+        /* It's deprecated, but there's no better alternative. */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        UpdateSystemActivity(UsrActivity);
+#pragma clang diagnostic pop
+        break;
+    }
+    }
+    return desktop_orig_wndproc( hwnd, msg, wp, lp );
+}
+
 /**********************************************************************
  *              CreateWindow   (MACDRV.@)
  */
 BOOL CDECL macdrv_CreateWindow(HWND hwnd)
 {
     if (hwnd == GetDesktopWindow())
+    {
+        desktop_orig_wndproc = (WNDPROC)SetWindowLongPtrW( GetDesktopWindow(),
+            GWLP_WNDPROC, (LONG_PTR)desktop_wndproc_wrapper );
+
         macdrv_init_clipboard();
+    }
     return TRUE;
 }
 
@@ -1943,7 +1981,7 @@ BOOL CDECL macdrv_UpdateLayeredWindow(HWND hwnd, const UPDATELAYEREDWINDOWINFO *
     char buffer[FIELD_OFFSET(BITMAPINFO, bmiColors[256])];
     BITMAPINFO *bmi = (BITMAPINFO *)buffer;
     void *src_bits, *dst_bits;
-    RECT rect;
+    RECT rect, src_rect;
     HDC hdc = 0;
     HBITMAP dib;
     BOOL ret = FALSE;
@@ -2005,11 +2043,13 @@ BOOL CDECL macdrv_UpdateLayeredWindow(HWND hwnd, const UPDATELAYEREDWINDOWINFO *
         surface->funcs->unlock(surface);
         PatBlt(hdc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, BLACKNESS);
     }
+    src_rect = rect;
+    if (info->pptSrc) OffsetRect( &src_rect, info->pptSrc->x, info->pptSrc->y );
+    DPtoLP( info->hdcSrc, (POINT *)&src_rect, 2 );
+
     if (!(ret = GdiAlphaBlend(hdc, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
-                              info->hdcSrc,
-                              rect.left + (info->pptSrc ? info->pptSrc->x : 0),
-                              rect.top + (info->pptSrc ? info->pptSrc->y : 0),
-                              rect.right - rect.left, rect.bottom - rect.top,
+                              info->hdcSrc, src_rect.left, src_rect.top,
+                              src_rect.right - src_rect.left, src_rect.bottom - src_rect.top,
                               blend)))
         goto done;
 

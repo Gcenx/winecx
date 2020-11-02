@@ -38,6 +38,7 @@
 
 #include "initguid.h"
 
+#include "wine/heap.h"
 #include "wine/test.h"
 
 #include "msg.h"
@@ -149,7 +150,7 @@ static IDataObject* IDataObjectImpl_Construct(void)
 {
     IDataObjectImpl *obj;
 
-    obj = HeapAlloc(GetProcessHeap(), 0, sizeof(*obj));
+    obj = heap_alloc(sizeof(*obj));
     obj->IDataObject_iface.lpVtbl = &IDataObjectImpl_Vtbl;
     obj->ref = 1;
 
@@ -163,7 +164,7 @@ static HRESULT WINAPI IDataObjectImpl_QueryInterface(IDataObject *iface, REFIID 
     if (IsEqualIID(riid, &IID_IUnknown) ||
         IsEqualIID(riid, &IID_IDataObject))
     {
-        *ppvObj = This;
+        *ppvObj = &This->IDataObject_iface;
     }
 
     if(*ppvObj)
@@ -187,10 +188,8 @@ static ULONG WINAPI IDataObjectImpl_Release(IDataObject * iface)
     ULONG ref = InterlockedDecrement(&This->ref);
 
     if (!ref)
-    {
-        HeapFree(GetProcessHeap(), 0, This);
-        return 0;
-    }
+        heap_free(This);
+
     return ref;
 }
 
@@ -276,7 +275,7 @@ static IShellBrowser* IShellBrowserImpl_Construct(void)
 {
     IShellBrowserImpl *browser;
 
-    browser = HeapAlloc(GetProcessHeap(), 0, sizeof(*browser));
+    browser = heap_alloc(sizeof(*browser));
     browser->IShellBrowser_iface.lpVtbl = &IShellBrowserImpl_Vtbl;
     browser->ref = 1;
 
@@ -295,7 +294,7 @@ static HRESULT WINAPI IShellBrowserImpl_QueryInterface(IShellBrowser *iface,
        IsEqualIID(riid, &IID_IOleWindow) ||
        IsEqualIID(riid, &IID_IShellBrowser))
     {
-        *ppvObj = This;
+        *ppvObj = &This->IShellBrowser_iface;
     }
 
     if(*ppvObj)
@@ -319,10 +318,8 @@ static ULONG WINAPI IShellBrowserImpl_Release(IShellBrowser * iface)
     ULONG ref = InterlockedDecrement(&This->ref);
 
     if (!ref)
-    {
-        HeapFree(GetProcessHeap(), 0, This);
-        return 0;
-    }
+        heap_free(This);
+
     return ref;
 }
 
@@ -1447,11 +1444,8 @@ static void test_SHCreateShellFolderViewEx(void)
     ok(unk == (IUnknown *)psv, "got %p\n", unk);
     IUnknown_Release(unk);
 
-    if (psv)
-    {
-        refCount = IShellView_Release(psv);
-        ok(refCount == 0, "refCount = %u\n", refCount);
-    }
+    refCount = IShellView_Release(psv);
+    ok(refCount == 0, "refCount = %u\n", refCount);
 
 if (0)
 {
@@ -1479,6 +1473,35 @@ if (0)
     IShellFolder_Release(desktop);
 }
 
+static void test_newmenu(void)
+{
+    IUnknown *unk, *unk2;
+    HRESULT hr;
+
+    hr = CoCreateInstance(&CLSID_NewMenu, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void **)&unk);
+todo_wine
+    ok(hr == S_OK, "Failed to create NewMenu object, hr %#x.\n", hr);
+    if (hr != S_OK)
+    {
+        skip("NewMenu is not supported.\n");
+        return;
+    }
+
+    hr = IUnknown_QueryInterface(unk, &IID_IShellExtInit, (void **)&unk2);
+    ok(hr == S_OK, "Failed to get IShellExtInit, hr %#x.\n", hr);
+    IUnknown_Release(unk2);
+
+    hr = IUnknown_QueryInterface(unk, &IID_IContextMenu3, (void **)&unk2);
+    ok(hr == S_OK, "Failed to get IContextMenu3, hr %#x.\n", hr);
+    IUnknown_Release(unk2);
+
+    hr = IUnknown_QueryInterface(unk, &IID_IObjectWithSite, (void **)&unk2);
+    ok(hr == S_OK, "Failed to get IObjectWithSite, hr %#x.\n", hr);
+    IUnknown_Release(unk2);
+
+    IUnknown_Release(unk);
+}
+
 START_TEST(shlview)
 {
     OleInitialize(NULL);
@@ -1494,6 +1517,7 @@ START_TEST(shlview)
     test_IOleCommandTarget();
     test_SHCreateShellFolderView();
     test_SHCreateShellFolderViewEx();
+    test_newmenu();
 
     OleUninitialize();
 }

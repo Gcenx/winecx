@@ -8,7 +8,7 @@
 @ stub TdhEnumerateProviderFieldInformation
 @ stub TdhEnumerateProviderFilters
 @ stub TdhEnumerateProviders
-@ stub TdhEnumerateRemoveWBEMProviderFieldInformation
+@ stub TdhEnumerateRemoteWBEMProviderFieldInformation
 @ stub TdhEnumerateRemoteWBEMProviders
 @ stub TdhFormatProperty
 @ stub TdhGetAllEventsInformation
@@ -24,10 +24,11 @@
 @ stdcall TdhLoadManifest(wstr)
 @ stub TdhLoadManifestFromBinary
 @ stub TdhOpenDecodingHandle
-@ stub TdhpFindMatchClassFromWBEM
-@ stub TdhpGetBestTraceEventInfoWBEM
 @ stub TdhQueryProviderFieldInformation
 @ stub TdhQueryRemoteWBEMProviderFieldInformation
 @ stub TdhSetDecodingParameter
 @ stub TdhUnloadManifest
 @ stub TdhValidatePayloadFilter
+@ stub TdhpFindMatchClassFromWBEM
+@ stub TdhpGetBestTraceEventInfoWBEM
+@ stub TdhpGetEventMapInfoWBEM

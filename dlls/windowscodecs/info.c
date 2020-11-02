@@ -1514,7 +1514,7 @@ typedef struct
     UINT container_count;
 } MetadataReaderInfo;
 
-struct metadata_container *get_metadata_container(MetadataReaderInfo *info, const GUID *guid)
+static struct metadata_container *get_metadata_container(MetadataReaderInfo *info, const GUID *guid)
 {
     unsigned i;
 
@@ -2153,6 +2153,22 @@ void ReleaseComponentInfos(void)
     ComponentInfo *info, *next_info;
     WINE_RB_FOR_EACH_ENTRY_DESTRUCTOR(info, next_info, &component_info_cache, ComponentInfo, entry)
         IWICComponentInfo_Release(&info->IWICComponentInfo_iface);
+}
+
+HRESULT get_decoder_info(REFCLSID clsid, IWICBitmapDecoderInfo **info)
+{
+    IWICComponentInfo *compinfo;
+    HRESULT hr;
+
+    hr = CreateComponentInfo(clsid, &compinfo);
+    if (FAILED(hr)) return hr;
+
+    hr = IWICComponentInfo_QueryInterface(compinfo, &IID_IWICBitmapDecoderInfo,
+        (void **)info);
+
+    IWICComponentInfo_Release(compinfo);
+
+    return hr;
 }
 
 typedef struct {

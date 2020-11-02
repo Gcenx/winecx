@@ -26,6 +26,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
+#include "winioctl.h"
 #include "wine/test.h"
 
 #define PIPENAME "\\\\.\\PiPe\\tests_pipe.c"
@@ -37,6 +38,10 @@ static BOOL (WINAPI *pDuplicateTokenEx)(HANDLE,DWORD,LPSECURITY_ATTRIBUTES,
                                         SECURITY_IMPERSONATION_LEVEL,TOKEN_TYPE,PHANDLE);
 static DWORD (WINAPI *pQueueUserAPC)(PAPCFUNC pfnAPC, HANDLE hThread, ULONG_PTR dwData);
 static BOOL (WINAPI *pCancelIoEx)(HANDLE handle, LPOVERLAPPED lpOverlapped);
+static BOOL (WINAPI *pGetNamedPipeClientProcessId)(HANDLE,ULONG*);
+static BOOL (WINAPI *pGetNamedPipeServerProcessId)(HANDLE,ULONG*);
+static BOOL (WINAPI *pGetNamedPipeClientSessionId)(HANDLE,ULONG*);
+static BOOL (WINAPI *pGetNamedPipeServerSessionId)(HANDLE,ULONG*);
 
 static BOOL user_apc_ran;
 static void CALLBACK user_apc(ULONG_PTR param)
@@ -61,7 +66,7 @@ struct rpcThreadArgs
 static DWORD CALLBACK rpcThreadMain(LPVOID arg)
 {
     struct rpcThreadArgs *rpcargs = (struct rpcThreadArgs *)arg;
-    trace("rpcThreadMain starting\n");
+    if (winetest_debug > 1) trace("rpcThreadMain starting\n");
     SetLastError( rpcargs->lastError );
 
     switch (rpcargs->op)
@@ -81,7 +86,7 @@ static DWORD CALLBACK rpcThreadMain(LPVOID arg)
     }
 
     rpcargs->lastError = GetLastError();
-    trace("rpcThreadMain returning\n");
+    if (winetest_debug > 1) trace("rpcThreadMain returning\n");
     return 0;
 }
 
@@ -149,6 +154,7 @@ static void test_CreateNamedPipe(int pipemode)
     DWORD written;
     DWORD readden;
     DWORD avail;
+    DWORD left;
     DWORD lpmode;
     BOOL ret;
 
@@ -207,6 +213,10 @@ static void test_CreateNamedPipe(int pipemode)
     ok(hnp != INVALID_HANDLE_VALUE, "CreateNamedPipe failed\n");
     test_signaled(hnp);
 
+    ret = PeekNamedPipe(hnp, NULL, 0, NULL, &readden, NULL);
+    ok(!ret && GetLastError() == ERROR_BAD_PIPE, "PeekNamedPipe returned %x (%u)\n",
+       ret, GetLastError());
+
     ret = WaitNamedPipeA(PIPENAME, 2000);
     ok(ret, "WaitNamedPipe failed (%d)\n", GetLastError());
 
@@ -216,6 +226,12 @@ static void test_CreateNamedPipe(int pipemode)
     ok(!WaitNamedPipeA(PIPENAME, 100), "WaitNamedPipe succeeded\n");
 
     ok(GetLastError() == ERROR_SEM_TIMEOUT, "wrong error %u\n", GetLastError());
+
+    /* Test ConnectNamedPipe() in both directions */
+    ok(!ConnectNamedPipe(hnp, NULL), "ConnectNamedPipe(server) succeeded\n");
+    ok(GetLastError() == ERROR_PIPE_CONNECTED, "expected ERROR_PIPE_CONNECTED, got %u\n", GetLastError());
+    ok(!ConnectNamedPipe(hFile, NULL), "ConnectNamedPipe(client) succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_FUNCTION, "expected ERROR_INVALID_FUNCTION, got %u\n", GetLastError());
 
     /* don't try to do i/o if one side couldn't be opened, as it hangs */
     if (hFile != INVALID_HANDLE_VALUE) {
@@ -240,8 +256,12 @@ static void test_CreateNamedPipe(int pipemode)
         memset(ibuf, 0, sizeof(ibuf));
         ok(WriteFile(hnp, obuf, sizeof(obuf), &written, NULL), "WriteFile\n");
         ok(written == sizeof(obuf), "write file len 1\n");
-        ok(PeekNamedPipe(hFile, NULL, 0, NULL, &readden, NULL), "Peek\n");
-        ok(readden == sizeof(obuf), "peek 1 got %d bytes\n", readden);
+        ok(PeekNamedPipe(hFile, NULL, 0, NULL, &avail, &left), "Peek\n");
+        ok(avail == sizeof(obuf), "peek 1 got %d bytes\n", avail);
+        if (pipemode == PIPE_TYPE_BYTE)
+            ok(left == 0, "peek 1 got %d bytes left\n", left);
+        else
+            ok(left == sizeof(obuf), "peek 1 got %d bytes left\n", left);
         ok(ReadFile(hFile, ibuf, sizeof(ibuf), &readden, NULL), "ReadFile\n");
         ok(readden == sizeof(obuf), "read 1 got %d bytes\n", readden);
         ok(memcmp(obuf, ibuf, written) == 0, "content 1 check\n");
@@ -249,10 +269,18 @@ static void test_CreateNamedPipe(int pipemode)
         memset(ibuf, 0, sizeof(ibuf));
         ok(WriteFile(hFile, obuf2, sizeof(obuf2), &written, NULL), "WriteFile\n");
         ok(written == sizeof(obuf2), "write file len 2\n");
-        ok(PeekNamedPipe(hnp, NULL, 0, NULL, &readden, NULL), "Peek\n");
-        ok(readden == sizeof(obuf2), "peek 2 got %d bytes\n", readden);
-        ok(PeekNamedPipe(hnp, (LPVOID)1, 0, NULL, &readden, NULL), "Peek\n");
-        ok(readden == sizeof(obuf2), "peek 2 got %d bytes\n", readden);
+        ok(PeekNamedPipe(hnp, NULL, 0, NULL, &avail, &left), "Peek\n");
+        ok(avail == sizeof(obuf2), "peek 2 got %d bytes\n", avail);
+        if (pipemode == PIPE_TYPE_BYTE)
+            ok(left == 0, "peek 2 got %d bytes left\n", left);
+        else
+            ok(left == sizeof(obuf2), "peek 2 got %d bytes left\n", left);
+        ok(PeekNamedPipe(hnp, (LPVOID)1, 0, NULL, &avail, &left), "Peek\n");
+        ok(avail == sizeof(obuf2), "peek 2 got %d bytes\n", avail);
+        if (pipemode == PIPE_TYPE_BYTE)
+            ok(left == 0, "peek 2 got %d bytes left\n", left);
+        else
+            ok(left == sizeof(obuf2), "peek 2 got %d bytes left\n", left);
         ok(ReadFile(hnp, ibuf, sizeof(ibuf), &readden, NULL), "ReadFile\n");
         ok(readden == sizeof(obuf2), "read 2 got %d bytes\n", readden);
         ok(memcmp(obuf2, ibuf, written) == 0, "content 2 check\n");
@@ -261,6 +289,13 @@ static void test_CreateNamedPipe(int pipemode)
         memset(ibuf, 0, sizeof(ibuf));
         ok(WriteFile(hnp, obuf2, sizeof(obuf2), &written, NULL), "WriteFile\n");
         ok(written == sizeof(obuf2), "write file len\n");
+        ok(PeekNamedPipe(hFile, ibuf, 4, &readden, &avail, &left), "Peek\n");
+        ok(readden == 4, "peek got %d bytes\n", readden);
+        ok(avail == sizeof(obuf2), "peek got %d bytes available\n", avail);
+        if (pipemode == PIPE_TYPE_BYTE)
+            ok(left == -4, "peek got %d bytes left\n", left);
+        else
+            ok(left == sizeof(obuf2)-4, "peek got %d bytes left\n", left);
         ok(ReadFile(hFile, ibuf, 4, &readden, NULL), "ReadFile\n");
         ok(readden == 4, "read got %d bytes\n", readden);
         ok(ReadFile(hFile, ibuf + 4, sizeof(ibuf) - 4, &readden, NULL), "ReadFile\n");
@@ -270,12 +305,17 @@ static void test_CreateNamedPipe(int pipemode)
         memset(ibuf, 0, sizeof(ibuf));
         ok(WriteFile(hFile, obuf, sizeof(obuf), &written, NULL), "WriteFile\n");
         ok(written == sizeof(obuf), "write file len\n");
+        ok(PeekNamedPipe(hnp, ibuf, 4, &readden, &avail, &left), "Peek\n");
+        ok(readden == 4, "peek got %d bytes\n", readden);
+        ok(avail == sizeof(obuf), "peek got %d bytes available\n", avail);
         if (pipemode == PIPE_TYPE_BYTE)
         {
+            ok(left == -4, "peek got %d bytes left\n", left);
             ok(ReadFile(hnp, ibuf, 4, &readden, NULL), "ReadFile\n");
         }
         else
         {
+            ok(left == sizeof(obuf)-4, "peek got %d bytes left\n", left);
             SetLastError(0xdeadbeef);
             ok(!ReadFile(hnp, ibuf, 4, &readden, NULL), "ReadFile\n");
             ok(GetLastError() == ERROR_MORE_DATA, "wrong error\n");
@@ -316,15 +356,22 @@ static void test_CreateNamedPipe(int pipemode)
         ok(written == sizeof(obuf), "write file len 3a\n");
         ok(WriteFile(hnp, obuf2, sizeof(obuf2), &written, NULL), " WriteFile3b\n");
         ok(written == sizeof(obuf2), "write file len 3b\n");
-        ok(PeekNamedPipe(hFile, ibuf, sizeof(ibuf), &readden, &avail, NULL), "Peek3\n");
+        ok(PeekNamedPipe(hFile, ibuf, 4, &readden, &avail, &left), "Peek3\n");
+        ok(readden == 4, "peek3 got %d bytes\n", readden);
+        if (pipemode == PIPE_TYPE_BYTE)
+            ok(left == -4, "peek3 got %d bytes left\n", left);
+        else
+            ok(left == sizeof(obuf)-4, "peek3 got %d bytes left\n", left);
+        ok(avail == sizeof(obuf) + sizeof(obuf2), "peek3 got %d bytes available\n", avail);
+        ok(PeekNamedPipe(hFile, ibuf, sizeof(ibuf), &readden, &avail, &left), "Peek3\n");
         if (pipemode == PIPE_TYPE_BYTE) {
-            /* currently the Wine behavior depends on the kernel version */
-            /* ok(readden == sizeof(obuf) + sizeof(obuf2), "peek3 got %d bytes\n", readden); */
-            if (readden != sizeof(obuf) + sizeof(obuf2)) todo_wine ok(0, "peek3 got %d bytes\n", readden);
+            ok(readden == sizeof(obuf) + sizeof(obuf2), "peek3 got %d bytes\n", readden);
+            ok(left == (DWORD) -(sizeof(obuf) + sizeof(obuf2)), "peek3 got %d bytes left\n", left);
         }
         else
         {
             ok(readden == sizeof(obuf), "peek3 got %d bytes\n", readden);
+            ok(left == 0, "peek3 got %d bytes left\n", left);
         }
         ok(avail == sizeof(obuf) + sizeof(obuf2), "peek3 got %d bytes available\n", avail);
         pbuf = ibuf;
@@ -346,15 +393,22 @@ static void test_CreateNamedPipe(int pipemode)
         ok(written == sizeof(obuf), "write file len 4a\n");
         ok(WriteFile(hFile, obuf2, sizeof(obuf2), &written, NULL), " WriteFile4b\n");
         ok(written == sizeof(obuf2), "write file len 4b\n");
-        ok(PeekNamedPipe(hnp, ibuf, sizeof(ibuf), &readden, &avail, NULL), "Peek4\n");
+        ok(PeekNamedPipe(hnp, ibuf, 4, &readden, &avail, &left), "Peek3\n");
+        ok(readden == 4, "peek3 got %d bytes\n", readden);
+        if (pipemode == PIPE_TYPE_BYTE)
+            ok(left == -4, "peek3 got %d bytes left\n", left);
+        else
+            ok(left == sizeof(obuf)-4, "peek3 got %d bytes left\n", left);
+        ok(avail == sizeof(obuf) + sizeof(obuf2), "peek3 got %d bytes available\n", avail);
+        ok(PeekNamedPipe(hnp, ibuf, sizeof(ibuf), &readden, &avail, &left), "Peek4\n");
         if (pipemode == PIPE_TYPE_BYTE) {
-            /* currently the Wine behavior depends on the kernel version */
-            /* ok(readden == sizeof(obuf) + sizeof(obuf2), "peek4 got %d bytes\n", readden); */
-            if (readden != sizeof(obuf) + sizeof(obuf2)) todo_wine ok(0, "peek4 got %d bytes\n", readden);
+            ok(readden == sizeof(obuf) + sizeof(obuf2), "peek4 got %d bytes\n", readden);
+            ok(left == (DWORD) -(sizeof(obuf) + sizeof(obuf2)), "peek4 got %d bytes left\n", left);
         }
         else
         {
             ok(readden == sizeof(obuf), "peek4 got %d bytes\n", readden);
+            ok(left == 0, "peek4 got %d bytes left\n", left);
         }
         ok(avail == sizeof(obuf) + sizeof(obuf2), "peek4 got %d bytes available\n", avail);
         pbuf = ibuf;
@@ -392,10 +446,10 @@ static void test_CreateNamedPipe(int pipemode)
             ok(written == sizeof(obuf), "write file len 3a\n");
             ok(WriteFile(hnp, obuf2, sizeof(obuf2), &written, NULL), " WriteFile5b\n");
             ok(written == sizeof(obuf2), "write file len 3b\n");
-            ok(PeekNamedPipe(hFile, ibuf, sizeof(ibuf), &readden, &avail, NULL), "Peek5\n");
+            ok(PeekNamedPipe(hFile, ibuf, sizeof(ibuf), &readden, &avail, &left), "Peek5\n");
             ok(readden == sizeof(obuf), "peek5 got %d bytes\n", readden);
-
             ok(avail == sizeof(obuf) + sizeof(obuf2), "peek5 got %d bytes available\n", avail);
+            ok(left == 0, "peek5 got %d bytes left\n", left);
             pbuf = ibuf;
             ok(memcmp(obuf, pbuf, sizeof(obuf)) == 0, "content 5a check\n");
             ok(ReadFile(hFile, ibuf, sizeof(ibuf), &readden, NULL), "ReadFile\n");
@@ -576,7 +630,7 @@ static void test_CreateNamedPipe(int pipemode)
 
     ok(CloseHandle(hnp), "CloseHandle\n");
 
-    trace("test_CreateNamedPipe returning\n");
+    if (winetest_debug > 1) trace("test_CreateNamedPipe returning\n");
 }
 
 static void test_CreateNamedPipe_instances_must_match(void)
@@ -664,11 +718,65 @@ static void test_CreateNamedPipe_instances_must_match(void)
     ok(CloseHandle(hnp2), "CloseHandle\n");
 }
 
+static void test_ReadFile(void)
+{
+    HANDLE server, client;
+    OVERLAPPED overlapped;
+    DWORD size;
+    BOOL res;
+
+    static char buf[512];
+
+    server = CreateNamedPipeA(PIPENAME, PIPE_ACCESS_DUPLEX,
+                              PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+                              1, 1024, 1024, NMPWAIT_WAIT_FOREVER, NULL);
+    ok(server != INVALID_HANDLE_VALUE, "CreateNamedPipe failed with %u\n", GetLastError());
+
+    client = CreateFileA(PIPENAME, GENERIC_READ | GENERIC_WRITE, 0, NULL,
+                         OPEN_EXISTING, 0, 0);
+    ok(client != INVALID_HANDLE_VALUE, "CreateFile failed with %u\n", GetLastError());
+
+    ok(WriteFile(client, buf, sizeof(buf), &size, NULL), "WriteFile\n");
+
+    res = ReadFile(server, buf, 1, &size, NULL);
+    ok(!res && GetLastError() == ERROR_MORE_DATA, "ReadFile returned %x(%u)\n", res, GetLastError());
+    ok(size == 1, "size = %u\n", size);
+
+    /* pass both overlapped and ret read */
+    memset(&overlapped, 0, sizeof(overlapped));
+    res = ReadFile(server, buf, 1, &size, &overlapped);
+    ok(!res && GetLastError() == ERROR_MORE_DATA, "ReadFile returned %x(%u)\n", res, GetLastError());
+    ok(size == 0, "size = %u\n", size);
+    ok((NTSTATUS)overlapped.Internal == STATUS_BUFFER_OVERFLOW, "Internal = %lx\n", overlapped.Internal);
+    ok(overlapped.InternalHigh == 1, "InternalHigh = %lx\n", overlapped.InternalHigh);
+
+    DisconnectNamedPipe(server);
+
+    memset(&overlapped, 0, sizeof(overlapped));
+    overlapped.InternalHigh = 0xdeadbeef;
+    res = ReadFile(server, buf, 1, &size, &overlapped);
+    ok(!res && GetLastError() == ERROR_PIPE_NOT_CONNECTED, "ReadFile returned %x(%u)\n", res, GetLastError());
+    ok(size == 0, "size = %u\n", size);
+    ok(overlapped.Internal == STATUS_PENDING, "Internal = %lx\n", overlapped.Internal);
+    ok(overlapped.InternalHigh == 0xdeadbeef, "InternalHigh = %lx\n", overlapped.InternalHigh);
+
+    memset(&overlapped, 0, sizeof(overlapped));
+    overlapped.InternalHigh = 0xdeadbeef;
+    res = WriteFile(server, buf, 1, &size, &overlapped);
+    ok(!res && GetLastError() == ERROR_PIPE_NOT_CONNECTED, "ReadFile returned %x(%u)\n", res, GetLastError());
+    ok(size == 0, "size = %u\n", size);
+    ok(overlapped.Internal == STATUS_PENDING, "Internal = %lx\n", overlapped.Internal);
+    ok(overlapped.InternalHigh == 0xdeadbeef, "InternalHigh = %lx\n", overlapped.InternalHigh);
+
+    CloseHandle(server);
+    CloseHandle(client);
+}
+
 /** implementation of alarm() */
 static DWORD CALLBACK alarmThreadMain(LPVOID arg)
 {
     DWORD_PTR timeout = (DWORD_PTR) arg;
-    trace("alarmThreadMain\n");
+    if (winetest_debug > 1) trace("alarmThreadMain\n");
     if (WaitForSingleObject( alarm_event, timeout ) == WAIT_TIMEOUT)
     {
         ok(FALSE, "alarm\n");
@@ -684,7 +792,7 @@ static DWORD CALLBACK serverThreadMain1(LPVOID arg)
 {
     int i;
 
-    trace("serverThreadMain1 start\n");
+    if (winetest_debug > 1) trace("serverThreadMain1 start\n");
     /* Set up a simple echo server */
     hnp = CreateNamedPipeA(PIPENAME "serverThreadMain1", PIPE_ACCESS_DUPLEX,
         PIPE_TYPE_BYTE | PIPE_WAIT,
@@ -702,30 +810,30 @@ static DWORD CALLBACK serverThreadMain1(LPVOID arg)
         BOOL success;
 
         /* Wait for client to connect */
-        trace("Server calling ConnectNamedPipe...\n");
+        if (winetest_debug > 1) trace("Server calling ConnectNamedPipe...\n");
         ok(ConnectNamedPipe(hnp, NULL)
             || GetLastError() == ERROR_PIPE_CONNECTED, "ConnectNamedPipe\n");
-        trace("ConnectNamedPipe returned.\n");
+        if (winetest_debug > 1) trace("ConnectNamedPipe returned.\n");
 
         /* Echo bytes once */
         memset(buf, 0, sizeof(buf));
 
-        trace("Server reading...\n");
+        if (winetest_debug > 1) trace("Server reading...\n");
         success = ReadFile(hnp, buf, sizeof(buf), &readden, NULL);
-        trace("Server done reading.\n");
+        if (winetest_debug > 1) trace("Server done reading.\n");
         ok(success, "ReadFile\n");
         ok(readden, "short read\n");
 
-        trace("Server writing...\n");
+        if (winetest_debug > 1) trace("Server writing...\n");
         ok(WriteFile(hnp, buf, readden, &written, NULL), "WriteFile\n");
-        trace("Server done writing.\n");
+        if (winetest_debug > 1) trace("Server done writing.\n");
         ok(written == readden, "write file len\n");
 
         /* finish this connection, wait for next one */
         ok(FlushFileBuffers(hnp), "FlushFileBuffers\n");
-        trace("Server done flushing.\n");
+        if (winetest_debug > 1) trace("Server done flushing.\n");
         ok(DisconnectNamedPipe(hnp), "DisconnectNamedPipe\n");
-        trace("Server done disconnecting.\n");
+        if (winetest_debug > 1) trace("Server done disconnecting.\n");
     }
     return 0;
 }
@@ -757,28 +865,28 @@ static DWORD CALLBACK serverThreadMain2(LPVOID arg)
 
         user_apc_ran = FALSE;
         if (i == 0 && pQueueUserAPC) {
-            trace("Queueing an user APC\n"); /* verify the pipe is non alerable */
+            if (winetest_debug > 1) trace("Queueing an user APC\n"); /* verify the pipe is non alerable */
             ret = pQueueUserAPC(&user_apc, GetCurrentThread(), 0);
             ok(ret, "QueueUserAPC failed: %d\n", GetLastError());
         }
 
         /* Wait for client to connect */
-        trace("Server calling ConnectNamedPipe...\n");
+        if (winetest_debug > 1) trace("Server calling ConnectNamedPipe...\n");
         ok(ConnectNamedPipe(hnp, NULL)
             || GetLastError() == ERROR_PIPE_CONNECTED, "ConnectNamedPipe\n");
-        trace("ConnectNamedPipe returned.\n");
+        if (winetest_debug > 1) trace("ConnectNamedPipe returned.\n");
 
         /* Echo bytes once */
         memset(buf, 0, sizeof(buf));
 
-        trace("Server reading...\n");
+        if (winetest_debug > 1) trace("Server reading...\n");
         success = ReadFile(hnp, buf, sizeof(buf), &readden, NULL);
-        trace("Server done reading.\n");
+        if (winetest_debug > 1) trace("Server done reading.\n");
         ok(success, "ReadFile\n");
 
-        trace("Server writing...\n");
+        if (winetest_debug > 1) trace("Server writing...\n");
         ok(WriteFile(hnp, buf, readden, &written, NULL), "WriteFile\n");
-        trace("Server done writing.\n");
+        if (winetest_debug > 1) trace("Server done writing.\n");
         ok(written == readden, "write file len\n");
 
         /* finish this connection, wait for next one */
@@ -814,7 +922,7 @@ static DWORD CALLBACK serverThreadMain3(LPVOID arg)
     int i;
     HANDLE hEvent;
 
-    trace("serverThreadMain3\n");
+    if (winetest_debug > 1) trace("serverThreadMain3\n");
     /* Set up a simple echo server */
     hnp = CreateNamedPipeA(PIPENAME "serverThreadMain3", PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
         PIPE_TYPE_BYTE | PIPE_WAIT,
@@ -847,17 +955,17 @@ static DWORD CALLBACK serverThreadMain3(LPVOID arg)
 
         /* Wait for client to connect */
         if (i == 0) {
-            trace("Server calling non-overlapped ConnectNamedPipe on overlapped pipe...\n");
+            if (winetest_debug > 1) trace("Server calling non-overlapped ConnectNamedPipe on overlapped pipe...\n");
             success = ConnectNamedPipe(hnp, NULL);
             err = GetLastError();
             ok(success || (err == ERROR_PIPE_CONNECTED), "ConnectNamedPipe failed: %d\n", err);
-            trace("ConnectNamedPipe operation complete.\n");
+            if (winetest_debug > 1) trace("ConnectNamedPipe operation complete.\n");
         } else {
-            trace("Server calling overlapped ConnectNamedPipe...\n");
+            if (winetest_debug > 1) trace("Server calling overlapped ConnectNamedPipe...\n");
             success = ConnectNamedPipe(hnp, &oOverlap);
             err = GetLastError();
             ok(!success && (err == ERROR_IO_PENDING || err == ERROR_PIPE_CONNECTED), "overlapped ConnectNamedPipe\n");
-            trace("overlapped ConnectNamedPipe returned.\n");
+            if (winetest_debug > 1) trace("overlapped ConnectNamedPipe returned.\n");
             if (!success && (err == ERROR_IO_PENDING)) {
                 if (letWFSOEwait)
                 {
@@ -874,18 +982,18 @@ static DWORD CALLBACK serverThreadMain3(LPVOID arg)
                 }
             }
             ok(success || (err == ERROR_PIPE_CONNECTED), "GetOverlappedResult ConnectNamedPipe\n");
-            trace("overlapped ConnectNamedPipe operation complete.\n");
+            if (winetest_debug > 1) trace("overlapped ConnectNamedPipe operation complete.\n");
         }
 
         /* Echo bytes once */
         memset(buf, 0, sizeof(buf));
 
-        trace("Server reading...\n");
+        if (winetest_debug > 1) trace("Server reading...\n");
         success = ReadFile(hnp, buf, sizeof(buf), &readden, &oOverlap);
-        trace("Server ReadFile returned...\n");
+        if (winetest_debug > 1) trace("Server ReadFile returned...\n");
         err = GetLastError();
         ok(success || err == ERROR_IO_PENDING, "overlapped ReadFile\n");
-        trace("overlapped ReadFile returned.\n");
+        if (winetest_debug > 1) trace("overlapped ReadFile returned.\n");
         if (!success && (err == ERROR_IO_PENDING)) {
             if (letWFSOEwait)
             {
@@ -901,15 +1009,15 @@ static DWORD CALLBACK serverThreadMain3(LPVOID arg)
                 success = GetOverlappedResult(hnp, &oOverlap, &readden, TRUE);
             }
         }
-        trace("Server done reading.\n");
+        if (winetest_debug > 1) trace("Server done reading.\n");
         ok(success, "overlapped ReadFile\n");
 
-        trace("Server writing...\n");
+        if (winetest_debug > 1) trace("Server writing...\n");
         success = WriteFile(hnp, buf, readden, &written, &oOverlap);
-        trace("Server WriteFile returned...\n");
+        if (winetest_debug > 1) trace("Server WriteFile returned...\n");
         err = GetLastError();
         ok(success || err == ERROR_IO_PENDING, "overlapped WriteFile\n");
-        trace("overlapped WriteFile returned.\n");
+        if (winetest_debug > 1) trace("overlapped WriteFile returned.\n");
         if (!success && (err == ERROR_IO_PENDING)) {
             if (letWFSOEwait)
             {
@@ -925,7 +1033,7 @@ static DWORD CALLBACK serverThreadMain3(LPVOID arg)
                 success = GetOverlappedResult(hnp, &oOverlap, &written, TRUE);
             }
         }
-        trace("Server done writing.\n");
+        if (winetest_debug > 1) trace("Server done writing.\n");
         ok(success, "overlapped WriteFile\n");
         ok(written == readden, "write file len\n");
 
@@ -943,7 +1051,7 @@ static DWORD CALLBACK serverThreadMain4(LPVOID arg)
     HANDLE hcompletion;
     BOOL ret;
 
-    trace("serverThreadMain4\n");
+    if (winetest_debug > 1) trace("serverThreadMain4\n");
     /* Set up a simple echo server */
     hnp = CreateNamedPipeA(PIPENAME "serverThreadMain4", PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
         PIPE_TYPE_BYTE | PIPE_WAIT,
@@ -975,13 +1083,13 @@ static DWORD CALLBACK serverThreadMain4(LPVOID arg)
         memset(&oWrite, 0, sizeof(oWrite));
 
         /* Wait for client to connect */
-        trace("Server calling overlapped ConnectNamedPipe...\n");
+        if (winetest_debug > 1) trace("Server calling overlapped ConnectNamedPipe...\n");
         success = ConnectNamedPipe(hnp, &oConnect);
         err = GetLastError();
         ok(!success && (err == ERROR_IO_PENDING || err == ERROR_PIPE_CONNECTED),
            "overlapped ConnectNamedPipe got %u err %u\n", success, err );
         if (!success && err == ERROR_IO_PENDING) {
-            trace("ConnectNamedPipe GetQueuedCompletionStatus\n");
+            if (winetest_debug > 1) trace("ConnectNamedPipe GetQueuedCompletionStatus\n");
             success = GetQueuedCompletionStatus(hcompletion, &dummy, &compkey, &oResult, 0);
             if (!success)
             {
@@ -996,14 +1104,14 @@ static DWORD CALLBACK serverThreadMain4(LPVOID arg)
                 ok(oResult == &oConnect, "got overlapped pointer %p instead of %p\n", oResult, &oConnect);
             }
         }
-        trace("overlapped ConnectNamedPipe operation complete.\n");
+        if (winetest_debug > 1) trace("overlapped ConnectNamedPipe operation complete.\n");
 
         /* Echo bytes once */
         memset(buf, 0, sizeof(buf));
 
-        trace("Server reading...\n");
+        if (winetest_debug > 1) trace("Server reading...\n");
         success = ReadFile(hnp, buf, sizeof(buf), &readden, &oRead);
-        trace("Server ReadFile returned...\n");
+        if (winetest_debug > 1) trace("Server ReadFile returned...\n");
         err = GetLastError();
         ok(success || err == ERROR_IO_PENDING, "overlapped ReadFile, err=%i\n", err);
         success = GetQueuedCompletionStatus(hcompletion, &readden, &compkey,
@@ -1014,11 +1122,11 @@ static DWORD CALLBACK serverThreadMain4(LPVOID arg)
             ok(compkey == 12345, "got completion key %i instead of 12345\n", (int)compkey);
             ok(oResult == &oRead, "got overlapped pointer %p instead of %p\n", oResult, &oRead);
         }
-        trace("Server done reading.\n");
+        if (winetest_debug > 1) trace("Server done reading.\n");
 
-        trace("Server writing...\n");
+        if (winetest_debug > 1) trace("Server writing...\n");
         success = WriteFile(hnp, buf, readden, &written, &oWrite);
-        trace("Server WriteFile returned...\n");
+        if (winetest_debug > 1) trace("Server WriteFile returned...\n");
         err = GetLastError();
         ok(success || err == ERROR_IO_PENDING, "overlapped WriteFile failed, err=%u\n", err);
         success = GetQueuedCompletionStatus(hcompletion, &written, &compkey,
@@ -1030,7 +1138,46 @@ static DWORD CALLBACK serverThreadMain4(LPVOID arg)
             ok(oResult == &oWrite, "got overlapped pointer %p instead of %p\n", oResult, &oWrite);
             ok(written == readden, "write file len\n");
         }
-        trace("Server done writing.\n");
+        if (winetest_debug > 1) trace("Server done writing.\n");
+
+        /* Client will finish this connection, the following ops will trigger broken pipe errors. */
+
+        /* Wait for the pipe to break. */
+        while (PeekNamedPipe(hnp, NULL, 0, NULL, &written, &written));
+
+        if (winetest_debug > 1) trace("Server writing on disconnected pipe...\n");
+        SetLastError(ERROR_SUCCESS);
+        success = WriteFile(hnp, buf, readden, &written, &oWrite);
+        err = GetLastError();
+        ok(!success && err == ERROR_NO_DATA,
+            "overlapped WriteFile on disconnected pipe returned %u, err=%i\n", success, err);
+
+        /* No completion status is queued on immediate error. */
+        SetLastError(ERROR_SUCCESS);
+        oResult = (OVERLAPPED *)0xdeadbeef;
+        success = GetQueuedCompletionStatus(hcompletion, &written, &compkey,
+            &oResult, 0);
+        err = GetLastError();
+        ok(!success && err == WAIT_TIMEOUT && !oResult,
+           "WriteFile GetQueuedCompletionStatus returned %u, err=%i, oResult %p\n",
+           success, err, oResult);
+
+        if (winetest_debug > 1) trace("Server reading from disconnected pipe...\n");
+        SetLastError(ERROR_SUCCESS);
+        success = ReadFile(hnp, buf, sizeof(buf), &readden, &oRead);
+        if (winetest_debug > 1) trace("Server ReadFile from disconnected pipe returned...\n");
+        err = GetLastError();
+        ok(!success && err == ERROR_BROKEN_PIPE,
+            "overlapped ReadFile on disconnected pipe returned %u, err=%i\n", success, err);
+
+        SetLastError(ERROR_SUCCESS);
+        oResult = (OVERLAPPED *)0xdeadbeef;
+        success = GetQueuedCompletionStatus(hcompletion, &readden, &compkey,
+            &oResult, 0);
+        err = GetLastError();
+        ok(!success && err == WAIT_TIMEOUT && !oResult,
+           "ReadFile GetQueuedCompletionStatus returned %u, err=%i, oResult %p\n",
+           success, err, oResult);
 
         /* finish this connection, wait for next one */
         ok(FlushFileBuffers(hnp), "FlushFileBuffers\n");
@@ -1066,7 +1213,7 @@ static DWORD CALLBACK serverThreadMain5(LPVOID arg)
     int i;
     HANDLE hEvent;
 
-    trace("serverThreadMain5\n");
+    if (winetest_debug > 1) trace("serverThreadMain5\n");
     /* Set up a simple echo server */
     hnp = CreateNamedPipeA(PIPENAME "serverThreadMain5", PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
         PIPE_TYPE_BYTE | PIPE_WAIT,
@@ -1094,23 +1241,23 @@ static DWORD CALLBACK serverThreadMain5(LPVOID arg)
         oOverlap.hEvent = hEvent;
 
         /* Wait for client to connect */
-        trace("Server calling ConnectNamedPipe...\n");
+        if (winetest_debug > 1) trace("Server calling ConnectNamedPipe...\n");
         success = ConnectNamedPipe(hnp, NULL);
         err = GetLastError();
         ok(success || (err == ERROR_PIPE_CONNECTED), "ConnectNamedPipe failed: %d\n", err);
-        trace("ConnectNamedPipe operation complete.\n");
+        if (winetest_debug > 1) trace("ConnectNamedPipe operation complete.\n");
 
         /* Echo bytes once */
         memset(buf, 0, sizeof(buf));
 
-        trace("Server reading...\n");
+        if (winetest_debug > 1) trace("Server reading...\n");
         completion_called = 0;
         ResetEvent(hEvent);
         success = ReadFileEx(hnp, buf, sizeof(buf), &oOverlap, completion_routine);
-        trace("Server ReadFileEx returned...\n");
+        if (winetest_debug > 1) trace("Server ReadFileEx returned...\n");
         ok(success, "ReadFileEx failed, err=%i\n", GetLastError());
         ok(completion_called == 0, "completion routine called before ReadFileEx return\n");
-        trace("ReadFileEx returned.\n");
+        if (winetest_debug > 1) trace("ReadFileEx returned.\n");
         if (success) {
             DWORD ret;
             do {
@@ -1123,16 +1270,16 @@ static DWORD CALLBACK serverThreadMain5(LPVOID arg)
         ok(completion_num_bytes != 0, "read 0 bytes\n");
         ok(completion_lpoverlapped == &oOverlap, "got wrong overlapped pointer %p\n", completion_lpoverlapped);
         readden = completion_num_bytes;
-        trace("Server done reading.\n");
+        if (winetest_debug > 1) trace("Server done reading.\n");
 
-        trace("Server writing...\n");
+        if (winetest_debug > 1) trace("Server writing...\n");
         completion_called = 0;
         ResetEvent(hEvent);
         success = WriteFileEx(hnp, buf, readden, &oOverlap, completion_routine);
-        trace("Server WriteFileEx returned...\n");
+        if (winetest_debug > 1) trace("Server WriteFileEx returned...\n");
         ok(success, "WriteFileEx failed, err=%i\n", GetLastError());
         ok(completion_called == 0, "completion routine called before ReadFileEx return\n");
-        trace("overlapped WriteFile returned.\n");
+        if (winetest_debug > 1) trace("overlapped WriteFile returned.\n");
         if (success) {
             DWORD ret;
             do {
@@ -1140,7 +1287,7 @@ static DWORD CALLBACK serverThreadMain5(LPVOID arg)
             } while (ret == WAIT_IO_COMPLETION);
             ok(ret == 0, "wait WriteFileEx returned %x\n", ret);
         }
-        trace("Server done writing.\n");
+        if (winetest_debug > 1) trace("Server done writing.\n");
         ok(completion_called == 1, "completion routine called %i times\n", completion_called);
         ok(completion_errorcode == ERROR_SUCCESS, "completion routine got error %d\n", completion_errorcode);
         ok(completion_num_bytes == readden, "read %i bytes wrote %i\n", readden, completion_num_bytes);
@@ -1157,7 +1304,7 @@ static void exercizeServer(const char *pipename, HANDLE serverThread)
 {
     int i;
 
-    trace("exercizeServer starting\n");
+    if (winetest_debug > 1) trace("exercizeServer starting\n");
     for (i = 0; i < NB_SERVER_LOOPS; i++) {
         HANDLE hFile=INVALID_HANDLE_VALUE;
         static const char obuf[] = "Bit Bucket";
@@ -1168,7 +1315,7 @@ static void exercizeServer(const char *pipename, HANDLE serverThread)
 
         for (loop = 0; loop < 3; loop++) {
 	    DWORD err;
-            trace("Client connecting...\n");
+            if (winetest_debug > 1) trace("Client connecting...\n");
             /* Connect to the server */
             hFile = CreateFileA(pipename, GENERIC_READ | GENERIC_WRITE, 0,
                 NULL, OPEN_EXISTING, 0, 0);
@@ -1179,28 +1326,28 @@ static void exercizeServer(const char *pipename, HANDLE serverThread)
 	        ok(err == ERROR_PIPE_BUSY || err == ERROR_FILE_NOT_FOUND, "connecting to pipe\n");
 	    else
 	        ok(err == ERROR_PIPE_BUSY, "connecting to pipe\n");
-            trace("connect failed, retrying\n");
+            if (winetest_debug > 1) trace("connect failed, retrying\n");
             Sleep(200);
         }
         ok(hFile != INVALID_HANDLE_VALUE, "client opening named pipe\n");
 
         /* Make sure it can echo */
         memset(ibuf, 0, sizeof(ibuf));
-        trace("Client writing...\n");
+        if (winetest_debug > 1) trace("Client writing...\n");
         ok(WriteFile(hFile, obuf, sizeof(obuf), &written, NULL), "WriteFile to client end of pipe\n");
         ok(written == sizeof(obuf), "write file len\n");
-        trace("Client reading...\n");
+        if (winetest_debug > 1) trace("Client reading...\n");
         ok(ReadFile(hFile, ibuf, sizeof(obuf), &readden, NULL), "ReadFile from client end of pipe\n");
         ok(readden == sizeof(obuf), "read file len\n");
         ok(memcmp(obuf, ibuf, written) == 0, "content check\n");
 
-        trace("Client closing...\n");
+        if (winetest_debug > 1) trace("Client closing...\n");
         ok(CloseHandle(hFile), "CloseHandle\n");
     }
 
     ok(WaitForSingleObject(serverThread,INFINITE) == WAIT_OBJECT_0, "WaitForSingleObject\n");
     CloseHandle(hnp);
-    trace("exercizeServer returning\n");
+    if (winetest_debug > 1) trace("exercizeServer returning\n");
 }
 
 static void test_NamedPipe_2(void)
@@ -1254,7 +1401,7 @@ static void test_NamedPipe_2(void)
 
     ok(SetEvent( alarm_event ), "SetEvent\n");
     CloseHandle( alarm_event );
-    trace("test_NamedPipe_2 returning\n");
+    if (winetest_debug > 1) trace("test_NamedPipe_2 returning\n");
 }
 
 static int test_DisconnectNamedPipe(void)
@@ -1301,13 +1448,27 @@ static int test_DisconnectNamedPipe(void)
         ok(DisconnectNamedPipe(hnp), "DisconnectNamedPipe while messages waiting\n");
         ok(WriteFile(hFile, obuf, sizeof(obuf), &written, NULL) == 0
             && GetLastError() == ERROR_PIPE_NOT_CONNECTED, "WriteFile to disconnected pipe\n");
+        ok(WriteFile(hnp, obuf, sizeof(obuf), &written, NULL) == 0
+            && GetLastError() == ERROR_PIPE_NOT_CONNECTED, "WriteFile to disconnected pipe\n");
+        ok(ReadFile(hFile, ibuf, sizeof(ibuf), &readden, NULL) == 0
+            && GetLastError() == ERROR_PIPE_NOT_CONNECTED,
+            "ReadFile from disconnected pipe with bytes waiting\n");
         ok(ReadFile(hnp, ibuf, sizeof(ibuf), &readden, NULL) == 0
             && GetLastError() == ERROR_PIPE_NOT_CONNECTED,
             "ReadFile from disconnected pipe with bytes waiting\n");
+
         ok(!DisconnectNamedPipe(hnp) && GetLastError() == ERROR_PIPE_NOT_CONNECTED,
            "DisconnectNamedPipe worked twice\n");
         ret = WaitForSingleObject(hFile, 0);
         ok(ret == WAIT_TIMEOUT, "WaitForSingleObject returned %X\n", ret);
+
+        ret = PeekNamedPipe(hFile, NULL, 0, NULL, &readden, NULL);
+        todo_wine
+        ok(!ret && GetLastError() == ERROR_PIPE_NOT_CONNECTED, "PeekNamedPipe returned %x (%u)\n",
+           ret, GetLastError());
+        ret = PeekNamedPipe(hnp, NULL, 0, NULL, &readden, NULL);
+        ok(!ret && GetLastError() == ERROR_BAD_PIPE, "PeekNamedPipe returned %x (%u)\n",
+           ret, GetLastError());
         ok(CloseHandle(hFile), "CloseHandle\n");
     }
 
@@ -1419,6 +1580,11 @@ static void test_CloseHandle(void)
     ok(numbytes == 0, "expected 0, got %u\n", numbytes);
 
     numbytes = 0xdeadbeef;
+    ret = PeekNamedPipe(hfile, NULL, 0, NULL, &numbytes, NULL);
+    ok(ret, "PeekNamedPipe failed with %u\n", GetLastError());
+    ok(numbytes == sizeof(testdata), "expected sizeof(testdata), got %u\n", numbytes);
+
+    numbytes = 0xdeadbeef;
     memset(buffer, 0, sizeof(buffer));
     ret = ReadFile(hfile, buffer, sizeof(buffer), &numbytes, NULL);
     ok(ret, "ReadFile failed with %u\n", GetLastError());
@@ -1435,10 +1601,16 @@ static void test_CloseHandle(void)
     ok(!ret, "ReadFile unexpectedly succeeded\n");
     ok(GetLastError() == ERROR_BROKEN_PIPE, "expected ERROR_BROKEN_PIPE, got %u\n", GetLastError());
 
+    numbytes = 0xdeadbeef;
+    ret = PeekNamedPipe(hfile, NULL, 0, NULL, &numbytes, NULL);
+    ok(!ret && GetLastError() == ERROR_BROKEN_PIPE, "PeekNamedPipe returned %x (%u)\n",
+       ret, GetLastError());
+    ok(numbytes == 0xdeadbeef, "numbytes = %u\n", numbytes);
+
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, testdata, sizeof(testdata), &numbytes, NULL);
     ok(!ret, "WriteFile unexpectedly succeeded\n");
-    todo_wine ok(GetLastError() == ERROR_NO_DATA, "expected ERROR_NO_DATA, got %u\n", GetLastError());
+    ok(GetLastError() == ERROR_NO_DATA, "expected ERROR_NO_DATA, got %u\n", GetLastError());
 
     CloseHandle(hfile);
 
@@ -1483,7 +1655,7 @@ static void test_CloseHandle(void)
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, testdata, sizeof(testdata), &numbytes, NULL);
     ok(!ret, "WriteFile unexpectedly succeeded\n");
-    todo_wine ok(GetLastError() == ERROR_NO_DATA, "expected ERROR_NO_DATA, got %u\n", GetLastError());
+    ok(GetLastError() == ERROR_NO_DATA, "expected ERROR_NO_DATA, got %u\n", GetLastError());
 
     CloseHandle(hfile);
 
@@ -1518,6 +1690,11 @@ static void test_CloseHandle(void)
     ok(numbytes == 0, "expected 0, got %u\n", numbytes);
 
     numbytes = 0xdeadbeef;
+    ret = PeekNamedPipe(hpipe, NULL, 0, NULL, &numbytes, NULL);
+    ok(ret, "PeekNamedPipe failed with %u\n", GetLastError());
+    ok(numbytes == sizeof(testdata), "expected sizeof(testdata), got %u\n", numbytes);
+
+    numbytes = 0xdeadbeef;
     memset(buffer, 0, sizeof(buffer));
     ret = ReadFile(hpipe, buffer, sizeof(buffer), &numbytes, NULL);
     ok(ret, "ReadFile failed with %u\n", GetLastError());
@@ -1534,10 +1711,16 @@ static void test_CloseHandle(void)
     ok(!ret, "ReadFile unexpectedly succeeded\n");
     ok(GetLastError() == ERROR_BROKEN_PIPE, "expected ERROR_BROKEN_PIPE, got %u\n", GetLastError());
 
+    numbytes = 0xdeadbeef;
+    ret = PeekNamedPipe(hpipe, NULL, 0, NULL, &numbytes, NULL);
+    ok(!ret && GetLastError() == ERROR_BROKEN_PIPE, "PeekNamedPipe returned %x (%u)\n",
+       ret, GetLastError());
+    ok(numbytes == 0xdeadbeef, "numbytes = %u\n", numbytes);
+
     SetLastError(0xdeadbeef);
     ret = WriteFile(hpipe, testdata, sizeof(testdata), &numbytes, NULL);
     ok(!ret, "WriteFile unexpectedly succeeded\n");
-    todo_wine ok(GetLastError() == ERROR_NO_DATA, "expected ERROR_NO_DATA, got %u\n", GetLastError());
+    ok(GetLastError() == ERROR_NO_DATA, "expected ERROR_NO_DATA, got %u\n", GetLastError());
 
     CloseHandle(hpipe);
 
@@ -1582,7 +1765,7 @@ static void test_CloseHandle(void)
     SetLastError(0xdeadbeef);
     ret = WriteFile(hpipe, testdata, sizeof(testdata), &numbytes, NULL);
     ok(!ret, "WriteFile unexpectedly succeeded\n");
-    todo_wine ok(GetLastError() == ERROR_NO_DATA, "expected ERROR_NO_DATA, got %u\n", GetLastError());
+    ok(GetLastError() == ERROR_NO_DATA, "expected ERROR_NO_DATA, got %u\n", GetLastError());
 
     CloseHandle(hpipe);
 }
@@ -2201,9 +2384,8 @@ static void test_NamedPipeHandleState(void)
      * on a local pipe.
      */
     SetLastError(0xdeadbeef);
-    ret = GetNamedPipeHandleStateA(server, &state, &instances,
-        &maxCollectionCount, &collectDataTimeout, userName,
-        sizeof(userName) / sizeof(userName[0]));
+    ret = GetNamedPipeHandleStateA(server, &state, &instances, &maxCollectionCount,
+        &collectDataTimeout, userName, ARRAY_SIZE(userName));
     todo_wine
     ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
        "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
@@ -2456,11 +2638,9 @@ static void test_readfileex_pending(void)
     SetLastError(0xdeadbeef);
     ret = ReadFile(server, read_buf, 0, &num_bytes, &overlapped);
     ok(!ret, "ReadFile should fail\n");
-todo_wine
     ok(GetLastError() == ERROR_IO_PENDING, "expected ERROR_IO_PENDING, got %d\n", GetLastError());
     ok(num_bytes == 0, "bytes %u\n", num_bytes);
     ok((NTSTATUS)overlapped.Internal == STATUS_PENDING, "expected STATUS_PENDING, got %#lx\n", overlapped.Internal);
-todo_wine
     ok(overlapped.InternalHigh == -1, "expected -1, got %lu\n", overlapped.InternalHigh);
 
     wait = WaitForSingleObject(event, 100);
@@ -2472,11 +2652,9 @@ todo_wine
     ok(num_bytes == 1, "bytes %u\n", num_bytes);
 
     wait = WaitForSingleObject(event, 100);
-todo_wine
     ok(wait == WAIT_OBJECT_0, "WaitForSingleObject returned %x\n", wait);
 
     ok(num_bytes == 1, "bytes %u\n", num_bytes);
-todo_wine
     ok((NTSTATUS)overlapped.Internal == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", overlapped.Internal);
     ok(overlapped.InternalHigh == 0, "expected 0, got %lu\n", overlapped.InternalHigh);
 
@@ -2491,17 +2669,40 @@ todo_wine
     CloseHandle(event);
 }
 
-#define test_peek_pipe(a,b,c) _test_peek_pipe(__LINE__,a,b,c)
-static void _test_peek_pipe(unsigned line, HANDLE pipe, DWORD expected_read, DWORD expected_avail)
+#define test_peek_pipe(a,b,c,d) _test_peek_pipe(__LINE__,a,b,c,d)
+static void _test_peek_pipe(unsigned line, HANDLE pipe, DWORD expected_read, DWORD expected_avail, DWORD expected_message_length)
 {
-    DWORD bytes_read = 0xdeadbeed, avail = 0xdeadbeef;
+    DWORD bytes_read = 0xdeadbeed, avail = 0xdeadbeef, left = 0xdeadbeed;
     char buf[4000];
+    FILE_PIPE_PEEK_BUFFER *peek_buf = (void*)buf;
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
     BOOL r;
 
-    r = PeekNamedPipe(pipe, buf, sizeof(buf), &bytes_read, &avail, NULL);
+    r = PeekNamedPipe(pipe, buf, sizeof(buf), &bytes_read, &avail, &left);
     ok_(__FILE__,line)(r, "PeekNamedPipe failed: %u\n", GetLastError());
     ok_(__FILE__,line)(bytes_read == expected_read, "bytes_read = %u, expected %u\n", bytes_read, expected_read);
     ok_(__FILE__,line)(avail == expected_avail, "avail = %u, expected %u\n", avail, expected_avail);
+    ok_(__FILE__,line)(left == expected_message_length - expected_read, "left = %d, expected %d\n",
+                       left, expected_message_length - expected_read);
+
+    status = NtFsControlFile(pipe, 0, NULL, NULL, &io, FSCTL_PIPE_PEEK, NULL, 0, buf, sizeof(buf));
+    ok_(__FILE__,line)(!status || status == STATUS_PENDING, "NtFsControlFile(FSCTL_PIPE_PEEK) failed: %x\n", status);
+    ok_(__FILE__,line)(io.Information == FIELD_OFFSET(FILE_PIPE_PEEK_BUFFER, Data[expected_read]),
+                       "io.Information = %lu\n", io.Information);
+    ok_(__FILE__,line)(peek_buf->ReadDataAvailable == expected_avail, "ReadDataAvailable = %u, expected %u\n",
+                       peek_buf->ReadDataAvailable, expected_avail);
+    ok_(__FILE__,line)(peek_buf->MessageLength == expected_message_length, "MessageLength = %u, expected %u\n",
+                       peek_buf->MessageLength, expected_message_length);
+
+    if (expected_read)
+    {
+        r = PeekNamedPipe(pipe, buf, 1, &bytes_read, &avail, &left);
+        ok_(__FILE__,line)(r, "PeekNamedPipe failed: %u\n", GetLastError());
+        ok_(__FILE__,line)(bytes_read == 1, "bytes_read = %u, expected %u\n", bytes_read, expected_read);
+        ok_(__FILE__,line)(avail == expected_avail, "avail = %u, expected %u\n", avail, expected_avail);
+        ok_(__FILE__,line)(left == expected_message_length-1, "left = %d, expected %d\n", left, expected_message_length-1);
+    }
 }
 
 #define overlapped_read_sync(a,b,c,d,e) _overlapped_read_sync(__LINE__,a,b,c,d,e)
@@ -2519,7 +2720,7 @@ static void _overlapped_read_sync(unsigned line, HANDLE reader, void *buf, DWORD
     else
         ok_(__FILE__,line)(res, "ReadFile failed: %u\n", GetLastError());
     if(partial_read)
-        todo_wine ok_(__FILE__,line)(!read_bytes, "read_bytes %u expected 0\n", read_bytes);
+        ok_(__FILE__,line)(!read_bytes, "read_bytes %u expected 0\n", read_bytes);
     else
         ok_(__FILE__,line)(read_bytes == expected_result, "read_bytes %u expected %u\n", read_bytes, expected_result);
 
@@ -2580,7 +2781,7 @@ static void _overlapped_write_async(unsigned line, HANDLE writer, void *buf, DWO
     overlapped->hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
     res = WriteFile(writer, buf, size, &written_bytes, overlapped);
     ok_(__FILE__,line)(!res && GetLastError() == ERROR_IO_PENDING, "WriteFile returned %x(%u)\n", res, GetLastError());
-    todo_wine ok_(__FILE__,line)(!written_bytes, "written_bytes = %u\n", written_bytes);
+    ok_(__FILE__,line)(!written_bytes, "written_bytes = %u\n", written_bytes);
 
     _test_not_signaled(line, overlapped->hEvent);
 }
@@ -2685,7 +2886,7 @@ static void test_blocking_rw(HANDLE writer, HANDLE reader, DWORD buf_size, BOOL 
     /* test pending read with overlapped event */
     overlapped_read_async(reader, read_buf, 1000, &read_overlapped);
     test_flush_sync(writer);
-    test_peek_pipe(reader, 0, 0);
+    test_peek_pipe(reader, 0, 0, 0);
 
     /* write more data than needed for read */
     overlapped_write_sync(writer, buf, 4000);
@@ -2770,13 +2971,13 @@ static void test_blocking_rw(HANDLE writer, HANDLE reader, DWORD buf_size, BOOL 
     test_overlapped_result(reader, &read_overlapped2, 1, FALSE);
 
     overlapped_write_sync(writer, buf, 20);
-    test_peek_pipe(reader, 20, 20);
+    test_peek_pipe(reader, 20, 20, msg_mode ? 20 : 0);
     overlapped_write_sync(writer, buf, 15);
-    test_peek_pipe(reader, msg_mode ? 20 : 35, 35);
+    test_peek_pipe(reader, msg_mode ? 20 : 35, 35, msg_mode ? 20 : 0);
     overlapped_read_sync(reader, read_buf, 10, 10, msg_read);
-    test_peek_pipe(reader, msg_mode ? 10 : 25, 25);
+    test_peek_pipe(reader, msg_mode ? 10 : 25, 25, msg_mode ? 10 : 0);
     overlapped_read_sync(reader, read_buf, 10, 10, FALSE);
-    test_peek_pipe(reader, 15, 15);
+    test_peek_pipe(reader, 15, 15, msg_mode ? 15 : 0);
     overlapped_read_sync(reader, read_buf, 15, 15, FALSE);
 
     if(!pCancelIoEx) {
@@ -2891,7 +3092,7 @@ static void create_overlapped_pipe(DWORD mode, HANDLE *client, HANDLE *server)
 
     *server = CreateNamedPipeA(PIPENAME, FILE_FLAG_OVERLAPPED | PIPE_ACCESS_DUPLEX,
                                PIPE_WAIT | mode, 1, 5000, 6000, NMPWAIT_USE_DEFAULT_WAIT, NULL);
-    ok(&server != INVALID_HANDLE_VALUE, "CreateNamedPipe failed: %u\n", GetLastError());
+    ok(*server != INVALID_HANDLE_VALUE, "CreateNamedPipe failed: %u\n", GetLastError());
     test_signaled(*server);
 
     memset(&overlapped, 0, sizeof(overlapped));
@@ -2902,7 +3103,7 @@ static void create_overlapped_pipe(DWORD mode, HANDLE *client, HANDLE *server)
     test_not_signaled(overlapped.hEvent);
 
     *client = CreateFileA(PIPENAME, GENERIC_READ | GENERIC_WRITE, 0, &sec_attr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
-    ok(*server != INVALID_HANDLE_VALUE, "CreateFile failed: %u\n", GetLastError());
+    ok(*client != INVALID_HANDLE_VALUE, "CreateFile failed: %u\n", GetLastError());
 
     res = SetNamedPipeHandleState(*client, &read_mode, NULL, NULL);
     ok(res, "SetNamedPipeHandleState failed: %u\n", GetLastError());
@@ -3065,6 +3266,11 @@ static void test_TransactNamedPipe(void)
     HANDLE client, server;
     BYTE buf[10];
 
+    create_overlapped_pipe(PIPE_TYPE_BYTE, &client, &server);
+    overlapped_transact_failure(client, buf, 2, buf, 1, ERROR_BAD_PIPE);
+    CloseHandle(client);
+    CloseHandle(server);
+
     create_overlapped_pipe(PIPE_TYPE_MESSAGE | PIPE_READMODE_BYTE, &client, &server);
     overlapped_transact_failure(client, buf, 2, buf, 1, ERROR_BAD_PIPE);
     CloseHandle(client);
@@ -3083,6 +3289,311 @@ static void test_TransactNamedPipe(void)
     CloseHandle(server);
 }
 
+static HANDLE create_overlapped_server( OVERLAPPED *overlapped )
+{
+    HANDLE pipe;
+    BOOL ret;
+
+    pipe = CreateNamedPipeA(PIPENAME, FILE_FLAG_OVERLAPPED | PIPE_ACCESS_DUPLEX, PIPE_READMODE_BYTE | PIPE_WAIT,
+                            1, 5000, 6000, NMPWAIT_USE_DEFAULT_WAIT, NULL);
+    ok(pipe != INVALID_HANDLE_VALUE, "got %u\n", GetLastError());
+    ret = ConnectNamedPipe(pipe, overlapped);
+    ok(!ret && GetLastError() == ERROR_IO_PENDING, "got %u\n", GetLastError());
+    return pipe;
+}
+
+static void child_process_check_pid(DWORD server_pid)
+{
+    DWORD current = GetProcessId(GetCurrentProcess());
+    HANDLE pipe;
+    ULONG pid;
+    BOOL ret;
+
+    pipe = CreateFileA(PIPENAME, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+    ok(pipe != INVALID_HANDLE_VALUE, "got %u\n", GetLastError());
+
+    pid = 0;
+    ret = pGetNamedPipeClientProcessId(pipe, &pid);
+    ok(ret, "got %u\n", GetLastError());
+    ok(pid == current, "got %04x\n", pid);
+
+    pid = 0;
+    ret = pGetNamedPipeServerProcessId(pipe, &pid);
+    ok(ret, "got %u\n", GetLastError());
+    ok(pid == server_pid, "got %04x expected %04x\n", pid, server_pid);
+    CloseHandle(pipe);
+}
+
+static HANDLE create_check_id_process(const char *verb, DWORD id)
+{
+    STARTUPINFOA si = {sizeof(si)};
+    PROCESS_INFORMATION info;
+    char **argv, buf[MAX_PATH];
+    BOOL ret;
+
+    winetest_get_mainargs(&argv);
+    sprintf(buf, "\"%s\" pipe %s %x", argv[0], verb, id);
+    ret = CreateProcessA(NULL, buf, NULL, NULL, TRUE, 0, NULL, NULL, &si, &info);
+    ok(ret, "got %u\n", GetLastError());
+    CloseHandle(info.hThread);
+    return info.hProcess;
+}
+
+static void test_namedpipe_process_id(void)
+{
+    HANDLE client, server, process;
+    DWORD current = GetProcessId(GetCurrentProcess());
+    OVERLAPPED overlapped;
+    ULONG pid;
+    BOOL ret;
+
+    if (!pGetNamedPipeClientProcessId)
+    {
+        win_skip("GetNamedPipeClientProcessId not available\n");
+        return;
+    }
+
+    create_overlapped_pipe(PIPE_TYPE_BYTE, &client, &server);
+
+    SetLastError(0xdeadbeef);
+    ret = pGetNamedPipeClientProcessId(server, NULL);
+    ok(!ret, "success\n");
+    todo_wine ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "got %u\n", GetLastError());
+
+    pid = 0;
+    ret = pGetNamedPipeClientProcessId(server, &pid);
+    ok(ret, "got %u\n", GetLastError());
+    ok(pid == current, "got %04x expected %04x\n", pid, current);
+
+    pid = 0;
+    ret = pGetNamedPipeClientProcessId(client, &pid);
+    ok(ret, "got %u\n", GetLastError());
+    ok(pid == current, "got %04x expected %04x\n", pid, current);
+
+    SetLastError(0xdeadbeef);
+    ret = pGetNamedPipeServerProcessId(server, NULL);
+    ok(!ret, "success\n");
+    todo_wine ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "got %u\n", GetLastError());
+
+    pid = 0;
+    ret = pGetNamedPipeServerProcessId(client, &pid);
+    ok(ret, "got %u\n", GetLastError());
+    ok(pid == current, "got %04x expected %04x\n", pid, current);
+
+    pid = 0;
+    ret = pGetNamedPipeServerProcessId(server, &pid);
+    ok(ret, "got %u\n", GetLastError());
+    ok(pid == current, "got %04x expected %04x\n", pid, current);
+
+    /* closed client handle */
+    CloseHandle(client);
+    pid = 0;
+    ret = pGetNamedPipeClientProcessId(server, &pid);
+    ok(ret, "got %u\n", GetLastError());
+    ok(pid == current, "got %04x expected %04x\n", pid, current);
+
+    pid = 0;
+    ret = pGetNamedPipeServerProcessId(server, &pid);
+    ok(ret, "got %u\n", GetLastError());
+    ok(pid == current, "got %04x expected %04x\n", pid, current);
+    CloseHandle(server);
+
+    /* disconnected server */
+    create_overlapped_pipe(PIPE_TYPE_BYTE, &client, &server);
+    DisconnectNamedPipe(server);
+
+    SetLastError(0xdeadbeef);
+    ret = pGetNamedPipeClientProcessId(server, &pid);
+    todo_wine ok(!ret, "success\n");
+    todo_wine ok(GetLastError() == ERROR_NOT_FOUND, "got %u\n", GetLastError());
+
+    pid = 0;
+    ret = pGetNamedPipeServerProcessId(server, &pid);
+    ok(ret, "got %u\n", GetLastError());
+    ok(pid == current, "got %04x expected %04x\n", pid, current);
+
+    SetLastError(0xdeadbeef);
+    ret = pGetNamedPipeClientProcessId(client, &pid);
+    todo_wine ok(!ret, "success\n");
+    todo_wine ok(GetLastError() == ERROR_PIPE_NOT_CONNECTED, "got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pGetNamedPipeServerProcessId(client, &pid);
+    todo_wine ok(!ret, "success\n");
+    todo_wine ok(GetLastError() == ERROR_PIPE_NOT_CONNECTED, "got %u\n", GetLastError());
+    CloseHandle(client);
+    CloseHandle(server);
+
+    /* closed server handle */
+    create_overlapped_pipe(PIPE_TYPE_BYTE, &client, &server);
+    CloseHandle(server);
+
+    pid = 0;
+    ret = pGetNamedPipeClientProcessId(client, &pid);
+    ok(ret, "got %u\n", GetLastError());
+    ok(pid == current, "got %04x expected %04x\n", pid, current);
+
+    pid = 0;
+    ret = pGetNamedPipeServerProcessId(client, &pid);
+    ok(ret, "got %u\n", GetLastError());
+    ok(pid == current, "got %04x expected %04x\n", pid, current);
+    CloseHandle(client);
+
+    /* different process */
+    memset(&overlapped, 0, sizeof(overlapped));
+    overlapped.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+    server = create_overlapped_server( &overlapped );
+    ok(server != INVALID_HANDLE_VALUE, "got %u\n", GetLastError());
+
+    process = create_check_id_process("checkpid", GetProcessId(GetCurrentProcess()));
+    winetest_wait_child_process(process);
+
+    CloseHandle(overlapped.hEvent);
+    CloseHandle(process);
+    CloseHandle(server);
+}
+
+static void child_process_check_session_id(DWORD server_id)
+{
+    DWORD current;
+    HANDLE pipe;
+    ULONG id;
+    BOOL ret;
+
+    ProcessIdToSessionId(GetProcessId(GetCurrentProcess()), &current);
+
+    pipe = CreateFileA(PIPENAME, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+    ok(pipe != INVALID_HANDLE_VALUE, "got %u\n", GetLastError());
+
+    id = 0;
+    ret = pGetNamedPipeClientSessionId(pipe, &id);
+    ok(ret, "got %u\n", GetLastError());
+    ok(id == current, "got %04x\n", id);
+
+    id = 0;
+    ret = pGetNamedPipeServerSessionId(pipe, &id);
+    ok(ret, "got %u\n", GetLastError());
+    ok(id == server_id, "got %04x expected %04x\n", id, server_id);
+    CloseHandle(pipe);
+}
+
+static void test_namedpipe_session_id(void)
+{
+    HANDLE client, server, process;
+    OVERLAPPED overlapped;
+    DWORD current;
+    ULONG id;
+    BOOL ret;
+
+    if (!pGetNamedPipeClientSessionId)
+    {
+        win_skip("GetNamedPipeClientSessionId not available\n");
+        return;
+    }
+
+    ProcessIdToSessionId(GetProcessId(GetCurrentProcess()), &current);
+
+    create_overlapped_pipe(PIPE_TYPE_BYTE, &client, &server);
+
+    SetLastError(0xdeadbeef);
+    ret = pGetNamedPipeClientSessionId(server, NULL);
+    ok(!ret, "success\n");
+    todo_wine ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "got %u\n", GetLastError());
+
+    id = 0;
+    ret = pGetNamedPipeClientSessionId(server, &id);
+    ok(ret, "got %u\n", GetLastError());
+    ok(id == current, "got %u expected %u\n", id, current);
+
+    id = 0;
+    ret = pGetNamedPipeClientSessionId(client, &id);
+    ok(ret, "got %u\n", GetLastError());
+    ok(id == current, "got %u expected %u\n", id, current);
+
+    SetLastError(0xdeadbeef);
+    ret = pGetNamedPipeServerSessionId(server, NULL);
+    ok(!ret, "success\n");
+    todo_wine ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "got %u\n", GetLastError());
+
+    id = 0;
+    ret = pGetNamedPipeServerSessionId(client, &id);
+    ok(ret, "got %u\n", GetLastError());
+    ok(id == current, "got %u expected %u\n", id, current);
+
+    id = 0;
+    ret = pGetNamedPipeServerSessionId(server, &id);
+    ok(ret, "got %u\n", GetLastError());
+    ok(id == current, "got %u expected %u\n", id, current);
+
+    /* closed client handle */
+    CloseHandle(client);
+
+    id = 0;
+    ret = pGetNamedPipeClientSessionId(server, &id);
+    ok(ret, "got %u\n", GetLastError());
+    ok(id == current, "got %04x expected %04x\n", id, current);
+
+    id = 0;
+    ret = pGetNamedPipeServerSessionId(server, &id);
+    ok(ret, "got %u\n", GetLastError());
+    ok(id == current, "got %04x expected %04x\n", id, current);
+    CloseHandle(server);
+
+    /* disconnected server */
+    create_overlapped_pipe(PIPE_TYPE_BYTE, &client, &server);
+    DisconnectNamedPipe(server);
+
+    SetLastError(0xdeadbeef);
+    ret = pGetNamedPipeClientSessionId(server, &id);
+    todo_wine ok(!ret, "success\n");
+    todo_wine ok(GetLastError() == ERROR_NOT_FOUND, "got %u\n", GetLastError());
+
+    id = 0;
+    ret = pGetNamedPipeServerSessionId(server, &id);
+    ok(ret, "got %u\n", GetLastError());
+    ok(id == current, "got %04x expected %04x\n", id, current);
+
+    SetLastError(0xdeadbeef);
+    ret = pGetNamedPipeClientSessionId(client, &id);
+    todo_wine ok(!ret, "success\n");
+    todo_wine ok(GetLastError() == ERROR_PIPE_NOT_CONNECTED, "got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pGetNamedPipeServerSessionId(client, &id);
+    todo_wine ok(!ret, "success\n");
+    todo_wine ok(GetLastError() == ERROR_PIPE_NOT_CONNECTED, "got %u\n", GetLastError());
+    CloseHandle(client);
+    CloseHandle(server);
+
+    /* closed server handle */
+    create_overlapped_pipe(PIPE_TYPE_BYTE, &client, &server);
+    CloseHandle(server);
+
+    id = 0;
+    ret = pGetNamedPipeClientSessionId(client, &id);
+    ok(ret, "got %u\n", GetLastError());
+    ok(id == current, "got %04x expected %04x\n", id, current);
+
+    id = 0;
+    ret = pGetNamedPipeServerSessionId(client, &id);
+    ok(ret, "got %u\n", GetLastError());
+    ok(id == current, "got %04x expected %04x\n", id, current);
+    CloseHandle(client);
+
+    /* different process */
+    memset(&overlapped, 0, sizeof(overlapped));
+    overlapped.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+    server = create_overlapped_server( &overlapped );
+    ok(server != INVALID_HANDLE_VALUE, "got %u\n", GetLastError());
+
+    process = create_check_id_process("checksessionid", current);
+    winetest_wait_child_process(process);
+
+    CloseHandle(overlapped.hEvent);
+    CloseHandle(process);
+    CloseHandle(server);
+}
+
 START_TEST(pipe)
 {
     char **argv;
@@ -3094,15 +3605,37 @@ START_TEST(pipe)
     hmod = GetModuleHandleA("kernel32.dll");
     pQueueUserAPC = (void *) GetProcAddress(hmod, "QueueUserAPC");
     pCancelIoEx = (void *) GetProcAddress(hmod, "CancelIoEx");
+    pGetNamedPipeClientProcessId = (void *) GetProcAddress(hmod, "GetNamedPipeClientProcessId");
+    pGetNamedPipeServerProcessId = (void *) GetProcAddress(hmod, "GetNamedPipeServerProcessId");
+    pGetNamedPipeClientSessionId = (void *) GetProcAddress(hmod, "GetNamedPipeClientSessionId");
+    pGetNamedPipeServerSessionId = (void *) GetProcAddress(hmod, "GetNamedPipeServerSessionId");
 
     argc = winetest_get_mainargs(&argv);
 
-    if (argc > 3 && !strcmp(argv[2], "writepipe"))
+    if (argc > 3)
     {
-        UINT_PTR handle;
-        sscanf(argv[3], "%lx", &handle);
-        child_process_write_pipe((HANDLE)handle);
-        return;
+        if (!strcmp(argv[2], "writepipe"))
+        {
+            UINT_PTR handle;
+            sscanf(argv[3], "%lx", &handle);
+            child_process_write_pipe((HANDLE)handle);
+            return;
+        }
+        if (!strcmp(argv[2], "checkpid"))
+        {
+            DWORD pid = GetProcessId(GetCurrentProcess());
+            sscanf(argv[3], "%x", &pid);
+            child_process_check_pid(pid);
+            return;
+        }
+        if (!strcmp(argv[2], "checksessionid"))
+        {
+            DWORD id;
+            ProcessIdToSessionId(GetProcessId(GetCurrentProcess()), &id);
+            sscanf(argv[3], "%x", &id);
+            child_process_check_session_id(id);
+            return;
+        }
     }
 
     if (test_DisconnectNamedPipe())
@@ -3112,6 +3645,7 @@ START_TEST(pipe)
     test_CreateNamedPipe(PIPE_TYPE_BYTE);
     test_CreateNamedPipe(PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE);
     test_CreatePipe();
+    test_ReadFile();
     test_CloseHandle();
     test_impersonation();
     test_overlapped();
@@ -3121,5 +3655,8 @@ START_TEST(pipe)
     test_readfileex_pending();
     test_overlapped_transport(TRUE, FALSE);
     test_overlapped_transport(TRUE, TRUE);
+    test_overlapped_transport(FALSE, FALSE);
     test_TransactNamedPipe();
+    test_namedpipe_process_id();
+    test_namedpipe_session_id();
 }

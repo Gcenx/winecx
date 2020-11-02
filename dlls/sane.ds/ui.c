@@ -639,7 +639,7 @@ static void UpdateRelevantEdit(HWND hwnd, const SANE_Option_Descriptor *opt,
     else return;
 
     buffer[len++] = ' ';
-    LoadStringW( SANE_instance, opt->unit, buffer + len, sizeof(buffer)/sizeof(WCHAR) - len );
+    LoadStringW( SANE_instance, opt->unit, buffer + len, ARRAY_SIZE( buffer ) - len );
 
     edit_w = GetDlgItem(hwnd,index+ID_BASE+ID_EDIT_BASE);
     if (edit_w) SetWindowTextW(edit_w,buffer);
@@ -711,6 +711,23 @@ static BOOL UpdateSaneBoolOption(int index, BOOL position)
     {
         if (result & SANE_INFO_RELOAD_OPTIONS || 
                 result & SANE_INFO_RELOAD_PARAMS || result & SANE_INFO_INEXACT) 
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static BOOL UpdateSaneIntOption(int index, SANE_Int value)
+{
+    SANE_Status rc = SANE_STATUS_GOOD;
+    SANE_Int result = 0;
+
+    rc = psane_control_option (activeDS.deviceHandle,index,
+            SANE_ACTION_SET_VALUE, &value, &result);
+
+    if(rc == SANE_STATUS_GOOD)
+    {
+        if (result & SANE_INFO_RELOAD_OPTIONS ||
+                result & SANE_INFO_RELOAD_PARAMS || result & SANE_INFO_INEXACT)
             return TRUE;
     }
     return FALSE;
@@ -790,6 +807,21 @@ static INT_PTR InitializeDialog(HWND hwnd)
             if (b)
                 SendMessageA(control,BM_SETCHECK,BST_CHECKED,0);
 
+        }
+        else if (opt->type == SANE_TYPE_INT &&
+                 opt->constraint_type == SANE_CONSTRAINT_WORD_LIST)
+        {
+            int j, count = opt->constraint.word_list[0];
+            CHAR buffer[16];
+            SANE_Int val;
+            for (j=1; j<=count; j++)
+            {
+                sprintf(buffer, "%d", opt->constraint.word_list[j]);
+                SendMessageA(control, CB_ADDSTRING, 0, (LPARAM)buffer);
+            }
+            psane_control_option(activeDS.deviceHandle, i, SANE_ACTION_GET_VALUE, &val, NULL);
+            sprintf(buffer, "%d", val);
+            SendMessageA(control,CB_SELECTSTRING,0,(LPARAM)buffer);
         }
         else if (opt->constraint_type == SANE_CONSTRAINT_RANGE)
         {
@@ -977,6 +1009,11 @@ static void ComboChanged(HWND hwnd, INT id, HWND control)
         if (UpdateSaneStringOption(index, value))
                 InitializeDialog(hwnd);
     }
+    else if (opt->type == SANE_TYPE_INT)
+    {
+        if (UpdateSaneIntOption(index, atoi(value)))
+            InitializeDialog(hwnd);
+    }
 }
 
 
@@ -997,13 +1034,11 @@ static INT_PTR CALLBACK DialogProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM
                         if (psn->lParam)
                         {
                             activeDS.currentState = 6;
-                            if (activeDS.windowMessage)
-                                PostMessageA(activeDS.hwndOwner, activeDS.windowMessage, MSG_XFERREADY, 0);
+                            SANE_Notify(MSG_XFERREADY);
                         }
                         break;
                     case PSN_QUERYCANCEL:
-                        if (activeDS.windowMessage)
-                            PostMessageA(activeDS.hwndOwner, activeDS.windowMessage, MSG_CLOSEDSREQ, 0);
+                        SANE_Notify(MSG_CLOSEDSREQ);
                         break;
                     case PSN_SETACTIVE:
                         InitializeDialog(hwndDlg);

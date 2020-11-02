@@ -164,6 +164,15 @@ char * __cdecl NTDLL_strncpy( char *dst, const char *src, size_t len )
 
 
 /*********************************************************************
+ *                  strnlen   (NTDLL.@)
+ */
+size_t __cdecl NTDLL_strnlen( const char *str, size_t len )
+{
+    return strnlen( str, len );
+}
+
+
+/*********************************************************************
  *                  strpbrk   (NTDLL.@)
  */
 char * __cdecl NTDLL_strpbrk( const char *str, const char *accept )
@@ -1178,19 +1187,19 @@ static int NTDLL_vsscanf( const char *str, const char *format, __ms_va_list ap)
                 else goto widecharacter;
             character:
                 { /* read single character into char */
-                    char *str = suppress ? NULL : va_arg( ap, char * );
-                    char *pstr = str;
+                    char *sptr = suppress ? NULL : va_arg( ap, char * );
+                    char *sptr_beg = sptr;
                     unsigned size = UINT_MAX;
                     if (width == -1) width = 1;
                     while (width && nch != '\0')
                     {
                         if (!suppress)
                         {
-                            *str++ = nch;
+                            *sptr++ = nch;
                             if(size) size--;
                             else
                             {
-                                *pstr = 0;
+                                *sptr_beg = 0;
                                 return rd;
                             }
                         }
@@ -1202,19 +1211,19 @@ static int NTDLL_vsscanf( const char *str, const char *format, __ms_va_list ap)
                 break;
             widecharacter:
                 { /* read single character into a WCHAR */
-                    WCHAR *str = suppress ? NULL : va_arg( ap, WCHAR * );
-                    WCHAR *pstr = str;
+                    WCHAR *sptr = suppress ? NULL : va_arg( ap, WCHAR * );
+                    WCHAR *sptr_beg = sptr;
                     unsigned size = UINT_MAX;
                     if (width == -1) width = 1;
                     while (width && nch != '\0')
                     {
                         if (!suppress)
                         {
-                            *str++ = nch;
+                            *sptr++ = nch;
                             if (size) size--;
                             else
                             {
-                                *pstr = 0;
+                                *sptr_beg = 0;
                                 return rd;
                             }
                         }
@@ -1248,10 +1257,10 @@ static int NTDLL_vsscanf( const char *str, const char *format, __ms_va_list ap)
                 break;
             case '[':
                 {
-                    char *str = suppress ? NULL : va_arg( ap, char * );
-                    char *sptr = str;
+                    char *sptr = suppress ? NULL : va_arg( ap, char * );
+                    char *sptr_beg = sptr;
                     RTL_BITMAP bitMask;
-                    ULONG Mask[8];
+                    ULONG Mask[8] = { 0 };
                     BOOLEAN invert = FALSE; /* Set if we are NOT to find the chars */
                     unsigned size = UINT_MAX;
 
@@ -1312,7 +1321,7 @@ static int NTDLL_vsscanf( const char *str, const char *format, __ms_va_list ap)
                         if(size > 1) size--;
                         else
                         {
-                            *str = 0;
+                            if (!suppress) *sptr_beg = 0;
                             return rd;
                         }
                     }
@@ -1363,7 +1372,7 @@ static int NTDLL_vsscanf( const char *str, const char *format, __ms_va_list ap)
 /*********************************************************************
  *                  sscanf   (NTDLL.@)
  */
-int __cdecl NTDLL_sscanf( const char *str, const char *format, ... )
+int WINAPIV NTDLL_sscanf( const char *str, const char *format, ... )
 {
     int ret;
     __ms_va_list valist;

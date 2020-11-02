@@ -3,7 +3,8 @@
 @ stub DsAddressToSiteNames
 @ stub DsAddressToSiteNamesEx
 @ stub DsDeregisterDnsHostRecords
-@ stub DsEnumerateDomainTrusts
+@ stdcall DsEnumerateDomainTrustsA(str long ptr ptr)
+@ stdcall DsEnumerateDomainTrustsW(wstr long ptr ptr)
 @ stub DsGetDcClose
 @ stdcall DsGetDcNameA(str str ptr str long ptr)
 @ stdcall DsGetDcNameW(wstr wstr ptr wstr long ptr)
@@ -171,7 +172,7 @@
 @ stdcall NetScheduleJobAdd(wstr ptr ptr)
 @ stdcall NetScheduleJobDel(wstr long long)
 @ stdcall NetScheduleJobEnum(wstr ptr long ptr ptr ptr)
-@ stub NetScheduleJobGetInfo
+@ stdcall NetScheduleJobGetInfo(wstr long ptr)
 @ stub NetServerComputerNameAdd
 @ stub NetServerComputerNameDel
 @ stdcall NetServerDiskEnum(wstr long ptr long ptr ptr ptr)

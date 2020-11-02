@@ -25,6 +25,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
+#include "wine/heap.h"
 #include "msvcrt.h"
 #include "cppexcept.h"
 #include "mtdll.h"
@@ -357,30 +358,36 @@ static inline void cs_set_head(critical_section *cs, cs_queue *q)
     cs->head = &cs->unk_active;
 }
 
+static inline void cs_lock(critical_section *cs, cs_queue *q)
+{
+    cs_queue *last;
+
+    if(cs->unk_thread_id == GetCurrentThreadId())
+        throw_exception(EXCEPTION_IMPROPER_LOCK, 0, "Already locked");
+
+    memset(q, 0, sizeof(*q));
+    last = InterlockedExchangePointer(&cs->tail, q);
+    if(last) {
+        last->next = q;
+        NtWaitForKeyedEvent(keyed_event, q, 0, NULL);
+    }
+
+    cs_set_head(cs, q);
+    if(InterlockedCompareExchangePointer(&cs->tail, &cs->unk_active, q) != q) {
+        spin_wait_for_next_cs(q);
+        cs->unk_active.next = q->next;
+    }
+}
+
 /* ?lock@critical_section@Concurrency@@QAEXXZ */
 /* ?lock@critical_section@Concurrency@@QEAAXXZ */
 DEFINE_THISCALL_WRAPPER(critical_section_lock, 4)
 void __thiscall critical_section_lock(critical_section *this)
 {
-    cs_queue q, *last;
+    cs_queue q;
 
     TRACE("(%p)\n", this);
-
-    if(this->unk_thread_id == GetCurrentThreadId())
-        throw_exception(EXCEPTION_IMPROPER_LOCK, 0, "Already locked");
-
-    memset(&q, 0, sizeof(q));
-    last = InterlockedExchangePointer(&this->tail, &q);
-    if(last) {
-        last->next = &q;
-        NtWaitForKeyedEvent(keyed_event, &q, 0, NULL);
-    }
-
-    cs_set_head(this, &q);
-    if(InterlockedCompareExchangePointer(&this->tail, &this->unk_active, &q) != &q) {
-        spin_wait_for_next_cs(&q);
-        this->unk_active.next = q.next;
-    }
+    cs_lock(this, &q);
 }
 
 /* ?try_lock@critical_section@Concurrency@@QAE_NXZ */
@@ -502,8 +509,13 @@ MSVCRT_bool __thiscall critical_section_try_lock_for(
 typedef struct
 {
     critical_section *cs;
-    void *unknown[4];
-    int unknown2[2];
+    union {
+        cs_queue q;
+        struct {
+            void *unknown[4];
+            int unknown2[2];
+        } unknown;
+    } lock;
 } critical_section_scoped_lock;
 
 /* ??0scoped_lock@critical_section@Concurrency@@QAE@AAV12@@Z */
@@ -514,7 +526,7 @@ critical_section_scoped_lock* __thiscall critical_section_scoped_lock_ctor(
 {
     TRACE("(%p %p)\n", this, cs);
     this->cs = cs;
-    critical_section_lock(this->cs);
+    cs_lock(this->cs, &this->lock.q);
     return this;
 }
 
@@ -525,6 +537,127 @@ void __thiscall critical_section_scoped_lock_dtor(critical_section_scoped_lock *
 {
     TRACE("(%p)\n", this);
     critical_section_unlock(this->cs);
+}
+
+typedef struct
+{
+    critical_section cs;
+} _NonReentrantPPLLock;
+
+/* ??0_NonReentrantPPLLock@details@Concurrency@@QAE@XZ */
+/* ??0_NonReentrantPPLLock@details@Concurrency@@QEAA@XZ */
+DEFINE_THISCALL_WRAPPER(_NonReentrantPPLLock_ctor, 4)
+_NonReentrantPPLLock* __thiscall _NonReentrantPPLLock_ctor(_NonReentrantPPLLock *this)
+{
+    TRACE("(%p)\n", this);
+
+    critical_section_ctor(&this->cs);
+    return this;
+}
+
+/* ?_Acquire@_NonReentrantPPLLock@details@Concurrency@@QAEXPAX@Z */
+/* ?_Acquire@_NonReentrantPPLLock@details@Concurrency@@QEAAXPEAX@Z */
+DEFINE_THISCALL_WRAPPER(_NonReentrantPPLLock__Acquire, 8)
+void __thiscall _NonReentrantPPLLock__Acquire(_NonReentrantPPLLock *this, cs_queue *q)
+{
+    TRACE("(%p %p)\n", this, q);
+    cs_lock(&this->cs, q);
+}
+
+/* ?_Release@_NonReentrantPPLLock@details@Concurrency@@QAEXXZ */
+/* ?_Release@_NonReentrantPPLLock@details@Concurrency@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(_NonReentrantPPLLock__Release, 4)
+void __thiscall _NonReentrantPPLLock__Release(_NonReentrantPPLLock *this)
+{
+    TRACE("(%p)\n", this);
+    critical_section_unlock(&this->cs);
+}
+
+typedef struct
+{
+    critical_section cs;
+    LONG count;
+    LONG owner;
+} _ReentrantPPLLock;
+
+/* ??0_ReentrantPPLLock@details@Concurrency@@QAE@XZ */
+/* ??0_ReentrantPPLLock@details@Concurrency@@QEAA@XZ */
+DEFINE_THISCALL_WRAPPER(_ReentrantPPLLock_ctor, 4)
+_ReentrantPPLLock* __thiscall _ReentrantPPLLock_ctor(_ReentrantPPLLock *this)
+{
+    TRACE("(%p)\n", this);
+
+    critical_section_ctor(&this->cs);
+    this->count = 0;
+    this->owner = -1;
+    return this;
+}
+
+/* ?_Acquire@_ReentrantPPLLock@details@Concurrency@@QAEXPAX@Z */
+/* ?_Acquire@_ReentrantPPLLock@details@Concurrency@@QEAAXPEAX@Z */
+DEFINE_THISCALL_WRAPPER(_ReentrantPPLLock__Acquire, 8)
+void __thiscall _ReentrantPPLLock__Acquire(_ReentrantPPLLock *this, cs_queue *q)
+{
+    TRACE("(%p %p)\n", this, q);
+
+    if(this->owner == GetCurrentThreadId()) {
+        this->count++;
+        return;
+    }
+
+    cs_lock(&this->cs, q);
+    this->count++;
+    this->owner = GetCurrentThreadId();
+}
+
+/* ?_Release@_ReentrantPPLLock@details@Concurrency@@QAEXXZ */
+/* ?_Release@_ReentrantPPLLock@details@Concurrency@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(_ReentrantPPLLock__Release, 4)
+void __thiscall _ReentrantPPLLock__Release(_ReentrantPPLLock *this)
+{
+    TRACE("(%p)\n", this);
+
+    this->count--;
+    if(this->count)
+        return;
+
+    this->owner = -1;
+    critical_section_unlock(&this->cs);
+}
+
+typedef struct
+{
+    _ReentrantPPLLock *lock;
+    union {
+        cs_queue q;
+        struct {
+            void *unknown[4];
+            int unknown2[2];
+        } unknown;
+    } wait;
+} _ReentrantPPLLock__Scoped_lock;
+
+/* ??0_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAE@AAV123@@Z */
+/* ??0_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QEAA@AEAV123@@Z */
+DEFINE_THISCALL_WRAPPER(_ReentrantPPLLock__Scoped_lock_ctor, 8)
+_ReentrantPPLLock__Scoped_lock* __thiscall _ReentrantPPLLock__Scoped_lock_ctor(
+        _ReentrantPPLLock__Scoped_lock *this, _ReentrantPPLLock *lock)
+{
+    TRACE("(%p %p)\n", this, lock);
+
+    this->lock = lock;
+    _ReentrantPPLLock__Acquire(this->lock, &this->wait.q);
+    return this;
+}
+
+/* ??1_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QAE@XZ */
+/* ??1_Scoped_lock@_ReentrantPPLLock@details@Concurrency@@QEAA@XZ */
+DEFINE_THISCALL_WRAPPER(_ReentrantPPLLock__Scoped_lock_dtor, 4)
+void __thiscall _ReentrantPPLLock__Scoped_lock_dtor(_ReentrantPPLLock__Scoped_lock *this)
+{
+    TRACE("(%p)\n", this);
+
+    _ReentrantPPLLock__Release(this->lock);
 }
 
 /* ?_GetConcurrency@details@Concurrency@@YAIXZ */

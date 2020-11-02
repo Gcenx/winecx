@@ -28,9 +28,8 @@
 WINE_DEFAULT_DEBUG_CHANNEL(secur32);
 
 /* Tries to allocate a new SecHandle, into which it stores package (in
- * phSec->dwUpper) and a copy of realHandle (allocated with SECUR32_ALLOC,
- * and stored in phSec->dwLower).  SecHandle is equivalent to both a
- * CredHandle and a CtxtHandle.
+ * phSec->dwUpper) and a copy of realHandle (stored in phSec->dwLower).
+ * SecHandle is equivalent to both a CredHandle and a CtxtHandle.
  */
 static SECURITY_STATUS SECUR32_makeSecHandle(PSecHandle phSec,
  SecurePackage *package, PSecHandle realHandle)
@@ -41,7 +40,7 @@ static SECURITY_STATUS SECUR32_makeSecHandle(PSecHandle phSec,
 
     if (phSec && package && realHandle)
     {
-        PSecHandle newSec = HeapAlloc(GetProcessHeap(), 0, sizeof(SecHandle));
+        PSecHandle newSec = heap_alloc(sizeof(SecHandle));
 
         if (newSec)
         {
@@ -169,7 +168,7 @@ SECURITY_STATUS WINAPI FreeCredentialsHandle(
             ret = package->provider->fnTableW.FreeCredentialsHandle(cred);
         else
             ret = SEC_E_INVALID_HANDLE;
-        HeapFree(GetProcessHeap(), 0, cred);
+        heap_free(cred);
     }
     else
         ret = SEC_E_INVALID_HANDLE;
@@ -468,7 +467,7 @@ SECURITY_STATUS WINAPI DeleteSecurityContext(PCtxtHandle phContext)
             ret = package->provider->fnTableW.DeleteSecurityContext(ctxt);
         else
             ret = SEC_E_INVALID_HANDLE;
-        HeapFree(GetProcessHeap(), 0, ctxt);
+        heap_free(ctxt);
     }
     else
         ret = SEC_E_INVALID_HANDLE;
@@ -713,7 +712,7 @@ SECURITY_STATUS WINAPI QuerySecurityPackageInfoA(SEC_CHAR *pszPackageName,
                  package->infoW.Comment, -1, NULL, 0, NULL, NULL);
                 bytesNeeded += commentLen;
             }
-            *ppPackageInfo = HeapAlloc(GetProcessHeap(), 0, bytesNeeded);
+            *ppPackageInfo = heap_alloc(bytesNeeded);
             if (*ppPackageInfo)
             {
                 PSTR nextString = (PSTR)((PBYTE)*ppPackageInfo +
@@ -775,7 +774,7 @@ SECURITY_STATUS WINAPI QuerySecurityPackageInfoW(SEC_WCHAR *pszPackageName,
             commentLen = lstrlenW(package->infoW.Comment) + 1;
             bytesNeeded += commentLen * sizeof(WCHAR);
         }
-        *ppPackageInfo = HeapAlloc(GetProcessHeap(), 0, bytesNeeded);
+        *ppPackageInfo = heap_alloc(bytesNeeded);
         if (*ppPackageInfo)
         {
             PWSTR nextString = (PWSTR)((PBYTE)*ppPackageInfo +

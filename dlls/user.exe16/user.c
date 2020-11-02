@@ -87,10 +87,7 @@ static BOOL CALLBACK gray_string_callback( HDC hdc, LPARAM param, INT len )
 /* callback for 16-bit gray string proc with string pointer */
 static BOOL CALLBACK gray_string_callback_ptr( HDC hdc, LPARAM param, INT len )
 {
-    const struct gray_string_info *info;
-    char *str = (char *)param;
-
-    info = (struct gray_string_info *)(str - offsetof( struct gray_string_info, str ));
+    const struct gray_string_info *info = CONTAINING_RECORD( (void *)param, struct gray_string_info, str );
     return gray_string_callback( hdc, (LPARAM)info, len );
 }
 
@@ -507,6 +504,15 @@ static void free_clipboard_formats(void)
         GlobalFree16( fmt->data );
         HeapFree( GetProcessHeap(), 0, fmt );
     }
+}
+
+
+/***********************************************************************
+ *		OldExitWindows (USER.2)
+ */
+void WINAPI OldExitWindows16(void)
+{
+    ExitWindows16(0, 0);
 }
 
 
@@ -1388,7 +1394,7 @@ DWORD WINAPI GetTabbedTextExtent16( HDC16 hdc, LPCSTR lpstr, INT16 count,
  */
 DWORD WINAPI UserSeeUserDo16(WORD wReqType, WORD wParam1, WORD wParam2, WORD wParam3)
 {
-    STACK16FRAME* stack16 = MapSL((SEGPTR)NtCurrentTeb()->WOW32Reserved);
+    STACK16FRAME* stack16 = MapSL((SEGPTR)NtCurrentTeb()->SystemReserved1[0]);
     HANDLE16 oldDS = stack16->ds;
     DWORD ret = (DWORD)-1;
 
@@ -1428,7 +1434,7 @@ HMENU16 WINAPI LookupMenuHandle16( HMENU16 hmenu, INT16 id )
 }
 
 
-static LPCSTR parse_menu_resource( LPCSTR res, HMENU hMenu )
+static LPCSTR parse_menu_resource( LPCSTR res, HMENU hMenu, BOOL oldFormat )
 {
     WORD flags, id = 0;
     LPCSTR str;
@@ -1436,11 +1442,21 @@ static LPCSTR parse_menu_resource( LPCSTR res, HMENU hMenu )
 
     do
     {
-        flags = GET_WORD(res);
+        /* Windows 3.00 and later use a WORD for the flags, whereas 1.x and 2.x use a BYTE. */
+        if (oldFormat)
+        {
+            flags = GET_BYTE(res);
+            res += sizeof(BYTE);
+        }
+        else
+        {
+            flags = GET_WORD(res);
+            res += sizeof(WORD);
+        }
+
         end_flag = flags & MF_END;
         /* Remove MF_END because it has the same value as MF_HILITE */
         flags &= ~MF_END;
-        res += sizeof(WORD);
         if (!(flags & MF_POPUP))
         {
             id = GET_WORD(res);
@@ -1452,7 +1468,7 @@ static LPCSTR parse_menu_resource( LPCSTR res, HMENU hMenu )
         {
             HMENU hSubMenu = CreatePopupMenu();
             if (!hSubMenu) return NULL;
-            if (!(res = parse_menu_resource( res, hSubMenu ))) return NULL;
+            if (!(res = parse_menu_resource( res, hSubMenu, oldFormat ))) return NULL;
             AppendMenuA( hMenu, flags, (UINT_PTR)hSubMenu, str );
         }
         else  /* Not a popup */
@@ -1468,22 +1484,32 @@ static LPCSTR parse_menu_resource( LPCSTR res, HMENU hMenu )
  */
 HMENU16 WINAPI LoadMenuIndirect16( LPCVOID template )
 {
+    BOOL oldFormat;
     HMENU hMenu;
     WORD version, offset;
     LPCSTR p = template;
 
     TRACE("(%p)\n", template );
-    version = GET_WORD(p);
-    p += sizeof(WORD);
-    if (version)
+
+    /* Windows 1.x and 2.x menus have a slightly different menu format from 3.x menus */
+    oldFormat = (GetExeVersion16() < 0x0300);
+
+    /* Windows 3.00 and later menu items are preceded by a MENUITEMTEMPLATEHEADER structure */
+    if (!oldFormat)
     {
-        WARN("version must be 0 for Win16\n" );
-        return 0;
+        version = GET_WORD(p);
+        p += sizeof(WORD);
+        if (version)
+        {
+            WARN("version must be 0 for Win16 >= 3.00 applications\n" );
+            return 0;
+        }
+        offset = GET_WORD(p);
+        p += sizeof(WORD) + offset;
     }
-    offset = GET_WORD(p);
-    p += sizeof(WORD) + offset;
+
     if (!(hMenu = CreateMenu())) return 0;
-    if (!parse_menu_resource( p, hMenu ))
+    if (!parse_menu_resource( p, hMenu, oldFormat ))
     {
         DestroyMenu( hMenu );
         return 0;
@@ -1761,7 +1787,7 @@ UINT16 WINAPI RealizePalette16( HDC16 hdc )
  */
 WORD WINAPI GetFreeSystemResources16( WORD resType )
 {
-    STACK16FRAME* stack16 = MapSL((SEGPTR)NtCurrentTeb()->WOW32Reserved);
+    STACK16FRAME* stack16 = MapSL((SEGPTR)NtCurrentTeb()->SystemReserved1[0]);
     HANDLE16 oldDS = stack16->ds;
     int userPercent, gdiPercent;
 
@@ -2376,6 +2402,10 @@ BOOL16 WINAPI InsertMenu16( HMENU16 hMenu, UINT16 pos, UINT16 flags,
     if ((pos == (UINT16)-1) && (flags & MF_BYPOSITION)) pos32 = (UINT)-1;
     if (IS_MENU_STRING_ITEM(flags) && data)
         return InsertMenuA( HMENU_32(hMenu), pos32, flags, id, MapSL(data) );
+
+    /* If "data" is an HBITMAP, the high WORD will contain the application's DGROUP selector if the
+     * application cast (LPSTR)hBitmap rather than (LPSTR)(LONG)hBitmap. */
+    if (flags & MF_BITMAP) data = (SEGPTR)HBITMAP_32(LOWORD(data));
     return InsertMenuA( HMENU_32(hMenu), pos32, flags, id, (LPSTR)data );
 }
 
@@ -3179,12 +3209,14 @@ DWORD WINAPI FormatMessage16(
     talloced= 100;
 
 #define ADD_TO_T(c) \
-        *t++=c;\
-        if (t-target == talloced) {\
+        do { \
+            *t++=c;\
+            if (t-target == talloced) {\
                 target  = HeapReAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,target,talloced*2);\
                 t       = target+talloced;\
                 talloced*=2;\
-        }
+            } \
+        } while(0)
 
     if (from) {
         f=from;
@@ -3245,8 +3277,11 @@ DWORD WINAPI FormatMessage16(
 
                         /* CMF - This makes a BIG assumption about va_list */
                         while ((ret = vsnprintf(b, sz, fmtstr, (va_list) argliststart)) < 0 || ret >= sz) {
+                            LPSTR new_b;
                             sz = (ret == -1 ? sz + 100 : ret + 1);
-                            b = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, b, sz);
+                            new_b = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, b, sz);
+                            if (!new_b) break;
+                            b = new_b;
                         }
                         for (x=b; *x; x++) ADD_TO_T(*x);
                         HeapFree(GetProcessHeap(), 0, b);
@@ -3285,9 +3320,6 @@ DWORD WINAPI FormatMessage16(
         *t='\0';
     }
     talloced = strlen(target)+1;
-    if (nSize && talloced<nSize) {
-        target = HeapReAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,target,nSize);
-    }
     TRACE("-- %s\n",debugstr_a(target));
     if (dwFlags & FORMAT_MESSAGE_ALLOCATE_BUFFER) {
         /* nSize is the MINIMUM size */

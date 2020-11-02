@@ -40,7 +40,6 @@
 #include "winsock2.h"
 #include "ws2ipdef.h"
 #include "winhttp.h"
-#include "wincrypt.h"
 #include "winreg.h"
 #define COBJMACROS
 #include "ole2.h"
@@ -99,12 +98,15 @@ static void session_destroy( object_header_t *hdr )
     TRACE("%p\n", session);
 
     if (session->unload_event) SetEvent( session->unload_event );
+    if (session->cred_handle_initialized) FreeCredentialsHandle( &session->cred_handle );
 
     LIST_FOR_EACH_SAFE( item, next, &session->cookie_cache )
     {
         domain = LIST_ENTRY( item, domain_t, entry );
         delete_domain( domain );
     }
+    session->cs.DebugInfo->Spare[0] = 0;
+    DeleteCriticalSection( &session->cs );
     heap_free( session->agent );
     heap_free( session->proxy_server );
     heap_free( session->proxy_bypass );
@@ -183,6 +185,19 @@ static BOOL session_set_option( object_header_t *hdr, DWORD option, LPVOID buffe
         hdr->redirect_policy = policy;
         return TRUE;
     }
+    case WINHTTP_OPTION_SECURE_PROTOCOLS:
+    {
+        if (buflen != sizeof(session->secure_protocols))
+        {
+            set_last_error( ERROR_INSUFFICIENT_BUFFER );
+            return FALSE;
+        }
+        EnterCriticalSection( &session->cs );
+        session->secure_protocols = *(DWORD *)buffer;
+        LeaveCriticalSection( &session->cs );
+        TRACE("0x%x\n", session->secure_protocols);
+        return TRUE;
+    }
     case WINHTTP_OPTION_DISABLE_FEATURE:
         set_last_error( ERROR_WINHTTP_INCORRECT_HANDLE_TYPE );
         return FALSE;
@@ -213,7 +228,7 @@ static BOOL session_set_option( object_header_t *hdr, DWORD option, LPVOID buffe
         return TRUE;
     default:
         FIXME("unimplemented option %u\n", option);
-        set_last_error( ERROR_INVALID_PARAMETER );
+        set_last_error( ERROR_WINHTTP_INVALID_OPTION );
         return FALSE;
     }
 }
@@ -248,6 +263,8 @@ HINTERNET WINAPI WinHttpOpen( LPCWSTR agent, DWORD access, LPCWSTR proxy, LPCWST
     session->send_timeout = DEFAULT_SEND_TIMEOUT;
     session->recv_timeout = DEFAULT_RECEIVE_TIMEOUT;
     list_init( &session->cookie_cache );
+    InitializeCriticalSection( &session->cs );
+    session->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": session.cs");
 
     if (agent && !(session->agent = strdupW( agent ))) goto end;
     if (access == WINHTTP_ACCESS_TYPE_DEFAULT_PROXY)
@@ -585,6 +602,8 @@ static void request_destroy( object_header_t *hdr )
     }
     release_object( &request->connect->hdr );
 
+    CertFreeCertificateContext( request->server_cert );
+
     destroy_authinfo( request->authinfo );
     destroy_authinfo( request->proxy_authinfo );
 
@@ -709,7 +728,7 @@ static BOOL request_query_option( object_header_t *hdr, DWORD option, LPVOID buf
     {
     case WINHTTP_OPTION_SECURITY_FLAGS:
     {
-        DWORD flags;
+        DWORD flags = 0;
         int bits;
 
         if (!buffer || *buflen < sizeof(flags))
@@ -721,14 +740,17 @@ static BOOL request_query_option( object_header_t *hdr, DWORD option, LPVOID buf
 
         flags = 0;
         if (hdr->flags & WINHTTP_FLAG_SECURE) flags |= SECURITY_FLAG_SECURE;
-        flags |= request->netconn.security_flags;
-        bits = netconn_get_cipher_strength( &request->netconn );
-        if (bits >= 128)
-            flags |= SECURITY_FLAG_STRENGTH_STRONG;
-        else if (bits >= 56)
-            flags |= SECURITY_FLAG_STRENGTH_MEDIUM;
-        else
-            flags |= SECURITY_FLAG_STRENGTH_WEAK;
+        flags |= request->security_flags;
+        if (request->netconn)
+        {
+            bits = netconn_get_cipher_strength( request->netconn );
+            if (bits >= 128)
+                flags |= SECURITY_FLAG_STRENGTH_STRONG;
+            else if (bits >= 56)
+                flags |= SECURITY_FLAG_STRENGTH_MEDIUM;
+            else
+                flags |= SECURITY_FLAG_STRENGTH_WEAK;
+        }
         *(DWORD *)buffer = flags;
         *buflen = sizeof(flags);
         return TRUE;
@@ -744,14 +766,14 @@ static BOOL request_query_option( object_header_t *hdr, DWORD option, LPVOID buf
             return FALSE;
         }
 
-        if (!(cert = netconn_get_certificate( &request->netconn ))) return FALSE;
+        if (!(cert = CertDuplicateCertificateContext( request->server_cert ))) return FALSE;
         *(CERT_CONTEXT **)buffer = (CERT_CONTEXT *)cert;
         *buflen = sizeof(cert);
         return TRUE;
     }
     case WINHTTP_OPTION_SECURITY_CERTIFICATE_STRUCT:
     {
-        const CERT_CONTEXT *cert;
+        const CERT_CONTEXT *cert = request->server_cert;
         const CRYPT_OID_INFO *oidInfo;
         WINHTTP_CERTIFICATE_INFO *ci = buffer;
 
@@ -763,24 +785,21 @@ static BOOL request_query_option( object_header_t *hdr, DWORD option, LPVOID buf
             set_last_error( ERROR_INSUFFICIENT_BUFFER );
             return FALSE;
         }
-        if (!(cert = netconn_get_certificate( &request->netconn ))) return FALSE;
+        if (!cert) return FALSE;
 
         ci->ftExpiry = cert->pCertInfo->NotAfter;
         ci->ftStart  = cert->pCertInfo->NotBefore;
         ci->lpszSubjectInfo = blob_to_str( cert->dwCertEncodingType, &cert->pCertInfo->Subject );
         ci->lpszIssuerInfo  = blob_to_str( cert->dwCertEncodingType, &cert->pCertInfo->Issuer );
         ci->lpszProtocolName      = NULL;
-        oidInfo = CryptFindOIDInfo( CRYPT_OID_INFO_OID_KEY,
-                                    cert->pCertInfo->SignatureAlgorithm.pszObjId,
-                                    0 );
+        oidInfo = CryptFindOIDInfo( CRYPT_OID_INFO_OID_KEY, cert->pCertInfo->SignatureAlgorithm.pszObjId, 0 );
         if (oidInfo)
             ci->lpszSignatureAlgName = (LPWSTR)oidInfo->pwszName;
         else
             ci->lpszSignatureAlgName  = NULL;
         ci->lpszEncryptionAlgName = NULL;
-        ci->dwKeySize = netconn_get_cipher_strength( &request->netconn );
+        ci->dwKeySize = request->netconn ? netconn_get_cipher_strength( request->netconn ) : 0;
 
-        CertFreeCertificateContext( cert );
         *buflen = sizeof(*ci);
         return TRUE;
     }
@@ -793,7 +812,7 @@ static BOOL request_query_option( object_header_t *hdr, DWORD option, LPVOID buf
             return FALSE;
         }
 
-        *(DWORD *)buffer = netconn_get_cipher_strength( &request->netconn );
+        *(DWORD *)buffer = request->netconn ? netconn_get_cipher_strength( request->netconn ) : 0;
         *buflen = sizeof(DWORD);
         return TRUE;
     }
@@ -810,12 +829,12 @@ static BOOL request_query_option( object_header_t *hdr, DWORD option, LPVOID buf
             set_last_error( ERROR_INSUFFICIENT_BUFFER );
             return FALSE;
         }
-        if (!netconn_connected( &request->netconn ))
+        if (!request->netconn)
         {
             set_last_error( ERROR_WINHTTP_INCORRECT_HANDLE_STATE );
             return FALSE;
         }
-        if (getsockname( request->netconn.socket, &local, &len )) return FALSE;
+        if (getsockname( request->netconn->socket, &local, &len )) return FALSE;
         if (!convert_sockaddr( &local, &info->LocalAddress )) return FALSE;
         if (!convert_sockaddr( remote, &info->RemoteAddress )) return FALSE;
         info->cbSize = sizeof(*info);
@@ -951,7 +970,7 @@ static BOOL request_set_option( object_header_t *hdr, DWORD option, LPVOID buffe
             set_last_error( ERROR_INVALID_PARAMETER );
             return FALSE;
         }
-        request->netconn.security_flags = flags;
+        request->security_flags = flags;
         return TRUE;
     }
     case WINHTTP_OPTION_RESOLVE_TIMEOUT:
@@ -1007,10 +1026,22 @@ static BOOL request_set_option( object_header_t *hdr, DWORD option, LPVOID buffe
         }
         FIXME("WINHTTP_OPTION_CLIENT_CERT_CONTEXT\n");
         return TRUE;
+    case WINHTTP_OPTION_ENABLE_FEATURE:
+        if(buflen == sizeof( DWORD ) && *(DWORD *)buffer == WINHTTP_ENABLE_SSL_REVOCATION)
+        {
+            request->check_revocation = TRUE;
+            SetLastError( NO_ERROR );
+            return TRUE;
+        }
+        else
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return FALSE;
+        }
     default:
         FIXME("unimplemented option %u\n", option);
-        set_last_error( ERROR_INVALID_PARAMETER );
-        return TRUE;
+        set_last_error( ERROR_WINHTTP_INVALID_OPTION );
+        return FALSE;
     }
 }
 
@@ -1106,7 +1137,6 @@ HINTERNET WINAPI WinHttpOpenRequest( HINTERNET hconnect, LPCWSTR verb, LPCWSTR o
     request->connect = connect;
     list_add_head( &connect->hdr.children, &request->hdr.entry );
 
-    if (!netconn_init( &request->netconn )) goto end;
     request->resolve_timeout = connect->session->resolve_timeout;
     request->connect_timeout = connect->session->connect_timeout;
     request->send_timeout = connect->session->send_timeout;
@@ -1583,29 +1613,21 @@ BOOL WINAPI WinHttpGetDefaultProxyConfiguration( WINHTTP_PROXY_INFO *info )
     }
     if (!got_from_reg && (envproxy = getenv( "http_proxy" )))
     {
-        char *colon, *http_proxy;
+        char *colon, *http_proxy = NULL;
 
-        if ((colon = strchr( envproxy, ':' )))
+        if (!(colon = strchr( envproxy, ':' ))) http_proxy = envproxy;
+        else
         {
             if (*(colon + 1) == '/' && *(colon + 2) == '/')
             {
-                static const char http[] = "http://";
-
                 /* It's a scheme, check that it's http */
-                if (!strncmp( envproxy, http, strlen( http ) ))
-                    http_proxy = envproxy + strlen( http );
-                else
-                {
-                    WARN("unsupported scheme in $http_proxy: %s\n", envproxy);
-                    http_proxy = NULL;
-                }
+                if (!strncmp( envproxy, "http://", 7 )) http_proxy = envproxy + 7;
+                else WARN("unsupported scheme in $http_proxy: %s\n", envproxy);
             }
-            else
-                http_proxy = envproxy;
+            else http_proxy = envproxy;
         }
-        else
-            http_proxy = envproxy;
-        if (http_proxy)
+
+        if (http_proxy && http_proxy[0])
         {
             WCHAR *http_proxyW;
             int len;
@@ -1618,8 +1640,7 @@ BOOL WINAPI WinHttpGetDefaultProxyConfiguration( WINHTTP_PROXY_INFO *info )
                 info->dwAccessType = WINHTTP_ACCESS_TYPE_NAMED_PROXY;
                 info->lpszProxy = http_proxyW;
                 info->lpszProxyBypass = NULL;
-                TRACE("http proxy (from environment) = %s\n",
-                    debugstr_w(info->lpszProxy));
+                TRACE("http proxy (from environment) = %s\n", debugstr_w(info->lpszProxy));
             }
         }
     }
@@ -2089,10 +2110,10 @@ BOOL WINAPI WinHttpSetTimeouts( HINTERNET handle, int resolve, int connect, int 
             if (receive < 0) receive = 0;
             request->recv_timeout = receive;
 
-            if (netconn_connected( &request->netconn ))
+            if (request->netconn)
             {
-                if (netconn_set_timeout( &request->netconn, TRUE, send )) ret = FALSE;
-                if (netconn_set_timeout( &request->netconn, FALSE, receive )) ret = FALSE;
+                if (netconn_set_timeout( request->netconn, TRUE, send )) ret = FALSE;
+                if (netconn_set_timeout( request->netconn, FALSE, receive )) ret = FALSE;
             }
             break;
 

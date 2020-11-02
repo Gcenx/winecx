@@ -208,19 +208,29 @@ static void testEmptyWrite(HANDLE hCon)
     okCURSOR(hCon, c);
 }
 
-static void testWriteSimple(HANDLE hCon)
+static void simple_write_console(HANDLE console, const char *text)
 {
-    COORD		c;
-    DWORD		len;
-    const char*		mytest = "abcdefg";
-    const int	mylen = strlen(mytest);
+    DWORD len;
+    COORD c = {0, 0};
+    BOOL ret;
 
     /* single line write */
     c.X = c.Y = 0;
-    ok(SetConsoleCursorPosition(hCon, c) != 0, "Cursor in upper-left\n");
+    ok(SetConsoleCursorPosition(console, c) != 0, "Cursor in upper-left\n");
 
-    ok(WriteConsoleA(hCon, mytest, mylen, &len, NULL) != 0 && len == mylen, "WriteConsole\n");
-    c.Y = 0;
+    ret = WriteConsoleA(console, text, strlen(text), &len, NULL);
+    ok(ret, "WriteConsoleA failed: %u\n", GetLastError());
+    ok(len == strlen(text), "unexpected len %u\n", len);
+}
+
+static void testWriteSimple(HANDLE hCon)
+{
+    const char*	mytest = "abcdefg";
+    int mylen = strlen(mytest);
+    COORD c = {0, 0};
+
+    simple_write_console(hCon, mytest);
+
     for (c.X = 0; c.X < mylen; c.X++)
     {
         okCHAR(hCon, c, mytest[c.X], TEST_ATTRIB);
@@ -982,7 +992,7 @@ static void test_GetSetConsoleInputExeName(void)
     GetModuleFileNameA(GetModuleHandleA(NULL), module, sizeof(module));
     p = strrchr(module, '\\') + 1;
 
-    ret = pGetConsoleInputExeNameA(sizeof(buffer)/sizeof(buffer[0]), buffer);
+    ret = pGetConsoleInputExeNameA(ARRAY_SIZE(buffer), buffer);
     ok(ret, "GetConsoleInputExeNameA failed\n");
     todo_wine ok(!lstrcmpA(buffer, p), "got %s expected %s\n", buffer, p);
 
@@ -1001,7 +1011,7 @@ static void test_GetSetConsoleInputExeName(void)
     ret = pSetConsoleInputExeNameA(input_exe);
     ok(ret, "SetConsoleInputExeNameA failed\n");
 
-    ret = pGetConsoleInputExeNameA(sizeof(buffer)/sizeof(buffer[0]), buffer);
+    ret = pGetConsoleInputExeNameA(ARRAY_SIZE(buffer), buffer);
     ok(ret, "GetConsoleInputExeNameA failed\n");
     ok(!lstrcmpA(buffer, input_exe), "got %s expected %s\n", buffer, input_exe);
 }
@@ -1074,7 +1084,7 @@ static void test_OpenCON(void)
     unsigned            i;
     HANDLE              h;
 
-    for (i = 0; i < sizeof(accesses) / sizeof(accesses[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(accesses); i++)
     {
         h = CreateFileW(conW, GENERIC_WRITE, 0, NULL, accesses[i], 0, NULL);
         ok(h != INVALID_HANDLE_VALUE || broken(accesses[i] == TRUNCATE_EXISTING /* Win8 */),
@@ -1179,7 +1189,7 @@ static void test_OpenConsoleW(void)
         return;
     }
 
-    for (index = 0; index < sizeof(invalid_table)/sizeof(invalid_table[0]); index++)
+    for (index = 0; index < ARRAY_SIZE(invalid_table); index++)
     {
         SetLastError(0xdeadbeef);
         ret = pOpenConsoleW(invalid_table[index].name, invalid_table[index].access,
@@ -1193,7 +1203,7 @@ static void test_OpenConsoleW(void)
            invalid_table[index].gle, invalid_table[index].gle2, index, gle);
     }
 
-    for (index = 0; index < sizeof(valid_table)/sizeof(valid_table[0]); index++)
+    for (index = 0; index < ARRAY_SIZE(valid_table); index++)
     {
         ret = pOpenConsoleW(valid_table[index].name, valid_table[index].access,
                             valid_table[index].inherit, valid_table[index].creation);
@@ -1248,7 +1258,7 @@ static void test_CreateFileW(void)
     HANDLE ret;
     SECURITY_ATTRIBUTES sa;
 
-    for (index = 0; index < sizeof(cf_table)/sizeof(cf_table[0]); index++)
+    for (index = 0; index < ARRAY_SIZE(cf_table); index++)
     {
         SetLastError(0xdeadbeef);
 
@@ -1380,7 +1390,7 @@ static void test_GetNumberOfConsoleInputEvents(HANDLE input_handle)
         {INVALID_HANDLE_VALUE, &count, ERROR_INVALID_HANDLE},
     };
 
-    for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(invalid_table); i++)
     {
         SetLastError(0xdeadbeef);
         if (invalid_table[i].nrofevents) count = 0xdeadbeef;
@@ -1481,7 +1491,7 @@ static void test_WriteConsoleInputA(HANDLE input_handle)
     event.EventType = MOUSE_EVENT;
     event.Event.MouseEvent = mouse_event;
 
-    for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(invalid_table); i++)
     {
         if (invalid_table[i].win_crash)
             continue;
@@ -1541,31 +1551,31 @@ static void test_WriteConsoleInputA(HANDLE input_handle)
     ret = FlushConsoleInputBuffer(input_handle);
     ok(ret == TRUE, "Expected FlushConsoleInputBuffer to return TRUE, got %d\n", ret);
 
-    for (i = 0; i < sizeof(event_list)/sizeof(event_list[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(event_list); i++)
     {
         event_list[i].EventType = MOUSE_EVENT;
         event_list[i].Event.MouseEvent = mouse_event;
     }
 
     /* Writing consecutive chunks of mouse events appears to work. */
-    ret = WriteConsoleInputA(input_handle, event_list, sizeof(event_list)/sizeof(event_list[0]), &count);
+    ret = WriteConsoleInputA(input_handle, event_list, ARRAY_SIZE(event_list), &count);
     ok(ret == TRUE, "Expected WriteConsoleInputA to return TRUE, got %d\n", ret);
-    ok(count == sizeof(event_list)/sizeof(event_list[0]),
+    ok(count == ARRAY_SIZE(event_list),
        "Expected count to be event list length, got %u\n", count);
 
     ret = GetNumberOfConsoleInputEvents(input_handle, &count);
     ok(ret == TRUE, "Expected GetNumberOfConsoleInputEvents to return TRUE, got %d\n", ret);
-    ok(count == sizeof(event_list)/sizeof(event_list[0]),
+    ok(count == ARRAY_SIZE(event_list),
        "Expected count to be event list length, got %u\n", count);
 
-    ret = WriteConsoleInputA(input_handle, event_list, sizeof(event_list)/sizeof(event_list[0]), &count);
+    ret = WriteConsoleInputA(input_handle, event_list, ARRAY_SIZE(event_list), &count);
     ok(ret == TRUE, "Expected WriteConsoleInputA to return TRUE, got %d\n", ret);
-    ok(count == sizeof(event_list)/sizeof(event_list[0]),
+    ok(count == ARRAY_SIZE(event_list),
        "Expected count to be event list length, got %u\n", count);
 
     ret = GetNumberOfConsoleInputEvents(input_handle, &count);
     ok(ret == TRUE, "Expected GetNumberOfConsoleInputEvents to return TRUE, got %d\n", ret);
-    ok(count == 2*sizeof(event_list)/sizeof(event_list[0]),
+    ok(count == 2*ARRAY_SIZE(event_list),
        "Expected count to be twice event list length, got %u\n", count);
 
     /* Again, writing a single mouse event with adjacent mouse events queued doesn't appear to affect the count. */
@@ -1576,7 +1586,7 @@ static void test_WriteConsoleInputA(HANDLE input_handle)
     ret = GetNumberOfConsoleInputEvents(input_handle, &count);
     ok(ret == TRUE, "Expected GetNumberOfConsoleInputEvents to return TRUE, got %d\n", ret);
     todo_wine
-    ok(count == 2*sizeof(event_list)/sizeof(event_list[0]),
+    ok(count == 2*ARRAY_SIZE(event_list),
        "Expected count to be twice event list length, got %u\n", count);
 
     ret = FlushConsoleInputBuffer(input_handle);
@@ -1718,7 +1728,7 @@ static void test_WriteConsoleInputW(HANDLE input_handle)
     event.EventType = MOUSE_EVENT;
     event.Event.MouseEvent = mouse_event;
 
-    for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(invalid_table); i++)
     {
         if (invalid_table[i].win_crash)
             continue;
@@ -1778,31 +1788,31 @@ static void test_WriteConsoleInputW(HANDLE input_handle)
     ret = FlushConsoleInputBuffer(input_handle);
     ok(ret == TRUE, "Expected FlushConsoleInputBuffer to return TRUE, got %d\n", ret);
 
-    for (i = 0; i < sizeof(event_list)/sizeof(event_list[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(event_list); i++)
     {
         event_list[i].EventType = MOUSE_EVENT;
         event_list[i].Event.MouseEvent = mouse_event;
     }
 
     /* Writing consecutive chunks of mouse events appears to work. */
-    ret = WriteConsoleInputW(input_handle, event_list, sizeof(event_list)/sizeof(event_list[0]), &count);
+    ret = WriteConsoleInputW(input_handle, event_list, ARRAY_SIZE(event_list), &count);
     ok(ret == TRUE, "Expected WriteConsoleInputW to return TRUE, got %d\n", ret);
-    ok(count == sizeof(event_list)/sizeof(event_list[0]),
+    ok(count == ARRAY_SIZE(event_list),
        "Expected count to be event list length, got %u\n", count);
 
     ret = GetNumberOfConsoleInputEvents(input_handle, &count);
     ok(ret == TRUE, "Expected GetNumberOfConsoleInputEvents to return TRUE, got %d\n", ret);
-    ok(count == sizeof(event_list)/sizeof(event_list[0]),
+    ok(count == ARRAY_SIZE(event_list),
        "Expected count to be event list length, got %u\n", count);
 
-    ret = WriteConsoleInputW(input_handle, event_list, sizeof(event_list)/sizeof(event_list[0]), &count);
+    ret = WriteConsoleInputW(input_handle, event_list, ARRAY_SIZE(event_list), &count);
     ok(ret == TRUE, "Expected WriteConsoleInputW to return TRUE, got %d\n", ret);
-    ok(count == sizeof(event_list)/sizeof(event_list[0]),
+    ok(count == ARRAY_SIZE(event_list),
        "Expected count to be event list length, got %u\n", count);
 
     ret = GetNumberOfConsoleInputEvents(input_handle, &count);
     ok(ret == TRUE, "Expected GetNumberOfConsoleInputEvents to return TRUE, got %d\n", ret);
-    ok(count == 2*sizeof(event_list)/sizeof(event_list[0]),
+    ok(count == 2*ARRAY_SIZE(event_list),
        "Expected count to be twice event list length, got %u\n", count);
 
     /* Again, writing a single mouse event with adjacent mouse events queued doesn't appear to affect the count. */
@@ -1813,7 +1823,7 @@ static void test_WriteConsoleInputW(HANDLE input_handle)
     ret = GetNumberOfConsoleInputEvents(input_handle, &count);
     ok(ret == TRUE, "Expected GetNumberOfConsoleInputEvents to return TRUE, got %d\n", ret);
     todo_wine
-    ok(count == 2*sizeof(event_list)/sizeof(event_list[0]),
+    ok(count == 2*ARRAY_SIZE(event_list),
        "Expected count to be twice event list length, got %u\n", count);
 
     ret = FlushConsoleInputBuffer(input_handle);
@@ -1932,7 +1942,7 @@ static void test_WriteConsoleOutputCharacterA(HANDLE output_handle)
         {output_handle, output, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
     };
 
-    for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(invalid_table); i++)
     {
         if (invalid_table[i].win7_crash)
             continue;
@@ -2016,7 +2026,7 @@ static void test_WriteConsoleOutputCharacterW(HANDLE output_handle)
         {output_handle, outputW, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
     };
 
-    for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(invalid_table); i++)
     {
         if (invalid_table[i].win7_crash)
             continue;
@@ -2099,7 +2109,7 @@ static void test_WriteConsoleOutputAttribute(HANDLE output_handle)
         {output_handle, &attr, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
     };
 
-    for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(invalid_table); i++)
     {
         if (invalid_table[i].win7_crash)
             continue;
@@ -2169,7 +2179,7 @@ static void test_FillConsoleOutputCharacterA(HANDLE output_handle)
         {output_handle, 'a', 1, {0, 0}, NULL, ERROR_INVALID_ACCESS, 1},
     };
 
-    for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(invalid_table); i++)
     {
         if (invalid_table[i].win7_crash)
             continue;
@@ -2228,7 +2238,7 @@ static void test_FillConsoleOutputCharacterW(HANDLE output_handle)
         {output_handle, 'a', 1, {0, 0}, NULL, ERROR_INVALID_ACCESS, 1},
     };
 
-    for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(invalid_table); i++)
     {
         if (invalid_table[i].win7_crash)
             continue;
@@ -2287,7 +2297,7 @@ static void test_FillConsoleOutputAttribute(HANDLE output_handle)
         {output_handle, FOREGROUND_BLUE, 1, {0, 0}, NULL, ERROR_INVALID_ACCESS, 1},
     };
 
-    for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(invalid_table); i++)
     {
         if (invalid_table[i].win7_crash)
             continue;
@@ -2365,7 +2375,7 @@ static void test_ReadConsoleOutputCharacterA(HANDLE output_handle)
         {output_handle, &read, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
     };
 
-    for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(invalid_table); i++)
     {
         if (invalid_table[i].win7_crash)
             continue;
@@ -2449,7 +2459,7 @@ static void test_ReadConsoleOutputCharacterW(HANDLE output_handle)
         {output_handle, &read, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
     };
 
-    for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(invalid_table); i++)
     {
         if (invalid_table[i].win7_crash)
             continue;
@@ -2532,7 +2542,7 @@ static void test_ReadConsoleOutputAttribute(HANDLE output_handle)
         {output_handle, &attr, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
     };
 
-    for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(invalid_table); i++)
     {
         if (invalid_table[i].win7_crash)
             continue;
@@ -2582,6 +2592,11 @@ static void test_ReadConsole(void)
 
     SetLastError(0xdeadbeef);
     ret = GetFileSize(std_input, NULL);
+    if (GetLastError() == 0xdeadbeef)
+    {
+        skip("stdin is redirected\n");
+        return;
+    }
     ok(ret == INVALID_FILE_SIZE, "expected INVALID_FILE_SIZE, got %#x\n", ret);
     ok(GetLastError() == ERROR_INVALID_HANDLE ||
        GetLastError() == ERROR_INVALID_FUNCTION, /* Win 8, 10 */
@@ -3014,6 +3029,98 @@ static void test_GetConsoleScreenBufferInfoEx(HANDLE std_output)
     ok(GetLastError() == 0xdeadbeef, "got %u, expected 0xdeadbeef\n", GetLastError());
 }
 
+static void test_AttachConsole_child(DWORD console_pid)
+{
+    HANDLE pipe_in, pipe_out;
+    COORD c = {0,0};
+    HANDLE console;
+    char buf[32];
+    DWORD len;
+    BOOL res;
+
+    res = CreatePipe(&pipe_in, &pipe_out, NULL, 0);
+    ok(res, "CreatePipe failed: %u\n", GetLastError());
+
+    res = AttachConsole(console_pid);
+    ok(!res && GetLastError() == ERROR_ACCESS_DENIED,
+       "AttachConsole returned: %x(%u)\n", res, GetLastError());
+
+    res = FreeConsole();
+    ok(res, "FreeConsole failed: %u\n", GetLastError());
+
+    SetStdHandle(STD_ERROR_HANDLE, pipe_out);
+
+    res = AttachConsole(console_pid);
+    ok(res, "AttachConsole failed: %u\n", GetLastError());
+
+    ok(pipe_out != GetStdHandle(STD_ERROR_HANDLE), "std handle not set to console\n");
+
+    console = CreateFileA("CONOUT$", GENERIC_READ|GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0);
+    ok(console != INVALID_HANDLE_VALUE, "Could not open console\n");
+
+    res = ReadConsoleOutputCharacterA(console, buf, 6, c, &len);
+    ok(res, "ReadConsoleOutputCharacterA failed: %u\n", GetLastError());
+    ok(len == 6, "len = %u\n", len);
+    ok(!memcmp(buf, "Parent", 6), "Unexpected console output\n");
+
+    res = FreeConsole();
+    ok(res, "FreeConsole failed: %u\n", GetLastError());
+
+    SetStdHandle(STD_INPUT_HANDLE, pipe_in);
+    SetStdHandle(STD_OUTPUT_HANDLE, pipe_out);
+
+    res = AttachConsole(ATTACH_PARENT_PROCESS);
+    ok(res, "AttachConsole failed: %u\n", GetLastError());
+
+    ok(pipe_in != GetStdHandle(STD_INPUT_HANDLE), "std handle not set to console\n");
+    ok(pipe_out != GetStdHandle(STD_OUTPUT_HANDLE), "std handle not set to console\n");
+
+    console = CreateFileA("CONOUT$", GENERIC_READ|GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0);
+    ok(console != INVALID_HANDLE_VALUE, "Could not open console\n");
+
+    res = ReadConsoleOutputCharacterA(console, buf, 6, c, &len);
+    ok(res, "ReadConsoleOutputCharacterA failed: %u\n", GetLastError());
+    ok(len == 6, "len = %u\n", len);
+    ok(!memcmp(buf, "Parent", 6), "Unexpected console output\n");
+
+    simple_write_console(console, "Child");
+    CloseHandle(console);
+
+    res = FreeConsole();
+    ok(res, "FreeConsole failed: %u\n", GetLastError());
+
+    res = CloseHandle(pipe_in);
+    ok(res, "pipe_in is no longer valid\n");
+    res = CloseHandle(pipe_out);
+    ok(res, "pipe_out is no longer valid\n");
+}
+
+static void test_AttachConsole(HANDLE console)
+{
+    STARTUPINFOA si = { sizeof(si) };
+    PROCESS_INFORMATION info;
+    char **argv, buf[MAX_PATH];
+    COORD c = {0,0};
+    DWORD len;
+    BOOL res;
+
+    simple_write_console(console, "Parent console");
+
+    winetest_get_mainargs(&argv);
+    sprintf(buf, "\"%s\" console attach_console %x", argv[0], GetCurrentProcessId());
+    res = CreateProcessA(NULL, buf, NULL, NULL, TRUE, 0, NULL, NULL, &si, &info);
+    ok(res, "CreateProcess failed: %u\n", GetLastError());
+    CloseHandle(info.hThread);
+
+    winetest_wait_child_process(info.hProcess);
+    CloseHandle(info.hProcess);
+
+    res = ReadConsoleOutputCharacterA(console, buf, 5, c, &len);
+    ok(res, "ReadConsoleOutputCharacterA failed: %u\n", GetLastError());
+    ok(len == 5, "len = %u\n", len);
+    ok(!memcmp(buf, "Child", 5), "Unexpected console output\n");
+}
+
 START_TEST(console)
 {
     static const char font_name[] = "Lucida Console";
@@ -3025,8 +3132,20 @@ START_TEST(console)
     char old_font[LF_FACESIZE];
     BOOL delete = FALSE;
     DWORD size;
+    char **argv;
+    int argc;
 
     init_function_pointers();
+
+    argc = winetest_get_mainargs(&argv);
+
+    if (argc > 3 && !strcmp(argv[2], "attach_console"))
+    {
+        DWORD parent_pid;
+        sscanf(argv[3], "%x", &parent_pid);
+        test_AttachConsole_child(parent_pid);
+        return;
+    }
 
     /* be sure we have a clean console (and that's our own)
      * FIXME: this will make the test fail (currently) if we don't run
@@ -3165,4 +3284,5 @@ START_TEST(console)
     test_GetConsoleFontInfo(hConOut);
     test_SetConsoleFont(hConOut);
     test_GetConsoleScreenBufferInfoEx(hConOut);
+    test_AttachConsole(hConOut);
 }

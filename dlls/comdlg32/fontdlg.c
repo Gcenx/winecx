@@ -484,6 +484,16 @@ static inline void CFn_ReleaseDC(const CHOOSEFONTW *lpcf, HDC hdc)
             ReleaseDC(0, hdc);
 }
 
+/*************************************************************************
+ *              select_combo_item                           [internal]
+ */
+static void select_combo_item( HWND dialog, int id, int sel )
+{
+    HWND combo = GetDlgItem( dialog, id );
+    SendMessageW( combo, CB_SETCURSEL, sel, 0 );
+    SendMessageW( dialog, WM_COMMAND, MAKEWPARAM( id, CBN_SELCHANGE ), (LPARAM)combo );
+}
+
 /***********************************************************************
  *                 AddFontStyle                          [internal]
  */
@@ -544,10 +554,7 @@ static void CFn_FitFontSize( HWND hDlg, int points)
         if (points == (int)SendDlgItemMessageW
                 (hDlg,cmb3, CB_GETITEMDATA,i,0))
         {
-            SendDlgItemMessageW(hDlg,cmb3,CB_SETCURSEL,i,0);
-            SendMessageW(hDlg, WM_COMMAND,
-                    MAKEWPARAM(cmb3, CBN_SELCHANGE),
-                    (LPARAM)GetDlgItem(hDlg,cmb3));
+            select_combo_item( hDlg, cmb3, i );
             return;
         }
     }
@@ -560,21 +567,17 @@ static BOOL CFn_FitFontStyle( HWND hDlg, LONG packedstyle )
 {
     LONG id;
     int i;
-    BOOL ret = FALSE;
     /* look for fitting font style in combobox2 */
     for (i=0;i<TEXT_EXTRAS;i++)
     {
         id = SendDlgItemMessageW(hDlg, cmb2, CB_GETITEMDATA, i, 0);
         if (packedstyle == id)
         {
-            SendDlgItemMessageW(hDlg, cmb2, CB_SETCURSEL, i, 0);
-            SendMessageW(hDlg, WM_COMMAND, MAKEWPARAM(cmb2, CBN_SELCHANGE),
-                    (LPARAM)GetDlgItem(hDlg,cmb2));
-            ret = TRUE;
-            break;
+            select_combo_item( hDlg, cmb2, i );
+            return TRUE;
         }
     }
-    return ret;
+    return FALSE;
 }
 
 
@@ -588,16 +591,12 @@ static BOOL CFn_FitCharSet( HWND hDlg, int charset )
         cs =SendDlgItemMessageW(hDlg, cmb5, CB_GETITEMDATA, i, 0);
         if (charset == cs)
         {
-            SendDlgItemMessageW(hDlg, cmb5, CB_SETCURSEL, i, 0);
-            SendMessageW(hDlg, WM_COMMAND, MAKEWPARAM(cmb5, CBN_SELCHANGE),
-                    (LPARAM)GetDlgItem(hDlg,cmb2));
+            select_combo_item( hDlg, cmb5, i );
             return TRUE;
         }
     }
     /* no charset fits: select the first one in the list */
-    SendDlgItemMessageW(hDlg, cmb5, CB_SETCURSEL, 0, 0);
-    SendMessageW(hDlg, WM_COMMAND, MAKEWPARAM(cmb5, CBN_SELCHANGE),
-            (LPARAM)GetDlgItem(hDlg,cmb2));
+    select_combo_item( hDlg, cmb5, 0 );
     return FALSE;
 }
 
@@ -730,9 +729,7 @@ static LRESULT CFn_WMInitDialog(HWND hDlg, LPARAM lParam, LPCHOOSEFONTW lpcf)
             points = MulDiv( height, 72, GetScreenDPI());
             pstyle = MAKELONG(lpxx->lfWeight > FW_MEDIUM ? FW_BOLD:
                     FW_NORMAL,lpxx->lfItalic !=0);
-            SendDlgItemMessageW(hDlg, cmb1, CB_SETCURSEL, j, 0);
-            SendMessageW(hDlg, WM_COMMAND, MAKEWPARAM(cmb1, CBN_SELCHANGE),
-                    (LPARAM)GetDlgItem(hDlg,cmb1));
+            select_combo_item( hDlg, cmb1, j );
             init = TRUE;
             /* look for fitting font style in combobox2 */
             CFn_FitFontStyle(hDlg, pstyle);
@@ -743,18 +740,10 @@ static LRESULT CFn_WMInitDialog(HWND hDlg, LPARAM lParam, LPCHOOSEFONTW lpcf)
     }
     if (!init)
     {
-        SendDlgItemMessageW(hDlg,cmb1,CB_SETCURSEL,0,0);
-        SendMessageW(hDlg, WM_COMMAND, MAKEWPARAM(cmb1, CBN_SELCHANGE),
-                (LPARAM)GetDlgItem(hDlg,cmb1));
-        SendDlgItemMessageW(hDlg,cmb2,CB_SETCURSEL,0,0);
-        SendMessageW(hDlg, WM_COMMAND, MAKEWPARAM(cmb2, CBN_SELCHANGE),
-                (LPARAM)GetDlgItem(hDlg,cmb1));
-        SendDlgItemMessageW(hDlg,cmb3,CB_SETCURSEL,0,0);
-        SendMessageW(hDlg, WM_COMMAND, MAKEWPARAM(cmb3, CBN_SELCHANGE),
-                (LPARAM)GetDlgItem(hDlg,cmb3));
-        SendDlgItemMessageW(hDlg,cmb5,CB_SETCURSEL,0,0);
-        SendMessageW(hDlg, WM_COMMAND, MAKEWPARAM(cmb5, CBN_SELCHANGE),
-                (LPARAM)GetDlgItem(hDlg,cmb5));
+        select_combo_item( hDlg, cmb1, 0 );
+        select_combo_item( hDlg, cmb2, 0 );
+        select_combo_item( hDlg, cmb3, 0 );
+        select_combo_item( hDlg, cmb5, 0 );
     }
     /* limit text length user can type in as font size */
     SendDlgItemMessageW(hDlg, cmb3, CB_LIMITTEXT, 5, 0);
@@ -762,12 +751,7 @@ static LRESULT CFn_WMInitDialog(HWND hDlg, LPARAM lParam, LPCHOOSEFONTW lpcf)
     if ((lpcf->Flags & CF_USESTYLE) && lpcf->lpszStyle)
     {
         j=SendDlgItemMessageW(hDlg,cmb2,CB_FINDSTRING,-1,(LPARAM)lpcf->lpszStyle);
-        if (j!=CB_ERR)
-        {
-            j=SendDlgItemMessageW(hDlg,cmb2,CB_SETCURSEL,j,0);
-            SendMessageW(hDlg,WM_COMMAND,cmb2,
-                    MAKELONG(LOWORD(GetDlgItem(hDlg,cmb2)),CBN_SELCHANGE));
-        }
+        if (j!=CB_ERR) select_combo_item( hDlg, cmb2, j );
     }
     CFn_ReleaseDC(lpcf, hdc);
     SetCursor(hcursor);
@@ -941,14 +925,37 @@ static LRESULT CFn_WMCommand(HWND hDlg, WPARAM wParam, LPARAM lParam, LPCHOOSEFO
     int i;
     long l;
     HDC hdc;
+    BOOL cmb_selected_by_edit = FALSE;
 
     if (!lpcf) return FALSE;
+
+    if(HIWORD(wParam) == CBN_EDITCHANGE)
+    {
+        int idx;
+        WCHAR str_edit[256], str_cmb[256];
+        int cmb = LOWORD(wParam);
+
+        GetDlgItemTextW(hDlg, cmb, str_edit, ARRAY_SIZE(str_edit));
+        idx = SendDlgItemMessageW(hDlg, cmb, CB_FINDSTRING, -1, (LPARAM)str_edit);
+        if(idx != -1)
+        {
+            SendDlgItemMessageW(hDlg, cmb, CB_GETLBTEXT, idx, (LPARAM)str_cmb);
+
+            /* Select listbox entry only if we have an exact match */
+            if(lstrcmpiW(str_edit, str_cmb) == 0)
+            {
+                 SendDlgItemMessageW(hDlg, cmb, CB_SETCURSEL, idx, 0);
+                 SendDlgItemMessageW(hDlg, cmb, CB_SETEDITSEL, 0, -1); /* Remove edit field selection */
+                 cmb_selected_by_edit = TRUE;
+            }
+        }
+    }
 
     TRACE("WM_COMMAND wParam=%08X lParam=%08lX\n", (LONG)wParam, lParam);
     switch (LOWORD(wParam))
     {
     case cmb1:
-        if (HIWORD(wParam)==CBN_SELCHANGE)
+        if (HIWORD(wParam) == CBN_SELCHANGE || cmb_selected_by_edit)
         {
             INT pointsize; /* save current pointsize */
             LONG pstyle;  /* save current style */
@@ -999,7 +1006,7 @@ static LRESULT CFn_WMCommand(HWND hDlg, WPARAM wParam, LPARAM lParam, LPCHOOSEFO
     case cmb2:
     case cmb3:
     case cmb5:
-        if (HIWORD(wParam)==CBN_SELCHANGE || HIWORD(wParam)== BN_CLICKED )
+        if (HIWORD(wParam) == CBN_SELCHANGE || HIWORD(wParam) == BN_CLICKED || cmb_selected_by_edit)
         {
             WCHAR str[256];
             WINDOWINFO wininfo;

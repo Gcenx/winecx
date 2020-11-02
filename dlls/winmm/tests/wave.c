@@ -977,7 +977,10 @@ static void wave_out_test_device(UINT_PTR device)
        "waveOutGetDevCapsA(%s): MMSYSERR_NOERROR expected, got %s\n",
        dev_name(device),wave_out_error(rc));
     if (rc!=MMSYSERR_NOERROR)
+    {
+        HeapFree(GetProcessHeap(), 0, nameA);
         return;
+    }
 
     trace("  %s: \"%s\" (%s) %d.%d (%d:%d)\n",dev_name(device),capsA.szPname,
           (nameA?nameA:"failed"),capsA.vDriverVersion >> 8,
@@ -1038,7 +1041,7 @@ static void wave_out_test_device(UINT_PTR device)
                                 CALLBACK_EVENT,&capsA,TRUE,FALSE,FALSE);
     }
 
-    for (f=0;f<NB_WIN_FORMATS;f++) {
+    for (f = 0; f < ARRAY_SIZE(win_formats); f++) {
         format.wFormatTag=WAVE_FORMAT_PCM;
         format.nChannels=win_formats[f][3];
         format.wBitsPerSample=win_formats[f][2];
@@ -1412,6 +1415,28 @@ static void wave_out_test_device(UINT_PTR device)
     } else
         trace("waveOutOpen(%s): 32 bit float samples not supported\n",
               dev_name(device));
+
+    /* Test invalid parameters */
+
+    format.wFormatTag = WAVE_FORMAT_PCM;
+    format.nChannels = 1;
+    format.nSamplesPerSec = 11025;
+    format.nBlockAlign = 1;
+    format.nAvgBytesPerSec = 11025 * 1;
+    format.wBitsPerSample = 8;
+    format.cbSize = 0;
+
+    format.nAvgBytesPerSec = 0;
+    rc = waveOutOpen(&wout, device, &format, 0, 0, 0);
+    ok(rc == MMSYSERR_NOERROR,
+       "waveOutOpen(%s): returned %s\n",dev_name(device),wave_out_error(rc));
+    waveOutClose(wout);
+    format.nAvgBytesPerSec = 11025 * 1;
+
+    format.nSamplesPerSec = 0;
+    rc = waveOutOpen(&wout, device, &format, 0, 0, 0);
+    ok(rc == MMSYSERR_INVALPARAM || rc == WAVERR_BADFORMAT, /* XP and lower return WAVERR_BADFORMAT */
+       "waveOutOpen(%s): returned %s\n",dev_name(device),wave_out_error(rc));
 }
 
 static void wave_out_tests(void)
@@ -1436,6 +1461,16 @@ static void wave_out_tests(void)
     if(rc != MMSYSERR_NOTSUPPORTED)
         ok((ndev == 0 && (preferred == -1 || broken(preferred != -1))) ||
                 preferred < ndev, "Got invalid preferred device: 0x%x\n", preferred);
+
+    rc = waveOutMessage((HWAVEOUT)WAVE_MAPPER, DRVM_MAPPER_PREFERRED_GET,
+         (DWORD_PTR)-1  , 0);
+    ok(rc == MMSYSERR_INVALPARAM || rc == MMSYSERR_BADDEVICEID, /* w2008+wvista */
+       "waveOutMessage(DRVM_MAPPER_PREFERRED_GET) failed: %u\n", rc);
+
+    rc = waveOutMessage((HWAVEOUT)WAVE_MAPPER, DRVM_MAPPER_PREFERRED_GET,
+         0, (DWORD_PTR)&status);
+    ok(rc == MMSYSERR_INVALPARAM || rc == MMSYSERR_BADDEVICEID, /* w2008+wvista */
+       "waveOutMessage(DRVM_MAPPER_PREFERRED_GET) failed: %u\n", rc);
 
     rc=waveOutGetDevCapsA(ndev+1,&capsA,sizeof(capsA));
     ok(rc==MMSYSERR_BADDEVICEID,

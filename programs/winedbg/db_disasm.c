@@ -64,7 +64,7 @@
 
 #include "debugger.h"
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__x86_64__)
 
 /*
  * Switch to disassemble 16-bit code.
@@ -301,23 +301,23 @@ static const struct inst db_inst_0f4x[] = {
 };
 
 static const struct inst db_inst_0f5x[] = {
-/*50*/	{ "movmskps",TRUE, NONE, op2(E, XMM), 0 },
-/*51*/	{ "sqrtps",  TRUE, NONE, op2(XMM, EXMM), 0 },
-/*52*/	{ "rsqrtps", TRUE, NONE, op2(XMM, EXMM), 0 },
-/*53*/	{ "rcpps",   TRUE, NONE, op2(XMM, EXMM), 0 },
-/*54*/	{ "andps",   TRUE, NONE, op2(XMM, EXMM), 0 },
-/*55*/	{ "andnps",  TRUE, NONE, op2(XMM, EXMM), 0 },
-/*56*/	{ "orps",    TRUE, NONE, op2(XMM, EXMM), 0 },
-/*57*/	{ "xorps",   TRUE, NONE, op2(XMM, EXMM), 0 },
+/*50*/	{ "movmskps",TRUE, NONE, op2(EXMM, R),   0 },
+/*51*/	{ "sqrtps",  TRUE, NONE, op2(EXMM, XMM), 0 },
+/*52*/	{ "rsqrtps", TRUE, NONE, op2(EXMM, XMM), 0 },
+/*53*/	{ "rcpps",   TRUE, NONE, op2(EXMM, XMM), 0 },
+/*54*/	{ "andps",   TRUE, NONE, op2(EXMM, XMM), 0 },
+/*55*/	{ "andnps",  TRUE, NONE, op2(EXMM, XMM), 0 },
+/*56*/	{ "orps",    TRUE, NONE, op2(EXMM, XMM), 0 },
+/*57*/	{ "xorps",   TRUE, NONE, op2(EXMM, XMM), 0 },
 
-/*58*/	{ "addps",   TRUE, NONE, op2(XMM, EXMM), 0 },
-/*59*/	{ "mulps",   TRUE, NONE, op2(XMM, EXMM), 0 },
-/*5a*/	{ "(bad)",   FALSE, NONE,  0,   0 },
-/*5b*/	{ "(bad)",   FALSE, NONE,  0,   0 },
-/*5c*/	{ "subps",   TRUE, NONE, op2(XMM, EXMM), 0 },
-/*5d*/	{ "minps",   TRUE, NONE, op2(XMM, EXMM), 0 },
-/*5e*/	{ "divps",   TRUE, NONE, op2(XMM, EXMM), 0 },
-/*5f*/	{ "maxps",   TRUE, NONE, op2(XMM, EXMM), 0 },
+/*58*/	{ "addps",   TRUE, NONE, op2(EXMM, XMM), 0 },
+/*59*/	{ "mulps",   TRUE, NONE, op2(EXMM, XMM), 0 },
+/*5a*/	{ "cvtps2pd",TRUE, NONE, op2(EXMM, XMM), 0 },
+/*5b*/	{ "cvtdq2ps",TRUE, NONE, op2(EXMM, XMM), 0 },
+/*5c*/	{ "subps",   TRUE, NONE, op2(EXMM, XMM), 0 },
+/*5d*/	{ "minps",   TRUE, NONE, op2(EXMM, XMM), 0 },
+/*5e*/	{ "divps",   TRUE, NONE, op2(EXMM, XMM), 0 },
+/*5f*/	{ "maxps",   TRUE, NONE, op2(EXMM, XMM), 0 },
 };
 
 static const struct inst db_inst_0f6x[] = {
@@ -1225,7 +1225,7 @@ static void db_print_address(const char *seg, int size, struct i_addr *addrp, in
                void*    a2;
                
                dbg_printf("0x%x -> ", addrp->disp);
-	       if (!dbg_read_memory((void*)addrp->disp, &a1, sizeof(a1))) {
+	       if (!dbg_read_memory((void*)(INT_PTR)addrp->disp, &a1, sizeof(a1))) {
 		   dbg_printf("(invalid source)");
 	       } else if (!dbg_read_memory(a1, &a2, sizeof(a2))) {
 		  dbg_printf("(invalid destination)");
@@ -1800,8 +1800,8 @@ void be_i386_disasm_one_insn(ADDRESS64 *addr, int display)
                                        short_addr ? 2 : 4, FALSE );
                         get_value_inc( address.Segment, addr,  /* segment */
                                        2, FALSE );
-                        be_cpu->build_addr(dbg_curr_thread->handle, &dbg_context,
-                                           &address, address.Segment, address.Offset);
+                        dbg_curr_process->be_cpu->build_addr(dbg_curr_thread->handle,
+                            &dbg_context, &address, address.Segment, address.Offset);
 			if( db_display )
 			  {
                               print_address( &address, TRUE );

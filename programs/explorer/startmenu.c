@@ -53,7 +53,6 @@ static struct menu_item public_startmenu;
 static struct menu_item user_startmenu;
 
 #define MENU_ID_RUN 1
-#define MENU_ID_QUIT 2
 
 static ULONG copy_pidls(struct menu_item* item, LPITEMIDLIST dest)
 {
@@ -384,21 +383,6 @@ static void run_dialog(void)
     FreeLibrary(hShell32);
 }
 
-static void do_shutdown(void)
-{
-    static const char cmdline[] = "wineboot --end-session --shutdown --kill";
-    STARTUPINFOA si = {0};
-    PROCESS_INFORMATION pi;
-
-    si.cb = sizeof(si);
-
-    if (CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
-    {
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-    }
-}
-
 LRESULT menu_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     switch (msg)
@@ -435,8 +419,6 @@ LRESULT menu_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
                 exec_item(item);
             else if (mii.wID == MENU_ID_RUN)
                 run_dialog();
-            else if (mii.wID == MENU_ID_QUIT)
-                do_shutdown();
 
             destroy_menus();
 
@@ -454,7 +436,7 @@ void do_startmenu(HWND hwnd)
     MENUITEMINFOW mii;
     RECT rc={0,0,0,0};
     TPMPARAMS tpm;
-    WCHAR run_label[50], quit_label[50];
+    WCHAR run_label[50];
 
     destroy_menus();
 
@@ -493,23 +475,12 @@ void do_startmenu(HWND hwnd)
     if (SUCCEEDED(SHGetSpecialFolderLocation(NULL, CSIDL_CONTROLS, &pidl)))
         add_shell_item(&root_menu, pidl);
 
-    LoadStringW(NULL, IDS_RUN, run_label, sizeof(run_label)/sizeof(run_label[0]));
+    LoadStringW(NULL, IDS_RUN, run_label, ARRAY_SIZE(run_label));
 
     mii.cbSize = sizeof(mii);
     mii.fMask = MIIM_STRING|MIIM_ID;
     mii.dwTypeData = run_label;
     mii.wID = MENU_ID_RUN;
-
-    InsertMenuItemW(root_menu.menuhandle, -1, TRUE, &mii);
-
-    AppendMenuW(root_menu.menuhandle, MF_SEPARATOR, 0, NULL);
-
-    LoadStringW(NULL, IDS_QUIT, quit_label, sizeof(quit_label)/sizeof(quit_label[0]));
-
-    mii.cbSize = sizeof(mii);
-    mii.fMask = MIIM_STRING|MIIM_ID;
-    mii.dwTypeData = quit_label;
-    mii.wID = MENU_ID_QUIT;
 
     InsertMenuItemW(root_menu.menuhandle, -1, TRUE, &mii);
 

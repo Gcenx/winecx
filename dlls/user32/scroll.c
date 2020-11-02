@@ -17,15 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
- *
- * NOTES
- *
- * This code was audited for completeness against the documented features
- * of Comctl32.dll version 6.0 on Oct. 8, 2004, by Dimitrie O. Paun.
- * 
- * Unless otherwise noted, we believe this code to be complete, as per
- * the specification mentioned above.
- * If you discover missing features, or bugs, please note them below.
  */
 
 #include "config.h"
@@ -168,7 +159,8 @@ static SCROLLBAR_INFO *SCROLL_GetInternalInfo( HWND hwnd, INT nBar, BOOL alloc )
             if (wndPtr->pScroll) infoPtr = &((LPWINSCROLLBAR_INFO)wndPtr->pScroll)->vert;
             break;
         case SB_CTL:
-            infoPtr = (SCROLLBAR_INFO *)wndPtr->wExtra;
+            if (get_class_winproc( wndPtr->class ) == BUILTIN_WINPROC( WINPROC_SCROLLBAR ))
+                infoPtr = (SCROLLBAR_INFO *)wndPtr->wExtra;
             break;
         case SB_BOTH:
             WARN("with SB_BOTH\n");

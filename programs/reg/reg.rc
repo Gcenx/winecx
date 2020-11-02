@@ -18,7 +18,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "reg.h"
+#include "resource.h"
 
 #pragma makedep po
 
@@ -29,7 +29,7 @@ STRINGTABLE
     STRING_USAGE, "Usage:\n\
 \  REG [operation] [parameters]\n\n\
 \Supported operations:\n\
-\  ADD | DELETE | QUERY\n\n\
+\  ADD | DELETE | IMPORT | EXPORT | QUERY\n\n\
 \For help on a specific operation, type:\n\
 \  REG [operation] /?\n\n"
     STRING_ADD_USAGE, "REG ADD key_name [/v value_name | /ve] [/t type] [/s separator] [/d data] [/f]\n"
@@ -62,4 +62,11 @@ STRINGTABLE
     STRING_REG_HELP, "Type \"REG /?\" for help.\n"
     STRING_FUNC_HELP, "Type \"REG %1 /?\" for help.\n"
     STRING_VALUE_NOT_SET, "(value not set)"
+    STRING_IMPORT_USAGE, "REG IMPORT file.reg\n"
+    STRING_FILE_NOT_FOUND, "reg: The file '%1' was not found.\n"
+    STRING_OPEN_KEY_FAILED, "reg: Unable to open the registry key '%1'.\n"
+    STRING_ESCAPE_SEQUENCE, "reg: Unrecognized escape sequence [\\%1!c!]\n"
+    STRING_EXPORT_USAGE, "REG EXPORT key_name file.reg [/y]\n"
+    STRING_INVALID_SYSTEM_KEY, "reg: Invalid system key [%1]\n"
+    STRING_OVERWRITE_FILE, "The file '%1' already exists. Do you want to overwrite it?"
 }

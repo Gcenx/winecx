@@ -214,7 +214,6 @@ HRESULT WINAPI D3DXAssembleShader(const char *data, UINT data_len, const D3DXMAC
 
 static const void *main_file_data;
 
-static CRITICAL_SECTION from_file_mutex;
 static CRITICAL_SECTION_DEBUG from_file_mutex_debug =
 {
     0, 0, &from_file_mutex,
@@ -224,14 +223,14 @@ static CRITICAL_SECTION_DEBUG from_file_mutex_debug =
     },
     0, 0, {(DWORD_PTR)(__FILE__ ": from_file_mutex")}
 };
-static CRITICAL_SECTION from_file_mutex = {&from_file_mutex_debug, -1, 0, 0, 0, 0};
+CRITICAL_SECTION from_file_mutex = {&from_file_mutex_debug, -1, 0, 0, 0, 0};
 
 /* D3DXInclude private implementation, used to implement
  * D3DXAssembleShaderFromFile() from D3DXAssembleShader(). */
 /* To be able to correctly resolve include search paths we have to store the
  * pathname of each include file. We store the pathname pointer right before
  * the file data. */
-static HRESULT WINAPI d3dincludefromfile_open(ID3DXInclude *iface, D3DXINCLUDE_TYPE include_type,
+static HRESULT WINAPI d3dx_include_from_file_open(ID3DXInclude *iface, D3DXINCLUDE_TYPE include_type,
         const char *filename, const void *parent_data, const void **data, UINT *bytes)
 {
     const char *p, *parent_name = "";
@@ -250,7 +249,7 @@ static HRESULT WINAPI d3dincludefromfile_open(ID3DXInclude *iface, D3DXINCLUDE_T
             parent_name = *((const char **)main_file_data - 1);
     }
 
-    TRACE("Looking up for include file %s, parent %s\n", debugstr_a(filename), debugstr_a(parent_name));
+    TRACE("Looking up include file %s, parent %s.\n", debugstr_a(filename), debugstr_a(parent_name));
 
     if ((p = strrchr(parent_name, '\\')))
         ++p;
@@ -301,7 +300,7 @@ error:
     return HRESULT_FROM_WIN32(GetLastError());
 }
 
-static HRESULT WINAPI d3dincludefromfile_close(ID3DXInclude *iface, const void *data)
+static HRESULT WINAPI d3dx_include_from_file_close(ID3DXInclude *iface, const void *data)
 {
     HeapFree(GetProcessHeap(), 0, *((char **)data - 1));
     HeapFree(GetProcessHeap(), 0, (char **)data - 1);
@@ -310,13 +309,10 @@ static HRESULT WINAPI d3dincludefromfile_close(ID3DXInclude *iface, const void *
     return S_OK;
 }
 
-static const struct ID3DXIncludeVtbl D3DXInclude_Vtbl = {
-    d3dincludefromfile_open,
-    d3dincludefromfile_close
-};
-
-struct D3DXIncludeImpl {
-    ID3DXInclude ID3DXInclude_iface;
+const struct ID3DXIncludeVtbl d3dx_include_from_file_vtbl =
+{
+    d3dx_include_from_file_open,
+    d3dx_include_from_file_close
 };
 
 HRESULT WINAPI D3DXAssembleShaderFromFileA(const char *filename, const D3DXMACRO *defines,
@@ -348,7 +344,7 @@ HRESULT WINAPI D3DXAssembleShaderFromFileW(const WCHAR *filename, const D3DXMACR
     const void *buffer;
     DWORD len;
     HRESULT hr;
-    struct D3DXIncludeImpl includefromfile;
+    struct d3dx_include_from_file include_from_file;
     char *filename_a;
 
     TRACE("filename %s, defines %p, include %p, flags %#x, shader %p, error_messages %p.\n",
@@ -356,8 +352,8 @@ HRESULT WINAPI D3DXAssembleShaderFromFileW(const WCHAR *filename, const D3DXMACR
 
     if(!include)
     {
-        includefromfile.ID3DXInclude_iface.lpVtbl = &D3DXInclude_Vtbl;
-        include = &includefromfile.ID3DXInclude_iface;
+        include_from_file.ID3DXInclude_iface.lpVtbl = &d3dx_include_from_file_vtbl;
+        include = &include_from_file.ID3DXInclude_iface;
     }
 
     len = WideCharToMultiByte(CP_ACP, 0, filename, -1, NULL, 0, NULL, NULL);
@@ -481,7 +477,7 @@ HRESULT WINAPI D3DXCompileShaderFromFileW(const WCHAR *filename, const D3DXMACRO
     const void *buffer;
     DWORD len, filename_len;
     HRESULT hr;
-    struct D3DXIncludeImpl includefromfile;
+    struct d3dx_include_from_file include_from_file;
     char *filename_a;
 
     TRACE("filename %s, defines %p, include %p, entrypoint %s, profile %s, "
@@ -491,8 +487,8 @@ HRESULT WINAPI D3DXCompileShaderFromFileW(const WCHAR *filename, const D3DXMACRO
 
     if (!include)
     {
-        includefromfile.ID3DXInclude_iface.lpVtbl = &D3DXInclude_Vtbl;
-        include = &includefromfile.ID3DXInclude_iface;
+        include_from_file.ID3DXInclude_iface.lpVtbl = &d3dx_include_from_file_vtbl;
+        include = &include_from_file.ID3DXInclude_iface;
     }
 
     filename_len = WideCharToMultiByte(CP_ACP, 0, filename, -1, NULL, 0, NULL, NULL);
@@ -606,7 +602,7 @@ HRESULT WINAPI D3DXPreprocessShaderFromFileW(const WCHAR *filename, const D3DXMA
     const void *buffer;
     DWORD len;
     HRESULT hr;
-    struct D3DXIncludeImpl includefromfile;
+    struct d3dx_include_from_file include_from_file;
     char *filename_a;
 
     TRACE("filename %s, defines %p, include %p, shader %p, error_messages %p.\n",
@@ -614,8 +610,8 @@ HRESULT WINAPI D3DXPreprocessShaderFromFileW(const WCHAR *filename, const D3DXMA
 
     if (!include)
     {
-        includefromfile.ID3DXInclude_iface.lpVtbl = &D3DXInclude_Vtbl;
-        include = &includefromfile.ID3DXInclude_iface;
+        include_from_file.ID3DXInclude_iface.lpVtbl = &d3dx_include_from_file_vtbl;
+        include = &include_from_file.ID3DXInclude_iface;
     }
 
     len = WideCharToMultiByte(CP_ACP, 0, filename, -1, NULL, 0, NULL, NULL);
@@ -680,11 +676,6 @@ HRESULT WINAPI D3DXPreprocessShaderFromResourceW(HMODULE module, const WCHAR *re
                                 shader, error_messages);
 
 }
-
-struct ctab_constant {
-    D3DXCONSTANT_DESC desc;
-    struct ctab_constant *constants;
-};
 
 struct ID3DXConstantTableImpl {
     ID3DXConstantTable ID3DXConstantTable_iface;
@@ -946,13 +937,20 @@ static HRESULT WINAPI ID3DXConstantTableImpl_GetDesc(ID3DXConstantTable *iface, 
     return D3D_OK;
 }
 
+const struct ctab_constant *d3dx_shader_get_ctab_constant(ID3DXConstantTable *iface, D3DXHANDLE constant)
+{
+    struct ID3DXConstantTableImpl *ctab = impl_from_ID3DXConstantTable(iface);
+
+    return get_valid_constant(ctab, constant);
+}
+
 static HRESULT WINAPI ID3DXConstantTableImpl_GetConstantDesc(ID3DXConstantTable *iface, D3DXHANDLE constant,
                                                              D3DXCONSTANT_DESC *desc, UINT *count)
 {
-    struct ID3DXConstantTableImpl *This = impl_from_ID3DXConstantTable(iface);
-    struct ctab_constant *c = get_valid_constant(This, constant);
+    struct ID3DXConstantTableImpl *ctab = impl_from_ID3DXConstantTable(iface);
+    struct ctab_constant *c = get_valid_constant(ctab, constant);
 
-    TRACE("(%p)->(%p, %p, %p)\n", This, constant, desc, count);
+    TRACE("(%p)->(%p, %p, %p)\n", ctab, constant, desc, count);
 
     if (!c)
     {
@@ -2052,6 +2050,7 @@ HRESULT WINAPI D3DXGetShaderConstantTableEx(const DWORD *byte_code, DWORD flags,
         {
             object->constants[i].desc.RegisterCount = constant_info[i].RegisterCount;
         }
+        object->constants[i].constantinfo_reserved = constant_info[i].Reserved;
     }
 
     *constant_table = &object->ID3DXConstantTable_iface;
@@ -2412,4 +2411,250 @@ HRESULT WINAPI D3DXCreateTextureShader(const DWORD *function, ID3DXTextureShader
     *texture_shader = &object->ID3DXTextureShader_iface;
 
     return D3D_OK;
+}
+
+static unsigned int get_instr_length(const DWORD *byte_code, unsigned int major, unsigned int minor)
+{
+    unsigned int len = 0;
+
+    if (major > 1)
+        return (*byte_code & D3DSI_INSTLENGTH_MASK) >> D3DSI_INSTLENGTH_SHIFT;
+
+    switch (*byte_code & 0xffff)
+    {
+        case D3DSIO_END:
+            ERR("Unexpected END token.\n");
+            return 0;
+        case D3DSIO_COMMENT:
+            return (*byte_code & D3DSI_COMMENTSIZE_MASK) >> D3DSI_COMMENTSIZE_SHIFT;
+        case D3DSIO_DEF:
+        case D3DSIO_DEFI:
+            return 5;
+        case D3DSIO_DEFB:
+            return 2;
+        default:
+            ++byte_code;
+            while (*byte_code & 0x80000000)
+            {
+                ++byte_code;
+                ++len;
+            }
+    }
+
+    return len;
+}
+
+static HRESULT get_shader_semantics(const DWORD *byte_code, D3DXSEMANTIC *semantics, UINT *count, BOOL output)
+{
+    static const D3DDECLUSAGE regtype_usage[] =
+    {
+        D3DDECLUSAGE_COLOR,
+        D3DDECLUSAGE_COLOR,
+        0,
+        D3DDECLUSAGE_TEXCOORD,
+        0,
+        D3DDECLUSAGE_COLOR,
+        D3DDECLUSAGE_TEXCOORD,
+        0,
+        0,
+        D3DDECLUSAGE_DEPTH
+    };
+    static const D3DDECLUSAGE rast_usage[] =
+    {
+        D3DDECLUSAGE_POSITION,
+        D3DDECLUSAGE_FOG,
+        D3DDECLUSAGE_PSIZE
+    };
+    DWORD reg_type, usage, index, version_token = *byte_code;
+    BOOL is_ps = version_token >> 16 == 0xffff;
+    unsigned int major, minor, i = 0, j;
+    BYTE colors = 0, rastout = 0;
+    BOOL has_dcl, depth = 0;
+    WORD texcoords = 0;
+
+    if ((version_token & 0xffff0000) != 0xfffe0000 && (version_token & 0xffff0000) != 0xffff0000)
+        return D3DXERR_INVALIDDATA;
+
+    major = version_token >> 8 & 0xff;
+    minor = version_token & 0xff;
+
+    TRACE("%s shader, version %u.%u.\n", is_ps ? "Pixel" : "Vertex", major, minor);
+    ++byte_code;
+
+    has_dcl = (!is_ps && (!output || major == 3)) || (is_ps && !output && major >= 2);
+
+    while (*byte_code != D3DSIO_END)
+    {
+        if (has_dcl && (*byte_code & 0xffff) == D3DSIO_DCL)
+        {
+            DWORD usage_token = byte_code[1];
+            DWORD reg = byte_code[2];
+
+            reg_type = ((reg & D3DSP_REGTYPE_MASK) >> D3DSP_REGTYPE_SHIFT)
+                    | ((reg & D3DSP_REGTYPE_MASK2) >> D3DSP_REGTYPE_SHIFT2);
+
+            if (is_ps && !output && major == 2)
+            {
+                /* dcl with no explicit usage, look at the register. */
+                reg_type = ((reg & D3DSP_REGTYPE_MASK) >> D3DSP_REGTYPE_SHIFT)
+                        | ((reg & D3DSP_REGTYPE_MASK2) >> D3DSP_REGTYPE_SHIFT2);
+                index = reg & D3DSP_REGNUM_MASK;
+                if (reg_type >= ARRAY_SIZE(regtype_usage))
+                {
+                    WARN("Invalid register type %u.\n", reg_type);
+                    reg_type = 0;
+                }
+                usage = regtype_usage[reg_type];
+                if (semantics)
+                {
+                    semantics[i].Usage = usage;
+                    semantics[i].UsageIndex = index;
+                }
+                ++i;
+            }
+            else if ((!output && reg_type == D3DSPR_INPUT) || (output && reg_type == D3DSPR_OUTPUT))
+            {
+                if (semantics)
+                {
+                    semantics[i].Usage =
+                            (usage_token & D3DSP_DCL_USAGE_MASK) >> D3DSP_DCL_USAGE_SHIFT;
+                    semantics[i].UsageIndex =
+                            (usage_token & D3DSP_DCL_USAGEINDEX_MASK) >> D3DSP_DCL_USAGEINDEX_SHIFT;
+                }
+                ++i;
+            }
+            byte_code += 3;
+        }
+        else if (!has_dcl)
+        {
+            unsigned int len = get_instr_length(byte_code, major, minor) + 1;
+
+            switch (*byte_code & 0xffff)
+            {
+                case D3DSIO_COMMENT:
+                case D3DSIO_DEF:
+                case D3DSIO_DEFB:
+                case D3DSIO_DEFI:
+                    byte_code += len;
+                    break;
+                default:
+                    ++byte_code;
+                    while (*byte_code & 0x80000000)
+                    {
+                        reg_type = ((*byte_code & D3DSP_REGTYPE_MASK) >> D3DSP_REGTYPE_SHIFT)
+                                | ((*byte_code & D3DSP_REGTYPE_MASK2) >> D3DSP_REGTYPE_SHIFT2);
+                        index = *byte_code & D3DSP_REGNUM_MASK;
+
+                        if ((reg_type == D3DSPR_TEMP && is_ps && major == 1)
+                                || (reg_type == D3DSPR_INPUT && is_ps)
+                                || (reg_type == D3DSPR_TEXTURE && is_ps && !output)
+                                || reg_type == D3DSPR_RASTOUT
+                                || reg_type == D3DSPR_ATTROUT
+                                || reg_type == D3DSPR_OUTPUT
+                                || reg_type == D3DSPR_DEPTHOUT)
+                        {
+                            if (reg_type == D3DSPR_RASTOUT)
+                                rastout |= 1u << index;
+                            else if (reg_type == D3DSPR_DEPTHOUT)
+                                depth = TRUE;
+                            else if (reg_type == D3DSPR_TEXTURE || reg_type == D3DSPR_OUTPUT)
+                                texcoords |= 1u << index;
+                            else
+                                colors |= 1u << index;
+                        }
+                        ++byte_code;
+                    }
+            }
+        }
+        else
+        {
+            byte_code += get_instr_length(byte_code, major, minor) + 1;
+        }
+    }
+
+    if (!has_dcl)
+    {
+        i = j = 0;
+        while (texcoords)
+        {
+            if (texcoords & 1)
+            {
+                if (semantics)
+                {
+                    semantics[i].Usage = D3DDECLUSAGE_TEXCOORD;
+                    semantics[i].UsageIndex = j;
+                }
+                ++i;
+            }
+            texcoords >>= 1;
+            ++j;
+        }
+        j = 0;
+        while (colors)
+        {
+            if (colors & 1)
+            {
+                if (semantics)
+                {
+                    semantics[i].Usage = D3DDECLUSAGE_COLOR;
+                    semantics[i].UsageIndex = j;
+                }
+                ++i;
+            }
+            colors >>= 1;
+            ++j;
+        }
+        j = 0;
+        while (rastout)
+        {
+            if (rastout & 1)
+            {
+                if (j >= ARRAY_SIZE(rast_usage))
+                {
+                    WARN("Invalid RASTOUT register index.\n");
+                    usage = 0;
+                }
+                else
+                {
+                    usage = rast_usage[j];
+                }
+                if (semantics)
+                {
+                    semantics[i].Usage = usage;
+                    semantics[i].UsageIndex = 0;
+                }
+                ++i;
+            }
+            rastout >>= 1;
+            ++j;
+        }
+        if (depth)
+        {
+            if (semantics)
+            {
+                semantics[i].Usage = D3DDECLUSAGE_DEPTH;
+                semantics[i].UsageIndex = 0;
+            }
+            ++i;
+        }
+    }
+
+    if (count)
+        *count = i;
+
+    return D3D_OK;
+}
+
+HRESULT WINAPI D3DXGetShaderInputSemantics(const DWORD *byte_code, D3DXSEMANTIC *semantics, UINT *count)
+{
+    TRACE("byte_code %p, semantics %p, count %p.\n", byte_code, semantics, count);
+
+    return get_shader_semantics(byte_code, semantics, count, FALSE);
+}
+
+HRESULT WINAPI D3DXGetShaderOutputSemantics(const DWORD *byte_code, D3DXSEMANTIC *semantics, UINT *count)
+{
+    TRACE("byte_code %p, semantics %p, count %p.\n", byte_code, semantics, count);
+
+    return get_shader_semantics(byte_code, semantics, count, TRUE);
 }

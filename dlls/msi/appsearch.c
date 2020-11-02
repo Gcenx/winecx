@@ -506,7 +506,7 @@ static LPWSTR get_ini_field(LPWSTR buf, int field)
     while ((end = strchrW(beg, ',')) && i < field)
     {
         beg = end + 1;
-        while (*beg && *beg == ' ')
+        while (*beg == ' ')
             beg++;
 
         i++;
@@ -949,8 +949,7 @@ static UINT ACTION_SearchDirectory(MSIPACKAGE *package, MSISIGNATURE *sig,
             if (GetDriveTypeW(pathWithDrive) != DRIVE_FIXED)
                 continue;
 
-            lstrcpynW(pathWithDrive + 3, path,
-                      sizeof(pathWithDrive) / sizeof(pathWithDrive[0]) - 3);
+            lstrcpynW(pathWithDrive + 3, path, ARRAY_SIZE(pathWithDrive) - 3);
 
             if (sig->File)
                 rc = ACTION_RecurseSearchDirectory(package, &val, sig,
@@ -1117,7 +1116,7 @@ static UINT iterate_appsearch(MSIRECORD *row, LPVOID param)
     uirow = MSI_CreateRecord( 2 );
     MSI_RecordSetStringW( uirow, 1, propName );
     MSI_RecordSetStringW( uirow, 2, sigName );
-    msi_ui_actiondata( package, szAppSearch, uirow );
+    MSI_ProcessMessage(package, INSTALLMESSAGE_ACTIONDATA, uirow);
     msiobj_release( &uirow->hdr );
 
     return r;

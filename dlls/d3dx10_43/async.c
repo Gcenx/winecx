@@ -20,7 +20,6 @@
 #include "wine/port.h"
 #include "d3d10_1.h"
 #include "d3dx10.h"
-#include "d3dx10core.h"
 #include "d3dcompiler.h"
 
 #include "wine/debug.h"
@@ -116,7 +115,7 @@ static HRESULT WINAPI filedataloader_Load(ID3DX10DataLoader *iface)
     CloseHandle(file);
     if (!ret)
     {
-        ERR("Failed to read file contents.\n");
+        WARN("Failed to read file contents.\n");
         HeapFree(GetProcessHeap(), 0, data);
         return E_FAIL;
     }
@@ -176,7 +175,7 @@ static HRESULT WINAPI resourcedataloader_Load(ID3DX10DataLoader *iface)
     hglobal = LoadResource(loader->u.resource.module, loader->u.resource.rsrc);
     if (!hglobal)
     {
-        ERR("Failed to load resource.\n");
+        WARN("Failed to load resource.\n");
         return E_FAIL;
     }
 
@@ -350,7 +349,7 @@ HRESULT WINAPI D3DX10CreateAsyncResourceLoaderA(HMODULE module, const char *reso
 
     if (!(rsrc = FindResourceA(module, resource, (const char *)RT_RCDATA)))
     {
-        ERR("Failed to find resource.\n");
+        WARN("Failed to find resource.\n");
         HeapFree(GetProcessHeap(), 0, object);
         return D3DX10_ERR_INVALID_DATA;
     }
@@ -382,7 +381,7 @@ HRESULT WINAPI D3DX10CreateAsyncResourceLoaderW(HMODULE module, const WCHAR *res
 
     if (!(rsrc = FindResourceW(module, resource, (const WCHAR *)RT_RCDATA)))
     {
-        ERR("Failed to find resource.\n");
+        WARN("Failed to find resource.\n");
         HeapFree(GetProcessHeap(), 0, object);
         return D3DX10_ERR_INVALID_DATA;
     }
@@ -396,4 +395,16 @@ HRESULT WINAPI D3DX10CreateAsyncResourceLoaderW(HMODULE module, const WCHAR *res
     *loader = &object->ID3DX10DataLoader_iface;
 
     return S_OK;
+}
+
+HRESULT WINAPI D3DX10PreprocessShaderFromMemory(const char *data, SIZE_T data_size, const char *filename,
+        const D3D10_SHADER_MACRO *defines, ID3DInclude *include, ID3DX10ThreadPump *pump, ID3D10Blob **shader_text,
+        ID3D10Blob **errors, HRESULT *hresult)
+{
+    FIXME("data %s, data_size %lu, filename %s, defines %p, include %p, pump %p, shader_text %p, "
+            "errors %p, hresult %p stub!\n",
+            debugstr_an(data, data_size), data_size, debugstr_a(filename), defines, include, pump,
+            shader_text, errors, hresult);
+
+    return E_NOTIMPL;
 }

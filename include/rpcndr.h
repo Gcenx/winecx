@@ -45,9 +45,7 @@ extern "C" {
 	{ l, w1, w2, { b1, b2,  b3,  b4,  b5,  b6,  b7,  b8 } }
 #else
 #define EXTERN_GUID(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) \
-        const GUID DECLSPEC_SELECTANY name DECLSPEC_HIDDEN; \
-        const GUID DECLSPEC_SELECTANY name = \
-	{ l, w1, w2, { b1, b2,  b3,  b4,  b5,  b6,  b7,  b8 } }
+        EXTERN_C const GUID name
 #endif
 #endif
 
@@ -116,7 +114,7 @@ typedef UINT64 MIDL_uhyper;
 typedef unsigned char boolean;
 
 #define __RPC_CALLEE WINAPI
-#define RPC_VAR_ENTRY __cdecl
+#define RPC_VAR_ENTRY WINAPIV
 #define NDR_SHAREABLE static
 
 #define MIDL_ascii_strlen(s) strlen(s)

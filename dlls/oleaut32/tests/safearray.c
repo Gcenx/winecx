@@ -47,8 +47,6 @@ static HMODULE hOleaut32;
 
 static HRESULT (WINAPI *pSafeArrayAllocDescriptorEx)(VARTYPE,UINT,SAFEARRAY**);
 static HRESULT (WINAPI *pSafeArrayCopyData)(SAFEARRAY*,SAFEARRAY*);
-static HRESULT (WINAPI *pSafeArrayGetIID)(SAFEARRAY*,GUID*);
-static HRESULT (WINAPI *pSafeArraySetIID)(SAFEARRAY*,REFGUID);
 static HRESULT (WINAPI *pSafeArrayGetVartype)(SAFEARRAY*,VARTYPE*);
 static HRESULT (WINAPI *pSafeArrayGetRecordInfo)(SAFEARRAY*,IRecordInfo**);
 static SAFEARRAY* (WINAPI *pSafeArrayCreateEx)(VARTYPE,UINT,SAFEARRAYBOUND*,LPVOID);
@@ -569,7 +567,7 @@ static void test_safearray(void)
 	hres = SafeArrayDestroy(a);
 	ok(hres == S_OK,"SAD failed with hres %x\n", hres);
 
-	for (i=0;i<sizeof(vttypes)/sizeof(vttypes[0]);i++) {
+        for (i = 0; i < ARRAY_SIZE(vttypes); i++) {
 	if ((i == VT_I8 || i == VT_UI8) && has_i8)
 	{
 	  vttypes[i].elemsize = sizeof(LONG64);
@@ -686,35 +684,33 @@ static void test_safearray(void)
 	hres = SafeArrayDestroyDescriptor(a);
 	ok(hres == S_OK,"SADD with data in array failed with hres %x\n",hres);
 
-	/* IID functions */
-	/* init a small stack safearray */
-    if (pSafeArraySetIID) {
-        memset(&b, 0, sizeof(b));
-        b.cDims = 1;
-        memset(&iid, 0x42, sizeof(IID));
-        hres = pSafeArraySetIID(&b,&iid);
-        ok(hres == E_INVALIDARG,"SafeArraySetIID of non IID capable safearray did not return E_INVALIDARG, but %x\n",hres);
+    /* IID functions */
+    /* init a small stack safearray */
+    memset(&b, 0, sizeof(b));
+    b.cDims = 1;
+    memset(&iid, 0x42, sizeof(IID));
+    hres = SafeArraySetIID(&b, &iid);
+    ok(hres == E_INVALIDARG, "Unexpected ret value %#x.\n", hres);
 
-        hres = SafeArrayAllocDescriptor(1,&a);
-        ok(hres == S_OK,"SafeArrayAllocDescriptor should return S_OK, but got %x\n",hres);
-        ok((a->fFeatures & FADF_HAVEIID) == 0,"newly allocated descriptor with SAAD should not have FADF_HAVEIID\n");
-        hres = pSafeArraySetIID(a,&iid);
-        ok(hres == E_INVALIDARG,"SafeArraySetIID of newly allocated descriptor with SAAD should return E_INVALIDARG, but got %x\n",hres);
+    hres = SafeArrayAllocDescriptor(1, &a);
+    ok(hres == S_OK, "Failed to allocate array descriptor, hr %#x.\n", hres);
+    ok((a->fFeatures & FADF_HAVEIID) == 0, "Unexpected features mask %#x.\n", a->fFeatures);
+    hres = SafeArraySetIID(a, &iid);
+    ok(hres == E_INVALIDARG, "Unexpected ret value %#x.\n", hres);
 
-        hres = SafeArrayDestroyDescriptor(a);
-        ok(hres == S_OK,"SADD failed with hres %x\n",hres);
-    }
+    hres = SafeArrayDestroyDescriptor(a);
+    ok(hres == S_OK,"SADD failed with hres %x\n",hres);
 
     if (!pSafeArrayAllocDescriptorEx)
         return;
 
-    for (i = 0; i < sizeof(vttypes)/sizeof(vttypes[0]); i++) {
+    for (i = 0; i < ARRAY_SIZE(vttypes); i++) {
 		a = NULL;
 		hres = pSafeArrayAllocDescriptorEx(vttypes[i].vt,1,&a);
 		ok(hres == S_OK, "SafeArrayAllocDescriptorEx gave hres 0x%x\n", hres);
 		ok(a->fFeatures == vttypes[i].expflags,"SAADE(%d) resulted with flags %x, expected %x\n", vttypes[i].vt, a->fFeatures, vttypes[i].expflags);
 		if (a->fFeatures & FADF_HAVEIID) {
-			hres = pSafeArrayGetIID(a, &iid);
+			hres = SafeArrayGetIID(a, &iid);
 			ok(hres == S_OK,"SAGIID failed for vt %d with hres %x\n", vttypes[i].vt,hres);
 			switch (vttypes[i].vt) {
 			case VT_UNKNOWN:
@@ -730,7 +726,7 @@ static void test_safearray(void)
 				break;
 			}
 		} else {
-			hres = pSafeArrayGetIID(a, &iid);
+			hres = SafeArrayGetIID(a, &iid);
 			ok(hres == E_INVALIDARG,"SAGIID did not fail for vt %d with hres %x\n", vttypes[i].vt,hres);
 		}
 		if (a->fFeatures & FADF_RECORD) {
@@ -751,13 +747,13 @@ static void test_safearray(void)
 		}
 
 		if (a->fFeatures & FADF_HAVEIID) {
-			hres = pSafeArraySetIID(a, &IID_IStorage); /* random IID */
+			hres = SafeArraySetIID(a, &IID_IStorage); /* random IID */
 			ok(hres == S_OK,"SASIID failed with FADF_HAVEIID set for vt %d with %x\n", vttypes[i].vt, hres);
-			hres = pSafeArrayGetIID(a, &iid);
+			hres = SafeArrayGetIID(a, &iid);
 			ok(hres == S_OK,"SAGIID failed with FADF_HAVEIID set for vt %d with %x\n", vttypes[i].vt, hres);
 			ok(IsEqualGUID(&iid, &IID_IStorage),"returned iid is not IID_IStorage\n");
 		} else {
-			hres = pSafeArraySetIID(a, &IID_IStorage); /* random IID */
+			hres = SafeArraySetIID(a, &IID_IStorage); /* random IID */
 			ok(hres == E_INVALIDARG,"SASIID did not failed with !FADF_HAVEIID set for vt %d with %x\n", vttypes[i].vt, hres);
 		}
 		hres = SafeArrayDestroyDescriptor(a);
@@ -769,7 +765,7 @@ static void test_SafeArrayAllocDestroyDescriptor(void)
 {
   SAFEARRAY *sa;
   HRESULT hres;
-  int i;
+  UINT i;
 
   /* Failure cases */
   hres = SafeArrayAllocDescriptor(0, &sa);
@@ -793,7 +789,7 @@ static void test_SafeArrayAllocDestroyDescriptor(void)
 
     if (hres == S_OK)
     {
-      ok(SafeArrayGetDim(sa) == (UINT)i, "Dimension is %d; should be %d\n",
+      ok(SafeArrayGetDim(sa) == i, "Dimension is %d; should be %d\n",
          SafeArrayGetDim(sa), i);
 
       hres = SafeArrayDestroyDescriptor(sa);
@@ -832,11 +828,9 @@ static void test_SafeArrayCreateLockDestroy(void)
   SAFEARRAY *sa;
   HRESULT hres;
   VARTYPE vt;
-  int dimension;
+  UINT dimension;
 
-#define NUM_DIMENSIONS (int)(sizeof(sab) / sizeof(sab[0]))
-
-  for (dimension = 0; dimension < NUM_DIMENSIONS; dimension++)
+  for (dimension = 0; dimension < ARRAY_SIZE(sab); dimension++)
   {
     sab[dimension].lLbound = 0;
     sab[dimension].cElements = 8;
@@ -854,7 +848,7 @@ static void test_SafeArrayCreateLockDestroy(void)
 
   /* Don't test 0 sized dimensions, as Windows has a bug which allows this */
 
-  for (dimension = 0; dimension < NUM_DIMENSIONS; dimension++)
+  for (dimension = 0; dimension < ARRAY_SIZE(sab); dimension++)
     sab[dimension].cElements = 8;
 
   /* Test all VARTYPES in 1-4 dimensions */
@@ -874,7 +868,7 @@ static void test_SafeArrayCreateLockDestroy(void)
 
       if (sa)
       {
-        ok(SafeArrayGetDim(sa) == (UINT)dimension,
+        ok(SafeArrayGetDim(sa) == dimension,
            "VARTYPE %d (@%d dimensions) cDims is %d, expected %d\n",
            vt, dimension, SafeArrayGetDim(sa), dimension);
         ok(SafeArrayGetElemsize(sa) == dwLen || vt == VT_R8,
@@ -885,12 +879,8 @@ static void test_SafeArrayCreateLockDestroy(void)
         {
           ok((sa->fFeatures & FADF_HAVEIID) == 0,
              "Non interface type should not have FADF_HAVEIID\n");
-          if (pSafeArraySetIID)
-          {
-            hres = pSafeArraySetIID(sa, &IID_IUnknown);
-            ok(hres == E_INVALIDARG,
-               "Non interface type allowed SetIID(), hres %x\n", hres);
-          }
+          hres = SafeArraySetIID(sa, &IID_IUnknown);
+          ok(hres == E_INVALIDARG, "Unexpected ret value %#x.\n", hres);
           if (vt != VT_RECORD)
           {
             VARTYPE aVt;
@@ -908,12 +898,8 @@ static void test_SafeArrayCreateLockDestroy(void)
         else
         {
           ok(sa->fFeatures & FADF_HAVEIID, "Interface type should have FADF_HAVEIID\n");
-          if (pSafeArraySetIID)
-          {
-            hres = pSafeArraySetIID(sa, &IID_IUnknown);
-            ok(hres == S_OK,
-               "Non interface type disallowed SetIID(), hres %x\n", hres);
-          }
+          hres = SafeArraySetIID(sa, &IID_IUnknown);
+          ok(hres == S_OK, "Failed to set array IID, hres %#x.\n", hres);
           ok((sa->fFeatures & FADF_HAVEVARTYPE) == 0,
              "Interface type %d should not have FADF_HAVEVARTYPE\n", vt);
         }
@@ -1019,13 +1005,13 @@ static void test_LockUnlock(void)
   hres = SafeArrayUnlock(NULL);
   ok(hres == E_INVALIDARG, "Lock NULL array hres 0x%x\n", hres);
 
-  for (dimension = 0; dimension < NUM_DIMENSIONS; dimension++)
+  for (dimension = 0; dimension < ARRAY_SIZE(sab); dimension++)
   {
     sab[dimension].lLbound = 0;
     sab[dimension].cElements = 8;
   }
 
-  sa = SafeArrayCreate(VT_UI1, NUM_DIMENSIONS, sab);
+  sa = SafeArrayCreate(VT_UI1, ARRAY_SIZE(sab), sab);
 
   /* Test maximum locks */
 test_LockUnlock_Vector:
@@ -1066,27 +1052,27 @@ test_LockUnlock_Vector:
 static void test_SafeArrayGetPutElement(void)
 {
   SAFEARRAYBOUND sab[4];
-  LONG indices[NUM_DIMENSIONS], index;
+  LONG indices[ARRAY_SIZE(sab)], index;
   SAFEARRAY *sa;
   HRESULT hres;
   int value = 0, gotvalue, dimension;
   IRecordInfoImpl *irec;
   unsigned int x,y,z,a;
 
-  for (dimension = 0; dimension < NUM_DIMENSIONS; dimension++)
+  for (dimension = 0; dimension < ARRAY_SIZE(sab); dimension++)
   {
     sab[dimension].lLbound = dimension * 2 + 1;
     sab[dimension].cElements = dimension * 3 + 1;
   }
 
-  sa = SafeArrayCreate(VT_INT, NUM_DIMENSIONS, sab);
+  sa = SafeArrayCreate(VT_INT, ARRAY_SIZE(sab), sab);
   if (!sa)
     return; /* Some early versions can't handle > 3 dims */
 
   ok(sa->cbElements == sizeof(value), "int size mismatch\n");
 
   /* Failure cases */
-  for (x = 0; x < NUM_DIMENSIONS; x++)
+  for (x = 0; x < ARRAY_SIZE(sab); x++)
   {
     indices[0] = sab[0].lLbound;
     indices[1] = sab[1].lLbound;
@@ -1396,16 +1382,16 @@ static void test_SafeArrayCopyData(void)
     return;
   }
 
-  for (dimension = 0; dimension < NUM_DIMENSIONS; dimension++)
+  for (dimension = 0; dimension < ARRAY_SIZE(sab); dimension++)
   {
     sab[dimension].lLbound = dimension * 2 + 2;
     sab[dimension].cElements = dimension * 3 + 1;
     size *= sab[dimension].cElements;
   }
 
-  sa = SafeArrayCreate(VT_INT, NUM_DIMENSIONS, sab);
+  sa = SafeArrayCreate(VT_INT, ARRAY_SIZE(sab), sab);
   ok(sa != NULL, "Copy test couldn't create array\n");
-  sacopy = SafeArrayCreate(VT_INT, NUM_DIMENSIONS, sab);
+  sacopy = SafeArrayCreate(VT_INT, ARRAY_SIZE(sab), sab);
   ok(sacopy != NULL, "Copy test couldn't create copy array\n");
 
   if (!sa || !sacopy)
@@ -1465,11 +1451,11 @@ static void test_SafeArrayCopyData(void)
   hres = SafeArrayDestroy(sacopy);
   ok(hres == S_OK, "got 0x%08x\n", hres);
 
-  sacopy = SafeArrayCreate(VT_INT, NUM_DIMENSIONS, sab);
+  sacopy = SafeArrayCreate(VT_INT, ARRAY_SIZE(sab), sab);
   ok(sacopy != NULL, "Copy test couldn't create copy array\n");
   ok(sacopy->fFeatures == FADF_HAVEVARTYPE, "0x%04x\n", sacopy->fFeatures);
 
-  for (i = 0; i < sizeof(ignored_copy_features)/sizeof(USHORT); i++)
+  for (i = 0; i < ARRAY_SIZE(ignored_copy_features); i++)
   {
       USHORT feature = ignored_copy_features[i];
       USHORT orig = sacopy->fFeatures;
@@ -1503,7 +1489,7 @@ static void test_SafeArrayCopyData(void)
      "got 0x%04x\n", sacopy->fFeatures);
   SafeArrayDestroy(sacopy);
 
-  sacopy = SafeArrayCreate(VT_UI1, NUM_DIMENSIONS, sab);
+  sacopy = SafeArrayCreate(VT_UI1, ARRAY_SIZE(sab), sab);
   ok(sacopy != NULL, "Copy test couldn't create copy array\n");
   ok(sacopy->fFeatures == FADF_HAVEVARTYPE, "0x%04x\n", sacopy->fFeatures);
   hres = SafeArrayCopyData(sa, sacopy);
@@ -1519,7 +1505,7 @@ static void test_SafeArrayCreateEx(void)
   SAFEARRAYBOUND sab[4];
   SAFEARRAY *sa;
   HRESULT hres;
-  int dimension;
+  UINT dimension;
 
   if (!pSafeArrayCreateEx)
   {
@@ -1527,7 +1513,7 @@ static void test_SafeArrayCreateEx(void)
     return;
   }
 
-  for (dimension = 0; dimension < NUM_DIMENSIONS; dimension++)
+  for (dimension = 0; dimension < ARRAY_SIZE(sab); dimension++)
   {
     sab[dimension].lLbound = 0;
     sab[dimension].cElements = 8;
@@ -1544,25 +1530,14 @@ static void test_SafeArrayCreateEx(void)
   if (sa)
   {
     GUID guid;
-    if (pSafeArrayGetIID)
-    {
-      hres = pSafeArrayGetIID(sa, &guid);
-      ok(hres == S_OK, "CreateEx (ITypeInfo) no IID hres 0x%x\n", hres);
-      if (hres == S_OK)
-      {
-        ok(IsEqualGUID(&guid, &IID_ITypeInfo), "CreateEx (ITypeInfo) bad IID\n");
-      }
-    }
-    if (pSafeArraySetIID)
-    {
-      hres = pSafeArraySetIID(sa, &IID_IUnknown);
-      ok(hres == S_OK, "Failed to set IID, hres = %8x\n", hres);
-      if (hres == S_OK && pSafeArrayGetIID)
-      {
-        hres = pSafeArrayGetIID(sa, &guid);
-        ok(hres == S_OK && IsEqualGUID(&guid, &IID_IUnknown), "Set bad IID\n");
-      }
-    }
+
+    hres = SafeArrayGetIID(sa, &guid);
+    ok(hres == S_OK, "Failed to get array IID, hres %#x.\n", hres);
+    ok(IsEqualGUID(&guid, &IID_ITypeInfo), "CreateEx (ITypeInfo) bad IID\n");
+    hres = SafeArraySetIID(sa, &IID_IUnknown);
+    ok(hres == S_OK, "Failed to set IID, hres = %8x\n", hres);
+    hres = SafeArrayGetIID(sa, &guid);
+    ok(hres == S_OK && IsEqualGUID(&guid, &IID_IUnknown), "Set bad IID\n");
     hres = SafeArrayDestroy(sa);
     ok(hres == S_OK, "got 0x%08x\n", hres);
   }
@@ -1573,15 +1548,10 @@ static void test_SafeArrayCreateEx(void)
   if (sa)
   {
     GUID guid;
-    if (pSafeArrayGetIID)
-    {
-      hres = pSafeArrayGetIID(sa, &guid);
-      ok(hres == S_OK, "CreateEx (NULL) no IID hres 0x%x\n", hres);
-      if (hres == S_OK)
-      {
-        ok(IsEqualGUID(&guid, &IID_IDispatch), "CreateEx (NULL) bad IID\n");
-      }
-    }
+
+    hres = SafeArrayGetIID(sa, &guid);
+    ok(hres == S_OK, "Failed to get array IID, hres %#x.\n", hres);
+    ok(IsEqualGUID(&guid, &IID_IDispatch), "CreateEx (NULL) bad IID\n");
     hres = SafeArrayDestroy(sa);
     ok(hres == S_OK, "got 0x%08x\n", hres);
   }
@@ -1592,15 +1562,10 @@ static void test_SafeArrayCreateEx(void)
   if (sa)
   {
     GUID guid;
-    if (pSafeArrayGetIID)
-    {
-      hres = pSafeArrayGetIID(sa, &guid);
-      ok(hres == S_OK, "CreateEx (NULL-Unk) no IID hres 0x%x\n", hres);
-      if (hres == S_OK)
-      {
-        ok(IsEqualGUID(&guid, &IID_IUnknown), "CreateEx (NULL-Unk) bad IID\n");
-      }
-    }
+
+    hres = SafeArrayGetIID(sa, &guid);
+    ok(hres == S_OK, "Failed to get array IID, hres %#x.\n", hres);
+    ok(IsEqualGUID(&guid, &IID_IUnknown), "CreateEx (NULL-Unk) bad IID\n");
     hres = SafeArrayDestroy(sa);
     ok(hres == S_OK, "got 0x%08x\n", hres);
   }
@@ -1798,7 +1763,7 @@ static void test_SafeArrayCopy(void)
   ok(sa->fFeatures == 0, "got src features 0x%04x\n", sa->fFeatures);
   sa->cbElements = 16;
 
-  for (i = 0; i < sizeof(ignored_copy_features)/sizeof(USHORT); i++)
+  for (i = 0; i < ARRAY_SIZE(ignored_copy_features); i++)
   {
       USHORT feature = ignored_copy_features[i];
 
@@ -2125,8 +2090,6 @@ START_TEST(safearray)
 
     GETPTR(SafeArrayAllocDescriptorEx);
     GETPTR(SafeArrayCopyData);
-    GETPTR(SafeArrayGetIID);
-    GETPTR(SafeArraySetIID);
     GETPTR(SafeArrayGetVartype);
     GETPTR(SafeArrayCreateEx);
     GETPTR(SafeArrayCreateVector);

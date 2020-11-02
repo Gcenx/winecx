@@ -294,15 +294,8 @@ static HRESULT WINAPI VfwCapture_Pause(IBaseFilter * iface)
 static HRESULT WINAPI VfwCapture_Run(IBaseFilter * iface, REFERENCE_TIME tStart)
 {
     VfwCapture *This = impl_from_IBaseFilter(iface);
-    TRACE("(%x%08x)\n", (ULONG)(tStart >> 32), (ULONG)tStart);
+    TRACE("(%s)\n", wine_dbgstr_longlong(tStart));
     return qcap_driver_run(This->driver_info, &This->filter.state);
-}
-
-/** IBaseFilter methods **/
-static HRESULT WINAPI VfwCapture_FindPin(IBaseFilter * iface, LPCWSTR Id, IPin **ppPin)
-{
-    FIXME("(%s, %p) - stub\n", debugstr_w(Id), ppPin);
-    return E_NOTIMPL;
 }
 
 static const IBaseFilterVtbl VfwCapture_Vtbl =
@@ -318,7 +311,7 @@ static const IBaseFilterVtbl VfwCapture_Vtbl =
     BaseFilterImpl_SetSyncSource,
     BaseFilterImpl_GetSyncSource,
     BaseFilterImpl_EnumPins,
-    VfwCapture_FindPin,
+    BaseFilterImpl_FindPin,
     BaseFilterImpl_QueryFilterInfo,
     BaseFilterImpl_JoinFilterGraph,
     BaseFilterImpl_QueryVendorInfo
@@ -665,6 +658,12 @@ static inline VfwPinImpl *impl_from_BasePin(BasePin *pin)
     return CONTAINING_RECORD(pin, VfwPinImpl, pin.pin);
 }
 
+static HRESULT WINAPI VfwPin_CheckMediaType(BasePin *pin, const AM_MEDIA_TYPE *amt)
+{
+    FIXME("(%p) stub\n", pin);
+    return E_NOTIMPL;
+}
+
 static HRESULT WINAPI VfwPin_GetMediaType(BasePin *pin, int iPosition, AM_MEDIA_TYPE *pmt)
 {
     VfwPinImpl *This = impl_from_BasePin(pin);
@@ -707,7 +706,7 @@ static HRESULT WINAPI VfwPin_DecideBufferSize(BaseOutputPin *iface, IMemAllocato
 
 static const BaseOutputPinFuncTable output_BaseOutputFuncTable = {
     {
-        NULL,
+        VfwPin_CheckMediaType,
         BaseOutputPinImpl_AttemptConnection,
         VfwPin_GetMediaTypeVersion,
         VfwPin_GetMediaType

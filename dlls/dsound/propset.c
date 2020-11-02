@@ -200,7 +200,6 @@ static HRESULT DSPROPERTY_DescriptionW(
     IMMDevice *mmdevice;
     IPropertyStore *ps;
     PROPVARIANT pv;
-    DWORD desclen;
     HRESULT hr;
 
     TRACE("pPropData=%p,cbPropData=%d,pcbReturned=%p)\n",
@@ -248,12 +247,9 @@ static HRESULT DSPROPERTY_DescriptionW(
         return hr;
     }
 
-    desclen = lstrlenW(pv.u.pwszVal) + 1;
-    /* FIXME: Still a memory leak.. */
-    ppd->Description = HeapAlloc(GetProcessHeap(), 0, desclen * sizeof(WCHAR));
-    memcpy(ppd->Description, pv.u.pwszVal, desclen * sizeof(WCHAR));
-    ppd->Module = wine_vxd_drv;
-    ppd->Interface = wInterface;
+    ppd->Description = strdupW(pv.u.pwszVal);
+    ppd->Module = strdupW(wine_vxd_drv);
+    ppd->Interface = strdupW(wInterface);
     ppd->Type = DIRECTSOUNDDEVICE_TYPE_VXD;
 
     PropVariantClear(&pv);
@@ -365,8 +361,8 @@ static void DSPROPERTY_descWto1(const DSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTION_W
                                 DSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTION_1_DATA *data1)
 {
     data1->DeviceId = dataW->DeviceId;
-    lstrcpynW(data1->ModuleW, dataW->Module, sizeof(data1->ModuleW)/sizeof(*data1->ModuleW));
-    lstrcpynW(data1->DescriptionW, dataW->Description, sizeof(data1->DescriptionW)/sizeof(*data1->DescriptionW));
+    lstrcpynW(data1->ModuleW, dataW->Module, ARRAY_SIZE(data1->ModuleW));
+    lstrcpynW(data1->DescriptionW, dataW->Description, ARRAY_SIZE(data1->DescriptionW));
     WideCharToMultiByte(CP_ACP, 0, data1->DescriptionW, -1, data1->DescriptionA, sizeof(data1->DescriptionA)-1, NULL, NULL);
     WideCharToMultiByte(CP_ACP, 0, data1->ModuleW, -1, data1->ModuleA, sizeof(data1->ModuleA)-1, NULL, NULL);
     data1->DescriptionA[sizeof(data1->DescriptionA)-1] = 0;
@@ -463,6 +459,7 @@ static HRESULT DSPROPERTY_DescriptionA(
         return hr;
     if (!DSPROPERTY_descWtoA(&data, ppd))
         hr = E_OUTOFMEMORY;
+    HeapFree(GetProcessHeap(), 0, data.Description);
     HeapFree(GetProcessHeap(), 0, data.Module);
     HeapFree(GetProcessHeap(), 0, data.Interface);
     return hr;
@@ -488,6 +485,7 @@ static HRESULT DSPROPERTY_Description1(
     if (FAILED(hr))
         return hr;
     DSPROPERTY_descWto1(&data, ppd);
+    HeapFree(GetProcessHeap(), 0, data.Description);
     HeapFree(GetProcessHeap(), 0, data.Module);
     HeapFree(GetProcessHeap(), 0, data.Interface);
     return hr;

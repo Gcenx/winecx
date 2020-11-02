@@ -246,11 +246,16 @@ static inline BOOL is_dib_monochrome( const BITMAPINFO* info )
 /****************************************************************************
  *          EMF_Create_HENHMETAFILE
  */
-HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, BOOL on_disk )
+HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, DWORD filesize, BOOL on_disk )
 {
     HENHMETAFILE hmf;
     ENHMETAFILEOBJ *metaObj;
 
+    if (filesize < sizeof(*emh))
+    {
+        WARN("File too small for emf header\n");
+        return 0;
+    }
     if (emh->iType != EMR_HEADER)
     {
         SetLastError(ERROR_INVALID_DATA);
@@ -261,6 +266,11 @@ HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, BOOL on_disk )
     {
         WARN("Invalid emf header type 0x%08x sig 0x%08x.\n",
              emh->iType, emh->dSignature);
+        return 0;
+    }
+    if (filesize < emh->nBytes)
+    {
+        WARN("File truncated (got %u bytes, header says %u)\n", emh->nBytes, filesize);
         return 0;
     }
 
@@ -287,7 +297,8 @@ static BOOL EMF_Delete_HENHMETAFILE( HENHMETAFILE hmf )
         UnmapViewOfFile( metaObj->emh );
     else
         HeapFree( GetProcessHeap(), 0, metaObj->emh );
-    return HeapFree( GetProcessHeap(), 0, metaObj );
+    HeapFree( GetProcessHeap(), 0, metaObj );
+    return TRUE;
 }
 
 /******************************************************************
@@ -317,14 +328,17 @@ static HENHMETAFILE EMF_GetEnhMetaFile( HANDLE hFile )
     ENHMETAHEADER *emh;
     HANDLE hMapping;
     HENHMETAFILE hemf;
+    DWORD filesize;
+
+    filesize = GetFileSize( hFile, NULL );
 
     hMapping = CreateFileMappingA( hFile, NULL, PAGE_READONLY, 0, 0, NULL );
-    emh = MapViewOfFile( hMapping, FILE_MAP_READ, 0, 0, 0 );
+    emh = MapViewOfFile( hMapping, FILE_MAP_READ, 0, 0, filesize );
     CloseHandle( hMapping );
 
     if (!emh) return 0;
 
-    hemf = EMF_Create_HENHMETAFILE( emh, TRUE );
+    hemf = EMF_Create_HENHMETAFILE( emh, filesize, TRUE );
     if (!hemf)
         UnmapViewOfFile( emh );
     return hemf;
@@ -467,7 +481,7 @@ HENHMETAFILE WINAPI SetEnhMetaFileBits(UINT bufsize, const BYTE *buf)
     ENHMETAHEADER *emh = HeapAlloc( GetProcessHeap(), 0, bufsize );
     HENHMETAFILE hmf;
     memmove(emh, buf, bufsize);
-    hmf = EMF_Create_HENHMETAFILE( emh, FALSE );
+    hmf = EMF_Create_HENHMETAFILE( emh, bufsize, FALSE );
     if (!hmf)
         HeapFree( GetProcessHeap(), 0, emh );
     return hmf;
@@ -785,6 +799,10 @@ BOOL WINAPI PlayEnhMetaFileRecord(
             break;
         info->state.mode = pSetMapMode->iMode;
         EMF_SetMapMode(hdc, info);
+
+        if (!IS_WIN9X())
+            EMF_Update_MF_Xform(hdc, info);
+
 	break;
       }
     case EMR_SETBKMODE:
@@ -886,6 +904,10 @@ BOOL WINAPI PlayEnhMetaFileRecord(
         info->state.wndOrgY = pSetWindowOrgEx->ptlOrigin.y;
 
         TRACE("SetWindowOrgEx: %d,%d\n", info->state.wndOrgX, info->state.wndOrgY);
+
+        if (!IS_WIN9X())
+            EMF_Update_MF_Xform(hdc, info);
+
         break;
       }
     case EMR_SETWINDOWEXTEX:
@@ -900,6 +922,10 @@ BOOL WINAPI PlayEnhMetaFileRecord(
             EMF_FixIsotropic(hdc, info);
 
         TRACE("SetWindowExtEx: %d,%d\n",info->state.wndExtX, info->state.wndExtY);
+
+        if (!IS_WIN9X())
+            EMF_Update_MF_Xform(hdc, info);
+
 	break;
       }
     case EMR_SETVIEWPORTORGEX:
@@ -909,6 +935,10 @@ BOOL WINAPI PlayEnhMetaFileRecord(
         info->state.vportOrgX = pSetViewportOrgEx->ptlOrigin.x;
         info->state.vportOrgY = pSetViewportOrgEx->ptlOrigin.y;
         TRACE("SetViewportOrgEx: %d,%d\n", info->state.vportOrgX, info->state.vportOrgY);
+
+        if (!IS_WIN9X())
+            EMF_Update_MF_Xform(hdc, info);
+
 	break;
       }
     case EMR_SETVIEWPORTEXTEX:
@@ -922,6 +952,10 @@ BOOL WINAPI PlayEnhMetaFileRecord(
         if (info->state.mode == MM_ISOTROPIC)
             EMF_FixIsotropic(hdc, info);
         TRACE("SetViewportExtEx: %d,%d\n", info->state.vportExtX, info->state.vportExtY);
+
+        if (!IS_WIN9X())
+            EMF_Update_MF_Xform(hdc, info);
+
 	break;
       }
     case EMR_CREATEPEN:
@@ -1251,6 +1285,10 @@ BOOL WINAPI PlayEnhMetaFileRecord(
       {
         const EMRSETWORLDTRANSFORM *lpXfrm = (const EMRSETWORLDTRANSFORM *)mr;
         info->state.world_transform = lpXfrm->xform;
+
+        if (!IS_WIN9X())
+            EMF_Update_MF_Xform(hdc, info);
+
         break;
       }
 
@@ -1406,6 +1444,9 @@ BOOL WINAPI PlayEnhMetaFileRecord(
              lpScaleViewportExtEx->xNum,lpScaleViewportExtEx->xDenom,
              lpScaleViewportExtEx->yNum,lpScaleViewportExtEx->yDenom);
 
+        if (!IS_WIN9X())
+            EMF_Update_MF_Xform(hdc, info);
+
         break;
       }
 
@@ -1431,6 +1472,9 @@ BOOL WINAPI PlayEnhMetaFileRecord(
              lpScaleWindowExtEx->xNum,lpScaleWindowExtEx->xDenom,
              lpScaleWindowExtEx->yNum,lpScaleWindowExtEx->yDenom);
 
+        if (!IS_WIN9X())
+            EMF_Update_MF_Xform(hdc, info);
+
         break;
       }
 
@@ -1443,14 +1487,20 @@ BOOL WINAPI PlayEnhMetaFileRecord(
             info->state.world_transform.eM11 = info->state.world_transform.eM22 = 1;
             info->state.world_transform.eM12 = info->state.world_transform.eM21 = 0;
             info->state.world_transform.eDx  = info->state.world_transform.eDy  = 0;
+            if (!IS_WIN9X())
+                EMF_Update_MF_Xform(hdc, info);
             break;
         case MWT_LEFTMULTIPLY:
             CombineTransform(&info->state.world_transform, &lpModifyWorldTrans->xform,
                              &info->state.world_transform);
+            if (!IS_WIN9X())
+                ModifyWorldTransform(hdc, &lpModifyWorldTrans->xform, MWT_LEFTMULTIPLY);
             break;
         case MWT_RIGHTMULTIPLY:
             CombineTransform(&info->state.world_transform, &info->state.world_transform,
                              &lpModifyWorldTrans->xform);
+            if (!IS_WIN9X())
+                EMF_Update_MF_Xform(hdc, info);
             break;
         default:
             FIXME("Unknown imode %d\n", lpModifyWorldTrans->iMode);
@@ -2420,6 +2470,14 @@ BOOL WINAPI EnumEnhMetaFile(
     {
 	emr = (ENHMETARECORD *)((char *)emh + offset);
 
+        if (offset + 8 > emh->nBytes ||
+            offset > offset + emr->nSize ||
+            offset + emr->nSize > emh->nBytes)
+        {
+            WARN("record truncated\n");
+            break;
+        }
+
         /* In Win9x mode we update the xform if the record will produce output */
         if (hdc && IS_WIN9X() && emr_produces_output(emr->iType))
             EMF_Update_MF_Xform(hdc, info);
@@ -2427,11 +2485,6 @@ BOOL WINAPI EnumEnhMetaFile(
 	TRACE("Calling EnumFunc with record %s, size %d\n", get_emr_name(emr->iType), emr->nSize);
 	ret = (*callback)(hdc, ht, emr, emh->nHandles, (LPARAM)data);
 	offset += emr->nSize;
-
-        /* WinNT - update the transform (win9x updates when the next graphics
-           output record is played). */
-        if (hdc && !IS_WIN9X())
-            EMF_Update_MF_Xform(hdc, info);
     }
 
     if (hdc)
@@ -2530,7 +2583,7 @@ HENHMETAFILE WINAPI CopyEnhMetaFileA(
     if (!file) {
         emrDst = HeapAlloc( GetProcessHeap(), 0, emrSrc->nBytes );
 	memcpy( emrDst, emrSrc, emrSrc->nBytes );
-	hmfDst = EMF_Create_HENHMETAFILE( emrDst, FALSE );
+	hmfDst = EMF_Create_HENHMETAFILE( emrDst, emrSrc->nBytes, FALSE );
 	if (!hmfDst)
 		HeapFree( GetProcessHeap(), 0, emrDst );
     } else {
@@ -2572,7 +2625,7 @@ HENHMETAFILE WINAPI CopyEnhMetaFileW(
     if (!file) {
         emrDst = HeapAlloc( GetProcessHeap(), 0, emrSrc->nBytes );
 	memcpy( emrDst, emrSrc, emrSrc->nBytes );
-	hmfDst = EMF_Create_HENHMETAFILE( emrDst, FALSE );
+	hmfDst = EMF_Create_HENHMETAFILE( emrDst, emrSrc->nBytes, FALSE );
 	if (!hmfDst)
 		HeapFree( GetProcessHeap(), 0, emrDst );
     } else {

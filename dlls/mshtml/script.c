@@ -65,6 +65,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
 #endif
 
+/* See jscript.h in jscript.dll. */
+#define SCRIPTLANGUAGEVERSION_HTML 0x400
+#define SCRIPTLANGUAGEVERSION_ES5  0x102
+
 static const WCHAR documentW[] = {'d','o','c','u','m','e','n','t',0};
 static const WCHAR windowW[] = {'w','i','n','d','o','w',0};
 static const WCHAR script_endW[] = {'<','/','S','C','R','I','P','T','>',0};
@@ -94,7 +98,7 @@ struct ScriptHost {
 
 static ScriptHost *get_elem_script_host(HTMLInnerWindow*,HTMLScriptElement*);
 
-static void set_script_prop(ScriptHost *script_host, DWORD property, VARIANT *val)
+static BOOL set_script_prop(ScriptHost *script_host, DWORD property, VARIANT *val)
 {
     IActiveScriptProperty *script_prop;
     HRESULT hres;
@@ -103,40 +107,25 @@ static void set_script_prop(ScriptHost *script_host, DWORD property, VARIANT *va
             (void**)&script_prop);
     if(FAILED(hres)) {
         WARN("Could not get IActiveScriptProperty iface: %08x\n", hres);
-        return;
+        return FALSE;
     }
 
     hres = IActiveScriptProperty_SetProperty(script_prop, property, NULL, val);
     IActiveScriptProperty_Release(script_prop);
-    if(FAILED(hres))
+    if(FAILED(hres)) {
         WARN("SetProperty(%x) failed: %08x\n", property, hres);
-}
-
-static BOOL is_quirks_mode(HTMLDocumentNode *doc)
-{
-    const WCHAR *compat_mode;
-    nsAString nsstr;
-    nsresult nsres;
-    BOOL ret = FALSE;
-
-    static const WCHAR BackCompatW[] = {'B','a','c','k','C','o','m','p','a','t',0};
-
-    nsAString_Init(&nsstr, NULL);
-    nsres = nsIDOMHTMLDocument_GetCompatMode(doc->nsdoc, &nsstr);
-    if(NS_SUCCEEDED(nsres)) {
-        nsAString_GetData(&nsstr, &compat_mode);
-        if(!strcmpW(compat_mode, BackCompatW))
-            ret = TRUE;
+        return FALSE;
     }
-    nsAString_Finish(&nsstr);
-    return ret;
+
+    return TRUE;
 }
 
 static BOOL init_script_engine(ScriptHost *script_host)
 {
+    compat_mode_t compat_mode;
     IObjectSafety *safety;
     SCRIPTSTATE state;
-    DWORD supported_opts=0, enabled_opts=0;
+    DWORD supported_opts=0, enabled_opts=0, script_mode;
     VARIANT var;
     HRESULT hres;
 
@@ -169,9 +158,21 @@ static BOOL init_script_engine(ScriptHost *script_host)
     if(FAILED(hres))
         return FALSE;
 
+    compat_mode = lock_document_mode(script_host->window->doc);
+    script_mode = compat_mode < COMPAT_MODE_IE8 ? SCRIPTLANGUAGEVERSION_5_7 : SCRIPTLANGUAGEVERSION_5_8;
+    if(IsEqualGUID(&script_host->guid, &CLSID_JScript)) {
+        if(compat_mode >= COMPAT_MODE_IE9)
+            script_mode = SCRIPTLANGUAGEVERSION_ES5;
+        script_mode |= SCRIPTLANGUAGEVERSION_HTML;
+    }
     V_VT(&var) = VT_I4;
-    V_I4(&var) = is_quirks_mode(script_host->window->doc) ? 1 : 2;
-    set_script_prop(script_host, SCRIPTPROP_INVOKEVERSIONING, &var);
+    V_I4(&var) = script_mode;
+    if(!set_script_prop(script_host, SCRIPTPROP_INVOKEVERSIONING, &var) && (script_mode & SCRIPTLANGUAGEVERSION_HTML)) {
+        /* If this failed, we're most likely using native jscript. */
+        WARN("Failed to set script mode to HTML version.\n");
+        V_I4(&var) = compat_mode < COMPAT_MODE_IE8 ? SCRIPTLANGUAGEVERSION_5_7 : SCRIPTLANGUAGEVERSION_5_8;
+        set_script_prop(script_host, SCRIPTPROP_INVOKEVERSIONING, &var);
+    }
 
     V_VT(&var) = VT_BOOL;
     V_BOOL(&var) = VARIANT_TRUE;
@@ -724,6 +725,19 @@ static ScriptHost *create_script_host(HTMLInnerWindow *window, const GUID *guid)
     return ret;
 }
 
+static void dispatch_script_readystatechange_event(HTMLScriptElement *script)
+{
+    DOMEvent *event;
+    HRESULT hres;
+
+    hres = create_document_event(script->element.node.doc, EVENTID_READYSTATECHANGE, &event);
+    if(FAILED(hres))
+        return;
+
+    dispatch_event(&script->element.node.event_target, event);
+    IDOMEvent_Release(&event->IDOMEvent_iface);
+}
+
 typedef struct {
     task_t header;
     HTMLScriptElement *elem;
@@ -737,7 +751,7 @@ static void fire_readystatechange_proc(task_t *_task)
         return;
 
     task->elem->pending_readystatechange_event = FALSE;
-    fire_event(task->elem->element.node.doc, EVENTID_READYSTATECHANGE, FALSE, &task->elem->element.node, NULL, NULL);
+    dispatch_script_readystatechange_event(task->elem);
 }
 
 static void fire_readystatechange_task_destr(task_t *_task)
@@ -772,8 +786,7 @@ static void set_script_elem_readystate(HTMLScriptElement *script_elem, READYSTAT
                 script_elem->pending_readystatechange_event = TRUE;
         }else {
             script_elem->pending_readystatechange_event = FALSE;
-            fire_event(script_elem->element.node.doc, EVENTID_READYSTATECHANGE, FALSE,
-                    &script_elem->element.node, NULL, NULL);
+            dispatch_script_readystatechange_event(script_elem);
         }
     }
 }
@@ -893,7 +906,7 @@ static void script_file_available(ScriptBSC *bsc)
         return;
     }
 
-    nsres = nsIDOMHTMLElement_GetParentNode(script_elem->element.nselem, &parent);
+    nsres = nsIDOMElement_GetParentNode(script_elem->element.dom_element, &parent);
     if(NS_FAILED(nsres) || !parent) {
         TRACE("No parent, not executing\n");
         script_elem->parse_on_bind = TRUE;
@@ -1041,8 +1054,8 @@ HRESULT load_script(HTMLScriptElement *script_elem, const WCHAR *src, BOOL async
 
     static const WCHAR wine_schemaW[] = {'w','i','n','e',':'};
 
-    if(strlenW(src) > sizeof(wine_schemaW)/sizeof(WCHAR) && !memcmp(src, wine_schemaW, sizeof(wine_schemaW)))
-        src += sizeof(wine_schemaW)/sizeof(WCHAR);
+    if(strlenW(src) > ARRAY_SIZE(wine_schemaW) && !memcmp(src, wine_schemaW, sizeof(wine_schemaW)))
+        src += ARRAY_SIZE(wine_schemaW);
 
     TRACE("(%p %s %x)\n", script_elem, debugstr_w(src), async);
 
@@ -1193,7 +1206,7 @@ static BOOL get_guid_from_language(LPCWSTR type, GUID *guid)
 
 static BOOL get_script_guid(HTMLInnerWindow *window, nsIDOMHTMLScriptElement *nsscript, GUID *guid)
 {
-    nsIDOMHTMLElement *nselem;
+    nsIDOMElement *nselem;
     const PRUnichar *language;
     nsAString val_str;
     BOOL ret = FALSE;
@@ -1217,11 +1230,11 @@ static BOOL get_script_guid(HTMLInnerWindow *window, nsIDOMHTMLScriptElement *ns
         ERR("GetType failed: %08x\n", nsres);
     }
 
-    nsres = nsIDOMHTMLScriptElement_QueryInterface(nsscript, &IID_nsIDOMHTMLElement, (void**)&nselem);
+    nsres = nsIDOMHTMLScriptElement_QueryInterface(nsscript, &IID_nsIDOMElement, (void**)&nselem);
     assert(nsres == NS_OK);
 
     nsres = get_elem_attr_value(nselem, languageW, &val_str, &language);
-    nsIDOMHTMLElement_Release(nselem);
+    nsIDOMElement_Release(nselem);
     if(NS_SUCCEEDED(nsres)) {
         if(*language) {
             ret = get_guid_from_language(language, guid);
@@ -1576,7 +1589,7 @@ void bind_event_scripts(HTMLDocumentNode *doc)
         assert(nsres == NS_OK);
         nsIDOMNode_Release(script_node);
 
-        hres = script_elem_from_nsscript(doc, nsscript, &script_elem);
+        hres = script_elem_from_nsscript(nsscript, &script_elem);
         if(FAILED(hres))
             continue;
 

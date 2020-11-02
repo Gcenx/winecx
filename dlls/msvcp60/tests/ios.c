@@ -480,19 +480,6 @@ static basic_string_wchar* (__thiscall *p_basic_string_wchar_ctor_cstr_alloc)(ba
 static const wchar_t* (__thiscall *p_basic_string_wchar_cstr)(basic_string_wchar*);
 static void (__thiscall *p_basic_string_wchar_dtor)(basic_string_wchar*);
 
-static inline const char* debugstr_longlong(ULONGLONG ll)
-{
-    /* return a different string if called up to 4 times in the same ok() */
-    static char string[4][17];
-    static int which;
-
-    if (sizeof(ll) > sizeof(unsigned long) && ll >> 32)
-        sprintf(string[which & 3], "%lx%08lx", (unsigned long)(ll >> 32), (unsigned long)ll);
-    else
-        sprintf(string[which & 3], "%lx", (unsigned long)ll);
-    return string[which++ & 3];
-}
-
 /* Emulate a __thiscall */
 #ifdef __i386__
 
@@ -871,7 +858,7 @@ static void test_num_get_get_double(void)
         { "1.0e1,0", NULL,      IOSTATE_goodbit, 10.0,  ',' }, /* group in exponent */
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func3(p_basic_string_char_ctor_cstr_alloc, &str, tests[i].str, &fake_allocator);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
@@ -995,7 +982,7 @@ static void test_num_put_put_double(void)
         { -1.23456789e-9, NULL, 9, FMTFLAG_fixed, "-0.000000001"       }
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func3(p_basic_stringstream_char_ctor_mode, &ss, OPENMODE_in|OPENMODE_out, TRUE);
 
@@ -1085,7 +1072,7 @@ static void test_istream_ipfx(void)
         { "\n\t ws",    TRUE,  FALSE, TRUE,  IOSTATE_goodbit, '\n' },
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func3(p_basic_string_char_ctor_cstr_alloc, &str, tests[i].str, &fake_allocator);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
@@ -1165,7 +1152,7 @@ static void test_istream_ignore(void)
         { "ABC ",         42, ' ',  IOSTATE_goodbit, EOF }, /* delim at end */
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func3(p_basic_string_char_ctor_cstr_alloc, &str, tests[i].str, &fake_allocator);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
@@ -1229,7 +1216,7 @@ static void test_istream_seekg(void)
         { "",            0, SEEKDIR_beg, IOSTATE_goodbit, EOF },
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func3(p_basic_string_char_ctor_cstr_alloc, &str, tests[i].str, &fake_allocator);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
@@ -1288,7 +1275,7 @@ static void test_istream_seekg_fpos(void)
         { "",           0,  IOSTATE_goodbit, EOF },
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func3(p_basic_string_char_ctor_cstr_alloc, &str, tests[i].str, &fake_allocator);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
@@ -1349,7 +1336,7 @@ static void test_istream_peek(void)
         { "ABCDEF", 'A', 'A', IOSTATE_goodbit },
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func3(p_basic_string_char_ctor_cstr_alloc, &str, tests[i].str, &fake_allocator);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
@@ -1420,7 +1407,7 @@ static void test_istream_tellg(void)
         { "ABCDEFGHIJ", -6,  0,  0,  0 }
     };
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* stringstream<char> version */
         call_func3(p_basic_string_char_ctor_cstr_alloc, &str, tests[i].str, &fake_allocator);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);
@@ -1439,8 +1426,12 @@ static void test_istream_tellg(void)
 
         ok(tests[i].telloff_ss == tpos.off, "wrong offset, expected = %ld found = %ld\n", tests[i].telloff_ss, tpos.off);
         ok(rpos == &tpos, "wrong return fpos, expected = %p found = %p\n", rpos, &tpos);
-        ok(tpos.pos == 0, "wrong position, expected = 0 found = %s\n", debugstr_longlong(tpos.pos));
+        ok(tpos.pos == 0, "wrong position, expected = 0 found = %s\n", wine_dbgstr_longlong(tpos.pos));
         ok(tpos.state == 0, "wrong state, expected = 0 found = %d\n", tpos.state);
+        if(tests[i].seekoff == -1) {
+            ok(ss.basic_ios.base.state == IOSTATE_goodbit,
+                    "ss.basic_ios.base.state = %x\n", ss.basic_ios.base.state);
+        }
 
         call_func1(p_basic_stringstream_char_vbase_dtor, &ss);
         call_func1(p_basic_string_char_dtor, &str);
@@ -1464,8 +1455,12 @@ static void test_istream_tellg(void)
 
         ok(tests[i].telloff_ss == tpos.off, "wrong offset, expected = %ld found = %ld\n", tests[i].telloff_ss, tpos.off);
         ok(rpos == &tpos, "wrong return fpos, expected = %p found = %p\n", rpos, &tpos);
-        ok(tpos.pos == 0, "wrong position, expected = 0 found = %s\n", debugstr_longlong(tpos.pos));
+        ok(tpos.pos == 0, "wrong position, expected = 0 found = %s\n", wine_dbgstr_longlong(tpos.pos));
         ok(tpos.state == 0, "wrong state, expected = 0 found = %d\n", tpos.state);
+        if(tests[i].seekoff == -1) {
+            ok(ss.basic_ios.base.state == IOSTATE_goodbit,
+                    "ss.basic_ios.base.state = %x\n", ss.basic_ios.base.state);
+        }
 
         call_func1(p_basic_stringstream_wchar_vbase_dtor, &wss);
         call_func1(p_basic_string_wchar_dtor, &wstr);
@@ -1491,7 +1486,7 @@ static void test_istream_tellg(void)
         rpos = call_func2(p_basic_istream_char_tellg, &fs.base.base1, &tpos);
 
         ok(tests[i].tellpos == tpos.pos, "wrong filepos, expected = %s found = %s\n",
-            debugstr_longlong(tests[i].tellpos), debugstr_longlong(tpos.pos));
+            wine_dbgstr_longlong(tests[i].tellpos), wine_dbgstr_longlong(tpos.pos));
         ok(rpos == &tpos, "wrong return fpos, expected = %p found = %p\n", rpos, &tpos);
         ok(tpos.off == tests[i].telloff_fs, "wrong offset, expected %ld found %ld\n", tests[i].telloff_fs, tpos.off);
         ok(tpos.state == 0, "wrong state, expected = 0 found = %d\n", tpos.state);
@@ -1514,7 +1509,7 @@ static void test_istream_tellg(void)
         rpos = call_func2(p_basic_istream_wchar_tellg, &wfs.base.base1, &tpos);
 
         ok(tests[i].tellpos == tpos.pos, "wrong filepos, expected = %s found = %s\n",
-            debugstr_longlong(tests[i].tellpos), debugstr_longlong(tpos.pos));
+            wine_dbgstr_longlong(tests[i].tellpos), wine_dbgstr_longlong(tpos.pos));
         ok(rpos == &tpos, "wrong return fpos, expected = %p found = %p\n", rpos, &tpos);
         ok(tpos.off == tests[i].telloff_fs, "wrong offset, expected %ld found %ld\n", tests[i].telloff_fs, tpos.off);
         ok(tpos.state == 0, "wrong state, expected = 0 found = %d\n", tpos.state);
@@ -1567,7 +1562,7 @@ static void test_istream_getline(void)
         return;
     }
 
-    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+    for(i=0; i<ARRAY_SIZE(tests); i++) {
         /* char version */
         call_func3(p_basic_string_char_ctor_cstr_alloc, &str, tests[i].str, &fake_allocator);
         call_func4(p_basic_stringstream_char_ctor_str, &ss, &str, OPENMODE_out|OPENMODE_in, TRUE);

@@ -32,25 +32,6 @@
  */
 static WCHAR sExeName[MAX_PATH] = {0};
 static GUID gameInstanceId;
-static HRESULT WINAPI (*pSHGetFolderPathW)(HWND,int,HANDLE,DWORD,LPWSTR);
-/*******************************************************************************
- *_loadDynamicRoutines
- *
- * Helper function, prepares pointers to system procedures which may be not
- * available on older operating systems.
- *
- * Returns:
- *  TRUE                        procedures were loaded successfully
- *  FALSE                       procedures were not loaded successfully
- */
-static BOOL _loadDynamicRoutines(void)
-{
-    HMODULE hModule = LoadLibraryA( "shell32.dll" );
-
-    pSHGetFolderPathW = (LPVOID)GetProcAddress(hModule, "SHGetFolderPathW");
-    if (!pSHGetFolderPathW) return FALSE;
-    return TRUE;
-}
 
 /*******************************************************************************
  * Registers test suite executable as game in Games Explorer. Required to test
@@ -63,7 +44,7 @@ static void test_register_game(IGameExplorer **explorer)
     BSTR bstrExeName, bstrExePath;
 
     /* prepare path to binary */
-    GetModuleFileNameW(NULL, sExeName, sizeof (sExeName) / sizeof (sExeName[0]));
+    GetModuleFileNameW(NULL, sExeName, ARRAY_SIZE(sExeName));
 
     lstrcpyW(pathW, sExeName);
     PathRemoveFileSpecW(pathW);
@@ -117,10 +98,10 @@ static HRESULT _buildStatisticsFilePath(LPCGUID guidApplicationId, LPWSTR *lpSta
     HRESULT hr;
     WCHAR sGuid[49], sPath[MAX_PATH];
 
-    hr = pSHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, sPath);
+    hr = SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, sPath);
 
     if(SUCCEEDED(hr))
-        hr = (StringFromGUID2(guidApplicationId, sGuid, sizeof(sGuid) / sizeof(sGuid[0])) != 0 ? S_OK : E_FAIL);
+        hr = (StringFromGUID2(guidApplicationId, sGuid, ARRAY_SIZE(sGuid)) != 0 ? S_OK : E_FAIL);
 
     if(SUCCEEDED(hr))
     {
@@ -395,14 +376,6 @@ START_TEST(gamestatistics)
     HRESULT hr;
     IGameStatisticsMgr* gsm;
     IGameExplorer *ge;
-
-    if (!_loadDynamicRoutines())
-    {
-        /* this is not a failure, because a procedure loaded by address
-         * is always available on systems which has gameux.dll */
-        win_skip("too old system, cannot load required dynamic procedures\n");
-        return;
-    }
 
     hr = CoInitialize( NULL );
     ok(hr == S_OK, "failed to init COM\n");

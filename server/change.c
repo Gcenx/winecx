@@ -187,6 +187,8 @@ static const struct fd_ops dir_fd_ops =
     no_fd_read,                  /* read */
     no_fd_write,                 /* write */
     no_fd_flush,                 /* flush */
+    no_fd_get_file_info,         /* get_file_info */
+    no_fd_get_volume_info,       /* get_volume_info */
     default_fd_ioctl,            /* ioctl */
     default_fd_queue_async,      /* queue_async */
     default_fd_reselect_async    /* reselect_async */
@@ -1246,8 +1248,8 @@ DECL_HANDLER(read_directory_changes)
         return;
 
     /* requests don't timeout */
-    if (!(async = create_async( current, &req->async, NULL ))) goto end;
-    if (!fd_queue_async( dir->fd, async, ASYNC_TYPE_WAIT )) goto end;
+    if (!(async = create_async( dir->fd, current, &req->async, NULL ))) goto end;
+    fd_queue_async( dir->fd, async, ASYNC_TYPE_WAIT );
 
     /* assign it once */
     if (!dir->filter)
@@ -1269,8 +1271,8 @@ DECL_HANDLER(read_directory_changes)
 
     set_error(STATUS_PENDING);
 
+    release_object( async );
 end:
-    if (async) release_object( async );
     release_object( dir );
 }
 

@@ -87,7 +87,7 @@ struct dbg_process*	dbg_curr_process = NULL;
 struct dbg_thread*	dbg_curr_thread = NULL;
 DWORD_PTR	        dbg_curr_tid = 0;
 DWORD_PTR	        dbg_curr_pid = 0;
-CONTEXT                 dbg_context;
+dbg_ctx_t               dbg_context;
 BOOL    	        dbg_interactiveP = FALSE;
 HANDLE                  dbg_houtput = 0;
 
@@ -241,7 +241,7 @@ const struct dbg_internal_var* dbg_get_internal_var(const char* name)
     {
 	if (!strcmp(div->name, name)) return div;
     }
-    for (div = be_cpu->context_vars; div->name; div++)
+    for (div = dbg_curr_process->be_cpu->context_vars; div->name; div++)
     {
 	if (!strcasecmp(div->name, name))
         {
@@ -279,24 +279,31 @@ struct dbg_process*     dbg_get_process_h(HANDLE h)
     return NULL;
 }
 
+#ifdef __i386__
+extern struct backend_cpu be_i386;
+#elif defined(__powerpc__)
+extern struct backend_cpu be_ppc;
+#elif defined(__x86_64__)
+extern struct backend_cpu be_i386;
+extern struct backend_cpu be_x86_64;
+#elif defined(__arm__) && !defined(__ARMEB__)
+extern struct backend_cpu be_arm;
+#elif defined(__aarch64__) && !defined(__AARCH64EB__)
+extern struct backend_cpu be_arm64;
+#else
+# error CPU unknown
+#endif
+
 struct dbg_process*	dbg_add_process(const struct be_process_io* pio, DWORD pid, HANDLE h)
 {
     struct dbg_process*	p;
+    BOOL wow64;
 
     if ((p = dbg_get_process(pid)))
-    {
-        if (p->handle != 0)
-        {
-            WINE_ERR("Process (%04x) is already defined\n", pid);
-        }
-        else
-        {
-            p->handle = h;
-            p->process_io = pio;
-            p->imageName = NULL;
-        }
         return p;
-    }
+
+    if (!h)
+        h = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
 
     if (!(p = HeapAlloc(GetProcessHeap(), 0, sizeof(struct dbg_process)))) return NULL;
     p->handle = h;
@@ -318,6 +325,22 @@ struct dbg_process*	dbg_add_process(const struct be_process_io* pio, DWORD pid, 
     p->source_end_line = -1;
 
     list_add_head(&dbg_process_list, &p->entry);
+
+    IsWow64Process(h, &wow64);
+
+#ifdef __i386__
+    p->be_cpu = &be_i386;
+#elif defined(__powerpc__)
+    p->be_cpu = &be_ppc;
+#elif defined(__x86_64__)
+    p->be_cpu = wow64 ? &be_i386 : &be_x86_64;
+#elif defined(__arm__) && !defined(__ARMEB__)
+    p->be_cpu = &be_arm;
+#elif defined(__aarch64__) && !defined(__AARCH64EB__)
+    p->be_cpu = &be_arm64;
+#else
+# error CPU unknown
+#endif
     return p;
 }
 
@@ -425,7 +448,7 @@ BOOL dbg_get_debuggee_info(HANDLE hProcess, IMAGEHLP_MODULE64* imh_mod)
      * enumeration
      */
     SymSetOptions((opt = SymGetOptions()) | 0x40000000);
-    SymEnumerateModules64(hProcess, mod_loader_cb, (void*)&mli);
+    SymEnumerateModules64(hProcess, mod_loader_cb, &mli);
     SymSetOptions(opt);
 
     return imh_mod->BaseOfImage != 0;
@@ -609,20 +632,34 @@ static LONG CALLBACK top_filter( EXCEPTION_POINTERS *ptr )
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
-struct backend_cpu* be_cpu;
-#ifdef __i386__
-extern struct backend_cpu be_i386;
-#elif defined(__powerpc__)
-extern struct backend_cpu be_ppc;
-#elif defined(__x86_64__)
-extern struct backend_cpu be_x86_64;
-#elif defined(__arm__) && !defined(__ARMEB__)
-extern struct backend_cpu be_arm;
-#elif defined(__aarch64__) && !defined(__AARCH64EB__)
-extern struct backend_cpu be_arm64;
-#else
-# error CPU unknown
-#endif
+static void restart_if_wow64(void)
+{
+    BOOL is_wow64;
+
+    if (IsWow64Process( GetCurrentProcess(), &is_wow64 ) && is_wow64)
+    {
+        STARTUPINFOW si;
+        PROCESS_INFORMATION pi;
+        WCHAR filename[MAX_PATH];
+        void *redir;
+        DWORD exit_code;
+
+        memset( &si, 0, sizeof(si) );
+        si.cb = sizeof(si);
+        GetModuleFileNameW( 0, filename, MAX_PATH );
+
+        Wow64DisableWow64FsRedirection( &redir );
+        if (CreateProcessW( filename, GetCommandLineW(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi ))
+        {
+            WINE_TRACE( "restarting %s\n", wine_dbgstr_w(filename) );
+            WaitForSingleObject( pi.hProcess, INFINITE );
+            GetExitCodeProcess( pi.hProcess, &exit_code );
+            ExitProcess( exit_code );
+        }
+        else WINE_ERR( "failed to restart 64-bit %s, err %d\n", wine_dbgstr_w(filename), GetLastError() );
+        Wow64RevertWow64FsRedirection( redir );
+    }
+}
 
 int main(int argc, char** argv)
 {
@@ -630,19 +667,6 @@ int main(int argc, char** argv)
     HANDLE              hFile = INVALID_HANDLE_VALUE;
     enum dbg_start      ds;
 
-#ifdef __i386__
-    be_cpu = &be_i386;
-#elif defined(__powerpc__)
-    be_cpu = &be_ppc;
-#elif defined(__x86_64__)
-    be_cpu = &be_x86_64;
-#elif defined(__arm__) && !defined(__ARMEB__)
-    be_cpu = &be_arm;
-#elif defined(__aarch64__) && !defined(__AARCH64EB__)
-    be_cpu = &be_arm64;
-#else
-# error CPU unknown
-#endif
     /* Initialize the output */
     dbg_houtput = GetStdHandle(STD_OUTPUT_HANDLE);
 
@@ -659,6 +683,7 @@ int main(int argc, char** argv)
 
     if (argc && !strcmp(argv[0], "--gdb"))
     {
+        restart_if_wow64();
         retv = gdb_main(argc, argv);
         if (retv == -1) dbg_winedbg_usage(FALSE);
         return retv;
@@ -731,6 +756,8 @@ int main(int argc, char** argv)
     case start_error_parse:     return dbg_winedbg_usage(FALSE);
     case start_error_init:      return -1;
     }
+
+    restart_if_wow64();
 
     dbg_start_interactive(hFile);
 

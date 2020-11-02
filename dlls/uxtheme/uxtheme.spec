@@ -100,6 +100,7 @@
 @ stdcall GetWindowTheme(ptr)
 @ stdcall HitTestThemeBackground(ptr long long long long ptr long int64 ptr)
 @ stdcall IsAppThemed()
+@ stdcall IsCompositionActive()
 @ stdcall IsThemeActive()
 @ stdcall IsThemeBackgroundPartiallyTransparent(ptr long long)
 @ stdcall IsThemeDialogTextureEnabled(ptr)
@@ -107,3 +108,4 @@
 @ stdcall OpenThemeData(ptr wstr)
 @ stdcall SetThemeAppProperties(long)
 @ stdcall SetWindowTheme(ptr wstr wstr)
+@ stdcall SetWindowThemeAttribute(ptr long ptr long)

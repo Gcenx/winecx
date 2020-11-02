@@ -600,7 +600,7 @@ static HRESULT WINAPI AviMux_Run(IBaseFilter *iface, REFERENCE_TIME tStart)
     HRESULT hr;
     int i, stream_id;
 
-    TRACE("(%p)->(0x%x%08x)\n", This, (ULONG)(tStart >> 32), (ULONG)tStart);
+    TRACE("(%p)->(%s)\n", This, wine_dbgstr_longlong(tStart));
 
     if(This->filter.state == State_Running)
         return S_OK;
@@ -1223,6 +1223,12 @@ static const ISpecifyPropertyPagesVtbl SpecifyPropertyPagesVtbl = {
     SpecifyPropertyPages_GetPages
 };
 
+static HRESULT WINAPI AviMuxOut_CheckMediaType(BasePin *base, const AM_MEDIA_TYPE *amt)
+{
+    FIXME("(%p) stub\n", base);
+    return S_OK;
+}
+
 static HRESULT WINAPI AviMuxOut_AttemptConnection(BasePin *base,
         IPin *pReceivePin, const AM_MEDIA_TYPE *pmt)
 {
@@ -1299,7 +1305,7 @@ static HRESULT WINAPI AviMuxOut_BreakConnect(BaseOutputPin *base)
 
 static const BaseOutputPinFuncTable AviMuxOut_BaseOutputFuncTable = {
     {
-        NULL,
+        AviMuxOut_CheckMediaType,
         AviMuxOut_AttemptConnection,
         AviMuxOut_GetMediaTypeVersion,
         AviMuxOut_GetMediaType
@@ -1484,8 +1490,7 @@ static HRESULT WINAPI AviMuxOut_NewSegment(IPin *iface, REFERENCE_TIME tStart,
         REFERENCE_TIME tStop, double dRate)
 {
     AviMux *This = impl_from_out_IPin(iface);
-    TRACE("(%p)->(0x%x%08x 0x%x%08x %lf)\n", This, (ULONG)(tStart >> 32),
-            (ULONG)tStart, (ULONG)(tStop >> 32), (ULONG)tStop, dRate);
+    TRACE("(%p)->(%s %s %f)\n", This, wine_dbgstr_longlong(tStart), wine_dbgstr_longlong(tStop), dRate);
     return BasePinImpl_NewSegment(iface, tStart, tStop, dRate);
 }
 
@@ -1960,8 +1965,8 @@ static HRESULT WINAPI AviMuxIn_NewSegment(IPin *iface, REFERENCE_TIME tStart,
 {
     AviMux *This = impl_from_in_IPin(iface);
     AviMuxIn *avimuxin = AviMuxIn_from_IPin(iface);
-    TRACE("(%p:%s)->(0x%x%08x 0x%x%08x %lf)\n", This, debugstr_w(avimuxin->pin.pin.pinInfo.achName),
-         (ULONG)(tStart >> 32), (ULONG)tStart, (ULONG)(tStop >> 32), (ULONG)tStop, dRate);
+    TRACE("(%p:%s)->(%s %s %f)\n", This, debugstr_w(avimuxin->pin.pin.pinInfo.achName),
+         wine_dbgstr_longlong(tStart), wine_dbgstr_longlong(tStop), dRate);
     return BasePinImpl_NewSegment(iface, tStart, tStop, dRate);
 }
 

@@ -24,19 +24,9 @@
 #include "wine/wgl.h"
 
 #define MAX_FORMATS 256
-typedef void* HPBUFFERARB;
 
 /* WGL_ARB_create_context */
 static HGLRC (WINAPI *pwglCreateContextAttribsARB)(HDC hDC, HGLRC hShareContext, const int *attribList);
-
-#define WGL_CONTEXT_MAJOR_VERSION_ARB 0x2091
-#define WGL_CONTEXT_MINOR_VERSION_ARB 0x2092
-#define WGL_CONTEXT_LAYER_PLANE_ARB 0x2093
-#define WGL_CONTEXT_FLAGS_ARB 0x2094
-
-/* Flags for WGL_CONTEXT_FLAGS_ARB */
-#define WGL_CONTEXT_DEBUG_BIT_ARB 0x0001
-#define WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB	0x0002
 
 /* WGL_ARB_extensions_string */
 static const char* (WINAPI *pwglGetExtensionsStringARB)(HDC);
@@ -47,24 +37,11 @@ static BOOL (WINAPI *pwglMakeContextCurrentARB)(HDC hdraw, HDC hread, HGLRC hglr
 static HDC (WINAPI *pwglGetCurrentReadDCARB)(void);
 
 /* WGL_ARB_pixel_format */
-#define WGL_ACCELERATION_ARB 0x2003
-#define WGL_COLOR_BITS_ARB 0x2014
-#define WGL_RED_BITS_ARB   0x2015
-#define WGL_GREEN_BITS_ARB 0x2017
-#define WGL_BLUE_BITS_ARB  0x2019
-#define WGL_ALPHA_BITS_ARB 0x201B
-#define WGL_SUPPORT_GDI_ARB   0x200F
-#define WGL_DOUBLE_BUFFER_ARB 0x2011
-#define WGL_NO_ACCELERATION_ARB        0x2025
-#define WGL_GENERIC_ACCELERATION_ARB   0x2026
-#define WGL_FULL_ACCELERATION_ARB      0x2027
-
 static BOOL (WINAPI *pwglChoosePixelFormatARB)(HDC, const int *, const FLOAT *, UINT, int *, UINT *);
 static BOOL (WINAPI *pwglGetPixelFormatAttribivARB)(HDC, int, int, UINT, const int *, int *);
 
 /* WGL_ARB_pbuffer */
-#define WGL_DRAW_TO_PBUFFER_ARB 0x202D
-static HPBUFFERARB* (WINAPI *pwglCreatePbufferARB)(HDC, int, int, int, const int *);
+static HPBUFFERARB (WINAPI *pwglCreatePbufferARB)(HDC, int, int, int, const int *);
 static HDC (WINAPI *pwglGetPbufferDCARB)(HPBUFFERARB);
 
 /* WGL_EXT_swap_control */
@@ -232,6 +209,101 @@ static void test_pbuffers(HDC hdc)
     else skip("Pbuffer test for offscreen pixelformat skipped as no offscreen-only format with pbuffer capabilities has been found\n");
 }
 
+static int test_pfd(const PIXELFORMATDESCRIPTOR *pfd)
+{
+    int pf;
+    HDC hdc;
+    HWND hwnd;
+
+    hwnd = CreateWindowA("static", "Title", WS_OVERLAPPEDWINDOW, 10, 10, 200, 200, NULL, NULL,
+            NULL, NULL);
+    if (!hwnd)
+        return 0;
+
+    hdc = GetDC( hwnd );
+    pf = ChoosePixelFormat( hdc, pfd );
+    ReleaseDC( hwnd, hdc );
+    DestroyWindow( hwnd );
+
+    return pf;
+}
+
+static void test_choosepixelformat(void)
+{
+    PIXELFORMATDESCRIPTOR pfd = {
+        sizeof(PIXELFORMATDESCRIPTOR),
+        1,                     /* version */
+        PFD_DRAW_TO_WINDOW |
+        PFD_SUPPORT_OPENGL |
+        PFD_TYPE_RGBA,
+        0,                     /* color depth */
+        0, 0, 0, 0, 0, 0,      /* color bits */
+        0,                     /* alpha buffer */
+        0,                     /* shift bit */
+        0,                     /* accumulation buffer */
+        0, 0, 0, 0,            /* accum bits */
+        0,                     /* z-buffer */
+        0,                     /* stencil buffer */
+        0,                     /* auxiliary buffer */
+        PFD_MAIN_PLANE,        /* main layer */
+        0,                     /* reserved */
+        0, 0, 0                /* layer masks */
+    };
+
+    ok( test_pfd(&pfd), "Simple pfd failed\n" );
+    pfd.dwFlags |= PFD_DOUBLEBUFFER_DONTCARE;
+    ok( test_pfd(&pfd), "PFD_DOUBLEBUFFER_DONTCARE failed\n" );
+    pfd.dwFlags |= PFD_STEREO_DONTCARE;
+    ok( test_pfd(&pfd), "PFD_DOUBLEBUFFER_DONTCARE|PFD_STEREO_DONTCARE failed\n" );
+    pfd.dwFlags &= ~PFD_DOUBLEBUFFER_DONTCARE;
+    ok( test_pfd(&pfd), "PFD_STEREO_DONTCARE failed\n" );
+    pfd.dwFlags &= ~PFD_STEREO_DONTCARE;
+
+    pfd.cColorBits = 32;
+    ok( test_pfd(&pfd), "Simple pfd failed\n" );
+    pfd.dwFlags |= PFD_DOUBLEBUFFER_DONTCARE;
+    ok( test_pfd(&pfd), "PFD_DOUBLEBUFFER_DONTCARE failed\n" );
+    pfd.dwFlags |= PFD_STEREO_DONTCARE;
+    ok( test_pfd(&pfd), "PFD_DOUBLEBUFFER_DONTCARE|PFD_STEREO_DONTCARE failed\n" );
+    pfd.dwFlags &= ~PFD_DOUBLEBUFFER_DONTCARE;
+    ok( test_pfd(&pfd), "PFD_STEREO_DONTCARE failed\n" );
+    pfd.dwFlags &= ~PFD_STEREO_DONTCARE;
+    pfd.cColorBits = 0;
+
+    pfd.cAlphaBits = 8;
+    ok( test_pfd(&pfd), "Simple pfd failed\n" );
+    pfd.dwFlags |= PFD_DOUBLEBUFFER_DONTCARE;
+    ok( test_pfd(&pfd), "PFD_DOUBLEBUFFER_DONTCARE failed\n" );
+    pfd.dwFlags |= PFD_STEREO_DONTCARE;
+    ok( test_pfd(&pfd), "PFD_DOUBLEBUFFER_DONTCARE|PFD_STEREO_DONTCARE failed\n" );
+    pfd.dwFlags &= ~PFD_DOUBLEBUFFER_DONTCARE;
+    ok( test_pfd(&pfd), "PFD_STEREO_DONTCARE failed\n" );
+    pfd.dwFlags &= ~PFD_STEREO_DONTCARE;
+    pfd.cAlphaBits = 0;
+
+    pfd.cStencilBits = 8;
+    ok( test_pfd(&pfd), "Simple pfd failed\n" );
+    pfd.dwFlags |= PFD_DOUBLEBUFFER_DONTCARE;
+    ok( test_pfd(&pfd), "PFD_DOUBLEBUFFER_DONTCARE failed\n" );
+    pfd.dwFlags |= PFD_STEREO_DONTCARE;
+    ok( test_pfd(&pfd), "PFD_DOUBLEBUFFER_DONTCARE|PFD_STEREO_DONTCARE failed\n" );
+    pfd.dwFlags &= ~PFD_DOUBLEBUFFER_DONTCARE;
+    ok( test_pfd(&pfd), "PFD_STEREO_DONTCARE failed\n" );
+    pfd.dwFlags &= ~PFD_STEREO_DONTCARE;
+    pfd.cStencilBits = 0;
+
+    pfd.cAuxBuffers = 1;
+    ok( test_pfd(&pfd), "Simple pfd failed\n" );
+    pfd.dwFlags |= PFD_DOUBLEBUFFER_DONTCARE;
+    ok( test_pfd(&pfd), "PFD_DOUBLEBUFFER_DONTCARE failed\n" );
+    pfd.dwFlags |= PFD_STEREO_DONTCARE;
+    ok( test_pfd(&pfd), "PFD_DOUBLEBUFFER_DONTCARE|PFD_STEREO_DONTCARE failed\n" );
+    pfd.dwFlags &= ~PFD_DOUBLEBUFFER_DONTCARE;
+    ok( test_pfd(&pfd), "PFD_STEREO_DONTCARE failed\n" );
+    pfd.dwFlags &= ~PFD_STEREO_DONTCARE;
+    pfd.cAuxBuffers = 0;
+}
+
 static void test_setpixelformat(HDC winhdc)
 {
     int res = 0;
@@ -302,6 +374,30 @@ static void test_setpixelformat(HDC winhdc)
         ok( i == pf, "GetPixelFormat returned wrong format %d/%d\n", i, pf );
         ReleaseDC( hwnd, hdc );
         DestroyWindow( hwnd );
+        /* check various calls with invalid hdc */
+        SetLastError( 0xdeadbeef );
+        i = GetPixelFormat( hdc );
+        ok( i == 0, "GetPixelFormat succeeded\n" );
+        ok( GetLastError() == ERROR_INVALID_PIXEL_FORMAT, "wrong error %u\n", GetLastError() );
+        SetLastError( 0xdeadbeef );
+        res = SetPixelFormat( hdc, pf, &pfd );
+        ok( !res, "SetPixelFormat succeeded\n" );
+        ok( GetLastError() == ERROR_INVALID_HANDLE, "wrong error %u\n", GetLastError() );
+        SetLastError( 0xdeadbeef );
+        res = DescribePixelFormat( hdc, 0, 0, NULL );
+        ok( !res, "DescribePixelFormat succeeded\n" );
+        ok( GetLastError() == ERROR_INVALID_HANDLE, "wrong error %u\n", GetLastError() );
+        SetLastError( 0xdeadbeef );
+        pf = ChoosePixelFormat( hdc, &pfd );
+        ok( !pf, "ChoosePixelFormat succeeded\n" );
+        ok( GetLastError() == ERROR_INVALID_HANDLE, "wrong error %u\n", GetLastError() );
+        SetLastError( 0xdeadbeef );
+        res = SwapBuffers( hdc );
+        ok( !res, "SwapBuffers succeeded\n" );
+        ok( GetLastError() == ERROR_INVALID_HANDLE, "wrong error %u\n", GetLastError() );
+        SetLastError( 0xdeadbeef );
+        ok( !wglCreateContext( hdc ), "CreateContext succeeded\n" );
+        ok( GetLastError() == ERROR_INVALID_HANDLE, "wrong error %u\n", GetLastError() );
     }
 
     hwnd = CreateWindowA("static", "Title", WS_OVERLAPPEDWINDOW, 10, 10, 200, 200, NULL, NULL,
@@ -429,7 +525,7 @@ static void test_colorbits(HDC hdc)
 {
     const int iAttribList[] = { WGL_COLOR_BITS_ARB, WGL_RED_BITS_ARB, WGL_GREEN_BITS_ARB,
                                 WGL_BLUE_BITS_ARB, WGL_ALPHA_BITS_ARB };
-    int iAttribRet[sizeof(iAttribList)/sizeof(iAttribList[0])];
+    int iAttribRet[ARRAY_SIZE(iAttribList)];
     const int iAttribs[] = { WGL_ALPHA_BITS_ARB, 1, 0 };
     unsigned int nFormats;
     BOOL res;
@@ -449,8 +545,8 @@ static void test_colorbits(HDC hdc)
         return;
     }
 
-    res = pwglGetPixelFormatAttribivARB(hdc, iPixelFormat, 0,
-              sizeof(iAttribList)/sizeof(iAttribList[0]), iAttribList, iAttribRet);
+    res = pwglGetPixelFormatAttribivARB(hdc, iPixelFormat, 0, ARRAY_SIZE(iAttribList), iAttribList,
+            iAttribRet);
     if(res == FALSE)
     {
         skip("wglGetPixelFormatAttribivARB failed\n");
@@ -464,7 +560,7 @@ static void test_colorbits(HDC hdc)
 static void test_gdi_dbuf(HDC hdc)
 {
     const int iAttribList[] = { WGL_SUPPORT_GDI_ARB, WGL_DOUBLE_BUFFER_ARB };
-    int iAttribRet[sizeof(iAttribList)/sizeof(iAttribList[0])];
+    int iAttribRet[ARRAY_SIZE(iAttribList)];
     unsigned int nFormats;
     int iPixelFormat;
     BOOL res;
@@ -478,9 +574,8 @@ static void test_gdi_dbuf(HDC hdc)
     nFormats = DescribePixelFormat(hdc, 0, 0, NULL);
     for(iPixelFormat = 1;iPixelFormat <= nFormats;iPixelFormat++)
     {
-        res = pwglGetPixelFormatAttribivARB(hdc, iPixelFormat, 0,
-                  sizeof(iAttribList)/sizeof(iAttribList[0]), iAttribList,
-                  iAttribRet);
+        res = pwglGetPixelFormatAttribivARB(hdc, iPixelFormat, 0, ARRAY_SIZE(iAttribList),
+                iAttribList, iAttribRet);
         ok(res!=FALSE, "wglGetPixelFormatAttribivARB failed for pixel format %d\n", iPixelFormat);
         if(res == FALSE)
             continue;
@@ -492,7 +587,7 @@ static void test_gdi_dbuf(HDC hdc)
 static void test_acceleration(HDC hdc)
 {
     const int iAttribList[] = { WGL_ACCELERATION_ARB };
-    int iAttribRet[sizeof(iAttribList)/sizeof(iAttribList[0])];
+    int iAttribRet[ARRAY_SIZE(iAttribList)];
     unsigned int nFormats;
     int iPixelFormat;
     int res;
@@ -507,9 +602,8 @@ static void test_acceleration(HDC hdc)
     nFormats = DescribePixelFormat(hdc, 0, 0, NULL);
     for(iPixelFormat = 1; iPixelFormat <= nFormats; iPixelFormat++)
     {
-        res = pwglGetPixelFormatAttribivARB(hdc, iPixelFormat, 0,
-                  sizeof(iAttribList)/sizeof(iAttribList[0]), iAttribList,
-                  iAttribRet);
+        res = pwglGetPixelFormatAttribivARB(hdc, iPixelFormat, 0, ARRAY_SIZE(iAttribList),
+                iAttribList, iAttribRet);
         ok(res!=FALSE, "wglGetPixelFormatAttribivARB failed for pixel format %d\n", iPixelFormat);
         if(res == FALSE)
             continue;
@@ -891,7 +985,8 @@ static void test_opengl3(HDC hdc)
         gl3Ctx = pwglCreateContextAttribsARB((HDC)0xdeadbeef, 0, 0);
         ok(gl3Ctx == 0, "pwglCreateContextAttribsARB using an invalid HDC passed\n");
         error = GetLastError();
-        ok(error == ERROR_DC_NOT_FOUND ||
+        ok(error == ERROR_DC_NOT_FOUND || error == ERROR_INVALID_HANDLE ||
+           broken(error == ERROR_DS_GENERIC_ERROR) ||
            broken(error == NVIDIA_HRESULT_FROM_WIN32(ERROR_INVALID_DATA)), /* Nvidia Vista + Win7 */
            "Expected ERROR_DC_NOT_FOUND, got error=%x\n", error);
         wglDeleteContext(gl3Ctx);
@@ -906,7 +1001,7 @@ static void test_opengl3(HDC hdc)
         ok(gl3Ctx == 0, "pwglCreateContextAttribsARB using an invalid shareList passed\n");
         error = GetLastError();
         /* The Nvidia implementation seems to return hresults instead of win32 error codes */
-        ok(error == ERROR_INVALID_OPERATION ||
+        ok(error == ERROR_INVALID_OPERATION || error == ERROR_INVALID_DATA ||
            error == NVIDIA_HRESULT_FROM_WIN32(ERROR_INVALID_OPERATION), "Expected ERROR_INVALID_OPERATION, got error=%x\n", error);
         wglDeleteContext(gl3Ctx);
     }
@@ -1689,6 +1784,7 @@ START_TEST(opengl)
             return;
         }
 
+        test_choosepixelformat();
         test_setpixelformat(hdc);
         test_destroy(hdc);
         test_sharelists(hdc);

@@ -150,7 +150,6 @@ static const struct vid_mode vid_modes_test[] = {
     {0, 0, 0, 0, DM_DISPLAYFREQUENCY, 0}
     */
 };
-#define vid_modes_cnt (sizeof(vid_modes_test) / sizeof(vid_modes_test[0]))
 
 static void test_ChangeDisplaySettingsEx(void)
 {
@@ -237,7 +236,7 @@ static void test_ChangeDisplaySettingsEx(void)
     memset(&dm, 0, sizeof(dm));
     dm.dmSize = sizeof(dm);
 
-    for (i = 0; i < vid_modes_cnt; i++)
+    for (i = 0; i < ARRAY_SIZE(vid_modes_test); i++)
     {
         dm.dmPelsWidth        = vid_modes_test[i].w;
         dm.dmPelsHeight       = vid_modes_test[i].h;
@@ -399,7 +398,7 @@ static void test_monitors(void)
 
     /* tests for cbSize in MONITORINFO */
     monitor = pMonitorFromWindow( 0, MONITOR_DEFAULTTOPRIMARY );
-    for (i = 0; i < (sizeof(testdatami) / sizeof(testdatami[0])); i++)
+    for (i = 0; i < ARRAY_SIZE(testdatami); i++)
     {
         memset( &mi, 0, sizeof(mi) );
         mi.cbSize = testdatami[i].cbSize;
@@ -421,7 +420,7 @@ static void test_monitors(void)
     }
 
     /* tests for cbSize in MONITORINFOEXA */
-    for (i = 0; i < (sizeof(testdatamiexa) / sizeof(testdatamiexa[0])); i++)
+    for (i = 0; i < ARRAY_SIZE(testdatamiexa); i++)
     {
         memset( &miexa, 0, sizeof(miexa) );
         miexa.cbSize = testdatamiexa[i].cbSize;
@@ -434,7 +433,7 @@ static void test_monitors(void)
     }
 
     /* tests for cbSize in MONITORINFOEXW */
-    for (i = 0; i < (sizeof(testdatamiexw) / sizeof(testdatamiexw[0])); i++)
+    for (i = 0; i < ARRAY_SIZE(testdatamiexw); i++)
     {
         memset( &miexw, 0, sizeof(miexw) );
         miexw.cbSize = testdatamiexw[i].cbSize;

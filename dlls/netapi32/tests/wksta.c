@@ -50,7 +50,7 @@ static BOOL init_wksta_tests(void)
     BOOL rc;
 
     user_name[0] = 0;
-    dwSize = sizeof(user_name)/sizeof(user_name[0]);
+    dwSize = ARRAY_SIZE(user_name);
     rc=GetUserNameW(user_name, &dwSize);
     if (rc==FALSE && GetLastError()==ERROR_CALL_NOT_IMPLEMENTED) {
         win_skip("GetUserNameW is not implemented\n");
@@ -59,7 +59,7 @@ static BOOL init_wksta_tests(void)
     ok(rc, "User Name Retrieved\n");
 
     computer_name[0] = 0;
-    dwSize = sizeof(computer_name)/sizeof(computer_name[0]);
+    dwSize = ARRAY_SIZE(computer_name);
     ok(GetComputerNameW(computer_name, &dwSize), "Computer Name Retrieved\n");
     return TRUE;
 }
@@ -168,7 +168,8 @@ static void run_wkstatransportenum_tests(void)
     /* 4th check: is param 6 passed? */
     apiReturn = pNetWkstaTransportEnum(NULL, 0, &bufPtr, MAX_PREFERRED_LENGTH,
         &entriesRead, NULL, NULL);
-    ok(apiReturn == RPC_X_NULL_REF_POINTER, "null pointer\n");
+    ok(apiReturn == RPC_X_NULL_REF_POINTER,
+       "NetWkstaTransportEnum returned %d\n", apiReturn);
 
     /* final check: valid return, actually get data back */
     apiReturn = pNetWkstaTransportEnum(NULL, 0, &bufPtr, MAX_PREFERRED_LENGTH,

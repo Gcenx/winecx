@@ -57,12 +57,14 @@ static const char * const builtin_only[] =
     "icmp",
     "iphlpapi",
     "kernel32",
+    "l3codeca.acm",
     "mountmgr.sys",
     "mswsock",
     "ntdll",
     "ntoskrnl.exe",
     "opengl32",
     "sane.ds",
+    "secur32",
     "twain_32",
     "unicows",
     "user32",
@@ -70,7 +72,6 @@ static const char * const builtin_only[] =
     "w32skrnl",
     "wined3d",
     "winedos",
-    "winemp3.acm",
     "wineps",
     "winmm",
     "wintab32",
@@ -208,7 +209,7 @@ static inline BOOL is_builtin_only( const char *name )
             !strcmp( ext, ".tlb" ))
             return TRUE;
     }
-    return bsearch( &name, builtin_only, sizeof(builtin_only)/sizeof(builtin_only[0]),
+    return bsearch( &name, builtin_only, ARRAY_SIZE(builtin_only),
                     sizeof(builtin_only[0]), compare_dll ) != NULL;
 }
 
@@ -414,7 +415,7 @@ static void on_add_combo_change(HWND dialog)
     WCHAR buffer[1024];
     int sel, len;
 
-    SendDlgItemMessageW(dialog, IDC_DLLCOMBO, WM_GETTEXT, sizeof(buffer)/sizeof(WCHAR), (LPARAM) buffer);
+    SendDlgItemMessageW(dialog, IDC_DLLCOMBO, WM_GETTEXT, ARRAY_SIZE(buffer), (LPARAM)buffer);
     /* if lib was chosen from combobox, we receive an empty buffer, check manually */
     sel=SendDlgItemMessageW(dialog, IDC_DLLCOMBO, CB_GETCURSEL, 0, 0);
     len=SendDlgItemMessageW(dialog, IDC_DLLCOMBO, CB_GETLBTEXTLEN, sel, 0);

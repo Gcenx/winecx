@@ -1149,6 +1149,43 @@ static HRESULT copypixels_to_8bppGray(struct FormatConverter *This, const WICRec
         return S_OK;
     }
 
+    if (source_format == format_32bppGrayFloat)
+    {
+        hr = S_OK;
+
+        if (prc)
+        {
+            srcstride = 4 * prc->Width;
+            srcdatasize = srcstride * prc->Height;
+
+            srcdata = HeapAlloc(GetProcessHeap(), 0, srcdatasize);
+            if (!srcdata) return E_OUTOFMEMORY;
+
+            hr = IWICBitmapSource_CopyPixels(This->source, prc, srcstride, srcdatasize, srcdata);
+            if (SUCCEEDED(hr))
+            {
+                INT x, y;
+                BYTE *src = srcdata, *dst = pbBuffer;
+
+                for (y=0; y < prc->Height; y++)
+                {
+                    float *srcpixel = (float*)src;
+                    BYTE *dstpixel = dst;
+
+                    for (x=0; x < prc->Width; x++)
+                        *dstpixel++ = (BYTE)floorf(to_sRGB_component(*srcpixel++) * 255.0f + 0.51f);
+
+                    src += srcstride;
+                    dst += cbStride;
+                }
+            }
+
+            HeapFree(GetProcessHeap(), 0, srcdata);
+        }
+
+        return hr;
+    }
+
     srcstride = 3 * prc->Width;
     srcdatasize = srcstride * prc->Height;
 
@@ -1169,12 +1206,7 @@ static HRESULT copypixels_to_8bppGray(struct FormatConverter *This, const WICRec
             {
                 float gray = (bgr[2] * 0.2126f + bgr[1] * 0.7152f + bgr[0] * 0.0722f) / 255.0f;
 
-                /* conversion from 32bppGrayFloat to 24bppBGR has already applied sRGB gamma */
-                if (source_format == format_32bppGrayFloat)
-                    gray *= 255.0f;
-                else
-                    gray = to_sRGB_component(gray) * 255.0f;
-
+                gray = to_sRGB_component(gray) * 255.0f;
                 dst[x] = (BYTE)floorf(gray + 0.51f);
                 bgr += 3;
             }

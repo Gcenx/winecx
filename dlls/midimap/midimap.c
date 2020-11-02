@@ -77,6 +77,7 @@
  */
 
 WINE_DEFAULT_DEBUG_CHANNEL(msacm);
+WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 typedef struct tagMIDIOUTPORT
 {
@@ -116,14 +117,15 @@ static BOOL	MIDIMAP_FindPort(const WCHAR* name, unsigned* dev)
 	    return TRUE;
     }
     /* try the form #nnn */
-    if (*name == '#' && isdigit(name[1]))
+    if (*name == '#' && name[1] >= '0' && name[1] <= '9')
     {
         const WCHAR*  ptr = name + 1;
         *dev = 0;
         do 
         {
             *dev = *dev * 10 + *ptr - '0';
-        } while (isdigit(*++ptr));
+            ptr++;
+        } while (*ptr >= '0' && *ptr <= '9');
 	if (*dev < numMidiOutPorts)
 	    return TRUE;
     }
@@ -170,7 +172,7 @@ static BOOL	MIDIMAP_LoadSettingsScheme(MIDIMAPDATA* mom, const WCHAR* scheme)
 	return FALSE;
     }
 
-    for (idx = 0; !RegEnumKeyW(hKey, idx, buffer, sizeof(buffer)/sizeof(buffer[0])); idx++)
+    for (idx = 0; !RegEnumKeyW(hKey, idx, buffer, ARRAY_SIZE(buffer)); idx++)
     {
 	if (RegOpenKeyW(hKey, buffer, &hPortKey)) continue;
 
@@ -281,13 +283,25 @@ static DWORD modOpen(DWORD_PTR *lpdwUser, LPMIDIOPENDESC lpDesc, DWORD dwFlags)
 
     if (MIDIMAP_LoadSettings(mom))
     {
+	UINT chn;
 	*lpdwUser = (DWORD_PTR)mom;
 	mom->self = mom;
-
 	mom->wCbFlags = HIWORD(dwFlags & CALLBACK_TYPEMASK);
 	mom->midiDesc = *lpDesc;
-	MIDIMAP_NotifyClient(mom, MOM_OPEN, 0L, 0L);
 
+	for (chn = 0; chn < 16; chn++)
+	{
+	    if (mom->ChannelMap[chn]->loaded) continue;
+	    if (midiOutOpen(&mom->ChannelMap[chn]->hMidi, mom->ChannelMap[chn]->uDevID,
+			    0L, 0L, CALLBACK_NULL) == MMSYSERR_NOERROR)
+		mom->ChannelMap[chn]->loaded = 1;
+	    else
+		mom->ChannelMap[chn]->loaded = -1;
+	    /* FIXME: should load here the IDF midi data... and allow channel and
+	     * patch mappings
+	     */
+	}
+	MIDIMAP_NotifyClient(mom, MOM_OPEN, 0L, 0L);
 	return MMSYSERR_NOERROR;
     }
     HeapFree(GetProcessHeap(), 0, mom);
@@ -379,17 +393,6 @@ static DWORD modData(MIDIMAPDATA* mom, DWORD_PTR dwParam)
     case 0xC0:
     case 0xD0:
     case 0xE0:
-	if (mom->ChannelMap[chn]->loaded == 0)
-	{
-	    if (midiOutOpen(&mom->ChannelMap[chn]->hMidi, mom->ChannelMap[chn]->uDevID,
-			    0L, 0L, CALLBACK_NULL) == MMSYSERR_NOERROR)
-		mom->ChannelMap[chn]->loaded = 1;
-	    else
-		mom->ChannelMap[chn]->loaded = -1;
-	    /* FIXME: should load here the IDF midi data... and allow channel and
-	     * patch mappings
-	     */
-	}
 	if (mom->ChannelMap[chn]->loaded > 0)
 	{
 	    /* change channel */
@@ -552,6 +555,8 @@ static LRESULT MIDIMAP_drvOpen(void)
 {
     MIDIOUTCAPSW	moc;
     unsigned		dev, i;
+    WCHAR               throughportW[] = {'M','i','d','i',' ','T','h','r','o','u','g','h',0};
+    BOOL                found_valid_port = FALSE;
 
     if (midiOutPorts)
 	return 0;
@@ -570,12 +575,17 @@ static LRESULT MIDIMAP_drvOpen(void)
 	    midiOutPorts[dev].lpbPatch = NULL;
 	    for (i = 0; i < 16; i++)
 		midiOutPorts[dev].aChn[i] = i;
+	    if (strncmpW(midiOutPorts[dev].name, throughportW, strlenW(throughportW)) != 0)
+	        found_valid_port = TRUE;
 	}
 	else
 	{
 	    midiOutPorts[dev].loaded = -1;
 	}
     }
+
+    if (!found_valid_port)
+        ERR_(winediag)("No software synthesizer midi port found, Midi sound output probably won't work.\n");
 
     return 1;
 }

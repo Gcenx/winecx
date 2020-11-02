@@ -25,14 +25,12 @@
 #include <commdlg.h>
 #include <cderr.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <shellapi.h>
 #include <shlwapi.h>
 
+#include "wine/heap.h"
 #include "wine/unicode.h"
 #include "main.h"
-#include "regproc.h"
-#include "resource.h"
 
 static const WCHAR* editValueName;
 static WCHAR* stringValueData;
@@ -40,10 +38,11 @@ static BOOL isDecimal;
 
 struct edit_params
 {
-    HKEY    hKey;
-    LPCWSTR lpszValueName;
-    void   *pData;
-    LONG    cbData;
+    HKEY         hkey;
+    const WCHAR *value_name;
+    DWORD        type;
+    void        *data;
+    DWORD        size;
 };
 
 static int vmessagebox(HWND hwnd, int buttons, int titleId, int resId, __ms_va_list va_args)
@@ -53,8 +52,8 @@ static int vmessagebox(HWND hwnd, int buttons, int titleId, int resId, __ms_va_l
     WCHAR *str;
     int ret;
 
-    LoadStringW(hInst, titleId, title, COUNT_OF(title));
-    LoadStringW(hInst, resId, fmt, COUNT_OF(fmt));
+    LoadStringW(hInst, titleId, title, ARRAY_SIZE(title));
+    LoadStringW(hInst, resId, fmt, ARRAY_SIZE(fmt));
 
     FormatMessageW(FORMAT_MESSAGE_FROM_STRING|FORMAT_MESSAGE_ALLOCATE_BUFFER,
                    fmt, 0, 0, (WCHAR *)&str, 0, &va_args);
@@ -64,7 +63,7 @@ static int vmessagebox(HWND hwnd, int buttons, int titleId, int resId, __ms_va_l
     return ret;
 }
 
-int __cdecl messagebox(HWND hwnd, int buttons, int titleId, int resId, ...)
+int WINAPIV messagebox(HWND hwnd, int buttons, int titleId, int resId, ...)
 {
     __ms_va_list ap;
     INT result;
@@ -76,7 +75,7 @@ int __cdecl messagebox(HWND hwnd, int buttons, int titleId, int resId, ...)
     return result;
 }
 
-static void __cdecl error_code_messagebox(HWND hwnd, unsigned int msg_id, ...)
+static void WINAPIV error_code_messagebox(HWND hwnd, unsigned int msg_id, ...)
 {
     __ms_va_list ap;
 
@@ -93,7 +92,7 @@ static BOOL change_dword_base(HWND hwndDlg, BOOL toHex)
     WCHAR buf[128];
     DWORD val;
 
-    if (!GetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, buf, COUNT_OF(buf))) return FALSE;
+    if (!GetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, buf, ARRAY_SIZE(buf))) return FALSE;
     if (!swscanf(buf, toHex ? percent_u : percent_x, &val)) return FALSE;
     wsprintfW(buf, toHex ? percent_x : percent_u, val);
     return SetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, buf);
@@ -101,7 +100,6 @@ static BOOL change_dword_base(HWND hwndDlg, BOOL toHex)
 
 static INT_PTR CALLBACK modify_dlgproc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    WCHAR* valueData;
     HWND hwndValue;
     int len;
 
@@ -109,7 +107,8 @@ static INT_PTR CALLBACK modify_dlgproc(HWND hwndDlg, UINT uMsg, WPARAM wParam, L
     case WM_INITDIALOG:
         SetDlgItemTextW(hwndDlg, IDC_VALUE_NAME, editValueName);
         SetDlgItemTextW(hwndDlg, IDC_VALUE_DATA, stringValueData);
-	CheckRadioButton(hwndDlg, IDC_DWORD_HEX, IDC_DWORD_DEC, isDecimal ? IDC_DWORD_DEC : IDC_DWORD_HEX);
+        CheckRadioButton(hwndDlg, IDC_DWORD_HEX, IDC_DWORD_DEC, IDC_DWORD_HEX);
+        isDecimal = FALSE;
         return TRUE;
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
@@ -122,12 +121,10 @@ static INT_PTR CALLBACK modify_dlgproc(HWND hwndDlg, UINT uMsg, WPARAM wParam, L
         case IDOK:
             if ((hwndValue = GetDlgItem(hwndDlg, IDC_VALUE_DATA))) {
                 len = GetWindowTextLengthW(hwndValue);
-                if ((valueData = HeapReAlloc(GetProcessHeap(), 0, stringValueData, (len + 1) * sizeof(WCHAR)))) {
-                    stringValueData = valueData;
-                    if (!GetWindowTextW(hwndValue, stringValueData, len + 1))
-                        *stringValueData = 0;
+                stringValueData = heap_xrealloc(stringValueData, (len + 1) * sizeof(WCHAR));
+                if (!GetWindowTextW(hwndValue, stringValueData, len + 1))
+                    *stringValueData = 0;
                 }
-            }
             /* Fall through */
         case IDCANCEL:
             EndDialog(hwndDlg, wParam);
@@ -140,34 +137,31 @@ static INT_PTR CALLBACK modify_dlgproc(HWND hwndDlg, UINT uMsg, WPARAM wParam, L
 static INT_PTR CALLBACK bin_modify_dlgproc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     struct edit_params *params;
-    LPBYTE pData;
-    LONG cbData;
+    BYTE *data;
+    LONG size;
     LONG lRet;
 
     switch(uMsg) {
     case WM_INITDIALOG:
         params = (struct edit_params *)lParam;
         SetWindowLongPtrW(hwndDlg, DWLP_USER, (ULONG_PTR)params);
-        if (params->lpszValueName)
-            SetDlgItemTextW(hwndDlg, IDC_VALUE_NAME, params->lpszValueName);
+        if (params->value_name)
+            SetDlgItemTextW(hwndDlg, IDC_VALUE_NAME, params->value_name);
         else
             SetDlgItemTextW(hwndDlg, IDC_VALUE_NAME, g_pszDefaultValueName);
-        SendDlgItemMessageW(hwndDlg, IDC_VALUE_DATA, HEM_SETDATA, (WPARAM)params->cbData, (LPARAM)params->pData);
+        SendDlgItemMessageW(hwndDlg, IDC_VALUE_DATA, HEM_SETDATA, (WPARAM)params->size, (LPARAM)params->data);
+        SendDlgItemMessageW(hwndDlg, IDC_VALUE_DATA, WM_SETFONT, (WPARAM) GetStockObject(ANSI_FIXED_FONT), TRUE);
         return TRUE;
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
         case IDOK:
             params = (struct edit_params *)GetWindowLongPtrW(hwndDlg, DWLP_USER);
-            cbData = SendDlgItemMessageW(hwndDlg, IDC_VALUE_DATA, HEM_GETDATA, 0, 0);
-            pData = HeapAlloc(GetProcessHeap(), 0, cbData);
+            size = SendDlgItemMessageW(hwndDlg, IDC_VALUE_DATA, HEM_GETDATA, 0, 0);
+            data = heap_xalloc(size);
 
-            if (pData)
-            {
-                SendDlgItemMessageW(hwndDlg, IDC_VALUE_DATA, HEM_GETDATA, (WPARAM)cbData, (LPARAM)pData);
-                lRet = RegSetValueExW(params->hKey, params->lpszValueName, 0, REG_BINARY, pData, cbData);
-            }
-            else
-                lRet = ERROR_OUTOFMEMORY;
+            SendDlgItemMessageW(hwndDlg, IDC_VALUE_DATA, HEM_GETDATA, (WPARAM)size, (LPARAM)data);
+            lRet = RegSetValueExW(params->hkey, params->value_name, 0, params->type, data, size);
+            heap_free(data);
 
             if (lRet == ERROR_SUCCESS)
                 EndDialog(hwndDlg, 1);
@@ -185,12 +179,9 @@ static INT_PTR CALLBACK bin_modify_dlgproc(HWND hwndDlg, UINT uMsg, WPARAM wPara
     return FALSE;
 }
 
-static BOOL check_value(HWND hwnd, HKEY hKey, LPCWSTR valueName)
+static BOOL value_exists(HWND hwnd, HKEY hKey, const WCHAR *value_name)
 {
-    WCHAR empty = 0;
-    LONG lRet = RegQueryValueExW(hKey, valueName ? valueName : &empty, 0, NULL, 0, NULL);
-    if(lRet != ERROR_SUCCESS) return FALSE;
-    return TRUE;
+    return !RegQueryValueExW(hKey, value_name, NULL, NULL, NULL, NULL);
 }
 
 static LPWSTR read_value(HWND hwnd, HKEY hKey, LPCWSTR valueName, DWORD *lpType, LONG *len)
@@ -198,14 +189,13 @@ static LPWSTR read_value(HWND hwnd, HKEY hKey, LPCWSTR valueName, DWORD *lpType,
     DWORD valueDataLen;
     LPWSTR buffer = NULL;
     LONG lRet;
-	WCHAR empty = 0;
 
-    lRet = RegQueryValueExW(hKey, valueName ? valueName : &empty, 0, lpType, 0, &valueDataLen);
-    if (lRet != ERROR_SUCCESS) {
+    lRet = RegQueryValueExW(hKey, valueName, NULL, lpType, NULL, &valueDataLen);
+    if (lRet) {
         if (lRet == ERROR_FILE_NOT_FOUND && !valueName) { /* no default value here, make it up */
             if (len) *len = 1;
             if (lpType) *lpType = REG_SZ;
-            buffer = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR));
+            buffer = heap_xalloc(sizeof(WCHAR));
             *buffer = '\0';
             return buffer;
         }
@@ -213,12 +203,9 @@ static LPWSTR read_value(HWND hwnd, HKEY hKey, LPCWSTR valueName, DWORD *lpType,
         goto done;
     }
     if ( *lpType == REG_DWORD ) valueDataLen = sizeof(DWORD);
-    if (!(buffer = HeapAlloc(GetProcessHeap(), 0, valueDataLen+sizeof(WCHAR)))) {
-        error_code_messagebox(hwnd, IDS_TOO_BIG_VALUE, valueDataLen);
-        goto done;
-    }
+    buffer = heap_xalloc(valueDataLen + sizeof(WCHAR));
     lRet = RegQueryValueExW(hKey, valueName, 0, 0, (LPBYTE)buffer, &valueDataLen);
-    if (lRet != ERROR_SUCCESS) {
+    if (lRet) {
         error_code_messagebox(hwnd, IDS_BAD_VALUE, valueName);
         goto done;
     }
@@ -228,7 +215,7 @@ static LPWSTR read_value(HWND hwnd, HKEY hKey, LPCWSTR valueName, DWORD *lpType,
     return buffer;
 
 done:
-    HeapFree(GetProcessHeap(), 0, buffer);
+    heap_free(buffer);
     return NULL;
 }
 
@@ -242,24 +229,24 @@ BOOL CreateKey(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPWSTR keyName)
     HKEY hKey;
          
     lRet = RegOpenKeyExW(hKeyRoot, keyPath, 0, KEY_CREATE_SUB_KEY, &hKey);
-    if (lRet != ERROR_SUCCESS) {
+    if (lRet) {
         error_code_messagebox(hwnd, IDS_CREATE_KEY_FAILED);
 	goto done;
     }
 
-    if (!LoadStringW(GetModuleHandleW(0), IDS_NEWKEY, newKey, COUNT_OF(newKey))) goto done;
+    if (!LoadStringW(GetModuleHandleW(0), IDS_NEWKEY, newKey, ARRAY_SIZE(newKey))) goto done;
 
     /* try to find a name for the key being created (maximum = 100 attempts) */
     for (keyNum = 1; keyNum < 100; keyNum++) {
 	wsprintfW(keyName, newKey, keyNum);
 	lRet = RegOpenKeyW(hKey, keyName, &retKey);
-	if (lRet != ERROR_SUCCESS) break;
+	if (lRet) break;
 	RegCloseKey(retKey);
     }
     if (lRet == ERROR_SUCCESS) goto done;
     
     lRet = RegCreateKeyW(hKey, keyName, &retKey);
-    if (lRet != ERROR_SUCCESS) {
+    if (lRet) {
         error_code_messagebox(hwnd, IDS_CREATE_KEY_FAILED);
 	goto done;
     }
@@ -280,7 +267,7 @@ BOOL ModifyValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR valueName)
     LONG len;
 
     lRet = RegOpenKeyExW(hKeyRoot, keyPath, 0, KEY_READ | KEY_SET_VALUE, &hKey);
-    if (lRet != ERROR_SUCCESS) {
+    if (lRet) {
         error_code_messagebox(hwnd, IDS_SET_VALUE_FAILED);
 	return FALSE;
     }
@@ -295,9 +282,8 @@ BOOL ModifyValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR valueName)
             else error_code_messagebox(hwnd, IDS_SET_VALUE_FAILED);
         }
     } else if ( type == REG_DWORD ) {
-	const WCHAR u[] = {'%','u',0};
-	const WCHAR x[] = {'%','x',0};
-	wsprintfW(stringValueData, isDecimal ? u : x, *((DWORD*)stringValueData));
+        static const WCHAR x[] = {'%','x',0};
+        wsprintfW(stringValueData, x, *((DWORD*)stringValueData));
 	if (DialogBoxW(0, MAKEINTRESOURCEW(IDD_EDIT_DWORD), hwnd, modify_dlgproc) == IDOK) {
 	    DWORD val;
 	    CHAR* valueA = GetMultiByteString(stringValueData);
@@ -306,16 +292,8 @@ BOOL ModifyValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR valueName)
 		if (lRet == ERROR_SUCCESS) result = TRUE;
                 else error_code_messagebox(hwnd, IDS_SET_VALUE_FAILED);
 	    }
-	    HeapFree(GetProcessHeap(), 0, valueA);
+	    heap_free(valueA);
 	}
-    } else if ( type == REG_BINARY ) {
-        struct edit_params params;
-        params.hKey = hKey;
-        params.lpszValueName = valueName;
-        params.pData = stringValueData;
-        params.cbData = len;
-        result = DialogBoxParamW(NULL, MAKEINTRESOURCEW(IDD_EDIT_BINARY), hwnd,
-            bin_modify_dlgproc, (LPARAM)&params);
     } else if ( type == REG_MULTI_SZ ) {
         WCHAR char1 = '\r', char2 = '\n';
         WCHAR *tmpValueData = NULL;
@@ -324,8 +302,7 @@ BOOL ModifyValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR valueName)
         for ( i = 0, count = 0; i < len - 1; i++)
             if ( !stringValueData[i] && stringValueData[i + 1] )
                 count++;
-        tmpValueData = HeapAlloc( GetProcessHeap(), 0, ( len + count ) * sizeof(WCHAR));
-        if ( !tmpValueData ) goto done;
+        tmpValueData = heap_xalloc((len + count) * sizeof(WCHAR));
 
         for ( i = 0, j = 0; i < len - 1; i++)
         {
@@ -338,15 +315,14 @@ BOOL ModifyValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR valueName)
                 tmpValueData[j++] = stringValueData[i];
         }
         tmpValueData[j] = stringValueData[i];
-        HeapFree( GetProcessHeap(), 0, stringValueData);
+        heap_free(stringValueData);
         stringValueData = tmpValueData;
         tmpValueData = NULL;
 
         if (DialogBoxW(0, MAKEINTRESOURCEW(IDD_EDIT_MULTI_STRING), hwnd, modify_dlgproc) == IDOK)
         {
             len = lstrlenW( stringValueData );
-            tmpValueData = HeapAlloc( GetProcessHeap(), 0, (len + 2) * sizeof(WCHAR));
-            if ( !tmpValueData ) goto done;
+            tmpValueData = heap_xalloc((len + 2) * sizeof(WCHAR));
 
             for ( i = 0, j = 0; i < len - 1; i++)
             {
@@ -362,19 +338,39 @@ BOOL ModifyValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR valueName)
             tmpValueData[j++] = stringValueData[i];
             tmpValueData[j++] = 0;
             tmpValueData[j++] = 0;
-            HeapFree( GetProcessHeap(), 0, stringValueData);
+            heap_free(stringValueData);
             stringValueData = tmpValueData;
 
             lRet = RegSetValueExW(hKey, valueName, 0, type, (LPBYTE)stringValueData, j * sizeof(WCHAR));
             if (lRet == ERROR_SUCCESS) result = TRUE;
             else error_code_messagebox(hwnd, IDS_SET_VALUE_FAILED);
         }
-    } else {
-        error_code_messagebox(hwnd, IDS_UNSUPPORTED_TYPE, type);
+    }
+    else /* hex data types */
+    {
+        struct edit_params params;
+
+        params.hkey = hKey;
+        params.value_name = valueName;
+        params.type = type;
+        params.data = stringValueData;
+        params.size = len;
+        result = DialogBoxParamW(NULL, MAKEINTRESOURCEW(IDD_EDIT_BINARY), hwnd,
+                                 bin_modify_dlgproc, (LPARAM)&params);
+    }
+
+    /* Update the listview item with the new data string */
+    if (result)
+    {
+        int index = SendMessageW(g_pChildWnd->hListWnd, LVM_GETNEXTITEM, -1,
+                                 MAKELPARAM(LVNI_FOCUSED | LVNI_SELECTED, 0));
+        heap_free(stringValueData);
+        stringValueData = read_value(hwnd, hKey, valueName, &type, &len);
+        format_value_data(g_pChildWnd->hListWnd, index, type, stringValueData, len);
     }
 
 done:
-    HeapFree(GetProcessHeap(), 0, stringValueData);
+    heap_free(stringValueData);
     stringValueData = NULL;
     RegCloseKey(hKey);
     return result;
@@ -387,16 +383,17 @@ BOOL DeleteKey(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath)
     HKEY hKey;
 
     lRet = RegOpenKeyExW(hKeyRoot, keyPath, 0, KEY_READ|KEY_SET_VALUE, &hKey);
-    if (lRet != ERROR_SUCCESS) {
+    if (lRet) {
         error_code_messagebox(hwnd, IDS_DELETE_KEY_FAILED);
 	return FALSE;
     }
     
-    if (messagebox(hwnd, MB_YESNO | MB_ICONEXCLAMATION, IDS_DELETE_KEY_TITLE, IDS_DELETE_KEY_TEXT, keyPath) != IDYES)
+    if (messagebox(hwnd, MB_YESNO | MB_ICONEXCLAMATION, IDS_DELETE_KEY_TITLE,
+                   IDS_DELETE_KEY_TEXT) != IDYES)
 	goto done;
 	
     lRet = SHDeleteKeyW(hKeyRoot, keyPath);
-    if (lRet != ERROR_SUCCESS) {
+    if (lRet) {
         error_code_messagebox(hwnd, IDS_BAD_KEY, keyPath);
 	goto done;
     }
@@ -407,29 +404,20 @@ done:
     return result;
 }
 
-BOOL DeleteValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR valueName, BOOL showMessageBox)
+BOOL DeleteValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR valueName)
 {
     BOOL result = FALSE;
     LONG lRet;
     HKEY hKey;
-    LPCWSTR visibleValueName = valueName ? valueName : g_pszDefaultValueName;
-    WCHAR empty = 0;
 
     lRet = RegOpenKeyExW(hKeyRoot, keyPath, 0, KEY_READ | KEY_SET_VALUE, &hKey);
-    if (lRet != ERROR_SUCCESS) return FALSE;
+    if (lRet) return FALSE;
 
-    if (showMessageBox)
-    {
-        if (messagebox(hwnd, MB_YESNO | MB_ICONEXCLAMATION, IDS_DELETE_VALUE_TITLE, IDS_DELETE_VALUE_TEXT,
-                visibleValueName) != IDYES)
-            goto done;
-    }
-
-    lRet = RegDeleteValueW(hKey, valueName ? valueName : &empty);
-    if (lRet != ERROR_SUCCESS && valueName) {
+    lRet = RegDeleteValueW(hKey, valueName);
+    if (lRet && valueName) {
         error_code_messagebox(hwnd, IDS_BAD_VALUE, valueName);
     }
-    if (lRet != ERROR_SUCCESS) goto done;
+    if (lRet) goto done;
     result = TRUE;
 
 done:
@@ -443,16 +431,17 @@ BOOL CreateValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, DWORD valueType, LPW
     WCHAR newValue[256];
     DWORD valueDword = 0;
     BOOL result = FALSE;
-    int valueNum;
+    int valueNum, index;
     HKEY hKey;
+    LVITEMW item;
          
     lRet = RegOpenKeyExW(hKeyRoot, keyPath, 0, KEY_READ | KEY_SET_VALUE, &hKey);
-    if (lRet != ERROR_SUCCESS) {
+    if (lRet) {
         error_code_messagebox(hwnd, IDS_CREATE_VALUE_FAILED);
 	return FALSE;
     }
 
-    if (!LoadStringW(GetModuleHandleW(0), IDS_NEWVALUE, newValue, COUNT_OF(newValue))) goto done;
+    if (!LoadStringW(GetModuleHandleW(0), IDS_NEWVALUE, newValue, ARRAY_SIZE(newValue))) goto done;
 
     /* try to find a name for the value being created (maximum = 100 attempts) */
     for (valueNum = 1; valueNum < 100; valueNum++) {
@@ -466,10 +455,18 @@ BOOL CreateValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, DWORD valueType, LPW
     }
    
     lRet = RegSetValueExW(hKey, valueName, 0, valueType, (BYTE*)&valueDword, sizeof(DWORD));
-    if (lRet != ERROR_SUCCESS) {
+    if (lRet) {
         error_code_messagebox(hwnd, IDS_CREATE_VALUE_FAILED);
 	goto done;
     }
+
+    /* Add the new item to the listview */
+    index = AddEntryToList(g_pChildWnd->hListWnd, valueName, valueType,
+                           (BYTE *)&valueDword, sizeof(DWORD), -1);
+    item.state = LVIS_FOCUSED | LVIS_SELECTED;
+    item.stateMask = LVIS_FOCUSED | LVIS_SELECTED;
+    SendMessageW(g_pChildWnd->hListWnd, LVM_SETITEMSTATE, index, (LPARAM)&item);
+
     result = TRUE;
 
 done:
@@ -489,24 +486,24 @@ BOOL RenameValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR oldName, LPC
     if (!newName) return FALSE;
 
     lRet = RegOpenKeyExW(hKeyRoot, keyPath, 0, KEY_READ | KEY_SET_VALUE, &hKey);
-    if (lRet != ERROR_SUCCESS) {
+    if (lRet) {
         error_code_messagebox(hwnd, IDS_RENAME_VALUE_FAILED);
 	return FALSE;
     }
-    /* check if the value already exists */
-    if (check_value(hwnd, hKey, newName)) {
+
+    if (value_exists(hwnd, hKey, newName)) {
         error_code_messagebox(hwnd, IDS_VALUE_EXISTS, oldName);
         goto done;
     }
     value = read_value(hwnd, hKey, oldName, &type, &len);
     if(!value) goto done;
     lRet = RegSetValueExW(hKey, newName, 0, type, (BYTE*)value, len);
-    if (lRet != ERROR_SUCCESS) {
+    if (lRet) {
         error_code_messagebox(hwnd, IDS_RENAME_VALUE_FAILED);
 	goto done;
     }
     lRet = RegDeleteValueW(hKey, oldName);
-    if (lRet != ERROR_SUCCESS) {
+    if (lRet) {
 	RegDeleteValueW(hKey, newName);
         error_code_messagebox(hwnd, IDS_RENAME_VALUE_FAILED);
 	goto done;
@@ -514,7 +511,7 @@ BOOL RenameValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR oldName, LPC
     result = TRUE;
 
 done:
-    HeapFree(GetProcessHeap(), 0, value);
+    heap_free(value);
     RegCloseKey(hKey);
     return result;
 }
@@ -538,13 +535,13 @@ BOOL RenameKey(HWND hwnd, HKEY hRootKey, LPCWSTR keyPath, LPCWSTR newName)
     } else {
 	LPWSTR srcSubKey_copy;
 
-	parentPath = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(keyPath)+1)*sizeof(WCHAR));
+	parentPath = heap_xalloc((lstrlenW(keyPath) + 1) * sizeof(WCHAR));
 	lstrcpyW(parentPath, keyPath);
 	srcSubKey_copy = strrchrW(parentPath, '\\');
 	*srcSubKey_copy = 0;
 	srcSubKey = srcSubKey_copy + 1;
 	lRet = RegOpenKeyExW(hRootKey, parentPath, 0, KEY_READ | KEY_CREATE_SUB_KEY, &parentKey);
-	if (lRet != ERROR_SUCCESS) {
+	if (lRet) {
             error_code_messagebox(hwnd, IDS_RENAME_KEY_FAILED);
 	    goto done;
 	}
@@ -557,14 +554,14 @@ BOOL RenameKey(HWND hwnd, HKEY hRootKey, LPCWSTR keyPath, LPCWSTR newName)
         KEY_WRITE, NULL /* FIXME */, &destKey, &disposition);
     if (disposition == REG_OPENED_EXISTING_KEY)
         lRet = ERROR_FILE_EXISTS;
-    if (lRet != ERROR_SUCCESS) {
+    if (lRet) {
         error_code_messagebox(hwnd, IDS_KEY_EXISTS, srcSubKey);
         goto done;
     }
 
     /* FIXME: SHCopyKey does not copy the security attributes */
     lRet = SHCopyKeyW(parentKey, srcSubKey, destKey, 0);
-    if (lRet != ERROR_SUCCESS) {
+    if (lRet) {
         RegCloseKey(destKey);
         RegDeleteKeyW(parentKey, newName);
         error_code_messagebox(hwnd, IDS_RENAME_KEY_FAILED);
@@ -572,7 +569,7 @@ BOOL RenameKey(HWND hwnd, HKEY hRootKey, LPCWSTR keyPath, LPCWSTR newName)
     }
 
     lRet = SHDeleteKeyW(hRootKey, keyPath);
-    if (lRet != ERROR_SUCCESS) {
+    if (lRet) {
         error_code_messagebox(hwnd, IDS_RENAME_KEY_FAILED);
         goto done;
     }
@@ -583,7 +580,7 @@ done:
     RegCloseKey(destKey);
     if (parentKey) {
         RegCloseKey(parentKey); 
-        HeapFree(GetProcessHeap(), 0, parentPath);
+        heap_free(parentPath);
     }
     return result;
 }

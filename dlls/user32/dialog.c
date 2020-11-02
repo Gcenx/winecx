@@ -283,6 +283,7 @@ static BOOL DIALOG_CreateControls32( HWND hwnd, LPCSTR template, const DLG_TEMPL
             WARN("control %s %s creation failed\n", debugstr_w(info.className),
                  debugstr_w(info.windowName));
             if (dlgTemplate->style & DS_NOFAILCREATE) continue;
+            SetLastError(0);
             return FALSE;
         }
 
@@ -839,9 +840,8 @@ INT_PTR WINAPI DialogBoxParamA( HINSTANCE hInst, LPCSTR name,
 
     if (!(hrsrc = FindResourceA( hInst, name, (LPSTR)RT_DIALOG ))) return -1;
     if (!(ptr = LoadResource(hInst, hrsrc))) return -1;
-    hwnd = DIALOG_CreateIndirect( hInst, ptr, owner, dlgProc, param, FALSE, &owner );
-    if (hwnd) return DIALOG_DoDialogBox( hwnd, owner );
-    return -1;
+    if (!(hwnd = DIALOG_CreateIndirect( hInst, ptr, owner, dlgProc, param, FALSE, &owner ))) return -1;
+    return DIALOG_DoDialogBox( hwnd, owner );
 }
 
 
@@ -859,9 +859,8 @@ INT_PTR WINAPI DialogBoxParamW( HINSTANCE hInst, LPCWSTR name,
 
     if (!(hrsrc = FindResourceW( hInst, name, (LPWSTR)RT_DIALOG ))) return -1;
     if (!(ptr = LoadResource(hInst, hrsrc))) return -1;
-    hwnd = DIALOG_CreateIndirect( hInst, ptr, owner, dlgProc, param, TRUE, &owner );
-    if (hwnd) return DIALOG_DoDialogBox( hwnd, owner );
-    return -1;
+    if (!(hwnd = DIALOG_CreateIndirect( hInst, ptr, owner, dlgProc, param, TRUE, &owner ))) return -1;
+    return DIALOG_DoDialogBox( hwnd, owner );
 }
 
 
@@ -961,7 +960,7 @@ static BOOL DIALOG_IsAccelerator( HWND hwnd, HWND hwndDlg, WPARAM wParam )
         {
             dlgCode = SendMessageW( hwndControl, WM_GETDLGCODE, 0, 0 );
             if ( (dlgCode & (DLGC_BUTTON | DLGC_STATIC)) &&
-                 GetWindowTextW( hwndControl, buffer, sizeof(buffer)/sizeof(WCHAR) ))
+                 GetWindowTextW( hwndControl, buffer, ARRAY_SIZE( buffer )))
             {
                 /* find the accelerator key */
                 LPWSTR p = buffer - 2;
@@ -1253,10 +1252,11 @@ BOOL WINAPI IsDialogMessageW( HWND hwndDlg, LPMSG msg )
         case VK_RETURN:
             {
                 DWORD dw;
-                if ((GetFocus() == msg->hwnd) &&
-                    (SendMessageW (msg->hwnd, WM_GETDLGCODE, 0, 0) & DLGC_DEFPUSHBUTTON))
+                HWND hwndFocus = GetFocus();
+                if (IsChild( hwndDlg, hwndFocus ) &&
+                    (SendMessageW( hwndFocus, WM_GETDLGCODE, 0, 0 ) & DLGC_DEFPUSHBUTTON))
                 {
-                    SendMessageW (hwndDlg, WM_COMMAND, MAKEWPARAM (GetDlgCtrlID(msg->hwnd),BN_CLICKED), (LPARAM)msg->hwnd); 
+                    SendMessageW( hwndDlg, WM_COMMAND, MAKEWPARAM( GetDlgCtrlID( hwndFocus ), BN_CLICKED ), (LPARAM)hwndFocus );
                 }
                 else if (DC_HASDEFID == HIWORD(dw = SendMessageW (hwndDlg, DM_GETDEFID, 0, 0)))
                 {
@@ -1267,7 +1267,6 @@ BOOL WINAPI IsDialogMessageW( HWND hwndDlg, LPMSG msg )
                 else
                 {
                     SendMessageW( hwndDlg, WM_COMMAND, IDOK, (LPARAM)GetDlgItem( hwndDlg, IDOK ) );
-
                 }
             }
             return TRUE;
@@ -1583,9 +1582,9 @@ HWND WINAPI GetNextDlgGroupItem( HWND hwndDlg, HWND hwndCtrl, BOOL fPrevious )
      */
     retvalue = hwndCtrl;
     hwnd = hwndCtrl;
-    while (hwndNext = GetWindow (hwnd, GW_HWNDNEXT),
-           1)
+    while (1)
     {
+        hwndNext = GetWindow (hwnd, GW_HWNDNEXT);
         while (!hwndNext)
         {
             /* Climb out until there is a next sibling of the ancestor or we
@@ -1869,7 +1868,7 @@ static INT DIALOG_DlgDirListW( HWND hDlg, LPWSTR spec, INT idLBox,
     if (idStatic && ((hwnd = GetDlgItem( hDlg, idStatic )) != 0))
     {
         WCHAR temp[MAX_PATH];
-        GetCurrentDirectoryW( sizeof(temp)/sizeof(WCHAR), temp );
+        GetCurrentDirectoryW( ARRAY_SIZE( temp ), temp );
         CharLowerW( temp );
         /* Can't use PostMessage() here, because the string is on the stack */
         SetDlgItemTextW( hDlg, idStatic, temp );
