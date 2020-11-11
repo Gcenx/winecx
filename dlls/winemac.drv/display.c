@@ -928,6 +928,8 @@ better:
             size_t width = CGDisplayModeGetWidth(best_display_mode);
             size_t height = CGDisplayModeGetHeight(best_display_mode);
 
+            macdrv_init_display_devices(TRUE);
+
             if (best_is_original && retina_enabled)
             {
                 width *= 2;
@@ -937,8 +939,6 @@ better:
             SendMessageW(GetDesktopWindow(), WM_MACDRV_UPDATE_DESKTOP_RECT, mode_bpp,
                          MAKELPARAM(width, height));
             ret = DISP_CHANGE_SUCCESSFUL;
-
-            macdrv_init_display_devices(TRUE);
         }
         else
         {

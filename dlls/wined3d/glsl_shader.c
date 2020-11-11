@@ -8567,8 +8567,11 @@ static GLuint find_glsl_fragment_shader(const struct wined3d_context_gl *context
         {
             unsigned int coord;
             coord = shader_find_free_input_register(&shader->reg_maps, context_gl->c.d3d_info->limits.ffp_blend_stages - 1);
-            /* Store off by one, the code checks against zero */
-            ((struct glsl_shader_private *)shader->backend_data)->clipplane_emulation = coord + 1;
+            if (coord != ~0u)
+            {
+                /* Store off by one, the code checks against zero */
+                ((struct glsl_shader_private *)shader->backend_data)->clipplane_emulation = coord + 1;
+            }
         }
     }
     shader_data = shader->backend_data;

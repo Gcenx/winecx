@@ -1865,8 +1865,12 @@ static void shader_cleanup_reg_maps(struct wined3d_shader_reg_maps *reg_maps)
 unsigned int shader_find_free_input_register(const struct wined3d_shader_reg_maps *reg_maps, unsigned int max)
 {
     DWORD map = 1u << max;
+
     map |= map - 1;
     map &= reg_maps->shader_version.major < 3 ? ~reg_maps->texcoord : ~reg_maps->input_registers;
+
+    if (!map)
+      return ~0u;
 
     return wined3d_log2i(map);
 }

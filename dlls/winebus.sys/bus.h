@@ -56,5 +56,5 @@ DEVICE_OBJECT* find_device_by_uid(DWORD uid) DECLSPEC_HIDDEN;
 DWORD check_bus_option(const UNICODE_STRING *option, DWORD default_value) DECLSPEC_HIDDEN;
 BOOL is_xbox_gamepad(WORD vid, WORD pid) DECLSPEC_HIDDEN;
 
-HANDLE driver_key DECLSPEC_HIDDEN;
-DEVICE_OBJECT *bus_pdo DECLSPEC_HIDDEN;
+extern HANDLE driver_key DECLSPEC_HIDDEN;
+extern DEVICE_OBJECT *bus_pdo DECLSPEC_HIDDEN;

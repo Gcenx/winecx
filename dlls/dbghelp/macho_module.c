@@ -1384,19 +1384,18 @@ static ULONG_HOSTPTR get_dyld_image_info_address(struct process* pcs)
     {
         /* Read dyld image info address from PEB */
         if (pcs->is_64bit)
-            ret = ReadProcessMemory(pcs->handle, &pbi.PebBaseAddress->Reserved[0],
+            ret = ReadProcessMemory(pcs->handle, &pbi.PebBaseAddress->CloudFileFlags,
                 &dyld_image_info_address, sizeof(dyld_image_info_address), NULL);
         else if (pcs->is_32on64)
         {
-            PEB32 *peb32 = (PEB32 *)pbi.PebBaseAddress;
-            ret = ReadProcessMemory(pcs->handle, &peb32->Reserved[0], &dyld_image_info_address,
+            ret = ReadProcessMemory(pcs->handle, (char *)pbi.PebBaseAddress + 0x460 /* CloudFileFlags */, &dyld_image_info_address,
                 sizeof(dyld_image_info_address), NULL);
         }
         else
         {
             PEB32 *peb32 = (PEB32 *)pbi.PebBaseAddress;
             ULONG addr32;
-            ret = ReadProcessMemory(pcs->handle, &peb32->Reserved[0], &addr32,
+            ret = ReadProcessMemory(pcs->handle, (char *)pbi.PebBaseAddress + 0x460 /* CloudFileFlags */, &addr32,
                 sizeof(addr32), NULL);
             dyld_image_info_address = addr32;
         }

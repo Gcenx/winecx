@@ -109,9 +109,9 @@ static BOOL fetch_module( DWORD process, DWORD flags, LDR_MODULE** ldr_mod, ULON
             while (curr != head)
             {
                 if (!*num)
-                    *ldr_mod = HeapAlloc( GetProcessHeap(), 0, sizeof(LDR_MODULE) );
+                    *ldr_mod = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(LDR_MODULE) );
                 else
-                    *ldr_mod = HeapReAlloc( GetProcessHeap(), 0, *ldr_mod,
+                    *ldr_mod = HeapReAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, *ldr_mod,
                                             (*num + 1) * sizeof(LDR_MODULE) );
                 if (!*ldr_mod) break;
                 if (!ReadProcessMemory( hProcess,

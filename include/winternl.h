@@ -288,7 +288,8 @@ typedef struct _PEB
     PVOID /*PPEBLOCKROUTINE*/    FastPebUnlockRoutine;              /* 024/048 */
     ULONG                        EnvironmentUpdateCount;            /* 028/050 */
     PVOID                        KernelCallbackTable;               /* 02c/058 */
-    ULONG                        Reserved[2];                       /* 030/060 */
+    ULONG                        Reserved;                          /* 030/060 */
+    ULONG                        AtlThunkSListPtr32;                /* 034/064 */
     PVOID /*PPEB_FREE_BLOCK*/    FreeList;                          /* 038/068 */
     ULONG                        TlsExpansionCounter;               /* 03c/070 */
     PRTL_BITMAP                  TlsBitmap;                         /* 040/078 */
@@ -341,6 +342,24 @@ typedef struct _PEB
     LIST_ENTRY                   FlsListHead;                       /* 210/328 */
     PRTL_BITMAP                  FlsBitmap;                         /* 218/338 */
     ULONG                        FlsBitmapBits[4];                  /* 21c/340 */
+    ULONG                        FlsHighIndex;                      /* 22c/350 */
+    PVOID                        WerRegistrationData;               /* 230/358 */
+    PVOID                        WerShipAssertPtr;                  /* 234/360 */
+    PVOID                        pUnused;                           /* 238/368 */
+    PVOID                        pImageHeaderHash;                  /* 23c/370 */
+    ULONG                        TracingFlags;                      /* 240/378 */
+    ULONGLONG                    CsrServerReadOnlySharedMemoryBase; /* 248/380 */
+    ULONG                        TppWorkerpListLock;                /* 250/388 */
+    LIST_ENTRY                   TppWorkerpList;                    /* 254/390 */
+    PVOID                        WaitOnAddressHashTable [0x80];     /* 25c/3a0 */
+    PVOID                        TelemetryCoverageHeader;           /* 45c/7a0 */
+    ULONG                        CloudFileFlags;                    /* 460/7a8 */
+    ULONG                        CloudFileDiagFlags;                /* 464/7ac */
+    CHAR                         PlaceholderCompatibilityMode;      /* 468/7b0 */
+    CHAR                         PlaceholderCompatibilityModeReserved[7]; /* 469/7b1 */
+    PVOID                        LeapSecondData;                    /* 470/7b8 */
+    ULONG                        LeapSecondFlags;                   /* 474/7c0 */
+    ULONG                        NtGlobalFlag2;                     /* 478/7c4 */
 } PEB, *PPEB;
 
 

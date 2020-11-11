@@ -1773,10 +1773,9 @@ static BOOL elf_search_loader(struct process* pcs, struct elf_info* elf_info)
 
     if (!pcs->is_64bit)
     {
-        PEB32 *peb32 = (PEB32 *)pbi.PebBaseAddress;
         DWORD base32;
 
-        if (!ReadProcessMemory( pcs->handle, &peb32->Reserved[0], &base32,
+        if (!ReadProcessMemory( pcs->handle, (char *)pbi.PebBaseAddress + 0x460 /* CloudFileFlags */, &base32,
                                 sizeof(base32), NULL ))
             return FALSE;
 
@@ -1784,7 +1783,7 @@ static BOOL elf_search_loader(struct process* pcs, struct elf_info* elf_info)
     }
     else
     {
-        if (!ReadProcessMemory( pcs->handle, &pbi.PebBaseAddress->Reserved[0],
+        if (!ReadProcessMemory( pcs->handle, &pbi.PebBaseAddress->CloudFileFlags,
                                 &base, sizeof(base), NULL ))
             return FALSE;
     }

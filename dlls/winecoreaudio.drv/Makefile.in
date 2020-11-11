@@ -13,4 +13,6 @@ C_SRCS = \
 OBJC_SRCS = \
 	authorization.m
 
+coremidi_EXTRADEFS = $(HOSTSTACK_CFLAGS)
+midi_EXTRADEFS = $(HOSTSTACK_CFLAGS)
 mmdevdrv_EXTRADEFS = $(HOSTSTACK_CFLAGS)

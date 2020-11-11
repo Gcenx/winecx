@@ -104,8 +104,6 @@ static CFRunLoopRef run_loop;
 static HANDLE run_loop_handle;
 
 static const WCHAR busidW[] = {'X','B','O','X',0};
-#include "initguid.h"
-DEFINE_GUID(DEVCLASS, 0x2381EBD6,0x852A,0x464D,0x95,0x2D,0xF8,0x4D,0x08,0x35,0xDE,0xBA);
 
 struct platform_private {
     io_object_t object;
@@ -578,7 +576,7 @@ static void process_IOService_Device(io_object_t object)
 
     if (is_xbox_gamepad(vid,pid))
     {
-        device = bus_create_hid_device(busidW, vid, pid, -1, 1, uid, serial_string,
+        device = bus_create_hid_device(busidW, vid, pid, 0, 1, uid, serial_string,
                                        1, &xbox_vtbl, sizeof(struct platform_private));
     }
     else
@@ -606,7 +604,7 @@ static void process_IOService_Device(io_object_t object)
             (*dev)->Release(dev);
         }
         else
-            IoInvalidateDeviceRelations(device, BusRelations);
+            IoInvalidateDeviceRelations(bus_pdo, BusRelations);
     }
 }
 
@@ -631,6 +629,7 @@ static void handle_IOServiceTerminatedCallback(void * HOSTPTR refcon, io_iterato
         if (device)
         {
             cleanupDevice(device);
+            bus_unlink_hid_device(device);
             bus_remove_hid_device(device);
         }
         IOObjectRelease(object);

@@ -805,7 +805,7 @@ case $host_os in
     if xcodebuild -version | egrep -qs 'Xcode 9(\D|$)' ; then
         preloader_needs_mmacosx_version_min=yes
     fi
-    WINEPRELOADER_LDFLAGS="-nostartfiles -nodefaultlibs -e _start -ldylib1.o -Wl,-image_base,0x7c400000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,wine_info.plist"
+    WINEPRELOADER_LDFLAGS="-nostartfiles -nodefaultlibs -e _start -ldylib1.o -Wl,-image_base,0x7c400000,-pagezero_size,0x1000,-sectcreate,__TEXT,__info_plist,wine_info.plist,-segaddr,WINE_4GB_RESERVE,0x100000000"
     WINE_TRY_CFLAGS([-Wl,-no_new_main -e _main],
                     [WINEPRELOADER_LDFLAGS="-Wl,-no_new_main $WINEPRELOADER_LDFLAGS"
                      WINE_TRY_CFLAGS([-Wl,-no_new_main -e _main -nostartfiles -nodefaultlibs],,

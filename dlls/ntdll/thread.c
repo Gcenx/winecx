@@ -339,7 +339,7 @@ TEB *thread_init(void)
     InitializeListHead( &ldr.InLoadOrderModuleList );
     InitializeListHead( &ldr.InMemoryOrderModuleList );
     InitializeListHead( &ldr.InInitializationOrderModuleList );
-    *(ULONG_HOSTPTR *)peb->Reserved = get_image_addr();
+    *(ULONG_HOSTPTR *)&peb->CloudFileFlags = get_image_addr();
 
 #if defined(__APPLE__) && defined(__x86_64__) && !defined(__i386_on_x86_64__)
     *((DWORD*)((char*)user_shared_data_external + 0x1000)) = (DWORD)__wine_syscall_dispatcher;
