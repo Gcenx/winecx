@@ -430,8 +430,8 @@ msgstr "세부 사항 숨기기"
 msgid "See details"
 msgstr "세부 사항 보기"
 
-#: comctl32.rc:31 cryptui.rc:235 regedit.rc:286 taskmgr.rc:434 winedbg.rc:61
-#: winedbg.rc:76 wordpad.rc:180
+#: comctl32.rc:31 cryptui.rc:235 regedit.rc:286 taskmgr.rc:434 winedbg.rc:59
+#: winedbg.rc:71 wordpad.rc:180
 msgid "Close"
 msgstr "닫기"
 
@@ -683,7 +683,7 @@ msgstr "단어 단위로(&W)"
 msgid "Match &Case"
 msgstr "대/소문자 구분(&C)"
 
-#: comdlg32.rc:325 joy.rc:71
+#: comdlg32.rc:325 joy.rc:72
 msgid "Direction"
 msgstr "방향"
 
@@ -3539,27 +3539,27 @@ msgstr "증가"
 msgid "High"
 msgstr "높음"
 
-#: joy.rc:36
+#: joy.rc:37
 msgid "Joysticks"
 msgstr "조이스틱"
 
-#: joy.rc:39 winecfg.rc:213
+#: joy.rc:40 winecfg.rc:213
 msgid "&Disable"
 msgstr "사용하지 않음(&D)"
 
-#: joy.rc:40
+#: joy.rc:41
 msgid "&Enable"
 msgstr "가능(&E)"
 
-#: joy.rc:41
+#: joy.rc:42
 msgid "Connected"
 msgstr "연결됨"
 
-#: joy.rc:43
+#: joy.rc:44
 msgid "Disabled"
 msgstr "불가능"
 
-#: joy.rc:45
+#: joy.rc:46
 msgid ""
 "After disabling or enabling a device, the connected joysticks won't be "
 "updated here until you restart this applet."
@@ -3567,23 +3567,23 @@ msgstr ""
 "장치를 비활성화하거나 활성화한 후, 이 애플릿을 다시 시작할 때까지 연결된 조이"
 "스틱을 업데이트하지 않습니다."
 
-#: joy.rc:50
+#: joy.rc:51
 msgid "Test Joystick"
 msgstr "조이스틱 테스트"
 
-#: joy.rc:54
+#: joy.rc:55
 msgid "Buttons"
 msgstr "버튼"
 
-#: joy.rc:63
+#: joy.rc:64
 msgid "Test Force Feedback"
 msgstr "강제 피드백 테스트"
 
-#: joy.rc:67
+#: joy.rc:68
 msgid "Available Effects"
 msgstr "가능한 효과들"
 
-#: joy.rc:69
+#: joy.rc:70
 msgid ""
 "Press any button in the controller to activate the chosen effect. The effect "
 "direction can be changed with the controller axis."
@@ -3594,6 +3594,10 @@ msgstr ""
 #: joy.rc:31
 msgid "Game Controllers"
 msgstr "게임 컨트롤러"
+
+#: joy.rc:32
+msgid "Test and configure game controllers."
+msgstr ""
 
 #: jscript.rc:28
 msgid "Error converting object to primitive type"
@@ -7214,7 +7218,7 @@ msgstr "전체 네트워크"
 msgid "Sound Selection"
 msgstr "사운드 선택"
 
-#: msacm32.rc:39 winedbg.rc:77
+#: msacm32.rc:39 winedbg.rc:72
 msgid "&Save As..."
 msgstr "다른 이름 저장(&S)..."
 
@@ -15982,7 +15986,7 @@ msgstr ""
 "프로그램 %s은(는) 심각한 문제에 직면해서 종료합니다.불편을 끼쳐드려 죄송합니"
 "다."
 
-#: winedbg.rc:59
+#: winedbg.rc:57
 msgid ""
 "This can be caused by a problem in the program or a deficiency in Wine. You "
 "may want to check <a href=\"http://www.codeweavers.com/compatibility/"
@@ -15994,15 +15998,15 @@ msgstr ""
 "compatibility/\">http://www.codeweavers.com/compatibility/</a> 에서 관련 팁"
 "을 살펴 볼 수 있습니다."
 
-#: winedbg.rc:62
+#: winedbg.rc:60
 msgid "Show &Details"
 msgstr "자세히(&D) 보이기"
 
-#: winedbg.rc:67
+#: winedbg.rc:65
 msgid "Program Error Details"
 msgstr "자세한 프로그램 오류"
 
-#: winedbg.rc:74
+#: winedbg.rc:69
 msgid ""
 "If this problem is not present under Windows and has not been reported yet, "
 "you can save the detailed information to a file using the \"Save As\" "

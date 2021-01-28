@@ -86,7 +86,7 @@ static ssize_t efd_read(struct esync *esync)
 #ifdef HAVE_SYS_EVENTFD_H
     uint64_t value;
 
-    return read( esync->fd, &value, sizeof(value) );
+    return read( esync->fd, &value, sizeof(value) ) > 0;
 #else
     static char buffer[4096];
 

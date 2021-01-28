@@ -419,8 +419,8 @@ msgstr "隐藏详情"
 msgid "See details"
 msgstr "显示详情"
 
-#: comctl32.rc:31 cryptui.rc:235 regedit.rc:286 taskmgr.rc:434 winedbg.rc:61
-#: winedbg.rc:76 wordpad.rc:180
+#: comctl32.rc:31 cryptui.rc:235 regedit.rc:286 taskmgr.rc:434 winedbg.rc:59
+#: winedbg.rc:71 wordpad.rc:180
 msgid "Close"
 msgstr "关闭"
 
@@ -613,7 +613,7 @@ msgstr "自定义颜色(&C)："
 
 #: comdlg32.rc:289
 msgid "|S&olid"
-msgstr ""
+msgstr "|纯色(&O)"
 
 #: comdlg32.rc:290
 msgid "&Red:"
@@ -650,11 +650,9 @@ msgid "&Define Custom Colors >>"
 msgstr "定义自定义颜色(&D) >>"
 
 #: comdlg32.rc:312
-#, fuzzy
-#| msgid "&No"
 msgctxt "Solid"
 msgid "&o"
-msgstr "否(&N)"
+msgstr "&o"
 
 #: comdlg32.rc:318 regedit.rc:275 regedit.rc:285
 msgid "Find"
@@ -672,7 +670,7 @@ msgstr "全字匹配(&W)"
 msgid "Match &Case"
 msgstr "区分大小写(&C)"
 
-#: comdlg32.rc:325 joy.rc:71
+#: comdlg32.rc:325 joy.rc:72
 msgid "Direction"
 msgstr "方向"
 
@@ -3506,27 +3504,27 @@ msgstr "较高"
 msgid "High"
 msgstr "高"
 
-#: joy.rc:36
+#: joy.rc:37
 msgid "Joysticks"
 msgstr "操纵杆"
 
-#: joy.rc:39 winecfg.rc:213
+#: joy.rc:40 winecfg.rc:213
 msgid "&Disable"
 msgstr "停用(&D)"
 
-#: joy.rc:40
+#: joy.rc:41
 msgid "&Enable"
 msgstr "启用(&E)"
 
-#: joy.rc:41
+#: joy.rc:42
 msgid "Connected"
 msgstr "已连接"
 
-#: joy.rc:43
+#: joy.rc:44
 msgid "Disabled"
 msgstr "停用"
 
-#: joy.rc:45
+#: joy.rc:46
 msgid ""
 "After disabling or enabling a device, the connected joysticks won't be "
 "updated here until you restart this applet."
@@ -3534,23 +3532,23 @@ msgstr ""
 "在禁用或启用设备之后，已连接的操纵杆的信息将不会在这里更新，直到您重启该小工"
 "具为止。"
 
-#: joy.rc:50
+#: joy.rc:51
 msgid "Test Joystick"
 msgstr "测试操纵杆"
 
-#: joy.rc:54
+#: joy.rc:55
 msgid "Buttons"
 msgstr "按钮"
 
-#: joy.rc:63
+#: joy.rc:64
 msgid "Test Force Feedback"
 msgstr "测试力反馈"
 
-#: joy.rc:67
+#: joy.rc:68
 msgid "Available Effects"
 msgstr "可选效果"
 
-#: joy.rc:69
+#: joy.rc:70
 msgid ""
 "Press any button in the controller to activate the chosen effect. The effect "
 "direction can be changed with the controller axis."
@@ -3559,6 +3557,10 @@ msgstr "在控制器上按任意键以激活选中的效果。可根据控制器
 #: joy.rc:31
 msgid "Game Controllers"
 msgstr "游戏控制器"
+
+#: joy.rc:32
+msgid "Test and configure game controllers."
+msgstr ""
 
 #: jscript.rc:28
 msgid "Error converting object to primitive type"
@@ -7178,7 +7180,7 @@ msgstr "整个网络"
 msgid "Sound Selection"
 msgstr "声音选择"
 
-#: msacm32.rc:39 winedbg.rc:77
+#: msacm32.rc:39 winedbg.rc:72
 msgid "&Save As..."
 msgstr "保存为(&S)..."
 
@@ -8234,26 +8236,20 @@ msgid "Off"
 msgstr "关"
 
 #: version.rc:42
-#, fuzzy
-#| msgid "video"
 msgid "Provider"
-msgstr "视频"
+msgstr "提供者"
 
 #: version.rc:45
-#, fuzzy
-#| msgid "Select the format you want to use:"
 msgid "Select the data you want to connect to:"
-msgstr "选择您希望使用的格式："
+msgstr "选择您想要连接的数据源："
 
 #: version.rc:36
-#, fuzzy
-#| msgid "Properties"
 msgid "Data Link Properties"
-msgstr "属性"
+msgstr "数据链路属性"
 
 #: version.rc:37
 msgid "OLE DB Provider(s)"
-msgstr ""
+msgstr "OLE DB 提供者"
 
 #: oledlg.rc:55
 msgid "Insert Object"
@@ -15787,7 +15783,7 @@ msgid ""
 "sorry for the inconvenience."
 msgstr "程序 %s 遇到严重的问题需要关闭。我们对此造成的不便表示抱歉。"
 
-#: winedbg.rc:59
+#: winedbg.rc:57
 msgid ""
 "This can be caused by a problem in the program or a deficiency in Wine. You "
 "may want to check <a href=\"http://www.codeweavers.com/compatibility/"
@@ -15797,15 +15793,15 @@ msgstr ""
 "这可能是由程序的问题或者 Wine 的缺陷造成的。你可能需要查看 <a href=\"https://"
 "appdb.winehq.org\">Application Databa</a> 来获取运行该应用的相关技巧。"
 
-#: winedbg.rc:62
+#: winedbg.rc:60
 msgid "Show &Details"
 msgstr "详细信息 (&D)"
 
-#: winedbg.rc:67
+#: winedbg.rc:65
 msgid "Program Error Details"
 msgstr "程序错误详情"
 
-#: winedbg.rc:74
+#: winedbg.rc:69
 msgid ""
 "If this problem is not present under Windows and has not been reported yet, "
 "you can save the detailed information to a file using the \"Save As\" "

@@ -36,6 +36,28 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(display);
 
+/* CrossOver Hack #18576: don't check for kDisplayModeSafeFlag on Apple Silicon. */
+#include <sys/types.h>
+#include <sys/sysctl.h>
+static int apple_silicon_status;
+static BOOL CALLBACK init_is_apple_silicon(INIT_ONCE* once, void* param, void** context)
+{
+    /* returns 0 for native process or on error, 1 for translated */
+    int ret = 0;
+    size_t size = sizeof(ret);
+    if (sysctlbyname("sysctl.proc_translated", &ret, &size, NULL, 0) == -1)
+        apple_silicon_status = 0;
+    else
+        apple_silicon_status = ret;
+
+    return TRUE;
+}
+static int is_apple_silicon(void)
+{
+    static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
+    InitOnceExecuteOnce(&once, init_is_apple_silicon, NULL, NULL);
+    return apple_silicon_status;
+}
 
 struct display_mode_descriptor
 {
@@ -849,7 +871,9 @@ LONG CDECL macdrv_ChangeDisplaySettingsEx(LPCWSTR devname, LPDEVMODEW devmode,
             height *= 2;
         }
 
-        if (!(io_flags & kDisplayModeValidFlag) || !(io_flags & kDisplayModeSafeFlag))
+        /* CrossOver Hack #18576: don't check for kDisplayModeSafeFlag on Apple Silicon. */
+        if (!(io_flags & kDisplayModeValidFlag) ||
+            (!(io_flags & kDisplayModeSafeFlag) && !is_apple_silicon()))
             continue;
 
         safe++;
@@ -1042,8 +1066,10 @@ BOOL CDECL macdrv_EnumDisplaySettingsEx(LPCWSTR devname, DWORD mode,
                 CGDisplayModeRef candidate = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
 
                 io_flags = CGDisplayModeGetIOFlags(candidate);
+                /* CrossOver Hack #18576: don't check for kDisplayModeSafeFlag on Apple Silicon. */
                 if (!(flags & EDS_RAWMODE) &&
-                    (!(io_flags & kDisplayModeValidFlag) || !(io_flags & kDisplayModeSafeFlag)))
+                    (!(io_flags & kDisplayModeValidFlag) ||
+                     (!(io_flags & kDisplayModeSafeFlag) && !is_apple_silicon())))
                     continue;
 
                 seen_modes++;

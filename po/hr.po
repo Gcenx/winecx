@@ -436,8 +436,8 @@ msgstr "Sakrij karti&ce"
 msgid "See details"
 msgstr "Detalji"
 
-#: comctl32.rc:31 cryptui.rc:235 regedit.rc:286 taskmgr.rc:434 winedbg.rc:61
-#: winedbg.rc:76 wordpad.rc:180
+#: comctl32.rc:31 cryptui.rc:235 regedit.rc:286 taskmgr.rc:434 winedbg.rc:59
+#: winedbg.rc:71 wordpad.rc:180
 msgid "Close"
 msgstr "Zatvori"
 
@@ -689,7 +689,7 @@ msgstr "Odgovara samo &cijela riječ"
 msgid "Match &Case"
 msgstr "Odgovara &veličina slova"
 
-#: comdlg32.rc:325 joy.rc:71
+#: comdlg32.rc:325 joy.rc:72
 msgid "Direction"
 msgstr "Smjer"
 
@@ -3577,27 +3577,27 @@ msgstr "Povećane"
 msgid "High"
 msgstr "Visoke"
 
-#: joy.rc:36
+#: joy.rc:37
 msgid "Joysticks"
 msgstr "Joystici"
 
-#: joy.rc:39 winecfg.rc:213
+#: joy.rc:40 winecfg.rc:213
 msgid "&Disable"
 msgstr "&Isključi"
 
-#: joy.rc:40
+#: joy.rc:41
 msgid "&Enable"
 msgstr "&Uključi"
 
-#: joy.rc:41
+#: joy.rc:42
 msgid "Connected"
 msgstr "Povezan"
 
-#: joy.rc:43
+#: joy.rc:44
 msgid "Disabled"
 msgstr "Isključen"
 
-#: joy.rc:45
+#: joy.rc:46
 msgid ""
 "After disabling or enabling a device, the connected joysticks won't be "
 "updated here until you restart this applet."
@@ -3605,23 +3605,23 @@ msgstr ""
 "Nakon isključivanja ili uključivanja uređaja, povezani joystici neće biti "
 "osvježeni ovdje dok ponovno ne pokrenete ovaj applet."
 
-#: joy.rc:50
+#: joy.rc:51
 msgid "Test Joystick"
 msgstr "Isprobaj joystick"
 
-#: joy.rc:54
+#: joy.rc:55
 msgid "Buttons"
 msgstr "Gumbi"
 
-#: joy.rc:63
+#: joy.rc:64
 msgid "Test Force Feedback"
 msgstr "Isprobaj povratnu vezu sile"
 
-#: joy.rc:67
+#: joy.rc:68
 msgid "Available Effects"
 msgstr "Dostupni efekti"
 
-#: joy.rc:69
+#: joy.rc:70
 msgid ""
 "Press any button in the controller to activate the chosen effect. The effect "
 "direction can be changed with the controller axis."
@@ -3632,6 +3632,10 @@ msgstr ""
 #: joy.rc:31
 msgid "Game Controllers"
 msgstr "Igraći upravljači"
+
+#: joy.rc:32
+msgid "Test and configure game controllers."
+msgstr ""
 
 #: jscript.rc:28
 msgid "Error converting object to primitive type"
@@ -7421,7 +7425,7 @@ msgstr "Cijela mreža"
 msgid "Sound Selection"
 msgstr "Izbor zvuka"
 
-#: msacm32.rc:39 winedbg.rc:77
+#: msacm32.rc:39 winedbg.rc:72
 msgid "&Save As..."
 msgstr "&Spremi kao..."
 
@@ -16107,7 +16111,7 @@ msgstr ""
 "Program %s je naišao na ozbiljan problem i mora biti zatvoren. Ispričavamo "
 "se zbog neugodnosti."
 
-#: winedbg.rc:56
+#: winedbg.rc:57
 #, fuzzy
 #| msgid ""
 #| "This can be caused by a problem in the program or a deficiency in Wine. "
@@ -16123,15 +16127,15 @@ msgstr ""
 "<a href=\"https://appdb.winehq.org\">bazu aplikacija</a>za savjete o "
 "pokretanju ovog programa."
 
-#: winedbg.rc:62
+#: winedbg.rc:60
 msgid "Show &Details"
 msgstr "Pokaži &detalje"
 
-#: winedbg.rc:67
+#: winedbg.rc:65
 msgid "Program Error Details"
 msgstr "Detalji greške programa"
 
-#: winedbg.rc:74
+#: winedbg.rc:69
 msgid ""
 "If this problem is not present under Windows and has not been reported yet, "
 "you can save the detailed information to a file using the \"Save As\" "
