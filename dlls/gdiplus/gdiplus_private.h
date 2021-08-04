@@ -72,6 +72,7 @@ extern GpStatus gdip_transform_points(GpGraphics *graphics, GpCoordinateSpace ds
 
 extern GpStatus graphics_from_image(GpImage *image, GpGraphics **graphics) DECLSPEC_HIDDEN;
 extern GpStatus encode_image_png(GpImage *image, IStream* stream, GDIPCONST EncoderParameters* params) DECLSPEC_HIDDEN;
+extern GpStatus terminate_encoder_wic(GpImage *image) DECLSPEC_HIDDEN;
 
 extern GpStatus METAFILE_GetGraphicsContext(GpMetafile* metafile, GpGraphics **result) DECLSPEC_HIDDEN;
 extern GpStatus METAFILE_GetDC(GpMetafile* metafile, HDC *hdc) DECLSPEC_HIDDEN;
@@ -103,6 +104,11 @@ extern GpStatus METAFILE_DrawImagePointsRect(GpMetafile* metafile, GpImage *imag
 extern GpStatus METAFILE_AddSimpleProperty(GpMetafile *metafile, SHORT prop, SHORT val) DECLSPEC_HIDDEN;
 extern GpStatus METAFILE_DrawPath(GpMetafile *metafile, GpPen *pen, GpPath *path) DECLSPEC_HIDDEN;
 extern GpStatus METAFILE_FillPath(GpMetafile *metafile, GpBrush *brush, GpPath *path) DECLSPEC_HIDDEN;
+extern GpStatus METAFILE_DrawDriverString(GpMetafile *metafile, GDIPCONST UINT16 *text, INT length,
+    GDIPCONST GpFont *font, GDIPCONST GpStringFormat *format, GDIPCONST GpBrush *brush,
+    GDIPCONST PointF *positions, INT flags, GDIPCONST GpMatrix *matrix) DECLSPEC_HIDDEN;
+extern GpStatus METAFILE_FillRegion(GpMetafile* metafile, GpBrush* brush,
+    GpRegion* region) DECLSPEC_HIDDEN;
 extern void METAFILE_Free(GpMetafile *metafile) DECLSPEC_HIDDEN;
 
 extern void calc_curve_bezier(const GpPointF *pts, REAL tension, REAL *x1,
@@ -122,7 +128,7 @@ extern GpStatus trace_path(GpGraphics *graphics, GpPath *path) DECLSPEC_HIDDEN;
 typedef struct region_element region_element;
 extern void delete_element(region_element *element) DECLSPEC_HIDDEN;
 
-extern GpStatus get_hatch_data(GpHatchStyle hatchstyle, const char **result) DECLSPEC_HIDDEN;
+extern GpStatus get_hatch_data(GpHatchStyle hatchstyle, const unsigned char **result) DECLSPEC_HIDDEN;
 
 static inline INT gdip_round(REAL x)
 {
@@ -346,6 +352,7 @@ struct GpAdjustableArrowCap{
 
 struct GpImage{
     IWICBitmapDecoder *decoder;
+    IWICBitmapEncoder *encoder;
     ImageType type;
     GUID format;
     UINT flags;
@@ -405,6 +412,7 @@ struct GpMetafile{
     BOOL auto_frame; /* If true, determine the frame automatically */
     GpPointF auto_frame_min, auto_frame_max;
     DWORD next_object_id;
+    UINT limit_dpi;
 
     /* playback */
     GpGraphics *playback_graphics;

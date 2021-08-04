@@ -105,11 +105,15 @@ static BOOL CreateDirect3D(void)
         return FALSE;
     }
 
-    rc = IDirectDraw_SetCooperativeLevel(lpDD, NULL, DDSCL_NORMAL);
+    rc = IDirectDraw7_SetCooperativeLevel(lpDD, NULL, DDSCL_NORMAL);
     ok(rc==DD_OK, "SetCooperativeLevel returned: %x\n", rc);
 
     rc = IDirectDraw7_QueryInterface(lpDD, &IID_IDirect3D7, (void**) &lpD3D);
-    if (rc == E_NOINTERFACE) return FALSE;
+    if (rc == E_NOINTERFACE)
+    {
+        IDirectDraw7_Release(lpDD);
+        return FALSE;
+    }
     ok(rc==DD_OK, "QueryInterface returned: %x\n", rc);
 
     memset(&ddsd, 0, sizeof(ddsd));
@@ -120,7 +124,11 @@ static BOOL CreateDirect3D(void)
     ddsd.dwHeight = 256;
     rc = IDirectDraw7_CreateSurface(lpDD, &ddsd, &lpDDS, NULL);
     if (FAILED(rc))
+    {
+        IDirect3D7_Release(lpD3D);
+        IDirectDraw7_Release(lpDD);
         return FALSE;
+    }
 
     num = 0;
     IDirectDraw7_EnumSurfaces(lpDD, DDENUMSURFACES_ALL | DDENUMSURFACES_DOESEXIST, NULL, &num, SurfaceCounter);
@@ -144,7 +152,13 @@ static BOOL CreateDirect3D(void)
         rc = IDirectDrawSurface_AddAttachedSurface(lpDDS, lpDDSdepth);
         ok(rc == DD_OK, "IDirectDrawSurface_AddAttachedSurface returned %x\n", rc);
         if (FAILED(rc))
+        {
+            IDirectDrawSurface7_Release(lpDDSdepth);
+            IDirectDrawSurface7_Release(lpDDS);
+            IDirect3D7_Release(lpD3D);
+            IDirectDraw7_Release(lpDD);
             return FALSE;
+        }
     }
 
     rc = IDirect3D7_CreateDevice(lpD3D, &IID_IDirect3DTnLHalDevice, lpDDS,
@@ -160,6 +174,11 @@ static BOOL CreateDirect3D(void)
                 &lpD3DDevice);
             if (!lpD3DDevice) {
                 trace("IDirect3D7::CreateDevice() for a RGB device failed with an error %x, giving up\n", rc);
+                if (lpDDSdepth)
+                    IDirectDrawSurface7_Release(lpDDSdepth);
+                IDirectDrawSurface7_Release(lpDDS);
+                IDirect3D7_Release(lpD3D);
+                IDirectDraw7_Release(lpDD);
                 return FALSE;
             }
         }
@@ -196,7 +215,7 @@ static void ReleaseDirect3D(void)
 
     if (lpDD != NULL)
     {
-        IDirectDraw_Release(lpDD);
+        IDirectDraw7_Release(lpDD);
         lpDD = NULL;
     }
 }

@@ -1761,7 +1761,6 @@ static HRESULT WINAPI DefaultHandler_IPersistStorage_IsDirty(
  * BYTE  data[] - moniker data for a link
  */
 
-static const WCHAR OleStream[] = {1,'O','l','e',0};
 typedef struct
 {
     DWORD version;
@@ -1777,7 +1776,7 @@ static HRESULT load_ole_stream(DefaultHandler *This, IStorage *storage)
     IStream *stream;
     HRESULT hr;
 
-    hr = IStorage_OpenStream(storage, OleStream, NULL, STGM_READ | STGM_SHARE_EXCLUSIVE, 0, &stream);
+    hr = IStorage_OpenStream(storage, L"\1Ole", NULL, STGM_READ | STGM_SHARE_EXCLUSIVE, 0, &stream);
 
     if(SUCCEEDED(hr))
     {

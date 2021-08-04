@@ -31,7 +31,7 @@ static inline HRESULT i_stream_read(IStream* stream, void * __ptr64 data, ULONG 
         HRESULT hr;
         char local[1024];
         DWORD toread = min(len, sizeof(local));
-        if ((hr = IStream_Read(stream, local, toread, &toread)) != S_OK)
+        if (FAILED(hr = IStream_Read(stream, local, toread, &toread)))
             return hr;
         if (!toread) break;
         memcpy((char * __ptr64)data + *pread, local, toread);

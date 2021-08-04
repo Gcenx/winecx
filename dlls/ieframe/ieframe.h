@@ -200,6 +200,8 @@ struct WebBrowser {
     DWORD sink_aspects;
     DWORD sink_flags;
 
+    IOleAdviseHolder *advise_holder;
+
     /* window context */
 
     HWND frame_hwnd;
@@ -208,6 +210,8 @@ struct WebBrowser {
     RECT clip_rect;
     OLEINPLACEFRAMEINFO frameinfo;
     SIZEL extent;
+
+    BOOL ui_activated;
 
     HWND shell_embedding_hwnd;
 
@@ -280,6 +284,7 @@ HRESULT set_dochost_url(DocHost*,const WCHAR*) DECLSPEC_HIDDEN;
 void handle_navigation_error(DocHost*,HRESULT,BSTR,IHTMLWindow2*) DECLSPEC_HIDDEN;
 HRESULT dochost_object_available(DocHost*,IUnknown*) DECLSPEC_HIDDEN;
 void set_doc_state(DocHost*,READYSTATE) DECLSPEC_HIDDEN;
+void activate_document(DocHost*) DECLSPEC_HIDDEN;
 void deactivate_document(DocHost*) DECLSPEC_HIDDEN;
 void create_doc_view_hwnd(DocHost*) DECLSPEC_HIDDEN;
 void on_commandstate_change(DocHost*,LONG,BOOL) DECLSPEC_HIDDEN;
@@ -382,3 +387,12 @@ static inline LPSTR co_strdupWtoA(LPCWSTR str)
         WideCharToMultiByte(CP_ACP, 0, str, -1, ret, len, 0, 0);
     return ret;
 }
+
+enum SessionOp
+{
+    SESSION_QUERY,
+    SESSION_INCREMENT,
+    SESSION_DECREMENT
+};
+
+LONG WINAPI SetQueryNetSessionCount(DWORD session_op);

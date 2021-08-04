@@ -23,9 +23,6 @@
  * - Many flags, options and whatnot are unimplemented.
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <assert.h>
 #include <stdarg.h>
 #include "windef.h"
@@ -405,12 +402,9 @@ static WINECRYPT_CERTSTORE *CRYPT_MemOpenStore(HCRYPTPROV hCryptProv,
     return (WINECRYPT_CERTSTORE*)store;
 }
 
-static const WCHAR rootW[] = { 'R','o','o','t',0 };
-
 static WINECRYPT_CERTSTORE *CRYPT_SysRegOpenStoreW(HCRYPTPROV hCryptProv,
  DWORD dwFlags, const void *pvPara)
 {
-    static const WCHAR fmt[] = { '%','s','\\','%','s',0 };
     LPCWSTR storeName = pvPara;
     LPWSTR storePath;
     WINECRYPT_CERTSTORE *store = NULL;
@@ -432,7 +426,7 @@ static WINECRYPT_CERTSTORE *CRYPT_SysRegOpenStoreW(HCRYPTPROV hCryptProv,
         root = HKEY_LOCAL_MACHINE;
         base = CERT_LOCAL_MACHINE_SYSTEM_STORE_REGPATH;
         /* If the HKLM\Root certs are requested, expressing system certs into the registry */
-        if (!lstrcmpiW(storeName, rootW))
+        if (!lstrcmpiW(storeName, L"Root"))
             CRYPT_ImportSystemRootCertsToReg();
         break;
     case CERT_SYSTEM_STORE_CURRENT_USER:
@@ -485,7 +479,7 @@ static WINECRYPT_CERTSTORE *CRYPT_SysRegOpenStoreW(HCRYPTPROV hCryptProv,
         REGSAM sam = dwFlags & CERT_STORE_READONLY_FLAG ? KEY_READ :
             KEY_ALL_ACCESS;
 
-        wsprintfW(storePath, fmt, base, storeName);
+        wsprintfW(storePath, L"%s\\%s", base, storeName);
         if (dwFlags & CERT_STORE_OPEN_EXISTING_FLAG)
             rc = RegOpenKeyExW(root, storePath, 0, sam, &key);
         else
@@ -874,19 +868,19 @@ HCERTSTORE WINAPI CertOpenStore(LPCSTR lpszStoreProvider,
                 FIXME("unimplemented type %d\n", LOWORD(lpszStoreProvider));
         }
     }
-    else if (!_strnicmp(lpszStoreProvider, sz_CERT_STORE_PROV_MEMORY, -1))
+    else if (!stricmp(lpszStoreProvider, sz_CERT_STORE_PROV_MEMORY))
         openFunc = CRYPT_MemOpenStore;
-    else if (!_strnicmp(lpszStoreProvider, sz_CERT_STORE_PROV_FILENAME_W, -1))
+    else if (!stricmp(lpszStoreProvider, sz_CERT_STORE_PROV_FILENAME_W))
         openFunc = CRYPT_FileOpenStore;
-    else if (!_strnicmp(lpszStoreProvider, sz_CERT_STORE_PROV_SYSTEM, -1))
+    else if (!stricmp(lpszStoreProvider, sz_CERT_STORE_PROV_SYSTEM))
         openFunc = CRYPT_SysOpenStoreW;
-    else if (!_strnicmp(lpszStoreProvider, sz_CERT_STORE_PROV_PKCS7, -1))
+    else if (!stricmp(lpszStoreProvider, sz_CERT_STORE_PROV_PKCS7))
         openFunc = CRYPT_PKCSOpenStore;
-    else if (!_strnicmp(lpszStoreProvider, sz_CERT_STORE_PROV_SERIALIZED, -1))
+    else if (!stricmp(lpszStoreProvider, sz_CERT_STORE_PROV_SERIALIZED))
         openFunc = CRYPT_SerializedOpenStore;
-    else if (!_strnicmp(lpszStoreProvider, sz_CERT_STORE_PROV_COLLECTION, -1))
+    else if (!stricmp(lpszStoreProvider, sz_CERT_STORE_PROV_COLLECTION))
         openFunc = CRYPT_CollectionOpenStore;
-    else if (!_strnicmp(lpszStoreProvider, sz_CERT_STORE_PROV_SYSTEM_REGISTRY, -1))
+    else if (!stricmp(lpszStoreProvider, sz_CERT_STORE_PROV_SYSTEM_REGISTRY))
         openFunc = CRYPT_SysRegOpenStoreW;
     else
     {
@@ -1355,7 +1349,7 @@ BOOL WINAPI CertEnumSystemStore(DWORD dwFlags, void *pvSystemStoreLocationPara,
      */
     if (ret && (dwFlags & CERT_SYSTEM_STORE_LOCATION_MASK) ==
      CERT_SYSTEM_STORE_LOCAL_MACHINE)
-        ret = pfnEnum(rootW, dwFlags, &info, NULL, pvArg);
+        ret = pfnEnum(L"Root", dwFlags, &info, NULL, pvArg);
     return ret;
 }
 

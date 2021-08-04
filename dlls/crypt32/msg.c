@@ -16,9 +16,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdarg.h>
 #define NONAMELESSUNION
 #include "windef.h"
@@ -1574,9 +1571,8 @@ static BOOL WINAPI CRYPT_ExportKeyTrans(
     ret = CRYPT_ConstructAlgorithmId(&keyInfo.Algorithm,
         &pKeyTransEncodeInfo->KeyEncryptionAlgorithm);
     if (ret)
-        CRYPT_ConstructBitBlob(&keyInfo.PublicKey,
+        ret = CRYPT_ConstructBitBlob(&keyInfo.PublicKey,
          &pKeyTransEncodeInfo->RecipientPublicKey);
-
     if (ret)
         ret = CryptImportPublicKeyInfo(pKeyTransEncodeInfo->hCryptProv,
          X509_ASN_ENCODING, &keyInfo, &expKey);
@@ -2999,15 +2995,14 @@ static BOOL CDecodeEnvelopedMsg_GetParam(CDecodeMsg *msg, DWORD dwParamType,
     return ret;
 }
 
-static BOOL CRYPT_CopyUnauthAttr(void *pvData, DWORD *pcbData,
- const CMSG_CMS_SIGNER_INFO *in)
+static BOOL CRYPT_CopyAttr(void *pvData, DWORD *pcbData, const CRYPT_ATTRIBUTES *attr)
 {
     DWORD size;
     BOOL ret;
 
-    TRACE("(%p, %d, %p)\n", pvData, pvData ? *pcbData : 0, in);
+    TRACE("(%p, %d, %p)\n", pvData, pvData ? *pcbData : 0, attr);
 
-    size = CRYPT_SizeOfAttributes(&in->UnauthAttrs);
+    size = CRYPT_SizeOfAttributes(attr);
     if (!pvData)
     {
         *pcbData = size;
@@ -3020,12 +3015,8 @@ static BOOL CRYPT_CopyUnauthAttr(void *pvData, DWORD *pcbData,
         ret = FALSE;
     }
     else
-    {
-        CRYPT_ATTRIBUTES *out = pvData;
+        ret = CRYPT_ConstructAttributes(pvData, attr);
 
-        CRYPT_ConstructAttributes(out,&in->UnauthAttrs);
-        ret = TRUE;
-    }
     TRACE("returning %d\n", ret);
     return ret;
 }
@@ -3160,6 +3151,12 @@ static BOOL CDecodeSignedMsg_GetParam(CDecodeMsg *msg, DWORD dwParamType,
         else
             SetLastError(CRYPT_E_INVALID_MSG_TYPE);
         break;
+    case CMSG_ENCODED_MESSAGE:
+        if (msg->msg_data.pbData)
+            ret = CRYPT_CopyParam(pvData, pcbData, msg->msg_data.pbData, msg->msg_data.cbData);
+        else
+            SetLastError(CRYPT_E_INVALID_MSG_TYPE);
+        break;
     case CMSG_ENCODED_SIGNER:
         if (msg->u.signed_data.info)
         {
@@ -3203,14 +3200,26 @@ static BOOL CDecodeSignedMsg_GetParam(CDecodeMsg *msg, DWORD dwParamType,
         else
             SetLastError(CRYPT_E_INVALID_MSG_TYPE);
         break;
+    case CMSG_SIGNER_AUTH_ATTR_PARAM:
+        if (msg->u.signed_data.info)
+        {
+            if (dwIndex >= msg->u.signed_data.info->cSignerInfo)
+                SetLastError(CRYPT_E_INVALID_INDEX);
+            else
+                ret = CRYPT_CopyAttr(pvData, pcbData,
+                 &msg->u.signed_data.info->rgSignerInfo[dwIndex].AuthAttrs);
+        }
+        else
+            SetLastError(CRYPT_E_INVALID_MSG_TYPE);
+        break;
     case CMSG_SIGNER_UNAUTH_ATTR_PARAM:
         if (msg->u.signed_data.info)
         {
             if (dwIndex >= msg->u.signed_data.info->cSignerInfo)
                 SetLastError(CRYPT_E_INVALID_INDEX);
             else
-                ret = CRYPT_CopyUnauthAttr(pvData, pcbData,
-                 &msg->u.signed_data.info->rgSignerInfo[dwIndex]);
+                ret = CRYPT_CopyAttr(pvData, pcbData,
+                 &msg->u.signed_data.info->rgSignerInfo[dwIndex].UnauthAttrs);
         }
         else
             SetLastError(CRYPT_E_INVALID_MSG_TYPE);

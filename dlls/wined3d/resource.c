@@ -130,16 +130,9 @@ HRESULT resource_init(struct wined3d_resource *resource, struct wined3d_device *
                 continue;
             }
             if ((bind_flags & WINED3D_BIND_DEPTH_STENCIL)
-                    && !(format->flags[gl_type] & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL)))
+                    && !(format->flags[gl_type] & WINED3DFMT_FLAG_DEPTH_STENCIL))
             {
                 WARN("Format %s cannot be used for depth/stencil buffers.\n", debug_d3dformat(format->id));
-                continue;
-            }
-            if (wined3d_settings.offscreen_rendering_mode == ORM_FBO
-                    && bind_flags & (WINED3D_BIND_RENDER_TARGET | WINED3D_BIND_DEPTH_STENCIL)
-                    && !(format->flags[gl_type] & WINED3DFMT_FLAG_FBO_ATTACHABLE))
-            {
-                WARN("Render target or depth stencil is not FBO attachable.\n");
                 continue;
             }
             if ((bind_flags & WINED3D_BIND_SHADER_RESOURCE)
@@ -240,6 +233,9 @@ static void wined3d_resource_destroy_object(void *object)
 {
     struct wined3d_resource *resource = object;
 
+    TRACE("resource %p.\n", resource);
+
+    heap_free(resource->sub_resource_bind_counts_device);
     wined3d_resource_free_sysmem(resource);
     context_resource_released(resource->device, resource);
     wined3d_resource_release(resource);
@@ -383,11 +379,112 @@ HRESULT CDECL wined3d_resource_map(struct wined3d_resource *resource, unsigned i
     return wined3d_cs_map(resource->device->cs, resource, sub_resource_idx, map_desc, box, flags);
 }
 
+HRESULT CDECL wined3d_resource_map_info(struct wined3d_resource *resource, unsigned int sub_resource_idx,
+        struct wined3d_map_info *info, DWORD flags)
+{
+    TRACE("resource %p, sub_resource_idx %u.\n", resource, sub_resource_idx);
+
+    return resource->resource_ops->resource_map_info(resource, sub_resource_idx, info, flags);
+}
+
 HRESULT CDECL wined3d_resource_unmap(struct wined3d_resource *resource, unsigned int sub_resource_idx)
 {
     TRACE("resource %p, sub_resource_idx %u.\n", resource, sub_resource_idx);
 
     return wined3d_cs_unmap(resource->device->cs, resource, sub_resource_idx);
+}
+
+UINT CDECL wined3d_resource_update_info(struct wined3d_resource *resource, unsigned int sub_resource_idx,
+        const struct wined3d_box *box, unsigned int row_pitch, unsigned int depth_pitch)
+{
+    unsigned int width, height, depth;
+    struct wined3d_box b;
+    UINT data_size;
+
+    TRACE("resource %p, sub_resource_idx %u, box %s, row_pitch %u, depth_pitch %u.\n",
+            resource, sub_resource_idx, debug_box(box), row_pitch, depth_pitch);
+
+    if (resource->type == WINED3D_RTYPE_BUFFER)
+    {
+        if (sub_resource_idx > 0)
+        {
+            WARN("Invalid sub_resource_idx %u.\n", sub_resource_idx);
+            return 0;
+        }
+
+        width = resource->size;
+        height = 1;
+        depth = 1;
+    }
+    else if (resource->type == WINED3D_RTYPE_TEXTURE_1D ||
+            resource->type == WINED3D_RTYPE_TEXTURE_2D || resource->type == WINED3D_RTYPE_TEXTURE_3D)
+    {
+        struct wined3d_texture *texture = texture_from_resource(resource);
+        unsigned int level;
+
+        if (sub_resource_idx >= texture->level_count * texture->layer_count)
+        {
+            WARN("Invalid sub_resource_idx %u.\n", sub_resource_idx);
+            return 0;
+        }
+
+        level = sub_resource_idx % texture->level_count;
+        width = wined3d_texture_get_level_width(texture, level);
+        height = wined3d_texture_get_level_height(texture, level);
+        depth = wined3d_texture_get_level_depth(texture, level);
+    }
+    else
+    {
+        FIXME("Not implemented for %s resources.\n", debug_d3dresourcetype(resource->type));
+        return 0;
+    }
+
+    if (!box)
+    {
+        wined3d_box_set(&b, 0, 0, width, height, 0, depth);
+        box = &b;
+    }
+    else if (box->left >= box->right || box->right > width
+            || box->top >= box->bottom || box->bottom > height
+            || box->front >= box->back || box->back > depth)
+    {
+        WARN("Invalid box %s specified.\n", debug_box(box));
+        return 0;
+    }
+
+    if (resource->format_flags & WINED3DFMT_FLAG_BLOCKS)
+    {
+        if (resource->type != WINED3D_RTYPE_TEXTURE_2D)
+        {
+            FIXME("Calculation of block formats not implemented for %s resources.\n", debug_d3dresourcetype(resource->type));
+            return 0;
+        }
+
+        height  = (box->bottom - box->top  + resource->format->block_height - 1) / resource->format->block_height;
+        width   = (box->right  - box->left + resource->format->block_width  - 1) / resource->format->block_width;
+        return (height - 1) * row_pitch + width * resource->format->block_byte_count;
+    }
+
+    data_size = 0;
+    switch (resource->type)
+    {
+        case WINED3D_RTYPE_TEXTURE_3D:
+            data_size += (box->back - box->front - 1) * depth_pitch;
+            /* fall-through */
+        case WINED3D_RTYPE_TEXTURE_2D:
+            data_size += (box->bottom - box->top - 1) * row_pitch;
+            /* fall-through */
+        case WINED3D_RTYPE_TEXTURE_1D:
+            data_size += (box->right - box->left) * resource->format->byte_count;
+            break;
+        case WINED3D_RTYPE_BUFFER:
+            data_size = box->right - box->left;
+            break;
+        case WINED3D_RTYPE_NONE:
+            break;
+    }
+
+    return data_size;
 }
 
 void CDECL wined3d_resource_preload(struct wined3d_resource *resource)
@@ -434,6 +531,21 @@ void wined3d_resource_free_sysmem(struct wined3d_resource *resource)
     resource->heap_memory = NULL;
 }
 
+GLbitfield wined3d_resource_gl_storage_flags(const struct wined3d_resource *resource)
+{
+    uint32_t access = resource->access;
+    GLbitfield flags = 0;
+
+    if (resource->usage & WINED3DUSAGE_DYNAMIC)
+        flags |= GL_CLIENT_STORAGE_BIT;
+    if (access & WINED3D_RESOURCE_ACCESS_MAP_W)
+        flags |= GL_MAP_WRITE_BIT;
+    if (access & WINED3D_RESOURCE_ACCESS_MAP_R)
+        flags |= GL_MAP_READ_BIT;
+
+    return flags;
+}
+
 GLbitfield wined3d_resource_gl_map_flags(DWORD d3d_flags)
 {
     GLbitfield ret = 0;
@@ -442,10 +554,7 @@ GLbitfield wined3d_resource_gl_map_flags(DWORD d3d_flags)
         ret |= GL_MAP_WRITE_BIT | GL_MAP_FLUSH_EXPLICIT_BIT;
     if (d3d_flags & WINED3D_MAP_READ)
         ret |= GL_MAP_READ_BIT;
-
-    if (d3d_flags & WINED3D_MAP_DISCARD)
-        ret |= GL_MAP_INVALIDATE_BUFFER_BIT;
-    if (d3d_flags & WINED3D_MAP_NOOVERWRITE)
+    else
         ret |= GL_MAP_UNSYNCHRONIZED_BIT;
 
     return ret;
@@ -548,4 +657,52 @@ unsigned int wined3d_resource_get_sample_count(const struct wined3d_resource *re
     }
 
     return resource->multisample_type;
+}
+
+VkAccessFlags vk_access_mask_from_bind_flags(uint32_t bind_flags)
+{
+    VkAccessFlags flags = 0;
+
+    if (bind_flags & WINED3D_BIND_VERTEX_BUFFER)
+        flags |= VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+    if (bind_flags & WINED3D_BIND_INDEX_BUFFER)
+        flags |= VK_ACCESS_INDEX_READ_BIT;
+    if (bind_flags & WINED3D_BIND_CONSTANT_BUFFER)
+        flags |= VK_ACCESS_UNIFORM_READ_BIT;
+    if (bind_flags & WINED3D_BIND_SHADER_RESOURCE)
+        flags |= VK_ACCESS_SHADER_READ_BIT;
+    if (bind_flags & WINED3D_BIND_UNORDERED_ACCESS)
+        flags |= VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    if (bind_flags & WINED3D_BIND_INDIRECT_BUFFER)
+        flags |= VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+    if (bind_flags & WINED3D_BIND_RENDER_TARGET)
+        flags |= VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    if (bind_flags & WINED3D_BIND_DEPTH_STENCIL)
+        flags |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    if (bind_flags & WINED3D_BIND_STREAM_OUTPUT)
+        flags |= VK_ACCESS_TRANSFORM_FEEDBACK_WRITE_BIT_EXT;
+
+    return flags;
+}
+
+VkPipelineStageFlags vk_pipeline_stage_mask_from_bind_flags(uint32_t bind_flags)
+{
+    VkPipelineStageFlags flags = 0;
+
+    if (bind_flags & (WINED3D_BIND_VERTEX_BUFFER | WINED3D_BIND_INDEX_BUFFER))
+        flags |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+    if (bind_flags & (WINED3D_BIND_CONSTANT_BUFFER | WINED3D_BIND_SHADER_RESOURCE | WINED3D_BIND_UNORDERED_ACCESS))
+        flags |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT
+                | VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT | VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT
+                | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    if (bind_flags & WINED3D_BIND_INDIRECT_BUFFER)
+        flags |= VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
+    if (bind_flags & WINED3D_BIND_RENDER_TARGET)
+        flags |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    if (bind_flags & WINED3D_BIND_DEPTH_STENCIL)
+        flags |= VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    if (bind_flags & WINED3D_BIND_STREAM_OUTPUT)
+        flags |= VK_PIPELINE_STAGE_TRANSFORM_FEEDBACK_BIT_EXT;
+
+    return flags;
 }

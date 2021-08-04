@@ -81,8 +81,6 @@ FARPROC WINAPI get_proc_address( HMODULE module, LPCSTR function )
  */
 static BOOL load_library_as_datafile( LPCWSTR load_path, DWORD flags, LPCWSTR name, HMODULE *mod_ret )
 {
-    static const WCHAR dotDLL[] = {'.','d','l','l',0};
-
     WCHAR filenameW[MAX_PATH];
     HANDLE mapping, file = INVALID_HANDLE_VALUE;
     HMODULE module = 0;
@@ -92,7 +90,7 @@ static BOOL load_library_as_datafile( LPCWSTR load_path, DWORD flags, LPCWSTR na
 
     if (flags & LOAD_LIBRARY_AS_IMAGE_RESOURCE) protect |= SEC_IMAGE;
 
-    if (SearchPathW( NULL, name, dotDLL, ARRAY_SIZE( filenameW ), filenameW, NULL ))
+    if (SearchPathW( NULL, name, L".dll", ARRAY_SIZE( filenameW ), filenameW, NULL ))
     {
         file = CreateFileW( filenameW, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
                             NULL, OPEN_EXISTING, 0, 0 );
@@ -303,7 +301,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetModuleFileNameW( HMODULE module, LPWSTR filena
 {
     ULONG len = 0;
     ULONG_PTR magic;
-    LDR_MODULE *pldr;
+    LDR_DATA_TABLE_ENTRY *pldr;
     WIN16_SUBSYSTEM_TIB *win16_tib;
 
     if (!module && ((win16_tib = NtCurrentTeb()->Tib.SubSystemTib)) && win16_tib->exe_name)
@@ -449,18 +447,18 @@ __ASM_GLOBAL_FUNC( GetProcAddress,
                    "movq %rsp,%rbp\n\t"
                    __ASM_SEH(".seh_setframe %rbp,0\n\t")
                    __ASM_CFI(".cfi_def_cfa_register %rbp\n\t")
-                   "subq $0x60,%rsp\n\t"
-                   __ASM_SEH(".seh_stackalloc 0x60\n\t")
                    __ASM_SEH(".seh_endprologue\n\t")
-                   "movaps %xmm0,-0x10(%rbp)\n\t"
-                   "movaps %xmm1,-0x20(%rbp)\n\t"
-                   "movaps %xmm2,-0x30(%rbp)\n\t"
-                   "movaps %xmm3,-0x40(%rbp)\n\t"
+                   "subq $0x60,%rsp\n\t"
+                   "andq $~15,%rsp\n\t"
+                   "movaps %xmm0,0x20(%rsp)\n\t"
+                   "movaps %xmm1,0x30(%rsp)\n\t"
+                   "movaps %xmm2,0x40(%rsp)\n\t"
+                   "movaps %xmm3,0x50(%rsp)\n\t"
                    "call " __ASM_NAME("get_proc_address") "\n\t"
-                   "movaps -0x40(%rbp), %xmm3\n\t"
-                   "movaps -0x30(%rbp), %xmm2\n\t"
-                   "movaps -0x20(%rbp), %xmm1\n\t"
-                   "movaps -0x10(%rbp), %xmm0\n\t"
+                   "movaps 0x50(%rsp), %xmm3\n\t"
+                   "movaps 0x40(%rsp), %xmm2\n\t"
+                   "movaps 0x30(%rsp), %xmm1\n\t"
+                   "movaps 0x20(%rsp), %xmm0\n\t"
                    "leaq 0(%rbp),%rsp\n\t"
                    __ASM_CFI(".cfi_def_cfa_register %rsp\n\t")
                    "popq %rbp\n\t"
@@ -532,6 +530,26 @@ HMODULE WINAPI DECLSPEC_HOTPATCH LoadLibraryExW( LPCWSTR name, HANDLE file, DWOR
     module = load_library( &str, flags );
     RtlFreeUnicodeString( &str );
     return module;
+}
+
+
+/***********************************************************************
+ *      LoadPackagedLibrary    (kernelbase.@)
+ */
+HMODULE WINAPI /* DECLSPEC_HOTPATCH */ LoadPackagedLibrary( LPCWSTR name, DWORD reserved )
+{
+    FIXME( "semi-stub, name %s, reserved %#x.\n", debugstr_w(name), reserved );
+    SetLastError( APPMODEL_ERROR_NO_PACKAGE );
+    return NULL;
+}
+
+
+/***********************************************************************
+ *      LoadAppInitDlls    (kernelbase.@)
+ */
+void WINAPI LoadAppInitDlls(void)
+{
+    TRACE( "\n" );
 }
 
 

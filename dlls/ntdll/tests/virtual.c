@@ -25,13 +25,20 @@
 #include "windef.h"
 #include "winternl.h"
 #include "wine/test.h"
+#include "ddk/wdm.h"
 
 static unsigned int page_size;
 
+static DWORD64 (WINAPI *pGetEnabledXStateFeatures)(void);
 static NTSTATUS (WINAPI *pRtlCreateUserStack)(SIZE_T, SIZE_T, ULONG, SIZE_T, SIZE_T, INITIAL_TEB *);
+static ULONG64 (WINAPI *pRtlGetEnabledExtendedFeatures)(ULONG64);
 static NTSTATUS (WINAPI *pRtlFreeUserStack)(void *);
 static BOOL (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
+static NTSTATUS (WINAPI *pNtAllocateVirtualMemoryEx)(HANDLE, PVOID *, SIZE_T *, ULONG, ULONG,
+                                                     MEM_EXTENDED_PARAMETER *, ULONG);
 static const BOOL is_win64 = sizeof(void*) != sizeof(int);
+
+static SYSTEM_BASIC_INFORMATION sbi;
 
 static HANDLE create_target_process(const char *arg)
 {
@@ -210,6 +217,24 @@ static void test_NtAllocateVirtualMemory(void)
     size = 0;
     status = NtFreeVirtualMemory(NtCurrentProcess(), &addr1, &size, MEM_RELEASE);
     ok(status == STATUS_SUCCESS, "NtFreeVirtualMemory failed\n");
+
+    if (!pNtAllocateVirtualMemoryEx)
+    {
+        win_skip("NtAllocateVirtualMemoryEx() is missing\n");
+        return;
+    }
+
+    /* simple allocation should succeed */
+    size = 0x1000;
+    addr1 = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size, MEM_RESERVE | MEM_COMMIT,
+                                        PAGE_EXECUTE_READWRITE, NULL, 0);
+    ok(status == STATUS_SUCCESS, "NtAllocateVirtualMemoryEx returned %08x\n", status);
+
+    /* specifying a count of >0 with NULL parameters should fail */
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size, MEM_RESERVE | MEM_COMMIT,
+                                        PAGE_EXECUTE_READWRITE, NULL, 1);
+    ok(status == STATUS_INVALID_PARAMETER, "NtAllocateVirtualMemoryEx returned %08x\n", status);
 }
 
 static void test_RtlCreateUserStack(void)
@@ -513,9 +538,223 @@ static void test_NtMapViewOfSection(void)
     CloseHandle(process);
 }
 
+#define SUPPORTED_XSTATE_FEATURES ((1 << XSTATE_LEGACY_FLOATING_POINT) | (1 << XSTATE_LEGACY_SSE) | (1 << XSTATE_AVX))
+
+static void test_user_shared_data(void)
+{
+    struct old_xstate_configuration
+    {
+        ULONG64 EnabledFeatures;
+        ULONG Size;
+        ULONG OptimizedSave:1;
+        ULONG CompactionEnabled:1;
+        XSTATE_FEATURE Features[MAXIMUM_XSTATE_FEATURES];
+    };
+
+    static const ULONG feature_offsets[] =
+    {
+            0,
+            160, /*offsetof(XMM_SAVE_AREA32, XmmRegisters)*/
+            512  /* sizeof(XMM_SAVE_AREA32) */ + offsetof(XSTATE, YmmContext),
+    };
+    static const ULONG feature_sizes[] =
+    {
+            160,
+            256, /*sizeof(M128A) * 16 */
+            sizeof(YMMCONTEXT),
+    };
+    const KSHARED_USER_DATA *user_shared_data = (void *)0x7ffe0000;
+    XSTATE_CONFIGURATION xstate = user_shared_data->XState;
+    ULONG64 feature_mask;
+    unsigned int i;
+
+    ok(user_shared_data->NumberOfPhysicalPages == sbi.MmNumberOfPhysicalPages,
+            "Got number of physical pages %#x, expected %#x.\n",
+            user_shared_data->NumberOfPhysicalPages, sbi.MmNumberOfPhysicalPages);
+
+#if defined(__i386__) || defined(__x86_64__)
+    ok(user_shared_data->ProcessorFeatures[PF_RDTSC_INSTRUCTION_AVAILABLE] /* Supported since Pentium CPUs. */,
+            "_RDTSC not available.\n");
+#endif
+    ok(user_shared_data->ActiveProcessorCount == NtCurrentTeb()->Peb->NumberOfProcessors
+            || broken(!user_shared_data->ActiveProcessorCount) /* before Win7 */,
+            "Got unexpected ActiveProcessorCount %u.\n", user_shared_data->ActiveProcessorCount);
+    ok(user_shared_data->ActiveGroupCount == 1
+            || broken(!user_shared_data->ActiveGroupCount) /* before Win7 */,
+            "Got unexpected ActiveGroupCount %u.\n", user_shared_data->ActiveGroupCount);
+
+    if (!pRtlGetEnabledExtendedFeatures)
+    {
+        skip("RtlGetEnabledExtendedFeatures is not available.\n");
+        return;
+    }
+
+    feature_mask = pRtlGetEnabledExtendedFeatures(~(ULONG64)0);
+    if (!feature_mask)
+    {
+        skip("XState features are not available.\n");
+        return;
+    }
+
+    if (!xstate.EnabledFeatures)
+    {
+        struct old_xstate_configuration *xs_old
+                = (struct old_xstate_configuration *)((char *)user_shared_data + 0x3e0);
+
+        memset(&xstate, 0, sizeof(xstate));
+        xstate.EnabledFeatures = xstate.EnabledVolatileFeatures = xs_old->EnabledFeatures;
+        memcpy(&xstate.Size, &xs_old->Size, sizeof(*xs_old) - offsetof(struct old_xstate_configuration, Size));
+        for (i = 0; i < 3; ++i)
+             xstate.AllFeatures[i] = xs_old->Features[i].Size;
+        xstate.AllFeatureSize = 512 + sizeof(XSTATE);
+    }
+
+    trace("XState EnabledFeatures %s.\n", wine_dbgstr_longlong(xstate.EnabledFeatures));
+    feature_mask = pRtlGetEnabledExtendedFeatures(0);
+    ok(!feature_mask, "Got unexpected feature_mask %s.\n", wine_dbgstr_longlong(feature_mask));
+    feature_mask = pRtlGetEnabledExtendedFeatures(~(ULONG64)0);
+    ok(feature_mask == xstate.EnabledFeatures, "Got unexpected feature_mask %s.\n",
+            wine_dbgstr_longlong(feature_mask));
+    feature_mask = pGetEnabledXStateFeatures();
+    ok(feature_mask == xstate.EnabledFeatures, "Got unexpected feature_mask %s.\n",
+            wine_dbgstr_longlong(feature_mask));
+    ok((xstate.EnabledFeatures & SUPPORTED_XSTATE_FEATURES) == SUPPORTED_XSTATE_FEATURES,
+            "Got unexpected EnabledFeatures %s.\n", wine_dbgstr_longlong(xstate.EnabledFeatures));
+    ok((xstate.EnabledVolatileFeatures & SUPPORTED_XSTATE_FEATURES) == xstate.EnabledFeatures,
+            "Got unexpected EnabledVolatileFeatures %s.\n", wine_dbgstr_longlong(xstate.EnabledVolatileFeatures));
+    ok(xstate.Size >= 512 + sizeof(XSTATE), "Got unexpected Size %u.\n", xstate.Size);
+    if (xstate.CompactionEnabled)
+        ok(xstate.OptimizedSave, "Got zero OptimizedSave with compaction enabled.\n");
+    ok(!xstate.AlignedFeatures, "Got unexpected AlignedFeatures %s.\n",
+            wine_dbgstr_longlong(xstate.AlignedFeatures));
+    ok(xstate.AllFeatureSize >= 512 + sizeof(XSTATE), "Got unexpected AllFeatureSize %u.\n",
+            xstate.AllFeatureSize);
+
+    for (i = 0; i < ARRAY_SIZE(feature_sizes); ++i)
+    {
+        ok(xstate.AllFeatures[i] == feature_sizes[i]
+                || broken(!xstate.AllFeatures[i]) /* win10pro */,
+                "Got unexpected AllFeatures[%u] %u, expected %u.\n", i,
+                xstate.AllFeatures[i], feature_sizes[i]);
+        ok(xstate.Features[i].Size == feature_sizes[i], "Got unexpected Features[%u].Size %u, expected %u.\n", i,
+                xstate.Features[i].Size, feature_sizes[i]);
+        ok(xstate.Features[i].Offset == feature_offsets[i], "Got unexpected Features[%u].Offset %u, expected %u.\n",
+                i, xstate.Features[i].Offset, feature_offsets[i]);
+    }
+}
+
+static void perform_relocations( void *module, INT_PTR delta )
+{
+    IMAGE_NT_HEADERS *nt;
+    IMAGE_BASE_RELOCATION *rel, *end;
+    const IMAGE_DATA_DIRECTORY *relocs;
+    const IMAGE_SECTION_HEADER *sec;
+    ULONG protect_old[96], i;
+
+    nt = RtlImageNtHeader( module );
+    relocs = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
+    if (!relocs->VirtualAddress || !relocs->Size) return;
+    sec = (const IMAGE_SECTION_HEADER *)((const char *)&nt->OptionalHeader +
+                                         nt->FileHeader.SizeOfOptionalHeader);
+    for (i = 0; i < nt->FileHeader.NumberOfSections; i++)
+    {
+        void *addr = (char *)module + sec[i].VirtualAddress;
+        SIZE_T size = sec[i].SizeOfRawData;
+        NtProtectVirtualMemory( NtCurrentProcess(), &addr,
+                                &size, PAGE_READWRITE, &protect_old[i] );
+    }
+    rel = (IMAGE_BASE_RELOCATION *)((char *)module + relocs->VirtualAddress);
+    end = (IMAGE_BASE_RELOCATION *)((char *)rel + relocs->Size);
+    while (rel && rel < end - 1 && rel->SizeOfBlock)
+        rel = LdrProcessRelocationBlock( (char *)module + rel->VirtualAddress,
+                                         (rel->SizeOfBlock - sizeof(*rel)) / sizeof(USHORT),
+                                         (USHORT *)(rel + 1), delta );
+    for (i = 0; i < nt->FileHeader.NumberOfSections; i++)
+    {
+        void *addr = (char *)module + sec[i].VirtualAddress;
+        SIZE_T size = sec[i].SizeOfRawData;
+        NtProtectVirtualMemory( NtCurrentProcess(), &addr,
+                                &size, protect_old[i], &protect_old[i] );
+    }
+}
+
+
+static void test_syscalls(void)
+{
+    HMODULE module = GetModuleHandleW( L"ntdll.dll" );
+    HANDLE handle;
+    NTSTATUS status;
+    NTSTATUS (WINAPI *pNtClose)(HANDLE);
+    WCHAR path[MAX_PATH];
+    HANDLE file, mapping;
+    INT_PTR delta;
+    void *ptr;
+
+    /* initial image */
+    pNtClose = (void *)GetProcAddress( module, "NtClose" );
+    handle = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( handle != 0, "CreateEventWfailed %u\n", GetLastError() );
+    status = pNtClose( handle );
+    ok( !status, "NtClose failed %x\n", status );
+    status = pNtClose( handle );
+    ok( status == STATUS_INVALID_HANDLE, "NtClose failed %x\n", status );
+
+    /* syscall thunk copy */
+    ptr = VirtualAlloc( NULL, 0x1000, MEM_COMMIT, PAGE_EXECUTE_READWRITE );
+    ok( ptr != NULL, "VirtualAlloc failed\n" );
+    memcpy( ptr, pNtClose, 32 );
+    pNtClose = ptr;
+    handle = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( handle != 0, "CreateEventWfailed %u\n", GetLastError() );
+    status = pNtClose( handle );
+    ok( !status, "NtClose failed %x\n", status );
+    status = pNtClose( handle );
+    ok( status == STATUS_INVALID_HANDLE, "NtClose failed %x\n", status );
+    VirtualFree( ptr, 0, MEM_FREE );
+
+    /* new mapping */
+    GetModuleFileNameW( module, path, MAX_PATH );
+    file = CreateFileW( path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0 );
+    ok( file != INVALID_HANDLE_VALUE, "can't open %s: %u\n", wine_dbgstr_w(path), GetLastError() );
+    mapping = CreateFileMappingW( file, NULL, SEC_IMAGE | PAGE_READONLY, 0, 0, NULL );
+    ok( mapping != NULL, "CreateFileMappingW failed err %u\n", GetLastError() );
+    ptr = MapViewOfFile( mapping, FILE_MAP_READ, 0, 0, 0 );
+    ok( ptr != NULL, "MapViewOfFile failed err %u\n", GetLastError() );
+    CloseHandle( mapping );
+    CloseHandle( file );
+    delta = (char *)ptr - (char *)module;
+
+    if (memcmp( ptr, module, 0x1000 ))
+    {
+        skip( "modules are not identical (non-PE build?)\n" );
+        UnmapViewOfFile( ptr );
+        return;
+    }
+    perform_relocations( ptr, delta );
+    pNtClose = (void *)GetProcAddress( module, "NtClose" );
+    if (!memcmp( pNtClose, (char *)pNtClose + delta, 32 ))
+    {
+        pNtClose = (void *)((char *)pNtClose + delta);
+        handle = CreateEventW( NULL, FALSE, FALSE, NULL );
+        ok( handle != 0, "CreateEventWfailed %u\n", GetLastError() );
+        status = pNtClose( handle );
+        ok( !status, "NtClose failed %x\n", status );
+        status = pNtClose( handle );
+        ok( status == STATUS_INVALID_HANDLE, "NtClose failed %x\n", status );
+    }
+    else
+    {
+#ifdef __x86_64__
+        ok( 0, "syscall thunk relocated\n" );
+#else
+        skip( "syscall thunk relocated\n" );
+#endif
+    }
+    UnmapViewOfFile( ptr );
+}
+
 START_TEST(virtual)
 {
-    SYSTEM_BASIC_INFORMATION sbi;
     HMODULE mod;
 
     int argc;
@@ -534,10 +773,12 @@ START_TEST(virtual)
 
     mod = GetModuleHandleA("kernel32.dll");
     pIsWow64Process = (void *)GetProcAddress(mod, "IsWow64Process");
-
+    pGetEnabledXStateFeatures = (void *)GetProcAddress(mod, "GetEnabledXStateFeatures");
     mod = GetModuleHandleA("ntdll.dll");
     pRtlCreateUserStack = (void *)GetProcAddress(mod, "RtlCreateUserStack");
     pRtlFreeUserStack = (void *)GetProcAddress(mod, "RtlFreeUserStack");
+    pRtlGetEnabledExtendedFeatures = (void *)GetProcAddress(mod, "RtlGetEnabledExtendedFeatures");
+    pNtAllocateVirtualMemoryEx = (void *)GetProcAddress(mod, "NtAllocateVirtualMemoryEx");
 
     NtQuerySystemInformation(SystemBasicInformation, &sbi, sizeof(sbi), NULL);
     trace("system page size %#x\n", sbi.PageSize);
@@ -546,4 +787,6 @@ START_TEST(virtual)
     test_NtAllocateVirtualMemory();
     test_RtlCreateUserStack();
     test_NtMapViewOfSection();
+    test_user_shared_data();
+    test_syscalls();
 }

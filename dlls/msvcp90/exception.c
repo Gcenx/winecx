@@ -26,10 +26,13 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcp);
 
+CREATE_TYPE_INFO_VTABLE
+
 #define CLASS_IS_SIMPLE_TYPE          1
 #define CLASS_HAS_VIRTUAL_BASE_CLASS  4
 
 void WINAPI _CxxThrowException(exception*,const cxx_exception_type*);
+int* __cdecl __processing_throw(void);
 
 #if _MSVCP_VER >= 70 || defined(_MSVCIRT)
 typedef const char **exception_name;
@@ -63,34 +66,6 @@ extern const vtable_ptr MSVCP_failure_vtable;
 extern const vtable_ptr MSVCP_bad_cast_vtable;
 /* ??_7range_error@std@@6B@ */
 extern const vtable_ptr MSVCP_range_error_vtable;
-
-static void MSVCP_type_info_dtor(type_info * _this)
-{
-    free(_this->name);
-}
-
-/* Unexported */
-DEFINE_THISCALL_WRAPPER(MSVCP_type_info_vector_dtor,8)
-void * __thiscall MSVCP_type_info_vector_dtor(type_info * _this, unsigned int flags)
-{
-    TRACE("(%p %x)\n", _this, flags);
-    if (flags & 2)
-    {
-        /* we have an array, with the number of elements stored before the first object */
-        INT_PTR i, *ptr = (INT_PTR *)_this - 1;
-
-        for (i = *ptr - 1; i >= 0; i--) MSVCP_type_info_dtor(_this + i);
-        MSVCRT_operator_delete(ptr);
-    }
-    else
-    {
-        MSVCP_type_info_dtor(_this);
-        if (flags & 1) MSVCRT_operator_delete(_this);
-    }
-    return _this;
-}
-
-DEFINE_RTTI_DATA0( type_info, 0, ".?AVtype_info@@" )
 
 /* ??0exception@@QAE@ABQBD@Z */
 /* ??0exception@@QEAA@AEBQEBD@Z */
@@ -314,7 +289,7 @@ logic_error* __thiscall MSVCP_logic_error_ctor( logic_error *this, exception_nam
 #if _MSVCP_VER == 60
     MSVCP_exception_ctor(&this->e, "");
 #else
-    MSVCP_exception_ctor(&this->e, NULL);
+    MSVCP_exception_default_ctor(&this->e);
 #endif
     MSVCP_basic_string_char_ctor_cstr(&this->str, EXCEPTION_STR(name));
 #else
@@ -560,7 +535,7 @@ static runtime_error* MSVCP_runtime_error_ctor( runtime_error *this, exception_n
 #if _MSVCP_VER == 60
     MSVCP_exception_ctor(&this->e, "");
 #else
-    MSVCP_exception_ctor(&this->e, NULL);
+    MSVCP_exception_default_ctor(&this->e);
 #endif
     MSVCP_basic_string_char_ctor_cstr(&this->str, EXCEPTION_STR(name));
 #else
@@ -939,7 +914,7 @@ void __cdecl _Xruntime_error(const char *str)
 }
 
 /* ?uncaught_exception@std@@YA_NXZ */
-MSVCP_bool __cdecl MSVCP__uncaught_exception(void)
+bool __cdecl MSVCP__uncaught_exception(void)
 {
     return __uncaught_exception();
 }
@@ -947,7 +922,7 @@ MSVCP_bool __cdecl MSVCP__uncaught_exception(void)
 #if _MSVCP_VER >= 140
 int __cdecl __uncaught_exceptions(void)
 {
-    return *UCRTBASE___processing_throw();
+    return *__processing_throw();
 }
 
 typedef struct
@@ -968,7 +943,7 @@ void __cdecl __ExceptionPtrCreate(exception_ptr *ep)
     ep->ref = NULL;
 }
 
-#if defined(__i386__) && !defined(__MINGW32__)
+#ifdef __ASM_USE_THISCALL_WRAPPER
 extern void call_dtor(const cxx_exception_type *type, void *func, void *object);
 
 __ASM_GLOBAL_FUNC( call_dtor,
@@ -1020,11 +995,7 @@ void __cdecl __ExceptionPtrDestroy(exception_ptr *ep)
 #define EXCEPTION_VTABLE(name,funcs) __ASM_VTABLE(name,funcs VTABLE_ADD_FUNC(MSVCP_exception__Doraise))
 #endif
 
-#ifndef __GNUC__
-void __asm_dummy_vtables(void) {
-#endif
-    __ASM_VTABLE(type_info,
-            VTABLE_ADD_FUNC(MSVCP_type_info_vector_dtor));
+__ASM_BLOCK_BEGIN(exception_vtables)
     EXCEPTION_VTABLE(exception,
             VTABLE_ADD_FUNC(MSVCP_exception_vector_dtor)
             VTABLE_ADD_FUNC(MSVCP_exception_what));
@@ -1065,9 +1036,7 @@ void __asm_dummy_vtables(void) {
     EXCEPTION_VTABLE(range_error,
             VTABLE_ADD_FUNC(MSVCP_runtime_error_vector_dtor)
             VTABLE_ADD_FUNC(MSVCP_runtime_error_what));
-#ifndef __GNUC__
-}
-#endif
+__ASM_BLOCK_END
 
 /* Internal: throws selected exception */
 void throw_exception(exception_type et, const char *str)

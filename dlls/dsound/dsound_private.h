@@ -80,7 +80,7 @@ struct DirectSoundDevice
     DWORD                       writelead, buflen, ac_frames, frag_frames, playpos, pad, stopped;
     int                         nrofbuffers;
     IDirectSoundBufferImpl**    buffers;
-    RTL_RWLOCK                  buffer_list_lock;
+    SRWLOCK                     buffer_list_lock;
     CRITICAL_SECTION            mixlock;
     IDirectSoundBufferImpl     *primary;
     DWORD                       speaker_config;
@@ -136,7 +136,7 @@ struct IDirectSoundBufferImpl
     LONG                        ref, refn, ref3D, refiks;
     /* IDirectSoundBufferImpl fields */
     DirectSoundDevice*          device;
-    RTL_RWLOCK                  lock;
+    SRWLOCK                     lock;
     PWAVEFORMATEX               pwfx;
     BufferMemory*               buffer;
     DWORD                       playflags,state,leadin;

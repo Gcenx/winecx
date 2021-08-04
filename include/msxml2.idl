@@ -31,6 +31,10 @@ import "oaidl.idl";
 #define vi_progid(str)
 #endif
 
+cpp_quote("#ifdef __ISAXXMLReader_INTERFACE_DEFINED__")
+cpp_quote("#undef __MSXML2_LIBRARY_DEFINED__")
+cpp_quote("#endif")
+
 [
     uuid(f5078f18-c551-11d3-89b9-0000f81fe221),
     version(3.0),
@@ -133,6 +137,8 @@ typedef enum tagDOMNodeType
 } DOMNodeType;
 cpp_quote("#endif")
 
+cpp_quote("#ifndef __msxml_som_enums__")
+cpp_quote("#define __msxml_som_enums__")
 typedef enum _SOMITEMTYPE
 {
     SOMITEM_SCHEMA                      = 0x1000,
@@ -260,6 +266,7 @@ typedef enum _SCHEMATYPEVARIETY
     SCHEMATYPEVARIETY_LIST      =  1,
     SCHEMATYPEVARIETY_UNION     =  2,
 } SCHEMATYPEVARIETY;
+cpp_quote("#endif /* __msxml_som_enums__ */")
 
 [
 local,

@@ -29,16 +29,14 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
-
-
 /* MT */
-#define LOCK_CONSOLE   _mlock(_CONIO_LOCK)
-#define UNLOCK_CONSOLE _munlock(_CONIO_LOCK)
+#define LOCK_CONSOLE   _lock(_CONIO_LOCK)
+#define UNLOCK_CONSOLE _unlock(_CONIO_LOCK)
 
 static HANDLE MSVCRT_console_in = INVALID_HANDLE_VALUE;
 static HANDLE MSVCRT_console_out= INVALID_HANDLE_VALUE;
-static int __MSVCRT_console_buffer = MSVCRT_EOF;
-static MSVCRT_wchar_t __MSVCRT_console_buffer_w = MSVCRT_WEOF;
+static int __MSVCRT_console_buffer = EOF;
+static wchar_t __MSVCRT_console_buffer_w = WEOF;
 
 /* INTERNAL: Initialise console handles */
 void msvcrt_init_console(void)
@@ -86,13 +84,13 @@ int CDECL _cputs(const char* str)
 /*********************************************************************
  *		_cputws (MSVCRT.@)
  */
-int CDECL _cputws(const MSVCRT_wchar_t* str)
+int CDECL _cputws(const wchar_t* str)
 {
   DWORD count;
   int len, retval = -1;
 
   if (!MSVCRT_CHECK_PMT(str != NULL)) return -1;
-  len = lstrlenW(str);
+  len = wcslen(str);
 
   LOCK_CONSOLE;
   if (WriteConsoleW(MSVCRT_console_out, str, len, &count, NULL)
@@ -155,12 +153,12 @@ static BOOL handle_enhanced_keys(INPUT_RECORD *ir, unsigned char *ch1, unsigned 
  */
 int CDECL _getch_nolock(void)
 {
-  int retval = MSVCRT_EOF;
+  int retval = EOF;
 
-  if (__MSVCRT_console_buffer != MSVCRT_EOF)
+  if (__MSVCRT_console_buffer != EOF)
   {
     retval = __MSVCRT_console_buffer;
-    __MSVCRT_console_buffer = MSVCRT_EOF;
+    __MSVCRT_console_buffer = EOF;
   }
   else
   {
@@ -220,14 +218,14 @@ int CDECL _getch(void)
 /*********************************************************************
  *		_getwch_nolock (MSVCR80.@)
  */
-MSVCRT_wchar_t CDECL _getwch_nolock(void)
+wchar_t CDECL _getwch_nolock(void)
 {
-    MSVCRT_wchar_t retval = MSVCRT_WEOF;
+    wchar_t retval = WEOF;
 
-    if (__MSVCRT_console_buffer_w != MSVCRT_WEOF)
+    if (__MSVCRT_console_buffer_w != WEOF)
     {
         retval = __MSVCRT_console_buffer_w;
-        __MSVCRT_console_buffer_w = MSVCRT_WEOF;
+        __MSVCRT_console_buffer_w = WEOF;
     }
     else
     {
@@ -274,9 +272,9 @@ MSVCRT_wchar_t CDECL _getwch_nolock(void)
 /*********************************************************************
  *              _getwch (MSVCRT.@)
  */
-MSVCRT_wchar_t CDECL _getwch(void)
+wchar_t CDECL _getwch(void)
 {
-    MSVCRT_wchar_t ret;
+    wchar_t ret;
 
     LOCK_CONSOLE;
     ret = _getwch_nolock();
@@ -292,7 +290,7 @@ int CDECL _putch_nolock(int c)
   DWORD count;
   if (WriteConsoleA(MSVCRT_console_out, &c, 1, &count, NULL) && count == 1)
     return c;
-  return MSVCRT_EOF;
+  return EOF;
 }
 
 /*********************************************************************
@@ -309,18 +307,18 @@ int CDECL _putch(int c)
 /*********************************************************************
  *		_putwch_nolock (MSVCR80.@)
  */
-MSVCRT_wchar_t CDECL _putwch_nolock(MSVCRT_wchar_t c)
+wchar_t CDECL _putwch_nolock(wchar_t c)
 {
     DWORD count;
     if (WriteConsoleW(MSVCRT_console_out, &c, 1, &count, NULL) && count==1)
         return c;
-    return MSVCRT_WEOF;
+    return WEOF;
 }
 
 /*********************************************************************
  *		_putwch (MSVCRT.@)
  */
-MSVCRT_wchar_t CDECL _putwch(MSVCRT_wchar_t c)
+wchar_t CDECL _putwch(wchar_t c)
 {
     LOCK_CONSOLE;
     c = _putwch_nolock(c);
@@ -335,7 +333,7 @@ int CDECL _getche_nolock(void)
 {
   int retval;
   retval = _getch_nolock();
-  if (retval != MSVCRT_EOF)
+  if (retval != EOF)
     retval = _putch_nolock(retval);
   return retval;
 }
@@ -356,11 +354,11 @@ int CDECL _getche(void)
 /*********************************************************************
  *              _getwche_nolock (MSVCR80.@)
  */
-MSVCRT_wchar_t CDECL _getwche_nolock(void)
+wchar_t CDECL _getwche_nolock(void)
 {
-    MSVCRT_wchar_t wch;
+    wchar_t wch;
     wch = _getch_nolock();
-    if (wch == MSVCRT_WEOF)
+    if (wch == WEOF)
         return wch;
     return _putwch_nolock(wch);
 }
@@ -368,9 +366,9 @@ MSVCRT_wchar_t CDECL _getwche_nolock(void)
 /*********************************************************************
  *              _getwche (MSVCRT.@)
  */
-MSVCRT_wchar_t CDECL _getwche(void)
+wchar_t CDECL _getwche(void)
 {
-    MSVCRT_wchar_t ret;
+    wchar_t ret;
 
     LOCK_CONSOLE;
     ret = _getwche_nolock();
@@ -421,8 +419,8 @@ char* CDECL _cgets(char* str)
  */
 int CDECL _ungetch_nolock(int c)
 {
-  int retval = MSVCRT_EOF;
-  if (c != MSVCRT_EOF && __MSVCRT_console_buffer == MSVCRT_EOF)
+  int retval = EOF;
+  if (c != EOF && __MSVCRT_console_buffer == EOF)
     retval = __MSVCRT_console_buffer = c;
   return retval;
 }
@@ -441,10 +439,10 @@ int CDECL _ungetch(int c)
 /*********************************************************************
  *              _ungetwch_nolock (MSVCR80.@)
  */
-MSVCRT_wchar_t CDECL _ungetwch_nolock(MSVCRT_wchar_t c)
+wchar_t CDECL _ungetwch_nolock(wchar_t c)
 {
-    MSVCRT_wchar_t retval = MSVCRT_WEOF;
-    if (c != MSVCRT_WEOF && __MSVCRT_console_buffer_w == MSVCRT_WEOF)
+    wchar_t retval = WEOF;
+    if (c != WEOF && __MSVCRT_console_buffer_w == WEOF)
         retval = __MSVCRT_console_buffer_w = c;
     return retval;
 }
@@ -452,7 +450,7 @@ MSVCRT_wchar_t CDECL _ungetwch_nolock(MSVCRT_wchar_t c)
 /*********************************************************************
  *              _ungetwch (MSVCRT.@)
  */
-MSVCRT_wchar_t CDECL _ungetwch(MSVCRT_wchar_t c)
+wchar_t CDECL _ungetwch(wchar_t c)
 {
     LOCK_CONSOLE;
     c = _ungetwch_nolock(c);
@@ -468,7 +466,7 @@ int CDECL _kbhit(void)
   int retval = 0;
 
   LOCK_CONSOLE;
-  if (__MSVCRT_console_buffer != MSVCRT_EOF)
+  if (__MSVCRT_console_buffer != EOF)
     retval = 1;
   else
   {
@@ -478,7 +476,7 @@ int CDECL _kbhit(void)
 
     GetNumberOfConsoleInputEvents(MSVCRT_console_in, &count);
 
-    if (count && (ir = MSVCRT_malloc(count * sizeof(INPUT_RECORD))) &&
+    if (count && (ir = malloc(count * sizeof(INPUT_RECORD))) &&
         PeekConsoleInputA(MSVCRT_console_in, ir, count, &count))
       for(i = 0; i < count - 1; i++)
       {
@@ -490,7 +488,7 @@ int CDECL _kbhit(void)
           break;
         }
       }
-    MSVCRT_free(ir);
+    free(ir);
   }
   UNLOCK_CONSOLE;
   return retval;
@@ -505,7 +503,7 @@ static int puts_clbk_console_a(void *ctx, int len, const char *str)
     return len;
 }
 
-static int puts_clbk_console_w(void *ctx, int len, const MSVCRT_wchar_t *str)
+static int puts_clbk_console_w(void *ctx, int len, const wchar_t *str)
 {
     LOCK_CONSOLE;
     if(!WriteConsoleW(MSVCRT_console_out, str, len, NULL, NULL))
@@ -541,7 +539,7 @@ int WINAPIV _cprintf(const char* format, ...)
 /*********************************************************************
  *		_vcwprintf (MSVCRT.@)
  */
-int CDECL _vcwprintf(const MSVCRT_wchar_t* format, __ms_va_list valist)
+int CDECL _vcwprintf(const wchar_t* format, __ms_va_list valist)
 {
     return pf_printf_w(puts_clbk_console_w, NULL, format, NULL, 0, arg_clbk_valist, NULL, &valist);
 }
@@ -549,7 +547,7 @@ int CDECL _vcwprintf(const MSVCRT_wchar_t* format, __ms_va_list valist)
 /*********************************************************************
  *		_cwprintf (MSVCRT.@)
  */
-int WINAPIV _cwprintf(const MSVCRT_wchar_t* format, ...)
+int WINAPIV _cwprintf(const wchar_t* format, ...)
 {
   int retval;
   __ms_va_list valist;
@@ -566,8 +564,8 @@ int WINAPIV _cwprintf(const MSVCRT_wchar_t* format, ...)
 /*********************************************************************
  *		__conio_common_vcprintf (UCRTBASE.@)
  */
-int CDECL MSVCRT__conio_common_vcprintf(unsigned __int64 options, const char* format,
-                                        MSVCRT__locale_t locale, __ms_va_list valist)
+int CDECL __conio_common_vcprintf(unsigned __int64 options, const char* format,
+                                        _locale_t locale, __ms_va_list valist)
 {
     if (options & ~UCRTBASE_PRINTF_MASK)
         FIXME("options %s not handled\n", wine_dbgstr_longlong(options));
@@ -578,8 +576,8 @@ int CDECL MSVCRT__conio_common_vcprintf(unsigned __int64 options, const char* fo
 /*********************************************************************
  *		__conio_common_vcwprintf (UCRTBASE.@)
  */
-int CDECL MSVCRT__conio_common_vcwprintf(unsigned __int64 options, const MSVCRT_wchar_t* format,
-                                         MSVCRT__locale_t locale, __ms_va_list valist)
+int CDECL __conio_common_vcwprintf(unsigned __int64 options, const wchar_t* format,
+                                         _locale_t locale, __ms_va_list valist)
 {
     if (options & ~UCRTBASE_PRINTF_MASK)
         FIXME("options %s not handled\n", wine_dbgstr_longlong(options));

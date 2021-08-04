@@ -148,6 +148,7 @@ static void key_dump( struct object *obj, int verbose );
 static struct object_type *key_get_type( struct object *obj );
 static unsigned int key_map_access( struct object *obj, unsigned int access );
 static struct security_descriptor *key_get_sd( struct object *obj );
+static WCHAR *key_get_full_name( struct object *obj, data_size_t *len );
 static int key_close_handle( struct object *obj, struct process *process, obj_handle_t handle );
 static void key_destroy( struct object *obj );
 
@@ -166,6 +167,7 @@ static const struct object_ops key_ops =
     key_map_access,          /* map_access */
     key_get_sd,              /* get_sd */
     default_set_sd,          /* set_sd */
+    key_get_full_name,       /* get_full_name */
     no_lookup_name,          /* lookup_name */
     no_link_name,            /* link_name */
     NULL,                    /* unlink_name */
@@ -178,8 +180,7 @@ static const struct object_ops key_ops =
 
 static inline int is_wow6432node( const WCHAR *name, unsigned int len )
 {
-    return (len == sizeof(wow6432node) &&
-            !memicmpW( name, wow6432node, ARRAY_SIZE( wow6432node )));
+    return (len == sizeof(wow6432node) && !memicmp_strW( name, wow6432node, sizeof( wow6432node )));
 }
 
 /*
@@ -199,7 +200,7 @@ static void dump_path( const struct key *key, const struct key *base, FILE *f )
         dump_path( key->parent, base, f );
         fprintf( f, "\\\\" );
     }
-    dump_strW( key->name, key->namelen / sizeof(WCHAR), f, "[]" );
+    dump_strW( key->name, key->namelen, f, "[]" );
 }
 
 /* dump a value to a text file */
@@ -211,7 +212,7 @@ static void dump_value( const struct key_value *value, FILE *f )
     if (value->namelen)
     {
         fputc( '\"', f );
-        count = 1 + dump_strW( value->name, value->namelen / sizeof(WCHAR), f, "\"\"" );
+        count = 1 + dump_strW( value->name, value->namelen, f, "\"\"" );
         count += fprintf( f, "\"=" );
     }
     else count = fprintf( f, "@=" );
@@ -227,7 +228,7 @@ static void dump_value( const struct key_value *value, FILE *f )
         if (((WCHAR *)value->data)[value->len / sizeof(WCHAR) - 1]) break;
         if (value->type != REG_SZ) fprintf( f, "str(%x):", value->type );
         fputc( '\"', f );
-        dump_strW( (WCHAR *)value->data, value->len / sizeof(WCHAR), f, "\"\"" );
+        dump_strW( (WCHAR *)value->data, value->len, f, "\"\"" );
         fprintf( f, "\"\n" );
         return;
 
@@ -273,7 +274,7 @@ static void save_subkeys( const struct key *key, const struct key *base, FILE *f
         if (key->class)
         {
             fprintf( f, "#class=\"" );
-            dump_strW( key->class, key->classlen / sizeof(WCHAR), f, "\"\"" );
+            dump_strW( key->class, key->classlen, f, "\"\"" );
             fprintf( f, "\"\n" );
         }
         if (key->flags & KEY_SYMLINK) fputs( "#link\n", f );
@@ -395,6 +396,28 @@ static struct security_descriptor *key_get_sd( struct object *obj )
     return key_default_sd;
 }
 
+static WCHAR *key_get_full_name( struct object *obj, data_size_t *ret_len )
+{
+    static const WCHAR backslash = '\\';
+    struct key *key = (struct key *) obj;
+    data_size_t len = sizeof(root_name) - sizeof(WCHAR);
+    char *ret;
+
+    for (key = (struct key *)obj; key != root_key; key = key->parent) len += key->namelen + sizeof(WCHAR);
+    if (!(ret = malloc( len ))) return NULL;
+
+    *ret_len = len;
+    key = (struct key *)obj;
+    for (key = (struct key *)obj; key != root_key; key = key->parent)
+    {
+        memcpy( ret + len - key->namelen, key->name, key->namelen );
+        len -= key->namelen + sizeof(WCHAR);
+        memcpy( ret + len, &backslash, sizeof(WCHAR) );
+    }
+    memcpy( ret, root_name, sizeof(root_name) - sizeof(WCHAR) );
+    return (WCHAR *)ret;
+}
+
 /* close the notification associated with a handle */
 static int key_close_handle( struct object *obj, struct process *process, obj_handle_t handle )
 {
@@ -439,8 +462,7 @@ static inline void get_req_path( struct unicode_str *str, int skip_root )
     str->str = get_req_data();
     str->len = (get_req_data_size() / sizeof(WCHAR)) * sizeof(WCHAR);
 
-    if (skip_root && str->len >= sizeof(root_name) &&
-        !memicmpW( str->str, root_name, ARRAY_SIZE( root_name )))
+    if (skip_root && str->len >= sizeof(root_name) && !memicmp_strW( str->str, root_name, sizeof(root_name) ))
     {
         str->str += ARRAY_SIZE( root_name );
         str->len -= sizeof(root_name);
@@ -648,7 +670,7 @@ static struct key *find_subkey( const struct key *key, const struct unicode_str 
     {
         i = (min + max) / 2;
         len = min( key->subkeys[i]->namelen, name->len );
-        res = memicmpW( key->subkeys[i]->name, name->str, len / sizeof(WCHAR) );
+        res = memicmp_strW( key->subkeys[i]->name, name->str, len );
         if (!res) res = key->subkeys[i]->namelen - name->len;
         if (!res)
         {
@@ -692,7 +714,7 @@ static struct key *follow_symlink( struct key *key, int iteration )
     path.str = value->data;
     path.len = (value->len / sizeof(WCHAR)) * sizeof(WCHAR);
     if (path.len <= sizeof(root_name)) return NULL;
-    if (memicmpW( path.str, root_name, ARRAY_SIZE( root_name ))) return NULL;
+    if (memicmp_strW( path.str, root_name, sizeof(root_name) )) return NULL;
     path.str += ARRAY_SIZE( root_name );
     path.len -= sizeof(root_name);
 
@@ -878,15 +900,13 @@ static struct key *create_key_recursive( struct key *key, const struct unicode_s
 }
 
 /* query information about a key or a subkey */
-static void enum_key( const struct key *key, int index, int info_class,
-                      struct enum_key_reply *reply )
+static void enum_key( struct key *key, int index, int info_class, struct enum_key_reply *reply )
 {
-    static const WCHAR backslash[] = { '\\' };
     int i;
     data_size_t len, namelen, classlen;
     data_size_t max_subkey = 0, max_class = 0;
     data_size_t max_value = 0, max_data = 0;
-    const struct key *k;
+    WCHAR *fullname = NULL;
     char *data;
 
     if (index != -1)  /* -1 means use the specified key directly */
@@ -905,11 +925,7 @@ static void enum_key( const struct key *key, int index, int info_class,
     switch(info_class)
     {
     case KeyNameInformation:
-        namelen = 0;
-        for (k = key; k != root_key; k = k->parent)
-            namelen += k->namelen + sizeof(backslash);
-        if (!namelen) return;
-        namelen += sizeof(root_name) - sizeof(backslash);
+        if (!(fullname = key->obj.ops->get_full_name( &key->obj, &namelen ))) return;
         /* fall through */
     case KeyBasicInformation:
         classlen = 0; /* only return the name */
@@ -961,18 +977,8 @@ static void enum_key( const struct key *key, int index, int info_class,
         }
         else if (info_class == KeyNameInformation)
         {
-            data_size_t pos = namelen;
             reply->namelen = namelen;
-            for (k = key; k != root_key; k = k->parent)
-            {
-                pos -= k->namelen;
-                if (pos < len) memcpy( data + pos, k->name,
-                                       min( k->namelen, len - pos ) );
-                pos -= sizeof(backslash);
-                if (pos < len) memcpy( data + pos, backslash,
-                                       min( sizeof(backslash), len - pos ) );
-            }
-            memcpy( data, root_name, min( sizeof(root_name) - sizeof(backslash), len ) );
+            memcpy( data, fullname, len );
         }
         else
         {
@@ -980,6 +986,7 @@ static void enum_key( const struct key *key, int index, int info_class,
             memcpy( data, key->name, len );
         }
     }
+    free( fullname );
     if (debug_level > 1) dump_operation( key, NULL, "Enum" );
 }
 
@@ -1055,7 +1062,7 @@ static struct key_value *find_value( const struct key *key, const struct unicode
     {
         i = (min + max) / 2;
         len = min( key->values[i].namelen, name->len );
-        res = memicmpW( key->values[i].name, name->str, len / sizeof(WCHAR) );
+        res = memicmp_strW( key->values[i].name, name->str, len );
         if (!res) res = key->values[i].namelen - name->len;
         if (!res)
         {
@@ -1117,7 +1124,7 @@ static void set_value( struct key *key, const struct unicode_str *name,
     if (key->flags & KEY_SYMLINK)
     {
         if (type != REG_LINK || name->len != symlink_str.len ||
-            memicmpW( name->str, symlink_str.str, name->len / sizeof(WCHAR) ))
+            memicmp_strW( name->str, symlink_str.str, name->len ))
         {
             set_error( STATUS_ACCESS_DENIED );
             return;
@@ -1615,7 +1622,7 @@ static int get_prefix_len( struct key *key, const char *name, struct file_load_i
     len = (p - info->tmp) * sizeof(WCHAR);
     for (res = 1; key != root_key; res++)
     {
-        if (len == key->namelen && !memicmpW( info->tmp, key->name, len / sizeof(WCHAR) )) break;
+        if (len == key->namelen && !memicmp_strW( info->tmp, key->name, len )) break;
         key = key->parent;
     }
     if (key == root_key) res = 0;  /* no matching name */
@@ -1735,31 +1742,22 @@ static int load_init_registry_from_file( const char *filename, struct key *key )
 
     save_branch_info[save_branch_count].path = filename;
     save_branch_info[save_branch_count++].key = (struct key *)grab_object( key );
-    make_object_static( &key->obj );
+    make_object_permanent( &key->obj );
     return (f != NULL);
 }
 
 static WCHAR *format_user_registry_path( const SID *sid, struct unicode_str *path )
 {
-    static const WCHAR prefixW[] = {'U','s','e','r','\\','S',0};
-    static const WCHAR formatW[] = {'-','%','u',0};
-    WCHAR buffer[7 + 10 + 10 + 10 * SID_MAX_SUB_AUTHORITIES];
-    WCHAR *p = buffer;
+    char buffer[7 + 11 + 11 + 11 * SID_MAX_SUB_AUTHORITIES], *p = buffer;
     unsigned int i;
 
-    strcpyW( p, prefixW );
-    p += strlenW( prefixW );
-    p += sprintfW( p, formatW, sid->Revision );
-    p += sprintfW( p, formatW, MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5],
-                                                   sid->IdentifierAuthority.Value[4] ),
-                                         MAKEWORD( sid->IdentifierAuthority.Value[3],
-                                                   sid->IdentifierAuthority.Value[2] )));
-    for (i = 0; i < sid->SubAuthorityCount; i++)
-        p += sprintfW( p, formatW, sid->SubAuthority[i] );
-
-    path->len = (p - buffer) * sizeof(WCHAR);
-    path->str = p = memdup( buffer, path->len );
-    return p;
+    p += sprintf( p, "User\\S-%u-%u", sid->Revision,
+                  MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5],
+                                      sid->IdentifierAuthority.Value[4] ),
+                            MAKEWORD( sid->IdentifierAuthority.Value[3],
+                                      sid->IdentifierAuthority.Value[2] )));
+    for (i = 0; i < sid->SubAuthorityCount; i++) p += sprintf( p, "-%u", sid->SubAuthority[i] );
+    return ascii_to_unicode_str( buffer, path );
 }
 
 /* get the cpu architectures that can be supported in the current prefix */
@@ -1815,7 +1813,7 @@ void init_registry(void)
     /* create the root key */
     root_key = alloc_key( &root_name, current_time );
     assert( root_key );
-    make_object_static( &root_key->obj );
+    make_object_permanent( &root_key->obj );
 
     /* load system.reg into Registry\Machine */
 
@@ -2061,7 +2059,7 @@ DECL_HANDLER(create_key)
     class.len = (class.len / sizeof(WCHAR)) * sizeof(WCHAR);
 
     if (!objattr->rootdir && name.len >= sizeof(root_name) &&
-        !memicmpW( name.str, root_name, ARRAY_SIZE( root_name )))
+        !memicmp_strW( name.str, root_name, sizeof(root_name) ))
     {
         name.str += ARRAY_SIZE( root_name );
         name.len -= sizeof(root_name);
@@ -2219,7 +2217,7 @@ DECL_HANDLER(load_registry)
     }
 
     if (!objattr->rootdir && name.len >= sizeof(root_name) &&
-        !memicmpW( name.str, root_name, ARRAY_SIZE( root_name )))
+        !memicmp_strW( name.str, root_name, sizeof(root_name) ))
     {
         name.str += ARRAY_SIZE( root_name );
         name.len -= sizeof(root_name);

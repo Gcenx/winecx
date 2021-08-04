@@ -20,9 +20,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-/* To get ICON_SMALL2 with the MSVC headers */
-#define _WIN32_WINNT 0x0501
-
 #include <assert.h>
 #include <limits.h>
 #include <stdlib.h>
@@ -1291,87 +1288,24 @@ static LRESULT CALLBACK cbt_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
     return CallNextHookEx(hhook, nCode, wParam, lParam);
 }
 
-static const WCHAR winlogonW[] =
-    {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
-     'W','i','n','d','o','w','s',' ','N','T','\\','C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
-     'W','i','n','l','o','g','o','n',0};
-static const WCHAR autorestartshellW[] =
-    {'A','u','t','o','R','e','s','t','a','r','t','S','h','e','l','l',0};
-
-static DWORD get_autorestart(void)
-{
-    DWORD type, val, len = sizeof(val);
-    REGSAM access = KEY_ALL_ACCESS|KEY_WOW64_64KEY;
-    HKEY hkey;
-    LONG res;
-
-    if (RegCreateKeyExW( HKEY_LOCAL_MACHINE, winlogonW, 0, 0, 0, access, NULL, &hkey, 0 )) return 0;
-    res = RegQueryValueExW( hkey, autorestartshellW, NULL, &type, (BYTE *)&val, &len );
-    RegCloseKey( hkey );
-    return (!res && type == REG_DWORD) ? val : 0;
-}
-
-static BOOL set_autorestart( DWORD val )
-{
-    REGSAM access = KEY_ALL_ACCESS|KEY_WOW64_64KEY;
-    HKEY hkey;
-    LONG res;
-
-    if (RegCreateKeyExW( HKEY_LOCAL_MACHINE, winlogonW, 0, 0, 0, access, NULL, &hkey, 0 )) return FALSE;
-    res = RegSetValueExW( hkey, autorestartshellW, 0, REG_DWORD, (BYTE *)&val, sizeof(val) );
-    RegCloseKey( hkey );
-    return !res;
-}
-
-static void test_shell_window(void)
+static DWORD WINAPI test_shell_window_thread(LPVOID param)
 {
     BOOL ret;
-    DWORD error, restart = get_autorestart();
     HMODULE hinst, hUser32;
     BOOL (WINAPI*SetShellWindow)(HWND);
     HWND hwnd1, hwnd2, hwnd3, hwnd4, hwnd5;
     HWND shellWindow, nextWnd;
+    HDESK testDesktop = (HDESK)param;
 
-    if (restart && !set_autorestart(0))
-    {
-        skip("cannot disable automatic shell restart (needs admin rights\n");
-        return;
-    }
+    SetThreadDesktop(testDesktop);
 
     shellWindow = GetShellWindow();
     hinst = GetModuleHandleA(NULL);
     hUser32 = GetModuleHandleA("user32");
 
+    ok(shellWindow == NULL, "Newly created desktop has a shell window %p\n", shellWindow);
+
     SetShellWindow = (void *)GetProcAddress(hUser32, "SetShellWindow");
-
-    if (shellWindow) {
-        DWORD pid;
-        HANDLE hProcess;
-
-        GetWindowThreadProcessId(shellWindow, &pid);
-        hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-        if (!hProcess)
-        {
-            skip( "cannot get access to shell process\n" );
-            set_autorestart(restart);
-            return;
-        }
-
-        SetLastError(0xdeadbeef);
-        ret = DestroyWindow(shellWindow);
-        error = GetLastError();
-
-        ok(!ret, "DestroyWindow(shellWindow)\n");
-        /* passes on Win XP, but not on Win98 */
-        ok(error==ERROR_ACCESS_DENIED || error == 0xdeadbeef,
-           "got %u after DestroyWindow(shellWindow)\n", error);
-
-        /* close old shell instance */
-        ret = TerminateProcess(hProcess, 0);
-        ok(ret, "termination of previous shell process failed: GetLastError()=%d\n", GetLastError());
-        WaitForSingleObject(hProcess, INFINITE);    /* wait for termination */
-        CloseHandle(hProcess);
-    }
 
     hwnd1 = CreateWindowExA(0, "#32770", "TEST1", WS_OVERLAPPEDWINDOW/*|WS_VISIBLE*/, 100, 100, 300, 200, 0, 0, hinst, 0);
 
@@ -1384,8 +1318,8 @@ static void test_shell_window(void)
     ok(!ret, "second call to SetShellWindow(hwnd1)\n");
 
     ret = SetShellWindow(0);
-    error = GetLastError();
     /* passes on Win XP, but not on Win98
+    DWORD error = GetLastError();
     ok(!ret, "reset shell window by SetShellWindow(0)\n");
     ok(error==ERROR_INVALID_WINDOW_HANDLE, "ERROR_INVALID_WINDOW_HANDLE after SetShellWindow(0)\n"); */
 
@@ -1445,7 +1379,24 @@ static void test_shell_window(void)
     DestroyWindow(hwnd3);
     DestroyWindow(hwnd4);
     DestroyWindow(hwnd5);
-    set_autorestart(restart);
+
+    return 0;
+}
+
+static void test_shell_window(void)
+{
+    HDESK hdesk;
+    HANDLE hthread;
+
+    hdesk = CreateDesktopA("winetest", NULL, NULL, 0, GENERIC_ALL, NULL);
+
+    hthread = CreateThread(NULL, 0, test_shell_window_thread, (LPVOID)hdesk, 0, NULL);
+
+    WaitForSingleObject(hthread, INFINITE);
+
+    DeleteObject(hthread);
+
+    CloseDesktop(hdesk);
 }
 
 /************** MDI test ****************/
@@ -8309,6 +8260,7 @@ static void test_fullscreen(void)
         0, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW
     };
     WNDCLASSA cls;
+    int timeout;
     HWND hwnd;
     int i, j;
     POINT pt;
@@ -8431,6 +8383,32 @@ static void test_fullscreen(void)
             DestroyWindow(hwnd);
         }
     }
+
+    /* Test restoring a full screen window with WS_THICKFRAME style to normal */
+    /* Add WS_THICKFRAME style later so that the window can cover the entire monitor */
+    hwnd = CreateWindowA("fullscreen_class", NULL, WS_POPUP | WS_VISIBLE, 0, 0, mi.rcMonitor.right,
+                         mi.rcMonitor.bottom, NULL, NULL, GetModuleHandleA(NULL), NULL);
+    ok(!!hwnd, "CreateWindow failed, error %#x.\n", GetLastError());
+    flush_events(TRUE);
+
+    /* Add WS_THICKFRAME and exit full screen */
+    SetWindowLongA(hwnd, GWL_STYLE, GetWindowLongA(hwnd, GWL_STYLE) | WS_THICKFRAME);
+    SetWindowPos(hwnd, 0, 0, 0, 100, 100, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
+    flush_events(TRUE);
+
+    /* TestBots need about 1000ms to exit full screen */
+    timeout = 1000;
+    while (timeout > 0)
+    {
+        timeout -= 200;
+        flush_events(TRUE);
+        GetWindowRect(hwnd, &rc);
+        if (rc.right - rc.left == 100 && rc.bottom - rc.top == 100)
+            break;
+    }
+    ok(rc.right - rc.left == 100, "Expect width %d, got %d.\n", 100, rc.right - rc.left);
+    ok(rc.bottom - rc.top == 100, "Expect height %d, got %d.\n", 100, rc.bottom - rc.top);
+    DestroyWindow(hwnd);
 
     UnregisterClassA("fullscreen_class", GetModuleHandleA(NULL));
 }
@@ -9451,7 +9429,7 @@ static void test_window_from_point(const char *argv0)
     ok(win == child, "WindowFromPoint returned %p, expected %p\n", win, child);
 
     SetEvent(end_event);
-    winetest_wait_child_process(info.hProcess);
+    wait_child_process(info.hProcess);
     CloseHandle(start_event);
     CloseHandle(end_event);
     CloseHandle(info.hProcess);
@@ -10302,7 +10280,7 @@ static void test_winproc_handles(const char *argv0)
     startup.cb = sizeof(startup);
     ok(CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL,
                 &startup, &info), "CreateProcess failed.\n");
-    winetest_wait_child_process(info.hProcess);
+    wait_child_process(info.hProcess);
     CloseHandle(info.hProcess);
     CloseHandle(info.hThread);
 }
@@ -11864,12 +11842,56 @@ static void test_other_process_window(const char *argv0)
     ret = WaitForSingleObject(test_done_event, 5000);
     ok(ret == WAIT_OBJECT_0, "Unexpected ret %x.\n", ret);
 
-    winetest_wait_child_process(info.hProcess);
+    wait_child_process(info.hProcess);
     CloseHandle(window_ready_event);
     CloseHandle(test_done_event);
     CloseHandle(info.hProcess);
     CloseHandle(info.hThread);
     DestroyWindow(hwnd);
+}
+
+static void test_cancel_mode(void)
+{
+    HWND hwnd1, hwnd2, child;
+    LRESULT ret;
+
+    hwnd1 = CreateWindowA("MainWindowClass", "window 1", WS_OVERLAPPEDWINDOW,
+            100, 200, 500, 300, NULL, NULL, NULL, NULL);
+    hwnd2 = CreateWindowA("MainWindowClass", "window 2", WS_OVERLAPPEDWINDOW,
+            100, 200, 500, 300, NULL, NULL, NULL, NULL);
+    flush_events(TRUE);
+    SetCapture(hwnd1);
+    ok(GetCapture() == hwnd1, "got capture %p\n", GetCapture());
+
+    ret = SendMessageA(hwnd2, WM_CANCELMODE, 0, 0);
+    ok(!ret, "got %ld\n", ret);
+    ok(GetCapture() == hwnd1, "got capture %p\n", GetCapture());
+
+    ret = SendMessageA(hwnd1, WM_CANCELMODE, 0, 0);
+    ok(!ret, "got %ld\n", ret);
+    ok(!GetCapture(), "got capture %p\n", GetCapture());
+
+    child = CreateWindowA("MainWindowClass", "child", WS_CHILD,
+            0, 0, 100, 100, hwnd1, NULL, NULL, NULL);
+
+    SetCapture(child);
+    ok(GetCapture() == child, "got capture %p\n", GetCapture());
+
+    ret = SendMessageA(hwnd2, WM_CANCELMODE, 0, 0);
+    ok(!ret, "got %ld\n", ret);
+    ok(GetCapture() == child, "got capture %p\n", GetCapture());
+
+    ret = SendMessageA(hwnd1, WM_CANCELMODE, 0, 0);
+    ok(!ret, "got %ld\n", ret);
+    ok(GetCapture() == child, "got capture %p\n", GetCapture());
+
+    ret = SendMessageA(child, WM_CANCELMODE, 0, 0);
+    ok(!ret, "got %ld\n", ret);
+    ok(!GetCapture(), "got capture %p\n", GetCapture());
+
+    DestroyWindow(child);
+    DestroyWindow(hwnd1);
+    DestroyWindow(hwnd2);
 }
 
 START_TEST(win)
@@ -12038,6 +12060,7 @@ START_TEST(win)
     test_arrange_iconic_windows();
     test_other_process_window(argv[0]);
     test_SC_SIZE();
+    test_cancel_mode();
 
     /* add the tests above this line */
     if (hhook) UnhookWindowsHookEx(hhook);
@@ -12051,7 +12074,5 @@ START_TEST(win)
      */
     test_topmost();
 
-    /* Execute the SetShellWindow() test last, since it kills explorer and that
-     * breaks a lot of things. */
     test_shell_window();
 }

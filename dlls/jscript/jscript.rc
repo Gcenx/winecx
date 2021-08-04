@@ -27,6 +27,7 @@ STRINGTABLE
     IDS_TO_PRIMITIVE        "Error converting object to primitive type"
     IDS_INVALID_CALL_ARG    "Invalid procedure call or argument"
     IDS_SUBSCRIPT_OUT_OF_RANGE "Subscript out of range"
+    IDS_STACK_OVERFLOW      "Out of stack space"
     IDS_OBJECT_REQUIRED     "Object required"
     IDS_CREATE_OBJ_ERROR    "Automation server can't create object"
     IDS_NO_PROPERTY         "Object doesn't support this property or method"
@@ -58,7 +59,10 @@ STRINGTABLE
     IDS_INVALID_DELETE      "Cannot delete '|'"
     IDS_NOT_VBARRAY         "VBArray object expected"
     IDS_JSCRIPT_EXPECTED    "JScript object expected"
+    IDS_ENUMERATOR_EXPECTED "Enumerator object expected"
+    IDS_REGEXP_EXPECTED     "Regular Expression object expected"
     IDS_REGEXP_SYNTAX_ERROR "Syntax error in regular expression"
+    IDS_EXCEPTION_THROWN    "Exception thrown and not caught"
     IDS_URI_INVALID_CODING  "URI to be decoded is incorrect"
     IDS_URI_INVALID_CHAR    "URI to be encoded contains invalid characters"
     IDS_FRACTION_DIGITS_OUT_OF_RANGE "Number of fraction digits is out of range"
@@ -66,9 +70,15 @@ STRINGTABLE
     IDS_INVALID_LENGTH      "Array length must be a finite positive integer"
     IDS_ARRAY_EXPECTED      "Array object expected"
     IDS_INVALID_WRITABLE_PROP_DESC "'writable' attribute on the property descriptor cannot be set to 'true' on this object"
+    IDS_OBJECT_NONEXTENSIBLE       "Cannot define property '|': object is not extensible"
     IDS_NONCONFIGURABLE_REDEFINED  "Cannot redefine non-configurable property '|'"
     IDS_NONWRITABLE_MODIFIED       "Cannot modify non-writable property '|'"
+    IDS_MAP_EXPECTED               "'this' is not a Map object"
     IDS_PROP_DESC_MISMATCH         "Property cannot have both accessors and a value"
+
+    IDS_COMPILATION_ERROR   "Microsoft JScript compilation error"
+    IDS_RUNTIME_ERROR       "Microsoft JScript runtime error"
+    IDS_UNKNOWN_ERROR       "Unknown runtime error"
 }
 
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL

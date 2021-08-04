@@ -20,9 +20,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define _WIN32_WINNT 0x0600 /* For WM_CHANGEUISTATE,QS_RAWINPUT,WM_DWMxxxx */
-#define WINVER 0x0600 /* for WM_GETTITLEBARINFOEX */
-
 #include <assert.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -34,6 +31,7 @@
 #include "winuser.h"
 #include "winnls.h"
 #include "dbt.h"
+#include "commctrl.h"
 
 #include "wine/test.h"
 
@@ -73,13 +71,6 @@
 #else
 #define ARCH "none"
 #endif
-
-static BOOL   (WINAPI *pActivateActCtx)(HANDLE,ULONG_PTR*);
-static HANDLE (WINAPI *pCreateActCtxW)(PCACTCTXW);
-static BOOL   (WINAPI *pDeactivateActCtx)(DWORD,ULONG_PTR);
-static BOOL   (WINAPI *pGetCurrentActCtx)(HANDLE *);
-static BOOL   (WINAPI *pQueryActCtxW)(DWORD,HANDLE,void*,ULONG,void*,SIZE_T,SIZE_T*);
-static void   (WINAPI *pReleaseActCtx)(HANDLE);
 
 /* encoded DRAWITEMSTRUCT into an LPARAM */
 typedef struct
@@ -890,6 +881,145 @@ static const struct message WmShowVisMaxPopupSeq[] = {
     { WM_MOVE, sent|defwinproc },
     { WM_SIZE, sent|defwinproc|wparam, SIZE_MAXIMIZED },
     { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam, 0, 0 },
+    { 0 }
+};
+/* ShowWindow(hwnd, SW_RESTORE) to a minimized window */
+static const struct message WmShowRestoreMinimizedOverlappedSeq[] =
+{
+    { HCBT_MINMAX, hook },
+    { WM_QUERYOPEN, sent },
+    { WM_GETTEXT, sent|optional },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_FRAMECHANGED|SWP_NOCOPYBITS|SWP_STATECHANGED },
+    { WM_GETMINMAXINFO, sent|defwinproc },
+    { WM_NCCALCSIZE, sent },
+    { HCBT_ACTIVATE, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam|optional, SWP_NOSIZE|SWP_NOMOVE },
+    { WM_NCACTIVATE, sent },
+    { WM_GETTEXT, sent|defwinproc|optional },
+    { WM_ACTIVATE, sent|wparam, WA_ACTIVE },
+    { HCBT_SETFOCUS, hook },
+    { WM_SETFOCUS, sent|defwinproc },
+    { WM_NCPAINT, sent },
+    { WM_GETTEXT, sent|defwinproc|optional },
+    { WM_GETTEXT, sent|defwinproc|optional },
+    { WM_ERASEBKGND, sent },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_FRAMECHANGED|SWP_NOCOPYBITS|SWP_STATECHANGED },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|defwinproc },
+    { WM_NCCALCSIZE, sent|optional },
+    { WM_NCPAINT, sent|optional },
+    { WM_ERASEBKGND, sent|optional },
+    /* Note this WM_ACTIVATE message even if the window is already active and focused */
+    { WM_ACTIVATE, sent|wparam|lparam, WA_ACTIVE, 0 },
+    { WM_SYNCPAINT, sent|optional },
+    { WM_PAINT, sent },
+    { WM_GETMINMAXINFO, sent|optional },
+    { 0 }
+};
+/* ShowWindow(hwnd, SW_SHOWNOACTIVATE) to a minimized window */
+static const struct message WmShowNoActivateMinimizedOverlappedSeq[] =
+{
+    { HCBT_MINMAX, hook },
+    { WM_QUERYOPEN, sent },
+    { WM_GETTEXT, sent|optional },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOCOPYBITS|SWP_STATECHANGED },
+    { WM_GETMINMAXINFO, sent|defwinproc },
+    { WM_NCCALCSIZE, sent },
+    { WM_NCPAINT, sent },
+    { WM_GETTEXT, sent|defwinproc|optional },
+    { WM_ERASEBKGND, sent },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOCOPYBITS|SWP_STATECHANGED },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|defwinproc },
+    /* Following optional messages are on XP/2003 */
+    { WM_NCCALCSIZE, sent|optional },
+    { WM_NCPAINT, sent|optional },
+    { WM_ERASEBKGND, sent|optional },
+    { HCBT_SETFOCUS, hook|optional },
+    { WM_SETFOCUS, sent|optional },
+    { HCBT_ACTIVATE, hook|optional },
+    { WM_WINDOWPOSCHANGING, sent|wparam|optional, SWP_NOSIZE|SWP_NOMOVE },
+    { WM_NCACTIVATE, sent|optional },
+    { WM_GETTEXT, sent|defwinproc|optional },
+    { WM_ACTIVATE, sent|wparam|optional, WA_ACTIVE },
+    { HCBT_SETFOCUS, hook|optional },
+    { WM_SETFOCUS, sent|defwinproc|optional },
+    { WM_KILLFOCUS, sent|optional },
+    { WM_SETFOCUS, sent|optional },
+    /* Note this WM_ACTIVATE message on XP even if the window is already active and focused */
+    { WM_ACTIVATE, sent|wparam|lparam|optional, WA_ACTIVE, 0 },
+    { WM_SYNCPAINT, sent|optional },
+    { WM_PAINT, sent },
+    { WM_GETMINMAXINFO, sent|optional },
+    { 0 }
+};
+/* ShowWindow(hwnd, SW_RESTORE) to an active minimized window */
+static const struct message WmShowRestoreActiveMinimizedOverlappedSeq[] =
+{
+    { HCBT_MINMAX, hook },
+    { WM_QUERYOPEN, sent },
+    { WM_GETTEXT, sent|optional },
+    { WM_NCACTIVATE, sent },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOSIZE|SWP_NOMOVE },
+    { WM_WINDOWPOSCHANGED, sent|wparam|optional, SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
+    { WM_NCCALCSIZE, sent|optional },
+    { WM_MOVE, sent|optional },
+    { WM_SIZE, sent|optional },
+    { WM_GETTEXT, sent|optional },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_FRAMECHANGED|SWP_NOCOPYBITS|SWP_STATECHANGED },
+    { WM_GETMINMAXINFO, sent|defwinproc },
+    { WM_NCCALCSIZE, sent },
+    { WM_NCPAINT, sent },
+    { WM_GETTEXT, sent|defwinproc|optional },
+    { WM_ERASEBKGND, sent },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_FRAMECHANGED|SWP_NOCOPYBITS|SWP_STATECHANGED },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|defwinproc },
+    { WM_NCCALCSIZE, sent|optional },
+    { WM_NCPAINT, sent|optional },
+    { WM_ERASEBKGND, sent|optional },
+    { HCBT_SETFOCUS, hook },
+    { WM_SETFOCUS, sent },
+    /* Note this WM_ACTIVATE message even if the window is already active */
+    { WM_ACTIVATE, sent|wparam|lparam, WA_ACTIVE, 0 },
+    { WM_SYNCPAINT, sent|optional },
+    { WM_PAINT, sent },
+    { WM_GETMINMAXINFO, sent|optional },
+    { 0 }
+};
+/* ShowWindow(hwnd, SW_SHOWNOACTIVATE) to an active minimized window */
+static const struct message WmShowNoActivateActiveMinimizedOverlappedSeq[] =
+{
+    { HCBT_MINMAX, hook },
+    { WM_QUERYOPEN, sent },
+    { WM_GETTEXT, sent|optional },
+    { WM_NCACTIVATE, sent },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOSIZE|SWP_NOMOVE },
+    { WM_WINDOWPOSCHANGED, sent|wparam|optional, SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
+    { WM_NCCALCSIZE, sent|optional },
+    { WM_MOVE, sent|optional },
+    { WM_SIZE, sent|optional },
+    { WM_GETTEXT, sent|optional },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOCOPYBITS|SWP_STATECHANGED },
+    { WM_GETMINMAXINFO, sent|defwinproc },
+    { WM_NCCALCSIZE, sent },
+    { WM_NCPAINT, sent },
+    { WM_GETTEXT, sent|defwinproc|optional },
+    { WM_ERASEBKGND, sent },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOCOPYBITS|SWP_STATECHANGED },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|defwinproc },
+    { WM_NCCALCSIZE, sent|optional },
+    { WM_NCPAINT, sent|optional },
+    { WM_ERASEBKGND, sent|optional },
+    /* Following optional messages are present on XP */
+    { HCBT_SETFOCUS, hook|optional },
+    { WM_SETFOCUS, sent|optional },
+    /* Note this WM_ACTIVATE message even if the window is already active and with flag SW_SHOWNOACTIVATE */
+    { WM_ACTIVATE, sent|wparam|lparam|optional, WA_ACTIVE, 0 },
+    { WM_SYNCPAINT, sent|optional },
+    { WM_PAINT, sent },
+    { WM_GETMINMAXINFO, sent|optional },
     { 0 }
 };
 /* CreateWindow (for a child popup window, not initially visible) */
@@ -1930,6 +2060,41 @@ static const struct message WmSHOWNATopInvisible[] = {
     { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam, 0, 0 },
     { WM_SIZE, sent|wparam, SIZE_RESTORED },
     { WM_MOVE, sent },
+    { 0 }
+};
+
+static const struct message WmTrackPopupMenuMinimizeWindow[] = {
+    { HCBT_CREATEWND, hook },
+    { WM_ENTERMENULOOP, sent|wparam|lparam, TRUE, 0 },
+    { WM_INITMENU, sent|lparam, 0, 0 },
+    { WM_INITMENUPOPUP, sent|lparam, 0, 0 },
+    { 0x0093, sent|optional },
+    { 0x0094, sent|optional },
+    { 0x0094, sent|optional },
+    { WM_ENTERIDLE, sent|wparam, 2 },
+    { HCBT_MINMAX, hook },
+    { HCBT_SETFOCUS, hook },
+    { WM_KILLFOCUS, sent|wparam, 0 },
+    { WM_GETTEXT, sent|optional },
+    { WM_WINDOWPOSCHANGING, sent },
+    { WM_GETMINMAXINFO, sent|defwinproc },
+    { WM_NCCALCSIZE, sent|wparam|optional, 1 },
+    { WM_WINDOWPOSCHANGED, sent },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|defwinproc },
+    { WM_GETTEXT, sent|optional },
+    { WM_NCCALCSIZE, sent|wparam|optional, 1 },
+    { WM_CANCELMODE, sent },
+    { WM_CAPTURECHANGED, sent|defwinproc },
+    { HCBT_DESTROYWND, hook },
+    { WM_UNINITMENUPOPUP, sent|defwinproc|lparam, 0, 0 },
+    { WM_MENUSELECT, sent|defwinproc|wparam|lparam, 0xffff0000, 0 },
+    { WM_EXITMENULOOP, sent|defwinproc|wparam|lparam, 1, 0 },
+    { WM_NCACTIVATE, sent },
+    { WM_GETTEXT, sent|defwinproc|optional },
+    { WM_GETTEXT, sent|defwinproc|optional },
+    { WM_ACTIVATE, sent },
+    { WM_ACTIVATEAPP, sent|wparam, 0 },
     { 0 }
 };
 
@@ -4651,7 +4816,7 @@ static void test_scroll_messages(HWND hwnd)
 
 static void test_showwindow(void)
 {
-    HWND hwnd, hchild;
+    HWND hwnd, hwnd2, hchild;
     RECT rc;
 
     hwnd = CreateWindowExA(0, "TestWindowClass", "Test overlapped", WS_OVERLAPPEDWINDOW,
@@ -4786,6 +4951,68 @@ static void test_showwindow(void)
     ShowWindow(hwnd, SW_SHOWMAXIMIZED);
     ok(IsZoomed(hwnd), "window should be maximized\n");
     ok_sequence(WmShowVisMaxPopupSeq, "ShowWindow(SW_SHOWMAXIMIZED):popup", FALSE);
+    DestroyWindow(hwnd);
+    flush_sequence();
+
+    /* Test 5:
+     * 1. Restoring a minimized window.
+     */
+    hwnd = CreateWindowA("TestWindowClass", "window1", WS_VISIBLE | WS_OVERLAPPEDWINDOW, 0, 0, 100, 100, 0, 0, 0, 0);
+    ok(hwnd != NULL, "Failed to create window\n");
+
+    hwnd2 = CreateWindowA("static", "window2", WS_VISIBLE | WS_OVERLAPPEDWINDOW, 0, 0, 100, 100, 0, 0, 0, 0);
+    ok(hwnd2 != NULL, "Failed to create window\n");
+
+    ShowWindow(hwnd, SW_MINIMIZE);
+    SetActiveWindow(hwnd2);
+    ok(GetActiveWindow() == hwnd2, "Unexpected active window\n");
+    flush_events();
+    flush_sequence();
+    ShowWindow(hwnd, SW_RESTORE);
+    flush_events();
+    ok_sequence(WmShowRestoreMinimizedOverlappedSeq,
+                "ShowWindow(hwnd, SW_RESTORE): minimized overlapped", TRUE);
+
+    ShowWindow(hwnd, SW_MINIMIZE);
+    SetActiveWindow(hwnd2);
+    ok(GetActiveWindow() == hwnd2, "Unexpected active window\n");
+    flush_events();
+    flush_sequence();
+    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    flush_events();
+    ok_sequence(WmShowNoActivateMinimizedOverlappedSeq,
+                "ShowWindow(hwnd, SW_SHOWNOACTIVATE): minimized overlapped", TRUE);
+
+    DestroyWindow(hwnd2);
+    DestroyWindow(hwnd);
+    flush_sequence();
+
+    /* Test 6:
+     * 1. Restoring a minimized but active window.
+     */
+    hwnd = CreateWindowA("TestWindowClass", "parent", WS_VISIBLE | WS_OVERLAPPEDWINDOW, 0, 0, 100, 100, 0, 0, 0, 0);
+    ok(hwnd != NULL, "Failed to create window\n");
+
+    ShowWindow(hwnd, SW_MINIMIZE);
+    SetActiveWindow(hwnd);
+    ok(GetActiveWindow() == hwnd, "Unexpected active window\n");
+    flush_events();
+    flush_sequence();
+    ShowWindow(hwnd, SW_RESTORE);
+    flush_events();
+    ok_sequence(WmShowRestoreActiveMinimizedOverlappedSeq,
+                "ShowWindow(hwnd, SW_RESTORE): active minimized overlapped", TRUE);
+
+    ShowWindow(hwnd, SW_MINIMIZE);
+    SetActiveWindow(hwnd);
+    ok(GetActiveWindow() == hwnd, "Unexpected active window\n");
+    flush_events();
+    flush_sequence();
+    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    flush_events();
+    ok_sequence(WmShowNoActivateActiveMinimizedOverlappedSeq,
+                "ShowWindow(hwnd, SW_SHOWNOACTIVATE): active minimized overlapped", TRUE);
+
     DestroyWindow(hwnd);
     flush_sequence();
 }
@@ -5059,7 +5286,7 @@ static void test_WM_DEVICECHANGE(HWND hwnd)
     }
 }
 
-static DWORD CALLBACK show_window_thread(LPVOID arg)
+static DWORD CALLBACK hide_window_thread( LPVOID arg )
 {
    HWND hwnd = arg;
 
@@ -5067,6 +5294,16 @@ static DWORD CALLBACK show_window_thread(LPVOID arg)
    ok(ShowWindow(hwnd, SW_HIDE) == FALSE, "ShowWindow(SW_HIDE) expected FALSE\n");
 
    return 0;
+}
+
+static DWORD CALLBACK show_window_thread( LPVOID arg )
+{
+    HWND hwnd = arg;
+
+    /* function will not return if ShowWindow(SW_SHOW) calls SendMessage() */
+    ok( ShowWindow( hwnd, SW_SHOW ), "ShowWindow(SW_SHOW) expected TRUE\n" ); /* actually it's 24... */
+
+    return 0;
 }
 
 /* Helper function to easier test SetWindowPos messages */
@@ -5130,7 +5367,7 @@ static void test_messages(void)
     ok_sequence(WmEmptySeq, "ShowWindow(SW_HIDE):overlapped", FALSE);
 
     /* test ShowWindow(SW_HIDE) on a hidden window -  multi-threaded */
-    hthread = CreateThread(NULL, 0, show_window_thread, hwnd, 0, &tid);
+    hthread = CreateThread( NULL, 0, hide_window_thread, hwnd, 0, &tid );
     ok(hthread != NULL, "CreateThread failed, error %d\n", GetLastError());
     ok(WaitForSingleObject(hthread, INFINITE) == WAIT_OBJECT_0, "WaitForSingleObject failed\n");
     CloseHandle(hthread);
@@ -5140,6 +5377,14 @@ static void test_messages(void)
     ShowWindow(hwnd, SW_SHOW);
     flush_events();
     ok_sequence(WmShowOverlappedSeq, "ShowWindow(SW_SHOW):overlapped", TRUE);
+
+    /* test ShowWindow(SW_SHOW) on a visible window -  multi-threaded */
+    hthread = CreateThread( NULL, 0, show_window_thread, hwnd, 0, &tid );
+    ok( hthread != NULL, "CreateThread failed, error %d\n", GetLastError() );
+    ok( WaitForSingleObject( hthread, INFINITE ) == WAIT_OBJECT_0, "WaitForSingleObject failed\n" );
+    CloseHandle( hthread );
+    flush_events();
+    ok_sequence( WmEmptySeq, "ShowWindow(SW_SHOW):overlapped", FALSE );
 
     ShowWindow(hwnd, SW_HIDE);
     flush_events();
@@ -8661,7 +8906,7 @@ static HANDLE test_create(const char *file)
     actctx.cbSize = sizeof(ACTCTXW);
     actctx.lpSource = path;
 
-    handle = pCreateActCtxW(&actctx);
+    handle = CreateActCtxW(&actctx);
     ok(handle != INVALID_HANDLE_VALUE, "failed to create context, error %u\n", GetLastError());
 
     ok(actctx.cbSize == sizeof(actctx), "cbSize=%d\n", actctx.cbSize);
@@ -8779,13 +9024,7 @@ static void test_interthread_messages(void)
     log_all_parent_messages--;
     DestroyWindow( wnd_event.hwnd );
 
-    /* activation context tests */
-    if (!pActivateActCtx)
-    {
-        win_skip("Activation contexts are not supported, skipping\n");
-        return;
-    }
-
+    /* Activation context tests */
     create_manifest_file("testdep1.manifest", manifest_dep);
     create_manifest_file("main.manifest", manifest_main);
 
@@ -8794,7 +9033,7 @@ static void test_interthread_messages(void)
     DeleteFileA("main.manifest");
 
     handle = (void*)0xdeadbeef;
-    ret = pGetCurrentActCtx(&handle);
+    ret = GetCurrentActCtx(&handle);
     ok(ret, "GetCurrentActCtx failed: %u\n", GetLastError());
     ok(handle == 0, "active context %p\n", handle);
 
@@ -8805,14 +9044,14 @@ static void test_interthread_messages(void)
     CloseHandle(wnd_event.start_event);
 
     /* context is activated after thread creation, so it doesn't inherit it by default */
-    ret = pActivateActCtx(context, &cookie);
+    ret = ActivateActCtx(context, &cookie);
     ok(ret, "activation failed: %u\n", GetLastError());
 
     handle = 0;
-    ret = pGetCurrentActCtx(&handle);
+    ret = GetCurrentActCtx(&handle);
     ok(ret, "GetCurrentActCtx failed: %u\n", GetLastError());
     ok(handle != 0, "active context %p\n", handle);
-    pReleaseActCtx(handle);
+    ReleaseActCtx(handle);
 
     /* destination window will test for active context */
     ret = SendMessageA(wnd_event.hwnd, WM_USER+10, 0, 0);
@@ -8830,9 +9069,9 @@ static void test_interthread_messages(void)
     ok(WaitForSingleObject(hThread, INFINITE) == WAIT_OBJECT_0, "WaitForSingleObject failed\n");
     CloseHandle(hThread);
 
-    ret = pDeactivateActCtx(0, cookie);
+    ret = DeactivateActCtx(0, cookie);
     ok(ret, "DeactivateActCtx failed: %u\n", GetLastError());
-    pReleaseActCtx(context);
+    ReleaseActCtx(context);
 }
 
 
@@ -9483,12 +9722,12 @@ static LRESULT MsgCheckProc (BOOL unicode, HWND hwnd, UINT message,
 	    BOOL ret;
 
 	    handle = (void*)0xdeadbeef;
-	    ret = pGetCurrentActCtx(&handle);
+	    ret = GetCurrentActCtx(&handle);
 	    ok(ret, "failed to get current context, %u\n", GetLastError());
 	    ok(handle == 0, "got active context %p\n", handle);
 
 	    memset(&basicinfo, 0xff, sizeof(basicinfo));
-	    ret = pQueryActCtxW(QUERY_ACTCTX_FLAG_USE_ACTIVE_ACTCTX, handle, 0, ActivationContextBasicInformation,
+	    ret = QueryActCtxW(QUERY_ACTCTX_FLAG_USE_ACTIVE_ACTCTX, handle, 0, ActivationContextBasicInformation,
 	        &basicinfo, sizeof(basicinfo), NULL);
 	    ok(ret, "got %d, error %d\n", ret, GetLastError());
 	    ok(basicinfo.hActCtx == NULL, "got %p\n", basicinfo.hActCtx);
@@ -15489,6 +15728,42 @@ static const struct message WmRestoreMinimizedOverlappedSeq[] =
     { 0 }
 };
 
+/* DefWindowProcA(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0) to an active minimized window */
+static const struct message WmRestoreActiveMinimizedOverlappedSeq[] =
+{
+    { HCBT_SYSCOMMAND, hook|wparam|lparam, SC_RESTORE, 0 },
+    { HCBT_MINMAX, hook },
+    { WM_QUERYOPEN, sent },
+    { WM_GETTEXT, sent|optional },
+    { WM_NCACTIVATE, sent },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOSIZE|SWP_NOMOVE },
+    { WM_WINDOWPOSCHANGED, sent|wparam|optional, SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
+    { WM_NCCALCSIZE, sent|optional },
+    { WM_MOVE, sent|optional },
+    { WM_SIZE, sent|optional },
+    { WM_GETTEXT, sent|optional },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_FRAMECHANGED|SWP_NOCOPYBITS|SWP_STATECHANGED },
+    { WM_GETMINMAXINFO, sent|defwinproc },
+    { WM_NCCALCSIZE, sent },
+    { WM_NCPAINT, sent },
+    { WM_GETTEXT, sent|defwinproc|optional },
+    { WM_ERASEBKGND, sent },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_FRAMECHANGED|SWP_NOCOPYBITS|SWP_STATECHANGED },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|defwinproc },
+    { WM_NCCALCSIZE, sent|optional },
+    { WM_NCPAINT, sent|optional },
+    { WM_ERASEBKGND, sent|optional },
+    { HCBT_SETFOCUS, hook },
+    { WM_SETFOCUS, sent },
+    /* Note this WM_ACTIVATE messages even if the window is already active */
+    { WM_ACTIVATE, sent|wparam|lparam, WA_ACTIVE, 0 },
+    { WM_SYNCPAINT, sent|optional },
+    { WM_PAINT, sent },
+    { WM_GETMINMAXINFO, sent|optional },
+    { 0 }
+};
+
 struct rbuttonup_thread_data
 {
     HWND hwnd;
@@ -15550,7 +15825,15 @@ static void test_defwinproc(void)
     DefWindowProcA(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
     flush_events();
     ok_sequence(WmRestoreMinimizedOverlappedSeq, "DefWindowProcA(SC_RESTORE):overlapped", TRUE);
+
+    ShowWindow(hwnd, SW_MINIMIZE);
+    SetActiveWindow(hwnd);
+    ok(GetActiveWindow() == hwnd, "Unexpected active window\n");
+    flush_events();
     flush_sequence();
+    DefWindowProcA(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
+    flush_events();
+    ok_sequence(WmRestoreActiveMinimizedOverlappedSeq, "DefWindowProcA(SC_RESTORE):active minimized overlapped", TRUE);
 
     GetCursorPos(&pos);
     GetWindowRect(hwnd, &rect);
@@ -15926,17 +16209,27 @@ static void test_PostMessage(void)
     flush_events();
 }
 
-static LPARAM g_broadcast_lparam;
+static WPARAM g_broadcast_wparam;
 static LRESULT WINAPI broadcast_test_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     WNDPROC oldproc = (WNDPROC)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
 
     if (wParam == 0xbaadbeef)
-        g_broadcast_lparam = wParam;
+        g_broadcast_wparam = wParam;
     else
-        g_broadcast_lparam = 0;
+        g_broadcast_wparam = 0;
 
     return CallWindowProcA(oldproc, hwnd, message, wParam, lParam);
+}
+static WNDPROC *g_oldproc_sub;
+static WPARAM *g_broadcast_sub_wparam;
+static LRESULT WINAPI broadcast_test_sub_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    int sub_index = GetWindowLongPtrA(hwnd, GWLP_USERDATA);
+
+    g_broadcast_sub_wparam[sub_index] = (wParam == 0xbaadbeef) ? wParam : 0;
+
+    return CallWindowProcA(g_oldproc_sub[sub_index], hwnd, message, wParam, lParam);
 }
 
 static void test_broadcast(void)
@@ -15950,9 +16243,34 @@ static void test_broadcast(void)
         0xc000, /* lowest possible atom returned by RegisterWindowMessage */
         0xffff,
     };
+    static const struct
+    {
+        LONG style;
+        BOOL receive;
+    } bcast_expect[] =
+    {
+        {WS_OVERLAPPED,             TRUE},
+        {WS_OVERLAPPED|WS_DLGFRAME, TRUE},
+        {WS_OVERLAPPED|WS_BORDER,   TRUE},
+        {WS_OVERLAPPED|WS_CAPTION,  TRUE},
+        {WS_CHILD,                  FALSE},
+        {WS_CHILD|WS_DLGFRAME,      FALSE},
+        {WS_CHILD|WS_BORDER,        FALSE},
+        {WS_CHILD|WS_CAPTION,       FALSE},
+        {WS_CHILD|WS_POPUP,         TRUE},
+        {WS_POPUP,                  TRUE},
+        {WS_POPUP|WS_DLGFRAME,      TRUE},
+        {WS_POPUP|WS_BORDER,        TRUE},
+        {WS_POPUP|WS_CAPTION,       TRUE},
+    };
     WNDPROC oldproc;
-    unsigned int i;
+    unsigned int i, j;
     HWND hwnd;
+    HWND *hwnd_sub;
+
+    hwnd_sub = HeapAlloc( GetProcessHeap(), 0, ARRAY_SIZE(bcast_expect) * sizeof(*hwnd_sub) );
+    g_oldproc_sub = HeapAlloc( GetProcessHeap(), 0, ARRAY_SIZE(bcast_expect) * sizeof(*g_oldproc_sub) );
+    g_broadcast_sub_wparam = HeapAlloc( GetProcessHeap(), 0, ARRAY_SIZE(bcast_expect) * sizeof(*g_broadcast_sub_wparam) );
 
     hwnd = CreateWindowExA(0, "static", NULL, WS_POPUP, 0, 0, 0, 0, 0, 0, 0, NULL);
     ok(hwnd != NULL, "got %p\n", hwnd);
@@ -15963,6 +16281,7 @@ static void test_broadcast(void)
     for (i = 0; i < ARRAY_SIZE(messages); i++)
     {
         BOOL ret;
+        BOOL msg_expected = (messages[i] < WM_USER || messages[i] >= 0xc000);
         MSG msg;
 
         flush_events();
@@ -15975,15 +16294,9 @@ static void test_broadcast(void)
 
         memset(&msg, 0xab, sizeof(msg));
         ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE);
-        if (messages[i] < WM_USER || messages[i] >= 0xc000)
-        {
-            ok(ret, "%d: message %04x, got %d, error %d\n", i, messages[i], ret, GetLastError());
+        ok(ret == msg_expected, "%d: message %04x, got %d, error %d\n", i, messages[i], ret, GetLastError());
+        if (msg_expected)
             ok(msg.hwnd == hwnd, "%d: got %p\n", i, msg.hwnd);
-        }
-        else
-        {
-            ok(!ret, "%d: message %04x, got %d, error %d\n", i, messages[i], ret, GetLastError());
-        }
 
         /* post, topmost */
         ret = PostMessageA(HWND_TOPMOST, messages[i], 0, 0);
@@ -15991,54 +16304,76 @@ static void test_broadcast(void)
 
         memset(&msg, 0xab, sizeof(msg));
         ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE);
-        if (messages[i] < WM_USER || messages[i] >= 0xc000)
-        {
-            ok(ret, "%d: message %04x, got %d, error %d\n", i, messages[i], ret, GetLastError());
+        ok(ret == msg_expected, "%d: message %04x, got %d, error %d\n", i, messages[i], ret, GetLastError());
+        if (msg_expected)
             ok(msg.hwnd == hwnd, "%d: got %p\n", i, msg.hwnd);
-        }
-        else
-        {
-            ok(!ret, "%d: got %d, error %d\n", i, ret, GetLastError());
-        }
+    }
+
+    for (j = 0; j < ARRAY_SIZE(bcast_expect); j++)
+    {
+        hwnd_sub[j] = CreateWindowA("static", NULL, bcast_expect[j].style, 0, 0, 0, 0, hwnd, 0, 0, NULL);
+        ok(hwnd_sub[j] != NULL, "got %p\n", hwnd_sub[j]);
+        /* CreateWindow adds extra style flags, so call SetWindowLong to clear some of those. */
+        SetWindowLongA(hwnd_sub[j], GWL_STYLE, bcast_expect[j].style);
+
+        g_oldproc_sub[j] = (WNDPROC)SetWindowLongPtrA(hwnd_sub[j], GWLP_WNDPROC, (LONG_PTR)broadcast_test_sub_proc);
+        SetWindowLongPtrA(hwnd_sub[j], GWLP_USERDATA, (LONG_PTR)j);
+    }
+
+    for (i = 0; i < ARRAY_SIZE(messages); i++)
+    {
+        BOOL ret;
+        BOOL msg_expected = (messages[i] < WM_USER || messages[i] >= 0xc000);
 
         /* send, broadcast */
-        g_broadcast_lparam = 0xdead;
+        g_broadcast_wparam = 0xdead;
+        for (j = 0; j < ARRAY_SIZE(bcast_expect); j++)
+            g_broadcast_sub_wparam[j] = 0xdead;
         ret = SendMessageTimeoutA(HWND_BROADCAST, messages[i], 0xbaadbeef, 0, SMTO_NORMAL, 2000, NULL);
         if (!ret && GetLastError() == ERROR_TIMEOUT)
             win_skip("broadcasting test %d, timeout\n", i);
         else
         {
-            if (messages[i] < WM_USER || messages[i] >= 0xc000)
+            WPARAM wparam_expected = msg_expected ? 0xbaadbeef : 0xdead;
+            ok(g_broadcast_wparam == wparam_expected, "%d: message %04x, got %#lx, error %d\n",
+                i, messages[i], g_broadcast_wparam, GetLastError());
+            for (j = 0; j < ARRAY_SIZE(bcast_expect); j++)
             {
-                ok(g_broadcast_lparam == 0xbaadbeef, "%d: message %04x, got %#lx, error %d\n", i, messages[i],
-                    g_broadcast_lparam, GetLastError());
-            }
-            else
-            {
-                ok(g_broadcast_lparam == 0xdead, "%d: message %04x, got %#lx, error %d\n", i, messages[i],
-                    g_broadcast_lparam, GetLastError());
+                wparam_expected = (msg_expected && bcast_expect[j].receive) ? 0xbaadbeef : 0xdead;
+                ok(g_broadcast_sub_wparam[j] == wparam_expected,
+                    "%d,%d: message %04x, got %#lx, error %d\n", i, j, messages[i],
+                    g_broadcast_sub_wparam[j], GetLastError());
             }
         }
 
         /* send, topmost */
-        g_broadcast_lparam = 0xdead;
+        g_broadcast_wparam = 0xdead;
+        for (j = 0; j < ARRAY_SIZE(bcast_expect); j++)
+            g_broadcast_sub_wparam[j] = 0xdead;
         ret = SendMessageTimeoutA(HWND_TOPMOST, messages[i], 0xbaadbeef, 0, SMTO_NORMAL, 2000, NULL);
         if (!ret && GetLastError() == ERROR_TIMEOUT)
             win_skip("broadcasting test %d, timeout\n", i);
         else
         {
-            if (messages[i] < WM_USER || messages[i] >= 0xc000)
+            WPARAM wparam_expected = msg_expected ? 0xbaadbeef : 0xdead;
+            ok(g_broadcast_wparam == wparam_expected, "%d: message %04x, got %#lx, error %d\n",
+                i, messages[i], g_broadcast_wparam, GetLastError());
+            for (j = 0; j < ARRAY_SIZE(bcast_expect); j++)
             {
-                ok(g_broadcast_lparam == 0xbaadbeef, "%d: message %04x, got %#lx, error %d\n", i, messages[i],
-                    g_broadcast_lparam, GetLastError());
-            }
-            else
-            {
-                ok(g_broadcast_lparam == 0xdead, "%d: message %04x, got %#lx, error %d\n", i, messages[i],
-                    g_broadcast_lparam, GetLastError());
+                wparam_expected = (msg_expected && bcast_expect[j].receive) ? 0xbaadbeef : 0xdead;
+                ok(g_broadcast_sub_wparam[j] == wparam_expected,
+                    "%d,%d: message %04x, got %#lx, error %d\n", i, j, messages[i],
+                    g_broadcast_sub_wparam[j], GetLastError());
             }
         }
     }
+
+    for (j = 0; j < ARRAY_SIZE(bcast_expect); j++)
+        DestroyWindow(hwnd_sub[j]);
+
+    HeapFree(GetProcessHeap(), 0, g_broadcast_sub_wparam);
+    HeapFree(GetProcessHeap(), 0, g_oldproc_sub);
+    HeapFree(GetProcessHeap(), 0, hwnd_sub);
 
     DestroyWindow(hwnd);
 }
@@ -16318,7 +16653,7 @@ static void test_WaitForInputIdle( char *argv0 )
                 WaitForSingleObject( pi.hProcess, 1000 );  /* give it a chance to exit on its own */
             }
             TerminateProcess( pi.hProcess, 0 );  /* just in case */
-            winetest_wait_child_process( pi.hProcess );
+            wait_child_process( pi.hProcess );
             ret = WaitForInputIdle( pi.hProcess, 100 );
             ok( ret == WAIT_FAILED, "%u: WaitForInputIdle after exit error %08x\n", i, ret );
             CloseHandle( pi.hProcess );
@@ -17324,6 +17659,25 @@ static void test_layered_window(void)
 
 static HMENU hpopupmenu;
 
+static LRESULT WINAPI minimize_popup_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    LRESULT ret;
+
+    if (ignore_message( message )) return 0;
+    ret = MsgCheckProc( FALSE, hwnd, message, wParam, lParam );
+
+    switch (message) {
+    case WM_ENTERIDLE:
+        ShowWindow(hwnd, SW_MINIMIZE);
+        break;
+    case WM_TIMER:
+        EndMenu();
+        break;
+    }
+
+    return ret;
+}
+
 static LRESULT WINAPI cancel_popup_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     if (ignore_message( message )) return 0;
@@ -17405,6 +17759,21 @@ static void test_TrackPopupMenu(void)
     ret = TrackPopupMenu(hpopupmenu, 0, 100,100, 0, hwnd, NULL);
     ok_sequence(WmTrackPopupMenuAbort, "WmTrackPopupMenuAbort", TRUE);
     ok(ret == TRUE, "TrackPopupMenu failed\n");
+
+    SetWindowLongPtrA( hwnd, GWLP_WNDPROC, (LONG_PTR)minimize_popup_proc);
+
+    /* set cursor over the window, otherwise the WM_CANCELMODE message may not always be sent */
+    SetCursorPos( 0, 0 );
+    ShowWindow( hwnd, SW_SHOW );
+
+    flush_events();
+    flush_sequence();
+    SetTimer( hwnd, TIMER_ID, 500, NULL );
+    ret = TrackPopupMenu( hpopupmenu, 0, 100,100, 0, hwnd, NULL );
+    ok_sequence( WmTrackPopupMenuMinimizeWindow, "TrackPopupMenuMinimizeWindow", TRUE );
+    ok( ret == 1, "TrackPopupMenu failed with error %i\n", GetLastError() );
+    KillTimer( hwnd, TIMER_ID );
+    ShowWindow( hwnd, SW_RESTORE );
 
     SetWindowLongPtrA( hwnd, GWLP_WNDPROC, (LONG_PTR)cancel_popup_proc);
 
@@ -17828,18 +18197,35 @@ static void test_invalid_window(void)
     ok(GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "wrong error %u\n", GetLastError());
 }
 
-static void init_funcs(void)
+static void test_button_style(void)
 {
-    HMODULE hKernel32 = GetModuleHandleA("kernel32.dll");
+    DWORD type, expected_type;
+    HWND button;
+    LRESULT ret;
+    DWORD i, j;
 
-#define X(f) p##f = (void*)GetProcAddress(hKernel32, #f)
-    X(ActivateActCtx);
-    X(CreateActCtxW);
-    X(DeactivateActCtx);
-    X(GetCurrentActCtx);
-    X(QueryActCtxW);
-    X(ReleaseActCtx);
-#undef X
+    for (i = BS_PUSHBUTTON; i <= BS_DEFCOMMANDLINK; ++i)
+    {
+        button = CreateWindowA(WC_BUTTONA, "test", i, 0, 0, 50, 50, NULL, 0, 0, NULL);
+        ok(button != NULL, "Expected button not null.\n");
+
+        type = GetWindowLongW(button, GWL_STYLE) & BS_TYPEMASK;
+        expected_type = (i == BS_USERBUTTON ? BS_PUSHBUTTON : i);
+        ok(type == expected_type, "Expected type %#x, got %#x.\n", expected_type, type);
+
+        for (j = BS_PUSHBUTTON; j <= BS_DEFCOMMANDLINK; ++j)
+        {
+            ret = SendMessageA(button, BM_SETSTYLE, j, FALSE);
+            ok(ret == 0, "Expected %#x, got %#lx.\n", 0, ret);
+
+            type = GetWindowLongW(button, GWL_STYLE) & BS_TYPEMASK;
+            expected_type = j;
+
+            ok(type == expected_type, "Original type %#x, expected new type %#x, got %#x.\n", i,
+                    expected_type, type);
+        }
+        DestroyWindow(button);
+    }
 }
 
 START_TEST(msg)
@@ -17850,8 +18236,6 @@ START_TEST(msg)
     HMODULE hModuleImm32;
     BOOL (WINAPI *pImmDisableIME)(DWORD);
     int argc;
-
-    init_funcs();
 
     argc = winetest_get_mainargs( &test_argv );
     if (argc >= 3)
@@ -17927,6 +18311,7 @@ START_TEST(msg)
     test_mdi_messages();
     test_button_messages();
     test_button_bm_get_set_image();
+    test_button_style();
     test_autoradio_BM_CLICK();
     test_autoradio_kbd_move();
     test_static_messages();

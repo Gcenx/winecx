@@ -124,9 +124,9 @@
 #include "wine/strmbase.h"
 
 #include "qtprivate.h"
+#include "wineqtdecoder_classes.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(qtsplitter);
-extern CLSID CLSID_QTSplitter;
 
 typedef struct QTOutPin {
     struct strmbase_source pin;
@@ -278,25 +278,21 @@ static void qt_splitter_destroy(struct strmbase_filter *iface)
 static HRESULT qt_splitter_start_stream(struct strmbase_filter *iface, REFERENCE_TIME time)
 {
     QTSplitter *filter = impl_from_strmbase_filter(iface);
-    HRESULT hr = VFW_E_NOT_CONNECTED, pin_hr;
+    HRESULT hr;
 
     EnterCriticalSection(&filter->csReceive);
 
-    if (filter->pVideo_Pin)
-    {
-        if (SUCCEEDED(pin_hr = BaseOutputPinImpl_Active(&filter->pVideo_Pin->pin)))
-            hr = pin_hr;
-    }
-    if (filter->pAudio_Pin)
-    {
-        if (SUCCEEDED(pin_hr = BaseOutputPinImpl_Active(&filter->pAudio_Pin->pin)))
-            hr = pin_hr;
-    }
+    if (filter->pVideo_Pin && filter->pVideo_Pin->pin.pin.peer
+            && FAILED(hr = IMemAllocator_Commit(filter->pVideo_Pin->pin.pAllocator)))
+        ERR("Failed to commit video allocator, hr %#x.\n", hr);
+    if (filter->pAudio_Pin && filter->pAudio_Pin->pin.pin.peer
+            && FAILED(hr = IMemAllocator_Commit(filter->pAudio_Pin->pin.pAllocator)))
+        ERR("Failed to commit audio allocator, hr %#x.\n", hr);
     SetEvent(filter->runEvent);
 
     LeaveCriticalSection(&filter->csReceive);
 
-    return hr;
+    return S_OK;
 }
 
 static HRESULT qt_splitter_cleanup_stream(struct strmbase_filter *iface)
@@ -397,12 +393,11 @@ static void qt_splitter_sink_disconnect(struct strmbase_sink *iface)
 static const struct strmbase_sink_ops sink_ops =
 {
     .base.pin_query_accept = sink_query_accept,
-    .base.pin_get_media_type = strmbase_pin_get_media_type,
     .sink_connect = qt_splitter_sink_connect,
     .sink_disconnect = qt_splitter_sink_disconnect,
 };
 
-IUnknown * CALLBACK QTSplitter_create(IUnknown *outer, HRESULT *phr)
+HRESULT qt_splitter_create(IUnknown *outer, IUnknown **out)
 {
     QTSplitter *This;
     static const WCHAR wcsInputPinName[] = {'I','n','p','u','t',' ','P','i','n',0};
@@ -411,12 +406,8 @@ IUnknown * CALLBACK QTSplitter_create(IUnknown *outer, HRESULT *phr)
 
     RegisterWineDataHandler();
 
-    This = CoTaskMemAlloc(sizeof(*This));
-    if (!This)
-    {
-        *phr = E_OUTOFMEMORY;
-        return NULL;
-    }
+    if (!(This = CoTaskMemAlloc(sizeof(*This))))
+        return E_OUTOFMEMORY;
     ZeroMemory(This,sizeof(*This));
 
     strmbase_filter_init(&This->filter, outer, &CLSID_QTSplitter, &filter_ops);
@@ -430,8 +421,9 @@ IUnknown * CALLBACK QTSplitter_create(IUnknown *outer, HRESULT *phr)
     This->aSession = NULL;
     This->runEvent = CreateEventW(NULL, 0, 0, NULL);
 
-    *phr = S_OK;
-    return &This->filter.IUnknown_inner;
+    TRACE("Created QT splitter %p.\n", This);
+    *out = &This->filter.IUnknown_inner;
+    return S_OK;
 }
 
 static OSErr QT_Create_Extract_Session(QTSplitter *filter)

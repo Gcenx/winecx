@@ -83,8 +83,10 @@ struct object_ops
     struct security_descriptor *(*get_sd)( struct object * );
     /* sets the security descriptor of the object */
     int (*set_sd)( struct object *, const struct security_descriptor *, unsigned int );
+    /* get the object full name */
+    WCHAR *(*get_full_name)(struct object *, data_size_t *);
     /* lookup a name if an object has a namespace */
-    struct object *(*lookup_name)(struct object *, struct unicode_str *,unsigned int);
+    struct object *(*lookup_name)(struct object *, struct unicode_str *,unsigned int,struct object *);
     /* link an object's name into a parent object */
     int (*link_name)(struct object *, struct object_name *, struct object *);
     /* unlink an object's name from its parent */
@@ -108,6 +110,7 @@ struct object
     struct list               wait_queue;
     struct object_name       *name;
     struct security_descriptor *sd;
+    unsigned int              is_permanent:1;
 #ifdef DEBUG_OBJECTS
     struct list               obj_list;
 #endif
@@ -134,17 +137,17 @@ extern void *memdup( const void *data, size_t len );
 extern void *alloc_object( const struct object_ops *ops );
 extern void namespace_add( struct namespace *namespace, struct object_name *ptr );
 extern const WCHAR *get_object_name( struct object *obj, data_size_t *len );
-extern WCHAR *get_object_full_name( struct object *obj, data_size_t *ret_len );
+extern WCHAR *default_get_full_name( struct object *obj, data_size_t *ret_len );
 extern void dump_object_name( struct object *obj );
 extern struct object *lookup_named_object( struct object *root, const struct unicode_str *name,
                                            unsigned int attr, struct unicode_str *name_left );
+extern data_size_t get_path_element( const WCHAR *name, data_size_t len );
 extern void *create_named_object( struct object *parent, const struct object_ops *ops,
                                   const struct unicode_str *name, unsigned int attributes,
                                   const struct security_descriptor *sd );
 extern void *open_named_object( struct object *parent, const struct object_ops *ops,
                                 const struct unicode_str *name, unsigned int attributes );
 extern void unlink_named_object( struct object *obj );
-extern void make_object_static( struct object *obj );
 extern struct namespace *create_namespace( unsigned int hash_size );
 extern void free_kernel_objects( struct object *obj );
 /* grab/release_object can take any pointer, but you better make sure */
@@ -164,7 +167,9 @@ extern struct security_descriptor *default_get_sd( struct object *obj );
 extern int default_set_sd( struct object *obj, const struct security_descriptor *sd, unsigned int set_info );
 extern int set_sd_defaults_from_token( struct object *obj, const struct security_descriptor *sd,
                                        unsigned int set_info, struct token *token );
-extern struct object *no_lookup_name( struct object *obj, struct unicode_str *name, unsigned int attributes );
+extern WCHAR *no_get_full_name( struct object *obj, data_size_t *ret_len );
+extern struct object *no_lookup_name( struct object *obj, struct unicode_str *name,
+                                      unsigned int attributes, struct object *root );
 extern int no_link_name( struct object *obj, struct object_name *name, struct object *parent );
 extern void default_unlink_name( struct object *obj, struct object_name *name );
 extern struct object *no_open_file( struct object *obj, unsigned int access, unsigned int sharing,
@@ -176,6 +181,9 @@ extern void no_destroy( struct object *obj );
 extern void dump_objects(void);
 extern void close_objects(void);
 #endif
+
+static inline void make_object_permanent( struct object *obj ) { obj->is_permanent = 1; }
+static inline void make_object_temporary( struct object *obj ) { obj->is_permanent = 0; }
 
 /* event functions */
 
@@ -209,6 +217,7 @@ extern void sock_init(void);
 
 extern int set_process_debugger( struct process *process, struct thread *debugger );
 extern void generate_debug_event( struct thread *thread, int code, const void *arg );
+extern void resume_delayed_debug_events( struct thread *thread );
 extern void generate_startup_debug_events( struct process *process, client_ptr_t entry );
 extern void debug_exit_thread( struct thread *thread );
 
@@ -238,13 +247,16 @@ extern struct object *get_root_directory(void);
 extern struct object *get_directory_obj( struct process *process, obj_handle_t handle );
 extern struct object_type *get_object_type( const struct unicode_str *name );
 extern int directory_link_name( struct object *obj, struct object_name *name, struct object *parent );
-extern void init_directories(void);
+extern void init_directories( struct fd *intl_fd );
 
 /* symbolic link functions */
 
 extern struct object *create_obj_symlink( struct object *root, const struct unicode_str *name,
                                           unsigned int attr, struct object *target,
                                           const struct security_descriptor *sd );
+extern struct object *create_symlink( struct object *root, const struct unicode_str *name,
+                                      unsigned int attr, const struct unicode_str *target,
+                                      const struct security_descriptor *sd );
 
 /* global variables */
 

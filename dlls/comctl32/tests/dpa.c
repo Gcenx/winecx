@@ -356,12 +356,6 @@ static void test_DPA_Merge(void)
     DWORD dw;
     BOOL rc;
 
-    if(!pDPA_Merge)
-    {
-        win_skip("DPA_Merge() not available\n");
-        return;
-    }
-
     dpa  = pDPA_Create(0);
     dpa2 = pDPA_Create(0);
     dpa3 = pDPA_Create(0);
@@ -485,12 +479,6 @@ static void test_DPA_EnumCallback(void)
     DWORD dw;
     INT i, ret;
 
-    if(!pDPA_EnumCallback)
-    {
-        win_skip("DPA_EnumCallback() not available\n");
-        return;
-    }
-
     dpa = pDPA_Create(0);
 
     for (i = 0; i < 6; i++)
@@ -517,12 +505,6 @@ static void test_DPA_DestroyCallback(void)
     HDPA dpa;
     INT i, ret;
 
-    if(!pDPA_DestroyCallback)
-    {
-        win_skip("DPA_DestroyCallback() not available\n");
-        return;
-    }
-
     dpa = pDPA_Create(0);
 
     for (i = 0; i < 3; i++)
@@ -538,7 +520,6 @@ static void test_DPA_DestroyCallback(void)
 
 static void test_DPA_LoadStream(void)
 {
-    static const WCHAR szStg[] = { 'S','t','g',0 };
     IStorage* pStg = NULL;
     IStream* pStm = NULL;
     LARGE_INTEGER li;
@@ -549,24 +530,14 @@ static void test_DPA_LoadStream(void)
     ULONG written, ret;
     HDPA dpa;
 
-    if(!pDPA_LoadStream)
-    {
-        win_skip("DPA_LoadStream() not available. Skipping stream tests.\n");
-        return;
-    }
-
     hRes = CoInitialize(NULL);
-    if (hRes != S_OK)
-    {
-        ok(0, "hResult: %d\n", hRes);
-        return;
-    }
+    ok(hRes == S_OK, "Failed to initialize COM, hr %#x.\n", hRes);
 
     dwMode = STGM_DIRECT|STGM_CREATE|STGM_READWRITE|STGM_SHARE_EXCLUSIVE;
     hRes = StgCreateDocfile(NULL, dwMode|STGM_DELETEONRELEASE, 0, &pStg);
     expect(S_OK, hRes);
 
-    hRes = IStorage_CreateStream(pStg, szStg, dwMode, 0, 0, &pStm);
+    hRes = IStorage_CreateStream(pStg, L"Stg", dwMode, 0, 0, &pStm);
     expect(S_OK, hRes);
 
     /* write less than header size */
@@ -658,7 +629,6 @@ static void test_DPA_LoadStream(void)
 static void test_DPA_SaveStream(void)
 {
     HDPA dpa;
-    static const WCHAR szStg[] = { 'S','t','g',0 };
     IStorage* pStg = NULL;
     IStream* pStm = NULL;
     DWORD dwMode, dw;
@@ -668,24 +638,14 @@ static void test_DPA_SaveStream(void)
     BOOL rc;
     LARGE_INTEGER liZero;
 
-    if(!pDPA_SaveStream)
-    {
-        win_skip("DPA_SaveStream() not available. Skipping stream tests.\n");
-        return;
-    }
-
     hRes = CoInitialize(NULL);
-    if (hRes != S_OK)
-    {
-        ok(0, "hResult: %d\n", hRes);
-        return;
-    }
+    ok(hRes == S_OK, "Failed to initialize COM, hr %#x.\n", hRes);
 
     dwMode = STGM_DIRECT|STGM_CREATE|STGM_READWRITE|STGM_SHARE_EXCLUSIVE;
     hRes = StgCreateDocfile(NULL, dwMode|STGM_DELETEONRELEASE, 0, &pStg);
     expect(S_OK, hRes);
 
-    hRes = IStorage_CreateStream(pStg, szStg, dwMode, 0, 0, &pStm);
+    hRes = IStorage_CreateStream(pStg, L"Stg", dwMode, 0, 0, &pStm);
     expect(S_OK, hRes);
 
     dpa = pDPA_Create(0);

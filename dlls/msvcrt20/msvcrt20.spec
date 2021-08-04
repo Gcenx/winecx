@@ -16,20 +16,20 @@
 @ stub -arch=win64 ??0fstream@@QEAA@H@Z
 @ stub -arch=win32 ??0fstream@@QAE@HPADH@Z
 @ stub -arch=win64 ??0fstream@@QEAA@HPEADH@Z
-@ stub -arch=win32 ??0fstream@@QAE@PBDHH@Z
-@ stub -arch=win64 ??0fstream@@QEAA@PEBDHH@Z
+@ thiscall -arch=win32 ??0fstream@@QAE@PBDHH@Z(ptr str long long long) msvcirt.??0fstream@@QAE@PBDHH@Z
+@ cdecl -arch=win64 ??0fstream@@QEAA@PEBDHH@Z(ptr str long long long) msvcirt.??0fstream@@QEAA@PEBDHH@Z
 @ stub -arch=win32 ??0fstream@@QAE@XZ
 @ stub -arch=win64 ??0fstream@@QEAA@XZ
-@ stub -arch=win32 ??0ifstream@@QAE@ABV0@@Z
-@ stub -arch=win64 ??0ifstream@@QEAA@AEBV0@@Z
-@ stub -arch=win32 ??0ifstream@@QAE@H@Z
-@ stub -arch=win64 ??0ifstream@@QEAA@H@Z
-@ stub -arch=win32 ??0ifstream@@QAE@HPADH@Z
-@ stub -arch=win64 ??0ifstream@@QEAA@HPEADH@Z
-@ stub -arch=win32 ??0ifstream@@QAE@PBDHH@Z
-@ stub -arch=win64 ??0ifstream@@QEAA@PEBDHH@Z
-@ stub -arch=win32 ??0ifstream@@QAE@XZ
-@ stub -arch=win64 ??0ifstream@@QEAA@XZ
+@ thiscall -arch=win32 ??0ifstream@@QAE@ABV0@@Z(ptr ptr long) msvcirt.??0ifstream@@QAE@ABV0@@Z
+@ cdecl -arch=win64 ??0ifstream@@QEAA@AEBV0@@Z(ptr ptr long) msvcirt.??0ifstream@@QEAA@AEBV0@@Z
+@ thiscall -arch=win32 ??0ifstream@@QAE@H@Z(ptr long long) msvcirt.??0ifstream@@QAE@H@Z
+@ cdecl -arch=win64 ??0ifstream@@QEAA@H@Z(ptr long long) msvcirt.??0ifstream@@QEAA@H@Z
+@ thiscall -arch=win32 ??0ifstream@@QAE@HPADH@Z(ptr long ptr long long) msvcirt.??0ifstream@@QAE@HPADH@Z
+@ cdecl -arch=win64 ??0ifstream@@QEAA@HPEADH@Z(ptr long ptr long long) msvcirt.??0ifstream@@QEAA@HPEADH@Z
+@ thiscall -arch=win32 ??0ifstream@@QAE@PBDHH@Z(ptr str long long long) msvcirt.??0ifstream@@QAE@PBDHH@Z
+@ cdecl -arch=win64 ??0ifstream@@QEAA@PEBDHH@Z(ptr str long long long) msvcirt.??0ifstream@@QEAA@PEBDHH@Z
+@ thiscall -arch=win32 ??0ifstream@@QAE@XZ(ptr long) msvcirt.??0ifstream@@QAE@XZ
+@ cdecl -arch=win64 ??0ifstream@@QEAA@XZ(ptr long) msvcirt.??0ifstream@@QEAA@XZ
 @ thiscall -arch=win32 ??0ios@@IAE@ABV0@@Z(ptr ptr) msvcirt.??0ios@@IAE@ABV0@@Z
 @ cdecl -arch=win64 ??0ios@@IEAA@AEBV0@@Z(ptr ptr) msvcirt.??0ios@@IEAA@AEBV0@@Z
 @ thiscall -arch=win32 ??0ios@@IAE@XZ(ptr) msvcirt.??0ios@@IAE@XZ
@@ -60,16 +60,16 @@
 @ cdecl -arch=win64 ??0istrstream@@QEAA@PEAD@Z(ptr ptr long) msvcirt.??0istrstream@@QEAA@PEAD@Z
 @ thiscall -arch=win32 ??0istrstream@@QAE@PADH@Z(ptr ptr long long) msvcirt.??0istrstream@@QAE@PADH@Z
 @ cdecl -arch=win64 ??0istrstream@@QEAA@PEADH@Z(ptr ptr long long) msvcirt.??0istrstream@@QEAA@PEADH@Z
-@ stub -arch=win32 ??0ofstream@@QAE@ABV0@@Z
-@ stub -arch=win64 ??0ofstream@@QEAA@AEBV0@@Z
-@ stub -arch=win32 ??0ofstream@@QAE@H@Z
-@ stub -arch=win64 ??0ofstream@@QEAA@H@Z
-@ stub -arch=win32 ??0ofstream@@QAE@HPADH@Z
-@ stub -arch=win64 ??0ofstream@@QEAA@HPEADH@Z
-@ stub -arch=win32 ??0ofstream@@QAE@PBDHH@Z
-@ stub -arch=win64 ??0ofstream@@QEAA@PEBDHH@Z
-@ stub -arch=win32 ??0ofstream@@QAE@XZ
-@ stub -arch=win64 ??0ofstream@@QEAA@XZ
+@ thiscall -arch=win32 ??0ofstream@@QAE@ABV0@@Z(ptr ptr long) msvcirt.??0ofstream@@QAE@ABV0@@Z
+@ cdecl -arch=win64 ??0ofstream@@QEAA@AEBV0@@Z(ptr ptr long) msvcirt.??0ofstream@@QEAA@AEBV0@@Z
+@ thiscall -arch=win32 ??0ofstream@@QAE@H@Z(ptr long long) msvcirt.??0ofstream@@QAE@H@Z
+@ cdecl -arch=win64 ??0ofstream@@QEAA@H@Z(ptr long long) msvcirt.??0ofstream@@QEAA@H@Z
+@ thiscall -arch=win32 ??0ofstream@@QAE@HPADH@Z(ptr long ptr long long) msvcirt.??0ofstream@@QAE@HPADH@Z
+@ cdecl -arch=win64 ??0ofstream@@QEAA@HPEADH@Z(ptr long ptr long long) msvcirt.??0ofstream@@QEAA@HPEADH@Z
+@ thiscall -arch=win32 ??0ofstream@@QAE@PBDHH@Z(ptr str long long long) msvcirt.??0ofstream@@QAE@PBDHH@Z
+@ cdecl -arch=win64 ??0ofstream@@QEAA@PEBDHH@Z(ptr str long long long) msvcirt.??0ofstream@@QEAA@PEBDHH@Z
+@ thiscall -arch=win32 ??0ofstream@@QAE@XZ(ptr long) msvcirt.??0ofstream@@QAE@XZ
+@ cdecl -arch=win64 ??0ofstream@@QEAA@XZ(ptr long) msvcirt.??0ofstream@@QEAA@XZ
 @ thiscall -arch=win32 ??0ostream@@IAE@ABV0@@Z(ptr ptr long) msvcirt.??0ostream@@IAE@ABV0@@Z
 @ cdecl -arch=win64 ??0ostream@@IEAA@AEBV0@@Z(ptr ptr long) msvcirt.??0ostream@@IEAA@AEBV0@@Z
 @ thiscall -arch=win32 ??0ostream@@IAE@XZ(ptr long) msvcirt.??0ostream@@IAE@XZ
@@ -122,10 +122,10 @@
 @ cdecl -arch=win64 ??1Iostream_init@@QEAA@XZ(ptr) msvcirt.??1Iostream_init@@QEAA@XZ
 @ thiscall -arch=win32 ??1filebuf@@UAE@XZ(ptr) msvcirt.??1filebuf@@UAE@XZ
 @ cdecl -arch=win64 ??1filebuf@@UEAA@XZ(ptr) msvcirt.??1filebuf@@UEAA@XZ
-@ stub -arch=win32 ??1fstream@@UAE@XZ
-@ stub -arch=win64 ??1fstream@@UEAA@XZ
-@ stub -arch=win32 ??1ifstream@@UAE@XZ
-@ stub -arch=win64 ??1ifstream@@UEAA@XZ
+@ thiscall -arch=win32 ??1fstream@@UAE@XZ(ptr) msvcirt.??1fstream@@UAE@XZ
+@ cdecl -arch=win64 ??1fstream@@UEAA@XZ(ptr) msvcirt.??1fstream@@UEAA@XZ
+@ thiscall -arch=win32 ??1ifstream@@UAE@XZ(ptr) msvcirt.??1ifstream@@UAE@XZ
+@ cdecl -arch=win64 ??1ifstream@@UEAA@XZ(ptr) msvcirt.??1ifstream@@UEAA@XZ
 @ thiscall -arch=win32 ??1ios@@UAE@XZ(ptr) msvcirt.??1ios@@UAE@XZ
 @ cdecl -arch=win64 ??1ios@@UEAA@XZ(ptr) msvcirt.??1ios@@UEAA@XZ
 @ thiscall -arch=win32 ??1iostream@@UAE@XZ(ptr) msvcirt.??1iostream@@UAE@XZ
@@ -136,8 +136,8 @@
 @ cdecl -arch=win64 ??1istream_withassign@@UEAA@XZ(ptr) msvcirt.??1istream_withassign@@UEAA@XZ
 @ thiscall -arch=win32 ??1istrstream@@UAE@XZ(ptr) msvcirt.??1istrstream@@UAE@XZ
 @ cdecl -arch=win64 ??1istrstream@@UEAA@XZ(ptr) msvcirt.??1istrstream@@UEAA@XZ
-@ stub -arch=win32 ??1ofstream@@UAE@XZ
-@ stub -arch=win64 ??1ofstream@@UEAA@XZ
+@ thiscall -arch=win32 ??1ofstream@@UAE@XZ(ptr) msvcirt.??1ofstream@@UAE@XZ
+@ cdecl -arch=win64 ??1ofstream@@UEAA@XZ(ptr) msvcirt.??1ofstream@@UEAA@XZ
 @ thiscall -arch=win32 ??1ostream@@UAE@XZ(ptr) msvcirt.??1ostream@@UAE@XZ
 @ cdecl -arch=win64 ??1ostream@@UEAA@XZ(ptr) msvcirt.??1ostream@@UEAA@XZ
 @ thiscall -arch=win32 ??1ostream_withassign@@UAE@XZ(ptr) msvcirt.??1ostream_withassign@@UAE@XZ
@@ -164,8 +164,8 @@
 @ cdecl -arch=win64 ??4filebuf@@QEAAAEAV0@AEBV0@@Z(ptr ptr) msvcirt.??4filebuf@@QEAAAEAV0@AEBV0@@Z
 @ stub -arch=win32 ??4fstream@@QAEAAV0@AAV0@@Z
 @ stub -arch=win64 ??4fstream@@QEAAAEAV0@AEAV0@@Z
-@ stub -arch=win32 ??4ifstream@@QAEAAV0@ABV0@@Z
-@ stub -arch=win64 ??4ifstream@@QEAAAEAV0@AEBV0@@Z
+@ thiscall -arch=win32 ??4ifstream@@QAEAAV0@ABV0@@Z(ptr ptr) msvcirt.??4ifstream@@QAEAAV0@ABV0@@Z
+@ cdecl -arch=win64 ??4ifstream@@QEAAAEAV0@AEBV0@@Z(ptr ptr) msvcirt.??4ifstream@@QEAAAEAV0@AEBV0@@Z
 @ thiscall -arch=win32 ??4ios@@IAEAAV0@ABV0@@Z(ptr ptr) msvcirt.??4ios@@IAEAAV0@ABV0@@Z
 @ cdecl -arch=win64 ??4ios@@IEAAAEAV0@AEBV0@@Z(ptr ptr) msvcirt.??4ios@@IEAAAEAV0@AEBV0@@Z
 @ thiscall -arch=win32 ??4iostream@@IAEAAV0@AAV0@@Z(ptr ptr) msvcirt.??4iostream@@IAEAAV0@AAV0@@Z
@@ -184,8 +184,8 @@
 @ cdecl -arch=win64 ??4istream_withassign@@QEAAAEAVistream@@PEAVstreambuf@@@Z(ptr ptr) msvcirt.??4istream_withassign@@QEAAAEAVistream@@PEAVstreambuf@@@Z
 @ thiscall -arch=win32 ??4istrstream@@QAEAAV0@ABV0@@Z(ptr ptr) msvcirt.??4istrstream@@QAEAAV0@ABV0@@Z
 @ cdecl -arch=win64 ??4istrstream@@QEAAAEAV0@AEBV0@@Z(ptr ptr) msvcirt.??4istrstream@@QEAAAEAV0@AEBV0@@Z
-@ stub -arch=win32 ??4ofstream@@QAEAAV0@ABV0@@Z
-@ stub -arch=win64 ??4ofstream@@QEAAAEAV0@AEBV0@@Z
+@ thiscall -arch=win32 ??4ofstream@@QAEAAV0@ABV0@@Z(ptr ptr) msvcirt.??4ofstream@@QAEAAV0@ABV0@@Z
+@ cdecl -arch=win64 ??4ofstream@@QEAAAEAV0@AEBV0@@Z(ptr ptr) msvcirt.??4ofstream@@QEAAAEAV0@AEBV0@@Z
 @ thiscall -arch=win32 ??4ostream@@IAEAAV0@ABV0@@Z(ptr ptr) msvcirt.??4ostream@@IAEAAV0@ABV0@@Z
 @ cdecl -arch=win64 ??4ostream@@IEAAAEAV0@AEBV0@@Z(ptr ptr) msvcirt.??4ostream@@IEAAAEAV0@AEBV0@@Z
 @ thiscall -arch=win32 ??4ostream@@IAEAAV0@PAVstreambuf@@@Z(ptr ptr) msvcirt.??4ostream@@IAEAAV0@PAVstreambuf@@@Z
@@ -287,14 +287,14 @@
 @ thiscall -arch=win32 ??Bios@@QBEPAXXZ(ptr) msvcirt.??Bios@@QBEPAXXZ
 @ cdecl -arch=win64 ??Bios@@QEBAPEAXXZ(ptr) msvcirt.??Bios@@QEBAPEAXXZ
 @ extern ??_7filebuf@@6B@ msvcirt.??_7filebuf@@6B@
-# @ extern ??_7fstream@@6B@
-# @ extern ??_7ifstream@@6B@
+@ extern ??_7fstream@@6B@ msvcirt.??_7fstream@@6B@
+@ extern ??_7ifstream@@6B@ msvcirt.??_7ifstream@@6B@
 @ extern ??_7ios@@6B@ msvcirt.??_7ios@@6B@
 @ extern ??_7iostream@@6B@ msvcirt.??_7iostream@@6B@
 @ extern ??_7istream@@6B@ msvcirt.??_7istream@@6B@
 @ extern ??_7istream_withassign@@6B@ msvcirt.??_7istream_withassign@@6B@
 @ extern ??_7istrstream@@6B@ msvcirt.??_7istrstream@@6B@
-# @ extern ??_7ofstream@@6B@
+@ extern ??_7ofstream@@6B@ msvcirt.??_7ofstream@@6B@
 @ extern ??_7ostream@@6B@ msvcirt.??_7ostream@@6B@
 @ extern ??_7ostream_withassign@@6B@ msvcirt.??_7ostream_withassign@@6B@
 @ extern ??_7ostrstream@@6B@ msvcirt.??_7ostrstream@@6B@
@@ -303,15 +303,15 @@
 @ extern ??_7streambuf@@6B@ msvcirt.??_7streambuf@@6B@
 @ extern ??_7strstream@@6B@ msvcirt.??_7strstream@@6B@
 @ extern ??_7strstreambuf@@6B@ msvcirt.??_7strstreambuf@@6B@
-# @ extern ??_8fstream@@7Bistream@@@
-# @ extern ??_8fstream@@7Bostream@@@
-# @ extern ??_8ifstream@@7B@
+@ extern ??_8fstream@@7Bistream@@@ msvcirt.??_8fstream@@7Bistream@@@
+@ extern ??_8fstream@@7Bostream@@@ msvcirt.??_8fstream@@7Bostream@@@
+@ extern ??_8ifstream@@7B@ msvcirt.??_8ifstream@@7B@
 @ extern ??_8iostream@@7Bistream@@@ msvcirt.??_8iostream@@7Bistream@@@
 @ extern ??_8iostream@@7Bostream@@@ msvcirt.??_8iostream@@7Bostream@@@
 @ extern ??_8istream@@7B@ msvcirt.??_8istream@@7B@
 @ extern ??_8istream_withassign@@7B@ msvcirt.??_8istream_withassign@@7B@
 @ extern ??_8istrstream@@7B@ msvcirt.??_8istrstream@@7B@
-# @ extern ??_8ofstream@@7B@
+@ extern ??_8ofstream@@7B@ msvcirt.??_8ofstream@@7B@
 @ extern ??_8ostream@@7B@ msvcirt.??_8ostream@@7B@
 @ extern ??_8ostream_withassign@@7B@ msvcirt.??_8ostream_withassign@@7B@
 @ extern ??_8ostrstream@@7B@ msvcirt.??_8ostrstream@@7B@
@@ -319,10 +319,10 @@
 @ extern ??_8stdiostream@@7Bostream@@@ msvcirt.??_8stdiostream@@7Bostream@@@
 @ extern ??_8strstream@@7Bistream@@@ msvcirt.??_8strstream@@7Bistream@@@
 @ extern ??_8strstream@@7Bostream@@@ msvcirt.??_8strstream@@7Bostream@@@
-@ stub -arch=win32 ??_Dfstream@@QAEXXZ
-@ stub -arch=win64 ??_Dfstream@@QEAAXXZ
-@ stub -arch=win32 ??_Difstream@@QAEXXZ
-@ stub -arch=win64 ??_Difstream@@QEAAXXZ
+@ thiscall -arch=win32 ??_Dfstream@@QAEXXZ(ptr) msvcirt.??_Dfstream@@QAEXXZ
+@ cdecl -arch=win64 ??_Dfstream@@QEAAXXZ(ptr) msvcirt.??_Dfstream@@QEAAXXZ
+@ thiscall -arch=win32 ??_Difstream@@QAEXXZ(ptr) msvcirt.??_Difstream@@QAEXXZ
+@ cdecl -arch=win64 ??_Difstream@@QEAAXXZ(ptr) msvcirt.??_Difstream@@QEAAXXZ
 @ thiscall -arch=win32 ??_Diostream@@QAEXXZ(ptr) msvcirt.??_Diostream@@QAEXXZ
 @ cdecl -arch=win64 ??_Diostream@@QEAAXXZ(ptr) msvcirt.??_Diostream@@QEAAXXZ
 @ thiscall -arch=win32 ??_Distream@@QAEXXZ(ptr) msvcirt.??_Distream@@QAEXXZ
@@ -331,8 +331,8 @@
 @ cdecl -arch=win64 ??_Distream_withassign@@QEAAXXZ(ptr) msvcirt.??_Distream_withassign@@QEAAXXZ
 @ thiscall -arch=win32 ??_Distrstream@@QAEXXZ(ptr) msvcirt.??_Distrstream@@QAEXXZ
 @ cdecl -arch=win64 ??_Distrstream@@QEAAXXZ(ptr) msvcirt.??_Distrstream@@QEAAXXZ
-@ stub -arch=win32 ??_Dofstream@@QAEXXZ
-@ stub -arch=win64 ??_Dofstream@@QEAAXXZ
+@ thiscall -arch=win32 ??_Dofstream@@QAEXXZ(ptr) msvcirt.??_Dofstream@@QAEXXZ
+@ cdecl -arch=win64 ??_Dofstream@@QEAAXXZ(ptr) msvcirt.??_Dofstream@@QEAAXXZ
 @ thiscall -arch=win32 ??_Dostream@@QAEXXZ(ptr) msvcirt.??_Dostream@@QAEXXZ
 @ cdecl -arch=win64 ??_Dostream@@QEAAXXZ(ptr) msvcirt.??_Dostream@@QEAAXXZ
 @ thiscall -arch=win32 ??_Dostream_withassign@@QAEXXZ(ptr) msvcirt.??_Dostream_withassign@@QAEXXZ
@@ -345,14 +345,14 @@
 @ cdecl -arch=win64 ??_Dstrstream@@QEAAXXZ(ptr) msvcirt.??_Dstrstream@@QEAAXXZ
 @ stub -arch=win32 ??_EIostream_init@@QAEPAXI@Z
 @ thiscall -arch=win32 ??_Efilebuf@@UAEPAXI@Z(ptr long) msvcirt.??_Efilebuf@@UAEPAXI@Z
-@ stub -arch=win32 ??_Efstream@@UAEPAXI@Z
-@ stub -arch=win32 ??_Eifstream@@UAEPAXI@Z
+@ thiscall -arch=win32 ??_Efstream@@UAEPAXI@Z(ptr long) msvcirt.??_Efstream@@UAEPAXI@Z
+@ thiscall -arch=win32 ??_Eifstream@@UAEPAXI@Z(ptr long) msvcirt.??_Eifstream@@UAEPAXI@Z
 @ thiscall -arch=win32 ??_Eios@@UAEPAXI@Z(ptr long) msvcirt.??_Eios@@UAEPAXI@Z
 @ thiscall -arch=win32 ??_Eiostream@@UAEPAXI@Z(ptr long) msvcirt.??_Eiostream@@UAEPAXI@Z
 @ thiscall -arch=win32 ??_Eistream@@UAEPAXI@Z(ptr long) msvcirt.??_Eistream@@UAEPAXI@Z
 @ thiscall -arch=win32 ??_Eistream_withassign@@UAEPAXI@Z(ptr long) msvcirt.??_Eistream_withassign@@UAEPAXI@Z
 @ thiscall -arch=win32 ??_Eistrstream@@UAEPAXI@Z(ptr long) msvcirt.??_Eistrstream@@UAEPAXI@Z
-@ stub -arch=win32 ??_Eofstream@@UAEPAXI@Z
+@ thiscall -arch=win32 ??_Eofstream@@UAEPAXI@Z(ptr long) msvcirt.??_Eofstream@@UAEPAXI@Z
 @ thiscall -arch=win32 ??_Eostream@@UAEPAXI@Z(ptr long) msvcirt.??_Eostream@@UAEPAXI@Z
 @ thiscall -arch=win32 ??_Eostream_withassign@@UAEPAXI@Z(ptr long) msvcirt.??_Eostream_withassign@@UAEPAXI@Z
 @ thiscall -arch=win32 ??_Eostrstream@@UAEPAXI@Z(ptr long) msvcirt.??_Eostrstream@@UAEPAXI@Z
@@ -363,14 +363,14 @@
 @ thiscall -arch=win32 ??_Estrstreambuf@@UAEPAXI@Z(ptr long) msvcirt.??_Estrstreambuf@@UAEPAXI@Z
 @ stub -arch=win32 ??_GIostream_init@@QAEPAXI@Z
 @ thiscall -arch=win32 ??_Gfilebuf@@UAEPAXI@Z(ptr long) msvcirt.??_Gfilebuf@@UAEPAXI@Z
-@ stub -arch=win32 ??_Gfstream@@UAEPAXI@Z
-@ stub -arch=win32 ??_Gifstream@@UAEPAXI@Z
+@ thiscall -arch=win32 ??_Gfstream@@UAEPAXI@Z(ptr long) msvcirt.??_Gfstream@@UAEPAXI@Z
+@ thiscall -arch=win32 ??_Gifstream@@UAEPAXI@Z(ptr long) msvcirt.??_Gifstream@@UAEPAXI@Z
 @ thiscall -arch=win32 ??_Gios@@UAEPAXI@Z(ptr long) msvcirt.??_Gios@@UAEPAXI@Z
 @ thiscall -arch=win32 ??_Giostream@@UAEPAXI@Z(ptr long) msvcirt.??_Giostream@@UAEPAXI@Z
 @ thiscall -arch=win32 ??_Gistream@@UAEPAXI@Z(ptr long) msvcirt.??_Gistream@@UAEPAXI@Z
 @ thiscall -arch=win32 ??_Gistream_withassign@@UAEPAXI@Z(ptr long) msvcirt.??_Gistream_withassign@@UAEPAXI@Z
 @ thiscall -arch=win32 ??_Gistrstream@@UAEPAXI@Z(ptr long) msvcirt.??_Gistrstream@@UAEPAXI@Z
-@ stub -arch=win32 ??_Gofstream@@UAEPAXI@Z
+@ thiscall -arch=win32 ??_Gofstream@@UAEPAXI@Z(ptr long) msvcirt.??_Gofstream@@UAEPAXI@Z
 @ thiscall -arch=win32 ??_Gostream@@UAEPAXI@Z(ptr long) msvcirt.??_Gostream@@UAEPAXI@Z
 @ thiscall -arch=win32 ??_Gostream_withassign@@UAEPAXI@Z(ptr long) msvcirt.??_Gostream_withassign@@UAEPAXI@Z
 @ thiscall -arch=win32 ??_Gostrstream@@UAEPAXI@Z(ptr long) msvcirt.??_Gostrstream@@UAEPAXI@Z
@@ -394,10 +394,10 @@
 @ cdecl -arch=win64 ?attach@filebuf@@QEAAPEAV1@H@Z(ptr long) msvcirt.?attach@filebuf@@QEAAPEAV1@H@Z
 @ stub -arch=win32 ?attach@fstream@@QAEXH@Z
 @ stub -arch=win64 ?attach@fstream@@QEAAXH@Z
-@ stub -arch=win32 ?attach@ifstream@@QAEXH@Z
-@ stub -arch=win64 ?attach@ifstream@@QEAAXH@Z
-@ stub -arch=win32 ?attach@ofstream@@QAEXH@Z
-@ stub -arch=win64 ?attach@ofstream@@QEAAXH@Z
+@ thiscall -arch=win32 ?attach@ifstream@@QAEXH@Z(ptr long) msvcirt.?attach@ifstream@@QAEXH@Z
+@ cdecl -arch=win64 ?attach@ifstream@@QEAAXH@Z(ptr long) msvcirt.?attach@ifstream@@QEAAXH@Z
+@ thiscall -arch=win32 ?attach@ofstream@@QAEXH@Z(ptr long) msvcirt.?attach@ofstream@@QAEXH@Z
+@ cdecl -arch=win64 ?attach@ofstream@@QEAAXH@Z(ptr long) msvcirt.?attach@ofstream@@QEAAXH@Z
 @ thiscall -arch=win32 ?bad@ios@@QBEHXZ(ptr) msvcirt.?bad@ios@@QBEHXZ
 @ cdecl -arch=win64 ?bad@ios@@QEBAHXZ(ptr) msvcirt.?bad@ios@@QEBAHXZ
 @ thiscall -arch=win32 ?base@streambuf@@IBEPADXZ(ptr) msvcirt.?base@streambuf@@IBEPADXZ
@@ -416,10 +416,10 @@
 @ cdecl -arch=win64 ?close@filebuf@@QEAAPEAV1@XZ(ptr) msvcirt.?close@filebuf@@QEAAPEAV1@XZ
 @ stub -arch=win32 ?close@fstream@@QAEXXZ
 @ stub -arch=win64 ?close@fstream@@QEAAXXZ
-@ stub -arch=win32 ?close@ifstream@@QAEXXZ
-@ stub -arch=win64 ?close@ifstream@@QEAAXXZ
-@ stub -arch=win32 ?close@ofstream@@QAEXXZ
-@ stub -arch=win64 ?close@ofstream@@QEAAXXZ
+@ thiscall -arch=win32 ?close@ifstream@@QAEXXZ(ptr) msvcirt.?close@ifstream@@QAEXXZ
+@ cdecl -arch=win64 ?close@ifstream@@QEAAXXZ(ptr) msvcirt.?close@ifstream@@QEAAXXZ
+@ thiscall -arch=win32 ?close@ofstream@@QAEXXZ(ptr) msvcirt.?close@ofstream@@QAEXXZ
+@ cdecl -arch=win64 ?close@ofstream@@QEAAXXZ(ptr) msvcirt.?close@ofstream@@QEAAXXZ
 @ cdecl -arch=win32 ?clrlock@ios@@QAAXXZ(ptr) msvcirt.?clrlock@ios@@QAAXXZ
 @ cdecl -arch=win64 ?clrlock@ios@@QEAAXXZ(ptr) msvcirt.?clrlock@ios@@QEAAXXZ
 @ thiscall -arch=win32 ?clrlock@streambuf@@QAEXXZ(ptr) msvcirt.?clrlock@streambuf@@QAEXXZ
@@ -460,10 +460,10 @@
 @ cdecl -arch=win64 ?fd@filebuf@@QEBAHXZ(ptr) msvcirt.?fd@filebuf@@QEBAHXZ
 @ stub -arch=win32 ?fd@fstream@@QBEHXZ
 @ stub -arch=win64 ?fd@fstream@@QEBAHXZ
-@ stub -arch=win32 ?fd@ifstream@@QBEHXZ
-@ stub -arch=win64 ?fd@ifstream@@QEBAHXZ
-@ stub -arch=win32 ?fd@ofstream@@QBEHXZ
-@ stub -arch=win64 ?fd@ofstream@@QEBAHXZ
+@ thiscall -arch=win32 ?fd@ifstream@@QBEHXZ(ptr) msvcirt.?fd@ifstream@@QBEHXZ
+@ cdecl -arch=win64 ?fd@ifstream@@QEBAHXZ(ptr) msvcirt.?fd@ifstream@@QEBAHXZ
+@ thiscall -arch=win32 ?fd@ofstream@@QBEHXZ(ptr) msvcirt.?fd@ofstream@@QBEHXZ
+@ cdecl -arch=win64 ?fd@ofstream@@QEBAHXZ(ptr) msvcirt.?fd@ofstream@@QEBAHXZ
 @ thiscall -arch=win32 ?fill@ios@@QAEDD@Z(ptr long) msvcirt.?fill@ios@@QAEDD@Z
 @ cdecl -arch=win64 ?fill@ios@@QEAADD@Z(ptr long) msvcirt.?fill@ios@@QEAADD@Z
 @ thiscall -arch=win32 ?fill@ios@@QBEDXZ(ptr) msvcirt.?fill@ios@@QBEDXZ
@@ -527,10 +527,10 @@
 @ cdecl -arch=win64 ?is_open@filebuf@@QEBAHXZ(ptr) msvcirt.?is_open@filebuf@@QEBAHXZ
 @ stub -arch=win32 ?is_open@fstream@@QBEHXZ
 @ stub -arch=win64 ?is_open@fstream@@QEBAHXZ
-@ stub -arch=win32 ?is_open@ifstream@@QBEHXZ
-@ stub -arch=win64 ?is_open@ifstream@@QEBAHXZ
-@ stub -arch=win32 ?is_open@ofstream@@QBEHXZ
-@ stub -arch=win64 ?is_open@ofstream@@QEBAHXZ
+@ thiscall -arch=win32 ?is_open@ifstream@@QBEHXZ(ptr) msvcirt.?is_open@ifstream@@QBEHXZ
+@ cdecl -arch=win64 ?is_open@ifstream@@QEBAHXZ(ptr) msvcirt.?is_open@ifstream@@QEBAHXZ
+@ thiscall -arch=win32 ?is_open@ofstream@@QBEHXZ(ptr) msvcirt.?is_open@ofstream@@QBEHXZ
+@ cdecl -arch=win64 ?is_open@ofstream@@QEBAHXZ(ptr) msvcirt.?is_open@ofstream@@QEBAHXZ
 @ thiscall -arch=win32 ?isfx@istream@@QAEXXZ(ptr) msvcirt.?isfx@istream@@QAEXXZ
 @ cdecl -arch=win64 ?isfx@istream@@QEAAXXZ(ptr) msvcirt.?isfx@istream@@QEAAXXZ
 @ thiscall -arch=win32 ?iword@ios@@QBEAAJH@Z(ptr long) msvcirt.?iword@ios@@QBEAAJH@Z
@@ -552,10 +552,10 @@
 @ cdecl -arch=win64 ?open@filebuf@@QEAAPEAV1@PEBDHH@Z(ptr str long long) msvcirt.?open@filebuf@@QEAAPEAV1@PEBDHH@Z
 @ stub -arch=win32 ?open@fstream@@QAEXPBDHH@Z
 @ stub -arch=win64 ?open@fstream@@QEAAXPEBDHH@Z
-@ stub -arch=win32 ?open@ifstream@@QAEXPBDHH@Z
-@ stub -arch=win64 ?open@ifstream@@QEAAXPEBDHH@Z
-@ stub -arch=win32 ?open@ofstream@@QAEXPBDHH@Z
-@ stub -arch=win64 ?open@ofstream@@QEAAXPEBDHH@Z
+@ thiscall -arch=win32 ?open@ifstream@@QAEXPBDHH@Z(ptr str long long) msvcirt.?open@ifstream@@QAEXPBDHH@Z
+@ cdecl -arch=win64 ?open@ifstream@@QEAAXPEBDHH@Z(ptr str long long) msvcirt.?open@ifstream@@QEAAXPEBDHH@Z
+@ thiscall -arch=win32 ?open@ofstream@@QAEXPBDHH@Z(ptr str long long) msvcirt.?open@ofstream@@QAEXPBDHH@Z
+@ cdecl -arch=win64 ?open@ofstream@@QEAAXPEBDHH@Z(ptr str long long) msvcirt.?open@ofstream@@QEAAXPEBDHH@Z
 @ extern ?openprot@filebuf@@2HB msvcirt.?openprot@filebuf@@2HB
 @ thiscall -arch=win32 ?opfx@ostream@@QAEHXZ(ptr) msvcirt.?opfx@ostream@@QAEHXZ
 @ cdecl -arch=win64 ?opfx@ostream@@QEAAHXZ(ptr) msvcirt.?opfx@ostream@@QEAAHXZ
@@ -601,14 +601,14 @@
 @ cdecl -arch=win64 ?pword@ios@@QEBAAEAPEAXH@Z(ptr long) msvcirt.?pword@ios@@QEBAAEAPEAXH@Z
 @ stub -arch=win32 ?rdbuf@fstream@@QBEPAVfilebuf@@XZ
 @ stub -arch=win64 ?rdbuf@fstream@@QEBAPEAVfilebuf@@XZ
-@ stub -arch=win32 ?rdbuf@ifstream@@QBEPAVfilebuf@@XZ
-@ stub -arch=win64 ?rdbuf@ifstream@@QEBAPEAVfilebuf@@XZ
+@ thiscall -arch=win32 ?rdbuf@ifstream@@QBEPAVfilebuf@@XZ(ptr) msvcirt.?rdbuf@ifstream@@QBEPAVfilebuf@@XZ
+@ cdecl -arch=win64 ?rdbuf@ifstream@@QEBAPEAVfilebuf@@XZ(ptr) msvcirt.?rdbuf@ifstream@@QEBAPEAVfilebuf@@XZ
 @ thiscall -arch=win32 ?rdbuf@ios@@QBEPAVstreambuf@@XZ(ptr) msvcirt.?rdbuf@ios@@QBEPAVstreambuf@@XZ
 @ cdecl -arch=win64 ?rdbuf@ios@@QEBAPEAVstreambuf@@XZ(ptr) msvcirt.?rdbuf@ios@@QEBAPEAVstreambuf@@XZ
 @ thiscall -arch=win32 ?rdbuf@istrstream@@QBEPAVstrstreambuf@@XZ(ptr) msvcirt.?rdbuf@istrstream@@QBEPAVstrstreambuf@@XZ
 @ cdecl -arch=win64 ?rdbuf@istrstream@@QEBAPEAVstrstreambuf@@XZ(ptr) msvcirt.?rdbuf@istrstream@@QEBAPEAVstrstreambuf@@XZ
-@ stub -arch=win32 ?rdbuf@ofstream@@QBEPAVfilebuf@@XZ
-@ stub -arch=win64 ?rdbuf@ofstream@@QEBAPEAVfilebuf@@XZ
+@ thiscall -arch=win32 ?rdbuf@ofstream@@QBEPAVfilebuf@@XZ(ptr) msvcirt.?rdbuf@ofstream@@QBEPAVfilebuf@@XZ
+@ cdecl -arch=win64 ?rdbuf@ofstream@@QEBAPEAVfilebuf@@XZ(ptr) msvcirt.?rdbuf@ofstream@@QEBAPEAVfilebuf@@XZ
 @ thiscall -arch=win32 ?rdbuf@ostrstream@@QBEPAVstrstreambuf@@XZ(ptr) msvcirt.?rdbuf@ostrstream@@QBEPAVstrstreambuf@@XZ
 @ cdecl -arch=win64 ?rdbuf@ostrstream@@QEBAPEAVstrstreambuf@@XZ(ptr) msvcirt.?rdbuf@ostrstream@@QEBAPEAVstrstreambuf@@XZ
 @ thiscall -arch=win32 ?rdbuf@stdiostream@@QBEPAVstdiobuf@@XZ(ptr) msvcirt.?rdbuf@stdiostream@@QBEPAVstdiobuf@@XZ
@@ -651,10 +651,10 @@
 @ cdecl -arch=win64 ?setbuf@filebuf@@UEAAPEAVstreambuf@@PEADH@Z(ptr ptr long) msvcirt.?setbuf@filebuf@@UEAAPEAVstreambuf@@PEADH@Z
 @ stub -arch=win32 ?setbuf@fstream@@QAEPAVstreambuf@@PADH@Z
 @ stub -arch=win64 ?setbuf@fstream@@QEAAPEAVstreambuf@@PEADH@Z
-@ stub -arch=win32 ?setbuf@ifstream@@QAEPAVstreambuf@@PADH@Z
-@ stub -arch=win64 ?setbuf@ifstream@@QEAAPEAVstreambuf@@PEADH@Z
-@ stub -arch=win32 ?setbuf@ofstream@@QAEPAVstreambuf@@PADH@Z
-@ stub -arch=win64 ?setbuf@ofstream@@QEAAPEAVstreambuf@@PEADH@Z
+@ thiscall -arch=win32 ?setbuf@ifstream@@QAEPAVstreambuf@@PADH@Z(ptr ptr long) msvcirt.?setbuf@ifstream@@QAEPAVstreambuf@@PADH@Z
+@ cdecl -arch=win64 ?setbuf@ifstream@@QEAAPEAVstreambuf@@PEADH@Z(ptr ptr long) msvcirt.?setbuf@ifstream@@QEAAPEAVstreambuf@@PEADH@Z
+@ thiscall -arch=win32 ?setbuf@ofstream@@QAEPAVstreambuf@@PADH@Z(ptr ptr long) msvcirt.?setbuf@ofstream@@QAEPAVstreambuf@@PADH@Z
+@ cdecl -arch=win64 ?setbuf@ofstream@@QEAAPEAVstreambuf@@PEADH@Z(ptr ptr long) msvcirt.?setbuf@ofstream@@QEAAPEAVstreambuf@@PEADH@Z
 @ thiscall -arch=win32 ?setbuf@streambuf@@UAEPAV1@PADH@Z(ptr ptr long) msvcirt.?setbuf@streambuf@@UAEPAV1@PADH@Z
 @ cdecl -arch=win64 ?setbuf@streambuf@@UEAAPEAV1@PEADH@Z(ptr ptr long) msvcirt.?setbuf@streambuf@@UEAAPEAV1@PEADH@Z
 @ thiscall -arch=win32 ?setbuf@strstreambuf@@UAEPAVstreambuf@@PADH@Z(ptr ptr long) msvcirt.?setbuf@strstreambuf@@UAEPAVstreambuf@@PADH@Z
@@ -673,10 +673,10 @@
 @ cdecl -arch=win64 ?setmode@filebuf@@QEAAHH@Z(ptr long) msvcirt.?setmode@filebuf@@QEAAHH@Z
 @ stub -arch=win32 ?setmode@fstream@@QAEHH@Z
 @ stub -arch=win64 ?setmode@fstream@@QEAAHH@Z
-@ stub -arch=win32 ?setmode@ifstream@@QAEHH@Z
-@ stub -arch=win64 ?setmode@ifstream@@QEAAHH@Z
-@ stub -arch=win32 ?setmode@ofstream@@QAEHH@Z
-@ stub -arch=win64 ?setmode@ofstream@@QEAAHH@Z
+@ thiscall -arch=win32 ?setmode@ifstream@@QAEHH@Z(ptr long) msvcirt.?setmode@ifstream@@QAEHH@Z
+@ cdecl -arch=win64 ?setmode@ifstream@@QEAAHH@Z(ptr long) msvcirt.?setmode@ifstream@@QEAAHH@Z
+@ thiscall -arch=win32 ?setmode@ofstream@@QAEHH@Z(ptr long) msvcirt.?setmode@ofstream@@QAEHH@Z
+@ cdecl -arch=win64 ?setmode@ofstream@@QEAAHH@Z(ptr long) msvcirt.?setmode@ofstream@@QEAAHH@Z
 @ thiscall -arch=win32 ?setp@streambuf@@IAEXPAD0@Z(ptr ptr ptr) msvcirt.?setp@streambuf@@IAEXPAD0@Z
 @ cdecl -arch=win64 ?setp@streambuf@@IEAAXPEAD0@Z(ptr ptr ptr) msvcirt.?setp@streambuf@@IEAAXPEAD0@Z
 @ thiscall -arch=win32 ?setrwbuf@stdiobuf@@QAEHHH@Z(ptr long long) msvcirt.?setrwbuf@stdiobuf@@QAEHHH@Z
@@ -1072,8 +1072,8 @@
 @ cdecl _mkdir(str) msvcrt._mkdir
 @ cdecl _mktemp(str) msvcrt._mktemp
 @ cdecl _msize(ptr) msvcrt._msize
-@ stub _mtlock
-@ stub _mtunlock
+@ cdecl _mtlock(ptr) msvcirt._mtlock
+@ cdecl _mtunlock(ptr) msvcirt._mtunlock
 @ cdecl _nextafter(double double) msvcrt._nextafter
 @ cdecl _onexit(ptr) msvcrt._onexit
 @ varargs _open(str long) msvcrt._open
@@ -1089,7 +1089,7 @@
 @ cdecl _putenv(str) msvcrt._putenv
 @ cdecl _putw(long ptr) msvcrt._putw
 @ cdecl _putws(wstr) msvcrt._putws
-# extern _pwctype
+@ extern _pwctype msvcrt._pwctype
 @ cdecl _read(long ptr long) msvcrt._read
 @ cdecl _rmdir(str) msvcrt._rmdir
 @ cdecl _rmtmp() msvcrt._rmtmp
@@ -1354,7 +1354,7 @@
 @ cdecl isxdigit(long) msvcrt.isxdigit
 @ cdecl labs(long) msvcrt.labs
 @ cdecl ldexp(double long) msvcrt.ldexp
-@ cdecl ldiv(long long) msvcrt.ldiv
+@ cdecl -ret64 ldiv(long long) msvcrt.ldiv
 @ cdecl localeconv() msvcrt.localeconv
 @ cdecl localtime(ptr) msvcrt.localtime
 @ cdecl log(double) msvcrt.log

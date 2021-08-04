@@ -35,7 +35,8 @@ D3DFORMAT d3dformat_from_wined3dformat(enum wined3d_format_id format)
     BYTE *c = (BYTE *)&format;
 
     /* Don't translate FOURCC formats */
-    if (isprint(c[0]) && isprint(c[1]) && isprint(c[2]) && isprint(c[3])) return format;
+    if (isprint(c[0]) && isprint(c[1]) && isprint(c[2]) && isprint(c[3]))
+            return (D3DFORMAT)format;
 
     switch(format)
     {
@@ -85,7 +86,8 @@ enum wined3d_format_id wined3dformat_from_d3dformat(D3DFORMAT format)
     BYTE *c = (BYTE *)&format;
 
     /* Don't translate FOURCC formats */
-    if (isprint(c[0]) && isprint(c[1]) && isprint(c[2]) && isprint(c[3])) return format;
+    if (isprint(c[0]) && isprint(c[1]) && isprint(c[2]) && isprint(c[3]))
+            return (enum wined3d_format_id)format;
 
     switch(format)
     {
@@ -204,7 +206,7 @@ static void present_parameters_from_wined3d_swapchain_desc(D3DPRESENT_PARAMETERS
     present_parameters->BackBufferHeight = swapchain_desc->backbuffer_height;
     present_parameters->BackBufferFormat = d3dformat_from_wined3dformat(swapchain_desc->backbuffer_format);
     present_parameters->BackBufferCount = swapchain_desc->backbuffer_count;
-    present_parameters->MultiSampleType = swapchain_desc->multisample_type;
+    present_parameters->MultiSampleType = d3dmultisample_type_from_wined3d(swapchain_desc->multisample_type);
     present_parameters->SwapEffect = d3dswapeffect_from_wined3dswapeffect(swapchain_desc->swap_effect);
     present_parameters->hDeviceWindow = swapchain_desc->device_window;
     present_parameters->Windowed = swapchain_desc->windowed;
@@ -255,8 +257,13 @@ static enum wined3d_swap_interval wined3dswapinterval_from_d3d(DWORD interval)
     }
 }
 
-static BOOL wined3d_swapchain_desc_from_present_parameters(struct wined3d_swapchain_desc *swapchain_desc,
-        const D3DPRESENT_PARAMETERS *present_parameters)
+static enum wined3d_multisample_type wined3d_multisample_type_from_d3d(D3DMULTISAMPLE_TYPE type)
+{
+    return (enum wined3d_multisample_type)type;
+}
+
+static BOOL wined3d_swapchain_desc_from_d3d8(struct wined3d_swapchain_desc *swapchain_desc,
+        struct wined3d_output *output, const D3DPRESENT_PARAMETERS *present_parameters)
 {
     if (!present_parameters->SwapEffect || present_parameters->SwapEffect > D3DSWAPEFFECT_COPY_VSYNC)
     {
@@ -286,12 +293,13 @@ static BOOL wined3d_swapchain_desc_from_present_parameters(struct wined3d_swapch
             return FALSE;
     }
 
+    swapchain_desc->output = output;
     swapchain_desc->backbuffer_width = present_parameters->BackBufferWidth;
     swapchain_desc->backbuffer_height = present_parameters->BackBufferHeight;
     swapchain_desc->backbuffer_format = wined3dformat_from_d3dformat(present_parameters->BackBufferFormat);
     swapchain_desc->backbuffer_count = max(1, present_parameters->BackBufferCount);
     swapchain_desc->backbuffer_bind_flags = WINED3D_BIND_RENDER_TARGET;
-    swapchain_desc->multisample_type = present_parameters->MultiSampleType;
+    swapchain_desc->multisample_type = wined3d_multisample_type_from_d3d(present_parameters->MultiSampleType);
     swapchain_desc->multisample_quality = 0; /* d3d9 only */
     swapchain_desc->swap_effect = wined3dswapeffect_from_d3dswapeffect(present_parameters->SwapEffect);
     swapchain_desc->device_window = present_parameters->hDeviceWindow;
@@ -310,10 +318,11 @@ static BOOL wined3d_swapchain_desc_from_present_parameters(struct wined3d_swapch
     return TRUE;
 }
 
-void d3dcaps_from_wined3dcaps(D3DCAPS8 *caps, const struct wined3d_caps *wined3d_caps)
+void d3dcaps_from_wined3dcaps(D3DCAPS8 *caps, const struct wined3d_caps *wined3d_caps,
+        unsigned int adapter_ordinal)
 {
     caps->DeviceType                = (D3DDEVTYPE)wined3d_caps->DeviceType;
-    caps->AdapterOrdinal            = wined3d_caps->AdapterOrdinal;
+    caps->AdapterOrdinal            = adapter_ordinal;
     caps->Caps                      = wined3d_caps->Caps;
     caps->Caps2                     = wined3d_caps->Caps2;
     caps->Caps3                     = wined3d_caps->Caps3;
@@ -414,6 +423,9 @@ void d3dcaps_from_wined3dcaps(D3DCAPS8 *caps, const struct wined3d_caps *wined3d
             | D3DPTFILTERCAPS_MIPFLINEAR | D3DPTFILTERCAPS_MAGFPOINT | D3DPTFILTERCAPS_MAGFLINEAR
             | D3DPTFILTERCAPS_MAGFANISOTROPIC | D3DPTFILTERCAPS_MAGFAFLATCUBIC
             | D3DPTFILTERCAPS_MAGFGAUSSIANCUBIC;
+    if (caps->LineCaps & WINED3DLINECAPS_ANTIALIAS)
+        caps->RasterCaps |= D3DPRASTERCAPS_ANTIALIASEDGES;
+    caps->LineCaps &= ~WINED3DLINECAPS_ANTIALIAS;
     caps->StencilCaps &= ~WINED3DSTENCILCAPS_TWOSIDED;
     caps->VertexProcessingCaps &= D3DVTXPCAPS_TEXGEN | D3DVTXPCAPS_MATERIALSOURCE7
             | D3DVTXPCAPS_DIRECTIONALLIGHTS | D3DVTXPCAPS_POSITIONALLIGHTS | D3DVTXPCAPS_LOCALVIEWER
@@ -429,6 +441,29 @@ void d3dcaps_from_wined3dcaps(D3DCAPS8 *caps, const struct wined3d_caps *wined3d
     else
         caps->VertexShaderVersion = D3DVS_VERSION(0, 0);
     caps->MaxVertexShaderConst = min(D3D8_MAX_VERTEX_SHADER_CONSTANTF, caps->MaxVertexShaderConst);
+}
+
+static enum wined3d_transform_state wined3d_transform_state_from_d3d(D3DTRANSFORMSTATETYPE state)
+{
+    return (enum wined3d_transform_state)state;
+}
+
+static enum wined3d_render_state wined3d_render_state_from_d3d(D3DRENDERSTATETYPE state)
+{
+    switch (state)
+    {
+        case D3DRS_ZBIAS:
+            return WINED3D_RS_DEPTHBIAS;
+        case D3DRS_EDGEANTIALIAS:
+            return WINED3D_RS_ANTIALIASEDLINEENABLE;
+        default:
+            return (enum wined3d_render_state)state;
+    }
+}
+
+static enum wined3d_primitive_type wined3d_primitive_type_from_d3d(D3DPRIMITIVETYPE type)
+{
+    return (enum wined3d_primitive_type)type;
 }
 
 /* Handle table functions */
@@ -575,7 +610,7 @@ static ULONG WINAPI d3d8_device_Release(IDirect3DDevice8 *iface)
 
     if (!ref)
     {
-        IDirect3D8 *parent = device->d3d_parent;
+        IDirect3D8 *parent = &device->d3d_parent->IDirect3D8_iface;
         unsigned i;
 
         TRACE("Releasing wined3d device %p.\n", device->wined3d_device);
@@ -671,7 +706,8 @@ static HRESULT WINAPI d3d8_device_GetDirect3D(IDirect3DDevice8 *iface, IDirect3D
     if (!d3d8)
         return D3DERR_INVALIDCALL;
 
-    return IDirect3D8_QueryInterface(device->d3d_parent, &IID_IDirect3D8, (void **)d3d8);
+    return IDirect3D8_QueryInterface(&device->d3d_parent->IDirect3D8_iface, &IID_IDirect3D8,
+            (void **)d3d8);
 }
 
 static HRESULT WINAPI d3d8_device_GetDeviceCaps(IDirect3DDevice8 *iface, D3DCAPS8 *caps)
@@ -689,7 +725,7 @@ static HRESULT WINAPI d3d8_device_GetDeviceCaps(IDirect3DDevice8 *iface, D3DCAPS
     hr = wined3d_device_get_device_caps(device->wined3d_device, &wined3d_caps);
     wined3d_mutex_unlock();
 
-    d3dcaps_from_wined3dcaps(caps, &wined3d_caps);
+    d3dcaps_from_wined3dcaps(caps, &wined3d_caps, device->adapter_ordinal);
 
     return hr;
 }
@@ -729,6 +765,7 @@ static HRESULT WINAPI d3d8_device_GetCreationParameters(IDirect3DDevice8 *iface,
             (struct wined3d_device_creation_parameters *)parameters);
     wined3d_mutex_unlock();
 
+    parameters->AdapterOrdinal = device->adapter_ordinal;
     return D3D_OK;
 }
 
@@ -737,6 +774,8 @@ static HRESULT WINAPI d3d8_device_SetCursorProperties(IDirect3DDevice8 *iface,
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
     struct d3d8_surface *bitmap_impl = unsafe_impl_from_IDirect3DSurface8(bitmap);
+    D3DSURFACE_DESC surface_desc;
+    D3DDISPLAYMODE mode;
     HRESULT hr;
 
     TRACE("iface %p, hotspot_x %u, hotspot_y %u, bitmap %p.\n",
@@ -745,6 +784,26 @@ static HRESULT WINAPI d3d8_device_SetCursorProperties(IDirect3DDevice8 *iface,
     if (!bitmap)
     {
         WARN("No cursor bitmap, returning D3DERR_INVALIDCALL.\n");
+        return D3DERR_INVALIDCALL;
+    }
+
+    if (FAILED(hr = IDirect3DSurface8_GetDesc(bitmap, &surface_desc)))
+    {
+        WARN("Failed to get surface description, hr %#x.\n", hr);
+        return hr;
+    }
+
+    if (FAILED(hr = IDirect3D8_GetAdapterDisplayMode(&device->d3d_parent->IDirect3D8_iface,
+            device->adapter_ordinal, &mode)))
+    {
+        WARN("Failed to get device display mode, hr %#x.\n", hr);
+        return hr;
+    }
+
+    if (surface_desc.Width > mode.Width || surface_desc.Height > mode.Height)
+    {
+        WARN("Surface dimension %ux%u exceeds display mode %ux%u.\n", surface_desc.Width,
+                surface_desc.Height, mode.Width, mode.Height);
         return D3DERR_INVALIDCALL;
     }
 
@@ -788,6 +847,7 @@ static HRESULT WINAPI d3d8_device_CreateAdditionalSwapChain(IDirect3DDevice8 *if
     struct wined3d_swapchain_desc desc;
     struct d3d8_swapchain *object;
     unsigned int swap_interval;
+    unsigned int output_idx;
     unsigned int i, count;
     HRESULT hr;
 
@@ -818,7 +878,9 @@ static HRESULT WINAPI d3d8_device_CreateAdditionalSwapChain(IDirect3DDevice8 *if
     }
     wined3d_mutex_unlock();
 
-    if (!wined3d_swapchain_desc_from_present_parameters(&desc, present_parameters))
+    output_idx = device->adapter_ordinal;
+    if (!wined3d_swapchain_desc_from_d3d8(&desc, device->d3d_parent->wined3d_outputs[output_idx],
+            present_parameters))
         return D3DERR_INVALIDCALL;
     swap_interval = wined3dswapinterval_from_d3d(present_parameters->FullScreen_PresentationInterval);
     if (SUCCEEDED(hr = d3d8_swapchain_create(device, &desc, swap_interval, &object)))
@@ -883,6 +945,7 @@ static HRESULT WINAPI d3d8_device_Reset(IDirect3DDevice8 *iface,
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
     struct wined3d_swapchain_desc swapchain_desc;
     struct d3d8_swapchain *implicit_swapchain;
+    unsigned int output_idx;
     HRESULT hr;
 
     TRACE("iface %p, present_parameters %p.\n", iface, present_parameters);
@@ -892,7 +955,9 @@ static HRESULT WINAPI d3d8_device_Reset(IDirect3DDevice8 *iface,
         WARN("App not active, returning D3DERR_DEVICELOST.\n");
         return D3DERR_DEVICELOST;
     }
-    if (!wined3d_swapchain_desc_from_present_parameters(&swapchain_desc, present_parameters))
+    output_idx = device->adapter_ordinal;
+    if (!wined3d_swapchain_desc_from_d3d8(&swapchain_desc,
+            device->d3d_parent->wined3d_outputs[output_idx], present_parameters))
         return D3DERR_INVALIDCALL;
     swapchain_desc.flags |= WINED3D_SWAPCHAIN_IMPLICIT;
 
@@ -926,9 +991,6 @@ static HRESULT WINAPI d3d8_device_Reset(IDirect3DDevice8 *iface,
                 = wined3dswapinterval_from_d3d(present_parameters->FullScreen_PresentationInterval);
         wined3d_stateblock_set_render_state(device->state, WINED3D_RS_POINTSIZE_MIN, 0);
         wined3d_stateblock_set_render_state(device->state, WINED3D_RS_ZENABLE,
-                !!swapchain_desc.enable_auto_depth_stencil);
-        wined3d_device_set_render_state(device->wined3d_device, WINED3D_RS_POINTSIZE_MIN, 0);
-        wined3d_device_set_render_state(device->wined3d_device, WINED3D_RS_ZENABLE,
                 !!swapchain_desc.enable_auto_depth_stencil);
         device_reset_viewport_state(device);
         device->device_state = D3D8_DEVICE_STATE_OK;
@@ -1242,7 +1304,8 @@ static HRESULT WINAPI d3d8_device_CreateRenderTarget(IDirect3DDevice8 *iface, UI
         access |= WINED3D_RESOURCE_ACCESS_MAP_R | WINED3D_RESOURCE_ACCESS_MAP_W;
 
     return d3d8_device_create_surface(device, wined3dformat_from_d3dformat(format),
-            multisample_type, WINED3D_BIND_RENDER_TARGET, access, width, height, surface);
+            wined3d_multisample_type_from_d3d(multisample_type),
+            WINED3D_BIND_RENDER_TARGET, access, width, height, surface);
 }
 
 static HRESULT WINAPI d3d8_device_CreateDepthStencilSurface(IDirect3DDevice8 *iface,
@@ -1260,7 +1323,7 @@ static HRESULT WINAPI d3d8_device_CreateDepthStencilSurface(IDirect3DDevice8 *if
     *surface = NULL;
 
     return d3d8_device_create_surface(device, wined3dformat_from_d3dformat(format),
-            multisample_type, WINED3D_BIND_DEPTH_STENCIL,
+            wined3d_multisample_type_from_d3d(multisample_type), WINED3D_BIND_DEPTH_STENCIL,
             WINED3D_RESOURCE_ACCESS_GPU, width, height, surface);
 }
 
@@ -1606,6 +1669,7 @@ static HRESULT WINAPI d3d8_device_Clear(IDirect3DDevice8 *iface, DWORD rect_coun
     }
 
     wined3d_mutex_lock();
+    wined3d_device_apply_stateblock(device->wined3d_device, device->state);
     hr = wined3d_device_clear(device->wined3d_device, rect_count, (const RECT *)rects, flags, &c, z, stencil);
     wined3d_mutex_unlock();
 
@@ -1621,9 +1685,8 @@ static HRESULT WINAPI d3d8_device_SetTransform(IDirect3DDevice8 *iface,
 
     /* Note: D3DMATRIX is compatible with struct wined3d_matrix. */
     wined3d_mutex_lock();
-    wined3d_stateblock_set_transform(device->update_state, state, (const struct wined3d_matrix *)matrix);
-    if (!device->recording)
-        wined3d_device_set_transform(device->wined3d_device, state, (const struct wined3d_matrix *)matrix);
+    wined3d_stateblock_set_transform(device->update_state,
+            wined3d_transform_state_from_d3d(state), (const struct wined3d_matrix *)matrix);
     wined3d_mutex_unlock();
 
     return D3D_OK;
@@ -1638,7 +1701,7 @@ static HRESULT WINAPI d3d8_device_GetTransform(IDirect3DDevice8 *iface,
 
     /* Note: D3DMATRIX is compatible with struct wined3d_matrix. */
     wined3d_mutex_lock();
-    wined3d_device_get_transform(device->wined3d_device, state, (struct wined3d_matrix *)matrix);
+    memcpy(matrix, &device->stateblock_state->transforms[state], sizeof(*matrix));
     wined3d_mutex_unlock();
 
     return D3D_OK;
@@ -1653,8 +1716,8 @@ static HRESULT WINAPI d3d8_device_MultiplyTransform(IDirect3DDevice8 *iface,
 
     /* Note: D3DMATRIX is compatible with struct wined3d_matrix. */
     wined3d_mutex_lock();
-    wined3d_stateblock_multiply_transform(device->state, state, (const struct wined3d_matrix *)matrix);
-    wined3d_device_multiply_transform(device->wined3d_device, state, (const struct wined3d_matrix *)matrix);
+    wined3d_stateblock_multiply_transform(device->state,
+            wined3d_transform_state_from_d3d(state), (const struct wined3d_matrix *)matrix);
     wined3d_mutex_unlock();
 
     return D3D_OK;
@@ -1695,8 +1758,6 @@ static HRESULT WINAPI d3d8_device_SetViewport(IDirect3DDevice8 *iface, const D3D
     vp.max_z = viewport->MaxZ;
 
     wined3d_stateblock_set_viewport(device->update_state, &vp);
-    if (!device->recording)
-        wined3d_device_set_viewports(device->wined3d_device, 1, &vp);
     wined3d_mutex_unlock();
 
     return D3D_OK;
@@ -1710,7 +1771,7 @@ static HRESULT WINAPI d3d8_device_GetViewport(IDirect3DDevice8 *iface, D3DVIEWPO
     TRACE("iface %p, viewport %p.\n", iface, viewport);
 
     wined3d_mutex_lock();
-    wined3d_device_get_viewports(device->wined3d_device, NULL, &wined3d_viewport);
+    wined3d_viewport = device->stateblock_state->viewport;
     wined3d_mutex_unlock();
 
     viewport->X = wined3d_viewport.x;
@@ -1732,8 +1793,6 @@ static HRESULT WINAPI d3d8_device_SetMaterial(IDirect3DDevice8 *iface, const D3D
     /* Note: D3DMATERIAL8 is compatible with struct wined3d_material. */
     wined3d_mutex_lock();
     wined3d_stateblock_set_material(device->update_state, (const struct wined3d_material *)material);
-    if (!device->recording)
-        wined3d_device_set_material(device->wined3d_device, (const struct wined3d_material *)material);
     wined3d_mutex_unlock();
 
     return D3D_OK;
@@ -1747,7 +1806,7 @@ static HRESULT WINAPI d3d8_device_GetMaterial(IDirect3DDevice8 *iface, D3DMATERI
 
     /* Note: D3DMATERIAL8 is compatible with struct wined3d_material. */
     wined3d_mutex_lock();
-    wined3d_device_get_material(device->wined3d_device, (struct wined3d_material *)material);
+    memcpy(material, &device->stateblock_state->material, sizeof(*material));
     wined3d_mutex_unlock();
 
     return D3D_OK;
@@ -1763,8 +1822,6 @@ static HRESULT WINAPI d3d8_device_SetLight(IDirect3DDevice8 *iface, DWORD index,
     /* Note: D3DLIGHT8 is compatible with struct wined3d_light. */
     wined3d_mutex_lock();
     hr = wined3d_stateblock_set_light(device->update_state, index, (const struct wined3d_light *)light);
-    if (SUCCEEDED(hr) && !device->recording)
-        hr = wined3d_device_set_light(device->wined3d_device, index, (const struct wined3d_light *)light);
     wined3d_mutex_unlock();
 
     return hr;
@@ -1773,13 +1830,14 @@ static HRESULT WINAPI d3d8_device_SetLight(IDirect3DDevice8 *iface, DWORD index,
 static HRESULT WINAPI d3d8_device_GetLight(IDirect3DDevice8 *iface, DWORD index, D3DLIGHT8 *light)
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
+    BOOL enabled;
     HRESULT hr;
 
     TRACE("iface %p, index %u, light %p.\n", iface, index, light);
 
     /* Note: D3DLIGHT8 is compatible with struct wined3d_light. */
     wined3d_mutex_lock();
-    hr = wined3d_device_get_light(device->wined3d_device, index, (struct wined3d_light *)light);
+    hr = wined3d_stateblock_get_light(device->state, index, (struct wined3d_light *)light, &enabled);
     wined3d_mutex_unlock();
 
     return hr;
@@ -1794,22 +1852,21 @@ static HRESULT WINAPI d3d8_device_LightEnable(IDirect3DDevice8 *iface, DWORD ind
 
     wined3d_mutex_lock();
     hr = wined3d_stateblock_set_light_enable(device->update_state, index, enable);
-    if (SUCCEEDED(hr) && !device->recording)
-        hr = wined3d_device_set_light_enable(device->wined3d_device, index, enable);
     wined3d_mutex_unlock();
 
     return hr;
 }
 
-static HRESULT WINAPI d3d8_device_GetLightEnable(IDirect3DDevice8 *iface, DWORD index, BOOL *enable)
+static HRESULT WINAPI d3d8_device_GetLightEnable(IDirect3DDevice8 *iface, DWORD index, BOOL *enabled)
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
+    struct wined3d_light light;
     HRESULT hr;
 
-    TRACE("iface %p, index %u, enable %p.\n", iface, index, enable);
+    TRACE("iface %p, index %u, enabled %p.\n", iface, index, enabled);
 
     wined3d_mutex_lock();
-    hr = wined3d_device_get_light_enable(device->wined3d_device, index, enable);
+    hr = wined3d_stateblock_get_light(device->state, index, &light, enabled);
     wined3d_mutex_unlock();
 
     return hr;
@@ -1824,8 +1881,6 @@ static HRESULT WINAPI d3d8_device_SetClipPlane(IDirect3DDevice8 *iface, DWORD in
 
     wined3d_mutex_lock();
     hr = wined3d_stateblock_set_clip_plane(device->update_state, index, (const struct wined3d_vec4 *)plane);
-    if (SUCCEEDED(hr) && !device->recording)
-        hr = wined3d_device_set_clip_plane(device->wined3d_device, index, (const struct wined3d_vec4 *)plane);
     wined3d_mutex_unlock();
 
     return hr;
@@ -1834,15 +1889,48 @@ static HRESULT WINAPI d3d8_device_SetClipPlane(IDirect3DDevice8 *iface, DWORD in
 static HRESULT WINAPI d3d8_device_GetClipPlane(IDirect3DDevice8 *iface, DWORD index, float *plane)
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
-    HRESULT hr;
 
     TRACE("iface %p, index %u, plane %p.\n", iface, index, plane);
 
+    if (index >= device->max_user_clip_planes)
+    {
+        TRACE("Plane %u requested, but only %u planes are supported.\n", index, device->max_user_clip_planes);
+        return WINED3DERR_INVALIDCALL;
+    }
+
     wined3d_mutex_lock();
-    hr = wined3d_device_get_clip_plane(device->wined3d_device, index, (struct wined3d_vec4 *)plane);
+    memcpy(plane, &device->stateblock_state->clip_planes[index], sizeof(struct wined3d_vec4));
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
+}
+
+static void resolve_depth_buffer(struct d3d8_device *device)
+{
+    const struct wined3d_stateblock_state *state = device->stateblock_state;
+    struct wined3d_rendertarget_view *wined3d_dsv;
+    struct wined3d_resource *dst_resource;
+    struct wined3d_texture *dst_texture;
+    struct wined3d_resource_desc desc;
+    struct d3d8_surface *d3d8_dsv;
+
+    if (!(dst_texture = state->textures[0]))
+        return;
+    dst_resource = wined3d_texture_get_resource(dst_texture);
+    wined3d_resource_get_desc(dst_resource, &desc);
+    if (desc.format != WINED3DFMT_D24_UNORM_S8_UINT
+            && desc.format != WINED3DFMT_X8D24_UNORM
+            && desc.format != WINED3DFMT_DF16
+            && desc.format != WINED3DFMT_DF24
+            && desc.format != WINED3DFMT_INTZ)
+        return;
+
+    if (!(wined3d_dsv = wined3d_device_get_depth_stencil_view(device->wined3d_device)))
+        return;
+    d3d8_dsv = wined3d_rendertarget_view_get_sub_resource_parent(wined3d_dsv);
+
+    wined3d_device_resolve_sub_resource(device->wined3d_device, dst_resource, 0,
+            wined3d_rendertarget_view_get_resource(wined3d_dsv), d3d8_dsv->sub_resource_idx, desc.format);
 }
 
 static HRESULT WINAPI d3d8_device_SetRenderState(IDirect3DDevice8 *iface,
@@ -1853,11 +1941,9 @@ static HRESULT WINAPI d3d8_device_SetRenderState(IDirect3DDevice8 *iface,
     TRACE("iface %p, state %#x, value %#x.\n", iface, state, value);
 
     wined3d_mutex_lock();
-    if (state == D3DRS_ZBIAS)
-        state = WINED3D_RS_DEPTHBIAS;
-    wined3d_stateblock_set_render_state(device->update_state, state, value);
-    if (!device->recording)
-        wined3d_device_set_render_state(device->wined3d_device, state, value);
+    wined3d_stateblock_set_render_state(device->update_state, wined3d_render_state_from_d3d(state), value);
+    if (state == D3DRS_POINTSIZE && value == D3D8_RESZ_CODE)
+        resolve_depth_buffer(device);
     wined3d_mutex_unlock();
 
     return D3D_OK;
@@ -1872,7 +1958,7 @@ static HRESULT WINAPI d3d8_device_GetRenderState(IDirect3DDevice8 *iface,
     TRACE("iface %p, state %#x, value %p.\n", iface, state, value);
 
     wined3d_mutex_lock();
-    device_state = wined3d_stateblock_get_state(device->state);
+    device_state = device->stateblock_state;
     switch (state)
     {
         case D3DRS_ZBIAS:
@@ -1953,12 +2039,11 @@ static HRESULT WINAPI d3d8_device_EndStateBlock(IDirect3DDevice8 *iface, DWORD *
 static HRESULT WINAPI d3d8_device_ApplyStateBlock(IDirect3DDevice8 *iface, DWORD token)
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
+    const struct wined3d_stateblock_state *state;
     struct wined3d_stateblock *stateblock;
     struct wined3d_buffer *wined3d_buffer;
     struct d3d8_vertexbuffer *buffer;
-    unsigned int i, offset, stride;
-    enum wined3d_format_id format;
-    HRESULT hr;
+    unsigned int i;
 
     TRACE("iface %p, token %#x.\n", iface, token);
 
@@ -1981,17 +2066,16 @@ static HRESULT WINAPI d3d8_device_ApplyStateBlock(IDirect3DDevice8 *iface, DWORD
     }
     wined3d_stateblock_apply(stateblock, device->state);
     device->sysmem_vb = 0;
+    state = device->stateblock_state;
     for (i = 0; i < D3D8_MAX_STREAMS; ++i)
     {
-        if (FAILED(hr = wined3d_device_get_stream_source(device->wined3d_device,
-                i, &wined3d_buffer, &offset, &stride)))
-            continue;
+        wined3d_buffer = state->streams[i].buffer;
         if (!wined3d_buffer || !(buffer = wined3d_buffer_get_parent(wined3d_buffer)))
             continue;
         if (buffer->draw_buffer)
             device->sysmem_vb |= 1u << i;
     }
-    device->sysmem_ib = (wined3d_buffer = wined3d_device_get_index_buffer(device->wined3d_device, &format, &offset))
+    device->sysmem_ib = (wined3d_buffer = state->index_buffer)
             && (buffer = wined3d_buffer_get_parent(wined3d_buffer)) && buffer->draw_buffer;
     wined3d_mutex_unlock();
 
@@ -2141,8 +2225,15 @@ static HRESULT WINAPI d3d8_device_GetTexture(IDirect3DDevice8 *iface, DWORD stag
     if (!texture)
         return D3DERR_INVALIDCALL;
 
+    if (stage >= WINED3D_MAX_FRAGMENT_SAMPLERS)
+    {
+        WARN("Ignoring invalid stage %u.\n", stage);
+        *texture = NULL;
+        return D3D_OK;
+    }
+
     wined3d_mutex_lock();
-    if ((wined3d_texture = wined3d_device_get_texture(device->wined3d_device, stage)))
+    if ((wined3d_texture = device->stateblock_state->textures[stage]))
     {
         texture_impl = wined3d_texture_get_parent(wined3d_texture);
         *texture = &texture_impl->IDirect3DBaseTexture8_iface;
@@ -2169,9 +2260,6 @@ static HRESULT WINAPI d3d8_device_SetTexture(IDirect3DDevice8 *iface, DWORD stag
     wined3d_mutex_lock();
     wined3d_stateblock_set_texture(device->update_state, stage,
             texture_impl ? texture_impl->wined3d_texture : NULL);
-    if (!device->recording)
-        wined3d_device_set_texture(device->wined3d_device, stage,
-                texture_impl ? texture_impl->wined3d_texture : NULL);
     wined3d_mutex_unlock();
 
     return D3D_OK;
@@ -2220,26 +2308,28 @@ tss_lookup[] =
 };
 
 static HRESULT WINAPI d3d8_device_GetTextureStageState(IDirect3DDevice8 *iface,
-        DWORD stage, D3DTEXTURESTAGESTATETYPE Type, DWORD *value)
+        DWORD stage, D3DTEXTURESTAGESTATETYPE state, DWORD *value)
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
+    const struct wined3d_stateblock_state *device_state;
     const struct tss_lookup *l;
 
-    TRACE("iface %p, stage %u, state %#x, value %p.\n", iface, stage, Type, value);
+    TRACE("iface %p, stage %u, state %#x, value %p.\n", iface, stage, state, value);
 
-    if (Type >= ARRAY_SIZE(tss_lookup))
+    if (state >= ARRAY_SIZE(tss_lookup))
     {
-        WARN("Invalid Type %#x passed.\n", Type);
+        WARN("Invalid state %#x.\n", state);
         return D3D_OK;
     }
 
-    l = &tss_lookup[Type];
+    l = &tss_lookup[state];
 
     wined3d_mutex_lock();
+    device_state = device->stateblock_state;
     if (l->sampler_state)
-        *value = wined3d_device_get_sampler_state(device->wined3d_device, stage, l->u.sampler_state);
+        *value = device_state->sampler_states[stage][l->u.sampler_state];
     else
-        *value = wined3d_device_get_texture_stage_state(device->wined3d_device, stage, l->u.texture_state);
+        *value = device_state->texture_states[stage][l->u.texture_state];
     wined3d_mutex_unlock();
 
     return D3D_OK;
@@ -2263,17 +2353,9 @@ static HRESULT WINAPI d3d8_device_SetTextureStageState(IDirect3DDevice8 *iface,
 
     wined3d_mutex_lock();
     if (l->sampler_state)
-    {
         wined3d_stateblock_set_sampler_state(device->update_state, stage, l->u.sampler_state, value);
-        if (!device->recording)
-            wined3d_device_set_sampler_state(device->wined3d_device, stage, l->u.sampler_state, value);
-    }
     else
-    {
         wined3d_stateblock_set_texture_stage_state(device->update_state, stage, l->u.texture_state, value);
-        if (!device->recording)
-            wined3d_device_set_texture_stage_state(device->wined3d_device, stage, l->u.texture_state, value);
-    }
     wined3d_mutex_unlock();
 
     return D3D_OK;
@@ -2287,6 +2369,7 @@ static HRESULT WINAPI d3d8_device_ValidateDevice(IDirect3DDevice8 *iface, DWORD 
     TRACE("iface %p, pass_count %p.\n", iface, pass_count);
 
     wined3d_mutex_lock();
+    wined3d_device_apply_stateblock(device->wined3d_device, device->state);
     hr = wined3d_device_validate_device(device->wined3d_device, pass_count);
     wined3d_mutex_unlock();
 
@@ -2339,35 +2422,36 @@ static HRESULT WINAPI d3d8_device_GetCurrentTexturePalette(IDirect3DDevice8 *ifa
 static void d3d8_device_upload_sysmem_vertex_buffers(struct d3d8_device *device,
         unsigned int start_vertex, unsigned int vertex_count)
 {
+    const struct wined3d_stateblock_state *state = device->stateblock_state;
     struct wined3d_vertex_declaration *wined3d_decl;
     struct wined3d_box box = {0, 0, 0, 1, 0, 1};
+    const struct wined3d_stream_state *stream;
     struct d3d8_vertexbuffer *d3d8_buffer;
     struct wined3d_resource *dst_resource;
     struct d3d8_vertex_declaration *decl;
-    unsigned int i, offset, stride, map;
     struct wined3d_buffer *dst_buffer;
     struct wined3d_resource_desc desc;
+    unsigned int stride, map;
     HRESULT hr;
 
     if (!device->sysmem_vb)
         return;
 
-    wined3d_decl = wined3d_device_get_vertex_declaration(device->wined3d_device);
-    if (!wined3d_decl)
+    if (!(wined3d_decl = state->vertex_declaration))
         return;
 
     decl = wined3d_vertex_declaration_get_parent(wined3d_decl);
     map = decl->stream_map & device->sysmem_vb;
     while (map)
     {
-        i = wined3d_bit_scan(&map);
+        stream = &state->streams[wined3d_bit_scan(&map)];
+        dst_buffer = stream->buffer;
+        stride = stream->stride;
 
-        if (FAILED(hr = wined3d_device_get_stream_source(device->wined3d_device, i, &dst_buffer, &offset, &stride)))
-            ERR("Failed to get stream source.\n");
         d3d8_buffer = wined3d_buffer_get_parent(dst_buffer);
         dst_resource = wined3d_buffer_get_resource(dst_buffer);
         wined3d_resource_get_desc(dst_resource, &desc);
-        box.left = offset + start_vertex * stride;
+        box.left = stream->offset + start_vertex * stride;
         box.right = min(box.left + vertex_count * stride, desc.size);
         if (FAILED(hr = wined3d_device_copy_sub_resource_region(device->wined3d_device,
                 dst_resource, 0, box.left, 0, 0,
@@ -2379,25 +2463,26 @@ static void d3d8_device_upload_sysmem_vertex_buffers(struct d3d8_device *device,
 static void d3d8_device_upload_sysmem_index_buffer(struct d3d8_device *device,
         unsigned int start_idx, unsigned int idx_count)
 {
+    const struct wined3d_stateblock_state *state = device->stateblock_state;
     struct wined3d_box box = {0, 0, 0, 1, 0, 1};
     struct wined3d_resource *dst_resource;
     struct d3d8_indexbuffer *d3d8_buffer;
     struct wined3d_buffer *dst_buffer;
     struct wined3d_resource_desc desc;
     enum wined3d_format_id format;
-    unsigned int offset, idx_size;
+    unsigned int idx_size;
     HRESULT hr;
 
     if (!device->sysmem_ib)
         return;
 
-    if (!(dst_buffer = wined3d_device_get_index_buffer(device->wined3d_device, &format, &offset)))
-        ERR("Failed to get index buffer.\n");
+    dst_buffer = state->index_buffer;
+    format = state->index_format;
     d3d8_buffer = wined3d_buffer_get_parent(dst_buffer);
     dst_resource = wined3d_buffer_get_resource(dst_buffer);
     wined3d_resource_get_desc(dst_resource, &desc);
     idx_size = format == WINED3DFMT_R16_UINT ? 2 : 4;
-    box.left = offset + start_idx * idx_size;
+    box.left = start_idx * idx_size;
     box.right = min(box.left + idx_count * idx_size, desc.size);
     if (FAILED(hr = wined3d_device_copy_sub_resource_region(device->wined3d_device,
             dst_resource, 0, box.left, 0, 0,
@@ -2418,7 +2503,8 @@ static HRESULT WINAPI d3d8_device_DrawPrimitive(IDirect3DDevice8 *iface,
     vertex_count = vertex_count_from_primitive_count(primitive_type, primitive_count);
     wined3d_mutex_lock();
     d3d8_device_upload_sysmem_vertex_buffers(device, start_vertex, vertex_count);
-    wined3d_device_set_primitive_type(device->wined3d_device, primitive_type, 0);
+    wined3d_device_set_primitive_type(device->wined3d_device, wined3d_primitive_type_from_d3d(primitive_type), 0);
+    wined3d_device_apply_stateblock(device->wined3d_device, device->state);
     hr = wined3d_device_draw_primitive(device->wined3d_device, start_vertex, vertex_count);
     wined3d_mutex_unlock();
 
@@ -2439,10 +2525,11 @@ static HRESULT WINAPI d3d8_device_DrawIndexedPrimitive(IDirect3DDevice8 *iface,
 
     index_count = vertex_count_from_primitive_count(primitive_type, primitive_count);
     wined3d_mutex_lock();
-    base_vertex_index = wined3d_device_get_base_vertex_index(device->wined3d_device);
+    base_vertex_index = device->stateblock_state->base_vertex_index;
     d3d8_device_upload_sysmem_vertex_buffers(device, base_vertex_index + min_vertex_idx, vertex_count);
     d3d8_device_upload_sysmem_index_buffer(device, start_idx, index_count);
-    wined3d_device_set_primitive_type(device->wined3d_device, primitive_type, 0);
+    wined3d_device_set_primitive_type(device->wined3d_device, wined3d_primitive_type_from_d3d(primitive_type), 0);
+    wined3d_device_apply_stateblock(device->wined3d_device, device->state);
     hr = wined3d_device_draw_indexed_primitive(device->wined3d_device, start_idx, index_count);
     wined3d_mutex_unlock();
 
@@ -2531,13 +2618,14 @@ static HRESULT WINAPI d3d8_device_DrawPrimitiveUP(IDirect3DDevice8 *iface,
     wined3d_resource_unmap(vb, 0);
     device->vertex_buffer_pos = vb_pos + size;
 
-    hr = wined3d_device_set_stream_source(device->wined3d_device, 0, device->vertex_buffer, 0, stride);
+    hr = wined3d_stateblock_set_stream_source(device->state, 0, device->vertex_buffer, 0, stride);
     if (FAILED(hr))
         goto done;
 
-    wined3d_device_set_primitive_type(device->wined3d_device, primitive_type, 0);
+    wined3d_device_set_primitive_type(device->wined3d_device, wined3d_primitive_type_from_d3d(primitive_type), 0);
+    wined3d_device_apply_stateblock(device->wined3d_device, device->state);
     hr = wined3d_device_draw_primitive(device->wined3d_device, vb_pos / stride, vtx_count);
-    wined3d_device_set_stream_source(device->wined3d_device, 0, NULL, 0, 0);
+    wined3d_stateblock_set_stream_source(device->state, 0, NULL, 0, 0);
 
 done:
     wined3d_mutex_unlock();
@@ -2654,20 +2742,21 @@ static HRESULT WINAPI d3d8_device_DrawIndexedPrimitiveUP(IDirect3DDevice8 *iface
     wined3d_resource_unmap(ib, 0);
     device->index_buffer_pos = ib_pos + idx_size;
 
-    hr = wined3d_device_set_stream_source(device->wined3d_device, 0, device->vertex_buffer, 0, vertex_stride);
+    hr = wined3d_stateblock_set_stream_source(device->state, 0, device->vertex_buffer, 0, vertex_stride);
     if (FAILED(hr))
         goto done;
 
-    wined3d_device_set_index_buffer(device->wined3d_device, device->index_buffer,
-            wined3dformat_from_d3dformat(index_format), 0);
-    wined3d_device_set_base_vertex_index(device->wined3d_device, vb_pos / vertex_stride - min_vertex_idx);
+    wined3d_stateblock_set_index_buffer(device->state, device->index_buffer,
+            wined3dformat_from_d3dformat(index_format));
+    wined3d_stateblock_set_base_vertex_index(device->state, vb_pos / vertex_stride - min_vertex_idx);
 
-    wined3d_device_set_primitive_type(device->wined3d_device, primitive_type, 0);
+    wined3d_device_set_primitive_type(device->wined3d_device, wined3d_primitive_type_from_d3d(primitive_type), 0);
+    wined3d_device_apply_stateblock(device->wined3d_device, device->state);
     hr = wined3d_device_draw_indexed_primitive(device->wined3d_device, ib_pos / idx_fmt_size, idx_count);
 
-    wined3d_device_set_stream_source(device->wined3d_device, 0, NULL, 0, 0);
-    wined3d_device_set_index_buffer(device->wined3d_device, NULL, WINED3DFMT_UNKNOWN, 0);
-    wined3d_device_set_base_vertex_index(device->wined3d_device, 0);
+    wined3d_stateblock_set_stream_source(device->state, 0, NULL, 0, 0);
+    wined3d_stateblock_set_index_buffer(device->state, NULL, WINED3DFMT_UNKNOWN);
+    wined3d_stateblock_set_base_vertex_index(device->state, 0);
 
 done:
     wined3d_mutex_unlock();
@@ -2679,15 +2768,18 @@ static HRESULT WINAPI d3d8_device_ProcessVertices(IDirect3DDevice8 *iface, UINT 
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
     struct d3d8_vertexbuffer *dst = unsafe_impl_from_IDirect3DVertexBuffer8(dst_buffer);
+    const struct wined3d_stateblock_state *state;
+    const struct wined3d_stream_state *stream;
     struct d3d8_vertexbuffer *d3d8_buffer;
-    struct wined3d_buffer *wined3d_buffer;
-    unsigned int i, offset, stride, map;
+    unsigned int i, map;
     HRESULT hr;
 
     TRACE("iface %p, src_start_idx %u, dst_idx %u, vertex_count %u, dst_buffer %p, flags %#x.\n",
             iface, src_start_idx, dst_idx, vertex_count, dst_buffer, flags);
 
     wined3d_mutex_lock();
+
+    state = device->stateblock_state;
 
     /* Note that an alternative approach would be to simply create these
      * buffers with WINED3D_RESOURCE_ACCESS_MAP_R and update them here like we
@@ -2698,16 +2790,15 @@ static HRESULT WINAPI d3d8_device_ProcessVertices(IDirect3DDevice8 *iface, UINT 
     while (map)
     {
         i = wined3d_bit_scan(&map);
+        stream = &state->streams[i];
 
-        if (FAILED(wined3d_device_get_stream_source(device->wined3d_device,
-                i, &wined3d_buffer, &offset, &stride)))
-            ERR("Failed to get stream source.\n");
-        d3d8_buffer = wined3d_buffer_get_parent(wined3d_buffer);
-        if (FAILED(wined3d_device_set_stream_source(device->wined3d_device,
-                i, d3d8_buffer->wined3d_buffer, offset, stride)))
+        d3d8_buffer = wined3d_buffer_get_parent(stream->buffer);
+        if (FAILED(wined3d_stateblock_set_stream_source(device->state,
+                i, d3d8_buffer->wined3d_buffer, stream->offset, stream->stride)))
             ERR("Failed to set stream source.\n");
     }
 
+    wined3d_device_apply_stateblock(device->wined3d_device, device->state);
     hr = wined3d_device_process_vertices(device->wined3d_device, src_start_idx, dst_idx,
             vertex_count, dst->wined3d_buffer, NULL, flags, dst->fvf);
 
@@ -2715,13 +2806,11 @@ static HRESULT WINAPI d3d8_device_ProcessVertices(IDirect3DDevice8 *iface, UINT 
     while (map)
     {
         i = wined3d_bit_scan(&map);
+        stream = &state->streams[i];
 
-        if (FAILED(wined3d_device_get_stream_source(device->wined3d_device,
-                i, &wined3d_buffer, &offset, &stride)))
-            ERR("Failed to get stream source.\n");
-        d3d8_buffer = wined3d_buffer_get_parent(wined3d_buffer);
-        if (FAILED(wined3d_device_set_stream_source(device->wined3d_device,
-                i, d3d8_buffer->draw_buffer, offset, stride)))
+        d3d8_buffer = wined3d_buffer_get_parent(stream->buffer);
+        if (FAILED(wined3d_stateblock_set_stream_source(device->state,
+                i, d3d8_buffer->draw_buffer, stream->offset, stream->stride)))
             ERR("Failed to set stream source.\n");
     }
 
@@ -2858,12 +2947,6 @@ static HRESULT WINAPI d3d8_device_SetVertexShader(IDirect3DDevice8 *iface, DWORD
         wined3d_stateblock_set_vertex_declaration(device->update_state,
                 d3d8_device_get_fvf_declaration(device, shader)->wined3d_vertex_declaration);
         wined3d_stateblock_set_vertex_shader(device->update_state, NULL);
-        if (!device->recording)
-        {
-            wined3d_device_set_vertex_declaration(device->wined3d_device,
-                    d3d8_device_get_fvf_declaration(device, shader)->wined3d_vertex_declaration);
-            wined3d_device_set_vertex_shader(device->wined3d_device, NULL);
-        }
         wined3d_mutex_unlock();
 
         return D3D_OK;
@@ -2883,12 +2966,6 @@ static HRESULT WINAPI d3d8_device_SetVertexShader(IDirect3DDevice8 *iface, DWORD
     wined3d_stateblock_set_vertex_declaration(device->update_state,
             shader_impl->vertex_declaration->wined3d_vertex_declaration);
     wined3d_stateblock_set_vertex_shader(device->update_state, shader_impl->wined3d_shader);
-    if (!device->recording)
-    {
-        wined3d_device_set_vertex_declaration(device->wined3d_device,
-                shader_impl->vertex_declaration->wined3d_vertex_declaration);
-        wined3d_device_set_vertex_shader(device->wined3d_device, shader_impl->wined3d_shader);
-    }
     wined3d_mutex_unlock();
 
     return D3D_OK;
@@ -2903,7 +2980,7 @@ static HRESULT WINAPI d3d8_device_GetVertexShader(IDirect3DDevice8 *iface, DWORD
     TRACE("iface %p, shader %p.\n", iface, shader);
 
     wined3d_mutex_lock();
-    if ((wined3d_declaration = wined3d_device_get_vertex_declaration(device->wined3d_device)))
+    if ((wined3d_declaration = device->stateblock_state->vertex_declaration))
     {
         d3d8_declaration = wined3d_vertex_declaration_get_parent(wined3d_declaration);
         *shader = d3d8_declaration->shader_handle;
@@ -2936,7 +3013,7 @@ static HRESULT WINAPI d3d8_device_DeleteVertexShader(IDirect3DDevice8 *iface, DW
     }
 
     if (shader_impl->wined3d_shader
-            && wined3d_device_get_vertex_shader(device->wined3d_device) == shader_impl->wined3d_shader)
+            && device->stateblock_state->vs == shader_impl->wined3d_shader)
         IDirect3DDevice8_SetVertexShader(iface, 0);
 
     wined3d_mutex_unlock();
@@ -2964,34 +3041,35 @@ static HRESULT WINAPI d3d8_device_SetVertexShaderConstant(IDirect3DDevice8 *ifac
 
     wined3d_mutex_lock();
     hr = wined3d_stateblock_set_vs_consts_f(device->update_state, start_register, count, data);
-    if (SUCCEEDED(hr) && !device->recording)
-        hr = wined3d_device_set_vs_consts_f(device->wined3d_device, start_register, count, data);
     wined3d_mutex_unlock();
 
     return hr;
 }
 
 static HRESULT WINAPI d3d8_device_GetVertexShaderConstant(IDirect3DDevice8 *iface,
-        DWORD start_register, void *data, DWORD count)
+        DWORD start_idx, void *constants, DWORD count)
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
-    HRESULT hr;
+    const struct wined3d_vec4 *src;
 
-    TRACE("iface %p, start_register %u, data %p, count %u.\n",
-            iface, start_register, data, count);
+    TRACE("iface %p, start_idx %u, constants %p, count %u.\n", iface, start_idx, constants, count);
 
-    if (start_register + count > D3D8_MAX_VERTEX_SHADER_CONSTANTF)
+    if (!constants)
+        return D3DERR_INVALIDCALL;
+
+    if (start_idx >= device->vs_uniform_count || count > device->vs_uniform_count - start_idx)
     {
-        WARN("Trying to access %u constants, but d3d8 only supports %u\n",
-             start_register + count, D3D8_MAX_VERTEX_SHADER_CONSTANTF);
+        WARN("Trying to access %u constants, but d3d8 only supports %u.\n",
+             start_idx + count, device->vs_uniform_count);
         return D3DERR_INVALIDCALL;
     }
 
     wined3d_mutex_lock();
-    hr = wined3d_device_get_vs_consts_f(device->wined3d_device, start_register, count, data);
+    src = device->stateblock_state->vs_consts_f;
+    memcpy(constants, &src[start_idx], count * sizeof(*src));
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d8_device_GetVertexShaderDeclaration(IDirect3DDevice8 *iface,
@@ -3090,11 +3168,7 @@ static HRESULT WINAPI d3d8_device_SetIndices(IDirect3DDevice8 *iface,
     wined3d_stateblock_set_base_vertex_index(device->update_state, base_vertex_idx);
     wined3d_stateblock_set_index_buffer(device->update_state, wined3d_buffer, ib ? ib->format : WINED3DFMT_UNKNOWN);
     if (!device->recording)
-    {
-        wined3d_device_set_base_vertex_index(device->wined3d_device, base_vertex_idx);
-        wined3d_device_set_index_buffer(device->wined3d_device, wined3d_buffer, ib ? ib->format : WINED3DFMT_UNKNOWN, 0);
         device->sysmem_ib = ib && ib->draw_buffer;
-    }
     wined3d_mutex_unlock();
 
     return D3D_OK;
@@ -3104,7 +3178,7 @@ static HRESULT WINAPI d3d8_device_GetIndices(IDirect3DDevice8 *iface,
         IDirect3DIndexBuffer8 **buffer, UINT *base_vertex_index)
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
-    enum wined3d_format_id wined3d_format;
+    const struct wined3d_stateblock_state *state;
     struct wined3d_buffer *wined3d_buffer;
     struct d3d8_indexbuffer *buffer_impl;
 
@@ -3115,8 +3189,9 @@ static HRESULT WINAPI d3d8_device_GetIndices(IDirect3DDevice8 *iface,
 
     /* The case from UINT to INT is safe because d3d8 will never set negative values */
     wined3d_mutex_lock();
-    *base_vertex_index = wined3d_device_get_base_vertex_index(device->wined3d_device);
-    if ((wined3d_buffer = wined3d_device_get_index_buffer(device->wined3d_device, &wined3d_format, NULL)))
+    state = device->stateblock_state;
+    *base_vertex_index = state->base_vertex_index;
+    if ((wined3d_buffer = state->index_buffer))
     {
         buffer_impl = wined3d_buffer_get_parent(wined3d_buffer);
         *buffer = &buffer_impl->IDirect3DIndexBuffer8_iface;
@@ -3190,8 +3265,6 @@ static HRESULT WINAPI d3d8_device_SetPixelShader(IDirect3DDevice8 *iface, DWORD 
     if (!shader)
     {
         wined3d_stateblock_set_pixel_shader(device->update_state, NULL);
-        if (!device->recording)
-            wined3d_device_set_pixel_shader(device->wined3d_device, NULL);
         wined3d_mutex_unlock();
         return D3D_OK;
     }
@@ -3205,8 +3278,6 @@ static HRESULT WINAPI d3d8_device_SetPixelShader(IDirect3DDevice8 *iface, DWORD 
 
     TRACE("Setting shader %p.\n", shader_impl);
     wined3d_stateblock_set_pixel_shader(device->update_state, shader_impl->wined3d_shader);
-    if (!device->recording)
-        wined3d_device_set_pixel_shader(device->wined3d_device, shader_impl->wined3d_shader);
     wined3d_mutex_unlock();
 
     return D3D_OK;
@@ -3223,7 +3294,7 @@ static HRESULT WINAPI d3d8_device_GetPixelShader(IDirect3DDevice8 *iface, DWORD 
         return D3DERR_INVALIDCALL;
 
     wined3d_mutex_lock();
-    if ((object = wined3d_device_get_pixel_shader(device->wined3d_device)))
+    if ((object = device->stateblock_state->ps))
     {
         struct d3d8_pixel_shader *d3d8_shader;
         d3d8_shader = wined3d_shader_get_parent(object);
@@ -3256,7 +3327,7 @@ static HRESULT WINAPI d3d8_device_DeletePixelShader(IDirect3DDevice8 *iface, DWO
         return D3DERR_INVALIDCALL;
     }
 
-    if (wined3d_device_get_pixel_shader(device->wined3d_device) == shader_impl->wined3d_shader)
+    if (device->stateblock_state->ps == shader_impl->wined3d_shader)
         IDirect3DDevice8_SetPixelShader(iface, 0);
 
     wined3d_mutex_unlock();
@@ -3277,27 +3348,29 @@ static HRESULT WINAPI d3d8_device_SetPixelShaderConstant(IDirect3DDevice8 *iface
 
     wined3d_mutex_lock();
     hr = wined3d_stateblock_set_ps_consts_f(device->update_state, start_register, count, data);
-    if (SUCCEEDED(hr) && !device->recording)
-        hr = wined3d_device_set_ps_consts_f(device->wined3d_device, start_register, count, data);
     wined3d_mutex_unlock();
 
     return hr;
 }
 
 static HRESULT WINAPI d3d8_device_GetPixelShaderConstant(IDirect3DDevice8 *iface,
-        DWORD start_register, void *data, DWORD count)
+        DWORD start_idx, void *constants, DWORD count)
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
-    HRESULT hr;
+    const struct wined3d_vec4 *src;
 
-    TRACE("iface %p, start_register %u, data %p, count %u.\n",
-            iface, start_register, data, count);
+    TRACE("iface %p, start_idx %u, constants %p, count %u.\n", iface, start_idx, constants, count);
+
+    if (!constants || start_idx >= D3D8_MAX_PIXEL_SHADER_CONSTANTF
+            || count > D3D8_MAX_PIXEL_SHADER_CONSTANTF - start_idx)
+        return WINED3DERR_INVALIDCALL;
 
     wined3d_mutex_lock();
-    hr = wined3d_device_get_ps_consts_f(device->wined3d_device, start_register, count, data);
+    src = device->stateblock_state->ps_consts_f;
+    memcpy(constants, &src[start_idx], count * sizeof(*src));
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d8_device_GetPixelShaderFunction(IDirect3DDevice8 *iface,
@@ -3352,19 +3425,26 @@ static HRESULT WINAPI d3d8_device_SetStreamSource(IDirect3DDevice8 *iface,
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
     struct d3d8_vertexbuffer *buffer_impl = unsafe_impl_from_IDirect3DVertexBuffer8(buffer);
+    const struct wined3d_stateblock_state *state;
     struct wined3d_buffer *wined3d_buffer;
     HRESULT hr;
 
     TRACE("iface %p, stream_idx %u, buffer %p, stride %u.\n",
             iface, stream_idx, buffer, stride);
 
+    if (stream_idx >= ARRAY_SIZE(state->streams))
+    {
+        WARN("Stream index %u out of range.\n", stream_idx);
+        return D3DERR_INVALIDCALL;
+    }
+
     wined3d_mutex_lock();
 
     if (!buffer_impl)
     {
-        wined3d_device_get_stream_source(device->wined3d_device, stream_idx, &wined3d_buffer,
-                NULL, &stride);
         wined3d_buffer = NULL;
+        state = device->stateblock_state;
+        stride = state->streams[stream_idx].stride;
     }
     else if (buffer_impl->draw_buffer)
         wined3d_buffer = buffer_impl->draw_buffer;
@@ -3374,14 +3454,10 @@ static HRESULT WINAPI d3d8_device_SetStreamSource(IDirect3DDevice8 *iface,
     hr = wined3d_stateblock_set_stream_source(device->update_state, stream_idx, wined3d_buffer, 0, stride);
     if (SUCCEEDED(hr) && !device->recording)
     {
-        hr = wined3d_device_set_stream_source(device->wined3d_device, stream_idx, wined3d_buffer, 0, stride);
-        if (SUCCEEDED(hr))
-        {
-            if (buffer_impl && buffer_impl->draw_buffer)
-                device->sysmem_vb |= (1u << stream_idx);
-            else
-                device->sysmem_vb &= ~(1u << stream_idx);
-        }
+        if (buffer_impl && buffer_impl->draw_buffer)
+            device->sysmem_vb |= (1u << stream_idx);
+        else
+            device->sysmem_vb &= ~(1u << stream_idx);
     }
 
     wined3d_mutex_unlock();
@@ -3393,9 +3469,9 @@ static HRESULT WINAPI d3d8_device_GetStreamSource(IDirect3DDevice8 *iface,
         UINT stream_idx, IDirect3DVertexBuffer8 **buffer, UINT *stride)
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
+    const struct wined3d_stateblock_state *state;
+    const struct wined3d_stream_state *stream;
     struct d3d8_vertexbuffer *buffer_impl;
-    struct wined3d_buffer *wined3d_buffer = NULL;
-    HRESULT hr;
 
     TRACE("iface %p, stream_idx %u, buffer %p, stride %p.\n",
             iface, stream_idx, buffer, stride);
@@ -3403,23 +3479,27 @@ static HRESULT WINAPI d3d8_device_GetStreamSource(IDirect3DDevice8 *iface,
     if (!buffer)
         return D3DERR_INVALIDCALL;
 
-    wined3d_mutex_lock();
-    hr = wined3d_device_get_stream_source(device->wined3d_device, stream_idx, &wined3d_buffer, 0, stride);
-    if (SUCCEEDED(hr) && wined3d_buffer)
+    if (stream_idx >= ARRAY_SIZE(state->streams))
     {
-        buffer_impl = wined3d_buffer_get_parent(wined3d_buffer);
+        WARN("Stream index %u out of range.\n", stream_idx);
+        return D3DERR_INVALIDCALL;
+    }
+
+    wined3d_mutex_lock();
+    state = device->stateblock_state;
+    stream = &state->streams[stream_idx];
+    if (stream->buffer)
+    {
+        buffer_impl = wined3d_buffer_get_parent(stream->buffer);
         *buffer = &buffer_impl->IDirect3DVertexBuffer8_iface;
         IDirect3DVertexBuffer8_AddRef(*buffer);
     }
     else
-    {
-        if (FAILED(hr))
-            ERR("Failed to get wined3d stream source, hr %#x.\n", hr);
         *buffer = NULL;
-    }
+    *stride = stream->stride;
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
 }
 
 static const struct IDirect3DDevice8Vtbl d3d8_device_vtbl =
@@ -3644,7 +3724,11 @@ HRESULT device_init(struct d3d8_device *device, struct d3d8 *parent, struct wine
 {
     struct wined3d_swapchain_desc swapchain_desc;
     struct wined3d_swapchain *wined3d_swapchain;
+    struct wined3d_adapter *wined3d_adapter;
+    struct wined3d_output *wined3d_output;
     struct d3d8_swapchain *d3d_swapchain;
+    struct wined3d_caps caps;
+    unsigned int output_idx;
     HRESULT hr;
 
     static const enum wined3d_feature_level feature_levels[] =
@@ -3655,8 +3739,13 @@ HRESULT device_init(struct d3d8_device *device, struct d3d8 *parent, struct wine
         WINED3D_FEATURE_LEVEL_5,
     };
 
+    output_idx = adapter;
+    if (output_idx >= parent->wined3d_output_count)
+        return D3DERR_INVALIDCALL;
+
     device->IDirect3DDevice8_iface.lpVtbl = &d3d8_device_vtbl;
     device->device_parent.ops = &d3d8_wined3d_device_parent_ops;
+    device->adapter_ordinal = adapter;
     device->ref = 1;
     if (!(device->handle_table.entries = heap_alloc_zero(D3D8_INITIAL_HANDLE_TABLE_SIZE
             * sizeof(*device->handle_table.entries))))
@@ -3669,7 +3758,9 @@ HRESULT device_init(struct d3d8_device *device, struct d3d8 *parent, struct wine
     if (!(flags & D3DCREATE_FPU_PRESERVE)) setup_fpu();
 
     wined3d_mutex_lock();
-    if (FAILED(hr = wined3d_device_create(wined3d, adapter, device_type,
+    wined3d_output = parent->wined3d_outputs[output_idx];
+    wined3d_adapter = wined3d_output_get_adapter(wined3d_output);
+    if (FAILED(hr = wined3d_device_create(wined3d, wined3d_adapter, wined3d_device_type_from_d3d(device_type),
             focus_window, flags, 4, feature_levels, ARRAY_SIZE(feature_levels),
             &device->device_parent, &device->wined3d_device)))
     {
@@ -3679,6 +3770,10 @@ HRESULT device_init(struct d3d8_device *device, struct d3d8 *parent, struct wine
         return hr;
     }
 
+    wined3d_get_device_caps(wined3d_adapter, wined3d_device_type_from_d3d(device_type), &caps);
+    device->max_user_clip_planes = caps.MaxUserClipPlanes;
+    device->vs_uniform_count = caps.MaxVertexShaderConst;
+
     if (FAILED(hr = wined3d_stateblock_create(device->wined3d_device, NULL, WINED3D_SBT_PRIMARY, &device->state)))
     {
         ERR("Failed to create primary stateblock, hr %#x.\n", hr);
@@ -3686,6 +3781,7 @@ HRESULT device_init(struct d3d8_device *device, struct d3d8 *parent, struct wine
         wined3d_mutex_unlock();
         return hr;
     }
+    device->stateblock_state = wined3d_stateblock_get_state(device->state);
     device->update_state = device->state;
 
     if (!parameters->Windowed)
@@ -3705,7 +3801,7 @@ HRESULT device_init(struct d3d8_device *device, struct d3d8 *parent, struct wine
     if (flags & D3DCREATE_MULTITHREADED)
         wined3d_device_set_multithreaded(device->wined3d_device);
 
-    if (!wined3d_swapchain_desc_from_present_parameters(&swapchain_desc, parameters))
+    if (!wined3d_swapchain_desc_from_d3d8(&swapchain_desc, wined3d_output, parameters))
     {
         wined3d_device_release_focus_window(device->wined3d_device);
         wined3d_device_decref(device->wined3d_device);
@@ -3733,9 +3829,6 @@ HRESULT device_init(struct d3d8_device *device, struct d3d8 *parent, struct wine
     wined3d_stateblock_set_render_state(device->state, WINED3D_RS_ZENABLE,
             !!swapchain_desc.enable_auto_depth_stencil);
     wined3d_stateblock_set_render_state(device->state, WINED3D_RS_POINTSIZE_MIN, 0);
-    wined3d_device_set_render_state(device->wined3d_device,
-            WINED3D_RS_ZENABLE, !!swapchain_desc.enable_auto_depth_stencil);
-    wined3d_device_set_render_state(device->wined3d_device, WINED3D_RS_POINTSIZE_MIN, 0);
     device_reset_viewport_state(device);
     wined3d_mutex_unlock();
 
@@ -3752,8 +3845,8 @@ HRESULT device_init(struct d3d8_device *device, struct d3d8 *parent, struct wine
 
     device->implicit_swapchain = wined3d_swapchain;
 
-    device->d3d_parent = &parent->IDirect3D8_iface;
-    IDirect3D8_AddRef(device->d3d_parent);
+    device->d3d_parent = parent;
+    IDirect3D8_AddRef(&parent->IDirect3D8_iface);
 
     return D3D_OK;
 

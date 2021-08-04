@@ -728,11 +728,11 @@ version_table[] =
 
 static const char *get_windows_version(void)
 {
-    OSVERSIONINFOEXW info = { sizeof(OSVERSIONINFOEXW) };
+    RTL_OSVERSIONINFOEXW info = { sizeof(RTL_OSVERSIONINFOEXW) };
     static char str[64];
     int i;
 
-    GetVersionExW( (OSVERSIONINFOW *)&info );
+    RtlGetVersion( &info );
 
     for (i = 0; i < ARRAY_SIZE(version_table); i++)
     {
@@ -758,8 +758,6 @@ static void output_system_info(void)
     static const char platform[] = "x86_32on64";
 #elif defined(__x86_64__)
     static const char platform[] = "x86_64";
-#elif defined(__powerpc__)
-    static const char platform[] = "powerpc";
 #elif defined(__arm__)
     static const char platform[] = "arm";
 #elif defined(__aarch64__)
@@ -1030,13 +1028,42 @@ static BOOL tgt_process_active_close_process(struct dbg_process* pcs, BOOL kill)
 static BOOL tgt_process_active_read(HANDLE hProcess, const void* HOSTPTR addr,
                                     void* buffer, SIZE_T len, SIZE_T* HOSTPTR rlen)
 {
-    return ReadProcessMemory( hProcess, addr, buffer, len, rlen );
+    const void * WIN32PTR guestptr;
+    SIZE_T guestlen;
+    BOOL ret;
+#ifdef __i386_on_x86_64__
+    guestptr = TRUNCCAST(const void *, addr);
+    if (addr != guestptr)
+    {
+        FIXME("Read of 64 bit address %p from 32 bit process.\n", addr);
+        return FALSE;
+    }
+#else
+    guestptr = addr;
+#endif
+    ret = ReadProcessMemory( hProcess, guestptr, buffer, len, &guestlen );
+    *rlen = guestlen;
+    return ret;
 }
 
 static BOOL tgt_process_active_write(HANDLE hProcess, void* HOSTPTR addr,
                                      const void* buffer, SIZE_T len, SIZE_T* wlen)
 {
-    return WriteProcessMemory( hProcess, addr, buffer, len, wlen );
+    void * WIN32PTR guestptr;
+    SIZE_T guestlen;
+    BOOL ret;
+#ifdef __i386_on_x86_64__
+    guestptr = TRUNCCAST(void *, addr);
+    if (addr != guestptr)
+    {
+        FIXME("Read of 64 bit address %p from 32 bit process.\n", addr);
+        return FALSE;
+    }
+#else
+    guestptr = addr;
+#endif
+    ret = WriteProcessMemory( hProcess, guestptr, buffer, len, &guestlen );
+    *wlen = guestlen;
 }
 
 static BOOL tgt_process_active_get_selector(HANDLE hThread, DWORD sel, LDT_ENTRY* le)

@@ -127,6 +127,9 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, void *pReserved)
     case DLL_PROCESS_ATTACH:
         instance = hinstDLL;
         DisableThreadLibraryCalls( hinstDLL );
+#ifdef HAVE_FAUDIOLINKEDVERSION
+        TRACE("Using FAudio version %d\n", FAudioLinkedVersion() );
+#endif
         break;
     }
     return TRUE;
@@ -336,9 +339,9 @@ static void FAPOCALL XAPO_Process(void * HOSTPTR iface,
     }
     for (i = 0; i < OutputProcessParameterCount; i++)
     {
-        input_process_params[i].pBuffer = ADDRSPACECAST(void *, pOutputProcessParameters[i].pBuffer);
-        input_process_params[i].BufferFlags = (XAPO_BUFFER_FLAGS)pOutputProcessParameters[i].BufferFlags;
-        input_process_params[i].ValidFrameCount = pOutputProcessParameters[i].ValidFrameCount;
+        output_process_params[i].pBuffer = ADDRSPACECAST(void *, pOutputProcessParameters[i].pBuffer);
+        output_process_params[i].BufferFlags = (XAPO_BUFFER_FLAGS)pOutputProcessParameters[i].BufferFlags;
+        output_process_params[i].ValidFrameCount = pOutputProcessParameters[i].ValidFrameCount;
     }
 
     IXAPO_Process(This->xapo, InputProcessParameterCount,
@@ -2125,10 +2128,8 @@ static HRESULT WINAPI XAudio2CF_CreateInstance(IClassFactory *iface, IUnknown *p
     FAudio_RegisterForCallbacks(object->faudio, &object->FAudioEngineCallback_vtbl);
 
     hr = IXAudio2_QueryInterface(&object->IXAudio2_iface, riid, ppobj);
+    IXAudio2_Release(&object->IXAudio2_iface);
     if(FAILED(hr)){
-        object->lock.DebugInfo->Spare[0] = 0;
-        DeleteCriticalSection(&object->lock);
-        HeapFree(GetProcessHeap(), 0, object);
         return hr;
     }
 

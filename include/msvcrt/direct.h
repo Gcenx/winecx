@@ -10,7 +10,7 @@
 
 #include "wine/winheader_enter.h"
 
-#include <corecrt.h>
+#include <corecrt_wdirect.h>
 
 #include <pshpack8.h>
 
@@ -28,23 +28,14 @@ struct _diskfree_t {
 };
 #endif /* _DISKFREE_T_DEFINED */
 
-int           __cdecl _chdir(const char*);
-int           __cdecl _chdrive(int);
-char*         __cdecl _getcwd(char*,int);
-char*         __cdecl _getdcwd(int,char*,int);
-int           __cdecl _getdrive(void);
-__msvcrt_ulong __cdecl _getdrives(void);
-int           __cdecl _mkdir(const char*);
-int           __cdecl _rmdir(const char*);
-
-#ifndef _WDIRECT_DEFINED
-#define _WDIRECT_DEFINED
-int      __cdecl _wchdir(const wchar_t*);
-wchar_t* __cdecl _wgetcwd(wchar_t*,int);
-wchar_t* __cdecl _wgetdcwd(int,wchar_t*,int);
-int      __cdecl _wmkdir(const wchar_t*);
-int      __cdecl _wrmdir(const wchar_t*);
-#endif /* _WDIRECT_DEFINED */
+_ACRTIMP int           __cdecl _chdir(const char*);
+_ACRTIMP int           __cdecl _chdrive(int);
+_ACRTIMP char*         __cdecl _getcwd(char*,int);
+_ACRTIMP char*         __cdecl _getdcwd(int,char*,int);
+_ACRTIMP int           __cdecl _getdrive(void);
+_ACRTIMP __msvcrt_ulong __cdecl _getdrives(void);
+_ACRTIMP int           __cdecl _mkdir(const char*);
+_ACRTIMP int           __cdecl _rmdir(const char*);
 
 #ifdef __cplusplus
 }

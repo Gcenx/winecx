@@ -11,6 +11,7 @@ C_SRCS = \
 	debugger.c \
 	device.c \
 	directory.c \
+	display.c \
 	esync.c \
 	event.c \
 	fd.c \
@@ -34,7 +35,6 @@ C_SRCS = \
 	semaphore.c \
 	serial.c \
 	signal.c \
-	snapshot.c \
 	sock.c \
 	symlink.c \
 	thread.c \
@@ -51,4 +51,7 @@ MANPAGES = \
 	wineserver.fr.UTF-8.man.in \
 	wineserver.man.in
 
+EXTRADEFS = $(HOSTSTACK_CFLAGS)
 EXTRALIBS = $(LDEXECFLAGS) $(POLL_LIBS) $(RT_LIBS) $(INOTIFY_LIBS)
+
+unicode_EXTRADEFS = -DNLSDIR="\"${nlsdir}\"" -DBIN_TO_NLSDIR=\"`$(MAKEDEP) -R ${bindir} ${nlsdir}`\"

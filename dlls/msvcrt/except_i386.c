@@ -25,12 +25,11 @@
  * www.thecodeproject.com.
  */
 
-#include "config.h"
-#include "wine/port.h"
+#ifdef __i386__
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
-
+#include <setjmp.h>
 #include <stdarg.h>
+#include <fpieee.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -120,7 +119,7 @@ typedef struct _SCOPETABLE
   void * (*lpfnHandler)(void);
 } SCOPETABLE, *PSCOPETABLE;
 
-typedef struct _MSVCRT_EXCEPTION_FRAME
+typedef struct MSVCRT_EXCEPTION_FRAME
 {
   EXCEPTION_REGISTRATION_RECORD *prev;
   void (*handler)(PEXCEPTION_RECORD, EXCEPTION_REGISTRATION_RECORD*,
@@ -147,63 +146,6 @@ DWORD CDECL cxx_frame_handler( PEXCEPTION_RECORD rec, cxx_exception_frame* frame
                                const cxx_function_descr *descr,
                                catch_func_nested_frame* nested_frame ) DECLSPEC_HIDDEN;
 
-#ifdef __i386_on_x86_64__
-/* call a copy constructor */
-extern void call_copy_ctor( void *func, void *this, void *src, int has_vbase );
-void call_copy_ctor( void *func, void *this, void *src, int has_vbase )
-{
-    ((void (__attribute__((thiscall32)) *)(void *, void *, BOOL)) func)(this, src, 1);
-}
-
-__ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(continue_after_catch),
-                     "movl 4(%esp), %edx\n\t"
-                     "movl 8(%esp), %eax\n\t"
-                     "movl -4(%edx), %esp\n\t"
-                     "leal 12(%edx), %ebp\n\t"
-                     "jmp *%eax" );
-void CDECL DECLSPEC_NORETURN DECLSPEC_HIDDEN continue_after_catch( cxx_exception_frame *frame, void *addr )
-{
-    WINE_CALL_IMPL32(continue_after_catch)( frame, addr );
-}
-
-__ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(call_finally_block),
-                     "movl 8(%esp), %ebp\n\t"
-                     "jmp *4(%esp)" );
-void CDECL DECLSPEC_NORETURN DECLSPEC_HIDDEN call_finally_block( void *code_block, void *base_ptr )
-{
-    WINE_CALL_IMPL32(call_finally_block)( code_block, base_ptr );
-}
-
-__ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(call_filter),
-                     "pushl %ebp\n\t"
-                     "pushl 12(%esp)\n\t"
-                     "movl 20(%esp), %ebp\n\t"
-                     "call *12(%esp)\n\t"
-                     "popl %ebp\n\t"
-                     "popl %ebp\n\t"
-                     "ret" );
-int CDECL DECLSPEC_HIDDEN call_filter( int (*func)(PEXCEPTION_POINTERS), void *arg, void *ebp )
-{
-    return WINE_CALL_IMPL32(call_filter)( func, arg, ebp );
-}
-
-__ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(call_handler),
-                     "pushl %ebp\n\t"
-                     "pushl %ebx\n\t"
-                     "pushl %esi\n\t"
-                     "pushl %edi\n\t"
-                     "movl 24(%esp), %ebp\n\t"
-                     "call *20(%esp)\n\t"
-                     "popl %edi\n\t"
-                     "popl %esi\n\t"
-                     "popl %ebx\n\t"
-                     "popl %ebp\n\t"
-                     "ret" );
-void* CDECL DECLSPEC_HIDDEN call_handler( void * (*func)(void), void *ebp )
-{
-    return WINE_CALL_IMPL32(call_handler)( func, ebp );
-}
-#else
 /* call a copy constructor */
 extern void call_copy_ctor( void *func, void *this, void *src, int has_vbase );
 
@@ -263,7 +205,6 @@ __ASM_GLOBAL_FUNC( call_handler,
                    "popl %ebx\n\t"
                    "popl %ebp\n\t"
                    "ret" );
-#endif /* __i386_on_x86_64__ */
 
 static inline void dump_type( const cxx_type_info *type )
 {
@@ -386,7 +327,7 @@ static void cxx_local_unwind( cxx_exception_frame* frame, const cxx_function_des
         if (trylevel < 0 || trylevel >= descr->unwind_count)
         {
             ERR( "invalid trylevel %d\n", trylevel );
-            MSVCRT_terminate();
+            terminate();
         }
         handler = descr->unwind_table[trylevel].handler;
         if (handler)
@@ -401,8 +342,8 @@ static void cxx_local_unwind( cxx_exception_frame* frame, const cxx_function_des
 }
 
 /* handler for exceptions happening while calling a catch function */
-static DWORD CDECL catch_function_nested_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
-                                                  CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
+static DWORD catch_function_nested_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
+                                            CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
 {
     catch_func_nested_frame *nested_frame = (catch_func_nested_frame *)frame;
 
@@ -598,7 +539,7 @@ static LONG CALLBACK se_translation_filter( EXCEPTION_POINTERS *ep, void *c )
     if (rec->ExceptionCode != CXX_EXCEPTION)
     {
         TRACE( "non-c++ exception thrown in SEH handler: %x\n", rec->ExceptionCode );
-        MSVCRT_terminate();
+        terminate();
     }
 
     exc_type = (cxx_exception_type *)rec->ExceptionInformation[2];
@@ -607,6 +548,18 @@ static LONG CALLBACK se_translation_filter( EXCEPTION_POINTERS *ep, void *c )
 
     __DestructExceptionObject( rec );
     return ExceptionContinueSearch;
+}
+
+static void check_noexcept( PEXCEPTION_RECORD rec,
+        const cxx_function_descr *descr, BOOL nested )
+{
+    if (!nested && rec->ExceptionCode == CXX_EXCEPTION &&
+            descr->magic >= CXX_FRAME_MAGIC_VC8 &&
+            (descr->flags & FUNC_DESCR_NOEXCEPT))
+    {
+        ERR("noexcept function propagating exception\n");
+        terminate();
+    }
 }
 
 /*********************************************************************
@@ -636,7 +589,11 @@ DWORD CDECL cxx_frame_handler( PEXCEPTION_RECORD rec, cxx_exception_frame* frame
         if (descr->unwind_count && !nested_frame) cxx_local_unwind( frame, descr, -1 );
         return ExceptionContinueSearch;
     }
-    if (!descr->tryblock_count) return ExceptionContinueSearch;
+    if (!descr->tryblock_count)
+    {
+        check_noexcept(rec, descr, nested_frame != NULL);
+        return ExceptionContinueSearch;
+    }
 
     if(rec->ExceptionCode == CXX_EXCEPTION &&
             rec->ExceptionInformation[1] == 0 && rec->ExceptionInformation[2] == 0)
@@ -701,6 +658,7 @@ DWORD CDECL cxx_frame_handler( PEXCEPTION_RECORD rec, cxx_exception_frame* frame
 
     call_catch_block( rec, context, frame, descr,
             nested_frame, exc_type );
+    check_noexcept(rec, descr, nested_frame != NULL);
     return ExceptionContinueSearch;
 }
 
@@ -710,25 +668,6 @@ DWORD CDECL cxx_frame_handler( PEXCEPTION_RECORD rec, cxx_exception_frame* frame
  */
 extern DWORD CDECL __CxxFrameHandler( PEXCEPTION_RECORD rec, EXCEPTION_REGISTRATION_RECORD* frame,
                                       PCONTEXT context, EXCEPTION_REGISTRATION_RECORD** dispatch );
-#ifdef __i386_on_x86_64__
-__ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(__CxxFrameHandler),
-                     "pushl $0\n\t"        /* nested_frame */
-                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                     "pushl %eax\n\t"      /* descr */
-                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                     "pushl 24(%esp)\n\t"  /* dispatch */
-                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                     "pushl 24(%esp)\n\t"  /* context */
-                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                     "pushl 24(%esp)\n\t"  /* frame */
-                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                     "pushl 24(%esp)\n\t"  /* rec */
-                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                     "call " __ASM_THUNK_SYMBOL("cxx_frame_handler") "\n\t"
-                     "add $24,%esp\n\t"
-                     __ASM_CFI(".cfi_adjust_cfa_offset -24\n\t")
-                     "ret" )
-#else
 __ASM_GLOBAL_FUNC( __CxxFrameHandler,
                    "pushl $0\n\t"        /* nested_frame */
                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
@@ -746,7 +685,6 @@ __ASM_GLOBAL_FUNC( __CxxFrameHandler,
                    "add $24,%esp\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset -24\n\t")
                    "ret" )
-#endif
 
 
 /*********************************************************************
@@ -754,7 +692,7 @@ __ASM_GLOBAL_FUNC( __CxxFrameHandler,
  *
  * Callback meant to be used as UnwindFunc for setjmp/longjmp.
  */
-void __stdcall __CxxLongjmpUnwind( const struct MSVCRT___JUMP_BUFFER *buf )
+void __stdcall __CxxLongjmpUnwind( const _JUMP_BUFFER *buf )
 {
     cxx_exception_frame *frame = (cxx_exception_frame *)buf->Registration;
     const cxx_function_descr *descr = (const cxx_function_descr *)buf->UnwindData[0];
@@ -810,12 +748,7 @@ unsigned int CDECL __CxxQueryExceptionSize(void)
  */
 
 /* Provided for VC++ binary compatibility only */
-#ifdef __i386_on_x86_64__
-extern void CDECL _EH_prolog(void);
-__ASM_GLOBAL_FUNC32(__ASM_THUNK_NAME(_EH_prolog),
-#else
 __ASM_GLOBAL_FUNC(_EH_prolog,
-#endif
                   __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")  /* skip ret addr */
                   "pushl $-1\n\t"
                   __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
@@ -836,10 +769,10 @@ static const SCOPETABLE_V4 *get_scopetable_v4( MSVCRT_EXCEPTION_FRAME *frame, UL
     return (const SCOPETABLE_V4 *)((ULONG_PTR)frame->scopetable ^ cookie);
 }
 
-static DWORD CDECL MSVCRT_nested_handler(PEXCEPTION_RECORD rec,
-                                         EXCEPTION_REGISTRATION_RECORD* frame,
-                                         PCONTEXT context,
-                                         EXCEPTION_REGISTRATION_RECORD** dispatch)
+static DWORD MSVCRT_nested_handler(PEXCEPTION_RECORD rec,
+                                   EXCEPTION_REGISTRATION_RECORD* frame,
+                                   PCONTEXT context,
+                                   EXCEPTION_REGISTRATION_RECORD** dispatch)
 {
   if (!(rec->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND)))
     return ExceptionContinueSearch;
@@ -1087,34 +1020,8 @@ int CDECL _except_handler4_common( ULONG *cookie, void (*check_cookie)(void),
  */
 
 #define MSVCRT_JMP_MAGIC 0x56433230 /* ID value for new jump structure */
-typedef void (__stdcall *MSVCRT_unwind_function)(const struct MSVCRT___JUMP_BUFFER *);
+typedef void (__stdcall *MSVCRT_unwind_function)(const _JUMP_BUFFER *);
 
-#ifdef __i386_on_x86_64__
-#define DEFINE_SETJMP_ENTRYPOINT(name)                                                              \
-    __ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(name),                                                    \
-                         "movl 4(%esp),%ecx\n\t"   /* jmp_buf */                                    \
-                         "movl %ebp,0(%ecx)\n\t"   /* jmp_buf.Ebp */                                \
-                         "movl %ebx,4(%ecx)\n\t"   /* jmp_buf.Ebx */                                \
-                         "movl %edi,8(%ecx)\n\t"   /* jmp_buf.Edi */                                \
-                         "movl %esi,12(%ecx)\n\t"  /* jmp_buf.Esi */                                \
-                         "movl %esp,16(%ecx)\n\t"  /* jmp_buf.Esp */                                \
-                         "movl 0(%esp),%eax\n\t"                                                    \
-                         "movl %eax,20(%ecx)\n\t"  /* jmp_buf.Eip */                                \
-                         "jmp " __ASM_THUNK_SYMBOL("__regs_" # name ) )
-
-extern void CDECL DECLSPEC_HIDDEN MSVCRT_longjmp_impl(struct MSVCRT___JUMP_BUFFER *jmp, int retval);
-__ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(MSVCRT_longjmp_impl),
-                     "movl 4(%esp),%ecx\n\t"   /* jmp_buf */
-                     "movl 8(%esp),%eax\n\t"   /* retval */
-                     "movl 0(%ecx),%ebp\n\t"   /* jmp_buf.Ebp */
-                     "movl 4(%ecx),%ebx\n\t"   /* jmp_buf.Ebx */
-                     "movl 8(%ecx),%edi\n\t"   /* jmp_buf.Edi */
-                     "movl 12(%ecx),%esi\n\t"  /* jmp_buf.Esi */
-                     "movl 16(%ecx),%esp\n\t"  /* jmp_buf.Esp */
-                     "addl $4,%esp\n\t"        /* get rid of return address */
-                     "jmp *20(%ecx)\n\t"       /* jmp_buf.Eip */ )
-
-#else
 /* define an entrypoint for setjmp/setjmp3 that stores the registers in the jmp buf */
 /* and then jumps to the C backend function */
 #define DEFINE_SETJMP_ENTRYPOINT(name) \
@@ -1129,16 +1036,14 @@ __ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(MSVCRT_longjmp_impl),
                        "movl %eax,20(%ecx)\n\t"  /* jmp_buf.Eip */  \
                        "jmp " __ASM_NAME("__regs_") # name )
 
-#endif
-
 /*******************************************************************
  *		_setjmp (MSVCRT.@)
  */
 DEFINE_SETJMP_ENTRYPOINT(MSVCRT__setjmp)
-int CDECL DECLSPEC_HIDDEN __regs_MSVCRT__setjmp(struct MSVCRT___JUMP_BUFFER *jmp)
+int CDECL DECLSPEC_HIDDEN __regs_MSVCRT__setjmp(_JUMP_BUFFER *jmp)
 {
-    jmp->Registration = (unsigned __int32)NtCurrentTeb()->Tib.ExceptionList;
-    if (jmp->Registration == (unsigned __int32)-1)
+    jmp->Registration = (unsigned long)NtCurrentTeb()->Tib.ExceptionList;
+    if (jmp->Registration == ~0UL)
         jmp->TryLevel = TRYLEVEL_END;
     else
         jmp->TryLevel = ((MSVCRT_EXCEPTION_FRAME*)jmp->Registration)->trylevel;
@@ -1152,27 +1057,27 @@ int CDECL DECLSPEC_HIDDEN __regs_MSVCRT__setjmp(struct MSVCRT___JUMP_BUFFER *jmp
  *		_setjmp3 (MSVCRT.@)
  */
 DEFINE_SETJMP_ENTRYPOINT( MSVCRT__setjmp3 )
-int WINAPIV DECLSPEC_HIDDEN __regs_MSVCRT__setjmp3(struct MSVCRT___JUMP_BUFFER *jmp, int nb_args, ...)
+int WINAPIV DECLSPEC_HIDDEN __regs_MSVCRT__setjmp3(_JUMP_BUFFER *jmp, int nb_args, ...)
 {
     jmp->Cookie = MSVCRT_JMP_MAGIC;
     jmp->UnwindFunc = 0;
-    jmp->Registration = (unsigned __int32)NtCurrentTeb()->Tib.ExceptionList;
-    if (jmp->Registration == (unsigned __int32)-1)
+    jmp->Registration = (unsigned long)NtCurrentTeb()->Tib.ExceptionList;
+    if (jmp->Registration == ~0UL)
     {
         jmp->TryLevel = TRYLEVEL_END;
     }
     else
     {
         int i;
-        __ms_va_list args;
+        va_list args;
 
-        __ms_va_start( args, nb_args );
+        va_start( args, nb_args );
         if (nb_args > 0) jmp->UnwindFunc = va_arg( args, unsigned long );
         if (nb_args > 1) jmp->TryLevel = va_arg( args, unsigned long );
         else jmp->TryLevel = ((MSVCRT_EXCEPTION_FRAME*)jmp->Registration)->trylevel;
         for (i = 0; i < 6 && i < nb_args - 2; i++)
             jmp->UnwindData[i] = va_arg( args, unsigned long );
-        __ms_va_end( args );
+        va_end( args );
     }
 
     TRACE("buf=%p ebx=%08lx esi=%08lx edi=%08lx ebp=%08lx esp=%08lx eip=%08lx frame=%08lx\n",
@@ -1183,7 +1088,7 @@ int WINAPIV DECLSPEC_HIDDEN __regs_MSVCRT__setjmp3(struct MSVCRT___JUMP_BUFFER *
 /*********************************************************************
  *		longjmp (MSVCRT.@)
  */
-void CDECL MSVCRT_longjmp(struct MSVCRT___JUMP_BUFFER *jmp, int retval)
+void CDECL MSVCRT_longjmp(_JUMP_BUFFER *jmp, int retval)
 {
     unsigned long cur_frame = 0;
 
@@ -1215,17 +1120,13 @@ void CDECL MSVCRT_longjmp(struct MSVCRT___JUMP_BUFFER *jmp, int retval)
     if (!retval)
         retval = 1;
 
-#ifdef __i386_on_x86_64__
-    WINE_CALL_IMPL32(MSVCRT_longjmp_impl)( jmp, retval );
-#else
     __wine_longjmp( (__wine_jmp_buf *)jmp, retval );
-#endif
 }
 
 /*********************************************************************
  *		_seh_longjmp_unwind (MSVCRT.@)
  */
-void __stdcall _seh_longjmp_unwind(struct MSVCRT___JUMP_BUFFER *jmp)
+void __stdcall _seh_longjmp_unwind(_JUMP_BUFFER *jmp)
 {
     msvcrt_local_unwind2( (MSVCRT_EXCEPTION_FRAME *)jmp->Registration, jmp->TryLevel, (void *)jmp->Ebp );
 }
@@ -1233,7 +1134,7 @@ void __stdcall _seh_longjmp_unwind(struct MSVCRT___JUMP_BUFFER *jmp)
 /*********************************************************************
  *		_seh_longjmp_unwind4 (MSVCRT.@)
  */
-void __stdcall _seh_longjmp_unwind4(struct MSVCRT___JUMP_BUFFER *jmp)
+void __stdcall _seh_longjmp_unwind4(_JUMP_BUFFER *jmp)
 {
     msvcrt_local_unwind4( (ULONG *)&jmp->Cookie, (MSVCRT_EXCEPTION_FRAME *)jmp->Registration,
                           jmp->TryLevel, (void *)jmp->Ebp );
@@ -1242,14 +1143,14 @@ void __stdcall _seh_longjmp_unwind4(struct MSVCRT___JUMP_BUFFER *jmp)
 /*********************************************************************
  *              _fpieee_flt (MSVCRT.@)
  */
-int __cdecl _fpieee_flt(ULONG exception_code, EXCEPTION_POINTERS *ep,
+int __cdecl _fpieee_flt(__msvcrt_ulong exception_code, EXCEPTION_POINTERS *ep,
         int (__cdecl *handler)(_FPIEEE_RECORD*))
 {
     FLOATING_SAVE_AREA *ctx = &ep->ContextRecord->FloatSave;
     _FPIEEE_RECORD rec;
     int ret;
 
-    TRACE("(%x %p %p)\n", exception_code, ep, handler);
+    TRACE("(%lx %p %p)\n", exception_code, ep, handler);
 
     switch(exception_code) {
     case STATUS_FLOAT_DIVIDE_BY_ZERO:

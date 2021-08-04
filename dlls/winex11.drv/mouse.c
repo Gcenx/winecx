@@ -51,7 +51,6 @@ MAKE_FUNCPTR(XcursorLibraryLoadCursor);
 
 #include "x11drv.h"
 #include "wine/server.h"
-#include "wine/library.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
@@ -75,8 +74,8 @@ static const UINT button_down_flags[NB_BUTTONS] =
     MOUSEEVENTF_RIGHTDOWN,
     MOUSEEVENTF_WHEEL,
     MOUSEEVENTF_WHEEL,
-    MOUSEEVENTF_XDOWN,  /* FIXME: horizontal wheel */
-    MOUSEEVENTF_XDOWN,
+    MOUSEEVENTF_HWHEEL,
+    MOUSEEVENTF_HWHEEL,
     MOUSEEVENTF_XDOWN,
     MOUSEEVENTF_XDOWN
 };
@@ -88,8 +87,8 @@ static const UINT button_up_flags[NB_BUTTONS] =
     MOUSEEVENTF_RIGHTUP,
     0,
     0,
-    MOUSEEVENTF_XUP,
-    MOUSEEVENTF_XUP,
+    0,
+    0,
     MOUSEEVENTF_XUP,
     MOUSEEVENTF_XUP
 };
@@ -101,8 +100,8 @@ static const UINT button_down_data[NB_BUTTONS] =
     0,
     WHEEL_DELTA,
     -WHEEL_DELTA,
-    XBUTTON1,
-    XBUTTON2,
+    -WHEEL_DELTA,
+    WHEEL_DELTA,
     XBUTTON1,
     XBUTTON2
 };
@@ -114,8 +113,8 @@ static const UINT button_up_data[NB_BUTTONS] =
     0,
     0,
     0,
-    XBUTTON1,
-    XBUTTON2,
+    0,
+    0,
     XBUTTON1,
     XBUTTON2
 };
@@ -151,14 +150,13 @@ MAKE_FUNCPTR(XISelectEvents);
 void X11DRV_Xcursor_Init(void)
 {
 #ifdef SONAME_LIBXCURSOR
-    xcursor_handle = wine_dlopen(SONAME_LIBXCURSOR, RTLD_NOW, NULL, 0);
-    if (!xcursor_handle)  /* wine_dlopen failed. */
+    xcursor_handle = dlopen(SONAME_LIBXCURSOR, RTLD_NOW);
+    if (!xcursor_handle)
     {
         WARN("Xcursor failed to load.  Using fallback code.\n");
         return;
     }
-#define LOAD_FUNCPTR(f) \
-        p##f = wine_dlsym(xcursor_handle, #f, NULL, 0)
+#define LOAD_FUNCPTR(f) p##f = dlsym(xcursor_handle, #f)
 
     LOAD_FUNCPTR(XcursorImageCreate);
     LOAD_FUNCPTR(XcursorImageDestroy);
@@ -447,7 +445,7 @@ static BOOL grab_clipping_window( const RECT *clip )
     if (!data->clip_hwnd) sync_window_cursor( clip_window );
     InterlockedExchangePointer( (void **)&cursor_window, msg_hwnd );
     data->clip_hwnd = msg_hwnd;
-    SendMessageW( GetDesktopWindow(), WM_X11DRV_CLIP_CURSOR, 0, (LPARAM)msg_hwnd );
+    SendNotifyMessageW( GetDesktopWindow(), WM_X11DRV_CLIP_CURSOR_NOTIFY, 0, (LPARAM)msg_hwnd );
     return TRUE;
 }
 
@@ -467,7 +465,7 @@ void ungrab_clipping_window(void)
     XUnmapWindow( display, clip_window );
     if (clipping_cursor) XUngrabPointer( display, CurrentTime );
     clipping_cursor = FALSE;
-    SendMessageW( GetDesktopWindow(), WM_X11DRV_CLIP_CURSOR, 0, 0 );
+    SendNotifyMessageW( GetDesktopWindow(), WM_X11DRV_CLIP_CURSOR_NOTIFY, 0, 0 );
 }
 
 /***********************************************************************
@@ -495,12 +493,10 @@ void retry_grab_clipping_window(void)
         ClipCursor( &last_clip_rect );
 }
 
-BOOL CDECL X11DRV_ClipCursor( const RECT *clip );
-
 /***********************************************************************
  *             clip_cursor_notify
  *
- * Notification function called upon receiving a WM_X11DRV_CLIP_CURSOR.
+ * Notification function called upon receiving a WM_X11DRV_CLIP_CURSOR_NOTIFY.
  */
 LRESULT clip_cursor_notify( HWND hwnd, HWND prev_clip_hwnd, HWND new_clip_hwnd )
 {
@@ -513,7 +509,7 @@ LRESULT clip_cursor_notify( HWND hwnd, HWND prev_clip_hwnd, HWND new_clip_hwnd )
         HWND prev = clip_hwnd;
         clip_hwnd = new_clip_hwnd;
         if (prev || new_clip_hwnd) TRACE( "clip hwnd changed from %p to %p\n", prev, new_clip_hwnd );
-        if (prev) SendNotifyMessageW( prev, WM_X11DRV_CLIP_CURSOR, (WPARAM)prev, 0 );
+        if (prev) SendNotifyMessageW( prev, WM_X11DRV_CLIP_CURSOR_NOTIFY, (WPARAM)prev, 0 );
     }
     else if (hwnd == data->clip_hwnd)  /* this is a notification that clipping has been reset */
     {
@@ -522,13 +518,6 @@ LRESULT clip_cursor_notify( HWND hwnd, HWND prev_clip_hwnd, HWND new_clip_hwnd )
         data->clip_reset = GetTickCount();
         disable_xinput2();
         DestroyWindow( hwnd );
-    }
-    else if (hwnd == GetForegroundWindow())  /* request to clip */
-    {
-        RECT clip;
-
-        GetClipCursor( &clip );
-        X11DRV_ClipCursor( &clip );
     }
     else if (prev_clip_hwnd)
     {
@@ -550,7 +539,8 @@ BOOL clip_fullscreen_window( HWND hwnd, BOOL reset )
 {
     struct x11drv_win_data *data;
     struct x11drv_thread_data *thread_data;
-    RECT rect;
+    MONITORINFO monitor_info;
+    HMONITOR monitor;
     DWORD style;
     BOOL fullscreen;
 
@@ -561,21 +551,25 @@ BOOL clip_fullscreen_window( HWND hwnd, BOOL reset )
     /* maximized windows don't count as full screen */
     if ((style & WS_MAXIMIZE) && (style & WS_CAPTION) == WS_CAPTION) return FALSE;
     if (!(data = get_win_data( hwnd ))) return FALSE;
-    fullscreen = is_window_rect_fullscreen( &data->whole_rect );
+    fullscreen = is_window_rect_full_screen( &data->whole_rect );
     release_win_data( data );
     if (!fullscreen) return FALSE;
     if (!(thread_data = x11drv_thread_data())) return FALSE;
     if (GetTickCount() - thread_data->clip_reset < 1000) return FALSE;
     if (!reset && clipping_cursor && thread_data->clip_hwnd) return FALSE;  /* already clipping */
-    rect = get_primary_monitor_rect();
+
+    monitor = MonitorFromWindow( hwnd, MONITOR_DEFAULTTONEAREST );
+    if (!monitor) return FALSE;
+    monitor_info.cbSize = sizeof(monitor_info);
+    if (!GetMonitorInfoW( monitor, &monitor_info )) return FALSE;
     if (!grab_fullscreen)
     {
         RECT virtual_rect = get_virtual_screen_rect();
-        if (!EqualRect( &rect, &virtual_rect )) return FALSE;
+        if (!EqualRect( &monitor_info.rcMonitor, &virtual_rect )) return FALSE;
         if (is_virtual_desktop()) return FALSE;
     }
     TRACE( "win %p clipping fullscreen\n", hwnd );
-    return grab_clipping_window( &rect );
+    return grab_clipping_window( &monitor_info.rcMonitor );
 }
 
 
@@ -1536,7 +1530,7 @@ BOOL CDECL X11DRV_ClipCursor( LPCRECT clip )
         if (tid && tid != GetCurrentThreadId() && pid == GetCurrentProcessId())
         {
             TRACE( "forwarding clip request to %p\n", foreground );
-            SendNotifyMessageW( foreground, WM_X11DRV_CLIP_CURSOR, 0, 0 );
+            SendNotifyMessageW( foreground, WM_X11DRV_CLIP_CURSOR_REQUEST, FALSE, FALSE );
             return TRUE;
         }
 
@@ -1558,6 +1552,30 @@ BOOL CDECL X11DRV_ClipCursor( LPCRECT clip )
     }
     ungrab_clipping_window();
     return TRUE;
+}
+
+/***********************************************************************
+ *             clip_cursor_request
+ *
+ * Function called upon receiving a WM_X11DRV_CLIP_CURSOR_REQUEST.
+ */
+LRESULT clip_cursor_request( HWND hwnd, BOOL fullscreen, BOOL reset )
+{
+    RECT clip;
+
+    if (hwnd == GetDesktopWindow())
+        WARN( "ignoring clip cursor request on desktop window.\n" );
+    else if (hwnd != GetForegroundWindow())
+        WARN( "ignoring clip cursor request on non-foreground window.\n" );
+    else if (fullscreen)
+        clip_fullscreen_window( hwnd, reset );
+    else
+    {
+        GetClipCursor( &clip );
+        X11DRV_ClipCursor( &clip );
+    }
+
+    return 0;
 }
 
 /***********************************************************************
@@ -1868,7 +1886,7 @@ void X11DRV_XInput2_Init(void)
 {
 #if defined(SONAME_LIBXI) && defined(HAVE_X11_EXTENSIONS_XINPUT2_H)
     int event, error;
-    void *libxi_handle = wine_dlopen( SONAME_LIBXI, RTLD_NOW, NULL, 0 );
+    void *libxi_handle = dlopen( SONAME_LIBXI, RTLD_NOW );
 
     if (!libxi_handle)
     {
@@ -1876,7 +1894,7 @@ void X11DRV_XInput2_Init(void)
         return;
     }
 #define LOAD_FUNCPTR(f) \
-    if (!(p##f = wine_dlsym( libxi_handle, #f, NULL, 0))) \
+    if (!(p##f = dlsym( libxi_handle, #f))) \
     { \
         WARN("Failed to load %s.\n", #f); \
         return; \

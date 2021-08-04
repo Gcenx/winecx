@@ -52,31 +52,111 @@ static inline ItemMonikerImpl *impl_from_IMoniker(IMoniker *iface)
     return CONTAINING_RECORD(iface, ItemMonikerImpl, IMoniker_iface);
 }
 
+static ItemMonikerImpl *unsafe_impl_from_IMoniker(IMoniker *iface);
+
 static inline ItemMonikerImpl *impl_from_IROTData(IROTData *iface)
 {
     return CONTAINING_RECORD(iface, ItemMonikerImpl, IROTData_iface);
 }
 
-static HRESULT ItemMonikerImpl_Destroy(ItemMonikerImpl* iface);
+struct container_lock
+{
+    IUnknown IUnknown_iface;
+    LONG refcount;
+    IOleItemContainer *container;
+};
+
+static struct container_lock *impl_lock_from_IUnknown(IUnknown *iface)
+{
+    return CONTAINING_RECORD(iface, struct container_lock, IUnknown_iface);
+}
+
+static HRESULT WINAPI container_lock_QueryInterface(IUnknown *iface, REFIID riid, void **obj)
+{
+    if (IsEqualIID(riid, &IID_IUnknown))
+    {
+        *obj = iface;
+        IUnknown_AddRef(iface);
+        return S_OK;
+    }
+
+    WARN("Unsupported interface %s.\n", debugstr_guid(riid));
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI container_lock_AddRef(IUnknown *iface)
+{
+    struct container_lock *lock = impl_lock_from_IUnknown(iface);
+    return InterlockedIncrement(&lock->refcount);
+}
+
+static ULONG WINAPI container_lock_Release(IUnknown *iface)
+{
+    struct container_lock *lock = impl_lock_from_IUnknown(iface);
+    ULONG refcount = InterlockedDecrement(&lock->refcount);
+
+    if (!refcount)
+    {
+        IOleItemContainer_LockContainer(lock->container, FALSE);
+        IOleItemContainer_Release(lock->container);
+        heap_free(lock);
+    }
+
+    return refcount;
+}
+
+static const IUnknownVtbl container_lock_vtbl =
+{
+    container_lock_QueryInterface,
+    container_lock_AddRef,
+    container_lock_Release,
+};
+
+static HRESULT set_container_lock(IOleItemContainer *container, IBindCtx *pbc)
+{
+    struct container_lock *lock;
+    HRESULT hr;
+
+    if (!(lock = heap_alloc(sizeof(*lock))))
+        return E_OUTOFMEMORY;
+
+    if (FAILED(hr = IOleItemContainer_LockContainer(container, TRUE)))
+    {
+        heap_free(lock);
+        return hr;
+    }
+
+    lock->IUnknown_iface.lpVtbl = &container_lock_vtbl;
+    lock->refcount = 1;
+    lock->container = container;
+    IOleItemContainer_AddRef(lock->container);
+
+    hr = IBindCtx_RegisterObjectBound(pbc, &lock->IUnknown_iface);
+    IUnknown_Release(&lock->IUnknown_iface);
+    return hr;
+}
 
 /*******************************************************************************
  *        ItemMoniker_QueryInterface
  *******************************************************************************/
-static HRESULT WINAPI ItemMonikerImpl_QueryInterface(IMoniker* iface,REFIID riid,void** ppvObject)
+static HRESULT WINAPI ItemMonikerImpl_QueryInterface(IMoniker *iface, REFIID riid, void **ppvObject)
 {
     ItemMonikerImpl *This = impl_from_IMoniker(iface);
 
-    TRACE("(%p,%s,%p)\n",This,debugstr_guid(riid),ppvObject);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), ppvObject);
 
     if (!ppvObject)
         return E_INVALIDARG;
 
-    /* Compare the riid with the interface IDs implemented by this object.*/
     if (IsEqualIID(&IID_IUnknown, riid) ||
         IsEqualIID(&IID_IPersist, riid) ||
         IsEqualIID(&IID_IPersistStream, riid) ||
-        IsEqualIID(&IID_IMoniker, riid))
+        IsEqualIID(&IID_IMoniker, riid) ||
+        IsEqualGUID(&CLSID_ItemMoniker, riid))
+    {
         *ppvObject = iface;
+    }
     else if (IsEqualIID(&IID_IROTData, riid))
         *ppvObject = &This->IROTData_iface;
     else if (IsEqualIID(&IID_IMarshal, riid))
@@ -115,17 +195,20 @@ static ULONG WINAPI ItemMonikerImpl_AddRef(IMoniker* iface)
  ******************************************************************************/
 static ULONG WINAPI ItemMonikerImpl_Release(IMoniker* iface)
 {
-    ItemMonikerImpl *This = impl_from_IMoniker(iface);
-    ULONG ref;
+    ItemMonikerImpl *moniker = impl_from_IMoniker(iface);
+    ULONG refcount = InterlockedDecrement(&moniker->ref);
 
-    TRACE("(%p)\n",This);
+    TRACE("%p, refcount %u.\n", iface, refcount);
 
-    ref = InterlockedDecrement(&This->ref);
+    if (!refcount)
+    {
+        if (moniker->pMarshal) IUnknown_Release(moniker->pMarshal);
+        heap_free(moniker->itemName);
+        heap_free(moniker->itemDelimiter);
+        heap_free(moniker);
+    }
 
-    /* destroy the object if there are no more references to it */
-    if (ref == 0) ItemMonikerImpl_Destroy(This);
-
-    return ref;
+    return refcount;
 }
 
 /******************************************************************************
@@ -329,6 +412,18 @@ static HRESULT WINAPI ItemMonikerImpl_GetSizeMax(IMoniker* iface, ULARGE_INTEGER
     return S_OK;
 }
 
+static DWORD get_bind_speed_from_bindctx(IBindCtx *pbc)
+{
+    DWORD bind_speed = BINDSPEED_INDEFINITE;
+    BIND_OPTS bind_opts;
+
+    bind_opts.cbStruct = sizeof(bind_opts);
+    if (SUCCEEDED(IBindCtx_GetBindOptions(pbc, &bind_opts)) && bind_opts.dwTickCountDeadline)
+        bind_speed = bind_opts.dwTickCountDeadline < 2500 ? BINDSPEED_IMMEDIATE : BINDSPEED_MODERATE;
+
+    return bind_speed;
+}
+
 /******************************************************************************
  *                  ItemMoniker_BindToObject
  ******************************************************************************/
@@ -339,9 +434,8 @@ static HRESULT WINAPI ItemMonikerImpl_BindToObject(IMoniker* iface,
                                                    VOID** ppvResult)
 {
     ItemMonikerImpl *This = impl_from_IMoniker(iface);
-    HRESULT   res;
-    IID    refid=IID_IOleItemContainer;
-    IOleItemContainer *poic=0;
+    IOleItemContainer *container;
+    HRESULT hr;
 
     TRACE("(%p,%p,%p,%s,%p)\n",iface,pbc,pmkToLeft,debugstr_guid(riid),ppvResult);
 
@@ -353,48 +447,48 @@ static HRESULT WINAPI ItemMonikerImpl_BindToObject(IMoniker* iface,
 
     *ppvResult=0;
 
-    res=IMoniker_BindToObject(pmkToLeft,pbc,NULL,&refid,(void**)&poic);
+    hr = IMoniker_BindToObject(pmkToLeft, pbc, NULL, &IID_IOleItemContainer, (void **)&container);
+    if (SUCCEEDED(hr))
+    {
+        if (FAILED(hr = set_container_lock(container, pbc)))
+            WARN("Failed to lock container, hr %#x.\n", hr);
 
-    if (SUCCEEDED(res)){
-
-        res=IOleItemContainer_GetObject(poic,This->itemName,BINDSPEED_MODERATE,pbc,riid,ppvResult);
-
-        IOleItemContainer_Release(poic);
+        hr = IOleItemContainer_GetObject(container, This->itemName, get_bind_speed_from_bindctx(pbc), pbc,
+                riid, ppvResult);
+        IOleItemContainer_Release(container);
     }
 
-    return res;
+    return hr;
 }
 
 /******************************************************************************
  *        ItemMoniker_BindToStorage
  ******************************************************************************/
-static HRESULT WINAPI ItemMonikerImpl_BindToStorage(IMoniker* iface,
-                                                    IBindCtx* pbc,
-                                                    IMoniker* pmkToLeft,
-                                                    REFIID riid,
-                                                    VOID** ppvResult)
+static HRESULT WINAPI ItemMonikerImpl_BindToStorage(IMoniker *iface, IBindCtx *pbc, IMoniker *pmkToLeft, REFIID riid,
+        void **ppvResult)
 {
-    ItemMonikerImpl *This = impl_from_IMoniker(iface);
-    HRESULT   res;
-    IOleItemContainer *poic=0;
+    ItemMonikerImpl *moniker = impl_from_IMoniker(iface);
+    IOleItemContainer *container;
+    HRESULT hr;
 
-    TRACE("(%p,%p,%p,%s,%p)\n",iface,pbc,pmkToLeft,debugstr_guid(riid),ppvResult);
+    TRACE("%p, %p, %p, %s, %p.\n", iface, pbc, pmkToLeft, debugstr_guid(riid), ppvResult);
 
-    *ppvResult=0;
+    *ppvResult = 0;
 
-    if(pmkToLeft==NULL)
+    if (!pmkToLeft)
         return E_INVALIDARG;
 
-    res=IMoniker_BindToObject(pmkToLeft,pbc,NULL,&IID_IOleItemContainer,(void**)&poic);
+    hr = IMoniker_BindToObject(pmkToLeft, pbc, NULL, &IID_IOleItemContainer, (void **)&container);
+    if (SUCCEEDED(hr))
+    {
+        if (FAILED(hr = set_container_lock(container, pbc)))
+            WARN("Failed to lock container, hr %#x.\n", hr);
 
-    if (SUCCEEDED(res)){
-
-        res=IOleItemContainer_GetObjectStorage(poic,This->itemName,pbc,riid,ppvResult);
-
-        IOleItemContainer_Release(poic);
+        hr = IOleItemContainer_GetObjectStorage(container, moniker->itemName, pbc, riid, ppvResult);
+        IOleItemContainer_Release(container);
     }
 
-    return res;
+    return hr;
 }
 
 /******************************************************************************
@@ -426,7 +520,7 @@ static HRESULT WINAPI ItemMonikerImpl_ComposeWith(IMoniker* iface,
                                                   IMoniker** ppmkComposite)
 {
     HRESULT res=S_OK;
-    DWORD mkSys,mkSys2;
+    DWORD mkSys,mkSys2, order;
     IEnumMoniker* penumMk=0;
     IMoniker *pmostLeftMk=0;
     IMoniker* tempMkComposite=0;
@@ -438,16 +532,14 @@ static HRESULT WINAPI ItemMonikerImpl_ComposeWith(IMoniker* iface,
 
     *ppmkComposite=0;
 
-    IMoniker_IsSystemMoniker(pmkRight,&mkSys);
-
-    /* If pmkRight is an anti-moniker, the returned moniker is NULL */
-    if(mkSys==MKSYS_ANTIMONIKER)
-        return res;
-
+    if (is_anti_moniker(pmkRight, &order))
+    {
+        return order > 1 ? create_anti_moniker(order - 1, ppmkComposite) : S_OK;
+    }
     else
         /* if pmkRight is a composite whose leftmost component is an anti-moniker,           */
         /* the returned moniker is the composite after the leftmost anti-moniker is removed. */
-
+        IMoniker_IsSystemMoniker(pmkRight,&mkSys);
          if(mkSys==MKSYS_GENERICCOMPOSITE){
 
             res=IMoniker_Enum(pmkRight,TRUE,&penumMk);
@@ -510,34 +602,20 @@ static HRESULT WINAPI ItemMonikerImpl_Enum(IMoniker* iface,BOOL fForward, IEnumM
 /******************************************************************************
  *        ItemMoniker_IsEqual
  ******************************************************************************/
-static HRESULT WINAPI ItemMonikerImpl_IsEqual(IMoniker* iface,IMoniker* pmkOtherMoniker)
+static HRESULT WINAPI ItemMonikerImpl_IsEqual(IMoniker *iface, IMoniker *other)
 {
+    ItemMonikerImpl *moniker = impl_from_IMoniker(iface), *other_moniker;
 
-    CLSID clsid;
-    LPOLESTR dispName1,dispName2;
-    IBindCtx* bind;
-    HRESULT res = S_FALSE;
+    TRACE("%p, %p.\n", iface, other);
 
-    TRACE("(%p,%p)\n",iface,pmkOtherMoniker);
+    if (!other)
+        return E_INVALIDARG;
 
-    if (!pmkOtherMoniker) return S_FALSE;
+    other_moniker = unsafe_impl_from_IMoniker(other);
+    if (!other_moniker)
+        return S_FALSE;
 
-
-    /* check if both are ItemMoniker */
-    if(FAILED (IMoniker_GetClassID(pmkOtherMoniker,&clsid))) return S_FALSE;
-    if(!IsEqualCLSID(&clsid,&CLSID_ItemMoniker)) return S_FALSE;
-
-    /* check if both displaynames are the same */
-    if(SUCCEEDED ((res = CreateBindCtx(0,&bind)))) {
-        if(SUCCEEDED (IMoniker_GetDisplayName(iface,bind,NULL,&dispName1))) {
-	    if(SUCCEEDED (IMoniker_GetDisplayName(pmkOtherMoniker,bind,NULL,&dispName2))) {
-                if(wcscmp(dispName1,dispName2)==0) res = S_OK;
-                CoTaskMemFree(dispName2);
-            }
-            CoTaskMemFree(dispName1);
-	}
-    }
-    return res;
+    return !wcsicmp(moniker->itemName, other_moniker->itemName) ? S_OK : S_FALSE;
 }
 
 /******************************************************************************
@@ -568,53 +646,51 @@ static HRESULT WINAPI ItemMonikerImpl_Hash(IMoniker* iface,DWORD* pdwHash)
 /******************************************************************************
  *        ItemMoniker_IsRunning
  ******************************************************************************/
-static HRESULT WINAPI ItemMonikerImpl_IsRunning(IMoniker* iface,
-                                                IBindCtx* pbc,
-                                                IMoniker* pmkToLeft,
-                                                IMoniker* pmkNewlyRunning)
+static HRESULT WINAPI ItemMonikerImpl_IsRunning(IMoniker *iface, IBindCtx *pbc, IMoniker *pmkToLeft,
+        IMoniker *pmkNewlyRunning)
 {
-    ItemMonikerImpl *This = impl_from_IMoniker(iface);
+    ItemMonikerImpl *moniker = impl_from_IMoniker(iface);
+    IOleItemContainer *container;
     IRunningObjectTable* rot;
-    HRESULT res;
-    IOleItemContainer *poic=0;
+    HRESULT hr;
 
     TRACE("(%p,%p,%p,%p)\n",iface,pbc,pmkToLeft,pmkNewlyRunning);
 
-    /* If pmkToLeft is NULL, this method returns TRUE if pmkNewlyRunning is non-NULL and is equal to this */
-    /* moniker. Otherwise, the method checks the ROT to see whether this moniker is running.              */
-    if (pmkToLeft==NULL)
-        if ((pmkNewlyRunning!=NULL)&&(IMoniker_IsEqual(pmkNewlyRunning,iface)==S_OK))
-            return S_OK;
-        else {
-            if (pbc==NULL)
-                return E_INVALIDARG;
+    if (!pbc)
+        return E_INVALIDARG;
 
-            res=IBindCtx_GetRunningObjectTable(pbc,&rot);
-
-            if (FAILED(res))
-                return res;
-
-            res = IRunningObjectTable_IsRunning(rot,iface);
-
-            IRunningObjectTable_Release(rot);
+    if (!pmkToLeft)
+    {
+        if (pmkNewlyRunning)
+        {
+            return IMoniker_IsEqual(iface, pmkNewlyRunning);
         }
-    else{
+        else
+        {
+            hr = IBindCtx_GetRunningObjectTable(pbc, &rot);
+            if (SUCCEEDED(hr))
+            {
+                hr = IRunningObjectTable_IsRunning(rot, iface);
+                IRunningObjectTable_Release(rot);
+            }
+        }
+    }
+    else
+    {
+        /* Container itself must be running too. */
+        hr = IMoniker_IsRunning(pmkToLeft, pbc, NULL, NULL);
+        if (hr != S_OK)
+            return hr;
 
-        /* If pmkToLeft is non-NULL, the method calls IMoniker::BindToObject on the pmkToLeft parameter,         */
-        /* requesting an IOleItemContainer interface pointer. The method then calls IOleItemContainer::IsRunning,*/
-        /* passing the string contained within this moniker. */
-
-        res=IMoniker_BindToObject(pmkToLeft,pbc,NULL,&IID_IOleItemContainer,(void**)&poic);
-
-        if (SUCCEEDED(res)){
-
-            res=IOleItemContainer_IsRunning(poic,This->itemName);
-
-            IOleItemContainer_Release(poic);
+        hr = IMoniker_BindToObject(pmkToLeft, pbc, NULL, &IID_IOleItemContainer, (void **)&container);
+        if (SUCCEEDED(hr))
+        {
+            hr = IOleItemContainer_IsRunning(container, moniker->itemName);
+            IOleItemContainer_Release(container);
         }
     }
 
-    return res;
+    return hr;
 }
 
 /******************************************************************************
@@ -761,45 +837,36 @@ static HRESULT WINAPI ItemMonikerImpl_GetDisplayName(IMoniker* iface,
 /******************************************************************************
  *        ItemMoniker_ParseDisplayName
  ******************************************************************************/
-static HRESULT WINAPI ItemMonikerImpl_ParseDisplayName(IMoniker* iface,
-                                                       IBindCtx* pbc,
-                                                       IMoniker* pmkToLeft,
-                                                       LPOLESTR pszDisplayName,
-                                                       ULONG* pchEaten,
-                                                       IMoniker** ppmkOut)
+static HRESULT WINAPI ItemMonikerImpl_ParseDisplayName(IMoniker *iface, IBindCtx *pbc, IMoniker *pmkToLeft,
+        LPOLESTR displayname, ULONG *eaten, IMoniker **ppmkOut)
 {
     ItemMonikerImpl *This = impl_from_IMoniker(iface);
-    IOleItemContainer* poic=0;
-    IParseDisplayName* ppdn=0;
-    LPOLESTR displayName;
-    HRESULT res;
+    IOleItemContainer *container;
+    IParseDisplayName *parser;
+    HRESULT hr;
 
-    TRACE("%s\n", debugstr_w(pszDisplayName));
+    TRACE("%p, %p, %p, %s, %p, %p.\n", iface, pbc, pmkToLeft, debugstr_w(displayname), eaten, ppmkOut);
 
-    /* If pmkToLeft is NULL, this method returns MK_E_SYNTAX */
-    if (pmkToLeft==NULL)
-
+    if (!pmkToLeft)
         return MK_E_SYNTAX;
 
-    else{
-        /* Otherwise, the method calls IMoniker::BindToObject on the pmkToLeft parameter, requesting an */
-        /* IParseDisplayName interface pointer to the object identified by the moniker, and passes the display */
-        /* name to IParseDisplayName::ParseDisplayName */
-        res=IMoniker_BindToObject(pmkToLeft,pbc,NULL,&IID_IOleItemContainer,(void**)&poic);
-
-        if (SUCCEEDED(res)){
-
-            res=IOleItemContainer_GetObject(poic,This->itemName,BINDSPEED_MODERATE,pbc,&IID_IParseDisplayName,(void**)&ppdn);
-
-            res=IMoniker_GetDisplayName(iface,pbc,NULL,&displayName);
-
-            res=IParseDisplayName_ParseDisplayName(ppdn,pbc,displayName,pchEaten,ppmkOut);
-
-            IOleItemContainer_Release(poic);
-            IParseDisplayName_Release(ppdn);
+    hr = IMoniker_BindToObject(pmkToLeft, pbc, NULL, &IID_IOleItemContainer, (void **)&container);
+    if (SUCCEEDED(hr))
+    {
+        if (SUCCEEDED(hr = set_container_lock(container, pbc)))
+        {
+            hr = IOleItemContainer_GetObject(container, This->itemName, get_bind_speed_from_bindctx(pbc), pbc,
+                    &IID_IParseDisplayName, (void **)&parser);
+            if (SUCCEEDED(hr))
+            {
+                hr = IParseDisplayName_ParseDisplayName(parser, pbc, displayname, eaten, ppmkOut);
+                IParseDisplayName_Release(parser);
+            }
         }
+        IOleItemContainer_Release(container);
     }
-    return res;
+
+    return hr;
 }
 
 /******************************************************************************
@@ -920,6 +987,13 @@ static const IMonikerVtbl VT_ItemMonikerImpl =
     ItemMonikerImpl_IsSystemMoniker
 };
 
+static ItemMonikerImpl *unsafe_impl_from_IMoniker(IMoniker *iface)
+{
+    if (iface->lpVtbl != &VT_ItemMonikerImpl)
+        return NULL;
+    return CONTAINING_RECORD(iface, ItemMonikerImpl, IMoniker_iface);
+}
+
 /********************************************************************************/
 /* Virtual function table for the IROTData class.                               */
 static const IROTDataVtbl VT_ROTDataImpl =
@@ -931,107 +1005,71 @@ static const IROTDataVtbl VT_ROTDataImpl =
 };
 
 /******************************************************************************
- *         ItemMoniker_Construct (local function)
- *******************************************************************************/
-static HRESULT ItemMonikerImpl_Construct(ItemMonikerImpl* This, const WCHAR *delimiter, const WCHAR *name)
+ *        CreateItemMoniker	[OLE32.@]
+ ******************************************************************************/
+HRESULT WINAPI CreateItemMoniker(const WCHAR *delimiter, const WCHAR *name, IMoniker **ret)
 {
+    ItemMonikerImpl *moniker;
     int str_len;
+    HRESULT hr;
 
-    TRACE("(%p, %s, %s)\n", This, debugstr_w(delimiter), debugstr_w(name));
+    TRACE("%s, %s, %p.\n", debugstr_w(delimiter), debugstr_w(name), ret);
 
-    /* Initialize the virtual function table. */
-    This->IMoniker_iface.lpVtbl = &VT_ItemMonikerImpl;
-    This->IROTData_iface.lpVtbl = &VT_ROTDataImpl;
-    This->ref          = 0;
-    This->pMarshal     = NULL;
-    This->itemDelimiter = NULL;
+    if (!(moniker = heap_alloc_zero(sizeof(*moniker))))
+        return E_OUTOFMEMORY;
+
+    moniker->IMoniker_iface.lpVtbl = &VT_ItemMonikerImpl;
+    moniker->IROTData_iface.lpVtbl = &VT_ROTDataImpl;
+    moniker->ref = 1;
 
     str_len = (lstrlenW(name) + 1) * sizeof(WCHAR);
-    This->itemName = heap_alloc(str_len);
-    if (!This->itemName)
-	return E_OUTOFMEMORY;
-    memcpy(This->itemName, name, str_len);
+    moniker->itemName = heap_alloc(str_len);
+    if (!moniker->itemName)
+    {
+        hr = E_OUTOFMEMORY;
+        goto failed;
+    }
+    memcpy(moniker->itemName, name, str_len);
 
     if (delimiter)
     {
         str_len = (lstrlenW(delimiter) + 1) * sizeof(WCHAR);
-        This->itemDelimiter = heap_alloc(str_len);
-        if (!This->itemDelimiter)
+        moniker->itemDelimiter = heap_alloc(str_len);
+        if (!moniker->itemDelimiter)
         {
-            heap_free(This->itemName);
-            return E_OUTOFMEMORY;
+            hr = E_OUTOFMEMORY;
+            goto failed;
         }
-        memcpy(This->itemDelimiter, delimiter, str_len);
+        memcpy(moniker->itemDelimiter, delimiter, str_len);
     }
 
-    return S_OK;
-}
-
-/******************************************************************************
- *        ItemMoniker_Destroy (local function)
- *******************************************************************************/
-static HRESULT ItemMonikerImpl_Destroy(ItemMonikerImpl* This)
-{
-    TRACE("(%p)\n",This);
-
-    if (This->pMarshal) IUnknown_Release(This->pMarshal);
-    HeapFree(GetProcessHeap(),0,This->itemName);
-    HeapFree(GetProcessHeap(),0,This->itemDelimiter);
-    HeapFree(GetProcessHeap(),0,This);
+    *ret = &moniker->IMoniker_iface;
 
     return S_OK;
+
+failed:
+    IMoniker_Release(&moniker->IMoniker_iface);
+
+    return hr;
 }
 
-/******************************************************************************
- *        CreateItemMoniker	[OLE32.@]
- ******************************************************************************/
-HRESULT WINAPI CreateItemMoniker(LPCOLESTR lpszDelim, LPCOLESTR  lpszItem, IMoniker **ppmk)
+HRESULT WINAPI ItemMoniker_CreateInstance(IClassFactory *iface, IUnknown *outer, REFIID riid, void **ppv)
 {
-    ItemMonikerImpl* newItemMoniker;
-    HRESULT        hr;
+    IMoniker *moniker;
+    HRESULT hr;
 
-    TRACE("(%s,%s,%p)\n",debugstr_w(lpszDelim),debugstr_w(lpszItem),ppmk);
-
-    newItemMoniker = HeapAlloc(GetProcessHeap(), 0, sizeof(ItemMonikerImpl));
-
-    if (!newItemMoniker)
-        return STG_E_INSUFFICIENTMEMORY;
-
-    hr = ItemMonikerImpl_Construct(newItemMoniker,lpszDelim,lpszItem);
-
-    if (FAILED(hr)){
-        HeapFree(GetProcessHeap(),0,newItemMoniker);
-        return hr;
-    }
-
-    return ItemMonikerImpl_QueryInterface(&newItemMoniker->IMoniker_iface,&IID_IMoniker,
-                                          (void**)ppmk);
-}
-
-HRESULT WINAPI ItemMoniker_CreateInstance(IClassFactory *iface,
-    IUnknown *pUnk, REFIID riid, void **ppv)
-{
-    ItemMonikerImpl* newItemMoniker;
-    HRESULT  hr;
-    static const WCHAR wszEmpty[] = { 0 };
-
-    TRACE("(%p, %s, %p)\n", pUnk, debugstr_guid(riid), ppv);
+    TRACE("(%p, %s, %p)\n", outer, debugstr_guid(riid), ppv);
 
     *ppv = NULL;
 
-    if (pUnk)
+    if (outer)
         return CLASS_E_NOAGGREGATION;
 
-    newItemMoniker = HeapAlloc(GetProcessHeap(), 0, sizeof(ItemMonikerImpl));
-    if (!newItemMoniker)
-        return E_OUTOFMEMORY;
+    if (FAILED(hr = CreateItemMoniker(L"", L"", &moniker)))
+        return hr;
 
-    hr = ItemMonikerImpl_Construct(newItemMoniker, wszEmpty, wszEmpty);
-
-    if (SUCCEEDED(hr))
-        hr = ItemMonikerImpl_QueryInterface(&newItemMoniker->IMoniker_iface, riid, ppv);
-    if (FAILED(hr))
-        HeapFree(GetProcessHeap(),0,newItemMoniker);
+    hr = IMoniker_QueryInterface(moniker, riid, ppv);
+    IMoniker_Release(moniker);
 
     return hr;
 }

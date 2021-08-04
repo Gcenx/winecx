@@ -34,6 +34,10 @@ struct __server_iovec
 {
     const void  *ptr;
     data_size_t  size;
+    /* 32on64: this header is used from 32 and 64-bit PE code.
+     * hostptr can't be a 'void *', and be careful of 32/64-bit padding differences.
+     */
+    unsigned __int64 hostptr;
 };
 
 #define __SERVER_MAX_DATA 5
@@ -47,6 +51,8 @@ struct __server_request_info
     } u;
     unsigned int          data_count; /* count of request data pointers */
     void                 *reply_data; /* reply data pointer */
+    /* 32on64: this header is also used from 32-bit PE code, reply_data_hostptr can't be a 'void *' */
+    unsigned __int64      reply_data_hostptr; /* hostptr reply data pointer */
     struct __server_iovec data[__SERVER_MAX_DATA];  /* request variable size data */
 };
 
@@ -77,18 +83,46 @@ static inline void wine_server_add_data( void *req_ptr, const void *ptr, data_si
     if (size)
     {
         req->data[req->data_count].ptr = ptr;
+        req->data[req->data_count].hostptr = (ULONG_HOSTPTR)NULL;
         req->data[req->data_count++].size = size;
         req->u.req.request_header.request_size += size;
     }
 }
+
+#ifdef __i386_on_x86_64__
+/* add some data to be sent along with the request */
+static inline void wine_server_add_data( void *req_ptr, const void * HOSTPTR ptr, data_size_t size ) __attribute__((overloadable))
+{
+    struct __server_request_info * const req = req_ptr;
+    if (size)
+    {
+        req->data[req->data_count].ptr = NULL;
+        req->data[req->data_count].hostptr = (ULONG_HOSTPTR)ptr;
+        req->data[req->data_count++].size = size;
+        req->u.req.request_header.request_size += size;
+    }
+}
+#endif
 
 /* set the pointer and max size for the reply var data */
 static inline void wine_server_set_reply( void *req_ptr, void *ptr, data_size_t max_size )
 {
     struct __server_request_info * const req = req_ptr;
     req->reply_data = ptr;
+    req->reply_data_hostptr = 0 /* NULL */;
     req->u.req.request_header.reply_size = max_size;
 }
+
+#ifdef __i386_on_x86_64__
+/* set the pointer and max size for the reply var data */
+static inline void wine_server_set_reply( void *req_ptr, void * HOSTPTR ptr, data_size_t max_size ) __attribute__((overloadable))
+{
+    struct __server_request_info * const req = req_ptr;
+    req->reply_data = NULL;
+    req->reply_data_hostptr = (unsigned __int64)ptr;
+    req->u.req.request_header.reply_size = max_size;
+}
+#endif
 
 /* convert an object handle to a server handle */
 static inline obj_handle_t wine_server_obj_handle( HANDLE handle )

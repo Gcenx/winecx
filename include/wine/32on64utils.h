@@ -77,4 +77,20 @@
 #define MAP_FAILED_HOSTPTR ((void * HOSTPTR)-1)
 #endif
 
+#ifndef RTLD_DEFAULT_HOSTPTR
+#if defined(__i386_on_x86_64__) && defined(__APPLE__)
+#define RTLD_DEFAULT_HOSTPTR ((void * HOSTPTR)-2)
+#else
+#define RTLD_DEFAULT_HOSTPTR RTLD_DEFAULT
+#endif
+#endif
+
+#if !defined(RTLD_SELF_HOSTPTR) && defined(RTLD_SELF)
+#if defined(__i386_on_x86_64__) && defined(__APPLE__)
+#define RTLD_SELF_HOSTPTR ((void * HOSTPTR)-3)
+#else
+#define RTLD_SELF_HOSTPTR RTLF_SELF
+#endif
+#endif
+
 #endif /* __WINE_WINE_32ON64UTILS_H */

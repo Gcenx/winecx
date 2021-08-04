@@ -47,7 +47,8 @@ typedef struct {
     const char *date;
     const char *time;
     LCID lcid;
-    int  unk[2];
+    int unk;
+    int refcount;
 } __lc_time_data;
 
 static __time32_t (__cdecl *p_mkgmtime32)(struct tm*);
@@ -150,21 +151,21 @@ static void test_gmtime(void)
 
     gmt_tm->tm_wday = gmt_tm->tm_yday = 0;
     gmt = p_mkgmtime32(gmt_tm);
-    ok(gmt == valid, "gmt = %u\n", gmt);
+    ok(gmt == valid, "gmt = %lu\n", gmt);
     ok(gmt_tm->tm_wday == 4, "gmt_tm->tm_wday = %d\n", gmt_tm->tm_wday);
     ok(gmt_tm->tm_yday == 0, "gmt_tm->tm_yday = %d\n", gmt_tm->tm_yday);
 
     gmt_tm->tm_wday = gmt_tm->tm_yday = 0;
     gmt_tm->tm_isdst = -1;
     gmt = p_mkgmtime32(gmt_tm);
-    ok(gmt == valid, "gmt = %u\n", gmt);
+    ok(gmt == valid, "gmt = %lu\n", gmt);
     ok(gmt_tm->tm_wday == 4, "gmt_tm->tm_wday = %d\n", gmt_tm->tm_wday);
     ok(gmt_tm->tm_yday == 0, "gmt_tm->tm_yday = %d\n", gmt_tm->tm_yday);
 
     gmt_tm->tm_wday = gmt_tm->tm_yday = 0;
     gmt_tm->tm_isdst = 1;
     gmt = p_mkgmtime32(gmt_tm);
-    ok(gmt == valid, "gmt = %u\n", gmt);
+    ok(gmt == valid, "gmt = %lu\n", gmt);
     ok(gmt_tm->tm_wday == 4, "gmt_tm->tm_wday = %d\n", gmt_tm->tm_wday);
     ok(gmt_tm->tm_yday == 0, "gmt_tm->tm_yday = %d\n", gmt_tm->tm_yday);
 
@@ -177,13 +178,13 @@ static void test_gmtime(void)
 
     gmt_tm->tm_isdst = -1;
     gmt = p_mkgmtime32(gmt_tm);
-    ok(gmt == valid, "gmt = %u\n", gmt);
+    ok(gmt == valid, "gmt = %lu\n", gmt);
     ok(gmt_tm->tm_wday == 6, "gmt_tm->tm_wday = %d\n", gmt_tm->tm_wday);
     ok(gmt_tm->tm_yday == 2, "gmt_tm->tm_yday = %d\n", gmt_tm->tm_yday);
 
     gmt_tm->tm_isdst = 1;
     gmt = p_mkgmtime32(gmt_tm);
-    ok(gmt == valid, "gmt = %u\n", gmt);
+    ok(gmt == valid, "gmt = %lu\n", gmt);
 
     if(!p_gmtime32_s) {
         win_skip("Skipping _gmtime32_s tests\n");
@@ -441,13 +442,12 @@ static void test_wstrdate(void)
 {
     wchar_t date[16], * result;
     int month, day, year, count, len;
-    wchar_t format[] = { '%','0','2','d','/','%','0','2','d','/','%','0','2','d',0 };
 
     result = _wstrdate(date);
     ok(result == date, "Wrong return value\n");
     len = wcslen(date);
     ok(len == 8, "Wrong length: returned %d, should be 8\n", len);
-    count = swscanf(date, format, &month, &day, &year);
+    count = swscanf(date, L"%02d/%02d/%02d", &month, &day, &year);
     ok(count == 3, "Wrong format: count = %d, should be 3\n", count);
 }
 
@@ -455,13 +455,12 @@ static void test_wstrtime(void)
 {
     wchar_t time[16], * result;
     int hour, minute, second, count, len;
-    wchar_t format[] = { '%','0','2','d',':','%','0','2','d',':','%','0','2','d',0 };
 
     result = _wstrtime(time);
     ok(result == time, "Wrong return value\n");
     len = wcslen(time);
     ok(len == 8, "Wrong length: returned %d, should be 8\n", len);
-    count = swscanf(time, format, &hour, &minute, &second);
+    count = swscanf(time, L"%02d:%02d:%02d", &hour, &minute, &second);
     ok(count == 3, "Wrong format: count = %d, should be 3\n", count);
 }
 
@@ -727,8 +726,6 @@ static void test_strftime(void)
         { "mon1", "mon2", "mon3", "mon4", "mon5", "mon6", "mon7", "mon8", "mon9", "mon10", "mon11", "mon12" },
         "tam", "tpm"
     };
-
-    static const wchar_t cW[] = { '%','c',0 };
     time_t gmt;
     struct tm* gmt_tm;
     char buf[256], bufA[256];
@@ -800,7 +797,7 @@ static void test_strftime(void)
     }
 
     retA = p_strftime(bufA, 256, "%c", gmt_tm);
-    retW = p_wcsftime(bufW, 256, cW, gmt_tm);
+    retW = p_wcsftime(bufW, 256, L"%c", gmt_tm);
     ok(retW == 17, "expected 17, got %ld\n", retW);
     ok(retA == retW, "expected %ld, got %ld\n", retA, retW);
     buf[0] = 0;
@@ -824,8 +821,8 @@ static void test_strftime(void)
         return;
     }
 
-    /* TODO: find meaning of unk[0] */
-    time_data.unk[0] = 1;
+    /* TODO: find meaning of unk */
+    time_data.unk = 1;
     for (i=0; i<ARRAY_SIZE(tests_td); i++)
     {
         time_data.short_date = tests_td[i].short_date;

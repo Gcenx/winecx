@@ -82,7 +82,7 @@ static BOOL x86_64_get_addr(HANDLE hThread, const CONTEXT* ctx,
     addr->Mode = AddrModeFlat;
     switch (ca)
     {
-#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
+#ifdef __x86_64__
     case cpu_addr_pc:    addr->Segment = ctx->SegCs; addr->Offset = ctx->Rip; return TRUE;
     case cpu_addr_stack: addr->Segment = ctx->SegSs; addr->Offset = ctx->Rsp; return TRUE;
     case cpu_addr_frame: addr->Segment = ctx->SegSs; addr->Offset = ctx->Rbp; return TRUE;
@@ -92,7 +92,7 @@ static BOOL x86_64_get_addr(HANDLE hThread, const CONTEXT* ctx,
     }
 }
 
-#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
+#ifdef __x86_64__
 
 enum st_mode {stm_start, stm_64bit, stm_done};
 
@@ -698,7 +698,7 @@ static BOOL x86_64_stack_walk(struct cpu_stack_walk *csw, STACKFRAME64 *frame,
 
 static void*    x86_64_find_runtime_function(struct module* module, DWORD64 addr)
 {
-#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
+#ifdef __x86_64__
     RUNTIME_FUNCTION*   rtf;
     ULONG               size;
     int                 min, max;
@@ -726,7 +726,7 @@ static void*    x86_64_find_runtime_function(struct module* module, DWORD64 addr
     return NULL;
 }
 
-static unsigned x86_64_map_dwarf_register(unsigned regno, BOOL eh_frame)
+static unsigned x86_64_map_dwarf_register(unsigned regno, const struct module* module, BOOL eh_frame)
 {
     unsigned    reg;
 
@@ -782,7 +782,7 @@ static unsigned x86_64_map_dwarf_register(unsigned regno, BOOL eh_frame)
 
 static void *x86_64_fetch_context_reg(union ctx *pctx, unsigned regno, unsigned *size)
 {
-#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
+#ifdef __x86_64__
     CONTEXT *ctx = &pctx->ctx;
 
     switch (regno)
@@ -910,7 +910,7 @@ static BOOL x86_64_fetch_minidump_thread(struct dump_context* dc, unsigned index
     if (ctx->ContextFlags && (flags & ThreadWriteInstructionWindow))
     {
         /* FIXME: crop values across module boundaries, */
-#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
+#ifdef __x86_64__
         ULONG64 base = ctx->Rip <= 0x80 ? 0 : ctx->Rip - 0x80;
         minidump_add_memory_block(dc, base, ctx->Rip + 0x80 - base, 0);
 #endif
@@ -925,13 +925,13 @@ static BOOL x86_64_fetch_minidump_module(struct dump_context* dc, unsigned index
     if (1)
     {
         /* FIXME: crop values across module boundaries, */
-#if defined(__x86_64__) && !defined(__i386_on_x86_64__)
+#ifdef __x86_64__
         struct process*         pcs;
         struct module*          module;
         const RUNTIME_FUNCTION* rtf;
         ULONG                   size;
 
-        if (!(pcs = process_find_by_handle(dc->hProcess)) ||
+        if (!(pcs = process_find_by_handle(dc->process->handle)) ||
             !(module = module_find_by_addr(pcs, dc->modules[index].base, DMT_UNKNOWN)))
             return FALSE;
         rtf = (const RUNTIME_FUNCTION*)pe_map_directory(module, IMAGE_DIRECTORY_ENTRY_EXCEPTION, &size);
@@ -949,9 +949,7 @@ static BOOL x86_64_fetch_minidump_module(struct dump_context* dc, unsigned index
                     /* we need to read into the other process */
                     /* rtf = (RUNTIME_FUNCTION*)(module->module.BaseOfImage + (rtf->UnwindData & ~1)); */
                 }
-                if (ReadProcessMemory(dc->hProcess,
-                                      (void*)(dc->modules[index].base + rtf->UnwindData),
-                                      &ui, sizeof(ui), NULL))
+                if (read_process_memory(dc->process, dc->modules[index].base + rtf->UnwindData, &ui, sizeof(ui)))
                     minidump_add_memory_block(dc, dc->modules[index].base + rtf->UnwindData,
                                               FIELD_OFFSET(UNWIND_INFO, UnwindCode) + ui.CountOfCodes * sizeof(UNWIND_CODE), 0);
                 rtf++;

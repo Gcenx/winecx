@@ -20,8 +20,12 @@
 #define COBJMACROS
 #include <initguid.h>
 #include <oledb.h>
+#include <olectl.h>
 #include <msado15_backcompat.h>
 #include "wine/test.h"
+#include "msdasql.h"
+
+DEFINE_GUID(DBPROPSET_ROWSET,            0xc8b522be, 0x5cf3, 0x11ce, 0xad, 0xe5, 0x00, 0xaa, 0x00, 0x44, 0x77, 0x3d);
 
 #define MAKE_ADO_HRESULT( err ) MAKE_HRESULT( SEVERITY_ERROR, FACILITY_CONTROL, err )
 
@@ -60,16 +64,23 @@ static LONG get_refs_recordset( _Recordset *recordset )
 static void test_Recordset(void)
 {
     _Recordset *recordset;
+    IRunnableObject *runtime;
     ISupportErrorInfo *errorinfo;
     Fields *fields, *fields2;
     Field *field;
     LONG refs, count, state;
     VARIANT missing, val, index;
+    CursorLocationEnum location;
+    CursorTypeEnum cursor;
     BSTR name;
     HRESULT hr;
 
     hr = CoCreateInstance( &CLSID_Recordset, NULL, CLSCTX_INPROC_SERVER, &IID__Recordset, (void **)&recordset );
     ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = _Recordset_QueryInterface( recordset, &IID_IRunnableObject, (void**)&runtime);
+    ok(hr == E_NOINTERFACE, "Unexpected IRunnableObject interface\n");
+    ok(runtime == NULL, "expected NULL\n");
 
     /* _Recordset object supports ISupportErrorInfo */
     errorinfo = NULL;
@@ -131,6 +142,16 @@ static void test_Recordset(void)
     hr = _Recordset_get_State( recordset, &state );
     ok( hr == S_OK, "got %08x\n", hr );
     ok( state == adStateClosed, "got %d\n", state );
+
+    location = -1;
+    hr = _Recordset_get_CursorLocation( recordset, &location );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( location == adUseServer, "got %d\n", location );
+
+    cursor = adOpenUnspecified;
+    hr = _Recordset_get_CursorType( recordset, &cursor );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( cursor == adOpenForwardOnly, "got %d\n", cursor );
 
     VariantInit( &missing );
     hr = _Recordset_AddNew( recordset, missing, missing );
@@ -267,6 +288,348 @@ static void test_Recordset(void)
 
     Field_Release( field );
     Fields_Release( fields );
+    _Recordset_Release( recordset );
+}
+
+/* This interface is queried for but is not documented anywhere. */
+DEFINE_GUID(UKN_INTERFACE, 0x6f1e39e1, 0x05c6, 0x11d0, 0xa7, 0x8b, 0x00, 0xaa, 0x00, 0xa3, 0xf0, 0x0d);
+
+struct test_rowset
+{
+    IRowset IRowset_iface;
+    IRowsetInfo IRowsetInfo_iface;
+    IColumnsInfo IColumnsInfo_iface;
+    LONG refs;
+};
+
+static inline struct test_rowset *impl_from_IRowset( IRowset *iface )
+{
+    return CONTAINING_RECORD( iface, struct test_rowset, IRowset_iface );
+}
+
+static inline struct test_rowset *impl_from_IRowsetInfo( IRowsetInfo *iface )
+{
+    return CONTAINING_RECORD( iface, struct test_rowset, IRowsetInfo_iface );
+}
+
+static inline struct test_rowset *impl_from_IColumnsInfo( IColumnsInfo *iface )
+{
+    return CONTAINING_RECORD( iface, struct test_rowset, IColumnsInfo_iface );
+}
+
+static HRESULT WINAPI rowset_info_QueryInterface(IRowsetInfo *iface, REFIID riid, void **obj)
+{
+    struct test_rowset *rowset = impl_from_IRowsetInfo( iface );
+    return IRowset_QueryInterface(&rowset->IRowset_iface, riid, obj);
+}
+
+static ULONG WINAPI rowset_info_AddRef(IRowsetInfo *iface)
+{
+    struct test_rowset *rowset = impl_from_IRowsetInfo( iface );
+    return IRowset_AddRef(&rowset->IRowset_iface);
+}
+
+static ULONG WINAPI rowset_info_Release(IRowsetInfo *iface)
+{
+    struct test_rowset *rowset = impl_from_IRowsetInfo( iface );
+    return IRowset_Release(&rowset->IRowset_iface);
+}
+
+static HRESULT WINAPI rowset_info_GetProperties(IRowsetInfo *iface, const ULONG count,
+        const DBPROPIDSET propertyidsets[], ULONG *out_count, DBPROPSET **propertysets1)
+{
+    ok( count == 2, "got %d\n", count );
+
+    ok( IsEqualIID(&DBPROPSET_ROWSET, &propertyidsets[0].guidPropertySet), "got %s\n", wine_dbgstr_guid(&propertyidsets[0].guidPropertySet));
+    ok( propertyidsets[0].cPropertyIDs == 17, "got %d\n", propertyidsets[0].cPropertyIDs );
+
+    ok( IsEqualIID(&DBPROPSET_PROVIDERROWSET, &propertyidsets[1].guidPropertySet), "got %s\n", wine_dbgstr_guid(&propertyidsets[1].guidPropertySet));
+    ok( propertyidsets[1].cPropertyIDs == 1, "got %d\n", propertyidsets[1].cPropertyIDs );
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI rowset_info_GetReferencedRowset(IRowsetInfo *iface, DBORDINAL ordinal,
+        REFIID riid, IUnknown **unk)
+{
+    ok(0, "Unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI rowset_info_GetSpecification(IRowsetInfo *iface, REFIID riid,
+        IUnknown **specification)
+{
+    ok(0, "Unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static const struct IRowsetInfoVtbl rowset_info =
+{
+    rowset_info_QueryInterface,
+    rowset_info_AddRef,
+    rowset_info_Release,
+    rowset_info_GetProperties,
+    rowset_info_GetReferencedRowset,
+    rowset_info_GetSpecification
+};
+
+static HRESULT WINAPI column_info_QueryInterface(IColumnsInfo *iface, REFIID riid, void **obj)
+{
+    struct test_rowset *rowset = impl_from_IColumnsInfo( iface );
+    return IRowset_QueryInterface(&rowset->IRowset_iface, riid, obj);
+}
+
+static ULONG WINAPI column_info_AddRef(IColumnsInfo *iface)
+{
+    struct test_rowset *rowset = impl_from_IColumnsInfo( iface );
+    return IRowset_AddRef(&rowset->IRowset_iface);
+}
+
+static ULONG WINAPI column_info_Release(IColumnsInfo *iface)
+{
+    struct test_rowset *rowset = impl_from_IColumnsInfo( iface );
+    return IRowset_Release(&rowset->IRowset_iface);
+}
+
+static HRESULT WINAPI column_info_GetColumnInfo(IColumnsInfo *This, DBORDINAL *columns,
+        DBCOLUMNINFO **colinfo, OLECHAR **stringsbuffer)
+{
+    DBCOLUMNINFO *dbcolumn;
+    *columns = 1;
+
+    *stringsbuffer = CoTaskMemAlloc(sizeof(L"Column1"));
+    lstrcpyW(*stringsbuffer, L"Column1");
+
+    dbcolumn = CoTaskMemAlloc(sizeof(DBCOLUMNINFO));
+
+    dbcolumn->pwszName = *stringsbuffer;
+    dbcolumn->pTypeInfo = NULL;
+    dbcolumn->iOrdinal = 1;
+    dbcolumn->dwFlags = DBCOLUMNFLAGS_MAYBENULL;
+    dbcolumn->ulColumnSize = 5;
+    dbcolumn->wType = DBTYPE_I4;
+    dbcolumn->bPrecision = 1;
+    dbcolumn->bScale = 1;
+    dbcolumn->columnid.eKind = DBKIND_NAME;
+    dbcolumn->columnid.uName.pwszName = *stringsbuffer;
+
+    *colinfo = dbcolumn;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI column_info_MapColumnIDs(IColumnsInfo *This, DBORDINAL column_ids,
+        const DBID *dbids, DBORDINAL *columns)
+{
+    ok(0, "Unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static const struct IColumnsInfoVtbl column_info =
+{
+    column_info_QueryInterface,
+    column_info_AddRef,
+    column_info_Release,
+    column_info_GetColumnInfo,
+    column_info_MapColumnIDs,
+};
+
+static HRESULT WINAPI rowset_QueryInterface(IRowset *iface, REFIID riid, void **obj)
+{
+    struct test_rowset *rowset = impl_from_IRowset( iface );
+
+    *obj = NULL;
+
+    if (IsEqualIID(riid, &IID_IRowset) ||
+        IsEqualIID(riid, &IID_IUnknown))
+    {
+        trace("Requested interface IID_IRowset\n");
+        *obj = &rowset->IRowset_iface;
+    }
+    else if (IsEqualIID(riid, &IID_IRowsetInfo))
+    {
+        trace("Requested interface IID_IRowsetInfo\n");
+        *obj = &rowset->IRowsetInfo_iface;
+    }
+    else if (IsEqualIID(riid, &IID_IColumnsInfo))
+    {
+        trace("Requested interface IID_IColumnsInfo\n");
+        *obj = &rowset->IColumnsInfo_iface;
+    }
+    else if (IsEqualIID(riid, &IID_IRowsetLocate))
+    {
+        trace("Requested interface IID_IRowsetLocate\n");
+        return E_NOINTERFACE;
+    }
+    else if (IsEqualIID(riid, &IID_IDBAsynchStatus))
+    {
+        trace("Requested interface IID_IDBAsynchStatus\n");
+        return E_NOINTERFACE;
+    }
+    else if (IsEqualIID(riid, &IID_IAccessor))
+    {
+        trace("Requested interface IID_IAccessor\n");
+        return E_NOINTERFACE;
+    }
+    else if (IsEqualIID(riid, &UKN_INTERFACE))
+    {
+        trace("Unknown interface\n");
+        return E_NOINTERFACE;
+    }
+
+    if(*obj) {
+        IUnknown_AddRef((IUnknown*)*obj);
+        return S_OK;
+    }
+
+    ok(0, "Unsupported interface %s\n", wine_dbgstr_guid(riid));
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI rowset_AddRef(IRowset *iface)
+{
+    struct test_rowset *rowset = impl_from_IRowset( iface );
+    return InterlockedIncrement( &rowset->refs );
+}
+
+static ULONG WINAPI rowset_Release(IRowset *iface)
+{
+    struct test_rowset *rowset = impl_from_IRowset( iface );
+    /* Object not allocated no need to destroy */
+    return InterlockedDecrement( &rowset->refs );
+}
+
+static HRESULT WINAPI rowset_AddRefRows(IRowset *iface, DBCOUNTITEM cRows, const HROW rghRows[],
+    DBREFCOUNT rgRefCounts[], DBROWSTATUS rgRowStatus[])
+{
+    ok(0, "Unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI rowset_GetData(IRowset *iface, HROW hRow, HACCESSOR hAccessor, void *pData)
+{
+    ok(0, "Unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI rowset_GetNextRows(IRowset *iface, HCHAPTER hReserved, DBROWOFFSET lRowsOffset,
+    DBROWCOUNT cRows, DBCOUNTITEM *pcRowObtained, HROW **prghRows)
+{
+    ok(0, "Unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI rowset_ReleaseRows(IRowset *iface, DBCOUNTITEM cRows, const HROW rghRows[],
+    DBROWOPTIONS rgRowOptions[], DBREFCOUNT rgRefCounts[], DBROWSTATUS rgRowStatus[])
+{
+    ok(0, "Unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI rowset_RestartPosition(IRowset *iface, HCHAPTER hReserved)
+{
+    ok(0, "Unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static const struct IRowsetVtbl rowset_vtbl =
+{
+    rowset_QueryInterface,
+    rowset_AddRef,
+    rowset_Release,
+    rowset_AddRefRows,
+    rowset_GetData,
+    rowset_GetNextRows,
+    rowset_ReleaseRows,
+    rowset_RestartPosition
+};
+
+static ULONG get_refcount(void *iface)
+{
+    IUnknown *unknown = iface;
+    IUnknown_AddRef(unknown);
+    return IUnknown_Release(unknown);
+}
+
+static void test_ADORecordsetConstruction(void)
+{
+    _Recordset *recordset;
+    ADORecordsetConstruction *construct;
+    Fields *fields = NULL;
+    Field *field;
+    struct test_rowset testrowset;
+    IRowset *rowset;
+    HRESULT hr;
+    LONG ref, count;
+
+    hr = CoCreateInstance( &CLSID_Recordset, NULL, CLSCTX_INPROC_SERVER, &IID__Recordset, (void **)&recordset );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = _Recordset_QueryInterface( recordset, &IID_ADORecordsetConstruction, (void**)&construct );
+    ok( hr == S_OK, "got %08x\n", hr );
+    if (FAILED(hr))
+    {
+        goto done;
+    }
+
+    testrowset.IRowset_iface.lpVtbl = &rowset_vtbl;
+    testrowset.IRowsetInfo_iface.lpVtbl = &rowset_info;
+    testrowset.IColumnsInfo_iface.lpVtbl = &column_info;
+    testrowset.refs = 1;
+
+    rowset = &testrowset.IRowset_iface;
+
+    ref = get_refcount( rowset );
+    ok( ref == 1, "got %d\n", ref );
+    hr = ADORecordsetConstruction_put_Rowset( construct, (IUnknown*)rowset );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    ref = get_refcount( rowset );
+    ok( ref == 2, "got %d\n", ref );
+
+    hr = _Recordset_get_Fields( recordset, &fields );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( fields != NULL, "NULL value\n");
+
+    ref = get_refcount( rowset );
+    ok( ref == 2, "got %d\n", ref );
+
+    count = -1;
+    hr = Fields_get_Count( fields, &count );
+    todo_wine ok( count == 1, "got %d\n", count );
+    if (count > 0)
+    {
+        VARIANT index;
+        LONG size;
+        DataTypeEnum type;
+
+        V_VT( &index ) = VT_BSTR;
+        V_BSTR( &index ) = SysAllocString( L"Column1" );
+
+        hr = Fields_get_Item( fields, index, &field );
+        ok( hr == S_OK, "got %08x\n", hr );
+
+        hr = Field_get_Type( field, &type );
+        ok( hr == S_OK, "got %08x\n", hr );
+        ok( type == adInteger, "got %d\n", type );
+        size = -1;
+        hr = Field_get_DefinedSize( field, &size );
+        ok( hr == S_OK, "got %08x\n", hr );
+        ok( size == 5, "got %d\n", size );
+
+        VariantClear(&index);
+
+        Field_Release(field);
+    }
+
+    ref = get_refcount(rowset);
+    ok( ref == 2, "got %d\n", ref );
+
+    Fields_Release(fields);
+
+    ADORecordsetConstruction_Release(construct);
+
+done:
     _Recordset_Release( recordset );
 }
 
@@ -660,17 +1023,32 @@ static void test_Connection(void)
     _Connection *connection;
     IRunnableObject *runtime;
     ISupportErrorInfo *errorinfo;
+    IConnectionPointContainer *pointcontainer;
+    ADOConnectionConstruction15 *construct;
     LONG state, timeout;
+    BSTR str, str2, str3;
+    ConnectModeEnum mode;
+    CursorLocationEnum location;
 
     hr = CoCreateInstance(&CLSID_Connection, NULL, CLSCTX_INPROC_SERVER, &IID__Connection, (void**)&connection);
     ok( hr == S_OK, "got %08x\n", hr );
 
     hr = _Connection_QueryInterface(connection, &IID_IRunnableObject, (void**)&runtime);
     ok(hr == E_NOINTERFACE, "Unexpected IRunnableObject interface\n");
+    ok(runtime == NULL, "expected NULL\n");
 
     hr = _Connection_QueryInterface(connection, &IID_ISupportErrorInfo, (void**)&errorinfo);
     ok(hr == S_OK, "Failed to get ISupportErrorInfo interface\n");
     ISupportErrorInfo_Release(errorinfo);
+
+    hr = _Connection_QueryInterface(connection, &IID_IConnectionPointContainer, (void**)&pointcontainer);
+    ok(hr == S_OK, "Failed to get IConnectionPointContainer interface %08x\n", hr);
+    IConnectionPointContainer_Release(pointcontainer);
+
+    hr = _Connection_QueryInterface(connection, &IID_ADOConnectionConstruction15, (void**)&construct);
+    todo_wine ok(hr == S_OK, "Failed to get ADOConnectionConstruction15 interface %08x\n", hr);
+    if (hr == S_OK)
+        ADOConnectionConstruction15_Release(construct);
 
 if (0)   /* Crashes on windows */
 {
@@ -682,6 +1060,9 @@ if (0)   /* Crashes on windows */
     hr = _Connection_get_State(connection, &state);
     ok(hr == S_OK, "Failed to get state, hr 0x%08x\n", hr);
     ok(state == adStateClosed, "Unexpected state value 0x%08x\n", state);
+
+    hr = _Connection_Close(connection);
+    ok(hr == MAKE_ADO_HRESULT(adErrObjectClosed), "got %08x\n", hr);
 
     timeout = 0;
     hr = _Connection_get_CommandTimeout(connection, &timeout);
@@ -696,6 +1077,124 @@ if (0)   /* Crashes on windows */
     ok(hr == S_OK, "Failed to get state, hr 0x%08x\n", hr);
     ok(timeout == 300, "Unexpected timeout value %d\n", timeout);
 
+    location = 0;
+    hr = _Connection_get_CursorLocation(connection, &location);
+    ok(hr == S_OK, "Failed, hr 0x%08x\n", hr);
+    ok(location == adUseServer, "Unexpected location value %d\n", location);
+
+    hr = _Connection_put_CursorLocation(connection, adUseClient);
+    ok(hr == S_OK, "Failed, hr 0x%08x\n", hr);
+
+    location = 0;
+    hr = _Connection_get_CursorLocation(connection, &location);
+    ok(hr == S_OK, "Failed, hr 0x%08x\n", hr);
+    ok(location == adUseClient, "Unexpected location value %d\n", location);
+
+    hr = _Connection_put_CursorLocation(connection, adUseServer);
+    ok(hr == S_OK, "Failed, hr 0x%08x\n", hr);
+
+    mode = 0xdeadbeef;
+    hr = _Connection_get_Mode(connection, &mode);
+    ok(hr == S_OK, "Failed to get state, hr 0x%08x\n", hr);
+    ok(mode == adModeUnknown, "Unexpected mode value %d\n", mode);
+
+    hr = _Connection_put_Mode(connection, adModeShareDenyNone);
+    ok(hr == S_OK, "Failed to get state, hr 0x%08x\n", hr);
+
+    mode = adModeUnknown;
+    hr = _Connection_get_Mode(connection, &mode);
+    ok(hr == S_OK, "Failed to get state, hr 0x%08x\n", hr);
+    ok(mode == adModeShareDenyNone, "Unexpected mode value %d\n", mode);
+
+    hr = _Connection_put_Mode(connection, adModeUnknown);
+    ok(hr == S_OK, "Failed to get state, hr 0x%08x\n", hr);
+
+    /* Default */
+    str = (BSTR)0xdeadbeef;
+    hr = _Connection_get_Provider(connection, &str);
+    ok(hr == S_OK, "Failed, hr 0x%08x\n", hr);
+    ok(!wcscmp(str, L"MSDASQL"), "wrong string %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    str = SysAllocString(L"MSDASQL.1");
+    hr = _Connection_put_Provider(connection, str);
+    ok(hr == S_OK, "Failed, hr 0x%08x\n", hr);
+    SysFreeString(str);
+
+    str = (BSTR)0xdeadbeef;
+    hr = _Connection_get_Provider(connection, &str);
+    ok(hr == S_OK, "Failed, hr 0x%08x\n", hr);
+    ok(!wcscmp(str, L"MSDASQL.1"), "wrong string %s\n", wine_dbgstr_w(str));
+
+    /* Restore default */
+    str = SysAllocString(L"MSDASQL");
+    hr = _Connection_put_Provider(connection, str);
+    ok(hr == S_OK, "Failed, hr 0x%08x\n", hr);
+    SysFreeString(str);
+
+    hr = _Connection_put_Provider(connection, NULL);
+    ok(hr == MAKE_ADO_HRESULT(adErrInvalidArgument), "got 0x%08x\n", hr);
+    SysFreeString(str);
+
+    str = (BSTR)0xdeadbeef;
+    hr = _Connection_get_ConnectionString(connection, &str);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(str == NULL, "got %p\n", str);
+
+    str = SysAllocString(L"Provider=MSDASQL.1;Persist Security Info=False;Data Source=wine_test");
+    hr = _Connection_put_ConnectionString(connection, str);
+    ok(hr == S_OK, "Failed, hr 0x%08x\n", hr);
+
+    /* Show put_ConnectionString effects Provider */
+    str3 = (BSTR)0xdeadbeef;
+    hr = _Connection_get_Provider(connection, &str3);
+    ok(hr == S_OK, "Failed, hr 0x%08x\n", hr);
+    ok(str3 != NULL, "Expected value got NULL\n");
+    todo_wine ok(!wcscmp(str3, L"MSDASQL.1"), "wrong string %s\n", wine_dbgstr_w(str3));
+    SysFreeString(str3);
+
+if (0) /* Crashes on windows */
+{
+    hr = _Connection_get_ConnectionString(connection, NULL);
+    ok(hr == E_POINTER, "Failed, hr 0x%08x\n", hr);
+}
+
+    str2 = NULL;
+    hr = _Connection_get_ConnectionString(connection, &str2);
+    ok(hr == S_OK, "Failed, hr 0x%08x\n", hr);
+    ok(!wcscmp(str, str2), "wrong string %s\n", wine_dbgstr_w(str2));
+
+    hr = _Connection_Open(connection, NULL, NULL, NULL, 0);
+    ok(hr == E_FAIL, "Failed, hr 0x%08x\n", hr);
+
+    /* Open adds trailing ; if it's missing */
+    str3 = SysAllocString(L"Provider=MSDASQL.1;Persist Security Info=False;Data Source=wine_test;");
+    hr = _Connection_Open(connection, NULL, NULL, NULL, adConnectUnspecified);
+    ok(hr == E_FAIL, "Failed, hr 0x%08x\n", hr);
+
+    str2 = NULL;
+    hr = _Connection_get_ConnectionString(connection, &str2);
+    ok(hr == S_OK, "Failed, hr 0x%08x\n", hr);
+    todo_wine ok(!wcscmp(str3, str2) || broken(!wcscmp(str, str2)) /* XP */, "wrong string %s\n", wine_dbgstr_w(str2));
+
+    hr = _Connection_Open(connection, str, NULL, NULL, adConnectUnspecified);
+    todo_wine ok(hr == E_FAIL, "Failed, hr 0x%08x\n", hr);
+    SysFreeString(str);
+
+    str2 = NULL;
+    hr = _Connection_get_ConnectionString(connection, &str2);
+    ok(hr == S_OK, "Failed, hr 0x%08x\n", hr);
+    todo_wine ok(!wcscmp(str3, str2) || broken(!wcscmp(str, str2)) /* XP */, "wrong string %s\n", wine_dbgstr_w(str2));
+    SysFreeString(str2);
+    SysFreeString(str3);
+
+    hr = _Connection_put_ConnectionString(connection, NULL);
+    ok(hr == S_OK, "Failed, hr 0x%08x\n", hr);
+
+    str = (BSTR)0xdeadbeef;
+    hr = _Connection_get_ConnectionString(connection, &str);
+    ok(hr == S_OK, "Failed, hr 0x%08x\n", hr);
+    ok(str == NULL, "got %p\n", str);
     _Connection_Release(connection);
 }
 
@@ -706,6 +1205,9 @@ static void test_Command(void)
     _ADO *ado;
     Command15 *command15;
     Command25 *command25;
+    CommandTypeEnum cmd_type = adCmdUnspecified;
+    BSTR cmd_text = (BSTR)"test";
+    _Connection *connection;
 
     hr = CoCreateInstance( &CLSID_Command, NULL, CLSCTX_INPROC_SERVER, &IID__Command, (void **)&command );
     ok( hr == S_OK, "got %08x\n", hr );
@@ -722,13 +1224,271 @@ static void test_Command(void)
     ok( hr == S_OK, "got %08x\n", hr );
     Command25_Release( command25 );
 
+    hr = _Command_get_CommandType( command, &cmd_type );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( cmd_type == adCmdUnknown, "got %08x\n", cmd_type );
+
+    _Command_put_CommandType( command, adCmdText );
+    hr = _Command_get_CommandType( command, &cmd_type );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( cmd_type == adCmdText, "got %08x\n", cmd_type );
+
+    hr = _Command_put_CommandType( command, 0xdeadbeef );
+    ok( hr == MAKE_ADO_HRESULT( adErrInvalidArgument ), "got %08x\n", hr );
+
+    hr = _Command_get_CommandText( command, &cmd_text );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( !cmd_text, "got %s\n", wine_dbgstr_w( cmd_text ));
+
+    hr = _Command_put_CommandText( command, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    cmd_text = SysAllocString( L"" );
+    hr = _Command_put_CommandText( command, cmd_text );
+    ok( hr == S_OK, "got %08x\n", hr );
+    SysFreeString( cmd_text );
+
+    hr = _Command_get_CommandText( command,  &cmd_text );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( cmd_text && !*cmd_text, "got %p\n", cmd_text );
+
+    cmd_text = SysAllocString( L"test" );
+    hr = _Command_put_CommandText( command, cmd_text );
+    ok( hr == S_OK, "got %08x\n", hr );
+    SysFreeString( cmd_text );
+
+    hr = _Command_get_CommandText( command,  &cmd_text );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( !wcscmp( L"test", cmd_text ), "got %p\n", wine_dbgstr_w( cmd_text ) );
+
+    connection = (_Connection*)0xdeadbeef;
+    hr = _Command_get_ActiveConnection( command,  &connection );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( connection == NULL, "got %p\n", connection );
+
+    hr = _Command_putref_ActiveConnection( command,  NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
     _Command_Release( command );
+}
+
+struct conn_event {
+    ConnectionEventsVt conn_event_sink;
+    LONG refs;
+};
+
+static HRESULT WINAPI conneventvt_QueryInterface( ConnectionEventsVt *iface, REFIID riid, void **obj )
+{
+    struct conn_event *conn_event = CONTAINING_RECORD( iface, struct conn_event, conn_event_sink );
+
+    if (IsEqualGUID( &IID_ConnectionEventsVt, riid ))
+    {
+        InterlockedIncrement( &conn_event->refs );
+        *obj = iface;
+        return S_OK;
+    }
+
+    ok( 0, "unexpected call\n" );
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI conneventvt_AddRef( ConnectionEventsVt *iface )
+{
+    struct conn_event *conn_event = CONTAINING_RECORD( iface, struct conn_event, conn_event_sink );
+    return InterlockedIncrement( &conn_event->refs );
+}
+
+static ULONG WINAPI conneventvt_Release( ConnectionEventsVt *iface )
+{
+    struct conn_event *conn_event = CONTAINING_RECORD( iface, struct conn_event, conn_event_sink );
+    return InterlockedDecrement( &conn_event->refs );
+}
+
+static HRESULT WINAPI conneventvt_InfoMessage( ConnectionEventsVt *iface, Error *error,
+        EventStatusEnum *status, _Connection *Connection )
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI conneventvt_BeginTransComplete( ConnectionEventsVt *iface, LONG TransactionLevel,
+        Error *error, EventStatusEnum *status, _Connection *connection )
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI conneventvt_CommitTransComplete( ConnectionEventsVt *iface, Error *error,
+        EventStatusEnum *status, _Connection *connection )
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI conneventvt_RollbackTransComplete( ConnectionEventsVt *iface, Error *error,
+        EventStatusEnum *status, _Connection *connection )
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI conneventvt_WillExecute( ConnectionEventsVt *iface, BSTR *source,
+        CursorTypeEnum *cursor_type, LockTypeEnum *lock_type, LONG *options, EventStatusEnum *status,
+        _Command *command, _Recordset *record_set, _Connection *connection )
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI conneventvt_ExecuteComplete( ConnectionEventsVt *iface, LONG records_affected,
+        Error *error, EventStatusEnum *status, _Command *command, _Recordset *record_set,
+        _Connection *connection )
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI conneventvt_WillConnect( ConnectionEventsVt *iface, BSTR *string, BSTR *userid,
+        BSTR *password, LONG *options, EventStatusEnum *status, _Connection *connection )
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI conneventvt_ConnectComplete( ConnectionEventsVt *iface, Error *error,
+        EventStatusEnum *status, _Connection *connection )
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI conneventvt_Disconnect( ConnectionEventsVt *iface, EventStatusEnum *status,
+        _Connection *connection )
+{
+    return E_NOTIMPL;
+}
+
+static const ConnectionEventsVtVtbl conneventvt_vtbl = {
+    conneventvt_QueryInterface,
+    conneventvt_AddRef,
+    conneventvt_Release,
+    conneventvt_InfoMessage,
+    conneventvt_BeginTransComplete,
+    conneventvt_CommitTransComplete,
+    conneventvt_RollbackTransComplete,
+    conneventvt_WillExecute,
+    conneventvt_ExecuteComplete,
+    conneventvt_WillConnect,
+    conneventvt_ConnectComplete,
+    conneventvt_Disconnect
+};
+
+static HRESULT WINAPI supporterror_QueryInterface( ISupportErrorInfo *iface, REFIID riid, void **obj )
+{
+    if (IsEqualGUID( &IID_ISupportErrorInfo, riid ))
+    {
+        *obj = iface;
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI supporterror_AddRef( ISupportErrorInfo *iface )
+{
+    return 2;
+}
+
+static ULONG WINAPI supporterror_Release( ISupportErrorInfo *iface )
+{
+    return 1;
+}
+
+static HRESULT WINAPI supporterror_InterfaceSupportsErrorInfo( ISupportErrorInfo *iface, REFIID riid )
+{
+    return E_NOTIMPL;
+}
+
+static const struct ISupportErrorInfoVtbl support_error_vtbl =
+{
+    supporterror_QueryInterface,
+    supporterror_AddRef,
+    supporterror_Release,
+    supporterror_InterfaceSupportsErrorInfo
+};
+
+static void test_ConnectionPoint(void)
+{
+    HRESULT hr;
+    ULONG refs;
+    DWORD cookie;
+    IConnectionPoint *point;
+    IConnectionPointContainer *pointcontainer;
+    struct conn_event conn_event = { { &conneventvt_vtbl }, 0 };
+    ISupportErrorInfo support_err_sink = { &support_error_vtbl };
+
+    hr = CoCreateInstance( &CLSID_Connection, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IConnectionPointContainer, (void**)&pointcontainer );
+
+    hr = IConnectionPointContainer_FindConnectionPoint( pointcontainer, &DIID_ConnectionEvents, NULL );
+    ok( hr == E_POINTER, "got %08x\n", hr );
+
+    hr = IConnectionPointContainer_FindConnectionPoint( pointcontainer, &DIID_RecordsetEvents, &point );
+    ok( hr == CONNECT_E_NOCONNECTION, "got %08x\n", hr );
+
+    hr = IConnectionPointContainer_FindConnectionPoint( pointcontainer, &DIID_ConnectionEvents, &point );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* nothing advised yet */
+    hr = IConnectionPoint_Unadvise( point, 3 );
+    ok( hr == E_FAIL, "got %08x\n", hr );
+
+    hr = IConnectionPoint_Advise( point, NULL, NULL );
+    ok( hr == E_FAIL, "got %08x\n", hr );
+
+    hr = IConnectionPoint_Advise( point, (void*)&conn_event.conn_event_sink, NULL );
+    ok( hr == E_FAIL, "got %08x\n", hr );
+
+    cookie = 0xdeadbeef;
+    hr = IConnectionPoint_Advise( point, NULL, &cookie );
+    ok( hr == E_FAIL, "got %08x\n", hr );
+    ok( cookie == 0xdeadbeef, "got %08x\n", cookie );
+
+    /* unsupported sink */
+    cookie = 0xdeadbeef;
+    hr = IConnectionPoint_Advise( point, (void*)&support_err_sink, &cookie );
+    ok( hr == E_FAIL, "got %08x\n", hr );
+    ok( !cookie, "got %08x\n", cookie );
+
+    cookie = 0;
+    hr = IConnectionPoint_Advise( point, (void*)&conn_event.conn_event_sink, &cookie );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( cookie, "got %08x\n", cookie );
+
+    /* invalid cookie */
+    hr = IConnectionPoint_Unadvise( point, 0 );
+    ok( hr == E_FAIL, "got %08x\n", hr );
+
+    /* wrong cookie */
+    hr = IConnectionPoint_Unadvise( point, cookie + 1 );
+    ok( hr == E_FAIL, "got %08x\n", hr );
+
+    hr = IConnectionPoint_Unadvise( point, cookie );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* sinks are released when the connection is destroyed */
+    cookie = 0;
+    hr = IConnectionPoint_Advise( point, (void*)&conn_event.conn_event_sink, &cookie );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( cookie, "got %08x\n", cookie );
+    ok( conn_event.refs == 1, "got %d\n", conn_event.refs );
+
+    refs = IConnectionPoint_Release( point );
+    ok( refs == 1, "got %u", refs );
+
+    IConnectionPointContainer_Release( pointcontainer );
+
+    ok( !conn_event.refs, "got %d\n", conn_event.refs );
 }
 
 START_TEST(msado15)
 {
     CoInitialize( NULL );
     test_Connection();
+    test_ADORecordsetConstruction();
+    test_ConnectionPoint();
     test_Fields();
     test_Recordset();
     test_Stream();

@@ -363,14 +363,14 @@ static HRESULT WINAPI content_SetContentRect(IDirectManipulationContent *iface, 
 static HRESULT WINAPI content_GetViewport(IDirectManipulationContent *iface, REFIID riid, void **object)
 {
     struct primarycontext *This = impl_from_IDirectManipulationContent(iface);
-    FIXME("%p, %p, %p\n", This, debugstr_guid(riid), object);
+    FIXME("%p, %s, %p\n", This, debugstr_guid(riid), object);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI content_GetTag(IDirectManipulationContent *iface, REFIID riid, void **object, UINT32 *id)
 {
     struct primarycontext *This = impl_from_IDirectManipulationContent(iface);
-    FIXME("%p, %p, %p, %p\n", This, debugstr_guid(riid), object, id);
+    FIXME("%p, %s, %p, %p\n", This, debugstr_guid(riid), object, id);
     return E_NOTIMPL;
 }
 
@@ -610,7 +610,7 @@ static HRESULT WINAPI viewport_SetViewportOptions(IDirectManipulationViewport2 *
 {
     struct directviewport *This = impl_from_IDirectManipulationViewport2(iface);
     FIXME("%p, %d\n", This, options);
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 static HRESULT WINAPI viewport_AddConfiguration(IDirectManipulationViewport2 *iface, DIRECTMANIPULATION_CONFIGURATION configuration)

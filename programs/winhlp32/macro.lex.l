@@ -92,7 +92,7 @@ struct lexret  yylval;
         {
             BEGIN INITIAL;
             *lex_data->strptr++ = '\0';
-            return STRING;
+            return HLPSTRING;
         }
         else *lex_data->strptr++ = yytext[0];
     }
@@ -142,7 +142,7 @@ static const char* ts(int t)
     case VOID_FUNCTION: return "VOID_FUNCTION";
     case BOOL_FUNCTION: return "BOOL_FUNCTION";
     case INTEGER: return "INTEGER";
-    case STRING: return "STRING";
+    case HLPSTRING: return "STRING";
     case IDENTIFIER: return "IDENTIFIER";
     default: c[0] = (char)t; return c;
     }
@@ -177,7 +177,7 @@ static int MACRO_CheckArgs(void* pa[], unsigned max, const char* args)
             switch (*args)
             {
             case 'S': 
-                if (t != STRING)
+                if (t != HLPSTRING)
                 {WINE_WARN("missing S\n");return -1;}
                 pa[idx] = (void*)yylval.string;  
                 break;

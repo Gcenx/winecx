@@ -108,9 +108,11 @@ static const GUID *d3dformat_to_wic_guid(D3DFORMAT format)
 #define DDS_PF_ALPHA 0x1
 #define DDS_PF_ALPHA_ONLY 0x2
 #define DDS_PF_FOURCC 0x4
+#define DDS_PF_INDEXED 0x20
 #define DDS_PF_RGB 0x40
 #define DDS_PF_YUV 0x200
 #define DDS_PF_LUMINANCE 0x20000
+#define DDS_PF_BUMPLUMINANCE 0x40000
 #define DDS_PF_BUMPDUDV 0x80000
 
 struct dds_pixel_format
@@ -348,6 +350,15 @@ static D3DFORMAT dds_alpha_to_d3dformat(const struct dds_pixel_format *pixel_for
     return D3DFMT_UNKNOWN;
 }
 
+static D3DFORMAT dds_indexed_to_d3dformat(const struct dds_pixel_format *pixel_format)
+{
+    if (pixel_format->bpp == 8)
+        return D3DFMT_P8;
+
+    WARN("Unknown indexed pixel format (%u).\n", pixel_format->bpp);
+    return D3DFMT_UNKNOWN;
+}
+
 static D3DFORMAT dds_bump_to_d3dformat(const struct dds_pixel_format *pixel_format)
 {
     if (pixel_format->bpp == 16 && pixel_format->rmask == 0x00ff && pixel_format->gmask == 0xff00)
@@ -356,6 +367,17 @@ static D3DFORMAT dds_bump_to_d3dformat(const struct dds_pixel_format *pixel_form
         return D3DFMT_V16U16;
 
     WARN("Unknown bump pixel format (%u, %#x, %#x, %#x, %#x)\n", pixel_format->bpp,
+        pixel_format->rmask, pixel_format->gmask, pixel_format->bmask, pixel_format->amask);
+    return D3DFMT_UNKNOWN;
+}
+
+static D3DFORMAT dds_bump_luminance_to_d3dformat(const struct dds_pixel_format *pixel_format)
+{
+    if (pixel_format->bpp == 32 && pixel_format->rmask == 0x000000ff && pixel_format->gmask == 0x0000ff00
+            && pixel_format->bmask == 0x00ff0000)
+        return D3DFMT_X8L8V8U8;
+
+    WARN("Unknown bump pixel format (%u, %#x, %#x, %#x, %#x).\n", pixel_format->bpp,
         pixel_format->rmask, pixel_format->gmask, pixel_format->bmask, pixel_format->amask);
     return D3DFMT_UNKNOWN;
 }
@@ -369,6 +391,8 @@ static D3DFORMAT dds_pixel_format_to_d3dformat(const struct dds_pixel_format *pi
 
     if (pixel_format->flags & DDS_PF_FOURCC)
         return dds_fourcc_to_d3dformat(pixel_format->fourcc);
+    if (pixel_format->flags & DDS_PF_INDEXED)
+        return dds_indexed_to_d3dformat(pixel_format);
     if (pixel_format->flags & DDS_PF_RGB)
         return dds_rgb_to_d3dformat(pixel_format);
     if (pixel_format->flags & DDS_PF_LUMINANCE)
@@ -377,6 +401,8 @@ static D3DFORMAT dds_pixel_format_to_d3dformat(const struct dds_pixel_format *pi
         return dds_alpha_to_d3dformat(pixel_format);
     if (pixel_format->flags & DDS_PF_BUMPDUDV)
         return dds_bump_to_d3dformat(pixel_format);
+    if (pixel_format->flags & DDS_PF_BUMPLUMINANCE)
+        return dds_bump_luminance_to_d3dformat(pixel_format);
 
     WARN("Unknown pixel format (flags %#x, fourcc %#x, bpp %u, r %#x, g %#x, b %#x, a %#x)\n",
         pixel_format->flags, pixel_format->fourcc, pixel_format->bpp,
@@ -861,6 +887,41 @@ static BOOL convert_dib_to_bmp(const void **data, unsigned int *size)
     return TRUE;
 }
 
+/* windowscodecs always returns xRGB, but we should return ARGB if and only if
+ * at least one pixel has a non-zero alpha component. */
+static BOOL image_is_argb(IWICBitmapFrameDecode *frame, const D3DXIMAGE_INFO *info)
+{
+    unsigned int size, i;
+    BYTE *buffer;
+    HRESULT hr;
+
+    if (info->Format != D3DFMT_X8R8G8B8 || info->ImageFileFormat != D3DXIFF_BMP)
+        return FALSE;
+
+    size = info->Width * info->Height * 4;
+    if (!(buffer = malloc(size)))
+        return FALSE;
+
+    if (FAILED(hr = IWICBitmapFrameDecode_CopyPixels(frame, NULL, info->Width * 4, size, buffer)))
+    {
+        ERR("Failed to copy pixels, hr %#x.\n", hr);
+        free(buffer);
+        return FALSE;
+    }
+
+    for (i = 0; i < info->Width * info->Height; ++i)
+    {
+        if (buffer[i * 4 + 3])
+        {
+            free(buffer);
+            return TRUE;
+        }
+    }
+
+    free(buffer);
+    return FALSE;
+}
+
 /************************************************************
  * D3DXGetImageInfoFromFileInMemory
  *
@@ -979,6 +1040,9 @@ HRESULT WINAPI D3DXGetImageInfoFromFileInMemory(const void *data, UINT datasize,
                     }
                 }
             }
+
+            if (SUCCEEDED(hr) && image_is_argb(frame, info))
+                info->Format = D3DFMT_A8R8G8B8;
 
             if (frame)
                  IWICBitmapFrameDecode_Release(frame);
@@ -2116,11 +2180,14 @@ HRESULT WINAPI D3DXLoadSurfaceFromSurface(IDirect3DSurface9 *dst_surface,
         const PALETTEENTRY *dst_palette, const RECT *dst_rect, IDirect3DSurface9 *src_surface,
         const PALETTEENTRY *src_palette, const RECT *src_rect, DWORD filter, D3DCOLOR color_key)
 {
+    const struct pixel_format_desc *src_format_desc, *dst_format_desc;
+    D3DSURFACE_DESC src_desc, dst_desc;
+    struct volume src_size, dst_size;
     IDirect3DSurface9 *temp_surface;
     D3DTEXTUREFILTERTYPE d3d_filter;
     IDirect3DDevice9 *device;
-    D3DSURFACE_DESC src_desc;
     D3DLOCKED_RECT lock;
+    RECT dst_rect_temp;
     HRESULT hr;
     RECT s;
 
@@ -2132,28 +2199,92 @@ HRESULT WINAPI D3DXLoadSurfaceFromSurface(IDirect3DSurface9 *dst_surface,
     if (!dst_surface || !src_surface)
         return D3DERR_INVALIDCALL;
 
+    IDirect3DSurface9_GetDesc(src_surface, &src_desc);
+    src_format_desc = get_format_info(src_desc.Format);
+    if (!src_rect)
+    {
+        SetRect(&s, 0, 0, src_desc.Width, src_desc.Height);
+        src_rect = &s;
+    }
+    else if (src_rect->left == src_rect->right || src_rect->top == src_rect->bottom)
+    {
+        WARN("Empty src_rect specified.\n");
+        return filter == D3DX_FILTER_NONE ? D3D_OK : E_FAIL;
+    }
+    else if (src_rect->left > src_rect->right || src_rect->right > src_desc.Width
+            || src_rect->left < 0 || src_rect->left > src_desc.Width
+            || src_rect->top > src_rect->bottom || src_rect->bottom > src_desc.Height
+            || src_rect->top < 0 || src_rect->top > src_desc.Height)
+    {
+        WARN("Invalid src_rect specified.\n");
+        return D3DERR_INVALIDCALL;
+    }
+
+    src_size.width = src_rect->right - src_rect->left;
+    src_size.height = src_rect->bottom - src_rect->top;
+    src_size.depth = 1;
+
+    IDirect3DSurface9_GetDesc(dst_surface, &dst_desc);
+    dst_format_desc = get_format_info(dst_desc.Format);
+    if (!dst_rect)
+    {
+        SetRect(&dst_rect_temp, 0, 0, dst_desc.Width, dst_desc.Height);
+        dst_rect = &dst_rect_temp;
+    }
+    else if (dst_rect->left == dst_rect->right || dst_rect->top == dst_rect->bottom)
+    {
+        WARN("Empty dst_rect specified.\n");
+        return filter == D3DX_FILTER_NONE ? D3D_OK : E_FAIL;
+    }
+    else if (dst_rect->left > dst_rect->right || dst_rect->right > dst_desc.Width
+            || dst_rect->left < 0 || dst_rect->left > dst_desc.Width
+            || dst_rect->top > dst_rect->bottom || dst_rect->bottom > dst_desc.Height
+            || dst_rect->top < 0 || dst_rect->top > dst_desc.Height)
+    {
+        WARN("Invalid dst_rect specified.\n");
+        return D3DERR_INVALIDCALL;
+    }
+
+    dst_size.width = dst_rect->right - dst_rect->left;
+    dst_size.height = dst_rect->bottom - dst_rect->top;
+    dst_size.depth = 1;
+
     if (!dst_palette && !src_palette && !color_key)
     {
-        switch (filter)
+        if (src_desc.Format == dst_desc.Format
+                && dst_size.width == src_size.width
+                && dst_size.height == src_size.height
+                && color_key == 0
+                && !(src_rect->left & (src_format_desc->block_width - 1))
+                && !(src_rect->top & (src_format_desc->block_height - 1))
+                && !(dst_rect->left & (dst_format_desc->block_width - 1))
+                && !(dst_rect->top & (dst_format_desc->block_height - 1)))
         {
-            case D3DX_FILTER_NONE:
-                d3d_filter = D3DTEXF_NONE;
-                break;
+            d3d_filter = D3DTEXF_NONE;
+        }
+        else
+        {
+            switch (filter)
+            {
+                case D3DX_FILTER_NONE:
+                    d3d_filter = D3DTEXF_NONE;
+                    break;
 
-            case D3DX_FILTER_POINT:
-                d3d_filter = D3DTEXF_POINT;
-                break;
+                case D3DX_FILTER_POINT:
+                    d3d_filter = D3DTEXF_POINT;
+                    break;
 
-            case D3DX_FILTER_LINEAR:
-                d3d_filter = D3DTEXF_LINEAR;
-                break;
+                case D3DX_FILTER_LINEAR:
+                    d3d_filter = D3DTEXF_LINEAR;
+                    break;
 
-            default:
-                d3d_filter = ~0u;
-                break;
+                default:
+                    d3d_filter = D3DTEXF_FORCE_DWORD;
+                    break;
+            }
         }
 
-        if (d3d_filter != ~0u)
+        if (d3d_filter != D3DTEXF_FORCE_DWORD)
         {
             IDirect3DSurface9_GetDevice(src_surface, &device);
             hr = IDirect3DDevice9_StretchRect(device, src_surface, src_rect, dst_surface, dst_rect, d3d_filter);
@@ -2161,14 +2292,6 @@ HRESULT WINAPI D3DXLoadSurfaceFromSurface(IDirect3DSurface9 *dst_surface,
             if (SUCCEEDED(hr))
                 return D3D_OK;
         }
-    }
-
-    IDirect3DSurface9_GetDesc(src_surface, &src_desc);
-
-    if (!src_rect)
-    {
-        SetRect(&s, 0, 0, src_desc.Width, src_desc.Height);
-        src_rect = &s;
     }
 
     if (FAILED(lock_surface(src_surface, NULL, &lock, &temp_surface, FALSE)))

@@ -27,6 +27,7 @@
 #include "winsvc.h"
 #include "winioctl.h"
 #include "winternl.h"
+#include "winsock2.h"
 #include "wine/test.h"
 #include "wine/heap.h"
 
@@ -109,17 +110,25 @@ static SC_HANDLE load_driver(char *filename, const char *resname, const char *dr
     return service;
 }
 
-static BOOL start_driver(HANDLE service)
+static BOOL start_driver(HANDLE service, BOOL vista_plus)
 {
     SERVICE_STATUS status;
     BOOL ret;
 
     SetLastError(0xdeadbeef);
     ret = StartServiceA(service, 0, NULL);
-    if (!ret && (GetLastError() == ERROR_DRIVER_BLOCKED || GetLastError() == ERROR_INVALID_IMAGE_HASH))
+    if (!ret && (GetLastError() == ERROR_DRIVER_BLOCKED || GetLastError() == ERROR_INVALID_IMAGE_HASH
+            || (vista_plus && GetLastError() == ERROR_FILE_NOT_FOUND)))
     {
-        /* If Secure Boot is enabled or the machine is 64-bit, it will reject an unsigned driver. */
-        skip("Failed to start service; probably your machine doesn't accept unsigned drivers.\n");
+        if (vista_plus && GetLastError() == ERROR_FILE_NOT_FOUND)
+        {
+            skip("Windows Vista or newer is required to run this service.\n");
+        }
+        else
+        {
+            /* If Secure Boot is enabled or the machine is 64-bit, it will reject an unsigned driver. */
+            skip("Failed to start service; probably your machine doesn't accept unsigned drivers.\n");
+        }
         DeleteService(service);
         CloseServiceHandle(service);
         return FALSE;
@@ -143,13 +152,14 @@ static BOOL start_driver(HANDLE service)
     return TRUE;
 }
 
+static ULONG64 modified_value;
+
 static void main_test(void)
 {
-    static const WCHAR dokW[] = {'d','o','k',0};
     WCHAR temppathW[MAX_PATH], pathW[MAX_PATH];
     struct test_input *test_input;
-    UNICODE_STRING pathU;
     DWORD len, written, read;
+    UNICODE_STRING pathU;
     LONG new_failures;
     char buffer[512];
     HANDLE okfile;
@@ -157,7 +167,7 @@ static void main_test(void)
 
     /* Create a temporary file that the driver will write ok/trace output to. */
     GetTempPathW(MAX_PATH, temppathW);
-    GetTempFileNameW(temppathW, dokW, 0, pathW);
+    GetTempFileNameW(temppathW, L"dok", 0, pathW);
     pRtlDosPathNameToNtPathName_U( pathW, &pathU, NULL, NULL );
 
     len = pathU.Length + sizeof(WCHAR);
@@ -165,6 +175,11 @@ static void main_test(void)
     test_input->running_under_wine = !strcmp(winetest_platform, "wine");
     test_input->winetest_report_success = winetest_report_success;
     test_input->winetest_debug = winetest_debug;
+    test_input->process_id = GetCurrentProcessId();
+    test_input->teststr_offset = (SIZE_T)((BYTE *)&teststr - (BYTE *)NtCurrentTeb()->Peb->ImageBaseAddress);
+    test_input->modified_value = &modified_value;
+    modified_value = 0;
+
     memcpy(test_input->path, pathU.Buffer, len);
     res = DeviceIoControl(device, IOCTL_WINETEST_MAIN_TEST, test_input,
                           offsetof( struct test_input, path[len / sizeof(WCHAR)]),
@@ -477,6 +492,119 @@ static void test_return_status(void)
     ok(ret_size == 3, "got size %u\n", ret_size);
 }
 
+static BOOL compare_unicode_string(const WCHAR *buffer, ULONG len, const WCHAR *expect)
+{
+    return len == wcslen(expect) * sizeof(WCHAR) && !memcmp(buffer, expect, len);
+}
+
+static void test_object_info(void)
+{
+    char buffer[200];
+    OBJECT_NAME_INFORMATION *name_info = (OBJECT_NAME_INFORMATION *)buffer;
+    OBJECT_TYPE_INFORMATION *type_info = (OBJECT_TYPE_INFORMATION *)buffer;
+    FILE_NAME_INFORMATION *file_info = (FILE_NAME_INFORMATION *)buffer;
+    HANDLE file;
+    NTSTATUS status;
+    IO_STATUS_BLOCK io;
+    ULONG size;
+
+    status = NtQueryObject(device, ObjectNameInformation, buffer, sizeof(buffer), NULL);
+    ok(!status, "got %#x\n", status);
+    ok(compare_unicode_string(name_info->Name.Buffer, name_info->Name.Length, L"\\Device\\WineTestDriver"),
+            "wrong name %s\n", debugstr_w(name_info->Name.Buffer));
+
+    status = NtQueryObject(device, ObjectTypeInformation, buffer, sizeof(buffer), NULL);
+    ok(!status, "got %#x\n", status);
+    ok(compare_unicode_string(type_info->TypeName.Buffer, type_info->TypeName.Length, L"File"),
+            "wrong name %s\n", debugstr_wn(type_info->TypeName.Buffer, type_info->TypeName.Length / sizeof(WCHAR)));
+
+    status = NtQueryInformationFile(device, &io, buffer, sizeof(buffer), FileNameInformation);
+    todo_wine ok(status == STATUS_INVALID_DEVICE_REQUEST, "got %#x\n", status);
+
+    file = CreateFileA("\\\\.\\WineTestDriver\\subfile", 0, 0, NULL, OPEN_EXISTING, 0, NULL);
+    todo_wine ok(file != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError());
+    if (file == INVALID_HANDLE_VALUE) return;
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    status = NtQueryObject(file, ObjectNameInformation, buffer, sizeof(buffer), &size);
+    ok(!status, "got %#x\n", status);
+    ok(size == sizeof(*name_info) + sizeof(L"\\Device\\WineTestDriver\\subfile"), "wrong size %u\n", size);
+    ok(compare_unicode_string(name_info->Name.Buffer, name_info->Name.Length, L"\\Device\\WineTestDriver\\subfile"),
+            "wrong name %s\n", debugstr_w(name_info->Name.Buffer));
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    status = NtQueryObject(file, ObjectNameInformation, buffer, size - 2, &size);
+    ok(status == STATUS_BUFFER_OVERFLOW, "got %#x\n", status);
+    ok(size == sizeof(*name_info) + sizeof(L"\\Device\\WineTestDriver\\subfile"), "wrong size %u\n", size);
+    ok(compare_unicode_string(name_info->Name.Buffer, name_info->Name.Length, L"\\Device\\WineTestDriver\\subfil"),
+            "wrong name %s\n", debugstr_w(name_info->Name.Buffer));
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    status = NtQueryObject(file, ObjectNameInformation, buffer, sizeof(*name_info), &size);
+    ok(status == STATUS_BUFFER_OVERFLOW, "got %#x\n", status);
+    ok(size == sizeof(*name_info) + sizeof(L"\\Device\\WineTestDriver\\subfile"), "wrong size %u\n", size);
+
+    status = NtQueryObject(file, ObjectTypeInformation, buffer, sizeof(buffer), NULL);
+    ok(!status, "got %#x\n", status);
+    ok(compare_unicode_string(type_info->TypeName.Buffer, type_info->TypeName.Length, L"File"),
+            "wrong name %s\n", debugstr_wn(type_info->TypeName.Buffer, type_info->TypeName.Length / sizeof(WCHAR)));
+
+    status = NtQueryInformationFile(file, &io, buffer, sizeof(buffer), FileNameInformation);
+    ok(!status, "got %#x\n", status);
+    ok(compare_unicode_string(file_info->FileName, file_info->FileNameLength, L"\\subfile"),
+            "wrong name %s\n", debugstr_wn(file_info->FileName, file_info->FileNameLength / sizeof(WCHAR)));
+
+    CloseHandle(file);
+
+    file = CreateFileA("\\\\.\\WineTestDriver\\notimpl", 0, 0, NULL, OPEN_EXISTING, 0, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError());
+
+    status = NtQueryObject(file, ObjectNameInformation, buffer, sizeof(buffer), NULL);
+    ok(!status, "got %#x\n", status);
+    ok(compare_unicode_string(name_info->Name.Buffer, name_info->Name.Length, L"\\Device\\WineTestDriver"),
+            "wrong name %s\n", debugstr_w(name_info->Name.Buffer));
+
+    status = NtQueryInformationFile(file, &io, buffer, sizeof(buffer), FileNameInformation);
+    ok(status == STATUS_NOT_IMPLEMENTED, "got %#x\n", status);
+
+    CloseHandle(file);
+
+    file = CreateFileA("\\\\.\\WineTestDriver\\badparam", 0, 0, NULL, OPEN_EXISTING, 0, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError());
+
+    status = NtQueryObject(file, ObjectNameInformation, buffer, sizeof(buffer), NULL);
+    ok(!status, "got %#x\n", status);
+    ok(compare_unicode_string(name_info->Name.Buffer, name_info->Name.Length, L"\\Device\\WineTestDriver"),
+            "wrong name %s\n", debugstr_w(name_info->Name.Buffer));
+
+    status = NtQueryInformationFile(file, &io, buffer, sizeof(buffer), FileNameInformation);
+    ok(status == STATUS_INVALID_PARAMETER, "got %#x\n", status);
+
+    CloseHandle(file);
+
+    file = CreateFileA("\\\\.\\WineTestDriver\\genfail", 0, 0, NULL, OPEN_EXISTING, 0, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError());
+
+    status = NtQueryObject(file, ObjectNameInformation, buffer, sizeof(buffer), NULL);
+    ok(status == STATUS_UNSUCCESSFUL, "got %#x\n", status);
+
+    status = NtQueryInformationFile(file, &io, buffer, sizeof(buffer), FileNameInformation);
+    ok(status == STATUS_UNSUCCESSFUL, "got %#x\n", status);
+
+    CloseHandle(file);
+
+    file = CreateFileA("\\\\.\\WineTestDriver\\badtype", 0, 0, NULL, OPEN_EXISTING, 0, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "got error %u\n", GetLastError());
+
+    status = NtQueryObject(file, ObjectNameInformation, buffer, sizeof(buffer), NULL);
+    ok(status == STATUS_OBJECT_TYPE_MISMATCH, "got %#x\n", status);
+
+    status = NtQueryInformationFile(file, &io, buffer, sizeof(buffer), FileNameInformation);
+    ok(status == STATUS_OBJECT_TYPE_MISMATCH, "got %#x\n", status);
+
+    CloseHandle(file);
+}
+
 static void test_driver3(void)
 {
     char filename[MAX_PATH];
@@ -498,6 +626,99 @@ static void test_driver3(void)
     DeleteFileA(filename);
 }
 
+static DWORD WINAPI wsk_test_thread(void *parameter)
+{
+    static const char test_send_string[] = "Client test string 1.";
+    static const WORD version = MAKEWORD(2, 2);
+    SOCKET s_listen, s_accept, s_connect;
+    struct sockaddr_in addr;
+    char buffer[256];
+    int ret, err;
+    WSADATA data;
+    int opt_val;
+
+    ret = WSAStartup(version, &data);
+    ok(!ret, "WSAStartup() failed, ret %u.\n", ret);
+
+    s_connect = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ok(s_connect != INVALID_SOCKET, "Error creating socket, WSAGetLastError() %u.\n", WSAGetLastError());
+
+    s_listen = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ok(s_listen != INVALID_SOCKET, "Error creating socket, WSAGetLastError() %u.\n", WSAGetLastError());
+
+    opt_val = 1;
+    setsockopt(s_listen, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt_val, sizeof(opt_val));
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(CLIENT_LISTEN_PORT);
+    addr.sin_addr.s_addr = htonl(0x7f000001);
+    ret = bind(s_listen, (struct sockaddr *)&addr, sizeof(addr));
+    ok(!ret, "Got unexpected ret %d, WSAGetLastError() %u.\n", ret, WSAGetLastError());
+
+    ret = listen(s_listen, SOMAXCONN);
+    ok(!ret, "Got unexpected ret %d, WSAGetLastError() %u.\n", ret, WSAGetLastError());
+
+    addr.sin_port = htons(SERVER_LISTEN_PORT);
+
+    ret = connect(s_connect, (struct sockaddr *)&addr, sizeof(addr));
+    while (ret && ((err = WSAGetLastError()) == WSAECONNREFUSED || err == WSAECONNABORTED))
+    {
+        SwitchToThread();
+        ret = connect(s_connect, (struct sockaddr *)&addr, sizeof(addr));
+    }
+    ok(!ret, "Error connecting, WSAGetLastError() %u.\n", WSAGetLastError());
+
+    ret = send(s_connect, test_send_string, sizeof(test_send_string), 0);
+    ok(ret == sizeof(test_send_string), "Got unexpected ret %d.\n", ret);
+
+    ret = recv(s_connect, buffer, sizeof(buffer), 0);
+    ok(ret == sizeof(buffer), "Got unexpected ret %d.\n", ret);
+    ok(!strcmp(buffer, "Server test string 1."), "Received unexpected data.\n");
+
+    s_accept = accept(s_listen, NULL, NULL);
+    ok(s_accept != INVALID_SOCKET, "Error creating socket, WSAGetLastError() %u.\n", WSAGetLastError());
+
+    closesocket(s_accept);
+    closesocket(s_connect);
+    closesocket(s_listen);
+    return TRUE;
+}
+
+static void test_driver4(void)
+{
+    char filename[MAX_PATH];
+    SC_HANDLE service;
+    HANDLE hthread;
+    DWORD written;
+    BOOL ret;
+
+    if (!(service = load_driver(filename, "driver4.dll", "WineTestDriver4")))
+        return;
+
+    if (!start_driver(service, TRUE))
+    {
+        DeleteFileA(filename);
+        return;
+    }
+
+    device = CreateFileA("\\\\.\\WineTestDriver4", 0, 0, NULL, OPEN_EXISTING, 0, NULL);
+    ok(device != INVALID_HANDLE_VALUE, "failed to open device: %u\n", GetLastError());
+
+    hthread = CreateThread(NULL, 0, wsk_test_thread, NULL, 0, NULL);
+    main_test();
+    WaitForSingleObject(hthread, INFINITE);
+
+    ret = DeviceIoControl(device, IOCTL_WINETEST_DETACH, NULL, 0, NULL, 0, &written, NULL);
+    ok(ret, "DeviceIoControl failed: %u\n", GetLastError());
+
+    CloseHandle(device);
+
+    unload_driver(service);
+    ret = DeleteFileA(filename);
+    ok(ret, "DeleteFile failed: %u\n", GetLastError());
+}
+
 START_TEST(ntoskrnl)
 {
     char filename[MAX_PATH], filename2[MAX_PATH];
@@ -515,7 +736,7 @@ START_TEST(ntoskrnl)
     subtest("driver");
     if (!(service = load_driver(filename, "driver.dll", "WineTestDriver")))
         return;
-    if (!start_driver(service))
+    if (!start_driver(service, FALSE))
     {
         DeleteFileA(filename);
         return;
@@ -527,11 +748,15 @@ START_TEST(ntoskrnl)
 
     test_basic_ioctl();
     test_mismatched_status_ioctl();
+
     main_test();
+    todo_wine ok(modified_value == 0xdeadbeeffeedcafe, "Got unexpected value %#I64x.\n", modified_value);
+
     test_overlapped();
     test_load_driver(service2);
     test_file_handles();
     test_return_status();
+    test_object_info();
 
     /* We need a separate ioctl to call IoDetachDevice(); calling it in the
      * driver unload routine causes a live-lock. */
@@ -548,4 +773,6 @@ START_TEST(ntoskrnl)
     ok(ret, "DeleteFile failed: %u\n", GetLastError());
 
     test_driver3();
+    subtest("driver4");
+    test_driver4();
 }

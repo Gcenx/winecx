@@ -19,19 +19,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <assert.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#ifdef HAVE_VALGRIND_MEMCHECK_H
-#include <valgrind/memcheck.h>
-#else
-#define RUNNING_ON_VALGRIND 0
-#endif
+
+#define RUNNING_ON_VALGRIND 0  /* FIXME */
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -122,7 +116,7 @@ C_ASSERT( HEAP_MAX_SMALL_FREE_LIST % ALIGNMENT == 0 );
 /* Max size of the blocks on the free lists above HEAP_MAX_SMALL_FREE_LIST */
 static const SIZE_T HEAP_freeListSizes[] =
 {
-    0x200, 0x400, 0x1000, ~0UL
+    0x200, 0x400, 0x1000, ~(SIZE_T)0
 };
 #define HEAP_NB_FREE_LISTS (ARRAY_SIZE( HEAP_freeListSizes ) + HEAP_NB_SMALL_FREE_LISTS)
 
@@ -151,7 +145,13 @@ typedef struct tagSUBHEAP
 typedef struct tagHEAP
 {
     DWORD_PTR        unknown1[2];
-    DWORD            unknown2;
+    DWORD            unknown2[2];
+    DWORD_PTR        unknown3[4];
+    DWORD            unknown4;
+    DWORD_PTR        unknown5[2];
+    DWORD            unknown6[3];
+    DWORD_PTR        unknown7[2];
+    /* For Vista through 10, 'flags' is at offset 0x40 (x86) / 0x70 (x64) */
     DWORD            flags;         /* Heap flags */
     DWORD            force_flags;   /* Forced heap flags for debugging */
     SUBHEAP          subheap;       /* First sub-heap */
@@ -726,7 +726,8 @@ static void *allocate_large_block( HEAP *heap, DWORD flags, SIZE_T size )
     LPVOID address = NULL;
 
     if (block_size < size) return NULL;  /* overflow */
-    if (virtual_alloc_aligned( &address, 0, &block_size, MEM_COMMIT, get_protection_type( flags ), 5 ))
+    if (NtAllocateVirtualMemory( NtCurrentProcess(), &address, 0, &block_size,
+                                 MEM_COMMIT, get_protection_type( flags )))
     {
         WARN("Could not allocate block for %08lx bytes\n", size );
         return NULL;
@@ -1331,7 +1332,7 @@ static BOOL HEAP_IsRealArena( HEAP *heapPtr,   /* [in] ptr to the heap */
                               *             does not complain    */
 {
     SUBHEAP *subheap;
-    BOOL ret = TRUE;
+    BOOL ret = FALSE;
     const ARENA_LARGE *large_arena;
 
     flags &= HEAP_NO_SERIALIZE;
@@ -1353,16 +1354,11 @@ static BOOL HEAP_IsRealArena( HEAP *heapPtr,   /* [in] ptr to the heap */
                     ERR("Heap %p: block %p is not inside heap\n", heapPtr, block );
                 else if (WARN_ON(heap))
                     WARN("Heap %p: block %p is not inside heap\n", heapPtr, block );
-                ret = FALSE;
             }
-            else
-                ret = validate_large_arena( heapPtr, large_arena, quiet );
-        } else
-            ret = HEAP_ValidateInUseArena( subheap, arena, quiet );
-
-        if (!(flags & HEAP_NO_SERIALIZE))
-            RtlLeaveCriticalSection( &heapPtr->critSection );
-        return ret;
+            else ret = validate_large_arena( heapPtr, large_arena, quiet );
+        }
+        else ret = HEAP_ValidateInUseArena( subheap, arena, quiet );
+        goto done;
     }
 
     LIST_FOR_EACH_ENTRY( subheap, &heapPtr->subheap_list, SUBHEAP, entry )
@@ -1372,27 +1368,23 @@ static BOOL HEAP_IsRealArena( HEAP *heapPtr,   /* [in] ptr to the heap */
         {
             if (*(DWORD *)ptr & ARENA_FLAG_FREE)
             {
-                if (!HEAP_ValidateFreeArena( subheap, (ARENA_FREE *)ptr )) {
-                    ret = FALSE;
-                    break;
-                }
+                if (!HEAP_ValidateFreeArena( subheap, (ARENA_FREE *)ptr )) goto done;
                 ptr += sizeof(ARENA_FREE) + (*(DWORD *)ptr & ARENA_SIZE_MASK);
             }
             else
             {
-                if (!HEAP_ValidateInUseArena( subheap, (ARENA_INUSE *)ptr, NOISY )) {
-                    ret = FALSE;
-                    break;
-                }
+                if (!HEAP_ValidateInUseArena( subheap, (ARENA_INUSE *)ptr, NOISY )) goto done;
                 ptr += sizeof(ARENA_INUSE) + (*(DWORD *)ptr & ARENA_SIZE_MASK);
             }
         }
-        if (!ret) break;
     }
 
     LIST_FOR_EACH_ENTRY( large_arena, &heapPtr->large_list, ARENA_LARGE, entry )
-        if (!(ret = validate_large_arena( heapPtr, large_arena, quiet ))) break;
+        if (!validate_large_arena( heapPtr, large_arena, quiet )) goto done;
 
+    ret = TRUE;
+
+done:
     if (!(flags & HEAP_NO_SERIALIZE)) RtlLeaveCriticalSection( &heapPtr->critSection );
     return ret;
 }
@@ -1517,14 +1509,9 @@ void heap_set_debug_flags( HANDLE handle )
     if ((heap->flags & HEAP_GROWABLE) && !heap->pending_free &&
         ((flags & HEAP_FREE_CHECKING_ENABLED) || RUNNING_ON_VALGRIND))
     {
-        void *ptr = NULL;
-        SIZE_T size = MAX_FREE_PENDING * sizeof(*heap->pending_free);
-
-        if (!virtual_alloc_aligned( &ptr, 0, &size, MEM_COMMIT, PAGE_READWRITE, 4 ))
-        {
-            heap->pending_free = ptr;
-            heap->pending_pos = 0;
-        }
+        heap->pending_free = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                              MAX_FREE_PENDING * sizeof(*heap->pending_free) );
+        heap->pending_pos = 0;
     }
 }
 
@@ -1602,6 +1589,12 @@ HANDLE WINAPI RtlDestroyHeap( HANDLE heap )
     void *addr;
 
     TRACE("%p\n", heap );
+    if (!heapPtr && heap && (((HEAP *)heap)->flags & HEAP_VALIDATE_PARAMS) &&
+        NtCurrentTeb()->Peb->BeingDebugged)
+    {
+        DbgPrint( "Attempt to destroy an invalid heap\n" );
+        DbgBreakPoint();
+    }
     if (!heapPtr) return heap;
 
     if (heap == processHeap) return heap; /* cannot delete the main process heap */
@@ -1631,12 +1624,7 @@ HANDLE WINAPI RtlDestroyHeap( HANDLE heap )
         NtFreeVirtualMemory( NtCurrentProcess(), &addr, &size, MEM_RELEASE );
     }
     subheap_notify_free_all(&heapPtr->subheap);
-    if (heapPtr->pending_free)
-    {
-        size = 0;
-        addr = heapPtr->pending_free;
-        NtFreeVirtualMemory( NtCurrentProcess(), &addr, &size, MEM_RELEASE );
-    }
+    RtlFreeHeap( GetProcessHeap(), 0, heapPtr->pending_free );
     size = 0;
     addr = heapPtr->subheap.base;
     NtFreeVirtualMemory( NtCurrentProcess(), &addr, &size, MEM_RELEASE );
@@ -2031,7 +2019,7 @@ SIZE_T WINAPI RtlSizeHeap( HANDLE heap, ULONG flags, const void *ptr )
     if (!heapPtr)
     {
         RtlSetLastWin32ErrorAndNtStatusFromNtStatus( STATUS_INVALID_HANDLE );
-        return ~0UL;
+        return ~(SIZE_T)0;
     }
     flags &= HEAP_NO_SERIALIZE;
     flags |= heapPtr->flags;
@@ -2041,7 +2029,7 @@ SIZE_T WINAPI RtlSizeHeap( HANDLE heap, ULONG flags, const void *ptr )
     if (!validate_block_pointer( heapPtr, &subheap, pArena ))
     {
         RtlSetLastWin32ErrorAndNtStatusFromNtStatus( STATUS_INVALID_PARAMETER );
-        ret = ~0UL;
+        ret = ~(SIZE_T)0;
     }
     else if (!subheap)
     {

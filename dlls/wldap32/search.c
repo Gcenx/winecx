@@ -34,7 +34,9 @@
 #include "wldap32.h"
 #include "wine/debug.h"
 
+#ifdef HAVE_LDAP
 WINE_DEFAULT_DEBUG_CHANNEL(wldap32);
+#endif
 
 /***********************************************************************
  *      ldap_searchA     (WLDAP32.@)
@@ -106,8 +108,8 @@ ULONG CDECL ldap_searchW( WLDAP32_LDAP *ld, PWCHAR base, ULONG scope, PWCHAR fil
     PWCHAR attrs[], ULONG attrsonly )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
-    char *baseU = NULL, *filterU = NULL, * HOSTPTR *attrsU = NULL;
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
+    char *baseU = NULL, *filterU = NULL, **attrsU = NULL;
     int msg;
 
     ret = WLDAP32_LDAP_NO_MEMORY;
@@ -130,7 +132,7 @@ ULONG CDECL ldap_searchW( WLDAP32_LDAP *ld, PWCHAR base, ULONG scope, PWCHAR fil
         if (!attrsU) goto exit;
     }
 
-    ret = ldap_search_ext( ldap_get( ld ), baseU, scope, filterU, attrsU, attrsonly,
+    ret = ldap_search_ext( ld->ld, baseU, scope, filterU, attrsU, attrsonly,
                            NULL, NULL, NULL, 0, &msg );
 
     if (ret == LDAP_SUCCESS)
@@ -238,8 +240,8 @@ ULONG CDECL ldap_search_extW( WLDAP32_LDAP *ld, PWCHAR base, ULONG scope,
     PLDAPControlW *clientctrls, ULONG timelimit, ULONG sizelimit, ULONG *message )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
-    char *baseU = NULL, *filterU = NULL, * HOSTPTR *attrsU = NULL;
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
+    char *baseU = NULL, *filterU = NULL, **attrsU = NULL;
     LDAPControl **serverctrlsU = NULL, **clientctrlsU = NULL;
     struct timeval tv, *tvp = NULL;
 
@@ -279,7 +281,7 @@ ULONG CDECL ldap_search_extW( WLDAP32_LDAP *ld, PWCHAR base, ULONG scope,
         tvp = &tv;
     }
 
-    ret = map_error( ldap_search_ext( ldap_get( ld ), baseU, scope, filterU, attrsU, attrsonly,
+    ret = map_error( ldap_search_ext( ld->ld, baseU, scope, filterU, attrsU, attrsonly,
                                       serverctrlsU, clientctrlsU, tvp, sizelimit, (int *)message ));
 
 exit:
@@ -381,11 +383,9 @@ ULONG CDECL ldap_search_ext_sW( WLDAP32_LDAP *ld, PWCHAR base, ULONG scope,
     PLDAPControlW *clientctrls, struct l_timeval* timeout, ULONG sizelimit, WLDAP32_LDAPMessage **res )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
-    char *baseU = NULL, *filterU = NULL, * HOSTPTR *attrsU = NULL;
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
+    char *baseU = NULL, *filterU = NULL, **attrsU = NULL;
     LDAPControl **serverctrlsU = NULL, **clientctrlsU = NULL;
-    LDAPMessage *msg = NULL;
-    struct timeval tv;
 
     ret = WLDAP32_LDAP_NO_MEMORY;
 
@@ -415,15 +415,10 @@ ULONG CDECL ldap_search_ext_sW( WLDAP32_LDAP *ld, PWCHAR base, ULONG scope,
         clientctrlsU = controlarrayWtoU( clientctrls );
         if (!clientctrlsU) goto exit;
     }
-    if (timeout) {
-        tv.tv_sec = timeout->tv_sec;
-        tv.tv_usec = timeout->tv_usec;
-    }
 
-    ret = map_error( ldap_search_ext_s( ldap_get( ld ), baseU, scope, filterU, attrsU, attrsonly,
-                                        serverctrlsU, clientctrlsU, timeout ? &tv : NULL,
-                                        sizelimit, &msg ));
-    ret = message_wrap( ret, msg, res );
+    ret = map_error( ldap_search_ext_s( ld->ld, baseU, scope, filterU, attrsU, attrsonly,
+                                        serverctrlsU, clientctrlsU, (struct timeval *)timeout,
+                                        sizelimit, res ));
 
 exit:
     strfreeU( baseU );
@@ -505,9 +500,8 @@ ULONG CDECL ldap_search_sW( WLDAP32_LDAP *ld, PWCHAR base, ULONG scope, PWCHAR f
     PWCHAR attrs[], ULONG attrsonly, WLDAP32_LDAPMessage **res )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
-    char *baseU = NULL, *filterU = NULL, * HOSTPTR *attrsU = NULL;
-    LDAPMessage *msg = NULL;
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
+    char *baseU = NULL, *filterU = NULL, **attrsU = NULL;
 
     ret = WLDAP32_LDAP_NO_MEMORY;
 
@@ -529,9 +523,8 @@ ULONG CDECL ldap_search_sW( WLDAP32_LDAP *ld, PWCHAR base, ULONG scope, PWCHAR f
         if (!attrsU) goto exit;
     }
 
-    ret = map_error( ldap_search_ext_s( ldap_get( ld ), baseU, scope, filterU, attrsU, attrsonly,
-                                        NULL, NULL, NULL, 0, &msg ));
-    ret = message_wrap( ret, msg, res );
+    ret = map_error( ldap_search_ext_s( ld->ld, baseU, scope, filterU, attrsU, attrsonly,
+                                        NULL, NULL, NULL, 0, res ));
 
 exit:
     strfreeU( baseU );
@@ -616,10 +609,8 @@ ULONG CDECL ldap_search_stW( WLDAP32_LDAP *ld, const PWCHAR base, ULONG scope,
     struct l_timeval *timeout, WLDAP32_LDAPMessage **res )
 {
     ULONG ret = WLDAP32_LDAP_NOT_SUPPORTED;
-#ifdef HAVE_LDAP
-    char *baseU = NULL, *filterU = NULL, * HOSTPTR *attrsU = NULL;
-    LDAPMessage *msg = NULL;
-    struct timeval tv;
+#if defined(HAVE_LDAP) && !defined(__i386_on_x86_64__)
+    char *baseU = NULL, *filterU = NULL, **attrsU = NULL;
 
     ret = WLDAP32_LDAP_NO_MEMORY;
 
@@ -641,14 +632,9 @@ ULONG CDECL ldap_search_stW( WLDAP32_LDAP *ld, const PWCHAR base, ULONG scope,
         attrsU = strarrayWtoU( attrs );
         if (!attrsU) goto exit;
     }
-    if (timeout) {
-        tv.tv_sec = timeout->tv_sec;
-        tv.tv_usec = timeout->tv_usec;
-    }
 
-    ret = map_error( ldap_search_ext_s( ldap_get( ld ), baseU, scope, filterU, attrsU, attrsonly,
-                                        NULL, NULL, timeout ? &tv : NULL, 0, &msg ));
-    ret = message_wrap (ret, msg, res );
+    ret = map_error( ldap_search_ext_s( ld->ld, baseU, scope, filterU, attrsU, attrsonly,
+                                        NULL, NULL, (struct timeval *)timeout, 0, res ));
 
 exit:
     strfreeU( baseU );

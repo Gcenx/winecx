@@ -48,7 +48,6 @@
 #include "undocshell.h"
 #include "pidl.h"
 #include "wine/unicode.h"
-#include "wine/library.h"
 #include "shlwapi.h"
 #include "xdg.h"
 #include "sddl.h"
@@ -3962,9 +3961,579 @@ end:
 }
 
 /*************************************************************************
+ * _SHGetXDGUserDirs  [Internal]
+ *
+ * Get XDG directories paths from XDG configuration.
+ *
+ * PARAMS
+ *  xdg_dirs    [I] Array of XDG directories to look for.
+ *  num_dirs    [I] Number of elements in xdg_dirs.
+ *  xdg_results [O] An array of the XDG directories paths.
+ */
+static inline void _SHGetXDGUserDirs(const char * const *xdg_dirs, const unsigned int num_dirs, char *** xdg_results) {
+    HRESULT hr;
+
+    hr = XDG_UserDirLookup(xdg_dirs, num_dirs, xdg_results);
+    if (FAILED(hr)) *xdg_results = NULL;
+}
+
+/*************************************************************************
+ * _SHFreeXDGUserDirs  [Internal]
+ *
+ * Free resources allocated by XDG_UserDirLookup().
+ *
+ * PARAMS
+ *  num_dirs    [I] Number of elements in xdg_results.
+ *  xdg_results [I] An array of the XDG directories paths.
+ */
+static inline void _SHFreeXDGUserDirs(const unsigned int num_dirs, char ** xdg_results) {
+    UINT i;
+
+    if (xdg_results)
+    {
+        for (i = 0; i < num_dirs; i++)
+            heap_free(xdg_results[i]);
+        heap_free(xdg_results);
+    }
+}
+
+/*************************************************************************
+ * _SHAppendToUnixPath  [Internal]
+ *
+ * Helper function for _SHCreateSymbolicLinks. Appends pwszSubPath (or the
+ * corresponding resource, if IS_INTRESOURCE) to the unix base path 'szBasePath'
+ * and replaces backslashes with slashes.
+ *
+ * PARAMS
+ *  szBasePath  [IO] The unix base path, which will be appended to (CP_UNXICP).
+ *  pwszSubPath [I]  Sub-path or resource id (use MAKEINTRESOURCEW).
+ *
+ * RETURNS
+ *  Success: TRUE,
+ *  Failure: FALSE
+ */
+static inline BOOL _SHAppendToUnixPath(char *szBasePath, LPCWSTR pwszSubPath) {
+    WCHAR wszSubPath[MAX_PATH];
+    int cLen = strlen(szBasePath);
+    char *pBackslash;
+
+    if (IS_INTRESOURCE(pwszSubPath)) {
+        if (!LoadStringW(shell32_hInstance, LOWORD(pwszSubPath), wszSubPath, MAX_PATH)) {
+            /* Fall back to hard coded defaults. */
+            switch (LOWORD(pwszSubPath)) {
+                case IDS_PERSONAL:
+                    lstrcpyW(wszSubPath, DocumentsW);
+                    break;
+                case IDS_MYMUSIC:
+                    lstrcpyW(wszSubPath, My_MusicW);
+                    break;
+                case IDS_MYPICTURES:
+                    lstrcpyW(wszSubPath, My_PicturesW);
+                    break;
+                case IDS_MYVIDEOS:
+                    lstrcpyW(wszSubPath, My_VideosW);
+                    break;
+                case IDS_DOWNLOADS:
+                    lstrcpyW(wszSubPath, DownloadsW);
+                    break;
+                case IDS_TEMPLATES:
+                    lstrcpyW(wszSubPath, TemplatesW);
+                    break;
+                default:
+                    ERR("LoadString(%d) failed!\n", LOWORD(pwszSubPath));
+                    return FALSE;
+            }
+        }
+    } else {
+        lstrcpyW(wszSubPath, pwszSubPath);
+    }
+
+    if (szBasePath[cLen-1] != '/') szBasePath[cLen++] = '/';
+
+    if (!WideCharToMultiByte(CP_UNIXCP, 0, wszSubPath, -1, szBasePath + cLen,
+                             FILENAME_MAX - cLen, NULL, NULL))
+    {
+        return FALSE;
+    }
+
+    pBackslash = szBasePath + cLen;
+    while ((pBackslash = strchr(pBackslash, '\\'))) *pBackslash = '/';
+
+    return TRUE;
+}
+
+/******************************************************************************
+ * _SHGetFolderUnixPath  [Internal]
+ *
+ * Create a shell folder and get its unix path.
+ *
+ * PARAMS
+ *  nFolder [I] CSIDL identifying the folder.
+ */
+static inline char * _SHGetFolderUnixPath(const int nFolder)
+{
+    WCHAR wszTempPath[MAX_PATH];
+    HRESULT hr;
+
+    hr = SHGetFolderPathW(NULL, nFolder, NULL,
+                          SHGFP_TYPE_DEFAULT, wszTempPath);
+    if (FAILED(hr)) return NULL;
+
+    return wine_get_unix_file_name(wszTempPath);
+}
+
+/******************************************************************************
+ * _SHCreateMyDocumentsSubDirs  [Internal]
+ *
+ * Create real directories for various shell folders under 'My Documents'. For
+ * Windows and homeless styles. Fails silently for already existing sub dirs.
+ *
+ * PARAMS
+ *  aidsMyStuff      [I] Array of IDS_* resources to create sub dirs for.
+ *  num              [I] Number of elements in aidsMyStuff.
+ *  szPersonalTarget [I] Unix path to 'My Documents' directory.
+ */
+static void _SHCreateMyDocumentsSubDirs(const UINT * aidsMyStuff, const UINT num, const char * szPersonalTarget)
+{
+    char szMyStuffTarget[FILENAME_MAX];
+    UINT i;
+
+    if (aidsMyStuff && szPersonalTarget)
+    {
+        for (i = 0; i < num; i++)
+        {
+            strcpy(szMyStuffTarget, szPersonalTarget);
+            if (_SHAppendToUnixPath(szMyStuffTarget, MAKEINTRESOURCEW(aidsMyStuff[i])))
+                mkdir(szMyStuffTarget, 0777);
+        }
+    }
+}
+
+/******************************************************************************
+ * _SHCreateMyDocumentsSymbolicLink  [Internal]
+ *
+ * Sets up a symbolic link for the 'My Documents' shell folder to point into
+ * the users home directory.
+ *
+ * PARAMS
+ *  aidsMyStuff [I] Array of IDS_* resources to create sub dirs for.
+ *  aids_num    [I] Number of elements in aidsMyStuff.
+ */
+static void _SHCreateMyDocumentsSymbolicLink(const UINT * aidsMyStuff, const UINT aids_num)
+{
+    static const char * const xdg_dirs[] = { "DOCUMENTS" };
+    static const unsigned int num = ARRAY_SIZE(xdg_dirs);
+    char szPersonalTarget[FILENAME_MAX], *pszPersonal;
+    struct stat statFolder;
+    const char * HOSTPTR pszHome;
+    char ** xdg_results;
+
+    /* Get the unix path of 'My Documents'. */
+    pszPersonal = _SHGetFolderUnixPath(CSIDL_PERSONAL|CSIDL_FLAG_DONT_VERIFY);
+    if (!pszPersonal) return;
+
+    _SHGetXDGUserDirs(xdg_dirs, num, &xdg_results);
+
+#ifndef __ANDROID__
+    pszHome = getenv("HOME");
+#else
+    pszHome = "/sdcard/Download";
+#endif
+    if (pszHome && !stat(pszHome, &statFolder) && S_ISDIR(statFolder.st_mode))
+    {
+        while (1)
+        {
+            /* Check if there's already a Wine-specific 'My Documents' folder */
+            strcpy(szPersonalTarget, pszHome);
+            if (_SHAppendToUnixPath(szPersonalTarget, MAKEINTRESOURCEW(IDS_PERSONAL)) &&
+                !stat(szPersonalTarget, &statFolder) && S_ISDIR(statFolder.st_mode))
+            {
+                /* '$HOME/My Documents' exists. Create subfolders for
+                 * 'My Pictures', 'My Videos', 'My Music' etc. or fail silently
+                 * if they already exist.
+                 */
+                _SHCreateMyDocumentsSubDirs(aidsMyStuff, aids_num, szPersonalTarget);
+                break;
+            }
+
+            /* Try to point to the XDG Documents folder */
+            if (xdg_results && xdg_results[0] &&
+               !stat(xdg_results[0], &statFolder) &&
+               S_ISDIR(statFolder.st_mode))
+            {
+                strcpy(szPersonalTarget, xdg_results[0]);
+                break;
+            }
+
+            /* Or the hardcoded / OS X Documents folder */
+            strcpy(szPersonalTarget, pszHome);
+            if (_SHAppendToUnixPath(szPersonalTarget, DocumentsW) &&
+               !stat(szPersonalTarget, &statFolder) &&
+               S_ISDIR(statFolder.st_mode))
+                break;
+
+            /* As a last resort point to $HOME. */
+            strcpy(szPersonalTarget, pszHome);
+            break;
+        }
+
+        /* Create symbolic link to 'My Documents' or fail silently if a directory
+         * or symlink exists. */
+        symlink(szPersonalTarget, pszPersonal);
+    }
+    else
+    {
+        /* '$HOME' doesn't exist. Create subdirs for 'My Pictures', 'My Videos',
+         * 'My Music' etc. in '%USERPROFILE%\My Documents' or fail silently if
+         * they already exist. */
+        pszHome = NULL;
+        strcpy(szPersonalTarget, pszPersonal);
+        _SHCreateMyDocumentsSubDirs(aidsMyStuff, aids_num, szPersonalTarget);
+    }
+
+    heap_free(pszPersonal);
+
+    _SHFreeXDGUserDirs(num, xdg_results);
+}
+
+/******************************************************************************
+ * _SHCreateMyStuffSymbolicLink  [Internal]
+ *
+ * Sets up a symbolic link for one of the 'My Whatever' shell folders to point
+ * into the users home directory.
+ *
+ * PARAMS
+ *  nFolder [I] CSIDL identifying the folder.
+ */
+static void _SHCreateMyStuffSymbolicLink(int nFolder)
+{
+    static const UINT aidsMyStuff[] = {
+        IDS_MYPICTURES, IDS_MYVIDEOS, IDS_MYMUSIC, IDS_DOWNLOADS, IDS_TEMPLATES
+    };
+    static const WCHAR * const MyOSXStuffW[] = {
+        PicturesW, MoviesW, MusicW, DownloadsW, TemplatesW
+    };
+    static const int acsidlMyStuff[] = {
+        CSIDL_MYPICTURES, CSIDL_MYVIDEO, CSIDL_MYMUSIC, CSIDL_DOWNLOADS, CSIDL_TEMPLATES
+    };
+    static const char * const xdg_dirs[] = {
+        "PICTURES", "VIDEOS", "MUSIC", "DOWNLOAD", "TEMPLATES"
+    };
+    static const unsigned int num = ARRAY_SIZE(xdg_dirs);
+    char szPersonalTarget[FILENAME_MAX], *pszPersonal;
+    char szMyStuffTarget[FILENAME_MAX], *pszMyStuff;
+    struct stat statFolder;
+    const char * HOSTPTR pszHome;
+    char ** xdg_results;
+    DWORD folder = nFolder & CSIDL_FOLDER_MASK;
+    UINT i;
+
+    for (i = 0; i < ARRAY_SIZE(acsidlMyStuff) && acsidlMyStuff[i] != folder; i++);
+    if (i >= ARRAY_SIZE(acsidlMyStuff)) return;
+
+    /* Create all necessary profile sub-dirs up to 'My Documents' and get the unix path. */
+    pszPersonal = _SHGetFolderUnixPath(CSIDL_PERSONAL|CSIDL_FLAG_CREATE);
+    if (!pszPersonal) return;
+
+    strcpy(szPersonalTarget, pszPersonal);
+    if (!stat(pszPersonal, &statFolder) && S_ISLNK(statFolder.st_mode))
+    {
+        int cLen = readlink(pszPersonal, szPersonalTarget, FILENAME_MAX-1);
+        if (cLen >= 0) szPersonalTarget[cLen] = '\0';
+    }
+    heap_free(pszPersonal);
+
+    _SHGetXDGUserDirs(xdg_dirs, num, &xdg_results);
+
+#ifndef __ANDROID__
+    pszHome = getenv("HOME");
+#else
+    pszHome = "/sdcard/Download";
+#endif
+
+    while (1)
+    {
+        /* Get the current 'My Whatever' folder unix path. */
+        pszMyStuff = _SHGetFolderUnixPath(acsidlMyStuff[i]|CSIDL_FLAG_DONT_VERIFY);
+        if (!pszMyStuff) break;
+
+        while (1)
+        {
+            /* Check for the Wine-specific '$HOME/My Documents' subfolder */
+            strcpy(szMyStuffTarget, szPersonalTarget);
+            if (_SHAppendToUnixPath(szMyStuffTarget, MAKEINTRESOURCEW(aidsMyStuff[i])) &&
+                !stat(szMyStuffTarget, &statFolder) && S_ISDIR(statFolder.st_mode))
+                break;
+
+            /* Try the XDG_XXX_DIR folder */
+            if (xdg_results && xdg_results[i])
+            {
+                strcpy(szMyStuffTarget, xdg_results[i]);
+                break;
+            }
+
+            /* Or the OS X folder (these are never localized) */
+            if (pszHome)
+            {
+                strcpy(szMyStuffTarget, pszHome);
+                if (_SHAppendToUnixPath(szMyStuffTarget, MyOSXStuffW[i]) &&
+                    !stat(szMyStuffTarget, &statFolder) &&
+                    S_ISDIR(statFolder.st_mode))
+                    break;
+            }
+
+            /* As a last resort point to the same location as 'My Documents' */
+            strcpy(szMyStuffTarget, szPersonalTarget);
+            break;
+        }
+        symlink(szMyStuffTarget, pszMyStuff);
+        heap_free(pszMyStuff);
+        break;
+    }
+
+    _SHFreeXDGUserDirs(num, xdg_results);
+}
+
+/******************************************************************************
+ * _SHCreateDesktopSymbolicLink  [Internal]
+ *
+ * Sets up a symbolic link for the 'Desktop' shell folder to point into the
+ * users home directory.
+ */
+static void _SHCreateDesktopSymbolicLink(void)
+{
+#ifdef __ANDROID__
+    static const WCHAR DownloadW[] = {'D','o','w','n','l','o','a','d','\0'};
+    char target[FILENAME_MAX], link[FILENAME_MAX], *favorites;
+    char *pszDownloads;
+#endif
+    static const char * const xdg_dirs[] = { "DESKTOP" };
+    static const unsigned int num = ARRAY_SIZE(xdg_dirs);
+    char *pszPersonal;
+    char szDesktopTarget[FILENAME_MAX], *pszDesktop;
+    struct stat statFolder;
+    const char * HOSTPTR pszHome;
+    char ** xdg_results;
+    char * xdg_desktop_dir;
+
+    /* Create all necessary profile sub-dirs up to 'My Documents' and get the unix path. */
+    pszPersonal = _SHGetFolderUnixPath(CSIDL_PERSONAL|CSIDL_FLAG_CREATE);
+    if (!pszPersonal) return;
+
+    _SHGetXDGUserDirs(xdg_dirs, num, &xdg_results);
+
+#ifndef __ANDROID__
+    pszHome = getenv("HOME");
+#else
+    pszHome = "/sdcard/Download";
+#endif
+
+#ifdef __ANDROID__
+    /* Downloads folder for Android */
+    pszDownloads = _SHGetFolderUnixPath( CSIDL_DOWNLOADS|CSIDL_FLAG_CREATE );
+    if (pszDownloads)
+    {
+        remove(pszDownloads);
+        symlink("/sdcard/Download", pszDownloads);
+        HeapFree(GetProcessHeap(), 0, pszDownloads);
+    }
+#endif
+
+    if (getenv("CX_DIRECT_DESKTOP"))
+    {
+    /* Link the Desktop folder to the native one like in vanilla Wine.
+     * Note that this means .lnk files will be created on the user's native
+     * desktop, next to the corresponding .desktop file on Linux. They will
+     * also not be part of the bottle and will thus not be deleted, archived
+     * or packaged with it.
+     */
+    if (pszHome)
+        strcpy(szDesktopTarget, pszHome);
+    else
+        strcpy(szDesktopTarget, pszPersonal);
+    heap_free(pszPersonal);
+
+    xdg_desktop_dir = xdg_results ? xdg_results[0] : NULL;
+#ifdef __ANDROID__
+    if (!xdg_desktop_dir)
+        xdg_desktop_dir = "/sdcard/Download";
+#endif
+    if (xdg_desktop_dir ||
+        (_SHAppendToUnixPath(szDesktopTarget, DesktopW) &&
+        !stat(szDesktopTarget, &statFolder) && S_ISDIR(statFolder.st_mode)))
+    {
+        pszDesktop = _SHGetFolderUnixPath(CSIDL_DESKTOPDIRECTORY|CSIDL_FLAG_DONT_VERIFY);
+        if (pszDesktop)
+        {
+            if (xdg_desktop_dir)
+                symlink(xdg_desktop_dir, pszDesktop);
+            else
+                symlink(szDesktopTarget, pszDesktop);
+            heap_free(pszDesktop);
+        }
+    }
+    }
+    else
+    {
+        /* CrossOver Hack 12791:
+         * Create the Desktop folder and put a link to the native one inside.
+         */
+        xdg_desktop_dir = xdg_results ? xdg_results[0] : NULL;
+#ifdef __ANDROID__
+        if (!xdg_desktop_dir)
+            xdg_desktop_dir = "/sdcard/Download";
+#endif
+        pszDesktop = _SHGetFolderUnixPath( CSIDL_DESKTOPDIRECTORY|CSIDL_FLAG_DONT_VERIFY );
+        if (pszHome && pszDesktop)
+        {
+#           define szLinuxDesktop  "/My Linux Desktop"
+#           define szMacDesktop    "/My Mac Desktop"
+#           define szNativeDesktop "/My Native Desktop"
+#           define szAndroidDesktop "/My Android Downloads"
+            static const char* szDesktops[] = {szAndroidDesktop, szLinuxDesktop, szMacDesktop,
+                                               szNativeDesktop, NULL};
+            const char* pszNativeDesktop;
+            int i;
+#ifdef __ANDROID__
+            pszNativeDesktop = szAndroidDesktop;
+#elif defined(linux)
+            pszNativeDesktop = szLinuxDesktop;
+#elif defined(__APPLE__)
+            pszNativeDesktop = szMacDesktop;
+#else
+            pszNativeDesktop = szNativeDesktop;
+#endif
+            for (i=0; szDesktops[i]; i++)
+            {
+                char * pszDesktopLink = HeapAlloc(GetProcessHeap(), 0, strlen(pszDesktop) + strlen(szDesktops[i])+1);
+                strcpy(pszDesktopLink, pszDesktop);
+                strcat(pszDesktopLink, szDesktops[i]);
+                rmdir(pszDesktopLink);
+                if (stat(pszDesktopLink, &statFolder) ||
+                    !S_ISDIR(statFolder.st_mode) ||
+                    statFolder.st_uid != geteuid())
+                {
+                    /* Delete the other platforms' links */
+                    unlink(pszDesktopLink);
+                    if (strcmp(szDesktops[i], pszNativeDesktop) != 0)
+                        continue;
+
+                    /* And create one for the current platform */
+                    if (xdg_desktop_dir)
+                        symlink(xdg_desktop_dir, pszDesktopLink);
+                    else
+                    {
+                        strcpy(szDesktopTarget, pszHome);
+                        if (_SHAppendToUnixPath(szDesktopTarget, DesktopW) &&
+                            !stat(szDesktopTarget, &statFolder) &&
+                            S_ISDIR(statFolder.st_mode))
+                            symlink(szDesktopTarget, pszDesktopLink);
+                    }
+                }
+                HeapFree(GetProcessHeap(), 0, pszDesktopLink);
+            }
+            HeapFree(GetProcessHeap(), 0, pszDesktop);
+        }
+    }
+
+#ifdef __ANDROID__
+    hr = SHGetFolderPathW(NULL, CSIDL_FAVORITES|CSIDL_FLAG_CREATE, NULL,
+                          SHGFP_TYPE_DEFAULT, wszTempPath);
+    if (SUCCEEDED(hr) && (favorites = wine_get_unix_file_name(wszTempPath)))
+    {
+#define CREATE_SYMLINK(name) \
+        strcpy(target, pszHome); \
+        strcpy(link, favorites); \
+        if (_SHAppendToUnixPath(target, name) && _SHAppendToUnixPath(link, name)) \
+        { \
+            FIXME( "%s -> %s\n", debugstr_a(link), debugstr_a(target) ); \
+            symlink(target, link); \
+        }
+
+        CREATE_SYMLINK(DocumentsW)
+        CREATE_SYMLINK(PicturesW)
+        CREATE_SYMLINK(MusicW)
+        CREATE_SYMLINK(MoviesW)
+        CREATE_SYMLINK(DownloadW)
+        CREATE_SYMLINK(DesktopW)
+#undef CREATE_SYMLINK
+    }
+#endif
+
+    _SHFreeXDGUserDirs(num, xdg_results);
+}
+
+/******************************************************************************
+ * _SHCreateSymbolicLink  [Internal]
+ *
+ * Sets up a symbolic link for one of the special shell folders to point into
+ * the users home directory.
+ *
+ * PARAMS
+ *  nFolder [I] CSIDL identifying the folder.
+ */
+static void _SHCreateSymbolicLink(int nFolder)
+{
+    static const UINT aidsMyStuff[] = {
+        IDS_MYPICTURES, IDS_MYVIDEOS, IDS_MYMUSIC, IDS_DOWNLOADS, IDS_TEMPLATES
+    };
+    DWORD folder = nFolder & CSIDL_FOLDER_MASK;
+
+    switch (folder) {
+        case CSIDL_PERSONAL:
+            _SHCreateMyDocumentsSymbolicLink(aidsMyStuff, ARRAY_SIZE(aidsMyStuff));
+            break;
+        case CSIDL_MYPICTURES:
+        case CSIDL_MYVIDEO:
+        case CSIDL_MYMUSIC:
+        case CSIDL_DOWNLOADS:
+        case CSIDL_TEMPLATES:
+            _SHCreateMyStuffSymbolicLink(folder);
+            break;
+        case CSIDL_DESKTOPDIRECTORY:
+            _SHCreateDesktopSymbolicLink();
+            break;
+    }
+}
+
+/******************************************************************************
+ * _SHCreateSymbolicLinks  [Internal]
+ *
+ * Sets up symbol links for various shell folders to point into the user's home
+ * directory. We do an educated guess about what the user would probably want:
+ * - If there is a 'My Documents' directory in $HOME, the user probably wants
+ *   wine's 'My Documents' to point there. Furthermore, we infer that the user
+ *   is a Windows lover and has no problem with wine creating subfolders for
+ *   'My Pictures', 'My Music', 'My Videos' etc. under '$HOME/My Documents', if
+ *   those do not already exist. We put appropriate symbolic links in place for
+ *   those, too.
+ * - If there is no 'My Documents' directory in $HOME, we let 'My Documents'
+ *   point directly to $HOME. We assume the user to be a unix hacker who does not
+ *   want wine to create anything anywhere besides the .wine directory. So, if
+ *   there already is a 'My Music' directory in $HOME, we symlink the 'My Music'
+ *   shell folder to it. But if not, then we check XDG_MUSIC_DIR - "well known"
+ *   directory, and try to link to that. If that fails, then we symlink to
+ *   $HOME directly. The same holds for 'My Pictures', 'My Videos' etc.
+ * - The Desktop shell folder is symlinked to XDG_DESKTOP_DIR. If that does not
+ *   exist, then we try '$HOME/Desktop'. If that does not exist, then we leave
+ *   it alone.
+ * ('My Music',... above in fact means LoadString(IDS_MYMUSIC))
+ */
+static void _SHCreateSymbolicLinks(void)
+{
+    static const int acsidlMyStuff[] = {
+        CSIDL_MYPICTURES, CSIDL_MYVIDEO, CSIDL_MYMUSIC, CSIDL_DOWNLOADS, CSIDL_TEMPLATES, CSIDL_PERSONAL, CSIDL_DESKTOPDIRECTORY
+    };
+    UINT i;
+
+    for (i=0; i < ARRAY_SIZE(acsidlMyStuff); i++)
+        _SHCreateSymbolicLink(acsidlMyStuff[i]);
+}
+
+/******************************************************************************
  * SHGetFolderPathW			[SHELL32.@]
  *
- * Convert nFolder to path.  
+ * Convert nFolder to path.
  *
  * RETURNS
  *  Success: S_OK
@@ -4059,7 +4628,7 @@ HRESULT WINAPI SHGetFolderPathAndSubDirW(
     DWORD      folder = nFolder & CSIDL_FOLDER_MASK;
     CSIDL_Type type;
     int        ret;
-    
+
     TRACE("%p,%#x,%p,%#x,%s,%p\n", hwndOwner, nFolder, hToken, dwFlags, debugstr_w(pszSubPath), pszPath);
 
     /* Windows always NULL-terminates the resulting path regardless of success
@@ -4166,6 +4735,10 @@ HRESULT WINAPI SHGetFolderPathAndSubDirW(
         hr = HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND);
         goto end;
     }
+
+    /* create symbolic links rather than directories for specific
+     * user shell folders */
+    _SHCreateSymbolicLink(folder);
 
     /* create directory/directories */
     ret = SHCreateDirectoryExW(hwndOwner, szBuildPath, NULL);
@@ -4392,398 +4965,6 @@ static HRESULT _SHRegisterCommonShellFolders(void)
      szSHFolders, folders, ARRAY_SIZE(folders));
     TRACE("returning 0x%08x\n", hr);
     return hr;
-}
-
-/******************************************************************************
- * _SHAppendToUnixPath  [Internal]
- *
- * Helper function for _SHCreateSymbolicLinks. Appends pwszSubPath (or the 
- * corresponding resource, if IS_INTRESOURCE) to the unix base path 'szBasePath' 
- * and replaces backslashes with slashes.
- *
- * PARAMS
- *  szBasePath  [IO] The unix base path, which will be appended to (CP_UNXICP).
- *  pwszSubPath [I]  Sub-path or resource id (use MAKEINTRESOURCEW).
- *
- * RETURNS
- *  Success: TRUE,
- *  Failure: FALSE
- */
-static inline BOOL _SHAppendToUnixPath(char *szBasePath, LPCWSTR pwszSubPath) {
-    WCHAR wszSubPath[MAX_PATH];
-    int cLen = strlen(szBasePath);
-    char *pBackslash;
-
-    if (IS_INTRESOURCE(pwszSubPath)) {
-        if (!LoadStringW(shell32_hInstance, LOWORD(pwszSubPath), wszSubPath, MAX_PATH)) {
-            /* Fall back to hard coded defaults. */
-            switch (LOWORD(pwszSubPath)) {
-                case IDS_PERSONAL:
-                    lstrcpyW(wszSubPath, DocumentsW);
-                    break;
-                case IDS_MYMUSIC:
-                    lstrcpyW(wszSubPath, My_MusicW);
-                    break;
-                case IDS_MYPICTURES:
-                    lstrcpyW(wszSubPath, My_PicturesW);
-                    break;
-                case IDS_MYVIDEOS:
-                    lstrcpyW(wszSubPath, My_VideosW);
-                    break;
-                case IDS_DOWNLOADS:
-                    lstrcpyW(wszSubPath, DownloadsW);
-                    break;
-                case IDS_TEMPLATES:
-                    lstrcpyW(wszSubPath, TemplatesW);
-                    break;
-                default:
-                    ERR("LoadString(%d) failed!\n", LOWORD(pwszSubPath));
-                    return FALSE;
-            }
-        }
-    } else {
-        lstrcpyW(wszSubPath, pwszSubPath);
-    }
- 
-    if (szBasePath[cLen-1] != '/') szBasePath[cLen++] = '/';
- 
-    if (!WideCharToMultiByte(CP_UNIXCP, 0, wszSubPath, -1, szBasePath + cLen,
-                             FILENAME_MAX - cLen, NULL, NULL))
-    {
-        return FALSE;
-    }
- 
-    pBackslash = szBasePath + cLen;
-    while ((pBackslash = strchr(pBackslash, '\\'))) *pBackslash = '/';
- 
-    return TRUE;
-}
-
-/******************************************************************************
- * _SHCreateSymbolicLinks  [Internal]
- * 
- * Sets up symbol links for various shell folders to point into the user's home
- * directory. We do an educated guess about what the user would probably want:
- * - If there is a 'My Documents' directory in $HOME, the user probably wants
- *   wine's 'My Documents' to point there. Furthermore, we infer that the user
- *   is a Windows lover and has no problem with wine creating subfolders for
- *   'My Pictures', 'My Music', 'My Videos' etc. under '$HOME/My Documents', if
- *   those do not already exist. We put appropriate symbolic links in place for
- *   those, too.
- * - If there is no 'My Documents' directory in $HOME, we let 'My Documents'
- *   point directly to $HOME. We assume the user to be a unix hacker who does not
- *   want wine to create anything anywhere besides the .wine directory. So, if
- *   there already is a 'My Music' directory in $HOME, we symlink the 'My Music'
- *   shell folder to it. But if not, then we check XDG_MUSIC_DIR - "well known"
- *   directory, and try to link to that. If that fails, then we symlink to
- *   $HOME directly. The same holds for 'My Pictures', 'My Videos' etc.
- * - The Desktop shell folder is symlinked to XDG_DESKTOP_DIR. If that does not
- *   exist, then we try '$HOME/Desktop'. If that does not exist, then we leave
- *   it alone.
- * ('My Music',... above in fact means LoadString(IDS_MYMUSIC))
- */
-static void _SHCreateSymbolicLinks(void)
-{
-#ifdef __ANDROID__
-    static const WCHAR DownloadW[] = {'D','o','w','n','l','o','a','d','\0'};
-    char target[FILENAME_MAX], link[FILENAME_MAX], *favorites;
-    char *pszDownloads;
-#endif
-    static const UINT aidsMyStuff[] = {
-        IDS_MYPICTURES, IDS_MYVIDEOS, IDS_MYMUSIC, IDS_DOWNLOADS, IDS_TEMPLATES
-    };
-    static const WCHAR * const MyOSXStuffW[] = {
-        PicturesW, MoviesW, MusicW, DownloadsW, TemplatesW
-    };
-    static const int acsidlMyStuff[] = {
-        CSIDL_MYPICTURES, CSIDL_MYVIDEO, CSIDL_MYMUSIC, CSIDL_DOWNLOADS, CSIDL_TEMPLATES
-    };
-    static const char * const xdg_dirs[] = {
-        "PICTURES", "VIDEOS", "MUSIC", "DOWNLOAD", "TEMPLATES", "DOCUMENTS", "DESKTOP"
-    };
-    static const unsigned int num = ARRAY_SIZE(xdg_dirs);
-    WCHAR wszTempPath[MAX_PATH];
-    char szPersonalTarget[FILENAME_MAX], *pszPersonal;
-    char szMyStuffTarget[FILENAME_MAX], *pszMyStuff;
-    char szDesktopTarget[FILENAME_MAX], *pszDesktop;
-    struct stat statFolder;
-    const char * HOSTPTR pszHome;
-    HRESULT hr;
-    char ** xdg_results;
-    char * xdg_desktop_dir;
-    UINT i;
-
-    /* Create all necessary profile sub-dirs up to 'My Documents' and get the unix path. */
-    hr = SHGetFolderPathW(NULL, CSIDL_PERSONAL|CSIDL_FLAG_CREATE, NULL,
-                          SHGFP_TYPE_DEFAULT, wszTempPath);
-    if (FAILED(hr)) return;
-    pszPersonal = wine_get_unix_file_name(wszTempPath);
-    if (!pszPersonal) return;
-
-    hr = XDG_UserDirLookup(xdg_dirs, num, &xdg_results);
-    if (FAILED(hr)) xdg_results = NULL;
-
-#ifndef __ANDROID__
-    pszHome = getenv("HOME");
-#else
-    pszHome = "/sdcard/Download";
-#endif
-    if (pszHome && !stat(pszHome, &statFolder) && S_ISDIR(statFolder.st_mode))
-    {
-        while (1)
-        {
-            /* Check if there's already a Wine-specific 'My Documents' folder */
-            strcpy(szPersonalTarget, pszHome);
-            if (_SHAppendToUnixPath(szPersonalTarget, MAKEINTRESOURCEW(IDS_PERSONAL)) &&
-                !stat(szPersonalTarget, &statFolder) && S_ISDIR(statFolder.st_mode))
-            {
-                /* '$HOME/My Documents' exists. Create subfolders for
-                 * 'My Pictures', 'My Videos', 'My Music' etc. or fail silently
-                 * if they already exist.
-                 */
-                for (i = 0; i < ARRAY_SIZE(aidsMyStuff); i++)
-                {
-                    strcpy(szMyStuffTarget, szPersonalTarget);
-                    if (_SHAppendToUnixPath(szMyStuffTarget, MAKEINTRESOURCEW(aidsMyStuff[i])))
-                        mkdir(szMyStuffTarget, 0777);
-                }
-                break;
-            }
-
-            /* Try to point to the XDG Documents folder */
-            if (xdg_results && xdg_results[num-2] &&
-               !stat(xdg_results[num-2], &statFolder) &&
-               S_ISDIR(statFolder.st_mode))
-            {
-                strcpy(szPersonalTarget, xdg_results[num-2]);
-                break;
-            }
-
-            /* Or the hardcoded / OS X / Android Documents folder */
-            strcpy(szPersonalTarget, pszHome);
-            if (_SHAppendToUnixPath(szPersonalTarget, DocumentsW) &&
-               !stat(szPersonalTarget, &statFolder) &&
-               S_ISDIR(statFolder.st_mode))
-                break;
-
-            /* As a last resort point to $HOME. */
-            strcpy(szPersonalTarget, pszHome);
-            break;
-        }
-
-        /* Replace 'My Documents' directory with a symlink or fail silently if not empty. */
-        remove(pszPersonal);
-        symlink(szPersonalTarget, pszPersonal);
-    }
-    else
-    {
-        /* '$HOME' doesn't exist. Create subdirs for 'My Pictures', 'My Videos',
-         * 'My Music' etc. in '%USERPROFILE%\My Documents' or fail silently if
-         * they already exist. */
-        pszHome = NULL;
-        strcpy(szPersonalTarget, pszPersonal);
-        for (i = 0; i < ARRAY_SIZE(aidsMyStuff); i++) {
-            strcpy(szMyStuffTarget, szPersonalTarget);
-            if (_SHAppendToUnixPath(szMyStuffTarget, MAKEINTRESOURCEW(aidsMyStuff[i])))
-                mkdir(szMyStuffTarget, 0777);
-        }
-    }
-
-    /* Create symbolic links for 'My Pictures', 'My Videos', 'My Music' etc. */
-    for (i=0; i < ARRAY_SIZE(aidsMyStuff); i++)
-    {
-        /* Create the current 'My Whatever' folder and get its unix path. */
-        hr = SHGetFolderPathW(NULL, acsidlMyStuff[i]|CSIDL_FLAG_CREATE, NULL,
-                              SHGFP_TYPE_DEFAULT, wszTempPath);
-        if (FAILED(hr)) continue;
-
-        pszMyStuff = wine_get_unix_file_name(wszTempPath);
-        if (!pszMyStuff) continue;
-        
-        while (1)
-        {
-            /* Check for the Wine-specific '$HOME/My Documents' subfolder */
-            strcpy(szMyStuffTarget, szPersonalTarget);
-            if (_SHAppendToUnixPath(szMyStuffTarget, MAKEINTRESOURCEW(aidsMyStuff[i])) &&
-                !stat(szMyStuffTarget, &statFolder) && S_ISDIR(statFolder.st_mode))
-                break;
-
-            /* Try the XDG_XXX_DIR folder */
-            if (xdg_results && xdg_results[i])
-            {
-                strcpy(szMyStuffTarget, xdg_results[i]);
-                break;
-            }
-
-            /* Or the OS X folder (these are never localized) */
-            if (pszHome)
-            {
-                strcpy(szMyStuffTarget, pszHome);
-                if (_SHAppendToUnixPath(szMyStuffTarget, MyOSXStuffW[i]) &&
-                    !stat(szMyStuffTarget, &statFolder) &&
-                    S_ISDIR(statFolder.st_mode))
-                    break;
-            }
-
-            /* As a last resort point to the same location as 'My Documents' */
-            strcpy(szMyStuffTarget, szPersonalTarget);
-            break;
-        }
-        remove(pszMyStuff);
-        symlink(szMyStuffTarget, pszMyStuff);
-        heap_free(pszMyStuff);
-    }
-
-#ifdef __ANDROID__
-    /* Downloads folder for Android */
-    hr = SHGetFolderPathW(NULL, CSIDL_DOWNLOADS|CSIDL_FLAG_CREATE, NULL,
-                          SHGFP_TYPE_DEFAULT, wszTempPath);
-    if (SUCCEEDED(hr) && (pszDownloads = wine_get_unix_file_name(wszTempPath)))
-    {
-        remove(pszDownloads);
-        symlink("/sdcard/Download", pszDownloads);
-        HeapFree(GetProcessHeap(), 0, pszDownloads);
-    }
-#endif
-
-    /* Last but not least, the Desktop folder */
-    if (getenv("CX_DIRECT_DESKTOP"))
-    {
-    /* Link the Desktop folder to the native one like in vanilla Wine.
-     * Note that this means .lnk files will be created on the user's native
-     * desktop, next to the corresponding .desktop file on Linux. They will
-     * also not be part of the bottle and will thus not be deleted, archived
-     * or packaged with it.
-     */
-    if (pszHome)
-        strcpy(szDesktopTarget, pszHome);
-    else
-        strcpy(szDesktopTarget, pszPersonal);
-    heap_free(pszPersonal);
-
-    xdg_desktop_dir = xdg_results ? xdg_results[num - 1] : NULL;
-#ifdef __ANDROID__
-    if (!xdg_desktop_dir)
-        xdg_desktop_dir = "/sdcard/Download";
-#endif
-    if (xdg_desktop_dir ||
-        (_SHAppendToUnixPath(szDesktopTarget, DesktopW) &&
-        !stat(szDesktopTarget, &statFolder) && S_ISDIR(statFolder.st_mode)))
-    {
-        hr = SHGetFolderPathW(NULL, CSIDL_DESKTOPDIRECTORY|CSIDL_FLAG_CREATE, NULL,
-                              SHGFP_TYPE_DEFAULT, wszTempPath);
-        if (SUCCEEDED(hr) && (pszDesktop = wine_get_unix_file_name(wszTempPath)))
-        {
-            remove(pszDesktop);
-            if (xdg_desktop_dir)
-                symlink(xdg_desktop_dir, pszDesktop);
-            else
-                symlink(szDesktopTarget, pszDesktop);
-            heap_free(pszDesktop);
-        }
-    }
-    }
-    else
-    {
-        /* CrossOver Hack 12791:
-         * Create the Desktop folder and put a link to the native one inside.
-         */
-        xdg_desktop_dir = xdg_results ? xdg_results[num - 1] : NULL;
-#ifdef __ANDROID__
-        if (!xdg_desktop_dir)
-            xdg_desktop_dir = "/sdcard/Download";
-#endif
-        hr = SHGetFolderPathW(NULL, CSIDL_DESKTOPDIRECTORY|CSIDL_FLAG_CREATE, NULL,
-                              SHGFP_TYPE_DEFAULT, wszTempPath);
-        if (pszHome && SUCCEEDED(hr) &&
-            (pszDesktop = wine_get_unix_file_name(wszTempPath)))
-        {
-#           define szLinuxDesktop  "/My Linux Desktop"
-#           define szMacDesktop    "/My Mac Desktop"
-#           define szNativeDesktop "/My Native Desktop"
-#           define szAndroidDesktop "/My Android Downloads"
-            static const char* szDesktops[] = {szAndroidDesktop, szLinuxDesktop, szMacDesktop,
-                                               szNativeDesktop, NULL};
-            const char* pszNativeDesktop;
-#ifdef __ANDROID__
-            pszNativeDesktop = szAndroidDesktop;
-#elif defined(linux)
-            pszNativeDesktop = szLinuxDesktop;
-#elif defined(__APPLE__)
-            pszNativeDesktop = szMacDesktop;
-#else
-            pszNativeDesktop = szNativeDesktop;
-#endif
-            for (i=0; szDesktops[i]; i++)
-            {
-                char * pszDesktopLink = HeapAlloc(GetProcessHeap(), 0, strlen(pszDesktop) + strlen(szDesktops[i])+1);
-                strcpy(pszDesktopLink, pszDesktop);
-                strcat(pszDesktopLink, szDesktops[i]);
-                rmdir(pszDesktopLink);
-                if (stat(pszDesktopLink, &statFolder) ||
-                    !S_ISDIR(statFolder.st_mode) ||
-                    statFolder.st_uid != geteuid())
-                {
-#ifdef __ANDROID__
-                    int needSameUid = 0;
-#else
-                    int needSameUid = 0;
-#endif
-                    /* Delete the other platforms' links */
-                    unlink(pszDesktopLink);
-                    if (strcmp(szDesktops[i], pszNativeDesktop) != 0)
-                        continue;
-
-                    /* And create one for the current platform */
-                    if (xdg_desktop_dir)
-                        symlink(xdg_desktop_dir, pszDesktopLink);
-                    else
-                    {
-                        strcpy(szDesktopTarget, pszHome);
-                        if (_SHAppendToUnixPath(szDesktopTarget, DesktopW) &&
-                            !stat(szDesktopTarget, &statFolder) &&
-                            S_ISDIR(statFolder.st_mode) &&
-                            needSameUid ? statFolder.st_uid == geteuid() : 1)
-                            symlink(szDesktopTarget, pszDesktopLink);
-                    }
-                }
-                HeapFree(GetProcessHeap(), 0, pszDesktopLink);
-            }
-            HeapFree(GetProcessHeap(), 0, pszDesktop);
-        }
-    }
-
-#ifdef __ANDROID__
-    hr = SHGetFolderPathW(NULL, CSIDL_FAVORITES|CSIDL_FLAG_CREATE, NULL,
-                          SHGFP_TYPE_DEFAULT, wszTempPath);
-    if (SUCCEEDED(hr) && (favorites = wine_get_unix_file_name(wszTempPath)))
-    {
-#define CREATE_SYMLINK(name) \
-        strcpy(target, pszHome); \
-        strcpy(link, favorites); \
-        if (_SHAppendToUnixPath(target, name) && _SHAppendToUnixPath(link, name)) \
-        { \
-            FIXME( "%s -> %s\n", debugstr_a(link), debugstr_a(target) ); \
-            symlink(target, link); \
-        }
-
-        CREATE_SYMLINK(DocumentsW)
-        CREATE_SYMLINK(PicturesW)
-        CREATE_SYMLINK(MusicW)
-        CREATE_SYMLINK(MoviesW)
-        CREATE_SYMLINK(DownloadW)
-        CREATE_SYMLINK(DesktopW)
-#undef CREATE_SYMLINK
-    }
-#endif
-
-    /* Free resources allocated by XDG_UserDirLookup() */
-    if (xdg_results)
-    {
-        for (i = 0; i < num; i++)
-            heap_free(xdg_results[i]);
-        heap_free(xdg_results);
-    }
 }
 
 void WINAPI wine_update_symbolic_links(HWND hwnd, HINSTANCE handle, LPCWSTR cmdline, INT show)
@@ -5197,6 +5378,10 @@ HRESULT WINAPI SHGetKnownFolderPath(REFKNOWNFOLDERID rfid, DWORD flags, HANDLE t
         hr = HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND);
         goto failed;
     }
+
+    /* create symbolic links rather than directories for specific
+     * user shell folders */
+    _SHCreateSymbolicLink(folder);
 
     /* create directory/directories */
     ret = SHCreateDirectoryExW(NULL, pathW, NULL);

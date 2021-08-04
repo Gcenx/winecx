@@ -5,10 +5,6 @@
  * Unit tests for data structure packing
  */
 
-#define WINVER 0x0501
-#define _WIN32_IE 0x0501
-#define _WIN32_WINNT 0x0501
-
 #define WINE_NOWINSOCK
 
 #include "windef.h"
@@ -31,7 +27,7 @@
 
 #if defined(_MSC_VER) && (_MSC_VER >= 1300) && defined(__cplusplus)
 # define _TYPE_ALIGNMENT(type) __alignof(type)
-#elif defined(__GNUC__)
+#elif defined(__GNUC__) || defined(__clang__)
 # define _TYPE_ALIGNMENT(type) __alignof__(type)
 #else
 /*
@@ -53,23 +49,23 @@
  * Test helper macros
  */
 
-#define TEST_TYPE_SIZE(type, size)             C_ASSERT(sizeof(type) == size);
+#define TEST_TYPE_SIZE(type, size)              C_ASSERT(sizeof(type) == size);
 
 #ifdef TYPE_ALIGNMENT
-# define TEST_TYPE_ALIGN(type, align)          C_ASSERT(TYPE_ALIGNMENT(type) == align);
+# define TEST_TYPE_ALIGN(type, align)           C_ASSERT(TYPE_ALIGNMENT(type) == align);
 #else
 # define TEST_TYPE_ALIGN(type, align)
 #endif
 
 #ifdef _TYPE_ALIGNMENT
-# define TEST_TARGET_ALIGN(type, align)        C_ASSERT(_TYPE_ALIGNMENT(*(type)0) == align);
-# define TEST_FIELD_ALIGN(type, field, align)  C_ASSERT(_TYPE_ALIGNMENT(((type*)0)->field) == align);
+# define TEST_TARGET_ALIGN(type, align)         C_ASSERT(_TYPE_ALIGNMENT(*(type)0) == align);
+# define TEST_FIELD_ALIGN(type, field, align)   C_ASSERT(_TYPE_ALIGNMENT(((type*)0)->field) == align);
 #else
 # define TEST_TARGET_ALIGN(type, align)
 # define TEST_FIELD_ALIGN(type, field, align)
 #endif
 
-#define TEST_FIELD_OFFSET(type, field, offset) C_ASSERT(FIELD_OFFSET(type, field) == offset);
+#define TEST_FIELD_OFFSET(type, field, offset)  C_ASSERT(FIELD_OFFSET(type, field) == offset);
 
 #define TEST_TARGET_SIZE(type, size)            TEST_TYPE_SIZE(*(type)0, size)
 #define TEST_FIELD_SIZE(type, field, size)      TEST_TYPE_SIZE((((type*)0)->field), size)
@@ -818,6 +814,28 @@ static void test_pack_MIXERCONTROLW(void)
     TEST_FIELD_OFFSET(MIXERCONTROLW, cMultipleItems, 16)
 }
 
+static void test_pack_MIXERLINECONTROLSA(void)
+{
+    /* MIXERLINECONTROLSA (pack 1) */
+    TEST_FIELD_SIZE  (MIXERLINECONTROLSA, cbStruct, 4)
+    TEST_FIELD_ALIGN (MIXERLINECONTROLSA, cbStruct, 1)
+    TEST_FIELD_OFFSET(MIXERLINECONTROLSA, cbStruct, 0)
+    TEST_FIELD_SIZE  (MIXERLINECONTROLSA, dwLineID, 4)
+    TEST_FIELD_ALIGN (MIXERLINECONTROLSA, dwLineID, 1)
+    TEST_FIELD_OFFSET(MIXERLINECONTROLSA, dwLineID, 4)
+}
+
+static void test_pack_MIXERLINECONTROLSW(void)
+{
+    /* MIXERLINECONTROLSW (pack 1) */
+    TEST_FIELD_SIZE  (MIXERLINECONTROLSW, cbStruct, 4)
+    TEST_FIELD_ALIGN (MIXERLINECONTROLSW, cbStruct, 1)
+    TEST_FIELD_OFFSET(MIXERLINECONTROLSW, cbStruct, 0)
+    TEST_FIELD_SIZE  (MIXERLINECONTROLSW, dwLineID, 4)
+    TEST_FIELD_ALIGN (MIXERLINECONTROLSW, dwLineID, 1)
+    TEST_FIELD_OFFSET(MIXERLINECONTROLSW, dwLineID, 4)
+}
+
 static void test_pack_MIXERCONTROLDETAILS(void)
 {
     /* MIXERCONTROLDETAILS (pack 1) */
@@ -887,6 +905,8 @@ static void test_pack_MIXERCONTROLDETAILS_UNSIGNED(void)
 static void test_pack_MMIOINFO(void)
 {
     /* MMIOINFO (pack 1) */
+    TEST_TYPE_SIZE   (MMIOINFO, 100)
+    TEST_TYPE_ALIGN  (MMIOINFO, 1)
     TEST_FIELD_SIZE  (MMIOINFO, dwFlags, 4)
     TEST_FIELD_ALIGN (MMIOINFO, dwFlags, 1)
     TEST_FIELD_OFFSET(MMIOINFO, dwFlags, 0)
@@ -899,6 +919,42 @@ static void test_pack_MMIOINFO(void)
     TEST_FIELD_SIZE  (MMIOINFO, wErrorRet, 4)
     TEST_FIELD_ALIGN (MMIOINFO, wErrorRet, 1)
     TEST_FIELD_OFFSET(MMIOINFO, wErrorRet, 16)
+    TEST_FIELD_SIZE  (MMIOINFO, hTask, 8)
+    TEST_FIELD_ALIGN (MMIOINFO, hTask, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, hTask, 20)
+    TEST_FIELD_SIZE  (MMIOINFO, cchBuffer, 4)
+    TEST_FIELD_ALIGN (MMIOINFO, cchBuffer, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, cchBuffer, 28)
+    TEST_FIELD_SIZE  (MMIOINFO, pchBuffer, 8)
+    TEST_FIELD_ALIGN (MMIOINFO, pchBuffer, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, pchBuffer, 32)
+    TEST_FIELD_SIZE  (MMIOINFO, pchNext, 8)
+    TEST_FIELD_ALIGN (MMIOINFO, pchNext, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, pchNext, 40)
+    TEST_FIELD_SIZE  (MMIOINFO, pchEndRead, 8)
+    TEST_FIELD_ALIGN (MMIOINFO, pchEndRead, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, pchEndRead, 48)
+    TEST_FIELD_SIZE  (MMIOINFO, pchEndWrite, 8)
+    TEST_FIELD_ALIGN (MMIOINFO, pchEndWrite, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, pchEndWrite, 56)
+    TEST_FIELD_SIZE  (MMIOINFO, lBufOffset, 4)
+    TEST_FIELD_ALIGN (MMIOINFO, lBufOffset, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, lBufOffset, 64)
+    TEST_FIELD_SIZE  (MMIOINFO, lDiskOffset, 4)
+    TEST_FIELD_ALIGN (MMIOINFO, lDiskOffset, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, lDiskOffset, 68)
+    TEST_FIELD_SIZE  (MMIOINFO, adwInfo, 12)
+    TEST_FIELD_ALIGN (MMIOINFO, adwInfo, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, adwInfo, 72)
+    TEST_FIELD_SIZE  (MMIOINFO, dwReserved1, 4)
+    TEST_FIELD_ALIGN (MMIOINFO, dwReserved1, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, dwReserved1, 84)
+    TEST_FIELD_SIZE  (MMIOINFO, dwReserved2, 4)
+    TEST_FIELD_ALIGN (MMIOINFO, dwReserved2, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, dwReserved2, 88)
+    TEST_FIELD_SIZE  (MMIOINFO, hmmio, 8)
+    TEST_FIELD_ALIGN (MMIOINFO, hmmio, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, hmmio, 92)
 }
 
 static void test_pack_MMCKINFO(void)
@@ -3223,6 +3279,28 @@ static void test_pack_MIXERCONTROLW(void)
     TEST_FIELD_OFFSET(MIXERCONTROLW, cMultipleItems, 16)
 }
 
+static void test_pack_MIXERLINECONTROLSA(void)
+{
+    /* MIXERLINECONTROLSA (pack 1) */
+    TEST_FIELD_SIZE  (MIXERLINECONTROLSA, cbStruct, 4)
+    TEST_FIELD_ALIGN (MIXERLINECONTROLSA, cbStruct, 1)
+    TEST_FIELD_OFFSET(MIXERLINECONTROLSA, cbStruct, 0)
+    TEST_FIELD_SIZE  (MIXERLINECONTROLSA, dwLineID, 4)
+    TEST_FIELD_ALIGN (MIXERLINECONTROLSA, dwLineID, 1)
+    TEST_FIELD_OFFSET(MIXERLINECONTROLSA, dwLineID, 4)
+}
+
+static void test_pack_MIXERLINECONTROLSW(void)
+{
+    /* MIXERLINECONTROLSW (pack 1) */
+    TEST_FIELD_SIZE  (MIXERLINECONTROLSW, cbStruct, 4)
+    TEST_FIELD_ALIGN (MIXERLINECONTROLSW, cbStruct, 1)
+    TEST_FIELD_OFFSET(MIXERLINECONTROLSW, cbStruct, 0)
+    TEST_FIELD_SIZE  (MIXERLINECONTROLSW, dwLineID, 4)
+    TEST_FIELD_ALIGN (MIXERLINECONTROLSW, dwLineID, 1)
+    TEST_FIELD_OFFSET(MIXERLINECONTROLSW, dwLineID, 4)
+}
+
 static void test_pack_MIXERCONTROLDETAILS(void)
 {
     /* MIXERCONTROLDETAILS (pack 1) */
@@ -3292,6 +3370,8 @@ static void test_pack_MIXERCONTROLDETAILS_UNSIGNED(void)
 static void test_pack_MMIOINFO(void)
 {
     /* MMIOINFO (pack 1) */
+    TEST_TYPE_SIZE   (MMIOINFO, 72)
+    TEST_TYPE_ALIGN  (MMIOINFO, 1)
     TEST_FIELD_SIZE  (MMIOINFO, dwFlags, 4)
     TEST_FIELD_ALIGN (MMIOINFO, dwFlags, 1)
     TEST_FIELD_OFFSET(MMIOINFO, dwFlags, 0)
@@ -3304,6 +3384,42 @@ static void test_pack_MMIOINFO(void)
     TEST_FIELD_SIZE  (MMIOINFO, wErrorRet, 4)
     TEST_FIELD_ALIGN (MMIOINFO, wErrorRet, 1)
     TEST_FIELD_OFFSET(MMIOINFO, wErrorRet, 12)
+    TEST_FIELD_SIZE  (MMIOINFO, hTask, 4)
+    TEST_FIELD_ALIGN (MMIOINFO, hTask, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, hTask, 16)
+    TEST_FIELD_SIZE  (MMIOINFO, cchBuffer, 4)
+    TEST_FIELD_ALIGN (MMIOINFO, cchBuffer, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, cchBuffer, 20)
+    TEST_FIELD_SIZE  (MMIOINFO, pchBuffer, 4)
+    TEST_FIELD_ALIGN (MMIOINFO, pchBuffer, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, pchBuffer, 24)
+    TEST_FIELD_SIZE  (MMIOINFO, pchNext, 4)
+    TEST_FIELD_ALIGN (MMIOINFO, pchNext, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, pchNext, 28)
+    TEST_FIELD_SIZE  (MMIOINFO, pchEndRead, 4)
+    TEST_FIELD_ALIGN (MMIOINFO, pchEndRead, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, pchEndRead, 32)
+    TEST_FIELD_SIZE  (MMIOINFO, pchEndWrite, 4)
+    TEST_FIELD_ALIGN (MMIOINFO, pchEndWrite, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, pchEndWrite, 36)
+    TEST_FIELD_SIZE  (MMIOINFO, lBufOffset, 4)
+    TEST_FIELD_ALIGN (MMIOINFO, lBufOffset, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, lBufOffset, 40)
+    TEST_FIELD_SIZE  (MMIOINFO, lDiskOffset, 4)
+    TEST_FIELD_ALIGN (MMIOINFO, lDiskOffset, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, lDiskOffset, 44)
+    TEST_FIELD_SIZE  (MMIOINFO, adwInfo, 12)
+    TEST_FIELD_ALIGN (MMIOINFO, adwInfo, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, adwInfo, 48)
+    TEST_FIELD_SIZE  (MMIOINFO, dwReserved1, 4)
+    TEST_FIELD_ALIGN (MMIOINFO, dwReserved1, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, dwReserved1, 60)
+    TEST_FIELD_SIZE  (MMIOINFO, dwReserved2, 4)
+    TEST_FIELD_ALIGN (MMIOINFO, dwReserved2, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, dwReserved2, 64)
+    TEST_FIELD_SIZE  (MMIOINFO, hmmio, 4)
+    TEST_FIELD_ALIGN (MMIOINFO, hmmio, 1)
+    TEST_FIELD_OFFSET(MMIOINFO, hmmio, 68)
 }
 
 static void test_pack_MMCKINFO(void)
@@ -5005,6 +5121,8 @@ static void test_pack(void)
     test_pack_MIXERCONTROLDETAILS_UNSIGNED();
     test_pack_MIXERCONTROLW();
     test_pack_MIXERLINEA();
+    test_pack_MIXERLINECONTROLSA();
+    test_pack_MIXERLINECONTROLSW();
     test_pack_MIXERLINEW();
     test_pack_MMCKINFO();
     test_pack_MMIOINFO();

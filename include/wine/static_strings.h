@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
- *
+ * 
  * NOTES:
  * This is not optimized in any way. It is intended to store local copies in
  * 32-bit address space of informational strings returned from 64-bit

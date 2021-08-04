@@ -159,6 +159,17 @@ my %remap_types =
      "GLDEBUGPROCARB" => "void *",
      "PROC" => "WINEGLDEF(PROC)",
     );
+
+my %khronos_types =
+    (
+     "khronos_int8_t" => "signed char",
+     "khronos_uint8_t" => "unsigned char",
+     "khronos_int16_t" => "short",
+     "khronos_uint16_t" => "unsigned short",
+     "khronos_int32_t" => "int",
+     "khronos_uint32_t" => "unsigned int",
+     "khronos_float_t" => "float",
+    );
 #
 # Used to convert some types
 #
@@ -331,14 +342,14 @@ sub GenerateThunk($$$)
     return $ret;
 }
 
-sub generate_null_func($$)
+sub generate_null_func($$$)
 {
-    my ($name, $func_ref) = @_;
+    my ($name, $func_ref, $callconv) = @_;
     my $ret;
 
     return "" if $name eq "glDebugEntry";
 
-    $ret = get_func_proto( "static %s null_%s(%s)", $name, $func_ref, 1, 0 );
+    $ret = get_func_proto( "static %s$callconv null_%s(%s)", $name, $func_ref, 1, 0 );
     $ret .= " {";
     if ($name eq "glGetError")
     {
@@ -445,8 +456,11 @@ if ($version eq "1.0") {
 #
 # Fetch the registry files
 #
--f "gl.xml" || system "wget https://raw.github.com/KhronosGroup/OpenGL-Registry/master/xml/gl.xml" || die "cannot download gl.xml";
--f "wgl.xml" || system "wget https://raw.github.com/KhronosGroup/OpenGL-Registry/master/xml/wgl.xml" || die "cannot download wgl.xml";
+my $url="https://raw.githubusercontent.com/KhronosGroup/OpenGL-Registry";
+my $commit="03e1bfb87c4664d34dc7822fb591841eec747094";
+
+-f "gl-$commit.xml" || system "wget", "-O", "gl-$commit.xml", "$url/$commit/xml/gl.xml" || die "cannot download gl.xml";
+-f "wgl-$commit.xml" || system "wget", "-O", "wgl-$commit.xml", "$url/$commit/xml/wgl.xml" || die "cannot download wgl.xml";
 
 
 #
@@ -466,7 +480,6 @@ if ($version eq "1.0") {
 my %norm_functions;
 my %ext_functions;
 my %wgl_functions;
-my %glu_functions;
 my %gl_enums;
 my (%gl_types, @gl_types);  # also use an array to preserve declaration order
 
@@ -495,6 +508,8 @@ my %remapped_wgl_functions =
      "wglUseFontBitmaps" => 0,
      "wglUseFontOutlines" => 0,
     );
+
+my @extra_wgl_functions = ( "wglGetDefaultProcAddress" );
 
 my %supported_wgl_extensions =
    (
@@ -643,6 +658,10 @@ sub parse_file($)
                 }
                 $wgl_functions{$name} = $functions{$cmd->{name}};
             }
+            foreach my $name (@extra_wgl_functions)
+            {
+                $wgl_functions{$name} = $functions{$name} if defined $functions{$name};
+            }
         }
         next unless defined $norm_categories{$feature->{name}};
         foreach my $cmd ($feature->findnodes("./require/command"))
@@ -689,16 +708,6 @@ sub parse_file($)
             }
             next;
         }
-        # CrossOver Hack 10798
-        if ($ext->{supported} eq "glu")
-        {
-            foreach my $cmd ($ext->findnodes("./require/command"))
-            {
-                my $name = $cmd->{name};
-                $glu_functions{$name} = [ $functions{$name}[0], $functions{$name}[1] ];
-            }
-            next;
-        }
         next unless is_supported_api( $ext->{supported} );
         foreach my $req ($ext->findnodes("./require"))
         {
@@ -724,8 +733,8 @@ sub parse_file($)
     }
 }
 
-parse_file( "gl.xml" );
-parse_file( "wgl.xml" );
+parse_file( "gl-$commit.xml" );
+parse_file( "wgl-$commit.xml" );
 parse_file( "winegl.xml" );
 
 #
@@ -786,14 +795,6 @@ foreach (sort keys %ext_functions)
 }
 print HEADER "};\n\n";
 
-# CrossOver Hack 10798
-print HEADER "struct opengl_funcs_glu\n{\n";
-foreach (sort keys %glu_functions)
-{
-    print HEADER get_func_proto("    %-10s (WINE_GLAPI *p_%s)(%s);\n", $_, $glu_functions{$_}, 1, 0);
-}
-print HEADER "};\n\n";
-
 print HEADER "#ifndef WINE_GL_WIN32\n";
 print HEADER "#include \"hostaddrspace_exit.h\"\n";
 print HEADER "#endif\n\n";
@@ -802,7 +803,7 @@ print HEADER "struct opengl_funcs_wgl\n{\n";
 foreach (sort keys %wgl_functions)
 {
     next unless defined $supported_wgl_functions{$_};
-    print HEADER get_func_proto("    %-10s (WINE_GLAPI *p_%s)(%s);\n", $_, $wgl_functions{$_}, 1, 0);
+    print HEADER get_func_proto("    %-10s (WINAPI *p_%s)(%s);\n", $_, $wgl_functions{$_}, 1, 0);
 }
 print HEADER "};\n\n";
 
@@ -810,21 +811,12 @@ print HEADER "struct WINE_OPENGL_FUNCS\n{\n";
 print HEADER "    struct opengl_funcs_wgl wgl;\n";
 print HEADER "    struct opengl_funcs_gl gl;\n";
 print HEADER "    struct opengl_funcs_ext ext;\n";
-print HEADER "    struct opengl_funcs_glu glu;\n";
 print HEADER "};\n\n";
 
 print HEADER "#define ALL_WGL_FUNCS";
 foreach (sort keys %norm_functions)
 {
     next if $_ eq "glDebugEntry";
-    printf HEADER " \\\n    USE_GL_FUNC(\%s)", $_;
-}
-print HEADER "\n\n";
-
-# CrossOver Hack 10798
-print HEADER "#define ALL_GLU_FUNCS";
-foreach (sort keys %glu_functions)
-{
     printf HEADER " \\\n    USE_GL_FUNC(\%s)", $_;
 }
 print HEADER "\n\n";
@@ -865,7 +857,9 @@ print HEADER "typedef uint32_t khronos_uint32_t;\n\n";
 
 foreach (@gl_types)
 {
-    printf HEADER $gl_types{$_}->textContent() . "\n";
+    my $type = $gl_types{$_}->textContent();
+    foreach my $t (keys %khronos_types) { $type =~ s/\s(\Q$t\E)\s/ $khronos_types{$t} /; }
+    printf HEADER $type . "\n";
 }
 print HEADER "#ifdef __i386_on_x86_64__\n";
 foreach (@gl_types)
@@ -929,17 +923,13 @@ foreach (sort keys %norm_functions) {
 
 foreach (sort keys %wgl_functions) {
     next unless defined $supported_wgl_functions{$_};
-    print NORM generate_null_func($_, $wgl_functions{$_});
+    print NORM generate_null_func($_, $wgl_functions{$_}, " WINAPI");
 }
 
 print NORM "\n#include \"wine/hostaddrspace_enter.h\"\n\n";
 
 foreach (sort keys %norm_functions) {
-    print NORM generate_null_func($_, $norm_functions{$_});
-}
-# CrossOver Hack 10798
-foreach (sort keys %glu_functions) {
-    print NORM generate_null_func($_, $glu_functions{$_});
+    print NORM generate_null_func($_, $norm_functions{$_}, "");
 }
 my $exited_host = 0;
 foreach (sort keys %ext_functions) {
@@ -947,7 +937,7 @@ foreach (sort keys %ext_functions) {
         print NORM "\n#include \"wine/hostaddrspace_exit.h\"\n\n";
         $exited_host = 1;
     }
-    print NORM generate_null_func($_, $ext_functions{$_});
+    print NORM generate_null_func($_, $ext_functions{$_}, "");
 }
 
 print NORM "\nstruct opengl_funcs null_opengl_funcs =\n{\n    {\n";
@@ -960,9 +950,6 @@ print NORM "    },\n    {\n";
 foreach (sort keys %norm_functions) { print NORM "        null_$_,\n" unless $_ eq "glDebugEntry"; }
 print NORM "    },\n    {\n";
 foreach (sort keys %ext_functions) { print NORM "        null_$_,\n"; }
-# CrossOver Hack 10798
-print NORM "    },\n    {\n";
-foreach (sort keys %glu_functions) { print NORM "        null_$_,\n"; }
 print NORM "    }\n};\n";
 
 close(NORM);

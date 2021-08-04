@@ -46,7 +46,9 @@ int verbose = 0;
 int link_ext_symbols = 0;
 int force_pointer_size = 0;
 int unwind_tables = 0;
+int use_msvcrt = 0;
 int unix_lib = 0;
+int safe_seh = 0;
 
 #ifdef __i386__
 enum target_cpu target_cpu = CPU_x86;
@@ -115,7 +117,9 @@ enum exec_mode_values
     MODE_EXE,
     MODE_DEF,
     MODE_IMPLIB,
+    MODE_STATICLIB,
     MODE_BUILTIN,
+    MODE_FIXUP_CTORS,
     MODE_RESOURCES
 };
 
@@ -199,7 +203,7 @@ static void set_subsystem( const char *subsystem, DLLSPEC *spec )
 static void set_target( const char *target )
 {
     unsigned int i;
-    char *p, *platform, *spec = xstrdup( target );
+    char *p, *spec = xstrdup( target );
 
     /* target specification is in the form CPU-MANUFACTURER-OS or CPU-MANUFACTURER-KERNEL-OS */
 
@@ -215,13 +219,11 @@ static void set_target( const char *target )
         cpu = get_cpu_from_name( spec );
         if (cpu == -1) fatal_error( "Unrecognized CPU '%s'\n", spec );
         target_cpu = cpu;
-        platform = p;
-        if ((p = strrchr( p, '-' ))) platform = p + 1;
     }
     else if (!strcmp( spec, "mingw32" ))
     {
         target_cpu = CPU_x86;
-        platform = spec;
+        p = spec;
     }
     else
         fatal_error( "Invalid target specification '%s'\n", target );
@@ -229,16 +231,23 @@ static void set_target( const char *target )
     /* get the OS part */
 
     target_platform = PLATFORM_UNSPECIFIED;  /* default value */
-    for (i = 0; i < ARRAY_SIZE(platform_names); i++)
+    for (;;)
     {
-        if (!strncmp( platform_names[i].name, platform, strlen(platform_names[i].name) ))
+        for (i = 0; i < ARRAY_SIZE(platform_names); i++)
         {
-            target_platform = platform_names[i].platform;
-            break;
+            if (!strncmp( platform_names[i].name, p, strlen(platform_names[i].name) ))
+            {
+                target_platform = platform_names[i].platform;
+                break;
+            }
         }
+        if (target_platform != PLATFORM_UNSPECIFIED || !(p = strchr( p, '-' ))) break;
+        p++;
     }
 
     free( spec );
+
+    if (target_cpu == CPU_ARM && target_platform == PLATFORM_WINDOWS) thumb_mode = 1;
 }
 
 /* cleanup on program exit */
@@ -288,6 +297,7 @@ static const char usage_str[] =
 "   -N, --dll-name=DLLNAME    Set the DLL name (default: from input file name)\n"
 "   -o, --output=NAME         Set the output file name (default: stdout)\n"
 "   -r, --res=RSRC.RES        Load resources from RSRC.RES\n"
+"       --safeseh             Mark object files as SEH compatible\n"
 "       --save-temps          Do not delete the generated intermediate files\n"
 "       --subsystem=SUBSYS    Set the subsystem (one of native, windows, console, wince)\n"
 "   -u, --undefined=SYMBOL    Add an undefined reference to SYMBOL when linking\n"
@@ -299,8 +309,10 @@ static const char usage_str[] =
 "       --def                 Build a .def file from a .spec file\n"
 "       --exe                 Build an executable from object files\n"
 "       --implib              Build an import library\n"
-"       --builtin             Mark a library as a Wine builtin\n"
+"       --staticlib           Build a static library\n"
 "       --resources           Build a .o or .res file for the resource files\n\n"
+"       --builtin             Mark a library as a Wine builtin\n"
+"       --fixup-ctors         Fixup the constructors data after the module has been built\n"
 "The mode options are mutually exclusive; you must specify one and only one.\n\n";
 
 enum long_options_values
@@ -314,12 +326,15 @@ enum long_options_values
     LONG_OPT_CCCMD,
     LONG_OPT_EXTERNAL_SYMS,
     LONG_OPT_FAKE_MODULE,
+    LONG_OPT_FIXUP_CTORS,
     LONG_OPT_LARGE_ADDRESS_AWARE,
     LONG_OPT_LDCMD,
     LONG_OPT_NMCMD,
     LONG_OPT_NXCOMPAT,
     LONG_OPT_RESOURCES,
+    LONG_OPT_SAFE_SEH,
     LONG_OPT_SAVE_TEMPS,
+    LONG_OPT_STATICLIB,
     LONG_OPT_SUBSYSTEM,
     LONG_OPT_VERSION
 };
@@ -332,16 +347,19 @@ static const struct option long_options[] =
     { "def",           0, 0, LONG_OPT_DEF },
     { "exe",           0, 0, LONG_OPT_EXE },
     { "implib",        0, 0, LONG_OPT_IMPLIB },
+    { "staticlib",     0, 0, LONG_OPT_STATICLIB },
     { "builtin",       0, 0, LONG_OPT_BUILTIN },
     { "as-cmd",        1, 0, LONG_OPT_ASCMD },
     { "cc-cmd",        1, 0, LONG_OPT_CCCMD },
     { "external-symbols", 0, 0, LONG_OPT_EXTERNAL_SYMS },
     { "fake-module",   0, 0, LONG_OPT_FAKE_MODULE },
+    { "fixup-ctors",   0, 0, LONG_OPT_FIXUP_CTORS },
     { "large-address-aware", 0, 0, LONG_OPT_LARGE_ADDRESS_AWARE },
     { "ld-cmd",        1, 0, LONG_OPT_LDCMD },
     { "nm-cmd",        1, 0, LONG_OPT_NMCMD },
     { "nxcompat",      1, 0, LONG_OPT_NXCOMPAT },
     { "resources",     0, 0, LONG_OPT_RESOURCES },
+    { "safeseh",       0, 0, LONG_OPT_SAFE_SEH },
     { "save-temps",    0, 0, LONG_OPT_SAVE_TEMPS },
     { "subsystem",     1, 0, LONG_OPT_SUBSYSTEM },
     { "version",       0, 0, LONG_OPT_VERSION },
@@ -381,10 +399,29 @@ static void set_exec_mode( enum exec_mode_values mode )
 /* get the default entry point for a given spec file */
 static const char *get_default_entry_point( const DLLSPEC *spec )
 {
-    if (spec->characteristics & IMAGE_FILE_DLL) return "__wine_spec_dll_entry";
-    if (spec->subsystem == IMAGE_SUBSYSTEM_NATIVE) return "__wine_spec_drv_entry";
-    if (spec->type == SPEC_WIN16) return "__wine_spec_exe16_entry";
-    return "__wine_spec_exe_entry";
+    if (spec->characteristics & IMAGE_FILE_DLL) return "DllMain";
+    if (spec->subsystem == IMAGE_SUBSYSTEM_NATIVE) return "DriverEntry";
+    if (spec->type == SPEC_WIN16)
+    {
+        add_spec_extra_ld_symbol("WinMain16");
+        return "__wine_spec_exe16_entry";
+    }
+    else if (spec->unicode_app)
+    {
+        /* __wine_spec_exe_wentry always calls wmain */
+        add_spec_extra_ld_symbol("wmain");
+        if (spec->subsystem == IMAGE_SUBSYSTEM_WINDOWS_GUI)
+            add_spec_extra_ld_symbol("wWinMain");
+        return "__wine_spec_exe_wentry";
+    }
+    else
+    {
+        /* __wine_spec_exe_entry always calls main */
+        add_spec_extra_ld_symbol("main");
+        if (spec->subsystem == IMAGE_SUBSYSTEM_WINDOWS_GUI)
+            add_spec_extra_ld_symbol("WinMain");
+        return "__wine_spec_exe_entry";
+    }
 }
 
 /* parse options from the argv array and remove all the recognized ones */
@@ -434,7 +471,9 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
             else if (!strcmp( optarg, "wine32" )) { force_pointer_size = 8; target_cpu = CPU_x86_32on64; }
             else if (!strcmp( optarg, "arm" )) thumb_mode = 0;
             else if (!strcmp( optarg, "thumb" )) thumb_mode = 1;
+            else if (!strcmp( optarg, "no-cygwin" )) use_msvcrt = 1;
             else if (!strcmp( optarg, "unix" )) unix_lib = 1;
+            else if (!strcmp( optarg, "unicode" )) spec->unicode_app = 1;
             else if (!strncmp( optarg, "cpu=", 4 )) cpu_option = xstrdup( optarg + 4 );
             else if (!strncmp( optarg, "fpu=", 4 )) fpu_option = xstrdup( optarg + 4 );
             else if (!strncmp( optarg, "arch=", 5 )) arch_option = xstrdup( optarg + 5 );
@@ -502,8 +541,14 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
         case LONG_OPT_IMPLIB:
             set_exec_mode( MODE_IMPLIB );
             break;
+        case LONG_OPT_STATICLIB:
+            set_exec_mode( MODE_STATICLIB );
+            break;
         case LONG_OPT_BUILTIN:
             set_exec_mode( MODE_BUILTIN );
+            break;
+        case LONG_OPT_FIXUP_CTORS:
+            set_exec_mode( MODE_FIXUP_CTORS );
             break;
         case LONG_OPT_ASCMD:
             as_command = strarray_fromstring( optarg, " " );
@@ -529,6 +574,9 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
         case LONG_OPT_NXCOMPAT:
             if (optarg[0] == 'n' || optarg[0] == 'N')
                 spec->dll_characteristics &= ~IMAGE_DLLCHARACTERISTICS_NX_COMPAT;
+            break;
+        case LONG_OPT_SAFE_SEH:
+            safe_seh = 1;
             break;
         case LONG_OPT_RESOURCES:
             set_exec_mode( MODE_RESOURCES );
@@ -660,7 +708,7 @@ int main(int argc, char **argv)
     case MODE_EXE:
         load_resources( argv, spec );
         if (spec_file_name && !parse_input_file( spec )) break;
-        if (!spec->init_func) spec->init_func = xstrdup( get_default_entry_point( spec ));
+        if (!spec->init_func && !unix_lib) spec->init_func = xstrdup( get_default_entry_point( spec ));
 
         if (fake_module)
         {
@@ -688,11 +736,18 @@ int main(int argc, char **argv)
     case MODE_IMPLIB:
         if (!spec_file_name) fatal_error( "missing .spec file\n" );
         if (!parse_input_file( spec )) break;
-        output_import_lib( spec, argv );
+        output_static_lib( spec, argv );
+        break;
+    case MODE_STATICLIB:
+        output_static_lib( NULL, argv );
         break;
     case MODE_BUILTIN:
         if (!argv[0]) fatal_error( "missing file argument for --builtin option\n" );
         make_builtin_files( argv );
+        break;
+    case MODE_FIXUP_CTORS:
+        if (!argv[0]) fatal_error( "missing file argument for --fixup-ctors option\n" );
+        fixup_constructors( argv );
         break;
     case MODE_RESOURCES:
         load_resources( argv, spec );

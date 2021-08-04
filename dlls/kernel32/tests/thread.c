@@ -18,13 +18,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-/* Define _WIN32_WINNT to get SetThreadIdealProcessor on Windows */
-#define _WIN32_WINNT 0x0600
-
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <float.h>
+#include <math.h>
 
 /* the tests intentionally pass invalid pointers and need an exception handler */
 #define WINE_NO_INLINE_STRING
@@ -90,11 +88,6 @@ static BOOL (WINAPI *pIsWow64Process)(HANDLE,PBOOL);
 static BOOL (WINAPI *pSetThreadErrorMode)(DWORD,PDWORD);
 static DWORD (WINAPI *pGetThreadErrorMode)(void);
 static DWORD (WINAPI *pRtlGetThreadErrorMode)(void);
-static BOOL   (WINAPI *pActivateActCtx)(HANDLE,ULONG_PTR*);
-static HANDLE (WINAPI *pCreateActCtxW)(PCACTCTXW);
-static BOOL   (WINAPI *pDeactivateActCtx)(DWORD,ULONG_PTR);
-static BOOL   (WINAPI *pGetCurrentActCtx)(HANDLE *);
-static void   (WINAPI *pReleaseActCtx)(HANDLE);
 static PTP_POOL (WINAPI *pCreateThreadpool)(PVOID);
 static void (WINAPI *pCloseThreadpool)(PTP_POOL);
 static PTP_WORK (WINAPI *pCreateThreadpoolWork)(PTP_WORK_CALLBACK,PVOID,PTP_CALLBACK_ENVIRON);
@@ -312,7 +305,7 @@ static DWORD WINAPI thread_actctx_func(void *p)
     BOOL ret;
 
     cur = (void*)0xdeadbeef;
-    ret = pGetCurrentActCtx(&cur);
+    ret = GetCurrentActCtx(&cur);
     ok(ret, "thread GetCurrentActCtx failed, %u\n", GetLastError());
     ok(cur == param->handle, "got %p, expected %p\n", cur, param->handle);
     param->thread_context = cur;
@@ -1183,6 +1176,38 @@ static void test_SetThreadContext(void)
     CloseHandle( thread );
 }
 
+static DWORD WINAPI test_stack( void *arg )
+{
+    DWORD *stack = (DWORD *)(((DWORD)&arg & ~0xfff) + 0x1000);
+
+    ok( stack == NtCurrentTeb()->Tib.StackBase, "wrong stack %p/%p\n",
+        stack, NtCurrentTeb()->Tib.StackBase );
+    ok( !stack[-1], "wrong data %p = %08x\n", stack - 1, stack[-1] );
+    ok( stack[-2] == (DWORD)arg, "wrong data %p = %08x\n", stack - 2, stack[-2] );
+    ok( stack[-3] == (DWORD)test_stack, "wrong data %p = %08x\n", stack - 3, stack[-3] );
+    ok( !stack[-4], "wrong data %p = %08x\n", stack - 4, stack[-4] );
+    return 0;
+}
+
+static void test_GetThreadContext(void)
+{
+    CONTEXT ctx;
+    BOOL ret;
+    HANDLE thread;
+
+    memset(&ctx, 0xcc, sizeof(ctx));
+    ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+    ret = GetThreadContext(GetCurrentThread(), &ctx);
+    ok(ret, "GetThreadContext failed: %u\n", GetLastError());
+    ok(ctx.ContextFlags == CONTEXT_DEBUG_REGISTERS, "ContextFlags = %x\n", ctx.ContextFlags);
+    ok(!ctx.Dr0, "Dr0 = %x\n", ctx.Dr0);
+    ok(!ctx.Dr1, "Dr0 = %x\n", ctx.Dr0);
+
+    thread = CreateThread( NULL, 0, test_stack, (void *)0x1234, 0, NULL );
+    WaitForSingleObject( thread, 1000 );
+    CloseHandle( thread );
+}
+
 static void test_GetThreadSelectorEntry(void)
 {
     LDT_ENTRY entry;
@@ -1203,6 +1228,21 @@ static void test_GetThreadSelectorEntry(void)
     ok(ret, "GetThreadSelectorEntry(SegCs) error %u\n", GetLastError());
     ret = GetThreadSelectorEntry(GetCurrentThread(), ctx.SegDs, &entry);
     ok(ret, "GetThreadSelectorEntry(SegDs) error %u\n", GetLastError());
+    ret = GetThreadSelectorEntry(GetCurrentThread(), ctx.SegDs & ~3, &entry);
+    ok(ret, "GetThreadSelectorEntry(SegDs) error %u\n", GetLastError());
+    ret = GetThreadSelectorEntry(GetCurrentThread(), 0, &entry);
+    ok(ret, "GetThreadSelectorEntry(SegDs) error %u\n", GetLastError());
+    ret = GetThreadSelectorEntry(GetCurrentThread(), 3, &entry);
+    ok(ret, "GetThreadSelectorEntry(SegDs) error %u\n", GetLastError());
+    SetLastError( 0xdeadbeef );
+    ret = GetThreadSelectorEntry(GetCurrentThread(), 0xdeadbeef, &entry);
+    ok(!ret, "GetThreadSelectorEntry(invalid) succeeded\n");
+    ok( GetLastError() == ERROR_GEN_FAILURE
+        || GetLastError() == ERROR_INVALID_THREAD_ID /* 32-bit */, "wrong error %u\n", GetLastError() );
+    ret = GetThreadSelectorEntry(GetCurrentThread(), ctx.SegDs + 0x100, &entry);
+    ok(!ret, "GetThreadSelectorEntry(invalid) succeeded\n");
+    ok( GetLastError() == ERROR_GEN_FAILURE
+        || GetLastError() == ERROR_NOACCESS /* 32-bit */, "wrong error %u\n", GetLastError() );
 
     memset(&entry, 0x11, sizeof(entry));
     ret = GetThreadSelectorEntry(GetCurrentThread(), ctx.SegFs, &entry);
@@ -1221,6 +1261,40 @@ static void test_GetThreadSelectorEntry(void)
     ok(entry.HighWord.Bits.Reserved_0 == 0,   "expected 0, got %u\n", entry.HighWord.Bits.Reserved_0);
     ok(entry.HighWord.Bits.Default_Big == 1,  "expected 1, got %u\n", entry.HighWord.Bits.Default_Big);
     ok(entry.HighWord.Bits.Granularity == 0,  "expected 0, got %u\n", entry.HighWord.Bits.Granularity);
+
+    memset(&entry, 0x11, sizeof(entry));
+    ret = GetThreadSelectorEntry(GetCurrentThread(), ctx.SegCs, &entry);
+    ok(ret, "GetThreadSelectorEntry(SegDs) error %u\n", GetLastError());
+    entry.HighWord.Bits.Type &= ~1; /* ignore accessed bit */
+    base  = (void *)((entry.HighWord.Bits.BaseHi << 24) | (entry.HighWord.Bits.BaseMid << 16) | entry.BaseLow);
+    limit = (entry.HighWord.Bits.LimitHi << 16) | entry.LimitLow;
+
+    ok(base == 0, "got base %p\n", base);
+    ok(limit == ~0u >> 12, "got limit %#x\n", limit);
+    ok(entry.HighWord.Bits.Type == 0x1a,      "expected 0x12, got %#x\n", entry.HighWord.Bits.Type);
+    ok(entry.HighWord.Bits.Dpl == 3,          "expected 3, got %u\n", entry.HighWord.Bits.Dpl);
+    ok(entry.HighWord.Bits.Pres == 1,         "expected 1, got %u\n", entry.HighWord.Bits.Pres);
+    ok(entry.HighWord.Bits.Sys == 0,          "expected 0, got %u\n", entry.HighWord.Bits.Sys);
+    ok(entry.HighWord.Bits.Reserved_0 == 0,   "expected 0, got %u\n", entry.HighWord.Bits.Reserved_0);
+    ok(entry.HighWord.Bits.Default_Big == 1,  "expected 1, got %u\n", entry.HighWord.Bits.Default_Big);
+    ok(entry.HighWord.Bits.Granularity == 1,  "expected 1, got %u\n", entry.HighWord.Bits.Granularity);
+
+    memset(&entry, 0x11, sizeof(entry));
+    ret = GetThreadSelectorEntry(GetCurrentThread(), ctx.SegDs, &entry);
+    ok(ret, "GetThreadSelectorEntry(SegDs) error %u\n", GetLastError());
+    entry.HighWord.Bits.Type &= ~1; /* ignore accessed bit */
+    base  = (void *)((entry.HighWord.Bits.BaseHi << 24) | (entry.HighWord.Bits.BaseMid << 16) | entry.BaseLow);
+    limit = (entry.HighWord.Bits.LimitHi << 16) | entry.LimitLow;
+
+    ok(base == 0, "got base %p\n", base);
+    ok(limit == ~0u >> 12, "got limit %#x\n", limit);
+    ok(entry.HighWord.Bits.Type == 0x12,      "expected 0x12, got %#x\n", entry.HighWord.Bits.Type);
+    ok(entry.HighWord.Bits.Dpl == 3,          "expected 3, got %u\n", entry.HighWord.Bits.Dpl);
+    ok(entry.HighWord.Bits.Pres == 1,         "expected 1, got %u\n", entry.HighWord.Bits.Pres);
+    ok(entry.HighWord.Bits.Sys == 0,          "expected 0, got %u\n", entry.HighWord.Bits.Sys);
+    ok(entry.HighWord.Bits.Reserved_0 == 0,   "expected 0, got %u\n", entry.HighWord.Bits.Reserved_0);
+    ok(entry.HighWord.Bits.Default_Big == 1,  "expected 1, got %u\n", entry.HighWord.Bits.Default_Big);
+    ok(entry.HighWord.Bits.Granularity == 1,  "expected 1, got %u\n", entry.HighWord.Bits.Granularity);
 }
 
 #endif  /* __i386__ */
@@ -1279,12 +1353,33 @@ static void CALLBACK timeout_function(PVOID p, BOOLEAN TimerOrWaitFired)
     ok(TimerOrWaitFired, "wait should have timed out\n");
 }
 
+struct waitthread_test_param
+{
+    HANDLE trigger_event;
+    HANDLE wait_event;
+    HANDLE complete_event;
+};
+
+static void CALLBACK waitthread_test_function(PVOID p, BOOLEAN TimerOrWaitFired)
+{
+    struct waitthread_test_param *param = p;
+    DWORD ret;
+
+    SetEvent(param->trigger_event);
+    ret = WaitForSingleObject(param->wait_event, 100);
+    todo_wine
+    ok(ret == WAIT_TIMEOUT, "wait should have timed out\n");
+    SetEvent(param->complete_event);
+}
+
 static void test_RegisterWaitForSingleObject(void)
 {
     BOOL ret;
-    HANDLE wait_handle;
+    HANDLE wait_handle, wait_handle2;
     HANDLE handle;
     HANDLE complete_event;
+    HANDLE waitthread_trigger_event, waitthread_wait_event;
+    struct waitthread_test_param param;
 
     if (!pRegisterWaitForSingleObject || !pUnregisterWait)
     {
@@ -1334,6 +1429,53 @@ static void test_RegisterWaitForSingleObject(void)
     ok(!ret, "Expected UnregisterWait to fail\n");
     ok(GetLastError() == ERROR_INVALID_HANDLE,
        "Expected ERROR_INVALID_HANDLE, got %d\n", GetLastError());
+
+    /* test WT_EXECUTEINWAITTHREAD */
+
+    SetEvent(handle);
+    ret = pRegisterWaitForSingleObject(&wait_handle, handle, signaled_function, complete_event, INFINITE, WT_EXECUTEONLYONCE | WT_EXECUTEINWAITTHREAD);
+    ok(ret, "RegisterWaitForSingleObject failed with error %d\n", GetLastError());
+
+    WaitForSingleObject(complete_event, INFINITE);
+    /* give worker thread chance to complete */
+    Sleep(100);
+
+    ret = pUnregisterWait(wait_handle);
+    ok(ret, "UnregisterWait failed with error %d\n", GetLastError());
+
+    /* test multiple waits with WT_EXECUTEINWAITTHREAD.
+     * Windows puts multiple waits on the same wait thread, and using WT_EXECUTEINWAITTHREAD causes the callbacks to run serially.
+     */
+
+    SetEvent(handle);
+    waitthread_trigger_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    waitthread_wait_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+
+    param.trigger_event = waitthread_trigger_event;
+    param.wait_event = waitthread_wait_event;
+    param.complete_event = complete_event;
+
+    ret = pRegisterWaitForSingleObject(&wait_handle2, waitthread_trigger_event, signaled_function, waitthread_wait_event,
+                                       INFINITE, WT_EXECUTEONLYONCE | WT_EXECUTEINWAITTHREAD);
+    ok(ret, "RegisterWaitForSingleObject failed with error %d\n", GetLastError());
+
+    ret = pRegisterWaitForSingleObject(&wait_handle, handle, waitthread_test_function, &param, INFINITE, WT_EXECUTEONLYONCE | WT_EXECUTEINWAITTHREAD);
+    ok(ret, "RegisterWaitForSingleObject failed with error %d\n", GetLastError());
+
+    WaitForSingleObject(complete_event, INFINITE);
+    /* give worker thread chance to complete */
+    Sleep(100);
+
+    ret = pUnregisterWait(wait_handle);
+    ok(ret, "UnregisterWait failed with error %d\n", GetLastError());
+
+    ret = pUnregisterWait(wait_handle2);
+    ok(ret, "UnregisterWait failed with error %d\n", GetLastError());
+
+    CloseHandle(waitthread_wait_event);
+    CloseHandle(waitthread_trigger_event);
+    CloseHandle(complete_event);
+    CloseHandle(handle);
 }
 
 static DWORD LS_main;
@@ -1698,12 +1840,34 @@ static inline unsigned long get_fpu_cw(void)
 #endif
     return MAKELONG( cw, sse );
 #elif defined(__aarch64__)
-    unsigned long cw;
+    ULONG_PTR cw;
     __asm__ __volatile__( "mrs %0, fpcr" : "=r" (cw) );
     return cw;
 #else
     return 0;
 #endif
+}
+
+static inline void fpu_invalid_operation(void)
+{
+    double d;
+
+#if defined(__i386__)
+    unsigned int sse;
+#ifdef _MSC_VER
+    __asm { stmxcsr [sse] }
+    sse |= 1; /* invalid operation flag */
+    __asm { ldmxcsr [sse] }
+#else
+    __asm__ volatile ("stmxcsr %0" : "=m" (sse));
+    sse |= 1;
+    __asm__ volatile ("ldmxcsr %0" : : "m" (sse));
+#endif
+#endif
+
+    d = acos(2.0);
+    ok(_isnan(d), "d = %lf\n", d);
+    ok(_statusfp() == _SW_INVALID, "_statusfp() = %x\n", _statusfp());
 }
 
 static DWORD WINAPI fpu_thread(void *param)
@@ -1747,7 +1911,7 @@ static void test_thread_fpu_cw(void)
 {
     static const struct {
         unsigned int cw; unsigned long fpu_cw; unsigned long fpu_cw_broken;
-    } expected_cw[6] =
+    } expected_cw[8] =
     {
 #ifdef __i386__
         { _MCW_EM | _PC_53, MAKELONG( 0x27f, 0x1f80 ) },
@@ -1755,20 +1919,26 @@ static void test_thread_fpu_cw(void)
         { _EM_INEXACT | _RC_CHOP | _PC_24, MAKELONG( 0xc60, 0x7000 ), MAKELONG( 0xc60, 0x1f80 ) },
         { _MCW_EM | _PC_53, MAKELONG( 0x27f, 0x1f80 ) },
         { _EM_INEXACT | _RC_CHOP | _PC_24, MAKELONG( 0xc60, 0x7000 ), MAKELONG( 0xc60, 0x1f80 ) },
-        { _MCW_EM | _PC_53, MAKELONG( 0x27f, 0x1f80 ) }
+        { _MCW_EM | _PC_53, MAKELONG( 0x27f, 0x1f80 ) },
+        { _MCW_EM | _PC_53, MAKELONG( 0x27f, 0x1f81 ) },
+        { _MCW_EM | _PC_53, MAKELONG( 0x27f, 0x1f81 ) }
 #elif defined(__x86_64__)
         { _MCW_EM | _PC_64, MAKELONG( 0x27f, 0x1f80 ) },
         { _MCW_EM | _PC_64, MAKELONG( 0x27f, 0x1f80 ) },
         { _EM_INEXACT | _RC_CHOP | _PC_64, MAKELONG( 0x27f, 0x7000 ) },
         { _MCW_EM | _PC_64, MAKELONG( 0x27f, 0x1f80 ) },
         { _EM_INEXACT | _RC_CHOP | _PC_64, MAKELONG( 0x27f, 0x7000 ) },
-        { _MCW_EM | _PC_64, MAKELONG( 0x27f, 0x1f80 ) }
+        { _MCW_EM | _PC_64, MAKELONG( 0x27f, 0x1f80 ) },
+        { _MCW_EM | _PC_64, MAKELONG( 0x27f, 0x1f81 ) },
+        { _MCW_EM | _PC_64, MAKELONG( 0x27f, 0x1f81 ) }
 #elif defined(__aarch64__)
         { _MCW_EM | _PC_64, 0 },
         { _MCW_EM | _PC_64, 0 },
         { _EM_INEXACT | _RC_CHOP | _PC_64, 0xc08f00 },
         { _MCW_EM | _PC_64, 0 },
         { _EM_INEXACT | _RC_CHOP | _PC_64, 0xc08f00 },
+        { _MCW_EM | _PC_64, 0 },
+        { _MCW_EM | _PC_64, 0 },
         { _MCW_EM | _PC_64, 0 }
 #else
         { 0xdeadbeef, 0xdeadbeef }
@@ -1810,6 +1980,18 @@ static void test_thread_fpu_cw(void)
     fpu_cw = get_fpu_cw();
     ok(cw == expected_cw[5].cw, "expected %#x got %#x\n", expected_cw[5].cw, cw);
     ok(fpu_cw == expected_cw[5].fpu_cw, "expected %#lx got %#lx\n", expected_cw[5].fpu_cw, fpu_cw);
+
+    fpu_invalid_operation();
+    cw = _control87( 0, 0 );
+    fpu_cw = get_fpu_cw();
+    ok(cw == expected_cw[6].cw, "expected %#x got %#x\n", expected_cw[6].cw, cw);
+    ok(fpu_cw == expected_cw[6].fpu_cw, "expected %#lx got %#lx\n", expected_cw[6].fpu_cw, fpu_cw);
+
+    cw = _control87( initial_cw, _MCW_EM | _MCW_RC | _MCW_PC );
+    fpu_cw = get_fpu_cw();
+    ok(cw == expected_cw[7].cw, "expected %#x got %#x\n", expected_cw[6].cw, cw);
+    ok(fpu_cw == expected_cw[7].fpu_cw, "expected %#lx got %#lx\n", expected_cw[6].fpu_cw, fpu_cw);
+    _clearfp();
 }
 
 static const char manifest_dep[] =
@@ -1852,7 +2034,7 @@ static HANDLE test_create(const char *file)
     actctx.cbSize = sizeof(ACTCTXW);
     actctx.lpSource = path;
 
-    handle = pCreateActCtxW(&actctx);
+    handle = CreateActCtxW(&actctx);
     ok(handle != INVALID_HANDLE_VALUE, "failed to create context, error %u\n", GetLastError());
 
     ok(actctx.cbSize == sizeof(actctx), "cbSize=%d\n", actctx.cbSize);
@@ -1876,12 +2058,6 @@ static void test_thread_actctx(void)
     DWORD tid, ret;
     BOOL b;
 
-    if (!pActivateActCtx)
-    {
-        win_skip("skipping activation context tests\n");
-        return;
-    }
-
     create_manifest_file("testdep1.manifest", manifest_dep);
     create_manifest_file("main.manifest", manifest_main);
 
@@ -1890,7 +2066,7 @@ static void test_thread_actctx(void)
     DeleteFileA("main.manifest");
 
     handle = (void*)0xdeadbeef;
-    b = pGetCurrentActCtx(&handle);
+    b = GetCurrentActCtx(&handle);
     ok(b, "GetCurrentActCtx failed: %u\n", GetLastError());
     ok(handle == 0, "active context %p\n", handle);
 
@@ -1905,17 +2081,17 @@ static void test_thread_actctx(void)
     ok(param.thread_context == NULL, "got wrong thread context %p\n", param.thread_context);
     CloseHandle(thread);
 
-    b = pActivateActCtx(context, &cookie);
+    b = ActivateActCtx(context, &cookie);
     ok(b, "activation failed: %u\n", GetLastError());
 
     handle = 0;
-    b = pGetCurrentActCtx(&handle);
+    b = GetCurrentActCtx(&handle);
     ok(b, "GetCurrentActCtx failed: %u\n", GetLastError());
     ok(handle != 0, "no active context\n");
-    pReleaseActCtx(handle);
+    ReleaseActCtx(handle);
 
     param.handle = NULL;
-    b = pGetCurrentActCtx(&param.handle);
+    b = GetCurrentActCtx(&param.handle);
     ok(b && param.handle != NULL, "failed to get context, %u\n", GetLastError());
 
     param.thread_context = (void*)0xdeadbeef;
@@ -1925,7 +2101,7 @@ static void test_thread_actctx(void)
     ret = WaitForSingleObject(thread, 1000);
     ok(ret == WAIT_OBJECT_0, "wait timeout\n");
     ok(param.thread_context == context, "got wrong thread context %p, %p\n", param.thread_context, context);
-    pReleaseActCtx(param.thread_context);
+    ReleaseActCtx(param.thread_context);
     CloseHandle(thread);
 
     /* similar test for CreateRemoteThread() */
@@ -1936,16 +2112,15 @@ static void test_thread_actctx(void)
     ret = WaitForSingleObject(thread, 1000);
     ok(ret == WAIT_OBJECT_0, "wait timeout\n");
     ok(param.thread_context == context, "got wrong thread context %p, %p\n", param.thread_context, context);
-    pReleaseActCtx(param.thread_context);
+    ReleaseActCtx(param.thread_context);
     CloseHandle(thread);
 
-    pReleaseActCtx(param.handle);
+    ReleaseActCtx(param.handle);
 
-    b = pDeactivateActCtx(0, cookie);
+    b = DeactivateActCtx(0, cookie);
     ok(b, "DeactivateActCtx failed: %u\n", GetLastError());
-    pReleaseActCtx(context);
+    ReleaseActCtx(context);
 }
-
 
 static void WINAPI threadpool_workcallback(PTP_CALLBACK_INSTANCE instance, void *context, PTP_WORK work) {
     int *foo = (int*)context;
@@ -2099,12 +2274,9 @@ static void test_thread_info(void)
 #endif
 
         case ThreadTimes:
-todo_wine
             ok(status == STATUS_SUCCESS, "for info %u expected STATUS_SUCCESS, got %08x (ret_len %u)\n", i, status, ret_len);
             break;
 
-        case ThreadAffinityMask:
-        case ThreadQuerySetWin32StartAddress:
         case ThreadIsIoPending:
 todo_wine
             ok(status == STATUS_ACCESS_DENIED, "for info %u expected STATUS_ACCESS_DENIED, got %08x (ret_len %u)\n", i, status, ret_len);
@@ -2267,11 +2439,6 @@ static void init_funcs(void)
     X(IsWow64Process);
     X(SetThreadErrorMode);
     X(GetThreadErrorMode);
-    X(ActivateActCtx);
-    X(CreateActCtxW);
-    X(DeactivateActCtx);
-    X(GetCurrentActCtx);
-    X(ReleaseActCtx);
 
     X(CreateThreadpool);
     X(CloseThreadpool);
@@ -2352,6 +2519,7 @@ START_TEST(thread)
 #ifdef __i386__
    test_SetThreadContext();
    test_GetThreadSelectorEntry();
+   test_GetThreadContext();
 #endif
    test_QueueUserWorkItem();
    test_RegisterWaitForSingleObject();

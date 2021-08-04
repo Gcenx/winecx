@@ -130,21 +130,6 @@ static void free_bstrs(void)
     alloced_bstrs_count = 0;
 }
 
-static BSTR a2bstr(const char *str)
-{
-    BSTR ret;
-    int len;
-
-    if(!str)
-        return NULL;
-
-    len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
-    ret = SysAllocStringLen(NULL, len);
-    MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
-
-    return ret;
-}
-
 
 /* test IHTMLElementCollection */
 static HRESULT WINAPI htmlecoll_QueryInterface(IHTMLElementCollection *iface, REFIID riid, void **ppvObject)
@@ -250,7 +235,6 @@ static IHTMLElementCollection htmlecoll = { &TestHTMLECollectionVtbl };
 /* test IHTMLDocument2 */
 static HRESULT WINAPI htmldoc2_QueryInterface(IHTMLDocument2 *iface, REFIID riid, void **ppvObject)
 {
-   trace("\n");
    *ppvObject = NULL;
    return E_NOINTERFACE;
 }
@@ -496,7 +480,7 @@ static HRESULT WINAPI htmldoc2_put_URL(IHTMLDocument2 *iface, BSTR v)
 static HRESULT WINAPI htmldoc2_get_URL(IHTMLDocument2 *iface, BSTR *p)
 {
     CHECK_EXPECT2(htmldoc2_get_url);
-    *p = a2bstr("http://test.winehq.org/");
+    *p = SysAllocString(L"http://test.winehq.org/");
     return S_OK;
 }
 
@@ -1311,7 +1295,6 @@ static HRESULT WINAPI dispevent_Invoke(IDispatch *iface, DISPID member, REFIID r
 
         hr = IXMLHttpRequest_get_responseText(httpreq, &text);
         ok(hr == S_OK, "got 0x%08x\n", hr);
-        ok(*text != 0, "got %s\n", wine_dbgstr_w(text));
         SysFreeString(text);
     }
 
@@ -1460,8 +1443,6 @@ static void test_XMLHTTP(void)
     static const char bodyA[] = "mode=Test";
     static const char urlA[] = "http://test.winehq.org/tests/post.php";
     static const char referertesturl[] = "http://test.winehq.org/tests/referer.php";
-    static const WCHAR wszExpectedResponse[] = {'F','A','I','L','E','D',0};
-    static const WCHAR norefererW[] = {'n','o',' ','r','e','f','e','r','e','r',' ','s','e','t',0};
 
     IXMLHttpRequest *xhr;
     IObjectWithSite *obj_site, *obj_site2;
@@ -1603,7 +1584,7 @@ static void test_XMLHTTP(void)
     hr = IXMLHttpRequest_getAllResponseHeaders(xhr, &str);
     EXPECT_HR(hr, S_OK);
     /* status line is stripped already */
-    ok(memcmp(str, _bstr_("HTTP"), 4*sizeof(WCHAR)), "got response headers %s\n", wine_dbgstr_w(str));
+    ok(memcmp(str, L"HTTP", 4*sizeof(WCHAR)), "got response headers %s\n", wine_dbgstr_w(str));
     ok(*str, "got empty headers\n");
     hr = IXMLHttpRequest_getAllResponseHeaders(xhr, &str1);
     EXPECT_HR(hr, S_OK);
@@ -1631,7 +1612,7 @@ static void test_XMLHTTP(void)
 
     hr = IXMLHttpRequest_get_statusText(xhr, &str);
     EXPECT_HR(hr, S_OK);
-    ok(!lstrcmpW(str, _bstr_("OK")), "got status %s\n", wine_dbgstr_w(str));
+    ok(!lstrcmpW(str, L"OK"), "got status %s\n", wine_dbgstr_w(str));
     SysFreeString(str);
 
     /* another ::send() after completed request */
@@ -1647,8 +1628,7 @@ static void test_XMLHTTP(void)
      * not what the server expects */
     if(hr == S_OK)
     {
-        ok(!memcmp(bstrResponse, wszExpectedResponse, sizeof(wszExpectedResponse)),
-            "expected %s, got %s\n", wine_dbgstr_w(wszExpectedResponse), wine_dbgstr_w(bstrResponse));
+        ok(!memcmp(bstrResponse, L"FAILED", 7 * sizeof(WCHAR)), "Unexpected response %s.\n", wine_dbgstr_w(bstrResponse));
         SysFreeString(bstrResponse);
     }
 
@@ -1729,7 +1709,7 @@ static void test_XMLHTTP(void)
     ok(hr == S_OK, "got 0x%08x\n", hr);
     hr = IXMLHttpRequest_get_responseText(xhr, &str);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(!lstrcmpW(str, norefererW), "got response text %s\n", wine_dbgstr_w(str));
+    ok(!lstrcmpW(str, L"no referer set"), "got response text %s\n", wine_dbgstr_w(str));
     SysFreeString(str);
 
     /* interaction with object site */
@@ -1747,7 +1727,7 @@ static void test_XMLHTTP(void)
     set_xhr_site(xhr);
 
     test_open(xhr, "GET", "tests/referer.php", S_OK);
-    str1 = a2bstr("http://test.winehq.org/");
+    str1 = SysAllocString(L"http://test.winehq.org/");
 
     V_VT(&varbody) = VT_EMPTY;
     hr = IXMLHttpRequest_send(xhr, varbody);
@@ -1817,7 +1797,7 @@ static void test_server_xhr(void)
     V_VT(&body) = VT_EMPTY;
 
     hr = IServerXMLHTTPRequest_send(xhr, body);
-    if (hr == INET_E_RESOURCE_NOT_FOUND)
+    if (hr == INET_E_RESOURCE_NOT_FOUND || hr == WININET_E_NAME_NOT_RESOLVED)
     {
         skip("No connection could be made with test.winehq.org\n");
         IServerXMLHTTPRequest_Release(xhr);

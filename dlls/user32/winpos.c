@@ -19,9 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdarg.h>
 #include <string.h>
 #include "ntstatus.h"
@@ -1182,7 +1179,13 @@ static BOOL show_window( HWND hwnd, INT cmd )
     else WIN_ReleasePtr( wndPtr );
 
     /* if previous state was minimized Windows sets focus to the window */
-    if (style & WS_MINIMIZE) SetFocus( hwnd );
+    if (style & WS_MINIMIZE)
+    {
+        SetFocus( hwnd );
+        /* Send a WM_ACTIVATE message for a top level window, even if the window is already active */
+        if (GetAncestor( hwnd, GA_ROOT ) == hwnd && !(swp & SWP_NOACTIVATE))
+            SendMessageW( hwnd, WM_ACTIVATE, WA_ACTIVE, 0 );
+    }
 
 done:
     SetThreadDpiAwarenessContext( context );
@@ -1230,6 +1233,9 @@ BOOL WINAPI ShowWindow( HWND hwnd, INT cmd )
 
     if ((cmd == SW_HIDE) && !(GetWindowLongW( hwnd, GWL_STYLE ) & WS_VISIBLE))
         return FALSE;
+
+    if ((cmd == SW_SHOW) && (GetWindowLongW( hwnd, GWL_STYLE ) & WS_VISIBLE))
+        return TRUE;
 
     return SendMessageW( hwnd, WM_WINE_SHOWWINDOW, cmd, 0 );
 }
@@ -2410,7 +2416,10 @@ BOOL WINAPI SetWindowPos( HWND hwnd, HWND hwndInsertAfter,
     if (WIN_IsCurrentThread( hwnd ))
         return USER_SetWindowPos( &winpos, 0, 0 );
 
-    return SendMessageW( winpos.hwnd, WM_WINE_SETWINDOWPOS, 0, (LPARAM)&winpos );
+    if (flags & SWP_ASYNCWINDOWPOS)
+        return SendNotifyMessageW( winpos.hwnd, WM_WINE_SETWINDOWPOS, 0, (LPARAM)&winpos );
+    else
+        return SendMessageW( winpos.hwnd, WM_WINE_SETWINDOWPOS, 0, (LPARAM)&winpos );
 }
 
 
@@ -2985,6 +2994,11 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
                               origRect.bottom - origRect.top,
                               ( hittest == HTCAPTION ) ? SWP_NOSIZE : 0 );
         }
+
+        /* CrossOver Hack 10879 */
+        if (hittest != HTCAPTION)
+            RedrawWindow( hwnd, NULL, NULL,
+                          RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN );
     }
 
     if (IsIconic(hwnd))

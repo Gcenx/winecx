@@ -1219,9 +1219,9 @@ typedef struct tagSTYLESTRUCT {
   /* Offsets for GetWindowLong() and GetWindowWord() */
 #define GWL_EXSTYLE         (-20)
 #define GWL_STYLE           (-16)
+#define GWL_ID              (-12)
 #if !defined _WIN64 && !defined __WINESRC__
 # define GWL_USERDATA        (-21)
-# define GWL_ID              (-12)
 # define GWL_HWNDPARENT      (-8)
 # define GWL_HINSTANCE       (-6)
 # define GWL_WNDPROC         (-4)
@@ -1503,15 +1503,17 @@ DECL_WINELIB_TYPE_AW(LPHELPWININFO)
 #define DISP_CHANGE_BADDUALVIEW (-6)
 
 /* ChangeDisplaySettings.dwFlags */
-#define	CDS_UPDATEREGISTRY	0x00000001
-#define	CDS_TEST		0x00000002
-#define	CDS_FULLSCREEN		0x00000004
-#define	CDS_GLOBAL		0x00000008
-#define	CDS_SET_PRIMARY		0x00000010
-#define	CDS_VIDEOPARAMETERS	0x00000020
-#define	CDS_NORESET		0x10000000
-#define	CDS_SETRECT		0x20000000
-#define	CDS_RESET		0x40000000
+#define CDS_UPDATEREGISTRY          0x00000001
+#define CDS_TEST                    0x00000002
+#define CDS_FULLSCREEN              0x00000004
+#define CDS_GLOBAL                  0x00000008
+#define CDS_SET_PRIMARY             0x00000010
+#define CDS_VIDEOPARAMETERS         0x00000020
+#define CDS_ENABLE_UNSAFE_MODES     0x00000100
+#define CDS_DISABLE_UNSAFE_MODES    0x00000200
+#define CDS_NORESET                 0x10000000
+#define CDS_RESET_EX                0x20000000
+#define CDS_RESET                   0x40000000
 
 typedef struct tagWNDCLASSEXA
 {
@@ -3114,7 +3116,9 @@ typedef struct tagTRACKMOUSEEVENT {
 typedef  PVOID           HDEVNOTIFY;
 typedef  HDEVNOTIFY     *PHDEVNOTIFY;
 
-#define DEVICE_NOTIFY_WINDOW_HANDLE     0x00000000
+#define DEVICE_NOTIFY_WINDOW_HANDLE         0x00000000
+#define DEVICE_NOTIFY_SERVICE_HANDLE        0x00000001
+#define DEVICE_NOTIFY_ALL_INTERFACE_CLASSES 0x00000004
 
 /* used for GetWindowInfo() */
 
@@ -3397,6 +3401,18 @@ typedef struct tagTOUCHINPUT {
     DWORD     cyContact;
 } TOUCHINPUT, *PTOUCHINPUT;
 typedef TOUCHINPUT const * PCTOUCHINPUT;
+
+#define TOUCHEVENTF_MOVE        0x0001
+#define TOUCHEVENTF_DOWN        0x0002
+#define TOUCHEVENTF_UP          0x0004
+#define TOUCHEVENTF_INRANGE     0x0008
+#define TOUCHEVENTF_PRIMARY     0x0010
+#define TOUCHEVENTF_NOCOALESCE  0x0020
+#define TOUCHEVENTF_PEN         0x0040
+#define TOUCHEVENTF_PALM        0x0080
+
+#define TWF_FINETOUCH  0x0001
+#define TWF_WANTPALM   0x0002
 
 /* Gesture definitions */
 DECLARE_HANDLE(HGESTUREINFO);
@@ -3702,6 +3718,7 @@ WINUSERAPI INT         WINAPI DrawTextExW(HDC,LPWSTR,INT,LPRECT,UINT,LPDRAWTEXTP
 WINUSERAPI BOOL        WINAPI EmptyClipboard(void);
 WINUSERAPI BOOL        WINAPI EnableMenuItem(HMENU,UINT,UINT);
 WINUSERAPI BOOL        WINAPI EnableMouseInPointer(BOOL);
+WINUSERAPI BOOL        WINAPI EnableNonClientDpiScaling(HWND);
 WINUSERAPI BOOL        WINAPI EnableScrollBar(HWND,UINT,UINT);
 WINUSERAPI BOOL        WINAPI EnableWindow(HWND,BOOL);
 WINUSERAPI BOOL        WINAPI EndDeferWindowPos(HDWP);

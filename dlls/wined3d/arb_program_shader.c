@@ -238,6 +238,7 @@ struct shader_arb_ctx_priv
         NV3
     } target_version;
 
+    const struct wined3d_gl_info *gl_info;
     const struct arb_vs_compile_args    *cur_vs_args;
     const struct arb_ps_compile_args    *cur_ps_args;
     const struct arb_ps_compiled_shader *compiled_fprog;
@@ -332,7 +333,6 @@ static BOOL need_helper_const(const struct arb_vshader_private *shader_data,
     if (need_rel_addr_const(shader_data, reg_maps, gl_info)) return TRUE;
     if (!gl_info->supported[NV_VERTEX_PROGRAM]) return TRUE; /* Need to init colors. */
     if (gl_info->quirks & WINED3D_QUIRK_ARB_VS_OFFSET_LIMIT) return TRUE; /* Load the immval offset. */
-    if (gl_info->quirks & WINED3D_QUIRK_SET_TEXCOORD_W) return TRUE; /* Have to init texcoords. */
     if (!use_nv_clip(gl_info)) return TRUE; /* Init the clip texcoord */
     if (reg_maps->usesnrm) return TRUE; /* 0.0 */
     if (reg_maps->usespow) return TRUE; /* EPS, 0.0 and 1.0 */
@@ -700,7 +700,7 @@ static void shader_arb_load_constants_internal(struct shader_arb_priv *priv, str
     {
         const struct wined3d_shader *pshader = state->shader[WINED3D_SHADER_TYPE_PIXEL];
         const struct arb_ps_compiled_shader *gl_shader = priv->compiled_fprog;
-        UINT rt_height = state->fb->render_targets[0]->height;
+        UINT rt_height = state->fb.render_targets[0]->height;
 
         /* Load DirectX 9 float constants for pixel shader */
         priv->highest_dirty_ps_const = shader_arb_load_constants_f(pshader, gl_info, GL_FRAGMENT_PROGRAM_ARB,
@@ -807,9 +807,7 @@ static void shader_generate_arb_declarations(const struct wined3d_shader *shader
 
             for (i = 0; i < shader->limits->constant_float; ++i)
             {
-                DWORD idx = i >> 5;
-                DWORD shift = i & 0x1f;
-                if (reg_maps->constf[idx] & (1u << shift))
+                if (wined3d_bitmap_is_set(reg_maps->constf, i))
                     highest_constf = i;
             }
 
@@ -1439,7 +1437,7 @@ static void shader_hw_sample(const struct wined3d_shader_instruction *ins, DWORD
 
         case WINED3D_SHADER_RESOURCE_TEXTURE_2D:
             if (pshader && priv->cur_ps_args->super.np2_fixup & (1u << sampler_idx)
-                    && ins->ctx->gl_info->supported[ARB_TEXTURE_RECTANGLE])
+                    && priv->gl_info->supported[ARB_TEXTURE_RECTANGLE])
                 tex_type = "RECT";
             else
                 tex_type = "2D";
@@ -3399,7 +3397,7 @@ static void shader_hw_ret(const struct wined3d_shader_instruction *ins)
     if(vshader)
     {
         if (priv->in_main_func) vshader_add_footer(priv, shader->backend_data,
-                priv->cur_vs_args, ins->ctx->reg_maps, ins->ctx->gl_info, buffer);
+                priv->cur_vs_args, ins->ctx->reg_maps, priv->gl_info, buffer);
     }
 
     shader_addline(buffer, "RET;\n");
@@ -3654,6 +3652,7 @@ static GLuint shader_arb_generate_pshader(const struct wined3d_shader *shader,
 
     /*  Create the hw ARB shader */
     memset(&priv_ctx, 0, sizeof(priv_ctx));
+    priv_ctx.gl_info = gl_info;
     priv_ctx.cur_ps_args = args;
     priv_ctx.compiled_fprog = compiled;
     priv_ctx.cur_np2fixup_info = &compiled->np2fixup_info;
@@ -4220,13 +4219,13 @@ static GLuint shader_arb_generate_vshader(const struct wined3d_shader *shader,
 {
     const struct arb_vshader_private *shader_data = shader->backend_data;
     const struct wined3d_shader_reg_maps *reg_maps = &shader->reg_maps;
-    struct shader_arb_priv *priv = shader->device->shader_priv;
     GLuint ret;
     DWORD next_local = 0;
     struct shader_arb_ctx_priv priv_ctx;
     unsigned int i;
 
     memset(&priv_ctx, 0, sizeof(priv_ctx));
+    priv_ctx.gl_info = gl_info;
     priv_ctx.cur_vs_args = args;
     list_init(&priv_ctx.control_frames);
     init_output_registers(shader, ps_input_sig, &priv_ctx, compiled);
@@ -4319,17 +4318,6 @@ static GLuint shader_arb_generate_vshader(const struct wined3d_shader *shader,
     {
         const char *color_init = arb_get_helper_value(WINED3D_SHADER_TYPE_VERTEX, ARB_0001);
         shader_addline(buffer, "MOV result.color.secondary, %s;\n", color_init);
-
-        if (gl_info->quirks & WINED3D_QUIRK_SET_TEXCOORD_W && !priv->ffp_proj_control)
-        {
-            int i;
-            const char *one = arb_get_helper_value(WINED3D_SHADER_TYPE_VERTEX, ARB_ONE);
-            for(i = 0; i < MAX_REG_TEXCRD; i++)
-            {
-                if (reg_maps->u.texcoord_mask[i] && reg_maps->u.texcoord_mask[i] != WINED3DSP_WRITEMASK_ALL)
-                    shader_addline(buffer, "MOV result.texcoord[%u].w, %s\n", i, one);
-            }
-        }
     }
 
     /* The shader starts with the main function */
@@ -4713,7 +4701,7 @@ static void shader_arb_select(void *shader_priv, struct wined3d_context *context
         }
         else
         {
-            UINT rt_height = state->fb->render_targets[0]->height;
+            UINT rt_height = state->fb.render_targets[0]->height;
             shader_arb_ps_local_constants(compiled, context_gl, state, rt_height);
         }
 
@@ -7760,11 +7748,15 @@ static HRESULT arbfp_blit_set(struct wined3d_arbfp_blitter *blitter, struct wine
             case COMPLEX_FIXUP_NV12:
                 shader = gen_yuv_shader(gl_info, &type);
                 break;
+
+            default:
+                FIXME("Unsupported fixup %#x.\n", fixup);
+                return E_NOTIMPL;
         }
 
         if (!shader)
         {
-            FIXME("Unsupported complex fixup %#x, not setting a shader\n", fixup);
+            ERR("Failed to get shader for fixup %#x.\n", fixup);
             return E_NOTIMPL;
         }
 
@@ -7829,7 +7821,7 @@ static BOOL arbfp_blit_supported(enum wined3d_blit_op blit_op, const struct wine
 
     if (blit_op == WINED3D_BLIT_OP_RAW_BLIT && dst_format->id == src_format->id)
     {
-        if (dst_format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL))
+        if (dst_format->depth_size || dst_format->stencil_size)
             blit_op = WINED3D_BLIT_OP_DEPTH_BLIT;
         else
             blit_op = WINED3D_BLIT_OP_COLOR_BLIT;
@@ -7912,7 +7904,8 @@ static DWORD arbfp_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_bl
         struct wined3d_context *context, struct wined3d_texture *src_texture, unsigned int src_sub_resource_idx,
         DWORD src_location, const RECT *src_rect, struct wined3d_texture *dst_texture,
         unsigned int dst_sub_resource_idx, DWORD dst_location, const RECT *dst_rect,
-        const struct wined3d_color_key *color_key, enum wined3d_texture_filter_type filter)
+        const struct wined3d_color_key *color_key, enum wined3d_texture_filter_type filter,
+        const struct wined3d_format *resolve_format)
 {
     struct wined3d_texture_gl *src_texture_gl = wined3d_texture_gl(src_texture);
     struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
@@ -7924,11 +7917,12 @@ static DWORD arbfp_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_bl
     unsigned int src_level;
     RECT s, d;
 
-    TRACE("blitter %p, op %#x, context %p, src_texture %p, src_sub_resource_idx %u, src_location %s, src_rect %s, "
-            "dst_texture %p, dst_sub_resource_idx %u, dst_location %s, dst_rect %s, colour_key %p, filter %s.\n",
+    TRACE("blitter %p, op %#x, context %p, src_texture %p, src_sub_resource_idx %u, src_location %s, "
+            "src_rect %s, dst_texture %p, dst_sub_resource_idx %u, dst_location %s, dst_rect %s, "
+            "colour_key %p, filter %s, resolve format %p.\n",
             blitter, op, context, src_texture, src_sub_resource_idx, wined3d_debug_location(src_location),
             wine_dbgstr_rect(src_rect), dst_texture, dst_sub_resource_idx, wined3d_debug_location(dst_location),
-            wine_dbgstr_rect(dst_rect), color_key, debug_d3dtexturefiltertype(filter));
+            wine_dbgstr_rect(dst_rect), color_key, debug_d3dtexturefiltertype(filter), resolve_format);
 
     if (!arbfp_blit_supported(op, context, &src_texture->resource, src_location,
             &dst_texture->resource, dst_location))
@@ -7941,7 +7935,7 @@ static DWORD arbfp_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_bl
 
         TRACE("Forwarding to blitter %p.\n", next);
         return next->ops->blitter_blit(next, op, context, src_texture, src_sub_resource_idx, src_location,
-                src_rect, dst_texture, dst_sub_resource_idx, dst_location, dst_rect, color_key, filter);
+                src_rect, dst_texture, dst_sub_resource_idx, dst_location, dst_rect, color_key, filter, resolve_format);
     }
 
     arbfp_blitter = CONTAINING_RECORD(blitter, struct wined3d_arbfp_blitter, blitter);

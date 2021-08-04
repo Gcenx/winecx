@@ -56,16 +56,6 @@ static CHAR version_dll[]       = "version.dll";
 static CHAR winetest[]          = "winetest";
 static CHAR xcv_localport[]     = ",XcvMonitor Local Port";
 
-static const WCHAR cmd_MonitorUIW[] = {'M','o','n','i','t','o','r','U','I',0};
-static const WCHAR cmd_PortIsValidW[] = {'P','o','r','t','I','s','V','a','l','i','d',0};
-static WCHAR emptyW[] = {0};
-
-static WCHAR portname_com1W[] = {'C','O','M','1',':',0};
-static WCHAR portname_com2W[] = {'C','O','M','2',':',0};
-static WCHAR portname_fileW[] = {'F','I','L','E',':',0};
-static WCHAR portname_lpt1W[] = {'L','P','T','1',':',0};
-static WCHAR portname_lpt2W[] = {'L','P','T','2',':',0};
-
 static HANDLE  hwinspool;
 static BOOL  (WINAPI * pAddPortExA)(LPSTR, DWORD, LPBYTE, LPSTR);
 static BOOL  (WINAPI * pEnumPrinterDriversW)(LPWSTR, LPWSTR, DWORD, LPBYTE, DWORD, LPDWORD, LPDWORD);
@@ -118,22 +108,6 @@ static BOOL is_access_denied(DWORD res, DWORD lasterror)
         return TRUE;
     }
     return FALSE;
-}
-
-static BOOL on_win9x = FALSE;
-
-static BOOL check_win9x(void)
-{
-    if (pGetPrinterW)
-    {
-        SetLastError(0xdeadbeef);
-        pGetPrinterW(NULL, 0, NULL, 0, NULL);
-        return (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED);
-    }
-    else
-    {
-        return TRUE;
-    }
 }
 
 static void find_default_printer(VOID)
@@ -333,8 +307,6 @@ static void test_AddMonitor(void)
         "returned %d with %d (expected '0' with ERROR_INVALID_LEVEL)\n",
         res, GetLastError());
 
-    if (0)
-    {
     /* This test crashes win9x on vmware (works with win9x on qemu 0.8.1) */
     SetLastError(MAGIC_DEAD);
     res = AddMonitorA(NULL, 2, NULL);
@@ -344,7 +316,6 @@ static void test_AddMonitor(void)
          (GetLastError() == ERROR_PRIVILEGE_NOT_HELD)), 
         "returned %d with %d (expected '0' with: MAGIC_DEAD or "
         "ERROR_PRIVILEGE_NOT_HELD)\n", res, GetLastError());
-    }
 
     ZeroMemory(&mi2a, sizeof(MONITOR_INFO_2A));
     SetLastError(MAGIC_DEAD);
@@ -1219,7 +1190,7 @@ static void test_EnumPrinterDrivers(void)
         }
 
         /* EnumPrinterDriversA returns the same number of bytes as EnumPrinterDriversW */
-        if (!on_win9x && pEnumPrinterDriversW)
+        if (pEnumPrinterDriversW)
         {
             DWORD double_needed;
             DWORD double_returned;
@@ -1407,15 +1378,14 @@ static void test_EnumPrintProcessors(void)
 
 
     /* failure-Codes for NULL */
-    if (0) {
-        /* this test crashes on win98se */
-        SetLastError(0xdeadbeef);
-        pcbNeeded = 0xdeadbeef;
-        pcReturned = 0xdeadbeef;
-        res = EnumPrintProcessorsA(NULL, NULL, 1, NULL, cbBuf, &pcbNeeded, &pcReturned);
-        ok( !res && (GetLastError() == ERROR_INVALID_USER_BUFFER) ,
-            "got %u with %u (expected '0' with ERROR_INVALID_USER_BUFFER)\n",
-            res, GetLastError());
+    SetLastError(0xdeadbeef);
+    pcbNeeded = 0xdeadbeef;
+    pcReturned = 0xdeadbeef;
+    res = EnumPrintProcessorsA(NULL, NULL, 1, NULL, cbBuf, &pcbNeeded, &pcReturned);
+    todo_wine {
+    ok( !res && (GetLastError() == ERROR_INVALID_USER_BUFFER) ,
+        "got %u with %u (expected '0' with ERROR_INVALID_USER_BUFFER)\n",
+        res, GetLastError());
     }
 
     SetLastError(0xdeadbeef);
@@ -1982,7 +1952,7 @@ static void test_SetDefaultPrinter(void)
     }
 
     if (!pSetDefaultPrinterA)  return;
-	/* only supported on win2k and above */
+    /* only supported on win2k and above */
 
     /* backup the original value */
     org_value[0] = '\0';
@@ -2108,7 +2078,7 @@ static void test_XcvDataW_MonitorUI(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, cmd_MonitorUIW, NULL, 0, NULL, 0, &needed, &status);
+    res = pXcvDataW(hXcv, L"MonitorUI", NULL, 0, NULL, 0, &needed, &status);
     ok( res && (status == ERROR_INSUFFICIENT_BUFFER) && (needed <= MAX_PATH),
         "returned %d with %u and %u for status %u (expected '!= 0' and "
         "'<= MAX_PATH' for status ERROR_INSUFFICIENT_BUFFER)\n",
@@ -2125,7 +2095,7 @@ static void test_XcvDataW_MonitorUI(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, emptyW, NULL, 0, NULL, 0, &needed, &status);
+    res = pXcvDataW(hXcv, L"", NULL, 0, NULL, 0, &needed, &status);
     ok( res && (status == ERROR_INVALID_PARAMETER),
         "returned %d with %u and %u for status %u (expected '!= 0' with "
         "ERROR_INVALID_PARAMETER)\n", res, GetLastError(), needed, status);
@@ -2142,7 +2112,7 @@ static void test_XcvDataW_MonitorUI(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, cmd_MonitorUIW, NULL, 0, buffer, len, NULL, &status);
+    res = pXcvDataW(hXcv, L"MonitorUI", NULL, 0, buffer, len, NULL, &status);
     ok( !res && (GetLastError() == ERROR_INVALID_PARAMETER),
         "returned %d with %u and %u for status %u (expected '0' with "
         "ERROR_INVALID_PARAMETER)\n", res, GetLastError(), needed, status);
@@ -2150,7 +2120,7 @@ static void test_XcvDataW_MonitorUI(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, cmd_MonitorUIW, NULL, 0, NULL, len, &needed, &status);
+    res = pXcvDataW(hXcv, L"MonitorUI", NULL, 0, NULL, len, &needed, &status);
     ok( !res && (GetLastError() == RPC_X_NULL_REF_POINTER),
         "returned %d with %u and %u for status %u (expected '0' with "
         "RPC_X_NULL_REF_POINTER)\n", res, GetLastError(), needed, status);
@@ -2158,7 +2128,7 @@ static void test_XcvDataW_MonitorUI(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, cmd_MonitorUIW, NULL, 0, buffer, len, &needed, NULL);
+    res = pXcvDataW(hXcv, L"MonitorUI", NULL, 0, buffer, len, &needed, NULL);
     ok( !res && (GetLastError() == RPC_X_NULL_REF_POINTER),
         "returned %d with %u and %u for status %u (expected '0' with "
         "RPC_X_NULL_REF_POINTER)\n", res, GetLastError(), needed, status);
@@ -2167,7 +2137,7 @@ static void test_XcvDataW_MonitorUI(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, cmd_MonitorUIW, NULL, 0, buffer, len+1, &needed, &status);
+    res = pXcvDataW(hXcv, L"MonitorUI", NULL, 0, buffer, len+1, &needed, &status);
     ok( res && (status == ERROR_SUCCESS),
         "returned %d with %u and %u for status %u (expected '!= 0' for status "
         "ERROR_SUCCESS)\n", res, GetLastError(), needed, status);
@@ -2177,7 +2147,7 @@ static void test_XcvDataW_MonitorUI(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, cmd_MonitorUIW, NULL, 0, buffer, len-1, &needed, &status);
+    res = pXcvDataW(hXcv, L"MonitorUI", NULL, 0, buffer, len-1, &needed, &status);
     ok( res && (status == ERROR_INSUFFICIENT_BUFFER),
         "returned %d with %u and %u for status %u (expected '!= 0' for status "
         "ERROR_INSUFFICIENT_BUFFER)\n", res, GetLastError(), needed, status);
@@ -2188,7 +2158,7 @@ static void test_XcvDataW_MonitorUI(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, cmd_MonitorUIW, NULL, 0, buffer, len, &needed, &status);
+    res = pXcvDataW(hXcv, L"MonitorUI", NULL, 0, buffer, len, &needed, &status);
     ok( res && (status == ERROR_SUCCESS),
         "returned %d with %u and %u for status %u (expected '!= 0' for status "
         "ERROR_SUCCESS)\n", res, GetLastError(), needed, status);
@@ -2227,7 +2197,7 @@ static void test_XcvDataW_PortIsValid(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, cmd_PortIsValidW, (PBYTE) portname_lpt1W, sizeof(portname_lpt1W), NULL, 0, NULL, &status);
+    res = pXcvDataW(hXcv, L"PortIsValid", (BYTE *) L"LPT1:", sizeof(L"LPT1:"), NULL, 0, NULL, &status);
     ok( !res && (GetLastError() == ERROR_INVALID_PARAMETER),
         "returned %d with %u and %u for status %u (expected '!= 0' with ERROR_INVALID_PARAMETER)\n",
          res, GetLastError(), needed, status);
@@ -2236,7 +2206,7 @@ static void test_XcvDataW_PortIsValid(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, cmd_PortIsValidW, (PBYTE) emptyW, sizeof(emptyW), NULL, 0, &needed, &status);
+    res = pXcvDataW(hXcv, L"PortIsValid", (BYTE *) L"", sizeof(L""), NULL, 0, &needed, &status);
     ok( res && ((status == ERROR_FILE_NOT_FOUND) || (status == ERROR_PATH_NOT_FOUND)),
         "returned %d with %u and %u for status %u (expected '!= 0' for status: "
         "ERROR_FILE_NOT_FOUND or ERROR_PATH_NOT_FOUND)\n",
@@ -2246,7 +2216,8 @@ static void test_XcvDataW_PortIsValid(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, cmd_PortIsValidW, (PBYTE) tempdirW, (lstrlenW(tempdirW) + 1) * sizeof(WCHAR), NULL, 0, &needed, &status);
+    res = pXcvDataW(hXcv, L"PortIsValid", (BYTE *) tempdirW, (lstrlenW(tempdirW) + 1) * sizeof(WCHAR),
+                    NULL, 0, &needed, &status);
     /* XP: ERROR_PATH_NOT_FOUND, w2k ERROR_ACCESS_DENIED */
     ok( res && ((status == ERROR_PATH_NOT_FOUND) || (status == ERROR_ACCESS_DENIED)),
         "returned %d with %u and %u for status %u (expected '!= 0' for status: "
@@ -2257,7 +2228,7 @@ static void test_XcvDataW_PortIsValid(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, cmd_PortIsValidW, (PBYTE) portname_lpt1W, sizeof(portname_lpt1W), NULL, 0, &needed, &status);
+    res = pXcvDataW(hXcv, L"PortIsValid", (BYTE *) L"LPT1:", sizeof(L"LPT1:"), NULL, 0, &needed, &status);
     ok( res && (status == ERROR_SUCCESS),
         "returned %d with %u and %u for status %u (expected '!= 0' for ERROR_SUCCESS)\n",
         res, GetLastError(), needed, status);
@@ -2265,7 +2236,7 @@ static void test_XcvDataW_PortIsValid(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, cmd_PortIsValidW, (PBYTE) portname_lpt2W, sizeof(portname_lpt2W), NULL, 0, &needed, &status);
+    res = pXcvDataW(hXcv, L"PortIsValid", (BYTE *) L"LPT2:", sizeof(L"LPT2:"), NULL, 0, &needed, &status);
     ok( res && (status == ERROR_SUCCESS),
         "returned %d with %u and %u for status %u (expected '!= 0' for ERROR_SUCCESS)\n",
         res, GetLastError(), needed, status);
@@ -2273,7 +2244,7 @@ static void test_XcvDataW_PortIsValid(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, cmd_PortIsValidW, (PBYTE) portname_com1W, sizeof(portname_com1W), NULL, 0, &needed, &status);
+    res = pXcvDataW(hXcv, L"PortIsValid", (BYTE *) L"COM1:", sizeof(L"COM1:"), NULL, 0, &needed, &status);
     ok( res && (status == ERROR_SUCCESS),
         "returned %d with %u and %u for status %u (expected '!= 0' for ERROR_SUCCESS)\n",
         res, GetLastError(), needed, status);
@@ -2281,7 +2252,7 @@ static void test_XcvDataW_PortIsValid(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, cmd_PortIsValidW, (PBYTE) portname_com2W, sizeof(portname_com2W), NULL, 0, &needed, &status);
+    res = pXcvDataW(hXcv, L"PortIsValid", (BYTE *) L"COM2:", sizeof(L"COM2:"), NULL, 0, &needed, &status);
     ok( res && (status == ERROR_SUCCESS),
         "returned %d with %u and %u for status %u (expected '!= 0' for ERROR_SUCCESS)\n",
         res, GetLastError(), needed, status);
@@ -2289,7 +2260,7 @@ static void test_XcvDataW_PortIsValid(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, cmd_PortIsValidW, (PBYTE) portname_fileW, sizeof(portname_fileW), NULL, 0, &needed, &status);
+    res = pXcvDataW(hXcv, L"PortIsValid", (BYTE *) L"FILE:", sizeof(L"FILE:"), NULL, 0, &needed, &status);
     ok( res && (status == ERROR_SUCCESS),
         "returned %d with %u and %u for status %u (expected '!= 0' with  ERROR_SUCCESS)\n",
         res, GetLastError(), needed, status);
@@ -2299,7 +2270,8 @@ static void test_XcvDataW_PortIsValid(void)
     needed = (DWORD) 0xdeadbeef;
     status = (DWORD) 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    res = pXcvDataW(hXcv, cmd_PortIsValidW, (PBYTE) tempfileW, (lstrlenW(tempfileW) + 1) * sizeof(WCHAR), NULL, 0, &needed, &status);
+    res = pXcvDataW(hXcv, L"PortIsValid", (BYTE *) tempfileW, (lstrlenW(tempfileW) + 1) * sizeof(WCHAR),
+                    NULL, 0, &needed, &status);
     ok( res && (status == ERROR_SUCCESS),
         "returned %d with %u and %u for status %u (expected '!= 0' with ERROR_SUCCESS)\n",
         res, GetLastError(), needed, status);
@@ -2356,7 +2328,7 @@ static void test_GetPrinter(void)
         ok(needed > 0,"not expected needed buffer size %d\n", needed);
 
         /* GetPrinterA returns the same number of bytes as GetPrinterW */
-        if (!on_win9x && !ret && pGetPrinterW && level != 6 && level != 7)
+        if (!ret && pGetPrinterW && level != 6 && level != 7)
         {
             DWORD double_needed;
             ret = pGetPrinterW(hprn, level, NULL, 0, &double_needed);
@@ -2408,9 +2380,6 @@ static void test_GetPrinterData(void)
     res = OpenPrinterA(NULL, &hprn, NULL);
     if (!res)
     {
-        /* printserver not available on win9x */
-        if (!on_win9x)
-            win_skip("Unable to open the printserver: %d\n", GetLastError());
         return;
     }
 
@@ -2593,7 +2562,7 @@ static void test_GetPrinterDriver(void)
         }
 
         /* GetPrinterDriverA returns the same number of bytes as GetPrinterDriverW */
-        if (!on_win9x && !ret && pGetPrinterDriverW)
+        if (!ret && pGetPrinterDriverW)
         {
             DWORD double_needed;
             ret = pGetPrinterDriverW(hprn, NULL, level, NULL, 0, &double_needed);
@@ -2961,7 +2930,7 @@ static void test_OpenPrinter_defaults(void)
     ret = GetJobA( printer, add_job->JobId, 2, (BYTE *)job_info, needed, &needed );
     ok( ret, "GetJobA() failed le=%d\n", GetLastError() );
 
-todo_wine
+    todo_wine
     ok( job_info->pDevMode != NULL, "got NULL DEVMODEA\n");
     if (job_info->pDevMode)
         ok( job_info->pDevMode->u1.s1.dmPaperSize == default_size, "got %d default %d\n",
@@ -3080,10 +3049,6 @@ START_TEST(info)
     pGetPrinterW = (void *) GetProcAddress(hwinspool, "GetPrinterW");
     pSetDefaultPrinterA = (void *) GetProcAddress(hwinspool, "SetDefaultPrinterA");
     pXcvDataW = (void *) GetProcAddress(hwinspool, "XcvDataW");
-
-    on_win9x = check_win9x();
-    if (on_win9x)
-        win_skip("Several W-functions are not available on Win9x/WinMe\n");
 
     find_default_printer();
     find_local_server();

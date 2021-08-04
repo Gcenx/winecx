@@ -48,6 +48,47 @@ WINE_DEFAULT_DEBUG_CHANNEL(mmio);
 
 static WINE_MMIO *MMIOList;
 
+/* From kernel32 */
+static HANDLE create_file_OF( LPCSTR path, INT mode )
+{
+    DWORD access, sharing, creation;
+    char full_path[MAX_PATH];
+
+    if (mode & OF_CREATE)
+    {
+        creation = CREATE_ALWAYS;
+        access = GENERIC_READ | GENERIC_WRITE;
+    }
+    else
+    {
+        creation = OPEN_EXISTING;
+        switch(mode & 0x03)
+        {
+        case OF_READ:      access = GENERIC_READ; break;
+        case OF_WRITE:     access = GENERIC_WRITE; break;
+        case OF_READWRITE: access = GENERIC_READ | GENERIC_WRITE; break;
+        default:           access = 0; break;
+        }
+    }
+
+    switch(mode & 0x70)
+    {
+    case OF_SHARE_EXCLUSIVE:  sharing = 0; break;
+    case OF_SHARE_DENY_WRITE: sharing = FILE_SHARE_READ; break;
+    case OF_SHARE_DENY_READ:  sharing = FILE_SHARE_WRITE; break;
+    case OF_SHARE_DENY_NONE:
+    case OF_SHARE_COMPAT:
+    default:                  sharing = FILE_SHARE_READ | FILE_SHARE_WRITE; break;
+    }
+
+    if (mode & OF_CREATE)
+        return CreateFileA( path, access, sharing, NULL, creation, FILE_ATTRIBUTE_NORMAL, 0 );
+
+    if (!SearchPathA( NULL, path, NULL, MAX_PATH, full_path, NULL ))
+        return INVALID_HANDLE_VALUE;
+    return CreateFileA( full_path, access, sharing, NULL, creation, FILE_ATTRIBUTE_NORMAL, 0 );
+}
+
 /**************************************************************************
  *               	mmioDosIOProc           		[internal]
  */
@@ -76,9 +117,14 @@ static LRESULT CALLBACK mmioDosIOProc(LPMMIOINFO lpmmioinfo, UINT uMessage,
 
 	    /* if filename NULL, assume open file handle in adwInfo[0] */
 	    if (szFileName) {
-                OFSTRUCT    ofs;
-                lpmmioinfo->adwInfo[0] = OpenFile(szFileName, &ofs, lpmmioinfo->dwFlags & 0xFFFF);
-            }
+		HANDLE file;
+
+		file = create_file_OF( szFileName, lpmmioinfo->dwFlags );
+		if (file != INVALID_HANDLE_VALUE)
+		    lpmmioinfo->adwInfo[0] = HandleToLong(file);
+		else
+		    lpmmioinfo->adwInfo[0] = HFILE_ERROR;
+	    }
 	    if (lpmmioinfo->adwInfo[0] == HFILE_ERROR)
 		ret = MMIOERR_FILENOTFOUND;
 	}
@@ -695,6 +741,7 @@ HMMIO WINAPI mmioOpenW(LPWSTR szFileName, MMIOINFO* lpmmioinfo,
     if (szFileName)
     {
         INT     len = WideCharToMultiByte( CP_ACP, 0, szFileName, -1, NULL, 0, NULL, NULL );
+        if (len < MAX_PATH) len = MAX_PATH;
         szFn = HeapAlloc( GetProcessHeap(), 0, len );
         if (!szFn) return NULL;
         WideCharToMultiByte( CP_ACP, 0, szFileName, -1, szFn, len, NULL, NULL );

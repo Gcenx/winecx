@@ -44,7 +44,7 @@ struct timer
     int                  manual;    /* manual reset */
     int                  signaled;  /* current signaled state */
     unsigned int         period;    /* timer period in ms */
-    timeout_t            when;      /* next expiration */
+    abstime_t            when;      /* next expiration */
     struct timeout_user *timeout;   /* timeout user */
     struct thread       *thread;    /* thread that set the APC function */
     client_ptr_t         callback;  /* callback APC function */
@@ -75,6 +75,7 @@ static const struct object_ops timer_ops =
     timer_map_access,          /* map_access */
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
+    default_get_full_name,     /* get_full_name */
     no_lookup_name,            /* lookup_name */
     directory_link_name,       /* link_name */
     default_unlink_name,       /* unlink_name */
@@ -102,6 +103,7 @@ static struct timer *create_timer( struct object *root, const struct unicode_str
             timer->period   = 0;
             timer->timeout  = NULL;
             timer->thread   = NULL;
+            timer->esync_fd = NULL;
 
             if (do_esync())
                 timer->esync_fd = esync_create_fd( 0, 0 );
@@ -123,10 +125,10 @@ static void timer_callback( void *private )
         memset( &data, 0, sizeof(data) );
         if (timer->callback)
         {
-            data.type       = APC_TIMER;
-            data.timer.func = timer->callback;
-            data.timer.time = timer->when;
-            data.timer.arg  = timer->arg;
+            data.type            = APC_TIMER;
+            data.user.timer.func = timer->callback;
+            data.user.timer.time = timer->when;
+            data.user.timer.arg  = timer->arg;
         }
         else data.type = APC_NONE;  /* wake up only */
 
@@ -139,8 +141,9 @@ static void timer_callback( void *private )
 
     if (timer->period)  /* schedule the next expiration */
     {
-        timer->when += (timeout_t)timer->period * 10000;
-        timer->timeout = add_timeout_user( timer->when, timer_callback, timer );
+        if (timer->when > 0) timer->when = -monotonic_time;
+        timer->when -= (abstime_t)timer->period * 10000;
+        timer->timeout = add_timeout_user( abstime_to_timeout(timer->when), timer_callback, timer );
     }
     else timer->timeout = NULL;
 
@@ -181,21 +184,23 @@ static int set_timer( struct timer *timer, timeout_t expire, unsigned int period
         if (do_esync())
             esync_clear( timer->esync_fd );
     }
-    timer->when     = (expire <= 0) ? current_time - expire : max( expire, current_time );
+    timer->when     = (expire <= 0) ? expire - monotonic_time : max( expire, current_time );
     timer->period   = period;
     timer->callback = callback;
     timer->arg      = arg;
     if (callback) timer->thread = (struct thread *)grab_object( current );
-    timer->timeout = add_timeout_user( timer->when, timer_callback, timer );
+    if (expire != TIMEOUT_INFINITE)
+        timer->timeout = add_timeout_user( expire, timer_callback, timer );
     return signaled;
 }
 
 static void timer_dump( struct object *obj, int verbose )
 {
     struct timer *timer = (struct timer *)obj;
+    timeout_t timeout = abstime_to_timeout( timer->when );
     assert( obj->ops == &timer_ops );
     fprintf( stderr, "Timer manual=%d when=%s period=%u\n",
-             timer->manual, get_timeout_str(timer->when), timer->period );
+             timer->manual, get_timeout_str(timeout), timer->period );
 }
 
 static struct object_type *timer_get_type( struct object *obj )

@@ -39,73 +39,59 @@ extern BOOL echo_mode;
 extern BOOL interactive;
 
 struct env_stack *pushd_directories;
-const WCHAR dotW[]    = {'.','\0'};
-const WCHAR dotdotW[] = {'.','.','\0'};
-const WCHAR nullW[]   = {'\0'};
-const WCHAR starW[]   = {'*','\0'};
-const WCHAR slashW[]  = {'\\','\0'};
-const WCHAR equalW[]  = {'=','\0'};
-const WCHAR wildcardsW[] = {'*','?','\0'};
-const WCHAR slashstarW[] = {'\\','*','\0'};
-const WCHAR deviceW[] = {'\\','\\','.','\\','\0'};
 const WCHAR inbuilt[][10] = {
-        {'C','A','L','L','\0'},
-        {'C','D','\0'},
-        {'C','H','D','I','R','\0'},
-        {'C','L','S','\0'},
-        {'C','O','P','Y','\0'},
-        {'C','T','T','Y','\0'},
-        {'D','A','T','E','\0'},
-        {'D','E','L','\0'},
-        {'D','I','R','\0'},
-        {'E','C','H','O','\0'},
-        {'E','R','A','S','E','\0'},
-        {'F','O','R','\0'},
-        {'G','O','T','O','\0'},
-        {'H','E','L','P','\0'},
-        {'I','F','\0'},
-        {'L','A','B','E','L','\0'},
-        {'M','D','\0'},
-        {'M','K','D','I','R','\0'},
-        {'M','O','V','E','\0'},
-        {'P','A','T','H','\0'},
-        {'P','A','U','S','E','\0'},
-        {'P','R','O','M','P','T','\0'},
-        {'R','E','M','\0'},
-        {'R','E','N','\0'},
-        {'R','E','N','A','M','E','\0'},
-        {'R','D','\0'},
-        {'R','M','D','I','R','\0'},
-        {'S','E','T','\0'},
-        {'S','H','I','F','T','\0'},
-        {'S','T','A','R','T','\0'},
-        {'T','I','M','E','\0'},
-        {'T','I','T','L','E','\0'},
-        {'T','Y','P','E','\0'},
-        {'V','E','R','I','F','Y','\0'},
-        {'V','E','R','\0'},
-        {'V','O','L','\0'},
-        {'E','N','D','L','O','C','A','L','\0'},
-        {'S','E','T','L','O','C','A','L','\0'},
-        {'P','U','S','H','D','\0'},
-        {'P','O','P','D','\0'},
-        {'A','S','S','O','C','\0'},
-        {'C','O','L','O','R','\0'},
-        {'F','T','Y','P','E','\0'},
-        {'M','O','R','E','\0'},
-        {'C','H','O','I','C','E','\0'},
-        {'M','K','L','I','N','K','\0'},
-        {'E','X','I','T','\0'}
+        L"CALL",
+        L"CD",
+        L"CHDIR",
+        L"CLS",
+        L"COPY",
+        L"CTTY",
+        L"DATE",
+        L"DEL",
+        L"DIR",
+        L"ECHO",
+        L"ERASE",
+        L"FOR",
+        L"GOTO",
+        L"HELP",
+        L"IF",
+        L"LABEL",
+        L"MD",
+        L"MKDIR",
+        L"MOVE",
+        L"PATH",
+        L"PAUSE",
+        L"PROMPT",
+        L"REM",
+        L"REN",
+        L"RENAME",
+        L"RD",
+        L"RMDIR",
+        L"SET",
+        L"SHIFT",
+        L"START",
+        L"TIME",
+        L"TITLE",
+        L"TYPE",
+        L"VERIFY",
+        L"VER",
+        L"VOL",
+        L"ENDLOCAL",
+        L"SETLOCAL",
+        L"PUSHD",
+        L"POPD",
+        L"ASSOC",
+        L"COLOR",
+        L"FTYPE",
+        L"MORE",
+        L"CHOICE",
+        L"MKLINK",
+        L"EXIT"
 };
 static const WCHAR externals[][10] = {
-        {'A','T','T','R','I','B','\0'},
-        {'X','C','O','P','Y','\0'}
+        L"ATTRIB",
+        L"XCOPY"
 };
-static const WCHAR onW[]  = {'O','N','\0'};
-static const WCHAR offW[] = {'O','F','F','\0'};
-static const WCHAR parmY[] = {'/','Y','\0'};
-static const WCHAR parmNoY[] = {'/','-','Y','\0'};
-static const WCHAR eqeqW[]   = {'=','=','\0'};
 
 static HINSTANCE hinst;
 struct env_stack *saved_environment;
@@ -267,11 +253,6 @@ void WCMD_change_tty (void) {
  */
 
 void WCMD_choice (const WCHAR * args) {
-
-    static const WCHAR bellW[] = {7,0};
-    static const WCHAR commaW[] = {',',0};
-    static const WCHAR bracket_open[] = {'[',0};
-    static const WCHAR bracket_close[] = {']','?',0};
     WCHAR answer[16];
     WCHAR buffer[16];
     WCHAR *ptr = NULL;
@@ -387,15 +368,15 @@ void WCMD_choice (const WCHAR * args) {
 
     if (!opt_n) {
         /* print a list of all allowed answers inside brackets */
-        WCMD_output_asis(bracket_open);
+        WCMD_output_asis(L"[");
         ptr = opt_c;
         answer[1] = 0;
         while ((answer[0] = *ptr++)) {
             WCMD_output_asis(answer);
             if (*ptr)
-                WCMD_output_asis(commaW);
+                WCMD_output_asis(L",");
         }
-        WCMD_output_asis(bracket_close);
+        WCMD_output_asis(L"]?");
     }
 
     while (TRUE) {
@@ -410,7 +391,7 @@ void WCMD_choice (const WCHAR * args) {
         ptr = wcschr(opt_c, answer[0]);
         if (ptr) {
             WCMD_output_asis(answer);
-            WCMD_output_asis(newlineW);
+            WCMD_output_asis(L"\r\n");
             if (have_console)
                 SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), oldmode);
 
@@ -423,7 +404,7 @@ void WCMD_choice (const WCHAR * args) {
         {
             /* key not allowed: play the bell */
             WINE_TRACE("key not allowed: %s\n", wine_dbgstr_w(answer));
-            WCMD_output_asis(bellW);
+            WCMD_output_asis(L"\a");
         }
     }
 }
@@ -604,7 +585,6 @@ void WCMD_copy(WCHAR * args) {
   WCHAR   copycmd[4];
   DWORD   len;
   BOOL    dstisdevice = FALSE;
-  static const WCHAR copyCmdW[] = {'C','O','P','Y','C','M','D','\0'};
 
   typedef struct _COPY_FILES
   {
@@ -793,11 +773,11 @@ void WCMD_copy(WCHAR * args) {
     /* If COPYCMD is set, then we force the overwrite with /Y and ask for
      * confirmation with /-Y. If COPYCMD is neither of those, then we use the
      * default behavior. */
-    len = GetEnvironmentVariableW(copyCmdW, copycmd, ARRAY_SIZE(copycmd));
+    len = GetEnvironmentVariableW(L"COPYCMD", copycmd, ARRAY_SIZE(copycmd));
     if (len && len < ARRAY_SIZE(copycmd)) {
-      if (!lstrcmpiW (copycmd, parmY))
+      if (!lstrcmpiW(copycmd, L"/Y"))
         prompt = FALSE;
-      else if (!lstrcmpiW (copycmd, parmNoY))
+      else if (!lstrcmpiW(copycmd, L"/-Y"))
         prompt = TRUE;
     }
   }
@@ -807,8 +787,8 @@ void WCMD_copy(WCHAR * args) {
   if (destination == NULL) {
 
     WINE_TRACE("No destination supplied, so need to calculate it\n");
-    lstrcpyW(destname, dotW);
-    lstrcatW(destname, slashW);
+    lstrcpyW(destname, L".");
+    lstrcatW(destname, L"\\");
 
     destination = heap_xalloc(sizeof(COPY_FILES));
     if (destination == NULL) goto exitreturn;
@@ -835,7 +815,7 @@ void WCMD_copy(WCHAR * args) {
          (attributes & FILE_ATTRIBUTE_DIRECTORY))) {
 
       destisdirectory = TRUE;
-      if (!ends_with_backslash( destname )) lstrcatW(destname, slashW);
+      if (!ends_with_backslash(destname)) lstrcatW(destname, L"\\");
       WINE_TRACE("Directory, so full name is now '%s'\n", wine_dbgstr_w(destname));
     }
   }
@@ -857,7 +837,7 @@ void WCMD_copy(WCHAR * args) {
   } else if (!destisdirectory) {
     /* We have been asked to copy to a filename. Default to ascii IF the
        source contains wildcards (true even if only one match)           */
-    if (wcspbrk(sourcelist->name, wildcardsW) != NULL) {
+    if (wcspbrk(sourcelist->name, L"*?") != NULL) {
       anyconcats = TRUE;  /* We really are concatenating to a single file */
       if (destination->binarycopy == -1) {
         destination->binarycopy = 0;
@@ -876,7 +856,7 @@ void WCMD_copy(WCHAR * args) {
              wine_dbgstr_w(destname), appendfirstsource);
 
   /* Remember if the destination is a device */
-  if (wcsncmp(destination->name, deviceW, lstrlenW(deviceW)) == 0) {
+  if (wcsncmp(destination->name, L"\\\\.\\", lstrlenW(L"\\\\.\\")) == 0) {
     WINE_TRACE("Destination is a device\n");
     dstisdevice = TRUE;
   }
@@ -916,17 +896,17 @@ void WCMD_copy(WCHAR * args) {
 
       /* We need to know where the filename part starts, so append * and
          recalculate the full resulting path                              */
-      lstrcatW(thiscopy->name, starW);
+      lstrcatW(thiscopy->name, L"*");
       GetFullPathNameW(thiscopy->name, ARRAY_SIZE(srcpath), srcpath, &filenamepart);
       WINE_TRACE("Directory, so full name is now '%s'\n", wine_dbgstr_w(srcpath));
 
-    } else if ((wcspbrk(srcpath, wildcardsW) == NULL) &&
+    } else if ((wcspbrk(srcpath, L"*?") == NULL) &&
                (attributes != INVALID_FILE_ATTRIBUTES) &&
                (attributes & FILE_ATTRIBUTE_DIRECTORY)) {
 
       /* We need to know where the filename part starts, so append \* and
          recalculate the full resulting path                              */
-      lstrcatW(thiscopy->name, slashstarW);
+      lstrcatW(thiscopy->name, L"\\*");
       GetFullPathNameW(thiscopy->name, ARRAY_SIZE(srcpath), srcpath, &filenamepart);
       WINE_TRACE("Directory, so full name is now '%s'\n", wine_dbgstr_w(srcpath));
     }
@@ -935,7 +915,7 @@ void WCMD_copy(WCHAR * args) {
                     wine_dbgstr_w(srcpath), anyconcats);
 
     /* If the source is a device, just use it, otherwise search */
-    if (wcsncmp(srcpath, deviceW, lstrlenW(deviceW)) == 0) {
+    if (wcsncmp(srcpath, L"\\\\.\\", lstrlenW(L"\\\\.\\")) == 0) {
       WINE_TRACE("Source is a device\n");
       srcisdevice = TRUE;
       srcname  = &srcpath[4]; /* After the \\.\ prefix */
@@ -1154,7 +1134,6 @@ void WCMD_create_dir (WCHAR *args) {
  * and a bitmask of unwanted attributes (*wantClear).
  */
 static void WCMD_delete_parse_attributes(DWORD *wantSet, DWORD *wantClear) {
-    static const WCHAR parmA[] = {'/','A','\0'};
     WCHAR *p;
 
     /* both are strictly 'out' parameters */
@@ -1162,7 +1141,7 @@ static void WCMD_delete_parse_attributes(DWORD *wantSet, DWORD *wantClear) {
     *wantClear=0;
 
     /* For each /A argument */
-    for (p=wcsstr(quals, parmA); p != NULL; p=wcsstr(p, parmA)) {
+    for (p=wcsstr(quals, L"/A"); p != NULL; p=wcsstr(p, L"/A")) {
         /* Skip /A itself */
         p += 2;
 
@@ -1204,11 +1183,7 @@ static void WCMD_delete_parse_attributes(DWORD *wantSet, DWORD *wantClear) {
  * (If /P supplied, del will prompt for individual files later.)
  */
 static BOOL WCMD_delete_confirm_wildcard(const WCHAR *filename, BOOL *pPrompted) {
-    static const WCHAR parmP[] = {'/','P','\0'};
-    static const WCHAR parmQ[] = {'/','Q','\0'};
-
-    if ((wcsstr(quals, parmQ) == NULL) && (wcsstr(quals, parmP) == NULL)) {
-        static const WCHAR anyExt[]= {'.','*','\0'};
+    if ((wcsstr(quals, L"/Q") == NULL) && (wcsstr(quals, L"/P") == NULL)) {
         WCHAR drive[10];
         WCHAR dir[MAX_PATH];
         WCHAR fname[MAX_PATH];
@@ -1217,20 +1192,18 @@ static BOOL WCMD_delete_confirm_wildcard(const WCHAR *filename, BOOL *pPrompted)
 
         /* Convert path into actual directory spec */
         GetFullPathNameW(filename, ARRAY_SIZE(fpath), fpath, NULL);
-        WCMD_splitpath(fpath, drive, dir, fname, ext);
+        _wsplitpath(fpath, drive, dir, fname, ext);
 
         /* Only prompt for * and *.*, not *a, a*, *.a* etc */
-        if ((lstrcmpW(fname, starW) == 0) &&
-            (*ext == 0x00 || (lstrcmpW(ext, anyExt) == 0))) {
+        if ((lstrcmpW(fname, L"*") == 0) && (*ext == 0x00 || (lstrcmpW(ext, L".*") == 0))) {
 
             WCHAR question[MAXSTRING];
-            static const WCHAR fmt[] = {'%','s',' ','\0'};
 
             /* Caller uses this to suppress "file not found" warning later */
             *pPrompted = TRUE;
 
             /* Ask for confirmation */
-            wsprintfW(question, fmt, fpath);
+            wsprintfW(question, L"%s ", fpath);
             return WCMD_ask_confirm(question, TRUE, NULL);
         }
     }
@@ -1244,10 +1217,6 @@ static BOOL WCMD_delete_confirm_wildcard(const WCHAR *filename, BOOL *pPrompted)
  * Returns TRUE if a file was deleted.
  */
 static BOOL WCMD_delete_one (const WCHAR *thisArg) {
-
-    static const WCHAR parmP[] = {'/','P','\0'};
-    static const WCHAR parmS[] = {'/','S','\0'};
-    static const WCHAR parmF[] = {'/','F','\0'};
     DWORD wanted_attrs;
     DWORD unwanted_attrs;
     BOOL found = FALSE;
@@ -1284,10 +1253,9 @@ static BOOL WCMD_delete_one (const WCHAR *thisArg) {
         && (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
     {
       WCHAR modifiedParm[MAX_PATH];
-      static const WCHAR slashStar[] = {'\\','*','\0'};
 
       lstrcpyW(modifiedParm, argCopy);
-      lstrcatW(modifiedParm, slashStar);
+      lstrcatW(modifiedParm, L"\\*");
       FindClose(hff);
       found = TRUE;
       WCMD_delete_one(modifiedParm);
@@ -1311,7 +1279,7 @@ static BOOL WCMD_delete_one (const WCHAR *thisArg) {
              && ((fd.dwFileAttributes & unwanted_attrs) == 0);
 
           /* /P means prompt for each file */
-          if (ok && wcsstr (quals, parmP) != NULL) {
+          if (ok && wcsstr(quals, L"/P") != NULL) {
             WCHAR* question;
 
             /* Ask for confirmation */
@@ -1326,7 +1294,7 @@ static BOOL WCMD_delete_one (const WCHAR *thisArg) {
             /* If file is read only, and /A:r or /F supplied, delete it */
             if (fd.dwFileAttributes & FILE_ATTRIBUTE_READONLY &&
                 ((wanted_attrs & FILE_ATTRIBUTE_READONLY) ||
-                wcsstr (quals, parmF) != NULL)) {
+                wcsstr(quals, L"/F") != NULL)) {
                 SetFileAttributesW(fpath, fd.dwFileAttributes & ~FILE_ATTRIBUTE_READONLY);
             }
 
@@ -1340,7 +1308,7 @@ static BOOL WCMD_delete_one (const WCHAR *thisArg) {
     }
 
     /* Now recurse into all subdirectories handling the parameter in the same way */
-    if (wcsstr (quals, parmS) != NULL) {
+    if (wcsstr(quals, L"/S") != NULL) {
 
       WCHAR thisDir[MAX_PATH];
       int cPos;
@@ -1352,7 +1320,7 @@ static BOOL WCMD_delete_one (const WCHAR *thisArg) {
 
       /* Convert path into actual directory spec */
       GetFullPathNameW(argCopy, ARRAY_SIZE(thisDir), thisDir, NULL);
-      WCMD_splitpath(thisDir, drive, dir, fname, ext);
+      _wsplitpath(thisDir, drive, dir, fname, ext);
 
       lstrcpyW(thisDir, drive);
       lstrcatW(thisDir, dir);
@@ -1375,8 +1343,7 @@ static BOOL WCMD_delete_one (const WCHAR *thisArg) {
 
         do {
           if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-              (lstrcmpW(fd.cFileName, dotdotW) != 0) &&
-              (lstrcmpW(fd.cFileName, dotW) != 0)) {
+              (lstrcmpW(fd.cFileName, L"..") != 0) && (lstrcmpW(fd.cFileName, L".") != 0)) {
 
             DIRECTORY_STACK *nextDir;
             WCHAR subParm[MAX_PATH];
@@ -1384,7 +1351,7 @@ static BOOL WCMD_delete_one (const WCHAR *thisArg) {
             /* Work out search parameter in sub dir */
             lstrcpyW (subParm, thisDir);
             lstrcatW (subParm, fd.cFileName);
-            lstrcatW (subParm, slashW);
+            lstrcatW (subParm, L"\\");
             lstrcatW (subParm, fname);
             lstrcatW (subParm, ext);
             WINE_TRACE("Recursive, Adding to search list '%s'\n", wine_dbgstr_w(subParm));
@@ -1514,19 +1481,19 @@ void WCMD_echo (const WCHAR *args)
   count = lstrlenW(trimmed);
   if (count == 0 && origcommand[0]!='.' && origcommand[0]!=':'
                  && origcommand[0]!=';' && origcommand[0]!='/') {
-    if (echo_mode) WCMD_output (WCMD_LoadMessage(WCMD_ECHOPROMPT), onW);
-    else WCMD_output (WCMD_LoadMessage(WCMD_ECHOPROMPT), offW);
+    if (echo_mode) WCMD_output(WCMD_LoadMessage(WCMD_ECHOPROMPT), L"ON");
+    else WCMD_output (WCMD_LoadMessage(WCMD_ECHOPROMPT), L"OFF");
     heap_free(trimmed);
     return;
   }
 
-  if (lstrcmpiW(trimmed, onW) == 0)
+  if (lstrcmpiW(trimmed, L"ON") == 0)
     echo_mode = TRUE;
-  else if (lstrcmpiW(trimmed, offW) == 0)
+  else if (lstrcmpiW(trimmed, L"OFF") == 0)
     echo_mode = FALSE;
   else {
     WCMD_output_asis (args);
-    WCMD_output_asis (newlineW);
+    WCMD_output_asis(L"\r\n");
   }
   heap_free(trimmed);
 }
@@ -1674,12 +1641,10 @@ static BOOL WCMD_parse_forf_options(WCHAR *options, WCHAR *eol, int *skip,
   static const WCHAR tokensW[] = {'t','o','k','e','n','s','='};
   static const WCHAR delimsW[] = {'d','e','l','i','m','s','='};
   static const WCHAR usebackqW[] = {'u','s','e','b','a','c','k','q'};
-  static const WCHAR forf_defaultdelims[] = {' ', '\t', '\0'};
-  static const WCHAR forf_defaulttokens[] = {'1', '\0'};
 
   /* Initialize to defaults */
-  lstrcpyW(delims, forf_defaultdelims);
-  lstrcpyW(tokens, forf_defaulttokens);
+  lstrcpyW(delims, L" \t");
+  lstrcpyW(tokens, L"1");
   *eol      = 0;
   *skip     = 0;
   *usebackq = FALSE;
@@ -1777,14 +1742,13 @@ static void WCMD_add_dirstowalk(DIRECTORY_STACK *dirsToWalk) {
   /* Build a generic search and add all directories on the list of directories
      still to walk                                                             */
   lstrcpyW(fullitem, dirsToWalk->dirName);
-  lstrcatW(fullitem, slashstarW);
+  lstrcatW(fullitem, L"\\*");
   hff = FindFirstFileW(fullitem, &fd);
   if (hff != INVALID_HANDLE_VALUE) {
     do {
       WINE_TRACE("Looking for subdirectories\n");
       if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-          (lstrcmpW(fd.cFileName, dotdotW) != 0) &&
-          (lstrcmpW(fd.cFileName, dotW) != 0))
+          (lstrcmpW(fd.cFileName, L"..") != 0) && (lstrcmpW(fd.cFileName, L".") != 0))
       {
         /* Allocate memory, add to list */
         DIRECTORY_STACK *toWalk = heap_xalloc(sizeof(DIRECTORY_STACK));
@@ -1794,7 +1758,7 @@ static void WCMD_add_dirstowalk(DIRECTORY_STACK *dirsToWalk) {
         remainingDirs = toWalk;
         toWalk->dirName = heap_xalloc(sizeof(WCHAR) * (lstrlenW(dirsToWalk->dirName) + 2 + lstrlenW(fd.cFileName)));
         lstrcpyW(toWalk->dirName, dirsToWalk->dirName);
-        lstrcatW(toWalk->dirName, slashW);
+        lstrcatW(toWalk->dirName, L"\\");
         lstrcatW(toWalk->dirName, fd.cFileName);
         WINE_TRACE("Added to stack %s (%p->%p)\n", wine_dbgstr_w(toWalk->dirName),
                    toWalk, toWalk->next);
@@ -1968,6 +1932,7 @@ static void WCMD_parse_line(CMD_LIST    *cmdStart,
   BOOL thisduplicate = FALSE;
   BOOL anyduplicates = FALSE;
   int  totalfound;
+  static WCHAR emptyW[] = L"";
 
   /* Skip lines if requested */
   if (*forf_skip) {
@@ -1998,7 +1963,7 @@ static void WCMD_parse_line(CMD_LIST    *cmdStart,
   for (varoffset=0;
        varidx >= 0 && varoffset<totalfound && (((varidx%26) + varoffset) < 26);
        varoffset++) {
-    forloopcontext.variable[varidx + varoffset] = (WCHAR *)nullW;
+    forloopcontext.variable[varidx + varoffset] = emptyW;
   }
 
   /* Loop extracting the tokens
@@ -2048,7 +2013,7 @@ static void WCMD_parse_line(CMD_LIST    *cmdStart,
     int i;
     for (i=varidx; i<MAX_FOR_VARIABLES; i++) {
       if ((forloopcontext.variable[i] != oldcontext.variable[i]) &&
-          (forloopcontext.variable[i] != nullW)) {
+          (forloopcontext.variable[i] != emptyW)) {
         heap_free(forloopcontext.variable[i]);
       }
     }
@@ -2081,10 +2046,6 @@ static HANDLE WCMD_forf_getinputhandle(BOOL usebackq, WCHAR *itemstr, BOOL iscmd
   WCHAR  temp_cmd[MAXSTRING];
   WCHAR *trimmed = NULL;
   HANDLE hinput = INVALID_HANDLE_VALUE;
-  static const WCHAR redirOutW[]  = {'>','%','s','\0'};
-  static const WCHAR cmdW[]       = {'C','M','D','\0'};
-  static const WCHAR cmdslashcW[] = {'C','M','D','.','E','X','E',' ',
-                                     '/','C',' ','%','s','\0'};
 
   /* Remove leading and trailing character (but there may be trailing whitespace too) */
   if ((iscmd && (itemstr[0] == '`' && usebackq)) ||
@@ -2102,11 +2063,11 @@ static HANDLE WCMD_forf_getinputhandle(BOOL usebackq, WCHAR *itemstr, BOOL iscmd
   if (iscmd) {
     /* Get temp filename */
     GetTempPathW(ARRAY_SIZE(temp_str), temp_str);
-    GetTempFileNameW(temp_str, cmdW, 0, temp_file);
+    GetTempFileNameW(temp_str, L"CMD", 0, temp_file);
 
     /* Redirect output to the temporary file */
-    wsprintfW(temp_str, redirOutW, temp_file);
-    wsprintfW(temp_cmd, cmdslashcW, itemstr);
+    wsprintfW(temp_str, L">%s", temp_file);
+    wsprintfW(temp_cmd, L"CMD.EXE /C %s", itemstr);
     WINE_TRACE("Issuing '%s' with redirs '%s'\n",
                wine_dbgstr_w(temp_cmd), wine_dbgstr_w(temp_str));
     WCMD_execute (temp_cmd, temp_str, NULL, FALSE);
@@ -2308,7 +2269,6 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
          * If the parameter within the set has a wildcard then search for matching files
          * otherwise do a literal substitution.
          */
-        static const WCHAR wildcards[] = {'*','?','\0'};
 
         /* Take a copy of the item returned from WCMD_parameter as it is held in a
            static buffer which can be overwritten during parsing of the for body   */
@@ -2328,7 +2288,7 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
                as it is fully qualified in the /R case */
             if (dirsToWalk) {
               lstrcpyW(fullitem, dirsToWalk->dirName);
-              lstrcatW(fullitem, slashW);
+              lstrcatW(fullitem, L"\\");
               lstrcatW(fullitem, item);
             } else {
               WCHAR *prefix = wcsrchr(item, '\\');
@@ -2336,7 +2296,7 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
               lstrcpyW(fullitem, item);
             }
 
-            if (wcspbrk (fullitem, wildcards)) {
+            if (wcspbrk(fullitem, L"*?")) {
               hff = FindFirstFileW(fullitem, &fd);
               if (hff != INVALID_HANDLE_VALUE) {
                 do {
@@ -2346,15 +2306,14 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
 
                   /* Handle as files or dirs appropriately, but ignore . and .. */
                   if (isDirectory == expandDirs &&
-                      (lstrcmpW(fd.cFileName, dotdotW) != 0) &&
-                      (lstrcmpW(fd.cFileName, dotW) != 0))
+                      (lstrcmpW(fd.cFileName, L"..") != 0) && (lstrcmpW(fd.cFileName, L".") != 0))
                   {
                       thisCmdStart = cmdStart;
                       WINE_TRACE("Processing FOR filename %s\n", wine_dbgstr_w(fd.cFileName));
 
                       if (doRecurse) {
                           lstrcpyW(fullitem, dirsToWalk->dirName);
-                          lstrcatW(fullitem, slashW);
+                          lstrcatW(fullitem, L"\\");
                           lstrcatW(fullitem, fd.cFileName);
                       } else {
                           if (prefixlen) lstrcpynW(fullitem, item, prefixlen + 1);
@@ -2479,7 +2438,6 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
     /* If /L is provided, now run the for loop */
     if (useNumbers) {
         WCHAR thisNum[20];
-        static const WCHAR fmt[] = {'%','d','\0'};
 
         WINE_TRACE("FOR /L provided range from %d to %d step %d\n",
                    numbers[0], numbers[2], numbers[1]);
@@ -2487,7 +2445,7 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
              (numbers[1]<0)? i>=numbers[2] : i<=numbers[2];
              i=i + numbers[1]) {
 
-            swprintf(thisNum, ARRAY_SIZE(thisNum), fmt, i);
+            swprintf(thisNum, ARRAY_SIZE(thisNum), L"%d", i);
             WINE_TRACE("Processing FOR number %s\n", wine_dbgstr_w(thisNum));
 
             thisCmdStart = cmdStart;
@@ -2566,9 +2524,8 @@ void WCMD_give_help (const WCHAR *args)
       if (CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE | SORT_STRINGSORT,
 	  args, -1, externals[i], -1) == CSTR_EQUAL) {
         WCHAR cmd[128];
-        static const WCHAR helpW[] = {' ', '/','?','\0'};
         lstrcpyW(cmd, args);
-        lstrcatW(cmd, helpW);
+        lstrcatW(cmd, L" /?");
         WCMD_run_program(cmd, FALSE);
         return;
       }
@@ -2591,14 +2548,13 @@ void WCMD_goto (CMD_LIST **cmdList) {
 
   WCHAR string[MAX_PATH];
   WCHAR *labelend = NULL;
-  const WCHAR labelEndsW[] = {'>','<','|','&',' ',':','\t','\0'};
+  const WCHAR labelEndsW[] = L"><|& :\t";
 
   /* Do not process any more parts of a processed multipart or multilines command */
   if (cmdList) *cmdList = NULL;
 
   if (context != NULL) {
     WCHAR *paramStart = param1, *str;
-    static const WCHAR eofW[] = {':','e','o','f','\0'};
 
     if (param1[0] == 0x00) {
       WCMD_output_stderr(WCMD_LoadMessage(WCMD_NOARG));
@@ -2606,7 +2562,7 @@ void WCMD_goto (CMD_LIST **cmdList) {
     }
 
     /* Handle special :EOF label */
-    if (lstrcmpiW (eofW, param1) == 0) {
+    if (lstrcmpiW(L":eof", param1) == 0) {
       context -> skip_rest = TRUE;
       return;
     }
@@ -2688,7 +2644,6 @@ void WCMD_pushd (const WCHAR *args)
 {
     struct env_stack *curdir;
     WCHAR *thisdir;
-    static const WCHAR parmD[] = {'/','D','\0'};
 
     if (wcschr(args, '/') != NULL) {
       SetLastError(ERROR_INVALID_PARAMETER);
@@ -2706,7 +2661,7 @@ void WCMD_pushd (const WCHAR *args)
     }
 
     /* Change directory using CD code with /D parameter */
-    lstrcpyW(quals, parmD);
+    lstrcpyW(quals, L"/D");
     GetCurrentDirectoryW (1024, thisdir);
     errorlevel = 0;
     WCMD_setshow_default(args);
@@ -2768,15 +2723,9 @@ static int evaluate_if_comparison(const WCHAR *leftOperand, const WCHAR *operato
     WCHAR *endptr_leftOp, *endptr_rightOp;
     long int leftOperand_int, rightOperand_int;
     BOOL int_operands;
-    static const WCHAR lssW[]  = {'l','s','s','\0'};
-    static const WCHAR leqW[]  = {'l','e','q','\0'};
-    static const WCHAR equW[]  = {'e','q','u','\0'};
-    static const WCHAR neqW[]  = {'n','e','q','\0'};
-    static const WCHAR geqW[]  = {'g','e','q','\0'};
-    static const WCHAR gtrW[]  = {'g','t','r','\0'};
 
     /* == is a special case, as it always compares strings */
-    if (!lstrcmpiW(operator, eqeqW))
+    if (!lstrcmpiW(operator, L"=="))
         return caseInsensitive ? lstrcmpiW(leftOperand, rightOperand) == 0
                                : lstrcmpW (leftOperand, rightOperand) == 0;
 
@@ -2786,7 +2735,7 @@ static int evaluate_if_comparison(const WCHAR *leftOperand, const WCHAR *operato
     int_operands = (!*endptr_leftOp) && (!*endptr_rightOp);
 
     /* Perform actual (integer or string) comparison */
-    if (!lstrcmpiW(operator, lssW)) {
+    if (!lstrcmpiW(operator, L"lss")) {
         if (int_operands)
             return leftOperand_int < rightOperand_int;
         else
@@ -2794,7 +2743,7 @@ static int evaluate_if_comparison(const WCHAR *leftOperand, const WCHAR *operato
                                    : lstrcmpW (leftOperand, rightOperand) < 0;
     }
 
-    if (!lstrcmpiW(operator, leqW)) {
+    if (!lstrcmpiW(operator, L"leq")) {
         if (int_operands)
             return leftOperand_int <= rightOperand_int;
         else
@@ -2802,7 +2751,7 @@ static int evaluate_if_comparison(const WCHAR *leftOperand, const WCHAR *operato
                                    : lstrcmpW (leftOperand, rightOperand) <= 0;
     }
 
-    if (!lstrcmpiW(operator, equW)) {
+    if (!lstrcmpiW(operator, L"equ")) {
         if (int_operands)
             return leftOperand_int == rightOperand_int;
         else
@@ -2810,7 +2759,7 @@ static int evaluate_if_comparison(const WCHAR *leftOperand, const WCHAR *operato
                                    : lstrcmpW (leftOperand, rightOperand) == 0;
     }
 
-    if (!lstrcmpiW(operator, neqW)) {
+    if (!lstrcmpiW(operator, L"neq")) {
         if (int_operands)
             return leftOperand_int != rightOperand_int;
         else
@@ -2818,7 +2767,7 @@ static int evaluate_if_comparison(const WCHAR *leftOperand, const WCHAR *operato
                                    : lstrcmpW (leftOperand, rightOperand) != 0;
     }
 
-    if (!lstrcmpiW(operator, geqW)) {
+    if (!lstrcmpiW(operator, L"geq")) {
         if (int_operands)
             return leftOperand_int >= rightOperand_int;
         else
@@ -2826,7 +2775,7 @@ static int evaluate_if_comparison(const WCHAR *leftOperand, const WCHAR *operato
                                    : lstrcmpW (leftOperand, rightOperand) >= 0;
     }
 
-    if (!lstrcmpiW(operator, gtrW)) {
+    if (!lstrcmpiW(operator, L"gtr")) {
         if (int_operands)
             return leftOperand_int > rightOperand_int;
         else
@@ -2840,18 +2789,13 @@ static int evaluate_if_comparison(const WCHAR *leftOperand, const WCHAR *operato
 int evaluate_if_condition(WCHAR *p, WCHAR **command, int *test, int *negate)
 {
   WCHAR condition[MAX_PATH];
-  static const WCHAR notW[]    = {'n','o','t','\0'};
-  static const WCHAR errlvlW[] = {'e','r','r','o','r','l','e','v','e','l','\0'};
-  static const WCHAR existW[]  = {'e','x','i','s','t','\0'};
-  static const WCHAR defdW[]   = {'d','e','f','i','n','e','d','\0'};
-  static const WCHAR parmI[]   = {'/','I','\0'};
-  int caseInsensitive = (wcsstr(quals, parmI) != NULL);
+  int caseInsensitive = (wcsstr(quals, L"/I") != NULL);
 
-  *negate = !lstrcmpiW(param1,notW);
+  *negate = !lstrcmpiW(param1,L"not");
   lstrcpyW(condition, (*negate ? param2 : param1));
   WINE_TRACE("Condition: %s\n", wine_dbgstr_w(condition));
 
-  if (!lstrcmpiW (condition, errlvlW)) {
+  if (!lstrcmpiW(condition, L"errorlevel")) {
     WCHAR *param = WCMD_parameter(p, 1+(*negate), NULL, FALSE, FALSE);
     WCHAR *endptr;
     long int param_int = wcstol(param, &endptr, 10);
@@ -2859,14 +2803,14 @@ int evaluate_if_condition(WCHAR *p, WCHAR **command, int *test, int *negate)
     *test = ((long int)errorlevel >= param_int);
     WCMD_parameter(p, 2+(*negate), command, FALSE, FALSE);
   }
-  else if (!lstrcmpiW (condition, existW)) {
+  else if (!lstrcmpiW(condition, L"exist")) {
     WIN32_FIND_DATAW fd;
     HANDLE hff;
     WCHAR *param = WCMD_parameter(p, 1+(*negate), NULL, FALSE, FALSE);
     int    len = lstrlenW(param);
 
     /* FindFirstFile does not like a directory path ending in '\', append a '.' */
-    if (len && param[len-1] == '\\') lstrcatW(param, dotW);
+    if (len && param[len-1] == '\\') lstrcatW(param, L".");
 
     hff = FindFirstFileW(param, &fd);
     *test = (hff != INVALID_HANDLE_VALUE );
@@ -2874,7 +2818,7 @@ int evaluate_if_condition(WCHAR *p, WCHAR **command, int *test, int *negate)
 
     WCMD_parameter(p, 2+(*negate), command, FALSE, FALSE);
   }
-  else if (!lstrcmpiW (condition, defdW)) {
+  else if (!lstrcmpiW(condition, L"defined")) {
     *test = (GetEnvironmentVariableW(WCMD_parameter(p, 1+(*negate), NULL, FALSE, FALSE),
                                     NULL, 0) > 0);
     WCMD_parameter(p, 2+(*negate), command, FALSE, FALSE);
@@ -2892,8 +2836,8 @@ int evaluate_if_condition(WCHAR *p, WCHAR **command, int *test, int *negate)
     while (*p == ' ' || *p == '\t')
       p++;
 
-    if (!wcsncmp(p, eqeqW, lstrlenW(eqeqW)))
-      lstrcpyW(operator, eqeqW);
+    if (!wcsncmp(p, L"==", lstrlenW(L"==")))
+      lstrcpyW(operator, L"==");
     else {
       lstrcpyW(operator, WCMD_parameter(p, 0, &paramStart, FALSE, FALSE));
       if (!*operator) goto syntax_err;
@@ -2938,8 +2882,14 @@ void WCMD_if (WCHAR *p, CMD_LIST **cmdList)
   int test;   /* Condition evaluation result */
   WCHAR *command;
 
+  /* Function evaluate_if_condition relies on the global variables quals, param1 and param2
+     set in a call to WCMD_parse before */
   if (evaluate_if_condition(p, &command, &test, &negate) == -1)
       goto syntax_err;
+
+  WINE_TRACE("p: %s, quals: %s, param1: %s, param2: %s, command: %s\n",
+             wine_dbgstr_w(p), wine_dbgstr_w(quals), wine_dbgstr_w(param1),
+             wine_dbgstr_w(param2), wine_dbgstr_w(command));
 
   /* Process rest of IF statement which is on the same line
      Note: This may process all or some of the cmdList (eg a GOTO) */
@@ -2975,7 +2925,7 @@ void WCMD_move (void)
 
   /* If no destination supplied, assume current directory */
   if (param2[0] == 0x00) {
-      lstrcpyW(param2, dotW);
+      lstrcpyW(param2, L".");
   }
 
   /* If 2nd parm is directory, then use original filename */
@@ -2986,7 +2936,7 @@ void WCMD_move (void)
              wine_dbgstr_w(param1), wine_dbgstr_w(output));
 
   /* Split into components */
-  WCMD_splitpath(input, drive, dir, fname, ext);
+  _wsplitpath(input, drive, dir, fname, ext);
 
   hff = FindFirstFileW(input, &fd);
   if (hff == INVALID_HANDLE_VALUE)
@@ -2997,6 +2947,7 @@ void WCMD_move (void)
     WCHAR  src[MAX_PATH];
     DWORD attribs;
     BOOL ok = TRUE;
+    DWORD flags = 0;
 
     WINE_TRACE("Processing file '%s'\n", wine_dbgstr_w(fd.cFileName));
 
@@ -3009,7 +2960,7 @@ void WCMD_move (void)
     if (attribs != INVALID_FILE_ATTRIBUTES &&
        (attribs & FILE_ATTRIBUTE_DIRECTORY)) {
       lstrcpyW(dest, output);
-      lstrcatW(dest, slashW);
+      lstrcatW(dest, L"\\");
       lstrcatW(dest, fd.cFileName);
     } else {
       lstrcpyW(dest, output);
@@ -3026,15 +2977,27 @@ void WCMD_move (void)
       WCHAR copycmd[MAXSTRING];
       DWORD len;
 
-      /* /-Y has the highest priority, then /Y and finally the COPYCMD env. variable */
-      if (wcsstr (quals, parmNoY))
+      /* Default whether automatic overwriting is on. If we are interactive then
+         we prompt by default, otherwise we overwrite by default
+         /-Y has the highest priority, then /Y and finally the COPYCMD env. variable */
+      if (wcsstr(quals, L"/-Y"))
         force = FALSE;
-      else if (wcsstr (quals, parmY))
+      else if (wcsstr(quals, L"/Y"))
         force = TRUE;
       else {
-        static const WCHAR copyCmdW[] = {'C','O','P','Y','C','M','D','\0'};
-        len = GetEnvironmentVariableW(copyCmdW, copycmd, ARRAY_SIZE(copycmd));
-        force = (len && len < ARRAY_SIZE(copycmd) && !lstrcmpiW(copycmd, parmY));
+        /* By default, we will force the overwrite in batch mode and ask for
+         * confirmation in interactive mode. */
+        force = !interactive;
+        /* If COPYCMD is set, then we force the overwrite with /Y and ask for
+         * confirmation with /-Y. If COPYCMD is neither of those, then we use the
+         * default behavior. */
+        len = GetEnvironmentVariableW(L"COPYCMD", copycmd, ARRAY_SIZE(copycmd));
+        if (len && len < ARRAY_SIZE(copycmd)) {
+          if (!lstrcmpiW(copycmd, L"/Y"))
+            force = TRUE;
+          else if (!lstrcmpiW(copycmd, L"/-Y"))
+            force = FALSE;
+        }
       }
 
       /* Prompt if overwriting */
@@ -3045,20 +3008,14 @@ void WCMD_move (void)
         question = WCMD_format_string(WCMD_LoadMessage(WCMD_OVERWRITE), dest);
         ok = WCMD_ask_confirm(question, FALSE, NULL);
         LocalFree(question);
-
-        /* So delete the destination prior to the move */
-        if (ok) {
-          if (!DeleteFileW(dest)) {
-            WCMD_print_error ();
-            errorlevel = 1;
-            ok = FALSE;
-          }
-        }
       }
+
+      if (ok)
+        flags |= MOVEFILE_REPLACE_EXISTING;
     }
 
     if (ok) {
-      status = MoveFileW(src, dest);
+      status = MoveFileExW(src, dest, flags);
     } else {
       status = TRUE;
     }
@@ -3107,8 +3064,6 @@ void WCMD_remove_dir (WCHAR *args) {
   int   argno         = 0;
   int   argsProcessed = 0;
   WCHAR *argN          = args;
-  static const WCHAR parmS[] = {'/','S','\0'};
-  static const WCHAR parmQ[] = {'/','Q','\0'};
 
   /* Loop through all args */
   while (argN) {
@@ -3120,7 +3075,7 @@ void WCMD_remove_dir (WCHAR *args) {
 
       /* If subdirectory search not supplied, just try to remove
          and report error if it fails (eg if it contains a file) */
-      if (wcsstr (quals, parmS) == NULL) {
+      if (wcsstr(quals, L"/S") == NULL) {
         if (!RemoveDirectoryW(thisArg)) WCMD_print_error ();
 
       /* Otherwise use ShFileOp to recursively remove a directory */
@@ -3129,13 +3084,12 @@ void WCMD_remove_dir (WCHAR *args) {
         SHFILEOPSTRUCTW lpDir;
 
         /* Ask first */
-        if (wcsstr (quals, parmQ) == NULL) {
+        if (wcsstr(quals, L"/Q") == NULL) {
           BOOL  ok;
           WCHAR  question[MAXSTRING];
-          static const WCHAR fmt[] = {'%','s',' ','\0'};
 
           /* Ask for confirmation */
-          wsprintfW(question, fmt, thisArg);
+          wsprintfW(question, L"%s ", thisArg);
           ok = WCMD_ask_confirm(question, TRUE, NULL);
 
           /* Abort if answer is 'N' */
@@ -3207,7 +3161,7 @@ void WCMD_rename (void)
   dotDst = wcschr(param2, '.');
 
   /* Split into components */
-  WCMD_splitpath(input, drive, dir, fname, ext);
+  _wsplitpath(input, drive, dir, fname, ext);
 
   hff = FindFirstFileW(input, &fd);
   if (hff == INVALID_HANDLE_VALUE)
@@ -3306,12 +3260,6 @@ void WCMD_setlocal (const WCHAR *s) {
   struct env_stack *env_copy;
   WCHAR cwd[MAX_PATH];
   BOOL newdelay;
-  static const WCHAR ondelayW[]     = {'E','N','A','B','L','E','D','E','L','A',
-                                       'Y','E','D','E','X','P','A','N','S','I',
-                                       'O','N','\0'};
-  static const WCHAR offdelayW[]    = {'D','I','S','A','B','L','E','D','E','L',
-                                       'A','Y','E','D','E','X','P','A','N','S',
-                                       'I','O','N','\0'};
 
   /* setlocal does nothing outside of batch programs */
   if (!context) return;
@@ -3320,9 +3268,9 @@ void WCMD_setlocal (const WCHAR *s) {
 
   /* ENABLEDELAYEDEXPANSION / DISABLEDELAYEDEXPANSION could be parm1 or parm2
      (if both ENABLEEXTENSIONS and ENABLEDELAYEDEXPANSION supplied for example) */
-  if (!wcsicmp(param1, ondelayW) || !wcsicmp(param2, ondelayW)) {
+  if (!wcsicmp(param1, L"ENABLEDELAYEDEXPANSION") || !wcsicmp(param2, L"ENABLEDELAYEDEXPANSION")) {
     newdelay = TRUE;
-  } else if (!wcsicmp(param1, offdelayW) || !wcsicmp(param2, offdelayW)) {
+  } else if (!wcsicmp(param1, L"DISABLEDELAYEDEXPANSION") || !wcsicmp(param2, L"DISABLEDELAYEDEXPANSION")) {
     newdelay = FALSE;
   } else {
     newdelay = delayedsubst;
@@ -3418,9 +3366,8 @@ void WCMD_endlocal (void) {
   if (IsCharAlphaW(temp->u.cwd)) {
     WCHAR envvar[4];
     WCHAR cwd[MAX_PATH];
-    static const WCHAR fmt[] = {'=','%','c',':','\0'};
 
-    wsprintfW(envvar, fmt, temp->u.cwd);
+    wsprintfW(envvar, L"=%c:", temp->u.cwd);
     if (GetEnvironmentVariableW(envvar, cwd, MAX_PATH)) {
       WINE_TRACE("Resetting cwd to %s\n", wine_dbgstr_w(cwd));
       SetCurrentDirectoryW(cwd);
@@ -3445,7 +3392,6 @@ void WCMD_setshow_default (const WCHAR *args) {
   WCHAR *pos;
   WIN32_FIND_DATAW fd;
   HANDLE hff;
-  static const WCHAR parmD[] = {'/','D','\0'};
 
   WINE_TRACE("Request change to directory '%s'\n", wine_dbgstr_w(args));
 
@@ -3453,7 +3399,7 @@ void WCMD_setshow_default (const WCHAR *args) {
   if (lstrlenW(args) >= 2 &&
       CompareStringW(LOCALE_USER_DEFAULT,
                      NORM_IGNORECASE | SORT_STRINGSORT,
-                     args, 2, parmD, -1) == CSTR_EQUAL) {
+                     args, 2, L"/D", -1) == CSTR_EQUAL) {
     args += 2;
     while (*args && (*args==' ' || *args=='\t'))
       args++;
@@ -3462,7 +3408,7 @@ void WCMD_setshow_default (const WCHAR *args) {
   GetCurrentDirectoryW(ARRAY_SIZE(cwd), cwd);
 
   if (!*args) {
-    lstrcatW (cwd, newlineW);
+    lstrcatW(cwd, L"\r\n");
     WCMD_output_asis (cwd);
   }
   else {
@@ -3488,14 +3434,13 @@ void WCMD_setshow_default (const WCHAR *args) {
           WCHAR dir[MAX_PATH];
           WCHAR fname[MAX_PATH];
           WCHAR ext[MAX_PATH];
-          static const WCHAR fmt[] = {'%','s','%','s','%','s','\0'};
 
           /* Convert path into actual directory spec */
           GetFullPathNameW(string, ARRAY_SIZE(fpath), fpath, NULL);
-          WCMD_splitpath(fpath, drive, dir, fname, ext);
+          _wsplitpath(fpath, drive, dir, fname, ext);
 
           /* Rebuild path */
-          wsprintfW(string, fmt, drive, dir, fd.cFileName);
+          wsprintfW(string, L"%s%s%s", drive, dir, fd.cFileName);
           break;
         }
       } while (FindNextFileW(hff, &fd) != 0);
@@ -3517,7 +3462,7 @@ void WCMD_setshow_default (const WCHAR *args) {
 
       /* Restore old directory if drive letter would change, and
            CD x:\directory /D (or pushd c:\directory) not supplied */
-      if ((wcsstr(quals, parmD) == NULL) &&
+      if ((wcsstr(quals, L"/D") == NULL) &&
           (param1[1] == ':') && (toupper(param1[0]) != toupper(cwd[0]))) {
         SetCurrentDirectoryW(cwd);
       }
@@ -3529,7 +3474,7 @@ void WCMD_setshow_default (const WCHAR *args) {
        drive                                                          */
     if ((string[1] == ':') && IsCharAlphaW(string[0])) {
       WCHAR env[4];
-      lstrcpyW(env, equalW);
+      lstrcpyW(env, L"=");
       memcpy(env+1, string, 2 * sizeof(WCHAR));
       env[3] = 0x00;
       WINE_TRACE("Setting '%s' to '%s'\n", wine_dbgstr_w(env), wine_dbgstr_w(string));
@@ -3551,12 +3496,11 @@ void WCMD_setshow_date (void) {
 
   WCHAR curdate[64], buffer[64];
   DWORD count;
-  static const WCHAR parmT[] = {'/','T','\0'};
 
   if (!*param1) {
     if (GetDateFormatW(LOCALE_USER_DEFAULT, 0, NULL, NULL, curdate, ARRAY_SIZE(curdate))) {
       WCMD_output (WCMD_LoadMessage(WCMD_CURRENTDATE), curdate);
-      if (wcsstr (quals, parmT) == NULL) {
+      if (wcsstr(quals, L"/T") == NULL) {
         WCMD_output (WCMD_LoadMessage(WCMD_NEWDATE));
         WCMD_ReadFile(GetStdHandle(STD_INPUT_HANDLE), buffer, ARRAY_SIZE(buffer), &count);
         if (count > 2) {
@@ -3581,7 +3525,7 @@ static int __cdecl WCMD_compare( const void *a, const void *b )
     int r;
     const WCHAR * const *str_a = a, * const *str_b = b;
     r = CompareStringW( LOCALE_USER_DEFAULT, NORM_IGNORECASE | SORT_STRINGSORT,
-	  *str_a, wcscspn(*str_a, equalW), *str_b, wcscspn(*str_b, equalW) );
+	  *str_a, wcscspn(*str_a, L"="), *str_b, wcscspn(*str_b, L"=") );
     if( r == CSTR_LESS_THAN ) return -1;
     if( r == CSTR_GREATER_THAN ) return 1;
     return 0;
@@ -3626,7 +3570,7 @@ static int WCMD_setshow_sortenv(const WCHAR *s, const WCHAR *stub)
       /* Don't display special internal variables */
       if (str[i][0] != '=') {
         WCMD_output_asis(str[i]);
-        WCMD_output_asis(newlineW);
+        WCMD_output_asis(L"\r\n");
         displayedcount++;
       }
     }
@@ -3901,11 +3845,10 @@ static int WCMD_reduce(OPSTACK **opstack, VARSTACK **varstack) {
 
   case '=':
         {
-          WCHAR  intFormat[] = {'%','d','\0'};
           WCHAR  result[MAXSTRING];
 
           /* Build the result, then push it onto the stack */
-          swprintf(result, ARRAY_SIZE(result), intFormat, var1);
+          swprintf(result, ARRAY_SIZE(result), L"%d", var1);
           WINE_TRACE("Assigning %s a value %s\n", wine_dbgstr_w((*varstack)->variable),
                      wine_dbgstr_w(result));
           SetEnvironmentVariableW((*varstack)->variable, result);
@@ -3928,8 +3871,7 @@ static int WCMD_reduce(OPSTACK **opstack, VARSTACK **varstack) {
  */
 static int WCMD_handleExpression(WCHAR **expr, int *ret, int depth)
 {
-  static const WCHAR mathDelims[] = {' ','\t','(',')','!','~','-','*','/','%',
-                                     '+','<','>','&','^','|','=',',','\0' };
+  static const WCHAR mathDelims[] = L" \t()!~-*/%+<>&^|=,";
   int       rc = 0;
   WCHAR    *pos;
   BOOL      lastwasnumber = FALSE;  /* FALSE makes a minus at the start of the expression easier to handle */
@@ -4161,8 +4103,6 @@ void WCMD_setshow_env (WCHAR *s) {
   LPVOID env;
   WCHAR *p;
   BOOL status;
-  static const WCHAR parmP[] = {'/','P','\0'};
-  static const WCHAR parmA[] = {'/','A','\0'};
   WCHAR string[MAXSTRING];
 
   if (param1[0] == 0x00 && quals[0] == 0x00) {
@@ -4174,7 +4114,7 @@ void WCMD_setshow_env (WCHAR *s) {
   /* See if /P supplied, and if so echo the prompt, and read in a reply */
   if (CompareStringW(LOCALE_USER_DEFAULT,
                      NORM_IGNORECASE | SORT_STRINGSORT,
-                     s, 2, parmP, -1) == CSTR_EQUAL) {
+                     s, 2, L"/P", -1) == CSTR_EQUAL) {
     DWORD count;
 
     s += 2;
@@ -4210,7 +4150,7 @@ void WCMD_setshow_env (WCHAR *s) {
   /* See if /A supplied, and if so calculate the results of all the expressions */
   } else if (CompareStringW(LOCALE_USER_DEFAULT,
                             NORM_IGNORECASE | SORT_STRINGSORT,
-                            s, 2, parmA, -1) == CSTR_EQUAL) {
+                            s, 2, L"/A", -1) == CSTR_EQUAL) {
     /* /A supplied, so evaluate expressions and set variables appropriately */
     /* Syntax is set /a var=1,var2=var+4 etc, and it echos back the result  */
     /* of the final computation                                             */
@@ -4242,8 +4182,7 @@ void WCMD_setshow_env (WCHAR *s) {
 
     /* If we have no context (interactive or cmd.exe /c) print the final result */
     if (!context) {
-      static const WCHAR fmt[] = {'%','d','\0'};
-      swprintf(string, ARRAY_SIZE(string), fmt, result);
+      swprintf(string, ARRAY_SIZE(string), L"%d", result);
       WCMD_output_asis(string);
     }
 
@@ -4291,15 +4230,13 @@ void WCMD_setshow_path (const WCHAR *args) {
 
   WCHAR string[1024];
   DWORD status;
-  static const WCHAR pathW[] = {'P','A','T','H','\0'};
-  static const WCHAR pathEqW[] = {'P','A','T','H','=','\0'};
 
   if (!*param1 && !*param2) {
-    status = GetEnvironmentVariableW(pathW, string, ARRAY_SIZE(string));
+    status = GetEnvironmentVariableW(L"PATH", string, ARRAY_SIZE(string));
     if (status != 0) {
-      WCMD_output_asis ( pathEqW);
+      WCMD_output_asis(L"PATH=");
       WCMD_output_asis ( string);
-      WCMD_output_asis ( newlineW);
+      WCMD_output_asis(L"\r\n");
     }
     else {
       WCMD_output_stderr(WCMD_LoadMessage(WCMD_NOPATH));
@@ -4307,7 +4244,7 @@ void WCMD_setshow_path (const WCHAR *args) {
   }
   else {
     if (*args == '=') args++; /* Skip leading '=' */
-    status = SetEnvironmentVariableW(pathW, args);
+    status = SetEnvironmentVariableW(L"PATH", args);
     if (!status) WCMD_print_error();
   }
 }
@@ -4321,18 +4258,17 @@ void WCMD_setshow_path (const WCHAR *args) {
 void WCMD_setshow_prompt (void) {
 
   WCHAR *s;
-  static const WCHAR promptW[] = {'P','R','O','M','P','T','\0'};
 
   if (!*param1) {
-    SetEnvironmentVariableW(promptW, NULL);
+    SetEnvironmentVariableW(L"PROMPT", NULL);
   }
   else {
     s = param1;
     while ((*s == '=') || (*s == ' ') || (*s == '\t')) s++;
     if (!*s) {
-      SetEnvironmentVariableW(promptW, NULL);
+      SetEnvironmentVariableW(L"PROMPT", NULL);
     }
-    else SetEnvironmentVariableW(promptW, s);
+    else SetEnvironmentVariableW(L"PROMPT", s);
   }
 }
 
@@ -4348,13 +4284,12 @@ void WCMD_setshow_time (void) {
   WCHAR curtime[64], buffer[64];
   DWORD count;
   SYSTEMTIME st;
-  static const WCHAR parmT[] = {'/','T','\0'};
 
   if (!*param1) {
     GetLocalTime(&st);
     if (GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &st, NULL, curtime, ARRAY_SIZE(curtime))) {
       WCMD_output (WCMD_LoadMessage(WCMD_CURRENTTIME), curtime);
-      if (wcsstr (quals, parmT) == NULL) {
+      if (wcsstr(quals, L"/T") == NULL) {
         WCMD_output (WCMD_LoadMessage(WCMD_NEWTIME));
         WCMD_ReadFile(GetStdHandle(STD_INPUT_HANDLE), buffer, ARRAY_SIZE(buffer), &count);
         if (count > 2) {
@@ -4407,11 +4342,6 @@ void WCMD_shift (const WCHAR *args) {
  */
 void WCMD_start(WCHAR *args)
 {
-    static const WCHAR exeW[] = {'\\','c','o','m','m','a','n','d',
-                                 '\\','s','t','a','r','t','.','e','x','e',0};
-    static const WCHAR startDelims[] = { ' ', '\t', '/', '\0' };
-    static const WCHAR prefixQuote[] = {'"','\\','"','\0'};
-    static const WCHAR postfixQuote[] = {'\\','"','"','\0'};
     int argno;
     int have_title;
     WCHAR file[MAX_PATH];
@@ -4420,10 +4350,10 @@ void WCMD_start(WCHAR *args)
     PROCESS_INFORMATION pi;
 
     GetWindowsDirectoryW( file, MAX_PATH );
-    lstrcatW( file, exeW );
+    lstrcatW(file, L"\\command\\start.exe");
     cmdline = heap_xalloc( (lstrlenW(file) + lstrlenW(args) + 8) * sizeof(WCHAR) );
     lstrcpyW( cmdline, file );
-    lstrcatW( cmdline, spaceW );
+    lstrcatW(cmdline, L" ");
     cmdline_params = cmdline + lstrlenW(cmdline);
 
     /* The start built-in has some special command-line parsing properties
@@ -4464,7 +4394,7 @@ void WCMD_start(WCHAR *args)
         WCHAR *thisArg, *argN;
 
         argN = NULL;
-        thisArg = WCMD_parameter_with_delims(args, argno, &argN, FALSE, FALSE, startDelims);
+        thisArg = WCMD_parameter_with_delims(args, argno, &argN, FALSE, FALSE, L" \t/");
 
         /* No more parameters */
         if (!argN)
@@ -4480,12 +4410,12 @@ void WCMD_start(WCHAR *args)
             cmdline_params[argN - args] = '\0';
 
             /* Add quoted title */
-            lstrcatW(cmdline_params, prefixQuote);
+            lstrcatW(cmdline_params, L"\"\\\"");
             lstrcatW(cmdline_params, thisArg);
-            lstrcatW(cmdline_params, postfixQuote);
+            lstrcatW(cmdline_params, L"\\\"\"");
 
             /* Concatenate remaining command-line */
-            thisArg = WCMD_parameter_with_delims(args, argno, &argN, TRUE, FALSE, startDelims);
+            thisArg = WCMD_parameter_with_delims(args, argno, &argN, TRUE, FALSE, L" \t/");
             lstrcatW(cmdline_params, argN + lstrlenW(thisArg));
 
             break;
@@ -4575,8 +4505,7 @@ void WCMD_type (WCHAR *args) {
       errorlevel = 1;
     } else {
       if (writeHeaders) {
-        static const WCHAR fmt[] = {'\n','%','1','\n','\n','\n','\0'};
-        WCMD_output_stderr(fmt, thisArg);
+        WCMD_output_stderr(L"\n%1\n\n\n", thisArg);
       }
       while (WCMD_ReadFile(h, buffer, ARRAY_SIZE(buffer) - 1, &count)) {
         if (count == 0) break;	/* ReadFile reports success on EOF! */
@@ -4602,15 +4531,10 @@ void WCMD_more (WCHAR *args) {
   WCHAR  moreStrPage[100];
   WCHAR  buffer[512];
   DWORD count;
-  static const WCHAR moreStart[] = {'-','-',' ','\0'};
-  static const WCHAR moreFmt[]   = {'%','s',' ','-','-','\n','\0'};
-  static const WCHAR moreFmt2[]  = {'%','s',' ','(','%','2','.','2','d','%','%',
-                                    ')',' ','-','-','\n','\0'};
-  static const WCHAR conInW[]    = {'C','O','N','I','N','$','\0'};
 
   /* Prefix the NLS more with '-- ', then load the text */
   errorlevel = 0;
-  lstrcpyW(moreStr, moreStart);
+  lstrcpyW(moreStr, L"-- ");
   LoadStringW(hinst, WCMD_MORESTR, &moreStr[3], ARRAY_SIZE(moreStr)-3);
 
   if (param1[0] == 0x00) {
@@ -4620,7 +4544,7 @@ void WCMD_more (WCHAR *args) {
        more are satisfied by the next line from the input (file). To
        avoid this, ensure stdin is to the console                    */
     HANDLE hstdin  = GetStdHandle(STD_INPUT_HANDLE);
-    HANDLE hConIn = CreateFileW(conInW, GENERIC_READ | GENERIC_WRITE,
+    HANDLE hConIn = CreateFileW(L"CONIN$", GENERIC_READ | GENERIC_WRITE,
                          FILE_SHARE_READ, NULL, OPEN_EXISTING,
                          FILE_ATTRIBUTE_NORMAL, 0);
     WINE_TRACE("No parms - working probably in pipe mode\n");
@@ -4628,7 +4552,7 @@ void WCMD_more (WCHAR *args) {
 
     /* Warning: No easy way of ending the stream (ctrl+z on windows) so
        once you get in this bit unless due to a pipe, it's going to end badly...  */
-    wsprintfW(moreStrPage, moreFmt, moreStr);
+    wsprintfW(moreStrPage, L"%s --\n", moreStr);
 
     WCMD_enter_paged_mode(moreStrPage);
     while (WCMD_ReadFile(hstdin, buffer, ARRAY_SIZE(buffer)-1, &count)) {
@@ -4659,7 +4583,7 @@ void WCMD_more (WCHAR *args) {
       if (needsPause) {
 
         /* Wait */
-        wsprintfW(moreStrPage, moreFmt2, moreStr, 100);
+        wsprintfW(moreStrPage, L"%s (%2.2d%%) --\n", moreStr, 100);
         WCMD_leave_paged_mode();
         WCMD_output_asis(moreStrPage);
         WCMD_ReadFile(GetStdHandle(STD_INPUT_HANDLE), buffer, ARRAY_SIZE(buffer), &count);
@@ -4690,7 +4614,7 @@ void WCMD_more (WCHAR *args) {
           curPos += count;
 
           /* Update % count (would be used in WCMD_output_asis as prompt) */
-          wsprintfW(moreStrPage, moreFmt2, moreStr, (int) min(99, (curPos * 100)/fileLen));
+          wsprintfW(moreStrPage, L"%s (%2.2d%%) --\n", moreStr, (int) min(99, (curPos * 100)/fileLen));
 
           WCMD_output_asis (buffer);
         }
@@ -4716,15 +4640,15 @@ void WCMD_verify (const WCHAR *args) {
 
   count = lstrlenW(args);
   if (count == 0) {
-    if (verify_mode) WCMD_output (WCMD_LoadMessage(WCMD_VERIFYPROMPT), onW);
-    else WCMD_output (WCMD_LoadMessage(WCMD_VERIFYPROMPT), offW);
+    if (verify_mode) WCMD_output(WCMD_LoadMessage(WCMD_VERIFYPROMPT), L"ON");
+    else WCMD_output (WCMD_LoadMessage(WCMD_VERIFYPROMPT), L"OFF");
     return;
   }
-  if (lstrcmpiW(args, onW) == 0) {
+  if (lstrcmpiW(args, L"ON") == 0) {
     verify_mode = TRUE;
     return;
   }
-  else if (lstrcmpiW(args, offW) == 0) {
+  else if (lstrcmpiW(args, L"OFF") == 0) {
     verify_mode = FALSE;
     return;
   }
@@ -4766,12 +4690,11 @@ int WCMD_volume(BOOL set_label, const WCHAR *path)
     status = GetVolumeInformationW(NULL, label, ARRAY_SIZE(label), &serial, NULL, NULL, NULL, 0);
   }
   else {
-    static const WCHAR fmt[] = {'%','s','\\','\0'};
     if ((path[1] != ':') || (lstrlenW(path) != 2)) {
       WCMD_output_stderr(WCMD_LoadMessage(WCMD_SYNTAXERR));
       return 0;
     }
-    wsprintfW (curdir, fmt, path);
+    wsprintfW (curdir, L"%s\\", path);
     status = GetVolumeInformationW(curdir, label, ARRAY_SIZE(label), &serial, NULL, NULL, NULL, 0);
   }
   if (!status) {
@@ -4813,11 +4736,9 @@ int WCMD_volume(BOOL set_label, const WCHAR *path)
  */
 
 void WCMD_exit (CMD_LIST **cmdList) {
-
-    static const WCHAR parmB[] = {'/','B','\0'};
     int rc = wcstol(param1, NULL, 10); /* Note: wcstol of empty parameter is 0 */
 
-    if (context && lstrcmpiW(quals, parmB) == 0) {
+    if (context && lstrcmpiW(quals, L"/B") == 0) {
         errorlevel = rc;
         context -> skip_rest = TRUE;
         *cmdList = NULL;
@@ -4842,8 +4763,6 @@ void WCMD_assoc (const WCHAR *args, BOOL assoc) {
     WCHAR    keyValue[MAXSTRING];
     DWORD   valueLen = MAXSTRING;
     HKEY    readKey;
-    static const WCHAR shOpCmdW[] = {'\\','S','h','e','l','l','\\',
-                                     'O','p','e','n','\\','C','o','m','m','a','n','d','\0'};
 
     /* See if parameter includes '=' */
     errorlevel = 0;
@@ -4851,8 +4770,7 @@ void WCMD_assoc (const WCHAR *args, BOOL assoc) {
     if (newValue) accessOptions |= KEY_WRITE;
 
     /* Open a key to HKEY_CLASSES_ROOT for enumerating */
-    if (RegOpenKeyExW(HKEY_CLASSES_ROOT, nullW, 0,
-                      accessOptions, &key) != ERROR_SUCCESS) {
+    if (RegOpenKeyExW(HKEY_CLASSES_ROOT, L"", 0, accessOptions, &key) != ERROR_SUCCESS) {
       WINE_FIXME("Unexpected failure opening HKCR key: %d\n", GetLastError());
       return;
     }
@@ -4879,19 +4797,19 @@ void WCMD_assoc (const WCHAR *args, BOOL assoc) {
           {
             WCHAR subkey[MAXSTRING];
             lstrcpyW(subkey, keyName);
-            if (!assoc) lstrcatW(subkey, shOpCmdW);
+            if (!assoc) lstrcatW(subkey, L"\\Shell\\Open\\Command");
 
             if (RegOpenKeyExW(key, subkey, 0, accessOptions, &readKey) == ERROR_SUCCESS) {
 
               valueLen = ARRAY_SIZE(keyValue);
               rc = RegQueryValueExW(readKey, NULL, NULL, NULL, (LPBYTE)keyValue, &valueLen);
               WCMD_output_asis(keyName);
-              WCMD_output_asis(equalW);
+              WCMD_output_asis(L"=");
               /* If no default value found, leave line empty after '=' */
               if (rc == ERROR_SUCCESS) {
                 WCMD_output_asis(keyValue);
               }
-              WCMD_output_asis(newlineW);
+              WCMD_output_asis(L"\r\n");
               RegCloseKey(readKey);
             }
           }
@@ -4912,16 +4830,16 @@ void WCMD_assoc (const WCHAR *args, BOOL assoc) {
 
         /* Set up key name */
         lstrcpyW(subkey, keyValue);
-        if (!assoc) lstrcatW(subkey, shOpCmdW);
+        if (!assoc) lstrcatW(subkey, L"\\Shell\\Open\\Command");
 
         if (RegOpenKeyExW(key, subkey, 0, accessOptions, &readKey) == ERROR_SUCCESS) {
 
           rc = RegQueryValueExW(readKey, NULL, NULL, NULL, (LPBYTE)keyValue, &valueLen);
           WCMD_output_asis(args);
-          WCMD_output_asis(equalW);
+          WCMD_output_asis(L"=");
           /* If no default value found, leave line empty after '=' */
           if (rc == ERROR_SUCCESS) WCMD_output_asis(keyValue);
-          WCMD_output_asis(newlineW);
+          WCMD_output_asis(L"\r\n");
           RegCloseKey(readKey);
 
         } else {
@@ -4948,7 +4866,7 @@ void WCMD_assoc (const WCHAR *args, BOOL assoc) {
 
         /* Set up key name */
         lstrcpyW(subkey, args);
-        if (!assoc) lstrcatW(subkey, shOpCmdW);
+        if (!assoc) lstrcatW(subkey, L"\\Shell\\Open\\Command");
 
         /* If nothing after '=' then clear value - only valid for ASSOC */
         if (*newValue == 0x00) {
@@ -4990,9 +4908,9 @@ void WCMD_assoc (const WCHAR *args, BOOL assoc) {
             errorlevel = 2;
           } else {
             WCMD_output_asis(args);
-            WCMD_output_asis(equalW);
+            WCMD_output_asis(L"=");
             WCMD_output_asis(newValue);
-            WCMD_output_asis(newlineW);
+            WCMD_output_asis(L"\r\n");
           }
         }
       }
@@ -5063,9 +4981,6 @@ void WCMD_mklink(WCHAR *args)
     BOOL ret = FALSE;
     WCHAR file1[MAX_PATH];
     WCHAR file2[MAX_PATH];
-    static const WCHAR optD[] = {'/', 'D', '\0'};
-    static const WCHAR optH[] = {'/', 'H', '\0'};
-    static const WCHAR optJ[] = {'/', 'J', '\0'};
 
     if (param1[0] == 0x00 || param2[0] == 0x00) {
         WCMD_output_stderr(WCMD_LoadMessage(WCMD_NOARG));
@@ -5081,11 +4996,11 @@ void WCMD_mklink(WCHAR *args)
 
         WINE_TRACE("mklink: Processing arg '%s'\n", wine_dbgstr_w(thisArg));
 
-        if(lstrcmpiW(thisArg, optD) == 0)
+        if (lstrcmpiW(thisArg, L"/D") == 0)
             isdir = TRUE;
-        else if(lstrcmpiW(thisArg, optH) == 0)
+        else if (lstrcmpiW(thisArg, L"/H") == 0)
             hard = TRUE;
-        else if(lstrcmpiW(thisArg, optJ) == 0)
+        else if (lstrcmpiW(thisArg, L"/J") == 0)
             junction = TRUE;
         else {
             if(!file1[0])

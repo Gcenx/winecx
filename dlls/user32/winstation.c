@@ -31,7 +31,6 @@
 #include "winternl.h"
 #include "ddk/wdm.h"
 #include "wine/server.h"
-#include "wine/unicode.h"
 #include "wine/debug.h"
 #include "user_private.h"
 
@@ -59,9 +58,6 @@ static BOOL CALLBACK enum_names_WtoA( LPWSTR name, LPARAM lparam )
 static HANDLE get_winstations_dir_handle(void)
 {
     static HANDLE handle = NULL;
-    static const WCHAR basenameW[] = {'\\','S','e','s','s','i','o','n','s','\\','%','u',
-                                      '\\','W','i','n','d','o','w','s','\\',
-                                      'W','i','n','d','o','w','S','t','a','t','i','o','n','s',0};
     WCHAR buffer[64];
     UNICODE_STRING str;
     OBJECT_ATTRIBUTES attr;
@@ -70,7 +66,7 @@ static HANDLE get_winstations_dir_handle(void)
     {
         HANDLE dir;
 
-        sprintfW( buffer, basenameW, NtCurrentTeb()->Peb->SessionId );
+        swprintf( buffer, ARRAY_SIZE(buffer), L"\\Sessions\\%u\\Windows\\WindowStations", NtCurrentTeb()->Peb->SessionId );
         RtlInitUnicodeString( &str, buffer );
         InitializeObjectAttributes( &attr, &str, 0, 0, NULL );
         NtOpenDirectoryObject( &dir, DIRECTORY_CREATE_OBJECT | DIRECTORY_TRAVERSE, &attr );
@@ -78,6 +74,30 @@ static HANDLE get_winstations_dir_handle(void)
             CloseHandle( dir );
     }
     return handle;
+}
+
+static WCHAR default_name[29];
+
+static BOOL WINAPI winstation_default_name_once( INIT_ONCE *once, void *param, void **context )
+{
+    TOKEN_STATISTICS stats;
+    BOOL ret;
+
+    ret = GetTokenInformation( GetCurrentProcessToken(), TokenStatistics, &stats, sizeof(stats), NULL );
+    if (ret)
+        swprintf( default_name, ARRAY_SIZE(default_name), L"Service-0x%x-%x$",
+                  stats.AuthenticationId.HighPart, stats.AuthenticationId.LowPart );
+
+    return ret;
+}
+
+static const WCHAR *get_winstation_default_name( void )
+{
+    static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
+    BOOL ret;
+
+    ret = InitOnceExecuteOnce( &once, winstation_default_name_once, NULL, NULL );
+    return ret ? default_name : NULL;
 }
 
 /***********************************************************************
@@ -106,12 +126,17 @@ HWINSTA WINAPI CreateWindowStationW( LPCWSTR name, DWORD flags, ACCESS_MASK acce
                                      LPSECURITY_ATTRIBUTES sa )
 {
     HANDLE ret;
-    DWORD len = name ? strlenW(name) : 0;
+    DWORD len = name ? lstrlenW(name) : 0;
 
     if (len >= MAX_PATH)
     {
         SetLastError( ERROR_FILENAME_EXCED_RANGE );
         return 0;
+    }
+    if (!len)
+    {
+        name = get_winstation_default_name();
+        len = lstrlenW( name );
     }
     SERVER_START_REQ( create_winstation )
     {
@@ -154,11 +179,16 @@ HWINSTA WINAPI OpenWindowStationA( LPCSTR name, BOOL inherit, ACCESS_MASK access
 HWINSTA WINAPI OpenWindowStationW( LPCWSTR name, BOOL inherit, ACCESS_MASK access )
 {
     HANDLE ret = 0;
-    DWORD len = name ? strlenW(name) : 0;
+    DWORD len = name ? lstrlenW(name) : 0;
     if (len >= MAX_PATH)
     {
         SetLastError( ERROR_FILENAME_EXCED_RANGE );
         return 0;
+    }
+    if (!len)
+    {
+        name = get_winstation_default_name();
+        len = lstrlenW( name );
     }
     SERVER_START_REQ( open_winstation )
     {
@@ -300,7 +330,7 @@ HDESK WINAPI CreateDesktopW( LPCWSTR name, LPCWSTR device, LPDEVMODEW devmode,
                              DWORD flags, ACCESS_MASK access, LPSECURITY_ATTRIBUTES sa )
 {
     HANDLE ret;
-    DWORD len = name ? strlenW(name) : 0;
+    DWORD len = name ? lstrlenW(name) : 0;
 
     if (device || devmode)
     {
@@ -348,7 +378,7 @@ HDESK WINAPI OpenDesktopA( LPCSTR name, DWORD flags, BOOL inherit, ACCESS_MASK a
 HDESK open_winstation_desktop( HWINSTA hwinsta, LPCWSTR name, DWORD flags, BOOL inherit, ACCESS_MASK access )
 {
     HANDLE ret = 0;
-    DWORD len = name ? strlenW(name) : 0;
+    DWORD len = name ? lstrlenW(name) : 0;
     if (len >= MAX_PATH)
     {
         SetLastError( ERROR_FILENAME_EXCED_RANGE );
@@ -545,8 +575,6 @@ BOOL WINAPI GetUserObjectInformationA( HANDLE handle, INT index, LPVOID info, DW
  */
 BOOL WINAPI GetUserObjectInformationW( HANDLE handle, INT index, LPVOID info, DWORD len, LPDWORD needed )
 {
-    static const WCHAR desktopW[] = { 'D','e','s','k','t','o','p',0 };
-    static const WCHAR winstationW[] = { 'W','i','n','d','o','w','S','t','a','t','i','o','n',0 };
     BOOL ret;
 
     switch(index)
@@ -583,14 +611,14 @@ BOOL WINAPI GetUserObjectInformationW( HANDLE handle, INT index, LPVOID info, DW
             ret = !wine_server_call_err( req );
             if (ret)
             {
-                size_t size = reply->is_desktop ? sizeof(desktopW) : sizeof(winstationW);
+                size_t size = reply->is_desktop ? sizeof(L"Desktop") : sizeof(L"WindowStation");
                 if (needed) *needed = size;
                 if (len < size)
                 {
                     SetLastError( ERROR_INSUFFICIENT_BUFFER );
                     ret = FALSE;
                 }
-                else memcpy( info, reply->is_desktop ? desktopW : winstationW, size );
+                else memcpy( info, reply->is_desktop ? L"Desktop" : L"WindowStation", size );
             }
         }
         SERVER_END_REQ;

@@ -133,12 +133,32 @@ static void test_uninitialized(IAudioClient *ac)
 static void test_audioclient(void)
 {
     IAudioClient *ac;
+    IAudioClient2 *ac2;
+    IAudioClient3 *ac3;
     IUnknown *unk;
     HRESULT hr;
     ULONG ref;
     WAVEFORMATEX *pwfx, *pwfx2;
     REFERENCE_TIME t1, t2;
     HANDLE handle;
+    BOOL offload_capable;
+    AudioClientProperties client_props;
+
+    hr = IMMDevice_Activate(dev, &IID_IAudioClient3, CLSCTX_INPROC_SERVER,
+            NULL, (void**)&ac3);
+    ok(hr == S_OK ||
+            broken(hr == E_NOINTERFACE) /* win8 */,
+            "IAudioClient3 Activation failed with %08x\n", hr);
+    if(hr == S_OK)
+        IAudioClient3_Release(ac3);
+
+    hr = IMMDevice_Activate(dev, &IID_IAudioClient2, CLSCTX_INPROC_SERVER,
+            NULL, (void**)&ac2);
+    ok(hr == S_OK ||
+       broken(hr == E_NOINTERFACE) /* win7 */,
+       "IAudioClient2 Activation failed with %08x\n", hr);
+    if(hr == S_OK)
+        IAudioClient2_Release(ac2);
 
     hr = IMMDevice_Activate(dev, &IID_IAudioClient, CLSCTX_INPROC_SERVER,
             NULL, (void**)&ac);
@@ -244,6 +264,62 @@ static void test_audioclient(void)
            "IsFormatSupported(0xffffffff) call returns %08x\n", hr);
     }
 
+    hr = IAudioClient_QueryInterface(ac, &IID_IAudioClient2, (void**)&ac2);
+    if (hr == S_OK)
+    {
+        hr = IAudioClient2_IsOffloadCapable(ac2, AudioCategory_BackgroundCapableMedia, NULL);
+        ok(hr == E_INVALIDARG, "IsOffloadCapable gave wrong error: %08x\n", hr);
+
+        hr = IAudioClient2_IsOffloadCapable(ac2, AudioCategory_BackgroundCapableMedia, &offload_capable);
+        ok(hr == S_OK, "IsOffloadCapable failed: %08x\n", hr);
+
+        hr = IAudioClient2_SetClientProperties(ac2, NULL);
+        ok(hr == E_POINTER, "SetClientProperties with NULL props gave wrong error: %08x\n", hr);
+
+        /* invalid cbSize */
+        client_props.cbSize = 0;
+        client_props.bIsOffload = FALSE;
+        client_props.eCategory = AudioCategory_BackgroundCapableMedia;
+        client_props.Options = 0;
+
+        hr = IAudioClient2_SetClientProperties(ac2, &client_props);
+        ok(hr == E_INVALIDARG, "SetClientProperties with invalid cbSize gave wrong error: %08x\n", hr);
+
+        /* offload consistency */
+        client_props.cbSize = sizeof(client_props) - sizeof(client_props.Options);
+        client_props.bIsOffload = TRUE;
+
+        hr = IAudioClient2_SetClientProperties(ac2, &client_props);
+        if(!offload_capable)
+            ok(hr == AUDCLNT_E_ENDPOINT_OFFLOAD_NOT_CAPABLE, "SetClientProperties(offload) gave wrong error: %08x\n", hr);
+        else
+            ok(hr == S_OK, "SetClientProperties(offload) failed: %08x\n", hr);
+
+        /* disable offload */
+        client_props.bIsOffload = FALSE;
+        hr = IAudioClient2_SetClientProperties(ac2, &client_props);
+        ok(hr == S_OK, "SetClientProperties failed: %08x\n", hr);
+
+        /* Options field added in Win 8.1 */
+        client_props.cbSize = sizeof(client_props);
+        hr = IAudioClient2_SetClientProperties(ac2, &client_props);
+        ok(hr == S_OK ||
+                broken(hr == E_INVALIDARG) /* <= win8 */,
+                "SetClientProperties failed: %08x\n", hr);
+
+        IAudioClient2_Release(ac2);
+    }
+    else
+        win_skip("IAudioClient2 is not present on Win <= 7\n");
+
+    hr = IAudioClient_QueryInterface(ac, &IID_IAudioClient3, (void**)&ac3);
+    ok(hr == S_OK ||
+            broken(hr == E_NOINTERFACE) /* win8 */,
+            "Failed to query IAudioClient3 interface: %08x\n", hr);
+
+    if(hr == S_OK)
+        IAudioClient3_Release(ac3);
+
     test_uninitialized(ac);
 
     hr = IAudioClient_Initialize(ac, 3, 0, 5000000, 0, pwfx, NULL);
@@ -270,6 +346,14 @@ static void test_audioclient(void)
         if(hr == S_OK)
             trace("Initialize(duration=0) GetBufferSize is %u\n", num);
     }
+
+    hr = IAudioClient_Initialize(ac, AUDCLNT_SHAREMODE_SHARED, 0, 5000000, 0, pwfx, NULL);
+    ok(hr == AUDCLNT_E_ALREADY_INITIALIZED, "Calling Initialize twice returns %08x\n", hr);
+
+    hr = IAudioClient_Start(ac);
+    ok(hr == S_OK ||
+       broken(hr == AUDCLNT_E_DEVICE_INVALIDATED), /* Win10 >= 1607 */
+       "Start on a doubly initialized stream returns %08x\n", hr);
 
     IAudioClient_Release(ac);
 
@@ -339,9 +423,6 @@ static void test_audioclient(void)
     /* Native appears to add the engine period to the HW latency in shared mode */
     if(t2 == 0)
         win10 = TRUE;
-
-    hr = IAudioClient_Initialize(ac, AUDCLNT_SHAREMODE_SHARED, 0, 5000000, 0, pwfx, NULL);
-    ok(hr == AUDCLNT_E_ALREADY_INITIALIZED, "Calling Initialize twice returns %08x\n", hr);
 
     hr = IAudioClient_SetEventHandle(ac, NULL);
     ok(hr == E_INVALIDARG, "SetEventHandle(NULL) returns %08x\n", hr);
@@ -2280,6 +2361,7 @@ static void test_endpointvolume(void)
 START_TEST(render)
 {
     HRESULT hr;
+    DWORD mode;
 
     CoInitializeEx(NULL, COINIT_MULTITHREADED);
     hr = CoCreateInstance(&CLSID_MMDeviceEnumerator, NULL, CLSCTX_INPROC_SERVER, &IID_IMMDeviceEnumerator, (void**)&mme);
@@ -2305,8 +2387,11 @@ START_TEST(render)
     test_formats(AUDCLNT_SHAREMODE_SHARED);
     test_references();
     test_marshal();
-    trace("Output to a MS-DOS console is particularly slow and disturbs timing.\n");
-    trace("Please redirect output to a file.\n");
+    if (GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &mode))
+    {
+        trace("Output to a MS-DOS console is particularly slow and disturbs timing.\n");
+        trace("Please redirect output to a file.\n");
+    }
     test_event();
     test_padding();
     test_clock(1);

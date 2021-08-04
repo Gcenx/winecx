@@ -1,7 +1,7 @@
 EXTRADEFS = -D_COMCTL32_
 MODULE    = comctl32.dll
 IMPORTLIB = comctl32
-IMPORTS   = uuid user32 gdi32 advapi32 usp10 imm32
+IMPORTS   = uuid user32 gdi32 advapi32 usp10 imm32 kernelbase
 DELAYIMPORTS = winmm uxtheme
 
 EXTRADLLFLAGS = -mno-cygwin
@@ -11,7 +11,6 @@ C_SRCS = \
 	button.c \
 	combo.c \
 	comboex.c \
-	comctl32undoc.c \
 	commctrl.c \
 	datetime.c \
 	dpa.c \

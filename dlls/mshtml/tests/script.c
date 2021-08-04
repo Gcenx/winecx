@@ -172,28 +172,6 @@ static BOOL skip_loadobject_tests;
 static IActiveScriptSite *site;
 static SCRIPTSTATE state;
 
-static int strcmp_wa(LPCWSTR strw, const char *stra)
-{
-    CHAR buf[512];
-    WideCharToMultiByte(CP_ACP, 0, strw, -1, buf, sizeof(buf), NULL, NULL);
-    return lstrcmpA(stra, buf);
-}
-
-static BSTR a2bstr(const char *str)
-{
-    BSTR ret;
-    int len;
-
-    if(!str)
-        return NULL;
-
-    len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
-    ret = SysAllocStringLen(NULL, len);
-    MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
-
-    return ret;
-}
-
 static BOOL init_key(const char *key_name, const char *def_value, BOOL init)
 {
     HKEY hkey;
@@ -303,7 +281,7 @@ static HRESULT WINAPI VariantChangeType_ChangeType(IVariantChangeType *iface, VA
     ok(vt == VT_BSTR, "vt = %d\n", vt);
 
     V_VT(dst) = VT_BSTR;
-    V_BSTR(dst) = a2bstr("red");
+    V_BSTR(dst) = SysAllocString(L"red");
     return S_OK;
 }
 
@@ -509,21 +487,21 @@ static IDispatchEx funcDisp = { &testObjVtbl };
 
 static HRESULT WINAPI scriptDisp_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD grfdex, DISPID *pid)
 {
-    if(!strcmp_wa(bstrName, "testProp")) {
+    if(!lstrcmpW(bstrName, L"testProp")) {
         CHECK_EXPECT(script_testprop_d);
         ok(grfdex == fdexNameCaseSensitive, "grfdex = %x\n", grfdex);
         *pid = DISPID_SCRIPT_TESTPROP;
         return S_OK;
     }
 
-    if(!strcmp_wa(bstrName, "testProp2")) {
+    if(!lstrcmpW(bstrName, L"testProp2")) {
         CHECK_EXPECT(script_testprop2_d);
         ok(grfdex == fdexNameCaseSensitive, "grfdex = %x\n", grfdex);
         *pid = DISPID_SCRIPT_TESTPROP2;
         return S_OK;
     }
 
-    if(!strcmp_wa(bstrName, "divid")) {
+    if(!lstrcmpW(bstrName, L"divid")) {
         CHECK_EXPECT(script_divid_d);
         ok(grfdex == fdexNameCaseSensitive, "grfdex = %x\n", grfdex);
         return E_FAIL;
@@ -583,31 +561,31 @@ static IDispatchEx scriptDisp = { &scriptDispVtbl };
 
 static HRESULT WINAPI externalDisp_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD grfdex, DISPID *pid)
 {
-    if(!strcmp_wa(bstrName, "ok")) {
+    if(!lstrcmpW(bstrName, L"ok")) {
         *pid = DISPID_EXTERNAL_OK;
         return S_OK;
     }
-    if(!strcmp_wa(bstrName, "trace")) {
+    if(!lstrcmpW(bstrName, L"trace")) {
         *pid = DISPID_EXTERNAL_TRACE;
         return S_OK;
     }
-    if(!strcmp_wa(bstrName, "reportSuccess")) {
+    if(!lstrcmpW(bstrName, L"reportSuccess")) {
         *pid = DISPID_EXTERNAL_REPORTSUCCESS;
         return S_OK;
     }
-    if(!strcmp_wa(bstrName, "todo_wine_ok")) {
+    if(!lstrcmpW(bstrName, L"todo_wine_ok")) {
         *pid = DISPID_EXTERNAL_TODO_WINE_OK;
         return S_OK;
     }
-    if(!strcmp_wa(bstrName, "broken")) {
+    if(!lstrcmpW(bstrName, L"broken")) {
         *pid = DISPID_EXTERNAL_BROKEN;
         return S_OK;
     }
-    if(!strcmp_wa(bstrName, "win_skip")) {
+    if(!lstrcmpW(bstrName, L"win_skip")) {
         *pid = DISPID_EXTERNAL_WIN_SKIP;
         return S_OK;
     }
-    if(!strcmp_wa(bstrName, "writeStream")) {
+    if(!lstrcmpW(bstrName, L"writeStream")) {
         *pid = DISPID_EXTERNAL_WRITESTREAM;
         return S_OK;
     }
@@ -1253,6 +1231,9 @@ static IHTMLDocument2 *create_document(void)
 
     hres = CoCreateInstance(&CLSID_HTMLDocument, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
             &IID_IHTMLDocument2, (void**)&doc);
+#if !defined(__i386__) && !defined(__x86_64__)
+    todo_wine
+#endif
     ok(hres == S_OK, "CoCreateInstance failed: %08x\n", hres);
     return SUCCEEDED(hres) ? doc : NULL;
 }
@@ -1950,7 +1931,7 @@ static void test_func(IDispatchEx *obj)
     VARIANT var;
     HRESULT hres;
 
-    str = a2bstr("toString");
+    str = SysAllocString(L"toString");
     hres = IDispatchEx_GetDispID(obj, str, fdexNameCaseSensitive, &id);
     SysFreeString(str);
     ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
@@ -1981,7 +1962,7 @@ static void test_func(IDispatchEx *obj)
         VARIANT args[2];
 
         ok(V_VT(&var) == VT_BSTR, "V_VT(var)=%d\n", V_VT(&var));
-        ok(!strcmp_wa(V_BSTR(&var), "[object]"), "V_BSTR(var) = %s\n", wine_dbgstr_w(V_BSTR(&var)));
+        ok(!lstrcmpW(V_BSTR(&var), L"[object]"), "V_BSTR(var) = %s\n", wine_dbgstr_w(V_BSTR(&var)));
         VariantClear(&var);
 
         dp.rgdispidNamedArgs = named_args;
@@ -1995,7 +1976,7 @@ static void test_func(IDispatchEx *obj)
         hres = IDispatchEx_Invoke(dispex, DISPID_VALUE, &IID_NULL, LOCALE_NEUTRAL, DISPATCH_METHOD, &dp, &var, &ei, NULL);
         ok(hres == S_OK, "InvokeEx failed: %08x\n", hres);
         ok(V_VT(&var) == VT_BSTR, "V_VT(var)=%d\n", V_VT(&var));
-        ok(!strcmp_wa(V_BSTR(&var), "[object]"), "V_BSTR(var) = %s\n", wine_dbgstr_w(V_BSTR(&var)));
+        ok(!lstrcmpW(V_BSTR(&var), L"[object]"), "V_BSTR(var) = %s\n", wine_dbgstr_w(V_BSTR(&var)));
         VariantClear(&var);
     }
 
@@ -2014,7 +1995,7 @@ static void test_func(IDispatchEx *obj)
     hres = dispex_propget(dispex, DISPID_VALUE, &var, &caller_sp);
     ok(hres == S_OK, "InvokeEx returned: %08x, expected S_OK\n", hres);
     ok(V_VT(&var) == VT_BSTR, "V_VT(var) = %d\n", V_VT(&var));
-    ok(!strcmp_wa(V_BSTR(&var), "\nfunction toString() {\n    [native code]\n}\n"),
+    ok(!lstrcmpW(V_BSTR(&var), L"\nfunction toString() {\n    [native code]\n}\n"),
        "V_BSTR(var) = %s\n", wine_dbgstr_w(V_BSTR(&var)));
     VariantClear(&var);
     todo_wine CHECK_CALLED(QS_IActiveScriptSite);
@@ -2030,7 +2011,7 @@ static void test_nextdispid(IDispatchEx *dispex)
     VARIANT var;
     HRESULT hres;
 
-    name = a2bstr("dynVal");
+    name = SysAllocString(L"dynVal");
     hres = IDispatchEx_GetDispID(dispex, name, fdexNameCaseSensitive|fdexNameEnsure, &dyn_id);
     ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
     SysFreeString(name);
@@ -2049,9 +2030,9 @@ static void test_nextdispid(IDispatchEx *dispex)
         ok(hres == S_OK, "GetMemberName failed: %08x\n", hres);
 
         if(id == dyn_id)
-            ok(!strcmp_wa(name, "dynVal"), "name = %s\n", wine_dbgstr_w(name));
+            ok(!lstrcmpW(name, L"dynVal"), "name = %s\n", wine_dbgstr_w(name));
         else if(id == DISPID_IOMNAVIGATOR_PLATFORM)
-            ok(!strcmp_wa(name, "platform"), "name = %s\n", wine_dbgstr_w(name));
+            ok(!lstrcmpW(name, L"platform"), "name = %s\n", wine_dbgstr_w(name));
 
         SysFreeString(name);
         last_id = id;
@@ -2073,7 +2054,7 @@ static void test_global_id(void)
 
     SET_EXPECT(GetScriptDispatch);
     SET_EXPECT(script_divid_d);
-    tmp = a2bstr("divid");
+    tmp = SysAllocString(L"divid");
     hres = IDispatchEx_GetDispID(window_dispex, tmp, fdexNameCaseSensitive, &id);
     ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
     SysFreeString(tmp);
@@ -2164,7 +2145,7 @@ static void test_default_arg_conv(IHTMLWindow2 *window)
     test_elem_disabled(elem, VARIANT_FALSE);
 
     V_VT(&v) = VT_BSTR;
-    V_BSTR(&v) = a2bstr("test");
+    V_BSTR(&v) = SysAllocString(L"test");
     hres = dispex_propput(dispex, DISPID_IHTMLELEMENT3_DISABLED, 0, &v, NULL);
     ok(hres == S_OK, "InvokeEx failed: %08x\n", hres);
     SysFreeString(V_BSTR(&v));
@@ -2402,7 +2383,7 @@ static void test_script_run(void)
     test_default_arg_conv(window);
     IHTMLWindow2_Release(window);
 
-    tmp = a2bstr("test");
+    tmp = SysAllocString(L"test");
     hres = IDispatchEx_DeleteMemberByName(dispex, tmp, fdexNameCaseSensitive);
     ok(hres == E_NOTIMPL, "DeleteMemberByName failed: %08x\n", hres);
 
@@ -2412,7 +2393,7 @@ static void test_script_run(void)
 
     SET_EXPECT(GetScriptDispatch);
     SET_EXPECT(script_testprop_d);
-    tmp = a2bstr("testProp");
+    tmp = SysAllocString(L"testProp");
     hres = IDispatchEx_GetDispID(window_dispex, tmp, fdexNameCaseSensitive, &id);
     ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
     ok(id != DISPID_SCRIPT_TESTPROP, "id == DISPID_SCRIPT_TESTPROP\n");
@@ -2420,7 +2401,7 @@ static void test_script_run(void)
     CHECK_CALLED(script_testprop_d);
     SysFreeString(tmp);
 
-    tmp = a2bstr("testProp");
+    tmp = SysAllocString(L"testProp");
     hres = IDispatchEx_GetDispID(window_dispex, tmp, fdexNameCaseSensitive, &id);
     ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
     ok(id != DISPID_SCRIPT_TESTPROP, "id == DISPID_SCRIPT_TESTPROP\n");
@@ -2438,7 +2419,7 @@ static void test_script_run(void)
 
     SET_EXPECT(GetScriptDispatch);
     SET_EXPECT(script_testprop2_d);
-    tmp = a2bstr("testProp2");
+    tmp = SysAllocString(L"testProp2");
     hres = IDispatchEx_GetDispID(window_dispex, tmp, fdexNameCaseSensitive|fdexNameEnsure, &id);
     ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
     ok(id != DISPID_SCRIPT_TESTPROP2, "id == DISPID_SCRIPT_TESTPROP2\n");
@@ -2446,7 +2427,7 @@ static void test_script_run(void)
     CHECK_CALLED(script_testprop2_d);
     SysFreeString(tmp);
 
-    tmp = a2bstr("test");
+    tmp = SysAllocString(L"test");
     hres = IDispatchEx_DeleteMemberByName(window_dispex, tmp, fdexNameCaseSensitive);
     ok(hres == E_NOTIMPL, "DeleteMemberByName failed: %08x\n", hres);
 
@@ -2465,19 +2446,19 @@ static HRESULT WINAPI ActiveScriptParse_ParseScriptText(IActiveScriptParse *ifac
     ok(pvarResult != NULL, "pvarResult == NULL\n");
     ok(pexcepinfo != NULL, "pexcepinfo == NULL\n");
 
-    if(!strcmp_wa(pstrCode, "execScript call")) {
+    if(!lstrcmpW(pstrCode, L"execScript call")) {
         CHECK_EXPECT(ParseScriptText_execScript);
         ok(!pstrItemName, "pstrItemName = %s\n", wine_dbgstr_w(pstrItemName));
-        ok(!strcmp_wa(pstrDelimiter, "\""), "pstrDelimiter = %s\n", wine_dbgstr_w(pstrDelimiter));
+        ok(!lstrcmpW(pstrDelimiter, L"\""), "pstrDelimiter = %s\n", wine_dbgstr_w(pstrDelimiter));
         ok(dwFlags == SCRIPTTEXT_ISVISIBLE, "dwFlags = %x\n", dwFlags);
 
         V_VT(pvarResult) = VT_I4;
         V_I4(pvarResult) = 10;
         return S_OK;
-    }else if(!strcmp_wa(pstrCode, "simple script")) {
+    }else if(!lstrcmpW(pstrCode, L"simple script")) {
         CHECK_EXPECT(ParseScriptText_script);
-        ok(!strcmp_wa(pstrItemName, "window"), "pstrItemName = %s\n", wine_dbgstr_w(pstrItemName));
-        ok(!strcmp_wa(pstrDelimiter, "</SCRIPT>"), "pstrDelimiter = %s\n", wine_dbgstr_w(pstrDelimiter));
+        ok(!lstrcmpW(pstrItemName, L"window"), "pstrItemName = %s\n", wine_dbgstr_w(pstrItemName));
+        ok(!lstrcmpW(pstrDelimiter, L"</SCRIPT>"), "pstrDelimiter = %s\n", wine_dbgstr_w(pstrDelimiter));
         ok(dwFlags == (SCRIPTTEXT_ISVISIBLE|SCRIPTTEXT_HOSTMANAGESSOURCE), "dwFlags = %x\n", dwFlags);
 
         test_script_run();
@@ -2682,7 +2663,7 @@ static HRESULT WINAPI ActiveScript_GetScriptDispatch(IActiveScript *iface, LPCOL
 {
     CHECK_EXPECT(GetScriptDispatch);
 
-    ok(!strcmp_wa(pstrItemName, "window"), "pstrItemName = %s\n", wine_dbgstr_w(pstrItemName));
+    ok(!lstrcmpW(pstrItemName, L"window"), "pstrItemName = %s\n", wine_dbgstr_w(pstrItemName));
 
     if(!script_disp)
         return E_NOTIMPL;
@@ -2811,7 +2792,7 @@ typedef struct {
 
     IStream *stream;
     char *data;
-    size_t size;
+    ULONG size;
     char *ptr;
 
     IUri *uri;
@@ -2842,7 +2823,7 @@ static void report_data(ProtocolHandler *This)
 
     CoTaskMemFree(addl_headers);
 
-    headers = a2bstr("HTTP/1.1 200 OK\r\n\r\n");
+    headers = SysAllocString(L"HTTP/1.1 200 OK\r\n\r\n");
     hres = IHttpNegotiate_OnResponse(http_negotiate, 200, headers, NULL, NULL);
     ok(hres == S_OK, "OnResponse failed: %08x\n", hres);
     SysFreeString(headers);
@@ -3102,10 +3083,10 @@ static HRESULT WINAPI ProtocolEx_StartEx(IInternetProtocolEx *iface, IUri *uri, 
     if(FAILED(hres))
         return hres;
 
-    if(!strcmp_wa(path, "/index.html")) {
+    if(!lstrcmpW(path, L"/index.html")) {
         This->data = index_html_data;
         This->size = strlen(This->data);
-    }else if(!strcmp_wa(path, "/echo.php")) {
+    }else if(!lstrcmpW(path, L"/echo.php")) {
         ok(This->bind_info.dwBindVerb == BINDVERB_POST, "unexpected bind verb %d\n", This->bind_info.dwBindVerb == BINDVERB_POST);
         todo_wine ok(This->bind_info.stgmedData.tymed == TYMED_ISTREAM, "tymed = %x\n", This->bind_info.stgmedData.tymed);
         switch(This->bind_info.stgmedData.tymed) {
@@ -3120,7 +3101,7 @@ static HRESULT WINAPI ProtocolEx_StartEx(IInternetProtocolEx *iface, IUri *uri, 
         default:
             ok(0, "unexpected tymed %d\n", This->bind_info.stgmedData.tymed);
         }
-    }else if(!strcmp_wa(path, "/jsstream.php")) {
+    }else if(!lstrcmpW(path, L"/jsstream.php")) {
         BSTR query;
 
         hres = IUri_GetQuery(uri, &query);
@@ -3135,12 +3116,21 @@ static HRESULT WINAPI ProtocolEx_StartEx(IInternetProtocolEx *iface, IUri *uri, 
         This->size = strlen(This->data);
     }else {
         src = FindResourceW(NULL, *path == '/' ? path+1 : path, (const WCHAR*)RT_HTML);
-        ok(src != NULL, "Could not find resource for path %s\n", wine_dbgstr_w(path));
         if(src) {
             This->size = SizeofResource(NULL, src);
             This->data = LoadResource(NULL, src);
         }else {
-            hres = E_FAIL;
+            HANDLE file = CreateFileW(*path == '/' ? path+1 : path, GENERIC_READ, 0, NULL, OPEN_EXISTING,
+                                      FILE_ATTRIBUTE_READONLY, NULL);
+            if(file != INVALID_HANDLE_VALUE) {
+                This->size = GetFileSize(file, NULL);
+                This->data = malloc(This->size);
+                ReadFile(file, This->data, This->size, &This->size, NULL);
+                CloseHandle(file);
+            }else {
+                ok(0, "Could not find %s\n", debugstr_w(path));
+                hres = E_FAIL;
+            }
         }
     }
 
@@ -3260,7 +3250,7 @@ static const char simple_script_str[] =
     "<script language=\"TestScript\">simple script</script>"
     "</body></html>";
 
-static void test_exec_script(IHTMLDocument2 *doc, const char *codea, const char *langa)
+static void test_exec_script(IHTMLDocument2 *doc, const WCHAR *codew, const WCHAR *langw)
 {
     IHTMLWindow2 *window;
     BSTR code, lang;
@@ -3270,8 +3260,8 @@ static void test_exec_script(IHTMLDocument2 *doc, const char *codea, const char 
     hres = IHTMLDocument2_get_parentWindow(doc, &window);
     ok(hres == S_OK, "get_parentWindow failed: %08x\n", hres);
 
-    code = a2bstr(codea);
-    lang = a2bstr(langa);
+    code = SysAllocString(codew);
+    lang = SysAllocString(langw);
 
     SET_EXPECT(ParseScriptText_execScript);
     hres = IHTMLWindow2_execScript(window, code, lang, &v);
@@ -3281,7 +3271,7 @@ static void test_exec_script(IHTMLDocument2 *doc, const char *codea, const char 
     CHECK_CALLED(ParseScriptText_execScript);
     SysFreeString(lang);
 
-    lang = a2bstr("invalid");
+    lang = SysAllocString(L"invalid");
     V_VT(&v) = 100;
     hres = IHTMLWindow2_execScript(window, code, lang, &v);
     ok(hres == CO_E_CLASSSTRING, "execScript failed: %08x, expected CO_E_CLASSSTRING\n", hres);
@@ -3330,7 +3320,7 @@ static void test_simple_script(void)
     CHECK_CALLED(ParseScriptText_script);
     CHECK_CALLED(SetScriptState_CONNECTED);
 
-    test_exec_script(doc, "execScript call", "TestScript");
+    test_exec_script(doc, L"execScript call", L"TestScript");
 
     if(site)
         IActiveScriptSite_Release(site);
@@ -3402,17 +3392,17 @@ static void run_js_script(const char *test_name)
     IMoniker_Release(mon);
 }
 
-static void run_from_path(const char *path, const char *opt)
+static void run_from_path(const WCHAR *path, const char *opt)
 {
-    char buf[255] = "http://winetest.example.org";
+    WCHAR buf[255] = L"http://winetest.example.org";
     IMoniker *mon;
     BSTR url;
     HRESULT hres;
 
-    strcat(buf, path);
+    lstrcatW(buf, path);
     if(opt)
-        sprintf(buf + strlen(buf), "?%s", opt);
-    url = a2bstr(buf);
+        wsprintfW(buf + lstrlenW(buf), L"?%S", opt);
+    url = SysAllocString(buf);
     hres = CreateURLMoniker(NULL, url, &mon);
     SysFreeString(url);
     ok(hres == S_OK, "CreateUrlMoniker failed: %08x\n", hres);
@@ -3443,7 +3433,7 @@ static void run_script_as_http_with_mode(const char *script, const char *opt, co
             document_mode ? "\">" : "",
             script);
 
-    run_from_path("/index.html", opt ? opt : script);
+    run_from_path(L"/index.html", opt ? opt : script);
 }
 
 static void init_protocol_handler(void)
@@ -3578,10 +3568,17 @@ static BOOL check_ie(void)
 
 START_TEST(script)
 {
+    int argc;
+    char **argv;
+
+    argc = winetest_get_mainargs(&argv);
     CoInitialize(NULL);
     container_hwnd = create_container_window();
 
-    if(check_ie()) {
+    if(argc > 2) {
+        init_protocol_handler();
+        run_script_as_http_with_mode(argv[2], NULL, "11");
+    }else if(check_ie()) {
         if(winetest_interactive || ! is_ie_hardened()) {
             if(register_script_engine()) {
                 test_simple_script();
@@ -3594,6 +3591,9 @@ START_TEST(script)
             skip("IE running in Enhanced Security Configuration\n");
         }
     }else {
+#if !defined(__i386__) && !defined(__x86_64__)
+        todo_wine
+#endif
         win_skip("Too old IE.\n");
     }
 

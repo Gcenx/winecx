@@ -81,7 +81,7 @@ static ULONG WINAPI BackgroundCopyFile_Release(
 
     if (ref == 0)
     {
-        IBackgroundCopyJob3_Release(&file->owner->IBackgroundCopyJob3_iface);
+        IBackgroundCopyJob4_Release(&file->owner->IBackgroundCopyJob4_iface);
         HeapFree(GetProcessHeap(), 0, file->info.LocalName);
         HeapFree(GetProcessHeap(), 0, file->info.RemoteName);
         HeapFree(GetProcessHeap(), 0, file);
@@ -195,7 +195,7 @@ HRESULT BackgroundCopyFileConstructor(BackgroundCopyJobImpl *owner,
     This->owner = owner;
     This->read_size = 0;
     This->tempFileName[0] = 0;
-    IBackgroundCopyJob3_AddRef(&owner->IBackgroundCopyJob3_iface);
+    IBackgroundCopyJob4_AddRef(&owner->IBackgroundCopyJob4_iface);
 
     *file = This;
     return S_OK;
@@ -452,14 +452,13 @@ static DWORD CALLBACK progress_callback_local(LARGE_INTEGER totalSize, LARGE_INT
 
 static BOOL transfer_file_local(BackgroundCopyFileImpl *file, const WCHAR *tmpname)
 {
-    static const WCHAR fileW[] = {'f','i','l','e',':','/','/',0};
     BackgroundCopyJobImpl *job = file->owner;
     const WCHAR *ptr;
     BOOL ret;
 
     transitionJobState(job, BG_JOB_STATE_QUEUED, BG_JOB_STATE_TRANSFERRING);
 
-    if (lstrlenW(file->info.RemoteName) > 7 && !wcsnicmp(file->info.RemoteName, fileW, 7))
+    if (lstrlenW(file->info.RemoteName) > 7 && !wcsnicmp(file->info.RemoteName, L"file://", 7))
         ptr = file->info.RemoteName + 7;
     else
         ptr = file->info.RemoteName;
@@ -476,7 +475,6 @@ static BOOL transfer_file_local(BackgroundCopyFileImpl *file, const WCHAR *tmpna
 
 BOOL processFile(BackgroundCopyFileImpl *file, BackgroundCopyJobImpl *job)
 {
-    static const WCHAR prefix[] = {'B','I','T', 0};
     WCHAR tmpDir[MAX_PATH], tmpName[MAX_PATH];
     WCHAR host[MAX_PATH];
     URL_COMPONENTSW uc;
@@ -490,7 +488,7 @@ BOOL processFile(BackgroundCopyFileImpl *file, BackgroundCopyJobImpl *job)
         return FALSE;
     }
 
-    if (!GetTempFileNameW(tmpDir, prefix, 0, tmpName))
+    if (!GetTempFileNameW(tmpDir, L"BIT", 0, tmpName))
     {
         ERR("Couldn't create temp file: %d\n", GetLastError());
         /* Guessing on what state this should give us */

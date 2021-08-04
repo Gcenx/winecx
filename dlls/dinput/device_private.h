@@ -63,12 +63,14 @@ struct IDirectInputDeviceImpl
     GUID                        guid;
     CRITICAL_SECTION            crit;
     IDirectInputImpl           *dinput;
-    struct list                 entry;       /* entry into IDirectInput devices list */
+    struct list                 entry;       /* entry into acquired device list */
     HANDLE                      hEvent;
     DWORD                       dwCoopLevel;
     HWND                        win;
     int                         acquired;
-    DI_EVENT_PROC               event_proc;  /* function to receive mouse & keyboard events */
+
+    BOOL                        use_raw_input; /* use raw input instead of low-level messages */
+    RAWINPUTDEVICE              raw_device;    /* raw device to (un)register */
 
     LPDIDEVICEOBJECTDATA        data_queue;  /* buffer for 'GetDeviceData'.                 */
     int                         queue_len;   /* valid size of the queue                     */
@@ -122,7 +124,7 @@ extern void _dump_DIPROPHEADER(LPCDIPROPHEADER diph)  DECLSPEC_HIDDEN;
 extern void _dump_OBJECTINSTANCEA(const DIDEVICEOBJECTINSTANCEA *ddoi)  DECLSPEC_HIDDEN;
 extern void _dump_OBJECTINSTANCEW(const DIDEVICEOBJECTINSTANCEW *ddoi)  DECLSPEC_HIDDEN;
 extern void _dump_DIDATAFORMAT(const DIDATAFORMAT *df)  DECLSPEC_HIDDEN;
-extern const char * HOSTPTR _dump_dinput_GUID(const GUID *guid)  DECLSPEC_HIDDEN;
+extern const char *_dump_dinput_GUID(const GUID *guid)  DECLSPEC_HIDDEN;
 
 extern LPDIOBJECTDATAFORMAT dataformat_to_odf_by_type(LPCDIDATAFORMAT df, int n, DWORD type)   DECLSPEC_HIDDEN;
 

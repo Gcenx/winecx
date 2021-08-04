@@ -10,3 +10,5 @@ C_SRCS = \
 	bus_udev.c \
 	bus_xbox360.c \
 	main.c
+
+RC_SRCS = winebus.rc

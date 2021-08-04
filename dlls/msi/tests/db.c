@@ -33,8 +33,8 @@
 static const char *msifile = "winetest-db.msi";
 static const char *msifile2 = "winetst2-db.msi";
 static const char *mstfile = "winetst-db.mst";
-static const WCHAR msifileW[] = {'w','i','n','e','t','e','s','t','-','d','b','.','m','s','i',0};
-static const WCHAR msifile2W[] = {'w','i','n','e','t','s','t','2','-','d','b','.','m','s','i',0};
+static const WCHAR msifileW[] = L"winetest-db.msi";
+static const WCHAR msifile2W[] = L"winetst2-db.msi";
 
 static void WINAPIV check_record_(int line, MSIHANDLE rec, UINT count, ...)
 {
@@ -1428,7 +1428,7 @@ static void test_msiexport(void)
 
 static void test_longstrings(void)
 {
-    const char insert_query[] = 
+    const char insert_query[] =
         "INSERT INTO `strings` ( `id`, `val` ) VALUES('1', 'Z')";
     char *str;
     MSIHANDLE hdb = 0, hview = 0, hrec = 0;
@@ -1442,7 +1442,7 @@ static void test_longstrings(void)
     ok(r == ERROR_SUCCESS, "MsiOpenDatabase failed\n");
 
     /* create a table */
-    r = try_query( hdb, 
+    r = try_query( hdb,
         "CREATE TABLE `strings` ( `id` INT, `val` CHAR(0) PRIMARY KEY `id`)");
     ok(r == ERROR_SUCCESS, "query failed\n");
 
@@ -1507,7 +1507,7 @@ static void create_file_data(LPCSTR name, LPCSTR data, DWORD size)
 }
 
 #define create_file(name) create_file_data(name, name, 0)
- 
+
 static void test_streamtable(void)
 {
     MSIHANDLE hdb = 0, rec, view, hsi;
@@ -2740,7 +2740,7 @@ static void test_handle_limit(void)
         static char szQueryBuf[256] = "SELECT * from `_Tables`";
         hviews[i] = 0xdeadbeeb;
         r = MsiDatabaseOpenViewA(hdb, szQueryBuf, &hviews[i]);
-        if( r != ERROR_SUCCESS || hviews[i] == 0xdeadbeeb || 
+        if( r != ERROR_SUCCESS || hviews[i] == 0xdeadbeeb ||
             hviews[i] == 0 || (i && (hviews[i] == hviews[i-1])))
             break;
     }
@@ -3069,11 +3069,40 @@ static UINT package_from_db(MSIHANDLE hdb, MSIHANDLE *handle)
 
 static void test_try_transform(void)
 {
+    static const struct {
+        const char *table;
+        const char *column;
+        const char *row;
+        const char *data;
+        const char *current;
+    } transform_view[] = {
+        { "MOO", "OOO", "1", "c", "a" },
+        { "MOO", "COW", "", "5378", "3" },
+        { "MOO", "PIG", "", "5378", "4" },
+        { "MOO", "PIG", "1", "5", "" },
+        { "MOO", "DELETE", "3", "", "" },
+        { "BINARY", "BLOB", "1", "BINARY.1", "" },
+        { "BINARY", "INSERT", "1", "", "" },
+        { "AAR", "CREATE", "", "", "" },
+        { "AAR", "CAR", "", "15871", "1" },
+        { "AAR", "BAR", "", "1282", "2" },
+        { "AAR", "BAR", "vw", "1", "" },
+        { "AAR", "BAR", "bmw", "2", "" },
+        { "AAR", "INSERT", "vw", "", "" },
+        { "AAR", "INSERT", "bmw", "", "" },
+        { "Property", "CREATE", "", "", "" },
+        { "Property", "Property", "", "11592", "1" },
+        { "Property", "Value", "", "7424", "2" },
+        { "Property", "Value", "prop", "val", "" },
+        { "Property", "INSERT", "prop", "", "" }
+    };
+
     MSIHANDLE hdb, hview, hrec, hpkg = 0;
     LPCSTR query;
     UINT r;
     DWORD sz;
     char buffer[MAX_PATH];
+    int i, matched;
 
     DeleteFileA(msifile);
     DeleteFileA(mstfile);
@@ -3134,6 +3163,65 @@ static void test_try_transform(void)
 
     r = MsiOpenDatabaseW(msifileW, MSIDBOPEN_DIRECT, &hdb );
     ok( r == ERROR_SUCCESS , "Failed to create database\n" );
+
+    r = MsiDatabaseApplyTransformA(hdb, mstfile, MSITRANSFORM_ERROR_VIEWTRANSFORM);
+    ok(r == ERROR_SUCCESS, "return code %d, should be ERROR_SUCCESS\n", r);
+
+    query = "select * from `_TransformView`";
+    r = MsiDatabaseOpenViewA(hdb, query, &hview);
+    ok(r == ERROR_SUCCESS, "MsiDatabaseOpenView failed\n");
+    r = MsiViewExecute(hview, 0);
+    ok(r == ERROR_SUCCESS, "MsiViewExecute failed\n");
+
+    r = MsiViewGetColumnInfo(hview, MSICOLINFO_NAMES, &hrec);
+    ok(r == ERROR_SUCCESS, "error\n");
+    check_record(hrec, 5, "Table", "Column", "Row", "Data", "Current");
+    MsiCloseHandle(hrec);
+
+    r = MsiViewGetColumnInfo(hview, MSICOLINFO_TYPES, &hrec);
+    ok(r == ERROR_SUCCESS, "error\n");
+    check_record(hrec, 5, "g0", "g0", "G0", "G0", "G0");
+    MsiCloseHandle(hrec);
+
+    matched = 0;
+    while (MsiViewFetch(hview, &hrec) == ERROR_SUCCESS)
+    {
+        char data[5][256];
+
+        for (i = 1; i <= 5; i++) {
+            sz = ARRAY_SIZE(data[0]);
+            r = MsiRecordGetStringA(hrec, i, data[i-1], &sz);
+            ok(r == ERROR_SUCCESS, "%d) MsiRecordGetStringA failed %d\n", i, r);
+        }
+
+        for (i = 0; i < ARRAY_SIZE(transform_view); i++)
+        {
+            if (strcmp(data[0], transform_view[i].table) ||
+                    strcmp(data[1], transform_view[i].column) ||
+                    strcmp(data[2], transform_view[i].row))
+                continue;
+
+            matched++;
+            ok(!strcmp(data[3], transform_view[i].data), "%d) data[3] = %s\n", i, data[3]);
+            ok(!strcmp(data[4], transform_view[i].current), "%d) data[4] = %s\n", i, data[4]);
+            break;
+        }
+        ok(i != ARRAY_SIZE(transform_view), "invalid row: %s, %s, %s\n",
+                wine_dbgstr_a(data[0]), wine_dbgstr_a(data[1]), wine_dbgstr_a(data[2]));
+        MsiCloseHandle(hrec);
+    }
+    ok(matched == ARRAY_SIZE(transform_view), "matched = %d\n", matched);
+
+    r = MsiViewClose(hview);
+    ok(r == ERROR_SUCCESS, "MsiViewClose failed\n");
+    r = MsiCloseHandle(hview);
+    ok(r == ERROR_SUCCESS, "MsiCloseHandle failed\n");
+
+    query = "ALTER TABLE `_TransformView` FREE";
+    r = run_query( hdb, 0, query );
+    ok( r == ERROR_SUCCESS, "cannot free _TransformView table: %d\n", r );
+    r = run_query( hdb, 0, query );
+    ok( r == ERROR_BAD_QUERY_SYNTAX, "_TransformView table still exist: %d\n", r );
 
     r = MsiDatabaseApplyTransformA( hdb, mstfile, 0 );
     ok( r == ERROR_SUCCESS, "return code %d, should be ERROR_SUCCESS\n", r );
@@ -3862,16 +3950,28 @@ static void test_temporary_table(void)
 static void test_alter(void)
 {
     MSICONDITION cond;
-    MSIHANDLE hdb = 0;
+    MSIHANDLE hdb = 0, rec;
     const char *query;
     UINT r;
 
     hdb = create_db();
     ok( hdb, "failed to create db\n");
 
+    query = "CREATE TABLE `T` ( `B` SHORT NOT NULL TEMPORARY, `C` CHAR(255) TEMPORARY PRIMARY KEY `C`)";
+    r = run_query(hdb, 0, query);
+    ok(r == ERROR_SUCCESS, "failed to add table\n");
+
+    query = "SELECT * FROM `T`";
+    r = run_query(hdb, 0, query);
+    ok(r == ERROR_BAD_QUERY_SYNTAX, "expected ERROR_BAD_QUERY_SYNTAX, got %d\n", r);
+
     query = "CREATE TABLE `T` ( `B` SHORT NOT NULL TEMPORARY, `C` CHAR(255) TEMPORARY PRIMARY KEY `C`) HOLD";
     r = run_query(hdb, 0, query);
     ok(r == ERROR_SUCCESS, "failed to add table\n");
+
+    query = "SELECT * FROM `T`";
+    r = run_query(hdb, 0, query);
+    ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %d\n", r);
 
     cond = MsiDatabaseIsTablePersistentA(hdb, "T");
     ok( cond == MSICONDITION_FALSE, "wrong return condition\n");
@@ -3920,6 +4020,10 @@ static void test_alter(void)
     r = run_query(hdb, 0, query);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
+    query = "SELECT * FROM `_Columns` WHERE `Table` = 'U' AND `Name` = 'C'";
+    r = do_query(hdb, query, &rec);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
     /* add column C again */
     query = "ALTER TABLE `U` ADD `C` INTEGER";
     r = run_query(hdb, 0, query);
@@ -3936,6 +4040,10 @@ static void test_alter(void)
     query = "ALTER TABLE `U` ADD `D` INTEGER TEMPORARY HOLD";
     r = run_query(hdb, 0, query);
     ok(r == ERROR_BAD_QUERY_SYNTAX, "Expected ERROR_BAD_QUERY_SYNTAX, got %d\n", r);
+
+    query = "SELECT * FROM `_Columns` WHERE `Table` = 'U' AND `Name` = 'D'";
+    r = do_query(hdb, query, &rec);
+    ok(r == ERROR_NO_MORE_ITEMS, "Expected ERROR_NO_MORE_ITEMS, got %d\n", r);
 
     query = "INSERT INTO `U` ( `A`, `B`, `C`, `D` ) VALUES ( 5, 6, 7, 8 )";
     r = run_query(hdb, 0, query);
@@ -4668,34 +4776,6 @@ static void test_rows_order(void)
 
 static void test_collation(void)
 {
-    static const WCHAR query1[] =
-        {'I','N','S','E','R','T',' ','I','N','T','O',' ','`','b','a','r','`',' ',
-         '(','`','f','o','o','`',',','`','b','a','z','`',')',' ','V','A','L','U','E','S',' ',
-         '(','\'','a',0x30a,'\'',',','\'','C','\'',')',0};
-    static const WCHAR query2[] =
-        {'I','N','S','E','R','T',' ','I','N','T','O',' ','`','b','a','r','`',' ',
-         '(','`','f','o','o','`',',','`','b','a','z','`',')',' ','V','A','L','U','E','S',' ',
-         '(','\'',0xe5,'\'',',','\'','D','\'',')',0};
-    static const WCHAR query3[] =
-        {'C','R','E','A','T','E',' ','T','A','B','L','E',' ','`','b','a','z','`',' ',
-         '(',' ','`','a',0x30a,'`',' ','L','O','N','G','C','H','A','R',' ','N','O','T',' ','N','U','L','L',',',
-           ' ','`',0xe5,'`',' ','L','O','N','G','C','H','A','R',' ','N','O','T',' ','N','U','L','L',' ',
-           'P','R','I','M','A','R','Y',' ','K','E','Y',' ','`','a',0x30a,'`',')',0};
-    static const WCHAR query4[] =
-        {'C','R','E','A','T','E',' ','T','A','B','L','E',' ','`','a',0x30a,'`',' ',
-         '(',' ','`','f','o','o','`',' ','L','O','N','G','C','H','A','R',' ','N','O','T',' ',
-         'N','U','L','L',' ','P','R','I','M','A','R','Y',' ','K','E','Y',' ','`','f','o','o','`',')',0};
-    static const WCHAR query5[] =
-        {'C','R','E','A','T','E',' ','T','A','B','L','E',' ','`',0xe5,'`',' ',
-         '(',' ','`','f','o','o','`',' ','L','O','N','G','C','H','A','R',' ','N','O','T',' ',
-         'N','U','L','L',' ','P','R','I','M','A','R','Y',' ','K','E','Y',' ','`','f','o','o','`',')',0};
-    static const WCHAR query6[] =
-        {'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ','`','b','a','r','`',' ','W','H','E','R','E',
-         ' ','`','f','o','o','`',' ','=','\'',0xe5,'\'',0};
-    static const WCHAR letter_C[] = {'C',0};
-    static const WCHAR letter_D[] = {'D',0};
-    static const WCHAR letter_a_ring[] = {'a',0x30a,0};
-    static const WCHAR letter_a_with_ring[] = {0xe5,0};
     const char *query;
     MSIHANDLE hdb = 0, hview = 0, hrec = 0;
     UINT r;
@@ -4724,19 +4804,19 @@ static void test_collation(void)
             "( `foo`, `baz` ) VALUES ( '\1', 'B' )");
     ok(r == ERROR_SUCCESS, "cannot add value to table %u\n", r);
 
-    r = run_queryW(hdb, 0, query1);
+    r = run_queryW(hdb, 0, L"INSERT INTO `bar` (`foo`,`baz`) VALUES ('a\x30a','C')");
     ok(r == ERROR_SUCCESS, "cannot add value to table %u\n", r);
 
-    r = run_queryW(hdb, 0, query2);
+    r = run_queryW(hdb, 0, L"INSERT INTO `bar` (`foo`,`baz`) VALUES ('\xe5','D')");
     ok(r == ERROR_SUCCESS, "cannot add value to table %u\n", r);
 
-    r = run_queryW(hdb, 0, query3);
+    r = run_queryW(hdb, 0, L"CREATE TABLE `baz` ( `a\x30a` LONGCHAR NOT NULL, `\xe5` LONGCHAR NOT NULL PRIMARY KEY `a\x30a`)");
     ok(r == ERROR_SUCCESS, "cannot create table %u\n", r);
 
-    r = run_queryW(hdb, 0, query4);
+    r = run_queryW(hdb, 0, L"CREATE TABLE `a\x30a` ( `foo` LONGCHAR NOT NULL PRIMARY KEY `foo`)");
     ok(r == ERROR_SUCCESS, "cannot create table %u\n", r);
 
-    r = run_queryW(hdb, 0, query5);
+    r = run_queryW(hdb, 0, L"CREATE TABLE `\xe5` ( `foo` LONGCHAR NOT NULL PRIMARY KEY `foo`)");
     ok(r == ERROR_SUCCESS, "cannot create table %u\n", r);
 
     query = "SELECT * FROM `bar`";
@@ -4774,12 +4854,12 @@ static void test_collation(void)
     sz = ARRAY_SIZE(bufferW);
     r = MsiRecordGetStringW(hrec, 1, bufferW, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(!memcmp(bufferW, letter_a_ring, sizeof(letter_a_ring)),
-       "Expected %s, got %s\n", wine_dbgstr_w(letter_a_ring), wine_dbgstr_w(bufferW));
+    ok(!memcmp(bufferW, L"a\x30a", sizeof(L"a\x30a")),
+       "Expected %s, got %s\n", wine_dbgstr_w(L"a\x30a"), wine_dbgstr_w(bufferW));
     sz = ARRAY_SIZE(bufferW);
     r = MsiRecordGetStringW(hrec, 2, bufferW, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(!lstrcmpW(bufferW, letter_C), "Expected C, got %s\n", wine_dbgstr_w(bufferW));
+    ok(!lstrcmpW(bufferW, L"C"), "Expected C, got %s\n", wine_dbgstr_w(bufferW));
     MsiCloseHandle(hrec);
 
     r = MsiViewFetch(hview, &hrec);
@@ -4787,12 +4867,12 @@ static void test_collation(void)
     sz = ARRAY_SIZE(bufferW);
     r = MsiRecordGetStringW(hrec, 1, bufferW, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(!memcmp(bufferW, letter_a_with_ring, sizeof(letter_a_with_ring)),
-       "Expected %s, got %s\n", wine_dbgstr_w(letter_a_with_ring), wine_dbgstr_w(bufferW));
+    ok(!memcmp(bufferW, L"\xe5", sizeof(L"\xe5")),
+       "Expected %s, got %s\n", wine_dbgstr_w(L"\xe5"), wine_dbgstr_w(bufferW));
     sz = ARRAY_SIZE(bufferW);
     r = MsiRecordGetStringW(hrec, 2, bufferW, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(!lstrcmpW(bufferW, letter_D), "Expected D, got %s\n", wine_dbgstr_w(bufferW));
+    ok(!lstrcmpW(bufferW, L"D"), "Expected D, got %s\n", wine_dbgstr_w(bufferW));
     MsiCloseHandle(hrec);
 
     r = MsiViewClose(hview);
@@ -4800,7 +4880,7 @@ static void test_collation(void)
     r = MsiCloseHandle(hview);
     ok(r == ERROR_SUCCESS, "MsiCloseHandle failed\n");
 
-    r = MsiDatabaseOpenViewW(hdb, query6, &hview);
+    r = MsiDatabaseOpenViewW(hdb, L"SELECT * FROM `bar` WHERE `foo` ='\xe5'", &hview);
     ok(r == ERROR_SUCCESS, "MsiDatabaseOpenView failed\n");
     r = MsiViewExecute(hview, 0);
     ok(r == ERROR_SUCCESS, "MsiViewExecute failed\n");
@@ -4810,12 +4890,12 @@ static void test_collation(void)
     sz = ARRAY_SIZE(bufferW);
     r = MsiRecordGetStringW(hrec, 1, bufferW, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(!memcmp(bufferW, letter_a_with_ring, sizeof(letter_a_with_ring)),
-       "Expected %s, got %s\n", wine_dbgstr_w(letter_a_with_ring), wine_dbgstr_w(bufferW));
+    ok(!memcmp(bufferW, L"\xe5", sizeof(L"\xe5")),
+       "Expected %s, got %s\n", wine_dbgstr_w(L"\xe5"), wine_dbgstr_w(bufferW));
     sz = ARRAY_SIZE(bufferW);
     r = MsiRecordGetStringW(hrec, 2, bufferW, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(!lstrcmpW(bufferW, letter_D), "Expected D, got %s\n", wine_dbgstr_w(bufferW));
+    ok(!lstrcmpW(bufferW, L"D"), "Expected D, got %s\n", wine_dbgstr_w(bufferW));
     MsiCloseHandle(hrec);
 
     r = MsiViewFetch(hview, &hrec);
@@ -7431,7 +7511,6 @@ static void test_droptable(void)
 
 static void test_dbmerge(void)
 {
-    static const WCHAR refdbW[] = {'r','e','f','d','b','.','m','s','i',0};
     MSIHANDLE hdb, href, hview, hrec;
     CHAR buf[MAX_PATH];
     LPCSTR query;
@@ -7441,7 +7520,7 @@ static void test_dbmerge(void)
     r = MsiOpenDatabaseW(msifileW, MSIDBOPEN_CREATE, &hdb);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    r = MsiOpenDatabaseW(refdbW, MSIDBOPEN_CREATE, &href);
+    r = MsiOpenDatabaseW(L"refdb.msi", MSIDBOPEN_CREATE, &href);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* hDatabase is invalid */
@@ -7982,7 +8061,7 @@ static void test_dbmerge(void)
     MsiCloseHandle(hdb);
     MsiCloseHandle(href);
     DeleteFileA(msifile);
-    DeleteFileW(refdbW);
+    DeleteFileW(L"refdb.msi");
     DeleteFileA("codepage.idt");
     DeleteFileA("binary.dat");
 }

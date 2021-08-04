@@ -19,24 +19,16 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <fcntl.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
 #include <ctype.h>
 #include <string.h>
 
 #include "wine/winbase16.h"
 #include "wownt32.h"
 #include "winternl.h"
-#include "wine/library.h"
 #include "kernel16_private.h"
 #include "wine/debug.h"
 
@@ -372,15 +364,14 @@ BOOL NE_LoadSegment( NE_MODULE *pModule, WORD segnum )
     {
  	/* Implement self-loading segments */
  	SELFLOADHEADER *selfloadheader;
-        void *oldstack;
+        WORD old_ss = CURRENT_SS, old_sp = CURRENT_SP;
         HFILE16 hFile16;
         WORD args[3];
         DWORD ret;
 
  	selfloadheader = MapSL( MAKESEGPTR(SEL(pSegTable->hSeg),0) );
-        oldstack = NtCurrentTeb()->SystemReserved1[0];
-        NtCurrentTeb()->SystemReserved1[0] = (void *)MAKESEGPTR(pModule->self_loading_sel,
-                                                                0xff00 - sizeof(STACK16FRAME));
+        CURRENT_SS = pModule->self_loading_sel;
+        CURRENT_SP = 0xff00 - sizeof(STACK16FRAME);
 
         hFile16 = NE_OpenFile( pModule );
         TRACE_(dll)("Call LoadAppSegProc(hmodule=0x%04x,hf=%x,segnum=%d)\n",
@@ -392,7 +383,8 @@ BOOL NE_LoadSegment( NE_MODULE *pModule, WORD segnum )
         pSeg->hSeg = LOWORD(ret);
         TRACE_(dll)("Ret LoadAppSegProc: hSeg=0x%04x\n", pSeg->hSeg);
         _lclose16( hFile16 );
-        NtCurrentTeb()->SystemReserved1[0] = oldstack;
+        CURRENT_SS = old_ss;
+        CURRENT_SP = old_sp;
 
         pSeg->flags |= NE_SEGFLAGS_LOADED;
         return TRUE;
@@ -470,7 +462,7 @@ BOOL NE_LoadAllSegments( NE_MODULE *pModule )
         /* Handle self-loading modules */
         SELFLOADHEADER *selfloadheader;
         HMODULE16 mod = GetModuleHandle16("KERNEL");
-        void *oldstack;
+        WORD old_ss = CURRENT_SS, old_sp = CURRENT_SP;
         WORD args[2];
 
         TRACE_(module)("%.*s is a self-loading module!\n",
@@ -484,9 +476,8 @@ BOOL NE_LoadAllSegments( NE_MODULE *pModule )
         sel = GlobalAlloc16( GMEM_ZEROINIT, 0xFF00 );
         pModule->self_loading_sel = SEL(sel);
         FarSetOwner16( sel, pModule->self );
-        oldstack = NtCurrentTeb()->SystemReserved1[0];
-        NtCurrentTeb()->SystemReserved1[0] = (void *)MAKESEGPTR(pModule->self_loading_sel,
-                                                                0xff00 - sizeof(STACK16FRAME) );
+        CURRENT_SS = pModule->self_loading_sel;
+        CURRENT_SP = 0xff00 - sizeof(STACK16FRAME);
 
         hFile16 = NE_OpenFile(pModule);
         TRACE_(dll)("CallBootAppProc(hModule=0x%04x,hf=0x%04x)\n",
@@ -496,7 +487,8 @@ BOOL NE_LoadAllSegments( NE_MODULE *pModule )
         WOWCallback16Ex( (DWORD)selfloadheader->BootApp, WCB16_PASCAL, sizeof(args), args, NULL );
 	TRACE_(dll)("Return from CallBootAppProc\n");
         _lclose16(hFile16);
-        NtCurrentTeb()->SystemReserved1[0] = oldstack;
+        CURRENT_SS = old_ss;
+        CURRENT_SP = old_sp;
 
         for (i = 2; i <= pModule->ne_cseg; i++)
             if (!NE_LoadSegment( pModule, i )) return FALSE;
@@ -625,13 +617,10 @@ static VOID NE_GetDLLInitParams( NE_MODULE *pModule,
         {
             /* Not SINGLEDATA */
             ERR_(dll)("Library is not marked SINGLEDATA\n");
-            exit(1);
         }
-        else  /* DATA NONE DLL */
-        {
-            *ds = 0;
-            *heap = 0;
-        }
+        /* DATA NONE DLL */
+        *ds = 0;
+        *heap = 0;
     }
     else  /* DATA SINGLE DLL */
     {
@@ -691,7 +680,7 @@ static BOOL NE_InitDLL( NE_MODULE *pModule )
     context.SegEs = ds;   /* who knows ... */
     context.SegCs = SEL(pSegTable[SELECTOROF(pModule->ne_csip)-1].hSeg);
     context.Eip   = OFFSETOF(pModule->ne_csip);
-    context.Ebp   = OFFSETOF(NtCurrentTeb()->SystemReserved1[0]) + FIELD_OFFSET(STACK16FRAME,bp);
+    context.Ebp   = CURRENT_SP + FIELD_OFFSET(STACK16FRAME,bp);
 
     pModule->ne_csip = 0;  /* Don't initialize it twice */
     TRACE_(dll)("Calling LibMain for %.*s, cs:ip=%04x:%04x ds=%04x di=%04x cx=%04x\n",
@@ -715,7 +704,6 @@ void NE_InitializeDLLs( HMODULE16 hModule )
     HMODULE16 *pDLL;
 
     if (!(pModule = NE_GetPtr( hModule ))) return;
-    assert( !(pModule->ne_flags & NE_FFLAGS_WIN32) );
 
     if (pModule->dlls_to_init)
     {
@@ -794,7 +782,7 @@ static void NE_CallDllEntryPoint( NE_MODULE *pModule, DWORD dwReason )
         context.SegEs = ds;   /* who knows ... */
         context.SegCs = HIWORD(entryPoint);
         context.Eip   = LOWORD(entryPoint);
-        context.Ebp   = OFFSETOF(NtCurrentTeb()->SystemReserved1[0]) + FIELD_OFFSET(STACK16FRAME,bp);
+        context.Ebp   = CURRENT_SP + FIELD_OFFSET(STACK16FRAME,bp);
 
         args[7] = HIWORD(dwReason);
         args[6] = LOWORD(dwReason);
@@ -879,7 +867,6 @@ static void fill_init_list( struct ne_init_list *list, HMODULE16 hModule )
     int i;
 
     if (!(pModule = NE_GetPtr( hModule ))) return;
-    assert( !(pModule->ne_flags & NE_FFLAGS_WIN32) );
 
     /* Never add a module twice */
     for ( i = 0; i < list->count; i++ )
@@ -1003,8 +990,6 @@ BOOL NE_CreateSegment( NE_MODULE *pModule, int segnum )
     int minsize;
     unsigned char selflags;
 
-    assert( !(pModule->ne_flags & NE_FFLAGS_WIN32) );
-
     if ( segnum < 1 || segnum > pModule->ne_cseg )
         return FALSE;
 
@@ -1018,8 +1003,8 @@ BOOL NE_CreateSegment( NE_MODULE *pModule, int segnum )
     if ( segnum == SELECTOROF(pModule->ne_sssp) ) minsize += pModule->ne_stack;
     if ( segnum == pModule->ne_autodata ) minsize += pModule->ne_heap;
 
-    selflags = (pSeg->flags & NE_SEGFLAGS_DATA) ? WINE_LDT_FLAGS_DATA : WINE_LDT_FLAGS_CODE;
-    if (pSeg->flags & NE_SEGFLAGS_32BIT) selflags |= WINE_LDT_FLAGS_32BIT;
+    selflags = (pSeg->flags & NE_SEGFLAGS_DATA) ? LDT_FLAGS_DATA : LDT_FLAGS_CODE;
+    if (pSeg->flags & NE_SEGFLAGS_32BIT) selflags |= LDT_FLAGS_32BIT;
     pSeg->hSeg = GLOBAL_Alloc( NE_Ne2MemFlags(pSeg->flags), minsize, pModule->self, selflags );
     if (!pSeg->hSeg) return FALSE;
 

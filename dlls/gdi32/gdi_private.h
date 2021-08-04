@@ -99,7 +99,7 @@ typedef struct tagDC
 
     struct gdi_path *path;
 
-    struct font_gamma_ramp *font_gamma_ramp;
+    const struct font_gamma_ramp *font_gamma_ramp;
 
     UINT          font_code_page;
     WORD          ROPmode;
@@ -261,11 +261,13 @@ extern DWORD put_image_into_bitmap( BITMAPOBJ *bmp, HRGN clip, BITMAPINFO *info,
                                     struct bitblt_coords *dst ) DECLSPEC_HIDDEN;
 extern void dibdrv_set_window_surface( DC *dc, struct window_surface *surface ) DECLSPEC_HIDDEN;
 
+extern NTSTATUS init_opengl_lib( HMODULE module, DWORD reason, const void *ptr_in, void *ptr_out ) DECLSPEC_HIDDEN;
+
 /* driver.c */
 extern const struct gdi_dc_funcs null_driver DECLSPEC_HIDDEN;
 extern const struct gdi_dc_funcs dib_driver DECLSPEC_HIDDEN;
 extern const struct gdi_dc_funcs path_driver DECLSPEC_HIDDEN;
-extern const struct gdi_dc_funcs *font_driver DECLSPEC_HIDDEN;
+extern const struct gdi_dc_funcs font_driver DECLSPEC_HIDDEN;
 extern const struct gdi_dc_funcs *DRIVER_load_driver( LPCWSTR name ) DECLSPEC_HIDDEN;
 extern BOOL DRIVER_GetDriverName( LPCWSTR device, LPWSTR driver, DWORD size ) DECLSPEC_HIDDEN;
 
@@ -273,14 +275,13 @@ extern BOOL DRIVER_GetDriverName( LPCWSTR device, LPWSTR driver, DWORD size ) DE
 extern HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, DWORD filesize, BOOL on_disk ) DECLSPEC_HIDDEN;
 
 /* font.c */
+
 struct font_gamma_ramp
 {
     DWORD gamma;
     BYTE  encode[256];
     BYTE  decode[256];
 };
-
-/* freetype.c */
 
 /* Undocumented structure filled in by GetFontRealizationInfo */
 struct font_realization_info
@@ -302,11 +303,144 @@ struct char_width_info
     INT unk;   /* unknown */
 };
 
-extern INT WineEngAddFontResourceEx(LPCWSTR, DWORD, PVOID) DECLSPEC_HIDDEN;
-extern HANDLE WineEngAddFontMemResourceEx(PVOID, DWORD, PVOID, LPDWORD) DECLSPEC_HIDDEN;
-extern BOOL WineEngCreateScalableFontResource(DWORD, LPCWSTR, LPCWSTR, LPCWSTR) DECLSPEC_HIDDEN;
-extern BOOL WineEngInit(void) DECLSPEC_HIDDEN;
-extern BOOL WineEngRemoveFontResourceEx(LPCWSTR, DWORD, PVOID) DECLSPEC_HIDDEN;
+typedef struct { FLOAT eM11, eM12, eM21, eM22; } FMAT2;
+
+struct bitmap_font_size
+{
+    int  width;
+    int  height;
+    int  size;
+    int  x_ppem;
+    int  y_ppem;
+    int  internal_leading;
+};
+
+struct gdi_font
+{
+    struct list            entry;
+    struct list            unused_entry;
+    DWORD                  refcount;
+    DWORD                  gm_size;
+    struct glyph_metrics **gm;
+    OUTLINETEXTMETRICW     otm;
+    KERNINGPAIR           *kern_pairs;
+    int                    kern_count;
+    /* the following members can be accessed without locking, they are never modified after creation */
+    void                  *private;  /* font backend private data */
+    struct list            child_fonts;
+    DWORD                  handle;
+    DWORD                  cache_num;
+    DWORD                  hash;
+    UINT                   charset;
+    UINT                   codepage;
+    FONTSIGNATURE          fs;
+    LOGFONTW               lf;
+    FMAT2                  matrix;
+    UINT                   face_index;
+    INT                    scale_y;
+    INT                    aveWidth;
+    INT                    ppem;
+    SHORT                  yMax;
+    SHORT                  yMin;
+    UINT                   ntmFlags;
+    UINT                   ntmCellHeight;
+    UINT                   ntmAvgWidth;
+    UINT                   aa_flags;
+    ULONG                  ttc_item_offset;    /* 0 if font is not a part of TrueType collection */
+    BOOL                   can_use_bitmap : 1;
+    BOOL                   fake_italic : 1;
+    BOOL                   fake_bold : 1;
+    BOOL                   scalable : 1;
+    struct gdi_font       *base_font;
+    void                  *gsub_table;
+    void                  *vert_feature;
+    void                  *data_ptr;
+    SIZE_T                 data_size;
+    FILETIME               writetime;
+    WCHAR                  file[1];
+};
+
+#define MS_MAKE_TAG(ch1,ch2,ch3,ch4) \
+    (((DWORD)ch4 << 24) | ((DWORD)ch3 << 16) | ((DWORD)ch2 << 8) | (DWORD)ch1)
+
+#define MS_GASP_TAG MS_MAKE_TAG('g', 'a', 's', 'p')
+#define MS_GSUB_TAG MS_MAKE_TAG('G', 'S', 'U', 'B')
+#define MS_KERN_TAG MS_MAKE_TAG('k', 'e', 'r', 'n')
+#define MS_TTCF_TAG MS_MAKE_TAG('t', 't', 'c', 'f')
+#define MS_VDMX_TAG MS_MAKE_TAG('V', 'D', 'M', 'X')
+
+#define FS_DBCS_MASK (FS_JISJAPAN | FS_CHINESESIMP | FS_WANSUNG | FS_CHINESETRAD | FS_JOHAB)
+
+#define ADDFONT_EXTERNAL_FONT 0x01
+#define ADDFONT_ALLOW_BITMAP  0x02
+#define ADDFONT_ADD_TO_CACHE  0x04
+#define ADDFONT_ADD_RESOURCE  0x08  /* added through AddFontResource */
+#define ADDFONT_VERTICAL_FONT 0x10
+#define ADDFONT_EXTERNAL_FOUND 0x20
+#define ADDFONT_AA_FLAGS(flags) ((flags) << 16)
+
+struct font_backend_funcs
+{
+    void  (CDECL *load_fonts)(void);
+    BOOL  (CDECL *enum_family_fallbacks)( DWORD pitch_and_family, int index, WCHAR buffer[LF_FACESIZE] );
+    INT   (CDECL *add_font)( const WCHAR *file, DWORD flags );
+    INT   (CDECL *add_mem_font)( void *ptr, SIZE_T size, DWORD flags );
+
+    BOOL  (CDECL *load_font)( struct gdi_font *gdi_font );
+    DWORD (CDECL *get_font_data)( struct gdi_font *gdi_font, DWORD table, DWORD offset,
+                                  void *buf, DWORD count );
+    UINT  (CDECL *get_aa_flags)( struct gdi_font *font, UINT aa_flags, BOOL antialias_fakes );
+    BOOL  (CDECL *get_glyph_index)( struct gdi_font *gdi_font, UINT *glyph, BOOL use_encoding );
+    UINT  (CDECL *get_default_glyph)( struct gdi_font *gdi_font );
+    DWORD (CDECL *get_glyph_outline)( struct gdi_font *font, UINT glyph, UINT format,
+                                      GLYPHMETRICS *gm, ABC *abc, DWORD buflen, void *buf,
+                                      const MAT2 *mat, BOOL tategaki );
+    DWORD (CDECL *get_unicode_ranges)( struct gdi_font *font, GLYPHSET *gs );
+    BOOL  (CDECL *get_char_width_info)( struct gdi_font *font, struct char_width_info *info );
+    BOOL  (CDECL *set_outline_text_metrics)( struct gdi_font *font );
+    BOOL  (CDECL *set_bitmap_text_metrics)( struct gdi_font *font );
+    DWORD (CDECL *get_kerning_pairs)( struct gdi_font *gdi_font, KERNINGPAIR **kern_pair );
+    void  (CDECL *destroy_font)( struct gdi_font *font );
+};
+
+struct font_callback_funcs
+{
+    int (CDECL *add_gdi_face)( const WCHAR *family_name, const WCHAR *second_name,
+                               const WCHAR *style, const WCHAR *fullname, const WCHAR *file,
+                               void *data_ptr, SIZE_T data_size, UINT index, FONTSIGNATURE fs,
+                               DWORD ntmflags, DWORD version, DWORD flags,
+                               const struct bitmap_font_size *size );
+};
+
+extern void font_init(void) DECLSPEC_HIDDEN;
+
+/* opentype.c */
+
+struct ttc_sfnt_v1;
+struct tt_name_v0;
+
+struct opentype_name
+{
+    DWORD codepage;
+    DWORD length;
+    const void * HOSTPTR bytes;
+};
+
+extern BOOL opentype_get_ttc_sfnt_v1( const void * HOSTPTR data, size_t size, DWORD index, DWORD *count,
+                                      const struct ttc_sfnt_v1 * HOSTPTR * HOSTPTR ttc_sfnt_v1 ) DECLSPEC_HIDDEN;
+extern BOOL opentype_get_tt_name_v0( const void * HOSTPTR data, size_t size, const struct ttc_sfnt_v1 * HOSTPTR ttc_sfnt_v1,
+                                     const struct tt_name_v0 * HOSTPTR * HOSTPTR tt_name_v0 ) DECLSPEC_HIDDEN;
+
+typedef BOOL ( *opentype_enum_names_cb )( LANGID langid, struct opentype_name *name, void *user );
+extern BOOL opentype_enum_family_names( const struct tt_name_v0 * HOSTPTR tt_name_v0,
+                                        opentype_enum_names_cb callback, void *user ) DECLSPEC_HIDDEN;
+extern BOOL opentype_enum_style_names( const struct tt_name_v0 * HOSTPTR tt_name_v0,
+                                       opentype_enum_names_cb callback, void *user ) DECLSPEC_HIDDEN;
+extern BOOL opentype_enum_full_names( const struct tt_name_v0 * HOSTPTR tt_name_v0,
+                                      opentype_enum_names_cb callback, void *user ) DECLSPEC_HIDDEN;
+
+extern BOOL opentype_get_properties( const void * HOSTPTR data, size_t size, const struct ttc_sfnt_v1 * HOSTPTR ttc_sfnt_v1,
+                                     DWORD *version, FONTSIGNATURE *fs, DWORD *ntm_flags ) DECLSPEC_HIDDEN;
 
 /* gdiobj.c */
 extern HGDIOBJ alloc_gdi_handle( void *obj, WORD type, const struct gdi_obj_funcs *funcs ) DECLSPEC_HIDDEN;
@@ -469,7 +603,6 @@ extern INT  CDECL nulldrv_SaveDC( PHYSDEV dev ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_ScaleViewportExtEx( PHYSDEV dev, INT x_num, INT x_denom, INT y_num, INT y_denom, SIZE *size ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_ScaleWindowExtEx( PHYSDEV dev, INT x_num, INT x_denom, INT y_num, INT y_denom, SIZE *size ) DECLSPEC_HIDDEN;
 extern BOOL CDECL nulldrv_SelectClipPath( PHYSDEV dev, INT mode ) DECLSPEC_HIDDEN;
-extern HFONT CDECL nulldrv_SelectFont( PHYSDEV dev, HFONT font, UINT *ggo_flags ) DECLSPEC_HIDDEN;
 extern INT CDECL nulldrv_SetDIBitsToDevice( PHYSDEV dev, INT x_dst, INT y_dst, DWORD width, DWORD height,
                                             INT x_src, INT y_src, UINT start, UINT lines,
                                             const void *bits, BITMAPINFO *info, UINT coloruse ) DECLSPEC_HIDDEN;
@@ -620,7 +753,7 @@ static inline void copy_bitmapinfo( BITMAPINFO *dst, const BITMAPINFO *src )
     memcpy( dst, src, get_dib_info_size( src, DIB_RGB_COLORS ));
 }
 
-extern void free_heap_bits( struct gdi_image_bits *bits ) DECLSPEC_HIDDEN;
+extern void CDECL free_heap_bits( struct gdi_image_bits *bits ) DECLSPEC_HIDDEN;
 
 extern HMODULE gdi32_module DECLSPEC_HIDDEN;
 

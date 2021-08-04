@@ -18,9 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/debug.h"
-
 #include <stdarg.h>
 
 #include "windef.h"
@@ -28,10 +25,9 @@
 #include "wingdi.h"
 #include "winuser.h"
 #include "icm.h"
+#include "wine/debug.h"
 
 #include "mscms_priv.h"
-
-#ifdef HAVE_LCMS2
 
 static CRITICAL_SECTION mscms_handle_cs;
 static CRITICAL_SECTION_DEBUG mscms_handle_cs_debug =
@@ -176,7 +172,7 @@ BOOL close_profile( HPROFILE handle )
         }
         CloseHandle( profile->file );
     }
-    cmsCloseProfile( profile->cmsprofile );
+    if (profile->cmsprofile) lcms_funcs->close_profile( profile->cmsprofile );
     HeapFree( GetProcessHeap(), 0, profile->data );
 
     memset( profile, 0, sizeof(struct profile) );
@@ -242,11 +238,10 @@ BOOL close_transform( HTRANSFORM handle )
     }
     transform = &transformtable[index];
 
-    cmsDeleteTransform( transform->cmstransform );
+    lcms_funcs->close_transform( transform->cmstransform );
+
     memset( transform, 0, sizeof(struct transform) );
 
     LeaveCriticalSection( &mscms_handle_cs );
     return TRUE;
 }
-
-#endif /* HAVE_LCMS2 */

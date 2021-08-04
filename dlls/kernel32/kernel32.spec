@@ -150,7 +150,7 @@
 @ stdcall AddVectoredContinueHandler(long ptr) ntdll.RtlAddVectoredContinueHandler
 @ stdcall AddVectoredExceptionHandler(long ptr) ntdll.RtlAddVectoredExceptionHandler
 # @ stub AdjustCalendarDate
-@ stdcall AllocConsole()
+@ stdcall -import AllocConsole()
 @ stub -i386 AllocLSCallback
 @ stdcall -i386 -private AllocSLCallback(ptr ptr) krnl386.exe16.AllocSLCallback
 @ stdcall -import AllocateUserPhysicalPages(long ptr ptr)
@@ -171,7 +171,7 @@
 @ stub BaseCleanupAppcompatCacheSupport
 # @ stub BaseDllReadWriteIniFile
 @ stub BaseDumpAppcompatCache
-@ stdcall BaseFlushAppcompatCache()
+@ stdcall -import BaseFlushAppcompatCache()
 # @ stub BaseFormatObjectAttributes
 # @ stub BaseFormatTimeOut
 # @ stub BaseGenerateAppCompatData
@@ -182,7 +182,7 @@
 @ stub BaseProcessInitPostImport
 # @ stub BaseQueryModuleData
 # @ stub BaseSetLastNTError
-# @ stub BaseThreadInitThunk
+@ stdcall -fastcall BaseThreadInitThunk(long ptr ptr)
 @ stub BaseUpdateAppcompatCache
 # @ stub BaseVerifyUnicodeString
 # @ stub Basep8BitStringToDynamicUnicodeString
@@ -195,7 +195,7 @@
 # @ stub BasepFreeActivationContextActivationBlock
 # @ stub BasepFreeAppCompatData
 # @ stub BasepMapModuleHandle
-@ stdcall Beep(long long)
+@ stdcall -import Beep(long long)
 @ stdcall BeginUpdateResourceA(str long)
 @ stdcall BeginUpdateResourceW(wstr long)
 @ stdcall BindIoCompletionCallback(long ptr long)
@@ -210,7 +210,7 @@
 @ stdcall -import CancelIo(long)
 @ stdcall -import CancelIoEx(long ptr)
 @ stdcall -import CancelSynchronousIo(long)
-# @ stub CancelThreadpoolIo
+@ stdcall CancelThreadpoolIo(ptr) ntdll.TpCancelAsyncIoOperation
 @ stdcall CancelTimerQueueTimer(ptr ptr)
 @ stdcall -import CancelWaitableTimer(long)
 @ stdcall -import ChangeTimerQueueTimer(ptr ptr long long)
@@ -226,11 +226,12 @@
 @ stdcall -import CloseHandle(long)
 # @ stub ClosePrivateNamespace
 @ stdcall CloseProfileUserMapping()
+@ stdcall -import ClosePseudoConsole(ptr)
 @ stub CloseSystemHandle
 @ stdcall CloseThreadpool(ptr) ntdll.TpReleasePool
 @ stdcall CloseThreadpoolCleanupGroup(ptr) ntdll.TpReleaseCleanupGroup
 @ stdcall CloseThreadpoolCleanupGroupMembers(ptr long ptr) ntdll.TpReleaseCleanupGroupMembers
-# @ stub CloseThreadpoolIo
+@ stdcall CloseThreadpoolIo(ptr) ntdll.TpReleaseIoCompletion
 @ stdcall CloseThreadpoolTimer(ptr) ntdll.TpReleaseTimer
 @ stdcall CloseThreadpoolWait(ptr) ntdll.TpReleaseWait
 @ stdcall CloseThreadpoolWork(ptr) ntdll.TpReleaseWork
@@ -255,13 +256,13 @@
 @ stdcall -import ConvertThreadToFiber(ptr)
 @ stdcall -import ConvertThreadToFiberEx(ptr long)
 @ stdcall ConvertToGlobalHandle(long)
-# @ stub CopyContext
+@ stdcall -import -arch=i386,x86_64 CopyContext(ptr long ptr)
 @ stdcall CopyFileA(str str long)
 @ stdcall CopyFileExA (str str ptr ptr ptr long)
-@ stdcall CopyFileExW (wstr wstr ptr ptr ptr long)
+@ stdcall -import CopyFileExW(wstr wstr ptr ptr ptr long)
 # @ stub CopyFileTransactedA
 # @ stub CopyFileTransactedW
-@ stdcall CopyFileW(wstr wstr long)
+@ stdcall -import CopyFileW(wstr wstr long)
 @ stdcall CopyLZFile(long long) LZCopy
 @ stdcall CreateActCtxA(ptr)
 @ stdcall -import CreateActCtxW(ptr)
@@ -287,10 +288,10 @@
 @ stdcall -import CreateFileMappingNumaW(long ptr long long long wstr long)
 @ stdcall -import CreateFileMappingW(long ptr long long long wstr)
 @ stdcall -import CreateFileW(wstr long long ptr long long long)
-@ stdcall CreateHardLinkA(str str ptr)
+@ stdcall -import CreateHardLinkA(str str ptr)
 @ stdcall CreateHardLinkTransactedA(str str ptr ptr)
 @ stdcall CreateHardLinkTransactedW(wstr wstr ptr ptr)
-@ stdcall CreateHardLinkW(wstr wstr ptr)
+@ stdcall -import CreateHardLinkW(wstr wstr ptr)
 @ stdcall -import CreateIoCompletionPort(long long long long)
 @ stdcall CreateJobObjectA(ptr str)
 @ stdcall CreateJobObjectW(ptr wstr)
@@ -316,6 +317,7 @@
 @ stdcall -import CreateProcessInternalW(long wstr wstr ptr ptr long long ptr wstr ptr ptr ptr)
 # @ stub CreateProcessInternalWSecure
 @ stdcall -import CreateProcessW(wstr wstr ptr ptr long long ptr wstr ptr ptr)
+@ stdcall -import CreatePseudoConsole(long long long long ptr)
 @ stdcall -import CreateRemoteThread(long ptr long ptr long long ptr)
 @ stdcall -import CreateRemoteThreadEx(long ptr long ptr ptr long ptr ptr)
 @ stdcall CreateSemaphoreA(ptr long long str)
@@ -326,7 +328,7 @@
 @ stdcall CreateSymbolicLinkA(str str long)
 # @ stub CreateSymbolicLinkTransactedA
 # @ stub CreateSymbolicLinkTransactedW
-@ stdcall CreateSymbolicLinkW(wstr wstr long)
+@ stdcall -import CreateSymbolicLinkW(wstr wstr long)
 @ stdcall CreateTapePartition(long long long long)
 @ stdcall -import CreateThread(ptr long ptr long long ptr)
 @ stdcall -import CreateThreadpool(ptr)
@@ -345,7 +347,7 @@
 @ stdcall CreateWaitableTimerExA(ptr str long long)
 @ stdcall -import CreateWaitableTimerExW(ptr wstr long long)
 @ stdcall -import CreateWaitableTimerW(ptr long wstr)
-# @ stub CtrlRoutine
+@ stdcall CtrlRoutine(ptr) kernelbase.CtrlRoutine
 @ stdcall -import DeactivateActCtx(long long)
 @ stdcall -import DebugActiveProcess(long)
 @ stdcall -import DebugActiveProcessStop(long)
@@ -355,7 +357,7 @@
 @ stdcall DecodePointer(ptr) ntdll.RtlDecodePointer
 @ stdcall DecodeSystemPointer(ptr) ntdll.RtlDecodeSystemPointer
 @ stdcall DefineDosDeviceA(long str str)
-@ stdcall DefineDosDeviceW(long wstr wstr)
+@ stdcall -import DefineDosDeviceW(long wstr wstr)
 @ stdcall -import DelayLoadFailureHook(str str)
 @ stdcall DeleteAtom(long)
 # @ stub DeleteBoundaryDescriptor
@@ -374,7 +376,7 @@
 @ stdcall -arch=x86_64 DeleteUmsCompletionList(ptr)
 @ stdcall -arch=x86_64 DeleteUmsThreadContext(ptr)
 @ stdcall DeleteVolumeMountPointA(str)
-@ stdcall DeleteVolumeMountPointW(wstr)
+@ stdcall -import DeleteVolumeMountPointW(wstr)
 @ stdcall -arch=x86_64 DequeueUmsCompletionListItems(ptr long ptr)
 @ stdcall DeviceIoControl(long long ptr long ptr long ptr ptr)
 @ stdcall -import DisableThreadLibraryCalls(long)
@@ -488,20 +490,20 @@
 # @ stub FindFirstFileTransactedW
 @ stdcall -import FindFirstFileW(wstr ptr)
 # @ stub FindFirstStreamTransactedW
-@ stdcall FindFirstStreamW(wstr long ptr long)
+@ stdcall -import FindFirstStreamW(wstr long ptr long)
 @ stdcall FindFirstVolumeA(ptr long)
 @ stdcall FindFirstVolumeMountPointA(str ptr long)
 @ stdcall FindFirstVolumeMountPointW(wstr ptr long)
-@ stdcall FindFirstVolumeW(ptr long)
+@ stdcall -import FindFirstVolumeW(ptr long)
 @ stdcall -import FindNextChangeNotification(long)
 @ stdcall -import FindNextFileA(long ptr)
 # @ stub FindNextFileNameW
 @ stdcall -import FindNextFileW(long ptr)
-@ stdcall FindNextStreamW(long ptr)
+@ stdcall -import FindNextStreamW(long ptr)
 @ stdcall FindNextVolumeA(long ptr long)
 @ stub FindNextVolumeMountPointA
 @ stub FindNextVolumeMountPointW
-@ stdcall FindNextVolumeW(long ptr long)
+@ stdcall -import FindNextVolumeW(long ptr long)
 @ stdcall -import FindNLSString(long long wstr long wstr long ptr)
 @ stdcall -import FindNLSStringEx(wstr long wstr long wstr long ptr ptr ptr long)
 @ stdcall FindResourceA(long str str)
@@ -509,22 +511,22 @@
 @ stdcall -import FindResourceExW(long wstr wstr long)
 @ stdcall -import FindResourceW(long wstr wstr)
 @ stdcall -import FindStringOrdinal(long wstr long wstr long long)
-@ stdcall FindVolumeClose(ptr)
+@ stdcall -import FindVolumeClose(ptr)
 @ stdcall FindVolumeMountPointClose(ptr)
 @ stdcall -import FlsAlloc(ptr)
 @ stdcall -import FlsFree(long)
 @ stdcall -import FlsGetValue(long)
 @ stdcall -import FlsSetValue(long ptr)
-@ stdcall FlushConsoleInputBuffer(long)
+@ stdcall -import FlushConsoleInputBuffer(long)
 @ stdcall -import FlushFileBuffers(long)
 @ stdcall -import FlushInstructionCache(long long long)
-@ stdcall FlushProcessWriteBuffers()
+@ stdcall FlushProcessWriteBuffers() ntdll.NtFlushProcessWriteBuffers
 @ stdcall -import FlushViewOfFile(ptr long)
 @ stdcall FoldStringA(long str long ptr long)
 @ stdcall -import FoldStringW(long wstr long ptr long)
-@ stdcall FormatMessageA(long ptr long long ptr long ptr)
-@ stdcall FormatMessageW(long ptr long long ptr long ptr)
-@ stdcall FreeConsole()
+@ stdcall -import FormatMessageA(long ptr long long ptr long ptr)
+@ stdcall -import FormatMessageW(long ptr long long ptr long ptr)
+@ stdcall -import FreeConsole()
 @ stdcall -import FreeEnvironmentStringsA(ptr)
 @ stdcall -import FreeEnvironmentStringsW(ptr)
 @ stub -i386 FreeLSCallback
@@ -541,7 +543,7 @@
 @ stdcall GetActiveProcessorCount(long)
 @ stdcall GetActiveProcessorGroupCount()
 # @ stub GetApplicationRecoveryCallback
-@ stdcall GetApplicationRestartSettings(long ptr ptr ptr)
+@ stdcall -import GetApplicationRestartSettings(long ptr ptr ptr)
 @ stdcall GetAtomNameA(long ptr long)
 @ stdcall GetAtomNameW(long ptr long)
 @ stdcall GetBinaryType(str ptr) GetBinaryTypeA
@@ -626,9 +628,9 @@
 @ stdcall GetCurrentConsoleFontEx(long long ptr)
 @ stdcall -import GetCurrentDirectoryA(long ptr)
 @ stdcall -import GetCurrentDirectoryW(long ptr)
-@ stdcall GetCurrentPackageFamilyName(ptr ptr)
-@ stdcall GetCurrentPackageFullName(ptr ptr)
-@ stdcall GetCurrentPackageId(ptr ptr)
+@ stdcall GetCurrentPackageFamilyName(ptr ptr) kernelbase.GetCurrentPackageFamilyName
+@ stdcall GetCurrentPackageFullName(ptr ptr) kernelbase.GetCurrentPackageFullName
+@ stdcall GetCurrentPackageId(ptr ptr) kernelbase.GetCurrentPackageId
 @ stdcall -norelay GetCurrentProcess() KERNEL32_GetCurrentProcess
 @ stdcall -norelay GetCurrentProcessId() KERNEL32_GetCurrentProcessId
 @ stdcall GetCurrentProcessorNumber() ntdll.NtGetCurrentProcessorNumber
@@ -645,19 +647,19 @@
 @ stdcall GetDefaultCommConfigW(wstr ptr ptr)
 @ stub GetDefaultSortkeySize
 @ stdcall GetDevicePowerState(long ptr)
-@ stdcall GetDiskFreeSpaceA(str ptr ptr ptr ptr)
-@ stdcall GetDiskFreeSpaceExA (str ptr ptr ptr)
-@ stdcall GetDiskFreeSpaceExW (wstr ptr ptr ptr)
-@ stdcall GetDiskFreeSpaceW(wstr ptr ptr ptr ptr)
+@ stdcall -import GetDiskFreeSpaceA(str ptr ptr ptr ptr)
+@ stdcall -import GetDiskFreeSpaceExA (str ptr ptr ptr)
+@ stdcall -import GetDiskFreeSpaceExW (wstr ptr ptr ptr)
+@ stdcall -import GetDiskFreeSpaceW(wstr ptr ptr ptr ptr)
 @ stdcall GetDllDirectoryA(long ptr)
 @ stdcall GetDllDirectoryW(long ptr)
-@ stdcall GetDriveTypeA(str)
-@ stdcall GetDriveTypeW(wstr)
+@ stdcall -import GetDriveTypeA(str)
+@ stdcall -import GetDriveTypeW(wstr)
 # @ stub GetDurationFormat
 # @ stub GetDurationFormatEx
 @ stdcall -import GetDynamicTimeZoneInformation(ptr)
 @ stdcall -import GetDynamicTimeZoneInformationEffectiveYears(ptr ptr ptr)
-@ stdcall -ret64 -arch=i386,x86_64 GetEnabledXStateFeatures()
+@ stdcall -import -ret64 -arch=i386,x86_64 GetEnabledXStateFeatures()
 @ stdcall -import GetEnvironmentStrings()
 @ stdcall -import GetEnvironmentStringsA()
 @ stdcall -import GetEnvironmentStringsW()
@@ -678,14 +680,14 @@
 # @ stub GetFileBandwidthReservation
 @ stdcall -import GetFileInformationByHandle(long ptr)
 @ stdcall -import GetFileInformationByHandleEx(long long ptr long)
-@ stdcall GetFileMUIInfo(long wstr ptr ptr)
-@ stdcall GetFileMUIPath(long wstr wstr ptr ptr ptr ptr)
+@ stdcall -import GetFileMUIInfo(long wstr ptr ptr)
+@ stdcall -import GetFileMUIPath(long wstr wstr ptr ptr ptr ptr)
 @ stdcall -import GetFileSize(long ptr)
 @ stdcall -import GetFileSizeEx(long ptr)
 @ stdcall -import GetFileTime(long ptr ptr ptr)
 @ stdcall -import GetFileType(long)
-@ stdcall GetFinalPathNameByHandleA(long ptr long long)
-@ stdcall GetFinalPathNameByHandleW(long ptr long long)
+@ stdcall -import GetFinalPathNameByHandleA(long ptr long long)
+@ stdcall -import GetFinalPathNameByHandleW(long ptr long long)
 @ stdcall GetFirmwareEnvironmentVariableA(str str ptr long)
 @ stdcall GetFirmwareEnvironmentVariableW(wstr wstr ptr long)
 @ stdcall -import GetFullPathNameA(str long ptr ptr)
@@ -707,8 +709,8 @@
 @ stdcall -import GetLocaleInfoW(long long ptr long)
 @ stdcall -import GetLocaleInfoEx(wstr long ptr long)
 @ stdcall GetLogicalDriveStringsA(long ptr)
-@ stdcall GetLogicalDriveStringsW(long ptr)
-@ stdcall GetLogicalDrives()
+@ stdcall -import GetLogicalDriveStringsW(long ptr)
+@ stdcall -import GetLogicalDrives()
 @ stdcall -import GetLogicalProcessorInformation(ptr ptr)
 @ stdcall -import GetLogicalProcessorInformationEx(long ptr ptr)
 @ stdcall -import GetLongPathNameA(str ptr long)
@@ -724,13 +726,15 @@
 @ stdcall -import GetModuleHandleExA(long ptr ptr)
 @ stdcall -import GetModuleHandleExW(long ptr ptr)
 @ stdcall -import GetModuleHandleW(wstr)
+@ stdcall -import GetNLSVersion(long long ptr)
+@ stdcall -import GetNLSVersionEx(long wstr ptr)
 # @ stub GetNamedPipeAttribute
 # @ stub GetNamedPipeClientComputerNameA
 # @ stub GetNamedPipeClientComputerNameW
 @ stdcall GetNamedPipeClientProcessId(long ptr)
 @ stdcall GetNamedPipeClientSessionId(long ptr)
-@ stdcall GetNamedPipeHandleStateA(long ptr ptr ptr ptr str long)
-@ stdcall GetNamedPipeHandleStateW(long ptr ptr ptr ptr wstr long)
+@ stdcall GetNamedPipeHandleStateA(long ptr ptr ptr ptr ptr long)
+@ stdcall -import GetNamedPipeHandleStateW(long ptr ptr ptr ptr ptr long)
 @ stdcall -import GetNamedPipeInfo(long ptr ptr ptr ptr)
 @ stdcall GetNamedPipeServerProcessId(long ptr)
 @ stdcall GetNamedPipeServerSessionId(long ptr)
@@ -738,8 +742,6 @@
 @ stdcall -arch=x86_64 GetNextUmsListItem(ptr)
 @ stub GetNextVDMCommand
 @ stub GetNlsSectionName
-# @ stub GetNLSVersion
-# @ stub GetNLSVersionEx
 # @ stub GetNumaAvailableMemory
 @ stdcall GetNumaAvailableMemoryNode(long ptr)
 @ stdcall GetNumaAvailableMemoryNodeEx(long ptr)
@@ -761,8 +763,9 @@
 @ stdcall -import GetOEMCP()
 @ stdcall -import GetOverlappedResult(long ptr ptr long)
 @ stdcall -import GetOverlappedResultEx(long ptr ptr long long)
-@ stdcall GetUserPreferredUILanguages(long ptr ptr ptr)
-@ stdcall GetPackageFullName(long ptr ptr)
+@ stdcall -import GetUserPreferredUILanguages(long ptr ptr ptr)
+@ stdcall GetPackageFamilyName(long ptr ptr) kernelbase.GetPackageFamilyName
+@ stdcall GetPackageFullName(long ptr ptr) kernelbase.GetPackageFullName
 @ stdcall -import GetPhysicallyInstalledSystemMemory(ptr)
 @ stdcall -import GetPriorityClass(long)
 @ stdcall GetPrivateProfileIntA(str str long str)
@@ -787,13 +790,13 @@
 @ stdcall -import GetProcessIdOfThread(long)
 @ stdcall GetProcessIoCounters(long ptr)
 @ stdcall -import GetProcessMitigationPolicy(long long ptr long)
-@ stdcall GetProcessPreferredUILanguages(long ptr ptr ptr)
+@ stdcall -import GetProcessPreferredUILanguages(long ptr ptr ptr)
 @ stdcall -import GetProcessPriorityBoost(long ptr)
 @ stdcall -import GetProcessShutdownParameters(ptr ptr)
 # @ stub GetProcessorSystemCycleTime
-@ stdcall GetProcessTimes(long ptr ptr ptr ptr)
+@ stdcall -import GetProcessTimes(long ptr ptr ptr ptr)
 # @ stub GetProcessUserModeExceptionPolicy
-@ stdcall GetProcessVersion(long)
+@ stdcall -import GetProcessVersion(long)
 @ stdcall GetProcessWorkingSetSize(long ptr ptr)
 @ stdcall -import GetProcessWorkingSetSizeEx(long ptr ptr ptr)
 @ stdcall -import GetProductInfo(long long long long ptr)
@@ -829,13 +832,13 @@
 @ stdcall -import GetSystemFirmwareTable(long long ptr long)
 @ stdcall -import GetSystemInfo(ptr)
 @ stdcall GetSystemPowerStatus(ptr)
-@ stdcall GetSystemPreferredUILanguages(long ptr ptr ptr)
+@ stdcall -import GetSystemPreferredUILanguages(long ptr ptr ptr)
 @ stdcall GetSystemRegistryQuota(ptr ptr)
 @ stdcall -import GetSystemTime(ptr)
-@ stdcall GetSystemTimeAdjustment(ptr ptr ptr)
+@ stdcall -import GetSystemTimeAdjustment(ptr ptr ptr)
 @ stdcall -import GetSystemTimeAsFileTime(ptr)
 @ stdcall -import GetSystemTimePreciseAsFileTime(ptr)
-@ stdcall GetSystemTimes(ptr ptr ptr)
+@ stdcall -import GetSystemTimes(ptr ptr ptr)
 @ stdcall -import GetSystemWindowsDirectoryA(ptr long)
 @ stdcall -import GetSystemWindowsDirectoryW(ptr long)
 @ stdcall -import GetSystemWow64DirectoryA(ptr long)
@@ -853,9 +856,9 @@
 @ stdcall -import GetThreadGroupAffinity(long ptr)
 @ stdcall -import GetThreadIOPendingFlag(long ptr)
 @ stdcall -import GetThreadId(ptr)
-# @ stub GetThreadIdealProcessorEx
+@ stdcall -import GetThreadIdealProcessorEx(long ptr)
 @ stdcall -import GetThreadLocale()
-@ stdcall GetThreadPreferredUILanguages(long ptr ptr ptr)
+@ stdcall -import GetThreadPreferredUILanguages(long ptr ptr ptr)
 @ stdcall -import GetThreadPriority(long)
 @ stdcall -import GetThreadPriorityBoost(long ptr)
 @ stdcall GetThreadSelectorEntry(long long ptr)
@@ -880,19 +883,20 @@
 @ stdcall -import GetVersion()
 @ stdcall -import GetVersionExA(ptr)
 @ stdcall -import GetVersionExW(ptr)
-@ stdcall GetVolumeInformationA(str ptr long ptr ptr ptr ptr long)
-@ stdcall GetVolumeInformationByHandleW(ptr ptr long ptr ptr ptr ptr long)
-@ stdcall GetVolumeInformationW(wstr ptr long ptr ptr ptr ptr long)
+@ stdcall -import GetVolumeInformationA(str ptr long ptr ptr ptr ptr long)
+@ stdcall -import GetVolumeInformationByHandleW(ptr ptr long ptr ptr ptr ptr long)
+@ stdcall -import GetVolumeInformationW(wstr ptr long ptr ptr ptr ptr long)
 @ stdcall GetVolumeNameForVolumeMountPointA(str ptr long)
-@ stdcall GetVolumeNameForVolumeMountPointW(wstr ptr long)
+@ stdcall -import GetVolumeNameForVolumeMountPointW(wstr ptr long)
 @ stdcall GetVolumePathNameA(str ptr long)
-@ stdcall GetVolumePathNameW(wstr ptr long)
+@ stdcall -import GetVolumePathNameW(wstr ptr long)
 @ stdcall GetVolumePathNamesForVolumeNameA(str ptr long ptr)
-@ stdcall GetVolumePathNamesForVolumeNameW(wstr ptr long ptr)
+@ stdcall -import GetVolumePathNamesForVolumeNameW(wstr ptr long ptr)
 @ stdcall -import GetWindowsDirectoryA(ptr long)
 @ stdcall -import GetWindowsDirectoryW(ptr long)
 @ stdcall -import GetWriteWatch(long ptr long ptr ptr ptr)
-# @ stub GetXStateFeaturesMask
+@ stdcall -import -arch=i386,x86_64 GetXStateFeaturesMask(ptr ptr)
+@ stdcall -import -arch=i386,x86_64 SetXStateFeaturesMask(ptr int64)
 @ stdcall GlobalAddAtomA(str)
 @ stdcall GlobalAddAtomW(wstr)
 @ stdcall -import GlobalAlloc(long long)
@@ -938,16 +942,17 @@
 @ stub HeapUsage
 @ stdcall -import HeapValidate(long long ptr)
 @ stdcall -import HeapWalk(long ptr)
-@ stdcall IdnToAscii(long wstr long ptr long)
-@ stdcall IdnToNameprepUnicode(long wstr long ptr long)
-@ stdcall IdnToUnicode(long wstr long ptr long)
+@ stdcall -import IdnToAscii(long wstr long ptr long)
+@ stdcall -import IdnToNameprepUnicode(long wstr long ptr long)
+@ stdcall -import IdnToUnicode(long wstr long ptr long)
 @ stdcall InitAtomTable(long)
 @ stdcall InitOnceBeginInitialize(ptr long ptr ptr) kernelbase.InitOnceBeginInitialize
 @ stdcall InitOnceComplete(ptr long ptr) kernelbase.InitOnceComplete
 @ stdcall InitOnceExecuteOnce(ptr ptr ptr ptr) kernelbase.InitOnceExecuteOnce
 @ stdcall InitOnceInitialize(ptr) ntdll.RtlRunOnceInitialize
 @ stdcall InitializeConditionVariable(ptr) ntdll.RtlInitializeConditionVariable
-# @ stub InitializeContext
+@ stdcall -import -arch=i386,x86_64 InitializeContext(ptr long ptr ptr)
+@ stdcall -import -arch=i386,x86_64 InitializeContext2(ptr long ptr ptr int64)
 @ stdcall InitializeCriticalSection(ptr) ntdll.RtlInitializeCriticalSection
 @ stdcall -import InitializeCriticalSectionAndSpinCount(ptr long)
 @ stdcall -import InitializeCriticalSectionEx(ptr long long)
@@ -995,35 +1000,37 @@
 @ stdcall -import IsValidLanguageGroup(long long)
 @ stdcall -import IsValidLocale(long long)
 @ stdcall -import IsValidLocaleName(wstr)
+@ stdcall -import IsValidNLSVersion(long wstr ptr)
 # @ stub IsValidUILanguage
 @ stdcall -import IsWow64Process(ptr ptr)
-@ stdcall K32EmptyWorkingSet(long)
-@ stdcall K32EnumDeviceDrivers(ptr long ptr)
-@ stdcall K32EnumPageFilesA(ptr ptr)
-@ stdcall K32EnumPageFilesW(ptr ptr)
-@ stdcall K32EnumProcessModules(long ptr long ptr)
-@ stdcall K32EnumProcessModulesEx(long ptr long ptr long)
-@ stdcall K32EnumProcesses(ptr long ptr)
-@ stdcall K32GetDeviceDriverBaseNameA(ptr ptr long)
-@ stdcall K32GetDeviceDriverBaseNameW(ptr ptr long)
-@ stdcall K32GetDeviceDriverFileNameA(ptr ptr long)
-@ stdcall K32GetDeviceDriverFileNameW(ptr ptr long)
-@ stdcall K32GetMappedFileNameA(long ptr ptr long)
-@ stdcall K32GetMappedFileNameW(long ptr ptr long)
-@ stdcall K32GetModuleBaseNameA(long long ptr long)
-@ stdcall K32GetModuleBaseNameW(long long ptr long)
-@ stdcall K32GetModuleFileNameExA(long long ptr long)
-@ stdcall K32GetModuleFileNameExW(long long ptr long)
-@ stdcall K32GetModuleInformation(long long ptr long)
-@ stdcall K32GetPerformanceInfo(ptr long)
-@ stdcall K32GetProcessImageFileNameA(long ptr long)
-@ stdcall K32GetProcessImageFileNameW(long ptr long)
-@ stdcall K32GetProcessMemoryInfo(long ptr long)
-@ stdcall K32GetWsChanges(long ptr long)
-@ stdcall K32GetWsChangesEx(long ptr ptr)
-@ stdcall K32InitializeProcessForWsWatch(long)
-@ stdcall K32QueryWorkingSet(long ptr long)
-@ stdcall K32QueryWorkingSetEx(long ptr long)
+@ stdcall -import IsWow64Process2(ptr ptr ptr)
+@ stdcall -import K32EmptyWorkingSet(long)
+@ stdcall -import K32EnumDeviceDrivers(ptr long ptr)
+@ stdcall -import K32EnumPageFilesA(ptr ptr)
+@ stdcall -import K32EnumPageFilesW(ptr ptr)
+@ stdcall -import K32EnumProcessModules(long ptr long ptr)
+@ stdcall -import K32EnumProcessModulesEx(long ptr long ptr long)
+@ stdcall -import K32EnumProcesses(ptr long ptr)
+@ stdcall -import K32GetDeviceDriverBaseNameA(ptr ptr long)
+@ stdcall -import K32GetDeviceDriverBaseNameW(ptr ptr long)
+@ stdcall -import K32GetDeviceDriverFileNameA(ptr ptr long)
+@ stdcall -import K32GetDeviceDriverFileNameW(ptr ptr long)
+@ stdcall -import K32GetMappedFileNameA(long ptr ptr long)
+@ stdcall -import K32GetMappedFileNameW(long ptr ptr long)
+@ stdcall -import K32GetModuleBaseNameA(long long ptr long)
+@ stdcall -import K32GetModuleBaseNameW(long long ptr long)
+@ stdcall -import K32GetModuleFileNameExA(long long ptr long)
+@ stdcall -import K32GetModuleFileNameExW(long long ptr long)
+@ stdcall -import K32GetModuleInformation(long long ptr long)
+@ stdcall -import K32GetPerformanceInfo(ptr long)
+@ stdcall -import K32GetProcessImageFileNameA(long ptr long)
+@ stdcall -import K32GetProcessImageFileNameW(long ptr long)
+@ stdcall -import K32GetProcessMemoryInfo(long ptr long)
+@ stdcall -import K32GetWsChanges(long ptr long)
+@ stdcall -import K32GetWsChangesEx(long ptr ptr)
+@ stdcall -import K32InitializeProcessForWsWatch(long)
+@ stdcall -import K32QueryWorkingSet(long ptr long)
+@ stdcall -import K32QueryWorkingSetEx(long ptr long)
 @ stdcall -i386 -private -norelay K32Thk1632Epilog() krnl386.exe16.K32Thk1632Epilog
 @ stdcall -i386 -private -norelay K32Thk1632Prolog() krnl386.exe16.K32Thk1632Prolog
 @ stdcall -import LCIDToLocaleName(long ptr long long)
@@ -1043,12 +1050,13 @@
 @ stdcall LZStart()
 @ stdcall LeaveCriticalSection(ptr) ntdll.RtlLeaveCriticalSection
 @ stdcall LeaveCriticalSectionWhenCallbackReturns(ptr ptr) ntdll.TpCallbackLeaveCriticalSectionOnCompletion
-# @ stub LoadAppInitDlls
+@ stdcall -import LoadAppInitDlls()
 @ stdcall -import LoadLibraryA(str)
 @ stdcall -import LoadLibraryExA( str long long)
 @ stdcall -import LoadLibraryExW(wstr long long)
 @ stdcall -import LoadLibraryW(wstr)
 @ stdcall LoadModule(str ptr)
+@ stdcall -import LoadPackagedLibrary(wstr long)
 @ stdcall -import LoadResource(long long)
 # @ stub LoadStringBaseExW
 # @ stub LoadStringBaseW
@@ -1064,7 +1072,7 @@
 @ stdcall LocalSize(long)
 @ stdcall -import LocalUnlock(long)
 @ stdcall -import LocaleNameToLCID(wstr long)
-# @ stub LocateXStateFeature
+@ stdcall -import -arch=i386,x86_64 LocateXStateFeature(ptr long ptr)
 @ stdcall -import LockFile(long long long long long)
 @ stdcall -import LockFileEx(long long long long long ptr)
 @ stdcall -import LockResource(long)
@@ -1089,12 +1097,12 @@
 @ stdcall Module32NextW(long ptr)
 @ stdcall MoveFileA(str str)
 @ stdcall MoveFileExA(str str long)
-@ stdcall MoveFileExW(wstr wstr long)
+@ stdcall -import MoveFileExW(wstr wstr long)
 @ stdcall MoveFileTransactedA(str str ptr ptr long ptr)
 @ stdcall MoveFileTransactedW(wstr wstr ptr ptr long ptr)
 @ stdcall MoveFileW(wstr wstr)
 @ stdcall MoveFileWithProgressA(str str ptr ptr long)
-@ stdcall MoveFileWithProgressW(wstr wstr ptr ptr long)
+@ stdcall -import MoveFileWithProgressW(wstr wstr ptr ptr long)
 @ stdcall MulDiv(long long long)
 @ stdcall -import MultiByteToWideChar(long long str long ptr long)
 @ stdcall -import NeedCurrentDirectoryForExePathA(str)
@@ -1154,7 +1162,7 @@
 @ stdcall Process32FirstW (ptr ptr)
 @ stdcall Process32Next (ptr ptr)
 @ stdcall Process32NextW (ptr ptr)
-@ stdcall ProcessIdToSessionId(long ptr)
+@ stdcall -import ProcessIdToSessionId(long ptr)
 @ stdcall -import PulseEvent(long)
 @ stdcall -import PurgeComm(long long)
 @ stdcall -i386 -private -norelay QT_Thunk() krnl386.exe16.QT_Thunk
@@ -1162,9 +1170,9 @@
 @ stdcall -import QueryActCtxW(long ptr ptr long ptr long ptr)
 @ stdcall QueryDepthSList(ptr) ntdll.RtlQueryDepthSList
 @ stdcall QueryDosDeviceA(str ptr long)
-@ stdcall QueryDosDeviceW(wstr ptr long)
-@ stdcall QueryFullProcessImageNameA(ptr long ptr ptr)
-@ stdcall QueryFullProcessImageNameW(ptr long ptr ptr)
+@ stdcall -import QueryDosDeviceW(wstr ptr long)
+@ stdcall -import QueryFullProcessImageNameA(ptr long ptr ptr)
+@ stdcall -import QueryFullProcessImageNameW(ptr long ptr ptr)
 # @ stub QueryIdleProcessorCycleTime
 # @ stub QueryIdleProcessorCycleTimeEx
 @ stdcall QueryInformationJobObject(long long ptr long ptr)
@@ -1174,10 +1182,10 @@
 @ stdcall -import QueryPerformanceCounter(ptr)
 @ stdcall -import QueryPerformanceFrequency(ptr)
 # @ stub QueryProcessAffinityUpdateMode
-@ stdcall QueryProcessCycleTime(long ptr)
-@ stdcall QueryThreadCycleTime(long ptr)
+@ stdcall -import QueryProcessCycleTime(long ptr)
+@ stdcall -import QueryThreadCycleTime(long ptr)
 # @ stub QueryThreadProfiling
-# @ stub QueryThreadpoolStackInformation
+@ stdcall -import QueryThreadpoolStackInformation(ptr ptr)
 @ stdcall -arch=x86_64 QueryUmsThreadInformation(ptr long ptr long ptr)
 @ stdcall -import QueryUnbiasedInterruptTime(ptr)
 @ stub QueryWin31IniFilesMappedToRegistry
@@ -1185,23 +1193,22 @@
 @ stdcall -import QueueUserWorkItem(ptr ptr long)
 @ stdcall -import RaiseException(long long long ptr)
 # @ stub RaiseFailFastException
-@ stdcall ReadConsoleA(long ptr long ptr ptr)
-@ stdcall ReadConsoleInputA(long ptr long ptr)
+@ stdcall -import ReadConsoleA(long ptr long ptr ptr)
+@ stdcall -import ReadConsoleInputA(long ptr long ptr)
 @ stub ReadConsoleInputExA
 @ stub ReadConsoleInputExW
-@ stdcall ReadConsoleInputW(long ptr long ptr)
+@ stdcall -import ReadConsoleInputW(long ptr long ptr)
 @ stdcall -import ReadConsoleOutputA(long ptr long long ptr)
 @ stdcall -import ReadConsoleOutputAttribute(long ptr long long ptr)
 @ stdcall -import ReadConsoleOutputCharacterA(long ptr long long ptr)
 @ stdcall -import ReadConsoleOutputCharacterW(long ptr long long ptr)
 @ stdcall -import ReadConsoleOutputW(long ptr long long ptr)
-@ stdcall ReadConsoleW(long ptr long ptr ptr)
+@ stdcall -import ReadConsoleW(long ptr long ptr ptr)
 @ stdcall -import ReadDirectoryChangesW(long ptr long long long ptr ptr ptr)
-@ stdcall ReadFile(long ptr long ptr ptr) KERNEL32_ReadFile
+@ stdcall -import ReadFile(long ptr long ptr ptr)
 @ stdcall -import ReadFileEx(long ptr long ptr ptr)
 @ stdcall -import ReadFileScatter(long ptr long ptr ptr)
 @ stdcall -import ReadProcessMemory(long ptr ptr long ptr)
-@ stdcall -arch=x86_32on64 wine_ReadProcessMemory_HOSTPTR(long int64 ptr long int64)
 # @ stub ReadThreadProfilingData
 @ stdcall -private -import RegCloseKey(long)
 @ stdcall -private -import RegCreateKeyExA(long str long ptr long long ptr ptr ptr)
@@ -1265,16 +1272,16 @@
 @ stdcall ReleaseSemaphoreWhenCallbackReturns(ptr long long) ntdll.TpCallbackReleaseSemaphoreOnCompletion
 @ stdcall ReleaseSRWLockExclusive(ptr) ntdll.RtlReleaseSRWLockExclusive
 @ stdcall ReleaseSRWLockShared(ptr) ntdll.RtlReleaseSRWLockShared
-@ stdcall RemoveDirectoryA(str)
-@ stdcall RemoveDirectoryW(wstr)
+@ stdcall -import RemoveDirectoryA(str)
+@ stdcall -import RemoveDirectoryW(wstr)
 # @ stub RemoveLocalAlternateComputerNameA
 # @ stub RemoveLocalAlternateComputerNameW
 @ stdcall RemoveVectoredContinueHandler(ptr) ntdll.RtlRemoveVectoredContinueHandler
 @ stdcall RemoveVectoredExceptionHandler(ptr) ntdll.RtlRemoveVectoredExceptionHandler
 @ stdcall -import ReOpenFile(ptr long long long) ReOpenFile
-@ stdcall ReplaceFile(wstr wstr wstr long ptr ptr) ReplaceFileW
+@ stdcall -import ReplaceFile(wstr wstr wstr long ptr ptr) ReplaceFileW
 @ stdcall ReplaceFileA(str str str long ptr ptr)
-@ stdcall ReplaceFileW(wstr wstr wstr long ptr ptr)
+@ stdcall -import ReplaceFileW(wstr wstr wstr long ptr ptr)
 # @ stub RemoveDirectoryTransactedA
 # @ stub RemoveDirectoryTransactedW
 @ stdcall -import RemoveDllDirectory(ptr)
@@ -1284,6 +1291,7 @@
 @ stdcall RequestWakeupLatency(long)
 @ stdcall -import ResetEvent(long)
 @ stdcall -import ResetWriteWatch(ptr long)
+@ stdcall -import ResizePseudoConsole(ptr long)
 @ stdcall ResolveDelayLoadedAPI(ptr ptr ptr ptr ptr long) ntdll.LdrResolveDelayLoadedAPI
 @ stdcall -import ResolveLocaleName(wstr ptr long)
 @ stdcall RestoreLastError(long) ntdll.RtlRestoreLastWin32Error
@@ -1347,7 +1355,7 @@
 @ stdcall -import SetConsoleCP(long)
 # @ stub SetConsoleHistoryInfo
 @ stub SetConsoleCommandHistoryMode
-@ stdcall SetConsoleCtrlHandler(ptr long)
+@ stdcall -import SetConsoleCtrlHandler(ptr long)
 @ stub SetConsoleCursor
 @ stdcall -import SetConsoleCursorInfo(long ptr)
 @ stub SetConsoleCursorMode
@@ -1387,8 +1395,8 @@
 @ stdcall SetDllDirectoryW(wstr)
 # @ stub SetDynamicTimeZoneInformation
 @ stdcall -import SetEndOfFile(long)
-# @ stub SetEnvironmentStringsA
-# @ stub SetEnvironmentStringsW
+@ stdcall -import SetEnvironmentStringsA(str)
+@ stdcall -import SetEnvironmentStringsW(wstr)
 @ stdcall -import SetEnvironmentVariableA(str str)
 @ stdcall -import SetEnvironmentVariableW(wstr wstr)
 @ stdcall -import SetErrorMode(long)
@@ -1411,7 +1419,7 @@
 @ stdcall -import SetFileTime(long ptr ptr ptr)
 @ stdcall -import SetFileValidData(ptr int64)
 # @ stub SetFirmwareEnvironmentVariableA
-# @ stub SetFirmwareEnvironmentVariableW
+@ stdcall SetFirmwareEnvironmentVariableW(wstr wstr ptr long)
 @ stdcall SetHandleContext(long long)
 @ stdcall SetHandleCount(long)
 @ stdcall -import SetHandleInformation(long long long)
@@ -1432,7 +1440,7 @@
 @ stdcall -import SetProcessAffinityUpdateMode(long long)
 @ stdcall SetProcessDEPPolicy(long)
 @ stdcall -import SetProcessMitigationPolicy(long ptr long)
-@ stdcall SetProcessPreferredUILanguages(long ptr ptr)
+@ stdcall -import SetProcessPreferredUILanguages(long ptr ptr)
 @ stdcall -import SetProcessPriorityBoost(long long)
 @ stdcall -import SetProcessShutdownParameters(long long)
 # @ stub SetProcessUserModeExceptionPolicy
@@ -1444,7 +1452,7 @@
 @ stdcall -import SetSystemFileCacheSize(long long long)
 @ stdcall SetSystemPowerState(long long)
 @ stdcall -import SetSystemTime(ptr)
-@ stdcall SetSystemTimeAdjustment(long long)
+@ stdcall -import SetSystemTimeAdjustment(long long)
 @ stdcall SetTapeParameters(ptr long ptr)
 @ stdcall SetTapePosition(ptr long long long long long)
 @ stdcall SetTermsrvAppInstallMode(long)
@@ -1457,13 +1465,13 @@
 @ stdcall -import SetThreadIdealProcessor(long long)
 @ stdcall -import SetThreadIdealProcessorEx(long ptr ptr)
 @ stdcall -import SetThreadLocale(long)
-@ stdcall SetThreadPreferredUILanguages(long ptr ptr)
+@ stdcall -import SetThreadPreferredUILanguages(long ptr ptr)
 @ stdcall -import SetThreadPriority(long long)
 @ stdcall -import SetThreadPriorityBoost(long long)
 @ stdcall -import SetThreadStackGuarantee(ptr)
 # @ stub SetThreadToken
 @ stdcall -import SetThreadUILanguage(long)
-# @ stub SetThreadpoolStackInformation
+@ stdcall -import SetThreadpoolStackInformation(ptr ptr)
 @ stdcall SetThreadpoolThreadMaximum(ptr long) ntdll.TpSetPoolMaxThreads
 @ stdcall SetThreadpoolThreadMinimum(ptr long) ntdll.TpSetPoolMinThreads
 @ stdcall SetThreadpoolTimer(ptr ptr long long) ntdll.TpSetTimer
@@ -1491,7 +1499,7 @@
 @ stdcall -import SleepEx(long long)
 # @ stub SortCloseHandle
 # @ stub SortGetHandle
-# @ stub StartThreadpoolIo
+@ stdcall StartThreadpoolIo(ptr) ntdll.TpStartAsyncIoOperation
 @ stdcall SubmitThreadpoolWork(ptr) ntdll.TpPostWork
 @ stdcall -import SuspendThread(long)
 @ stdcall -import SwitchToFiber(ptr)
@@ -1580,7 +1588,7 @@
 @ stdcall -import WaitForMultipleObjectsEx(long ptr long long long)
 @ stdcall -import WaitForSingleObject(long long)
 @ stdcall -import WaitForSingleObjectEx(long long long)
-# @ stub WaitForThreadpoolIoCallbacks
+@ stdcall WaitForThreadpoolIoCallbacks(ptr) ntdll.TpWaitForIoCompletion
 @ stdcall WaitForThreadpoolTimerCallbacks(ptr long) ntdll.TpWaitForTimer
 @ stdcall WaitForThreadpoolWaitCallbacks(ptr long) ntdll.TpWaitForWait
 @ stdcall WaitForThreadpoolWorkCallbacks(ptr long) ntdll.TpWaitForWork
@@ -1588,14 +1596,14 @@
 @ stdcall -import WaitNamedPipeW (wstr long)
 @ stdcall WakeAllConditionVariable(ptr) ntdll.RtlWakeAllConditionVariable
 @ stdcall WakeConditionVariable(ptr) ntdll.RtlWakeConditionVariable
-# @ stub WerGetFlags
-@ stdcall WerRegisterFile(wstr long long)
-@ stdcall WerRegisterMemoryBlock(ptr long)
-@ stdcall WerRegisterRuntimeExceptionModule(wstr ptr)
-@ stdcall WerSetFlags(long)
-# @ stub WerUnregisterFile
-@ stdcall WerUnregisterMemoryBlock(ptr)
-@ stdcall WerUnregisterRuntimeExceptionModule(wstr ptr)
+@ stdcall -import WerGetFlags(ptr ptr)
+@ stdcall -import WerRegisterFile(wstr long long)
+@ stdcall -import WerRegisterMemoryBlock(ptr long)
+@ stdcall -import WerRegisterRuntimeExceptionModule(wstr ptr)
+@ stdcall -import WerSetFlags(long)
+@ stdcall -import WerUnregisterFile(wstr)
+@ stdcall -import WerUnregisterMemoryBlock(ptr)
+@ stdcall -import WerUnregisterRuntimeExceptionModule(wstr ptr)
 # @ stub WerpCleanupMessageMapping
 # @ stub WerpInitiateRemoteRecovery
 # @ stub WerpNotifyLoadStringResource
@@ -1611,7 +1619,7 @@
 @ stdcall -import Wow64RevertWow64FsRedirection(ptr)
 @ stdcall Wow64SetThreadContext(long ptr)
 # @ stub Wow64SuspendThread
-@ stdcall WriteConsoleA(long ptr long ptr ptr)
+@ stdcall -import WriteConsoleA(long ptr long ptr ptr)
 @ stdcall -import WriteConsoleInputA(long ptr long ptr)
 @ stub WriteConsoleInputVDMA
 @ stub WriteConsoleInputVDMW
@@ -1621,8 +1629,8 @@
 @ stdcall -import WriteConsoleOutputCharacterA(long ptr long long ptr)
 @ stdcall -import WriteConsoleOutputCharacterW(long ptr long long ptr)
 @ stdcall -import WriteConsoleOutputW(long ptr long long ptr)
-@ stdcall WriteConsoleW(long ptr long ptr ptr)
-@ stdcall WriteFile(long ptr long ptr ptr) KERNEL32_WriteFile
+@ stdcall -import WriteConsoleW(long ptr long ptr ptr)
+@ stdcall -import WriteFile(long ptr long ptr ptr)
 @ stdcall -import WriteFileEx(long ptr long ptr ptr)
 @ stdcall -import WriteFileGather(long ptr long ptr ptr)
 @ stdcall WritePrivateProfileSectionA(str str str)
@@ -1632,7 +1640,6 @@
 @ stdcall WritePrivateProfileStructA (str str ptr long str)
 @ stdcall WritePrivateProfileStructW(wstr wstr ptr long wstr)
 @ stdcall -import WriteProcessMemory(long ptr ptr long ptr)
-@ stdcall -arch=x86_32on64 wine_WriteProcessMemory_HOSTPTR(long int64 ptr long ptr)
 @ stdcall WriteProfileSectionA(str str)
 @ stdcall WriteProfileSectionW(wstr wstr)
 @ stdcall WriteProfileStringA(str str str)
@@ -1640,7 +1647,7 @@
 @ stdcall WriteTapemark(ptr long long long)
 @ stdcall -import ZombifyActCtx(ptr)
 @ stdcall -arch=x86_64 -private __C_specific_handler(ptr long ptr ptr) ntdll.__C_specific_handler
-@ stdcall -arch=arm,x86_64 -private -norelay __chkstk() ntdll.__chkstk
+@ cdecl -arch=arm,arm64,x86_64 -norelay __chkstk() ntdll.__chkstk
 @ stub _DebugOut
 @ stub _DebugPrintf
 @ stdcall _hread(long ptr long)
@@ -1678,19 +1685,6 @@
 # All functions must be prefixed with '__wine_' (for internal functions)
 # or 'wine_' (for user-visible functions) to avoid namespace conflicts.
 
-# 16-bit relays (for backwards compatibility)
-@ cdecl -i386 -private __wine_dll_register_16(ptr str)
-@ cdecl -i386 -private __wine_dll_unregister_16(ptr)
-@ stub -i386 __wine_call_from_16_regs
-
 # Unix files
 @ cdecl wine_get_unix_file_name(wstr)
 @ cdecl wine_get_dos_file_name(str)
-
-# Init code
-@ cdecl -norelay -private __wine_start_process()
-
-@ stdcall -arch=x86_32on64 wine_MultiByteToWideChar_HOSTPTR(long long int64 long int64 long)
-@ stdcall -arch=x86_32on64 wine_WideCharToMultiByte_HOSTPTR(long long int64 long int64 long int64 int64)
-@ stdcall -arch=x86_32on64 wine_IsBadStringPtrA_HOSTPTR(int64 int64)
-@ stdcall -arch=x86_32on64 wine_IsBadStringPtrW_HOSTPTR(int64 int64)

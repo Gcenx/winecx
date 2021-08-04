@@ -137,7 +137,6 @@ ULONG CDECL ldap_extended_operationW( WLDAP32_LDAP *ld, PWCHAR oid, struct WLDAP
 #ifdef HAVE_LDAP
     char *oidU = NULL;
     LDAPControl **serverctrlsU = NULL, **clientctrlsU = NULL;
-    struct berval bvdata;
 
     ret = WLDAP32_LDAP_NO_MEMORY;
 
@@ -150,10 +149,6 @@ ULONG CDECL ldap_extended_operationW( WLDAP32_LDAP *ld, PWCHAR oid, struct WLDAP
         oidU = strWtoU( oid );
         if (!oidU) goto exit;
     }
-    if (data) {
-        bvdata.bv_len = data->bv_len;
-        bvdata.bv_val = data->bv_val;
-    }
     if (serverctrls) {
         serverctrlsU = controlarrayWtoU( serverctrls );
         if (!serverctrlsU) goto exit;
@@ -163,7 +158,7 @@ ULONG CDECL ldap_extended_operationW( WLDAP32_LDAP *ld, PWCHAR oid, struct WLDAP
         if (!clientctrlsU) goto exit;
     }
 
-    ret = map_error( ldap_extended_operation( ldap_get( ld ), oid ? oidU : "", data ? &bvdata : NULL,
+    ret = map_error( ldap_extended_operation( ld->ld, oid ? oidU : "", (struct berval *)data,
                                               serverctrlsU, clientctrlsU, (int *)message ));
 
 exit:
@@ -273,10 +268,6 @@ ULONG CDECL ldap_extended_operation_sW( WLDAP32_LDAP *ld, PWCHAR oid, struct WLD
         oidU = strWtoU( oid );
         if (!oidU) goto exit;
     }
-    if (data) {
-        bvdata.bv_len = data->bv_len;
-        bvdata.bv_val = data->bv_val;
-    }
     if (serverctrls) {
         serverctrlsU = controlarrayWtoU( serverctrls );
         if (!serverctrlsU) goto exit;
@@ -286,12 +277,14 @@ ULONG CDECL ldap_extended_operation_sW( WLDAP32_LDAP *ld, PWCHAR oid, struct WLD
         if (!clientctrlsU) goto exit;
     }
 
-    ret = map_error( ldap_extended_operation_s( ldap_get( ld ), oid ? oidU : "", data ? &bvdata : NULL,
-                                                serverctrlsU, clientctrlsU, &retoidU, &bvret ));
+    ret = map_error( ldap_extended_operation_s( ld->ld, oid ? oidU : "", data ? &bvdata : NULL, serverctrlsU,
+                                                clientctrlsU, &retoidU, &bvret ));
     ret = bvconvert_and_free( ret, bvret, retdata );
 
     if (retoid && retoidU) {
-        *retoid = strUtoW( retoidU );
+        char *copy = heap_strdup(retoidU);
+        *retoid = strUtoW( copy );
+        heap_free(copy);
         if (!*retoid) ret = WLDAP32_LDAP_NO_MEMORY;
         ldap_memfree( retoidU );
     }

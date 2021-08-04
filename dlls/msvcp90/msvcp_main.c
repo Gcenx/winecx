@@ -26,7 +26,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcp);
 
-#if defined(__i386__) && !defined(__MINGW32__)
+#ifdef __ASM_USE_THISCALL_WRAPPER
 
 #define DEFINE_VTBL_WRAPPER(off)            \
     __ASM_GLOBAL_FUNC(vtbl_wrapper_ ## off, \
@@ -54,24 +54,20 @@ DEFINE_VTBL_WRAPPER(56);
 
 #endif
 
-void* (__cdecl *MSVCRT_operator_new)(MSVCP_size_t);
+void* (__cdecl *MSVCRT_operator_new)(size_t);
 void (__cdecl *MSVCRT_operator_delete)(void*);
 void* (__cdecl *MSVCRT_set_new_handler)(void*);
-
-#if _MSVCP_VER >= 140
-int* (__cdecl *UCRTBASE___processing_throw)(void);
-#endif
 
 #if _MSVCP_VER >= 110
 critical_section* (__thiscall *critical_section_ctor)(critical_section*);
 void (__thiscall *critical_section_dtor)(critical_section*);
 void (__thiscall *critical_section_lock)(critical_section*);
 void (__thiscall *critical_section_unlock)(critical_section*);
-MSVCP_bool (__thiscall *critical_section_trylock)(critical_section*);
+bool (__thiscall *critical_section_trylock)(critical_section*);
 #endif
 
 #if _MSVCP_VER >= 100
-MSVCP_bool (__cdecl *Context_IsCurrentTaskCollectionCanceling)(void);
+bool (__cdecl *Context_IsCurrentTaskCollectionCanceling)(void);
 #endif
 
 #define VERSION_STRING(ver) #ver
@@ -83,7 +79,7 @@ MSVCP_bool (__cdecl *Context_IsCurrentTaskCollectionCanceling)(void);
 #endif
 
 #if _MSVCP_VER >= 140
-static void* __cdecl operator_new(MSVCP_size_t size)
+static void* __cdecl operator_new(size_t size)
 {
     void *retval;
     int freed;
@@ -93,13 +89,13 @@ static void* __cdecl operator_new(MSVCP_size_t size)
         retval = malloc(size);
         if (retval)
         {
-            TRACE("(%ld) returning %p\n", size, retval);
+            TRACE("(%Iu) returning %p\n", size, retval);
             return retval;
         }
         freed = _callnewh(size);
     } while (freed);
 
-    TRACE("(%ld) out of memory\n", size);
+    TRACE("(%Iu) out of memory\n", size);
     throw_exception(EXCEPTION_BAD_ALLOC, "bad allocation");
     return NULL;
 }
@@ -113,26 +109,6 @@ static void __cdecl operator_delete(void *mem)
 void __cdecl _invalid_parameter(const wchar_t *expr, const wchar_t *func, const wchar_t *file, unsigned int line, uintptr_t arg)
 {
    _invalid_parameter_noinfo();
-}
-
-int WINAPIV _scprintf(const char* fmt, ...)
-{
-    int ret;
-    __ms_va_list valist;
-    __ms_va_start(valist, fmt);
-    ret = _vsnprintf(NULL, 0, fmt, valist);
-    __ms_va_end(valist);
-    return ret;
-}
-
-int WINAPIV sprintf(char *buf, const char *fmt, ...)
-{
-    int ret;
-    __ms_va_list valist;
-    __ms_va_start(valist, fmt);
-    ret = _vsnprintf(buf, -1, fmt, valist);
-    __ms_va_end(valist);
-    return ret;
 }
 #endif
 
@@ -149,7 +125,6 @@ static void init_cxx_funcs(void)
     MSVCRT_operator_new = operator_new;
     MSVCRT_operator_delete = operator_delete;
     MSVCRT_set_new_handler = (void*)GetProcAddress(hmod, "_set_new_handler");
-    UCRTBASE___processing_throw = (void*)GetProcAddress(hmod, "__processing_throw");
 
     hcon = LoadLibraryA( CONCRT_NAME(_MSVCP_VER) );
     if (!hcon) FIXME( "%s not loaded\n", CONCRT_NAME(_MSVCP_VER) );
@@ -250,8 +225,3 @@ __int64 * __cdecl std_Fpz_func(void)
 {
     return &std_Fpz;
 }
-
-#if defined(__MINGW32__) && _MSVCP_VER >= 80 && _MSVCP_VER <= 90
-/* Hack: prevent Mingw from importing mingw_helpers.o which conflicts with encode/decode_pointer */
-int mingw_app_type = 0;
-#endif

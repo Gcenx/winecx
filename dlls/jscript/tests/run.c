@@ -111,6 +111,7 @@ DEFINE_EXPECT(testobj_onlydispid_d);
 DEFINE_EXPECT(testobj_onlydispid_i);
 DEFINE_EXPECT(testobj_notexists_d);
 DEFINE_EXPECT(testobj_newenum);
+DEFINE_EXPECT(testobj_getidfail_d);
 DEFINE_EXPECT(enumvariant_next_0);
 DEFINE_EXPECT(enumvariant_next_1);
 DEFINE_EXPECT(enumvariant_reset);
@@ -121,6 +122,15 @@ DEFINE_EXPECT(DeleteMemberByDispID);
 DEFINE_EXPECT(DeleteMemberByDispID_false);
 DEFINE_EXPECT(DeleteMemberByDispID_error);
 DEFINE_EXPECT(BindHandler);
+
+#define JS_E_SUBSCRIPT_OUT_OF_RANGE  0x800a0009
+#define JS_E_INVALID_ACTION          0x800a01bd
+#define JS_E_OBJECT_EXPECTED         0x800a138f
+#define JS_E_UNDEFINED_VARIABLE      0x800a1391
+#define JS_E_EXCEPTION_THROWN        0x800a139e
+#define JS_E_SYNTAX                  0x800a03ea
+#define JS_E_MISSING_RBRACKET        0x800a03ee
+#define JS_E_MISPLACED_RETURN        0x800a03fa
 
 #define DISPID_GLOBAL_TESTPROPGET   0x1000
 #define DISPID_GLOBAL_TESTPROPPUT   0x1001
@@ -155,6 +165,11 @@ DEFINE_EXPECT(BindHandler);
 #define DISPID_GLOBAL_TESTENUMOBJ   0x101e
 #define DISPID_GLOBAL_CALLEVAL      0x101f
 #define DISPID_GLOBAL_PROPARGPUTOP  0x1020
+#define DISPID_GLOBAL_THROWINT      0x1021
+#define DISPID_GLOBAL_THROWEI       0x1022
+#define DISPID_GLOBAL_VDATE         0x1023
+#define DISPID_GLOBAL_VCY           0x1024
+#define DISPID_GLOBAL_TODOWINE      0x1025
 
 #define DISPID_GLOBAL_TESTPROPDELETE      0x2000
 #define DISPID_GLOBAL_TESTNOPROPDELETE    0x2001
@@ -465,6 +480,10 @@ static HRESULT WINAPI testObj_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD
         CHECK_EXPECT(testobj_notexists_d);
         test_grfdex(grfdex, fdexNameCaseSensitive);
         return DISP_E_UNKNOWNNAME;
+    }
+    if(!lstrcmpW(bstrName, L"getIDFail")) {
+        CHECK_EXPECT(testobj_getidfail_d);
+        return E_FAIL;
     }
 
     ok(0, "unexpected name %s\n", wine_dbgstr_w(bstrName));
@@ -797,6 +816,11 @@ static HRESULT WINAPI Global_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD 
         *pid = DISPID_GLOBAL_TRACE;
         return S_OK;
     }
+    if(!lstrcmpW(bstrName, L"todo_wine_ok")) {
+        test_grfdex(grfdex, fdexNameCaseSensitive);
+        *pid = DISPID_GLOBAL_TODOWINE;
+        return S_OK;
+    }
     if(!lstrcmpW(bstrName, L"reportSuccess")) {
         CHECK_EXPECT(global_success_d);
         test_grfdex(grfdex, fdexNameCaseSensitive);
@@ -926,6 +950,18 @@ static HRESULT WINAPI Global_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD 
         return S_OK;
     }
 
+    if(!lstrcmpW(bstrName, L"throwInt")) {
+        test_grfdex(grfdex, fdexNameCaseSensitive);
+        *pid = DISPID_GLOBAL_THROWINT;
+        return S_OK;
+    }
+
+    if(!lstrcmpW(bstrName, L"throwEI")) {
+        test_grfdex(grfdex, fdexNameCaseSensitive);
+        *pid = DISPID_GLOBAL_THROWEI;
+        return S_OK;
+    }
+
     if(!lstrcmpW(bstrName, L"propArgPutO")) {
         CHECK_EXPECT(global_propargput_d);
         test_grfdex(grfdex, fdexNameEnsure|fdexNameCaseSensitive);
@@ -940,6 +976,16 @@ static HRESULT WINAPI Global_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD 
 
     if(!lstrcmpW(bstrName, L"getShort")) {
         *pid = DISPID_GLOBAL_GETSHORT;
+        return S_OK;
+    }
+
+    if(!lstrcmpW(bstrName, L"v_date")) {
+        *pid = DISPID_GLOBAL_VDATE;
+        return S_OK;
+    }
+
+    if(!lstrcmpW(bstrName, L"v_cy")) {
+        *pid = DISPID_GLOBAL_VCY;
         return S_OK;
     }
 
@@ -1020,6 +1066,25 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
         ok(V_VT(pdp->rgvarg) == VT_BSTR, "V_VT(pdp->rgvarg) = %d\n", V_VT(pdp->rgvarg));
         ok(V_VT(pdp->rgvarg+1) == VT_BOOL, "V_VT(pdp->rgvarg+1) = %d\n", V_VT(pdp->rgvarg+1));
         ok(V_BOOL(pdp->rgvarg+1), "%s: %s\n", test_name, wine_dbgstr_w(V_BSTR(pdp->rgvarg)));
+
+        return S_OK;
+
+    case DISPID_GLOBAL_TODOWINE:
+        ok(wFlags == INVOKE_FUNC || wFlags == (INVOKE_FUNC|INVOKE_PROPERTYGET), "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->rgvarg != NULL, "rgvarg == NULL\n");
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(pdp->cArgs == 2, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
+        if(wFlags & INVOKE_PROPERTYGET)
+            ok(pvarRes != NULL, "pvarRes == NULL\n");
+        else
+            ok(!pvarRes, "pvarRes != NULL\n");
+        ok(pei != NULL, "pei == NULL\n");
+
+        ok(V_VT(pdp->rgvarg) == VT_BSTR, "V_VT(pdp->rgvarg) = %d\n", V_VT(pdp->rgvarg));
+        ok(V_VT(pdp->rgvarg+1) == VT_BOOL, "V_VT(pdp->rgvarg+1) = %d\n", V_VT(pdp->rgvarg+1));
+        todo_wine ok(V_BOOL(pdp->rgvarg+1), "%s: %s\n", test_name, wine_dbgstr_w(V_BSTR(pdp->rgvarg)));
 
         return S_OK;
 
@@ -1137,6 +1202,9 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
             break;
         case VT_ARRAY|VT_VARIANT:
             V_BSTR(pvarRes) = SysAllocString(L"VT_ARRAY|VT_VARIANT");
+            break;
+        case VT_DATE:
+            V_BSTR(pvarRes) = SysAllocString(L"VT_DATE");
             break;
         default:
             ok(0, "unknown vt %d\n", V_VT(pdp->rgvarg));
@@ -1484,6 +1552,46 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
         V_I2(pvarRes) = 10;
         return S_OK;
 
+    case DISPID_GLOBAL_VDATE:
+        ok(wFlags == (DISPATCH_METHOD|DISPATCH_PROPERTYGET), "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->cArgs == 1, "cArgs = %d\n", pdp->cArgs);
+        ok(pvarRes != NULL, "pvarRes != NULL\n");
+        V_VT(pvarRes) = VT_DATE;
+        switch(V_VT(pdp->rgvarg))
+        {
+        case VT_I4:
+            V_DATE(pvarRes) = V_I4(pdp->rgvarg);
+            break;
+        case VT_R8:
+            V_DATE(pvarRes) = V_R8(pdp->rgvarg);
+            break;
+        default:
+            ok(0, "vt = %u\n", V_VT(pdp->rgvarg));
+            return E_INVALIDARG;
+        }
+        return S_OK;
+
+    case DISPID_GLOBAL_VCY:
+        ok(wFlags == (DISPATCH_METHOD|DISPATCH_PROPERTYGET), "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->cArgs == 1, "cArgs = %d\n", pdp->cArgs);
+        ok(pvarRes != NULL, "pvarRes != NULL\n");
+        V_VT(pvarRes) = VT_CY;
+        switch(V_VT(pdp->rgvarg))
+        {
+        case VT_I4:
+            V_CY(pvarRes).int64 = V_I4(pdp->rgvarg);
+            break;
+        case VT_R8:
+            V_CY(pvarRes).int64 = V_R8(pdp->rgvarg);
+            break;
+        default:
+            ok(0, "vt = %u\n", V_VT(pdp->rgvarg));
+            return E_INVALIDARG;
+        }
+        return S_OK;
+
     case DISPID_GLOBAL_INTPROP:
         V_VT(pvarRes) = VT_INT;
         V_INT(pvarRes) = 22;
@@ -1586,6 +1694,73 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
         SysFreeString(V_BSTR(&arg));
         IDispatchEx_Release(eval_func);
         return S_OK;
+    }
+    case DISPID_GLOBAL_THROWINT: {
+        VARIANT *v = pdp->rgvarg;
+        HRESULT hres;
+
+        ok(wFlags == INVOKE_FUNC, "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->rgvarg != NULL, "rgvarg == NULL\n");
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(pdp->cArgs == 1, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
+        ok(pei != NULL, "pei == NULL\n");
+        if(pvarRes) {
+            ok(V_VT(pvarRes) == VT_EMPTY, "V_VT(pvarRes) = %d\n", V_VT(pvarRes));
+            V_VT(pvarRes) = VT_BOOL;
+            V_BOOL(pvarRes) = VARIANT_FALSE;
+        }
+
+        switch(V_VT(v)) {
+        case VT_I4:
+            hres = V_I4(v);
+            break;
+        case VT_R8:
+            hres = (HRESULT)V_R8(v);
+            break;
+        default:
+            ok(0, "unexpected vt %d\n", V_VT(v));
+            return E_INVALIDARG;
+        }
+        return hres;
+    }
+
+    case DISPID_GLOBAL_THROWEI: {
+        VARIANT *v = pdp->rgvarg + pdp->cArgs - 1;
+        HRESULT hres;
+
+        ok(wFlags == INVOKE_FUNC, "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->rgvarg != NULL, "rgvarg == NULL\n");
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(pdp->cArgs == 1 || pdp->cArgs == 2, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
+        ok(pei != NULL, "pei == NULL\n");
+        if(pvarRes) {
+            ok(V_VT(pvarRes) == VT_EMPTY, "V_VT(pvarRes) = %d\n", V_VT(pvarRes));
+            V_VT(pvarRes) = VT_BOOL;
+            V_BOOL(pvarRes) = VARIANT_FALSE;
+        }
+
+        switch(V_VT(v)) {
+        case VT_I4:
+            hres = V_I4(v);
+            break;
+        case VT_R8:
+            hres = (HRESULT)V_R8(v);
+            break;
+        default:
+            ok(0, "unexpected vt %d\n", V_VT(v));
+            return E_INVALIDARG;
+        }
+
+        pei->scode = hres;
+        if(pdp->cArgs == 1) {
+            pei->bstrSource = SysAllocString(L"test source");
+            pei->bstrDescription = SysAllocString(L"test description");
+        }
+        return DISP_E_EXCEPTION;
     }
     }
 
@@ -1708,8 +1883,6 @@ static HRESULT WINAPI ActiveScriptSite_OnLeaveScript(IActiveScriptSite *iface)
 {
     return E_NOTIMPL;
 }
-
-#undef ACTSCPSITE_THIS
 
 static const IActiveScriptSiteVtbl ActiveScriptSiteVtbl = {
     ActiveScriptSite_QueryInterface,
@@ -1926,148 +2099,366 @@ static HRESULT parse_htmlscript(const WCHAR *script_str)
     return hres;
 }
 
-static void test_IActiveScriptError(IActiveScriptError *error, SCODE errorcode, ULONG line, LONG pos, const WCHAR *script_source,
-                                    const WCHAR *description, const WCHAR *line_text)
-{
-    HRESULT hres;
-    DWORD source_context;
-    ULONG line_number;
-    LONG char_position;
-    BSTR linetext;
-    EXCEPINFO excep;
+#define ERROR_TODO_PARSE        0x0001
+#define ERROR_TODO_SCODE        0x0002
+#define ERROR_TODO_DESCRIPTION  0x0004
 
-    /* IActiveScriptError_GetSourcePosition */
-
-    hres = IActiveScriptError_GetSourcePosition(error, NULL, NULL, NULL);
-    ok(hres == S_OK, "IActiveScriptError_GetSourcePosition -- hres: expected S_OK, got 0x%08x\n", hres);
-
-    source_context = 0xdeadbeef;
-    hres = IActiveScriptError_GetSourcePosition(error, &source_context, NULL, NULL);
-    ok(hres == S_OK, "IActiveScriptError_GetSourcePosition -- hres: expected S_OK, got 0x%08x\n", hres);
-    ok(source_context == 0, "IActiveScriptError_GetSourcePosition -- source_context: expected 0, got 0x%08x\n", source_context);
-
-    line_number = 0xdeadbeef;
-    hres = IActiveScriptError_GetSourcePosition(error, NULL, &line_number, NULL);
-    ok(hres == S_OK, "IActiveScriptError_GetSourcePosition -- hres: expected S_OK, got 0x%08x\n", hres);
-    ok(line_number == line, "IActiveScriptError_GetSourcePosition -- line_number: expected %d, got %d\n", line, line_number);
-
-    char_position = 0xdeadbeef;
-    hres = IActiveScriptError_GetSourcePosition(error, NULL, NULL, &char_position);
-    ok(hres == S_OK, "IActiveScriptError_GetSourcePosition -- hres: expected S_OK, got 0x%08x\n", hres);
-    ok(char_position == pos, "IActiveScriptError_GetSourcePosition -- char_position: expected %d, got %d\n", pos, char_position);
-
-    /* IActiveScriptError_GetSourceLineText */
-
-    hres = IActiveScriptError_GetSourceLineText(error, NULL);
-    ok(hres == E_POINTER, "IActiveScriptError_GetSourceLineText -- hres: expected E_POINTER, got 0x%08x\n", hres);
-
-    linetext = NULL;
-    hres = IActiveScriptError_GetSourceLineText(error, &linetext);
-    if (line_text) {
-        ok(hres == S_OK, "IActiveScriptError_GetSourceLineText -- hres: expected S_OK, got 0x%08x\n", hres);
-        ok(linetext != NULL && !lstrcmpW(linetext, line_text),
-           "IActiveScriptError_GetSourceLineText -- expected %s, got %s\n", wine_dbgstr_w(line_text), wine_dbgstr_w(linetext));
-    } else {
-        ok(hres == E_FAIL, "IActiveScriptError_GetSourceLineText -- hres: expected S_OK, got 0x%08x\n", hres);
-        ok(linetext == NULL,
-           "IActiveScriptError_GetSourceLineText -- expected NULL, got %s\n", wine_dbgstr_w(linetext));
-    }
-    SysFreeString(linetext);
-
-    /* IActiveScriptError_GetExceptionInfo */
-
-    hres = IActiveScriptError_GetExceptionInfo(error, NULL);
-    ok(hres == E_POINTER, "IActiveScriptError_GetExceptionInfo -- hres: expected E_POINTER, got 0x%08x\n", hres);
-
-    excep.wCode = 0xdead;
-    excep.wReserved = 0xdead;
-    excep.bstrSource = (BSTR)0xdeadbeef;
-    excep.bstrDescription = (BSTR)0xdeadbeef;
-    excep.bstrHelpFile = (BSTR)0xdeadbeef;
-    excep.dwHelpContext = 0xdeadbeef;
-    excep.pvReserved = (void *)0xdeadbeef;
-    excep.pfnDeferredFillIn = (void *)0xdeadbeef;
-    excep.scode = 0xdeadbeef;
-
-    hres = IActiveScriptError_GetExceptionInfo(error, &excep);
-    ok(hres == S_OK, "IActiveScriptError_GetExceptionInfo -- hres: expected S_OK, got 0x%08x\n", hres);
-
-    ok(excep.wCode == 0, "IActiveScriptError_GetExceptionInfo -- excep.wCode: expected 0, got 0x%08x\n", excep.wCode);
-    ok(excep.wReserved == 0, "IActiveScriptError_GetExceptionInfo -- excep.wReserved: expected 0, got %d\n", excep.wReserved);
-    if (!is_lang_english())
-        skip("Non-english UI (test with hardcoded strings)\n");
-    else {
-        ok(excep.bstrSource != NULL && !lstrcmpW(excep.bstrSource, script_source),
-           "IActiveScriptError_GetExceptionInfo -- excep.bstrSource is not valid: expected %s, got %s\n",
-           wine_dbgstr_w(script_source), wine_dbgstr_w(excep.bstrSource));
-        ok(excep.bstrDescription != NULL && !lstrcmpW(excep.bstrDescription, description),
-           "IActiveScriptError_GetExceptionInfo -- excep.bstrDescription is not valid: got %s\n", wine_dbgstr_w(excep.bstrDescription));
-    }
-    ok(excep.bstrHelpFile == NULL,
-       "IActiveScriptError_GetExceptionInfo -- excep.bstrHelpFile: expected NULL, got %s\n", wine_dbgstr_w(excep.bstrHelpFile));
-    ok(excep.dwHelpContext == 0, "IActiveScriptError_GetExceptionInfo -- excep.dwHelpContext: expected 0, got %d\n", excep.dwHelpContext);
-    ok(excep.pvReserved == NULL, "IActiveScriptError_GetExceptionInfo -- excep.pvReserved: expected NULL, got %p\n", excep.pvReserved);
-    ok(excep.pfnDeferredFillIn == NULL, "IActiveScriptError_GetExceptionInfo -- excep.pfnDeferredFillIn: expected NULL, got %p\n", excep.pfnDeferredFillIn);
-    ok(excep.scode == errorcode, "IActiveScriptError_GetExceptionInfo -- excep.scode: expected 0x%08x, got 0x%08x\n", errorcode, excep.scode);
-
-    SysFreeString(excep.bstrSource);
-    SysFreeString(excep.bstrDescription);
-    SysFreeString(excep.bstrHelpFile);
-}
-
-static void parse_script_with_error(DWORD flags, const WCHAR *script_str, SCODE errorcode, ULONG line, LONG pos, const WCHAR *script_source,
-                                    const WCHAR *description, const WCHAR *line_text)
+static void test_error_reports(void)
 {
     IActiveScriptParse *parser;
     IActiveScript *engine;
+    unsigned i;
     HRESULT hres;
 
-    engine = create_script();
-    if(!engine)
-        return;
+    static const struct {
+        const WCHAR *script;
+        HRESULT error;
+        unsigned line;
+        unsigned character;
+        const WCHAR *error_source;
+        const WCHAR *description;
+        const WCHAR *line_text;
+        BOOL todo_flags;
+        BOOL reserved_lcid;
+    } tests[] = {
+        {
+            L"?",
+            JS_E_SYNTAX, 0, 0,
+            L"Microsoft JScript compilation error",
+            L"Syntax error",
+            L"?"
+        },
+        {
+            L"var a=1;\nif(a\n-->0) a=5;\n",
+            JS_E_MISSING_RBRACKET, 2, 0,
+            L"Microsoft JScript compilation error",
+            L"Expected ')'",
+            L"-->0) a=5;",
+            ERROR_TODO_PARSE
+        },
+        {
+            L"new 3;",
+            JS_E_INVALID_ACTION, 0, 0,
+            L"Microsoft JScript runtime error",
+            L"Object doesn't support this action"
+        },
+        {
+            L"new null;",
+            JS_E_OBJECT_EXPECTED, 0, 0,
+            L"Microsoft JScript runtime error",
+            L"Object expected"
+        },
+        {
+            L"var a;\nnew null;",
+            JS_E_OBJECT_EXPECTED, 1, 0,
+            L"Microsoft JScript runtime error",
+            L"Object expected"
+        },
+        {
+            L"var a; new null;",
+            JS_E_OBJECT_EXPECTED, 0, 7,
+            L"Microsoft JScript runtime error",
+            L"Object expected"
+        },
+        {
+            L"var a;\na=\n  new null;",
+            JS_E_OBJECT_EXPECTED, 1, 0,
+            L"Microsoft JScript runtime error",
+            L"Object expected"
+        },
+        {
+            L"var a;\nif(na=\n  new null) {}",
+            JS_E_OBJECT_EXPECTED, 1, 0,
+            L"Microsoft JScript runtime error",
+            L"Object expected"
+        },
+        {
+            L"not_existing_variable.something();",
+            JS_E_UNDEFINED_VARIABLE, 0, 0,
+            L"Microsoft JScript runtime error",
+            L"'not_existing_variable' is undefined"
+        },
+        {
+            L" throw 1;",
+            JS_E_EXCEPTION_THROWN, 0, 1,
+            L"Microsoft JScript runtime error",
+            L"Exception thrown and not caught"
+        },
+        {
+            L"var f = function() { throw 1; };\n"
+            L"f();\n",
+            JS_E_EXCEPTION_THROWN, 0, 21,
+            L"Microsoft JScript runtime error",
+            L"Exception thrown and not caught"
+        },
+        {
+            L"var f = function() { throw 1; };\n"
+            L"try { f(); } finally { 2; }\n",
+            JS_E_EXCEPTION_THROWN, 1, 21,
+            L"Microsoft JScript runtime error",
+            L"Exception thrown and not caught"
+        },
+        {
+            L" throwInt(-2146827270);",
+            JS_E_MISPLACED_RETURN, 0, 1,
+            L"Microsoft JScript runtime error",
+            L"'return' statement outside of function"
+        },
+        {
+            L" throwEI(-2146827270);",
+            JS_E_MISPLACED_RETURN, 0, 1,
+            L"test source",
+            L"test description"
+        },
+        {
+            L" throwEI(-2146827270, false);",
+            JS_E_MISPLACED_RETURN, 0, 1,
+            L"Microsoft JScript runtime error",
+            L"'return' statement outside of function"
+        },
+        {
+            L" throwEI(-2147467259 /* E_FAIL */, false);",
+            E_FAIL, 0, 1
+        },
+        {
+            L" throwInt(-2147467259 /* E_FAIL */);",
+            E_FAIL, 0, 1,
+            NULL,
+            NULL,
+            NULL,
+            FALSE,
+            0x409
+        },
+        {
+            L" throwEI(-2147467259 /* E_FAIL */);",
+            E_FAIL, 0, 1,
+            L"test source",
+            L"test description"
+        },
+        {
+            L"switch(2) {\n"
+            L"    case 1: break;\n"
+            L"    case 0: break;\n"
+            L"    case new null: break;\n"
+            L"    default: throw 1;\n"
+            L"}\n",
+            JS_E_OBJECT_EXPECTED, 3, 4,
+            L"Microsoft JScript runtime error",
+            L"Object expected"
+        },
+        {
+            L"do {\n"
+            L"    1;\n"
+            L"} while ( new null );\n",
+            JS_E_OBJECT_EXPECTED, 2, 2,
+            L"Microsoft JScript runtime error",
+            L"Object expected"
+        },
+        {
+            L"for (var i = 0; i < 100; new null) { i++ }",
+            JS_E_OBJECT_EXPECTED, 0, 25,
+            L"Microsoft JScript runtime error",
+            L"Object expected"
+        },
+        {
+            L"for (var i = 0; new null; i++) { i++ }",
+            JS_E_OBJECT_EXPECTED, 0, 16,
+            L"Microsoft JScript runtime error",
+            L"Object expected"
+        },
+        {
+            L"for (new null; i < 100; i++) { i++ }",
+            JS_E_OBJECT_EXPECTED, 0, 5,
+            L"Microsoft JScript runtime error",
+            L"Object expected"
+        },
+        {
+            L"var e = new Error();\n"
+            L"e.number = -2146828279;\n"
+            L"e.description = 'test';\n"
+            L"throw e;",
+            JS_E_SUBSCRIPT_OUT_OF_RANGE, 3, 0,
+            L"Microsoft JScript runtime error",
+            L"test",
+            NULL,
+            FALSE,
+            TRUE
+        },
+        {
+            L"var e = new Error();\n"
+            L"e.number = -2146828279;\n"
+            L"e.message = 'test';\n"
+            L"throw e;",
+            JS_E_SUBSCRIPT_OUT_OF_RANGE, 3, 0,
+            L"Microsoft JScript runtime error",
+            L"",
+            NULL,
+            FALSE,
+            TRUE
+        },
+        {
+            L"var e = new Error();\n"
+            L"throw e;",
+            E_FAIL, 1, 0,
+            NULL,
+            L"",
+            NULL,
+            FALSE,
+            TRUE
+        },
+        {
+            L"var e = new Object();\n"
+            L"e.number = -2146828279;\n"
+            L"e.description = 'test';\n"
+            L"throw e;",
+            JS_E_EXCEPTION_THROWN, 3, 0,
+            L"Microsoft JScript runtime error",
+            L"Exception thrown and not caught",
+            NULL,
+            ERROR_TODO_SCODE | ERROR_TODO_DESCRIPTION
+        },
+        {
+            L"f(1\n,\n2,\n ,,3\n);\n",
+            JS_E_SYNTAX, 3, 1,
+            L"Microsoft JScript compilation error",
+            L"Syntax error",
+            L" ,,3"
+        },
+    };
 
-    hres = IActiveScript_QueryInterface(engine, &IID_IActiveScriptParse, (void**)&parser);
-    ok(hres == S_OK, "Could not get IActiveScriptParse: %08x\n", hres);
-    if (FAILED(hres))
+    if (!is_lang_english())
+        skip("Non-english UI (test with hardcoded strings)\n");
+
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
     {
+        engine = create_script();
+
+        hres = IActiveScript_QueryInterface(engine, &IID_IActiveScriptParse, (void**)&parser);
+        ok(hres == S_OK, "Could not get IActiveScriptParse: %08x\n", hres);
+
+        hres = IActiveScriptParse_InitNew(parser);
+        ok(hres == S_OK, "InitNew failed: %08x\n", hres);
+
+        hres = IActiveScript_SetScriptSite(engine, &ActiveScriptSite_CheckError);
+        ok(hres == S_OK, "SetScriptSite failed: %08x\n", hres);
+
+        hres = IActiveScript_AddNamedItem(engine, L"test",
+                SCRIPTITEM_ISVISIBLE|SCRIPTITEM_ISSOURCE|SCRIPTITEM_GLOBALMEMBERS);
+        ok(hres == S_OK, "AddNamedItem failed: %08x\n", hres);
+
+        hres = IActiveScript_SetScriptState(engine, SCRIPTSTATE_STARTED);
+        ok(hres == S_OK, "SetScriptState(SCRIPTSTATE_STARTED) failed: %08x\n", hres);
+
+        hres = IActiveScript_GetScriptDispatch(engine, NULL, &script_disp);
+        ok(hres == S_OK, "GetScriptDispatch failed: %08x\n", hres);
+        ok(script_disp != NULL, "script_disp == NULL\n");
+        ok(script_disp != (IDispatch*)&Global, "script_disp == Global\n");
+
+        script_error = NULL;
+        SET_EXPECT(ActiveScriptSite_OnScriptError);
+        hres = IActiveScriptParse_ParseScriptText(parser, tests[i].script, NULL, NULL, NULL, 10, 0, 0, NULL, NULL);
+        todo_wine_if(tests[i].todo_flags & ERROR_TODO_PARSE)
+        ok(hres == SCRIPT_E_REPORTED || (tests[i].error == JS_E_EXCEPTION_THROWN && hres == SCRIPT_E_PROPAGATE),
+           "[%u] got: 0x%08x for %s\n", i, hres, wine_dbgstr_w(tests[i].script));
+        todo_wine_if(tests[i].todo_flags & ERROR_TODO_PARSE)
+        CHECK_CALLED(ActiveScriptSite_OnScriptError);
+
+        if (script_error)
+        {
+            DWORD source_context;
+            ULONG line_number;
+            LONG character;
+            BSTR line_text;
+            EXCEPINFO ei;
+
+            hres = IActiveScriptError_GetSourcePosition(script_error, NULL, NULL, NULL);
+            ok(hres == S_OK, "GetSourcePosition failed %08x\n", hres);
+
+            source_context = 0xdeadbeef;
+            hres = IActiveScriptError_GetSourcePosition(script_error, &source_context, NULL, NULL);
+            ok(hres == S_OK, "GetSourcePosition failed0x%08x\n", hres);
+            ok(source_context == 10, "source_context = %x\n", source_context);
+
+            line_number = 0xdeadbeef;
+            hres = IActiveScriptError_GetSourcePosition(script_error, NULL, &line_number, NULL);
+            ok(hres == S_OK, "GetSourcePosition failed%08x\n", hres);
+            ok(line_number == tests[i].line, "[%u] line = %u expected %u\n", i, line_number, tests[i].line);
+
+            character = 0xdeadbeef;
+            hres = IActiveScriptError_GetSourcePosition(script_error, NULL, NULL, &character);
+            ok(hres == S_OK, "GetSourcePosition failed: %08x\n", hres);
+            ok(character == tests[i].character, "[%u] character = %u expected %u\n", i, character, tests[i].character);
+
+            hres = IActiveScriptError_GetSourceLineText(script_error, NULL);
+            ok(hres == E_POINTER, "GetSourceLineText returned %08x\n", hres);
+
+            line_text = (BSTR)0xdeadbeef;
+            hres = IActiveScriptError_GetSourceLineText(script_error, &line_text);
+            if (tests[i].line_text)
+            {
+                ok(hres == S_OK, "GetSourceLineText failed: %08x\n", hres);
+                ok(line_text != NULL && !lstrcmpW(line_text, tests[i].line_text), "[%u] GetSourceLineText returned %s expected %s\n",
+                   i, wine_dbgstr_w(line_text), wine_dbgstr_w(tests[i].line_text));
+            }
+            else
+            {
+                ok(hres == E_FAIL, "GetSourceLineText failed: %08x\n", hres);
+            }
+            if (SUCCEEDED(hres))
+                SysFreeString(line_text);
+
+            hres = IActiveScriptError_GetExceptionInfo(script_error, NULL);
+            ok(hres == E_POINTER, "GetExceptionInfo failed: %08x\n", hres);
+
+            ei.wCode = 0xdead;
+            ei.wReserved = 0xdead;
+            ei.bstrSource = (BSTR)0xdeadbeef;
+            ei.bstrDescription = (BSTR)0xdeadbeef;
+            ei.bstrHelpFile = (BSTR)0xdeadbeef;
+            ei.dwHelpContext = 0xdeadbeef;
+            ei.pvReserved = (void *)0xdeadbeef;
+            ei.pfnDeferredFillIn = (void *)0xdeadbeef;
+            ei.scode = 0xdeadbeef;
+
+            hres = IActiveScriptError_GetExceptionInfo(script_error, &ei);
+            ok(hres == S_OK, "GetExceptionInfo failed: %08x\n", hres);
+
+            todo_wine_if(tests[i].todo_flags & ERROR_TODO_SCODE)
+            ok(ei.scode == tests[i].error, "[%u] scode = %08x, expected %08x\n", i, ei.scode, tests[i].error);
+            ok(ei.wCode == 0, "wCode = %x\n", ei.wCode);
+            todo_wine_if(tests[i].reserved_lcid)
+            ok(ei.wReserved == (tests[i].reserved_lcid ? GetUserDefaultLCID() : 0), "[%u] wReserved = %x expected %x\n",
+               i, ei.wReserved, (tests[i].reserved_lcid ? GetUserDefaultLCID() : 0));
+            if (is_lang_english())
+            {
+                if(tests[i].error_source)
+                    ok(ei.bstrSource && !lstrcmpW(ei.bstrSource, tests[i].error_source), "[%u] bstrSource = %s expected %s\n",
+                       i, wine_dbgstr_w(ei.bstrSource), wine_dbgstr_w(tests[i].error_source));
+                else
+                    ok(!ei.bstrSource, "[%u] bstrSource = %s expected NULL\n", i, wine_dbgstr_w(ei.bstrSource));
+                if(tests[i].description)
+                    todo_wine_if(tests[i].todo_flags & ERROR_TODO_DESCRIPTION)
+                    ok(ei.bstrDescription && !lstrcmpW(ei.bstrDescription, tests[i].description),
+                       "[%u] bstrDescription = %s expected %s\n", i, wine_dbgstr_w(ei.bstrDescription), wine_dbgstr_w(tests[i].description));
+                else
+                    ok(!ei.bstrDescription, "[%u] bstrDescription = %s expected NULL\n", i, wine_dbgstr_w(ei.bstrDescription));
+            }
+            ok(!ei.bstrHelpFile, "bstrHelpFile = %s\n", wine_dbgstr_w(ei.bstrHelpFile));
+            ok(!ei.dwHelpContext, "dwHelpContext = %d\n", ei.dwHelpContext);
+            ok(!ei.pvReserved, "pvReserved = %p\n", ei.pvReserved);
+            ok(!ei.pfnDeferredFillIn, "pfnDeferredFillIn = %p\n", ei.pfnDeferredFillIn);
+
+            SysFreeString(ei.bstrSource);
+            SysFreeString(ei.bstrDescription);
+            SysFreeString(ei.bstrHelpFile);
+
+            IActiveScriptError_Release(script_error);
+        }
+
+        IDispatch_Release(script_disp);
         IActiveScript_Release(engine);
-        return;
+        IActiveScriptParse_Release(parser);
     }
-
-    hres = IActiveScriptParse_InitNew(parser);
-    ok(hres == S_OK, "InitNew failed: %08x\n", hres);
-
-    hres = IActiveScript_SetScriptSite(engine, &ActiveScriptSite_CheckError);
-    ok(hres == S_OK, "SetScriptSite failed: %08x\n", hres);
-
-    hres = IActiveScript_AddNamedItem(engine, L"test",
-            SCRIPTITEM_ISVISIBLE|SCRIPTITEM_ISSOURCE|flags);
-    ok(hres == S_OK, "AddNamedItem failed: %08x\n", hres);
-
-    hres = IActiveScript_SetScriptState(engine, SCRIPTSTATE_STARTED);
-    ok(hres == S_OK, "SetScriptState(SCRIPTSTATE_STARTED) failed: %08x\n", hres);
-
-    hres = IActiveScript_GetScriptDispatch(engine, NULL, &script_disp);
-    ok(hres == S_OK, "GetScriptDispatch failed: %08x\n", hres);
-    ok(script_disp != NULL, "script_disp == NULL\n");
-    ok(script_disp != (IDispatch*)&Global, "script_disp == Global\n");
-
-    script_error = NULL;
-    SET_EXPECT(ActiveScriptSite_OnScriptError);
-    hres = IActiveScriptParse_ParseScriptText(parser, script_str, NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
-    todo_wine ok(hres == 0x80020101, "parse_script_with_error should have returned 0x80020101, got: 0x%08x\n", hres);
-    todo_wine CHECK_CALLED(ActiveScriptSite_OnScriptError);
-
-    if (script_error)
-    {
-        test_IActiveScriptError(script_error, errorcode, line, pos, script_source, description, line_text);
-
-        IActiveScriptError_Release(script_error);
-    }
-
-    IDispatch_Release(script_disp);
-    IActiveScript_Release(engine);
-    IActiveScriptParse_Release(parser);
 }
 
 #define run_script(a) _run_script(__LINE__,a)
@@ -2178,9 +2569,6 @@ static void test_isvisible(BOOL global_members)
     IActiveScript *engine;
     HRESULT hres;
 
-    static const WCHAR script_textW[] =
-        {'v','a','r',' ','v',' ','=',' ','t','e','s','t','V','a','l',';',0};
-
     engine = create_script();
     if(!engine)
         return;
@@ -2213,12 +2601,12 @@ static void test_isvisible(BOOL global_members)
 
     if(!global_members)
         SET_EXPECT(GetItemInfo_testVal);
-    hres = IActiveScriptParse_ParseScriptText(parser, script_textW, NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
+    hres = IActiveScriptParse_ParseScriptText(parser, L"var v = testVal;", NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08x\n", hres);
     if(!global_members)
         CHECK_CALLED(GetItemInfo_testVal);
 
-    hres = IActiveScriptParse_ParseScriptText(parser, script_textW, NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
+    hres = IActiveScriptParse_ParseScriptText(parser, L"var v = testVal;", NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08x\n", hres);
 
     IActiveScript_Release(engine);
@@ -2478,7 +2866,7 @@ static void test_invokeex(void)
     DISPPARAMS dp = {NULL};
     IActiveScript *script;
     IDispatchEx *dispex;
-    VARIANT v;
+    VARIANT v, arg;
     BSTR str;
     HRESULT hres;
 
@@ -2525,6 +2913,93 @@ static void test_invokeex(void)
     ok(hres == S_OK, "InvokeEx failed: %08x\n", hres);
     ok(V_VT(&v) == VT_I4, "V_VT(v) = %d\n", V_VT(&v));
     ok(V_I4(&v) == 6, "V_I4(v) = %d\n", V_I4(&v));
+
+    IDispatchEx_Release(dispex);
+    IActiveScript_Release(script);
+
+    /* test InvokeEx following prototype chain of builtin object (PROP_PROTREF) */
+    hres = parse_script_expr(L"o = new Array(); o.push(\"foo\"); o", &v, &script);
+    ok(hres == S_OK, "parse_script_expr failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(v) = %d\n", V_VT(&v));
+
+    hres = IDispatch_QueryInterface(V_DISPATCH(&v), &IID_IDispatchEx, (void**)&dispex);
+    ok(hres == S_OK, "Could not get IDispatchEx iface: %08x\n", hres);
+    VariantClear(&v);
+
+    str = SysAllocString(L"push");
+    hres = IDispatchEx_GetDispID(dispex, str, 0, &func_id);
+    SysFreeString(str);
+    ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
+
+    dp.rgvarg = &arg;
+    dp.cArgs = 1;
+    V_VT(&arg) = VT_BSTR;
+    V_BSTR(&arg) = SysAllocString(L"bar");
+
+    hres = IDispatchEx_InvokeEx(dispex, func_id, 0, DISPATCH_METHOD, &dp, &v, NULL, NULL);
+    ok(hres == S_OK, "InvokeEx failed: %08x\n", hres);
+    SysFreeString(V_BSTR(&arg));
+
+    str = SysAllocString(L"join");
+    hres = IDispatchEx_GetDispID(dispex, str, 0, &func_id);
+    SysFreeString(str);
+    ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
+
+    V_BSTR(&arg) = SysAllocString(L";");
+    hres = IDispatchEx_InvokeEx(dispex, func_id, 0, DISPATCH_METHOD, &dp, &v, NULL, NULL);
+    ok(hres == S_OK, "InvokeEx failed: %08x\n", hres);
+    SysFreeString(V_BSTR(&arg));
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
+    ok(!lstrcmpW(V_BSTR(&v), L"foo;bar"), "V_BSTR(v) = %s\n", wine_dbgstr_w(V_BSTR(&v)));
+
+    VariantClear(&v);
+
+    dp.rgvarg = NULL;
+    dp.cArgs = 0;
+
+    IDispatchEx_Release(dispex);
+    IActiveScript_Release(script);
+
+    /* test InvokeEx following prototype chain of JScript objects (PROP_JSVAL) */
+    hres = parse_script_expr(L"function c() { this.func = function() { return this.prop1 * this.prop2 };"
+                             L"this.prop1 = 6; this.prop2 = 9; }; var o = new c(); o.prop2 = 7; o",
+                             &v, &script);
+    ok(hres == S_OK, "parse_script_expr failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_DISPATCH, "V_VT(v) = %d\n", V_VT(&v));
+
+    hres = IDispatch_QueryInterface(V_DISPATCH(&v), &IID_IDispatchEx, (void**)&dispex);
+    ok(hres == S_OK, "Could not get IDispatchEx iface: %08x\n", hres);
+    VariantClear(&v);
+
+    str = SysAllocString(L"prop1");
+    hres = IDispatchEx_GetDispID(dispex, str, 0, &prop_id);
+    SysFreeString(str);
+    ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
+
+    hres = IDispatchEx_InvokeEx(dispex, prop_id, 0, DISPATCH_PROPERTYGET, &dp, &v, NULL, NULL);
+    ok(hres == S_OK, "InvokeEx failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_I4, "V_VT(v) = %d\n", V_VT(&v));
+    ok(V_I4(&v) == 6, "V_I4(v) = %d\n", V_I4(&v));
+
+    str = SysAllocString(L"prop2");
+    hres = IDispatchEx_GetDispID(dispex, str, 0, &prop_id);
+    SysFreeString(str);
+    ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
+
+    hres = IDispatchEx_InvokeEx(dispex, prop_id, 0, DISPATCH_PROPERTYGET, &dp, &v, NULL, NULL);
+    ok(hres == S_OK, "InvokeEx failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_I4, "V_VT(v) = %d\n", V_VT(&v));
+    ok(V_I4(&v) == 7, "V_I4(v) = %d\n", V_I4(&v));
+
+    str = SysAllocString(L"func");
+    hres = IDispatchEx_GetDispID(dispex, str, 0, &func_id);
+    SysFreeString(str);
+    ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
+
+    hres = IDispatchEx_InvokeEx(dispex, func_id, 0, DISPATCH_METHOD, &dp, &v, NULL, NULL);
+    ok(hres == S_OK, "InvokeEx failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_I4, "V_VT(v) = %d\n", V_VT(&v));
+    ok(V_I4(&v) == 42, "V_I4(v) = %s\n", wine_dbgstr_variant(&v));
 
     IDispatchEx_Release(dispex);
     IActiveScript_Release(script);
@@ -2642,17 +3117,17 @@ static void run_bom_tests(void)
     int i;
     HRESULT hres;
     struct bom_test bom_tests[] = {
-        {{'v','a','r',' ','a',' ','=',' ','1',';',' ','r','e','p','o','r','t','S','u','c','c','e','s','s','(',')',';','\0'}, S_OK},
-        {{0xFEFF,'v','a','r',' ','a',' ','=',' ','1',';',' ','r','e','p','o','r','t','S','u','c','c','e','s','s','(',')',';','\0'}, S_OK},
-        {{'v',0xFEFF,'a','r',' ','a',' ','=',' ','1',';',' ','r','e','p','o','r','t','S','u','c','c','e','s','s','(',')',';','\0'}, JS_E_OUT_OF_MEMORY},
-        {{'v','a','r',0xFEFF,' ','a',' ','=',' ','1',';',' ','r','e','p','o','r','t','S','u','c','c','e','s','s','(',')',';','\0'}, S_OK},
-        {{'v','a','r',' ','a',' ','=',' ','1',';',' ',0xFEFF,'r','e','p','o','r','t','S','u','c','c','e','s','s','(',')',';','\0'}, S_OK},
-        {{'v','a','r',' ','a',' ','=',' ','1',';',' ','r','e','p','o','r','t',0xFEFF,'S','u','c','c','e','s','s','(',')',';','\0'}, JS_E_OUT_OF_MEMORY},
-        {{'v','a','r',' ','a',' ','=',' ','1',';',' ','r','e','p','o','r','t','S','u','c','c','e','s','s',0xFEFF,'(',')',';','\0'}, S_OK},
-        {{'v','a','r',' ','a',' ','=',' ','1',';',' ','r','e','p','o','r','t','S','u','c','c','e','s','s','(',0xFEFF,')',';','\0'}, S_OK},
-        {{'v','a','r',' ','a',' ','=',0xFEFF,' ','1',';',' ','r','e','p','o','r','t','S','u','c','c','e','s','s','(',0xFEFF,')',';','\0'}, S_OK},
-        {{0xFEFF,'v','a','r',' ','a',' ','=',0xFEFF,0xFEFF,' ','1',';',' ','r','e','p','o','r','t','S','u','c','c','e','s','s','(',0xFEFF,')',';','\0'}, S_OK},
-        {{0}}
+        {L"var a = 1; reportSuccess();", S_OK},
+        {L"\xfeffvar a = 1; reportSuccess();", S_OK},
+        {L"v\xfeff" "ar a = 1; reportSuccess();", JS_E_OUT_OF_MEMORY},
+        {L"var\xfeff a = 1; reportSuccess();", S_OK},
+        {L"var a = 1; \xfeffreportSuccess();", S_OK},
+        {L"var a = 1; report\xfeffSuccess();", JS_E_OUT_OF_MEMORY},
+        {L"var a = 1; reportSuccess\xfeff();", S_OK},
+        {L"var a = 1; reportSuccess(\xfeff);", S_OK},
+        {L"var a =\xfeff 1; reportSuccess(\xfeff);", S_OK},
+        {L"\xfeffvar a =\xfeff\xfeff 1; reportSuccess(\xfeff);", S_OK},
+        {L""}
     };
 
     engine_clsid = &CLSID_JScript;
@@ -2904,6 +3379,20 @@ static BOOL run_tests(void)
     CHECK_CALLED(testobj_onlydispid_d);
     CHECK_CALLED(testobj_onlydispid_i);
 
+    SET_EXPECT(testobj_getidfail_d);
+    hres = parse_script(SCRIPTITEM_GLOBALMEMBERS, L"testObj.notExists = testObj.getIDFail;");
+    ok(hres == E_FAIL, "parse_script returned %08x\n", hres);
+    CHECK_CALLED(testobj_getidfail_d);
+
+    SET_EXPECT(global_propget_d);
+    SET_EXPECT(global_propget_i);
+    SET_EXPECT(testobj_getidfail_d);
+    hres = parse_script(SCRIPTITEM_GLOBALMEMBERS, L"testObj.getIDFail = testPropGet;");
+    ok(hres == E_FAIL, "parse_script returned %08x\n", hres);
+    CHECK_CALLED(global_propget_d);
+    CHECK_CALLED(global_propget_i);
+    CHECK_CALLED(testobj_getidfail_d);
+
     SET_EXPECT(global_propargput_d);
     SET_EXPECT(global_propargput_i);
     run_script(L"var t=0; propArgPutG(t++, t++) = t++;");
@@ -3039,54 +3528,7 @@ static BOOL run_tests(void)
     test_script_exprs();
     test_invokeex();
     test_eval();
-
-    parse_script_with_error(
-        SCRIPTITEM_GLOBALMEMBERS,
-        L"?",
-        0x800a03ea, 0, 0,
-        L"Microsoft JScript compilation error",
-        L"Syntax error",
-        L"?");
-
-    parse_script_with_error(
-        SCRIPTITEM_GLOBALMEMBERS,
-        L"var a=1;\nif(a\n-->0) a=5;\n",
-        0x800a03ee, 2, 0,
-        L"Microsoft JScript compilation error",
-        L"Expected ')'",
-        L"-->0) a=5;");
-
-    parse_script_with_error(
-        SCRIPTITEM_GLOBALMEMBERS,
-        L"new 3;",
-        0x800a01bd, 0, 0,
-        L"Microsoft JScript runtime error",
-        L"Object doesn't support this action",
-        NULL);
-
-    parse_script_with_error(
-        SCRIPTITEM_GLOBALMEMBERS,
-        L"new null;",
-        0x800a138f, 0, 0,
-        L"Microsoft JScript runtime error",
-        L"Object expected",
-        NULL);
-
-    parse_script_with_error(
-        SCRIPTITEM_GLOBALMEMBERS,
-        L"var a;\nnew null;",
-        0x800a138f, 1, 0,
-        L"Microsoft JScript runtime error",
-        L"Object expected",
-        NULL);
-
-    parse_script_with_error(
-        SCRIPTITEM_GLOBALMEMBERS,
-        L"var a; new null;",
-        0x800a138f, 0, 7,
-        L"Microsoft JScript runtime error",
-        L"Object expected",
-        NULL);
+    test_error_reports();
 
     run_bom_tests();
 

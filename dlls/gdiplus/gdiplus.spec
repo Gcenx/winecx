@@ -200,7 +200,7 @@
 200 stub GdipEnumerateMetafileSrcRectDestPointI
 201 stdcall GdipEnumerateMetafileSrcRectDestPoints(ptr ptr ptr long ptr long ptr ptr ptr)
 202 stub GdipEnumerateMetafileSrcRectDestPointsI
-203 stub GdipEnumerateMetafileSrcRectDestRect
+203 stdcall GdipEnumerateMetafileSrcRectDestRect(ptr ptr ptr ptr long ptr ptr ptr)
 204 stub GdipEnumerateMetafileSrcRectDestRectI
 205 stdcall GdipFillClosedCurve2(ptr ptr ptr long float long)
 206 stdcall GdipFillClosedCurve2I(ptr ptr ptr long float long)
@@ -298,7 +298,7 @@
 298 stdcall GdipGetLogFontA(ptr ptr ptr)
 299 stdcall GdipGetLogFontW(ptr ptr ptr)
 300 stdcall GdipGetMatrixElements(ptr ptr)
-301 stub GdipGetMetafileDownLevelRasterizationLimit
+301 stdcall GdipGetMetafileDownLevelRasterizationLimit(ptr ptr)
 302 stdcall GdipGetMetafileHeaderFromEmf(ptr ptr)
 303 stdcall GdipGetMetafileHeaderFromFile(wstr ptr)
 304 stdcall GdipGetMetafileHeaderFromMetafile(ptr ptr)
@@ -472,7 +472,7 @@
 472 stdcall GdipRotateTextureTransform(ptr float long)
 473 stdcall GdipRotateWorldTransform(ptr float long)
 474 stdcall GdipSaveAdd(ptr ptr)
-475 stub GdipSaveAddImage
+475 stdcall GdipSaveAddImage(ptr ptr ptr)
 476 stdcall GdipSaveGraphics(ptr ptr)
 477 stdcall GdipSaveImageToFile(ptr wstr ptr ptr)
 478 stdcall GdipSaveImageToStream(ptr ptr ptr ptr)

@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <assert.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -28,15 +26,13 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winreg.h"
+#include "winnls.h"
 #include "winternl.h"
 #include "winerror.h"
 #include "gdi_private.h"
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dc);
-
-static const WCHAR displayW[] = { 'd','i','s','p','l','a','y',0 };
 
 static BOOL DC_DeleteObject( HGDIOBJ handle );
 
@@ -148,7 +144,7 @@ DC *alloc_dc_ptr( WORD magic )
     }
     dc->nulldrv.hdc = dc->hSelf;
 
-    if (font_driver && !font_driver->pCreateDC( &dc->physDev, NULL, NULL, NULL, NULL ))
+    if (!font_driver.pCreateDC( &dc->physDev, NULL, NULL, NULL, NULL ))
     {
         free_dc_ptr( dc );
         return NULL;
@@ -168,7 +164,6 @@ static void free_dc_state( DC *dc )
     if (dc->hVisRgn) DeleteObject( dc->hVisRgn );
     if (dc->region) DeleteObject( dc->region );
     if (dc->path) free_gdi_path( dc->path );
-    HeapFree( GetProcessHeap(), 0, dc->font_gamma_ramp );
     HeapFree( GetProcessHeap(), 0, dc );
 }
 
@@ -642,7 +637,7 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
             ERR( "no device found for %s\n", debugstr_w(device) );
             return 0;
         }
-        strcpyW(buf, driver);
+        lstrcpyW(buf, driver);
     }
 
     if (!(funcs = DRIVER_load_driver( buf )))
@@ -702,7 +697,7 @@ HDC WINAPI CreateDCA( LPCSTR driver, LPCSTR device, LPCSTR output,
     if (initData)
     {
         /* don't convert initData for DISPLAY driver, it's not used */
-        if (!driverW.Buffer || strcmpiW( driverW.Buffer, displayW ))
+        if (!driverW.Buffer || wcsicmp( driverW.Buffer, L"display" ))
             initDataW = GdiConvertToDevmodeW(initData);
     }
 
@@ -757,7 +752,7 @@ HDC WINAPI CreateCompatibleDC( HDC hdc )
         funcs = physDev->funcs;
         release_dc_ptr( origDC );
     }
-    else funcs = DRIVER_load_driver( displayW );
+    else funcs = DRIVER_load_driver( L"display" );
 
     if (!(dc = alloc_dc_ptr( OBJ_MEMDC ))) return 0;
 

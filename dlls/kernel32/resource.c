@@ -20,9 +20,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdarg.h>
 
 #define NONAMELESSUNION
@@ -34,8 +31,8 @@
 #include "winternl.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
-#include "wine/unicode.h"
 #include "wine/list.h"
+#include "kernel_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(resource);
 
@@ -62,6 +59,26 @@ static NTSTATUS get_res_nameA( LPCSTR name, UNICODE_STRING *str )
     return STATUS_SUCCESS;
 }
 
+static NTSTATUS get_res_nameW( LPCWSTR name, UNICODE_STRING *str )
+{
+    if (IS_INTRESOURCE(name))
+    {
+        str->Buffer = ULongToPtr( LOWORD(name) );
+        return STATUS_SUCCESS;
+    }
+    if (name[0] == '#')
+    {
+        ULONG value;
+        RtlInitUnicodeString( str, name + 1 );
+        if (RtlUnicodeStringToInteger( str, 10, &value ) != STATUS_SUCCESS || HIWORD(value))
+            return STATUS_INVALID_PARAMETER;
+        str->Buffer = ULongToPtr(value);
+        return STATUS_SUCCESS;
+    }
+    RtlCreateUnicodeString( str, name );
+    RtlUpcaseUnicodeString( str, str, FALSE );
+    return STATUS_SUCCESS;
+}
 
 /**********************************************************************
  *	    FindResourceExA  (KERNEL32.@)
@@ -192,7 +209,7 @@ static int resource_strcmp( LPCWSTR a, LPCWSTR b )
     if ( a == b )
         return 0;
     if (!IS_INTRESOURCE( a ) && !IS_INTRESOURCE( b ) )
-        return lstrcmpW( a, b );
+        return wcscmp( a, b );
     /* strings come before ids */
     if (!IS_INTRESOURCE( a ) && IS_INTRESOURCE( b ))
         return -1;
@@ -964,7 +981,6 @@ static DWORD get_init_data_size( void *base, DWORD mapping_size )
 
 static BOOL write_raw_resources( QUEUEDUPDATES *updates )
 {
-    static const WCHAR prefix[] = { 'r','e','s','u',0 };
     WCHAR tempdir[MAX_PATH], tempfile[MAX_PATH];
     DWORD i, section_size;
     BOOL ret = FALSE;
@@ -981,7 +997,7 @@ static BOOL write_raw_resources( QUEUEDUPDATES *updates )
     if (!GetTempPathW( MAX_PATH, tempdir ))
         return ret;
 
-    if (!GetTempFileNameW( tempdir, prefix, 0, tempfile ))
+    if (!GetTempFileNameW( tempdir, L"resu", 0, tempfile ))
         return ret;
 
     if (!CopyFileW( updates->pFileName, tempfile, FALSE ))
@@ -1290,27 +1306,37 @@ BOOL WINAPI UpdateResourceW( HANDLE hUpdate, LPCWSTR lpType, LPCWSTR lpName,
                              WORD wLanguage, LPVOID lpData, DWORD cbData)
 {
     QUEUEDUPDATES *updates;
+    UNICODE_STRING nameW, typeW;
     BOOL ret = FALSE;
 
     TRACE("%p %s %s %08x %p %d\n", hUpdate,
           debugstr_w(lpType), debugstr_w(lpName), wLanguage, lpData, cbData);
 
+    nameW.Buffer = typeW.Buffer = NULL;
     updates = GlobalLock(hUpdate);
     if (updates)
     {
+        if (!set_ntstatus( get_res_nameW( lpName, &nameW ))) goto done;
+        if (!set_ntstatus( get_res_nameW( lpType, &typeW ))) goto done;
+
         if (lpData == NULL && cbData == 0)  /* remove resource */
         {
-            ret = update_add_resource( updates, lpType, lpName, wLanguage, NULL, TRUE );
+            ret = update_add_resource( updates, typeW.Buffer, nameW.Buffer, wLanguage, NULL, TRUE );
         }
         else
         {
             struct resource_data *data;
             data = allocate_resource_data( wLanguage, 0, lpData, cbData, TRUE );
             if (data)
-                ret = update_add_resource( updates, lpType, lpName, wLanguage, data, TRUE );
+                ret = update_add_resource( updates, typeW.Buffer, nameW.Buffer, wLanguage, data, TRUE );
         }
+
+    done:
         GlobalUnlock(hUpdate);
     }
+
+    if (!IS_INTRESOURCE(nameW.Buffer)) HeapFree( GetProcessHeap(), 0, nameW.Buffer );
+    if (!IS_INTRESOURCE(typeW.Buffer)) HeapFree( GetProcessHeap(), 0, typeW.Buffer );
     return ret;
 }
 

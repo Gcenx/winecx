@@ -41,8 +41,6 @@
 #include "ddk/wdm.h"
 #include "android.h"
 #include "wine/server.h"
-#include "wine/unicode.h"
-#include "wine/library.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(android);
@@ -339,14 +337,16 @@ static inline BOOL is_client_in_process(void)
 #ifdef __i386__  /* the Java VM uses %fs/%gs for its own purposes, so we need to wrap the calls */
 
 static WORD orig_fs, java_fs;
-static inline void wrap_java_call(void)   { wine_set_fs( java_fs ); }
-static inline void unwrap_java_call(void) { wine_set_fs( orig_fs ); }
+static inline void wrap_java_call(void)   { __asm__( "mov %0,%%fs" :: "r" (java_fs) ); }
+static inline void unwrap_java_call(void) { __asm__( "mov %0,%%fs" :: "r" (orig_fs) ); }
 static inline void init_java_thread( JavaVM *java_vm )
 {
-    orig_fs = wine_get_fs();
+    java_fs = *p_java_gdt_sel;
+    __asm__( "mov %%fs,%0" : "=r" (orig_fs) );
+    __asm__( "mov %0,%%fs" :: "r" (java_fs) );
     (*java_vm)->AttachCurrentThread( java_vm, &jni_env, 0 );
-    java_fs = wine_get_fs();
-    wine_set_fs( orig_fs );
+    if (!*p_java_gdt_sel) __asm__( "mov %%fs,%0" : "=r" (java_fs) );
+    __asm__( "mov %0,%%fs" :: "r" (orig_fs) );
 }
 
 #elif defined(__x86_64__)
@@ -772,7 +772,7 @@ static int status_to_android_error( NTSTATUS status )
 
 static jobject load_java_method( jmethodID *method, const char *name, const char *args )
 {
-    jobject object = wine_get_java_object();
+    jobject object = *p_java_object;
 
     if (!*method)
     {
@@ -1531,7 +1531,7 @@ static DWORD CALLBACK device_thread( void *arg )
 
     TRACE( "starting process %x\n", GetCurrentProcessId() );
 
-    if (!(java_vm = wine_get_java_vm())) return 0;  /* not running under Java */
+    if (!(java_vm = *p_java_vm)) return 0;  /* not running under Java */
 
     init_java_thread( java_vm );
 

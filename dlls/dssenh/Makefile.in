@@ -1,6 +1,9 @@
 MODULE    = dssenh.dll
+IMPORTS   = bcrypt crypt32 advapi32
 
 EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
 	main.c
+
+RC_SRCS = rsrc.rc

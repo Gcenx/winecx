@@ -10,7 +10,7 @@
 
 #include "wine/winheader_enter.h"
 
-#include <corecrt.h>
+#include <corecrt_wctype.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,59 +20,32 @@ extern "C" {
 #define WEOF        (wint_t)(0xFFFF)
 #endif
 
-/* ASCII char classification table - binary compatible */
-#define _UPPER        0x0001  /* C1_UPPER */
-#define _LOWER        0x0002  /* C1_LOWER */
-#define _DIGIT        0x0004  /* C1_DIGIT */
-#define _SPACE        0x0008  /* C1_SPACE */
-#define _PUNCT        0x0010  /* C1_PUNCT */
-#define _CONTROL      0x0020  /* C1_CNTRL */
-#define _BLANK        0x0040  /* C1_BLANK */
-#define _HEX          0x0080  /* C1_XDIGIT */
-#define _LEADBYTE     0x8000
-#define _ALPHA       (0x0100|_UPPER|_LOWER)  /* (C1_ALPHA|_UPPER|_LOWER) */
-
-int __cdecl __isascii(int);
-int __cdecl __iscsym(int);
-int __cdecl __iscsymf(int);
-int __cdecl __toascii(int);
-int __cdecl _isctype(int,int);
-int __cdecl _tolower(int);
-int __cdecl _toupper(int);
-int __cdecl isalnum(int);
-int __cdecl isalpha(int);
-int __cdecl iscntrl(int);
-int __cdecl isdigit(int);
-int __cdecl isgraph(int);
-int __cdecl islower(int);
-int __cdecl isprint(int);
-int __cdecl ispunct(int);
-int __cdecl isspace(int);
-int __cdecl isupper(int);
-int __cdecl isxdigit(int);
-int __cdecl tolower(int);
-int __cdecl toupper(int);
-
-#ifndef _WCTYPE_DEFINED
-#define _WCTYPE_DEFINED
-int __cdecl is_wctype(wint_t,wctype_t);
-int __cdecl isleadbyte(int);
-int __cdecl iswalnum(wint_t);
-int __cdecl iswalpha(wint_t);
-int __cdecl iswascii(wint_t);
-int __cdecl iswcntrl(wint_t);
-int __cdecl iswctype(wint_t,wctype_t);
-int __cdecl iswdigit(wint_t);
-int __cdecl iswgraph(wint_t);
-int __cdecl iswlower(wint_t);
-int __cdecl iswprint(wint_t);
-int __cdecl iswpunct(wint_t);
-int __cdecl iswspace(wint_t);
-int __cdecl iswupper(wint_t);
-int __cdecl iswxdigit(wint_t);
-wchar_t __cdecl towlower(wchar_t);
-wchar_t __cdecl towupper(wchar_t);
-#endif /* _WCTYPE_DEFINED */
+_ACRTIMP int __cdecl __isascii(int);
+_ACRTIMP int __cdecl __iscsym(int);
+_ACRTIMP int __cdecl __iscsymf(int);
+_ACRTIMP int __cdecl __toascii(int);
+_ACRTIMP int __cdecl _isblank_l(int,_locale_t);
+_ACRTIMP int __cdecl _isctype(int,int);
+_ACRTIMP int __cdecl _tolower(int);
+_ACRTIMP int __cdecl _tolower_l(int,_locale_t);
+_ACRTIMP int __cdecl _toupper(int);
+_ACRTIMP int __cdecl _toupper_l(int,_locale_t);
+_ACRTIMP int __cdecl isalnum(int);
+_ACRTIMP int __cdecl isalpha(int);
+_ACRTIMP int __cdecl isblank(int);
+_ACRTIMP int __cdecl iscntrl(int);
+_ACRTIMP int __cdecl isdigit(int);
+_ACRTIMP int __cdecl isgraph(int);
+_ACRTIMP int __cdecl islower(int);
+_ACRTIMP int __cdecl isprint(int);
+_ACRTIMP int __cdecl _isprint_l(int,_locale_t);
+_ACRTIMP int __cdecl ispunct(int);
+_ACRTIMP int __cdecl isspace(int);
+_ACRTIMP int __cdecl _isspace_l(int,_locale_t);
+_ACRTIMP int __cdecl isupper(int);
+_ACRTIMP int __cdecl isxdigit(int);
+_ACRTIMP int __cdecl tolower(int);
+_ACRTIMP int __cdecl toupper(int);
 
 #ifdef __cplusplus
 }

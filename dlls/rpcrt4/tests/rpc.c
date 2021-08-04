@@ -854,6 +854,55 @@ static void test_RpcBindingFree(void)
        status);
 }
 
+static void test_RpcIfInqId(void)
+{
+    static const GUID guid = {0x12345678, 0xdead, 0xbeef, {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}};
+    static RPC_STATUS (WINAPI *pRpcIfInqId)(RPC_IF_HANDLE, RPC_IF_ID *);
+    RPC_SERVER_INTERFACE server_interface;
+    RPC_CLIENT_INTERFACE client_interface;
+    RPC_IF_HANDLE test_handles[2];
+    RPC_STATUS status;
+    RPC_IF_ID if_id;
+    UINT test_idx;
+
+    pRpcIfInqId = (void *)GetProcAddress(GetModuleHandleA("rpcrt4.dll"), "RpcIfInqId");
+
+    memset(&server_interface, 0, sizeof(server_interface));
+    memset(&client_interface, 0, sizeof(client_interface));
+    server_interface.InterfaceId.SyntaxGUID = guid;
+    server_interface.InterfaceId.SyntaxVersion.MajorVersion = 1;
+    server_interface.InterfaceId.SyntaxVersion.MinorVersion = 2;
+    client_interface.InterfaceId.SyntaxGUID = guid;
+    client_interface.InterfaceId.SyntaxVersion.MajorVersion = 1;
+    client_interface.InterfaceId.SyntaxVersion.MinorVersion = 2;
+
+    /* Crash on Windows */
+    if (0)
+    {
+        status = pRpcIfInqId(NULL, &if_id);
+        ok(status == RPC_S_INVALID_ARG, "Expected %#x, got %#x.\n", RPC_S_INVALID_ARG, status);
+
+        status = pRpcIfInqId((RPC_IF_HANDLE)&server_interface, NULL);
+        ok(status == RPC_S_INVALID_ARG, "Expected %#x, got %#x.\n", RPC_S_INVALID_ARG, status);
+    }
+
+    test_handles[0] = (RPC_IF_HANDLE)&server_interface;
+    test_handles[1] = (RPC_IF_HANDLE)&client_interface;
+
+    for (test_idx = 0; test_idx < ARRAY_SIZE(test_handles); ++test_idx)
+    {
+        memset(&if_id, 0, sizeof(if_id));
+        status = pRpcIfInqId(test_handles[test_idx], &if_id);
+        ok(status == RPC_S_OK, "Test %u: Expected %#x, got %#x.\n", test_idx, RPC_S_OK, status);
+        ok(!memcmp(&if_id.Uuid, &guid, sizeof(guid)), "Test %u: Expected UUID %s, got %s.\n", test_idx,
+                wine_dbgstr_guid(&guid), wine_dbgstr_guid(&if_id.Uuid));
+        ok(if_id.VersMajor == 1, "Test %u: Expected major version 1, got %hu.\n", test_idx,
+                if_id.VersMajor);
+        ok(if_id.VersMinor == 2, "Test %u: Expected minor version 2, got %hu.\n", test_idx,
+                if_id.VersMinor);
+    }
+}
+
 static void test_RpcServerInqDefaultPrincName(void)
 {
     RPC_STATUS ret;
@@ -1116,7 +1165,6 @@ enum firewall_op
 
 static HRESULT set_firewall( enum firewall_op op )
 {
-    static const WCHAR testW[] = {'r','p','c','r','t','4','_','t','e','s','t',0};
     HRESULT hr, init;
     INetFwMgr *mgr = NULL;
     INetFwPolicy *policy = NULL;
@@ -1156,7 +1204,7 @@ static HRESULT set_firewall( enum firewall_op op )
     hr = INetFwAuthorizedApplication_put_ProcessImageFileName( app, image );
     if (hr != S_OK) goto done;
 
-    name = SysAllocString( testW );
+    name = SysAllocString( L"rpcrt4_test" );
     hr = INetFwAuthorizedApplication_put_Name( app, name );
     SysFreeString( name );
     ok( hr == S_OK, "got %08x\n", hr );
@@ -1204,6 +1252,7 @@ START_TEST( rpc )
     test_UuidCreate();
     test_UuidCreateSequential();
     test_RpcBindingFree();
+    test_RpcIfInqId();
     test_RpcServerInqDefaultPrincName();
     test_RpcServerRegisterAuthInfo();
 

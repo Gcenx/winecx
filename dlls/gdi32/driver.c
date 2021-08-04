@@ -19,9 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <assert.h>
 #include <stdarg.h>
 #include <string.h>
@@ -31,19 +28,24 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
+#include "winreg.h"
 #include "ddrawgdi.h"
 #include "wine/winbase16.h"
 #include "winuser.h"
 #include "winternl.h"
+#include "initguid.h"
+#include "devguid.h"
+#include "setupapi.h"
 #include "ddk/d3dkmthk.h"
 
 #include "gdi_private.h"
-#include "wine/unicode.h"
 #include "wine/list.h"
 #include "wine/debug.h"
 #include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(driver);
+
+DEFINE_DEVPROPKEY(DEVPROPKEY_GPU_LUID, 0x60b193cb, 0x5276, 0x4d0f, 0x96, 0xfc, 0xf1, 0x73, 0xab, 0xad, 0x3e, 0xc6, 2);
 
 struct graphics_driver
 {
@@ -69,8 +71,6 @@ static struct graphics_driver *display_driver;
 
 static struct list d3dkmt_adapters = LIST_INIT( d3dkmt_adapters );
 static struct list d3dkmt_devices = LIST_INIT( d3dkmt_devices );
-
-const struct gdi_dc_funcs *font_driver = NULL;
 
 static CRITICAL_SECTION driver_section;
 static CRITICAL_SECTION_DEBUG critsect_debug =
@@ -139,26 +139,37 @@ static const struct gdi_dc_funcs *get_display_driver(void)
  */
 static BOOL is_display_device( LPCWSTR name )
 {
-    static const WCHAR display_deviceW[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y'};
     const WCHAR *p = name;
 
-    if (strncmpiW( name, display_deviceW, sizeof(display_deviceW) / sizeof(WCHAR) ))
-        return FALSE;
+    if (wcsnicmp( name, L"\\\\.\\DISPLAY", lstrlenW(L"\\\\.\\DISPLAY") )) return FALSE;
 
-    p += sizeof(display_deviceW) / sizeof(WCHAR);
+    p += lstrlenW(L"\\\\.\\DISPLAY");
 
-    if (!isdigitW( *p++ ))
+    if (!iswdigit( *p++ ))
         return FALSE;
 
     for (; *p; p++)
     {
-        if (!isdigitW( *p ))
+        if (!iswdigit( *p ))
             return FALSE;
     }
 
     return TRUE;
 }
 
+static HANDLE get_display_device_init_mutex( void )
+{
+    HANDLE mutex = CreateMutexW( NULL, FALSE, L"display_device_init" );
+
+    WaitForSingleObject( mutex, INFINITE );
+    return mutex;
+}
+
+static void release_display_device_init_mutex( HANDLE mutex )
+{
+    ReleaseMutex( mutex );
+    CloseHandle( mutex );
+}
 
 /**********************************************************************
  *	     DRIVER_load_driver
@@ -167,10 +178,9 @@ const struct gdi_dc_funcs *DRIVER_load_driver( LPCWSTR name )
 {
     HMODULE module;
     struct graphics_driver *driver, *new_driver;
-    static const WCHAR displayW[] = { 'd','i','s','p','l','a','y',0 };
 
     /* display driver is a special case */
-    if (!strcmpiW( name, displayW ) || is_display_device( name )) return get_display_driver();
+    if (!wcsicmp( name, L"display" ) || is_display_device( name )) return get_display_driver();
 
     if ((module = GetModuleHandleW( name )))
     {
@@ -524,7 +534,7 @@ static INT CDECL nulldrv_GetTextFace( PHYSDEV dev, INT size, LPWSTR name )
 
     if (GetObjectW( dc->hFont, sizeof(font), &font ))
     {
-        ret = strlenW( font.lfFaceName ) + 1;
+        ret = lstrlenW( font.lfFaceName ) + 1;
         if (name)
         {
             lstrcpynW( name, font.lfFaceName, size );
@@ -631,6 +641,11 @@ static HBITMAP CDECL nulldrv_SelectBitmap( PHYSDEV dev, HBITMAP bitmap )
 static HBRUSH CDECL nulldrv_SelectBrush( PHYSDEV dev, HBRUSH brush, const struct brush_pattern *pattern )
 {
     return brush;
+}
+
+static HFONT CDECL nulldrv_SelectFont( PHYSDEV dev, HFONT font, UINT *aa_flags )
+{
+    return font;
 }
 
 static HPALETTE CDECL nulldrv_SelectPalette( PHYSDEV dev, HPALETTE palette, BOOL bkgnd )
@@ -917,25 +932,21 @@ const struct gdi_dc_funcs null_driver =
  */
 BOOL DRIVER_GetDriverName( LPCWSTR device, LPWSTR driver, DWORD size )
 {
-    static const WCHAR displayW[] = { 'd','i','s','p','l','a','y',0 };
-    static const WCHAR devicesW[] = { 'd','e','v','i','c','e','s',0 };
-    static const WCHAR empty_strW[] = { 0 };
     WCHAR *p;
 
     /* display is a special case */
-    if (!strcmpiW( device, displayW ) ||
-        is_display_device( device ))
+    if (!wcsicmp( device, L"display" ) || is_display_device( device ))
     {
-        lstrcpynW( driver, displayW, size );
+        lstrcpynW( driver, L"display", size );
         return TRUE;
     }
 
-    size = GetProfileStringW(devicesW, device, empty_strW, driver, size);
+    size = GetProfileStringW(L"devices", device, L"", driver, size);
     if(!size) {
         WARN("Unable to find %s in [devices] section of win.ini\n", debugstr_w(device));
         return FALSE;
     }
-    p = strchrW(driver, ',');
+    p = wcschr(driver, ',');
     if(!p)
     {
         WARN("%s entry in [devices] section of win.ini is malformed.\n", debugstr_w(device));
@@ -1350,24 +1361,63 @@ NTSTATUS WINAPI D3DKMTCloseAdapter( const D3DKMT_CLOSEADAPTER *desc )
  */
 NTSTATUS WINAPI D3DKMTOpenAdapterFromGdiDisplayName( D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME *desc )
 {
-    static const WCHAR displayW[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y'};
+    WCHAR *end, key_nameW[MAX_PATH], bufferW[MAX_PATH];
+    HDEVINFO devinfo = INVALID_HANDLE_VALUE;
+    NTSTATUS status = STATUS_UNSUCCESSFUL;
     static D3DKMT_HANDLE handle_start = 0;
     struct d3dkmt_adapter *adapter;
-    WCHAR *end;
-    int id;
+    SP_DEVINFO_DATA device_data;
+    DWORD size, state_flags;
+    DEVPROPTYPE type;
+    HANDLE mutex;
+    LUID luid;
+    int index;
 
-    TRACE("(%p) semi-stub\n", desc);
+    TRACE("(%p)\n", desc);
 
-    if (!desc || strncmpiW( desc->DeviceName, displayW, ARRAY_SIZE(displayW) ))
+    if (!desc)
         return STATUS_UNSUCCESSFUL;
 
-    id = strtolW( desc->DeviceName + ARRAY_SIZE(displayW), &end, 10 ) - 1;
+    TRACE("DeviceName: %s\n", wine_dbgstr_w( desc->DeviceName ));
+    if (wcsnicmp( desc->DeviceName, L"\\\\.\\DISPLAY", lstrlenW(L"\\\\.\\DISPLAY") ))
+        return STATUS_UNSUCCESSFUL;
+
+    index = wcstol( desc->DeviceName + lstrlenW(L"\\\\.\\DISPLAY"), &end, 10 ) - 1;
     if (*end)
         return STATUS_UNSUCCESSFUL;
 
     adapter = heap_alloc( sizeof( *adapter ) );
     if (!adapter)
         return STATUS_NO_MEMORY;
+
+    /* Get adapter LUID from SetupAPI */
+    mutex = get_display_device_init_mutex();
+
+    size = sizeof( bufferW );
+    swprintf( key_nameW, MAX_PATH, L"\\Device\\Video%d", index );
+    if (RegGetValueW( HKEY_LOCAL_MACHINE, L"HARDWARE\\DEVICEMAP\\VIDEO", key_nameW, RRF_RT_REG_SZ, NULL, bufferW, &size ))
+        goto done;
+
+    /* Strip \Registry\Machine\ prefix and retrieve Wine specific data set by the display driver */
+    lstrcpyW( key_nameW, bufferW + 18 );
+    size = sizeof( state_flags );
+    if (RegGetValueW( HKEY_CURRENT_CONFIG, key_nameW, L"StateFlags", RRF_RT_REG_DWORD, NULL,
+                      &state_flags, &size ))
+        goto done;
+
+    if (!(state_flags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP))
+        goto done;
+
+    size = sizeof( bufferW );
+    if (RegGetValueW( HKEY_CURRENT_CONFIG, key_nameW, L"GPUID", RRF_RT_REG_SZ, NULL, bufferW, &size ))
+        goto done;
+
+    devinfo = SetupDiCreateDeviceInfoList( &GUID_DEVCLASS_DISPLAY, NULL );
+    device_data.cbSize = sizeof( device_data );
+    SetupDiOpenDeviceInfoW( devinfo, bufferW, NULL, 0, &device_data );
+    if (!SetupDiGetDevicePropertyW( devinfo, &device_data, &DEVPROPKEY_GPU_LUID, &type,
+                                    (BYTE *)&luid, sizeof( luid ), NULL, 0))
+        goto done;
 
     EnterCriticalSection( &driver_section );
     /* D3DKMT_HANDLE is UINT, so we can't use pointer as handle */
@@ -1376,11 +1426,16 @@ NTSTATUS WINAPI D3DKMTOpenAdapterFromGdiDisplayName( D3DKMT_OPENADAPTERFROMGDIDI
     LeaveCriticalSection( &driver_section );
 
     desc->hAdapter = handle_start;
-    /* FIXME: Support AdapterLuid */
-    desc->AdapterLuid.LowPart = 0;
-    desc->AdapterLuid.HighPart = 0;
-    desc->VidPnSourceId = id;
-    return STATUS_SUCCESS;
+    desc->AdapterLuid = luid;
+    desc->VidPnSourceId = index;
+    status = STATUS_SUCCESS;
+
+done:
+    SetupDiDestroyDeviceInfoList( devinfo );
+    release_display_device_init_mutex( mutex );
+    if (status != STATUS_SUCCESS)
+        heap_free( adapter );
+    return status;
 }
 
 /******************************************************************************
@@ -1468,6 +1523,15 @@ NTSTATUS WINAPI D3DKMTQueryStatistics(D3DKMT_QUERYSTATISTICS *stats)
 {
     FIXME("(%p): stub\n", stats);
     return STATUS_SUCCESS;
+}
+
+/******************************************************************************
+ *		D3DKMTSetQueuedLimit [GDI32.@]
+ */
+NTSTATUS WINAPI D3DKMTSetQueuedLimit( D3DKMT_SETQUEUEDLIMIT *desc )
+{
+    FIXME( "(%p): stub\n", desc );
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 /******************************************************************************

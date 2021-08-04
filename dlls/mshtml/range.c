@@ -33,9 +33,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
-static const WCHAR brW[] = {'b','r',0};
-static const WCHAR hrW[] = {'h','r',0};
-
 typedef struct {
     DispatchEx dispex;
     IHTMLTxtRange     IHTMLTxtRange_iface;
@@ -93,34 +90,20 @@ static HTMLTxtRange *get_range_object(HTMLDocumentNode *doc, IHTMLTxtRange *ifac
 
 static range_unit_t string_to_unit(LPCWSTR str)
 {
-    static const WCHAR characterW[] =
-        {'c','h','a','r','a','c','t','e','r',0};
-    static const WCHAR wordW[] =
-        {'w','o','r','d',0};
-    static const WCHAR sentenceW[] =
-        {'s','e','n','t','e','n','c','e',0};
-    static const WCHAR texteditW[] =
-        {'t','e','x','t','e','d','i','t',0};
-
-    if(!wcsicmp(str, characterW))  return RU_CHAR;
-    if(!wcsicmp(str, wordW))       return RU_WORD;
-    if(!wcsicmp(str, sentenceW))   return RU_SENTENCE;
-    if(!wcsicmp(str, texteditW))   return RU_TEXTEDIT;
+    if(!wcsicmp(str, L"character"))  return RU_CHAR;
+    if(!wcsicmp(str, L"word"))       return RU_WORD;
+    if(!wcsicmp(str, L"sentence"))   return RU_SENTENCE;
+    if(!wcsicmp(str, L"textedit"))   return RU_TEXTEDIT;
 
     return RU_UNKNOWN;
 }
 
 static int string_to_nscmptype(LPCWSTR str)
 {
-    static const WCHAR seW[] = {'S','t','a','r','t','T','o','E','n','d',0};
-    static const WCHAR ssW[] = {'S','t','a','r','t','T','o','S','t','a','r','t',0};
-    static const WCHAR esW[] = {'E','n','d','T','o','S','t','a','r','t',0};
-    static const WCHAR eeW[] = {'E','n','d','T','o','E','n','d',0};
-
-    if(!wcsicmp(str, seW))  return NS_START_TO_END;
-    if(!wcsicmp(str, ssW))  return NS_START_TO_START;
-    if(!wcsicmp(str, esW))  return NS_END_TO_START;
-    if(!wcsicmp(str, eeW))  return NS_END_TO_END;
+    if(!wcsicmp(str, L"StartToEnd"))  return NS_START_TO_END;
+    if(!wcsicmp(str, L"StartToStart"))  return NS_START_TO_START;
+    if(!wcsicmp(str, L"EndToStart"))  return NS_END_TO_START;
+    if(!wcsicmp(str, L"EndToEnd"))  return NS_END_TO_END;
 
     return -1;
 }
@@ -450,10 +433,10 @@ static void wstrbuf_append_node(wstrbuf_t *buf, nsIDOMNode *node, BOOL ignore_te
         break;
     }
     case ELEMENT_NODE:
-        if(is_elem_tag(node, brW)) {
+        if(is_elem_tag(node, L"br")) {
             static const WCHAR endlW[] = {'\r','\n'};
             wstrbuf_append_len(buf, endlW, 2);
-        }else if(is_elem_tag(node, hrW)) {
+        }else if(is_elem_tag(node, L"hr")) {
             static const WCHAR endl2W[] = {'\r','\n','\r','\n'};
             wstrbuf_append_len(buf, endl2W, 4);
         }
@@ -617,7 +600,7 @@ static WCHAR move_next_char(rangepoint_t *iter)
             if(!node)
                 break;
 
-            if(is_elem_tag(node, brW)) {
+            if(is_elem_tag(node, L"br")) {
                 if(cspace) {
                     nsIDOMNode_Release(node);
                     free_rangepoint(iter);
@@ -627,7 +610,7 @@ static WCHAR move_next_char(rangepoint_t *iter)
 
                 cspace = '\n';
                 init_rangepoint(&last_space, iter->node, iter->off+1);
-            }else if(is_elem_tag(node, hrW)) {
+            }else if(is_elem_tag(node, L"hr")) {
                 nsIDOMNode_Release(node);
                 if(cspace) {
                     free_rangepoint(iter);
@@ -707,12 +690,12 @@ static WCHAR move_prev_char(rangepoint_t *iter)
             if(!node)
                 break;
 
-            if(is_elem_tag(node, brW)) {
+            if(is_elem_tag(node, L"br")) {
                 if(cspace)
                     free_rangepoint(&last_space);
                 cspace = '\n';
                 init_rangepoint(&last_space, iter->node, iter->off-1);
-            }else if(is_elem_tag(node, hrW)) {
+            }else if(is_elem_tag(node, L"hr")) {
                 nsIDOMNode_Release(node);
                 if(cspace) {
                     free_rangepoint(iter);
@@ -947,8 +930,7 @@ static HRESULT WINAPI HTMLTxtRange_get_htmlText(IHTMLTxtRange *iface, BSTR *p)
     }
 
     if(!*p) {
-        static const WCHAR emptyW[] = {0};
-        *p = SysAllocString(emptyW);
+        *p = SysAllocString(L"");
     }
 
     TRACE("return %s\n", debugstr_w(*p));
@@ -1674,9 +1656,6 @@ static HRESULT exec_indent(HTMLTxtRange *This, VARIANT *in, VARIANT *out)
     nsIDOMDocumentFragment *fragment;
     nsIDOMNode *tmp;
 
-    static const PRUnichar blockquoteW[] = {'B','L','O','C','K','Q','U','O','T','E',0};
-    static const PRUnichar pW[] = {'P',0};
-
     TRACE("(%p)->(%p %p)\n", This, in, out);
 
     if(!This->doc->nsdoc) {
@@ -1684,8 +1663,8 @@ static HRESULT exec_indent(HTMLTxtRange *This, VARIANT *in, VARIANT *out)
         return E_NOTIMPL;
     }
 
-    create_nselem(This->doc, blockquoteW, &blockquote_elem);
-    create_nselem(This->doc, pW, &p_elem);
+    create_nselem(This->doc, L"BLOCKQUOTE", &blockquote_elem);
+    create_nselem(This->doc, L"P", &p_elem);
 
     nsIDOMRange_ExtractContents(This->nsrange, &fragment);
     nsIDOMElement_AppendChild(p_elem, (nsIDOMNode*)fragment, &tmp);
@@ -1750,7 +1729,8 @@ HRESULT HTMLTxtRange_Create(HTMLDocumentNode *doc, nsIDOMRange *nsrange, IHTMLTx
     if(!ret)
         return E_OUTOFMEMORY;
 
-    init_dispex(&ret->dispex, (IUnknown*)&ret->IHTMLTxtRange_iface, &HTMLTxtRange_dispex);
+    init_dispatch(&ret->dispex, (IUnknown*)&ret->IHTMLTxtRange_iface, &HTMLTxtRange_dispex,
+                                 dispex_compat_mode(&doc->node.event_target.dispex));
 
     ret->IHTMLTxtRange_iface.lpVtbl = &HTMLTxtRangeVtbl;
     ret->IOleCommandTarget_iface.lpVtbl = &OleCommandTargetVtbl;
@@ -2086,7 +2066,7 @@ static dispex_static_data_t HTMLDOMRange_dispex = {
     HTMLDOMRange_iface_tids
 };
 
-HRESULT HTMLDOMRange_Create(nsIDOMRange *nsrange, IHTMLDOMRange **p)
+HRESULT create_dom_range(nsIDOMRange *nsrange, compat_mode_t compat_mode, IHTMLDOMRange **p)
 {
     HTMLDOMRange *ret;
 
@@ -2094,7 +2074,7 @@ HRESULT HTMLDOMRange_Create(nsIDOMRange *nsrange, IHTMLDOMRange **p)
     if(!ret)
         return E_OUTOFMEMORY;
 
-    init_dispex(&ret->dispex, (IUnknown*)&ret->IHTMLDOMRange_iface, &HTMLDOMRange_dispex);
+    init_dispatch(&ret->dispex, (IUnknown*)&ret->IHTMLDOMRange_iface, &HTMLDOMRange_dispex, compat_mode);
 
     ret->IHTMLDOMRange_iface.lpVtbl = &HTMLDOMRangeVtbl;
     ret->ref = 1;
@@ -2115,4 +2095,298 @@ void detach_ranges(HTMLDocumentNode *This)
         iter->doc = NULL;
         list_remove(&iter->entry);
     }
+}
+
+typedef struct {
+    IMarkupPointer2 IMarkupPointer2_iface;
+    LONG ref;
+} MarkupPointer;
+
+static inline MarkupPointer *impl_from_IMarkupPointer2(IMarkupPointer2 *iface)
+{
+    return CONTAINING_RECORD(iface, MarkupPointer, IMarkupPointer2_iface);
+}
+
+static HRESULT WINAPI MarkupPointer2_QueryInterface(IMarkupPointer2 *iface, REFIID riid, void **ppv)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
+
+    if(IsEqualGUID(&IID_IUnknown, riid)) {
+        *ppv = &This->IMarkupPointer2_iface;
+    }else if(IsEqualGUID(&IID_IMarkupPointer, riid)) {
+        *ppv = &This->IMarkupPointer2_iface;
+    }else if(IsEqualGUID(&IID_IMarkupPointer2, riid)) {
+        *ppv = &This->IMarkupPointer2_iface;
+    }else {
+        *ppv = NULL;
+        WARN("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppv);
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI MarkupPointer2_AddRef(IMarkupPointer2 *iface)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI MarkupPointer2_Release(IMarkupPointer2 *iface)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    if(!ref)
+        heap_free(This);
+
+    return ref;
+}
+
+static HRESULT WINAPI MarkupPointer2_OwningDoc(IMarkupPointer2 *iface, IHTMLDocument2 **p)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_Gravity(IMarkupPointer2 *iface, POINTER_GRAVITY *p)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_SetGravity(IMarkupPointer2 *iface, POINTER_GRAVITY gravity)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%u)\n", This, gravity);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_Cling(IMarkupPointer2 *iface, BOOL *p)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_SetCling(IMarkupPointer2 *iface, BOOL cling)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%x)\n", This, cling);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_Unposition(IMarkupPointer2 *iface)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_IsPositioned(IMarkupPointer2 *iface, BOOL *p)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_GetContainer(IMarkupPointer2 *iface, IMarkupContainer **p)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_MoveAdjacentToElement(IMarkupPointer2 *iface, IHTMLElement *element, ELEMENT_ADJACENCY adj)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p %u)\n", This, element, adj);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_MoveToPointer(IMarkupPointer2 *iface, IMarkupPointer *pointer)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p)\n", This, pointer);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_MoveToContainer(IMarkupPointer2 *iface, IMarkupContainer *container, BOOL at_start)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p %x)\n", This, container, at_start);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_Left(IMarkupPointer2 *iface, BOOL move, MARKUP_CONTEXT_TYPE *context,
+                                          IHTMLElement **element, LONG *len, OLECHAR *text)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%x %p %p %p %p)\n", This, move, context, element, len, text);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_Right(IMarkupPointer2 *iface, BOOL move, MARKUP_CONTEXT_TYPE *context,
+                                           IHTMLElement **element, LONG *len, OLECHAR *text)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%x %p %p %p %p)\n", This, move, context, element, len, text);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_CurrentScope(IMarkupPointer2 *iface, IHTMLElement **p)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_IsLeftOf(IMarkupPointer2 *iface, IMarkupPointer *that_pointer, BOOL *p)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p %p)\n", This, that_pointer, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_IsLeftOfOrEqualTo(IMarkupPointer2 *iface, IMarkupPointer *that_pointer, BOOL *p)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p %p)\n", This, that_pointer, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_IsRightOf(IMarkupPointer2 *iface, IMarkupPointer *that_pointer, BOOL *p)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p %p)\n", This, that_pointer, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_IsRightOfOrEqualTo(IMarkupPointer2 *iface, IMarkupPointer *that_pointer, BOOL *p)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p %p)\n", This, that_pointer, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_IsEqualTo(IMarkupPointer2 *iface, IMarkupPointer *that_pointer, BOOL *p)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p %p)\n", This, that_pointer, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_MoveUnit(IMarkupPointer2 *iface, MOVEUNIT_ACTION action)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%u)\n", This, action);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_FindText(IMarkupPointer2 *iface, OLECHAR *text, DWORD flags,
+                                              IMarkupPointer *end_match, IMarkupPointer *end_search)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%s %x %p %p)\n", This, debugstr_w(text), flags, end_match, end_search);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_IsAtWordBreak(IMarkupPointer2 *iface, BOOL *p)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_GetMarkupPosition(IMarkupPointer2 *iface, LONG *p)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p)\n", This, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_MoveToMarkupPosition(IMarkupPointer2 *iface, IMarkupContainer *container, LONG mp)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p %d)\n", This, container, mp);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_MoveUnitBounded(IMarkupPointer2 *iface, MOVEUNIT_ACTION action, IMarkupPointer *boundary)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%u %p)\n", This, action, boundary);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_IsInsideURL(IMarkupPointer2 *iface, IMarkupPointer *right, BOOL *p)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p %p)\n", This, right, p);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MarkupPointer2_MoveToContent(IMarkupPointer2 *iface, IHTMLElement *element, BOOL at_start)
+{
+    MarkupPointer *This = impl_from_IMarkupPointer2(iface);
+    FIXME("(%p)->(%p %x)\n", This, element, at_start);
+    return E_NOTIMPL;
+}
+
+static const IMarkupPointer2Vtbl MarkupPointer2Vtbl = {
+    MarkupPointer2_QueryInterface,
+    MarkupPointer2_AddRef,
+    MarkupPointer2_Release,
+    MarkupPointer2_OwningDoc,
+    MarkupPointer2_Gravity,
+    MarkupPointer2_SetGravity,
+    MarkupPointer2_Cling,
+    MarkupPointer2_SetCling,
+    MarkupPointer2_Unposition,
+    MarkupPointer2_IsPositioned,
+    MarkupPointer2_GetContainer,
+    MarkupPointer2_MoveAdjacentToElement,
+    MarkupPointer2_MoveToPointer,
+    MarkupPointer2_MoveToContainer,
+    MarkupPointer2_Left,
+    MarkupPointer2_Right,
+    MarkupPointer2_CurrentScope,
+    MarkupPointer2_IsLeftOf,
+    MarkupPointer2_IsLeftOfOrEqualTo,
+    MarkupPointer2_IsRightOf,
+    MarkupPointer2_IsRightOfOrEqualTo,
+    MarkupPointer2_IsEqualTo,
+    MarkupPointer2_MoveUnit,
+    MarkupPointer2_FindText,
+    MarkupPointer2_IsAtWordBreak,
+    MarkupPointer2_GetMarkupPosition,
+    MarkupPointer2_MoveToMarkupPosition,
+    MarkupPointer2_MoveUnitBounded,
+    MarkupPointer2_IsInsideURL,
+    MarkupPointer2_MoveToContent
+};
+
+HRESULT create_markup_pointer(IMarkupPointer **ret)
+{
+    MarkupPointer *markup_pointer;
+
+    if(!(markup_pointer = heap_alloc(sizeof(*markup_pointer))))
+        return E_OUTOFMEMORY;
+
+    markup_pointer->IMarkupPointer2_iface.lpVtbl = &MarkupPointer2Vtbl;
+    markup_pointer->ref = 1;
+
+    *ret = (IMarkupPointer*)&markup_pointer->IMarkupPointer2_iface;
+    return S_OK;
 }

@@ -133,18 +133,18 @@ typedef enum {
 
 typedef struct _statement_t {
     statement_type_t type;
+    unsigned loc;
     struct _statement_t *next;
 } statement_t;
 
 typedef struct {
     statement_t stat;
     call_expression_t *expr;
-    BOOL is_strict;
 } call_statement_t;
 
 typedef struct {
     statement_t stat;
-    call_expression_t *left_expr;
+    expression_t *left_expr;
     expression_t *value_expr;
 } assign_statement_t;
 
@@ -183,6 +183,7 @@ typedef struct _function_decl_t {
     const WCHAR *name;
     function_type_t type;
     BOOL is_public;
+    BOOL is_default;
     arg_decl_t *args;
     statement_t *body;
     struct _function_decl_t *next;
@@ -204,6 +205,7 @@ typedef struct _class_decl_t {
 typedef struct _elseif_decl_t {
     expression_t *expr;
     statement_t *stat;
+    unsigned loc;
     struct _elseif_decl_t *next;
 } elseif_decl_t;
 
@@ -282,9 +284,9 @@ typedef struct {
     const WCHAR *end;
 
     BOOL option_explicit;
-    BOOL parse_complete;
     BOOL is_html;
     HRESULT hres;
+    int error_loc;
 
     int last_token;
     unsigned last_nl;
@@ -298,5 +300,5 @@ typedef struct {
 
 HRESULT parse_script(parser_ctx_t*,const WCHAR*,const WCHAR*,DWORD) DECLSPEC_HIDDEN;
 void parser_release(parser_ctx_t*) DECLSPEC_HIDDEN;
-int parser_lex(void*,parser_ctx_t*) DECLSPEC_HIDDEN;
+int parser_lex(void*,unsigned*,parser_ctx_t*) DECLSPEC_HIDDEN;
 void *parser_alloc(parser_ctx_t*,size_t) DECLSPEC_HIDDEN;

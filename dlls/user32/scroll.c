@@ -19,8 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 
 #include "windef.h"
@@ -120,10 +118,9 @@ static void SCROLL_DrawInterior_9x( HWND hwnd, HDC hdc, INT nBar,
 /*********************************************************************
  * scrollbar class descriptor
  */
-static const WCHAR scrollbarW[] = {'S','c','r','o','l','l','B','a','r',0};
 const struct builtin_class_descr SCROLL_builtin_class =
 {
-    scrollbarW,             /* name */
+    L"ScrollBar",           /* name */
     CS_DBLCLKS | CS_VREDRAW | CS_HREDRAW | CS_PARENTDC, /* style  */
     WINPROC_SCROLLBAR,      /* proc */
     sizeof(SCROLLBAR_WNDDATA), /* extra */
@@ -1754,6 +1751,12 @@ static INT SCROLL_SetScrollInfo( HWND hwnd, INT nBar, LPCSCROLLINFO info, BOOL b
 	    new_flags = ESB_ENABLE_BOTH;
             if ((nBar != SB_CTL) && ( (action & SA_SSI_REFRESH) ))
                 action |= SA_SSI_SHOW;
+        }
+
+        if (nBar == SB_CTL && bRedraw && IsWindowVisible(hwnd) &&
+               (new_flags == ESB_ENABLE_BOTH || new_flags == ESB_DISABLE_BOTH))
+        {
+            EnableWindow(hwnd, new_flags == ESB_ENABLE_BOTH);
         }
 
         if (infoPtr->flags != new_flags) /* check arrow flags */

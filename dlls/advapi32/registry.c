@@ -36,7 +36,6 @@
 #include "winerror.h"
 #include "winternl.h"
 
-#include "wine/unicode.h"
 #include "wine/debug.h"
 #include "wine/list.h"
 
@@ -365,7 +364,7 @@ LSTATUS WINAPI RegSetValueW( HKEY hkey, LPCWSTR subkey, DWORD type, LPCWSTR data
 
     if (type != REG_SZ || !data) return ERROR_INVALID_PARAMETER;
 
-    return RegSetKeyValueW( hkey, subkey, NULL, type, data, (strlenW(data) + 1)*sizeof(WCHAR) );
+    return RegSetKeyValueW( hkey, subkey, NULL, type, data, (lstrlenW(data) + 1)*sizeof(WCHAR) );
 }
 
 /******************************************************************************
@@ -508,6 +507,17 @@ LSTATUS WINAPI RegReplaceKeyW( HKEY hkey, LPCWSTR lpSubKey, LPCWSTR lpNewFile,
 
 
 /******************************************************************************
+ * RegRenameKey [ADVAPI32.@]
+ *
+ */
+LSTATUS WINAPI RegRenameKey( HKEY hkey, LPCWSTR lpSubKey, LPCWSTR lpNewName )
+{
+    FIXME("(%p,%s,%s): stub\n", hkey, debugstr_w(lpSubKey), debugstr_w(lpNewName));
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+
+/******************************************************************************
  * RegReplaceKeyA [ADVAPI32.@]
  *
  * See RegReplaceKeyW.
@@ -565,7 +575,7 @@ LSTATUS WINAPI RegConnectRegistryW( LPCWSTR lpMachineName, HKEY hKey,
             lpMachineName += 2;
         if (GetComputerNameW(compName, &len))
         {
-            if (!strcmpiW(lpMachineName, compName))
+            if (!wcsicmp(lpMachineName, compName))
                 ret = RegOpenKeyW(hKey, NULL, phkResult);
             else
             {
@@ -632,6 +642,17 @@ LONG WINAPI RegCopyTreeA( HKEY hsrc, const char *subkey, HKEY hdst )
     ret = RegCopyTreeW( hsrc, subkeyW.Buffer, hdst );
     RtlFreeUnicodeString( &subkeyW );
     return ret;
+}
+
+
+/******************************************************************************
+ * RegEnableReflectionKey [ADVAPI32.@]
+ *
+ */
+LONG WINAPI RegEnableReflectionKey(HKEY base)
+{
+    FIXME("%p: stub\n", base);
+    return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
 

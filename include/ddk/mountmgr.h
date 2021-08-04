@@ -54,13 +54,54 @@ static const WCHAR MOUNTMGR_DOS_DEVICE_NAME[] = {'\\','\\','.','\\','M','o','u',
 #define IOCTL_MOUNTMGR_DEFINE_UNIX_DRIVE CTL_CODE(MOUNTMGRCONTROLTYPE, 32, METHOD_BUFFERED, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
 #define IOCTL_MOUNTMGR_QUERY_UNIX_DRIVE  CTL_CODE(MOUNTMGRCONTROLTYPE, 33, METHOD_BUFFERED, FILE_READ_ACCESS)
 
+enum mountmgr_fs_type
+{
+    MOUNTMGR_FS_TYPE_NTFS,
+    MOUNTMGR_FS_TYPE_FAT,
+    MOUNTMGR_FS_TYPE_FAT32,
+    MOUNTMGR_FS_TYPE_ISO9660,
+    MOUNTMGR_FS_TYPE_UDF,
+};
+
 struct mountmgr_unix_drive
 {
-    ULONG  size;
-    ULONG  type;
-    WCHAR  letter;
-    USHORT mount_point_offset;
-    USHORT device_offset;
+    ULONG     size;
+    ULONG     type;
+    ULONG     fs_type;
+    DWORD     serial;
+    ULONGLONG unix_dev;
+    WCHAR     letter;
+    USHORT    mount_point_offset;
+    USHORT    device_offset;
+    USHORT    label_offset;
+};
+
+#define IOCTL_MOUNTMGR_READ_CREDENTIAL       CTL_CODE(MOUNTMGRCONTROLTYPE, 48, METHOD_BUFFERED, FILE_READ_ACCESS)
+#define IOCTL_MOUNTMGR_WRITE_CREDENTIAL      CTL_CODE(MOUNTMGRCONTROLTYPE, 49, METHOD_BUFFERED, FILE_WRITE_ACCESS)
+#define IOCTL_MOUNTMGR_DELETE_CREDENTIAL     CTL_CODE(MOUNTMGRCONTROLTYPE, 50, METHOD_BUFFERED, FILE_WRITE_ACCESS)
+#define IOCTL_MOUNTMGR_ENUMERATE_CREDENTIALS CTL_CODE(MOUNTMGRCONTROLTYPE, 51, METHOD_BUFFERED, FILE_READ_ACCESS)
+
+struct mountmgr_credential
+{
+    ULONG    targetname_offset;
+    ULONG    targetname_size;
+    ULONG    username_offset;
+    ULONG    username_size;
+    ULONG    comment_offset;
+    ULONG    comment_size;
+    ULONG    blob_offset;
+    ULONG    blob_size;
+    BOOL     blob_preserve;
+    FILETIME last_written;
+};
+
+struct mountmgr_credential_list
+{
+    ULONG size;
+    ULONG count;
+    ULONG filter_offset;
+    ULONG filter_size;
+    struct mountmgr_credential creds[1];
 };
 
 #define IOCTL_MOUNTMGR_QUERY_DHCP_REQUEST_PARAMS CTL_CODE(MOUNTMGRCONTROLTYPE, 64, METHOD_BUFFERED, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
@@ -83,6 +124,8 @@ struct mountmgr_dhcp_request_params
     WCHAR adapter[IF_MAX_STRING_SIZE + 1];
     struct mountmgr_dhcp_request_param params[1];
 };
+
+#define IOCTL_MOUNTMGR_QUERY_SYMBOL_FILE CTL_CODE(MOUNTMGRCONTROLTYPE, 80, METHOD_BUFFERED, FILE_READ_ACCESS)
 
 #endif
 

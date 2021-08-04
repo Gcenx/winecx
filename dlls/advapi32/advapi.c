@@ -33,8 +33,6 @@
 #include "wincred.h"
 #include "wct.h"
 
-#include "wine/library.h"
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 #include "advapi32_misc.h"
@@ -43,89 +41,52 @@ WINE_DEFAULT_DEBUG_CHANNEL(advapi);
 
 /******************************************************************************
  * GetUserNameA [ADVAPI32.@]
- *
- * Get the current user name.
- *
- * PARAMS
- *  lpszName [O]   Destination for the user name.
- *  lpSize   [I/O] Size of lpszName.
- *
- * RETURNS
- *  Success: The length of the user name, including terminating NUL.
- *  Failure: ERROR_MORE_DATA if *lpSize is too small.
  */
-BOOL WINAPI
-GetUserNameA( LPSTR lpszName, LPDWORD lpSize )
+BOOL WINAPI GetUserNameA( LPSTR name, LPDWORD size )
 {
-    WCHAR *buffer;
+    DWORD len = GetEnvironmentVariableA( "WINEUSERNAME", name, *size );
     BOOL ret;
-    DWORD sizeW = *lpSize;
 
-    if (!(buffer = heap_alloc( sizeW * sizeof(WCHAR) )))
+    /* CrossOver Hack 12735: Use a consistent username */
+    if (!getenv( "CX_REPORT_REAL_USERNAME" ))
     {
-        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
-        return FALSE;
+        len = sizeof("crossover");
+        if ((ret = (len <= *size))) strcpy( name, "crossover" );
+        else SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        *size = len;
+        return ret;
     }
 
-    ret = GetUserNameW( buffer, &sizeW );
-    if (ret)
-        *lpSize = WideCharToMultiByte( CP_ACP, 0, buffer, -1, lpszName, *lpSize, NULL, NULL );
-    else
-        *lpSize = sizeW;
-
-    heap_free( buffer );
+    if (!len) return FALSE;
+    if ((ret = (len < *size))) len++;
+    else SetLastError( ERROR_INSUFFICIENT_BUFFER );
+    *size = len;
     return ret;
 }
 
 /******************************************************************************
  * GetUserNameW [ADVAPI32.@]
- *
- * See GetUserNameA.
  */
-BOOL WINAPI
-GetUserNameW( LPWSTR lpszName, LPDWORD lpSize )
+BOOL WINAPI GetUserNameW( LPWSTR name, LPDWORD size )
 {
+    DWORD len = GetEnvironmentVariableW( L"WINEUSERNAME", name, *size );
+    BOOL ret;
+
     /* CrossOver Hack 12735: Use a consistent username */
-    const char * HOSTPTR report_real_username = getenv( "CX_REPORT_REAL_USERNAME" );
-    const char * HOSTPTR name;
-    DWORD i, len;
-    LPWSTR backslash;
-
-    if (!report_real_username)
-        name = "crossover";
-    else
-        name = wine_get_user_name();
-
-    len = MultiByteToWideChar( CP_UNIXCP, 0, name, -1, NULL, 0 );
-    if (len > *lpSize)
+    if (!getenv( "CX_REPORT_REAL_USERNAME" ))
     {
-        SetLastError( ERROR_INSUFFICIENT_BUFFER );
-        *lpSize = len;
-        return FALSE;
+        len = ARRAY_SIZE( L"crossover" );
+        if ((ret = (len <= *size))) wcscpy( name, L"crossover" );
+        else SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        *size = len;
+        return ret;
     }
 
-    *lpSize = len;
-    MultiByteToWideChar( CP_UNIXCP, 0, name, -1, lpszName, len );
-
-    /* Word uses the user name to create named mutexes and file mappings,
-     * and backslashes in the name cause the creation to fail.
-     * Also, Windows doesn't return the domain name in the user name even when
-     * joined to a domain. A Unix box joined to a domain using winbindd will
-     * contain the domain name in the username. So we need to cut this off.
-     * FIXME: Only replaces forward and backslashes for now, should get the
-     * winbind separator char from winbindd and replace that.
-     */
-    for (i = 0; lpszName[i]; i++)
-        if (lpszName[i] == '/') lpszName[i] = '\\';
-
-    backslash = strrchrW(lpszName, '\\');
-    if (backslash == NULL)
-        return TRUE;
-
-    len = lstrlenW(backslash);
-    memmove(lpszName, backslash + 1, len * sizeof(WCHAR));
-    *lpSize = len;
-    return TRUE;
+    if (!len) return FALSE;
+    if ((ret = (len < *size))) len++;
+    else SetLastError( ERROR_INSUFFICIENT_BUFFER );
+    *size = len;
+    return ret;
 }
 
 /******************************************************************************
@@ -332,14 +293,13 @@ typedef UINT (WINAPI *fnMsiProvideComponentFromDescriptor)(LPCWSTR,LPWSTR,DWORD*
 DWORD WINAPI CommandLineFromMsiDescriptor( WCHAR *szDescriptor,
                     WCHAR *szCommandLine, DWORD *pcchCommandLine )
 {
-    static const WCHAR szMsi[] = { 'm','s','i',0 };
     fnMsiProvideComponentFromDescriptor mpcfd;
     HMODULE hmsi;
     UINT r = ERROR_CALL_NOT_IMPLEMENTED;
 
     TRACE("%s %p %p\n", debugstr_w(szDescriptor), szCommandLine, pcchCommandLine);
 
-    hmsi = LoadLibraryW( szMsi );
+    hmsi = LoadLibraryW( L"msi" );
     if (!hmsi)
         return r;
     mpcfd = (fnMsiProvideComponentFromDescriptor)GetProcAddress( hmsi,

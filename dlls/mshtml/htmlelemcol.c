@@ -375,8 +375,6 @@ static BOOL is_elem_name(HTMLElement *elem, LPCWSTR name)
     BOOL ret = FALSE;
     nsresult nsres;
 
-    static const PRUnichar nameW[] = {'n','a','m','e',0};
-
     if(!elem->dom_element)
         return FALSE;
 
@@ -388,7 +386,7 @@ static BOOL is_elem_name(HTMLElement *elem, LPCWSTR name)
         return TRUE;
     }
 
-    nsres = get_elem_attr_value(elem->dom_element, nameW, &nsstr, &str);
+    nsres = get_elem_attr_value(elem->dom_element, L"name", &nsstr, &str);
     if(NS_SUCCEEDED(nsres)) {
         ret = !wcsicmp(str, name);
         nsAString_Finish(&nsstr);
@@ -835,8 +833,8 @@ static IHTMLElementCollection *HTMLElementCollection_Create(HTMLElement **elems,
     ret->elems = elems;
     ret->len = len;
 
-    init_dispex_with_compat_mode(&ret->dispex, (IUnknown*)&ret->IHTMLElementCollection_iface,
-                                 &HTMLElementCollection_dispex, compat_mode);
+    init_dispatch(&ret->dispex, (IUnknown*)&ret->IHTMLElementCollection_iface,
+                  &HTMLElementCollection_dispex, compat_mode);
 
     TRACE("ret=%p len=%d\n", ret, len);
 

@@ -98,7 +98,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dinput);
 
-#define MAKEUINT64(high, low) ( ((uint64_t)high << 32) | (uint32_t)low )
+#define MAKEUINT64(high, low) (((uint64_t)high << 32) | (uint32_t)low)
 
 static CFMutableArrayRef device_main_elements = NULL;
 
@@ -1280,10 +1280,6 @@ static HRESULT alloc_device(REFGUID rguid, IDirectInputImpl *dinput,
     get_osx_device_elements_props(newDevice);
 
     IDirectInput_AddRef(&newDevice->generic.base.dinput->IDirectInput7A_iface);
-
-    EnterCriticalSection(&dinput->crit);
-    list_add_tail(&dinput->devices_list, &newDevice->generic.base.entry);
-    LeaveCriticalSection(&dinput->crit);
 
     newDevice->generic.devcaps.dwSize = sizeof(newDevice->generic.devcaps);
     newDevice->generic.devcaps.dwFlags |= DIDC_ATTACHED;

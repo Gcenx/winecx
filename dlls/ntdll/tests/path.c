@@ -77,6 +77,11 @@ static void test_RtlDetermineDosPathNameType_U(void)
         { "//?foo", 1 },
         { "\\\\?", 7 },
         { "//?", 7 },
+        { "CONIN$", 5 },
+        { "CONOUT$", 5 },
+        { "CONERR$", 5 },
+        { "\\\\.\\CONIN$", 6 },
+        { "\\\\.\\CONOUT$", 6 },
         { NULL, 0 }
     };
 
@@ -143,6 +148,15 @@ static void test_RtlIsDosDeviceName_U(void)
         { "CoM4:",         0, 8 },
         { "lpt9:",         0, 8 },
         { "c:\\lpt0.txt",  0, 0 },
+        { "CONIN$",        0, 12, TRUE }, /* fails on winxp */
+        { "CONOUT$",       0, 14, TRUE }, /* fails on winxp */
+        { "CONERR$",       0, 0 },
+        { "CON",           0, 6 },
+        { "PIPE",          0, 0 },
+        { "\\??\\CONIN$",  8, 12, TRUE }, /* fails on winxp */
+        { "\\??\\CONOUT$", 8, 14, TRUE }, /* fails on winxp */
+        { "\\??\\CONERR$", 0, 0 },
+        { "\\??\\CON",     8, 6 },
         { "c:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -329,6 +343,11 @@ static void test_RtlGetFullPathName_U(void)
             { "//?/foo/.",                   "\\\\?\\foo",       "foo"},
             { "//?/foo/..",                  "\\\\?\\",          NULL},
 
+            { "CONIN$",                      "\\\\.\\CONIN$",    NULL,
+                                             "C:\\windows\\CONIN$", "CONIN$"},
+            { "CONOUT$",                     "\\\\.\\CONOUT$",   NULL,
+                                             "C:\\windows\\CONOUT$", "CONOUT$"},
+
             /* RtlGetFullPathName_U() can't understand the global namespace prefix */
             { "\\??\\foo",                   "C:\\??\\foo",      "foo"},
             { 0 }
@@ -395,156 +414,185 @@ static void test_RtlGetFullPathName_U(void)
 
 static void test_RtlDosPathNameToNtPathName_U(void)
 {
-    static const WCHAR broken_global_prefix[] = {'\\','?','?','\\','C',':','\\','?','?'};
+    static const WCHAR broken_global_prefix[] = L"\\??\\C:\\??";
 
     char curdir[MAX_PATH];
-    WCHAR path[MAX_PATH];
     UNICODE_STRING nameW;
     WCHAR *file_part;
     NTSTATUS status;
-    BOOL ret, expect;
+    BOOL ret;
     int i;
 
     static const struct
     {
-        const char *dos;
-        const char *nt;
+        const WCHAR *dos;
+        const WCHAR *nt;
         int file_offset;    /* offset to file part */
-        NTSTATUS status;
-        NTSTATUS alt_status;
-        int broken;
+        const WCHAR *alt_nt;
     }
     tests[] =
     {
-        { "c:\\",           "\\??\\c:\\",                  -1, STATUS_SUCCESS },
-        { "c:/",            "\\??\\c:\\",                  -1, STATUS_SUCCESS },
-        { "c:/foo",         "\\??\\c:\\foo",                7, STATUS_SUCCESS },
-        { "c:/foo.",        "\\??\\c:\\foo",                7, STATUS_SUCCESS },
-        { "c:/foo/",        "\\??\\c:\\foo\\",             -1, STATUS_SUCCESS },
-        { "c:/foo//",       "\\??\\c:\\foo\\",             -1, STATUS_SUCCESS },
-        { "C:/foo",         "\\??\\C:\\foo",                7, STATUS_SUCCESS },
-        { "C:/foo/bar",     "\\??\\C:\\foo\\bar",          11, STATUS_SUCCESS },
-        { "C:/foo/bar",     "\\??\\C:\\foo\\bar",          11, STATUS_SUCCESS },
-        { "c:.",            "\\??\\C:\\windows",            7, STATUS_SUCCESS },
-        { "c:foo",          "\\??\\C:\\windows\\foo",      15, STATUS_SUCCESS },
-        { "c:foo/bar",      "\\??\\C:\\windows\\foo\\bar", 19, STATUS_SUCCESS },
-        { "c:./foo",        "\\??\\C:\\windows\\foo",      15, STATUS_SUCCESS },
-        { "c:/./foo",       "\\??\\c:\\foo",                7, STATUS_SUCCESS },
-        { "c:/foo/.",       "\\??\\c:\\foo",                7, STATUS_SUCCESS },
-        { "c:/foo/./bar",   "\\??\\c:\\foo\\bar",          11, STATUS_SUCCESS },
-        { "c:/foo/../bar",  "\\??\\c:\\bar",                7, STATUS_SUCCESS },
-        { "\\foo",          "\\??\\C:\\foo",                7, STATUS_SUCCESS },
-        { "foo",            "\\??\\C:\\windows\\foo",      15, STATUS_SUCCESS },
-        { ".",              "\\??\\C:\\windows",            7, STATUS_SUCCESS },
-        { "./",             "\\??\\C:\\windows\\",         -1, STATUS_SUCCESS },
-        { "..",             "\\??\\C:\\",                  -1, STATUS_SUCCESS },
-        { "...",            "\\??\\C:\\windows\\",         -1, STATUS_SUCCESS },
-        { "./foo",          "\\??\\C:\\windows\\foo",      15, STATUS_SUCCESS },
-        { "foo/..",         "\\??\\C:\\windows",            7, STATUS_SUCCESS },
-        { "AUX" ,           "\\??\\AUX",                   -1, STATUS_SUCCESS },
-        { "COM1" ,          "\\??\\COM1",                  -1, STATUS_SUCCESS },
-        { "?<>*\"|:",       "\\??\\C:\\windows\\?<>*\"|:", 15, STATUS_SUCCESS },
+        {L"c:\\",           L"\\??\\c:\\",                  -1},
+        {L"c:/",            L"\\??\\c:\\",                  -1},
+        {L"c:/foo",         L"\\??\\c:\\foo",                7},
+        {L"c:/foo.",        L"\\??\\c:\\foo",                7},
+        {L"c:/foo/",        L"\\??\\c:\\foo\\",             -1},
+        {L"c:/foo//",       L"\\??\\c:\\foo\\",             -1},
+        {L"C:/foo",         L"\\??\\C:\\foo",                7},
+        {L"C:/foo/bar",     L"\\??\\C:\\foo\\bar",          11},
+        {L"C:/foo/bar",     L"\\??\\C:\\foo\\bar",          11},
+        {L"c:.",            L"\\??\\C:\\windows",            7},
+        {L"c:foo",          L"\\??\\C:\\windows\\foo",      15},
+        {L"c:foo/bar",      L"\\??\\C:\\windows\\foo\\bar", 19},
+        {L"c:./foo",        L"\\??\\C:\\windows\\foo",      15},
+        {L"c:/./foo",       L"\\??\\c:\\foo",                7},
+        {L"c:/..",          L"\\??\\c:\\",                  -1},
+        {L"c:/foo/.",       L"\\??\\c:\\foo",                7},
+        {L"c:/foo/./bar",   L"\\??\\c:\\foo\\bar",          11},
+        {L"c:/foo/../bar",  L"\\??\\c:\\bar",                7},
+        {L"\\foo",          L"\\??\\C:\\foo",                7},
+        {L"foo",            L"\\??\\C:\\windows\\foo",      15},
+        {L".",              L"\\??\\C:\\windows",            7},
+        {L"./",             L"\\??\\C:\\windows\\",         -1},
+        {L"..",             L"\\??\\C:\\",                  -1},
+        {L"...",            L"\\??\\C:\\windows\\",         -1},
+        {L"./foo",          L"\\??\\C:\\windows\\foo",      15},
+        {L"foo/..",         L"\\??\\C:\\windows",            7},
+        {L"AUX" ,           L"\\??\\AUX",                   -1},
+        {L"COM1" ,          L"\\??\\COM1",                  -1},
+        {L"?<>*\"|:",       L"\\??\\C:\\windows\\?<>*\"|:", 15},
+        {L"?:",             L"\\??\\?:\\",                  -1},
 
-        { "",   NULL, -1, STATUS_OBJECT_NAME_INVALID, STATUS_OBJECT_PATH_NOT_FOUND },
-        { NULL, NULL, -1, STATUS_OBJECT_NAME_INVALID, STATUS_OBJECT_PATH_NOT_FOUND },
-        { " ",  NULL, -1, STATUS_OBJECT_NAME_INVALID, STATUS_OBJECT_PATH_NOT_FOUND },
+        {L"\\\\foo",        L"\\??\\UNC\\foo",              -1},
+        {L"//foo",          L"\\??\\UNC\\foo",              -1},
+        {L"\\/foo",         L"\\??\\UNC\\foo",              -1},
+        {L"//",             L"\\??\\UNC\\",                 -1},
+        {L"//foo/",         L"\\??\\UNC\\foo\\",            -1},
 
-        { "\\\\foo",        "\\??\\UNC\\foo",              -1, STATUS_SUCCESS },
-        { "//foo",          "\\??\\UNC\\foo",              -1, STATUS_SUCCESS },
-        { "\\/foo",         "\\??\\UNC\\foo",              -1, STATUS_SUCCESS },
-        { "//",             "\\??\\UNC\\",                 -1, STATUS_SUCCESS },
-        { "//foo/",         "\\??\\UNC\\foo\\",            -1, STATUS_SUCCESS },
+        {L"//.",            L"\\??\\",                      -1},
+        {L"//./",           L"\\??\\",                      -1},
+        {L"//.//",          L"\\??\\",                      -1},
+        {L"//./foo",        L"\\??\\foo",                    4},
+        {L"//./foo/",       L"\\??\\foo\\",                 -1},
+        {L"//./foo/bar",    L"\\??\\foo\\bar",               8},
+        {L"//./foo/.",      L"\\??\\foo",                    4},
+        {L"//./foo/..",     L"\\??\\",                      -1},
 
-        { "//.",            "\\??\\",                      -1, STATUS_SUCCESS },
-        { "//./",           "\\??\\",                      -1, STATUS_SUCCESS },
-        { "//.//",          "\\??\\",                      -1, STATUS_SUCCESS },
-        { "//./foo",        "\\??\\foo",                    4, STATUS_SUCCESS },
-        { "//./foo/",       "\\??\\foo\\",                 -1, STATUS_SUCCESS },
-        { "//./foo/bar",    "\\??\\foo\\bar",               8, STATUS_SUCCESS },
-        { "//./foo/.",      "\\??\\foo",                    4, STATUS_SUCCESS },
-        { "//./foo/..",     "\\??\\",                      -1, STATUS_SUCCESS },
+        {L"//?",            L"\\??\\",                      -1},
+        {L"//?/",           L"\\??\\",                      -1},
+        {L"//?//",          L"\\??\\",                      -1},
+        {L"//?/foo",        L"\\??\\foo",                    4},
+        {L"//?/foo/",       L"\\??\\foo\\",                 -1},
+        {L"//?/foo/bar",    L"\\??\\foo\\bar",               8},
+        {L"//?/foo/.",      L"\\??\\foo",                    4},
+        {L"//?/foo/..",     L"\\??\\",                      -1},
 
-        { "//?",            "\\??\\",                      -1, STATUS_SUCCESS },
-        { "//?/",           "\\??\\",                      -1, STATUS_SUCCESS },
-        { "//?//",          "\\??\\",                      -1, STATUS_SUCCESS },
-        { "//?/foo",        "\\??\\foo",                    4, STATUS_SUCCESS },
-        { "//?/foo/",       "\\??\\foo\\",                 -1, STATUS_SUCCESS },
-        { "//?/foo/bar",    "\\??\\foo\\bar",               8, STATUS_SUCCESS },
-        { "//?/foo/.",      "\\??\\foo",                    4, STATUS_SUCCESS },
-        { "//?/foo/..",     "\\??\\",                      -1, STATUS_SUCCESS },
+        {L"\\\\.",          L"\\??\\",                      -1},
+        {L"\\\\.\\",        L"\\??\\",                      -1},
+        {L"\\\\.\\/",       L"\\??\\",                      -1},
+        {L"\\\\.\\foo",     L"\\??\\foo",                    4},
+        {L"\\\\.\\foo/",    L"\\??\\foo\\",                 -1},
+        {L"\\\\.\\foo/bar", L"\\??\\foo\\bar",               8},
+        {L"\\\\.\\foo/.",   L"\\??\\foo",                    4},
+        {L"\\\\.\\foo/..",  L"\\??\\",                      -1},
 
-        { "\\\\?",           "\\??\\",                     -1, STATUS_SUCCESS },
-        { "\\\\?\\",         "\\??\\",                     -1, STATUS_SUCCESS },
+        {L"\\\\?",          L"\\??\\",                      -1},
+        {L"\\\\?\\",        L"\\??\\",                      -1},
 
-        { "\\\\?\\/",        "\\??\\/",                     4, STATUS_SUCCESS },
-        { "\\\\?\\foo",      "\\??\\foo",                   4, STATUS_SUCCESS },
-        { "\\\\?\\foo/",     "\\??\\foo/",                  4, STATUS_SUCCESS },
-        { "\\\\?\\foo/bar",  "\\??\\foo/bar",               4, STATUS_SUCCESS },
-        { "\\\\?\\foo/.",    "\\??\\foo/.",                 4, STATUS_SUCCESS },
-        { "\\\\?\\foo/..",   "\\??\\foo/..",                4, STATUS_SUCCESS },
-        { "\\\\?\\\\",       "\\??\\\\",                   -1, STATUS_SUCCESS },
-        { "\\\\?\\\\\\",     "\\??\\\\\\",                 -1, STATUS_SUCCESS },
-        { "\\\\?\\foo\\",    "\\??\\foo\\",                -1, STATUS_SUCCESS },
-        { "\\\\?\\foo\\bar", "\\??\\foo\\bar",              8, STATUS_SUCCESS },
-        { "\\\\?\\foo\\.",   "\\??\\foo\\.",                8, STATUS_SUCCESS },
-        { "\\\\?\\foo\\..",  "\\??\\foo\\..",               8, STATUS_SUCCESS },
+        {L"\\\\?\\/",       L"\\??\\/",                      4},
+        {L"\\\\?\\foo",     L"\\??\\foo",                    4},
+        {L"\\\\?\\foo/",    L"\\??\\foo/",                   4},
+        {L"\\\\?\\foo/bar", L"\\??\\foo/bar",                4},
+        {L"\\\\?\\foo/.",   L"\\??\\foo/.",                  4},
+        {L"\\\\?\\foo/..",  L"\\??\\foo/..",                 4},
+        {L"\\\\?\\\\",      L"\\??\\\\",                    -1},
+        {L"\\\\?\\\\\\",    L"\\??\\\\\\",                  -1},
+        {L"\\\\?\\foo\\",   L"\\??\\foo\\",                 -1},
+        {L"\\\\?\\foo\\bar",L"\\??\\foo\\bar",               8},
+        {L"\\\\?\\foo\\.",  L"\\??\\foo\\.",                 8},
+        {L"\\\\?\\foo\\..", L"\\??\\foo\\..",                8},
 
-        { "\\??",           "\\??\\C:\\??",                 7, STATUS_SUCCESS },
-        { "\\??\\",         "\\??\\C:\\??\\",              -1, STATUS_SUCCESS },
+        {L"\\??",           L"\\??\\C:\\??",                 7},
+        {L"\\??\\",         L"\\??\\C:\\??\\",              -1},
 
-        { "\\??\\/",        "\\??\\/",                      4, STATUS_SUCCESS },
-        { "\\??\\foo",      "\\??\\foo",                    4, STATUS_SUCCESS },
-        { "\\??\\foo/",     "\\??\\foo/",                   4, STATUS_SUCCESS },
-        { "\\??\\foo/bar",  "\\??\\foo/bar",                4, STATUS_SUCCESS },
-        { "\\??\\foo/.",    "\\??\\foo/.",                  4, STATUS_SUCCESS },
-        { "\\??\\foo/..",   "\\??\\foo/..",                 4, STATUS_SUCCESS },
-        { "\\??\\\\",       "\\??\\\\",                    -1, STATUS_SUCCESS },
-        { "\\??\\\\\\",     "\\??\\\\\\",                  -1, STATUS_SUCCESS },
-        { "\\??\\foo\\",    "\\??\\foo\\",                 -1, STATUS_SUCCESS },
-        { "\\??\\foo\\bar", "\\??\\foo\\bar",               8, STATUS_SUCCESS },
-        { "\\??\\foo\\.",   "\\??\\foo\\.",                 8, STATUS_SUCCESS },
-        { "\\??\\foo\\..",  "\\??\\foo\\..",                8, STATUS_SUCCESS },
+        {L"\\??\\/",        L"\\??\\/",                      4},
+        {L"\\??\\foo",      L"\\??\\foo",                    4},
+        {L"\\??\\foo/",     L"\\??\\foo/",                   4},
+        {L"\\??\\foo/bar",  L"\\??\\foo/bar",                4},
+        {L"\\??\\foo/.",    L"\\??\\foo/.",                  4},
+        {L"\\??\\foo/..",   L"\\??\\foo/..",                 4},
+        {L"\\??\\\\",       L"\\??\\\\",                    -1},
+        {L"\\??\\\\\\",     L"\\??\\\\\\",                  -1},
+        {L"\\??\\foo\\",    L"\\??\\foo\\",                 -1},
+        {L"\\??\\foo\\bar", L"\\??\\foo\\bar",               8},
+        {L"\\??\\foo\\.",   L"\\??\\foo\\.",                 8},
+        {L"\\??\\foo\\..",  L"\\??\\foo\\..",                8},
+
+        {L"CONIN$",         L"\\??\\CONIN$",                -1, L"\\??\\C:\\windows\\CONIN$"  /* winxp */ },
+        {L"CONOUT$",        L"\\??\\CONOUT$",               -1, L"\\??\\C:\\windows\\CONOUT$" /* winxp */ },
+        {L"cOnOuT$",        L"\\??\\cOnOuT$",               -1, L"\\??\\C:\\windows\\cOnOuT$" /* winxp */ },
+        {L"CONERR$",        L"\\??\\C:\\windows\\CONERR$",  15},
     };
 
     GetCurrentDirectoryA(sizeof(curdir), curdir);
     SetCurrentDirectoryA("C:\\windows\\");
 
+    ret = pRtlDosPathNameToNtPathName_U(NULL, &nameW, &file_part, NULL);
+    ok(!ret, "Got %d.\n", ret);
+
+    ret = pRtlDosPathNameToNtPathName_U(L"", &nameW, &file_part, NULL);
+    ok(!ret, "Got %d.\n", ret);
+
+    ret = pRtlDosPathNameToNtPathName_U(L" ", &nameW, &file_part, NULL);
+    ok(!ret, "Got %d.\n", ret);
+
+    if (pRtlDosPathNameToNtPathName_U_WithStatus)
+    {
+        status = pRtlDosPathNameToNtPathName_U_WithStatus(NULL, &nameW, &file_part, NULL);
+        ok(status == STATUS_OBJECT_NAME_INVALID || status == STATUS_OBJECT_PATH_NOT_FOUND /* 2003 */,
+                "Got status %#x.\n", status);
+
+        status = pRtlDosPathNameToNtPathName_U_WithStatus(L"", &nameW, &file_part, NULL);
+        ok(status == STATUS_OBJECT_NAME_INVALID || status == STATUS_OBJECT_PATH_NOT_FOUND /* 2003 */,
+                "Got status %#x.\n", status);
+
+        status = pRtlDosPathNameToNtPathName_U_WithStatus(L" ", &nameW, &file_part, NULL);
+        ok(status == STATUS_OBJECT_NAME_INVALID || status == STATUS_OBJECT_PATH_NOT_FOUND /* 2003 */,
+                "Got status %#x.\n", status);
+    }
+
     for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
-        MultiByteToWideChar(CP_ACP, 0, tests[i].dos, -1, path, ARRAY_SIZE(path));
-        ret = pRtlDosPathNameToNtPathName_U(path, &nameW, &file_part, NULL);
+        ret = pRtlDosPathNameToNtPathName_U(tests[i].dos, &nameW, &file_part, NULL);
+        ok(ret == TRUE, "%s: Got %d.\n", debugstr_w(tests[i].dos), ret);
 
         if (pRtlDosPathNameToNtPathName_U_WithStatus)
         {
             RtlFreeUnicodeString(&nameW);
-            status = pRtlDosPathNameToNtPathName_U_WithStatus(path, &nameW, &file_part, NULL);
-            ok(status == tests[i].status || status == tests[i].alt_status,
-                "%s: Expected status %#x, got %#x.\n", tests[i].dos, tests[i].status, status);
+            status = pRtlDosPathNameToNtPathName_U_WithStatus(tests[i].dos, &nameW, &file_part, NULL);
+            ok(status == STATUS_SUCCESS, "%s: Got status %#x.\n", debugstr_w(tests[i].dos), status);
         }
 
-        expect = (tests[i].status == STATUS_SUCCESS);
-        ok(ret == expect, "%s: Expected %#x, got %#x.\n", tests[i].dos, expect, ret);
-
-        if (ret != TRUE) continue;
-
-        if (!strncmp(tests[i].dos, "\\??\\", 4) && tests[i].dos[4] &&
-            broken(!memcmp(nameW.Buffer, broken_global_prefix, sizeof(broken_global_prefix))))
+        if (!wcsncmp(tests[i].dos, L"\\??\\", 4) && tests[i].dos[4] &&
+            broken(!wcsncmp(nameW.Buffer, broken_global_prefix, wcslen(broken_global_prefix))))
         {
             /* Windows version prior to 2003 don't interpret the \??\ prefix */
             continue;
         }
 
-        MultiByteToWideChar(CP_ACP, 0, tests[i].nt, -1, path, ARRAY_SIZE(path));
-        ok(!lstrcmpW(nameW.Buffer, path), "%s: Expected %s, got %s.\n",
-            tests[i].dos, tests[i].nt, wine_dbgstr_w(nameW.Buffer));
+        ok(!wcscmp(nameW.Buffer, tests[i].nt) || broken(!wcscmp(nameW.Buffer, tests[i].alt_nt)), "%s: Expected %s, got %s.\n",
+            debugstr_w(tests[i].dos), debugstr_w(tests[i].nt), debugstr_w(nameW.Buffer));
 
-        if (tests[i].file_offset > 0)
-            ok(file_part == nameW.Buffer + tests[i].file_offset,
-                "%s: Expected file part %s, got %s.\n", tests[i].dos,
-                wine_dbgstr_w(nameW.Buffer + tests[i].file_offset), wine_dbgstr_w(file_part));
-        else
-            ok(file_part == NULL, "%s: Expected NULL file part, got %s.\n",
-                tests[i].dos, wine_dbgstr_w(file_part));
+        if (!wcscmp(nameW.Buffer, tests[i].nt))
+        {
+            if (tests[i].file_offset > 0)
+                ok(file_part == nameW.Buffer + tests[i].file_offset,
+                   "%s: Expected file part %s, got %s.\n", debugstr_w(tests[i].dos),
+                   debugstr_w(nameW.Buffer + tests[i].file_offset), debugstr_w(file_part));
+            else
+                ok(file_part == NULL, "%s: Expected NULL file part, got %s.\n",
+                   debugstr_w(tests[i].dos), debugstr_w(file_part));
+        }
 
         RtlFreeUnicodeString(&nameW);
     }

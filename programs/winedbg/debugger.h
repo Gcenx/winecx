@@ -209,6 +209,7 @@ struct dbg_thread
     }*                          frames;
     int                         num_frames;
     int                         curr_frame;
+    BOOL                        suspended;
 };
 
 struct dbg_delayed_bp

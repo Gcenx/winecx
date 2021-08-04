@@ -613,6 +613,9 @@ static HRESULT WINAPI d3drm_viewport2_SetProjection(IDirect3DRMViewport2 *iface,
 
     TRACE("iface %p, type %#x.\n", iface, type);
 
+    if (!viewport->d3d_viewport)
+        return D3DRMERR_BADOBJECT;
+
     viewport->projection = type;
 
     return D3DRM_OK;
@@ -974,6 +977,9 @@ static D3DRMPROJECTIONTYPE WINAPI d3drm_viewport2_GetProjection(IDirect3DRMViewp
     struct d3drm_viewport *viewport = impl_from_IDirect3DRMViewport2(iface);
 
     TRACE("iface %p.\n", iface);
+
+    if (!viewport->d3d_viewport)
+        return ~0u;
 
     return viewport->projection;
 }

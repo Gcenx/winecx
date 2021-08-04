@@ -30,8 +30,10 @@ extern "C" {
 #endif
 
 typedef unsigned char   SQLCHAR;
-#ifdef WINE_UNICODE_NATIVE
+#if defined(WINE_UNICODE_NATIVE)
 typedef wchar_t         SQLWCHAR;
+#elif __cpp_unicode_literals >= 200710
+typedef char16_t        SQLWCHAR;
 #else
 typedef unsigned short  SQLWCHAR;
 #endif

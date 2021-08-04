@@ -33,7 +33,6 @@
 #include "winnls.h"
 #include "rpc.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 #include "crypt32_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(crypt);
@@ -428,6 +427,91 @@ static BOOL CertContext_CopyParam(void *pvData, DWORD *pcbData, const void *pb,
     return ret;
 }
 
+void CRYPT_ConvertKeyContext(const struct store_CERT_KEY_CONTEXT *src, CERT_KEY_CONTEXT *dst)
+{
+    dst->cbSize = sizeof(*dst);
+    dst->hCryptProv = src->hCryptProv;
+    dst->dwKeySpec = src->dwKeySpec;
+}
+
+/*
+ * Fix offsets in a continuous block of memory of CRYPT_KEY_PROV_INFO with
+ * its associated data.
+ */
+static void fix_KeyProvInfoProperty(CRYPT_KEY_PROV_INFO *info)
+{
+    BYTE *data;
+    DWORD i;
+
+    data = (BYTE *)(info + 1) + sizeof(CRYPT_KEY_PROV_PARAM) * info->cProvParam;
+
+    if (info->pwszContainerName)
+    {
+        info->pwszContainerName = (LPWSTR)data;
+        data += (lstrlenW(info->pwszContainerName) + 1) * sizeof(WCHAR);
+    }
+
+    if (info->pwszProvName)
+    {
+        info->pwszProvName = (LPWSTR)data;
+        data += (lstrlenW(info->pwszProvName) + 1) * sizeof(WCHAR);
+    }
+
+    info->rgProvParam = info->cProvParam ? (CRYPT_KEY_PROV_PARAM *)(info + 1) : NULL;
+
+    for (i = 0; i < info->cProvParam; i++)
+    {
+        info->rgProvParam[i].pbData = info->rgProvParam[i].cbData ? data : NULL;
+        data += info->rgProvParam[i].cbData;
+    }
+}
+
+/*
+ * Copy to a continuous block of memory of CRYPT_KEY_PROV_INFO with
+ * its associated data.
+ */
+static void copy_KeyProvInfoProperty(const CRYPT_KEY_PROV_INFO *from, CRYPT_KEY_PROV_INFO *to)
+{
+    BYTE *data;
+    DWORD i;
+
+    data = (BYTE *)(to + 1) + sizeof(CRYPT_KEY_PROV_PARAM) * from->cProvParam;
+
+    if (from->pwszContainerName)
+    {
+        to->pwszContainerName = (LPWSTR)data;
+        lstrcpyW((LPWSTR)data, from->pwszContainerName);
+        data += (lstrlenW(from->pwszContainerName) + 1) * sizeof(WCHAR);
+    }
+    else
+        to->pwszContainerName = NULL;
+
+    if (from->pwszProvName)
+    {
+        to->pwszProvName = (LPWSTR)data;
+        lstrcpyW((LPWSTR)data, from->pwszProvName);
+        data += (lstrlenW(from->pwszProvName) + 1) * sizeof(WCHAR);
+    }
+    else
+        to->pwszProvName = NULL;
+
+    to->dwProvType = from->dwProvType;
+    to->dwFlags = from->dwFlags;
+    to->cProvParam = from->cProvParam;
+    to->rgProvParam = from->cProvParam ? (CRYPT_KEY_PROV_PARAM *)(to + 1) : NULL;
+    to->dwKeySpec = from->dwKeySpec;
+
+    for (i = 0; i < from->cProvParam; i++)
+    {
+        to->rgProvParam[i].dwParam = from->rgProvParam[i].dwParam;
+        to->rgProvParam[i].dwFlags = from->rgProvParam[i].dwFlags;
+        to->rgProvParam[i].cbData = from->rgProvParam[i].cbData;
+        to->rgProvParam[i].pbData = from->rgProvParam[i].cbData ? data : NULL;
+        memcpy(data, from->rgProvParam[i].pbData, from->rgProvParam[i].cbData);
+        data += from->rgProvParam[i].cbData;
+    }
+}
+
 static BOOL CertContext_GetProperty(cert_t *cert, DWORD dwPropId,
  void *pvData, DWORD *pcbData)
 {
@@ -441,7 +525,16 @@ static BOOL CertContext_GetProperty(cert_t *cert, DWORD dwPropId,
     else
         ret = FALSE;
     if (ret)
+    {
+        CERT_KEY_CONTEXT ctx;
+        if (dwPropId == CERT_KEY_CONTEXT_PROP_ID)
+        {
+            CRYPT_ConvertKeyContext((const struct store_CERT_KEY_CONTEXT *)blob.pbData, &ctx);
+            blob.pbData = (BYTE *)&ctx;
+            blob.cbData = ctx.cbSize;
+        }
         ret = CertContext_CopyParam(pvData, pcbData, blob.pbData, blob.cbData);
+    }
     else
     {
         /* Implicit properties */
@@ -520,34 +613,6 @@ static BOOL CertContext_GetProperty(cert_t *cert, DWORD dwPropId,
     return ret;
 }
 
-void CRYPT_FixKeyProvInfoPointers(PCRYPT_KEY_PROV_INFO info)
-{
-    DWORD i, containerLen, provNameLen;
-    LPBYTE data = (LPBYTE)info + sizeof(CRYPT_KEY_PROV_INFO);
-
-    info->pwszContainerName = (LPWSTR)data;
-    containerLen = (lstrlenW(info->pwszContainerName) + 1) * sizeof(WCHAR);
-    data += containerLen;
-
-    info->pwszProvName = (LPWSTR)data;
-    provNameLen = (lstrlenW(info->pwszProvName) + 1) * sizeof(WCHAR);
-    data += provNameLen;
-
-    if (info->cProvParam)
-    {
-        info->rgProvParam = (PCRYPT_KEY_PROV_PARAM)data;
-        data += info->cProvParam * sizeof(CRYPT_KEY_PROV_PARAM);
-
-        for (i = 0; i < info->cProvParam; i++)
-        {
-            info->rgProvParam[i].pbData = data;
-            data += info->rgProvParam[i].cbData;
-        }
-    }
-    else
-        info->rgProvParam = NULL;
-}
-
 BOOL WINAPI CertGetCertificateContextProperty(PCCERT_CONTEXT pCertContext,
  DWORD dwPropId, void *pvData, DWORD *pcbData)
 {
@@ -581,10 +646,9 @@ BOOL WINAPI CertGetCertificateContextProperty(PCCERT_CONTEXT pCertContext,
         break;
     }
     case CERT_KEY_PROV_INFO_PROP_ID:
-        ret = CertContext_GetProperty(cert, dwPropId, pvData,
-         pcbData);
+        ret = CertContext_GetProperty(cert, dwPropId, pvData, pcbData);
         if (ret && pvData)
-            CRYPT_FixKeyProvInfoPointers(pvData);
+            fix_KeyProvInfoProperty(pvData);
         break;
     default:
         ret = CertContext_GetProperty(cert, dwPropId, pvData,
@@ -595,84 +659,50 @@ BOOL WINAPI CertGetCertificateContextProperty(PCCERT_CONTEXT pCertContext,
     return ret;
 }
 
-/* Copies key provider info from from into to, where to is assumed to be a
- * contiguous buffer of memory large enough for from and all its associated
- * data, but whose pointers are uninitialized.
- * Upon return, to contains a contiguous copy of from, packed in the following
- * order:
- * - CRYPT_KEY_PROV_INFO
- * - pwszContainerName
- * - pwszProvName
- * - rgProvParam[0]...
+/*
+ * Create a continuous block of memory for CRYPT_KEY_PROV_INFO with
+ * its associated data, and add it to the certificate properties.
  */
-static void CRYPT_CopyKeyProvInfo(PCRYPT_KEY_PROV_INFO to,
- const CRYPT_KEY_PROV_INFO *from)
+static BOOL CertContext_SetKeyProvInfoProperty(CONTEXT_PROPERTY_LIST *properties, const CRYPT_KEY_PROV_INFO *info)
 {
-    DWORD i;
-    LPBYTE nextData = (LPBYTE)to + sizeof(CRYPT_KEY_PROV_INFO);
-
-    if (from->pwszContainerName)
-    {
-        to->pwszContainerName = (LPWSTR)nextData;
-        lstrcpyW(to->pwszContainerName, from->pwszContainerName);
-        nextData += (lstrlenW(from->pwszContainerName) + 1) * sizeof(WCHAR);
-    }
-    else
-        to->pwszContainerName = NULL;
-    if (from->pwszProvName)
-    {
-        to->pwszProvName = (LPWSTR)nextData;
-        lstrcpyW(to->pwszProvName, from->pwszProvName);
-        nextData += (lstrlenW(from->pwszProvName) + 1) * sizeof(WCHAR);
-    }
-    else
-        to->pwszProvName = NULL;
-    to->dwProvType = from->dwProvType;
-    to->dwFlags = from->dwFlags;
-    to->cProvParam = from->cProvParam;
-    to->rgProvParam = (PCRYPT_KEY_PROV_PARAM)nextData;
-    nextData += to->cProvParam * sizeof(CRYPT_KEY_PROV_PARAM);
-    to->dwKeySpec = from->dwKeySpec;
-    for (i = 0; i < to->cProvParam; i++)
-    {
-        memcpy(&to->rgProvParam[i], &from->rgProvParam[i],
-         sizeof(CRYPT_KEY_PROV_PARAM));
-        to->rgProvParam[i].pbData = nextData;
-        memcpy(to->rgProvParam[i].pbData, from->rgProvParam[i].pbData,
-         from->rgProvParam[i].cbData);
-        nextData += from->rgProvParam[i].cbData;
-    }
-}
-
-static BOOL CertContext_SetKeyProvInfoProperty(CONTEXT_PROPERTY_LIST *properties,
- const CRYPT_KEY_PROV_INFO *info)
-{
+    CRYPT_KEY_PROV_INFO *prop;
+    DWORD size = sizeof(CRYPT_KEY_PROV_INFO), i;
     BOOL ret;
-    LPBYTE buf = NULL;
-    DWORD size = sizeof(CRYPT_KEY_PROV_INFO), i, containerSize, provNameSize;
 
     if (info->pwszContainerName)
-        containerSize = (lstrlenW(info->pwszContainerName) + 1) * sizeof(WCHAR);
-    else
-        containerSize = 0;
+        size += (lstrlenW(info->pwszContainerName) + 1) * sizeof(WCHAR);
     if (info->pwszProvName)
-        provNameSize = (lstrlenW(info->pwszProvName) + 1) * sizeof(WCHAR);
-    else
-        provNameSize = 0;
-    size += containerSize + provNameSize;
+        size += (lstrlenW(info->pwszProvName) + 1) * sizeof(WCHAR);
+
     for (i = 0; i < info->cProvParam; i++)
         size += sizeof(CRYPT_KEY_PROV_PARAM) + info->rgProvParam[i].cbData;
-    buf = CryptMemAlloc(size);
-    if (buf)
+
+    prop = HeapAlloc(GetProcessHeap(), 0, size);
+    if (!prop)
     {
-        CRYPT_CopyKeyProvInfo((PCRYPT_KEY_PROV_INFO)buf, info);
-        ret = ContextPropertyList_SetProperty(properties,
-         CERT_KEY_PROV_INFO_PROP_ID, buf, size);
-        CryptMemFree(buf);
+        SetLastError(ERROR_OUTOFMEMORY);
+        return FALSE;
     }
-    else
-        ret = FALSE;
+
+    copy_KeyProvInfoProperty(info, prop);
+
+    ret = ContextPropertyList_SetProperty(properties, CERT_KEY_PROV_INFO_PROP_ID, (const BYTE *)prop, size);
+    HeapFree(GetProcessHeap(), 0, prop);
+
     return ret;
+}
+
+static BOOL CertContext_SetKeyContextProperty(CONTEXT_PROPERTY_LIST *properties,
+ const CERT_KEY_CONTEXT *keyContext)
+{
+    struct store_CERT_KEY_CONTEXT ctx;
+
+    ctx.cbSize = sizeof(ctx);
+    ctx.hCryptProv = keyContext->hCryptProv;
+    ctx.dwKeySpec = keyContext->dwKeySpec;
+
+    return ContextPropertyList_SetProperty(properties, CERT_KEY_CONTEXT_PROP_ID,
+     (const BYTE *)&ctx, ctx.cbSize);
 }
 
 static BOOL CertContext_SetProperty(cert_t *cert, DWORD dwPropId,
@@ -733,7 +763,6 @@ static BOOL CertContext_SetProperty(cert_t *cert, DWORD dwPropId,
             }
             break;
         case CERT_KEY_CONTEXT_PROP_ID:
-        {
             if (pvData)
             {
                 const CERT_KEY_CONTEXT *keyContext = pvData;
@@ -744,8 +773,7 @@ static BOOL CertContext_SetProperty(cert_t *cert, DWORD dwPropId,
                     ret = FALSE;
                 }
                 else
-                    ret = ContextPropertyList_SetProperty(cert->base.properties, dwPropId,
-                     (const BYTE *)keyContext, keyContext->cbSize);
+                    ret = CertContext_SetKeyContextProperty(cert->base.properties, pvData);
             }
             else
             {
@@ -753,7 +781,6 @@ static BOOL CertContext_SetProperty(cert_t *cert, DWORD dwPropId,
                 ret = TRUE;
             }
             break;
-        }
         case CERT_KEY_PROV_INFO_PROP_ID:
             if (pvData)
                 ret = CertContext_SetKeyProvInfoProperty(cert->base.properties, pvData);
@@ -900,11 +927,10 @@ BOOL WINAPI CryptAcquireCertificatePrivateKey(PCCERT_CONTEXT pCert,
 
         if (!ret)
         {
-            static const WCHAR myW[] = { 'M','y',0 };
             HCERTSTORE hstore;
 
             hstore = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0,
-                                   CERT_SYSTEM_STORE_CURRENT_USER, myW);
+                                   CERT_SYSTEM_STORE_CURRENT_USER, L"My");
             if (hstore)
             {
                 cert_in_store = CertFindCertificateInStore(hstore, pCert->dwCertEncodingType, 0,
@@ -1040,10 +1066,10 @@ static BOOL container_matches_cert(PCCERT_CONTEXT pCert, LPCSTR container,
     if (matches)
     {
         keyProvInfo->pwszContainerName =
-         CryptMemAlloc((strlenW(containerW) + 1) * sizeof(WCHAR));
+         CryptMemAlloc((lstrlenW(containerW) + 1) * sizeof(WCHAR));
         if (keyProvInfo->pwszContainerName)
         {
-            strcpyW(keyProvInfo->pwszContainerName, containerW);
+            lstrcpyW(keyProvInfo->pwszContainerName, containerW);
             keyProvInfo->dwKeySpec = AT_SIGNATURE;
         }
         else
@@ -1720,13 +1746,10 @@ static BOOL compare_cert_by_name_str(PCCERT_CONTEXT pCertContext,
 
         if (str)
         {
-            LPWSTR ptr;
-
             CertNameToStrW(pCertContext->dwCertEncodingType, name,
              CERT_SIMPLE_NAME_STR, str, len);
-            for (ptr = str; *ptr; ptr++)
-                *ptr = tolowerW(*ptr);
-            if (strstrW(str, pvPara))
+            wcslwr(str);
+            if (wcsstr(str, pvPara))
                 ret = TRUE;
             CryptMemFree(str);
         }
@@ -1748,11 +1771,8 @@ static PCCERT_CONTEXT find_cert_by_name_str_a(HCERTSTORE store, DWORD dwType,
 
         if (str)
         {
-            LPWSTR ptr;
-
             MultiByteToWideChar(CP_ACP, 0, pvPara, -1, str, len);
-            for (ptr = str; *ptr; ptr++)
-                *ptr = tolowerW(*ptr);
+            wcslwr(str);
             found = cert_compare_certs_in_store(store, prev,
              compare_cert_by_name_str, dwType, dwFlags, str);
             CryptMemFree(str);
@@ -1772,17 +1792,13 @@ static PCCERT_CONTEXT find_cert_by_name_str_w(HCERTSTORE store, DWORD dwType,
 
     if (pvPara)
     {
-        DWORD len = strlenW(pvPara);
+        DWORD len = lstrlenW(pvPara);
         LPWSTR str = CryptMemAlloc((len + 1) * sizeof(WCHAR));
 
         if (str)
         {
-            LPCWSTR src;
-            LPWSTR dst;
-
-            for (src = pvPara, dst = str; *src; src++, dst++)
-                *dst = tolowerW(*src);
-            *dst = 0;
+            wcscpy( str, pvPara );
+            wcslwr( str );
            found = cert_compare_certs_in_store(store, prev,
             compare_cert_by_name_str, dwType, dwFlags, str);
            CryptMemFree(str);
@@ -2131,10 +2147,10 @@ static BOOL find_matching_rdn_attr(DWORD dwFlags, const CERT_NAME_INFO *name,
                      name->rgRDN[i].rgRDNAttr[j].Value.cbData)
                         match = FALSE;
                     else if (dwFlags & CERT_CASE_INSENSITIVE_IS_RDN_ATTRS_FLAG)
-                        match = !strncmpiW(nameStr, attrStr,
+                        match = !wcsnicmp(nameStr, attrStr,
                          attr->Value.cbData / sizeof(WCHAR));
                     else
-                        match = !strncmpW(nameStr, attrStr,
+                        match = !wcsncmp(nameStr, attrStr,
                          attr->Value.cbData / sizeof(WCHAR));
                     TRACE("%s : %s => %d\n",
                      debugstr_wn(nameStr, attr->Value.cbData / sizeof(WCHAR)),
@@ -3596,7 +3612,7 @@ typedef RPC_STATUS (RPC_ENTRY *RpcStringFreeFunc)(unsigned char **);
 static HCRYPTPROV CRYPT_CreateKeyProv(void)
 {
     HCRYPTPROV hProv = 0;
-    HMODULE rpcrt = LoadLibraryA("rpcrt4");
+    HMODULE rpcrt = LoadLibraryW(L"rpcrt4");
 
     if (rpcrt)
     {

@@ -66,11 +66,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 /* See jscript.h in jscript.dll. */
 #define SCRIPTLANGUAGEVERSION_HTML 0x400
 #define SCRIPTLANGUAGEVERSION_ES5  0x102
-
-static const WCHAR documentW[] = {'d','o','c','u','m','e','n','t',0};
-static const WCHAR windowW[] = {'w','i','n','d','o','w',0};
-static const WCHAR script_endW[] = {'<','/','S','C','R','I','P','T','>',0};
-static const WCHAR emptyW[] = {0};
+#define SCRIPTLANGUAGEVERSION_ES6  0x103
 
 struct ScriptHost {
     IActiveScriptSite              IActiveScriptSite_iface;
@@ -159,7 +155,9 @@ static BOOL init_script_engine(ScriptHost *script_host)
     compat_mode = lock_document_mode(script_host->window->doc);
     script_mode = compat_mode < COMPAT_MODE_IE8 ? SCRIPTLANGUAGEVERSION_5_7 : SCRIPTLANGUAGEVERSION_5_8;
     if(IsEqualGUID(&script_host->guid, &CLSID_JScript)) {
-        if(compat_mode >= COMPAT_MODE_IE9)
+        if(compat_mode >= COMPAT_MODE_IE11)
+            script_mode = SCRIPTLANGUAGEVERSION_ES6;
+        else if(compat_mode >= COMPAT_MODE_IE9)
             script_mode = SCRIPTLANGUAGEVERSION_ES5;
         script_mode |= SCRIPTLANGUAGEVERSION_HTML;
     }
@@ -201,7 +199,7 @@ static BOOL init_script_engine(ScriptHost *script_host)
         return FALSE;
     }
 
-    hres = IActiveScript_AddNamedItem(script_host->script, windowW,
+    hres = IActiveScript_AddNamedItem(script_host->script, L"window",
             SCRIPTITEM_ISVISIBLE|SCRIPTITEM_ISSOURCE|SCRIPTITEM_GLOBALMEMBERS);
     if(SUCCEEDED(hres)) {
         V_VT(&var) = VT_BOOL;
@@ -357,7 +355,7 @@ static HRESULT WINAPI ActiveScriptSite_GetItemInfo(IActiveScriptSite *iface, LPC
 
     *ppiunkItem = NULL;
 
-    if(wcscmp(pstrName, windowW))
+    if(wcscmp(pstrName, L"window"))
         return DISP_E_MEMBERNOTFOUND;
 
     if(!This->window)
@@ -728,12 +726,22 @@ static void dispatch_script_readystatechange_event(HTMLScriptElement *script)
     DOMEvent *event;
     HRESULT hres;
 
-    hres = create_document_event(script->element.node.doc, EVENTID_READYSTATECHANGE, &event);
-    if(FAILED(hres))
-        return;
+    if(script->readystate != READYSTATE_LOADED ||
+       dispex_compat_mode(&script->element.node.event_target.dispex) < COMPAT_MODE_IE10) {
+        hres = create_document_event(script->element.node.doc, EVENTID_READYSTATECHANGE, &event);
+        if(SUCCEEDED(hres)) {
+            dispatch_event(&script->element.node.event_target, event);
+            IDOMEvent_Release(&event->IDOMEvent_iface);
+        }
+    }
 
-    dispatch_event(&script->element.node.event_target, event);
-    IDOMEvent_Release(&event->IDOMEvent_iface);
+    if(script->readystate == READYSTATE_LOADED) {
+        hres = create_document_event(script->element.node.doc, EVENTID_LOAD, &event);
+        if(SUCCEEDED(hres)) {
+            dispatch_event(&script->element.node.event_target, event);
+            IDOMEvent_Release(&event->IDOMEvent_iface);
+        }
+    }
 }
 
 typedef struct {
@@ -762,6 +770,10 @@ static void fire_readystatechange_task_destr(task_t *_task)
 static void set_script_elem_readystate(HTMLScriptElement *script_elem, READYSTATE readystate)
 {
     script_elem->readystate = readystate;
+
+    if(readystate != READYSTATE_LOADED &&
+       dispex_compat_mode(&script_elem->element.node.event_target.dispex) >= COMPAT_MODE_IE11)
+        return;
 
     if(readystate != READYSTATE_INTERACTIVE) {
         if(!script_elem->element.node.doc->window->parser_callback_cnt) {
@@ -800,7 +812,7 @@ static void parse_elem_text(ScriptHost *script_host, HTMLScriptElement *script_e
     VariantInit(&var);
     memset(&excepinfo, 0, sizeof(excepinfo));
     TRACE(">>>\n");
-    hres = IActiveScriptParse_ParseScriptText(script_host->parse, text, windowW, NULL, script_endW,
+    hres = IActiveScriptParse_ParseScriptText(script_host->parse, text, L"window", NULL, L"</SCRIPT>",
                                               0, 0, SCRIPTTEXT_ISVISIBLE|SCRIPTTEXT_HOSTMANAGESSOURCE,
                                               &var, &excepinfo);
     if(SUCCEEDED(hres))
@@ -813,6 +825,8 @@ typedef struct {
     BSCallback bsc;
 
     HTMLScriptElement *script_elem;
+    nsILoadGroup *load_group;
+    nsIRequest *request;
     DWORD scheme;
 
     DWORD size;
@@ -936,6 +950,13 @@ static void ScriptBSC_destroy(BSCallback *bsc)
         This->script_elem = NULL;
     }
 
+    if(This->request) {
+        ERR("Unfinished request\n");
+        nsIRequest_Release(This->request);
+    }
+    if(This->load_group)
+        nsILoadGroup_Release(This->load_group);
+
     heap_free(This->buf);
     heap_free(This);
 }
@@ -948,8 +969,18 @@ static HRESULT ScriptBSC_init_bindinfo(BSCallback *bsc)
 static HRESULT ScriptBSC_start_binding(BSCallback *bsc)
 {
     ScriptBSC *This = impl_from_BSCallback(bsc);
+    nsresult nsres;
 
     This->script_elem->binding = &This->bsc;
+
+    if(This->load_group) {
+        nsres = create_onload_blocker_request(&This->request);
+        if(NS_SUCCEEDED(nsres)) {
+            nsres = nsILoadGroup_AddRequest(This->load_group, This->request, NULL);
+            if(NS_FAILED(nsres))
+                ERR("AddRequest failed: %08x\n", nsres);
+        }
+    }
 
     /* FIXME: We should find a better to decide if 'loading' state is supposed to be used by the protocol. */
     if(This->scheme == URL_SCHEME_HTTPS || This->scheme == URL_SCHEME_HTTP)
@@ -961,6 +992,7 @@ static HRESULT ScriptBSC_start_binding(BSCallback *bsc)
 static HRESULT ScriptBSC_stop_binding(BSCallback *bsc, HRESULT result)
 {
     ScriptBSC *This = impl_from_BSCallback(bsc);
+    nsresult nsres;
 
     if(SUCCEEDED(result) && !This->script_elem)
         result = E_UNEXPECTED;
@@ -978,6 +1010,14 @@ static HRESULT ScriptBSC_stop_binding(BSCallback *bsc, HRESULT result)
         heap_free(This->buf);
         This->buf = NULL;
         This->size = 0;
+    }
+
+    if(This->request) {
+        nsres = nsILoadGroup_RemoveRequest(This->load_group, This->request, NULL, NS_OK);
+        if(NS_FAILED(nsres))
+            ERR("RemoveRequest failed: %08x\n", nsres);
+        nsIRequest_Release(This->request);
+        This->request = NULL;
     }
 
     IHTMLScriptElement_Release(&This->script_elem->IHTMLScriptElement_iface);
@@ -1090,6 +1130,20 @@ HRESULT load_script(HTMLScriptElement *script_elem, const WCHAR *src, BOOL async
     IHTMLScriptElement_AddRef(&script_elem->IHTMLScriptElement_iface);
     bsc->script_elem = script_elem;
 
+    if(window->bscallback && window->bscallback->nschannel &&
+       window->bscallback->nschannel->load_group) {
+        cpp_bool contains;
+        nsresult nsres;
+
+        nsres = nsIDOMNode_Contains(script_elem->element.node.doc->node.nsnode,
+                                    script_elem->element.node.nsnode, &contains);
+        if(NS_SUCCEEDED(nsres) && contains) {
+            TRACE("script %p will block load event\n", script_elem);
+            bsc->load_group = window->bscallback->nschannel->load_group;
+            nsILoadGroup_AddRef(bsc->load_group);
+        }
+    }
+
     hres = start_binding(window, &bsc->bsc, NULL);
 
     IBindStatusCallback_Release(&bsc->bsc.IBindStatusCallback_iface);
@@ -1169,17 +1223,10 @@ static GUID get_default_script_guid(HTMLInnerWindow *window)
 
 static BOOL get_guid_from_type(LPCWSTR type, GUID *guid)
 {
-    static const WCHAR text_javascriptW[] =
-        {'t','e','x','t','/','j','a','v','a','s','c','r','i','p','t',0};
-    static const WCHAR text_jscriptW[] =
-        {'t','e','x','t','/','j','s','c','r','i','p','t',0};
-    static const WCHAR text_vbscriptW[] =
-        {'t','e','x','t','/','v','b','s','c','r','i','p','t',0};
-
     /* FIXME: Handle more types */
-    if(!wcsicmp(type, text_javascriptW) || !wcsicmp(type, text_jscriptW)) {
+    if(!wcsicmp(type, L"text/javascript") || !wcsicmp(type, L"text/jscript")) {
         *guid = CLSID_JScript;
-    }else if(!wcsicmp(type, text_vbscriptW)) {
+    }else if(!wcsicmp(type, L"text/vbscript")) {
         *guid = CLSID_VBScript;
     }else {
         FIXME("Unknown type %s\n", debugstr_w(type));
@@ -1210,8 +1257,6 @@ static BOOL get_script_guid(HTMLInnerWindow *window, nsIDOMHTMLScriptElement *ns
     BOOL ret = FALSE;
     nsresult nsres;
 
-    static const PRUnichar languageW[] = {'l','a','n','g','u','a','g','e',0};
-
     nsAString_Init(&val_str, NULL);
 
     nsres = nsIDOMHTMLScriptElement_GetType(nsscript, &val_str);
@@ -1231,7 +1276,7 @@ static BOOL get_script_guid(HTMLInnerWindow *window, nsIDOMHTMLScriptElement *ns
     nsres = nsIDOMHTMLScriptElement_QueryInterface(nsscript, &IID_nsIDOMElement, (void**)&nselem);
     assert(nsres == NS_OK);
 
-    nsres = get_elem_attr_value(nselem, languageW, &val_str, &language);
+    nsres = get_elem_attr_value(nselem, L"language", &val_str, &language);
     nsIDOMElement_Release(nselem);
     if(NS_SUCCEEDED(nsres)) {
         if(*language) {
@@ -1308,8 +1353,6 @@ IDispatch *script_parse_event(HTMLInnerWindow *window, LPCWSTR text)
     IDispatch *disp;
     HRESULT hres;
 
-    static const WCHAR delimiterW[] = {'\"',0};
-
     TRACE("%s\n", debugstr_w(text));
 
     for(ptr = text; iswalnum(*ptr); ptr++);
@@ -1349,8 +1392,8 @@ IDispatch *script_parse_event(HTMLInnerWindow *window, LPCWSTR text)
     if(!script_host || !script_host->parse_proc)
         return NULL;
 
-    hres = IActiveScriptParseProcedure2_ParseProcedureText(script_host->parse_proc, ptr, NULL, emptyW,
-            NULL, NULL, delimiterW, 0 /* FIXME */, 0,
+    hres = IActiveScriptParseProcedure2_ParseProcedureText(script_host->parse_proc, ptr, NULL, L"",
+            NULL, NULL, L"\"", 0 /* FIXME */, 0,
             SCRIPTPROC_HOSTMANAGESSOURCE|SCRIPTPROC_IMPLICIT_THIS|SCRIPTPROC_IMPLICIT_PARENTS, &disp);
     if(FAILED(hres)) {
         WARN("ParseProcedureText failed: %08x\n", hres);
@@ -1367,8 +1410,6 @@ HRESULT exec_script(HTMLInnerWindow *window, const WCHAR *code, const WCHAR *lan
     EXCEPINFO ei;
     GUID guid;
     HRESULT hres;
-
-    static const WCHAR delimW[] = {'"',0};
 
     if(!get_guid_from_language(lang, &guid)) {
         WARN("Could not find script GUID\n");
@@ -1388,7 +1429,7 @@ HRESULT exec_script(HTMLInnerWindow *window, const WCHAR *code, const WCHAR *lan
 
     memset(&ei, 0, sizeof(ei));
     TRACE(">>>\n");
-    hres = IActiveScriptParse_ParseScriptText(script_host->parse, code, NULL, NULL, delimW, 0, 0, SCRIPTTEXT_ISVISIBLE, ret, &ei);
+    hres = IActiveScriptParse_ParseScriptText(script_host->parse, code, NULL, NULL, L"\"", 0, 0, SCRIPTTEXT_ISVISIBLE, ret, &ei);
     if(SUCCEEDED(hres))
         TRACE("<<<\n");
     else
@@ -1405,7 +1446,7 @@ IDispatch *get_script_disp(ScriptHost *script_host)
     if(!script_host->script)
         return NULL;
 
-    hres = IActiveScript_GetScriptDispatch(script_host->script, windowW, &disp);
+    hres = IActiveScript_GetScriptDispatch(script_host->script, L"window", &disp);
     if(FAILED(hres))
         return NULL;
 
@@ -1431,10 +1472,10 @@ static EventTarget *find_event_target(HTMLDocumentNode *doc, HTMLScriptElement *
     nsAString_GetData(&target_id_str, &target_id);
     if(!*target_id) {
         FIXME("Empty for attribute\n");
-    }else if(!wcscmp(target_id, documentW)) {
+    }else if(!wcscmp(target_id, L"document")) {
         event_target = &doc->node.event_target;
         htmldoc_addref(&doc->basedoc);
-    }else if(!wcscmp(target_id, windowW)) {
+    }else if(!wcscmp(target_id, L"window")) {
         if(doc->window) {
             event_target = &doc->window->event_target;
             IDispatchEx_AddRef(&event_target->dispex.IDispatchEx_iface);
@@ -1521,7 +1562,7 @@ static IDispatch *parse_event_elem(HTMLDocumentNode *doc, HTMLScriptElement *scr
 
         nsAString_GetData(&nsstr, &text);
         hres = IActiveScriptParseProcedure2_ParseProcedureText(script_host->parse_proc, text, args,
-                emptyW, NULL, NULL, script_endW, 0, 0,
+                L"", NULL, NULL, L"</SCRIPT>", 0, 0,
                 SCRIPTPROC_HOSTMANAGESSOURCE|SCRIPTPROC_IMPLICIT_THIS|SCRIPTPROC_IMPLICIT_PARENTS, &disp);
         if(FAILED(hres))
             disp = NULL;
@@ -1554,14 +1595,12 @@ void bind_event_scripts(HTMLDocumentNode *doc)
     nsresult nsres;
     HRESULT hres;
 
-    static const PRUnichar selectorW[] = {'s','c','r','i','p','t','[','e','v','e','n','t',']',0};
-
     TRACE("%p\n", doc);
 
     if(!doc->nsdoc)
         return;
 
-    nsAString_InitDepend(&selector_str, selectorW);
+    nsAString_InitDepend(&selector_str, L"script[event]");
     nsres = nsIDOMHTMLDocument_QuerySelectorAll(doc->nsdoc, &selector_str, &node_list);
     nsAString_Finish(&selector_str);
     if(NS_FAILED(nsres)) {

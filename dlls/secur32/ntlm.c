@@ -32,7 +32,6 @@
 #include "lm.h"
 #include "secur32_priv.h"
 #include "hmac_md5.h"
-#include "wine/library.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
@@ -1390,8 +1389,8 @@ static const SecPkgInfoA infoA = {
     ntlm_comment_A
 };
 
-SecPkgInfoA *ntlm_package_infoA = (SecPkgInfoA *)&infoA;
-SecPkgInfoW *ntlm_package_infoW = (SecPkgInfoW *)&infoW;
+static SecPkgInfoA *ntlm_package_infoA = (SecPkgInfoA *)&infoA;
+static SecPkgInfoW *ntlm_package_infoW = (SecPkgInfoW *)&infoW;
 
 static SecPkgInfoW *build_package_infoW( const SecPkgInfoW *info )
 {
@@ -2020,7 +2019,8 @@ void SECUR32_initNTLMSP(void)
          getenv("CX_ROOT") )
     {
         static const char config_file_format[] = "--configfile=%s/smb.conf";
-        const char * HOSTPTR datadir = wine_get_data_dir();
+        char buffer[MAX_PATH];
+        int size = GetEnvironmentVariableA( "WINEDATADIR", buffer, MAX_PATH );
 
         cleanup_helper(helper);
 
@@ -2044,10 +2044,10 @@ void SECUR32_initNTLMSP(void)
         else
             check_version(helper);
 
-        if (datadir)
+        if (size)
         {
-            config_file_option = HeapAlloc( GetProcessHeap(), 0, sizeof(config_file_format) + strlen(datadir) );
-            sprintf( config_file_option, config_file_format, datadir );
+            config_file_option = HeapAlloc( GetProcessHeap(), 0, sizeof(config_file_format) + strlen(buffer) );
+            sprintf( config_file_option, config_file_format, buffer + 4 );
         }
     }
 

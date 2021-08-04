@@ -33,6 +33,7 @@
 #include "wine/asm.h"
 #include "wine/debug.h"
 #include "wine/heap.h"
+#include "wine/server.h"
 
 #include "ntoskrnl_private.h"
 
@@ -83,9 +84,11 @@ NTSTATUS WINAPI KeWaitForMultipleObjects(ULONG count, void *pobjs[],
         {
             switch (objs[i]->Type)
             {
+            case TYPE_MANUAL_TIMER:
             case TYPE_MANUAL_EVENT:
                 objs[i]->WaitListHead.Blink = CreateEventW( NULL, TRUE, objs[i]->SignalState, NULL );
                 break;
+            case TYPE_AUTO_TIMER:
             case TYPE_AUTO_EVENT:
                 objs[i]->WaitListHead.Blink = CreateEventW( NULL, FALSE, objs[i]->SignalState, NULL );
                 break;
@@ -99,9 +102,6 @@ NTSTATUS WINAPI KeWaitForMultipleObjects(ULONG count, void *pobjs[],
                     semaphore->Header.SignalState, semaphore->Limit, NULL );
                 break;
             }
-            case TYPE_MANUAL_TIMER:
-            case TYPE_AUTO_TIMER:
-                break;
             }
         }
 
@@ -137,6 +137,8 @@ NTSTATUS WINAPI KeWaitForMultipleObjects(ULONG count, void *pobjs[],
         {
             switch (objs[i]->Type)
             {
+            case TYPE_AUTO_TIMER:
+            case TYPE_MANUAL_TIMER:
             case TYPE_MANUAL_EVENT:
             case TYPE_AUTO_EVENT:
             case TYPE_SEMAPHORE:
@@ -311,6 +313,28 @@ void WINAPI KeClearEvent( PRKEVENT event )
 }
 
 /***********************************************************************
+ *           KeReadStateEvent (NTOSKRNL.EXE.@)
+ */
+LONG WINAPI KeReadStateEvent( PRKEVENT event )
+{
+    HANDLE handle;
+
+    TRACE("event %p.\n", event);
+
+    if (event->Header.WaitListHead.Blink == INVALID_HANDLE_VALUE)
+    {
+        if (!(ObOpenObjectByPointer( event, OBJ_KERNEL_HANDLE, NULL, EVENT_QUERY_STATE, NULL, KernelMode, &handle )))
+        {
+            EVENT_BASIC_INFORMATION event_info;
+            if (!(NtQueryEvent( handle, EventBasicInformation, &event_info, sizeof(event_info), NULL)))
+                event->Header.SignalState = event_info.EventState;
+            NtClose( handle );
+        }
+    }
+    return event->Header.SignalState;
+}
+
+/***********************************************************************
  *           KeInitializeSemaphore   (NTOSKRNL.EXE.@)
  */
 void WINAPI KeInitializeSemaphore( PRKSEMAPHORE semaphore, LONG count, LONG limit )
@@ -388,6 +412,25 @@ LONG WINAPI KeReleaseMutex( PRKMUTEX mutex, BOOLEAN wait )
     return ret;
 }
 
+static void CALLBACK ke_timer_complete_proc(PTP_CALLBACK_INSTANCE instance, void *timer_, PTP_TIMER tp_timer)
+{
+    KTIMER *timer = timer_;
+    KDPC *dpc = timer->Dpc;
+
+    TRACE("instance %p, timer %p, tp_timer %p.\n", instance, timer, tp_timer);
+
+    if (dpc && dpc->DeferredRoutine)
+    {
+        TRACE("Calling dpc->DeferredRoutine %p, dpc->DeferredContext %p.\n", dpc->DeferredRoutine, dpc->DeferredContext);
+        dpc->DeferredRoutine(dpc, dpc->DeferredContext, dpc->SystemArgument1, dpc->SystemArgument2);
+    }
+    EnterCriticalSection( &sync_cs );
+    timer->Header.SignalState = TRUE;
+    if (timer->Header.WaitListHead.Blink)
+        SetEvent(timer->Header.WaitListHead.Blink);
+    LeaveCriticalSection( &sync_cs );
+}
+
 /***********************************************************************
  *           KeInitializeTimerEx   (NTOSKRNL.EXE.@)
  */
@@ -421,19 +464,24 @@ BOOLEAN WINAPI KeSetTimerEx( KTIMER *timer, LARGE_INTEGER duetime, LONG period, 
     TRACE("timer %p, duetime %s, period %d, dpc %p.\n",
         timer, wine_dbgstr_longlong(duetime.QuadPart), period, dpc);
 
-    if (dpc)
-    {
-        FIXME("Unhandled DPC %p.\n", dpc);
-        return FALSE;
-    }
-
     EnterCriticalSection( &sync_cs );
 
-    ret = timer->Header.Inserted;
-    timer->Header.Inserted = TRUE;
-    timer->Header.WaitListHead.Blink = CreateWaitableTimerW( NULL, timer->Header.Type == TYPE_MANUAL_TIMER, NULL );
-    SetWaitableTimer( timer->Header.WaitListHead.Blink, &duetime, period, NULL, NULL, FALSE );
+    if ((ret = timer->Header.Inserted))
+        KeCancelTimer(timer);
 
+    timer->Header.Inserted = TRUE;
+
+    if (!timer->TimerListEntry.Blink)
+        timer->TimerListEntry.Blink = (void *)CreateThreadpoolTimer(ke_timer_complete_proc, timer, NULL);
+
+    if (!timer->TimerListEntry.Blink)
+        ERR("Could not create thread pool timer.\n");
+
+    timer->DueTime.QuadPart = duetime.QuadPart;
+    timer->Period = period;
+    timer->Dpc = dpc;
+
+    SetThreadpoolTimer((TP_TIMER *)timer->TimerListEntry.Blink, (FILETIME *)&duetime, period, 0);
     LeaveCriticalSection( &sync_cs );
 
     return ret;
@@ -446,10 +494,29 @@ BOOLEAN WINAPI KeCancelTimer( KTIMER *timer )
     TRACE("timer %p.\n", timer);
 
     EnterCriticalSection( &sync_cs );
+    if (timer->TimerListEntry.Blink)
+    {
+        SetThreadpoolTimer((TP_TIMER *)timer->TimerListEntry.Blink, NULL, 0, 0);
+
+        LeaveCriticalSection( &sync_cs );
+        WaitForThreadpoolTimerCallbacks((TP_TIMER *)timer->TimerListEntry.Blink, TRUE);
+        EnterCriticalSection( &sync_cs );
+
+        if (timer->TimerListEntry.Blink)
+        {
+            CloseThreadpoolTimer((TP_TIMER *)timer->TimerListEntry.Blink);
+            timer->TimerListEntry.Blink = NULL;
+        }
+    }
+    timer->Header.SignalState = FALSE;
+    if (timer->Header.WaitListHead.Blink && !*((ULONG_PTR *)&timer->Header.WaitListHead.Flink))
+    {
+        CloseHandle(timer->Header.WaitListHead.Blink);
+        timer->Header.WaitListHead.Blink = NULL;
+    }
+
     ret = timer->Header.Inserted;
     timer->Header.Inserted = FALSE;
-    CloseHandle(timer->Header.WaitListHead.Blink);
-    timer->Header.WaitListHead.Blink = NULL;
     LeaveCriticalSection( &sync_cs );
 
     return ret;
@@ -488,7 +555,7 @@ static inline void small_pause(void)
 void WINAPI KeAcquireSpinLockAtDpcLevel( KSPIN_LOCK *lock )
 {
     TRACE("lock %p.\n", lock);
-    while (!InterlockedCompareExchangePointer( (void **)lock, (void *)1, (void *)0 ))
+    while (InterlockedCompareExchangePointer( (void **)lock, (void *)1, (void *)0 ))
         small_pause();
 }
 
@@ -596,6 +663,56 @@ void WINAPI KeReleaseInStackQueuedSpinLock( KLOCK_QUEUE_HANDLE *queue )
     KeReleaseInStackQueuedSpinLockFromDpcLevel( queue );
 }
 #endif
+
+/***********************************************************************
+ *           KeInitializeApc (NTOSKRNL.EXE.@)
+ */
+void WINAPI KeInitializeApc(PRKAPC apc, PRKTHREAD thread, KAPC_ENVIRONMENT env, PKKERNEL_ROUTINE krnl_routine,
+                            PKRUNDOWN_ROUTINE rundown_routine, PKNORMAL_ROUTINE normal_routine, KPROCESSOR_MODE apc_mode, PVOID ctx)
+{
+    TRACE("apc %p thread %p env %u krnl_routine %p rundown_routine %p normal_routine %p apc_mode %u ctx %p\n",
+           apc, thread, env, krnl_routine, rundown_routine, normal_routine, apc_mode, ctx);
+
+    if (env != OriginalApcEnvironment)
+        FIXME("Unhandled APC_ENVIRONMENT\n");
+
+    apc->Type = 18;
+    apc->Size = sizeof(*apc);
+    apc->Thread = thread;
+    apc->ApcStateIndex = env;
+    apc->KernelRoutine = krnl_routine;
+    apc->RundownRoutine = rundown_routine;
+    apc->NormalRoutine = normal_routine;
+    apc->Inserted = FALSE;
+    if (apc->NormalRoutine)
+    {
+        apc->ApcMode = apc_mode;
+        apc->NormalContext = ctx;
+    }
+    else
+    {
+        apc->ApcMode = KernelMode;
+        apc->NormalContext = NULL;
+    }
+}
+
+/***********************************************************************
+ *           KeTestAlertThread  (NTOSKRNL.EXE.@)
+ */
+BOOLEAN WINAPI KeTestAlertThread(KPROCESSOR_MODE mode)
+{
+    FIXME("stub! %u\n", mode);
+    return TRUE;
+}
+
+/***********************************************************************
+ *           KeAlertThread  (NTOSKRNL.EXE.@)
+ */
+BOOLEAN WINAPI KeAlertThread(PKTHREAD thread, KPROCESSOR_MODE mode)
+{
+    FIXME("stub! %p mode %u\n", thread, mode);
+    return TRUE;
+}
 
 static KSPIN_LOCK cancel_lock;
 
@@ -1257,4 +1374,11 @@ void WINAPI IoReleaseRemoveLockAndWaitEx( IO_REMOVE_LOCK *lock, void *tag, ULONG
         ERR("Lock %p is not acquired!\n", lock);
     else if (count > 0)
         KeWaitForSingleObject( &lock->Common.RemoveEvent, Executive, KernelMode, FALSE, NULL );
+}
+
+BOOLEAN WINAPI KeSetTimer(KTIMER *timer, LARGE_INTEGER duetime, KDPC *dpc)
+{
+    TRACE("timer %p, duetime %I64x, dpc %p.\n", timer, duetime.QuadPart, dpc);
+
+    return KeSetTimerEx(timer, duetime, 0, dpc);
 }

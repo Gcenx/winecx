@@ -78,7 +78,6 @@ static const struct epm_endpoints
 
 static BOOL start_rpcss(void)
 {
-    static const WCHAR rpcssW[] = {'R','p','c','S','s',0};
     SC_HANDLE scm, service;
     SERVICE_STATUS_PROCESS status;
     BOOL ret = FALSE;
@@ -90,7 +89,7 @@ static BOOL start_rpcss(void)
         ERR( "failed to open service manager\n" );
         return FALSE;
     }
-    if (!(service = OpenServiceW( scm, rpcssW, SERVICE_START | SERVICE_QUERY_STATUS )))
+    if (!(service = OpenServiceW( scm, L"RpcSs", SERVICE_START | SERVICE_QUERY_STATUS )))
     {
         ERR( "failed to open RpcSs service\n" );
         CloseServiceHandle( scm );
@@ -183,7 +182,7 @@ static RPC_STATUS get_epm_handle_server(RPC_BINDING_HANDLE *epm_handle)
 
 static LONG WINAPI rpc_filter(EXCEPTION_POINTERS *__eptr)
 {
-    switch (GetExceptionCode())
+    switch (__eptr->ExceptionRecord->ExceptionCode)
     {
         case EXCEPTION_ACCESS_VIOLATION:
         case EXCEPTION_ILLEGAL_INSTRUCTION:

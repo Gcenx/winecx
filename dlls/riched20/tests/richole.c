@@ -3694,7 +3694,7 @@ static void test_Expand(void)
   ITextRange_Release(range);
 }
 
-static void test_MoveEnd(void)
+static void test_MoveEnd_story(void)
 {
   static const char test_text1[] = "Word1 Word2";
   IRichEditOle *reole = NULL;
@@ -3808,6 +3808,283 @@ static void test_MoveEnd(void)
   ITextRange_Release(range);
 }
 
+static void test_character_movestart(ITextRange *range, int textlen, int i, int j, LONG target)
+{
+    HRESULT hr;
+    LONG delta = 0;
+    LONG expected_delta;
+    LONG expected_start = target;
+
+    if (expected_start < 0)
+        expected_start = 0;
+    else if (expected_start > textlen)
+        expected_start = textlen;
+    expected_delta = expected_start - i;
+    hr = ITextRange_SetRange(range, i, j);
+    ok(SUCCEEDED(hr), "got 0x%08x\n", hr);
+    hr = ITextRange_MoveStart(range, tomCharacter, target - i, &delta);
+    if (expected_start == i) {
+        ok(hr == S_FALSE, "(%d,%d) move by %d got hr=0x%08x\n", i, j, target - i, hr);
+        ok(delta == 0, "(%d,%d) move by %d got delta %d\n", i, j, target - i, delta);
+        CHECK_RANGE(range, i, j);
+    } else {
+        ok(hr == S_OK, "(%d,%d) move by %d got hr=0x%08x\n", i, j, target - i, hr);
+        ok(delta == expected_delta, "(%d,%d) move by %d got delta %d\n", i, j, target - i, delta);
+        if (expected_start <= j)
+            CHECK_RANGE(range, expected_start, j);
+        else
+            CHECK_RANGE(range, expected_start, expected_start);
+    }
+}
+
+static void test_character_moveend(ITextRange *range, int textlen, int i, int j, LONG target)
+{
+    HRESULT hr;
+    LONG delta;
+    LONG expected_delta;
+    LONG expected_end = target;
+
+    if (expected_end < 0)
+        expected_end = 0;
+    else if (expected_end > textlen + 1)
+        expected_end = textlen + 1;
+    expected_delta = expected_end - j;
+    hr = ITextRange_SetRange(range, i, j);
+    ok(SUCCEEDED(hr), "got 0x%08x\n", hr);
+    hr = ITextRange_MoveEnd(range, tomCharacter, target - j, &delta);
+    if (expected_end == j) {
+        ok(hr == S_FALSE, "(%d,%d) move by %d got hr=0x%08x\n", i, j, target - j, hr);
+        ok(delta == 0, "(%d,%d) move by %d got delta %d\n", i, j, target - j, delta);
+        CHECK_RANGE(range, i, j);
+    } else {
+        ok(hr == S_OK, "(%d,%d) move by %d got hr=0x%08x\n", i, j, target - j, hr);
+        ok(delta == expected_delta, "(%d,%d) move by %d got delta %d\n", i, j, target - j, delta);
+        if (i <= expected_end)
+            CHECK_RANGE(range, i, expected_end);
+        else
+            CHECK_RANGE(range, expected_end, expected_end);
+    }
+}
+
+static void test_character_move(ITextRange *range, int textlen, int i, int j, LONG target)
+{
+    HRESULT hr;
+    LONG move_by;
+    LONG delta = 0;
+    LONG expected_delta;
+    LONG expected_location = target;
+
+    if (expected_location < 0)
+        expected_location = 0;
+    else if (expected_location > textlen)
+        expected_location = textlen;
+
+    if (target <= i) {
+        move_by = target - i;
+        expected_delta = expected_location - i;
+        if (i != j) {
+            --move_by;
+            --expected_delta;
+        }
+    } else if (j <= target) {
+        move_by = target - j;
+        expected_delta = expected_location - j;
+        if (i != j) {
+            ++move_by;
+            ++expected_delta;
+        }
+    } else {
+        /* There's no way to move to a point between start and end: */
+        return;
+    }
+
+    hr = ITextRange_SetRange(range, i, j);
+    ok(SUCCEEDED(hr), "got 0x%08x\n", hr);
+    hr = ITextRange_Move(range, tomCharacter, move_by, &delta);
+    if (expected_delta == 0) {
+        ok(hr == S_FALSE, "(%d,%d) move by %d got hr=0x%08x\n", i, j, move_by, hr);
+        ok(delta == 0, "(%d,%d) move by %d got delta %d\n", i, j, move_by, delta);
+        CHECK_RANGE(range, expected_location, expected_location);
+    } else {
+        ok(hr == S_OK, "(%d,%d) move by %d got hr=0x%08x\n", i, j, move_by, hr);
+        ok(delta == expected_delta, "(%d,%d) move by %d got delta %d\n", i, j, move_by, delta);
+        CHECK_RANGE(range, expected_location, expected_location);
+    }
+}
+
+static void test_character_startof(ITextRange *range, int textlen, int i, int j)
+{
+    HRESULT hr;
+    LONG delta;
+
+    hr = ITextRange_SetRange(range, i, j);
+    ok(SUCCEEDED(hr), "got 0x%08x\n", hr);
+    hr = ITextRange_StartOf(range, tomCharacter, tomMove, &delta);
+    if (i == j) {
+        ok(hr == S_FALSE, "(%d,%d) tomMove got hr=0x%08x\n", i, j, hr);
+        ok(delta == 0, "(%d,%d) tomMove got delta %d\n", i, j, delta);
+    } else {
+        ok(hr == S_OK, "(%d,%d) tomMove got hr=0x%08x\n", i, j, hr);
+        ok(delta == -1, "(%d,%d) tomMove got delta %d\n", i, j, delta);
+    }
+    CHECK_RANGE(range, i, i);
+
+    hr = ITextRange_SetRange(range, i, j);
+    ok(SUCCEEDED(hr), "got 0x%08x\n", hr);
+    hr = ITextRange_StartOf(range, tomCharacter, tomExtend, &delta);
+    ok(hr == S_FALSE, "(%d,%d) tomExtend got hr=0x%08x\n", i, j, hr);
+    ok(delta == 0, "(%d,%d) tomExtend got delta %d\n", i, j, delta);
+    CHECK_RANGE(range, i, j);
+}
+
+static void test_character_endof(ITextRange *range, int textlen, int i, int j)
+{
+    HRESULT hr;
+    LONG end;
+    LONG delta;
+
+    hr = ITextRange_SetRange(range, i, j);
+    ok(SUCCEEDED(hr), "got 0x%08x\n", hr);
+    hr = ITextRange_EndOf(range, tomCharacter, tomMove, &delta);
+
+    /* A character "end", apparently cannot be before the very first character */
+    end = j;
+    if (j == 0)
+        ++end;
+
+    if (i == end) {
+        ok(hr == S_FALSE, "(%d,%d) tomMove got hr=0x%08x\n", i, j, hr);
+        ok(delta == 0, "(%d,%d) tomMove got delta %d\n", i, j, delta);
+    } else {
+        ok(hr == S_OK, "(%d,%d) tomMove got hr=0x%08x\n", i, j, hr);
+        ok(delta == 1, "(%d,%d) tomMove got delta %d\n", i, j, delta);
+    }
+    CHECK_RANGE(range, end, end);
+
+    hr = ITextRange_SetRange(range, i, j);
+    ok(SUCCEEDED(hr), "got 0x%08x\n", hr);
+    hr = ITextRange_EndOf(range, tomCharacter, tomExtend, &delta);
+    if (0 < j) {
+        ok(hr == S_FALSE, "(%d,%d) tomExtend got hr=0x%08x\n", i, j, hr);
+        ok(delta == 0, "(%d,%d) tomExtend got delta %d\n", i, j, delta);
+    } else {
+        ok(hr == S_OK, "(%d,%d) tomExtend got hr=0x%08x\n", i, j, hr);
+        ok(delta == 1, "(%d,%d) tomExtend got delta %d\n", i, j, delta);
+    }
+    CHECK_RANGE(range, i, end);
+}
+
+static void test_character_movement(void)
+{
+  static const char test_text1[] = "ab\n c";
+  IRichEditOle *reole = NULL;
+  ITextDocument *doc = NULL;
+  ITextRange *range;
+  ITextSelection *selection;
+  HRESULT hr;
+  HWND hwnd;
+  int i, j;
+  const int textlen = strlen(test_text1);
+
+  create_interfaces(&hwnd, &reole, &doc, &selection);
+  SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)test_text1);
+
+  hr = ITextDocument_Range(doc, 0, 0, &range);
+  ok(hr == S_OK, "got 0x%08x\n", hr);
+
+  /* Exhaustive test of every possible combination of (start,end) locations,
+   * against every possible target location to move to. */
+  for (i = 0; i <= textlen; i++) {
+      for (j = i; j <= textlen; j++) {
+          LONG target;
+          for (target = -2; target <= textlen + 3; target++) {
+              test_character_moveend(range, textlen, i, j, target);
+              test_character_movestart(range, textlen, i, j, target);
+              test_character_move(range, textlen, i, j, target);
+          }
+          test_character_startof(range, textlen, i, j);
+          test_character_endof(range, textlen, i, j);
+      }
+  }
+
+  release_interfaces(&hwnd, &reole, &doc, NULL);
+  ITextSelection_Release(selection);
+  ITextRange_Release(range);
+}
+
+#define CLIPBOARD_RANGE_CONTAINS(range, start, end, expected) _clipboard_range_contains(range, start, end, expected, __LINE__, 0);
+#define TODO_CLIPBOARD_RANGE_CONTAINS(range, start, end, expected) _clipboard_range_contains(range, start, end, expected, __LINE__, 1);
+static void _clipboard_range_contains(ITextRange *range, LONG start, LONG end, const char *expected, int line, int todo)
+{
+  HRESULT hr;
+  BOOL clipboard_open;
+  HGLOBAL global;
+  const char *clipboard_text;
+
+  hr = ITextRange_SetRange(range, start, end);
+  ok_(__FILE__,line)(SUCCEEDED(hr), "SetRange failed: 0x%08x\n", hr);
+  hr = ITextRange_Copy(range, NULL);
+  ok_(__FILE__,line)(hr == S_OK, "Copy failed: 0x%08x\n", hr);
+
+  clipboard_open = OpenClipboard(NULL);
+  ok_(__FILE__,line)(clipboard_open, "OpenClipboard failed: %d\n", GetLastError());
+  global = GetClipboardData(CF_TEXT);
+  ok_(__FILE__,line)(global != NULL, "GetClipboardData failed: %p\n", global);
+  clipboard_text = GlobalLock(global);
+  ok_(__FILE__,line)(clipboard_text != NULL, "GlobalLock failed: %p\n", clipboard_text);
+  todo_wine_if(todo) ok_(__FILE__,line)(!strcmp(expected, clipboard_text), "unexpected contents: %s\n", wine_dbgstr_a(clipboard_text));
+  GlobalUnlock(global);
+  CloseClipboard();
+}
+
+static void test_clipboard(void)
+{
+  static const char text_in[] = "ab\n c";
+  IRichEditOle *reole = NULL;
+  ITextDocument *doc = NULL;
+  ITextRange *range;
+  ITextSelection *selection;
+  HRESULT hr;
+  HWND hwnd;
+
+  create_interfaces(&hwnd, &reole, &doc, &selection);
+  SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)text_in);
+
+  hr = ITextDocument_Range(doc, 0, 0, &range);
+  ok(hr == S_OK, "got 0x%08x\n", hr);
+
+  CLIPBOARD_RANGE_CONTAINS(range, 0, 5, "ab\r\n c")
+  CLIPBOARD_RANGE_CONTAINS(range, 0, 0, "ab\r\n c")
+  CLIPBOARD_RANGE_CONTAINS(range, 1, 1, "ab\r\n c")
+  CLIPBOARD_RANGE_CONTAINS(range, 0, 1, "a")
+  CLIPBOARD_RANGE_CONTAINS(range, 5, 6, "")
+
+  /* Setting password char does not stop Copy */
+  SendMessageA(hwnd, EM_SETPASSWORDCHAR, '*', 0);
+  CLIPBOARD_RANGE_CONTAINS(range, 0, 1, "a")
+
+  /* Cut can be undone */
+  hr = ITextRange_SetRange(range, 0, 1);
+  ok(SUCCEEDED(hr), "SetRange failed: 0x%08x\n", hr);
+  hr = ITextRange_Cut(range, NULL);
+  ok(hr == S_OK, "Cut failed: 0x%08x\n", hr);
+  CLIPBOARD_RANGE_CONTAINS(range, 0, 4, "b\r\n c");
+  hr = ITextDocument_Undo(doc, 1, NULL);
+  todo_wine ok(hr == S_OK, "Undo failed: 0x%08x\n", hr);
+  TODO_CLIPBOARD_RANGE_CONTAINS(range, 0, 5, "ab\r\n c");
+
+  /* Cannot cut when read-only */
+  SendMessageA(hwnd, EM_SETREADONLY, TRUE, 0);
+  hr = ITextRange_SetRange(range, 0, 1);
+  ok(SUCCEEDED(hr), "SetRange failed: 0x%08x\n", hr);
+  hr = ITextRange_Cut(range, NULL);
+  ok(hr == E_ACCESSDENIED, "got 0x%08x\n", hr);
+
+  release_interfaces(&hwnd, &reole, &doc, NULL);
+  ITextSelection_Release(selection);
+  ITextRange_Release(range);
+}
+
 START_TEST(richole)
 {
   /* Must explicitly LoadLibrary(). The test has no references to functions in
@@ -3846,5 +4123,7 @@ START_TEST(richole)
   test_GetStoryLength();
   test_ITextSelection_GetDuplicate();
   test_Expand();
-  test_MoveEnd();
+  test_MoveEnd_story();
+  test_character_movement();
+  test_clipboard();
 }

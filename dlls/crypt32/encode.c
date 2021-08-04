@@ -30,9 +30,6 @@
  * MSDN, especially "Constants for CryptEncodeObject and CryptDecodeObject"
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -46,7 +43,6 @@
 #include "snmp.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
-#include "wine/unicode.h"
 #include "crypt32_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(cryptasn);
@@ -1015,7 +1011,7 @@ static BOOL CRYPT_AsnEncodeUTF8String(const CERT_NAME_VALUE *value,
     if (value->Value.cbData)
         strLen = value->Value.cbData / sizeof(WCHAR);
     else if (str)
-        strLen = strlenW(str);
+        strLen = lstrlenW(str);
     else
         strLen = 0;
     encodedLen = WideCharToMultiByte(CP_UTF8, 0, str, strLen, NULL, 0, NULL,
@@ -1186,7 +1182,7 @@ static BOOL CRYPT_AsnEncodeRdnAttr(DWORD dwCertEncodingType,
     return ret;
 }
 
-static int BLOBComp(const void * HOSTPTR l, const void * HOSTPTR r)
+static int __cdecl BLOBComp(const void *l, const void *r)
 {
     const CRYPT_DER_BLOB * HOSTPTR a = l, * HOSTPTR b = r;
     int ret;
@@ -1999,7 +1995,7 @@ static BOOL CRYPT_AsnEncodeUnicodeStringCoerce(const CERT_NAME_VALUE *value,
     if (value->Value.cbData)
         encodedLen = value->Value.cbData / sizeof(WCHAR);
     else if (str)
-        encodedLen = strlenW(str);
+        encodedLen = lstrlenW(str);
     else
         encodedLen = 0;
     CRYPT_EncodeLen(encodedLen, NULL, &lenBytes);
@@ -2036,7 +2032,7 @@ static BOOL CRYPT_AsnEncodeNumericString(const CERT_NAME_VALUE *value,
     if (value->Value.cbData)
         encodedLen = value->Value.cbData / sizeof(WCHAR);
     else if (str)
-        encodedLen = strlenW(str);
+        encodedLen = lstrlenW(str);
     else
         encodedLen = 0;
     CRYPT_EncodeLen(encodedLen, NULL, &lenBytes);
@@ -2060,7 +2056,7 @@ static BOOL CRYPT_AsnEncodeNumericString(const CERT_NAME_VALUE *value,
             ptr += lenBytes;
             for (i = 0; ret && i < encodedLen; i++)
             {
-                if (isdigitW(str[i]))
+                if ('0' <= str[i] && str[i] <= '9')
                     *ptr++ = (BYTE)str[i];
                 else
                 {
@@ -2078,9 +2074,7 @@ static BOOL CRYPT_AsnEncodeNumericString(const CERT_NAME_VALUE *value,
 
 static inline BOOL isprintableW(WCHAR wc)
 {
-    return isalnumW(wc) || isspaceW(wc) || wc == '\'' || wc == '(' ||
-     wc == ')' || wc == '+' || wc == ',' || wc == '-' || wc == '.' ||
-     wc == '/' || wc == ':' || wc == '=' || wc == '?';
+    return wc && wcschr( L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 '()+,-./:=?", wc );
 }
 
 static BOOL CRYPT_AsnEncodePrintableString(const CERT_NAME_VALUE *value,
@@ -2094,7 +2088,7 @@ static BOOL CRYPT_AsnEncodePrintableString(const CERT_NAME_VALUE *value,
     if (value->Value.cbData)
         encodedLen = value->Value.cbData / sizeof(WCHAR);
     else if (str)
-        encodedLen = strlenW(str);
+        encodedLen = lstrlenW(str);
     else
         encodedLen = 0;
     CRYPT_EncodeLen(encodedLen, NULL, &lenBytes);
@@ -2145,7 +2139,7 @@ static BOOL CRYPT_AsnEncodeIA5String(const CERT_NAME_VALUE *value,
     if (value->Value.cbData)
         encodedLen = value->Value.cbData / sizeof(WCHAR);
     else if (str)
-        encodedLen = strlenW(str);
+        encodedLen = lstrlenW(str);
     else
         encodedLen = 0;
     CRYPT_EncodeLen(encodedLen, NULL, &lenBytes);
@@ -2197,7 +2191,7 @@ static BOOL CRYPT_AsnEncodeUniversalString(const CERT_NAME_VALUE *value,
     if (value->Value.cbData)
         strLen = value->Value.cbData / sizeof(WCHAR);
     else if (str)
-        strLen = strlenW(str);
+        strLen = lstrlenW(str);
     else
         strLen = 0;
     CRYPT_EncodeLen(strLen * 4, NULL, &lenBytes);

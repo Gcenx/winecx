@@ -1576,3 +1576,80 @@ HRESULT __RPC_STUB IColumnsInfo_MapColumnIDs_Stub(IColumnsInfo* This, DBORDINAL 
     FIXME("(%p)->(%lu %p %p %p): stub\n", This, column_ids, dbids, columns, error);
     return E_NOTIMPL;
 }
+
+HRESULT CALLBACK IGetDataSource_GetDataSource_Proxy(IGetDataSource* This, REFIID riid, IUnknown **datasource)
+{
+    FIXME("(%p)->(%s %p): stub\n", This, debugstr_guid(riid), datasource);
+    return E_NOTIMPL;
+}
+
+HRESULT __RPC_STUB IGetDataSource_GetDataSource_Stub(IGetDataSource* This, REFIID riid, IUnknown **datasource,
+    IErrorInfo **error)
+{
+    FIXME("(%p)->(%s %p %p): stub\n", This, debugstr_guid(riid), datasource, error);
+    return E_NOTIMPL;
+}
+
+HRESULT CALLBACK ICommandProperties_GetProperties_Proxy(ICommandProperties* This, const ULONG count,
+    const DBPROPIDSET propertyidsets[], ULONG *sets_cnt, DBPROPSET **propertyset)
+{
+    FIXME("(%p)->(%d %p %p %p): stub\n", This, count, propertyidsets, sets_cnt, propertyset);
+    return E_NOTIMPL;
+}
+
+HRESULT __RPC_STUB ICommandProperties_GetProperties_Stub(ICommandProperties* This, const ULONG count,
+    const DBPROPIDSET *propertyidsets, ULONG *sets_cnt, DBPROPSET **propertyset, IErrorInfo **error)
+{
+    FIXME("(%p)->(%d %p %p %p %p): stub\n", This, count, propertyidsets, sets_cnt, propertyset, error);
+    return E_NOTIMPL;
+}
+
+HRESULT CALLBACK ICommandProperties_SetProperties_Proxy(ICommandProperties* This, ULONG count, DBPROPSET propertyset[])
+{
+    FIXME("(%p)->(%d %p): stub\n", This, count, propertyset);
+    return E_NOTIMPL;
+}
+
+HRESULT __RPC_STUB ICommandProperties_SetProperties_Stub(ICommandProperties* This, ULONG count,
+    DBPROPSET *propertyset, ULONG total, DBPROPSTATUS *propstatus, IErrorInfo **error)
+{
+    FIXME("(%p)->(%d %p %d %p %p): stub\n", This, count, propertyset, total, propstatus, error);
+    return E_NOTIMPL;
+}
+
+HRESULT CALLBACK IConvertType_CanConvert_Proxy(IConvertType* This, DBTYPE from, DBTYPE to, DBCONVERTFLAGS flags)
+{
+    FIXME("(%p)->(%d %d 0x%08x): stub\n", This, from, to, flags);
+    return E_NOTIMPL;
+}
+
+HRESULT __RPC_STUB IConvertType_CanConvert_Stub(IConvertType* This, DBTYPE from, DBTYPE to,
+    DBCONVERTFLAGS flags, IErrorInfo **error)
+{
+    FIXME("(%p)->(%d %d 0x%08x %p): stub\n", This, from, to, flags, error);
+    return E_NOTIMPL;
+}
+
+HRESULT CALLBACK ICommandPrepare_Prepare_Proxy(ICommandPrepare* This, ULONG runs)
+{
+    FIXME("(%p)->(%d): stub\n", This, runs);
+    return E_NOTIMPL;
+}
+
+HRESULT __RPC_STUB ICommandPrepare_Prepare_Stub(ICommandPrepare* This, ULONG runs, IErrorInfo **error)
+{
+    FIXME("(%p)->(%d %p): stub\n", This, runs, error);
+    return E_NOTIMPL;
+}
+
+HRESULT CALLBACK ICommandPrepare_Unprepare_Proxy(ICommandPrepare* This)
+{
+    FIXME("(%p)->(): stub\n", This);
+    return E_NOTIMPL;
+}
+
+HRESULT __RPC_STUB ICommandPrepare_Unprepare_Stub(ICommandPrepare* This, IErrorInfo **error)
+{
+    FIXME("(%p)->(%p): stub\n", This, error);
+    return E_NOTIMPL;
+}

@@ -290,50 +290,32 @@ typedef ULONG_PTR SIZE_T, *PSIZE_T;
 
 typedef ULONG_PTR KAFFINITY, *PKAFFINITY;
 
+#define MINLONGLONG             ((LONGLONG)~MAXLONGLONG)
+
 /* Some Wine-specific definitions */
 
 /* Architecture dependent settings. */
 /* These are hardcoded to avoid dependencies on config.h in Winelib apps. */
 #if defined(__i386__) || defined(__i386_on_x86_64__)
 # undef  WORDS_BIGENDIAN
-# undef  BITFIELDS_BIGENDIAN
-# define ALLOW_UNALIGNED_ACCESS
 #elif defined(__x86_64__)
 # undef  WORDS_BIGENDIAN
-# undef  BITFIELDS_BIGENDIAN
-# define ALLOW_UNALIGNED_ACCESS
 #elif defined(__powerpc__)
 # define WORDS_BIGENDIAN
-# define BITFIELDS_BIGENDIAN
-# undef  ALLOW_UNALIGNED_ACCESS
 #elif defined(__ALPHA__)
 # undef  WORDS_BIGENDIAN
-# undef  BITFIELDS_BIGENDIAN
-# undef  ALLOW_UNALIGNED_ACCESS
 #elif defined(__ARMEB__)
 # define WORDS_BIGENDIAN
-# define BITFIELDS_BIGENDIAN
-# undef  ALLOW_UNALIGNED_ACCESS
 #elif defined(__ARMEL__) || defined(__arm__)
 # undef  WORDS_BIGENDIAN
-# undef  BITFIELDS_BIGENDIAN
-# undef  ALLOW_UNALIGNED_ACCESS
 #elif defined(__AARCH64EB__)
 # define WORDS_BIGENDIAN
-# define BITFIELDS_BIGENDIAN
-# undef  ALLOW_UNALIGNED_ACCESS
 #elif defined(__AARCH64EL__) || defined(__aarch64__)
 # undef  WORDS_BIGENDIAN
-# undef  BITFIELDS_BIGENDIAN
-# undef  ALLOW_UNALIGNED_ACCESS
 #elif defined(__MIPSEB__)
 # define WORDS_BIGENDIAN
-# define BITFIELDS_BIGENDIAN
-# undef  ALLOW_UNALIGNED_ACCESS
 #elif defined(__MIPSEL__)
 # undef  WORDS_BIGENDIAN
-# undef  BITFIELDS_BIGENDIAN
-# undef  ALLOW_UNALIGNED_ACCESS
 #elif !defined(RC_INVOKED) && !defined(__WIDL__) && !defined(__midl)
 # error Unknown CPU architecture!
 #endif

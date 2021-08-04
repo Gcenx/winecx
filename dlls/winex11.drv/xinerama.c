@@ -27,11 +27,9 @@
 #ifdef HAVE_X11_EXTENSIONS_XINERAMA_H
 #include <X11/extensions/Xinerama.h>
 #endif
-#include "wine/library.h"
 #include "x11drv.h"
 #include "wine/debug.h"
 #include "wine/heap.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 
@@ -43,7 +41,6 @@ static MONITORINFOEXW default_monitor =
     MONITORINFOF_PRIMARY,       /* dwFlags */
     { '\\','\\','.','\\','D','I','S','P','L','A','Y','1',0 }   /* szDevice */
 };
-static const WCHAR monitor_deviceW[] = { '\\','\\','.','\\','D','I','S','P','L','A','Y','%','d',0 }; /* CrossOver Hack 13441 */
 
 static MONITORINFOEXW *monitors;
 static int nb_monitors;
@@ -54,82 +51,6 @@ static inline MONITORINFOEXW *get_primary(void)
     int idx = primary_monitor;
     if (idx >= nb_monitors) idx = 0;
     return &monitors[idx];
-}
-
-/* CodeWeavers Hack bug 5752: Converted to return a region and to query
- * the _CX_WORKAREA property of the root window in preference to _NET_WORKAREA. */
-HRGN query_work_area(void)
-{
-    Atom type;
-    int format;
-    unsigned long count, remaining;
-    long *work_area;
-    HRGN region = NULL;
-
-    if (!XGetWindowProperty( gdi_display, DefaultRootWindow(gdi_display), x11drv_atom(_CX_WORKAREA), 0,
-                             ~0, False, XA_CARDINAL, &type, &format, &count,
-                             &remaining, (unsigned char **)&work_area ))
-    {
-        if (type == XA_CARDINAL && format == 32 && count >= 4)
-        {
-            int i;
-            HRGN temp = CreateRectRgn( 0, 0, 0, 0 );
-
-            region = CreateRectRgn( 0, 0, 0, 0 );
-            for (i = 0; i + 3 < count; i += 4)
-            {
-                SetRectRgn( temp, work_area[i+0], work_area[i+1],
-                            work_area[i+0] + work_area[i+2], work_area[i+1] + work_area[i+3] );
-                CombineRgn( region, region, temp, RGN_OR );
-            }
-
-            DeleteObject( temp );
-            XFree( work_area );
-            return region;
-        }
-        XFree( work_area );
-    }
-
-    /* Try _GTK_WORKAREAS first as _NET_WORKAREA may be incorrect on multi-monitor systems */
-    if (!XGetWindowProperty( gdi_display, DefaultRootWindow(gdi_display),
-                             x11drv_atom(_GTK_WORKAREAS_D0), 0, ~0, False, XA_CARDINAL, &type,
-                             &format, &count, &remaining, (unsigned char **)&work_area ))
-    {
-        if (type == XA_CARDINAL && format == 32 && count >= 4)
-        {
-            int i;
-            HRGN temp = CreateRectRgn( 0, 0, 0, 0 );
-
-            region = CreateRectRgn( 0, 0, 0, 0 );
-            for (i = 0; i + 3 < count; i += 4)
-            {
-                SetRectRgn( temp, work_area[i+0], work_area[i+1],
-                            work_area[i+0] + work_area[i+2], work_area[i+1] + work_area[i+3] );
-                CombineRgn( region, region, temp, RGN_OR );
-            }
-
-            DeleteObject( temp );
-            XFree( work_area );
-            return region;
-        }
-        XFree(work_area);
-    }
-
-    WARN("_GTK_WORKAREAS is not supported, fallback to _NET_WORKAREA. "
-         "Work areas may be incorrect on multi-monitor systems.\n");
-    if (!XGetWindowProperty( gdi_display, DefaultRootWindow(gdi_display), x11drv_atom(_NET_WORKAREA), 0,
-                             ~0, False, XA_CARDINAL, &type, &format, &count,
-                             &remaining, (unsigned char **)&work_area ))
-    {
-        if (type == XA_CARDINAL && format == 32 && count >= 4)
-        {
-            region = CreateRectRgn( work_area[0], work_area[1],
-                                    work_area[0] + work_area[2], work_area[1] + work_area[3] );
-        }
-        XFree( work_area );
-    }
-
-    return region;
 }
 
 #ifdef SONAME_LIBXINERAMA
@@ -143,14 +64,14 @@ static void load_xinerama(void)
 {
     void *handle;
 
-    if (!(handle = wine_dlopen(SONAME_LIBXINERAMA, RTLD_NOW, NULL, 0)))
+    if (!(handle = dlopen(SONAME_LIBXINERAMA, RTLD_NOW)))
     {
         WARN( "failed to open %s\n", SONAME_LIBXINERAMA );
         return;
     }
-    pXineramaQueryExtension = wine_dlsym( handle, "XineramaQueryExtension", NULL, 0 );
+    pXineramaQueryExtension = dlsym( handle, "XineramaQueryExtension" );
     if (!pXineramaQueryExtension) WARN( "XineramaQueryScreens not found\n" );
-    pXineramaQueryScreens = wine_dlsym( handle, "XineramaQueryScreens", NULL, 0 );
+    pXineramaQueryScreens = dlsym( handle, "XineramaQueryScreens" );
     if (!pXineramaQueryScreens) WARN( "XineramaQueryScreens not found\n" );
 }
 
@@ -158,7 +79,6 @@ static int query_screens(void)
 {
     int i, count, event_base, error_base;
     XineramaScreenInfo *screens;
-    HRGN workarea_rgn, temp_rgn;
 
     if (!monitors)  /* first time around */
         load_xinerama();
@@ -167,15 +87,9 @@ static int query_screens(void)
         !pXineramaQueryExtension( gdi_display, &event_base, &error_base ) ||
         !(screens = pXineramaQueryScreens( gdi_display, &count ))) return 0;
 
-    /* CodeWeavers Hack bug 5752: made query_work_area return a region */
-    workarea_rgn = query_work_area();
-    temp_rgn = CreateRectRgn( 0, 0, 0, 0 );
-
     if (monitors != &default_monitor) HeapFree( GetProcessHeap(), 0, monitors );
     if ((monitors = HeapAlloc( GetProcessHeap(), 0, count * sizeof(*monitors) )))
     {
-        int device = 2; /* 1 is reserved for primary; CrossOver Hack 13441 */
-
         nb_monitors = count;
         for (i = 0; i < nb_monitors; i++)
         {
@@ -185,30 +99,13 @@ static int query_screens(void)
             monitors[i].rcMonitor.right  = screens[i].x_org + screens[i].width;
             monitors[i].rcMonitor.bottom = screens[i].y_org + screens[i].height;
             monitors[i].dwFlags          = 0;
-            if (workarea_rgn && temp_rgn)
-            {
-                SetRectRgn( temp_rgn, monitors[i].rcMonitor.left, monitors[i].rcMonitor.top,
-                            monitors[i].rcMonitor.right, monitors[i].rcMonitor.bottom );
-                if (CombineRgn( temp_rgn, temp_rgn, workarea_rgn, RGN_AND ) != ERROR)
-                    GetRgnBox( temp_rgn, &monitors[i].rcWork );
-            }
-            else
-                monitors[i].rcWork = monitors[i].rcMonitor;
+            monitors[i].rcWork           = get_work_area( &monitors[i].rcMonitor );
         }
 
         get_primary()->dwFlags |= MONITORINFOF_PRIMARY;
-
-        /* CrossOver Hack 13441 */
-        for (i = 0; i < nb_monitors; i++)
-        {
-            snprintfW( monitors[i].szDevice, sizeof(monitors[i].szDevice) / sizeof(WCHAR),
-                       monitor_deviceW, (monitors[i].dwFlags & MONITORINFOF_PRIMARY) ? 1 : device++ );
-        }
     }
     else count = 0;
 
-    DeleteObject( workarea_rgn );
-    DeleteObject( temp_rgn );
     XFree( screens );
     return count;
 }
@@ -376,16 +273,8 @@ void xinerama_init( unsigned int width, unsigned int height )
     SetRect( &rect, 0, 0, width, height );
     if (!query_screens())
     {
-        /* CodeWeavers Hack bug 5752: made query_work_area return a region */
-        HRGN workarea, temp;
-
-        default_monitor.rcWork = default_monitor.rcMonitor = rect;
-        workarea = query_work_area();
-        if ((temp = CreateRectRgnIndirect( &default_monitor.rcWork )) &&
-            CombineRgn( temp, temp, workarea, RGN_AND ) != ERROR)
-            GetRgnBox( temp, &default_monitor.rcWork );
-        DeleteObject( temp );
-        DeleteObject( workarea );
+        default_monitor.rcMonitor = rect;
+        default_monitor.rcWork = get_work_area( &default_monitor.rcMonitor );
         nb_monitors = 1;
         monitors = &default_monitor;
     }

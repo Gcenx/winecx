@@ -33,13 +33,6 @@
 
 #include "wine/test.h"
 
-static const WCHAR invalid_url1[] = {'h','t','t','p',':','/','/','l','o','c','a','l','h','o','s','t',':','5','0','0','0','0',0};
-static const WCHAR invalid_url2[] = {'l','o','c','a','l','h','o','s','t',':','5','0','0','0','0',0};
-static const WCHAR invalid_url3[] = {'l','o','c','a','l','h','o','s','t',':','5','0','0','0','0','/',0};
-static const WCHAR invalid_url4[] = {'h','t','t','p',':','/','/','l','o','c','a','l','h','o','s','t','/',0};
-static const WCHAR invalid_url5[] = {'h','t','t','p',':','/','/','l','o','c','a','l','h','o','s','t',':','/',0};
-static const WCHAR invalid_url6[] = {'h','t','t','p',':','/','/','l','o','c','a','l','h','o','s','t',':','0','/',0};
-
 static ULONG (WINAPI *pHttpAddUrlToUrlGroup)(HTTP_URL_GROUP_ID id, const WCHAR *url, HTTP_URL_CONTEXT context, ULONG reserved);
 static ULONG (WINAPI *pHttpCreateServerSession)(HTTPAPI_VERSION version, HTTP_SERVER_SESSION_ID *session_id, ULONG reserved);
 static ULONG (WINAPI *pHttpCreateRequestQueue)(HTTPAPI_VERSION version, const WCHAR *name, SECURITY_ATTRIBUTES *sa, ULONG flags, HANDLE *handle);
@@ -113,8 +106,9 @@ static unsigned short add_url_v1(HANDLE queue)
     for (port = 50000; port < 51000; ++port)
     {
         swprintf(url, ARRAY_SIZE(url), L"http://localhost:%u/", port);
-        if ((ret = HttpAddUrl(queue, url, NULL)) != ERROR_SHARING_VIOLATION)
+        if (!(ret = HttpAddUrl(queue, url, NULL)))
             return port;
+        ok(ret == ERROR_SHARING_VIOLATION, "Failed to add %s, error %u.\n", debugstr_w(url), ret);
     }
     ok(0, "Failed to add url %s, error %u.\n", debugstr_w(url), ret);
     return 0;
@@ -129,8 +123,9 @@ static ULONG add_url_v2(HTTP_URL_GROUP_ID group)
     for (port = 50010; port < 51000; ++port)
     {
         swprintf(url, ARRAY_SIZE(url), L"http://localhost:%u/", port);
-        if ((ret = pHttpAddUrlToUrlGroup(group, url, 0xdeadbeef, 0)) != ERROR_SHARING_VIOLATION)
+        if (!(ret = pHttpAddUrlToUrlGroup(group, url, 0xdeadbeef, 0)))
             return port;
+        ok(ret == ERROR_SHARING_VIOLATION, "Failed to add %s, error %u.\n", debugstr_w(url), ret);
     }
     ok(0, "Failed to add url %s, error %u.\n", debugstr_w(url), ret);
     return 0;
@@ -186,6 +181,9 @@ static void test_v1_server(void)
     ret = CloseHandle(queue2);
     ok(ret, "Failed to close queue handle, error %u.\n", GetLastError());
 
+    ret_size = 0xdeadbeef;
+    ret = HttpReceiveHttpRequest(NULL, HTTP_NULL_ID, 0, (HTTP_REQUEST *)req, sizeof(req_buffer), &ret_size, NULL);
+    ok(ret == ERROR_INVALID_HANDLE, "Got error %u.\n", ret);
     ret = HttpReceiveHttpRequest(NULL, HTTP_NULL_ID, 0, (HTTP_REQUEST *)req, sizeof(req_buffer), NULL, &ovl);
     ok(ret == ERROR_INVALID_HANDLE, "Got error %u.\n", ret);
     ret = HttpReceiveHttpRequest(queue, 0xdeadbeef, 0, (HTTP_REQUEST *)req, sizeof(req_buffer), NULL, &ovl);
@@ -200,17 +198,17 @@ static void test_v1_server(void)
 
     ret = HttpAddUrl(NULL, L"http://localhost:50000/", NULL);
     ok(ret == ERROR_INVALID_HANDLE || ret == ERROR_INVALID_PARAMETER /* < Vista */, "Got error %u.\n", ret);
-    ret = HttpAddUrl(queue, invalid_url1, NULL);
+    ret = HttpAddUrl(queue, L"http://localhost:50000", NULL);
     ok(ret == ERROR_INVALID_PARAMETER, "Got error %u.\n", ret);
-    ret = HttpAddUrl(queue, invalid_url2, NULL);
+    ret = HttpAddUrl(queue, L"localhost:50000", NULL);
     ok(ret == ERROR_INVALID_PARAMETER, "Got error %u.\n", ret);
-    ret = HttpAddUrl(queue, invalid_url3, NULL);
+    ret = HttpAddUrl(queue, L"localhost:50000/", NULL);
     ok(ret == ERROR_INVALID_PARAMETER, "Got error %u.\n", ret);
-    ret = HttpAddUrl(queue, invalid_url4, NULL);
+    ret = HttpAddUrl(queue, L"http://localhost/", NULL);
     ok(ret == ERROR_INVALID_PARAMETER, "Got error %u.\n", ret);
-    ret = HttpAddUrl(queue, invalid_url5, NULL);
+    ret = HttpAddUrl(queue, L"http://localhost:/", NULL);
     ok(ret == ERROR_INVALID_PARAMETER, "Got error %u.\n", ret);
-    ret = HttpAddUrl(queue, invalid_url6, NULL);
+    ret = HttpAddUrl(queue, L"http://localhost:0/", NULL);
     ok(ret == ERROR_INVALID_PARAMETER, "Got error %u.\n", ret);
     port = add_url_v1(queue);
     swprintf(url, ARRAY_SIZE(url), L"http://localhost:%u/", port);
@@ -235,9 +233,11 @@ static void test_v1_server(void)
     ok(ret, "Got error %u.\n", GetLastError());
     ok(ret_size > sizeof(*req), "Got size %u.\n", ret_size);
 
-    /* 64-bit Windows 10 version 1507 apparently suffers from a bug where it
-     * will report success before completely filling the buffer. Wait for a
-     * short interval to work around this. */
+    /* Various versions of Windows (observed on 64-bit Windows 8 and Windows 10
+     * version 1507, but probably affecting others) suffer from a bug where the
+     * kernel will report success before completely filling the buffer or
+     * reporting the correct buffer size. Wait for a short interval to work
+     * around this. */
     Sleep(100);
 
     ok(!req->Flags, "Got flags %#x.\n", req->Flags);
@@ -304,7 +304,7 @@ static void test_v1_server(void)
     ok(req->BytesReceived == strlen(req_text), "Got %s bytes.\n", wine_dbgstr_longlong(req->BytesReceived));
     ok(!req->EntityChunkCount, "Got %u entity chunks.\n", req->EntityChunkCount);
     ok(!req->pEntityChunks, "Got entity chunks %p.\n", req->pEntityChunks);
-    ok(!req->RawConnectionId, "Got SSL connection ID %s.\n", wine_dbgstr_longlong(req->RawConnectionId));
+    /* req->RawConnectionId is zero until Win10 2004. */
     ok(!req->pSslInfo, "Got SSL info %p.\n", req->pSslInfo);
 
     response.StatusCode = 418;
@@ -342,6 +342,18 @@ static void test_v1_server(void)
     ok(!ret, "Got error %u.\n", ret);
     ret = remove_url_v1(queue, port);
     ok(ret == ERROR_FILE_NOT_FOUND, "Got error %u.\n", ret);
+
+    ret = HttpReceiveHttpRequest(queue, HTTP_NULL_ID, 0, (HTTP_REQUEST *)req, sizeof(req_buffer), NULL, &ovl);
+    ok(ret == ERROR_IO_PENDING, "Got error %u.\n", ret);
+
+    ret = CancelIo(queue);
+    ok(ret, "Failed to close queue handle, error %u.\n", GetLastError());
+
+    ret_size = 0xdeadbeef;
+    ret = GetOverlappedResult(queue, &ovl, &ret_size, FALSE);
+    ok(!ret, "Expected failure.\n");
+    ok(GetLastError() == ERROR_OPERATION_ABORTED, "Got error %u.\n", GetLastError());
+    ok(!ret_size, "Got size %u.\n", ret_size);
 
     closesocket(s);
     CloseHandle(ovl.hEvent);
@@ -429,7 +441,8 @@ static void test_v1_completion_port(void)
 
 static void test_v1_multiple_requests(void)
 {
-    char DECLSPEC_ALIGN(8) req_buffer1[2048], DECLSPEC_ALIGN(8) req_buffer2[2048];
+    char DECLSPEC_ALIGN(8) req_buffer1[2048];
+    char DECLSPEC_ALIGN(8) req_buffer2[2048];
     HTTP_REQUEST_V1 *req1 = (HTTP_REQUEST_V1 *)req_buffer1, *req2 = (HTTP_REQUEST_V1 *)req_buffer2;
     HTTP_RESPONSE_V1 response = {};
     struct sockaddr_in sockaddr;
@@ -535,7 +548,8 @@ static void test_v1_multiple_requests(void)
 
 static void test_v1_short_buffer(void)
 {
-    char DECLSPEC_ALIGN(8) req_buffer[2048], DECLSPEC_ALIGN(8) req_buffer2[2048];
+    char DECLSPEC_ALIGN(8) req_buffer[2048];
+    char DECLSPEC_ALIGN(8) req_buffer2[2048];
     HTTP_REQUEST_V1 *req = (HTTP_REQUEST_V1 *)req_buffer, *req2 = (HTTP_REQUEST_V1 *)req_buffer2;
     HTTP_REQUEST_ID req_id;
     unsigned short port;
@@ -766,6 +780,12 @@ static void test_v1_entity_body(void)
     send_response_v1(queue, req->RequestId, s);
 
     /* Test HttpReceiveRequestEntityBody(). */
+
+    ret_size = 0xdeadbeef;
+    ret = HttpReceiveRequestEntityBody(NULL, HTTP_NULL_ID, 0, recv_body, sizeof(recv_body), &ret_size, NULL);
+    ok(ret == ERROR_INVALID_HANDLE, "Got error %u.\n", ret);
+    ret = HttpReceiveRequestEntityBody(NULL, HTTP_NULL_ID, 0, recv_body, sizeof(recv_body), NULL, &ovl);
+    ok(ret == ERROR_INVALID_HANDLE, "Got error %u.\n", ret);
 
     sprintf(req_text, post_req, port);
     ret = send(s, req_text, strlen(req_text) + 1, 0);
@@ -1063,6 +1083,56 @@ static void test_v1_unknown_tokens(void)
     ok(ret, "Failed to close queue handle, error %u.\n", GetLastError());
 }
 
+static void test_v1_urls(void)
+{
+    char DECLSPEC_ALIGN(8) req_buffer[2048];
+    HTTP_REQUEST_V1 *req = (HTTP_REQUEST_V1 *)req_buffer;
+    unsigned short port;
+    char req_text[200];
+    DWORD ret_size;
+    WCHAR url[50];
+    HANDLE queue;
+    ULONG ret;
+    SOCKET s;
+
+    ret = HttpCreateHttpHandle(&queue, 0);
+    ok(!ret, "Got error %u.\n", ret);
+
+    for (port = 50000; port < 51000; ++port)
+    {
+        swprintf(url, ARRAY_SIZE(url), L"http://+:%u/", port);
+        if (!(ret = HttpAddUrl(queue, url, NULL)))
+            break;
+        if (ret == ERROR_ACCESS_DENIED)
+        {
+            skip("Not enough permissions to bind to all URLs.\n");
+            CloseHandle(queue);
+            return;
+        }
+        ok(ret == ERROR_SHARING_VIOLATION, "Failed to add %s, error %u.\n", debugstr_w(url), ret);
+    }
+
+    ok(!ret, "Got error %u.\n", ret);
+
+    s = create_client_socket(port);
+    sprintf(req_text, simple_req, port);
+    ret = send(s, req_text, strlen(req_text), 0);
+    ok(ret == strlen(req_text), "send() returned %d.\n", ret);
+
+    memset(req_buffer, 0xcc, sizeof(req_buffer));
+    ret = HttpReceiveHttpRequest(queue, HTTP_NULL_ID, 0, (HTTP_REQUEST *)req, sizeof(req_buffer), &ret_size, NULL);
+    ok(!ret, "Got error %u.\n", ret);
+    ok(ret_size > sizeof(*req), "Got size %u.\n", ret_size);
+
+    send_response_v1(queue, req->RequestId, s);
+
+    ret = HttpRemoveUrl(queue, url);
+    ok(!ret, "Got error %u.\n", ret);
+    closesocket(s);
+    ret = CloseHandle(queue);
+    ok(ret, "Failed to close queue handle, error %u.\n", GetLastError());
+}
+
 static void test_HttpCreateServerSession(void)
 {
     HTTP_SERVER_SESSION_ID session;
@@ -1198,17 +1268,17 @@ static void test_v2_server(void)
 
     port = add_url_v2(group);
 
-    ret = pHttpAddUrlToUrlGroup(group, invalid_url1, 0xdeadbeef, 0);
+    ret = pHttpAddUrlToUrlGroup(group, L"http://localhost:50000", 0xdeadbeef, 0);
     todo_wine ok(ret == ERROR_INVALID_PARAMETER, "Got error %u.\n", ret);
-    ret = pHttpAddUrlToUrlGroup(group, invalid_url2, 0xdeadbeef, 0);
+    ret = pHttpAddUrlToUrlGroup(group, L"localhost:50000", 0xdeadbeef, 0);
     todo_wine ok(ret == ERROR_INVALID_PARAMETER, "Got error %u.\n", ret);
-    ret = pHttpAddUrlToUrlGroup(group, invalid_url3, 0xdeadbeef, 0);
+    ret = pHttpAddUrlToUrlGroup(group, L"localhost:50000/", 0xdeadbeef, 0);
     todo_wine ok(ret == ERROR_INVALID_PARAMETER, "Got error %u.\n", ret);
-    ret = pHttpAddUrlToUrlGroup(group, invalid_url4, 0xdeadbeef, 0);
+    ret = pHttpAddUrlToUrlGroup(group, L"http://localhost/", 0xdeadbeef, 0);
     todo_wine ok(ret == ERROR_INVALID_PARAMETER, "Got error %u.\n", ret);
-    ret = pHttpAddUrlToUrlGroup(group, invalid_url5, 0xdeadbeef, 0);
+    ret = pHttpAddUrlToUrlGroup(group, L"http://localhost:/", 0xdeadbeef, 0);
     todo_wine ok(ret == ERROR_INVALID_PARAMETER, "Got error %u.\n", ret);
-    ret = pHttpAddUrlToUrlGroup(group, invalid_url6, 0xdeadbeef, 0);
+    ret = pHttpAddUrlToUrlGroup(group, L"http://localhost:0/", 0xdeadbeef, 0);
     todo_wine ok(ret == ERROR_INVALID_PARAMETER, "Got error %u.\n", ret);
     swprintf(url, ARRAY_SIZE(url), L"http://localhost:%u/", port);
     ret = pHttpAddUrlToUrlGroup(group, url, 0xdeadbeef, 0);
@@ -1228,10 +1298,14 @@ static void test_v2_server(void)
     ret = send(s, req_text, strlen(req_text), 0);
     ok(ret == strlen(req_text), "send() returned %d.\n", ret);
 
+    ret = WaitForSingleObject(ovl.hEvent, 100);
+    ok(!ret, "Got %u.\n", ret);
+
+    Sleep(100);
+
     ret = GetOverlappedResult(queue, &ovl, &ret_size, TRUE);
     ok(ret, "Got error %u.\n", GetLastError());
     ok(ret_size > sizeof(*req), "Got size %u.\n", ret_size);
-    Sleep(100);
 
     ok(!req->Flags, "Got flags %#x.\n", req->Flags);
     ok(req->ConnectionId, "Expected nonzero connection ID.\n");
@@ -1298,10 +1372,9 @@ static void test_v2_server(void)
     ok(req->BytesReceived == strlen(req_text), "Got %s bytes.\n", wine_dbgstr_longlong(req->BytesReceived));
     ok(!req->EntityChunkCount, "Got %u entity chunks.\n", req->EntityChunkCount);
     ok(!req->pEntityChunks, "Got entity chunks %p.\n", req->pEntityChunks);
-    ok(!req->RawConnectionId, "Got SSL connection ID %s.\n", wine_dbgstr_longlong(req->RawConnectionId));
+    /* req->RawConnectionId is zero until Win10 2004. */
     ok(!req->pSslInfo, "Got SSL info %p.\n", req->pSslInfo);
-    ok(!reqv2->RequestInfoCount, "Got request info count %u.\n", reqv2->RequestInfoCount);
-    ok(!reqv2->pRequestInfo, "Got request info %p.\n", reqv2->pRequestInfo);
+    /* RequestInfoCount and pRequestInfo are zero until Win10 1909. */
 
     response.s.StatusCode = 418;
     response.s.pReason = "I'm a teapot";
@@ -1455,6 +1528,7 @@ START_TEST(httpapi)
     test_v1_bad_request();
     test_v1_cooked_url();
     test_v1_unknown_tokens();
+    test_v1_urls();
 
     ret = HttpTerminate(HTTP_INITIALIZE_SERVER, NULL);
     ok(!ret, "Failed to terminate, ret %u.\n", ret);

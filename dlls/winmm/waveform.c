@@ -2458,7 +2458,6 @@ static DWORD WINAPI WINMM_DevicesThreadProc(void *arg)
 {
     HANDLE evt = arg;
     HRESULT hr;
-    static const WCHAR messageW[] = {'M','e','s','s','a','g','e',0};
 
     hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     if(FAILED(hr)){
@@ -2480,7 +2479,7 @@ static DWORD WINAPI WINMM_DevicesThreadProc(void *arg)
         FreeLibraryAndExitThread(g_devthread_module, 1);
     }
 
-    g_devices_hwnd = CreateWindowW(messageW, NULL, 0, 0, 0, 0, 0,
+    g_devices_hwnd = CreateWindowW(L"Message", NULL, 0, 0, 0, 0, 0,
             HWND_MESSAGE, NULL, NULL, NULL);
     if(!g_devices_hwnd){
         WARN("CreateWindow failed: %d\n", GetLastError());
@@ -2669,10 +2668,18 @@ UINT WINAPI waveOutGetDevCapsW(UINT_PTR uDeviceID, LPWAVEOUTCAPSW lpCaps,
 
         caps = &mapper_caps;
     }else{
-        if(uDeviceID >= g_outmmdevices_count)
-            return MMSYSERR_BADDEVICEID;
+        if(uDeviceID >= g_outmmdevices_count){
+            WINMM_Device *device = WINMM_GetDeviceFromHWAVE((HWAVE)uDeviceID);
 
-        caps = &read_map(g_out_map, uDeviceID)->out_caps;
+            if(!WINMM_ValidateAndLock(device))
+                return MMSYSERR_BADDEVICEID;
+
+            caps = &device->parent->out_caps;
+
+            LeaveCriticalSection(&device->lock);
+        }else{
+            caps = &read_map(g_out_map, uDeviceID)->out_caps;
+        }
     }
 
     memcpy(lpCaps, caps, min(uSize, sizeof(*lpCaps)));
@@ -3336,10 +3343,18 @@ UINT WINAPI waveInGetDevCapsW(UINT_PTR uDeviceID, LPWAVEINCAPSW lpCaps, UINT uSi
 
         caps = &mapper_caps;
     }else{
-        if(uDeviceID >= g_inmmdevices_count)
-            return MMSYSERR_BADDEVICEID;
+        if(uDeviceID >= g_inmmdevices_count){
+            WINMM_Device *device = WINMM_GetDeviceFromHWAVE((HWAVE)uDeviceID);
 
-        caps = &read_map(g_in_map, uDeviceID)->in_caps;
+            if(!WINMM_ValidateAndLock(device))
+                return MMSYSERR_BADDEVICEID;
+
+            caps = &device->parent->in_caps;
+
+            LeaveCriticalSection(&device->lock);
+        }else{
+            caps = &read_map(g_in_map, uDeviceID)->in_caps;
+        }
     }
 
     memcpy(lpCaps, caps, min(uSize, sizeof(*lpCaps)));

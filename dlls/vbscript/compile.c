@@ -44,6 +44,7 @@ typedef struct {
     unsigned instr_size;
     vbscode_t *code;
 
+    unsigned loc;
     statement_ctx_t *stat_ctx;
 
     unsigned *labels;
@@ -162,6 +163,7 @@ static unsigned push_instr(compile_ctx_t *ctx, vbsop_t op)
     }
 
     ctx->code->instrs[ctx->instr_cnt].op = op;
+    ctx->code->instrs[ctx->instr_cnt].loc = ctx->loc;
     return ctx->instr_cnt++;
 }
 
@@ -372,7 +374,7 @@ static inline BOOL emit_catch(compile_ctx_t *ctx, unsigned off)
     return emit_catch_jmp(ctx, off, ctx->instr_cnt);
 }
 
-static HRESULT compile_error(script_ctx_t *ctx, HRESULT error)
+static HRESULT compile_error(script_ctx_t *ctx, compile_ctx_t *compiler, HRESULT error)
 {
     if(error == SCRIPT_E_REPORTED)
         return error;
@@ -381,7 +383,7 @@ static HRESULT compile_error(script_ctx_t *ctx, HRESULT error)
     ctx->ei.scode = error = map_hres(error);
     ctx->ei.bstrSource = get_vbscript_string(VBS_COMPILE_ERROR);
     ctx->ei.bstrDescription = get_vbscript_error_string(error);
-    return report_script_error(ctx);
+    return report_script_error(ctx, compiler->code, compiler->loc);
 }
 
 static expression_t *lookup_const_decls(compile_ctx_t *ctx, const WCHAR *name, BOOL lookup_global)
@@ -630,6 +632,8 @@ static HRESULT compile_if_statement(compile_ctx_t *ctx, if_statement_t *stat)
     for(elseif_decl = stat->elseifs; elseif_decl; elseif_decl = elseif_decl->next) {
         instr_ptr(ctx, cnd_jmp)->arg1.uint = ctx->instr_cnt;
 
+        ctx->loc = elseif_decl->loc;
+
         hres = compile_expression(ctx, elseif_decl->expr);
         if(FAILED(hres))
             return hres;
@@ -723,6 +727,7 @@ static HRESULT compile_dowhile_statement(compile_ctx_t *ctx, while_statement_t *
     if(FAILED(hres))
         return hres;
 
+    ctx->loc = stat->stat.loc;
     if(stat->expr) {
         hres = compile_expression(ctx, stat->expr);
         if(FAILED(hres))
@@ -778,6 +783,7 @@ static HRESULT compile_foreach_statement(compile_ctx_t *ctx, foreach_statement_t
         return hres;
 
     /* We need a separated enumnext here, because we need to jump out of the loop on exception. */
+    ctx->loc = stat->stat.loc;
     hres = push_instr_uint_bstr(ctx, OP_enumnext, loop_ctx.for_end_label, stat->identifier);
     if(FAILED(hres))
         return hres;
@@ -987,15 +993,27 @@ static HRESULT compile_select_statement(compile_ctx_t *ctx, select_statement_t *
     return S_OK;
 }
 
-static HRESULT compile_assignment(compile_ctx_t *ctx, call_expression_t *left, expression_t *value_expr, BOOL is_set)
+static HRESULT compile_assignment(compile_ctx_t *ctx, expression_t *left, expression_t *value_expr, BOOL is_set)
 {
+    call_expression_t *call_expr = NULL;
     member_expression_t *member_expr;
-    unsigned args_cnt;
+    unsigned args_cnt = 0;
     vbsop_t op;
     HRESULT hres;
 
-    assert(left->call_expr->type == EXPR_MEMBER);
-    member_expr = (member_expression_t*)left->call_expr;
+    switch(left->type) {
+    case EXPR_MEMBER:
+        member_expr = (member_expression_t*)left;
+        break;
+    case EXPR_CALL:
+        call_expr = (call_expression_t*)left;
+        assert(call_expr->call_expr->type == EXPR_MEMBER);
+        member_expr = (member_expression_t*)call_expr->call_expr;
+        break;
+    default:
+        assert(0);
+        return E_FAIL;
+    }
 
     if(member_expr->obj_expr) {
         hres = compile_expression(ctx, member_expr->obj_expr);
@@ -1011,9 +1029,11 @@ static HRESULT compile_assignment(compile_ctx_t *ctx, call_expression_t *left, e
     if(FAILED(hres))
         return hres;
 
-    hres = compile_args(ctx, left->args, &args_cnt);
-    if(FAILED(hres))
-        return hres;
+    if(call_expr) {
+        hres = compile_args(ctx, call_expr->args, &args_cnt);
+        if(FAILED(hres))
+            return hres;
+    }
 
     hres = push_instr_bstr_uint(ctx, op, member_expr->identifier, args_cnt);
     if(FAILED(hres))
@@ -1108,16 +1128,18 @@ static HRESULT compile_redim_statement(compile_ctx_t *ctx, redim_statement_t *st
     unsigned arg_cnt;
     HRESULT hres;
 
-    if(stat->preserve) {
-        FIXME("Preserving redim not supported\n");
-        return E_NOTIMPL;
-    }
-
     hres = compile_args(ctx, stat->dims, &arg_cnt);
     if(FAILED(hres))
         return hres;
 
-    return push_instr_bstr_uint(ctx, OP_redim, stat->identifier, arg_cnt);
+    hres = push_instr_bstr_uint(ctx, stat->preserve ? OP_redim_preserve : OP_redim, stat->identifier, arg_cnt);
+    if(FAILED(hres))
+	return hres;
+
+    if(!emit_catch(ctx, 0))
+        return E_OUTOFMEMORY;
+
+    return S_OK;
 }
 
 static HRESULT compile_const_statement(compile_ctx_t *ctx, const_statement_t *stat)
@@ -1295,6 +1317,8 @@ static HRESULT compile_statement(compile_ctx_t *ctx, statement_ctx_t *stat_ctx, 
     }
 
     while(stat) {
+        ctx->loc = stat->loc;
+
         switch(stat->type) {
         case STAT_ASSIGN:
             hres = compile_assign_statement(ctx, (assign_statement_t*)stat, FALSE);
@@ -1444,7 +1468,6 @@ static HRESULT compile_func(compile_ctx_t *ctx, statement_t *stat, function_t *f
     case FUNC_PROPGET:
     case FUNC_PROPLET:
     case FUNC_PROPSET:
-    case FUNC_DEFGET:
         ctx->prop_end_label = alloc_label(ctx);
         if(!ctx->prop_end_label)
             return E_OUTOFMEMORY;
@@ -1606,7 +1629,6 @@ static HRESULT create_class_funcprop(compile_ctx_t *ctx, function_decl_t *func_d
         case FUNC_FUNCTION:
         case FUNC_SUB:
         case FUNC_PROPGET:
-        case FUNC_DEFGET:
             invoke_type = VBDISP_CALLGET;
             break;
         case FUNC_PROPLET:
@@ -1646,13 +1668,11 @@ static BOOL lookup_class_funcs(class_desc_t *class_desc, const WCHAR *name)
 static HRESULT compile_class(compile_ctx_t *ctx, class_decl_t *class_decl)
 {
     function_decl_t *func_decl, *func_prop_decl;
+    BOOL is_default, have_default = FALSE;
     class_desc_t *class_desc;
     dim_decl_t *prop_decl;
     unsigned i;
     HRESULT hres;
-
-    static const WCHAR class_initializeW[] = {'c','l','a','s','s','_','i','n','i','t','i','a','l','i','z','e',0};
-    static const WCHAR class_terminateW[] = {'c','l','a','s','s','_','t','e','r','m','i','n','a','t','e',0};
 
     if(lookup_dim_decls(ctx, class_decl->name) || lookup_funcs_name(ctx, class_decl->name)
             || lookup_const_decls(ctx, class_decl->name, FALSE) || lookup_class_name(ctx, class_decl->name)) {
@@ -1668,14 +1688,21 @@ static HRESULT compile_class(compile_ctx_t *ctx, class_decl_t *class_decl)
     if(!class_desc->name)
         return E_OUTOFMEMORY;
 
-    class_desc->func_cnt = 1; /* always allocate slot for default getter */
+    class_desc->func_cnt = 1; /* always allocate slot for default getter or method */
 
     for(func_decl = class_decl->funcs; func_decl; func_decl = func_decl->next) {
+        is_default = FALSE;
         for(func_prop_decl = func_decl; func_prop_decl; func_prop_decl = func_prop_decl->next_prop_func) {
-            if(func_prop_decl->type == FUNC_DEFGET)
+            if(func_prop_decl->is_default) {
+                if(have_default) {
+                    FIXME("multiple default getters or methods\n");
+                    return E_FAIL;
+                }
+                is_default = have_default = TRUE;
                 break;
+            }
         }
-        if(!func_prop_decl)
+        if(!is_default)
             class_desc->func_cnt++;
     }
 
@@ -1686,20 +1713,20 @@ static HRESULT compile_class(compile_ctx_t *ctx, class_decl_t *class_decl)
 
     for(func_decl = class_decl->funcs, i=1; func_decl; func_decl = func_decl->next, i++) {
         for(func_prop_decl = func_decl; func_prop_decl; func_prop_decl = func_prop_decl->next_prop_func) {
-            if(func_prop_decl->type == FUNC_DEFGET) {
+            if(func_prop_decl->is_default) {
                 i--;
                 break;
             }
         }
 
-        if(!wcsicmp(class_initializeW, func_decl->name)) {
+        if(!wcsicmp(L"class_initialize", func_decl->name)) {
             if(func_decl->type != FUNC_SUB) {
                 FIXME("class initializer is not sub\n");
                 return E_FAIL;
             }
 
             class_desc->class_initialize_id = i;
-        }else  if(!wcsicmp(class_terminateW, func_decl->name)) {
+        }else  if(!wcsicmp(L"class_terminate", func_decl->name)) {
             if(func_decl->type != FUNC_SUB) {
                 FIXME("class terminator is not sub\n");
                 return E_FAIL;
@@ -1756,26 +1783,33 @@ static HRESULT compile_class(compile_ctx_t *ctx, class_decl_t *class_decl)
     return S_OK;
 }
 
-static BOOL lookup_script_identifier(script_ctx_t *script, const WCHAR *identifier)
+static BOOL lookup_script_identifier(compile_ctx_t *ctx, script_ctx_t *script, const WCHAR *identifier)
 {
-    ScriptDisp *obj = script->script_obj;
+    ScriptDisp *contexts[] = {
+        ctx->code->named_item ? ctx->code->named_item->script_obj : NULL,
+        script->script_obj
+    };
     class_desc_t *class;
     vbscode_t *code;
-    unsigned i;
+    unsigned c, i;
 
-    for(i = 0; i < obj->global_vars_cnt; i++) {
-        if(!wcsicmp(obj->global_vars[i]->name, identifier))
-            return TRUE;
-    }
+    for(c = 0; c < ARRAY_SIZE(contexts); c++) {
+        if(!contexts[c]) continue;
 
-    for(i = 0; i < obj->global_funcs_cnt; i++) {
-        if(!wcsicmp(obj->global_funcs[i]->name, identifier))
-            return TRUE;
-    }
+        for(i = 0; i < contexts[c]->global_vars_cnt; i++) {
+            if(!wcsicmp(contexts[c]->global_vars[i]->name, identifier))
+                return TRUE;
+        }
 
-    for(class = obj->classes; class; class = class->next) {
-        if(!wcsicmp(class->name, identifier))
-            return TRUE;
+        for(i = 0; i < contexts[c]->global_funcs_cnt; i++) {
+            if(!wcsicmp(contexts[c]->global_funcs[i]->name, identifier))
+                return TRUE;
+        }
+
+        for(class = contexts[c]->classes; class; class = class->next) {
+            if(!wcsicmp(class->name, identifier))
+                return TRUE;
+        }
     }
 
     LIST_FOR_EACH_ENTRY(code, &script->code_list, vbscode_t, entry) {
@@ -1783,7 +1817,7 @@ static BOOL lookup_script_identifier(script_ctx_t *script, const WCHAR *identifi
         var_desc_t *vars = code->main_code.vars;
         function_t *func;
 
-        if(!code->pending_exec)
+        if(!code->pending_exec || (code->named_item && code->named_item != ctx->code->named_item))
             continue;
 
         for(i = 0; i < var_cnt; i++) {
@@ -1812,14 +1846,14 @@ static HRESULT check_script_collisions(compile_ctx_t *ctx, script_ctx_t *script)
     class_desc_t *class;
 
     for(i = 0; i < var_cnt; i++) {
-        if(lookup_script_identifier(script, vars[i].name)) {
+        if(lookup_script_identifier(ctx, script, vars[i].name)) {
             FIXME("%s: redefined\n", debugstr_w(vars[i].name));
             return E_FAIL;
         }
     }
 
     for(class = ctx->code->classes; class; class = class->next) {
-        if(lookup_script_identifier(script, class->name)) {
+        if(lookup_script_identifier(ctx, script, class->name)) {
             FIXME("%s: redefined\n", debugstr_w(class->name));
             return E_FAIL;
         }
@@ -1838,8 +1872,8 @@ void release_vbscode(vbscode_t *code)
     for(i=0; i < code->bstr_cnt; i++)
         SysFreeString(code->bstr_pool[i]);
 
-    if(code->context)
-        IDispatch_Release(code->context);
+    if(code->named_item)
+        release_named_item(code->named_item);
     heap_pool_free(&code->heap);
 
     heap_free(code->bstr_pool);
@@ -1848,19 +1882,30 @@ void release_vbscode(vbscode_t *code)
     heap_free(code);
 }
 
-static vbscode_t *alloc_vbscode(compile_ctx_t *ctx, const WCHAR *source)
+static vbscode_t *alloc_vbscode(compile_ctx_t *ctx, const WCHAR *source, DWORD_PTR cookie, unsigned start_line)
 {
     vbscode_t *ret;
+    size_t len;
+
+    len = source ? lstrlenW(source) : 0;
+    if(len > INT32_MAX)
+        return NULL;
 
     ret = heap_alloc_zero(sizeof(*ret));
     if(!ret)
         return NULL;
 
-    ret->source = heap_strdupW(source);
+    ret->source = heap_alloc((len + 1) * sizeof(WCHAR));
     if(!ret->source) {
         heap_free(ret);
         return NULL;
     }
+    if(len)
+        memcpy(ret->source, source, len * sizeof(WCHAR));
+    ret->source[len] = 0;
+
+    ret->cookie = cookie;
+    ret->start_line = start_line;
 
     ret->instrs = heap_alloc(32*sizeof(instr_t));
     if(!ret->instrs) {
@@ -1871,8 +1916,6 @@ static vbscode_t *alloc_vbscode(compile_ctx_t *ctx, const WCHAR *source)
     ctx->instr_cnt = 1;
     ctx->instr_size = 32;
     heap_pool_init(&ret->heap);
-
-    ret->option_explicit = ctx->parser.option_explicit;
 
     ret->main_code.type = FUNC_GLOBAL;
     ret->main_code.code_ctx = ret;
@@ -1890,44 +1933,62 @@ static void release_compiler(compile_ctx_t *ctx)
         release_vbscode(ctx->code);
 }
 
-HRESULT compile_script(script_ctx_t *script, const WCHAR *src, const WCHAR *delimiter, DWORD flags, vbscode_t **ret)
+HRESULT compile_script(script_ctx_t *script, const WCHAR *src, const WCHAR *item_name, const WCHAR *delimiter,
+                       DWORD_PTR cookie, unsigned start_line, DWORD flags, vbscode_t **ret)
 {
     function_decl_t *func_decl;
+    named_item_t *item = NULL;
     class_decl_t *class_decl;
     function_t *new_func;
     compile_ctx_t ctx;
     vbscode_t *code;
     HRESULT hres;
 
-    if (!src) src = L"";
+    if(item_name) {
+        item = lookup_named_item(script, item_name, 0);
+        if(!item) {
+            WARN("Unknown context %s\n", debugstr_w(item_name));
+            return E_INVALIDARG;
+        }
+        if(!item->script_obj) item = NULL;
+    }
 
-    hres = parse_script(&ctx.parser, src, delimiter, flags);
-    if(FAILED(hres))
-        return compile_error(script, hres);
-
-    code = ctx.code = alloc_vbscode(&ctx, src);
+    memset(&ctx, 0, sizeof(ctx));
+    code = ctx.code = alloc_vbscode(&ctx, src, cookie, start_line);
     if(!ctx.code)
-        return compile_error(script, E_OUTOFMEMORY);
+        return E_OUTOFMEMORY;
+    if(item) {
+        code->named_item = item;
+        item->ref++;
+    }
 
-    ctx.func_decls = NULL;
-    ctx.labels = NULL;
-    ctx.global_consts = NULL;
-    ctx.stat_ctx = NULL;
-    ctx.labels_cnt = ctx.labels_size = 0;
+    hres = parse_script(&ctx.parser, code->source, delimiter, flags);
+    if(FAILED(hres)) {
+        if(ctx.parser.error_loc != -1)
+            ctx.loc = ctx.parser.error_loc;
+        hres = compile_error(script, &ctx, hres);
+        release_vbscode(code);
+        return hres;
+    }
 
     hres = compile_func(&ctx, ctx.parser.stats, &ctx.code->main_code);
     if(FAILED(hres)) {
+        hres = compile_error(script, &ctx, hres);
         release_compiler(&ctx);
-        return compile_error(script, hres);
+        return hres;
     }
 
+    code->option_explicit = ctx.parser.option_explicit;
     ctx.global_consts = ctx.const_decls;
+    code->option_explicit = ctx.parser.option_explicit;
+
 
     for(func_decl = ctx.func_decls; func_decl; func_decl = func_decl->next) {
         hres = create_function(&ctx, func_decl, &new_func);
         if(FAILED(hres)) {
+            hres = compile_error(script, &ctx, hres);
             release_compiler(&ctx);
-            return compile_error(script, hres);
+            return hres;
         }
 
         new_func->next = ctx.code->funcs;
@@ -1937,15 +1998,17 @@ HRESULT compile_script(script_ctx_t *script, const WCHAR *src, const WCHAR *deli
     for(class_decl = ctx.parser.class_decls; class_decl; class_decl = class_decl->next) {
         hres = compile_class(&ctx, class_decl);
         if(FAILED(hres)) {
+            hres = compile_error(script, &ctx, hres);
             release_compiler(&ctx);
-            return compile_error(script, hres);
+            return hres;
         }
     }
 
     hres = check_script_collisions(&ctx, script);
     if(FAILED(hres)) {
+        hres = compile_error(script, &ctx, hres);
         release_compiler(&ctx);
-        return compile_error(script, hres);
+        return hres;
     }
 
     code->is_persistent = (flags & SCRIPTTEXT_ISPERSISTENT) != 0;
@@ -1961,13 +2024,15 @@ HRESULT compile_script(script_ctx_t *script, const WCHAR *src, const WCHAR *deli
     return S_OK;
 }
 
-HRESULT compile_procedure(script_ctx_t *script, const WCHAR *src, const WCHAR *delimiter, DWORD flags, class_desc_t **ret)
+HRESULT compile_procedure(script_ctx_t *script, const WCHAR *src, const WCHAR *item_name, const WCHAR *delimiter,
+                          DWORD_PTR cookie, unsigned start_line, DWORD flags, class_desc_t **ret)
 {
     class_desc_t *desc;
     vbscode_t *code;
     HRESULT hres;
 
-    hres = compile_script(script, src, delimiter, flags & ~SCRIPTTEXT_ISPERSISTENT, &code);
+    hres = compile_script(script, src, item_name, delimiter, cookie, start_line,
+                          flags & ~SCRIPTTEXT_ISPERSISTENT, &code);
     if(FAILED(hres))
         return hres;
 

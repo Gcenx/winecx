@@ -24,6 +24,7 @@
 #include "dxgi1_6.h"
 #include "d3d11.h"
 #include "d3d12.h"
+#include "d3d12sdklayers.h"
 #include "winternl.h"
 #include "ddk/d3dkmthk.h"
 #include "wine/heap.h"
@@ -43,6 +44,10 @@ static HRESULT (WINAPI *pCreateDXGIFactory2)(UINT flags, REFIID iid, void **fact
 static NTSTATUS (WINAPI *pD3DKMTCheckVidPnExclusiveOwnership)(const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *desc);
 static NTSTATUS (WINAPI *pD3DKMTCloseAdapter)(const D3DKMT_CLOSEADAPTER *desc);
 static NTSTATUS (WINAPI *pD3DKMTOpenAdapterFromGdiDisplayName)(D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME *desc);
+
+static HRESULT (WINAPI *pD3D11CreateDevice)(IDXGIAdapter *adapter, D3D_DRIVER_TYPE driver_type, HMODULE swrast, UINT flags,
+        const D3D_FEATURE_LEVEL *feature_levels, UINT levels, UINT sdk_version, ID3D11Device **device_out,
+        D3D_FEATURE_LEVEL *obtained_feature_level, ID3D11DeviceContext **immediate_context);
 
 static PFN_D3D12_CREATE_DEVICE pD3D12CreateDevice;
 static PFN_D3D12_GET_DEBUG_INTERFACE pD3D12GetDebugInterface;
@@ -121,6 +126,103 @@ static ULONG get_refcount(void *iface)
     return IUnknown_Release(unknown);
 }
 
+static void get_virtual_rect(RECT *rect)
+{
+    rect->left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    rect->top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    rect->right = rect->left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    rect->bottom = rect->top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+}
+
+static BOOL equal_mode_rect(const DEVMODEW *mode1, const DEVMODEW *mode2)
+{
+    return mode1->dmPosition.x == mode2->dmPosition.x
+            && mode1->dmPosition.y == mode2->dmPosition.y
+            && mode1->dmPelsWidth == mode2->dmPelsWidth
+            && mode1->dmPelsHeight == mode2->dmPelsHeight;
+}
+
+/* Free original_modes after finished using it */
+static BOOL save_display_modes(DEVMODEW **original_modes, unsigned int *display_count)
+{
+    unsigned int number, size = 2, count = 0, index = 0;
+    DISPLAY_DEVICEW display_device;
+    DEVMODEW *modes, *tmp;
+
+    if (!(modes = heap_alloc(size * sizeof(*modes))))
+        return FALSE;
+
+    display_device.cb = sizeof(display_device);
+    while (EnumDisplayDevicesW(NULL, index++, &display_device, 0))
+    {
+        /* Skip software devices */
+        if (swscanf(display_device.DeviceName, L"\\\\.\\DISPLAY%u", &number) != 1)
+            continue;
+
+        if (!(display_device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP))
+            continue;
+
+        if (count >= size)
+        {
+            size *= 2;
+            if (!(tmp = heap_realloc(modes, size * sizeof(*modes))))
+            {
+                heap_free(modes);
+                return FALSE;
+            }
+            modes = tmp;
+        }
+
+        memset(&modes[count], 0, sizeof(modes[count]));
+        modes[count].dmSize = sizeof(modes[count]);
+        if (!EnumDisplaySettingsW(display_device.DeviceName, ENUM_CURRENT_SETTINGS, &modes[count]))
+        {
+            heap_free(modes);
+            return FALSE;
+        }
+
+        lstrcpyW(modes[count++].dmDeviceName, display_device.DeviceName);
+    }
+
+    *original_modes = modes;
+    *display_count = count;
+    return TRUE;
+}
+
+static BOOL restore_display_modes(DEVMODEW *modes, unsigned int count)
+{
+    unsigned int index;
+    LONG ret;
+
+    for (index = 0; index < count; ++index)
+    {
+        ret = ChangeDisplaySettingsExW(modes[index].dmDeviceName, &modes[index], NULL,
+                CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
+        if (ret != DISP_CHANGE_SUCCESSFUL)
+            return FALSE;
+    }
+    ret = ChangeDisplaySettingsExW(NULL, NULL, NULL, 0, NULL);
+    return ret == DISP_CHANGE_SUCCESSFUL;
+}
+
+/* try to make sure pending X events have been processed before continuing */
+static void flush_events(void)
+{
+    int diff = 200;
+    DWORD time;
+    MSG msg;
+
+    time = GetTickCount() + diff;
+    while (diff > 0)
+    {
+        if (MsgWaitForMultipleObjects(0, NULL, FALSE, 100, QS_ALLINPUT) == WAIT_TIMEOUT)
+            break;
+        while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
+            DispatchMessageA(&msg);
+        diff = time - GetTickCount();
+    }
+}
+
 #define check_interface(a, b, c, d) check_interface_(__LINE__, a, b, c, d)
 static HRESULT check_interface_(unsigned int line, void *iface, REFIID iid,
         BOOL supported, BOOL is_broken)
@@ -177,8 +279,9 @@ static unsigned int check_multisample_quality_levels(IDXGIDevice *dxgi_device,
 #define MODE_DESC_IGNORE_FORMAT            0x00000004u
 #define MODE_DESC_IGNORE_SCANLINE_ORDERING 0x00000008u
 #define MODE_DESC_IGNORE_SCALING           0x00000010u
+#define MODE_DESC_IGNORE_EXACT_RESOLUTION  0x00000020u
 
-#define MODE_DESC_CHECK_RESOLUTION         (~MODE_DESC_IGNORE_RESOLUTION)
+#define MODE_DESC_CHECK_RESOLUTION         (~MODE_DESC_IGNORE_RESOLUTION & ~MODE_DESC_IGNORE_EXACT_RESOLUTION)
 #define MODE_DESC_CHECK_FORMAT             (~MODE_DESC_IGNORE_FORMAT)
 
 #define check_mode_desc(a, b, c) check_mode_desc_(__LINE__, a, b, c)
@@ -187,10 +290,16 @@ static void check_mode_desc_(unsigned int line, const DXGI_MODE_DESC *desc,
 {
     if (!(ignore_flags & MODE_DESC_IGNORE_RESOLUTION))
     {
-        ok_(__FILE__, line)(desc->Width == expected_desc->Width
-                && desc->Height == expected_desc->Height,
-                "Got resolution %ux%u, expected %ux%u.\n",
-                desc->Width, desc->Height, expected_desc->Width, expected_desc->Height);
+        if (ignore_flags & MODE_DESC_IGNORE_EXACT_RESOLUTION)
+            ok_(__FILE__, line)(desc->Width * desc->Height ==
+                    expected_desc->Width * expected_desc->Height,
+                    "Got resolution %ux%u, expected %ux%u.\n",
+                    desc->Width, desc->Height, expected_desc->Width, expected_desc->Height);
+        else
+            ok_(__FILE__, line)(desc->Width == expected_desc->Width &&
+                    desc->Height == expected_desc->Height,
+                    "Got resolution %ux%u, expected %ux%u.\n",
+                    desc->Width, desc->Height, expected_desc->Width, expected_desc->Height);
     }
     if (!(ignore_flags & MODE_DESC_IGNORE_REFRESH_RATE))
     {
@@ -310,6 +419,8 @@ static BOOL output_belongs_to_adapter(IDXGIOutput *output, IDXGIAdapter *adapter
 
 struct fullscreen_state
 {
+    DWORD style;
+    DWORD exstyle;
     RECT window_rect;
     RECT client_rect;
     HMONITOR monitor;
@@ -329,6 +440,9 @@ static void capture_fullscreen_state_(unsigned int line, struct fullscreen_state
     MONITORINFOEXW monitor_info;
     BOOL ret;
 
+    state->style = GetWindowLongA(window, GWL_STYLE);
+    state->exstyle = GetWindowLongA(window, GWL_EXSTYLE);
+
     ret = GetWindowRect(window, &state->window_rect);
     ok_(__FILE__, line)(ret, "GetWindowRect failed.\n");
     ret = GetClientRect(window, &state->client_rect);
@@ -343,10 +457,16 @@ static void capture_fullscreen_state_(unsigned int line, struct fullscreen_state
     state->monitor_rect = monitor_info.rcMonitor;
 }
 
-#define check_fullscreen_state(a, b) check_fullscreen_state_(__LINE__, a, b)
 static void check_fullscreen_state_(unsigned int line, const struct fullscreen_state *state,
-        const struct fullscreen_state *expected_state)
+        const struct fullscreen_state *expected_state, BOOL windowed)
 {
+    todo_wine_if(!windowed)
+    ok_(__FILE__, line)((state->style & ~WS_VISIBLE) == (expected_state->style & ~WS_VISIBLE),
+            "Got style %#x, expected %#x.\n",
+            state->style & ~(DWORD)WS_VISIBLE, expected_state->style & ~(DWORD)WS_VISIBLE);
+    ok_(__FILE__, line)((state->exstyle & ~WS_EX_TOPMOST) == (expected_state->exstyle & ~WS_EX_TOPMOST),
+            "Got exstyle %#x, expected %#x.\n",
+            state->exstyle & ~(DWORD)WS_EX_TOPMOST, expected_state->exstyle & ~(DWORD)WS_EX_TOPMOST);
     ok_(__FILE__, line)(EqualRect(&state->window_rect, &expected_state->window_rect),
             "Got window rect %s, expected %s.\n",
             wine_dbgstr_rect(&state->window_rect), wine_dbgstr_rect(&expected_state->window_rect));
@@ -361,13 +481,13 @@ static void check_fullscreen_state_(unsigned int line, const struct fullscreen_s
             wine_dbgstr_rect(&state->monitor_rect), wine_dbgstr_rect(&expected_state->monitor_rect));
 }
 
-#define check_window_fullscreen_state(a, b) check_window_fullscreen_state_(__LINE__, a, b)
+#define check_window_fullscreen_state(a, b) check_window_fullscreen_state_(__LINE__, a, b, TRUE)
 static void check_window_fullscreen_state_(unsigned int line, HWND window,
-        const struct fullscreen_state *expected_state)
+        const struct fullscreen_state *expected_state, BOOL windowed)
 {
     struct fullscreen_state current_state;
     capture_fullscreen_state_(line, &current_state, window);
-    check_fullscreen_state_(line, &current_state, expected_state);
+    check_fullscreen_state_(line, &current_state, expected_state, windowed);
 }
 
 #define check_swapchain_fullscreen_state(a, b) check_swapchain_fullscreen_state_(__LINE__, a, b)
@@ -381,7 +501,8 @@ static void check_swapchain_fullscreen_state_(unsigned int line, IDXGISwapChain 
 
     hr = IDXGISwapChain_GetDesc(swapchain, &swapchain_desc);
     ok_(__FILE__, line)(hr == S_OK, "Failed to get swapchain desc, hr %#x.\n", hr);
-    check_window_fullscreen_state_(line, swapchain_desc.OutputWindow, &expected_state->fullscreen_state);
+    check_window_fullscreen_state_(line, swapchain_desc.OutputWindow,
+            &expected_state->fullscreen_state, swapchain_desc.Windowed);
 
     ok_(__FILE__, line)(swapchain_desc.Windowed == !expected_state->fullscreen,
             "Got windowed %#x, expected %#x.\n",
@@ -446,6 +567,9 @@ static void compute_expected_swapchain_fullscreen_state_after_fullscreen_change_
         new_height = mode_desc.Height;
     }
 
+    state->fullscreen_state.style &= WS_VISIBLE | WS_CLIPSIBLINGS;
+    state->fullscreen_state.exstyle &= WS_EX_TOPMOST;
+
     state->fullscreen = TRUE;
     if (swapchain_desc->Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH)
     {
@@ -496,9 +620,12 @@ static void wait_fullscreen_state_(unsigned int line, IDXGISwapChain *swapchain,
             "Got unexpected state %#x, expected %#x.\n", state, expected);
 }
 
-#define wait_vidpn_exclusive_ownership(a, b, c) wait_vidpn_exclusive_ownership_(__LINE__, a, b, c)
-static void wait_vidpn_exclusive_ownership_(unsigned int line,
-        const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *desc, NTSTATUS expected, BOOL todo)
+/* VidPN exclusive ownership doesn't change immediately.
+ * This helper is used to wait for the expected status */
+#define get_expected_vidpn_exclusive_ownership(a, b) \
+        get_expected_vidpn_exclusive_ownership_(__LINE__, a, b)
+static NTSTATUS get_expected_vidpn_exclusive_ownership_(unsigned int line,
+        const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *desc, NTSTATUS expected)
 {
     static const unsigned int wait_timeout = 2000;
     static const unsigned int wait_step = 100;
@@ -513,8 +640,7 @@ static void wait_vidpn_exclusive_ownership_(unsigned int line,
         Sleep(wait_step);
         total_time += wait_step;
     }
-    todo_wine_if(todo) ok_(__FILE__, line)(status == expected,
-            "Got unexpected status %#x, expected %#x.\n", status, expected);
+    return status;
 }
 
 static HWND create_window(void)
@@ -596,6 +722,39 @@ success:
     ID3D10Device1_Release(device);
 
     return dxgi_device;
+}
+
+static IDXGIDevice *create_d3d11_device(void)
+{
+    static const D3D_FEATURE_LEVEL feature_level[] =
+    {
+        D3D_FEATURE_LEVEL_11_0,
+    };
+    unsigned int feature_level_count = ARRAY_SIZE(feature_level);
+    IDXGIDevice *device = NULL;
+    ID3D11Device *d3d_device;
+    HRESULT hr;
+
+    if (!pD3D11CreateDevice)
+        return NULL;
+
+    hr = pD3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, 0, feature_level, feature_level_count,
+            D3D11_SDK_VERSION, &d3d_device, NULL, NULL);
+    if (FAILED(hr))
+        hr = pD3D11CreateDevice(NULL, D3D_DRIVER_TYPE_WARP, NULL, 0, feature_level, feature_level_count,
+                D3D11_SDK_VERSION, &d3d_device, NULL, NULL);
+    if (FAILED(hr))
+        hr = pD3D11CreateDevice(NULL, D3D_DRIVER_TYPE_REFERENCE, NULL, 0, feature_level, feature_level_count,
+                D3D11_SDK_VERSION, &d3d_device, NULL, NULL);
+
+    if (SUCCEEDED(hr))
+    {
+        hr = ID3D11Device_QueryInterface(d3d_device, &IID_IDXGIDevice, (void **)&device);
+        ok(SUCCEEDED(hr), "Created device does not implement IDXGIDevice.\n");
+        ID3D11Device_Release(d3d_device);
+    }
+
+    return device;
 }
 
 static ID3D12Device *create_d3d12_device(void)
@@ -895,7 +1054,7 @@ static void test_adapter_luid(void)
     ok(hr == DXGI_ERROR_NOT_FOUND, "Got unexpected hr %#x.\n", hr);
 
     /* Older versions of WARP aren't enumerated by IDXGIFactory_EnumAdapters(). */
-    todo_wine ok(found_adapter_count == 1 || broken(is_null_luid_adapter),
+    ok(found_adapter_count == 1 || broken(is_null_luid_adapter),
             "Found %u adapters for LUID %08x:%08x.\n",
             found_adapter_count, device_adapter_desc.AdapterLuid.HighPart,
             device_adapter_desc.AdapterLuid.LowPart);
@@ -913,8 +1072,12 @@ static void test_adapter_luid(void)
     }
 
     hr = IDXGIFactory4_EnumAdapterByLuid(factory4, device_adapter_desc.AdapterLuid,
+            &IID_IDXGIAdapter, NULL);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDXGIFactory4_EnumAdapterByLuid(factory4, device_adapter_desc.AdapterLuid,
             &IID_IDXGIAdapter, (void **)&adapter);
-    todo_wine ok(hr == S_OK, "Failed to enum adapter by LUID, hr %#x.\n", hr);
+    ok(hr == S_OK, "Failed to enum adapter by LUID, hr %#x.\n", hr);
     if (SUCCEEDED(hr))
     {
         hr = IDXGIAdapter_GetDesc(adapter, &desc);
@@ -1036,7 +1199,7 @@ static void test_check_interface_support(void)
 
     hr = IDXGIAdapter_CheckInterfaceSupport(adapter, &IID_ID3D11Device, NULL);
     ok(hr == DXGI_ERROR_UNSUPPORTED, "Got unexpected hr %#x.\n", hr);
-    driver_version.HighPart = driver_version.LowPart = 0xdeadbeef;
+    driver_version.LowPart = driver_version.HighPart = 0xdeadbeef;
     hr = IDXGIAdapter_CheckInterfaceSupport(adapter, &IID_ID3D11Device, &driver_version);
     ok(hr == DXGI_ERROR_UNSUPPORTED, "Got unexpected hr %#x.\n", hr);
     ok(driver_version.HighPart == 0xdeadbeef, "Got unexpected driver version %#x.\n", driver_version.HighPart);
@@ -1049,6 +1212,7 @@ static void test_check_interface_support(void)
 
 static void test_create_surface(void)
 {
+    ID3D11Texture2D *texture2d;
     DXGI_SURFACE_DESC desc;
     IDXGISurface *surface;
     IDXGIDevice *device;
@@ -1077,6 +1241,40 @@ static void test_create_surface(void)
     check_interface(surface, &IID_IDXGISurface1, TRUE, TRUE);
 
     IDXGISurface_Release(surface);
+    refcount = IDXGIDevice_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+
+    /* DXGI_USAGE_UNORDERED_ACCESS */
+    if (!(device = create_d3d11_device()))
+    {
+        skip("Failed to create D3D11 device.\n");
+        return;
+    }
+
+    surface = NULL;
+    hr = IDXGIDevice_CreateSurface(device, &desc, 1, DXGI_USAGE_UNORDERED_ACCESS, NULL, &surface);
+    ok(SUCCEEDED(hr), "Failed to create a dxgi surface, hr %#x\n", hr);
+
+    if (surface)
+    {
+        ID3D11UnorderedAccessView *uav;
+        ID3D11Device *d3d_device;
+
+        hr = IDXGISurface_QueryInterface(surface, &IID_ID3D11Texture2D, (void **)&texture2d);
+        ok(SUCCEEDED(hr), "Failed to get texture interface, hr %#x.\n", hr);
+
+        ID3D11Texture2D_GetDevice(texture2d, &d3d_device);
+
+        hr = ID3D11Device_CreateUnorderedAccessView(d3d_device, (ID3D11Resource *)texture2d, NULL, &uav);
+        ok(SUCCEEDED(hr), "Failed to create unordered access view, hr %#x.\n", hr);
+        ID3D11UnorderedAccessView_Release(uav);
+
+        ID3D11Device_Release(d3d_device);
+        ID3D11Texture2D_Release(texture2d);
+
+        IDXGISurface_Release(surface);
+    }
+
     refcount = IDXGIDevice_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);
 }
@@ -1170,6 +1368,9 @@ static void test_output(void)
 
     hr = IDXGIDevice_GetAdapter(device, &adapter);
     ok(SUCCEEDED(hr), "GetAdapter failed, hr %#x.\n", hr);
+
+    hr = IDXGIAdapter_EnumOutputs(adapter, 0, NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
 
     hr = IDXGIAdapter_EnumOutputs(adapter, 0, &output);
     if (hr == DXGI_ERROR_NOT_FOUND)
@@ -1291,8 +1492,13 @@ static void test_output(void)
 
 static void test_find_closest_matching_mode(void)
 {
+    static const DXGI_MODE_SCALING scaling_tests[] =
+    {
+        DXGI_MODE_SCALING_CENTERED,
+        DXGI_MODE_SCALING_STRETCHED
+    };
     DXGI_MODE_DESC *modes, mode, matching_mode;
-    unsigned int i, mode_count;
+    unsigned int i, j, mode_count;
     IDXGIAdapter *adapter;
     IDXGIDevice *device;
     IDXGIOutput *output;
@@ -1401,7 +1607,8 @@ static void test_find_closest_matching_mode(void)
         mode.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         hr = IDXGIOutput_FindClosestMatchingMode(output, &mode, &matching_mode, NULL);
         ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-        check_mode_desc(&matching_mode, &modes[i], MODE_DESC_CHECK_RESOLUTION & MODE_DESC_CHECK_FORMAT);
+        check_mode_desc(&matching_mode, &modes[i],
+                (MODE_DESC_CHECK_RESOLUTION & MODE_DESC_CHECK_FORMAT) | MODE_DESC_IGNORE_EXACT_RESOLUTION);
 
         memset(&mode, 0, sizeof(mode));
         mode.Width = modes[i].Width + 1;
@@ -1409,7 +1616,8 @@ static void test_find_closest_matching_mode(void)
         mode.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         hr = IDXGIOutput_FindClosestMatchingMode(output, &mode, &matching_mode, NULL);
         ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-        check_mode_desc(&matching_mode, &modes[i], MODE_DESC_CHECK_RESOLUTION & MODE_DESC_CHECK_FORMAT);
+        check_mode_desc(&matching_mode, &modes[i],
+                (MODE_DESC_CHECK_RESOLUTION & MODE_DESC_CHECK_FORMAT) | MODE_DESC_IGNORE_EXACT_RESOLUTION);
     }
 
     memset(&mode, 0, sizeof(mode));
@@ -1444,23 +1652,25 @@ static void test_find_closest_matching_mode(void)
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
     check_mode_desc(&matching_mode, &modes[0], MODE_DESC_CHECK_RESOLUTION & MODE_DESC_CHECK_FORMAT);
 
-    memset(&mode, 0, sizeof(mode));
-    mode.Width = modes[0].Width;
-    mode.Height = modes[0].Height;
-    mode.Format = modes[0].Format;
-    mode.Scaling = DXGI_MODE_SCALING_CENTERED;
-    hr = IDXGIOutput_FindClosestMatchingMode(output, &mode, &matching_mode, NULL);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-    check_mode_desc(&matching_mode, &modes[0], MODE_DESC_CHECK_RESOLUTION & MODE_DESC_CHECK_FORMAT);
+    for (i = 0; i < ARRAY_SIZE(scaling_tests); ++i)
+    {
+        for (j = 0; j < mode_count; ++j)
+        {
+            if (modes[j].Scaling != scaling_tests[i])
+                continue;
 
-    memset(&mode, 0, sizeof(mode));
-    mode.Width = modes[0].Width;
-    mode.Height = modes[0].Height;
-    mode.Format = modes[0].Format;
-    mode.Scaling = DXGI_MODE_SCALING_STRETCHED;
-    hr = IDXGIOutput_FindClosestMatchingMode(output, &mode, &matching_mode, NULL);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-    check_mode_desc(&matching_mode, &modes[0], MODE_DESC_CHECK_RESOLUTION & MODE_DESC_CHECK_FORMAT);
+            memset(&mode, 0, sizeof(mode));
+            mode.Width = modes[j].Width;
+            mode.Height = modes[j].Height;
+            mode.Format = modes[j].Format;
+            mode.Scaling = modes[j].Scaling;
+            hr = IDXGIOutput_FindClosestMatchingMode(output, &mode, &matching_mode, NULL);
+            ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+            check_mode_desc(&matching_mode, &modes[j],
+                    MODE_DESC_IGNORE_REFRESH_RATE | MODE_DESC_IGNORE_SCANLINE_ORDERING);
+            break;
+        }
+    }
 
     heap_free(modes);
 
@@ -1835,6 +2045,8 @@ static void test_create_swapchain(void)
     creation_desc.OutputWindow = CreateWindowA("static", "dxgi_test",
             WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
             0, 0, 222, 222, 0, 0, 0, 0);
+    expected_state.fullscreen_state.style = WS_CLIPSIBLINGS | WS_CAPTION
+            | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
     SetRect(&expected_state.fullscreen_state.window_rect, 0, 0, 222, 222);
     GetClientRect(creation_desc.OutputWindow, expected_client_rect);
     expected_width = expected_client_rect->right;
@@ -1857,6 +2069,8 @@ static void test_create_swapchain(void)
     creation_desc.OutputWindow = CreateWindowA("static", "dxgi_test",
             WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
             1, 1, 0, 0, 0, 0, 0, 0);
+    expected_state.fullscreen_state.style = WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
+    expected_state.fullscreen_state.exstyle = 0;
     SetRect(&expected_state.fullscreen_state.window_rect, 1, 1, 1, 1);
     SetRectEmpty(expected_client_rect);
     expected_width = expected_height = 8;
@@ -1964,52 +2178,39 @@ done:
     DestroyWindow(creation_desc.OutputWindow);
 }
 
-static HMONITOR get_primary_if_right_side_secondary(const DXGI_OUTPUT_DESC *output_desc)
+static void test_get_containing_output(IUnknown *device, BOOL is_d3d12)
 {
-    HMONITOR primary, secondary;
-    MONITORINFO mi;
-    POINT pt = {0, 0};
-
-    primary = MonitorFromPoint(pt, MONITOR_DEFAULTTONULL);
-    pt.x = output_desc->DesktopCoordinates.right;
-    secondary = MonitorFromPoint(pt, MONITOR_DEFAULTTONULL);
-    mi.cbSize = sizeof(mi);
-    if (secondary && secondary != primary
-            && GetMonitorInfoW(primary, &mi) && (mi.dwFlags & MONITORINFOF_PRIMARY))
-        return primary;
-    return NULL;
-}
-
-static void test_get_containing_output(void)
-{
-    unsigned int output_count, output_idx;
+    unsigned int adapter_idx, output_idx, output_count;
+    DXGI_OUTPUT_DESC output_desc, output_desc2;
     DXGI_SWAP_CHAIN_DESC swapchain_desc;
     IDXGIOutput *output, *output2;
-    DXGI_OUTPUT_DESC output_desc;
     MONITORINFOEXW monitor_info;
     IDXGISwapChain *swapchain;
     IDXGIFactory *factory;
     IDXGIAdapter *adapter;
     POINT points[4 * 16];
-    IDXGIDevice *device;
     unsigned int i, j;
     HMONITOR monitor;
-    HMONITOR primary;
+    BOOL fullscreen;
     ULONG refcount;
     HRESULT hr;
     BOOL ret;
 
-    if (!(device = create_device(0)))
+    adapter = get_adapter(device, is_d3d12);
+    if (!adapter)
     {
-        skip("Failed to create device.\n");
+        skip("Failed to get adapter on Direct3D %d.\n", is_d3d12 ? 12 : 10);
         return;
     }
 
-    hr = IDXGIDevice_GetAdapter(device, &adapter);
-    ok(SUCCEEDED(hr), "GetAdapter failed, hr %#x.\n", hr);
-
-    hr = IDXGIAdapter_GetParent(adapter, &IID_IDXGIFactory, (void **)&factory);
-    ok(SUCCEEDED(hr), "GetParent failed, hr %#x.\n", hr);
+    output_count = 0;
+    while ((hr = IDXGIAdapter_EnumOutputs(adapter, output_count, &output)) != DXGI_ERROR_NOT_FOUND)
+    {
+        ok(SUCCEEDED(hr), "Failed to enumerate output %u, hr %#x.\n", output_count, hr);
+        IDXGIOutput_Release(output);
+        ++output_count;
+    }
+    IDXGIAdapter_Release(adapter);
 
     swapchain_desc.BufferDesc.Width = 100;
     swapchain_desc.BufferDesc.Height = 100;
@@ -2021,22 +2222,15 @@ static void test_get_containing_output(void)
     swapchain_desc.SampleDesc.Count = 1;
     swapchain_desc.SampleDesc.Quality = 0;
     swapchain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    swapchain_desc.BufferCount = 1;
+    swapchain_desc.BufferCount = is_d3d12 ? 2 : 1;
     swapchain_desc.OutputWindow = CreateWindowA("static", "dxgi_test",
             WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 100, 100, 0, 0, 0, 0);
     swapchain_desc.Windowed = TRUE;
-    swapchain_desc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    swapchain_desc.SwapEffect = is_d3d12 ? DXGI_SWAP_EFFECT_FLIP_DISCARD : DXGI_SWAP_EFFECT_DISCARD;
     swapchain_desc.Flags = 0;
 
-    output_count = 0;
-    while (IDXGIAdapter_EnumOutputs(adapter, output_count, &output) != DXGI_ERROR_NOT_FOUND)
-    {
-        ok(SUCCEEDED(hr), "Failed to enumerate output %u, hr %#x.\n", output_count, hr);
-        IDXGIOutput_Release(output);
-        ++output_count;
-    }
-
-    hr = IDXGIFactory_CreateSwapChain(factory, (IUnknown *)device, &swapchain_desc, &swapchain);
+    get_factory(device, is_d3d12, &factory);
+    hr = IDXGIFactory_CreateSwapChain(factory, device, &swapchain_desc, &swapchain);
     ok(SUCCEEDED(hr), "CreateSwapChain failed, hr %#x.\n", hr);
 
     monitor = MonitorFromWindow(swapchain_desc.OutputWindow, 0);
@@ -2052,7 +2246,6 @@ static void test_get_containing_output(void)
     if (hr == DXGI_ERROR_UNSUPPORTED)
     {
         win_skip("GetContainingOutput() not supported.\n");
-        IDXGISwapChain_Release(swapchain);
         goto done;
     }
 
@@ -2077,122 +2270,273 @@ static void test_get_containing_output(void)
             wine_dbgstr_rect(&output_desc.DesktopCoordinates),
             wine_dbgstr_rect(&monitor_info.rcMonitor));
 
-    primary = get_primary_if_right_side_secondary(&output_desc);
-
-    output_idx = 0;
-    while ((hr = IDXGIAdapter_EnumOutputs(adapter, output_idx, &output)) != DXGI_ERROR_NOT_FOUND)
+    for (adapter_idx = 0; SUCCEEDED(IDXGIFactory_EnumAdapters(factory, adapter_idx, &adapter));
+            ++adapter_idx)
     {
-        ok(SUCCEEDED(hr), "Failed to enumerate output %u, hr %#x.\n", output_idx, hr);
-
-        hr = IDXGIOutput_GetDesc(output, &output_desc);
-        ok(SUCCEEDED(hr), "GetDesc failed, hr %#x.\n", hr);
-
-        /* Move the OutputWindow to the current output. */
-        ret = SetWindowPos(swapchain_desc.OutputWindow, 0,
-                output_desc.DesktopCoordinates.left, output_desc.DesktopCoordinates.top,
-                0, 0, SWP_NOSIZE | SWP_NOZORDER);
-        ok(ret, "SetWindowPos failed.\n");
-
-        hr = IDXGISwapChain_GetContainingOutput(swapchain, &output2);
-        ok(SUCCEEDED(hr), "GetContainingOutput failed, hr %#x.\n", hr);
-
-        check_output_equal(output, output2);
-
-        refcount = IDXGIOutput_Release(output2);
-        ok(!refcount, "IDXGIOutput has %u references left.\n", refcount);
-        refcount = IDXGIOutput_Release(output);
-        ok(!refcount, "IDXGIOutput has %u references left.\n", refcount);
-        ++output_idx;
-
-        /* Move the OutputWindow around the corners of the current output desktop coordinates. */
-        for (i = 0; i < 4; ++i)
+        for (output_idx = 0; SUCCEEDED(IDXGIAdapter_EnumOutputs(adapter, output_idx, &output));
+                ++output_idx)
         {
-            static const POINT offsets[] =
-            {
-                {  0,   0},
-                {-49,   0}, {-50,   0}, {-51,   0},
-                {  0, -49}, {  0, -50}, {  0, -51},
-                {-49, -49}, {-50, -49}, {-51, -49},
-                {-49, -50}, {-50, -50}, {-51, -50},
-                {-49, -51}, {-50, -51}, {-51, -51},
-            };
-            unsigned int x, y;
-
-            switch (i)
-            {
-                case 0:
-                    x = output_desc.DesktopCoordinates.left;
-                    y = output_desc.DesktopCoordinates.top;
-                    break;
-                case 1:
-                    x = output_desc.DesktopCoordinates.right;
-                    y = output_desc.DesktopCoordinates.top;
-                    break;
-                case 2:
-                    x = output_desc.DesktopCoordinates.right;
-                    y = output_desc.DesktopCoordinates.bottom;
-                    break;
-                case 3:
-                    x = output_desc.DesktopCoordinates.left;
-                    y = output_desc.DesktopCoordinates.bottom;
-                    break;
-            }
-
-            for (j = 0; j < ARRAY_SIZE(offsets); ++j)
-            {
-                unsigned int idx = ARRAY_SIZE(offsets) * i + j;
-                assert(idx < ARRAY_SIZE(points));
-                points[idx].x = x + offsets[j].x;
-                points[idx].y = y + offsets[j].y;
-            }
-        }
-
-        for (i = 0; i < ARRAY_SIZE(points); ++i)
-        {
-            ret = SetWindowPos(swapchain_desc.OutputWindow, 0, points[i].x, points[i].y,
-                    0, 0, SWP_NOSIZE | SWP_NOZORDER);
-            ok(ret, "Failed to set window position.\n");
-
-            monitor = MonitorFromWindow(swapchain_desc.OutputWindow, MONITOR_DEFAULTTONEAREST);
-            ok(!!monitor, "Failed to get monitor from window.\n");
-
-            monitor_info.cbSize = sizeof(monitor_info);
-            ret = GetMonitorInfoW(monitor, (MONITORINFO *)&monitor_info);
-            ok(ret, "Failed to get monitor info.\n");
-
-            hr = IDXGISwapChain_GetContainingOutput(swapchain, &output);
-            /* Hack to prevent test failures with secondary on the right until multi-monitor support is improved. */
-            todo_wine_if(primary && monitor != primary)
-            ok(hr == S_OK || broken(hr == DXGI_ERROR_UNSUPPORTED),
-                    "Failed to get containing output, hr %#x.\n", hr);
-            if (hr != S_OK)
-                continue;
-            ok(!!output, "Got unexpected containing output %p.\n", output);
             hr = IDXGIOutput_GetDesc(output, &output_desc);
-            ok(hr == S_OK, "Failed to get output desc, hr %#x.\n", hr);
-            refcount = IDXGIOutput_Release(output);
-            ok(!refcount, "IDXGIOutput has %u references left.\n", refcount);
+            ok(SUCCEEDED(hr), "Adapter %u output %u: GetDesc failed, hr %#x.\n", adapter_idx,
+                    output_idx, hr);
 
-            ok(!lstrcmpW(output_desc.DeviceName, monitor_info.szDevice),
-                    "Got unexpected device name %s, expected %s.\n",
-                    wine_dbgstr_w(output_desc.DeviceName), wine_dbgstr_w(monitor_info.szDevice));
-            ok(EqualRect(&output_desc.DesktopCoordinates, &monitor_info.rcMonitor),
-                    "Got unexpected desktop coordinates %s, expected %s.\n",
-                    wine_dbgstr_rect(&output_desc.DesktopCoordinates),
-                    wine_dbgstr_rect(&monitor_info.rcMonitor));
+            /* Move the OutputWindow to the current output. */
+            ret = SetWindowPos(swapchain_desc.OutputWindow, 0, output_desc.DesktopCoordinates.left,
+                    output_desc.DesktopCoordinates.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+            ok(ret, "Adapter %u output %u: SetWindowPos failed.\n", adapter_idx, output_idx);
+
+            hr = IDXGISwapChain_GetContainingOutput(swapchain, &output2);
+            if (FAILED(hr))
+            {
+                win_skip("Adapter %u output %u: GetContainingOutput failed, hr %#x.\n",
+                        adapter_idx, output_idx, hr);
+                IDXGIOutput_Release(output);
+                continue;
+            }
+
+            check_output_equal(output, output2);
+
+            refcount = IDXGIOutput_Release(output2);
+            ok(!refcount, "Adapter %u output %u: IDXGIOutput has %u references left.\n",
+                    adapter_idx, output_idx, refcount);
+
+            /* Move the OutputWindow around the corners of the current output desktop coordinates. */
+            for (i = 0; i < 4; ++i)
+            {
+                static const POINT offsets[] =
+                {
+                    {  0,   0},
+                    {-49,   0}, {-50,   0}, {-51,   0},
+                    {  0, -49}, {  0, -50}, {  0, -51},
+                    {-49, -49}, {-50, -49}, {-51, -49},
+                    {-49, -50}, {-50, -50}, {-51, -50},
+                    {-49, -51}, {-50, -51}, {-51, -51},
+                };
+                unsigned int x = 0, y = 0;
+
+                switch (i)
+                {
+                    case 0:
+                        x = output_desc.DesktopCoordinates.left;
+                        y = output_desc.DesktopCoordinates.top;
+                        break;
+                    case 1:
+                        x = output_desc.DesktopCoordinates.right;
+                        y = output_desc.DesktopCoordinates.top;
+                        break;
+                    case 2:
+                        x = output_desc.DesktopCoordinates.right;
+                        y = output_desc.DesktopCoordinates.bottom;
+                        break;
+                    case 3:
+                        x = output_desc.DesktopCoordinates.left;
+                        y = output_desc.DesktopCoordinates.bottom;
+                        break;
+                }
+
+                for (j = 0; j < ARRAY_SIZE(offsets); ++j)
+                {
+                    unsigned int idx = ARRAY_SIZE(offsets) * i + j;
+                    assert(idx < ARRAY_SIZE(points));
+                    points[idx].x = x + offsets[j].x;
+                    points[idx].y = y + offsets[j].y;
+                }
+            }
+
+            for (i = 0; i < ARRAY_SIZE(points); ++i)
+            {
+                ret = SetWindowPos(swapchain_desc.OutputWindow, 0, points[i].x, points[i].y,
+                        0, 0, SWP_NOSIZE | SWP_NOZORDER);
+                ok(ret, "Adapter %u output %u point %u: Failed to set window position.\n",
+                        adapter_idx, output_idx, i);
+
+                monitor = MonitorFromWindow(swapchain_desc.OutputWindow, MONITOR_DEFAULTTONEAREST);
+                ok(!!monitor, "Adapter %u output %u point %u: Failed to get monitor from window.\n",
+                        adapter_idx, output_idx, i);
+
+                monitor_info.cbSize = sizeof(monitor_info);
+                ret = GetMonitorInfoW(monitor, (MONITORINFO *)&monitor_info);
+                ok(ret, "Adapter %u output %u point %u: Failed to get monitor info.\n", adapter_idx,
+                        output_idx, i);
+
+                hr = IDXGISwapChain_GetContainingOutput(swapchain, &output2);
+                ok(hr == S_OK || broken(hr == DXGI_ERROR_UNSUPPORTED),
+                        "Adapter %u output %u point %u: Failed to get containing output, hr %#x.\n",
+                        adapter_idx, output_idx, i, hr);
+                if (hr != S_OK)
+                    continue;
+                ok(!!output2, "Adapter %u output %u point %u: Got unexpected containing output %p.\n",
+                        adapter_idx, output_idx, i, output2);
+                hr = IDXGIOutput_GetDesc(output2, &output_desc);
+                ok(hr == S_OK, "Adapter %u output %u point %u: Failed to get output desc, hr %#x.\n",
+                        adapter_idx, output_idx, i, hr);
+                refcount = IDXGIOutput_Release(output2);
+                ok(!refcount, "Adapter %u output %u point %u: IDXGIOutput has %u references left.\n",
+                        adapter_idx, output_idx, i, refcount);
+
+                ok(!lstrcmpW(output_desc.DeviceName, monitor_info.szDevice),
+                        "Adapter %u output %u point %u: Got unexpected device name %s, expected %s.\n",
+                        adapter_idx, output_idx, i, wine_dbgstr_w(output_desc.DeviceName),
+                        wine_dbgstr_w(monitor_info.szDevice));
+                ok(EqualRect(&output_desc.DesktopCoordinates, &monitor_info.rcMonitor),
+                        "Adapter %u output %u point %u: Expect desktop coordinates %s, got %s.\n",
+                        adapter_idx, output_idx, i,
+                        wine_dbgstr_rect(&output_desc.DesktopCoordinates),
+                        wine_dbgstr_rect(&monitor_info.rcMonitor));
+            }
+            IDXGIOutput_Release(output);
         }
+        IDXGIAdapter_Release(adapter);
     }
 
-    refcount = IDXGISwapChain_Release(swapchain);
-    ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
+    /* Test GetContainingOutput with a full screen swapchain. The containing output should stay
+     * the same even if the device window is moved */
+    hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, NULL);
+    if (FAILED(hr))
+    {
+        skip("SetFullscreenState failed, hr %#x.\n", hr);
+        goto done;
+    }
+
+    hr = IDXGISwapChain_GetContainingOutput(swapchain, &output2);
+    if (FAILED(hr))
+    {
+        win_skip("GetContainingOutput failed, hr %#x.\n", hr);
+        IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
+        goto done;
+    }
+
+    for (adapter_idx = 0; SUCCEEDED(IDXGIFactory_EnumAdapters(factory, adapter_idx, &adapter));
+            ++adapter_idx)
+    {
+        for (output_idx = 0; SUCCEEDED(IDXGIAdapter_EnumOutputs(adapter, output_idx, &output));
+                ++output_idx)
+        {
+            hr = IDXGIOutput_GetDesc(output, &output_desc);
+            ok(hr == S_OK, "Adapter %u output %u: GetDesc failed, hr %#x.\n", adapter_idx,
+                    output_idx, hr);
+            IDXGIOutput_Release(output);
+
+            /* Move the OutputWindow to the current output. */
+            ret = SetWindowPos(swapchain_desc.OutputWindow, 0, output_desc.DesktopCoordinates.left,
+                    output_desc.DesktopCoordinates.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+            ok(ret, "Adapter %u output %u: SetWindowPos failed.\n", adapter_idx, output_idx);
+
+            hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, &output);
+            ok(hr == S_OK, "Adapter %u output %u: GetFullscreenState failed, hr %#x.\n",
+                    adapter_idx, output_idx, hr);
+            ok(fullscreen, "Adapter %u output %u: Expect swapchain full screen.\n", adapter_idx,
+                    output_idx);
+            ok(output == output2, "Adapter %u output %u: Expect output %p, got %p.\n",
+                    adapter_idx, output_idx, output2, output);
+            IDXGIOutput_Release(output);
+
+            hr = IDXGISwapChain_GetContainingOutput(swapchain, &output);
+            ok(hr == S_OK, "Adapter %u output %u: GetContainingOutput failed, hr %#x.\n",
+                    adapter_idx, output_idx, hr);
+            ok(output == output2, "Adapter %u output %u: Expect output %p, got %p.\n",
+                    adapter_idx, output_idx, output2, output);
+            IDXGIOutput_Release(output);
+        }
+        IDXGIAdapter_Release(adapter);
+    }
+
+    IDXGIOutput_Release(output2);
+    hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
+    ok(hr == S_OK, "SetFullscreenState failed, hr %#x.\n", hr);
+
+    /* Test GetContainingOutput after a full screen swapchain is made windowed by pressing
+     * Alt+Enter, then move it to another output and use Alt+Enter to enter full screen */
+    output = NULL;
+    output2 = NULL;
+    for (adapter_idx = 0; SUCCEEDED(IDXGIFactory_EnumAdapters(factory, adapter_idx, &adapter));
+            ++adapter_idx)
+    {
+        for (output_idx = 0; SUCCEEDED(IDXGIAdapter_EnumOutputs(adapter, output_idx,
+                output ? &output2 : &output)); ++output_idx)
+        {
+            if (output2)
+                break;
+        }
+
+        IDXGIAdapter_Release(adapter);
+        if (output2)
+            break;
+    }
+
+    if (output && output2)
+    {
+        hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, output);
+        IDXGIOutput_Release(output);
+        if (FAILED(hr))
+        {
+            skip("SetFullscreenState failed, hr %#x.\n", hr);
+            IDXGIOutput_Release(output2);
+            goto done;
+        }
+
+        /* Post an Alt + VK_RETURN WM_SYSKEYDOWN to leave full screen on the first output */
+        PostMessageA(swapchain_desc.OutputWindow, WM_SYSKEYDOWN, VK_RETURN,
+                (MapVirtualKeyA(VK_RETURN, MAPVK_VK_TO_VSC) << 16) | 0x20000001);
+        flush_events();
+        hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, NULL);
+        ok(hr == S_OK, "GetFullscreenState failed, hr %#x.\n", hr);
+        ok(!fullscreen, "Expect swapchain not full screen.\n");
+
+        /* Move the swapchain output window to the second output */
+        hr = IDXGIOutput_GetDesc(output2, &output_desc2);
+        ok(hr == S_OK, "GetDesc failed, hr %#x.\n", hr);
+        ret = SetWindowPos(swapchain_desc.OutputWindow, 0, output_desc2.DesktopCoordinates.left,
+                output_desc2.DesktopCoordinates.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+        ok(ret, "SetWindowPos failed.\n");
+
+        /* Post an Alt + VK_RETURN WM_SYSKEYDOWN to enter full screen on the second output */
+        PostMessageA(swapchain_desc.OutputWindow, WM_SYSKEYDOWN, VK_RETURN,
+                (MapVirtualKeyA(VK_RETURN, MAPVK_VK_TO_VSC) << 16) | 0x20000001);
+        flush_events();
+        output = NULL;
+        hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, &output);
+        ok(hr == S_OK, "GetFullscreenState failed, hr %#x.\n", hr);
+        ok(fullscreen, "Expect swapchain full screen.\n");
+        ok(!!output, "Expect output not NULL.\n");
+        hr = IDXGIOutput_GetDesc(output, &output_desc);
+        ok(hr == S_OK, "GetDesc failed, hr %#x.\n", hr);
+        hr = IDXGIOutput_GetDesc(output2, &output_desc2);
+        ok(hr == S_OK, "GetDesc failed, hr %#x.\n", hr);
+        ok(!lstrcmpW(output_desc.DeviceName, output_desc2.DeviceName),
+                "Expect device name %s, got %s.\n", wine_dbgstr_w(output_desc2.DeviceName),
+                wine_dbgstr_w(output_desc.DeviceName));
+        IDXGIOutput_Release(output);
+
+        output = NULL;
+        hr = IDXGISwapChain_GetContainingOutput(swapchain, &output);
+        ok(hr == S_OK, "GetContainingOutput failed, hr %#x.\n", hr);
+        hr = IDXGIOutput_GetDesc(output, &output_desc);
+        ok(hr == S_OK, "GetDesc failed, hr %#x.\n", hr);
+        hr = IDXGIOutput_GetDesc(output2, &output_desc2);
+        ok(hr == S_OK, "GetDesc failed, hr %#x.\n", hr);
+        ok(!lstrcmpW(output_desc.DeviceName, output_desc2.DeviceName),
+                "Expect device name %s, got %s.\n", wine_dbgstr_w(output_desc2.DeviceName),
+                wine_dbgstr_w(output_desc.DeviceName));
+
+        hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
+        ok(hr == S_OK, "SetFullscreenState failed, hr %#x.\n", hr);
+    }
+    else
+    {
+        skip("This test requires two outputs.\n");
+    }
+
+    if (output)
+        IDXGIOutput_Release(output);
+    if (output2)
+        IDXGIOutput_Release(output2);
 
 done:
-    refcount = IDXGIDevice_Release(device);
-    ok(!refcount, "Device has %u references left.\n", refcount);
-    refcount = IDXGIAdapter_Release(adapter);
-    ok(!refcount, "Adapter has %u references left.\n", refcount);
+    refcount = IDXGISwapChain_Release(swapchain);
+    ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
     refcount = IDXGIFactory_Release(factory);
-    ok(!refcount, "Factory has %u references left.\n", refcount);
+    ok(refcount == !is_d3d12, "IDXGIFactory has %u references left.\n", refcount);
     DestroyWindow(swapchain_desc.OutputWindow);
 }
 
@@ -2363,6 +2707,7 @@ static void test_set_fullscreen(IUnknown *device, BOOL is_d3d12)
     IDXGISwapChain *swapchain;
     IDXGIFactory *factory;
     IDXGIOutput *output;
+    BOOL fullscreen;
     ULONG refcount;
     HRESULT hr;
 
@@ -2432,11 +2777,20 @@ static void test_set_fullscreen(IUnknown *device, BOOL is_d3d12)
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
     hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(!fullscreen, "Got unexpected fullscreen %#x.\n", fullscreen);
     DestroyWindow(swapchain_desc.OutputWindow);
     hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(!fullscreen, "Got unexpected fullscreen %#x.\n", fullscreen);
     hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, NULL);
     ok(hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE, "Got unexpected hr %#x.\n", hr);
+    hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(!fullscreen, "Got unexpected fullscreen %#x.\n", fullscreen);
     hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
     refcount = IDXGISwapChain_Release(swapchain);
@@ -2448,13 +2802,25 @@ static void test_set_fullscreen(IUnknown *device, BOOL is_d3d12)
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
     hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, NULL);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(!!fullscreen, "Got unexpected fullscreen %#x.\n", fullscreen);
     DestroyWindow(swapchain_desc.OutputWindow);
     hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, NULL);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(!!fullscreen, "Got unexpected fullscreen %#x.\n", fullscreen);
     hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(!fullscreen, "Got unexpected fullscreen %#x.\n", fullscreen);
     hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, NULL);
     ok(hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE, "Got unexpected hr %#x.\n", hr);
+    hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(!fullscreen, "Got unexpected fullscreen %#x.\n", fullscreen);
     hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
     refcount = IDXGISwapChain_Release(swapchain);
@@ -2480,34 +2846,23 @@ done:
     ok(refcount == !is_d3d12, "Got unexpected refcount %u.\n", refcount);
 }
 
-static void test_default_fullscreen_target_output(void)
+static void test_default_fullscreen_target_output(IUnknown *device, BOOL is_d3d12)
 {
     IDXGIOutput *output, *containing_output, *target;
+    unsigned int adapter_idx, output_idx;
     DXGI_SWAP_CHAIN_DESC swapchain_desc;
     DXGI_OUTPUT_DESC output_desc;
+    unsigned int width, height;
     IDXGISwapChain *swapchain;
-    unsigned int output_idx;
     IDXGIFactory *factory;
     IDXGIAdapter *adapter;
-    IDXGIDevice *device;
+    BOOL fullscreen, ret;
+    RECT window_rect;
     ULONG refcount;
     HRESULT hr;
-    BOOL ret;
 
-    if (!(device = create_device(0)))
-    {
-        skip("Failed to create device.\n");
-        return;
-    }
+    get_factory(device, is_d3d12, &factory);
 
-    hr = IDXGIDevice_GetAdapter(device, &adapter);
-    ok(SUCCEEDED(hr), "GetAdapter failed, hr %#x.\n", hr);
-
-    hr = IDXGIAdapter_GetParent(adapter, &IID_IDXGIFactory, (void **)&factory);
-    ok(SUCCEEDED(hr), "GetParent failed, hr %#x.\n", hr);
-
-    swapchain_desc.BufferDesc.Width = 640;
-    swapchain_desc.BufferDesc.Height = 480;
     swapchain_desc.BufferDesc.RefreshRate.Numerator = 60;
     swapchain_desc.BufferDesc.RefreshRate.Denominator = 60;
     swapchain_desc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -2516,87 +2871,176 @@ static void test_default_fullscreen_target_output(void)
     swapchain_desc.SampleDesc.Count = 1;
     swapchain_desc.SampleDesc.Quality = 0;
     swapchain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    swapchain_desc.BufferCount = 1;
-    swapchain_desc.OutputWindow = create_window();
-    swapchain_desc.Windowed = TRUE;
-    swapchain_desc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    swapchain_desc.BufferCount = is_d3d12 ? 2 : 1;
+    swapchain_desc.SwapEffect = is_d3d12 ? DXGI_SWAP_EFFECT_FLIP_DISCARD : DXGI_SWAP_EFFECT_DISCARD;
     swapchain_desc.Flags = 0;
 
-    hr = IDXGIFactory_CreateSwapChain(factory, (IUnknown *)device, &swapchain_desc, &swapchain);
-    ok(SUCCEEDED(hr), "CreateSwapChain failed, hr %#x.\n", hr);
-
-    output_idx = 0;
-    while ((hr = IDXGIAdapter_EnumOutputs(adapter, output_idx, &output)) != DXGI_ERROR_NOT_FOUND)
+    for (adapter_idx = 0; SUCCEEDED(IDXGIFactory_EnumAdapters(factory, adapter_idx, &adapter));
+            ++adapter_idx)
     {
-        ok(SUCCEEDED(hr), "Failed to enumerate output %u, hr %#x.\n", output_idx, hr);
-
-        hr = IDXGIOutput_GetDesc(output, &output_desc);
-        ok(SUCCEEDED(hr), "GetDesc failed, hr %#x.\n", hr);
-
-        /* Move the OutputWindow to the current output. */
-        ret = SetWindowPos(swapchain_desc.OutputWindow, 0,
-                output_desc.DesktopCoordinates.left, output_desc.DesktopCoordinates.top,
-                0, 0, SWP_NOSIZE | SWP_NOZORDER);
-        ok(ret, "SetWindowPos failed.\n");
-
-        hr = IDXGISwapChain_GetContainingOutput(swapchain, &containing_output);
-        ok(SUCCEEDED(hr) || broken(hr == DXGI_ERROR_UNSUPPORTED) /* Win 7 testbot */,
-                "GetContainingOutput failed, hr %#x.\n", hr);
-        if (hr == DXGI_ERROR_UNSUPPORTED)
+        for (output_idx = 0; SUCCEEDED(IDXGIAdapter_EnumOutputs(adapter, output_idx, &output));
+                ++output_idx)
         {
-            win_skip("GetContainingOutput() not supported.\n");
-            IDXGIOutput_Release(output);
-            goto done;
-        }
+            /* Windowed swapchain */
+            swapchain_desc.BufferDesc.Width = 640;
+            swapchain_desc.BufferDesc.Height = 480;
+            swapchain_desc.OutputWindow = create_window();
+            swapchain_desc.Windowed = TRUE;
+            hr = IDXGIFactory_CreateSwapChain(factory, (IUnknown *)device, &swapchain_desc,
+                    &swapchain);
+            ok(SUCCEEDED(hr), "Adapter %u output %u: CreateSwapChain failed, hr %#x.\n",
+                    adapter_idx, output_idx, hr);
 
-        hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, NULL);
-        ok(SUCCEEDED(hr) || hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE,
-                "SetFullscreenState failed, hr %#x.\n", hr);
-        if (hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE)
-        {
-            skip("Could not change fullscreen state.\n");
+            hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, &containing_output);
+            ok(SUCCEEDED(hr), "Adapter %u output %u: GetFullscreenState failed, hr %#x.\n",
+                    adapter_idx, output_idx, hr);
+            ok(!fullscreen, "Adapter %u output %u: Expected not fullscreen.\n", adapter_idx,
+                    output_idx);
+            ok(!containing_output, "Adapter %u output %u: Expected a null output.\n", adapter_idx,
+                    output_idx);
+
+            /* Move the OutputWindow to the current output. */
+            hr = IDXGIOutput_GetDesc(output, &output_desc);
+            ok(SUCCEEDED(hr), "Adapter %u output %u: GetDesc failed, hr %#x.\n", adapter_idx,
+                    output_idx, hr);
+            ret = SetWindowPos(swapchain_desc.OutputWindow, 0,
+                    output_desc.DesktopCoordinates.left, output_desc.DesktopCoordinates.top,
+                    0, 0, SWP_NOSIZE | SWP_NOZORDER);
+            ok(ret, "Adapter %u output %u: SetWindowPos failed, error %#x.\n", adapter_idx,
+                    output_idx, GetLastError());
+
+            hr = IDXGISwapChain_GetContainingOutput(swapchain, &containing_output);
+            ok(SUCCEEDED(hr) || broken(hr == DXGI_ERROR_UNSUPPORTED) /* Win 7 testbot */,
+                    "Adapter %u output %u: GetContainingOutput failed, hr %#x.\n", adapter_idx,
+                    output_idx, hr);
+            if (hr == DXGI_ERROR_UNSUPPORTED)
+            {
+                win_skip("Adapter %u output %u: GetContainingOutput() not supported.\n",
+                        adapter_idx, output_idx);
+                IDXGISwapChain_Release(swapchain);
+                IDXGIOutput_Release(output);
+                DestroyWindow(swapchain_desc.OutputWindow);
+                continue;
+            }
+
+            hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, NULL);
+            ok(SUCCEEDED(hr) || hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE,
+                    "Adapter %u output %u: SetFullscreenState failed, hr %#x.\n", adapter_idx,
+                    output_idx, hr);
+            if (hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE)
+            {
+                skip("Adapter %u output %u: Could not change fullscreen state.\n", adapter_idx,
+                        output_idx);
+                IDXGIOutput_Release(containing_output);
+                IDXGISwapChain_Release(swapchain);
+                IDXGIOutput_Release(output);
+                DestroyWindow(swapchain_desc.OutputWindow);
+                continue;
+            }
+            GetWindowRect(swapchain_desc.OutputWindow, &window_rect);
+            ok(EqualRect(&window_rect, &output_desc.DesktopCoordinates),
+                    "Adapter %u output %u: Expect window rect %s, got %s.\n", adapter_idx,
+                    output_idx, wine_dbgstr_rect(&output_desc.DesktopCoordinates),
+                    wine_dbgstr_rect(&window_rect));
+
+            target = NULL;
+            hr = IDXGISwapChain_GetFullscreenState(swapchain, NULL, &target);
+            ok(SUCCEEDED(hr), "Adapter %u output %u: GetFullscreenState failed, hr %#x.\n",
+                    adapter_idx, output_idx, hr);
+            ok(target != containing_output,
+                    "Adapter %u output %u: Got unexpected output %p, expected %p.\n", adapter_idx,
+                    output_idx, target, containing_output);
+            check_output_equal(target, containing_output);
+
+            refcount = IDXGIOutput_Release(containing_output);
+            ok(!refcount, "Adapter %u output %u: IDXGIOutput has %u references left.\n",
+                    adapter_idx, output_idx, refcount);
+
+            hr = IDXGISwapChain_GetContainingOutput(swapchain, &containing_output);
+            ok(SUCCEEDED(hr), "Adapter %u output %u: GetContainingOutput failed, hr %#x.\n",
+                    adapter_idx, output_idx, hr);
+            ok(containing_output == target,
+                    "Adapter %u output %u: Got unexpected containing output %p, expected %p.\n",
+                    adapter_idx, output_idx, containing_output, target);
+            refcount = IDXGIOutput_Release(containing_output);
+            ok(refcount >= 2, "Adapter %u output %u: Got unexpected refcount %u.\n", adapter_idx,
+                    output_idx, refcount);
+            refcount = IDXGIOutput_Release(target);
+            ok(refcount >= 1, "Adapter %u output %u: Got unexpected refcount %u.\n", adapter_idx,
+                    output_idx, refcount);
+
+            hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
+            ok(SUCCEEDED(hr), "Adapter %u output %u: SetFullscreenState failed, hr %#x.\n",
+                    adapter_idx, output_idx, hr);
+            refcount = IDXGISwapChain_Release(swapchain);
+            ok(!refcount, "Adapter %u output %u: IDXGISwapChain has %u references left.\n",
+                    adapter_idx, output_idx, refcount);
+            DestroyWindow(swapchain_desc.OutputWindow);
+
+            /* Full screen swapchain */
+            width = output_desc.DesktopCoordinates.right - output_desc.DesktopCoordinates.left;
+            height = output_desc.DesktopCoordinates.bottom - output_desc.DesktopCoordinates.top;
+            swapchain_desc.BufferDesc.Width = width;
+            swapchain_desc.BufferDesc.Height = height;
+            swapchain_desc.OutputWindow = create_window();
+            swapchain_desc.Windowed = FALSE;
+            ret = SetWindowPos(swapchain_desc.OutputWindow, 0, output_desc.DesktopCoordinates.left,
+                    output_desc.DesktopCoordinates.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+            ok(ret, "Adapter %u output %u: SetWindowPos failed, error %#x.\n", adapter_idx,
+                    output_idx, GetLastError());
+            hr = IDXGIFactory_CreateSwapChain(factory, (IUnknown *)device, &swapchain_desc,
+                    &swapchain);
+            if (FAILED(hr))
+            {
+                skip("Adapter %u output %u: CreateSwapChain failed, hr %#x.\n", adapter_idx,
+                        output_idx, hr);
+                IDXGIOutput_Release(output);
+                DestroyWindow(swapchain_desc.OutputWindow);
+                continue;
+            }
+
+            hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, &containing_output);
+            ok(SUCCEEDED(hr), "Adapter %u output %u: GetFullscreenState failed, hr %#x.\n",
+                    adapter_idx, output_idx, hr);
+            ok(fullscreen, "Adapter %u output %u: Expected fullscreen.\n", adapter_idx, output_idx);
+            ok(!!containing_output, "Adapter %u output %u: Expected a valid output.\n", adapter_idx,
+                    output_idx);
+            if (containing_output)
+                IDXGIOutput_Release(containing_output);
+
+            ret = GetWindowRect(swapchain_desc.OutputWindow, &window_rect);
+            ok(ret, "Adapter %u output %u: GetWindowRect failed, error %#x.\n", adapter_idx,
+                    output_idx, GetLastError());
+            ok(EqualRect(&window_rect, &output_desc.DesktopCoordinates),
+                    "Adapter %u output %u: Expect window rect %s, got %s.\n", adapter_idx,
+                    output_idx, wine_dbgstr_rect(&output_desc.DesktopCoordinates),
+                    wine_dbgstr_rect(&window_rect));
+
+            hr = IDXGISwapChain_GetContainingOutput(swapchain, &containing_output);
+            ok(hr == S_OK, "Adapter %u output %u: GetContainingOutput failed, hr %#x.\n",
+                    adapter_idx, output_idx, hr);
+            ok(containing_output != output,
+                    "Adapter %u output %u: Got unexpected output %p, expected %p.\n", adapter_idx,
+                    output_idx, output, containing_output);
+            check_output_equal(output, containing_output);
             IDXGIOutput_Release(containing_output);
-            IDXGIOutput_Release(output);
-            goto done;
+
+            hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
+            ok(hr == S_OK, "Adapter %u output %u: SetFullscreenState failed, hr %#x.\n",
+                    adapter_idx, output_idx, hr);
+            refcount = IDXGISwapChain_Release(swapchain);
+            ok(!refcount, "Adapter %u output %u: IDXGISwapChain has %u references left.\n",
+                    adapter_idx, output_idx, refcount);
+            refcount = IDXGIOutput_Release(output);
+            ok(!refcount, "Adapter %u output %u: IDXGIOutput has %u references left.\n",
+                    adapter_idx, output_idx, refcount);
+            DestroyWindow(swapchain_desc.OutputWindow);
         }
-
-        target = NULL;
-        hr = IDXGISwapChain_GetFullscreenState(swapchain, NULL, &target);
-        ok(SUCCEEDED(hr), "GetFullscreenState failed, hr %#x.\n", hr);
-        ok(target != containing_output, "Got unexpected output pointers %p, %p.\n",
-                target, containing_output);
-        check_output_equal(target, containing_output);
-
-        refcount = IDXGIOutput_Release(containing_output);
-        ok(!refcount, "IDXGIOutput has %u references left.\n", refcount);
-
-        hr = IDXGISwapChain_GetContainingOutput(swapchain, &containing_output);
-        ok(SUCCEEDED(hr), "GetContainingOutput failed, hr %#x.\n", hr);
-        ok(containing_output == target, "Got unexpected containing output %p, expected %p.\n",
-                containing_output, target);
-        refcount = IDXGIOutput_Release(containing_output);
-        ok(refcount >= 2, "Got unexpected refcount %u.\n", refcount);
-        refcount = IDXGIOutput_Release(target);
-        ok(refcount >= 1, "Got unexpected refcount %u.\n", refcount);
-
-        hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
-        ok(SUCCEEDED(hr), "SetFullscreenState failed, hr %#x.\n", hr);
-
-        IDXGIOutput_Release(output);
-        ++output_idx;
+        IDXGIAdapter_Release(adapter);
     }
 
-done:
-    refcount = IDXGISwapChain_Release(swapchain);
-    ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
-
-    refcount = IDXGIDevice_Release(device);
-    ok(!refcount, "Device has %u references left.\n", refcount);
-    refcount = IDXGIAdapter_Release(adapter);
-    ok(!refcount, "Adapter has %u references left.\n", refcount);
     refcount = IDXGIFactory_Release(factory);
-    ok(!refcount, "Factory has %u references left.\n", refcount);
-    DestroyWindow(swapchain_desc.OutputWindow);
+    ok(refcount == !is_d3d12, "IDXGIFactory has %u references left.\n", refcount);
 }
 
 static void test_windowed_resize_target(IDXGISwapChain *swapchain, HWND window,
@@ -2659,12 +3103,12 @@ static void test_windowed_resize_target(IDXGISwapChain *swapchain, HWND window,
         check_swapchain_fullscreen_state(swapchain, &expected_state);
     }
 
-    ret = MoveWindow(window, 0, 0, 0, 0, TRUE);
-    ok(ret, "Failed to move window.\n");
+    ret = SetWindowPos(window, 0, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOZORDER);
+    ok(ret, "SetWindowPos failed, error %#x.\n", GetLastError());
     GetWindowRect(window, &e->window_rect);
     GetClientRect(window, &e->client_rect);
-    ret = MoveWindow(window, 0, 0, 200, 200, TRUE);
-    ok(ret, "Failed to move window.\n");
+    ret = SetWindowPos(window, 0, 0, 0, 200, 200, SWP_NOMOVE | SWP_NOZORDER);
+    ok(ret, "SetWindowPos failed, error %#x.\n", GetLastError());
 
     memset(&mode, 0, sizeof(mode));
     hr = IDXGISwapChain_ResizeTarget(swapchain, &mode);
@@ -2747,10 +3191,13 @@ static void test_fullscreen_resize_target(IDXGISwapChain *swapchain,
 static void test_resize_target(IUnknown *device, BOOL is_d3d12)
 {
     struct swapchain_fullscreen_state initial_state, expected_state;
+    unsigned int adapter_idx, output_idx, test_idx;
     DXGI_SWAP_CHAIN_DESC swapchain_desc;
+    DXGI_OUTPUT_DESC output_desc;
     IDXGISwapChain *swapchain;
     IDXGIFactory *factory;
-    unsigned int i;
+    IDXGIAdapter *adapter;
+    IDXGIOutput *output;
     ULONG refcount;
     HRESULT hr;
 
@@ -2794,85 +3241,108 @@ static void test_resize_target(IUnknown *device, BOOL is_d3d12)
     swapchain_desc.SwapEffect = is_d3d12 ? DXGI_SWAP_EFFECT_FLIP_DISCARD : DXGI_SWAP_EFFECT_DISCARD;
     swapchain_desc.Flags = 0;
 
-    for (i = 0; i < ARRAY_SIZE(tests); ++i)
+    for (adapter_idx = 0; SUCCEEDED(IDXGIFactory_EnumAdapters(factory, adapter_idx, &adapter));
+            ++adapter_idx)
     {
-        swapchain_desc.Flags = tests[i].flags;
-        swapchain_desc.OutputWindow = CreateWindowA("static", "dxgi_test", 0,
-                tests[i].origin.x, tests[i].origin.y, 400, 200, 0, 0, 0, 0);
-        if (tests[i].menu)
+        for (output_idx = 0; SUCCEEDED(IDXGIAdapter_EnumOutputs(adapter, output_idx, &output));
+                ++output_idx)
         {
-            HMENU menu_bar = CreateMenu();
-            HMENU menu = CreateMenu();
-            AppendMenuA(menu_bar, MF_POPUP, (UINT_PTR)menu, "Menu");
-            SetMenu(swapchain_desc.OutputWindow, menu_bar);
-        }
+            hr = IDXGIOutput_GetDesc(output, &output_desc);
+            ok(hr == S_OK, "Adapter %u output %u: GetDesc failed, hr %#x.\n", adapter_idx,
+                    output_idx, hr);
 
-        memset(&initial_state, 0, sizeof(initial_state));
-        capture_fullscreen_state(&initial_state.fullscreen_state, swapchain_desc.OutputWindow);
-
-        hr = IDXGIFactory_CreateSwapChain(factory, device, &swapchain_desc, &swapchain);
-        ok(SUCCEEDED(hr), "CreateSwapChain failed, hr %#x.\n", hr);
-        check_swapchain_fullscreen_state(swapchain, &initial_state);
-
-        expected_state = initial_state;
-        if (tests[i].fullscreen)
-        {
-            expected_state.fullscreen = TRUE;
-            compute_expected_swapchain_fullscreen_state_after_fullscreen_change(&expected_state,
-                    &swapchain_desc, &initial_state.fullscreen_state.monitor_rect, 800, 600, NULL);
-            hr = IDXGISwapChain_GetContainingOutput(swapchain, &expected_state.target);
-            ok(SUCCEEDED(hr) || broken(hr == DXGI_ERROR_UNSUPPORTED) /* Win 7 testbot */,
-                    "GetContainingOutput failed, hr %#x.\n", hr);
-            if (hr == DXGI_ERROR_UNSUPPORTED)
+            for (test_idx = 0; test_idx < ARRAY_SIZE(tests); ++test_idx)
             {
-                win_skip("GetContainingOutput() not supported.\n");
-                IDXGISwapChain_Release(swapchain);
+                swapchain_desc.Flags = tests[test_idx].flags;
+                swapchain_desc.OutputWindow = CreateWindowA("static", "dxgi_test", 0,
+                        output_desc.DesktopCoordinates.left + tests[test_idx].origin.x,
+                        output_desc.DesktopCoordinates.top + tests[test_idx].origin.y,
+                        400, 200, 0, 0, 0, 0);
+                if (tests[test_idx].menu)
+                {
+                    HMENU menu_bar = CreateMenu();
+                    HMENU menu = CreateMenu();
+                    AppendMenuA(menu_bar, MF_POPUP, (UINT_PTR)menu, "Menu");
+                    SetMenu(swapchain_desc.OutputWindow, menu_bar);
+                }
+
+                memset(&initial_state, 0, sizeof(initial_state));
+                capture_fullscreen_state(&initial_state.fullscreen_state, swapchain_desc.OutputWindow);
+
+                hr = IDXGIFactory_CreateSwapChain(factory, device, &swapchain_desc, &swapchain);
+                ok(SUCCEEDED(hr), "Adapter %u output %u test %u: CreateSwapChain failed, hr %#x.\n",
+                        adapter_idx, output_idx, test_idx, hr);
+                check_swapchain_fullscreen_state(swapchain, &initial_state);
+
+                expected_state = initial_state;
+                if (tests[test_idx].fullscreen)
+                {
+                    expected_state.fullscreen = TRUE;
+                    compute_expected_swapchain_fullscreen_state_after_fullscreen_change(&expected_state,
+                            &swapchain_desc, &initial_state.fullscreen_state.monitor_rect, 800, 600, NULL);
+                    hr = IDXGISwapChain_GetContainingOutput(swapchain, &expected_state.target);
+                    ok(SUCCEEDED(hr) || broken(hr == DXGI_ERROR_UNSUPPORTED) /* Win 7 testbot */,
+                            "Adapter %u output %u test %u: GetContainingOutput failed, hr %#x.\n",
+                            adapter_idx, output_idx, test_idx, hr);
+                    if (hr == DXGI_ERROR_UNSUPPORTED)
+                    {
+                        win_skip("Adapter %u output %u test %u: GetContainingOutput() not supported.\n",
+                                adapter_idx, output_idx, test_idx);
+                        IDXGISwapChain_Release(swapchain);
+                        DestroyWindow(swapchain_desc.OutputWindow);
+                        continue;
+                    }
+
+                    hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, NULL);
+                    ok(SUCCEEDED(hr) || hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE,
+                            "Adapter %u output %u test %u: SetFullscreenState failed, hr %#x.\n",
+                            adapter_idx, output_idx, test_idx, hr);
+                    if (hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE)
+                    {
+                        skip("Adapter %u output %u test %u: Could not change fullscreen state.\n",
+                                adapter_idx, output_idx, test_idx);
+                        IDXGIOutput_Release(expected_state.target);
+                        IDXGISwapChain_Release(swapchain);
+                        DestroyWindow(swapchain_desc.OutputWindow);
+                        continue;
+                    }
+                }
+                check_swapchain_fullscreen_state(swapchain, &expected_state);
+
+                hr = IDXGISwapChain_ResizeTarget(swapchain, NULL);
+                ok(hr == DXGI_ERROR_INVALID_CALL, "Adapter %u output %u test %u: Got unexpected hr %#x.\n",
+                        adapter_idx, output_idx, test_idx, hr);
+                check_swapchain_fullscreen_state(swapchain, &expected_state);
+
+                if (tests[test_idx].fullscreen)
+                {
+                    test_fullscreen_resize_target(swapchain, &expected_state);
+
+                    hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
+                    ok(SUCCEEDED(hr), "Adapter %u output %u test %u: SetFullscreenState failed, hr %#x.\n",
+                            adapter_idx, output_idx, test_idx, hr);
+                    check_swapchain_fullscreen_state(swapchain, &initial_state);
+                    IDXGIOutput_Release(expected_state.target);
+                    check_swapchain_fullscreen_state(swapchain, &initial_state);
+                    expected_state = initial_state;
+                }
+                else
+                {
+                    test_windowed_resize_target(swapchain, swapchain_desc.OutputWindow, &expected_state);
+
+                    check_swapchain_fullscreen_state(swapchain, &expected_state);
+                }
+
+                refcount = IDXGISwapChain_Release(swapchain);
+                ok(!refcount, "Adapter %u output %u test %u: IDXGISwapChain has %u references left.\n",
+                        adapter_idx, output_idx, test_idx, refcount);
+                check_window_fullscreen_state(swapchain_desc.OutputWindow, &expected_state.fullscreen_state);
                 DestroyWindow(swapchain_desc.OutputWindow);
-                continue;
             }
-
-            hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, NULL);
-            ok(SUCCEEDED(hr) || hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE,
-                    "SetFullscreenState failed, hr %#x.\n", hr);
-            if (hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE)
-            {
-                skip("Could not change fullscreen state.\n");
-                IDXGIOutput_Release(expected_state.target);
-                IDXGISwapChain_Release(swapchain);
-                DestroyWindow(swapchain_desc.OutputWindow);
-                continue;
-            }
+            IDXGIOutput_Release(output);
         }
-        check_swapchain_fullscreen_state(swapchain, &expected_state);
-
-        hr = IDXGISwapChain_ResizeTarget(swapchain, NULL);
-        ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
-        check_swapchain_fullscreen_state(swapchain, &expected_state);
-
-        if (tests[i].fullscreen)
-        {
-            test_fullscreen_resize_target(swapchain, &expected_state);
-
-            hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
-            ok(SUCCEEDED(hr), "SetFullscreenState failed, hr %#x.\n", hr);
-            check_swapchain_fullscreen_state(swapchain, &initial_state);
-            IDXGIOutput_Release(expected_state.target);
-            check_swapchain_fullscreen_state(swapchain, &initial_state);
-            expected_state = initial_state;
-        }
-        else
-        {
-            test_windowed_resize_target(swapchain, swapchain_desc.OutputWindow, &expected_state);
-
-            check_swapchain_fullscreen_state(swapchain, &expected_state);
-        }
-
-        refcount = IDXGISwapChain_Release(swapchain);
-        ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
-        check_window_fullscreen_state(swapchain_desc.OutputWindow, &expected_state.fullscreen_state);
-        DestroyWindow(swapchain_desc.OutputWindow);
+        IDXGIAdapter_Release(adapter);
     }
-
     refcount = IDXGIFactory_Release(factory);
     ok(refcount == !is_d3d12, "Got unexpected refcount %u.\n", refcount);
 }
@@ -3210,6 +3680,7 @@ done:
     ok(!refcount, "Device has %u references left.\n", refcount);
     refcount = IDXGIFactory_Release(factory);
     ok(!refcount, "Factory has %u references left.\n", refcount);
+    DestroyWindow(swapchain_desc.OutputWindow);
 }
 
 static void test_create_factory(void)
@@ -3877,66 +4348,79 @@ static void test_swapchain_parameters(void)
     }
     tests[] =
     {
-        {TRUE,   0, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        /* 0 */
         {TRUE,   1, DXGI_SWAP_EFFECT_DISCARD,         S_OK,                    S_OK,                     0},
         {TRUE,   2, DXGI_SWAP_EFFECT_DISCARD,         S_OK,                    S_OK,                     0},
-        {TRUE,   0, DXGI_SWAP_EFFECT_SEQUENTIAL,      DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   1, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                     0},
         {TRUE,   2, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                     1},
         {TRUE,   3, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                     2},
+        /* 5 */
         {TRUE,   0, 2 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   1, 2 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   2, 2 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   0, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        /* 10 */
         {TRUE,   2, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL,  1},
         {TRUE,   3, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL,  2},
         {TRUE,   0, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   1, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   2, DXGI_SWAP_EFFECT_FLIP_DISCARD,    S_OK,                    DXGI_ERROR_INVALID_CALL,  0},
+        /* 15 */
         {TRUE,   0, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   1, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   2, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,  16, DXGI_SWAP_EFFECT_DISCARD,         S_OK,                    S_OK,                     0},
         {TRUE,  16, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                    15},
+        /* 20 */
         {TRUE,  16, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL, 15},
         {TRUE,  16, DXGI_SWAP_EFFECT_FLIP_DISCARD,    S_OK,                    DXGI_ERROR_INVALID_CALL,  0},
-        {TRUE,  17, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
-        {TRUE,  17, DXGI_SWAP_EFFECT_SEQUENTIAL,      DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,  17, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
-        {TRUE,  17, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
-
-        {FALSE,  0, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  1, DXGI_SWAP_EFFECT_DISCARD,         S_OK,                    S_OK,                     0},
         {FALSE,  2, DXGI_SWAP_EFFECT_DISCARD,         S_OK,                    S_OK,                     0},
-        {FALSE,  0, DXGI_SWAP_EFFECT_SEQUENTIAL,      DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        /* 25 */
         {FALSE,  1, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                     0},
         {FALSE,  2, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                     1},
         {FALSE,  3, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                     2},
         {FALSE,  0, 2 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  1, 2 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        /* 30 */
         {FALSE,  2, 2 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  0, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  2, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL,  1},
         {FALSE,  3, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL,  2},
+        /* 35 */
         {FALSE,  0, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  1, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  2, DXGI_SWAP_EFFECT_FLIP_DISCARD,    S_OK,                    DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  0, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  1, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        /* 40 */
         {FALSE,  2, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE, 16, DXGI_SWAP_EFFECT_DISCARD,         S_OK,                    S_OK,                     0},
         {FALSE, 16, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                    15},
         {FALSE, 16, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL, 15},
+        {FALSE, 17, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        /* 45 */
+        {FALSE, 17, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+
         /* The following test fails on Nvidia with E_OUTOFMEMORY and leaks device references in the
          * process. Disable it for now.
         {FALSE, 16, DXGI_SWAP_EFFECT_FLIP_DISCARD,    S_OK,                    DXGI_ERROR_INVALID_CALL,  0},
          */
+
+        /* The following tests crash on Win10 1909
+        {TRUE,   0, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {TRUE,   0, DXGI_SWAP_EFFECT_SEQUENTIAL,      DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {TRUE,  17, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {TRUE,  17, DXGI_SWAP_EFFECT_SEQUENTIAL,      DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {TRUE,  17, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {FALSE,  0, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {FALSE,  0, DXGI_SWAP_EFFECT_SEQUENTIAL,      DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE, 17, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE, 17, DXGI_SWAP_EFFECT_SEQUENTIAL,      DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
-        {FALSE, 17, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
-        {FALSE, 17, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        */
     };
     static const DXGI_USAGE usage_tests[] =
     {
@@ -4001,11 +4485,10 @@ static void test_swapchain_parameters(void)
         }
 
         expected_usage = DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_BACK_BUFFER;
-        if (tests[i].swap_effect == DXGI_SWAP_EFFECT_DISCARD)
-            expected_usage |= DXGI_USAGE_DISCARD_ON_PRESENT;
         hr = IDXGIResource_GetUsage(resource, &usage);
         ok(SUCCEEDED(hr), "Failed to get resource usage, hr %#x, test %u.\n", hr, i);
-        ok(usage == expected_usage, "Got usage %x, expected %x, test %u.\n", usage, expected_usage, i);
+        ok((usage & expected_usage) == expected_usage, "Got usage %x, expected %x, test %u.\n",
+                usage, expected_usage, i);
 
         IDXGIResource_Release(resource);
 
@@ -4030,7 +4513,7 @@ static void test_swapchain_parameters(void)
              * the draw on the screen right away (Aero on or off doesn't matter), but
              * Present with DXGI_PRESENT_DO_NOT_SEQUENCE will show the modifications.
              *
-             * Note that if the application doesn't have focused creating a fullscreen
+             * Note that if the application doesn't have focus creating a fullscreen
              * swapchain returns DXGI_STATUS_OCCLUDED and we get a windowed swapchain,
              * so use the Windowed property of the swapchain that was actually created. */
             expected_usage = DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_BACK_BUFFER | DXGI_USAGE_READ_ONLY;
@@ -4232,9 +4715,10 @@ static void test_swapchain_present(IUnknown *device, BOOL is_d3d12)
             skip("Test %u: Could not change fullscreen state.\n", i);
             continue;
         }
+        flush_events();
         ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
         hr = IDXGISwapChain_ResizeBuffers(swapchain, 0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
-        todo_wine_if(!is_d3d12) ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
         hr = IDXGISwapChain_Present(swapchain, 0, flags[i]);
         ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
         output = NULL;
@@ -4281,7 +4765,7 @@ static void test_swapchain_present(IUnknown *device, BOOL is_d3d12)
         ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
         ok(fullscreen, "Test %u: Got unexpected fullscreen status.\n", i);
         hr = IDXGISwapChain_ResizeBuffers(swapchain, 0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
-        todo_wine_if(!is_d3d12) ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
         hr = IDXGISwapChain_Present(swapchain, 0, flags[i]);
         ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
 
@@ -4289,7 +4773,7 @@ static void test_swapchain_present(IUnknown *device, BOOL is_d3d12)
         /* An invisible window doesn't cause the swapchain to exit fullscreen
          * mode. */
         hr = IDXGISwapChain_ResizeBuffers(swapchain, 0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
-        todo_wine_if(!is_d3d12) ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
         hr = IDXGISwapChain_Present(swapchain, 0, flags[i]);
         ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
         fullscreen = FALSE;
@@ -4313,7 +4797,7 @@ static void test_swapchain_present(IUnknown *device, BOOL is_d3d12)
                 "Test %u: Got unexpected fullscreen status.\n", i);
 
         hr = IDXGISwapChain_ResizeBuffers(swapchain, 0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
-        todo_wine_if(!is_d3d12) ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
         hr = IDXGISwapChain_Present(swapchain, 0, flags[i]);
         todo_wine_if(is_d3d12) ok(hr == (is_d3d12 ? DXGI_STATUS_OCCLUDED : S_OK),
                 "Test %u: Got unexpected hr %#x.\n", i, hr);
@@ -4332,7 +4816,7 @@ static void test_swapchain_present(IUnknown *device, BOOL is_d3d12)
          * IDXGISwapChain_Present() calls to work, otherwise they will return
          * DXGI_ERROR_INVALID_CALL */
         hr = IDXGISwapChain_ResizeBuffers(swapchain, 0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
-        todo_wine_if(!is_d3d12) ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
         hr = IDXGISwapChain_Present(swapchain, 0, flags[i]);
         if (flags[i] == DXGI_PRESENT_TEST)
             todo_wine_if(is_d3d12) ok(hr == (is_d3d12 ? DXGI_STATUS_OCCLUDED : S_OK),
@@ -4348,14 +4832,14 @@ static void test_swapchain_present(IUnknown *device, BOOL is_d3d12)
         ShowWindow(occluding_window, SW_SHOW);
 
         hr = IDXGISwapChain_ResizeBuffers(swapchain, 0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
-        todo_wine_if(!is_d3d12) ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
         hr = IDXGISwapChain_Present(swapchain, 0, flags[i]);
         /* hr == S_OK on vista and 2008 */
         todo_wine ok(hr == DXGI_STATUS_OCCLUDED || broken(hr == S_OK),
                 "Test %u: Got unexpected hr %#x.\n", i, hr);
 
         hr = IDXGISwapChain_ResizeBuffers(swapchain, 0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
-        todo_wine_if(!is_d3d12) ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
         hr = IDXGISwapChain_Present(swapchain, 0, flags[i]);
         if (flags[i] == DXGI_PRESENT_TEST)
         {
@@ -4364,12 +4848,12 @@ static void test_swapchain_present(IUnknown *device, BOOL is_d3d12)
             /* IDXGISwapChain_Present() without flags refreshes the occlusion
              * state. */
             hr = IDXGISwapChain_ResizeBuffers(swapchain, 0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
-            todo_wine_if(!is_d3d12) ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+            ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
             hr = IDXGISwapChain_Present(swapchain, 0, 0);
             todo_wine ok(hr == DXGI_STATUS_OCCLUDED || broken(hr == S_OK),
                     "Test %u: Got unexpected hr %#x.\n", i, hr);
             hr = IDXGISwapChain_ResizeBuffers(swapchain, 0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
-            todo_wine_if(!is_d3d12) ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+            ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
             hr = IDXGISwapChain_Present(swapchain, 0, DXGI_PRESENT_TEST);
             ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
         }
@@ -4383,8 +4867,9 @@ static void test_swapchain_present(IUnknown *device, BOOL is_d3d12)
         todo_wine ok(!fullscreen, "Test %u: Got unexpected fullscreen status.\n", i);
 
         DestroyWindow(occluding_window);
+        flush_events();
         hr = IDXGISwapChain_ResizeBuffers(swapchain, 0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
-        todo_wine_if(!is_d3d12) ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
         hr = IDXGISwapChain_Present(swapchain, 0, flags[i]);
         ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
 
@@ -4859,22 +5344,295 @@ static void test_object_wrapping(void)
     ok(!refcount, "Factory has %u references left.\n", refcount);
 }
 
-/* try to make sure pending X events have been processed before continuing */
-static void flush_events(void)
+struct adapter_info
 {
-    int diff = 200;
-    DWORD time;
-    MSG msg;
+    const WCHAR *name;
+    HMONITOR monitor;
+};
 
-    time = GetTickCount() + diff;
-    while (diff > 0)
+static BOOL CALLBACK enum_monitor_proc(HMONITOR monitor, HDC dc, RECT *rect, LPARAM lparam)
+{
+    struct adapter_info *adapter_info = (struct adapter_info *)lparam;
+    MONITORINFOEXW monitor_info;
+
+    monitor_info.cbSize = sizeof(monitor_info);
+    if (GetMonitorInfoW(monitor, (MONITORINFO *)&monitor_info)
+            && !lstrcmpiW(adapter_info->name, monitor_info.szDevice))
     {
-        if (MsgWaitForMultipleObjects(0, NULL, FALSE, 100, QS_ALLINPUT) == WAIT_TIMEOUT)
-            break;
-        while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
-            DispatchMessageA(&msg);
-        diff = time - GetTickCount();
+        adapter_info->monitor = monitor;
+        return FALSE;
     }
+
+    return TRUE;
+}
+
+static HMONITOR get_monitor(const WCHAR *adapter_name)
+{
+    struct adapter_info info = {adapter_name, NULL};
+
+    EnumDisplayMonitors(NULL, NULL, enum_monitor_proc, (LPARAM)&info);
+    return info.monitor;
+}
+
+static void test_multi_adapter(void)
+{
+    unsigned int output_count = 0, expected_output_count = 0;
+    unsigned int adapter_index, output_index, device_index;
+    DXGI_OUTPUT_DESC old_output_desc, output_desc;
+    DXGI_ADAPTER_DESC1 adapter_desc1;
+    DXGI_ADAPTER_DESC adapter_desc;
+    DISPLAY_DEVICEW display_device;
+    MONITORINFO monitor_info;
+    DEVMODEW old_mode, mode;
+    IDXGIAdapter1 *adapter1;
+    IDXGIFactory *factory;
+    IDXGIAdapter *adapter;
+    IDXGIOutput *output;
+    HMONITOR monitor;
+    BOOL found;
+    HRESULT hr;
+    LONG ret;
+
+    if (FAILED(hr = CreateDXGIFactory(&IID_IDXGIFactory, (void **)&factory)))
+    {
+        skip("Failed to create IDXGIFactory, hr %#x.\n", hr);
+        return;
+    }
+
+    hr = IDXGIFactory_EnumAdapters(factory, 0, NULL);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDXGIFactory_EnumAdapters(factory, 0, &adapter);
+    if (hr == DXGI_ERROR_NOT_FOUND)
+    {
+        skip("Could not enumerate adapters.\n");
+        IDXGIFactory_Release(factory);
+        return;
+    }
+    ok(hr == S_OK, "Failed to enumerate adapter, hr %#x.\n", hr);
+
+    for (adapter_index = 0; SUCCEEDED(IDXGIFactory_EnumAdapters(factory, adapter_index, &adapter)); ++adapter_index)
+    {
+        for (output_index = 0; SUCCEEDED(IDXGIAdapter_EnumOutputs(adapter, output_index, &output)); ++output_index)
+        {
+            hr = IDXGIOutput_GetDesc(output, &output_desc);
+            ok(hr == S_OK, "Adapter %u output %u: Got unexpected hr %#x.\n", adapter_index,
+                    output_index, hr);
+
+            found = FALSE;
+            display_device.cb = sizeof(display_device);
+            for (device_index = 0; EnumDisplayDevicesW(NULL, device_index, &display_device, 0); ++device_index)
+            {
+                if (!lstrcmpiW(display_device.DeviceName, output_desc.DeviceName))
+                {
+                    found = TRUE;
+                    break;
+                }
+            }
+            ok(found, "Adapter %u output %u: Failed to find device %s.\n",
+                    adapter_index, output_index, wine_dbgstr_w(output_desc.DeviceName));
+
+            ok(display_device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP,
+                    "Adapter %u output %u: Got unexpected state flags %#x.\n", adapter_index,
+                    output_index, display_device.StateFlags);
+            if (!adapter_index && !output_index)
+                ok(display_device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE,
+                        "Adapter %u output %u: Got unexpected state flags %#x.\n", adapter_index,
+                        output_index, display_device.StateFlags);
+            else
+                ok(!(display_device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE),
+                        "Adapter %u output %u: Got unexpected state flags %#x.\n", adapter_index,
+                        output_index, display_device.StateFlags);
+
+            /* Should have the same monitor handle. */
+            monitor = get_monitor(display_device.DeviceName);
+            ok(!!monitor, "Adapter %u output %u: Failed to find monitor %s.\n", adapter_index,
+                    output_index, wine_dbgstr_w(display_device.DeviceName));
+            ok(monitor == output_desc.Monitor,
+                    "Adapter %u output %u: Got unexpected monitor %p, expected %p.\n",
+                    adapter_index, output_index, monitor, output_desc.Monitor);
+
+            /* Should have the same monitor rectangle. */
+            monitor_info.cbSize = sizeof(monitor_info);
+            ret = GetMonitorInfoA(monitor, &monitor_info);
+            ok(ret, "Adapter %u output %u: Failed to get monitor info, error %#x.\n", adapter_index,
+                    output_index, GetLastError());
+            ok(EqualRect(&monitor_info.rcMonitor, &output_desc.DesktopCoordinates),
+                    "Adapter %u output %u: Got unexpected output rect %s, expected %s.\n",
+                    adapter_index, output_index, wine_dbgstr_rect(&monitor_info.rcMonitor),
+                    wine_dbgstr_rect(&output_desc.DesktopCoordinates));
+
+            ++output_count;
+
+            /* Test output description after it got detached */
+            if (display_device.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
+            {
+                IDXGIOutput_Release(output);
+                continue;
+            }
+
+            old_output_desc = output_desc;
+
+            /* Save current display settings */
+            memset(&old_mode, 0, sizeof(old_mode));
+            old_mode.dmSize = sizeof(old_mode);
+            ret = EnumDisplaySettingsW(display_device.DeviceName, ENUM_CURRENT_SETTINGS, &old_mode);
+            /* Win10 TestBots may return FALSE but it's actually successful */
+            ok(ret || broken(!ret),
+                    "Adapter %u output %u: EnumDisplaySettingsW failed for %s, error %#x.\n",
+                    adapter_index, output_index, wine_dbgstr_w(display_device.DeviceName),
+                    GetLastError());
+
+            /* Detach */
+            memset(&mode, 0, sizeof(mode));
+            mode.dmSize = sizeof(mode);
+            mode.dmFields = DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT;
+            mode.dmPosition = old_mode.dmPosition;
+            ret = ChangeDisplaySettingsExW(display_device.DeviceName, &mode, NULL,
+                    CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
+            ok(ret == DISP_CHANGE_SUCCESSFUL,
+                    "Adapter %u output %u: ChangeDisplaySettingsExW %s returned unexpected %d.\n",
+                    adapter_index, output_index, wine_dbgstr_w(display_device.DeviceName), ret);
+            ret = ChangeDisplaySettingsExW(display_device.DeviceName, NULL, NULL, 0, NULL);
+            ok(ret == DISP_CHANGE_SUCCESSFUL,
+                    "Adapter %u output %u: ChangeDisplaySettingsExW %s returned unexpected %d.\n",
+                    adapter_index, output_index, wine_dbgstr_w(display_device.DeviceName), ret);
+
+            /* Check if it is really detached */
+            memset(&mode, 0, sizeof(mode));
+            mode.dmSize = sizeof(mode);
+            ret = EnumDisplaySettingsW(display_device.DeviceName, ENUM_CURRENT_SETTINGS, &mode);
+            /* Win10 TestBots may return FALSE but it's actually successful */
+            ok(ret || broken(!ret) ,
+                    "Adapter %u output %u: EnumDisplaySettingsW failed for %s, error %#x.\n",
+                    adapter_index, output_index, wine_dbgstr_w(display_device.DeviceName),
+                    GetLastError());
+            if (mode.dmPelsWidth && mode.dmPelsHeight)
+            {
+                skip("Adapter %u output %u: Failed to detach device %s.\n", adapter_index,
+                        output_index, wine_dbgstr_w(display_device.DeviceName));
+                IDXGIOutput_Release(output);
+                continue;
+            }
+
+            /* Only the AttachedToDesktop field is updated after an output is detached.
+             * IDXGIAdapter_EnumOutputs() has to be called again to get other fields updated.
+             * But resolution changes are reflected right away. This weird behaviour is currently
+             * unimplemented in Wine */
+            memset(&output_desc, 0, sizeof(output_desc));
+            hr = IDXGIOutput_GetDesc(output, &output_desc);
+            ok(hr == S_OK, "Adapter %u output %u: Got unexpected hr %#x.\n", adapter_index,
+                    output_index, hr);
+            ok(!lstrcmpiW(output_desc.DeviceName, old_output_desc.DeviceName),
+                    "Adapter %u output %u: Expect device name %s, got %s.\n", adapter_index,
+                    output_index, wine_dbgstr_w(old_output_desc.DeviceName),
+                    wine_dbgstr_w(output_desc.DeviceName));
+            todo_wine
+            ok(EqualRect(&output_desc.DesktopCoordinates, &old_output_desc.DesktopCoordinates),
+                    "Adapter %u output %u: Expect desktop coordinates %s, got %s.\n",
+                    adapter_index, output_index,
+                    wine_dbgstr_rect(&old_output_desc.DesktopCoordinates),
+                    wine_dbgstr_rect(&output_desc.DesktopCoordinates));
+            ok(!output_desc.AttachedToDesktop,
+                    "Adapter %u output %u: Expect output not attached to desktop.\n", adapter_index,
+                    output_index);
+            ok(output_desc.Rotation == old_output_desc.Rotation,
+                    "Adapter %u output %u: Expect rotation %#x, got %#x.\n", adapter_index,
+                    output_index, old_output_desc.Rotation, output_desc.Rotation);
+            todo_wine
+            ok(output_desc.Monitor == old_output_desc.Monitor,
+                    "Adapter %u output %u: Expect monitor %p, got %p.\n", adapter_index,
+                    output_index, old_output_desc.Monitor, output_desc.Monitor);
+            IDXGIOutput_Release(output);
+
+            /* Call IDXGIAdapter_EnumOutputs() again to get up-to-date output description */
+            hr = IDXGIAdapter_EnumOutputs(adapter, output_index, &output);
+            ok(hr == S_OK, "Adapter %u output %u: Got unexpected hr %#x.\n", adapter_index,
+                    output_index, hr);
+            memset(&output_desc, 0, sizeof(output_desc));
+            hr = IDXGIOutput_GetDesc(output, &output_desc);
+            ok(hr == S_OK, "Adapter %u output %u: Got unexpected hr %#x.\n", adapter_index,
+                    output_index, hr);
+            ok(!lstrcmpiW(output_desc.DeviceName, display_device.DeviceName),
+                    "Adapter %u output %u: Expect device name %s, got %s.\n", adapter_index,
+                    output_index, wine_dbgstr_w(display_device.DeviceName),
+                    wine_dbgstr_w(output_desc.DeviceName));
+            ok(IsRectEmpty(&output_desc.DesktopCoordinates),
+                    "Adapter %u output %u: Expect desktop rect empty, got %s.\n", adapter_index,
+                    output_index, wine_dbgstr_rect(&output_desc.DesktopCoordinates));
+            ok(!output_desc.AttachedToDesktop,
+                    "Adapter %u output %u: Expect output not attached to desktop.\n", adapter_index,
+                    output_index);
+            ok(output_desc.Rotation == DXGI_MODE_ROTATION_IDENTITY,
+                    "Adapter %u output %u: Expect rotation %#x, got %#x.\n", adapter_index,
+                    output_index, DXGI_MODE_ROTATION_IDENTITY, output_desc.Rotation);
+            ok(!output_desc.Monitor, "Adapter %u output %u: Expect monitor NULL.\n", adapter_index,
+                    output_index);
+
+            /* Restore settings */
+            ret = ChangeDisplaySettingsExW(display_device.DeviceName, &old_mode, NULL,
+                    CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
+            ok(ret == DISP_CHANGE_SUCCESSFUL,
+                    "Adapter %u output %u: ChangeDisplaySettingsExW %s returned unexpected %d.\n",
+                    adapter_index, output_index, wine_dbgstr_w(display_device.DeviceName), ret);
+            ret = ChangeDisplaySettingsExW(display_device.DeviceName, NULL, NULL, 0, NULL);
+            ok(ret == DISP_CHANGE_SUCCESSFUL,
+                    "Adapter %u output %u: ChangeDisplaySettingsExW %s returned unexpected %d.\n",
+                    adapter_index, output_index, wine_dbgstr_w(display_device.DeviceName), ret);
+
+            IDXGIOutput_Release(output);
+        }
+
+        IDXGIAdapter_Release(adapter);
+    }
+
+    /* Windows 8+ always have a WARP adapter present at the end. */
+    todo_wine ok(adapter_index >= 2 || broken(adapter_index < 2) /* Windows 7 and before */,
+            "Got unexpected adapter count %u.\n", adapter_index);
+    if (adapter_index < 2)
+    {
+        todo_wine win_skip("WARP adapter missing, skipping tests.\n");
+        goto done;
+    }
+
+    hr = IDXGIFactory_EnumAdapters(factory, adapter_index - 1, &adapter);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDXGIAdapter_GetDesc(adapter, &adapter_desc);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    todo_wine ok(!lstrcmpW(adapter_desc.Description, L"Microsoft Basic Render Driver"),
+            "Got unexpected description %s.\n", wine_dbgstr_w(adapter_desc.Description));
+    todo_wine ok(adapter_desc.VendorId == 0x1414,
+            "Got unexpected vendor ID %#x.\n", adapter_desc.VendorId);
+    todo_wine ok(adapter_desc.DeviceId == 0x008c,
+            "Got unexpected device ID %#x.\n", adapter_desc.DeviceId);
+    ok(adapter_desc.SubSysId == 0x0000,
+            "Got unexpected sub-system ID %#x.\n", adapter_desc.SubSysId);
+    ok(adapter_desc.Revision == 0x0000,
+            "Got unexpected revision %#x.\n", adapter_desc.Revision);
+    todo_wine ok(!adapter_desc.DedicatedVideoMemory,
+            "Got unexpected DedicatedVideoMemory %#lx.\n", adapter_desc.DedicatedVideoMemory);
+    ok(!adapter_desc.DedicatedSystemMemory,
+            "Got unexpected DedicatedSystemMemory %#lx.\n", adapter_desc.DedicatedSystemMemory);
+
+    hr = IDXGIAdapter_QueryInterface(adapter, &IID_IDXGIAdapter1, (void **)&adapter1);
+    ok(hr == S_OK || broken(hr == E_NOINTERFACE), "Got unexpected hr %#x.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        hr = IDXGIAdapter1_GetDesc1(adapter1, &adapter_desc1);
+        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        todo_wine ok(adapter_desc1.Flags == DXGI_ADAPTER_FLAG_SOFTWARE,
+                "Got unexpected flags %#x.\n", adapter_desc1.Flags);
+        IDXGIAdapter1_Release(adapter1);
+    }
+
+    IDXGIAdapter_Release(adapter);
+
+done:
+    IDXGIFactory_Release(factory);
+
+    expected_output_count = GetSystemMetrics(SM_CMONITORS);
+    ok(output_count == expected_output_count, "Expect output count %d, got %d\n",
+            expected_output_count, output_count);
 }
 
 struct message
@@ -5153,12 +5911,22 @@ static void test_swapchain_window_styles(void)
          WS_EX_WINDOWEDGE},
         {WS_OVERLAPPED | WS_VISIBLE, 0,
          WS_OVERLAPPED | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CAPTION, WS_EX_WINDOWEDGE},
+        {WS_OVERLAPPED | WS_MAXIMIZE, 0,
+         WS_OVERLAPPED | WS_MAXIMIZE | WS_CLIPSIBLINGS | WS_CAPTION, WS_EX_WINDOWEDGE},
+        {WS_OVERLAPPED | WS_MINIMIZE, 0,
+         WS_OVERLAPPED | WS_MINIMIZE | WS_CLIPSIBLINGS | WS_CAPTION, WS_EX_WINDOWEDGE},
         {WS_CAPTION | WS_DISABLED, WS_EX_TOPMOST,
          WS_CAPTION | WS_DISABLED | WS_CLIPSIBLINGS, WS_EX_TOPMOST | WS_EX_WINDOWEDGE},
         {WS_CAPTION | WS_DISABLED | WS_VISIBLE, WS_EX_TOPMOST,
          WS_CAPTION | WS_DISABLED | WS_VISIBLE | WS_CLIPSIBLINGS, WS_EX_TOPMOST | WS_EX_WINDOWEDGE},
         {WS_CAPTION | WS_SYSMENU | WS_VISIBLE, WS_EX_APPWINDOW,
          WS_CAPTION | WS_SYSMENU | WS_VISIBLE | WS_CLIPSIBLINGS, WS_EX_APPWINDOW | WS_EX_WINDOWEDGE},
+        {WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_BORDER | WS_DLGFRAME
+         | WS_VSCROLL | WS_HSCROLL | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+         0,
+         WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_BORDER | WS_DLGFRAME
+         | WS_VSCROLL | WS_HSCROLL | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+         WS_EX_WINDOWEDGE},
     };
 
     if (!(device = create_device(0)))
@@ -5200,8 +5968,11 @@ static void test_swapchain_window_styles(void)
         ok(exstyle == tests[i].expected_exstyle, "Test %u: Got exstyle %#x, expected %#x.\n",
                 i, exstyle, tests[i].expected_exstyle);
 
-        fullscreen_style = tests[i].expected_style & (WS_VISIBLE | WS_DISABLED | WS_CLIPSIBLINGS);
-        fullscreen_exstyle = (tests[i].expected_exstyle & WS_EX_APPWINDOW) | WS_EX_TOPMOST;
+        fullscreen_style = tests[i].expected_style & ~(WS_POPUP | WS_MAXIMIZEBOX
+                | WS_MINIMIZEBOX | WS_THICKFRAME | WS_SYSMENU | WS_DLGFRAME | WS_BORDER);
+        fullscreen_exstyle = tests[i].expected_exstyle & ~(WS_EX_DLGMODALFRAME
+                | WS_EX_TOOLWINDOW | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_CONTEXTHELP);
+        fullscreen_exstyle |= WS_EX_TOPMOST;
 
         hr = IDXGIFactory_CreateSwapChain(factory, (IUnknown *)device, &swapchain_desc, &swapchain);
         ok(hr == S_OK, "Failed to create swapchain, hr %#x.\n", hr);
@@ -5237,22 +6008,54 @@ static void test_swapchain_window_styles(void)
 
         style = GetWindowLongA(swapchain_desc.OutputWindow, GWL_STYLE);
         exstyle = GetWindowLongA(swapchain_desc.OutputWindow, GWL_EXSTYLE);
-        todo_wine_if(!(tests[i].expected_style & WS_VISIBLE))
         ok(style == tests[i].expected_style, "Test %u: Got style %#x, expected %#x.\n",
                 i, style, tests[i].expected_style);
-        todo_wine_if(!(tests[i].expected_exstyle & WS_EX_TOPMOST))
         ok(exstyle == tests[i].expected_exstyle, "Test %u: Got exstyle %#x, expected %#x.\n",
                 i, exstyle, tests[i].expected_exstyle);
+
+        hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, NULL);
+        ok(hr == S_OK || hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE
+                || broken(hr == DXGI_ERROR_UNSUPPORTED), /* Win 7 testbot */
+                "Failed to set fullscreen state, hr %#x.\n", hr);
+        if (SUCCEEDED(hr))
+        {
+            style = GetWindowLongA(swapchain_desc.OutputWindow, GWL_STYLE);
+            exstyle = GetWindowLongA(swapchain_desc.OutputWindow, GWL_EXSTYLE);
+            todo_wine
+            ok(style == fullscreen_style, "Test %u: Got style %#x, expected %#x.\n",
+                    i, style, fullscreen_style);
+            ok(exstyle == fullscreen_exstyle, "Test %u: Got exstyle %#x, expected %#x.\n",
+                    i, exstyle, fullscreen_exstyle);
+
+            SetWindowLongW(swapchain_desc.OutputWindow, GWL_STYLE, fullscreen_style);
+            SetWindowLongW(swapchain_desc.OutputWindow, GWL_EXSTYLE, fullscreen_exstyle);
+
+            hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
+            ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+            style = GetWindowLongA(swapchain_desc.OutputWindow, GWL_STYLE);
+            exstyle = GetWindowLongA(swapchain_desc.OutputWindow, GWL_EXSTYLE);
+            todo_wine
+            ok(style == tests[i].expected_style, "Test %u: Got style %#x, expected %#x.\n",
+                    i, style, tests[i].expected_style);
+            todo_wine
+            ok(exstyle == tests[i].expected_exstyle, "Test %u: Got exstyle %#x, expected %#x.\n",
+                    i, exstyle, tests[i].expected_exstyle);
+        }
+        else
+        {
+            skip("Test %u: Could not change fullscreen state.\n", i);
+        }
 
         refcount = IDXGISwapChain_Release(swapchain);
         ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
 
         style = GetWindowLongA(swapchain_desc.OutputWindow, GWL_STYLE);
         exstyle = GetWindowLongA(swapchain_desc.OutputWindow, GWL_EXSTYLE);
-        todo_wine_if(!(tests[i].expected_style & WS_VISIBLE))
+        todo_wine
         ok(style == tests[i].expected_style, "Test %u: Got style %#x, expected %#x.\n",
                 i, style, tests[i].expected_style);
-        todo_wine_if(!(tests[i].expected_exstyle & WS_EX_TOPMOST))
+        todo_wine
         ok(exstyle == tests[i].expected_exstyle, "Test %u: Got exstyle %#x, expected %#x.\n",
                 i, exstyle, tests[i].expected_exstyle);
 
@@ -5377,15 +6180,13 @@ done:
     ok(!refcount, "Factory has %u references left.\n", refcount);
 }
 
-static void test_window_association(void)
+static void test_window_association(IUnknown *device, BOOL is_d3d12)
 {
     DXGI_SWAP_CHAIN_DESC swapchain_desc;
     LONG_PTR original_wndproc, wndproc;
     IDXGIFactory *factory, *factory2;
     IDXGISwapChain *swapchain;
     IDXGIOutput *output;
-    IDXGIAdapter *adapter;
-    IDXGIDevice *device;
     HWND hwnd, hwnd2;
     BOOL fullscreen;
     unsigned int i;
@@ -5422,12 +6223,6 @@ static void test_window_association(void)
         {0, FALSE}
     };
 
-    if (!(device = create_device(0)))
-    {
-        skip("Failed to create device.\n");
-        return;
-    }
-
     swapchain_desc.BufferDesc.Width = 640;
     swapchain_desc.BufferDesc.Height = 480;
     swapchain_desc.BufferDesc.RefreshRate.Numerator = 60;
@@ -5438,10 +6233,10 @@ static void test_window_association(void)
     swapchain_desc.SampleDesc.Count = 1;
     swapchain_desc.SampleDesc.Quality = 0;
     swapchain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    swapchain_desc.BufferCount = 1;
+    swapchain_desc.BufferCount = is_d3d12 ? 2 : 1;
     swapchain_desc.OutputWindow = CreateWindowA("static", "dxgi_test", 0, 0, 0, 400, 200, 0, 0, 0, 0);
     swapchain_desc.Windowed = TRUE;
-    swapchain_desc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    swapchain_desc.SwapEffect = is_d3d12 ? DXGI_SWAP_EFFECT_FLIP_DISCARD : DXGI_SWAP_EFFECT_DISCARD;
     swapchain_desc.Flags = 0;
 
     original_wndproc = GetWindowLongPtrW(swapchain_desc.OutputWindow, GWLP_WNDPROC);
@@ -5450,11 +6245,7 @@ static void test_window_association(void)
     hr = CreateDXGIFactory(&IID_IDXGIFactory, (void **)&factory2);
     ok(hr == S_OK, "Failed to create DXGI factory, hr %#x.\n", hr);
 
-    hr = IDXGIDevice_GetAdapter(device, &adapter);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-    hr = IDXGIAdapter_GetParent(adapter, &IID_IDXGIFactory, (void **)&factory);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-    refcount = IDXGIAdapter_Release(adapter);
+    get_factory(device, is_d3d12, &factory);
 
     hr = IDXGIFactory_GetWindowAssociation(factory, NULL);
     ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
@@ -5484,7 +6275,7 @@ static void test_window_association(void)
     ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
 
     /* Alt+Enter tests. */
-    hr = IDXGIFactory_CreateSwapChain(factory, (IUnknown *)device, &swapchain_desc, &swapchain);
+    hr = IDXGIFactory_CreateSwapChain(factory, device, &swapchain_desc, &swapchain);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
 
     wndproc = GetWindowLongPtrW(swapchain_desc.OutputWindow, GWLP_WNDPROC);
@@ -5554,10 +6345,8 @@ static void test_window_association(void)
     ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
     DestroyWindow(swapchain_desc.OutputWindow);
 
-    refcount = IDXGIDevice_Release(device);
-    ok(!refcount, "Device has %u references left.\n", refcount);
     refcount = IDXGIFactory_Release(factory);
-    ok(!refcount, "Factory has %u references left.\n", refcount);
+    ok(refcount == !is_d3d12, "IDXGIFactory has %u references left.\n", refcount);
 }
 
 static void test_output_ownership(IUnknown *device, BOOL is_d3d12)
@@ -5611,7 +6400,9 @@ static void test_output_ownership(IUnknown *device, BOOL is_d3d12)
 
     check_ownership_desc.hAdapter = open_adapter_gdi_desc.hAdapter;
     check_ownership_desc.VidPnSourceId = open_adapter_gdi_desc.VidPnSourceId;
-    wait_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS, FALSE);
+    status = get_expected_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#x, expected %#x.\n", status,
+            STATUS_SUCCESS);
 
     swapchain_desc.BufferDesc.Width = 800;
     swapchain_desc.BufferDesc.Height = 600;
@@ -5645,20 +6436,41 @@ static void test_output_ownership(IUnknown *device, BOOL is_d3d12)
     hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, NULL);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
     ok(fullscreen, "Got unexpected fullscreen state.\n");
+    /* Win10 1909 doesn't seem to grab output exclusive ownership.
+     * And all output ownership calls return S_OK on D3D10 and D3D12 with 1909. */
     if (is_d3d12)
-        wait_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS, FALSE);
+    {
+        status = get_expected_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS);
+        ok(status == STATUS_SUCCESS, "Got unexpected status %#x, expected %#x.\n", status,
+                STATUS_SUCCESS);
+    }
     else
-        wait_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_GRAPHICS_PRESENT_OCCLUDED, TRUE);
+    {
+        status = get_expected_vidpn_exclusive_ownership(&check_ownership_desc,
+                STATUS_GRAPHICS_PRESENT_OCCLUDED);
+        todo_wine ok(status == STATUS_GRAPHICS_PRESENT_OCCLUDED ||
+                broken(status == STATUS_SUCCESS), /* Win10 1909 */
+                "Got unexpected status %#x, expected %#x.\n", status,
+                STATUS_GRAPHICS_PRESENT_OCCLUDED);
+    }
     hr = IDXGIOutput_TakeOwnership(output, NULL, FALSE);
-    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
+    ok(hr == DXGI_ERROR_INVALID_CALL || broken(hr == S_OK), /* Win10 1909 */
+            "Got unexpected hr %#x.\n", hr);
     hr = IDXGIOutput_TakeOwnership(output, NULL, TRUE);
-    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
+    ok(hr == DXGI_ERROR_INVALID_CALL || broken(hr == S_OK), /* Win10 1909 */
+            "Got unexpected hr %#x.\n", hr);
     hr = IDXGIOutput_TakeOwnership(output, device, FALSE);
-    todo_wine ok(hr == (is_d3d12 ? E_NOINTERFACE : E_INVALIDARG), "Got unexpected hr %#x.\n", hr);
+    if (is_d3d12)
+        todo_wine ok(hr == E_NOINTERFACE || hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    else
+        todo_wine ok(hr == E_INVALIDARG || broken(hr == S_OK), /* Win10 1909 */
+                "Got unexpected hr %#x.\n", hr);
     hr = IDXGIOutput_TakeOwnership(output, device, TRUE);
-    todo_wine_if(is_d3d12) ok(hr == (is_d3d12 ? E_NOINTERFACE : S_OK), "Got unexpected hr %#x.\n", hr);
+    ok(hr == E_NOINTERFACE || hr == S_OK, "Got unexpected hr %#x.\n", hr);
     IDXGIOutput_ReleaseOwnership(output);
-    wait_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS, FALSE);
+    status = get_expected_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#x, expected %#x.\n", status,
+            STATUS_SUCCESS);
 
     /* IDXGIOutput_TakeOwnership always returns E_NOINTERFACE for d3d12. Tests
      * finished. */
@@ -5666,16 +6478,21 @@ static void test_output_ownership(IUnknown *device, BOOL is_d3d12)
         goto done;
 
     hr = IDXGIOutput_TakeOwnership(output, device, FALSE);
-    ok(hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE || broken(hr == S_OK), /* Win10 1909 */
+            "Got unexpected hr %#x.\n", hr);
     IDXGIOutput_ReleaseOwnership(output);
 
     hr = IDXGIOutput_TakeOwnership(output, device, TRUE);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
     /* Note that the "exclusive" parameter to IDXGIOutput_TakeOwnership()
      * seems to behave opposite to what's described by MSDN. */
-    wait_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_GRAPHICS_PRESENT_OCCLUDED, FALSE);
+    status = get_expected_vidpn_exclusive_ownership(&check_ownership_desc,
+            STATUS_GRAPHICS_PRESENT_OCCLUDED);
+    ok(status == STATUS_GRAPHICS_PRESENT_OCCLUDED ||
+            broken(status == STATUS_SUCCESS), /* Win10 1909 */
+            "Got unexpected status %#x, expected %#x.\n", status, STATUS_GRAPHICS_PRESENT_OCCLUDED);
     hr = IDXGIOutput_TakeOwnership(output, device, FALSE);
-    ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+    ok(hr == E_INVALIDARG || broken(hr == S_OK) /* Win10 1909 */, "Got unexpected hr %#x.\n", hr);
     IDXGIOutput_ReleaseOwnership(output);
 
     /* Swapchain in windowed mode. */
@@ -5685,16 +6502,24 @@ static void test_output_ownership(IUnknown *device, BOOL is_d3d12)
     hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, NULL);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
     ok(!fullscreen, "Unexpected fullscreen state.\n");
-    wait_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS, FALSE);
+    status = get_expected_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#x, expected %#x.\n", status,
+            STATUS_SUCCESS);
 
     hr = IDXGIOutput_TakeOwnership(output, device, FALSE);
-    ok(hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE || broken(hr == S_OK), /* Win10 1909 */
+            "Got unexpected hr %#x.\n", hr);
 
     hr = IDXGIOutput_TakeOwnership(output, device, TRUE);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-    wait_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_GRAPHICS_PRESENT_OCCLUDED, FALSE);
+    status = get_expected_vidpn_exclusive_ownership(&check_ownership_desc,
+            STATUS_GRAPHICS_PRESENT_OCCLUDED);
+    ok(status == STATUS_GRAPHICS_PRESENT_OCCLUDED || broken(hr == S_OK), /* Win10 1909 */
+            "Got unexpected status %#x, expected %#x.\n", status, STATUS_GRAPHICS_PRESENT_OCCLUDED);
     IDXGIOutput_ReleaseOwnership(output);
-    wait_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS, FALSE);
+    status = get_expected_vidpn_exclusive_ownership(&check_ownership_desc, STATUS_SUCCESS);
+    ok(status == STATUS_SUCCESS, "Got unexpected status %#x, expected %#x.\n", status,
+            STATUS_SUCCESS);
 
 done:
     IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
@@ -5709,6 +6534,772 @@ done:
     close_adapter_desc.hAdapter = open_adapter_gdi_desc.hAdapter;
     status = pD3DKMTCloseAdapter(&close_adapter_desc);
     ok(status == STATUS_SUCCESS, "Got unexpected status %#x.\n", status);
+}
+
+static void test_cursor_clipping(IUnknown *device, BOOL is_d3d12)
+{
+    unsigned int adapter_idx, output_idx, mode_idx, mode_count;
+    DXGI_SWAP_CHAIN_DESC swapchain_desc;
+    DXGI_OUTPUT_DESC output_desc;
+    IDXGIAdapter *adapter = NULL;
+    RECT virtual_rect, clip_rect;
+    unsigned int width, height;
+    IDXGISwapChain *swapchain;
+    DXGI_MODE_DESC *modes;
+    IDXGIFactory *factory;
+    IDXGIOutput *output;
+    ULONG refcount;
+    HRESULT hr;
+    BOOL ret;
+
+    get_factory(device, is_d3d12, &factory);
+
+    swapchain_desc.SampleDesc.Count = 1;
+    swapchain_desc.SampleDesc.Quality = 0;
+    swapchain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapchain_desc.BufferCount = is_d3d12 ? 2 : 1;
+    swapchain_desc.Windowed = TRUE;
+    swapchain_desc.SwapEffect = is_d3d12 ? DXGI_SWAP_EFFECT_FLIP_DISCARD : DXGI_SWAP_EFFECT_DISCARD;
+    swapchain_desc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+
+    for (adapter_idx = 0; SUCCEEDED(IDXGIFactory_EnumAdapters(factory, adapter_idx, &adapter));
+            ++adapter_idx)
+    {
+        for (output_idx = 0; SUCCEEDED(IDXGIAdapter_EnumOutputs(adapter, output_idx, &output));
+                ++output_idx)
+        {
+            hr = IDXGIOutput_GetDisplayModeList(output, DXGI_FORMAT_R8G8B8A8_UNORM, 0, &mode_count,
+                    NULL);
+            ok(SUCCEEDED(hr) || broken(hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE), /* Win 7 TestBots */
+                    "Adapter %u output %u: GetDisplayModeList failed, hr %#x.\n", adapter_idx,
+                    output_idx, hr);
+            if (hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE)
+            {
+                win_skip("Adapter %u output %u: GetDisplayModeList() not supported.\n", adapter_idx,
+                        output_idx);
+                IDXGIOutput_Release(output);
+                continue;
+            }
+
+            modes = heap_calloc(mode_count, sizeof(*modes));
+            hr = IDXGIOutput_GetDisplayModeList(output, DXGI_FORMAT_R8G8B8A8_UNORM, 0, &mode_count,
+                    modes);
+            ok(hr == S_OK, "Adapter %u output %u: GetDisplayModeList failed, hr %#x.\n",
+                    adapter_idx, output_idx, hr);
+
+            hr = IDXGIOutput_GetDesc(output, &output_desc);
+            ok(hr == S_OK, "Adapter %u output %u: GetDesc failed, hr %#x.\n", adapter_idx,
+                    output_idx, hr);
+            width = output_desc.DesktopCoordinates.right - output_desc.DesktopCoordinates.left;
+            height = output_desc.DesktopCoordinates.bottom - output_desc.DesktopCoordinates.top;
+            for (mode_idx = 0; mode_idx < mode_count; ++mode_idx)
+            {
+                if (modes[mode_idx].Width != width && modes[mode_idx].Height != height)
+                    break;
+            }
+            ok(modes[mode_idx].Width != width && modes[mode_idx].Height != height,
+                    "Adapter %u output %u: Failed to find a different mode than %ux%u.\n",
+                    adapter_idx, output_idx, width, height);
+
+            ret = ClipCursor(NULL);
+            ok(ret, "Adapter %u output %u: ClipCursor failed, error %#x.\n",
+                    adapter_idx, output_idx, GetLastError());
+            get_virtual_rect(&virtual_rect);
+            ret = GetClipCursor(&clip_rect);
+            ok(ret, "Adapter %u output %u: GetClipCursor failed, error %#x.\n", adapter_idx,
+                    output_idx, GetLastError());
+            ok(EqualRect(&clip_rect, &virtual_rect),
+                    "Adapter %u output %u: Expect clip rect %s, got %s.\n", adapter_idx, output_idx,
+                    wine_dbgstr_rect(&virtual_rect), wine_dbgstr_rect(&clip_rect));
+
+            swapchain_desc.BufferDesc.Width = modes[mode_idx].Width;
+            swapchain_desc.BufferDesc.Height = modes[mode_idx].Height;
+            swapchain_desc.BufferDesc.RefreshRate = modes[mode_idx].RefreshRate;
+            swapchain_desc.BufferDesc.Format = modes[mode_idx].Format;
+            swapchain_desc.BufferDesc.ScanlineOrdering = modes[mode_idx].ScanlineOrdering;
+            swapchain_desc.BufferDesc.Scaling = modes[mode_idx].Scaling;
+            swapchain_desc.OutputWindow = create_window();
+            heap_free(modes);
+            hr = IDXGIFactory_CreateSwapChain(factory, (IUnknown *)device, &swapchain_desc,
+                    &swapchain);
+            ok(hr == S_OK, "Adapter %u output %u: CreateSwapChain failed, hr %#x.\n",
+                    adapter_idx, output_idx, hr);
+
+            flush_events();
+            get_virtual_rect(&virtual_rect);
+            ret = GetClipCursor(&clip_rect);
+            ok(ret, "Adapter %u output %u: GetClipCursor failed, error %#x.\n", adapter_idx,
+                    output_idx, GetLastError());
+            ok(EqualRect(&clip_rect, &virtual_rect),
+                    "Adapter %u output %u: Expect clip rect %s, got %s.\n", adapter_idx, output_idx,
+                    wine_dbgstr_rect(&virtual_rect), wine_dbgstr_rect(&clip_rect));
+
+            hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, NULL);
+            ok(hr == S_OK || hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE ||
+                    broken(hr == DXGI_ERROR_UNSUPPORTED), /* Win 7 testbot */
+                    "Adapter %u output %u: SetFullscreenState failed, hr %#x.\n", adapter_idx,
+                    output_idx, hr);
+            if (FAILED(hr))
+            {
+                skip("Adapter %u output %u: Could not change fullscreen state, hr %#x.\n",
+                        adapter_idx, output_idx, hr);
+                IDXGISwapChain_Release(swapchain);
+                IDXGIOutput_Release(output);
+                DestroyWindow(swapchain_desc.OutputWindow);
+                continue;
+            }
+
+            flush_events();
+            get_virtual_rect(&virtual_rect);
+            ret = GetClipCursor(&clip_rect);
+            ok(ret, "Adapter %u output %u: GetClipCursor failed, error %#x.\n", adapter_idx,
+                    output_idx, GetLastError());
+            ok(EqualRect(&clip_rect, &virtual_rect),
+                    "Adapter %u output %u: Expect clip rect %s, got %s.\n", adapter_idx, output_idx,
+                    wine_dbgstr_rect(&virtual_rect), wine_dbgstr_rect(&clip_rect));
+
+            hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
+            ok(hr == S_OK, "Adapter %u output %u: Got unexpected hr %#x.\n", adapter_idx,
+                    output_idx, hr);
+            refcount = IDXGISwapChain_Release(swapchain);
+            ok(!refcount, "Adapter %u output %u: IDXGISwapChain has %u references left.\n",
+                    adapter_idx, output_idx, refcount);
+            refcount = IDXGIOutput_Release(output);
+            ok(!refcount, "Adapter %u output %u: IDXGIOutput has %u references left.\n",
+                    adapter_idx, output_idx, refcount);
+            DestroyWindow(swapchain_desc.OutputWindow);
+
+            flush_events();
+            get_virtual_rect(&virtual_rect);
+            ret = GetClipCursor(&clip_rect);
+            ok(ret, "Adapter %u output %u: GetClipCursor failed, error %#x.\n", adapter_idx,
+                    output_idx, GetLastError());
+            ok(EqualRect(&clip_rect, &virtual_rect),
+                    "Adapter %u output %u: Expect clip rect %s, got %s.\n", adapter_idx, output_idx,
+                    wine_dbgstr_rect(&virtual_rect), wine_dbgstr_rect(&clip_rect));
+        }
+
+        IDXGIAdapter_Release(adapter);
+    }
+
+    refcount = IDXGIFactory_Release(factory);
+    ok(refcount == !is_d3d12, "Got unexpected refcount %u.\n", refcount);
+}
+
+static void test_factory_check_feature_support(void)
+{
+    IDXGIFactory5 *factory;
+    ULONG ref_count;
+    HRESULT hr;
+    BOOL data;
+
+    if (FAILED(hr = CreateDXGIFactory(&IID_IDXGIFactory5, (void**)&factory)))
+    {
+        win_skip("IDXGIFactory5 is not available.\n");
+        return;
+    }
+
+    hr = IDXGIFactory5_CheckFeatureSupport(factory, 0x12345678, (void *)&data, sizeof(data));
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
+
+    /* Crashes on Windows. */
+    if (0)
+    {
+        hr = IDXGIFactory5_CheckFeatureSupport(factory, DXGI_FEATURE_PRESENT_ALLOW_TEARING, NULL, sizeof(data));
+        ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
+    }
+
+    hr = IDXGIFactory5_CheckFeatureSupport(factory, DXGI_FEATURE_PRESENT_ALLOW_TEARING, &data, sizeof(data) - 1);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDXGIFactory5_CheckFeatureSupport(factory, DXGI_FEATURE_PRESENT_ALLOW_TEARING, &data, sizeof(data) + 1);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
+
+    data = (BOOL)0xdeadbeef;
+    hr = IDXGIFactory5_CheckFeatureSupport(factory, DXGI_FEATURE_PRESENT_ALLOW_TEARING, &data, sizeof(data));
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(data == TRUE || data == FALSE, "Got unexpected data %#x.\n", data);
+
+    ref_count = IDXGIFactory5_Release(factory);
+    ok(!ref_count, "Factory has %u references left.\n", ref_count);
+}
+
+static void test_frame_latency_event(IUnknown *device, BOOL is_d3d12)
+{
+    DXGI_SWAP_CHAIN_DESC1 swapchain_desc;
+    IDXGISwapChain2 *swapchain2;
+    IDXGISwapChain1 *swapchain1;
+    IDXGIFactory2 *factory2;
+    IDXGIFactory *factory;
+    UINT frame_latency;
+    DWORD wait_result;
+    ULONG ref_count;
+    unsigned int i;
+    HANDLE event;
+    HWND window;
+    HRESULT hr;
+
+    get_factory(device, is_d3d12, &factory);
+
+    hr = IDXGIFactory_QueryInterface(factory, &IID_IDXGIFactory2, (void**)&factory2);
+    IDXGIFactory_Release(factory);
+    if (FAILED(hr))
+    {
+        win_skip("IDXGIFactory2 not available.\n");
+        return;
+    }
+
+    window = create_window();
+
+    swapchain_desc.Width = 640;
+    swapchain_desc.Height = 480;
+    swapchain_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    swapchain_desc.Stereo = FALSE;
+    swapchain_desc.SampleDesc.Count = 1;
+    swapchain_desc.SampleDesc.Quality = 0;
+    swapchain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapchain_desc.BufferCount = 2;
+    swapchain_desc.Scaling = DXGI_SCALING_STRETCH;
+    swapchain_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    swapchain_desc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+    swapchain_desc.Flags = 0;
+
+    hr = IDXGIFactory2_CreateSwapChainForHwnd(factory2, device,
+            window, &swapchain_desc, NULL, NULL, &swapchain1);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDXGISwapChain1_QueryInterface(swapchain1, &IID_IDXGISwapChain2, (void**)&swapchain2);
+    IDXGISwapChain1_Release(swapchain1);
+    if (FAILED(hr))
+    {
+        win_skip("IDXGISwapChain2 not available.\n");
+        IDXGIFactory2_Release(factory2);
+        DestroyWindow(window);
+        return;
+    }
+
+    /* test swap chain without waitable object */
+    frame_latency = 0xdeadbeef;
+    hr = IDXGISwapChain2_GetMaximumFrameLatency(swapchain2, &frame_latency);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
+    ok(frame_latency == 0xdeadbeef, "Got unexpected frame latency %#x.\n", frame_latency);
+    hr = IDXGISwapChain2_SetMaximumFrameLatency(swapchain2, 1);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
+    event = IDXGISwapChain2_GetFrameLatencyWaitableObject(swapchain2);
+    ok(!event, "Got unexpected event %p.\n", event);
+
+    ref_count = IDXGISwapChain2_Release(swapchain2);
+    ok(!ref_count, "Swap chain has %u references left.\n", ref_count);
+
+    /* test swap chain with waitable object */
+    swapchain_desc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+
+    hr = IDXGIFactory2_CreateSwapChainForHwnd(factory2, device,
+            window, &swapchain_desc, NULL, NULL, &swapchain1);
+    ok(hr == S_OK, "Failed to create swap chain, hr %#x.\n", hr);
+    hr = IDXGISwapChain1_QueryInterface(swapchain1, &IID_IDXGISwapChain2, (void**)&swapchain2);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    IDXGISwapChain1_Release(swapchain1);
+
+    event = IDXGISwapChain2_GetFrameLatencyWaitableObject(swapchain2);
+    ok(!!event, "Got unexpected event %p.\n", event);
+
+    /* auto-reset event */
+    wait_result = WaitForSingleObject(event, 0);
+    ok(!wait_result, "Got unexpected wait result %#x.\n", wait_result);
+    wait_result = WaitForSingleObject(event, 0);
+    ok(wait_result == WAIT_TIMEOUT, "Got unexpected wait result %#x.\n", wait_result);
+
+    hr = IDXGISwapChain2_GetMaximumFrameLatency(swapchain2, &frame_latency);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(frame_latency == 1, "Got unexpected frame latency %#x.\n", frame_latency);
+
+    hr = IDXGISwapChain2_SetMaximumFrameLatency(swapchain2, 0);
+    ok(hr == DXGI_ERROR_INVALID_CALL, "Got unexpected hr %#x.\n", hr);
+    hr = IDXGISwapChain2_GetMaximumFrameLatency(swapchain2, &frame_latency);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(frame_latency == 1, "Got unexpected frame latency %#x.\n", frame_latency);
+
+    hr = IDXGISwapChain2_SetMaximumFrameLatency(swapchain2, 2);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDXGISwapChain2_GetMaximumFrameLatency(swapchain2, &frame_latency);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(frame_latency == 2, "Got unexpected frame latency %#x.\n", frame_latency);
+
+    for (i = 0; i < 5; i++)
+    {
+        hr = IDXGISwapChain2_Present(swapchain2, 0, 0);
+        ok(hr == S_OK, "Present %u failed with hr %#x.\n", i, hr);
+    }
+
+    wait_result = WaitForSingleObject(event, 1000);
+    ok(!wait_result, "Got unexpected wait result %#x.\n", wait_result);
+
+    ref_count = IDXGISwapChain2_Release(swapchain2);
+    ok(!ref_count, "Swap chain has %u references left.\n", ref_count);
+    DestroyWindow(window);
+    ref_count = IDXGIFactory2_Release(factory2);
+    ok(ref_count == !is_d3d12, "Factory has %u references left.\n", ref_count);
+}
+
+static void test_colour_space_support(IUnknown *device, BOOL is_d3d12)
+{
+    DXGI_SWAP_CHAIN_DESC1 swapchain_desc;
+    IDXGISwapChain3 *swapchain3;
+    IDXGISwapChain1 *swapchain1;
+    IDXGIFactory2 *factory2;
+    IDXGIFactory *factory;
+    ULONG ref_count;
+    unsigned int i;
+    UINT support;
+    HWND window;
+    HRESULT hr;
+
+    static const DXGI_COLOR_SPACE_TYPE colour_spaces[] =
+    {
+        DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
+        DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709,
+        DXGI_COLOR_SPACE_RGB_STUDIO_G22_NONE_P709,
+        DXGI_COLOR_SPACE_RGB_STUDIO_G22_NONE_P2020,
+        DXGI_COLOR_SPACE_RESERVED,
+        DXGI_COLOR_SPACE_YCBCR_FULL_G22_NONE_P709_X601,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P601,
+        DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
+        DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P2020,
+        DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P2020,
+        DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020,
+        DXGI_COLOR_SPACE_RGB_STUDIO_G2084_NONE_P2020,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_TOPLEFT_P2020,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_TOPLEFT_P2020,
+        DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P2020,
+        DXGI_COLOR_SPACE_YCBCR_STUDIO_GHLG_TOPLEFT_P2020,
+        DXGI_COLOR_SPACE_YCBCR_FULL_GHLG_TOPLEFT_P2020,
+    };
+
+    get_factory(device, is_d3d12, &factory);
+
+    hr = IDXGIFactory_QueryInterface(factory, &IID_IDXGIFactory2, (void**)&factory2);
+    IDXGIFactory_Release(factory);
+    if (FAILED(hr))
+    {
+        win_skip("IDXGIFactory2 not available.\n");
+        return;
+    }
+
+    window = create_window();
+
+    swapchain_desc.Width = 640;
+    swapchain_desc.Height = 480;
+    swapchain_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    swapchain_desc.Stereo = FALSE;
+    swapchain_desc.SampleDesc.Count = 1;
+    swapchain_desc.SampleDesc.Quality = 0;
+    swapchain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapchain_desc.BufferCount = 2;
+    swapchain_desc.Scaling = DXGI_SCALING_STRETCH;
+    swapchain_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    swapchain_desc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+    swapchain_desc.Flags = 0;
+
+    hr = IDXGIFactory2_CreateSwapChainForHwnd(factory2, device,
+            window, &swapchain_desc, NULL, NULL, &swapchain1);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDXGISwapChain1_QueryInterface(swapchain1, &IID_IDXGISwapChain3, (void**)&swapchain3);
+    IDXGISwapChain1_Release(swapchain1);
+    if (FAILED(hr))
+    {
+        win_skip("IDXGISwapChain3 not available.\n");
+        IDXGIFactory2_Release(factory2);
+        DestroyWindow(window);
+        return;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(colour_spaces); ++i)
+    {
+        support = 0xdeadbeef;
+        hr = IDXGISwapChain3_CheckColorSpaceSupport(swapchain3, colour_spaces[i], &support);
+        ok(hr == S_OK, "Got unexpected hr %#x for test %u.\n", hr, i);
+        ok(!(support & ~DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT),
+                "Got unexpected support flags %#x for test %u.\n", support, i);
+
+        if (colour_spaces[i] == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709)
+        {
+            ok(support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT,
+                    "Required colour space not supported for test %u.\n", i);
+        }
+        else if (colour_spaces[i] == DXGI_COLOR_SPACE_RESERVED)
+        {
+            ok(!support, "Invalid colour space supported for test %u.\n", i);
+        }
+
+        hr = IDXGISwapChain3_SetColorSpace1(swapchain3, colour_spaces[i]);
+        ok(hr == (support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) ? S_OK : E_INVALIDARG,
+                "Got unexpected hr %#x for text %u.\n", hr, i);
+    }
+
+    ref_count = IDXGISwapChain3_Release(swapchain3);
+    ok(!ref_count, "Swap chain has %u references left.\n", ref_count);
+    DestroyWindow(window);
+    ref_count = IDXGIFactory2_Release(factory2);
+    ok(ref_count == !is_d3d12, "Factory has %u references left.\n", ref_count);
+}
+
+static void test_mode_change(IUnknown *device, BOOL is_d3d12)
+{
+    unsigned int user32_width = 0, user32_height = 0, d3d_width = 0, d3d_height = 0;
+    unsigned int display_count = 0, mode_idx = 0, adapter_idx, output_idx;
+    DEVMODEW *original_modes = NULL, old_devmode, devmode, devmode2;
+    DXGI_SWAP_CHAIN_DESC swapchain_desc, swapchain_desc2;
+    IDXGIOutput *output, *second_output = NULL;
+    WCHAR second_monitor_name[CCHDEVICENAME];
+    IDXGISwapChain *swapchain, *swapchain2;
+    DXGI_OUTPUT_DESC output_desc;
+    IDXGIAdapter *adapter;
+    IDXGIFactory *factory;
+    BOOL fullscreen, ret;
+    LONG change_ret;
+    ULONG refcount;
+    HRESULT hr;
+
+    memset(&devmode, 0, sizeof(devmode));
+    devmode.dmSize = sizeof(devmode);
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode, &registry_mode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(NULL, ENUM_REGISTRY_SETTINGS, &devmode);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode, &registry_mode), "Got a different mode.\n");
+
+    while (EnumDisplaySettingsW(NULL, mode_idx++, &devmode))
+    {
+        if (devmode.dmPelsWidth == registry_mode.dmPelsWidth
+                && devmode.dmPelsHeight == registry_mode.dmPelsHeight)
+            continue;
+
+        if (!d3d_width && !d3d_height)
+        {
+            d3d_width = devmode.dmPelsWidth;
+            d3d_height = devmode.dmPelsHeight;
+            continue;
+        }
+
+        if (devmode.dmPelsWidth == d3d_width && devmode.dmPelsHeight == d3d_height)
+            continue;
+
+        user32_width = devmode.dmPelsWidth;
+        user32_height = devmode.dmPelsHeight;
+        break;
+    }
+    if (!user32_width || !user32_height)
+    {
+        skip("Failed to find three different display modes for the primary output.\n");
+        return;
+    }
+
+    ret = save_display_modes(&original_modes, &display_count);
+    ok(ret, "Failed to save original display modes.\n");
+
+    get_factory(device, is_d3d12, &factory);
+
+    /* Test that no mode restorations if no mode changes actually happened */
+    change_ret = ChangeDisplaySettingsW(&devmode, CDS_UPDATEREGISTRY | CDS_NORESET);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsW failed with %d.\n", change_ret);
+
+    swapchain_desc.BufferDesc.Width = registry_mode.dmPelsWidth;
+    swapchain_desc.BufferDesc.Height = registry_mode.dmPelsHeight;
+    swapchain_desc.BufferDesc.RefreshRate.Numerator = 60;
+    swapchain_desc.BufferDesc.RefreshRate.Denominator = 1;
+    swapchain_desc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    swapchain_desc.BufferDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
+    swapchain_desc.BufferDesc.Scaling = DXGI_MODE_SCALING_UNSPECIFIED;
+    swapchain_desc.SampleDesc.Count = 1;
+    swapchain_desc.SampleDesc.Quality = 0;
+    swapchain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapchain_desc.BufferCount = is_d3d12 ? 2 : 1;
+    swapchain_desc.OutputWindow = CreateWindowA("static", "dxgi_test", 0, 0, 0, 400, 200, 0, 0, 0, 0);
+    swapchain_desc.Windowed = TRUE;
+    swapchain_desc.SwapEffect = is_d3d12 ? DXGI_SWAP_EFFECT_FLIP_DISCARD : DXGI_SWAP_EFFECT_DISCARD;
+    swapchain_desc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+
+    hr = IDXGIFactory_CreateSwapChain(factory, device, &swapchain_desc, &swapchain);
+    ok(hr == S_OK, "CreateSwapChain failed, hr %#x.\n", hr);
+    refcount = IDXGISwapChain_Release(swapchain);
+    ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
+
+    memset(&devmode2, 0, sizeof(devmode2));
+    devmode2.dmSize = sizeof(devmode2);
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &registry_mode), "Got a different mode.\n");
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* If current display settings are different than the display settings in registry before
+     * calling SetFullscreenState() */
+    change_ret = ChangeDisplaySettingsW(&devmode, CDS_UPDATEREGISTRY | CDS_NORESET);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsW failed with %d.\n", change_ret);
+
+    hr = IDXGIFactory_CreateSwapChain(factory, device, &swapchain_desc, &swapchain);
+    ok(hr == S_OK, "CreateSwapChain failed, hr %#x.\n", hr);
+    hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, NULL);
+    ok(hr == DXGI_ERROR_UNSUPPORTED /* Win7 */
+            || hr == S_OK /* Win8~Win10 1909 */
+            || hr == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE, /* Win10 2004 */
+            "Got unexpected hr %#x.\n", hr);
+
+    hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    refcount = IDXGISwapChain_Release(swapchain);
+    ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test that mode restorations use display settings in the registry with a fullscreen device */
+    hr = IDXGIFactory_CreateSwapChain(factory, device, &swapchain_desc, &swapchain);
+    ok(hr == S_OK, "CreateSwapChain failed, hr %#x.\n", hr);
+    hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, NULL);
+    if (FAILED(hr))
+    {
+        skip("SetFullscreenState failed, hr %#x.\n", hr);
+        refcount = IDXGISwapChain_Release(swapchain);
+        ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
+        goto done;
+    }
+
+    change_ret = ChangeDisplaySettingsW(&devmode, CDS_UPDATEREGISTRY | CDS_NORESET);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsW failed with %d.\n", change_ret);
+    hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &devmode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(NULL, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &devmode), "Got a different mode.\n");
+    refcount = IDXGISwapChain_Release(swapchain);
+    ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    for (adapter_idx = 0; SUCCEEDED(IDXGIFactory_EnumAdapters(factory, adapter_idx, &adapter)); ++adapter_idx)
+    {
+        for (output_idx = 0; SUCCEEDED(IDXGIAdapter_EnumOutputs(adapter, output_idx, &output)); ++output_idx)
+        {
+            hr = IDXGIOutput_GetDesc(output, &output_desc);
+            ok(hr == S_OK, "Adapter %u output %u: Got unexpected hr %#x.\n", adapter_idx, output_idx, hr);
+
+            if ((adapter_idx || output_idx) && output_desc.AttachedToDesktop)
+            {
+                second_output = output;
+                break;
+            }
+
+            IDXGIOutput_Release(output);
+        }
+
+        IDXGIAdapter_Release(adapter);
+        if (second_output)
+            break;
+    }
+
+    if (!second_output)
+    {
+        skip("Following tests require two monitors.\n");
+        goto done;
+    }
+    lstrcpyW(second_monitor_name, output_desc.DeviceName);
+
+    memset(&old_devmode, 0, sizeof(old_devmode));
+    old_devmode.dmSize = sizeof(old_devmode);
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &old_devmode);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+
+    mode_idx = 0;
+    d3d_width = 0;
+    d3d_height = 0;
+    user32_width = 0;
+    user32_height = 0;
+    while (EnumDisplaySettingsW(second_monitor_name, mode_idx++, &devmode))
+    {
+        if (devmode.dmPelsWidth == old_devmode.dmPelsWidth
+                && devmode.dmPelsHeight == old_devmode.dmPelsHeight)
+            continue;
+
+        if (!d3d_width && !d3d_height)
+        {
+            d3d_width = devmode.dmPelsWidth;
+            d3d_height = devmode.dmPelsHeight;
+            continue;
+        }
+
+        if (devmode.dmPelsWidth == d3d_width && devmode.dmPelsHeight == d3d_height)
+            continue;
+
+        user32_width = devmode.dmPelsWidth;
+        user32_height = devmode.dmPelsHeight;
+        break;
+    }
+    if (!user32_width || !user32_height)
+    {
+        skip("Failed to find three different display modes for the second output.\n");
+        goto done;
+    }
+
+    /* Test that mode restorations for non-primary outputs upon fullscreen state changes */
+    hr = IDXGIFactory_CreateSwapChain(factory, device, &swapchain_desc, &swapchain);
+    ok(hr == S_OK, "CreateSwapChain failed, hr %#x.\n", hr);
+    hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    change_ret = ChangeDisplaySettingsExW(second_monitor_name, &devmode, NULL, CDS_RESET, NULL);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExW failed with %d.\n", change_ret);
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    if (devmode2.dmPelsWidth == old_devmode.dmPelsWidth
+            && devmode2.dmPelsHeight == old_devmode.dmPelsHeight)
+    {
+        skip("Failed to change display settings of the second monitor.\n");
+        hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
+        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        refcount = IDXGISwapChain_Release(swapchain);
+        ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
+        goto done;
+    }
+
+    hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    hr = IDXGIOutput_GetDesc(second_output, &output_desc);
+    ok(hr == S_OK, "GetDesc failed, hr %#x.\n", hr);
+    ok(output_desc.DesktopCoordinates.right - output_desc.DesktopCoordinates.left ==
+            old_devmode.dmPelsWidth, "Expected width %u, got %u.\n", old_devmode.dmPelsWidth,
+            output_desc.DesktopCoordinates.right - output_desc.DesktopCoordinates.left);
+    ok(output_desc.DesktopCoordinates.bottom - output_desc.DesktopCoordinates.top ==
+            old_devmode.dmPelsHeight, "Expected height %u, got %u.\n", old_devmode.dmPelsHeight,
+            output_desc.DesktopCoordinates.bottom - output_desc.DesktopCoordinates.top);
+
+    refcount = IDXGISwapChain_Release(swapchain);
+    ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test that mode restorations for non-primary outputs use display settings in the registry */
+    hr = IDXGIFactory_CreateSwapChain(factory, device, &swapchain_desc, &swapchain);
+    ok(hr == S_OK, "CreateSwapChain failed, hr %#x.\n", hr);
+    hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, NULL);
+    ok(hr == S_OK, "SetFullscreenState failed, hr %#x.\n", hr);
+
+    change_ret = ChangeDisplaySettingsExW(second_monitor_name, &devmode, NULL,
+            CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
+    ok(change_ret == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExW failed with %d.\n", change_ret);
+    hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
+    ok(hr == S_OK, "SetFullscreenState failed, hr %#x.\n", hr);
+
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(devmode2.dmPelsWidth == devmode.dmPelsWidth && devmode2.dmPelsHeight == devmode.dmPelsHeight,
+            "Expected resolution %ux%u, got %ux%u.\n", devmode.dmPelsWidth, devmode.dmPelsHeight,
+            devmode2.dmPelsWidth, devmode2.dmPelsHeight);
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(devmode2.dmPelsWidth == devmode.dmPelsWidth && devmode2.dmPelsHeight == devmode.dmPelsHeight,
+            "Expected resolution %ux%u, got %ux%u.\n", devmode.dmPelsWidth, devmode.dmPelsHeight,
+            devmode2.dmPelsWidth, devmode2.dmPelsHeight);
+    hr = IDXGIOutput_GetDesc(second_output, &output_desc);
+    ok(hr == S_OK, "GetDesc failed, hr %#x.\n", hr);
+    ok(output_desc.DesktopCoordinates.right - output_desc.DesktopCoordinates.left ==
+            devmode.dmPelsWidth, "Expected width %u, got %u.\n", devmode.dmPelsWidth,
+            output_desc.DesktopCoordinates.right - output_desc.DesktopCoordinates.left);
+    ok(output_desc.DesktopCoordinates.bottom - output_desc.DesktopCoordinates.top ==
+            devmode.dmPelsHeight, "Expected height %u, got %u.\n", devmode.dmPelsHeight,
+            output_desc.DesktopCoordinates.bottom - output_desc.DesktopCoordinates.top);
+
+    refcount = IDXGISwapChain_Release(swapchain);
+    ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+    /* Test that mode restorations for non-primary outputs on fullscreen state changes when there
+     * are two fullscreen swapchains on different outputs */
+    hr = IDXGIFactory_CreateSwapChain(factory, device, &swapchain_desc, &swapchain);
+    ok(hr == S_OK, "CreateSwapChain failed, hr %#x.\n", hr);
+
+    swapchain_desc2 = swapchain_desc;
+    swapchain_desc.BufferDesc.Width = d3d_width;
+    swapchain_desc.BufferDesc.Height = d3d_height;
+    swapchain_desc2.OutputWindow = CreateWindowA("static", "dxgi_test2", 0,
+            old_devmode.dmPosition.x, old_devmode.dmPosition.y, 400, 200, 0, 0, 0, 0);
+    hr = IDXGIFactory_CreateSwapChain(factory, device, &swapchain_desc2, &swapchain2);
+    ok(hr == S_OK, "CreateSwapChain failed, hr %#x.\n", hr);
+    hr = IDXGISwapChain_SetFullscreenState(swapchain, TRUE, NULL);
+    ok(hr == S_OK, "SetFullscreenState failed, hr %#x.\n", hr);
+    hr = IDXGISwapChain_SetFullscreenState(swapchain2, TRUE, NULL);
+    if (FAILED(hr))
+    {
+        skip("SetFullscreenState failed, hr %#x.\n", hr);
+        refcount = IDXGISwapChain_Release(swapchain2);
+        ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
+        hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
+        ok(hr == S_OK, "SetFullscreenState failed, hr %#x.\n", hr);
+        refcount = IDXGISwapChain_Release(swapchain);
+        ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
+        goto done;
+    }
+
+    hr = IDXGISwapChain_SetFullscreenState(swapchain, FALSE, NULL);
+    ok(hr == S_OK, "SetFullscreenState failed, hr %#x.\n", hr);
+    hr = IDXGISwapChain_GetFullscreenState(swapchain, &fullscreen, NULL);
+    ok(hr == S_OK, "GetFullscreenState failed, hr %#x.\n", hr);
+    ok(!fullscreen, "Expected swapchain not fullscreen.\n");
+    hr = IDXGISwapChain_GetFullscreenState(swapchain2, &fullscreen, NULL);
+    ok(hr == S_OK, "GetFullscreenState failed, hr %#x.\n", hr);
+    ok(fullscreen, "Expected swapchain fullscreen.\n");
+
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_CURRENT_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    ret = EnumDisplaySettingsW(second_monitor_name, ENUM_REGISTRY_SETTINGS, &devmode2);
+    ok(ret, "EnumDisplaySettingsW failed, error %#x.\n", GetLastError());
+    ok(equal_mode_rect(&devmode2, &old_devmode), "Got a different mode.\n");
+    hr = IDXGIOutput_GetDesc(second_output, &output_desc);
+    ok(hr == S_OK, "GetDesc failed, hr %#x.\n", hr);
+    ok(output_desc.DesktopCoordinates.right - output_desc.DesktopCoordinates.left ==
+            old_devmode.dmPelsWidth, "Expected width %u, got %u.\n", old_devmode.dmPelsWidth,
+            output_desc.DesktopCoordinates.right - output_desc.DesktopCoordinates.left);
+    ok(output_desc.DesktopCoordinates.bottom - output_desc.DesktopCoordinates.top ==
+            old_devmode.dmPelsHeight, "Expected height %u, got %u.\n", old_devmode.dmPelsHeight,
+            output_desc.DesktopCoordinates.bottom - output_desc.DesktopCoordinates.top);
+
+    hr = IDXGISwapChain_SetFullscreenState(swapchain2, FALSE, NULL);
+    ok(hr == S_OK, "SetFullscreenState failed, hr %#x.\n", hr);
+    refcount = IDXGISwapChain_Release(swapchain2);
+    ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
+    refcount = IDXGISwapChain_Release(swapchain);
+    ok(!refcount, "IDXGISwapChain has %u references left.\n", refcount);
+    DestroyWindow(swapchain_desc2.OutputWindow);
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+
+done:
+    if (second_output)
+        IDXGIOutput_Release(second_output);
+    DestroyWindow(swapchain_desc.OutputWindow);
+    refcount = IDXGIFactory_Release(factory);
+    ok(refcount == !is_d3d12, "Got unexpected refcount %u.\n", refcount);
+    ret = restore_display_modes(original_modes, display_count);
+    ok(ret, "Failed to restore display modes.\n");
+    heap_free(original_modes);
 }
 
 static void run_on_d3d10(void (*test_func)(IUnknown *device, BOOL is_d3d12))
@@ -5754,7 +7345,7 @@ static void run_on_d3d12(void (*test_func)(IUnknown *device, BOOL is_d3d12))
 
 START_TEST(dxgi)
 {
-    HMODULE dxgi_module, d3d12_module, gdi32_module;
+    HMODULE dxgi_module, d3d11_module, d3d12_module, gdi32_module;
     BOOL enable_debug_layer = FALSE;
     unsigned int argc, i;
     ID3D12Debug *debug;
@@ -5768,6 +7359,9 @@ START_TEST(dxgi)
     pD3DKMTCheckVidPnExclusiveOwnership = (void *)GetProcAddress(gdi32_module, "D3DKMTCheckVidPnExclusiveOwnership");
     pD3DKMTCloseAdapter = (void *)GetProcAddress(gdi32_module, "D3DKMTCloseAdapter");
     pD3DKMTOpenAdapterFromGdiDisplayName = (void *)GetProcAddress(gdi32_module, "D3DKMTOpenAdapterFromGdiDisplayName");
+
+    d3d11_module = LoadLibraryA("d3d11.dll");
+    pD3D11CreateDevice = (void *)GetProcAddress(d3d11_module, "D3D11CreateDevice");
 
     registry_mode.dmSize = sizeof(registry_mode);
     ok(EnumDisplaySettingsW(NULL, ENUM_REGISTRY_SETTINGS, &registry_mode), "Failed to get display mode.\n");
@@ -5795,25 +7389,24 @@ START_TEST(dxgi)
     queue_test(test_parents);
     queue_test(test_output);
     queue_test(test_find_closest_matching_mode);
-    queue_test(test_get_containing_output);
     queue_test(test_resize_target_wndproc);
     queue_test(test_create_factory);
     queue_test(test_private_data);
     queue_test(test_maximum_frame_latency);
     queue_test(test_output_desc);
     queue_test(test_object_wrapping);
+    queue_test(test_factory_check_feature_support);
 
     run_queued_tests();
 
     /* These tests use full-screen swapchains, so shouldn't run in parallel. */
     test_create_swapchain();
-    test_default_fullscreen_target_output();
     test_inexact_modes();
     test_gamma_control();
+    test_multi_adapter();
     test_swapchain_parameters();
     test_swapchain_window_messages();
     test_swapchain_window_styles();
-    test_window_association();
     run_on_d3d10(test_set_fullscreen);
     run_on_d3d10(test_resize_target);
     run_on_d3d10(test_swapchain_resize);
@@ -5821,6 +7414,11 @@ START_TEST(dxgi)
     run_on_d3d10(test_swapchain_backbuffer_index);
     run_on_d3d10(test_swapchain_formats);
     run_on_d3d10(test_output_ownership);
+    run_on_d3d10(test_cursor_clipping);
+    run_on_d3d10(test_get_containing_output);
+    run_on_d3d10(test_window_association);
+    run_on_d3d10(test_default_fullscreen_target_output);
+    run_on_d3d10(test_mode_change);
 
     if (!(d3d12_module = LoadLibraryA("d3d12.dll")))
     {
@@ -5844,6 +7442,13 @@ START_TEST(dxgi)
     run_on_d3d12(test_swapchain_backbuffer_index);
     run_on_d3d12(test_swapchain_formats);
     run_on_d3d12(test_output_ownership);
+    run_on_d3d12(test_cursor_clipping);
+    run_on_d3d12(test_frame_latency_event);
+    run_on_d3d12(test_colour_space_support);
+    run_on_d3d12(test_get_containing_output);
+    run_on_d3d12(test_window_association);
+    run_on_d3d12(test_default_fullscreen_target_output);
+    run_on_d3d12(test_mode_change);
 
     FreeLibrary(d3d12_module);
 }

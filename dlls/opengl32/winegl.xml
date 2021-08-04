@@ -330,101 +330,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
         </command>
     </commands>
 
-    <!-- CrossOver Hack 10798 -->
-    <types>
-        <type>typedef struct GLUnurbs <name>GLUnurbs</name>;</type>
-    </types>
-    <commands namespace="GLU">
-        <command>
-          <proto>void <name>gluBeginCurve</name></proto>
-          <param><ptype>GLUnurbs</ptype> *<name>nurb</name></param>
-        </command>
-        <command>
-          <proto>void <name>gluBeginSurface</name></proto>
-          <param><ptype>GLUnurbs</ptype> *<name>nurb</name></param>
-        </command>
-        <command>
-          <proto>void <name>gluBeginTrim</name></proto>
-          <param><ptype>GLUnurbs</ptype> *<name>nurb</name></param>
-        </command>
-        <command>
-          <proto>void <name>gluDeleteNurbsRenderer</name></proto>
-          <param><ptype>GLUnurbs</ptype> *<name>nurb</name></param>
-        </command>
-        <command>
-          <proto>void <name>gluEndCurve</name></proto>
-          <param><ptype>GLUnurbs</ptype> *<name>nurb</name></param>
-        </command>
-        <command>
-          <proto>void <name>gluEndSurface</name></proto>
-          <param><ptype>GLUnurbs</ptype> *<name>nurb</name></param>
-        </command>
-        <command>
-          <proto>void <name>gluEndTrim</name></proto>
-          <param><ptype>GLUnurbs</ptype> *<name>nurb</name></param>
-        </command>
-        <command>
-          <proto>void <name>gluGetNurbsProperty</name></proto>
-          <param><ptype>GLUnurbs</ptype> *<name>nurb</name></param>
-          <param><ptype>GLenum</ptype> <name>property</name></param>
-          <param><ptype>GLfloat</ptype> *<name>data</name></param>
-        </command>
-        <command>
-          <proto>void <name>gluLoadSamplingMatrices</name></proto>
-          <param><ptype>GLUnurbs</ptype> *<name>nurb</name></param>
-          <param>const <ptype>GLfloat </ptype> *<name>model</name></param>
-          <param>const <ptype>GLfloat </ptype> *<name>perspective</name></param>
-          <param>const <ptype>GLint </ptype> *<name>view</name></param>
-        </command>
-        <command>
-          <proto><ptype>GLUnurbs</ptype> *<name>gluNewNurbsRenderer</name></proto>
-        </command>
-        <command>
-          <proto>void <name>gluNurbsCallback</name></proto>
-          <param><ptype>GLUnurbs</ptype> *<name>nurb</name></param>
-          <param><ptype>GLenum</ptype> <name>which</name></param>
-          <param><ptype>void </ptype> *<name>CallBackFunc</name></param>
-        </command>
-        <command>
-          <proto>void <name>gluNurbsCurve</name></proto>
-          <param><ptype>GLUnurbs</ptype> *<name>nurb</name></param>
-          <param><ptype>GLint</ptype> <name>knotCount</name></param>
-          <param><ptype>GLfloat </ptype> *<name>knots</name></param>
-          <param><ptype>GLint</ptype> <name>stride</name></param>
-          <param><ptype>GLfloat </ptype> *<name>control</name></param>
-          <param><ptype>GLint</ptype> <name>order</name></param>
-          <param><ptype>GLenum</ptype> <name>type</name></param>
-        </command>
-        <command>
-          <proto>void <name>gluNurbsProperty</name></proto>
-          <param><ptype>GLUnurbs</ptype> *<name>nurb</name></param>
-          <param><ptype>GLenum</ptype> <name>property</name></param>
-          <param><ptype>GLfloat</ptype> <name>value</name></param>
-        </command>
-        <command>
-          <proto>void <name>gluNurbsSurface</name></proto>
-          <param><ptype>GLUnurbs</ptype> *<name>nurb</name></param>
-          <param><ptype>GLint</ptype> <name>sKnotCount</name></param>
-          <param><ptype>GLfloat</ptype> *<name>sKnots</name></param>
-          <param><ptype>GLint</ptype> <name>tKnotCount</name></param>
-          <param><ptype>GLfloat</ptype> *<name>tKnots</name></param>
-          <param><ptype>GLint</ptype> <name>sStride</name></param>
-          <param><ptype>GLint</ptype> <name>tStride</name></param>
-          <param><ptype>GLfloat</ptype> *<name>control</name></param>
-          <param><ptype>GLint</ptype> <name>sOrder</name></param>
-          <param><ptype>GLint</ptype> <name>tOrder</name></param>
-          <param><ptype>GLenum</ptype> <name>type</name></param>
-        </command>
-        <command>
-          <proto>void <name>gluPwlCurve</name></proto>
-          <param><ptype>GLUnurbs</ptype> *<name>nurb</name></param>
-          <param><ptype>GLint</ptype> <name>count</name></param>
-          <param><ptype>GLfloat</ptype> *<name>data</name></param>
-          <param><ptype>GLint</ptype> <name>stride</name></param>
-          <param><ptype>GLenum</ptype> <name>type</name></param>
-        </command>
-    </commands>
-
     <feature api="gl" name="GL_VERSION_1_0" number="1.0">
         <require>
             <command name="glDebugEntry"/>
@@ -531,26 +436,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
                 <command name="wglQueryCurrentRendererStringWINE"/>
                 <command name="wglQueryRendererIntegerWINE"/>
                 <command name="wglQueryRendererStringWINE"/>
-            </require>
-        </extension>
-        <!-- CrossOver Hack 10798 -->
-        <extension name="GLU" supported="glu">
-            <require>
-                <command name="gluBeginCurve"/>
-                <command name="gluBeginSurface"/>
-                <command name="gluBeginTrim"/>
-                <command name="gluDeleteNurbsRenderer"/>
-                <command name="gluEndCurve"/>
-                <command name="gluEndSurface"/>
-                <command name="gluEndTrim"/>
-                <command name="gluGetNurbsProperty"/>
-                <command name="gluLoadSamplingMatrices"/>
-                <command name="gluNewNurbsRenderer"/>
-                <command name="gluNurbsCallback"/>
-                <command name="gluNurbsCurve"/>
-                <command name="gluNurbsProperty"/>
-                <command name="gluNurbsSurface"/>
-                <command name="gluPwlCurve"/>
             </require>
         </extension>
     </extensions>

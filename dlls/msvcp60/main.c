@@ -27,7 +27,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcp);
 
-#if defined(__i386__) && !defined(__MINGW32__)
+#ifdef __ASM_USE_THISCALL_WRAPPER
 
 #define DEFINE_VTBL_WRAPPER(off)            \
     __ASM_GLOBAL_FUNC(vtbl_wrapper_ ## off, \
@@ -58,7 +58,7 @@ DEFINE_VTBL_WRAPPER(56);
 /* ?_Fpz@std@@3_JB */
 const __int64 std_Fpz = 0;
 
-void* (__cdecl *MSVCRT_operator_new)(MSVCP_size_t);
+void* (__cdecl *MSVCRT_operator_new)(size_t);
 void (__cdecl *MSVCRT_operator_delete)(void*);
 void* (__cdecl *MSVCRT_set_new_handler)(void*);
 

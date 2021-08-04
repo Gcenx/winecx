@@ -28,7 +28,6 @@
 #include "winternl.h"
 #include "winnt.h"
 #include "wine/heap.h"
-#include "wine/library.h"
 #include "wine/debug.h"
 #include "wine/wgl.h"
 #include "wine/wgl_driver.h"
@@ -38,9 +37,7 @@
 #define __gl_h_
 #define __gltypes_h_
 #include <OpenGL/OpenGL.h>
-#define GLUnurbs mac_GLUnurbs
 #include <OpenGL/glu.h>
-#undef GLUnurbs
 #include <OpenGL/CGLRenderers.h>
 #include <dlfcn.h>
 
@@ -89,6 +86,7 @@ struct wgl_context
 #ifdef __i386_on_x86_64__
     LONG                    last_error;
     CFMutableDictionaryRef  mapped_buffers;
+    void                   *pending_mapped;
 #endif
 };
 
@@ -130,7 +128,6 @@ static struct opengl_funcs opengl_funcs;
 
 #define USE_GL_FUNC(name) #name,
 static const char *opengl_func_names[] = { ALL_WGL_FUNCS };
-static const char *glu_func_names[] = { ALL_GLU_FUNCS }; /* CrossOver Hack 10798 */
 #undef USE_GL_FUNC
 
 #include "wine/hostaddrspace_enter.h"
@@ -773,7 +770,8 @@ static void enum_renderer_pixel_formats(renderer_properties renderer, CFMutableA
 
                         if (!(renderer.stencil_modes & depth_stencil_modes[stencil_mode].mode))
                             continue;
-                        if (accelerated && depth_stencil_modes[depth_mode].bits != 24 && stencil_mode > 0)
+                        if (accelerated && depth_stencil_modes[depth_mode].bits != 24 &&
+                            depth_stencil_modes[depth_mode].bits != 32 && stencil_mode > 0)
                             continue;
 
                         attribs[n++] = kCGLPFAStencilSize;
@@ -2239,13 +2237,17 @@ static void set_mapped_buffer(CFMutableDictionaryRef mapped_buffers, GLuint buff
 /**********************************************************************
  *              free_mapped_buffer
  */
-static void free_mapped_buffer(CFMutableDictionaryRef mapped_buffers, GLuint buffer)
+static void free_mapped_buffer(struct wgl_context *context, GLuint buffer)
 {
+    CFMutableDictionaryRef mapped_buffers = context->mapped_buffers;
     const void * HOSTPTR addr;
     if ((addr = CFDictionaryGetValue(mapped_buffers, (const void * HOSTPTR)(ULONG_HOSTPTR)buffer)))
     {
         TRACE("buffer %u address %p\n", buffer, addr);
-        VirtualFree(ADDRSPACECAST(void *, addr), 0, MEM_RELEASE);
+        if (context->pending_mapped)
+            VirtualFree(context->pending_mapped, 0, MEM_RELEASE);
+        context->pending_mapped = ADDRSPACECAST(void *, addr);
+        CFDictionaryRemoveValue(mapped_buffers, (const void * HOSTPTR)(ULONG_HOSTPTR)buffer);
     }
 }
 
@@ -2265,8 +2267,13 @@ static void free_mapped_buffer_applier(const void * HOSTPTR key, const void * HO
  *
  * Unmap all low memory associated with buffers in a context.
  */
-static void free_mapped_buffers(CFMutableDictionaryRef mapped_buffers)
+static void free_mapped_buffers(struct wgl_context *context)
 {
+    CFMutableDictionaryRef mapped_buffers = context->mapped_buffers;
+
+    if (context->pending_mapped)
+        VirtualFree(context->pending_mapped, 0, MEM_RELEASE);
+    context->pending_mapped = NULL;
     CFDictionaryApplyFunction(mapped_buffers, free_mapped_buffer_applier, NULL);
     CFRelease(mapped_buffers);
 }
@@ -2464,7 +2471,7 @@ static void macdrv_glDeleteBuffers(GLsizei n, const GLuint * HOSTPTR buffers)
     struct wgl_context *current = NtCurrentTeb()->glContext;
     GLsizei i;
     for (i = 0; i < n; i++)
-        free_mapped_buffer(current->mapped_buffers, buffers[i]);
+        free_mapped_buffer(current, buffers[i]);
 
     pglDeleteBuffers(n, buffers);
 }
@@ -2517,24 +2524,15 @@ static GLenum macdrv_glGetError(void)
     return pglGetError();
 }
 
-
-/**********************************************************************
- *              macdrv_glMapBuffer
- *
- * Hook into glMapBuffer to map its memory into the lower 4 GB if necessary.
- */
-static void * HOSTPTR macdrv_glMapBuffer(GLenum target, GLenum access)
+static void * HOSTPTR remap_memory(void * HOSTPTR hostaddr, GLint size, GLenum target, BOOL readonly)
 {
     struct wgl_context *current = NtCurrentTeb()->glContext;
-    GLuint buffer;
-    GLint size;
-    void * HOSTPTR hostaddr;
-    mach_vm_address_t lowaddr;
+    vm_prot_t cur_protection, max_protection;
+    mach_vm_address_t lowaddr, base;
+    mach_vm_size_t aligned_size;
     kern_return_t kr;
+    GLuint buffer;
 
-    TRACE("target 0x%04x access 0x%04x\n", target, access);
-
-    hostaddr = pglMapBuffer(target, access);
     TRACE("    host address %p\n", hostaddr);
     if (!hostaddr) return NULL;
 
@@ -2543,9 +2541,12 @@ static void * HOSTPTR macdrv_glMapBuffer(GLenum target, GLenum access)
         return hostaddr;
 
     /* Get some low memory, then remap it to the host allocation. */
-    opengl_funcs.ext.p_glGetBufferParameteriv(target, GL_BUFFER_SIZE, &size);
-    if (!(lowaddr = (mach_vm_address_t)VirtualAlloc(NULL, size, MEM_COMMIT,
-                                                    (access == GL_READ_ONLY) ? PAGE_READONLY : PAGE_READWRITE)))
+    base = (vm_map_address_t)hostaddr & ~PAGE_MASK;
+    aligned_size = (size + ((vm_map_offset_t)hostaddr - base) + PAGE_MASK) & ~PAGE_MASK;
+    TRACE("base host address 0x%08llx, aligned size %llu\n", base, aligned_size);
+
+    if (!(lowaddr = (mach_vm_address_t)VirtualAlloc(NULL, aligned_size, MEM_COMMIT,
+                                                    readonly ? PAGE_READONLY : PAGE_READWRITE)))
     {
         WARN("failed to find low memory to remap to\n");
         pglUnmapBuffer(target);
@@ -2553,8 +2554,8 @@ static void * HOSTPTR macdrv_glMapBuffer(GLenum target, GLenum access)
         return NULL;
     }
 
-    if ((kr = mach_vm_remap(mach_task_self(), &lowaddr, size, 0, VM_FLAGS_FIXED|VM_FLAGS_OVERWRITE,
-                            mach_task_self(), (mach_vm_address_t)hostaddr, FALSE, NULL, NULL,
+    if ((kr = mach_vm_remap(mach_task_self(), &lowaddr, aligned_size, 0, VM_FLAGS_FIXED|VM_FLAGS_OVERWRITE,
+                            mach_task_self(), base, FALSE, &cur_protection, &max_protection,
                             VM_INHERIT_DEFAULT)) != KERN_SUCCESS)
     {
         WARN("failed to remap memory; Mach error %d\n", kr);
@@ -2567,7 +2568,25 @@ static void * HOSTPTR macdrv_glMapBuffer(GLenum target, GLenum access)
     opengl_funcs.gl.p_glGetIntegerv(binding_for_target(target), (GLint * HOSTPTR)&buffer);
     set_mapped_buffer(current->mapped_buffers, buffer, (void *)(UINT32)lowaddr);
     TRACE("    remapped buffer %u to address 0x%08llx\n", buffer, lowaddr);
-    return (void * HOSTPTR)lowaddr;
+    return (void * HOSTPTR)(lowaddr + ((vm_map_offset_t)hostaddr - base));
+
+}
+
+/**********************************************************************
+ *              macdrv_glMapBuffer
+ *
+ * Hook into glMapBuffer to map its memory into the lower 4 GB if necessary.
+ */
+static void * HOSTPTR macdrv_glMapBuffer(GLenum target, GLenum access)
+{
+    GLint size;
+    void * HOSTPTR hostaddr;
+
+    TRACE("target 0x%04x access 0x%04x\n", target, access);
+
+    hostaddr = pglMapBuffer(target, access);
+    opengl_funcs.ext.p_glGetBufferParameteriv(target, GL_BUFFER_SIZE, &size);
+    return remap_memory(hostaddr, size, target, access == GL_READ_ONLY);
 }
 
 
@@ -2579,48 +2598,13 @@ static void * HOSTPTR macdrv_glMapBuffer(GLenum target, GLenum access)
 static void * HOSTPTR macdrv_glMapBufferRange(GLenum target, WINEGLDEF(GLintptr) offset,
                                               WINEGLDEF(GLsizeiptr) size, GLbitfield access)
 {
-    struct wgl_context *current = NtCurrentTeb()->glContext;
-    GLuint buffer;
     void * HOSTPTR hostaddr;
-    kern_return_t kr;
-    mach_vm_address_t lowaddr;
 
     TRACE("target 0x%04x offset %ld/0x%08lx size %ld/0x%08lx access 0x%04x\n",
           target, offset, offset, size, size, access);
 
     hostaddr = pglMapBufferRange(target, offset, size, access);
-    TRACE("    host address %p\n", hostaddr);
-    if (!hostaddr) return NULL;
-
-    /* If this pointer is already below 4 GB, we don't need to do anything. */
-    if ((ULONG_HOSTPTR)hostaddr < 0x100000000ULL)
-        return hostaddr;
-
-    /* Get some low memory, then remap it to the host allocation. */
-    if (!(lowaddr = (mach_vm_address_t)VirtualAlloc(NULL, (SIZE_T)size, MEM_COMMIT,
-                                                    (access & GL_MAP_WRITE_BIT) ? PAGE_READWRITE : PAGE_READONLY)))
-    {
-        WARN("failed to find low memory to remap to\n");
-        pglUnmapBuffer(target);
-        InterlockedExchange(&current->last_error, GL_OUT_OF_MEMORY);
-        return NULL;
-    }
-
-    if ((kr = mach_vm_remap(mach_task_self(), &lowaddr, size, 0, VM_FLAGS_FIXED|VM_FLAGS_OVERWRITE,
-                            mach_task_self(), (mach_vm_address_t)hostaddr, FALSE, NULL, NULL,
-                            VM_INHERIT_DEFAULT)) != KERN_SUCCESS)
-    {
-        WARN("failed to remap memory; Mach error %d\n", kr);
-        VirtualFree((void *)(UINT32)lowaddr, 0, MEM_RELEASE);
-        pglUnmapBuffer(target);
-        InterlockedExchange(&current->last_error, GL_OUT_OF_MEMORY);
-        return NULL;
-    }
-
-    opengl_funcs.gl.p_glGetIntegerv(binding_for_target(target), (GLint * HOSTPTR)&buffer);
-    set_mapped_buffer(current->mapped_buffers, buffer, (void *)(UINT32)lowaddr);
-    TRACE("    remapped buffer %u to address 0x%08llx\n", buffer, lowaddr);
-    return (void * HOSTPTR)lowaddr;
+    return remap_memory(hostaddr, size, target, !(access & GL_MAP_WRITE_BIT));
 }
 
 
@@ -2639,7 +2623,7 @@ static GLboolean macdrv_glUnmapBuffer(GLenum target)
     TRACE("target 0x%04x\n", target);
 
     opengl_funcs.gl.p_glGetIntegerv(binding_for_target(target), (GLint * HOSTPTR)&buffer);
-    free_mapped_buffer(current->mapped_buffers, buffer);
+    free_mapped_buffer(current, buffer);
 
     return pglUnmapBuffer(target);
 }
@@ -4552,11 +4536,10 @@ static void load_extensions(void)
 }
 
 
-static BOOL init_opengl(void)
+static BOOL CALLBACK init_opengl(INIT_ONCE *init_once, void *context, void **param)
 {
     static BOOL init_done = FALSE;
     unsigned int i;
-    char buffer[200];
 
     if (init_done) return (opengl_handle != NULL);
     init_done = TRUE;
@@ -4570,28 +4553,21 @@ static BOOL init_opengl(void)
         return FALSE;
     }
 
-    opengl_handle = wine_dlopen("/System/Library/Frameworks/OpenGL.framework/OpenGL", RTLD_LAZY|RTLD_LOCAL|RTLD_NOLOAD, buffer, sizeof(buffer));
+    opengl_handle = dlopen("/System/Library/Frameworks/OpenGL.framework/OpenGL", RTLD_LAZY|RTLD_LOCAL|RTLD_NOLOAD);
     if (!opengl_handle)
     {
-        ERR("Failed to load OpenGL: %s\n", buffer);
+        ERR("Failed to load OpenGL: %s\n", dlerror());
         ERR("OpenGL support is disabled.\n");
         return FALSE;
     }
 
     for (i = 0; i < ARRAY_SIZE(opengl_func_names); i++)
     {
-        if (!(((void * HOSTPTR *)&opengl_funcs.gl)[i] = wine_dlsym(opengl_handle, opengl_func_names[i], NULL, 0)))
+        if (!(((void * HOSTPTR *)&opengl_funcs.gl)[i] = dlsym(opengl_handle, opengl_func_names[i])))
         {
             ERR("%s not found in OpenGL, disabling.\n", opengl_func_names[i]);
             goto failed;
         }
-    }
-
-    /* CrossOver Hack 10798 */
-    for (i = 0; i < sizeof(glu_func_names)/sizeof(glu_func_names[0]); i++)
-    {
-        if (!(((void * HOSTPTR *)&opengl_funcs.glu)[i] = wine_dlsym(opengl_handle, glu_func_names[i], NULL, 0)))
-            WARN("%s not found in OpenGL\n", glu_func_names[i]);
     }
 
     if (!init_gl_info())
@@ -4615,7 +4591,7 @@ static BOOL init_opengl(void)
 
     /* redirect some OpenGL extension functions */
 #define REDIRECT2(func,impl) \
-    do { if ((p##func = wine_dlsym(opengl_handle, #func, NULL, 0))) { opengl_funcs.ext.p_##func = macdrv_##impl; } } while(0)
+    do { if ((p##func = dlsym(opengl_handle, #func))) { opengl_funcs.ext.p_##func = macdrv_##impl; } } while(0)
 #define REDIRECT(func) REDIRECT2(func,func)
     REDIRECT(glCopyColorTable);
 #ifdef __i386_on_x86_64__
@@ -4631,8 +4607,16 @@ static BOOL init_opengl(void)
 #endif
 #undef REDIRECT
 
+    /* make sure to initialize extension function pointers that we use
+     * in our wrappers */
     if (gluCheckExtension((GLubyte*)"GL_APPLE_flush_render", (GLubyte*)gl_info.glExtensions))
-        pglFlushRenderAPPLE = wine_dlsym(opengl_handle, "glFlushRenderAPPLE", NULL, 0);
+        pglFlushRenderAPPLE = dlsym(opengl_handle, "glFlushRenderAPPLE");
+#ifdef __i386_on_x86_64__
+    opengl_funcs.ext.p_glGetBufferParameteriv = dlsym(opengl_handle, "glGetBufferParameteriv");
+    if (!opengl_funcs.ext.p_glGetBufferParameteriv)
+        opengl_funcs.ext.p_glGetBufferParameteriv = dlsym(opengl_handle, "glGetBufferParameterivARB");
+    TRACE("p_glGetBufferParameteriv %p\n", opengl_funcs.ext.p_glGetBufferParameteriv);
+#endif
 
     load_extensions();
     if (!init_pixel_formats())
@@ -4641,7 +4625,7 @@ static BOOL init_opengl(void)
     return TRUE;
 
 failed:
-    wine_dlclose(opengl_handle, NULL, 0);
+    dlclose(opengl_handle);
     opengl_handle = NULL;
     return FALSE;
 }
@@ -4673,7 +4657,7 @@ void sync_gl_view(struct macdrv_win_data* data, const RECT* old_whole_rect, cons
 /**********************************************************************
  *              macdrv_wglDescribePixelFormat
  */
-int macdrv_wglDescribePixelFormat(HDC hdc, int fmt, UINT size, PIXELFORMATDESCRIPTOR *descr)
+static int WINAPI macdrv_wglDescribePixelFormat(HDC hdc, int fmt, UINT size, PIXELFORMATDESCRIPTOR *descr)
 {
     const pixel_format *pf;
     const struct color_mode *mode;
@@ -4739,7 +4723,7 @@ int macdrv_wglDescribePixelFormat(HDC hdc, int fmt, UINT size, PIXELFORMATDESCRI
 /***********************************************************************
  *              macdrv_wglCopyContext
  */
-static BOOL macdrv_wglCopyContext(struct wgl_context *src, struct wgl_context *dst, UINT mask)
+static BOOL WINAPI macdrv_wglCopyContext(struct wgl_context *src, struct wgl_context *dst, UINT mask)
 {
     CGLError err;
 
@@ -4754,7 +4738,7 @@ static BOOL macdrv_wglCopyContext(struct wgl_context *src, struct wgl_context *d
 /***********************************************************************
  *              macdrv_wglCreateContext
  */
-static struct wgl_context *macdrv_wglCreateContext(HDC hdc)
+static struct wgl_context * WINAPI macdrv_wglCreateContext(HDC hdc)
 {
     struct wgl_context *context;
 
@@ -4768,7 +4752,7 @@ static struct wgl_context *macdrv_wglCreateContext(HDC hdc)
 /***********************************************************************
  *              macdrv_wglDeleteContext
  */
-static BOOL macdrv_wglDeleteContext(struct wgl_context *context)
+static BOOL WINAPI macdrv_wglDeleteContext(struct wgl_context *context)
 {
     TRACE("deleting context %p/%p/%p\n", context, context->context, context->cglcontext);
 
@@ -4778,7 +4762,7 @@ static BOOL macdrv_wglDeleteContext(struct wgl_context *context)
 
     macdrv_dispose_opengl_context(context->context);
 #ifdef __i386_on_x86_64__
-    free_mapped_buffers(context->mapped_buffers);
+    free_mapped_buffers(context);
 #endif
     return HeapFree(GetProcessHeap(), 0, context);
 }
@@ -4786,7 +4770,7 @@ static BOOL macdrv_wglDeleteContext(struct wgl_context *context)
 /***********************************************************************
  *              macdrv_wglGetPixelFormat
  */
-static int macdrv_wglGetPixelFormat(HDC hdc)
+static int WINAPI macdrv_wglGetPixelFormat(HDC hdc)
 {
     int format;
 
@@ -4808,12 +4792,12 @@ static int macdrv_wglGetPixelFormat(HDC hdc)
 /***********************************************************************
  *              macdrv_wglGetProcAddress
  */
-static WINEGLDEF(PROC) macdrv_wglGetProcAddress(const char *proc)
+static WINEGLDEF(PROC) WINAPI macdrv_wglGetProcAddress(const char *proc)
 {
     void *HOSTPTR ret;
 
     if (!strncmp(proc, "wgl", 3)) return NULL;
-    ret = wine_dlsym(opengl_handle, proc, NULL, 0);
+    ret = dlsym(opengl_handle, proc);
     if (ret)
     {
         if (TRACE_ON(wgl))
@@ -4833,7 +4817,7 @@ static WINEGLDEF(PROC) macdrv_wglGetProcAddress(const char *proc)
 /***********************************************************************
  *              macdrv_wglMakeCurrent
  */
-static BOOL macdrv_wglMakeCurrent(HDC hdc, struct wgl_context *context)
+static BOOL WINAPI macdrv_wglMakeCurrent(HDC hdc, struct wgl_context *context)
 {
     TRACE("hdc %p context %p/%p/%p\n", hdc, context, (context ? context->context : NULL),
           (context ? context->cglcontext : NULL));
@@ -4844,7 +4828,7 @@ static BOOL macdrv_wglMakeCurrent(HDC hdc, struct wgl_context *context)
 /**********************************************************************
  *              macdrv_wglSetPixelFormat
  */
-static BOOL macdrv_wglSetPixelFormat(HDC hdc, int fmt, const PIXELFORMATDESCRIPTOR *descr)
+static BOOL WINAPI macdrv_wglSetPixelFormat(HDC hdc, int fmt, const PIXELFORMATDESCRIPTOR *descr)
 {
     return set_pixel_format(hdc, fmt, FALSE);
 }
@@ -4852,7 +4836,7 @@ static BOOL macdrv_wglSetPixelFormat(HDC hdc, int fmt, const PIXELFORMATDESCRIPT
 /***********************************************************************
  *              macdrv_wglShareLists
  */
-static BOOL macdrv_wglShareLists(struct wgl_context *org, struct wgl_context *dest)
+static BOOL WINAPI macdrv_wglShareLists(struct wgl_context *org, struct wgl_context *dest)
 {
     macdrv_opengl_context saved_context;
     CGLContextObj saved_cglcontext;
@@ -4905,7 +4889,7 @@ static BOOL macdrv_wglShareLists(struct wgl_context *org, struct wgl_context *de
 /**********************************************************************
  *              macdrv_wglSwapBuffers
  */
-static BOOL macdrv_wglSwapBuffers(HDC hdc)
+static BOOL WINAPI macdrv_wglSwapBuffers(HDC hdc)
 {
     struct wgl_context *context = NtCurrentTeb()->glContext;
     BOOL match = FALSE;
@@ -4990,13 +4974,15 @@ static struct opengl_funcs opengl_funcs =
  */
 struct opengl_funcs * CDECL macdrv_wine_get_wgl_driver(PHYSDEV dev, UINT version)
 {
+    static INIT_ONCE opengl_init = INIT_ONCE_STATIC_INIT;
+
     if (version != WINE_WGL_DRIVER_VERSION)
     {
         ERR("version mismatch, opengl32 wants %u but macdrv has %u\n", version, WINE_WGL_DRIVER_VERSION);
         return NULL;
     }
 
-    if (!init_opengl()) return (void *)-1;
+    if (!InitOnceExecuteOnce(&opengl_init, init_opengl, NULL, NULL)) return (void *)-1;
 
     return &opengl_funcs;
 }

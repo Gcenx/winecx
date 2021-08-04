@@ -27,52 +27,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(jscript);
 
-static const WCHAR NaNW[] = {'N','a','N',0};
-static const WCHAR InfinityW[] = {'I','n','f','i','n','i','t','y',0};
-static const WCHAR ArrayW[] = {'A','r','r','a','y',0};
-static const WCHAR BooleanW[] = {'B','o','o','l','e','a','n',0};
-static const WCHAR DateW[] = {'D','a','t','e',0};
-static const WCHAR ErrorW[] = {'E','r','r','o','r',0};
-static const WCHAR EvalErrorW[] = {'E','v','a','l','E','r','r','o','r',0};
-static const WCHAR RangeErrorW[] = {'R','a','n','g','e','E','r','r','o','r',0};
-static const WCHAR ReferenceErrorW[] = {'R','e','f','e','r','e','n','c','e','E','r','r','o','r',0};
-static const WCHAR SyntaxErrorW[] = {'S','y','n','t','a','x','E','r','r','o','r',0};
-static const WCHAR TypeErrorW[] = {'T','y','p','e','E','r','r','o','r',0};
-static const WCHAR URIErrorW[] = {'U','R','I','E','r','r','o','r',0};
-static const WCHAR FunctionW[] = {'F','u','n','c','t','i','o','n',0};
-static const WCHAR NumberW[] = {'N','u','m','b','e','r',0};
-static const WCHAR ObjectW[] = {'O','b','j','e','c','t',0};
-static const WCHAR StringW[] = {'S','t','r','i','n','g',0};
-static const WCHAR RegExpW[] = {'R','e','g','E','x','p',0};
-static const WCHAR RegExpErrorW[] = {'R','e','g','E','x','p','E','r','r','o','r',0};
-static const WCHAR ActiveXObjectW[] = {'A','c','t','i','v','e','X','O','b','j','e','c','t',0};
-static const WCHAR VBArrayW[] = {'V','B','A','r','r','a','y',0};
-static const WCHAR EnumeratorW[] = {'E','n','u','m','e','r','a','t','o','r',0};
-static const WCHAR escapeW[] = {'e','s','c','a','p','e',0};
-static const WCHAR evalW[] = {'e','v','a','l',0};
-static const WCHAR isNaNW[] = {'i','s','N','a','N',0};
-static const WCHAR isFiniteW[] = {'i','s','F','i','n','i','t','e',0};
-static const WCHAR parseIntW[] = {'p','a','r','s','e','I','n','t',0};
-static const WCHAR parseFloatW[] = {'p','a','r','s','e','F','l','o','a','t',0};
-static const WCHAR unescapeW[] = {'u','n','e','s','c','a','p','e',0};
-static const WCHAR _GetObjectW[] = {'G','e','t','O','b','j','e','c','t',0};
-static const WCHAR ScriptEngineW[] = {'S','c','r','i','p','t','E','n','g','i','n','e',0};
-static const WCHAR ScriptEngineMajorVersionW[] =
-    {'S','c','r','i','p','t','E','n','g','i','n','e','M','a','j','o','r','V','e','r','s','i','o','n',0};
-static const WCHAR ScriptEngineMinorVersionW[] =
-    {'S','c','r','i','p','t','E','n','g','i','n','e','M','i','n','o','r','V','e','r','s','i','o','n',0};
-static const WCHAR ScriptEngineBuildVersionW[] =
-    {'S','c','r','i','p','t','E','n','g','i','n','e','B','u','i','l','d','V','e','r','s','i','o','n',0};
-static const WCHAR CollectGarbageW[] = {'C','o','l','l','e','c','t','G','a','r','b','a','g','e',0};
-static const WCHAR MathW[] = {'M','a','t','h',0};
-static const WCHAR JSONW[] = {'J','S','O','N',0};
-static const WCHAR encodeURIW[] = {'e','n','c','o','d','e','U','R','I',0};
-static const WCHAR decodeURIW[] = {'d','e','c','o','d','e','U','R','I',0};
-static const WCHAR encodeURIComponentW[] = {'e','n','c','o','d','e','U','R','I','C','o','m','p','o','n','e','n','t',0};
-static const WCHAR decodeURIComponentW[] = {'d','e','c','o','d','e','U','R','I','C','o','m','p','o','n','e','n','t',0};
-
-static const WCHAR undefinedW[] = {'u','n','d','e','f','i','n','e','d',0};
-
 static int uri_char_table[] = {
     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, /* 00-0f */
     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, /* 10-1f */
@@ -204,10 +158,10 @@ HRESULT JSGlobal_eval(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, unsigned a
         return E_OUTOFMEMORY;
 
     TRACE("parsing %s\n", debugstr_jsval(argv[0]));
-    hres = compile_script(ctx, src, NULL, NULL, TRUE, FALSE, &code);
+    hres = compile_script(ctx, src, 0, 0, NULL, NULL, TRUE, FALSE, frame ? frame->bytecode->named_item : NULL, &code);
     if(FAILED(hres)) {
         WARN("parse (%s) failed: %08x\n", debugstr_jsval(argv[0]), hres);
-        return throw_syntax_error(ctx, hres, NULL);
+        return hres;
     }
 
     if(!frame || (frame->flags & EXEC_GLOBAL))
@@ -215,7 +169,7 @@ HRESULT JSGlobal_eval(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, unsigned a
     if(flags & DISPATCH_JSCRIPT_CALLEREXECSSOURCE)
         exec_flags |= EXEC_RETURN_TO_INTERP;
     hres = exec_source(ctx, exec_flags, code, &code->global_code, frame ? frame->scope : NULL,
-            frame ? frame->this_obj : NULL, NULL, frame ? frame->variable_obj : ctx->global, 0, NULL, r);
+            frame ? frame->this_obj : NULL, NULL, 0, NULL, r);
     release_bytecode(code);
     return hres;
 }
@@ -258,7 +212,7 @@ static HRESULT JSGlobal_isFinite(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
         if(FAILED(hres))
             return hres;
 
-        ret = is_finite(n);
+        ret = isfinite(n);
     }
 
     if(r)
@@ -547,14 +501,12 @@ static HRESULT JSGlobal_GetObject(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags
 static HRESULT JSGlobal_ScriptEngine(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, unsigned argc, jsval_t *argv,
         jsval_t *r)
 {
-    static const WCHAR JScriptW[] = {'J','S','c','r','i','p','t',0};
-
     TRACE("\n");
 
     if(r) {
         jsstr_t *ret;
 
-        ret = jsstr_alloc(JScriptW);
+        ret = jsstr_alloc(L"JScript");
         if(!ret)
             return E_OUTOFMEMORY;
 
@@ -632,7 +584,7 @@ static HRESULT JSGlobal_encodeURI(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags
             i = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, ptr, 1, NULL, 0, NULL, NULL)*3;
             if(!i) {
                 jsstr_release(str);
-                return throw_uri_error(ctx, JS_E_INVALID_URI_CHAR, NULL);
+                return JS_E_INVALID_URI_CHAR;
             }
 
             len += i;
@@ -710,7 +662,7 @@ static HRESULT JSGlobal_decodeURI(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags
 
             if(!res) {
                 jsstr_release(str);
-                return throw_uri_error(ctx, JS_E_INVALID_URI_CODING, NULL);
+                return JS_E_INVALID_URI_CODING;
             }
 
             ptr += i*3+2;
@@ -783,7 +735,7 @@ static HRESULT JSGlobal_encodeURIComponent(script_ctx_t *ctx, vdisp_t *jsthis, W
             size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, ptr, 1, NULL, 0, NULL, NULL);
             if(!size) {
                 jsstr_release(str);
-                return throw_uri_error(ctx, JS_E_INVALID_URI_CHAR, NULL);
+                return JS_E_INVALID_URI_CHAR;
             }
             len += size*3;
         }
@@ -931,23 +883,23 @@ static HRESULT JSGlobal_decodeURIComponent(script_ctx_t *ctx, vdisp_t *jsthis, W
 }
 
 static const builtin_prop_t JSGlobal_props[] = {
-    {CollectGarbageW,            JSGlobal_CollectGarbage,            PROPF_METHOD},
-    {_GetObjectW,                JSGlobal_GetObject,                 PROPF_METHOD|2},
-    {ScriptEngineW,              JSGlobal_ScriptEngine,              PROPF_METHOD},
-    {ScriptEngineBuildVersionW,  JSGlobal_ScriptEngineBuildVersion,  PROPF_METHOD},
-    {ScriptEngineMajorVersionW,  JSGlobal_ScriptEngineMajorVersion,  PROPF_METHOD},
-    {ScriptEngineMinorVersionW,  JSGlobal_ScriptEngineMinorVersion,  PROPF_METHOD},
-    {decodeURIW,                 JSGlobal_decodeURI,                 PROPF_METHOD|1},
-    {decodeURIComponentW,        JSGlobal_decodeURIComponent,        PROPF_METHOD|1},
-    {encodeURIW,                 JSGlobal_encodeURI,                 PROPF_METHOD|1},
-    {encodeURIComponentW,        JSGlobal_encodeURIComponent,        PROPF_METHOD|1},
-    {escapeW,                    JSGlobal_escape,                    PROPF_METHOD|1},
-    {evalW,                      JSGlobal_eval,                      PROPF_METHOD|1},
-    {isFiniteW,                  JSGlobal_isFinite,                  PROPF_METHOD|1},
-    {isNaNW,                     JSGlobal_isNaN,                     PROPF_METHOD|1},
-    {parseFloatW,                JSGlobal_parseFloat,                PROPF_METHOD|1},
-    {parseIntW,                  JSGlobal_parseInt,                  PROPF_METHOD|2},
-    {unescapeW,                  JSGlobal_unescape,                  PROPF_METHOD|1}
+    {L"CollectGarbage",            JSGlobal_CollectGarbage,            PROPF_METHOD},
+    {L"GetObject",                 JSGlobal_GetObject,                 PROPF_METHOD|2},
+    {L"ScriptEngine",              JSGlobal_ScriptEngine,              PROPF_METHOD},
+    {L"ScriptEngineBuildVersion",  JSGlobal_ScriptEngineBuildVersion,  PROPF_METHOD},
+    {L"ScriptEngineMajorVersion",  JSGlobal_ScriptEngineMajorVersion,  PROPF_METHOD},
+    {L"ScriptEngineMinorVersion",  JSGlobal_ScriptEngineMinorVersion,  PROPF_METHOD},
+    {L"decodeURI",                 JSGlobal_decodeURI,                 PROPF_METHOD|1},
+    {L"decodeURIComponent",        JSGlobal_decodeURIComponent,        PROPF_METHOD|1},
+    {L"encodeURI",                 JSGlobal_encodeURI,                 PROPF_METHOD|1},
+    {L"encodeURIComponent",        JSGlobal_encodeURIComponent,        PROPF_METHOD|1},
+    {L"escape",                    JSGlobal_escape,                    PROPF_METHOD|1},
+    {L"eval",                      JSGlobal_eval,                      PROPF_METHOD|1},
+    {L"isFinite",                  JSGlobal_isFinite,                  PROPF_METHOD|1},
+    {L"isNaN",                     JSGlobal_isNaN,                     PROPF_METHOD|1},
+    {L"parseFloat",                JSGlobal_parseFloat,                PROPF_METHOD|1},
+    {L"parseInt",                  JSGlobal_parseInt,                  PROPF_METHOD|2},
+    {L"unescape",                  JSGlobal_unescape,                  PROPF_METHOD|1}
 };
 
 static const builtin_info_t JSGlobal_info = {
@@ -967,7 +919,7 @@ static HRESULT init_constructors(script_ctx_t *ctx, jsdisp_t *object_prototype)
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, FunctionW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"Function", PROPF_WRITABLE,
                                        jsval_obj(ctx->function_constr));
     if(FAILED(hres))
         return hres;
@@ -976,7 +928,7 @@ static HRESULT init_constructors(script_ctx_t *ctx, jsdisp_t *object_prototype)
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, ObjectW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"Object", PROPF_WRITABLE,
                                        jsval_obj(ctx->object_constr));
     if(FAILED(hres))
         return hres;
@@ -985,7 +937,7 @@ static HRESULT init_constructors(script_ctx_t *ctx, jsdisp_t *object_prototype)
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, ArrayW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"Array", PROPF_WRITABLE,
                                        jsval_obj(ctx->array_constr));
     if(FAILED(hres))
         return hres;
@@ -994,7 +946,7 @@ static HRESULT init_constructors(script_ctx_t *ctx, jsdisp_t *object_prototype)
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, BooleanW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"Boolean", PROPF_WRITABLE,
                                        jsval_obj(ctx->bool_constr));
     if(FAILED(hres))
         return hres;
@@ -1003,7 +955,7 @@ static HRESULT init_constructors(script_ctx_t *ctx, jsdisp_t *object_prototype)
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, DateW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"Date", PROPF_WRITABLE,
                                        jsval_obj(ctx->date_constr));
     if(FAILED(hres))
         return hres;
@@ -1012,7 +964,7 @@ static HRESULT init_constructors(script_ctx_t *ctx, jsdisp_t *object_prototype)
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, EnumeratorW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"Enumerator", PROPF_WRITABLE,
                                        jsval_obj(ctx->enumerator_constr));
     if(FAILED(hres))
         return hres;
@@ -1021,42 +973,42 @@ static HRESULT init_constructors(script_ctx_t *ctx, jsdisp_t *object_prototype)
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, ErrorW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"Error", PROPF_WRITABLE,
                                        jsval_obj(ctx->error_constr));
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, EvalErrorW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"EvalError", PROPF_WRITABLE,
                                        jsval_obj(ctx->eval_error_constr));
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, RangeErrorW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"RangeError", PROPF_WRITABLE,
                                        jsval_obj(ctx->range_error_constr));
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, ReferenceErrorW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"ReferenceError", PROPF_WRITABLE,
                                        jsval_obj(ctx->reference_error_constr));
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, RegExpErrorW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"RegExpError", PROPF_WRITABLE,
                                        jsval_obj(ctx->regexp_error_constr));
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, SyntaxErrorW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"SyntaxError", PROPF_WRITABLE,
                                        jsval_obj(ctx->syntax_error_constr));
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, TypeErrorW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"TypeError", PROPF_WRITABLE,
                                        jsval_obj(ctx->type_error_constr));
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, URIErrorW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"URIError", PROPF_WRITABLE,
                                        jsval_obj(ctx->uri_error_constr));
     if(FAILED(hres))
         return hres;
@@ -1065,7 +1017,7 @@ static HRESULT init_constructors(script_ctx_t *ctx, jsdisp_t *object_prototype)
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, NumberW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"Number", PROPF_WRITABLE,
                                        jsval_obj(ctx->number_constr));
     if(FAILED(hres))
         return hres;
@@ -1074,7 +1026,7 @@ static HRESULT init_constructors(script_ctx_t *ctx, jsdisp_t *object_prototype)
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, RegExpW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"RegExp", PROPF_WRITABLE,
                                        jsval_obj(ctx->regexp_constr));
     if(FAILED(hres))
         return hres;
@@ -1083,7 +1035,7 @@ static HRESULT init_constructors(script_ctx_t *ctx, jsdisp_t *object_prototype)
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, StringW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"String", PROPF_WRITABLE,
                                        jsval_obj(ctx->string_constr));
     if(FAILED(hres))
         return hres;
@@ -1092,7 +1044,7 @@ static HRESULT init_constructors(script_ctx_t *ctx, jsdisp_t *object_prototype)
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, VBArrayW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"VBArray", PROPF_WRITABLE,
                                        jsval_obj(ctx->vbarray_constr));
     if(FAILED(hres))
         return hres;
@@ -1103,7 +1055,7 @@ static HRESULT init_constructors(script_ctx_t *ctx, jsdisp_t *object_prototype)
 HRESULT init_global(script_ctx_t *ctx)
 {
     unsigned const_flags = ctx->version >= SCRIPTLANGUAGEVERSION_ES5 ? 0 : PROPF_WRITABLE;
-    jsdisp_t *math, *object_prototype, *constr;
+    jsdisp_t *math, *constr;
     HRESULT hres;
 
     if(ctx->global)
@@ -1113,12 +1065,11 @@ HRESULT init_global(script_ctx_t *ctx)
     if(FAILED(hres))
         return hres;
 
-    hres = create_object_prototype(ctx, &object_prototype);
+    hres = create_object_prototype(ctx, &ctx->object_prototype);
     if(FAILED(hres))
         return hres;
 
-    hres = init_constructors(ctx, object_prototype);
-    jsdisp_release(object_prototype);
+    hres = init_constructors(ctx, ctx->object_prototype);
     if(FAILED(hres))
         return hres;
 
@@ -1126,7 +1077,7 @@ HRESULT init_global(script_ctx_t *ctx)
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, MathW, PROPF_WRITABLE, jsval_obj(math));
+    hres = jsdisp_define_data_property(ctx->global, L"Math", PROPF_WRITABLE, jsval_obj(math));
     jsdisp_release(math);
     if(FAILED(hres))
         return hres;
@@ -1138,7 +1089,7 @@ HRESULT init_global(script_ctx_t *ctx)
         if(FAILED(hres))
             return hres;
 
-        hres = jsdisp_define_data_property(ctx->global, JSONW, PROPF_WRITABLE, jsval_obj(json));
+        hres = jsdisp_define_data_property(ctx->global, L"JSON", PROPF_WRITABLE, jsval_obj(json));
         jsdisp_release(json);
         if(FAILED(hres))
             return hres;
@@ -1148,20 +1099,23 @@ HRESULT init_global(script_ctx_t *ctx)
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, ActiveXObjectW, PROPF_WRITABLE,
+    hres = jsdisp_define_data_property(ctx->global, L"ActiveXObject", PROPF_WRITABLE,
                                        jsval_obj(constr));
     jsdisp_release(constr);
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, undefinedW, const_flags, jsval_undefined());
+    hres = jsdisp_define_data_property(ctx->global, L"undefined", const_flags, jsval_undefined());
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, NaNW, const_flags, jsval_number(NAN));
+    hres = jsdisp_define_data_property(ctx->global, L"NaN", const_flags, jsval_number(NAN));
     if(FAILED(hres))
         return hres;
 
-    hres = jsdisp_define_data_property(ctx->global, InfinityW, const_flags, jsval_number(INFINITY));
-    return hres;
+    hres = jsdisp_define_data_property(ctx->global, L"Infinity", const_flags, jsval_number(INFINITY));
+    if(FAILED(hres))
+        return hres;
+
+    return init_set_constructor(ctx);
 }

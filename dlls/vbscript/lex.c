@@ -310,20 +310,22 @@ static int hex_to_int(WCHAR c)
 static int parse_hex_literal(parser_ctx_t *ctx, LONG *ret)
 {
     const WCHAR *begin = ctx->ptr;
-    LONG l = 0, d;
+    unsigned l = 0, d;
 
     while((d = hex_to_int(*++ctx->ptr)) != -1)
         l = l*16 + d;
 
-    if(begin + 9 /* max digits+1 */ < ctx->ptr || (*ctx->ptr != '&' && is_identifier_char(*ctx->ptr))) {
+    if(begin + 9 /* max digits+1 */ < ctx->ptr) {
         FIXME("invalid literal\n");
         return 0;
     }
 
-    if(*ctx->ptr == '&')
+    if(*ctx->ptr == '&') {
         ctx->ptr++;
-
-    *ret = l;
+        *ret = l;
+    }else {
+        *ret = l == (UINT16)l ? (INT16)l : l;
+    }
     return tInt;
 }
 
@@ -335,8 +337,7 @@ static void skip_spaces(parser_ctx_t *ctx)
 
 static int comment_line(parser_ctx_t *ctx)
 {
-    static const WCHAR newlineW[] = {'\n','\r',0};
-    ctx->ptr = wcspbrk(ctx->ptr, newlineW);
+    ctx->ptr = wcspbrk(ctx->ptr, L"\n\r");
     if(ctx->ptr)
         ctx->ptr++;
     else
@@ -344,13 +345,14 @@ static int comment_line(parser_ctx_t *ctx)
     return tNL;
 }
 
-static int parse_next_token(void *lval, parser_ctx_t *ctx)
+static int parse_next_token(void *lval, unsigned *loc, parser_ctx_t *ctx)
 {
     WCHAR c;
 
     skip_spaces(ctx);
+    *loc = ctx->ptr - ctx->code;
     if(ctx->ptr == ctx->end)
-        return ctx->last_token == tNL ? tEOF : tNL;
+        return ctx->last_token == tNL ? 0 : tNL;
 
     c = *ctx->ptr;
 
@@ -390,11 +392,18 @@ static int parse_next_token(void *lval, parser_ctx_t *ctx)
         /*
          * We need to distinguish between '.' used as part of a member expression and
          * a beginning of a dot expression (a member expression accessing with statement
-         * expression).
+         * expression) and a floating point number like ".2" .
          */
         c = ctx->ptr > ctx->code ? ctx->ptr[-1] : '\n';
+        if (is_identifier_char(c) || c == ')') {
+            ctx->ptr++;
+            return '.';
+        }
+        c = ctx->ptr[1];
+        if('0' <= c && c <= '9')
+            return parse_numeric_literal(ctx, lval);
         ctx->ptr++;
-        return is_identifier_char(c) || c == ')' ? '.' : tDOT;
+        return tDOT;
     case '-':
         if(ctx->is_html && ctx->ptr[1] == '-' && ctx->ptr[2] == '>')
             return comment_line(ctx);
@@ -450,7 +459,7 @@ static int parse_next_token(void *lval, parser_ctx_t *ctx)
     return 0;
 }
 
-int parser_lex(void *lval, parser_ctx_t *ctx)
+int parser_lex(void *lval, unsigned *loc, parser_ctx_t *ctx)
 {
     int ret;
 
@@ -461,7 +470,7 @@ int parser_lex(void *lval, parser_ctx_t *ctx)
     }
 
     while(1) {
-        ret = parse_next_token(lval, ctx);
+        ret = parse_next_token(lval, loc, ctx);
         if(ret == '_') {
             skip_spaces(ctx);
             if(*ctx->ptr != '\n' && *ctx->ptr != '\r') {

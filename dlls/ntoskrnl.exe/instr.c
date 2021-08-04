@@ -33,6 +33,22 @@
 #include "wine/debug.h"
 #include "wine/exception.h"
 
+#define KSHARED_USER_DATA_PAGE_SIZE 0x1000
+
+#define CR0_PE 0x00000001 /* Protected Mode */
+#define CR0_ET 0x00000010 /* Extension Type */
+#define CR0_NE 0x00000020 /* Numeric Error */
+#define CR0_WP 0x00010000 /* Write Protect */
+#define CR0_AM 0x00040000 /* Alignment Mask */
+#define CR0_PG 0x80000000 /* Paging */
+
+enum instr_op
+{
+    INSTR_OP_MOV,
+    INSTR_OP_OR,
+    INSTR_OP_XOR,
+};
+
 #ifdef __i386__
 
 WINE_DEFAULT_DEBUG_CHANNEL(int);
@@ -341,7 +357,7 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
                 TRACE( "mov cr%u,%s at 0x%08x\n", reg, reg_names[instr[2] & 7], context->Eip );
                 switch (reg)
                 {
-                case 0: *data = 0x10; break; /* FIXME: set more bits ? */
+                case 0: *data = CR0_PE|CR0_ET|CR0_NE|CR0_WP|CR0_AM|CR0_PG; break;
                 case 2: *data = 0; break;
                 case 3: *data = 0; break;
                 case 4: *data = 0; break;
@@ -481,7 +497,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(int);
 #define SIB_INDEX( sib, rex )   (((sib) >> 3) & 7) | (((rex) & REX_X) ? 8 : 0)
 #define SIB_BASE( sib, rex )    (((sib) & 7) | (((rex) & REX_B) ? 8 : 0))
 
-extern BYTE* CDECL __wine_user_shared_data(void);
+/* keep in sync with dlls/ntdll/thread.c:thread_init */
+static const BYTE *wine_user_shared_data = (BYTE *)0x7ffe0000;
 static const BYTE *user_shared_data      = (BYTE *)0xfffff78000000000;
 
 static inline DWORD64 *get_int_reg( CONTEXT *context, int index )
@@ -500,20 +517,49 @@ static inline int get_op_size( int long_op, int rex )
 }
 
 /* store an operand into a register */
-static void store_reg_word( CONTEXT *context, BYTE regmodrm, const BYTE *addr, int long_op, int rex )
+static void store_reg_word( CONTEXT *context, BYTE regmodrm, const BYTE *addr, int long_op, int rex,
+        enum instr_op op )
 {
     int index = REGMODRM_REG( regmodrm, rex );
     BYTE *reg = (BYTE *)get_int_reg( context, index );
-    memcpy( reg, addr, get_op_size( long_op, rex ) );
+    int op_size = get_op_size( long_op, rex );
+    int i;
+
+    switch (op)
+    {
+        case INSTR_OP_MOV:
+            memcpy( reg, addr, op_size );
+            break;
+        case INSTR_OP_OR:
+            for (i = 0; i < op_size; ++i)
+                reg[i] |= addr[i];
+            break;
+        case INSTR_OP_XOR:
+            for (i = 0; i < op_size; ++i)
+                reg[i] ^= addr[i];
+            break;
+    }
 }
 
 /* store an operand into a byte register */
-static void store_reg_byte( CONTEXT *context, BYTE regmodrm, const BYTE *addr, int rex )
+static void store_reg_byte( CONTEXT *context, BYTE regmodrm, const BYTE *addr, int rex, enum instr_op op )
 {
     int index = REGMODRM_REG( regmodrm, rex );
     BYTE *reg = (BYTE *)get_int_reg( context, index );
     if (!rex && index >= 4 && index < 8) reg -= (4 * sizeof(DWORD64) - 1); /* special case: ah, ch, dh, bh */
-    *reg = *addr;
+
+    switch (op)
+    {
+        case INSTR_OP_MOV:
+            *reg = *addr;
+            break;
+        case INSTR_OP_OR:
+            *reg |= *addr;
+            break;
+        case INSTR_OP_XOR:
+            *reg ^= *addr;
+            break;
+    }
 }
 
 /***********************************************************************
@@ -521,7 +567,7 @@ static void store_reg_byte( CONTEXT *context, BYTE regmodrm, const BYTE *addr, i
  *
  * Return the address of an instruction operand (from the mod/rm byte).
  */
-static BYTE *INSTR_GetOperandAddr( CONTEXT *context, BYTE *instr,
+static BYTE *INSTR_GetOperandAddr( CONTEXT *context, BYTE *instr, int addl_instr_len,
                                    int long_addr, int rex, int segprefix, int *len )
 {
     int mod, rm, ss = 0, off, have_sib = 0;
@@ -565,6 +611,7 @@ static BYTE *INSTR_GetOperandAddr( CONTEXT *context, BYTE *instr,
             if (!long_addr) base &= 0xffffffff;
             GET_VAL( &off, DWORD );
             base += (signed long)off;
+            base += (signed long)*len + (signed long)addl_instr_len;
         }
         break;
 
@@ -775,7 +822,11 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
                 context->Rax = (ULONG)syscall_address;
                 break;
             }
-            default: return ExceptionContinueSearch;
+            default:
+                FIXME("reg %#x, returning 0.\n", reg);
+                context->Rdx = 0;
+                context->Rax = 0;
+                break;
             }
             context->Rip += prefixlen + 2;
             return ExceptionContinueExecution;
@@ -783,16 +834,18 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
         case 0xb6: /* movzx Eb, Gv */
         case 0xb7: /* movzx Ew, Gv */
         {
-            BYTE *data = INSTR_GetOperandAddr( context, instr + 2, long_addr,
+            BYTE *data = INSTR_GetOperandAddr( context, instr + 2, prefixlen + 2, long_addr,
                                                rex, segprefix, &len );
             unsigned int data_size = (instr[1] == 0xb7) ? 2 : 1;
             SIZE_T offset = data - user_shared_data;
 
-            if (offset <= sizeof(KSHARED_USER_DATA) - data_size)
+            if (offset <= KSHARED_USER_DATA_PAGE_SIZE - data_size)
             {
                 ULONGLONG temp = 0;
-                memcpy( &temp, __wine_user_shared_data() + offset, data_size );
-                store_reg_word( context, instr[2], (BYTE *)&temp, long_op, rex );
+
+                TRACE("USD offset %#x at %p.\n", (unsigned int)offset, (void *)context->Rip);
+                memcpy( &temp, wine_user_shared_data + offset, data_size );
+                store_reg_word( context, instr[2], (BYTE *)&temp, long_op, rex, INSTR_OP_MOV );
                 context->Rip += prefixlen + len + 2;
                 return ExceptionContinueExecution;
             }
@@ -803,18 +856,35 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
 
     case 0x8a: /* mov Eb, Gb */
     case 0x8b: /* mov Ev, Gv */
+    case 0x0b: /* or  Ev, Gv */
+    case 0x33: /* xor Ev, Gv */
     {
-        BYTE *data = INSTR_GetOperandAddr( context, instr + 1, long_addr,
+        BYTE *data = INSTR_GetOperandAddr( context, instr + 1, prefixlen + 1, long_addr,
                                            rex, segprefix, &len );
         unsigned int data_size = (*instr == 0x8b) ? get_op_size( long_op, rex ) : 1;
         SIZE_T offset = data - user_shared_data;
 
-        if (offset <= sizeof(KSHARED_USER_DATA) - data_size)
+        if (offset <= KSHARED_USER_DATA_PAGE_SIZE - data_size)
         {
+            TRACE("USD offset %#x at %p.\n", (unsigned int)offset, (void *)context->Rip);
             switch (*instr)
             {
-            case 0x8a: store_reg_byte( context, instr[1], __wine_user_shared_data() + offset, rex ); break;
-            case 0x8b: store_reg_word( context, instr[1], __wine_user_shared_data() + offset, long_op, rex ); break;
+                case 0x8a:
+                    store_reg_byte( context, instr[1], wine_user_shared_data + offset,
+                            rex, INSTR_OP_MOV );
+                    break;
+                case 0x8b:
+                    store_reg_word( context, instr[1], wine_user_shared_data + offset,
+                            long_op, rex, INSTR_OP_MOV );
+                    break;
+                case 0x0b:
+                    store_reg_word( context, instr[1], wine_user_shared_data + offset,
+                            long_op, rex, INSTR_OP_OR );
+                    break;
+                case 0x33:
+                    store_reg_word( context, instr[1], wine_user_shared_data + offset,
+                            long_op, rex, INSTR_OP_XOR );
+                    break;
             }
             context->Rip += prefixlen + len + 1;
             return ExceptionContinueExecution;
@@ -830,9 +900,10 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
         SIZE_T offset = data - user_shared_data;
         len = long_addr ? sizeof(DWORD64) : sizeof(DWORD);
 
-        if (offset <= sizeof(KSHARED_USER_DATA) - data_size)
+        if (offset <= KSHARED_USER_DATA_PAGE_SIZE - data_size)
         {
-            memcpy( &context->Rax, __wine_user_shared_data() + offset, data_size );
+            TRACE("USD offset %#x at %p.\n", (unsigned int)offset, (void *)context->Rip);
+            memcpy( &context->Rax, wine_user_shared_data + offset, data_size );
             context->Rip += prefixlen + len + 1;
             return ExceptionContinueExecution;
         }

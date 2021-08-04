@@ -23,6 +23,7 @@
 #include "wine/port.h"
 
 #include <assert.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -105,6 +106,7 @@
 
 #include "winternl.h"
 #include "winioctl.h"
+#include "ddk/wdm.h"
 
 #if defined(HAVE_SYS_EPOLL_H) && defined(HAVE_EPOLL_CREATE)
 # include <sys/epoll.h>
@@ -217,6 +219,7 @@ static const struct object_ops fd_ops =
     no_map_access,            /* map_access */
     default_get_sd,           /* get_sd */
     default_set_sd,           /* set_sd */
+    no_get_full_name,         /* get_full_name */
     no_lookup_name,           /* lookup_name */
     no_link_name,             /* link_name */
     NULL,                     /* unlink_name */
@@ -258,6 +261,7 @@ static const struct object_ops device_ops =
     no_map_access,            /* map_access */
     default_get_sd,           /* get_sd */
     default_set_sd,           /* set_sd */
+    no_get_full_name,         /* get_full_name */
     no_lookup_name,           /* lookup_name */
     no_link_name,             /* link_name */
     NULL,                     /* unlink_name */
@@ -298,6 +302,7 @@ static const struct object_ops inode_ops =
     no_map_access,            /* map_access */
     default_get_sd,           /* get_sd */
     default_set_sd,           /* set_sd */
+    no_get_full_name,         /* get_full_name */
     no_lookup_name,           /* lookup_name */
     no_link_name,             /* link_name */
     NULL,                     /* unlink_name */
@@ -340,6 +345,7 @@ static const struct object_ops file_lock_ops =
     no_map_access,              /* map_access */
     default_get_sd,             /* get_sd */
     default_set_sd,             /* set_sd */
+    no_get_full_name,           /* get_full_name */
     no_lookup_name,             /* lookup_name */
     no_link_name,               /* link_name */
     NULL,                       /* unlink_name */
@@ -370,20 +376,64 @@ static file_pos_t max_unix_offset = OFF_T_MAX;
 struct timeout_user
 {
     struct list           entry;      /* entry in sorted timeout list */
-    timeout_t             when;       /* timeout expiry (absolute time) */
+    abstime_t             when;       /* timeout expiry */
     timeout_callback      callback;   /* callback function */
     void                 *private;    /* callback private data */
 };
 
-static struct list timeout_list = LIST_INIT(timeout_list);   /* sorted timeouts list */
+static struct list abs_timeout_list = LIST_INIT(abs_timeout_list); /* sorted absolute timeouts list */
+static struct list rel_timeout_list = LIST_INIT(rel_timeout_list); /* sorted relative timeouts list */
 timeout_t current_time;
+timeout_t monotonic_time;
 
-static inline void set_current_time(void)
+struct _KUSER_SHARED_DATA *user_shared_data = NULL;
+static const int user_shared_data_timeout = 16;
+
+static void set_user_shared_data_time(void)
+{
+    timeout_t tick_count = monotonic_time / 10000;
+
+    /* on X86 there should be total store order guarantees, so volatile is enough
+     * to ensure the stores aren't reordered by the compiler, and then they will
+     * always be seen in-order from other CPUs. On other archs, we need atomic
+     * intrinsics to guarantee that. */
+#if defined(__i386__) || defined(__x86_64__)
+    user_shared_data->SystemTime.High2Time = current_time >> 32;
+    user_shared_data->SystemTime.LowPart   = current_time;
+    user_shared_data->SystemTime.High1Time = current_time >> 32;
+
+    user_shared_data->InterruptTime.High2Time = monotonic_time >> 32;
+    user_shared_data->InterruptTime.LowPart   = monotonic_time;
+    user_shared_data->InterruptTime.High1Time = monotonic_time >> 32;
+
+    user_shared_data->TickCount.High2Time = tick_count >> 32;
+    user_shared_data->TickCount.LowPart   = tick_count;
+    user_shared_data->TickCount.High1Time = tick_count >> 32;
+    *(volatile ULONG *)&user_shared_data->TickCountLowDeprecated = tick_count;
+#else
+    __atomic_store_n(&user_shared_data->SystemTime.High2Time, current_time >> 32, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&user_shared_data->SystemTime.LowPart, current_time, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&user_shared_data->SystemTime.High1Time, current_time >> 32, __ATOMIC_SEQ_CST);
+
+    __atomic_store_n(&user_shared_data->InterruptTime.High2Time, monotonic_time >> 32, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&user_shared_data->InterruptTime.LowPart, monotonic_time, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&user_shared_data->InterruptTime.High1Time, monotonic_time >> 32, __ATOMIC_SEQ_CST);
+
+    __atomic_store_n(&user_shared_data->TickCount.High2Time, tick_count >> 32, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&user_shared_data->TickCount.LowPart, tick_count, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&user_shared_data->TickCount.High1Time, tick_count >> 32, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&user_shared_data->TickCountLowDeprecated, tick_count, __ATOMIC_SEQ_CST);
+#endif
+}
+
+void set_current_time(void)
 {
     static const timeout_t ticks_1601_to_1970 = (timeout_t)86400 * (369 * 365 + 89) * TICKS_PER_SEC;
     struct timeval now;
     gettimeofday( &now, NULL );
     current_time = (timeout_t)now.tv_sec * TICKS_PER_SEC + now.tv_usec * 10 + ticks_1601_to_1970;
+    monotonic_time = monotonic_counter();
+    if (user_shared_data) set_user_shared_data_time();
 }
 
 /* add a timeout user */
@@ -393,16 +443,27 @@ struct timeout_user *add_timeout_user( timeout_t when, timeout_callback func, vo
     struct list *ptr;
 
     if (!(user = mem_alloc( sizeof(*user) ))) return NULL;
-    user->when     = (when > 0) ? when : current_time - when;
+    user->when     = timeout_to_abstime( when );
     user->callback = func;
     user->private  = private;
 
     /* Now insert it in the linked list */
 
-    LIST_FOR_EACH( ptr, &timeout_list )
+    if (user->when > 0)
     {
-        struct timeout_user *timeout = LIST_ENTRY( ptr, struct timeout_user, entry );
-        if (timeout->when >= user->when) break;
+        LIST_FOR_EACH( ptr, &abs_timeout_list )
+        {
+            struct timeout_user *timeout = LIST_ENTRY( ptr, struct timeout_user, entry );
+            if (timeout->when >= user->when) break;
+        }
+    }
+    else
+    {
+        LIST_FOR_EACH( ptr, &rel_timeout_list )
+        {
+            struct timeout_user *timeout = LIST_ENTRY( ptr, struct timeout_user, entry );
+            if (timeout->when <= user->when) break;
+        }
     }
     list_add_before( ptr, &user->entry );
     return user;
@@ -857,18 +918,31 @@ static void remove_poll_user( struct fd *fd, int user )
 /* process pending timeouts and return the time until the next timeout, in milliseconds */
 static int get_next_timeout(void)
 {
-    if (!list_empty( &timeout_list ))
+    int ret = user_shared_data ? user_shared_data_timeout : -1;
+
+    if (!list_empty( &abs_timeout_list ) || !list_empty( &rel_timeout_list ))
     {
         struct list expired_list, *ptr;
 
         /* first remove all expired timers from the list */
 
         list_init( &expired_list );
-        while ((ptr = list_head( &timeout_list )) != NULL)
+        while ((ptr = list_head( &abs_timeout_list )) != NULL)
         {
             struct timeout_user *timeout = LIST_ENTRY( ptr, struct timeout_user, entry );
 
             if (timeout->when <= current_time)
+            {
+                list_remove( &timeout->entry );
+                list_add_tail( &expired_list, &timeout->entry );
+            }
+            else break;
+        }
+        while ((ptr = list_head( &rel_timeout_list )) != NULL)
+        {
+            struct timeout_user *timeout = LIST_ENTRY( ptr, struct timeout_user, entry );
+
+            if (-timeout->when <= monotonic_time)
             {
                 list_remove( &timeout->entry );
                 list_add_tail( &expired_list, &timeout->entry );
@@ -886,15 +960,25 @@ static int get_next_timeout(void)
             free( timeout );
         }
 
-        if ((ptr = list_head( &timeout_list )) != NULL)
+        if ((ptr = list_head( &abs_timeout_list )) != NULL)
         {
             struct timeout_user *timeout = LIST_ENTRY( ptr, struct timeout_user, entry );
-            int diff = (timeout->when - current_time + 9999) / 10000;
-            if (diff < 0) diff = 0;
-            return diff;
+            timeout_t diff = (timeout->when - current_time + 9999) / 10000;
+            if (diff > INT_MAX) diff = INT_MAX;
+            else if (diff < 0) diff = 0;
+            if (ret == -1 || diff < ret) ret = diff;
+        }
+
+        if ((ptr = list_head( &rel_timeout_list )) != NULL)
+        {
+            struct timeout_user *timeout = LIST_ENTRY( ptr, struct timeout_user, entry );
+            timeout_t diff = (-timeout->when - monotonic_time + 9999) / 10000;
+            if (diff > INT_MAX) diff = INT_MAX;
+            else if (diff < 0) diff = 0;
+            if (ret == -1 || diff < ret) ret = diff;
         }
     }
-    return -1;  /* no pending timeouts */
+    return ret;
 }
 
 /* server main poll() loop */
@@ -1773,6 +1857,7 @@ struct fd *open_fd( struct fd *root, const char *name, int flags, mode_t *mode, 
     struct fd *fd;
     int root_fd = -1;
     int rw_mode;
+    char *path;
 
     if (((options & FILE_DELETE_ON_CLOSE) && !(access & DELETE)) ||
         ((options & FILE_DIRECTORY_FILE) && (flags & O_TRUNC)))
@@ -1822,8 +1907,6 @@ struct fd *open_fd( struct fd *root, const char *name, int flags, mode_t *mode, 
     }
     else rw_mode = O_RDONLY;
 
-    fd->unix_name = dup_fd_name( root, name );
-
     if ((fd->unix_fd = open( name, rw_mode | (flags & ~O_TRUNC), *mode )) == -1)
     {
         /* if we tried to open a directory for write access, retry read-only */
@@ -1838,6 +1921,13 @@ struct fd *open_fd( struct fd *root, const char *name, int flags, mode_t *mode, 
             file_set_error();
             goto error;
         }
+    }
+
+    fd->unix_name = NULL;
+    if ((path = dup_fd_name( root, name )))
+    {
+        fd->unix_name = realpath( path, NULL );
+        free( path );
     }
 
     closed_fd->unix_fd = fd->unix_fd;
@@ -1991,12 +2081,6 @@ void set_fd_signaled( struct fd *fd, int signaled )
 
     if (do_esync() && !signaled)
         esync_clear( fd->esync_fd );
-}
-
-/* check if fd is signaled */
-int is_fd_signaled( struct fd *fd )
-{
-    return fd->signaled;
 }
 
 /* handler for close_handle that refuses to close fd-associated handles in other processes */
@@ -2310,6 +2394,31 @@ static struct fd *get_handle_fd_obj( struct process *process, obj_handle_t handl
     return fd;
 }
 
+static int is_dir_empty( int fd )
+{
+    DIR *dir;
+    int empty;
+    struct dirent *de;
+
+    if ((fd = dup( fd )) == -1)
+        return -1;
+
+    if (!(dir = fdopendir( fd )))
+    {
+        close( fd );
+        return -1;
+    }
+
+    empty = 1;
+    while (empty && (de = readdir( dir )))
+    {
+        if (!strcmp( de->d_name, "." ) || !strcmp( de->d_name, ".." )) continue;
+        empty = 0;
+    }
+    closedir( dir );
+    return empty;
+}
+
 /* set disposition for the fd */
 static void set_fd_disposition( struct fd *fd, int unlink )
 {
@@ -2327,24 +2436,38 @@ static void set_fd_disposition( struct fd *fd, int unlink )
         return;
     }
 
-    if (fstat( fd->unix_fd, &st ) == -1)
+    if (unlink)
     {
-        file_set_error();
-        return;
-    }
-
-    /* can't unlink special files */
-    if (unlink && !S_ISDIR(st.st_mode) && !S_ISREG(st.st_mode))
-    {
-        set_error( STATUS_INVALID_PARAMETER );
-        return;
-    }
-
-    /* can't unlink files we don't have permission to write */
-    if (unlink && !(st.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)) && !S_ISDIR(st.st_mode))
-    {
-        set_error( STATUS_CANNOT_DELETE );
-        return;
+        if (fstat( fd->unix_fd, &st ) == -1)
+        {
+            file_set_error();
+            return;
+        }
+        if (S_ISREG( st.st_mode ))  /* can't unlink files we don't have permission to write */
+        {
+            if (!(st.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)))
+            {
+                set_error( STATUS_CANNOT_DELETE );
+                return;
+            }
+        }
+        else if (S_ISDIR( st.st_mode ))  /* can't remove non-empty directories */
+        {
+            switch (is_dir_empty( fd->unix_fd ))
+            {
+            case -1:
+                file_set_error();
+                return;
+            case 0:
+                set_error( STATUS_DIRECTORY_NOT_EMPTY );
+                return;
+            }
+        }
+        else  /* can't unlink special files */
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return;
+        }
     }
 
     fd->closed->unlink = unlink ? 1 : 0;
@@ -2354,10 +2477,10 @@ static void set_fd_disposition( struct fd *fd, int unlink )
 
 /* set new name for the fd */
 static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr,
-                         data_size_t len, int create_link )
+                         data_size_t len, int create_link, int replace )
 {
     struct inode *inode;
-    struct stat st;
+    struct stat st, st2;
     char *name;
 
     if (!fd->inode || !fd->unix_name)
@@ -2365,6 +2488,12 @@ static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr,
         set_error( STATUS_OBJECT_TYPE_MISMATCH );
         return;
     }
+    if (fd->unix_fd == -1)
+    {
+        set_error( fd->no_fd_status );
+        return;
+    }
+
     if (!len || ((nameptr[0] == '/') ^ !root))
     {
         set_error( STATUS_OBJECT_PATH_SYNTAX_BAD );
@@ -2387,8 +2516,7 @@ static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr,
     }
 
     /* when creating a hard link, source cannot be a dir */
-    if (create_link && fd->unix_fd != -1 &&
-        !fstat( fd->unix_fd, &st ) && S_ISDIR( st.st_mode ))
+    if (create_link && !fstat( fd->unix_fd, &st ) && S_ISDIR( st.st_mode ))
     {
         set_error( STATUS_FILE_IS_A_DIRECTORY );
         goto failed;
@@ -2396,6 +2524,19 @@ static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr,
 
     if (!stat( name, &st ))
     {
+        if (!fstat( fd->unix_fd, &st2 ) && st.st_ino == st2.st_ino && st.st_dev == st2.st_dev)
+        {
+            if (create_link && !replace) set_error( STATUS_OBJECT_NAME_COLLISION );
+            free( name );
+            return;
+        }
+
+        if (!replace)
+        {
+            set_error( STATUS_OBJECT_NAME_COLLISION );
+            goto failed;
+        }
+
         /* can't replace directories or special files */
         if (!S_ISREG( st.st_mode ))
         {
@@ -2417,8 +2558,7 @@ static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr,
 
         /* link() expects that the target doesn't exist */
         /* rename() cannot replace files with directories */
-        if (create_link || (fd->unix_fd != -1 &&
-            !fstat( fd->unix_fd, &st ) && S_ISDIR( st.st_mode )))
+        if (create_link || S_ISDIR( st2.st_mode ))
         {
             if (unlink( name ))
             {
@@ -2442,9 +2582,21 @@ static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr,
         goto failed;
     }
 
+    if (is_file_executable( fd->unix_name ) != is_file_executable( name ) && !fstat( fd->unix_fd, &st ))
+    {
+        if (is_file_executable( name ))
+            /* set executable bit where read bit is set */
+            st.st_mode |= (st.st_mode & 0444) >> 2;
+        else
+            st.st_mode &= ~0111;
+        fchmod( fd->unix_fd, st.st_mode );
+    }
+
     free( fd->unix_name );
-    fd->unix_name = name;
-    fd->closed->unix_name = name;
+    fd->closed->unix_name = fd->unix_name = realpath( name, NULL );
+    free( name );
+    if (!fd->unix_name)
+        set_error( STATUS_NO_MEMORY );
     return;
 
 failed:
@@ -2724,7 +2876,7 @@ DECL_HANDLER(set_fd_name_info)
 
     if ((fd = get_handle_fd_obj( current->process, req->handle, 0 )))
     {
-        set_fd_name( fd, root_fd, get_req_data(), get_req_data_size(), req->link );
+        set_fd_name( fd, root_fd, get_req_data(), get_req_data_size(), req->link, req->replace );
         release_object( fd );
     }
     if (root_fd) release_object( root_fd );

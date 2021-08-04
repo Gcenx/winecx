@@ -41,6 +41,7 @@
 
 #include "test_reg.h"
 #include "test_tlb.h"
+#include "test_simple.h"
 
 #define expect_eq(expr, value, type, format) { type _ret = (expr); ok((value) == _ret, #expr " expected " format " got " format "\n", value, _ret); }
 #define expect_int(expr, value) expect_eq(expr, (int)(value), int, "%d")
@@ -52,7 +53,7 @@
     { \
         CHAR buf[260]; \
         expect_eq(!WideCharToMultiByte(CP_ACP, 0, (expr), -1, buf, 260, NULL, NULL), 0, int, "%d"); \
-        ok(strcmp(value, buf) == 0, #expr " expected \"%s\" got \"%s\"\n", value, buf); \
+        ok(value && strcmp(value, buf) == 0, #expr " expected \"%s\" got \"%s\"\n", value, buf); \
     }
 
 #define ole_expect(expr, expect) { \
@@ -88,10 +89,6 @@ static void _expect_ref(IUnknown* obj, ULONG ref, int line)
 static HRESULT (WINAPI *pRegisterTypeLibForUser)(ITypeLib*,OLECHAR*,OLECHAR*);
 static HRESULT (WINAPI *pUnRegisterTypeLibForUser)(REFGUID,WORD,WORD,LCID,SYSKIND);
 
-static BOOL   (WINAPI *pActivateActCtx)(HANDLE,ULONG_PTR*);
-static HANDLE (WINAPI *pCreateActCtxW)(PCACTCTXW);
-static BOOL   (WINAPI *pDeactivateActCtx)(DWORD,ULONG_PTR);
-static VOID   (WINAPI *pReleaseActCtx)(HANDLE);
 static BOOL   (WINAPI *pIsWow64Process)(HANDLE,LPBOOL);
 static LONG   (WINAPI *pRegDeleteKeyExW)(HKEY,LPCWSTR,REGSAM,DWORD);
 
@@ -295,10 +292,6 @@ static void init_function_pointers(void)
 
     pRegisterTypeLibForUser = (void *)GetProcAddress(hmod, "RegisterTypeLibForUser");
     pUnRegisterTypeLibForUser = (void *)GetProcAddress(hmod, "UnRegisterTypeLibForUser");
-    pActivateActCtx = (void *)GetProcAddress(hk32, "ActivateActCtx");
-    pCreateActCtxW = (void *)GetProcAddress(hk32, "CreateActCtxW");
-    pDeactivateActCtx = (void *)GetProcAddress(hk32, "DeactivateActCtx");
-    pReleaseActCtx = (void *)GetProcAddress(hk32, "ReleaseActCtx");
     pIsWow64Process = (void *)GetProcAddress(hk32, "IsWow64Process");
     pRegDeleteKeyExW = (void*)GetProcAddress(hadv, "RegDeleteKeyExW");
 }
@@ -775,18 +768,18 @@ static void test_CreateDispTypeInfo(void)
     SysFreeString(methdata[3].szName);
 }
 
-static void write_typelib(int res_no, const char *filename)
+static void write_typelib(int res_no, const WCHAR *filename, const WCHAR *type)
 {
     DWORD written;
     HANDLE file;
     HRSRC res;
     void *ptr;
 
-    file = CreateFileA( filename, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0 );
+    file = CreateFileW( filename, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0 );
     ok( file != INVALID_HANDLE_VALUE, "file creation failed\n" );
     if (file == INVALID_HANDLE_VALUE) return;
-    res = FindResourceA( GetModuleHandleA(NULL), (LPCSTR)MAKEINTRESOURCE(res_no), "TYPELIB" );
-    ok( res != 0, "couldn't find resource\n" );
+    res = FindResourceW( GetModuleHandleA(NULL), (const WCHAR *)MAKEINTRESOURCE(res_no), type );
+    ok( res != 0, "couldn't find resource %d %s\n", res_no, debugstr_w(type) );
     ptr = LockResource( LoadResource( GetModuleHandleA(NULL), res ));
     WriteFile( file, ptr, SizeofResource( GetModuleHandleA(NULL), res ), &written, NULL );
     ok( written == SizeofResource( GetModuleHandleA(NULL), res ), "couldn't write resource\n" );
@@ -820,12 +813,12 @@ static void test_invoke_func(ITypeInfo *typeinfo)
     ok(hres == DISP_E_BADPARAMCOUNT, "got 0x%08x\n", hres);
 }
 
-static const char *create_test_typelib(int res_no)
+static WCHAR *create_test_typelib(int res_no, const WCHAR *type)
 {
-    static char filename[MAX_PATH];
+    static WCHAR filename[MAX_PATH];
 
-    GetTempFileNameA( ".", "tlb", 0, filename );
-    write_typelib(res_no, filename);
+    GetTempFileNameW(L".", L"tlb", 0, filename);
+    write_typelib(res_no, filename, type);
     return filename;
 }
 
@@ -838,19 +831,22 @@ static void test_TypeInfo(void)
     static WCHAR wszBogus[] = { 'b','o','g','u','s',0 };
     static WCHAR wszGetTypeInfo[] = { 'G','e','t','T','y','p','e','I','n','f','o',0 };
     static WCHAR wszClone[] = {'C','l','o','n','e',0};
+    static WCHAR wszTestDll[] = {'t','e','s','t','.','d','l','l',0};
     OLECHAR* bogus = wszBogus;
     OLECHAR* pwszGetTypeInfo = wszGetTypeInfo;
     OLECHAR* pwszClone = wszClone;
     DISPID dispidMember;
     DISPPARAMS dispparams;
     GUID bogusguid = {0x806afb4f,0x13f7,0x42d2,{0x89,0x2c,0x6c,0x97,0xc3,0x6a,0x36,0xc1}};
+    static const GUID moduleTestGetDllEntryGuid = {0xf073cd92,0xa199,0x11ea,{0xbb,0x37,0x02,0x42,0xac,0x13,0x00,0x02}};
     VARIANT var, res, args[2];
     UINT count, i;
     TYPEKIND kind;
-    const char *filenameA;
-    WCHAR filename[MAX_PATH];
+    const WCHAR *filename;
     TYPEATTR *attr;
     LONG l;
+    WORD ordinal;
+    BSTR bstrDllName, bstrName;
 
     hr = LoadTypeLib(wszStdOle2, &pTypeLib);
     ok_ole_success(hr, LoadTypeLib);
@@ -1029,10 +1025,52 @@ static void test_TypeInfo(void)
     ITypeInfo_Release(pTypeInfo);
     ITypeLib_Release(pTypeLib);
 
-    filenameA = create_test_typelib(3);
-    MultiByteToWideChar(CP_ACP, 0, filenameA, -1, filename, MAX_PATH);
+    filename = create_test_typelib(3, L"TYPELIB");
     hr = LoadTypeLib(filename, &pTypeLib);
     ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* test GetDllEntry */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTypeLib, &moduleTestGetDllEntryGuid, &pTypeInfo);
+    ok_ole_success(hr, ITypeLib_GetTypeInfoOfGuid);
+    ok(pTypeInfo != NULL, "got NULL typeinfo\n");
+
+    /* wrong memberid -- wrong invkind */
+    hr = ITypeInfo_GetDllEntry(pTypeInfo, 0x6000000d, INVOKE_FUNC, &bstrDllName, &bstrName, &ordinal);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "ITypeInfo_GetDllEntry should have returned TYPE_E_ELEMENTNOTFOUND instead of 0x%08x\n", hr);
+
+    hr = ITypeInfo_GetDllEntry(pTypeInfo, 0x6000000d, INVOKE_PROPERTYPUTREF, &bstrDllName, &bstrName, &ordinal);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "ITypeInfo_GetDllEntry should have returned TYPE_E_ELEMENTNOTFOUND instead of 0x%08x\n", hr);
+
+    /* wrong memberid -- correct invkind */
+    hr = ITypeInfo_GetDllEntry(pTypeInfo, 0x6000000d, INVOKE_PROPERTYGET, &bstrDllName, &bstrName, &ordinal);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "ITypeInfo_GetDllEntry should have returned TYPE_E_ELEMENTNOTFOUND instead of 0x%08x\n", hr);
+
+    hr = ITypeInfo_GetDllEntry(pTypeInfo, 0x6000000d, INVOKE_PROPERTYPUT, &bstrDllName, &bstrName, &ordinal);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "ITypeInfo_GetDllEntry should have returned TYPE_E_ELEMENTNOTFOUND instead of 0x%08x\n", hr);
+
+    /* correct memberid -- wrong invkind */
+    hr = ITypeInfo_GetDllEntry(pTypeInfo, 0x60000000, INVOKE_FUNC, &bstrDllName, &bstrName, &ordinal);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "ITypeInfo_GetDllEntry should have returned TYPE_E_ELEMENTNOTFOUND instead of 0x%08x\n", hr);
+
+    hr = ITypeInfo_GetDllEntry(pTypeInfo, 0x60000000, INVOKE_PROPERTYPUTREF, &bstrDllName, &bstrName, &ordinal);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "ITypeInfo_GetDllEntry should have returned TYPE_E_ELEMENTNOTFOUND instead of 0x%08x\n", hr);
+
+    /* correct memberid -- correct invkind */
+    hr = ITypeInfo_GetDllEntry(pTypeInfo, 0x60000000, INVOKE_PROPERTYGET, &bstrDllName, &bstrName, &ordinal);
+    ok_ole_success(hr, ITypeInfo_GetDllEntry);
+    ok(!lstrcmpW(bstrDllName, wszTestDll), "got %s\n", wine_dbgstr_w(bstrDllName));
+    ok(bstrName == NULL, "got %s\n", wine_dbgstr_w(bstrName));
+    ok(ordinal == 1, "got ordinal: %04x\n", ordinal);
+    SysFreeString(bstrDllName);
+
+    hr = ITypeInfo_GetDllEntry(pTypeInfo, 0x60000000, INVOKE_PROPERTYPUT, &bstrDllName, &bstrName, &ordinal);
+    ok_ole_success(hr, ITypeInfo_GetDllEntry);
+    ok(!lstrcmpW(bstrDllName, wszTestDll), "got %s\n", wine_dbgstr_w(bstrDllName));
+    ok(bstrName == NULL, "got %s\n", wine_dbgstr_w(bstrName));
+    ok(ordinal == 2, "got ordinal: %04x\n", ordinal);
+    SysFreeString(bstrDllName);
+
+    ITypeInfo_Release(pTypeInfo);
 
     hr = ITypeLib_GetTypeInfoOfGuid(pTypeLib, &IID_IInvokeTest, &pTypeInfo);
     ok(hr == S_OK, "got 0x%08x\n", hr);
@@ -1132,7 +1170,7 @@ static void test_TypeInfo(void)
 
     ITypeInfo_Release(pTypeInfo);
     ITypeLib_Release(pTypeLib);
-    DeleteFileA(filenameA);
+    DeleteFileW(filename);
 }
 
 static int WINAPI int_func( int a0, int a1, int a2, int a3, int a4 )
@@ -1586,7 +1624,7 @@ static void test_inheritance(void)
 {
     HRESULT hr;
     ITypeLib *pTL;
-    ITypeInfo *pTI, *pTI_p;
+    ITypeInfo *pTI, *pTI_p, *dual_ti;
     TYPEATTR *pTA;
     HREFTYPE href;
     FUNCDESC *pFD;
@@ -1729,7 +1767,7 @@ static void test_inheritance(void)
     hr = ITypeInfo_GetTypeAttr(pTI, &pTA);
     ok(hr == S_OK, "hr %08x\n", hr);
     ok(pTA->typekind == TKIND_DISPATCH, "kind %04x\n", pTA->typekind);
-    ok(pTA->cbSizeVft == 7 * sizeof(void *), "sizevft %d\n", pTA->cbSizeVft);
+    ok(pTA->cbSizeVft == sizeof(IDispatchVtbl), "sizevft %d\n", pTA->cbSizeVft);
     ok(pTA->wTypeFlags == TYPEFLAG_FDISPATCHABLE, "typeflags %x\n", pTA->wTypeFlags);
     ok(pTA->cFuncs == 3, "cfuncs %d\n", pTA->cFuncs);
     ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
@@ -1822,6 +1860,60 @@ static void test_inheritance(void)
     ok(pFD->memid == 0x60020000, "memid %08x\n", pFD->memid);
     ok(pFD->oVft == 5 * sizeof(void *), "oVft %d\n", pFD->oVft);
     ITypeInfo_ReleaseFuncDesc(pTI, pFD);
+    ITypeInfo_Release(pTI);
+
+    /* ItestIF13 is dual with inherited dual ifaces */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTL, &IID_ItestIF13, &pTI);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(pTI, &pTA);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pTA->typekind == TKIND_DISPATCH, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == 7 * sizeof(void *), "sizevft %d\n", pTA->cbSizeVft);
+    ok(pTA->wTypeFlags == (TYPEFLAG_FDISPATCHABLE|TYPEFLAG_FDUAL), "typeflags %x\n", pTA->wTypeFlags);
+    ok(pTA->cFuncs == 10, "cfuncs %d\n", pTA->cFuncs);
+    ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
+    ITypeInfo_ReleaseTypeAttr(pTI, pTA);
+
+    hr = ITypeInfo_GetRefTypeOfImplType(pTI, 0, &href);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetRefTypeInfo(pTI, href, &pTI_p);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetTypeAttr(pTI_p, &pTA);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(IsEqualGUID(&pTA->guid, &IID_IDispatch), "guid %s\n", wine_dbgstr_guid(&pTA->guid));
+    ITypeInfo_ReleaseTypeAttr(pTI_p, pTA);
+
+    hr = ITypeInfo_GetFuncDesc(pTI, 9, &pFD);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFD->memid == 0x1236, "memid %08x\n", pFD->memid);
+    ITypeInfo_ReleaseFuncDesc(pTI, pFD);
+
+    hr = ITypeInfo_GetRefTypeInfo(pTI, -2, &dual_ti);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(dual_ti, &pTA);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pTA->typekind == TKIND_INTERFACE, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == sizeof(ItestIF13Vtbl), "sizevft %d\n", pTA->cbSizeVft);
+    ok(pTA->wTypeFlags == (TYPEFLAG_FDISPATCHABLE|TYPEFLAG_FOLEAUTOMATION|TYPEFLAG_FDUAL), "typeflags %x\n", pTA->wTypeFlags);
+    ok(pTA->cFuncs == 1, "cfuncs %d\n", pTA->cFuncs);
+    ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
+    ITypeInfo_ReleaseTypeAttr(dual_ti, pTA);
+
+    hr = ITypeInfo_GetRefTypeOfImplType(dual_ti, 0, &href);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetRefTypeInfo(dual_ti, href, &pTI_p);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetTypeAttr(pTI_p, &pTA);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(pTA->typekind == TKIND_INTERFACE, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == sizeof(ItestIF12Vtbl), "sizevft %d\n", pTA->cbSizeVft);
+    ok(IsEqualGUID(&pTA->guid, &IID_ItestIF12), "guid %s\n", wine_dbgstr_guid(&pTA->guid));
+    ITypeInfo_ReleaseTypeAttr(pTI_p, pTA);
+    ITypeInfo_Release(pTI_p);
+
+    ITypeInfo_Release(dual_ti);
     ITypeInfo_Release(pTI);
 
     ITypeLib_Release(pTL);
@@ -3886,6 +3978,14 @@ static const struct map_entry funckind_map[] = {
     {0, NULL}
 };
 
+static const struct map_entry varkind_map[] = {
+    MAP_ENTRY(VAR_PERINSTANCE),
+    MAP_ENTRY(VAR_STATIC),
+    MAP_ENTRY(VAR_CONST),
+    MAP_ENTRY(VAR_DISPATCH),
+    {0, NULL}
+};
+
 static const struct map_entry invkind_map[] = {
     MAP_ENTRY(INVOKE_FUNC),
     MAP_ENTRY(INVOKE_PROPERTYGET),
@@ -4156,6 +4256,71 @@ static const char *dump_func_flags(DWORD flags)
     return buf;
 }
 
+static const char *dump_var_flags(DWORD flags)
+{
+    static char buf[256];
+
+    if (!flags) return "0";
+
+    buf[0] = 0;
+
+#define ADD_FLAG(x) if (flags & x) { if (buf[0]) strcat(buf, "|"); strcat(buf, #x); flags &= ~x; }
+    ADD_FLAG(VARFLAG_FREADONLY)
+    ADD_FLAG(VARFLAG_FSOURCE)
+    ADD_FLAG(VARFLAG_FBINDABLE)
+    ADD_FLAG(VARFLAG_FREQUESTEDIT)
+    ADD_FLAG(VARFLAG_FDISPLAYBIND)
+    ADD_FLAG(VARFLAG_FDEFAULTBIND)
+    ADD_FLAG(VARFLAG_FHIDDEN)
+    ADD_FLAG(VARFLAG_FRESTRICTED)
+    ADD_FLAG(VARFLAG_FDEFAULTCOLLELEM)
+    ADD_FLAG(VARFLAG_FUIDEFAULT)
+    ADD_FLAG(VARFLAG_FNONBROWSABLE)
+    ADD_FLAG(VARFLAG_FREPLACEABLE)
+    ADD_FLAG(VARFLAG_FIMMEDIATEBIND)
+#undef ADD_FLAG
+
+    assert(!flags);
+    assert(strlen(buf) < sizeof(buf));
+
+    return buf;
+}
+
+static const char *dump_variant_info(const VARIANT *v)
+{
+    const char *vt_str = map_value(V_VT(v), vt_map);
+    static char buf[256];
+    switch(V_VT(v)) {
+        case VT_I1: sprintf(buf, "{ %s, { .value_int = %d } }", vt_str, V_I1(v)); break;
+        case VT_I2: sprintf(buf, "{ %s, { .value_int = %d } }", vt_str, V_I2(v)); break;
+        case VT_I4: sprintf(buf, "{ %s, { .value_int = %d } }", vt_str, V_I4(v)); break;
+        case VT_I8: sprintf(buf, "{ %s, { .value_int = %s } }", vt_str, wine_dbgstr_longlong(V_I8(v))); break;
+        case VT_INT: sprintf(buf, "{ %s, { .value_int = %d } }", vt_str, V_UINT(v)); break;
+        case VT_BOOL: sprintf(buf, "{ %s, { .value_int = %d } }", vt_str, V_BOOL(v)); break;
+
+        case VT_UI1: sprintf(buf, "{ %s, { .value_uint = %u } }", vt_str, V_UI1(v)); break;
+        case VT_UI2: sprintf(buf, "{ %s, { .value_uint = %u } }", vt_str, V_UI2(v)); break;
+        case VT_UI4: sprintf(buf, "{ %s, { .value_uint = %u } }", vt_str, V_UI4(v)); break;
+        case VT_UI8: sprintf(buf, "{ %s, { .value_uint = %u } }", vt_str, wine_dbgstr_longlong(V_UI8(v))); break;
+        case VT_UINT: sprintf(buf, "{ %s, { .value_uint = %u } }", vt_str, V_UINT(v)); break;
+
+        case VT_R4: sprintf(buf, "{ %s, { .value_float = %0.9g } }", vt_str, V_R4(v)); break;
+        case VT_R8: sprintf(buf, "{ %s, { .value_float = %0.17g } }", vt_str, V_R8(v)); break;
+
+        case VT_BSTR: sprintf(buf, "{ %s, { .value_str = \"%s\" } }", vt_str, dump_string(V_BSTR(v))); break;
+        default:
+            printf("failed - dump_variant_info: cannot serialize %s\n", vt_str);
+            sprintf(buf, "{ %s, { /* cannot dump */ } }", vt_str);
+    }
+    return buf;
+}
+
+static const char *dump_custdata_info(LPCUSTDATAITEM item) {
+    static char buf[256];
+    sprintf(buf, "{ \"%s\", %s }", wine_dbgstr_guid(&item->guid), dump_variant_info(&item->varValue));
+    return buf;
+}
+
 static int get_href_type(ITypeInfo *info, TYPEDESC *tdesc)
 {
     int href_type = -1;
@@ -4180,46 +4345,62 @@ static int get_href_type(ITypeInfo *info, TYPEDESC *tdesc)
     return href_type;
 }
 
-static void test_dump_typelib(const char *name)
+static void test_dump_typelib(const WCHAR *name)
 {
-    WCHAR wszString[260];
     ITypeInfo *info;
+    ITypeInfo2 *info2;
     ITypeLib *lib;
     int count;
     int i;
+    HREFTYPE hRefType = 0;
+    CUSTDATA cust_data;
 
-    MultiByteToWideChar(CP_ACP, 0, name, -1, wszString, 260);
-    OLE_CHECK(LoadTypeLib(wszString, &lib));
+    OLE_CHECK(LoadTypeLib(name, &lib));
 
     printf("/*** Autogenerated data. Do not edit, change the generator above instead. ***/\n");
 
     count = ITypeLib_GetTypeInfoCount(lib);
-    for (i = 0; i < count; i++)
+    for (i = 0; i < count;)
     {
         TYPEATTR *attr;
         BSTR name;
         DWORD help_ctx;
-        int f = 0;
+        int f = 0, v = 0, c = 0;
 
         OLE_CHECK(ITypeLib_GetDocumentation(lib, i, &name, NULL, &help_ctx, NULL));
         printf("{\n"
                "  \"%s\",\n", dump_string(name));
 
         OLE_CHECK(ITypeLib_GetTypeInfo(lib, i, &info));
+        if (hRefType)
+        {
+            ITypeInfo *refInfo;
+            OLE_CHECK(ITypeInfo_GetRefTypeInfo(info, hRefType, &refInfo));
+            ITypeInfo_Release(info);
+            info = refInfo;
+        }
+        OLE_CHECK(ITypeInfo_QueryInterface(info, &IID_ITypeInfo2, (void**)&info2));
+
         OLE_CHECK(ITypeInfo_GetTypeAttr(info, &attr));
+        OLE_CHECK(ITypeInfo2_GetAllCustData(info2,&cust_data));
 
         printf("  \"%s\",\n", wine_dbgstr_guid(&attr->guid));
 
         printf("  /*kind*/ %s, /*flags*/ %s, /*align*/ %s, /*size*/ %s,\n"
-               "  /*helpctx*/ 0x%04x, /*version*/ 0x%08x, /*#vtbl*/ %d, /*#func*/ %d",
+               "  /*helpctx*/ 0x%04x, /*version*/ 0x%08x, /*#vtbl*/ %d, /*#func*/ %d, /*#var*/ %d,\n",
             map_value(attr->typekind, tkind_map), dump_type_flags(attr->wTypeFlags),
             print_align(name, attr), print_size(name, attr),
             help_ctx, MAKELONG(attr->wMinorVerNum, attr->wMajorVerNum),
-            attr->cbSizeVft/sizeof(void*), attr->cFuncs);
+            attr->cbSizeVft/sizeof(void*), attr->cFuncs, attr->cVars);
 
-        if (attr->cFuncs) printf(",\n  {\n");
-        else printf("\n");
+        printf("  /*#custdata*/ %d, %s\n", cust_data.cCustData, cust_data.cCustData ? "{" : "{},");
+        for (c = 0; c < cust_data.cCustData; ++c) {
+            printf("    %s,\n", dump_custdata_info(&cust_data.prgCustData[c]));
+        }
+        if (cust_data.cCustData) printf("  },\n");
+        ClearCustData(&cust_data);
 
+        printf("  { /* funcs */%s", attr->cFuncs ? "\n" : " },\n");
         while (1)
         {
             FUNCDESC *desc;
@@ -4229,6 +4410,7 @@ static void test_dump_typelib(const char *name)
 
             if (FAILED(ITypeInfo_GetFuncDesc(info, f, &desc)))
                 break;
+            OLE_CHECK(ITypeInfo2_GetAllFuncCustData(info2,f,&cust_data));
             printf("    {\n"
                    "      /*id*/ 0x%x, /*func*/ %s, /*inv*/ %s, /*call*/ %s,\n",
                 desc->memid, map_value(desc->funckind, funckind_map), map_value(desc->invkind, invkind_map),
@@ -4237,12 +4419,30 @@ static void test_dump_typelib(const char *name)
                 desc->cParams, desc->cParamsOpt, desc->oVft/sizeof(void*), desc->cScodes, dump_func_flags(desc->wFuncFlags));
             printf("      {%s, %s, %s}, /* ret */\n", map_value(desc->elemdescFunc.tdesc.vt, vt_map),
                 map_value(get_href_type(info, &desc->elemdescFunc.tdesc), tkind_map), dump_param_flags(U(desc->elemdescFunc).paramdesc.wParamFlags));
+            printf("      /*#custdata*/ %d, %s\n", cust_data.cCustData, cust_data.cCustData ? "{" : "{},");
+            for (c = 0; c < cust_data.cCustData; ++c) {
+                printf("        %s,\n", dump_custdata_info(&cust_data.prgCustData[c]));
+            }
+            if (cust_data.cCustData) printf("      },\n");
+            ClearCustData(&cust_data);
+
             printf("      { /* params */\n");
             for (p = 0; p < desc->cParams; p++)
             {
                 ELEMDESC e = desc->lprgelemdescParam[p];
-                printf("        {%s, %s, %s},\n", map_value(e.tdesc.vt, vt_map),
+                OLE_CHECK(ITypeInfo2_GetAllParamCustData(info2,f,p,&cust_data));
+                printf("        {%s, %s, %s", map_value(e.tdesc.vt, vt_map),
                     map_value(get_href_type(info, &e.tdesc), tkind_map), dump_param_flags(U(e).paramdesc.wParamFlags));
+                if (cust_data.cCustData) {
+                    printf(", /*#custdata*/ %d, {\n", cust_data.cCustData);
+                    for (c = 0; c < cust_data.cCustData; ++c) {
+                        printf("          %s,\n", dump_custdata_info(&cust_data.prgCustData[c]));
+                    }
+                    printf("        } },\n");
+                } else {
+                    printf("},\n");
+                }
+                ClearCustData(&cust_data);
             }
             printf("        {-1, 0, 0}\n");
             printf("      },\n");
@@ -4259,9 +4459,61 @@ static void test_dump_typelib(const char *name)
             ITypeInfo_ReleaseFuncDesc(info, desc);
             f++;
         }
-        if (attr->cFuncs) printf("  }\n");
+        if (attr->cFuncs) printf("  },\n");
+
+        printf("  { /* vars */%s", attr->cVars ? "\n" : " },\n");
+        while (1)
+        {
+            VARDESC *desc;
+            BSTR varname;
+            UINT cNames;
+            if (FAILED(ITypeInfo_GetVarDesc(info, v, &desc)))
+                break;
+            OLE_CHECK(ITypeInfo2_GetAllVarCustData(info2,v,&cust_data));
+            OLE_CHECK(ITypeInfo_GetNames(info, desc->memid, &varname, 1, &cNames));
+            if(cNames!=1) { printf("GetNames failed - VARDESC should have one name, got %d\n", cNames); return; }
+            printf("    {\n"
+                   "      /*id*/ 0x%x, /*name*/ \"%s\", /*flags*/ %s, /*kind*/ %s,\n",
+                desc->memid, dump_string(varname), dump_var_flags(desc->wVarFlags), map_value(desc->varkind, varkind_map));
+            SysFreeString(varname);
+            if (desc->varkind == VAR_PERINSTANCE) {
+                printf("      { .oInst = %d },\n", desc->DUMMYUNIONNAME.oInst);
+            } else if (desc->varkind == VAR_CONST) {
+                printf("      { .varValue = %s },\n", dump_variant_info(desc->DUMMYUNIONNAME.lpvarValue));
+            } else {
+                printf("      { /* DUMMYUNIONNAME unused*/ },\n");
+            }
+
+            printf("      /*#custdata*/ %d, %s\n", cust_data.cCustData, cust_data.cCustData ? "{" : "{},");
+            for (c = 0; c < cust_data.cCustData; ++c) {
+                printf("        %s,\n", dump_custdata_info(&cust_data.prgCustData[c]));
+            }
+            if (cust_data.cCustData) printf("      },\n");
+            ClearCustData(&cust_data);
+
+            printf("      {%s, %s, %s}, /* ret */\n", map_value(desc->elemdescVar.tdesc.vt, vt_map),
+                map_value(get_href_type(info, &desc->elemdescVar.tdesc), tkind_map), dump_param_flags(U(desc->elemdescVar).paramdesc.wParamFlags));
+            printf("    },\n");
+            ITypeInfo_ReleaseVarDesc(info, desc);
+            v++;
+        }
+        if (attr->cVars) printf("  },\n");
+
         printf("},\n");
+
+        if ((attr->typekind == TKIND_DISPATCH) && (attr->wTypeFlags & TYPEFLAG_FDUAL) &&
+            SUCCEEDED(ITypeInfo_GetRefTypeOfImplType(info, -1, &hRefType)))
+        {
+            /* next iteration dumps hRefType, the TKIND_INTERFACE reference underneath this [dual] TKIND_DISPATCH */
+        }
+        else
+        {
+            i++; /* move to the next item in lib */
+            hRefType = 0;
+        }
+
         ITypeInfo_ReleaseTypeAttr(info, attr);
+        ITypeInfo2_Release(info2);
         ITypeInfo_Release(info);
         SysFreeString(name);
     }
@@ -4270,11 +4522,28 @@ static void test_dump_typelib(const char *name)
 
 #else
 
+typedef struct _variant_info {
+    VARTYPE vt;
+    union {
+        INT64 value_int;
+        UINT64 value_uint;
+        double value_float;
+        const char * value_str;
+    };
+} variant_info;
+
+typedef struct _custdata_info {
+    LPCSTR uuid;
+    variant_info value;
+} custdata_info;
+
 typedef struct _element_info
 {
     VARTYPE vt;
     TYPEKIND type;
     USHORT wParamFlags;
+    DWORD cCustData;
+    custdata_info custdata[5];
 } element_info;
 
 typedef struct _function_info
@@ -4289,9 +4558,26 @@ typedef struct _function_info
     short cScodes;
     WORD wFuncFlags;
     element_info ret_type;
+    DWORD cCustData;
+    custdata_info custdata[5];
     element_info params[15];
     LPCSTR names[15];
 } function_info;
+
+typedef struct _var_info
+{
+    MEMBERID memid;
+    LPCSTR name;
+    WORD wVarFlags;
+    VARKIND varkind;
+    union {
+        ULONG oInst; /* VAR_PERINSTANCE */
+        variant_info varValue; /* VAR_CONST */
+    } DUMMYUNIONNAME;
+    DWORD cCustData;
+    custdata_info custdata[5];
+    element_info elemdescVar;
+} var_info;
 
 typedef struct _type_info
 {
@@ -4305,27 +4591,44 @@ typedef struct _type_info
     DWORD version;
     USHORT cbSizeVft;
     USHORT cFuncs;
+    USHORT cVars;
+    DWORD cCustData;
+    custdata_info custdata[5];
     function_info funcs[20];
+    var_info vars[20];
 } type_info;
 
+static const SYSKIND info_syskind = SYS_WIN32;
 static const type_info info[] = {
 /*** Autogenerated data. Do not edit, change the generator above instead. ***/
 {
   "g",
   "{b14b6bb5-904e-4ff9-b247-bd361f7a0001}",
   /*kind*/ TKIND_RECORD, /*flags*/ 0, /*align*/ TYPE_ALIGNMENT(struct g), /*size*/ sizeof(struct g),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 1,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "g1", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 0 },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "test_iface",
   "{b14b6bb5-904e-4ff9-b247-bd361f7a0002}",
   /*kind*/ TKIND_INTERFACE, /*flags*/ 0, /*align*/ TYPE_ALIGNMENT(test_iface*), /*size*/ sizeof(test_iface*),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 4, /*#func*/ 1,
-  {
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 4, /*#func*/ 1, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */
     {
       /*id*/ 0x60010000, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 3, /*#scodes*/ 0, /*flags*/ 0,
       {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {VT_PTR, -1, PARAMFLAG_FIN},
         {-1, 0, 0}
@@ -4336,18 +4639,21 @@ static const type_info info[] = {
         NULL,
       },
     },
-  }
+  },
+  { /* vars */ },
 },
 {
   "parent_iface",
   "{b14b6bb5-904e-4ff9-b247-bd361f7aa001}",
   /*kind*/ TKIND_INTERFACE, /*flags*/ 0, /*align*/ TYPE_ALIGNMENT(parent_iface*), /*size*/ sizeof(parent_iface*),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 4, /*#func*/ 1,
-  {
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 4, /*#func*/ 1, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */
     {
       /*id*/ 0x60010000, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 3, /*#scodes*/ 0, /*flags*/ 0,
       {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {VT_PTR, -1, PARAMFLAG_FOUT|PARAMFLAG_FRETVAL},
         {-1, 0, 0}
@@ -4358,18 +4664,21 @@ static const type_info info[] = {
         NULL,
       },
     },
-  }
+  },
+  { /* vars */ },
 },
 {
   "child_iface",
   "{b14b6bb5-904e-4ff9-b247-bd361f7aa002}",
   /*kind*/ TKIND_INTERFACE, /*flags*/ 0, /*align*/ TYPE_ALIGNMENT(child_iface*), /*size*/ sizeof(child_iface*),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 5, /*#func*/ 1,
-  {
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 5, /*#func*/ 1, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */
     {
       /*id*/ 0x60020000, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 4, /*#scodes*/ 0, /*flags*/ 0,
       {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {-1, 0, 0}
       },
@@ -4378,54 +4687,89 @@ static const type_info info[] = {
         NULL,
       },
     },
-  }
+  },
+  { /* vars */ },
 },
 {
   "_n",
   "{016fe2ec-b2c8-45f8-b23b-39e53a753903}",
   /*kind*/ TKIND_RECORD, /*flags*/ 0, /*align*/ TYPE_ALIGNMENT(struct _n), /*size*/ sizeof(struct _n),
-  /*helpctx*/ 0x0003, /*version*/ 0x00010002, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0003, /*version*/ 0x00010002, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 1,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "n1", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 0 },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "n",
   "{016fe2ec-b2c8-45f8-b23b-39e53a753902}",
   /*kind*/ TKIND_ALIAS, /*flags*/ TYPEFLAG_FHIDDEN, /*align*/ TYPE_ALIGNMENT(n), /*size*/ sizeof(n),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */ },
 },
 {
   "nn",
   "{00000000-0000-0000-0000-000000000000}",
   /*kind*/ TKIND_ALIAS, /*flags*/ 0, /*align*/ TYPE_ALIGNMENT(nn), /*size*/ sizeof(nn),
-  /*helpctx*/ 0x0003, /*version*/ 0x00010002, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0003, /*version*/ 0x00010002, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */ },
 },
 {
   "_m",
   "{016fe2ec-b2c8-45f8-b23b-39e53a753906}",
   /*kind*/ TKIND_RECORD, /*flags*/ 0, /*align*/ TYPE_ALIGNMENT(struct _m), /*size*/ sizeof(struct _m),
-  /*helpctx*/ 0x0003, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0003, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 1,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "m1", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 0 },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "m",
   "{016fe2ec-b2c8-45f8-b23b-39e53a753905}",
   /*kind*/ TKIND_ALIAS, /*flags*/ TYPEFLAG_FHIDDEN, /*align*/ TYPE_ALIGNMENT(m), /*size*/ sizeof(m),
-  /*helpctx*/ 0x0000, /*version*/ 0x00010002, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00010002, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */ },
 },
 {
   "mm",
   "{00000000-0000-0000-0000-000000000000}",
   /*kind*/ TKIND_ALIAS, /*flags*/ 0, /*align*/ TYPE_ALIGNMENT(mm), /*size*/ sizeof(mm),
-  /*helpctx*/ 0x0003, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0003, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */ },
 },
 {
   "IDualIface",
   "{b14b6bb5-904e-4ff9-b247-bd361f7aaedd}",
   /*kind*/ TKIND_DISPATCH, /*flags*/ TYPEFLAG_FDISPATCHABLE|TYPEFLAG_FDUAL, /*align*/ TYPE_ALIGNMENT(IDualIface*), /*size*/ sizeof(IDualIface*),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 7, /*#func*/ 8,
-  {
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 7, /*#func*/ 8, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */
     {
       /*id*/ 0x60000000, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 2, /*#opt*/ 0, /*vtbl*/ 0, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
       {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {VT_PTR, -1, PARAMFLAG_FIN},
         {VT_PTR, -1, PARAMFLAG_FOUT},
@@ -4442,6 +4786,7 @@ static const type_info info[] = {
       /*id*/ 0x60000001, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 1, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
       {VT_UI4, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {-1, 0, 0}
       },
@@ -4454,6 +4799,7 @@ static const type_info info[] = {
       /*id*/ 0x60000002, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 2, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
       {VT_UI4, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {-1, 0, 0}
       },
@@ -4466,6 +4812,7 @@ static const type_info info[] = {
       /*id*/ 0x60010000, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 3, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
       {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {VT_PTR, -1, PARAMFLAG_FOUT},
         {-1, 0, 0}
@@ -4480,6 +4827,7 @@ static const type_info info[] = {
       /*id*/ 0x60010001, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 3, /*#opt*/ 0, /*vtbl*/ 4, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
       {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {VT_UINT, -1, PARAMFLAG_FIN},
         {VT_UI4, -1, PARAMFLAG_FIN},
@@ -4498,6 +4846,7 @@ static const type_info info[] = {
       /*id*/ 0x60010002, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 5, /*#opt*/ 0, /*vtbl*/ 5, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
       {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {VT_PTR, -1, PARAMFLAG_FIN},
         {VT_PTR, -1, PARAMFLAG_FIN},
@@ -4520,6 +4869,7 @@ static const type_info info[] = {
       /*id*/ 0x60010003, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 8, /*#opt*/ 0, /*vtbl*/ 6, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
       {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {VT_I4, -1, PARAMFLAG_FIN},
         {VT_PTR, -1, PARAMFLAG_FIN},
@@ -4548,6 +4898,7 @@ static const type_info info[] = {
       /*id*/ 0x60020000, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 7, /*#scodes*/ 0, /*flags*/ 0,
       {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {-1, 0, 0}
       },
@@ -4556,18 +4907,44 @@ static const type_info info[] = {
         NULL,
       },
     },
-  }
+  },
+  { /* vars */ },
+},
+{
+  "IDualIface",
+  "{b14b6bb5-904e-4ff9-b247-bd361f7aaedd}",
+  /*kind*/ TKIND_INTERFACE, /*flags*/ TYPEFLAG_FDISPATCHABLE|TYPEFLAG_FOLEAUTOMATION|TYPEFLAG_FDUAL, /*align*/ TYPE_ALIGNMENT(IDualIface*), /*size*/ sizeof(IDualIface*),
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 8, /*#func*/ 1, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */
+    {
+      /*id*/ 0x60020000, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 7, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "Test",
+        NULL,
+      },
+    },
+  },
+  { /* vars */ },
 },
 {
   "ISimpleIface",
   "{ec5dfcd6-eeb0-4cd6-b51e-8030e1dac009}",
   /*kind*/ TKIND_INTERFACE, /*flags*/ TYPEFLAG_FDISPATCHABLE, /*align*/ TYPE_ALIGNMENT(ISimpleIface*), /*size*/ sizeof(ISimpleIface*),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 8, /*#func*/ 1,
-  {
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 8, /*#func*/ 1, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */
     {
       /*id*/ 0x60020000, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 7, /*#scodes*/ 0, /*flags*/ 0,
       {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {-1, 0, 0}
       },
@@ -4576,138 +4953,395 @@ static const type_info info[] = {
         NULL,
       },
     },
-  }
+  },
+  { /* vars */ },
 },
 {
   "test_struct",
   "{4029f190-ca4a-4611-aeb9-673983cb96dd}",
   /*kind*/ TKIND_RECORD, /*flags*/ 0, /*align*/ TYPE_ALIGNMENT(struct test_struct), /*size*/ sizeof(struct test_struct),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 4,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "hr", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 0 },
+      /*#custdata*/ 0, {},
+      {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000001, /*name*/ "b", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 4 },
+      /*#custdata*/ 0, {},
+      {VT_BOOL, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000002, /*name*/ "disp", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 8 },
+      /*#custdata*/ 0, {},
+      {VT_DISPATCH, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000003, /*name*/ "bstr", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 12 },
+      /*#custdata*/ 0, {},
+      {VT_BSTR, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "test_struct2",
   "{4029f190-ca4a-4611-aeb9-673983cb96de}",
   /*kind*/ TKIND_RECORD, /*flags*/ 0, /*align*/ TYPE_ALIGNMENT(struct test_struct2), /*size*/ sizeof(struct test_struct2),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 4,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "hr", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 0 },
+      /*#custdata*/ 0, {},
+      {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000001, /*name*/ "b", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 4 },
+      /*#custdata*/ 0, {},
+      {VT_BOOL, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000002, /*name*/ "disp", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 8 },
+      /*#custdata*/ 0, {},
+      {VT_DISPATCH, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000003, /*name*/ "bstr", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 12 },
+      /*#custdata*/ 0, {},
+      {VT_BSTR, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "t_INT",
   "{016fe2ec-b2c8-45f8-b23b-39e53a75396a}",
   /*kind*/ TKIND_ALIAS, /*flags*/ TYPEFLAG_FRESTRICTED, /*align*/ TYPE_ALIGNMENT(t_INT), /*size*/ sizeof(t_INT),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */ },
 },
 {
   "a",
   "{00000000-0000-0000-0000-000000000000}",
   /*kind*/ TKIND_ALIAS, /*flags*/ 0, /*align*/ TYPE_ALIGNMENT(a), /*size*/ sizeof(a),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */ },
 },
 {
   "_a",
   "{00000000-0000-0000-0000-000000000000}",
   /*kind*/ TKIND_ENUM, /*flags*/ 0, /*align*/ 4, /*size*/ 4,
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 2,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "a1", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 0 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000001, /*name*/ "a2", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 1 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "aa",
   "{00000000-0000-0000-0000-000000000000}",
   /*kind*/ TKIND_ENUM, /*flags*/ 0, /*align*/ 4, /*size*/ 4,
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 2,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "aa1", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 0 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000001, /*name*/ "aa2", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 1 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "_b",
   "{00000000-0000-0000-0000-000000000000}",
   /*kind*/ TKIND_ENUM, /*flags*/ 0, /*align*/ 4, /*size*/ 4,
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 2,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "b1", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 0 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000001, /*name*/ "b2", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 1 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "bb",
   "{00000000-0000-0000-0000-000000000000}",
   /*kind*/ TKIND_ENUM, /*flags*/ 0, /*align*/ 4, /*size*/ 4,
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 2,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "bb1", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 0 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000001, /*name*/ "bb2", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 1 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "c",
   "{016fe2ec-b2c8-45f8-b23b-39e53a75396b}",
   /*kind*/ TKIND_ALIAS, /*flags*/ 0, /*align*/ TYPE_ALIGNMENT(c), /*size*/ sizeof(c),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */ },
 },
 {
   "_c",
   "{00000000-0000-0000-0000-000000000000}",
   /*kind*/ TKIND_ENUM, /*flags*/ 0, /*align*/ 4, /*size*/ 4,
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 2,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "c1", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 0 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000001, /*name*/ "c2", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 1 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "cc",
   "{016fe2ec-b2c8-45f8-b23b-39e53a75396c}",
   /*kind*/ TKIND_ENUM, /*flags*/ 0, /*align*/ 4, /*size*/ 4,
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 2,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "cc1", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 0 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000001, /*name*/ "cc2", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 1 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "d",
   "{016fe2ec-b2c8-45f8-b23b-39e53a75396d}",
   /*kind*/ TKIND_ALIAS, /*flags*/ TYPEFLAG_FRESTRICTED|TYPEFLAG_FHIDDEN, /*align*/ TYPE_ALIGNMENT(d), /*size*/ sizeof(d),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */ },
 },
 {
   "_d",
   "{00000000-0000-0000-0000-000000000000}",
   /*kind*/ TKIND_ENUM, /*flags*/ TYPEFLAG_FRESTRICTED|TYPEFLAG_FHIDDEN, /*align*/ 4, /*size*/ 4,
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 2,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "d1", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 0 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000001, /*name*/ "d2", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 1 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "dd",
   "{016fe2ec-b2c8-45f8-b23b-39e53a75396e}",
   /*kind*/ TKIND_ENUM, /*flags*/ TYPEFLAG_FRESTRICTED|TYPEFLAG_FHIDDEN, /*align*/ 4, /*size*/ 4,
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 2,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "dd1", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 0 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000001, /*name*/ "dd2", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 1 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "e",
   "{016fe2ec-b2c8-45f8-b23b-39e53a753970}",
   /*kind*/ TKIND_ALIAS, /*flags*/ TYPEFLAG_FRESTRICTED|TYPEFLAG_FHIDDEN, /*align*/ TYPE_ALIGNMENT(e), /*size*/ sizeof(e),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */ },
 },
 {
   "_e",
   "{00000000-0000-0000-0000-000000000000}",
   /*kind*/ TKIND_RECORD, /*flags*/ TYPEFLAG_FRESTRICTED|TYPEFLAG_FHIDDEN, /*align*/ TYPE_ALIGNMENT(struct _e), /*size*/ sizeof(struct _e),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 1,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "e1", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 0 },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "ee",
   "{016fe2ec-b2c8-45f8-b23b-39e53a753971}",
   /*kind*/ TKIND_RECORD, /*flags*/ TYPEFLAG_FRESTRICTED|TYPEFLAG_FHIDDEN, /*align*/ TYPE_ALIGNMENT(struct ee), /*size*/ sizeof(struct ee),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 1,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "ee1", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 0 },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "f",
   "{016fe2ec-b2c8-45f8-b23b-39e53a753972}",
   /*kind*/ TKIND_ALIAS, /*flags*/ TYPEFLAG_FRESTRICTED|TYPEFLAG_FHIDDEN, /*align*/ TYPE_ALIGNMENT(f), /*size*/ sizeof(f),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */ },
 },
 {
   "_f",
   "{00000000-0000-0000-0000-000000000000}",
   /*kind*/ TKIND_UNION, /*flags*/ TYPEFLAG_FRESTRICTED|TYPEFLAG_FHIDDEN, /*align*/ TYPE_ALIGNMENT(union _f), /*size*/ sizeof(union _f),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 2,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "f1", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 0 },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000001, /*name*/ "f2", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 0 },
+      /*#custdata*/ 0, {},
+      {VT_PTR, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "ff",
   "{016fe2ec-b2c8-45f8-b23b-39e53a753973}",
   /*kind*/ TKIND_UNION, /*flags*/ TYPEFLAG_FRESTRICTED|TYPEFLAG_FHIDDEN, /*align*/ TYPE_ALIGNMENT(union ff), /*size*/ sizeof(union ff),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 2,
+  /*#custdata*/ 0, {},
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "ff1", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 0 },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000001, /*name*/ "ff2", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 0 },
+      /*#custdata*/ 0, {},
+      {VT_PTR, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 },
 {
   "ITestIface",
   "{ec5dfcd6-eeb0-4cd6-b51e-8030e1dac00a}",
   /*kind*/ TKIND_INTERFACE, /*flags*/ TYPEFLAG_FDISPATCHABLE, /*align*/ TYPE_ALIGNMENT(ITestIface*), /*size*/ sizeof(ITestIface*),
-  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 13, /*#func*/ 6,
-  {
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 13, /*#func*/ 6, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */
     {
       /*id*/ 0x60020000, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 7, /*#scodes*/ 0, /*flags*/ 0,
       {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {VT_USERDEFINED, TKIND_ALIAS, PARAMFLAG_NONE},
         {-1, 0, 0}
@@ -4722,6 +5356,7 @@ static const type_info info[] = {
       /*id*/ 0x60020001, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 8, /*#scodes*/ 0, /*flags*/ 0,
       {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {VT_USERDEFINED, TKIND_ENUM, PARAMFLAG_NONE},
         {-1, 0, 0}
@@ -4736,6 +5371,7 @@ static const type_info info[] = {
       /*id*/ 0x60020002, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 9, /*#scodes*/ 0, /*flags*/ 0,
       {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {VT_USERDEFINED, TKIND_ALIAS, PARAMFLAG_NONE},
         {-1, 0, 0}
@@ -4750,6 +5386,7 @@ static const type_info info[] = {
       /*id*/ 0x60020003, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 10, /*#scodes*/ 0, /*flags*/ 0,
       {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {VT_USERDEFINED, TKIND_ALIAS, PARAMFLAG_NONE},
         {-1, 0, 0}
@@ -4764,6 +5401,7 @@ static const type_info info[] = {
       /*id*/ 0x60020004, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 11, /*#scodes*/ 0, /*flags*/ 0,
       {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {VT_USERDEFINED, TKIND_ALIAS, PARAMFLAG_NONE},
         {-1, 0, 0}
@@ -4778,6 +5416,7 @@ static const type_info info[] = {
       /*id*/ 0x60020005, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 12, /*#scodes*/ 0, /*flags*/ 0,
       {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
       { /* params */
         {VT_USERDEFINED, TKIND_ALIAS, PARAMFLAG_NONE},
         {-1, 0, 0}
@@ -4788,28 +5427,912 @@ static const type_info info[] = {
         NULL,
       },
     },
-  }
+  },
+  { /* vars */ },
+},
+{
+  "ITestDispatch",
+  "{2d4430d5-99ea-4645-85f0-c5814b72804b}",
+  /*kind*/ TKIND_DISPATCH, /*flags*/ TYPEFLAG_FDISPATCHABLE, /*align*/ TYPE_ALIGNMENT(ITestDispatch*), /*size*/ sizeof(ITestDispatch*),
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 7, /*#func*/ 7, /*#var*/ 2,
+  /*#custdata*/ 0, {},
+  { /* funcs */
+    {
+      /*id*/ 0x1, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 0, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_void",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x2, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 0, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_PTR, -1, PARAMFLAG_FOUT|PARAMFLAG_FRETVAL},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_void_retval",
+        "ret",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x3, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 0, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_HRESULT",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x4, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 0, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_PTR, -1, PARAMFLAG_FOUT|PARAMFLAG_FRETVAL},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_HRESULT_retval",
+        "ret",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x5, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 0, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_int",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x6, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 0, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_PTR, -1, PARAMFLAG_FOUT|PARAMFLAG_FRETVAL},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_int_retval",
+        "ret",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x7, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 2, /*#opt*/ 0, /*vtbl*/ 0, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_R8, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_BSTR, -1, PARAMFLAG_FIN},
+        {VT_I4, -1, PARAMFLAG_FLCID},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "parse_lcid",
+        "x",
+        "lcid",
+        NULL,
+      },
+    },
+  },
+  { /* vars */
+    {
+      /*id*/ 0xa, /*name*/ "property_int", /*flags*/ 0, /*kind*/ VAR_DISPATCH,
+      { /* DUMMYUNIONNAME unused*/ },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0xb, /*name*/ "property_HRESULT", /*flags*/ 0, /*kind*/ VAR_DISPATCH,
+      { /* DUMMYUNIONNAME unused*/ },
+      /*#custdata*/ 0, {},
+      {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
+},
+{
+  "ITestDispDual",
+  "{79ca07f9-ac22-44ac-9aaf-811f45412293}",
+  /*kind*/ TKIND_DISPATCH, /*flags*/ TYPEFLAG_FDISPATCHABLE|TYPEFLAG_FDUAL, /*align*/ TYPE_ALIGNMENT(ITestDispDual*), /*size*/ sizeof(ITestDispDual*),
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 7, /*#func*/ 14, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */
+    {
+      /*id*/ 0x60000000, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 2, /*#opt*/ 0, /*vtbl*/ 0, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_PTR, -1, PARAMFLAG_FIN},
+        {VT_PTR, -1, PARAMFLAG_FOUT},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "QueryInterface",
+        "riid",
+        "ppvObj",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x60000001, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 1, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
+      {VT_UI4, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "AddRef",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x60000002, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 2, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
+      {VT_UI4, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "Release",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x60010000, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 3, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_PTR, -1, PARAMFLAG_FOUT},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "GetTypeInfoCount",
+        "pctinfo",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x60010001, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 3, /*#opt*/ 0, /*vtbl*/ 4, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_UINT, -1, PARAMFLAG_FIN},
+        {VT_UI4, -1, PARAMFLAG_FIN},
+        {VT_PTR, -1, PARAMFLAG_FOUT},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "GetTypeInfo",
+        "itinfo",
+        "lcid",
+        "pptinfo",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x60010002, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 5, /*#opt*/ 0, /*vtbl*/ 5, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_PTR, -1, PARAMFLAG_FIN},
+        {VT_PTR, -1, PARAMFLAG_FIN},
+        {VT_UINT, -1, PARAMFLAG_FIN},
+        {VT_UI4, -1, PARAMFLAG_FIN},
+        {VT_PTR, -1, PARAMFLAG_FOUT},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "GetIDsOfNames",
+        "riid",
+        "rgszNames",
+        "cNames",
+        "lcid",
+        "rgdispid",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x60010003, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 8, /*#opt*/ 0, /*vtbl*/ 6, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_I4, -1, PARAMFLAG_FIN},
+        {VT_PTR, -1, PARAMFLAG_FIN},
+        {VT_UI4, -1, PARAMFLAG_FIN},
+        {VT_UI2, -1, PARAMFLAG_FIN},
+        {VT_PTR, -1, PARAMFLAG_FIN},
+        {VT_PTR, -1, PARAMFLAG_FOUT},
+        {VT_PTR, -1, PARAMFLAG_FOUT},
+        {VT_PTR, -1, PARAMFLAG_FOUT},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "Invoke",
+        "dispidMember",
+        "riid",
+        "lcid",
+        "wFlags",
+        "pdispparams",
+        "pvarResult",
+        "pexcepinfo",
+        "puArgErr",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x1, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 7, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_void",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x2, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 8, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_R8, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_void_retval",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x3, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 9, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_HRESULT",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x4, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 10, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_R8, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_HRESULT_retval",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x5, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 11, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_int",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x6, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 12, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_R8, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_int_retval",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x7, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 13, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_R8, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_BSTR, -1, PARAMFLAG_FIN},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "parse_lcid",
+        "x",
+        NULL,
+      },
+    },
+  },
+  { /* vars */ },
+},
+{
+  "ITestDispDual",
+  "{79ca07f9-ac22-44ac-9aaf-811f45412293}",
+  /*kind*/ TKIND_INTERFACE, /*flags*/ TYPEFLAG_FDISPATCHABLE|TYPEFLAG_FOLEAUTOMATION|TYPEFLAG_FDUAL, /*align*/ TYPE_ALIGNMENT(ITestDispDual*), /*size*/ sizeof(ITestDispDual*),
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 14, /*#func*/ 7, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */
+    {
+      /*id*/ 0x1, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 7, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_void",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x2, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 8, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_PTR, -1, PARAMFLAG_FOUT|PARAMFLAG_FRETVAL},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_void_retval",
+        "ret",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x3, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 9, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_HRESULT",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x4, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 10, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_PTR, -1, PARAMFLAG_FOUT|PARAMFLAG_FRETVAL},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_HRESULT_retval",
+        "ret",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x5, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 11, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_int",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x6, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 12, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_PTR, -1, PARAMFLAG_FOUT|PARAMFLAG_FRETVAL},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_int_retval",
+        "ret",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x7, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 3, /*#opt*/ 0, /*vtbl*/ 13, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_BSTR, -1, PARAMFLAG_FIN},
+        {VT_I4, -1, PARAMFLAG_FLCID},
+        {VT_PTR, -1, PARAMFLAG_FOUT|PARAMFLAG_FRETVAL},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "parse_lcid",
+        "x",
+        "lcid",
+        "ret",
+        NULL,
+      },
+    },
+  },
+  { /* vars */ },
+},
+{
+  "ITestDispInherit",
+  "{cdb105e3-24fb-4ae6-b826-801b7b2a0a07}",
+  /*kind*/ TKIND_DISPATCH, /*flags*/ TYPEFLAG_FDISPATCHABLE, /*align*/ TYPE_ALIGNMENT(ITestDispInherit*), /*size*/ sizeof(ITestDispInherit*),
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 7, /*#func*/ 14, /*#var*/ 0,
+  /*#custdata*/ 0, {},
+  { /* funcs */
+    {
+      /*id*/ 0x60000000, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 2, /*#opt*/ 0, /*vtbl*/ 0, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_PTR, -1, PARAMFLAG_FIN},
+        {VT_PTR, -1, PARAMFLAG_FOUT},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "QueryInterface",
+        "riid",
+        "ppvObj",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x60000001, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 1, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
+      {VT_UI4, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "AddRef",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x60000002, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 2, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
+      {VT_UI4, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "Release",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x60010000, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 3, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_PTR, -1, PARAMFLAG_FOUT},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "GetTypeInfoCount",
+        "pctinfo",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x60010001, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 3, /*#opt*/ 0, /*vtbl*/ 4, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_UINT, -1, PARAMFLAG_FIN},
+        {VT_UI4, -1, PARAMFLAG_FIN},
+        {VT_PTR, -1, PARAMFLAG_FOUT},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "GetTypeInfo",
+        "itinfo",
+        "lcid",
+        "pptinfo",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x60010002, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 5, /*#opt*/ 0, /*vtbl*/ 5, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_PTR, -1, PARAMFLAG_FIN},
+        {VT_PTR, -1, PARAMFLAG_FIN},
+        {VT_UINT, -1, PARAMFLAG_FIN},
+        {VT_UI4, -1, PARAMFLAG_FIN},
+        {VT_PTR, -1, PARAMFLAG_FOUT},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "GetIDsOfNames",
+        "riid",
+        "rgszNames",
+        "cNames",
+        "lcid",
+        "rgdispid",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x60010003, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 8, /*#opt*/ 0, /*vtbl*/ 6, /*#scodes*/ 0, /*flags*/ FUNCFLAG_FRESTRICTED,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_I4, -1, PARAMFLAG_FIN},
+        {VT_PTR, -1, PARAMFLAG_FIN},
+        {VT_UI4, -1, PARAMFLAG_FIN},
+        {VT_UI2, -1, PARAMFLAG_FIN},
+        {VT_PTR, -1, PARAMFLAG_FIN},
+        {VT_PTR, -1, PARAMFLAG_FOUT},
+        {VT_PTR, -1, PARAMFLAG_FOUT},
+        {VT_PTR, -1, PARAMFLAG_FOUT},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "Invoke",
+        "dispidMember",
+        "riid",
+        "lcid",
+        "wFlags",
+        "pdispparams",
+        "pvarResult",
+        "pexcepinfo",
+        "puArgErr",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x1, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 7, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_void",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x2, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 8, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_R8, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_void_retval",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x3, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 9, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_HRESULT",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x4, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 10, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_R8, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_HRESULT_retval",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x5, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 11, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_int",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x6, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 12, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_R8, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_int_retval",
+        NULL,
+      },
+    },
+    {
+      /*id*/ 0x7, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 13, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_R8, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 0, {},
+      { /* params */
+        {VT_BSTR, -1, PARAMFLAG_FIN},
+        {-1, 0, 0}
+      },
+      { /* names */
+        "parse_lcid",
+        "x",
+        NULL,
+      },
+    },
+  },
+  { /* vars */ },
+},
+{
+  "custdata_interface",
+  "{786ee4ff-c5dd-4bf4-9578-0d22fb5369cc}",
+  /*kind*/ TKIND_INTERFACE, /*flags*/ TYPEFLAG_FDISPATCHABLE, /*align*/ TYPE_ALIGNMENT(custdata_interface*), /*size*/ sizeof(custdata_interface*),
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 8, /*#func*/ 1, /*#var*/ 0,
+  /*#custdata*/ 1, {
+    { "{c8768723-e6d2-4442-b039-92e9c82429c4}", { VT_BSTR, { .value_str = "ITypeInfo2::GetCustData interface" } } },
+  },
+  { /* funcs */
+    {
+      /*id*/ 0x60020000, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 7, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_HRESULT, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 1, {
+        { "{c8768723-e6d2-4442-b039-92e9c82429c4}", { VT_BSTR, { .value_str = "ITypeInfo2::GetFuncCustData custdata_interface::test_method" } } },
+      },
+      { /* params */
+        {VT_INT, -1, PARAMFLAG_FIN, /*#custdata*/ 1, {
+          { "{c8768723-e6d2-4442-b039-92e9c82429c4}", { VT_BSTR, { .value_str = "ITypeInfo2::GetParamCustData custdata_interface::test_method(x)" } } },
+        } },
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_method",
+        "x",
+        NULL,
+      },
+    },
+  },
+  { /* vars */ },
+},
+{
+  "custdata_enum",
+  "{6ca99f5e-c86a-42ad-a5ee-5bd4c8e5553c}",
+  /*kind*/ TKIND_ENUM, /*flags*/ 0, /*align*/ 4, /*size*/ 4,
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 2,
+  /*#custdata*/ 1, {
+    { "{c8768723-e6d2-4442-b039-92e9c82429c4}", { VT_BSTR, { .value_str = "ITypeInfo2::GetCustData enum" } } },
+  },
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "One", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 0 } } },
+      /*#custdata*/ 1, {
+        { "{c8768723-e6d2-4442-b039-92e9c82429c4}", { VT_BSTR, { .value_str = "ITypeInfo2::GetVarCustData enum" } } },
+      },
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+    {
+      /*id*/ 0x40000001, /*name*/ "Two", /*flags*/ 0, /*kind*/ VAR_CONST,
+      { .varValue = { VT_I4, { .value_int = 1 } } },
+      /*#custdata*/ 0, {},
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
+},
+{
+  "custdata_struct",
+  "{62fabe17-f733-4b09-b859-3f455dcda450}",
+  /*kind*/ TKIND_RECORD, /*flags*/ 0, /*align*/ TYPE_ALIGNMENT(struct custdata_struct), /*size*/ sizeof(struct custdata_struct),
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 1,
+  /*#custdata*/ 1, {
+    { "{c8768723-e6d2-4442-b039-92e9c82429c4}", { VT_BSTR, { .value_str = "ITypeInfo2::GetCustData struct" } } },
+  },
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "test_field", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 0 },
+      /*#custdata*/ 1, {
+        { "{c8768723-e6d2-4442-b039-92e9c82429c4}", { VT_BSTR, { .value_str = "ITypeInfo2::GetVarCustData struct" } } },
+      },
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
+},
+{
+  "custdata_union",
+  "{00000000-0000-0000-0000-000000000000}",
+  /*kind*/ TKIND_UNION, /*flags*/ 0, /*align*/ TYPE_ALIGNMENT(union custdata_union), /*size*/ sizeof(union custdata_union),
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 1,
+  /*#custdata*/ 1, {
+    { "{c8768723-e6d2-4442-b039-92e9c82429c4}", { VT_BSTR, { .value_str = "ITypeInfo2::GetCustData union" } } },
+  },
+  { /* funcs */ },
+  { /* vars */
+    {
+      /*id*/ 0x40000000, /*name*/ "test_field", /*flags*/ 0, /*kind*/ VAR_PERINSTANCE,
+      { .oInst = 0 },
+      /*#custdata*/ 1, {
+        { "{c8768723-e6d2-4442-b039-92e9c82429c4}", { VT_BSTR, { .value_str = "ITypeInfo2::GetVarCustData union" } } },
+      },
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
+},
+{
+  "custdata_typedef",
+  "{d58744d6-63f9-467c-87e5-c95158098b18}",
+  /*kind*/ TKIND_ALIAS, /*flags*/ 0, /*align*/ TYPE_ALIGNMENT(custdata_typedef), /*size*/ sizeof(custdata_typedef),
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 0, /*#func*/ 0, /*#var*/ 0,
+  /*#custdata*/ 1, {
+    { "{c8768723-e6d2-4442-b039-92e9c82429c4}", { VT_BSTR, { .value_str = "ITypeInfo2::GetCustData typedef" } } },
+  },
+  { /* funcs */ },
+  { /* vars */ },
+},
+{
+  "custdata_dispatch",
+  "{bffc216e-2159-465a-80df-b85fd4f4f122}",
+  /*kind*/ TKIND_DISPATCH, /*flags*/ TYPEFLAG_FDISPATCHABLE, /*align*/ TYPE_ALIGNMENT(custdata_dispatch*), /*size*/ sizeof(custdata_dispatch*),
+  /*helpctx*/ 0x0000, /*version*/ 0x00000000, /*#vtbl*/ 7, /*#func*/ 1, /*#var*/ 1,
+  /*#custdata*/ 1, {
+    { "{c8768723-e6d2-4442-b039-92e9c82429c4}", { VT_BSTR, { .value_str = "ITypeInfo2::GetCustData dispinterface" } } },
+  },
+  { /* funcs */
+    {
+      /*id*/ 0x1, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
+      /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 0, /*#scodes*/ 0, /*flags*/ 0,
+      {VT_VOID, -1, PARAMFLAG_NONE}, /* ret */
+      /*#custdata*/ 1, {
+        { "{c8768723-e6d2-4442-b039-92e9c82429c4}", { VT_BSTR, { .value_str = "ITypeInfo2::GetFuncCustData dispinterface method" } } },
+      },
+      { /* params */
+        {VT_INT, -1, PARAMFLAG_FIN, /*#custdata*/ 1, {
+          { "{c8768723-e6d2-4442-b039-92e9c82429c4}", { VT_BSTR, { .value_str = "ITypeInfo2::GetParamCustData test_dispatch::test_method(x)" } } },
+        } },
+        {-1, 0, 0}
+      },
+      { /* names */
+        "test_method",
+        "x",
+        NULL,
+      },
+    },
+  },
+  { /* vars */
+    {
+      /*id*/ 0x0, /*name*/ "test_property", /*flags*/ 0, /*kind*/ VAR_DISPATCH,
+      { /* DUMMYUNIONNAME unused*/ },
+      /*#custdata*/ 1, {
+        { "{c8768723-e6d2-4442-b039-92e9c82429c4}", { VT_BSTR, { .value_str = "ITypeInfo2::GetVarCustData dispinterface property" } } },
+      },
+      {VT_INT, -1, PARAMFLAG_NONE}, /* ret */
+    },
+  },
 }
 };
+
+#define check_variant_info(value, expected) { \
+    expect_int(V_VT(value), (expected)->vt); \
+    switch(V_VT(value)) { \
+        case VT_I1: expect_int(V_I1(value), (expected)->value_int); break; \
+        case VT_I2: expect_int(V_I2(value), (expected)->value_int); break; \
+        case VT_I4: expect_int(V_I4(value), (expected)->value_int); break; \
+        case VT_I8: expect_int(V_I8(value), (expected)->value_int); break; \
+        case VT_BOOL: expect_int(V_BOOL(value), (expected)->value_int); break; \
+        case VT_INT: expect_int(V_INT(value), (expected)->value_int); break; \
+        case VT_UI1: expect_int(V_UI1(value), (expected)->value_uint); break; \
+        case VT_UI2: expect_int(V_UI2(value), (expected)->value_uint); break; \
+        case VT_UI4: expect_int(V_UI4(value), (expected)->value_uint); break; \
+        case VT_UI8: expect_int(V_UI8(value), (expected)->value_uint); break; \
+        case VT_UINT: expect_int(V_UINT(value), (expected)->value_uint); break; \
+        case VT_BSTR: expect_wstr_acpval(V_BSTR(value), (expected)->value_str); break; \
+        default: skip("check_variant_info: comparing value not implemented for VARTYPE %d\n",V_VT(value)); \
+    } }
 
 #define check_type(elem, info) { \
       expect_int((elem)->tdesc.vt, (info)->vt);                     \
       expect_hex(U(*(elem)).paramdesc.wParamFlags, (info)->wParamFlags); \
   }
 
-static void test_dump_typelib(const char *name)
+static void parse_guid(LPCSTR strGuid, GUID *guid)
 {
-    WCHAR wszName[MAX_PATH];
-    ITypeLib *typelib;
-    int ticount = ARRAY_SIZE(info);
-    int iface, func;
+    WCHAR guidW[39];
+    MultiByteToWideChar(CP_ACP, 0, strGuid, -1, guidW, ARRAY_SIZE(guidW));
+    ole_check(IIDFromString(guidW, guid));
+}
 
-    MultiByteToWideChar(CP_ACP, 0, name, -1, wszName, MAX_PATH);
-    ole_check(LoadTypeLibEx(wszName, REGKIND_NONE, &typelib));
-    expect_eq(ITypeLib_GetTypeInfoCount(typelib), ticount, UINT, "%d");
-    for (iface = 0; iface < ticount; iface++)
+static void test_dump_typelib(const WCHAR *name)
+{
+    ITypeLib *typelib;
+    CUSTDATA cust_data;
+    int iface = 0, func, var, cust;
+    HREFTYPE hRefType = 0;
+    VARIANT v;
+    HRESULT hr;
+    TLIBATTR *libattr;
+    const type_info *ti;
+
+    ole_check(LoadTypeLibEx(name, REGKIND_NONE, &typelib));
+
+    ole_check(ITypeLib_GetLibAttr(typelib, &libattr));
+    if(libattr->syskind != info_syskind) {
+        /* struct VARDESC::oInst may vary from changes in sizeof(void *) affecting the offset of later fields*/
+        skip("ignoring VARDESC::oInst, (libattr->syskind expected %d got %d)\n", info_syskind, libattr->syskind);
+    }
+
+    for (ti = info; ti != info + ARRAY_SIZE(info); ti++)
     {
-        const type_info *ti = &info[iface];
+        ITypeInfo2 *typeinfo2;
         ITypeInfo *typeinfo;
         TYPEATTR *typeattr;
         BSTR bstrIfName;
@@ -4817,6 +6340,13 @@ static void test_dump_typelib(const char *name)
 
         trace("Interface %s\n", ti->name);
         ole_check(ITypeLib_GetTypeInfo(typelib, iface, &typeinfo));
+        if (hRefType)
+        {
+            ITypeInfo *refInfo;
+            ole_check(ITypeInfo_GetRefTypeInfo(typeinfo, hRefType, &refInfo));
+            ITypeInfo_Release(typeinfo);
+            typeinfo = refInfo;
+        }
         ole_check(ITypeLib_GetDocumentation(typelib, iface, &bstrIfName, NULL, &help_ctx, NULL));
         expect_wstr_acpval(bstrIfName, ti->name);
         SysFreeString(bstrIfName);
@@ -4830,17 +6360,16 @@ static void test_dump_typelib(const char *name)
         expect_int(MAKELONG(typeattr->wMinorVerNum, typeattr->wMajorVerNum), ti->version);
         expect_int(typeattr->cbSizeVft, ti->cbSizeVft * sizeof(void*));
         expect_int(typeattr->cFuncs, ti->cFuncs);
+        expect_int(typeattr->cVars, ti->cVars);
 
         /* compare type uuid */
         if (ti->uuid && *ti->uuid)
         {
-            WCHAR guidW[39];
             ITypeInfo *typeinfo2;
             HRESULT hr;
             GUID guid;
 
-            MultiByteToWideChar(CP_ACP, 0, ti->uuid, -1, guidW, ARRAY_SIZE(guidW));
-            IIDFromString(guidW, &guid);
+            parse_guid(ti->uuid,&guid);
             expect_guid(&guid, &typeattr->guid);
 
             /* check that it's possible to search using this uuid */
@@ -4848,6 +6377,26 @@ static void test_dump_typelib(const char *name)
             hr = ITypeLib_GetTypeInfoOfGuid(typelib, &guid, &typeinfo2);
             ok(hr == S_OK || (IsEqualGUID(&guid, &IID_NULL) && hr == TYPE_E_ELEMENTNOTFOUND), "got 0x%08x\n", hr);
             if (hr == S_OK) ITypeInfo_Release(typeinfo2);
+        }
+
+        ole_check(ITypeInfo_GetTypeAttr(typeinfo, &typeattr));
+
+        hr = ITypeInfo_QueryInterface(typeinfo, &IID_ITypeInfo2, (void**)&typeinfo2);
+        ok(hr == S_OK, "Could not get ITypeInfo2: %08x\n", hr);
+
+        memset(&cust_data, 0, sizeof(cust_data));
+        ole_check(ITypeInfo2_GetAllCustData(typeinfo2,&cust_data));
+        expect_int(cust_data.cCustData, ti->cCustData);
+        ClearCustData(&cust_data);
+        for (cust = 0; cust < ti->cCustData; cust++)
+        {
+            GUID guid;
+            parse_guid(ti->custdata[cust].uuid,&guid);
+            /* check that it's possible to search using this uuid */
+            hr = ITypeInfo2_GetCustData(typeinfo2,&guid,&v);
+            ok(hr == S_OK, "GetCustDatafailed: %08x\n", hr);
+            check_variant_info(&v,&ti->custdata[cust].value);
+            VariantClear(&v);
         }
 
         for (func = 0; func < typeattr->cFuncs; func++)
@@ -4869,6 +6418,22 @@ static void test_dump_typelib(const char *name)
             expect_int(desc->oVft, fn_info->vtbl_index * sizeof(void*));
             expect_int(desc->cScodes, fn_info->cScodes);
             expect_int(desc->wFuncFlags, fn_info->wFuncFlags);
+
+            memset(&cust_data, 0, sizeof(cust_data));
+            ole_check(ITypeInfo2_GetAllFuncCustData(typeinfo2,func,&cust_data));
+            expect_int(cust_data.cCustData, fn_info->cCustData);
+            ClearCustData(&cust_data);
+            for (cust = 0; cust < fn_info->cCustData; cust++)
+            {
+                GUID guid;
+                parse_guid(fn_info->custdata[cust].uuid,&guid);
+                /* check that it's possible to search using this uuid */
+                hr = ITypeInfo2_GetFuncCustData(typeinfo2,func,&guid,&v);
+                ok(hr == S_OK, "GetCustDatafailed: %08x\n", hr);
+                check_variant_info(&v,&fn_info->custdata[cust].value);
+                VariantClear(&v);
+            }
+
             ole_check(ITypeInfo_GetNames(typeinfo, desc->memid, namesTab, 256, &cNames));
             for (i = 0; i < cNames; i++)
             {
@@ -4881,6 +6446,21 @@ static void test_dump_typelib(const char *name)
             for (i = 0 ; i < desc->cParams; i++)
             {
                 check_type(&desc->lprgelemdescParam[i], &fn_info->params[i]);
+
+                memset(&cust_data, 0, sizeof(cust_data));
+                ole_check(ITypeInfo2_GetAllParamCustData(typeinfo2,func,i,&cust_data));
+                expect_int(cust_data.cCustData, fn_info->params[i].cCustData);
+                ClearCustData(&cust_data);
+                for (cust = 0; cust < fn_info->params[i].cCustData; cust++)
+                {
+                    GUID guid;
+                    parse_guid(fn_info->params[i].custdata[cust].uuid,&guid);
+                    /* check that it's possible to search using this uuid */
+                    hr = ITypeInfo2_GetParamCustData(typeinfo2,func,i,&guid,&v);
+                    ok(hr == S_OK, "GetParamCustDatafailed: %08x\n", hr);
+                    check_variant_info(&v,&fn_info->params[i].custdata[cust].value);
+                    VariantClear(&v);
+                }
 
                 if (desc->lprgelemdescParam[i].tdesc.vt == VT_USERDEFINED)
                 {
@@ -4898,12 +6478,91 @@ static void test_dump_typelib(const char *name)
             }
             expect_int(fn_info->params[desc->cParams].vt, (VARTYPE)-1);
 
+            V_VT(&v) = VT_ERROR;
+            hr = ITypeInfo2_GetFuncCustData(typeinfo2, func, &IID_NULL, &v);
+            ok(hr == S_OK, "GetFuncCustData failed: %08x\n", hr);
+            ok(V_VT(&v) == VT_EMPTY, "V_VT(&v) = %d\n", V_VT(&v));
+            VariantClear(&v);
+
+            V_VT(&v) = VT_ERROR;
+            hr = ITypeInfo2_GetFuncCustData(typeinfo2, func, &IID_IBaseIface, &v);
+            ok(hr == S_OK, "GetFuncCustData failed: %08x\n", hr);
+            ok(V_VT(&v) == VT_EMPTY, "V_VT(&v) = %d\n", V_VT(&v));
+            VariantClear(&v);
+
+            memset(&cust_data, 0, sizeof(cust_data));
             ITypeInfo_ReleaseFuncDesc(typeinfo, desc);
         }
 
+        for (var = 0; var < typeattr->cVars; var++)
+        {
+            const var_info *var_info = &ti->vars[var];
+            VARDESC *desc;
+            BSTR varname;
+            UINT cNames;
+
+            trace("Variable %s\n", var_info->name);
+            ole_check(ITypeInfo_GetVarDesc(typeinfo, var, &desc));
+
+            expect_int(desc->memid, var_info->memid);
+
+            ole_check(ITypeInfo_GetNames(typeinfo, desc->memid, &varname, 1, &cNames));
+            expect_int(cNames, 1);
+            expect_wstr_acpval(varname, var_info->name);
+            SysFreeString(varname);
+
+            expect_null(desc->lpstrSchema); /* Reserved */
+            expect_int(desc->wVarFlags, var_info->wVarFlags);
+            expect_int(desc->varkind, var_info->varkind);
+            if (desc->varkind == VAR_PERINSTANCE) {
+                /* oInst depends on preceding field data sizes (except for unions),
+                 * so it may not be valid to expect it to match info[] on other platforms */
+                if ((libattr->syskind == info_syskind) || (typeattr->typekind == TKIND_UNION)) {
+                    expect_int(desc->DUMMYUNIONNAME.oInst, var_info->DUMMYUNIONNAME.oInst);
+                }
+            } else if(desc->varkind == VAR_CONST) {
+                check_variant_info(desc->DUMMYUNIONNAME.lpvarValue, &var_info->DUMMYUNIONNAME.varValue);
+            } else {
+                expect_null(desc->DUMMYUNIONNAME.lpvarValue);
+            }
+            memset(&cust_data, 0, sizeof(cust_data));
+            ole_check(ITypeInfo2_GetAllVarCustData(typeinfo2,var,&cust_data));
+            expect_int(cust_data.cCustData, var_info->cCustData);
+            ClearCustData(&cust_data);
+            for (cust = 0; cust < var_info->cCustData; cust++)
+            {
+                GUID guid;
+                parse_guid(var_info->custdata[cust].uuid,&guid);
+                /* check that it's possible to search using this uuid */
+                hr = ITypeInfo2_GetVarCustData(typeinfo2,var,&guid,&v);
+                ok(hr == S_OK, "GetVarCustData failed: %08x\n", hr);
+                check_variant_info(&v,&var_info->custdata[cust].value);
+                VariantClear(&v);
+            }
+
+            check_type(&desc->elemdescVar, &var_info->elemdescVar);
+
+            ITypeInfo_ReleaseVarDesc(typeinfo, desc);
+        }
+
+        if ((typeattr->typekind == TKIND_DISPATCH) && (typeattr->wTypeFlags & TYPEFLAG_FDUAL) &&
+            SUCCEEDED(ITypeInfo_GetRefTypeOfImplType(typeinfo, -1, &hRefType)))
+        {
+            /* next iteration dumps hRefType, the TKIND_INTERFACE reference underneath this [dual] TKIND_DISPATCH */
+        }
+        else
+        {
+            iface++; /* move to the next item in typelib */
+            hRefType = 0;
+        }
+
         ITypeInfo_ReleaseTypeAttr(typeinfo, typeattr);
+
+        ITypeInfo2_Release(typeinfo2);
         ITypeInfo_Release(typeinfo);
     }
+    expect_eq(ITypeLib_GetTypeInfoCount(typelib), iface, UINT, "%d");
+    ITypeLib_ReleaseTLibAttr(typelib, libattr);
     ITypeLib_Release(typelib);
 }
 
@@ -4998,8 +6657,7 @@ static void test_create_typelibs(void)
 static void test_register_typelib(BOOL system_registration)
 {
     HRESULT hr;
-    WCHAR filename[MAX_PATH];
-    const char *filenameA;
+    WCHAR *filename;
     ITypeLib *typelib;
     WCHAR uuidW[40];
     char key_name[MAX_PATH], uuid[40];
@@ -5028,7 +6686,8 @@ static void test_register_typelib(BOOL system_registration)
         { TKIND_DISPATCH,  TYPEFLAG_FDISPATCHABLE },
         { TKIND_INTERFACE, TYPEFLAG_FDISPATCHABLE },
         { TKIND_INTERFACE, TYPEFLAG_FDISPATCHABLE },
-        { TKIND_RECORD, 0 }
+        { TKIND_RECORD, 0 },
+        { TKIND_MODULE, 0 },
     };
 
     trace("Starting %s typelib registration tests\n",
@@ -5043,8 +6702,7 @@ static void test_register_typelib(BOOL system_registration)
     if (pIsWow64Process)
         pIsWow64Process(GetCurrentProcess(), &is_wow64);
 
-    filenameA = create_test_typelib(3);
-    MultiByteToWideChar(CP_ACP, 0, filenameA, -1, filename, MAX_PATH);
+    filename = create_test_typelib(3, L"TYPELIB");
 
     hr = LoadTypeLibEx(filename, REGKIND_NONE, &typelib);
     ok(hr == S_OK, "got %08x\n", hr);
@@ -5057,13 +6715,13 @@ static void test_register_typelib(BOOL system_registration)
     {
         win_skip("Insufficient privileges to register typelib in the registry\n");
         ITypeLib_Release(typelib);
-        DeleteFileA(filenameA);
+        DeleteFileW(filename);
         return;
     }
     ok(hr == S_OK, "got %08x\n", hr);
 
     count = ITypeLib_GetTypeInfoCount(typelib);
-    ok(count == 14, "got %d\n", count);
+    ok(count == 15, "got %d\n", count);
 
     for(i = 0; i < count; i++)
     {
@@ -5187,7 +6845,7 @@ static void test_register_typelib(BOOL system_registration)
     }
 
     ITypeLib_Release(typelib);
-    DeleteFileA( filenameA );
+    DeleteFileW(filename);
 }
 
 static void test_LoadTypeLib(void)
@@ -5727,7 +7385,7 @@ static HANDLE create_actctx(const char *file)
     actctx.cbSize = sizeof(ACTCTXW);
     actctx.lpSource = path;
 
-    handle = pCreateActCtxW(&actctx);
+    handle = CreateActCtxW(&actctx);
     ok(handle != INVALID_HANDLE_VALUE, "handle == INVALID_HANDLE_VALUE, error %u\n", GetLastError());
 
     ok(actctx.cbSize == sizeof(actctx), "actctx.cbSize=%d\n", actctx.cbSize);
@@ -5781,12 +7439,6 @@ static void test_LoadRegTypeLib(void)
     BSTR path;
     BOOL ret;
 
-    if (!pActivateActCtx)
-    {
-        win_skip("Activation contexts not supported, skipping LoadRegTypeLib tests\n");
-        return;
-    }
-
     create_manifest_file("testdep.manifest", manifest_dep);
     create_manifest_file("main.manifest", manifest_main);
 
@@ -5795,8 +7447,8 @@ static void test_LoadRegTypeLib(void)
     DeleteFileA("main.manifest");
 
     /* create typelib file */
-    write_typelib(1, "test_actctx_tlb.tlb");
-    write_typelib(3, "test_actctx_tlb2.tlb");
+    write_typelib(1, L"test_actctx_tlb.tlb", L"TYPELIB");
+    write_typelib(3, L"test_actctx_tlb2.tlb", L"TYPELIB");
 
     hr = LoadRegTypeLib(&LIBID_TestTypelib, 1, 0, LOCALE_NEUTRAL, &tl);
     ok(hr == TYPE_E_LIBNOTREGISTERED, "got 0x%08x\n", hr);
@@ -5807,7 +7459,7 @@ static void test_LoadRegTypeLib(void)
     hr = QueryPathOfRegTypeLib(&LIBID_TestTypelib, 2, 0, LOCALE_NEUTRAL, &path);
     ok(hr == TYPE_E_LIBNOTREGISTERED, "got 0x%08x\n", hr);
 
-    ret = pActivateActCtx(handle, &cookie);
+    ret = ActivateActCtx(handle, &cookie);
     ok(ret, "ActivateActCtx failed: %u\n", GetLastError());
 
     path = NULL;
@@ -5909,10 +7561,10 @@ static void test_LoadRegTypeLib(void)
     DeleteFileA("test_actctx_tlb.tlb");
     DeleteFileA("test_actctx_tlb2.tlb");
 
-    ret = pDeactivateActCtx(0, cookie);
+    ret = DeactivateActCtx(0, cookie);
     ok(ret, "DeactivateActCtx failed: %u\n", GetLastError());
 
-    pReleaseActCtx(handle);
+    ReleaseActCtx(handle);
 }
 
 #define AUX_HREF 1
@@ -6377,8 +8029,7 @@ static void test_stub(void)
 
 static void test_dep(void) {
     HRESULT          hr;
-    const char      *refFilename;
-    WCHAR            refFilenameW[MAX_PATH];
+    const WCHAR     *refFilename;
     ITypeLib        *preftLib;
     ITypeInfo       *preftInfo;
     char             filename[MAX_PATH];
@@ -6397,13 +8048,11 @@ static void test_dep(void) {
 
     trace("Starting typelib dependency tests\n");
 
-    refFilename = create_test_typelib(2);
-    MultiByteToWideChar(CP_ACP, 0, refFilename, -1, refFilenameW, MAX_PATH);
-
-    hr = LoadTypeLibEx(refFilenameW, REGKIND_NONE, &preftLib);
+    refFilename = create_test_typelib(4, L"TL");
+    hr = LoadTypeLibEx(refFilename, REGKIND_NONE, &preftLib);
     ok(hr == S_OK, "got %08x\n", hr);
 
-    hr = ITypeLib_GetTypeInfoOfGuid(preftLib, &IID_ISimpleIface, &preftInfo);
+    hr = ITypeLib_GetTypeInfoOfGuid(preftLib, &IID_IBaseIface, &preftInfo);
     ok(hr == S_OK, "got %08x\n", hr);
 
     GetTempFileNameA(".", "tlb", 0, filename);
@@ -6447,8 +8096,7 @@ static void test_dep(void) {
 
     ITypeInfo_Release(preftInfo);
     ITypeLib_Release(preftLib);
-
-    DeleteFileW(refFilenameW);
+    DeleteFileW(refFilename);
 
     hr = LoadTypeLibEx(filenameW, REGKIND_NONE, &ptLib);
     ok(hr == S_OK, "got: %x\n", hr);
@@ -6460,11 +8108,37 @@ static void test_dep(void) {
     ok(hr == S_OK, "got: %x\n", hr);
 
     hr = ITypeInfo_GetRefTypeInfo(ptInfo, refType, &ptInfoExt);
-    ok(hr == S_OK || broken(hr == TYPE_E_CANTLOADLIBRARY) /* win 2000 */, "got: %x\n", hr);
+    ok(hr == TYPE_E_CANTLOADLIBRARY, "got: %x\n", hr);
 
     ITypeInfo_Release(ptInfo);
     if(ptInfoExt)
         ITypeInfo_Release(ptInfoExt);
+    ITypeLib_Release(ptLib);
+
+    hr = LoadTypeLibEx(filenameW, REGKIND_NONE, &ptLib);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    hr = ITypeLib_GetTypeInfo(ptLib, 0, &ptInfo);
+    ok(hr == S_OK, "GetTypeInfo failed: %08x\n", hr);
+
+    hr = ITypeInfo_GetRefTypeOfImplType(ptInfo, 0, &refType);
+    ok(hr == S_OK, "GetRefTypeOfImplType failed: %08x\n", hr);
+
+    hr = ITypeInfo_GetRefTypeInfo(ptInfo, refType, &ptInfoExt);
+    ok(hr == TYPE_E_CANTLOADLIBRARY, "got: %x\n", hr);
+
+    refFilename = create_test_typelib(4, L"TL");
+    hr = LoadTypeLibEx(refFilename, REGKIND_NONE, &preftLib);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    hr = ITypeInfo_GetRefTypeInfo(ptInfo, refType, &ptInfoExt);
+    ok(hr == S_OK, "got: %x\n", hr);
+    ITypeInfo_Release(ptInfoExt);
+
+    ITypeLib_Release(preftLib);
+    DeleteFileW(refFilename);
+
+    ITypeInfo_Release(ptInfo);
     ITypeLib_Release(ptLib);
 
     DeleteFileW(filenameW);
@@ -6569,7 +8243,7 @@ static void test_DeleteImplType(void)
 
 START_TEST(typelib)
 {
-    const char *filename;
+    const WCHAR *filename;
 
     init_function_pointers();
 
@@ -6592,10 +8266,10 @@ START_TEST(typelib)
     test_SetDocString();
     test_FindName();
 
-    if ((filename = create_test_typelib(2)))
+    if ((filename = create_test_typelib(2, L"TYPELIB")))
     {
         test_dump_typelib( filename );
-        DeleteFileA( filename );
+        DeleteFileW( filename );
     }
 
     test_register_typelib(TRUE);

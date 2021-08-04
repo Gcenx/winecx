@@ -21,6 +21,14 @@ enthält) folgende Befehle auf:
 ./configure
 make
 
+Im Anschluss können Sie Wine entweder installieren:
+
+make install
+
+Oder direkt aus dem Quellverzeichnis ausführen:
+
+./wine notepad
+
 Starten Sie Programme mit "wine Programmname". Weitere
 Informationen und Problemlösungen entnehmen Sie bitte dem Rest dieser
 Datei, der Man-Page von Wine und insbesondere der Vielzahl an 
@@ -36,7 +44,7 @@ folgenden Betriebssysteme:
   FreeBSD 8.0 oder neuer
   Solaris x86 9 oder neuer
   NetBSD-current
-  Mac OS X 10.5 oder neuer
+  Mac OS X 10.8 oder neuer
 
 Da Wine Thread-Unterstützung auf Kernelebene benötigt, werden nur die oben
 aufgeführten Betriebssysteme unterstützt.
@@ -59,9 +67,10 @@ NetBSD-Info:
   SYSVMSG in Ihrem Kernel aktiviert haben.
 
 Mac OS X Info:
-  Sie benötigen mindestens Xcode 2.4 um richtig unter x86 kompilieren zu
-  können. Der Mac-Treiber benötigt mindestens OS X 10.6, unter 10.5 wird
-  dieser nicht mit kompiliert.
+  Sie benötigen Xcode/Xcode-Kommandozeilentools oder Apple cctools. Die
+  Mindestanforderungen um Wine zu kompilieren sind clang 3.8 mit dem
+  MacOSX10.10.sdk und mingw-w64 v8. Das MacOSX10.14.sdk oder neuer kann
+  nur wine64 erzeugen.
 
 Unterstützte Dateisysteme:
   Wine sollte auf den meisten Dateisystemen laufen. Kompatibilitätsprobleme
@@ -83,11 +92,9 @@ Optionale Bibliotheken:
   wurden. Tipps zum Installieren fehlender Pakete finden Sie unter:
   https://wiki.winehq.org/Recommended_Packages
 
-  Unter 64-Bit Plattformen, falls Sie Wine als 32-Bit kompilieren (Standard),
-  benötigen Sie die 32-Bit-Versionen dieser Bibliotheken; Details unter
-  https://wiki.winehq.org/WineOn64bit
-  Für ein reines 64-Bit Wine (oder ein gemischtes 32- und 64-Bit Wine-Setup),
-  siehe https://wiki.winehq.org/Wine64
+  Unter 64-Bit-Plattformen benötigen Sie auch die 32-Bit-Versionen dieser
+  Bibliotheken.
+
 
 4. KOMPILIEREN
 
@@ -105,6 +112,9 @@ unter Unix zu kompilieren und zu verlinken.
 Mit ./configure --help können Sie sich Konfigurations-Optionen für die
 Kompilierung anzeigen lassen.
 
+Weitere Informationen finden Sie unter https://wiki.winehq.org/Building_Wine
+
+
 5. SETUP
 
 Nachdem Wine korrekt erstellt wurde, können Sie "make install" aufrufen;
@@ -115,8 +125,8 @@ Vergessen Sie nicht, zuerst frühere Wine-Installationen zu entfernen, die mit
 der neuen in Konflikt stehen könnten. Versuchen Sie entweder "dpkg -r wine",
 "rpm -e wine" oder "make uninstall" vor der Installation auszuführen.
 
-Nach der Installation können Sie das Tool "winecfg" starten.
-Konfigurationshinweise finden Sie im Support-Bereich auf https://www.winehq.org/
+Nach der Installation können Sie das Konfigurationswerkzeug "winecfg" starten.
+Hinweise dazu finden Sie im Support-Bereich auf https://www.winehq.org/
 
 
 6. AUSFÜHREN VON PROGRAMMEN
@@ -135,8 +145,8 @@ Beispiel: Um Notepad auszuführen:
 
     wine notepad.exe liesmich.txt         (Programmaufruf mit Parametern)
 
-Wine ist nicht perfekt, daher können manche Programme abstürzen.
-In diesem Fall bekommen Sie einen Log vom Absturz, den Sie beifügen sollten,
+Wine ist nicht perfekt, manche Programme könnten abstürzen.
+In solchen Fällen bekommen Sie einen Log vom Absturz, den Sie beifügen sollten,
 wenn Sie den Fehler melden.
 
 

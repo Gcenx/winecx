@@ -31,9 +31,6 @@ typedef struct {
     BOOL val;
 } BoolInstance;
 
-static const WCHAR toStringW[] = {'t','o','S','t','r','i','n','g',0};
-static const WCHAR valueOfW[] = {'v','a','l','u','e','O','f',0};
-
 static inline BoolInstance *bool_from_jsdisp(jsdisp_t *jsdisp)
 {
     return CONTAINING_RECORD(jsdisp, BoolInstance, dispex);
@@ -60,18 +57,15 @@ static HRESULT Bool_toString(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, uns
 {
     BoolInstance *bool;
 
-    static const WCHAR trueW[] = {'t','r','u','e',0};
-    static const WCHAR falseW[] = {'f','a','l','s','e',0};
-
     TRACE("\n");
 
     if(!(bool = bool_this(jsthis)))
-        return throw_type_error(ctx, JS_E_BOOLEAN_EXPECTED, NULL);
+        return JS_E_BOOLEAN_EXPECTED;
 
     if(r) {
         jsstr_t *val;
 
-        val = jsstr_alloc(bool->val ? trueW : falseW);
+        val = jsstr_alloc(bool->val ? L"true" : L"false");
         if(!val)
             return E_OUTOFMEMORY;
 
@@ -89,7 +83,7 @@ static HRESULT Bool_valueOf(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, unsi
     TRACE("\n");
 
     if(!(bool = bool_this(jsthis)))
-        return throw_type_error(ctx, JS_E_BOOLEAN_EXPECTED, NULL);
+        return JS_E_BOOLEAN_EXPECTED;
 
     if(r)
         *r = jsval_bool(bool->val);
@@ -103,7 +97,7 @@ static HRESULT Bool_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, unsign
 
     switch(flags) {
     case INVOKE_FUNC:
-        return throw_type_error(ctx, JS_E_FUNCTION_EXPECTED, NULL);
+        return JS_E_FUNCTION_EXPECTED;
     default:
         FIXME("unimplemented flags %x\n", flags);
         return E_NOTIMPL;
@@ -114,8 +108,8 @@ static HRESULT Bool_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, unsign
 }
 
 static const builtin_prop_t Bool_props[] = {
-    {toStringW,              Bool_toString,             PROPF_METHOD},
-    {valueOfW,               Bool_valueOf,              PROPF_METHOD}
+    {L"toString",            Bool_toString,             PROPF_METHOD},
+    {L"valueOf",             Bool_valueOf,              PROPF_METHOD}
 };
 
 static const builtin_info_t Bool_info = {
@@ -200,13 +194,11 @@ HRESULT create_bool_constr(script_ctx_t *ctx, jsdisp_t *object_prototype, jsdisp
     BoolInstance *bool;
     HRESULT hres;
 
-    static const WCHAR BooleanW[] = {'B','o','o','l','e','a','n',0};
-
     hres = alloc_bool(ctx, object_prototype, &bool);
     if(FAILED(hres))
         return hres;
 
-    hres = create_builtin_constructor(ctx, BoolConstr_value, BooleanW, NULL,
+    hres = create_builtin_constructor(ctx, BoolConstr_value, L"Boolean", NULL,
             PROPF_CONSTR|1, &bool->dispex, ret);
 
     jsdisp_release(&bool->dispex);

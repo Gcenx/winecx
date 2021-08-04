@@ -23,24 +23,20 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <wine/library.h>
-
 #ifdef WIDE_SCANF
-#define _CHAR_ MSVCRT_wchar_t
-#define _EOF_ MSVCRT_WEOF
-#define _EOF_RET (short)MSVCRT_WEOF
-#define _ISSPACE_(c) MSVCRT_iswspace(c)
-#define _ISDIGIT_(c) MSVCRT_iswdigit(c)
+#define _CHAR_ wchar_t
+#define _EOF_ WEOF
+#define _EOF_RET (short)WEOF
+#define _ISSPACE_(c) iswspace(c)
 #define _WIDE2SUPPORTED_(c) c /* No conversion needed (wide to wide) */
 #define _CHAR2SUPPORTED_(c) c /* FIXME: convert char to wide char */
 #define _CHAR2DIGIT_(c, base) wchar2digit((c), (base))
 #define _BITMAPSIZE_ 256*256
 #else /* WIDE_SCANF */
 #define _CHAR_ char
-#define _EOF_ MSVCRT_EOF
-#define _EOF_RET MSVCRT_EOF
+#define _EOF_ EOF
+#define _EOF_RET EOF
 #define _ISSPACE_(c) isspace(c)
-#define _ISDIGIT_(c) isdigit(c)
 #define _WIDE2SUPPORTED_(c) c /* FIXME: convert wide char to char */
 #define _CHAR2SUPPORTED_(c) c /* No conversion needed (char to char) */
 #define _CHAR2DIGIT_(c, base) char2digit((c), (base))
@@ -52,19 +48,19 @@
 #define _STRTOD_NAME_(func) console_ ## func
 #define _GETC_(file) (consumed++, _getch())
 #define _UNGETC_(nch, file) do { _ungetch(nch); consumed--; } while(0)
-#define _LOCK_FILE_(file) MSVCRT__lock_file(MSVCRT_stdin)
-#define _UNLOCK_FILE_(file) MSVCRT__unlock_file(MSVCRT_stdin)
+#define _LOCK_FILE_(file) _lock_file(MSVCRT_stdin)
+#define _UNLOCK_FILE_(file) _unlock_file(MSVCRT_stdin)
 #ifdef WIDE_SCANF
 #ifdef SECURE
-#define _FUNCTION_ static int MSVCRT_vcwscanf_s_l(const MSVCRT_wchar_t *format, MSVCRT__locale_t locale, __ms_va_list ap)
+#define _FUNCTION_ static int vcwscanf_s_l(const wchar_t *format, _locale_t locale, __ms_va_list ap)
 #else  /* SECURE */
-#define _FUNCTION_ static int MSVCRT_vcwscanf_l(const MSVCRT_wchar_t *format, MSVCRT__locale_t locale, __ms_va_list ap)
+#define _FUNCTION_ static int vcwscanf_l(const wchar_t *format, _locale_t locale, __ms_va_list ap)
 #endif /* SECURE */
 #else  /* WIDE_SCANF */
 #ifdef SECURE
-#define _FUNCTION_ static int MSVCRT_vcscanf_s_l(const char *format, MSVCRT__locale_t locale, __ms_va_list ap)
+#define _FUNCTION_ static int vcscanf_s_l(const char *format, _locale_t locale, __ms_va_list ap)
 #else  /* SECURE */
-#define _FUNCTION_ static int MSVCRT_vcscanf_l(const char *format, MSVCRT__locale_t locale, __ms_va_list ap)
+#define _FUNCTION_ static int vcscanf_l(const char *format, _locale_t locale, __ms_va_list ap)
 #endif /* SECURE */
 #endif /* WIDE_SCANF */
 #else
@@ -88,15 +84,15 @@
 #define _UNLOCK_FILE_(file) do {} while(0)
 #ifdef WIDE_SCANF
 #ifdef SECURE
-#define _FUNCTION_ static int MSVCRT_vsnwscanf_s_l(const MSVCRT_wchar_t *file, MSVCRT_size_t length, const MSVCRT_wchar_t *format, MSVCRT__locale_t locale, __ms_va_list ap)
+#define _FUNCTION_ static int vsnwscanf_s_l(const wchar_t *file, size_t length, const wchar_t *format, _locale_t locale, __ms_va_list ap)
 #else  /* SECURE */
-#define _FUNCTION_ static int MSVCRT_vsnwscanf_l(const MSVCRT_wchar_t *file, MSVCRT_size_t length, const MSVCRT_wchar_t *format, MSVCRT__locale_t locale, __ms_va_list ap)
+#define _FUNCTION_ static int vsnwscanf_l(const wchar_t *file, size_t length, const wchar_t *format, _locale_t locale, __ms_va_list ap)
 #endif /* SECURE */
 #else /* WIDE_SCANF */
 #ifdef SECURE
-#define _FUNCTION_ static int MSVCRT_vsnscanf_s_l(const char *file, MSVCRT_size_t length, const char *format, MSVCRT__locale_t locale, __ms_va_list ap)
+#define _FUNCTION_ static int vsnscanf_s_l(const char *file, size_t length, const char *format, _locale_t locale, __ms_va_list ap)
 #else  /* SECURE */
-#define _FUNCTION_ static int MSVCRT_vsnscanf_l(const char *file, MSVCRT_size_t length, const char *format, MSVCRT__locale_t locale, __ms_va_list ap)
+#define _FUNCTION_ static int vsnscanf_l(const char *file, size_t length, const char *format, _locale_t locale, __ms_va_list ap)
 #endif /* SECURE */
 #endif /* WIDE_SCANF */
 #else /* STRING_LEN */
@@ -110,42 +106,42 @@
 #define _UNLOCK_FILE_(file) do {} while(0)
 #ifdef WIDE_SCANF
 #ifdef SECURE
-#define _FUNCTION_ static int MSVCRT_vswscanf_s_l(const MSVCRT_wchar_t *file, const MSVCRT_wchar_t *format, MSVCRT__locale_t locale, __ms_va_list ap)
+#define _FUNCTION_ static int vswscanf_s_l(const wchar_t *file, const wchar_t *format, _locale_t locale, __ms_va_list ap)
 #else  /* SECURE */
-#define _FUNCTION_ static int MSVCRT_vswscanf_l(const MSVCRT_wchar_t *file, const MSVCRT_wchar_t *format, MSVCRT__locale_t locale, __ms_va_list ap)
+#define _FUNCTION_ static int vswscanf_l(const wchar_t *file, const wchar_t *format, _locale_t locale, __ms_va_list ap)
 #endif /* SECURE */
 #else /* WIDE_SCANF */
 #ifdef SECURE
-#define _FUNCTION_ static int MSVCRT_vsscanf_s_l(const char *file, const char *format, MSVCRT__locale_t locale, __ms_va_list ap)
+#define _FUNCTION_ static int vsscanf_s_l(const char *file, const char *format, _locale_t locale, __ms_va_list ap)
 #else  /* SECURE */
-#define _FUNCTION_ static int MSVCRT_vsscanf_l(const char *file, const char *format, MSVCRT__locale_t locale, __ms_va_list ap)
+#define _FUNCTION_ static int vsscanf_l(const char *file, const char *format, _locale_t locale, __ms_va_list ap)
 #endif /* SECURE */
 #endif /* WIDE_SCANF */
 #endif /* STRING_LEN */
 #else /* STRING */
 #ifdef WIDE_SCANF
-#define _GETC_FUNC_(file) MSVCRT_fgetwc(file)
+#define _GETC_FUNC_(file) fgetwc(file)
 #define _STRTOD_NAME_(func) filew_ ## func
-#define _GETC_(file) (consumed++, MSVCRT_fgetwc(file))
-#define _UNGETC_(nch, file) do { MSVCRT_ungetwc(nch, file); consumed--; } while(0)
-#define _LOCK_FILE_(file) MSVCRT__lock_file(file)
-#define _UNLOCK_FILE_(file) MSVCRT__unlock_file(file)
+#define _GETC_(file) (consumed++, fgetwc(file))
+#define _UNGETC_(nch, file) do { ungetwc(nch, file); consumed--; } while(0)
+#define _LOCK_FILE_(file) _lock_file(file)
+#define _UNLOCK_FILE_(file) _unlock_file(file)
 #ifdef SECURE
-#define _FUNCTION_ static int MSVCRT_vfwscanf_s_l(MSVCRT_FILE* file, const MSVCRT_wchar_t *format, MSVCRT__locale_t locale, __ms_va_list ap)
+#define _FUNCTION_ static int vfwscanf_s_l(FILE* file, const wchar_t *format, _locale_t locale, __ms_va_list ap)
 #else  /* SECURE */
-#define _FUNCTION_ static int MSVCRT_vfwscanf_l(MSVCRT_FILE* file, const MSVCRT_wchar_t *format, MSVCRT__locale_t locale, __ms_va_list ap)
+#define _FUNCTION_ static int vfwscanf_l(FILE* file, const wchar_t *format, _locale_t locale, __ms_va_list ap)
 #endif /* SECURE */
 #else /* WIDE_SCANF */
-#define _GETC_FUNC_(file) MSVCRT_fgetc(file)
+#define _GETC_FUNC_(file) fgetc(file)
 #define _STRTOD_NAME_(func) file_ ## func
-#define _GETC_(file) (consumed++, MSVCRT_fgetc(file))
-#define _UNGETC_(nch, file) do { MSVCRT_ungetc(nch, file); consumed--; } while(0)
-#define _LOCK_FILE_(file) MSVCRT__lock_file(file)
-#define _UNLOCK_FILE_(file) MSVCRT__unlock_file(file)
+#define _GETC_(file) (consumed++, fgetc(file))
+#define _UNGETC_(nch, file) do { ungetc(nch, file); consumed--; } while(0)
+#define _LOCK_FILE_(file) _lock_file(file)
+#define _UNLOCK_FILE_(file) _unlock_file(file)
 #ifdef SECURE
-#define _FUNCTION_ static int MSVCRT_vfscanf_s_l(MSVCRT_FILE* file, const char *format, MSVCRT__locale_t locale, __ms_va_list ap)
+#define _FUNCTION_ static int vfscanf_s_l(FILE* file, const char *format, _locale_t locale, __ms_va_list ap)
 #else  /* SECURE */
-#define _FUNCTION_ static int MSVCRT_vfscanf_l(MSVCRT_FILE* file, const char *format, MSVCRT__locale_t locale, __ms_va_list ap)
+#define _FUNCTION_ static int vfscanf_l(FILE* file, const char *format, _locale_t locale, __ms_va_list ap)
 #endif /* SECURE */
 #endif /* WIDE_SCANF */
 #endif /* STRING */
@@ -153,11 +149,11 @@
 
 #if (!defined(SECURE) && !defined(STRING_LEN) && (!defined(CONSOLE) || !defined(WIDE_SCANF)))
 struct _STRTOD_NAME_(strtod_scanf_ctx) {
-    MSVCRT_pthreadlocinfo locinfo;
+    pthreadlocinfo locinfo;
 #ifdef STRING
     const _CHAR_ *file;
 #else
-    MSVCRT_FILE *file;
+    FILE *file;
 #endif
     int length;
     int read;
@@ -166,18 +162,18 @@ struct _STRTOD_NAME_(strtod_scanf_ctx) {
     BOOL err;
 };
 
-static MSVCRT_wchar_t _STRTOD_NAME_(strtod_scanf_get)(void *ctx)
+static wchar_t _STRTOD_NAME_(strtod_scanf_get)(void *ctx)
 {
     struct _STRTOD_NAME_(strtod_scanf_ctx) *context = ctx;
 
     context->cur = _EOF_;
-    if (!context->length) return MSVCRT_WEOF;
+    if (!context->length) return WEOF;
     if (context->unget != _EOF_) {
         context->cur = context->unget;
         context->unget = _EOF_;
     } else {
         context->cur = _GETC_FUNC_(context->file);
-        if (context->cur == _EOF_) return MSVCRT_WEOF;
+        if (context->cur == _EOF_) return WEOF;
     }
 
     if (context->length > 0) context->length--;
@@ -200,7 +196,7 @@ static void _STRTOD_NAME_(strtod_scanf_unget)(void *ctx)
 #endif
 
 _FUNCTION_ {
-    MSVCRT_pthreadlocinfo locinfo;
+    pthreadlocinfo locinfo;
     int rd = 0, consumed = 0;
     int nch;
     if (!*format) return 0;
@@ -262,7 +258,7 @@ _FUNCTION_ {
 	    /* read prefix (if any) */
 	    while (!prefix_finished) {
                 /* look for width specification */
-                while (_ISDIGIT_(*format)) {
+                while (*format >= '0' && *format <= '9') {
                     width *= 10;
                     width += *format++ - '0';
                 }
@@ -295,7 +291,7 @@ _FUNCTION_ {
             switch(*format) {
 	    case 'p':
 	    case 'P': /* pointer. */
-                if (wine_is_64bit()) I64_prefix = 1;
+                if (sizeof(void *) == sizeof(LONGLONG)) I64_prefix = 1;
                 /* fall through */
 	    case 'x':
 	    case 'X': /* hexadecimal integer. */
@@ -390,6 +386,7 @@ _FUNCTION_ {
                     struct _STRTOD_NAME_(strtod_scanf_ctx) ctx = {locinfo, file, width};
 #endif
                     int negative = 0;
+                    struct fpnum fp;
                     double cur;
 
                     /* skip initial whitespace */
@@ -405,8 +402,9 @@ _FUNCTION_ {
                     if(ctx.length > length-consumed+1) ctx.length = length-consumed+1;
 #endif
 
-                    cur = parse_double(_STRTOD_NAME_(strtod_scanf_get),
-                            _STRTOD_NAME_(strtod_scanf_unget), &ctx, locinfo, NULL);
+                    fp = fpnum_parse(_STRTOD_NAME_(strtod_scanf_get),
+                            _STRTOD_NAME_(strtod_scanf_unget), &ctx, locinfo, FALSE);
+                    fpnum_double(&fp, &cur);
                     if(!rd && ctx.err) {
                         _UNLOCK_FILE_(file);
                         return _EOF_RET;
@@ -484,8 +482,8 @@ _FUNCTION_ {
                 }
                 break;
 	    widecharstring: { /* read a word into a wchar_t* */
-		    MSVCRT_wchar_t *sptr = suppress ? NULL : va_arg(ap, MSVCRT_wchar_t*);
-                    MSVCRT_wchar_t *sptr_beg = sptr;
+		    wchar_t *sptr = suppress ? NULL : va_arg(ap, wchar_t*);
+                    wchar_t *sptr_beg = sptr;
 #ifdef SECURE
                     unsigned size = suppress ? UINT_MAX : va_arg(ap, unsigned);
 #else
@@ -565,8 +563,8 @@ _FUNCTION_ {
                 }
 		break;
 	  widecharacter: { /* read single character into a wchar_t */
-                    MSVCRT_wchar_t *str = suppress ? NULL : va_arg(ap, MSVCRT_wchar_t*);
-                    MSVCRT_wchar_t *pstr = str;
+                    wchar_t *str = suppress ? NULL : va_arg(ap, wchar_t*);
+                    wchar_t *pstr = str;
 #ifdef SECURE
                     unsigned size = suppress ? UINT_MAX : va_arg(ap, unsigned);
 #else
@@ -639,12 +637,12 @@ _FUNCTION_ {
                     while(*format && (*format != ']')) {
 			/* According to msdn:
 			 * "Note that %[a-z] and %[z-a] are interpreted as equivalent to %[abcde...z]." */
-			if((*format == '-') && (*(format + 1) != ']')) {
-			    if ((*(format - 1)) < *(format + 1))
-				RtlSetBits(&bitMask, *(format - 1) +1 , *(format + 1) - *(format - 1));
-			    else
-				RtlSetBits(&bitMask, *(format + 1)    , *(format - 1) - *(format + 1));			      
-			    format++;
+                        if(format[1] == '-' && format[2] && format[2] != ']') {
+                            if (format[0] < format[2])
+                                RtlSetBits(&bitMask, format[0], format[2] - format[0] + 1);
+                            else
+                                RtlSetBits(&bitMask, format[2], format[0] - format[2] + 1);
+			    format += 2;
 			} else
 			    RtlSetBits(&bitMask, *format, 1);
 			format++;
@@ -721,7 +719,6 @@ _FUNCTION_ {
 #undef _EOF_
 #undef _EOF_RET
 #undef _ISSPACE_
-#undef _ISDIGIT_
 #undef _CHAR2SUPPORTED_
 #undef _WIDE2SUPPORTED_
 #undef _CHAR2DIGIT_

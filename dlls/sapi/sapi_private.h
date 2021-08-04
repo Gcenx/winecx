@@ -22,9 +22,12 @@
 
 HRESULT data_key_create( IUnknown *outer, REFIID iid, void **obj ) DECLSPEC_HIDDEN;
 HRESULT file_stream_create( IUnknown *outer, REFIID iid, void **obj ) DECLSPEC_HIDDEN;
+HRESULT resource_manager_create( IUnknown *outer, REFIID iid, void **obj ) DECLSPEC_HIDDEN;
+HRESULT speech_stream_create( IUnknown *outer, REFIID iid, void **obj ) DECLSPEC_HIDDEN;
 HRESULT speech_voice_create( IUnknown *outer, REFIID iid, void **obj ) DECLSPEC_HIDDEN;
 HRESULT token_category_create( IUnknown *outer, REFIID iid, void **obj ) DECLSPEC_HIDDEN;
 HRESULT token_enum_create( IUnknown *outer, REFIID iid, void **obj ) DECLSPEC_HIDDEN;
+HRESULT token_create( IUnknown *outer, REFIID iid, void **obj ) DECLSPEC_HIDDEN;
 
 static inline LPWSTR heap_strdupW(LPCWSTR str)
 {

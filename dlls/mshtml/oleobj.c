@@ -231,19 +231,12 @@ static void load_settings(HTMLDocumentObj *doc)
     DWORD val, size;
     LONG res;
 
-    static const WCHAR ie_keyW[] = {
-        'S','O','F','T','W','A','R','E','\\',
-        'M','i','c','r','o','s','o','f','t','\\',
-        'I','n','t','e','r','n','e','t',' ','E','x','p','l','o','r','e','r',0};
-    static const WCHAR zoomW[] = {'Z','o','o','m',0};
-    static const WCHAR zoom_factorW[] = {'Z','o','o','m','F','a','c','t','o','r',0};
-
-    res = RegOpenKeyW(HKEY_CURRENT_USER, ie_keyW, &settings_key);
+    res = RegOpenKeyW(HKEY_CURRENT_USER, L"SOFTWARE\\Microsoft\\Internet Explorer", &settings_key);
     if(res != ERROR_SUCCESS)
         return;
 
     size = sizeof(val);
-    res = RegGetValueW(settings_key, zoomW, zoom_factorW, RRF_RT_REG_DWORD, NULL, &val, &size);
+    res = RegGetValueW(settings_key, L"Zoom", L"ZoomFactor", RRF_RT_REG_DWORD, NULL, &val, &size);
     RegCloseKey(settings_key);
     if(res == ERROR_SUCCESS)
         set_viewer_zoom(doc->nscontainer, (float)val/100000);
@@ -606,15 +599,27 @@ static HRESULT WINAPI OleObject_GetUserType(IOleObject *iface, DWORD dwFormOfTyp
 static HRESULT WINAPI OleObject_SetExtent(IOleObject *iface, DWORD dwDrawAspect, SIZEL *psizel)
 {
     HTMLDocument *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%d %p)\n", This, dwDrawAspect, psizel);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%d %p)\n", This, dwDrawAspect, psizel);
+
+    if (dwDrawAspect != DVASPECT_CONTENT)
+        return E_INVALIDARG;
+
+    This->doc_obj->extent = *psizel;
+    return S_OK;
 }
 
 static HRESULT WINAPI OleObject_GetExtent(IOleObject *iface, DWORD dwDrawAspect, SIZEL *psizel)
 {
     HTMLDocument *This = impl_from_IOleObject(iface);
-    FIXME("(%p)->(%d %p)\n", This, dwDrawAspect, psizel);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%d %p)\n", This, dwDrawAspect, psizel);
+
+    if (dwDrawAspect != DVASPECT_CONTENT)
+        return E_INVALIDARG;
+
+    *psizel = This->doc_obj->extent;
+    return S_OK;
 }
 
 static HRESULT WINAPI OleObject_Advise(IOleObject *iface, IAdviseSink *pAdvSink, DWORD *pdwConnection)
@@ -1473,4 +1478,6 @@ void HTMLDocument_OleObj_Init(HTMLDocument *This)
     This->IObjectWithSite_iface.lpVtbl = &ObjectWithSiteVtbl;
     This->IOleContainer_iface.lpVtbl = &OleContainerVtbl;
     This->IObjectSafety_iface.lpVtbl = &ObjectSafetyVtbl;
+    This->doc_obj->extent.cx = 1;
+    This->doc_obj->extent.cy = 1;
 }

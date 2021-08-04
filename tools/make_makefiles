@@ -41,7 +41,6 @@ my %modules16 =
 my %exported_wine_headers = (
     "wine/debug.h" => 1,
     "wine/exception.h" => 1,
-    "wine/library.h" => 1,
     "wine/itss.idl" => 1,
     "wine/svcctl.idl" => 1,
 );
@@ -74,6 +73,7 @@ my @source_vars = (
 );
 
 my (@makefiles, %makefiles);
+my @nls_files;
 
 sub dirname($)
 {
@@ -389,6 +389,10 @@ sub assign_sources_to_makefiles(@)
         {
             next unless defined ${$make}{"TESTDLL"};
         }
+        elsif ($name =~ /\.nls$/)
+        {
+            push @nls_files, $name if $dir eq "nls";
+        }
         elsif ($dir ne "loader")  # loader dir contains misc files
         {
             next;
@@ -480,9 +484,17 @@ sub update_makefiles(@)
     replace_in_file( "configure.ac", '^WINE_CONFIG_MAKEFILE', '^dnl End of auto-generated output commands\n$', @lines);
 }
 
+sub update_wine_inf()
+{
+    my @lines;
+    push @lines, "[NlsFiles]", sort grep(!/^sort/, @nls_files);
+    push @lines, "\n[SortFiles]", sort grep(/^sort/, @nls_files);
+    push @lines, "\n[WineSourceDirs]\n";
+    replace_in_file "loader/wine.inf.in", '^\[NlsFiles\]', '^\[WineSourceDirs\]', join( "\n", @lines );
+}
 
 my $git_dir = $ENV{GIT_DIR} || ".git";
-die "needs to be run from a git checkout" unless -d $git_dir;
+die "needs to be run from a git checkout" unless -e $git_dir;
 
 my @all_files = split /\0/, `git ls-files -c -z`;
 map { $ignored_source_files{$_} = 1; } split /\0/, `git ls-files -d -z`;
@@ -496,3 +508,4 @@ foreach my $file (sort @makefiles)
 
 assign_sources_to_makefiles( @all_files );
 update_makefiles( @makefiles );
+update_wine_inf();

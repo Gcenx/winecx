@@ -32,6 +32,15 @@
 #define TESTFILE ".\\testwine.ini"
 #define TESTFILE2 ".\\testwine2.ini"
 
+static void check_profile_string_(int line, const char *section, const char *name, const char *file, const char *expect)
+{
+    char value[200] = {0};
+    DWORD ret = GetPrivateProfileStringA(section, name, "default", value, sizeof(value), file);
+    ok_(__FILE__, line)(ret == strlen(expect), "expected len %u, got %u\n", strlen(expect), ret);
+    ok_(__FILE__, line)(!strcmp(value, expect), "expected %s, got %s\n", debugstr_a(expect), debugstr_a(value));
+}
+#define check_profile_string(a, b, c, d) check_profile_string_(__LINE__, a, b, c, d);
+
 struct _profileInt { 
     LPCSTR section;
     LPCSTR key;
@@ -582,8 +591,10 @@ static void test_GetPrivateProfileString(const char *content, const char *descri
                                    buf, MAX_PATH, filename);
     ok(ret == 18, "Expected 18, got %d\n", ret);
     len = lstrlenA("section1") + sizeof(CHAR) + lstrlenA("section2") + 2 * sizeof(CHAR);
-    ok(!memcmp(buf, "section1\0section2\0\0", len),
-       "Expected \"section1\\0section2\\0\\0\", got \"%s\"\n", buf);
+
+    ok(!memcmp(buf, "section1\0section2\0", len),
+       "Expected \"section1\\x00section2\\x00\\x00\", got %s\n",
+       debugstr_an(buf, (ret + 2 >= MAX_PATH ? MAX_PATH : ret + 1)));
 
     /* lpAppName is empty */
     memset(buf, 0xc, sizeof(buf));
@@ -658,7 +669,8 @@ static void test_GetPrivateProfileString(const char *content, const char *descri
                                    buf, MAX_PATH, filename);
     ok(ret == 18, "Expected 18, got %d\n", ret);
     ok(!memcmp(buf, "name1\0name2\0name4\0", ret + 1),
-       "Expected \"name1\\0name2\\0name4\\0\", got \"%s\"\n", buf);
+       "Expected \"name1\\x00name2\\x00name4\\x00\\x00\", got %s\n",
+       debugstr_an(buf, (ret + 2 >= MAX_PATH ? MAX_PATH : ret + 1)));
 
     /* lpKeyName is empty */
     memset(buf, 0xc,sizeof(buf));
@@ -785,8 +797,9 @@ static void test_GetPrivateProfileString(const char *content, const char *descri
     ok(ret == 14, "Expected 14, got %d\n", ret);
     len = lstrlenA("section1") + 2 * sizeof(CHAR);
     todo_wine
-    ok(!memcmp(buf, "section1\0secti\0\0", ret + 2),
-       "Expected \"section1\\0secti\\0\\0\", got \"%s\"\n", buf);
+    ok(!memcmp(buf, "section1\0secti\0", ret + 2),
+       "Expected \"section1\\x00secti\\x00\\x00\", got %s\n",
+       debugstr_an(buf, (ret + 2 >= 16 ? 16 : ret + 1)));
 
     /* lpKeyName is NULL, not enough room for final key name */
     memset(buf, 0xc,sizeof(buf));
@@ -795,8 +808,9 @@ static void test_GetPrivateProfileString(const char *content, const char *descri
                                    buf, 16, filename);
     ok(ret == 14, "Expected 14, got %d\n", ret);
     todo_wine
-    ok(!memcmp(buf, "name1\0name2\0na\0\0", ret + 2),
-       "Expected \"name1\\0name2\\0na\\0\\0\", got \"%s\"\n", buf);
+    ok(!memcmp(buf, "name1\0name2\0na\0", ret + 2),
+       "Expected \"name1\\x00name2\\x00na\\x00\\x00\", got %s\n",
+       debugstr_an(buf, (ret + 2 >= 16 ? 16 : ret + 1)));
 
     /* key value has quotation marks which are stripped */
     memset(buf, 0xc,sizeof(buf));
@@ -1092,6 +1106,488 @@ static void test_WritePrivateProfileString(void)
     DeleteFileA(path);
 }
 
+static void test_profile_struct(void)
+{
+    static const char expect_data[] = "[s]\r\nkey=616261637573006F\r\n";
+    char buffer[20];
+    BOOL ret;
+
+    SetLastError(0xdeadbeef);
+    ret = GetPrivateProfileStructA("s", "key", buffer, sizeof(buffer), "./winetest.ini");
+    ok(!ret, "expected failure\n");
+    todo_wine ok(GetLastError() == ERROR_BAD_LENGTH, "got error %u\n", GetLastError());
+
+    ret = WritePrivateProfileStructA("s", "key", (void *)"abacus", sizeof("abacus"), "./winetest.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    ok(check_file_data("./winetest.ini", expect_data), "file doesn't match\n");
+
+    SetLastError(0xdeadbeef);
+    ret = GetPrivateProfileStructA("s", "key", buffer, 6, "./winetest.ini");
+    ok(!ret, "expected failure\n");
+    todo_wine ok(GetLastError() == ERROR_BAD_LENGTH, "got error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = GetPrivateProfileStructA("s", "key", buffer, 8, "./winetest.ini");
+    ok(!ret, "expected failure\n");
+    todo_wine ok(GetLastError() == ERROR_BAD_LENGTH, "got error %u\n", GetLastError());
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    ret = GetPrivateProfileStructA("s", "key", buffer, 7, "./winetest.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    ok(!strcmp(buffer, "abacus"), "data didn't match\n");
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    ret = GetPrivateProfileStringA("s", "key", "default", buffer, sizeof(buffer), "./winetest.ini");
+    ok(ret == 16, "got size %u\n", ret);
+    ok(!strcmp(buffer, "616261637573006F"), "got %s\n", debugstr_a(buffer));
+
+    ret = WritePrivateProfileStringA("s", "key", "636163747573006F", "./winetest.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = GetPrivateProfileStructA("s", "key", buffer, 7, "./winetest.ini");
+    ok(!ret, "expected failure\n");
+    todo_wine ok(GetLastError() == ERROR_INVALID_DATA, "got error %u\n", GetLastError());
+
+    ret = WritePrivateProfileStringA("s", "key", "6361637475730083", "./winetest.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    ret = GetPrivateProfileStructA("s", "key", buffer, 7, "./winetest.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    ok(!strcmp(buffer, "cactus"), "data didn't match\n");
+
+    ret = WritePrivateProfileStringA("s", "key", "636163747573008Q", "./winetest.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = GetPrivateProfileStructA("s", "key", buffer, 7, "./winetest.ini");
+    ok(!ret, "expected failure\n");
+    todo_wine ok(GetLastError() == ERROR_INVALID_DATA, "got error %u\n", GetLastError());
+
+    ret = WritePrivateProfileStringA("s", "key", "16361637475730083", "./winetest.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = GetPrivateProfileStructA("s", "key", buffer, 7, "./winetest.ini");
+    ok(!ret, "expected failure\n");
+    todo_wine ok(GetLastError() == ERROR_BAD_LENGTH, "got error %u\n", GetLastError());
+
+    ret = DeleteFileA("./winetest.ini");
+    ok(ret, "got error %u\n", GetLastError());
+}
+
+static void check_registry_value_(int line, HKEY key, const char *value, const char *expect)
+{
+    char buffer[30];
+    DWORD type, size = sizeof(buffer);
+    LSTATUS ret;
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    ret = RegQueryValueExA(key, value, 0, &type, (BYTE *)buffer, &size);
+    ok_(__FILE__, line)(!ret, "got error %u\n", ret);
+    ok_(__FILE__, line)(!strcmp(buffer, expect), "expected %s, got %s\n", debugstr_a(expect), debugstr_a(buffer));
+    ok_(__FILE__, line)(type == REG_SZ, "got type %u\n", type);
+}
+#define check_registry_value(a, b, c) check_registry_value_(__LINE__, a, b, c)
+
+static void test_registry_mapping(void)
+{
+    static const DWORD ivalue = 0xabacab;
+    HKEY mapping_key, mapped_key, mapping_subkey;
+    char buffer[30];
+    LSTATUS ret;
+
+    /* impersonate ourselves to prevent registry virtualization */
+    ret = ImpersonateSelf(SecurityImpersonation);
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = RegCreateKeyExA(HKEY_LOCAL_MACHINE,
+            "Software\\Microsoft\\Windows NT\\CurrentVersion\\IniFileMapping\\winetest_map.ini",
+            0, NULL, 0, KEY_READ | KEY_WRITE | KEY_WOW64_64KEY, NULL, &mapping_key, NULL);
+    if (ret == ERROR_ACCESS_DENIED)
+    {
+        skip("Not enough permissions to write to the IniFileMapping key.\n");
+        return;
+    }
+    ok(!ret, "got error %u\n", ret);
+
+    ret = RegSetValueExA(mapping_key, "section1", 0, REG_SZ, (BYTE *)"USR:winetest_map", sizeof("USR:winetest_map"));
+    ok(!ret, "got error %u\n", ret);
+    ret = WritePrivateProfileStringA(NULL, NULL, NULL, "winetest_map.ini");
+    todo_wine ok(ret, "got error %u\n", GetLastError());
+
+    check_profile_string("section1", "name1", "winetest_map.ini", "default");
+
+    ret = WritePrivateProfileStringA("section1", "name1", "value1", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    check_profile_string("section1", "name1", "winetest_map.ini", "value1");
+    check_profile_string("section1", "name1", "C:/fake/path/winetest_map.ini", "value1");
+
+    ret = RegOpenKeyExA(HKEY_CURRENT_USER, "winetest_map", 0, KEY_READ | KEY_WRITE, &mapped_key);
+    ok(!ret, "got error %u\n", ret);
+    check_registry_value(mapped_key, "name1", "value1");
+
+    ret = RegSetValueExA(mapped_key, "name2", 0, REG_SZ, (BYTE *)"value2", sizeof("value2"));
+    ok(!ret, "got error %u\n", ret);
+
+    check_profile_string("section1", "name2", "winetest_map.ini", "value2");
+
+    ret = GetFileAttributesA("C:/windows/winetest_map.ini");
+    ok(ret == INVALID_FILE_ATTRIBUTES, "winetest_map.ini should not exist.\n");
+
+    ret = WritePrivateProfileStringA("section1", "name2", NULL, "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    ret = RegQueryValueExA(mapped_key, "name2", 0, NULL, NULL, NULL);
+    ok(ret == ERROR_FILE_NOT_FOUND, "got error %u\n", ret);
+
+    /* Test non-string types. */
+
+    ret = RegSetValueExA(mapped_key, "name3", 0, REG_DWORD, (BYTE *)&ivalue, sizeof(ivalue));
+    ok(!ret, "got error %u\n", ret);
+    check_profile_string("section1", "name3", "winetest_map.ini", "default");
+
+    ret = GetPrivateProfileIntA("section1", "name3", 0, "winetest_map.ini");
+    ok(ret == 0, "got %#x\n", ret);
+
+    ret = RegSetValueExA(mapped_key, "name3", 0, REG_BINARY, (BYTE *)"value3", sizeof("value3"));
+    ok(!ret, "got error %u\n", ret);
+    check_profile_string("section1", "name3", "winetest_map.ini", "default");
+
+    ret = RegSetValueExA(mapped_key, "name3", 0, REG_MULTI_SZ, (BYTE *)"one\0two\0", sizeof("one\0two\0"));
+    ok(!ret, "got error %u\n", ret);
+    check_profile_string("section1", "name3", "winetest_map.ini", "default");
+
+    ret = RegSetValueExA(mapped_key, "name3", 0, REG_EXPAND_SZ, (BYTE *)"x%SystemRoot%", sizeof("x%SystemRoot%"));
+    ok(!ret, "got error %u\n", ret);
+    check_profile_string("section1", "name3", "winetest_map.ini", "default");
+
+    /* Test WritePrivateProfileSection(). Unlike with .ini files, it doesn't
+     * remove existing entries. */
+
+    ret = WritePrivateProfileStringA("section1", "name4", "value4", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    ret = WritePrivateProfileStringA("section1", "name5", "value5", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    ret = WritePrivateProfileSectionA("section1", "name4=four\0name6=six\0", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    check_profile_string("section1", "name4", "winetest_map.ini", "four");
+    check_profile_string("section1", "name5", "winetest_map.ini", "value5");
+    check_profile_string("section1", "name6", "winetest_map.ini", "six");
+
+    /* Test deleting the section. */
+
+    RegCloseKey(mapped_key);
+
+    ret = RegCreateKeyExA(HKEY_CURRENT_USER, "winetest_map\\subkey", 0, NULL, 0, 0, NULL, &mapped_key, NULL);
+    ok(!ret, "got error %u\n", ret);
+    RegCloseKey(mapped_key);
+
+    ret = WritePrivateProfileStringA("section1", "name1", "value1", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    ret = WritePrivateProfileStringA("section1", NULL, NULL, "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    check_profile_string("section1", "name1", "winetest_map.ini", "default");
+
+    ret = WritePrivateProfileStringA("section1", "name1", "value1", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    ret = WritePrivateProfileSectionA("section1", NULL, "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    check_profile_string("section1", "name1", "winetest_map.ini", "default");
+
+    ret = RegDeleteKeyA(HKEY_CURRENT_USER, "winetest_map\\subkey");
+    ok(!ret, "got error %u\n", ret);
+    ret = RegDeleteKeyA(HKEY_CURRENT_USER, "winetest_map");
+    ok(!ret, "got error %u\n", ret);
+
+    /* Test GetPrivateProfileSectionNames(). */
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    ret = GetPrivateProfileSectionNamesA(buffer, 5, "winetest_map.ini");
+    ok(ret == 3, "got %u\n", ret);
+    ok(!memcmp(buffer, "sec\0", 5), "got %s\n", debugstr_an(buffer, ret));
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    ret = GetPrivateProfileSectionNamesA(buffer, sizeof(buffer), "winetest_map.ini");
+    ok(ret == 9, "got %u\n", ret);
+    ok(!memcmp(buffer, "section1\0", 10), "got %s\n", debugstr_an(buffer, ret));
+
+    ret = WritePrivateProfileStringA("file_section", "name1", "value1", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    ret = GetPrivateProfileSectionNamesA(buffer, 5, "winetest_map.ini");
+    ok(ret == 3, "got %u\n", ret);
+    ok(!memcmp(buffer, "sec\0", 5), "got %s\n", debugstr_an(buffer, ret));
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    ret = GetPrivateProfileSectionNamesA(buffer, sizeof(buffer), "winetest_map.ini");
+    ok(ret == 22, "got %u\n", ret);
+    ok(!memcmp(buffer, "section1\0file_section\0", 23), "got %s\n", debugstr_an(buffer, ret));
+
+    ret = DeleteFileA("C:/windows/winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    /* Test the SYS: prefix. */
+
+    ret = RegSetValueExA(mapping_key, "section2", 0, REG_SZ, (BYTE *)"SYS:winetest_map", sizeof("SYS:winetest_map"));
+    ok(!ret, "got error %u\n", ret);
+    ret = WritePrivateProfileStringA(NULL, NULL, NULL, "winetest_map.ini");
+    todo_wine ok(ret, "got error %u\n", GetLastError());
+
+    check_profile_string("section2", "name1", "winetest_map.ini", "default");
+
+    ret = WritePrivateProfileStringA("section2", "name1", "value1", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    check_profile_string("section2", "name1", "winetest_map.ini", "value1");
+
+    ret = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\winetest_map", 0, KEY_READ | KEY_WRITE, &mapped_key);
+    ok(!ret, "got error %u\n", ret);
+    check_registry_value(mapped_key, "name1", "value1");
+
+    ret = RegSetValueExA(mapped_key, "name2", 0, REG_SZ, (BYTE *)"value2", sizeof("value2"));
+    ok(!ret, "got error %u\n", ret);
+
+    check_profile_string("section2", "name2", "winetest_map.ini", "value2");
+
+    ret = GetFileAttributesA("C:/windows/winetest_map.ini");
+    ok(ret == INVALID_FILE_ATTRIBUTES, "winetest_map.ini should not exist.\n");
+
+    ret = RegDeleteKeyA(mapped_key, "");
+    ok(!ret, "got error %u\n", ret);
+    RegCloseKey(mapped_key);
+
+    /* Try writing directly to the .ini file on disk instead. */
+
+    ret = WritePrivateProfileStringA("section3", "name1", "value1", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    check_profile_string("section3", "name1", "winetest_map.ini", "value1");
+
+    ret = RegSetValueExA(mapping_key, "section3", 0, REG_SZ, (BYTE *)"USR:winetest_map", sizeof("USR:winetest_map"));
+    ok(!ret, "got error %u\n", ret);
+    ret = WritePrivateProfileStringA(NULL, NULL, NULL, "winetest_map.ini");
+    todo_wine ok(ret, "got error %u\n", GetLastError());
+
+    check_profile_string("section3", "name1", "winetest_map.ini", "default");
+
+    ret = RegOpenKeyExA(HKEY_CURRENT_USER, "winetest_section3", 0, KEY_READ | KEY_WRITE, &mapped_key);
+    ok(ret == ERROR_FILE_NOT_FOUND, "got error %u\n", ret);
+
+    ret = WritePrivateProfileStringA("section3", "name1", "value2", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    check_profile_string("section3", "name1", "winetest_map.ini", "value2");
+
+    ret = RegOpenKeyExA(HKEY_CURRENT_USER, "winetest_map", 0, KEY_READ | KEY_WRITE, &mapped_key);
+    ok(!ret, "got error %u\n", ret);
+
+    ret = RegDeleteKeyA(mapped_key, "");
+    ok(!ret, "got error %u\n", ret);
+    RegCloseKey(mapped_key);
+
+    ret = RegDeleteValueA(mapping_key, "section3");
+    ok(!ret, "got error %u\n", ret);
+    ret = WritePrivateProfileStringA(NULL, NULL, NULL, "winetest_map.ini");
+    todo_wine ok(ret, "got error %u\n", GetLastError());
+
+    check_profile_string("section3", "name1", "winetest_map.ini", "value1");
+
+    ret = DeleteFileA("C:/windows/winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    /* Test default keys. */
+
+    ret = WritePrivateProfileStringA("section4", "name1", "value1", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    check_profile_string("section4", "name1", "winetest_map.ini", "value1");
+
+    ret = DeleteFileA("C:/windows/winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = RegSetValueExA(mapping_key, NULL, 0, REG_SZ, (BYTE *)"SYS:winetest_default", sizeof("SYS:winetest_default"));
+    ok(!ret, "got error %u\n", ret);
+    ret = WritePrivateProfileStringA(NULL, NULL, NULL, "winetest_map.ini");
+    todo_wine ok(ret, "got error %u\n", GetLastError());
+
+    ret = WritePrivateProfileStringA("section4", "name1", "value1", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\winetest_default\\section4", 0, KEY_READ, &mapped_key);
+    ok(!ret, "got error %u\n", ret);
+    check_registry_value(mapped_key, "name1", "value1");
+    RegCloseKey(mapped_key);
+
+    ret = RegCreateKeyExA(HKEY_LOCAL_MACHINE, "Software\\winetest_default\\section5",
+            0, NULL, 0, KEY_WRITE, NULL, &mapped_key, NULL);
+    ok(!ret, "got error %u\n", ret);
+    ret = RegSetValueExA(mapped_key, "name2", 0, REG_SZ, (BYTE *)"value2", sizeof("value2"));
+    ok(!ret, "got error %u\n", ret);
+    RegCloseKey(mapped_key);
+
+    check_profile_string("section5", "name2", "winetest_map.ini", "value2");
+
+    ret = GetFileAttributesA("C:/windows/winetest_map.ini");
+    ok(ret == INVALID_FILE_ATTRIBUTES, "winetest_map.ini should not exist.\n");
+
+    ret = RegDeleteKeyA(HKEY_LOCAL_MACHINE, "Software\\winetest_default\\Section4");
+    ret = RegDeleteKeyA(HKEY_LOCAL_MACHINE, "Software\\winetest_default\\Section5");
+    ret = RegDeleteKeyA(HKEY_LOCAL_MACHINE, "Software\\winetest_default");
+    ok(!ret, "got error %u\n", ret);
+    ret = RegDeleteValueA(mapping_key, NULL);
+    ok(!ret, "got error %u\n", ret);
+
+    /* Test name-specific mapping. */
+
+    ret = RegCreateKeyExA(mapping_key, "section6", 0, NULL, 0, KEY_READ | KEY_WRITE, NULL, &mapping_subkey, NULL);
+    ok(!ret, "got error %u\n", ret);
+    ret = RegSetValueExA(mapping_subkey, "name1", 0, REG_SZ, (BYTE *)"USR:winetest_name1", sizeof("USR:winetest_name1"));
+    ok(!ret, "got error %u\n", ret);
+    ret = RegSetValueExA(mapping_subkey, "name2", 0, REG_SZ, (BYTE *)"SYS:winetest_name2", sizeof("SYS:winetest_name2"));
+    ok(!ret, "got error %u\n", ret);
+    ret = WritePrivateProfileStringA(NULL, NULL, NULL, "winetest_map.ini");
+    todo_wine ok(ret, "got error %u\n", GetLastError());
+
+    ret = WritePrivateProfileStringA("section6", "name1", "value1", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    check_profile_string("section6", "name1", "winetest_map.ini", "value1");
+
+    ret = RegOpenKeyExA(HKEY_CURRENT_USER, "winetest_name1", 0, KEY_READ | KEY_WRITE, &mapped_key);
+    ok(!ret, "got error %u\n", ret);
+    check_registry_value(mapped_key, "name1", "value1");
+
+    ret = RegSetValueExA(mapped_key, "name1", 0, REG_SZ, (BYTE *)"one", sizeof("one"));
+    ok(!ret, "got error %u\n", ret);
+    check_profile_string("section6", "name1", "winetest_map.ini", "one");
+
+    ret = RegDeleteKeyA(mapped_key, "");
+    ok(!ret, "got error %u\n", ret);
+    RegCloseKey(mapped_key);
+
+    ret = WritePrivateProfileStringA("section6", "name2", "value2", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\winetest_name2", 0, KEY_READ | KEY_WRITE, &mapped_key);
+    ok(!ret, "got error %u\n", ret);
+    check_registry_value(mapped_key, "name2", "value2");
+
+    ret = RegSetValueExA(mapped_key, "name2", 0, REG_SZ, (BYTE *)"two", sizeof("two"));
+    ok(!ret, "got error %u\n", ret);
+    check_profile_string("section6", "name2", "winetest_map.ini", "two");
+
+    ret = RegDeleteKeyA(mapped_key, "");
+    ok(!ret, "got error %u\n", ret);
+    RegCloseKey(mapped_key);
+
+    ret = WritePrivateProfileStringA("section6", "name3", "value3", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    check_profile_string("section6", "name3", "winetest_map.ini", "value3");
+    ret = DeleteFileA("C:/windows/winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    /* Test name-specific mapping with Get/WritePrivateProfileSection(). */
+
+    ret = WritePrivateProfileStringA("section6", "name2", "value2", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = WritePrivateProfileStringA("section6", "name3", "value3", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = WritePrivateProfileSectionA("section6", "name1=one\0name3=three\0", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    check_profile_string("section6", "name1", "winetest_map.ini", "one");
+    check_profile_string("section6", "name2", "winetest_map.ini", "value2");
+    check_profile_string("section6", "name3", "winetest_map.ini", "value3");
+
+    ret = RegOpenKeyExA(HKEY_CURRENT_USER, "winetest_name1", 0, KEY_READ | KEY_WRITE, &mapped_key);
+    ok(!ret, "got error %u\n", ret);
+    ret = RegDeleteValueA(mapped_key, "name1");
+    ok(!ret, "got error %u\n", ret);
+    RegCloseKey(mapped_key);
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    ret = GetPrivateProfileSectionA("section6", buffer, 5, "winetest_map.ini");
+    ok(ret == 3, "got %u\n", ret);
+    ok(!memcmp(buffer, "nam\0", 5), "got %s\n", debugstr_an(buffer, ret));
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    ret = GetPrivateProfileSectionA("section6", buffer, sizeof(buffer), "winetest_map.ini");
+    ok(ret == 26, "got %u\n", ret);
+    ok(!memcmp(buffer, "name2=value2\0name3=value3\0", 27), "got %s\n", debugstr_an(buffer, ret));
+
+    ret = WritePrivateProfileStringA("section6", NULL, NULL, "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    check_profile_string("section6", "name1", "winetest_map.ini", "default");
+    check_profile_string("section6", "name2", "winetest_map.ini", "default");
+    check_profile_string("section6", "name3", "winetest_map.ini", "default");
+
+    ret = RegDeleteKeyA(HKEY_CURRENT_USER, "winetest_name1");
+    ok(!ret, "got error %u\n", ret);
+    ret = RegDeleteKeyA(HKEY_LOCAL_MACHINE, "Software\\winetest_name2");
+    ok(!ret, "got error %u\n", ret);
+    ret = DeleteFileA("C:/windows/winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    /* Test name-specific mapping with a default value. */
+
+    ret = RegSetValueExA(mapping_subkey, NULL, 0, REG_SZ, (BYTE *)"USR:winetest_default", sizeof("USR:winetest_default"));
+    ok(!ret, "got error %u\n", ret);
+    ret = WritePrivateProfileStringA(NULL, NULL, NULL, "winetest_map.ini");
+    todo_wine ok(ret, "got error %u\n", GetLastError());
+
+    ret = WritePrivateProfileStringA("section6", "name2", "value2", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    ret = WritePrivateProfileStringA("section6", "name3", "value3", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+
+    ret = RegOpenKeyExA(HKEY_CURRENT_USER, "winetest_default", 0, KEY_READ | KEY_WRITE, &mapped_key);
+    ok(!ret, "got error %u\n", ret);
+    check_registry_value(mapped_key, "name3", "value3");
+
+    ret = RegSetValueExA(mapped_key, "name3", 0, REG_SZ, (BYTE *)"three", sizeof("three"));
+    ok(!ret, "got error %u\n", ret);
+    check_profile_string("section6", "name3", "winetest_map.ini", "three");
+
+    memset(buffer, 0xcc, sizeof(buffer));
+    ret = GetPrivateProfileSectionA("section6", buffer, sizeof(buffer), "winetest_map.ini");
+    ok(ret == 25, "got %u\n", ret);
+    todo_wine ok(!memcmp(buffer, "name2=value2\0name3=three\0", 26), "got %s\n", debugstr_an(buffer, ret));
+
+    ret = WritePrivateProfileSectionA("section6", "name2=duo\0name3=treis\0", "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    check_profile_string("section6", "name2", "winetest_map.ini", "duo");
+    check_profile_string("section6", "name3", "winetest_map.ini", "treis");
+
+    ret = WritePrivateProfileStringA("section6", NULL, NULL, "winetest_map.ini");
+    ok(ret, "got error %u\n", GetLastError());
+    check_profile_string("section6", "name2", "winetest_map.ini", "default");
+    check_profile_string("section6", "name3", "winetest_map.ini", "default");
+
+    ret = RegDeleteKeyA(HKEY_LOCAL_MACHINE, "Software\\winetest_name2");
+    ok(!ret, "got error %u\n", ret);
+    ret = RegDeleteKeyA(HKEY_CURRENT_USER, "winetest_name1");
+    ok(!ret, "got error %u\n", ret);
+    ret = RegDeleteKeyA(mapped_key, "");
+    ok(!ret, "got error %u\n", ret);
+    RegCloseKey(mapped_key);
+
+    ret = RegDeleteKeyA(mapping_subkey, "");
+    ok(!ret, "got error %u\n", ret);
+    RegCloseKey(mapping_subkey);
+
+    ret = RegDeleteKeyA(mapping_key, "");
+    ok(!ret, "got error %u\n", ret);
+    RegCloseKey(mapping_key);
+
+    ret = DeleteFileA("C:/windows/winetest_map.ini");
+    ok(!ret, "expected failure\n");
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND, "got error %u\n", GetLastError());
+    ret = RevertToSelf();
+    ok(ret, "got error %u\n", GetLastError());
+}
+
 START_TEST(profile)
 {
     test_profile_int();
@@ -1119,4 +1615,6 @@ START_TEST(profile)
         "[section2]\r",
         "CR only");
     test_WritePrivateProfileString();
+    test_profile_struct();
+    test_registry_mapping();
 }

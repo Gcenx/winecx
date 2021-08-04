@@ -80,12 +80,6 @@ static NTSTATUS (WINAPI *pRtlGetSearchPath)(LPWSTR*);
 static void     (WINAPI *pRtlReleasePath)(LPWSTR);
 static NTSTATUS (WINAPI *pLdrGetDllPath)(LPCWSTR,ULONG,LPWSTR*,LPWSTR*);
 
-static BOOL   (WINAPI *pActivateActCtx)(HANDLE,ULONG_PTR*);
-static HANDLE (WINAPI *pCreateActCtxW)(PCACTCTXW);
-static BOOL   (WINAPI *pDeactivateActCtx)(DWORD,ULONG_PTR);
-static BOOL   (WINAPI *pGetCurrentActCtx)(HANDLE *);
-static void   (WINAPI *pReleaseActCtx)(HANDLE);
-
 static BOOL (WINAPI *pCheckNameLegalDOS8Dot3W)(const WCHAR *, char *, DWORD, BOOL *, BOOL *);
 static BOOL (WINAPI *pCheckNameLegalDOS8Dot3A)(const char *, char *, DWORD, BOOL *, BOOL *);
 
@@ -108,10 +102,10 @@ static void test_ValidPathA(const CHAR *curdir, const CHAR *subdir, const CHAR *
                          CHAR *shortstr, SLpassfail *passfail, const CHAR *errstr)
 {
   CHAR tmpstr[MAX_PATH],
-       fullpath[MAX_PATH],      /*full path to the file (not short/long) */
+       fullpath[MAX_PATH + 1],      /*full path to the file (not short/long) */
        subpath[MAX_PATH],       /*relative path to the file */
-       fullpathshort[MAX_PATH], /*absolute path to the file (short format) */
-       fullpathlong[MAX_PATH],  /*absolute path to the file (long format) */
+       fullpathshort[2 * MAX_PATH], /*absolute path to the file (short format) */
+       fullpathlong[2 * MAX_PATH],  /*absolute path to the file (long format) */
        curdirshort[MAX_PATH],   /*absolute path to the current dir (short) */
        curdirlong[MAX_PATH];    /*absolute path to the current dir (long) */
   LPSTR strptr;                 /*ptr to the filename portion of the path */
@@ -333,7 +327,7 @@ static void test_InitPathA(CHAR *newdir, CHAR *curDrive, CHAR *otherDrive)
   CHAR tmppath[MAX_PATH], /*path to TEMP */
        tmpstr[MAX_PATH],
        tmpstr1[MAX_PATH],
-       invalid_dir[MAX_PATH];
+       invalid_dir[MAX_PATH + 29];
 
   DWORD len,len1,drives;
   INT id;
@@ -557,7 +551,7 @@ static void test_CurrentDirectoryA(CHAR *origdir, CHAR *newdir)
 /* Cleanup the mess we made while executing these tests */
 static void test_CleanupPathA(CHAR *origdir, CHAR *curdir)
 {
-  CHAR tmpstr[MAX_PATH];
+  CHAR tmpstr[MAX_PATH + 35];
   sprintf(tmpstr,"%s\\%s\\%s",curdir,SHORTDIR,SHORTFILE);
   ok(DeleteFileA(tmpstr),"DeleteFileA failed\n");
   sprintf(tmpstr,"%s\\%s\\%s",curdir,SHORTDIR,LONGFILE);
@@ -602,7 +596,7 @@ static void test_PathNameA(CHAR *curdir, CHAR curDrive, CHAR otherDrive)
 {
   CHAR curdir_short[MAX_PATH],
        longdir_short[MAX_PATH];
-  CHAR tmpstr[MAX_PATH],tmpstr1[MAX_PATH],tmpstr2[MAX_PATH];
+  CHAR tmpstr[MAX_PATH + 15],tmpstr1[MAX_PATH + 22],tmpstr2[2 * MAX_PATH + 15];
   LPSTR strptr;                 /*ptr to the filename portion of the path */
   DWORD len;
   INT i;
@@ -1758,7 +1752,7 @@ static HANDLE test_create(const char *file)
     actctx.cbSize = sizeof(ACTCTXW);
     actctx.lpSource = manifest_path;
 
-    handle = pCreateActCtxW(&actctx);
+    handle = CreateActCtxW(&actctx);
     ok(handle != INVALID_HANDLE_VALUE, "failed to create context, error %u\n", GetLastError());
 
     ok(actctx.cbSize == sizeof(actctx), "cbSize=%d\n", actctx.cbSize);
@@ -1780,7 +1774,7 @@ static void test_SearchPathA(void)
     static const CHAR testdeprelA[] = "./testdep.dll";
     static const CHAR kernel32A[] = "kernel32.dll";
     static const CHAR fileA[] = "";
-    CHAR pathA[MAX_PATH], buffA[MAX_PATH], path2A[MAX_PATH], path3A[MAX_PATH], curdirA[MAX_PATH];
+    CHAR pathA[MAX_PATH + 13], buffA[MAX_PATH], path2A[MAX_PATH], path3A[MAX_PATH + 13], curdirA[MAX_PATH];
     CHAR tmpdirA[MAX_PATH], *ptrA = NULL;
     ULONG_PTR cookie;
     HANDLE handle;
@@ -1825,9 +1819,6 @@ static void test_SearchPathA(void)
 
     DeleteFileA(path2A);
 
-    if (!pActivateActCtx)
-        return;
-
     GetWindowsDirectoryA(pathA, ARRAY_SIZE(pathA));
 
     create_manifest_file("testdep1.manifest", manifest_dep);
@@ -1844,7 +1835,7 @@ static void test_SearchPathA(void)
     ret = SearchPathA(NULL, kernel32A, NULL, ARRAY_SIZE(path2A), path2A, NULL);
     ok(ret && ret == strlen(path2A), "got %d\n", ret);
 
-    ret = pActivateActCtx(handle, &cookie);
+    ret = ActivateActCtx(handle, &cookie);
     ok(ret, "failed to activate context, %u\n", GetLastError());
 
     /* works when activated */
@@ -1873,9 +1864,9 @@ static void test_SearchPathA(void)
     ok(ret && ret == strlen(buffA), "got %d\n", ret);
     ok(strcmp(buffA, path2A), "got wrong path %s, %s\n", buffA, path2A);
 
-    ret = pDeactivateActCtx(0, cookie);
+    ret = DeactivateActCtx(0, cookie);
     ok(ret, "failed to deactivate context, %u\n", GetLastError());
-    pReleaseActCtx(handle);
+    ReleaseActCtx(handle);
 
     /* test the search path priority of the working directory */
     GetTempPathA(sizeof(tmpdirA), tmpdirA);
@@ -1886,7 +1877,8 @@ static void test_SearchPathA(void)
     ok(ret && ret == strlen(path2A), "got %d\n", ret);
     bret = CopyFileA(path2A, pathA, FALSE);
     ok(bret != 0, "failed to copy test executable to temp directory, %u\n", GetLastError());
-    sprintf(path3A, "%s%s%s", curdirA, curdirA[strlen(curdirA)-1] != '\\' ? "\\" : "", kernel32A);
+    GetModuleFileNameA( GetModuleHandleA(0), path3A, sizeof(path3A) );
+    strcpy( strrchr( path3A, '\\' ) + 1, kernel32A );
     bret = CopyFileA(path2A, path3A, FALSE);
     ok(bret != 0, "failed to copy test executable to launch directory, %u\n", GetLastError());
     bret = SetCurrentDirectoryA(tmpdirA);
@@ -1957,9 +1949,6 @@ if (0)
 
     DeleteFileW(path2W);
 
-    if (!pActivateActCtx)
-        return;
-
     GetWindowsDirectoryW(pathW, ARRAY_SIZE(pathW));
 
     create_manifest_file("testdep1.manifest", manifest_dep);
@@ -1983,7 +1972,7 @@ if (0)
 
     GetWindowsDirectoryW(pathW, ARRAY_SIZE(pathW));
 
-    ret = pActivateActCtx(handle, &cookie);
+    ret = ActivateActCtx(handle, &cookie);
     ok(ret, "failed to activate context, %u\n", GetLastError());
 
     /* works when activated */
@@ -2016,9 +2005,9 @@ if (0)
     ret = SearchPathW(NULL, ole32W, NULL, ARRAY_SIZE(buffW), buffW, NULL);
     ok(ret && ret == lstrlenW(buffW), "got %d\n", ret);
 
-    ret = pDeactivateActCtx(0, cookie);
+    ret = DeactivateActCtx(0, cookie);
     ok(ret, "failed to deactivate context, %u\n", GetLastError());
-    pReleaseActCtx(handle);
+    ReleaseActCtx(handle);
 }
 
 static void test_GetFullPathNameA(void)
@@ -2157,11 +2146,6 @@ static void init_pointers(void)
     MAKEFUNC(RemoveDllDirectory);
     MAKEFUNC(SetDllDirectoryW);
     MAKEFUNC(SetDefaultDllDirectories);
-    MAKEFUNC(ActivateActCtx);
-    MAKEFUNC(CreateActCtxW);
-    MAKEFUNC(DeactivateActCtx);
-    MAKEFUNC(GetCurrentActCtx);
-    MAKEFUNC(ReleaseActCtx);
     MAKEFUNC(CheckNameLegalDOS8Dot3W);
     MAKEFUNC(CheckNameLegalDOS8Dot3A);
     mod = GetModuleHandleA("ntdll.dll");
@@ -2652,6 +2636,24 @@ static void test_LdrGetDllPath(void)
     ret = pLdrGetDllPath( fooW, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, &path, &unknown_ptr );
     ok( ret == STATUS_INVALID_PARAMETER, "LdrGetDllPath failed %x\n", ret );
 
+    lstrcpyW( buffer, L"\\\\?\\" );
+    lstrcatW( buffer, dlldir );
+    p = buffer + lstrlenW(buffer);
+    *p++ = '\\';
+    lstrcpyW( p, fooW );
+    ret = pLdrGetDllPath( buffer, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, &path, &unknown_ptr );
+    ok( !ret, "LdrGetDllPath failed %x\n", ret );
+    ok( !unknown_ptr, "unknown ptr %p\n", unknown_ptr );
+    ok( !memcmp( path, L"\\\\?\\", 4 * sizeof(WCHAR) ) && path_equal( path + 4, dlldir ),
+        "got %s expected \\\\?\\%s\n", wine_dbgstr_w(path), wine_dbgstr_w(dlldir));
+    pRtlReleasePath( path );
+
+    ret = pLdrGetDllPath( L"\\\\?\\c:\\test.dll", LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, &path, &unknown_ptr );
+    ok( !ret, "LdrGetDllPath failed %x\n", ret );
+    ok( !unknown_ptr, "unknown ptr %p\n", unknown_ptr );
+    ok( !lstrcmpW( path, L"\\\\?\\c:" ), "got %s expected \\\\?\\c:\n", wine_dbgstr_w(path));
+    pRtlReleasePath( path );
+
     lstrcpyW( buffer, dlldir );
     p = buffer + lstrlenW(buffer);
     *p++ = '\\';
@@ -2694,10 +2696,6 @@ START_TEST(path)
     CHAR origdir[MAX_PATH],curdir[MAX_PATH], curDrive, otherDrive;
 
     init_pointers();
-
-    /* Report only once */
-    if (!pActivateActCtx)
-        win_skip("Activation contexts not supported, some tests will be skipped\n");
 
     test_relative_path();
     test_InitPathA(curdir, &curDrive, &otherDrive);

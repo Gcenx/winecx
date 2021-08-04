@@ -54,14 +54,15 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved)
     return TRUE;
 }
 
-struct renderingparams {
+struct renderingparams
+{
     IDWriteRenderingParams3 IDWriteRenderingParams3_iface;
-    LONG ref;
+    LONG refcount;
 
-    FLOAT gamma;
-    FLOAT contrast;
-    FLOAT grayscalecontrast;
-    FLOAT cleartype_level;
+    float gamma;
+    float contrast;
+    float grayscalecontrast;
+    float cleartype_level;
     DWRITE_PIXEL_GEOMETRY geometry;
     DWRITE_RENDERING_MODE1 mode;
     DWRITE_GRID_FIT_MODE gridfit;
@@ -74,9 +75,7 @@ static inline struct renderingparams *impl_from_IDWriteRenderingParams3(IDWriteR
 
 static HRESULT WINAPI renderingparams_QueryInterface(IDWriteRenderingParams3 *iface, REFIID riid, void **obj)
 {
-    struct renderingparams *This = impl_from_IDWriteRenderingParams3(iface);
-
-    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), obj);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
 
     if (IsEqualIID(riid, &IID_IDWriteRenderingParams3) ||
         IsEqualIID(riid, &IID_IDWriteRenderingParams2) ||
@@ -96,51 +95,61 @@ static HRESULT WINAPI renderingparams_QueryInterface(IDWriteRenderingParams3 *if
 
 static ULONG WINAPI renderingparams_AddRef(IDWriteRenderingParams3 *iface)
 {
-    struct renderingparams *This = impl_from_IDWriteRenderingParams3(iface);
-    ULONG ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p)->(%d)\n", This, ref);
-    return ref;
+    struct renderingparams *params = impl_from_IDWriteRenderingParams3(iface);
+    ULONG refcount = InterlockedIncrement(&params->refcount);
+
+    TRACE("%p, refcount %d.\n", iface, refcount);
+
+    return refcount;
 }
 
 static ULONG WINAPI renderingparams_Release(IDWriteRenderingParams3 *iface)
 {
-    struct renderingparams *This = impl_from_IDWriteRenderingParams3(iface);
-    ULONG ref = InterlockedDecrement(&This->ref);
+    struct renderingparams *params = impl_from_IDWriteRenderingParams3(iface);
+    ULONG refcount = InterlockedDecrement(&params->refcount);
 
-    TRACE("(%p)->(%d)\n", This, ref);
+    TRACE("%p, refcount %d.\n", iface, refcount);
 
-    if (!ref)
-        heap_free(This);
+    if (!refcount)
+        heap_free(params);
 
-    return ref;
+    return refcount;
 }
 
-static FLOAT WINAPI renderingparams_GetGamma(IDWriteRenderingParams3 *iface)
+static float WINAPI renderingparams_GetGamma(IDWriteRenderingParams3 *iface)
 {
-    struct renderingparams *This = impl_from_IDWriteRenderingParams3(iface);
-    TRACE("(%p)\n", This);
-    return This->gamma;
+    struct renderingparams *params = impl_from_IDWriteRenderingParams3(iface);
+
+    TRACE("%p.\n", iface);
+
+    return params->gamma;
 }
 
-static FLOAT WINAPI renderingparams_GetEnhancedContrast(IDWriteRenderingParams3 *iface)
+static float WINAPI renderingparams_GetEnhancedContrast(IDWriteRenderingParams3 *iface)
 {
-    struct renderingparams *This = impl_from_IDWriteRenderingParams3(iface);
-    TRACE("(%p)\n", This);
-    return This->contrast;
+    struct renderingparams *params = impl_from_IDWriteRenderingParams3(iface);
+
+    TRACE("%p.\n", iface);
+
+    return params->contrast;
 }
 
-static FLOAT WINAPI renderingparams_GetClearTypeLevel(IDWriteRenderingParams3 *iface)
+static float WINAPI renderingparams_GetClearTypeLevel(IDWriteRenderingParams3 *iface)
 {
-    struct renderingparams *This = impl_from_IDWriteRenderingParams3(iface);
-    TRACE("(%p)\n", This);
-    return This->cleartype_level;
+    struct renderingparams *params = impl_from_IDWriteRenderingParams3(iface);
+
+    TRACE("%p.\n", iface);
+
+    return params->cleartype_level;
 }
 
 static DWRITE_PIXEL_GEOMETRY WINAPI renderingparams_GetPixelGeometry(IDWriteRenderingParams3 *iface)
 {
-    struct renderingparams *This = impl_from_IDWriteRenderingParams3(iface);
-    TRACE("(%p)\n", This);
-    return This->geometry;
+    struct renderingparams *params = impl_from_IDWriteRenderingParams3(iface);
+
+    TRACE("%p.\n", iface);
+
+    return params->geometry;
 }
 
 static DWRITE_RENDERING_MODE rendering_mode_from_mode1(DWRITE_RENDERING_MODE1 mode)
@@ -161,35 +170,42 @@ static DWRITE_RENDERING_MODE rendering_mode_from_mode1(DWRITE_RENDERING_MODE1 mo
 
 static DWRITE_RENDERING_MODE WINAPI renderingparams_GetRenderingMode(IDWriteRenderingParams3 *iface)
 {
-    struct renderingparams *This = impl_from_IDWriteRenderingParams3(iface);
+    struct renderingparams *params = impl_from_IDWriteRenderingParams3(iface);
 
-    TRACE("(%p)\n", This);
+    TRACE("%p.\n", iface);
 
-    return rendering_mode_from_mode1(This->mode);
+    return rendering_mode_from_mode1(params->mode);
 }
 
-static FLOAT WINAPI renderingparams1_GetGrayscaleEnhancedContrast(IDWriteRenderingParams3 *iface)
+static float WINAPI renderingparams1_GetGrayscaleEnhancedContrast(IDWriteRenderingParams3 *iface)
 {
-    struct renderingparams *This = impl_from_IDWriteRenderingParams3(iface);
-    TRACE("(%p)\n", This);
-    return This->grayscalecontrast;
+    struct renderingparams *params = impl_from_IDWriteRenderingParams3(iface);
+
+    TRACE("%p.\n", iface);
+
+    return params->grayscalecontrast;
 }
 
 static DWRITE_GRID_FIT_MODE WINAPI renderingparams2_GetGridFitMode(IDWriteRenderingParams3 *iface)
 {
-    struct renderingparams *This = impl_from_IDWriteRenderingParams3(iface);
-    TRACE("(%p)\n", This);
-    return This->gridfit;
+    struct renderingparams *params = impl_from_IDWriteRenderingParams3(iface);
+
+    TRACE("%p.\n", iface);
+
+    return params->gridfit;
 }
 
 static DWRITE_RENDERING_MODE1 WINAPI renderingparams3_GetRenderingMode1(IDWriteRenderingParams3 *iface)
 {
-    struct renderingparams *This = impl_from_IDWriteRenderingParams3(iface);
-    TRACE("(%p)\n", This);
-    return This->mode;
+    struct renderingparams *params = impl_from_IDWriteRenderingParams3(iface);
+
+    TRACE("%p.\n", iface);
+
+    return params->mode;
 }
 
-static const struct IDWriteRenderingParams3Vtbl renderingparamsvtbl = {
+static const struct IDWriteRenderingParams3Vtbl renderingparamsvtbl =
+{
     renderingparams_QueryInterface,
     renderingparams_AddRef,
     renderingparams_Release,
@@ -203,11 +219,11 @@ static const struct IDWriteRenderingParams3Vtbl renderingparamsvtbl = {
     renderingparams3_GetRenderingMode1
 };
 
-static HRESULT create_renderingparams(FLOAT gamma, FLOAT contrast, FLOAT grayscalecontrast, FLOAT cleartype_level,
+static HRESULT create_renderingparams(float gamma, float contrast, float grayscalecontrast, float cleartype_level,
         DWRITE_PIXEL_GEOMETRY geometry, DWRITE_RENDERING_MODE1 mode, DWRITE_GRID_FIT_MODE gridfit,
         IDWriteRenderingParams3 **params)
 {
-    struct renderingparams *This;
+    struct renderingparams *object;
 
     *params = NULL;
 
@@ -217,21 +233,21 @@ static HRESULT create_renderingparams(FLOAT gamma, FLOAT contrast, FLOAT graysca
     if ((UINT32)gridfit > DWRITE_GRID_FIT_MODE_ENABLED || (UINT32)geometry > DWRITE_PIXEL_GEOMETRY_BGR)
         return E_INVALIDARG;
 
-    This = heap_alloc(sizeof(struct renderingparams));
-    if (!This) return E_OUTOFMEMORY;
+    if (!(object = heap_alloc(sizeof(*object))))
+        return E_OUTOFMEMORY;
 
-    This->IDWriteRenderingParams3_iface.lpVtbl = &renderingparamsvtbl;
-    This->ref = 1;
+    object->IDWriteRenderingParams3_iface.lpVtbl = &renderingparamsvtbl;
+    object->refcount = 1;
 
-    This->gamma = gamma;
-    This->contrast = contrast;
-    This->grayscalecontrast = grayscalecontrast;
-    This->cleartype_level = cleartype_level;
-    This->geometry = geometry;
-    This->mode = mode;
-    This->gridfit = gridfit;
+    object->gamma = gamma;
+    object->contrast = contrast;
+    object->grayscalecontrast = grayscalecontrast;
+    object->cleartype_level = cleartype_level;
+    object->geometry = geometry;
+    object->mode = mode;
+    object->gridfit = gridfit;
 
-    *params = &This->IDWriteRenderingParams3_iface;
+    *params = &object->IDWriteRenderingParams3_iface;
 
     return S_OK;
 }
@@ -258,9 +274,7 @@ static inline struct localizedstrings *impl_from_IDWriteLocalizedStrings(IDWrite
 
 static HRESULT WINAPI localizedstrings_QueryInterface(IDWriteLocalizedStrings *iface, REFIID riid, void **obj)
 {
-    struct localizedstrings *This = impl_from_IDWriteLocalizedStrings(iface);
-
-    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), obj);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
 
     if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDWriteLocalizedStrings))
     {
@@ -358,60 +372,66 @@ static HRESULT WINAPI localizedstrings_GetLocaleNameLength(IDWriteLocalizedStrin
 
 static HRESULT WINAPI localizedstrings_GetLocaleName(IDWriteLocalizedStrings *iface, UINT32 index, WCHAR *buffer, UINT32 size)
 {
-    struct localizedstrings *This = impl_from_IDWriteLocalizedStrings(iface);
+    struct localizedstrings *strings = impl_from_IDWriteLocalizedStrings(iface);
 
-    TRACE("(%p)->(%u %p %u)\n", This, index, buffer, size);
+    TRACE("%p, %u, %p, %u.\n", iface, index, buffer, size);
 
-    if (index >= This->count) {
+    if (index >= strings->count)
+    {
         if (buffer) *buffer = 0;
         return E_FAIL;
     }
 
-    if (size < strlenW(This->data[index].locale)+1) {
+    if (size < strlenW(strings->data[index].locale) + 1)
+    {
         if (buffer) *buffer = 0;
         return E_NOT_SUFFICIENT_BUFFER;
     }
 
-    strcpyW(buffer, This->data[index].locale);
+    strcpyW(buffer, strings->data[index].locale);
     return S_OK;
 }
 
 static HRESULT WINAPI localizedstrings_GetStringLength(IDWriteLocalizedStrings *iface, UINT32 index, UINT32 *length)
 {
-    struct localizedstrings *This = impl_from_IDWriteLocalizedStrings(iface);
+    struct localizedstrings *strings = impl_from_IDWriteLocalizedStrings(iface);
 
-    TRACE("(%p)->(%u %p)\n", This, index, length);
+    TRACE("%p, %u, %p.\n", iface, index, length);
 
-    if (index >= This->count) {
-        *length = (UINT32)-1;
+    if (index >= strings->count)
+    {
+        *length = ~0u;
         return E_FAIL;
     }
 
-    *length = strlenW(This->data[index].string);
+    *length = strlenW(strings->data[index].string);
     return S_OK;
 }
 
 static HRESULT WINAPI localizedstrings_GetString(IDWriteLocalizedStrings *iface, UINT32 index, WCHAR *buffer, UINT32 size)
 {
-    struct localizedstrings *This = impl_from_IDWriteLocalizedStrings(iface);
+    struct localizedstrings *strings = impl_from_IDWriteLocalizedStrings(iface);
 
-    TRACE("(%p)->(%u %p %u)\n", This, index, buffer, size);
+    TRACE("%p, %u, %p, %u.\n", iface, index, buffer, size);
 
-    if (index >= This->count) {
+    if (index >= strings->count)
+    {
         if (buffer) *buffer = 0;
         return E_FAIL;
     }
 
-    if (size < strlenW(This->data[index].string)+1) {
+    if (size < strlenW(strings->data[index].string) + 1)
+    {
         if (buffer) *buffer = 0;
         return E_NOT_SUFFICIENT_BUFFER;
     }
 
-    strcpyW(buffer, This->data[index].string);
+    strcpyW(buffer, strings->data[index].string);
     return S_OK;
 }
 
-static const IDWriteLocalizedStringsVtbl localizedstringsvtbl = {
+static const IDWriteLocalizedStringsVtbl localizedstringsvtbl =
+{
     localizedstrings_QueryInterface,
     localizedstrings_AddRef,
     localizedstrings_Release,
@@ -446,10 +466,13 @@ HRESULT add_localizedstring(IDWriteLocalizedStrings *iface, const WCHAR *locale,
     struct localizedstrings *strings = impl_from_IDWriteLocalizedStrings(iface);
     size_t i, count = strings->count;
 
-    /* make sure there's no duplicates */
-    for (i = 0; i < count; i++)
-        if (!strcmpW(strings->data[i].locale, locale))
-            return S_OK;
+    /* Make sure there's no duplicates, unless it's empty. This is used by dlng/slng entries of 'meta' table. */
+    if (*locale)
+    {
+        for (i = 0; i < count; i++)
+            if (!strcmpW(strings->data[i].locale, locale))
+                return S_OK;
+    }
 
     if (!dwrite_array_reserve((void **)&strings->data, &strings->size, strings->count + 1, sizeof(*strings->data)))
         return E_OUTOFMEMORY;
@@ -468,7 +491,7 @@ HRESULT add_localizedstring(IDWriteLocalizedStrings *iface, const WCHAR *locale,
     return S_OK;
 }
 
-HRESULT clone_localizedstring(IDWriteLocalizedStrings *iface, IDWriteLocalizedStrings **ret)
+HRESULT clone_localizedstrings(IDWriteLocalizedStrings *iface, IDWriteLocalizedStrings **ret)
 {
     struct localizedstrings *strings, *strings_clone;
     size_t i;
@@ -508,13 +531,15 @@ HRESULT clone_localizedstring(IDWriteLocalizedStrings *iface, IDWriteLocalizedSt
 void set_en_localizedstring(IDWriteLocalizedStrings *iface, const WCHAR *string)
 {
     static const WCHAR enusW[] = {'e','n','-','U','S',0};
-    struct localizedstrings *This = impl_from_IDWriteLocalizedStrings(iface);
+    struct localizedstrings *strings = impl_from_IDWriteLocalizedStrings(iface);
     UINT32 i;
 
-    for (i = 0; i < This->count; i++) {
-        if (!strcmpiW(This->data[i].locale, enusW)) {
-            heap_free(This->data[i].string);
-            This->data[i].string = heap_strdupW(string);
+    for (i = 0; i < strings->count; i++)
+    {
+        if (!strcmpiW(strings->data[i].locale, enusW))
+        {
+            heap_free(strings->data[i].string);
+            strings->data[i].string = heap_strdupW(string);
             break;
         }
     }
@@ -1624,7 +1649,8 @@ static HRESULT WINAPI dwritefactory5_CreateFontSetBuilder(IDWriteFactory7 *iface
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI dwritefactory5_CreateInMemoryFontFileLoader(IDWriteFactory7 *iface, IDWriteFontFileLoader **loader)
+static HRESULT WINAPI dwritefactory5_CreateInMemoryFontFileLoader(IDWriteFactory7 *iface,
+        IDWriteInMemoryFontFileLoader **loader)
 {
     TRACE("%p, %p.\n", iface, loader);
 

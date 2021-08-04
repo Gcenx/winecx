@@ -25,7 +25,6 @@
 #include "dbghelp_private.h"
 #include "wine/winbase16.h"
 #include "winternl.h"
-#include "wine/library.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
@@ -34,7 +33,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
 
 #define IS_VM86_MODE(ctx) (ctx->EFlags & V86_FLAG)
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
 static ADDRESS_MODE get_selector_type(HANDLE hThread, const CONTEXT* ctx, WORD sel)
 {
     LDT_ENTRY	le;
@@ -43,17 +42,13 @@ static ADDRESS_MODE get_selector_type(HANDLE hThread, const CONTEXT* ctx, WORD s
     /* null or system selector */
     if (!(sel & 4) || ((sel >> 3) < 17)) return AddrModeFlat;
     if (hThread && GetThreadSelectorEntry(hThread, sel, &le))
-    {
-        if (wine_ldt_get_base(&le) == 0 && wine_ldt_get_limit(&le) == 0xffffffff)
-            return AddrModeFlat;
         return le.HighWord.Bits.Default_Big ? AddrMode1632 : AddrMode1616;
-    }
     /* selector doesn't exist */
     return -1;
 }
 
 static BOOL i386_build_addr(HANDLE hThread, const CONTEXT* ctx, ADDRESS64* addr,
-                            unsigned seg, unsigned long offset)
+                            unsigned seg, ULONG_PTR offset)
 {
     addr->Mode    = AddrModeFlat;
     addr->Segment = seg;
@@ -80,7 +75,7 @@ static BOOL i386_build_addr(HANDLE hThread, const CONTEXT* ctx, ADDRESS64* addr,
 static BOOL i386_get_addr(HANDLE hThread, const CONTEXT* ctx,
                           enum cpu_addr ca, ADDRESS64* addr)
 {
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
     switch (ca)
     {
     case cpu_addr_pc:    return i386_build_addr(hThread, ctx, addr, ctx->SegCs, ctx->Eip);
@@ -224,10 +219,10 @@ static BOOL i386_stack_walk(struct cpu_stack_walk *csw, STACKFRAME64 *frame,
         if (NtQueryInformationThread(csw->hThread, ThreadBasicInformation, &info,
                                      sizeof(info), NULL) == STATUS_SUCCESS)
         {
-            curr_switch = (DWORD_PTR)info.TebBaseAddress + FIELD_OFFSET(TEB, SystemReserved1[0]);
+            curr_switch = (DWORD_PTR)info.TebBaseAddress + FIELD_OFFSET(TEB, SystemReserved1);
             if (!sw_read_mem(csw, curr_switch, &p, sizeof(p)))
             {
-                WARN("Can't read TEB:SystemReserved1[0]\n");
+                WARN("Can't read TEB:SystemReserved1\n");
                 goto done_err;
             }
             next_switch = p;
@@ -513,7 +508,7 @@ done_err:
     return FALSE;
 }
 
-static unsigned i386_map_dwarf_register(unsigned regno, BOOL eh_frame)
+static unsigned i386_map_dwarf_register(unsigned regno, const struct module* module, BOOL eh_frame)
 {
     unsigned    reg;
 
@@ -525,13 +520,11 @@ static unsigned i386_map_dwarf_register(unsigned regno, BOOL eh_frame)
     case  3: reg = CV_REG_EBX; break;
     case  4:
     case  5:
-#ifdef __APPLE__
         /* On OS X, DWARF eh_frame uses a different mapping for the registers.  It's
            apparently the mapping as emitted by GCC, at least at some point in its history. */
-        if (eh_frame)
+        if (eh_frame && module->type == DMT_MACHO)
             reg = (regno == 4) ? CV_REG_EBP : CV_REG_ESP;
         else
-#endif
             reg = (regno == 4) ? CV_REG_ESP : CV_REG_EBP;
         break;
     case  6: reg = CV_REG_ESI; break;
@@ -611,6 +604,16 @@ static void *i386_fetch_context_reg(union ctx *pctx, unsigned regno, unsigned *s
     case CV_REG_FS: *size = sizeof(ctx->SegFs); return &ctx->SegFs;
     case CV_REG_GS: *size = sizeof(ctx->SegGs); return &ctx->SegGs;
 
+    case CV_REG_XMM0 + 0: *size = 16; return &ctx->ExtendedRegisters[10*16];
+    case CV_REG_XMM0 + 1: *size = 16; return &ctx->ExtendedRegisters[11*16];
+    case CV_REG_XMM0 + 2: *size = 16; return &ctx->ExtendedRegisters[12*16];
+    case CV_REG_XMM0 + 3: *size = 16; return &ctx->ExtendedRegisters[13*16];
+    case CV_REG_XMM0 + 4: *size = 16; return &ctx->ExtendedRegisters[14*16];
+    case CV_REG_XMM0 + 5: *size = 16; return &ctx->ExtendedRegisters[15*16];
+    case CV_REG_XMM0 + 6: *size = 16; return &ctx->ExtendedRegisters[16*16];
+    case CV_REG_XMM0 + 7: *size = 16; return &ctx->ExtendedRegisters[17*16];
+
+    case CV_REG_MXCSR: *size = sizeof(DWORD); return &ctx->ExtendedRegisters[24];
     }
     FIXME("Unknown register %x\n", regno);
     return NULL;
@@ -675,7 +678,7 @@ static BOOL i386_fetch_minidump_thread(struct dump_context* dc, unsigned index, 
     if (ctx->ContextFlags && (flags & ThreadWriteInstructionWindow))
     {
         /* FIXME: crop values across module boundaries, */
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
         ULONG base = ctx->Eip <= 0x80 ? 0 : ctx->Eip - 0x80;
         minidump_add_memory_block(dc, base, ctx->Eip + 0x80 - base, 0);
 #endif

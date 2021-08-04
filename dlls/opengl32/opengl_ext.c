@@ -8,7 +8,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(opengl);
 
-const int extension_registry_size = 2682;
+const int extension_registry_size = 2684;
 
 static void WINAPI glAccumxOES( GLenum op, GLfixed value )
 {
@@ -2710,6 +2710,13 @@ static void WINAPI glDepthBoundsdNV( GLdouble zmin, GLdouble zmax )
   funcs->ext.p_glDepthBoundsdNV( zmin, zmax );
 }
 
+static void WINAPI glDepthRangeArraydvNV( GLuint first, GLsizei count, const GLdouble *v )
+{
+  const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
+  TRACE( "(%d, %d, %p)\n", first, count, v );
+  funcs->ext.p_glDepthRangeArraydvNV( first, count, v );
+}
+
 static void WINAPI glDepthRangeArrayv( GLuint first, GLsizei count, const GLdouble *v )
 {
   const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
@@ -2722,6 +2729,13 @@ static void WINAPI glDepthRangeIndexed( GLuint index, GLdouble n, GLdouble f )
   const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
   TRACE( "(%d, %f, %f)\n", index, n, f );
   funcs->ext.p_glDepthRangeIndexed( index, n, f );
+}
+
+static void WINAPI glDepthRangeIndexeddNV( GLuint index, GLdouble n, GLdouble f )
+{
+  const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
+  TRACE( "(%d, %f, %f)\n", index, n, f );
+  funcs->ext.p_glDepthRangeIndexeddNV( index, n, f );
 }
 
 static void WINAPI glDepthRangedNV( GLdouble zNear, GLdouble zFar )
@@ -4233,18 +4247,18 @@ static void WINAPI glGetActiveAttribARB( GLhandleARB programObj, GLuint index, G
   funcs->ext.p_glGetActiveAttribARB( programObj, index, maxLength, length, size, type, name );
 }
 
-static void WINAPI glGetActiveSubroutineName( GLuint program, GLenum shadertype, GLuint index, GLsizei bufsize, GLsizei *length, GLchar *name )
+static void WINAPI glGetActiveSubroutineName( GLuint program, GLenum shadertype, GLuint index, GLsizei bufSize, GLsizei *length, GLchar *name )
 {
   const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-  TRACE( "(%d, %d, %d, %d, %p, %p)\n", program, shadertype, index, bufsize, length, name );
-  funcs->ext.p_glGetActiveSubroutineName( program, shadertype, index, bufsize, length, name );
+  TRACE( "(%d, %d, %d, %d, %p, %p)\n", program, shadertype, index, bufSize, length, name );
+  funcs->ext.p_glGetActiveSubroutineName( program, shadertype, index, bufSize, length, name );
 }
 
-static void WINAPI glGetActiveSubroutineUniformName( GLuint program, GLenum shadertype, GLuint index, GLsizei bufsize, GLsizei *length, GLchar *name )
+static void WINAPI glGetActiveSubroutineUniformName( GLuint program, GLenum shadertype, GLuint index, GLsizei bufSize, GLsizei *length, GLchar *name )
 {
   const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-  TRACE( "(%d, %d, %d, %d, %p, %p)\n", program, shadertype, index, bufsize, length, name );
-  funcs->ext.p_glGetActiveSubroutineUniformName( program, shadertype, index, bufsize, length, name );
+  TRACE( "(%d, %d, %d, %d, %p, %p)\n", program, shadertype, index, bufSize, length, name );
+  funcs->ext.p_glGetActiveSubroutineUniformName( program, shadertype, index, bufSize, length, name );
 }
 
 static void WINAPI glGetActiveSubroutineUniformiv( GLuint program, GLenum shadertype, GLuint index, GLenum pname, GLint *values )
@@ -4629,11 +4643,11 @@ static void WINAPI glGetConvolutionParameterxvOES( GLenum target, GLenum pname, 
   funcs->ext.p_glGetConvolutionParameterxvOES( target, pname, params );
 }
 
-static void WINAPI glGetCoverageModulationTableNV( GLsizei bufsize, GLfloat *v )
+static void WINAPI glGetCoverageModulationTableNV( GLsizei bufSize, GLfloat *v )
 {
   const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-  TRACE( "(%d, %p)\n", bufsize, v );
-  funcs->ext.p_glGetCoverageModulationTableNV( bufsize, v );
+  TRACE( "(%d, %p)\n", bufSize, v );
+  funcs->ext.p_glGetCoverageModulationTableNV( bufSize, v );
 }
 
 static GLuint WINAPI glGetDebugMessageLog( GLuint count, GLsizei bufSize, GLenum *sources, GLenum *types, GLuint *ids, GLenum *severities, GLsizei *lengths, GLchar *messageLog )
@@ -4643,11 +4657,11 @@ static GLuint WINAPI glGetDebugMessageLog( GLuint count, GLsizei bufSize, GLenum
   return funcs->ext.p_glGetDebugMessageLog( count, bufSize, sources, types, ids, severities, lengths, messageLog );
 }
 
-static GLuint WINAPI glGetDebugMessageLogAMD( GLuint count, GLsizei bufsize, GLenum *categories, GLuint *severities, GLuint *ids, GLsizei *lengths, GLchar *message )
+static GLuint WINAPI glGetDebugMessageLogAMD( GLuint count, GLsizei bufSize, GLenum *categories, GLuint *severities, GLuint *ids, GLsizei *lengths, GLchar *message )
 {
   const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-  TRACE( "(%d, %d, %p, %p, %p, %p, %p)\n", count, bufsize, categories, severities, ids, lengths, message );
-  return funcs->ext.p_glGetDebugMessageLogAMD( count, bufsize, categories, severities, ids, lengths, message );
+  TRACE( "(%d, %d, %p, %p, %p, %p, %p)\n", count, bufSize, categories, severities, ids, lengths, message );
+  return funcs->ext.p_glGetDebugMessageLogAMD( count, bufSize, categories, severities, ids, lengths, message );
 }
 
 static GLuint WINAPI glGetDebugMessageLogARB( GLuint count, GLsizei bufSize, GLenum *sources, GLenum *types, GLuint *ids, GLenum *severities, GLsizei *lengths, GLchar *messageLog )
@@ -4993,25 +5007,25 @@ static void WINAPI glGetIntegerui64vNV( GLenum value, GLuint64EXT *result )
   funcs->ext.p_glGetIntegerui64vNV( value, result );
 }
 
-static void WINAPI glGetInternalformatSampleivNV( GLenum target, GLenum internalformat, GLsizei samples, GLenum pname, GLsizei bufSize, GLint *params )
+static void WINAPI glGetInternalformatSampleivNV( GLenum target, GLenum internalformat, GLsizei samples, GLenum pname, GLsizei count, GLint *params )
 {
   const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-  TRACE( "(%d, %d, %d, %d, %d, %p)\n", target, internalformat, samples, pname, bufSize, params );
-  funcs->ext.p_glGetInternalformatSampleivNV( target, internalformat, samples, pname, bufSize, params );
+  TRACE( "(%d, %d, %d, %d, %d, %p)\n", target, internalformat, samples, pname, count, params );
+  funcs->ext.p_glGetInternalformatSampleivNV( target, internalformat, samples, pname, count, params );
 }
 
-static void WINAPI glGetInternalformati64v( GLenum target, GLenum internalformat, GLenum pname, GLsizei bufSize, GLint64 *params )
+static void WINAPI glGetInternalformati64v( GLenum target, GLenum internalformat, GLenum pname, GLsizei count, GLint64 *params )
 {
   const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-  TRACE( "(%d, %d, %d, %d, %p)\n", target, internalformat, pname, bufSize, params );
-  funcs->ext.p_glGetInternalformati64v( target, internalformat, pname, bufSize, params );
+  TRACE( "(%d, %d, %d, %d, %p)\n", target, internalformat, pname, count, params );
+  funcs->ext.p_glGetInternalformati64v( target, internalformat, pname, count, params );
 }
 
-static void WINAPI glGetInternalformativ( GLenum target, GLenum internalformat, GLenum pname, GLsizei bufSize, GLint *params )
+static void WINAPI glGetInternalformativ( GLenum target, GLenum internalformat, GLenum pname, GLsizei count, GLint *params )
 {
   const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-  TRACE( "(%d, %d, %d, %d, %p)\n", target, internalformat, pname, bufSize, params );
-  funcs->ext.p_glGetInternalformativ( target, internalformat, pname, bufSize, params );
+  TRACE( "(%d, %d, %d, %d, %p)\n", target, internalformat, pname, count, params );
+  funcs->ext.p_glGetInternalformativ( target, internalformat, pname, count, params );
 }
 
 static void WINAPI glGetInvariantBooleanvEXT( GLuint id, GLenum value, GLboolean *data )
@@ -5892,18 +5906,18 @@ static void WINAPI glGetProgramResourceName( GLuint program, GLenum programInter
   funcs->ext.p_glGetProgramResourceName( program, programInterface, index, bufSize, length, name );
 }
 
-static void WINAPI glGetProgramResourcefvNV( GLuint program, GLenum programInterface, GLuint index, GLsizei propCount, const GLenum *props, GLsizei bufSize, GLsizei *length, GLfloat *params )
+static void WINAPI glGetProgramResourcefvNV( GLuint program, GLenum programInterface, GLuint index, GLsizei propCount, const GLenum *props, GLsizei count, GLsizei *length, GLfloat *params )
 {
   const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-  TRACE( "(%d, %d, %d, %d, %p, %d, %p, %p)\n", program, programInterface, index, propCount, props, bufSize, length, params );
-  funcs->ext.p_glGetProgramResourcefvNV( program, programInterface, index, propCount, props, bufSize, length, params );
+  TRACE( "(%d, %d, %d, %d, %p, %d, %p, %p)\n", program, programInterface, index, propCount, props, count, length, params );
+  funcs->ext.p_glGetProgramResourcefvNV( program, programInterface, index, propCount, props, count, length, params );
 }
 
-static void WINAPI glGetProgramResourceiv( GLuint program, GLenum programInterface, GLuint index, GLsizei propCount, const GLenum *props, GLsizei bufSize, GLsizei *length, GLint *params )
+static void WINAPI glGetProgramResourceiv( GLuint program, GLenum programInterface, GLuint index, GLsizei propCount, const GLenum *props, GLsizei count, GLsizei *length, GLint *params )
 {
   const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-  TRACE( "(%d, %d, %d, %d, %p, %d, %p, %p)\n", program, programInterface, index, propCount, props, bufSize, length, params );
-  funcs->ext.p_glGetProgramResourceiv( program, programInterface, index, propCount, props, bufSize, length, params );
+  TRACE( "(%d, %d, %d, %d, %p, %d, %p, %p)\n", program, programInterface, index, propCount, props, count, length, params );
+  funcs->ext.p_glGetProgramResourceiv( program, programInterface, index, propCount, props, count, length, params );
 }
 
 static void WINAPI glGetProgramStageiv( GLuint program, GLenum shadertype, GLenum pname, GLint *values )
@@ -6200,11 +6214,11 @@ static GLint WINAPI glGetSubroutineUniformLocation( GLuint program, GLenum shade
   return funcs->ext.p_glGetSubroutineUniformLocation( program, shadertype, name );
 }
 
-static void WINAPI glGetSynciv( GLsync sync, GLenum pname, GLsizei bufSize, GLsizei *length, GLint *values )
+static void WINAPI glGetSynciv( GLsync sync, GLenum pname, GLsizei count, GLsizei *length, GLint *values )
 {
   const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-  TRACE( "(%p, %d, %d, %p, %p)\n", sync, pname, bufSize, length, values );
-  funcs->ext.p_glGetSynciv( sync, pname, bufSize, length, values );
+  TRACE( "(%p, %d, %d, %p, %p)\n", sync, pname, count, length, values );
+  funcs->ext.p_glGetSynciv( sync, pname, count, length, values );
 }
 
 static void WINAPI glGetTexBumpParameterfvATI( GLenum pname, GLfloat *param )
@@ -12290,11 +12304,11 @@ static void WINAPI glQueryObjectParameteruiAMD( GLenum target, GLuint id, GLenum
   funcs->ext.p_glQueryObjectParameteruiAMD( target, id, pname, param );
 }
 
-static GLint WINAPI glQueryResourceNV( GLenum queryType, GLint tagId, GLuint bufSize, GLint *buffer )
+static GLint WINAPI glQueryResourceNV( GLenum queryType, GLint tagId, GLuint count, GLint *buffer )
 {
   const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-  TRACE( "(%d, %d, %d, %p)\n", queryType, tagId, bufSize, buffer );
-  return funcs->ext.p_glQueryResourceNV( queryType, tagId, bufSize, buffer );
+  TRACE( "(%d, %d, %d, %p)\n", queryType, tagId, count, buffer );
+  return funcs->ext.p_glQueryResourceNV( queryType, tagId, count, buffer );
 }
 
 static void WINAPI glQueryResourceTagNV( GLint tagId, const GLchar *tagString )
@@ -15674,11 +15688,11 @@ static void WINAPI glVDPAUFiniNV(void)
   funcs->ext.p_glVDPAUFiniNV();
 }
 
-static void WINAPI glVDPAUGetSurfaceivNV( GLvdpauSurfaceNV surface, GLenum pname, GLsizei bufSize, GLsizei *length, GLint *values )
+static void WINAPI glVDPAUGetSurfaceivNV( GLvdpauSurfaceNV surface, GLenum pname, GLsizei count, GLsizei *length, GLint *values )
 {
   const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-  TRACE( "(%ld, %d, %d, %p, %p)\n", surface, pname, bufSize, length, values );
-  funcs->ext.p_glVDPAUGetSurfaceivNV( surface, pname, bufSize, length, values );
+  TRACE( "(%ld, %d, %d, %p, %p)\n", surface, pname, count, length, values );
+  funcs->ext.p_glVDPAUGetSurfaceivNV( surface, pname, count, length, values );
 }
 
 static void WINAPI glVDPAUInitNV( const void *vdpDevice, const void *getProcAddress )
@@ -18778,7 +18792,7 @@ extern int WINAPI wglReleasePbufferDCARB( HPBUFFERARB hPbuffer, HDC hDC ) DECLSP
 extern BOOL WINAPI wglReleaseTexImageARB( HPBUFFERARB hPbuffer, int iBuffer ) DECLSPEC_HIDDEN;
 extern BOOL WINAPI wglSetPbufferAttribARB( HPBUFFERARB hPbuffer, const int *piAttribList ) DECLSPEC_HIDDEN;
 
-const OpenGL_extension extension_registry[2682] = {
+const OpenGL_extension extension_registry[2684] = {
   { "glAccumxOES", "GL_OES_fixed_point", glAccumxOES },
   { "glAcquireKeyedMutexWin32EXT", "GL_EXT_win32_keyed_mutex", glAcquireKeyedMutexWin32EXT },
   { "glActiveProgramEXT", "GL_EXT_separate_shader_objects", glActiveProgramEXT },
@@ -19166,8 +19180,10 @@ const OpenGL_extension extension_registry[2682] = {
   { "glDeleteVertexShaderEXT", "GL_EXT_vertex_shader", glDeleteVertexShaderEXT },
   { "glDepthBoundsEXT", "GL_EXT_depth_bounds_test", glDepthBoundsEXT },
   { "glDepthBoundsdNV", "GL_NV_depth_buffer_float", glDepthBoundsdNV },
+  { "glDepthRangeArraydvNV", "GL_ARB_viewport_array", glDepthRangeArraydvNV },
   { "glDepthRangeArrayv", "GL_ARB_viewport_array GL_VERSION_4_1", glDepthRangeArrayv },
   { "glDepthRangeIndexed", "GL_ARB_viewport_array GL_VERSION_4_1", glDepthRangeIndexed },
+  { "glDepthRangeIndexeddNV", "GL_ARB_viewport_array", glDepthRangeIndexeddNV },
   { "glDepthRangedNV", "GL_NV_depth_buffer_float", glDepthRangedNV },
   { "glDepthRangef", "GL_ARB_ES2_compatibility GL_VERSION_4_1", glDepthRangef },
   { "glDepthRangefOES", "GL_OES_single_precision", glDepthRangefOES },

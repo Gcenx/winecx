@@ -20,13 +20,16 @@
  */
 
 #define COBJMACROS
+#include <math.h>
 #include "dshow.h"
 #include "initguid.h"
 #include "dsound.h"
 #include "amaudio.h"
+#include "mmreg.h"
+#include "wine/strmbase.h"
 #include "wine/test.h"
 
-static const WCHAR sink_id[] = {'A','u','d','i','o',' ','I','n','p','u','t',' ','p','i','n',' ','(','r','e','n','d','e','r','e','d',')',0};
+static const WCHAR sink_id[] = L"Audio Input pin (rendered)";
 
 static IBaseFilter *create_dsound_render(void)
 {
@@ -35,6 +38,12 @@ static IBaseFilter *create_dsound_render(void)
             &IID_IBaseFilter, (void **)&filter);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     return filter;
+}
+
+static inline BOOL compare_media_types(const AM_MEDIA_TYPE *a, const AM_MEDIA_TYPE *b)
+{
+    return !memcmp(a, b, offsetof(AM_MEDIA_TYPE, pbFormat))
+        && !memcmp(a->pbFormat, b->pbFormat, a->cbFormat);
 }
 
 static ULONG get_refcount(void *iface)
@@ -64,10 +73,9 @@ static ULONG WINAPI property_bag_Release(IPropertyBag *iface)
 
 static HRESULT WINAPI property_bag_Read(IPropertyBag *iface, const WCHAR *name, VARIANT *var, IErrorLog *log)
 {
-    static const WCHAR dsguidW[] = {'D','S','G','u','i','d',0};
     WCHAR guidstr[39];
 
-    ok(!lstrcmpW(name, dsguidW), "Got unexpected name %s.\n", wine_dbgstr_w(name));
+    ok(!wcscmp(name, L"DSGuid"), "Got unexpected name %s.\n", wine_dbgstr_w(name));
     ok(V_VT(var) == VT_BSTR, "Got unexpected type %u.\n", V_VT(var));
     StringFromGUID2(&DSDEVID_DefaultPlayback, guidstr, ARRAY_SIZE(guidstr));
     V_BSTR(var) = SysAllocString(guidstr);
@@ -353,18 +361,16 @@ static void test_enum_pins(void)
 
 static void test_find_pin(void)
 {
-    static const WCHAR inW[] = {'I','n',0};
-    static const WCHAR input_pinW[] = {'i','n','p','u','t',' ','p','i','n',0};
     IBaseFilter *filter = create_dsound_render();
     IEnumPins *enum_pins;
     IPin *pin, *pin2;
     HRESULT hr;
     ULONG ref;
 
-    hr = IBaseFilter_FindPin(filter, inW, &pin);
+    hr = IBaseFilter_FindPin(filter, L"In", &pin);
     ok(hr == VFW_E_NOT_FOUND, "Got hr %#x.\n", hr);
 
-    hr = IBaseFilter_FindPin(filter, input_pinW, &pin);
+    hr = IBaseFilter_FindPin(filter, L"input pin", &pin);
     ok(hr == VFW_E_NOT_FOUND, "Got hr %#x.\n", hr);
 
     hr = IBaseFilter_FindPin(filter, sink_id, &pin);
@@ -405,7 +411,7 @@ static void test_pin_info(void)
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     ok(info.pFilter == filter, "Expected filter %p, got %p.\n", filter, info.pFilter);
     ok(info.dir == PINDIR_INPUT, "Got direction %d.\n", info.dir);
-    ok(!lstrcmpW(info.achName, sink_id), "Got name %s.\n", wine_dbgstr_w(info.achName));
+    ok(!wcscmp(info.achName, sink_id), "Got name %s.\n", wine_dbgstr_w(info.achName));
     ref = get_refcount(filter);
     ok(ref == 3, "Got unexpected refcount %d.\n", ref);
     ref = get_refcount(pin);
@@ -418,7 +424,7 @@ static void test_pin_info(void)
 
     hr = IPin_QueryId(pin, &id);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    ok(!lstrcmpW(id, sink_id), "Got id %s.\n", wine_dbgstr_w(id));
+    ok(!wcscmp(id, sink_id), "Got id %s.\n", wine_dbgstr_w(id));
     CoTaskMemFree(id);
 
     hr = IPin_QueryInternalConnections(pin, NULL, NULL);
@@ -575,60 +581,565 @@ static void test_enum_media_types(void)
     ok(!ref, "Got outstanding refcount %d.\n", ref);
 }
 
-static void test_pin(IPin *pin)
+struct testfilter
 {
-    IMemInputPin *mpin = NULL;
+    struct strmbase_filter filter;
+    struct strmbase_source source;
+};
 
-    IPin_QueryInterface(pin, &IID_IMemInputPin, (void **)&mpin);
-
-    ok(mpin != NULL, "No IMemInputPin found!\n");
-    if (mpin)
-    {
-        ok(IMemInputPin_ReceiveCanBlock(mpin) == S_OK, "Receive can't block for pin!\n");
-        ok(IMemInputPin_NotifyAllocator(mpin, NULL, 0) == E_POINTER, "NotifyAllocator likes a NULL pointer argument\n");
-        IMemInputPin_Release(mpin);
-    }
-    /* TODO */
+static inline struct testfilter *impl_from_strmbase_filter(struct strmbase_filter *iface)
+{
+    return CONTAINING_RECORD(iface, struct testfilter, filter);
 }
 
-static void test_basefilter(void)
+static struct strmbase_pin *testfilter_get_pin(struct strmbase_filter *iface, unsigned int index)
 {
-    IEnumPins *pin_enum = NULL;
-    IBaseFilter *base = create_dsound_render();
-    IPin *pins[2];
-    ULONG ref;
+    struct testfilter *filter = impl_from_strmbase_filter(iface);
+    if (!index)
+        return &filter->source.pin;
+    return NULL;
+}
+
+static void testfilter_destroy(struct strmbase_filter *iface)
+{
+    struct testfilter *filter = impl_from_strmbase_filter(iface);
+    strmbase_source_cleanup(&filter->source);
+    strmbase_filter_cleanup(&filter->filter);
+}
+
+static const struct strmbase_filter_ops testfilter_ops =
+{
+    .filter_get_pin = testfilter_get_pin,
+    .filter_destroy = testfilter_destroy,
+};
+
+static HRESULT testsource_query_interface(struct strmbase_pin *iface, REFIID iid, void **out)
+{
+    ok(!IsEqualGUID(iid, &IID_IQualityControl), "Unexpected query for IQualityControl.\n");
+    return E_NOINTERFACE;
+}
+
+static HRESULT WINAPI testsource_DecideAllocator(struct strmbase_source *iface,
+        IMemInputPin *peer, IMemAllocator **allocator)
+{
+    return S_OK;
+}
+
+static const struct strmbase_source_ops testsource_ops =
+{
+    .base.pin_query_interface = testsource_query_interface,
+    .pfnAttemptConnection = BaseOutputPinImpl_AttemptConnection,
+    .pfnDecideAllocator = testsource_DecideAllocator,
+};
+
+static void testfilter_init(struct testfilter *filter)
+{
+    static const GUID clsid = {0xabacab};
+    strmbase_filter_init(&filter->filter, NULL, &clsid, &testfilter_ops);
+    strmbase_source_init(&filter->source, &filter->filter, L"", &testsource_ops);
+}
+
+static void test_allocator(IMemInputPin *input)
+{
+    IMemAllocator *req_allocator, *ret_allocator;
+    ALLOCATOR_PROPERTIES props;
     HRESULT hr;
 
-    hr = IBaseFilter_EnumPins(base, NULL);
-    ok(hr == E_POINTER, "hr = %08x and not E_POINTER\n", hr);
+    hr = IMemInputPin_GetAllocatorRequirements(input, &props);
+    ok(hr == E_NOTIMPL, "Got hr %#x.\n", hr);
 
-    hr= IBaseFilter_EnumPins(base, &pin_enum);
-    ok(hr == S_OK, "hr = %08x and not S_OK\n", hr);
+    hr = IMemInputPin_GetAllocator(input, &ret_allocator);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    hr = IEnumPins_Next(pin_enum, 1, NULL, NULL);
-    ok(hr == E_POINTER, "hr = %08x and not E_POINTER\n", hr);
-
-    hr = IEnumPins_Next(pin_enum, 2, pins, NULL);
-    ok(hr == E_INVALIDARG, "hr = %08x and not E_INVALIDARG\n", hr);
-
-    pins[0] = (void *)0xdead;
-    pins[1] = (void *)0xdeed;
-
-    hr = IEnumPins_Next(pin_enum, 2, pins, &ref);
-    ok(hr == S_FALSE, "hr = %08x instead of S_FALSE\n", hr);
-    ok(pins[0] != (void *)0xdead && pins[0] != NULL, "pins[0] = %p\n", pins[0]);
-    if (pins[0] != (void *)0xdead && pins[0] != NULL)
+    if (hr == S_OK)
     {
-        test_pin(pins[0]);
-        IPin_Release(pins[0]);
+        hr = IMemAllocator_GetProperties(ret_allocator, &props);
+        ok(hr == S_OK, "Got hr %#x.\n", hr);
+        ok(!props.cBuffers, "Got %d buffers.\n", props.cBuffers);
+        ok(!props.cbBuffer, "Got size %d.\n", props.cbBuffer);
+        ok(!props.cbAlign, "Got alignment %d.\n", props.cbAlign);
+        ok(!props.cbPrefix, "Got prefix %d.\n", props.cbPrefix);
+
+        hr = IMemInputPin_NotifyAllocator(input, ret_allocator, TRUE);
+        ok(hr == S_OK, "Got hr %#x.\n", hr);
+        IMemAllocator_Release(ret_allocator);
     }
 
-    ok(pins[1] == (void *)0xdeed, "pins[1] = %p\n", pins[1]);
+    hr = IMemInputPin_NotifyAllocator(input, NULL, TRUE);
+    ok(hr == E_POINTER, "Got hr %#x.\n", hr);
 
-    ref = IEnumPins_Release(pin_enum);
-    ok(ref == 0, "ref is %u and not 0!\n", ref);
+    CoCreateInstance(&CLSID_MemoryAllocator, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IMemAllocator, (void **)&req_allocator);
 
-    IBaseFilter_Release(base);
+    hr = IMemInputPin_NotifyAllocator(input, req_allocator, TRUE);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMemInputPin_GetAllocator(input, &ret_allocator);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(ret_allocator == req_allocator, "Allocators didn't match.\n");
+
+    IMemAllocator_Release(req_allocator);
+    IMemAllocator_Release(ret_allocator);
+}
+
+struct frame_thread_params
+{
+    IMemInputPin *sink;
+    IMediaSample *sample;
+};
+
+static DWORD WINAPI frame_thread(void *arg)
+{
+    struct frame_thread_params *params = arg;
+    HRESULT hr;
+
+    if (winetest_debug > 1) trace("%04x: Sending frame.\n", GetCurrentThreadId());
+    hr = IMemInputPin_Receive(params->sink, params->sample);
+    if (winetest_debug > 1) trace("%04x: Returned %#x.\n", GetCurrentThreadId(), hr);
+    IMediaSample_Release(params->sample);
+    free(params);
+    return hr;
+}
+
+static HRESULT send_frame(IMemInputPin *sink)
+{
+    struct frame_thread_params *params = malloc(sizeof(*params));
+    REFERENCE_TIME start_time, end_time;
+    IMemAllocator *allocator;
+    unsigned short *words;
+    IMediaSample *sample;
+    unsigned int i;
+    HANDLE thread;
+    HRESULT hr;
+    BYTE *data;
+    DWORD ret;
+
+    hr = IMemInputPin_GetAllocator(sink, &allocator);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMemAllocator_GetBuffer(allocator, &sample, NULL, NULL, 0);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaSample_GetPointer(sample, &data);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    words = (unsigned short *)data;
+    for (i = 0; i < 44100 * 2; i += 2)
+        words[i] = words[i+1] = sinf(i / 20.0f) * 0x7fff;
+
+    hr = IMediaSample_SetActualDataLength(sample, 44100 * 4);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    start_time = 0;
+    end_time = start_time + 10000000;
+    hr = IMediaSample_SetTime(sample, &start_time, &end_time);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    params->sink = sink;
+    params->sample = sample;
+    thread = CreateThread(NULL, 0, frame_thread, params, 0, NULL);
+    ret = WaitForSingleObject(thread, 500);
+    todo_wine_if (ret) ok(!ret, "Wait failed.\n");
+    GetExitCodeThread(thread, &ret);
+    CloseHandle(thread);
+
+    IMemAllocator_Release(allocator);
+    return ret;
+}
+
+static void test_filter_state(IMemInputPin *input, IMediaControl *control)
+{
+    OAFilterState state;
+    HRESULT hr;
+
+    hr = send_frame(input);
+    ok(hr == VFW_E_WRONG_STATE, "Got hr %#x.\n", hr);
+
+    /* The renderer is not fully paused until it receives a sample. The
+     * DirectSound renderer never blocks in Receive(), despite returning S_OK
+     * from ReceiveCanBlock(). Instead it holds on to each sample until its
+     * presentation time, then writes it into the buffer. This is more work
+     * than it's worth to emulate, so for now, we'll ignore this behaviour. */
+
+    hr = IMediaControl_Pause(control);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+
+    /* It's possible to queue multiple samples while paused. The number of
+     * samples that can be queued depends on the length of each sample, but
+     * it's not particularly clear how. */
+
+    hr = IMediaControl_GetState(control, 0, &state);
+    ok(hr == VFW_S_STATE_INTERMEDIATE, "Got hr %#x.\n", hr);
+
+    hr = send_frame(input);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_GetState(control, 1000, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_Stop(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = send_frame(input);
+    ok(hr == VFW_E_WRONG_STATE, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_Pause(control);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_GetState(control, 0, &state);
+    ok(hr == VFW_S_STATE_INTERMEDIATE, "Got hr %#x.\n", hr);
+
+    hr = send_frame(input);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_GetState(control, 1000, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_Run(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_GetState(control, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = send_frame(input);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = send_frame(input);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_GetState(control, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_Run(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_GetState(control, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_Pause(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_GetState(control, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_Stop(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_GetState(control, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    /* The DirectSound renderer will silently refuse to transition to running
+     * if it hasn't finished pausing yet. Once it does it reports itself as
+     * completely paused. */
+}
+
+static void test_flushing(IPin *pin, IMemInputPin *input, IMediaControl *control)
+{
+    OAFilterState state;
+    HRESULT hr;
+
+    hr = IMediaControl_Pause(control);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+
+    hr = send_frame(input);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_GetState(control, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_BeginFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = send_frame(input);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+
+    hr = IPin_EndFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_GetState(control, 0, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_Run(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_BeginFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = send_frame(input);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+
+    hr = IPin_EndFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = send_frame(input);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_Stop(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+}
+
+static unsigned int check_ec_complete(IMediaEvent *eventsrc, DWORD timeout)
+{
+    LONG_PTR param1, param2;
+    unsigned int ret = 0;
+    HRESULT hr;
+    LONG code;
+
+    while ((hr = IMediaEvent_GetEvent(eventsrc, &code, &param1, &param2, timeout)) == S_OK)
+    {
+        if (code == EC_COMPLETE)
+        {
+            ok(param1 == S_OK, "Got param1 %#lx.\n", param1);
+            ok(!param2, "Got param2 %#lx.\n", param2);
+            ret++;
+        }
+        IMediaEvent_FreeEventParams(eventsrc, code, param1, param2);
+        timeout = 0;
+    }
+    ok(hr == E_ABORT, "Got hr %#x.\n", hr);
+
+    return ret;
+}
+
+static void test_eos(IPin *pin, IMemInputPin *input, IMediaControl *control)
+{
+    IMediaEvent *eventsrc;
+    OAFilterState state;
+    HRESULT hr;
+    BOOL ret;
+
+    IMediaControl_QueryInterface(control, &IID_IMediaEvent, (void **)&eventsrc);
+
+    hr = IMediaControl_Pause(control);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    ret = check_ec_complete(eventsrc, 0);
+    ok(!ret, "Got unexpected EC_COMPLETE.\n");
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_GetState(control, 1000, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ret = check_ec_complete(eventsrc, 0);
+    ok(!ret, "Got unexpected EC_COMPLETE.\n");
+
+    hr = send_frame(input);
+    todo_wine ok(hr == VFW_E_SAMPLE_REJECTED_EOS, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_Run(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ret = check_ec_complete(eventsrc, 0);
+    todo_wine ok(ret == 1, "Expected EC_COMPLETE.\n");
+
+    hr = IMediaControl_Stop(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ret = check_ec_complete(eventsrc, 0);
+    ok(!ret, "Got unexpected EC_COMPLETE.\n");
+
+    /* We do not receive an EC_COMPLETE notification until the last sample is
+     * done rendering. */
+
+    hr = IMediaControl_Pause(control);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    hr = send_frame(input);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaControl_GetState(control, 1000, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaControl_Run(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ret = check_ec_complete(eventsrc, 0);
+    ok(!ret, "Got unexpected EC_COMPLETE.\n");
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ret = check_ec_complete(eventsrc, 0);
+    ok(!ret, "Got unexpected EC_COMPLETE.\n");
+    ret = check_ec_complete(eventsrc, 2000);
+    todo_wine ok(ret == 1, "Expected EC_COMPLETE.\n");
+
+    hr = IMediaControl_Stop(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ret = check_ec_complete(eventsrc, 0);
+    ok(!ret, "Got unexpected EC_COMPLETE.\n");
+
+    /* Test sending EOS while flushing. */
+
+    hr = IMediaControl_Run(control);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    hr = send_frame(input);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_BeginFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IPin_EndOfStream(pin);
+    todo_wine ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    hr = IPin_EndFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_Stop(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ret = check_ec_complete(eventsrc, 0);
+    ok(!ret, "Got unexpected EC_COMPLETE.\n");
+
+    /* Test sending EOS and then flushing or stopping. */
+
+    hr = IMediaControl_Pause(control);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    hr = send_frame(input);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaControl_GetState(control, 1000, &state);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaControl_Run(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ret = check_ec_complete(eventsrc, 0);
+    ok(!ret, "Got unexpected EC_COMPLETE.\n");
+
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ret = check_ec_complete(eventsrc, 0);
+    ok(!ret, "Got unexpected EC_COMPLETE.\n");
+
+    hr = IPin_BeginFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IPin_EndFlush(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = send_frame(input);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IPin_EndOfStream(pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ret = check_ec_complete(eventsrc, 0);
+    ok(!ret, "Got unexpected EC_COMPLETE.\n");
+
+    hr = IMediaControl_Stop(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ret = check_ec_complete(eventsrc, 0);
+    ok(!ret, "Got unexpected EC_COMPLETE.\n");
+
+    IMediaEvent_Release(eventsrc);
+}
+
+static void test_connect_pin(void)
+{
+    ALLOCATOR_PROPERTIES req_props = {1, 4 * 44100, 1, 0}, ret_props;
+    WAVEFORMATEX wfx =
+    {
+        .wFormatTag = WAVE_FORMAT_PCM,
+        .nChannels = 2,
+        .nSamplesPerSec = 44100,
+        .nAvgBytesPerSec = 44100 * 4,
+        .nBlockAlign = 4,
+        .wBitsPerSample = 16,
+    };
+    AM_MEDIA_TYPE req_mt =
+    {
+        .majortype = MEDIATYPE_Audio,
+        .subtype = MEDIASUBTYPE_PCM,
+        .formattype = FORMAT_WaveFormatEx,
+        .cbFormat = sizeof(wfx),
+        .pbFormat = (BYTE *)&wfx,
+    };
+    IBaseFilter *filter = create_dsound_render();
+    struct testfilter source;
+    IMemAllocator *allocator;
+    IMediaControl *control;
+    IFilterGraph2 *graph;
+    IMemInputPin *input;
+    AM_MEDIA_TYPE mt;
+    IPin *pin, *peer;
+    HRESULT hr;
+    ULONG ref;
+
+    testfilter_init(&source);
+
+    CoCreateInstance(&CLSID_FilterGraph, NULL, CLSCTX_INPROC_SERVER, &IID_IFilterGraph2, (void **)&graph);
+    IFilterGraph2_AddFilter(graph, &source.filter.IBaseFilter_iface, L"source");
+    IFilterGraph2_AddFilter(graph, filter, L"sink");
+    IFilterGraph2_QueryInterface(graph, &IID_IMediaControl, (void **)&control);
+
+    IBaseFilter_FindPin(filter, sink_id, &pin);
+
+    peer = (IPin *)0xdeadbeef;
+    hr = IPin_ConnectedTo(pin, &peer);
+    ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#x.\n", hr);
+    ok(!peer, "Got peer %p.\n", peer);
+
+    hr = IPin_ConnectionMediaType(pin, &mt);
+    ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_Pause(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IFilterGraph2_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &req_mt);
+    ok(hr == VFW_E_NOT_STOPPED, "Got hr %#x.\n", hr);
+    hr = IMediaControl_Stop(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IFilterGraph2_ConnectDirect(graph, &source.source.pin.IPin_iface, pin, &req_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_ConnectedTo(pin, &peer);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(peer == &source.source.pin.IPin_iface, "Got peer %p.\n", peer);
+    IPin_Release(peer);
+
+    hr = IPin_ConnectionMediaType(pin, &mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(compare_media_types(&mt, &req_mt), "Media types didn't match.\n");
+
+    hr = IMediaControl_Pause(control);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    hr = IFilterGraph2_Disconnect(graph, pin);
+    ok(hr == VFW_E_NOT_STOPPED, "Got hr %#x.\n", hr);
+    hr = IMediaControl_Stop(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    IPin_QueryInterface(pin, &IID_IMemInputPin, (void **)&input);
+
+    test_allocator(input);
+
+    hr = CoCreateInstance(&CLSID_MemoryAllocator, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IMemAllocator, (void **)&allocator);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMemAllocator_SetProperties(allocator, &req_props, &ret_props);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(!memcmp(&ret_props, &req_props, sizeof(req_props)), "Properties did not match.\n");
+    hr = IMemInputPin_NotifyAllocator(input, allocator, TRUE);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMemAllocator_Commit(allocator);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMemInputPin_ReceiveCanBlock(input);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    test_filter_state(input, control);
+    test_flushing(pin, input, control);
+    test_eos(pin, input, control);
+
+    hr = IFilterGraph2_Disconnect(graph, pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IFilterGraph2_Disconnect(graph, pin);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    ok(source.source.pin.peer == pin, "Got peer %p.\n", source.source.pin.peer);
+    IFilterGraph2_Disconnect(graph, &source.source.pin.IPin_iface);
+
+    peer = (IPin *)0xdeadbeef;
+    hr = IPin_ConnectedTo(pin, &peer);
+    ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#x.\n", hr);
+    ok(!peer, "Got peer %p.\n", peer);
+
+    hr = IPin_ConnectionMediaType(pin, &mt);
+    ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#x.\n", hr);
+
+    ref = IMemAllocator_Release(allocator);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    IMemInputPin_Release(input);
+    IPin_Release(pin);
+    IMediaControl_Release(control);
+    ref = IFilterGraph2_Release(graph);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ref = IBaseFilter_Release(&source.filter.IBaseFilter_iface);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
 }
 
 static void test_unconnected_filter_state(void)
@@ -688,6 +1199,121 @@ static void test_unconnected_filter_state(void)
     ok(!ref, "Got outstanding refcount %d.\n", ref);
 }
 
+static HRESULT does_dsound_support_format(WAVEFORMATEX *format)
+{
+    const DSBUFFERDESC desc =
+    {
+        .dwSize = sizeof(DSBUFFERDESC),
+        .dwBufferBytes = format->nAvgBytesPerSec,
+        .lpwfxFormat = format,
+    };
+    IDirectSoundBuffer *buffer;
+    IDirectSound *dsound;
+    HRESULT hr;
+
+    hr = DirectSoundCreate(NULL, &dsound, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IDirectSound_CreateSoundBuffer(dsound, &desc, &buffer, NULL);
+    if (hr == S_OK)
+        IDirectSoundBuffer_Release(buffer);
+    IDirectSound_Release(dsound);
+
+    return hr == S_OK ? S_OK : S_FALSE;
+}
+
+static void test_media_types(void)
+{
+    IBaseFilter *filter = create_dsound_render();
+    AM_MEDIA_TYPE *mt, req_mt = {{0}};
+    IEnumMediaTypes *enummt;
+    WAVEFORMATEX wfx = {0};
+    HRESULT hr, expect_hr;
+    unsigned int i, j;
+    WORD channels;
+    ULONG ref;
+    IPin *pin;
+
+    static const DWORD sample_rates[] = {8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000, 96000};
+
+    static const struct
+    {
+        WORD tag;
+        WORD depth;
+    } formats[] =
+    {
+        {WAVE_FORMAT_PCM, 8},
+        {WAVE_FORMAT_PCM, 16},
+        {WAVE_FORMAT_PCM, 24},
+        {WAVE_FORMAT_PCM, 32},
+        {WAVE_FORMAT_IEEE_FLOAT, 32},
+        {WAVE_FORMAT_IEEE_FLOAT, 64},
+    };
+
+    IBaseFilter_FindPin(filter, sink_id, &pin);
+
+    hr = IPin_EnumMediaTypes(pin, &enummt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IEnumMediaTypes_Next(enummt, 1, &mt, NULL);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    if (hr == S_OK)
+    {
+        ok(IsEqualGUID(&mt->majortype, &MEDIATYPE_Audio), "Got major type %s.\n", wine_dbgstr_guid(&mt->majortype));
+        ok(IsEqualGUID(&mt->subtype, &GUID_NULL), "Got subtype %s.\n", wine_dbgstr_guid(&mt->subtype));
+        ok(mt->bFixedSizeSamples == TRUE, "Got fixed size %d.\n", mt->bFixedSizeSamples);
+        ok(!mt->bTemporalCompression, "Got temporal compression %d.\n", mt->bTemporalCompression);
+        ok(mt->lSampleSize == 1, "Got sample size %u.\n", mt->lSampleSize);
+        ok(IsEqualGUID(&mt->formattype, &GUID_NULL), "Got format type %s.\n", wine_dbgstr_guid(&mt->formattype));
+        ok(!mt->pUnk, "Got pUnk %p.\n", mt->pUnk);
+        ok(!mt->cbFormat, "Got format size %u.\n", mt->cbFormat);
+        ok(!mt->pbFormat, "Got unexpected format block.\n");
+
+        hr = IPin_QueryAccept(pin, mt);
+        ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+
+        CoTaskMemFree(mt);
+    }
+
+    hr = IEnumMediaTypes_Next(enummt, 1, &mt, NULL);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+
+    req_mt.majortype = MEDIATYPE_Audio;
+    req_mt.formattype = FORMAT_WaveFormatEx;
+    req_mt.cbFormat = sizeof(WAVEFORMATEX);
+    req_mt.pbFormat = (BYTE *)&wfx;
+
+    IEnumMediaTypes_Release(enummt);
+
+    for (channels = 1; channels <= 2; ++channels)
+    {
+        wfx.nChannels = channels;
+
+        for (i = 0; i < ARRAY_SIZE(formats); ++i)
+        {
+            wfx.wFormatTag = formats[i].tag;
+            wfx.wBitsPerSample = formats[i].depth;
+            wfx.nBlockAlign = wfx.nChannels * wfx.wBitsPerSample / 8;
+            for (j = 0; j < ARRAY_SIZE(sample_rates); ++j)
+            {
+                wfx.nSamplesPerSec = sample_rates[j];
+                wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
+
+                expect_hr = does_dsound_support_format(&wfx);
+
+                hr = IPin_QueryAccept(pin, &req_mt);
+                ok(hr == expect_hr, "Expected hr %#x, got %#x, for %d channels, %d-bit %s, %d Hz.\n",
+                        expect_hr, hr, channels, formats[i].depth,
+                        formats[i].tag == WAVE_FORMAT_PCM ? "integer" : "float", sample_rates[j]);
+            }
+        }
+    }
+
+    IPin_Release(pin);
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+}
+
 START_TEST(dsoundrender)
 {
     IBaseFilter *filter;
@@ -715,7 +1341,8 @@ START_TEST(dsoundrender)
     test_basic_audio();
     test_enum_media_types();
     test_unconnected_filter_state();
-    test_basefilter();
+    test_media_types();
+    test_connect_pin();
 
     CoUninitialize();
 }

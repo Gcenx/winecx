@@ -34,9 +34,11 @@ typedef enum _AUDCLNT_SHAREMODE
 #define AUDCLNT_STREAMFLAGS_EVENTCALLBACK 0x00040000
 #define AUDCLNT_STREAMFLAGS_NOPERSIST 0x00080000
 #define AUDCLNT_STREAMFLAGS_RATEADJUST 0x00100000
+#define AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY 0x08000000
 #define AUDCLNT_SESSIONFLAGS_EXPIREWHENUNOWNED 0x10000000
 #define AUDCLNT_SESSIONFLAGS_DISPLAY_HIDE 0x20000000
 #define AUDCLNT_SESSIONFLAGS_DISPLAY_HIDEWHENEXPIRED 0x40000000
+#define AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM 0x80000000
 
 typedef enum _AudioSessionState
 {
@@ -54,7 +56,11 @@ typedef enum _AUDIO_STREAM_CATEGORY
     AudioCategory_Alerts,
     AudioCategory_SoundEffects,
     AudioCategory_GameEffects,
-    AudioCategory_GameMedia
+    AudioCategory_GameMedia,
+    AudioCategory_GameChat,
+    AudioCategory_Speech,
+    AudioCategory_Movie,
+    AudioCategory_Media,
 } AUDIO_STREAM_CATEGORY;
 
 #endif

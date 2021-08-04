@@ -37,31 +37,58 @@
 #define WIN32_LEAN_AND_MEAN
 #include "windows.h"
 #include "wine/winbase16.h"
+#include "wine/asm.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(rundll32);
 
 
-/*
- * Control_RunDLL has these parameters
- */
-typedef void (WINAPI *EntryPointW)(HWND hWnd, HINSTANCE hInst, LPWSTR lpszCmdLine, int nCmdShow);
-typedef void (WINAPI *EntryPointA)(HWND hWnd, HINSTANCE hInst, LPSTR lpszCmdLine, int nCmdShow);
+#ifdef __i386__
+/* wrapper for dlls that declare the entry point incorrectly */
+extern void call_entry_point( void *func, HWND hwnd, HINSTANCE inst, void *cmdline, int show );
+__ASM_GLOBAL_FUNC( call_entry_point,
+                   "pushl %ebp\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                   __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                   "movl %esp,%ebp\n\t"
+                   __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                   "pushl %edi\n\t"
+                   __ASM_CFI(".cfi_rel_offset %edi,-4\n\t")
+                   "pushl %esi\n\t"
+                   __ASM_CFI(".cfi_rel_offset %esi,-8\n\t")
+                   "pushl %ebx\n\t"
+                   __ASM_CFI(".cfi_rel_offset %ebx,-12\n\t")
+                   "subl $12,%esp\n\t"
+                   "pushl 24(%ebp)\n\t"
+                   "pushl 20(%ebp)\n\t"
+                   "pushl 16(%ebp)\n\t"
+                   "pushl 12(%ebp)\n\t"
+                   "call *8(%ebp)\n\t"
+                   "leal -12(%ebp),%esp\n\t"
+                   "popl %ebx\n\t"
+                   __ASM_CFI(".cfi_same_value %ebx\n\t")
+                   "popl %esi\n\t"
+                   __ASM_CFI(".cfi_same_value %esi\n\t")
+                   "popl %edi\n\t"
+                   __ASM_CFI(".cfi_same_value %edi\n\t")
+                   "leave\n\t"
+                   __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                   __ASM_CFI(".cfi_same_value %ebp\n\t")
+                   "ret" )
+#else
+static void call_entry_point( void *func, HWND hwnd, HINSTANCE inst, void *cmdline, int show )
+{
+    void (WINAPI *entry_point)( HWND hwnd, HINSTANCE inst, void *cmdline, int show ) = func;
+    entry_point( hwnd, inst, cmdline, show );
+}
+#endif
 
-/*
- * Control_RunDLL needs to have a window. So lets make us a very
- * simple window class.
- */
-static const WCHAR szTitle[] = {'r','u','n','d','l','l','3','2',0};
-static const WCHAR szWindowClass[] = {'c','l','a','s','s','_','r','u','n','d','l','l','3','2',0};
-static const WCHAR kernel32[] = {'k','e','r','n','e','l','3','2','.','d','l','l',0};
-static const WCHAR shell32[] = {'s','h','e','l','l','3','2','.','d','l','l',0};
-
-static HINSTANCE16 (WINAPI *pLoadLibrary16)(LPCSTR libname);
-static FARPROC16 (WINAPI *pGetProcAddress16)(HMODULE16 hModule, LPCSTR name);
 static void (WINAPI *pRunDLL_CallEntry16)( FARPROC proc, HWND hwnd, HINSTANCE inst,
                                            LPCSTR cmdline, INT cmdshow );
 
+/*
+ * Control_RunDLL needs to have a window. So lets make us a very simple window class.
+ */
 static ATOM register_class(void)
 {
     WNDCLASSEXW wcex;
@@ -77,14 +104,17 @@ static ATOM register_class(void)
     wcex.hCursor        = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW);
     wcex.hbrBackground  = (HBRUSH)(COLOR_WINDOW+1);
     wcex.lpszMenuName   = NULL;
-    wcex.lpszClassName  = szWindowClass;
+    wcex.lpszClassName  = L"class_rundll32";
     wcex.hIconSm        = NULL;
 
     return RegisterClassExW(&wcex);
 }
 
+#ifdef __i386__
+
 static HINSTANCE16 load_dll16( LPCWSTR dll )
 {
+    HINSTANCE16 (WINAPI *pLoadLibrary16)(LPCSTR libname);
     HINSTANCE16 ret = 0;
     DWORD len = WideCharToMultiByte( CP_ACP, 0, dll, -1, NULL, 0, NULL, NULL );
     char *dllA = HeapAlloc( GetProcessHeap(), 0, len );
@@ -92,7 +122,7 @@ static HINSTANCE16 load_dll16( LPCWSTR dll )
     if (dllA)
     {
         WideCharToMultiByte( CP_ACP, 0, dll, -1, dllA, len, NULL, NULL );
-        pLoadLibrary16 = (void *)GetProcAddress( GetModuleHandleW(kernel32), (LPCSTR)35 );
+        pLoadLibrary16 = (void *)GetProcAddress( GetModuleHandleW(L"kernel32.dll"), (LPCSTR)35 );
         if (pLoadLibrary16) ret = pLoadLibrary16( dllA );
         HeapFree( GetProcessHeap(), 0, dllA );
     }
@@ -101,6 +131,7 @@ static HINSTANCE16 load_dll16( LPCWSTR dll )
 
 static FARPROC16 get_entry_point16( HINSTANCE16 inst, LPCWSTR entry )
 {
+    FARPROC16 (WINAPI *pGetProcAddress16)(HMODULE16 hModule, LPCSTR name);
     FARPROC16 ret = 0;
     DWORD len = WideCharToMultiByte( CP_ACP, 0, entry, -1, NULL, 0, NULL, NULL );
     char *entryA = HeapAlloc( GetProcessHeap(), 0, len );
@@ -108,12 +139,13 @@ static FARPROC16 get_entry_point16( HINSTANCE16 inst, LPCWSTR entry )
     if (entryA)
     {
         WideCharToMultiByte( CP_ACP, 0, entry, -1, entryA, len, NULL, NULL );
-        pGetProcAddress16 = (void *)GetProcAddress( GetModuleHandleW(kernel32), (LPCSTR)37 );
+        pGetProcAddress16 = (void *)GetProcAddress( GetModuleHandleW(L"kernel32.dll"), (LPCSTR)37 );
         if (pGetProcAddress16) ret = pGetProcAddress16( inst, entryA );
         HeapFree( GetProcessHeap(), 0, entryA );
     }
     return ret;
 }
+#endif
 
 static void *get_entry_point32( HMODULE module, LPCWSTR entry, BOOL *unicode )
 {
@@ -243,8 +275,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE hOldInstance, LPWSTR szCmdLine
 {
     HWND hWnd;
     LPWSTR szDllName,szEntryPoint;
-    void *entry_point;
-    BOOL unicode = FALSE, win16;
+    void *entry_point = NULL;
+    BOOL unicode = FALSE, win16 = FALSE;
     STARTUPINFOW info;
     HMODULE hDll;
 
@@ -254,8 +286,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE hOldInstance, LPWSTR szCmdLine
 
     /* Initialize the rundll32 class */
     register_class();
-    hWnd = CreateWindowW(szWindowClass, szTitle,
-          WS_OVERLAPPEDWINDOW|WS_VISIBLE,
+    hWnd = CreateWindowW(L"class_rundll32", L"rundll32", WS_OVERLAPPEDWINDOW|WS_VISIBLE,
           CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, NULL, NULL, NULL, NULL);
 
     /* Get the dll name and API EntryPoint */
@@ -272,11 +303,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE hOldInstance, LPWSTR szCmdLine
 
     /* Load the library */
     hDll=LoadLibraryW(szDllName);
-    if (hDll)
-    {
-        win16 = FALSE;
-        entry_point = get_entry_point32( hDll, szEntryPoint, &unicode );
-    }
+    if (hDll) entry_point = get_entry_point32( hDll, szEntryPoint, &unicode );
+#ifdef __i386__
     else
     {
         HINSTANCE16 dll = load_dll16( szDllName );
@@ -287,9 +315,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE hOldInstance, LPWSTR szCmdLine
             goto CLEANUP;
         }
         win16 = TRUE;
-        unicode = FALSE;
         entry_point = get_entry_point16( dll, szEntryPoint );
     }
+#endif
 
     if (!entry_point)
     {
@@ -304,12 +332,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE hOldInstance, LPWSTR szCmdLine
 
     if (unicode)
     {
-        EntryPointW pEntryPointW = entry_point;
-
         WINE_TRACE( "Calling %s (%p,%p,%s,%d)\n", wine_dbgstr_w(szEntryPoint),
                     hWnd, instance, wine_dbgstr_w(szCmdLine), info.wShowWindow );
 
-        pEntryPointW( hWnd, instance, szCmdLine, info.wShowWindow );
+        call_entry_point( entry_point, hWnd, instance, szCmdLine, info.wShowWindow );
     }
     else
     {
@@ -326,16 +352,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE hOldInstance, LPWSTR szCmdLine
 
         if (win16)
         {
-            HMODULE shell = LoadLibraryW( shell32 );
+            HMODULE shell = LoadLibraryW( L"shell32.dll" );
             if (shell) pRunDLL_CallEntry16 = (void *)GetProcAddress( shell, (LPCSTR)122 );
             if (pRunDLL_CallEntry16)
                 pRunDLL_CallEntry16( entry_point, hWnd, instance, cmdline, info.wShowWindow );
         }
-        else
-        {
-            EntryPointA pEntryPointA = entry_point;
-            pEntryPointA( hWnd, instance, cmdline, info.wShowWindow );
-        }
+        else call_entry_point( entry_point, hWnd, instance, cmdline, info.wShowWindow );
+
         HeapFree( GetProcessHeap(), 0, cmdline );
     }
 

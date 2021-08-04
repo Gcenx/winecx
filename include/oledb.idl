@@ -40,6 +40,7 @@ typedef ULONG_PTR DBREFCOUNT;
 typedef ULONG_PTR DB_UPARAMS;
 typedef LONG_PTR  DB_LPARAMS;
 typedef DWORD_PTR DBHASHVALUE;
+typedef LONG_PTR DB_LRESERVE;
 
 #include "dbs.idl"
 
@@ -69,6 +70,13 @@ typedef DWORD_PTR DBHASHVALUE;
 #include "binres.idl"
 #include "crtrow.idl"
 #include "errrec.idl"
+#include "getdts.idl"
+#include "cmdstrm.idl"
+#include "cmdprp.idl"
+#include "cvttyp.idl"
+#include "cmdpre.idl"
+#include "rstchg.idl"
+#include "rstupd.idl"
 
 cpp_quote("#include <accctrl.h>")
 

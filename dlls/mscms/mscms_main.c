@@ -18,30 +18,21 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
-#include "wine/port.h"
-#include "wine/debug.h"
-#include "wine/library.h"
-
 #include <stdarg.h>
 
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
+#include "winternl.h"
 #include "icm.h"
+#include "wine/debug.h"
 
 #include "mscms_priv.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mscms);
 
-#ifdef HAVE_LCMS2
-static void lcms_error_handler(cmsContext ctx, cmsUInt32Number error, const char *text)
-{
-    TRACE("%u %s\n", error, debugstr_a(text));
-}
-#endif
+const struct lcms_funcs *lcms_funcs = NULL;
 
 BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
 {
@@ -51,17 +42,12 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
     {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls( hinst );
-#ifdef HAVE_LCMS2
-        cmsSetLogErrorHandler( lcms_error_handler );
-#else
-        ERR( "Wine was built without support for liblcms2, expect problems\n" );
-#endif
+        if (__wine_init_unix_lib( hinst, reason, NULL, &lcms_funcs ))
+            ERR( "No liblcms2 support, expect problems\n" );
         break;
     case DLL_PROCESS_DETACH:
         if (reserved) break;
-#ifdef HAVE_LCMS2
         free_handle_tables();
-#endif
         break;
     }
     return TRUE;

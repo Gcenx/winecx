@@ -6,7 +6,6 @@ C_SRCS = \
 	genres.c \
 	newstruc.c \
 	po.c \
-	readres.c \
 	translation.c \
 	utils.c \
 	wrc.c \
@@ -15,7 +14,11 @@ C_SRCS = \
 LEX_SRCS   = parser.l
 BISON_SRCS = parser.y
 
-wrc_EXTRADEFS = -DINCLUDEDIR="\"${includedir}\""
+wrc_EXTRADEFS = \
+	-DNLSDIR="\"${nlsdir}\"" \
+	-DINCLUDEDIR="\"${includedir}\"" \
+	-DBIN_TO_NLSDIR=\"`${MAKEDEP} -R ${bindir} ${nlsdir}`\" \
+	-DBIN_TO_INCLUDEDIR=\"`${MAKEDEP} -R ${bindir} ${includedir}`\"
 
 EXTRALIBS = $(GETTEXTPO_LIBS) -lwpp
 

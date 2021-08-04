@@ -574,7 +574,8 @@ static NTSTATUS fdo_pnp_dispatch(DEVICE_OBJECT *device, IRP *irp)
             if (sdl_driver_init() == STATUS_SUCCESS)
             {
                 xbox_driver_init();
-                return STATUS_SUCCESS;
+                irp->IoStatus.u.Status = STATUS_SUCCESS;
+                break;
             }
         }
         udev_driver_init();

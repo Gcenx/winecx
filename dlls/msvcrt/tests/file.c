@@ -687,7 +687,7 @@ static void test_fflush( void )
   char buf1[16], buf2[24];
   char *tempf;
   FILE *tempfh;
-  int ret;
+  int ret, fd;
 
   tempf=_tempnam(".","wne");
 
@@ -728,7 +728,23 @@ static void test_fflush( void )
   ok(memcmp(buf1, buf2, sizeof(buf1)) == 0, "Got unexpected data (%c)\n", buf2[0]);
 
   fclose(tempfh);
+  unlink(tempf);
 
+  /* test flush failure */
+  tempfh = fopen(tempf,"wb");
+  ok(tempfh != NULL, "Can't open test file.\n");
+  fwrite(obuf, 1, sizeof(obuf), tempfh);
+  fd = tempfh->_file;
+  tempfh->_file = -1;
+
+  ok(tempfh->_ptr - tempfh->_base, "buffer is empty\n");
+  ret = fflush(tempfh);
+  ok(ret == EOF, "expected EOF, got %d\n", ret);
+  ok(!(tempfh->_ptr - tempfh->_base), "buffer should be empty\n");
+  ok(!tempfh->_cnt, "tempfh->_cnt = %d\n", tempfh->_cnt);
+
+  tempfh->_file = fd;
+  fclose(tempfh);
   unlink(tempf);
   free(tempf);
 }
@@ -955,6 +971,38 @@ static void test_fgetwc_unicode(void)
     ok(ch == WEOF, "got %04hx, expected WEOF (unicode)\n", ch);
     fclose(tempfh);
 
+    tempfh = fopen(tempfile, "r,ccs=utf-8");
+    ok(tempfh != NULL, "can't open tempfile\n");
+    for (i = 1; i < ARRAY_SIZE(wchar_text); i++)
+    {
+        ch = fgetwc(tempfh);
+        ok(ch == wchar_text[i],
+                "got %04hx, expected %04x (unicode[%d])\n", ch, wchar_text[i], i-1);
+    }
+    ch = fgetwc(tempfh);
+    ok(ch == WEOF, "got %04hx, expected WEOF (unicode)\n", ch);
+    fclose(tempfh);
+
+    tempfh = fopen(tempfile, "a,ccs=utf-16le");
+    ok(tempfh != NULL, "can't open tempfile\n");
+    ch = fputwc('a', tempfh);
+    ok(ch == 'a', "fputwc returned %x\n", ch);
+    fclose(tempfh);
+
+    tempfh = fopen(tempfile, "a+,ccs=utf-8");
+    ok(tempfh != NULL, "can't open tempfile\n");
+    for (i = 1; i < ARRAY_SIZE(wchar_text); i++)
+    {
+        ch = fgetwc(tempfh);
+        ok(ch == wchar_text[i],
+                "got %04hx, expected %04x (unicode[%d])\n", ch, wchar_text[i], i-1);
+    }
+    ch = fgetwc(tempfh);
+    ok(ch == 'a', "got %04x, expected 'a'\n", ch);
+    ch = fgetwc(tempfh);
+    ok(ch == WEOF, "got %04hx, expected WEOF (unicode)\n", ch);
+    fclose(tempfh);
+
     tempfh = fopen(tempfile, "wb");
     ok(tempfh != NULL, "can't open tempfile\n");
     ret = WideCharToMultiByte(CP_UTF8, 0, wchar_text, ARRAY_SIZE(wchar_text),
@@ -973,6 +1021,23 @@ static void test_fgetwc_unicode(void)
     }
     ch = fgetwc(tempfh);
     ok(ch == WEOF, "got %04hx, expected WEOF (utf8)\n", ch);
+    fclose(tempfh);
+
+    tempfh = fopen(tempfile, "wb");
+    ok(tempfh != NULL, "can't open tempfile\n");
+    fwrite(wchar_text+1, 1, sizeof(wchar_text)-1, tempfh);
+    fclose(tempfh);
+
+    tempfh = fopen(tempfile, "rt,ccs=utf-16le");
+    ok(tempfh != NULL, "can't open tempfile\n");
+    for (i = 1; i < ARRAY_SIZE(wchar_text); i++)
+    {
+        ch = fgetwc(tempfh);
+        ok(ch == wchar_text[i],
+                "got %04hx, expected %04x (unicode[%d])\n", ch, wchar_text[i], i-1);
+    }
+    ch = fgetwc(tempfh);
+    ok(ch == WEOF, "got %04hx, expected WEOF (unicode)\n", ch);
     fclose(tempfh);
     unlink(temppath);
 }
@@ -1185,7 +1250,7 @@ static void test_file_write_read( void )
 
   memset(btext, 0, LLEN);
   tempfd = _open(tempf,_O_APPEND|_O_RDWR); /* open for APPEND in default mode */
-  ok(tell(tempfd) == 0, "bad position %u expecting 0\n", tell(tempfd));
+  ok(tell(tempfd) == 0, "bad position %lu expecting 0\n", tell(tempfd));
   ok(_read(tempfd,btext,LLEN) == lstrlenA(mytext), "_read _O_APPEND got bad length\n");
   ok( memcmp(mytext,btext,strlen(mytext)) == 0, "problems with _O_APPEND _read\n");
   _close(tempfd);
@@ -1206,15 +1271,15 @@ static void test_file_write_read( void )
   _lseek(tempfd, -3, FILE_END);
   ret = _read(tempfd,btext,1);
   ok(ret == 1 && *btext == 'e', "_read expected 'e' got \"%.*s\" bad length: %d\n", ret, btext, ret);
-  ok(tell(tempfd) == 41, "bad position %u expecting 41\n", tell(tempfd));
+  ok(tell(tempfd) == 41, "bad position %lu expecting 41\n", tell(tempfd));
   _lseek(tempfd, -3, FILE_END);
   ret = _read(tempfd,btext,2);
   ok(ret == 1 && *btext == 'e', "_read expected 'e' got \"%.*s\" bad length: %d\n", ret, btext, ret);
-  ok(tell(tempfd) == 42, "bad position %u expecting 42\n", tell(tempfd));
+  ok(tell(tempfd) == 42, "bad position %lu expecting 42\n", tell(tempfd));
   _lseek(tempfd, -3, FILE_END);
   ret = _read(tempfd,btext,3);
   ok(ret == 2 && *btext == 'e', "_read expected 'e' got \"%.*s\" bad length: %d\n", ret, btext, ret);
-  ok(tell(tempfd) == 43, "bad position %u expecting 43\n", tell(tempfd));
+  ok(tell(tempfd) == 43, "bad position %lu expecting 43\n", tell(tempfd));
    _close(tempfd);
 
   ret = unlink(tempf);
@@ -1430,7 +1495,7 @@ static void test_stdout_handle( STARTUPINFOA *startup, char *cmdline, HANDLE hst
 
     CreateProcessA( NULL, cmdline, NULL, NULL, TRUE,
                     CREATE_DEFAULT_ERROR_MODE | NORMAL_PRIORITY_CLASS, NULL, NULL, startup, &proc );
-    winetest_wait_child_process( proc.hProcess );
+    wait_child_process( proc.hProcess );
 
     data = read_file( hErrorFile );
     if (expect_stdout)
@@ -1464,12 +1529,12 @@ static void test_file_inherit( const char* selfname )
     fd = open ("fdopen.tst", O_CREAT | O_RDWR | O_BINARY, _S_IREAD |_S_IWRITE);
     ok(fd != -1, "Couldn't create test file\n");
     arg_v[0] = get_base_name(selfname);
-    arg_v[1] = "tests/file.c";
+    arg_v[1] = "file";
     arg_v[2] = "inherit";
     arg_v[3] = buffer; sprintf(buffer, "%d", fd);
     arg_v[4] = 0;
     _spawnvp(_P_WAIT, selfname, arg_v);
-    ok(tell(fd) == 8, "bad position %u expecting 8\n", tell(fd));
+    ok(tell(fd) == 8, "bad position %lu expecting 8\n", tell(fd));
     lseek(fd, 0, SEEK_SET);
     ok(read(fd, buffer, sizeof (buffer)) == 8 && memcmp(buffer, "Success", 8) == 0, "Couldn't read back the data\n");
     close (fd);
@@ -1477,12 +1542,12 @@ static void test_file_inherit( const char* selfname )
     
     fd = open ("fdopen.tst", O_CREAT | O_RDWR | O_BINARY | O_NOINHERIT, _S_IREAD |_S_IWRITE);
     ok(fd != -1, "Couldn't create test file\n");
-    arg_v[1] = "tests/file.c";
+    arg_v[1] = "file";
     arg_v[2] = "inherit_no";
     arg_v[3] = buffer; sprintf(buffer, "%d", fd);
     arg_v[4] = 0;
     _spawnvp(_P_WAIT, selfname, arg_v);
-    ok(tell(fd) == 0, "bad position %u expecting 0\n", tell(fd));
+    ok(tell(fd) == 0, "bad position %lu expecting 0\n", tell(fd));
     ok(read(fd, buffer, sizeof (buffer)) == 0, "Found unexpected data (%s)\n", buffer);
     close (fd);
     ok(unlink("fdopen.tst") == 0, "Couldn't unlink\n");
@@ -1647,7 +1712,7 @@ static void test_invalid_stdin( const char* selfname )
     sprintf(cmdline, "%s file stdin", selfname);
     CreateProcessA(NULL, cmdline, NULL, NULL, TRUE,
             CREATE_DEFAULT_ERROR_MODE|NORMAL_PRIORITY_CLASS, NULL, NULL, &startup, &proc);
-    winetest_wait_child_process(proc.hProcess);
+    wait_child_process(proc.hProcess);
 
     ret = RegCloseKey(key);
     ok(!ret, "RegCloseKey failed: %x\n", ret);
@@ -1879,12 +1944,6 @@ static void test_fopen_s( void )
 static void test__wfopen_s( void )
 {
     const char name[] = "empty1";
-    const WCHAR wname[] = {
-       'e','m','p','t','y','1',0
-    };
-    const WCHAR wmode[] = {
-       'w',0
-    };
     char buff[16];
     FILE *file;
     int ret;
@@ -1896,7 +1955,7 @@ static void test__wfopen_s( void )
         return;
     }
     /* testing _wfopen_s */
-    ret = p__wfopen_s(&file, wname, wmode);
+    ret = p__wfopen_s(&file, L"empty1", L"w");
     ok(ret == 0, "_wfopen_s failed with %d\n", ret);
     ok(file != 0, "_wfopen_s failed to return value\n");
     fwrite(name, sizeof(name), 1, file);
@@ -2168,7 +2227,7 @@ static void test_pipes(const char* selfname)
     }
 
     arg_v[0] = get_base_name(selfname);
-    arg_v[1] = "tests/file.c";
+    arg_v[1] = "file";
     arg_v[2] = "pipes";
     arg_v[3] = str_fdr; sprintf(str_fdr, "%d", pipes[0]);
     arg_v[4] = str_fdw; sprintf(str_fdw, "%d", pipes[1]);
@@ -2197,7 +2256,7 @@ static void test_pipes(const char* selfname)
         return;
     }
 
-    arg_v[1] = "tests/file.c";
+    arg_v[1] = "file";
     arg_v[2] = "pipes";
     arg_v[3] = str_fdr; sprintf(str_fdr, "%d", pipes[0]);
     arg_v[4] = str_fdw; sprintf(str_fdw, "%d", pipes[1]);

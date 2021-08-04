@@ -1,7 +1,11 @@
 MODULE    = conhost.exe
+IMPORTS   = user32 gdi32 advapi32
+DELAYIMPORTS = comctl32
 
-EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+EXTRADLLFLAGS = -mwindows -municode -mno-cygwin
 
-C_SRCS = conhost.c
+C_SRCS = \
+	conhost.c \
+	window.c
 
-RC_SRCS = version.rc
+RC_SRCS = conhost.rc

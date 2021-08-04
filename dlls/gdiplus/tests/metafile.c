@@ -31,6 +31,8 @@
 static BOOL save_metafiles;
 static BOOL load_metafiles;
 
+static const WCHAR description[] = L"winetest";
+
 typedef struct emfplus_record
 {
     DWORD record_type;
@@ -378,7 +380,7 @@ static void test_empty(void)
     MetafileHeader header;
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
+    UINT limit_dpi;
 
     hdc = CreateCompatibleDC(0);
 
@@ -408,6 +410,42 @@ static void test_empty(void)
     if (stat != Ok)
         return;
 
+    stat = GdipGetMetafileDownLevelRasterizationLimit(metafile, NULL);
+    expect(InvalidParameter, stat);
+
+    stat = GdipGetMetafileDownLevelRasterizationLimit(NULL, &limit_dpi);
+    expect(InvalidParameter, stat);
+
+    limit_dpi = 0xdeadbeef;
+    stat = GdipGetMetafileDownLevelRasterizationLimit(metafile, &limit_dpi);
+    expect(Ok, stat);
+    ok(limit_dpi == 96, "limit_dpi was %d\n", limit_dpi);
+
+    stat = GdipSetMetafileDownLevelRasterizationLimit(metafile, 255);
+    expect(Ok, stat);
+
+    limit_dpi = 0xdeadbeef;
+    stat = GdipGetMetafileDownLevelRasterizationLimit(metafile, &limit_dpi);
+    expect(Ok, stat);
+    ok(limit_dpi == 255, "limit_dpi was %d\n", limit_dpi);
+
+    stat = GdipSetMetafileDownLevelRasterizationLimit(metafile, 0);
+    expect(Ok, stat);
+
+    limit_dpi = 0xdeadbeef;
+    stat = GdipGetMetafileDownLevelRasterizationLimit(metafile, &limit_dpi);
+    expect(Ok, stat);
+    ok(limit_dpi == 96, "limit_dpi was %d\n", limit_dpi);
+
+    stat = GdipSetMetafileDownLevelRasterizationLimit(metafile, 1);
+    expect(InvalidParameter, stat);
+
+    stat = GdipSetMetafileDownLevelRasterizationLimit(metafile, 9);
+    expect(InvalidParameter, stat);
+
+    stat = GdipSetMetafileDownLevelRasterizationLimit(metafile, 10);
+    expect(Ok, stat);
+
     stat = GdipGetHemfFromMetafile(metafile, &hemf);
     expect(InvalidParameter, stat);
 
@@ -419,6 +457,14 @@ static void test_empty(void)
 
     stat = GdipDeleteGraphics(graphics);
     expect(Ok, stat);
+
+    limit_dpi = 0xdeadbeef;
+    stat = GdipGetMetafileDownLevelRasterizationLimit(metafile, &limit_dpi);
+    expect(WrongState, stat);
+    expect(0xdeadbeef, limit_dpi);
+
+    stat = GdipSetMetafileDownLevelRasterizationLimit(metafile, 200);
+    expect(WrongState, stat);
 
     check_metafile(metafile, empty_records, "empty metafile", dst_points, &frame, UnitPixel);
 
@@ -455,7 +501,7 @@ static void test_empty(void)
     expect(100, header.Height);
     expect(28, header.EmfPlusHeaderSize);
     expect(96, header.LogicalDpiX);
-    expect(96, header.LogicalDpiX);
+    expect(96, header.LogicalDpiY);
     expect(EMR_HEADER, U(header).EmfHeader.iType);
     expect(0, U(header).EmfHeader.rclBounds.left);
     expect(0, U(header).EmfHeader.rclBounds.top);
@@ -494,7 +540,7 @@ static void test_empty(void)
     expect(100, header.Height);
     expect(28, header.EmfPlusHeaderSize);
     expect(96, header.LogicalDpiX);
-    expect(96, header.LogicalDpiX);
+    expect(96, header.LogicalDpiY);
     expect(EMR_HEADER, U(header).EmfHeader.iType);
     expect(0, U(header).EmfHeader.rclBounds.left);
     expect(0, U(header).EmfHeader.rclBounds.top);
@@ -541,7 +587,7 @@ static void test_empty(void)
     expect(100, header.Height);
     expect(28, header.EmfPlusHeaderSize);
     expect(96, header.LogicalDpiX);
-    expect(96, header.LogicalDpiX);
+    expect(96, header.LogicalDpiY);
     expect(EMR_HEADER, U(header).EmfHeader.iType);
     expect(0, U(header).EmfHeader.rclBounds.left);
     expect(0, U(header).EmfHeader.rclBounds.top);
@@ -581,7 +627,6 @@ static void test_getdc(void)
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
     static const GpPointF dst_points_half[3] = {{0.0,0.0},{50.0,0.0},{0.0,50.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     HBRUSH hbrush, holdbrush;
     GpBitmap *bitmap;
     ARGB color;
@@ -739,7 +784,6 @@ static void test_emfonly(void)
     MetafileHeader header;
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     HBRUSH hbrush, holdbrush;
     GpBitmap *bitmap;
     ARGB color;
@@ -830,7 +874,7 @@ static void test_emfonly(void)
     expect(100, header.Height);
     expect(0, header.EmfPlusHeaderSize);
     expect(0, header.LogicalDpiX);
-    expect(0, header.LogicalDpiX);
+    expect(0, header.LogicalDpiY);
     expect(EMR_HEADER, U(header).EmfHeader.iType);
     expect(25, U(header).EmfHeader.rclBounds.left);
     expect(25, U(header).EmfHeader.rclBounds.top);
@@ -926,7 +970,7 @@ static void test_emfonly(void)
     expect(100, header.Height);
     expect(0, header.EmfPlusHeaderSize);
     expect(0, header.LogicalDpiX);
-    expect(0, header.LogicalDpiX);
+    expect(0, header.LogicalDpiY);
     expect(EMR_HEADER, U(header).EmfHeader.iType);
     expect(25, U(header).EmfHeader.rclBounds.left);
     expect(25, U(header).EmfHeader.rclBounds.top);
@@ -973,7 +1017,7 @@ static void test_emfonly(void)
     expect(100, header.Height);
     expect(0, header.EmfPlusHeaderSize);
     expect(0, header.LogicalDpiX);
-    expect(0, header.LogicalDpiX);
+    expect(0, header.LogicalDpiY);
     expect(EMR_HEADER, U(header).EmfHeader.iType);
     expect(25, U(header).EmfHeader.rclBounds.left);
     expect(25, U(header).EmfHeader.rclBounds.top);
@@ -1036,7 +1080,6 @@ static void test_fillrect(void)
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
     static const GpPointF dst_points_half[3] = {{0.0,0.0},{50.0,0.0},{0.0,50.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GpBitmap *bitmap;
     ARGB color;
     GpBrush *brush;
@@ -1149,7 +1192,6 @@ static void test_clear(void)
     HENHMETAFILE hemf;
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     static const GpPointF dst_points[3] = {{10.0,10.0},{20.0,10.0},{10.0,20.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GpBitmap *bitmap;
     ARGB color;
 
@@ -1221,7 +1263,6 @@ static void test_nullframerect(void) {
     GpMetafile *metafile;
     GpGraphics *graphics;
     HDC hdc, metafile_dc;
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GpBrush *brush;
     HBRUSH hbrush, holdbrush;
     GpRectF bounds;
@@ -1329,6 +1370,64 @@ static void test_nullframerect(void) {
 
     stat = GdipDisposeImage((GpImage*)metafile);
     expect(Ok, stat);
+
+    hdc = CreateCompatibleDC(0);
+
+    stat = GdipRecordMetafile(hdc, EmfTypeEmfPlusOnly, NULL, MetafileFrameUnitMillimeter,
+        description, &metafile);
+    expect(Ok, stat);
+
+    DeleteDC(hdc);
+
+    stat = GdipGetImageGraphicsContext((GpImage*)metafile, &graphics);
+    expect(Ok, stat);
+
+    stat = GdipGetDC(graphics, &metafile_dc);
+    expect(Ok, stat);
+
+    if (stat != Ok)
+    {
+        GdipDeleteGraphics(graphics);
+        GdipDisposeImage((GpImage*)metafile);
+        return;
+    }
+
+    hbrush = CreateSolidBrush(0xff0000);
+
+    holdbrush = SelectObject(metafile_dc, hbrush);
+
+    Rectangle(metafile_dc, 25, 25, 75, 75);
+
+    SelectObject(metafile_dc, holdbrush);
+
+    DeleteObject(hbrush);
+
+    stat = GdipReleaseDC(graphics, metafile_dc);
+    expect(Ok, stat);
+
+    stat = GdipCreateSolidFill((ARGB)0xff0000ff, (GpSolidFill**)&brush);
+    expect(Ok, stat);
+
+    stat = GdipFillRectangleI(graphics, brush, 20, 40, 10, 70);
+    expect(Ok, stat);
+
+    stat = GdipDeleteBrush(brush);
+    expect(Ok, stat);
+
+    stat = GdipDeleteGraphics(graphics);
+    expect(Ok, stat);
+
+    stat = GdipGetImageBounds((GpImage*)metafile, &bounds, &unit);
+    expect(Ok, stat);
+    expect(UnitPixel, unit);
+    expectf_(20.0, bounds.X, 0.05);
+    expectf_(25.0, bounds.Y, 0.05);
+    expectf_(55.0, bounds.Width, 1.00);
+    todo_wine expectf_(55.0, bounds.Width, 0.05);
+    expectf_(85.0, bounds.Height, 0.05);
+
+    stat = GdipDisposeImage((GpImage*)metafile);
+    expect(Ok, stat);
 }
 
 static const emfplus_record pagetransform_records[] = {
@@ -1356,7 +1455,6 @@ static void test_pagetransform(void)
     HDC hdc;
     static const GpRectF frame = {0.0, 0.0, 5.0, 5.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GpBitmap *bitmap;
     ARGB color;
     GpBrush *brush;
@@ -1561,7 +1659,6 @@ static void test_worldtransform(void)
     HDC hdc;
     static const GpRectF frame = {0.0, 0.0, 5.0, 5.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GpBitmap *bitmap;
     ARGB color;
     GpBrush *brush;
@@ -1818,7 +1915,6 @@ static void test_converttoemfplus(void)
     GpStatus (WINAPI *pGdipConvertToEmfPlus)( const GpGraphics *graphics, GpMetafile *metafile, BOOL *succ,
               EmfType emfType, const WCHAR *description, GpMetafile **outmetafile);
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GpStatus stat;
     GpMetafile *metafile, *metafile2 = NULL, *emhmeta;
     GpGraphics *graphics;
@@ -1898,7 +1994,6 @@ static void test_frameunit(void)
     GpGraphics *graphics;
     HDC hdc;
     static const GpRectF frame = {0.0, 0.0, 5.0, 5.0};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GpUnit unit;
     REAL dpix, dpiy;
     GpRectF bounds;
@@ -1994,7 +2089,6 @@ static void test_containers(void)
     HDC hdc;
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GraphicsContainer state1, state2;
     GpRectF srcrect, dstrect;
     REAL dpix, dpiy;
@@ -2190,7 +2284,6 @@ static void test_clipping(void)
     HDC hdc;
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     GraphicsState state;
 
     hdc = CreateCompatibleDC(0);
@@ -2331,7 +2424,6 @@ static void test_gditransform(void)
     MetafileHeader header;
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     static const GpPointF dst_points[3] = {{0.0,0.0},{40.0,0.0},{0.0,40.0}};
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     HBRUSH hbrush, holdbrush;
     GpBitmap *bitmap;
     ARGB color;
@@ -2458,7 +2550,6 @@ static const emfplus_record draw_image_metafile_records[] = {
 
 static void test_drawimage(void)
 {
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     static const GpPointF dst_points[3] = {{10.0,10.0},{85.0,15.0},{10.0,80.0}};
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
     const ColorMatrix double_red = {{
@@ -2576,7 +2667,6 @@ static const emfplus_record properties_records[] = {
 
 static void test_properties(void)
 {
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
 
     GpMetafile *metafile;
@@ -2654,7 +2744,6 @@ static const emfplus_record draw_path_records[] = {
 
 static void test_drawpath(void)
 {
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
 
     GpMetafile *metafile;
@@ -2719,9 +2808,7 @@ static const emfplus_record fill_path_records[] = {
 
 static void test_fillpath(void)
 {
-    static const WCHAR description[] = {'w','i','n','e','t','e','s','t',0};
     static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
-    static const WCHAR winetestemfW[] = {'w','i','n','e','t','e','s','t','.','e','m','f',0};
 
     GpMetafile *metafile;
     GpGraphics *graphics;
@@ -2767,7 +2854,7 @@ static void test_fillpath(void)
     check_emfplus(hemf, fill_path_records, "fill path");
 
     /* write to disk */
-    DeleteEnhMetaFile(CopyEnhMetaFileW(hemf, winetestemfW));
+    DeleteEnhMetaFile(CopyEnhMetaFileW(hemf, L"winetest.emf"));
 
     DeleteEnhMetaFile(hemf);
 
@@ -2775,15 +2862,15 @@ static void test_fillpath(void)
     expect(Ok, stat);
 
     /* should succeed when given path to an EMF */
-    stat = GdipCreateMetafileFromWmfFile(winetestemfW, NULL, &metafile);
+    stat = GdipCreateMetafileFromWmfFile(L"winetest.emf", NULL, &metafile);
     expect(Ok, stat);
 
     stat = GdipDisposeImage((GpImage*)metafile);
     expect(Ok, stat);
 
-    DeleteFileW(winetestemfW);
+    DeleteFileW(L"winetest.emf");
 
-    stat = GdipCreateMetafileFromWmfFile(winetestemfW, NULL, &metafile);
+    stat = GdipCreateMetafileFromWmfFile(L"winetest.emf", NULL, &metafile);
     expect(GenericError, stat);
 }
 
@@ -2908,6 +2995,468 @@ static void test_restoredc(void)
     expect(Ok, stat);
 }
 
+static const emfplus_record drawdriverstring_records[] = {
+    { EMR_HEADER },
+    { EmfPlusRecordTypeHeader },
+    { EmfPlusRecordTypeObject, ObjectTypeFont << 8 },
+    { EmfPlusRecordTypeDrawDriverString, 0x8000 },
+    { EmfPlusRecordTypeObject, (ObjectTypeFont << 8) | 1 },
+    { EmfPlusRecordTypeObject, (ObjectTypeBrush << 8) | 2 },
+    { EmfPlusRecordTypeDrawDriverString, 0x1 },
+    { EmfPlusRecordTypeEndOfFile },
+    { EMR_EOF },
+    { 0 }
+};
+
+static void test_drawdriverstring(void)
+{
+    static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
+    static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
+    static const PointF solidpos[4] = {{10.0,10.0}, {20.0,10.0}, {30.0,10.0}, {40.0,10.0}};
+    static const PointF hatchpos = {10.0,30.0};
+
+    GpBitmap *bitmap;
+    GpStatus stat;
+    GpGraphics *graphics;
+    GpFont *solidfont, *hatchfont;
+    GpBrush *solidbrush, *hatchbrush;
+    HDC hdc;
+    GpMatrix *matrix;
+    GpMetafile *metafile;
+    LOGFONTA logfont = { 0 };
+
+    hdc = CreateCompatibleDC(0);
+
+    strcpy(logfont.lfFaceName, "Times New Roman");
+    logfont.lfHeight = 12;
+    logfont.lfCharSet = DEFAULT_CHARSET;
+
+    stat = GdipCreateFontFromLogfontA(hdc, &logfont, &solidfont);
+    if (stat == NotTrueTypeFont || stat == FileNotFound)
+    {
+        DeleteDC(hdc);
+        skip("Times New Roman not installed.\n");
+        return;
+    }
+
+    stat = GdipCloneFont(solidfont, &hatchfont);
+    expect(Ok, stat);
+
+    stat = GdipRecordMetafile(hdc, EmfTypeEmfPlusOnly, &frame, MetafileFrameUnitPixel,
+        L"winetest", &metafile);
+    expect(Ok, stat);
+
+    DeleteDC(hdc);
+    hdc = NULL;
+
+    stat = GdipGetImageGraphicsContext((GpImage*)metafile, &graphics);
+    expect(Ok, stat);
+
+    stat = GdipCreateSolidFill((ARGB)0xff0000ff, (GpSolidFill**)&solidbrush);
+    expect(Ok, stat);
+
+    stat = GdipCreateHatchBrush(HatchStyleHorizontal, (ARGB)0xff00ff00, (ARGB)0xffff0000,
+        (GpHatch**)&hatchbrush);
+    expect(Ok, stat);
+
+    stat = GdipCreateMatrix(&matrix);
+    expect(Ok, stat);
+
+    stat = GdipDrawDriverString(graphics, L"Test", 4, solidfont, solidbrush, solidpos,
+        DriverStringOptionsCmapLookup, matrix);
+    expect(Ok, stat);
+
+    stat = GdipSetMatrixElements(matrix, 1.5, 0.0, 0.0, 1.5, 0.0, 0.0);
+    expect(Ok, stat);
+
+    stat = GdipDrawDriverString(graphics, L"Test ", 5, hatchfont, hatchbrush, &hatchpos,
+        DriverStringOptionsCmapLookup|DriverStringOptionsRealizedAdvance, matrix);
+    expect(Ok, stat);
+
+    stat = GdipDeleteGraphics(graphics);
+    graphics = NULL;
+
+    check_metafile(metafile, drawdriverstring_records, "drawdriverstring metafile", dst_points,
+        &frame, UnitPixel);
+    sync_metafile(&metafile, "drawdriverstring.emf");
+
+    stat = GdipCreateBitmapFromScan0(100, 100, 0, PixelFormat32bppARGB, NULL, &bitmap);
+    expect(Ok, stat);
+
+    stat = GdipGetImageGraphicsContext((GpImage*)bitmap, &graphics);
+    expect(Ok, stat);
+
+    play_metafile(metafile, graphics, drawdriverstring_records, "drawdriverstring playback",
+        dst_points, &frame, UnitPixel);
+
+    GdipDeleteMatrix(matrix);
+    GdipDeleteGraphics(graphics);
+    GdipDeleteBrush(solidbrush);
+    GdipDeleteBrush(hatchbrush);
+    GdipDeleteFont(solidfont);
+    GdipDeleteFont(hatchfont);
+    GdipDisposeImage((GpImage*)bitmap);
+    GdipDisposeImage((GpImage*)metafile);
+}
+
+static const emfplus_record unknownfontdecode_records[] = {
+    { EMR_HEADER },
+    { EmfPlusRecordTypeHeader },
+    { EmfPlusRecordTypeObject, ObjectTypeFont << 8 },
+    { EmfPlusRecordTypeDrawDriverString, 0x8000 },
+    { EmfPlusRecordTypeEndOfFile },
+    { EMR_EOF },
+    { 0 }
+};
+
+static void test_unknownfontdecode(void)
+{
+    static const GpPointF dst_points[3] = {{0.0,0.0},{100.0,0.0},{0.0,100.0}};
+    static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
+    static const PointF pos = {10.0,30.0};
+    static const INT testfont0_resnum = 2;
+
+    BOOL rval;
+    DWORD written, ressize;
+    GpBitmap *bitmap;
+    GpBrush *brush;
+    GpFont *font;
+    GpFontCollection *fonts;
+    GpFontFamily *family;
+    GpGraphics *graphics;
+    GpMetafile *metafile;
+    GpStatus stat;
+    HANDLE file;
+    HDC hdc;
+    HRSRC res;
+    INT fontscount;
+    WCHAR path[MAX_PATH];
+    void *buf;
+
+    /* Create a custom font from a resource. */
+    GetTempPathW(MAX_PATH, path);
+    lstrcatW(path, L"wine_testfont0.ttf");
+
+    file = CreateFileW(path, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
+    ok(file != INVALID_HANDLE_VALUE, "file creation failed, at %s, error %d\n",
+        wine_dbgstr_w(path), GetLastError());
+
+    res = FindResourceA(GetModuleHandleA(NULL), MAKEINTRESOURCEA(testfont0_resnum),
+        (LPCSTR)RT_RCDATA);
+    ok(res != 0, "couldn't find resource\n");
+
+    buf = LockResource(LoadResource(GetModuleHandleA(NULL), res));
+    ressize = SizeofResource(GetModuleHandleA(NULL), res);
+
+    WriteFile(file, buf, ressize, &written, NULL);
+    expect(ressize, written);
+
+    CloseHandle(file);
+
+    stat = GdipNewPrivateFontCollection(&fonts);
+    expect(Ok, stat);
+
+    stat = GdipPrivateAddFontFile(fonts, path);
+    expect(Ok, stat);
+
+    stat = GdipGetFontCollectionFamilyCount(fonts, &fontscount);
+    expect(Ok, stat);
+    expect(1, fontscount);
+
+    stat = GdipGetFontCollectionFamilyList(fonts, fontscount, &family, &fontscount);
+    expect(Ok, stat);
+
+    stat = GdipCreateFont(family, 16.0, FontStyleRegular, UnitPixel, &font);
+    expect(Ok, stat);
+
+    /* Start metafile recording. */
+    hdc = CreateCompatibleDC(0);
+    stat = GdipRecordMetafile(hdc, EmfTypeEmfPlusOnly, &frame, MetafileFrameUnitPixel,
+        L"winetest", &metafile);
+    expect(Ok, stat);
+    DeleteDC(hdc);
+    hdc = NULL;
+
+    stat = GdipGetImageGraphicsContext((GpImage*)metafile, &graphics);
+    expect(Ok, stat);
+
+    stat = GdipCreateSolidFill((ARGB)0xff0000ff, (GpSolidFill**)&brush);
+    expect(Ok, stat);
+
+    /* Write something with the custom font so that it is encoded. */
+    stat = GdipDrawDriverString(graphics, L"Test", 4, font, brush, &pos,
+        DriverStringOptionsCmapLookup|DriverStringOptionsRealizedAdvance, NULL);
+    expect(Ok, stat);
+
+    /* Delete the custom font so that it is not present during playback. */
+    GdipDeleteFont(font);
+    GdipDeletePrivateFontCollection(&fonts);
+    rval = DeleteFileW(path);
+    expect(TRUE, rval);
+
+    GdipDeleteGraphics(graphics);
+    graphics = NULL;
+
+    check_metafile(metafile, unknownfontdecode_records, "unknownfontdecode metafile", dst_points,
+        &frame, UnitPixel);
+    sync_metafile(&metafile, "unknownfontdecode.emf");
+
+    stat = GdipCreateBitmapFromScan0(100, 100, 0, PixelFormat32bppARGB, NULL, &bitmap);
+    expect(Ok, stat);
+
+    stat = GdipGetImageGraphicsContext((GpImage*)bitmap, &graphics);
+    expect(Ok, stat);
+
+    play_metafile(metafile, graphics, unknownfontdecode_records, "unknownfontdecode playback",
+        dst_points, &frame, UnitPixel);
+
+    GdipDeleteGraphics(graphics);
+    GdipDeleteBrush(brush);
+    GdipDisposeImage((GpImage*)bitmap);
+    GdipDisposeImage((GpImage*)metafile);
+}
+
+static const emfplus_record fillregion_records[] = {
+    { EMR_HEADER },
+    { EmfPlusRecordTypeHeader },
+    { EmfPlusRecordTypeObject, ObjectTypeRegion << 8 },
+    { EmfPlusRecordTypeFillRegion, 0x8000 },
+    { EmfPlusRecordTypeObject, (ObjectTypeBrush << 8) | 1 },
+    { EmfPlusRecordTypeObject, (ObjectTypeRegion << 8) | 2 },
+    { EmfPlusRecordTypeFillRegion, 2 },
+    { EmfPlusRecordTypeEndOfFile },
+    { EMR_EOF },
+    { 0 }
+};
+
+static void test_fillregion(void)
+{
+    static const GpPointF dst_points[3] = {{0.0, 0.0}, {100.0, 0.0}, {0.0, 100.0}};
+    static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
+    static const GpRectF solidrect = {20.0, 20.0, 20.0, 20.0};
+    static const GpRectF hatchrect = {50.0, 50.0, 20.0, 20.0};
+
+    GpStatus stat;
+    GpMetafile *metafile;
+    GpGraphics *graphics;
+    GpBitmap *bitmap;
+    GpBrush *solidbrush, *hatchbrush;
+    GpRegion *solidregion, *hatchregion;
+    ARGB color;
+    HDC hdc;
+
+    hdc = CreateCompatibleDC(0);
+    stat = GdipRecordMetafile(hdc, EmfTypeEmfPlusOnly, &frame, MetafileFrameUnitPixel,
+        L"winetest", &metafile);
+    expect(Ok, stat);
+    DeleteDC(hdc);
+    hdc = NULL;
+
+    stat = GdipGetImageGraphicsContext((GpImage*)metafile, &graphics);
+    expect(Ok, stat);
+
+    stat = GdipCreateRegionRect(&solidrect, &solidregion);
+    expect(Ok, stat);
+
+    stat = GdipCreateSolidFill(0xffaabbcc, (GpSolidFill**)&solidbrush);
+    expect(Ok, stat);
+
+    stat = GdipFillRegion(graphics, solidbrush, solidregion);
+    expect(Ok, stat);
+
+    stat = GdipCreateRegionRect(&hatchrect, &hatchregion);
+    expect(Ok, stat);
+
+    stat = GdipCreateHatchBrush(HatchStyleHorizontal, 0xffff0000, 0xff0000ff,
+        (GpHatch**)&hatchbrush);
+    expect(Ok, stat);
+
+    stat = GdipFillRegion(graphics, hatchbrush, hatchregion);
+    expect(Ok, stat);
+
+    stat = GdipDeleteGraphics(graphics);
+    graphics = NULL;
+    expect(Ok, stat);
+
+    check_metafile(metafile, fillregion_records, "regionfill metafile", dst_points,
+        &frame, UnitPixel);
+    sync_metafile(&metafile, "regionfill.emf");
+
+    stat = GdipCreateBitmapFromScan0(100, 100, 0, PixelFormat32bppARGB, NULL, &bitmap);
+    expect(Ok, stat);
+
+    stat = GdipGetImageGraphicsContext((GpImage*)bitmap, &graphics);
+    expect(Ok, stat);
+
+    play_metafile(metafile, graphics, fillregion_records, "regionfill playback",
+        dst_points, &frame, UnitPixel);
+
+    stat = GdipBitmapGetPixel(bitmap, 25, 25, &color);
+    expect(Ok, stat);
+    expect(0xffaabbcc, color);
+
+    stat = GdipBitmapGetPixel(bitmap, 56, 56, &color);
+    expect(Ok, stat);
+    expect(0xffff0000, color);
+
+    stat = GdipBitmapGetPixel(bitmap, 57, 57, &color);
+    expect(Ok, stat);
+    expect(0xff0000ff, color);
+
+    GdipDeleteRegion(solidregion);
+    GdipDeleteRegion(hatchregion);
+    GdipDeleteBrush(solidbrush);
+    GdipDeleteBrush(hatchbrush);
+    GdipDeleteGraphics(graphics);
+    GdipDisposeImage((GpImage*)bitmap);
+    GdipDisposeImage((GpImage*)metafile);
+}
+
+static const emfplus_record lineargradient_records[] = {
+    { EMR_HEADER },
+    { EmfPlusRecordTypeHeader },
+    { EmfPlusRecordTypeObject, ObjectTypeBrush << 8 },
+    { EmfPlusRecordTypeFillRects, 0x4000 },
+    { EmfPlusRecordTypeObject, (ObjectTypeBrush << 8) | 1 },
+    { EmfPlusRecordTypeFillRects, 0x4000 },
+    { EmfPlusRecordTypeObject, (ObjectTypeBrush << 8) | 2 },
+    { EmfPlusRecordTypeFillRects, 0x4000 },
+    { EmfPlusRecordTypeObject, (ObjectTypeBrush << 8) | 3 },
+    { EmfPlusRecordTypeFillRects, 0x4000 },
+    { EmfPlusRecordTypeEndOfFile },
+    { EMR_EOF },
+    { 0 }
+};
+
+static void test_lineargradient(void)
+{
+    static const GpPointF dst_points[3] = {{0.0, 0.0}, {100.0, 0.0}, {0.0, 100.0}};
+    static const GpRectF frame = {0.0, 0.0, 100.0, 100.0};
+    static const GpRectF horizrect = {10.0, 10.0, 20.0, 20.0};
+    static const GpRectF vertrect = {50.0, 10.0, 20.0, 20.0};
+    static const GpRectF blendrect = {10.0, 50.0, 20.0, 20.0};
+    static const GpRectF presetrect = {50.0, 50.0, 20.0, 20.0};
+    static const REAL blendfac[3] = {0.0, 0.9, 1.0};
+    static const REAL blendpos[3] = {0.0, 0.5, 1.0};
+    static const ARGB pblendcolor[3] = {0xffff0000, 0xff00ff00, 0xff0000ff};
+    static const REAL pblendpos[3] = {0.0, 0.5, 1.0};
+
+    ARGB color;
+    GpBitmap *bitmap;
+    GpBrush *horizbrush, *vertbrush, *blendbrush, *presetbrush;
+    GpGraphics *graphics;
+    GpMetafile *metafile;
+    GpStatus stat;
+    HDC hdc;
+
+    hdc = CreateCompatibleDC(0);
+    stat = GdipRecordMetafile(hdc, EmfTypeEmfPlusOnly, &frame, MetafileFrameUnitPixel,
+        L"winetest", &metafile);
+    expect(Ok, stat);
+    DeleteDC(hdc);
+    hdc = NULL;
+
+    stat = GdipGetImageGraphicsContext((GpImage*)metafile, &graphics);
+    expect(Ok, stat);
+
+    /* Test various brush types to cover all valid combinations
+       of optional serialized data. */
+    stat = GdipCreateLineBrushFromRect(&horizrect, 0xffff0000, 0xff0000ff,
+        LinearGradientModeHorizontal, WrapModeTile, (GpLineGradient**)&horizbrush);
+    expect(Ok, stat);
+
+    stat = GdipCreateLineBrushFromRect(&vertrect, 0xffff0000, 0xff0000ff,
+        LinearGradientModeVertical, WrapModeTile, (GpLineGradient**)&vertbrush);
+    expect(Ok, stat);
+
+    stat = GdipCreateLineBrushFromRect(&blendrect, 0xffff0000, 0xff0000ff,
+        LinearGradientModeHorizontal, WrapModeTile, (GpLineGradient**)&blendbrush);
+    expect(Ok, stat);
+
+    stat = GdipSetLineBlend((GpLineGradient*)blendbrush, blendfac, blendpos, 3);
+    expect(Ok, stat);
+
+    stat = GdipCreateLineBrushFromRect(&presetrect, 0xffff0000, 0xff0000ff,
+        LinearGradientModeVertical, WrapModeTile, (GpLineGradient**)&presetbrush);
+    expect(Ok, stat);
+
+    stat = GdipSetLinePresetBlend((GpLineGradient*)presetbrush, pblendcolor, pblendpos, 3);
+    expect(Ok, stat);
+
+    stat = GdipFillRectangles(graphics, vertbrush, &vertrect, 1);
+    expect(Ok, stat);
+
+    stat = GdipFillRectangles(graphics, horizbrush, &horizrect, 1);
+    expect(Ok, stat);
+
+    stat = GdipFillRectangles(graphics, blendbrush, &blendrect, 1);
+    expect(Ok, stat);
+
+    stat = GdipFillRectangles(graphics, presetbrush, &presetrect, 1);
+    expect(Ok, stat);
+
+    stat = GdipDeleteGraphics(graphics);
+    graphics = NULL;
+    expect(Ok, stat);
+
+    check_metafile(metafile, lineargradient_records, "lineargradient metafile", dst_points,
+        &frame, UnitPixel);
+    sync_metafile(&metafile, "lineargradient.emf");
+
+    stat = GdipCreateBitmapFromScan0(100, 100, 0, PixelFormat32bppARGB, NULL, &bitmap);
+    expect(Ok, stat);
+
+    stat = GdipGetImageGraphicsContext((GpImage*)bitmap, &graphics);
+    expect(Ok, stat);
+
+    play_metafile(metafile, graphics, lineargradient_records, "lineargradient playback",
+        dst_points, &frame, UnitPixel);
+
+    /* Verify horizontal gradient fill. */
+    stat = GdipBitmapGetPixel(bitmap, 10, 10, &color);
+    expect(Ok, stat);
+    expect(0xffff0000, color);
+
+    stat = GdipBitmapGetPixel(bitmap, 18, 10, &color);
+    expect(Ok, stat);
+    expect(0xff990066, color);
+
+    /* Verify vertical gradient fill. */
+    stat = GdipBitmapGetPixel(bitmap, 50, 10, &color);
+    expect(Ok, stat);
+    expect(0xffff0000, color);
+
+    stat = GdipBitmapGetPixel(bitmap, 50, 18, &color);
+    expect(Ok, stat);
+    expect(0xff990066, color);
+
+    /* Verify custom blend gradient fill. */
+    stat = GdipBitmapGetPixel(bitmap, 10, 50, &color);
+    expect(Ok, stat);
+    expect(0xffff0000, color);
+
+    stat = GdipBitmapGetPixel(bitmap, 18, 50, &color);
+    expect(Ok, stat);
+    expect(0xff4700b8, color);
+
+    /* Verify preset color gradient fill. */
+    stat = GdipBitmapGetPixel(bitmap, 50, 50, &color);
+    expect(Ok, stat);
+    expect(0xffff0000, color);
+
+    stat = GdipBitmapGetPixel(bitmap, 50, 60, &color);
+    expect(Ok, stat);
+    expect(0xff00ff00, color);
+
+    GdipDeleteBrush(vertbrush);
+    GdipDeleteBrush(horizbrush);
+    GdipDeleteBrush(blendbrush);
+    GdipDeleteBrush(presetbrush);
+    GdipDeleteGraphics(graphics);
+    GdipDisposeImage((GpImage*)bitmap);
+    GdipDisposeImage((GpImage*)metafile);
+}
+
 START_TEST(metafile)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
@@ -2957,6 +3506,10 @@ START_TEST(metafile)
     test_drawpath();
     test_fillpath();
     test_restoredc();
+    test_drawdriverstring();
+    test_unknownfontdecode();
+    test_fillregion();
+    test_lineargradient();
 
     GdiplusShutdown(gdiplusToken);
 }

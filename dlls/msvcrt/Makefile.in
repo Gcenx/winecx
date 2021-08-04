@@ -1,11 +1,18 @@
-EXTRADEFS = -D_MT -D_MSVCR_VER=0
+EXTRADEFS = -D_CRTIMP=
 MODULE    = msvcrt.dll
 IMPORTLIB = msvcrt
+IMPORTS   = ntdll
 DELAYIMPORTS = advapi32 user32
+EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
 	console.c \
 	cpp.c \
+	crt_gccmain.c \
+	crt_main.c \
+	crt_winmain.c \
+	crt_wmain.c \
+	crt_wwinmain.c \
 	ctype.c \
 	data.c \
 	dir.c \
@@ -31,10 +38,12 @@ C_SRCS = \
 	process.c \
 	scanf.c \
 	scheduler.c \
+	sincos.c \
 	string.c \
 	thread.c \
 	time.c \
 	undname.c \
+	unixlib.c \
 	wcs.c
 
 RC_SRCS = \

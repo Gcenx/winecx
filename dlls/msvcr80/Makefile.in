@@ -1,8 +1,10 @@
-EXTRADEFS = -D_MT -D_MSVCR_VER=80
+EXTRADEFS = -D_CRTIMP=
 MODULE    = msvcr80.dll
 IMPORTLIB = msvcr80
+IMPORTS   = ntdll
 DELAYIMPORTS = advapi32 user32
 PARENTSRC = ../msvcrt
+EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
 	console.c \
@@ -31,10 +33,12 @@ C_SRCS = \
 	onexit.c \
 	process.c \
 	scanf.c \
+	sincos.c \
 	string.c \
 	thread.c \
 	time.c \
 	undname.c \
+	unixlib.c \
 	wcs.c
 
 RC_SRCS = msvcr80.rc

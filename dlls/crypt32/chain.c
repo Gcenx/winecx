@@ -16,16 +16,18 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  *
  */
+
 #include <stdarg.h>
+#include <wchar.h>
 #define NONAMELESSUNION
 #include "windef.h"
 #include "winbase.h"
+#include "winnls.h"
 #define CERT_CHAIN_PARA_HAS_EXTRA_FIELDS
 #define CERT_REVOCATION_PARA_HAS_EXTRA_FIELDS
 #include "wincrypt.h"
 #include "wininet.h"
 #include "wine/debug.h"
-#include "wine/unicode.h"
 #include "crypt32_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(crypt);
@@ -66,8 +68,6 @@ static inline void CRYPT_CloseStores(DWORD cStores, HCERTSTORE *stores)
         CertCloseStore(stores[i], 0);
 }
 
-static const WCHAR rootW[] = { 'R','o','o','t',0 };
-
 /* Finds cert in store by comparing the cert's hashes. */
 static PCCERT_CONTEXT CRYPT_FindCertInStore(HCERTSTORE store,
  PCCERT_CONTEXT cert)
@@ -92,7 +92,7 @@ static BOOL CRYPT_CheckRestrictedRoot(HCERTSTORE store)
 
     if (store)
     {
-        HCERTSTORE rootStore = CertOpenSystemStoreW(0, rootW);
+        HCERTSTORE rootStore = CertOpenSystemStoreW(0, L"Root");
         PCCERT_CONTEXT cert = NULL, check;
 
         do {
@@ -117,17 +117,13 @@ HCERTCHAINENGINE CRYPT_CreateChainEngine(HCERTSTORE root, DWORD system_store, co
     CertificateChainEngine *engine;
     HCERTSTORE worldStores[4];
 
-    static const WCHAR caW[] = { 'C','A',0 };
-    static const WCHAR myW[] = { 'M','y',0 };
-    static const WCHAR trustW[] = { 'T','r','u','s','t',0 };
-
     if(!root) {
         if(config->cbSize >= sizeof(CERT_CHAIN_ENGINE_CONFIG) && config->hExclusiveRoot)
             root = CertDuplicateStore(config->hExclusiveRoot);
         else if (config->hRestrictedRoot)
             root = CertDuplicateStore(config->hRestrictedRoot);
         else
-            root = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, system_store, rootW);
+            root = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, system_store, L"Root");
         if(!root)
             return NULL;
     }
@@ -142,9 +138,9 @@ HCERTCHAINENGINE CRYPT_CreateChainEngine(HCERTSTORE root, DWORD system_store, co
     engine->hRoot = root;
     engine->hWorld = CertOpenStore(CERT_STORE_PROV_COLLECTION, 0, 0, CERT_STORE_CREATE_NEW_FLAG, NULL);
     worldStores[0] = CertDuplicateStore(engine->hRoot);
-    worldStores[1] = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, system_store, caW);
-    worldStores[2] = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, system_store, myW);
-    worldStores[3] = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, system_store, trustW);
+    worldStores[1] = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, system_store, L"CA");
+    worldStores[2] = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, system_store, L"My");
+    worldStores[3] = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, system_store, L"Trust");
 
     CRYPT_AddStoresToCollection(engine->hWorld, ARRAY_SIZE(worldStores), worldStores);
     CRYPT_AddStoresToCollection(engine->hWorld, config->cAdditionalStore, config->rghAdditionalStore);
@@ -704,18 +700,18 @@ static BOOL url_matches(LPCWSTR constraint, LPCWSTR name,
          * The format for URIs is in RFC 2396.
          *
          * First, remove any scheme that's present. */
-        colon = strchrW(name, ':');
+        colon = wcschr(name, ':');
         if (colon && *(colon + 1) == '/' && *(colon + 2) == '/')
             name = colon + 3;
         /* Next, find the end of the authority component.  (The authority is
          * generally just the hostname, but it may contain a username or a port.
          * Those are removed next.)
          */
-        authority_end = strchrW(name, '/');
+        authority_end = wcschr(name, '/');
         if (!authority_end)
-            authority_end = strchrW(name, '?');
+            authority_end = wcschr(name, '?');
         if (!authority_end)
-            authority_end = name + strlenW(name);
+            authority_end = name + lstrlenW(name);
         /* Remove any port number from the authority.  The userinfo portion
          * of an authority may contain a colon, so stop if a userinfo portion
          * is found (indicated by '@').
@@ -726,7 +722,7 @@ static BOOL url_matches(LPCWSTR constraint, LPCWSTR name,
         if (*colon == ':')
             authority_end = colon;
         /* Remove any username from the authority */
-        if ((at = strchrW(name, '@')))
+        if ((at = wcschr(name, '@')))
             name = at;
         /* Ignore any path or query portion of the URL. */
         if (*authority_end)
@@ -760,11 +756,11 @@ static BOOL rfc822_name_matches(LPCWSTR constraint, LPCWSTR name,
         *trustErrorStatus |= CERT_TRUST_INVALID_NAME_CONSTRAINTS;
     else if (!name)
         ; /* no match */
-    else if (strchrW(constraint, '@'))
+    else if (wcschr(constraint, '@'))
         match = !lstrcmpiW(constraint, name);
     else
     {
-        if ((at = strchrW(name, '@')))
+        if ((at = wcschr(name, '@')))
             match = domain_name_matches(constraint, at + 1);
         else
             match = !lstrcmpiW(constraint, name);
@@ -3195,15 +3191,15 @@ static BOOL match_dns_to_subject_alt_name(const CERT_EXTENSION *ext,
                      * label, then requires an exact match of the remaining
                      * string.
                      */
-                    server_name_dot = strchrW(server_name, '.');
+                    server_name_dot = wcschr(server_name, '.');
                     if (server_name_dot)
                     {
-                        if (!strcmpiW(server_name_dot,
+                        if (!wcsicmp(server_name_dot,
                          subjectName->rgAltEntry[i].u.pwszDNSName + 1))
                             matches = TRUE;
                     }
                 }
-                else if (!strcmpiW(server_name,
+                else if (!wcsicmp(server_name,
                  subjectName->rgAltEntry[i].u.pwszDNSName))
                     matches = TRUE;
             }
@@ -3226,13 +3222,13 @@ static BOOL find_matching_domain_component(const CERT_NAME_INFO *name,
                 const CERT_RDN_ATTR *attr;
 
                 attr = &name->rgRDN[i].rgRDNAttr[j];
-                /* Compare with strncmpiW rather than strcmpiW in order to avoid
+                /* Compare with wcsnicmp rather than wcsicmp in order to avoid
                  * a match with a string with an embedded NULL.  The component
                  * must match one domain component attribute's entire string
                  * value with a case-insensitive match.
                  */
                 if ((len == attr->Value.cbData / sizeof(WCHAR)) &&
-                    !strncmpiW(component, (LPCWSTR)attr->Value.pbData, len))
+                    !wcsnicmp(component, (LPCWSTR)attr->Value.pbData, len))
                     return TRUE;
             }
     return FALSE;
@@ -3283,7 +3279,7 @@ static BOOL match_domain_component(LPCWSTR allowed_component, DWORD allowed_len,
             }
         }
         if (matches)
-            matches = tolowerW(*allowed_ptr) == tolowerW(*server_ptr);
+            matches = towlower(*allowed_ptr) == towlower(*server_ptr);
     }
     if (matches && server_ptr - server_component < server_len)
     {
@@ -3301,7 +3297,7 @@ static BOOL match_common_name(LPCWSTR server_name, const CERT_RDN_ATTR *nameAttr
     LPCWSTR allowed_component = allowed;
     DWORD allowed_len = nameAttr->Value.cbData / sizeof(WCHAR);
     LPCWSTR server_component = server_name;
-    DWORD server_len = strlenW(server_name);
+    DWORD server_len = lstrlenW(server_name);
     BOOL matches = TRUE, allow_wildcards = TRUE;
 
     TRACE_(chain)("CN = %s\n", debugstr_wn(allowed_component, allowed_len));
@@ -3332,9 +3328,9 @@ static BOOL match_common_name(LPCWSTR server_name, const CERT_RDN_ATTR *nameAttr
     do {
         LPCWSTR allowed_dot, server_dot;
 
-        allowed_dot = memchrW(allowed_component, '.',
+        allowed_dot = wmemchr(allowed_component, '.',
          allowed_len - (allowed_component - allowed));
-        server_dot = memchrW(server_component, '.',
+        server_dot = wmemchr(server_component, '.',
          server_len - (server_component - server_name));
         /* The number of components must match */
         if ((!allowed_dot && server_dot) || (allowed_dot && !server_dot))
@@ -3395,11 +3391,11 @@ static BOOL match_dns_to_subject_dn(PCCERT_CONTEXT cert, LPCWSTR server_name)
             LPCWSTR ptr = server_name;
 
             do {
-                LPCWSTR dot = strchrW(ptr, '.'), end;
+                LPCWSTR dot = wcschr(ptr, '.'), end;
                 /* 254 is the maximum DNS label length, see RFC 1035 */
                 size_t len;
 
-                end = dot ? dot : ptr + strlenW(ptr);
+                end = dot ? dot : ptr + lstrlenW(ptr);
                 len = end - ptr;
                 if (len >= 255)
                 {
@@ -3455,10 +3451,13 @@ static BOOL WINAPI verify_ssl_policy(LPCSTR szPolicyOID,
  PCERT_CHAIN_POLICY_STATUS pPolicyStatus)
 {
     HTTPSPolicyCallbackData *sslPara = NULL;
-    DWORD checks = 0;
+    DWORD checks = 0, baseChecks = 0;
 
     if (pPolicyPara)
+    {
+        baseChecks = pPolicyPara->dwFlags;
         sslPara = pPolicyPara->pvExtraPolicyPara;
+    }
     if (TRACE_ON(chain))
         dump_ssl_extra_chain_policy_para(sslPara);
     if (sslPara && sslPara->u.cbSize >= sizeof(HTTPSPolicyCallbackData))
@@ -3474,7 +3473,8 @@ static BOOL WINAPI verify_ssl_policy(LPCSTR szPolicyOID,
     }
     else if (pChainContext->TrustStatus.dwErrorStatus &
      CERT_TRUST_IS_UNTRUSTED_ROOT &&
-     !(checks & SECURITY_FLAG_IGNORE_UNKNOWN_CA))
+     !(checks & SECURITY_FLAG_IGNORE_UNKNOWN_CA) &&
+     !(baseChecks & CERT_CHAIN_POLICY_ALLOW_UNKNOWN_CA_FLAG))
     {
         pPolicyStatus->dwError = CERT_E_UNTRUSTEDROOT;
         find_element_with_error(pChainContext,

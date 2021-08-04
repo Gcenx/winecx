@@ -7,7 +7,7 @@
 #define WINE_GLAPI
 #endif
 
-#define WINE_WGL_DRIVER_VERSION 25
+#define WINE_WGL_DRIVER_VERSION 22
 
 struct wgl_context;
 struct wgl_pbuffer;
@@ -755,8 +755,10 @@ struct opengl_funcs_ext
     void       (WINE_GLAPI *p_glDeleteVertexShaderEXT)( GLuint id );
     void       (WINE_GLAPI *p_glDepthBoundsEXT)( GLclampd zmin, GLclampd zmax );
     void       (WINE_GLAPI *p_glDepthBoundsdNV)( GLdouble zmin, GLdouble zmax );
+    void       (WINE_GLAPI *p_glDepthRangeArraydvNV)( GLuint first, GLsizei count, const GLdouble *v );
     void       (WINE_GLAPI *p_glDepthRangeArrayv)( GLuint first, GLsizei count, const GLdouble *v );
     void       (WINE_GLAPI *p_glDepthRangeIndexed)( GLuint index, GLdouble n, GLdouble f );
+    void       (WINE_GLAPI *p_glDepthRangeIndexeddNV)( GLuint index, GLdouble n, GLdouble f );
     void       (WINE_GLAPI *p_glDepthRangedNV)( GLdouble zNear, GLdouble zFar );
     void       (WINE_GLAPI *p_glDepthRangef)( GLfloat n, GLfloat f );
     void       (WINE_GLAPI *p_glDepthRangefOES)( GLclampf n, GLclampf f );
@@ -972,8 +974,8 @@ struct opengl_funcs_ext
     void       (WINE_GLAPI *p_glGetActiveAtomicCounterBufferiv)( GLuint program, GLuint bufferIndex, GLenum pname, GLint *params );
     void       (WINE_GLAPI *p_glGetActiveAttrib)( GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name );
     void       (WINE_GLAPI *p_glGetActiveAttribARB)( GLhandleARB programObj, GLuint index, GLsizei maxLength, GLsizei *length, GLint *size, GLenum *type, GLcharARB *name );
-    void       (WINE_GLAPI *p_glGetActiveSubroutineName)( GLuint program, GLenum shadertype, GLuint index, GLsizei bufsize, GLsizei *length, GLchar *name );
-    void       (WINE_GLAPI *p_glGetActiveSubroutineUniformName)( GLuint program, GLenum shadertype, GLuint index, GLsizei bufsize, GLsizei *length, GLchar *name );
+    void       (WINE_GLAPI *p_glGetActiveSubroutineName)( GLuint program, GLenum shadertype, GLuint index, GLsizei bufSize, GLsizei *length, GLchar *name );
+    void       (WINE_GLAPI *p_glGetActiveSubroutineUniformName)( GLuint program, GLenum shadertype, GLuint index, GLsizei bufSize, GLsizei *length, GLchar *name );
     void       (WINE_GLAPI *p_glGetActiveSubroutineUniformiv)( GLuint program, GLenum shadertype, GLuint index, GLenum pname, GLint *values );
     void       (WINE_GLAPI *p_glGetActiveUniform)( GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name );
     void       (WINE_GLAPI *p_glGetActiveUniformARB)( GLhandleARB programObj, GLuint index, GLsizei maxLength, GLsizei *length, GLint *size, GLenum *type, GLcharARB *name );
@@ -1028,9 +1030,9 @@ struct opengl_funcs_ext
     void       (WINE_GLAPI *p_glGetConvolutionParameteriv)( GLenum target, GLenum pname, GLint *params );
     void       (WINE_GLAPI *p_glGetConvolutionParameterivEXT)( GLenum target, GLenum pname, GLint *params );
     void       (WINE_GLAPI *p_glGetConvolutionParameterxvOES)( GLenum target, GLenum pname, GLfixed *params );
-    void       (WINE_GLAPI *p_glGetCoverageModulationTableNV)( GLsizei bufsize, GLfloat *v );
+    void       (WINE_GLAPI *p_glGetCoverageModulationTableNV)( GLsizei bufSize, GLfloat *v );
     GLuint     (WINE_GLAPI *p_glGetDebugMessageLog)( GLuint count, GLsizei bufSize, GLenum *sources, GLenum *types, GLuint *ids, GLenum *severities, GLsizei *lengths, GLchar *messageLog );
-    GLuint     (WINE_GLAPI *p_glGetDebugMessageLogAMD)( GLuint count, GLsizei bufsize, GLenum *categories, GLuint *severities, GLuint *ids, GLsizei *lengths, GLchar *message );
+    GLuint     (WINE_GLAPI *p_glGetDebugMessageLogAMD)( GLuint count, GLsizei bufSize, GLenum *categories, GLuint *severities, GLuint *ids, GLsizei *lengths, GLchar *message );
     GLuint     (WINE_GLAPI *p_glGetDebugMessageLogARB)( GLuint count, GLsizei bufSize, GLenum *sources, GLenum *types, GLuint *ids, GLenum *severities, GLsizei *lengths, GLchar *messageLog );
     void       (WINE_GLAPI *p_glGetDetailTexFuncSGIS)( GLenum target, GLfloat *points );
     void       (WINE_GLAPI *p_glGetDoubleIndexedvEXT)( GLenum target, GLuint index, GLdouble *data );
@@ -1080,9 +1082,9 @@ struct opengl_funcs_ext
     void       (WINE_GLAPI *p_glGetIntegeri_v)( GLenum target, GLuint index, GLint *data );
     void       (WINE_GLAPI *p_glGetIntegerui64i_vNV)( GLenum value, GLuint index, GLuint64EXT *result );
     void       (WINE_GLAPI *p_glGetIntegerui64vNV)( GLenum value, GLuint64EXT *result );
-    void       (WINE_GLAPI *p_glGetInternalformatSampleivNV)( GLenum target, GLenum internalformat, GLsizei samples, GLenum pname, GLsizei bufSize, GLint *params );
-    void       (WINE_GLAPI *p_glGetInternalformati64v)( GLenum target, GLenum internalformat, GLenum pname, GLsizei bufSize, GLint64 *params );
-    void       (WINE_GLAPI *p_glGetInternalformativ)( GLenum target, GLenum internalformat, GLenum pname, GLsizei bufSize, GLint *params );
+    void       (WINE_GLAPI *p_glGetInternalformatSampleivNV)( GLenum target, GLenum internalformat, GLsizei samples, GLenum pname, GLsizei count, GLint *params );
+    void       (WINE_GLAPI *p_glGetInternalformati64v)( GLenum target, GLenum internalformat, GLenum pname, GLsizei count, GLint64 *params );
+    void       (WINE_GLAPI *p_glGetInternalformativ)( GLenum target, GLenum internalformat, GLenum pname, GLsizei count, GLint *params );
     void       (WINE_GLAPI *p_glGetInvariantBooleanvEXT)( GLuint id, GLenum value, GLboolean *data );
     void       (WINE_GLAPI *p_glGetInvariantFloatvEXT)( GLuint id, GLenum value, GLfloat *data );
     void       (WINE_GLAPI *p_glGetInvariantIntegervEXT)( GLuint id, GLenum value, GLint *data );
@@ -1207,8 +1209,8 @@ struct opengl_funcs_ext
     GLint      (WINE_GLAPI *p_glGetProgramResourceLocation)( GLuint program, GLenum programInterface, const GLchar *name );
     GLint      (WINE_GLAPI *p_glGetProgramResourceLocationIndex)( GLuint program, GLenum programInterface, const GLchar *name );
     void       (WINE_GLAPI *p_glGetProgramResourceName)( GLuint program, GLenum programInterface, GLuint index, GLsizei bufSize, GLsizei *length, GLchar *name );
-    void       (WINE_GLAPI *p_glGetProgramResourcefvNV)( GLuint program, GLenum programInterface, GLuint index, GLsizei propCount, const GLenum *props, GLsizei bufSize, GLsizei *length, GLfloat *params );
-    void       (WINE_GLAPI *p_glGetProgramResourceiv)( GLuint program, GLenum programInterface, GLuint index, GLsizei propCount, const GLenum *props, GLsizei bufSize, GLsizei *length, GLint *params );
+    void       (WINE_GLAPI *p_glGetProgramResourcefvNV)( GLuint program, GLenum programInterface, GLuint index, GLsizei propCount, const GLenum *props, GLsizei count, GLsizei *length, GLfloat *params );
+    void       (WINE_GLAPI *p_glGetProgramResourceiv)( GLuint program, GLenum programInterface, GLuint index, GLsizei propCount, const GLenum *props, GLsizei count, GLsizei *length, GLint *params );
     void       (WINE_GLAPI *p_glGetProgramStageiv)( GLuint program, GLenum shadertype, GLenum pname, GLint *values );
     void       (WINE_GLAPI *p_glGetProgramStringARB)( GLenum target, GLenum pname, void *string );
     void       (WINE_GLAPI *p_glGetProgramStringNV)( GLuint id, GLenum pname, GLubyte *program );
@@ -1252,7 +1254,7 @@ struct opengl_funcs_ext
     const GLubyte * (WINE_GLAPI *p_glGetStringi)( GLenum name, GLuint index );
     GLuint     (WINE_GLAPI *p_glGetSubroutineIndex)( GLuint program, GLenum shadertype, const GLchar *name );
     GLint      (WINE_GLAPI *p_glGetSubroutineUniformLocation)( GLuint program, GLenum shadertype, const GLchar *name );
-    void       (WINE_GLAPI *p_glGetSynciv)( GLsync sync, GLenum pname, GLsizei bufSize, GLsizei *length, GLint *values );
+    void       (WINE_GLAPI *p_glGetSynciv)( GLsync sync, GLenum pname, GLsizei count, GLsizei *length, GLint *values );
     void       (WINE_GLAPI *p_glGetTexBumpParameterfvATI)( GLenum pname, GLfloat *param );
     void       (WINE_GLAPI *p_glGetTexBumpParameterivATI)( GLenum pname, GLint *param );
     void       (WINE_GLAPI *p_glGetTexEnvxvOES)( GLenum target, GLenum pname, GLfixed *params );
@@ -2118,7 +2120,7 @@ struct opengl_funcs_ext
     void       (WINE_GLAPI *p_glQueryCounter)( GLuint id, GLenum target );
     GLbitfield (WINE_GLAPI *p_glQueryMatrixxOES)( GLfixed *mantissa, GLint *exponent );
     void       (WINE_GLAPI *p_glQueryObjectParameteruiAMD)( GLenum target, GLuint id, GLenum pname, GLuint param );
-    GLint      (WINE_GLAPI *p_glQueryResourceNV)( GLenum queryType, GLint tagId, GLuint bufSize, GLint *buffer );
+    GLint      (WINE_GLAPI *p_glQueryResourceNV)( GLenum queryType, GLint tagId, GLuint count, GLint *buffer );
     void       (WINE_GLAPI *p_glQueryResourceTagNV)( GLint tagId, const GLchar *tagString );
     void       (WINE_GLAPI *p_glRasterPos2xOES)( GLfixed x, GLfixed y );
     void       (WINE_GLAPI *p_glRasterPos2xvOES)( const GLfixed *coords );
@@ -2600,7 +2602,7 @@ struct opengl_funcs_ext
     void       (WINE_GLAPI *p_glUseProgramStages)( GLuint pipeline, GLbitfield stages, GLuint program );
     void       (WINE_GLAPI *p_glUseShaderProgramEXT)( GLenum type, GLuint program );
     void       (WINE_GLAPI *p_glVDPAUFiniNV)(void);
-    void       (WINE_GLAPI *p_glVDPAUGetSurfaceivNV)( WINEGLDEF(GLvdpauSurfaceNV) surface, GLenum pname, GLsizei bufSize, GLsizei *length, GLint *values );
+    void       (WINE_GLAPI *p_glVDPAUGetSurfaceivNV)( WINEGLDEF(GLvdpauSurfaceNV) surface, GLenum pname, GLsizei count, GLsizei *length, GLint *values );
     void       (WINE_GLAPI *p_glVDPAUInitNV)( const void *vdpDevice, const void *getProcAddress );
     GLboolean  (WINE_GLAPI *p_glVDPAUIsSurfaceNV)( WINEGLDEF(GLvdpauSurfaceNV) surface );
     void       (WINE_GLAPI *p_glVDPAUMapSurfacesNV)( GLsizei numSurfaces, const WINEGLDEF(GLvdpauSurfaceNV) *surfaces );
@@ -3052,41 +3054,22 @@ struct opengl_funcs_ext
     BOOL       (WINE_GLAPI *p_wglSwapIntervalEXT)( int interval );
 };
 
-struct opengl_funcs_glu
-{
-    void       (WINE_GLAPI *p_gluBeginCurve)( GLUnurbs *nurb );
-    void       (WINE_GLAPI *p_gluBeginSurface)( GLUnurbs *nurb );
-    void       (WINE_GLAPI *p_gluBeginTrim)( GLUnurbs *nurb );
-    void       (WINE_GLAPI *p_gluDeleteNurbsRenderer)( GLUnurbs *nurb );
-    void       (WINE_GLAPI *p_gluEndCurve)( GLUnurbs *nurb );
-    void       (WINE_GLAPI *p_gluEndSurface)( GLUnurbs *nurb );
-    void       (WINE_GLAPI *p_gluEndTrim)( GLUnurbs *nurb );
-    void       (WINE_GLAPI *p_gluGetNurbsProperty)( GLUnurbs *nurb, GLenum property, GLfloat *data );
-    void       (WINE_GLAPI *p_gluLoadSamplingMatrices)( GLUnurbs *nurb, const GLfloat  *model, const GLfloat  *perspective, const GLint  *view );
-    GLUnurbs * (WINE_GLAPI *p_gluNewNurbsRenderer)(void);
-    void       (WINE_GLAPI *p_gluNurbsCallback)( GLUnurbs *nurb, GLenum which, void  *CallBackFunc );
-    void       (WINE_GLAPI *p_gluNurbsCurve)( GLUnurbs *nurb, GLint knotCount, GLfloat  *knots, GLint stride, GLfloat  *control, GLint order, GLenum type );
-    void       (WINE_GLAPI *p_gluNurbsProperty)( GLUnurbs *nurb, GLenum property, GLfloat value );
-    void       (WINE_GLAPI *p_gluNurbsSurface)( GLUnurbs *nurb, GLint sKnotCount, GLfloat *sKnots, GLint tKnotCount, GLfloat *tKnots, GLint sStride, GLint tStride, GLfloat *control, GLint sOrder, GLint tOrder, GLenum type );
-    void       (WINE_GLAPI *p_gluPwlCurve)( GLUnurbs *nurb, GLint count, GLfloat *data, GLint stride, GLenum type );
-};
-
 #ifndef WINE_GL_WIN32
 #include "hostaddrspace_exit.h"
 #endif
 
 struct opengl_funcs_wgl
 {
-    BOOL       (WINE_GLAPI *p_wglCopyContext)( struct wgl_context * hglrcSrc, struct wgl_context * hglrcDst, UINT mask );
-    struct wgl_context * (WINE_GLAPI *p_wglCreateContext)( HDC hDc );
-    BOOL       (WINE_GLAPI *p_wglDeleteContext)( struct wgl_context * oldContext );
-    int        (WINE_GLAPI *p_wglDescribePixelFormat)( HDC hdc, int ipfd, UINT cjpfd, PIXELFORMATDESCRIPTOR *ppfd );
-    int        (WINE_GLAPI *p_wglGetPixelFormat)( HDC hdc );
-    WINEGLDEF(PROC) (WINE_GLAPI *p_wglGetProcAddress)( LPCSTR lpszProc );
-    BOOL       (WINE_GLAPI *p_wglMakeCurrent)( HDC hDc, struct wgl_context * newContext );
-    BOOL       (WINE_GLAPI *p_wglSetPixelFormat)( HDC hdc, int ipfd, const PIXELFORMATDESCRIPTOR *ppfd );
-    BOOL       (WINE_GLAPI *p_wglShareLists)( struct wgl_context * hrcSrvShare, struct wgl_context * hrcSrvSource );
-    BOOL       (WINE_GLAPI *p_wglSwapBuffers)( HDC hdc );
+    BOOL       (WINAPI *p_wglCopyContext)( struct wgl_context * hglrcSrc, struct wgl_context * hglrcDst, UINT mask );
+    struct wgl_context * (WINAPI *p_wglCreateContext)( HDC hDc );
+    BOOL       (WINAPI *p_wglDeleteContext)( struct wgl_context * oldContext );
+    int        (WINAPI *p_wglDescribePixelFormat)( HDC hdc, int ipfd, UINT cjpfd, PIXELFORMATDESCRIPTOR *ppfd );
+    int        (WINAPI *p_wglGetPixelFormat)( HDC hdc );
+    WINEGLDEF(PROC) (WINAPI *p_wglGetProcAddress)( LPCSTR lpszProc );
+    BOOL       (WINAPI *p_wglMakeCurrent)( HDC hDc, struct wgl_context * newContext );
+    BOOL       (WINAPI *p_wglSetPixelFormat)( HDC hdc, int ipfd, const PIXELFORMATDESCRIPTOR *ppfd );
+    BOOL       (WINAPI *p_wglShareLists)( struct wgl_context * hrcSrvShare, struct wgl_context * hrcSrvSource );
+    BOOL       (WINAPI *p_wglSwapBuffers)( HDC hdc );
 };
 
 struct WINE_OPENGL_FUNCS
@@ -3094,7 +3077,6 @@ struct WINE_OPENGL_FUNCS
     struct opengl_funcs_wgl wgl;
     struct opengl_funcs_gl gl;
     struct opengl_funcs_ext ext;
-    struct opengl_funcs_glu glu;
 };
 
 #define ALL_WGL_FUNCS \
@@ -3434,23 +3416,6 @@ struct WINE_OPENGL_FUNCS
     USE_GL_FUNC(glVertex4sv) \
     USE_GL_FUNC(glVertexPointer) \
     USE_GL_FUNC(glViewport)
-
-#define ALL_GLU_FUNCS \
-    USE_GL_FUNC(gluBeginCurve) \
-    USE_GL_FUNC(gluBeginSurface) \
-    USE_GL_FUNC(gluBeginTrim) \
-    USE_GL_FUNC(gluDeleteNurbsRenderer) \
-    USE_GL_FUNC(gluEndCurve) \
-    USE_GL_FUNC(gluEndSurface) \
-    USE_GL_FUNC(gluEndTrim) \
-    USE_GL_FUNC(gluGetNurbsProperty) \
-    USE_GL_FUNC(gluLoadSamplingMatrices) \
-    USE_GL_FUNC(gluNewNurbsRenderer) \
-    USE_GL_FUNC(gluNurbsCallback) \
-    USE_GL_FUNC(gluNurbsCurve) \
-    USE_GL_FUNC(gluNurbsProperty) \
-    USE_GL_FUNC(gluNurbsSurface) \
-    USE_GL_FUNC(gluPwlCurve)
 
 extern struct opengl_funcs * CDECL __wine_get_wgl_driver( HDC hdc, UINT version );
 extern BOOL CDECL __wine_set_pixel_format( HWND hwnd, int format );

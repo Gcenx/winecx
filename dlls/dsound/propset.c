@@ -28,7 +28,6 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "mmsystem.h"
-#include "winternl.h"
 #include "winnls.h"
 #include "vfwmsgs.h"
 #include "mmddk.h"
@@ -43,7 +42,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dsound);
 
-static WCHAR wInterface[] = { 'I','n','t','e','r','f','a','c','e',0 };
+static WCHAR wInterface[] = L"Interface";
 
 typedef struct IKsPrivatePropertySetImpl
 {

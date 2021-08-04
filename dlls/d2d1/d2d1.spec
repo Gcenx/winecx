@@ -3,9 +3,9 @@
 @ stdcall D2D1MakeSkewMatrix(float float float float ptr)
 @ stdcall D2D1IsMatrixInvertible(ptr)
 @ stdcall D2D1InvertMatrix(ptr)
-@ stub D2D1ConvertColorSpace
-@ stub D2D1CreateDevice
+@ stdcall D2D1ConvertColorSpace(long long ptr)
+@ stdcall D2D1CreateDevice(ptr ptr ptr)
 @ stub D2D1CreateDeviceContext
-@ stub D2D1SinCos
-@ stub D2D1Tan
-@ stub D2D1Vec3Length
+@ stdcall D2D1SinCos(float ptr ptr)
+@ stdcall D2D1Tan(float)
+@ stdcall D2D1Vec3Length(float float float)

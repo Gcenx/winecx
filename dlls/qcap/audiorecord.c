@@ -17,20 +17,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-
-#define COBJMACROS
-
-#include "windef.h"
-#include "winbase.h"
-#include "wtypes.h"
-#include "wingdi.h"
-#include "winuser.h"
-#include "dshow.h"
-
-#include "qcap_main.h"
-
-#include "wine/debug.h"
+#include "qcap_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(qcap);
 
@@ -60,7 +47,7 @@ static void audio_record_destroy(struct strmbase_filter *iface)
     AudioRecord *filter = impl_from_strmbase_filter(iface);
 
     strmbase_filter_cleanup(&filter->filter);
-    CoTaskMemFree(filter);
+    free(filter);
 }
 
 static HRESULT audio_record_query_interface(struct strmbase_filter *iface, REFIID iid, void **out)
@@ -121,12 +108,11 @@ static HRESULT WINAPI PPB_Load(IPersistPropertyBag *iface, IPropertyBag *pPropBa
     AudioRecord *This = impl_from_IPersistPropertyBag(iface);
     HRESULT hr;
     VARIANT var;
-    static const WCHAR WaveInIDW[] = {'W','a','v','e','I','n','I','D',0};
 
     TRACE("(%p/%p)->(%p, %p)\n", iface, This, pPropBag, pErrorLog);
 
     V_VT(&var) = VT_I4;
-    hr = IPropertyBag_Read(pPropBag, WaveInIDW, &var, pErrorLog);
+    hr = IPropertyBag_Read(pPropBag, L"WaveInID", &var, pErrorLog);
     if (SUCCEEDED(hr))
     {
         FIXME("FIXME: implement opening waveIn device %d\n", V_I4(&var));
@@ -154,22 +140,17 @@ static const IPersistPropertyBagVtbl PersistPropertyBagVtbl =
     PPB_Save
 };
 
-IUnknown* WINAPI QCAP_createAudioCaptureFilter(IUnknown *outer, HRESULT *phr)
+HRESULT audio_record_create(IUnknown *outer, IUnknown **out)
 {
-    AudioRecord *This = NULL;
+    AudioRecord *object;
 
-    FIXME("(%p, %p): the entire CLSID_AudioRecord implementation is just stubs\n", outer, phr);
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
 
-    This = CoTaskMemAlloc(sizeof(*This));
-    if (This == NULL) {
-        *phr = E_OUTOFMEMORY;
-        return NULL;
-    }
-    memset(This, 0, sizeof(*This));
-    This->IPersistPropertyBag_iface.lpVtbl = &PersistPropertyBagVtbl;
+    object->IPersistPropertyBag_iface.lpVtbl = &PersistPropertyBagVtbl;
+    strmbase_filter_init(&object->filter, outer, &CLSID_AudioRecord, &filter_ops);
 
-    strmbase_filter_init(&This->filter, outer, &CLSID_AudioRecord, &filter_ops);
-
-    *phr = S_OK;
-    return &This->filter.IUnknown_inner;
+    TRACE("Created audio recorder %p.\n", object);
+    *out = &object->filter.IUnknown_inner;
+    return S_OK;
 }

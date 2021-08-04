@@ -1,12 +1,19 @@
-EXTRADEFS = -D_MT -D_MSVCR_VER=140
+EXTRADEFS = -D_CRTIMP=
 MODULE    = ucrtbase.dll
 IMPORTLIB = ucrtbase
+IMPORTS   = ntdll
 DELAYIMPORTS = advapi32 user32
 PARENTSRC = ../msvcrt
+EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
 	console.c \
 	cpp.c \
+	crt_gccmain.c \
+	crt_main.c \
+	crt_winmain.c \
+	crt_wmain.c \
+	crt_wwinmain.c \
 	ctype.c \
 	data.c \
 	dir.c \
@@ -30,10 +37,12 @@ C_SRCS = \
 	printf.c \
 	process.c \
 	scanf.c \
+	sincos.c \
 	string.c \
 	thread.c \
 	time.c \
 	undname.c \
+	unixlib.c \
 	wcs.c
 
 RC_SRCS = version.rc

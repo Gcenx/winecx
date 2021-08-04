@@ -49,58 +49,23 @@
 #include <CoreServices/CoreServices.h>
 #undef LoadResource
 #undef GetCurrentThread
-
-#include <mach-o/dyld_images.h>
-#include <mach-o/dyld.h>
-#include <mach-o/getsect.h>
-#include <mach-o/nlist.h>
-#include <mach/mach_error.h>
-#include <mach/mach.h>
 #include <pthread.h>
-
-/* CrossOver Hack 13438 */
-#define MAKEFUNC(f) static typeof(f) *p##f
-MAKEFUNC(CFNotificationCenterGetDistributedCenter);
-MAKEFUNC(CFRelease);
-MAKEFUNC(CFRunLoopAddSource);
-MAKEFUNC(CFRunLoopGetCurrent);
-MAKEFUNC(CFRunLoopRun);
-MAKEFUNC(CFRunLoopSourceCreate);
-MAKEFUNC(CFRunLoopSourceSignal);
-MAKEFUNC(CFRunLoopStop);
-MAKEFUNC(kCFRunLoopCommonModes);
-MAKEFUNC(MPCurrentTaskID);
-MAKEFUNC(MPTaskIsPreemptive);
-#undef MAKEFUNC
-
+#include <mach-o/getsect.h>
 #else
 extern char **environ;
-#endif
-
-#ifdef __ANDROID__
-#include <jni.h>
 #endif
 
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
 #include "windef.h"
 #include "winbase.h"
-#include "wine/library.h"
+#include "wine/asm.h"
 
 /* argc/argv for the Windows application */
 int __wine_main_argc = 0;
 char **__wine_main_argv = NULL;
 WCHAR * WIN32PTR * WIN32PTR __wine_main_wargv = NULL;
 char **__wine_main_environ = NULL;
-
-struct dll_path_context
-{
-    unsigned int index; /* current index in the dll path list */
-    char *buffer;       /* buffer used for storing path names */
-    char *name;         /* start of file name part in buffer (including leading slash) */
-    int   namelen;      /* length of file name without .so extension */
-    int   win16;        /* 16-bit dll search */
-};
 
 #define MAX_DLLS 100
 
@@ -114,14 +79,30 @@ static int nb_dlls;
 
 static const IMAGE_NT_HEADERS *main_exe;
 
+typedef void (*load_dll_callback_t)( void *, const char * );
 static load_dll_callback_t load_dll_callback;
 
-static const char *build_dir;
+extern void *wine_anon_mmap( void *start, size_t size, int prot, int flags );
+
+#ifdef __ASM_OBSOLETE
+
+struct dll_path_context
+{
+    unsigned int index; /* current index in the dll path list */
+    char *buffer;       /* buffer used for storing path names */
+    char *name;         /* start of file name part in buffer (including leading slash) */
+    int   namelen;      /* length of file name without .so extension */
+    int   win16;        /* 16-bit dll search */
+};
+
 static const char *default_dlldir;
 static const char **dll_paths;
 static unsigned int nb_dll_paths;
 static int dll_path_maxlen;
 
+extern const char *build_dir;
+
+extern void wine_init_argv0_path_obsolete( const char *argv0 );
 extern void mmap_init(void);
 extern const char *get_dlldir( const char **default_dlldir );
 
@@ -154,7 +135,7 @@ static void build_dll_path(void)
         dll_path_maxlen = strlen(dlldir);
         dll_paths[nb_dll_paths++] = dlldir;
     }
-    else if ((build_dir = wine_get_build_dir()))
+    else if (build_dir)
     {
         dll_path_maxlen = strlen(build_dir) + sizeof("/programs");
     }
@@ -180,58 +161,6 @@ static void build_dll_path(void)
         if (len > dll_path_maxlen) dll_path_maxlen = len;
         dll_paths[nb_dll_paths++] = default_dlldir;
     }
-}
-
-/* check if the library is the correct architecture */
-/* only returns false for a valid library of the wrong arch */
-static int check_library_arch( int fd )
-{
-#ifdef __APPLE__
-    struct  /* Mach-O header */
-    {
-        unsigned int magic;
-        unsigned int cputype;
-    } header;
-
-    if (read( fd, &header, sizeof(header) ) != sizeof(header)) return 1;
-    if (header.magic != 0xfeedface && header.magic != 0xfeedfacf) return 1;
-    if (sizeof(void *HOSTPTR) == sizeof(int))
-        return header.magic == 0xfeedface && (header.cputype >> 24) == 0;
-    else
-        return header.magic == 0xfeedfacf && (header.cputype >> 24) == 1; /* CPU_ARCH_ABI64 */
-#else
-    struct  /* ELF header */
-    {
-        unsigned char magic[4];
-        unsigned char class;
-        unsigned char data;
-        unsigned char version;
-    } header;
-
-    if (read( fd, &header, sizeof(header) ) != sizeof(header)) return 1;
-    if (memcmp( header.magic, "\177ELF", 4 )) return 1;
-    if (header.version != 1 /* EV_CURRENT */) return 1;
-#ifdef WORDS_BIGENDIAN
-    if (header.data != 2 /* ELFDATA2MSB */) return 1;
-#else
-    if (header.data != 1 /* ELFDATA2LSB */) return 1;
-#endif
-    if (sizeof(void *HOSTPTR) == sizeof(int)) return header.class == 1; /* ELFCLASS32 */
-    else return header.class == 2; /* ELFCLASS64 */
-#endif
-}
-
-/* check if a given file can be opened */
-static inline int file_exists( const char *name )
-{
-    int ret = 0;
-    int fd = open( name, O_RDONLY );
-    if (fd != -1)
-    {
-        ret = check_library_arch( fd );
-        close( fd );
-    }
-    return ret;
 }
 
 static inline char *prepend( char *buffer, const char *str, size_t len )
@@ -302,26 +231,7 @@ static inline void free_dll_path( struct dll_path_context *context )
     free( context->buffer );
 }
 
-
-/* open a library for a given dll, searching in the dll path
- * 'name' must be the Windows dll name (e.g. "kernel32.dll") */
-static void *dlopen_dll( const char *name, char *error, int errorsize,
-                         int test_only, int *exists )
-{
-    struct dll_path_context context;
-    char *path;
-    void *ret = NULL;
-
-    *exists = 0;
-    for (path = first_dll_path( name, 0, &context ); path; path = next_dll_path( &context ))
-    {
-        if (!test_only && (ret = wine_dlopen( path, RTLD_NOW, error, errorsize ))) break;
-        if ((*exists = file_exists( path ))) break; /* exists but cannot be loaded, return the error */
-    }
-    free_dll_path( &context );
-    return ret;
-}
-
+#endif  /* __ASM_OBSOLETE */
 
 /* adjust an array of pointers to make them into RVAs */
 static inline void fixup_rva_ptrs( void *array, BYTE *base, unsigned int count )
@@ -441,12 +351,8 @@ static void * WIN32PTR map_dll( const IMAGE_NT_HEADERS *nt_descr )
     assert( size <= page_size );
 
     /* module address must be aligned on 64K boundary */
-    addr = *(BYTE * WIN32PTR *)&nt_descr->OptionalHeader.DataDirectory[15];
-    if (!addr || ((ULONG_PTR)addr & 0xffff) || mprotect( addr, page_size, PROT_READ | PROT_WRITE ))
-    {
-        addr = (BYTE * WIN32PTR)((nt_descr->OptionalHeader.ImageBase + 0xffff) & ~0xffff);
-        if (wine_anon_mmap( addr, page_size, PROT_READ|PROT_WRITE, MAP_FIXED ) != addr) return NULL;
-    }
+    addr = (BYTE * WIN32PTR)((nt_descr->OptionalHeader.ImageBase + 0xffff) & ~0xffff);
+    if (wine_anon_mmap( addr, page_size, PROT_READ|PROT_WRITE, MAP_FIXED ) != addr) return NULL;
 
     dos    = (IMAGE_DOS_HEADER *)addr;
     nt     = (IMAGE_NT_HEADERS *)(dos + 1);
@@ -493,22 +399,13 @@ static void * WIN32PTR map_dll( const IMAGE_NT_HEADERS *nt_descr )
     nt->OptionalHeader.SizeOfImage                 = data_end;
     nt->OptionalHeader.ImageBase                   = (ULONG_PTR)addr;
 
-    /* Clear DataDirectory[15] */
-
-    nt->OptionalHeader.DataDirectory[15].VirtualAddress = 0;
-    nt->OptionalHeader.DataDirectory[15].Size = 0;
-
     /* Build the code section */
 
     memcpy( sec->Name, ".text", sizeof(".text") );
     sec->SizeOfRawData = code_end - code_start;
     sec->Misc.VirtualSize = sec->SizeOfRawData;
     sec->VirtualAddress   = code_start;
-#ifdef _WIN64
-    sec->PointerToRawData = 0x400; /* file alignment */
-#else
-    sec->PointerToRawData = 0x200; /* file alignment */
-#endif
+    sec->PointerToRawData = code_start;
     sec->Characteristics  = (IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ);
     sec++;
 
@@ -613,12 +510,220 @@ void wine_dll_set_callback( load_dll_callback_t load )
 }
 
 
+#ifdef __ASM_OBSOLETE
+
+/***********************************************************************
+ *           wine_dll_enum_load_path
+ *
+ * Enumerate the dll load path.
+ */
+const char *wine_dll_enum_load_path_obsolete( unsigned int index )
+{
+    if (index >= nb_dll_paths) return NULL;
+    return dll_paths[index];
+}
+
+
+/*
+ * These functions provide wrappers around dlopen() and associated
+ * functions.  They work around a bug in glibc 2.1.x where calling
+ * a dl*() function after a previous dl*() function has failed
+ * without a dlerror() call between the two will cause a crash.
+ * They all take a pointer to a buffer that
+ * will receive the error description (from dlerror()).  This
+ * parameter may be NULL if the error description is not required.
+ */
+
+#ifndef RTLD_FIRST
+#define RTLD_FIRST 0
+#endif
+
+/***********************************************************************
+ *		wine_dlopen
+ */
+void *wine_dlopen_obsolete( const char *filename, int flag, char *error, size_t errorsize )
+{
+    void *ret;
+    const char *s;
+
+#ifdef __APPLE__
+    /* the Mac OS loader pretends to be able to load PE files, so avoid them here */
+    unsigned char magic[2];
+    int fd = open( filename, O_RDONLY );
+    if (fd != -1)
+    {
+        if (pread( fd, magic, 2, 0 ) == 2 && magic[0] == 'M' && magic[1] == 'Z')
+        {
+            if (error && errorsize)
+            {
+                static const char msg[] = "MZ format";
+                size_t len = min( errorsize, sizeof(msg) );
+                memcpy( error, msg, len );
+                error[len - 1] = 0;
+            }
+            close( fd );
+            return NULL;
+        }
+        close( fd );
+    }
+#endif
+    dlerror(); dlerror();
+#ifdef __sun
+    if (strchr( filename, ':' ))
+    {
+        char path[PATH_MAX];
+        /* Solaris' brain damaged dlopen() treats ':' as a path separator */
+        realpath( filename, path );
+        ret = dlopen( path, flag | RTLD_FIRST );
+    }
+    else
+#endif
+    ret = dlopen( filename, flag | RTLD_FIRST );
+    s = dlerror();
+    if (error && errorsize)
+    {
+        if (s)
+        {
+            size_t len = strlen(s);
+            if (len >= errorsize) len = errorsize - 1;
+            memcpy( error, s, len );
+            error[len] = 0;
+        }
+        else error[0] = 0;
+    }
+    dlerror();
+    return ret;
+}
+
+/***********************************************************************
+ *		wine_dlsym
+ */
+void *wine_dlsym_obsolete( void *handle, const char *symbol, char *error, size_t errorsize )
+{
+    void *ret;
+    const char *s;
+    dlerror(); dlerror();
+    ret = dlsym( handle, symbol );
+    s = dlerror();
+    if (error && errorsize)
+    {
+        if (s)
+        {
+            size_t len = strlen(s);
+            if (len >= errorsize) len = errorsize - 1;
+            memcpy( error, s, len );
+            error[len] = 0;
+        }
+        else error[0] = 0;
+    }
+    dlerror();
+    return ret;
+}
+
+/***********************************************************************
+ *		wine_dlclose
+ */
+int wine_dlclose_obsolete( void *handle, char *error, size_t errorsize )
+{
+    int ret;
+    const char *s;
+    dlerror(); dlerror();
+    ret = dlclose( handle );
+    s = dlerror();
+    if (error && errorsize)
+    {
+        if (s)
+        {
+            size_t len = strlen(s);
+            if (len >= errorsize) len = errorsize - 1;
+            memcpy( error, s, len );
+            error[len] = 0;
+        }
+        else error[0] = 0;
+    }
+    dlerror();
+    return ret;
+}
+
+
+/* check if the library is the correct architecture */
+/* only returns false for a valid library of the wrong arch */
+static int check_library_arch( int fd )
+{
+#ifdef __APPLE__
+    struct  /* Mach-O header */
+    {
+        unsigned int magic;
+        unsigned int cputype;
+    } header;
+
+    if (read( fd, &header, sizeof(header) ) != sizeof(header)) return 1;
+    if (header.magic != 0xfeedface && header.magic != 0xfeedfacf) return 1;
+    if (sizeof(void *HOSTPTR) == sizeof(int))
+        return header.magic == 0xfeedface && (header.cputype >> 24) == 0;
+    else
+        return header.magic == 0xfeedfacf && (header.cputype >> 24) == 1; /* CPU_ARCH_ABI64 */
+#else
+    struct  /* ELF header */
+    {
+        unsigned char magic[4];
+        unsigned char class;
+        unsigned char data;
+        unsigned char version;
+    } header;
+
+    if (read( fd, &header, sizeof(header) ) != sizeof(header)) return 1;
+    if (memcmp( header.magic, "\177ELF", 4 )) return 1;
+    if (header.version != 1 /* EV_CURRENT */) return 1;
+#ifdef WORDS_BIGENDIAN
+    if (header.data != 2 /* ELFDATA2MSB */) return 1;
+#else
+    if (header.data != 1 /* ELFDATA2LSB */) return 1;
+#endif
+    if (sizeof(void *HOSTPTR) == sizeof(int)) return header.class == 1; /* ELFCLASS32 */
+    else return header.class == 2; /* ELFCLASS64 */
+#endif
+}
+
+/* check if a given file can be opened */
+static int file_exists( const char *name )
+{
+    int ret = 0;
+    int fd = open( name, O_RDONLY );
+    if (fd != -1)
+    {
+        ret = check_library_arch( fd );
+        close( fd );
+    }
+    return ret;
+}
+
+/* open a library for a given dll, searching in the dll path
+ * 'name' must be the Windows dll name (e.g. "kernel32.dll") */
+static void *dlopen_dll( const char *name, char *error, int errorsize,
+                         int test_only, int *exists )
+{
+    struct dll_path_context context;
+    char *path;
+    void *ret = NULL;
+
+    *exists = 0;
+    for (path = first_dll_path( name, 0, &context ); path; path = next_dll_path( &context ))
+    {
+        if (!test_only && (ret = wine_dlopen_obsolete( path, RTLD_NOW, error, errorsize ))) break;
+        if ((*exists = file_exists( path ))) break; /* exists but cannot be loaded, return the error */
+    }
+    free_dll_path( &context );
+    return ret;
+}
+
+
 /***********************************************************************
  *           wine_dll_load
  *
  * Load a builtin dll.
  */
-void *wine_dll_load( const char *filename, char *error, int errorsize, int *file_exists )
+void *wine_dll_load_obsolete( const char *filename, char *error, int errorsize, int *file_exists )
 {
     int i;
 
@@ -648,10 +753,10 @@ void *wine_dll_load( const char *filename, char *error, int errorsize, int *file
  *
  * Unload a builtin dll.
  */
-void wine_dll_unload( void *handle )
+void wine_dll_unload_obsolete( void *handle )
 {
     if (handle != (void *)1)
-	wine_dlclose( handle, NULL, 0 );
+	wine_dlclose_obsolete( handle, NULL, 0 );
 }
 
 
@@ -660,22 +765,10 @@ void wine_dll_unload( void *handle )
  *
  * Try to load the .so for the main exe.
  */
-void *wine_dll_load_main_exe( const char *name, char *error, int errorsize,
-                              int test_only, int *file_exists )
+void *wine_dll_load_main_exe_obsolete( const char *name, char *error, int errorsize,
+                                       int test_only, int *file_exists )
 {
     return dlopen_dll( name, error, errorsize, test_only, file_exists );
-}
-
-
-/***********************************************************************
- *           wine_dll_enum_load_path
- *
- * Enumerate the dll load path.
- */
-const char *wine_dll_enum_load_path( unsigned int index )
-{
-    if (index >= nb_dll_paths) return NULL;
-    return dll_paths[index];
 }
 
 
@@ -685,7 +778,7 @@ const char *wine_dll_enum_load_path( unsigned int index )
  * Retrieve the name of the 32-bit owner dll for a 16-bit dll.
  * Return 0 if OK, -1 on error.
  */
-int wine_dll_get_owner( const char *name, char *buffer, int size, int *exists )
+int wine_dll_get_owner_obsolete( const char *name, char *buffer, int size, int *exists )
 {
     int ret = -1;
     char *path;
@@ -748,87 +841,6 @@ struct apple_stack_info
 };
 
 /***********************************************************************
- *           apple_override_bundle_name
- *
- * Rewrite the bundle name in the Info.plist embedded in the loader.
- * This is the only way to control the title of the application menu
- * when using the Mac driver.  The GUI frameworks call down into Core
- * Foundation to get the bundle name for that.
- *
- * CrossOver Hack 13438
- */
-static void apple_override_bundle_name( int argc, char *argv[] )
-{
-    char* info_plist;
-    unsigned long remaining;
-    static const char prefix[] = "<key>CFBundleName</key>\n    <string>";
-    const size_t prefix_len = strlen(prefix);
-    static const char suffix[] = "</string>";
-    const size_t suffix_len = strlen(suffix);
-    static const char padding[] = "<!-- bundle name padding -->";
-    const size_t padding_len = strlen(padding);
-    char* bundle_name;
-    const char* p;
-    int bundle_name_len, max_bundle_name_len;
-    uintptr_t start, end;
-    const char* new_bundle_name;
-    int new_bundle_name_len;
-
-    if (argc < 2)
-        return;
-
-    info_plist = getsectdata("__TEXT", "__info_plist", &remaining);
-    if (!info_plist || !remaining)
-        return;
-    info_plist += _dyld_get_image_vmaddr_slide(0);
-
-    bundle_name = strnstr(info_plist, prefix, remaining);
-    if (!bundle_name)
-        return;
-
-    bundle_name += prefix_len;
-    remaining -= bundle_name - info_plist;
-    p = strnstr(bundle_name, suffix, remaining);
-    if (!p)
-        return;
-
-    bundle_name_len = p - bundle_name;
-    remaining -= bundle_name_len + suffix_len;
-
-    max_bundle_name_len = bundle_name_len;
-    if (padding_len <= remaining &&
-        !memcmp(bundle_name + bundle_name_len + suffix_len, padding, padding_len))
-        max_bundle_name_len += padding_len;
-
-    new_bundle_name = argv[1];
-    if ((p = strrchr(new_bundle_name, '\\'))) new_bundle_name = p + 1;
-    if ((p = strrchr(new_bundle_name, '/'))) new_bundle_name = p + 1;
-    if (strspn(new_bundle_name, "0123456789abcdefABCDEF") == 32 &&
-        new_bundle_name[32] == '.')
-        new_bundle_name += 33;
-    if ((p = strrchr(new_bundle_name, '.')) && p != new_bundle_name)
-        new_bundle_name_len = p - new_bundle_name;
-    else
-        new_bundle_name_len = strlen(new_bundle_name);
-    if (!new_bundle_name_len)
-        return;
-
-    start = (uintptr_t)bundle_name;
-    end = (uintptr_t)(bundle_name + max_bundle_name_len + suffix_len);
-    start &= ~(getpagesize() - 1);
-    end = (end + getpagesize() - 1) & ~(getpagesize() - 1);
-    if (mprotect((void*)start, end - start, PROT_READ|PROT_WRITE|PROT_EXEC) == 0)
-    {
-        int copy_len = min(new_bundle_name_len, max_bundle_name_len);
-        memcpy(bundle_name, new_bundle_name, copy_len);
-        memcpy(bundle_name + copy_len, suffix, suffix_len);
-        if (copy_len < max_bundle_name_len)
-            memset(bundle_name + copy_len + suffix_len, ' ', max_bundle_name_len - copy_len);
-        mprotect((void*)start, end - start, PROT_READ|PROT_EXEC);
-    }
-}
-
-/***********************************************************************
  *           apple_alloc_thread_stack
  *
  * Callback for wine_mmap_enum_reserved_areas to allocate space for
@@ -876,9 +888,9 @@ static void apple_create_wine_thread( void *init_func )
          * fails, just let it go wherever.  It'll be a waste of space, but we
          * can go on. */
         if (!pthread_attr_getstacksize( &attr, &info.desired_size ) &&
-            wine_mmap_enum_reserved_areas( apple_alloc_thread_stack, &info, 1 ))
+            wine_mmap_enum_reserved_areas_obsolete( apple_alloc_thread_stack, &info, 1 ))
         {
-            wine_mmap_remove_reserved_area( info.stack, info.desired_size, 0 );
+            wine_mmap_remove_reserved_area_obsolete( info.stack, info.desired_size, 0 );
             pthread_attr_setstackaddr( &attr, (char*)info.stack + info.desired_size );
         }
 #endif
@@ -894,7 +906,7 @@ static void apple_create_wine_thread( void *init_func )
      * the run loop allows apple_main_thread() and thus wine_init() to
      * return. */
     if (!success)
-        pCFRunLoopStop( pCFRunLoopGetCurrent() );
+        CFRunLoopStop( CFRunLoopGetCurrent() );
 }
 
 
@@ -908,52 +920,8 @@ static void apple_create_wine_thread( void *init_func )
  */
 static void apple_main_thread( void (*init_func)(void) )
 {
-    void *corefoundation_handle, *coreservices_handle;
-    char error[1024];
     CFRunLoopSourceContext source_context = { 0 };
     CFRunLoopSourceRef source;
-
-    /* CrossOver Hack 13438: dynamically load CoreFoundation and CoreServices */
-    corefoundation_handle = wine_dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
-                                        RTLD_LAZY, error, sizeof(error));
-    if (!corefoundation_handle)
-    {
-        fprintf(stderr, "wine: failed to load CoreFoundation; %s\n", error);
-        return;
-    }
-
-#define LOADFUNC(f) if (!(p##f = wine_dlsym(corefoundation_handle, #f, error, sizeof(error)))) \
-                    { \
-                        fprintf(stderr, "wine: failed to load symbol %s; %s\n", #f, error); \
-                        return; \
-                    }
-    LOADFUNC(CFNotificationCenterGetDistributedCenter);
-    LOADFUNC(CFRelease);
-    LOADFUNC(CFRunLoopAddSource);
-    LOADFUNC(CFRunLoopGetCurrent);
-    LOADFUNC(CFRunLoopRun);
-    LOADFUNC(CFRunLoopSourceCreate);
-    LOADFUNC(CFRunLoopSourceSignal);
-    LOADFUNC(CFRunLoopStop);
-    LOADFUNC(kCFRunLoopCommonModes);
-#undef LOADFUNC
-
-    coreservices_handle = wine_dlopen("/System/Library/Frameworks/CoreServices.framework/CoreServices",
-                                        RTLD_LAZY, error, sizeof(error));
-    if (!coreservices_handle)
-    {
-        fprintf(stderr, "wine: failed to load CoreServices; %s\n", error);
-        return;
-    }
-
-#define LOADFUNC(f) if (!(p##f = wine_dlsym(coreservices_handle, #f, error, sizeof(error)))) \
-                    { \
-                        fprintf(stderr, "wine: failed to load symbol %s; %s\n", #f, error); \
-                        return; \
-                    }
-    LOADFUNC(MPCurrentTaskID);
-    LOADFUNC(MPTaskIsPreemptive);
-#undef LOADFUNC
 
     if (!pthread_main_np())
     {
@@ -964,12 +932,12 @@ static void apple_main_thread( void (*init_func)(void) )
     /* Multi-processing Services can get confused about the main thread if the
      * first time it's used is on a secondary thread.  Use it here to make sure
      * that doesn't happen. */
-    pMPTaskIsPreemptive(pMPCurrentTaskID());
+    MPTaskIsPreemptive(MPCurrentTaskID());
 
     /* Give ourselves the best chance of having the distributed notification
      * center scheduled on this thread's run loop.  In theory, it's scheduled
      * in the first thread to ask for it. */
-    pCFNotificationCenterGetDistributedCenter();
+    CFNotificationCenterGetDistributedCenter();
 
     /* We use this run loop source for two purposes.  First, a run loop exits
      * if it has no more sources scheduled.  So, we need at least one source
@@ -979,310 +947,28 @@ static void apple_main_thread( void (*init_func)(void) )
      * adding it and have its callback spin off the Wine thread. */
     source_context.info = init_func;
     source_context.perform = apple_create_wine_thread;
-    source = pCFRunLoopSourceCreate( NULL, 0, &source_context );
+    source = CFRunLoopSourceCreate( NULL, 0, &source_context );
 
     if (source)
     {
-        /* CrossOver Hack 13438 */
-        pCFRunLoopAddSource( pCFRunLoopGetCurrent(), source, *pkCFRunLoopCommonModes );
-        pCFRunLoopSourceSignal( source );
-        pCFRelease( source );
+        CFRunLoopAddSource( CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes );
+        CFRunLoopSourceSignal( source );
+        CFRelease( source );
 
-        pCFRunLoopRun(); /* Should never return, except on error. */
+        CFRunLoopRun(); /* Should never return, except on error. */
     }
 
     /* If we get here (i.e. return), that indicates failure to our caller. */
 }
-
-#ifdef __i386_on_x86_64__
-struct dyld_helpers
-{
-    uintptr_t       version;
-    void            *ignored[18];
-    kern_return_t   (*vm_alloc)(vm_map_t task, vm_address_t* addr, vm_size_t size, int flags);
-    void*           (*mmap)(void* addr, size_t len, int prot, int flags, int fd, off_t offset);
-};
-
-static __thread int divert_dyld_allocations;
-
-
-static struct dyld_all_image_infos* get_image_addr(void)
-{
-    struct dyld_all_image_infos *ret = 0;
-    struct task_dyld_info dyld_info;
-    mach_msg_type_number_t size = TASK_DYLD_INFO_COUNT;
-    if (task_info(mach_task_self(), TASK_DYLD_INFO, (task_info_t)&dyld_info, &size) == KERN_SUCCESS)
-        ret = (struct dyld_all_image_infos*)dyld_info.all_image_info_addr;
-    return ret;
-}
-
-
-static kern_return_t wine_vm_allocate(vm_map_t task, vm_address_t* addr, vm_size_t size, int flags)
-{
-    kern_return_t ret;
-    vm_address_t base, hint;
-    unsigned int required_flags = VM_FLAGS_ANYWHERE;
-    unsigned int allowed_flags = required_flags | VM_FLAGS_PURGABLE | VM_FLAGS_RANDOM_ADDR |
-                                 VM_FLAGS_NO_CACHE | VM_FLAGS_RESILIENT_CODESIGN |
-                                 VM_FLAGS_RESILIENT_MEDIA | VM_FLAGS_ALIAS_MASK;
-
-    if (!divert_dyld_allocations || task != mach_task_self() ||
-        (flags & required_flags) != required_flags || flags & ~allowed_flags ||
-        size >= 0xfffff000)
-        return vm_allocate(task, addr, size, flags);
-
-    if (0x1000 < (uintptr_t)*addr && (uintptr_t)*addr < (0x100000000 - size))
-        hint = *addr;
-    else
-        hint = 0;
-    while (true)
-    {
-        base = hint ?: (vm_address_t)0x1000;
-        ret = vm_allocate(task, &base, size, flags & ~(unsigned int)VM_FLAGS_RANDOM_ADDR);
-        if (ret == KERN_SUCCESS)
-        {
-            if ((uintptr_t)base < (0x100000000 - size))
-            {
-                *addr = base;
-                return ret;
-            }
-            vm_deallocate(task, base, size);
-            ret = KERN_NO_SPACE;
-        }
-        if (!hint)
-            break;
-        hint = 0;
-    }
-
-    return ret;
-}
-
-
-static void* wine_mmap(void* addr, size_t len, int prot, int flags, int fd, off_t offset)
-{
-    void *ret, *base, *hint;
-
-    if (!divert_dyld_allocations || flags & (MAP_ANON | MAP_FIXED | MAP_JIT) ||
-        len > 0xfffff000)
-        return mmap(addr, len, prot, flags, fd, offset);
-
-    if (0x1000 < (uintptr_t)addr && (uintptr_t)addr <= (0x100000000 - len))
-        hint = addr;
-    else
-        hint = 0;
-    while (true)
-    {
-        base = hint ?: (void*)0x1000;
-        ret = mmap(base, len, prot, flags, fd, offset);
-        if (ret != MAP_FAILED)
-        {
-            if ((uintptr_t)ret <= (0x100000000 - len))
-                return ret;
-            munmap(ret, len);
-        }
-        if (!hint)
-            break;
-        hint = 0;
-    }
-
-    if (ret != MAP_FAILED)
-        errno = ENOMEM;
-    return MAP_FAILED;
-}
-
-
-void install_dyld_allocation_hooks(void)
-{
-    int i;
-    struct dyld_all_image_infos *info = get_image_addr();
-    const struct mach_header_64 *hdr = (const struct mach_header_64*)info->dyldImageLoadAddress;
-    const struct symtab_command *symbol_table = NULL;
-    const struct load_command *cmd = (const struct load_command*)(hdr + 1);
-    for (i = 0; i < hdr->ncmds; i++)
-    {
-        if (cmd->cmd == LC_SYMTAB)
-        {
-            symbol_table = (const struct symtab_command*)cmd;
-            break;
-        }
-        cmd = (const struct load_command*)((char*)cmd + cmd->cmdsize);
-    }
-    if (!symbol_table)
-        return;
-
-    const struct segment_command_64* symbol_data_segment = NULL;
-    cmd = (const struct load_command*)(hdr + 1);
-    for (i = 0; i < hdr->ncmds; i++)
-    {
-        if (cmd->cmd == LC_SEGMENT_64)
-        {
-            symbol_data_segment = (const void*)cmd;
-            if (symbol_data_segment->fileoff <= symbol_table->symoff &&
-                symbol_table->symoff < symbol_data_segment->fileoff + symbol_data_segment->filesize)
-                break;
-        }
-        cmd = (const struct load_command*)((char*)cmd + cmd->cmdsize);
-    }
-    if (i >= hdr->ncmds)
-        return;
-    size_t symoffset = symbol_table->symoff - symbol_data_segment->fileoff;
-    size_t stroffset = symbol_table->stroff - symbol_data_segment->fileoff;
-    unsigned long size;
-    const uint8_t *base = getsegmentdata(hdr, symbol_data_segment->segname, &size);
-    const struct nlist_64 *nlist = (const void*)(base + symoffset);
-    const char *strings = (const void*)(base + stroffset);
-    for (i = 0; i < symbol_table->nsyms; i++)
-    {
-        if (!nlist[i].n_un.n_strx || nlist[i].n_un.n_strx >= symbol_table->strsize)
-            continue;
-        const char *name = strings + nlist[i].n_un.n_strx;
-        if (!strcmp(name, "__ZN4dyld17gLibSystemHelpersE")) /* dyld::gLibSystemHelpers */
-        {
-            struct dyld_helpers **phelpers = (void*)((char*)hdr + nlist[i].n_value);
-            struct dyld_helpers *helpers = *phelpers;
-            if (helpers->mmap == &mmap && helpers->vm_alloc == &vm_allocate)
-            {
-                helpers->mmap = wine_mmap;
-                helpers->vm_alloc = wine_vm_allocate;
-            }
-            break;
-        }
-    }
-}
-#endif
 #endif
 
-
-#ifdef __ANDROID__
-
-#ifndef WINE_JAVA_CLASS
-#define WINE_JAVA_CLASS "org/winehq/wine/WineDriver"
-#endif
-
-static JavaVM *java_vm;
-static jobject java_object;
-
-/* return the Java VM that was used for JNI initialisation */
-JavaVM *wine_get_java_vm(void)
-{
-    return java_vm;
-}
-
-/* return the Java object that called the wine_init method */
-jobject wine_get_java_object(void)
-{
-    return java_object;
-}
-
-/* main Wine initialisation */
-static jstring wine_init_jni( JNIEnv *env, jobject obj, jobjectArray cmdline, jobjectArray environment )
-{
-    char **argv;
-    char *str;
-    char error[1024];
-    int i, argc, length;
-
-    /* get the command line array */
-
-    argc = (*env)->GetArrayLength( env, cmdline );
-    for (i = length = 0; i < argc; i++)
-    {
-        jobject str_obj = (*env)->GetObjectArrayElement( env, cmdline, i );
-        length += (*env)->GetStringUTFLength( env, str_obj ) + 1;
-    }
-
-    argv = malloc( (argc + 1) * sizeof(*argv) + length );
-    str = (char *)(argv + argc + 1);
-    for (i = 0; i < argc; i++)
-    {
-        jobject str_obj = (*env)->GetObjectArrayElement( env, cmdline, i );
-        length = (*env)->GetStringUTFLength( env, str_obj );
-        (*env)->GetStringUTFRegion( env, str_obj, 0,
-                                    (*env)->GetStringLength( env, str_obj ), str );
-        argv[i] = str;
-        str[length] = 0;
-        str += length + 1;
-    }
-    argv[argc] = NULL;
-
-    /* set the environment variables */
-
-    if (environment)
-    {
-        int count = (*env)->GetArrayLength( env, environment );
-        for (i = 0; i < count - 1; i += 2)
-        {
-            jobject var_obj = (*env)->GetObjectArrayElement( env, environment, i );
-            jobject val_obj = (*env)->GetObjectArrayElement( env, environment, i + 1 );
-            const char *var = (*env)->GetStringUTFChars( env, var_obj, NULL );
-
-            if (val_obj)
-            {
-                const char *val = (*env)->GetStringUTFChars( env, val_obj, NULL );
-                setenv( var, val, 1 );
-                if (!strcmp( var, "LD_LIBRARY_PATH" ))
-                {
-                    void (*update_func)( const char * ) = dlsym( RTLD_DEFAULT,
-                                                                 "android_update_LD_LIBRARY_PATH" );
-                    if (update_func) update_func( val );
-                }
-                else if (!strcmp( var, "WINEDEBUGLOG" ))
-                {
-                    int fd = open( val, O_WRONLY | O_CREAT | O_APPEND, 0666 );
-                    if (fd != -1)
-                    {
-                        dup2( fd, 2 );
-                        close( fd );
-                    }
-                }
-                (*env)->ReleaseStringUTFChars( env, val_obj, val );
-            }
-            else unsetenv( var );
-
-            (*env)->ReleaseStringUTFChars( env, var_obj, var );
-        }
-    }
-
-    java_object = (*env)->NewGlobalRef( env, obj );
-
-#ifdef __i386__
-    {
-        unsigned short java_fs = wine_get_fs();
-        wine_set_fs( 0 );
-        wine_init( argc, argv, error, sizeof(error) );
-        wine_set_fs( java_fs );
-    }
-#else
-    wine_init( argc, argv, error, sizeof(error) );
-#endif
-    return (*env)->NewStringUTF( env, error );
-}
-
-jint JNI_OnLoad( JavaVM *vm, void *reserved )
-{
-    static const JNINativeMethod method =
-    {
-        "wine_init", "([Ljava/lang/String;[Ljava/lang/String;)Ljava/lang/String;", wine_init_jni
-    };
-
-    JNIEnv *env;
-    jclass class;
-
-    java_vm = vm;
-    if ((*vm)->AttachCurrentThread( vm, &env, NULL ) != JNI_OK) return JNI_ERR;
-    if (!(class = (*env)->FindClass( env, WINE_JAVA_CLASS ))) return JNI_ERR;
-    (*env)->RegisterNatives( env, class, &method, 1 );
-    return JNI_VERSION_1_6;
-}
-
-#endif  /* __ANDROID__ */
 
 /***********************************************************************
  *           wine_init
  *
  * Main Wine initialisation.
  */
-void wine_init( int argc, char *argv[], char *error, int error_size )
+void wine_init_obsolete( int argc, char *argv[], char *error, int error_size )
 {
     struct dll_path_context context;
     char *path;
@@ -1297,58 +983,16 @@ void wine_init( int argc, char *argv[], char *error, int error_size )
     set_max_limit( RLIMIT_AS );
 #endif
 
-#ifdef __APPLE__ /* CrossOver Hack 13438 */
-    apple_override_bundle_name(argc, argv);
-#endif
-
-#ifdef __i386_on_x86_64__
-#ifdef __APPLE__
-    {
-        LDT_ENTRY cs32_entry, ds32_entry;
-
-        wine_32on64_cs64 = wine_get_cs();
-        wine_32on64_cs32 = wine_ldt_alloc_entries(2);
-
-        if (!wine_32on64_cs32)
-        {
-            snprintf(error, error_size, "couldn't allocate LDT entries for 32-bit code and data segments\n");
-            return;
-        }
-        wine_ldt_set_base( &cs32_entry, NULL );
-        wine_ldt_set_limit( &cs32_entry, -1 );
-        wine_ldt_set_flags( &cs32_entry, WINE_LDT_FLAGS_CODE | WINE_LDT_FLAGS_32BIT );
-        if (wine_ldt_set_entry( wine_32on64_cs32, &cs32_entry ) < 0)
-        {
-            snprintf(error, error_size, "failed to set the LDT entry for 32-bit code segment\n");
-            return;
-        }
-
-        wine_32on64_ds32 = wine_32on64_cs32 + (1 << 3);
-        wine_ldt_set_base( &ds32_entry, NULL );
-        wine_ldt_set_limit( &ds32_entry, -1 );
-        wine_ldt_set_flags( &ds32_entry, WINE_LDT_FLAGS_DATA | WINE_LDT_FLAGS_32BIT );
-        if (wine_ldt_set_entry( wine_32on64_ds32, &ds32_entry ) < 0)
-        {
-            snprintf(error, error_size, "failed to set the LDT entry for 32-bit data segment\n");
-            return;
-        }
-    }
-#endif
-#endif
-
-    wine_init_argv0_path( argv[0] );
+    wine_init_argv0_path_obsolete( argv[0] );
     build_dll_path();
     __wine_main_argc = argc;
     __wine_main_argv = argv;
     __wine_main_environ = __wine_get_main_environment();
     mmap_init();
-#if defined(__APPLE__) && defined(__i386_on_x86_64__)
-    install_dyld_allocation_hooks();
-#endif
 
     for (path = first_dll_path( "ntdll.dll", 0, &context ); path; path = next_dll_path( &context ))
     {
-        if ((ntdll = wine_dlopen( path, RTLD_NOW, error, error_size )))
+        if ((ntdll = dlopen( path, RTLD_NOW )))
         {
             /* if we didn't use the default dll dir, remove it from the search path */
             if (default_dlldir[0] && context.index < nb_dll_paths + 2) nb_dll_paths--;
@@ -1357,8 +1001,21 @@ void wine_init( int argc, char *argv[], char *error, int error_size )
     }
     free_dll_path( &context );
 
-    if (!ntdll) return;
-    if (!(init_func = wine_dlsym( ntdll, "__wine_process_init", error, error_size ))) return;
+    if (!ntdll || !(init_func = dlsym( ntdll, "__wine_process_init" )))
+    {
+        if (error && error_size)
+        {
+            const char *s = dlerror();
+            if (s)
+            {
+                size_t len = min( strlen(s), error_size - 1 );
+                memcpy( error, s, len );
+                error[len] = 0;
+            }
+            else error[0] = 0;
+        }
+        return;
+    }
 #ifdef __APPLE__
     apple_main_thread( init_func );
 #else
@@ -1366,138 +1023,14 @@ void wine_init( int argc, char *argv[], char *error, int error_size )
 #endif
 }
 
+__ASM_OBSOLETE(wine_dlopen);
+__ASM_OBSOLETE(wine_dlsym);
+__ASM_OBSOLETE(wine_dlclose);
+__ASM_OBSOLETE(wine_dll_enum_load_path);
+__ASM_OBSOLETE(wine_dll_get_owner);
+__ASM_OBSOLETE(wine_dll_load);
+__ASM_OBSOLETE(wine_dll_load_main_exe);
+__ASM_OBSOLETE(wine_dll_unload);
+__ASM_OBSOLETE(wine_init);
 
-/*
- * These functions provide wrappers around dlopen() and associated
- * functions.  They work around a bug in glibc 2.1.x where calling
- * a dl*() function after a previous dl*() function has failed
- * without a dlerror() call between the two will cause a crash.
- * They all take a pointer to a buffer that
- * will receive the error description (from dlerror()).  This
- * parameter may be NULL if the error description is not required.
- */
-
-#ifndef RTLD_FIRST
-#define RTLD_FIRST 0
-#endif
-
-/***********************************************************************
- *		wine_dlopen
- */
-void *wine_dlopen( const char *filename, int flag, char *error, size_t errorsize )
-{
-    void *ret;
-    const char *s;
-
-#ifdef __APPLE__
-    /* the Mac OS loader pretends to be able to load PE files, so avoid them here */
-    unsigned char magic[2];
-    int fd = open( filename, O_RDONLY );
-    if (fd != -1)
-    {
-        if (pread( fd, magic, 2, 0 ) == 2 && magic[0] == 'M' && magic[1] == 'Z')
-        {
-            if (error && errorsize)
-            {
-                static const char msg[] = "MZ format";
-                size_t len = min( errorsize, sizeof(msg) );
-                memcpy( error, msg, len );
-                error[len - 1] = 0;
-            }
-            close( fd );
-            return NULL;
-        }
-        close( fd );
-    }
-#endif
-    dlerror(); dlerror();
-#ifdef __sun
-    if (strchr( filename, ':' ))
-    {
-        char path[PATH_MAX];
-        /* Solaris' brain damaged dlopen() treats ':' as a path separator */
-        realpath( filename, path );
-        ret = dlopen( path, flag | RTLD_FIRST );
-    }
-    else
-#endif
-    ret = dlopen( filename, flag | RTLD_FIRST );
-    s = dlerror();
-    if (error && errorsize)
-    {
-        if (s)
-        {
-            size_t len = strlen(s);
-            if (len >= errorsize) len = errorsize - 1;
-            memcpy( error, s, len );
-            error[len] = 0;
-        }
-        else error[0] = 0;
-    }
-    dlerror();
-    return ret;
-}
-
-/***********************************************************************
- *		wine_dlsym
- */
-void *wine_dlsym( void *handle, const char *symbol, char *error, size_t errorsize )
-{
-    void *ret;
-    const char *s;
-    dlerror(); dlerror();
-    ret = dlsym( handle, symbol );
-    s = dlerror();
-    if (error && errorsize)
-    {
-        if (s)
-        {
-            size_t len = strlen(s);
-            if (len >= errorsize) len = errorsize - 1;
-            memcpy( error, s, len );
-            error[len] = 0;
-        }
-        else error[0] = 0;
-    }
-    dlerror();
-    return ret;
-}
-
-/***********************************************************************
- *		wine_dlclose
- */
-int wine_dlclose( void *handle, char *error, size_t errorsize )
-{
-    int ret;
-    const char *s;
-    dlerror(); dlerror();
-    ret = dlclose( handle );
-    s = dlerror();
-    if (error && errorsize)
-    {
-        if (s)
-        {
-            size_t len = strlen(s);
-            if (len >= errorsize) len = errorsize - 1;
-            memcpy( error, s, len );
-            error[len] = 0;
-        }
-        else error[0] = 0;
-    }
-    dlerror();
-    return ret;
-}
-
-/***********************************************************************
- *		wine_enable_dlopen_redirect
- */
-int wine_enable_dlopen_redirect(int enable)
-{
-#if defined(__APPLE__) && defined(__i386_on_x86_64__)
-    int old = divert_dyld_allocations;
-    divert_dyld_allocations = enable;
-    return old;
-#else
-    return 0;
-#endif
-}
+#endif /* __ASM_OBSOLETE */

@@ -21,7 +21,7 @@
 #include "wingdi.h"
 #include "mmreg.h"
 #include "mmsystem.h"
-#include "mediaerr.h"
+#include "dmo.h"
 #include "wmcodecdsp.h"
 #include "uuids.h"
 #include "wine/test.h"
@@ -40,8 +40,10 @@ static REFERENCE_TIME samplelen(DWORD samples, int rate)
     return (REFERENCE_TIME) 10000000 * samples / rate;
 }
 
-struct test_buffer {
+struct test_buffer
+{
     IMediaBuffer IMediaBuffer_iface;
+    LONG refcount;
     BYTE data[5000];
     DWORD len;
     DWORD maxlen;
@@ -65,12 +67,14 @@ static HRESULT WINAPI Buffer_QueryInterface(IMediaBuffer *iface, REFIID iid, voi
 
 static ULONG WINAPI Buffer_AddRef(IMediaBuffer *iface)
 {
-    return 2;
+    struct test_buffer *buffer = impl_from_IMediaBuffer(iface);
+    return InterlockedIncrement(&buffer->refcount);
 }
 
 static ULONG WINAPI Buffer_Release(IMediaBuffer *iface)
 {
-    return 1;
+    struct test_buffer *buffer = impl_from_IMediaBuffer(iface);
+    return InterlockedDecrement(&buffer->refcount);
 }
 
 static HRESULT WINAPI Buffer_SetLength(IMediaBuffer *iface, DWORD len)
@@ -107,8 +111,8 @@ static IMediaBufferVtbl Buffer_vtbl = {
 static void test_convert(void)
 {
     static const BYTE mp3hdr[] = {0xff,0xfb,0x14,0xc4};
-    struct test_buffer outbuf = {{&Buffer_vtbl}};
-    struct test_buffer inbuf = {{&Buffer_vtbl}};
+    struct test_buffer outbuf = {.IMediaBuffer_iface = {&Buffer_vtbl}, .refcount = 1};
+    struct test_buffer inbuf = {.IMediaBuffer_iface = {&Buffer_vtbl}, .refcount = 1};
     DMO_MEDIA_TYPE in = {{0}}, out = {{0}};
     MPEGLAYER3WAVEFORMAT mp3fmt = {{0}};
     DMO_OUTPUT_DATA_BUFFER output;
@@ -169,6 +173,7 @@ static void test_convert(void)
     inbuf.len = 96 * 5;
     hr = IMediaObject_ProcessInput(dmo, 0, &inbuf.IMediaBuffer_iface, 0, 0, 0);
     ok(hr == S_OK, "got %#x\n", hr);
+    ok(inbuf.refcount == 2, "Got refcount %d.\n", inbuf.refcount);
 
     hr = IMediaObject_ProcessInput(dmo, 0, &inbuf.IMediaBuffer_iface, 0, 0, 0);
     ok(hr == DMO_E_NOTACCEPTING, "got %#x\n", hr);
@@ -194,6 +199,8 @@ static void test_convert(void)
     ok(output.rtTimestamp == 0, "got %s\n", wine_dbgstr_longlong(output.rtTimestamp));
     ok(output.rtTimelength == samplelen(written, 48000),
         "got %s\n", wine_dbgstr_longlong(output.rtTimelength));
+    ok(inbuf.refcount == 2, "Got refcount %d.\n", inbuf.refcount);
+    ok(outbuf.refcount == 1, "Got refcount %d.\n", inbuf.refcount);
 
     hr = IMediaObject_ProcessOutput(dmo, 0, 1, &output, &status);
     ok(hr == S_FALSE, "got %#x\n", hr);
@@ -205,6 +212,8 @@ static void test_convert(void)
 
     hr = IMediaObject_ProcessInput(dmo, 0, &inbuf.IMediaBuffer_iface, 0, 0, 0);
     ok(hr == DMO_E_NOTACCEPTING, "got %#x\n", hr);
+    ok(inbuf.refcount == 2, "Got refcount %d.\n", inbuf.refcount);
+    ok(outbuf.refcount == 1, "Got refcount %d.\n", inbuf.refcount);
 
     /* write the rest */
     outbuf.len = 0;
@@ -219,15 +228,95 @@ static void test_convert(void)
         "got %s\n", wine_dbgstr_longlong(output.rtTimestamp));
     ok(output.rtTimelength == samplelen(outbuf.len, 48000),
         "got %s\n", wine_dbgstr_longlong(output.rtTimelength));
+    ok(inbuf.refcount == 1, "Got refcount %d.\n", inbuf.refcount);
+    ok(outbuf.refcount == 1, "Got refcount %d.\n", inbuf.refcount);
+    written += outbuf.len;
 
     hr = IMediaObject_ProcessOutput(dmo, 0, 1, &output, &status);
     ok(hr == S_FALSE, "got %#x\n", hr);
     ok(output.dwStatus == 0, "got %#x\n", output.dwStatus);
 
+    output.pBuffer = NULL;
+    output.dwStatus = 0xdeadbeef;
+    output.rtTimestamp = 0xdeadbeef;
+    output.rtTimelength = 0xdeadbeef;
+    hr = IMediaObject_ProcessOutput(dmo, DMO_PROCESS_OUTPUT_DISCARD_WHEN_NO_BUFFER, 1, &output, &status);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(!output.pBuffer, "Got buffer %p.\n", output.pBuffer);
+    ok(!output.dwStatus, "Got status %#x.\n", output.dwStatus);
+    ok(output.rtTimestamp == 0xdeadbeef, "Got timestamp %s.\n", wine_dbgstr_longlong(output.rtTimestamp));
+    ok(output.rtTimelength == 0xdeadbeef, "Got length %s.\n", wine_dbgstr_longlong(output.rtTimelength));
+
     hr = IMediaObject_ProcessInput(dmo, 0, &inbuf.IMediaBuffer_iface, 0, 0, 0);
     ok(hr == S_OK, "got %#x\n", hr);
 
+    hr = IMediaObject_ProcessInput(dmo, 0, &inbuf.IMediaBuffer_iface, 0, 0, 0);
+    ok(hr == DMO_E_NOTACCEPTING, "Got hr %#x.\n", hr);
+
+    output.pBuffer = NULL;
+    output.dwStatus = 0xdeadbeef;
+    output.rtTimestamp = 0xdeadbeef;
+    output.rtTimelength = 0xdeadbeef;
+    hr = IMediaObject_ProcessOutput(dmo, DMO_PROCESS_OUTPUT_DISCARD_WHEN_NO_BUFFER, 1, &output, &status);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(!output.pBuffer, "Got buffer %p.\n", output.pBuffer);
+    ok(output.dwStatus == O_INCOMPLETE, "Got status %#x.\n", output.dwStatus);
+    ok(output.rtTimestamp == 0xdeadbeef, "Got timestamp %s.\n", wine_dbgstr_longlong(output.rtTimestamp));
+    ok(output.rtTimelength == 0xdeadbeef, "Got length %s.\n", wine_dbgstr_longlong(output.rtTimelength));
+    ok(inbuf.refcount == 2, "Got refcount %d.\n", inbuf.refcount);
+
+    hr = IMediaObject_ProcessOutput(dmo, 0, 1, &output, &status);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(!output.pBuffer, "Got buffer %p.\n", output.pBuffer);
+    ok(output.dwStatus == O_INCOMPLETE, "Got status %#x.\n", output.dwStatus);
+    ok(output.rtTimestamp == 0xdeadbeef, "Got timestamp %s.\n", wine_dbgstr_longlong(output.rtTimestamp));
+    ok(output.rtTimelength == 0xdeadbeef, "Got length %s.\n", wine_dbgstr_longlong(output.rtTimelength));
+    ok(inbuf.refcount == 2, "Got refcount %d.\n", inbuf.refcount);
+
+    output.pBuffer = &outbuf.IMediaBuffer_iface;
+    outbuf.len = 0;
+    outbuf.maxlen = 5000;
+    hr = IMediaObject_ProcessOutput(dmo, 0, 1, &output, &status);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(outbuf.len > 1152 && outbuf.len <= 5000, "Got length %u.\n", outbuf.len);
+    ok(output.dwStatus == (O_SYNCPOINT | O_TIME | O_TIMELENGTH | O_INCOMPLETE),
+            "Got status %#x.\n", output.dwStatus);
+    ok(output.rtTimestamp == samplelen(written, 48000), "Got timestamp %s.\n",
+            wine_dbgstr_longlong(output.rtTimestamp));
+    ok(output.rtTimelength == samplelen(outbuf.len, 48000),
+            "Got length %s.\n", wine_dbgstr_longlong(output.rtTimelength));
+    ok(inbuf.refcount == 2, "Got refcount %d.\n", inbuf.refcount);
+    ok(outbuf.refcount == 1, "Got refcount %d.\n", inbuf.refcount);
+
+    hr = IMediaObject_Flush(dmo);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(inbuf.refcount == 1, "Got refcount %d.\n", inbuf.refcount);
+
+    outbuf.len = 0;
+    outbuf.maxlen = 5000;
+    hr = IMediaObject_ProcessOutput(dmo, 0, 1, &output, &status);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+
+    hr = IMediaObject_Flush(dmo);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaObject_ProcessInput(dmo, 0, &inbuf.IMediaBuffer_iface, 0, 0, 0);
+    ok(hr == S_OK, "got %#x\n", hr);
+
+    hr = IMediaObject_ProcessOutput(dmo, 0, 1, &output, &status);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(outbuf.len > 1152 && outbuf.len <= 5000, "Got length %u.\n", outbuf.len);
+    ok(output.dwStatus == (O_SYNCPOINT | O_TIME | O_TIMELENGTH | O_INCOMPLETE),
+            "Got status %#x.\n", output.dwStatus);
+    ok(!output.rtTimestamp, "Got timestamp %s.\n", wine_dbgstr_longlong(output.rtTimestamp));
+    ok(output.rtTimelength == samplelen(outbuf.len, 48000),
+            "Got length %s.\n", wine_dbgstr_longlong(output.rtTimelength));
+    ok(inbuf.refcount == 2, "Got refcount %d.\n", inbuf.refcount);
+    ok(outbuf.refcount == 1, "Got refcount %d.\n", inbuf.refcount);
+
     IMediaObject_Release(dmo);
+    ok(inbuf.refcount == 1, "Got outstanding refcount %d.\n", inbuf.refcount);
+    ok(outbuf.refcount == 1, "Got outstanding refcount %d.\n", outbuf.refcount);
 }
 
 static const GUID IID_test_outer = {0xdeadbeef,0,0,{0,0,0,0,0,0,0,0x66}};
@@ -286,6 +375,279 @@ static void test_aggregation(void)
     ok(hr == E_NOINTERFACE, "got %#x\n", hr);
 }
 
+static void test_stream_info(void)
+{
+    MPEGLAYER3WAVEFORMAT input_format =
+    {
+        .wfx.nSamplesPerSec = 48000,
+    };
+    DMO_MEDIA_TYPE input_mt =
+    {
+        .majortype = MEDIATYPE_Audio,
+        .subtype = WMMEDIASUBTYPE_MP3,
+        .formattype = FORMAT_WaveFormatEx,
+        .cbFormat = sizeof(input_format),
+        .pbFormat = (BYTE *)&input_format,
+    };
+
+    WAVEFORMATEX output_format =
+    {
+        .nSamplesPerSec = 48000,
+    };
+    DMO_MEDIA_TYPE output_mt =
+    {
+        .formattype = FORMAT_WaveFormatEx,
+        .cbFormat = sizeof(output_format),
+        .pbFormat = (BYTE *)&output_format,
+    };
+
+    DWORD input_count, output_count, flags, size, lookahead, alignment;
+    WORD channels, depth;
+    IMediaObject *dmo;
+    HRESULT hr;
+
+    hr = CoCreateInstance(&CLSID_CMP3DecMediaObject, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IMediaObject, (void **)&dmo);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaObject_GetStreamCount(dmo, &input_count, &output_count);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(input_count == 1, "Got input count %u.\n", input_count);
+    ok(output_count == 1, "Got output count %u.\n", output_count);
+
+    flags = 0xdeadbeef;
+    hr = IMediaObject_GetInputStreamInfo(dmo, 0, &flags);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(!flags, "Got flags %#x.\n", flags);
+
+    flags = 0xdeadbeef;
+    hr = IMediaObject_GetOutputStreamInfo(dmo, 0, &flags);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(!flags, "Got flags %#x.\n", flags);
+
+    hr = IMediaObject_GetInputSizeInfo(dmo, 0, &size, &lookahead, &alignment);
+    ok(hr == DMO_E_TYPE_NOT_SET, "Got hr %#x.\n", hr);
+    hr = IMediaObject_GetOutputSizeInfo(dmo, 0, &size, &alignment);
+    ok(hr == DMO_E_TYPE_NOT_SET, "Got hr %#x.\n", hr);
+
+    for (channels = 1; channels <= 2; ++channels)
+    {
+        input_format.wfx.nChannels = channels;
+        output_format.nChannels = channels;
+
+        hr = IMediaObject_SetInputType(dmo, 0, &input_mt, 0);
+        ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+        hr = IMediaObject_GetInputSizeInfo(dmo, 0, &size, &lookahead, &alignment);
+        ok(hr == DMO_E_TYPE_NOT_SET, "Got hr %#x.\n", hr);
+        hr = IMediaObject_GetOutputSizeInfo(dmo, 0, &size, &alignment);
+        ok(hr == DMO_E_TYPE_NOT_SET, "Got hr %#x.\n", hr);
+
+        for (depth = 8; depth <= 16; depth += 8)
+        {
+            output_format.wBitsPerSample = depth;
+            output_format.nBlockAlign = channels * depth / 8;
+            output_format.nAvgBytesPerSec = 48000 * output_format.nBlockAlign;
+
+            hr = IMediaObject_SetOutputType(dmo, 0, &output_mt, 0);
+            ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+            size = lookahead = alignment = 0xdeadbeef;
+            hr = IMediaObject_GetInputSizeInfo(dmo, 0, &size, &lookahead, &alignment);
+            ok(hr == S_OK, "Got hr %#x.\n", hr);
+            ok(!size || broken(size == output_format.nBlockAlign) /* Vista */,
+                    "Got size %u for %u channels, depth %u.\n", size, channels, depth);
+            ok(lookahead == 0xdeadbeef, "Got lookahead %u.\n", lookahead);
+            ok(alignment == 1, "Got alignment %u.\n", alignment);
+
+            size = alignment = 0xdeadbeef;
+            hr = IMediaObject_GetOutputSizeInfo(dmo, 0, &size, &alignment);
+            ok(hr == S_OK, "Got hr %#x.\n", hr);
+            /* Vista returns the expected size; all later versions act as if
+             * channels == 2 for some reason. */
+            ok(size >= channels * 1152 * depth / 8,
+                    "Got size %u for %u channels, depth %u.\n", size, channels, depth);
+            ok(alignment == 1, "Got alignment %u.\n", alignment);
+        }
+
+        hr = IMediaObject_SetOutputType(dmo, 0, &output_mt, DMO_SET_TYPEF_CLEAR);
+        ok(hr == S_OK, "Got hr %#x.\n", hr);
+    }
+
+    IMediaObject_Release(dmo);
+}
+
+static void test_media_types(void)
+{
+    MPEGLAYER3WAVEFORMAT mp3fmt =
+    {
+        .wfx.nChannels = 2,
+        .wfx.nSamplesPerSec = 48000,
+    };
+    DMO_MEDIA_TYPE input_mt =
+    {
+        .majortype = MEDIATYPE_Audio,
+        .subtype = WMMEDIASUBTYPE_MP3,
+        .formattype = FORMAT_WaveFormatEx,
+        .cbFormat = sizeof(mp3fmt),
+        .pbFormat = (BYTE *)&mp3fmt,
+    };
+
+    WAVEFORMATEX expect_wfx =
+    {
+        .wFormatTag = WAVE_FORMAT_PCM,
+        .nSamplesPerSec = 48000,
+    };
+
+    WAVEFORMATEX output_format =
+    {
+        .nChannels = 1,
+        .nSamplesPerSec = 48000,
+        .nAvgBytesPerSec = 48000,
+        .nBlockAlign = 1,
+        .wBitsPerSample = 8,
+    };
+    DMO_MEDIA_TYPE output_mt =
+    {
+        .formattype = FORMAT_WaveFormatEx,
+        .cbFormat = sizeof(output_format),
+        .pbFormat = (BYTE *)&output_format,
+    };
+
+    DMO_MEDIA_TYPE mt;
+    IMediaObject *dmo;
+    HRESULT hr;
+    DWORD i;
+
+    hr = CoCreateInstance(&CLSID_CMP3DecMediaObject, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IMediaObject, (void **)&dmo);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    memset(&mt, 0xcc, sizeof(DMO_MEDIA_TYPE));
+    hr = IMediaObject_GetInputType(dmo, 0, 0, &mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(IsEqualGUID(&mt.majortype, &MEDIATYPE_Audio), "Got major type %s.\n", wine_dbgstr_guid(&mt.majortype));
+    ok(IsEqualGUID(&mt.subtype, &WMMEDIASUBTYPE_MP3), "Got subtype %s.\n", wine_dbgstr_guid(&mt.subtype));
+    ok(mt.bFixedSizeSamples == 0xcccccccc, "Got fixed size %d.\n", mt.bFixedSizeSamples);
+    ok(mt.bTemporalCompression == 0xcccccccc, "Got temporal compression %d.\n", mt.bTemporalCompression);
+    ok(mt.lSampleSize == 0xcccccccc, "Got sample size %u.\n", mt.lSampleSize);
+    ok(IsEqualGUID(&mt.formattype, &GUID_NULL), "Got format type %s.\n",
+            wine_dbgstr_guid(&mt.formattype));
+    ok(!mt.pUnk, "Got pUnk %p.\n", mt.pUnk);
+    ok(!mt.cbFormat, "Got format size %u.\n", mt.cbFormat);
+    ok(!mt.pbFormat, "Got format block %p.\n", mt.pbFormat);
+
+    hr = IMediaObject_GetInputType(dmo, 0, 1, &mt);
+    ok(hr == DMO_E_NO_MORE_ITEMS, "Got hr %#x.\n", hr);
+
+    memset(&mt, 0xcc, sizeof(DMO_MEDIA_TYPE));
+    hr = IMediaObject_GetOutputType(dmo, 0, 0, &mt);
+    ok(hr == DMO_E_TYPE_NOT_SET, "Got hr %#x.\n", hr);
+
+    hr = IMediaObject_SetInputType(dmo, 0, &input_mt, DMO_SET_TYPEF_TEST_ONLY);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    input_mt.majortype = GUID_NULL;
+    hr = IMediaObject_SetInputType(dmo, 0, &input_mt, DMO_SET_TYPEF_TEST_ONLY);
+    ok(hr == DMO_E_TYPE_NOT_ACCEPTED, "Got hr %#x.\n", hr);
+    input_mt.majortype = MEDIATYPE_Stream;
+    hr = IMediaObject_SetInputType(dmo, 0, &input_mt, DMO_SET_TYPEF_TEST_ONLY);
+    ok(hr == DMO_E_TYPE_NOT_ACCEPTED, "Got hr %#x.\n", hr);
+    input_mt.majortype = MEDIATYPE_Audio;
+
+    input_mt.subtype = GUID_NULL;
+    hr = IMediaObject_SetInputType(dmo, 0, &input_mt, DMO_SET_TYPEF_TEST_ONLY);
+    ok(hr == DMO_E_TYPE_NOT_ACCEPTED, "Got hr %#x.\n", hr);
+    input_mt.subtype = MEDIASUBTYPE_PCM;
+    hr = IMediaObject_SetInputType(dmo, 0, &input_mt, DMO_SET_TYPEF_TEST_ONLY);
+    ok(hr == DMO_E_TYPE_NOT_ACCEPTED, "Got hr %#x.\n", hr);
+    input_mt.subtype = WMMEDIASUBTYPE_MP3;
+
+    input_mt.formattype = GUID_NULL;
+    hr = IMediaObject_SetInputType(dmo, 0, &input_mt, DMO_SET_TYPEF_TEST_ONLY);
+    ok(hr == DMO_E_TYPE_NOT_ACCEPTED, "Got hr %#x.\n", hr);
+    input_mt.formattype = FORMAT_None;
+    hr = IMediaObject_SetInputType(dmo, 0, &input_mt, DMO_SET_TYPEF_TEST_ONLY);
+    ok(hr == DMO_E_TYPE_NOT_ACCEPTED, "Got hr %#x.\n", hr);
+    input_mt.formattype = FORMAT_WaveFormatEx;
+
+    hr = IMediaObject_SetInputType(dmo, 0, &input_mt, 0);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    for (i = 0; i < 4; ++i)
+    {
+        memset(&mt, 0xcc, sizeof(DMO_MEDIA_TYPE));
+        hr = IMediaObject_GetOutputType(dmo, 0, i, &mt);
+        ok(hr == S_OK, "Got hr %#x.\n", hr);
+        ok(IsEqualGUID(&mt.majortype, &MEDIATYPE_Audio), "Got major type %s.\n", wine_dbgstr_guid(&mt.majortype));
+        ok(IsEqualGUID(&mt.subtype, &MEDIASUBTYPE_PCM), "Got subtype %s.\n", wine_dbgstr_guid(&mt.subtype));
+        ok(mt.bFixedSizeSamples == 0xcccccccc, "Got fixed size %d.\n", mt.bFixedSizeSamples);
+        ok(mt.bTemporalCompression == 0xcccccccc, "Got temporal compression %d.\n", mt.bTemporalCompression);
+        ok(mt.lSampleSize == 0xcccccccc, "Got sample size %u.\n", mt.lSampleSize);
+        ok(IsEqualGUID(&mt.formattype, &FORMAT_WaveFormatEx), "Got format type %s.\n",
+                wine_dbgstr_guid(&mt.formattype));
+        ok(!mt.pUnk, "Got pUnk %p.\n", mt.pUnk);
+        ok(mt.cbFormat >= sizeof(WAVEFORMATEX), "Got format size %u.\n", mt.cbFormat);
+        ok(!!mt.pbFormat, "Got format block %p.\n", mt.pbFormat);
+
+        expect_wfx.nChannels = (i / 2) ? 1 : 2;
+        expect_wfx.wBitsPerSample = (i % 2) ? 8 : 16;
+        expect_wfx.nBlockAlign = expect_wfx.nChannels * expect_wfx.wBitsPerSample / 8;
+        expect_wfx.nAvgBytesPerSec = 48000 * expect_wfx.nBlockAlign;
+        ok(!memcmp(mt.pbFormat, &expect_wfx, sizeof(WAVEFORMATEX)), "Format blocks didn't match.\n");
+
+        MoFreeMediaType(&mt);
+    }
+
+    hr = IMediaObject_GetOutputType(dmo, 0, 4, &mt);
+    ok(hr == DMO_E_NO_MORE_ITEMS, "Got hr %#x.\n", hr);
+
+    mp3fmt.wfx.nChannels = 1;
+    hr = IMediaObject_SetInputType(dmo, 0, &input_mt, 0);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    for (i = 0; i < 2; ++i)
+    {
+        memset(&mt, 0xcc, sizeof(DMO_MEDIA_TYPE));
+        hr = IMediaObject_GetOutputType(dmo, 0, i, &mt);
+        ok(hr == S_OK, "Got hr %#x.\n", hr);
+        ok(IsEqualGUID(&mt.majortype, &MEDIATYPE_Audio), "Got major type %s.\n", wine_dbgstr_guid(&mt.majortype));
+        ok(IsEqualGUID(&mt.subtype, &MEDIASUBTYPE_PCM), "Got subtype %s.\n", wine_dbgstr_guid(&mt.subtype));
+        ok(mt.bFixedSizeSamples == 0xcccccccc, "Got fixed size %d.\n", mt.bFixedSizeSamples);
+        ok(mt.bTemporalCompression == 0xcccccccc, "Got temporal compression %d.\n", mt.bTemporalCompression);
+        ok(mt.lSampleSize == 0xcccccccc, "Got sample size %u.\n", mt.lSampleSize);
+        ok(IsEqualGUID(&mt.formattype, &FORMAT_WaveFormatEx), "Got format type %s.\n",
+                wine_dbgstr_guid(&mt.formattype));
+        ok(!mt.pUnk, "Got pUnk %p.\n", mt.pUnk);
+        ok(mt.cbFormat >= sizeof(WAVEFORMATEX), "Got format size %u.\n", mt.cbFormat);
+        ok(!!mt.pbFormat, "Got format block %p.\n", mt.pbFormat);
+
+        expect_wfx.nChannels = 1;
+        expect_wfx.wBitsPerSample = (i % 2) ? 8 : 16;
+        expect_wfx.nBlockAlign = expect_wfx.nChannels * expect_wfx.wBitsPerSample / 8;
+        expect_wfx.nAvgBytesPerSec = 48000 * expect_wfx.nBlockAlign;
+        ok(!memcmp(mt.pbFormat, &expect_wfx, sizeof(WAVEFORMATEX)), "Format blocks didn't match.\n");
+
+        MoFreeMediaType(&mt);
+    }
+
+    hr = IMediaObject_GetOutputType(dmo, 0, 2, &mt);
+    ok(hr == DMO_E_NO_MORE_ITEMS, "Got hr %#x.\n", hr);
+
+    hr = IMediaObject_SetOutputType(dmo, 0, &output_mt, DMO_SET_TYPEF_TEST_ONLY);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    output_mt.formattype = GUID_NULL;
+    hr = IMediaObject_SetOutputType(dmo, 0, &output_mt, DMO_SET_TYPEF_TEST_ONLY);
+    ok(hr == DMO_E_TYPE_NOT_ACCEPTED, "Got hr %#x.\n", hr);
+    output_mt.formattype = FORMAT_None;
+    hr = IMediaObject_SetOutputType(dmo, 0, &output_mt, DMO_SET_TYPEF_TEST_ONLY);
+    ok(hr == DMO_E_TYPE_NOT_ACCEPTED, "Got hr %#x.\n", hr);
+    output_mt.formattype = FORMAT_WaveFormatEx;
+
+    IMediaObject_Release(dmo);
+}
+
 START_TEST(mp3dmod)
 {
     IMediaObject *dmo;
@@ -304,6 +666,8 @@ START_TEST(mp3dmod)
 
     test_convert();
     test_aggregation();
+    test_stream_info();
+    test_media_types();
 
     CoUninitialize();
 }

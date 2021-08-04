@@ -109,6 +109,8 @@ typedef enum _CONFIGURATION_TYPE
     MaximumType
 } CONFIGURATION_TYPE, *PCONFIGURATION_TYPE;
 
+#define IMAGE_ADDRESSING_MODE_32BIT 3
+
 typedef struct _IMAGE_INFO
 {
     union
@@ -120,7 +122,11 @@ typedef struct _IMAGE_INFO
             ULONG SystemModeImage      : 1;
             ULONG ImageMappedToAllPids : 1;
             ULONG ExtendedInfoPresent  : 1;
-            ULONG Reserved             : 21;
+            ULONG MachineTypeMismatch : 1;
+            ULONG ImageSignatureLevel : 4;
+            ULONG ImageSignatureType : 3;
+            ULONG ImagePartialMap : 1;
+            ULONG Reserved : 12;
         } DUMMYSTRUCTNAME;
     } DUMMYUNIONNAME;
     PVOID  ImageBase;
@@ -142,6 +148,40 @@ typedef struct _FILE_VALID_DATA_LENGTH_INFORMATION
   LARGE_INTEGER ValidDataLength;
 } FILE_VALID_DATA_LENGTH_INFORMATION, *PFILE_VALID_DATA_LENGTH_INFORMATION;
 
+typedef enum _RTL_GENERIC_COMPARE_RESULTS
+{
+    GenericLessThan,
+    GenericGreaterThan,
+    GenericEqual
+} RTL_GENERIC_COMPARE_RESULTS;
+
+typedef struct _RTL_SPLAY_LINKS
+{
+    struct _RTL_SPLAY_LINKS *Parent;
+    struct _RTL_SPLAY_LINKS *LeftChild;
+    struct _RTL_SPLAY_LINKS *RightChild;
+} RTL_SPLAY_LINKS, *PRTL_SPLAY_LINKS;
+
+struct _RTL_GENERIC_TABLE;
+
+typedef RTL_GENERIC_COMPARE_RESULTS (WINAPI *PRTL_GENERIC_COMPARE_ROUTINE)(struct _RTL_GENERIC_TABLE *, void *, void *);
+typedef void * (WINAPI *PRTL_GENERIC_ALLOCATE_ROUTINE)(struct _RTL_GENERIC_TABLE *, LONG);
+typedef void (WINAPI *PRTL_GENERIC_FREE_ROUTINE)(struct _RTL_GENERIC_TABLE *Table, void *);
+
+typedef struct _RTL_GENERIC_TABLE
+{
+    PRTL_SPLAY_LINKS TableRoot;
+    LIST_ENTRY InsertOrderList;
+    LIST_ENTRY *OrderedPointer;
+    ULONG WhichOrderedElement;
+    ULONG NumberGenericTableElements;
+    PRTL_GENERIC_COMPARE_ROUTINE CompareRoutine;
+    PRTL_GENERIC_ALLOCATE_ROUTINE AllocateRoutine;
+    PRTL_GENERIC_FREE_ROUTINE FreeRoutine;
+    void *TableContext;
+} RTL_GENERIC_TABLE;
+typedef RTL_GENERIC_TABLE *PRTL_GENERIC_TABLE;
+
 typedef struct _RTL_BALANCED_LINKS {
     struct _RTL_BALANCED_LINKS *Parent;
     struct _RTL_BALANCED_LINKS *LeftChild;
@@ -153,15 +193,9 @@ typedef RTL_BALANCED_LINKS *PRTL_BALANCED_LINKS;
 
 struct _RTL_AVL_TABLE;
 
-typedef enum _RTL_GENERIC_COMPARE_RESULTS {
-    GenericLessThan,
-    GenericGreaterThan,
-    GenericEqual
-} RTL_GENERIC_COMPARE_RESULTS;
-
 typedef RTL_GENERIC_COMPARE_RESULTS (WINAPI *PRTL_AVL_COMPARE_ROUTINE)(struct _RTL_AVL_TABLE *, void *, void *);
 
-typedef void (WINAPI *PRTL_AVL_ALLOCATE_ROUTINE)(struct _RTL_AVL_TABLE *, LONG);
+typedef void * (WINAPI *PRTL_AVL_ALLOCATE_ROUTINE)(struct _RTL_AVL_TABLE *, LONG);
 
 typedef void (WINAPI *PRTL_AVL_FREE_ROUTINE )(struct _RTL_AVL_TABLE *, void *buffer);
 
@@ -225,8 +259,10 @@ NTSTATUS  WINAPI KeExpandKernelStackAndCallout(PEXPAND_STACK_CALLOUT,void*,SIZE_
 void      WINAPI KeSetTargetProcessorDpc(PRKDPC,CCHAR);
 BOOLEAN   WINAPI MmIsAddressValid(void *);
 HANDLE    WINAPI PsGetProcessId(PEPROCESS);
+void *    WINAPI PsGetProcessSectionBaseAddress(PEPROCESS);
 HANDLE    WINAPI PsGetThreadId(PETHREAD);
 HANDLE    WINAPI PsGetThreadProcessId(PETHREAD);
+NTSTATUS  WINAPI PsRemoveLoadImageNotifyRoutine(PLOAD_IMAGE_NOTIFY_ROUTINE);
 NTSTATUS  WINAPI PsSetCreateProcessNotifyRoutine(PCREATE_PROCESS_NOTIFY_ROUTINE,BOOLEAN);
 NTSTATUS  WINAPI PsSetCreateProcessNotifyRoutineEx(PCREATE_PROCESS_NOTIFY_ROUTINE_EX,BOOLEAN);
 NTSTATUS  WINAPI PsSetCreateThreadNotifyRoutine(PCREATE_THREAD_NOTIFY_ROUTINE);

@@ -25,9 +25,7 @@
 #include "wine/heap.h"
 #include "wine/list.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(httpapi);
-
-static const WCHAR device_nameW[] = {'\\','D','e','v','i','c','e','\\','H','t','t','p','\\','R','e','q','Q','u','e','u','e',0};
+WINE_DEFAULT_DEBUG_CHANNEL(http);
 
 static WCHAR *heap_strdupW(const WCHAR *str)
 {
@@ -53,7 +51,6 @@ static WCHAR *heap_strdupW(const WCHAR *str)
  */
 ULONG WINAPI HttpInitialize(HTTPAPI_VERSION version, ULONG flags, void *reserved)
 {
-    static const WCHAR httpW[] = {'h','t','t','p',0};
     SC_HANDLE manager, service;
 
     TRACE("version %u.%u, flags %#x, reserved %p.\n", version.HttpApiMajorVersion,
@@ -68,7 +65,7 @@ ULONG WINAPI HttpInitialize(HTTPAPI_VERSION version, ULONG flags, void *reserved
     if (!(manager = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT)))
         return GetLastError();
 
-    if (!(service = OpenServiceW(manager, httpW, SERVICE_START)))
+    if (!(service = OpenServiceW(manager, L"http", SERVICE_START)))
     {
         ERR("Failed to open HTTP service, error %u.\n", GetLastError());
         CloseServiceHandle(manager);
@@ -205,7 +202,7 @@ ULONG WINAPI HttpCreateHttpHandle(HANDLE *handle, ULONG reserved)
     if (!handle)
         return ERROR_INVALID_PARAMETER;
 
-    RtlInitUnicodeString(&string, device_nameW);
+    RtlInitUnicodeString(&string, L"\\Device\\Http\\ReqQueue");
     attr.ObjectName = &string;
     return RtlNtStatusToDosError(NtCreateFile(handle, 0, &attr, &iosb, NULL,
             FILE_ATTRIBUTE_NORMAL, 0, FILE_OPEN, FILE_NON_DIRECTORY_FILE, NULL, 0));
@@ -304,13 +301,17 @@ ULONG WINAPI HttpReceiveRequestEntityBody(HANDLE queue, HTTP_REQUEST_ID id, ULON
         ovl = &sync_ovl;
     }
 
-    if (!DeviceIoControl(queue, IOCTL_HTTP_RECEIVE_BODY, &params, sizeof(params), buffer, size, NULL, ovl))
+    if (!DeviceIoControl(queue, IOCTL_HTTP_RECEIVE_BODY, &params, sizeof(params), buffer, size, ret_size, ovl))
         ret = GetLastError();
 
     if (ovl == &sync_ovl)
     {
-        if (!GetOverlappedResult(queue, ovl, ret_size, TRUE))
-            ret = GetLastError();
+        if (ret == ERROR_IO_PENDING)
+        {
+            ret = ERROR_SUCCESS;
+            if (!GetOverlappedResult(queue, ovl, ret_size, TRUE))
+                ret = GetLastError();
+        }
         CloseHandle(sync_ovl.hEvent);
     }
 
@@ -348,14 +349,17 @@ ULONG WINAPI HttpReceiveHttpRequest(HANDLE queue, HTTP_REQUEST_ID id, ULONG flag
         ovl = &sync_ovl;
     }
 
-    if (!DeviceIoControl(queue, IOCTL_HTTP_RECEIVE_REQUEST, &params, sizeof(params), request, size, NULL, ovl))
+    if (!DeviceIoControl(queue, IOCTL_HTTP_RECEIVE_REQUEST, &params, sizeof(params), request, size, ret_size, ovl))
         ret = GetLastError();
 
     if (ovl == &sync_ovl)
     {
-        ret = ERROR_SUCCESS;
-        if (!GetOverlappedResult(queue, ovl, ret_size, TRUE))
-            ret = GetLastError();
+        if (ret == ERROR_IO_PENDING)
+        {
+            ret = ERROR_SUCCESS;
+            if (!GetOverlappedResult(queue, ovl, ret_size, TRUE))
+                ret = GetLastError();
+        }
         CloseHandle(sync_ovl.hEvent);
     }
 
@@ -650,25 +654,29 @@ ULONG WINAPI HttpCloseUrlGroup(HTTP_URL_GROUP_ID id)
 ULONG WINAPI HttpSetUrlGroupProperty(HTTP_URL_GROUP_ID id, HTTP_SERVER_PROPERTY property, void *value, ULONG length)
 {
     struct url_group *group = get_url_group(id);
-    const HTTP_BINDING_INFO *info = value;
 
     TRACE("id %s, property %u, value %p, length %u.\n",
             wine_dbgstr_longlong(id), property, value, length);
 
-    if (property != HttpServerBindingProperty)
+    switch (property)
     {
-        FIXME("Unhandled property %u.\n", property);
-        return ERROR_CALL_NOT_IMPLEMENTED;
+        case HttpServerBindingProperty:
+        {
+            const HTTP_BINDING_INFO *info = value;
+
+            TRACE("Binding to queue %p.\n", info->RequestQueueHandle);
+            group->queue = info->RequestQueueHandle;
+            if (group->url)
+                add_url(group->queue, group->url, group->context);
+            return ERROR_SUCCESS;
+        }
+        case HttpServerLoggingProperty:
+            WARN("Ignoring logging property.\n");
+            return ERROR_SUCCESS;
+        default:
+            FIXME("Unhandled property %u.\n", property);
+            return ERROR_CALL_NOT_IMPLEMENTED;
     }
-
-    TRACE("Binding to queue %p.\n", info->RequestQueueHandle);
-
-    group->queue = info->RequestQueueHandle;
-
-    if (group->url)
-        add_url(group->queue, group->url, group->context);
-
-    return ERROR_SUCCESS;
 }
 
 /***********************************************************************
@@ -741,7 +749,7 @@ ULONG WINAPI HttpCreateRequestQueue(HTTPAPI_VERSION version, const WCHAR *name,
     if (flags)
         FIXME("Unhandled flags %#x.\n", flags);
 
-    RtlInitUnicodeString(&string, device_nameW);
+    RtlInitUnicodeString(&string, L"\\Device\\Http\\ReqQueue");
     attr.ObjectName = &string;
     if (sa && sa->bInheritHandle)
         attr.Attributes |= OBJ_INHERIT;
@@ -759,4 +767,38 @@ ULONG WINAPI HttpCloseRequestQueue(HANDLE handle)
     if (!CloseHandle(handle))
         return GetLastError();
     return ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *        HttpSetRequestQueueProperty     (HTTPAPI.@)
+ */
+ULONG WINAPI HttpSetRequestQueueProperty(HANDLE queue, HTTP_SERVER_PROPERTY property,
+        void *value, ULONG length, ULONG reserved1, void *reserved2)
+{
+    FIXME("queue %p, property %u, value %p, length %u, reserved1 %#x, reserved2 %p, stub!\n",
+            queue, property, value, length, reserved1, reserved2);
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+/***********************************************************************
+ *        HttpSetServerSessionProperty     (HTTPAPI.@)
+ */
+ULONG WINAPI HttpSetServerSessionProperty(HTTP_SERVER_SESSION_ID id,
+        HTTP_SERVER_PROPERTY property, void *value, ULONG length)
+{
+    TRACE("id %s, property %u, value %p, length %u.\n",
+            wine_dbgstr_longlong(id), property, value, length);
+
+    switch (property)
+    {
+        case HttpServerQosProperty:
+        {
+            const HTTP_QOS_SETTING_INFO *info = value;
+            FIXME("Ignoring QoS setting %u.\n", info->QosType);
+            return ERROR_SUCCESS;
+        }
+        default:
+            FIXME("Unhandled property %u.\n", property);
+            return ERROR_CALL_NOT_IMPLEMENTED;
+    }
 }

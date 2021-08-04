@@ -849,20 +849,71 @@ BOOL WINAPI CryptCATCatalogInfoFromContext(HCATINFO hcatinfo, CATALOG_INFO *info
 }
 
 /***********************************************************************
+ *      CryptCATPutAttrInfo  (WINTRUST.@)
+ */
+CRYPTCATATTRIBUTE * WINAPI CryptCATPutAttrInfo(HANDLE catalog, CRYPTCATMEMBER *member,
+        WCHAR *name, DWORD flags, DWORD size, BYTE *data)
+{
+    FIXME("catalog %p, member %p, name %s, flags %#x, size %u, data %p, stub!\n",
+            catalog, member, debugstr_w(name), flags, size, data);
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return NULL;
+}
+
+/***********************************************************************
+ *      CryptCATPutCatAttrInfo  (WINTRUST.@)
+ */
+CRYPTCATATTRIBUTE * WINAPI CryptCATPutCatAttrInfo(HANDLE catalog,
+        WCHAR *name, DWORD flags, DWORD size, BYTE *data)
+{
+    FIXME("catalog %p, name %s, flags %#x, size %u, data %p, stub!\n",
+            catalog, debugstr_w(name), flags, size, data);
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return NULL;
+}
+
+/***********************************************************************
+ *      CryptCATPutMemberInfo  (WINTRUST.@)
+ */
+CRYPTCATMEMBER * WINAPI CryptCATPutMemberInfo(HANDLE catalog, WCHAR *filename,
+        WCHAR *member, GUID *subject, DWORD version, DWORD size, BYTE *data)
+{
+    FIXME("catalog %p, filename %s, member %s, subject %s, version %u, size %u, data %p, stub!\n",
+            catalog, debugstr_w(filename), debugstr_w(member), debugstr_guid(subject), version, size, data);
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return NULL;
+}
+
+/***********************************************************************
+ *      CryptCATPersistStore  (WINTRUST.@)
+ */
+BOOL WINAPI CryptCATPersistStore(HANDLE catalog)
+{
+    FIXME("catalog %p, stub!\n", catalog);
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+/***********************************************************************
  *      CryptCATOpen  (WINTRUST.@)
  */
-HANDLE WINAPI CryptCATOpen(LPWSTR pwszFileName, DWORD fdwOpenFlags, HCRYPTPROV hProv,
+HANDLE WINAPI CryptCATOpen(WCHAR *filename, DWORD flags, HCRYPTPROV hProv,
                            DWORD dwPublicVersion, DWORD dwEncodingType)
 {
     HANDLE file, hmsg;
     BYTE *buffer = NULL;
-    DWORD size, flags = OPEN_EXISTING;
+    DWORD size, open_mode = OPEN_ALWAYS;
     struct cryptcat *cc;
+    BOOL valid;
 
-    TRACE("%s, %x, %lx, %x, %x\n", debugstr_w(pwszFileName), fdwOpenFlags,
-          hProv, dwPublicVersion, dwEncodingType);
+    TRACE("filename %s, flags %#x, provider %#lx, version %#x, type %#x\n",
+          debugstr_w(filename), flags, hProv, dwPublicVersion, dwEncodingType);
 
-    if (!pwszFileName)
+    if (!filename)
     {
         SetLastError(ERROR_INVALID_PARAMETER);
         return INVALID_HANDLE_VALUE;
@@ -870,10 +921,12 @@ HANDLE WINAPI CryptCATOpen(LPWSTR pwszFileName, DWORD fdwOpenFlags, HCRYPTPROV h
 
     if (!dwEncodingType)  dwEncodingType  = X509_ASN_ENCODING | PKCS_7_ASN_ENCODING;
 
-    if (fdwOpenFlags & CRYPTCAT_OPEN_ALWAYS)    flags |= OPEN_ALWAYS;
-    if (fdwOpenFlags & CRYPTCAT_OPEN_CREATENEW) flags |= CREATE_NEW;
+    if (flags == CRYPTCAT_OPEN_EXISTING)
+        open_mode = OPEN_EXISTING;
+    if (flags & CRYPTCAT_OPEN_CREATENEW)
+        open_mode = CREATE_ALWAYS;
 
-    file = CreateFileW(pwszFileName, GENERIC_READ, FILE_SHARE_READ, NULL, flags, 0, NULL);
+    file = CreateFileW(filename, GENERIC_READ, FILE_SHARE_READ, NULL, open_mode, 0, NULL);
     if (file == INVALID_HANDLE_VALUE) return INVALID_HANDLE_VALUE;
 
     size = GetFileSize(file, NULL);
@@ -889,13 +942,15 @@ HANDLE WINAPI CryptCATOpen(LPWSTR pwszFileName, DWORD fdwOpenFlags, HCRYPTPROV h
         HeapFree(GetProcessHeap(), 0, buffer);
         return INVALID_HANDLE_VALUE;
     }
-    if (!ReadFile(file, buffer, size, &size, NULL) || !CryptMsgUpdate(hmsg, buffer, size, TRUE))
+    if (!size) valid = FALSE;
+    else if (!ReadFile(file, buffer, size, &size, NULL))
     {
         CloseHandle(file);
         HeapFree(GetProcessHeap(), 0, buffer);
         CryptMsgClose(hmsg);
         return INVALID_HANDLE_VALUE;
     }
+    else valid = CryptMsgUpdate(hmsg, buffer, size, TRUE);
     HeapFree(GetProcessHeap(), 0, buffer);
     CloseHandle(file);
 
@@ -909,7 +964,13 @@ HANDLE WINAPI CryptCATOpen(LPWSTR pwszFileName, DWORD fdwOpenFlags, HCRYPTPROV h
 
     cc->msg = hmsg;
     cc->encoding = dwEncodingType;
-    if (CryptMsgGetParam(hmsg, CMSG_ATTR_CERT_COUNT_PARAM, 0, &cc->attr_count, &size))
+    if (!valid)
+    {
+        cc->magic = CRYPTCAT_MAGIC;
+        SetLastError(ERROR_SUCCESS);
+        return cc;
+    }
+    else if (CryptMsgGetParam(hmsg, CMSG_ATTR_CERT_COUNT_PARAM, 0, &cc->attr_count, &size))
     {
         DWORD i, sum = 0;
         BYTE *p;
@@ -951,7 +1012,7 @@ HANDLE WINAPI CryptCATOpen(LPWSTR pwszFileName, DWORD fdwOpenFlags, HCRYPTPROV h
             p += size;
         }
         cc->inner = decode_inner_content(hmsg, dwEncodingType, &cc->inner_len);
-        if (!cc->inner || !CryptSIPRetrieveSubjectGuid(pwszFileName, NULL, &cc->subject))
+        if (!cc->inner || !CryptSIPRetrieveSubjectGuid(filename, NULL, &cc->subject))
         {
             CryptMsgClose(hmsg);
             HeapFree(GetProcessHeap(), 0, cc->attr);
@@ -960,6 +1021,7 @@ HANDLE WINAPI CryptCATOpen(LPWSTR pwszFileName, DWORD fdwOpenFlags, HCRYPTPROV h
             return INVALID_HANDLE_VALUE;
         }
         cc->magic = CRYPTCAT_MAGIC;
+        SetLastError(ERROR_SUCCESS);
         return cc;
     }
     HeapFree(GetProcessHeap(), 0, cc);

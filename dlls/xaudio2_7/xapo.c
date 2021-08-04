@@ -170,11 +170,43 @@ static HRESULT WINAPI XAPOFX_LockForProcess(IXAPO *iface, UINT32 in_params_count
     XA2XAPOFXImpl *This = impl_from_IXAPO(iface);
     TRACE("%p, %u, %p, %u, %p\n", This, in_params_count, in_params,
             out_params_count, out_params);
+#ifndef __i386_on_x86_64__
     return This->fapo->LockForProcess(This->fapo,
             in_params_count,
             (const FAPOLockForProcessBufferParameters *)in_params,
             out_params_count,
             (const FAPOLockForProcessBufferParameters *)out_params);
+#else
+    {
+        HRESULT hr;
+        uint32_t i;
+        FAPOLockForProcessBufferParameters * WIN32PTR in, * WIN32PTR out;
+
+        in = CoTaskMemAlloc(in_params_count * sizeof(*in));
+        out = CoTaskMemAlloc(out_params_count * sizeof(*out));
+        if (!in || !out)
+            return E_OUTOFMEMORY;
+
+        for (i = 0; i < in_params_count; i++)
+        {
+            in[i].pFormat = (const FAudioWaveFormatEx *)in_params[i].pFormat;
+            in[i].MaxFrameCount = in_params[i].MaxFrameCount;
+        }
+        for (i = 0; i < out_params_count; i++)
+        {
+            out[i].pFormat = (const FAudioWaveFormatEx *)out_params[i].pFormat;
+            out[i].MaxFrameCount = out_params[i].MaxFrameCount;
+        }
+        hr = This->fapo->LockForProcess(This->fapo,
+                in_params_count,
+                in,
+                out_params_count,
+                out);
+        CoTaskMemFree(in);
+        CoTaskMemFree(out);
+        return hr;
+    }
+#endif
 }
 
 static void WINAPI XAPOFX_UnlockForProcess(IXAPO *iface)
@@ -192,9 +224,37 @@ static void WINAPI XAPOFX_Process(IXAPO *iface, UINT32 in_params_count,
     XA2XAPOFXImpl *This = impl_from_IXAPO(iface);
     TRACE("%p, %u, %p, %u, %p, %u\n", This, in_params_count, in_params,
             out_params_count, out_params, enabled);
+#ifndef __i386_on_x86_64__
     This->fapo->Process(This->fapo, in_params_count,
             (const FAPOProcessBufferParameters *)in_params, out_params_count,
             (FAPOProcessBufferParameters *)out_params, enabled);
+#else
+    {
+        /* They are arrays, but docs say XAudio2 only supports one input/output stream */
+        FAPOProcessBufferParameters in, out;
+        if (in_params && in_params_count)
+        {
+            in.pBuffer = in_params[0].pBuffer;
+            in.BufferFlags = (FAPOBufferFlags)in_params[0].BufferFlags;
+            in.ValidFrameCount = in_params[0].ValidFrameCount;
+        }
+        if (out_params && out_params_count)
+        {
+            out.pBuffer = out_params[0].pBuffer;
+            out.BufferFlags = (FAPOBufferFlags)out_params[0].BufferFlags;
+            out.ValidFrameCount = out_params[0].ValidFrameCount;
+        }
+        This->fapo->Process(This->fapo, in_params_count,
+                in_params ? &in : NULL, out_params_count,
+                out_params ? &out : NULL, enabled);
+        if (out_params && out_params_count)
+        {
+            out_params[0].pBuffer = ADDRSPACECAST(void *, out.pBuffer);
+            out_params[0].BufferFlags = (FAPOBufferFlags)out.BufferFlags;
+            out_params[0].ValidFrameCount = out.ValidFrameCount;
+        }
+    }
+#endif
 }
 
 static UINT32 WINAPI XAPOFX_CalcInputFrames(IXAPO *iface, UINT32 output_frames)
@@ -325,6 +385,16 @@ static inline HRESULT get_fapo_from_clsid(REFCLSID clsid, FAPO **fapo)
             XAudio_Internal_Free,
             XAudio_Internal_Realloc
         );
+#if XAUDIO2_VER >= 9 && HAVE_FAUDIOCREATEREVERB9WITHCUSTOMALLOCATOREXT
+    if(IsEqualGUID(clsid, &CLSID_AudioReverb27))
+        return FAudioCreateReverb9WithCustomAllocatorEXT(
+            fapo,
+            0,
+            XAudio_Internal_Malloc,
+            XAudio_Internal_Free,
+            XAudio_Internal_Realloc
+        );
+#else
     if(IsEqualGUID(clsid, &CLSID_AudioReverb27))
         return FAudioCreateReverbWithCustomAllocatorEXT(
             fapo,
@@ -333,6 +403,7 @@ static inline HRESULT get_fapo_from_clsid(REFCLSID clsid, FAPO **fapo)
             XAudio_Internal_Free,
             XAudio_Internal_Realloc
         );
+#endif
 #endif
 #if XAUDIO2_VER >= 8 || defined XAPOFX1_VER
     if(IsEqualGUID(clsid, &CLSID_FXReverb) ||
@@ -379,12 +450,9 @@ static HRESULT WINAPI xapocf_CreateInstance(IClassFactory *iface, IUnknown *pOut
     }
 
     hr = IXAPO_QueryInterface(&object->IXAPO_iface, riid, ppobj);
-    if(FAILED(hr)){
-        HeapFree(GetProcessHeap(), 0, object);
-        return hr;
-    }
+    IXAPO_Release(&object->IXAPO_iface);
 
-    return S_OK;
+    return hr;
 }
 
 static HRESULT WINAPI xapocf_LockServer(IClassFactory *iface, BOOL dolock)

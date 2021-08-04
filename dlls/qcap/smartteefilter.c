@@ -18,20 +18,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-
-#define COBJMACROS
-
-#include "windef.h"
-#include "winbase.h"
-#include "wtypes.h"
-#include "wingdi.h"
-#include "winuser.h"
-#include "dshow.h"
-
-#include "qcap_main.h"
-
-#include "wine/debug.h"
+#include "qcap_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(qcap);
 
@@ -72,13 +59,19 @@ static void smart_tee_destroy(struct strmbase_filter *iface)
     strmbase_source_cleanup(&filter->capture);
     strmbase_source_cleanup(&filter->preview);
     strmbase_filter_cleanup(&filter->filter);
-    CoTaskMemFree(filter);
+    free(filter);
+}
+
+static HRESULT smart_tee_wait_state(struct strmbase_filter *iface, DWORD timeout)
+{
+    return iface->state == State_Paused ? VFW_S_CANT_CUE : S_OK;
 }
 
 static const struct strmbase_filter_ops filter_ops =
 {
     .filter_get_pin = smart_tee_get_pin,
     .filter_destroy = smart_tee_destroy,
+    .filter_wait_state = smart_tee_wait_state,
 };
 
 static HRESULT sink_query_accept(struct strmbase_pin *base, const AM_MEDIA_TYPE *pmt)
@@ -321,35 +314,29 @@ static const struct strmbase_source_ops preview_ops =
     .pfnDecideAllocator = SmartTeeFilterPreview_DecideAllocator,
 };
 
-IUnknown* WINAPI QCAP_createSmartTeeFilter(IUnknown *outer, HRESULT *phr)
+HRESULT smart_tee_create(IUnknown *outer, IUnknown **out)
 {
-    static const WCHAR captureW[] = {'C','a','p','t','u','r','e',0};
-    static const WCHAR previewW[] = {'P','r','e','v','i','e','w',0};
-    static const WCHAR inputW[] = {'I','n','p','u','t',0};
     SmartTeeFilter *object;
     HRESULT hr;
 
-    if (!(object = CoTaskMemAlloc(sizeof(*object))))
-    {
-        *phr = E_OUTOFMEMORY;
-        return NULL;
-    }
-    memset(object, 0, sizeof(*object));
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
 
     strmbase_filter_init(&object->filter, outer, &CLSID_SmartTee, &filter_ops);
-    strmbase_sink_init(&object->sink, &object->filter, inputW, &sink_ops, NULL);
+    strmbase_sink_init(&object->sink, &object->filter, L"Input", &sink_ops, NULL);
     hr = CoCreateInstance(&CLSID_MemoryAllocator, NULL, CLSCTX_INPROC_SERVER,
             &IID_IMemAllocator, (void **)&object->sink.pAllocator);
     if (FAILED(hr))
     {
-        *phr = hr;
         strmbase_filter_cleanup(&object->filter);
-        return NULL;
+        free(object);
+        return hr;
     }
 
-    strmbase_source_init(&object->capture, &object->filter, captureW, &capture_ops);
-    strmbase_source_init(&object->preview, &object->filter, previewW, &preview_ops);
+    strmbase_source_init(&object->capture, &object->filter, L"Capture", &capture_ops);
+    strmbase_source_init(&object->preview, &object->filter, L"Preview", &preview_ops);
 
-    *phr = S_OK;
-    return &object->filter.IUnknown_inner;
+    TRACE("Created smart tee %p.\n", object);
+    *out = &object->filter.IUnknown_inner;
+    return S_OK;
 }

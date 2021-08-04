@@ -540,7 +540,8 @@ enum x11drv_window_messages
     WM_X11DRV_SET_WIN_REGION,
     WM_X11DRV_RESIZE_DESKTOP,
     WM_X11DRV_SET_CURSOR,
-    WM_X11DRV_CLIP_CURSOR
+    WM_X11DRV_CLIP_CURSOR_NOTIFY,
+    WM_X11DRV_CLIP_CURSOR_REQUEST
 };
 
 /* _NET_WM_STATE properties that we keep track of */
@@ -564,9 +565,9 @@ struct x11drv_win_data
     HWND        hwnd;           /* hwnd that this private data belongs to */
     Window      whole_window;   /* X window for the complete window */
     Window      client_window;  /* X window for the client area */
-    RECT        window_rect;    /* USER window rectangle relative to parent */
-    RECT        whole_rect;     /* X window rectangle for the whole window relative to parent */
-    RECT        client_rect;    /* client area relative to parent */
+    RECT        window_rect;    /* USER window rectangle relative to win32 parent window client area */
+    RECT        whole_rect;     /* X window rectangle for the whole window relative to win32 parent window client area */
+    RECT        client_rect;    /* client area relative to win32 parent window client area */
     XIC         xic;            /* X input context */
     BOOL        managed : 1;    /* is window managed? */
     BOOL        mapped : 1;     /* is window mapped? (in either normal or iconic state) */
@@ -629,6 +630,7 @@ extern void CDECL X11DRV_SetFocus( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void set_window_cursor( Window window, HCURSOR handle ) DECLSPEC_HIDDEN;
 extern void sync_window_cursor( Window window ) DECLSPEC_HIDDEN;
 extern LRESULT clip_cursor_notify( HWND hwnd, HWND prev_clip_hwnd, HWND new_clip_hwnd ) DECLSPEC_HIDDEN;
+extern LRESULT clip_cursor_request( HWND hwnd, BOOL fullscreen, BOOL reset ) DECLSPEC_HIDDEN;
 extern void ungrab_clipping_window(void) DECLSPEC_HIDDEN;
 extern void reset_clipping_window(void) DECLSPEC_HIDDEN;
 extern void retry_grab_clipping_window(void) DECLSPEC_HIDDEN;
@@ -643,36 +645,74 @@ typedef int (*x11drv_error_callback)( Display *display, XErrorEvent *event, void
 extern void X11DRV_expect_error( Display *display, x11drv_error_callback callback, void *arg ) DECLSPEC_HIDDEN;
 extern int X11DRV_check_error(void) DECLSPEC_HIDDEN;
 extern void X11DRV_X_to_window_rect( struct x11drv_win_data *data, RECT *rect, int x, int y, int cx, int cy ) DECLSPEC_HIDDEN;
+extern BOOL is_window_rect_full_screen( const RECT *rect ) DECLSPEC_HIDDEN;
 extern POINT virtual_screen_to_root( INT x, INT y ) DECLSPEC_HIDDEN;
 extern POINT root_to_virtual_screen( INT x, INT y ) DECLSPEC_HIDDEN;
 extern RECT get_virtual_screen_rect(void) DECLSPEC_HIDDEN;
 extern RECT get_primary_monitor_rect(void) DECLSPEC_HIDDEN;
 extern RECT get_host_primary_monitor_rect(void) DECLSPEC_HIDDEN;
-extern HRGN query_work_area(void) DECLSPEC_HIDDEN;
+extern RECT get_work_area( const RECT *monitor_rect ) DECLSPEC_HIDDEN;
 extern void xinerama_init( unsigned int width, unsigned int height ) DECLSPEC_HIDDEN;
 
-struct x11drv_mode_info
+#define DEPTH_COUNT 3
+extern const unsigned int *depths DECLSPEC_HIDDEN;
+
+/* Required functions for changing and enumerating display settings */
+struct x11drv_settings_handler
 {
-    unsigned int width;
-    unsigned int height;
-    unsigned int bpp;
-    unsigned int refresh_rate;
+    /* A name to tell what host driver is used */
+    const char *name;
+
+    /* Higher priority can override handlers with a lower priority */
+    UINT priority;
+
+    /* get_id() will be called to map a device name, e.g., \\.\DISPLAY1 to a driver specific id.
+     * Following functions use this id to identify the device.
+     *
+     * Return FALSE if the device cannot be found and TRUE on success */
+    BOOL (*get_id)(const WCHAR *device_name, ULONG_PTR *id);
+
+    /* get_modes() will be called to get a list of supported modes of the device of id in modes
+     * with respect to flags, which could be 0, EDS_RAWMODE or EDS_ROTATEDMODE. If the implementation
+     * uses dmDriverExtra then every DEVMODEW in the list must have the same dmDriverExtra value
+     *
+     * Following fields in DEVMODE must be valid:
+     * dmSize, dmDriverExtra, dmFields, dmDisplayOrientation, dmBitsPerPel, dmPelsWidth, dmPelsHeight,
+     * dmDisplayFlags and dmDisplayFrequency
+     *
+     * Return FALSE on failure with parameters unchanged and error code set. Return TRUE on success */
+    BOOL (*get_modes)(ULONG_PTR id, DWORD flags, DEVMODEW **modes, UINT *mode_count);
+
+    /* free_modes() will be called to free the mode list returned from get_modes() */
+    void (*free_modes)(DEVMODEW *modes);
+
+    /* get_current_mode() will be called to get the current display mode of the device of id
+     *
+     * Following fields in DEVMODE must be valid:
+     * dmFields, dmDisplayOrientation, dmBitsPerPel, dmPelsWidth, dmPelsHeight, dmDisplayFlags,
+     * dmDisplayFrequency and dmPosition
+     *
+     * Return FALSE on failure with parameters unchanged and error code set. Return TRUE on success */
+    BOOL (*get_current_mode)(ULONG_PTR id, DEVMODEW *mode);
+
+    /* set_current_mode() will be called to change the display mode of the display device of id.
+     * mode must be a valid mode from get_modes() with optional fields, such as dmPosition set.
+     *
+     * Return DISP_CHANGE_*, same as ChangeDisplaySettingsExW() return values */
+    LONG (*set_current_mode)(ULONG_PTR id, DEVMODEW *mode);
 };
 
+extern void X11DRV_Settings_SetHandler(const struct x11drv_settings_handler *handler) DECLSPEC_HIDDEN;
+
 extern void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height ) DECLSPEC_HIDDEN;
-extern void X11DRV_resize_desktop(unsigned int width, unsigned int height) DECLSPEC_HIDDEN;
+extern void X11DRV_resize_desktop(BOOL) DECLSPEC_HIDDEN;
+extern void init_registry_display_settings(void) DECLSPEC_HIDDEN;
 extern BOOL is_virtual_desktop(void) DECLSPEC_HIDDEN;
 extern BOOL is_desktop_fullscreen(void) DECLSPEC_HIDDEN;
+extern BOOL is_detached_mode(const DEVMODEW *) DECLSPEC_HIDDEN;
 extern BOOL create_desktop_win_data( Window win ) DECLSPEC_HIDDEN;
-extern void X11DRV_Settings_AddDepthModes(void) DECLSPEC_HIDDEN;
-extern void X11DRV_Settings_AddOneMode(unsigned int width, unsigned int height, unsigned int bpp, unsigned int freq) DECLSPEC_HIDDEN;
-unsigned int X11DRV_Settings_GetModeCount(void) DECLSPEC_HIDDEN;
+extern BOOL get_primary_adapter(WCHAR *) DECLSPEC_HIDDEN;
 void X11DRV_Settings_Init(void) DECLSPEC_HIDDEN;
-struct x11drv_mode_info *X11DRV_Settings_SetHandlers(const char *name,
-                                                     int (*pNewGCM)(void),
-                                                     LONG (*pNewSCM)(int, struct x11drv_mode_info *),
-                                                     unsigned int nmodes,
-                                                     int reserve_depths) DECLSPEC_HIDDEN;
 
 void X11DRV_XF86VM_Init(void) DECLSPEC_HIDDEN;
 void X11DRV_XRandR_Init(void) DECLSPEC_HIDDEN;
@@ -691,6 +731,8 @@ struct x11drv_gpu
     UINT device_id;
     UINT subsys_id;
     UINT revision_id;
+    /* Vulkan device UUID */
+    GUID vulkan_uuid;
 };
 
 /* Represent an adapter in EnumDisplayDevices context */
@@ -755,9 +797,13 @@ struct x11drv_display_device_handler
     void (*register_event_handlers)(void);
 };
 
+extern HANDLE get_display_device_init_mutex(void) DECLSPEC_HIDDEN;
+extern BOOL get_host_primary_gpu(struct x11drv_gpu *gpu) DECLSPEC_HIDDEN;
+extern void release_display_device_init_mutex(HANDLE) DECLSPEC_HIDDEN;
 extern void X11DRV_DisplayDevices_SetHandler(const struct x11drv_display_device_handler *handler) DECLSPEC_HIDDEN;
 extern void X11DRV_DisplayDevices_Init(BOOL force) DECLSPEC_HIDDEN;
 extern void X11DRV_DisplayDevices_RegisterEventHandlers(void) DECLSPEC_HIDDEN;
+extern void X11DRV_DisplayDevices_Update(BOOL) DECLSPEC_HIDDEN;
 /* Display device handler used in virtual desktop mode */
 extern struct x11drv_display_device_handler desktop_handler DECLSPEC_HIDDEN;
 
@@ -778,13 +824,6 @@ static inline BOOL is_window_rect_mapped( const RECT *rect )
             rect->top < virtual_rect.bottom &&
             max( rect->right, rect->left + 1 ) > virtual_rect.left &&
             max( rect->bottom, rect->top + 1 ) > virtual_rect.top);
-}
-
-static inline BOOL is_window_rect_fullscreen( const RECT *rect )
-{
-    RECT primary_rect = get_primary_monitor_rect();
-    return (rect->left <= primary_rect.left && rect->right >= primary_rect.right &&
-            rect->top <= primary_rect.top && rect->bottom >= primary_rect.bottom);
 }
 
 extern BOOL enable_shm_surface DECLSPEC_HIDDEN;

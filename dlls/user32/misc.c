@@ -4,6 +4,7 @@
  * Copyright 1995 Thomas Sandford
  * Copyright 1997 Marcus Meissner
  * Copyright 1998 Turchanov Sergey
+ * Copyright 2019 Micah N Gorrell for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,8 +21,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 
 #include "windef.h"
@@ -31,7 +30,6 @@
 #include "controls.h"
 #include "user_private.h"
 
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
@@ -241,17 +239,6 @@ DWORD WINAPI SetLogonNotifyWindow(HWINSTA hwinsta,HWND hwnd)
 }
 
 /***********************************************************************
- *              QueryDisplayConfig (USER32.@)
- */
-LONG WINAPI QueryDisplayConfig(UINT32 flags, UINT32 *numpathelements, DISPLAYCONFIG_PATH_INFO *pathinfo,
-                               UINT32 *numinfoelements, DISPLAYCONFIG_MODE_INFO *modeinfo,
-                               DISPLAYCONFIG_TOPOLOGY_ID *topologyid)
-{
-   FIXME("(%08x %p %p %p %p %p)\n", flags, numpathelements, pathinfo, numinfoelements, modeinfo, topologyid);
-   return ERROR_CALL_NOT_IMPLEMENTED;
-}
-
-/***********************************************************************
  *		RegisterSystemThread (USER32.@)
  */
 void WINAPI RegisterSystemThread(DWORD flags, DWORD reserved)
@@ -285,59 +272,6 @@ BOOL WINAPI DeregisterShellHookWindow(HWND hWnd)
 DWORD WINAPI RegisterTasklist (DWORD x)
 {
     FIXME("0x%08x\n",x);
-    return TRUE;
-}
-
-
-/***********************************************************************
- *		RegisterDeviceNotificationA (USER32.@)
- *
- * See RegisterDeviceNotificationW.
- */
-HDEVNOTIFY WINAPI RegisterDeviceNotificationA(HANDLE hnd, LPVOID notifyfilter, DWORD flags)
-{
-    FIXME("(hwnd=%p, filter=%p,flags=0x%08x) returns a fake device notification handle!\n",
-          hnd,notifyfilter,flags );
-    return (HDEVNOTIFY) 0xcafecafe;
-}
-
-/***********************************************************************
- *		RegisterDeviceNotificationW (USER32.@)
- *
- * Registers a window with the system so that it will receive
- * notifications about a device.
- *
- * PARAMS
- *     hRecipient           [I] Window or service status handle that
- *                              will receive notifications.
- *     pNotificationFilter  [I] DEV_BROADCAST_HDR followed by some
- *                              type-specific data.
- *     dwFlags              [I] See notes
- *
- * RETURNS
- *
- * A handle to the device notification.
- *
- * NOTES
- *
- * The dwFlags parameter can be one of two values:
- *| DEVICE_NOTIFY_WINDOW_HANDLE  - hRecipient is a window handle
- *| DEVICE_NOTIFY_SERVICE_HANDLE - hRecipient is a service status handle
- */
-HDEVNOTIFY WINAPI RegisterDeviceNotificationW(HANDLE hRecipient, LPVOID pNotificationFilter, DWORD dwFlags)
-{
-    FIXME("(hwnd=%p, filter=%p,flags=0x%08x) returns a fake device notification handle!\n",
-          hRecipient,pNotificationFilter,dwFlags );
-    return (HDEVNOTIFY) 0xcafeaffe;
-}
-
-/***********************************************************************
- *		UnregisterDeviceNotification (USER32.@)
- *
- */
-BOOL  WINAPI UnregisterDeviceNotification(HDEVNOTIFY hnd)
-{
-    FIXME("(handle=%p), STUB!\n", hnd);
     return TRUE;
 }
 
@@ -388,8 +322,7 @@ VOID WINAPI LoadLocalFonts(VOID)
  */
 BOOL WINAPI User32InitializeImmEntryTable(DWORD magic)
 {
-    static const WCHAR imm32_dllW[] = {'i','m','m','3','2','.','d','l','l',0};
-    HMODULE imm32 = GetModuleHandleW(imm32_dllW);
+    HMODULE imm32 = GetModuleHandleW(L"imm32.dll");
 
     TRACE("(%x)\n", magic);
 
@@ -546,21 +479,6 @@ BOOL WINAPI IsWindowRedirectedForPrint( HWND hwnd )
 }
 
 /**********************************************************************
- * GetDisplayConfigBufferSizes [USER32.@]
- */
-LONG WINAPI GetDisplayConfigBufferSizes(UINT32 flags, UINT32 *num_path_info, UINT32 *num_mode_info)
-{
-    FIXME("(0x%x %p %p): stub\n", flags, num_path_info, num_mode_info);
-
-    if (!num_path_info || !num_mode_info)
-        return ERROR_INVALID_PARAMETER;
-
-    *num_path_info = 0;
-    *num_mode_info = 0;
-    return ERROR_NOT_SUPPORTED;
-}
-
-/**********************************************************************
  * RegisterPointerDeviceNotifications [USER32.@]
  */
 BOOL WINAPI RegisterPointerDeviceNotifications(HWND hwnd, BOOL notifyrange)
@@ -612,10 +530,9 @@ BOOL WINAPI GetPointerType(UINT32 id, POINTER_INPUT_TYPE *type)
     return TRUE;
 }
 
-static const WCHAR imeW[] = {'I','M','E',0};
 const struct builtin_class_descr IME_builtin_class =
 {
-    imeW,               /* name */
+    L"IME",             /* name */
     0,                  /* style  */
     WINPROC_IME,        /* proc */
     2*sizeof(LONG_PTR), /* extra */

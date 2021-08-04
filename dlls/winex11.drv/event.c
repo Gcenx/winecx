@@ -704,7 +704,7 @@ static void handle_wm_protocols( HWND hwnd, XClientMessageEvent *event )
 
         if (can_activate_window(hwnd))
         {
-            /* simulate a mouse click on the caption to find out
+            /* simulate a mouse click on the menu to find out
              * whether the window wants to be activated */
             LRESULT ma = SendMessageW( hwnd, WM_MOUSEACTIVATE,
                                        (WPARAM)GetAncestor( hwnd, GA_ROOT ),
@@ -1707,17 +1707,6 @@ static void handle_xembed_protocol( HWND hwnd, XClientMessageEvent *event )
             reparent_notify( event->display, hwnd, event->data.l[3], 0, 0 );
         }
         break;
-
-    case XEMBED_WINDOW_ACTIVATE:
-        {
-            struct x11drv_win_data *data = get_win_data( hwnd );
-
-            if (!data) return;
-            TRACE( "win %p/%lx XEMBED_WINDOW_ACTIVATE\n", hwnd, event->window );
-            if (data->embedder) xembed_request_focus( data->display, data->embedder, event->data.l[0] );
-            release_win_data( data );
-            break;
-        }
 
     case XEMBED_WINDOW_DEACTIVATE:
         TRACE( "win %p/%lx XEMBED_WINDOW_DEACTIVATE message\n", hwnd, event->window );

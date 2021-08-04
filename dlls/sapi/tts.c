@@ -517,7 +517,7 @@ static HRESULT WINAPI spvoice_GetInfo(ISpVoice *iface, SPEVENTSOURCEINFO *info)
 
 static HRESULT WINAPI spvoice_SetOutput(ISpVoice *iface, IUnknown *unk, BOOL changes)
 {
-    FIXME("(%p, %p, %d: stub.\n)", iface, unk, changes);
+    FIXME("(%p, %p, %d): stub.\n", iface, unk, changes);
 
     return E_NOTIMPL;
 }
@@ -561,7 +561,7 @@ static HRESULT WINAPI spvoice_GetVoice(ISpVoice *iface, ISpObjectToken **token)
 {
     FIXME("(%p, %p): stub.\n", iface, token);
 
-    return E_NOTIMPL;
+    return token_create(NULL, &IID_ISpObjectToken, (void **)token);
 }
 
 static HRESULT WINAPI spvoice_Speak(ISpVoice *iface, const WCHAR *contents, DWORD flags, ULONG *number)

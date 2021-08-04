@@ -47,6 +47,7 @@
 DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
 DEFINE_GUID(outer_test_iid,0x06d4cd6c,0x18dd,0x11ea,0x8e,0x76,0xfc,0xaa,0x14,0x72,0x2d,0xac);
 DEFINE_OLEGUID(CGID_DocHostCmdPriv, 0x000214D4L, 0, 0);
+DEFINE_GUID(IID_IProxyManager,0x00000008,0x0000,0x0000,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46);
 
 #define DEFINE_EXPECT(func) \
     static BOOL expect_ ## func = FALSE, called_ ## func = FALSE
@@ -157,20 +158,29 @@ DEFINE_EXPECT(OnFocus_TRUE);
 DEFINE_EXPECT(OnFocus_FALSE);
 DEFINE_EXPECT(GetExternal);
 DEFINE_EXPECT(outer_QI_test);
-
-static const WCHAR wszItem[] = {'i','t','e','m',0};
+DEFINE_EXPECT(Advise_OnClose);
 
 static VARIANT_BOOL exvb;
 
 static IWebBrowser2 *wb;
 
 static HWND container_hwnd, shell_embedding_hwnd;
-static BOOL is_downloading, do_download, is_first_load, use_container_olecmd, test_close, is_http, use_container_dochostui;
+static BOOL is_downloading, do_download, is_first_load, use_container_olecmd;
+static BOOL test_close, test_hide, is_http, use_container_dochostui;
 static HRESULT hr_dochost_TranslateAccelerator = E_NOTIMPL;
 static HRESULT hr_site_TranslateAccelerator = E_NOTIMPL;
-static const char *current_url;
+static const WCHAR *current_url;
 static int wb_version, expect_update_commands_enable, set_update_commands_enable;
 static BOOL nav_back_todo, nav_forward_todo; /* FIXME */
+
+enum SessionOp
+{
+    SESSION_QUERY,
+    SESSION_INCREMENT,
+    SESSION_DECREMENT
+};
+
+static LONG (WINAPI *pSetQueryNetSessionCount)(DWORD);
 
 #define BUSY_FAIL 2
 
@@ -184,6 +194,7 @@ static BOOL nav_back_todo, nav_forward_todo; /* FIXME */
 
 static DWORD dwl_flags;
 
+static IAdviseSink test_sink;
 
 /* Returns true if the user interface is in English. Note that this does not
  * presume of the formatting of dates, numbers, etc.
@@ -208,13 +219,6 @@ static BOOL is_lang_english(void)
     return PRIMARYLANGID(GetUserDefaultLangID()) == LANG_ENGLISH;
 }
 
-static int strcmp_wa(LPCWSTR strw, const char *stra)
-{
-    CHAR buf[512];
-    WideCharToMultiByte(CP_ACP, 0, strw, -1, buf, sizeof(buf), NULL, NULL);
-    return lstrcmpA(stra, buf);
-}
-
 static BOOL iface_cmp(IUnknown *iface1, IUnknown *iface2)
 {
     IUnknown *unk1, *unk2;
@@ -228,18 +232,6 @@ static BOOL iface_cmp(IUnknown *iface1, IUnknown *iface2)
     IUnknown_Release(unk2);
 
     return unk1 == unk2;
-}
-
-static BSTR a2bstr(const char *str)
-{
-    BSTR ret;
-    int len;
-
-    len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
-    ret = SysAllocStringLen(NULL, len);
-    MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
-
-    return ret;
 }
 
 #define create_webbrowser() _create_webbrowser(__LINE__)
@@ -257,7 +249,7 @@ static IWebBrowser2 *_create_webbrowser(unsigned line)
 }
 
 #define test_LocationURL(a,b) _test_LocationURL(__LINE__,a,b)
-static void _test_LocationURL(unsigned line, IWebBrowser2 *wb, const char *exurl)
+static void _test_LocationURL(unsigned line, IWebBrowser2 *wb, const WCHAR *exurl)
 {
     BSTR url = (void*)0xdeadbeef;
     HRESULT hres;
@@ -266,7 +258,7 @@ static void _test_LocationURL(unsigned line, IWebBrowser2 *wb, const char *exurl
     ok_(__FILE__,line) (hres == (*exurl ? S_OK : S_FALSE), "get_LocationURL failed: %08x\n", hres);
     if (SUCCEEDED(hres))
     {
-        ok_(__FILE__,line) (!strcmp_wa(url, exurl), "unexpected URL: %s\n", wine_dbgstr_w(url));
+        ok_(__FILE__,line) (!lstrcmpW(url, exurl), "unexpected URL: %s\n", wine_dbgstr_w(url));
         SysFreeString(url);
     }
 }
@@ -726,8 +718,8 @@ static void test_OnBeforeNavigate(const VARIANT *disp, const VARIANT *url, const
         ok(V_VT(V_VARIANTREF(url)) == VT_BSTR, "V_VT(V_VARIANTREF(url))=%d, expected VT_BSTR\n",
            V_VT(V_VARIANTREF(url)));
         ok(V_BSTR(V_VARIANTREF(url)) != NULL, "V_BSTR(V_VARIANTREF(url)) == NULL\n");
-        ok(!strcmp_wa(V_BSTR(V_VARIANTREF(url)), current_url), "unexpected url %s, expected %s\n",
-           wine_dbgstr_w(V_BSTR(V_VARIANTREF(url))), current_url);
+        ok(!lstrcmpW(V_BSTR(V_VARIANTREF(url)), current_url), "unexpected url %s, expected %s\n",
+           wine_dbgstr_w(V_BSTR(V_VARIANTREF(url))), wine_dbgstr_w(current_url));
     }
 
     ok(V_VT(flags) == (VT_BYREF|VT_VARIANT), "V_VT(flags)=%x, expected VT_BYREF|VT_VARIANT\n",
@@ -792,7 +784,7 @@ static void test_OnBeforeNavigate(const VARIANT *disp, const VARIANT *url, const
         ok(V_VT(V_VARIANTREF(headers)) == VT_BSTR, "V_VT(V_VARIANTREF(headers))=%d, expected VT_BSTR\n",
            V_VT(V_VARIANTREF(headers)));
         str = V_BSTR(V_VARIANTREF(headers));
-        ok(!str || !strcmp_wa(str, "Referer: http://test.winehq.org/tests/hello.html\r\n"),
+        ok(!str || !lstrcmpW(str, L"Referer: http://test.winehq.org/tests/hello.html\r\n"),
            "V_BSTR(V_VARIANTREF(headers)) = %s, expected NULL\n", wine_dbgstr_w(str));
     }
 
@@ -816,7 +808,8 @@ static void test_navigatecomplete2(DISPPARAMS *dp)
     ok(V_VT(dp->rgvarg) == (VT_BYREF|VT_VARIANT), "V_VT(dp->rgvarg) = %d\n", V_VT(dp->rgvarg));
     v = V_VARIANTREF(dp->rgvarg);
     ok(V_VT(v) == VT_BSTR, "V_VT(url) = %d\n", V_VT(v));
-    ok(!strcmp_wa(V_BSTR(v), current_url), "url=%s, expected %s\n", wine_dbgstr_w(V_BSTR(v)), current_url);
+    ok(!lstrcmpW(V_BSTR(v), current_url), "url=%s, expected %s\n", wine_dbgstr_w(V_BSTR(v)),
+       wine_dbgstr_w(current_url));
 
     ok(V_VT(dp->rgvarg+1) == VT_DISPATCH, "V_VT(dp->rgvarg+1) = %d\n", V_VT(dp->rgvarg+1));
     ok(V_DISPATCH(dp->rgvarg+1) == (IDispatch*)wb, "V_DISPATCH=%p, wb=%p\n", V_DISPATCH(dp->rgvarg+1), wb);
@@ -839,7 +832,8 @@ static void test_documentcomplete(DISPPARAMS *dp)
     ok(V_VT(dp->rgvarg) == (VT_BYREF|VT_VARIANT), "V_VT(dp->rgvarg) = %d\n", V_VT(dp->rgvarg));
     v = V_VARIANTREF(dp->rgvarg);
     ok(V_VT(v) == VT_BSTR, "V_VT(url) = %d\n", V_VT(v));
-    ok(!strcmp_wa(V_BSTR(v), current_url), "url=%s, expected %s\n", wine_dbgstr_w(V_BSTR(v)), current_url);
+    ok(!lstrcmpW(V_BSTR(v), current_url), "url=%s, expected %s\n", wine_dbgstr_w(V_BSTR(v)),
+       wine_dbgstr_w(current_url));
 
     ok(V_VT(dp->rgvarg+1) == VT_DISPATCH, "V_VT(dp->rgvarg+1) = %d\n", V_VT(dp->rgvarg+1));
     ok(V_DISPATCH(dp->rgvarg+1) == (IDispatch*)wb, "V_DISPATCH=%p, wb=%p\n", V_DISPATCH(dp->rgvarg+1), wb);
@@ -1279,9 +1273,9 @@ static HRESULT WINAPI InPlaceUIWindow_SetActiveObject(IOleInPlaceFrame *iface,
         IOleInPlaceActiveObject *pActiveObject, LPCOLESTR pszObjName)
 {
     CHECK_EXPECT(UIWindow_SetActiveObject);
-    if(!test_close) {
+    if(!test_close && !test_hide) {
         ok(pActiveObject != NULL, "pActiveObject = NULL\n");
-        ok(!lstrcmpW(pszObjName, wszItem), "unexpected pszObjName\n");
+        ok(!lstrcmpW(pszObjName, L"item"), "unexpected pszObjName\n");
     } else {
         ok(!pActiveObject, "pActiveObject != NULL\n");
         ok(!pszObjName, "pszObjName != NULL\n");
@@ -1293,9 +1287,9 @@ static HRESULT WINAPI InPlaceFrame_SetActiveObject(IOleInPlaceFrame *iface,
         IOleInPlaceActiveObject *pActiveObject, LPCOLESTR pszObjName)
 {
     CHECK_EXPECT(Frame_SetActiveObject);
-    if(!test_close) {
+    if(!test_close && !test_hide) {
         ok(pActiveObject != NULL, "pActiveObject = NULL\n");
-        ok(!lstrcmpW(pszObjName, wszItem), "unexpected pszObjName\n");
+        ok(!lstrcmpW(pszObjName, L"item"), "unexpected pszObjName\n");
     } else {
         ok(!pActiveObject, "pActiveObject != NULL\n");
         ok(!pszObjName, "pszObjName != NULL\n");
@@ -1830,19 +1824,17 @@ static LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 
 static HWND create_container_window(void)
 {
-    static const WCHAR wszWebBrowserContainer[] =
-        {'W','e','b','B','r','o','w','s','e','r','C','o','n','t','a','i','n','e','r',0};
     static WNDCLASSEXW wndclass = {
         sizeof(WNDCLASSEXW),
         0,
         wnd_proc,
         0, 0, NULL, NULL, NULL, NULL, NULL,
-        wszWebBrowserContainer,
+        L"WebBrowserContainer",
         NULL
     };
 
     RegisterClassExW(&wndclass);
-    return CreateWindowW(wszWebBrowserContainer, wszWebBrowserContainer,
+    return CreateWindowW(L"WebBrowserContainer", L"WebBrowserContainer",
             WS_OVERLAPPEDWINDOW, 10, 10, 600, 600, NULL, NULL, NULL, NULL);
 }
 
@@ -1851,11 +1843,15 @@ static void test_DoVerb(IWebBrowser2 *unk)
     IOleObject *oleobj;
     RECT rect = {0,0,1000,1000};
     HRESULT hres;
+    DWORD connection;
 
     hres = IWebBrowser2_QueryInterface(unk, &IID_IOleObject, (void**)&oleobj);
     ok(hres == S_OK, "QueryInterface(IID_OleObject) failed: %08x\n", hres);
     if(FAILED(hres))
         return;
+
+    hres = IOleObject_Advise(oleobj, &test_sink, &connection);
+    ok(hres == S_OK, "Advise failed: %08x\n", hres);
 
     SET_EXPECT(CanInPlaceActivate);
     SET_EXPECT(Site_GetWindow);
@@ -1890,6 +1886,9 @@ static void test_DoVerb(IWebBrowser2 *unk)
     hres = IOleObject_DoVerb(oleobj, OLEIVERB_SHOW, NULL, &ClientSite,
                            0, (HWND)0xdeadbeef, &rect);
     ok(hres == S_OK, "DoVerb failed: %08x\n", hres);
+
+    hres = IOleObject_Unadvise(oleobj, connection);
+    ok(hres == S_OK, "Unadvise failed: %08x\n", hres);
 
     IOleObject_Release(oleobj);
 }
@@ -1948,9 +1947,7 @@ static void test_SetHostNames(IOleObject *oleobj)
 {
     HRESULT hres;
 
-    static const WCHAR test_appW[] =  {'t','e','s','t',' ','a','p','p',0};
-
-    hres = IOleObject_SetHostNames(oleobj, test_appW, (void*)0xdeadbeef);
+    hres = IOleObject_SetHostNames(oleobj, L"test app", (void*)0xdeadbeef);
     ok(hres == S_OK, "SetHostNames failed: %08x\n", hres);
 }
 
@@ -1958,6 +1955,7 @@ static void test_ClientSite(IWebBrowser2 *unk, IOleClientSite *client, BOOL stop
 {
     IOleObject *oleobj;
     IOleInPlaceObject *inplace;
+    DWORD session_count;
     HWND hwnd;
     HRESULT hres;
 
@@ -1981,6 +1979,8 @@ static void test_ClientSite(IWebBrowser2 *unk, IOleClientSite *client, BOOL stop
     ok((hwnd == NULL) ^ (client == NULL), "unexpected hwnd %p\n", hwnd);
 
     if(client) {
+        session_count = pSetQueryNetSessionCount(SESSION_QUERY);
+
         SET_EXPECT(GetContainer);
         SET_EXPECT(Site_GetWindow);
         SET_EXPECT(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
@@ -2007,6 +2007,9 @@ static void test_ClientSite(IWebBrowser2 *unk, IOleClientSite *client, BOOL stop
     ok(hres == S_OK, "SetClientSite failed: %08x\n", hres);
 
     if(client) {
+        DWORD count = pSetQueryNetSessionCount(SESSION_QUERY);
+        ok(count == session_count + 1, "count = %u expected %u\n", count, session_count + 1);
+
         CHECK_CALLED(GetContainer);
         CHECK_CALLED(Site_GetWindow);
         CHECK_CALLED(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
@@ -2237,6 +2240,44 @@ static void test_EnumVerbs(IWebBrowser2 *wb)
     IEnumOLEVERB_Release(enum_verbs);
 }
 
+static void test_Persist(IWebBrowser2 *wb, int version)
+{
+    IPersist *persist;
+    GUID guid;
+    HRESULT hr;
+
+    hr = IWebBrowser2_QueryInterface(wb, &IID_IPersist, (void **)&persist);
+    ok(hr == S_OK, "QueryInterface(IID_IPersist) failed: %08x\n", hr);
+
+    hr = IPersist_GetClassID(persist, &guid);
+    ok(hr == S_OK, "GetClassID failed: %08x\n", hr);
+    if (version == 1)
+        ok(IsEqualGUID(&guid, &CLSID_WebBrowser_V1), "got wrong CLSID: %s\n", wine_dbgstr_guid(&guid));
+    else
+        ok(IsEqualGUID(&guid, &CLSID_WebBrowser), "got wrong CLSID: %s\n", wine_dbgstr_guid(&guid));
+
+    IPersist_Release(persist);
+}
+
+static void test_OleObject(IWebBrowser2 *wb, int version)
+{
+    IOleObject *oleobj;
+    CLSID clsid;
+    HRESULT hr;
+
+    hr = IWebBrowser2_QueryInterface(wb, &IID_IOleObject, (void **)&oleobj);
+    ok(hr == S_OK, "QueryInterface(IID_IOleObject) failed: %08x\n", hr);
+
+    hr = IOleObject_GetUserClassID(oleobj, &clsid);
+    ok(hr == S_OK, "GetUserClassID failed: %08x\n", hr);
+    if (version == 1)
+        ok(IsEqualGUID(&clsid, &CLSID_WebBrowser_V1), "got wrong CLSID: %s\n", wine_dbgstr_guid(&clsid));
+    else
+        ok(IsEqualGUID(&clsid, &CLSID_WebBrowser), "got wrong CLSID: %s\n", wine_dbgstr_guid(&clsid));
+
+    IOleObject_Release(oleobj);
+}
+
 static void test_ie_funcs(IWebBrowser2 *wb)
 {
     IDispatch *disp;
@@ -2463,7 +2504,7 @@ static void test_ie_funcs(IWebBrowser2 *wb)
     hres = IWebBrowser2_get_Name(wb, &sName);
     ok(hres == S_OK, "getName failed: %08x, expected S_OK\n", hres);
     if (is_lang_english())
-        ok(!strcmp_wa(sName, "Microsoft Web Browser Control"), "got '%s', expected 'Microsoft Web Browser Control'\n", wine_dbgstr_w(sName));
+        ok(!lstrcmpW(sName, L"Microsoft Web Browser Control"), "got '%s', expected 'Microsoft Web Browser Control'\n", wine_dbgstr_w(sName));
     else /* Non-English cannot be blank. */
         ok(sName!=NULL, "get_Name return a NULL string.\n");
     SysFreeString(sName);
@@ -2757,20 +2798,20 @@ static void test_ConnectionPoint(IWebBrowser2 *unk, BOOL init)
     IConnectionPoint_Release(point);
 }
 
-static void test_Navigate2(IWebBrowser2 *webbrowser, const char *nav_url)
+static void test_Navigate2(IWebBrowser2 *webbrowser, const WCHAR *nav_url)
 {
     VARIANT url;
     BOOL is_file;
     HRESULT hres;
 
-    test_LocationURL(webbrowser, is_first_load ? "" : current_url);
+    test_LocationURL(webbrowser, is_first_load ? L"" : current_url);
     test_ready_state(is_first_load ? READYSTATE_UNINITIALIZED : READYSTATE_COMPLETE, VARIANT_FALSE);
 
     is_http = !memcmp(nav_url, "http:", 5);
     V_VT(&url) = VT_BSTR;
-    V_BSTR(&url) = a2bstr(current_url = nav_url);
+    V_BSTR(&url) = SysAllocString(current_url = nav_url);
 
-    if((is_file = !strncasecmp(nav_url, "file://", 7)))
+    if((is_file = !wcsnicmp(nav_url, L"file://", 7)))
         current_url = nav_url + 7;
 
     if(is_first_load) {
@@ -3178,14 +3219,14 @@ static void test_IServiceProvider(IWebBrowser2 *unk)
     IServiceProvider_Release(servprov);
 }
 
-static void test_put_href(IWebBrowser2 *unk, const char *url)
+static void test_put_href(IWebBrowser2 *unk, const WCHAR *url)
 {
     IHTMLLocation *location;
     IHTMLDocument2 *doc;
     BSTR str;
     HRESULT hres;
 
-    trace("put_href(%s)...\n", url);
+    trace("put_href(%s)...\n", wine_dbgstr_w(url));
 
     doc = get_document(unk);
 
@@ -3195,7 +3236,7 @@ static void test_put_href(IWebBrowser2 *unk, const char *url)
     ok(hres == S_OK, "get_location failed: %08x\n", hres);
     ok(location != NULL, "location == NULL\n");
 
-    is_http = !memcmp(url, "http:", 5);
+    is_http = !wcsncmp(url, L"http:", 5);
 
     SET_EXPECT(TranslateUrl);
     SET_EXPECT(Invoke_BEFORENAVIGATE2);
@@ -3204,7 +3245,7 @@ static void test_put_href(IWebBrowser2 *unk, const char *url)
 
     dwl_flags = DWL_FROM_PUT_HREF;
 
-    str = a2bstr(current_url = url);
+    str = SysAllocString(current_url = url);
     is_first_load = FALSE;
     hres = IHTMLLocation_put_href(location, str);
 
@@ -3220,7 +3261,7 @@ static void test_put_href(IWebBrowser2 *unk, const char *url)
     test_ready_state(READYSTATE_COMPLETE, VARIANT_FALSE);
 }
 
-static void test_go_back(IWebBrowser2 *wb, const char *back_url, int back_enable, int forward_enable, int forward_todo)
+static void test_go_back(IWebBrowser2 *wb, const WCHAR *back_url, int back_enable, int forward_enable, int forward_todo)
 {
     HRESULT hres;
 
@@ -3262,7 +3303,7 @@ static void test_go_back(IWebBrowser2 *wb, const char *back_url, int back_enable
     CLEAR_CALLED(Invoke_PROPERTYCHANGE); /* called by IE11 */
 }
 
-static void test_go_forward(IWebBrowser2 *wb, const char *forward_url, int back_enable, int forward_enable)
+static void test_go_forward(IWebBrowser2 *wb, const WCHAR *forward_url, int back_enable, int forward_enable)
 {
     HRESULT hres;
 
@@ -3456,7 +3497,7 @@ static void test_TranslateAccelerator(IWebBrowser2 *unk)
         {5, 5}
     };
 
-    test_Navigate2(unk, "about:blank");
+    test_Navigate2(unk, L"about:blank");
 
     hres = IWebBrowser2_QueryInterface(unk, &IID_IOleInPlaceActiveObject, (void**)&pao);
     ok(hres == S_OK, "Got 0x%08x\n", hres);
@@ -3660,6 +3701,7 @@ static void test_Close(IWebBrowser2 *wb, BOOL do_download)
     }else {
         nav_back_todo = nav_forward_todo = TRUE;
     }
+    SET_EXPECT(Advise_OnClose);
     hres = IOleObject_Close(oo, OLECLOSE_NOSAVE);
     ok(hres == S_OK, "OleObject_Close failed: %x\n", hres);
     CHECK_CALLED(Frame_SetActiveObject);
@@ -3681,6 +3723,7 @@ static void test_Close(IWebBrowser2 *wb, BOOL do_download)
     }else {
         nav_back_todo = nav_forward_todo = FALSE;
     }
+    CHECK_CALLED(Advise_OnClose);
 
     hres = IOleObject_GetClientSite(oo, &ocs);
     ok(hres == S_OK, "hres = %x\n", hres);
@@ -3707,14 +3750,64 @@ static void test_Close(IWebBrowser2 *wb, BOOL do_download)
     SET_EXPECT(OnFocus_FALSE);
     SET_EXPECT(Invoke_COMMANDSTATECHANGE_NAVIGATEBACK_FALSE);
     SET_EXPECT(Invoke_COMMANDSTATECHANGE_NAVIGATEFORWARD_FALSE);
+    SET_EXPECT(Advise_OnClose);
     hres = IOleObject_Close(oo, OLECLOSE_NOSAVE);
     ok(hres == S_OK, "OleObject_Close failed: %x\n", hres);
-    todo_wine CHECK_NOT_CALLED(OnFocus_FALSE);
+    CHECK_NOT_CALLED(OnFocus_FALSE);
     todo_wine CHECK_NOT_CALLED(Invoke_COMMANDSTATECHANGE_NAVIGATEBACK_FALSE);
     todo_wine CHECK_NOT_CALLED(Invoke_COMMANDSTATECHANGE_NAVIGATEFORWARD_FALSE);
+    CHECK_CALLED(Advise_OnClose);
 
     test_close = FALSE;
     IOleObject_Release(oo);
+}
+
+static void test_Advise(IWebBrowser2 *wb)
+{
+    IOleObject *oleobj;
+    IEnumSTATDATA *data;
+    DWORD connection[2];
+    HRESULT hres;
+
+    hres = IWebBrowser2_QueryInterface(wb, &IID_IOleObject, (void **)&oleobj);
+    ok(hres == S_OK, "QueryInterface(IID_IOleObject) failed: %08x\n", hres);
+
+    hres = IOleObject_Unadvise(oleobj, 0);
+    ok(hres == OLE_E_NOCONNECTION, "Unadvise returned: %08x\n", hres);
+
+    data = (void *)0xdeadbeef;
+    hres = IOleObject_EnumAdvise(oleobj, &data);
+    ok(hres == E_NOTIMPL, "EnumAdvise returned: %08x\n", hres);
+    ok(data == NULL, "got data %p\n", data);
+
+    connection[0] = 0xdeadbeef;
+    hres = IOleObject_Advise(oleobj, NULL, &connection[0]);
+    ok(hres == E_INVALIDARG, "Advise returned: %08x\n", hres);
+    ok(connection[0] == 0, "got connection %u\n", connection[0]);
+
+    hres = IOleObject_Advise(oleobj, &test_sink, NULL);
+    ok(hres == E_INVALIDARG, "Advise returned: %08x\n", hres);
+
+    connection[0] = 0xdeadbeef;
+    hres = IOleObject_Advise(oleobj, &test_sink, &connection[0]);
+    ok(hres == S_OK, "Advise returned: %08x\n", hres);
+    ok(connection[0] != 0xdeadbeef, "got connection %u\n", connection[0]);
+
+    connection[1] = 0xdeadbeef;
+    hres = IOleObject_Advise(oleobj, &test_sink, &connection[1]);
+    ok(hres == S_OK, "Advise returned: %08x\n", hres);
+    ok(connection[1] == connection[0] + 1, "got connection %u\n", connection[1]);
+
+    hres = IOleObject_Unadvise(oleobj, connection[1]);
+    ok(hres == S_OK, "Unadvise returned: %08x\n", hres);
+
+    hres = IOleObject_Unadvise(oleobj, connection[1]);
+    ok(hres == OLE_E_NOCONNECTION, "Unadvise returned: %08x\n", hres);
+
+    hres = IOleObject_Unadvise(oleobj, connection[0]);
+    ok(hres == S_OK, "Unadvise returned: %08x\n", hres);
+
+    IOleObject_Release(oleobj);
 }
 
 #define TEST_DOWNLOAD    0x0001
@@ -3735,7 +3828,9 @@ static void init_test(IWebBrowser2 *webbrowser, DWORD flags)
 static void test_WebBrowser(DWORD flags, BOOL do_close)
 {
     IWebBrowser2 *webbrowser;
-    ULONG ref;
+    IOleObject *oleobj;
+    HRESULT hres;
+    ULONG ref, connection;
 
     webbrowser = create_webbrowser();
     if(!webbrowser)
@@ -3743,21 +3838,31 @@ static void test_WebBrowser(DWORD flags, BOOL do_close)
 
     init_test(webbrowser, flags);
 
+    hres = IWebBrowser2_QueryInterface(webbrowser, &IID_IOleObject, (void **)&oleobj);
+    ok(hres == S_OK, "QueryInterface(IID_OleObject) failed: %08x\n", hres);
+
+    hres = IOleObject_Advise(oleobj, &test_sink, &connection);
+    ok(hres == S_OK, "Advise failed: %08x\n", hres);
+
     test_QueryStatusWB(webbrowser, FALSE);
     test_ExecWB(webbrowser, FALSE);
     test_QueryInterface(webbrowser);
     test_ready_state(READYSTATE_UNINITIALIZED, BUSY_FAIL);
     test_ClassInfo(webbrowser);
     test_EnumVerbs(webbrowser);
-    test_LocationURL(webbrowser, "");
+    test_LocationURL(webbrowser, L"");
     test_ConnectionPoint(webbrowser, TRUE);
+
     test_ClientSite(webbrowser, &ClientSite, !do_download);
     test_Extent(webbrowser);
     test_wb_funcs(webbrowser, TRUE);
     test_DoVerb(webbrowser);
     test_olecmd(webbrowser, FALSE);
-    test_Navigate2(webbrowser, "about:blank");
+    test_Navigate2(webbrowser, L"about:blank");
     test_QueryStatusWB(webbrowser, TRUE);
+    test_Persist(webbrowser, 2);
+    test_OleObject(webbrowser, 2);
+    test_Advise(webbrowser);
 
     if(do_download) {
         IHTMLDocument2 *doc, *doc2;
@@ -3766,14 +3871,14 @@ static void test_WebBrowser(DWORD flags, BOOL do_close)
         test_olecmd(webbrowser, TRUE);
         doc = get_document(webbrowser);
 
-        test_put_href(webbrowser, "about:test");
+        test_put_href(webbrowser, L"about:test");
         test_download(DWL_FROM_PUT_HREF);
         doc2 = get_document(webbrowser);
         ok(doc == doc2, "doc != doc2\n");
         IHTMLDocument2_Release(doc2);
 
         trace("Navigate2 repeated...\n");
-        test_Navigate2(webbrowser, "about:blank");
+        test_Navigate2(webbrowser, L"about:blank");
         test_download(DWL_EXPECT_BEFORE_NAVIGATE);
         doc2 = get_document(webbrowser);
         ok(doc == doc2, "doc != doc2\n");
@@ -3783,7 +3888,7 @@ static void test_WebBrowser(DWORD flags, BOOL do_close)
         if(!do_close) {
             trace("Navigate2 http URL...\n");
             test_ready_state(READYSTATE_COMPLETE, VARIANT_FALSE);
-            test_Navigate2(webbrowser, "http://test.winehq.org/tests/hello.html");
+            test_Navigate2(webbrowser, L"http://test.winehq.org/tests/hello.html");
             nav_back_todo = TRUE;
             test_download(DWL_EXPECT_BEFORE_NAVIGATE|DWL_HTTP);
             nav_back_todo = FALSE;
@@ -3792,31 +3897,31 @@ static void test_WebBrowser(DWORD flags, BOOL do_close)
             test_Refresh(webbrowser, TRUE);
 
             trace("put_href http URL...\n");
-            test_put_href(webbrowser, "http://test.winehq.org/tests/winehq_snapshot/");
+            test_put_href(webbrowser, L"http://test.winehq.org/tests/winehq_snapshot/");
             test_download(DWL_FROM_PUT_HREF|DWL_HTTP|DWL_BACK_ENABLE);
 
             trace("GoBack...\n");
             nav_back_todo = TRUE;
-            test_go_back(webbrowser, "http://test.winehq.org/tests/hello.html", 0, 0, 1);
+            test_go_back(webbrowser, L"http://test.winehq.org/tests/hello.html", 0, 0, 1);
             test_download(DWL_FROM_GOBACK|DWL_HTTP);
             nav_back_todo = FALSE;
 
             trace("GoForward...\n");
-            test_go_forward(webbrowser, "http://test.winehq.org/tests/winehq_snapshot/", -1, 0);
+            test_go_forward(webbrowser, L"http://test.winehq.org/tests/winehq_snapshot/", -1, 0);
             test_download(DWL_FROM_GOFORWARD|DWL_HTTP);
 
             trace("GoBack...\n");
             nav_back_todo = TRUE;
-            test_go_back(webbrowser, "http://test.winehq.org/tests/hello.html", 0, -1, 0);
+            test_go_back(webbrowser, L"http://test.winehq.org/tests/hello.html", 0, -1, 0);
             test_download(DWL_FROM_GOBACK|DWL_HTTP);
             nav_back_todo = FALSE;
 
             trace("GoForward...\n");
-            test_go_forward(webbrowser, "http://test.winehq.org/tests/winehq_snapshot/", -1, 0);
+            test_go_forward(webbrowser, L"http://test.winehq.org/tests/winehq_snapshot/", -1, 0);
             test_download(DWL_FROM_GOFORWARD|DWL_HTTP);
         }else {
             trace("Navigate2 repeated with the same URL...\n");
-            test_Navigate2(webbrowser, "about:blank");
+            test_Navigate2(webbrowser, L"about:blank");
             test_download(DWL_EXPECT_BEFORE_NAVIGATE);
         }
 
@@ -3843,6 +3948,11 @@ static void test_WebBrowser(DWORD flags, BOOL do_close)
     test_ConnectionPoint(webbrowser, FALSE);
     test_IServiceProvider(webbrowser);
 
+    hres = IOleObject_Unadvise(oleobj, connection);
+    ok(hres == S_OK, "Unadvise failed: %08x\n", hres);
+
+    IOleObject_Release(oleobj);
+
     ref = IWebBrowser2_Release(webbrowser);
     ok(ref == 0 || broken(do_download && !do_close), "ref=%d, expected 0\n", ref);
 }
@@ -3850,7 +3960,8 @@ static void test_WebBrowser(DWORD flags, BOOL do_close)
 static void test_WebBrowserV1(void)
 {
     IWebBrowser2 *wb;
-    ULONG ref;
+    IOleObject *oleobj;
+    ULONG ref, connection;
     HRESULT hres;
 
     hres = CoCreateInstance(&CLSID_WebBrowser_V1, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
@@ -3860,12 +3971,26 @@ static void test_WebBrowserV1(void)
     init_test(wb, 0);
     wb_version = 1;
 
+    hres = IWebBrowser2_QueryInterface(wb, &IID_IOleObject, (void **)&oleobj);
+    ok(hres == S_OK, "QueryInterface(IID_OleObject) failed: %08x\n", hres);
+
+    hres = IOleObject_Advise(oleobj, &test_sink, &connection);
+    ok(hres == S_OK, "Advise failed: %08x\n", hres);
+
     test_QueryStatusWB(wb, FALSE);
     test_ExecWB(wb, FALSE);
     test_QueryInterface(wb);
     test_ready_state(READYSTATE_UNINITIALIZED, BUSY_FAIL);
     test_ClassInfo(wb);
     test_EnumVerbs(wb);
+    test_Persist(wb, 1);
+    test_OleObject(wb, 1);
+    test_Advise(wb);
+
+    hres = IOleObject_Unadvise(oleobj, connection);
+    ok(hres == S_OK, "Unadvise failed: %08x\n", hres);
+
+    IOleObject_Release(oleobj);
 
     ref = IWebBrowser2_Release(wb);
     ok(ref == 0, "ref=%d, expected 0\n", ref);
@@ -3882,7 +4007,7 @@ static void test_WebBrowser_slim_container(void)
     test_ConnectionPoint(webbrowser, TRUE);
     test_ClientSite(webbrowser, &ClientSite, TRUE);
     test_DoVerb(webbrowser);
-    test_Navigate2(webbrowser, "about:blank");
+    test_Navigate2(webbrowser, L"about:blank");
 
     /* Tests of interest */
     test_QueryStatusWB(webbrowser, TRUE);
@@ -3904,6 +4029,8 @@ static void test_WebBrowser_DoVerb(void)
     HWND hwnd;
     ULONG ref;
     BOOL res;
+    HRESULT hres;
+    VARIANT_BOOL b;
 
     webbrowser = create_webbrowser();
     init_test(webbrowser, 0);
@@ -3935,6 +4062,149 @@ static void test_WebBrowser_DoVerb(void)
     SET_EXPECT(OnInPlaceDeactivate);
     call_DoVerb(webbrowser, OLEIVERB_HIDE);
     CHECK_CALLED(OnInPlaceDeactivate);
+
+    b = 0x100;
+    hres = IWebBrowser2_get_Visible(webbrowser, &b);
+    ok(hres == S_OK, "get_Visible failed: %08x\n", hres);
+    ok(b == VARIANT_TRUE, "Visible = %x\n", b);
+
+    SET_EXPECT(CanInPlaceActivate);
+    SET_EXPECT(Site_GetWindow);
+    SET_EXPECT(OnInPlaceActivate);
+    SET_EXPECT(GetWindowContext);
+    SET_EXPECT(ShowObject);
+    SET_EXPECT(GetContainer);
+    SET_EXPECT(Frame_GetWindow);
+    SET_EXPECT(OnUIActivate);
+    SET_EXPECT(Frame_SetActiveObject);
+    SET_EXPECT(UIWindow_SetActiveObject);
+    SET_EXPECT(SetMenu);
+    SET_EXPECT(OnFocus_TRUE);
+    call_DoVerb(webbrowser, OLEIVERB_SHOW);
+    CHECK_CALLED(CanInPlaceActivate);
+    CHECK_CALLED(Site_GetWindow);
+    CHECK_CALLED(OnInPlaceActivate);
+    CHECK_CALLED(GetWindowContext);
+    CHECK_CALLED(ShowObject);
+    CHECK_CALLED(GetContainer);
+    CHECK_CALLED(Frame_GetWindow);
+    CHECK_CALLED(OnUIActivate);
+    CHECK_CALLED(Frame_SetActiveObject);
+    CHECK_CALLED(UIWindow_SetActiveObject);
+    CHECK_CALLED(SetMenu);
+    CHECK_CALLED(OnFocus_TRUE);
+
+    b = 0x100;
+    hres = IWebBrowser2_get_Visible(webbrowser, &b);
+    ok(hres == S_OK, "get_Visible failed: %08x\n", hres);
+    ok(b == VARIANT_TRUE, "Visible = %x\n", b);
+
+    call_DoVerb(webbrowser, OLEIVERB_SHOW);
+    call_DoVerb(webbrowser, OLEIVERB_UIACTIVATE);
+
+    SET_EXPECT(Frame_SetActiveObject);
+    SET_EXPECT(UIWindow_SetActiveObject);
+    SET_EXPECT(OnUIDeactivate);
+    SET_EXPECT(OnFocus_FALSE);
+    SET_EXPECT(OnInPlaceDeactivate);
+    test_hide = TRUE;
+    call_DoVerb(webbrowser, OLEIVERB_HIDE);
+    test_hide = FALSE;
+    CHECK_CALLED(Frame_SetActiveObject);
+    CHECK_CALLED(UIWindow_SetActiveObject);
+    CHECK_CALLED(OnUIDeactivate);
+    CHECK_CALLED(OnFocus_FALSE);
+    CHECK_CALLED(OnInPlaceDeactivate);
+
+    b = 0x100;
+    hres = IWebBrowser2_get_Visible(webbrowser, &b);
+    ok(hres == S_OK, "get_Visible failed: %08x\n", hres);
+    ok(b == VARIANT_TRUE, "Visible = %x\n", b);
+
+    SET_EXPECT(CanInPlaceActivate);
+    SET_EXPECT(Site_GetWindow);
+    SET_EXPECT(OnInPlaceActivate);
+    SET_EXPECT(GetWindowContext);
+    SET_EXPECT(ShowObject);
+    SET_EXPECT(GetContainer);
+    SET_EXPECT(Frame_GetWindow);
+    SET_EXPECT(OnUIActivate);
+    SET_EXPECT(Frame_SetActiveObject);
+    SET_EXPECT(UIWindow_SetActiveObject);
+    SET_EXPECT(SetMenu);
+    SET_EXPECT(OnFocus_TRUE);
+    call_DoVerb(webbrowser, OLEIVERB_SHOW);
+    CHECK_CALLED(CanInPlaceActivate);
+    CHECK_CALLED(Site_GetWindow);
+    CHECK_CALLED(OnInPlaceActivate);
+    CHECK_CALLED(GetWindowContext);
+    CHECK_CALLED(ShowObject);
+    CHECK_CALLED(GetContainer);
+    CHECK_CALLED(Frame_GetWindow);
+    CHECK_CALLED(OnUIActivate);
+    CHECK_CALLED(Frame_SetActiveObject);
+    CHECK_CALLED(UIWindow_SetActiveObject);
+    CHECK_CALLED(SetMenu);
+    CHECK_CALLED(OnFocus_TRUE);
+
+    b = 0x100;
+    hres = IWebBrowser2_get_Visible(webbrowser, &b);
+    ok(hres == S_OK, "get_Visible failed: %08x\n", hres);
+    ok(b == VARIANT_TRUE, "Visible = %x\n", b);
+
+    SET_EXPECT(Frame_SetActiveObject);
+    SET_EXPECT(UIWindow_SetActiveObject);
+    SET_EXPECT(OnUIDeactivate);
+    SET_EXPECT(OnFocus_FALSE);
+    SET_EXPECT(OnInPlaceDeactivate);
+    test_hide = TRUE;
+    call_DoVerb(webbrowser, OLEIVERB_HIDE);
+    CHECK_CALLED(Frame_SetActiveObject);
+    CHECK_CALLED(UIWindow_SetActiveObject);
+    CHECK_CALLED(OnUIDeactivate);
+    CHECK_CALLED(OnFocus_FALSE);
+    CHECK_CALLED(OnInPlaceDeactivate);
+
+    call_DoVerb(webbrowser, OLEIVERB_HIDE);
+    test_hide = FALSE;
+
+    b = 0x100;
+    hres = IWebBrowser2_get_Visible(webbrowser, &b);
+    ok(hres == S_OK, "get_Visible failed: %08x\n", hres);
+    ok(b == VARIANT_TRUE, "Visible = %x\n", b);
+
+    SET_EXPECT(CanInPlaceActivate);
+    SET_EXPECT(Site_GetWindow);
+    SET_EXPECT(OnInPlaceActivate);
+    SET_EXPECT(GetWindowContext);
+    SET_EXPECT(ShowObject);
+    SET_EXPECT(GetContainer);
+    SET_EXPECT(Frame_GetWindow);
+    SET_EXPECT(OnUIActivate);
+    SET_EXPECT(Frame_SetActiveObject);
+    SET_EXPECT(UIWindow_SetActiveObject);
+    SET_EXPECT(SetMenu);
+    SET_EXPECT(OnFocus_TRUE);
+    call_DoVerb(webbrowser, OLEIVERB_UIACTIVATE);
+    CHECK_CALLED(CanInPlaceActivate);
+    CHECK_CALLED(Site_GetWindow);
+    CHECK_CALLED(OnInPlaceActivate);
+    CHECK_CALLED(GetWindowContext);
+    CHECK_CALLED(ShowObject);
+    CHECK_CALLED(GetContainer);
+    CHECK_CALLED(Frame_GetWindow);
+    CHECK_CALLED(OnUIActivate);
+    CHECK_CALLED(Frame_SetActiveObject);
+    CHECK_CALLED(UIWindow_SetActiveObject);
+    CHECK_CALLED(SetMenu);
+    CHECK_CALLED(OnFocus_TRUE);
+
+    b = 0x100;
+    hres = IWebBrowser2_get_Visible(webbrowser, &b);
+    ok(hres == S_OK, "get_Visible failed: %08x\n", hres);
+    ok(b == VARIANT_TRUE, "Visible = %x\n", b);
+
+    call_DoVerb(webbrowser, OLEIVERB_SHOW);
 
     test_ClientSite(webbrowser, NULL, FALSE);
 
@@ -3969,13 +4239,13 @@ static void test_FileProtocol(void)
     IWebBrowser2 *webbrowser;
     HANDLE file;
     ULONG ref;
-    char file_path[MAX_PATH];
-    char file_url[MAX_PATH] = "File://";
+    WCHAR file_path[MAX_PATH];
+    WCHAR file_url[MAX_PATH] = L"File://";
 
-    static const char test_file[] = "wine_test.html";
+    static const WCHAR test_file[] = L"wine_test.html";
 
-    GetTempPathA(MAX_PATH, file_path);
-    strcat(file_path, test_file);
+    GetTempPathW(MAX_PATH, file_path);
+    lstrcatW(file_path, test_file);
 
     webbrowser = create_webbrowser();
     if(!webbrowser)
@@ -3983,16 +4253,15 @@ static void test_FileProtocol(void)
 
     init_test(webbrowser, 0);
 
-    file = CreateFileA(file_path, GENERIC_WRITE, 0, NULL,
-            CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    file = CreateFileW(file_path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
     if(file == INVALID_HANDLE_VALUE && GetLastError() != ERROR_FILE_EXISTS){
         ok(0, "CreateFile failed\n");
         return;
     }
     CloseHandle(file);
 
-    GetLongPathNameA(file_path, file_path, sizeof(file_path));
-    strcat(file_url, file_path);
+    GetLongPathNameW(file_path, file_path, ARRAY_SIZE(file_path));
+    lstrcatW(file_url, file_path);
 
     test_ConnectionPoint(webbrowser, TRUE);
     test_ClientSite(webbrowser, &ClientSite, TRUE);
@@ -4004,7 +4273,7 @@ static void test_FileProtocol(void)
     ok(ref == 0, "ref=%u, expected 0\n", ref);
 
     if(file != INVALID_HANDLE_VALUE)
-        DeleteFileA(file_path);
+        DeleteFileW(file_path);
 }
 
 static HRESULT WINAPI sink_QueryInterface( IAdviseSink *iface, REFIID riid, void **obj)
@@ -4013,6 +4282,9 @@ static HRESULT WINAPI sink_QueryInterface( IAdviseSink *iface, REFIID riid, void
         *obj = iface;
         return S_OK;
     }
+
+    if (IsEqualGUID(riid, &IID_IProxyManager))
+        return E_NOINTERFACE;
 
     ok(0, "unexpected call QI(%s)\n", wine_dbgstr_guid(riid));
     return E_NOINTERFACE;
@@ -4030,27 +4302,28 @@ static ULONG WINAPI sink_Release(IAdviseSink *iface)
 
 static void WINAPI sink_OnDataChange(IAdviseSink *iface, FORMATETC *format, STGMEDIUM *medium)
 {
-    trace("%p, %p, %p\n", iface, format, medium);
+    trace("OnDataChange(%p, %p, %p)\n", iface, format, medium);
 }
 
 static void WINAPI sink_OnViewChange(IAdviseSink *iface, DWORD aspect, LONG index)
 {
-    trace("%p, %08x, %d\n", iface, aspect, index);
+    trace("OnViewChange(%p, %08x, %d)\n", iface, aspect, index);
 }
 
 static void WINAPI sink_OnRename(IAdviseSink *iface, IMoniker *moniker)
 {
-    trace("%p, %p\n", iface, moniker);
+    trace("OnRename(%p, %p) \n", iface, moniker);
 }
 
 static void WINAPI sink_OnSave(IAdviseSink *iface)
 {
-    trace("%p\n", iface);
+    trace("OnSave(%p)\n", iface);
 }
 
 static void WINAPI sink_OnClose(IAdviseSink *iface)
 {
-    trace("%p\n", iface);
+    trace("OnClose(%p)\n", iface);
+    CHECK_EXPECT(Advise_OnClose);
 }
 
 static const IAdviseSinkVtbl sink_vtbl =
@@ -4074,6 +4347,7 @@ static void test_SetAdvise(void)
     IViewObject2 *view;
     IAdviseSink *sink;
     IOleObject *oleobj;
+    IDispatch *doc;
     DWORD aspects, flags;
 
     if (!(browser = create_webbrowser())) return;
@@ -4133,9 +4407,37 @@ static void test_SetAdvise(void)
     hr = IViewObject2_SetAdvise(view, 0, 0, NULL);
     ok(hr == S_OK, "got %08x\n", hr);
 
+    doc = (void*)0xdeadbeef;
+    hr = IWebBrowser2_get_Document(browser, &doc);
+    ok(hr == S_FALSE, "get_Document failed: %08x\n", hr);
+    ok(!doc, "doc = %p\n", doc);
+
     IOleObject_Release(oleobj);
     IViewObject2_Release(view);
     IWebBrowser2_Release(browser);
+}
+
+static void test_SetQueryNetSessionCount(void)
+{
+    LONG count;
+
+    count = pSetQueryNetSessionCount(SESSION_QUERY);
+    ok(count == 0, "count = %d\n", count);
+
+    count = pSetQueryNetSessionCount(SESSION_INCREMENT);
+    ok(count == 1, "count = %d\n", count);
+
+    count = pSetQueryNetSessionCount(SESSION_QUERY);
+    ok(count == 1, "count = %d\n", count);
+
+    count = pSetQueryNetSessionCount(0xdeadbeef);
+    ok(count == 0, "count = %d\n", count);
+
+    count = pSetQueryNetSessionCount(SESSION_DECREMENT);
+    ok(count == 0, "count = %d\n", count);
+
+    count = pSetQueryNetSessionCount(SESSION_QUERY);
+    ok(count == 0, "count = %d\n", count);
 }
 
 static HRESULT WINAPI outer_QueryInterface(IUnknown *iface, REFIID riid, void **ppv)
@@ -4197,7 +4499,13 @@ static void test_com_aggregation(void)
 
 START_TEST(webbrowser)
 {
+    HMODULE ieframe = LoadLibraryW(L"ieframe.dll");
+
+    pSetQueryNetSessionCount = (void*)GetProcAddress(ieframe, "SetQueryNetSessionCount");
+
     OleInitialize(NULL);
+
+    test_SetQueryNetSessionCount();
 
     container_hwnd = create_container_window();
 

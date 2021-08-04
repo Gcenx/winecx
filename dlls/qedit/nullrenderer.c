@@ -26,18 +26,29 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(qedit);
 
-typedef struct NullRendererImpl
+struct null_renderer
 {
     struct strmbase_renderer renderer;
-} NullRendererImpl;
+    HANDLE run_event;
+};
 
-static inline NullRendererImpl *impl_from_strmbase_renderer(struct strmbase_renderer *iface)
+static struct null_renderer *impl_from_strmbase_renderer(struct strmbase_renderer *iface)
 {
-    return CONTAINING_RECORD(iface, NullRendererImpl, renderer);
+    return CONTAINING_RECORD(iface, struct null_renderer, renderer);
 }
 
 static HRESULT WINAPI NullRenderer_DoRenderSample(struct strmbase_renderer *iface, IMediaSample *sample)
 {
+    struct null_renderer *filter = impl_from_strmbase_renderer(iface);
+
+    if (filter->renderer.filter.state == State_Paused)
+    {
+        const HANDLE events[2] = {filter->run_event, filter->renderer.flush_event};
+
+        SetEvent(filter->renderer.state_event);
+        WaitForMultipleObjects(2, events, FALSE, INFINITE);
+    }
+
     return S_OK;
 }
 
@@ -49,37 +60,45 @@ static HRESULT WINAPI NullRenderer_CheckMediaType(struct strmbase_renderer *ifac
 
 static void null_renderer_destroy(struct strmbase_renderer *iface)
 {
-    NullRendererImpl *filter = impl_from_strmbase_renderer(iface);
+    struct null_renderer *filter = impl_from_strmbase_renderer(iface);
 
+    CloseHandle(filter->run_event);
     strmbase_renderer_cleanup(&filter->renderer);
-    CoTaskMemFree(filter);
+    free(filter);
+}
+
+static void null_renderer_start_stream(struct strmbase_renderer *iface)
+{
+    struct null_renderer *filter = impl_from_strmbase_renderer(iface);
+    SetEvent(filter->run_event);
+}
+
+static void null_renderer_stop_stream(struct strmbase_renderer *iface)
+{
+    struct null_renderer *filter = impl_from_strmbase_renderer(iface);
+    ResetEvent(filter->run_event);
 }
 
 static const struct strmbase_renderer_ops renderer_ops =
 {
     .pfnCheckMediaType = NullRenderer_CheckMediaType,
     .pfnDoRenderSample = NullRenderer_DoRenderSample,
+    .renderer_start_stream = null_renderer_start_stream,
+    .renderer_stop_stream = null_renderer_stop_stream,
     .renderer_destroy = null_renderer_destroy,
 };
 
-HRESULT NullRenderer_create(IUnknown *outer, void **out)
+HRESULT null_renderer_create(IUnknown *outer, IUnknown **out)
 {
-    static const WCHAR sink_name[] = {'I','n',0};
+    struct null_renderer *object;
 
-    HRESULT hr;
-    NullRendererImpl *pNullRenderer;
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
 
-    *out = NULL;
+    strmbase_renderer_init(&object->renderer, outer, &CLSID_NullRenderer, L"In", &renderer_ops);
+    object->run_event = CreateEventW(NULL, TRUE, FALSE, NULL);
 
-    pNullRenderer = CoTaskMemAlloc(sizeof(NullRendererImpl));
-
-    hr = strmbase_renderer_init(&pNullRenderer->renderer, outer,
-            &CLSID_NullRenderer, sink_name, &renderer_ops);
-
-    if (FAILED(hr))
-        CoTaskMemFree(pNullRenderer);
-    else
-        *out = &pNullRenderer->renderer.filter.IUnknown_inner;
-
+    TRACE("Created null renderer %p.\n", object);
+    *out = &object->renderer.filter.IUnknown_inner;
     return S_OK;
 }

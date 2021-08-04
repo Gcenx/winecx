@@ -23,21 +23,17 @@
 #pragma makedep implib
 #endif
 
-#include "msvcrt.h"
+#include <stdio.h>
+#include <wine/asm.h>
 
 #undef __iob_func
-extern MSVCRT_FILE * CDECL __iob_func(void);
+extern FILE * __cdecl __iob_func(void);
 
 /*********************************************************************
  *		__acrt_iob_func(UCRTBASE.@)
  */
-MSVCRT_FILE * CDECL __acrt_iob_func(unsigned idx)
+FILE * __cdecl __acrt_iob_func(unsigned idx)
 {
     return __iob_func() + idx;
 }
-
-#if defined(__i386__) || defined(__i386_on_x86_64__)
-void *_imp____acrt_iob_func = __acrt_iob_func;
-#else
-void *__imp___acrt_iob_func = __acrt_iob_func;
-#endif
+__ASM_GLOBAL_IMPORT(__acrt_iob_func)

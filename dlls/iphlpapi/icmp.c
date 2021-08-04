@@ -144,281 +144,32 @@ static int in_cksum(u_short *addr, int len)
     return(answer);
 }
 
-
-
-/*
- * Exported Routines.
- */
-
-/***********************************************************************
- *		Icmp6CreateFile (IPHLPAPI.@)
- */
-HANDLE WINAPI Icmp6CreateFile(VOID)
+/* Receive a reply (IPv4); this function uses, takes ownership of and will always free `buffer` */
+static DWORD icmp_get_reply(int sid, unsigned char *buffer, DWORD send_time, void *reply_buf, DWORD reply_size, DWORD timeout)
 {
-    icmp_t* icp;
-
-    int sid=socket(AF_INET6,SOCK_RAW,IPPROTO_ICMPV6);
-    if (sid < 0)
-    {
-        /* Mac OS X supports non-privileged ICMP via SOCK_DGRAM type. */
-        sid=socket(AF_INET6,SOCK_DGRAM,IPPROTO_ICMPV6);
-    }
-    if (sid < 0) {
-        ERR_(winediag)("Failed to use ICMPV6 (network ping), this requires special permissions.\n");
-        SetLastError(ERROR_ACCESS_DENIED);
-        return INVALID_HANDLE_VALUE;
-    }
-
-    icp=HeapAlloc(GetProcessHeap(), 0, sizeof(*icp));
-    if (icp==NULL) {
-        close(sid);
-        SetLastError(IP_NO_RESOURCES);
-        return INVALID_HANDLE_VALUE;
-    }
-    icp->sid=sid;
-    icp->default_opts.OptionsSize=IP_OPTS_UNKNOWN;
-    return (HANDLE)icp;
-}
-
-
-/***********************************************************************
- *		Icmp6SendEcho2 (IPHLPAPI.@)
- */
-DWORD WINAPI Icmp6SendEcho2(
-    HANDLE                   IcmpHandle,
-    HANDLE                   Event,
-    PIO_APC_ROUTINE          ApcRoutine,
-    PVOID                    ApcContext,
-    struct sockaddr_in6*     SourceAddress,
-    struct sockaddr_in6*     DestinationAddress,
-    LPVOID                   RequestData,
-    WORD                     RequestSize,
-    PIP_OPTION_INFORMATION   RequestOptions,
-    LPVOID                   ReplyBuffer,
-    DWORD                    ReplySize,
-    DWORD                    Timeout
-    )
-{
-    FIXME("(%p, %p, %p, %p, %p, %p, %p, %d, %p, %p, %d, %d): stub\n", IcmpHandle, Event,
-            ApcRoutine, ApcContext, SourceAddress, DestinationAddress, RequestData,
-            RequestSize, RequestOptions, ReplyBuffer, ReplySize, Timeout);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
-}
-
-
-/***********************************************************************
- *		IcmpCreateFile (IPHLPAPI.@)
- */
-HANDLE WINAPI IcmpCreateFile(VOID)
-{
-    icmp_t* icp;
-
-    int sid=socket(AF_INET,SOCK_RAW,IPPROTO_ICMP);
-    if (sid < 0)
-    {
-        /* Mac OS X supports non-privileged ICMP via SOCK_DGRAM type. */
-        sid=socket(AF_INET,SOCK_DGRAM,IPPROTO_ICMP);
-    }
-    if (sid < 0) {
-        ERR_(winediag)("Failed to use ICMP (network ping), this requires special permissions.\n");
-        SetLastError(ERROR_ACCESS_DENIED);
-        return INVALID_HANDLE_VALUE;
-    }
-
-    icp=HeapAlloc(GetProcessHeap(), 0, sizeof(*icp));
-    if (icp==NULL) {
-        close(sid);
-        SetLastError(IP_NO_RESOURCES);
-        return INVALID_HANDLE_VALUE;
-    }
-    icp->sid=sid;
-    icp->default_opts.OptionsSize=IP_OPTS_UNKNOWN;
-    return (HANDLE)icp;
-}
-
-
-/***********************************************************************
- *		IcmpCloseHandle (IPHLPAPI.@)
- */
-BOOL WINAPI IcmpCloseHandle(HANDLE  IcmpHandle)
-{
-    icmp_t* icp=(icmp_t*)IcmpHandle;
-    if (IcmpHandle==INVALID_HANDLE_VALUE) {
-        /* FIXME: in fact win98 seems to ignore the handle value !!! */
-        SetLastError(ERROR_INVALID_HANDLE);
-        return FALSE;
-    }
-
-    close( icp->sid );
-    HeapFree(GetProcessHeap (), 0, icp);
-    return TRUE;
-}
-
-
-/***********************************************************************
- *		IcmpSendEcho (IPHLPAPI.@)
- */
-DWORD WINAPI IcmpSendEcho(
-    HANDLE                   IcmpHandle,
-    IPAddr                   DestinationAddress,
-    LPVOID                   RequestData,
-    WORD                     RequestSize,
-    PIP_OPTION_INFORMATION   RequestOptions,
-    LPVOID                   ReplyBuffer,
-    DWORD                    ReplySize,
-    DWORD                    Timeout
-    )
-{
-    icmp_t* icp=(icmp_t*)IcmpHandle;
-    unsigned char *buffer;
-    int reqsize, repsize;
-
-    struct icmp_echo_reply* ier;
-    struct ip* ip_header;
-    struct icmp* icmp_header;
-    char* endbuf;
-    int ip_header_len;
-    struct pollfd fdr;
-    DWORD send_time,recv_time;
+    int repsize = MAXIPLEN + MAXICMPLEN + min(65535, reply_size);
+    struct icmp *icmp_header = (struct icmp*)buffer;
+    char *endbuf = (char*)reply_buf + reply_size;
+    struct ip *ip_header = (struct ip*)buffer;
+    struct icmp_echo_reply *ier = reply_buf;
+    unsigned short id, seq, cksum;
     struct sockaddr_in addr;
+    int ip_header_len = 0;
     socklen_t addrlen;
-    unsigned short id,seq,cksum;
+    struct pollfd fdr;
+    DWORD recv_time;
     int res;
 
-    if (IcmpHandle==INVALID_HANDLE_VALUE) {
-        /* FIXME: in fact win98 seems to ignore the handle value !!! */
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return 0;
-    }
-
-    if (!ReplyBuffer||!ReplySize) {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return 0;
-    }
-
-    if (ReplySize<sizeof(ICMP_ECHO_REPLY)) {
-        SetLastError(IP_BUF_TOO_SMALL);
-        return 0;
-    }
-    /* check the request size against SO_MAX_MSG_SIZE using getsockopt */
-
-    if (!DestinationAddress) {
-        SetLastError(ERROR_INVALID_NETNAME);
-        return 0;
-    }
-
-    /* Prepare the request */
-    id=getpid() & 0xFFFF;
-    seq=InterlockedIncrement(&icmp_sequence) & 0xFFFF;
-
-    reqsize=ICMP_MINLEN+RequestSize;
-    /* max ip header + max icmp header and error data + reply size(max 65535 on Windows) */
-    /* FIXME: request size of 65535 is not supported yet because max buffer size of raw socket on linux is 32767 */
-    repsize = MAXIPLEN + MAXICMPLEN + min( 65535, ReplySize );
-    buffer = HeapAlloc(GetProcessHeap(), 0, max( repsize, reqsize ));
-    if (buffer == NULL) {
-        SetLastError(ERROR_OUTOFMEMORY);
-        return 0;
-    }
-
-    icmp_header=(struct icmp*)buffer;
-    icmp_header->icmp_type=ICMP_ECHO;
-    icmp_header->icmp_code=0;
-    icmp_header->icmp_cksum=0;
-    icmp_header->icmp_id=id;
-    icmp_header->icmp_seq=seq;
-    memcpy(buffer+ICMP_MINLEN, RequestData, RequestSize);
-    icmp_header->icmp_cksum=cksum=in_cksum((u_short*)buffer,reqsize);
-
-    addr.sin_family=AF_INET;
-    addr.sin_addr.s_addr=DestinationAddress;
-    addr.sin_port=0;
-
-    if (RequestOptions!=NULL) {
-        int val;
-        if (icp->default_opts.OptionsSize==IP_OPTS_UNKNOWN) {
-            socklen_t len;
-            /* Before we mess with the options, get the default values */
-            len=sizeof(val);
-            getsockopt(icp->sid,IPPROTO_IP,IP_TTL,(char *)&val,&len);
-            icp->default_opts.Ttl=val;
-
-            len=sizeof(val);
-            getsockopt(icp->sid,IPPROTO_IP,IP_TOS,(char *)&val,&len);
-            icp->default_opts.Tos=val;
-            /* FIXME: missing: handling of IP 'flags', and all the other options */
-        }
-
-        val=RequestOptions->Ttl;
-        setsockopt(icp->sid,IPPROTO_IP,IP_TTL,(char *)&val,sizeof(val));
-        val=RequestOptions->Tos;
-        setsockopt(icp->sid,IPPROTO_IP,IP_TOS,(char *)&val,sizeof(val));
-        /* FIXME:  missing: handling of IP 'flags', and all the other options */
-
-        icp->default_opts.OptionsSize=IP_OPTS_CUSTOM;
-    } else if (icp->default_opts.OptionsSize==IP_OPTS_CUSTOM) {
-        int val;
-
-        /* Restore the default options */
-        val=icp->default_opts.Ttl;
-        setsockopt(icp->sid,IPPROTO_IP,IP_TTL,(char *)&val,sizeof(val));
-        val=icp->default_opts.Tos;
-        setsockopt(icp->sid,IPPROTO_IP,IP_TOS,(char *)&val,sizeof(val));
-        /* FIXME: missing: handling of IP 'flags', and all the other options */
-
-        icp->default_opts.OptionsSize=IP_OPTS_DEFAULT;
-    }
-
-    /* Get ready for receiving the reply
-     * Do it before we send the request to minimize the risk of introducing delays
-     */
-    fdr.fd = icp->sid;
+    id = icmp_header->icmp_id;
+    seq = icmp_header->icmp_seq;
+    cksum = icmp_header->icmp_cksum;
+    fdr.fd = sid;
     fdr.events = POLLIN;
-    addrlen=sizeof(addr);
-    ier=ReplyBuffer;
-    endbuf=(char *) ReplyBuffer+ReplySize;
+    addrlen = sizeof(addr);
 
-    /* Send the packet */
-    TRACE("Sending %d bytes (RequestSize=%d) to %s\n", reqsize, RequestSize, inet_ntoa(addr.sin_addr));
-#if 0
-    if (TRACE_ON(icmp)){
-        int i;
-        printf("Output buffer:\n");
-        for (i=0;i<reqsize;i++)
-            printf("%2x,", buffer[i]);
-        printf("\n");
-    }
-#endif
-
-    send_time = GetTickCount();
-    res=sendto(icp->sid, buffer, reqsize, 0, (struct sockaddr*)&addr, sizeof(addr));
-    if (res<0) {
-        if (errno==EMSGSIZE)
-            SetLastError(IP_PACKET_TOO_BIG);
-        else {
-            switch (errno) {
-            case ENETUNREACH:
-                SetLastError(IP_DEST_NET_UNREACHABLE);
-                break;
-            case EHOSTUNREACH:
-                SetLastError(IP_DEST_HOST_UNREACHABLE);
-                break;
-            default:
-                TRACE("unknown error: errno=%d\n",errno);
-                SetLastError(IP_GENERAL_FAILURE);
-            }
-        }
-        HeapFree(GetProcessHeap(), 0, buffer);
-        return 0;
-    }
-
-    /* Get the reply */
-    ip_header=(struct ip*)buffer;
-    ip_header_len=0; /* because gcc was complaining */
-    while (poll(&fdr,1,Timeout)>0) {
+    while (poll(&fdr,1,timeout)>0) {
         recv_time = GetTickCount();
-        res=recvfrom(icp->sid, buffer, repsize, 0, (struct sockaddr*)&addr, &addrlen);
+        res=recvfrom(sid, buffer, repsize, 0, (struct sockaddr*)&addr, &addrlen);
         TRACE("received %d bytes from %s\n",res, inet_ntoa(addr.sin_addr));
         ier->Status=IP_REQ_TIMED_OUT;
 
@@ -515,13 +266,13 @@ DWORD WINAPI IcmpSendEcho(
              * if we get flooded with ICMP packets that are not for us.
              */
             DWORD t = (recv_time - send_time);
-            if (Timeout > t) Timeout -= t;
-            else             Timeout = 0;
+            if (timeout > t) timeout -= t;
+            else             timeout = 0;
             continue;
         } else {
             /* Check free space, should be large enough for an ICMP_ECHO_REPLY and remainning icmp data */
             if (endbuf-(char *)ier < sizeof(struct icmp_echo_reply)+(res-ip_header_len-ICMP_MINLEN)) {
-                res=ier-(ICMP_ECHO_REPLY *)ReplyBuffer;
+                res=ier-(ICMP_ECHO_REPLY *)reply_buf;
                 SetLastError(IP_GENERAL_FAILURE);
                 goto done;
             }
@@ -548,20 +299,184 @@ DWORD WINAPI IcmpSendEcho(
             }
 
             /* Prepare for the next packet */
-            endbuf-=ier->DataSize;
             ier++;
 
             /* Check out whether there is more but don't wait this time */
-            Timeout=0;
+            timeout=0;
         }
     }
-    res=ier-(ICMP_ECHO_REPLY*)ReplyBuffer;
+    res=ier-(ICMP_ECHO_REPLY*)reply_buf;
     if (res==0)
         SetLastError(IP_REQ_TIMED_OUT);
 done:
+    if (res)
+    {
+        /* Move the data so there's no gap between it and the ICMP_ECHO_REPLY array */
+        DWORD gap_size = endbuf - (char*)ier;
+
+        if (gap_size)
+        {
+            memmove(ier, endbuf, ((char*)reply_buf + reply_size) - endbuf);
+
+            /* Fix the pointers */
+            while (ier-- != reply_buf)
+            {
+                ier->Data = (char*)ier->Data - gap_size;
+                if (ier->Options.OptionsData)
+                    ier->Options.OptionsData -= gap_size;
+            }
+
+            /* According to MSDN, the reply buffer needs to hold space for a IO_STATUS_BLOCK,
+               found at the very end of the reply. This is confirmed on Windows XP, but Vista
+               and later do not store it anywhere and in fact don't even require it at all.
+
+               However, in case old apps analyze this IO_STATUS_BLOCK and expect it, we mimic
+               it and write it out if there's enough space available in the buffer. */
+            if (gap_size >= sizeof(IO_STATUS_BLOCK))
+            {
+                IO_STATUS_BLOCK *io = (IO_STATUS_BLOCK*)((char*)reply_buf + reply_size - sizeof(IO_STATUS_BLOCK));
+
+                io->Pointer = NULL;  /* Always NULL or STATUS_SUCCESS */
+                io->Information = reply_size - gap_size;
+            }
+        }
+    }
+
     HeapFree(GetProcessHeap(), 0, buffer);
     TRACE("received %d replies\n",res);
     return res;
+}
+
+
+
+/*
+ * Exported Routines.
+ */
+
+/***********************************************************************
+ *		Icmp6CreateFile (IPHLPAPI.@)
+ */
+HANDLE WINAPI Icmp6CreateFile(VOID)
+{
+    icmp_t* icp;
+
+    int sid=socket(AF_INET6,SOCK_RAW,IPPROTO_ICMPV6);
+    if (sid < 0)
+    {
+        /* Some systems (e.g. Linux 3.0+ and Mac OS X) support
+           non-privileged ICMP via SOCK_DGRAM type. */
+        sid=socket(AF_INET6,SOCK_DGRAM,IPPROTO_ICMPV6);
+    }
+    if (sid < 0) {
+        ERR_(winediag)("Failed to use ICMPV6 (network ping), this requires special permissions.\n");
+        SetLastError(ERROR_ACCESS_DENIED);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    icp=HeapAlloc(GetProcessHeap(), 0, sizeof(*icp));
+    if (icp==NULL) {
+        close(sid);
+        SetLastError(IP_NO_RESOURCES);
+        return INVALID_HANDLE_VALUE;
+    }
+    icp->sid=sid;
+    icp->default_opts.OptionsSize=IP_OPTS_UNKNOWN;
+    return (HANDLE)icp;
+}
+
+
+/***********************************************************************
+ *		Icmp6SendEcho2 (IPHLPAPI.@)
+ */
+DWORD WINAPI Icmp6SendEcho2(
+    HANDLE                   IcmpHandle,
+    HANDLE                   Event,
+    PIO_APC_ROUTINE          ApcRoutine,
+    PVOID                    ApcContext,
+    struct sockaddr_in6*     SourceAddress,
+    struct sockaddr_in6*     DestinationAddress,
+    LPVOID                   RequestData,
+    WORD                     RequestSize,
+    PIP_OPTION_INFORMATION   RequestOptions,
+    LPVOID                   ReplyBuffer,
+    DWORD                    ReplySize,
+    DWORD                    Timeout
+    )
+{
+    FIXME("(%p, %p, %p, %p, %p, %p, %p, %d, %p, %p, %d, %d): stub\n", IcmpHandle, Event,
+            ApcRoutine, ApcContext, SourceAddress, DestinationAddress, RequestData,
+            RequestSize, RequestOptions, ReplyBuffer, ReplySize, Timeout);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return 0;
+}
+
+
+/***********************************************************************
+ *		IcmpCreateFile (IPHLPAPI.@)
+ */
+HANDLE WINAPI IcmpCreateFile(VOID)
+{
+    icmp_t* icp;
+
+    int sid=socket(AF_INET,SOCK_RAW,IPPROTO_ICMP);
+    if (sid < 0)
+    {
+        /* Some systems (e.g. Linux 3.0+ and Mac OS X) support
+           non-privileged ICMP via SOCK_DGRAM type. */
+        sid=socket(AF_INET,SOCK_DGRAM,IPPROTO_ICMP);
+    }
+    if (sid < 0) {
+        ERR_(winediag)("Failed to use ICMP (network ping), this requires special permissions.\n");
+        SetLastError(ERROR_ACCESS_DENIED);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    icp=HeapAlloc(GetProcessHeap(), 0, sizeof(*icp));
+    if (icp==NULL) {
+        close(sid);
+        SetLastError(IP_NO_RESOURCES);
+        return INVALID_HANDLE_VALUE;
+    }
+    icp->sid=sid;
+    icp->default_opts.OptionsSize=IP_OPTS_UNKNOWN;
+    return (HANDLE)icp;
+}
+
+
+/***********************************************************************
+ *		IcmpCloseHandle (IPHLPAPI.@)
+ */
+BOOL WINAPI IcmpCloseHandle(HANDLE  IcmpHandle)
+{
+    icmp_t* icp=(icmp_t*)IcmpHandle;
+    if (IcmpHandle==INVALID_HANDLE_VALUE) {
+        /* FIXME: in fact win98 seems to ignore the handle value !!! */
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
+    close( icp->sid );
+    HeapFree(GetProcessHeap (), 0, icp);
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *		IcmpSendEcho (IPHLPAPI.@)
+ */
+DWORD WINAPI IcmpSendEcho(
+    HANDLE                   IcmpHandle,
+    IPAddr                   DestinationAddress,
+    LPVOID                   RequestData,
+    WORD                     RequestSize,
+    PIP_OPTION_INFORMATION   RequestOptions,
+    LPVOID                   ReplyBuffer,
+    DWORD                    ReplySize,
+    DWORD                    Timeout
+    )
+{
+    return IcmpSendEcho2Ex(IcmpHandle, NULL, NULL, NULL, 0, DestinationAddress,
+            RequestData, RequestSize, RequestOptions, ReplyBuffer, ReplySize, Timeout);
 }
 
 /***********************************************************************
@@ -581,22 +496,9 @@ DWORD WINAPI IcmpSendEcho2(
     DWORD                    Timeout
     )
 {
-    TRACE("(%p, %p, %p, %p, %08x, %p, %d, %p, %p, %d, %d): stub\n", IcmpHandle,
-            Event, ApcRoutine, ApcContext, DestinationAddress, RequestData,
-            RequestSize, RequestOptions, ReplyBuffer, ReplySize, Timeout);
-
-    if (Event)
-    {
-        FIXME("unsupported for events\n");
-        return 0;
-    }
-    if (ApcRoutine)
-    {
-        FIXME("unsupported for APCs\n");
-        return 0;
-    }
-    return IcmpSendEcho(IcmpHandle, DestinationAddress, RequestData,
-            RequestSize, RequestOptions, ReplyBuffer, ReplySize, Timeout);
+    return IcmpSendEcho2Ex(IcmpHandle, Event, ApcRoutine, ApcContext, 0,
+            DestinationAddress, RequestData, RequestSize, RequestOptions,
+            ReplyBuffer, ReplySize, Timeout);
 }
 
 /***********************************************************************
@@ -617,9 +519,39 @@ DWORD WINAPI IcmpSendEcho2Ex(
     DWORD                    Timeout
     )
 {
-    TRACE("(%p, %p, %p, %p, %08x, %08x, %p, %d, %p, %p, %d, %d): stub\n", IcmpHandle,
+    icmp_t* icp=(icmp_t*)IcmpHandle;
+    struct icmp* icmp_header;
+    struct sockaddr_in addr;
+    unsigned short id, seq;
+    unsigned char *buffer;
+    int reqsize, repsize;
+    DWORD send_time;
+
+    TRACE("(%p, %p, %p, %p, %08x, %08x, %p, %d, %p, %p, %d, %d)\n", IcmpHandle,
             Event, ApcRoutine, ApcContext, SourceAddress, DestinationAddress, RequestData,
             RequestSize, RequestOptions, ReplyBuffer, ReplySize, Timeout);
+
+    if (IcmpHandle==INVALID_HANDLE_VALUE) {
+        /* FIXME: in fact win98 seems to ignore the handle value !!! */
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+
+    if (!ReplyBuffer||!ReplySize) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+
+    if (ReplySize<sizeof(ICMP_ECHO_REPLY)) {
+        SetLastError(IP_BUF_TOO_SMALL);
+        return 0;
+    }
+    /* check the request size against SO_MAX_MSG_SIZE using getsockopt */
+
+    if (!DestinationAddress) {
+        SetLastError(ERROR_INVALID_NETNAME);
+        return 0;
+    }
 
     if (Event)
     {
@@ -637,8 +569,102 @@ DWORD WINAPI IcmpSendEcho2Ex(
         return 0;
     }
 
-    return IcmpSendEcho(IcmpHandle, DestinationAddress, RequestData,
-            RequestSize, RequestOptions, ReplyBuffer, ReplySize, Timeout);
+    /* Prepare the request */
+    id=getpid() & 0xFFFF;
+    seq=InterlockedIncrement(&icmp_sequence) & 0xFFFF;
+
+    reqsize=ICMP_MINLEN+RequestSize;
+    /* max ip header + max icmp header and error data + reply size(max 65535 on Windows) */
+    /* FIXME: request size of 65535 is not supported yet because max buffer size of raw socket on linux is 32767 */
+    repsize = MAXIPLEN + MAXICMPLEN + min( 65535, ReplySize );
+    buffer = HeapAlloc(GetProcessHeap(), 0, max( repsize, reqsize ));
+    if (buffer == NULL) {
+        SetLastError(ERROR_OUTOFMEMORY);
+        return 0;
+    }
+
+    icmp_header=(struct icmp*)buffer;
+    icmp_header->icmp_type=ICMP_ECHO;
+    icmp_header->icmp_code=0;
+    icmp_header->icmp_cksum=0;
+    icmp_header->icmp_id=id;
+    icmp_header->icmp_seq=seq;
+    memcpy(buffer+ICMP_MINLEN, RequestData, RequestSize);
+    icmp_header->icmp_cksum=in_cksum((u_short*)buffer,reqsize);
+
+    addr.sin_family=AF_INET;
+    addr.sin_addr.s_addr=DestinationAddress;
+    addr.sin_port=0;
+
+    if (RequestOptions!=NULL) {
+        int val;
+        if (icp->default_opts.OptionsSize==IP_OPTS_UNKNOWN) {
+            socklen_t len;
+            /* Before we mess with the options, get the default values */
+            len=sizeof(val);
+            getsockopt(icp->sid,IPPROTO_IP,IP_TTL,(char *)&val,&len);
+            icp->default_opts.Ttl=val;
+
+            len=sizeof(val);
+            getsockopt(icp->sid,IPPROTO_IP,IP_TOS,(char *)&val,&len);
+            icp->default_opts.Tos=val;
+            /* FIXME: missing: handling of IP 'flags', and all the other options */
+        }
+
+        val=RequestOptions->Ttl;
+        setsockopt(icp->sid,IPPROTO_IP,IP_TTL,(char *)&val,sizeof(val));
+        val=RequestOptions->Tos;
+        setsockopt(icp->sid,IPPROTO_IP,IP_TOS,(char *)&val,sizeof(val));
+        /* FIXME:  missing: handling of IP 'flags', and all the other options */
+
+        icp->default_opts.OptionsSize=IP_OPTS_CUSTOM;
+    } else if (icp->default_opts.OptionsSize==IP_OPTS_CUSTOM) {
+        int val;
+
+        /* Restore the default options */
+        val=icp->default_opts.Ttl;
+        setsockopt(icp->sid,IPPROTO_IP,IP_TTL,(char *)&val,sizeof(val));
+        val=icp->default_opts.Tos;
+        setsockopt(icp->sid,IPPROTO_IP,IP_TOS,(char *)&val,sizeof(val));
+        /* FIXME: missing: handling of IP 'flags', and all the other options */
+
+        icp->default_opts.OptionsSize=IP_OPTS_DEFAULT;
+    }
+
+    /* Send the packet */
+    TRACE("Sending %d bytes (RequestSize=%d) to %s\n", reqsize, RequestSize, inet_ntoa(addr.sin_addr));
+#if 0
+    if (TRACE_ON(icmp)){
+        int i;
+        printf("Output buffer:\n");
+        for (i=0;i<reqsize;i++)
+            printf("%2x,", buffer[i]);
+        printf("\n");
+    }
+#endif
+
+    send_time = GetTickCount();
+    if (sendto(icp->sid, buffer, reqsize, 0, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        if (errno==EMSGSIZE)
+            SetLastError(IP_PACKET_TOO_BIG);
+        else {
+            switch (errno) {
+            case ENETUNREACH:
+                SetLastError(IP_DEST_NET_UNREACHABLE);
+                break;
+            case EHOSTUNREACH:
+                SetLastError(IP_DEST_HOST_UNREACHABLE);
+                break;
+            default:
+                TRACE("unknown error: errno=%d\n",errno);
+                SetLastError(IP_GENERAL_FAILURE);
+            }
+        }
+        HeapFree(GetProcessHeap(), 0, buffer);
+        return 0;
+    }
+
+    return icmp_get_reply(icp->sid, buffer, send_time, ReplyBuffer, ReplySize, Timeout);
 }
 
 /*

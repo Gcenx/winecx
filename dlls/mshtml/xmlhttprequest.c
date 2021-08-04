@@ -30,6 +30,7 @@
 
 #include "mshtml_private.h"
 #include "htmlevent.h"
+#include "mshtmdid.h"
 #include "initguid.h"
 #include "msxml6.h"
 #include "objsafe.h"
@@ -117,22 +118,18 @@ static void detach_xhr_event_listener(XMLHttpReqEventListener *event_listener)
     nsAString str;
     nsresult nsres;
 
-    static const WCHAR loadW[] = {'l','o','a','d',0};
-    static const WCHAR readystatechangeW[] =
-        {'o','n','r','e','a','d','y','s','t','a','t','e','c','h','a','n','g','e',0};
-
     nsres = nsIXMLHttpRequest_QueryInterface(event_listener->xhr->nsxhr, &IID_nsIDOMEventTarget, (void**)&event_target);
     assert(nsres == NS_OK);
 
     if(event_listener->readystatechange_event) {
-        nsAString_InitDepend(&str, readystatechangeW);
+        nsAString_InitDepend(&str, L"onreadystatechange");
         nsres = nsIDOMEventTarget_RemoveEventListener(event_target, &str, &event_listener->nsIDOMEventListener_iface, FALSE);
         nsAString_Finish(&str);
         assert(nsres == NS_OK);
     }
 
     if(event_listener->load_event) {
-        nsAString_InitDepend(&str, loadW);
+        nsAString_InitDepend(&str, L"load");
         nsres = nsIDOMEventTarget_RemoveEventListener(event_target, &str, &event_listener->nsIDOMEventListener_iface, FALSE);
         nsAString_Finish(&str);
         assert(nsres == NS_OK);
@@ -208,7 +205,7 @@ static nsresult NSAPI XMLHttpReqEventListener_HandleEvent(nsIDOMEventListener *i
     if(!This->xhr)
         return NS_OK;
 
-    hres = create_event_from_nsevent(nsevent, &event);
+    hres = create_event_from_nsevent(nsevent, dispex_compat_mode(&This->xhr->event_target.dispex), &event);
     if(SUCCEEDED(hres) ){
         dispatch_event(&This->xhr->event_target, event);
         IDOMEvent_Release(&event->IDOMEvent_iface);
@@ -477,6 +474,29 @@ static HRESULT WINAPI HTMLXMLHttpRequest_abort(IHTMLXMLHttpRequest *iface)
     }
 
     return S_OK;
+}
+
+static HRESULT HTMLXMLHttpRequest_open_hook(DispatchEx *dispex, LCID lcid, WORD flags,
+        DISPPARAMS *dp, VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
+{
+    /* If only two arguments were given, implicitly set async to false */
+    if((flags & DISPATCH_METHOD) && dp->cArgs == 2 && !dp->cNamedArgs) {
+        VARIANT args[5];
+        DISPPARAMS new_dp = {args, NULL, ARRAY_SIZE(args), 0};
+        V_VT(args) = VT_EMPTY;
+        V_VT(args+1) = VT_EMPTY;
+        V_VT(args+2) = VT_BOOL;
+        V_BOOL(args+2) = VARIANT_TRUE;
+        args[3] = dp->rgvarg[0];
+        args[4] = dp->rgvarg[1];
+
+        TRACE("implicit async\n");
+
+        return IDispatchEx_InvokeEx(&dispex->IDispatchEx_iface, DISPID_IHTMLXMLHTTPREQUEST_OPEN,
+                                    lcid, flags, &new_dp, res, ei, caller);
+    }
+
+    return S_FALSE; /* fallback to default */
 }
 
 static HRESULT WINAPI HTMLXMLHttpRequest_open(IHTMLXMLHttpRequest *iface, BSTR bstrMethod, BSTR bstrUrl, VARIANT varAsync, VARIANT varUser, VARIANT varPassword)
@@ -756,10 +776,8 @@ static inline HTMLXMLHttpRequest *impl_from_DispatchEx(DispatchEx *iface)
 
 static HRESULT HTMLXMLHttpRequest_get_dispid(DispatchEx *dispex, BSTR name, DWORD flags, DISPID *dispid)
 {
-    static const WCHAR onloadW[] = {'o','n','l','o','a','d',0};
-
     /* onload event handler property is supported, but not exposed by any interface. We implement as a custom property. */
-    if(!wcscmp(onloadW, name)) {
+    if(!wcscmp(L"onload", name)) {
         *dispid = MSHTML_DISPID_HTMLXMLHTTPREQUEST_ONLOAD;
         return S_OK;
     }
@@ -811,17 +829,14 @@ static void HTMLXMLHttpRequest_bind_event(DispatchEx *dispex, eventid_t eid)
     nsAString type_str;
     nsresult nsres;
 
-    static const WCHAR readystatechangeW[] = {'r','e','a','d','y','s','t','a','t','e','c','h','a','n','g','e',0};
-    static const WCHAR loadW[] = {'l','o','a','d',0};
-
     TRACE("(%p)\n", This);
 
     switch(eid) {
     case EVENTID_READYSTATECHANGE:
-        type_name = readystatechangeW;
+        type_name = L"readystatechange";
         break;
     case EVENTID_LOAD:
-        type_name = loadW;
+        type_name = L"load";
         break;
     default:
         return;
@@ -856,6 +871,17 @@ static void HTMLXMLHttpRequest_bind_event(DispatchEx *dispex, eventid_t eid)
         This->event_listener->load_event = TRUE;
 }
 
+static void HTMLXMLHttpRequest_init_dispex_info(dispex_data_t *info, compat_mode_t compat_mode)
+{
+    static const dispex_hook_t xhr_hooks[] = {
+        {DISPID_IHTMLXMLHTTPREQUEST_OPEN, HTMLXMLHttpRequest_open_hook},
+        {DISPID_UNKNOWN}
+    };
+
+    EventTarget_init_dispex_info(info, compat_mode);
+    dispex_info_add_interface(info, IHTMLXMLHttpRequest_tid, compat_mode >= COMPAT_MODE_IE10 ? xhr_hooks : NULL);
+}
+
 static event_target_vtbl_t HTMLXMLHttpRequest_event_target_vtbl = {
     {
         NULL,
@@ -867,14 +893,13 @@ static event_target_vtbl_t HTMLXMLHttpRequest_event_target_vtbl = {
 };
 
 static const tid_t HTMLXMLHttpRequest_iface_tids[] = {
-    IHTMLXMLHttpRequest_tid,
     0
 };
 static dispex_static_data_t HTMLXMLHttpRequest_dispex = {
     &HTMLXMLHttpRequest_event_target_vtbl.dispex_vtbl,
     DispHTMLXMLHttpRequest_tid,
     HTMLXMLHttpRequest_iface_tids,
-    EventTarget_init_dispex_info
+    HTMLXMLHttpRequest_init_dispex_info
 };
 
 
@@ -1059,8 +1084,8 @@ HRESULT HTMLXMLHttpRequestFactory_Create(HTMLInnerWindow* window, HTMLXMLHttpReq
     ret->ref = 1;
     ret->window = window;
 
-    init_dispex(&ret->dispex, (IUnknown*)&ret->IHTMLXMLHttpRequestFactory_iface,
-            &HTMLXMLHttpRequestFactory_dispex);
+    init_dispatch(&ret->dispex, (IUnknown*)&ret->IHTMLXMLHttpRequestFactory_iface,
+                  &HTMLXMLHttpRequestFactory_dispex, dispex_compat_mode(&window->event_target.dispex));
 
     *ret_ptr = ret;
     return S_OK;

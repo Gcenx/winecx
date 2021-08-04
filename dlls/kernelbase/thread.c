@@ -246,6 +246,17 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetThreadId( HANDLE thread )
 
 
 /***********************************************************************
+ *           GetThreadIdealProcessorEx   (kernelbase.@)
+ */
+BOOL WINAPI /* DECLSPEC_HOTPATCH */ GetThreadIdealProcessorEx( HANDLE thread, PROCESSOR_NUMBER *ideal )
+{
+    FIXME( "(%p %p): stub\n", thread, ideal );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+
+/***********************************************************************
  *	GetThreadLocale   (kernelbase.@)
  */
 LCID WINAPI /* DECLSPEC_HOTPATCH */ GetThreadLocale(void)
@@ -365,6 +376,18 @@ static void CALLBACK call_user_apc( ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR ar
 DWORD WINAPI DECLSPEC_HOTPATCH QueueUserAPC( PAPCFUNC func, HANDLE thread, ULONG_PTR data )
 {
     return set_ntstatus( NtQueueApcThread( thread, call_user_apc, (ULONG_PTR)func, data, 0 ));
+}
+
+
+/***********************************************************************
+ *           QueryThreadCycleTime   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH QueryThreadCycleTime( HANDLE thread, ULONG64 *cycle )
+{
+    static int once;
+    if (!once++) FIXME( "(%p,%p): stub!\n", thread, cycle );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
 }
 
 
@@ -739,7 +762,7 @@ struct fiber_data
     CONTEXT               context;           /* 14/30 fiber context */
     DWORD                 flags;             /*       fiber flags */
     LPFIBER_START_ROUTINE start;             /*       start routine */
-    void                **fls_slots;         /*       fiber storage slots */
+    void                 *fls_slots;         /*       fiber storage slots */
 };
 
 extern void WINAPI switch_fiber( CONTEXT *old, CONTEXT *new );
@@ -999,7 +1022,7 @@ void WINAPI DECLSPEC_HOTPATCH DeleteFiber( LPVOID fiber_ptr )
         RtlExitUserThread( 1 );
     }
     RtlFreeUserStack( fiber->stack_allocation );
-    HeapFree( GetProcessHeap(), 0, fiber->fls_slots );
+    RtlProcessFlsData( fiber->fls_slots, 3 );
     HeapFree( GetProcessHeap(), 0, fiber );
 }
 
@@ -1043,38 +1066,8 @@ void WINAPI DECLSPEC_HOTPATCH SwitchToFiber( LPVOID fiber )
 DWORD WINAPI DECLSPEC_HOTPATCH FlsAlloc( PFLS_CALLBACK_FUNCTION callback )
 {
     DWORD index;
-    PEB * const peb = NtCurrentTeb()->Peb;
 
-    RtlAcquirePebLock();
-    if (!peb->FlsCallback &&
-        !(peb->FlsCallback = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY,
-                                        8 * sizeof(peb->FlsBitmapBits) * sizeof(void*) )))
-    {
-        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
-        index = FLS_OUT_OF_INDEXES;
-    }
-    else
-    {
-        index = RtlFindClearBitsAndSet( peb->FlsBitmap, 1, 1 );
-        if (index != ~0U)
-        {
-            if (!NtCurrentTeb()->FlsSlots &&
-                !(NtCurrentTeb()->FlsSlots = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY,
-                                                        8 * sizeof(peb->FlsBitmapBits) * sizeof(void*) )))
-            {
-                RtlClearBits( peb->FlsBitmap, index, 1 );
-                index = FLS_OUT_OF_INDEXES;
-                SetLastError( ERROR_NOT_ENOUGH_MEMORY );
-            }
-            else
-            {
-                NtCurrentTeb()->FlsSlots[index] = 0; /* clear the value */
-                peb->FlsCallback[index] = callback;
-            }
-        }
-        else SetLastError( ERROR_NO_MORE_ITEMS );
-    }
-    RtlReleasePebLock();
+    if (!set_ntstatus( RtlFlsAlloc( callback, &index ))) return FLS_OUT_OF_INDEXES;
     return index;
 }
 
@@ -1084,20 +1077,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH FlsAlloc( PFLS_CALLBACK_FUNCTION callback )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH FlsFree( DWORD index )
 {
-    BOOL ret;
-
-    RtlAcquirePebLock();
-    ret = RtlAreBitsSet( NtCurrentTeb()->Peb->FlsBitmap, index, 1 );
-    if (ret) RtlClearBits( NtCurrentTeb()->Peb->FlsBitmap, index, 1 );
-    if (ret)
-    {
-        /* FIXME: call Fls callback */
-        /* FIXME: add equivalent of ThreadZeroTlsCell here */
-        if (NtCurrentTeb()->FlsSlots) NtCurrentTeb()->FlsSlots[index] = 0;
-    }
-    else SetLastError( ERROR_INVALID_PARAMETER );
-    RtlReleasePebLock();
-    return ret;
+    return set_ntstatus( RtlFlsFree( index ));
 }
 
 
@@ -1106,13 +1086,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH FlsFree( DWORD index )
  */
 PVOID WINAPI DECLSPEC_HOTPATCH FlsGetValue( DWORD index )
 {
-    if (!index || index >= 8 * sizeof(NtCurrentTeb()->Peb->FlsBitmapBits) || !NtCurrentTeb()->FlsSlots)
-    {
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return NULL;
-    }
+    void *data;
+
+    if (!set_ntstatus( RtlFlsGetValue( index, &data ))) return NULL;
     SetLastError( ERROR_SUCCESS );
-    return NtCurrentTeb()->FlsSlots[index];
+    return data;
 }
 
 
@@ -1121,20 +1099,7 @@ PVOID WINAPI DECLSPEC_HOTPATCH FlsGetValue( DWORD index )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH FlsSetValue( DWORD index, PVOID data )
 {
-    if (!index || index >= 8 * sizeof(NtCurrentTeb()->Peb->FlsBitmapBits))
-    {
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return FALSE;
-    }
-    if (!NtCurrentTeb()->FlsSlots &&
-        !(NtCurrentTeb()->FlsSlots = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY,
-                                        8 * sizeof(NtCurrentTeb()->Peb->FlsBitmapBits) * sizeof(void*) )))
-    {
-        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
-        return FALSE;
-    }
-    NtCurrentTeb()->FlsSlots[index] = data;
-    return TRUE;
+    return set_ntstatus( RtlFlsSetValue( index, data ));
 }
 
 
@@ -1176,14 +1141,23 @@ PTP_CLEANUP_GROUP WINAPI DECLSPEC_HOTPATCH CreateThreadpoolCleanupGroup(void)
 }
 
 
+static void WINAPI tp_io_callback( TP_CALLBACK_INSTANCE *instance, void *userdata, void *cvalue, IO_STATUS_BLOCK *iosb, TP_IO *io )
+{
+    PTP_WIN32_IO_CALLBACK callback = *(void **)io;
+    callback( instance, userdata, cvalue, RtlNtStatusToDosError( iosb->u.Status ), iosb->Information, io );
+}
+
+
 /***********************************************************************
  *           CreateThreadpoolIo   (kernelbase.@)
  */
-PTP_IO WINAPI /* DECLSPEC_HOTPATCH */ CreateThreadpoolIo( HANDLE handle, PTP_WIN32_IO_CALLBACK callback,
+PTP_IO WINAPI DECLSPEC_HOTPATCH CreateThreadpoolIo( HANDLE handle, PTP_WIN32_IO_CALLBACK callback,
                                                     PVOID userdata, TP_CALLBACK_ENVIRON *environment )
 {
-    FIXME( "(%p, %p, %p, %p): stub\n", handle, callback, userdata, environment );
-    return FALSE;
+    TP_IO *io;
+    if (!set_ntstatus( TpAllocIoCompletion( &io, handle, tp_io_callback, userdata, environment ))) return NULL;
+    *(void **)io = callback; /* ntdll leaves us space to store our callback at the beginning of TP_IO struct */
+    return io;
 }
 
 
@@ -1242,4 +1216,20 @@ BOOL WINAPI DECLSPEC_HOTPATCH TrySubmitThreadpoolCallback( PTP_SIMPLE_CALLBACK c
 BOOL WINAPI DECLSPEC_HOTPATCH QueueUserWorkItem( LPTHREAD_START_ROUTINE func, PVOID context, ULONG flags )
 {
     return set_ntstatus( RtlQueueWorkItem( func, context, flags ));
+}
+
+/***********************************************************************
+ *           SetThreadpoolStackInformation   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH SetThreadpoolStackInformation( PTP_POOL pool, PTP_POOL_STACK_INFORMATION stack_info )
+{
+    return set_ntstatus( TpSetPoolStackInformation( pool, stack_info ));
+}
+
+/***********************************************************************
+ *           QueryThreadpoolStackInformation   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH QueryThreadpoolStackInformation( PTP_POOL pool, PTP_POOL_STACK_INFORMATION stack_info )
+{
+    return set_ntstatus( TpQueryPoolStackInformation( pool, stack_info ));
 }

@@ -226,15 +226,6 @@ HRESULT WINAPI D3DX10GetFeatureLevel1(ID3D10Device *device, ID3D10Device1 **devi
     return ID3D10Device_QueryInterface(device, &IID_ID3D10Device1, (void **)device1);
 }
 
-HRESULT WINAPI D3DX10GetImageInfoFromMemory(const void *src_data, SIZE_T src_data_size, ID3DX10ThreadPump *pump,
-        D3DX10_IMAGE_INFO *img_info, HRESULT *hresult)
-{
-    FIXME("src_data %p, src_data_size %lu, pump %p, img_info %p, hresult %p.\n",
-            src_data, src_data_size, pump, img_info, hresult);
-
-    return E_NOTIMPL;
-}
-
 D3DX_CPU_OPTIMIZATION WINAPI D3DXCpuOptimizations(BOOL enable)
 {
     FIXME("enable %#x stub.\n", enable);

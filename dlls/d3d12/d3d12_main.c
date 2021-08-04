@@ -265,7 +265,9 @@ static VkPhysicalDevice d3d12_get_vk_physical_device(struct vkd3d_instance *inst
     if ((vr = pfn_vkEnumeratePhysicalDevices(vk_instance, &count, vk_physical_devices)) < 0)
         goto done;
 
-    if (!IsEqualGUID(&adapter_info->driver_uuid, &GUID_NULL) && pfn_vkGetPhysicalDeviceProperties2)
+    if (!IsEqualGUID(&adapter_info->driver_uuid, &GUID_NULL) && pfn_vkGetPhysicalDeviceProperties2
+            && check_vk_instance_extension(vk_instance, pfn_vkGetInstanceProcAddr,
+                    VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME))
     {
         TRACE("Matching adapters by UUIDs.\n");
 
@@ -331,11 +333,17 @@ HRESULT WINAPI D3D12CreateDevice(IUnknown *adapter, D3D_FEATURE_LEVEL minimum_fe
     };
     static const char * const optional_instance_extensions[] =
     {
+        VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME,
         VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
     };
     static const char * const device_extensions[] =
     {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+    };
+    static const struct vkd3d_application_info application_info =
+    {
+        .type = VKD3D_STRUCTURE_TYPE_APPLICATION_INFO,
+        .api_version = VKD3D_API_VERSION_1_2,
     };
 
     TRACE("adapter %p, minimum_feature_level %#x, iid %s, device %p.\n",
@@ -357,7 +365,7 @@ HRESULT WINAPI D3D12CreateDevice(IUnknown *adapter, D3D_FEATURE_LEVEL minimum_fe
     }
 
     optional_extensions_info.type = VKD3D_STRUCTURE_TYPE_OPTIONAL_INSTANCE_EXTENSIONS_INFO;
-    optional_extensions_info.next = NULL;
+    optional_extensions_info.next = &application_info;
     optional_extensions_info.extensions = optional_instance_extensions;
     optional_extensions_info.extension_count = ARRAY_SIZE(optional_instance_extensions);
 
@@ -406,6 +414,15 @@ HRESULT WINAPI D3D12CreateRootSignatureDeserializer(const void *data, SIZE_T dat
     return vkd3d_create_root_signature_deserializer(data, data_size, iid, deserializer);
 }
 
+HRESULT WINAPI D3D12CreateVersionedRootSignatureDeserializer(const void *data, SIZE_T data_size,
+        REFIID iid, void **deserializer)
+{
+    TRACE("data %p, data_size %lu, iid %s, deserializer %p.\n",
+            data, data_size, debugstr_guid(iid), deserializer);
+
+    return vkd3d_create_versioned_root_signature_deserializer(data, data_size, iid, deserializer);
+}
+
 HRESULT WINAPI D3D12SerializeRootSignature(const D3D12_ROOT_SIGNATURE_DESC *root_signature_desc,
         D3D_ROOT_SIGNATURE_VERSION version, ID3DBlob **blob, ID3DBlob **error_blob)
 {
@@ -420,9 +437,5 @@ HRESULT WINAPI D3D12SerializeVersionedRootSignature(const D3D12_VERSIONED_ROOT_S
 {
     TRACE("desc %p, blob %p, error_blob %p.\n", desc, blob, error_blob);
 
-    if (desc->Version == D3D_ROOT_SIGNATURE_VERSION_1_0)
-        return vkd3d_serialize_root_signature(&desc->Desc_1_0, desc->Version, blob, error_blob);
-
-    FIXME("Unsupported version %#x.\n", desc->Version);
-    return E_NOTIMPL;
+    return vkd3d_serialize_versioned_root_signature(desc, blob, error_blob);
 }

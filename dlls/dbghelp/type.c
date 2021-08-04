@@ -24,7 +24,6 @@
 
 #define NONAMELESSUNION
 
-#include "config.h"
 #include <stdlib.h>
 #include <stdarg.h>
 #include <assert.h>
@@ -158,7 +157,7 @@ BOOL symt_get_address(const struct symt* type, ULONG64* addr)
 
 static struct symt* symt_find_type_by_name(const struct module* module,
                                            enum SymTagEnum sym_tag, 
-                                           const char* HOSTPTR typename)
+                                           const char* typename)
 {
     void*                       ptr;
     struct symt_ht*             type;
@@ -410,7 +409,7 @@ BOOL symt_add_function_signature_parameter(struct module* module,
     return TRUE;
 }
 
-struct symt_pointer* symt_new_pointer(struct module* module, struct symt* ref_type, unsigned long size)
+struct symt_pointer* symt_new_pointer(struct module* module, struct symt* ref_type, ULONG_PTR size)
 {
     struct symt_pointer*        sym;
 

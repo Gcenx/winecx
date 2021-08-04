@@ -71,6 +71,7 @@ static const struct object_ops event_ops =
     event_map_access,          /* map_access */
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
+    default_get_full_name,     /* get_full_name */
     no_lookup_name,            /* lookup_name */
     directory_link_name,       /* link_name */
     default_unlink_name,       /* unlink_name */
@@ -106,6 +107,7 @@ static const struct object_ops keyed_event_ops =
     keyed_event_map_access,      /* map_access */
     default_get_sd,              /* get_sd */
     default_set_sd,              /* set_sd */
+    default_get_full_name,       /* get_full_name */
     no_lookup_name,              /* lookup_name */
     directory_link_name,         /* link_name */
     default_unlink_name,         /* unlink_name */
@@ -206,7 +208,7 @@ static int event_signaled( struct object *obj, struct wait_queue_entry *entry )
 static struct esync_fd *event_get_esync_fd( struct object *obj, enum esync_type *type )
 {
     struct event *event = (struct event *)obj;
-    *type = ESYNC_MANUAL_SERVER;    /* all server-created events are manual-reset */
+    *type = event->manual_reset ? ESYNC_MANUAL_SERVER : ESYNC_AUTO_SERVER;
     return event->esync_fd;
 }
 

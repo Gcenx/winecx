@@ -69,6 +69,7 @@ DWORD wined3d_usage_from_d3d11(enum D3D11_USAGE usage) DECLSPEC_HIDDEN;
 struct wined3d_resource *wined3d_resource_from_d3d11_resource(ID3D11Resource *resource) DECLSPEC_HIDDEN;
 struct wined3d_resource *wined3d_resource_from_d3d10_resource(ID3D10Resource *resource) DECLSPEC_HIDDEN;
 DWORD wined3d_map_flags_from_d3d11_map_type(D3D11_MAP map_type) DECLSPEC_HIDDEN;
+DWORD wined3d_map_flags_from_d3d10_map_type(D3D10_MAP map_type) DECLSPEC_HIDDEN;
 DWORD wined3d_clear_flags_from_d3d11_clear_flags(UINT clear_flags) DECLSPEC_HIDDEN;
 unsigned int wined3d_access_from_d3d11(D3D11_USAGE usage, UINT cpu_access) DECLSPEC_HIDDEN;
 
@@ -439,6 +440,7 @@ struct d3d_depthstencil_state
     LONG refcount;
 
     struct wined3d_private_store private_store;
+    struct wined3d_depth_stencil_state *wined3d_state;
     D3D11_DEPTH_STENCIL_DESC desc;
     struct wine_rb_entry entry;
     ID3D11Device2 *device;
@@ -536,6 +538,7 @@ struct d3d_device
     LONG refcount;
 
     D3D_FEATURE_LEVEL feature_level;
+    BOOL d3d11_only;
 
     struct d3d11_immediate_context immediate_context;
 
@@ -546,10 +549,12 @@ struct d3d_device
     struct wine_rb_tree depthstencil_states;
     struct wine_rb_tree rasterizer_states;
     struct wine_rb_tree sampler_states;
-
-    struct d3d_depthstencil_state *depth_stencil_state;
-    UINT stencil_ref;
 };
+
+static inline struct d3d_device *impl_from_ID3D11Device(ID3D11Device *iface)
+{
+    return CONTAINING_RECORD((ID3D11Device2 *)iface, struct d3d_device, ID3D11Device2_iface);
+}
 
 static inline struct d3d_device *impl_from_ID3D11Device2(ID3D11Device2 *iface)
 {

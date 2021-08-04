@@ -59,8 +59,8 @@ static const char *msifile = "msitest.msi";
 static const char *msifile2 = "winetest2.msi";
 static const char *mstfile = "winetest.mst";
 
-static const WCHAR msifileW[] = {'m','s','i','t','e','s','t','.','m','s','i',0};
-static const WCHAR msifile2W[] = {'w','i','n','e','t','e','s','t','2','.','m','s','i',0};
+static const WCHAR msifileW[] = L"msitest.msi";
+static const WCHAR msifile2W[] = L"msitest2.msi";
 
 char CURR_DIR[MAX_PATH];
 char PROG_FILES_DIR[MAX_PATH];
@@ -1392,6 +1392,34 @@ static const CHAR sr_custom_action_dat[] =
     "sourcedir_unset\t19\t\tSourceDir should not be set\n"
     "sourcedir_set\t19\t\tSourceDir should be set\n";
 
+static const CHAR ai2_file_dat[] =
+    "File\tComponent_\tFileName\tFileSize\tVersion\tLanguage\tAttributes\tSequence\n"
+    "s72\ts72\tl255\ti4\tS72\tS20\tI2\ti2\n"
+    "File\tFile\n"
+    "five.txt\tFive\tfive.txt\t1000\t\t\t0\t5\n"
+    "four.txt\tFour\tfour.txt\t1000\t\t\t0\t4\n";
+
+static const CHAR ai2_component_dat[] =
+    "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
+    "s72\tS38\ts72\ti2\tS255\tS72\n"
+    "Component\tComponent\n"
+    "Five\t{8CC92E9D-14B2-4CA4-B2AA-B11D02078087}\tNEWDIR\t2\t\tfive.txt\n"
+    "Four\t{FD37B4EA-7209-45C0-8917-535F35A2F080}\tCABOUTDIR\t2\t\tfour.txt\n";
+
+static const CHAR ai2_feature_dat[] =
+    "Feature\tFeature_Parent\tTitle\tDescription\tDisplay\tLevel\tDirectory_\tAttributes\n"
+    "s38\tS38\tL64\tL255\tI2\ti2\tS72\ti2\n"
+    "Feature\tFeature\n"
+    "Five\t\tFive\tThe Five Feature\t5\t3\tNEWDIR\t0\n"
+    "Four\t\tFour\tThe Four Feature\t4\t3\tCABOUTDIR\t0\n";
+
+static const CHAR ai2_feature_comp_dat[] =
+    "Feature_\tComponent_\n"
+    "s38\ts72\n"
+    "FeatureComponents\tFeature_\tComponent_\n"
+    "Five\tFive\n"
+    "Four\tFour\n";
+
 static const msi_table tables[] =
 {
     ADD_TABLE(component),
@@ -1821,6 +1849,18 @@ static const msi_table ai_tables[] =
     ADD_TABLE(property)
 };
 
+static const msi_table ai2_tables[] =
+{
+    ADD_TABLE(ai2_component),
+    ADD_TABLE(directory),
+    ADD_TABLE(ai2_feature),
+    ADD_TABLE(ai2_feature_comp),
+    ADD_TABLE(ai2_file),
+    ADD_TABLE(install_exec_seq),
+    ADD_TABLE(media),
+    ADD_TABLE(property)
+};
+
 static const msi_table pc_tables[] =
 {
     ADD_TABLE(ca51_component),
@@ -2169,7 +2209,7 @@ static LONG CDECL fci_seek(INT_PTR hf, LONG dist, int seektype, int *err, void *
 {
     HANDLE handle = (HANDLE)hf;
     DWORD ret;
-    
+
     ret = SetFilePointer(handle, dist, NULL, seektype);
     ok(ret != INVALID_SET_FILE_POINTER, "Failed to SetFilePointer\n");
 
@@ -3816,7 +3856,7 @@ error:
 static void test_currentworkingdir(void)
 {
     UINT r;
-    CHAR drive[MAX_PATH], path[MAX_PATH];
+    CHAR drive[MAX_PATH], path[MAX_PATH + 12];
     LPSTR ptr;
 
     if (is_process_limited())
@@ -3955,11 +3995,6 @@ static void set_admin_property_stream(LPCSTR file)
     DWORD count;
     const DWORD mode = STGM_DIRECT | STGM_READWRITE | STGM_SHARE_EXCLUSIVE;
 
-    /* AdminProperties */
-    static const WCHAR stmname[] = {0x41ca,0x4330,0x3e71,0x44b5,0x4233,0x45f5,0x422c,0x4836,0};
-    static const WCHAR data[] = {'M','Y','P','R','O','P','=','2','7','1','8',' ',
-        'M','y','P','r','o','p','=','4','2',0};
-
     MultiByteToWideChar(CP_ACP, 0, file, -1, fileW, MAX_PATH);
 
     hr = StgOpenStorage(fileW, NULL, mode, NULL, 0, &stg);
@@ -3967,10 +4002,11 @@ static void set_admin_property_stream(LPCSTR file)
     if (!stg)
         return;
 
-    hr = IStorage_CreateStream(stg, stmname, STGM_WRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stm);
+    hr = IStorage_CreateStream(stg, L"\x41ca\x4330\x3e71\x44b5\x4233\x45f5\x422c\x4836",
+                               STGM_WRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stm);
     ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
 
-    hr = IStream_Write(stm, data, sizeof(data), &count);
+    hr = IStream_Write(stm, L"MYPROP=2718 MyProp=42", sizeof(L"MYPROP=2718 MyProp=42"), &count);
     ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
 
     IStream_Release(stm);
@@ -4778,7 +4814,7 @@ error:
 static void test_sourcedirprop(void)
 {
     UINT r;
-    CHAR props[MAX_PATH];
+    CHAR props[MAX_PATH + 18];
 
     if (is_process_limited())
     {
@@ -4865,6 +4901,24 @@ static void test_adminimage(void)
 
     delete_pf_files();
 
+    create_file("four.txt", 100);
+    create_file("five.txt", 100);
+    create_cab_file("msitest.cab", MEDIA_SIZE, "four.txt\0five.txt\0");
+    create_database_wordcount(msifile, ai2_tables, ARRAY_SIZE(ai2_tables),
+                              100, msidbSumInfoSourceTypeAdminImage|msidbSumInfoSourceTypeCompressed,
+                              ";1033", "{004757CA-5092-49C2-AD20-28E1CE0DF5F2}");
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    ok(delete_pf("msitest\\cabout\\new\\five.txt", TRUE), "File not installed\n");
+    ok(delete_pf("msitest\\cabout\\new", FALSE), "Directory not created\n");
+    ok(delete_pf("msitest\\cabout\\four.txt", TRUE), "File not installed\n");
+    ok(delete_pf("msitest\\cabout", FALSE), "Directory not created\n");
+    ok(delete_pf("msitest", FALSE), "Directory not created\n");
+
 error:
     DeleteFileA("msifile");
     DeleteFileA("msitest\\cabout\\new\\five.txt");
@@ -4925,9 +4979,6 @@ error:
 
 static void test_int_widths( void )
 {
-    static const WCHAR msitestW[] = {'m','s','i','t','e','s','t','.','m','s','i',0};
-    static const WCHAR msitableW[] = {'m','s','i','t','a','b','l','e','.','i','d','t',0};
-    static const WCHAR slashW[] = {'\\',0};
     static const char int0[] = "int0\ni0\nint0\tint0\n1";
     static const char int1[] = "int1\ni1\nint1\tint1\n1";
     static const char int2[] = "int2\ni2\nint2\tint2\n1";
@@ -4959,12 +5010,10 @@ static void test_int_widths( void )
     CreateDirectoryW(tmpdir, NULL);
 
     lstrcpyW(msitable, tmpdir);
-    lstrcatW(msitable, slashW);
-    lstrcatW(msitable, msitableW);
+    lstrcatW(msitable, L"\\msitable.idt");
 
     lstrcpyW(msidb, tmpdir);
-    lstrcatW(msidb, slashW);
-    lstrcatW(msidb, msitestW);
+    lstrcatW(msidb, L"\\msitest.msi");
 
     r = MsiOpenDatabaseW(msidb, MSIDBOPEN_CREATE, &db);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
@@ -4977,7 +5026,7 @@ static void test_int_widths( void )
         WriteFile(handle, tests[i].data, tests[i].size, &count, NULL);
         CloseHandle(handle);
 
-        r = MsiDatabaseImportW(db, tmpdir, msitableW);
+        r = MsiDatabaseImportW(db, tmpdir, L"msitable.idt");
         ok(r == tests[i].ret, " %u expected %u, got %u\n", i, tests[i].ret, r);
 
         r = MsiDatabaseCommit(db);
@@ -6112,7 +6161,7 @@ static void check_file_matches(const char *filename, const char *text)
 
 static void test_deferred_action(void)
 {
-    char path[200], file[200], buffer[200];
+    char path[200], file[200], buffer[211];
     UINT r;
 
     GetTempPathA(sizeof(path), path);

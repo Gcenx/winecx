@@ -19,6 +19,7 @@
 #ifndef _NTDEF_
 #define _NTDEF_
 
+#include <basetsd.h>
 #include "wine/winheader_enter.h"
 
 #ifdef __cplusplus
@@ -50,6 +51,38 @@ typedef enum _WAIT_TYPE {
 #define NT_WARNING(status)      ((((NTSTATUS)(status)) & 0xc0000000) == 0x80000000)
 #define NT_ERROR(status)        ((((NTSTATUS)(status)) & 0xc0000000) == 0xc0000000)
 
+#ifndef BASETYPES
+#define BASETYPES
+typedef unsigned char UCHAR, *PUCHAR;
+typedef unsigned short USHORT, *PUSHORT;
+#ifdef WINE_USE_LONG
+typedef unsigned long ULONG, *PULONG;
+#else
+typedef unsigned int ULONG, *PULONG;
+#endif
+#endif
+
+typedef struct _RTL_BALANCED_NODE
+{
+    union
+    {
+        struct _RTL_BALANCED_NODE *Children[2];
+        struct
+        {
+            struct _RTL_BALANCED_NODE *Left;
+            struct _RTL_BALANCED_NODE *Right;
+        } DUMMYSTRUCTNAME;
+    } DUMMYUNIONNAME;
+
+    union
+    {
+        UCHAR Red : 1;
+        UCHAR Balance : 2;
+        ULONG_PTR ParentValue;
+    } DUMMYUNIONNAME2;
+} RTL_BALANCED_NODE, *PRTL_BALANCED_NODE;
+
+#define RTL_BALANCED_NODE_RESERVED_PARENT_MASK 3
 #include "wine/winheader_exit.h"
 
 #endif /* _NTDEF_ */

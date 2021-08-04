@@ -195,7 +195,7 @@ static void test_create_delete_svc(void)
     SC_HANDLE scm_handle, svc_handle1, svc_handle2;
     CHAR username[UNLEN + 1], domain[MAX_PATH];
     DWORD user_size = UNLEN + 1;
-    CHAR account[UNLEN + 3];
+    CHAR account[MAX_PATH + UNLEN + 1];
     static const CHAR servicename         [] = "winetest_create_delete";
     static const CHAR pathname            [] = "we_dont_care.exe";
     static const CHAR empty               [] = "";
@@ -861,6 +861,14 @@ static void test_get_servicekeyname(void)
     servicesize = 0;
     ret = GetServiceKeyNameA(scm_handle, displayname, NULL, &servicesize);
     ok(!ret, "Expected failure\n");
+    if (strcmp(displayname, "Print Spooler") != 0 &&
+        GetLastError() == ERROR_SERVICE_DOES_NOT_EXIST)
+    {
+        win_skip("GetServiceKeyName() does not support localized display names: %s\n", displayname); /* Windows 7 */
+        CloseServiceHandle(scm_handle);
+        return; /* All the tests that follow will fail too */
+    }
+
     ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
        "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
 
@@ -1331,7 +1339,7 @@ static void test_enum_svc(void)
                               services, bufsize, &needed, &returned, &resume);
     ok(ret, "Expected success, got error %u\n", GetLastError());
     ok(needed == 0, "Expected needed buffer to be 0 as we are done\n");
-    ok(returned == missing, "Expected %u services to be returned\n", missing);
+    todo_wine ok(returned == missing, "Expected %u services to be returned\n", missing);
     ok(resume == 0, "Expected the resume handle to be 0\n");
     HeapFree(GetProcessHeap(), 0, services);
 
@@ -2670,6 +2678,94 @@ static void test_refcount(void)
     CloseServiceHandle(scm_handle);
 }
 
+static BOOL is_lang_english(void)
+{
+    static HMODULE hkernel32 = NULL;
+    static LANGID (WINAPI *pGetThreadUILanguage)(void) = NULL;
+    static LANGID (WINAPI *pGetUserDefaultUILanguage)(void) = NULL;
+
+    if (!hkernel32)
+    {
+        hkernel32 = GetModuleHandleA("kernel32.dll");
+        pGetThreadUILanguage = (void*)GetProcAddress(hkernel32, "GetThreadUILanguage");
+        pGetUserDefaultUILanguage = (void*)GetProcAddress(hkernel32, "GetUserDefaultUILanguage");
+    }
+    if (pGetThreadUILanguage)
+        return PRIMARYLANGID(pGetThreadUILanguage()) == LANG_ENGLISH;
+    if (pGetUserDefaultUILanguage)
+        return PRIMARYLANGID(pGetUserDefaultUILanguage()) == LANG_ENGLISH;
+
+    return PRIMARYLANGID(GetUserDefaultLangID()) == LANG_ENGLISH;
+}
+
+static void test_EventLog(void)
+{
+    SC_HANDLE scm_handle, svc_handle;
+    DWORD size;
+    BOOL ret;
+    QUERY_SERVICE_CONFIGA *config;
+    SERVICE_STATUS_PROCESS status;
+
+    scm_handle = OpenSCManagerA(NULL, NULL, GENERIC_READ);
+    ok(scm_handle != NULL, "OpenSCManager error %u\n", GetLastError());
+
+    svc_handle = OpenServiceA(scm_handle, "EventLog", GENERIC_READ);
+    ok(svc_handle != NULL, "OpenService error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = QueryServiceConfigA(svc_handle, NULL, 0, &size);
+    ok(!ret, "QueryServiceConfig should fail\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "got %u\n", GetLastError());
+
+    config = HeapAlloc(GetProcessHeap(), 0, size);
+    ret = QueryServiceConfigA(svc_handle, config, size, &size);
+    ok(ret, "QueryServiceConfig error %u\n", GetLastError());
+
+    ok(config->dwServiceType == SERVICE_WIN32_SHARE_PROCESS, "got %#x\n", config->dwServiceType);
+    ok(config->dwStartType == SERVICE_AUTO_START, "got %u\n", config->dwStartType);
+    ok(config->dwErrorControl == SERVICE_ERROR_NORMAL, "got %u\n", config->dwErrorControl);
+    ok(!strcmpi(config->lpBinaryPathName, "C:\\windows\\system32\\services.exe") /* XP */ ||
+       !strcmpi(config->lpBinaryPathName, "C:\\windows\\system32\\svchost.exe -k LocalServiceNetworkRestricted") /* Vista+ */ ||
+       !strcmpi(config->lpBinaryPathName, "C:\\windows\\system32\\svchost.exe -k LocalServiceNetworkRestricted -p") /* Win10 */,
+       "got %s\n", config->lpBinaryPathName);
+todo_wine
+    ok(!strcmpi(config->lpLoadOrderGroup, "Event Log"), "got %s\n", config->lpLoadOrderGroup);
+    ok(config->dwTagId == 0, "Expected 0, got %d\n", config->dwTagId);
+    ok(!config->lpDependencies[0], "lpDependencies is not empty\n");
+    ok(!strcmp(config->lpServiceStartName, "LocalSystem") /* XP */ ||
+       !strcmp(config->lpServiceStartName, "NT AUTHORITY\\LocalService"),
+       "got %s\n", config->lpServiceStartName);
+    ok(!is_lang_english() || /* DisplayName is often translated */
+       !strcmp(config->lpDisplayName, "Event Log") /* XP */ ||
+       !strcmp(config->lpDisplayName, "Windows Event Log") /* Vista+ */, "got %s\n", config->lpDisplayName);
+
+    HeapFree(GetProcessHeap(), 0, config);
+
+    memset(&status, 0, sizeof(status));
+    size = sizeof(status);
+    ret = QueryServiceStatusEx(svc_handle, SC_STATUS_PROCESS_INFO, (BYTE *)&status, size, &size);
+    ok(ret, "QueryServiceStatusEx error %u\n", GetLastError());
+    ok(status.dwServiceType == SERVICE_WIN32_SHARE_PROCESS ||
+       status.dwServiceType == (SERVICE_WIN32_SHARE_PROCESS | SERVICE_WIN32_OWN_PROCESS) /* Win10 */,
+       "got %#x\n", status.dwServiceType);
+    ok(status.dwCurrentState == SERVICE_RUNNING, "got %#x\n", status.dwCurrentState);
+todo_wine
+    ok(status.dwControlsAccepted == SERVICE_ACCEPT_SHUTDOWN /* XP */ ||
+       status.dwControlsAccepted == (SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN) /* 2008 */ ||
+       status.dwControlsAccepted == (SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_TIMECHANGE | SERVICE_ACCEPT_SHUTDOWN),
+       "got %#x\n", status.dwControlsAccepted);
+    ok(status.dwWin32ExitCode == 0, "got %#x\n", status.dwWin32ExitCode);
+    ok(status.dwServiceSpecificExitCode == 0, "got %#x\n", status.dwServiceSpecificExitCode);
+    ok(status.dwCheckPoint == 0, "got %#x\n", status.dwCheckPoint);
+    ok(status.dwWaitHint == 0, "got %#x\n", status.dwWaitHint);
+    ok(status.dwProcessId != 0, "got %#x\n", status.dwProcessId);
+    ok(status.dwServiceFlags == 0 || status.dwServiceFlags == SERVICE_RUNS_IN_SYSTEM_PROCESS /* XP */,
+       "got %#x\n", status.dwServiceFlags);
+
+    CloseServiceHandle(svc_handle);
+    CloseServiceHandle(scm_handle);
+}
+
 static DWORD WINAPI ctrl_handler(DWORD ctl, DWORD type, void *data, void *user)
 {
     HANDLE evt = user;
@@ -2767,4 +2863,5 @@ START_TEST(service)
      * and what the rules are
      */
     test_refcount();
+    test_EventLog();
 }

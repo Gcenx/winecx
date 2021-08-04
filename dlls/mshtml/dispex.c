@@ -45,9 +45,6 @@ static CRITICAL_SECTION_DEBUG cs_dispex_static_data_dbg =
 };
 static CRITICAL_SECTION cs_dispex_static_data = { &cs_dispex_static_data_dbg, -1, 0, 0, 0, 0 };
 
-
-static const WCHAR objectW[] = {'[','o','b','j','e','c','t',']',0};
-
 typedef struct {
     IID iid;
     VARIANT default_value;
@@ -700,7 +697,7 @@ static HRESULT dispex_value(DispatchEx *This, LCID lcid, WORD flags, DISPPARAMS 
     switch(flags) {
     case DISPATCH_PROPERTYGET:
         V_VT(res) = VT_BSTR;
-        V_BSTR(res) = SysAllocString(objectW);
+        V_BSTR(res) = SysAllocString(L"[object]");
         if(!V_BSTR(res))
             return E_OUTOFMEMORY;
         break;
@@ -879,7 +876,7 @@ static func_disp_t *create_func_disp(DispatchEx *obj, func_info_t *info)
         return NULL;
 
     ret->IUnknown_iface.lpVtbl = &FunctionUnkVtbl;
-    init_dispex(&ret->dispex, &ret->IUnknown_iface,  &function_dispex);
+    init_dispatch(&ret->dispex, &ret->IUnknown_iface,  &function_dispex, dispex_compat_mode(obj));
     ret->ref = 1;
     ret->obj = obj;
     ret->info = info;
@@ -1283,7 +1280,7 @@ static HRESULT function_invoke(DispatchEx *This, func_info_t *func, WORD flags, 
         if(func->id == DISPID_VALUE) {
             BSTR ret;
 
-            ret = SysAllocString(objectW);
+            ret = SysAllocString(L"[object]");
             if(!ret)
                 return E_OUTOFMEMORY;
 
@@ -1678,20 +1675,26 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
     }
 }
 
-static HRESULT WINAPI DispatchEx_DeleteMemberByName(IDispatchEx *iface, BSTR bstrName, DWORD grfdex)
+static HRESULT WINAPI DispatchEx_DeleteMemberByName(IDispatchEx *iface, BSTR name, DWORD grfdex)
 {
     DispatchEx *This = impl_from_IDispatchEx(iface);
+    DISPID id;
+    HRESULT hres;
 
-    TRACE("(%p)->(%s %x)\n", This, debugstr_w(bstrName), grfdex);
+    TRACE("(%p)->(%s %x)\n", This, debugstr_w(name), grfdex);
 
-    /* HACK: needed by Office; we shouldn't use IDispatchEx in this case */
-    if(dispex_compat_mode(This) >= COMPAT_MODE_IE9) {
-        FIXME("returning S_OK\n");
-        return S_OK;
+    if(dispex_compat_mode(This) < COMPAT_MODE_IE8) {
+        /* Not implemented by IE */
+        return E_NOTIMPL;
     }
 
-    /* Not implemented by IE */
-    return E_NOTIMPL;
+    hres = IDispatchEx_GetDispID(&This->IDispatchEx_iface, name, grfdex & ~fdexNameEnsure, &id);
+    if(FAILED(hres)) {
+        TRACE("property %s not found\n", debugstr_w(name));
+        return dispex_compat_mode(This) < COMPAT_MODE_IE9 ? hres : S_OK;
+    }
+
+    return IDispatchEx_DeleteMemberByDispID(&This->IDispatchEx_iface, id);
 }
 
 static HRESULT WINAPI DispatchEx_DeleteMemberByDispID(IDispatchEx *iface, DISPID id)
@@ -1700,8 +1703,25 @@ static HRESULT WINAPI DispatchEx_DeleteMemberByDispID(IDispatchEx *iface, DISPID
 
     TRACE("(%p)->(%x)\n", This, id);
 
-    /* Not implemented by IE */
-    return E_NOTIMPL;
+    if(dispex_compat_mode(This) < COMPAT_MODE_IE8) {
+        /* Not implemented by IE */
+        return E_NOTIMPL;
+    }
+
+    if(is_dynamic_dispid(id)) {
+        DWORD idx = id - DISPID_DYNPROP_0;
+        dynamic_prop_t *prop;
+
+        if(!get_dynamic_data(This) || idx > This->dynamic_data->prop_cnt)
+            return S_OK;
+
+        prop = This->dynamic_data->props + idx;
+        VariantClear(&prop->var);
+        prop->flags |= DYNPROP_DELETED;
+        return S_OK;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI DispatchEx_GetMemberProperties(IDispatchEx *iface, DISPID id, DWORD grfdexFetch, DWORD *pgrfdex)
@@ -1919,7 +1939,7 @@ void release_dispex(DispatchEx *This)
     heap_free(This->dynamic_data);
 }
 
-void init_dispex_with_compat_mode(DispatchEx *dispex, IUnknown *outer, dispex_static_data_t *data, compat_mode_t compat_mode)
+void init_dispatch(DispatchEx *dispex, IUnknown *outer, dispex_static_data_t *data, compat_mode_t compat_mode)
 {
     assert(compat_mode < COMPAT_MODE_CNT);
 

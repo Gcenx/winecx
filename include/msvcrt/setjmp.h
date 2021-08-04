@@ -47,7 +47,7 @@ typedef struct __JUMP_BUFFER
 
 #elif defined(__i386_on_x86_64__)
 
-#error Can't use this header for 32-on-64-bit mode
+#error "Can't use this header for 32-on-64-bit mode"
 
 #elif defined(__x86_64__)
 
@@ -147,15 +147,30 @@ typedef _JBTYPE jmp_buf[_JBLEN];
 extern "C" {
 #endif
 
-int __cdecl _setjmp(jmp_buf);
-void __cdecl longjmp(jmp_buf,int);
+_ACRTIMP void __cdecl longjmp(jmp_buf,int);
 
-#if defined(_WIN64) && defined(__GNUC__)
-int __cdecl __attribute__ ((__nothrow__,__returns_twice__)) _setjmpex(jmp_buf,void*);
+#ifdef _WIN64
+# ifdef _UCRT
+#  define _setjmpex __intrinsic_setjmpex
+# endif
+# if defined(__GNUC__) || defined(__clang__)
+_ACRTIMP int __cdecl __attribute__ ((__nothrow__,__returns_twice__)) _setjmpex(jmp_buf,void*);
 # define setjmp(buf)   _setjmpex(buf,__builtin_frame_address(0))
 # define setjmpex(buf) _setjmpex(buf,__builtin_frame_address(0))
-#else
-# define setjmp _setjmp
+# endif
+#else  /* _WIN64 */
+# ifdef _UCRT
+#  define _setjmp __intrinsic_setjmp
+# endif
+# if defined(__GNUC__) || defined(__clang__)
+_ACRTIMP int __cdecl __attribute__ ((__nothrow__,__returns_twice__)) _setjmp(jmp_buf);
+# else
+_ACRTIMP int __cdecl _setjmp(jmp_buf);
+# endif
+#endif  /* _WIN64 */
+
+#ifndef setjmp
+#define setjmp _setjmp
 #endif
 
 #ifdef __cplusplus

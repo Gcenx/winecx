@@ -26,33 +26,29 @@
     __asm__(".data\n" \
             "\t.balign 8\n" \
             "\t.quad " __ASM_NAME(#name "_rtti") "\n" \
-            "\t.globl " __ASM_NAME("MSVCRT_" #name "_vtable") "\n" \
-            __ASM_NAME("MSVCRT_" #name "_vtable") ":\n" \
+            "\t.globl " __ASM_NAME(#name "_vtable") "\n" \
+            __ASM_NAME(#name "_vtable") ":\n" \
             funcs "\n\t.text")
 
 #else
 
-#ifdef __i386_on_x86_64__
-#define VTABLE_ADD_FUNC(name) "\t.long " __ASM_THUNK_SYMBOL(#name) "\n"
-#else
 #define VTABLE_ADD_FUNC(name) "\t.long " THISCALL_NAME(name) "\n"
-#endif
 
 #define __ASM_VTABLE(name,funcs) \
     __asm__(".data\n" \
             "\t.balign 4\n" \
             "\t.long " __ASM_NAME(#name "_rtti") "\n" \
-            "\t.globl " __ASM_NAME("MSVCRT_" #name "_vtable") "\n" \
-            __ASM_NAME("MSVCRT_" #name "_vtable") ":\n" \
+            "\t.globl " __ASM_NAME(#name "_vtable") "\n" \
+            __ASM_NAME(#name "_vtable") ":\n" \
             funcs "\n\t.text")
 
 #endif /* _WIN64 */
 
-#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
+#ifndef __x86_64__
 
 #define DEFINE_RTTI_DATA(name, off, base_classes_no, cl1, cl2, cl3, cl4, cl5, cl6, cl7, cl8, cl9, mangled_name) \
     static type_info name ## _type_info = { \
-        &MSVCRT_type_info_vtable, \
+        &type_info_vtable, \
         NULL, \
         mangled_name \
     }; \
@@ -98,7 +94,7 @@ const rtti_object_locator name ## _rtti = { \
 
 #define DEFINE_RTTI_DATA(name, off, base_classes_no, cl1, cl2, cl3, cl4, cl5, cl6, cl7, cl8, cl9, mangled_name) \
     static type_info name ## _type_info = { \
-        &MSVCRT_type_info_vtable, \
+        &type_info_vtable, \
         NULL, \
         mangled_name \
     }; \
@@ -177,7 +173,7 @@ static void init_ ## name ## _rtti(char *base) \
 #define DEFINE_RTTI_DATA9(name, off, cl1, cl2, cl3, cl4, cl5, cl6, cl7, cl8, cl9, mangled_name) \
     DEFINE_RTTI_DATA(name, off, 9, cl1, cl2, cl3, cl4, cl5, cl6, cl7, cl8, cl9, mangled_name)
 
-#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
+#ifndef __x86_64__
 
 typedef struct _rtti_base_descriptor
 {
@@ -244,7 +240,7 @@ typedef struct
 
 #endif
 
-#if defined(__i386__) && !defined(__MINGW32__)
+#ifdef __ASM_USE_THISCALL_WRAPPER
 
 #define CALL_VTBL_FUNC(this, off, ret, type, args) ((ret (WINAPI*)type)&vtbl_wrapper_##off)args
 
@@ -268,4 +264,4 @@ extern void *vtbl_wrapper_48;
 
 #endif
 
-exception* __thiscall MSVCRT_exception_ctor(exception*, const char**);
+exception* __thiscall exception_ctor(exception*, const char**);

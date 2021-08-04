@@ -170,6 +170,9 @@ static ULONG WINAPI WebBrowser_Release(IUnknown *iface)
         if(This->sink)
             IAdviseSink_Release(This->sink);
 
+        if(This->advise_holder)
+            IOleAdviseHolder_Release(This->advise_holder);
+
         if(This->doc_host.document)
             IUnknown_Release(This->doc_host.document);
 
@@ -426,7 +429,7 @@ static HRESULT WINAPI WebBrowser_get_Document(IWebBrowser2 *iface, IDispatch **p
     }
 
     *ppDisp = disp;
-    return S_OK;
+    return disp ? S_OK : S_FALSE;
 }
 
 static HRESULT WINAPI WebBrowser_get_TopLevelContainer(IWebBrowser2 *iface, VARIANT_BOOL *pBool)

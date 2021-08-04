@@ -18,6 +18,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <stdarg.h>
+
+#include <ntstatus.h>
+#define WIN32_NO_STATUS
+#include <winternl.h>
 #include "wine/test.h"
 
 static LPVOID (WINAPI *pCreateFiber)(SIZE_T,LPFIBER_START_ROUTINE,LPVOID);
@@ -32,7 +37,13 @@ static DWORD (WINAPI *pFlsAlloc)(PFLS_CALLBACK_FUNCTION);
 static BOOL (WINAPI *pFlsFree)(DWORD);
 static PVOID (WINAPI *pFlsGetValue)(DWORD);
 static BOOL (WINAPI *pFlsSetValue)(DWORD,PVOID);
-
+static void (WINAPI *pRtlAcquirePebLock)(void);
+static void (WINAPI *pRtlReleasePebLock)(void);
+static NTSTATUS (WINAPI *pRtlFlsAlloc)(PFLS_CALLBACK_FUNCTION,DWORD*);
+static NTSTATUS (WINAPI *pRtlFlsFree)(ULONG);
+static NTSTATUS (WINAPI *pRtlFlsSetValue)(ULONG,void *);
+static NTSTATUS (WINAPI *pRtlFlsGetValue)(ULONG,void **);
+static void (WINAPI *pRtlProcessFlsData)(void *fls_data, ULONG flags);
 static void *fibers[3];
 static BYTE testparam = 185;
 static DWORD fls_index_to_set = FLS_OUT_OF_INDEXES;
@@ -44,6 +55,7 @@ static int cbCount = 0;
 static VOID init_funcs(void)
 {
     HMODULE hKernel32 = GetModuleHandleA("kernel32.dll");
+    HMODULE hntdll = GetModuleHandleA("ntdll.dll");
 
 #define X(f) p##f = (void*)GetProcAddress(hKernel32, #f);
     X(CreateFiber);
@@ -59,6 +71,17 @@ static VOID init_funcs(void)
     X(FlsGetValue);
     X(FlsSetValue);
 #undef X
+
+#define X(f) p##f = (void*)GetProcAddress(hntdll, #f);
+    X(RtlFlsAlloc);
+    X(RtlFlsFree);
+    X(RtlFlsSetValue);
+    X(RtlFlsGetValue);
+    X(RtlProcessFlsData);
+    X(RtlAcquirePebLock);
+    X(RtlReleasePebLock);
+#undef X
+
 }
 
 static VOID WINAPI FiberLocalStorageProc(PVOID lpFlsData)
@@ -72,6 +95,10 @@ static VOID WINAPI FiberLocalStorageProc(PVOID lpFlsData)
 static VOID WINAPI FiberMainProc(LPVOID lpFiberParameter)
 {
     BYTE *tparam = (BYTE *)lpFiberParameter;
+    TEB *teb = NtCurrentTeb();
+
+    ok(!teb->FlsSlots, "Got unexpected FlsSlots %p.\n", teb->FlsSlots);
+
     fiberCount++;
     ok(*tparam == 185, "Parameterdata expected not to be changed\n");
     if (fls_index_to_set != FLS_OUT_OF_INDEXES)
@@ -79,12 +106,16 @@ static VOID WINAPI FiberMainProc(LPVOID lpFiberParameter)
         void* ret;
         BOOL bret;
 
+        SetLastError( 0xdeadbeef );
         ret = pFlsGetValue(fls_index_to_set);
         ok(ret == NULL, "FlsGetValue returned %p, expected NULL\n", ret);
+        ok(GetLastError() == ERROR_INVALID_PARAMETER, "Got unexpected error %u.\n", GetLastError());
 
         /* Set the FLS value */
         bret = pFlsSetValue(fls_index_to_set, fls_value_to_set);
         ok(bret, "FlsSetValue failed with error %u\n", GetLastError());
+
+        ok(!!teb->FlsSlots, "Got unexpected FlsSlots %p.\n", teb->FlsSlots);
 
         /* Verify that FlsGetValue retrieves the value set by FlsSetValue */
         SetLastError( 0xdeadbeef );
@@ -171,16 +202,338 @@ static void test_FiberHandling(void)
     if (pIsThreadAFiber) ok(!pIsThreadAFiber(), "IsThreadAFiber reported TRUE\n");
 }
 
+#define FLS_TEST_INDEX_COUNT 4096
+
+static unsigned int check_linked_list(const LIST_ENTRY *le, const LIST_ENTRY *search_entry, unsigned int *index_found)
+{
+    unsigned int count = 0;
+    LIST_ENTRY *entry;
+
+    *index_found = ~0;
+
+    for (entry = le->Flink; entry != le; entry = entry->Flink)
+    {
+        if (entry == search_entry)
+        {
+            ok(*index_found == ~0, "Duplicate list entry.\n");
+            *index_found = count;
+        }
+        ++count;
+    }
+    return count;
+}
+
+static unsigned int test_fls_callback_call_count;
+
+static void WINAPI test_fls_callback(void *data)
+{
+    ++test_fls_callback_call_count;
+}
+
+static unsigned int test_fls_chunk_size(unsigned int chunk_index)
+{
+    return 0x10 << chunk_index;
+}
+
+static unsigned int test_fls_chunk_index_from_index(unsigned int index, unsigned int *index_in_chunk)
+{
+    unsigned int chunk_index = 0;
+
+    while (index >= test_fls_chunk_size(chunk_index))
+        index -= test_fls_chunk_size(chunk_index++);
+
+    *index_in_chunk = index;
+    return chunk_index;
+}
+
+static HANDLE test_fiberlocalstorage_peb_locked_event;
+static HANDLE test_fiberlocalstorage_done_event;
+
+
+static DWORD WINAPI test_FiberLocalStorage_thread(void *arg)
+{
+    pRtlAcquirePebLock();
+    SetEvent(test_fiberlocalstorage_peb_locked_event);
+    WaitForSingleObject(test_fiberlocalstorage_done_event, INFINITE);
+    pRtlReleasePebLock();
+    return 0;
+}
+
 static void test_FiberLocalStorage(void)
 {
-    DWORD fls, fls_2;
-    BOOL ret;
+    static DWORD fls_indices[FLS_TEST_INDEX_COUNT];
+    unsigned int i, j, count, entry_count, index;
+    LIST_ENTRY *fls_list_head, saved_entry;
+    TEB_FLS_DATA *fls_data, *new_fls_data;
+    GLOBAL_FLS_DATA *g_fls_data;
+    DWORD fls, fls_2, result;
+    TEB *teb = NtCurrentTeb();
+    PEB *peb = teb->Peb;
+    NTSTATUS status;
+    HANDLE hthread;
+    SIZE_T size;
     void* val;
+    BOOL ret;
 
     if (!pFlsAlloc || !pFlsSetValue || !pFlsGetValue || !pFlsFree)
     {
         win_skip( "Fiber Local Storage not supported\n" );
         return;
+    }
+
+    if (pRtlFlsAlloc)
+    {
+        if (pRtlFlsGetValue)
+        {
+            status = pRtlFlsGetValue(0, NULL);
+            ok(status == STATUS_INVALID_PARAMETER, "Got unexpected status %#x.\n", status);
+        }
+        else
+        {
+            win_skip("RtlFlsGetValue is not available.\n");
+        }
+
+        for (i = 0; i < FLS_TEST_INDEX_COUNT; ++i)
+        {
+            fls_indices[i] = 0xdeadbeef;
+            status = pRtlFlsAlloc(test_fls_callback, &fls_indices[i]);
+            ok(!status || status == STATUS_NO_MEMORY, "Got unexpected status %#x.\n", status);
+            if (status)
+            {
+                ok(fls_indices[i] == 0xdeadbeef, "Got unexpected index %#x.\n", fls_indices[i]);
+                break;
+            }
+            if (pRtlFlsSetValue)
+            {
+                status = pRtlFlsSetValue(fls_indices[i], (void *)(ULONG_PTR)(i + 1));
+                ok(!status, "Got unexpected status %#x.\n", status);
+            }
+        }
+        count = i;
+
+        fls_data = teb->FlsSlots;
+
+        /* FLS limits are increased since Win10 18312. */
+        ok(count && (count <= 127 || (count > 4000 && count < 4096)), "Got unexpected count %u.\n", count);
+
+        if (!peb->FlsCallback)
+        {
+            ok(pRtlFlsSetValue && pRtlFlsGetValue, "Missing RtlFlsGetValue / RtlFlsSetValue.\n");
+            ok(!peb->FlsBitmap, "Got unexpected FlsBitmap %p.\n", peb->FlsBitmap);
+            ok(!peb->FlsListHead.Flink && !peb->FlsListHead.Blink, "Got nonzero FlsListHead.\n");
+            ok(!peb->FlsHighIndex, "Got unexpected FlsHighIndex %u.\n", peb->FlsHighIndex);
+
+            fls_list_head = fls_data->fls_list_entry.Flink;
+
+            entry_count = check_linked_list(fls_list_head, &fls_data->fls_list_entry, &index);
+            ok(entry_count == 1, "Got unexpected count %u.\n", entry_count);
+            ok(!index, "Got unexpected index %u.\n", index);
+
+            g_fls_data = CONTAINING_RECORD(fls_list_head, GLOBAL_FLS_DATA, fls_list_head);
+
+            ok(g_fls_data->fls_high_index == 0xfef, "Got unexpected fls_high_index %#x.\n", g_fls_data->fls_high_index);
+
+            for (i = 0; i < 8; ++i)
+            {
+                ok(!!g_fls_data->fls_callback_chunks[i], "Got zero fls_callback_chunks[%u].\n", i);
+                ok(g_fls_data->fls_callback_chunks[i]->count == test_fls_chunk_size(i),
+                        "Got unexpected g_fls_data->fls_callback_chunks[%u]->count %u.\n",
+                        i, g_fls_data->fls_callback_chunks[i]->count);
+
+                size = HeapSize(GetProcessHeap(), 0, g_fls_data->fls_callback_chunks[i]);
+                ok(size == sizeof(ULONG_PTR) + sizeof(FLS_CALLBACK) * test_fls_chunk_size(i),
+                        "Got unexpected size %p.\n", (void *)size);
+
+                ok(!!fls_data->fls_data_chunks[i], "Got zero fls_data->fls_data_chunks[%u].\n", i);
+                ok(!fls_data->fls_data_chunks[i][0], "Got unexpected fls_data->fls_data_chunks[%u][0] %p.\n",
+                        i, fls_data->fls_data_chunks[i][0]);
+                size = HeapSize(GetProcessHeap(), 0, fls_data->fls_data_chunks[i]);
+                ok(size == sizeof(void *) * (test_fls_chunk_size(i) + 1), "Got unexpected size %p.\n", (void *)size);
+
+                if (!i)
+                {
+                    ok(g_fls_data->fls_callback_chunks[0]->callbacks[0].callback == (void *)~(ULONG_PTR)0,
+                            "Got unexpected callback %p.\n",
+                            g_fls_data->fls_callback_chunks[0]->callbacks[0].callback);
+                }
+
+                for (j = i ? 0 : fls_indices[0]; j < test_fls_chunk_size(i); ++j)
+                {
+                    ok(!g_fls_data->fls_callback_chunks[i]->callbacks[j].unknown,
+                            "Got unexpected unknown %p, i %u, j %u.\n",
+                            g_fls_data->fls_callback_chunks[i]->callbacks[j].unknown, i, j);
+                    ok(g_fls_data->fls_callback_chunks[i]->callbacks[j].callback == test_fls_callback,
+                            "Got unexpected callback %p, i %u, j %u.\n",
+                            g_fls_data->fls_callback_chunks[i]->callbacks[j].callback, i, j);
+                }
+            }
+            for (i = 0; i < count; ++i)
+            {
+                j = test_fls_chunk_index_from_index(fls_indices[i], &index);
+                ok(fls_data->fls_data_chunks[j][index + 1] == (void *)(ULONG_PTR)(i + 1),
+                        "Got unexpected FLS value %p, i %u, j %u, index %u.\n",
+                        fls_data->fls_data_chunks[j][index + 1], i, j, index);
+            }
+            j = test_fls_chunk_index_from_index(fls_indices[0x10], &index);
+            g_fls_data->fls_callback_chunks[j]->callbacks[index].callback = NULL;
+            status = pRtlFlsFree(fls_indices[0x10]);
+            ok(status == STATUS_INVALID_PARAMETER, "Got unexpected status %#x.\n", status);
+
+            g_fls_data->fls_callback_chunks[j]->callbacks[index].callback = test_fls_callback;
+            test_fls_callback_call_count = 0;
+            status = pRtlFlsFree(fls_indices[0x10]);
+            ok(!status, "Got unexpected status %#x.\n", status);
+            ok(test_fls_callback_call_count == 1, "Got unexpected callback call count %u.\n",
+                    test_fls_callback_call_count);
+
+            ok(!fls_data->fls_data_chunks[j][0], "Got unexpected fls_data->fls_data_chunks[%u][0] %p.\n",
+                    j, fls_data->fls_data_chunks[j][0]);
+            ok(!g_fls_data->fls_callback_chunks[j]->callbacks[index].callback,
+                    "Got unexpected callback %p.\n",
+                    g_fls_data->fls_callback_chunks[j]->callbacks[index].callback);
+
+            fls_data->fls_data_chunks[j][index + 1] = (void *)(ULONG_PTR)0x28;
+            status = pRtlFlsAlloc(test_fls_callback, &i);
+            ok(!status, "Got unexpected status %#x.\n", status);
+            ok(i == fls_indices[0x10], "Got unexpected index %u.\n", i);
+            ok(fls_data->fls_data_chunks[j][index + 1] == (void *)(ULONG_PTR)0x28, "Got unexpected data %p.\n",
+                    fls_data->fls_data_chunks[j][index + 1]);
+
+            status = pRtlFlsSetValue(i, (void *)(ULONG_PTR)0x11);
+            ok(!status, "Got unexpected status %#x.\n", status);
+
+            teb->FlsSlots = NULL;
+
+            val = (void *)0xdeadbeef;
+            status = pRtlFlsGetValue(fls_indices[1], &val);
+            new_fls_data = teb->FlsSlots;
+            ok(status == STATUS_INVALID_PARAMETER, "Got unexpected status %#x.\n", status);
+            ok(val == (void *)0xdeadbeef, "Got unexpected val %p.\n", val);
+            ok(!new_fls_data, "Got unexpected teb->FlsSlots %p.\n", new_fls_data);
+
+            status = pRtlFlsSetValue(fls_indices[1], (void *)(ULONG_PTR)0x28);
+            new_fls_data = teb->FlsSlots;
+            ok(!status, "Got unexpected status %#x.\n", status);
+            ok(!!new_fls_data, "Got unexpected teb->FlsSlots %p.\n", new_fls_data);
+
+            entry_count = check_linked_list(fls_list_head, &fls_data->fls_list_entry, &index);
+            ok(entry_count == 2, "Got unexpected count %u.\n", entry_count);
+            ok(!index, "Got unexpected index %u.\n", index);
+            check_linked_list(fls_list_head, &new_fls_data->fls_list_entry, &index);
+            ok(index == 1, "Got unexpected index %u.\n", index);
+
+            val = (void *)0xdeadbeef;
+            status = pRtlFlsGetValue(fls_indices[2], &val);
+            ok(!status, "Got unexpected status %#x.\n", status);
+            ok(!val, "Got unexpected val %p.\n", val);
+
+
+            /* With bit 0 of flags set RtlProcessFlsData is removing FLS data from the linked list
+             * and calls FLS callbacks. With bit 1 set the memory is freed. The remaining bits do not seem
+             * to have any obvious effect. */
+            for (i = 2; i < 32; ++i)
+            {
+                pRtlProcessFlsData(new_fls_data, 1 << i);
+                size = HeapSize(GetProcessHeap(), 0, new_fls_data);
+                ok(size == sizeof(*new_fls_data), "Got unexpected size %p.\n", (void *)size);
+            }
+
+            if (0)
+            {
+                pRtlProcessFlsData(new_fls_data, 2);
+                entry_count = check_linked_list(fls_list_head, &fls_data->fls_list_entry, &index);
+                ok(entry_count == 2, "Got unexpected count %u.\n", entry_count);
+
+                /* Crashes on Windows. */
+                HeapSize(GetProcessHeap(), 0, new_fls_data);
+            }
+
+            test_fiberlocalstorage_peb_locked_event = CreateEventA(NULL, FALSE, FALSE, NULL);
+            test_fiberlocalstorage_done_event = CreateEventA(NULL, FALSE, FALSE, NULL);
+            hthread = CreateThread(NULL, 0, test_FiberLocalStorage_thread, NULL, 0, NULL);
+            ok(!!hthread, "CreateThread failed.\n");
+            result = WaitForSingleObject(test_fiberlocalstorage_peb_locked_event, INFINITE);
+            ok(result == WAIT_OBJECT_0, "Got unexpected result %u.\n", result);
+            teb->FlsSlots = NULL;
+
+            test_fls_callback_call_count = 0;
+            saved_entry = new_fls_data->fls_list_entry;
+            pRtlProcessFlsData(new_fls_data, 1);
+            ok(!teb->FlsSlots, "Got unexpected teb->FlsSlots %p.\n", teb->FlsSlots);
+
+            teb->FlsSlots = fls_data;
+            ok(test_fls_callback_call_count == 1, "Got unexpected callback call count %u.\n",
+                    test_fls_callback_call_count);
+
+            SetEvent(test_fiberlocalstorage_done_event);
+            WaitForSingleObject(hthread, INFINITE);
+            CloseHandle(hthread);
+            CloseHandle(test_fiberlocalstorage_peb_locked_event);
+            CloseHandle(test_fiberlocalstorage_done_event);
+
+            ok(new_fls_data->fls_list_entry.Flink == saved_entry.Flink, "Got unexpected Flink %p.\n",
+                    saved_entry.Flink);
+            ok(new_fls_data->fls_list_entry.Blink == saved_entry.Blink, "Got unexpected Flink %p.\n",
+                    saved_entry.Blink);
+            size = HeapSize(GetProcessHeap(), 0, new_fls_data);
+            ok(size == sizeof(*new_fls_data), "Got unexpected size %p.\n", (void *)size);
+            test_fls_callback_call_count = 0;
+            i = test_fls_chunk_index_from_index(fls_indices[1], &index);
+            new_fls_data->fls_data_chunks[i][index + 1] = (void *)(ULONG_PTR)0x28;
+            pRtlProcessFlsData(new_fls_data, 2);
+            ok(!test_fls_callback_call_count, "Got unexpected callback call count %u.\n",
+                    test_fls_callback_call_count);
+
+            if (0)
+            {
+                /* crashes on Windows. */
+                HeapSize(GetProcessHeap(), 0, new_fls_data);
+            }
+
+            entry_count = check_linked_list(fls_list_head, &fls_data->fls_list_entry, &index);
+            ok(entry_count == 1, "Got unexpected count %u.\n", entry_count);
+            ok(!index, "Got unexpected index %u.\n", index);
+        }
+        else
+        {
+            win_skip("Old FLS data storage layout, skipping test.\n");
+            g_fls_data = NULL;
+        }
+
+        if (0)
+        {
+            /* crashes on Windows. */
+            pRtlFlsGetValue(fls_indices[0], NULL);
+        }
+
+        for (i = 0; i < count; ++i)
+        {
+            if (pRtlFlsGetValue)
+            {
+                status = pRtlFlsGetValue(fls_indices[i], &val);
+                ok(!status, "Got unexpected status %#x.\n", status);
+                ok(val == (void *)(ULONG_PTR)(i + 1), "Got unexpected val %p, i %u.\n", val, i);
+            }
+
+            status = pRtlFlsFree(fls_indices[i]);
+            ok(!status, "Got unexpected status %#x, i %u.\n", status, i);
+        }
+
+        if (!peb->FlsCallback)
+        {
+            ok(g_fls_data->fls_high_index == 0xfef, "Got unexpected fls_high_index %#x.\n",
+                    g_fls_data->fls_high_index);
+
+            for (i = 0; i < 8; ++i)
+            {
+                ok(!!g_fls_data->fls_callback_chunks[i], "Got zero fls_callback_chunks[%u].\n", i);
+                ok(!!fls_data->fls_data_chunks[i], "Got zero fls_data->fls_data_chunks[%u].\n", i);
+            }
+        }
+    }
+    else
+    {
+        win_skip("RtlFlsAlloc is not available.\n");
     }
 
     /* Test an unallocated index
@@ -197,6 +550,14 @@ static void test_FiberLocalStorage(void)
     ok( val == NULL,
         "getting fls index 127 (unallocated) failed with error %u\n", GetLastError() );
 
+    if (pRtlFlsGetValue)
+    {
+        val = (void *)0xdeadbeef;
+        status = pRtlFlsGetValue(127, &val);
+        ok( !status, "Got unexpected status %#x.\n", status );
+        ok( !val, "Got unexpected val %p.\n", val );
+    }
+
     ret = pFlsSetValue( 127, (void*) 0x217 );
     ok( ret, "setting fls index 127 (unallocated) failed with error %u\n", GetLastError() );
 
@@ -205,6 +566,14 @@ static void test_FiberLocalStorage(void)
     ok( val == (void*) 0x217, "fls index 127 (unallocated) wrong value %p\n", val );
     ok( GetLastError() == ERROR_SUCCESS,
         "getting fls index 127 (unallocated) failed with error %u\n", GetLastError() );
+
+    if (pRtlFlsGetValue)
+    {
+        val = (void *)0xdeadbeef;
+        status = pRtlFlsGetValue(127, &val);
+        ok( !status, "Got unexpected status %#x.\n", status );
+        ok( val == (void*)0x217, "Got unexpected val %p.\n", val );
+    }
 
     /* FlsFree, FlsGetValue, and FlsSetValue out of bounds should return
      * ERROR_INVALID_PARAMETER
@@ -217,13 +586,12 @@ static void test_FiberLocalStorage(void)
 
     SetLastError( 0xdeadbeef );
     ret = pFlsSetValue( 128, (void*) 0x217 );
-    ok( !ret, "setting fls index 128 (out of bounds) succeeded\n" );
-    ok( GetLastError() == ERROR_INVALID_PARAMETER,
+    ok( ret || GetLastError() == ERROR_INVALID_PARAMETER,
         "setting fls index 128 (out of bounds) wrong error %u\n", GetLastError() );
 
     SetLastError( 0xdeadbeef );
     val = pFlsGetValue( 128 );
-    ok( GetLastError() == ERROR_INVALID_PARAMETER,
+    ok( GetLastError() == ERROR_INVALID_PARAMETER || val == (void *)0x217,
         "getting fls index 128 (out of bounds) wrong error %u\n", GetLastError() );
 
     /* Test index 0 */
@@ -231,10 +599,23 @@ static void test_FiberLocalStorage(void)
     val = pFlsGetValue( 0 );
     ok( !val, "fls index 0 set to %p\n", val );
     ok( GetLastError() == ERROR_INVALID_PARAMETER, "setting fls index wrong error %u\n", GetLastError() );
+    if (pRtlFlsGetValue)
+    {
+        val = (void *)0xdeadbeef;
+        status = pRtlFlsGetValue(0, &val);
+        ok( status == STATUS_INVALID_PARAMETER, "Got unexpected status %#x.\n", status );
+        ok( val == (void*)0xdeadbeef, "Got unexpected val %p.\n", val );
+    }
+
     SetLastError( 0xdeadbeef );
     ret = pFlsSetValue( 0, (void *)0xdeadbeef );
     ok( !ret, "setting fls index 0 succeeded\n" );
     ok( GetLastError() == ERROR_INVALID_PARAMETER, "setting fls index wrong error %u\n", GetLastError() );
+    if (pRtlFlsSetValue)
+    {
+        status = pRtlFlsSetValue( 0, (void *)0xdeadbeef );
+        ok( status == STATUS_INVALID_PARAMETER, "Got unexpected status %#x.\n", status );
+    }
     SetLastError( 0xdeadbeef );
     val = pFlsGetValue( 0 );
     ok( !val, "fls index 0 wrong value %p\n", val );
@@ -246,8 +627,10 @@ static void test_FiberLocalStorage(void)
     ok( fls != 0, "fls index 0 allocated\n" );
     val = pFlsGetValue( fls );
     ok( !val, "fls index %u wrong value %p\n", fls, val );
+    SetLastError( 0xdeadbeef );
     ret = pFlsSetValue( fls, (void *)0xdeadbeef );
     ok( ret, "setting fls index %u failed\n", fls );
+    ok( GetLastError() == 0xdeadbeef, "setting fls index wrong error %u\n", GetLastError() );
     SetLastError( 0xdeadbeef );
     val = pFlsGetValue( fls );
     ok( val == (void *)0xdeadbeef, "fls index %u wrong value %p\n", fls, val );
@@ -276,7 +659,7 @@ static void test_FiberLocalStorage(void)
 
     SetLastError( 0xdeadbeef );
     val = pFlsGetValue( fls_2 );
-    ok( val == NULL, "fls index %u wrong value %p\n", fls, val );
+    ok( val == NULL || val == (void *)0xdeadbabe, "fls index %u wrong value %p\n", fls, val );
     ok( GetLastError() == ERROR_SUCCESS,
         "getting fls index %u failed with error %u\n", fls_2, GetLastError() );
     pFlsFree( fls_2 );
@@ -309,7 +692,7 @@ static void test_FiberLocalStorageCallback(PFLS_CALLBACK_FUNCTION cbfunc)
 
     ret = pFlsFree( fls );
     ok(ret, "FlsFree failed with error %u\n", GetLastError() );
-    todo_wine ok( cbCount == 1, "Wrong callback count: %d\n", cbCount );
+    ok( cbCount == 1, "Wrong callback count: %d\n", cbCount );
 
     /* Test that callback is not executed if value is NULL */
     cbCount = 0;
@@ -374,14 +757,14 @@ static void test_FiberLocalStorageWithFibers(PFLS_CALLBACK_FUNCTION cbfunc)
     fls_value_to_set = val1;
     pDeleteFiber(fibers[1]);
     ok(fiberCount == 0, "Wrong fiber count: %d\n", fiberCount);
-    todo_wine ok(cbCount == 1, "Wrong callback count: %d\n", cbCount);
+    ok(cbCount == 1, "Wrong callback count: %d\n", cbCount);
 
     fiberCount = 0;
     cbCount = 0;
     fls_value_to_set = val2;
     pFlsFree(fls_index_to_set);
     ok(fiberCount == 0, "Wrong fiber count: %d\n", fiberCount);
-    todo_wine ok(cbCount == 2, "Wrong callback count: %d\n", cbCount);
+    ok(cbCount == 2, "Wrong callback count: %d\n", cbCount);
 
     fiberCount = 0;
     cbCount = 0;
@@ -393,8 +776,76 @@ static void test_FiberLocalStorageWithFibers(PFLS_CALLBACK_FUNCTION cbfunc)
     test_ConvertFiberToThread();
 }
 
+static void WINAPI fls_exit_deadlock_callback(void *arg)
+{
+    if (arg == (void *)1)
+        Sleep(INFINITE);
+    if (arg == (void *)2)
+        /* Unfortunately this test won't affect the exit code if it fails, but
+         * at least it will print a failure message. */
+        ok(RtlDllShutdownInProgress(), "expected DLL shutdown\n");
+}
+
+static DWORD CALLBACK fls_exit_deadlock_thread(void *arg)
+{
+    FlsSetValue((DWORD_PTR)arg, (void *)1);
+    return 0;
+}
+
+static void fls_exit_deadlock_child(void)
+{
+    DWORD index = FlsAlloc(fls_exit_deadlock_callback);
+    FlsSetValue(index, (void *)2);
+    CreateThread(NULL, 0, fls_exit_deadlock_thread, (void *)(DWORD_PTR)index, 0, NULL);
+    Sleep(100);
+    ExitProcess(0);
+}
+
+static void test_fls_exit_deadlock(void)
+{
+    char **argv, cmdline[MAX_PATH];
+    PROCESS_INFORMATION pi;
+    STARTUPINFOA si = {0};
+    BOOL ret;
+
+    /* Regression test for the following deadlock:
+     *
+     * Thread A             Thread B
+     * -----------------------------
+     * ExitThread
+     * acquire FLS lock
+     * call FLS callback
+     *                      ExitProcess
+     *                      terminate thread A
+     *                      acquire FLS lock
+     *
+     * Thread B deadlocks on acquiring the FLS lock (in order to itself call its
+     * FLS callbacks.)
+     */
+
+    winetest_get_mainargs(&argv);
+    sprintf(cmdline, "%s %s fls_exit_deadlock", argv[0], argv[1]);
+    ret = CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    ok(ret, "failed to create child, error %u\n", GetLastError());
+    ret = WaitForSingleObject(pi.hProcess, 1000);
+    ok(!ret, "wait failed\n");
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+}
+
 START_TEST(fiber)
 {
+    char **argv;
+    int argc;
+
+    argc = winetest_get_mainargs(&argv);
+
+    if (argc == 3 && !strcmp(argv[2], "fls_exit_deadlock"))
+    {
+        fls_exit_deadlock_child();
+        return;
+    }
+
     init_funcs();
 
     if (!pCreateFiber)
@@ -407,4 +858,5 @@ START_TEST(fiber)
     test_FiberLocalStorage();
     test_FiberLocalStorageCallback(FiberLocalStorageProc);
     test_FiberLocalStorageWithFibers(FiberLocalStorageProc);
+    test_fls_exit_deadlock();
 }

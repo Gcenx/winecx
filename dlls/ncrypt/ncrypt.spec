@@ -8,7 +8,7 @@
 @ stdcall BCryptDecrypt(ptr ptr long ptr ptr long ptr long ptr long) bcrypt.BCryptDecrypt
 @ stub BCryptDeleteContext
 @ stdcall BCryptDeriveKey(ptr wstr ptr ptr long ptr long) bcrypt.BCryptDeriveKey
-@ stub BCryptDeriveKeyCapi
+@ stdcall BCryptDeriveKeyCapi(ptr ptr ptr long long) bcrypt.BCryptDeriveKeyCapi
 @ stdcall BCryptDeriveKeyPBKDF2(ptr ptr long ptr long int64 ptr long long) bcrypt.BCryptDeriveKeyPBKDF2
 @ stdcall BCryptDestroyHash(ptr) bcrypt.BCryptDestroyHash
 @ stdcall BCryptDestroyKey(ptr) bcrypt.BCryptDestroyKey
@@ -78,7 +78,7 @@
 @ stub NCryptGetProtectionDescriptorInfo
 @ stdcall NCryptImportKey(long long wstr ptr ptr ptr long long)
 @ stub NCryptIsAlgSupported(long wstr long)
-@ stub NCryptIsKeyHandle
+@ stdcall NCryptIsKeyHandle(long)
 @ stub NCryptKeyDerivation
 @ stub NCryptNotifyChangeKey
 @ stdcall NCryptOpenKey(long ptr wstr long long)

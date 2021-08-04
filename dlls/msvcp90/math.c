@@ -1000,42 +1000,42 @@ complex_float* __thiscall complex_float_ctor_def(complex_float *this)
 
 /* ??$?8M@std@@YA_NABMABV?$complex@M@0@@Z */
 /* ??$?8M@std@@YA_NAEBMAEBV?$complex@M@0@@Z */
-MSVCP_bool __cdecl complex_float_equal_fc(const float *l, const complex_float *r)
+bool __cdecl complex_float_equal_fc(const float *l, const complex_float *r)
 {
     return *l==r->real && r->imag==0;
 }
 
 /* ??$?8M@std@@YA_NABV?$complex@M@0@0@Z */
 /* ??$?8M@std@@YA_NAEBV?$complex@M@0@0@Z */
-MSVCP_bool __cdecl complex_float_equal(const complex_float *l, const complex_float *r)
+bool __cdecl complex_float_equal(const complex_float *l, const complex_float *r)
 {
     return l->real==r->real && l->imag==r->imag;
 }
 
 /* ??$?8M@std@@YA_NABV?$complex@M@0@ABM@Z */
 /* ??$?8M@std@@YA_NAEBV?$complex@M@0@AEBM@Z */
-MSVCP_bool __cdecl complex_float_equal_cf(const complex_float *l, const float *r)
+bool __cdecl complex_float_equal_cf(const complex_float *l, const float *r)
 {
     return l->real==*r && l->imag==0;
 }
 
 /* ??$?9M@std@@YA_NABMABV?$complex@M@0@@Z */
 /* ??$?9M@std@@YA_NAEBMAEBV?$complex@M@0@@Z */
-MSVCP_bool __cdecl complex_float_not_equal_fc(const float *l, const complex_float *r)
+bool __cdecl complex_float_not_equal_fc(const float *l, const complex_float *r)
 {
     return !complex_float_equal_fc(l, r);
 }
 
 /* ??$?9M@std@@YA_NABV?$complex@M@0@0@Z */
 /* ??$?9M@std@@YA_NAEBV?$complex@M@0@0@Z */
-MSVCP_bool __cdecl complex_float_not_equal(const complex_float *l, const complex_float *r)
+bool __cdecl complex_float_not_equal(const complex_float *l, const complex_float *r)
 {
     return !complex_float_equal(l, r);
 }
 
 /* ??$?9M@std@@YA_NABV?$complex@M@0@ABM@Z */
 /* ??$?9M@std@@YA_NAEBV?$complex@M@0@AEBM@Z */
-MSVCP_bool __cdecl complex_float_not_equal_cf(const complex_float *l, const float *r)
+bool __cdecl complex_float_not_equal_cf(const complex_float *l, const float *r)
 {
     return !complex_float_equal_cf(l, r);
 }
@@ -1610,7 +1610,7 @@ complex_double* __thiscall complex_double_ctor_def(complex_double *this)
 /* ??$?8N@std@@YA_NAEBNAEBV?$complex@N@0@@Z */
 /* ??$?8O@std@@YA_NABOABV?$complex@O@0@@Z */
 /* ??$?8O@std@@YA_NAEBOAEBV?$complex@O@0@@Z */
-MSVCP_bool __cdecl complex_double_equal_dc(const double *l, const complex_double *r)
+bool __cdecl complex_double_equal_dc(const double *l, const complex_double *r)
 {
     return *l==r->real && r->imag==0;
 }
@@ -1619,7 +1619,7 @@ MSVCP_bool __cdecl complex_double_equal_dc(const double *l, const complex_double
 /* ??$?8N@std@@YA_NAEBV?$complex@N@0@0@Z */
 /* ??$?8O@std@@YA_NABV?$complex@O@0@0@Z */
 /* ??$?8O@std@@YA_NAEBV?$complex@O@0@0@Z */
-MSVCP_bool __cdecl complex_double_equal(const complex_double *l, const complex_double *r)
+bool __cdecl complex_double_equal(const complex_double *l, const complex_double *r)
 {
     return l->real==r->real && l->imag==r->imag;
 }
@@ -1628,7 +1628,7 @@ MSVCP_bool __cdecl complex_double_equal(const complex_double *l, const complex_d
 /* ??$?8N@std@@YA_NAEBV?$complex@N@0@AEBN@Z */
 /* ??$?8O@std@@YA_NABV?$complex@O@0@ABO@Z */
 /* ??$?8O@std@@YA_NAEBV?$complex@O@0@AEBO@Z */
-MSVCP_bool __cdecl complex_double_equal_cd(const complex_double *l, double *r)
+bool __cdecl complex_double_equal_cd(const complex_double *l, double *r)
 {
     return l->real==*r && l->imag==0;
 }
@@ -1637,7 +1637,7 @@ MSVCP_bool __cdecl complex_double_equal_cd(const complex_double *l, double *r)
 /* ??$?9N@std@@YA_NAEBNAEBV?$complex@N@0@@Z */
 /* ??$?9O@std@@YA_NABOABV?$complex@O@0@@Z */
 /* ??$?9O@std@@YA_NAEBOAEBV?$complex@O@0@@Z */
-MSVCP_bool __cdecl complex_double_not_equal_dc(const double *l, const complex_double *r)
+bool __cdecl complex_double_not_equal_dc(const double *l, const complex_double *r)
 {
     return !complex_double_equal_dc(l, r);
 }
@@ -1646,7 +1646,7 @@ MSVCP_bool __cdecl complex_double_not_equal_dc(const double *l, const complex_do
 /* ??$?9N@std@@YA_NAEBV?$complex@N@0@0@Z */
 /* ??$?9O@std@@YA_NABV?$complex@O@0@0@Z */
 /* ??$?9O@std@@YA_NAEBV?$complex@O@0@0@Z */
-MSVCP_bool __cdecl complex_double_not_equal(const complex_double *l, const complex_double *r)
+bool __cdecl complex_double_not_equal(const complex_double *l, const complex_double *r)
 {
     return !complex_double_equal(l, r);
 }
@@ -1655,7 +1655,7 @@ MSVCP_bool __cdecl complex_double_not_equal(const complex_double *l, const compl
 /* ??$?9N@std@@YA_NAEBV?$complex@N@0@AEBN@Z */
 /* ??$?9O@std@@YA_NABV?$complex@O@0@ABO@Z */
 /* ??$?9O@std@@YA_NAEBV?$complex@O@0@AEBO@Z */
-MSVCP_bool __cdecl complex_double_not_equal_cd(const complex_double *l, double *r)
+bool __cdecl complex_double_not_equal_cd(const complex_double *l, double *r)
 {
     return !complex_double_equal_cd(l, r);
 }
@@ -2361,4 +2361,37 @@ short __cdecl _FExp(float *x, float y, short scale)
     *x = d;
 
     return dclass(*x);
+}
+
+/* ?_XLgamma@std@@YANN@Z */
+double __cdecl std__XLgamma_double(double z)
+{
+    /* Lanczos coefficients g=5, n=6 */
+    static const double lc[] = {
+        1.000000000190015,
+        76.18009172947146,
+        -86.50532032941677,
+        24.01409824083091,
+        -1.231739572450155,
+        0.1208650973866179e-2,
+        -0.5395239384953e-5
+    };
+    static const double log_sqrt_2pi = 0.91893853320467274178;
+
+    double base = z + 4.5, sum = 0;
+    int i;
+
+    if (z < 0.5) return log(M_PI / sin(M_PI * z)) - std__XLgamma_double(1 - z);
+
+    z--;
+    for(i = ARRAY_SIZE(lc) - 1; i >= 1; i--)
+        sum += lc[i] / (z + i);
+    sum += lc[0];
+    return log_sqrt_2pi + log(sum) - base + log(base) * (z + 0.5);
+}
+
+/* ?_XLgamma@tr1@std@@YAMM@Z */
+float __cdecl std__XLgamma_float(float z)
+{
+    return std__XLgamma_double(z);
 }

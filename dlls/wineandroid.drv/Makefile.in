@@ -22,9 +22,3 @@ SVG_SRCS = \
 RC_SRCS = version.rc
 
 EXTRA_TARGETS = wineandroid.drv-debug.aar
-
-all: wineandroid.drv-debug.aar
-
-wineandroid.drv-debug.aar: build.gradle $(srcdir)/AndroidManifest.xml $(srcdir)/WineDriver.java $(srcdir)/WineProvider.java $(srcdir)/wine.svg $(srcdir)/strings.xml
-	$(srcdir)/gradlew -q assembleDebug
-	mv build/outputs/aar/wineandroid.drv-debug.aar $@

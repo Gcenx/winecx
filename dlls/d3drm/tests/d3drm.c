@@ -103,6 +103,21 @@ static void vector_eq_(unsigned int line, const D3DVECTOR *left, const D3DVECTOR
     expect_vector_(line, left, U1(*right).x, U2(*right).y, U3(*right).z, 0);
 }
 
+static BOOL compare_uint(unsigned int x, unsigned int y, unsigned int max_diff)
+{
+    unsigned int diff = x > y ? x - y : y - x;
+
+    return diff <= max_diff;
+}
+
+static BOOL compare_color(D3DCOLOR c1, D3DCOLOR c2, BYTE max_diff)
+{
+    return compare_uint(c1 & 0xff, c2 & 0xff, max_diff)
+            && compare_uint((c1 >> 8) & 0xff, (c2 >> 8) & 0xff, max_diff)
+            && compare_uint((c1 >> 16) & 0xff, (c2 >> 16) & 0xff, max_diff)
+            && compare_uint((c1 >> 24) & 0xff, (c2 >> 24) & 0xff, max_diff);
+}
+
 static D3DRMMATRIX4D identity = {
     { 1.0f, 0.0f, 0.0f, 0.0f },
     { 0.0f, 1.0f, 0.0f, 0.0f },
@@ -1715,6 +1730,7 @@ static void test_Viewport(void)
     IDirect3DRMFrame3 *frame3, *d3drm_frame3, *tmp_frame3;
     IDirect3DRMFrame *frame, *d3drm_frame, *tmp_frame1;
     float field, left, top, right, bottom, front, back;
+    D3DRMPROJECTIONTYPE projection;
     IDirectDrawClipper *clipper;
     HRESULT hr;
     IDirect3DRM *d3drm1;
@@ -2150,6 +2166,8 @@ static void test_Viewport(void)
     ok(front == -1.0f, "Got unexpected front %.8e\n", front);
     back = IDirect3DRMViewport_GetBack(viewport);
     ok(back == -1.0f, "Got unexpected back %.8e\n", back);
+    projection = IDirect3DRMViewport_GetProjection(viewport);
+    ok(projection == ~0u, "Got unexpected projection type %#x.\n", projection);
 
     hr = IDirect3DRMViewport_SetCamera(viewport, frame);
     ok(hr == D3DRMERR_BADOBJECT, "Got unexpected hr %#x.\n", hr);
@@ -2160,6 +2178,8 @@ static void test_Viewport(void)
     hr = IDirect3DRMViewport_SetFront(viewport, 1.0f);
     ok(hr == D3DRMERR_BADOBJECT, "Got unexpected hr %#x.\n", hr);
     hr = IDirect3DRMViewport_SetBack(viewport, 100.0f);
+    ok(hr == D3DRMERR_BADOBJECT, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DRMViewport_SetProjection(viewport, D3DRMPROJECT_PERSPECTIVE);
     ok(hr == D3DRMERR_BADOBJECT, "Got unexpected hr %#x.\n", hr);
 
     /* Test all failures together */
@@ -2236,6 +2256,8 @@ static void test_Viewport(void)
     ok(front == 1.0f, "Got unexpected front %.8e.\n", front);
     back = IDirect3DRMViewport_GetBack(viewport);
     ok(back == 100.0f, "Got unexpected back %.8e.\n", back);
+    projection = IDirect3DRMViewport_GetProjection(viewport);
+    ok(projection == D3DRMPROJECT_PERSPECTIVE, "Got unexpected projection type %#x.\n", projection);
 
     hr = IDirect3DRMViewport_SetField(viewport, 1.0f);
     ok(hr == D3DRM_OK, "Got unexpected hr %#x.\n", hr);
@@ -2266,6 +2288,10 @@ static void test_Viewport(void)
     ok(hr == D3DRM_OK, "Got unexpected hr %#x.\n", hr);
     back = IDirect3DRMViewport_GetBack(viewport);
     ok(back == 200.0f, "Got unexpected back %.8e.\n", back);
+    hr = IDirect3DRMViewport_SetProjection(viewport, D3DRMPROJECT_ORTHOGRAPHIC);
+    ok(hr == D3DRM_OK, "Got unexpected hr %#x.\n", hr);
+    projection = IDirect3DRMViewport_GetProjection(viewport);
+    ok(projection == D3DRMPROJECT_ORTHOGRAPHIC, "Got unexpected projection type %#x.\n", projection);
 
     hr = IDirect3DRMViewport_Init(viewport, device1, frame, rc.left, rc.top, rc.right, rc.bottom);
     ok(hr == D3DRMERR_BADOBJECT, "Expected hr == D3DRMERR_BADOBJECT, got %#x.\n", hr);
@@ -2333,6 +2359,8 @@ static void test_Viewport(void)
     ok(front == -1.0f, "Got unexpected front %.8e\n", front);
     back = IDirect3DRMViewport2_GetBack(viewport2);
     ok(back == -1.0f, "Got unexpected back %.8e\n", back);
+    projection = IDirect3DRMViewport2_GetProjection(viewport2);
+    ok(projection == ~0u, "Got unexpected projection type %#x.\n", projection);
 
     hr = IDirect3DRMViewport2_SetCamera(viewport2, frame3);
     ok(hr == D3DRMERR_BADOBJECT, "Got unexpected hr %#x.\n", hr);
@@ -2343,6 +2371,8 @@ static void test_Viewport(void)
     hr = IDirect3DRMViewport2_SetFront(viewport2, 1.0f);
     ok(hr == D3DRMERR_BADOBJECT, "Got unexpected hr %#x.\n", hr);
     hr = IDirect3DRMViewport2_SetBack(viewport2, 100.0f);
+    ok(hr == D3DRMERR_BADOBJECT, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DRMViewport2_SetProjection(viewport2, D3DRMPROJECT_PERSPECTIVE);
     ok(hr == D3DRMERR_BADOBJECT, "Got unexpected hr %#x.\n", hr);
 
     hr = IDirect3DRMViewport2_Init(viewport2, NULL, frame3, rc.left, rc.top, rc.right, rc.bottom);
@@ -2412,6 +2442,8 @@ static void test_Viewport(void)
     ok(front == 1.0f, "Got unexpected front %.8e.\n", front);
     back = IDirect3DRMViewport2_GetBack(viewport2);
     ok(back == 100.0f, "Got unexpected back %.8e.\n", back);
+    projection = IDirect3DRMViewport2_GetProjection(viewport2);
+    ok(projection == D3DRMPROJECT_PERSPECTIVE, "Got unexpected projection type %#x.\n", projection);
 
     hr = IDirect3DRMViewport2_SetField(viewport2, 1.0f);
     ok(hr == D3DRM_OK, "Got unexpected hr %#x.\n", hr);
@@ -2442,6 +2474,10 @@ static void test_Viewport(void)
     ok(hr == D3DRM_OK, "Got unexpected hr %#x.\n", hr);
     back = IDirect3DRMViewport2_GetBack(viewport2);
     ok(back == 200.0f, "Got unexpected back %.8e.\n", back);
+    hr = IDirect3DRMViewport2_SetProjection(viewport2, D3DRMPROJECT_ORTHOGRAPHIC);
+    ok(hr == D3DRM_OK, "Got unexpected hr %#x.\n", hr);
+    projection = IDirect3DRMViewport2_GetProjection(viewport2);
+    ok(projection == D3DRMPROJECT_ORTHOGRAPHIC, "Got unexpected projection type %#x.\n", projection);
 
     hr = IDirect3DRMViewport2_Init(viewport2, device3, frame3, rc.left, rc.top, rc.right, rc.bottom);
     ok(hr == D3DRMERR_BADOBJECT, "Expected hr == D3DRMERR_BADOBJECT, got %#x.\n", hr);
@@ -2553,10 +2589,26 @@ static void test_Light(void)
     color = IDirect3DRMLight_GetColor(light);
     ok(color == 0xff180587, "wrong color (%x)\n", color);
 
+    hr = IDirect3DRMLight_SetColor(light, 0x00c0c0c0);
+    ok(hr == D3DRM_OK, "Got unexpected hr %#x.\n", hr);
+    color = IDirect3DRMLight_GetColor(light);
+    ok(color == 0xffc0c0c0, "Got unexpected color 0x%08x.\n", color);
+
     hr = IDirect3DRMLight_SetColorRGB(light, 0.5, 0.5, 0.5);
     ok(hr == D3DRM_OK, "Cannot set color (hr = %x)\n", hr);
     color = IDirect3DRMLight_GetColor(light);
     ok(color == 0xff7f7f7f, "wrong color (%x)\n", color);
+
+    IDirect3DRMLight_Release(light);
+
+    hr = IDirect3DRM_CreateLight(d3drm, D3DRMLIGHT_SPOT, 0x00c0c0c0, &light);
+    ok(hr == D3DRM_OK, "Got unexpected hr %#x.\n", hr);
+
+    type = IDirect3DRMLight_GetType(light);
+    ok(type == D3DRMLIGHT_SPOT, "Got unexpected type %#x.\n", type);
+
+    color = IDirect3DRMLight_GetColor(light);
+    ok(color == 0xffc0c0c0, "Got unexpected color 0x%08x.\n", color);
 
     IDirect3DRMLight_Release(light);
 
@@ -6691,18 +6743,6 @@ static IDirect3DDevice2 *create_device2_without_ds(IDirectDraw2 *ddraw, HWND win
     IDirect3D2_Release(d3d);
     IDirectDrawSurface_Release(surface);
     return device;
-}
-
-static BOOL compare_color(D3DCOLOR c1, D3DCOLOR c2, BYTE max_diff)
-{
-    if ((c1 & 0xff) - (c2 & 0xff) > max_diff) return FALSE;
-    c1 >>= 8; c2 >>= 8;
-    if ((c1 & 0xff) - (c2 & 0xff) > max_diff) return FALSE;
-    c1 >>= 8; c2 >>= 8;
-    if ((c1 & 0xff) - (c2 & 0xff) > max_diff) return FALSE;
-    c1 >>= 8; c2 >>= 8;
-    if ((c1 & 0xff) - (c2 & 0xff) > max_diff) return FALSE;
-    return TRUE;
 }
 
 static void clear_depth_surface(IDirectDrawSurface *surface, DWORD value)

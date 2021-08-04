@@ -227,19 +227,14 @@ static HRESULT WINAPI HTMLFormElement_get_dir(IHTMLFormElement *iface, BSTR *p)
 
 static HRESULT WINAPI HTMLFormElement_put_encoding(IHTMLFormElement *iface, BSTR v)
 {
-    static const WCHAR urlencodedW[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
-        'x','-','w','w','w','-','f','o','r','m','-','u','r','l','e','n','c','o','d','e','d',0};
-    static const WCHAR dataW[] = {'m','u','l','t','i','p','a','r','t','/',
-        'f','o','r','m','-','d','a','t','a',0};
-    static const WCHAR plainW[] = {'t','e','x','t','/','p','l','a','i','n',0};
-
     HTMLFormElement *This = impl_from_IHTMLFormElement(iface);
     nsAString encoding_str;
     nsresult nsres;
 
     TRACE("(%p)->(%s)\n", This, wine_dbgstr_w(v));
 
-    if(lstrcmpiW(v, urlencodedW) && lstrcmpiW(v, dataW) && lstrcmpiW(v, plainW)) {
+    if(lstrcmpiW(v, L"application/x-www-form-urlencoded") && lstrcmpiW(v, L"multipart/form-data")
+            && lstrcmpiW(v, L"text/plain")) {
         WARN("incorrect enctype\n");
         return E_INVALIDARG;
     }
@@ -268,16 +263,13 @@ static HRESULT WINAPI HTMLFormElement_get_encoding(IHTMLFormElement *iface, BSTR
 
 static HRESULT WINAPI HTMLFormElement_put_method(IHTMLFormElement *iface, BSTR v)
 {
-    static const WCHAR postW[] = {'P','O','S','T',0};
-    static const WCHAR getW[] = {'G','E','T',0};
-
     HTMLFormElement *This = impl_from_IHTMLFormElement(iface);
     nsAString method_str;
     nsresult nsres;
 
     TRACE("(%p)->(%s)\n", This, wine_dbgstr_w(v));
 
-    if(lstrcmpiW(v, postW) && lstrcmpiW(v, getW)) {
+    if(lstrcmpiW(v, L"POST") && lstrcmpiW(v, L"GET")) {
         WARN("unrecognized method\n");
         return E_INVALIDARG;
     }
@@ -464,11 +456,9 @@ static HRESULT WINAPI HTMLFormElement_submit(IHTMLFormElement *iface)
     if(NS_SUCCEEDED(nsres)) {
         const PRUnichar *method;
 
-        static const PRUnichar postW[] = {'p','o','s','t',0};
-
         nsAString_GetData(&method_str, &method);
         TRACE("method is %s\n", debugstr_w(method));
-        is_post_submit = !wcsicmp(method, postW);
+        is_post_submit = !wcsicmp(method, L"post");
     }
     nsAString_Finish(&method_str);
 
@@ -669,8 +659,6 @@ static HRESULT HTMLFormElement_get_dispid(HTMLDOMNode *iface,
     nsresult nsres;
     HRESULT hres = DISP_E_UNKNOWNNAME;
 
-    static const PRUnichar nameW[] = {'n','a','m','e',0};
-
     TRACE("(%p)->(%s %x %p)\n", This, wine_dbgstr_w(name), grfdex, pid);
 
     nsres = nsIDOMHTMLFormElement_GetElements(This->nsform, &elements);
@@ -739,7 +727,7 @@ static HRESULT HTMLFormElement_get_dispid(HTMLDOMNode *iface,
         }
 
         /* compare by name attr */
-        nsres = get_elem_attr_value(elem, nameW, &name_str, &str);
+        nsres = get_elem_attr_value(elem, L"name", &name_str, &str);
         nsIDOMElement_Release(elem);
         if(NS_SUCCEEDED(nsres)) {
             if(!wcsicmp(str, name)) {

@@ -231,6 +231,7 @@ HRESULT TRASH_GetDetails(const char *trash_path, const char * HOSTPTR name, WIN3
     int name_length = strlen(name);
     char *path = SHAlloc(trash_path_length+1+name_length+1);
     struct stat stats;
+    char *copy;
     int ret;
 
     if(!once++) FIXME("semi-stub\n");
@@ -248,7 +249,10 @@ HRESULT TRASH_GetDetails(const char *trash_path, const char * HOSTPTR name, WIN3
     data->nFileSizeLow = stats.st_size & 0xffffffff;
     RtlSecondsSince1970ToTime(stats.st_mtime, (LARGE_INTEGER*)&data->ftLastWriteTime);
 
-    if(!MultiByteToWideChar(CP_UNIXCP, 0, name, -1, data->cFileName, MAX_PATH))
+    copy = heap_strdup(name);
+    name_length = MultiByteToWideChar(CP_UNIXCP, 0, copy, -1, data->cFileName, MAX_PATH);
+    heap_free(copy);
+    if(!name_length)
         return S_FALSE;
     return S_OK;
 }
@@ -662,7 +666,7 @@ static HRESULT TRASH_GetDetails(const TRASH_BUCKET *bucket, const char* filename
     if (original_dos_name != NULL)
     {
         lstrcpynW(data->cFileName, original_dos_name, MAX_PATH);
-        SHFree(original_dos_name);
+        heap_free(original_dos_name);
     }
     else
     {

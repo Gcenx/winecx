@@ -2,6 +2,7 @@
  * Unit tests for lsa functions
  *
  * Copyright (c) 2006 Robert Reif
+ * Copyright (c) 2020 Dmitry Timoshkov
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -36,6 +37,9 @@
 #include "ntlsa.h"
 
 DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
+
+static BOOL (WINAPI *pGetSystemPreferredUILanguages)(DWORD, ULONG*, WCHAR*, ULONG*);
+static NTSTATUS (WINAPI *pLsaGetUserName)(PUNICODE_STRING *user, PUNICODE_STRING *domain);
 
 static void test_lsa(void)
 {
@@ -319,74 +323,109 @@ static void test_LsaLookupNames2(void)
     ok(status == STATUS_SUCCESS, "LsaClose() failed, returned 0x%08x\n", status);
 }
 
+static void check_unicode_string_(int line, const LSA_UNICODE_STRING *string, const WCHAR *expect)
+{
+    ok_(__FILE__, line)(string->Length == wcslen(string->Buffer) * sizeof(WCHAR),
+            "expected %u, got %u\n", wcslen(string->Buffer) * sizeof(WCHAR), string->Length);
+    ok_(__FILE__, line)(string->MaximumLength == string->Length + sizeof(WCHAR),
+            "expected %u, got %u\n", string->Length + sizeof(WCHAR), string->MaximumLength);
+    ok_(__FILE__, line)(!wcsicmp(string->Buffer, expect), "expected %s, got %s\n",
+            debugstr_w(expect), debugstr_w(string->Buffer));
+}
+#define check_unicode_string(a, b) check_unicode_string_(__LINE__, a, b)
+
 static void test_LsaLookupSids(void)
 {
+    WCHAR langW[32];
+    char user_buffer[64];
+    LSA_OBJECT_ATTRIBUTES attrs = {sizeof(attrs)};
+    TOKEN_USER *user = (TOKEN_USER *)user_buffer;
+    WCHAR computer_name[64], user_name[64];
     LSA_REFERENCED_DOMAIN_LIST *list;
-    LSA_OBJECT_ATTRIBUTES attrs;
     LSA_TRANSLATED_NAME *names;
     LSA_HANDLE policy;
-    TOKEN_USER *user;
     NTSTATUS status;
     HANDLE token;
-    DWORD size;
+    DWORD num, size;
     BOOL ret;
     PSID sid;
-
-    memset(&attrs, 0, sizeof(attrs));
-    attrs.Length = sizeof(attrs);
 
     status = LsaOpenPolicy(NULL, &attrs, POLICY_LOOKUP_NAMES, &policy);
     ok(status == STATUS_SUCCESS, "got 0x%08x\n", status);
 
     ret = OpenProcessToken(GetCurrentProcess(), MAXIMUM_ALLOWED, &token);
-    ok(ret, "got %d\n", ret);
+    ok(ret, "OpenProcessToken() failed, error %u\n", GetLastError());
 
-    ret = GetTokenInformation(token, TokenUser, NULL, 0, &size);
-    ok(!ret, "got %d\n", ret);
+    ret = GetTokenInformation(token, TokenUser, user, sizeof(user_buffer), &size);
+    ok(ret, "GetTokenInformation() failed, error %u\n", GetLastError());
 
-    user = HeapAlloc(GetProcessHeap(), 0, size);
-    ret = GetTokenInformation(token, TokenUser, user, size, &size);
-    ok(ret, "got %d\n", ret);
+    size = ARRAY_SIZE(computer_name);
+    ret = GetComputerNameW(computer_name, &size);
+    ok(ret, "GetComputerName() failed, error %u\n", GetLastError());
+
+    size = ARRAY_SIZE(user_name);
+    ret = GetUserNameW(user_name, &size);
+    ok(ret, "GetUserName() failed, error %u\n", GetLastError());
 
     status = LsaLookupSids(policy, 1, &user->User.Sid, &list, &names);
     ok(status == STATUS_SUCCESS, "got 0x%08x\n", status);
 
-    ok(list->Entries > 0, "got %d\n", list->Entries);
-    if (list->Entries)
-    {
-       ok((char*)list->Domains - (char*)list > 0, "%p, %p\n", list, list->Domains);
-       ok((char*)list->Domains[0].Sid - (char*)list->Domains > 0, "%p, %p\n", list->Domains, list->Domains[0].Sid);
-       ok(list->Domains[0].Name.MaximumLength > list->Domains[0].Name.Length, "got %d, %d\n", list->Domains[0].Name.MaximumLength,
-           list->Domains[0].Name.Length);
-    }
+    ok(list->Entries == 1, "got %d\n", list->Entries);
+    check_unicode_string(&list->Domains[0].Name, computer_name);
+
+    ok(names[0].Use == SidTypeUser, "got type %u\n", names[0].Use);
+    ok(!names[0].DomainIndex, "got index %u\n", names[0].DomainIndex);
+    check_unicode_string(&names[0].Name, user_name);
 
     LsaFreeMemory(names);
     LsaFreeMemory(list);
-
-    HeapFree(GetProcessHeap(), 0, user);
-
     CloseHandle(token);
 
     ret = ConvertStringSidToSidA("S-1-1-0", &sid);
-    ok(ret == TRUE, "ConvertStringSidToSidA returned false\n");
+    ok(ret, "ConvertStringSidToSidA() failed, error %u\n", GetLastError());
 
     status = LsaLookupSids(policy, 1, &sid, &list, &names);
     ok(status == STATUS_SUCCESS, "got 0x%08x\n", status);
 
-    ok(list->Entries > 0, "got %d\n", list->Entries);
+    ok(list->Entries == 1, "got %d\n", list->Entries);
+    check_unicode_string(&list->Domains[0].Name, L"");
 
-    if (list->Entries)
-    {
-       ok((char*)list->Domains - (char*)list > 0, "%p, %p\n", list, list->Domains);
-       ok((char*)list->Domains[0].Sid - (char*)list->Domains > 0, "%p, %p\n", list->Domains, list->Domains[0].Sid);
-       ok(list->Domains[0].Name.MaximumLength > list->Domains[0].Name.Length, "got %d, %d\n", list->Domains[0].Name.MaximumLength,
-           list->Domains[0].Name.Length);
-       ok(list->Domains[0].Name.Buffer != NULL, "domain[0] name buffer is null\n");
-    }
+    ok(names[0].Use == SidTypeWellKnownGroup, "got type %u\n", names[0].Use);
+    ok(!names[0].DomainIndex, "got index %u\n", names[0].DomainIndex);
+
+    /* The group name gets translated... but not in all locales */
+    size = ARRAY_SIZE(langW);
+    if (!pGetSystemPreferredUILanguages ||
+        !pGetSystemPreferredUILanguages(MUI_LANGUAGE_ID, &num, langW, &size))
+        langW[0] = 0;
+    if (wcscmp(langW, L"0409") == 0 || wcscmp(langW, L"0411") == 0)
+        /* English and Japanese */
+        check_unicode_string(&names[0].Name, L"Everyone");
+    else if (wcscmp(langW, L"0407") == 0) /* German */
+        check_unicode_string(&names[0].Name, L"Jeder");
+    else if (wcscmp(langW, L"040C") == 0) /* French */
+        check_unicode_string(&names[0].Name, L"Tout le monde");
+    else
+        trace("<Everyone-group>.Name=%s\n", debugstr_w(names[0].Name.Buffer));
 
     LsaFreeMemory(names);
     LsaFreeMemory(list);
+    FreeSid(sid);
 
+    ret = ConvertStringSidToSidA("S-1-1234-5678-1234-5678", &sid);
+    ok(ret, "ConvertStringSidToSidA() failed, error %u\n", GetLastError());
+
+    status = LsaLookupSids(policy, 1, &sid, &list, &names);
+    ok(status == STATUS_NONE_MAPPED, "got 0x%08x\n", status);
+
+    ok(!list->Entries, "got %d\n", list->Entries);
+
+    ok(names[0].Use == SidTypeUnknown, "got type %u\n", names[0].Use);
+    ok(names[0].DomainIndex == -1, "got index %u\n", names[0].DomainIndex);
+    check_unicode_string(&names[0].Name, L"S-1-1234-5678-1234-5678");
+
+    LsaFreeMemory(names);
+    LsaFreeMemory(list);
     FreeSid(sid);
 
     status = LsaClose(policy);
@@ -426,10 +465,59 @@ static void test_LsaLookupPrivilegeName(void)
     LsaFreeMemory(name);
 }
 
+static void test_LsaGetUserName(void)
+{
+    NTSTATUS status;
+    BOOL ret;
+    UNICODE_STRING *lsa_user, *lsa_domain;
+    WCHAR user[256], computer[256];
+    DWORD size;
+
+    if (!pLsaGetUserName)
+    {
+        skip("LsaGetUserName is not available on this platform\n");
+        return;
+    }
+
+    size = ARRAY_SIZE(user);
+    ret = GetUserNameW(user, &size);
+    ok(ret, "GetUserName error %u\n", GetLastError());
+
+    size = ARRAY_SIZE(computer);
+    ret = GetComputerNameW(computer, &size);
+    ok(ret, "GetComputerName error %u\n", GetLastError());
+
+    if (0) /* crashes under Windows */
+        status = pLsaGetUserName(NULL, NULL);
+
+    if (0) /* crashes under Windows */
+        status = pLsaGetUserName(NULL, &lsa_domain);
+
+    status = pLsaGetUserName(&lsa_user, NULL);
+    ok(!status, "got %#x\n", status);
+    check_unicode_string(lsa_user, user);
+    LsaFreeMemory(lsa_user);
+
+    status = pLsaGetUserName(&lsa_user, &lsa_domain);
+    ok(!status, "got %#x\n", status);
+    ok(!lstrcmpW(user, lsa_user->Buffer), "%s != %s\n", wine_dbgstr_w(user), wine_dbgstr_wn(lsa_user->Buffer, lsa_user->Length/sizeof(WCHAR)));
+    check_unicode_string(lsa_user, user);
+    check_unicode_string(lsa_domain, computer);
+    LsaFreeMemory(lsa_user);
+    LsaFreeMemory(lsa_domain);
+}
+
 START_TEST(lsa)
 {
+    HMODULE hkernel32 = GetModuleHandleA("kernel32.dll");
+    HMODULE hadvapi32 = GetModuleHandleA("advapi32.dll");
+
+    pGetSystemPreferredUILanguages = (void*)GetProcAddress(hkernel32, "GetSystemPreferredUILanguages");
+    pLsaGetUserName = (void *)GetProcAddress(hadvapi32, "LsaGetUserName");
+
     test_lsa();
     test_LsaLookupNames2();
     test_LsaLookupSids();
     test_LsaLookupPrivilegeName();
+    test_LsaGetUserName();
 }

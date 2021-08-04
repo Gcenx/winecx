@@ -37,7 +37,8 @@ enum user_object
 {
     USER_WINDOW = 1,
     USER_HOOK,
-    USER_CLIENT  /* arbitrary client handle */
+    USER_CLIENT,  /* arbitrary client handle */
+    USER_MONITOR
 };
 
 #define DESKTOP_ATOM  ((atom_t)32769)
@@ -78,6 +79,16 @@ struct desktop
     unsigned int         users;            /* processes and threads using this desktop */
     struct global_cursor cursor;           /* global cursor information */
     unsigned char        keystate[256];    /* asynchronous key state */
+};
+
+struct monitor
+{
+    user_handle_t        handle;           /* monitor handle */
+    struct list          entry;            /* entry in global monitor list */
+    rectangle_t          monitor_rect;     /* monitor rectangle */
+    rectangle_t          work_rect;        /* monitor work area rectangle */
+    WCHAR                *adapter_name;    /* adapter name */
+    data_size_t          adapter_name_len; /* adapter name length */
 };
 
 /* user handles functions */

@@ -111,6 +111,85 @@ interface IAudioClient : IUnknown
     );
 }
 
+typedef enum _AUDCLNT_STREAMOPTIONS
+{
+    AUDCLNT_STREAMOPTIONS_NONE = 0x0,
+    AUDCLNT_STREAMOPTIONS_RAW = 0x1,
+    AUDCLNT_STREAMOPTIONS_MATCH_FORMAT = 0x2,
+    AUDCLNT_STREAMOPTIONS_AMBISONICS = 0x4
+} AUDCLNT_STREAMOPTIONS;
+cpp_quote("DEFINE_ENUM_FLAG_OPERATORS(AUDCLNT_STREAMOPTIONS);")
+
+typedef struct _AudioClientProperties
+{
+    UINT32 cbSize;
+    BOOL bIsOffload;
+    AUDIO_STREAM_CATEGORY eCategory;
+    AUDCLNT_STREAMOPTIONS Options;
+} AudioClientProperties;
+
+typedef struct _Win8AudioClientProperties
+{
+    UINT32 cbSize;
+    BOOL bIsOffload;
+    AUDIO_STREAM_CATEGORY eCategory;
+    /* Options field added in Win 8.1 */
+} Win8AudioClientProperties;
+
+[
+    local,
+    pointer_default(unique),
+    uuid(726778cd-f60a-4eda-82de-e47610cd78aa),
+    object,
+]
+interface IAudioClient2 : IAudioClient
+{
+    HRESULT IsOffloadCapable(
+        AUDIO_STREAM_CATEGORY category,
+        [out] BOOL *offload_capable
+    );
+
+    HRESULT SetClientProperties(
+        [in] const AudioClientProperties *prop
+    );
+
+    HRESULT GetBufferSizeLimits(
+        [in] const WAVEFORMATEX *format,
+        BOOL event_driven,
+        [out] REFERENCE_TIME *min_duration,
+        [out] REFERENCE_TIME *max_duration
+    );
+}
+
+[
+    local,
+    pointer_default(unique),
+    uuid(7ed4ee07-8e67-4cd4-8c1a-2b7a5987ad42),
+    object,
+]
+interface IAudioClient3 : IAudioClient2
+{
+    HRESULT GetSharedModeEnginePeriod(
+        [in] const WAVEFORMATEX *format,
+        [out] UINT32 *default_period_frames,
+        [out] UINT32 *unit_period_frames,
+        [out] UINT32 *min_period_frames,
+        [out] UINT32 *max_period_frames
+    );
+
+    HRESULT GetCurrentSharedModeEnginePeriod(
+        [out] WAVEFORMATEX **cur_format,
+        [out] UINT32 *cur_period_frames
+    );
+
+    HRESULT InitializeSharedAudioStream(
+        [in] DWORD flags,
+        [in] UINT32 period_frames,
+        [in] const WAVEFORMATEX *format,
+        [in] const GUID *session_guid
+    );
+}
+
 [
     local,
     pointer_default(unique),
@@ -191,7 +270,7 @@ interface IAudioClock2 : IUnknown
 [
     local,
     pointer_default(unique),
-    uuid("f6e4c0a0-46d9-4fb9-be21-57a3ef2b626c"),
+    uuid("f6e4c0a0-46d9-4fb8-be21-57a3ef2b626c"),
     object,
 ]
 interface IAudioClockAdjustment : IUnknown
@@ -251,6 +330,60 @@ interface IAudioStreamVolume : IUnknown
     HRESULT GetAllVolumes(
         [in] UINT32 dwCount,
         [size_is(dwCount),out] float *pfVolumes
+    );
+}
+
+typedef enum AMBISONICS_TYPE
+{
+    AMBISONICS_TYPE_FULL3D = 0x0,
+} AMBISONICS_TYPE;
+
+typedef enum AMBISONICS_CHANNEL_ORDERING
+{
+    AMBISONICS_CHANNEL_ORDERING_ACN = 0x0,
+} AMBISONICS_CHANNEL_ORDERING;
+
+typedef enum AMBISONICS_NORMALIZATION
+{
+    AMBISONICS_NORMALIZATION_SN3D = 0x0,
+    AMBISONICS_NORMALIZATION_N3D = 0x1,
+} AMBISONICS_NORMALIZATION;
+
+typedef struct AMBISONICS_PARAMS
+{
+    UINT32 u32Size;
+    UINT32 u32Version;
+    AMBISONICS_TYPE u32Type;
+    AMBISONICS_CHANNEL_ORDERING u32ChannelOrdering;
+    AMBISONICS_NORMALIZATION u32Normalization;
+    UINT32 u32Order;
+    UINT32 u32NumChannels;
+    UINT32 *pu32ChannelMap;
+} AMBISONICS_PARAMS;
+
+[
+    local,
+    pointer_default(unique),
+    uuid(28724c91-df35-4856-9f76-d6a26413f3df),
+    object,
+]
+interface IAudioAmbisonicsControl : IUnknown
+{
+    HRESULT SetData(
+        [in] const AMBISONICS_PARAMS *param,
+        [in] UINT32 size
+    );
+    HRESULT SetHeadTracking(
+        [in] BOOL enable
+    );
+    HRESULT GetHeadTracking(
+        [out] BOOL *enable
+    );
+    HRESULT SetRotation(
+        [in] float x,
+        [in] float y,
+        [in] float z,
+        [in] float w
     );
 }
 
@@ -320,6 +453,11 @@ cpp_quote("#define AUDCLNT_E_OUT_OF_OFFLOAD_RESOURCES AUDCLNT_ERR(0x023)")
 cpp_quote("#define AUDCLNT_E_OFFLOAD_MODE_ONLY AUDCLNT_ERR(0x024)")
 cpp_quote("#define AUDCLNT_E_NONOFFLOAD_MODE_ONLY AUDCLNT_ERR(0x025)")
 cpp_quote("#define AUDCLNT_E_RESOURCES_INVALIDATED AUDCLNT_ERR(0x026)")
+cpp_quote("#define AUDCLNT_E_RAW_MODE_UNSUPPORTED AUDCLNT_ERR(0x027)")
+cpp_quote("#define AUDCLNT_E_ENGINE_PERIODICITY_LOCKED AUDCLNT_ERR(0x028)")
+cpp_quote("#define AUDCLNT_E_ENGINE_FORMAT_LOCKED AUDCLNT_ERR(0x029)")
+cpp_quote("#define AUDCLNT_E_HEADTRACKING_ENABLED AUDCLNT_ERR(0x030)")
+cpp_quote("#define AUDCLNT_E_HEADTRACKING_UNSUPPORTED AUDCLNT_ERR(0x040)")
 
 cpp_quote("#define AUDCLNT_S_BUFFER_EMPTY AUDCLNT_SUCCESS(0x1)")
 cpp_quote("#define AUDCLNT_S_THREAD_ALREADY_REGISTERED AUDCLNT_SUCCESS(0x2)")

@@ -47,8 +47,6 @@ static int      nApplicationPageHeight;
 static HANDLE   hApplicationPageEvent = NULL;   /* When this event becomes signaled then we refresh the app list */
 static BOOL     bSortAscending = TRUE;
 
-static const WCHAR    wszUser32[] = {'U','S','E','R','3','2','.','D','L','L',0};
-
 static void ApplicationPageUpdate(void)
 {
     /* Enable or disable the "End Task" & "Switch To" buttons */
@@ -238,10 +236,6 @@ static BOOL CALLBACK EnumWindowsProc(HWND hWnd, LPARAM lParam)
     HICON hIcon;
     WCHAR wszText[256];
     BOOL  bLargeIcon = TaskManagerSettings.View_LargeIcons;
-    BOOL  bHung = FALSE;
-    typedef int (__stdcall *IsHungAppWindowProc)(HWND);
-    IsHungAppWindowProc IsHungAppWindow;
-
 
     /* Skip our window */
     if (hWnd == hMainWnd)
@@ -270,14 +264,7 @@ static BOOL CALLBACK EnumWindowsProc(HWND hWnd, LPARAM lParam)
     if (!hIcon)
         hIcon = LoadIconW(hInst, bLargeIcon ? MAKEINTRESOURCEW(IDI_WINDOW) : MAKEINTRESOURCEW(IDI_WINDOWSM));
 
-    bHung = FALSE;
-
-    IsHungAppWindow = (IsHungAppWindowProc)(FARPROC)GetProcAddress(GetModuleHandleW(wszUser32), "IsHungAppWindow");
-
-    if (IsHungAppWindow)
-        bHung = IsHungAppWindow(hWnd);
-
-    AddOrUpdateHwnd(hWnd, wszText, hIcon, bHung);
+    AddOrUpdateHwnd(hWnd, wszText, hIcon, IsHungAppWindow(hWnd));
 
     return TRUE;
 }
@@ -754,19 +741,7 @@ void ApplicationPage_OnSwitchTo(void)
         }
     }
     if (pAPLI) {
-        typedef void (WINAPI *PROCSWITCHTOTHISWINDOW) (HWND, BOOL);
-        PROCSWITCHTOTHISWINDOW SwitchToThisWindow;
-
-        HMODULE hUser32 = GetModuleHandleW(wszUser32);
-        SwitchToThisWindow = (PROCSWITCHTOTHISWINDOW)GetProcAddress(hUser32, "SwitchToThisWindow");
-        if (SwitchToThisWindow) {
-            SwitchToThisWindow(pAPLI->hWnd, TRUE);
-        } else {
-            if (IsIconic(pAPLI->hWnd))
-                ShowWindow(pAPLI->hWnd, SW_RESTORE);
-            BringWindowToTop(pAPLI->hWnd);
-            SetForegroundWindow(pAPLI->hWnd);
-        }
+        SwitchToThisWindow(pAPLI->hWnd, TRUE);
         if (TaskManagerSettings.MinimizeOnUse)
             ShowWindow(hMainWnd, SW_MINIMIZE);
     }

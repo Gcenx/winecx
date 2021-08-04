@@ -21,11 +21,8 @@
 
 #define COBJMACROS
 #include "dshow.h"
+#include "wine/strmbase.h"
 #include "wine/test.h"
-
-static const WCHAR avifile[] = {'t','e','s','t','.','a','v','i',0};
-
-static const WCHAR source_id[] = {'O','u','t','p','u','t',0};
 
 static IBaseFilter *create_file_source(void)
 {
@@ -34,6 +31,12 @@ static IBaseFilter *create_file_source(void)
         &IID_IBaseFilter, (void **)&filter);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     return filter;
+}
+
+static BOOL compare_media_types(const AM_MEDIA_TYPE *a, const AM_MEDIA_TYPE *b)
+{
+    return !memcmp(a, b, offsetof(AM_MEDIA_TYPE, pbFormat))
+            && !memcmp(a->pbFormat, b->pbFormat, a->cbFormat);
 }
 
 static WCHAR *load_resource(const WCHAR *name)
@@ -45,7 +48,7 @@ static WCHAR *load_resource(const WCHAR *name)
     void *ptr;
 
     GetTempPathW(ARRAY_SIZE(pathW), pathW);
-    lstrcatW(pathW, name);
+    wcscat(pathW, name);
 
     file = CreateFileW(pathW, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
     ok(file != INVALID_HANDLE_VALUE, "Failed to create file %s, error %u.\n",
@@ -97,7 +100,7 @@ static void check_interface_(unsigned int line, void *iface_ptr, REFIID iid, BOO
 
 static void test_interfaces(void)
 {
-    const WCHAR *filename = load_resource(avifile);
+    const WCHAR *filename = load_resource(L"test.avi");
     IBaseFilter *filter = create_file_source();
     IPin *pin;
 
@@ -118,7 +121,7 @@ static void test_interfaces(void)
     check_interface(filter, &IID_IVideoWindow, FALSE);
 
     load_file(filter, filename);
-    IBaseFilter_FindPin(filter, source_id, &pin);
+    IBaseFilter_FindPin(filter, L"Output", &pin);
 
     check_interface(pin, &IID_IAsyncReader, TRUE);
     check_interface(pin, &IID_IPin, TRUE);
@@ -229,7 +232,6 @@ static void test_aggregation(void)
 
 static void test_file_source_filter(void)
 {
-    static const WCHAR prefix[] = {'w','i','n',0};
     static const struct
     {
         const char *label;
@@ -297,7 +299,7 @@ static void test_file_source_filter(void)
     int i;
 
     GetTempPathW(MAX_PATH, temp);
-    GetTempFileNameW(temp, prefix, 0, path);
+    GetTempFileNameW(temp, L"win", 0, path);
 
     for (i = 0; i < ARRAY_SIZE(tests); i++)
     {
@@ -335,7 +337,7 @@ static void test_file_source_filter(void)
         memset(&file_mt, 0x11, sizeof(file_mt));
         hr = IFileSourceFilter_GetCurFile(filesource, &olepath, &file_mt);
         ok(hr == S_OK, "Got hr %#x.\n", hr);
-        ok(!lstrcmpW(olepath, path), "Expected path %s, got %s.\n",
+        ok(!wcscmp(olepath, path), "Expected path %s, got %s.\n",
                 wine_dbgstr_w(path), wine_dbgstr_w(olepath));
         ok(IsEqualGUID(&file_mt.majortype, &MEDIATYPE_Stream), "Got major type %s.\n",
                 wine_dbgstr_guid(&file_mt.majortype));
@@ -354,7 +356,7 @@ static void test_file_source_filter(void)
         ok(!file_mt.pbFormat, "Got format %p.\n", file_mt.pbFormat);
         CoTaskMemFree(olepath);
 
-        hr = IBaseFilter_FindPin(filter, source_id, &pin);
+        hr = IBaseFilter_FindPin(filter, L"Output", &pin);
         ok(hr == S_OK, "Got hr %#x.\n", hr);
 
         hr = IPin_EnumMediaTypes(pin, &enum_mt);
@@ -385,6 +387,7 @@ static void test_file_source_filter(void)
         mt.bTemporalCompression = TRUE;
         mt.lSampleSize = 123;
         mt.formattype = FORMAT_VideoInfo;
+        mt.subtype = MEDIASUBTYPE_RGB32;
         hr = IPin_QueryAccept(pin, &mt);
         ok(hr == S_OK, "Got hr %#x.\n", hr);
 
@@ -423,7 +426,7 @@ static void test_file_source_filter(void)
     mt.pUnk = NULL;
     mt.cbFormat = 0;
     mt.pbFormat = NULL;
-    filename = load_resource(avifile);
+    filename = load_resource(L"test.avi");
     hr = IFileSourceFilter_Load(filesource, filename, &mt);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
@@ -432,7 +435,7 @@ static void test_file_source_filter(void)
     ok(!memcmp(&file_mt, &mt, sizeof(mt)), "Media types did not match.\n");
     CoTaskMemFree(olepath);
 
-    hr = IBaseFilter_FindPin(filter, source_id, &pin);
+    hr = IBaseFilter_FindPin(filter, L"Output", &pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IPin_EnumMediaTypes(pin, &enum_mt);
@@ -496,7 +499,7 @@ static void test_file_source_filter(void)
 
 static void test_enum_pins(void)
 {
-    const WCHAR *filename = load_resource(avifile);
+    const WCHAR *filename = load_resource(L"test.avi");
     IBaseFilter *filter = create_file_source();
     IEnumPins *enum1, *enum2;
     IPin *pins[2];
@@ -531,7 +534,6 @@ static void test_enum_pins(void)
     load_file(filter, filename);
 
     hr = IEnumPins_Next(enum1, 1, pins, NULL);
-todo_wine
     ok(hr == S_FALSE, "Got hr %#x.\n", hr);
 
     hr = IEnumPins_Reset(enum1);
@@ -607,7 +609,7 @@ todo_wine
 
 static void test_find_pin(void)
 {
-    const WCHAR *filename = load_resource(avifile);
+    const WCHAR *filename = load_resource(L"test.avi");
     IBaseFilter *filter = create_file_source();
     IEnumPins *enumpins;
     IPin *pin, *pin2;
@@ -615,12 +617,12 @@ static void test_find_pin(void)
     ULONG ref;
     BOOL ret;
 
-    hr = IBaseFilter_FindPin(filter, source_id, &pin);
+    hr = IBaseFilter_FindPin(filter, L"Output", &pin);
     ok(hr == VFW_E_NOT_FOUND, "Got hr %#x.\n", hr);
 
     load_file(filter, filename);
 
-    hr = IBaseFilter_FindPin(filter, source_id, &pin);
+    hr = IBaseFilter_FindPin(filter, L"Output", &pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     ref = get_refcount(filter);
     ok(ref == 2, "Got unexpected refcount %d.\n", ref);
@@ -645,7 +647,7 @@ static void test_find_pin(void)
 
 static void test_pin_info(void)
 {
-    const WCHAR *filename = load_resource(avifile);
+    const WCHAR *filename = load_resource(L"test.avi");
     IBaseFilter *filter = create_file_source();
     PIN_DIRECTION dir;
     PIN_INFO info;
@@ -657,7 +659,7 @@ static void test_pin_info(void)
 
     load_file(filter, filename);
 
-    hr = IBaseFilter_FindPin(filter, source_id, &pin);
+    hr = IBaseFilter_FindPin(filter, L"Output", &pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     ref = get_refcount(filter);
     ok(ref == 2, "Got unexpected refcount %d.\n", ref);
@@ -668,7 +670,7 @@ static void test_pin_info(void)
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     ok(info.pFilter == filter, "Expected filter %p, got %p.\n", filter, info.pFilter);
     ok(info.dir == PINDIR_OUTPUT, "Got direction %d.\n", info.dir);
-    ok(!lstrcmpW(info.achName, source_id), "Got name %s.\n", wine_dbgstr_w(info.achName));
+    ok(!wcscmp(info.achName, L"Output"), "Got name %s.\n", wine_dbgstr_w(info.achName));
     ref = get_refcount(filter);
     ok(ref == 3, "Got unexpected refcount %d.\n", ref);
     ref = get_refcount(pin);
@@ -681,7 +683,7 @@ static void test_pin_info(void)
 
     hr = IPin_QueryId(pin, &id);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    ok(!lstrcmpW(id, source_id), "Got id %s.\n", wine_dbgstr_w(id));
+    ok(!wcscmp(id, L"Output"), "Got id %s.\n", wine_dbgstr_w(id));
     CoTaskMemFree(id);
 
     IPin_Release(pin);
@@ -922,12 +924,23 @@ static void test_request(IAsyncReader *reader, IMemAllocator *allocator)
     IMediaSample_Release(sample2);
 }
 
+static DWORD CALLBACK wait_thread(void *arg)
+{
+    IAsyncReader *reader = arg;
+    IMediaSample *sample;
+    DWORD_PTR cookie;
+    HRESULT hr = IAsyncReader_WaitForNext(reader, 2000, &sample, &cookie);
+    ok(hr == VFW_E_WRONG_STATE, "Got hr %#x.\n", hr);
+    return 0;
+}
+
 static void test_flush(IAsyncReader *reader, IMemAllocator *allocator)
 {
     REFERENCE_TIME start_time, end_time;
     IMediaSample *sample, *ret_sample;
     BYTE buffer[20], *data;
     DWORD_PTR cookie;
+    HANDLE thread;
     HRESULT hr;
     int i;
 
@@ -979,12 +992,23 @@ static void test_flush(IAsyncReader *reader, IMemAllocator *allocator)
     for (i = 0; i < 512; i++)
         ok(data[i] == i % 111, "Got wrong byte %02x at %u.\n", data[i], i);
 
+    thread = CreateThread(NULL, 0, wait_thread, reader, 0, NULL);
+    ok(WaitForSingleObject(thread, 100) == WAIT_TIMEOUT, "Expected timeout.\n");
+
+    hr = IAsyncReader_BeginFlush(reader);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(!WaitForSingleObject(thread, 1000), "Wait timed out.\n");
+    CloseHandle(thread);
+
+    hr = IAsyncReader_EndFlush(reader);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
     IMediaSample_Release(sample);
 }
 
 static void test_async_reader(void)
 {
-    ALLOCATOR_PROPERTIES req_props = {2, 1024, 512, 0}, ret_props;
+    ALLOCATOR_PROPERTIES req_props = {100, 1024, 512, 0}, ret_props;
     IBaseFilter *filter = create_file_source();
     IFileSourceFilter *filesource;
     LONGLONG length, available;
@@ -1001,7 +1025,7 @@ static void test_async_reader(void)
     int i;
 
     GetTempPathW(ARRAY_SIZE(filename), filename);
-    lstrcatW(filename, avifile);
+    wcscat(filename, L"test.avi");
     file = CreateFileW(filename, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
     ok(file != INVALID_HANDLE_VALUE, "Failed to create file, error %u.\n", GetLastError());
     for (i = 0; i < 600; i++)
@@ -1013,7 +1037,7 @@ static void test_async_reader(void)
 
     IBaseFilter_QueryInterface(filter, &IID_IFileSourceFilter, (void **)&filesource);
     IFileSourceFilter_Load(filesource, filename, NULL);
-    IBaseFilter_FindPin(filter, source_id, &pin);
+    IBaseFilter_FindPin(filter, L"Output", &pin);
 
     hr = IPin_QueryInterface(pin, &IID_IAsyncReader, (void **)&reader);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -1054,7 +1078,7 @@ static void test_async_reader(void)
     ret_props = req_props;
     hr = IAsyncReader_RequestAllocator(reader, NULL, &ret_props, &allocator);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    ok(ret_props.cBuffers == 2, "Got %d buffers.\n", ret_props.cBuffers);
+    ok(ret_props.cBuffers == 100, "Got %d buffers.\n", ret_props.cBuffers);
     ok(ret_props.cbBuffer == 1024, "Got size %d.\n", ret_props.cbBuffer);
     ok(ret_props.cbAlign == 512, "Got alignment %d.\n", ret_props.cbAlign);
     ok(ret_props.cbPrefix == 0, "Got prefix %d.\n", ret_props.cbPrefix);
@@ -1077,7 +1101,7 @@ static void test_async_reader(void)
 
 static void test_enum_media_types(void)
 {
-    const WCHAR *filename = load_resource(avifile);
+    const WCHAR *filename = load_resource(L"test.avi");
     IBaseFilter *filter = create_file_source();
     IEnumMediaTypes *enum1, *enum2;
     AM_MEDIA_TYPE *mts[3];
@@ -1088,7 +1112,7 @@ static void test_enum_media_types(void)
 
     load_file(filter, filename);
 
-    IBaseFilter_FindPin(filter, source_id, &pin);
+    IBaseFilter_FindPin(filter, L"Output", &pin);
 
     hr = IPin_EnumMediaTypes(pin, &enum1);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -1181,6 +1205,277 @@ static void test_enum_media_types(void)
     ok(ret, "Failed to delete file, error %u.\n", GetLastError());
 }
 
+struct testsink
+{
+    struct strmbase_filter filter;
+    struct strmbase_sink pin;
+    IAsyncReader *reader;
+    BOOL reject_avi;
+    const AM_MEDIA_TYPE *mt;
+};
+
+static inline struct testsink *impl_sink_from_strmbase_filter(struct strmbase_filter *iface)
+{
+    return CONTAINING_RECORD(iface, struct testsink, filter);
+}
+
+static struct strmbase_pin *testsink_get_pin(struct strmbase_filter *iface, unsigned int index)
+{
+    struct testsink *filter = impl_sink_from_strmbase_filter(iface);
+    if (!index)
+        return &filter->pin.pin;
+    return NULL;
+}
+
+static void testsink_destroy(struct strmbase_filter *iface)
+{
+    struct testsink *filter = impl_sink_from_strmbase_filter(iface);
+    strmbase_sink_cleanup(&filter->pin);
+    strmbase_filter_cleanup(&filter->filter);
+}
+
+static const struct strmbase_filter_ops testsink_ops =
+{
+    .filter_get_pin = testsink_get_pin,
+    .filter_destroy = testsink_destroy,
+};
+
+static HRESULT testsink_get_media_type(struct strmbase_pin *iface, unsigned int index, AM_MEDIA_TYPE *mt)
+{
+    struct testsink *filter = impl_sink_from_strmbase_filter(iface->filter);
+    if (!index && filter->mt)
+    {
+        CopyMediaType(mt, filter->mt);
+        return S_OK;
+    }
+    return VFW_S_NO_MORE_ITEMS;
+}
+
+static HRESULT testsink_connect(struct strmbase_sink *iface, IPin *peer, const AM_MEDIA_TYPE *mt)
+{
+    struct testsink *filter = impl_sink_from_strmbase_filter(iface->pin.filter);
+    if (filter->reject_avi && IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_Avi))
+        return VFW_E_TYPE_NOT_ACCEPTED;
+    IPin_QueryInterface(peer, &IID_IAsyncReader, (void **)&filter->reader);
+    return S_OK;
+}
+
+static void testsink_disconnect(struct strmbase_sink *iface)
+{
+    struct testsink *filter = impl_sink_from_strmbase_filter(iface->pin.filter);
+    IAsyncReader_Release(filter->reader);
+    filter->reader = NULL;
+}
+
+static const struct strmbase_sink_ops testsink_pin_ops =
+{
+    .base.pin_get_media_type = testsink_get_media_type,
+    .sink_connect = testsink_connect,
+    .sink_disconnect = testsink_disconnect,
+};
+
+static void testsink_init(struct testsink *filter)
+{
+    static const GUID clsid = {0xabacab};
+    memset(filter, 0, sizeof(*filter));
+    strmbase_filter_init(&filter->filter, NULL, &clsid, &testsink_ops);
+    strmbase_sink_init(&filter->pin, &filter->filter, L"", &testsink_pin_ops, NULL);
+}
+
+static void test_connect_pin(void)
+{
+    AM_MEDIA_TYPE req_mt =
+    {
+        .majortype = MEDIATYPE_Stream,
+        .subtype = MEDIASUBTYPE_Avi,
+        .formattype = FORMAT_None,
+        .lSampleSize = 888,
+    };
+    const WCHAR *filename = load_resource(L"test.avi");
+    IBaseFilter *filter = create_file_source();
+    AM_MEDIA_TYPE mt, *source_mt;
+    struct testsink testsink;
+    IEnumMediaTypes *enummt;
+    IMediaControl *control;
+    IFilterGraph2 *graph;
+    IPin *source, *peer;
+    BYTE my_format = 1;
+    HRESULT hr;
+    ULONG ref;
+    BOOL ret;
+
+    testsink_init(&testsink);
+    CoCreateInstance(&CLSID_FilterGraph, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IFilterGraph2, (void **)&graph);
+    IFilterGraph2_AddFilter(graph, &testsink.filter.IBaseFilter_iface, L"sink");
+    IFilterGraph2_AddFilter(graph, filter, L"file source");
+    IFilterGraph2_QueryInterface(graph, &IID_IMediaControl, (void **)&control);
+    load_file(filter, filename);
+    IBaseFilter_FindPin(filter, L"Output", &source);
+
+    IPin_EnumMediaTypes(source, &enummt);
+    IEnumMediaTypes_Next(enummt, 1, &source_mt, NULL);
+    IEnumMediaTypes_Release(enummt);
+
+    peer = (IPin *)0xdeadbeef;
+    hr = IPin_ConnectedTo(source, &peer);
+    ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#x.\n", hr);
+    ok(!peer, "Got peer %p.\n", peer);
+
+    hr = IPin_ConnectionMediaType(source, &mt);
+    ok(hr == VFW_E_NOT_CONNECTED, "Got hr %#x.\n", hr);
+
+    /* Test exact connection. */
+
+    hr = IMediaControl_Pause(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, &req_mt);
+    ok(hr == VFW_E_NOT_STOPPED, "Got hr %#x.\n", hr);
+    hr = IMediaControl_Stop(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, &req_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IPin_ConnectedTo(source, &peer);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(peer == &testsink.pin.pin.IPin_iface, "Got peer %p.\n", peer);
+    IPin_Release(peer);
+
+    hr = IPin_ConnectionMediaType(source, &mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(compare_media_types(&mt, &req_mt), "Media types didn't match.\n");
+    ok(compare_media_types(&testsink.pin.pin.mt, &req_mt), "Media types didn't match.\n");
+
+    hr = IMediaControl_Pause(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IFilterGraph2_Disconnect(graph, source);
+    ok(hr == VFW_E_NOT_STOPPED, "Got hr %#x.\n", hr);
+    hr = IMediaControl_Stop(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IFilterGraph2_Disconnect(graph, source);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IFilterGraph2_Disconnect(graph, source);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    ok(testsink.pin.pin.peer == source, "Got peer %p.\n", testsink.pin.pin.peer);
+    IFilterGraph2_Disconnect(graph, &testsink.pin.pin.IPin_iface);
+
+    req_mt.pbFormat = &my_format;
+    req_mt.cbFormat = sizeof(my_format);
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, &req_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(compare_media_types(&testsink.pin.pin.mt, &req_mt), "Media types didn't match.\n");
+    IFilterGraph2_Disconnect(graph, source);
+    IFilterGraph2_Disconnect(graph, &testsink.pin.pin.IPin_iface);
+    req_mt.pbFormat = NULL;
+    req_mt.cbFormat = 0;
+
+    req_mt.majortype = MEDIATYPE_Video;
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, &req_mt);
+    ok(hr == VFW_E_TYPE_NOT_ACCEPTED, "Got hr %#x.\n", hr);
+    req_mt.majortype = MEDIATYPE_Stream;
+
+    req_mt.subtype = MEDIASUBTYPE_RGB8;
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, &req_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(compare_media_types(&testsink.pin.pin.mt, &req_mt), "Media types didn't match.\n");
+    IFilterGraph2_Disconnect(graph, source);
+    IFilterGraph2_Disconnect(graph, &testsink.pin.pin.IPin_iface);
+    req_mt.subtype = GUID_NULL;
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, &req_mt);
+    ok(hr == VFW_E_TYPE_NOT_ACCEPTED, "Got hr %#x.\n", hr);
+    req_mt.subtype = MEDIASUBTYPE_Avi;
+
+    /* Test connection with wildcards. */
+
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(compare_media_types(&testsink.pin.pin.mt, source_mt), "Media types didn't match.\n");
+    IFilterGraph2_Disconnect(graph, source);
+    IFilterGraph2_Disconnect(graph, &testsink.pin.pin.IPin_iface);
+
+    req_mt.formattype = GUID_NULL;
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, &req_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(compare_media_types(&testsink.pin.pin.mt, source_mt), "Media types didn't match.\n");
+    IFilterGraph2_Disconnect(graph, source);
+    IFilterGraph2_Disconnect(graph, &testsink.pin.pin.IPin_iface);
+
+    req_mt.formattype = FORMAT_None;
+    req_mt.majortype = GUID_NULL;
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, &req_mt);
+    ok(hr == VFW_E_NO_ACCEPTABLE_TYPES, "Got hr %#x.\n", hr);
+
+    req_mt.formattype = GUID_NULL;
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, &req_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(compare_media_types(&testsink.pin.pin.mt, source_mt), "Media types didn't match.\n");
+    IFilterGraph2_Disconnect(graph, source);
+    IFilterGraph2_Disconnect(graph, &testsink.pin.pin.IPin_iface);
+
+    req_mt.subtype = MEDIASUBTYPE_RGB8;
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, &req_mt);
+    ok(hr == VFW_E_NO_ACCEPTABLE_TYPES, "Got hr %#x.\n", hr);
+
+    req_mt.subtype = GUID_NULL;
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, &req_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(compare_media_types(&testsink.pin.pin.mt, source_mt), "Media types didn't match.\n");
+    IFilterGraph2_Disconnect(graph, source);
+    IFilterGraph2_Disconnect(graph, &testsink.pin.pin.IPin_iface);
+
+    req_mt.majortype = MEDIATYPE_Stream;
+    req_mt.subtype = MEDIASUBTYPE_RGB8;
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, &req_mt);
+    ok(hr == VFW_E_NO_ACCEPTABLE_TYPES, "Got hr %#x.\n", hr);
+
+    req_mt.subtype = GUID_NULL;
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, &req_mt);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(compare_media_types(&testsink.pin.pin.mt, source_mt), "Media types didn't match.\n");
+    IFilterGraph2_Disconnect(graph, source);
+    IFilterGraph2_Disconnect(graph, &testsink.pin.pin.IPin_iface);
+
+    req_mt.majortype = MEDIATYPE_Video;
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, &req_mt);
+    ok(hr == VFW_E_NO_ACCEPTABLE_TYPES, "Got hr %#x.\n", hr);
+
+    /* The second type (i.e. whose subtype is GUID_NULL) is not tried. This is
+     * consistent with its being rejected by IPin::QueryAccept(). */
+    testsink.reject_avi = TRUE;
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, NULL);
+    ok(hr == VFW_E_NO_ACCEPTABLE_TYPES, "Got hr %#x.\n", hr);
+
+    /* But any types we expose are tried. */
+    testsink.mt = &mt;
+    memset(&mt, 0, sizeof(mt));
+    mt.majortype = MEDIATYPE_Video;
+    mt.subtype = MEDIASUBTYPE_RGB8;
+    mt.formattype = FORMAT_None;
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, NULL);
+    ok(hr == VFW_E_NO_ACCEPTABLE_TYPES, "Got hr %#x.\n", hr);
+
+    mt.majortype = MEDIATYPE_Stream;
+    hr = IFilterGraph2_ConnectDirect(graph, source, &testsink.pin.pin.IPin_iface, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(compare_media_types(&testsink.pin.pin.mt, &mt), "Media types didn't match.\n");
+    IFilterGraph2_Disconnect(graph, source);
+    IFilterGraph2_Disconnect(graph, &testsink.pin.pin.IPin_iface);
+
+    CoTaskMemFree(source_mt);
+    IPin_Release(source);
+    IMediaControl_Release(control);
+    ref = IFilterGraph2_Release(graph);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ref = IBaseFilter_Release(&testsink.filter.IBaseFilter_iface);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ret = DeleteFileW(filename);
+    ok(ret, "Failed to delete file, error %u.\n", GetLastError());
+}
+
 START_TEST(filesource)
 {
     CoInitialize(NULL);
@@ -1194,6 +1489,7 @@ START_TEST(filesource)
     test_file_source_filter();
     test_async_reader();
     test_enum_media_types();
+    test_connect_pin();
 
     CoUninitialize();
 }

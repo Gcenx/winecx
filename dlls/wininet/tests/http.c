@@ -171,6 +171,26 @@ static INTERNET_STATUS_CALLBACK (WINAPI *pInternetSetStatusCallbackA)(HINTERNET 
 static INTERNET_STATUS_CALLBACK (WINAPI *pInternetSetStatusCallbackW)(HINTERNET ,INTERNET_STATUS_CALLBACK);
 static BOOL (WINAPI *pInternetGetSecurityInfoByURLA)(LPSTR,PCCERT_CHAIN_CONTEXT*,DWORD*);
 
+static BOOL is_lang_english(void)
+{
+    static HMODULE hkernel32 = NULL;
+    static LANGID (WINAPI *pGetThreadUILanguage)(void) = NULL;
+    static LANGID (WINAPI *pGetUserDefaultUILanguage)(void) = NULL;
+
+    if (!hkernel32)
+    {
+        hkernel32 = GetModuleHandleA("kernel32.dll");
+        pGetThreadUILanguage = (void*)GetProcAddress(hkernel32, "GetThreadUILanguage");
+        pGetUserDefaultUILanguage = (void*)GetProcAddress(hkernel32, "GetUserDefaultUILanguage");
+    }
+    if (pGetThreadUILanguage)
+        return PRIMARYLANGID(pGetThreadUILanguage()) == LANG_ENGLISH;
+    if (pGetUserDefaultUILanguage)
+        return PRIMARYLANGID(pGetUserDefaultUILanguage()) == LANG_ENGLISH;
+
+    return PRIMARYLANGID(GetUserDefaultLangID()) == LANG_ENGLISH;
+}
+
 static int strcmp_wa(LPCWSTR strw, const char *stra)
 {
     WCHAR buf[512];
@@ -570,6 +590,8 @@ static void InternetReadFile_test(int flags, const test_data_t *test)
     DWORD length, length2, index, exlen = 0, post_len = 0;
     const char *types[2] = { "*", NULL };
     HINTERNET hi, hic = 0, hor = 0;
+    DWORD contents_length, accepts_ranges;
+    BOOL not_supported;
 
     trace("Starting InternetReadFile test with flags 0x%x on url %s\n",flags,test->url);
     reset_events();
@@ -796,9 +818,22 @@ static void InternetReadFile_test(int flags, const test_data_t *test)
     res = HttpQueryInfoA(hor,HTTP_QUERY_CONTENT_LENGTH,&buffer,&length,&index);
     trace("Option HTTP_QUERY_CONTENT_LENGTH -> %i  %s  (%u)\n",res,buffer,GetLastError());
     if(test->flags & TESTF_COMPRESSED)
+    {
         ok(!res && GetLastError() == ERROR_HTTP_HEADER_NOT_FOUND,
            "expected ERROR_HTTP_HEADER_NOT_FOUND, got %x (%u)\n", res, GetLastError());
+        contents_length = 0;
+    }
+    else
+    {
+        contents_length = atoi(buffer);
+    }
     ok(!res || index == 1, "Index was not incremented although result is %x (index = %u)\n", res, index);
+
+    length = 64;
+    *buffer = 0;
+    res = HttpQueryInfoA(hor,HTTP_QUERY_ACCEPT_RANGES,&buffer,&length,0x0);
+    trace("Option HTTP_QUERY_ACCEPT_RANGES -> %i  %s  (%u)\n",res,buffer,GetLastError());
+    accepts_ranges = res && !strcmp(buffer, "bytes");
 
     length = 100;
     res = HttpQueryInfoA(hor,HTTP_QUERY_CONTENT_TYPE,buffer,&length,0x0);
@@ -809,6 +844,26 @@ static void InternetReadFile_test(int flags, const test_data_t *test)
     res = HttpQueryInfoA(hor,HTTP_QUERY_CONTENT_ENCODING,buffer,&length,0x0);
     buffer[length]=0;
     trace("Option HTTP_QUERY_CONTENT_ENCODING -> %i  %s\n",res,buffer);
+
+    SetLastError(0xdeadbeef);
+    length = InternetSetFilePointer(hor, 0, NULL, FILE_END, 0);
+    not_supported = length == INVALID_SET_FILE_POINTER
+            && GetLastError() == ERROR_INTERNET_INVALID_OPERATION;
+    if (accepts_ranges)
+        todo_wine ok((length == contents_length && (GetLastError() == ERROR_SUCCESS
+                || broken(GetLastError() == 0xdeadbeef))) || broken(not_supported),
+                "Got unexpected length %#x, GetLastError() %u, contents_length %u, accepts_ranges %#x.\n",
+                length, GetLastError(), contents_length, accepts_ranges);
+    else
+        ok(not_supported, "Got unexpected length %#x, GetLastError() %u.\n", length, GetLastError());
+
+    if (length != INVALID_SET_FILE_POINTER)
+    {
+        SetLastError(0xdeadbeef);
+        length = InternetSetFilePointer(hor, 0, NULL, FILE_BEGIN, 0);
+        ok(!length && (GetLastError() == ERROR_SUCCESS || broken(GetLastError() == 0xdeadbeef)),
+                "Got unexpected length %#x, GetLastError() %u.\n", length, GetLastError());
+    }
 
     SetLastError(0xdeadbeef);
     res = InternetReadFile(NULL, buffer, 100, &length);
@@ -6079,13 +6134,12 @@ typedef struct {
 static const cert_struct_test_t test_winehq_org_cert = {
     "US\r\n"
     "55114\r\n"
-    "MN\r\n"
+    "Minnesota\r\n"
     "Saint Paul\r\n"
     "Ste 120\r\n"
     "700 Raymond Ave\r\n"
     "CodeWeavers\r\n"
     "IT\r\n"
-    "Secure Link SSL Wildcard\r\n"
     "*.winehq.org",
 
     "US\r\n"
@@ -6113,6 +6167,58 @@ static const cert_struct_test_t test_winehq_com_cert = {
     "webmaster@winehq.org"
 };
 
+static const char *cert_string_fmt =
+    "Subject:\r\n%s\r\n"
+    "Issuer:\r\n%s\r\n"
+    "Effective Date:\t%s %s\r\n"
+    "Expiration Date:\t%s %s\r\n"
+    "Security Protocol:\t%s\r\n"
+    "Signature Type:\t%s\r\n"
+    "Encryption Type:\t%s\r\n"
+    "Privacy Strength:\t%s (%u bits)";
+
+static void test_cert_struct_string(HINTERNET req, const INTERNET_CERTIFICATE_INFOA *info)
+{
+    SYSTEMTIME start, expiry;
+    char expiry_date[32];
+    char expiry_time[32];
+    char start_date[32];
+    char start_time[32];
+    char expect[512];
+    char actual[512];
+    DWORD size;
+    BOOL res;
+
+    size = sizeof(actual);
+    SetLastError(0xdeadbeef);
+    memset(actual, 0x55, sizeof(actual));
+    res = InternetQueryOptionA(req, INTERNET_OPTION_SECURITY_CERTIFICATE, actual, &size);
+    ok(res, "InternetQueryOption failed: %u\n", GetLastError());
+
+    FileTimeToSystemTime(&info->ftStart, &start);
+    FileTimeToSystemTime(&info->ftExpiry, &expiry);
+
+    GetDateFormatA(LOCALE_USER_DEFAULT, 0, &start, NULL, start_date, sizeof(start_date));
+    GetTimeFormatA(LOCALE_USER_DEFAULT, 0, &start, NULL, start_time, sizeof(start_time));
+    GetDateFormatA(LOCALE_USER_DEFAULT, 0, &expiry, NULL, expiry_date, sizeof(expiry_date));
+    GetTimeFormatA(LOCALE_USER_DEFAULT, 0, &expiry, NULL, expiry_time, sizeof(expiry_time));
+
+    snprintf(expect, sizeof(expect), cert_string_fmt, info->lpszSubjectInfo, info->lpszIssuerInfo,
+             start_date, start_time, expiry_date, expiry_time,
+             info->lpszSignatureAlgName, info->lpszEncryptionAlgName, info->lpszProtocolName,
+             info->dwKeySize >= 128 ? "High" : "Low", info->dwKeySize);
+    ok(size == strlen(actual), "size = %u\n", size);
+    ok(!strcmp(actual, expect), "expected:\n%s\nactual:\n%s\n", expect, actual);
+
+    --size;
+    SetLastError(0xdeadbeef);
+    memset(actual, 0x55, sizeof(actual));
+    res = InternetQueryOptionA(req, INTERNET_OPTION_SECURITY_CERTIFICATE, actual, &size);
+    ok(!res && GetLastError() == ERROR_INSUFFICIENT_BUFFER, "InternetQueryOption failed: %d\n", GetLastError());
+    ok(size == 1, "unexpected size: %u\n", size);
+    ok(actual[0] == 0x55, "unexpected byte: %02x\n", actual[0]);
+}
+
 static void test_cert_struct(HINTERNET req, const cert_struct_test_t *test)
 {
     INTERNET_CERTIFICATE_INFOA info;
@@ -6139,6 +6245,10 @@ static void test_cert_struct(HINTERNET req, const cert_struct_test_t *test)
     ok(!info.lpszProtocolName, "lpszProtocolName = %s\n", info.lpszProtocolName);
     ok(info.dwKeySize >= 128 && info.dwKeySize <= 256, "dwKeySize = %u\n", info.dwKeySize);
 
+    if (is_lang_english())
+        test_cert_struct_string(req, &info);
+    else
+        skip("Skipping tests that are English-only\n");
     release_cert_info(&info);
 }
 
@@ -6218,7 +6328,7 @@ static void test_security_flags(void)
     INTERNET_CERTIFICATE_INFOA *cert;
     HINTERNET ses, conn, req;
     DWORD size, flags;
-    char buf[100];
+    char buf[512];
     BOOL res;
 
     if (!https_support)
@@ -6378,6 +6488,30 @@ static void test_security_flags(void)
         LocalFree(cert->lpszIssuerInfo);
     }
     HeapFree(GetProcessHeap(), 0, cert);
+
+    SetLastError(0xdeadbeef);
+    res = InternetQueryOptionW(req, INTERNET_OPTION_SECURITY_CERTIFICATE, NULL, NULL);
+    ok(!res && GetLastError() == ERROR_INVALID_PARAMETER, "InternetQueryOption failed: %d\n", GetLastError());
+
+    size = 0;
+    SetLastError(0xdeadbeef);
+    res = InternetQueryOptionW(req, INTERNET_OPTION_SECURITY_CERTIFICATE, NULL, &size);
+    ok(!res && GetLastError() == ERROR_INSUFFICIENT_BUFFER, "InternetQueryOption failed: %d\n", GetLastError());
+    ok(size == 1, "unexpected size: %u\n", size);
+
+    size = 42;
+    SetLastError(0xdeadbeef);
+    memset(buf, 0x55, sizeof(buf));
+    res = InternetQueryOptionW(req, INTERNET_OPTION_SECURITY_CERTIFICATE, buf, &size);
+    ok(!res && GetLastError() == ERROR_INSUFFICIENT_BUFFER, "InternetQueryOption failed: %d\n", GetLastError());
+    ok(size == 1, "unexpected size: %u\n", size);
+    ok(buf[0] == 0x55, "unexpected byte: %02x\n", buf[0]);
+
+    size = sizeof(buf);
+    SetLastError(0xdeadbeef);
+    res = InternetQueryOptionW(req, INTERNET_OPTION_SECURITY_CERTIFICATE, buf, &size);
+    ok(res && GetLastError() == ERROR_SUCCESS, "InternetQueryOption failed: %d\n", GetLastError());
+    ok(size < sizeof(buf), "unexpected size: %u\n", size);
 
     CHECK_NOTIFIED2(INTERNET_STATUS_CONNECTING_TO_SERVER, 2);
     CHECK_NOTIFIED2(INTERNET_STATUS_CONNECTED_TO_SERVER, 2);
@@ -6563,9 +6697,10 @@ static void test_secure_connection(void)
     static const WCHAR get[] = {'G','E','T',0};
     static const WCHAR testpage[] = {'/','t','e','s','t','s','/','h','e','l','l','o','.','h','t','m','l',0};
     HINTERNET ses, con, req;
-    DWORD size, flags, err;
+    DWORD size, size2, flags, err;
     INTERNET_CERTIFICATE_INFOA *certificate_structA = NULL;
     INTERNET_CERTIFICATE_INFOW *certificate_structW = NULL;
+    char certstr1[512], certstr2[512];
     BOOL ret;
 
     ses = InternetOpenA("Gizmo5", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
@@ -6629,6 +6764,19 @@ static void test_secure_connection(void)
         release_cert_info(certificate_structA);
     }
     HeapFree(GetProcessHeap(), 0, certificate_structW);
+
+    SetLastError(0xdeadbeef);
+    size = sizeof(certstr1);
+    ret = InternetQueryOptionW(req, INTERNET_OPTION_SECURITY_CERTIFICATE, certstr1, &size);
+    ok(ret && GetLastError() == ERROR_SUCCESS, "InternetQueryOption failed: %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    size2 = sizeof(certstr2);
+    ret = InternetQueryOptionA(req, INTERNET_OPTION_SECURITY_CERTIFICATE, certstr2, &size2);
+    ok(ret && GetLastError() == ERROR_SUCCESS, "InternetQueryOption failed: %d\n", GetLastError());
+
+    ok(size == size2, "expected same size\n");
+    ok(!strcmp(certstr1, certstr2), "expected same string\n");
 
     InternetCloseHandle(req);
     InternetCloseHandle(con);
@@ -7518,6 +7666,37 @@ static void test_concurrent_header_access(void)
     CloseHandle( wait );
 }
 
+static void test_cert_string(void)
+{
+    HINTERNET ses, con, req;
+    char actual[512];
+    DWORD size;
+    BOOL res;
+
+    ses = InternetOpenA( "winetest", 0, NULL, NULL, 0 );
+    ok( ses != NULL, "InternetOpenA failed\n" );
+
+    con = InternetConnectA( ses, "test.winehq.org", INTERNET_DEFAULT_HTTP_PORT, NULL, NULL,
+                            INTERNET_SERVICE_HTTP, 0, 0 );
+    ok( con != NULL, "InternetConnectA failed %u\n", GetLastError() );
+
+    req = HttpOpenRequestA( con, NULL, "/", NULL, NULL, NULL, 0, 0 );
+    ok( req != NULL, "HttpOpenRequestA failed %u\n", GetLastError() );
+
+    size = sizeof(actual);
+    SetLastError( 0xdeadbeef );
+    memset( actual, 0x55, sizeof(actual) );
+    res = InternetQueryOptionA( req, INTERNET_OPTION_SECURITY_CERTIFICATE, actual, &size );
+    ok( !res && GetLastError() == ERROR_INTERNET_INVALID_OPERATION,
+        "InternetQueryOption failed: %u\n", GetLastError() );
+    ok( size == 0, "unexpected size: %u\n", size );
+    ok( actual[0] == 0x55, "unexpected byte: %02x\n", actual[0] );
+
+    InternetCloseHandle( req );
+    InternetCloseHandle( con );
+    InternetCloseHandle( ses );
+}
+
 START_TEST(http)
 {
     HMODULE hdll;
@@ -7567,5 +7746,6 @@ START_TEST(http)
     test_connection_failure();
     test_default_service_port();
     test_concurrent_header_access();
+    test_cert_string();
     free_events();
 }

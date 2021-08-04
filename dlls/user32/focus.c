@@ -20,9 +20,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdarg.h>
 
 #include "windef.h"
@@ -210,9 +207,7 @@ static BOOL set_foreground_window( HWND hwnd, BOOL mouse )
             ret = set_active_window( hwnd, NULL, mouse, TRUE );
     }
 
-#ifdef __APPLE__
     MENU_send_window_menubar_to_macapp( hwnd );
-#endif
 
     return ret;
 }

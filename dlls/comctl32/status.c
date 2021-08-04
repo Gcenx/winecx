@@ -86,7 +86,7 @@ typedef struct
 #define VERT_BORDER 2
 #define HORZ_GAP    2
 
-static const WCHAR themeClass[] = { 'S','t','a','t','u','s',0 };
+static const WCHAR themeClass[] = L"Status";
 
 /* prototype */
 static void
@@ -657,12 +657,12 @@ STATUSBAR_SetParts (STATUS_INFO *infoPtr, INT count, LPINT parts)
     if (infoPtr->hwndToolTip) {
 	INT nTipCount;
 	TTTOOLINFOW ti;
-	WCHAR wEmpty = 0;
+        WCHAR wEmpty[] = L"";
 
 	ZeroMemory (&ti, sizeof(TTTOOLINFOW));
 	ti.cbSize = sizeof(TTTOOLINFOW);
 	ti.hwnd = infoPtr->Self;
-	ti.lpszText = &wEmpty;
+        ti.lpszText = wEmpty;
 
 	nTipCount = SendMessageW (infoPtr->hwndToolTip, TTM_GETTOOLCOUNT, 0, 0);
 	if (nTipCount < infoPtr->numParts) {
@@ -744,7 +744,7 @@ STATUSBAR_SetTextT (STATUS_INFO *infoPtr, INT nPart, WORD style,
 	if (ntext) {
 	    idx = ntext;
 	    while (*idx) {
-	        if(!iswprint(*idx))
+	        if(*idx < ' ' && *idx != '\t')
 	            *idx = ' ';
 	        idx++;
 	    }

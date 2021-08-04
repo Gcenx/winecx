@@ -1352,17 +1352,21 @@ static void dump_arm64_codes( const BYTE *ptr, unsigned int count )
             default:printf( "unknown op\n" ); break;
             }
         }
-        else if (ptr[i] == 0xe9)  /* MSFT_OP_TRAP_FRAME */
+        else if (ptr[i] == 0xe8)  /* MSFT_OP_TRAP_FRAME */
         {
             printf( "MSFT_OP_TRAP_FRAME\n" );
         }
-        else if (ptr[i] == 0xea)  /* MSFT_OP_MACHINE_FRAME */
+        else if (ptr[i] == 0xe9)  /* MSFT_OP_MACHINE_FRAME */
         {
             printf( "MSFT_OP_MACHINE_FRAME\n" );
         }
-        else if (ptr[i] == 0xeb)  /* MSFT_OP_CONTEXT */
+        else if (ptr[i] == 0xea)  /* MSFT_OP_CONTEXT */
         {
             printf( "MSFT_OP_CONTEXT\n" );
+        }
+        else if (ptr[i] == 0xec)  /* MSFT_OP_CLEAR_UNWOUND_TO_CALL */
+        {
+            printf( "MSFT_OP_CLEAR_UNWOUND_TO_CALL\n" );
         }
         else printf( "??\n");
     }
@@ -1415,7 +1419,7 @@ static void dump_arm64_packed_info( const struct runtime_function_arm64 *func )
     {
         if (func->u.s.RegF % 2 == 0)
             printf( "    %04x:  str d%u,[sp,#%#x]\n", pos++, 8 + func->u.s.RegF, intsz + fpsz - 8 );
-        for (i = func->u.s.RegF / 2 - 1; i >= 0; i--)
+        for (i = (func->u.s.RegF - 1)/ 2; i >= 0; i--)
         {
             if (!i && !intsz)
                 printf( "    %04x:  stp d8,d9,[sp,-#%#x]!\n", pos++, savesz );

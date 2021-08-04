@@ -177,10 +177,9 @@ static void test_enumerate_physical_device2(void)
     ok(vr == VK_SUCCESS, "Got unexpected VkResult %d.\n", vr);
 
     vr = vkEnumeratePhysicalDevices(vk_instance, &count, NULL);
-    ok(vr == VK_SUCCESS, "Got unexpected VkResult %d.\n", vr);
-    if (!count)
+    if (vr || !count)
     {
-        skip("No physical devices.\n");
+        skip("No physical devices. VkResult %d.\n", vr);
         vkDestroyInstance(vk_instance, NULL);
         return;
     }
@@ -213,7 +212,11 @@ static void test_enumerate_physical_device2(void)
             trace("Device '%s', device UUID: %s, driver UUID: %s, device LUID: %08x:%08x.\n",
                   properties2.properties.deviceName, wine_dbgstr_guid((const GUID *)id.deviceUUID),
                   wine_dbgstr_guid((const GUID *)id.driverUUID), luid->HighPart, luid->LowPart);
-            todo_wine ok(id.deviceLUIDValid == VK_TRUE, "Expected valid device LUID.\n");
+            ok(id.deviceLUIDValid == VK_TRUE, "Expected valid device LUID.\n");
+            /* If deviceLUIDValid is VK_TRUE, deviceNodeMask must contain exactly one bit according
+             * to the Vulkan specification */
+            ok(id.deviceNodeMask && !(id.deviceNodeMask & (id.deviceNodeMask - 1)),
+               "Expect deviceNodeMask to have only one bit set, got %#x.\n", id.deviceNodeMask);
         }
     }
 
@@ -384,6 +387,56 @@ static void test_unsupported_device_extensions(VkPhysicalDevice vk_physical_devi
     }
 }
 
+static void test_private_data(VkPhysicalDevice vk_physical_device)
+{
+    PFN_vkDestroyPrivateDataSlotEXT pfn_vkDestroyPrivateDataSlotEXT;
+    PFN_vkCreatePrivateDataSlotEXT pfn_vkCreatePrivateDataSlotEXT;
+    VkPrivateDataSlotCreateInfoEXT data_create_info;
+    PFN_vkGetPrivateDataEXT pfn_vkGetPrivateDataEXT;
+    PFN_vkSetPrivateDataEXT pfn_vkSetPrivateDataEXT;
+    VkPrivateDataSlotEXT data_slot;
+    VkDevice vk_device;
+    uint64_t data;
+    VkResult vr;
+
+    static const uint64_t data_value = 0x70AD;
+
+    static const char *ext_name = "VK_EXT_private_data";
+
+    if ((vr = create_device(vk_physical_device, 1, &ext_name, NULL, &vk_device)) < 0)
+    {
+        skip("Failed to create device with VK_EXT_private_data, VkResult %d.\n", vr);
+        return;
+    }
+
+    pfn_vkDestroyPrivateDataSlotEXT =
+            (void*) vkGetDeviceProcAddr(vk_device, "vkDestroyPrivateDataSlotEXT");
+    pfn_vkCreatePrivateDataSlotEXT =
+            (void*) vkGetDeviceProcAddr(vk_device, "vkCreatePrivateDataSlotEXT");
+    pfn_vkGetPrivateDataEXT =
+            (void*) vkGetDeviceProcAddr(vk_device, "vkGetPrivateDataEXT");
+    pfn_vkSetPrivateDataEXT =
+            (void*) vkGetDeviceProcAddr(vk_device, "vkSetPrivateDataEXT");
+
+    data_create_info.sType = VK_STRUCTURE_TYPE_PRIVATE_DATA_SLOT_CREATE_INFO_EXT;
+    data_create_info.pNext = NULL;
+    data_create_info.flags = 0;
+    vr = pfn_vkCreatePrivateDataSlotEXT(vk_device, &data_create_info, NULL, &data_slot);
+    ok(vr == VK_SUCCESS, "Failed to create private data slot, VkResult %d.\n", vr);
+
+    vr = pfn_vkSetPrivateDataEXT(vk_device, VK_OBJECT_TYPE_DEVICE,
+            (uint64_t) (uintptr_t) vk_device, data_slot, data_value);
+    ok(vr == VK_SUCCESS, "Failed to set private data, VkResult %d.\n", vr);
+
+    pfn_vkGetPrivateDataEXT(vk_device, VK_OBJECT_TYPE_DEVICE,
+            (uint64_t) (uintptr_t) vk_device, data_slot, &data);
+    ok(data == data_value, "Got unexpected private data, %s.\n",
+            wine_dbgstr_longlong(data));
+
+    pfn_vkDestroyPrivateDataSlotEXT(vk_device, data_slot, NULL);
+    vkDestroyDevice(vk_device, NULL);
+}
+
 static void for_each_device(void (*test_func)(VkPhysicalDevice))
 {
     VkPhysicalDevice *vk_physical_devices;
@@ -397,10 +450,9 @@ static void for_each_device(void (*test_func)(VkPhysicalDevice))
     ok(vr == VK_SUCCESS, "Got unexpected VkResult %d.\n", vr);
 
     vr = vkEnumeratePhysicalDevices(vk_instance, &count, NULL);
-    ok(vr == VK_SUCCESS, "Got unexpected VkResult %d.\n", vr);
-    if (!count)
+    if (vr || !count)
     {
-        skip("No physical devices.\n");
+        skip("No physical devices. VkResult %d.\n", vr);
         vkDestroyInstance(vk_instance, NULL);
         return;
     }
@@ -428,4 +480,5 @@ START_TEST(vulkan)
     for_each_device(test_destroy_command_pool);
     test_unsupported_instance_extensions();
     for_each_device(test_unsupported_device_extensions);
+    for_each_device(test_private_data);
 }

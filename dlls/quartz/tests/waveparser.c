@@ -20,10 +20,10 @@
 
 #define COBJMACROS
 #include "dshow.h"
+#include "mmreg.h"
 #include "wine/test.h"
 
-static const WCHAR sink_name[] = {'i','n','p','u','t',' ','p','i','n',0};
-static const WCHAR source_name[] = {'o','u','t','p','u','t',0};
+static const GUID testguid = {0xfacade};
 
 static IBaseFilter *create_wave_parser(void)
 {
@@ -34,8 +34,6 @@ static IBaseFilter *create_wave_parser(void)
     return filter;
 }
 
-static const WCHAR wavefile[] = {'t','e','s','t','.','w','a','v',0};
-
 static WCHAR *load_resource(const WCHAR *name)
 {
     static WCHAR pathW[MAX_PATH];
@@ -45,7 +43,7 @@ static WCHAR *load_resource(const WCHAR *name)
     void *ptr;
 
     GetTempPathW(ARRAY_SIZE(pathW), pathW);
-    lstrcatW(pathW, name);
+    wcscat(pathW, name);
 
     file = CreateFileW(pathW, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
     ok(file != INVALID_HANDLE_VALUE, "Failed to create file %s, error %u.\n",
@@ -70,7 +68,6 @@ static ULONG get_refcount(void *iface)
 
 static IFilterGraph2 *connect_input(IBaseFilter *splitter, const WCHAR *filename)
 {
-    static const WCHAR outputW[] = {'O','u','t','p','u','t',0};
     IFileSourceFilter *filesource;
     IFilterGraph2 *graph;
     IBaseFilter *reader;
@@ -87,8 +84,8 @@ static IFilterGraph2 *connect_input(IBaseFilter *splitter, const WCHAR *filename
     IFilterGraph2_AddFilter(graph, reader, NULL);
     IFilterGraph2_AddFilter(graph, splitter, NULL);
 
-    IBaseFilter_FindPin(splitter, sink_name, &sink);
-    IBaseFilter_FindPin(reader, outputW, &source);
+    IBaseFilter_FindPin(splitter, L"input pin", &sink);
+    IBaseFilter_FindPin(reader, L"Output", &source);
 
     hr = IFilterGraph2_ConnectDirect(graph, source, sink, NULL);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -117,7 +114,7 @@ static void check_interface_(unsigned int line, void *iface_ptr, REFIID iid, BOO
 
 static void test_interfaces(void)
 {
-    const WCHAR *filename = load_resource(wavefile);
+    const WCHAR *filename = load_resource(L"test.wav");
     IBaseFilter *filter = create_wave_parser();
     IFilterGraph2 *graph = connect_input(filter, filename);
     IPin *pin;
@@ -140,7 +137,7 @@ static void test_interfaces(void)
     check_interface(filter, &IID_IReferenceClock, FALSE);
     check_interface(filter, &IID_IVideoWindow, FALSE);
 
-    IBaseFilter_FindPin(filter, sink_name, &pin);
+    IBaseFilter_FindPin(filter, L"input pin", &pin);
 
     check_interface(pin, &IID_IPin, TRUE);
     check_interface(pin, &IID_IUnknown, TRUE);
@@ -152,7 +149,7 @@ static void test_interfaces(void)
 
     IPin_Release(pin);
 
-    IBaseFilter_FindPin(filter, source_name, &pin);
+    IBaseFilter_FindPin(filter, L"output", &pin);
 
     todo_wine check_interface(pin, &IID_IMediaPosition, TRUE);
     check_interface(pin, &IID_IMediaSeeking, TRUE);
@@ -266,7 +263,7 @@ static void test_aggregation(void)
 
 static void test_enum_pins(void)
 {
-    const WCHAR *filename = load_resource(wavefile);
+    const WCHAR *filename = load_resource(L"test.wav");
     IBaseFilter *filter = create_wave_parser();
     IEnumPins *enum1, *enum2;
     IFilterGraph2 *graph;
@@ -356,7 +353,6 @@ static void test_enum_pins(void)
     graph = connect_input(filter, filename);
 
     hr = IEnumPins_Next(enum1, 1, pins, NULL);
-todo_wine
     ok(hr == S_FALSE, "Got hr %#x.\n", hr);
 
     hr = IEnumPins_Reset(enum1);
@@ -401,7 +397,7 @@ todo_wine
 
 static void test_find_pin(void)
 {
-    const WCHAR *filename = load_resource(wavefile);
+    const WCHAR *filename = load_resource(L"test.wav");
     IBaseFilter *filter = create_wave_parser();
     IFilterGraph2 *graph;
     IEnumPins *enum_pins;
@@ -410,11 +406,11 @@ static void test_find_pin(void)
     ULONG ref;
     BOOL ret;
 
-    hr = IBaseFilter_FindPin(filter, sink_name, &pin);
+    hr = IBaseFilter_FindPin(filter, L"input pin", &pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     IPin_Release(pin);
 
-    hr = IBaseFilter_FindPin(filter, source_name, &pin);
+    hr = IBaseFilter_FindPin(filter, L"output", &pin);
     ok(hr == VFW_E_NOT_FOUND, "Got hr %#x.\n", hr);
 
     graph = connect_input(filter, filename);
@@ -425,9 +421,8 @@ static void test_find_pin(void)
     hr = IEnumPins_Next(enum_pins, 1, &pin2, NULL);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    hr = IBaseFilter_FindPin(filter, source_name, &pin);
+    hr = IBaseFilter_FindPin(filter, L"output", &pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-todo_wine
     ok(pin == pin2, "Expected pin %p, got %p.\n", pin2, pin);
     IPin_Release(pin);
     IPin_Release(pin2);
@@ -435,9 +430,8 @@ todo_wine
     hr = IEnumPins_Next(enum_pins, 1, &pin2, NULL);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
-    hr = IBaseFilter_FindPin(filter, sink_name, &pin);
+    hr = IBaseFilter_FindPin(filter, L"input pin", &pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-todo_wine
     ok(pin == pin2, "Expected pin %p, got %p.\n", pin2, pin);
     IPin_Release(pin);
     IPin_Release(pin2);
@@ -452,7 +446,7 @@ todo_wine
 
 static void test_pin_info(void)
 {
-    const WCHAR *filename = load_resource(wavefile);
+    const WCHAR *filename = load_resource(L"test.wav");
     IBaseFilter *filter = create_wave_parser();
     ULONG ref, expect_ref;
     IFilterGraph2 *graph;
@@ -465,7 +459,7 @@ static void test_pin_info(void)
 
     graph = connect_input(filter, filename);
 
-    hr = IBaseFilter_FindPin(filter, sink_name, &pin);
+    hr = IBaseFilter_FindPin(filter, L"input pin", &pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     expect_ref = get_refcount(filter);
     ref = get_refcount(pin);
@@ -475,7 +469,7 @@ static void test_pin_info(void)
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     ok(info.pFilter == filter, "Expected filter %p, got %p.\n", filter, info.pFilter);
     ok(info.dir == PINDIR_INPUT, "Got direction %d.\n", info.dir);
-    ok(!lstrcmpW(info.achName, sink_name), "Got name %s.\n", wine_dbgstr_w(info.achName));
+    ok(!wcscmp(info.achName, L"input pin"), "Got name %s.\n", wine_dbgstr_w(info.achName));
     ref = get_refcount(filter);
     ok(ref == expect_ref + 1, "Got unexpected refcount %d.\n", ref);
     ref = get_refcount(pin);
@@ -488,12 +482,12 @@ static void test_pin_info(void)
 
     hr = IPin_QueryId(pin, &id);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    ok(!lstrcmpW(id, sink_name), "Got id %s.\n", wine_dbgstr_w(id));
+    ok(!wcscmp(id, L"input pin"), "Got id %s.\n", wine_dbgstr_w(id));
     CoTaskMemFree(id);
 
     IPin_Release(pin);
 
-    hr = IBaseFilter_FindPin(filter, source_name, &pin);
+    hr = IBaseFilter_FindPin(filter, L"output", &pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     check_interface(pin, &IID_IPin, TRUE);
@@ -503,7 +497,7 @@ static void test_pin_info(void)
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     ok(info.pFilter == filter, "Expected filter %p, got %p.\n", filter, info.pFilter);
     ok(info.dir == PINDIR_OUTPUT, "Got direction %d.\n", info.dir);
-    ok(!lstrcmpW(info.achName, source_name), "Got name %s.\n", wine_dbgstr_w(info.achName));
+    ok(!wcscmp(info.achName, L"output"), "Got name %s.\n", wine_dbgstr_w(info.achName));
     IBaseFilter_Release(info.pFilter);
 
     hr = IPin_QueryDirection(pin, &dir);
@@ -512,7 +506,7 @@ static void test_pin_info(void)
 
     hr = IPin_QueryId(pin, &id);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    ok(!lstrcmpW(id, source_name), "Got id %s.\n", wine_dbgstr_w(id));
+    ok(!wcscmp(id, L"output"), "Got id %s.\n", wine_dbgstr_w(id));
     CoTaskMemFree(id);
 
     IPin_Release(pin);
@@ -528,17 +522,18 @@ static void test_media_types(void)
 {
     static const WAVEFORMATEX expect_wfx = {WAVE_FORMAT_PCM, 1, 44100, 44100, 1, 8, 0};
 
-    const WCHAR *filename = load_resource(wavefile);
+    const WCHAR *filename = load_resource(L"test.wav");
     IBaseFilter *filter = create_wave_parser();
     AM_MEDIA_TYPE mt = {{0}}, *pmt;
     IEnumMediaTypes *enummt;
     IFilterGraph2 *graph;
+    WAVEFORMATEX *wfx;
     HRESULT hr;
     ULONG ref;
     IPin *pin;
     BOOL ret;
 
-    IBaseFilter_FindPin(filter, sink_name, &pin);
+    IBaseFilter_FindPin(filter, L"input pin", &pin);
 
     hr = IPin_EnumMediaTypes(pin, &enummt);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -581,7 +576,7 @@ static void test_media_types(void)
     IEnumMediaTypes_Release(enummt);
     IPin_Release(pin);
 
-    IBaseFilter_FindPin(filter, source_name, &pin);
+    IBaseFilter_FindPin(filter, L"output", &pin);
 
     hr = IPin_EnumMediaTypes(pin, &enummt);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -612,20 +607,34 @@ static void test_media_types(void)
 
     pmt->majortype = GUID_NULL;
     hr = IPin_QueryAccept(pin, pmt);
-    todo_wine ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
     pmt->majortype = MEDIATYPE_Audio;
 
     pmt->subtype = GUID_NULL;
     hr = IPin_QueryAccept(pin, pmt);
-    todo_wine ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
     pmt->subtype = MEDIASUBTYPE_WAVE;
 
     pmt->formattype = GUID_NULL;
     hr = IPin_QueryAccept(pin, pmt);
-    todo_wine ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
     pmt->formattype = FORMAT_None;
     hr = IPin_QueryAccept(pin, pmt);
-    todo_wine ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+
+    wfx = (WAVEFORMATEX *)pmt->pbFormat;
+
+    wfx->nChannels = wfx->nBlockAlign = 2;
+    wfx->nAvgBytesPerSec = 44100 * 2;
+    wfx->nBlockAlign = 2;
+    hr = IPin_QueryAccept(pin, pmt);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    *wfx = expect_wfx;
+
+    wfx->wFormatTag = WAVE_FORMAT_IMA_ADPCM;
+    hr = IPin_QueryAccept(pin, pmt);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    *wfx = expect_wfx;
 
     CoTaskMemFree(pmt->pbFormat);
     CoTaskMemFree(pmt);
@@ -645,7 +654,7 @@ static void test_media_types(void)
 
 static void test_enum_media_types(void)
 {
-    const WCHAR *filename = load_resource(wavefile);
+    const WCHAR *filename = load_resource(L"test.wav");
     IBaseFilter *filter = create_wave_parser();
     IFilterGraph2 *graph = connect_input(filter, filename);
     IEnumMediaTypes *enum1, *enum2;
@@ -655,7 +664,7 @@ static void test_enum_media_types(void)
     IPin *pin;
     BOOL ret;
 
-    IBaseFilter_FindPin(filter, sink_name, &pin);
+    IBaseFilter_FindPin(filter, L"input pin", &pin);
 
     hr = IPin_EnumMediaTypes(pin, &enum1);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -686,7 +695,7 @@ static void test_enum_media_types(void)
     IEnumMediaTypes_Release(enum2);
     IPin_Release(pin);
 
-    IBaseFilter_FindPin(filter, source_name, &pin);
+    IBaseFilter_FindPin(filter, L"output", &pin);
 
     hr = IPin_EnumMediaTypes(pin, &enum1);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -773,25 +782,25 @@ static void test_unconnected_filter_state(void)
     ok(state == State_Stopped, "Got state %u.\n", state);
 
     hr = IBaseFilter_Pause(filter);
-    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IBaseFilter_GetState(filter, 0, &state);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    todo_wine ok(state == State_Paused, "Got state %u.\n", state);
+    ok(state == State_Paused, "Got state %u.\n", state);
 
     hr = IBaseFilter_Run(filter, 0);
-    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IBaseFilter_GetState(filter, 0, &state);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    todo_wine ok(state == State_Running, "Got state %u.\n", state);
+    ok(state == State_Running, "Got state %u.\n", state);
 
     hr = IBaseFilter_Pause(filter);
-    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IBaseFilter_GetState(filter, 0, &state);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    todo_wine ok(state == State_Paused, "Got state %u.\n", state);
+    ok(state == State_Paused, "Got state %u.\n", state);
 
     hr = IBaseFilter_Stop(filter);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -801,11 +810,11 @@ static void test_unconnected_filter_state(void)
     ok(state == State_Stopped, "Got state %u.\n", state);
 
     hr = IBaseFilter_Run(filter, 0);
-    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IBaseFilter_GetState(filter, 0, &state);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
-    todo_wine ok(state == State_Running, "Got state %u.\n", state);
+    ok(state == State_Running, "Got state %u.\n", state);
 
     hr = IBaseFilter_Stop(filter);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -816,6 +825,213 @@ static void test_unconnected_filter_state(void)
 
     ref = IBaseFilter_Release(filter);
     ok(!ref, "Got outstanding refcount %d.\n", ref);
+}
+
+static void test_seeking(void)
+{
+    LONGLONG time, current, stop, earliest, latest, duration;
+    const WCHAR *filename = load_resource(L"test.wav");
+    IBaseFilter *filter = create_wave_parser();
+    IFilterGraph2 *graph = connect_input(filter, filename);
+    IMediaSeeking *seeking;
+    unsigned int i;
+    double rate;
+    GUID format;
+    HRESULT hr;
+    DWORD caps;
+    ULONG ref;
+    IPin *pin;
+    BOOL ret;
+
+    static const struct
+    {
+        const GUID *guid;
+        HRESULT hr;
+    }
+    format_tests[] =
+    {
+        {&TIME_FORMAT_MEDIA_TIME, S_OK},
+        {&TIME_FORMAT_SAMPLE, S_OK},
+
+        {&TIME_FORMAT_BYTE, S_FALSE},
+        {&TIME_FORMAT_NONE, S_FALSE},
+        {&TIME_FORMAT_FRAME, S_FALSE},
+        {&TIME_FORMAT_FIELD, S_FALSE},
+        {&testguid, S_FALSE},
+    };
+
+    IBaseFilter_FindPin(filter, L"output", &pin);
+    IPin_QueryInterface(pin, &IID_IMediaSeeking, (void **)&seeking);
+
+    hr = IMediaSeeking_GetCapabilities(seeking, &caps);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    todo_wine ok(caps == (AM_SEEKING_CanSeekAbsolute | AM_SEEKING_CanSeekForwards
+            | AM_SEEKING_CanSeekBackwards | AM_SEEKING_CanGetStopPos
+            | AM_SEEKING_CanGetDuration | AM_SEEKING_CanDoSegments), "Got caps %#x.\n", caps);
+
+    caps = AM_SEEKING_CanSeekAbsolute | AM_SEEKING_CanSeekForwards;
+    hr = IMediaSeeking_CheckCapabilities(seeking, &caps);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(caps == (AM_SEEKING_CanSeekAbsolute | AM_SEEKING_CanSeekForwards), "Got caps %#x.\n", caps);
+
+    caps = AM_SEEKING_CanSeekAbsolute | AM_SEEKING_CanGetCurrentPos;
+    hr = IMediaSeeking_CheckCapabilities(seeking, &caps);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    ok(caps == AM_SEEKING_CanSeekAbsolute, "Got caps %#x.\n", caps);
+
+    caps = AM_SEEKING_CanGetCurrentPos;
+    hr = IMediaSeeking_CheckCapabilities(seeking, &caps);
+    ok(hr == E_FAIL, "Got hr %#x.\n", hr);
+    ok(!caps, "Got caps %#x.\n", caps);
+
+    caps = 0;
+    hr = IMediaSeeking_CheckCapabilities(seeking, &caps);
+    ok(hr == E_FAIL, "Got hr %#x.\n", hr);
+    ok(!caps, "Got caps %#x.\n", caps);
+
+    for (i = 0; i < ARRAY_SIZE(format_tests); ++i)
+    {
+        hr = IMediaSeeking_IsFormatSupported(seeking, format_tests[i].guid);
+        todo_wine_if(i == 1) ok(hr == format_tests[i].hr, "Got hr %#x for format %s.\n",
+                hr, wine_dbgstr_guid(format_tests[i].guid));
+    }
+
+    hr = IMediaSeeking_QueryPreferredFormat(seeking, &format);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(IsEqualGUID(&format, &TIME_FORMAT_MEDIA_TIME), "Got format %s.\n", wine_dbgstr_guid(&format));
+
+    hr = IMediaSeeking_GetTimeFormat(seeking, &format);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(IsEqualGUID(&format, &TIME_FORMAT_MEDIA_TIME), "Got format %s.\n", wine_dbgstr_guid(&format));
+
+    hr = IMediaSeeking_IsUsingTimeFormat(seeking, &TIME_FORMAT_MEDIA_TIME);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaSeeking_IsUsingTimeFormat(seeking, &TIME_FORMAT_SAMPLE);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+
+    hr = IMediaSeeking_SetTimeFormat(seeking, &TIME_FORMAT_FRAME);
+    ok(hr == E_INVALIDARG, "Got hr %#x.\n", hr);
+    hr = IMediaSeeking_SetTimeFormat(seeking, &TIME_FORMAT_SAMPLE);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaSeeking_GetTimeFormat(seeking, &format);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    todo_wine ok(IsEqualGUID(&format, &TIME_FORMAT_SAMPLE), "Got format %s.\n", wine_dbgstr_guid(&format));
+
+    hr = IMediaSeeking_IsUsingTimeFormat(seeking, &TIME_FORMAT_MEDIA_TIME);
+    todo_wine ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    hr = IMediaSeeking_IsUsingTimeFormat(seeking, &TIME_FORMAT_SAMPLE);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaSeeking_SetTimeFormat(seeking, &TIME_FORMAT_MEDIA_TIME);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    duration = 0xdeadbeef;
+    hr = IMediaSeeking_GetDuration(seeking, &duration);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    todo_wine ok(duration > 0, "Got duration %s.\n", wine_dbgstr_longlong(duration));
+
+    stop = current = 0xdeadbeef;
+    hr = IMediaSeeking_GetStopPosition(seeking, &stop);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(stop == duration, "Expected time %s, got %s.\n",
+            wine_dbgstr_longlong(duration), wine_dbgstr_longlong(stop));
+    hr = IMediaSeeking_GetCurrentPosition(seeking, &current);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(!current, "Got time %s.\n", wine_dbgstr_longlong(current));
+    stop = current = 0xdeadbeef;
+    hr = IMediaSeeking_GetPositions(seeking, &current, &stop);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(!current, "Got time %s.\n", wine_dbgstr_longlong(current));
+    ok(stop == duration, "Expected time %s, got %s.\n",
+            wine_dbgstr_longlong(duration), wine_dbgstr_longlong(stop));
+
+    time = 0xdeadbeef;
+    hr = IMediaSeeking_ConvertTimeFormat(seeking, &time, &TIME_FORMAT_MEDIA_TIME, 0x123456789a, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(time == 0x123456789a, "Got time %s.\n", wine_dbgstr_longlong(time));
+    time = 0xdeadbeef;
+    hr = IMediaSeeking_ConvertTimeFormat(seeking, &time, NULL, 0x123456789a, &TIME_FORMAT_MEDIA_TIME);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(time == 0x123456789a, "Got time %s.\n", wine_dbgstr_longlong(time));
+    time = 0xdeadbeef;
+    hr = IMediaSeeking_ConvertTimeFormat(seeking, &time, NULL, 441, &TIME_FORMAT_SAMPLE);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    todo_wine ok(time == 100000, "Got time %s.\n", wine_dbgstr_longlong(time));
+
+    earliest = latest = 0xdeadbeef;
+    hr = IMediaSeeking_GetAvailable(seeking, &earliest, &latest);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(!earliest, "Got time %s.\n", wine_dbgstr_longlong(earliest));
+    ok(latest == duration, "Expected time %s, got %s.\n",
+            wine_dbgstr_longlong(duration), wine_dbgstr_longlong(latest));
+
+    rate = 0;
+    hr = IMediaSeeking_GetRate(seeking, &rate);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(rate == 1.0, "Got rate %.16e.\n", rate);
+
+    hr = IMediaSeeking_SetRate(seeking, 200.0);
+    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    rate = 0;
+    hr = IMediaSeeking_GetRate(seeking, &rate);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    todo_wine ok(rate == 200.0, "Got rate %.16e.\n", rate);
+
+    hr = IMediaSeeking_SetRate(seeking, -1.0);
+    todo_wine ok(hr == E_INVALIDARG, "Got hr %#x.\n", hr);
+
+    hr = IMediaSeeking_GetPreroll(seeking, &time);
+    todo_wine ok(hr == E_NOTIMPL, "Got hr %#x.\n", hr);
+
+    current = 200 * 10000;
+    stop = 400 * 10000;
+    hr = IMediaSeeking_SetPositions(seeking, &current, AM_SEEKING_AbsolutePositioning,
+            &stop, AM_SEEKING_AbsolutePositioning);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(current == 200 * 10000, "Got time %s.\n", wine_dbgstr_longlong(current));
+    ok(stop == 400 * 10000, "Got time %s.\n", wine_dbgstr_longlong(stop));
+
+    stop = current = 0xdeadbeef;
+    hr = IMediaSeeking_GetPositions(seeking, &current, &stop);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(current == 200 * 10000, "Got time %s.\n", wine_dbgstr_longlong(current));
+    ok(stop == 400 * 10000, "Got time %s.\n", wine_dbgstr_longlong(stop));
+
+    current = 200 * 10000;
+    stop = 400 * 10000;
+    hr = IMediaSeeking_SetPositions(seeking, &current, AM_SEEKING_AbsolutePositioning | AM_SEEKING_ReturnTime,
+            &stop, AM_SEEKING_AbsolutePositioning | AM_SEEKING_ReturnTime);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(current == 200 * 10000, "Got time %s.\n", wine_dbgstr_longlong(current));
+    ok(stop == 400 * 10000, "Got time %s.\n", wine_dbgstr_longlong(stop));
+
+    current = 100 * 10000;
+    stop = 200 * 10000;
+    hr = IMediaSeeking_SetPositions(seeking, &current, AM_SEEKING_AbsolutePositioning | AM_SEEKING_ReturnTime,
+            &stop, AM_SEEKING_AbsolutePositioning | AM_SEEKING_ReturnTime);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(current == 100 * 10000, "Got time %s.\n", wine_dbgstr_longlong(current));
+    ok(stop == 200 * 10000, "Got time %s.\n", wine_dbgstr_longlong(stop));
+
+    current = 50 * 10000;
+    hr = IMediaSeeking_SetPositions(seeking, &current, AM_SEEKING_AbsolutePositioning,
+            NULL, AM_SEEKING_NoPositioning);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    stop = current = 0xdeadbeef;
+    hr = IMediaSeeking_GetPositions(seeking, &current, &stop);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(current == 50 * 10000, "Got time %s.\n", wine_dbgstr_longlong(current));
+    ok(stop == 200 * 10000, "Got time %s.\n", wine_dbgstr_longlong(stop));
+
+    IMediaSeeking_Release(seeking);
+    IPin_Release(pin);
+    IFilterGraph2_Release(graph);
+    ref = IBaseFilter_Release(filter);
+    ok(!ref, "Got outstanding refcount %d.\n", ref);
+    ret = DeleteFileW(filename);
+    ok(ret, "Failed to delete file, error %u.\n", GetLastError());
 }
 
 START_TEST(waveparser)
@@ -840,6 +1056,7 @@ START_TEST(waveparser)
     test_media_types();
     test_enum_media_types();
     test_unconnected_filter_state();
+    test_seeking();
 
     CoUninitialize();
 }

@@ -90,8 +90,10 @@
     X(typeofident,1, 0,0)                  \
     X(refval,     1, 0,0)                  \
     X(ret,        0, ARG_UINT,   0)        \
+    X(set_member, 1, 0,0)                  \
     X(setret,     1, 0,0)                  \
     X(sub,        1, 0,0)                  \
+    X(to_string,  1, 0,0)                  \
     X(undefined,  1, 0,0)                  \
     X(void,       1, 0,0)                  \
     X(xor,        1, 0,0)
@@ -125,6 +127,7 @@ typedef enum {
 
 typedef struct {
     jsop_t op;
+    unsigned loc;
     union {
         instr_arg_t arg[2];
         double dbl;
@@ -141,6 +144,8 @@ typedef struct {
     BSTR name;
     int ref;
 } local_ref_t;
+
+#define INVALID_LOCAL_REF 0x7fffffff
 
 typedef struct _function_code_t {
     BSTR name;
@@ -169,6 +174,7 @@ typedef struct _function_code_t {
     bytecode_t *bytecode;
 } function_code_t;
 
+IDispatch *lookup_global_host(script_ctx_t*) DECLSPEC_HIDDEN;
 local_ref_t *lookup_local(const function_code_t*,const WCHAR*) DECLSPEC_HIDDEN;
 
 struct _bytecode_t {
@@ -179,8 +185,11 @@ struct _bytecode_t {
     heap_pool_t heap;
 
     function_code_t global_code;
+    named_item_t *named_item;
 
     WCHAR *source;
+    UINT64 source_context;
+    unsigned start_line;
 
     BSTR *bstr_pool;
     unsigned bstr_pool_size;
@@ -193,8 +202,10 @@ struct _bytecode_t {
     struct list entry;
 };
 
-HRESULT compile_script(script_ctx_t*,const WCHAR*,const WCHAR*,const WCHAR*,BOOL,BOOL,bytecode_t**) DECLSPEC_HIDDEN;
+HRESULT compile_script(script_ctx_t*,const WCHAR*,UINT64,unsigned,const WCHAR*,const WCHAR*,BOOL,BOOL,named_item_t*,bytecode_t**) DECLSPEC_HIDDEN;
 void release_bytecode(bytecode_t*) DECLSPEC_HIDDEN;
+
+unsigned get_location_line(bytecode_t *code, unsigned loc, unsigned *char_pos) DECLSPEC_HIDDEN;
 
 static inline bytecode_t *bytecode_addref(bytecode_t *code)
 {
@@ -217,6 +228,28 @@ static inline scope_chain_t *scope_addref(scope_chain_t *scope)
     scope->ref++;
     return scope;
 }
+
+struct _jsexcept_t {
+    HRESULT error;
+
+    BOOL valid_value;
+    jsval_t value;
+
+    jsstr_t *source;
+    jsstr_t *message;
+    jsstr_t *line;
+
+    bytecode_t *code;
+    unsigned loc;
+
+    BOOL enter_notified;
+    jsexcept_t *prev;
+};
+
+void enter_script(script_ctx_t*,jsexcept_t*) DECLSPEC_HIDDEN;
+HRESULT leave_script(script_ctx_t*,HRESULT) DECLSPEC_HIDDEN;
+void reset_ei(jsexcept_t*) DECLSPEC_HIDDEN;
+void set_error_location(jsexcept_t*,bytecode_t*,unsigned,unsigned,jsstr_t*) DECLSPEC_HIDDEN;
 
 typedef struct _except_frame_t except_frame_t;
 struct _parser_ctx_t;
@@ -254,7 +287,7 @@ typedef struct _call_frame_t {
 #define EXEC_EVAL              0x0008
 
 HRESULT exec_source(script_ctx_t*,DWORD,bytecode_t*,function_code_t*,scope_chain_t*,IDispatch*,
-        jsdisp_t*,jsdisp_t*,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
+        jsdisp_t*,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
 
 HRESULT create_source_function(script_ctx_t*,bytecode_t*,function_code_t*,scope_chain_t*,jsdisp_t**) DECLSPEC_HIDDEN;
 HRESULT setup_arguments_object(script_ctx_t*,call_frame_t*) DECLSPEC_HIDDEN;

@@ -1779,14 +1779,14 @@ static void test_NonExistentPath(void)
                 STARTUPINFOA startup;
                 PROCESS_INFORMATION info;
 
-                sprintf(buffer, "%s tests/shellpath.c 1", selfname);
+                sprintf(buffer, "%s shellpath 1", selfname);
                 memset(&startup, 0, sizeof(startup));
                 startup.cb = sizeof(startup);
                 startup.dwFlags = STARTF_USESHOWWINDOW;
                 startup.wShowWindow = SW_SHOWNORMAL;
                 CreateProcessA(NULL, buffer, NULL, NULL, FALSE, 0L, NULL, NULL,
                  &startup, &info);
-                winetest_wait_child_process( info.hProcess );
+                wait_child_process( info.hProcess );
 
                 /* restore original values: */
                 trace("Restoring CSIDL_FAVORITES to %s\n", originalPath);
@@ -1794,7 +1794,7 @@ static void test_NonExistentPath(void)
                  strlen(originalPath) + 1);
                 RegFlushKey(key);
 
-                sprintf(buffer, "%s tests/shellpath.c 2", selfname);
+                sprintf(buffer, "%s shellpath 2", selfname);
                 memset(&startup, 0, sizeof(startup));
                 startup.cb = sizeof(startup);
                 startup.dwFlags = STARTF_USESHOWWINDOW;

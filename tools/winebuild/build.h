@@ -105,7 +105,6 @@ typedef struct
     int         flags;
     char       *name;         /* public name of this function */
     char       *link_name;    /* name of the C symbol to link to */
-    char       *impl_name;    /* name of the C symbol of the real implementation (thunks only) */
     char       *export_name;  /* name exported under for noname exports */
     union
     {
@@ -132,17 +131,16 @@ typedef struct
     int              alloc_entry_points; /* number of allocated entry points */
     int              nb_names;           /* number of entry points with names */
     unsigned int     nb_resources;       /* number of resources */
-    int              nb_syscalls;        /* number of syscalls */
     int              characteristics;    /* characteristics for the PE header */
     int              dll_characteristics;/* DLL characteristics for the PE header */
     int              subsystem;          /* subsystem id */
     int              subsystem_major;    /* subsystem version major number */
     int              subsystem_minor;    /* subsystem version minor number */
+    int              unicode_app;        /* default to unicode entry point */
     ORDDEF          *entry_points;       /* dll entry points */
     ORDDEF         **names;              /* array of entry point names (points into entry_points) */
     ORDDEF         **ordinals;           /* array of dll ordinals (points into entry_points) */
     struct resource *resources;          /* array of dll resources (format differs between Win16/Win32) */
-    ORDDEF         **syscalls;           /* array of syscalls (points into entry_points) */
 } DLLSPEC;
 
 enum target_cpu
@@ -178,17 +176,16 @@ struct strarray
 #define FLAG_REGISTER  0x0010  /* use register calling convention */
 #define FLAG_PRIVATE   0x0020  /* function is private (cannot be imported) */
 #define FLAG_ORDINAL   0x0040  /* function should be imported by ordinal */
-#define FLAG_THISCALL  0x0080  /* use thiscall calling convention */
-#define FLAG_FASTCALL  0x0100  /* use fastcall calling convention */
-#define FLAG_IMPORT    0x0200  /* export is imported from another module */
+#define FLAG_THISCALL  0x0080  /* function uses thiscall calling convention */
+#define FLAG_FASTCALL  0x0100  /* function uses fastcall calling convention */
+#define FLAG_SYSCALL   0x0200  /* function is a system call */
+#define FLAG_IMPORT    0x0400  /* export is imported from another module */
 
 #define FLAG_FORWARD   0x1000  /* function is a forwarded name */
 #define FLAG_EXT_LINK  0x2000  /* function links to an external symbol */
 #define FLAG_EXPORT32  0x4000  /* 32-bit export in 16-bit spec file */
-#define FLAG_SYSCALL   0x8000  /* function should be called through a syscall thunk */
 
 #define FLAG_CPU(cpu)  (0x10000 << (cpu))
-
 #define FLAG_CPU_MASK  (FLAG_CPU(CPU_LAST + 1) - FLAG_CPU(0))
 #define FLAG_CPU_WIN64 (FLAG_CPU(CPU_x86_64) | FLAG_CPU(CPU_ARM64))
 #define FLAG_CPU_WIN32 (FLAG_CPU_MASK & ~FLAG_CPU_WIN64)
@@ -280,6 +277,7 @@ extern void free_dll_spec( DLLSPEC *spec );
 extern char *make_c_identifier( const char *str );
 extern const char *get_stub_name( const ORDDEF *odp, const DLLSPEC *spec );
 extern const char *get_link_name( const ORDDEF *odp );
+extern int sort_func_list( ORDDEF **list, int count, int (*compare)(const void *, const void *) );
 extern int get_cpu_from_name( const char *name );
 extern unsigned int get_alignment(unsigned int align);
 extern unsigned int get_page_size(void);
@@ -297,12 +295,15 @@ extern const char *get_asm_export_section(void);
 extern const char *get_asm_rodata_section(void);
 extern const char *get_asm_rsrc_section(void);
 extern const char *get_asm_string_section(void);
+extern const char *arm64_page( const char *sym );
+extern const char *arm64_pageoff( const char *sym );
 extern void output_function_size( const char *name );
 extern void output_gnu_stack_note(void);
 
 extern void add_import_dll( const char *name, const char *filename );
 extern void add_delayed_import( const char *name );
 extern void add_extra_ld_symbol( const char *name );
+extern void add_spec_extra_ld_symbol( const char *name );
 extern void read_undef_symbols( DLLSPEC *spec, char **argv );
 extern void resolve_imports( DLLSPEC *spec );
 extern int is_undefined( const char *name );
@@ -310,8 +311,9 @@ extern int has_imports(void);
 extern void output_get_pc_thunk(void);
 extern void output_module( DLLSPEC *spec );
 extern void output_stubs( DLLSPEC *spec );
+extern void output_syscalls( DLLSPEC *spec );
 extern void output_imports( DLLSPEC *spec );
-extern void output_import_lib( DLLSPEC *spec, char **argv );
+extern void output_static_lib( DLLSPEC *spec, char **argv );
 extern void output_exports( DLLSPEC *spec );
 extern int load_res32_file( const char *name, DLLSPEC *spec );
 extern void output_resources( DLLSPEC *spec );
@@ -329,12 +331,11 @@ extern void output_fake_module16( DLLSPEC *spec16 );
 extern void output_res_o_file( DLLSPEC *spec );
 extern void output_asm_relays16(void);
 extern void make_builtin_files( char *argv[] );
+extern void fixup_constructors( char *argv[] );
 
 extern void add_16bit_exports( DLLSPEC *spec32, DLLSPEC *spec16 );
 extern int parse_spec_file( FILE *file, DLLSPEC *spec );
 extern int parse_def_file( FILE *file, DLLSPEC *spec );
-
-extern int sort_func_list( ORDDEF **list, int count, int (*compare)(const void *, const void *) );
 
 /* buffer management */
 
@@ -345,7 +346,6 @@ extern size_t input_buffer_pos;
 extern size_t input_buffer_size;
 extern unsigned char *output_buffer;
 extern size_t output_buffer_pos;
-extern size_t output_buffer_rva;
 extern size_t output_buffer_size;
 
 extern void init_input_buffer( const char *file );
@@ -360,13 +360,7 @@ extern void put_word( unsigned short val );
 extern void put_dword( unsigned int val );
 extern void put_qword( unsigned int val );
 extern void put_pword( unsigned int val );
-extern void put_str( const char *str );
 extern void align_output( unsigned int align );
-extern void align_output_rva( unsigned int file_align, unsigned int rva_align );
-extern size_t label_pos( const char *name );
-extern size_t label_rva( const char *name );
-extern size_t label_rva_align( const char *name );
-extern void put_label( const char *name );
 
 /* global variables */
 
@@ -379,7 +373,9 @@ extern int verbose;
 extern int link_ext_symbols;
 extern int force_pointer_size;
 extern int unwind_tables;
+extern int use_msvcrt;
 extern int unix_lib;
+extern int safe_seh;
 
 extern char *input_file_name;
 extern char *spec_file_name;

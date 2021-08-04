@@ -370,13 +370,13 @@ BOOL CRYPT_ReadSerializedStoreFromFile(HANDLE file, HCERTSTORE store) DECLSPEC_H
 BOOL CRYPT_ReadSerializedStoreFromBlob(const CRYPT_DATA_BLOB *blob,
  HCERTSTORE store) DECLSPEC_HIDDEN;
 
-/* Fixes up the pointers in info, where info is assumed to be a
- * CRYPT_KEY_PROV_INFO, followed by its container name, provider name, and any
- * provider parameters, in a contiguous buffer, but where info's pointers are
- * assumed to be invalid.  Upon return, info's pointers point to the
- * appropriate memory locations.
- */
-void CRYPT_FixKeyProvInfoPointers(PCRYPT_KEY_PROV_INFO info) DECLSPEC_HIDDEN;
+struct store_CERT_KEY_CONTEXT
+{
+    DWORD   cbSize;
+    DWORD64 hCryptProv;
+    DWORD   dwKeySpec;
+};
+void CRYPT_ConvertKeyContext(const struct store_CERT_KEY_CONTEXT *src, CERT_KEY_CONTEXT *dst) DECLSPEC_HIDDEN;
 
 /**
  *  String functions
@@ -451,7 +451,15 @@ void init_empty_store(void) DECLSPEC_HIDDEN;
  */
 #define IS_INTOID(x)    (((ULONG_PTR)(x) >> 16) == 0)
 
-BOOL gnutls_initialize(void) DECLSPEC_HIDDEN;
-void gnutls_uninitialize(void) DECLSPEC_HIDDEN;
+/* Unix interface */
+
+struct unix_funcs
+{
+    BOOL (WINAPI *enum_root_certs)( void *buffer, SIZE_T size, SIZE_T *needed );
+    BOOL (WINAPI *import_cert_store)( CRYPT_DATA_BLOB *pfx, const WCHAR *password, DWORD flags,
+                                      void **key_ret, void ***chain_ret, DWORD *count_ret );
+};
+
+extern const struct unix_funcs *unix_funcs DECLSPEC_HIDDEN;
 
 #endif

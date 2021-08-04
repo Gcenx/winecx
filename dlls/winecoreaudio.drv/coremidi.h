@@ -67,12 +67,6 @@ extern int AudioUnit_SetVolume(AudioUnit au, float left, float right);
 extern int AudioUnit_GetVolume(AudioUnit au, float *left, float *right);
 #endif
 
-typedef struct {
-    UInt16 devID;
-    UInt16 length;
-    Byte data[256];
-} MIDIMessage;
-
 /* coremidi.c */
 extern MIDIClientRef CoreMIDI_CreateClient(CFStringRef name);
 extern void CoreMIDI_GetObjectName(MIDIObjectRef obj, char *name, int size);
@@ -81,7 +75,7 @@ extern void MIDIIn_ReadProc(const MIDIPacketList *pktlist, void *refCon, void *c
 extern void MIDIOut_Send(MIDIPortRef port, MIDIEndpointRef dest, UInt8 *buffer, unsigned length);
 
 /* midi.c */
-void MIDIIn_SendMessage(MIDIMessage msg);
+void MIDIIn_SendMessage(UInt16 devID, const void * HOSTPTR buffer, UInt16 length);
 
 #include "wine/hostptraddrspace_exit.h"
 

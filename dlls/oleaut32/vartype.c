@@ -29,6 +29,8 @@
 #include "variant.h"
 #include "resource.h"
 
+#include "locale.h"
+
 WINE_DEFAULT_DEBUG_CHANNEL(variant);
 
 extern HMODULE hProxyDll DECLSPEC_HIDDEN;
@@ -37,9 +39,6 @@ extern HMODULE hProxyDll DECLSPEC_HIDDEN;
 #define CY_MULTIPLIER_F 10000.0
 #define CY_HALF         (CY_MULTIPLIER/2) /* 0.5 */
 #define CY_HALF_F       (CY_MULTIPLIER_F/2.0)
-
-static const WCHAR szFloatFormatW[] = { '%','.','7','G','\0' };
-static const WCHAR szDoubleFormatW[] = { '%','.','1','5','G','\0' };
 
 /* Copy data from one variant to another. */
 static inline void VARIANT_CopyData(const VARIANT *srcVar, VARTYPE vt, void *pOut)
@@ -3873,7 +3872,7 @@ HRESULT WINAPI VarCySub(CY cyLeft, CY cyRight, CY* pCyOut)
  */
 HRESULT WINAPI VarCyAbs(CY cyIn, CY* pCyOut)
 {
-  if (cyIn.s.Hi == (int)0x80000000 && !cyIn.s.Lo)
+  if (cyIn.s.Hi == 0x80000000 && !cyIn.s.Lo)
     return DISP_E_OVERFLOW;
 
   pCyOut->int64 = cyIn.int64 < 0 ? -cyIn.int64 : cyIn.int64;
@@ -3948,7 +3947,7 @@ HRESULT WINAPI VarCyInt(CY cyIn, CY* pCyOut)
  */
 HRESULT WINAPI VarCyNeg(CY cyIn, CY* pCyOut)
 {
-  if (cyIn.s.Hi == (int)0x80000000 && !cyIn.s.Lo)
+  if (cyIn.s.Hi == 0x80000000 && !cyIn.s.Lo)
     return DISP_E_OVERFLOW;
 
   pCyOut->int64 = -cyIn.int64;
@@ -6111,9 +6110,6 @@ static BOOL VARIANT_GetLocalisedText(LANGID langId, DWORD dwId, WCHAR *lpszDest)
  */
 HRESULT WINAPI VarBoolFromStr(OLECHAR* strIn, LCID lcid, ULONG dwFlags, VARIANT_BOOL *pBoolOut)
 {
-  /* Any VB/VBA programmers out there should recognise these strings... */
-  static const WCHAR szFalse[] = { '#','F','A','L','S','E','#','\0' };
-  static const WCHAR szTrue[] = { '#','T','R','U','E','#','\0' };
   WCHAR szBuff[64];
   LANGID langId = MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT);
   HRESULT hRes = S_OK;
@@ -6170,9 +6166,9 @@ VarBoolFromStr_CheckLocalised:
   }
 
   /* All checks against localised text have failed, try #TRUE#/#FALSE# */
-  if (!wcscmp(strIn, szFalse))
+  if (!wcscmp(strIn, L"#FALSE#"))
     *pBoolOut = VARIANT_FALSE;
-  else if (!wcscmp(strIn, szTrue))
+  else if (!wcscmp(strIn, L"#TRUE#"))
     *pBoolOut = VARIANT_TRUE;
   else
   {
@@ -6475,7 +6471,7 @@ static BSTR VARIANT_BstrReplaceDecimal(const WCHAR * buff, LCID lcid, ULONG dwFl
   {
     WCHAR *p;
     WCHAR numbuff[256];
-    WCHAR empty[] = {'\0'};
+    WCHAR empty[] = L"";
     NUMBERFMTW minFormat;
 
     minFormat.NumDigits = 0;
@@ -6507,12 +6503,15 @@ static BSTR VARIANT_BstrReplaceDecimal(const WCHAR * buff, LCID lcid, ULONG dwFl
 static HRESULT VARIANT_BstrFromReal(DOUBLE dblIn, LCID lcid, ULONG dwFlags,
                                     BSTR* pbstrOut, LPCWSTR lpszFormat)
 {
+  _locale_t locale;
   WCHAR buff[256];
 
   if (!pbstrOut)
     return E_INVALIDARG;
 
-  swprintf( buff, ARRAY_SIZE(buff), lpszFormat, dblIn );
+  if (!(locale = _create_locale(LC_ALL, "C"))) return E_OUTOFMEMORY;
+  _swprintf_l(buff, ARRAY_SIZE(buff), lpszFormat, locale, dblIn);
+  _free_locale(locale);
 
   /* Negative zeroes are disallowed (some applications depend on this).
      If buff starts with a minus, and then nothing follows but zeroes
@@ -6521,8 +6520,7 @@ static HRESULT VARIANT_BstrFromReal(DOUBLE dblIn, LCID lcid, ULONG dwFlags,
    */
   if (buff[0] == '-')
   {
-    static const WCHAR szAccept[] = {'0', '.', '\0'};
-    if (lstrlenW(buff + 1) == wcsspn(buff + 1, szAccept))
+    if (lstrlenW(buff + 1) == wcsspn(buff + 1, L"0."))
     { buff[0] = '0'; buff[1] = '\0'; }
   }
 
@@ -6563,7 +6561,7 @@ static HRESULT VARIANT_BstrFromReal(DOUBLE dblIn, LCID lcid, ULONG dwFlags,
  */
 HRESULT WINAPI VarBstrFromR4(FLOAT fltIn, LCID lcid, ULONG dwFlags, BSTR* pbstrOut)
 {
-  return VARIANT_BstrFromReal(fltIn, lcid, dwFlags, pbstrOut, szFloatFormatW);
+    return VARIANT_BstrFromReal(fltIn, lcid, dwFlags, pbstrOut, L"%.7G");
 }
 
 /******************************************************************************
@@ -6584,7 +6582,7 @@ HRESULT WINAPI VarBstrFromR4(FLOAT fltIn, LCID lcid, ULONG dwFlags, BSTR* pbstrO
  */
 HRESULT WINAPI VarBstrFromR8(double dblIn, LCID lcid, ULONG dwFlags, BSTR* pbstrOut)
 {
-  return VARIANT_BstrFromReal(dblIn, lcid, dwFlags, pbstrOut, szDoubleFormatW);
+    return VARIANT_BstrFromReal(dblIn, lcid, dwFlags, pbstrOut, L"%.15G");
 }
 
 /******************************************************************************

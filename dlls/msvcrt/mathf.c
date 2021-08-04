@@ -23,9 +23,22 @@
 #pragma makedep implib
 #endif
 
-#include <math.h>
+#include <corecrt.h>
+#include <wine/asm.h>
 
-#if defined(__i386__) || defined(__i386_on_x86_64__) || (_MSVCR_VER > 0 && _MSVCR_VER < 80)
+double __cdecl sin(double);
+double __cdecl cos(double);
+double __cdecl tan(double);
+double __cdecl atan2(double, double);
+double __cdecl exp(double);
+double __cdecl log(double);
+double __cdecl pow(double, double);
+double __cdecl sqrt(double);
+double __cdecl floor(double);
+double __cdecl ceil(double);
+float __cdecl powf(float, float);
+
+#if defined(__i386__) || (_MSVCR_VER > 0 && _MSVCR_VER < 80)
 float sinf(float x) { return sin(x); }
 float cosf(float x) { return cos(x); }
 float tanf(float x) { return tan(x); }
@@ -36,8 +49,21 @@ float powf(float x, float y) { return pow(x, y); }
 float sqrtf(float x) { return sqrt(x); }
 float floorf(float x) { return floor(x); }
 float ceilf(float x) { return ceil(x); }
+__ASM_GLOBAL_IMPORT(sinf)
+__ASM_GLOBAL_IMPORT(cosf)
+__ASM_GLOBAL_IMPORT(tanf)
+__ASM_GLOBAL_IMPORT(atan2f)
+__ASM_GLOBAL_IMPORT(expf)
+__ASM_GLOBAL_IMPORT(logf)
+__ASM_GLOBAL_IMPORT(powf)
+__ASM_GLOBAL_IMPORT(sqrtf)
+__ASM_GLOBAL_IMPORT(floorf)
+__ASM_GLOBAL_IMPORT(ceilf)
 #endif
 
 #if _MSVCR_VER < 120
 double exp2(double x) { return pow(2.0, x); }
+float exp2f(float x) { return powf(2.0f, x); }
+__ASM_GLOBAL_IMPORT(exp2)
+__ASM_GLOBAL_IMPORT(exp2f)
 #endif

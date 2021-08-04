@@ -159,10 +159,8 @@ static int check_keywords(parser_ctx_t *ctx, const WCHAR **lval)
 
 static BOOL skip_html_comment(parser_ctx_t *ctx)
 {
-    const WCHAR html_commentW[] = {'<','!','-','-',0};
-
     if(!ctx->is_html || ctx->ptr+3 >= ctx->end ||
-        memcmp(ctx->ptr, html_commentW, sizeof(WCHAR)*4))
+        memcmp(ctx->ptr, L"<!--", sizeof(WCHAR)*4))
         return FALSE;
 
     ctx->nl = TRUE;
@@ -543,12 +541,15 @@ static BOOL parse_numeric_literal(parser_ctx_t *ctx, double *ret)
     return TRUE;
 }
 
-static int next_token(parser_ctx_t *ctx, void *lval)
+static int next_token(parser_ctx_t *ctx, unsigned *loc, void *lval)
 {
     do {
-        if(!skip_spaces(ctx))
-            return tEOF;
+        if(!skip_spaces(ctx)) {
+            *loc  = ctx->ptr - ctx->begin;
+            return 0;
+        }
     }while(skip_comment(ctx) || skip_html_comment(ctx));
+    *loc  = ctx->ptr - ctx->begin;
 
     if(ctx->implicit_nl_semicolon) {
         if(ctx->nl)
@@ -576,6 +577,7 @@ static int next_token(parser_ctx_t *ctx, void *lval)
 
     switch(*ctx->ptr) {
     case '{':
+    case '}':
     case '(':
     case ')':
     case '[':
@@ -585,10 +587,6 @@ static int next_token(parser_ctx_t *ctx, void *lval)
     case '~':
     case '?':
         return *ctx->ptr++;
-
-    case '}':
-        *(const WCHAR**)lval = ctx->ptr++;
-        return '}';
 
     case '.':
         if(ctx->ptr+1 < ctx->end && is_digit(ctx->ptr[1])) {
@@ -1099,14 +1097,14 @@ static int cc_token(parser_ctx_t *ctx, void *lval)
     return tBooleanLiteral;
 }
 
-int parser_lex(void *lval, parser_ctx_t *ctx)
+int parser_lex(void *lval, unsigned *loc, parser_ctx_t *ctx)
 {
     int ret;
 
     ctx->nl = ctx->ptr == ctx->begin;
 
     do {
-        ret = next_token(ctx, lval);
+        ret = next_token(ctx, loc, lval);
     } while(ret == '@' && !(ret = cc_token(ctx, lval)));
 
     return ret;
@@ -1118,7 +1116,6 @@ literal_t *parse_regexp(parser_ctx_t *ctx)
     BOOL in_class = FALSE;
     DWORD re_len, flags;
     literal_t *ret;
-    HRESULT hres;
 
     TRACE("\n");
 
@@ -1147,6 +1144,7 @@ literal_t *parse_regexp(parser_ctx_t *ctx)
 
     if(ctx->ptr == ctx->end || *ctx->ptr != '/') {
         WARN("pre-parsing failed\n");
+        ctx->hres = JS_E_SYNTAX;
         return NULL;
     }
 
@@ -1156,8 +1154,8 @@ literal_t *parse_regexp(parser_ctx_t *ctx)
     while(ctx->ptr < ctx->end && iswalnum(*ctx->ptr))
         ctx->ptr++;
 
-    hres = parse_regexp_flags(flags_ptr, ctx->ptr-flags_ptr, &flags);
-    if(FAILED(hres))
+    ctx->hres = parse_regexp_flags(flags_ptr, ctx->ptr-flags_ptr, &flags);
+    if(FAILED(ctx->hres))
         return NULL;
 
     ret = parser_alloc(ctx, sizeof(literal_t));

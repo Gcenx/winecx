@@ -88,8 +88,24 @@ static HRESULT WINAPI client_security_QueryBlanket(
     void **pAuthInfo,
     DWORD *pCapabilities )
 {
-    FIXME("\n");
-    return WBEM_E_FAILED;
+    FIXME("semi-stub.\n");
+
+    if (pAuthnSvc)
+        *pAuthnSvc = RPC_C_AUTHN_NONE;
+    if (pAuthzSvc)
+        *pAuthzSvc = RPC_C_AUTHZ_NONE;
+    if (pServerPrincName)
+        *pServerPrincName = NULL;
+    if (pAuthnLevel)
+        *pAuthnLevel = RPC_C_AUTHN_LEVEL_NONE;
+    if (pImpLevel)
+        *pImpLevel = RPC_C_IMP_LEVEL_DEFAULT;
+    if (pAuthInfo)
+        *pAuthInfo = NULL;
+    if (pCapabilities)
+        *pCapabilities = 0;
+
+    return WBEM_NO_ERROR;
 }
 
 static HRESULT WINAPI client_security_SetBlanket(
@@ -103,9 +119,8 @@ static HRESULT WINAPI client_security_SetBlanket(
     void *pAuthInfo,
     DWORD Capabilities )
 {
-    static const OLECHAR defaultW[] =
-        {'<','C','O','L','E','_','D','E','F','A','U','L','T','_','P','R','I','N','C','I','P','A','L','>',0};
-    const OLECHAR *princname = (pServerPrincName == COLE_DEFAULT_PRINCIPAL) ? defaultW : pServerPrincName;
+    const OLECHAR *princname = (pServerPrincName == COLE_DEFAULT_PRINCIPAL) ?
+                               L"<COLE_DEFAULT_PRINCIPAL>" : pServerPrincName;
 
     FIXME("%p, %p, %u, %u, %s, %u, %u, %p, 0x%08x\n", iface, pProxy, AuthnSvc, AuthzSvc,
           debugstr_w(princname), AuthnLevel, ImpLevel, pAuthInfo, Capabilities);
@@ -270,17 +285,15 @@ static HRESULT WINAPI wbem_services_OpenNamespace(
     IWbemServices **ppWorkingNamespace,
     IWbemCallResult **ppResult )
 {
-    static const WCHAR cimv2W[] = {'c','i','m','v','2',0};
-    static const WCHAR defaultW[] = {'d','e','f','a','u','l','t',0};
     struct wbem_services *ws = impl_from_IWbemServices( iface );
 
     TRACE("%p, %s, 0x%08x, %p, %p, %p\n", iface, debugstr_w(strNamespace), lFlags,
           pCtx, ppWorkingNamespace, ppResult);
 
-    if ((wcsicmp( strNamespace, cimv2W ) && wcsicmp( strNamespace, defaultW )) || ws->namespace)
+    if ((wcsicmp( strNamespace, L"cimv2" ) && wcsicmp( strNamespace, L"default" )) || ws->namespace)
         return WBEM_E_INVALID_NAMESPACE;
 
-    return WbemServices_create( cimv2W, (void **)ppWorkingNamespace );
+    return WbemServices_create( L"cimv2", (void **)ppWorkingNamespace );
 }
 
 static HRESULT WINAPI wbem_services_CancelAsyncCall(
@@ -330,7 +343,7 @@ HRESULT parse_path( const WCHAR *str, struct path **ret )
 
     if (*p == '\\')
     {
-        static const WCHAR cimv2W[] = {'R','O','O','T','\\','C','I','M','V','2',0};
+        static const WCHAR cimv2W[] = L"ROOT\\CIMV2";
         WCHAR server[MAX_COMPUTERNAME_LENGTH+1];
         DWORD server_len = ARRAY_SIZE(server);
 
@@ -417,11 +430,8 @@ void free_path( struct path *path )
 
 WCHAR *query_from_path( const struct path *path )
 {
-    static const WCHAR selectW[] =
-        {'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ','%','s',' ',
-         'W','H','E','R','E',' ','%','s',0};
-    static const WCHAR select_allW[] =
-        {'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',0};
+    static const WCHAR selectW[] = L"SELECT * FROM %s WHERE %s";
+    static const WCHAR select_allW[] = L"SELECT * FROM ";
     WCHAR *query;
     UINT len;
 
@@ -456,6 +466,7 @@ HRESULT get_object( const WCHAR *object_path, IWbemClassObject **obj )
 {
     IEnumWbemClassObject *iter;
     struct path *path;
+    ULONG count;
     HRESULT hr;
 
     hr = parse_path( object_path, &path );
@@ -467,7 +478,12 @@ HRESULT get_object( const WCHAR *object_path, IWbemClassObject **obj )
         free_path( path );
         return hr;
     }
-    hr = create_class_object( path->class, iter, 0, NULL, obj );
+    hr = IEnumWbemClassObject_Next( iter, WBEM_INFINITE, 1, obj, &count );
+    if (hr == WBEM_S_FALSE)
+    {
+        hr = WBEM_E_NOT_FOUND;
+        *obj = NULL;
+    }
     IEnumWbemClassObject_Release( iter );
     free_path( path );
     return hr;
@@ -654,13 +670,11 @@ static HRESULT WINAPI wbem_services_ExecQuery(
     IWbemContext *pCtx,
     IEnumWbemClassObject **ppEnum )
 {
-    static const WCHAR wqlW[] = {'W','Q','L',0};
-
     TRACE("%p, %s, %s, 0x%08x, %p, %p\n", iface, debugstr_w(strQueryLanguage),
           debugstr_w(strQuery), lFlags, pCtx, ppEnum);
 
     if (!strQueryLanguage || !strQuery || !strQuery[0]) return WBEM_E_INVALID_PARAMETER;
-    if (wcsicmp( strQueryLanguage, wqlW )) return WBEM_E_INVALID_QUERY_TYPE;
+    if (wcsicmp( strQueryLanguage, L"WQL" )) return WBEM_E_INVALID_QUERY_TYPE;
     return exec_query( strQuery, ppEnum );
 }
 

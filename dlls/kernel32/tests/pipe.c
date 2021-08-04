@@ -36,7 +36,6 @@
 static HANDLE alarm_event;
 static BOOL (WINAPI *pDuplicateTokenEx)(HANDLE,DWORD,LPSECURITY_ATTRIBUTES,
                                         SECURITY_IMPERSONATION_LEVEL,TOKEN_TYPE,PHANDLE);
-static DWORD (WINAPI *pQueueUserAPC)(PAPCFUNC pfnAPC, HANDLE hThread, ULONG_PTR dwData);
 static BOOL (WINAPI *pCancelIoEx)(HANDLE handle, LPOVERLAPPED lpOverlapped);
 static BOOL (WINAPI *pGetNamedPipeClientProcessId)(HANDLE,ULONG*);
 static BOOL (WINAPI *pGetNamedPipeServerProcessId)(HANDLE,ULONG*);
@@ -908,9 +907,10 @@ static DWORD CALLBACK serverThreadMain2(LPVOID arg)
 
 
         user_apc_ran = FALSE;
-        if (i == 0 && pQueueUserAPC) {
+        if (i == 0)
+        {
             if (winetest_debug > 1) trace("Queueing an user APC\n"); /* verify the pipe is non alerable */
-            ret = pQueueUserAPC(&user_apc, GetCurrentThread(), 0);
+            ret = QueueUserAPC(&user_apc, GetCurrentThread(), 0);
             ok(ret, "QueueUserAPC failed: %d\n", GetLastError());
         }
 
@@ -939,7 +939,7 @@ static DWORD CALLBACK serverThreadMain2(LPVOID arg)
 
         ok(user_apc_ran == FALSE, "UserAPC ran, pipe using alertable io mode\n");
 
-        if (i == 0 && pQueueUserAPC)
+        if (i == 0)
             SleepEx(0, TRUE); /* get rid of apc */
 
         /* Set up next echo server */
@@ -1530,8 +1530,7 @@ static void test_CreatePipe(void)
     char readbuf[32];
 
     user_apc_ran = FALSE;
-    if (pQueueUserAPC)
-        ok(pQueueUserAPC(user_apc, GetCurrentThread(), 0), "couldn't create user apc\n");
+    ok(QueueUserAPC(user_apc, GetCurrentThread(), 0), "couldn't create user apc\n");
 
     pipe_attr.nLength = sizeof(SECURITY_ATTRIBUTES); 
     pipe_attr.bInheritHandle = TRUE; 
@@ -3258,7 +3257,7 @@ static void test_overlapped_transport(BOOL msg_mode, BOOL msg_read_mode)
         ok(!res && GetLastError() == ERROR_MORE_DATA, "ReadFile returned: %x %u\n", res, GetLastError());
     ok(read_bytes == 10, "read_bytes = %u\n", read_bytes);
     TerminateProcess(process, 0);
-    winetest_wait_child_process(process);
+    wait_child_process(process);
     /* after terminating process, there is no pending write and pipe buffer is empty */
     overlapped_read_async(server, buf, 10, &overlapped);
     overlapped_write_sync(client, buf, 1);
@@ -3524,7 +3523,7 @@ static void test_namedpipe_process_id(void)
     ok(server != INVALID_HANDLE_VALUE, "got %u\n", GetLastError());
 
     process = create_check_id_process("checkpid", GetProcessId(GetCurrentProcess()));
-    winetest_wait_child_process(process);
+    wait_child_process(process);
 
     CloseHandle(overlapped.hEvent);
     CloseHandle(process);
@@ -3667,7 +3666,7 @@ static void test_namedpipe_session_id(void)
     ok(server != INVALID_HANDLE_VALUE, "got %u\n", GetLastError());
 
     process = create_check_id_process("checksessionid", current);
-    winetest_wait_child_process(process);
+    wait_child_process(process);
 
     CloseHandle(overlapped.hEvent);
     CloseHandle(process);
@@ -4126,7 +4125,6 @@ START_TEST(pipe)
     hmod = GetModuleHandleA("advapi32.dll");
     pDuplicateTokenEx = (void *) GetProcAddress(hmod, "DuplicateTokenEx");
     hmod = GetModuleHandleA("kernel32.dll");
-    pQueueUserAPC = (void *) GetProcAddress(hmod, "QueueUserAPC");
     pCancelIoEx = (void *) GetProcAddress(hmod, "CancelIoEx");
     pGetNamedPipeClientProcessId = (void *) GetProcAddress(hmod, "GetNamedPipeClientProcessId");
     pGetNamedPipeServerProcessId = (void *) GetProcAddress(hmod, "GetNamedPipeServerProcessId");

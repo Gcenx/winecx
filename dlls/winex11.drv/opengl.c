@@ -40,7 +40,6 @@
 #include "x11drv.h"
 #include "xcomposite.h"
 #include "winternl.h"
-#include "wine/library.h"
 #include "wine/debug.h"
 
 #ifdef SONAME_LIBGL
@@ -249,6 +248,7 @@ struct gl_drawable
     SIZE                           pixmap_size;  /* pixmap size for GLXPixmap drawables */
     int                            swap_interval;
     BOOL                           refresh_swap_interval;
+    BOOL                           mutable_pf;
 };
 
 enum glx_swap_control_method
@@ -289,7 +289,6 @@ static struct opengl_funcs opengl_funcs;
 
 #define USE_GL_FUNC(name) #name,
 static const char *opengl_func_names[] = { ALL_WGL_FUNCS };
-static const char *glu_func_names[] = { ALL_GLU_FUNCS }; /* CrossOver Hack 10798 */
 #undef USE_GL_FUNC
 
 static void X11DRV_WineGL_LoadExtensions(void);
@@ -440,12 +439,14 @@ static BOOL X11DRV_WineGL_InitOpenglInfo(void)
     vis = pglXChooseVisual(gdi_display, screen, attribList);
     if (vis) {
 #ifdef __i386__
-        WORD old_fs = wine_get_fs();
+        WORD old_fs, new_fs;
+        __asm__( "mov %%fs,%0" : "=r" (old_fs) );
         /* Create a GLX Context. Without one we can't query GL information */
         ctx = pglXCreateContext(gdi_display, vis, None, GL_TRUE);
-        if (wine_get_fs() != old_fs)
+        __asm__( "mov %%fs,%0" : "=r" (new_fs) );
+        __asm__( "mov %0,%%fs" :: "r" (old_fs) );
+        if (old_fs != new_fs)
         {
-            wine_set_fs( old_fs );
             ERR( "%%fs register corrupted, probably broken ATI driver, disabling OpenGL.\n" );
             ERR( "You need to set the \"UseFastTls\" option to \"2\" in your X config file.\n" );
             goto done;
@@ -543,43 +544,27 @@ static void *opengl_handle;
 
 static BOOL WINAPI init_opengl( INIT_ONCE *once, void *param, void **context )
 {
-    void *glu_handle;
-    char buffer[200];
     int error_base, event_base;
     unsigned int i;
 
     /* No need to load any other libraries as according to the ABI, libGL should be self-sufficient
        and include all dependencies */
-    opengl_handle = wine_dlopen(SONAME_LIBGL, RTLD_NOW|RTLD_GLOBAL, buffer, sizeof(buffer));
+    opengl_handle = dlopen( SONAME_LIBGL, RTLD_NOW | RTLD_GLOBAL );
     if (opengl_handle == NULL)
     {
-        ERR( "Failed to load libGL: %s\n", buffer );
+        ERR( "Failed to load libGL: %s\n", dlerror() );
         ERR( "OpenGL support is disabled.\n");
         return TRUE;
     }
 
     for (i = 0; i < ARRAY_SIZE( opengl_func_names ); i++)
     {
-        if (!(((void **)&opengl_funcs.gl)[i] = wine_dlsym( opengl_handle, opengl_func_names[i], NULL, 0 )))
+        if (!(((void **)&opengl_funcs.gl)[i] = dlsym( opengl_handle, opengl_func_names[i] )))
         {
             ERR( "%s not found in libGL, disabling OpenGL.\n", opengl_func_names[i] );
             goto failed;
         }
     }
-
-#ifdef SONAME_LIBGLU /* CrossOver Hack 10798 */
-    glu_handle = wine_dlopen(SONAME_LIBGLU, RTLD_NOW|RTLD_GLOBAL, buffer, sizeof(buffer));
-    if (glu_handle)
-    {
-        for (i = 0; i < sizeof(glu_func_names)/sizeof(glu_func_names[0]); i++)
-        {
-            if (!(((void **)&opengl_funcs.glu)[i] = wine_dlsym( glu_handle, glu_func_names[i], NULL, 0 )))
-                WARN( "%s not found in libGLU\n", glu_func_names[i] );
-        }
-    }
-    else
-        WARN( "Failed to load libGLU: %s\n", buffer );
-#endif
 
     /* redirect some standard OpenGL functions */
 #define REDIRECT(func) \
@@ -589,7 +574,7 @@ static BOOL WINAPI init_opengl( INIT_ONCE *once, void *param, void **context )
     REDIRECT( glGetString );
 #undef REDIRECT
 
-    pglXGetProcAddressARB = wine_dlsym(opengl_handle, "glXGetProcAddressARB", NULL, 0);
+    pglXGetProcAddressARB = dlsym(opengl_handle, "glXGetProcAddressARB");
     if (pglXGetProcAddressARB == NULL) {
         ERR("Could not find glXGetProcAddressARB in libGL, disabling OpenGL.\n");
         goto failed;
@@ -745,7 +730,7 @@ static BOOL WINAPI init_opengl( INIT_ONCE *once, void *param, void **context )
     return TRUE;
 
 failed:
-    wine_dlclose(opengl_handle, NULL, 0);
+    dlclose(opengl_handle);
     opengl_handle = NULL;
     return TRUE;
 }
@@ -1325,7 +1310,8 @@ static GLXContext create_glxcontext(Display *display, struct wgl_context *contex
 /***********************************************************************
  *              create_gl_drawable
  */
-static struct gl_drawable *create_gl_drawable( HWND hwnd, const struct wgl_pixel_format *format, BOOL known_child )
+static struct gl_drawable *create_gl_drawable( HWND hwnd, const struct wgl_pixel_format *format, BOOL known_child,
+                                               BOOL mutable_pf )
 {
     struct gl_drawable *gl, *prev;
     XVisualInfo *visual = format->visual;
@@ -1345,6 +1331,7 @@ static struct gl_drawable *create_gl_drawable( HWND hwnd, const struct wgl_pixel
     gl->refresh_swap_interval = TRUE;
     gl->format = format;
     gl->ref = 1;
+    gl->mutable_pf = mutable_pf;
 
     if (!known_child && !GetWindow( hwnd, GW_CHILD ) && GetAncestor( hwnd, GA_PARENT ) == GetDesktopWindow())  /* childless top-level window */
     {
@@ -1403,13 +1390,13 @@ static struct gl_drawable *create_gl_drawable( HWND hwnd, const struct wgl_pixel
 /***********************************************************************
  *              set_win_format
  */
-static BOOL set_win_format( HWND hwnd, const struct wgl_pixel_format *format )
+static BOOL set_win_format( HWND hwnd, const struct wgl_pixel_format *format, BOOL mutable_pf )
 {
     struct gl_drawable *gl;
 
     if (!format->visual) return FALSE;
 
-    if (!(gl = create_gl_drawable( hwnd, format, FALSE ))) return FALSE;
+    if (!(gl = create_gl_drawable( hwnd, format, FALSE, mutable_pf ))) return FALSE;
 
     TRACE( "created GL drawable %lx for win %p %s\n",
            gl->drawable, hwnd, debugstr_fbconfig( format->fbconfig ));
@@ -1456,12 +1443,14 @@ static BOOL set_pixel_format(HDC hdc, int format, BOOL allow_change)
         if ((gl = get_gl_drawable( hwnd, hdc )))
         {
             int prev = pixel_format_index( gl->format );
+            BOOL mutable_pf = gl->mutable_pf;
             release_gl_drawable( gl );
-            return prev == format;  /* cannot change it if already set */
+            if (!mutable_pf)
+                return prev == format;  /* cannot change it if already set */
         }
     }
 
-    return set_win_format( hwnd, fmt );
+    return set_win_format( hwnd, fmt, allow_change );
 }
 
 
@@ -1480,7 +1469,7 @@ void sync_gl_drawable( HWND hwnd, BOOL known_child )
         if (!known_child) break; /* Still a childless top-level window */
         /* fall through */
     case DC_GL_PIXMAP_WIN:
-        if (!(new = create_gl_drawable( hwnd, old->format, known_child ))) break;
+        if (!(new = create_gl_drawable( hwnd, old->format, known_child, old->mutable_pf ))) break;
         mark_drawable_dirty( old, new );
         XFlush( gdi_display );
         TRACE( "Recreated GL drawable %lx to replace %lx\n", new->drawable, old->drawable );
@@ -1517,7 +1506,7 @@ void set_gl_drawable_parent( HWND hwnd, HWND parent )
         return;
     }
 
-    if ((new = create_gl_drawable( hwnd, old->format, FALSE )))
+    if ((new = create_gl_drawable( hwnd, old->format, FALSE, old->mutable_pf )))
     {
         mark_drawable_dirty( old, new );
         release_gl_drawable( new );
@@ -1553,8 +1542,8 @@ void destroy_gl_drawable( HWND hwnd )
  *
  * Get the pixel-format descriptor associated to the given id
  */
-static int glxdrv_wglDescribePixelFormat( HDC hdc, int iPixelFormat,
-                                          UINT nBytes, PIXELFORMATDESCRIPTOR *ppfd)
+static int WINAPI glxdrv_wglDescribePixelFormat( HDC hdc, int iPixelFormat,
+                                                 UINT nBytes, PIXELFORMATDESCRIPTOR *ppfd)
 {
   /*XVisualInfo *vis;*/
   int value;
@@ -1685,7 +1674,7 @@ static int glxdrv_wglDescribePixelFormat( HDC hdc, int iPixelFormat,
 /***********************************************************************
  *		glxdrv_wglGetPixelFormat
  */
-static int glxdrv_wglGetPixelFormat( HDC hdc )
+static int WINAPI glxdrv_wglGetPixelFormat( HDC hdc )
 {
     struct gl_drawable *gl;
     int ret = 0;
@@ -1705,7 +1694,7 @@ static int glxdrv_wglGetPixelFormat( HDC hdc )
 /***********************************************************************
  *		glxdrv_wglSetPixelFormat
  */
-static BOOL glxdrv_wglSetPixelFormat( HDC hdc, int iPixelFormat, const PIXELFORMATDESCRIPTOR *ppfd )
+static BOOL WINAPI glxdrv_wglSetPixelFormat( HDC hdc, int iPixelFormat, const PIXELFORMATDESCRIPTOR *ppfd )
 {
     return set_pixel_format(hdc, iPixelFormat, FALSE);
 }
@@ -1713,7 +1702,7 @@ static BOOL glxdrv_wglSetPixelFormat( HDC hdc, int iPixelFormat, const PIXELFORM
 /***********************************************************************
  *		glxdrv_wglCopyContext
  */
-static BOOL glxdrv_wglCopyContext(struct wgl_context *src, struct wgl_context *dst, UINT mask)
+static BOOL WINAPI glxdrv_wglCopyContext(struct wgl_context *src, struct wgl_context *dst, UINT mask)
 {
     TRACE("%p -> %p mask %#x\n", src, dst, mask);
 
@@ -1726,7 +1715,7 @@ static BOOL glxdrv_wglCopyContext(struct wgl_context *src, struct wgl_context *d
 /***********************************************************************
  *		glxdrv_wglCreateContext
  */
-static struct wgl_context *glxdrv_wglCreateContext( HDC hdc )
+static struct wgl_context * WINAPI glxdrv_wglCreateContext( HDC hdc )
 {
     struct wgl_context *ret;
     struct gl_drawable *gl;
@@ -1754,7 +1743,7 @@ static struct wgl_context *glxdrv_wglCreateContext( HDC hdc )
 /***********************************************************************
  *		glxdrv_wglDeleteContext
  */
-static BOOL glxdrv_wglDeleteContext(struct wgl_context *ctx)
+static BOOL WINAPI glxdrv_wglDeleteContext(struct wgl_context *ctx)
 {
     struct wgl_pbuffer *pb;
 
@@ -1782,7 +1771,7 @@ static BOOL glxdrv_wglDeleteContext(struct wgl_context *ctx)
 /***********************************************************************
  *		glxdrv_wglGetProcAddress
  */
-static PROC glxdrv_wglGetProcAddress(LPCSTR lpszProc)
+static PROC WINAPI glxdrv_wglGetProcAddress(LPCSTR lpszProc)
 {
     if (!strncmp(lpszProc, "wgl", 3)) return NULL;
     return pglXGetProcAddressARB((const GLubyte*)lpszProc);
@@ -1807,7 +1796,7 @@ static void set_context_drawables( struct wgl_context *ctx, struct gl_drawable *
 /***********************************************************************
  *		glxdrv_wglMakeCurrent
  */
-static BOOL glxdrv_wglMakeCurrent(HDC hdc, struct wgl_context *ctx)
+static BOOL WINAPI glxdrv_wglMakeCurrent(HDC hdc, struct wgl_context *ctx)
 {
     BOOL ret = FALSE;
     struct gl_drawable *gl;
@@ -1904,7 +1893,7 @@ done:
 /***********************************************************************
  *		glxdrv_wglShareLists
  */
-static BOOL glxdrv_wglShareLists(struct wgl_context *org, struct wgl_context *dest)
+static BOOL WINAPI glxdrv_wglShareLists(struct wgl_context *org, struct wgl_context *dest)
 {
     TRACE("(%p, %p)\n", org, dest);
 
@@ -3255,7 +3244,7 @@ static void X11DRV_WineGL_LoadExtensions(void)
  *
  * Swap the buffers of this DC
  */
-static BOOL glxdrv_wglSwapBuffers( HDC hdc )
+static BOOL WINAPI glxdrv_wglSwapBuffers( HDC hdc )
 {
     struct x11drv_escape_flush_gl_drawable escape;
     struct gl_drawable *gl;

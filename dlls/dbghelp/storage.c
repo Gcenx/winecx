@@ -20,7 +20,6 @@
  */
 
 
-#include "config.h"
 #include <assert.h>
 #include <stdlib.h>
 #include "wine/debug.h"
@@ -122,7 +121,7 @@ void* pool_alloc(struct pool* pool, size_t len)
     return ret;
 }
 
-char* pool_strdup(struct pool* pool, const char* HOSTPTR str)
+char* pool_strdup(struct pool* pool, const char* str)
 {
     char* ret;
     if ((ret = pool_alloc(pool, strlen(str) + 1))) strcpy(ret, str);
@@ -205,7 +204,7 @@ void* vector_add(struct vector* v, struct pool* pool)
  */
 struct key2index
 {
-    unsigned long       key;
+    ULONG_PTR           key;
     unsigned            index;
 };
 
@@ -221,7 +220,7 @@ void sparse_array_init(struct sparse_array* sa, unsigned elt_sz, unsigned bucket
  * Returns the first index which key is >= at passed key
  */
 static struct key2index* sparse_array_lookup(const struct sparse_array* sa,
-                                             unsigned long key, unsigned* idx)
+                                             ULONG_PTR key, unsigned* idx)
 {
     struct key2index*   pk2i;
     unsigned            low, high;
@@ -267,7 +266,7 @@ static struct key2index* sparse_array_lookup(const struct sparse_array* sa,
     return pk2i;
 }
 
-void*   sparse_array_find(const struct sparse_array* sa, unsigned long key)
+void*   sparse_array_find(const struct sparse_array* sa, ULONG_PTR key)
 {
     unsigned            idx;
     struct key2index*   pk2i;
@@ -277,7 +276,7 @@ void*   sparse_array_find(const struct sparse_array* sa, unsigned long key)
     return NULL;
 }
 
-void*   sparse_array_add(struct sparse_array* sa, unsigned long key, 
+void*   sparse_array_add(struct sparse_array* sa, ULONG_PTR key,
                          struct pool* pool)
 {
     unsigned            idx, i;
@@ -315,7 +314,7 @@ unsigned sparse_array_length(const struct sparse_array* sa)
     return sa->elements.num_elts;
 }
 
-static unsigned hash_table_hash(const char* HOSTPTR name, unsigned num_buckets)
+static unsigned hash_table_hash(const char* name, unsigned num_buckets)
 {
     unsigned    hash = 0;
     while (*name)

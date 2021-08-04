@@ -41,7 +41,6 @@
 #include <wine/unicode.h>
 #include <wine/debug.h>
 #include <wine/list.h>
-#include <wine/library.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(winecfg);
 

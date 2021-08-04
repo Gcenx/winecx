@@ -78,6 +78,12 @@ typedef struct tagMIDISource {
     DWORD startTime;
 } MIDISource;
 
+typedef struct {
+    UInt16 devID;
+    UInt16 length;
+    Byte data[];
+} MIDIMessage;
+
 static CRITICAL_SECTION midiInLock; /* Critical section for MIDI In */
 static CFStringRef MIDIInThreadPortName = NULL;
 
@@ -120,7 +126,9 @@ static BOOL MIDI_IsEnabled(void)
 LONG CoreAudio_MIDIInit(void)
 {
     int i;
-    CHAR szPname[MAXPNAMELEN] = {0};
+    CHAR szPname_stack[MAXPNAMELEN] = {0};
+    /* This function is only called from Wine threads with a 32-bit stack */
+    CHAR *szPname = TRUNCCAST(CHAR *, &szPname_stack);
 
     int numDest;
     CFStringRef name;
@@ -176,7 +184,7 @@ LONG CoreAudio_MIDIInit(void)
         sources[i].wDevID = i;
         sources[i].source = MIDIGetSource(i);
 
-        CoreMIDI_GetObjectName(sources[i].source, szPname, sizeof(szPname));
+        CoreMIDI_GetObjectName(sources[i].source, szPname, MAXPNAMELEN);
         MultiByteToWideChar(CP_ACP, 0, szPname, -1, sources[i].caps.szPname, ARRAY_SIZE(sources[i].caps.szPname));
 
         MIDIPortConnectSource(MIDIInPort, sources[i].source, &sources[i].wDevID);
@@ -192,7 +200,7 @@ LONG CoreAudio_MIDIInit(void)
     /* initialise MIDI synths */
     for (i = 0; i < MAX_MIDI_SYNTHS; i++)
     {
-        snprintf(szPname, sizeof(szPname), "CoreAudio MIDI Synth %d", i);
+        snprintf(szPname, MAXPNAMELEN, "CoreAudio MIDI Synth %d", i);
         MultiByteToWideChar(CP_ACP, 0, szPname, -1, destinations[i].caps.szPname, ARRAY_SIZE(destinations[i].caps.szPname));
 
         destinations[i].caps.wTechnology = MOD_SYNTH;
@@ -210,7 +218,7 @@ LONG CoreAudio_MIDIInit(void)
     {
         destinations[i].dest = MIDIGetDestination(i - MAX_MIDI_SYNTHS);
 
-        CoreMIDI_GetObjectName(destinations[i].dest, szPname, sizeof(szPname));
+        CoreMIDI_GetObjectName(destinations[i].dest, szPname, MAXPNAMELEN);
         MultiByteToWideChar(CP_ACP, 0, szPname, -1, destinations[i].caps.szPname, ARRAY_SIZE(destinations[i].caps.szPname));
 
         destinations[i].caps.wTechnology = MOD_MIDIPORT;
@@ -831,16 +839,22 @@ static DWORD MIDIIn_Reset(WORD wDevID)
  *  Call from CoreMIDI IO threaded callback,
  *  we can't call Wine debug channels, critical section or anything using NtCurrentTeb here.
  */
-void MIDIIn_SendMessage(MIDIMessage msg)
+void MIDIIn_SendMessage(UInt16 devID, const void * HOSTPTR buffer, UInt16 length)
 {
-    CFDataRef data;
+    MIDIMessage msg;
+    CFMutableDataRef data;
 
     CFMessagePortRef messagePort;
     messagePort = CFMessagePortCreateRemote(kCFAllocatorDefault, MIDIInThreadPortName);
 
-    data = CFDataCreate(kCFAllocatorDefault, (UInt8 *) &msg, sizeof(msg));
+    msg.devID = devID;
+    msg.length = length;
+
+    data = CFDataCreateMutable(kCFAllocatorDefault, sizeof(msg) + length);
     if (data)
     {
+        CFDataAppendBytes(data, (UInt8 *) &msg, sizeof(msg));
+        CFDataAppendBytes(data, buffer, length);
         CFMessagePortSendRequest(messagePort, 0, data, 0.0, 0.0, NULL, NULL);
         CFRelease(data);
     }

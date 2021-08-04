@@ -3529,13 +3529,17 @@ static void test_client_security(void)
     hr = IClassFactory_QueryInterface(pProxy, &IID_IUnknown, (LPVOID*)&pUnknown1);
     ok_ole_success(hr, "IUnknown_QueryInterface IID_IUnknown");
 
-    hr = IClassFactory_QueryInterface(pProxy, &IID_IRemUnknown, (LPVOID*)&pProxy2);
-    ok_ole_success(hr, "IUnknown_QueryInterface IID_IStream");
+    /* Does not work on Windows 10 19xx+ */
+    if (SUCCEEDED(IClassFactory_QueryInterface(pProxy, &IID_IRemUnknown, (void **)&pProxy2)))
+    {
+        hr = IUnknown_QueryInterface(pProxy2, &IID_IUnknown, (void **)&pUnknown2);
+        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
-    hr = IUnknown_QueryInterface(pProxy2, &IID_IUnknown, (LPVOID*)&pUnknown2);
-    ok_ole_success(hr, "IUnknown_QueryInterface IID_IUnknown");
+        ok(pUnknown1 == pUnknown2, "both proxy's IUnknowns should be the same - %p, %p\n", pUnknown1, pUnknown2);
+        IUnknown_Release(pUnknown2);
 
-    ok(pUnknown1 == pUnknown2, "both proxy's IUnknowns should be the same - %p, %p\n", pUnknown1, pUnknown2);
+        IUnknown_Release(pProxy2);
+    }
 
     hr = IClassFactory_QueryInterface(pProxy, &IID_IMarshal, (LPVOID*)&pMarshal);
     ok_ole_success(hr, "IUnknown_QueryInterface IID_IMarshal");
@@ -3572,9 +3576,7 @@ static void test_client_security(void)
     CoTaskMemFree(pServerPrincName);
 
     IClassFactory_Release(pProxy);
-    IUnknown_Release(pProxy2);
     IUnknown_Release(pUnknown1);
-    IUnknown_Release(pUnknown2);
     IMarshal_Release(pMarshal);
     IClientSecurity_Release(pCliSec);
 
@@ -3894,7 +3896,7 @@ static void test_local_server(void)
     quit_event = CreateEventA(NULL, FALSE, FALSE, "Wine COM Test Quit Event");
     SetEvent(quit_event);
 
-    winetest_wait_child_process( process );
+    wait_child_process( process );
     CloseHandle(quit_event);
     CloseHandle(process);
 }
@@ -4000,16 +4002,29 @@ static void test_globalinterfacetable(void)
 	ok_no_locks();
 
 	IGlobalInterfaceTable_Release(git);
+
+    hr = CoGetClassObject(&CLSID_StdGlobalInterfaceTable, CLSCTX_INPROC_SERVER, NULL, &IID_IClassFactory, (void **)&cf);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    IClassFactory_Release(cf);
 }
 
 static void test_manualresetevent(void)
 {
     ISynchronizeHandle *sync_handle;
     ISynchronize *psync1, *psync2;
+    IClassFactory *factory;
     IUnknown *punk;
     HANDLE handle;
     LONG ref;
     HRESULT hr;
+
+    hr = pDllGetClassObject(&CLSID_ManualResetEvent, &IID_IClassFactory, (void **)&factory);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    IClassFactory_Release(factory);
+
+    hr = CoGetClassObject(&CLSID_ManualResetEvent, CLSCTX_INPROC_SERVER, NULL, &IID_IClassFactory, (void **)&factory);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    IClassFactory_Release(factory);
 
     hr = CoCreateInstance(&CLSID_ManualResetEvent, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void**)&punk);
     ok(hr == S_OK, "Got 0x%08x\n", hr);

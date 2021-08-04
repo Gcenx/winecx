@@ -11,6 +11,7 @@
 #include "wine/winheader_enter.h"
 
 #include <corecrt.h>
+#include <corecrt_wio.h>
 
 #include <pshpack8.h>
 
@@ -22,11 +23,6 @@
 #define _A_VOLID  0x00000008
 #define _A_SUBDIR 0x00000010
 #define _A_ARCH   0x00000020
-
-#ifndef _FSIZE_T_DEFINED
-typedef __msvcrt_ulong _fsize_t;
-#define _FSIZE_T_DEFINED
-#endif
 
 #ifndef _FINDDATA_T_DEFINED
 #define _FINDDATA_T_DEFINED
@@ -61,87 +57,52 @@ struct _finddata64_t
 };
 #endif /* _FINDDATA_T_DEFINED */
 
-#ifndef _WFINDDATA_T_DEFINED
-#define _WFINDDATA_T_DEFINED
-struct _wfinddata_t {
-  unsigned attrib;
-  time_t   time_create;
-  time_t   time_access;
-  time_t   time_write;
-  _fsize_t size;
-  wchar_t  name[260];
-};
-
-struct _wfinddatai64_t {
-  unsigned attrib;
-  time_t  time_create;
-  time_t  time_access;
-  time_t  time_write;
-  __int64 DECLSPEC_ALIGN(8) size;
-  wchar_t name[260];
-};
-#endif /* _WFINDDATA_T_DEFINED */
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-int         __cdecl _access(const char*,int);
-int         __cdecl _chmod(const char*,int);
-int         __cdecl _chsize(int,__msvcrt_ulong);
-int         __cdecl _chsize_s(int,__int64);
-int         __cdecl _close(int);
-int         __cdecl _commit(int);
-int         __cdecl _creat(const char*,int);
-int         __cdecl _dup(int);
-int         __cdecl _dup2(int,int);
-int         __cdecl _eof(int);
-__int64     __cdecl _filelengthi64(int);
-__msvcrt_long __cdecl _filelength(int);
-int         __cdecl _findclose(intptr_t);
-intptr_t    __cdecl _findfirst(const char*,struct _finddata_t*);
-intptr_t    __cdecl _findfirsti64(const char*, struct _finddatai64_t*);
-intptr_t    __cdecl _findfirst64(const char*, struct _finddata64_t*);
-int         __cdecl _findnext(intptr_t,struct _finddata_t*);
-int         __cdecl _findnexti64(intptr_t, struct _finddatai64_t*);
-int         __cdecl _findnext64(intptr_t, struct _finddata64_t*);
-intptr_t    __cdecl _get_osfhandle(int);
-int         __cdecl _isatty(int);
-int         __cdecl _locking(int,int,__msvcrt_long);
-__msvcrt_long __cdecl _lseek(int,__msvcrt_long,int);
-__int64     __cdecl _lseeki64(int,__int64,int);
-char*       __cdecl _mktemp(char*);
-int         __cdecl _mktemp_s(char*,size_t);
-int         WINAPIV _open(const char*,int,...);
-int         __cdecl _open_osfhandle(intptr_t,int);
-int         __cdecl _pipe(int*,unsigned int,int);
-int         __cdecl _read(int,void*,unsigned int);
-int         __cdecl _setmode(int,int);
-int         WINAPIV _sopen(const char*,int,int,...);
-__msvcrt_long __cdecl _tell(int);
-__int64     __cdecl _telli64(int);
-int         __cdecl _umask(int);
-int         __cdecl _unlink(const char*);
-int         __cdecl _write(int,const void*,unsigned int);
+_ACRTIMP int         __cdecl _access(const char*,int);
+_ACRTIMP int         __cdecl _chmod(const char*,int);
+_ACRTIMP int         __cdecl _chsize(int,__msvcrt_long);
+_ACRTIMP int         __cdecl _chsize_s(int,__int64);
+_ACRTIMP int         __cdecl _close(int);
+_ACRTIMP int         __cdecl _commit(int);
+_ACRTIMP int         __cdecl _creat(const char*,int);
+_ACRTIMP int         __cdecl _dup(int);
+_ACRTIMP int         __cdecl _dup2(int,int);
+_ACRTIMP int         __cdecl _eof(int);
+_ACRTIMP __int64     __cdecl _filelengthi64(int);
+_ACRTIMP __msvcrt_long __cdecl _filelength(int);
+_ACRTIMP int         __cdecl _findclose(intptr_t);
+_ACRTIMP intptr_t    __cdecl _findfirst(const char*,struct _finddata_t*);
+_ACRTIMP intptr_t    __cdecl _findfirsti64(const char*, struct _finddatai64_t*);
+_ACRTIMP intptr_t    __cdecl _findfirst64(const char*, struct _finddata64_t*);
+_ACRTIMP int         __cdecl _findnext(intptr_t,struct _finddata_t*);
+_ACRTIMP int         __cdecl _findnexti64(intptr_t, struct _finddatai64_t*);
+_ACRTIMP int         __cdecl _findnext64(intptr_t, struct _finddata64_t*);
+_ACRTIMP intptr_t    __cdecl _get_osfhandle(int);
+_ACRTIMP int         __cdecl _isatty(int);
+_ACRTIMP int         __cdecl _locking(int,int,__msvcrt_long);
+_ACRTIMP __msvcrt_long __cdecl _lseek(int,__msvcrt_long,int);
+_ACRTIMP __int64     __cdecl _lseeki64(int,__int64,int);
+_ACRTIMP char*       __cdecl _mktemp(char*);
+_ACRTIMP int         __cdecl _mktemp_s(char*,size_t);
+_ACRTIMP int         WINAPIV _open(const char*,int,...);
+_ACRTIMP int         __cdecl _open_osfhandle(intptr_t,int);
+_ACRTIMP int         __cdecl _pipe(int*,unsigned int,int);
+_ACRTIMP int         __cdecl _read(int,void*,unsigned int);
+_ACRTIMP int         __cdecl _setmode(int,int);
+_ACRTIMP int         WINAPIV _sopen(const char*,int,int,...);
+_ACRTIMP errno_t     __cdecl _sopen_dispatch(const char*,int,int,int,int*,int);
+_ACRTIMP errno_t     __cdecl _sopen_s(int*,const char*,int,int,int);
+_ACRTIMP __msvcrt_long __cdecl _tell(int);
+_ACRTIMP __int64     __cdecl _telli64(int);
+_ACRTIMP int         __cdecl _umask(int);
+_ACRTIMP int         __cdecl _unlink(const char*);
+_ACRTIMP int         __cdecl _write(int,const void*,unsigned int);
 
-int         __cdecl remove(const char*);
-int         __cdecl rename(const char*,const char*);
-
-#ifndef _WIO_DEFINED
-#define _WIO_DEFINED
-int         __cdecl _waccess(const wchar_t*,int);
-int         __cdecl _wchmod(const wchar_t*,int);
-int         __cdecl _wcreat(const wchar_t*,int);
-intptr_t    __cdecl _wfindfirst(const wchar_t*,struct _wfinddata_t*);
-intptr_t    __cdecl _wfindfirsti64(const wchar_t*, struct _wfinddatai64_t*);
-int         __cdecl _wfindnext(intptr_t,struct _wfinddata_t*);
-int         __cdecl _wfindnexti64(intptr_t, struct _wfinddatai64_t*);
-wchar_t *   __cdecl _wmktemp(wchar_t*);
-int         WINAPIV _wopen(const wchar_t*,int,...);
-int         __cdecl _wrename(const wchar_t*,const wchar_t*);
-int         WINAPIV _wsopen(const wchar_t*,int,int,...);
-int         __cdecl _wunlink(const wchar_t*);
-#endif /* _WIO_DEFINED */
+_ACRTIMP int         __cdecl remove(const char*);
+_ACRTIMP int         __cdecl rename(const char*,const char*);
 
 #ifdef __cplusplus
 }
@@ -175,8 +136,8 @@ static inline int unlink(const char* path) { return _unlink(path); }
 static inline int write(int fd, const void* buf, unsigned int size) { return _write(fd, buf, size); }
 
 #if defined(__GNUC__) && (__GNUC__ < 4)
-extern int WINAPIV open(const char*,int,...) __attribute__((alias("_open")));
-extern int WINAPIV sopen(const char*,int,int,...) __attribute__((alias("_sopen")));
+_ACRTIMP int WINAPIV open(const char*,int,...) __attribute__((alias("_open")));
+_ACRTIMP int WINAPIV sopen(const char*,int,int,...) __attribute__((alias("_sopen")));
 #else
 #define open _open
 #define sopen _sopen

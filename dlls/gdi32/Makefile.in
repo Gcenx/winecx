@@ -4,7 +4,9 @@ IMPORTLIB = gdi32
 IMPORTS   = advapi32
 EXTRAINCL = $(FREETYPE_CFLAGS) $(FONTCONFIG_CFLAGS)
 EXTRALIBS = $(CARBON_LIBS) $(APPKIT_LIBS)
-DELAYIMPORTS = usp10
+DELAYIMPORTS = setupapi
+
+EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
 	bidi.c \
@@ -20,7 +22,6 @@ C_SRCS = \
 	dibdrv/objects.c \
 	dibdrv/opengl.c \
 	dibdrv/primitives.c \
-	direction.c \
 	driver.c \
 	enhmetafile.c \
 	enhmfdrv/bitblt.c \
@@ -41,15 +42,28 @@ C_SRCS = \
 	mfdrv/objects.c \
 	mfdrv/text.c \
 	opengl.c \
+	opentype.c \
 	painting.c \
 	palette.c \
 	path.c \
 	pen.c \
 	printdrv.c \
 	region.c \
+	uniscribe/bidi.c \
+	uniscribe/bracket.c \
+	uniscribe/breaking.c \
+	uniscribe/direction.c \
+	uniscribe/indic.c \
+	uniscribe/indicsyllable.c \
+	uniscribe/linebreak.c \
+	uniscribe/mirror.c \
+	uniscribe/opentype.c \
+	uniscribe/shape.c \
+	uniscribe/shaping.c \
+	uniscribe/usp10.c \
 	vertical.c \
 	vulkan.c
 
 RC_SRCS = gdi32.rc
 
-freetype_EXTRADEFS = -DWINE_FONT_DIR=\"`$(MAKEDEP) -R ${datadir}/wine ${fontdir}`\"
+font_EXTRADEFS = -DWINE_FONT_DIR=\"`${MAKEDEP} -R ${datadir}/wine ${fontdir}`\"

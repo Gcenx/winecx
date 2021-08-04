@@ -53,10 +53,13 @@ extern SID *const security_high_label_sid;
 
 /* token functions */
 
+extern struct token *get_token_obj( struct process *process, obj_handle_t handle, unsigned int access );
 extern struct token *token_create_admin(void);
 extern int token_assign_label( struct token *token, SID *label );
 extern struct token *token_duplicate( struct token *src_token, unsigned primary,
-                                      int impersonation_level, const struct security_descriptor *sd );
+                                      int impersonation_level, const struct security_descriptor *sd,
+                                      const LUID_AND_ATTRIBUTES *remove_privs, unsigned int remove_priv_count,
+                                      const SID *remove_groups, unsigned int remove_group_count );
 extern int token_check_privileges( struct token *token, int all_required,
                                    const LUID_AND_ATTRIBUTES *reqprivs,
                                    unsigned int count, LUID_AND_ATTRIBUTES *usedprivs);
@@ -83,7 +86,7 @@ static inline int security_equal_sid( const SID *sid1, const SID *sid2 )
 
 extern void security_set_thread_token( struct thread *thread, obj_handle_t handle );
 extern const SID *security_unix_uid_to_sid( uid_t uid );
-extern int check_object_access( struct object *obj, unsigned int *access );
+extern int check_object_access( struct token *token, struct object *obj, unsigned int *access );
 
 static inline int thread_single_check_privilege( struct thread *thread, const LUID *priv)
 {

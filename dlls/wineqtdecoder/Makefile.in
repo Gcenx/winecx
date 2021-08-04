@@ -4,8 +4,6 @@ EXTRALIBS = $(QUICKTIME_LIBS)
 PARENTSRC = ../strmbase
 
 C_SRCS = \
-	dllfunc.c \
-	enumpins.c \
 	filter.c \
 	main.c \
 	mediatype.c \
@@ -16,8 +14,10 @@ C_SRCS = \
 	qtutils.c \
 	qtvdecoder.c \
 	qualitycontrol.c \
-	seeking.c \
-	transform.c
+	seeking.c
 
 RC_SRCS = \
 	rsrc.rc
+
+IDL_SRCS = \
+	wineqtdecoder_classes.idl

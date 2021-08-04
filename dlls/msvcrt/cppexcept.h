@@ -29,6 +29,7 @@
 #define CXX_EXCEPTION       0xe06d7363
 
 #define FUNC_DESCR_SYNCHRONOUS  1 /* synchronous exceptions only (built with /EHs and /EHsc) */
+#define FUNC_DESCR_NOEXCEPT     4 /* noexcept function */
 
 typedef void (*vtable_ptr)(void);
 
@@ -59,7 +60,7 @@ typedef struct
 } this_ptr_offsets;
 
 /* complete information about a C++ type */
-#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
+#ifndef __x86_64__
 typedef struct __cxx_type_info
 {
     UINT             flags;        /* flags (see CLASS_* flags below) */
@@ -83,7 +84,7 @@ typedef struct __cxx_type_info
 #define CLASS_HAS_VIRTUAL_BASE_CLASS  4
 
 /* table of C++ types that apply for a given object */
-#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
+#ifndef __x86_64__
 typedef struct __cxx_type_info_table
 {
     UINT                 count;     /* number of types */
@@ -106,7 +107,7 @@ typedef DWORD (*cxx_exc_custom_handler)( PEXCEPTION_RECORD, struct __cxx_excepti
                                          EXCEPTION_REGISTRATION_RECORD *nested_frame, DWORD unknown3 );
 
 /* type information for an exception object */
-#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
+#ifndef __x86_64__
 typedef struct __cxx_exception_type
 {
     UINT                       flags;            /* TYPE_FLAG flags */
@@ -127,7 +128,7 @@ typedef struct
 void WINAPI _CxxThrowException(exception*,const cxx_exception_type*);
 int CDECL _XcptFilter(NTSTATUS, PEXCEPTION_POINTERS);
 
-static inline const char * HOSTPTR dbgstr_type_info( const type_info *info )
+static inline const char *dbgstr_type_info( const type_info *info )
 {
     if (!info) return "{}";
     return wine_dbg_sprintf( "{vtable=%p name=%s (%s)}",
@@ -154,7 +155,7 @@ static inline void *get_this_pointer( const this_ptr_offsets *off, void *object 
     return object;
 }
 
-#if !defined(__x86_64__) || defined(__i386_on_x86_64__)
+#ifndef __x86_64__
 #define DEFINE_EXCEPTION_TYPE_INFO(type, base_no, cl1, cl2)  \
 \
 static const cxx_type_info type ## _cxx_type_info = { \
@@ -162,7 +163,7 @@ static const cxx_type_info type ## _cxx_type_info = { \
     & type ##_type_info, \
     { 0, -1, 0 }, \
     sizeof(type), \
-    (cxx_copy_ctor)THISCALL(MSVCRT_ ## type ##_copy_ctor) \
+    (cxx_copy_ctor)THISCALL(type ##_copy_ctor) \
 }; \
 \
 static const cxx_type_info_table type ## _type_info_table = { \
@@ -176,7 +177,7 @@ static const cxx_type_info_table type ## _type_info_table = { \
 \
 static const cxx_exception_type type ## _exception_type = { \
     0, \
-    (cxx_copy_ctor)THISCALL(MSVCRT_ ## type ## _dtor), \
+    (cxx_copy_ctor)THISCALL(type ## _dtor), \
     NULL, \
     & type ## _type_info_table \
 };
@@ -212,11 +213,11 @@ static cxx_exception_type type ##_exception_type = { \
 static void init_ ## type ## _cxx(char *base) \
 { \
     type ## _cxx_type_info.type_info  = (char *)&type ## _type_info - base; \
-    type ## _cxx_type_info.copy_ctor  = (char *)MSVCRT_ ## type ## _copy_ctor - base; \
+    type ## _cxx_type_info.copy_ctor  = (char *)type ## _copy_ctor - base; \
     type ## _type_info_table.info[0]   = (char *)&type ## _cxx_type_info - base; \
     type ## _type_info_table.info[1]   = (char *)cl1 - base; \
     type ## _type_info_table.info[2]   = (char *)cl2 - base; \
-    type ## _exception_type.destructor      = (char *)MSVCRT_ ## type ## _dtor - base; \
+    type ## _exception_type.destructor      = (char *)type ## _dtor - base; \
     type ## _exception_type.type_info_table = (char *)&type ## _type_info_table - base; \
 }
 #endif

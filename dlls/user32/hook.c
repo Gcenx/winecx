@@ -62,21 +62,18 @@
  *     WH_MOUSE_LL                  Implemented but should use SendMessage instead
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdarg.h>
 #include <assert.h>
 
 #include "windef.h"
 #include "winbase.h"
+#include "winnls.h"
 #include "wingdi.h"
 #include "winuser.h"
 #include "winerror.h"
 #include "win.h"
 #include "user_private.h"
 #include "wine/server.h"
-#include "wine/unicode.h"
 #include "wine/asm.h"
 #include "wine/debug.h"
 #include "winternl.h"
@@ -187,7 +184,7 @@ static HHOOK set_windows_hook( INT id, HOOKPROC proc, HINSTANCE inst, DWORD tid,
         if (inst) /* make proc relative to the module base */
         {
             req->proc = wine_server_client_ptr( TRUNCCAST(void *, (char *)proc - (char *)inst) );
-            wine_server_add_data( req, module, strlenW(module) * sizeof(WCHAR) );
+            wine_server_add_data( req, module, lstrlenW(module) * sizeof(WCHAR) );
         }
         else req->proc = wine_server_client_ptr( proc );
 
@@ -390,7 +387,7 @@ void *get_hook_proc( void *proc, const WCHAR *module, HMODULE *free_module )
             static const WCHAR szQwMain[] = {'Q','W','M','A','I','N','.','D','L','L',0};
             static const WCHAR szQwWin[] = {'Q','W','W','I','N','.','D','L','L',0};
 
-            ptr = strrchrW(module,'\\');
+            ptr = wcsrchr(module,'\\');
             if (!ptr) ptr = module; else ptr++;
             if (lstrcmpiW(ptr,szQwMain)==0 || lstrcmpiW(ptr,szQwWin)==0)
             {
@@ -414,7 +411,6 @@ void *get_hook_proc( void *proc, const WCHAR *module, HMODULE *free_module )
 static LRESULT call_hook( struct hook_info *info, INT code, WPARAM wparam, LPARAM lparam )
 {
     DWORD_PTR ret = 0;
-    LRESULT lres;
 
     if (info->tid)
     {
@@ -428,23 +424,19 @@ static LRESULT call_hook( struct hook_info *info, INT code, WPARAM wparam, LPARA
         switch(info->id)
         {
         case WH_KEYBOARD_LL:
-            lres = MSG_SendInternalMessageTimeout( info->pid, info->tid, WM_WINE_KEYBOARD_LL_HOOK,
-                wparam, (LPARAM)&h_extra, SMTO_ABORTIFHUNG, get_ll_hook_timeout(), &ret );
+            MSG_SendInternalMessageTimeout( info->pid, info->tid, WM_WINE_KEYBOARD_LL_HOOK,
+                                            wparam, (LPARAM)&h_extra, SMTO_ABORTIFHUNG,
+                                            get_ll_hook_timeout(), &ret );
             break;
         case WH_MOUSE_LL:
-            lres = MSG_SendInternalMessageTimeout( info->pid, info->tid, WM_WINE_MOUSE_LL_HOOK,
-                wparam, (LPARAM)&h_extra, SMTO_ABORTIFHUNG, get_ll_hook_timeout(), &ret );
+            MSG_SendInternalMessageTimeout( info->pid, info->tid, WM_WINE_MOUSE_LL_HOOK,
+                                            wparam, (LPARAM)&h_extra, SMTO_ABORTIFHUNG,
+                                            get_ll_hook_timeout(), &ret );
             break;
         default:
             ERR("Unknown hook id %d\n", info->id);
             assert(0);
             break;
-        }
-
-        if (!lres && GetLastError() == ERROR_TIMEOUT)
-        {
-            TRACE("Hook %p timed out; removing it.\n", info->handle);
-            UnhookWindowsHookEx( info->handle );
         }
     }
     else if (info->proc)
@@ -486,7 +478,7 @@ static LRESULT call_hook( struct hook_info *info, INT code, WPARAM wparam, LPARA
     }
 
     if (info->id == WH_KEYBOARD_LL || info->id == WH_MOUSE_LL)
-        interlocked_xchg_add( &global_key_state_counter, 1 );  /* force refreshing the key state cache */
+        InterlockedIncrement( &global_key_state_counter );  /* force refreshing the key state cache */
 
     return ret;
 }
@@ -781,7 +773,7 @@ HWINEVENTHOOK WINAPI SetWinEventHook(DWORD event_min, DWORD event_max,
         if (inst) /* make proc relative to the module base */
         {
             req->proc = wine_server_client_ptr( TRUNCCAST(void *, (char *)proc - (char *)inst) );
-            wine_server_add_data( req, module, strlenW(module) * sizeof(WCHAR) );
+            wine_server_add_data( req, module, lstrlenW(module) * sizeof(WCHAR) );
         }
         else req->proc = wine_server_client_ptr( proc );
 

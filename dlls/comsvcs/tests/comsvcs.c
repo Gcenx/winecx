@@ -176,9 +176,6 @@ static DWORD WINAPI com_thread(void *arg)
 
 static void create_dispenser(void)
 {
-    static const WCHAR pool0[] = {'S','C','.','P','o','o','l',' ','0',' ','0',0};
-    static const WCHAR pool1[] = {'S','C','.','P','o','o','l',' ','1',' ','1',0};
-    static const WCHAR data[]  = {'d','a','t','a','1',0};
     HRESULT hr;
     IDispenserManager *dispenser = NULL;
     IHolder *holder1 = NULL, *holder2 = NULL, *holder3 = NULL;
@@ -200,10 +197,11 @@ static void create_dispenser(void)
     ok(!WaitForSingleObject(thread, 1000), "wait failed\n");
     GetExitCodeThread(thread, &ret);
     ok(ret == CO_E_NOTINITIALIZED, "got unexpected hr %#x\n", ret);
+    CloseHandle(thread);
 
     init_test_driver(&driver);
 
-    hr = IDispenserManager_RegisterDispenser(dispenser, &driver.IDispenserDriver_iface, pool0, &holder1);
+    hr = IDispenserManager_RegisterDispenser(dispenser, &driver.IDispenserDriver_iface, L"SC.Pool 0 0", &holder1);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     /* The above call creates an MTA thread, but we need to wait for it to
@@ -213,12 +211,13 @@ static void create_dispenser(void)
     ok(!WaitForSingleObject(thread, 20000), "wait failed\n");
     GetExitCodeThread(thread, &ret);
     ok(ret == S_OK, "got unexpected hr %#x\n", ret);
+    CloseHandle(thread);
 
-    hr = IDispenserManager_RegisterDispenser(dispenser, &driver.IDispenserDriver_iface, pool0, &holder2);
+    hr = IDispenserManager_RegisterDispenser(dispenser, &driver.IDispenserDriver_iface, L"SC.Pool 0 0", &holder2);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(holder1 != holder2, "same holder object returned\n");
 
-    hr = IDispenserManager_RegisterDispenser(dispenser, &driver.IDispenserDriver_iface, pool1, &holder3);
+    hr = IDispenserManager_RegisterDispenser(dispenser, &driver.IDispenserDriver_iface, L"SC.Pool 1 1", &holder3);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     if(holder1)
@@ -226,7 +225,7 @@ static void create_dispenser(void)
         SET_EXPECT(driver_CreateResource);
         SET_EXPECT(driver_Release);
 
-        str = SysAllocString(data);
+        str = SysAllocString(L"data1");
         hr = IHolder_AllocResource(holder1, (RESTYPID)str, &resid);
         ok(hr == S_OK, "got 0x%08x\n", hr);
         ok(resid == 10, "got %d\n", (int)resid);
@@ -254,7 +253,7 @@ static void create_dispenser(void)
         SET_EXPECT(driver_CreateResource);
         SET_EXPECT(driver_Release);
 
-        str = SysAllocString(data);
+        str = SysAllocString(L"data1");
         hr = IHolder_AllocResource(holder2, (RESTYPID)str, &resid);
         ok(hr == S_OK, "got 0x%08x\n", hr);
         ok(resid == 10, "got %d\n", (int)resid);

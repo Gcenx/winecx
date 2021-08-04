@@ -26,14 +26,6 @@
 #include "mfidl.h"
 #include "rpcproxy.h"
 
-#include "initguid.h"
-#include "mf.h"
-
-#undef INITGUID
-#include <guiddef.h>
-#include "mfapi.h"
-#include "mferror.h"
-
 #include "mf_private.h"
 
 #include "wine/debug.h"
@@ -43,6 +35,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 
 static HINSTANCE mf_instance;
+extern const GUID CLSID_FileSchemePlugin;
 
 struct activate_object
 {
@@ -96,7 +89,8 @@ static ULONG WINAPI activate_object_Release(IMFActivate *iface)
 
     if (!refcount)
     {
-        activate->funcs->free_private(activate->context);
+        if (activate->funcs->free_private)
+            activate->funcs->free_private(activate->context);
         if (activate->object)
             IUnknown_Release(activate->object);
         IMFAttributes_Release(activate->attributes);
@@ -402,14 +396,23 @@ static HRESULT WINAPI activate_object_ActivateObject(IMFActivate *iface, REFIID 
 
 static HRESULT WINAPI activate_object_ShutdownObject(IMFActivate *iface)
 {
-    FIXME("%p.\n", iface);
+    struct activate_object *activate = impl_from_IMFActivate(iface);
+    IUnknown *object;
 
-    return E_NOTIMPL;
+    TRACE("%p.\n", iface);
+
+    if ((object = InterlockedCompareExchangePointer((void **)&activate->object, NULL, activate->object)))
+    {
+        activate->funcs->shutdown_object(activate->context, object);
+        IUnknown_Release(object);
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI activate_object_DetachObject(IMFActivate *iface)
 {
-    FIXME("%p.\n", iface);
+    TRACE("%p.\n", iface);
 
     return E_NOTIMPL;
 }
@@ -751,17 +754,20 @@ static HRESULT WINAPI file_scheme_handler_BeginCreateObject(IMFSchemeHandler *if
 
     hr = MFCreateAsyncResult(&context->IUnknown_iface, &handler->IMFAsyncCallback_iface, (IUnknown *)caller, &item);
     IUnknown_Release(&context->IUnknown_iface);
-    IMFAsyncResult_Release(caller);
     if (SUCCEEDED(hr))
     {
         if (SUCCEEDED(hr = MFPutWorkItemEx(MFASYNC_CALLBACK_QUEUE_IO, item)))
         {
             if (cancel_cookie)
-                IMFAsyncResult_GetState(item, cancel_cookie);
+            {
+                *cancel_cookie = (IUnknown *)caller;
+                IUnknown_AddRef(*cancel_cookie);
+            }
         }
 
         IMFAsyncResult_Release(item);
     }
+    IMFAsyncResult_Release(caller);
 
     return hr;
 }
@@ -1020,7 +1026,7 @@ static const struct class_object
 }
 class_objects[] =
 {
-    { &CLSID_FileSchemeHandler, &file_scheme_handler_factory.IClassFactory_iface },
+    { &CLSID_FileSchemePlugin, &file_scheme_handler_factory.IClassFactory_iface },
 };
 
 /*******************************************************************************
@@ -1081,14 +1087,128 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
     return TRUE;
 }
 
+static HRESULT prop_string_vector_append(PROPVARIANT *vector, unsigned int *capacity, BOOL unique, const WCHAR *str)
+{
+    WCHAR *ptrW;
+    int len, i;
+
+    if (unique)
+    {
+        for (i = 0; i < vector->calpwstr.cElems; ++i)
+        {
+            if (!lstrcmpW(vector->calpwstr.pElems[i], str))
+                return S_OK;
+        }
+    }
+
+    if (!*capacity || *capacity - 1 < vector->calpwstr.cElems)
+    {
+        unsigned int new_count;
+        WCHAR **ptr;
+
+        new_count = *capacity ? *capacity * 2 : 10;
+        ptr = CoTaskMemRealloc(vector->calpwstr.pElems, new_count * sizeof(*vector->calpwstr.pElems));
+        if (!ptr)
+            return E_OUTOFMEMORY;
+        vector->calpwstr.pElems = ptr;
+        *capacity = new_count;
+    }
+
+    len = lstrlenW(str);
+    if (!(vector->calpwstr.pElems[vector->calpwstr.cElems] = ptrW = CoTaskMemAlloc((len + 1) * sizeof(WCHAR))))
+        return E_OUTOFMEMORY;
+
+    lstrcpyW(ptrW, str);
+    vector->calpwstr.cElems++;
+
+    return S_OK;
+}
+
+static int __cdecl qsort_string_compare(const void *a, const void *b)
+{
+    const WCHAR *left = *(const WCHAR **)a, *right = *(const WCHAR **)b;
+    return lstrcmpW(left, right);
+}
+
+static HRESULT mf_get_handler_strings(const WCHAR *path, WCHAR filter, unsigned int maxlen, PROPVARIANT *dst)
+{
+    static const HKEY hkey_roots[2] = { HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE };
+    unsigned int capacity = 0, count, size;
+    HRESULT hr = S_OK;
+    int i, index;
+    WCHAR *buffW;
+
+    buffW = heap_calloc(maxlen, sizeof(*buffW));
+    if (!buffW)
+        return E_OUTOFMEMORY;
+
+    memset(dst, 0, sizeof(*dst));
+    dst->vt = VT_VECTOR | VT_LPWSTR;
+
+    for (i = 0; i < ARRAY_SIZE(hkey_roots); ++i)
+    {
+        HKEY hkey;
+
+        if (RegOpenKeyW(hkey_roots[i], path, &hkey))
+            continue;
+
+        index = 0;
+        size = maxlen;
+        count = dst->calpwstr.cElems;
+        while (!RegEnumKeyExW(hkey, index++, buffW, &size, NULL, NULL, NULL, NULL))
+        {
+            if (filter && !wcschr(buffW, filter))
+                continue;
+
+            if (FAILED(hr = prop_string_vector_append(dst, &capacity, i > 0, buffW)))
+                break;
+            size = maxlen;
+        }
+
+        /* Sort last pass results. */
+        qsort(&dst->calpwstr.pElems[count], dst->calpwstr.cElems - count, sizeof(*dst->calpwstr.pElems),
+                qsort_string_compare);
+
+        RegCloseKey(hkey);
+    }
+
+    if (FAILED(hr))
+        PropVariantClear(dst);
+
+    heap_free(buffW);
+
+    return hr;
+}
+
 /***********************************************************************
  *      MFGetSupportedMimeTypes (mf.@)
  */
-HRESULT WINAPI MFGetSupportedMimeTypes(PROPVARIANT *array)
+HRESULT WINAPI MFGetSupportedMimeTypes(PROPVARIANT *dst)
 {
-    FIXME("(%p) stub\n", array);
+    unsigned int maxlen;
 
-    return E_NOTIMPL;
+    TRACE("%p.\n", dst);
+
+    if (!dst)
+        return E_POINTER;
+
+    /* According to RFC4288 it's 127/127 characters. */
+    maxlen = 127 /* type */ + 1 /* / */ + 127 /* subtype */ + 1;
+    return mf_get_handler_strings(L"Software\\Microsoft\\Windows Media Foundation\\ByteStreamHandlers", '/',
+            maxlen,  dst);
+}
+
+/***********************************************************************
+ *      MFGetSupportedSchemes (mf.@)
+ */
+HRESULT WINAPI MFGetSupportedSchemes(PROPVARIANT *dst)
+{
+    TRACE("%p.\n", dst);
+
+    if (!dst)
+        return E_POINTER;
+
+    return mf_get_handler_strings(L"Software\\Microsoft\\Windows Media Foundation\\SchemeHandlers", 0, 64, dst);
 }
 
 /***********************************************************************
@@ -1145,26 +1265,200 @@ HRESULT WINAPI MFEnumDeviceSources(IMFAttributes *attributes, IMFActivate ***sou
     return S_OK;
 }
 
-static HRESULT evr_create_object(IMFAttributes *attributes, void *user_context, IUnknown **obj)
+struct simple_type_handler
 {
-    FIXME("%p, %p, %p.\n", attributes, user_context, obj);
-
-    return E_NOTIMPL;
-}
-
-static void evr_free_private(void *user_context)
-{
-}
-
-static const struct activate_funcs evr_activate_funcs =
-{
-    evr_create_object,
-    evr_free_private,
+    IMFMediaTypeHandler IMFMediaTypeHandler_iface;
+    LONG refcount;
+    IMFMediaType *media_type;
+    CRITICAL_SECTION cs;
 };
 
-HRESULT WINAPI MFCreateVideoRendererActivate(HWND hwnd, IMFActivate **activate)
+static struct simple_type_handler *impl_from_IMFMediaTypeHandler(IMFMediaTypeHandler *iface)
 {
-    TRACE("%p, %p.\n", hwnd, activate);
+    return CONTAINING_RECORD(iface, struct simple_type_handler, IMFMediaTypeHandler_iface);
+}
 
-    return create_activation_object(hwnd, &evr_activate_funcs, activate);
+static HRESULT WINAPI simple_type_handler_QueryInterface(IMFMediaTypeHandler *iface, REFIID riid, void **obj)
+{
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+
+    if (IsEqualIID(riid, &IID_IMFMediaTypeHandler) ||
+            IsEqualIID(riid, &IID_IUnknown))
+    {
+        *obj = iface;
+        IMFMediaTypeHandler_AddRef(iface);
+        return S_OK;
+    }
+
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI simple_type_handler_AddRef(IMFMediaTypeHandler *iface)
+{
+    struct simple_type_handler *handler = impl_from_IMFMediaTypeHandler(iface);
+    ULONG refcount = InterlockedIncrement(&handler->refcount);
+
+    TRACE("%p, refcount %u.\n", iface, refcount);
+
+    return refcount;
+}
+
+static ULONG WINAPI simple_type_handler_Release(IMFMediaTypeHandler *iface)
+{
+    struct simple_type_handler *handler = impl_from_IMFMediaTypeHandler(iface);
+    ULONG refcount = InterlockedDecrement(&handler->refcount);
+
+    TRACE("%p, refcount %u.\n", iface, refcount);
+
+    if (!refcount)
+    {
+        if (handler->media_type)
+            IMFMediaType_Release(handler->media_type);
+        DeleteCriticalSection(&handler->cs);
+        heap_free(handler);
+    }
+
+    return refcount;
+}
+
+static HRESULT WINAPI simple_type_handler_IsMediaTypeSupported(IMFMediaTypeHandler *iface, IMFMediaType *in_type,
+        IMFMediaType **out_type)
+{
+    struct simple_type_handler *handler = impl_from_IMFMediaTypeHandler(iface);
+    DWORD flags = 0;
+    HRESULT hr;
+
+    TRACE("%p, %p, %p.\n", iface, in_type, out_type);
+
+    if (out_type)
+        *out_type = NULL;
+
+    EnterCriticalSection(&handler->cs);
+    if (!handler->media_type)
+        hr = MF_E_UNEXPECTED;
+    else
+    {
+        if (SUCCEEDED(hr = IMFMediaType_IsEqual(handler->media_type, in_type, &flags)))
+            hr = (flags & (MF_MEDIATYPE_EQUAL_MAJOR_TYPES | MF_MEDIATYPE_EQUAL_FORMAT_TYPES)) ==
+                    (MF_MEDIATYPE_EQUAL_MAJOR_TYPES | MF_MEDIATYPE_EQUAL_FORMAT_TYPES) ? S_OK : E_FAIL;
+    }
+    LeaveCriticalSection(&handler->cs);
+
+    return hr;
+}
+
+static HRESULT WINAPI simple_type_handler_GetMediaTypeCount(IMFMediaTypeHandler *iface, DWORD *count)
+{
+    TRACE("%p, %p.\n", iface, count);
+
+    if (!count)
+        return E_POINTER;
+
+    *count = 1;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI simple_type_handler_GetMediaTypeByIndex(IMFMediaTypeHandler *iface, DWORD index,
+        IMFMediaType **type)
+{
+    struct simple_type_handler *handler = impl_from_IMFMediaTypeHandler(iface);
+
+    TRACE("%p, %u, %p.\n", iface, index, type);
+
+    if (index > 0)
+        return MF_E_NO_MORE_TYPES;
+
+    EnterCriticalSection(&handler->cs);
+    *type = handler->media_type;
+    if (*type)
+        IMFMediaType_AddRef(*type);
+    LeaveCriticalSection(&handler->cs);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI simple_type_handler_SetCurrentMediaType(IMFMediaTypeHandler *iface, IMFMediaType *media_type)
+{
+    struct simple_type_handler *handler = impl_from_IMFMediaTypeHandler(iface);
+
+    TRACE("%p, %p.\n", iface, media_type);
+
+    EnterCriticalSection(&handler->cs);
+    if (handler->media_type)
+        IMFMediaType_Release(handler->media_type);
+    handler->media_type = media_type;
+    if (handler->media_type)
+        IMFMediaType_AddRef(handler->media_type);
+    LeaveCriticalSection(&handler->cs);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI simple_type_handler_GetCurrentMediaType(IMFMediaTypeHandler *iface, IMFMediaType **media_type)
+{
+    struct simple_type_handler *handler = impl_from_IMFMediaTypeHandler(iface);
+
+    TRACE("%p, %p.\n", iface, media_type);
+
+    if (!media_type)
+        return E_POINTER;
+
+    EnterCriticalSection(&handler->cs);
+    *media_type = handler->media_type;
+    if (*media_type)
+        IMFMediaType_AddRef(*media_type);
+    LeaveCriticalSection(&handler->cs);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI simple_type_handler_GetMajorType(IMFMediaTypeHandler *iface, GUID *type)
+{
+    struct simple_type_handler *handler = impl_from_IMFMediaTypeHandler(iface);
+    HRESULT hr;
+
+    TRACE("%p, %p.\n", iface, type);
+
+    EnterCriticalSection(&handler->cs);
+    if (handler->media_type)
+        hr = IMFMediaType_GetGUID(handler->media_type, &MF_MT_MAJOR_TYPE, type);
+    else
+        hr = MF_E_NOT_INITIALIZED;
+    LeaveCriticalSection(&handler->cs);
+
+    return hr;
+}
+
+static const IMFMediaTypeHandlerVtbl simple_type_handler_vtbl =
+{
+    simple_type_handler_QueryInterface,
+    simple_type_handler_AddRef,
+    simple_type_handler_Release,
+    simple_type_handler_IsMediaTypeSupported,
+    simple_type_handler_GetMediaTypeCount,
+    simple_type_handler_GetMediaTypeByIndex,
+    simple_type_handler_SetCurrentMediaType,
+    simple_type_handler_GetCurrentMediaType,
+    simple_type_handler_GetMajorType,
+};
+
+HRESULT WINAPI MFCreateSimpleTypeHandler(IMFMediaTypeHandler **handler)
+{
+    struct simple_type_handler *object;
+
+    TRACE("%p.\n", handler);
+
+    object = heap_alloc_zero(sizeof(*object));
+    if (!object)
+        return E_OUTOFMEMORY;
+
+    object->IMFMediaTypeHandler_iface.lpVtbl = &simple_type_handler_vtbl;
+    object->refcount = 1;
+    InitializeCriticalSection(&object->cs);
+
+    *handler = &object->IMFMediaTypeHandler_iface;
+
+    return S_OK;
 }

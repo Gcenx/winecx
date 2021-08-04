@@ -27,11 +27,11 @@
 #include "winbase.h"
 
 #include "wine/debug.h"
-#include "wine/library.h"
 #include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(opencl);
 
+#define CL_SILENCE_DEPRECATION
 #if defined(HAVE_CL_CL_H)
 #define CL_USE_DEPRECATED_OPENCL_1_1_APIS
 #define CL_USE_DEPRECATED_OPENCL_1_2_APIS

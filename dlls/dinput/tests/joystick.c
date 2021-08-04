@@ -405,17 +405,13 @@ static BOOL CALLBACK EnumJoysticks(const DIDEVICEINSTANCEA *lpddi, void *pvRef)
     ok(SUCCEEDED(hr), "IDirectInput_GetProperty() for DIPROP_GUIDANDPATH failed: %08x\n", hr);
 
     {
-        static const WCHAR formatW[] = {'\\','\\','?','\\','%','*','[','^','#',']','#','v','i','d','_',
-                                        '%','0','4','x','&','p','i','d','_','%','0','4','x',0};
-        static const WCHAR miW[] = {'m','i','_',0};
-        static const WCHAR igW[] = {'i','g','_',0};
         int vid, pid;
 
         _wcslwr(dpg.wszPath);
-        count = swscanf(dpg.wszPath, formatW, &vid, &pid);
+        count = swscanf(dpg.wszPath, L"\\\\?\\%*[^#]#vid_%04x&pid_%04x", &vid, &pid);
         ok(count == 2, "DIPROP_GUIDANDPATH path has wrong format. Expected count: 2 Got: %i Path: %s\n",
            count, wine_dbgstr_w(dpg.wszPath));
-        ok(wcsstr(dpg.wszPath, miW) != 0 || wcsstr(dpg.wszPath, igW) != 0,
+        ok(wcsstr(dpg.wszPath, L"mi_") != 0 || wcsstr(dpg.wszPath, L"ig_") != 0,
            "DIPROP_GUIDANDPATH path should contain either 'ig_' or 'mi_' substring. Path: %s\n",
            wine_dbgstr_w(dpg.wszPath));
     }
@@ -598,11 +594,33 @@ static BOOL CALLBACK EnumJoysticks(const DIDEVICEINSTANCEA *lpddi, void *pvRef)
         {
             DWORD effect_status;
             struct DIPROPDWORD diprop_word;
+            void *tmp;
             GUID guid = {0};
+            DIEFFECT effect_empty;
 
             hr = IDirectInputEffect_Initialize(effect, hInstance, data->version,
                                                &effect_data.guid);
             ok(hr==DI_OK,"IDirectInputEffect_Initialize failed: %08x\n", hr);
+
+            /* Test SetParameters with NULL pointers */
+            tmp = effect_data.eff.rgdwAxes;
+            effect_data.eff.rgdwAxes = NULL;
+            hr = IDirectInputEffect_SetParameters(effect, &effect_data.eff, DIEP_AXES);
+            ok(hr==DIERR_INVALIDPARAM,"IDirectInputEffect_SetParameters should fail with INVALIDPARAM, got: %08x\n", hr);
+            effect_data.eff.rgdwAxes = tmp;
+
+            tmp = effect_data.eff.rglDirection;
+            effect_data.eff.rglDirection = NULL;
+            hr = IDirectInputEffect_SetParameters(effect, &effect_data.eff, DIEP_DIRECTION);
+            ok(hr==DIERR_INVALIDPARAM,"IDirectInputEffect_SetParameters should fail with INVALIDPARAM, got: %08x\n", hr);
+            effect_data.eff.rglDirection = tmp;
+
+            tmp = effect_data.eff.lpvTypeSpecificParams;
+            effect_data.eff.lpvTypeSpecificParams = NULL;
+            hr = IDirectInputEffect_SetParameters(effect, &effect_data.eff, DIEP_TYPESPECIFICPARAMS);
+            ok(hr==DIERR_INVALIDPARAM,"IDirectInputEffect_SetParameters should fail with INVALIDPARAM, got: %08x\n", hr);
+            effect_data.eff.lpvTypeSpecificParams = tmp;
+
             hr = IDirectInputEffect_SetParameters(effect, &effect_data.eff, DIEP_AXES | DIEP_DIRECTION |
                                                   DIEP_TYPESPECIFICPARAMS);
             ok(hr==DI_OK,"IDirectInputEffect_SetParameters failed: %08x\n", hr);
@@ -637,7 +655,13 @@ static BOOL CALLBACK EnumJoysticks(const DIDEVICEINSTANCEA *lpddi, void *pvRef)
             hr = IDirectInputEffect_GetEffectStatus(effect, &effect_status);
             ok(hr==DI_OK,"IDirectInputEffect_GetEffectStatus() failed: %08x\n", hr);
             ok(effect_status==0,"IDirectInputEffect_GetEffectStatus() reported effect as started\n");
-            hr = IDirectInputEffect_SetParameters(effect, &effect_data.eff, DIEP_START);
+            /* SetParameters with a zeroed-out DIEFFECT and flags=0 should do nothing. */
+            memset(&effect_empty, 0, sizeof(effect_empty));
+            effect_empty.dwSize = sizeof(effect_empty);
+            hr = IDirectInputEffect_SetParameters(effect, &effect_empty, 0);
+            ok(hr==DI_NOEFFECT,"IDirectInputEffect_SetParameters failed: %08x\n", hr);
+            /* Start effect with SetParameters and a zeroed-out DIEFFECT. */
+            hr = IDirectInputEffect_SetParameters(effect, &effect_empty, DIEP_START);
             ok(hr==DI_OK,"IDirectInputEffect_SetParameters failed: %08x\n", hr);
             hr = IDirectInputEffect_GetEffectStatus(effect, &effect_status);
             ok(hr==DI_OK,"IDirectInputEffect_GetEffectStatus() failed: %08x\n", hr);

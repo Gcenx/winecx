@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/perl
 
 # Copyright 2002 Patrik Stridvall
 #
@@ -18,6 +18,7 @@
 #
 
 use strict;
+use warnings 'all';
 
 BEGIN {
     $0 =~ m%^(.*?/?tools)/winapi/winapi_test$%;
@@ -177,41 +178,74 @@ sub _find_align_kind_size($) {
 	$align = $pointer_size;
 	$kind = "pointer";
 	$size = $pointer_size;
+    } elsif (/^(?:void|VOID)$/) {
+	$align = 4;
+	$kind = "signed";
+	$size = 4;
     } elsif(/^char$/) {
 	$align = 1;
 	$kind = "char";
 	$size = 1;
-    } elsif(/^(?:(signed|unsigned)\s+)?(?:__int8|char|byte)$/) {
+    } elsif(/^(?:(signed|unsigned)\s+)?(?:__int8|char)$/) {
 	$align = 1;
 	$kind = defined($1) ? $1 : "signed";
+	$size = 1;
+    } elsif(/^CHAR$/) {
+	$align = 1;
+	$kind = "signed";
+	$size = 1;
+    } elsif(/^(?:byte|BOOLEAN|BYTE|UCHAR)$/) {
+	$align = 1;
+	$kind = "unsigned";
 	$size = 1;
     } elsif (/^(?:(signed|unsigned)\s+)?(?:__int16|short(?:\s+int)?)$/) {
 	$align = 2;
 	$kind = defined($1) ? $1 : "signed";
 	$size = 2;
-    } elsif (/^(?:wchar_t)$/) {
+    } elsif (/^SHORT$/) {
 	$align = 2;
 	$kind = "signed";
 	$size = 2;
+    } elsif (/^(?:char16_t|wchar_t|USHORT|WCHAR|WORD)$/) {
+	$align = 2;
+	$kind = "unsigned";
+	$size = 2;
     } elsif (/^(signed|unsigned)$/) {
 	$align = 4;
-	$kind = defined($1) ? $1 : "signed";
+	$kind = $1;
 	$size = 4;
     } elsif (/^(?:(signed|unsigned)\s+)?(?:__int32|int)$/) {
 	$align = 4;
 	$kind = defined($1) ? $1 : "signed";
 	$size = 4;
-    } elsif (/^(?:(signed|unsigned)\s+)?(?:long(?:\s+int)?)$/) {
-	$align = $pointer_size;
-	$kind = defined($1) ? $1 : "signed";
-	$size = $pointer_size;
-    } elsif (/^(?:float)$/) {
+    } elsif (/^(?:BOOL|INT|LONG)$/) {
+	$align = 4;
+	$kind = "signed";
+	$size = 4;
+    } elsif (/^(?:DWORD|FOURCC|LCID|UINT|ULONG)$/) {
+	$align = 4;
+	$kind = "unsigned";
+	$size = 4;
+    } elsif (/^(?:float|FLOAT)$/) {
 	$align = 4;
 	$kind = "float";
+	$size = 4;
+    } elsif (/^(?:(signed|unsigned)\s+)?(?:long(?:\s+int)?)$/) {
+        # 'long' is always 4 bytes on Windows.
+	$align = 4;
+	$kind = defined($1) ? $1 : "signed";
 	$size = 4;
     } elsif (/^(?:(signed|unsigned)\s+)?__int64$/) {
 	$align = 8;
 	$kind = defined($1) ? $1 : "signed";
+	$size = 8;
+    } elsif (/^(?:INT64|LONG64|LONGLONG)$/) {
+	$align = 8;
+	$kind = "signed";
+	$size = 8;
+    } elsif (/^(?:UINT64|ULONG64|DWORD64|ULONGLONG|DWORDLONG)$/) {
+	$align = 8;
+	$kind = "unsigned";
 	$size = 8;
     } elsif (/^(?:double|DOUBLE|DATE)$/) {
 	$align = 8;
@@ -221,62 +255,42 @@ sub _find_align_kind_size($) {
 	$align = 4;
 	$kind = "float";
 	$size = 12;
-    } elsif (/^H(?:DC|BITMAP|BRUSH|ICON|INSTANCE|KEY|MENU|METAFILE|WND)$/) {
+    } elsif (/^(?:INT|LONG)_PTR$/) {
+	$align = $pointer_size;
+	$kind = "signed";
+	$size = $pointer_size;
+    } elsif (/^(?:UINT|MMVERSION|ULONG|DWORD)_PTR$/) {
+	$align = $pointer_size;
+	$kind = "unsigned";
+	$size = $pointer_size;
+    } elsif (/^H(?:ANDLE|DC|BITMAP|BRUSH|ICON|INSTANCE|KEY|MENU|METAFILE|MMIO|TASK|WND)$/) {
 	$align = $pointer_size;
 	$kind = "pointer";
 	$size = $pointer_size;
-    } elsif (/^LP(?:BYTE|CSTR|CWSTR|DWORD|STR|VOID|WSTR)$/) {
+    } elsif (/^(?:HPSTR|LP[A-Z0-9_]+|PVOID)$/) {
 	$align = $pointer_size;
 	$kind = "pointer";
 	$size = $pointer_size;
-    } elsif (/^(?:FILETIME)$/) {
+    } elsif (/^POINTS$/) {
+	$align = 2;
+	$kind = "struct";
+	$size = 4;
+    } elsif (/^(?:FILETIME|LUID|POINT|POINTL)$/) {
 	$align = 4;
 	$kind = "struct";
 	$size = 8;
-    } elsif (/^GUID$/) {
+    } elsif (/^(?:CLSID|GUID|RECT|RECTL)$/) {
 	$align = 4;
 	$kind = "struct";
 	$size = 16;
-    } elsif (/^(?:VOID)$/) {
- 	$align = 4;
- 	$kind = "signed";
- 	$size = 4;
-    } elsif (/^(?:SHORT)$/) {
-	$align = 2;
-	$kind = "unsigned";
-	$size = 2;
-    } elsif (/^(?:BYTE)$/) {
-	$align = 1;
-	$kind = "unsigned";
-	$size = 1;
-    } elsif (/^(?:DWORD)$/) {
-	$align = 4;
-	$kind = "unsigned";
-	$size = 4;
-    } elsif (/^(?:WORD)$/) {
-	$align = 2;
-	$kind = "unsigned";
-	$size = 2;
-    } elsif (/^(?:INT64|LONG64|LONGLONG)$/) {
-	$align = 8;
- 	$kind = "signed";
- 	$size = 8;
-    } elsif (/^(?:UINT64|ULONG64|DWORD64|ULONGLONG|DWORDLONG)$/) {
-	$align = 8;
- 	$kind = "unsigned";
- 	$size = 8;
     } elsif (/^(?:LARGE_INTEGER)$/) {
 	$align = 8;
 	$kind = "union";
 	$size = 8;
-    } elsif (/^(?:POINTS)$/) {
-	$align = 2;
-	$kind = "struct";
-	$size = 4;
     } elsif (/^(struct|union)$/) {
 	$kind = $1;
 	if (!$size_parse_reported{$_}) {
-	    $output->write("$type_name: can't parse type\n");
+	    $output->write("cannot compute the size and alignment of $type_name types\n");
 	    $size_parse_reported{$_} = 1;
 	}
     } elsif (/^\w+\s*\((?:\s*CALLBACK|\s*NTAPI|\s*WINAPI)?\s*\*\s*\)\s*\(.*?\)$/) {
@@ -396,7 +410,7 @@ foreach my $file (@files) {
 	my $preprocessor = shift;
 
         #print "found_preprocessor: $begin_line: [$_]\n";
-	if ($preprocessor =~ /^\#\s*include\s+[\"<]pshpack(\d+)\.h[\">]$/) {
+	if ($preprocessor =~ /^\#\s*include\s+[\"<]pshpack(\d)\.h[\">]$/) {
 	    push @packs, $1 unless @ifdefs && !$ifdefs[$#ifdefs];
             #print "found pack $1 on line $begin_line\n";
 	} elsif($preprocessor =~ /^\#\s*include\s+[\"<]poppack\.h[\">]$/) {
@@ -405,8 +419,8 @@ foreach my $file (@files) {
 	} elsif ($preprocessor =~ /^\#\s*ifdef\s+_WIN64/) {
             push @ifdefs, ($pointer_size == 8);
 	} elsif ($preprocessor =~ /^\#\s*ifndef\s+_WIN64/) {
-            push @ifdefs, ($pointer_size == 4);
-	} elsif ($preprocessor =~ /^\#\s*elif\s+defined(_WIN64)/) {
+            push @ifdefs, ($pointer_size != 8);
+	} elsif ($preprocessor =~ /^\#\s*elif\s+defined\s*\(\s*_WIN64\s*\)/) {
             $ifdefs[$#ifdefs] = ($pointer_size == 8);
 	} elsif ($preprocessor =~ /^\#\s*ifdef\s/) {
             push @ifdefs, 2;
@@ -503,10 +517,6 @@ sub output_header($$$) {
     print OUT " */\n";
     print OUT "\n";
 
-    print OUT "#define WINVER 0x0501\n";
-    print OUT "#define _WIN32_IE 0x0501\n";
-    print OUT "#define _WIN32_WINNT 0x0501\n";
-    print OUT "\n";
     print OUT "#define WINE_NOWINSOCK\n";
     print OUT "\n";
     foreach my $test (@tests) {
@@ -534,7 +544,7 @@ sub output_header($$$) {
     print OUT "\n";
     print OUT "#if defined(_MSC_VER) && (_MSC_VER >= 1300) && defined(__cplusplus)\n";
     print OUT "# define _TYPE_ALIGNMENT(type) __alignof(type)\n";
-    print OUT "#elif defined(__GNUC__)\n";
+    print OUT "#elif defined(__GNUC__) || defined(__clang__)\n";
     print OUT "# define _TYPE_ALIGNMENT(type) __alignof__(type)\n";
     print OUT "#else\n";
     print OUT "/*\n";
@@ -557,23 +567,23 @@ sub output_header($$$) {
     print OUT " * Test helper macros\n";
     print OUT " */\n";
     print OUT "\n";
-    print OUT "#define TEST_TYPE_SIZE(type, size)             C_ASSERT(sizeof(type) == size);\n";
+    print OUT "#define TEST_TYPE_SIZE(type, size)              C_ASSERT(sizeof(type) == size);\n";
     print OUT "\n";
     print OUT "#ifdef TYPE_ALIGNMENT\n";
-    print OUT "# define TEST_TYPE_ALIGN(type, align)          C_ASSERT(TYPE_ALIGNMENT(type) == align);\n";
+    print OUT "# define TEST_TYPE_ALIGN(type, align)           C_ASSERT(TYPE_ALIGNMENT(type) == align);\n";
     print OUT "#else\n";
     print OUT "# define TEST_TYPE_ALIGN(type, align)\n";
     print OUT "#endif\n";
     print OUT "\n";
     print OUT "#ifdef _TYPE_ALIGNMENT\n";
-    print OUT "# define TEST_TARGET_ALIGN(type, align)        C_ASSERT(_TYPE_ALIGNMENT(*(type)0) == align);\n";
-    print OUT "# define TEST_FIELD_ALIGN(type, field, align)  C_ASSERT(_TYPE_ALIGNMENT(((type*)0)->field) == align);\n";
+    print OUT "# define TEST_TARGET_ALIGN(type, align)         C_ASSERT(_TYPE_ALIGNMENT(*(type)0) == align);\n";
+    print OUT "# define TEST_FIELD_ALIGN(type, field, align)   C_ASSERT(_TYPE_ALIGNMENT(((type*)0)->field) == align);\n";
     print OUT "#else\n";
     print OUT "# define TEST_TARGET_ALIGN(type, align)\n";
     print OUT "# define TEST_FIELD_ALIGN(type, field, align)\n";
     print OUT "#endif\n";
     print OUT "\n";
-    print OUT "#define TEST_FIELD_OFFSET(type, field, offset) C_ASSERT(FIELD_OFFSET(type, field) == offset);\n";
+    print OUT "#define TEST_FIELD_OFFSET(type, field, offset)  C_ASSERT(FIELD_OFFSET(type, field) == offset);\n";
     print OUT "\n";
     print OUT "#define TEST_TARGET_SIZE(type, size)            TEST_TYPE_SIZE(*(type)0, size)\n";
     print OUT "#define TEST_FIELD_SIZE(type, field, size)      TEST_TYPE_SIZE((((type*)0)->field), size)\n";
@@ -683,7 +693,7 @@ sub output_test_pack_type($$$$$$) {
 	    }
 	}
     } elsif ($type_kind eq "signed") {
-	print OUT "    TEST_TYPE_SIGNED($type_name)\n";
+        print OUT "    TEST_TYPE_SIGNED ($type_name)\n";
     } elsif ($type_kind eq "unsigned") {
 	print OUT "    TEST_TYPE_UNSIGNED($type_name)\n";
     }
@@ -863,8 +873,7 @@ foreach my $test_dir (@test_dirs) {
 
 foreach my $header (sort(keys(%{$file2types{$pointer_size}}))) {
     $output->prefix("$header: ");
-    $header =~ s%^include/%%;
-    my $type_name2type = $file2types{$pointer_size}{"include/$header"};
+    my $type_name2type = $file2types{$pointer_size}{$header};
     foreach my $_type_name (sort(keys(%$type_name2type))) {
 	my $type_name = $_type_name;
 
@@ -878,10 +887,10 @@ $output->prefix("$winapi_dir/tests.dat: ");
 foreach my $type_name (sort(keys(%type_names_used))) {
     my $found = 0;
     foreach my $header (sort(keys(%{$file2types{$pointer_size}}))) {
-	my $type_name2type = $file2types{$pointer_size}{"include/$header"};
-	if (exists($type_name2type{$type_name})) {
-	    $found = 1;
-	}
+        if (exists($file2types{$pointer_size}{$header}{$type_name})) {
+            $found = 1;
+            last;
+        }
     }
 
     if (!$found) {

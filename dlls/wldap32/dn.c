@@ -21,6 +21,8 @@
 #include "config.h"
 #include "wine/port.h"
 
+#include <assert.h>
+
 #include <stdarg.h>
 #ifdef HAVE_LDAP_H
 #include <ldap.h>
@@ -34,7 +36,9 @@
 #include "wldap32.h"
 #include "wine/debug.h"
 
+#ifdef HAVE_LDAP
 WINE_DEFAULT_DEBUG_CHANNEL(wldap32);
+#endif
 
 /***********************************************************************
  *      ldap_dn2ufnA     (WLDAP32.@)
@@ -81,7 +85,11 @@ PWCHAR CDECL ldap_dn2ufnW( PWCHAR dn )
 {
     PWCHAR ret = NULL;
 #ifdef HAVE_LDAP
-    char *dnU, * HOSTPTR retU;
+#ifdef __i386_on_x86_64__
+    /* 32on64 FIXME: Bounce retU to 32 bit address space if necessary. */
+    assert(0);
+#else
+    char *dnU, *retU;
 
     TRACE( "(%s)\n", debugstr_w(dn) );
 
@@ -94,6 +102,7 @@ PWCHAR CDECL ldap_dn2ufnW( PWCHAR dn )
     strfreeU( dnU );
     ldap_memfree( retU );
 
+#endif
 #endif
     return ret;
 }
@@ -145,7 +154,11 @@ PWCHAR * CDECL ldap_explode_dnW( PWCHAR dn, ULONG notypes )
 {
     PWCHAR *ret = NULL;
 #ifdef HAVE_LDAP
-    char *dnU, * HOSTPTR * HOSTPTR retU;
+#ifdef __i386_on_x86_64__
+    /* 32on64 FIXME: Bounce retU to 32 bit address space if necessary. */
+    assert(0);
+#else
+    char *dnU, **retU;
 
     TRACE( "(%s, 0x%08x)\n", debugstr_w(dn), notypes );
 
@@ -156,8 +169,9 @@ PWCHAR * CDECL ldap_explode_dnW( PWCHAR dn, ULONG notypes )
     ret = strarrayUtoW( retU );
 
     strfreeU( dnU );
-    ldap_memvfree( (void * HOSTPTR * HOSTPTR)retU );
+    ldap_memvfree( (void **)retU );
 
+#endif
 #endif
     return ret;
 }
@@ -206,17 +220,22 @@ PWCHAR CDECL ldap_get_dnW( WLDAP32_LDAP *ld, WLDAP32_LDAPMessage *entry )
 {
     PWCHAR ret = NULL;
 #ifdef HAVE_LDAP
-    char * HOSTPTR retU;
+#ifdef __i386_on_x86_64__
+    /* 32on64 FIXME: Bounce retU to 32 bit address space if necessary. */
+    assert(0);
+#else
+    char *retU;
 
     TRACE( "(%p, %p)\n", ld, entry );
 
     if (!ld || !entry) return NULL;
 
-    retU = ldap_get_dn( ldap_get( ld ), ldmsg_get( entry ) );
+    retU = ldap_get_dn( ld->ld, entry );
 
     ret = strUtoW( retU );
     ldap_memfree( retU );
 
+#endif
 #endif
     return ret;
 }

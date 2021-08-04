@@ -33,6 +33,8 @@
 
 HMODULE hmscoree;
 
+DEFINE_GUID(IID_ITest2, 0x50adb433, 0xf6c5, 0x3b30, 0x92,0x0a, 0x55,0x57,0x11,0x86,0x75,0x09);
+
 typedef enum _run_type
 {
     run_type_current_working_directory = 0,
@@ -71,7 +73,7 @@ static BOOL write_resource_file(const char *path_tmp, const char *name_res, cons
 static BOOL compile_cs_to_dll(char *source_path, char *dest_path)
 {
     const char *path_csc = "C:\\windows\\Microsoft.NET\\Framework\\v2.0.50727\\csc.exe";
-    char cmdline[MAX_PATH];
+    char cmdline[2 * MAX_PATH + 74];
     char path_temp[MAX_PATH];
     PROCESS_INFORMATION pi;
     STARTUPINFOA si = { 0 };
@@ -148,6 +150,62 @@ static void run_test(BOOL expect_success)
         }
         IClassFactory_Release(classFactory);
     }
+
+}
+
+static void run_registry_test(run_type run)
+{
+    char buffer[256];
+    ITest *test = NULL;
+    HRESULT hr, result_expected;
+    IUnknown *unk = NULL;
+    HKEY hkey;
+    DWORD ret;
+    int i = 0;
+
+    if (run == run_type_exe_directory) result_expected = S_OK;
+    else result_expected = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+
+    sprintf(buffer, "CLSID\\%s", wine_dbgstr_guid(&CLSID_Test), "");
+    ret = RegCreateKeyA( HKEY_CLASSES_ROOT, buffer, &hkey );
+    if (ret == ERROR_ACCESS_DENIED && !IsUserAnAdmin())
+    {
+        win_skip("cannot run the registry tests due to user not being admin\n");
+        RegCloseKey(hkey);
+        return;
+    }
+    ok(ret == ERROR_SUCCESS, "RegCreateKeyA returned %x\n", ret);
+
+    ret = RegSetKeyValueA(hkey, "InprocServer32", NULL, REG_SZ, "mscoree.dll", 11);
+    ok(ret == ERROR_SUCCESS, "RegSetKeyValueA returned %x\n", ret);
+    ret = RegSetKeyValueA(hkey, "InprocServer32", "Assembly", REG_SZ, "comtest, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null", 74);
+    ok(ret == ERROR_SUCCESS, "RegSetKeyValueA returned %x\n", ret);
+    ret = RegSetKeyValueA(hkey, "InprocServer32", "Class", REG_SZ, "DLL.Test", 8);
+    ok(ret == ERROR_SUCCESS, "RegSetKeyValueA returned %x\n", ret);
+    ret = RegSetKeyValueA(hkey, "InprocServer32", "CodeBase", REG_SZ, "file:///U:/invalid/path/to/comtest.dll", 41);
+    ok(ret == ERROR_SUCCESS, "RegSetKeyValueA returned %x\n", ret);
+
+    hr = CoCreateInstance(&CLSID_Test, NULL, CLSCTX_INPROC_SERVER, &IID_ITest, (void**)&test);
+    todo_wine_if(result_expected != S_OK)
+    ok(hr == result_expected, "Expected %x, got %x\n", result_expected, hr);
+
+    if (hr == S_OK)
+    {
+        hr = ITest_Func(test, &i);
+        ok(hr == S_OK, "Got %x\n", hr);
+        ok(i == 42, "Expected 42, got %d\n", i);
+        hr = ITest_QueryInterface(test, &IID_ITest2, (void**)&unk);
+        todo_wine ok(hr == S_OK, "ITest_QueryInterface returned %x\n", hr);
+        if (hr == S_OK) IUnknown_Release(unk);
+        ITest_Release(test);
+    }
+
+    RegDeleteKeyValueA(hkey, "InprocServer32", "CodeBase");
+    RegDeleteKeyValueA(hkey, "InprocServer32", "Class");
+    RegDeleteKeyValueA(hkey, "InprocServer32", "Assembly");
+    RegDeleteKeyValueA(hkey, "InprocServer32", NULL);
+    RegDeleteKeyA(hkey, "InprocServer32");
+    RegCloseKey(hkey);
 }
 
 static void get_dll_path_for_run(char *path_dll, UINT path_dll_size, run_type run)
@@ -247,6 +305,7 @@ static void prepare_and_run_test(const char *dll_source, run_type run)
         SetCurrentDirectoryA(path_tmp);
 
     run_test(run == run_type_exe_directory);
+    run_registry_test(run);
 
 cleanup:
     if (handle_context != NULL && handle_context != INVALID_HANDLE_VALUE)
@@ -315,7 +374,7 @@ static void run_child_process(const char *dll_source, run_type run)
     ret = CreateProcessA(exe, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
     ok(ret, "Could not create process: %u\n", GetLastError());
 
-    winetest_wait_child_process(pi.hProcess);
+    wait_child_process(pi.hProcess);
 
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);

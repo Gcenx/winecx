@@ -191,24 +191,6 @@ static DWORD netconn_verify_cert(netconn_t *conn, PCCERT_CONTEXT cert, HCERTSTOR
         }
     }
 
-    if (err) /* CrossOver hack tracked by bug 6776 */
-    {
-        HKEY hkey;
-        DWORD type, value, size = sizeof(value);
-
-        /* @@ Wine registry key: HKCU\Software\Wine\wininet */
-        if (!RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\wininet", &hkey ))
-        {
-            if (!RegQueryValueExA( hkey, "accept_invalid_certs", 0, &type, (BYTE *)&value, &size ) &&
-                type == REG_DWORD && value)
-            {
-                WARN("certificate is invalid, accepting it anyway\n");
-                err = ERROR_SUCCESS;
-            }
-            RegCloseKey( hkey );
-        }
-    }
-
     if(err) {
         WARN("failed %u\n", err);
         CertFreeCertificateChain(chain);

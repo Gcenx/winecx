@@ -25,7 +25,6 @@
 #include "winreg.h"
 #include "winternl.h"
 #include "wine/asm.h"
-#include "wine/library.h"
 
 #include "pshpack1.h"
 
@@ -102,7 +101,8 @@ typedef struct
 typedef struct
 {
     WORD null;        /* Always 0 */
-    DWORD old_ss_sp;  /* Stack pointer; used by SwitchTaskTo() */
+    WORD old_sp;      /* Stack pointer; used by SwitchTaskTo() */
+    WORD old_ss;
     WORD heap;        /* Pointer to the local heap information (if any) */
     WORD atomtable;   /* Pointer to the local atom table (if any) */
     WORD stacktop;    /* Top of the stack */
@@ -170,16 +170,13 @@ extern THHOOK *pThhook DECLSPEC_HIDDEN;
     (((offset)+(size) <= pModule->mapping_size) ? \
      (memcpy( buffer, (const char *)pModule->mapping + (offset), (size) ), TRUE) : FALSE)
 
-#define CURRENT_STACK16 ((STACK16FRAME*)MapSL(PtrToUlong(NtCurrentTeb()->SystemReserved1[0])))
-#define CURRENT_DS      (CURRENT_STACK16->ds)
-
 /* push bytes on the 16-bit stack of a thread; return a segptr to the first pushed byte */
 static inline SEGPTR stack16_push( int size )
 {
     STACK16FRAME *frame = CURRENT_STACK16;
     memmove( (char*)frame - size, frame, sizeof(*frame) );
-    NtCurrentTeb()->SystemReserved1[0] = (char *)NtCurrentTeb()->SystemReserved1[0] - size;
-    return (SEGPTR)((char *)NtCurrentTeb()->SystemReserved1[0] + sizeof(*frame));
+    CURRENT_SP -= size;
+    return MAKESEGPTR( CURRENT_SS, CURRENT_SP + sizeof(*frame) );
 }
 
 /* pop bytes from the 16-bit stack of a thread */
@@ -187,7 +184,7 @@ static inline void stack16_pop( int size )
 {
     STACK16FRAME *frame = CURRENT_STACK16;
     memmove( (char*)frame + size, frame, sizeof(*frame) );
-    NtCurrentTeb()->SystemReserved1[0] = (char *)NtCurrentTeb()->SystemReserved1[0] + size;
+    CURRENT_SP += size;
 }
 
 /* dosmem.c */
@@ -232,11 +229,39 @@ extern void NE_DllProcessAttach( HMODULE16 hModule ) DECLSPEC_HIDDEN;
 extern void NE_CallUserSignalProc( HMODULE16 hModule, UINT16 code ) DECLSPEC_HIDDEN;
 
 /* selector.c */
+#define LDT_SIZE 8192
+struct ldt_copy
+{
+    void         *base[LDT_SIZE];
+    unsigned int  limit[LDT_SIZE];
+    unsigned char flags[LDT_SIZE];
+};
+extern const struct ldt_copy *ldt_copy DECLSPEC_HIDDEN;
+
+#define LDT_FLAGS_DATA      0x13  /* Data segment */
+#define LDT_FLAGS_CODE      0x1b  /* Code segment */
+#define LDT_FLAGS_32BIT     0x40  /* Segment is 32-bit (code or stack) */
+
+static inline void *ldt_get_base( WORD sel ) { return ldt_copy->base[sel >> 3]; }
+static inline unsigned int ldt_get_limit( WORD sel ) { return ldt_copy->limit[sel >> 3]; }
+static inline unsigned char ldt_get_flags( WORD sel ) { return ldt_copy->flags[sel >> 3]; }
+
+extern void init_selectors(void) DECLSPEC_HIDDEN;
+extern BOOL ldt_is_system( WORD sel ) DECLSPEC_HIDDEN;
+extern BOOL ldt_is_valid( WORD sel ) DECLSPEC_HIDDEN;
+extern void *ldt_get_ptr( WORD sel, DWORD offset ) DECLSPEC_HIDDEN;
+extern BOOL ldt_get_entry( WORD sel, LDT_ENTRY *entry ) DECLSPEC_HIDDEN;
+extern void ldt_set_entry( WORD sel, LDT_ENTRY entry ) DECLSPEC_HIDDEN;
 extern WORD SELECTOR_AllocBlock( const void *base, DWORD size, unsigned char flags ) DECLSPEC_HIDDEN;
 extern WORD SELECTOR_ReallocBlock( WORD sel, const void *base, DWORD size ) DECLSPEC_HIDDEN;
 extern void SELECTOR_FreeBlock( WORD sel ) DECLSPEC_HIDDEN;
 #define IS_SELECTOR_32BIT(sel) \
-   (wine_ldt_is_system(sel) || (wine_ldt_copy.flags[LOWORD(sel) >> 3] & WINE_LDT_FLAGS_32BIT))
+   (ldt_is_system(sel) || (ldt_copy->flags[LOWORD(sel) >> 3] & LDT_FLAGS_32BIT))
+
+static inline WORD get_cs(void) { WORD res; __asm__( "movw %%cs,%0" : "=r" (res) ); return res; }
+static inline WORD get_ds(void) { WORD res; __asm__( "movw %%ds,%0" : "=r" (res) ); return res; }
+static inline WORD get_fs(void) { WORD res; __asm__( "movw %%fs,%0" : "=r" (res) ); return res; }
+static inline WORD get_gs(void) { WORD res; __asm__( "movw %%gs,%0" : "=r" (res) ); return res; }
 
 /* relay16.c */
 extern int relay_call_from_16( void *entry_point, unsigned char *args16, CONTEXT *context ) DECLSPEC_HIDDEN;
@@ -273,13 +298,14 @@ struct tagSYSLEVEL;
 
 struct kernel_thread_data
 {
-    void               *reserved;       /* stack segment pointer */
+    SEGPTR              stack;          /* 16-bit stack pointer */
     WORD                stack_sel;      /* 16-bit stack selector */
     WORD                htask16;        /* Win16 task handle */
     DWORD               sys_count[4];   /* syslevel mutex entry counters */
     struct tagSYSLEVEL *sys_mutex[4];   /* syslevel mutex pointers */
-    void               *pad[44];        /* change this if you add fields! */
 };
+
+C_ASSERT( sizeof(struct kernel_thread_data) <= sizeof(((TEB *)0)->SystemReserved1) );
 
 static inline struct kernel_thread_data *kernel_get_thread_data(void)
 {

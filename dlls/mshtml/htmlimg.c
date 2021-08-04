@@ -303,8 +303,6 @@ static HRESULT WINAPI HTMLImgElement_get_src(IHTMLImgElement *iface, BSTR *p)
     nsresult nsres;
     HRESULT hres = S_OK;
 
-    static const WCHAR blockedW[] = {'B','L','O','C','K','E','D',':',':',0};
-
     TRACE("(%p)->(%p)\n", This, p);
 
     nsAString_Init(&src_str, NULL);
@@ -312,9 +310,9 @@ static HRESULT WINAPI HTMLImgElement_get_src(IHTMLImgElement *iface, BSTR *p)
     if(NS_SUCCEEDED(nsres)) {
         nsAString_GetData(&src_str, &src);
 
-        if(!wcsnicmp(src, blockedW, ARRAY_SIZE(blockedW)-1)) {
+        if(!wcsnicmp(src, L"BLOCKED::", ARRAY_SIZE(L"BLOCKED::")-1)) {
             TRACE("returning BLOCKED::\n");
-            *p = SysAllocString(blockedW);
+            *p = SysAllocString(L"BLOCKED::");
             if(!*p)
                 hres = E_OUTOFMEMORY;
         }else {
@@ -878,8 +876,6 @@ static HRESULT WINAPI HTMLImageElementFactory_create(IHTMLImageElementFactory *i
     LONG l;
     HRESULT hres;
 
-    static const PRUnichar imgW[] = {'I','M','G',0};
-
     TRACE("(%p)->(%s %s %p)\n", This, debugstr_variant(&width),
             debugstr_variant(&height), img_elem);
 
@@ -892,7 +888,7 @@ static HRESULT WINAPI HTMLImageElementFactory_create(IHTMLImageElementFactory *i
 
     *img_elem = NULL;
 
-    hres = create_nselem(doc, imgW, &nselem);
+    hres = create_nselem(doc, L"IMG", &nselem);
     if(FAILED(hres))
         return hres;
 
@@ -996,8 +992,8 @@ HRESULT HTMLImageElementFactory_Create(HTMLInnerWindow *window, HTMLImageElement
     ret->ref = 1;
     ret->window = window;
 
-    init_dispex(&ret->dispex, (IUnknown*)&ret->IHTMLImageElementFactory_iface,
-            &HTMLImageElementFactory_dispex);
+    init_dispatch(&ret->dispex, (IUnknown*)&ret->IHTMLImageElementFactory_iface,
+                  &HTMLImageElementFactory_dispex, dispex_compat_mode(&window->event_target.dispex));
 
     *ret_val = ret;
     return S_OK;

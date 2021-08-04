@@ -34,7 +34,9 @@
 #include "wldap32.h"
 #include "wine/debug.h"
 
+#ifdef HAVE_LDAP
 WINE_DEFAULT_DEBUG_CHANNEL(wldap32);
+#endif
 
 /***********************************************************************
  *      ldap_deleteA     (WLDAP32.@)
@@ -97,7 +99,7 @@ ULONG CDECL ldap_deleteW( WLDAP32_LDAP *ld, PWCHAR dn )
         if (!dnU) return WLDAP32_LDAP_NO_MEMORY;
     }
 
-    ret = ldap_delete_ext( ldap_get( ld ), dn ? dnU : "", NULL, NULL, &msg );
+    ret = ldap_delete_ext( ld->ld, dn ? dnU : "", NULL, NULL, &msg );
 
     if (ret == LDAP_SUCCESS)
         ret = msg;
@@ -204,7 +206,7 @@ ULONG CDECL ldap_delete_extW( WLDAP32_LDAP *ld, PWCHAR dn, PLDAPControlW *server
         if (!clientctrlsU) goto exit;
     }
 
-    ret = map_error( ldap_delete_ext( ldap_get( ld ), dn ? dnU : "", serverctrlsU, clientctrlsU,
+    ret = map_error( ldap_delete_ext( ld->ld, dn ? dnU : "", serverctrlsU, clientctrlsU,
                                       message ? (int *)message : &dummy ));
 
 exit:
@@ -303,7 +305,7 @@ ULONG CDECL ldap_delete_ext_sW( WLDAP32_LDAP *ld, PWCHAR dn, PLDAPControlW *serv
         if (!clientctrlsU) goto exit;
     }
 
-    ret = map_error( ldap_delete_ext_s( ldap_get( ld ), dn ? dnU : "", serverctrlsU, clientctrlsU ));
+    ret = map_error( ldap_delete_ext_s( ld->ld, dn ? dnU : "", serverctrlsU, clientctrlsU ));
 
 exit:
     strfreeU( dnU );
@@ -369,7 +371,7 @@ ULONG CDECL ldap_delete_sW( WLDAP32_LDAP *ld, PWCHAR dn )
         if (!dnU) return WLDAP32_LDAP_NO_MEMORY;
     }
 
-    ret = map_error( ldap_delete_ext_s( ldap_get( ld ), dn ? dnU : "", NULL, NULL ));
+    ret = map_error( ldap_delete_ext_s( ld->ld, dn ? dnU : "", NULL, NULL ));
     strfreeU( dnU );
 
 #endif

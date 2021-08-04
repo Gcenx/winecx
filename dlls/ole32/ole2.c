@@ -62,6 +62,7 @@ typedef struct tagTrackerWindowInfo
   DWORD        dwOKEffect;
   DWORD*       pdwEffect;
   BOOL       trackingDone;
+  BOOL         inTrackCall;
   HRESULT      returnValue;
 
   BOOL       escPressed;
@@ -100,24 +101,18 @@ static LONG OLE_moduleLockCount = 0;
 /*
  * Name of our registered window class.
  */
-static const WCHAR OLEDD_DRAGTRACKERCLASS[] =
-  {'W','i','n','e','D','r','a','g','D','r','o','p','T','r','a','c','k','e','r','3','2',0};
+static const WCHAR OLEDD_DRAGTRACKERCLASS[] = L"WineDragDropTracker32";
 
 /*
  * Name of menu descriptor property.
  */
-static const WCHAR prop_olemenuW[] =
-  {'P','R','O','P','_','O','L','E','M','e','n','u','D','e','s','c','r','i','p','t','o','r',0};
+static const WCHAR prop_olemenuW[] = L"PROP_OLEMenuDescriptor";
 
 /* property to store IDropTarget pointer */
-static const WCHAR prop_oledroptarget[] =
-  {'O','l','e','D','r','o','p','T','a','r','g','e','t','I','n','t','e','r','f','a','c','e',0};
+static const WCHAR prop_oledroptarget[] = L"OleDropTargetInterface";
 
 /* property to store Marshalled IDropTarget pointer */
-static const WCHAR prop_marshalleddroptarget[] =
-  {'W','i','n','e','M','a','r','s','h','a','l','l','e','d','D','r','o','p','T','a','r','g','e','t',0};
-
-static const WCHAR emptyW[] = { 0 };
+static const WCHAR prop_marshalleddroptarget[] = L"WineMarshalledDropTarget";
 
 /******************************************************************************
  * These are the prototypes of miscellaneous utility methods
@@ -668,7 +663,6 @@ HRESULT WINAPI RevokeDragDrop(HWND hwnd)
  */
 HRESULT WINAPI OleRegGetUserType(REFCLSID clsid, DWORD form, LPOLESTR *usertype)
 {
-  static const WCHAR auxusertypeW[] = {'A','u','x','U','s','e','r','T','y','p','e','\\','%','d',0};
   DWORD valuetype, valuelen;
   WCHAR auxkeynameW[16];
   HKEY    usertypekey;
@@ -694,10 +688,10 @@ HRESULT WINAPI OleRegGetUserType(REFCLSID clsid, DWORD form, LPOLESTR *usertype)
   {
     HKEY auxkey;
 
-    swprintf(auxkeynameW, ARRAY_SIZE(auxkeynameW), auxusertypeW, form);
+    swprintf(auxkeynameW, ARRAY_SIZE(auxkeynameW), L"AuxUserType\\%d", form);
     if (COM_OpenKeyForCLSID(clsid, auxkeynameW, KEY_READ, &auxkey) == S_OK)
     {
-      if (!RegQueryValueExW(auxkey, emptyW, NULL, &valuetype, NULL, &valuelen) && valuelen)
+      if (!RegQueryValueExW(auxkey, L"", NULL, &valuetype, NULL, &valuelen) && valuelen)
       {
         RegCloseKey(usertypekey);
         usertypekey = auxkey;
@@ -708,7 +702,7 @@ HRESULT WINAPI OleRegGetUserType(REFCLSID clsid, DWORD form, LPOLESTR *usertype)
   }
 
   valuelen = 0;
-  if (RegQueryValueExW(usertypekey, emptyW, NULL, &valuetype, NULL, &valuelen))
+  if (RegQueryValueExW(usertypekey, L"", NULL, &valuetype, NULL, &valuelen))
   {
     RegCloseKey(usertypekey);
     return REGDB_E_READREGDB;
@@ -721,12 +715,7 @@ HRESULT WINAPI OleRegGetUserType(REFCLSID clsid, DWORD form, LPOLESTR *usertype)
     return E_OUTOFMEMORY;
   }
 
-  ret = RegQueryValueExW(usertypekey,
-			  emptyW,
-			  NULL,
-			  &valuetype,
-			  (LPBYTE)*usertype,
-			  &valuelen);
+  ret = RegQueryValueExW(usertypekey, L"", NULL, &valuetype, (BYTE *)*usertype, &valuelen);
   RegCloseKey(usertypekey);
   if (ret != ERROR_SUCCESS)
   {
@@ -747,7 +736,6 @@ HRESULT WINAPI DoDragDrop (
   DWORD       dwOKEffect,    /* [in] effects allowed by the source */
   DWORD       *pdwEffect)    /* [out] ptr to effects of the source */
 {
-  static const WCHAR trackerW[] = {'T','r','a','c','k','e','r','W','i','n','d','o','w',0};
   TrackerWindowInfo trackerInfo;
   HWND            hwndTrackWindow;
   MSG             msg;
@@ -766,11 +754,12 @@ HRESULT WINAPI DoDragDrop (
   trackerInfo.dwOKEffect        = dwOKEffect;
   trackerInfo.pdwEffect         = pdwEffect;
   trackerInfo.trackingDone      = FALSE;
+  trackerInfo.inTrackCall       = FALSE;
   trackerInfo.escPressed        = FALSE;
   trackerInfo.curTargetHWND     = 0;
   trackerInfo.curDragTarget     = 0;
 
-  hwndTrackWindow = CreateWindowW(OLEDD_DRAGTRACKERCLASS, trackerW,
+  hwndTrackWindow = CreateWindowW(OLEDD_DRAGTRACKERCLASS, L"TrackerWindow",
                                   WS_POPUP, CW_USEDEFAULT, CW_USEDEFAULT,
                                   CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, 0,
                                   &trackerInfo);
@@ -854,8 +843,6 @@ HRESULT WINAPI OleRegGetMiscStatus(
   DWORD    dwAspect,
   DWORD*   pdwStatus)
 {
-  static const WCHAR miscstatusW[] = {'M','i','s','c','S','t','a','t','u','s',0};
-  static const WCHAR dfmtW[] = {'%','d',0};
   WCHAR   keyName[16];
   HKEY    miscStatusKey;
   HKEY    aspectKey;
@@ -870,7 +857,7 @@ HRESULT WINAPI OleRegGetMiscStatus(
 
   if (actctx_get_miscstatus(clsid, dwAspect, pdwStatus)) return S_OK;
 
-  hr = COM_OpenKeyForCLSID(clsid, miscstatusW, KEY_READ, &miscStatusKey);
+  hr = COM_OpenKeyForCLSID(clsid, L"MiscStatus", KEY_READ, &miscStatusKey);
   if (FAILED(hr))
     /* missing key is not a failure */
     return hr == REGDB_E_KEYMISSING ? S_OK : hr;
@@ -880,7 +867,7 @@ HRESULT WINAPI OleRegGetMiscStatus(
   /*
    * Open the key specific to the requested aspect.
    */
-  swprintf(keyName, ARRAY_SIZE(keyName), dfmtW, dwAspect);
+  swprintf(keyName, ARRAY_SIZE(keyName), L"%d", dwAspect);
 
   result = open_classes_key(miscStatusKey, keyName, KEY_READ, &aspectKey);
   if (result == ERROR_SUCCESS)
@@ -1115,11 +1102,10 @@ HRESULT WINAPI OleRegEnumVerbs (REFCLSID clsid, LPENUMOLEVERB* ppenum)
     LONG res;
     HKEY hkeyVerb;
     DWORD dwSubKeys;
-    static const WCHAR wszVerb[] = {'V','e','r','b',0};
 
     TRACE("(%s, %p)\n", debugstr_guid(clsid), ppenum);
 
-    res = COM_OpenKeyForCLSID(clsid, wszVerb, KEY_READ, &hkeyVerb);
+    res = COM_OpenKeyForCLSID(clsid, L"Verb", KEY_READ, &hkeyVerb);
     if (FAILED(res))
     {
         if (res == REGDB_E_CLASSNOTREG)
@@ -2021,6 +2007,8 @@ found:
 void WINAPI ReleaseStgMedium(
   STGMEDIUM* pmedium)
 {
+  if (!pmedium) return;
+
   switch (pmedium->tymed)
   {
     case TYMED_HGLOBAL:
@@ -2285,6 +2273,13 @@ static void OLEDD_TrackStateChange(TrackerWindowInfo* trackerInfo)
   POINT pt;
 
   /*
+   * This method may be called from QueryContinueDrag again,
+   * (i.e. by running message loop) so avoid recursive call chain.
+   */
+  if (trackerInfo->inTrackCall) return;
+  trackerInfo->inTrackCall = TRUE;
+
+  /*
    * Get the handle of the window under the mouse
    */
   pt.x = trackerInfo->curMousePos.x;
@@ -2329,6 +2324,8 @@ static void OLEDD_TrackStateChange(TrackerWindowInfo* trackerInfo)
   }
   else
     drag_end( trackerInfo );
+
+  trackerInfo->inTrackCall = FALSE;
 }
 
 /***
@@ -2389,12 +2386,7 @@ static void OLEUTL_ReadRegistryDWORDValue(
   DWORD dwKeyType;
   LONG  lres;
 
-  lres = RegQueryValueExW(regKey,
-			  emptyW,
-			  NULL,
-			  &dwKeyType,
-			  (LPBYTE)buffer,
-			  &cbData);
+  lres = RegQueryValueExW(regKey, L"", NULL, &dwKeyType, (BYTE *)buffer, &cbData);
 
   if (lres==ERROR_SUCCESS)
   {
@@ -2572,13 +2564,12 @@ HRESULT WINAPI OleCreate(
  */
 HRESULT WINAPI OleGetAutoConvert(REFCLSID clsidOld, LPCLSID pClsidNew)
 {
-    static const WCHAR wszAutoConvertTo[] = {'A','u','t','o','C','o','n','v','e','r','t','T','o',0};
     HKEY hkey = NULL;
     WCHAR buf[CHARS_IN_GUID];
     LONG len;
     HRESULT res = S_OK;
 
-    res = COM_OpenKeyForCLSID(clsidOld, wszAutoConvertTo, KEY_READ, &hkey);
+    res = COM_OpenKeyForCLSID(clsidOld, L"AutoConvertTo", KEY_READ, &hkey);
     if (FAILED(res))
         goto done;
 
@@ -2599,7 +2590,6 @@ done:
  */
 HRESULT WINAPI OleSetAutoConvert(REFCLSID clsidOld, REFCLSID clsidNew)
 {
-    static const WCHAR wszAutoConvertTo[] = {'A','u','t','o','C','o','n','v','e','r','t','T','o',0};
     HKEY hkey = NULL;
     WCHAR szClsidNew[CHARS_IN_GUID];
     HRESULT res = S_OK;
@@ -2610,7 +2600,7 @@ HRESULT WINAPI OleSetAutoConvert(REFCLSID clsidOld, REFCLSID clsidNew)
     if (FAILED(res))
         goto done;
     StringFromGUID2(clsidNew, szClsidNew, CHARS_IN_GUID);
-    if (RegSetValueW(hkey, wszAutoConvertTo, REG_SZ, szClsidNew, (lstrlenW(szClsidNew)+1) * sizeof(WCHAR)))
+    if (RegSetValueW(hkey, L"AutoConvertTo", REG_SZ, szClsidNew, (lstrlenW(szClsidNew)+1) * sizeof(WCHAR)))
     {
         res = REGDB_E_WRITEREGDB;
 	goto done;
@@ -2711,20 +2701,6 @@ HRESULT WINAPI OleNoteObjectVisible(LPUNKNOWN pUnknown, BOOL bVisible)
     return CoLockObjectExternal(pUnknown, bVisible, TRUE);
 }
 
-
-/***********************************************************************
- *           OLE_FreeClipDataArray   [internal]
- *
- * NOTES:
- *  frees the data associated with an array of CLIPDATAs
- */
-static void OLE_FreeClipDataArray(ULONG count, CLIPDATA * pClipDataArray)
-{
-    ULONG i;
-    for (i = 0; i < count; i++)
-        CoTaskMemFree(pClipDataArray[i].pClipData);
-}
-
 /***********************************************************************
  *           PropSysAllocString			    [OLE32.@]
  * NOTES
@@ -2743,419 +2719,4 @@ BSTR WINAPI PropSysAllocString(LPCOLESTR str)
 void WINAPI PropSysFreeString(LPOLESTR str)
 {
     SysFreeString(str);
-}
-
-/******************************************************************************
- * Check if a PROPVARIANT's type is valid.
- */
-static inline HRESULT PROPVARIANT_ValidateType(VARTYPE vt)
-{
-    switch (vt)
-    {
-    case VT_EMPTY:
-    case VT_NULL:
-    case VT_I1:
-    case VT_I2:
-    case VT_I4:
-    case VT_I8:
-    case VT_R4:
-    case VT_R8:
-    case VT_CY:
-    case VT_DATE:
-    case VT_BSTR:
-    case VT_ERROR:
-    case VT_BOOL:
-    case VT_DECIMAL:
-    case VT_UI1:
-    case VT_UI2:
-    case VT_UI4:
-    case VT_UI8:
-    case VT_INT:
-    case VT_UINT:
-    case VT_LPSTR:
-    case VT_LPWSTR:
-    case VT_FILETIME:
-    case VT_BLOB:
-    case VT_DISPATCH:
-    case VT_UNKNOWN:
-    case VT_STREAM:
-    case VT_STORAGE:
-    case VT_STREAMED_OBJECT:
-    case VT_STORED_OBJECT:
-    case VT_BLOB_OBJECT:
-    case VT_CF:
-    case VT_CLSID:
-    case VT_I1|VT_VECTOR:
-    case VT_I2|VT_VECTOR:
-    case VT_I4|VT_VECTOR:
-    case VT_I8|VT_VECTOR:
-    case VT_R4|VT_VECTOR:
-    case VT_R8|VT_VECTOR:
-    case VT_CY|VT_VECTOR:
-    case VT_DATE|VT_VECTOR:
-    case VT_BSTR|VT_VECTOR:
-    case VT_ERROR|VT_VECTOR:
-    case VT_BOOL|VT_VECTOR:
-    case VT_VARIANT|VT_VECTOR:
-    case VT_UI1|VT_VECTOR:
-    case VT_UI2|VT_VECTOR:
-    case VT_UI4|VT_VECTOR:
-    case VT_UI8|VT_VECTOR:
-    case VT_LPSTR|VT_VECTOR:
-    case VT_LPWSTR|VT_VECTOR:
-    case VT_FILETIME|VT_VECTOR:
-    case VT_CF|VT_VECTOR:
-    case VT_CLSID|VT_VECTOR:
-    case VT_ARRAY|VT_I1:
-    case VT_ARRAY|VT_UI1:
-    case VT_ARRAY|VT_I2:
-    case VT_ARRAY|VT_UI2:
-    case VT_ARRAY|VT_I4:
-    case VT_ARRAY|VT_UI4:
-    case VT_ARRAY|VT_INT:
-    case VT_ARRAY|VT_UINT:
-    case VT_ARRAY|VT_R4:
-    case VT_ARRAY|VT_R8:
-    case VT_ARRAY|VT_CY:
-    case VT_ARRAY|VT_DATE:
-    case VT_ARRAY|VT_BSTR:
-    case VT_ARRAY|VT_BOOL:
-    case VT_ARRAY|VT_DECIMAL:
-    case VT_ARRAY|VT_DISPATCH:
-    case VT_ARRAY|VT_UNKNOWN:
-    case VT_ARRAY|VT_ERROR:
-    case VT_ARRAY|VT_VARIANT:
-        return S_OK;
-    }
-    WARN("Bad type %d\n", vt);
-    return STG_E_INVALIDPARAMETER;
-}
-
-/***********************************************************************
- *           PropVariantClear			    [OLE32.@]
- */
-HRESULT WINAPI PropVariantClear(PROPVARIANT * pvar) /* [in/out] */
-{
-    HRESULT hr;
-
-    TRACE("(%p)\n", pvar);
-
-    if (!pvar)
-        return S_OK;
-
-    hr = PROPVARIANT_ValidateType(pvar->vt);
-    if (FAILED(hr))
-    {
-        memset(pvar, 0, sizeof(*pvar));
-        return hr;
-    }
-
-    switch(pvar->vt)
-    {
-    case VT_EMPTY:
-    case VT_NULL:
-    case VT_I1:
-    case VT_I2:
-    case VT_I4:
-    case VT_I8:
-    case VT_R4:
-    case VT_R8:
-    case VT_CY:
-    case VT_DATE:
-    case VT_ERROR:
-    case VT_BOOL:
-    case VT_DECIMAL:
-    case VT_UI1:
-    case VT_UI2:
-    case VT_UI4:
-    case VT_UI8:
-    case VT_INT:
-    case VT_UINT:
-    case VT_FILETIME:
-        break;
-    case VT_DISPATCH:
-    case VT_UNKNOWN:
-    case VT_STREAM:
-    case VT_STREAMED_OBJECT:
-    case VT_STORAGE:
-    case VT_STORED_OBJECT:
-        if (pvar->u.pStream)
-            IStream_Release(pvar->u.pStream);
-        break;
-    case VT_CLSID:
-    case VT_LPSTR:
-    case VT_LPWSTR:
-        /* pick an arbitrary typed pointer - we don't care about the type
-         * as we are just freeing it */
-        CoTaskMemFree(pvar->u.puuid);
-        break;
-    case VT_BLOB:
-    case VT_BLOB_OBJECT:
-        CoTaskMemFree(pvar->u.blob.pBlobData);
-        break;
-    case VT_BSTR:
-        PropSysFreeString(pvar->u.bstrVal);
-        break;
-    case VT_CF:
-        if (pvar->u.pclipdata)
-        {
-            OLE_FreeClipDataArray(1, pvar->u.pclipdata);
-            CoTaskMemFree(pvar->u.pclipdata);
-        }
-        break;
-    default:
-        if (pvar->vt & VT_VECTOR)
-        {
-            ULONG i;
-
-            switch (pvar->vt & ~VT_VECTOR)
-            {
-            case VT_VARIANT:
-                FreePropVariantArray(pvar->u.capropvar.cElems, pvar->u.capropvar.pElems);
-                break;
-            case VT_CF:
-                OLE_FreeClipDataArray(pvar->u.caclipdata.cElems, pvar->u.caclipdata.pElems);
-                break;
-            case VT_BSTR:
-                for (i = 0; i < pvar->u.cabstr.cElems; i++)
-                    PropSysFreeString(pvar->u.cabstr.pElems[i]);
-                break;
-            case VT_LPSTR:
-                for (i = 0; i < pvar->u.calpstr.cElems; i++)
-                    CoTaskMemFree(pvar->u.calpstr.pElems[i]);
-                break;
-            case VT_LPWSTR:
-                for (i = 0; i < pvar->u.calpwstr.cElems; i++)
-                    CoTaskMemFree(pvar->u.calpwstr.pElems[i]);
-                break;
-            }
-            if (pvar->vt & ~VT_VECTOR)
-            {
-                /* pick an arbitrary VT_VECTOR structure - they all have the same
-                 * memory layout */
-                CoTaskMemFree(pvar->u.capropvar.pElems);
-            }
-        }
-        else if (pvar->vt & VT_ARRAY)
-            hr = SafeArrayDestroy(pvar->u.parray);
-        else
-        {
-            WARN("Invalid/unsupported type %d\n", pvar->vt);
-            hr = STG_E_INVALIDPARAMETER;
-        }
-    }
-
-    memset(pvar, 0, sizeof(*pvar));
-    return hr;
-}
-
-/***********************************************************************
- *           PropVariantCopy			    [OLE32.@]
- */
-HRESULT WINAPI PropVariantCopy(PROPVARIANT *pvarDest,      /* [out] */
-                               const PROPVARIANT *pvarSrc) /* [in] */
-{
-    ULONG len;
-    HRESULT hr;
-
-    TRACE("(%p, %p vt %04x)\n", pvarDest, pvarSrc, pvarSrc->vt);
-
-    hr = PROPVARIANT_ValidateType(pvarSrc->vt);
-    if (FAILED(hr))
-        return DISP_E_BADVARTYPE;
-
-    /* this will deal with most cases */
-    *pvarDest = *pvarSrc;
-
-    switch(pvarSrc->vt)
-    {
-    case VT_EMPTY:
-    case VT_NULL:
-    case VT_I1:
-    case VT_UI1:
-    case VT_I2:
-    case VT_UI2:
-    case VT_BOOL:
-    case VT_DECIMAL:
-    case VT_I4:
-    case VT_UI4:
-    case VT_R4:
-    case VT_ERROR:
-    case VT_I8:
-    case VT_UI8:
-    case VT_INT:
-    case VT_UINT:
-    case VT_R8:
-    case VT_CY:
-    case VT_DATE:
-    case VT_FILETIME:
-        break;
-    case VT_DISPATCH:
-    case VT_UNKNOWN:
-    case VT_STREAM:
-    case VT_STREAMED_OBJECT:
-    case VT_STORAGE:
-    case VT_STORED_OBJECT:
-        if (pvarDest->u.pStream)
-            IStream_AddRef(pvarDest->u.pStream);
-        break;
-    case VT_CLSID:
-        pvarDest->u.puuid = CoTaskMemAlloc(sizeof(CLSID));
-        *pvarDest->u.puuid = *pvarSrc->u.puuid;
-        break;
-    case VT_LPSTR:
-        if (pvarSrc->u.pszVal)
-        {
-            len = strlen(pvarSrc->u.pszVal);
-            pvarDest->u.pszVal = CoTaskMemAlloc((len+1)*sizeof(CHAR));
-            CopyMemory(pvarDest->u.pszVal, pvarSrc->u.pszVal, (len+1)*sizeof(CHAR));
-        }
-        break;
-    case VT_LPWSTR:
-        if (pvarSrc->u.pwszVal)
-        {
-            len = lstrlenW(pvarSrc->u.pwszVal);
-            pvarDest->u.pwszVal = CoTaskMemAlloc((len+1)*sizeof(WCHAR));
-            CopyMemory(pvarDest->u.pwszVal, pvarSrc->u.pwszVal, (len+1)*sizeof(WCHAR));
-        }
-        break;
-    case VT_BLOB:
-    case VT_BLOB_OBJECT:
-        if (pvarSrc->u.blob.pBlobData)
-        {
-            len = pvarSrc->u.blob.cbSize;
-            pvarDest->u.blob.pBlobData = CoTaskMemAlloc(len);
-            CopyMemory(pvarDest->u.blob.pBlobData, pvarSrc->u.blob.pBlobData, len);
-        }
-        break;
-    case VT_BSTR:
-        pvarDest->u.bstrVal = PropSysAllocString(pvarSrc->u.bstrVal);
-        break;
-    case VT_CF:
-        if (pvarSrc->u.pclipdata)
-        {
-            len = pvarSrc->u.pclipdata->cbSize - sizeof(pvarSrc->u.pclipdata->ulClipFmt);
-            pvarDest->u.pclipdata = CoTaskMemAlloc(sizeof (CLIPDATA));
-            pvarDest->u.pclipdata->cbSize = pvarSrc->u.pclipdata->cbSize;
-            pvarDest->u.pclipdata->ulClipFmt = pvarSrc->u.pclipdata->ulClipFmt;
-            pvarDest->u.pclipdata->pClipData = CoTaskMemAlloc(len);
-            CopyMemory(pvarDest->u.pclipdata->pClipData, pvarSrc->u.pclipdata->pClipData, len);
-        }
-        break;
-    default:
-        if (pvarSrc->vt & VT_VECTOR)
-        {
-            int elemSize;
-            ULONG i;
-
-            switch(pvarSrc->vt & ~VT_VECTOR)
-            {
-            case VT_I1:       elemSize = sizeof(pvarSrc->u.cVal); break;
-            case VT_UI1:      elemSize = sizeof(pvarSrc->u.bVal); break;
-            case VT_I2:       elemSize = sizeof(pvarSrc->u.iVal); break;
-            case VT_UI2:      elemSize = sizeof(pvarSrc->u.uiVal); break;
-            case VT_BOOL:     elemSize = sizeof(pvarSrc->u.boolVal); break;
-            case VT_I4:       elemSize = sizeof(pvarSrc->u.lVal); break;
-            case VT_UI4:      elemSize = sizeof(pvarSrc->u.ulVal); break;
-            case VT_R4:       elemSize = sizeof(pvarSrc->u.fltVal); break;
-            case VT_R8:       elemSize = sizeof(pvarSrc->u.dblVal); break;
-            case VT_ERROR:    elemSize = sizeof(pvarSrc->u.scode); break;
-            case VT_I8:       elemSize = sizeof(pvarSrc->u.hVal); break;
-            case VT_UI8:      elemSize = sizeof(pvarSrc->u.uhVal); break;
-            case VT_CY:       elemSize = sizeof(pvarSrc->u.cyVal); break;
-            case VT_DATE:     elemSize = sizeof(pvarSrc->u.date); break;
-            case VT_FILETIME: elemSize = sizeof(pvarSrc->u.filetime); break;
-            case VT_CLSID:    elemSize = sizeof(*pvarSrc->u.puuid); break;
-            case VT_CF:       elemSize = sizeof(*pvarSrc->u.pclipdata); break;
-            case VT_BSTR:     elemSize = sizeof(pvarSrc->u.bstrVal); break;
-            case VT_LPSTR:    elemSize = sizeof(pvarSrc->u.pszVal); break;
-            case VT_LPWSTR:   elemSize = sizeof(pvarSrc->u.pwszVal); break;
-            case VT_VARIANT:  elemSize = sizeof(*pvarSrc->u.pvarVal); break;
-
-            default:
-                FIXME("Invalid element type: %ul\n", pvarSrc->vt & ~VT_VECTOR);
-                return E_INVALIDARG;
-            }
-            len = pvarSrc->u.capropvar.cElems;
-            pvarDest->u.capropvar.pElems = len ? CoTaskMemAlloc(len * elemSize) : NULL;
-            if (pvarSrc->vt == (VT_VECTOR | VT_VARIANT))
-            {
-                for (i = 0; i < len; i++)
-                    PropVariantCopy(&pvarDest->u.capropvar.pElems[i], &pvarSrc->u.capropvar.pElems[i]);
-            }
-            else if (pvarSrc->vt == (VT_VECTOR | VT_CF))
-            {
-                FIXME("Copy clipformats\n");
-            }
-            else if (pvarSrc->vt == (VT_VECTOR | VT_BSTR))
-            {
-                for (i = 0; i < len; i++)
-                    pvarDest->u.cabstr.pElems[i] = PropSysAllocString(pvarSrc->u.cabstr.pElems[i]);
-            }
-            else if (pvarSrc->vt == (VT_VECTOR | VT_LPSTR))
-            {
-                size_t strLen;
-                for (i = 0; i < len; i++)
-                {
-                    strLen = lstrlenA(pvarSrc->u.calpstr.pElems[i]) + 1;
-                    pvarDest->u.calpstr.pElems[i] = CoTaskMemAlloc(strLen);
-                    memcpy(pvarDest->u.calpstr.pElems[i],
-                     pvarSrc->u.calpstr.pElems[i], strLen);
-                }
-            }
-            else if (pvarSrc->vt == (VT_VECTOR | VT_LPWSTR))
-            {
-                size_t strLen;
-                for (i = 0; i < len; i++)
-                {
-                    strLen = (lstrlenW(pvarSrc->u.calpwstr.pElems[i]) + 1) *
-                     sizeof(WCHAR);
-                    pvarDest->u.calpstr.pElems[i] = CoTaskMemAlloc(strLen);
-                    memcpy(pvarDest->u.calpstr.pElems[i],
-                     pvarSrc->u.calpstr.pElems[i], strLen);
-                }
-            }
-            else
-                CopyMemory(pvarDest->u.capropvar.pElems, pvarSrc->u.capropvar.pElems, len * elemSize);
-        }
-        else if (pvarSrc->vt & VT_ARRAY)
-        {
-            pvarDest->u.uhVal.QuadPart = 0;
-            return SafeArrayCopy(pvarSrc->u.parray, &pvarDest->u.parray);
-        }
-        else
-            WARN("Invalid/unsupported type %d\n", pvarSrc->vt);
-    }
-
-    return S_OK;
-}
-
-/***********************************************************************
- *           FreePropVariantArray			    [OLE32.@]
- */
-HRESULT WINAPI FreePropVariantArray(ULONG cVariants, /* [in] */
-                                    PROPVARIANT *rgvars)    /* [in/out] */
-{
-    ULONG i;
-
-    TRACE("(%u, %p)\n", cVariants, rgvars);
-
-    if (!rgvars)
-        return E_INVALIDARG;
-
-    for(i = 0; i < cVariants; i++)
-        PropVariantClear(&rgvars[i]);
-
-    return S_OK;
-}
-
-/******************************************************************************
- * DllDebugObjectRPCHook (OLE32.@)
- * turns on and off internal debugging,  pointer is only used on macintosh
- */
-
-BOOL WINAPI DllDebugObjectRPCHook(BOOL b, void *dummy)
-{
-  FIXME("stub\n");
-  return TRUE;
 }

@@ -179,8 +179,6 @@ static void test_ExtTextOut(void)
     hdcDisplay = GetDC(hwnd);
     ok(hdcDisplay != 0, "GetDC error %d\n", GetLastError());
 
-    trace("hdcDisplay %p\n", hdcDisplay);
-
     SetMapMode(hdcDisplay, MM_TEXT);
 
     memset(&orig_lf, 0, sizeof(orig_lf));
@@ -206,8 +204,6 @@ static void test_ExtTextOut(void)
 
     hdcMetafile = CreateEnhMetaFileA(hdcDisplay, NULL, NULL, NULL);
     ok(hdcMetafile != 0, "CreateEnhMetaFileA error %d\n", GetLastError());
-
-    trace("hdcMetafile %p\n", hdcMetafile);
 
     ok(GetDeviceCaps(hdcMetafile, TECHNOLOGY) == DT_RASDISPLAY,
        "GetDeviceCaps(TECHNOLOGY) has to return DT_RASDISPLAY for a display based EMF\n");
@@ -316,7 +312,6 @@ static int CALLBACK eto_scale_enum_proc(HDC hdc, HANDLETABLE *handle_table,
 static void test_ExtTextOutScale(void)
 {
     const RECT rc = { 0, 0, 100, 100 };
-    const WCHAR str[] = {'a',0 };
     struct eto_scale_test_record test;
     HDC hdcDisplay, hdcMetafile;
     HENHMETAFILE hMetafile;
@@ -396,7 +391,7 @@ static void test_ExtTextOutScale(void)
             ok(ret, "SetViewportExtEx failed\n");
         }
 
-        ret = ExtTextOutW(hdcMetafile, 0, 0, 0, 0, str, 1, NULL);
+        ret = ExtTextOutW(hdcMetafile, 0, 0, 0, 0, L"a", 1, NULL);
         ok(ret, "ExtTextOutW failed\n");
 
         hMetafile = CloseEnhMetaFile(hdcMetafile);
@@ -2057,7 +2052,6 @@ static void test_mf_Blank(void)
 
     hdcMetafile = CreateMetaFileA(NULL);
     ok(hdcMetafile != 0, "CreateMetaFileA(NULL) error %d\n", GetLastError());
-    trace("hdcMetafile %p\n", hdcMetafile);
 
 /* Tests on metafile initialization */
     caps = GetDeviceCaps (hdcMetafile, TECHNOLOGY);
@@ -2094,7 +2088,6 @@ static void test_CopyMetaFile(void)
 
     hdcMetafile = CreateMetaFileA(NULL);
     ok(hdcMetafile != 0, "CreateMetaFileA(NULL) error %d\n", GetLastError());
-    trace("hdcMetafile %p\n", hdcMetafile);
 
     hMetafile = CloseMetaFile(hdcMetafile);
     ok(hMetafile != 0, "CloseMetaFile error %d\n", GetLastError());
@@ -2141,7 +2134,6 @@ static void test_SetMetaFileBits(void)
     METAHEADER *mh;
 
     hmf = SetMetaFileBitsEx(sizeof(MF_GRAPHICS_BITS), MF_GRAPHICS_BITS);
-    trace("hmf %p\n", hmf);
     ok(hmf != 0, "SetMetaFileBitsEx error %d\n", GetLastError());
     type = GetObjectType(hmf);
     ok(type == OBJ_METAFILE, "SetMetaFileBitsEx created object with type %d\n", type);
@@ -2161,7 +2153,6 @@ static void test_SetMetaFileBits(void)
     /* Now with zero size */
     SetLastError(0xdeadbeef);
     hmf = SetMetaFileBitsEx(0, MF_GRAPHICS_BITS);
-    trace("hmf %p\n", hmf);
     ok(!hmf, "SetMetaFileBitsEx should fail\n");
     ok(GetLastError() == ERROR_INVALID_DATA ||
        broken(GetLastError() == ERROR_INVALID_PARAMETER), /* Win9x */
@@ -2170,7 +2161,6 @@ static void test_SetMetaFileBits(void)
     /* Now with odd size */
     SetLastError(0xdeadbeef);
     hmf = SetMetaFileBitsEx(sizeof(MF_GRAPHICS_BITS) - 1, MF_GRAPHICS_BITS);
-    trace("hmf %p\n", hmf);
     ok(!hmf, "SetMetaFileBitsEx should fail\n");
     ok(GetLastError() == 0xdeadbeef /* XP SP1 */, "wrong error %d\n", GetLastError());
 
@@ -2184,7 +2174,6 @@ static void test_SetMetaFileBits(void)
     mh->mtHeaderSize = 0;
     SetLastError(0xdeadbeef);
     hmf = SetMetaFileBitsEx(sizeof(MF_GRAPHICS_BITS), buf);
-    trace("hmf %p\n", hmf);
     ok(!hmf, "SetMetaFileBitsEx should fail\n");
     ok(GetLastError() == ERROR_INVALID_DATA ||
        broken(GetLastError() == ERROR_INVALID_PARAMETER), /* Win9x */
@@ -2196,7 +2185,6 @@ static void test_SetMetaFileBits(void)
     /* corruption of mtSize doesn't lead to a failure */
     mh->mtSize *= 2;
     hmf = SetMetaFileBitsEx(sizeof(MF_GRAPHICS_BITS), buf);
-    trace("hmf %p\n", hmf);
     ok(hmf != 0, "SetMetaFileBitsEx error %d\n", GetLastError());
 
     if (compare_mf_bits(hmf, MF_GRAPHICS_BITS, sizeof(MF_GRAPHICS_BITS), "mf_Graphics") != 0)
@@ -2215,7 +2203,6 @@ static void test_SetMetaFileBits(void)
     /* zeroing mtSize doesn't lead to a failure */
     mh->mtSize = 0;
     hmf = SetMetaFileBitsEx(sizeof(MF_GRAPHICS_BITS), buf);
-    trace("hmf %p\n", hmf);
     ok(hmf != 0, "SetMetaFileBitsEx error %d\n", GetLastError());
 
     if (compare_mf_bits(hmf, MF_GRAPHICS_BITS, sizeof(MF_GRAPHICS_BITS), "mf_Graphics") != 0)
@@ -2242,7 +2229,6 @@ static void test_mf_Graphics(void)
 
     hdcMetafile = CreateMetaFileA(NULL);
     ok(hdcMetafile != 0, "CreateMetaFileA(NULL) error %d\n", GetLastError());
-    trace("hdcMetafile %p\n", hdcMetafile);
 
     ret = MoveToEx(hdcMetafile, 1, 1, NULL);
     ok( ret, "MoveToEx error %d.\n", GetLastError());
@@ -2301,7 +2287,6 @@ static void test_mf_PatternBrush(void)
 
     hdcMetafile = CreateMetaFileA(NULL);
     ok(hdcMetafile != 0, "CreateMetaFileA error %d\n", GetLastError());
-    trace("hdcMetafile %p\n", hdcMetafile);
 
     hBrush = SelectObject(hdcMetafile, hBrush);
     ok(hBrush != 0, "SelectObject error %d.\n", GetLastError());
@@ -2385,7 +2370,6 @@ static void test_mf_ExtTextOut_on_path(void)
 
     hdcMetafile = CreateMetaFileA(NULL);
     ok(hdcMetafile != 0, "CreateMetaFileA(NULL) error %d\n", GetLastError());
-    trace("hdcMetafile %p\n", hdcMetafile);
 
     ret = BeginPath(hdcMetafile);
     ok(!ret, "BeginPath on metafile DC should fail\n");

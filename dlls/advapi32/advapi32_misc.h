@@ -25,16 +25,12 @@
 #include "winnls.h"
 #include "wine/heap.h"
 
-const char * HOSTPTR debugstr_sid(PSID sid) DECLSPEC_HIDDEN;
+const char * debugstr_sid(PSID sid) DECLSPEC_HIDDEN;
 BOOL ADVAPI_IsLocalComputer(LPCWSTR ServerName) DECLSPEC_HIDDEN;
 BOOL ADVAPI_GetComputerSid(PSID sid) DECLSPEC_HIDDEN;
 
 BOOL lookup_local_wellknown_name(const LSA_UNICODE_STRING*, PSID, LPDWORD, LPWSTR, LPDWORD, PSID_NAME_USE, BOOL*) DECLSPEC_HIDDEN;
 BOOL lookup_local_user_name(const LSA_UNICODE_STRING*, PSID, LPDWORD, LPWSTR, LPDWORD, PSID_NAME_USE, BOOL*) DECLSPEC_HIDDEN;
-WCHAR *SERV_dup(const char *str) DECLSPEC_HIDDEN;
-DWORD SERV_OpenSCManagerW(LPCWSTR, LPCWSTR, DWORD, SC_HANDLE*) DECLSPEC_HIDDEN;
-DWORD SERV_OpenServiceW(SC_HANDLE, LPCWSTR, DWORD, SC_HANDLE*) DECLSPEC_HIDDEN;
-NTSTATUS SERV_QueryServiceObjectSecurity(SC_HANDLE, SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, DWORD, LPDWORD) DECLSPEC_HIDDEN;
 const WCHAR *get_wellknown_privilege_name(const LUID *) DECLSPEC_HIDDEN;
 
 /* memory allocation functions */

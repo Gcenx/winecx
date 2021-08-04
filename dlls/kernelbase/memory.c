@@ -33,6 +33,7 @@
 #include "winnls.h"
 #include "winternl.h"
 #include "winerror.h"
+#include "ddk/wdm.h"
 
 #include "kernelbase.h"
 #include "wine/exception.h"
@@ -294,6 +295,21 @@ LPVOID WINAPI DECLSPEC_HOTPATCH VirtualAllocEx( HANDLE process, void *addr, SIZE
     LPVOID ret = addr;
 
     if (!set_ntstatus( NtAllocateVirtualMemory( process, &ret, 0, &size, type, protect ))) return NULL;
+    return ret;
+}
+
+
+/***********************************************************************
+ *             VirtualAlloc2   (kernelbase.@)
+ */
+LPVOID WINAPI DECLSPEC_HOTPATCH VirtualAlloc2( HANDLE process, void *addr, SIZE_T size,
+                                               DWORD type, DWORD protect,
+                                               MEM_EXTENDED_PARAMETER *parameters, ULONG count )
+{
+    LPVOID ret = addr;
+
+    if (!set_ntstatus( NtAllocateVirtualMemoryEx( process, &ret, &size, type, protect, parameters, count )))
+        return NULL;
     return ret;
 }
 
@@ -888,12 +904,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH LocalUnlock( HLOCAL hmem )
  */
 HANDLE WINAPI DECLSPEC_HOTPATCH CreateMemoryResourceNotification( MEMORY_RESOURCE_NOTIFICATION_TYPE type )
 {
-    static const WCHAR lowmemW[] =
-        {'\\','K','e','r','n','e','l','O','b','j','e','c','t','s',
-         '\\','L','o','w','M','e','m','o','r','y','C','o','n','d','i','t','i','o','n',0};
-    static const WCHAR highmemW[] =
-        {'\\','K','e','r','n','e','l','O','b','j','e','c','t','s',
-         '\\','H','i','g','h','M','e','m','o','r','y','C','o','n','d','i','t','i','o','n',0};
     HANDLE ret;
     UNICODE_STRING nameW;
     OBJECT_ATTRIBUTES attr;
@@ -901,10 +911,10 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateMemoryResourceNotification( MEMORY_RESOURC
     switch (type)
     {
     case LowMemoryResourceNotification:
-        RtlInitUnicodeString( &nameW, lowmemW );
+        RtlInitUnicodeString( &nameW, L"\\KernelObjects\\LowMemoryCondition" );
         break;
     case HighMemoryResourceNotification:
-        RtlInitUnicodeString( &nameW, highmemW );
+        RtlInitUnicodeString( &nameW, L"\\KernelObjects\\HighMemoryCondition" );
         break;
     default:
         SetLastError( ERROR_INVALID_PARAMETER );
@@ -1174,6 +1184,252 @@ LPVOID WINAPI DECLSPEC_HOTPATCH VirtualAllocExNuma( HANDLE process, void *addr, 
     return VirtualAllocEx( process, addr, size, type, protect );
 }
 
+
+/***********************************************************************
+ * CPU functions
+ ***********************************************************************/
+
+
+#if defined(__i386__) || defined(__x86_64__)
+/***********************************************************************
+ *             GetEnabledXStateFeatures   (kernelbase.@)
+ */
+DWORD64 WINAPI GetEnabledXStateFeatures(void)
+{
+    TRACE( "\n" );
+    return RtlGetEnabledExtendedFeatures( ~(ULONG64)0 );
+}
+
+
+/***********************************************************************
+ *             InitializeContext2         (kernelbase.@)
+ */
+BOOL WINAPI InitializeContext2( void *buffer, DWORD context_flags, CONTEXT **context, DWORD *length,
+        ULONG64 compaction_mask )
+{
+    ULONG orig_length;
+    NTSTATUS status;
+
+    TRACE( "buffer %p, context_flags %#x, context %p, ret_length %p, compaction_mask %s.\n",
+            buffer, context_flags, context, length, wine_dbgstr_longlong(compaction_mask) );
+
+    orig_length = *length;
+
+    if ((status = RtlGetExtendedContextLength2( context_flags, length, compaction_mask )))
+    {
+        if (status == STATUS_NOT_SUPPORTED && context_flags & 0x40)
+        {
+            context_flags &= ~0x40;
+            status = RtlGetExtendedContextLength2( context_flags, length, compaction_mask );
+        }
+
+        if (status)
+            return set_ntstatus( status );
+    }
+
+    if (!buffer || orig_length < *length)
+    {
+        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        return FALSE;
+    }
+
+    if ((status = RtlInitializeExtendedContext2( buffer, context_flags, (CONTEXT_EX **)context, compaction_mask )))
+        return set_ntstatus( status );
+
+    *context = (CONTEXT *)((BYTE *)*context + (*(CONTEXT_EX **)context)->Legacy.Offset);
+
+    return TRUE;
+}
+
+/***********************************************************************
+ *             InitializeContext               (kernelbase.@)
+ */
+BOOL WINAPI InitializeContext( void *buffer, DWORD context_flags, CONTEXT **context, DWORD *length )
+{
+    return InitializeContext2( buffer, context_flags, context, length, ~(ULONG64)0 );
+}
+
+/***********************************************************************
+ *           CopyContext                       (kernelbase.@)
+ */
+BOOL WINAPI CopyContext( CONTEXT *dst, DWORD context_flags, CONTEXT *src )
+{
+    DWORD context_size, arch_flag, flags_offset, dst_flags, src_flags;
+    static const DWORD arch_mask = 0x110000;
+    NTSTATUS status;
+    BYTE *d, *s;
+
+    TRACE("dst %p, context_flags %#x, src %p.\n", dst, context_flags, src);
+
+    if (context_flags & 0x40 && !RtlGetEnabledExtendedFeatures( ~(ULONG64)0 ))
+    {
+        SetLastError(ERROR_NOT_SUPPORTED);
+        return FALSE;
+    }
+
+    arch_flag = context_flags & arch_mask;
+
+    switch (arch_flag)
+    {
+        case  0x10000: context_size = 0x2cc; flags_offset =    0; break;
+        case 0x100000: context_size = 0x4d0; flags_offset = 0x30; break;
+        default:
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return FALSE;
+    }
+
+    d = (BYTE *)dst;
+    s = (BYTE *)src;
+    dst_flags = *(DWORD *)(d + flags_offset);
+    src_flags = *(DWORD *)(s + flags_offset);
+
+    if ((dst_flags & arch_mask) != arch_flag
+            || (src_flags & arch_mask) != arch_flag)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    context_flags &= src_flags;
+
+    if (context_flags & ~dst_flags & 0x40)
+    {
+        SetLastError(ERROR_MORE_DATA);
+        return FALSE;
+    }
+
+    if ((status = RtlCopyExtendedContext( (CONTEXT_EX *)(d + context_size), context_flags,
+            (CONTEXT_EX *)(s + context_size) )))
+        return set_ntstatus( status );
+
+    return TRUE;
+}
+#endif
+
+
+#if defined(__x86_64__)
+/***********************************************************************
+ *           LocateXStateFeature   (kernelbase.@)
+ */
+void * WINAPI LocateXStateFeature( CONTEXT *context, DWORD feature_id, DWORD *length )
+{
+    if (!(context->ContextFlags & CONTEXT_AMD64))
+        return NULL;
+
+    if (feature_id >= 2)
+        return ((context->ContextFlags & CONTEXT_XSTATE) == CONTEXT_XSTATE)
+                ? RtlLocateExtendedFeature( (CONTEXT_EX *)(context + 1), feature_id, length ) : NULL;
+
+    if (feature_id == 1)
+    {
+        if (length)
+            *length = sizeof(M128A) * 16;
+
+        return &context->u.FltSave.XmmRegisters;
+    }
+
+    if (length)
+        *length = offsetof(XSAVE_FORMAT, XmmRegisters);
+
+    return &context->u.FltSave;
+}
+
+/***********************************************************************
+ *           SetXStateFeaturesMask (kernelbase.@)
+ */
+BOOL WINAPI SetXStateFeaturesMask( CONTEXT *context, DWORD64 feature_mask )
+{
+    if (!(context->ContextFlags & CONTEXT_AMD64))
+        return FALSE;
+
+    if (feature_mask & 0x3)
+        context->ContextFlags |= CONTEXT_FLOATING_POINT;
+
+    if ((context->ContextFlags & CONTEXT_XSTATE) != CONTEXT_XSTATE)
+        return !(feature_mask & ~(DWORD64)3);
+
+    RtlSetExtendedFeaturesMask( (CONTEXT_EX *)(context + 1), feature_mask );
+    return TRUE;
+}
+
+/***********************************************************************
+ *           GetXStateFeaturesMask (kernelbase.@)
+ */
+BOOL WINAPI GetXStateFeaturesMask( CONTEXT *context, DWORD64 *feature_mask )
+{
+    if (!(context->ContextFlags & CONTEXT_AMD64))
+        return FALSE;
+
+    *feature_mask = (context->ContextFlags & CONTEXT_FLOATING_POINT) == CONTEXT_FLOATING_POINT
+            ? 3 : 0;
+
+    if ((context->ContextFlags & CONTEXT_XSTATE) == CONTEXT_XSTATE)
+        *feature_mask |= RtlGetExtendedFeaturesMask( (CONTEXT_EX *)(context + 1) );
+
+    return TRUE;
+}
+#elif defined(__i386__)
+/***********************************************************************
+ *           LocateXStateFeature   (kernelbase.@)
+ */
+void * WINAPI LocateXStateFeature( CONTEXT *context, DWORD feature_id, DWORD *length )
+{
+    if (!(context->ContextFlags & CONTEXT_X86))
+        return NULL;
+
+    if (feature_id >= 2)
+        return ((context->ContextFlags & CONTEXT_XSTATE) == CONTEXT_XSTATE)
+                ? RtlLocateExtendedFeature( (CONTEXT_EX *)(context + 1), feature_id, length ) : NULL;
+
+    if (feature_id == 1)
+    {
+        if (length)
+            *length = sizeof(M128A) * 8;
+
+        return (BYTE *)&context->ExtendedRegisters + offsetof(XSAVE_FORMAT, XmmRegisters);
+    }
+
+    if (length)
+        *length = offsetof(XSAVE_FORMAT, XmmRegisters);
+
+    return &context->ExtendedRegisters;
+}
+
+/***********************************************************************
+ *           SetXStateFeaturesMask (kernelbase.@)
+ */
+BOOL WINAPI SetXStateFeaturesMask( CONTEXT *context, DWORD64 feature_mask )
+{
+    if (!(context->ContextFlags & CONTEXT_X86))
+        return FALSE;
+
+    if (feature_mask & 0x3)
+        context->ContextFlags |= CONTEXT_EXTENDED_REGISTERS;
+
+    if ((context->ContextFlags & CONTEXT_XSTATE) != CONTEXT_XSTATE)
+        return !(feature_mask & ~(DWORD64)3);
+
+    RtlSetExtendedFeaturesMask( (CONTEXT_EX *)(context + 1), feature_mask );
+    return TRUE;
+}
+
+/***********************************************************************
+ *           GetXStateFeaturesMask (kernelbase.@)
+ */
+BOOL WINAPI GetXStateFeaturesMask( CONTEXT *context, DWORD64 *feature_mask )
+{
+    if (!(context->ContextFlags & CONTEXT_X86))
+        return FALSE;
+
+    *feature_mask = (context->ContextFlags & CONTEXT_EXTENDED_REGISTERS) == CONTEXT_EXTENDED_REGISTERS
+            ? 3 : 0;
+
+    if ((context->ContextFlags & CONTEXT_XSTATE) == CONTEXT_XSTATE)
+        *feature_mask |= RtlGetExtendedFeaturesMask( (CONTEXT_EX *)(context + 1) );
+
+    return TRUE;
+}
+#endif
 
 /***********************************************************************
  * Firmware functions

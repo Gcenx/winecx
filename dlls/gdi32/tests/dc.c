@@ -19,8 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-
-#define WINVER 0x0501 /* request latest DEVMODE */
 #define NONAMELESSSTRUCT
 #define NONAMELESSUNION
 
@@ -244,6 +242,8 @@ static void test_GdiConvertToDevmodeW(void)
         return;
     }
 
+    memset(&dmA, 0, sizeof(dmA));
+    dmA.dmSize = sizeof(dmA);
     ret = EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &dmA);
     ok(ret, "EnumDisplaySettingsExA error %u\n", GetLastError());
     ok(dmA.dmSize >= FIELD_OFFSET(DEVMODEA, dmICMMethod), "dmSize is too small: %04x\n", dmA.dmSize);
@@ -346,11 +346,6 @@ static void test_device_caps( HDC hdc, HDC ref_dc, const char *descr, int scale 
                 "wrong caps on %s for %u: %u\n", descr, caps[i],
                 GetDeviceCaps( hdc, caps[i] ) );
 
-        SetLastError( 0xdeadbeef );
-        ret = GetDeviceGammaRamp( hdc, &ramp );
-        ok( !ret, "GetDeviceGammaRamp succeeded on %s\n", descr );
-        ok( GetLastError() == ERROR_INVALID_PARAMETER || broken(GetLastError() == 0xdeadbeef), /* nt4 */
-            "wrong error %u on %s\n", GetLastError(), descr );
         type = GetClipBox( hdc, &rect );
         ok( type == ERROR, "GetClipBox returned %d on %s\n", type, descr );
 
@@ -392,17 +387,6 @@ static void test_device_caps( HDC hdc, HDC ref_dc, const char *descr, int scale 
                 "mismatched caps on %s for %u: %u/%u (scale %d)\n", descr, caps[i],
                 hdc_caps, GetDeviceCaps( ref_dc, caps[i] ), scale );
         }
-
-        SetLastError( 0xdeadbeef );
-        ret = GetDeviceGammaRamp( hdc, &ramp );
-        if (GetObjectType( hdc ) != OBJ_DC || GetDeviceCaps( hdc, TECHNOLOGY ) == DT_RASPRINTER)
-        {
-            ok( !ret, "GetDeviceGammaRamp succeeded on %s (type %d)\n", descr, GetObjectType( hdc ) );
-            ok( GetLastError() == ERROR_INVALID_PARAMETER || broken(GetLastError() == 0xdeadbeef), /* nt4 */
-                "wrong error %u on %s\n", GetLastError(), descr );
-        }
-        else
-            ok( ret || broken(!ret) /* NT4 */, "GetDeviceGammaRamp failed on %s (type %d), error %u\n", descr, GetObjectType( hdc ), GetLastError() );
 
         type = GetBoundsRect( hdc, &rect, 0 );
         ok( type == DCB_RESET || broken(type == DCB_SET) /* XP */,
@@ -494,12 +478,6 @@ static void test_device_caps( HDC hdc, HDC ref_dc, const char *descr, int scale 
                 "mismatched caps on %s and DIB for %u: %u/%u\n", descr, caps[i],
                 GetDeviceCaps( hdc, caps[i] ), GetDeviceCaps( ref_dc, caps[i] ) );
 
-        SetLastError( 0xdeadbeef );
-        ret = GetDeviceGammaRamp( hdc, &ramp );
-        ok( !ret, "GetDeviceGammaRamp succeeded on %s\n", descr );
-        ok( GetLastError() == ERROR_INVALID_PARAMETER || broken(GetLastError() == 0xdeadbeef), /* nt4 */
-            "wrong error %u on %s\n", GetLastError(), descr );
-
         type = GetClipBox( hdc, &rect );
         ok( type == SIMPLEREGION, "GetClipBox returned %d on memdc for %s\n", type, descr );
         ok( rect.left == 0 && rect.top == 0 && rect.right == 16 && rect.bottom == 16,
@@ -515,6 +493,29 @@ static void test_device_caps( HDC hdc, HDC ref_dc, const char *descr, int scale 
 
         SelectObject( hdc, old );
         DeleteObject( dib );
+    }
+
+    /* Memory DC, metafile DC and enhanced metafile DC support gamma ramp on Win10 1909+. Exclude
+     * these types from tests as they return different results depending on Windows versions */
+    if (GetObjectType( hdc ) != OBJ_MEMDC
+        && GetObjectType( hdc ) != OBJ_METADC
+        && GetObjectType( hdc ) != OBJ_ENHMETADC)
+    {
+        SetLastError( 0xdeadbeef );
+        ret = GetDeviceGammaRamp( hdc, &ramp );
+        if (GetObjectType( hdc ) != OBJ_DC || GetDeviceCaps( hdc, TECHNOLOGY ) == DT_RASPRINTER)
+        {
+            ok( !ret, "GetDeviceGammaRamp succeeded on %s (type %d)\n", descr, GetObjectType( hdc ) );
+            ok( GetLastError() == ERROR_INVALID_PARAMETER
+                || broken(GetLastError() == 0xdeadbeef) /* nt4 */
+                || broken(GetLastError() == NO_ERROR), /* Printer DC on Win10 1909+ */
+                "wrong error %u on %s\n", GetLastError(), descr );
+        }
+        else
+        {
+            ok( ret || broken(!ret) /* NT4 */, "GetDeviceGammaRamp failed on %s (type %d), error %u\n",
+                descr, GetObjectType( hdc ), GetLastError() );
+        }
     }
 
     /* restore hdc state */
@@ -593,6 +594,8 @@ static void test_CreateCompatibleDC(void)
 
     bitmap = CreateBitmap( 10, 10, 1, 1, NULL );
 
+    memset(&dm, 0, sizeof(dm));
+    dm.dmSize = sizeof(dm);
     bRet = EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &dm);
     ok(bRet, "EnumDisplaySettingsEx failed\n");
     dm.u1.s1.dmScale = 200;
@@ -1537,6 +1540,40 @@ static void test_pscript_printer_dc(void)
     DeleteDC(hdc);
 }
 
+struct screen_region_info
+{
+    HRGN region;
+    INT type;
+};
+
+static BOOL CALLBACK enum_monitor_proc(HMONITOR monitor, HDC hdc, RECT *rect, LPARAM lparam)
+{
+    struct screen_region_info *info = (struct screen_region_info *)lparam;
+    HRGN region;
+
+    if (!info->region)
+    {
+        info->region = CreateRectRgnIndirect(rect);
+        info->type = SIMPLEREGION;
+    }
+    else
+    {
+        region = CreateRectRgnIndirect(rect);
+        info->type = CombineRgn(info->region, info->region, region, RGN_OR);
+        DeleteObject(region);
+    }
+    return TRUE;
+}
+
+static INT get_screen_region_type(void)
+{
+    struct screen_region_info info = {NULL, NULLREGION};
+
+    EnumDisplayMonitors(NULL, NULL, enum_monitor_proc, (LPARAM)&info);
+    DeleteObject(info.region);
+    return info.type;
+}
+
 static void test_clip_box(void)
 {
     DEVMODEA scale_mode = {.dmSize = sizeof(DEVMODEA)};
@@ -1552,7 +1589,7 @@ static void test_clip_box(void)
     SetRect(&screen_rect, GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
             GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN),
             GetSystemMetrics(SM_YVIRTUALSCREEN) + GetSystemMetrics(SM_CYVIRTUALSCREEN));
-    screen_type = GetSystemMetrics(SM_CMONITORS) > 1 ? COMPLEXREGION : SIMPLEREGION;
+    screen_type = get_screen_region_type();
 
     dc = CreateDCA("DISPLAY", NULL, NULL, NULL);
     type = GetClipBox(dc, &rect);

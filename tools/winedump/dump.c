@@ -40,8 +40,8 @@
 #include "winbase.h"
 #include "winedump.h"
 
-static void*			dump_base;
-static unsigned long		dump_total_len;
+void *dump_base = NULL;
+unsigned long dump_total_len = 0;
 
 void dump_data( const unsigned char *ptr, unsigned int size, const char *prefix )
 {
@@ -207,6 +207,34 @@ const char* get_guid_str(const GUID* guid)
     return str;
 }
 
+const char *get_unicode_str( const WCHAR *str, int len )
+{
+    char *buffer;
+    int i = 0;
+
+    if (len == -1) len = strlenW( str );
+    buffer = dump_want_n( len * 6 + 3);
+    buffer[i++] = '"';
+    while (len-- > 0 && *str)
+    {
+        WCHAR c = *str++;
+        switch (c)
+        {
+        case '\n': strcpy( buffer + i, "\\n" );  i += 2; break;
+        case '\r': strcpy( buffer + i, "\\r" );  i += 2; break;
+        case '\t': strcpy( buffer + i, "\\t" );  i += 2; break;
+        case '"':  strcpy( buffer + i, "\\\"" ); i += 2; break;
+        case '\\': strcpy( buffer + i, "\\\\" ); i += 2; break;
+        default:
+            if (c >= ' ' && c <= 126) buffer[i++] = c;
+            else i += sprintf( buffer + i, "\\u%04x",c);
+        }
+    }
+    buffer[i++] = '"';
+    buffer[i] = 0;
+    return buffer;
+}
+
 const void*	PRD(unsigned long prd, unsigned long len)
 {
     return (prd + len > dump_total_len) ? NULL : (const char*)dump_base + prd;
@@ -239,6 +267,7 @@ dumpers[] =
     {SIG_EMF,           get_kind_emf,   emf_dump},
     {SIG_FNT,           get_kind_fnt,   fnt_dump},
     {SIG_TLB,           get_kind_tlb,   tlb_dump},
+    {SIG_NLS,           get_kind_nls,   nls_dump},
     {SIG_UNKNOWN,       NULL,           NULL} /* sentinel */
 };
 

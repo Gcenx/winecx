@@ -724,7 +724,7 @@ static const WCHAR *value_name_state( struct parser *parser, const WCHAR *pos )
             set_state( parser, EOL_BACKSLASH );
             return p;
         default:
-            if (!iswspace(*p)) token_end = p + 1;
+            if (*p && !iswspace(*p)) token_end = p + 1;
             else
             {
                 push_token( parser, p );
@@ -838,7 +838,7 @@ static const WCHAR *trailing_spaces_state( struct parser *parser, const WCHAR *p
             set_state( parser, EOL_BACKSLASH );
             return p;
         }
-        if (!iswspace(*p)) break;
+        if (*p && !iswspace(*p)) break;
     }
     pop_state( parser );
     return p;
@@ -1803,6 +1803,15 @@ BOOL WINAPI SetupGetIntField( PINFCONTEXT context, DWORD index, PINT result )
 }
 
 
+static int xdigit_to_int(WCHAR c)
+{
+    if ('0' <= c && c <= '9') return c - '0';
+    if ('a' <= c && c <= 'f') return c - 'a' + 10;
+    if ('A' <= c && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+
 /***********************************************************************
  *		SetupGetBinaryField    (SETUPAPI.@)
  */
@@ -1837,15 +1846,15 @@ BOOL WINAPI SetupGetBinaryField( PINFCONTEXT context, DWORD index, BYTE *buffer,
     {
         const WCHAR *p;
         DWORD value = 0;
-        for (p = field->text; *p && iswxdigit(*p); p++)
+        int d;
+        for (p = field->text; *p && (d = xdigit_to_int(*p)) != -1; p++)
         {
             if ((value <<= 4) > 255)
             {
                 SetLastError( ERROR_INVALID_DATA );
                 return FALSE;
             }
-            if (*p <= '9') value |= (*p - '0');
-            else value |= (towlower(*p) - 'a' + 10);
+            value |= d;
         }
         buffer[i - index] = value;
     }

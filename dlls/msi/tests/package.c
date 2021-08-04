@@ -35,8 +35,7 @@
 
 static BOOL is_wow64;
 static const char msifile[] = "winetest-package.msi";
-static const WCHAR msifileW[] =
-    {'w','i','n','e','t','e','s','t','-','p','a','c','k','a','g','e','.','m','s','i',0};
+static const WCHAR msifileW[] = L"winetest-package.msi";
 static char CURR_DIR[MAX_PATH];
 
 static INSTALLSTATE (WINAPI *pMsiGetComponentPathExA)(LPCSTR, LPCSTR, LPCSTR, MSIINSTALLCONTEXT, LPSTR, LPDWORD);
@@ -269,7 +268,7 @@ static void set_component_path(LPCSTR filename, MSIINSTALLCONTEXT context,
     WCHAR guidW[MAX_PATH];
     WCHAR squashedW[MAX_PATH];
     CHAR squashed[MAX_PATH];
-    CHAR comppath[MAX_PATH];
+    CHAR comppath[MAX_PATH + 81];
     CHAR prodpath[MAX_PATH];
     CHAR path[MAX_PATH];
     LPCSTR prod = NULL;
@@ -335,7 +334,7 @@ static void delete_component_path(LPCSTR guid, MSIINSTALLCONTEXT context, LPSTR 
     WCHAR squashedW[MAX_PATH];
     WCHAR substrW[MAX_PATH];
     CHAR squashed[MAX_PATH];
-    CHAR comppath[MAX_PATH];
+    CHAR comppath[MAX_PATH + 81];
     CHAR prodpath[MAX_PATH];
     REGSAM access = KEY_ALL_ACCESS;
 
@@ -1137,8 +1136,6 @@ static void test_doaction( void )
 
 static void test_gettargetpath_bad(void)
 {
-    static const WCHAR boo[] = {'b','o','o',0};
-    static const WCHAR empty[] = {0};
     char buffer[0x80];
     WCHAR bufferW[0x80];
     MSIHANDLE hpkg;
@@ -1182,20 +1179,20 @@ static void test_gettargetpath_bad(void)
     r = MsiGetTargetPathW( 0, NULL, NULL, &sz );
     ok( r == ERROR_INVALID_PARAMETER, "wrong return val\n");
 
-    r = MsiGetTargetPathW( 0, boo, NULL, NULL );
+    r = MsiGetTargetPathW( 0, L"boo", NULL, NULL );
     ok( r == ERROR_INVALID_HANDLE, "wrong return val\n");
 
-    r = MsiGetTargetPathW( 0, boo, NULL, NULL );
+    r = MsiGetTargetPathW( 0, L"boo", NULL, NULL );
     ok( r == ERROR_INVALID_HANDLE, "wrong return val\n");
 
-    r = MsiGetTargetPathW( hpkg, boo, NULL, NULL );
+    r = MsiGetTargetPathW( hpkg, L"boo", NULL, NULL );
     ok( r == ERROR_DIRECTORY, "wrong return val\n");
 
-    r = MsiGetTargetPathW( hpkg, boo, bufferW, NULL );
+    r = MsiGetTargetPathW( hpkg, L"boo", bufferW, NULL );
     ok( r == ERROR_DIRECTORY, "wrong return val\n");
 
     sz = 0;
-    r = MsiGetTargetPathW( hpkg, empty, bufferW, &sz );
+    r = MsiGetTargetPathW( hpkg, L"", bufferW, &sz );
     ok( r == ERROR_DIRECTORY, "wrong return val\n");
 
     MsiCloseHandle( hpkg );
@@ -1223,7 +1220,7 @@ static void query_file_path(MSIHANDLE hpkg, LPCSTR file, LPSTR buff)
 
 static void test_settargetpath(void)
 {
-    char tempdir[MAX_PATH+8], buffer[MAX_PATH], file[MAX_PATH];
+    char tempdir[MAX_PATH+8], buffer[MAX_PATH], file[MAX_PATH + 20];
     DWORD sz;
     MSIHANDLE hpkg;
     UINT r;
@@ -1391,10 +1388,6 @@ static void test_settargetpath(void)
 
 static void test_condition(void)
 {
-    static const WCHAR cond1[] = {'\"','a',0x30a,'\"','<','\"',0xe5,'\"',0};
-    static const WCHAR cond2[] = {'\"','a',0x30a,'\"','>','\"',0xe5,'\"',0};
-    static const WCHAR cond3[] = {'\"','a',0x30a,'\"','<','>','\"',0xe5,'\"',0};
-    static const WCHAR cond4[] = {'\"','a',0x30a,'\"','=','\"',0xe5,'\"',0};
     MSICONDITION r;
     MSIHANDLE hpkg;
 
@@ -2126,19 +2119,19 @@ static void test_condition(void)
     r = MsiEvaluateConditionA(hpkg, "A <= X");
     ok( r == MSICONDITION_FALSE, "wrong return val (%d)\n", r);
 
-    r = MsiEvaluateConditionW(hpkg, cond1);
+    r = MsiEvaluateConditionW(hpkg, L"\"a\x30a\"<\"\xe5\"");
     ok( r == MSICONDITION_TRUE || broken(r == MSICONDITION_FALSE),
         "wrong return val (%d)\n", r);
 
-    r = MsiEvaluateConditionW(hpkg, cond2);
+    r = MsiEvaluateConditionW(hpkg, L"\"a\x30a\">\"\xe5\"");
     ok( r == MSICONDITION_FALSE || broken(r == MSICONDITION_TRUE),
         "wrong return val (%d)\n", r);
 
-    r = MsiEvaluateConditionW(hpkg, cond3);
+    r = MsiEvaluateConditionW(hpkg, L"\"a\x30a\"<>\"\xe5\"");
     ok( r == MSICONDITION_TRUE || broken(r == MSICONDITION_FALSE),
         "wrong return val (%d)\n", r);
 
-    r = MsiEvaluateConditionW(hpkg, cond4);
+    r = MsiEvaluateConditionW(hpkg, L"\"a\x30a\"=\"\xe5\"");
     ok( r == MSICONDITION_FALSE || broken(r == MSICONDITION_TRUE),
         "wrong return val (%d)\n", r);
 
@@ -2161,9 +2154,6 @@ static void check_prop(MSIHANDLE hpkg, const char *prop, const char *expect, int
 
 static void test_props(void)
 {
-    static const WCHAR booW[] = {'b','o','o',0};
-    static const WCHAR xyzW[] = {'x','y','z',0};
-    static const WCHAR xyW[] = {'x','y',0};
     MSIHANDLE hpkg, hdb;
     UINT r;
     DWORD sz;
@@ -2296,36 +2286,36 @@ static void test_props(void)
     ok(sz == 3, "got size %u\n", sz);
 
     sz = 0;
-    r = MsiGetPropertyW(hpkg, booW, NULL, &sz);
+    r = MsiGetPropertyW(hpkg, L"boo", NULL, &sz);
     ok(!r, "got %u\n", r);
     ok(sz == 3, "got size %u\n", sz);
 
     sz = 0;
-    lstrcpyW(bufferW, booW);
-    r = MsiGetPropertyW(hpkg, booW, bufferW, &sz);
+    lstrcpyW(bufferW, L"boo");
+    r = MsiGetPropertyW(hpkg, L"boo", bufferW, &sz);
     ok(r == ERROR_MORE_DATA, "got %u\n", r);
-    ok(!lstrcmpW(bufferW, booW), "got %s\n", wine_dbgstr_w(bufferW));
+    ok(!lstrcmpW(bufferW, L"boo"), "got %s\n", wine_dbgstr_w(bufferW));
     ok(sz == 3, "got size %u\n", sz);
 
     sz = 1;
-    lstrcpyW(bufferW, booW);
-    r = MsiGetPropertyW(hpkg, booW, bufferW, &sz );
+    lstrcpyW(bufferW, L"boo");
+    r = MsiGetPropertyW(hpkg, L"boo", bufferW, &sz );
     ok(r == ERROR_MORE_DATA, "got %u\n", r);
     ok(!bufferW[0], "got %s\n", wine_dbgstr_w(bufferW));
     ok(sz == 3, "got size %u\n", sz);
 
     sz = 3;
-    lstrcpyW(bufferW, booW);
-    r = MsiGetPropertyW(hpkg, booW, bufferW, &sz );
+    lstrcpyW(bufferW, L"boo");
+    r = MsiGetPropertyW(hpkg, L"boo", bufferW, &sz );
     ok(r == ERROR_MORE_DATA, "got %u\n", r);
-    ok(!lstrcmpW(bufferW, xyW), "got %s\n", wine_dbgstr_w(bufferW));
+    ok(!lstrcmpW(bufferW, L"xy"), "got %s\n", wine_dbgstr_w(bufferW));
     ok(sz == 3, "got size %u\n", sz);
 
     sz = 4;
-    lstrcpyW(bufferW, booW);
-    r = MsiGetPropertyW(hpkg, booW, bufferW, &sz );
+    lstrcpyW(bufferW, L"boo");
+    r = MsiGetPropertyW(hpkg, L"boo", bufferW, &sz );
     ok(!r, "got %u\n", r);
-    ok(!lstrcmpW(bufferW, xyzW), "got %s\n", wine_dbgstr_w(bufferW));
+    ok(!lstrcmpW(bufferW, L"xyz"), "got %s\n", wine_dbgstr_w(bufferW));
     ok(sz == 3, "got size %u\n", sz);
 
     /* properties are case-sensitive */
@@ -2759,9 +2749,9 @@ static void test_formatrecord2(void)
 static void test_formatrecord_tables(void)
 {
     MSIHANDLE hdb, hrec, hpkg = 0;
-    CHAR buf[MAX_PATH];
+    CHAR buf[MAX_PATH + 41];
     CHAR curr_dir[MAX_PATH];
-    CHAR expected[MAX_PATH];
+    CHAR expected[MAX_PATH + 45];
     CHAR root[MAX_PATH];
     DWORD size;
     UINT r;
@@ -3074,12 +3064,9 @@ static void test_states(void)
     static const char msifile2[] = "winetest2-package.msi";
     static const char msifile3[] = "winetest3-package.msi";
     static const char msifile4[] = "winetest4-package.msi";
-    static const WCHAR msifile2W[] =
-        {'w','i','n','e','t','e','s','t','2','-','p','a','c','k','a','g','e','.','m','s','i',0};
-    static const WCHAR msifile3W[] =
-        {'w','i','n','e','t','e','s','t','3','-','p','a','c','k','a','g','e','.','m','s','i',0};
-    static const WCHAR msifile4W[] =
-        {'w','i','n','e','t','e','s','t','4','-','p','a','c','k','a','g','e','.','m','s','i',0};
+    static const WCHAR msifile2W[] = L"winetest2-package.msi";
+    static const WCHAR msifile3W[] = L"winetest3-package.msi";
+    static const WCHAR msifile4W[] = L"winetest4-package.msi";
     char msi_cache_file[MAX_PATH];
     DWORD cache_file_name_len;
     INSTALLSTATE state;
@@ -4011,7 +3998,7 @@ static void test_removefiles(void)
     ok( action == INSTALLSTATE_UNKNOWN, "expected INSTALLSTATE_UNKNOWN, got %d\n", action );
 
     ok(DeleteFileA("hydrogen.txt"), "Expected hydrogen.txt to exist\n");
-    ok(DeleteFileA("lithium.txt"), "Expected lithium.txt to exist\n");    
+    ok(DeleteFileA("lithium.txt"), "Expected lithium.txt to exist\n");
     ok(DeleteFileA("beryllium.txt"), "Expected beryllium.txt to exist\n");
     ok(DeleteFileA("carbon.txt"), "Expected carbon.txt to exist\n");
     ok(DeleteFileA("helium.txt"), "Expected helium.txt to exist\n");
@@ -4142,7 +4129,7 @@ done:
 static void test_appsearch_complocator(void)
 {
     MSIHANDLE hpkg, hdb;
-    char path[MAX_PATH], expected[MAX_PATH], prop[MAX_PATH];
+    char path[MAX_PATH + 15], expected[MAX_PATH], prop[MAX_PATH];
     LPSTR usersid;
     DWORD size;
     UINT r;
@@ -4391,7 +4378,7 @@ error:
 static void test_appsearch_reglocator(void)
 {
     MSIHANDLE hpkg, hdb;
-    char path[MAX_PATH], expected[MAX_PATH], prop[MAX_PATH];
+    char path[MAX_PATH + 20], expected[MAX_PATH], prop[MAX_PATH];
     DWORD binary[2], size, val;
     BOOL space, version, is_64bit = sizeof(void *) > sizeof(int);
     HKEY hklm, classes, hkcu, users;
@@ -4973,7 +4960,7 @@ static void delete_win_ini(LPCSTR file)
 static void test_appsearch_inilocator(void)
 {
     MSIHANDLE hpkg, hdb;
-    char path[MAX_PATH], expected[MAX_PATH], prop[MAX_PATH];
+    char path[MAX_PATH + 14], expected[MAX_PATH], prop[MAX_PATH];
     BOOL version;
     LPSTR ptr;
     DWORD size;
@@ -5210,7 +5197,7 @@ static void search_absolute_directory(LPSTR absolute, LPCSTR relative)
 static void test_appsearch_drlocator(void)
 {
     MSIHANDLE hpkg, hdb;
-    char path[MAX_PATH], expected[MAX_PATH], prop[MAX_PATH];
+    char path[MAX_PATH + 27], expected[MAX_PATH], prop[MAX_PATH];
     BOOL version;
     DWORD size;
     UINT r;
@@ -5747,6 +5734,9 @@ static void test_installprops(void)
     if (r == ERROR_SUCCESS) trace( "MsiNetAssemblySupport \"%s\"\n", buf );
 
     GetNativeSystemInfo(&si);
+
+    sprintf(buf, "%d", LOBYTE(LOWORD(GetVersion())) * 100 + HIBYTE(LOWORD(GetVersion())));
+    check_prop(hpkg, "VersionNT", buf, 1);
 
     if (S(U(si)).wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
     {
@@ -7959,16 +7949,11 @@ static void test_emptypackage(void)
 
 static void test_MsiGetProductProperty(void)
 {
-    static const WCHAR prodcode_propW[] = {'P','r','o','d','u','c','t','C','o','d','e',0};
-    static const WCHAR nonexistentW[] = {'I','D','o','n','t','E','x','i','s','t',0};
-    static const WCHAR newpropW[] = {'N','e','w','P','r','o','p','e','r','t','y',0};
-    static const WCHAR appleW[] = {'a','p','p','l','e',0};
-    static const WCHAR emptyW[] = {0};
     WCHAR valW[MAX_PATH];
     MSIHANDLE hprod, hdb;
     CHAR val[MAX_PATH];
     CHAR path[MAX_PATH];
-    CHAR query[MAX_PATH];
+    CHAR query[MAX_PATH + 17];
     CHAR keypath[MAX_PATH*2];
     CHAR prodcode[MAX_PATH];
     WCHAR prodcodeW[MAX_PATH];
@@ -8069,11 +8054,11 @@ static void test_MsiGetProductProperty(void)
     ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
-    lstrcpyW(valW, appleW);
-    r = MsiGetProductPropertyW(0xdeadbeef, prodcode_propW, valW, &size);
+    lstrcpyW(valW, L"apple");
+    r = MsiGetProductPropertyW(0xdeadbeef, L"ProductCode", valW, &size);
     ok(r == ERROR_INVALID_HANDLE,
        "Expected ERROR_INVALID_HANDLE, got %d\n", r);
-    ok(!lstrcmpW(valW, appleW),
+    ok(!lstrcmpW(valW, L"apple"),
        "Expected val to be unchanged, got %s\n", wine_dbgstr_w(valW));
     ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
@@ -8088,11 +8073,11 @@ static void test_MsiGetProductProperty(void)
     ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
-    lstrcpyW(valW, appleW);
+    lstrcpyW(valW, L"apple");
     r = MsiGetProductPropertyW(hprod, NULL, valW, &size);
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
-    ok(!lstrcmpW(valW, appleW),
+    ok(!lstrcmpW(valW, L"apple"),
        "Expected val to be unchanged, got %s\n", wine_dbgstr_w(valW));
     ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
@@ -8105,8 +8090,8 @@ static void test_MsiGetProductProperty(void)
     ok(size == 0, "Expected 0, got %d\n", size);
 
     size = MAX_PATH;
-    lstrcpyW(valW, appleW);
-    r = MsiGetProductPropertyW(hprod, emptyW, valW, &size);
+    lstrcpyW(valW, L"apple");
+    r = MsiGetProductPropertyW(hprod, L"", valW, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(*valW == 0, "Expected \"\", got %s\n", wine_dbgstr_w(valW));
     ok(size == 0, "Expected 0, got %d\n", size);
@@ -8122,8 +8107,8 @@ static void test_MsiGetProductProperty(void)
        "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
     size = MAX_PATH;
-    lstrcpyW(valW, appleW);
-    r = MsiGetProductPropertyW(hprod, prodcode_propW, valW, &size);
+    lstrcpyW(valW, L"apple");
+    r = MsiGetProductPropertyW(hprod, L"ProductCode", valW, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpW(valW, prodcodeW),
        "Expected %s, got %s\n", wine_dbgstr_w(prodcodeW), wine_dbgstr_w(valW));
@@ -8138,7 +8123,7 @@ static void test_MsiGetProductProperty(void)
        "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
     size = MAX_PATH;
-    r = MsiGetProductPropertyW(hprod, prodcode_propW, NULL, &size);
+    r = MsiGetProductPropertyW(hprod, L"ProductCode", NULL, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(size == lstrlenW(prodcodeW),
        "Expected %d, got %d\n", lstrlenW(prodcodeW), size);
@@ -8153,11 +8138,11 @@ static void test_MsiGetProductProperty(void)
     ok(size == lstrlenA(prodcode),
        "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
-    lstrcpyW(valW, appleW);
-    r = MsiGetProductPropertyW(hprod, prodcode_propW, valW, NULL);
+    lstrcpyW(valW, L"apple");
+    r = MsiGetProductPropertyW(hprod, L"ProductCode", valW, NULL);
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
-    ok(!lstrcmpW(valW, appleW),
+    ok(!lstrcmpW(valW, L"apple"),
        "Expected val to be unchanged, got %s\n", wine_dbgstr_w(valW));
     ok(size == lstrlenW(prodcodeW),
        "Expected %d, got %d\n", lstrlenW(prodcodeW), size);
@@ -8173,8 +8158,8 @@ static void test_MsiGetProductProperty(void)
        "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
     size = 4;
-    lstrcpyW(valW, appleW);
-    r = MsiGetProductPropertyW(hprod, prodcode_propW, valW, &size);
+    lstrcpyW(valW, L"apple");
+    r = MsiGetProductPropertyW(hprod, L"ProductCode", valW, &size);
     ok(r == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %d\n", r);
     ok(!memcmp(valW, prodcodeW, 3 * sizeof(WCHAR)),
        "Expected first 3 chars of %s, got %s\n", wine_dbgstr_w(prodcodeW), wine_dbgstr_w(valW));
@@ -8192,8 +8177,8 @@ static void test_MsiGetProductProperty(void)
        "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
     size = lstrlenW(prodcodeW);
-    lstrcpyW(valW, appleW);
-    r = MsiGetProductPropertyW(hprod, prodcode_propW, valW, &size);
+    lstrcpyW(valW, L"apple");
+    r = MsiGetProductPropertyW(hprod, L"ProductCode", valW, &size);
     ok(r == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %d\n", r);
     ok(!memcmp(valW, prodcodeW, lstrlenW(prodcodeW) - 1),
        "Expected first 37 chars of %s, got %s\n", wine_dbgstr_w(prodcodeW), wine_dbgstr_w(valW));
@@ -8211,8 +8196,8 @@ static void test_MsiGetProductProperty(void)
        "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
     size = lstrlenW(prodcodeW) + 1;
-    lstrcpyW(valW, appleW);
-    r = MsiGetProductPropertyW(hprod, prodcode_propW, valW, &size);
+    lstrcpyW(valW, L"apple");
+    r = MsiGetProductPropertyW(hprod, L"ProductCode", valW, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpW(valW, prodcodeW),
        "Expected %s, got %s\n", wine_dbgstr_w(prodcodeW), wine_dbgstr_w(valW));
@@ -8228,10 +8213,10 @@ static void test_MsiGetProductProperty(void)
     ok(size == 0, "Expected 0, got %d\n", size);
 
     size = MAX_PATH;
-    lstrcpyW(valW, appleW);
-    r = MsiGetProductPropertyW(hprod, nonexistentW, valW, &size);
+    lstrcpyW(valW, L"apple");
+    r = MsiGetProductPropertyW(hprod, L"IDontExist", valW, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(!lstrcmpW(valW, emptyW), "Expected \"\", got %s\n", wine_dbgstr_w(valW));
+    ok(!lstrcmpW(valW, L""), "Expected \"\", got %s\n", wine_dbgstr_w(valW));
     ok(size == 0, "Expected 0, got %d\n", size);
 
     r = MsiSetPropertyA(hprod, "NewProperty", "value");
@@ -8246,10 +8231,10 @@ static void test_MsiGetProductProperty(void)
     ok(size == 0, "Expected 0, got %d\n", size);
 
     size = MAX_PATH;
-    lstrcpyW(valW, appleW);
-    r = MsiGetProductPropertyW(hprod, newpropW, valW, &size);
+    lstrcpyW(valW, L"apple");
+    r = MsiGetProductPropertyW(hprod, L"NewProperty", valW, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(!lstrcmpW(valW, emptyW), "Expected \"\", got %s\n", wine_dbgstr_w(valW));
+    ok(!lstrcmpW(valW, L""), "Expected \"\", got %s\n", wine_dbgstr_w(valW));
     ok(size == 0, "Expected 0, got %d\n", size);
 
     r = MsiSetPropertyA(hprod, "ProductCode", "value");
@@ -8266,8 +8251,8 @@ static void test_MsiGetProductProperty(void)
        "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
     size = MAX_PATH;
-    lstrcpyW(valW, appleW);
-    r = MsiGetProductPropertyW(hprod, prodcode_propW, valW, &size);
+    lstrcpyW(valW, L"apple");
+    r = MsiGetProductPropertyW(hprod, L"ProductCode", valW, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpW(valW, prodcodeW),
        "Expected %s, got %s\n", wine_dbgstr_w(prodcodeW), wine_dbgstr_w(valW));

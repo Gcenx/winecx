@@ -22,14 +22,6 @@
 
 #include <corecrt.h>
 
-#ifndef NULL
-#ifdef __cplusplus
-#define NULL  0
-#else
-#define NULL  ((void *)0)
-#endif
-#endif
-
 #ifdef __GNUC__
 #define offsetof(s,m)       __builtin_offsetof(s,m)
 #elif defined(_WIN64)
@@ -43,8 +35,8 @@
 extern "C" {
 #endif
 
-__msvcrt_ulong __cdecl __threadid(void);
-__msvcrt_ulong __cdecl __threadhandle(void);
+_ACRTIMP __msvcrt_ulong __cdecl __threadid(void);
+_ACRTIMP __msvcrt_ulong __cdecl __threadhandle(void);
 #define _threadid    (__threadid())
 
 #ifdef __cplusplus

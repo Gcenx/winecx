@@ -27,7 +27,6 @@
 
 #include "winternl.h"
 #include "wine/exception.h"
-#include "wine/library.h"
 
 #include "wine/debug.h"
 
@@ -281,8 +280,6 @@ struct dbg_process*     dbg_get_process_h(HANDLE h)
 
 #if defined(__i386__) || defined(__i386_on_x86_64__)
 extern struct backend_cpu be_i386;
-#elif defined(__powerpc__)
-extern struct backend_cpu be_ppc;
 #elif defined(__x86_64__)
 extern struct backend_cpu be_i386;
 extern struct backend_cpu be_x86_64;
@@ -330,8 +327,6 @@ struct dbg_process*	dbg_add_process(const struct be_process_io* pio, DWORD pid, 
 
 #if defined(__i386__) || defined(__i386_on_x86_64__)
     p->be_cpu = &be_i386;
-#elif defined(__powerpc__)
-    p->be_cpu = &be_ppc;
 #elif defined(__x86_64__)
     p->be_cpu = wow64 ? &be_i386 : &be_x86_64;
 #elif defined(__arm__) && !defined(__ARMEB__)
@@ -500,6 +495,7 @@ struct dbg_thread* dbg_add_thread(struct dbg_process* p, DWORD tid,
     t->num_frames = 0;
     t->curr_frame = -1;
     t->addr_mode = AddrModeFlat;
+    t->suspended = FALSE;
 
     snprintf(t->name, sizeof(t->name), "%04x", tid);
 
@@ -668,7 +664,7 @@ static void restart_if_wow64(void)
     }
 }
 
-int __cdecl main(int argc, char** argv)
+int main(int argc, char** argv)
 {
     int 	        retv = 0;
     HANDLE              hFile = INVALID_HANDLE_VALUE;

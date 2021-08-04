@@ -26,15 +26,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(jscript);
 
-static const WCHAR parseW[] = {'p','a','r','s','e',0};
-static const WCHAR stringifyW[] = {'s','t','r','i','n','g','i','f','y',0};
-
-static const WCHAR nullW[] = {'n','u','l','l',0};
-static const WCHAR trueW[] = {'t','r','u','e',0};
-static const WCHAR falseW[] = {'f','a','l','s','e',0};
-
-static const WCHAR toJSONW[] = {'t','o','J','S','O','N',0};
-
 typedef struct {
     const WCHAR *ptr;
     const WCHAR *end;
@@ -110,19 +101,19 @@ static HRESULT parse_json_value(json_parse_ctx_t *ctx, jsval_t *r)
 
     /* JSONNullLiteral */
     case 'n':
-        if(!is_keyword(ctx, nullW))
+        if(!is_keyword(ctx, L"null"))
             break;
         *r = jsval_null();
         return S_OK;
 
     /* JSONBooleanLiteral */
     case 't':
-        if(!is_keyword(ctx, trueW))
+        if(!is_keyword(ctx, L"true"))
             break;
         *r = jsval_bool(TRUE);
         return S_OK;
     case 'f':
-        if(!is_keyword(ctx, falseW))
+        if(!is_keyword(ctx, L"false"))
             break;
         *r = jsval_bool(FALSE);
         return S_OK;
@@ -329,6 +320,8 @@ typedef struct {
     size_t stack_size;
 
     WCHAR gap[11]; /* according to the spec, it's no longer than 10 chars */
+
+    jsdisp_t *replacer;
 } stringify_ctx_t;
 
 static BOOL stringify_push_obj(stringify_ctx_t *ctx, jsdisp_t *obj)
@@ -479,9 +472,8 @@ static HRESULT json_quote(stringify_ctx_t *ctx, const WCHAR *ptr, size_t len)
             break;
         default:
             if(*ptr < ' ') {
-                static const WCHAR formatW[] = {'\\','u','%','0','4','x',0};
                 WCHAR buf[7];
-                swprintf(buf, ARRAY_SIZE(buf), formatW, *ptr);
+                swprintf(buf, ARRAY_SIZE(buf), L"\\u%04x", *ptr);
                 if(!append_string(ctx, buf))
                     return E_OUTOFMEMORY;
             }else {
@@ -500,13 +492,13 @@ static inline BOOL is_callable(jsdisp_t *obj)
     return is_class(obj, JSCLASS_FUNCTION);
 }
 
-static HRESULT stringify(stringify_ctx_t *ctx, jsval_t val);
+static HRESULT stringify(stringify_ctx_t *ctx, jsdisp_t *object, const WCHAR *name);
 
 /* ECMA-262 5.1 Edition    15.12.3 (abstract operation JA) */
 static HRESULT stringify_array(stringify_ctx_t *ctx, jsdisp_t *obj)
 {
     unsigned length, i, j;
-    jsval_t val;
+    WCHAR name[16];
     HRESULT hres;
 
     if(is_on_stack(ctx, obj)) {
@@ -536,19 +528,12 @@ static HRESULT stringify_array(stringify_ctx_t *ctx, jsdisp_t *obj)
             }
         }
 
-        hres = jsdisp_get_idx(obj, i, &val);
-        if(SUCCEEDED(hres)) {
-            hres = stringify(ctx, val);
-            if(FAILED(hres))
-                return hres;
-            if(hres == S_FALSE && !append_string(ctx, nullW))
-                return E_OUTOFMEMORY;
-        }else if(hres == DISP_E_UNKNOWNNAME) {
-            if(!append_string(ctx, nullW))
-                return E_OUTOFMEMORY;
-        }else {
+        _itow(i, name, ARRAY_SIZE(name));
+        hres = stringify(ctx, obj, name);
+        if(FAILED(hres))
             return hres;
-        }
+        if(hres == S_FALSE && !append_string(ctx, L"null"))
+            return E_OUTOFMEMORY;
     }
 
     if((length && *ctx->gap && !append_char(ctx, '\n')) || !append_char(ctx, ']'))
@@ -562,7 +547,6 @@ static HRESULT stringify_array(stringify_ctx_t *ctx, jsdisp_t *obj)
 static HRESULT stringify_object(stringify_ctx_t *ctx, jsdisp_t *obj)
 {
     DISPID dispid = DISPID_STARTENUM;
-    jsval_t val = jsval_undefined();
     unsigned prop_cnt = 0, i;
     size_t stepback;
     BSTR prop_name;
@@ -580,14 +564,6 @@ static HRESULT stringify_object(stringify_ctx_t *ctx, jsdisp_t *obj)
         return E_OUTOFMEMORY;
 
     while((hres = IDispatchEx_GetNextDispID(&obj->IDispatchEx_iface, fdexEnumDefault, dispid, &dispid)) == S_OK) {
-        jsval_release(val);
-        hres = jsdisp_propget(obj, dispid, &val);
-        if(FAILED(hres))
-            return hres;
-
-        if(is_undefined(val))
-            continue;
-
         stepback = ctx->buf_len;
 
         if(prop_cnt && !append_char(ctx, ',')) {
@@ -611,21 +587,23 @@ static HRESULT stringify_object(stringify_ctx_t *ctx, jsdisp_t *obj)
 
         hres = IDispatchEx_GetMemberName(&obj->IDispatchEx_iface, dispid, &prop_name);
         if(FAILED(hres))
-            break;
+            return hres;
 
         hres = json_quote(ctx, prop_name, SysStringLen(prop_name));
-        SysFreeString(prop_name);
-        if(FAILED(hres))
-            break;
-
-        if(!append_char(ctx, ':') || (*ctx->gap && !append_char(ctx, ' '))) {
-            hres = E_OUTOFMEMORY;
-            break;
+        if(FAILED(hres)) {
+            SysFreeString(prop_name);
+            return hres;
         }
 
-        hres = stringify(ctx, val);
+        if(!append_char(ctx, ':') || (*ctx->gap && !append_char(ctx, ' '))) {
+            SysFreeString(prop_name);
+            return E_OUTOFMEMORY;
+        }
+
+        hres = stringify(ctx, obj, prop_name);
+        SysFreeString(prop_name);
         if(FAILED(hres))
-            break;
+            return hres;
 
         if(hres == S_FALSE) {
             ctx->buf_len = stepback;
@@ -634,9 +612,6 @@ static HRESULT stringify_object(stringify_ctx_t *ctx, jsdisp_t *obj)
 
         prop_cnt++;
     }
-    jsval_release(val);
-    if(FAILED(hres))
-        return hres;
 
     if(prop_cnt && *ctx->gap) {
         if(!append_char(ctx, '\n'))
@@ -658,38 +633,61 @@ static HRESULT stringify_object(stringify_ctx_t *ctx, jsdisp_t *obj)
 }
 
 /* ECMA-262 5.1 Edition    15.12.3 (abstract operation Str) */
-static HRESULT stringify(stringify_ctx_t *ctx, jsval_t val)
+static HRESULT stringify(stringify_ctx_t *ctx, jsdisp_t *object, const WCHAR *name)
 {
-    jsval_t value;
+    jsval_t value, v;
     HRESULT hres;
 
-    if(is_object_instance(val) && get_object(val)) {
+    hres = jsdisp_propget_name(object, name, &value);
+    if(FAILED(hres))
+        return hres == DISP_E_UNKNOWNNAME ? S_FALSE : hres;
+
+    if(is_object_instance(value) && get_object(value)) {
         jsdisp_t *obj;
         DISPID id;
 
-        obj = iface_to_jsdisp(get_object(val));
-        if(!obj)
+        obj = iface_to_jsdisp(get_object(value));
+        if(!obj) {
+            jsval_release(value);
             return S_FALSE;
+        }
 
-        hres = jsdisp_get_id(obj, toJSONW, 0, &id);
+        hres = jsdisp_get_id(obj, L"toJSON", 0, &id);
         jsdisp_release(obj);
         if(hres == S_OK)
             FIXME("Use toJSON.\n");
     }
 
-    /* FIXME: Support replacer replacer. */
+    if(ctx->replacer) {
+        jsstr_t *name_str;
+        jsval_t args[2];
+        if(!(name_str = jsstr_alloc(name))) {
+            jsval_release(value);
+            return E_OUTOFMEMORY;
+        }
+        args[0] = jsval_string(name_str);
+        args[1] = value;
+        hres = jsdisp_call_value(ctx->replacer, to_disp(object), DISPATCH_METHOD, ARRAY_SIZE(args), args, &v);
+        jsstr_release(name_str);
+        jsval_release(value);
+        if(FAILED(hres))
+            return hres;
+        value = v;
+    }
 
-    hres = maybe_to_primitive(ctx->ctx, val, &value);
+    v = value;
+    hres = maybe_to_primitive(ctx->ctx, v, &value);
+    jsval_release(v);
     if(FAILED(hres))
         return hres;
 
     switch(jsval_type(value)) {
     case JSV_NULL:
-        if(!append_string(ctx, nullW))
+        if(!append_string(ctx, L"null"))
             hres = E_OUTOFMEMORY;
         break;
     case JSV_BOOL:
-        if(!append_string(ctx, get_bool(value) ? trueW : falseW))
+        if(!append_string(ctx, get_bool(value) ? L"true" : L"false"))
             hres = E_OUTOFMEMORY;
         break;
     case JSV_STRING: {
@@ -703,7 +701,7 @@ static HRESULT stringify(stringify_ctx_t *ctx, jsval_t val)
     }
     case JSV_NUMBER: {
         double n = get_number(value);
-        if(is_finite(n)) {
+        if(isfinite(n)) {
             const WCHAR *ptr;
             jsstr_t *str;
 
@@ -717,7 +715,7 @@ static HRESULT stringify(stringify_ctx_t *ctx, jsval_t val)
             hres = ptr && !append_string_len(ctx, ptr, jsstr_length(str)) ? E_OUTOFMEMORY : S_OK;
             jsstr_release(str);
         }else {
-            if(!append_string(ctx, nullW))
+            if(!append_string(ctx, L"null"))
                 hres = E_OUTOFMEMORY;
         }
         break;
@@ -755,7 +753,8 @@ static HRESULT stringify(stringify_ctx_t *ctx, jsval_t val)
 /* ECMA-262 5.1 Edition    15.12.3 */
 static HRESULT JSON_stringify(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, unsigned argc, jsval_t *argv, jsval_t *r)
 {
-    stringify_ctx_t stringify_ctx = {ctx, NULL,0,0, NULL,0,0, {0}};
+    stringify_ctx_t stringify_ctx = { ctx };
+    jsdisp_t *obj = NULL, *replacer;
     HRESULT hres;
 
     TRACE("\n");
@@ -766,9 +765,14 @@ static HRESULT JSON_stringify(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, un
         return S_OK;
     }
 
-    if(argc >= 2 && is_object_instance(argv[1])) {
-        FIXME("Replacer %s not yet supported\n", debugstr_jsval(argv[1]));
-        return E_NOTIMPL;
+    if(argc >= 2 && is_object_instance(argv[1]) && get_object(argv[1]) &&
+       (replacer = to_jsdisp(get_object(argv[1])))) {
+        if(is_callable(replacer)) {
+            stringify_ctx.replacer = jsdisp_addref(replacer);
+        }else if(is_class(replacer, JSCLASS_ARRAY)) {
+            FIXME("Array replacer not yet supported\n");
+            return E_NOTIMPL;
+        }
     }
 
     if(argc >= 3) {
@@ -776,7 +780,7 @@ static HRESULT JSON_stringify(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, un
 
         hres = maybe_to_primitive(ctx, argv[2], &space_val);
         if(FAILED(hres))
-            return hres;
+            goto fail;
 
         if(is_number(space_val)) {
             double n = get_number(space_val);
@@ -800,7 +804,12 @@ static HRESULT JSON_stringify(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, un
         jsval_release(space_val);
     }
 
-    hres = stringify(&stringify_ctx, argv[0]);
+    if(FAILED(hres = create_object(ctx, NULL, &obj)))
+        goto fail;
+    if(FAILED(hres = jsdisp_propput_name(obj, L"", argv[0])))
+        goto fail;
+
+    hres = stringify(&stringify_ctx, obj, L"");
     if(SUCCEEDED(hres) && r) {
         assert(!stringify_ctx.stack_top);
 
@@ -815,14 +824,19 @@ static HRESULT JSON_stringify(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, un
         }
     }
 
+fail:
+    if(obj)
+        jsdisp_release(obj);
+    if(stringify_ctx.replacer)
+        jsdisp_release(stringify_ctx.replacer);
     heap_free(stringify_ctx.buf);
     heap_free(stringify_ctx.stack);
     return hres;
 }
 
 static const builtin_prop_t JSON_props[] = {
-    {parseW,     JSON_parse,     PROPF_METHOD|2},
-    {stringifyW, JSON_stringify, PROPF_METHOD|3}
+    {L"parse",     JSON_parse,     PROPF_METHOD|2},
+    {L"stringify", JSON_stringify, PROPF_METHOD|3}
 };
 
 static const builtin_info_t JSON_info = {

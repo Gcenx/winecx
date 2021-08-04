@@ -298,6 +298,21 @@ fail:
     return E_FAIL;
 }
 
+static char* get_exe_basename_utf8(void)
+{
+    WCHAR filenameW[MAX_PATH], *basenameW;
+
+    GetModuleFileNameW(NULL, filenameW, MAX_PATH);
+
+    basenameW = wcsrchr(filenameW, '\\');
+    if (basenameW)
+        basenameW += 1;
+    else
+        basenameW = filenameW;
+
+    return WtoA(basenameW);
+}
+
 MonoDomain* get_root_domain(void)
 {
     static MonoDomain* root_domain;
@@ -309,8 +324,13 @@ MonoDomain* get_root_domain(void)
 
     if (root_domain == NULL)
     {
-        /* FIXME: Use exe filename to name the domain? */
-        root_domain = mono_jit_init_version("mscorlib.dll", "v4.0.30319");
+        char *exe_basename;
+
+        exe_basename = get_exe_basename_utf8();
+
+        root_domain = mono_jit_init_version(exe_basename, "v4.0.30319");
+
+        HeapFree(GetProcessHeap(), 0, exe_basename);
 
         is_mono_started = TRUE;
     }
@@ -477,7 +497,7 @@ static BOOL get_install_root(LPWSTR install_dir)
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, dotnet_key, 0, KEY_READ, &key))
         return FALSE;
 
-    len = MAX_PATH;
+    len = MAX_PATH * sizeof(WCHAR);
     if (RegQueryValueExW(key, install_root, 0, NULL, (LPBYTE)install_dir, &len))
     {
         RegCloseKey(key);
@@ -785,7 +805,7 @@ static BOOL get_mono_path_datadir(LPWSTR path)
     static const WCHAR winebuilddirW[] = {'W','I','N','E','B','U','I','L','D','D','I','R',0};
     static const WCHAR unix_prefix[] = {'\\','?','?','\\','u','n','i','x','\\'};
     static const WCHAR monoW[] = {'\\','m','o','n','o',0};
-    static const WCHAR dotdotW[] = {'\\','.','.',0};
+    static const WCHAR dotdotmonoW[] = {'\\','.','.','\\','m','o','n','o',0};
     const WCHAR *data_dir, *suffix;
     WCHAR *package_dir;
     BOOL ret;
@@ -793,7 +813,7 @@ static BOOL get_mono_path_datadir(LPWSTR path)
     if ((data_dir = _wgetenv( winedatadirW )))
         suffix = monoW;
     else if ((data_dir = _wgetenv( winebuilddirW )))
-        suffix = dotdotW;
+        suffix = dotdotmonoW;
     else
         return FALSE;
 
@@ -1501,6 +1521,10 @@ static DWORD get_basename_search_flags(const char *basename, MonoAssemblyName *a
 
         return reg_entry.flags;
     }
+
+    if (strcmp(basename, "Microsoft.Xna.Framework.*") == 0)
+        /* XNA redist is broken in Wine Mono, use FNA instead. */
+        return 0;
 
     return ASSEMBLY_SEARCH_UNDEFINED;
 }

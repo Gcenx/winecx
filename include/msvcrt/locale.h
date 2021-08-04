@@ -55,24 +55,48 @@ struct lconv
     char n_sep_by_space;
     char p_sign_posn;
     char n_sign_posn;
+#if _MSVCR_VER >= 100
+    wchar_t* _W_decimal_point;
+    wchar_t* _W_thousands_sep;
+    wchar_t* _W_int_curr_symbol;
+    wchar_t* _W_currency_symbol;
+    wchar_t* _W_mon_decimal_point;
+    wchar_t* _W_mon_thousands_sep;
+    wchar_t* _W_positive_sign;
+    wchar_t* _W_negative_sign;
+#endif
 };
 #endif /* _LCONV_DEFINED */
 
+struct tm;
+
+#ifndef _CONFIG_LOCALE_SWT
+#define _CONFIG_LOCALE_SWT
+
+#define _ENABLE_PER_THREAD_LOCALE 0x1
+#define _DISABLE_PER_THREAD_LOCALE 0x2
+#define _ENABLE_PER_THREAD_LOCALE_GLOBAL 0x10
+#define _DISABLE_PER_THREAD_LOCALE_GLOBAL 0x20
+#define _ENABLE_PER_THREAD_LOCALE_NEW 0x100
+#define _DISABLE_PER_THREAD_LOCALE_NEW 0x200
+
+#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-char*         __cdecl setlocale(int,const char*);
-struct lconv* __cdecl localeconv(void);
-int           __cdecl _configthreadlocale(int);
-_locale_t     __cdecl _get_current_locale(void);
-_locale_t     __cdecl _create_locale(int, const char*);
-void          __cdecl _free_locale(_locale_t);
+_ACRTIMP char*         __cdecl setlocale(int,const char*);
+_ACRTIMP struct lconv* __cdecl localeconv(void);
+_ACRTIMP size_t        __cdecl _Strftime(char*,size_t,const char*,const struct tm*,void*);
+_ACRTIMP int           __cdecl _configthreadlocale(int);
+_ACRTIMP _locale_t     __cdecl _get_current_locale(void);
+_ACRTIMP _locale_t     __cdecl _create_locale(int, const char*);
+_ACRTIMP void          __cdecl _free_locale(_locale_t);
 
 #ifndef _WLOCALE_DEFINED
 #define _WLOCALE_DEFINED
-wchar_t* __cdecl _wsetlocale(int,const wchar_t*);
+_ACRTIMP wchar_t* __cdecl _wsetlocale(int,const wchar_t*);
 #endif /* _WLOCALE_DEFINED */
 
 #ifdef __cplusplus

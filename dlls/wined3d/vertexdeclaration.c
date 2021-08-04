@@ -54,6 +54,8 @@ static void wined3d_vertex_declaration_destroy_object(void *object)
 {
     struct wined3d_vertex_declaration *declaration = object;
 
+    TRACE("declaration %p.\n", declaration);
+
     heap_free(declaration->elements);
     heap_free(declaration);
 }
@@ -200,6 +202,7 @@ static HRESULT vertexdeclaration_init(struct wined3d_vertex_declaration *declara
     for (i = 0; i < element_count; ++i)
     {
         struct wined3d_vertex_declaration_element *e = &declaration->elements[i];
+        unsigned int alignment;
 
         e->format = wined3d_get_format(adapter, elements[i].format, 0);
         e->ffp_valid = declaration_element_valid_ffp(&elements[i]);
@@ -212,6 +215,9 @@ static HRESULT vertexdeclaration_init(struct wined3d_vertex_declaration *declara
         e->usage = elements[i].usage;
         e->usage_idx = elements[i].usage_idx;
 
+        if ((alignment = e->format->byte_count) > 4)
+            alignment = 4;
+
         if (e->usage == WINED3D_DECL_USAGE_POSITIONT)
             declaration->position_transformed = TRUE;
 
@@ -222,10 +228,10 @@ static HRESULT vertexdeclaration_init(struct wined3d_vertex_declaration *declara
 
         if (!(e->format->flags[WINED3D_GL_RES_TYPE_BUFFER] & WINED3DFMT_FLAG_VERTEX_ATTRIBUTE))
         {
-            FIXME("The application tries to use an unsupported format (%s), returning E_FAIL.\n",
+            FIXME("The application tries to use an unsupported format (%s).\n",
                     debug_d3dformat(elements[i].format));
             heap_free(declaration->elements);
-            return E_FAIL;
+            return E_INVALIDARG;
         }
 
         if (e->offset == WINED3D_APPEND_ALIGNED_ELEMENT)
@@ -239,17 +245,18 @@ static HRESULT vertexdeclaration_init(struct wined3d_vertex_declaration *declara
                 prev = &declaration->elements[i - j];
                 if (prev->input_slot == e->input_slot)
                 {
-                    e->offset = (prev->offset + prev->format->byte_count + 3) & ~3;
+                    e->offset = (prev->offset + prev->format->byte_count + alignment - 1) & ~(alignment - 1);
                     break;
                 }
             }
         }
 
-        if (e->offset & 0x3)
+        if (e->offset & (alignment - 1))
         {
-            WARN("Declaration element %u is not 4 byte aligned(%u), returning E_FAIL.\n", i, e->offset);
+            WARN("Declaration element %u with format %s and offset %u is not %u byte aligned.\n",
+                    i, debug_d3dformat(elements[i].format), e->offset, alignment);
             heap_free(declaration->elements);
-            return E_FAIL;
+            return E_INVALIDARG;
         }
     }
 

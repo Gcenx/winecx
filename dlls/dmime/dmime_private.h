@@ -77,6 +77,7 @@ extern void set_audiopath_primary_dsound_buffer(IDirectMusicAudioPath*,IDirectSo
 typedef struct _DMUS_PRIVATE_SEGMENT_TRACK {
   struct list entry; /* for listing elements */
   DWORD dwGroupBits;
+  DWORD flags;
   IDirectMusicTrack* pTrack;
 } DMUS_PRIVATE_SEGMENT_TRACK, *LPDMUS_PRIVATE_SEGMENT_TRACK;
 
@@ -84,13 +85,6 @@ typedef struct _DMUS_PRIVATE_TEMPO_ITEM {
   struct list entry; /* for listing elements */
   DMUS_IO_TEMPO_ITEM item;
 } DMUS_PRIVATE_TEMPO_ITEM, *LPDMUS_PRIVATE_TEMPO_ITEM;
-
-typedef struct _DMUS_PRIVATE_SEGMENT_ITEM {
-  struct list entry; /* for listing elements */
-  DMUS_IO_SEGMENT_ITEM_HEADER header;
-  IDirectMusicObject* pObject;
-  WCHAR wszName[DMUS_MAX_NAME];
-} DMUS_PRIVATE_SEGMENT_ITEM, *LPDMUS_PRIVATE_SEGMENT_ITEM;
 
 typedef struct _DMUS_PRIVATE_GRAPH_TOOL {
   struct list entry; /* for listing elements */
@@ -102,16 +96,6 @@ typedef struct _DMUS_PRIVATE_TEMPO_PLAY_STATE {
   DWORD dummy;
 } DMUS_PRIVATE_TEMPO_PLAY_STATE, *LPDMUS_PRIVATE_TEMPO_PLAY_STATE;
 
-/* some sort of aux. performance channel: as far as i can understand, these are 
-   used to represent a particular midi channel in particular group at particular
-   group; so all we need to do is to fill it with parent port, group and midi 
-   channel ? */
-typedef struct DMUSIC_PRIVATE_PCHANNEL_ {
-	DWORD channel; /* map to this channel... */
-	DWORD group; /* ... in this group ... */
-	IDirectMusicPort *port; /* ... at this port */
-} DMUSIC_PRIVATE_PCHANNEL, *LPDMUSIC_PRIVATE_PCHANNEL;
-
 /**********************************************************************
  * Dll lifetime tracking declaration for dmime.dll
  */
@@ -122,7 +106,5 @@ static inline void DMIME_UnlockModule(void) { InterlockedDecrement( &DMIME_refCo
 /*****************************************************************************
  * Misc.
  */
-
-#include "dmutils.h"
 
 #endif	/* __WINE_DMIME_PRIVATE_H */

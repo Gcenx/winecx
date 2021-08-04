@@ -1,0 +1,14 @@
+MODULE    = qdvd.dll
+IMPORTS   = strmbase strmiids uuid ole32
+
+EXTRADLLFLAGS = -mno-cygwin
+
+C_SRCS = \
+	graph.c \
+	navigator.c \
+	qdvd_main.c
+
+IDL_SRCS = \
+	qdvd_classes.idl
+
+RC_SRCS = version.rc

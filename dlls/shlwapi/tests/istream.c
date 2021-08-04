@@ -270,7 +270,6 @@ static void test_stream_qi(IStream *stream)
 
     unk = NULL;
     hr = IStream_QueryInterface(stream, &IID_ISequentialStream, (void **)&unk);
-todo_wine
     ok(SUCCEEDED(hr) || broken(hr == E_NOINTERFACE) /* XP */, "Failed to get ISequentialStream interface, hr %#x.\n", hr);
     if (unk)
         IUnknown_Release(unk);
@@ -737,8 +736,10 @@ static void test_SHCreateMemStream(void)
 {
     static const BYTE initial[10];
     IStream *stream, *stream2;
+    LARGE_INTEGER off;
     IUnknown *unk;
     char buff[10];
+    ULONG i, num;
     HRESULT hr;
 
     stream = SHCreateMemStream(initial, 0);
@@ -753,14 +754,60 @@ static void test_SHCreateMemStream(void)
     ok(stream != NULL, "Failed to create a stream.\n");
 
     hr = IStream_QueryInterface(stream, &IID_ISequentialStream, (void **)&unk);
-todo_wine
     ok(hr == S_OK || broken(hr == E_NOINTERFACE) /* WinXP */, "Failed to QI, hr %#x.\n", hr);
     if (unk)
         IUnknown_Release(unk);
 
-    hr = IStream_Read(stream, buff, sizeof(buff), NULL);
-todo_wine
-    ok(hr == S_FALSE || broken(hr == S_OK) /* WinXP */, "Unexpected hr %#x.\n", hr);
+    num = ~0;
+    hr = IStream_Read(stream, buff, sizeof(buff), &num);
+    ok(hr == S_FALSE, "Unexpected hr %#x.\n", hr);
+    ok(num == 0, "expected 0, got 0x%08x\n", num);
+
+    num = ~0;
+    memset(buff, 0x55, sizeof(buff));
+    hr = IStream_Write(stream, buff, sizeof(buff), &num);
+    ok(hr == S_OK, "Failed to write, hr %#x.\n", hr);
+    ok(num == sizeof(buff), "expected %u, got %u\n", sizeof(buff), num);
+
+    off.QuadPart = 0;
+    hr = IStream_Seek(stream, off, STREAM_SEEK_SET, NULL);
+    ok(hr == S_OK, "Failed to seek, hr %#x.\n", hr);
+
+    num = ~0;
+    memset(buff, 0, sizeof(buff));
+    hr = IStream_Read(stream, buff, sizeof(buff), &num);
+    ok(hr == S_OK, "Failed to read, hr %#x.\n", hr);
+    ok(num == sizeof(buff), "expected %u, got %u\n", sizeof(buff), num);
+    for (i = 0; i < ARRAY_SIZE(buff); i++)
+        ok(buff[i] == 0x55, "expected 0x55, got 0x%02x at %u\n", buff[i], i);
+
+    num = ~0;
+    hr = IStream_Read(stream, buff, sizeof(buff), &num);
+    ok(hr == S_FALSE, "Unexpected hr %#x.\n", hr);
+    ok(num == 0, "expected 0, got 0x%08x\n", num);
+
+    num = ~0;
+    memset(buff, 0x11, sizeof(buff));
+    hr = IStream_Write(stream, buff, sizeof(buff), &num);
+    ok(hr == S_OK, "Failed to write, hr %#x.\n", hr);
+    ok(num == sizeof(buff), "expected %u, got %u\n", sizeof(buff), num);
+
+    off.QuadPart = -sizeof(buff);
+    hr = IStream_Seek(stream, off, STREAM_SEEK_CUR, NULL);
+    ok(hr == S_OK, "Failed to seek, hr %#x.\n", hr);
+
+    num = ~0;
+    memset(buff, 0, sizeof(buff));
+    hr = IStream_Read(stream, buff, sizeof(buff), &num);
+    ok(hr == S_OK, "Failed to read, hr %#x.\n", hr);
+    ok(num == sizeof(buff), "expected %u, got %u\n", sizeof(buff), num);
+    for (i = 0; i < ARRAY_SIZE(buff); i++)
+        ok(buff[i] == 0x11, "expected 0x11, got 0x%02x at %u\n", buff[i], i);
+
+    num = ~0;
+    hr = IStream_Read(stream, buff, sizeof(buff), &num);
+    ok(hr == S_FALSE, "Unexpected hr %#x.\n", hr);
+    ok(num == 0, "expected 0, got 0x%08x\n", num);
 
     hr = IStream_Clone(stream, &stream2);
 todo_wine

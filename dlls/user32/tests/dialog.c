@@ -29,8 +29,6 @@
  * normally be met.
  */
 
-#define WINVER 0x0600 /* For NONCLIENTMETRICS with padding */
-
 #include <assert.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -654,8 +652,8 @@ static void test_WM_NEXTDLGCTL(void)
      * Check whether the style of the button which got the focus, changed to BS_DEFPUSHBUTTON and
      * the style of default button changed to BS_PUSHBUTTON.
      */
-    ok(get_button_style(g_hwndTestDlgBut1) == BS_DEFPUSHBUTTON, "Button1's style not set to BS_DEFPUSHBUTTON");
-    ok(get_button_style(g_hwndTestDlgBut2) == BS_PUSHBUTTON, "Button2's style not set to BS_PUSHBUTTON");
+    ok(get_button_style(g_hwndTestDlgBut1) == BS_DEFPUSHBUTTON, "Button1's style not set to BS_DEFPUSHBUTTON\n");
+    ok(get_button_style(g_hwndTestDlgBut2) == BS_PUSHBUTTON, "Button2's style not set to BS_PUSHBUTTON\n");
 
     /* Move focus to Button2 using "WM_NEXTDLGCTL" */
     DefDlgProcA(g_hwndTestDlg, WM_NEXTDLGCTL, 0, 0);
@@ -669,8 +667,8 @@ static void test_WM_NEXTDLGCTL(void)
      * Check whether the style of the button which got the focus, changed to BS_DEFPUSHBUTTON and
      * the style of button which lost the focus changed to BS_PUSHBUTTON.
      */
-    ok(get_button_style(g_hwndTestDlgBut1) == BS_PUSHBUTTON, "Button1's style not set to BS_PUSHBUTTON");
-    ok(get_button_style(g_hwndTestDlgBut2) == BS_DEFPUSHBUTTON, "Button2's style not set to BS_DEFPUSHBUTTON");
+    ok(get_button_style(g_hwndTestDlgBut1) == BS_PUSHBUTTON, "Button1's style not set to BS_PUSHBUTTON\n");
+    ok(get_button_style(g_hwndTestDlgBut2) == BS_DEFPUSHBUTTON, "Button2's style not set to BS_DEFPUSHBUTTON\n");
 
     /* Move focus to Edit control using "WM_NEXTDLGCTL" */
     DefDlgProcA(g_hwndTestDlg, WM_NEXTDLGCTL, 0, 0);
@@ -2176,6 +2174,89 @@ static void test_dialog_custom_data(void)
     DialogBoxA(g_hinst, "CUSTOM_TEST_DIALOG", NULL, custom_test_dialog_proc);
 }
 
+static INT_PTR CALLBACK capture_release_proc(HWND dialog, UINT message, WPARAM wparam, LPARAM lparam)
+{
+    if (message == WM_INITDIALOG)
+    {
+        HWND child = (HWND)lparam;
+        DWORD style;
+
+        ok(GetCapture() == child, "got capture %p\n", GetCapture());
+        style = GetWindowLongA(child, GWL_STYLE);
+        ok(!(style & WS_DISABLED), "child should not be disabled\n");
+
+        PostMessageA(dialog, WM_USER, 0, (LPARAM)child);
+    }
+    else if (message == WM_USER)
+    {
+        HWND child = (HWND)lparam;
+        DWORD style;
+
+        ok(!GetCapture(), "got capture %p\n", GetCapture());
+        style = GetWindowLongA(child, GWL_STYLE);
+        ok(!(style & WS_DISABLED), "child should not be disabled\n");
+
+        EndDialog(dialog, 1);
+    }
+    return FALSE;
+}
+
+static INT_PTR CALLBACK capture_release_modeless_proc(HWND dialog, UINT message, WPARAM wparam, LPARAM lparam)
+{
+    if (message == WM_INITDIALOG)
+    {
+        HWND child = (HWND)lparam;
+        DWORD style;
+
+        ok(GetCapture() == child, "got capture %p\n", GetCapture());
+        style = GetWindowLongA(child, GWL_STYLE);
+        ok(!(style & WS_DISABLED), "child should not be disabled\n");
+
+        PostMessageA(dialog, WM_QUIT, 0, 0);
+    }
+    return FALSE;
+}
+
+static void test_capture_release(void)
+{
+    HWND window, child, dialog;
+    INT_PTR ret;
+    MSG msg;
+
+    /* Set the capture to a child window. The main window will receive
+     * WM_CANCELMODE when being disabled, but the child window will retain
+     * capture. */
+
+    window = CreateWindowA("static", "parent", 0, 100, 200, 300, 400, NULL, NULL, NULL, NULL);
+    child = CreateWindowA("static", "child", WS_CHILD, 10, 20, 100, 100, window, NULL, NULL, NULL);
+
+    SetCapture(child);
+    ret = DialogBoxParamA(GetModuleHandleA(NULL), "TEST_EMPTY_DIALOG", NULL, capture_release_proc, (LPARAM)child);
+    ok(ret == 1, "got %#Ix\n", ret);
+    ok(!GetCapture(), "got capture %p\n", GetCapture());
+
+    SetCapture(child);
+    ret = DialogBoxParamA(GetModuleHandleA(NULL), "TEST_EMPTY_DIALOG", window, capture_release_proc, (LPARAM)child);
+    ok(ret == 1, "got %#Ix\n", ret);
+    ok(!GetCapture(), "got capture %p\n", GetCapture());
+
+    SetCapture(child);
+    dialog = CreateDialogParamA(GetModuleHandleA(NULL), "TEST_EMPTY_DIALOG",
+            window, capture_release_modeless_proc, (LPARAM)child);
+    ok(!!dialog, "failed to create dialog\n");
+    ok(GetCapture() == child, "got capture %p\n", GetCapture());
+    ShowWindow(dialog, SW_SHOWNORMAL);
+    ok(GetCapture() == child, "got capture %p\n", GetCapture());
+    while (GetMessageA(&msg, NULL, 0, 0))
+        DispatchMessageA(&msg);
+    ok(GetCapture() == child, "got capture %p\n", GetCapture());
+
+    DestroyWindow(dialog);
+
+    DestroyWindow(child);
+    DestroyWindow(window);
+}
+
 START_TEST(dialog)
 {
     g_hinst = GetModuleHandleA (0);
@@ -2195,4 +2276,5 @@ START_TEST(dialog)
     test_SaveRestoreFocus();
     test_timer_message();
     test_MessageBox();
+    test_capture_release();
 }

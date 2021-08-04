@@ -22,9 +22,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -32,7 +29,7 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "wine/unicode.h"
+#include "winnls.h"
 #include "wine/debug.h"
 #include "winternl.h"
 
@@ -130,7 +127,7 @@ static WCHAR* NLS_GetLocaleString(LCID lcid, DWORD dwFlags)
 
   szBuff[0] = '\0';
   GetLocaleInfoW(lcid, dwFlags, szBuff, ARRAY_SIZE(szBuff));
-  dwLen = strlenW(szBuff) + 1;
+  dwLen = lstrlenW(szBuff) + 1;
   str = HeapAlloc(GetProcessHeap(), 0, dwLen * sizeof(WCHAR));
   if (str)
     memcpy(str, szBuff, dwLen * sizeof(WCHAR));
@@ -265,7 +262,7 @@ static const NLS_FORMAT_NODE *NLS_GetFormats(LCID lcid, DWORD dwFlags)
     /* Save some memory if month genitive name is the same or not present */
     for (i = 0; i < 12; i++)
     {
-      if (strcmpW(GetLongMonth(new_node, i), GetGenitiveMonth(new_node, i)) == 0)
+      if (wcscmp(GetLongMonth(new_node, i), GetGenitiveMonth(new_node, i)) == 0)
       {
         HeapFree(GetProcessHeap(), 0, GetGenitiveMonth(new_node, i));
         GetGenitiveMonth(new_node, i) = NULL;
@@ -320,7 +317,7 @@ static const NLS_FORMAT_NODE *NLS_GetFormats(LCID lcid, DWORD dwFlags)
  *
  * Determine if a locale is Unicode only, and thus invalid in ASCII calls.
  */
-BOOL NLS_IsUnicodeOnlyLcid(LCID lcid)
+static BOOL NLS_IsUnicodeOnlyLcid(LCID lcid)
 {
   lcid = ConvertDefaultLocale(lcid);
 
@@ -675,12 +672,11 @@ static INT NLS_GetDateTimeFormatW(LCID lcid, DWORD dwFlags,
 
       if (szAdd == buff && buff[0] == '\0')
       {
-        static const WCHAR fmtW[] = {'%','.','*','d',0};
         /* We have a numeric value to add */
-        snprintfW(buff, ARRAY_SIZE(buff), fmtW, count, dwVal);
+        swprintf(buff, ARRAY_SIZE(buff), L"%.*d", count, dwVal);
       }
 
-      dwLen = szAdd ? strlenW(szAdd) : 0;
+      dwLen = szAdd ? lstrlenW(szAdd) : 0;
 
       if (cchOut && dwLen)
       {
@@ -1143,7 +1139,7 @@ INT WINAPI GetNumberFormatW(LCID lcid, DWORD dwFlags,
                    szNegBuff, ARRAY_SIZE(szNegBuff));
     lpszNegStart = lpszNeg = szNegBuff;
   }
-  lpszNeg = lpszNeg + strlenW(lpszNeg) - 1;
+  lpszNeg = lpszNeg + lstrlenW(lpszNeg) - 1;
 
   dwFlags &= (LOCALE_NOUSEROVERRIDE|LOCALE_USE_CP_ACP);
 
@@ -1218,7 +1214,7 @@ INT WINAPI GetNumberFormatW(LCID lcid, DWORD dwFlags,
   }
   else
   {
-    LPWSTR lpszDec = lpFormat->lpDecimalSep + strlenW(lpFormat->lpDecimalSep) - 1;
+    LPWSTR lpszDec = lpFormat->lpDecimalSep + lstrlenW(lpFormat->lpDecimalSep) - 1;
 
     if (dwDecimals <= lpFormat->NumDigits)
     {
@@ -1288,7 +1284,7 @@ INT WINAPI GetNumberFormatW(LCID lcid, DWORD dwFlags,
     dwCurrentGroupCount++;
     if (szSrc >= lpszValue && dwCurrentGroupCount == dwGroupCount && *szSrc != '-')
     {
-      LPWSTR lpszGrp = lpFormat->lpThousandSep + strlenW(lpFormat->lpThousandSep) - 1;
+      LPWSTR lpszGrp = lpFormat->lpThousandSep + lstrlenW(lpFormat->lpThousandSep) - 1;
 
       while (lpszGrp >= lpFormat->lpThousandSep)
         *szOut-- = *lpszGrp--; /* Write grouping char */
@@ -1324,7 +1320,7 @@ INT WINAPI GetNumberFormatW(LCID lcid, DWORD dwFlags,
   }
   szOut++;
 
-  iRet = strlenW(szOut) + 1;
+  iRet = lstrlenW(szOut) + 1;
   if (cchOut)
   {
     if (iRet <= cchOut)
@@ -1538,9 +1534,9 @@ INT WINAPI GetCurrencyFormatW(LCID lcid, DWORD dwFlags,
   }
   dwFlags &= (LOCALE_NOUSEROVERRIDE|LOCALE_USE_CP_ACP);
 
-  lpszNeg = lpszNeg + strlenW(lpszNeg) - 1;
+  lpszNeg = lpszNeg + lstrlenW(lpszNeg) - 1;
   lpszCyStart = lpFormat->lpCurrencySymbol;
-  lpszCy = lpszCyStart + strlenW(lpszCyStart) - 1;
+  lpszCy = lpszCyStart + lstrlenW(lpszCyStart) - 1;
 
   /* Format the currency backwards into a temporary buffer */
 
@@ -1627,7 +1623,7 @@ INT WINAPI GetCurrencyFormatW(LCID lcid, DWORD dwFlags,
   }
   else
   {
-    LPWSTR lpszDec = lpFormat->lpDecimalSep + strlenW(lpFormat->lpDecimalSep) - 1;
+    LPWSTR lpszDec = lpFormat->lpDecimalSep + lstrlenW(lpFormat->lpDecimalSep) - 1;
 
     if (dwDecimals <= lpFormat->NumDigits)
     {
@@ -1696,7 +1692,7 @@ INT WINAPI GetCurrencyFormatW(LCID lcid, DWORD dwFlags,
     dwCurrentGroupCount++;
     if (szSrc >= lpszValue && dwCurrentGroupCount == dwGroupCount && *szSrc != '-')
     {
-      LPWSTR lpszGrp = lpFormat->lpThousandSep + strlenW(lpFormat->lpThousandSep) - 1;
+      LPWSTR lpszGrp = lpFormat->lpThousandSep + lstrlenW(lpFormat->lpThousandSep) - 1;
 
       while (lpszGrp >= lpFormat->lpThousandSep)
         *szOut-- = *lpszGrp--; /* Write grouping char */
@@ -1736,7 +1732,7 @@ INT WINAPI GetCurrencyFormatW(LCID lcid, DWORD dwFlags,
     *szOut-- = '(';
   szOut++;
 
-  iRet = strlenW(szOut) + 1;
+  iRet = lstrlenW(szOut) + 1;
   if (cchOut)
   {
     if (iRet <= cchOut)
@@ -1766,4 +1762,38 @@ int WINAPI GetCurrencyFormatEx(LPCWSTR localename, DWORD flags, LPCWSTR value,
             debugstr_w(value), format, str, len);
 
     return GetCurrencyFormatW( LocaleNameToLCID(localename, 0), flags, value, format, str, len);
+}
+
+/*********************************************************************
+ *            GetCalendarInfoA (KERNEL32.@)
+ */
+int WINAPI GetCalendarInfoA( LCID lcid, CALID id, CALTYPE type, LPSTR data, int size, DWORD *val )
+{
+    int ret, sizeW = size;
+    LPWSTR dataW = NULL;
+
+    if (NLS_IsUnicodeOnlyLcid(lcid))
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    if (!size && !(type & CAL_RETURN_NUMBER)) sizeW = GetCalendarInfoW( lcid, id, type, NULL, 0, NULL );
+    if (!(dataW = HeapAlloc(GetProcessHeap(), 0, sizeW * sizeof(WCHAR)))) return 0;
+
+    ret = GetCalendarInfoW( lcid, id, type, dataW, sizeW, val );
+    if(ret && dataW && data)
+        ret = WideCharToMultiByte( CP_ACP, 0, dataW, -1, data, size, NULL, NULL );
+    else if (type & CAL_RETURN_NUMBER)
+        ret *= sizeof(WCHAR);
+    HeapFree( GetProcessHeap(), 0, dataW );
+    return ret;
+}
+
+/*********************************************************************
+ *            SetCalendarInfoA (KERNEL32.@)
+ */
+int WINAPI SetCalendarInfoA( LCID lcid, CALID id, CALTYPE type, LPCSTR data)
+{
+    FIXME("(%08x,%08x,%08x,%s): stub\n", lcid, id, type, debugstr_a(data));
+    return 0;
 }

@@ -40,20 +40,27 @@
 #define D3DPRESENTFLAGS_MASK 0x00000fffu
 
 #define D3D8_MAX_VERTEX_SHADER_CONSTANTF 256
+#define D3D8_MAX_PIXEL_SHADER_CONSTANTF 8
 #define D3D8_MAX_STREAMS 16
+
+#define D3DFMT_RESZ MAKEFOURCC('R','E','S','Z')
+#define D3D8_RESZ_CODE 0x7fa05000
 
 /* CreateVertexShader can return > 0xFFFF */
 #define VS_HIGHESTFIXEDFXF 0xF0000000
 
 extern const struct wined3d_parent_ops d3d8_null_wined3d_parent_ops DECLSPEC_HIDDEN;
 
-void d3dcaps_from_wined3dcaps(D3DCAPS8 *caps, const struct wined3d_caps *wined3d_caps) DECLSPEC_HIDDEN;
+void d3dcaps_from_wined3dcaps(D3DCAPS8 *caps, const struct wined3d_caps *wined3d_caps,
+        unsigned int adapter_ordinal) DECLSPEC_HIDDEN;
 
 struct d3d8
 {
     IDirect3D8 IDirect3D8_iface;
     LONG refcount;
     struct wined3d *wined3d;
+    struct wined3d_output **wined3d_outputs;
+    unsigned int wined3d_output_count;
 };
 
 BOOL d3d8_init(struct d3d8 *d3d8) DECLSPEC_HIDDEN;
@@ -107,7 +114,8 @@ struct d3d8_device
     struct wined3d_device_parent device_parent;
     LONG                    ref;
     struct wined3d_device  *wined3d_device;
-    IDirect3D8             *d3d_parent;
+    unsigned int            adapter_ordinal;
+    struct d3d8            *d3d_parent;
     struct                  d3d8_handle_table handle_table;
 
     /* FVF management */
@@ -128,11 +136,14 @@ struct d3d8_device
     DWORD in_destruction : 1;
     DWORD padding : 14;
 
+    unsigned int max_user_clip_planes, vs_uniform_count;
+
     /* The d3d8 API supports only one implicit swapchain (no D3DCREATE_ADAPTERGROUP_DEVICE,
      * no GetSwapchain, GetBackBuffer doesn't accept a swapchain number). */
     struct wined3d_swapchain *implicit_swapchain;
 
     struct wined3d_stateblock *recording, *state, *update_state;
+    const struct wined3d_stateblock_state *stateblock_state;
 };
 
 HRESULT device_init(struct d3d8_device *device, struct d3d8 *parent, struct wined3d *wined3d, UINT adapter,
@@ -174,6 +185,7 @@ struct d3d8_swapchain
     IDirect3DSwapChain8 IDirect3DSwapChain8_iface;
     LONG refcount;
     struct wined3d_swapchain *wined3d_swapchain;
+    struct wined3d_swapchain_state_parent state_parent;
     IDirect3DDevice8 *parent_device;
     unsigned int swap_interval;
 };
@@ -356,6 +368,16 @@ static inline unsigned int wined3d_bind_flags_from_d3d8_usage(DWORD usage)
         bind_flags |= WINED3D_BIND_DEPTH_STENCIL;
 
     return bind_flags;
+}
+
+static inline D3DMULTISAMPLE_TYPE d3dmultisample_type_from_wined3d(enum wined3d_multisample_type type)
+{
+    return (D3DMULTISAMPLE_TYPE)type;
+}
+
+static inline enum wined3d_device_type wined3d_device_type_from_d3d(D3DDEVTYPE type)
+{
+    return (enum wined3d_device_type)type;
 }
 
 #endif /* __WINE_D3DX8_PRIVATE_H */

@@ -63,7 +63,7 @@ static BOOL test_ShouldDeactivate = FALSE;
 static DWORD tmSinkCookie;
 static DWORD dmSinkCookie;
 static DWORD documentStatus;
-static DWORD key_trace_sink_cookie, ui_element_sink_cookie, profile_activation_sink_cookie;
+static DWORD key_trace_sink_cookie, ui_element_sink_cookie, profile_activation_sink_cookie, active_lang_sink_cookie;
 static DWORD fake_service_onactivated_flags = 0;
 static ITfDocumentMgr *test_CurrentFocus = NULL;
 static ITfDocumentMgr *test_PrevFocus = NULL;
@@ -801,6 +801,45 @@ static const ITfTransitoryExtensionSinkVtbl TfTransitoryExtensionSinkVtbl = {
 
 static ITfTransitoryExtensionSink TfTransitoryExtensionSink = { &TfTransitoryExtensionSinkVtbl };
 
+static HRESULT WINAPI TfActiveLanguageProfileNotifySink_QueryInterface(ITfActiveLanguageProfileNotifySink *iface, REFIID riid, void **ppv)
+{
+    if(IsEqualGUID(&IID_IUnknown, riid) || IsEqualGUID(&IID_ITfActiveLanguageProfileNotifySink, riid)) {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI TfActiveLanguageProfileNotifySink_AddRef(ITfActiveLanguageProfileNotifySink *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI TfActiveLanguageProfileNotifySink_Release(ITfActiveLanguageProfileNotifySink *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI TfActiveLanguageProfileNotifySink_OnActivated(ITfActiveLanguageProfileNotifySink *iface, REFCLSID clsid,
+        REFGUID guidProfile, BOOL activated)
+{
+    trace("Got OnActivated: {clsid %s, guidProfile %s, activated %d}\n", wine_dbgstr_guid(clsid),
+            wine_dbgstr_guid(guidProfile), activated);
+
+    return S_OK;
+}
+
+static const ITfActiveLanguageProfileNotifySinkVtbl TfActiveLanguageProfileNotifySinkVtbl = {
+    TfActiveLanguageProfileNotifySink_QueryInterface,
+    TfActiveLanguageProfileNotifySink_AddRef,
+    TfActiveLanguageProfileNotifySink_Release,
+    TfActiveLanguageProfileNotifySink_OnActivated
+};
+
+static ITfActiveLanguageProfileNotifySink TfActiveLanguageProfileNotifySink = { &TfActiveLanguageProfileNotifySinkVtbl };
+
 /********************************************************************************************
  * Stub text service for testing
  ********************************************************************************************/
@@ -1073,9 +1112,6 @@ static void test_Register(void)
 {
     HRESULT hr;
 
-    static const WCHAR szDesc[] = {'F','a','k','e',' ','W','i','n','e',' ','S','e','r','v','i','c','e',0};
-    static const WCHAR szFile[] = {'F','a','k','e',' ','W','i','n','e',' ','S','e','r','v','i','c','e',' ','F','i','l','e',0};
-
     hr = ITfInputProcessorProfiles_GetCurrentLanguage(g_ipp,&gLangid);
     ok(SUCCEEDED(hr),"Unable to get current language id\n");
     trace("Current Language %x\n",gLangid);
@@ -1085,7 +1121,8 @@ static void test_Register(void)
     hr = ITfInputProcessorProfiles_Register(g_ipp, &CLSID_FakeService);
     ok(SUCCEEDED(hr),"Unable to register text service(%x)\n",hr);
     hr = ITfInputProcessorProfiles_AddLanguageProfile(g_ipp, &CLSID_FakeService, gLangid,
-            &CLSID_FakeService, szDesc, ARRAY_SIZE(szDesc), szFile, ARRAY_SIZE(szFile), 1);
+            &CLSID_FakeService, L"Fake Wine Service", ARRAY_SIZE(L"Fake Wine Service"),
+            L"Fake Wine Service File", ARRAY_SIZE(L"Fake Wine Service File"), 1);
     ok(SUCCEEDED(hr),"Unable to add Language Profile (%x)\n",hr);
 }
 
@@ -1231,6 +1268,10 @@ static void test_ThreadMgrAdviseSinks(void)
                               &profile_activation_sink_cookie);
     ok(hr == S_OK, "Failed to Advise ITfInputProcessorProfileActivationSink\n");
 
+    hr = ITfSource_AdviseSink(source, &IID_ITfActiveLanguageProfileNotifySink, (IUnknown*)&TfActiveLanguageProfileNotifySink,
+                              &active_lang_sink_cookie);
+    ok(hr == S_OK, "Failed to Advise ITfActiveLanguageProfileNotifySink\n");
+
     ITfSource_Release(source);
 }
 
@@ -1257,6 +1298,9 @@ static void test_ThreadMgrUnadviseSinks(void)
 
     hr = ITfSource_UnadviseSink(source, profile_activation_sink_cookie);
     ok(hr == S_OK, "Failed to unadvise ITfInputProcessorProfileActivationSink\n");
+
+    hr = ITfSource_UnadviseSink(source, active_lang_sink_cookie);
+    ok(hr == S_OK, "Failed to unadvise ITfActiveLanguageProfileNotifySink\n");
 
     ITfSource_Release(source);
 }
@@ -2025,12 +2069,11 @@ static void test_InsertAtSelection(TfEditCookie ec, ITfContext *cxt)
     HRESULT hr;
     ITfInsertAtSelection *iis;
     ITfRange *range=NULL;
-    static const WCHAR txt[] = {'H','e','l','l','o',' ','W','o','r','l','d',0};
 
     hr = ITfContext_QueryInterface(cxt, &IID_ITfInsertAtSelection , (LPVOID*)&iis);
     ok(SUCCEEDED(hr),"Failed to get ITfInsertAtSelection interface\n");
     test_ACP_InsertTextAtSelection = SINK_EXPECTED;
-    hr = ITfInsertAtSelection_InsertTextAtSelection(iis, ec, 0, txt, 11, &range);
+    hr = ITfInsertAtSelection_InsertTextAtSelection(iis, ec, 0, L"Hello World", 11, &range);
     ok(SUCCEEDED(hr),"ITfInsertAtSelection_InsertTextAtSelection failed %x\n",hr);
     sink_check_ok(&test_ACP_InsertTextAtSelection,"InsertTextAtSelection");
     ok(range != NULL,"No range returned\n");
@@ -2428,6 +2471,7 @@ static void test_AssociateFocus(void)
     ITfThreadMgr_SetFocus(g_tm,dmorig);
     sink_check_ok(&test_OnSetFocus,"OnSetFocus");
 
+    test_OnInitDocumentMgr = test_OnPushContext = SINK_OPTIONAL; /* Win10 1709+ */
     test_CurrentFocus = FOCUS_SAVE;
     test_PrevFocus = FOCUS_SAVE;
     test_OnSetFocus = SINK_SAVE;
@@ -2444,11 +2488,13 @@ static void test_AssociateFocus(void)
     ok(olddm == dm1, "incorrect old DocumentMgr returned\n");
     ITfDocumentMgr_Release(olddm);
 
+    test_OnInitDocumentMgr = test_OnPushContext = SINK_OPTIONAL; /* Win10 1709+ */
     test_OnSetFocus = SINK_IGNORE; /* OnSetFocus fires a couple of times on Win7 */
     test_CurrentFocus = FOCUS_IGNORE;
     test_PrevFocus = FOCUS_IGNORE;
     SetFocus(wnd2);
     processPendingMessages();
+    test_OnInitDocumentMgr = test_OnPushContext = SINK_OPTIONAL; /* Win10 1709+ */
     SetFocus(wnd1);
     processPendingMessages();
 
@@ -2466,6 +2512,7 @@ static void test_AssociateFocus(void)
 
     ITfDocumentMgr_Release(dm1);
 
+    test_OnPopContext = SINK_OPTIONAL; /* Win10 1709+ */
     test_CurrentFocus = dmorig;
     test_PrevFocus = FOCUS_IGNORE;
     test_OnSetFocus  = SINK_OPTIONAL;
@@ -2476,8 +2523,9 @@ static void test_AssociateFocus(void)
     test_CurrentFocus = FOCUS_IGNORE;
     test_PrevFocus = FOCUS_IGNORE;
     DestroyWindow(wnd1);
+    test_OnPopContext = SINK_OPTIONAL; /* Win10 1709+ */
     DestroyWindow(wnd2);
-    test_OnPopContext = SINK_OPTIONAL; /* Vista and greater */
+    test_OnPopContext = SINK_IGNORE; /* Vista+, twice Win10 1709+ */
     test_OnSetFocus = SINK_OPTIONAL; /* Vista and greater */
     ITfThreadMgr_GetFocus(g_tm, &test_PrevFocus);
     test_CurrentFocus = NULL;

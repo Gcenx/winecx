@@ -72,7 +72,9 @@ typedef struct _CrtMemState
 #include <assert.h>
 #define _ASSERT(expr)                   assert(expr)
 #define _ASSERTE(expr)                  assert(expr)
-#if defined(__GNUC__) && (defined(__i386__) || defined(__i386_on_x86_64__))
+#if defined(_MSC_VER)
+#define _CrtDbgBreak()                  __debugbreak()
+#elif defined(__GNUC__) && (defined(__i386__) || (defined(__i386__) || defined(__i386_on_x86_64__))
 #define _CrtDbgBreak()                  __asm__ ("\tint $0x3\n")
 #else
 #define _CrtDbgBreak()                  ((void)0)
@@ -86,14 +88,14 @@ extern int _crtAssertBusy;
 extern int _crtBreakAlloc;
 extern int _crtDbgFlag;
 
-int   __cdecl _CrtCheckMemory(void);
-int   WINAPIV _CrtDbgReport(int reportType, const char *filename, int linenumber,
-                            const char *moduleName, const char *format, ...);
-int   __cdecl _CrtDumpMemoryLeaks(void);
-int   __cdecl _CrtSetBreakAlloc(int);
-int   __cdecl _CrtSetDbgFlag(int);
-void *__cdecl _CrtSetDumpClient(void *dumpClient);
-int   __cdecl _CrtSetReportMode(int reportType, int reportMode);
+_ACRTIMP int   __cdecl _CrtCheckMemory(void);
+_ACRTIMP int   WINAPIV _CrtDbgReport(int reportType, const char *filename, int linenumber,
+                                     const char *moduleName, const char *format, ...);
+_ACRTIMP int   __cdecl _CrtDumpMemoryLeaks(void);
+_ACRTIMP int   __cdecl _CrtSetBreakAlloc(int);
+_ACRTIMP int   __cdecl _CrtSetDbgFlag(int);
+_ACRTIMP void *__cdecl _CrtSetDumpClient(void *dumpClient);
+_ACRTIMP int   __cdecl _CrtSetReportMode(int reportType, int reportMode);
 
 #ifdef __cplusplus
 }

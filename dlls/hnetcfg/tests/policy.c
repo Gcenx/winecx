@@ -109,7 +109,7 @@ static void test_interfaces(void)
 static void test_NetFwAuthorizedApplication(void)
 {
     INetFwAuthorizedApplication *app;
-    static WCHAR empty[] = {0};
+    static WCHAR empty[] = L"";
     UNIVERSAL_NAME_INFOW *info;
     WCHAR fullpath[MAX_PATH];
     WCHAR netpath[MAX_PATH];
@@ -180,7 +180,7 @@ static void test_IUPnPNAT(void)
     ok(hr == E_NOINTERFACE, "got: %08x\n", hr);
 
     hr = IUPnPNAT_get_StaticPortMappingCollection(nat, &static_ports);
-    todo_wine ok(hr == S_OK, "got: %08x\n", hr);
+    ok(hr == S_OK, "got: %08x\n", hr);
     if(hr == S_OK && static_ports)
         IStaticPortMappingCollection_Release(static_ports);
 

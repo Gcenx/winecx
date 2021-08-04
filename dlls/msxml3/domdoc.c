@@ -85,7 +85,7 @@ typedef struct {
     VARIANT_BOOL preserving;
     IXMLDOMSchemaCollection2* schemaCache;
     struct list selectNsList;
-    xmlChar const* selectNsStr;
+    xmlChar const* WIN32PTR selectNsStr;
     LONG selectNsStr_len;
     BOOL XPath;
     IUri *uri;
@@ -136,6 +136,7 @@ struct domdoc
 
     /* IObjectWithSite */
     IUnknown *site;
+    IUri *base_uri;
 
     /* IObjectSafety */
     DWORD safeopt;
@@ -801,13 +802,17 @@ static HRESULT domdoc_load_from_stream(domdoc *doc, ISequentialStream *stream)
 
     hr = GetHGlobalFromStream(hstream, &hglobal);
     if (FAILED(hr))
+    {
+        IStream_Release(hstream);
         return hr;
+    }
 
     len = GlobalSize(hglobal);
     ptr = GlobalLock(hglobal);
     if (len)
         xmldoc = doparse(doc, ptr, len, XML_CHAR_ENCODING_NONE);
     GlobalUnlock(hglobal);
+    IStream_Release(hstream);
 
     if (!xmldoc)
     {
@@ -829,7 +834,7 @@ static HRESULT WINAPI PersistStreamInit_Load(IPersistStreamInit *iface, IStream 
     if (!stream)
         return E_INVALIDARG;
 
-    return domdoc_load_from_stream(This, (ISequentialStream*)stream);
+    return This->error = domdoc_load_from_stream(This, (ISequentialStream*)stream);
 }
 
 static HRESULT WINAPI PersistStreamInit_Save(
@@ -968,6 +973,8 @@ static ULONG WINAPI domdoc_Release( IXMLDOMDocument3 *iface )
 
         if (This->site)
             IUnknown_Release( This->site );
+        if (This->base_uri)
+            IUri_Release( This->base_uri );
         destroy_xmlnode(&This->node);
 
         for (eid = 0; eid < EVENTID_LAST; eid++)
@@ -1522,8 +1529,10 @@ static HRESULT WINAPI domdoc_transformNodeToObject(
     case VT_UNKNOWN:
     case VT_DISPATCH:
     {
+        ISequentialStream *stream;
         IXMLDOMDocument *doc;
         HRESULT hr;
+        BSTR str;
 
         if (!V_UNKNOWN(&output))
             return E_INVALIDARG;
@@ -1533,13 +1542,18 @@ static HRESULT WINAPI domdoc_transformNodeToObject(
         if (IUnknown_QueryInterface(V_UNKNOWN(&output), &IID_IXMLDOMDocument, (void **)&doc) == S_OK)
         {
             VARIANT_BOOL b;
-            BSTR str;
 
             if (FAILED(hr = node_transform_node(&This->node, stylesheet, &str)))
                 return hr;
 
             hr = IXMLDOMDocument_loadXML(doc, str, &b);
             SysFreeString(str);
+            return hr;
+        }
+        else if (IUnknown_QueryInterface(V_UNKNOWN(&output), &IID_ISequentialStream, (void**)&stream) == S_OK)
+        {
+            hr = node_transform_node_params(&This->node, stylesheet, NULL, stream, NULL);
+            ISequentialStream_Release(stream);
             return hr;
         }
         else
@@ -1919,7 +1933,7 @@ static HRESULT WINAPI domdoc_createEntityReference(
 
 xmlChar* tagName_to_XPath(const BSTR tagName)
 {
-    xmlChar *query, *tmp;
+    xmlChar *query, * WIN32PTR tmp;
     static const xmlChar everything[] = "/descendant::node()";
     static const xmlChar mod_pre[] = "*[local-name()='";
     static const xmlChar mod_post[] = "']";
@@ -1953,10 +1967,11 @@ xmlChar* tagName_to_XPath(const BSTR tagName)
             while (*tokEnd && *tokEnd != '/')
                 ++tokEnd;
             len = WideCharToMultiByte(CP_UTF8, 0, tokBegin, tokEnd-tokBegin, NULL, 0, NULL, NULL);
-            tmp = xmlMalloc(len);
-            WideCharToMultiByte(CP_UTF8, 0, tokBegin, tokEnd-tokBegin, (char* HOSTPTR)tmp, len, NULL, NULL);
+            /* 32on64 FIXME: Do I need to alloc arguments to xmlStrncat via xmlAlloc? */
+            tmp = heap_alloc(len);
+            WideCharToMultiByte(CP_UTF8, 0, tokBegin, tokEnd-tokBegin, (char *)tmp, len, NULL, NULL);
             query = xmlStrncat(query, tmp, len);
-            xmlFree(tmp);
+            heap_free(tmp);
             tokBegin = tokEnd;
             query = xmlStrcat(query, mod_post);
         }
@@ -2281,7 +2296,7 @@ static HRESULT WINAPI domdoc_load(
 
         if (hr == S_OK)
         {
-            hr = domdoc_load_from_stream(This, stream);
+            hr = This->error = domdoc_load_from_stream(This, stream);
             if (hr == S_OK)
                 *isSuccessful = VARIANT_TRUE;
             ISequentialStream_Release(stream);
@@ -2306,7 +2321,7 @@ static HRESULT WINAPI domdoc_load(
             This->properties->uri = NULL;
         }
 
-        hr = create_uri(filename, &uri);
+        hr = create_uri(This->base_uri, filename, &uri);
         if (SUCCEEDED(hr))
             hr = CreateURLMonikerEx2(NULL, uri, &mon, 0);
         if ( SUCCEEDED(hr) )
@@ -2993,7 +3008,7 @@ static HRESULT WINAPI domdoc_setProperty(
     }
     else if (lstrcmpiW(p, PropertySelectionNamespacesW) == 0)
     {
-        xmlChar *nsStr = (xmlChar*)This->properties->selectNsStr;
+        xmlChar * WIN32PTR nsStr = (xmlChar* WIN32PTR)This->properties->selectNsStr;
         struct list *pNsList;
         VARIANT varStr;
         HRESULT hr;
@@ -3163,7 +3178,7 @@ static HRESULT WINAPI domdoc_getProperty(
     {
         int lenA, lenW;
         BSTR rebuiltStr, cur;
-        const xmlChar *nsStr;
+        const xmlChar * WIN32PTR nsStr;
         struct list *pNsList;
         select_ns_entry* pNsEntry;
 
@@ -3171,9 +3186,9 @@ static HRESULT WINAPI domdoc_getProperty(
         nsStr = This->properties->selectNsStr;
         pNsList = &This->properties->selectNsList;
         lenA = This->properties->selectNsStr_len;
-        lenW = MultiByteToWideChar(CP_UTF8, 0, (const char* HOSTPTR)nsStr, lenA+1, NULL, 0);
+        lenW = MultiByteToWideChar(CP_UTF8, 0, (const char*)nsStr, lenA+1, NULL, 0);
         rebuiltStr = heap_alloc(lenW*sizeof(WCHAR));
-        MultiByteToWideChar(CP_UTF8, 0, (const char* HOSTPTR)nsStr, lenA+1, rebuiltStr, lenW);
+        MultiByteToWideChar(CP_UTF8, 0, (const char*)nsStr, lenA+1, rebuiltStr, lenW);
         cur = rebuiltStr;
         /* this is fine because all of the chars that end tokens are ASCII*/
         LIST_FOR_EACH_ENTRY(pNsEntry, pNsList, select_ns_entry, entry)
@@ -3560,6 +3575,12 @@ static HRESULT WINAPI domdoc_ObjectWithSite_SetSite( IObjectWithSite *iface, IUn
             This->site = NULL;
         }
 
+        if(This->base_uri)
+        {
+            IUri_Release(This->base_uri);
+            This->base_uri = NULL;
+        }
+
         return S_OK;
     }
 
@@ -3569,6 +3590,7 @@ static HRESULT WINAPI domdoc_ObjectWithSite_SetSite( IObjectWithSite *iface, IUn
         IUnknown_Release( This->site );
 
     This->site = punk;
+    This->base_uri = get_base_uri(This->site);
 
     return S_OK;
 }
@@ -3673,6 +3695,7 @@ HRESULT get_domdoc_from_xmldoc(xmlDocPtr xmldoc, IXMLDOMDocument3 **document)
     doc->properties = properties_from_xmlDocPtr(xmldoc);
     doc->error = S_OK;
     doc->site = NULL;
+    doc->base_uri = NULL;
     doc->safeopt = 0;
     doc->cp_list = NULL;
     doc->namespaces = NULL;

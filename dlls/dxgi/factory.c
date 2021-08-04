@@ -36,6 +36,8 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_QueryInterface(IWineDXGIFactory *i
     TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
 
     if (IsEqualGUID(iid, &IID_IWineDXGIFactory)
+            || IsEqualGUID(iid, &IID_IDXGIFactory7)
+            || IsEqualGUID(iid, &IID_IDXGIFactory6)
             || IsEqualGUID(iid, &IID_IDXGIFactory5)
             || IsEqualGUID(iid, &IID_IDXGIFactory4)
             || IsEqualGUID(iid, &IID_IDXGIFactory3)
@@ -403,6 +405,9 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_EnumAdapterByLuid(IWineDXGIFactory
     TRACE("iface %p, luid %08x:%08x, iid %s, adapter %p.\n",
             iface, luid.HighPart, luid.LowPart, debugstr_guid(iid), adapter);
 
+    if (!adapter)
+        return DXGI_ERROR_INVALID_CALL;
+
     adapter_index = 0;
     while ((hr = dxgi_factory_EnumAdapters1(iface, adapter_index, &adapter1)) == S_OK)
     {
@@ -442,8 +447,55 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_EnumWarpAdapter(IWineDXGIFactory *
 static HRESULT STDMETHODCALLTYPE dxgi_factory_CheckFeatureSupport(IWineDXGIFactory *iface,
         DXGI_FEATURE feature, void *feature_data, UINT data_size)
 {
-    FIXME("iface %p, feature %#x, feature_data %p, data_size %u stub!\n",
+    TRACE("iface %p, feature %#x, feature_data %p, data_size %u.\n",
             iface, feature, feature_data, data_size);
+
+    switch (feature)
+    {
+        case DXGI_FEATURE_PRESENT_ALLOW_TEARING:
+            if (data_size != sizeof(BOOL))
+                return DXGI_ERROR_INVALID_CALL;
+            *(BOOL *)feature_data = TRUE;
+            return S_OK;
+
+        default:
+            WARN("Unsupported feature %#x.\n", feature);
+            return DXGI_ERROR_INVALID_CALL;
+    }
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_EnumAdapterByGpuPreference(IWineDXGIFactory *iface,
+        UINT adapter_idx, DXGI_GPU_PREFERENCE gpu_preference, REFIID iid, void **adapter)
+{
+    IDXGIAdapter1 *adapter_object;
+    HRESULT hr;
+
+    TRACE("iface %p, adapter_idx %u, gpu_preference %#x, iid %s, adapter %p.\n",
+            iface, adapter_idx, gpu_preference, debugstr_guid(iid), adapter);
+
+    if (gpu_preference != DXGI_GPU_PREFERENCE_UNSPECIFIED)
+        FIXME("Ignoring GPU preference %#x.\n", gpu_preference);
+
+    if (FAILED(hr = dxgi_factory_EnumAdapters1(iface, adapter_idx, &adapter_object)))
+        return hr;
+
+    hr = IDXGIAdapter1_QueryInterface(adapter_object, iid, adapter);
+    IDXGIAdapter1_Release(adapter_object);
+    return hr;
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_RegisterAdaptersChangedEvent(IWineDXGIFactory *iface,
+        HANDLE event, DWORD *cookie)
+{
+    FIXME("iface %p, event %p, cookie %p stub!\n", iface, event, cookie);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE dxgi_factory_UnregisterAdaptersChangedEvent(IWineDXGIFactory *iface,
+        DWORD cookie)
+{
+    FIXME("iface %p, cookie %#x stub!\n", iface, cookie);
 
     return E_NOTIMPL;
 }
@@ -470,10 +522,10 @@ static const struct IWineDXGIFactoryVtbl dxgi_factory_vtbl =
     dxgi_factory_CreateSwapChainForHwnd,
     dxgi_factory_CreateSwapChainForCoreWindow,
     dxgi_factory_GetSharedResourceAdapterLuid,
-    dxgi_factory_RegisterOcclusionStatusWindow,
+    dxgi_factory_RegisterStereoStatusWindow,
     dxgi_factory_RegisterStereoStatusEvent,
     dxgi_factory_UnregisterStereoStatus,
-    dxgi_factory_RegisterStereoStatusWindow,
+    dxgi_factory_RegisterOcclusionStatusWindow,
     dxgi_factory_RegisterOcclusionStatusEvent,
     dxgi_factory_UnregisterOcclusionStatus,
     dxgi_factory_CreateSwapChainForComposition,
@@ -484,6 +536,11 @@ static const struct IWineDXGIFactoryVtbl dxgi_factory_vtbl =
     dxgi_factory_EnumWarpAdapter,
     /* IDXIGFactory5 methods */
     dxgi_factory_CheckFeatureSupport,
+    /* IDXGIFactory6 methods */
+    dxgi_factory_EnumAdapterByGpuPreference,
+    /* IDXGIFactory7 methods */
+    dxgi_factory_RegisterAdaptersChangedEvent,
+    dxgi_factory_UnregisterAdaptersChangedEvent,
 };
 
 struct dxgi_factory *unsafe_impl_from_IDXGIFactory(IDXGIFactory *iface)

@@ -2,8 +2,6 @@ MODULE    = libstrmbase.a
 
 C_SRCS = \
 	dispatch.c \
-	dllfunc.c \
-	enumpins.c \
 	filter.c \
 	mediatype.c \
 	outputqueue.c \
@@ -11,7 +9,4 @@ C_SRCS = \
 	pospass.c \
 	qualitycontrol.c \
 	renderer.c \
-	seeking.c \
-	transform.c \
-	video.c \
-	window.c
+	seeking.c

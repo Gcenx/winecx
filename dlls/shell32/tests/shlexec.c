@@ -30,11 +30,6 @@
  *   we could check
  */
 
-/* Needed to get SEE_MASK_NOZONECHECKS with the PSDK */
-#define NTDDI_WINXPSP1 0x05010100
-#define NTDDI_VERSION NTDDI_WINXPSP1
-#define _WIN32_WINNT 0x0501
-
 #include <stdio.h>
 #include <assert.h>
 
@@ -1096,7 +1091,7 @@ static filename_tests_t noquotes_tests[]=
 
 static void test_lpFile_parsed(void)
 {
-    char fileA[MAX_PATH];
+    char fileA[MAX_PATH + 38];
     INT_PTR rc;
 
     if (skip_shlexec_tests)
@@ -1105,12 +1100,12 @@ static void test_lpFile_parsed(void)
         return;
     }
 
-    /* existing "drawback_file.noassoc" prevents finding "drawback_file.noassoc foo.shlexec" on wine */
+    /* existing "drawback_file.noassoc" prevents finding "drawback_file.noassoc foo.shlexec" on Wine */
     sprintf(fileA, "%s\\drawback_file.noassoc foo.shlexec", tmpdir);
     rc=shell_execute(NULL, fileA, NULL, NULL);
     okShell(rc > 32, "failed: rc=%lu\n", rc);
 
-    /* if quoted, existing "drawback_file.noassoc" not prevents finding "drawback_file.noassoc foo.shlexec" on wine */
+    /* if quoted, existing "drawback_file.noassoc" does not prevent finding "drawback_file.noassoc foo.shlexec" on Wine */
     sprintf(fileA, "\"%s\\drawback_file.noassoc foo.shlexec\"", tmpdir);
     rc=shell_execute(NULL, fileA, NULL, NULL);
     okShell(rc > 32 || broken(rc == SE_ERR_FNF) /* Win95/NT4 */,
@@ -1127,7 +1122,7 @@ static void test_lpFile_parsed(void)
     todo_wine okShell(rc > 32 || broken(rc == SE_ERR_FNF) /* Win9x/2000 */,
                       "failed: rc=%lu\n", rc);
 
-    /* nonexisting "drawback_nonexist.noassoc" not prevents finding "drawback_nonexist.noassoc foo.shlexec" on wine */
+    /* nonexistent "drawback_nonexist.noassoc" does not prevent finding "drawback_nonexist.noassoc foo.shlexec" on Wine */
     sprintf(fileA, "%s\\drawback_nonexist.noassoc foo.shlexec", tmpdir);
     rc=shell_execute(NULL, fileA, NULL, NULL);
     okShell(rc > 32, "failed: rc=%lu\n", rc);
@@ -1549,7 +1544,7 @@ static const argify_tests_t argify_tests[] =
 
 static void test_argify(void)
 {
-    char fileA[MAX_PATH], params[2*MAX_PATH+12];
+    char fileA[MAX_PATH + 18], params[2 * MAX_PATH + 28];
     INT_PTR rc;
     const argify_tests_t* test;
     const char *bad;
@@ -1607,7 +1602,7 @@ static void test_argify(void)
 
 static void test_filename(void)
 {
-    char filename[MAX_PATH];
+    char filename[MAX_PATH + 20];
     const filename_tests_t* test;
     char* c;
     INT_PTR rc;
@@ -1647,7 +1642,7 @@ static void test_filename(void)
         }
         else
         {
-            char quoted[MAX_PATH + 2];
+            char quoted[MAX_PATH + 22];
 
             quotedfile = TRUE;
             sprintf(quoted, "\"%s\"", filename);
@@ -1873,7 +1868,7 @@ static void test_fileurls(void)
 
 static void test_urls(void)
 {
-    char url[MAX_PATH];
+    char url[MAX_PATH + 15];
     INT_PTR rc;
 
     if (!create_test_class("fakeproto", FALSE))
@@ -1968,7 +1963,7 @@ static void test_urls(void)
 static void test_find_executable(void)
 {
     char notepad_path[MAX_PATH];
-    char filename[MAX_PATH];
+    char filename[MAX_PATH + 17];
     char command[MAX_PATH];
     const filename_tests_t* test;
     INT_PTR rc;
@@ -2114,8 +2109,8 @@ static filename_tests_t lnk_tests[]=
 
 static void test_lnks(void)
 {
-    char filename[MAX_PATH];
-    char params[MAX_PATH];
+    char filename[MAX_PATH + 26];
+    char params[MAX_PATH + 18];
     const filename_tests_t* test;
     INT_PTR rc;
 
@@ -2208,7 +2203,7 @@ static void test_lnks(void)
 
 static void test_exes(void)
 {
-    char filename[MAX_PATH];
+    char filename[2 * MAX_PATH + 17];
     char params[1024];
     INT_PTR rc;
 
@@ -2386,7 +2381,7 @@ static void hook_WaitForInputIdle(DWORD (WINAPI *new_func)(HANDLE, DWORD))
 
 static void test_dde(void)
 {
-    char filename[MAX_PATH], defApplication[MAX_PATH];
+    char filename[MAX_PATH + 14], defApplication[MAX_PATH];
     const dde_tests_t* test;
     char params[1024];
     INT_PTR rc;
@@ -2553,7 +2548,7 @@ static DWORD CALLBACK ddeThread(LPVOID arg)
 
 static void test_dde_default_app(void)
 {
-    char filename[MAX_PATH];
+    char filename[MAX_PATH + 14];
     HSZ hszApplication;
     dde_thread_info_t info = { filename, GetCurrentThreadId() };
     const dde_default_app_tests_t* test;
@@ -2655,7 +2650,7 @@ static void init_test(void)
 {
     HMODULE hdll;
     HRESULT (WINAPI *pDllGetVersion)(DLLVERSIONINFO*);
-    char filename[MAX_PATH];
+    char filename[MAX_PATH + 26];
     WCHAR lnkfile[MAX_PATH];
     char params[1024];
     const char* const * testfile;
@@ -2695,19 +2690,25 @@ static void init_test(void)
     /* Older versions (win 2k) fail tests if there is a space in
        the path. */
     if (dllver.dwMajorVersion <= 5)
-        strcpy(filename, "c:\\");
+        strcpy(tmpdir, "c:\\");
     else
-        GetTempPathA(sizeof(filename), filename);
-    GetTempFileNameA(filename, "wt", 0, tmpdir);
+        GetTempPathA(sizeof(tmpdir), tmpdir);
     GetLongPathNameA(tmpdir, tmpdir, sizeof(tmpdir));
+
+    /* In case of a failure it is necessary to show the path that was passed to
+     * ShellExecute(). That means the paths must not be randomized so as not to
+     * prevent the TestBot from detecting new failures.
+     */
+    strcat(tmpdir, "wtShlexecDir");
     DeleteFileA( tmpdir );
     rc = CreateDirectoryA( tmpdir, NULL );
-    ok( rc, "failed to create %s err %u\n", tmpdir, GetLastError() );
+    ok( rc || GetLastError() == ERROR_ALREADY_EXISTS,
+        "failed to create %s err %u\n", tmpdir, GetLastError() );
     /* Set %TMPDIR% for the tests */
     SetEnvironmentVariableA("TMPDIR", tmpdir);
 
-    rc = GetTempFileNameA(tmpdir, "wt", 0, child_file);
-    ok(rc != 0, "got %d\n", rc);
+    strcpy(child_file, tmpdir);
+    strcat(child_file, "\\wtShlexecFile");
     init_event(child_file);
 
     /* Set up the test files */
@@ -2741,7 +2742,7 @@ static void init_test(void)
     desc.icon=NULL;
     desc.icon_id=0;
     desc.hotkey=0;
-    create_lnk(lnkfile, &desc, 0);
+    create_lnk(lnkfile, &desc);
 
     sprintf(filename, "%s\\test_shortcut_exe.lnk", tmpdir);
     MultiByteToWideChar(CP_ACP, 0, filename, -1, lnkfile, ARRAY_SIZE(lnkfile));
@@ -2755,7 +2756,7 @@ static void init_test(void)
     desc.icon=NULL;
     desc.icon_id=0;
     desc.hotkey=0;
-    create_lnk(lnkfile, &desc, 0);
+    create_lnk(lnkfile, &desc);
 
     /* Create a basic association suitable for most tests */
     if (!create_test_association(".shlexec"))
@@ -2812,7 +2813,7 @@ static void cleanup_test(void)
 
 static void test_directory(void)
 {
-    char path[MAX_PATH], curdir[MAX_PATH];
+    char path[MAX_PATH + 10], curdir[MAX_PATH];
     char params[1024], dirpath[1024];
     INT_PTR rc;
 
@@ -2828,6 +2829,7 @@ static void test_directory(void)
                         NULL, "test2.exe", params, NULL, NULL);
     okShell(rc > 32, "returned %lu\n", rc);
     okChildInt("argcA", 4);
+    todo_wine okChildString("argvA0", path);
     okChildString("argvA3", "Exec");
     okChildPath("longPath", path);
     SetCurrentDirectoryA(curdir);
@@ -2841,6 +2843,7 @@ static void test_directory(void)
                         NULL, "test2.exe", params, tmpdir, NULL);
     okShell(rc > 32, "returned %lu\n", rc);
     okChildInt("argcA", 4);
+    okChildString("argvA0", path);
     okChildString("argvA3", "Exec");
     okChildPath("longPath", path);
 
@@ -2853,6 +2856,7 @@ static void test_directory(void)
                         NULL, "test2.exe", params, "%TMPDIR%", NULL);
     okShell(rc > 32, "returned %lu\n", rc);
     okChildInt("argcA", 4);
+    okChildString("argvA0", path);
     okChildString("argvA3", "Exec");
     okChildPath("longPath", path);
 
@@ -2861,6 +2865,18 @@ static void test_directory(void)
     rc=shell_execute_ex(SEE_MASK_NOZONECHECKS|SEE_MASK_FLAG_NO_UI,
                         NULL, "test2.exe", params, dirpath, NULL);
     okShell(rc == SE_ERR_FNF, "returned %lu\n", rc);
+
+    /* Same-named executable in different directory */
+    snprintf(path, ARRAY_SIZE(path), "%s%s", tmpdir, strrchr(argv0, '\\'));
+    CopyFileA(argv0, path, FALSE);
+    rc=shell_execute_ex(SEE_MASK_NOZONECHECKS|SEE_MASK_FLAG_NO_UI,
+                        NULL, strrchr(argv0, '\\') + 1, params, tmpdir, NULL);
+    okShell(rc > 32, "returned %lu\n", rc);
+    okChildInt("argcA", 4);
+    okChildString("argvA0", path);
+    okChildString("argvA3", "Exec");
+    okChildPath("longPath", path);
+    DeleteFileA(path);
 }
 
 START_TEST(shlexec)

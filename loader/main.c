@@ -21,211 +21,240 @@
 #include "config.h"
 #include "wine/port.h"
 
-#include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef HAVE_SYS_MMAN_H
-# include <sys/mman.h>
-#endif
-#ifdef HAVE_SYS_RESOURCE_H
-# include <sys/resource.h>
-#endif
-#ifdef HAVE_SYS_SYSCALL_H
-# include <sys/syscall.h>
-#endif
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
-#include <pthread.h>
 
-#include "wine/library.h"
+#ifdef __APPLE__ /* CrossOver Hack 13438 */
+#include <mach/mach.h>
+#include <mach/vm_map.h>
+#include <mach-o/dyld.h>
+#include <mach-o/getsect.h>
+#endif
+
 #include "main.h"
+
+extern char **environ;
 
 /* the preloader will set this variable */
 const struct wine_preload_info *wine_main_preload_info = NULL;
 
+/* canonicalize path and return its directory name */
+static char *realpath_dirname( const char *name )
+{
+    char *p, *fullpath = realpath( name, NULL );
+
+    if (fullpath)
+    {
+        p = strrchr( fullpath, '/' );
+        if (p == fullpath) p++;
+        if (p) *p = 0;
+    }
+    return fullpath;
+}
+
+/* if string ends with tail, remove it */
+static char *remove_tail( const char *str, const char *tail )
+{
+    size_t len = strlen( str );
+    size_t tail_len = strlen( tail );
+    char *ret;
+
+    if (len < tail_len) return NULL;
+    if (strcmp( str + len - tail_len, tail )) return NULL;
+    ret = malloc( len - tail_len + 1 );
+    memcpy( ret, str, len - tail_len );
+    ret[len - tail_len] = 0;
+    return ret;
+}
+
+/* build a path from the specified dir and name */
+static char *build_path( const char *dir, const char *name )
+{
+    size_t len = strlen( dir );
+    char *ret = malloc( len + strlen( name ) + 2 );
+
+    memcpy( ret, dir, len );
+    if (len && ret[len - 1] != '/') ret[len++] = '/';
+    strcpy( ret + len, name );
+    return ret;
+}
+
+static const char *get_self_exe( char *argv0 )
+{
+#if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
+    return "/proc/self/exe";
+#elif defined (__FreeBSD__) || defined(__DragonFly__)
+    return "/proc/curproc/file";
+#else
+    if (!strchr( argv0, '/' )) /* search in PATH */
+    {
+        char *p, *path = getenv( "PATH" );
+
+        if (!path || !(path = strdup(path))) return NULL;
+        for (p = strtok( path, ":" ); p; p = strtok( NULL, ":" ))
+        {
+            char *name = build_path( p, argv0 );
+            if (!access( name, X_OK ))
+            {
+                free( path );
+                return name;
+            }
+            free( name );
+        }
+        free( path );
+        return NULL;
+    }
+    return argv0;
+#endif
+}
+
+static void *try_dlopen( const char *dir, const char *name )
+{
+    char *path = build_path( dir, name );
+    void *handle = dlopen( path, RTLD_NOW );
+    free( path );
+    return handle;
+}
+
+static void *load_ntdll( char *argv0 )
+{
+    const char *self = get_self_exe( argv0 );
+    char *path, *p;
+    void *handle = NULL;
+
+    if (self && ((path = realpath_dirname( self ))))
+    {
+        if ((p = remove_tail( path, "/loader" )))
+        {
+            handle = try_dlopen( p, "dlls/ntdll/ntdll.so" );
+            free( p );
+        }
+        else handle = try_dlopen( path, BIN_TO_DLLDIR "/ntdll.so" );
+        free( path );
+    }
+
+    if (!handle && (path = getenv( "WINEDLLPATH" )))
+    {
+        path = strdup( path );
+        for (p = strtok( path, ":" ); p; p = strtok( NULL, ":" ))
+        {
+            handle = try_dlopen( p, "ntdll.so" );
+            if (handle) break;
+        }
+        free( path );
+    }
+
+    if (!handle && !self) handle = try_dlopen( DLLDIR, "ntdll.so" );
+
+    return handle;
+}
+
+#ifdef __APPLE__
+#define min(a,b)   (((a) < (b)) ? (a) : (b))
 /***********************************************************************
- *           check_command_line
+ *           apple_override_bundle_name
  *
- * Check if command line is one that needs to be handled specially.
+ * Rewrite the bundle name in the Info.plist embedded in the loader.
+ * This is the only way to control the title of the application menu
+ * when using the Mac driver.  The GUI frameworks call down into Core
+ * Foundation to get the bundle name for that.
+ *
+ * CrossOver Hack 13438
  */
-static void check_command_line( int argc, char *argv[] )
+static void apple_override_bundle_name( int argc, char *argv[] )
 {
-    static const char usage[] =
-        "Usage: wine PROGRAM [ARGUMENTS...]   Run the specified program\n"
-        "       wine --help                   Display this help and exit\n"
-        "       wine --version                Output version information and exit";
+    char* info_plist;
+    unsigned long remaining;
+    static const char prefix[] = "<key>CFBundleName</key>\n    <string>";
+    const size_t prefix_len = strlen(prefix);
+    static const char suffix[] = "</string>";
+    const size_t suffix_len = strlen(suffix);
+    static const char padding[] = "<!-- bundle name padding -->";
+    const size_t padding_len = strlen(padding);
+    char* bundle_name;
+    const char* p;
+    size_t bundle_name_len, max_bundle_name_len;
+    vm_address_t start, end;
+    const char* new_bundle_name;
+    size_t new_bundle_name_len;
 
-    if (argc <= 1)
-    {
-        fprintf( stderr, "%s\n", usage );
-        exit(1);
-    }
-    if (!strcmp( argv[1], "--help" ))
-    {
-        printf( "%s\n", usage );
-        exit(0);
-    }
-    if (!strcmp( argv[1], "--version" ))
-    {
-        printf( "%s\n", wine_get_build_id() );
-        exit(0);
-    }
-}
+    if (argc < 2)
+        return;
 
+    info_plist = getsectdata("__TEXT", "__info_plist", &remaining);
+    if (!info_plist || !remaining)
+        return;
+    info_plist += _dyld_get_image_vmaddr_slide(0);
 
-#ifdef __ANDROID__
+    bundle_name = strnstr(info_plist, prefix, remaining);
+    if (!bundle_name)
+        return;
 
-static int pre_exec(void)
-{
-#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__)
-    return 1;  /* we have a preloader */
-#else
-    return 0;  /* no exec needed */
-#endif
-}
+    bundle_name += prefix_len;
+    remaining -= bundle_name - info_plist;
+    p = strnstr(bundle_name, suffix, remaining);
+    if (!p)
+        return;
 
-#elif defined(__linux__) && (defined(__i386__) || defined(__arm__))
+    bundle_name_len = p - bundle_name;
+    remaining -= bundle_name_len + suffix_len;
 
-#ifdef __i386__
-/* separate thread to check for NPTL and TLS features */
-static void *needs_pthread( void *arg )
-{
-    pid_t tid = syscall( 224 /* SYS_gettid */ );
-    /* check for NPTL */
-    if (tid != -1 && tid != getpid()) return (void *)1;
-    /* check for TLS glibc */
-    if (wine_get_gs() != 0) return (void *)1;
-    /* check for exported epoll_create to detect new glibc versions without TLS */
-    if (wine_dlsym( RTLD_DEFAULT, "epoll_create", NULL, 0 ))
-        fprintf( stderr,
-                 "wine: glibc >= 2.3 without NPTL or TLS is not a supported combination.\n"
-                 "      Please upgrade to a glibc with NPTL support.\n" );
+    max_bundle_name_len = bundle_name_len;
+    if (padding_len <= remaining &&
+        !memcmp(bundle_name + bundle_name_len + suffix_len, padding, padding_len))
+        max_bundle_name_len += padding_len;
+
+    new_bundle_name = argv[1];
+    if ((p = strrchr(new_bundle_name, '\\'))) new_bundle_name = p + 1;
+    if ((p = strrchr(new_bundle_name, '/'))) new_bundle_name = p + 1;
+    if (strspn(new_bundle_name, "0123456789abcdefABCDEF") == 32 &&
+        new_bundle_name[32] == '.')
+        new_bundle_name += 33;
+    if ((p = strrchr(new_bundle_name, '.')) && p != new_bundle_name)
+        new_bundle_name_len = p - new_bundle_name;
     else
-        fprintf( stderr,
-                 "wine: Your C library is too old. You need at least glibc 2.3 with NPTL support.\n" );
-    return 0;
-}
+        new_bundle_name_len = strlen(new_bundle_name);
+    if (!new_bundle_name_len)
+        return;
 
-/* check if we support the glibc threading model */
-static void check_threading(void)
-{
-    pthread_t id;
-    void *ret;
-
-    pthread_create( &id, NULL, needs_pthread, NULL );
-    pthread_join( id, &ret );
-    if (!ret) exit(1);
-}
-#else
-static void check_threading(void)
-{
-}
-#endif
-
-static void check_vmsplit( void *stack )
-{
-    if (stack < (void *)0x80000000)
+    start = (vm_address_t)bundle_name;
+    end = (vm_address_t)(bundle_name + max_bundle_name_len + suffix_len);
+    start &= ~(getpagesize() - 1);
+    end = (end + getpagesize() - 1) & ~(getpagesize() - 1);
+    if (vm_protect(mach_task_self(), start, end - start, 0,
+                   VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE|VM_PROT_COPY) == KERN_SUCCESS)
     {
-        /* if the stack is below 0x80000000, assume we can safely try a munmap there */
-        if (munmap( (void *)0x80000000, 1 ) == -1 && errno == EINVAL)
-            fprintf( stderr,
-                     "Warning: memory above 0x80000000 doesn't seem to be accessible.\n"
-                     "Wine requires a 3G/1G user/kernel memory split to work properly.\n" );
+        size_t copy_len = min(new_bundle_name_len, max_bundle_name_len);
+        memcpy(bundle_name, new_bundle_name, copy_len);
+        memcpy(bundle_name + copy_len, suffix, suffix_len);
+        if (copy_len < max_bundle_name_len)
+            memset(bundle_name + copy_len + suffix_len, ' ', max_bundle_name_len - copy_len);
+        vm_protect(mach_task_self(), start, end - start, 0, VM_PROT_READ|VM_PROT_EXECUTE);
     }
 }
-
-static void set_max_limit( int limit )
-{
-    struct rlimit rlimit;
-
-    if (!getrlimit( limit, &rlimit ))
-    {
-        rlimit.rlim_cur = rlimit.rlim_max;
-        setrlimit( limit, &rlimit );
-    }
-}
-
-static int pre_exec(void)
-{
-    int temp;
-
-    check_threading();
-    check_vmsplit( &temp );
-    set_max_limit( RLIMIT_AS );
-#ifdef __i386__
-    return 1;  /* we have a preloader on x86 */
-#else
-    return 0;
 #endif
-}
-
-#elif defined(__linux__) && (defined(__x86_64__) || defined(__i386_on_x86_64__) || defined(__aarch64__))
-
-static int pre_exec(void)
-{
-    return 1;  /* we have a preloader on x86-64/arm64 */
-}
-
-#elif defined(__APPLE__) && (defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__))
-
-static int pre_exec(void)
-{
-    return 1;  /* we have a preloader */
-}
-
-#elif (defined(__FreeBSD__) || defined (__FreeBSD_kernel__) || defined(__DragonFly__))
-
-static int pre_exec(void)
-{
-    struct rlimit rl;
-
-    rl.rlim_cur = 0x02000000;
-    rl.rlim_max = 0x02000000;
-    setrlimit( RLIMIT_DATA, &rl );
-    return 1;
-}
-
-#else
-
-static int pre_exec(void)
-{
-    return 0;  /* no exec needed */
-}
-
-#endif
-
 
 /**********************************************************************
  *           main
  */
 int main( int argc, char *argv[] )
 {
-    char error[1024];
-    int i;
+    void *handle;
 
-    if (!getenv( "WINELOADERNOEXEC" ))  /* first time around */
+#ifdef __APPLE__ /* CrossOver Hack 13438 */
+    apple_override_bundle_name(argc, argv);
+#endif
+
+    if ((handle = load_ntdll( argv[0] )))
     {
-        static char noexec[] = "WINELOADERNOEXEC=1";
-
-        putenv( noexec );
-        check_command_line( argc, argv );
-        if (pre_exec())
-        {
-            wine_init_argv0_path( argv[0] );
-            wine_exec_wine_binary( NULL, argv, getenv( "WINELOADER" ));
-            fprintf( stderr, "wine: could not exec the wine loader\n" );
-            exit(1);
-        }
+        void (*init_func)(int, char **, char **) = dlsym( handle, "__wine_main" );
+        if (init_func) init_func( argc, argv, environ );
+        fprintf( stderr, "wine: __wine_main function not found in ntdll.so\n" );
+        exit(1);
     }
 
-    if (wine_main_preload_info)
-    {
-        for (i = 0; wine_main_preload_info[i].size; i++)
-            wine_mmap_add_reserved_area( wine_main_preload_info[i].addr, wine_main_preload_info[i].size );
-    }
-
-    wine_init( argc, argv, error, sizeof(error) );
-    fprintf( stderr, "wine: failed to initialize: %s\n", error );
+    fprintf( stderr, "wine: could not load ntdll.so: %s\n", dlerror() );
+    pthread_detach( pthread_self() );  /* force importing libpthread for OpenGL */
     exit(1);
 }

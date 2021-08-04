@@ -16,20 +16,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-
-#define COBJMACROS
-
-#include "windef.h"
-#include "winbase.h"
-#include "dshow.h"
+#include "qcap_private.h"
 #include "vfw.h"
 #include "aviriff.h"
-
-#include "qcap_main.h"
-
-#include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(qcap);
 
@@ -96,13 +85,11 @@ static HRESULT fill_format_info(AVICompressor *This, VIDEOINFOHEADER *src_videoi
     }
 
     size += FIELD_OFFSET(VIDEOINFOHEADER, bmiHeader);
-    This->videoinfo = heap_alloc(size);
-    if(!This->videoinfo)
+    if (!(This->videoinfo = calloc(1, size)))
         return E_OUTOFMEMORY;
 
     This->videoinfo_size = size;
     This->driver_flags = icinfo.dwFlags;
-    memset(This->videoinfo, 0, sizeof(*This->videoinfo));
     ICCompressGetFormat(This->hic, &src_videoinfo->bmiHeader, &This->videoinfo->bmiHeader);
 
     This->videoinfo->dwBitRate = 10000000/src_videoinfo->AvgTimePerFrame * This->videoinfo->bmiHeader.biSizeImage * 8;
@@ -128,11 +115,11 @@ static void avi_compressor_destroy(struct strmbase_filter *iface)
 
     if (filter->hic)
         ICClose(filter->hic);
-    heap_free(filter->videoinfo);
+    free(filter->videoinfo);
     strmbase_sink_cleanup(&filter->sink);
     strmbase_source_cleanup(&filter->source);
     strmbase_filter_cleanup(&filter->filter);
-    heap_free(filter);
+    free(filter);
 }
 
 static HRESULT avi_compressor_query_interface(struct strmbase_filter *iface, REFIID iid, void **out)
@@ -224,12 +211,10 @@ static HRESULT WINAPI AVICompressorPropertyBag_Load(IPersistPropertyBag *iface, 
     VARIANT v;
     HRESULT hres;
 
-    static const WCHAR fcc_handlerW[] = {'F','c','c','H','a','n','d','l','e','r',0};
-
     TRACE("(%p)->(%p %p)\n", This, pPropBag, pErrorLog);
 
     V_VT(&v) = VT_BSTR;
-    hres = IPropertyBag_Read(pPropBag, fcc_handlerW, &v, NULL);
+    hres = IPropertyBag_Read(pPropBag, L"FccHandler", &v, NULL);
     if(FAILED(hres)) {
         WARN("Could not read FccHandler: %08x\n", hres);
         return hres;
@@ -414,14 +399,13 @@ static HRESULT sink_connect(struct strmbase_sink *iface, IPin *peer, const AM_ME
 static void sink_disconnect(struct strmbase_sink *iface)
 {
     AVICompressor *filter = impl_from_strmbase_pin(&iface->pin);
-    heap_free(filter->videoinfo);
+    free(filter->videoinfo);
     filter->videoinfo = NULL;
 }
 
 static const struct strmbase_sink_ops sink_ops =
 {
     .base.pin_query_accept = sink_query_accept,
-    .base.pin_get_media_type = strmbase_pin_get_media_type,
     .base.pin_query_interface = sink_query_interface,
     .pfnReceive = AVICompressorIn_Receive,
     .sink_connect = sink_connect,
@@ -480,25 +464,20 @@ static const struct strmbase_source_ops source_ops =
     .pfnDecideAllocator = AVICompressorOut_DecideAllocator,
 };
 
-IUnknown* WINAPI QCAP_createAVICompressor(IUnknown *outer, HRESULT *phr)
+HRESULT avi_compressor_create(IUnknown *outer, IUnknown **out)
 {
-    static const WCHAR source_name[] = {'O','u','t',0};
-    static const WCHAR sink_name[] = {'I','n',0};
-    AVICompressor *compressor;
+    AVICompressor *object;
 
-    compressor = heap_alloc_zero(sizeof(*compressor));
-    if(!compressor) {
-        *phr = E_NOINTERFACE;
-        return NULL;
-    }
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
 
-    strmbase_filter_init(&compressor->filter, outer, &CLSID_AVICo, &filter_ops);
+    strmbase_filter_init(&object->filter, outer, &CLSID_AVICo, &filter_ops);
+    object->IPersistPropertyBag_iface.lpVtbl = &PersistPropertyBagVtbl;
 
-    compressor->IPersistPropertyBag_iface.lpVtbl = &PersistPropertyBagVtbl;
+    strmbase_sink_init(&object->sink, &object->filter, L"In", &sink_ops, NULL);
+    strmbase_source_init(&object->source, &object->filter, L"Out", &source_ops);
 
-    strmbase_sink_init(&compressor->sink, &compressor->filter, sink_name, &sink_ops, NULL);
-    strmbase_source_init(&compressor->source, &compressor->filter, source_name, &source_ops);
-
-    *phr = S_OK;
-    return &compressor->filter.IUnknown_inner;
+    TRACE("Created AVI compressor %p.\n", object);
+    *out = &object->filter.IUnknown_inner;
+    return S_OK;
 }

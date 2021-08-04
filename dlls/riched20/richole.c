@@ -444,7 +444,7 @@ static HRESULT get_textfont_prop_for_pos(const IRichEditOleImpl *reole, int pos,
     fmt.cbSize = sizeof(fmt);
     fmt.dwMask = textfont_prop_masks[propid][0];
 
-    ME_CursorFromCharOfs(reole->editor, pos, &from);
+    cursor_from_char_ofs( reole->editor, pos, &from );
     to = from;
     ME_MoveCursorChars(reole->editor, &to, 1, FALSE);
     ME_GetCharFormat(reole->editor, &from, &to, &fmt);
@@ -662,7 +662,8 @@ static void textrange_set_font(ITextRange *range, ITextFont *font)
         fmt.wWeight = value;
     }
 
-    if (fmt.dwMask) {
+    if (fmt.dwMask)
+    {
         const IRichEditOleImpl *reole = get_range_reole(range);
         ME_Cursor from, to;
         LONG start, end;
@@ -670,8 +671,8 @@ static void textrange_set_font(ITextRange *range, ITextFont *font)
         ITextRange_GetStart(range, &start);
         ITextRange_GetEnd(range, &end);
 
-        ME_CursorFromCharOfs(reole->editor, start, &from);
-        ME_CursorFromCharOfs(reole->editor, end, &to);
+        cursor_from_char_ofs( reole->editor, start, &from );
+        cursor_from_char_ofs( reole->editor, end, &to );
         ME_SetCharFormat(reole->editor, &from, &to, &fmt);
     }
 }
@@ -828,8 +829,8 @@ static HRESULT set_textfont_prop(ITextFontImpl *font, enum textfont_prop_id prop
     ITextRange_GetStart(font->range, &start);
     ITextRange_GetEnd(font->range, &end);
 
-    ME_CursorFromCharOfs(reole->editor, start, &from);
-    ME_CursorFromCharOfs(reole->editor, end, &to);
+    cursor_from_char_ofs( reole->editor, start, &from );
+    cursor_from_char_ofs( reole->editor, end, &to );
     ME_SetCharFormat(reole->editor, &from, &to, &fmt);
 
     return S_OK;
@@ -1349,12 +1350,15 @@ IRichEditOle_fnGetClipboardData(IRichEditOle *me, CHARRANGE *lpchrg,
     TRACE("(%p,%p,%d)\n",This, lpchrg, reco);
     if(!lplpdataobj)
         return E_INVALIDARG;
-    if(!lpchrg) {
+    if(!lpchrg)
+    {
         int nFrom, nTo, nStartCur = ME_GetSelectionOfs(This->editor, &nFrom, &nTo);
         start = This->editor->pCursors[nStartCur];
         nChars = nTo - nFrom;
-    } else {
-        ME_CursorFromCharOfs(This->editor, lpchrg->cpMin, &start);
+    }
+    else
+    {
+        cursor_from_char_ofs( This->editor, lpchrg->cpMin, &start );
         nChars = lpchrg->cpMax - lpchrg->cpMin;
     }
     return ME_GetDataObject(This->editor, &start, nChars, lplpdataobj);
@@ -1385,21 +1389,21 @@ IRichEditOle_fnGetObject(IRichEditOle *me, LONG iob,
         ME_Cursor cursor;
 
         TRACE("character offset: %d\n", lpreobject->cp);
-        ME_CursorFromCharOfs(This->editor, lpreobject->cp, &cursor);
-        if (!cursor.pRun->member.run.reobj)
+        cursor_from_char_ofs( This->editor, lpreobject->cp, &cursor );
+        if (!cursor.run->reobj)
             return E_INVALIDARG;
         else
-            reobj = cursor.pRun->member.run.reobj;
+            reobj = cursor.run->reobj;
     }
     else if (iob == REO_IOB_SELECTION)
     {
         ME_Cursor *from, *to;
 
         ME_GetSelection(This->editor, &from, &to);
-        if (!from->pRun->member.run.reobj)
+        if (!from->run->reobj)
             return E_INVALIDARG;
         else
-            reobj = from->pRun->member.run.reobj;
+            reobj = from->run->reobj;
     }
     else
     {
@@ -1647,15 +1651,15 @@ static HRESULT WINAPI ITextRange_fnGetText(ITextRange *me, BSTR *str)
     }
 
     editor = This->child.reole->editor;
-    ME_CursorFromCharOfs(editor, This->start, &start);
-    ME_CursorFromCharOfs(editor, This->end, &end);
+    cursor_from_char_ofs( editor, This->start, &start );
+    cursor_from_char_ofs( editor, This->end, &end );
 
     length = This->end - This->start;
     *str = SysAllocStringLen(NULL, length);
     if (!*str)
         return E_OUTOFMEMORY;
 
-    bEOP = (end.pRun->next->type == diTextEnd && This->end > ME_GetTextLength(editor));
+    bEOP = (!para_next( para_next( end.para )) && This->end > ME_GetTextLength(editor));
     ME_GetTextW(editor, *str, length, &start, length, FALSE, bEOP);
     return S_OK;
 }
@@ -1676,12 +1680,14 @@ static HRESULT WINAPI ITextRange_fnSetText(ITextRange *me, BSTR str)
     editor = This->child.reole->editor;
 
     /* delete only where's something to delete */
-    if (This->start != This->end) {
-        ME_CursorFromCharOfs(editor, This->start, &cursor);
+    if (This->start != This->end)
+    {
+        cursor_from_char_ofs( editor, This->start, &cursor );
         ME_InternalDeleteText(editor, &cursor, This->end - This->start, FALSE);
     }
 
-    if (!str || !*str) {
+    if (!str || !*str)
+    {
         /* will update this range as well */
         textranges_update_ranges(This->child.reole, This->start, This->end, RANGE_UPDATE_DELETE);
         return S_OK;
@@ -1690,8 +1696,8 @@ static HRESULT WINAPI ITextRange_fnSetText(ITextRange *me, BSTR str)
     /* it's safer not to rely on stored BSTR length */
     len = lstrlenW(str);
     cursor = editor->pCursors[0];
-    ME_CursorFromCharOfs(editor, This->start, &editor->pCursors[0]);
-    style = ME_GetInsertStyle(editor, 0);
+    cursor_from_char_ofs( editor, This->start, &editor->pCursors[0] );
+    style = style_get_insert_style( editor, editor->pCursors );
     ME_InsertTextFromCursor(editor, 0, str, len, style);
     ME_ReleaseStyle(style);
     editor->pCursors[0] = cursor;
@@ -1708,7 +1714,7 @@ static HRESULT range_GetChar(ME_TextEditor *editor, ME_Cursor *cursor, LONG *pch
 {
     WCHAR wch[2];
 
-    ME_GetTextW(editor, wch, 1, cursor, 1, FALSE, cursor->pRun->next->type == diTextEnd);
+    ME_GetTextW(editor, wch, 1, cursor, 1, FALSE, !para_next( para_next( cursor->para ) ));
     *pch = wch[0];
 
     return S_OK;
@@ -1729,7 +1735,7 @@ static HRESULT WINAPI ITextRange_fnGetChar(ITextRange *me, LONG *pch)
         return E_INVALIDARG;
 
     editor = This->child.reole->editor;
-    ME_CursorFromCharOfs(editor, This->start, &cursor);
+    cursor_from_char_ofs( editor, This->start, &cursor );
     return range_GetChar(editor, &cursor, pch);
 }
 
@@ -2048,7 +2054,7 @@ static HRESULT WINAPI ITextRange_fnSetRange(ITextRange *me, LONG anchor, LONG ac
 {
     ITextRangeImpl *This = impl_from_ITextRange(me);
 
-    FIXME("(%p)->(%d %d): stub\n", This, anchor, active);
+    TRACE("(%p)->(%d %d)\n", This, anchor, active);
 
     if (!This->child.reole)
         return CO_E_RELEASED;
@@ -2153,17 +2159,89 @@ static HRESULT WINAPI ITextRange_fnSelect(ITextRange *me)
     return S_OK;
 }
 
+static HRESULT textrange_startof(ITextRange *range, LONG unit, LONG extend, LONG *delta)
+{
+    HRESULT hr;
+    LONG start, end;
+    LONG moved;
+
+    ITextRange_GetStart(range, &start);
+    ITextRange_GetEnd(range, &end);
+
+    switch (unit)
+    {
+    case tomCharacter:
+    {
+        moved = 0;
+        if (extend == tomMove) {
+            if (start != end) {
+                ITextRange_SetEnd(range, start);
+                moved = -1;
+            }
+        }
+        if (delta)
+            *delta = moved;
+        hr = moved ? S_OK : S_FALSE;
+        break;
+    }
+    default:
+        FIXME("unit %d is not supported\n", unit);
+        return E_NOTIMPL;
+    }
+    return hr;
+}
+
 static HRESULT WINAPI ITextRange_fnStartOf(ITextRange *me, LONG unit, LONG extend,
                                            LONG *delta)
 {
     ITextRangeImpl *This = impl_from_ITextRange(me);
 
-    FIXME("(%p)->(%d %d %p): stub\n", This, unit, extend, delta);
+    TRACE("(%p)->(%d %d %p)\n", This, unit, extend, delta);
 
     if (!This->child.reole)
         return CO_E_RELEASED;
 
-    return E_NOTIMPL;
+    return textrange_startof(me, unit, extend, delta);
+}
+
+static HRESULT textrange_endof(ITextRange *range, ME_TextEditor *editor, LONG unit, LONG extend, LONG *delta)
+{
+    HRESULT hr;
+    LONG old_start, old_end, new_end;
+    LONG moved;
+
+    ITextRange_GetStart(range, &old_start);
+    ITextRange_GetEnd(range, &old_end);
+
+    switch (unit)
+    {
+    case tomCharacter:
+    {
+        moved = 0;
+        new_end = old_end;
+        if (old_end == 0)
+        {
+            ME_Cursor cursor;
+            cursor_from_char_ofs( editor, old_end, &cursor );
+            moved = ME_MoveCursorChars(editor, &cursor, 1, TRUE);
+            new_end = old_end + moved;
+        }
+        else if (extend == tomMove && old_start != old_end)
+            moved = 1;
+
+        ITextRange_SetEnd(range, new_end);
+        if (extend == tomMove)
+            ITextRange_SetStart(range, new_end);
+        if (delta)
+            *delta = moved;
+        hr = moved ? S_OK : S_FALSE;
+        break;
+    }
+    default:
+        FIXME("unit %d is not supported\n", unit);
+        return E_NOTIMPL;
+    }
+    return hr;
 }
 
 static HRESULT WINAPI ITextRange_fnEndOf(ITextRange *me, LONG unit, LONG extend,
@@ -2171,40 +2249,93 @@ static HRESULT WINAPI ITextRange_fnEndOf(ITextRange *me, LONG unit, LONG extend,
 {
     ITextRangeImpl *This = impl_from_ITextRange(me);
 
-    FIXME("(%p)->(%d %d %p): stub\n", This, unit, extend, delta);
+    TRACE("(%p)->(%d %d %p)\n", This, unit, extend, delta);
 
     if (!This->child.reole)
         return CO_E_RELEASED;
 
-    return E_NOTIMPL;
+    return textrange_endof(me, This->child.reole->editor, unit, extend, delta);
+}
+
+static HRESULT textrange_move(ITextRange *range, ME_TextEditor *editor, LONG unit, LONG count, LONG *delta)
+{
+    LONG old_start, old_end, new_start, new_end;
+    LONG move_by;
+    LONG moved;
+    HRESULT hr = S_OK;
+
+    if (!count)
+    {
+        if (delta)
+            *delta = 0;
+        return S_FALSE;
+    }
+
+    ITextRange_GetStart(range, &old_start);
+    ITextRange_GetEnd(range, &old_end);
+    switch (unit)
+    {
+    case tomCharacter:
+    {
+        ME_Cursor cursor;
+
+        if (count > 0)
+        {
+            cursor_from_char_ofs( editor, old_end, &cursor );
+            move_by = count;
+            if (old_start != old_end)
+                --move_by;
+        }
+        else
+        {
+            cursor_from_char_ofs( editor, old_start, &cursor );
+            move_by = count;
+            if (old_start != old_end)
+                ++move_by;
+        }
+        moved = ME_MoveCursorChars(editor, &cursor, move_by, FALSE);
+        if (count > 0)
+        {
+            new_end = old_end + moved;
+            new_start = new_end;
+            if (old_start != old_end)
+                ++moved;
+        }
+        else
+        {
+            new_start = old_start + moved;
+            new_end = new_start;
+            if (old_start != old_end)
+                --moved;
+        }
+        if (delta) *delta = moved;
+        break;
+    }
+    default:
+        FIXME("unit %d is not supported\n", unit);
+        return E_NOTIMPL;
+    }
+    if (moved == 0)
+        hr = S_FALSE;
+    ITextRange_SetStart(range, new_start);
+    ITextRange_SetEnd(range, new_end);
+
+    return hr;
 }
 
 static HRESULT WINAPI ITextRange_fnMove(ITextRange *me, LONG unit, LONG count, LONG *delta)
 {
     ITextRangeImpl *This = impl_from_ITextRange(me);
 
-    FIXME("(%p)->(%d %d %p): stub\n", This, unit, count, delta);
+    TRACE("(%p)->(%d %d %p)\n", This, unit, count, delta);
 
     if (!This->child.reole)
         return CO_E_RELEASED;
 
-    return E_NOTIMPL;
+    return textrange_move(me, This->child.reole->editor, unit, count, delta);
 }
 
-static HRESULT WINAPI ITextRange_fnMoveStart(ITextRange *me, LONG unit, LONG count,
-                                             LONG *delta)
-{
-    ITextRangeImpl *This = impl_from_ITextRange(me);
-
-    FIXME("(%p)->(%d %d %p): stub\n", This, unit, count, delta);
-
-    if (!This->child.reole)
-        return CO_E_RELEASED;
-
-    return E_NOTIMPL;
-}
-
-static HRESULT textrange_moveend(ITextRange *range, LONG unit, LONG count, LONG *delta)
+static HRESULT textrange_movestart(ITextRange *range, ME_TextEditor *editor, LONG unit, LONG count, LONG *delta)
 {
     LONG old_start, old_end, new_start, new_end;
     HRESULT hr = S_OK;
@@ -2220,6 +2351,77 @@ static HRESULT textrange_moveend(ITextRange *range, LONG unit, LONG count, LONG 
     ITextRange_GetEnd(range, &old_end);
     switch (unit)
     {
+    case tomCharacter:
+    {
+        ME_Cursor cursor;
+        LONG moved;
+
+        cursor_from_char_ofs( editor, old_start, &cursor );
+        moved = ME_MoveCursorChars(editor, &cursor, count, FALSE);
+        new_start = old_start + moved;
+        new_end = old_end;
+        if (new_end < new_start)
+            new_end = new_start;
+        if (delta)
+            *delta = moved;
+        break;
+    }
+    default:
+        FIXME("unit %d is not supported\n", unit);
+        return E_NOTIMPL;
+    }
+    if (new_start == old_start)
+        hr = S_FALSE;
+    ITextRange_SetStart(range, new_start);
+    ITextRange_SetEnd(range, new_end);
+
+    return hr;
+}
+
+static HRESULT WINAPI ITextRange_fnMoveStart(ITextRange *me, LONG unit, LONG count,
+                                             LONG *delta)
+{
+    ITextRangeImpl *This = impl_from_ITextRange(me);
+
+    TRACE("(%p)->(%d %d %p)\n", This, unit, count, delta);
+
+    if (!This->child.reole)
+        return CO_E_RELEASED;
+
+    return textrange_movestart(me, This->child.reole->editor, unit, count, delta);
+}
+
+static HRESULT textrange_moveend(ITextRange *range, ME_TextEditor *editor, LONG unit, LONG count, LONG *delta)
+{
+    LONG old_start, old_end, new_start, new_end;
+    HRESULT hr = S_OK;
+
+    if (!count)
+    {
+        if (delta)
+            *delta = 0;
+        return S_FALSE;
+    }
+
+    ITextRange_GetStart(range, &old_start);
+    ITextRange_GetEnd(range, &old_end);
+    switch (unit)
+    {
+    case tomCharacter:
+    {
+        ME_Cursor cursor;
+        LONG moved;
+
+        cursor_from_char_ofs( editor, old_end, &cursor );
+        moved = ME_MoveCursorChars(editor, &cursor, count, TRUE);
+        new_start = old_start;
+        new_end = old_end + moved;
+        if (new_end < new_start)
+            new_start = new_end;
+        if (delta)
+            *delta = moved;
+        break;
+    }
     case tomStory:
         if (count < 0)
             new_start = new_end = 0;
@@ -2260,7 +2462,7 @@ static HRESULT WINAPI ITextRange_fnMoveEnd(ITextRange *me, LONG unit, LONG count
     if (!This->child.reole)
         return CO_E_RELEASED;
 
-    return textrange_moveend(me, unit, count, delta);
+    return textrange_moveend(me, This->child.reole->editor, unit, count, delta);
 }
 
 static HRESULT WINAPI ITextRange_fnMoveWhile(ITextRange *me, VARIANT *charset, LONG count,
@@ -2392,28 +2594,53 @@ static HRESULT WINAPI ITextRange_fnDelete(ITextRange *me, LONG unit, LONG count,
     return E_NOTIMPL;
 }
 
+static HRESULT textrange_copy_or_cut( ITextRange *range, ME_TextEditor *editor, BOOL cut, VARIANT *v )
+{
+    LONG start, end;
+    ME_Cursor cursor;
+    IDataObject **data_out = NULL;
+
+    ITextRange_GetStart( range, &start );
+    ITextRange_GetEnd( range, &end );
+    if (start == end)
+    {
+        /* If the range is empty, all text is copied */
+        LONG prev_end = end;
+        ITextRange_SetEnd( range, MAXLONG );
+        start = 0;
+        ITextRange_GetEnd( range, &end );
+        ITextRange_SetEnd( range, prev_end );
+    }
+    cursor_from_char_ofs( editor, start, &cursor );
+
+    if (v && V_VT(v) == (VT_UNKNOWN | VT_BYREF) && V_UNKNOWNREF( v ))
+        data_out = (IDataObject **)V_UNKNOWNREF( v );
+
+    return editor_copy_or_cut( editor, cut, &cursor, end - start, data_out );
+}
+
 static HRESULT WINAPI ITextRange_fnCut(ITextRange *me, VARIANT *v)
 {
     ITextRangeImpl *This = impl_from_ITextRange(me);
 
-    FIXME("(%p)->(%p): stub\n", This, v);
+    TRACE("(%p)->(%p)\n", This, v);
 
     if (!This->child.reole)
         return CO_E_RELEASED;
 
-    return E_NOTIMPL;
+    return textrange_copy_or_cut(me, This->child.reole->editor, TRUE, v);
 }
 
 static HRESULT WINAPI ITextRange_fnCopy(ITextRange *me, VARIANT *v)
 {
     ITextRangeImpl *This = impl_from_ITextRange(me);
 
-    FIXME("(%p)->(%p): stub\n", This, v);
+    TRACE("(%p)->(%p)\n", This, v);
 
     if (!This->child.reole)
         return CO_E_RELEASED;
 
-    return E_NOTIMPL;
+    return textrange_copy_or_cut(me, This->child.reole->editor, FALSE, v);
 }
 
 static HRESULT WINAPI ITextRange_fnPaste(ITextRange *me, VARIANT *v, LONG format)
@@ -2506,12 +2733,12 @@ static HRESULT WINAPI ITextRange_fnScrollIntoView(ITextRange *me, LONG value)
     switch (value)
     {
     case tomStart:
-        ME_CursorFromCharOfs(editor, This->start, &cursor);
-        ME_GetCursorCoordinates(editor, &cursor, &x, &y, &height);
+        cursor_from_char_ofs( editor, This->start, &cursor );
+        cursor_coords( editor, &cursor, &x, &y, &height );
         break;
     case tomEnd:
-        ME_CursorFromCharOfs(editor, This->end, &cursor);
-        ME_GetCursorCoordinates(editor, &cursor, &x, &y, &height);
+        cursor_from_char_ofs( editor, This->end, &cursor );
+        cursor_coords( editor, &cursor, &x, &y, &height );
         break;
     default:
         FIXME("bStart value %d not handled\n", value);
@@ -2777,9 +3004,8 @@ static void textfont_reset_to_default(ITextFontImpl *font)
             font->props[id].l = GetSystemDefaultLCID();
             break;
         case FONT_NAME: {
-            static const WCHAR sysW[] = {'S','y','s','t','e','m',0};
             SysFreeString(font->props[id].str);
-            font->props[id].str = SysAllocString(sysW);
+            font->props[id].str = SysAllocString(L"System");
             break;
         }
         case FONT_WEIGHT:
@@ -4518,7 +4744,7 @@ static HRESULT WINAPI ITextSelection_fnGetText(ITextSelection *me, BSTR *pbstr)
     if (!*pbstr)
         return E_OUTOFMEMORY;
 
-    bEOP = (end->pRun->next->type == diTextEnd && endOfs > ME_GetTextLength(This->reOle->editor));
+    bEOP = (!para_next( para_next( end->para ) ) && endOfs > ME_GetTextLength(This->reOle->editor));
     ME_GetTextW(This->reOle->editor, *pbstr, nChars, start, nChars, FALSE, bEOP);
     TRACE("%s\n", wine_dbgstr_w(*pbstr));
 
@@ -4944,51 +5170,71 @@ static HRESULT WINAPI ITextSelection_fnStartOf(ITextSelection *me, LONG unit, LO
     LONG *delta)
 {
     ITextSelectionImpl *This = impl_from_ITextSelection(me);
+    ITextRange *range = NULL;
+    HRESULT hr;
 
-    FIXME("(%p)->(%d %d %p): stub\n", This, unit, extend, delta);
+    TRACE("(%p)->(%d %d %p)\n", This, unit, extend, delta);
 
     if (!This->reOle)
         return CO_E_RELEASED;
 
-    return E_NOTIMPL;
+    ITextSelection_QueryInterface(me, &IID_ITextRange, (void**)&range);
+    hr = textrange_startof(range, unit, extend, delta);
+    ITextRange_Release(range);
+    return hr;
 }
 
 static HRESULT WINAPI ITextSelection_fnEndOf(ITextSelection *me, LONG unit, LONG extend,
     LONG *delta)
 {
     ITextSelectionImpl *This = impl_from_ITextSelection(me);
+    ITextRange *range = NULL;
+    HRESULT hr;
 
-    FIXME("(%p)->(%d %d %p): stub\n", This, unit, extend, delta);
+    TRACE("(%p)->(%d %d %p)\n", This, unit, extend, delta);
 
     if (!This->reOle)
         return CO_E_RELEASED;
 
-    return E_NOTIMPL;
+    ITextSelection_QueryInterface(me, &IID_ITextRange, (void**)&range);
+    hr = textrange_endof(range, This->reOle->editor, unit, extend, delta);
+    ITextRange_Release(range);
+    return hr;
 }
 
 static HRESULT WINAPI ITextSelection_fnMove(ITextSelection *me, LONG unit, LONG count, LONG *delta)
 {
     ITextSelectionImpl *This = impl_from_ITextSelection(me);
+    ITextRange *range = NULL;
+    HRESULT hr;
 
-    FIXME("(%p)->(%d %d %p): stub\n", This, unit, count, delta);
+    TRACE("(%p)->(%d %d %p)\n", This, unit, count, delta);
 
     if (!This->reOle)
         return CO_E_RELEASED;
 
-    return E_NOTIMPL;
+    ITextSelection_QueryInterface(me, &IID_ITextRange, (void**)&range);
+    hr = textrange_movestart(range, This->reOle->editor, unit, count, delta);
+    ITextRange_Release(range);
+    return hr;
 }
 
 static HRESULT WINAPI ITextSelection_fnMoveStart(ITextSelection *me, LONG unit, LONG count,
     LONG *delta)
 {
     ITextSelectionImpl *This = impl_from_ITextSelection(me);
+    ITextRange *range = NULL;
+    HRESULT hr;
 
-    FIXME("(%p)->(%d %d %p): stub\n", This, unit, count, delta);
+    TRACE("(%p)->(%d %d %p)\n", This, unit, count, delta);
 
     if (!This->reOle)
         return CO_E_RELEASED;
 
-    return E_NOTIMPL;
+    ITextSelection_QueryInterface(me, &IID_ITextRange, (void**)&range);
+    hr = textrange_movestart(range, This->reOle->editor, unit, count, delta);
+    ITextRange_Release(range);
+    return hr;
 }
 
 static HRESULT WINAPI ITextSelection_fnMoveEnd(ITextSelection *me, LONG unit, LONG count,
@@ -5004,7 +5250,7 @@ static HRESULT WINAPI ITextSelection_fnMoveEnd(ITextSelection *me, LONG unit, LO
         return CO_E_RELEASED;
 
     ITextSelection_QueryInterface(me, &IID_ITextRange, (void**)&range);
-    hr = textrange_moveend(range, unit, count, delta);
+    hr = textrange_moveend(range, This->reOle->editor, unit, count, delta);
     ITextRange_Release(range);
     return hr;
 }
@@ -5143,25 +5389,35 @@ static HRESULT WINAPI ITextSelection_fnDelete(ITextSelection *me, LONG unit, LON
 static HRESULT WINAPI ITextSelection_fnCut(ITextSelection *me, VARIANT *v)
 {
     ITextSelectionImpl *This = impl_from_ITextSelection(me);
+    ITextRange *range = NULL;
+    HRESULT hr;
 
-    FIXME("(%p)->(%p): stub\n", This, v);
+    TRACE("(%p)->(%p): stub\n", This, v);
 
     if (!This->reOle)
         return CO_E_RELEASED;
 
-    return E_NOTIMPL;
+    ITextSelection_QueryInterface(me, &IID_ITextRange, (void**)&range);
+    hr = textrange_copy_or_cut(range, This->reOle->editor, TRUE, v);
+    ITextRange_Release(range);
+    return hr;
 }
 
 static HRESULT WINAPI ITextSelection_fnCopy(ITextSelection *me, VARIANT *v)
 {
     ITextSelectionImpl *This = impl_from_ITextSelection(me);
+    ITextRange *range = NULL;
+    HRESULT hr;
 
-    FIXME("(%p)->(%p): stub\n", This, v);
+    TRACE("(%p)->(%p)\n", This, v);
 
     if (!This->reOle)
         return CO_E_RELEASED;
 
-    return E_NOTIMPL;
+    ITextSelection_QueryInterface(me, &IID_ITextRange, (void**)&range);
+    hr = textrange_copy_or_cut(range, This->reOle->editor, FALSE, v);
+    ITextRange_Release(range);
+    return hr;
 }
 
 static HRESULT WINAPI ITextSelection_fnPaste(ITextSelection *me, VARIANT *v, LONG format)
@@ -5589,7 +5845,7 @@ void ME_GetOLEObjectSize(const ME_Context *c, ME_Run *run, SIZE *pSize)
   }
 }
 
-void ME_DrawOLE(ME_Context *c, int x, int y, ME_Run *run, BOOL selected)
+void draw_ole( ME_Context *c, int x, int y, ME_Run *run, BOOL selected )
 {
   IDataObject*  ido;
   FORMATETC     fmt;

@@ -25,8 +25,7 @@
 #include "wine/test.h"
 
 static const char *msifile = "winetest-record.msi";
-static const WCHAR msifileW[] =
-    {'w','i','n','e','t','e','s','t','-','r','e','c','o','r','d','.','m','s','i',0};
+static const WCHAR msifileW[] = L"winetest-record.msi";
 
 static BOOL create_temp_file(char *name)
 {
@@ -34,7 +33,7 @@ static BOOL create_temp_file(char *name)
     unsigned char buffer[26], i;
     DWORD sz;
     HANDLE handle;
-    
+
     r = GetTempFileNameA(".", "msitest",0,name);
     if(!r)
         return r;
@@ -57,7 +56,6 @@ static void test_msirecord(void)
     char buf[10];
     WCHAR bufW[10];
     const char str[] = "hello";
-    const WCHAR strW[] = { 'h','e','l','l','o',0};
     char filename[MAX_PATH];
 
     /* check behaviour with an invalid record */
@@ -211,7 +209,7 @@ static void test_msirecord(void)
     r = MsiRecordGetStringW(h,0,bufW,&sz);
     ok(r == ERROR_MORE_DATA, "wrong error\n");
     ok(sz == 5, "MsiRecordGetStringA returned the wrong length\n");
-    ok(0==memcmp(bufW,strW,8), "MsiRecordGetStringA returned the wrong string\n");
+    ok(!memcmp(bufW, L"hello", 8), "MsiRecordGetStringA returned the wrong string\n");
 
     sz = 0;
     bufW[0] = 'x';
@@ -338,7 +336,7 @@ static void test_msirecord(void)
     ok(r == ERROR_SUCCESS, "Failed to close handle\n");
 
     /* now try streams in a new record - need to create a file to play with */
-    r = create_temp_file(filename); 
+    r = create_temp_file(filename);
     if(!r)
         return;
 

@@ -119,6 +119,7 @@ my @dll_groups =
   "api-ms-win-security-base-l1-1-0",
   "api-ms-win-core-registry-l1-1-0",
   "api-ms-win-core-registry-l2-1-0",
+  "api-ms-win-core-registry-l2-2-0",
   "api-ms-win-core-shutdown-l1-1-0",
   "api-ms-win-eventing-classicprovider-l1-1-0",
   "api-ms-win-eventing-consumer-l1-1-0",
@@ -147,6 +148,7 @@ my @dll_groups =
   "api-ms-win-service-private-l1-1-1",
   "api-ms-win-service-winsvc-l1-1-0",
   "api-ms-win-service-winsvc-l1-2-0",
+  "sechost",
  ],
  [
   "authz",
@@ -175,6 +177,7 @@ my @dll_groups =
  [
   "netapi32",
   "ext-ms-win-domainjoin-netjoin-l1-1-0",
+  "srvcli",
  ],
  [
   "ntdll",
@@ -235,6 +238,8 @@ my @dll_groups =
   "api-ms-win-core-file-l2-1-0",
   "api-ms-win-core-file-l2-1-1",
   "api-ms-win-core-file-l2-1-2",
+  "api-ms-win-core-file-ansi-l2-1-0",
+  "api-ms-win-core-file-fromapp-l1-1-0",
   "api-ms-win-core-handle-l1-1-0",
   "api-ms-win-core-heap-l1-1-0",
   "api-ms-win-core-heap-l1-2-0",
@@ -260,6 +265,7 @@ my @dll_groups =
   "api-ms-win-core-memory-l1-1-0",
   "api-ms-win-core-memory-l1-1-1",
   "api-ms-win-core-memory-l1-1-2",
+  "api-ms-win-core-memory-l1-1-3",
   "api-ms-win-core-namespace-l1-1-0",
   "api-ms-win-core-normalization-l1-1-0",
   "api-ms-win-core-privateprofile-l1-1-1",
@@ -286,6 +292,7 @@ my @dll_groups =
   "api-ms-win-core-xstate-l2-1-0",
   "api-ms-win-core-processtopology-obsolete-l1-1-0",
   "api-ms-win-core-util-l1-1-0",
+  "api-ms-win-downlevel-kernel32-l2-1-0",
   "ext-ms-win-kernel32-package-current-l1-1-0",
   "ext-ms-win-kernel32-package-l1-1-1",
  ],
@@ -320,15 +327,18 @@ my @dll_groups =
   "api-ms-win-appmodel-runtime-l1-1-2",
   "api-ms-win-core-path-l1-1-0",
   "api-ms-win-core-quirks-l1-1-0",
+  "api-ms-win-core-systemtopology-l1-1-0",
   "api-ms-win-security-grouppolicy-l1-1-0",
+ ],
+ [
+  "combase",
+  "api-ms-win-core-com-private-l1-1-0",
  ],
  [
   "ole32",
   "api-ms-win-downlevel-ole32-l1-1-0",
   "api-ms-win-core-com-l1-1-0",
   "api-ms-win-core-com-l1-1-1",
-  "api-ms-win-core-com-private-l1-1-0",
-  "combase",
   "iprop",
  ],
  [
@@ -453,6 +463,7 @@ my @dll_groups =
   "ext-ms-win-rtcore-gdi-devcaps-l1-1-0",
   "ext-ms-win-rtcore-gdi-object-l1-1-0",
   "ext-ms-win-rtcore-gdi-rgn-l1-1-0",
+  "usp10"
  ],
  [
   "combase",

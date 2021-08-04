@@ -394,12 +394,10 @@ static void cache_container_create_object_name(LPWSTR lpszPath, WCHAR replace)
 /* Caller must hold container lock */
 static HANDLE cache_container_map_index(HANDLE file, const WCHAR *path, DWORD size, BOOL *validate)
 {
-    static const WCHAR mapping_name_format[]
-        = {'%','s','i','n','d','e','x','.','d','a','t','_','%','l','u',0};
     WCHAR mapping_name[MAX_PATH];
     HANDLE mapping;
 
-    wsprintfW(mapping_name, mapping_name_format, path, size);
+    wsprintfW(mapping_name, L"%sindex.dat_%lu", path, size);
     cache_container_create_object_name(mapping_name, '_');
 
     mapping = OpenFileMappingW(FILE_MAP_WRITE, FALSE, mapping_name);
@@ -415,13 +413,6 @@ static HANDLE cache_container_map_index(HANDLE file, const WCHAR *path, DWORD si
 /* Caller must hold container lock */
 static DWORD cache_container_set_size(cache_container *container, HANDLE file, DWORD blocks_no)
 {
-    static const WCHAR cache_content_key[] = {'S','o','f','t','w','a','r','e','\\',
-        'M','i','c','r','o','s','o','f','t','\\','W','i','n','d','o','w','s','\\',
-        'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
-        'I','n','t','e','r','n','e','t',' ','S','e','t','t','i','n','g','s','\\',
-        'C','a','c','h','e','\\','C','o','n','t','e','n','t',0};
-    static const WCHAR cache_limit[] = {'C','a','c','h','e','L','i','m','i','t',0};
-
     DWORD file_size = FILE_SIZE(blocks_no);
     WCHAR dir_path[MAX_PATH], *dir_name;
     entry_hash_table *hashtable_entry;
@@ -472,10 +463,11 @@ static DWORD cache_container_set_size(cache_container *container, HANDLE file, D
     header->dirs_no = container->default_entry_type==NORMAL_CACHE_ENTRY ? 4 : 0;
 
     /* If the registry has a cache size set, use the registry value */
-    if(RegOpenKeyW(HKEY_CURRENT_USER, cache_content_key, &key) == ERROR_SUCCESS) {
+    if(RegOpenKeyW(HKEY_CURRENT_USER,
+                L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Cache\\Content", &key) == ERROR_SUCCESS) {
         DWORD dw, len = sizeof(dw), keytype;
 
-        if(RegQueryValueExW(key, cache_limit, NULL, &keytype, (BYTE*)&dw, &len) == ERROR_SUCCESS &&
+        if(RegQueryValueExW(key, L"CacheLimit", NULL, &keytype, (BYTE*)&dw, &len) == ERROR_SUCCESS &&
                 keytype == REG_DWORD)
             header->cache_limit.QuadPart = (ULONGLONG)dw * 1024;
         RegCloseKey(key);
@@ -595,8 +587,6 @@ static BOOL cache_container_is_valid(urlcache_header *header, DWORD file_size)
  */
 static DWORD cache_container_open_index(cache_container *container, DWORD blocks_no)
 {
-    static const WCHAR index_dat[] = {'i','n','d','e','x','.','d','a','t',0};
-
     HANDLE file;
     WCHAR index_path[MAX_PATH];
     DWORD file_size;
@@ -610,7 +600,7 @@ static DWORD cache_container_open_index(cache_container *container, DWORD blocks
     }
 
     lstrcpyW(index_path, container->path);
-    lstrcatW(index_path, index_dat);
+    lstrcatW(index_path, L"index.dat");
 
     file = CreateFileW(index_path, GENERIC_READ|GENERIC_WRITE, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, 0, NULL);
     if(file == INVALID_HANDLE_VALUE) {
@@ -748,9 +738,6 @@ static void cache_container_delete_container(cache_container *pContainer)
 
 static void cache_containers_init(void)
 {
-    static const WCHAR UrlSuffix[] = {'C','o','n','t','e','n','t','.','I','E','5',0};
-    static const WCHAR HistorySuffix[] = {'H','i','s','t','o','r','y','.','I','E','5',0};
-    static const WCHAR CookieSuffix[] = {0};
     static const struct
     {
         int nFolder; /* CSIDL_* constant */
@@ -759,9 +746,9 @@ static void cache_containers_init(void)
         DWORD default_entry_type;
     } DefaultContainerData[] = 
     {
-        { CSIDL_INTERNET_CACHE, UrlSuffix, "", NORMAL_CACHE_ENTRY },
-        { CSIDL_HISTORY, HistorySuffix, "Visited:", URLHISTORY_CACHE_ENTRY },
-        { CSIDL_COOKIES, CookieSuffix, "Cookie:", COOKIE_CACHE_ENTRY },
+        { CSIDL_INTERNET_CACHE, L"Content.IE5", "", NORMAL_CACHE_ENTRY },
+        { CSIDL_HISTORY, L"History.IE5", "Visited:", URLHISTORY_CACHE_ENTRY },
+        { CSIDL_COOKIES, L"", "Cookie:", COOKIE_CACHE_ENTRY },
     };
     DWORD i;
 
@@ -1808,9 +1795,9 @@ static BOOL urlcache_get_entry_info(const char *url, void *entry_info,
 
     url_entry = (const entry_url*)((LPBYTE)header + hash_entry->offset);
     if(url_entry->header.signature != URL_SIGNATURE) {
-        cache_container_unlock_index(container, header);
         FIXME("Trying to retrieve entry of unknown format %s\n",
                 debugstr_an((LPCSTR)&url_entry->header.signature, sizeof(DWORD)));
+        cache_container_unlock_index(container, header);
         SetLastError(ERROR_FILE_NOT_FOUND);
         return FALSE;
     }
@@ -2041,8 +2028,8 @@ BOOL WINAPI SetUrlCacheEntryInfoA(LPCSTR lpszUrlName,
     pEntry = (entry_header*)((LPBYTE)pHeader + pHashEntry->offset);
     if (pEntry->signature != URL_SIGNATURE)
     {
-        cache_container_unlock_index(pContainer, pHeader);
         FIXME("Trying to retrieve entry of unknown format %s\n", debugstr_an((LPSTR)&pEntry->signature, sizeof(DWORD)));
+        cache_container_unlock_index(pContainer, pHeader);
         SetLastError(ERROR_FILE_NOT_FOUND);
         return FALSE;
     }
@@ -2111,9 +2098,9 @@ static BOOL urlcache_entry_get_file(const char *url, void *entry_info, DWORD *si
 
     url_entry = (entry_url*)((LPBYTE)header + hash_entry->offset);
     if(url_entry->header.signature != URL_SIGNATURE) {
-        cache_container_unlock_index(container, header);
         FIXME("Trying to retrieve entry of unknown format %s\n",
                 debugstr_an((LPSTR)&url_entry->header.signature, sizeof(DWORD)));
+        cache_container_unlock_index(container, header);
         SetLastError(ERROR_FILE_NOT_FOUND);
         return FALSE;
     }
@@ -2728,9 +2715,7 @@ static BOOL urlcache_entry_create(const char *url, const char *ext, WCHAR *full_
     }
 
     for(i=0; i<255 && !generate_name; i++) {
-        static const WCHAR format[] = {'[','%','u',']','%','s',0};
-
-        wsprintfW(full_path+full_path_len, format, i, extW);
+        wsprintfW(full_path+full_path_len, L"[%u]%s", i, extW);
 
         TRACE("Trying: %s\n", debugstr_w(full_path));
         file = CreateFileW(full_path, GENERIC_READ, 0, NULL, CREATE_NEW, 0, NULL);
@@ -4004,9 +3989,9 @@ BOOL WINAPI IsUrlCacheEntryExpiredA(LPCSTR url, DWORD dwFlags, FILETIME* pftLast
     pEntry = (const entry_header*)((LPBYTE)pHeader + pHashEntry->offset);
     if (pEntry->signature != URL_SIGNATURE)
     {
+        FIXME("Trying to retrieve entry of unknown format %s\n", debugstr_an((LPCSTR)&pEntry->signature, sizeof(DWORD)));
         cache_container_unlock_index(pContainer, pHeader);
         memset(pftLastModified, 0, sizeof(*pftLastModified));
-        FIXME("Trying to retrieve entry of unknown format %s\n", debugstr_an((LPCSTR)&pEntry->signature, sizeof(DWORD)));
         return TRUE;
     }
 

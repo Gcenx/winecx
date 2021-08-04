@@ -50,13 +50,13 @@
 @ stub MFCreateProxyLocator
 @ stub MFCreateRemoteDesktopPlugin
 @ stub MFCreateSAMIByteStreamPlugin
-@ stub MFCreateSampleCopierMFT
+@ stdcall MFCreateSampleCopierMFT(ptr)
 @ stdcall MFCreateSampleGrabberSinkActivate(ptr ptr ptr)
 @ stub MFCreateSecureHttpSchemePlugin
 @ stub MFCreateSequencerSegmentOffset
 @ stdcall MFCreateSequencerSource(ptr ptr)
 @ stub MFCreateSequencerSourceRemoteStream
-@ stub MFCreateSimpleTypeHandler
+@ stdcall MFCreateSimpleTypeHandler(ptr)
 @ stdcall MFCreateSourceResolver(ptr) mfplat.MFCreateSourceResolver
 @ stdcall MFCreateStandardQualityManager(ptr)
 @ stdcall MFCreateTopoLoader(ptr)
@@ -66,7 +66,7 @@
 @ stub MFCreateTranscodeSinkActivate
 @ stub MFCreateTranscodeTopology
 @ stub MFCreateUrlmonSchemePlugin
-@ stub MFCreateVideoRenderer
+@ stdcall MFCreateVideoRenderer(ptr ptr)
 @ stdcall MFCreateVideoRendererActivate(long ptr)
 @ stub MFCreateWMAEncoderActivate
 @ stub MFCreateWMVEncoderActivate
@@ -74,8 +74,8 @@
 @ stub MFGetMultipleServiceProviders
 @ stdcall MFGetService(ptr ptr ptr ptr)
 @ stdcall MFGetSupportedMimeTypes(ptr)
-@ stub MFGetSupportedSchemes
-@ stub MFGetTopoNodeCurrentType
+@ stdcall MFGetSupportedSchemes(ptr)
+@ stdcall MFGetTopoNodeCurrentType(ptr long long ptr)
 @ stub MFReadSequencerSegmentOffset
 @ stub MFRequireProtectedEnvironment
 @ stdcall MFShutdownObject(ptr)

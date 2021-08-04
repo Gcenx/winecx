@@ -63,10 +63,6 @@ typedef struct _EXCLUDELIST
 static ULONG filesCopied           = 0;              /* Number of files copied  */
 static EXCLUDELIST *excludeList    = NULL;           /* Excluded strings list   */
 static FILETIME dateRange;                           /* Date range to copy after*/
-static const WCHAR wchr_slash[]   = {'\\', 0};
-static const WCHAR wchr_star[]    = {'*', 0};
-static const WCHAR wchr_dot[]     = {'.', 0};
-static const WCHAR wchr_dotdot[]  = {'.', '.', 0};
 
 
 /* To minimize stack usage during recursion, some temporary variables
@@ -81,11 +77,10 @@ static WCHAR copyTo[MAX_PATH];
  * ========================================================================= */
 static WCHAR *XCOPY_LoadMessage(UINT id) {
     static WCHAR msg[MAXSTRING];
-    const WCHAR failedMsg[]  = {'F', 'a', 'i', 'l', 'e', 'd', '!', 0};
 
     if (!LoadStringW(GetModuleHandleW(NULL), id, msg, ARRAY_SIZE(msg))) {
        WINE_FIXME("LoadString failed with %d\n", GetLastError());
-       lstrcpyW(msg, failedMsg);
+       lstrcpyW(msg, L"Failed!");
     }
     return msg;
 }
@@ -122,11 +117,10 @@ static int WINAPIV XCOPY_wprintf(const WCHAR *format, ...) {
     }
 
     __ms_va_start(parms, format);
-    SetLastError(NO_ERROR);
     len = FormatMessageW(FORMAT_MESSAGE_FROM_STRING, format, 0, 0, output_bufW,
                    MAX_WRITECONSOLE_SIZE/sizeof(*output_bufW), &parms);
     __ms_va_end(parms);
-    if (len == 0 && GetLastError() != NO_ERROR) {
+    if (len == 0 && GetLastError() != ERROR_NO_WORK_DONE) {
       WINE_FIXME("Could not format string: le=%u, fmt=%s\n", GetLastError(), wine_dbgstr_w(format));
       return 0;
     }
@@ -187,8 +181,7 @@ static void XCOPY_FailMessage(DWORD err) {
       WINE_FIXME("FIXME: Cannot display message for error %d, status %d\n",
                  err, GetLastError());
     } else {
-      const WCHAR infostr[] = {'%', '1', '\n', 0};
-      XCOPY_wprintf(infostr, lpMsgBuf);
+      XCOPY_wprintf(L"%1\n", lpMsgBuf);
       LocalFree ((HLOCAL)lpMsgBuf);
     }
 }
@@ -253,14 +246,13 @@ static BOOL XCOPY_ProcessExcludeFile(WCHAR* filename, WCHAR* endOfName) {
     WCHAR   endChar = *endOfName;
     WCHAR   buffer[MAXSTRING];
     FILE   *inFile  = NULL;
-    const WCHAR readTextMode[]  = {'r', 't', 0};
 
     /* Null terminate the filename (temporarily updates the filename hence
          parms not const)                                                 */
     *endOfName = 0x00;
 
     /* Open the file */
-    inFile = _wfopen(filename, readTextMode);
+    inFile = _wfopen(filename, L"rt");
     if (inFile == NULL) {
         XCOPY_wprintf(XCOPY_LoadMessage(STRING_OPENFAIL), filename);
         *endOfName = endChar;
@@ -372,8 +364,8 @@ static int XCOPY_DoCopy(WCHAR *srcstem, WCHAR *srcspec,
         skipFile = FALSE;
 
         /* Ignore . and .. */
-        if (lstrcmpW(finddata->cFileName, wchr_dot)==0 ||
-            lstrcmpW(finddata->cFileName, wchr_dotdot)==0 ||
+        if (lstrcmpW(finddata->cFileName, L".")==0 ||
+            lstrcmpW(finddata->cFileName, L"..")==0 ||
             finddata->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
 
             WINE_TRACE("Skipping directory, . or .. (%s)\n", wine_dbgstr_w(finddata->cFileName));
@@ -534,16 +526,11 @@ static int XCOPY_DoCopy(WCHAR *srcstem, WCHAR *srcspec,
 
             /* Output a status message */
             if (!skipFile) {
-                if (flags & OPT_QUIET) {
-                    /* Skip message */
-                } else if (flags & OPT_FULL) {
-                    const WCHAR infostr[]   = {'%', '1', ' ', '-', '>', ' ',
-                                               '%', '2', '\n', 0};
-
-                    XCOPY_wprintf(infostr, copyFrom, copyTo);
-                } else {
-                    const WCHAR infostr[] = {'%', '1', '\n', 0};
-                    XCOPY_wprintf(infostr, copyFrom);
+                if (!(flags & OPT_QUIET)) {
+                    if (flags & OPT_FULL)
+                        XCOPY_wprintf(L"%1 -> %2\n", copyFrom, copyTo);
+                    else
+                        XCOPY_wprintf(L"%1\n", copyFrom);
                 }
 
                 /* If allowing overwriting of read only files, remove any
@@ -607,7 +594,7 @@ static int XCOPY_DoCopy(WCHAR *srcstem, WCHAR *srcspec,
         }
 
         lstrcpyW(inputpath, srcstem);
-        lstrcatW(inputpath, wchr_star);
+        lstrcatW(inputpath, L"*");
         findres = TRUE;
         WINE_TRACE("Processing subdirs with spec: %s\n", wine_dbgstr_w(inputpath));
 
@@ -616,20 +603,20 @@ static int XCOPY_DoCopy(WCHAR *srcstem, WCHAR *srcspec,
 
             /* Only looking for dirs */
             if ((finddata->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-                (lstrcmpW(finddata->cFileName, wchr_dot) != 0) &&
-                (lstrcmpW(finddata->cFileName, wchr_dotdot) != 0)) {
+                (lstrcmpW(finddata->cFileName, L".") != 0) &&
+                (lstrcmpW(finddata->cFileName, L"..") != 0)) {
 
                 WINE_TRACE("Handling subdir: %s\n", wine_dbgstr_w(finddata->cFileName));
 
                 /* Make up recursive information */
                 lstrcpyW(inputpath, srcstem);
                 lstrcatW(inputpath, finddata->cFileName);
-                lstrcatW(inputpath, wchr_slash);
+                lstrcatW(inputpath, L"\\");
 
                 lstrcpyW(outputpath, deststem);
                 if (*destspec == 0x00) {
                     lstrcatW(outputpath, finddata->cFileName);
-                    lstrcatW(outputpath, wchr_slash);
+                    lstrcatW(outputpath, L"\\");
                 }
 
                 XCOPY_DoCopy(inputpath, srcspec, outputpath, destspec, flags);
@@ -714,7 +701,6 @@ static void strip_quotes(WCHAR *word, WCHAR **end)
 static int XCOPY_ParseCommandLine(WCHAR *suppliedsource,
                                   WCHAR *supplieddestination, DWORD *pflags)
 {
-    const WCHAR EXCLUDE[]  = {'E', 'X', 'C', 'L', 'U', 'D', 'E', ':', 0};
     DWORD flags = *pflags;
     WCHAR *cmdline, *word, *end, *next;
     int rc = RC_INITERROR;
@@ -782,10 +768,8 @@ static int XCOPY_ParseCommandLine(WCHAR *suppliedsource,
                                    OPT_REMOVEARCH;    break;
 
                 /* E can be /E or /EXCLUDE */
-                case 'E': if (CompareStringW(LOCALE_USER_DEFAULT,
-                                             NORM_IGNORECASE | SORT_STRINGSORT,
-                                             &word[1], 8,
-                                             EXCLUDE, -1) == CSTR_EQUAL) {
+                case 'E': if (CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE | SORT_STRINGSORT,
+                                             &word[1], 8, L"EXCLUDE:", -1) == CSTR_EQUAL) {
                             if (XCOPY_ProcessExcludeList(&word[9])) {
                               XCOPY_FailMessage(ERROR_INVALID_PARAMETER);
                               goto out;
@@ -890,7 +874,7 @@ static int XCOPY_ParseCommandLine(WCHAR *suppliedsource,
 
     /* Default the destination if not supplied */
     if (supplieddestination[0] == 0x00)
-        lstrcpyW(supplieddestination, wchr_dot);
+        lstrcpyW(supplieddestination, L".");
 
     *pflags = flags;
     rc = RC_OK;
@@ -960,10 +944,9 @@ static int XCOPY_ProcessSourceParm(WCHAR *suppliedsource, WCHAR *stem,
         WINE_TRACE("Directory supplied\n");
         lstrcpyW(stem, suppliedsource);
         lastChar = stem[lstrlenW(stem)-1];
-        if (lastChar != '\\' && lastChar != ':') {
-            lstrcatW(stem, wchr_slash);
-        }
-        lstrcpyW(spec, wchr_star);
+        if (lastChar != '\\' && lastChar != ':')
+            lstrcatW(stem, L"\\");
+        lstrcpyW(spec, L"*");
 
     /* File or wildcard search:
          stem should be:
@@ -1063,9 +1046,8 @@ static int XCOPY_ProcessDestParm(WCHAR *supplieddestination, WCHAR *stem, WCHAR 
         *spec = 0x00;
 
         /* Ensure ends with a '\' */
-        if (stem[lstrlenW(stem)-1] != '\\') {
-            lstrcatW(stem, wchr_slash);
-        }
+        if (stem[lstrlenW(stem)-1] != '\\')
+            lstrcatW(stem, L"\\");
 
     } else {
         WCHAR drive[MAX_PATH];
@@ -1098,16 +1080,11 @@ int __cdecl wmain (int argc, WCHAR *argvW[])
     WCHAR   destinationspec[MAX_PATH] = {0};  /* Filespec of destination */
     WCHAR   copyCmd[MAXSTRING];               /* COPYCMD env var         */
     DWORD   flags = 0;                        /* Option flags            */
-    const WCHAR PROMPTSTR1[]  = {'/', 'Y', 0};
-    const WCHAR PROMPTSTR2[]  = {'/', 'y', 0};
-    const WCHAR COPYCMD[]  = {'C', 'O', 'P', 'Y', 'C', 'M', 'D', 0};
 
     /* Preinitialize flags based on COPYCMD */
-    if (GetEnvironmentVariableW(COPYCMD, copyCmd, MAXSTRING)) {
-        if (wcsstr(copyCmd, PROMPTSTR1) != NULL ||
-            wcsstr(copyCmd, PROMPTSTR2) != NULL) {
+    if (GetEnvironmentVariableW(L"COPYCMD", copyCmd, MAXSTRING)) {
+        if (wcsstr(copyCmd, L"/Y") != NULL || wcsstr(copyCmd, L"/y") != NULL)
             flags |= OPT_NOPROMPT;
-        }
     }
 
     /* FIXME: On UNIX, files starting with a '.' are treated as hidden under

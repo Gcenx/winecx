@@ -147,6 +147,8 @@ const char *debug_dxgi_format(DXGI_FORMAT format)
         WINE_D3D_TO_STR(DXGI_FORMAT_BC7_TYPELESS);
         WINE_D3D_TO_STR(DXGI_FORMAT_BC7_UNORM);
         WINE_D3D_TO_STR(DXGI_FORMAT_BC7_UNORM_SRGB);
+        WINE_D3D_TO_STR(DXGI_FORMAT_NV12);
+        WINE_D3D_TO_STR(DXGI_FORMAT_YUY2);
         WINE_D3D_TO_STR(DXGI_FORMAT_B4G4R4A4_UNORM);
         default:
             FIXME("Unrecognized DXGI_FORMAT %#x.\n", format);
@@ -309,6 +311,8 @@ DXGI_FORMAT dxgi_format_from_wined3dformat(enum wined3d_format_id format)
         case WINED3DFMT_BC7_TYPELESS: return DXGI_FORMAT_BC7_TYPELESS;
         case WINED3DFMT_BC7_UNORM: return DXGI_FORMAT_BC7_UNORM;
         case WINED3DFMT_BC7_UNORM_SRGB: return DXGI_FORMAT_BC7_UNORM_SRGB;
+        case WINED3DFMT_NV12: return DXGI_FORMAT_NV12;
+        case WINED3DFMT_YUY2: return DXGI_FORMAT_YUY2;
         case WINED3DFMT_B4G4R4A4_UNORM: return DXGI_FORMAT_B4G4R4A4_UNORM;
         default:
             FIXME("Unhandled wined3d format %#x.\n", format);
@@ -420,6 +424,8 @@ enum wined3d_format_id wined3dformat_from_dxgi_format(DXGI_FORMAT format)
         case DXGI_FORMAT_BC7_TYPELESS: return WINED3DFMT_BC7_TYPELESS;
         case DXGI_FORMAT_BC7_UNORM: return WINED3DFMT_BC7_UNORM;
         case DXGI_FORMAT_BC7_UNORM_SRGB: return WINED3DFMT_BC7_UNORM_SRGB;
+        case DXGI_FORMAT_NV12: return WINED3DFMT_NV12;
+        case DXGI_FORMAT_YUY2: return WINED3DFMT_YUY2;
         case DXGI_FORMAT_B4G4R4A4_UNORM: return WINED3DFMT_B4G4R4A4_UNORM;
         default:
             FIXME("Unhandled DXGI_FORMAT %#x.\n", format);
@@ -754,6 +760,11 @@ DWORD wined3d_map_flags_from_d3d11_map_type(D3D11_MAP map_type)
             FIXME("Unhandled map_type %#x.\n", map_type);
             return WINED3D_MAP_READ | WINED3D_MAP_WRITE;
     }
+}
+
+DWORD wined3d_map_flags_from_d3d10_map_type(D3D10_MAP map_type)
+{
+    return wined3d_map_flags_from_d3d11_map_type((D3D11_MAP)map_type);
 }
 
 DWORD wined3d_clear_flags_from_d3d11_clear_flags(UINT clear_flags)

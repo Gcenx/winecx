@@ -29,6 +29,8 @@ extern "C" {
 #include <wingdi.h>
 #endif
 
+#include <consoleapi.h>
+
 /* AttachConsole special pid value */
 #define ATTACH_PARENT_PROCESS ((DWORD) -1)
 
@@ -47,29 +49,6 @@ extern "C" {
 #define CONSOLE_MOUSE_SELECTION       0x04
 #define CONSOLE_MOUSE_DOWN            0x08
 
-/* handler routine control signal type */
-#define CTRL_C_EVENT        0
-#define CTRL_BREAK_EVENT    1
-#define CTRL_CLOSE_EVENT    2
-#define CTRL_LOGOFF_EVENT   5
-#define CTRL_SHUTDOWN_EVENT 6
-
-/* Console Mode flags */
-#define ENABLE_PROCESSED_INPUT 0x0001
-#define ENABLE_LINE_INPUT      0x0002
-#define ENABLE_ECHO_INPUT      0x0004
-#define ENABLE_WINDOW_INPUT    0x0008
-#define ENABLE_MOUSE_INPUT     0x0010
-#define ENABLE_INSERT_MODE     0x0020
-#define ENABLE_QUICK_EDIT_MODE 0x0040
-#define ENABLE_EXTENDED_FLAGS  0x0080
-#define ENABLE_AUTO_POSITION   0x0100
-
-#define ENABLE_PROCESSED_OUTPUT   0x01
-#define ENABLE_WRAP_AT_EOL_OUTPUT 0x02
-
-
-typedef BOOL (WINAPI *PHANDLER_ROUTINE)(DWORD dwCtrlType);
 
 /* Attributes flags: */
 
@@ -97,26 +76,6 @@ typedef struct _CONSOLE_CURSOR_INFO {
     BOOL	bVisible; /* Visibility of cursor */
 } CONSOLE_CURSOR_INFO, *LPCONSOLE_CURSOR_INFO;
 
-typedef struct tagCOORD
-{
-    SHORT X;
-    SHORT Y;
-} COORD, *LPCOORD;
-
-typedef struct tagSMALL_RECT
-{
-    SHORT Left;
-    SHORT Top;
-    SHORT Right;
-    SHORT Bottom;
-} SMALL_RECT,*LPSMALL_RECT;
-
-typedef struct _CONSOLE_FONT_INFO
-{
-    DWORD       nFont;
-    COORD       dwFontSize;
-} CONSOLE_FONT_INFO,*LPCONSOLE_FONT_INFO;
-
 #ifndef NOGDI
 typedef struct _CONSOLE_FONT_INFOEX
 {
@@ -139,14 +98,6 @@ typedef struct tagCONSOLE_HISTORY_INFO
     UINT        NumberOfHistoryBuffers;
     DWORD       dwFlags;
 } CONSOLE_HISTORY_INFO,*LPCONSOLE_HISTORY_INFO;
-
-typedef struct _CONSOLE_READCONSOLE_CONTROL
-{
-    ULONG       nLength;
-    ULONG       nInitialChars;
-    ULONG       dwCtrlWakeupMask;
-    ULONG       dwConsoleKeyState;
-} CONSOLE_READCONSOLE_CONTROL,*LPCONSOLE_READCONSOLE_CONTROL;
 
 typedef struct tagCONSOLE_SCREEN_BUFFER_INFO
 {
@@ -177,100 +128,10 @@ typedef struct _CONSOLE_SELECTION_INFO
     SMALL_RECT  srSelection;
 } CONSOLE_SELECTION_INFO,*LPCONSOLE_SELECTION_INFO;
 
-typedef struct tagCHAR_INFO
-{
-    union
-	{
-	WCHAR UnicodeChar;
-	CHAR AsciiChar;
-	} Char;
-    WORD	Attributes;
-} CHAR_INFO,*LPCHAR_INFO;
-
-typedef struct tagKEY_EVENT_RECORD
-{
-    BOOL	bKeyDown;		/* 04 */
-    WORD	wRepeatCount;		/* 08 */
-    WORD	wVirtualKeyCode;	/* 0A */
-    WORD	wVirtualScanCode;	/* 0C */
-    union				/* 0E */
-	{
-	WCHAR UnicodeChar;		/* 0E */
-	CHAR AsciiChar;			/* 0E */
-	} uChar;
-    DWORD	dwControlKeyState;	/* 10 */
-} KEY_EVENT_RECORD,*LPKEY_EVENT_RECORD;
-
-/* dwControlKeyState bitmask */
-#define	RIGHT_ALT_PRESSED	0x0001
-#define	LEFT_ALT_PRESSED	0x0002
-#define	RIGHT_CTRL_PRESSED	0x0004
-#define	LEFT_CTRL_PRESSED	0x0008
-#define	SHIFT_PRESSED		0x0010
-#define	NUMLOCK_ON		0x0020
-#define	SCROLLLOCK_ON		0x0040
-#define	CAPSLOCK_ON		0x0080
-#define	ENHANCED_KEY		0x0100
-
-typedef struct tagMOUSE_EVENT_RECORD
-{
-    COORD	dwMousePosition;
-    DWORD	dwButtonState;
-    DWORD	dwControlKeyState;
-    DWORD	dwEventFlags;
-} MOUSE_EVENT_RECORD,*LPMOUSE_EVENT_RECORD;
-
-/* MOUSE_EVENT_RECORD.dwButtonState */
-#define FROM_LEFT_1ST_BUTTON_PRESSED    0x0001
-#define RIGHTMOST_BUTTON_PRESSED        0x0002
-#define FROM_LEFT_2ND_BUTTON_PRESSED    0x0004
-#define FROM_LEFT_3RD_BUTTON_PRESSED    0x0008
-#define FROM_LEFT_4TH_BUTTON_PRESSED    0x0010
-
-/* MOUSE_EVENT_RECORD.dwEventFlags */
-#define MOUSE_MOVED                     0x0001
-#define DOUBLE_CLICK                    0x0002
-#define MOUSE_WHEELED                   0x0004
-#define MOUSE_HWHEELED                  0x0008
-
-typedef struct tagWINDOW_BUFFER_SIZE_RECORD
-{
-    COORD	dwSize;
-} WINDOW_BUFFER_SIZE_RECORD,*LPWINDOW_BUFFER_SIZE_RECORD;
-
-typedef struct tagMENU_EVENT_RECORD
-{
-    UINT	dwCommandId; /* perhaps UINT16 ??? */
-} MENU_EVENT_RECORD,*LPMENU_EVENT_RECORD;
-
-typedef struct tagFOCUS_EVENT_RECORD
-{
-    BOOL      bSetFocus; /* perhaps BOOL16 ??? */
-} FOCUS_EVENT_RECORD,*LPFOCUS_EVENT_RECORD;
-
-typedef struct tagINPUT_RECORD
-{
-    WORD		EventType;		/* 00 */
-    union
-	{
-	KEY_EVENT_RECORD KeyEvent;
-	MOUSE_EVENT_RECORD MouseEvent;
-	WINDOW_BUFFER_SIZE_RECORD WindowBufferSizeEvent;
-	MENU_EVENT_RECORD MenuEvent;
-	FOCUS_EVENT_RECORD FocusEvent;
-	} Event;
-} INPUT_RECORD,*PINPUT_RECORD;
-
-/* INPUT_RECORD.wEventType */
-#define KEY_EVENT			0x01
-#define MOUSE_EVENT			0x02
-#define WINDOW_BUFFER_SIZE_EVENT	0x04
-#define MENU_EVENT			0x08
-#define FOCUS_EVENT 			0x10
 
 #define CONSOLE_TEXTMODE_BUFFER  1
 
-#if (defined(__i386__) || defined(__i386_on_x86_64__)) && !defined(__MINGW32__)
+#if (defined(__i386__) || defined(__i386_on_x86_64__)) && !defined(__MINGW32__) && !defined(_MSC_VER)
 /* Note: this should return a COORD, but calling convention for returning
  * structures is different between Windows and gcc on i386. */
 
@@ -307,8 +168,6 @@ WINBASEAPI COORD WINAPI GetLargestConsoleWindowSize(HANDLE);
 WINBASEAPI BOOL   WINAPI AddConsoleAliasA(LPSTR,LPSTR,LPSTR);
 WINBASEAPI BOOL   WINAPI AddConsoleAliasW(LPWSTR,LPWSTR,LPWSTR);
 #define                  AddConsoleAlias WINELIB_NAME_AW(AddConsoleAlias)
-WINBASEAPI BOOL   WINAPI AllocConsole(VOID);
-WINBASEAPI BOOL   WINAPI AttachConsole(DWORD);
 WINBASEAPI BOOL   WINAPI CloseConsoleHandle(HANDLE);
 WINBASEAPI HANDLE WINAPI CreateConsoleScreenBuffer(DWORD,DWORD,LPSECURITY_ATTRIBUTES,DWORD,LPVOID);
 WINBASEAPI HANDLE WINAPI DuplicateConsoleHandle(HANDLE,DWORD,BOOL,DWORD);
@@ -317,7 +176,6 @@ WINBASEAPI BOOL WINAPI   FillConsoleOutputCharacterA(HANDLE,CHAR,DWORD,COORD,LPD
 WINBASEAPI BOOL WINAPI   FillConsoleOutputCharacterW(HANDLE,WCHAR,DWORD,COORD,LPDWORD);
 #define                  FillConsoleOutputCharacter WINELIB_NAME_AW(FillConsoleOutputCharacter)
 WINBASEAPI BOOL WINAPI   FlushConsoleInputBuffer( HANDLE);
-WINBASEAPI BOOL WINAPI   FreeConsole(VOID);
 WINBASEAPI BOOL WINAPI   GenerateConsoleCtrlEvent( DWORD,DWORD);
 WINBASEAPI DWORD WINAPI  GetConsoleAliasA(LPSTR,LPSTR,DWORD,LPSTR);
 WINBASEAPI DWORD WINAPI  GetConsoleAliasW(LPWSTR,LPWSTR,DWORD,LPWSTR);
@@ -334,7 +192,6 @@ WINBASEAPI DWORD WINAPI  GetConsoleAliasExesW(LPWSTR,DWORD);
 WINBASEAPI DWORD WINAPI  GetConsoleAliasExesLengthA(VOID);
 WINBASEAPI DWORD WINAPI  GetConsoleAliasExesLengthW(VOID);
 #define                  GetConsoleAliasExesLength WINELIB_NAME_AW(GetConsoleAliasExesLength)
-WINBASEAPI UINT WINAPI   GetConsoleCP(VOID);
 WINBASEAPI BOOL WINAPI   GetConsoleCursorInfo( HANDLE,LPCONSOLE_CURSOR_INFO);
 WINBASEAPI BOOL WINAPI   GetConsoleDisplayMode(LPDWORD);
 WINBASEAPI BOOL WINAPI   GetConsoleHistoryInfo(LPCONSOLE_HISTORY_INFO);
@@ -342,11 +199,9 @@ WINBASEAPI BOOL WINAPI   GetConsoleInputExeNameA(DWORD,LPSTR);
 WINBASEAPI BOOL WINAPI   GetConsoleInputExeNameW(DWORD,LPWSTR);
 #define                  GetConsoleInputExeName WINELIB_NAME_AW(GetConsoleInputExeName)
 WINBASEAPI HANDLE WINAPI GetConsoleInputWaitHandle(void);
-WINBASEAPI BOOL WINAPI   GetConsoleMode( HANDLE,LPDWORD);
 WINBASEAPI DWORD WINAPI  GetConsoleOriginalTitleA(LPSTR,DWORD);
 WINBASEAPI DWORD WINAPI  GetConsoleOriginalTitleW(LPWSTR,DWORD);
 #define                  GetConsoleOriginalTitle WINELIB_NAME_AW(GetConsoleOriginalTitle)
-WINBASEAPI UINT WINAPI   GetConsoleOutputCP(VOID);
 WINBASEAPI DWORD WINAPI  GetConsoleProcessList(LPDWORD,DWORD);
 WINBASEAPI BOOL WINAPI   GetConsoleScreenBufferInfo(HANDLE,LPCONSOLE_SCREEN_BUFFER_INFO);
 WINBASEAPI BOOL WINAPI   GetConsoleScreenBufferInfoEx(HANDLE,LPCONSOLE_SCREEN_BUFFER_INFOEX);
@@ -355,20 +210,10 @@ WINBASEAPI DWORD WINAPI  GetConsoleTitleW(LPWSTR,DWORD);
 #define                  GetConsoleTitle WINELIB_NAME_AW(GetConsoleTitle)
 WINBASEAPI HWND WINAPI   GetConsoleWindow(void);
 WINBASEAPI BOOL WINAPI   GetCurrentConsoleFont(HANDLE,BOOL,LPCONSOLE_FONT_INFO);
-WINBASEAPI BOOL WINAPI   GetNumberOfConsoleInputEvents( HANDLE,LPDWORD);
 WINBASEAPI BOOL WINAPI   GetNumberOfConsoleMouseButtons(LPDWORD);
 WINBASEAPI HANDLE WINAPI OpenConsoleA(LPCSTR,DWORD,BOOL,DWORD);
 WINBASEAPI HANDLE WINAPI OpenConsoleW(LPCWSTR,DWORD,BOOL,DWORD);
 #define                  OpenConsole WINELIB_NAME_AW(OpenConsole)
-WINBASEAPI BOOL WINAPI   PeekConsoleInputA( HANDLE,PINPUT_RECORD,DWORD,LPDWORD);
-WINBASEAPI BOOL WINAPI   PeekConsoleInputW( HANDLE,PINPUT_RECORD,DWORD,LPDWORD);
-#define                  PeekConsoleInput WINELIB_NAME_AW(PeekConsoleInput)
-WINBASEAPI BOOL WINAPI   ReadConsoleA(HANDLE,LPVOID,DWORD,LPDWORD,LPVOID);
-WINBASEAPI BOOL WINAPI   ReadConsoleW(HANDLE,LPVOID,DWORD,LPDWORD,LPVOID);
-#define                  ReadConsole WINELIB_NAME_AW(ReadConsole)
-WINBASEAPI BOOL WINAPI   ReadConsoleInputA(HANDLE,PINPUT_RECORD,DWORD,LPDWORD);
-WINBASEAPI BOOL WINAPI   ReadConsoleInputW(HANDLE,PINPUT_RECORD,DWORD,LPDWORD);
-#define                  ReadConsoleInput WINELIB_NAME_AW(ReadConsoleInput)
 WINBASEAPI BOOL WINAPI   ReadConsoleOutputA( HANDLE,LPCHAR_INFO,COORD,COORD,LPSMALL_RECT);
 WINBASEAPI BOOL WINAPI   ReadConsoleOutputW( HANDLE,LPCHAR_INFO,COORD,COORD,LPSMALL_RECT);
 #define                  ReadConsoleOutput WINELIB_NAME_AW(ReadConsoleOutput)
@@ -376,17 +221,15 @@ WINBASEAPI BOOL WINAPI   ReadConsoleOutputAttribute( HANDLE,LPWORD,DWORD,COORD,L
 WINBASEAPI BOOL WINAPI   ReadConsoleOutputCharacterA(HANDLE,LPSTR,DWORD,COORD,LPDWORD);
 WINBASEAPI BOOL WINAPI   ReadConsoleOutputCharacterW(HANDLE,LPWSTR,DWORD,COORD,LPDWORD);
 #define                  ReadConsoleOutputCharacter WINELIB_NAME_AW(ReadConsoleOutputCharacter)
-WINBASEAPI BOOL WINAPI   ScrollConsoleScreenBufferA( HANDLE,LPSMALL_RECT,LPSMALL_RECT,COORD,LPCHAR_INFO);
-WINBASEAPI BOOL WINAPI   ScrollConsoleScreenBufferW( HANDLE,LPSMALL_RECT,LPSMALL_RECT,COORD,LPCHAR_INFO);
+WINBASEAPI BOOL WINAPI   ScrollConsoleScreenBufferA( HANDLE,const SMALL_RECT *,const SMALL_RECT *,COORD,const CHAR_INFO *);
+WINBASEAPI BOOL WINAPI   ScrollConsoleScreenBufferW( HANDLE,const SMALL_RECT *,const SMALL_RECT *com,COORD,const CHAR_INFO *);
 #define                  ScrollConsoleScreenBuffer WINELIB_NAME_AW(ScrollConsoleScreenBuffer)
 WINBASEAPI BOOL WINAPI   SetConsoleActiveScreenBuffer( HANDLE);
 WINBASEAPI BOOL WINAPI   SetConsoleCP(UINT);
-WINBASEAPI BOOL WINAPI   SetConsoleCtrlHandler( PHANDLER_ROUTINE,BOOL);
 WINBASEAPI BOOL WINAPI   SetConsoleCursorInfo( HANDLE,LPCONSOLE_CURSOR_INFO);
 WINBASEAPI BOOL WINAPI   SetConsoleCursorPosition(HANDLE,COORD);
 WINBASEAPI BOOL WINAPI   SetConsoleDisplayMode(HANDLE,DWORD,LPCOORD);
 WINBASEAPI BOOL WINAPI   SetConsoleHistoryInfo(LPCONSOLE_HISTORY_INFO);
-WINBASEAPI BOOL WINAPI   SetConsoleMode( HANDLE,DWORD);
 WINBASEAPI BOOL WINAPI   SetConsoleOutputCP(UINT);
 WINBASEAPI BOOL WINAPI   SetConsoleScreenBufferInfoEx(HANDLE,LPCONSOLE_SCREEN_BUFFER_INFOEX);
 WINBASEAPI BOOL WINAPI   SetConsoleScreenBufferSize(HANDLE,COORD);
@@ -396,9 +239,6 @@ WINBASEAPI BOOL WINAPI   SetConsoleTitleW(LPCWSTR);
 #define                  SetConsoleTitle WINELIB_NAME_AW(SetConsoleTitle)
 WINBASEAPI BOOL WINAPI   SetConsoleWindowInfo( HANDLE,BOOL,LPSMALL_RECT);
 WINBASEAPI BOOL WINAPI   VerifyConsoleIoHandle(HANDLE);
-WINBASEAPI BOOL WINAPI   WriteConsoleA(HANDLE,const void *,DWORD,LPDWORD,void *);
-WINBASEAPI BOOL WINAPI   WriteConsoleW(HANDLE,const void *,DWORD,LPDWORD,void *);
-#define                  WriteConsole WINELIB_NAME_AW(WriteConsole)
 WINBASEAPI BOOL WINAPI   WriteConsoleInputA(HANDLE,const INPUT_RECORD *,DWORD,LPDWORD);
 WINBASEAPI BOOL WINAPI   WriteConsoleInputW(HANDLE,const INPUT_RECORD *,DWORD,LPDWORD);
 #define                  WriteConsoleInput WINELIB_NAME_AW(WriteConsoleInput)

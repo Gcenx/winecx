@@ -18,21 +18,18 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
 
 #include "windef.h"
 #include "winbase.h"
+#include "winnls.h"
 #include "winerror.h"
 #include "winioctl.h"
 #include "ddk/ntddser.h"
 
 #include "wine/server.h"
-#include "wine/unicode.h"
 
 #include "wine/debug.h"
 
@@ -46,11 +43,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(comm);
  */
 static LPCWSTR COMM_ParseStart(LPCWSTR ptr)
 {
-	static const WCHAR comW[] = {'C','O','M',0};
-
 	/* The device control string may optionally start with "COMx" followed
 	   by an optional ':' and spaces. */
-	if(!strncmpiW(ptr, comW, 3))
+	if(!wcsnicmp(ptr, L"COM", 3))
 	{
 		ptr += 3;
 
@@ -84,7 +79,7 @@ static LPCWSTR COMM_ParseStart(LPCWSTR ptr)
 static LPCWSTR COMM_ParseNumber(LPCWSTR ptr, LPDWORD lpnumber)
 {
 	if(*ptr < '0' || *ptr > '9') return NULL;
-	*lpnumber = strtoulW(ptr, NULL, 10);
+	*lpnumber = wcstoul(ptr, NULL, 10);
 	while(*ptr >= '0' && *ptr <= '9') ptr++;
 	return ptr;
 }
@@ -95,20 +90,25 @@ static LPCWSTR COMM_ParseParity(LPCWSTR ptr, LPBYTE lpparity)
 	   member of DCB and not fParity even when parity is specified in the
 	   device control string */
 
-	switch(toupperW(*ptr++))
+	switch(*ptr++)
 	{
+	case 'e':
 	case 'E':
 		*lpparity = EVENPARITY;
 		break;
+	case 'm':
 	case 'M':
 		*lpparity = MARKPARITY;
 		break;
+	case 'n':
 	case 'N':
 		*lpparity = NOPARITY;
 		break;
+	case 'o':
 	case 'O':
 		*lpparity = ODDPARITY;
 		break;
+	case 's':
 	case 'S':
 		*lpparity = SPACEPARITY;
 		break;
@@ -138,9 +138,8 @@ static LPCWSTR COMM_ParseByteSize(LPCWSTR ptr, LPBYTE lpbytesize)
 static LPCWSTR COMM_ParseStopBits(LPCWSTR ptr, LPBYTE lpstopbits)
 {
 	DWORD temp;
-	static const WCHAR stopbits15W[] = {'1','.','5',0};
 
-	if(!strncmpW(stopbits15W, ptr, 3))
+	if(!wcsncmp(L"1.5", ptr, 3))
 	{
 		ptr += 3;
 		*lpstopbits = ONE5STOPBITS;
@@ -163,15 +162,12 @@ static LPCWSTR COMM_ParseStopBits(LPCWSTR ptr, LPBYTE lpstopbits)
 
 static LPCWSTR COMM_ParseOnOff(LPCWSTR ptr, LPDWORD lponoff)
 {
-	static const WCHAR onW[] = {'o','n',0};
-	static const WCHAR offW[] = {'o','f','f',0};
-
-	if(!strncmpiW(onW, ptr, 2))
+	if(!wcsnicmp(L"on", ptr, 2))
 	{
 		ptr += 2;
 		*lponoff = 1;
 	}
-	else if(!strncmpiW(offW, ptr, 3))
+	else if(!wcsnicmp(L"off", ptr, 3))
 	{
 		ptr += 3;
 		*lponoff = 0;
@@ -239,7 +235,7 @@ static BOOL COMM_BuildOldCommDCB(LPCWSTR device, LPDCB lpdcb)
 	{
 		device++;
 		while(*device == ' ') device++;
-		if(*device) last = toupperW(*device++);
+		if(*device) last = *device++;
 		while(*device == ' ') device++;
 	}
 
@@ -255,6 +251,7 @@ static BOOL COMM_BuildOldCommDCB(LPCWSTR device, LPDCB lpdcb)
 		lpdcb->fDtrControl = DTR_CONTROL_ENABLE;
 		lpdcb->fRtsControl = RTS_CONTROL_ENABLE;
 		break;
+	case 'x':
 	case 'X':
 		lpdcb->fInX = TRUE;
 		lpdcb->fOutX = TRUE;
@@ -263,6 +260,7 @@ static BOOL COMM_BuildOldCommDCB(LPCWSTR device, LPDCB lpdcb)
 		lpdcb->fDtrControl = DTR_CONTROL_ENABLE;
 		lpdcb->fRtsControl = RTS_CONTROL_ENABLE;
 		break;
+	case 'p':
 	case 'P':
 		lpdcb->fInX = FALSE;
 		lpdcb->fOutX = FALSE;
@@ -291,47 +289,36 @@ static BOOL COMM_BuildNewCommDCB(LPCWSTR device, LPDCB lpdcb, LPCOMMTIMEOUTS lpt
 {
 	DWORD temp;
 	BOOL baud = FALSE, stop = FALSE;
-	static const WCHAR baudW[] = {'b','a','u','d','=',0};
-	static const WCHAR parityW[] = {'p','a','r','i','t','y','=',0};
-	static const WCHAR dataW[] = {'d','a','t','a','=',0};
-	static const WCHAR stopW[] = {'s','t','o','p','=',0};
-	static const WCHAR toW[] = {'t','o','=',0};
-	static const WCHAR xonW[] = {'x','o','n','=',0};
-	static const WCHAR odsrW[] = {'o','d','s','r','=',0};
-	static const WCHAR octsW[] = {'o','c','t','s','=',0};
-	static const WCHAR dtrW[] = {'d','t','r','=',0};
-	static const WCHAR rtsW[] = {'r','t','s','=',0};
-	static const WCHAR idsrW[] = {'i','d','s','r','=',0};
 
 	while(*device)
 	{
 		while(*device == ' ') device++;
 
-		if(!strncmpiW(baudW, device, 5))
+		if(!wcsnicmp(L"baud=", device, 5))
 		{
 			baud = TRUE;
-			
+
 			if(!(device = COMM_ParseNumber(device + 5, &lpdcb->BaudRate)))
 				return FALSE;
 		}
-		else if(!strncmpiW(parityW, device, 7))
+		else if(!wcsnicmp(L"parity=", device, 7))
 		{
 			if(!(device = COMM_ParseParity(device + 7, &lpdcb->Parity)))
 				return FALSE;
 		}
-		else if(!strncmpiW(dataW, device, 5))
+		else if(!wcsnicmp(L"data=", device, 5))
 		{
 			if(!(device = COMM_ParseByteSize(device + 5, &lpdcb->ByteSize)))
 				return FALSE;
 		}
-		else if(!strncmpiW(stopW, device, 5))
+		else if(!wcsnicmp(L"stop=", device, 5))
 		{
 			stop = TRUE;
-			
+
 			if(!(device = COMM_ParseStopBits(device + 5, &lpdcb->StopBits)))
 				return FALSE;
 		}
-		else if(!strncmpiW(toW, device, 3))
+		else if(!wcsnicmp(L"to=", device, 3))
 		{
 			if(!(device = COMM_ParseOnOff(device + 3, &temp)))
 				return FALSE;
@@ -342,7 +329,7 @@ static BOOL COMM_BuildNewCommDCB(LPCWSTR device, LPDCB lpdcb, LPCOMMTIMEOUTS lpt
 			lptimeouts->WriteTotalTimeoutMultiplier = 0;
 			lptimeouts->WriteTotalTimeoutConstant = temp ? 60000 : 0;
 		}
-		else if(!strncmpiW(xonW, device, 4))
+		else if(!wcsnicmp(L"xon=", device, 4))
 		{
 			if(!(device = COMM_ParseOnOff(device + 4, &temp)))
 				return FALSE;
@@ -350,35 +337,35 @@ static BOOL COMM_BuildNewCommDCB(LPCWSTR device, LPDCB lpdcb, LPCOMMTIMEOUTS lpt
 			lpdcb->fOutX = temp;
 			lpdcb->fInX = temp;
 		}
-		else if(!strncmpiW(odsrW, device, 5))
+		else if(!wcsnicmp(L"odsr=", device, 5))
 		{
 			if(!(device = COMM_ParseOnOff(device + 5, &temp)))
 				return FALSE;
 
 			lpdcb->fOutxDsrFlow = temp;
 		}
-		else if(!strncmpiW(octsW, device, 5))
+		else if(!wcsnicmp(L"octs=", device, 5))
 		{
 			if(!(device = COMM_ParseOnOff(device + 5, &temp)))
 				return FALSE;
 
 			lpdcb->fOutxCtsFlow = temp;
 		}
-		else if(!strncmpiW(dtrW, device, 4))
+		else if(!wcsnicmp(L"dtr=", device, 4))
 		{
 			if(!(device = COMM_ParseOnOff(device + 4, &temp)))
 				return FALSE;
 
 			lpdcb->fDtrControl = temp;
 		}
-		else if(!strncmpiW(rtsW, device, 4))
+		else if(!wcsnicmp(L"rts=", device, 4))
 		{
 			if(!(device = COMM_ParseOnOff(device + 4, &temp)))
 				return FALSE;
 
 			lpdcb->fRtsControl = temp;
 		}
-		else if(!strncmpiW(idsrW, device, 5))
+		else if(!wcsnicmp(L"idsr=", device, 5))
 		{
 			if(!(device = COMM_ParseOnOff(device + 5, &temp)))
 				return FALSE;
@@ -493,7 +480,7 @@ BOOL WINAPI BuildCommDCBAndTimeoutsW(
 
 	if(ptr == NULL)
 		result = FALSE;
-	else if(strchrW(ptr, ','))
+	else if(wcschr(ptr, ','))
 		result = COMM_BuildOldCommDCB(ptr, &dcb);
 	else
 		result = COMM_BuildNewCommDCB(ptr, &dcb, &timeouts);
@@ -544,8 +531,7 @@ BOOL WINAPI BuildCommDCBW(
  * The DLL should be loaded when the COMM port is opened, and closed
  * when the COMM port is closed. - MJM 20 June 2000
  ***********************************************************************/
-static const WCHAR lpszSerialUI[] = { 
-   's','e','r','i','a','l','u','i','.','d','l','l',0 };
+static const WCHAR lpszSerialUI[] = L"serialui.dll";
 
 
 /***********************************************************************

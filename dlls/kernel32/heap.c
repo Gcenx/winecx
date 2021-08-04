@@ -20,9 +20,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <assert.h>
 #include <limits.h>
 #include <stdlib.h>
@@ -333,10 +330,10 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
    {
       retval=HeapSize(GetProcessHeap(), 0, hmem);
 
-      if (retval == (SIZE_T)-1) /* It might be a GMEM_MOVEABLE data pointer */
+      if (retval == ~(SIZE_T)0) /* It might be a GMEM_MOVEABLE data pointer */
       {
           retval = HeapSize(GetProcessHeap(), 0, (char*)hmem - HGLOBAL_STORAGE);
-          if (retval != (SIZE_T)-1) retval -= HGLOBAL_STORAGE;
+          if (retval != ~(SIZE_T)0) retval -= HGLOBAL_STORAGE;
       }
    }
    else
@@ -351,7 +348,7 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
          else
          {
              retval = HeapSize(GetProcessHeap(), 0, (char *)pintern->Pointer - HGLOBAL_STORAGE );
-             if (retval != (SIZE_T)-1) retval -= HGLOBAL_STORAGE;
+             if (retval != ~(SIZE_T)0) retval -= HGLOBAL_STORAGE;
          }
       }
       else
@@ -362,7 +359,7 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
       }
       RtlUnlockHeap(GetProcessHeap());
    }
-   if (retval == (SIZE_T)-1) retval = 0;
+   if (retval == ~(SIZE_T)0) retval = 0;
    return retval;
 }
 
@@ -533,6 +530,35 @@ SIZE_T WINAPI LocalSize(
     return GlobalSize( handle );
 }
 
+/* CROSSOVER HACK: bug 17634
+ * This makes the result of GlobalMemoryStatus consistent with
+ * ntdll when the LARGE_ADDRESS_AWARE flag is overridden. */
+#ifndef _WIN64
+static BOOL large_address_enabled(void)
+{
+    static BOOL result = -1;
+
+    if (result == -1)
+    {
+        NTSTATUS status;
+        SYSTEM_BASIC_INFORMATION info;
+
+        status = NtQuerySystemInformation(SystemBasicInformation, &info, sizeof(info), NULL);
+
+        if (status)
+            return 0;
+
+        result = ((ULONG)info.HighestUserAddress >= 0x80000000);
+    }
+
+    return result;
+}
+#else
+static BOOL large_address_enabled(void)
+{
+    return FALSE;
+}
+#endif
 
 /***********************************************************************
  *           GlobalMemoryStatus   (KERNEL32.@)
@@ -587,7 +613,8 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
 
     /* values are limited to 2Gb unless the app has the IMAGE_FILE_LARGE_ADDRESS_AWARE flag */
     /* page file sizes are not limited (Adobe Illustrator 8 depends on this) */
-    if (!(nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE))
+    if (!(nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) &&
+        !large_address_enabled())
     {
         if (lpBuffer->dwTotalPhys > MAXLONG) lpBuffer->dwTotalPhys = MAXLONG;
         if (lpBuffer->dwAvailPhys > MAXLONG) lpBuffer->dwAvailPhys = MAXLONG;
@@ -609,8 +636,7 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
 
     TRACE("Length %u, MemoryLoad %u, TotalPhys %lx, AvailPhys %lx,"
           " TotalPageFile %lx, AvailPageFile %lx, TotalVirtual %lx, AvailVirtual %lx\n",
-          lpBuffer->dwLength, lpBuffer->dwMemoryLoad, (unsigned long)lpBuffer->dwTotalPhys,
-          (unsigned long)lpBuffer->dwAvailPhys, (unsigned long)lpBuffer->dwTotalPageFile,
-          (unsigned long)lpBuffer->dwAvailPageFile, (unsigned long)lpBuffer->dwTotalVirtual,
-          (unsigned long)lpBuffer->dwAvailVirtual );
+          lpBuffer->dwLength, lpBuffer->dwMemoryLoad, lpBuffer->dwTotalPhys,
+          lpBuffer->dwAvailPhys, lpBuffer->dwTotalPageFile, lpBuffer->dwAvailPageFile,
+          lpBuffer->dwTotalVirtual, lpBuffer->dwAvailVirtual );
 }

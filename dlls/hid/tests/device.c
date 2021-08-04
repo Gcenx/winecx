@@ -35,9 +35,12 @@ static void test_device_info(HANDLE device)
     PHIDP_PREPARSED_DATA ppd;
     HIDP_CAPS Caps;
     HIDD_ATTRIBUTES attributes;
+    HIDP_LINK_COLLECTION_NODE nodes[16];
+    ULONG nodes_count;
     NTSTATUS status;
     BOOL rc;
     WCHAR device_name[128];
+    int i;
 
     rc = HidD_GetPreparsedData(device, &ppd);
     ok(rc, "Failed to get preparsed data(0x%x)\n", GetLastError());
@@ -46,6 +49,33 @@ static void test_device_info(HANDLE device)
     rc = HidD_GetProductString(device, device_name, sizeof(device_name));
     ok(rc, "Failed to get product string(0x%x)\n", GetLastError());
     trace("Found device %s (%02x, %02x)\n", wine_dbgstr_w(device_name), Caps.UsagePage, Caps.Usage);
+
+    trace("LinkCollectionNodes: (%d)\n", Caps.NumberLinkCollectionNodes);
+    ok(Caps.NumberLinkCollectionNodes > 0, "Expected at least one link collection\n");
+
+    nodes_count = 0;
+    status = HidP_GetLinkCollectionNodes(nodes, &nodes_count, ppd);
+    ok(status == HIDP_STATUS_BUFFER_TOO_SMALL, "HidP_GetLinkCollectionNodes succeeded:%x\n", status);
+
+    nodes_count = ARRAY_SIZE(nodes);
+    status = HidP_GetLinkCollectionNodes(nodes, &nodes_count, ppd);
+    ok(status == HIDP_STATUS_SUCCESS, "HidP_GetLinkCollectionNodes failed:%x\n", status);
+
+    for (i = 0; i < nodes_count; ++i)
+    {
+        trace("  [%d] LinkUsage: %x LinkUsagePage: %x Parent: %x "
+              "NumberOfChildren: %x NextSibling: %x FirstChild: %x "
+              "CollectionType: %x IsAlias: %x UserContext: %p\n",
+              i, nodes[i].LinkUsage, nodes[i].LinkUsagePage, nodes[i].Parent,
+              nodes[i].NumberOfChildren, nodes[i].NextSibling, nodes[i].FirstChild,
+              nodes[i].CollectionType, nodes[i].IsAlias, nodes[i].UserContext);
+    }
+
+    ok(nodes_count > 0, "Unexpected number of link collection nodes:%u.\n", nodes_count);
+    ok(nodes[0].LinkUsagePage == Caps.UsagePage, "Unexpected top collection usage page:%x\n", nodes[0].LinkUsagePage);
+    ok(nodes[0].LinkUsage == Caps.Usage, "Unexpected top collection usage:%x\n", nodes[0].LinkUsage);
+    ok(nodes[0].CollectionType == 1, "Unexpected top collection type:%x\n", nodes[0].CollectionType);
+
     rc = HidD_FreePreparsedData(ppd);
     ok(rc, "Failed to free preparsed data(0x%x)\n", GetLastError());
     rc = HidD_GetAttributes(device, &attributes);
@@ -223,11 +253,38 @@ static void process_data(HIDP_CAPS Caps, PHIDP_PREPARSED_DATA ppd, CHAR *data, D
         trace("\tValues:\n");
         for (i = 0; i < length; i++)
         {
-            status = HidP_GetUsageValue(HidP_Input, values[i].UsagePage, 0,
-                values[i].Range.UsageMin, &value, ppd, data, data_length);
-            ok(status == HIDP_STATUS_SUCCESS, "Failed to get value [%i,%i] (%x)\n",
-                values[i].UsagePage, values[i].Range.UsageMin, status);
-            trace("[%02x, %02x]: %u\n",values[i].UsagePage, values[i].Range.UsageMin, value);
+            ok(values[i].ReportCount, "Zero ReportCount for [%i,%i]\n", values[i].UsagePage, values[i].NotRange.Usage);
+            if (values[i].IsRange || values[i].ReportCount <= 1)
+            {
+                status = HidP_GetUsageValue(HidP_Input, values[i].UsagePage, 0,
+                    values[i].Range.UsageMin, &value, ppd, data, data_length);
+                ok(status == HIDP_STATUS_SUCCESS, "Failed to get value [%i,%i] (%x)\n",
+                    values[i].UsagePage, values[i].Range.UsageMin, status);
+                trace("[%02x, %02x]: %u\n", values[i].UsagePage, values[i].Range.UsageMin, value);
+            }
+            else
+            {
+                USHORT k, array_size = (values[i].BitSize * values[i].ReportCount + 7) / 8;
+                PCHAR array = HeapAlloc(GetProcessHeap(), 0, array_size);
+                char *dump = HeapAlloc(GetProcessHeap(), 0, array_size * 3 + 1);
+
+                status = HidP_GetUsageValueArray(HidP_Input, values[i].UsagePage, 0,
+                    values[i].NotRange.Usage, array, array_size, ppd, data, data_length);
+                ok(status == HIDP_STATUS_SUCCESS, "Failed to get value array [%i,%i] (%x)\n",
+                    values[i].UsagePage, values[i].NotRange.Usage, status);
+                dump[0] = 0;
+                for (k = 0; k < array_size; k++)
+                {
+                    char bytestr[5];
+                    sprintf(bytestr, " %02x", (BYTE)array[k]);
+                    strcat(dump, bytestr);
+                }
+                trace("[%02x, %02x] element bit size %u num elements %u:%s\n", values[i].UsagePage,
+                    values[i].NotRange.Usage, values[i].BitSize, values[i].ReportCount, dump);
+
+                HeapFree(GetProcessHeap(), 0, dump);
+                HeapFree(GetProcessHeap(), 0, array);
+            }
         }
 
         HeapFree(GetProcessHeap(), 0, values);
@@ -316,6 +373,7 @@ static void test_read_device(void)
     CloseHandle(overlapped.hEvent);
     rc = HidD_FreePreparsedData(ppd);
     ok(rc, "Failed to free preparsed data(0x%x)\n", GetLastError());
+    CancelIo(device);
     CloseHandle(device);
     HeapFree(GetProcessHeap(), 0, data);
     HeapFree(GetProcessHeap(), 0, report);

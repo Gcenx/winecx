@@ -347,10 +347,16 @@ done:
  */
 static int macdrv_get_gpu_info_from_display_id_using_metal(struct macdrv_gpu* gpu, CGDirectDisplayID display_id)
 {
-    id<MTLDevice> device = [CGDirectDisplayCopyCurrentMetalDevice(display_id) autorelease];
-    if (!device || ![device respondsToSelector:@selector(registryID)])
-        return -1;
-    return macdrv_get_gpu_info_from_registry_id(gpu, device.registryID);
+    id<MTLDevice> device;
+    int ret = -1;
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+
+    device = [CGDirectDisplayCopyCurrentMetalDevice(display_id) autorelease];
+    if (device && [device respondsToSelector:@selector(registryID)])
+        ret = macdrv_get_gpu_info_from_registry_id(gpu, device.registryID);
+
+    [pool release];
+    return ret;
 }
 
 #else
@@ -371,7 +377,6 @@ static int macdrv_get_gpu_info_from_display_id_using_metal(struct macdrv_gpu* gp
  *              macdrv_get_gpu_info_from_display_id
  *
  * Get GPU information from a display id.
- * This is a fallback for 32bit build or older Mac OS version where Metal is unavailable.
  *
  * Returns non-zero value on failure.
  */

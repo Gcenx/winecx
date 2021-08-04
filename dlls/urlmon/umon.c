@@ -295,12 +295,27 @@ static HRESULT WINAPI URLMoniker_Reduce(IMoniker *iface, IBindCtx *pbc,
     return MK_S_REDUCED_TO_SELF;
 }
 
-static HRESULT WINAPI URLMoniker_ComposeWith(IMoniker *iface, IMoniker *pmkRight,
-        BOOL fOnlyIfNotGeneric, IMoniker **ppmkComposite)
+static HRESULT WINAPI URLMoniker_ComposeWith(IMoniker *iface, IMoniker *right,
+        BOOL only_if_not_generic, IMoniker **composite)
 {
-    URLMoniker *This = impl_from_IMoniker(iface);
-    FIXME("(%p)->(%p,%d,%p): stub\n",This,pmkRight,fOnlyIfNotGeneric,ppmkComposite);
-    return E_NOTIMPL;
+    HRESULT res;
+    IUri *right_uri;
+    IUriContainer *uri_container;
+
+    TRACE("(%p)->(%p,%d,%p)\n", iface, right, only_if_not_generic, composite);
+
+    if (!right || !composite) return E_INVALIDARG;
+
+    res = IMoniker_QueryInterface(right, &IID_IUriContainer, (void**)&uri_container);
+    if (SUCCEEDED(res)){
+        res = IUriContainer_GetIUri(uri_container, &right_uri);
+        if (SUCCEEDED(res)) res = CreateURLMonikerEx2(iface, right_uri, composite, 0);
+        IUriContainer_Release(uri_container);
+        return res;
+    }
+
+    if(only_if_not_generic) return MK_E_NEEDGENERIC;
+    return CreateGenericComposite(iface, right, composite);
 }
 
 static HRESULT WINAPI URLMoniker_Enum(IMoniker *iface, BOOL fForward, IEnumMoniker **ppenumMoniker)
@@ -858,10 +873,7 @@ HRESULT WINAPI URLDownloadToCacheFileW(LPUNKNOWN lpUnkCaller, LPCWSTR szURL, LPW
     HRESULT hr;
     LPWSTR ext;
 
-    static WCHAR header[] = {
-        'H','T','T','P','/','1','.','0',' ','2','0','0',' ',
-        'O','K','\\','r','\\','n','\\','r','\\','n',0
-    };
+    static WCHAR header[] = L"HTTP/1.0 200 OK\\r\\n\\r\\n";
 
     TRACE("(%p, %s, %p, %d, %d, %p)\n", lpUnkCaller, debugstr_w(szURL),
           szFileName, dwBufLength, dwReserved, pBSC);
@@ -932,11 +944,10 @@ HRESULT WINAPI HlinkSimpleNavigateToString( LPCWSTR szTarget,
     if (grfHLNF == HLNF_OPENINNEWWINDOW)
     {
         SHELLEXECUTEINFOW sei;
-        static const WCHAR openW[] = { 'o', 'p', 'e', 'n', 0 };
 
         memset(&sei, 0, sizeof(sei));
         sei.cbSize = sizeof(sei);
-        sei.lpVerb = openW;
+        sei.lpVerb = L"open";
         sei.nShow = SW_SHOWNORMAL;
         sei.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NO_CONSOLE;
         sei.lpFile = szTarget;

@@ -259,6 +259,7 @@ extern "C" {
 #define IPPROTO_ICMP               1
 #define IPPROTO_IGMP               2
 #define IPPROTO_GGP                3
+#define IPPROTO_IPIP               4
 #define IPPROTO_TCP                6
 #define IPPROTO_UDP                17
 #define IPPROTO_IDP                22
@@ -272,6 +273,7 @@ extern "C" {
 #define WS_IPPROTO_ICMP            1
 #define WS_IPPROTO_IGMP            2
 #define WS_IPPROTO_GGP             3
+#define WS_IPPROTO_IPIP            4
 #define WS_IPPROTO_TCP             6
 #define WS_IPPROTO_UDP             17
 #define WS_IPPROTO_IDP             22
@@ -1053,7 +1055,7 @@ int WINAPI WS(setsockopt)(SOCKET,int,int,const char*,int);
 int WINAPI WS(shutdown)(SOCKET,int);
 SOCKET WINAPI WS(socket)(int,int,int);
 
-#if defined(__MINGW32__) || defined (_MSC_VER)
+#if defined(__MINGW32__) || defined (_MSC_VER) || defined(__WINE_USE_MSVCRT)
 /* gethostname is not defined on Unix because of conflicts with unistd.h */
 int WINAPI WS(gethostname)(char*,int);
 #endif

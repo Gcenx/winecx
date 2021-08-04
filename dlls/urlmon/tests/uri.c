@@ -1725,6 +1725,31 @@ static const uri_properties uri_tests[] = {
             {URLZONE_INVALID,E_NOTIMPL,FALSE}
         }
     },
+    {   "http://[::5efe:1.2.3.4]", 0, S_OK, FALSE,
+        {
+            {"http://[::5efe:1.2.3.4]/",S_OK,FALSE},
+            {"[::5efe:1.2.3.4]",S_OK,FALSE},
+            {"http://[::5efe:1.2.3.4]/",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+            {"::5efe:1.2.3.4",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"/",S_OK,FALSE},
+            {"/",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"http://[::5efe:1.2.3.4]",S_OK,FALSE},
+            {"http",S_OK,FALSE},
+            {"",S_FALSE,FALSE},
+            {"",S_FALSE,FALSE},
+        },
+        {
+            {Uri_HOST_IPV6,S_OK,FALSE},
+            {80,S_OK,FALSE},
+            {URL_SCHEME_HTTP,S_OK,FALSE},
+            {URLZONE_INVALID,E_NOTIMPL,FALSE}
+        }
+    },
     /* Windows doesn't do anything to IPv6's in unknown schemes. */
     {   "zip://[0001:0:000:0004:0005:0006:001.002.003.000]", 0, S_OK, FALSE,
         {
@@ -7595,7 +7620,34 @@ static const uri_combine_test uri_combine_tests[] = {
             {URL_SCHEME_MAILTO,S_OK},
             {URLZONE_INVALID,E_NOTIMPL}
         }
-    }
+    },
+    {   "http://[::1]",0,
+        "/",Uri_CREATE_ALLOW_RELATIVE,
+        0,S_OK,FALSE,
+        {
+            {"http://[::1]/",S_OK},
+            {"[::1]",S_OK},
+            {"http://[::1]/",S_OK},
+            {"",S_FALSE},
+            {"",S_FALSE},
+            {"",S_FALSE},
+            {"::1",S_OK},
+            {"",S_FALSE},
+            {"/",S_OK},
+            {"/",S_OK},
+            {"",S_FALSE},
+            {"http://[::1]/",S_OK},
+            {"http",S_OK},
+            {"",S_FALSE},
+            {"",S_FALSE}
+        },
+        {
+            {Uri_HOST_IPV6,S_OK},
+            {80,S_OK,FALSE,TRUE},
+            {URL_SCHEME_HTTP,S_OK},
+            {URLZONE_INVALID,E_NOTIMPL}
+        }
+    },
 };
 
 typedef struct _uri_parse_test {
@@ -10872,10 +10924,11 @@ static void test_CoInternetCombineUrlEx(void) {
             hr = pCoInternetCombineUrlEx(base, relativeW, uri_combine_tests[i].combine_flags,
                                          &result, 0);
             todo_wine_if(uri_combine_tests[i].todo)
-                ok(hr == uri_combine_tests[i].expected,
+                ok(hr == uri_combine_tests[i].expected ||
+                   broken(hr == S_OK && uri_combine_tests[i].expected == E_INVALIDARG) /* win10 1607 to 1709 */,
                     "Error: CoInternetCombineUrlEx returned 0x%08x, expected 0x%08x on uri_combine_tests[%d].\n",
                     hr, uri_combine_tests[i]. expected, i);
-            if(SUCCEEDED(hr)) {
+            if(SUCCEEDED(hr) && SUCCEEDED(uri_combine_tests[i].expected)) {
                 DWORD j;
 
                 for(j = 0; j < ARRAY_SIZE(uri_combine_tests[i].str_props); ++j) {

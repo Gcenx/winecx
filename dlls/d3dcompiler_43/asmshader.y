@@ -591,8 +591,8 @@ instruction:          INSTR_ADD omods dreg ',' sregs
                                                       asm_ctx.line_no);
                                     set_parse_status(&asm_ctx.status,  PARSE_ERR);
                                 }
-                                if(asm_ctx.shader->version == BWRITERPS_VERSION(2, 0) ||
-                                    asm_ctx.shader->version == BWRITERPS_VERSION(2, 1)) {
+                                if (asm_ctx.shader->type == ST_PIXEL && asm_ctx.shader->major_version == 2)
+                                {
                                     asmparser_message(&asm_ctx, "Line %u: Declaration not supported in PS 2\n",
                                                       asm_ctx.line_no);
                                     set_parse_status(&asm_ctx.status,  PARSE_ERR);
@@ -614,8 +614,8 @@ instruction:          INSTR_ADD omods dreg ',' sregs
                                                       asm_ctx.line_no);
                                     set_parse_status(&asm_ctx.status,  PARSE_ERR);
                                 }
-                                if(asm_ctx.shader->version == BWRITERPS_VERSION(2, 0) ||
-                                    asm_ctx.shader->version == BWRITERPS_VERSION(2, 1)) {
+                                if (asm_ctx.shader->type == ST_PIXEL && asm_ctx.shader->major_version == 2)
+                                {
                                     asmparser_message(&asm_ctx, "Line %u: Declaration not supported in PS 2\n",
                                                       asm_ctx.line_no);
                                     set_parse_status(&asm_ctx.status,  PARSE_ERR);
@@ -1148,11 +1148,11 @@ swizzle:              /* empty */
                             else {
                                 DWORD last, i;
 
-                                $$ = $2.swizzle << BWRITERVS_SWIZZLE_SHIFT;
+                                $$ = $2.swizzle;
                                 /* Fill the swizzle by extending the last component */
                                 last = ($2.swizzle >> 2 * ($2.idx - 1)) & 0x03;
                                 for(i = $2.idx; i < 4; i++){
-                                    $$ |= last << (BWRITERVS_SWIZZLE_SHIFT + 2 * i);
+                                    $$ |= last << (2 * i);
                                 }
                                 TRACE("Got a swizzle: %08x\n", $$);
                             }

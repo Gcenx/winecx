@@ -2348,16 +2348,16 @@ void WINAPI glViewport( GLint x, GLint y, GLsizei width, GLsizei height )
   funcs->gl.p_glViewport( x, y, width, height );
 }
 
-static BOOL null_wglCopyContext( struct wgl_context * hglrcSrc, struct wgl_context * hglrcDst, UINT mask ) { return 0; }
-static struct wgl_context * null_wglCreateContext( HDC hDc ) { return 0; }
-static BOOL null_wglDeleteContext( struct wgl_context * oldContext ) { return 0; }
-static int null_wglDescribePixelFormat( HDC hdc, int ipfd, UINT cjpfd, PIXELFORMATDESCRIPTOR *ppfd ) { return 0; }
-static int null_wglGetPixelFormat( HDC hdc ) { return 0; }
-static WINEGLDEF(PROC) null_wglGetProcAddress( LPCSTR lpszProc ) { return 0; }
-static BOOL null_wglMakeCurrent( HDC hDc, struct wgl_context * newContext ) { return 0; }
-static BOOL null_wglSetPixelFormat( HDC hdc, int ipfd, const PIXELFORMATDESCRIPTOR *ppfd ) { return 0; }
-static BOOL null_wglShareLists( struct wgl_context * hrcSrvShare, struct wgl_context * hrcSrvSource ) { return 0; }
-static BOOL null_wglSwapBuffers( HDC hdc ) { return 0; }
+static BOOL WINAPI null_wglCopyContext( struct wgl_context * hglrcSrc, struct wgl_context * hglrcDst, UINT mask ) { return 0; }
+static struct wgl_context * WINAPI null_wglCreateContext( HDC hDc ) { return 0; }
+static BOOL WINAPI null_wglDeleteContext( struct wgl_context * oldContext ) { return 0; }
+static int WINAPI null_wglDescribePixelFormat( HDC hdc, int ipfd, UINT cjpfd, PIXELFORMATDESCRIPTOR *ppfd ) { return 0; }
+static int WINAPI null_wglGetPixelFormat( HDC hdc ) { return 0; }
+static WINEGLDEF(PROC) WINAPI null_wglGetProcAddress( LPCSTR lpszProc ) { return 0; }
+static BOOL WINAPI null_wglMakeCurrent( HDC hDc, struct wgl_context * newContext ) { return 0; }
+static BOOL WINAPI null_wglSetPixelFormat( HDC hdc, int ipfd, const PIXELFORMATDESCRIPTOR *ppfd ) { return 0; }
+static BOOL WINAPI null_wglShareLists( struct wgl_context * hrcSrvShare, struct wgl_context * hrcSrvSource ) { return 0; }
+static BOOL WINAPI null_wglSwapBuffers( HDC hdc ) { return 0; }
 
 #include "wine/hostaddrspace_enter.h"
 
@@ -2697,21 +2697,6 @@ static void null_glVertex4s( GLshort x, GLshort y, GLshort z, GLshort w ) { }
 static void null_glVertex4sv( const GLshort *v ) { }
 static void null_glVertexPointer( GLint size, GLenum type, GLsizei stride, const void *pointer ) { }
 static void null_glViewport( GLint x, GLint y, GLsizei width, GLsizei height ) { }
-static void null_gluBeginCurve( GLUnurbs *nurb ) { }
-static void null_gluBeginSurface( GLUnurbs *nurb ) { }
-static void null_gluBeginTrim( GLUnurbs *nurb ) { }
-static void null_gluDeleteNurbsRenderer( GLUnurbs *nurb ) { }
-static void null_gluEndCurve( GLUnurbs *nurb ) { }
-static void null_gluEndSurface( GLUnurbs *nurb ) { }
-static void null_gluEndTrim( GLUnurbs *nurb ) { }
-static void null_gluGetNurbsProperty( GLUnurbs *nurb, GLenum property, GLfloat *data ) { }
-static void null_gluLoadSamplingMatrices( GLUnurbs *nurb, const GLfloat  *model, const GLfloat  *perspective, const GLint  *view ) { }
-static GLUnurbs * null_gluNewNurbsRenderer(void) { return 0; }
-static void null_gluNurbsCallback( GLUnurbs *nurb, GLenum which, void  *CallBackFunc ) { }
-static void null_gluNurbsCurve( GLUnurbs *nurb, GLint knotCount, GLfloat  *knots, GLint stride, GLfloat  *control, GLint order, GLenum type ) { }
-static void null_gluNurbsProperty( GLUnurbs *nurb, GLenum property, GLfloat value ) { }
-static void null_gluNurbsSurface( GLUnurbs *nurb, GLint sKnotCount, GLfloat *sKnots, GLint tKnotCount, GLfloat *tKnots, GLint sStride, GLint tStride, GLfloat *control, GLint sOrder, GLint tOrder, GLenum type ) { }
-static void null_gluPwlCurve( GLUnurbs *nurb, GLint count, GLfloat *data, GLint stride, GLenum type ) { }
 static void null_glAccumxOES( GLenum op, GLfixed value ) { }
 static GLboolean null_glAcquireKeyedMutexWin32EXT( GLuint memory, GLuint64 key, GLuint timeout ) { return 0; }
 static void null_glActiveProgramEXT( GLuint program ) { }
@@ -3099,8 +3084,10 @@ static void null_glDeleteVertexArraysAPPLE( GLsizei n, const GLuint *arrays ) { 
 static void null_glDeleteVertexShaderEXT( GLuint id ) { }
 static void null_glDepthBoundsEXT( GLclampd zmin, GLclampd zmax ) { }
 static void null_glDepthBoundsdNV( GLdouble zmin, GLdouble zmax ) { }
+static void null_glDepthRangeArraydvNV( GLuint first, GLsizei count, const GLdouble *v ) { }
 static void null_glDepthRangeArrayv( GLuint first, GLsizei count, const GLdouble *v ) { }
 static void null_glDepthRangeIndexed( GLuint index, GLdouble n, GLdouble f ) { }
+static void null_glDepthRangeIndexeddNV( GLuint index, GLdouble n, GLdouble f ) { }
 static void null_glDepthRangedNV( GLdouble zNear, GLdouble zFar ) { }
 static void null_glDepthRangef( GLfloat n, GLfloat f ) { }
 static void null_glDepthRangefOES( GLclampf n, GLclampf f ) { }
@@ -3316,8 +3303,8 @@ static void null_glGenerateTextureMipmapEXT( GLuint texture, GLenum target ) { }
 static void null_glGetActiveAtomicCounterBufferiv( GLuint program, GLuint bufferIndex, GLenum pname, GLint *params ) { }
 static void null_glGetActiveAttrib( GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name ) { }
 static void null_glGetActiveAttribARB( GLhandleARB programObj, GLuint index, GLsizei maxLength, GLsizei *length, GLint *size, GLenum *type, GLcharARB *name ) { }
-static void null_glGetActiveSubroutineName( GLuint program, GLenum shadertype, GLuint index, GLsizei bufsize, GLsizei *length, GLchar *name ) { }
-static void null_glGetActiveSubroutineUniformName( GLuint program, GLenum shadertype, GLuint index, GLsizei bufsize, GLsizei *length, GLchar *name ) { }
+static void null_glGetActiveSubroutineName( GLuint program, GLenum shadertype, GLuint index, GLsizei bufSize, GLsizei *length, GLchar *name ) { }
+static void null_glGetActiveSubroutineUniformName( GLuint program, GLenum shadertype, GLuint index, GLsizei bufSize, GLsizei *length, GLchar *name ) { }
 static void null_glGetActiveSubroutineUniformiv( GLuint program, GLenum shadertype, GLuint index, GLenum pname, GLint *values ) { }
 static void null_glGetActiveUniform( GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name ) { }
 static void null_glGetActiveUniformARB( GLhandleARB programObj, GLuint index, GLsizei maxLength, GLsizei *length, GLint *size, GLenum *type, GLcharARB *name ) { }
@@ -3372,9 +3359,9 @@ static void null_glGetConvolutionParameterfvEXT( GLenum target, GLenum pname, GL
 static void null_glGetConvolutionParameteriv( GLenum target, GLenum pname, GLint *params ) { }
 static void null_glGetConvolutionParameterivEXT( GLenum target, GLenum pname, GLint *params ) { }
 static void null_glGetConvolutionParameterxvOES( GLenum target, GLenum pname, GLfixed *params ) { }
-static void null_glGetCoverageModulationTableNV( GLsizei bufsize, GLfloat *v ) { }
+static void null_glGetCoverageModulationTableNV( GLsizei bufSize, GLfloat *v ) { }
 static GLuint null_glGetDebugMessageLog( GLuint count, GLsizei bufSize, GLenum *sources, GLenum *types, GLuint *ids, GLenum *severities, GLsizei *lengths, GLchar *messageLog ) { return 0; }
-static GLuint null_glGetDebugMessageLogAMD( GLuint count, GLsizei bufsize, GLenum *categories, GLuint *severities, GLuint *ids, GLsizei *lengths, GLchar *message ) { return 0; }
+static GLuint null_glGetDebugMessageLogAMD( GLuint count, GLsizei bufSize, GLenum *categories, GLuint *severities, GLuint *ids, GLsizei *lengths, GLchar *message ) { return 0; }
 static GLuint null_glGetDebugMessageLogARB( GLuint count, GLsizei bufSize, GLenum *sources, GLenum *types, GLuint *ids, GLenum *severities, GLsizei *lengths, GLchar *messageLog ) { return 0; }
 static void null_glGetDetailTexFuncSGIS( GLenum target, GLfloat *points ) { }
 static void null_glGetDoubleIndexedvEXT( GLenum target, GLuint index, GLdouble *data ) { }
@@ -3424,9 +3411,9 @@ static void null_glGetIntegerIndexedvEXT( GLenum target, GLuint index, GLint *da
 static void null_glGetIntegeri_v( GLenum target, GLuint index, GLint *data ) { }
 static void null_glGetIntegerui64i_vNV( GLenum value, GLuint index, GLuint64EXT *result ) { }
 static void null_glGetIntegerui64vNV( GLenum value, GLuint64EXT *result ) { }
-static void null_glGetInternalformatSampleivNV( GLenum target, GLenum internalformat, GLsizei samples, GLenum pname, GLsizei bufSize, GLint *params ) { }
-static void null_glGetInternalformati64v( GLenum target, GLenum internalformat, GLenum pname, GLsizei bufSize, GLint64 *params ) { }
-static void null_glGetInternalformativ( GLenum target, GLenum internalformat, GLenum pname, GLsizei bufSize, GLint *params ) { }
+static void null_glGetInternalformatSampleivNV( GLenum target, GLenum internalformat, GLsizei samples, GLenum pname, GLsizei count, GLint *params ) { }
+static void null_glGetInternalformati64v( GLenum target, GLenum internalformat, GLenum pname, GLsizei count, GLint64 *params ) { }
+static void null_glGetInternalformativ( GLenum target, GLenum internalformat, GLenum pname, GLsizei count, GLint *params ) { }
 static void null_glGetInvariantBooleanvEXT( GLuint id, GLenum value, GLboolean *data ) { }
 static void null_glGetInvariantFloatvEXT( GLuint id, GLenum value, GLfloat *data ) { }
 static void null_glGetInvariantIntegervEXT( GLuint id, GLenum value, GLint *data ) { }
@@ -3551,8 +3538,8 @@ static GLuint null_glGetProgramResourceIndex( GLuint program, GLenum programInte
 static GLint null_glGetProgramResourceLocation( GLuint program, GLenum programInterface, const GLchar *name ) { return 0; }
 static GLint null_glGetProgramResourceLocationIndex( GLuint program, GLenum programInterface, const GLchar *name ) { return 0; }
 static void null_glGetProgramResourceName( GLuint program, GLenum programInterface, GLuint index, GLsizei bufSize, GLsizei *length, GLchar *name ) { }
-static void null_glGetProgramResourcefvNV( GLuint program, GLenum programInterface, GLuint index, GLsizei propCount, const GLenum *props, GLsizei bufSize, GLsizei *length, GLfloat *params ) { }
-static void null_glGetProgramResourceiv( GLuint program, GLenum programInterface, GLuint index, GLsizei propCount, const GLenum *props, GLsizei bufSize, GLsizei *length, GLint *params ) { }
+static void null_glGetProgramResourcefvNV( GLuint program, GLenum programInterface, GLuint index, GLsizei propCount, const GLenum *props, GLsizei count, GLsizei *length, GLfloat *params ) { }
+static void null_glGetProgramResourceiv( GLuint program, GLenum programInterface, GLuint index, GLsizei propCount, const GLenum *props, GLsizei count, GLsizei *length, GLint *params ) { }
 static void null_glGetProgramStageiv( GLuint program, GLenum shadertype, GLenum pname, GLint *values ) { }
 static void null_glGetProgramStringARB( GLenum target, GLenum pname, void *string ) { }
 static void null_glGetProgramStringNV( GLuint id, GLenum pname, GLubyte *program ) { }
@@ -3596,7 +3583,7 @@ static GLushort null_glGetStageIndexNV( GLenum shadertype ) { return 0; }
 static const GLubyte * null_glGetStringi( GLenum name, GLuint index ) { return 0; }
 static GLuint null_glGetSubroutineIndex( GLuint program, GLenum shadertype, const GLchar *name ) { return 0; }
 static GLint null_glGetSubroutineUniformLocation( GLuint program, GLenum shadertype, const GLchar *name ) { return 0; }
-static void null_glGetSynciv( GLsync sync, GLenum pname, GLsizei bufSize, GLsizei *length, GLint *values ) { }
+static void null_glGetSynciv( GLsync sync, GLenum pname, GLsizei count, GLsizei *length, GLint *values ) { }
 static void null_glGetTexBumpParameterfvATI( GLenum pname, GLfloat *param ) { }
 static void null_glGetTexBumpParameterivATI( GLenum pname, GLint *param ) { }
 static void null_glGetTexEnvxvOES( GLenum target, GLenum pname, GLfixed *params ) { }
@@ -4462,7 +4449,7 @@ static void null_glPushGroupMarkerEXT( GLsizei length, const GLchar *marker ) { 
 static void null_glQueryCounter( GLuint id, GLenum target ) { }
 static GLbitfield null_glQueryMatrixxOES( GLfixed *mantissa, GLint *exponent ) { return 0; }
 static void null_glQueryObjectParameteruiAMD( GLenum target, GLuint id, GLenum pname, GLuint param ) { }
-static GLint null_glQueryResourceNV( GLenum queryType, GLint tagId, GLuint bufSize, GLint *buffer ) { return 0; }
+static GLint null_glQueryResourceNV( GLenum queryType, GLint tagId, GLuint count, GLint *buffer ) { return 0; }
 static void null_glQueryResourceTagNV( GLint tagId, const GLchar *tagString ) { }
 static void null_glRasterPos2xOES( GLfixed x, GLfixed y ) { }
 static void null_glRasterPos2xvOES( const GLfixed *coords ) { }
@@ -4944,7 +4931,7 @@ static void null_glUseProgramObjectARB( GLhandleARB programObj ) { }
 static void null_glUseProgramStages( GLuint pipeline, GLbitfield stages, GLuint program ) { }
 static void null_glUseShaderProgramEXT( GLenum type, GLuint program ) { }
 static void null_glVDPAUFiniNV(void) { }
-static void null_glVDPAUGetSurfaceivNV( WINEGLDEF(GLvdpauSurfaceNV) surface, GLenum pname, GLsizei bufSize, GLsizei *length, GLint *values ) { }
+static void null_glVDPAUGetSurfaceivNV( WINEGLDEF(GLvdpauSurfaceNV) surface, GLenum pname, GLsizei count, GLsizei *length, GLint *values ) { }
 static void null_glVDPAUInitNV( const void *vdpDevice, const void *getProcAddress ) { }
 static GLboolean null_glVDPAUIsSurfaceNV( WINEGLDEF(GLvdpauSurfaceNV) surface ) { return 0; }
 static void null_glVDPAUMapSurfacesNV( GLsizei numSurfaces, const WINEGLDEF(GLvdpauSurfaceNV) *surfaces ) { }
@@ -6138,8 +6125,10 @@ struct opengl_funcs null_opengl_funcs =
         null_glDeleteVertexShaderEXT,
         null_glDepthBoundsEXT,
         null_glDepthBoundsdNV,
+        null_glDepthRangeArraydvNV,
         null_glDepthRangeArrayv,
         null_glDepthRangeIndexed,
+        null_glDepthRangeIndexeddNV,
         null_glDepthRangedNV,
         null_glDepthRangef,
         null_glDepthRangefOES,
@@ -8433,22 +8422,5 @@ struct opengl_funcs null_opengl_funcs =
         null_wglSetPbufferAttribARB,
         null_wglSetPixelFormatWINE,
         null_wglSwapIntervalEXT,
-    },
-    {
-        null_gluBeginCurve,
-        null_gluBeginSurface,
-        null_gluBeginTrim,
-        null_gluDeleteNurbsRenderer,
-        null_gluEndCurve,
-        null_gluEndSurface,
-        null_gluEndTrim,
-        null_gluGetNurbsProperty,
-        null_gluLoadSamplingMatrices,
-        null_gluNewNurbsRenderer,
-        null_gluNurbsCallback,
-        null_gluNurbsCurve,
-        null_gluNurbsProperty,
-        null_gluNurbsSurface,
-        null_gluPwlCurve,
     }
 };

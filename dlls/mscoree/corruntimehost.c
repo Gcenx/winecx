@@ -56,6 +56,16 @@ struct DomainEntry
 
 static HANDLE dll_fixup_heap; /* using a separate heap so we can have execute permission */
 
+static CRITICAL_SECTION fixup_list_cs;
+static CRITICAL_SECTION_DEBUG fixup_list_cs_debug =
+{
+    0, 0, &fixup_list_cs,
+    { &fixup_list_cs_debug.ProcessLocksList,
+      &fixup_list_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": fixup_list_cs") }
+};
+static CRITICAL_SECTION fixup_list_cs = { &fixup_list_cs_debug, -1, 0, 0, 0, 0 };
+
 static struct list dll_fixups;
 
 WCHAR **private_path = NULL;
@@ -74,9 +84,7 @@ struct dll_fixup
 struct comclassredirect_data
 {
     ULONG size;
-    BYTE  res;
-    BYTE  miscmask;
-    BYTE  res1[2];
+    ULONG flags;
     DWORD model;
     GUID  clsid;
     GUID  alias;
@@ -1224,6 +1232,34 @@ static const struct vtable_fixup_thunk thunk_template = {0};
 
 #endif
 
+DWORD WINAPI GetTokenForVTableEntry(HINSTANCE hinst, BYTE **ppVTEntry)
+{
+    struct dll_fixup *fixup;
+    DWORD result = 0;
+    DWORD rva;
+    int i;
+
+    TRACE("%p,%p\n", hinst, ppVTEntry);
+
+    rva = (BYTE*)ppVTEntry - (BYTE*)hinst;
+
+    EnterCriticalSection(&fixup_list_cs);
+    LIST_FOR_EACH_ENTRY(fixup, &dll_fixups, struct dll_fixup, entry)
+    {
+        if (fixup->dll != hinst)
+            continue;
+        if (rva < fixup->fixup->rva || (rva - fixup->fixup->rva >= fixup->fixup->count * sizeof(ULONG_PTR)))
+            continue;
+        i = (rva - fixup->fixup->rva) / sizeof(ULONG_PTR);
+        result = ((ULONG_PTR*)fixup->tokens)[i];
+        break;
+    }
+    LeaveCriticalSection(&fixup_list_cs);
+
+    TRACE("<-- %x\n", result);
+    return result;
+}
+
 static void CDECL ReallyFixupVTable(struct dll_fixup *fixup)
 {
     HRESULT hr=S_OK;
@@ -1358,7 +1394,9 @@ static void FixupVTableEntry(HMODULE hmodule, VTableFixup *vtable_fixup)
         return;
     }
 
+    EnterCriticalSection(&fixup_list_cs);
     list_add_tail(&dll_fixups, &fixup->entry);
+    LeaveCriticalSection(&fixup_list_cs);
 }
 
 static void FixupVTable_Assembly(HMODULE hmodule, ASSEMBLY *assembly)
@@ -1433,19 +1471,20 @@ __int32 WINAPI _CorExeMain(void)
     hr = parse_config_file(config_file, &parsed_config);
     if (SUCCEEDED(hr) && parsed_config.private_path && parsed_config.private_path[0])
     {
+        WCHAR *save;
         for(i = 0; parsed_config.private_path[i] != 0; i++)
             if (parsed_config.private_path[i] == ';') number_of_private_paths++;
         if (parsed_config.private_path[wcslen(parsed_config.private_path) - 1] != ';') number_of_private_paths++;
         config_file_dir_size = (wcsrchr(config_file, '\\') - config_file) + 1;
         priv_path = HeapAlloc(GetProcessHeap(), 0, (number_of_private_paths + 1) * sizeof(WCHAR *));
         /* wcstok ignores trailing semicolons */
-        temp = wcstok(parsed_config.private_path, scW);
+        temp = wcstok_s(parsed_config.private_path, scW, &save);
         for (i = 0; i < number_of_private_paths; i++)
         {
             priv_path[i] = HeapAlloc(GetProcessHeap(), 0, (config_file_dir_size + wcslen(temp) + 1) * sizeof(WCHAR));
             memcpy(priv_path[i], config_file, config_file_dir_size * sizeof(WCHAR));
             wcscpy(priv_path[i] + config_file_dir_size, temp);
-            temp = wcstok(NULL, scW);
+            temp = wcstok_s(NULL, scW, &save);
         }
         priv_path[number_of_private_paths] = NULL;
         if (InterlockedCompareExchangePointer((void **)&private_path, priv_path, NULL))
@@ -1708,6 +1747,7 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
     HKEY key, subkey;
     LONG res;
     int offset = 0;
+    HANDLE file = INVALID_HANDLE_VALUE;
     DWORD numKeys, keyLength;
     WCHAR codebase[MAX_PATH + 8];
     WCHAR classname[350], subkeyName[256];
@@ -1743,7 +1783,12 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
                 offset = lstrlenW(wszFileSlash);
 
             lstrcpyW(filename, codebase + offset);
+
+            file = CreateFileW(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, 0);
         }
+
+        if (file != INVALID_HANDLE_VALUE)
+            CloseHandle(file);
         else
         {
             WCHAR assemblyname[MAX_PATH + 8];
@@ -1752,27 +1797,37 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
             WARN("CodeBase value cannot be found, trying Assembly.\n");
             /* get the last subkey of InprocServer32 */
             res = RegQueryInfoKeyW(key, 0, 0, 0, &numKeys, 0, 0, 0, 0, 0, 0, 0);
-            if (res != ERROR_SUCCESS || numKeys == 0)
-                goto cleanup;
-            numKeys--;
-            keyLength = ARRAY_SIZE(subkeyName);
-            res = RegEnumKeyExW(key, numKeys, subkeyName, &keyLength, 0, 0, 0, 0);
             if (res != ERROR_SUCCESS)
                 goto cleanup;
-            res = RegOpenKeyExW(key, subkeyName, 0, KEY_READ, &subkey);
-            if (res != ERROR_SUCCESS)
-                goto cleanup;
-            dwBufLen = MAX_PATH + 8;
-            res = RegGetValueW(subkey, NULL, wszAssembly, RRF_RT_REG_SZ, NULL, assemblyname, &dwBufLen);
-            RegCloseKey(subkey);
-            if (res != ERROR_SUCCESS)
-                goto cleanup;
+            if (numKeys > 0)
+            {
+                numKeys--;
+                keyLength = ARRAY_SIZE(subkeyName);
+                res = RegEnumKeyExW(key, numKeys, subkeyName, &keyLength, 0, 0, 0, 0);
+                if (res != ERROR_SUCCESS)
+                    goto cleanup;
+                res = RegOpenKeyExW(key, subkeyName, 0, KEY_READ, &subkey);
+                if (res != ERROR_SUCCESS)
+                    goto cleanup;
+                dwBufLen = MAX_PATH + 8;
+                res = RegGetValueW(subkey, NULL, wszAssembly, RRF_RT_REG_SZ, NULL, assemblyname, &dwBufLen);
+                RegCloseKey(subkey);
+                if (res != ERROR_SUCCESS)
+                    goto cleanup;
+            }
+            else
+            {
+                dwBufLen = MAX_PATH + 8;
+                res = RegGetValueW(key, NULL, wszAssembly, RRF_RT_REG_SZ, NULL, assemblyname, &dwBufLen);
+                if (res != ERROR_SUCCESS)
+                    goto cleanup;
+            }
 
             hr = get_file_from_strongname(assemblyname, filename, MAX_PATH);
             if (FAILED(hr))
             {
                 /*
-                 * The registry doesn't have a CodeBase entry and it's not in the GAC.
+                 * The registry doesn't have a CodeBase entry or the file isn't there, and it's not in the GAC.
                  *
                  * Use the Assembly Key to retrieve the filename.
                  *    Assembly : REG_SZ : AssemblyName, Version=X.X.X.X, Culture=neutral, PublicKeyToken=null

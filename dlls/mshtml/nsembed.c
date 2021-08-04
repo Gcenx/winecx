@@ -89,8 +89,6 @@ static nsIComponentManager *pCompMgr = NULL;
 static nsICategoryManager *cat_mgr;
 static nsIFile *profile_directory, *plugin_directory;
 
-static const WCHAR wszNsContainer[] = {'N','s','C','o','n','t','a','i','n','e','r',0};
-
 static ATOM browser_class;
 static WCHAR gecko_path[MAX_PATH];
 static unsigned gecko_path_len;
@@ -249,9 +247,7 @@ static nsrefcnt NSAPI nsDirectoryServiceProvider2_Release(nsIDirectoryServicePro
 
 static nsresult create_profile_directory(void)
 {
-    static const WCHAR wine_geckoW[] = {'\\','w','i','n','e','_','g','e','c','k','o',0};
-
-    WCHAR path[MAX_PATH + ARRAY_SIZE(wine_geckoW)];
+    WCHAR path[MAX_PATH + ARRAY_SIZE(L"\\wine_gecko")];
     cpp_bool exists;
     nsresult nsres;
     HRESULT hres;
@@ -262,7 +258,7 @@ static nsresult create_profile_directory(void)
         return NS_ERROR_FAILURE;
     }
 
-    lstrcatW(path, wine_geckoW);
+    lstrcatW(path, L"\\wine_gecko");
     nsres = create_nsfile(path, &profile_directory);
     if(NS_FAILED(nsres))
         return nsres;
@@ -316,13 +312,11 @@ static nsresult NSAPI nsDirectoryServiceProvider2_GetFiles(nsIDirectoryServicePr
         nsresult nsres;
 
         if(!plugin_directory) {
-            static const WCHAR gecko_pluginW[] = {'\\','g','e','c','k','o','\\','p','l','u','g','i','n',0};
-
-            len = GetSystemDirectoryW(plugin_path, ARRAY_SIZE(plugin_path)-ARRAY_SIZE(gecko_pluginW)+1);
+            len = GetSystemDirectoryW(plugin_path, ARRAY_SIZE(plugin_path)-ARRAY_SIZE(L"\\gecko\\plugin")+1);
             if(!len)
                 return NS_ERROR_UNEXPECTED;
 
-            lstrcpyW(plugin_path+len, gecko_pluginW);
+            lstrcpyW(plugin_path+len, L"\\gecko\\plugin");
             nsres = create_nsfile(plugin_path, &plugin_directory);
             if(NS_FAILED(nsres)) {
                 *_retval = NULL;
@@ -362,13 +356,11 @@ static LRESULT WINAPI nsembed_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     GeckoBrowser *This;
     nsresult nsres;
 
-    static const WCHAR wszTHIS[] = {'T','H','I','S',0};
-
     if(msg == WM_CREATE) {
         This = *(GeckoBrowser**)lParam;
-        SetPropW(hwnd, wszTHIS, This);
+        SetPropW(hwnd, L"THIS", This);
     }else {
-        This = GetPropW(hwnd, wszTHIS);
+        This = GetPropW(hwnd, L"THIS");
     }
 
     switch(msg) {
@@ -402,7 +394,7 @@ static void register_browser_class(void)
         CS_DBLCLKS,
         nsembed_proc,
         0, 0, NULL, NULL, NULL, NULL, NULL,
-        wszNsContainer,
+        L"NsContainer",
         NULL,
     };
     wndclass.hInstance = hInst;
@@ -418,9 +410,8 @@ static BOOL install_wine_gecko(void)
     LONG len;
     BOOL ret;
 
-    static const WCHAR controlW[] = {'\\','c','o','n','t','r','o','l','.','e','x','e',0};
-    static const WCHAR argsW[] =
-        {' ','a','p','p','w','i','z','.','c','p','l',' ','i','n','s','t','a','l','l','_','g','e','c','k','o',0};
+    static const WCHAR controlW[] = L"\\control.exe";
+    static const WCHAR argsW[] = L" appwiz.cpl install_gecko";
 
     len = GetSystemDirectoryW(app, MAX_PATH-ARRAY_SIZE(controlW));
     memcpy(app+len, controlW, sizeof(controlW));
@@ -456,15 +447,7 @@ static void set_environment(LPCWSTR gre_path)
     WCHAR *path, buf[20];
     const WCHAR *ptr;
 
-    static const WCHAR pathW[] = {'P','A','T','H',0};
-    static const WCHAR warnW[] = {'w','a','r','n',0};
-    static const WCHAR xpcom_debug_breakW[] =
-        {'X','P','C','O','M','_','D','E','B','U','G','_','B','R','E','A','K',0};
-    static const WCHAR nspr_log_modulesW[] =
-        {'N','S','P','R','_','L','O','G','_','M','O','D','U','L','E','S',0};
-    static const WCHAR debug_formatW[] = {'a','l','l',':','%','d',0};
-
-    SetEnvironmentVariableW(xpcom_debug_breakW, warnW);
+    SetEnvironmentVariableW(L"XPCOM_DEBUG_BREAK", L"warn");
 
     if(TRACE_ON(gecko))
         debug_level = 5;
@@ -473,15 +456,15 @@ static void set_environment(LPCWSTR gre_path)
     else if(ERR_ON(gecko))
         debug_level = 1;
 
-    swprintf(buf, ARRAY_SIZE(buf), debug_formatW, debug_level);
-    SetEnvironmentVariableW(nspr_log_modulesW, buf);
+    swprintf(buf, ARRAY_SIZE(buf), L"all:%d", debug_level);
+    SetEnvironmentVariableW(L"NSPR_LOG_MODULES", buf);
 
-    len = GetEnvironmentVariableW(pathW, NULL, 0);
+    len = GetEnvironmentVariableW(L"PATH", NULL, 0);
     gre_path_len = lstrlenW(gre_path);
     path = heap_alloc((len+gre_path_len+1)*sizeof(WCHAR));
     if(!path)
         return;
-    GetEnvironmentVariableW(pathW, path, len);
+    GetEnvironmentVariableW(L"PATH", path, len);
 
     /* We have to modify PATH as xul.dll loads other DLLs from this directory. */
     if(!(ptr = wcsstr(path, gre_path))
@@ -490,7 +473,7 @@ static void set_environment(LPCWSTR gre_path)
         if(len)
             path[len-1] = ';';
         lstrcpyW(path+len, gre_path);
-        SetEnvironmentVariableW(pathW, path);
+        SetEnvironmentVariableW(L"PATH", path);
     }
     heap_free(path);
 }
@@ -528,13 +511,7 @@ static void set_lang(nsIPrefBranch *pref)
     DWORD res, size, type;
     HKEY hkey;
 
-    static const WCHAR international_keyW[] =
-        {'S','o','f','t','w','a','r','e',
-         '\\','M','i','c','r','o','s','o','f','t',
-         '\\','I','n','t','e','r','n','e','t',' ','E','x','p','l','o','r','e','r',
-         '\\','I','n','t','e','r','n','a','t','i','o','n','a','l',0};
-
-    res = RegOpenKeyW(HKEY_CURRENT_USER, international_keyW, &hkey);
+    res = RegOpenKeyW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Internet Explorer\\International", &hkey);
     if(res != ERROR_SUCCESS)
         return;
 
@@ -962,35 +939,51 @@ HRESULT return_nsstr(nsresult nsres, nsAString *nsstr, BSTR *p)
     return S_OK;
 }
 
-HRESULT return_nsstr_variant(nsresult nsres, nsAString *nsstr, VARIANT *p)
+HRESULT return_nsstr_variant(nsresult nsres, nsAString *nsstr, unsigned flags, VARIANT *p)
 {
-    const PRUnichar *str;
+    HRESULT hres = S_OK;
 
     if(NS_FAILED(nsres)) {
         ERR("failed: %08x\n", nsres);
         nsAString_Finish(nsstr);
-        return E_FAIL;
+        return map_nsresult(nsres);
     }
 
     if(NS_StringGetIsVoid(nsstr)) {
-        TRACE("ret null\n");
         V_VT(p) = VT_NULL;
     }else {
+        const WCHAR *str;
+        size_t len;
         nsAString_GetData(nsstr, &str);
-        TRACE("ret %s\n", debugstr_w(str));
-        if(*str) {
-            V_BSTR(p) = SysAllocString(str);
-            if(!V_BSTR(p)) {
-                nsAString_Finish(nsstr);
-                return E_OUTOFMEMORY;
+        len = wcslen(str);
+        if(flags & NSSTR_IMPLICIT_PX) {
+            const WCHAR *iter;
+            if(len > 2 && !wcscmp(str + len - 2, L"px"))
+                len -= 2;
+            for(iter = str; iter < str + len && is_digit(*iter); iter++);
+            if(*iter == '.') {
+                const WCHAR *dot = iter++;
+                while(iter < str + len && is_digit(*iter)) iter++;
+                if(iter == str + len && dot) len = dot - str;
             }
+        }
+        if(flags & NSSTR_COLOR) {
+            hres = nscolor_to_str(str, &V_BSTR(p));
+        }else if(*str) {
+            V_BSTR(p) = SysAllocStringLen(str, len);
+            if(!V_BSTR(p))
+                hres = E_OUTOFMEMORY;
         }else {
             V_BSTR(p) = NULL;
         }
-        V_VT(p) = VT_BSTR;
+        if(SUCCEEDED(hres))
+            V_VT(p) = VT_BSTR;
     }
 
     nsAString_Finish(nsstr);
+    if(FAILED(hres))
+        return hres;
+    TRACE("ret %s\n", debugstr_variant(p));
     return S_OK;
 }
 
@@ -1002,9 +995,6 @@ HRESULT return_nsstr_variant(nsresult nsres, nsAString *nsstr, VARIANT *p)
 HRESULT variant_to_nsstr(VARIANT *v, BOOL hex_int, nsAString *nsstr)
 {
     WCHAR buf[32];
-
-    static const WCHAR d_formatW[] = {'%','d',0};
-    static const WCHAR hex_formatW[] = {'#','%','0','6','x',0};
 
     switch(V_VT(v)) {
     case VT_NULL:
@@ -1020,7 +1010,7 @@ HRESULT variant_to_nsstr(VARIANT *v, BOOL hex_int, nsAString *nsstr)
         break;
 
     case VT_I4:
-        wsprintfW(buf, hex_int ? hex_formatW : d_formatW, V_I4(v));
+        wsprintfW(buf, hex_int ? L"#%06x" : L"%d", V_I4(v));
         nsAString_Init(nsstr, buf);
         break;
 
@@ -1669,7 +1659,7 @@ static nsresult NSAPI nsContextMenuListener_OnShowContextMenu(nsIContextMenuList
     if(FAILED(hres))
         return NS_ERROR_FAILURE;
 
-    hres = create_event_from_nsevent(aEvent, &event);
+    hres = create_event_from_nsevent(aEvent, dispex_compat_mode(&node->event_target.dispex), &event);
     if(SUCCEEDED(hres)) {
         dispatch_event(&node->event_target, event);
         IDOMEvent_Release(&event->IDOMEvent_iface);
@@ -2235,7 +2225,7 @@ static HRESULT init_browser(GeckoBrowser *browser)
             return E_FAIL;
     }
 
-    browser->hwnd = CreateWindowExW(0, wszNsContainer, NULL,
+    browser->hwnd = CreateWindowExW(0, L"NsContainer", NULL,
             WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 0, 0, 100, 100,
             GetDesktopWindow(), NULL, hInst, browser);
     if(!browser->hwnd) {

@@ -577,11 +577,9 @@ static HRESULT WINAPI HTMLDocument_put_designMode(IHTMLDocument2 *iface, BSTR v)
     HTMLDocument *This = impl_from_IHTMLDocument2(iface);
     HRESULT hres;
 
-    static const WCHAR onW[] = {'o','n',0};
-
     TRACE("(%p)->(%s)\n", This, debugstr_w(v));
 
-    if(wcsicmp(v, onW)) {
+    if(wcsicmp(v, L"on")) {
         FIXME("Unsupported arg %s\n", debugstr_w(v));
         return E_NOTIMPL;
     }
@@ -597,13 +595,12 @@ static HRESULT WINAPI HTMLDocument_put_designMode(IHTMLDocument2 *iface, BSTR v)
 static HRESULT WINAPI HTMLDocument_get_designMode(IHTMLDocument2 *iface, BSTR *p)
 {
     HTMLDocument *This = impl_from_IHTMLDocument2(iface);
-    static const WCHAR szOff[] = {'O','f','f',0};
     FIXME("(%p)->(%p) always returning Off\n", This, p);
 
     if(!p)
         return E_INVALIDARG;
 
-    *p = SysAllocString(szOff);
+    *p = SysAllocString(L"Off");
 
     return S_OK;
 }
@@ -711,34 +708,26 @@ static HRESULT WINAPI HTMLDocument_put_bgColor(IHTMLDocument2 *iface, VARIANT v)
 static HRESULT WINAPI HTMLDocument_get_bgColor(IHTMLDocument2 *iface, VARIANT *p)
 {
     HTMLDocument *This = impl_from_IHTMLDocument2(iface);
-    IHTMLElement *element = NULL;
-    IHTMLBodyElement *body;
-    HRESULT hr;
+    nsAString nsstr;
+    nsresult nsres;
+    HRESULT hres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    hr = IHTMLDocument2_get_body(iface, &element);
-    if (FAILED(hr))
-    {
-        ERR("Failed to get body (0x%08x)\n", hr);
-        return hr;
+    if(!This->doc_node->nsdoc) {
+        WARN("NULL nsdoc\n");
+        return E_UNEXPECTED;
     }
 
-    if(!element)
-    {
-        FIXME("Empty body element.\n");
-        return hr;
+    nsAString_Init(&nsstr, NULL);
+    nsres = nsIDOMHTMLDocument_GetBgColor(This->doc_node->nsdoc, &nsstr);
+    hres = return_nsstr_variant(nsres, &nsstr, NSSTR_COLOR, p);
+    if(hres == S_OK && V_VT(p) == VT_BSTR && !V_BSTR(p)) {
+        TRACE("default #ffffff\n");
+        if(!(V_BSTR(p) = SysAllocString(L"#ffffff")))
+            hres = E_OUTOFMEMORY;
     }
-
-    hr = IHTMLElement_QueryInterface(element, &IID_IHTMLBodyElement, (void**)&body);
-    if (SUCCEEDED(hr))
-    {
-        hr = IHTMLBodyElement_get_bgColor(body, p);
-        IHTMLBodyElement_Release(body);
-    }
-    IHTMLElement_Release(element);
-
-    return hr;
+    return hres;
 }
 
 static HRESULT WINAPI HTMLDocument_put_fgColor(IHTMLDocument2 *iface, VARIANT v)
@@ -832,12 +821,9 @@ static HRESULT WINAPI HTMLDocument_get_URL(IHTMLDocument2 *iface, BSTR *p)
 {
     HTMLDocument *This = impl_from_IHTMLDocument2(iface);
 
-    static const WCHAR about_blank_url[] =
-        {'a','b','o','u','t',':','b','l','a','n','k',0};
-
     TRACE("(%p)->(%p)\n", iface, p);
 
-    *p = SysAllocString(This->window->url ? This->window->url : about_blank_url);
+    *p = SysAllocString(This->window->url ? This->window->url : L"about:blank");
     return *p ? S_OK : E_OUTOFMEMORY;
 }
 
@@ -912,17 +898,10 @@ static HRESULT WINAPI HTMLDocument_get_cookie(IHTMLDocument2 *iface, BSTR *p)
 
     size = 0;
     bret = InternetGetCookieExW(This->window->url, NULL, NULL, &size, 0, NULL);
-    if(!bret) {
-        switch(GetLastError()) {
-        case ERROR_INSUFFICIENT_BUFFER:
-            break;
-        case ERROR_NO_MORE_ITEMS:
-            *p = NULL;
-            return S_OK;
-        default:
-            FIXME("InternetGetCookieExW failed: %u\n", GetLastError());
-            return HRESULT_FROM_WIN32(GetLastError());
-        }
+    if(!bret && GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+        WARN("InternetGetCookieExW failed: %u\n", GetLastError());
+        *p = NULL;
+        return S_OK;
     }
 
     if(!size) {
@@ -1134,8 +1113,6 @@ static HRESULT WINAPI HTMLDocument_open(IHTMLDocument2 *iface, BSTR url, VARIANT
     nsISupports *tmp;
     nsresult nsres;
 
-    static const WCHAR text_htmlW[] = {'t','e','x','t','/','h','t','m','l',0};
-
     TRACE("(%p)->(%s %s %s %s %p)\n", This, debugstr_w(url), debugstr_variant(&name),
           debugstr_variant(&features), debugstr_variant(&replace), pomWindowResult);
 
@@ -1144,7 +1121,7 @@ static HRESULT WINAPI HTMLDocument_open(IHTMLDocument2 *iface, BSTR url, VARIANT
         return E_NOTIMPL;
     }
 
-    if(!url || wcscmp(url, text_htmlW) || V_VT(&name) != VT_ERROR
+    if(!url || wcscmp(url, L"text/html") || V_VT(&name) != VT_ERROR
        || V_VT(&features) != VT_ERROR || V_VT(&replace) != VT_ERROR)
         FIXME("unsupported args\n");
 
@@ -1200,41 +1177,20 @@ static HRESULT WINAPI HTMLDocument_clear(IHTMLDocument2 *iface)
     return S_OK;
 }
 
-static const WCHAR copyW[] =
-    {'c','o','p','y',0};
-static const WCHAR cutW[] =
-    {'c','u','t',0};
-static const WCHAR fontnameW[] =
-    {'f','o','n','t','n','a','m','e',0};
-static const WCHAR fontsizeW[] =
-    {'f','o','n','t','s','i','z','e',0};
-static const WCHAR indentW[] =
-    {'i','n','d','e','n','t',0};
-static const WCHAR insertorderedlistW[] =
-    {'i','n','s','e','r','t','o','r','d','e','r','e','d','l','i','s','t',0};
-static const WCHAR insertunorderedlistW[] =
-    {'i','n','s','e','r','t','u','n','o','r','d','e','r','e','d','l','i','s','t',0};
-static const WCHAR outdentW[] =
-    {'o','u','t','d','e','n','t',0};
-static const WCHAR pasteW[] =
-    {'p','a','s','t','e',0};
-static const WCHAR respectvisibilityindesignW[] =
-    {'r','e','s','p','e','c','t','v','i','s','i','b','i','l','i','t','y','i','n','d','e','s','i','g','n',0};
-
 static const struct {
     const WCHAR *name;
     OLECMDID id;
 }command_names[] = {
-    {copyW, IDM_COPY},
-    {cutW, IDM_CUT},
-    {fontnameW, IDM_FONTNAME},
-    {fontsizeW, IDM_FONTSIZE},
-    {indentW, IDM_INDENT},
-    {insertorderedlistW, IDM_ORDERLIST},
-    {insertunorderedlistW, IDM_UNORDERLIST},
-    {outdentW, IDM_OUTDENT},
-    {pasteW, IDM_PASTE},
-    {respectvisibilityindesignW, IDM_RESPECTVISIBILITY_INDESIGN}
+    {L"copy", IDM_COPY},
+    {L"cut", IDM_CUT},
+    {L"fontname", IDM_FONTNAME},
+    {L"fontsize", IDM_FONTSIZE},
+    {L"indent", IDM_INDENT},
+    {L"insertorderedlist", IDM_ORDERLIST},
+    {L"insertunorderedlist", IDM_UNORDERLIST},
+    {L"outdent", IDM_OUTDENT},
+    {L"paste", IDM_PASTE},
+    {L"respectvisibilityindesign", IDM_RESPECTVISIBILITY_INDESIGN}
 };
 
 static BOOL cmdid_from_string(const WCHAR *str, OLECMDID *cmdid)
@@ -1691,6 +1647,7 @@ static HRESULT WINAPI HTMLDocument_get_styleSheets(IHTMLDocument2 *iface,
     HTMLDocument *This = impl_from_IHTMLDocument2(iface);
     nsIDOMStyleSheetList *nsstylelist;
     nsresult nsres;
+    HRESULT hres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
@@ -1704,13 +1661,13 @@ static HRESULT WINAPI HTMLDocument_get_styleSheets(IHTMLDocument2 *iface,
     nsres = nsIDOMHTMLDocument_GetStyleSheets(This->doc_node->nsdoc, &nsstylelist);
     if(NS_FAILED(nsres)) {
         ERR("GetStyleSheets failed: %08x\n", nsres);
-        return E_FAIL;
+        return map_nsresult(nsres);
     }
 
-    *p = HTMLStyleSheetsCollection_Create(nsstylelist);
+    hres = create_style_sheet_collection(nsstylelist,
+                                         dispex_compat_mode(&This->doc_node->node.event_target.dispex), p);
     nsIDOMStyleSheetList_Release(nsstylelist);
-
-    return S_OK;
+    return hres;
 }
 
 static HRESULT WINAPI HTMLDocument_put_onbeforeupdate(IHTMLDocument2 *iface, VARIANT v)
@@ -1745,14 +1702,12 @@ static HRESULT WINAPI HTMLDocument_toString(IHTMLDocument2 *iface, BSTR *String)
 {
     HTMLDocument *This = impl_from_IHTMLDocument2(iface);
 
-    static const WCHAR objectW[] = {'[','o','b','j','e','c','t',']',0};
-
     TRACE("(%p)->(%p)\n", This, String);
 
     if(!String)
         return E_INVALIDARG;
 
-    *String = SysAllocString(objectW);
+    *String = SysAllocString(L"[object]");
     return *String ? S_OK : E_OUTOFMEMORY;
 
 }
@@ -1767,8 +1722,6 @@ static HRESULT WINAPI HTMLDocument_createStyleSheet(IHTMLDocument2 *iface, BSTR 
     nsresult nsres;
     HRESULT hres;
 
-    static const WCHAR styleW[] = {'s','t','y','l','e',0};
-
     TRACE("(%p)->(%s %d %p)\n", This, debugstr_w(bstrHref), lIndex, ppnewStyleSheet);
 
     if(!This->doc_node->nsdoc) {
@@ -1781,11 +1734,11 @@ static HRESULT WINAPI HTMLDocument_createStyleSheet(IHTMLDocument2 *iface, BSTR 
 
     if(bstrHref && *bstrHref) {
         FIXME("semi-stub for href %s\n", debugstr_w(bstrHref));
-        *ppnewStyleSheet = HTMLStyleSheet_Create(NULL);
-        return S_OK;
+        return create_style_sheet(NULL, dispex_compat_mode(&This->doc_node->node.event_target.dispex),
+                                  ppnewStyleSheet);
     }
 
-    hres = create_element(This->doc_node, styleW, &elem);
+    hres = create_element(This->doc_node, L"style", &elem);
     if(FAILED(hres))
         return hres;
 
@@ -2398,8 +2351,7 @@ static HRESULT WINAPI HTMLDocument3_getElementsByName(IHTMLDocument3 *iface, BST
     nsAString selector_str;
     WCHAR *selector;
     nsresult nsres;
-
-    static const WCHAR formatW[] = {'*','[','i','d','=','%','s',']',',','*','[','n','a','m','e','=','%','s',']',0};
+    static const WCHAR formatW[] = L"*[id=%s],*[name=%s]";
 
     TRACE("(%p)->(%s %p)\n", This, debugstr_w(v), ppelColl);
 
@@ -2677,11 +2629,24 @@ static HRESULT WINAPI HTMLDocument4_get_onselectionchange(IHTMLDocument4 *iface,
     return get_doc_event(This, EVENTID_SELECTIONCHANGE, p);
 }
 
-static HRESULT WINAPI HTMLDocument4_get_namespace(IHTMLDocument4 *iface, IDispatch **p)
+static HRESULT WINAPI HTMLDocument4_get_namespaces(IHTMLDocument4 *iface, IDispatch **p)
 {
     HTMLDocument *This = impl_from_IHTMLDocument4(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!This->doc_node->namespaces) {
+        HRESULT hres;
+
+        hres = create_namespace_collection(dispex_compat_mode(&This->doc_node->node.event_target.dispex),
+                                           &This->doc_node->namespaces);
+        if(FAILED(hres))
+            return hres;
+    }
+
+    IHTMLNamespaceCollection_AddRef(This->doc_node->namespaces);
+    *p = (IDispatch*)This->doc_node->namespaces;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDocument4_createDocumentFromUrl(IHTMLDocument4 *iface, BSTR bstrUrl,
@@ -2718,7 +2683,7 @@ static HRESULT WINAPI HTMLDocument4_createEventObject(IHTMLDocument4 *iface,
         return E_NOTIMPL;
     }
 
-    return create_event_obj(ppEventObj);
+    return create_event_obj(dispex_compat_mode(&This->doc_node->node.event_target.dispex), ppEventObj);
 }
 
 static HRESULT WINAPI HTMLDocument4_fireEvent(IHTMLDocument4 *iface, BSTR bstrEventName,
@@ -2772,7 +2737,7 @@ static const IHTMLDocument4Vtbl HTMLDocument4Vtbl = {
     HTMLDocument4_hasFocus,
     HTMLDocument4_put_onselectionchange,
     HTMLDocument4_get_onselectionchange,
-    HTMLDocument4_get_namespace,
+    HTMLDocument4_get_namespaces,
     HTMLDocument4_createDocumentFromUrl,
     HTMLDocument4_put_media,
     HTMLDocument4_get_media,
@@ -3030,12 +2995,9 @@ static HRESULT WINAPI HTMLDocument5_get_compatMode(IHTMLDocument5 *iface, BSTR *
 {
     HTMLDocument *This = impl_from_IHTMLDocument5(iface);
 
-    static const WCHAR BackCompatW[] = {'B','a','c','k','C','o','m','p','a','t',0};
-    static const WCHAR CSS1CompatW[] = {'C','S','S','1','C','o','m','p','a','t',0};
-
     TRACE("(%p)->(%p)\n", This, p);
 
-    *p = SysAllocString(This->doc_node->document_mode <= COMPAT_MODE_IE5 ? BackCompatW : CSS1CompatW);
+    *p = SysAllocString(This->doc_node->document_mode <= COMPAT_MODE_IE5 ? L"BackCompat" : L"CSS1Compat");
     return *p ? S_OK : E_OUTOFMEMORY;
 }
 
@@ -4387,21 +4349,21 @@ static HRESULT WINAPI DocumentSelector_querySelectorAll(IDocumentSelector *iface
     HTMLDocument *This = impl_from_IDocumentSelector(iface);
     nsIDOMNodeList *node_list;
     nsAString nsstr;
-    nsresult nsres;
+    HRESULT hres;
 
     TRACE("(%p)->(%s %p)\n", This, debugstr_w(v), pel);
 
     nsAString_InitDepend(&nsstr, v);
-    nsres = nsIDOMHTMLDocument_QuerySelectorAll(This->doc_node->nsdoc, &nsstr, &node_list);
+    hres = map_nsresult(nsIDOMHTMLDocument_QuerySelectorAll(This->doc_node->nsdoc, &nsstr, &node_list));
     nsAString_Finish(&nsstr);
-    if(NS_FAILED(nsres)) {
-        ERR("QuerySelectorAll failed: %08x\n", nsres);
-        return E_FAIL;
+    if(FAILED(hres)) {
+        ERR("QuerySelectorAll failed: %08x\n", hres);
+        return hres;
     }
 
-    *pel = create_child_collection(node_list);
+    hres = create_child_collection(node_list, dispex_compat_mode(&This->doc_node->node.event_target.dispex), pel);
     nsIDOMNodeList_Release(node_list);
-    return *pel ? S_OK : E_OUTOFMEMORY;
+    return hres;
 }
 
 static const IDocumentSelectorVtbl DocumentSelectorVtbl = {
@@ -4843,8 +4805,10 @@ static ULONG WINAPI MarkupServices_Release(IMarkupServices *iface)
 static HRESULT WINAPI MarkupServices_CreateMarkupPointer(IMarkupServices *iface, IMarkupPointer **ppPointer)
 {
     HTMLDocument *This = impl_from_IMarkupServices(iface);
-    FIXME("(%p)->(%p)\n", This, ppPointer);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, ppPointer);
+
+    return create_markup_pointer(ppPointer);
 }
 
 static HRESULT WINAPI MarkupServices_CreateMarkupContainer(IMarkupServices *iface, IMarkupContainer **ppMarkupContainer)
@@ -5236,7 +5200,7 @@ static HRESULT WINAPI DocumentRange_createRange(IDocumentRange *iface, IHTMLDOMR
     if(NS_FAILED(nsIDOMHTMLDocument_CreateRange(This->doc_node->nsdoc, &nsrange)))
         return E_FAIL;
 
-    hres = HTMLDOMRange_Create(nsrange, p);
+    hres = create_dom_range(nsrange, dispex_compat_mode(&This->doc_node->node.event_target.dispex), p);
     nsIDOMRange_Release(nsrange);
     return hres;
 }
@@ -5436,6 +5400,11 @@ void detach_document_node(HTMLDocumentNode *doc)
         detach_dom_implementation(doc->dom_implementation);
         IHTMLDOMImplementation_Release(doc->dom_implementation);
         doc->dom_implementation = NULL;
+    }
+
+    if(doc->namespaces) {
+        IHTMLNamespaceCollection_Release(doc->namespaces);
+        doc->namespaces = NULL;
     }
 
     detach_events(doc);
@@ -5753,9 +5722,7 @@ HRESULT create_document_node(nsIDOMHTMLDocument *nsdoc, GeckoBrowser *browser, H
         nsAString mode_str;
         nsresult nsres;
 
-        static const PRUnichar onW[] = {'o','n',0};
-
-        nsAString_InitDepend(&mode_str, onW);
+        nsAString_InitDepend(&mode_str, L"on");
         nsres = nsIDOMHTMLDocument_SetDesignMode(doc->nsdoc, &mode_str);
         nsAString_Finish(&mode_str);
         if(NS_FAILED(nsres))
@@ -6097,10 +6064,11 @@ static HRESULT create_document_object(BOOL is_mhtml, IUnknown *outer, REFIID rii
     doc->IUnknown_inner.lpVtbl = &HTMLDocumentObjVtbl;
     doc->ICustomDoc_iface.lpVtbl = &CustomDocVtbl;
 
-    init_dispex(&doc->dispex, (IUnknown*)&doc->ICustomDoc_iface, &HTMLDocumentObj_dispex);
+    doc->basedoc.doc_obj = doc;
+
+    init_dispatch(&doc->dispex, (IUnknown*)&doc->ICustomDoc_iface, &HTMLDocumentObj_dispex, COMPAT_MODE_QUIRKS);
     init_doc(&doc->basedoc, outer ? outer : &doc->IUnknown_inner, &doc->dispex.IDispatchEx_iface);
     TargetContainer_Init(doc);
-    doc->basedoc.doc_obj = doc;
     doc->is_mhtml = is_mhtml;
 
     doc->task_magic = get_task_target_magic();

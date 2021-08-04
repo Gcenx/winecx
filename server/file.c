@@ -68,14 +68,14 @@ static void file_dump( struct object *obj, int verbose );
 static struct fd *file_get_fd( struct object *obj );
 static struct security_descriptor *file_get_sd( struct object *obj );
 static int file_set_sd( struct object *obj, const struct security_descriptor *sd, unsigned int set_info );
-static struct object *file_lookup_name( struct object *obj, struct unicode_str *name, unsigned int attr );
+static struct object *file_lookup_name( struct object *obj, struct unicode_str *name,
+                                      unsigned int attr, struct object *root );
 static struct object *file_open_file( struct object *obj, unsigned int access,
                                       unsigned int sharing, unsigned int options );
 static struct list *file_get_kernel_obj_list( struct object *obj );
 static void file_destroy( struct object *obj );
 
 static int file_get_poll_events( struct fd *fd );
-static int file_flush( struct fd *fd, struct async *async );
 static enum server_fd_type file_get_fd_type( struct fd *fd );
 
 static const struct object_ops file_ops =
@@ -93,6 +93,7 @@ static const struct object_ops file_ops =
     default_fd_map_access,        /* map_access */
     file_get_sd,                  /* get_sd */
     file_set_sd,                  /* set_sd */
+    no_get_full_name,             /* get_full_name */
     file_lookup_name,             /* lookup_name */
     no_link_name,                 /* link_name */
     NULL,                         /* unlink_name */
@@ -109,7 +110,7 @@ static const struct fd_ops file_fd_ops =
     file_get_fd_type,             /* get_fd_type */
     no_fd_read,                   /* read */
     no_fd_write,                  /* write */
-    file_flush,                   /* flush */
+    no_fd_flush,                  /* flush */
     default_fd_get_file_info,     /* get_file_info */
     no_fd_get_volume_info,        /* get_volume_info */
     default_fd_ioctl,             /* ioctl */
@@ -192,6 +193,12 @@ static struct object *create_file_obj( struct fd *fd, unsigned int access, mode_
     return &file->obj;
 }
 
+int is_file_executable( const char *name )
+{
+    int len = strlen( name );
+    return len >= 4 && (!strcasecmp( name + len - 4, ".exe") || !strcasecmp( name + len - 4, ".com" ));
+}
+
 static struct object *create_file( struct fd *root, const char *nameptr, data_size_t len,
                                    unsigned int access, unsigned int sharing, int create,
                                    unsigned int options, unsigned int attrs,
@@ -237,8 +244,7 @@ static struct object *create_file( struct fd *root, const char *nameptr, data_si
     else
         mode = (attrs & FILE_ATTRIBUTE_READONLY) ? 0444 : 0666;
 
-    if (len >= 4 &&
-        (!strcasecmp( name + len - 4, ".exe" ) || !strcasecmp( name + len - 4, ".com" )))
+    if (is_file_executable( name ))
     {
         if (mode & S_IRUSR)
             mode |= S_IXUSR;
@@ -290,17 +296,6 @@ static int file_get_poll_events( struct fd *fd )
     if (file->access & FILE_UNIX_READ_ACCESS) events |= POLLIN;
     if (file->access & FILE_UNIX_WRITE_ACCESS) events |= POLLOUT;
     return events;
-}
-
-static int file_flush( struct fd *fd, struct async *async )
-{
-    int unix_fd = get_unix_fd( fd );
-    if (unix_fd != -1 && fsync( unix_fd ) == -1)
-    {
-        file_set_error();
-        return 0;
-    }
-    return 1;
 }
 
 static enum server_fd_type file_get_fd_type( struct fd *fd )
@@ -610,7 +605,8 @@ static int file_set_sd( struct object *obj, const struct security_descriptor *sd
     return 1;
 }
 
-static struct object *file_lookup_name( struct object *obj, struct unicode_str *name, unsigned int attr )
+static struct object *file_lookup_name( struct object *obj, struct unicode_str *name,
+                                        unsigned int attr, struct object *root )
 {
     if (!name || !name->len) return NULL;  /* open the file itself */
 

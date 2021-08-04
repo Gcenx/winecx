@@ -219,14 +219,12 @@ static void set_default_templates(nsIPrintSettings *settings)
 {
     WCHAR buf[64];
 
-    static const PRUnichar empty[] = {0};
-
-    nsIPrintSettings_SetHeaderStrLeft(settings, empty);
-    nsIPrintSettings_SetHeaderStrRight(settings, empty);
-    nsIPrintSettings_SetHeaderStrCenter(settings, empty);
-    nsIPrintSettings_SetFooterStrLeft(settings, empty);
-    nsIPrintSettings_SetFooterStrRight(settings, empty);
-    nsIPrintSettings_SetFooterStrCenter(settings, empty);
+    nsIPrintSettings_SetHeaderStrLeft(settings, L"");
+    nsIPrintSettings_SetHeaderStrRight(settings, L"");
+    nsIPrintSettings_SetHeaderStrCenter(settings, L"");
+    nsIPrintSettings_SetFooterStrLeft(settings, L"");
+    nsIPrintSettings_SetFooterStrRight(settings, L"");
+    nsIPrintSettings_SetFooterStrCenter(settings, L"");
 
     if(LoadStringW(get_shdoclc(), IDS_PRINT_HEADER_TEMPLATE, buf, ARRAY_SIZE(buf)))
         set_print_template(settings, buf, TRUE);
@@ -916,6 +914,8 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
         DWORD nCmdID, DWORD nCmdexecopt, VARIANT *pvaIn, VARIANT *pvaOut)
 {
     HTMLDocument *This = impl_from_IOleCommandTarget(iface);
+
+    TRACE("(%p)->(%s %d %d %s %p)\n", This, debugstr_guid(pguidCmdGroup), nCmdID, nCmdexecopt, wine_dbgstr_variant(pvaIn), pvaOut);
 
     if(!This->doc_node->browser)
         return E_UNEXPECTED;

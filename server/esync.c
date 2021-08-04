@@ -23,7 +23,6 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdarg.h>
 #ifdef HAVE_SYS_EVENTFD_H
@@ -146,6 +145,7 @@ const struct object_ops esync_ops =
     esync_map_access,          /* map_access */
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
+    default_get_full_name,     /* get_full_name */
     no_lookup_name,            /* lookup_name */
     directory_link_name,       /* link_name */
     default_unlink_name,       /* unlink_name */
@@ -210,12 +210,14 @@ static void *get_shm( unsigned int idx )
 
     if (entry >= shm_addrs_size)
     {
-        if (!(shm_addrs = realloc( shm_addrs, (entry + 1) * sizeof(shm_addrs[0]) )))
+        int new_size = max(shm_addrs_size * 2, entry + 1);
+
+        if (!(shm_addrs = realloc( shm_addrs, new_size * sizeof(shm_addrs[0]) )))
             fprintf( stderr, "esync: couldn't expand shm_addrs array to size %d\n", entry + 1 );
 
-        memset( &shm_addrs[shm_addrs_size], 0, (entry + 1 - shm_addrs_size) * sizeof(shm_addrs[0]) );
+        memset( shm_addrs + shm_addrs_size, 0, (new_size - shm_addrs_size) * sizeof(shm_addrs[0]) );
 
-        shm_addrs_size = entry + 1;
+        shm_addrs_size = new_size;
     }
 
     if (!shm_addrs[entry])
@@ -230,7 +232,7 @@ static void *get_shm( unsigned int idx )
         if (debug_level)
             fprintf( stderr, "esync: Mapping page %d at %p.\n", entry, addr );
 
-        if (interlocked_cmpxchg_ptr( &shm_addrs[entry], addr, 0 ))
+        if (__sync_val_compare_and_swap( &shm_addrs[entry], 0, addr ))
             munmap( addr, pagesize ); /* someone beat us to it */
     }
 
@@ -294,9 +296,9 @@ static int esync_init_fd( struct esync_fd *fd, int initval, int semaphore )
     return 0;
 }
 
-static struct esync *create_esync( struct object *root, const struct unicode_str *name,
-    unsigned int attr, int initval, int max, enum esync_type type,
-    const struct security_descriptor *sd )
+struct esync *create_esync( struct object *root, const struct unicode_str *name,
+                            unsigned int attr, int initval, int max, enum esync_type type,
+                            const struct security_descriptor *sd )
 {
     struct esync *esync;
 
@@ -330,7 +332,7 @@ static struct esync *create_esync( struct object *root, const struct unicode_str
                 if (ftruncate( shm_fd, shm_size ) == -1)
                 {
                     fprintf( stderr, "esync: couldn't expand %s to size %ld: ",
-                        shm_name, shm_size );
+                             shm_name, (long)shm_size );
                     perror( "ftruncate" );
                 }
             }
@@ -469,11 +471,11 @@ void esync_set_event( struct esync *esync )
     if (esync->type == ESYNC_MANUAL_EVENT)
     {
         /* Acquire the spinlock. */
-        while (interlocked_cmpxchg( &event->locked, 1, 0 ))
+        while (__sync_val_compare_and_swap( &event->locked, 0, 1 ))
             small_pause();
     }
 
-    if (!interlocked_xchg( &event->signaled, 1 ))
+    if (!InterlockedExchange( &event->signaled, 1 ))
         esync_wake_fd( &esync->fd );
 
     if (esync->type == ESYNC_MANUAL_EVENT)
@@ -500,12 +502,12 @@ void esync_reset_event( struct esync *esync )
     if (esync->type == ESYNC_MANUAL_EVENT)
     {
         /* Acquire the spinlock. */
-        while (interlocked_cmpxchg( &event->locked, 1, 0 ))
+        while (__sync_val_compare_and_swap( &event->locked, 0, 1 ))
             small_pause();
     }
 
     /* Only bother signaling the fd if we weren't already signaled. */
-    if (interlocked_xchg( &event->signaled, 0 ))
+    if (InterlockedExchange( &event->signaled, 0 ))
         esync_clear( &esync->fd );
 
     if (esync->type == ESYNC_MANUAL_EVENT)
@@ -554,14 +556,13 @@ DECL_HANDLER(create_esync)
 
     if (!req->type)
     {
-        set_error( STATUS_INVALID_PARAMETER_4 );
+        set_error( STATUS_INVALID_PARAMETER );
         return;
     }
 
     if (!objattr) return;
 
-    if ((esync = create_esync( root, &name, objattr->attributes, req->initval,
-        req->max, req->type, sd )))
+    if ((esync = create_esync( root, &name, objattr->attributes, req->initval, req->max, req->type, sd )))
     {
         if (get_error() == STATUS_OBJECT_NAME_EXISTS)
             reply->handle = alloc_handle( current->process, esync, req->access, objattr->attributes );
@@ -625,7 +626,7 @@ DECL_HANDLER(get_esync_read_fd)
     enum esync_type type;
     struct esync_fd *fd;
 
-    if (!(obj = get_handle_obj( current->process, req->handle, SYNCHRONIZE, NULL )))
+    if (!(obj = get_handle_obj( current->process, req->handle, 0, NULL )))
         return;
 
     if (obj->ops->get_esync_fd)
@@ -666,7 +667,7 @@ DECL_HANDLER(get_esync_write_fd)
     enum esync_type type;
     struct esync_fd *fd;
 
-    if (!(obj = get_handle_obj( current->process, req->handle, SYNCHRONIZE, NULL )))
+    if (!(obj = get_handle_obj( current->process, req->handle, 0, NULL )))
         return;
 
     if (obj->ops->get_esync_fd)

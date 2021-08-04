@@ -16,7 +16,7 @@
 @ cdecl _isleadbyte_l(long ptr) ucrtbase._isleadbyte_l
 @ cdecl _islower_l(long ptr) ucrtbase._islower_l
 @ cdecl _isprint_l(long ptr) ucrtbase._isprint_l
-@ stub _ispunct_l
+@ cdecl _ispunct_l(long ptr) ucrtbase._ispunct_l
 @ cdecl _isspace_l(long ptr) ucrtbase._isspace_l
 @ cdecl _isupper_l(long ptr) ucrtbase._isupper_l
 @ cdecl _iswalnum_l(long ptr) ucrtbase._iswalnum_l
@@ -96,7 +96,7 @@
 @ cdecl _wcsupr_s(wstr long) ucrtbase._wcsupr_s
 @ cdecl _wcsupr_s_l(wstr long ptr) ucrtbase._wcsupr_s_l
 @ cdecl _wcsxfrm_l(ptr wstr long ptr) ucrtbase._wcsxfrm_l
-@ stub _wctype
+@ extern _wctype ucrtbase._wctype
 @ cdecl is_wctype(long long) ucrtbase.is_wctype
 @ cdecl isalnum(long) ucrtbase.isalnum
 @ cdecl isalpha(long) ucrtbase.isalpha
@@ -170,7 +170,7 @@
 @ cdecl wcsnlen(wstr long) ucrtbase.wcsnlen
 @ cdecl wcspbrk(wstr wstr) ucrtbase.wcspbrk
 @ cdecl wcsspn(wstr wstr) ucrtbase.wcsspn
-@ cdecl wcstok(wstr wstr) ucrtbase.wcstok
+@ cdecl wcstok(wstr wstr ptr) ucrtbase.wcstok
 @ cdecl wcstok_s(ptr wstr ptr) ucrtbase.wcstok_s
 @ cdecl wcsxfrm(ptr wstr long) ucrtbase.wcsxfrm
 @ cdecl wctype(str) ucrtbase.wctype

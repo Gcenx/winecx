@@ -31,27 +31,21 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(webservices);
 
-static const WCHAR http[] = {'h','t','t','p'};
-static const WCHAR https[] = {'h','t','t','p','s'};
-static const WCHAR nettcp[] = {'n','e','t','.','t','c','p'};
-static const WCHAR soapudp[] = {'s','o','a','p','.','u','d','p'};
-static const WCHAR netpipe[] = {'n','e','t','.','p','i','p','e'};
-
 static WS_URL_SCHEME_TYPE scheme_type( const WCHAR *str, ULONG len )
 {
-    if (len == ARRAY_SIZE( http ) && !wcsnicmp( str, http, ARRAY_SIZE( http )))
+    if (len == ARRAY_SIZE( L"http" ) - 1 && !wcsnicmp( str, L"http", ARRAY_SIZE( L"http" ) - 1 ))
         return WS_URL_HTTP_SCHEME_TYPE;
 
-    if (len == ARRAY_SIZE( https ) && !wcsnicmp( str, https, ARRAY_SIZE( https )))
+    if (len == ARRAY_SIZE( L"https" ) - 1 && !wcsnicmp( str, L"https", ARRAY_SIZE( L"https" ) - 1 ))
         return WS_URL_HTTPS_SCHEME_TYPE;
 
-    if (len == ARRAY_SIZE( nettcp ) && !wcsnicmp( str, nettcp, ARRAY_SIZE( nettcp )))
+    if (len == ARRAY_SIZE( L"net.tcp" ) - 1 && !wcsnicmp( str, L"net.tcp", ARRAY_SIZE( L"net.tcp" ) - 1 ))
         return WS_URL_NETTCP_SCHEME_TYPE;
 
-    if (len == ARRAY_SIZE( soapudp ) && !wcsnicmp( str, soapudp, ARRAY_SIZE( soapudp )))
+    if (len == ARRAY_SIZE( L"soap.udp" ) - 1 && !wcsnicmp( str, L"soap.udp", ARRAY_SIZE( L"soap.udp" ) - 1 ))
         return WS_URL_SOAPUDP_SCHEME_TYPE;
 
-    if (len == ARRAY_SIZE( netpipe ) && !wcsnicmp( str, netpipe, ARRAY_SIZE( netpipe )))
+    if (len == ARRAY_SIZE( L"net.pipe" ) - 1 && !wcsnicmp( str, L"net.pipe", ARRAY_SIZE( L"net.pipe" ) - 1 ))
         return WS_URL_NETPIPE_SCHEME_TYPE;
 
     return ~0u;
@@ -87,11 +81,13 @@ static inline int url_decode_byte( char c1, char c2 )
 
     if (c1 >= '0' && c1 <= '9') ret = (c1 - '0') * 16;
     else if (c1 >= 'a' && c1 <= 'f') ret = (c1 - 'a' + 10) * 16;
-    else ret = (c1 - 'A' + 10) * 16;
+    else if (c1 >= 'A' && c1 <= 'F') ret = (c1 - 'A' + 10) * 16;
+    else return -1;
 
     if (c2 >= '0' && c2 <= '9') ret += c2 - '0';
     else if (c2 >= 'a' && c2 <= 'f') ret += c2 - 'a' + 10;
-    else ret += c2 - 'A' + 10;
+    else if (c2 >= 'A' && c2 <= 'F') ret += c2 - 'A' + 10;
+    else return -1;
 
     return ret;
 }
@@ -102,15 +98,16 @@ static WCHAR *url_decode( WCHAR *str, ULONG len, WS_HEAP *heap, ULONG *ret_len )
     BOOL decode = FALSE, convert = FALSE;
     ULONG i, len_utf8, len_left;
     unsigned char *utf8, *r;
+    int b;
 
     *ret_len = len;
     for (i = 0; i < len; i++, p++)
     {
         if ((len - i) < 3) break;
-        if (p[0] == '%' && iswxdigit( p[1] ) && iswxdigit( p[2] ))
+        if (p[0] == '%' && (b = url_decode_byte( p[1], p[2] )) != -1)
         {
             decode = TRUE;
-            if (url_decode_byte( p[1], p[2] ) > 159)
+            if (b > 159)
             {
                 convert = TRUE;
                 break;
@@ -125,9 +122,9 @@ static WCHAR *url_decode( WCHAR *str, ULONG len, WS_HEAP *heap, ULONG *ret_len )
         p = str;
         while (len)
         {
-            if (len >= 3 && p[0] == '%' && iswxdigit( p[1] ) && iswxdigit( p[2] ))
+            if (len >= 3 && p[0] == '%' && (b = url_decode_byte( p[1], p[2] )) != -1)
             {
-                *q++ = url_decode_byte( p[1], p[2] );
+                *q++ = b;
                 p += 3;
                 len -= 3;
             }
@@ -144,9 +141,9 @@ static WCHAR *url_decode( WCHAR *str, ULONG len, WS_HEAP *heap, ULONG *ret_len )
     len_left = len_utf8;
     while (len_left)
     {
-        if (len_left >= 3 && r[0] == '%' && isxdigit( r[1] ) && isxdigit( r[2] ))
+        if (len_left >= 3 && r[0] == '%' && (b = url_decode_byte( r[1], r[2] )) != -1)
         {
-            r[0] = url_decode_byte( r[1], r[2] );
+            r[0] = b;
             len_left -= 3;
             memmove( r + 1, r + 3, len_left );
             len_utf8 -= 2;
@@ -214,7 +211,7 @@ HRESULT WINAPI WsDecodeUrl( const WS_STRING *str, ULONG flags, WS_HEAP *heap, WS
     if (len && *q == ':')
     {
         p = ++q; len--;
-        while (len && iswdigit( *q ))
+        while (len && '0' <= *q && *q <= '9')
         {
             if ((port = port * 10 + *q - '0') > 65535) goto done;
             q++; len--;
@@ -275,24 +272,24 @@ static const WCHAR *scheme_str( WS_URL_SCHEME_TYPE scheme, ULONG *len )
     switch (scheme)
     {
     case WS_URL_HTTP_SCHEME_TYPE:
-        *len = ARRAY_SIZE( http );
-        return http;
+        *len = ARRAY_SIZE( L"http" ) - 1;
+        return L"http";
 
     case WS_URL_HTTPS_SCHEME_TYPE:
-        *len = ARRAY_SIZE( https );
-        return https;
+        *len = ARRAY_SIZE( L"https" ) - 1;
+        return L"https";
 
     case WS_URL_NETTCP_SCHEME_TYPE:
-        *len = ARRAY_SIZE( nettcp );
-        return nettcp;
+        *len = ARRAY_SIZE( L"net.tcp" ) - 1;
+        return L"net.tcp";
 
     case WS_URL_SOAPUDP_SCHEME_TYPE:
-        *len = ARRAY_SIZE( soapudp );
-        return soapudp;
+        *len = ARRAY_SIZE( L"soap.udp" ) - 1;
+        return L"soap.udp";
 
     case WS_URL_NETPIPE_SCHEME_TYPE:
-        *len = ARRAY_SIZE( netpipe );
-        return netpipe;
+        *len = ARRAY_SIZE( L"net.pipe" ) - 1;
+        return L"net.pipe";
 
     default:
         ERR( "unhandled scheme %u\n", scheme );
@@ -361,7 +358,7 @@ static HRESULT url_encode_size( const WCHAR *str, ULONG len, const char *except,
 
 static ULONG url_encode_byte( unsigned char byte, const char *except, WCHAR *buf )
 {
-    static const WCHAR hex[] = {'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'};
+    static const WCHAR hex[] = L"0123456789ABCDEF";
     switch (escape_size( byte, except ))
     {
     case 3:
@@ -423,7 +420,6 @@ static HRESULT url_encode( const WCHAR *str, ULONG len, WCHAR *buf, const char *
 HRESULT WINAPI WsEncodeUrl( const WS_URL *base, ULONG flags, WS_HEAP *heap, WS_STRING *ret,
                             WS_ERROR *error )
 {
-    static const WCHAR fmtW[] = {':','%','u',0};
     ULONG len = 0, len_scheme, len_enc, ret_size = 0;
     const WS_HTTP_URL *url = (const WS_HTTP_URL *)base;
     const WCHAR *scheme;
@@ -481,7 +477,7 @@ HRESULT WINAPI WsEncodeUrl( const WS_URL *base, ULONG flags, WS_HEAP *heap, WS_S
     {
         q = url->portAsString.chars;
         len = url->portAsString.length;
-        while (len && iswdigit( *q ))
+        while (len && '0' <= *q && *q <= '9')
         {
             if ((port = port * 10 + *q - '0') > 65535)
             {
@@ -501,7 +497,7 @@ HRESULT WINAPI WsEncodeUrl( const WS_URL *base, ULONG flags, WS_HEAP *heap, WS_S
     if (port)
     {
         WCHAR buf[7];
-        len = swprintf( buf, ARRAY_SIZE(buf), fmtW, port );
+        len = swprintf( buf, ARRAY_SIZE(buf), L":%u", port );
         memcpy( p, buf, len * sizeof(WCHAR) );
         p += len;
     }

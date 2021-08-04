@@ -539,6 +539,7 @@ void output_bin_resources( DLLSPEC *spec, unsigned int start_rva )
     if (!spec->nb_resources) return;
 
     tree = build_resource_tree( spec, &data_offset );
+    init_output_buffer();
 
     /* output the resource directories */
 

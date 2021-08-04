@@ -87,6 +87,7 @@ static const struct object_ops atom_table_ops =
     no_map_access,                /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
+    no_get_full_name,             /* get_full_name */
     no_lookup_name,               /* lookup_name */
     no_link_name,                 /* link_name */
     NULL,                         /* unlink_name */
@@ -164,15 +165,6 @@ static atom_t add_atom_entry( struct atom_table *table, struct atom_entry *entry
     return entry->atom;
 }
 
-/* compute the hash code for a string */
-static unsigned short atom_hash( struct atom_table *table, const struct unicode_str *str )
-{
-    unsigned int i;
-    unsigned short hash = 0;
-    for (i = 0; i < str->len / sizeof(WCHAR); i++) hash ^= toupperW(str->str[i]) + i;
-    return hash % table->entries_count;
-}
-
 /* dump an atom table */
 static void atom_table_dump( struct object *obj, int verbose )
 {
@@ -189,7 +181,7 @@ static void atom_table_dump( struct object *obj, int verbose )
         if (!entry) continue;
         fprintf( stderr, "  %04x: ref=%d pinned=%c hash=%d \"",
                  entry->atom, entry->count, entry->pinned ? 'Y' : 'N', entry->hash );
-        dump_strW( entry->str, entry->len / sizeof(WCHAR), stderr, "\"\"");
+        dump_strW( entry->str, entry->len, stderr, "\"\"");
         fprintf( stderr, "\"\n" );
     }
 }
@@ -215,7 +207,7 @@ static struct atom_entry *find_atom_entry( struct atom_table *table, const struc
     struct atom_entry *entry = table->entries[hash];
     while (entry)
     {
-        if (entry->len == str->len && !memicmpW( entry->str, str->str, str->len/sizeof(WCHAR) )) break;
+        if (entry->len == str->len && !memicmp_strW( entry->str, str->str, str->len )) break;
         entry = entry->next;
     }
     return entry;
@@ -225,7 +217,7 @@ static struct atom_entry *find_atom_entry( struct atom_table *table, const struc
 static atom_t add_atom( struct atom_table *table, const struct unicode_str *str )
 {
     struct atom_entry *entry;
-    unsigned short hash = atom_hash( table, str );
+    unsigned short hash = hash_strW( str->str, str->len, table->entries_count );
     atom_t atom = 0;
 
     if (!str->len)
@@ -294,7 +286,8 @@ static atom_t find_atom( struct atom_table *table, const struct unicode_str *str
         set_error( STATUS_INVALID_PARAMETER );
         return 0;
     }
-    if (table && (entry = find_atom_entry( table, str, atom_hash(table, str) )))
+    if (table && (entry = find_atom_entry( table, str,
+                                           hash_strW( str->str, str->len, table->entries_count ))))
         return entry->atom;
     set_error( STATUS_OBJECT_NAME_NOT_FOUND );
     return 0;
@@ -312,7 +305,7 @@ static struct atom_table *get_global_table( struct winstation *winstation, int c
             else
             {
                 global_table = table;
-                make_object_static( &global_table->obj );
+                make_object_permanent( &global_table->obj );
             }
         }
         else set_error( STATUS_OBJECT_NAME_NOT_FOUND );
@@ -351,7 +344,7 @@ atom_t find_global_atom( struct winstation *winstation, const struct unicode_str
     struct atom_entry *entry;
 
     if (!str->len || str->len > MAX_ATOM_LEN || !table) return 0;
-    if ((entry = find_atom_entry( table, str, atom_hash(table, str) )))
+    if ((entry = find_atom_entry( table, str, hash_strW( str->str, str->len, table->entries_count ))))
         return entry->atom;
     return 0;
 }

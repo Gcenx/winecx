@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <float.h>
 #include <math.h>
+#include <fenv.h>
 #include <limits.h>
 #include <wctype.h>
 
@@ -147,15 +148,19 @@ struct MSVCRT_lconv
 
 typedef struct
 {
-    unsigned int control;
-    unsigned int status;
-} fenv_t;
-
-typedef struct
-{
     double r;
     double i;
 } _Dcomplex;
+
+typedef void (*vtable_ptr)(void);
+
+typedef struct {
+    const vtable_ptr *vtable;
+} Context;
+
+typedef struct {
+    Context *ctx;
+} _Context;
 
 static char* (CDECL *p_setlocale)(int category, const char* locale);
 static struct MSVCRT_lconv* (CDECL *p_localeconv)(void);
@@ -173,6 +178,9 @@ static float (CDECL *p_wcstof)(const wchar_t*, wchar_t**);
 static double (CDECL *p_remainder)(double, double);
 static int* (CDECL *p_errno)(void);
 static int (CDECL *p_fegetenv)(fenv_t*);
+static int (CDECL *p_fesetenv)(const fenv_t*);
+static int (CDECL *p_fegetround)(void);
+static int (CDECL *p_fesetround)(int);
 static int (CDECL *p__clearfp)(void);
 static _locale_t (__cdecl *p_wcreate_locale)(int, const wchar_t *);
 static void (__cdecl *p_free_locale)(_locale_t);
@@ -208,6 +216,9 @@ static MSVCRT_bool (__thiscall *p__Condition_variable_wait_for)(_Condition_varia
 static void (__thiscall *p__Condition_variable_notify_one)(_Condition_variable*);
 static void (__thiscall *p__Condition_variable_notify_all)(_Condition_variable*);
 
+static Context* (__cdecl *p_Context_CurrentContext)(void);
+static _Context* (__cdecl *p__Context__CurrentContext)(_Context*);
+
 #define SETNOFAIL(x,y) x = (void*)GetProcAddress(module,y)
 #define SET(x,y) do { SETNOFAIL(x,y); ok(x != NULL, "Export '%s' not found\n", y); } while(0)
 
@@ -241,6 +252,10 @@ static BOOL init(void)
     p_free_locale = (void*)GetProcAddress(module, "_free_locale");
     SET(p_wctype, "wctype");
     SET(p_fegetenv, "fegetenv");
+    SET(p_fesetenv, "fesetenv");
+    SET(p_fegetround, "fegetround");
+    SET(p_fesetround, "fesetround");
+
     SET(p__clearfp, "_clearfp");
     SET(p_vsscanf, "vsscanf");
     SET(p__Cbuild, "_Cbuild");
@@ -250,6 +265,7 @@ static BOOL init(void)
     SET(p_nexttowardl, "nexttowardl");
     SET(p_wctrans, "wctrans");
     SET(p_towctrans, "towctrans");
+    SET(p__Context__CurrentContext, "?_CurrentContext@_Context@details@Concurrency@@SA?AV123@XZ");
     if(sizeof(void*) == 8) { /* 64-bit initialization */
         SET(p_critical_section_ctor,
                 "??0critical_section@Concurrency@@QEAA@XZ");
@@ -281,6 +297,8 @@ static BOOL init(void)
                 "?notify_one@_Condition_variable@details@Concurrency@@QEAAXXZ");
         SET(p__Condition_variable_notify_all,
                 "?notify_all@_Condition_variable@details@Concurrency@@QEAAXXZ");
+        SET(p_Context_CurrentContext,
+                "?CurrentContext@Context@Concurrency@@SAPEAV12@XZ");
     } else {
 #ifdef __arm__
         SET(p_critical_section_ctor,
@@ -345,6 +363,8 @@ static BOOL init(void)
         SET(p__Condition_variable_notify_all,
                 "?notify_all@_Condition_variable@details@Concurrency@@QAEXXZ");
 #endif
+        SET(p_Context_CurrentContext,
+                "?CurrentContext@Context@Concurrency@@SAPAV12@XZ");
     }
 
     init_thiscall_thunk();
@@ -564,9 +584,6 @@ static void test__strtof(void)
     const char float3[] = "-3.402823466e+38";
     const char float4[] = "1.7976931348623158e+308";  /* DBL_MAX */
 
-    const WCHAR twelve[] = {'1','2','.','0',0};
-    const WCHAR arabic23[] = { 0x662, 0x663, 0};
-
     char *end;
     float f;
 
@@ -601,10 +618,10 @@ static void test__strtof(void)
     f = p_strtof("0x12", NULL);
     ok(f == 0, "f = %lf\n", f);
 
-    f = p_wcstof(twelve, NULL);
+    f = p_wcstof(L"12.0", NULL);
     ok(f == 12.0, "f = %lf\n", f);
 
-    f = p_wcstof(arabic23, NULL);
+    f = p_wcstof(L"\x0662\x0663", NULL);
     ok(f == 0, "f = %lf\n", f);
 
     if(!p_setlocale(LC_ALL, "Arabic")) {
@@ -612,10 +629,10 @@ static void test__strtof(void)
         return;
     }
 
-    f = p_wcstof(twelve, NULL);
+    f = p_wcstof(L"12.0", NULL);
     ok(f == 12.0, "f = %lf\n", f);
 
-    f = p_wcstof(arabic23, NULL);
+    f = p_wcstof(L"\x0662\x0663", NULL);
     ok(f == 0, "f = %lf\n", f);
 
     p_setlocale(LC_ALL, "C");
@@ -762,38 +779,44 @@ static void test_critical_section(void)
     call_func1(p_critical_section_dtor, &cs);
 }
 
-static void test_fegetenv(void)
+static void test_feenv(void)
 {
+    fenv_t env, env2;
     int ret;
-    fenv_t env;
 
     p__clearfp();
 
     ret = p_fegetenv(&env);
     ok(!ret, "fegetenv returned %x\n", ret);
-    ok(env.control == (_EM_INEXACT|_EM_UNDERFLOW|_EM_OVERFLOW|_EM_ZERODIVIDE|_EM_INVALID),
-            "env.control = %x\n", env.control);
-    ok(!env.status, "env.status = %x\n", env.status);
+    p_fesetround(FE_UPWARD);
+    ok(env._Fe_ctl == (_EM_INEXACT|_EM_UNDERFLOW|_EM_OVERFLOW|_EM_ZERODIVIDE|_EM_INVALID),
+            "env._Fe_ctl = %lx\n", env._Fe_ctl);
+    ok(!env._Fe_stat, "env._Fe_stat = %lx\n", env._Fe_stat);
+    ret = p_fegetenv(&env2);
+    ok(!ret, "fegetenv returned %x\n", ret);
+    ok(env2._Fe_ctl == (_EM_INEXACT|_EM_UNDERFLOW|_EM_OVERFLOW|_EM_ZERODIVIDE|_EM_INVALID | FE_UPWARD),
+            "env2._Fe_ctl = %lx\n", env2._Fe_ctl);
+    ret = p_fesetenv(&env);
+    ok(!ret, "fesetenv returned %x\n", ret);
+    ret = p_fegetround();
+    ok(ret == FE_TONEAREST, "Got unexpected round mode %#x.\n", ret);
 }
 
 static void test__wcreate_locale(void)
 {
-    static const wchar_t c_locale[] = {'C',0};
-    static const wchar_t bogus[] = {'b','o','g','u','s',0};
-    static const wchar_t empty[] = {0};
     _locale_t lcl;
     errno_t e;
 
     /* simple success */
     errno = -1;
-    lcl = p_wcreate_locale(LC_ALL, c_locale);
+    lcl = p_wcreate_locale(LC_ALL, L"C");
     e = errno;
     ok(!!lcl, "expected success, but got NULL\n");
     ok(errno == -1, "expected errno -1, but got %i\n", e);
     p_free_locale(lcl);
 
     errno = -1;
-    lcl = p_wcreate_locale(LC_ALL, empty);
+    lcl = p_wcreate_locale(LC_ALL, L"");
     e = errno;
     ok(!!lcl, "expected success, but got NULL\n");
     ok(errno == -1, "expected errno -1, but got %i\n", e);
@@ -801,14 +824,14 @@ static void test__wcreate_locale(void)
 
     /* bogus category */
     errno = -1;
-    lcl = p_wcreate_locale(-1, c_locale);
+    lcl = p_wcreate_locale(-1, L"C");
     e = errno;
     ok(!lcl, "expected failure, but got %p\n", lcl);
     ok(errno == -1, "expected errno -1, but got %i\n", e);
 
     /* bogus names */
     errno = -1;
-    lcl = p_wcreate_locale(LC_ALL, bogus);
+    lcl = p_wcreate_locale(LC_ALL, L"bogus");
     e = errno;
     ok(!lcl, "expected failure, but got %p\n", lcl);
     ok(errno == -1, "expected errno -1, but got %i\n", e);
@@ -1065,6 +1088,20 @@ static void test_towctrans(void)
     ok(ret == 'T', "towctrans('T', 1) returned %c, expected T\n", ret);
 }
 
+static void test_CurrentContext(void)
+{
+    _Context _ctx, *ret;
+    Context *ctx;
+
+    ctx = p_Context_CurrentContext();
+    ok(!!ctx, "got NULL\n");
+
+    memset(&_ctx, 0xcc, sizeof(_ctx));
+    ret = p__Context__CurrentContext(&_ctx);
+    ok(_ctx.ctx == ctx, "expected %p, got %p\n", ctx, _ctx.ctx);
+    ok(ret == &_ctx, "expected %p, got %p\n", &_ctx, ret);
+}
+
 START_TEST(msvcr120)
 {
     if (!init()) return;
@@ -1078,7 +1115,7 @@ START_TEST(msvcr120)
     test__strtof();
     test_remainder();
     test_critical_section();
-    test_fegetenv();
+    test_feenv();
     test__wcreate_locale();
     test__Condition_variable();
     test_wctype();
@@ -1086,4 +1123,5 @@ START_TEST(msvcr120)
     test__Cbuild();
     test_nexttoward();
     test_towctrans();
+    test_CurrentContext();
 }

@@ -1018,6 +1018,7 @@ static void test_ShellWindows(void)
 {
     IShellWindows *shellwindows;
     LONG cookie, cookie2, ret;
+    ITEMIDLIST *pidl;
     IDispatch *disp;
     VARIANT v, v2;
     HRESULT hr;
@@ -1034,15 +1035,12 @@ static void test_ShellWindows(void)
     ok(hr == HRESULT_FROM_WIN32(RPC_X_NULL_REF_POINTER), "got 0x%08x\n", hr);
 
     hr = IShellWindows_Register(shellwindows, NULL, 0, SWC_EXPLORER, &cookie);
-todo_wine
     ok(hr == E_POINTER, "got 0x%08x\n", hr);
 
     hr = IShellWindows_Register(shellwindows, (IDispatch*)shellwindows, 0, SWC_EXPLORER, &cookie);
-todo_wine
     ok(hr == E_POINTER, "got 0x%08x\n", hr);
 
     hr = IShellWindows_Register(shellwindows, (IDispatch*)shellwindows, 0, SWC_EXPLORER, &cookie);
-todo_wine
     ok(hr == E_POINTER, "got 0x%08x\n", hr);
 
     hwnd = CreateWindowExA(0, "button", "test", BS_CHECKBOX | WS_VISIBLE | WS_POPUP,
@@ -1051,34 +1049,56 @@ todo_wine
 
     cookie = 0;
     hr = IShellWindows_Register(shellwindows, NULL, HandleToLong(hwnd), SWC_EXPLORER, &cookie);
-todo_wine {
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(cookie != 0, "got %d\n", cookie);
-}
+
     cookie2 = 0;
     hr = IShellWindows_Register(shellwindows, NULL, HandleToLong(hwnd), SWC_EXPLORER, &cookie2);
-todo_wine {
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(cookie2 != 0 && cookie2 != cookie, "got %d\n", cookie2);
-}
+
+    pidl = ILCreateFromPathA("C:\\");
+    V_VT(&v) = VT_ARRAY | VT_UI1;
+    V_ARRAY(&v) = SafeArrayCreateVector(VT_UI1, 0, ILGetSize(pidl));
+    memcpy(V_ARRAY(&v)->pvData, pidl, ILGetSize(pidl));
+
+    VariantInit(&v2);
+    hr = IShellWindows_FindWindowSW(shellwindows, &v, &v2, SWC_EXPLORER, &ret, 0, &disp);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    ok(!ret, "Got window %#x.\n", ret);
+    ok(!disp, "Got IDispatch %p.\n", &disp);
+
+    hr = IShellWindows_OnNavigate(shellwindows, 0, &v);
+    ok(hr == E_INVALIDARG, "Got hr %#x.\n", hr);
+
+    hr = IShellWindows_OnNavigate(shellwindows, cookie, &v);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IShellWindows_FindWindowSW(shellwindows, &v, &v2, SWC_EXPLORER, &ret, 0, &disp);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(ret == (LONG)(LONG_PTR)hwnd, "Expected %p, got %#x.\n", hwnd, ret);
+    ok(!disp, "Got IDispatch %p.\n", &disp);
+
     hr = IShellWindows_Revoke(shellwindows, cookie);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IShellWindows_FindWindowSW(shellwindows, &v, &v2, SWC_EXPLORER, &ret, 0, &disp);
+    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
+    ok(!ret, "Got window %#x.\n", ret);
+    ok(!disp, "Got IDispatch %p.\n", &disp);
+
     hr = IShellWindows_Revoke(shellwindows, cookie2);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     hr = IShellWindows_Revoke(shellwindows, 0);
-todo_wine
     ok(hr == S_FALSE, "got 0x%08x\n", hr);
 
     /* we can register ourselves as desktop, but FindWindowSW still returns real desktop window */
     cookie = 0;
     hr = IShellWindows_Register(shellwindows, NULL, HandleToLong(hwnd), SWC_DESKTOP, &cookie);
-todo_wine {
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(cookie != 0, "got %d\n", cookie);
-}
+
     disp = (void*)0xdeadbeef;
     ret = 0xdead;
     VariantInit(&v);
@@ -1208,7 +1228,6 @@ todo_wine
     ok(ret == 0, "got %d\n", ret);
 
     hr = IShellWindows_Revoke(shellwindows, cookie);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
     DestroyWindow(hwnd);
     IShellWindows_Release(shellwindows);
@@ -1389,6 +1408,154 @@ if (0) { /* crashes on winxp/win2k3 */
     IShellDispatch_Release(sd);
 }
 
+static void test_ShellLinkObject(void)
+{
+    HRESULT hr;
+    IShellDispatch *sd;
+    WCHAR path[MAX_PATH],
+        empty_path[MAX_PATH],
+        link_path[MAX_PATH];
+    VARIANT v;
+    Folder2 *folder2;
+    Folder *folder;
+    FolderItem *item;
+    IDispatch *dispatch;
+    IShellLinkW *sl;
+    IShellLinkDual2* sld;
+    IPersistFile *pf;
+    BOOL ret;
+    BSTR str;
+    HANDLE file;
+    int hk;
+
+    hr = CoCreateInstance(&CLSID_Shell, NULL, CLSCTX_INPROC_SERVER,
+        &IID_IShellDispatch, (void**)&sd);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    GetTempPathW(MAX_PATH, path);
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = SysAllocString(path);
+    hr = IShellDispatch_NameSpace(sd, v, &folder);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    VariantClear(&v);
+
+    hr = Folder_QueryInterface(folder, &IID_Folder2, (void**)&folder2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    Folder_Release(folder);
+
+    hr = Folder2_get_Self(folder2, &item);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    dispatch = (IDispatch*)0xdeadbeef;
+    hr = FolderItem_get_GetLink(item, &dispatch);
+    ok(hr == E_NOTIMPL, "got 0x%08x\n", hr);
+    ok(dispatch == NULL, "got %p\n", dispatch);
+
+    FolderItem_Release(item);
+
+    PathCombineW(empty_path, path, L"winetest_empty_file.txt");
+    file = CreateFileW(empty_path, 0, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "CreateFile failed: %08x\n", GetLastError());
+    CloseHandle(file);
+
+    hr = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, &IID_IShellLinkW, (LPVOID*)&sl);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    hr = IShellLinkW_SetPath(sl, empty_path);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    hr = IShellLinkW_GetPath(sl, empty_path, MAX_PATH, NULL, 0);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    hr = IShellLinkW_SetDescription(sl, L"description");
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    hr = IShellLinkW_SetWorkingDirectory(sl, L"working directory");
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    hr = IShellLinkW_SetArguments(sl, L"arguments");
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    hr = IShellLinkW_SetHotkey(sl, 1234);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    hr = IShellLinkW_SetShowCmd(sl, 1);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IShellLinkW_QueryInterface(sl, &IID_IPersistFile, (LPVOID*)&pf);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    PathCombineW(link_path, path, L"winetest_filled.lnk");
+    hr = IPersistFile_Save(pf, link_path, TRUE);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    IPersistFile_Release(pf);
+    IShellLinkW_Release(sl);
+
+    str = SysAllocString(L"winetest_filled.lnk");
+    hr = Folder2_ParseName(folder2, str, &item);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    SysFreeString(str);
+
+    dispatch = NULL;
+    hr = FolderItem_get_GetLink(item, &dispatch);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(dispatch != NULL, "got %p\n", dispatch);
+
+    if (dispatch) {
+        sld = (IShellLinkDual2*)dispatch;
+
+        str = NULL;
+        hr = IShellLinkDual2_get_Path(sld, &str);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        if (hr == S_OK) {
+            ok(!wcscmp(str, empty_path), "got %s (wanted %s)\n",
+               wine_dbgstr_w(str), wine_dbgstr_w(empty_path));
+            SysFreeString(str);
+        }
+
+        str = NULL;
+        hr = IShellLinkDual2_get_Description(sld, &str);
+        todo_wine ok(hr == S_OK, "got 0x%08x\n", hr);
+        if (hr == S_OK) {
+            ok(!wcscmp(str, L"description"), "got %s\n", wine_dbgstr_w(str));
+            SysFreeString(str);
+        }
+
+        str = NULL;
+        hr = IShellLinkDual2_get_WorkingDirectory(sld, &str);
+        todo_wine ok(hr == S_OK, "got 0x%08x\n", hr);
+        if (hr == S_OK) {
+            ok(!wcscmp(str, L"working directory"), "got %s\n", wine_dbgstr_w(str));
+            SysFreeString(str);
+        }
+
+        str = NULL;
+        hr = IShellLinkDual2_get_Arguments(sld, &str);
+        todo_wine ok(hr == S_OK, "got 0x%08x\n", hr);
+        if (hr == S_OK) {
+            ok(!wcscmp(str, L"arguments"), "got %s\n", wine_dbgstr_w(str));
+            SysFreeString(str);
+        }
+
+        hk = 0;
+        hr = IShellLinkDual2_get_Hotkey(sld, &hk);
+        todo_wine ok(hr == S_OK, "got 0x%08x\n", hr);
+        todo_wine ok(hk == 1234, "got %i\n", hk);
+
+        hk = 0;
+        hr = IShellLinkDual2_get_ShowCommand(sld, &hk);
+        todo_wine ok(hr == S_OK, "got 0x%08x\n", hr);
+        todo_wine ok(hk == 1, "got %i\n", hk);
+
+        IShellLinkDual2_Release(sld);
+    }
+
+    FolderItem_Release(item);
+
+    ret = DeleteFileW(link_path);
+    ok(ret, "DeleteFile failed: %08x\n", GetLastError());
+    ret = DeleteFileW(empty_path);
+    ok(ret, "DeleteFile failed: %08x\n", GetLastError());
+
+    Folder2_Release(folder2);
+
+    IShellDispatch_Release(sd);
+}
+
 static void test_ShellExecute(void)
 {
     HRESULT hr;
@@ -1447,6 +1614,7 @@ START_TEST(shelldispatch)
     test_ShellWindows();
     test_ParseName();
     test_Verbs();
+    test_ShellLinkObject();
     test_ShellExecute();
 
     CoUninitialize();

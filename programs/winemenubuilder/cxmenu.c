@@ -260,7 +260,7 @@ static void cx_dump_menu(LPCWSTR linkW, int is_desktop, LPCWSTR rootW,
     if (icon_nameW) HeapFree(GetProcessHeap(), 0, icon_nameW);
     if (descriptionW) HeapFree(GetProcessHeap(), 0, descriptionW);
     if (archW) HeapFree(GetProcessHeap(), 0, archW);
-    HeapFree(GetProcessHeap(), 0, fname);
+    if (fname) HeapFree(GetProcessHeap(), 0, fname);
 }
 
 int cx_process_menu(LPCWSTR linkW, BOOL is_desktop, DWORD root_csidl,

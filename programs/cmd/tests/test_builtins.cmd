@@ -1013,6 +1013,13 @@ if /i not (a)==(b) (
 ) else (
   echo comparison operators surrounded by brackets seem to be broken
 )
+if defined windir echo windir is defined
+if not defined windir echo windir is defined
+if not exist %windir% (
+  echo windir does not exist
+) else (
+  echo windir does exist
+)
 echo --- case sensitivity with and without /i option
 if bar==BAR echo if does not default to case sensitivity
 if not bar==BAR echo if seems to default to case sensitivity
@@ -3142,6 +3149,9 @@ echo %ErrorLevel% should be 7
 if errorlevel 7 echo setting var worked too well, bad
 call :setError 3
 echo %ErrorLevel% should still be 7
+rem Verify that (call ) sets errorlevel to 0
+(call )
+if errorlevel 1 echo errorlevel should have been 0
 
 echo ------------ Testing GOTO ------------
 if a==a goto dest1

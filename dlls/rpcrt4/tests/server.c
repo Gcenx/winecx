@@ -94,6 +94,9 @@ static int (__cdecl *sum_cps)(cps_t *cps);
 static int (__cdecl *sum_cpsc)(cpsc_t *cpsc);
 static int (__cdecl *get_cpsc)(int n, cpsc_t *cpsc);
 static int (__cdecl *sum_complex_array)(int n, refpint_t pi[]);
+static int (__cdecl *sum_blob)(cs_blob_t *blob);
+static int (__cdecl *sum_data)(cs_data_t *data);
+static int (__cdecl *sum_container)(cs_container_t *container);
 static int (__cdecl *square_puint)(puint_t p);
 static int (__cdecl *sum_puints)(puints_t *p);
 static int (__cdecl *sum_cpuints)(cpuints_t *p);
@@ -141,7 +144,7 @@ static void (__cdecl *stop_autolisten)(void);
 static void (__cdecl *ip_test)(ipu_t *a);
 static int (__cdecl *sum_ptr_array)(int *a[2]);
 static int (__cdecl *sum_array_ptr)(int (*a)[2]);
-static ctx_handle_t __cdecl (*get_handle)(void);
+static ctx_handle_t (__cdecl *get_handle)(void);
 static void (__cdecl *get_handle_by_ptr)(ctx_handle_t *r);
 static void (__cdecl *test_handle)(ctx_handle_t ctx_handle);
 
@@ -185,6 +188,9 @@ static void (__cdecl *test_handle)(ctx_handle_t ctx_handle);
     X(sum_cpsc) \
     X(get_cpsc) \
     X(sum_complex_array) \
+    X(sum_blob) \
+    X(sum_data) \
+    X(sum_container) \
     X(square_puint) \
     X(sum_puints) \
     X(sum_cpuints) \
@@ -238,9 +244,6 @@ static void (__cdecl *test_handle)(ctx_handle_t ctx_handle);
 
 /* type check statements generated in header file */
 fnprintf *p_printf = printf;
-
-static const WCHAR helloW[] = { 'H','e','l','l','o',0 };
-static const WCHAR worldW[] = { 'W','o','r','l','d','!',0 };
 
 static BOOL is_interp;
 
@@ -504,6 +507,36 @@ int __cdecl s_sum_complex_array(int n, refpint_t pi[])
   int total = 0;
   for (; n > 0; n--)
     total += *pi[n - 1];
+  return total;
+}
+
+int __cdecl s_sum_blob(cs_blob_t *blob)
+{
+  int i, total = 0;
+
+  for (i = 0; i < blob->n; i++)
+    total += blob->ca[i];
+
+  return total;
+}
+
+int __cdecl s_sum_data(cs_data_t *data)
+{
+  int i, total = 0;
+
+  for (i = 0; i < data->blob.n; i++)
+    total += data->blob.ca[i];
+
+  return total;
+}
+
+int __cdecl s_sum_container(cs_container_t *container)
+{
+  int i, total = 0;
+
+  for (i = 0; i < container->data.blob.n; i++)
+    total += container->data.blob.ca[i];
+
   return total;
 }
 
@@ -797,10 +830,10 @@ void __cdecl s_get_namesw(int *n, wstr_array_t *names)
   wstr_array_t list;
 
   list = MIDL_user_allocate(2 * sizeof(list[0]));
-  list[0] = MIDL_user_allocate(sizeof(helloW));
-  lstrcpyW(list[0], helloW);
-  list[1] = MIDL_user_allocate(sizeof(worldW));
-  lstrcpyW(list[1], worldW);
+  list[0] = MIDL_user_allocate(sizeof(L"Hello"));
+  lstrcpyW(list[0], L"Hello");
+  list[1] = MIDL_user_allocate(sizeof(L"World!"));
+  lstrcpyW(list[1], L"World!");
 
   *names = list;
   *n = 2;
@@ -1112,7 +1145,7 @@ run_client(const char *test)
 
   make_cmdline(cmdline, test);
   ok(CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, 0L, NULL, NULL, &startup, &info), "CreateProcess\n");
-  winetest_wait_child_process( info.hProcess );
+  wait_child_process( info.hProcess );
   ok(CloseHandle(info.hProcess), "CloseHandle\n");
   ok(CloseHandle(info.hThread), "CloseHandle\n");
 }
@@ -1121,7 +1154,7 @@ static void
 basic_tests(void)
 {
   char string[] = "I am a string";
-  WCHAR wstring[] = {'I',' ','a','m',' ','a',' ','w','s','t','r','i','n','g', 0};
+  WCHAR wstring[] = L"I am a wstring";
   int f[5] = {1, 3, 0, -2, -4};
   vector_t a = {1, 3, 7};
   vector_t vec1 = {4, -2, 1}, vec2 = {-5, 2, 3}, *pvec2 = &vec2;
@@ -1563,8 +1596,8 @@ pointer_tests(void)
       namesw = NULL;
       get_namesw(&n, &namesw);
       ok(n == 2, "expected 2, got %d\n", n);
-      ok(!lstrcmpW(namesw[0], helloW), "expected Hello, got %s\n", wine_dbgstr_w(namesw[0]));
-      ok(!lstrcmpW(namesw[1], worldW), "expected World!, got %s\n", wine_dbgstr_w(namesw[1]));
+      ok(!lstrcmpW(namesw[0], L"Hello"), "expected Hello, got %s\n", wine_dbgstr_w(namesw[0]));
+      ok(!lstrcmpW(namesw[1], L"World!"), "expected World!, got %s\n", wine_dbgstr_w(namesw[1]));
       MIDL_user_free(namesw[0]);
       MIDL_user_free(namesw[1]);
       MIDL_user_free(namesw);
@@ -1618,6 +1651,9 @@ array_tests(void)
   vector_t vs[2] = {{1, -2, 3}, {4, -5, -6}};
   cps_t cps;
   cpsc_t cpsc;
+  cs_blob_t blob;
+  cs_data_t data;
+  cs_container_t container;
   cs_t *cs;
   int n;
   int ca[5] = {1, -2, 3, -4, 5};
@@ -1761,6 +1797,21 @@ array_tests(void)
 
   ok(sum_ptr_array(ptr_array) == 3, "RPC sum_ptr_array\n");
   ok(sum_array_ptr(&array) == 7, "RPC sum_array_ptr\n");
+
+  blob.n = ARRAY_SIZE(c);
+  blob.ca = c;
+  n = sum_blob(&blob);
+  ok(n == 45, "RPC sum_blob = %d\n", n);
+
+  data.blob.n = ARRAY_SIZE(c);
+  data.blob.ca = c;
+  n = sum_data(&data);
+  ok(n == 45, "RPC sum_data = %d\n", n);
+
+  container.data.blob.n = ARRAY_SIZE(c);
+  container.data.blob.ca = c;
+  n = sum_container(&container);
+  ok(n == 45, "RPC sum_container = %d\n", n);
 }
 
 void __cdecl s_authinfo_test(unsigned int protseq, int secure)
@@ -2337,7 +2388,7 @@ static void test_reconnect(void)
 
     stop();
 
-    winetest_wait_child_process(server_process);
+    wait_child_process(server_process);
     ok(CloseHandle(server_process), "CloseHandle\n");
 
     /* create new server, rpcrt4 will connect to it once sending to existing connection fails
@@ -2346,7 +2397,7 @@ static void test_reconnect(void)
     basic_tests();
     stop();
 
-    winetest_wait_child_process(server_process);
+    wait_child_process(server_process);
     ok(CloseHandle(server_process), "CloseHandle\n");
 
     ok(RPC_S_OK == RpcStringFreeA(&binding), "RpcStringFree\n");
@@ -2410,7 +2461,6 @@ enum firewall_op
 
 static HRESULT set_firewall( enum firewall_op op )
 {
-    static const WCHAR testW[] = {'r','p','c','r','t','4','_','t','e','s','t',0};
     HRESULT hr, init;
     INetFwMgr *mgr = NULL;
     INetFwPolicy *policy = NULL;
@@ -2450,7 +2500,7 @@ static HRESULT set_firewall( enum firewall_op op )
     hr = INetFwAuthorizedApplication_put_ProcessImageFileName( app, image );
     if (hr != S_OK) goto done;
 
-    name = SysAllocString( testW );
+    name = SysAllocString( L"rpcrt4_test" );
     hr = INetFwAuthorizedApplication_put_Name( app, name );
     SysFreeString( name );
     ok( hr == S_OK, "got %08x\n", hr );

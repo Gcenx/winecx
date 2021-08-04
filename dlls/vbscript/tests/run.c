@@ -144,6 +144,7 @@ DEFINE_EXPECT(OnLeaveScript);
 #define DISPID_GLOBAL_TESTERROROBJECT 1023
 #define DISPID_GLOBAL_THROWWITHDESC   1024
 #define DISPID_GLOBAL_PROPARGSET      1025
+#define DISPID_GLOBAL_UNKOBJ          1026
 
 #define DISPID_TESTOBJ_PROPGET      2000
 #define DISPID_TESTOBJ_PROPPUT      2001
@@ -153,9 +154,6 @@ DEFINE_EXPECT(OnLeaveScript);
 
 #define FACILITY_VBS 0xa
 #define MAKE_VBSERROR(code) MAKE_HRESULT(SEVERITY_ERROR, FACILITY_VBS, code)
-
-static const WCHAR testW[] = {'t','e','s','t',0};
-static const WCHAR emptyW[] = {0};
 
 static BOOL strict_dispid_check, is_english, allow_ui;
 static int first_day_of_week;
@@ -176,13 +174,6 @@ static BSTR a2bstr(const char *str)
     MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
 
     return ret;
-}
-
-static int strcmp_wa(LPCWSTR strw, const char *stra)
-{
-    CHAR buf[512];
-    WideCharToMultiByte(CP_ACP, 0, strw, -1, buf, sizeof(buf), 0, 0);
-    return lstrcmpA(buf, stra);
 }
 
 static const char *vt2a(VARIANT *v)
@@ -214,6 +205,8 @@ static const char *vt2a(VARIANT *v)
         return "VT_BSTR";
     case VT_DISPATCH:
         return "VT_DISPATCH";
+    case VT_UNKNOWN:
+        return "VT_UNKNOWN";
     case VT_BOOL:
         return "VT_BOOL";
     case VT_ARRAY|VT_VARIANT:
@@ -594,6 +587,35 @@ static void _test_grfdex(unsigned line, DWORD grfdex, DWORD expect)
 }
 
 static IDispatchEx enumDisp;
+
+static HRESULT WINAPI unkObj_QueryInterface(IUnknown *iface, REFIID riid, void **ppv)
+{
+    if(IsEqualGUID(riid, &IID_IUnknown)) {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI unkObj_AddRef(IUnknown *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI unkObj_Release(IUnknown *iface)
+{
+    return 1;
+}
+
+static const IUnknownVtbl unkObjVtbl = {
+    unkObj_QueryInterface,
+    unkObj_AddRef,
+    unkObj_Release
+};
+
+static IUnknown unkObj = { &unkObjVtbl };
 
 static HRESULT WINAPI EnumVARIANT_QueryInterface(IEnumVARIANT *iface, REFIID riid, void **ppv)
 {
@@ -1008,7 +1030,7 @@ static IDispatchEx enumDisp = { &enumDispVtbl };
 
 static HRESULT WINAPI collectionObj_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD grfdex, DISPID *pid)
 {
-    if(!strcmp_wa(bstrName, "reset")) {
+    if(!lstrcmpW(bstrName, L"reset")) {
         *pid = DISPID_COLLOBJ_RESET;
         return S_OK;
     }
@@ -1138,7 +1160,8 @@ static HRESULT WINAPI Global_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD 
         { L"throwInt",        DISPID_GLOBAL_THROWINT },
         { L"testOptionalArg", DISPID_GLOBAL_TESTOPTIONALARG },
         { L"testErrorObject", DISPID_GLOBAL_TESTERROROBJECT },
-        { L"throwWithDesc",   DISPID_GLOBAL_THROWWITHDESC }
+        { L"throwWithDesc",   DISPID_GLOBAL_THROWWITHDESC },
+        { L"unkObj",          DISPID_GLOBAL_UNKOBJ }
     };
 
     test_grfdex(grfdex, fdexNameCaseInsensitive);
@@ -1657,6 +1680,10 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
         ok(hres == S_OK, "Invoke failed: %08x\n", hres);
         return S_OK;
     }
+    case DISPID_GLOBAL_UNKOBJ:
+        V_VT(pvarRes) = VT_UNKNOWN;
+        V_UNKNOWN(pvarRes) = &unkObj;
+        return S_OK;
     }
 
     ok(0, "unexpected call %d\n", id);
@@ -1804,7 +1831,7 @@ static HRESULT WINAPI ActiveScriptSite_GetItemInfo(IActiveScriptSite *iface, LPC
     ok(dwReturnMask == SCRIPTINFO_IUNKNOWN, "unexpected dwReturnMask %x\n", dwReturnMask);
     ok(!ppti, "ppti != NULL\n");
 
-    if(strcmp_wa(pstrName, "test"))
+    if(lstrcmpW(pstrName, L"test"))
         ok(0, "unexpected pstrName %s\n", wine_dbgstr_w(pstrName));
 
     *ppiunkItem = (IUnknown*)&Global;
@@ -1829,21 +1856,22 @@ static HRESULT WINAPI ActiveScriptSite_OnStateChange(IActiveScriptSite *iface, S
 }
 
 static IActiveScriptError **store_script_error;
+static ULONG error_line;
+static LONG error_char;
 
 static HRESULT WINAPI ActiveScriptSite_OnScriptError(IActiveScriptSite *iface, IActiveScriptError *pscripterror)
 {
     HRESULT hr = onerror_hres, hres;
 
+    hres = IActiveScriptError_GetSourcePosition(pscripterror, NULL, &error_line, &error_char);
+    ok(hres == S_OK, "GetSourcePosition failed: %08x\n", hres);
+
     if(!expect_OnScriptError) {
         EXCEPINFO info;
-        ULONG line;
-        HRESULT hres;
 
-        hres = IActiveScriptError_GetSourcePosition(pscripterror, NULL, &line, NULL);
+        hres = IActiveScriptError_GetExceptionInfo(pscripterror, &info);
         if(SUCCEEDED(hres))
-            hres = IActiveScriptError_GetExceptionInfo(pscripterror, &info);
-        if(SUCCEEDED(hres))
-            trace("Error in line %u: %x %s\n", line+1, info.wCode, wine_dbgstr_w(info.bstrDescription));
+            trace("Error in line %u: %x %s\n", error_line + 1, info.wCode, wine_dbgstr_w(info.bstrDescription));
     }else {
         IDispatchEx *dispex;
 
@@ -1926,7 +1954,7 @@ static IActiveScript *create_and_init_script(DWORD flags, BOOL start)
     hres = IActiveScript_SetScriptSite(engine, &ActiveScriptSite);
     ok(hres == S_OK, "SetScriptSite failed: %08x\n", hres);
 
-    hres = IActiveScript_AddNamedItem(engine, testW,
+    hres = IActiveScript_AddNamedItem(engine, L"test",
             SCRIPTITEM_ISVISIBLE|SCRIPTITEM_ISSOURCE|flags);
     ok(hres == S_OK, "AddNamedItem failed: %08x\n", hres);
 
@@ -2015,9 +2043,6 @@ static void test_parse_context(void)
     BSTR str;
     HRESULT hres;
 
-    static const WCHAR xW[] = {'x',0};
-    static const WCHAR yW[] = {'y',0};
-
     global_ref = 1;
     engine = create_and_init_script(0, TRUE);
     if(!engine)
@@ -2032,7 +2057,7 @@ static void test_parse_context(void)
 
     /* unknown identifier context is not a valid argument */
     str = a2bstr("Call reportSuccess()\n");
-    hres = IActiveScriptParse_ParseScriptText(parser, str, yW, NULL, NULL, 0, 0, 0, NULL, NULL);
+    hres = IActiveScriptParse_ParseScriptText(parser, str, L"y", NULL, NULL, 0, 0, 0, NULL, NULL);
     ok(hres == E_INVALIDARG, "ParseScriptText failed: %08x\n", hres);
     SysFreeString(str);
 
@@ -2049,14 +2074,14 @@ static void test_parse_context(void)
 
     /* known global variable is not a valid context */
     str = a2bstr("Call reportSuccess()\n");
-    hres = IActiveScriptParse_ParseScriptText(parser, str, xW, NULL, NULL, 0, 0, 0, NULL, NULL);
+    hres = IActiveScriptParse_ParseScriptText(parser, str, L"x", NULL, NULL, 0, 0, 0, NULL, NULL);
     ok(hres == E_INVALIDARG, "ParseScriptText failed: %08x\n", hres);
     SysFreeString(str);
 
     SET_EXPECT(global_success_d);
     SET_EXPECT(global_success_i);
     str = a2bstr("Call reportSuccess()\n");
-    hres = IActiveScriptParse_ParseScriptText(parser, str, testW, NULL, NULL, 0, 0, 0, NULL, NULL);
+    hres = IActiveScriptParse_ParseScriptText(parser, str, L"test", NULL, NULL, 0, 0, 0, NULL, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08x\n", hres);
     SysFreeString(str);
     CHECK_CALLED(global_success_d);
@@ -2078,10 +2103,8 @@ static void _parse_htmlscript_a(unsigned line, const char *src)
     BSTR tmp;
     HRESULT hres;
 
-    static const WCHAR script_delimW[] = {'<','/','S','C','R','I','P','T','>',0};
-
     tmp = a2bstr(src);
-    hres = parse_script(SCRIPTITEM_GLOBALMEMBERS, tmp, script_delimW);
+    hres = parse_script(SCRIPTITEM_GLOBALMEMBERS, tmp, L"</SCRIPT>");
     SysFreeString(tmp);
     ok_(__FILE__,line)(hres == S_OK, "parse_script failed: %08x\n", hres);
 }
@@ -2093,10 +2116,8 @@ static IDispatchEx *parse_procedure(IActiveScriptParseProcedure2 *parse_proc, co
     BSTR str;
     HRESULT hres;
 
-    static const WCHAR delimiterW[] = {'\"',0};
-
     str = a2bstr(src);
-    hres = IActiveScriptParseProcedure2_ParseProcedureText(parse_proc, str, NULL, emptyW, NULL, NULL, delimiterW, 0, 0,
+    hres = IActiveScriptParseProcedure2_ParseProcedureText(parse_proc, str, NULL, L"", NULL, NULL, L"\"", 0, 0,
             SCRIPTPROC_HOSTMANAGESSOURCE|SCRIPTPROC_IMPLICIT_THIS|SCRIPTPROC_IMPLICIT_PARENTS|flags, &disp);
     SysFreeString(str);
     ok(hres == S_OK, "ParseProcedureText failed: %08x\n", hres);
@@ -2127,7 +2148,7 @@ static void test_procedures(void)
     hres = IActiveScript_QueryInterface(script, &IID_IActiveScriptParseProcedure2, (void**)&parse_proc);
     ok(hres == S_OK, "Could not get IActiveScriptParseProcedure2 iface: %08x\n", hres);
 
-    hres = IActiveScriptParseProcedure2_ParseProcedureText(parse_proc, NULL, NULL, emptyW, NULL, NULL, NULL, 0, 0, 0, &disp);
+    hres = IActiveScriptParseProcedure2_ParseProcedureText(parse_proc, NULL, NULL, L"", NULL, NULL, NULL, 0, 0, 0, &disp);
     ok(hres == S_OK, "ParseProcedureText failed: %08x\n", hres);
     IDispatch_Release(disp);
 
@@ -2152,7 +2173,7 @@ static void test_procedures(void)
     CHECK_CALLED(OnEnterScript);
     CHECK_CALLED(OnLeaveScript);
     ok(V_VT(&v) == VT_BSTR, "Expected VT_BSTR, got %s\n", vt2a(&v));
-    ok(!strcmp_wa(V_BSTR(&v), "foobar"), "Wrong string, got %s\n", wine_dbgstr_w(V_BSTR(&v)));
+    ok(!lstrcmpW(V_BSTR(&v), L"foobar"), "Wrong string, got %s\n", wine_dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
     IDispatchEx_Release(proc);
 
@@ -2354,7 +2375,7 @@ static void test_gc(void)
     hres = IActiveScript_SetScriptSite(engine, &ActiveScriptSite);
     ok(hres == S_OK, "SetScriptSite failed: %08x\n", hres);
 
-    hres = IActiveScript_AddNamedItem(engine, testW,
+    hres = IActiveScript_AddNamedItem(engine, L"test",
             SCRIPTITEM_ISVISIBLE|SCRIPTITEM_ISSOURCE|SCRIPTITEM_GLOBALMEMBERS);
     ok(hres == S_OK, "AddNamedItem failed: %08x\n", hres);
 
@@ -2390,60 +2411,150 @@ static void test_gc(void)
 
 static void test_parse_errors(void)
 {
-    static const char *invalid_scripts[] =
+    static const struct
     {
-        /* If...End If */
-        "If 0 > 1 Then\n"
-        "    x = 0 End If\n",
-
-        /* While...End While */
-        "While False\n"
-        "    x = 0 End While\n",
-
-        /* While...Wend */
-        "While False\n"
-        "    x = 0 Wend\n",
-
-        /* Do While...Loop */
-        "Do While False\n"
-        "    x = 0 Loop\n",
-
-        /* Do Until...Loop */
-        "Do Until True\n"
-        "    x = 0 Loop\n",
-
-        /* Do...Loop While */
-        "Do\n"
-        "    x = 0 Loop While False\n",
-
-        /* Do...Loop Until */
-        "Do\n"
-        "    x = 0 Loop Until True\n",
-
-        /* Select...End Select */
-        "x = False\n"
-        "Select Case 42\n"
-        "    Case 0\n"
-        "        Call ok(False, \"unexpected case\")\n"
-        "    Case 42\n"
-        "        x = True End Select\n"
-        "Call ok(x, \"wrong case\")\n",
-
-        /* Class...End Class  (empty) */
-        "Class C End Class",
-
-        /* invalid use of parentheses for call statement */
-        "strcomp(\"x\", \"y\")"
+        const char *src;
+        unsigned error_line;
+        int error_char;
+    }
+    invalid_scripts[] =
+    {
+        {
+            /* If...End If */
+            "If 0 > 1 Then\n"
+            "    x = 0 End If\n",
+            1, 10
+        },
+        {
+            /* While...End While */
+            "While False\n"
+            "    x = 0 End While\n",
+            1, 10
+        },
+        {
+            /* While...Wend */
+            "While False\n"
+            "    x = 0 Wend\n",
+            1, 10
+        },
+        {
+            /* Do While...Loop */
+            "Do While False\n"
+            "    x = 0 Loop\n",
+            1, 10
+        },
+        {
+            /* Do Until...Loop */
+            "Do Until True\n"
+            "    x = 0 Loop\n",
+            1, 10
+        },
+        {
+            /* Do...Loop While */
+            "Do\n"
+            "    x = 0 Loop While False\n",
+            1, 10
+        },
+        {
+            /* Do...Loop Until */
+            "Do\n"
+            "    x = 0 Loop Until True\n",
+            1, 10
+        },
+        {
+            /* Select...End Select */
+            "x = False\n"
+            "Select Case 42\n"
+            "    Case 0\n"
+            "        Call ok(False, \"unexpected case\")\n"
+            "    Case 42\n"
+            "        x = True End Select\n"
+            "Call ok(x, \"wrong case\")\n",
+            5, 17
+        },
+        {
+            /* Class...End Class  (empty) */
+            "Class C End Class",
+            0, 8
+        },
+        {
+            /* Class...End Class  (empty) */
+            "Class C _\nEnd Class",
+            1, 0
+        },
+        {
+            /* invalid use of parentheses for call statement */
+            "strcomp(\"x\", \"y\")",
+            0, -17
+        },
+        {
+            "\n\n\n  cint _\n   throwInt(&h80001234&)",
+            3, 2
+        },
+        {
+            "dim x\n"
+            "if true then throwInt(&h80001234&)",
+            1, 13
+        },
+        {
+            "dim x\n"
+            "if x = throwInt(&h80001234&) then x = 1",
+            1, 0
+        },
+        {
+            "sub test\n"
+            "    dim x\n"
+            "    if x = throwInt(&h80001234&) then x = 1\n"
+            "end sub\n"
+            "test\n",
+            2, 4
+        },
+        {
+            "dim x\n"
+            "do\n"
+            "    x = 1\n"
+            "loop until throwInt(&h80001234&)\n",
+            3, 0
+        },
+        {
+            "\n  select case 3\n"
+            "    case 2\n"
+            "        ok false, \"unexpected case\"\n"
+            "    case throwInt(&h80001234&)\n"
+            "        throwInt &h87001234&\n"
+            "end select\n",
+            1, 2
+        },
+        {
+            "if false then\n"
+            "    ok false, \"unexpected case\"\n"
+            " elseif throwInt(&h80001234&) then\n"
+            "    throwInt &h87001234&\n"
+            "else\n"
+            "    throwInt &h87001234&\n"
+            "end if\n",
+            2, 1
+        }
     };
     HRESULT hres;
     UINT i;
 
     for (i = 0; i < ARRAY_SIZE(invalid_scripts); i++)
     {
+        error_line = ~0;
+        error_char = -1;
+        onerror_hres = S_OK;
+
         SET_EXPECT(OnScriptError);
-        hres = parse_script_ar(invalid_scripts[i]);
-        ok(FAILED(hres), "[%u] script did not fail\n", i);
+        hres = parse_script_ar(invalid_scripts[i].src);
+        ok(hres == SCRIPT_E_REPORTED, "[%u] script returned: %08x\n", i, hres);
         CHECK_CALLED(OnScriptError);
+
+        ok(error_line == invalid_scripts[i].error_line, "[%u] error line %u expected %u\n",
+           i, error_line, invalid_scripts[i].error_line);
+        todo_wine_if(invalid_scripts[i].error_char < 0)
+        ok(error_char == abs(invalid_scripts[i].error_char), "[%u] error char %d expected %d\n",
+           i, error_char, invalid_scripts[i].error_char);
     }
 }
 
@@ -2522,7 +2633,7 @@ static HRESULT test_global_vars_ref(BOOL use_close)
     hres = IActiveScript_SetScriptSite(engine, &ActiveScriptSite);
     ok(hres == S_OK, "SetScriptSite failed: %08x\n", hres);
 
-    hres = IActiveScript_AddNamedItem(engine, testW, SCRIPTITEM_ISVISIBLE|SCRIPTITEM_ISSOURCE|SCRIPTITEM_GLOBALMEMBERS);
+    hres = IActiveScript_AddNamedItem(engine, L"test", SCRIPTITEM_ISVISIBLE|SCRIPTITEM_ISSOURCE|SCRIPTITEM_GLOBALMEMBERS);
     ok(hres == S_OK, "AddNamedItem failed: %08x\n", hres);
 
     hres = IActiveScript_SetScriptState(engine, SCRIPTSTATE_STARTED);
@@ -2557,6 +2668,7 @@ static void test_isexpression(void)
 {
     IActiveScriptParse *parser;
     IActiveScript *engine;
+    IDispatch *disp;
     SCRIPTSTATE ss;
     HRESULT hres;
     VARIANT var;
@@ -2619,6 +2731,18 @@ static void test_isexpression(void)
     VariantClear(&var);
     SysFreeString(str);
 
+    /* Without a global host or named item context, "me" returns the script dispatch */
+    hres = IActiveScript_GetScriptDispatch(engine, NULL, &disp);
+    ok(hres == S_OK, "GetScriptDispatch failed: %08x\n", hres);
+    str = a2bstr("me");
+    hres = IActiveScriptParse_ParseScriptText(parser, str, NULL, NULL, NULL, 0, 0, SCRIPTTEXT_ISEXPRESSION, &var, NULL);
+    ok(hres == S_OK, "ParseScriptText failed: %08x\n", hres);
+    ok(V_VT(&var) == VT_DISPATCH, "Expected VT_DISPATCH, got %s\n", vt2a(&var));
+    ok(V_DISPATCH(&var) == disp, "Wrong dispatch returned for 'me'\n");
+    IDispatch_Release(disp);
+    VariantClear(&var);
+    SysFreeString(str);
+
     /* An expression can also refer to a variable, function, class, etc previously set */
     V_VT(&var) = VT_I2;
     str = a2bstr("If True Then foo = 42 Else foo = 0\n");
@@ -2648,7 +2772,7 @@ static void test_isexpression(void)
     hres = IActiveScriptParse_ParseScriptText(parser, str, NULL, NULL, NULL, 0, 0, SCRIPTTEXT_ISEXPRESSION, &var, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08x\n", hres);
     ok(V_VT(&var) == VT_BSTR, "Expected VT_BSTR, got %s\n", vt2a(&var));
-    ok(!strcmp_wa(V_BSTR(&var), "foo is 42"), "Wrong string, got %s\n", wine_dbgstr_w(V_BSTR(&var)));
+    ok(!lstrcmpW(V_BSTR(&var), L"foo is 42"), "Wrong string, got %s\n", wine_dbgstr_w(V_BSTR(&var)));
     VariantClear(&var);
     SysFreeString(str);
 

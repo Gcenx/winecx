@@ -54,7 +54,6 @@ static void test_acquire_context(void)
     /* cannot acquire along with PROV_RSA_SIG, not compatible */
     SetLastError(0xdeadbeef);
     result = CryptAcquireContextA(&hProv, NULL, MS_DEF_DSS_PROV_A, PROV_RSA_SIG, 0);
-    todo_wine
     ok(!result && GetLastError() == NTE_PROV_TYPE_NO_MATCH,
         "Expected NTE_PROV_TYPE_NO_MATCH, got %08x\n", GetLastError());
 
@@ -126,11 +125,6 @@ static void test_acquire_context(void)
     SetLastError(0xdeadbeef);
     result = CryptAcquireContextA(
         &hProv, NULL, MS_ENH_DSS_DH_PROV_A, PROV_DSS_DH, CRYPT_VERIFYCONTEXT);
-    if(!result && GetLastError() == NTE_KEYSET_NOT_DEF)
-    {
-        win_skip("DSSENH and Schannel provider is broken on WinNT4\n");
-        return;
-    }
     ok(result, "Expected no errors.\n");
 
     result = CryptReleaseContext(hProv, 0);
@@ -189,38 +183,38 @@ struct keylength_test {
     DWORD flags;
     BOOL expectedResult;
     DWORD expectedError;
-    BOOL brokenResult;
     DWORD brokenError;
-    DWORD altError;
+    int todo_result;
+    int todo_error;
 };
 
 static const struct keylength_test baseDSS_keylength[] = {
     /* AT_KEYEXCHANGE is not supported by the base DSS provider */
-    {AT_KEYEXCHANGE, 448 << 16, FALSE, NTE_BAD_ALGID, FALSE, NTE_BAD_FLAGS}, /* WinNT4 and Win2k */
-    {AT_KEYEXCHANGE, 512 << 16, FALSE, NTE_BAD_ALGID, TRUE}, /* success on WinNT4 */
-    {AT_KEYEXCHANGE, 1024 << 16, FALSE, NTE_BAD_ALGID, TRUE}, /* success on WinNT4 */
-    {AT_KEYEXCHANGE, 1088 << 16, FALSE, NTE_BAD_ALGID, FALSE, NTE_BAD_FLAGS},/* WinNT4 and Win2k */
+    {AT_KEYEXCHANGE, 448 << 16, FALSE, NTE_BAD_ALGID, 0, 0, 1},
+    {AT_KEYEXCHANGE, 512 << 16, FALSE, NTE_BAD_ALGID, 0, 0, 1},
+    {AT_KEYEXCHANGE, 1024 << 16, FALSE, NTE_BAD_ALGID, 0, 0, 1},
+    {AT_KEYEXCHANGE, 1088 << 16, FALSE, NTE_BAD_ALGID, 0, 0, 1},
     /* min 512 max 1024 increment by 64 */
     {AT_SIGNATURE, 448 << 16, FALSE, NTE_BAD_FLAGS},
     {AT_SIGNATURE, 512 << 16, TRUE},
-    {AT_SIGNATURE, 513 << 16, FALSE, NTE_FAIL, FALSE, NTE_BAD_FLAGS, STATUS_INVALID_PARAMETER}, /* WinNT4 and Win2k */
+    {AT_SIGNATURE, 513 << 16, FALSE, STATUS_INVALID_PARAMETER, NTE_FAIL},
     {AT_SIGNATURE, 768 << 16, TRUE},
     {AT_SIGNATURE, 1024 << 16, TRUE},
     {AT_SIGNATURE, 1088 << 16, FALSE, NTE_BAD_FLAGS},
     /* CALG_DH_EPHEM is not supported by the base DSS provider */
-    {CALG_DH_EPHEM, 448 << 16, FALSE, NTE_BAD_ALGID, FALSE, NTE_BAD_FLAGS}, /* WinNT4 and Win2k */
-    {CALG_DH_EPHEM, 512 << 16, FALSE, NTE_BAD_ALGID, TRUE}, /* success on WinNT4 */
-    {CALG_DH_EPHEM, 1024 << 16, FALSE, NTE_BAD_ALGID, TRUE}, /* success on WinNT4 */
-    {CALG_DH_EPHEM, 1088 << 16, FALSE, NTE_BAD_ALGID, FALSE, NTE_BAD_FLAGS}, /* WinNT4 and Win2k */
+    {CALG_DH_EPHEM, 448 << 16, FALSE, NTE_BAD_ALGID, 0, 0, 1},
+    {CALG_DH_EPHEM, 512 << 16, FALSE, NTE_BAD_ALGID, 0, 0, 1},
+    {CALG_DH_EPHEM, 1024 << 16, FALSE, NTE_BAD_ALGID, 0, 0, 1},
+    {CALG_DH_EPHEM, 1088 << 16, FALSE, NTE_BAD_ALGID, 0, 0, 1},
     /* CALG_DH_SF is not supported by the base DSS provider */
-    {CALG_DH_SF, 448 << 16, FALSE, NTE_BAD_ALGID, FALSE, NTE_BAD_FLAGS}, /* WinNT4 and Win2k */
-    {CALG_DH_SF, 512 << 16, FALSE, NTE_BAD_ALGID, TRUE}, /* success on WinNT4 */
-    {CALG_DH_SF, 1024 << 16, FALSE, NTE_BAD_ALGID, TRUE}, /* success on WinNT4 */
-    {CALG_DH_SF, 1088 << 16, FALSE, NTE_BAD_ALGID, FALSE, NTE_BAD_FLAGS}, /* WinNT4 and Win2k */
+    {CALG_DH_SF, 448 << 16, FALSE, NTE_BAD_ALGID, 0, 0, 1},
+    {CALG_DH_SF, 512 << 16, FALSE, NTE_BAD_ALGID, 0, 0, 1},
+    {CALG_DH_SF, 1024 << 16, FALSE, NTE_BAD_ALGID, 0, 0, 1},
+    {CALG_DH_SF, 1088 << 16, FALSE, NTE_BAD_ALGID, 0, 0, 1},
     /* min 512 max 1024, increment by 64 */
     {CALG_DSS_SIGN, 448 << 16, FALSE, NTE_BAD_FLAGS},
     {CALG_DSS_SIGN, 512 << 16, TRUE},
-    {CALG_DSS_SIGN, 513 << 16, FALSE, NTE_FAIL, FALSE, NTE_BAD_FLAGS, STATUS_INVALID_PARAMETER}, /* WinNT4 and Win2k */
+    {CALG_DSS_SIGN, 513 << 16, FALSE, STATUS_INVALID_PARAMETER, NTE_FAIL},
     {CALG_DSS_SIGN, 768 << 16, TRUE},
     {CALG_DSS_SIGN, 1024 << 16, TRUE},
     {CALG_DSS_SIGN, 1088 << 16, FALSE, NTE_BAD_FLAGS}
@@ -229,32 +223,32 @@ static const struct keylength_test baseDSS_keylength[] = {
 static const struct keylength_test dssDH_keylength[] = {
     /* min 512 max 1024, increment by 64 */
     {AT_KEYEXCHANGE, 448 << 16, FALSE, NTE_BAD_FLAGS},
-    {AT_KEYEXCHANGE, 512 << 16, TRUE},
-    {AT_KEYEXCHANGE, 513 << 16, FALSE,  NTE_FAIL, FALSE, NTE_BAD_FLAGS}, /* WinNT4 and Win2k */
-    {AT_KEYEXCHANGE, 768 << 16, TRUE},
-    {AT_KEYEXCHANGE, 1024 << 16, TRUE},
+    {AT_KEYEXCHANGE, 512 << 16, TRUE, 0, 0, 1},
+    {AT_KEYEXCHANGE, 513 << 16, FALSE, NTE_BAD_FLAGS, 0, 0, 1},
+    {AT_KEYEXCHANGE, 768 << 16, TRUE, 0, 0, 1},
+    {AT_KEYEXCHANGE, 1024 << 16, TRUE, 0, 0, 1},
     {AT_KEYEXCHANGE, 1088 << 16, FALSE, NTE_BAD_FLAGS},
     {AT_SIGNATURE, 448 << 16, FALSE, NTE_BAD_FLAGS},
     {AT_SIGNATURE, 512 << 16, TRUE},
-    {AT_SIGNATURE, 513 << 16, FALSE,  NTE_FAIL, FALSE, NTE_BAD_FLAGS, STATUS_INVALID_PARAMETER}, /* WinNT4 and Win2k */
+    {AT_SIGNATURE, 513 << 16, FALSE, STATUS_INVALID_PARAMETER, NTE_FAIL},
     {AT_SIGNATURE, 768 << 16, TRUE},
     {AT_SIGNATURE, 1024 << 16, TRUE},
     {AT_SIGNATURE, 1088 << 16, FALSE, NTE_BAD_FLAGS},
     {CALG_DH_EPHEM, 448 << 16, FALSE, NTE_BAD_FLAGS},
-    {CALG_DH_EPHEM, 512 << 16, TRUE},
-    {CALG_DH_EPHEM, 513 << 16, FALSE,  NTE_FAIL, FALSE, NTE_BAD_FLAGS}, /* WinNT4 and Win2k */
-    {CALG_DH_EPHEM, 768 << 16, TRUE},
-    {CALG_DH_EPHEM, 1024 << 16, TRUE},
+    {CALG_DH_EPHEM, 512 << 16, TRUE, 0, 0, 1},
+    {CALG_DH_EPHEM, 513 << 16, FALSE, NTE_BAD_FLAGS, 0, 0, 1},
+    {CALG_DH_EPHEM, 768 << 16, TRUE, 0, 0, 1},
+    {CALG_DH_EPHEM, 1024 << 16, TRUE, 0, 0, 1},
     {CALG_DH_EPHEM, 1088 << 16, FALSE, NTE_BAD_FLAGS},
     {CALG_DH_SF, 448 << 16, FALSE, NTE_BAD_FLAGS},
-    {CALG_DH_SF, 512 << 16, TRUE},
-    {CALG_DH_SF, 513 << 16, FALSE,  NTE_FAIL, FALSE, NTE_BAD_FLAGS}, /* WinNT4 and Win2k */
-    {CALG_DH_SF, 768 << 16, TRUE},
-    {CALG_DH_SF, 1024 << 16, TRUE},
+    {CALG_DH_SF, 512 << 16, TRUE, 0, 0, 1},
+    {CALG_DH_SF, 513 << 16, FALSE, NTE_BAD_FLAGS, 0, 0, 1},
+    {CALG_DH_SF, 768 << 16, TRUE, 0, 0, 1},
+    {CALG_DH_SF, 1024 << 16, TRUE, 0, 0, 1},
     {CALG_DH_SF, 1088 << 16, FALSE, NTE_BAD_FLAGS},
     {CALG_DSS_SIGN, 448 << 16, FALSE, NTE_BAD_FLAGS},
     {CALG_DSS_SIGN, 512 << 16, TRUE},
-    {CALG_DSS_SIGN, 513 << 16, FALSE,  NTE_FAIL, FALSE, NTE_BAD_FLAGS, STATUS_INVALID_PARAMETER}, /* WinNT4 and Win2k */
+    {CALG_DSS_SIGN, 513 << 16, FALSE, STATUS_INVALID_PARAMETER, NTE_FAIL},
     {CALG_DSS_SIGN, 768 << 16, TRUE},
     {CALG_DSS_SIGN, 1024 << 16, TRUE},
     {CALG_DSS_SIGN, 1088 << 16, FALSE, NTE_BAD_FLAGS}
@@ -263,41 +257,41 @@ static const struct keylength_test dssDH_keylength[] = {
 static const struct keylength_test dssENH_keylength[] = {
     /* min 512 max 1024 (AT_KEYEXCHANGE, CALG_DH_EPHEM, CALG_DH_SF max 4096), increment by 64*/
     {AT_KEYEXCHANGE, 448 << 16, FALSE, NTE_BAD_FLAGS},
-    {AT_KEYEXCHANGE, 512 << 16, TRUE},
-    {AT_KEYEXCHANGE, 513 << 16, FALSE,  NTE_FAIL, FALSE, NTE_BAD_FLAGS}, /* WinNT4 and Win2k */
-    {AT_KEYEXCHANGE, 768 << 16, TRUE},
-    {AT_KEYEXCHANGE, 1024 << 16, TRUE},
-    {AT_KEYEXCHANGE, 1088 << 16, TRUE},
-    {AT_KEYEXCHANGE, 2048 << 16, TRUE},
+    {AT_KEYEXCHANGE, 512 << 16, TRUE, 0, 0, 1},
+    {AT_KEYEXCHANGE, 513 << 16, FALSE, NTE_BAD_FLAGS, 0, 0, 1},
+    {AT_KEYEXCHANGE, 768 << 16, TRUE, 0, 0, 1},
+    {AT_KEYEXCHANGE, 1024 << 16, TRUE, 0, 0, 1},
+    {AT_KEYEXCHANGE, 1088 << 16, TRUE, 0, 0, 1},
+    {AT_KEYEXCHANGE, 2048 << 16, TRUE, 0, 0, 1},
     /* Keylength too large - test bot timeout.
     {AT_KEYEXCHANGE, 3072 << 16, TRUE},
     {AT_KEYEXCHANGE, 4096 << 16, TRUE}, */
     {AT_KEYEXCHANGE, 4160 << 16, FALSE, NTE_BAD_FLAGS},
     {AT_SIGNATURE, 448 << 16, FALSE, NTE_BAD_FLAGS},
     {AT_SIGNATURE, 512 << 16, TRUE},
-    {AT_SIGNATURE, 513 << 16, FALSE,  NTE_FAIL, FALSE, NTE_BAD_FLAGS, STATUS_INVALID_PARAMETER}, /* WinNT4 and Win2k */
+    {AT_SIGNATURE, 513 << 16, FALSE, STATUS_INVALID_PARAMETER, NTE_FAIL},
     {AT_SIGNATURE, 768 << 16, TRUE},
     {AT_SIGNATURE, 1024 << 16, TRUE},
     {AT_SIGNATURE, 1032 << 16, FALSE, NTE_BAD_FLAGS},
     {CALG_DH_EPHEM, 448 << 16, FALSE, NTE_BAD_FLAGS},
-    {CALG_DH_EPHEM, 512 << 16, TRUE},
-    {CALG_DH_EPHEM, 513 << 16, FALSE,  NTE_FAIL, FALSE, NTE_BAD_FLAGS}, /* WinNT4 and Win2k */
-    {CALG_DH_EPHEM, 768 << 16, TRUE},
-    {CALG_DH_EPHEM, 1024 << 16, TRUE},
+    {CALG_DH_EPHEM, 512 << 16, TRUE, 0, 0, 1},
+    {CALG_DH_EPHEM, 513 << 16, FALSE, NTE_BAD_FLAGS, 0, 0, 1},
+    {CALG_DH_EPHEM, 768 << 16, TRUE, 0, 0, 1},
+    {CALG_DH_EPHEM, 1024 << 16, TRUE, 0, 0, 1},
     {CALG_DH_EPHEM, 1040 << 16, FALSE, NTE_BAD_FLAGS},
-    {CALG_DH_EPHEM, 1088 << 16, TRUE},
+    {CALG_DH_EPHEM, 1088 << 16, TRUE, 0, 0, 1},
     {CALG_DH_EPHEM, 4160 << 16, FALSE, NTE_BAD_FLAGS},
     {CALG_DH_SF, 448 << 16, FALSE, NTE_BAD_FLAGS},
-    {CALG_DH_SF, 512 << 16, TRUE},
-    {CALG_DH_SF, 513 << 16, FALSE,  NTE_FAIL, FALSE, NTE_BAD_FLAGS}, /* WinNT4 and Win2k */
-    {CALG_DH_SF, 768 << 16, TRUE},
-    {CALG_DH_SF, 1024 << 16, TRUE},
+    {CALG_DH_SF, 512 << 16, TRUE, 0, 0, 1},
+    {CALG_DH_SF, 513 << 16, FALSE, NTE_BAD_FLAGS, 0, 0, 1},
+    {CALG_DH_SF, 768 << 16, TRUE, 0, 0, 1},
+    {CALG_DH_SF, 1024 << 16, TRUE, 0, 0, 1},
     {CALG_DH_SF, 1032 << 16, FALSE, NTE_BAD_FLAGS},
-    {CALG_DH_SF, 1088 << 16, TRUE},
+    {CALG_DH_SF, 1088 << 16, TRUE, 0, 0, 1},
     {CALG_DH_SF, 4160 << 16, FALSE, NTE_BAD_FLAGS},
     {CALG_DSS_SIGN, 448 << 16, FALSE, NTE_BAD_FLAGS},
     {CALG_DSS_SIGN, 512 << 16, TRUE},
-    {CALG_DSS_SIGN, 513 << 16, FALSE,  NTE_FAIL, FALSE, NTE_BAD_FLAGS, STATUS_INVALID_PARAMETER}, /* WinNT4 and Win2k */
+    {CALG_DSS_SIGN, 513 << 16, FALSE, STATUS_INVALID_PARAMETER, NTE_FAIL},
     {CALG_DSS_SIGN, 768 << 16, TRUE},
     {CALG_DSS_SIGN, 1024 << 16, TRUE},
     {CALG_DSS_SIGN, 1088 << 16, FALSE, NTE_BAD_FLAGS}
@@ -315,32 +309,21 @@ static void test_keylength_array(HCRYPTPROV hProv,const struct keylength_test *t
         result = CryptGenKey(hProv, tests[i].algid, tests[i].flags, &key);
 
         /* success */
-        if(tests[i].expectedResult)
+        if (tests[i].expectedResult)
         {
-            ok(result, "%d: Expected a key, got %08x\n", i, GetLastError());
-            result = CryptDestroyKey(key);
-            ok(result, "Expected no errors.\n");
+            todo_wine_if (tests[i].todo_result) ok(result, "%d: got %08x\n", i, GetLastError());
+            if (result)
+            {
+                result = CryptDestroyKey(key);
+                ok(result, "%d: got %08x\n", i, GetLastError());
+            }
         }
         else
-        {   /* error but success on older system */
-            if(tests[i].brokenResult)
-                ok((!result && GetLastError() == tests[i].expectedError) ||
-                   broken(result), "%d: Didn't really expect a key, got %x, %d\n",
-                   i, GetLastError(), result);
-            else
-            {
-                /* error */
-                if(!tests[i].brokenError)
-                    ok(!result && GetLastError() == tests[i].expectedError,
-                       "%d: Expected an error, got %x, %d.\n", i, GetLastError(), result);
-
-                /* error but different error on older system */
-                else
-                    ok(!result && (GetLastError() == tests[i].expectedError ||
-                                   GetLastError() == tests[i].altError ||
-                                   broken(GetLastError() == tests[i].brokenError) ),
-                       "%d: Expected an error, got %x, %d.\n", i, GetLastError(), result);
-            }
+        {
+            todo_wine_if (tests[i].todo_result) ok(!result, "%d: got %x\n", i, GetLastError());
+            todo_wine_if (tests[i].todo_error)
+                ok(GetLastError() == tests[i].expectedError ||
+                   broken(GetLastError() == tests[i].brokenError), "%d: got %08x\n", i, GetLastError());
         }
     }
 }
@@ -348,6 +331,7 @@ static void test_keylength_array(HCRYPTPROV hProv,const struct keylength_test *t
 static void test_keylength(void)
 {
     HCRYPTPROV hProv = 0;
+    HCRYPTKEY key;
     BOOL result;
 
     /* acquire base dss provider */
@@ -358,6 +342,12 @@ static void test_keylength(void)
         skip("DSSENH is currently not available, skipping key length tests.\n");
         return;
     }
+    ok(result, "Expected no errors.\n");
+
+    result = CryptGenKey(hProv, AT_SIGNATURE, 0, &key);
+    ok(result, "Expected no errors.\n");
+
+    result = CryptDestroyKey(key);
     ok(result, "Expected no errors.\n");
 
     /* perform keylength tests */
@@ -381,11 +371,6 @@ static void test_keylength(void)
     SetLastError(0xdeadbeef);
     result = CryptAcquireContextA(
         &hProv, NULL, MS_ENH_DSS_DH_PROV_A, PROV_DSS_DH, CRYPT_VERIFYCONTEXT);
-    if(!result && GetLastError() == NTE_KEYSET_NOT_DEF)
-    {
-        win_skip("DSSENH and Schannel provider is broken on WinNT4\n");
-        return;
-    }
     ok(result, "Expected no errors.\n");
 
     /* perform keylength tests */
@@ -603,7 +588,7 @@ static void test_data_encryption(const struct encrypt_test *tests, int testLen)
     SetLastError(0xdeadbeef);
     result = CryptAcquireContextA(
         &hProv, NULL, MS_ENH_DSS_DH_PROV_A, PROV_DSS_DH, CRYPT_VERIFYCONTEXT);
-    if(!result && GetLastError() == NTE_KEYSET_NOT_DEF)
+    if (!result)
     {
         skip("DSSENH is currently not available, skipping encryption tests.\n");
         return;
@@ -625,6 +610,11 @@ static void test_data_encryption(const struct encrypt_test *tests, int testLen)
 
         /* Derive key */
         result = CryptDeriveKey(hProv, tests[i].algid, hHash, tests[i].keyLength, &pKey);
+        if (!result)
+        {
+            skip("skipping encryption tests\n");
+            return;
+        }
         ok(result, "Expected a derived key.\n");
 
         result = CryptDestroyHash(hHash);
@@ -694,7 +684,7 @@ static void test_cipher_modes(const struct ciphermode_test *tests, int testLen)
     SetLastError(0xdeadbeef);
     result = CryptAcquireContextA(
         &hProv, NULL, MS_ENH_DSS_DH_PROV_A, PROV_DSS_DH, CRYPT_VERIFYCONTEXT);
-    if(!result && GetLastError() == NTE_KEYSET_NOT_DEF)
+    if (!result)
     {
         skip("DSSENH is currently not available, skipping block cipher mode tests.\n");
         return;
@@ -710,6 +700,11 @@ static void test_cipher_modes(const struct ciphermode_test *tests, int testLen)
 
     /* Derive a CALG_RC2 key, but could be any other encryption cipher */
     result = CryptDeriveKey(hProv, CALG_RC2, hHash, 40 << 16, &pKey);
+    if (!result)
+    {
+        skip("skipping cipher mode tests\n");
+        return;
+    }
     ok(result, "Expected a derived key.\n");
 
     result = CryptDestroyHash(hHash);
@@ -897,6 +892,7 @@ static void test_signhash_array(HCRYPTPROV hProv, const struct signature_test *t
         ok(!memcmp(hashValue1, hashValue2, hashLen2), "Hashes were not identical.\n");
 
         /* Sign hash 1 */
+        signLen1 = 0;
         result = CryptSignHashA(hHash1, AT_SIGNATURE, NULL, 0, NULL, &signLen1);
         ok(result, "Failed to get signature length, got %x\n", GetLastError());
         ok(signLen1 == 40, "Expected a 40-byte signature, got %d\n", signLen1);
@@ -905,6 +901,7 @@ static void test_signhash_array(HCRYPTPROV hProv, const struct signature_test *t
         ok(result, "Failed to sign hash, got %x\n", GetLastError());
 
         /* Sign hash 2 */
+        signLen2 = 0;
         result = CryptSignHashA(hHash2, AT_SIGNATURE, NULL, 0, NULL, &signLen2);
         ok(result, "Failed to get signature length, got %x\n", GetLastError());
         ok(signLen2 == 40, "Expected a 40-byte signature, got %d\n", signLen2);
@@ -946,6 +943,11 @@ static void test_signhash_array(HCRYPTPROV hProv, const struct signature_test *t
 
         /* Verify signed hash 1 */
         result = CryptVerifySignatureA(hHash1, signValue1, sizeof(signValue1), pubKey, NULL, 0);
+        if (!result)
+        {
+            skip("skipping sign tests\n");
+            return;
+        }
         ok(result, "Failed to verify signature, got %x\n", GetLastError());
 
         result = CryptCreateHash(hProv, CALG_SHA, 0, 0, &hHash2);
@@ -1001,12 +1003,6 @@ static void test_verify_signature(void)
     /* acquire enhanced dss provider */
     SetLastError(0xdeadbeef);
     result = CryptAcquireContextA(&hProv, NULL, MS_ENH_DSS_DH_PROV_A, PROV_DSS_DH, 0);
-    if(!result && GetLastError() == NTE_KEYSET_NOT_DEF)
-    {
-        win_skip("DSSENH and Schannel provider is broken on WinNT4, skipping signature "
-            "verification tests.\n");
-        return;
-    }
     ok(result, "Failed to acquire CSP.\n");
 
     test_signhash_array(hProv, dssSign_data, ARRAY_SIZE(dssSign_data));
@@ -1120,94 +1116,99 @@ static void test_keyExchange_baseDSS(HCRYPTPROV hProv, const struct keyExchange_
 
         /* Generate key exchange keys for user1 and user2 */
         result = CryptGenKey(hProv, tests[i].algid, 512 << 16 | CRYPT_PREGEN, &privKey1);
-        ok((!result && GetLastError() ==  NTE_BAD_ALGID) || broken(result), /* WinNT4 */
-            "Expected NTE_BAD_ALGID, got %x\n", GetLastError());
+        if (!result)
+        {
+            skip("skipping key exchange tests\n");
+            return;
+        }
+        ok(!result && GetLastError() == NTE_BAD_ALGID,
+           "Expected NTE_BAD_ALGID, got %x\n", GetLastError());
 
         result = CryptGenKey(hProv, tests[i].algid, 512 << 16 | CRYPT_PREGEN, &privKey2);
-        ok((!result && GetLastError() ==  NTE_BAD_ALGID) || broken(result), /* WinNT4 */
-            "Expected NTE_BAD_ALGID, got %x\n", GetLastError());
+        ok(!result && GetLastError() == NTE_BAD_ALGID,
+           "Expected NTE_BAD_ALGID, got %x\n", GetLastError());
 
         /* Set the prime and generator values, which are agreed upon */
         result = CryptSetKeyParam(privKey1, KP_P, (BYTE *)&Prime, 0);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         result = CryptSetKeyParam(privKey2, KP_P, (BYTE *)&Prime, 0);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         result = CryptSetKeyParam(privKey1, KP_G, (BYTE *)&Generator, 0);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         result = CryptSetKeyParam(privKey2, KP_G, (BYTE *)&Generator, 0);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         /* Generate the secret value for user1 and user2 */
         result = CryptSetKeyParam(privKey1, KP_X, NULL, 0);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         result = CryptSetKeyParam(privKey2, KP_X, NULL, 0);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         /* Acquire required size for the public keys */
         result = CryptExportKey(privKey1, 0, PUBLICKEYBLOB, 0, NULL, &pubKeyLen1);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         result = CryptExportKey(privKey2, 0, PUBLICKEYBLOB, 0, NULL, &pubKeyLen2);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         /* Export public key which will be calculated into the shared key */
         result = CryptExportKey(privKey1, 0, PUBLICKEYBLOB, 0, pubKeyBuffer1, &pubKeyLen1);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         result = CryptExportKey(privKey2, 0, PUBLICKEYBLOB, 0, pubKeyBuffer2, &pubKeyLen2);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         /* Import the public key and convert it into a shared key */
         result = CryptImportKey(hProv, pubKeyBuffer2, pubKeyLen2, privKey1, 0, &sessionKey1);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) ||
-            broken(!result && GetLastError() ==  NTE_BAD_DATA) || /* Vista.64 */
-            broken(!result && GetLastError() ==  NTE_BAD_TYPE) || /* Win2K-W2K8, Win7.64 */
-            broken(!result && GetLastError() ==  NTE_BAD_ALGID),  /* W7SP164 (32 bit dssenh) */
+        ok((!result && GetLastError() == ERROR_INVALID_PARAMETER) ||
+            broken(!result && GetLastError() == NTE_BAD_DATA) || /* Vista.64 */
+            broken(!result && GetLastError() == NTE_BAD_TYPE) || /* Win2K-W2K8, Win7.64 */
+            broken(!result && GetLastError() == NTE_BAD_ALGID),  /* W7SP164 (32 bit dssenh) */
             "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         result = CryptImportKey(hProv, pubKeyBuffer1, pubKeyLen1, privKey2, 0, &sessionKey2);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) ||
-            broken(!result && GetLastError() ==  NTE_BAD_DATA) || /* Win 7 */
-            broken(!result && GetLastError() ==  NTE_BAD_TYPE) || /* Win2K-W2K8, Win7.64 */
-            broken(!result && GetLastError() ==  NTE_BAD_ALGID),  /* W7SP164 (32 bit dssenh) */
+        ok((!result && GetLastError() == ERROR_INVALID_PARAMETER) ||
+            broken(!result && GetLastError() == NTE_BAD_DATA) || /* Win 7 */
+            broken(!result && GetLastError() == NTE_BAD_TYPE) || /* Win2K-W2K8, Win7.64 */
+            broken(!result && GetLastError() == NTE_BAD_ALGID),  /* W7SP164 (32 bit dssenh) */
             "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         /* Set the shared key parameters to matching type */
         algid = CALG_RC4;
         result = CryptSetKeyParam(sessionKey1, KP_ALGID, (BYTE *)&algid, 0);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         algid = CALG_RC4;
         result = CryptSetKeyParam(sessionKey2, KP_ALGID, (BYTE *)&algid, 0);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         /* Encrypt some data and verify we are getting the same output */
         memcpy(pbData1, plainText, plainLen);
         dataLen = plainLen;
 
         result = CryptEncrypt(sessionKey1, 0, TRUE, 0, pbData1, &dataLen, 36);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         result = CryptDecrypt(sessionKey2, 0, TRUE, 0, pbData1, &dataLen);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         ok(!memcmp(pbData1, (BYTE *)plainText, sizeof(plainText)), "Incorrect decrypted data.\n");
 
@@ -1215,31 +1216,31 @@ static void test_keyExchange_baseDSS(HCRYPTPROV hProv, const struct keyExchange_
         dataLen = plainLen;
 
         result = CryptEncrypt(sessionKey2, 0, TRUE, 0, pbData2, &dataLen, 36);
-       ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         result = CryptDecrypt(sessionKey1, 0, TRUE, 0, pbData2, &dataLen);
-       ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         ok(!memcmp(pbData1, pbData2, dataLen), "Decrypted data is not identical.\n");
 
         /* Destroy all user keys */
         result = CryptDestroyKey(sessionKey1);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         result = CryptDestroyKey(sessionKey2);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         result = CryptDestroyKey(privKey1);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
 
         result = CryptDestroyKey(privKey2);
-        ok((!result && GetLastError() ==  ERROR_INVALID_PARAMETER) || broken(result),
-            "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError()); /* WinNT4 */
+        ok(!result && GetLastError() == ERROR_INVALID_PARAMETER,
+           "Expected ERROR_INVALID_PARAMETER, got %x\n", GetLastError());
     }
 }
 
@@ -1269,6 +1270,11 @@ static void test_keyExchange_dssDH(HCRYPTPROV hProv, const struct keyExchange_te
 
         /* Generate key exchange keys for user1 and user2 */
         result = CryptGenKey(hProv, tests[i].algid, 512 << 16 | CRYPT_PREGEN, &privKey1);
+        if (!result)
+        {
+            skip("skipping key exchange tests\n");
+            return;
+        }
         ok(result, "Failed to generate a key for user1, got %x\n", GetLastError());
 
         result = CryptGenKey(hProv, tests[i].algid, 512 << 16 | CRYPT_PREGEN, &privKey2);
@@ -1289,12 +1295,10 @@ static void test_keyExchange_dssDH(HCRYPTPROV hProv, const struct keyExchange_te
 
         /* Generate the secret value for user1 and user2 */
         result = CryptSetKeyParam(privKey1, KP_X, NULL, 0);
-        ok(result || broken(!result && GetLastError() == ERROR_INVALID_PARAMETER),
-            "Failed to set secret value for user 1, got %x\n", GetLastError());/* Win2k & WinXP */
+        ok(result, "Failed to set secret value for user 1, got %x\n", GetLastError());
 
         result = CryptSetKeyParam(privKey2, KP_X, NULL, 0);
-        ok(result || broken(!result && GetLastError() == ERROR_INVALID_PARAMETER),
-            "Failed to set secret value for user 2, got %x\n", GetLastError());/* Win2k & WinXP */
+        ok(result, "Failed to set secret value for user 2, got %x\n", GetLastError());
 
         /* Acquire required size for the public keys */
         result = CryptExportKey(privKey1, 0, PUBLICKEYBLOB, 0, NULL, &pubKeyLen1);
@@ -1396,11 +1400,6 @@ static void test_key_exchange(void)
     /* acquire enhanced dss provider */
     result = CryptAcquireContextA(&hProv, NULL, MS_ENH_DSS_DH_PROV_A, PROV_DSS_DH,
         CRYPT_VERIFYCONTEXT);
-    if(!result && GetLastError() == NTE_KEYSET_NOT_DEF)
-    {
-        win_skip("DSSENH and Schannel provider is broken on WinNT4, skipping shared key tests.\n");
-        return;
-    }
     ok(result, "Failed to acquire CSP.\n");
 
     test_keyExchange_dssDH(hProv, dssDHkey_data, ARRAY_SIZE(dssDHkey_data));
@@ -1419,6 +1418,132 @@ static void test_key_exchange(void)
     ok(result, "Failed to release CSP provider.\n");
 }
 
+static void test_duplicate_hash(void)
+{
+    static const char expected[] =
+        {0xb9,0x7b,0xed,0xd4,0x7b,0xd8,0xa0,0xcd,0x6c,0xba,0xce,0xe9,0xb1,0x36,0xbb,0x00,0x27,0xe3,0x95,0x21};
+    HCRYPTPROV hprov;
+    HCRYPTHASH hhash, hhash2;
+    BYTE buf[20];
+    DWORD len;
+    BOOL result;
+
+    result = CryptAcquireContextA(&hprov, NULL, MS_DEF_DSS_PROV_A, PROV_DSS, CRYPT_VERIFYCONTEXT);
+    ok(result, "got %08x\n", GetLastError());
+
+    result = CryptCreateHash(hprov, CALG_SHA, 0, 0, &hhash);
+    ok(result, "got %08x\n", GetLastError());
+
+    result = CryptHashData(hhash, (const BYTE *)"winetest", sizeof("winetest"), 0);
+    ok(result, "got %08x\n", GetLastError());
+
+    len = sizeof(buf);
+    result = CryptGetHashParam(hhash, HP_HASHVAL, buf, &len, 0);
+    ok(result, "got %08x\n", GetLastError());
+    ok(!memcmp(buf, expected, sizeof(expected)), "wrong data\n");
+
+    SetLastError(0xdeadbeef);
+    result = CryptHashData(hhash, (const BYTE *)"winetest", sizeof("winetest"), 0);
+    ok(!result, "success\n");
+    ok(GetLastError() == NTE_BAD_HASH_STATE, "got %08x\n", GetLastError());
+
+    result = CryptDuplicateHash(hhash, NULL, 0, &hhash2);
+    ok(result, "got %08x\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    result = CryptHashData(hhash2, (const BYTE *)"winetest", sizeof("winetest"), 0);
+    ok(!result, "success\n");
+    ok(GetLastError() == NTE_BAD_HASH_STATE, "got %08x\n", GetLastError());
+
+    len = sizeof(buf);
+    result = CryptGetHashParam(hhash2, HP_HASHVAL, buf, &len, 0);
+    ok(result, "got %08x\n", GetLastError());
+    ok(!memcmp(buf, expected, sizeof(expected)), "wrong data\n");
+
+    result = CryptDestroyHash(hhash2);
+    ok(result, "got %08x\n", GetLastError());
+
+    result = CryptDestroyHash(hhash);
+    ok(result, "got %08x\n", GetLastError());
+
+    result = CryptReleaseContext(hprov, 0);
+    ok(result, "got %08x\n", GetLastError());
+}
+
+static void test_userkey(void)
+{
+    HCRYPTPROV hprov;
+    HCRYPTKEY hkey;
+    BOOL result;
+
+    CryptAcquireContextA(&hprov, "winetest", MS_ENH_DSS_DH_PROV_A, PROV_DSS_DH, CRYPT_DELETEKEYSET);
+    result = CryptAcquireContextA(&hprov, "winetest", MS_ENH_DSS_DH_PROV_A, PROV_DSS_DH, CRYPT_NEWKEYSET);
+    ok(result, "got %08x\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    result = CryptGetUserKey(hprov, AT_KEYEXCHANGE, &hkey);
+    ok(!result, "success\n");
+    ok(GetLastError() == NTE_NO_KEY, "got %08x\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    result = CryptGetUserKey(hprov, AT_SIGNATURE, &hkey);
+    ok(!result, "success\n");
+    ok(GetLastError() == NTE_NO_KEY, "got %08x\n", GetLastError());
+
+    result = CryptGenKey(hprov, AT_SIGNATURE, 1024 << 16, &hkey);
+    ok(result, "got %08x\n", GetLastError());
+    result = CryptDestroyKey(hkey);
+    ok(result, "got %08x\n", GetLastError());
+
+    result = CryptGetUserKey(hprov, AT_SIGNATURE, &hkey);
+    ok(result, "got %08x\n", GetLastError());
+    result = CryptDestroyKey(hkey);
+    ok(result, "got %08x\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    result = CryptGetUserKey(hprov, AT_KEYEXCHANGE, &hkey);
+    ok(!result, "success\n");
+    ok(GetLastError() == NTE_NO_KEY, "got %08x\n", GetLastError());
+
+    result = CryptReleaseContext(hprov, 0);
+    ok(result, "got %08x\n", GetLastError());
+
+    hprov = 0xdeadbeef;
+    result = CryptAcquireContextA(&hprov, "winetest", MS_ENH_DSS_DH_PROV_A, PROV_DSS_DH, CRYPT_DELETEKEYSET);
+    ok(result, "got %08x\n", GetLastError());
+    ok(!hprov, "got %08x\n", (DWORD)hprov);
+}
+
+static void test_duplicate_key(void)
+{
+    HCRYPTPROV hprov;
+    HCRYPTKEY hkey, hkey2;
+    DWORD len;
+    BOOL result;
+    BYTE buf[512];
+
+    result = CryptAcquireContextA(&hprov, NULL, MS_DEF_DSS_PROV_A, PROV_DSS, CRYPT_VERIFYCONTEXT);
+    ok(result, "got %08x\n", GetLastError());
+
+    result = CryptImportKey(hprov, DSS_SIGN_PrivateKey, sizeof(DSS_SIGN_PrivateKey), 0, CRYPT_EXPORTABLE, &hkey);
+    ok(result, "got %08x\n", GetLastError());
+
+    result = CryptDuplicateKey(hkey, NULL, 0, &hkey2);
+    ok(result, "got %08x\n", GetLastError());
+
+    len = sizeof(buf);
+    result = CryptExportKey(hkey2, 0, PRIVATEKEYBLOB, 0, buf, &len);
+    ok(result, "got %08x\n", GetLastError());
+    ok(len == sizeof(DSS_SIGN_PrivateKey), "got %u\n", len);
+    ok(!memcmp(buf, DSS_SIGN_PrivateKey, sizeof(DSS_SIGN_PrivateKey)), "wrong data\n");
+
+    result = CryptDestroyKey(hkey2);
+    ok(result, "got %08x\n", GetLastError());
+
+    result = CryptDestroyKey(hkey);
+    ok(result, "got %08x\n", GetLastError());
+}
+
 START_TEST(dssenh)
 {
     test_acquire_context();
@@ -1428,4 +1553,7 @@ START_TEST(dssenh)
     test_cipher_modes(ciphermode_data, ARRAY_SIZE(ciphermode_data));
     test_verify_signature();
     test_key_exchange();
+    test_duplicate_hash();
+    test_userkey();
+    test_duplicate_key();
 }

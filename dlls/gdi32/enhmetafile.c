@@ -31,9 +31,6 @@
  *
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1143,6 +1140,31 @@ BOOL WINAPI PlayEnhMetaFileRecord(
 	break;
       }
 
+    case EMR_POLYDRAW16:
+    {
+        const EMRPOLYDRAW16 *pPolyDraw16 = (const EMRPOLYDRAW16 *)mr;
+        const POINTS *ptl = pPolyDraw16->apts;
+        POINT *pts = HeapAlloc(GetProcessHeap(), 0, pPolyDraw16->cpts * sizeof(POINT));
+        DWORD i;
+
+        /* NB abTypes array doesn't start at pPolyDraw16->abTypes. It's actually
+           pPolyDraw16->apts + pPolyDraw16->cpts. */
+        const BYTE *types = (BYTE*)(pPolyDraw16->apts + pPolyDraw16->cpts);
+
+        if (!pts)
+            break;
+
+        for (i = 0; i < pPolyDraw16->cpts; ++i)
+        {
+            pts[i].x = ptl[i].x;
+            pts[i].y = ptl[i].y;
+        }
+
+        PolyDraw(hdc, pts, types, pPolyDraw16->cpts);
+        HeapFree(GetProcessHeap(), 0, pts);
+        break;
+    }
+
     case EMR_STRETCHDIBITS:
       {
 	const EMRSTRETCHDIBITS *pStretchDIBits = (const EMRSTRETCHDIBITS *)mr;
@@ -1622,9 +1644,12 @@ BOOL WINAPI PlayEnhMetaFileRecord(
     case EMR_POLYDRAW:
       {
         const EMRPOLYDRAW *lpPolyDraw = (const EMRPOLYDRAW *)mr;
+
+        /* NB abTypes array doesn't start at lpPolyDraw->abTypes. It's actually
+           lpPolyDraw->aptl + lpPolyDraw->cptl. */
         PolyDraw( hdc,
                   (const POINT*)lpPolyDraw->aptl,
-                  lpPolyDraw->abTypes,
+                  (BYTE*)(lpPolyDraw->aptl + lpPolyDraw->cptl),
                   (INT)lpPolyDraw->cptl );
 
         break;
@@ -2240,7 +2265,6 @@ BOOL WINAPI PlayEnhMetaFileRecord(
         break;
     }
 
-    case EMR_POLYDRAW16:
     case EMR_GLSRECORD:
     case EMR_GLSBOUNDEDRECORD:
     case EMR_DRAWESCAPE:
@@ -2812,7 +2836,6 @@ typedef struct wmf_in_emf_comment
 HENHMETAFILE WINAPI SetWinMetaFileBits(UINT cbBuffer, const BYTE *lpbBuffer, HDC hdcRef,
                                        const METAFILEPICT *lpmfp)
 {
-    static const WCHAR szDisplayW[] = { 'D','I','S','P','L','A','Y','\0' };
     HMETAFILE hmf = NULL;
     HENHMETAFILE ret = NULL;
     HDC hdc = NULL, hdcdisp = NULL;
@@ -2833,7 +2856,7 @@ HENHMETAFILE WINAPI SetWinMetaFileBits(UINT cbBuffer, const BYTE *lpbBuffer, HDC
     if (ret) return ret;
 
     if(!hdcRef)
-        hdcRef = hdcdisp = CreateDCW(szDisplayW, NULL, NULL, NULL);
+        hdcRef = hdcdisp = CreateDCW(L"DISPLAY", NULL, NULL, NULL);
 
     if (lpmfp)
     {

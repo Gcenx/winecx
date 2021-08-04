@@ -186,6 +186,29 @@ static int open_mailto_url( const WCHAR *url )
     return launch_app( mailers, url );
 }
 
+static int open_invalid_url( const WCHAR *url )
+{
+    static const WCHAR httpW[] =
+        {'h','t','t','p',':','/','/',0};
+
+    WCHAR *url_prefixed;
+    int ret;
+
+    url_prefixed = HeapAlloc( GetProcessHeap(), 0, (ARRAY_SIZE(httpW) + strlenW( url )) * sizeof(WCHAR) );
+    if (!url_prefixed)
+    {
+        WINE_ERR("Out of memory\n");
+        return 1;
+    }
+
+    strcpyW( url_prefixed, httpW );
+    strcatW( url_prefixed, url );
+
+    ret = open_http_url( url_prefixed );
+    HeapFree( GetProcessHeap(), 0, url_prefixed );
+    return ret;
+}
+
 /*****************************************************************************
  * DDE helper functions.
  */
@@ -427,7 +450,7 @@ static WCHAR *convert_file_uri(IUri *uri)
  * Main entry point. This is a console application so we have a wmain() not a
  * winmain().
  */
-int __cdecl wmain(int argc, WCHAR *argv[])
+int wmain(int argc, WCHAR *argv[])
 {
     static const WCHAR nohomeW[] = {'-','n','o','h','o','m','e',0};
 
@@ -450,8 +473,8 @@ int __cdecl wmain(int argc, WCHAR *argv[])
 
     hres = CreateUri(url, Uri_CREATE_ALLOW_IMPLICIT_FILE_SCHEME|Uri_CREATE_FILE_USE_DOS_PATH, 0, &uri);
     if(FAILED(hres)) {
-        WINE_ERR("Failed to parse URL\n");
-        ret = open_http_url(url);
+        WINE_ERR("Failed to parse URL %s, treating as HTTP\n", wine_dbgstr_w(url));
+        ret = open_invalid_url(url);
         HeapFree(GetProcessHeap(), 0, ddeString);
         return ret;
     }

@@ -32,7 +32,6 @@
 #include <errno.h>
 #include <direct.h>
 
-void __cdecl __getmainargs(int *, char ***, char ***, int, int *);
 static int* (__cdecl *p___p___argc)(void);
 static char*** (__cdecl *p___p___argv)(void);
 
@@ -133,7 +132,7 @@ static void test___getmainargs(void)
 {
     int argc, new_argc, mode;
     char **argv, **new_argv, **envp;
-    char tmppath[MAX_PATH], filepath[MAX_PATH];
+    char tmppath[MAX_PATH], filepath[MAX_PATH + 14];
     FILE *f;
 
     ok(GetTempPathA(MAX_PATH, tmppath) != 0, "GetTempPath failed\n");
@@ -194,7 +193,7 @@ static void test___getmainargs(void)
 static void test___getmainargs_parent(char *name)
 {
     char cmdline[3*MAX_PATH];
-    char tmppath[MAX_PATH], filepath[MAX_PATH];
+    char tmppath[MAX_PATH], filepath[MAX_PATH + 14];
     STARTUPINFOA startup;
     PROCESS_INFORMATION proc;
     FILE *f;
@@ -218,7 +217,7 @@ static void test___getmainargs_parent(char *name)
     memset(&startup, 0, sizeof(startup));
     startup.cb = sizeof(startup);
     CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, CREATE_DEFAULT_ERROR_MODE|NORMAL_PRIORITY_CLASS, NULL, NULL, &startup, &proc);
-    winetest_wait_child_process(proc.hProcess);
+    wait_child_process(proc.hProcess);
 
     _unlink(filepath);
     sprintf(filepath, "%swine_test\\a", tmppath);

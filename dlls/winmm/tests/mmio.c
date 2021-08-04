@@ -471,6 +471,120 @@ static void test_mmioOpen(char *fname)
     mmioClose(hmmio, 0);
 }
 
+static void test_mmioOpen_create(void)
+{
+    HMMIO hmmio;
+    HANDLE handle;
+    WCHAR cwd[MAX_PATH], temp_dir[MAX_PATH];
+    /* According to docs, filename must be no more than 128 bytes, but it will
+     * actually allow longer than that. */
+    WCHAR long_filename[] = L"very_long_filename_"
+        L"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        L"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        L"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    WCHAR buffer[MAX_PATH], expect[MAX_PATH];
+    char exedir_filename[MAX_PATH], bufferA[MAX_PATH], expectA[MAX_PATH];
+    MMIOINFO info = {0};
+    BOOL ret;
+    FILE *f;
+
+    GetModuleFileNameA(NULL, exedir_filename, ARRAY_SIZE(exedir_filename));
+    strcpy(strrchr(exedir_filename, '\\') + 1, "test_mmio_path");
+    f = fopen(exedir_filename, "w");
+    ok(!!f, "failed to create %s: %s\n", debugstr_a(exedir_filename), strerror(errno));
+    fclose(f);
+
+    GetCurrentDirectoryW(ARRAY_SIZE(cwd), cwd);
+    GetTempPathW(ARRAY_SIZE(temp_dir), temp_dir);
+    SetCurrentDirectoryW(temp_dir);
+
+    DeleteFileW(long_filename);
+
+    /* open with MMIO_DENYNONE */
+    hmmio = mmioOpenW(long_filename, NULL, MMIO_CREATE | MMIO_WRITE | MMIO_DENYNONE);
+    ok(hmmio != NULL, "mmioOpen failed\n");
+
+    /* MMIO_DENYNONE lets us open it here, too */
+    handle = CreateFileW(long_filename, GENERIC_READ,
+            FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    ok(handle != INVALID_HANDLE_VALUE, "Couldn't open non-exclusive file\n");
+    CloseHandle(handle);
+
+    mmioClose(hmmio, 0);
+
+    DeleteFileW(long_filename);
+
+    /* open with MMIO_EXCLUSIVE */
+    hmmio = mmioOpenW(long_filename, NULL, MMIO_CREATE | MMIO_WRITE | MMIO_EXCLUSIVE);
+    ok(hmmio != NULL, "mmioOpen failed\n");
+
+    /* should fail due to MMIO_EXCLUSIVE */
+    handle = CreateFileW(long_filename, GENERIC_READ,
+            FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    ok(handle == INVALID_HANDLE_VALUE, "Opening exclusive file should have failed\n");
+    if(handle != INVALID_HANDLE_VALUE)
+        CloseHandle(handle);
+
+    mmioClose(hmmio, 0);
+
+    DeleteFileW(long_filename);
+
+    wcscpy(buffer, long_filename);
+    info.wErrorRet = 0xdead;
+    hmmio = mmioOpenW(buffer, &info, MMIO_PARSE);
+    todo_wine ok(hmmio == (HMMIO)FALSE, "failed to parse file name, error %#x\n", info.wErrorRet);
+    todo_wine ok(info.wErrorRet == MMIOERR_OUTOFMEMORY, "got error %#x\n", info.wErrorRet);
+    wcscpy(expect, temp_dir);
+    wcscat(expect, long_filename);
+    expect[127] = 0;
+    todo_wine ok(!wcscmp(buffer, expect), "expected %s, got %s\n", debugstr_w(expect), debugstr_w(buffer));
+
+    WideCharToMultiByte(CP_ACP, 0, long_filename, -1, bufferA, sizeof(bufferA), NULL, NULL);
+    info.wErrorRet = 0xdead;
+    hmmio = mmioOpenA(bufferA, &info, MMIO_PARSE);
+    todo_wine ok(hmmio == (HMMIO)FALSE, "failed to parse file name, error %#x\n", info.wErrorRet);
+    todo_wine ok(info.wErrorRet == MMIOERR_OUTOFMEMORY, "got error %#x\n", info.wErrorRet);
+    WideCharToMultiByte(CP_ACP, 0, long_filename, -1, expectA, sizeof(expectA), NULL, NULL);
+    todo_wine ok(!strcmp(bufferA, expectA), "expected %s, got %s\n", debugstr_a(expectA), debugstr_a(bufferA));
+
+    wcscpy(buffer, L"test_mmio_path");
+    hmmio = mmioOpenW(buffer, &info, MMIO_WRITE);
+    ok(!!hmmio, "failed to open file, error %#x\n", info.wErrorRet);
+    mmioClose(hmmio, 0);
+
+    wcscpy(buffer, L"test_mmio_path");
+    hmmio = mmioOpenW(buffer, &info, MMIO_PARSE);
+    ok(hmmio == (HMMIO)TRUE, "failed to parse file name, error %#x\n", info.wErrorRet);
+    wcscpy(expect, temp_dir);
+    wcscat(expect, L"test_mmio_path");
+    todo_wine ok(!wcscmp(buffer, expect), "expected %s, got %s\n", debugstr_w(expect), debugstr_w(buffer));
+
+    wcscpy(buffer, L"test_mmio_path");
+    info.wErrorRet = 0xdead;
+    hmmio = mmioOpenW(buffer, &info, MMIO_EXIST);
+    ok(hmmio == (HMMIO)FALSE, "file should exist\n");
+    todo_wine ok(info.wErrorRet == MMIOERR_FILENOTFOUND, "got error %#x\n", info.wErrorRet);
+
+    ret = DeleteFileA("test_mmio_path");
+    ok(!ret, "expected failure\n");
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND, "got error %u\n", GetLastError());
+
+    wcscpy(buffer, L"test_mmio_path");
+    hmmio = mmioOpenW(buffer, &info, MMIO_WRITE | MMIO_CREATE);
+    ok(!!hmmio, "failed to open file, error %#x\n", info.wErrorRet);
+    mmioClose(hmmio, 0);
+
+    ret = DeleteFileA("test_mmio_path");
+    ok(ret, "got error %u\n", GetLastError());
+
+    SetCurrentDirectoryW(cwd);
+
+    ret = DeleteFileA(exedir_filename);
+    ok(ret, "got error %u\n", GetLastError());
+}
+
 static void test_mmioSetBuffer(char *fname)
 {
     char buf[256];
@@ -1016,6 +1130,7 @@ START_TEST(mmio)
     test_mmioDescend(fname);
     test_mmioOpen(NULL);
     test_mmioOpen(fname);
+    test_mmioOpen_create();
     test_mmioSetBuffer(NULL);
     test_mmioSetBuffer(fname);
     test_mmioOpen_fourcc();

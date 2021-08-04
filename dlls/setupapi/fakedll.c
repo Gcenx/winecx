@@ -34,6 +34,7 @@
 #include "winnt.h"
 #include "winternl.h"
 #include "wine/debug.h"
+#include "wine/list.h"
 #include "ole2.h"
 #include "atliface.h"
 
@@ -62,15 +63,6 @@ struct dll_info
 };
 
 #define ALIGN(size,align) (((size) + (align) - 1) & ~((align) - 1))
-
-static const WCHAR winedlldirW[] = {'W','I','N','E','D','L','L','D','I','R','%','u',0};
-static const WCHAR winebuilddirW[] = {'W','I','N','E','B','U','I','L','D','D','I','R',0};
-static const WCHAR programsW[] = {'\\','p','r','o','g','r','a','m','s',0};
-static const WCHAR dllsW[] = {'\\','d','l','l','s',0};
-static const WCHAR fakedllsW[] = {'\\','f','a','k','e','d','l','l','s',0};
-static const WCHAR dllW[] = {'.','d','l','l',0};
-static const WCHAR exeW[] = {'.','e','x','e',0};
-static const WCHAR fakeW[] = {'.','f','a','k','e',0};
 
 /* contents of the dll sections */
 
@@ -200,7 +192,6 @@ static void extract_16bit_image( IMAGE_NT_HEADERS *nt, void **data, SIZE_T *size
 /* return 1 on success, 0 on nonexistent file, -1 on other error */
 static int read_file( const WCHAR *name, void **data, SIZE_T *size, BOOL expect_builtin )
 {
-    static const WCHAR sixteenW[] = {'1','6',0};
     struct stat st;
     int fd, ret = -1;
     size_t header_size;
@@ -245,7 +236,7 @@ static int read_file( const WCHAR *name, void **data, SIZE_T *size, BOOL expect_
               st.st_size - header_size ) == st.st_size - header_size)
     {
         *data = file_buffer;
-        if (lstrlenW(name) > 2 && !wcscmp( name + lstrlenW(name) - 2, sixteenW ))
+        if (lstrlenW(name) > 2 && !wcscmp( name + lstrlenW(name) - 2, L"16" ))
             extract_16bit_image( nt, data, size );
         ret = 1;
     }
@@ -257,7 +248,6 @@ done:
 /* build a complete fake dll from scratch */
 static BOOL build_fake_dll( HANDLE file, const WCHAR *name )
 {
-    static const WCHAR dotexeW[] = { '.','e','x','e',0 };
     IMAGE_DOS_HEADER *dos;
     IMAGE_NT_HEADERS *nt;
     struct dll_info info;
@@ -291,8 +281,6 @@ static BOOL build_fake_dll( HANDLE file, const WCHAR *name )
     nt->FileHeader.Machine = IMAGE_FILE_MACHINE_ARM64;
 #elif defined __arm__
     nt->FileHeader.Machine = IMAGE_FILE_MACHINE_ARMNT;
-#elif defined __powerpc__
-    nt->FileHeader.Machine = IMAGE_FILE_MACHINE_POWERPC;
 #else
     nt->FileHeader.Machine = IMAGE_FILE_MACHINE_I386;
 #endif
@@ -331,7 +319,7 @@ static BOOL build_fake_dll( HANDLE file, const WCHAR *name )
     nt->OptionalHeader.BaseOfCode          = info.mem_pos;
 
     ext = wcsrchr( name, '.' );
-    if (!ext || wcsicmp( ext, dotexeW )) nt->FileHeader.Characteristics |= IMAGE_FILE_DLL;
+    if (!ext || wcsicmp( ext, L".exe" )) nt->FileHeader.Characteristics |= IMAGE_FILE_DLL;
 
     if (nt->FileHeader.Characteristics & IMAGE_FILE_DLL)
     {
@@ -405,14 +393,14 @@ static inline WCHAR *prepend( WCHAR *buffer, const WCHAR *str, size_t len )
 static const WCHAR *enum_load_path( unsigned int idx )
 {
     WCHAR buffer[32];
-    swprintf( buffer, ARRAY_SIZE(buffer), winedlldirW, idx );
+    swprintf( buffer, ARRAY_SIZE(buffer), L"WINEDLLDIR%u", idx );
     return _wgetenv( buffer );
 }
 
 /* try to load a pre-compiled fake dll */
 static void *load_fake_dll( const WCHAR *name, SIZE_T *size )
 {
-    const WCHAR *build_dir = _wgetenv( winebuilddirW );
+    const WCHAR *build_dir = _wgetenv( L"WINEBUILDDIR" );
     const WCHAR *path;
     WCHAR *file, *ptr;
     void *data = NULL;
@@ -424,13 +412,13 @@ static void *load_fake_dll( const WCHAR *name, SIZE_T *size )
 
     i = 0;
     len = lstrlenW( name );
-    if (build_dir) maxlen = lstrlenW(build_dir) + ARRAY_SIZE(programsW) + len + 1;
+    if (build_dir) maxlen = lstrlenW(build_dir) + ARRAY_SIZE(L"\\programs") + len + 1;
     while ((path = enum_load_path( i++ ))) maxlen = max( maxlen, lstrlenW(path) );
-    maxlen += ARRAY_SIZE(fakedllsW) + len + ARRAY_SIZE(fakeW);
+    maxlen += ARRAY_SIZE(L"\\fakedlls") + len + ARRAY_SIZE(L".fake");
 
     if (!(file = HeapAlloc( GetProcessHeap(), 0, maxlen * sizeof(WCHAR) ))) return NULL;
 
-    pos = maxlen - len - ARRAY_SIZE(fakeW);
+    pos = maxlen - len - ARRAY_SIZE(L".fake");
     lstrcpyW( file + pos, name );
     file[--pos] = '\\';
 
@@ -440,24 +428,24 @@ static void *load_fake_dll( const WCHAR *name, SIZE_T *size )
         ptr = file + pos;
         namelen = len + 1;
         file[pos + len + 1] = 0;
-        if (namelen > 4 && !wcsncmp( ptr + namelen - 4, dllW, 4 )) namelen -= 4;
+        if (namelen > 4 && !wcsncmp( ptr + namelen - 4, L".dll", 4 )) namelen -= 4;
         ptr = prepend( ptr, ptr, namelen );
-        ptr = prepend( ptr, dllsW, ARRAY_SIZE(dllsW) - 1 );
+        ptr = prepend( ptr, L"\\dlls", 5 );
         ptr = prepend( ptr, build_dir, lstrlenW(build_dir) );
         if ((res = read_file( ptr, &data, size, TRUE ))) goto done;
-        lstrcpyW( file + pos + len + 1, fakeW );
+        lstrcpyW( file + pos + len + 1, L".fake" );
         if ((res = read_file( ptr, &data, size, FALSE ))) goto done;
 
         /* now as a program */
         ptr = file + pos;
         namelen = len + 1;
         file[pos + len + 1] = 0;
-        if (namelen > 4 && !wcsncmp( ptr + namelen - 4, exeW, 4 )) namelen -= 4;
+        if (namelen > 4 && !wcsncmp( ptr + namelen - 4, L".exe", 4 )) namelen -= 4;
         ptr = prepend( ptr, ptr, namelen );
-        ptr = prepend( ptr, programsW, ARRAY_SIZE(programsW) - 1 );
+        ptr = prepend( ptr, L"\\programs", 9 );
         ptr = prepend( ptr, build_dir, lstrlenW(build_dir) );
         if ((res = read_file( ptr, &data, size, TRUE ))) goto done;
-        lstrcpyW( file + pos + len + 1, fakeW );
+        lstrcpyW( file + pos + len + 1, L".fake" );
         if ((res = read_file( ptr, &data, size, FALSE ))) goto done;
     }
 
@@ -466,7 +454,7 @@ static void *load_fake_dll( const WCHAR *name, SIZE_T *size )
     {
         ptr = prepend( file + pos, path, lstrlenW(path) );
         if ((res = read_file( ptr, &data, size, TRUE ))) break;
-        ptr = prepend( file + pos, fakedllsW, ARRAY_SIZE(fakedllsW) - 1 );
+        ptr = prepend( file + pos, L"\\fakedlls", 9 );
         ptr = prepend( ptr, path, lstrlenW(path) );
         if ((res = read_file( ptr, &data, size, FALSE ))) break;
     }
@@ -567,8 +555,7 @@ static BOOL next_xml_elem( xmlbuf_t *xmlbuf, xmlstr_t *elem )
     return xmlbuf->ptr != xmlbuf->end;
 }
 
-static BOOL next_xml_attr(xmlbuf_t* xmlbuf, xmlstr_t* name, xmlstr_t* value,
-                          BOOL* error, BOOL* end)
+static BOOL next_xml_attr(xmlbuf_t* xmlbuf, xmlstr_t* name, xmlstr_t* value, BOOL* error)
 {
     const char *ptr;
 
@@ -586,7 +573,6 @@ static BOOL next_xml_attr(xmlbuf_t* xmlbuf, xmlstr_t* name, xmlstr_t* value,
             return FALSE;
 
         xmlbuf->ptr++;
-        *end = TRUE;
         *error = FALSE;
         return FALSE;
     }
@@ -629,13 +615,12 @@ static BOOL next_xml_attr(xmlbuf_t* xmlbuf, xmlstr_t* name, xmlstr_t* value,
     return TRUE;
 }
 
-static void get_manifest_filename( const xmlstr_t *arch, const xmlstr_t *name, const xmlstr_t *key,
-                                   const xmlstr_t *version, const xmlstr_t *lang, WCHAR *buffer, DWORD size )
+static void append_manifest_filename( const xmlstr_t *arch, const xmlstr_t *name, const xmlstr_t *key,
+                                      const xmlstr_t *version, const xmlstr_t *lang, WCHAR *buffer, DWORD size )
 {
-    static const WCHAR trailerW[] = {'_','d','e','a','d','b','e','e','f',0};
-    DWORD pos;
+    DWORD pos = lstrlenW( buffer );
 
-    pos = MultiByteToWideChar( CP_UTF8, 0, arch->ptr, arch->len, buffer, size );
+    pos += MultiByteToWideChar( CP_UTF8, 0, arch->ptr, arch->len, buffer + pos, size - pos );
     buffer[pos++] = '_';
     pos += MultiByteToWideChar( CP_UTF8, 0, name->ptr, name->len, buffer + pos, size - pos );
     buffer[pos++] = '_';
@@ -644,69 +629,44 @@ static void get_manifest_filename( const xmlstr_t *arch, const xmlstr_t *name, c
     pos += MultiByteToWideChar( CP_UTF8, 0, version->ptr, version->len, buffer + pos, size - pos );
     buffer[pos++] = '_';
     pos += MultiByteToWideChar( CP_UTF8, 0, lang->ptr, lang->len, buffer + pos, size - pos );
-    memcpy( buffer + pos, trailerW, sizeof(trailerW) );
+    lstrcpyW( buffer + pos, L"_deadbeef" );
     wcslwr( buffer );
 }
 
-static BOOL create_winsxs_dll( const WCHAR *dll_name, const xmlstr_t *arch, const xmlstr_t *name,
-                               const xmlstr_t *key, const xmlstr_t *version, const xmlstr_t *lang,
-                               const void *dll_data, size_t dll_size )
+static WCHAR* create_winsxs_dll_path( const xmlstr_t *arch, const xmlstr_t *name,
+                                      const xmlstr_t *key, const xmlstr_t *version,
+                                      const xmlstr_t *lang )
 {
-    static const WCHAR winsxsW[] = {'w','i','n','s','x','s','\\'};
     WCHAR *path;
-    const WCHAR *filename;
-    DWORD pos, written, path_len;
-    HANDLE handle;
-    BOOL ret = FALSE;
+    DWORD path_len;
 
-    if (!(filename = wcsrchr( dll_name, '\\' ))) filename = dll_name;
-    else filename++;
-
-    path_len = GetWindowsDirectoryW( NULL, 0 ) + 1 + ARRAY_SIZE( winsxsW )
-        + arch->len + name->len + key->len + version->len + 18 + lstrlenW( filename ) + 1;
+    path_len = GetWindowsDirectoryW( NULL, 0 ) + ARRAY_SIZE( L"\\winsxs\\" )
+        + arch->len + name->len + key->len + version->len + 19;
 
     path = HeapAlloc( GetProcessHeap(), 0, path_len * sizeof(WCHAR) );
-    pos = GetWindowsDirectoryW( path, path_len );
-    path[pos++] = '\\';
-    memcpy( path + pos, winsxsW, sizeof(winsxsW) );
-    pos += ARRAY_SIZE( winsxsW );
-    get_manifest_filename( arch, name, key, version, lang, path + pos, path_len - pos );
-    pos += lstrlenW( path + pos );
-    path[pos++] = '\\';
-    lstrcpyW( path + pos, filename );
-    handle = create_dest_file( path );
-    if (handle && handle != INVALID_HANDLE_VALUE)
-    {
-        TRACE( "creating %s\n", debugstr_w(path) );
-        ret = (WriteFile( handle, dll_data, dll_size, &written, NULL ) && written == dll_size);
-        if (!ret) ERR( "failed to write to %s (error=%u)\n", debugstr_w(path), GetLastError() );
-        CloseHandle( handle );
-        if (!ret) DeleteFileW( path );
-    }
-    HeapFree( GetProcessHeap(), 0, path );
-    return ret;
+    GetWindowsDirectoryW( path, path_len );
+    lstrcatW( path, L"\\winsxs\\" );
+    append_manifest_filename( arch, name, key, version, lang, path, path_len );
+    lstrcatW( path, L"\\" );
+    return path;
 }
 
 static BOOL create_manifest( const xmlstr_t *arch, const xmlstr_t *name, const xmlstr_t *key,
                              const xmlstr_t *version, const xmlstr_t *lang, const void *data, DWORD len )
 {
-    static const WCHAR winsxsW[] = {'w','i','n','s','x','s','\\','m','a','n','i','f','e','s','t','s','\\'};
-    static const WCHAR extensionW[] = {'.','m','a','n','i','f','e','s','t',0};
     WCHAR *path;
-    DWORD pos, written, path_len;
+    DWORD written, path_len;
     HANDLE handle;
     BOOL ret = FALSE;
 
-    path_len = GetWindowsDirectoryW( NULL, 0 ) + 1 + ARRAY_SIZE( winsxsW )
-        + arch->len + name->len + key->len + version->len + 18 + ARRAY_SIZE( extensionW );
+    path_len = GetWindowsDirectoryW( NULL, 0 ) + ARRAY_SIZE( L"\\winsxs\\manifests\\" )
+        + arch->len + name->len + key->len + version->len + 18 + ARRAY_SIZE( L".manifest" );
 
     path = HeapAlloc( GetProcessHeap(), 0, path_len * sizeof(WCHAR) );
-    pos = GetWindowsDirectoryW( path, MAX_PATH );
-    path[pos++] = '\\';
-    memcpy( path + pos, winsxsW, sizeof(winsxsW) );
-    pos += ARRAY_SIZE( winsxsW );
-    get_manifest_filename( arch, name, key, version, lang, path + pos, MAX_PATH - pos );
-    lstrcatW( path + pos, extensionW );
+    GetWindowsDirectoryW( path, path_len );
+    lstrcatW( path, L"\\winsxs\\manifests\\" );
+    append_manifest_filename( arch, name, key, version, lang, path, path_len );
+    lstrcatW( path, L".manifest" );
     handle = CreateFileW( path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL );
     if (handle == INVALID_HANDLE_VALUE && GetLastError() == ERROR_PATH_NOT_FOUND)
     {
@@ -726,10 +686,19 @@ static BOOL create_manifest( const xmlstr_t *arch, const xmlstr_t *name, const x
     return ret;
 }
 
-struct dll_data {
-    const WCHAR *name;
-    const void *data;
-    SIZE_T size;
+struct delay_copy
+{
+    struct list entry;
+    WCHAR *src;
+    WCHAR *dest;
+    WCHAR data[1];
+};
+
+struct dll_data
+{
+    struct list *delay_copy;
+    const WCHAR *src_dir;
+    DWORD src_len;
 };
 
 static BOOL CALLBACK register_manifest( HMODULE module, const WCHAR *type, WCHAR *res_name, LONG_PTR arg )
@@ -745,18 +714,18 @@ static BOOL CALLBACK register_manifest( HMODULE module, const WCHAR *type, WCHAR
 #else
     static const char current_arch[] = "none";
 #endif
-    static const WCHAR manifestW[] = {'W','I','N','E','_','M','A','N','I','F','E','S','T'};
     const struct dll_data *dll_data = (const struct dll_data*)arg;
+    WCHAR *dest = NULL;
+    DWORD dest_len = 0;
     xmlbuf_t buffer;
     xmlstr_t elem, attr_name, attr_value;
     xmlstr_t name, version, arch, key, lang;
-    BOOL end = FALSE, error;
+    BOOL error;
     const char *manifest;
     SIZE_T len;
     HRSRC rsrc;
 
-    if (IS_INTRESOURCE( res_name ) || wcsncmp( res_name, manifestW, ARRAY_SIZE( manifestW )))
-        return TRUE;
+    if (IS_INTRESOURCE( res_name ) || wcsncmp( res_name, L"WINE_MANIFEST", 13 )) return TRUE;
 
     rsrc = FindResourceW( module, res_name, type );
     manifest = LoadResource( module, rsrc );
@@ -769,8 +738,41 @@ static BOOL CALLBACK register_manifest( HMODULE module, const WCHAR *type, WCHAR
 
     while (next_xml_elem( &buffer, &elem ))
     {
+        if (xmlstr_cmp( &elem, "file" ))
+        {
+            while (next_xml_attr( &buffer, &attr_name, &attr_value, &error ))
+            {
+                if (xmlstr_cmp(&attr_name, "name"))
+                {
+                    name = attr_value;
+                    break;
+                }
+            }
+
+            if (!error && dest && name.ptr)
+            {
+                struct delay_copy *add = HeapAlloc( GetProcessHeap(), 0,
+                        sizeof(*add) + (dll_data->src_len + name.len +
+                            dest_len + name.len + 1) * sizeof(WCHAR) );
+                add->src = add->data;
+                memcpy( add->src, dll_data->src_dir, dll_data->src_len * sizeof(WCHAR) );
+                MultiByteToWideChar( CP_UTF8, 0, name.ptr, name.len,
+                        add->src + dll_data->src_len, name.len );
+                add->src[dll_data->src_len + name.len] = 0;
+                add->dest = add->data + dll_data->src_len + name.len + 1;
+                memcpy( add->dest, dest, dest_len * sizeof(WCHAR) );
+                memcpy( add->dest + dest_len, add->src + dll_data->src_len,
+                        (name.len + 1) * sizeof(WCHAR) );
+                TRACE("schedule copy %s -> %s\n", wine_dbgstr_w(add->src), wine_dbgstr_w(add->dest));
+                list_add_tail( dll_data->delay_copy, &add->entry );
+            }
+            continue;
+        }
+
         if (!xmlstr_cmp( &elem, "assemblyIdentity" )) continue;
-        while (next_xml_attr( &buffer, &attr_name, &attr_value, &error, &end ))
+        HeapFree( GetProcessHeap(), 0, dest );
+        dest = NULL;
+        while (next_xml_attr( &buffer, &attr_name, &attr_value, &error ))
         {
             if (xmlstr_cmp(&attr_name, "name")) name = attr_value;
             else if (xmlstr_cmp(&attr_name, "version")) version = attr_value;
@@ -793,17 +795,19 @@ static BOOL CALLBACK register_manifest( HMODULE module, const WCHAR *type, WCHAR
                 memcpy( new_buffer + strlen(new_buffer), arch.ptr, len - (arch.ptr - manifest) );
                 arch.ptr = current_arch;
                 arch.len = strlen( current_arch );
-                if (create_winsxs_dll( dll_data->name, &arch, &name, &key, &version, &lang, dll_data->data, dll_data->size ))
-                    create_manifest( &arch, &name, &key, &version, &lang, new_buffer, len + arch.len );
+                dest = create_winsxs_dll_path( &arch, &name, &key, &version, &lang );
+                create_manifest( &arch, &name, &key, &version, &lang, new_buffer, len + arch.len );
                 HeapFree( GetProcessHeap(), 0, new_buffer );
             }
             else
             {
-                if (create_winsxs_dll( dll_data->name, &arch, &name, &key, &version, &lang, dll_data->data, dll_data->size ))
-                    create_manifest( &arch, &name, &key, &version, &lang, manifest, len );
+                dest = create_winsxs_dll_path( &arch, &name, &key, &version, &lang );
+                create_manifest( &arch, &name, &key, &version, &lang, manifest, len );
             }
+            dest_len = wcslen( dest );
         }
     }
+    HeapFree( GetProcessHeap(), 0, dest );
 
     return TRUE;
 }
@@ -826,26 +830,27 @@ static BOOL CALLBACK register_resource( HMODULE module, LPCWSTR type, LPWSTR nam
     return TRUE;
 }
 
-static void register_fake_dll( const WCHAR *name, const void *data, size_t size )
+static void register_fake_dll( const WCHAR *name, const void *data, size_t size, struct list *delay_copy )
 {
-    static const WCHAR atlW[] = {'a','t','l','1','0','0','.','d','l','l',0};
-    static const WCHAR moduleW[] = {'M','O','D','U','L','E',0};
-    static const WCHAR regtypeW[] = {'W','I','N','E','_','R','E','G','I','S','T','R','Y',0};
     const IMAGE_RESOURCE_DIRECTORY *resdir;
     LDR_RESOURCE_INFO info;
     HRESULT hr = S_OK;
     HMODULE module = (HMODULE)((ULONG_PTR)data | 1);
-    struct dll_data dll_data = { name, data, size };
+    struct dll_data dll_data = { delay_copy, name, 0 };
+    const WCHAR *p;
 
+    if (!(p = wcsrchr( name, '\\' ))) p = name;
+    else p++;
+    dll_data.src_len = p - name;
     EnumResourceNamesW( module, (WCHAR*)RT_MANIFEST, register_manifest, (LONG_PTR)&dll_data );
 
-    info.Type = (ULONG_PTR)regtypeW;
+    info.Type = (ULONG_PTR)L"WINE_REGISTRY";
     if (LdrFindResourceDirectory_U( module, &info, 1, &resdir )) return;
 
     if (!registrar)
     {
         HRESULT (WINAPI *pAtlCreateRegistrar)(IRegistrar**);
-        HMODULE atl = LoadLibraryW( atlW );
+        HMODULE atl = LoadLibraryW( L"atl100.dll" );
 
         if ((pAtlCreateRegistrar = (void *)GetProcAddress( atl, "AtlCreateRegistrar" )))
             hr = pAtlCreateRegistrar( &registrar );
@@ -861,15 +866,14 @@ static void register_fake_dll( const WCHAR *name, const void *data, size_t size 
 
     TRACE( "registering %s\n", debugstr_w(name) );
     IRegistrar_ClearReplacements( registrar );
-    IRegistrar_AddReplacement( registrar, moduleW, name );
-    EnumResourceNamesW( module, regtypeW, register_resource, (LONG_PTR)&hr );
+    IRegistrar_AddReplacement( registrar, L"MODULE", name );
+    EnumResourceNamesW( module, L"WINE_REGISTRY", register_resource, (LONG_PTR)&hr );
     if (FAILED(hr)) ERR( "failed to register %s: %x\n", debugstr_w(name), hr );
 }
 
 /* copy a fake dll file to the dest directory */
-static int install_fake_dll( WCHAR *dest, WCHAR *file, const WCHAR *ext, BOOL expect_builtin )
+static int install_fake_dll( WCHAR *dest, WCHAR *file, const WCHAR *ext, BOOL expect_builtin, struct list *delay_copy )
 {
-    static const WCHAR sixteenW[] = {'1','6',0};
     int ret;
     SIZE_T size;
     void *data;
@@ -881,7 +885,7 @@ static int install_fake_dll( WCHAR *dest, WCHAR *file, const WCHAR *ext, BOOL ex
     if (ext) lstrcpyW( end, ext );
     if (!(ret = read_file( file, &data, &size, expect_builtin ))) return 0;
 
-    if (end > name + 2 && !wcsncmp( end - 2, sixteenW, 2 )) end -= 2;  /* remove "16" suffix */
+    if (end > name + 2 && !wcsncmp( end - 2, L"16", 2 )) end -= 2;  /* remove "16" suffix */
     memcpy( destname, name, (end - name) * sizeof(WCHAR) );
     destname[end - name] = 0;
     if (!add_handled_dll( destname )) ret = -1;
@@ -897,7 +901,7 @@ static int install_fake_dll( WCHAR *dest, WCHAR *file, const WCHAR *ext, BOOL ex
             ret = (WriteFile( h, data, size, &written, NULL ) && written == size);
             if (!ret) ERR( "failed to write to %s (error=%u)\n", debugstr_w(dest), GetLastError() );
             CloseHandle( h );
-            if (ret) register_fake_dll( dest, data, size );
+            if (ret) register_fake_dll( dest, data, size, delay_copy );
             else DeleteFileW( dest );
         }
     }
@@ -905,52 +909,83 @@ static int install_fake_dll( WCHAR *dest, WCHAR *file, const WCHAR *ext, BOOL ex
     return ret;
 }
 
+static void delay_copy_files( struct list *delay_copy )
+{
+    struct delay_copy *copy, *next;
+    DWORD written;
+    SIZE_T size;
+    void *data;
+    HANDLE h;
+    int ret;
+
+    LIST_FOR_EACH_ENTRY_SAFE( copy, next, delay_copy, struct delay_copy, entry )
+    {
+        list_remove( &copy->entry );
+        ret = read_file( copy->src, &data, &size, TRUE );
+        if (ret == -1) ret = read_file( copy->src, &data, &size, FALSE );
+        if (ret != 1)
+        {
+            HeapFree( GetProcessHeap(), 0, copy );
+            continue;
+        }
+
+        h = create_dest_file( copy->dest );
+        if (h && h != INVALID_HANDLE_VALUE)
+        {
+            ret = (WriteFile( h, data, size, &written, NULL ) && written == size);
+            if (!ret) ERR( "failed to write to %s (error=%u)\n", debugstr_w(copy->dest), GetLastError() );
+            CloseHandle( h );
+            if (!ret) DeleteFileW( copy->dest );
+        }
+        HeapFree( GetProcessHeap(), 0, copy );
+    }
+}
+
 /* find and install all fake dlls in a given lib directory */
 static void install_lib_dir( WCHAR *dest, WCHAR *file, const WCHAR *default_ext, BOOL expect_builtin )
 {
-    static const WCHAR starW[] = {'*',0};
-    static const WCHAR backslashW[] = {'\\',0};
-    static const WCHAR dotW[] = {'.',0};
-    static const WCHAR dotdotW[] = {'.','.',0};
     WCHAR *name;
     intptr_t handle;
     struct _wfinddata_t data;
+    struct list delay_copy = LIST_INIT( delay_copy );
 
     file[1] = '\\';  /* change \??\ to \\?\ */
     name = file + lstrlenW(file);
     *name++ = '\\';
-    lstrcpyW( name, starW );
+    lstrcpyW( name, L"*" );
 
     if ((handle = _wfindfirst( file, &data )) == -1) return;
     do
     {
         if (lstrlenW( data.name ) > max_dll_name_len) continue;
-        if (!wcscmp( data.name, dotW )) continue;
-        if (!wcscmp( data.name, dotdotW )) continue;
+        if (!wcscmp( data.name, L"." )) continue;
+        if (!wcscmp( data.name, L".." )) continue;
         lstrcpyW( name, data.name );
         if (default_ext)  /* inside build dir */
         {
-            lstrcatW( name, backslashW );
+            lstrcatW( name, L"\\" );
             lstrcatW( name, data.name );
             if (!wcschr( data.name, '.' )) lstrcatW( name, default_ext );
-            if (!install_fake_dll( dest, file, NULL, expect_builtin ))
-                install_fake_dll( dest, file, fakeW, FALSE );
+            if (!install_fake_dll( dest, file, NULL, expect_builtin, &delay_copy ))
+                install_fake_dll( dest, file, L".fake", FALSE, &delay_copy );
         }
-        else install_fake_dll( dest, file, NULL, expect_builtin );
+        else install_fake_dll( dest, file, NULL, expect_builtin, &delay_copy );
     }
     while (!_wfindnext( handle, &data ));
     _findclose( handle );
+
+    delay_copy_files( &delay_copy );
 }
 
 /* create fake dlls in dirname for all the files we can find */
 static BOOL create_wildcard_dlls( const WCHAR *dirname )
 {
-    const WCHAR *build_dir = _wgetenv( winebuilddirW );
+    const WCHAR *build_dir = _wgetenv( L"WINEBUILDDIR" );
     const WCHAR *path;
     unsigned int i, maxlen = 0;
     WCHAR *file, *dest;
 
-    if (build_dir) maxlen = lstrlenW(build_dir) + ARRAY_SIZE(programsW) + 1;
+    if (build_dir) maxlen = lstrlenW(build_dir) + ARRAY_SIZE(L"\\programs") + 1;
     for (i = 0; (path = enum_load_path(i)); i++) maxlen = max( maxlen, lstrlenW(path) );
     maxlen += 2 * max_dll_name_len + 2 + 10; /* ".dll.fake" */
     if (!(file = HeapAlloc( GetProcessHeap(), 0, maxlen * sizeof(WCHAR) ))) return FALSE;
@@ -966,18 +1001,18 @@ static BOOL create_wildcard_dlls( const WCHAR *dirname )
     if (build_dir)
     {
         lstrcpyW( file, build_dir );
-        lstrcatW( file, dllsW );
-        install_lib_dir( dest, file, dllW, TRUE );
+        lstrcatW( file, L"\\dlls" );
+        install_lib_dir( dest, file, L".dll", TRUE );
         lstrcpyW( file, build_dir );
-        lstrcatW( file, programsW );
-        install_lib_dir( dest, file, exeW, TRUE );
+        lstrcatW( file, L"\\programs" );
+        install_lib_dir( dest, file, L".exe", TRUE );
     }
     for (i = 0; (path = enum_load_path( i )); i++)
     {
         lstrcpyW( file, path );
         install_lib_dir( dest, file, NULL, TRUE );
         lstrcpyW( file, path );
-        lstrcatW( file, fakedllsW );
+        lstrcatW( file, L"\\fakedlls" );
         install_lib_dir( dest, file, NULL, FALSE );
     }
     HeapFree( GetProcessHeap(), 0, file );
@@ -990,6 +1025,7 @@ static BOOL create_wildcard_dlls( const WCHAR *dirname )
  */
 BOOL create_fake_dll( const WCHAR *name, const WCHAR *source )
 {
+    struct list delay_copy = LIST_INIT( delay_copy );
     HANDLE h;
     BOOL ret;
     SIZE_T size;
@@ -1023,7 +1059,7 @@ BOOL create_fake_dll( const WCHAR *name, const WCHAR *source )
         DWORD written;
 
         ret = (WriteFile( h, buffer, size, &written, NULL ) && written == size);
-        if (ret) register_fake_dll( name, buffer, size );
+        if (ret) register_fake_dll( name, buffer, size, &delay_copy );
         else ERR( "failed to write to %s (error=%u)\n", debugstr_w(name), GetLastError() );
     }
     else
@@ -1034,6 +1070,8 @@ BOOL create_fake_dll( const WCHAR *name, const WCHAR *source )
 
     CloseHandle( h );
     if (!ret) DeleteFileW( name );
+
+    delay_copy_files( &delay_copy );
     return ret;
 }
 

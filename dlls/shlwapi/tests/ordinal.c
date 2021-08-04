@@ -95,13 +95,6 @@ static const CHAR ie_international[] = {
 static const CHAR acceptlanguage[] = {
     'A','c','c','e','p','t','L','a','n','g','u','a','g','e',0};
 
-static int strcmp_wa(LPCWSTR strw, const char *stra)
-{
-    CHAR buf[512];
-    WideCharToMultiByte(CP_ACP, 0, strw, -1, buf, sizeof(buf), NULL, NULL);
-    return lstrcmpA(stra, buf);
-}
-
 typedef struct {
     int id;
     const void *args[5];
@@ -488,7 +481,7 @@ static void test_alloc_shared(int argc, char **argv)
     ok(ret, "could not create child process error: %u\n", GetLastError());
     if (ret)
     {
-        winetest_wait_child_process(pi.hProcess);
+        wait_child_process(pi.hProcess);
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
 
@@ -1691,11 +1684,8 @@ if (0)
     LocalFileTimeToFileTime(&filetime, &filetime);
 
     /* no way to get required buffer length here */
-    SetLastError(0xdeadbeef);
     ret = pSHFormatDateTimeA(&filetime, NULL, NULL, 0);
     ok(ret == 0, "got %d\n", ret);
-    ok(GetLastError() == 0xdeadbeef || broken(GetLastError() == ERROR_SUCCESS /* Win7 */),
-        "expected 0xdeadbeef, got %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     buff[0] = 'a'; buff[1] = 0;
@@ -2740,11 +2730,11 @@ static void test_SHGetIniString(void)
 
     ret = pSHGetIniStringW(TestAppW, AKeyW, out, ARRAY_SIZE(out), pathW);
     ok(ret == 1, "SHGetIniStringW should have given 1, instead: %d\n", ret);
-    ok(!strcmp_wa(out, "1"), "Expected L\"1\", got: %s\n", wine_dbgstr_w(out));
+    ok(!lstrcmpW(out, L"1"), "Expected L\"1\", got: %s\n", wine_dbgstr_w(out));
 
     ret = pSHGetIniStringW(TestAppW, AnotherKeyW, out, ARRAY_SIZE(out), pathW);
     ok(ret == 4, "SHGetIniStringW should have given 4, instead: %d\n", ret);
-    ok(!strcmp_wa(out, "asdf"), "Expected L\"asdf\", got: %s\n", wine_dbgstr_w(out));
+    ok(!lstrcmpW(out, L"asdf"), "Expected L\"asdf\", got: %s\n", wine_dbgstr_w(out));
 
     out[0] = 1;
     ret = pSHGetIniStringW(TestAppW, JunkKeyW, out, ARRAY_SIZE(out), pathW);

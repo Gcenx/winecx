@@ -16,8 +16,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 
 #define COBJMACROS
@@ -27,6 +25,8 @@
 #include "winreg.h"
 #include "objbase.h"
 #include "ocidl.h"
+#include "wincodec.h"
+#include "wincodecsdk.h"
 #include "initguid.h"
 
 #include "wincodecs_private.h"
@@ -50,12 +50,14 @@ static const classinfo wic_classes[] = {
     {&CLSID_WICPngEncoder, PngEncoder_CreateInstance},
     {&CLSID_WICBmpEncoder, BmpEncoder_CreateInstance},
     {&CLSID_WICGifDecoder, GifDecoder_CreateInstance},
+    {&CLSID_WICGifEncoder, GifEncoder_CreateInstance},
     {&CLSID_WICIcoDecoder, IcoDecoder_CreateInstance},
     {&CLSID_WICJpegDecoder, JpegDecoder_CreateInstance},
     {&CLSID_WICJpegEncoder, JpegEncoder_CreateInstance},
     {&CLSID_WICTiffDecoder, TiffDecoder_CreateInstance},
     {&CLSID_WICTiffEncoder, TiffEncoder_CreateInstance},
     {&CLSID_WICIcnsEncoder, IcnsEncoder_CreateInstance},
+    {&CLSID_WICDdsDecoder, DdsDecoder_CreateInstance},
     {&CLSID_WICDefaultFormatConverter, FormatConverter_CreateInstance},
     {&CLSID_WineTgaDecoder, TgaDecoder_CreateInstance},
     {&CLSID_WICUnknownMetadataReader, UnknownMetadataReader_CreateInstance},

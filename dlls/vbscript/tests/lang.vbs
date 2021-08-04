@@ -47,18 +47,33 @@ Call ok(56.789e-2 = 0.56789, "56.789e-2 <> 0.56789")
 Call ok(1e-94938484 = 0, "1e-... <> 0")
 Call ok(34e0 = 34, "34e0 <> 34")
 Call ok(34E1 = 340, "34E0 <> 340")
+Call ok(.5 = 0.5, ".5 <> 0.5")
+Call ok(.5e1 = 5, ".5e1 <> 5")
 Call ok(--1 = 1, "--1 = " & --1)
 Call ok(-empty = 0, "-empty = " & (-empty))
 Call ok(true = -1, "! true = -1")
 Call ok(false = 0, "false <> 0")
 Call ok(&hff = 255, "&hff <> 255")
 Call ok(&Hff = 255, "&Hff <> 255")
+Call ok(&hffff = -1, "&hffff <> -1")
+Call ok(&hfffe = -2, "&hfffe <> -2")
+Call ok(&hffff& = 65535, "&hffff& <> -1")
+Call ok(&hfffe& = 65534, "&hfffe& <> -2")
+Call ok(&hffffffff& = -1, "&hffffffff& <> -1")
+Call ok((&h01or&h02)=3,"&h01or&h02 <> 3")
 
 W = 5
 Call ok(W = 5, "W = " & W & " expected " & 5)
 
 x = "xx"
 Call ok(x = "xx", "x = " & x & " expected ""xx""")
+
+Dim public1 : public1 = 42
+Call ok(public1 = 42, "public1=" & public1 & " expected & " & 42)
+Private priv1 : priv1 = 43
+Call ok(priv1 = 43, "priv1=" & priv1 & " expected & " & 43)
+Public pub1 : pub1 = 44
+Call ok(pub1 = 44, "pub1=" & pub1 & " expected & " & 44)
 
 Call ok(true <> false, "true <> false is false")
 Call ok(not (true <> true), "true <> true is true")
@@ -81,6 +96,7 @@ Call ok(getVT(null) = "VT_NULL", "getVT(null) is not VT_NULL")
 Call ok(getVT(0) = "VT_I2", "getVT(0) is not VT_I2")
 Call ok(getVT(1) = "VT_I2", "getVT(1) is not VT_I2")
 Call ok(getVT(0.5) = "VT_R8", "getVT(0.5) is not VT_R8")
+Call ok(getVT(.5) = "VT_R8", "getVT(.5) is not VT_R8")
 Call ok(getVT(0.0) = "VT_R8", "getVT(0.0) is not VT_R8")
 Call ok(getVT(2147483647) = "VT_I4", "getVT(2147483647) is not VT_I4")
 Call ok(getVT(2147483648) = "VT_R8", "getVT(2147483648) is not VT_R8")
@@ -88,6 +104,9 @@ Call ok(getVT(&h10&) = "VT_I2", "getVT(&h10&) is not VT_I2")
 Call ok(getVT(&h10000&) = "VT_I4", "getVT(&h10000&) is not VT_I4")
 Call ok(getVT(&H10000&) = "VT_I4", "getVT(&H10000&) is not VT_I4")
 Call ok(getVT(&hffFFffFF&) = "VT_I2", "getVT(&hffFFffFF&) is not VT_I2")
+Call ok(getVT(&hffFFffFE&) = "VT_I2", "getVT(&hffFFffFE &) is not VT_I2")
+Call ok(getVT(&hffF&) = "VT_I2", "getVT(&hffFF&) is not VT_I2")
+Call ok(getVT(&hffFF&) = "VT_I4", "getVT(&hffFF&) is not VT_I4")
 Call ok(getVT(1e2) = "VT_R8", "getVT(1e2) is not VT_R8")
 Call ok(getVT(1e0) = "VT_R8", "getVT(1e0) is not VT_R8")
 Call ok(getVT(0.1e2) = "VT_R8", "getVT(0.1e2) is not VT_R8")
@@ -338,6 +357,10 @@ while empty
 wend
 
 x = 0
+WHILE x < 3 : x = x + 1 : Wend
+Call ok(x = 3, "x not equal to 3")
+
+x = 0
 WHILE x < 3 : x = x + 1
 Wend
 Call ok(x = 3, "x not equal to 3")
@@ -362,6 +385,8 @@ call ok((x and y), "x or y is false after while")
 do while false
 loop
 
+do while false : loop
+
 do while true
     exit do
     ok false, "exit do didn't work"
@@ -370,6 +395,10 @@ loop
 x = 0
 Do While x < 2 : x = x + 1
 Loop
+Call ok(x = 2, "x not equal to 2")
+
+x = 0
+Do While x < 2 : x = x + 1: Loop
 Call ok(x = 2, "x not equal to 2")
 
 x = 0
@@ -399,6 +428,10 @@ loop
 x = 0
 Do: :: x = x + 2
 Loop Until x = 4
+Call ok(x = 4, "x not equal to 4")
+
+x = 0
+Do: :: x = x + 2 :::  : Loop Until x = 4
 Call ok(x = 4, "x not equal to 4")
 
 x = 5
@@ -534,6 +567,16 @@ for x = 1 to 5 :
     Call ok(false, "exit for not escaped the loop?")
 next
 
+dim a1(8)
+a1(6)=8
+for x=1 to 8:a1(x)=x-1:next
+Call ok(a1(6) = 5, "colon used in for loop")
+
+a1(6)=8
+for x=1 to 8:y=1
+a1(x)=x-2:next
+Call ok(a1(6) = 4, "colon used in for loop")
+
 do while true
     for x = 1 to 100
         exit do
@@ -565,6 +608,15 @@ next
 Call ok(y = 3, "y = " & y)
 Call ok(z = 6, "z = " & z)
 Call ok(getVT(x) = "VT_EMPTY*", "getVT(x) = " & getVT(x))
+
+Call collectionObj.reset()
+y = 0
+x = 10
+z = 0
+for each x in collectionObj : z = z + 2 : y = y+1 ::
+Call ok(x = y, "x <> y") : next
+Call ok(y = 3, "y = " & y)
+Call ok(z = 6, "z = " & z)
 
 Call collectionObj.reset()
 y = false
@@ -672,6 +724,14 @@ select case 1  :
         x = True
 end select
 Call ok(x, "wrong case")
+
+select case 0
+    case 1
+    case else
+       'empty else with comment test
+end select
+
+select case 0 : case 1 : case else : end select
 
 if false then
 Sub testsub
@@ -1194,6 +1254,13 @@ Call ok(obj.Test1 = 6, "obj.Test1 is not 6")
 obj.AddToTest1(5)
 Call ok(obj.Test1 = 11, "obj.Test1 is not 11")
 
+set obj = unkObj
+set x = obj
+call ok(getVT(obj) = "VT_UNKNOWN*", "getVT(obj) = " & getVT(obj))
+call ok(getVT(x) = "VT_UNKNOWN*", "getVT(x) = " & getVT(x))
+call ok(getVT(unkObj) = "VT_UNKNOWN", "getVT(unkObj) = " & getVT(unkObj))
+call ok(obj is unkObj, "obj is not unkObj")
+
 ' Array tests
 
 Call ok(getVT(arr) = "VT_EMPTY*", "getVT(arr) = " & getVT(arr))
@@ -1346,6 +1413,28 @@ x = 1
 redim x(3)
 ok ubound(x) = 3, "ubound(x) = " & ubound(x)
 
+x(0) = 1
+x(1) = 2
+x(2) = 3
+x(2) = 4
+
+redim preserve x(1)
+ok ubound(x) = 1, "ubound(x) = " & ubound(x)
+ok x(0) = 1, "x(0) = " & x(1)
+ok x(1) = 2, "x(1) = " & x(1)
+
+redim preserve x(2)
+ok ubound(x) = 2, "ubound(x) = " & ubound(x)
+ok x(0) = 1, "x(0) = " & x(0)
+ok x(1) = 2, "x(1) = " & x(1)
+ok x(2) = vbEmpty, "x(2) = " & x(2)
+
+on error resume next
+redim preserve x(2,2)
+e = err.number
+on error goto 0
+ok e = 9, "e = " & e ' VBSE_OUT_OF_BOUNDS, cannot change cDims
+
 x = Array(1, 2)
 redim x(-1)
 ok lbound(x) = 0, "lbound(x) = " & lbound(x)
@@ -1355,6 +1444,40 @@ redim x(3, 2)
 ok ubound(x) = 3, "ubound(x) = " & ubound(x)
 ok ubound(x, 1) = 3, "ubound(x, 1) = " & ubound(x, 1)
 ok ubound(x, 2) = 2, "ubound(x, 2) = " & ubound(x, 2) & " expected 2"
+
+redim x(1, 3)
+x(0,0) = 1.1
+x(0,1) = 1.2
+x(0,2) = 1.3
+x(0,3) = 1.4
+x(1,0) = 2.1
+x(1,1) = 2.2
+x(1,2) = 2.3
+x(1,3) = 2.4
+
+redim preserve x(1,1)
+ok ubound(x, 1) = 1, "ubound(x, 1) = " & ubound(x, 1)
+ok ubound(x, 2) = 1, "ubound(x, 2) = " & ubound(x, 2)
+ok x(0,0) = 1.1, "x(0,0) = " & x(0,0)
+ok x(0,1) = 1.2, "x(0,1) = " & x(0,1)
+ok x(1,0) = 2.1, "x(1,0) = " & x(1,0)
+ok x(1,1) = 2.2, "x(1,1) = " & x(1,1)
+
+redim preserve x(1,2)
+ok ubound(x, 1) = 1, "ubound(x, 1) = " & ubound(x, 1)
+ok ubound(x, 2) = 2, "ubound(x, 2) = " & ubound(x, 2)
+ok x(0,0) = 1.1, "x(0,0) = " & x(0,0)
+ok x(0,1) = 1.2, "x(0,1) = " & x(0,1)
+ok x(1,0) = 2.1, "x(1,0) = " & x(1,0)
+ok x(1,1) = 2.2, "x(1,1) = " & x(1,1)
+ok x(0,2) = vbEmpty, "x(0,2) = " & x(0,2)
+ok x(1,2) = vbEmpty, "x(1,2) = " & x(1,1)
+
+on error resume next
+redim preserve x(2,2)
+e = err.number
+on error goto 0
+ok e = 9, "e = " & e ' VBSE_OUT_OF_BOUNDS, can only change rightmost dimension
 
 dim staticarray(4)
 on error resume next
@@ -1509,8 +1632,43 @@ sub test_identifiers
     Dim step
     step = "xx"
     Call ok(step = "xx", "step = " & step & " expected ""xx""")
+
+    Dim property
+    property = "xx"
+    Call ok(property = "xx", "property = " & property & " expected ""xx""")
 end sub
 call test_identifiers()
+
+Class class_test_identifiers_as_function_name
+    Sub Property ( par )
+    End Sub
+
+    Function Error( par )
+    End Function
+
+    Sub Default ()
+    End Sub
+
+    Function Explicit (par)
+        Explicit = par
+    End Function
+
+    Sub Step ( default )
+    End Sub
+End Class
+
+Class class_test_identifiers_as_property_name
+    Public Property Get Property()
+    End Property
+
+    Public Property Let Error(par)
+        Error = par
+    End Property
+
+    Public Property Set Default(par)
+        Set Default = par
+    End Property
+End Class
 
 sub test_dotIdentifiers
     ' test keywords that can also be an identifier after a dot
@@ -1613,6 +1771,43 @@ class TestPropSyntax
     end property
 end class
 
+Class TestPropParam
+    Public oDict
+    Public gotNothing
+    Public m_obj
+
+    Public Property Set bar(obj)
+        Set m_obj = obj
+    End Property
+    Public Property Set foo(par,obj)
+        Set m_obj = obj
+        if obj is Nothing Then gotNothing = True
+        oDict = par
+    End Property
+    Public Property Let Key(oldKey,newKey)
+        oDict = oldKey & newKey
+    End Property
+    Public Property Let three(uno,due,tre)
+        oDict = uno & due & tre
+    End Property
+    Public Property Let ten(a,b,c,d,e,f,g,h,i,j)
+        oDict = a & b & c & d & e & f & g & h & i & j
+    End Property
+End Class
+
+Set x = new TestPropParam
+x.key("old") = "new"
+call ok(x.oDict = "oldnew","x.oDict = " & x.oDict & " expected oldnew")
+x.three(1,2) = 3
+call ok(x.oDict = "123","x.oDict = " & x.oDict & " expected 123")
+x.ten(1,2,3,4,5,6,7,8,9) = 0
+call ok(x.oDict = "1234567890","x.oDict = " & x.oDict & " expected 1234567890")
+Set x.bar = Nothing
+call ok(x.gotNothing=Empty,"x.gotNothing = " & x.gotNothing  & " expected Empty")
+Set x.foo("123") = Nothing
+call ok(x.oDict = "123","x.oDict = " & x.oDict & " expected 123")
+call ok(x.gotNothing=True,"x.gotNothing = " & x.gotNothing  & " expected true")
+
 set x = new TestPropSyntax
 set x.prop = new TestPropSyntax
 set x.prop.prop = new TestPropSyntax
@@ -1620,9 +1815,43 @@ x.prop.prop.prop = 2
 call ok(x.getProp().getProp.prop = 2, "x.getProp().getProp.prop = " & x.getProp().getProp.prop)
 x.getprop.getprop().prop = 3
 call ok(x.getProp.prop.prop = 3, "x.getProp.prop.prop = " & x.getProp.prop.prop)
+set x.getprop.getprop().prop = new emptyclass
+set obj = new emptyclass
+set x.getprop.getprop().prop = obj
+call ok(x.getprop.getprop().prop is obj, "x.getprop.getprop().prop is not obj (emptyclass)")
 
 ok getVT(x) = "VT_DISPATCH*", "getVT(x) = " & getVT(x)
 todo_wine_ok getVT(x()) = "VT_BSTR", "getVT(x()) = " & getVT(x())
+
+funcCalled = ""
+class DefaultSubTest1
+ Public  default Sub init(a)
+    funcCalled = "init" & a
+ end sub
+end class
+
+Set obj = New DefaultSubTest1
+obj.init(1)
+call ok(funcCalled = "init1","funcCalled=" & funcCalled)
+funcCalled = ""
+obj(2)
+call ok(funcCalled = "init2","funcCalled=" & funcCalled)
+
+class DefaultSubTest2
+ Public Default Function init
+    funcCalled = "init"
+ end function
+end class
+
+Set obj = New DefaultSubTest2
+funcCalled = ""
+obj.init()
+call ok(funcCalled = "init","funcCalled=" & funcCalled)
+funcCalled = ""
+' todo this is not yet supported
+'funcCalled = ""
+'obj()
+'call ok(funcCalled = "init","funcCalled=" & funcCalled)
 
 with nothing
 end with

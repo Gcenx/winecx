@@ -74,6 +74,7 @@ static const struct object_ops handler_ops =
     no_map_access,            /* map_access */
     default_get_sd,           /* get_sd */
     default_set_sd,           /* set_sd */
+    no_get_full_name,         /* get_full_name */
     no_lookup_name,           /* lookup_name */
     no_link_name,             /* link_name */
     NULL,                     /* unlink_name */
@@ -127,7 +128,7 @@ static struct handler *create_handler( signal_callback callback )
         return NULL;
     }
     set_fd_events( handler->fd, POLLIN );
-    make_object_static( &handler->obj );
+    make_object_permanent( &handler->obj );
     return handler;
 }
 

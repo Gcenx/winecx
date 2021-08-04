@@ -50,9 +50,6 @@ enum seq_index {
 #define expect2(expected1, expected2, got1, got2) ok(expected1 == got1 && expected2 == got2, \
        "expected (%d,%d), got (%d,%d)\n", expected1, expected2, got1, got2)
 
-static const WCHAR testparentclassW[] =
-    {'L','i','s','t','v','i','e','w',' ','t','e','s','t',' ','p','a','r','e','n','t','W', 0};
-
 static HWND hwndparent, hwndparentW;
 /* prevents edit box creation, LVN_BEGINLABELEDIT return value */
 static BOOL blockEdit;
@@ -65,8 +62,6 @@ static NMLISTVIEW g_nmlistview_changing;
 /* format reported to control:
    -1 falls to defproc, anything else returned */
 static INT notifyFormat;
-/* indicates we're running < 5.80 version */
-static BOOL g_is_below_5;
 /* item data passed to LVN_GETDISPINFOA */
 static LVITEMA g_itema;
 /* alter notification code A->W */
@@ -555,9 +550,8 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
 
                   if (g_disp_A_to_W && (dispinfo->item.mask & LVIF_TEXT))
                   {
-                      static const WCHAR testW[] = {'T','E','S','T',0};
                       dispinfo->hdr.code = LVN_GETDISPINFOW;
-                      memcpy(dispinfo->item.pszText, testW, sizeof(testW));
+                      lstrcpyW((WCHAR *)dispinfo->item.pszText, L"TEST");
                   }
 
                   /* test control buffer size for text, 10 used to mask cases when control
@@ -618,7 +612,7 @@ static BOOL register_parent_wnd_class(BOOL Unicode)
         clsW.hCursor = LoadCursorA(0, (LPCSTR)IDC_ARROW);
         clsW.hbrBackground = GetStockObject(WHITE_BRUSH);
         clsW.lpszMenuName = NULL;
-        clsW.lpszClassName = testparentclassW;
+        clsW.lpszClassName = L"Listview test parentW";
     }
     else
     {
@@ -639,7 +633,6 @@ static BOOL register_parent_wnd_class(BOOL Unicode)
 
 static HWND create_parent_window(BOOL Unicode)
 {
-    static const WCHAR nameW[] = {'t','e','s','t','p','a','r','e','n','t','n','a','m','e','W',0};
     HWND hwnd;
 
     if (!register_parent_wnd_class(Unicode))
@@ -649,7 +642,7 @@ static HWND create_parent_window(BOOL Unicode)
     notifyFormat = -1;
 
     if (Unicode)
-        hwnd = CreateWindowExW(0, testparentclassW, nameW,
+        hwnd = CreateWindowExW(0, L"Listview test parentW", L"testparentnameW",
                                WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX |
                                WS_MAXIMIZEBOX | WS_VISIBLE,
                                0, 0, 100, 100,
@@ -715,10 +708,9 @@ static HWND create_listview_controlW(DWORD style, HWND parent)
     WNDPROC oldproc;
     HWND hwnd;
     RECT rect;
-    static const WCHAR nameW[] = {'f','o','o',0};
 
     GetClientRect(parent, &rect);
-    hwnd = CreateWindowExW(0, WC_LISTVIEWW, nameW,
+    hwnd = CreateWindowExW(0, WC_LISTVIEWW, L"foo",
                            WS_CHILD | WS_BORDER | WS_VISIBLE | style,
                            0, 0, rect.right, rect.bottom,
                            parent, NULL, GetModuleHandleW(NULL), NULL);
@@ -733,20 +725,6 @@ static HWND create_listview_controlW(DWORD style, HWND parent)
     return hwnd;
 }
 
-static BOOL is_win_xp(void)
-{
-    HWND hwnd, header;
-    BOOL ret;
-
-    hwnd = create_listview_control(LVS_ICON);
-    SendMessageA(hwnd, LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_HEADERINALLVIEWS, LVS_EX_HEADERINALLVIEWS);
-    header = (HWND)SendMessageA(hwnd, LVM_GETHEADER, 0, 0);
-    ret = !IsWindow(header);
-
-    DestroyWindow(hwnd);
-
-    return ret;
-}
 
 static LRESULT WINAPI header_subclass_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -1045,12 +1023,6 @@ static void test_checkboxes(void)
     item.stateMask = 0xffff;
     r = SendMessageA(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
     expect(1, r);
-    if (item.state != 0x1ccc)
-    {
-        win_skip("LVS_EX_CHECKBOXES style is unavailable. Skipping.\n");
-        DestroyWindow(hwnd);
-        return;
-    }
 
     /* Now add an item without specifying a state and check that its state goes to 0x1000 */
     item.iItem = 2;
@@ -1633,7 +1605,6 @@ static void test_header_presence_(HWND hwnd, BOOL present, int line)
 
 static void test_create(BOOL is_version_6)
 {
-    static const WCHAR testtextW[] = {'t','e','s','t',' ','t','e','x','t',0};
     char buff[16];
     HWND hList;
     HWND hHeader;
@@ -1644,12 +1615,6 @@ static void test_create(BOOL is_version_6)
     WNDCLASSEXA cls;
     DWORD style;
     ATOM class;
-
-    if (is_win_xp() && is_version_6)
-    {
-        win_skip("Skipping some tests on XP.\n");
-        return;
-    }
 
     cls.cbSize = sizeof(WNDCLASSEXA);
     r = GetClassInfoExA(GetModuleHandleA(NULL), WC_LISTVIEWA, &cls);
@@ -1822,7 +1787,7 @@ todo_wine_if(is_version_6)
     ok(!strcmp(buff, "test text"), "Unexpected window text %s.\n", buff);
     DestroyWindow(hList);
 
-    hList = CreateWindowExW(0, WC_LISTVIEWW, testtextW, WS_CHILD | WS_BORDER | WS_VISIBLE,
+    hList = CreateWindowExW(0, WC_LISTVIEWW, L"test text", WS_CHILD | WS_BORDER | WS_VISIBLE,
         0, 0, 100, 100, hwndparent, NULL, GetModuleHandleA(NULL), NULL);
     ok(hList != NULL, "Failed to create ListView window.\n");
     *buff = 0;
@@ -1941,11 +1906,8 @@ static LRESULT WINAPI cd_wndproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM 
                 return CDRF_NOTIFYSUBITEMDRAW|CDRF_NOTIFYPOSTPAINT;
             case CDDS_ITEMPREPAINT | CDDS_SUBITEM:
                 clr = GetBkColor(nmlvcd->nmcd.hdc);
-                todo_wine_if(showsel_always && is_selected && nmlvcd->iSubItem)
-                {
-                    ok(nmlvcd->clrTextBk == CLR_DEFAULT, "Unexpected text background %#x.\n", nmlvcd->clrTextBk);
-                    ok(nmlvcd->clrText == RGB(0, 255, 0), "Unexpected text color %#x.\n", nmlvcd->clrText);
-                }
+                ok(nmlvcd->clrTextBk == CLR_DEFAULT, "Unexpected text background %#x.\n", nmlvcd->clrTextBk);
+                ok(nmlvcd->clrText == RGB(0, 255, 0), "Unexpected text color %#x.\n", nmlvcd->clrText);
                 if (showsel_always && is_selected && nmlvcd->iSubItem)
                     ok(clr == GetSysColor(COLOR_3DFACE), "Unexpected background color %#x.\n", clr);
                 else
@@ -1962,11 +1924,8 @@ static LRESULT WINAPI cd_wndproc(HWND hwnd, UINT message, WPARAM wParam, LPARAM 
                     ok(clr == c0ffee, "Unexpected background color %#x.\n", clr);
                 }
 
-                todo_wine_if(showsel_always)
-                {
-                    ok(nmlvcd->clrTextBk == CLR_DEFAULT, "Unexpected text background color %#x.\n", nmlvcd->clrTextBk);
-                    ok(nmlvcd->clrText == RGB(0, 255, 0), "got 0x%x\n", nmlvcd->clrText);
-                }
+                ok(nmlvcd->clrTextBk == CLR_DEFAULT, "Unexpected text background color %#x.\n", nmlvcd->clrTextBk);
+                ok(nmlvcd->clrText == RGB(0, 255, 0), "got 0x%x\n", nmlvcd->clrText);
                 return CDRF_DODEFAULT;
             }
             return CDRF_DODEFAULT;
@@ -3149,29 +3108,22 @@ static void test_ownerdata(void)
     DWORD res;
     LVITEMA item;
 
-    /* it isn't possible to set LVS_OWNERDATA after creation */
-    if (g_is_below_5)
-    {
-        win_skip("set LVS_OWNERDATA after creation leads to crash on < 5.80\n");
-    }
-    else
-    {
-        hwnd = create_listview_control(LVS_REPORT);
-        ok(hwnd != NULL, "failed to create a listview window\n");
-        style = GetWindowLongPtrA(hwnd, GWL_STYLE);
-        ok(!(style & LVS_OWNERDATA) && style, "LVS_OWNERDATA isn't expected\n");
+    /* Setting LVS_OWNERDATA after creation leads to crash on older versions < 5.80 */
+    hwnd = create_listview_control(LVS_REPORT);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+    ok(!(style & LVS_OWNERDATA) && style, "LVS_OWNERDATA isn't expected\n");
 
-        flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
-        ret = SetWindowLongPtrA(hwnd, GWL_STYLE, style | LVS_OWNERDATA);
-        ok(ret == style, "Expected set GWL_STYLE to succeed\n");
-        ok_sequence(sequences, LISTVIEW_SEQ_INDEX, listview_ownerdata_switchto_seq,
-                "try to switch to LVS_OWNERDATA seq", FALSE);
+    ret = SetWindowLongPtrA(hwnd, GWL_STYLE, style | LVS_OWNERDATA);
+    ok(ret == style, "Expected set GWL_STYLE to succeed\n");
+    ok_sequence(sequences, LISTVIEW_SEQ_INDEX, listview_ownerdata_switchto_seq,
+            "try to switch to LVS_OWNERDATA seq", FALSE);
 
-        style = GetWindowLongPtrA(hwnd, GWL_STYLE);
-        ok(!(style & LVS_OWNERDATA), "LVS_OWNERDATA isn't expected\n");
-        DestroyWindow(hwnd);
-    }
+    style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+    ok(!(style & LVS_OWNERDATA), "LVS_OWNERDATA isn't expected\n");
+    DestroyWindow(hwnd);
 
     /* try to set LVS_OWNERDATA after creation just having it */
     hwnd = create_listview_control(LVS_OWNERDATA | LVS_REPORT);
@@ -3187,28 +3139,20 @@ static void test_ownerdata(void)
                 "try to switch to LVS_OWNERDATA seq", FALSE);
     DestroyWindow(hwnd);
 
-    /* try to remove LVS_OWNERDATA after creation just having it */
-    if (g_is_below_5)
-    {
-        win_skip("remove LVS_OWNERDATA after creation leads to crash on < 5.80\n");
-    }
-    else
-    {
-        hwnd = create_listview_control(LVS_OWNERDATA | LVS_REPORT);
-        ok(hwnd != NULL, "failed to create a listview window\n");
-        style = GetWindowLongPtrA(hwnd, GWL_STYLE);
-        ok(style & LVS_OWNERDATA, "LVS_OWNERDATA is expected\n");
+    hwnd = create_listview_control(LVS_OWNERDATA | LVS_REPORT);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+    ok(style & LVS_OWNERDATA, "LVS_OWNERDATA is expected\n");
 
-        flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
-        ret = SetWindowLongPtrA(hwnd, GWL_STYLE, style & ~LVS_OWNERDATA);
-        ok(ret == style, "Expected set GWL_STYLE to succeed\n");
-        ok_sequence(sequences, LISTVIEW_SEQ_INDEX, listview_ownerdata_switchto_seq,
-                "try to switch to LVS_OWNERDATA seq", FALSE);
-        style = GetWindowLongPtrA(hwnd, GWL_STYLE);
-        ok(style & LVS_OWNERDATA, "LVS_OWNERDATA is expected\n");
-        DestroyWindow(hwnd);
-    }
+    ret = SetWindowLongPtrA(hwnd, GWL_STYLE, style & ~LVS_OWNERDATA);
+    ok(ret == style, "Expected set GWL_STYLE to succeed\n");
+    ok_sequence(sequences, LISTVIEW_SEQ_INDEX, listview_ownerdata_switchto_seq,
+            "try to switch to LVS_OWNERDATA seq", FALSE);
+    style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+    ok(style & LVS_OWNERDATA, "LVS_OWNERDATA is expected\n");
+    DestroyWindow(hwnd);
 
     /* try select an item */
     hwnd = create_listview_control(LVS_OWNERDATA | LVS_REPORT);
@@ -4637,27 +4581,6 @@ static void test_indentation(void)
     DestroyWindow(hwnd);
 }
 
-static INT CALLBACK DummyCompareEx(LPARAM first, LPARAM second, LPARAM param)
-{
-    return 0;
-}
-
-static BOOL is_below_comctl_5(void)
-{
-    HWND hwnd;
-    BOOL ret;
-
-    hwnd = create_listview_control(LVS_REPORT);
-    ok(hwnd != NULL, "failed to create a listview window\n");
-    insert_item(hwnd, 0);
-
-    ret = SendMessageA(hwnd, LVM_SORTITEMSEX, 0, (LPARAM)&DummyCompareEx);
-
-    DestroyWindow(hwnd);
-
-    return !ret;
-}
-
 static void test_get_set_view(void)
 {
     HWND hwnd;
@@ -5365,6 +5288,19 @@ static void test_finditem(void)
     fi.flags = LVFI_SUBSTRING | LVFI_PARTIAL;
     r = SendMessageA(hwnd, LVM_FINDITEMA, -1, (LPARAM)&fi);
     expect(0, r);
+
+    /* Case sensitivity. */
+    strcpy(f, "Foo");
+    fi.flags = LVFI_STRING;
+    fi.psz = f;
+    r = SendMessageA(hwnd, LVM_FINDITEMA, -1, (LPARAM)&fi);
+    ok(!r, "Unexpected item index %d.\n", r);
+
+    strcpy(f, "F");
+    fi.flags = LVFI_SUBSTRING;
+    fi.psz = f;
+    r = SendMessageA(hwnd, LVM_FINDITEMA, -1, (LPARAM)&fi);
+    ok(!r, "Unexpected item index %d.\n", r);
 
     DestroyWindow(hwnd);
 }
@@ -6652,6 +6588,42 @@ static void test_item_state_change(void)
     }
 }
 
+static void test_selected_column(void)
+{
+    static const DWORD styles[] = { LVS_ICON, LVS_LIST, LVS_REPORT, LVS_SMALLICON };
+    int ret, i;
+    HWND hwnd;
+
+    for (i = 0; i < ARRAY_SIZE(styles); ++i)
+    {
+        hwnd = create_listview_control(styles[i]);
+
+        /* Initial value */
+        ret = SendMessageA(hwnd, LVM_GETSELECTEDCOLUMN, 0, 0);
+        ok(ret == -1, "Unexpected column %d.\n", ret);
+
+        ret = SendMessageA(hwnd, LVM_SETSELECTEDCOLUMN, -100, 0);
+        ok(ret == 1, "Unexpected return value %d.\n", ret);
+
+        ret = SendMessageA(hwnd, LVM_GETSELECTEDCOLUMN, 0, 0);
+        ok(ret == -100, "Unexpected column %d.\n", ret);
+
+        ret = SendMessageA(hwnd, LVM_SETSELECTEDCOLUMN, 100, 0);
+        ok(ret == 1, "Unexpected return value %d.\n", ret);
+
+        ret = SendMessageA(hwnd, LVM_GETSELECTEDCOLUMN, 0, 0);
+        ok(ret == 100, "Unexpected column %d.\n", ret);
+
+        ret = SendMessageA(hwnd, LVM_SETSELECTEDCOLUMN, -1, 0);
+        ok(ret == 1, "Unexpected return value %d.\n", ret);
+
+        ret = SendMessageA(hwnd, LVM_GETSELECTEDCOLUMN, 0, 0);
+        ok(ret == -1, "Unexpected column %d.\n", ret);
+
+        DestroyWindow(hwnd);
+    }
+}
+
 START_TEST(listview)
 {
     ULONG_PTR ctx_cookie;
@@ -6663,8 +6635,6 @@ START_TEST(listview)
 
     hwndparent = create_parent_window(FALSE);
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
-
-    g_is_below_5 = is_below_comctl_5();
 
     test_header_notification();
     test_header_notification2();
@@ -6759,6 +6729,7 @@ START_TEST(listview)
     test_LVN_ENDLABELEDIT();
     test_LVM_GETCOUNTPERPAGE();
     test_item_state_change();
+    test_selected_column();
 
     unload_v6_module(ctx_cookie, hCtx);
 

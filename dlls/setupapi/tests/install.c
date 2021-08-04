@@ -54,6 +54,24 @@ static char CURR_DIR[MAX_PATH];
  * Helpers
  */
 
+static void load_resource(const char *name, const char *filename)
+{
+    DWORD written;
+    HANDLE file;
+    HRSRC res;
+    void *ptr;
+
+    file = CreateFileA(filename, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
+    ok(file != INVALID_HANDLE_VALUE, "file creation failed, at %s, error %d\n", filename, GetLastError());
+
+    res = FindResourceA(NULL, name, "TESTDLL");
+    ok( res != 0, "couldn't find resource\n" );
+    ptr = LockResource( LoadResource( GetModuleHandleA(NULL), res ));
+    WriteFile( file, ptr, SizeofResource( GetModuleHandleA(NULL), res ), &written, NULL );
+    ok( written == SizeofResource( GetModuleHandleA(NULL), res ), "couldn't write resource\n" );
+    CloseHandle( file );
+}
+
 static void create_inf_file(LPCSTR filename, const char *data)
 {
     DWORD res;
@@ -330,7 +348,7 @@ static void ok_registry(BOOL expectsuccess)
 static void test_cmdline(void)
 {
     static const char infwithspaces[] = "test file.inf";
-    char path[MAX_PATH];
+    char path[MAX_PATH + 16];
     BOOL ret;
 
     create_inf_file(inffile, cmdline_inf);
@@ -366,7 +384,7 @@ static void test_registry(void)
 {
     HKEY key;
     LONG res;
-    char path[MAX_PATH];
+    char path[MAX_PATH + 9];
     BOOL ret;
 
     /* First create a registry structure we would like to be deleted */
@@ -396,7 +414,7 @@ static void test_registry(void)
 
 static void test_install_from(void)
 {
-    char path[MAX_PATH];
+    char path[MAX_PATH + 9];
     HINF infhandle;
     HKEY key;
     LONG res;
@@ -436,7 +454,7 @@ static void test_install_from(void)
 static void test_install_svc_from(void)
 {
     char inf[2048];
-    char path[MAX_PATH];
+    char path[MAX_PATH + 9];
     HINF infhandle;
     BOOL ret;
     SC_HANDLE scm_handle, svc_handle;
@@ -596,7 +614,7 @@ static void test_driver_install(void)
     HANDLE handle;
     SC_HANDLE scm_handle, svc_handle;
     BOOL ret;
-    char path[MAX_PATH], windir[MAX_PATH], driver[MAX_PATH];
+    char path[MAX_PATH + 9], windir[MAX_PATH], driver[MAX_PATH];
     DWORD attrs;
     /* Minimal stuff needed */
     static const char *inf =
@@ -665,7 +683,7 @@ static void test_driver_install(void)
 
 static void test_profile_items(void)
 {
-    char path[MAX_PATH], commonprogs[MAX_PATH];
+    char path[MAX_PATH + 22], commonprogs[MAX_PATH];
 
     static const char *inf =
         "[Version]\n"
@@ -947,7 +965,7 @@ static const char dirid_inf[] = "[Version]\n"
 static void check_dirid(int dirid, LPCSTR expected)
 {
     char buffer[sizeof(dirid_inf)+11];
-    char path[MAX_PATH], actual[MAX_PATH];
+    char path[MAX_PATH + 9], actual[MAX_PATH];
     LONG ret;
     DWORD size, type;
     HKEY key;
@@ -1027,7 +1045,7 @@ static void test_install_files_queue(void)
             "[DestinationDirs]\n"
             "files_section=40000,dst\n";
 
-    char path[MAX_PATH];
+    char path[MAX_PATH + 9];
     HSPFILEQ queue;
     void *context;
     HINF hinf;
@@ -1349,7 +1367,7 @@ static void test_install_file(void)
             "[DestinationDirs]\n"
             "DefaultDestDir=40000,dst\n";
 
-    char path[MAX_PATH];
+    char path[MAX_PATH + 9];
     INFCONTEXT infctx;
     HINF hinf;
     BOOL ret;
@@ -1448,7 +1466,7 @@ static void test_need_media(void)
             "DefaultDestDir=40000,dst\n";
 
     SP_FILE_COPY_PARAMS_A copy_params = {sizeof(copy_params)};
-    char path[MAX_PATH];
+    char path[MAX_PATH + 9];
     HSPFILEQ queue;
     HINF hinf;
     BOOL ret;
@@ -2040,6 +2058,77 @@ static void test_start_copy(void)
     delete_file("dst/");
 }
 
+static void test_register_dlls(void)
+{
+    static const char inf_data[] = "[Version]\n"
+            "Signature=\"$Chicago$\"\n"
+            "[DefaultInstall]\n"
+            "RegisterDlls=register_section\n"
+            "UnregisterDlls=register_section\n"
+            "[register_section]\n"
+            "40000,,winetest_selfreg.dll,1\n";
+
+    void *context = SetupInitDefaultQueueCallbackEx(NULL, INVALID_HANDLE_VALUE, 0, 0, 0);
+    char path[MAX_PATH];
+    HRESULT hr;
+    HINF hinf;
+    BOOL ret;
+    HKEY key;
+    LONG l;
+
+    create_inf_file("test.inf", inf_data);
+    sprintf(path, "%s\\test.inf", CURR_DIR);
+    hinf = SetupOpenInfFileA(path, NULL, INF_STYLE_WIN4, NULL);
+    ok(hinf != INVALID_HANDLE_VALUE, "Failed to open INF file, error %#x.\n", GetLastError());
+
+    load_resource("selfreg.dll", "winetest_selfreg.dll");
+    ret = SetupSetDirectoryIdA(hinf, 40000, CURR_DIR);
+    ok(ret, "Failed to set directory ID, error %u.\n", GetLastError());
+
+    RegDeleteKeyA(HKEY_CURRENT_USER, "winetest_setupapi_selfreg");
+
+    ret = SetupInstallFromInfSectionA(NULL, hinf, "DefaultInstall", SPINST_REGSVR,
+            NULL, "C:\\", 0, SetupDefaultQueueCallbackA, context, NULL, NULL);
+    ok(ret, "Failed to install, error %#x.\n", GetLastError());
+
+    l = RegOpenKeyA(HKEY_CURRENT_USER, "winetest_setupapi_selfreg", &key);
+    ok(!l, "Got error %u.\n", l);
+    RegCloseKey(key);
+
+    ret = SetupInstallFromInfSectionA(NULL, hinf, "DefaultInstall", SPINST_UNREGSVR,
+            NULL, "C:\\", 0, SetupDefaultQueueCallbackA, context, NULL, NULL);
+    ok(ret, "Failed to install, error %#x.\n", GetLastError());
+
+    l = RegOpenKeyA(HKEY_CURRENT_USER, "winetest_setupapi_selfreg", &key);
+    ok(l == ERROR_FILE_NOT_FOUND, "Got error %u.\n", l);
+
+    hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    ret = SetupInstallFromInfSectionA(NULL, hinf, "DefaultInstall", SPINST_REGSVR,
+            NULL, "C:\\", 0, SetupDefaultQueueCallbackA, context, NULL, NULL);
+    ok(ret, "Failed to install, error %#x.\n", GetLastError());
+
+    l = RegOpenKeyA(HKEY_CURRENT_USER, "winetest_setupapi_selfreg", &key);
+    ok(!l, "Got error %u.\n", l);
+    RegCloseKey(key);
+
+    ret = SetupInstallFromInfSectionA(NULL, hinf, "DefaultInstall", SPINST_UNREGSVR,
+            NULL, "C:\\", 0, SetupDefaultQueueCallbackA, context, NULL, NULL);
+    ok(ret, "Failed to install, error %#x.\n", GetLastError());
+
+    l = RegOpenKeyA(HKEY_CURRENT_USER, "winetest_setupapi_selfreg", &key);
+    ok(l == ERROR_FILE_NOT_FOUND, "Got error %u.\n", l);
+
+    CoUninitialize();
+
+    SetupCloseInfFile(hinf);
+    ret = DeleteFileA("test.inf");
+    ok(ret, "Failed to delete INF file, error %u.\n", GetLastError());
+    ret = DeleteFileA("winetest_selfreg.dll");
+    ok(ret, "Failed to delete test DLL, error %u.\n", GetLastError());
+}
+
 START_TEST(install)
 {
     char temp_path[MAX_PATH], prev_path[MAX_PATH];
@@ -2069,6 +2158,7 @@ START_TEST(install)
     test_close_queue();
     test_install_file();
     test_start_copy();
+    test_register_dlls();
 
     UnhookWindowsHookEx(hhook);
 

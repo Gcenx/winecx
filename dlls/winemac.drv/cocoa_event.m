@@ -46,7 +46,10 @@ static const OSType WineHotKeySignature = 'Wine';
 
     static BOOL wine_commandKeyDown(NSUInteger flags)
     {
-        return ((flags & (NSShiftKeyMask | NSControlKeyMask | NSAlternateKeyMask | NSCommandKeyMask)) == NSCommandKeyMask);
+        return ((flags & (NSEventModifierFlagShift |
+                          NSEventModifierFlagControl |
+                          NSEventModifierFlagOption |
+                          NSEventModifierFlagCommand)) == NSEventModifierFlagCommand);
     }
 
     + (BOOL) wine_commandKeyDown
@@ -104,7 +107,7 @@ static const OSType WineHotKeySignature = 'Wine';
 
     - (id) initWithEventHandler:(macdrv_event_handler)handler
     {
-        NSParameterAssert(handler != nil);
+        //NSParameterAssert(handler != nil);
 
         self = [super init];
         if (self != nil)
@@ -756,7 +759,7 @@ void macdrv_set_query_done(macdrv_query *query)
         query->done = TRUE;
         macdrv_release_query(query);
 
-        event = [NSEvent otherEventWithType:NSApplicationDefined
+        event = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
                                    location:NSZeroPoint
                               modifierFlags:0
                                   timestamp:[[NSProcessInfo processInfo] systemUptime]

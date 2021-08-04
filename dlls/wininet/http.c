@@ -54,81 +54,11 @@
 
 #include "internet.h"
 #include "zlib.h"
+#include "resource.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wininet);
-
-static const WCHAR g_szHttp1_0[] = {'H','T','T','P','/','1','.','0',0};
-static const WCHAR g_szHttp1_1[] = {'H','T','T','P','/','1','.','1',0};
-static const WCHAR szOK[] = {'O','K',0};
-static const WCHAR hostW[] = { 'H','o','s','t',0 };
-static const WCHAR szAuthorization[] = { 'A','u','t','h','o','r','i','z','a','t','i','o','n',0 };
-static const WCHAR szProxy_Authorization[] = { 'P','r','o','x','y','-','A','u','t','h','o','r','i','z','a','t','i','o','n',0 };
-static const WCHAR szStatus[] = { 'S','t','a','t','u','s',0 };
-static const WCHAR szKeepAlive[] = {'K','e','e','p','-','A','l','i','v','e',0};
-static const WCHAR szGET[] = { 'G','E','T', 0 };
-static const WCHAR szHEAD[] = { 'H','E','A','D', 0 };
-
-static const WCHAR szAccept[] = { 'A','c','c','e','p','t',0 };
-static const WCHAR szAccept_Charset[] = { 'A','c','c','e','p','t','-','C','h','a','r','s','e','t', 0 };
-static const WCHAR szAccept_Encoding[] = { 'A','c','c','e','p','t','-','E','n','c','o','d','i','n','g',0 };
-static const WCHAR szAccept_Language[] = { 'A','c','c','e','p','t','-','L','a','n','g','u','a','g','e',0 };
-static const WCHAR szAccept_Ranges[] = { 'A','c','c','e','p','t','-','R','a','n','g','e','s',0 };
-static const WCHAR szAge[] = { 'A','g','e',0 };
-static const WCHAR szAllow[] = { 'A','l','l','o','w',0 };
-static const WCHAR szCache_Control[] = { 'C','a','c','h','e','-','C','o','n','t','r','o','l',0 };
-static const WCHAR szConnection[] = { 'C','o','n','n','e','c','t','i','o','n',0 };
-static const WCHAR szContent_Base[] = { 'C','o','n','t','e','n','t','-','B','a','s','e',0 };
-static const WCHAR szContent_Disposition[] = { 'C','o','n','t','e','n','t','-','D','i','s','p','o','s','i','t','i','o','n',0 };
-static const WCHAR szContent_Encoding[] = { 'C','o','n','t','e','n','t','-','E','n','c','o','d','i','n','g',0 };
-static const WCHAR szContent_ID[] = { 'C','o','n','t','e','n','t','-','I','D',0 };
-static const WCHAR szContent_Language[] = { 'C','o','n','t','e','n','t','-','L','a','n','g','u','a','g','e',0 };
-static const WCHAR szContent_Length[] = { 'C','o','n','t','e','n','t','-','L','e','n','g','t','h',0 };
-static const WCHAR szContent_Location[] = { 'C','o','n','t','e','n','t','-','L','o','c','a','t','i','o','n',0 };
-static const WCHAR szContent_MD5[] = { 'C','o','n','t','e','n','t','-','M','D','5',0 };
-static const WCHAR szContent_Range[] = { 'C','o','n','t','e','n','t','-','R','a','n','g','e',0 };
-static const WCHAR szContent_Transfer_Encoding[] = { 'C','o','n','t','e','n','t','-','T','r','a','n','s','f','e','r','-','E','n','c','o','d','i','n','g',0 };
-static const WCHAR szContent_Type[] = { 'C','o','n','t','e','n','t','-','T','y','p','e',0 };
-static const WCHAR szCookie[] = { 'C','o','o','k','i','e',0 };
-static const WCHAR szDate[] = { 'D','a','t','e',0 };
-static const WCHAR szFrom[] = { 'F','r','o','m',0 };
-static const WCHAR szETag[] = { 'E','T','a','g',0 };
-static const WCHAR szExpect[] = { 'E','x','p','e','c','t',0 };
-static const WCHAR szExpires[] = { 'E','x','p','i','r','e','s',0 };
-static const WCHAR szIf_Match[] = { 'I','f','-','M','a','t','c','h',0 };
-static const WCHAR szIf_Modified_Since[] = { 'I','f','-','M','o','d','i','f','i','e','d','-','S','i','n','c','e',0 };
-static const WCHAR szIf_None_Match[] = { 'I','f','-','N','o','n','e','-','M','a','t','c','h',0 };
-static const WCHAR szIf_Range[] = { 'I','f','-','R','a','n','g','e',0 };
-static const WCHAR szIf_Unmodified_Since[] = { 'I','f','-','U','n','m','o','d','i','f','i','e','d','-','S','i','n','c','e',0 };
-static const WCHAR szLast_Modified[] = { 'L','a','s','t','-','M','o','d','i','f','i','e','d',0 };
-static const WCHAR szLocation[] = { 'L','o','c','a','t','i','o','n',0 };
-static const WCHAR szMax_Forwards[] = { 'M','a','x','-','F','o','r','w','a','r','d','s',0 };
-static const WCHAR szMime_Version[] = { 'M','i','m','e','-','V','e','r','s','i','o','n',0 };
-static const WCHAR szPragma[] = { 'P','r','a','g','m','a',0 };
-static const WCHAR szProxy_Authenticate[] = { 'P','r','o','x','y','-','A','u','t','h','e','n','t','i','c','a','t','e',0 };
-static const WCHAR szProxy_Connection[] = { 'P','r','o','x','y','-','C','o','n','n','e','c','t','i','o','n',0 };
-static const WCHAR szPublic[] = { 'P','u','b','l','i','c',0 };
-static const WCHAR szRange[] = { 'R','a','n','g','e',0 };
-static const WCHAR szReferer[] = { 'R','e','f','e','r','e','r',0 };
-static const WCHAR szRetry_After[] = { 'R','e','t','r','y','-','A','f','t','e','r',0 };
-static const WCHAR szServer[] = { 'S','e','r','v','e','r',0 };
-static const WCHAR szSet_Cookie[] = { 'S','e','t','-','C','o','o','k','i','e',0 };
-static const WCHAR szTransfer_Encoding[] = { 'T','r','a','n','s','f','e','r','-','E','n','c','o','d','i','n','g',0 };
-static const WCHAR szUnless_Modified_Since[] = { 'U','n','l','e','s','s','-','M','o','d','i','f','i','e','d','-','S','i','n','c','e',0 };
-static const WCHAR szUpgrade[] = { 'U','p','g','r','a','d','e',0 };
-static const WCHAR szURI[] = { 'U','R','I',0 };
-static const WCHAR szUser_Agent[] = { 'U','s','e','r','-','A','g','e','n','t',0 };
-static const WCHAR szVary[] = { 'V','a','r','y',0 };
-static const WCHAR szVia[] = { 'V','i','a',0 };
-static const WCHAR szWarning[] = { 'W','a','r','n','i','n','g',0 };
-static const WCHAR szWWW_Authenticate[] = { 'W','W','W','-','A','u','t','h','e','n','t','i','c','a','t','e',0 };
-
-static const WCHAR emptyW[] = {0};
-
-#define HTTP_REFERER    szReferer
-#define HTTP_ACCEPT     szAccept
-#define HTTP_USERAGENT  szUser_Agent
 
 #define HTTP_ADDHDR_FLAG_ADD				0x20000000
 #define HTTP_ADDHDR_FLAG_ADD_IF_NEW			0x10000000
@@ -237,17 +167,13 @@ static BOOL process_host_port(server_t *server)
     size_t name_len, len;
     WCHAR *buf;
 
-    static const WCHAR httpW[] = {'h','t','t','p',0};
-    static const WCHAR httpsW[] = {'h','t','t','p','s',0};
-    static const WCHAR formatW[] = {'%','s',':','/','/','%','s',':','%','u',0};
-
     name_len = lstrlenW(server->name);
-    len = name_len + 10 /* strlen("://:<port>") */ + ARRAY_SIZE(httpsW);
+    len = name_len + 10 /* strlen("://:<port>") */ + ARRAY_SIZE(L"https");
     buf = heap_alloc( len * sizeof(WCHAR) );
     if(!buf)
         return FALSE;
 
-    swprintf(buf, len, formatW, server->is_https ? httpsW : httpW, server->name, server->port);
+    swprintf(buf, len, L"%s://%s:%u", server->is_https ? L"https" : L"http", server->name, server->port);
     server->scheme_host_port = buf;
 
     server->host_port = server->scheme_host_port + 7 /* strlen("http://") */;
@@ -367,7 +293,7 @@ static WCHAR *get_host_header( http_request_t *req )
     WCHAR *ret = NULL;
 
     EnterCriticalSection( &req->headers_section );
-    if ((header = HTTP_GetHeader( req, hostW ))) ret = heap_strdupW( header->lpszValue );
+    if ((header = HTTP_GetHeader( req, L"Host" ))) ret = heap_strdupW( header->lpszValue );
     else ret = heap_strdupW( req->server->canon_host_port );
     LeaveCriticalSection( &req->headers_section );
     return ret;
@@ -555,7 +481,7 @@ static DWORD init_gzip_stream(http_request_t *req, BOOL is_gzip)
         return ERROR_OUTOFMEMORY;
     }
 
-    remove_header(req, szContent_Length, FALSE);
+    remove_header(req, L"Content-Length", FALSE);
 
     if(req->read_size) {
         memcpy(gzip_stream->buf, req->read_buf+req->read_pos, req->read_size);
@@ -583,12 +509,9 @@ static void HTTP_FreeTokens(LPWSTR * token_array)
 
 static void HTTP_FixURL(http_request_t *request)
 {
-    static const WCHAR szSlash[] = { '/',0 };
-    static const WCHAR szHttp[] = { 'h','t','t','p',':','/','/', 0 };
-
     /* If we don't have a path we set it to root */
     if (NULL == request->path)
-        request->path = heap_strdupW(szSlash);
+        request->path = heap_strdupW(L"/");
     else /* remove \r and \n*/
     {
         int nLen = lstrlenW(request->path);
@@ -605,7 +528,7 @@ static void HTTP_FixURL(http_request_t *request)
     }
 
     if(CSTR_EQUAL != CompareStringW( LOCALE_INVARIANT, NORM_IGNORECASE,
-                       request->path, lstrlenW(request->path), szHttp, lstrlenW(szHttp) )
+                       request->path, lstrlenW(request->path), L"http://", lstrlenW(L"http://") )
        && request->path[0] != '/') /* not an absolute path ?? --> fix it !! */
     {
         WCHAR *fixurl = heap_alloc((lstrlenW(request->path) + 2)*sizeof(WCHAR));
@@ -619,10 +542,6 @@ static void HTTP_FixURL(http_request_t *request)
 static WCHAR* build_request_header(http_request_t *request, const WCHAR *verb,
         const WCHAR *path, const WCHAR *version, BOOL use_cr)
 {
-    static const WCHAR szSpace[] = {' ',0};
-    static const WCHAR szColon[] = {':',' ',0};
-    static const WCHAR szCr[] = {'\r',0};
-    static const WCHAR szLf[] = {'\n',0};
     LPWSTR requestString;
     DWORD len, n;
     LPCWSTR *req;
@@ -641,13 +560,13 @@ static WCHAR* build_request_header(http_request_t *request, const WCHAR *verb,
     /* add the verb, path and HTTP version string */
     n = 0;
     req[n++] = verb;
-    req[n++] = szSpace;
+    req[n++] = L" ";
     req[n++] = path;
-    req[n++] = szSpace;
+    req[n++] = L" ";
     req[n++] = version;
     if (use_cr)
-        req[n++] = szCr;
-    req[n++] = szLf;
+        req[n++] = L"\r";
+    req[n++] = L"\n";
 
     /* Append custom request headers */
     for (i = 0; i < request->nCustHeaders; i++)
@@ -655,11 +574,11 @@ static WCHAR* build_request_header(http_request_t *request, const WCHAR *verb,
         if (request->custHeaders[i].wFlags & HDR_ISREQUEST)
         {
             req[n++] = request->custHeaders[i].lpszField;
-            req[n++] = szColon;
+            req[n++] = L": ";
             req[n++] = request->custHeaders[i].lpszValue;
             if (use_cr)
-                req[n++] = szCr;
-            req[n++] = szLf;
+                req[n++] = L"\r";
+            req[n++] = L"\n";
 
             TRACE("Adding custom header %s (%s)\n",
                    debugstr_w(request->custHeaders[i].lpszField),
@@ -667,8 +586,8 @@ static WCHAR* build_request_header(http_request_t *request, const WCHAR *verb,
         }
     }
     if (use_cr)
-        req[n++] = szCr;
-    req[n++] = szLf;
+        req[n++] = L"\r";
+    req[n++] = L"\n";
     req[n] = NULL;
 
     requestString = HTTP_build_req( req, 4 );
@@ -679,10 +598,6 @@ static WCHAR* build_request_header(http_request_t *request, const WCHAR *verb,
 
 static WCHAR* build_response_header(http_request_t *request, BOOL use_cr)
 {
-    static const WCHAR colonW[] = { ':',' ',0 };
-    static const WCHAR crW[] = { '\r',0 };
-    static const WCHAR lfW[] = { '\n',0 };
-    static const WCHAR status_fmt[] = { ' ','%','u',' ',0 };
     const WCHAR **req;
     WCHAR *ret, buf[14];
     DWORD i, n = 0;
@@ -698,25 +613,25 @@ static WCHAR* build_response_header(http_request_t *request, BOOL use_cr)
     if (request->status_code)
     {
         req[n++] = request->version;
-        swprintf(buf, ARRAY_SIZE(buf), status_fmt, request->status_code);
+        swprintf(buf, ARRAY_SIZE(buf), L" %u ", request->status_code);
         req[n++] = buf;
         req[n++] = request->statusText;
         if (use_cr)
-            req[n++] = crW;
-        req[n++] = lfW;
+            req[n++] = L"\r";
+        req[n++] = L"\n";
     }
 
     for(i = 0; i < request->nCustHeaders; i++)
     {
         if(!(request->custHeaders[i].wFlags & HDR_ISREQUEST)
-                && wcscmp(request->custHeaders[i].lpszField, szStatus))
+                && wcscmp(request->custHeaders[i].lpszField, L"Status"))
         {
             req[n++] = request->custHeaders[i].lpszField;
-            req[n++] = colonW;
+            req[n++] = L": ";
             req[n++] = request->custHeaders[i].lpszValue;
             if(use_cr)
-                req[n++] = crW;
-            req[n++] = lfW;
+                req[n++] = L"\r";
+            req[n++] = L"\n";
 
             TRACE("Adding custom header %s (%s)\n",
                     debugstr_w(request->custHeaders[i].lpszField),
@@ -724,8 +639,8 @@ static WCHAR* build_response_header(http_request_t *request, BOOL use_cr)
         }
     }
     if(use_cr)
-        req[n++] = crW;
-    req[n++] = lfW;
+        req[n++] = L"\r";
+    req[n++] = L"\n";
     req[n] = NULL;
 
     ret = HTTP_build_req(req, 0);
@@ -745,7 +660,7 @@ static void HTTP_ProcessCookies( http_request_t *request )
 
     EnterCriticalSection( &request->headers_section );
 
-    while((HeaderIndex = HTTP_GetCustomHeaderIndex(request, szSet_Cookie, numCookies++, FALSE)) != -1)
+    while((HeaderIndex = HTTP_GetCustomHeaderIndex(request, L"Set-Cookie", numCookies++, FALSE)) != -1)
     {
         const WCHAR *data;
         substr_t name;
@@ -1064,8 +979,7 @@ static BOOL HTTP_DoAuthorization( http_request_t *request, LPCWSTR pszAuthValue,
 
         if (is_basic_auth_value(pszAuthValue,NULL))
         {
-            static const WCHAR szBasic[] = {'B','a','s','i','c',0};
-            pAuthInfo->scheme = heap_strdupW(szBasic);
+            pAuthInfo->scheme = heap_strdupW(L"Basic");
             if (!pAuthInfo->scheme)
             {
                 heap_free(pAuthInfo);
@@ -1656,7 +1570,6 @@ static WCHAR *encode_auth_data( const WCHAR *scheme, const char *data, UINT data
  */
 static BOOL HTTP_InsertAuthorization( http_request_t *request, struct HttpAuthInfo *pAuthInfo, LPCWSTR header )
 {
-    static const WCHAR wszBasic[] = {'B','a','s','i','c',0};
     WCHAR *host, *authorization = NULL;
 
     if (pAuthInfo)
@@ -1669,7 +1582,7 @@ static BOOL HTTP_InsertAuthorization( http_request_t *request, struct HttpAuthIn
             /* clear the data as it isn't valid now that it has been sent to the
              * server, unless it's Basic authentication which doesn't do
              * connection tracking */
-            if (wcsicmp(pAuthInfo->scheme, wszBasic))
+            if (wcsicmp(pAuthInfo->scheme, L"Basic"))
             {
                 heap_free(pAuthInfo->auth_data);
                 pAuthInfo->auth_data = NULL;
@@ -1689,7 +1602,7 @@ static BOOL HTTP_InsertAuthorization( http_request_t *request, struct HttpAuthIn
         char *data;
 
         /* Don't use cached credentials when a username or Authorization was specified */
-        if ((request->session->userName && request->session->userName[0]) || wcscmp(header, szAuthorization))
+        if ((request->session->userName && request->session->userName[0]) || wcscmp(header, L"Authorization"))
             return TRUE;
 
         if (!(host = get_host_header(request)))
@@ -1699,7 +1612,7 @@ static BOOL HTTP_InsertAuthorization( http_request_t *request, struct HttpAuthIn
         {
             TRACE("Found cached basic authorization for %s\n", debugstr_w(host));
 
-            if (!(authorization = encode_auth_data(wszBasic, data, data_len)))
+            if (!(authorization = encode_auth_data(L"Basic", data, data_len)))
             {
                 heap_free(data);
                 heap_free(host);
@@ -1743,11 +1656,10 @@ static WCHAR *build_proxy_path_url(http_request_t *req)
 
 static BOOL HTTP_DomainMatches(LPCWSTR server, substr_t domain)
 {
-    static const WCHAR localW[] = { '<','l','o','c','a','l','>',0 };
     const WCHAR *dot, *ptr;
     int len;
 
-    if(domain.len == ARRAY_SIZE(localW)-1 && !wcsnicmp(domain.str, localW, domain.len) && !wcschr(server, '.' ))
+    if(domain.len == ARRAY_SIZE(L"<local>")-1 && !wcsnicmp(domain.str, L"<local>", domain.len) && !wcschr(server, '.' ))
         return TRUE;
 
     if(domain.len && *domain.str != '*')
@@ -1812,24 +1724,22 @@ static BOOL HTTP_ShouldBypassProxy(appinfo_t *lpwai, LPCWSTR server)
  */
 static BOOL HTTP_DealWithProxy(appinfo_t *hIC, http_session_t *session, http_request_t *request)
 {
-    static const WCHAR protoHttp[] = { 'h','t','t','p',0 };
-    static const WCHAR szHttp[] = { 'h','t','t','p',':','/','/',0 };
-    static WCHAR szNul[] = { 0 };
+    static WCHAR szNul[] = L"";
     URL_COMPONENTSW UrlComponents = { sizeof(UrlComponents) };
     server_t *new_server = NULL;
     WCHAR *proxy;
 
-    proxy = INTERNET_FindProxyForProtocol(hIC->proxy, protoHttp);
+    proxy = INTERNET_FindProxyForProtocol(hIC->proxy, L"http");
     if(!proxy)
         return FALSE;
     if(CSTR_EQUAL != CompareStringW(LOCALE_SYSTEM_DEFAULT, NORM_IGNORECASE,
-                                    proxy, lstrlenW(szHttp), szHttp, lstrlenW(szHttp))) {
-        WCHAR *proxy_url = heap_alloc(lstrlenW(proxy)*sizeof(WCHAR) + sizeof(szHttp));
+                                    proxy, lstrlenW(L"http://"), L"http://", lstrlenW(L"http://"))) {
+        WCHAR *proxy_url = heap_alloc(lstrlenW(proxy)*sizeof(WCHAR) + sizeof(L"http://"));
         if(!proxy_url) {
             heap_free(proxy);
             return FALSE;
         }
-        lstrcpyW(proxy_url, szHttp);
+        lstrcpyW(proxy_url, L"http://");
         lstrcatW(proxy_url, proxy);
         heap_free(proxy);
         proxy = proxy_url;
@@ -1881,8 +1791,6 @@ static DWORD HTTP_ResolveName(http_request_t *request)
 
 static WCHAR *compose_request_url(http_request_t *req)
 {
-    static const WCHAR http[] = { 'h','t','t','p',':','/','/',0 };
-    static const WCHAR https[] = { 'h','t','t','p','s',':','/','/',0 };
     const WCHAR *host, *scheme;
     WCHAR *buf, *ptr;
     size_t len;
@@ -1890,9 +1798,9 @@ static WCHAR *compose_request_url(http_request_t *req)
     host = req->server->canon_host_port;
 
     if (req->server->is_https)
-        scheme = https;
+        scheme = L"https://";
     else
-        scheme = http;
+        scheme = L"http://";
 
     len = lstrlenW(scheme) + lstrlenW(host) + (req->path[0] != '/' ? 1 : 0) + lstrlenW(req->path);
     ptr = buf = heap_alloc((len+1) * sizeof(WCHAR));
@@ -2022,7 +1930,7 @@ static BOOL HTTP_KeepAlive(http_request_t *request)
     /* as per RFC 2068, S8.1.2.1, if the client is HTTP/1.1 then assume that
      * the connection is keep-alive by default */
     if (HTTP_HttpQueryInfoW(request, HTTP_QUERY_VERSION, szVersion, &dwBufferSize, NULL) == ERROR_SUCCESS
-        && !wcsicmp(szVersion, g_szHttp1_1))
+        && !wcsicmp(szVersion, L"HTTP/1.1"))
     {
         keepalive = TRUE;
     }
@@ -2031,7 +1939,7 @@ static BOOL HTTP_KeepAlive(http_request_t *request)
     if (HTTP_HttpQueryInfoW(request, HTTP_QUERY_PROXY_CONNECTION, szConnectionResponse, &dwBufferSize, NULL) == ERROR_SUCCESS
         || HTTP_HttpQueryInfoW(request, HTTP_QUERY_CONNECTION, szConnectionResponse, &dwBufferSize, NULL) == ERROR_SUCCESS)
     {
-        keepalive = !wcsicmp(szConnectionResponse, szKeepAlive);
+        keepalive = !wcsicmp(szConnectionResponse, L"Keep-Alive");
     }
 
     return keepalive;
@@ -2081,6 +1989,38 @@ static DWORD str_to_buffer(const WCHAR *str, void *buffer, DWORD *size, BOOL uni
         *size = len - 1;
         return ERROR_SUCCESS;
     }
+}
+
+static DWORD get_security_cert_struct(http_request_t *req, INTERNET_CERTIFICATE_INFOA *info)
+{
+    PCCERT_CONTEXT context;
+    DWORD len;
+
+    context = (PCCERT_CONTEXT)NETCON_GetCert(req->netconn);
+    if(!context)
+        return ERROR_NOT_SUPPORTED;
+
+    memset(info, 0, sizeof(*info));
+    info->ftExpiry = context->pCertInfo->NotAfter;
+    info->ftStart = context->pCertInfo->NotBefore;
+    len = CertNameToStrA(context->dwCertEncodingType,
+             &context->pCertInfo->Subject, CERT_SIMPLE_NAME_STR|CERT_NAME_STR_CRLF_FLAG, NULL, 0);
+    info->lpszSubjectInfo = LocalAlloc(0, len);
+    if(info->lpszSubjectInfo)
+        CertNameToStrA(context->dwCertEncodingType,
+                 &context->pCertInfo->Subject, CERT_SIMPLE_NAME_STR|CERT_NAME_STR_CRLF_FLAG,
+                 info->lpszSubjectInfo, len);
+    len = CertNameToStrA(context->dwCertEncodingType,
+             &context->pCertInfo->Issuer, CERT_SIMPLE_NAME_STR|CERT_NAME_STR_CRLF_FLAG, NULL, 0);
+    info->lpszIssuerInfo = LocalAlloc(0, len);
+    if(info->lpszIssuerInfo)
+        CertNameToStrA(context->dwCertEncodingType,
+                 &context->pCertInfo->Issuer, CERT_SIMPLE_NAME_STR|CERT_NAME_STR_CRLF_FLAG,
+                 info->lpszIssuerInfo, len);
+    info->dwKeySize = NETCON_GetCipherStrength(req->netconn);
+
+    CertFreeCertificateContext(context);
+    return ERROR_SUCCESS;
 }
 
 static DWORD HTTPREQ_QueryOption(object_header_t *hdr, DWORD option, void *buffer, DWORD *size, BOOL unicode)
@@ -2235,8 +2175,6 @@ static DWORD HTTPREQ_QueryOption(object_header_t *hdr, DWORD option, void *buffe
     }
 
     case INTERNET_OPTION_SECURITY_CERTIFICATE_STRUCT: {
-        PCCERT_CONTEXT context;
-
         if(!req->netconn)
             return ERROR_INTERNET_INVALID_OPERATION;
 
@@ -2245,33 +2183,106 @@ static DWORD HTTPREQ_QueryOption(object_header_t *hdr, DWORD option, void *buffe
             return ERROR_INSUFFICIENT_BUFFER;
         }
 
-        context = (PCCERT_CONTEXT)NETCON_GetCert(req->netconn);
-        if(context) {
-            INTERNET_CERTIFICATE_INFOA *info = (INTERNET_CERTIFICATE_INFOA*)buffer;
-            DWORD len;
+        return get_security_cert_struct(req, (INTERNET_CERTIFICATE_INFOA*)buffer);
+    }
+    case INTERNET_OPTION_SECURITY_CERTIFICATE: {
+        DWORD err;
+        int needed;
+        char subject[64];
+        char issuer[64];
+        char effective[64];
+        char expiration[64];
+        char protocol[64];
+        char signature[64];
+        char encryption[64];
+        char privacy[64];
+        char bits[16];
+        char strength[16];
+        char start_date[32];
+        char start_time[32];
+        char expiry_date[32];
+        char expiry_time[32];
+        SYSTEMTIME start, expiry;
+        INTERNET_CERTIFICATE_INFOA info;
 
-            memset(info, 0, sizeof(*info));
-            info->ftExpiry = context->pCertInfo->NotAfter;
-            info->ftStart = context->pCertInfo->NotBefore;
-            len = CertNameToStrA(context->dwCertEncodingType,
-                     &context->pCertInfo->Subject, CERT_SIMPLE_NAME_STR|CERT_NAME_STR_CRLF_FLAG, NULL, 0);
-            info->lpszSubjectInfo = LocalAlloc(0, len);
-            if(info->lpszSubjectInfo)
-                CertNameToStrA(context->dwCertEncodingType,
-                         &context->pCertInfo->Subject, CERT_SIMPLE_NAME_STR|CERT_NAME_STR_CRLF_FLAG,
-                         info->lpszSubjectInfo, len);
-            len = CertNameToStrA(context->dwCertEncodingType,
-                     &context->pCertInfo->Issuer, CERT_SIMPLE_NAME_STR|CERT_NAME_STR_CRLF_FLAG, NULL, 0);
-            info->lpszIssuerInfo = LocalAlloc(0, len);
-            if(info->lpszIssuerInfo)
-                CertNameToStrA(context->dwCertEncodingType,
-                         &context->pCertInfo->Issuer, CERT_SIMPLE_NAME_STR|CERT_NAME_STR_CRLF_FLAG,
-                         info->lpszIssuerInfo, len);
-            info->dwKeySize = NETCON_GetCipherStrength(req->netconn);
-            CertFreeCertificateContext(context);
-            return ERROR_SUCCESS;
+        if(!size)
+            return ERROR_INVALID_PARAMETER;
+
+        if(!req->netconn) {
+            *size = 0;
+            return ERROR_INTERNET_INVALID_OPERATION;
         }
-        return ERROR_NOT_SUPPORTED;
+
+        if(!buffer) {
+            *size = 1;
+            return ERROR_INSUFFICIENT_BUFFER;
+        }
+
+        if((err = get_security_cert_struct(req, &info)))
+            return err;
+
+        LoadStringA(WININET_hModule, IDS_CERT_SUBJECT, subject, sizeof(subject));
+        LoadStringA(WININET_hModule, IDS_CERT_ISSUER, issuer, sizeof(issuer));
+        LoadStringA(WININET_hModule, IDS_CERT_EFFECTIVE, effective, sizeof(effective));
+        LoadStringA(WININET_hModule, IDS_CERT_EXPIRATION, expiration, sizeof(expiration));
+        LoadStringA(WININET_hModule, IDS_CERT_PROTOCOL, protocol, sizeof(protocol));
+        LoadStringA(WININET_hModule, IDS_CERT_SIGNATURE, signature, sizeof(signature));
+        LoadStringA(WININET_hModule, IDS_CERT_ENCRYPTION, encryption, sizeof(encryption));
+        LoadStringA(WININET_hModule, IDS_CERT_PRIVACY, privacy, sizeof(privacy));
+        LoadStringA(WININET_hModule, info.dwKeySize >= 128 ? IDS_CERT_HIGH : IDS_CERT_LOW,
+                    strength, sizeof(strength));
+        LoadStringA(WININET_hModule, IDS_CERT_BITS, bits, sizeof(bits));
+
+        FileTimeToSystemTime(&info.ftStart, &start);
+        FileTimeToSystemTime(&info.ftExpiry, &expiry);
+        GetDateFormatA(LOCALE_USER_DEFAULT, 0, &start, NULL, start_date, sizeof(start_date));
+        GetTimeFormatA(LOCALE_USER_DEFAULT, 0, &start, NULL, start_time, sizeof(start_time));
+        GetDateFormatA(LOCALE_USER_DEFAULT, 0, &expiry, NULL, expiry_date, sizeof(expiry_date));
+        GetTimeFormatA(LOCALE_USER_DEFAULT, 0, &expiry, NULL, expiry_time, sizeof(expiry_time));
+
+        needed = _scprintf("%s:\r\n%s\r\n"
+                           "%s:\r\n%s\r\n"
+                           "%s:\t%s %s\r\n"
+                           "%s:\t%s %s\r\n"
+                           "%s:\t(null)\r\n"
+                           "%s:\t(null)\r\n"
+                           "%s:\t(null)\r\n"
+                           "%s:\t%s (%u %s)",
+                           subject, info.lpszSubjectInfo,
+                           issuer, info.lpszIssuerInfo,
+                           effective, start_date, start_time,
+                           expiration, expiry_date, expiry_time,
+                           protocol, signature, encryption,
+                           privacy, strength, info.dwKeySize, bits);
+
+        if(needed < *size) {
+            err = ERROR_SUCCESS;
+            *size = snprintf(buffer, *size,
+                           "%s:\r\n%s\r\n"
+                           "%s:\r\n%s\r\n"
+                           "%s:\t%s %s\r\n"
+                           "%s:\t%s %s\r\n"
+                           "%s:\t(null)\r\n"
+                           "%s:\t(null)\r\n"
+                           "%s:\t(null)\r\n"
+                           "%s:\t%s (%u %s)",
+                           subject, info.lpszSubjectInfo,
+                           issuer, info.lpszIssuerInfo,
+                           effective, start_date, start_time,
+                           expiration, expiry_date, expiry_time,
+                           protocol, signature, encryption,
+                           privacy, strength, info.dwKeySize, bits);
+        }else {
+            err = ERROR_INSUFFICIENT_BUFFER;
+            *size = 1;
+        }
+
+        LocalFree(info.lpszSubjectInfo);
+        LocalFree(info.lpszIssuerInfo);
+        LocalFree(info.lpszProtocolName);
+        LocalFree(info.lpszSignatureAlgName);
+        LocalFree(info.lpszEncryptionAlgName);
+        return err;
     }
     case INTERNET_OPTION_CONNECT_TIMEOUT:
         if (*size < sizeof(DWORD))
@@ -2409,9 +2420,6 @@ static void commit_cache_entry(http_request_t *req)
 
 static void create_cache_entry(http_request_t *req)
 {
-    static const WCHAR no_cacheW[] = {'n','o','-','c','a','c','h','e',0};
-    static const WCHAR no_storeW[] = {'n','o','-','s','t','o','r','e',0};
-
     WCHAR file_name[MAX_PATH+1];
     WCHAR *url;
     BOOL b = TRUE;
@@ -2434,7 +2442,7 @@ static void create_cache_entry(http_request_t *req)
 
         EnterCriticalSection( &req->headers_section );
 
-        header_idx = HTTP_GetCustomHeaderIndex(req, szCache_Control, 0, FALSE);
+        header_idx = HTTP_GetCustomHeaderIndex(req, L"Cache-Control", 0, FALSE);
         if(header_idx != -1) {
             WCHAR *ptr;
 
@@ -2448,8 +2456,8 @@ static void create_cache_entry(http_request_t *req)
                 if(!end)
                     end = ptr + lstrlenW(ptr);
 
-                if(!wcsnicmp(ptr, no_cacheW, ARRAY_SIZE(no_cacheW)-1)
-                        || !wcsnicmp(ptr, no_storeW, ARRAY_SIZE(no_storeW)-1)) {
+                if(!wcsnicmp(ptr, L"no-cache", ARRAY_SIZE(L"no-cache")-1)
+                        || !wcsnicmp(ptr, L"no-store", ARRAY_SIZE(L"no-store")-1)) {
                     b = FALSE;
                     break;
                 }
@@ -2906,13 +2914,11 @@ static const data_stream_vtbl_t chunked_stream_vtbl = {
 /* set the request content length based on the headers */
 static DWORD set_content_length(http_request_t *request)
 {
-    static const WCHAR szChunked[] = {'c','h','u','n','k','e','d',0};
-    static const WCHAR headW[] = {'H','E','A','D',0};
     WCHAR contentLength[32];
     WCHAR encoding[20];
     DWORD size;
 
-    if(request->status_code == HTTP_STATUS_NO_CONTENT || !wcscmp(request->verb, headW)) {
+    if(request->status_code == HTTP_STATUS_NO_CONTENT || !wcscmp(request->verb, L"HEAD")) {
         request->contentLength = request->netconn_stream.content_length = 0;
         return ERROR_SUCCESS;
     }
@@ -2929,7 +2935,7 @@ static DWORD set_content_length(http_request_t *request)
 
     size = sizeof(encoding);
     if (HTTP_HttpQueryInfoW(request, HTTP_QUERY_TRANSFER_ENCODING, encoding, &size, NULL) == ERROR_SUCCESS &&
-        !wcsicmp(encoding, szChunked))
+        !wcsicmp(encoding, L"chunked"))
     {
         chunked_stream_t *chunked_stream;
 
@@ -2955,19 +2961,16 @@ static DWORD set_content_length(http_request_t *request)
     if(request->hdr.decoding) {
         int encoding_idx;
 
-        static const WCHAR deflateW[] = {'d','e','f','l','a','t','e',0};
-        static const WCHAR gzipW[] = {'g','z','i','p',0};
-
         EnterCriticalSection( &request->headers_section );
 
-        encoding_idx = HTTP_GetCustomHeaderIndex(request, szContent_Encoding, 0, FALSE);
+        encoding_idx = HTTP_GetCustomHeaderIndex(request, L"Content-Encoding", 0, FALSE);
         if(encoding_idx != -1) {
-            if(!wcsicmp(request->custHeaders[encoding_idx].lpszValue, gzipW)) {
+            if(!wcsicmp(request->custHeaders[encoding_idx].lpszValue, L"gzip")) {
                 HTTP_DeleteCustomHeader(request, encoding_idx);
                 LeaveCriticalSection( &request->headers_section );
                 return init_gzip_stream(request, TRUE);
             }
-            if(!wcsicmp(request->custHeaders[encoding_idx].lpszValue, deflateW)) {
+            if(!wcsicmp(request->custHeaders[encoding_idx].lpszValue, L"deflate")) {
                 HTTP_DeleteCustomHeader(request, encoding_idx);
                 LeaveCriticalSection( &request->headers_section );
                 return init_gzip_stream(request, FALSE);
@@ -3066,7 +3069,7 @@ static DWORD drain_content(http_request_t *req, BOOL blocking)
     if(!is_valid_netconn(req->netconn))
         return ERROR_NO_DATA;
 
-    if(!wcscmp(req->verb, szHEAD))
+    if(!wcscmp(req->verb, L"HEAD"))
         return ERROR_SUCCESS;
 
     EnterCriticalSection( &req->read_section );
@@ -3402,13 +3405,11 @@ static DWORD HTTP_HttpOpenRequestW(http_session_t *session,
             lstrcpyW(request->path,lpszObjectName);
         }
     }else {
-        static const WCHAR slashW[] = {'/',0};
-
-        request->path = heap_strdupW(slashW);
+        request->path = heap_strdupW(L"/");
     }
 
     if (lpszReferrer && *lpszReferrer)
-        HTTP_ProcessHeader(request, HTTP_REFERER, lpszReferrer, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDHDR_FLAG_REQ);
+        HTTP_ProcessHeader(request, L"Referer", lpszReferrer, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDHDR_FLAG_REQ);
 
     if (lpszAcceptTypes)
     {
@@ -3416,15 +3417,15 @@ static DWORD HTTP_HttpOpenRequestW(http_session_t *session,
         for (i = 0; lpszAcceptTypes[i]; i++)
         {
             if (!*lpszAcceptTypes[i]) continue;
-            HTTP_ProcessHeader(request, HTTP_ACCEPT, lpszAcceptTypes[i],
+            HTTP_ProcessHeader(request, L"Accept", lpszAcceptTypes[i],
                                HTTP_ADDHDR_FLAG_COALESCE_WITH_COMMA |
                                HTTP_ADDHDR_FLAG_REQ |
                                (i == 0 ? (HTTP_ADDHDR_FLAG_REPLACE | HTTP_ADDHDR_FLAG_ADD) : 0));
         }
     }
 
-    request->verb = heap_strdupW(lpszVerb && *lpszVerb ? lpszVerb : szGET);
-    request->version = heap_strdupW(lpszVersion && *lpszVersion ? lpszVersion : g_szHttp1_1);
+    request->verb = heap_strdupW(lpszVerb && *lpszVerb ? lpszVerb : L"GET");
+    request->version = heap_strdupW(lpszVersion && *lpszVersion ? lpszVersion : L"HTTP/1.1");
 
     if (hIC->proxy && hIC->proxy[0] && !HTTP_ShouldBypassProxy(hIC, session->hostName))
         HTTP_DealWithProxy( hIC, session, request );
@@ -3496,77 +3497,77 @@ lend:
 }
 
 static const LPCWSTR header_lookup[] = {
-    szMime_Version,		/* HTTP_QUERY_MIME_VERSION = 0 */
-    szContent_Type,		/* HTTP_QUERY_CONTENT_TYPE = 1 */
-    szContent_Transfer_Encoding,/* HTTP_QUERY_CONTENT_TRANSFER_ENCODING = 2 */
-    szContent_ID,		/* HTTP_QUERY_CONTENT_ID = 3 */
-    NULL,			/* HTTP_QUERY_CONTENT_DESCRIPTION = 4 */
-    szContent_Length,		/* HTTP_QUERY_CONTENT_LENGTH =  5 */
-    szContent_Language,		/* HTTP_QUERY_CONTENT_LANGUAGE =  6 */
-    szAllow,			/* HTTP_QUERY_ALLOW = 7 */
-    szPublic,			/* HTTP_QUERY_PUBLIC = 8 */
-    szDate,			/* HTTP_QUERY_DATE = 9 */
-    szExpires,			/* HTTP_QUERY_EXPIRES = 10 */
-    szLast_Modified,		/* HTTP_QUERY_LAST_MODIFIED = 11 */
-    NULL,			/* HTTP_QUERY_MESSAGE_ID = 12 */
-    szURI,			/* HTTP_QUERY_URI = 13 */
-    szFrom,			/* HTTP_QUERY_DERIVED_FROM = 14 */
-    NULL,			/* HTTP_QUERY_COST = 15 */
-    NULL,			/* HTTP_QUERY_LINK = 16 */
-    szPragma,			/* HTTP_QUERY_PRAGMA = 17 */
-    NULL,			/* HTTP_QUERY_VERSION = 18 */
-    szStatus,			/* HTTP_QUERY_STATUS_CODE = 19 */
-    NULL,			/* HTTP_QUERY_STATUS_TEXT = 20 */
-    NULL,			/* HTTP_QUERY_RAW_HEADERS = 21 */
-    NULL,			/* HTTP_QUERY_RAW_HEADERS_CRLF = 22 */
-    szConnection,		/* HTTP_QUERY_CONNECTION = 23 */
-    szAccept,			/* HTTP_QUERY_ACCEPT = 24 */
-    szAccept_Charset,		/* HTTP_QUERY_ACCEPT_CHARSET = 25 */
-    szAccept_Encoding,		/* HTTP_QUERY_ACCEPT_ENCODING = 26 */
-    szAccept_Language,		/* HTTP_QUERY_ACCEPT_LANGUAGE = 27 */
-    szAuthorization,		/* HTTP_QUERY_AUTHORIZATION = 28 */
-    szContent_Encoding,		/* HTTP_QUERY_CONTENT_ENCODING = 29 */
-    NULL,			/* HTTP_QUERY_FORWARDED = 30 */
-    NULL,			/* HTTP_QUERY_FROM = 31 */
-    szIf_Modified_Since,	/* HTTP_QUERY_IF_MODIFIED_SINCE = 32 */
-    szLocation,			/* HTTP_QUERY_LOCATION = 33 */
-    NULL,			/* HTTP_QUERY_ORIG_URI = 34 */
-    szReferer,			/* HTTP_QUERY_REFERER = 35 */
-    szRetry_After,		/* HTTP_QUERY_RETRY_AFTER = 36 */
-    szServer,			/* HTTP_QUERY_SERVER = 37 */
-    NULL,			/* HTTP_TITLE = 38 */
-    szUser_Agent,		/* HTTP_QUERY_USER_AGENT = 39 */
-    szWWW_Authenticate,		/* HTTP_QUERY_WWW_AUTHENTICATE = 40 */
-    szProxy_Authenticate,	/* HTTP_QUERY_PROXY_AUTHENTICATE = 41 */
-    szAccept_Ranges,		/* HTTP_QUERY_ACCEPT_RANGES = 42 */
-    szSet_Cookie,		/* HTTP_QUERY_SET_COOKIE = 43 */
-    szCookie,			/* HTTP_QUERY_COOKIE = 44 */
-    NULL,			/* HTTP_QUERY_REQUEST_METHOD = 45 */
-    NULL,			/* HTTP_QUERY_REFRESH = 46 */
-    szContent_Disposition,	/* HTTP_QUERY_CONTENT_DISPOSITION = 47 */
-    szAge,			/* HTTP_QUERY_AGE = 48 */
-    szCache_Control,		/* HTTP_QUERY_CACHE_CONTROL = 49 */
-    szContent_Base,		/* HTTP_QUERY_CONTENT_BASE = 50 */
-    szContent_Location,		/* HTTP_QUERY_CONTENT_LOCATION = 51 */
-    szContent_MD5,		/* HTTP_QUERY_CONTENT_MD5 = 52 */
-    szContent_Range,		/* HTTP_QUERY_CONTENT_RANGE = 53 */
-    szETag,			/* HTTP_QUERY_ETAG = 54 */
-    hostW,			/* HTTP_QUERY_HOST = 55 */
-    szIf_Match,			/* HTTP_QUERY_IF_MATCH = 56 */
-    szIf_None_Match,		/* HTTP_QUERY_IF_NONE_MATCH = 57 */
-    szIf_Range,			/* HTTP_QUERY_IF_RANGE = 58 */
-    szIf_Unmodified_Since,	/* HTTP_QUERY_IF_UNMODIFIED_SINCE = 59 */
-    szMax_Forwards,		/* HTTP_QUERY_MAX_FORWARDS = 60 */
-    szProxy_Authorization,	/* HTTP_QUERY_PROXY_AUTHORIZATION = 61 */
-    szRange,			/* HTTP_QUERY_RANGE = 62 */
-    szTransfer_Encoding,	/* HTTP_QUERY_TRANSFER_ENCODING = 63 */
-    szUpgrade,			/* HTTP_QUERY_UPGRADE = 64 */
-    szVary,			/* HTTP_QUERY_VARY = 65 */
-    szVia,			/* HTTP_QUERY_VIA = 66 */
-    szWarning,			/* HTTP_QUERY_WARNING = 67 */
-    szExpect,			/* HTTP_QUERY_EXPECT = 68 */
-    szProxy_Connection,		/* HTTP_QUERY_PROXY_CONNECTION = 69 */
-    szUnless_Modified_Since,	/* HTTP_QUERY_UNLESS_MODIFIED_SINCE = 70 */
+    L"Mime-Version",              /* HTTP_QUERY_MIME_VERSION = 0 */
+    L"Content-Type",              /* HTTP_QUERY_CONTENT_TYPE = 1 */
+    L"Content-Transfer-Encoding", /* HTTP_QUERY_CONTENT_TRANSFER_ENCODING = 2 */
+    L"Content-ID",                /* HTTP_QUERY_CONTENT_ID = 3 */
+    NULL,                         /* HTTP_QUERY_CONTENT_DESCRIPTION = 4 */
+    L"Content-Length",            /* HTTP_QUERY_CONTENT_LENGTH =  5 */
+    L"Content-Language",          /* HTTP_QUERY_CONTENT_LANGUAGE =  6 */
+    L"Allow",                     /* HTTP_QUERY_ALLOW = 7 */
+    L"Public",                    /* HTTP_QUERY_PUBLIC = 8 */
+    L"Date",                      /* HTTP_QUERY_DATE = 9 */
+    L"Expires",                   /* HTTP_QUERY_EXPIRES = 10 */
+    L"Last-Modified",             /* HTTP_QUERY_LAST_MODIFIED = 11 */
+    NULL,                         /* HTTP_QUERY_MESSAGE_ID = 12 */
+    L"URI",                       /* HTTP_QUERY_URI = 13 */
+    L"From",                      /* HTTP_QUERY_DERIVED_FROM = 14 */
+    NULL,                         /* HTTP_QUERY_COST = 15 */
+    NULL,                         /* HTTP_QUERY_LINK = 16 */
+    L"Pragma",                    /* HTTP_QUERY_PRAGMA = 17 */
+    NULL,                         /* HTTP_QUERY_VERSION = 18 */
+    L"Status",                    /* HTTP_QUERY_STATUS_CODE = 19 */
+    NULL,                         /* HTTP_QUERY_STATUS_TEXT = 20 */
+    NULL,                         /* HTTP_QUERY_RAW_HEADERS = 21 */
+    NULL,                         /* HTTP_QUERY_RAW_HEADERS_CRLF = 22 */
+    L"Connection",                /* HTTP_QUERY_CONNECTION = 23 */
+    L"Accept",                    /* HTTP_QUERY_ACCEPT = 24 */
+    L"Accept-Charset",            /* HTTP_QUERY_ACCEPT_CHARSET = 25 */
+    L"Accept-Encoding",           /* HTTP_QUERY_ACCEPT_ENCODING = 26 */
+    L"Accept-Language",           /* HTTP_QUERY_ACCEPT_LANGUAGE = 27 */
+    L"Authorization",             /* HTTP_QUERY_AUTHORIZATION = 28 */
+    L"Content-Encoding",          /* HTTP_QUERY_CONTENT_ENCODING = 29 */
+    NULL,                         /* HTTP_QUERY_FORWARDED = 30 */
+    NULL,                         /* HTTP_QUERY_FROM = 31 */
+    L"If-Modified-Since",         /* HTTP_QUERY_IF_MODIFIED_SINCE = 32 */
+    L"Location",                  /* HTTP_QUERY_LOCATION = 33 */
+    NULL,                         /* HTTP_QUERY_ORIG_URI = 34 */
+    L"Referer",                   /* HTTP_QUERY_REFERER = 35 */
+    L"Retry-After",               /* HTTP_QUERY_RETRY_AFTER = 36 */
+    L"Server",                    /* HTTP_QUERY_SERVER = 37 */
+    NULL,                         /* HTTP_TITLE = 38 */
+    L"User-Agent",                /* HTTP_QUERY_USER_AGENT = 39 */
+    L"WWW-Authenticate",          /* HTTP_QUERY_WWW_AUTHENTICATE = 40 */
+    L"Proxy-Authenticate",        /* HTTP_QUERY_PROXY_AUTHENTICATE = 41 */
+    L"Accept-Ranges",             /* HTTP_QUERY_ACCEPT_RANGES = 42 */
+    L"Set-Cookie",                /* HTTP_QUERY_SET_COOKIE = 43 */
+    L"Cookie",                    /* HTTP_QUERY_COOKIE = 44 */
+    NULL,                         /* HTTP_QUERY_REQUEST_METHOD = 45 */
+    NULL,                         /* HTTP_QUERY_REFRESH = 46 */
+    L"Content-Disposition",       /* HTTP_QUERY_CONTENT_DISPOSITION = 47 */
+    L"Age",                       /* HTTP_QUERY_AGE = 48 */
+    L"Cache-Control",             /* HTTP_QUERY_CACHE_CONTROL = 49 */
+    L"Content-Base",              /* HTTP_QUERY_CONTENT_BASE = 50 */
+    L"Content-Location",          /* HTTP_QUERY_CONTENT_LOCATION = 51 */
+    L"Content-MD5",               /* HTTP_QUERY_CONTENT_MD5 = 52 */
+    L"Content-Range",             /* HTTP_QUERY_CONTENT_RANGE = 53 */
+    L"ETag",                      /* HTTP_QUERY_ETAG = 54 */
+    L"Host",                      /* HTTP_QUERY_HOST = 55 */
+    L"If-Match",                  /* HTTP_QUERY_IF_MATCH = 56 */
+    L"If-None-Match",             /* HTTP_QUERY_IF_NONE_MATCH = 57 */
+    L"If-Range",                  /* HTTP_QUERY_IF_RANGE = 58 */
+    L"If-Unmodified-Since",       /* HTTP_QUERY_IF_UNMODIFIED_SINCE = 59 */
+    L"Max-Forwards",              /* HTTP_QUERY_MAX_FORWARDS = 60 */
+    L"Proxy-Authorization",       /* HTTP_QUERY_PROXY_AUTHORIZATION = 61 */
+    L"Range",                     /* HTTP_QUERY_RANGE = 62 */
+    L"Transfer-Encoding",         /* HTTP_QUERY_TRANSFER_ENCODING = 63 */
+    L"Upgrade",                   /* HTTP_QUERY_UPGRADE = 64 */
+    L"Vary",                      /* HTTP_QUERY_VARY = 65 */
+    L"Via",                       /* HTTP_QUERY_VIA = 66 */
+    L"Warning",                   /* HTTP_QUERY_WARNING = 67 */
+    L"Expect",                    /* HTTP_QUERY_EXPECT = 68 */
+    L"Proxy-Connection",          /* HTTP_QUERY_PROXY_CONNECTION = 69 */
+    L"Unless-Modified-Since",     /* HTTP_QUERY_UNLESS_MODIFIED_SINCE = 70 */
 };
 
 /***********************************************************************
@@ -3737,9 +3738,8 @@ static DWORD HTTP_HttpQueryInfoW(http_request_t *request, DWORD dwInfoLevel,
         }else {
             WCHAR buf[12];
             DWORD size;
-            static const WCHAR formatW[] = {'%','u',0};
 
-            size = swprintf(buf, ARRAY_SIZE(buf), formatW, request->status_code) * sizeof(WCHAR);
+            size = swprintf(buf, ARRAY_SIZE(buf), L"%u", request->status_code) * sizeof(WCHAR);
 
             if(size <= *lpdwBufferLength) {
                 memcpy(lpBuffer, buf, size+sizeof(WCHAR));
@@ -4059,8 +4059,8 @@ BOOL WINAPI HttpQueryInfoA(HINTERNET hHttpRequest, DWORD dwInfoLevel,
 
 static WCHAR *get_redirect_url(http_request_t *request)
 {
-    static WCHAR szHttp[] = {'h','t','t','p',0};
-    static WCHAR szHttps[] = {'h','t','t','p','s',0};
+    static WCHAR szHttp[] = L"http";
+    static WCHAR szHttps[] = L"https";
     http_session_t *session = request->session;
     URL_COMPONENTSW urlComponents = { sizeof(urlComponents) };
     WCHAR *orig_url = NULL, *redirect_url = NULL, *combined_url = NULL;
@@ -4197,9 +4197,11 @@ static DWORD HTTP_HandleRedirect(http_request_t *request, WCHAR *url)
         }
 
         if (custom_port)
-            HTTP_ProcessHeader(request, hostW, request->server->host_port, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDREQ_FLAG_REPLACE | HTTP_ADDHDR_FLAG_REQ);
+            HTTP_ProcessHeader(request, L"Host", request->server->host_port,
+                               HTTP_ADDREQ_FLAG_ADD | HTTP_ADDREQ_FLAG_REPLACE | HTTP_ADDHDR_FLAG_REQ);
         else
-            HTTP_ProcessHeader(request, hostW, request->server->name, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDREQ_FLAG_REPLACE | HTTP_ADDHDR_FLAG_REQ);
+            HTTP_ProcessHeader(request, L"Host", request->server->name,
+                               HTTP_ADDREQ_FLAG_ADD | HTTP_ADDREQ_FLAG_REPLACE | HTTP_ADDHDR_FLAG_REQ);
     }
 
     heap_free(request->path);
@@ -4208,11 +4210,11 @@ static DWORD HTTP_HandleRedirect(http_request_t *request, WCHAR *url)
     {
         DWORD needed = 1;
         HRESULT rc;
-        WCHAR dummy = 0;
+        WCHAR dummy[] = L"";
         WCHAR *path;
 
         path = heap_strndupW(urlComponents.lpszUrlPath, urlComponents.dwUrlPathLength);
-        rc = UrlEscapeW(path, &dummy, &needed, URL_ESCAPE_SPACES_ONLY);
+        rc = UrlEscapeW(path, dummy, &needed, URL_ESCAPE_SPACES_ONLY);
         if (rc != E_POINTER)
             ERR("Unable to escape string!(%s) (%d)\n",debugstr_w(path),rc);
         request->path = heap_alloc(needed*sizeof(WCHAR));
@@ -4227,8 +4229,8 @@ static DWORD HTTP_HandleRedirect(http_request_t *request, WCHAR *url)
     }
 
     /* Remove custom content-type/length headers on redirects.  */
-    remove_header(request, szContent_Type, TRUE);
-    remove_header(request, szContent_Length, TRUE);
+    remove_header(request, L"Content-Type", TRUE);
+    remove_header(request, L"Content-Length", TRUE);
 
     return ERROR_SUCCESS;
 }
@@ -4272,13 +4274,13 @@ static void HTTP_InsertCookies(http_request_t *request)
 
 static WORD HTTP_ParseWkday(LPCWSTR day)
 {
-    static const WCHAR days[7][4] = {{ 's','u','n',0 },
-                                     { 'm','o','n',0 },
-                                     { 't','u','e',0 },
-                                     { 'w','e','d',0 },
-                                     { 't','h','u',0 },
-                                     { 'f','r','i',0 },
-                                     { 's','a','t',0 }};
+    static const WCHAR days[7][4] = {L"sun",
+                                     L"mon",
+                                     L"tue",
+                                     L"wed",
+                                     L"thu",
+                                     L"fri",
+                                     L"sat"};
     unsigned int i;
     for (i = 0; i < ARRAY_SIZE(days); i++)
         if (!wcsicmp(day, days[i]))
@@ -4290,31 +4292,18 @@ static WORD HTTP_ParseWkday(LPCWSTR day)
 
 static WORD HTTP_ParseMonth(LPCWSTR month)
 {
-    static const WCHAR jan[] = { 'j','a','n',0 };
-    static const WCHAR feb[] = { 'f','e','b',0 };
-    static const WCHAR mar[] = { 'm','a','r',0 };
-    static const WCHAR apr[] = { 'a','p','r',0 };
-    static const WCHAR may[] = { 'm','a','y',0 };
-    static const WCHAR jun[] = { 'j','u','n',0 };
-    static const WCHAR jul[] = { 'j','u','l',0 };
-    static const WCHAR aug[] = { 'a','u','g',0 };
-    static const WCHAR sep[] = { 's','e','p',0 };
-    static const WCHAR oct[] = { 'o','c','t',0 };
-    static const WCHAR nov[] = { 'n','o','v',0 };
-    static const WCHAR dec[] = { 'd','e','c',0 };
-
-    if (!wcsicmp(month, jan)) return 1;
-    if (!wcsicmp(month, feb)) return 2;
-    if (!wcsicmp(month, mar)) return 3;
-    if (!wcsicmp(month, apr)) return 4;
-    if (!wcsicmp(month, may)) return 5;
-    if (!wcsicmp(month, jun)) return 6;
-    if (!wcsicmp(month, jul)) return 7;
-    if (!wcsicmp(month, aug)) return 8;
-    if (!wcsicmp(month, sep)) return 9;
-    if (!wcsicmp(month, oct)) return 10;
-    if (!wcsicmp(month, nov)) return 11;
-    if (!wcsicmp(month, dec)) return 12;
+    if (!wcsicmp(month, L"jan")) return 1;
+    if (!wcsicmp(month, L"feb")) return 2;
+    if (!wcsicmp(month, L"mar")) return 3;
+    if (!wcsicmp(month, L"apr")) return 4;
+    if (!wcsicmp(month, L"may")) return 5;
+    if (!wcsicmp(month, L"jun")) return 6;
+    if (!wcsicmp(month, L"jul")) return 7;
+    if (!wcsicmp(month, L"aug")) return 8;
+    if (!wcsicmp(month, L"sep")) return 9;
+    if (!wcsicmp(month, L"oct")) return 10;
+    if (!wcsicmp(month, L"nov")) return 11;
+    if (!wcsicmp(month, L"dec")) return 12;
     /* Invalid */
     return 0;
 }
@@ -4377,7 +4366,6 @@ static BOOL HTTP_ParseTime(SYSTEMTIME *st, LPCWSTR *str)
 
 static BOOL HTTP_ParseDateAsAsctime(LPCWSTR value, FILETIME *ft)
 {
-    static const WCHAR gmt[]= { 'G','M','T',0 };
     WCHAR day[4], *dayPtr, month[4], *monthPtr, *nextPtr;
     LPCWSTR ptr;
     SYSTEMTIME st = { 0 };
@@ -4444,7 +4432,7 @@ static BOOL HTTP_ParseDateAsAsctime(LPCWSTR value, FILETIME *ft)
     /* asctime() doesn't report a timezone, but some web servers do, so accept
      * with or without GMT.
      */
-    if (*ptr && wcscmp(ptr, gmt))
+    if (*ptr && wcscmp(ptr, L"GMT"))
     {
         ERR("unexpected timezone %s\n", debugstr_w(ptr));
         return FALSE;
@@ -4454,7 +4442,6 @@ static BOOL HTTP_ParseDateAsAsctime(LPCWSTR value, FILETIME *ft)
 
 static BOOL HTTP_ParseRfc1123Date(LPCWSTR value, FILETIME *ft)
 {
-    static const WCHAR gmt[]= { 'G','M','T',0 };
     WCHAR *nextPtr, day[4], month[4], *monthPtr;
     LPCWSTR ptr;
     unsigned long num;
@@ -4522,7 +4509,7 @@ static BOOL HTTP_ParseRfc1123Date(LPCWSTR value, FILETIME *ft)
     while (iswspace(*ptr))
         ptr++;
 
-    if (wcscmp(ptr, gmt))
+    if (wcscmp(ptr, L"GMT"))
     {
         ERR("unexpected time zone %s\n", debugstr_w(ptr));
         return FALSE;
@@ -4532,13 +4519,13 @@ static BOOL HTTP_ParseRfc1123Date(LPCWSTR value, FILETIME *ft)
 
 static WORD HTTP_ParseWeekday(LPCWSTR day)
 {
-    static const WCHAR days[7][10] = {{ 's','u','n','d','a','y',0 },
-                                     { 'm','o','n','d','a','y',0 },
-                                     { 't','u','e','s','d','a','y',0 },
-                                     { 'w','e','d','n','e','s','d','a','y',0 },
-                                     { 't','h','u','r','s','d','a','y',0 },
-                                     { 'f','r','i','d','a','y',0 },
-                                     { 's','a','t','u','r','d','a','y',0 }};
+    static const WCHAR days[7][10] = {L"sunday",
+                                     L"monday",
+                                     L"tuesday",
+                                     L"wednesday",
+                                     L"thursday",
+                                     L"friday",
+                                     L"saturday"};
     unsigned int i;
     for (i = 0; i < ARRAY_SIZE(days); i++)
         if (!wcsicmp(day, days[i]))
@@ -4550,7 +4537,6 @@ static WORD HTTP_ParseWeekday(LPCWSTR day)
 
 static BOOL HTTP_ParseRfc850Date(LPCWSTR value, FILETIME *ft)
 {
-    static const WCHAR gmt[]= { 'G','M','T',0 };
     WCHAR *nextPtr, day[10], month[4], *monthPtr;
     LPCWSTR ptr;
     unsigned long num;
@@ -4640,7 +4626,7 @@ static BOOL HTTP_ParseRfc850Date(LPCWSTR value, FILETIME *ft)
     while (iswspace(*ptr))
         ptr++;
 
-    if (wcscmp(ptr, gmt))
+    if (wcscmp(ptr, L"GMT"))
     {
         ERR("unexpected time zone %s\n", debugstr_w(ptr));
         return FALSE;
@@ -4650,10 +4636,9 @@ static BOOL HTTP_ParseRfc850Date(LPCWSTR value, FILETIME *ft)
 
 static BOOL HTTP_ParseDate(LPCWSTR value, FILETIME *ft)
 {
-    static const WCHAR zero[] = { '0',0 };
     BOOL ret;
 
-    if (!wcscmp(value, zero))
+    if (!wcscmp(value, L"0"))
     {
         ft->dwLowDateTime = ft->dwHighDateTime = 0;
         ret = TRUE;
@@ -4687,7 +4672,7 @@ static void HTTP_ProcessExpires(http_request_t *request)
     /* Look for a Cache-Control header with a max-age directive, as it takes
      * precedence over the Expires header.
      */
-    headerIndex = HTTP_GetCustomHeaderIndex(request, szCache_Control, 0, FALSE);
+    headerIndex = HTTP_GetCustomHeaderIndex(request, L"Cache-Control", 0, FALSE);
     if (headerIndex != -1)
     {
         LPHTTPHEADERW ccHeader = &request->custHeaders[headerIndex];
@@ -4705,10 +4690,7 @@ static void HTTP_ProcessExpires(http_request_t *request)
                 ;
             if (*equal == '=')
             {
-                static const WCHAR max_age[] = {
-                    'm','a','x','-','a','g','e',0 };
-
-                if (!wcsnicmp(ptr, max_age, equal - ptr - 1))
+                if (!wcsnicmp(ptr, L"max-age", equal - ptr - 1))
                 {
                     LPWSTR nextPtr;
                     unsigned long age;
@@ -4741,7 +4723,7 @@ static void HTTP_ProcessExpires(http_request_t *request)
     }
     if (!expirationFound)
     {
-        headerIndex = HTTP_GetCustomHeaderIndex(request, szExpires, 0, FALSE);
+        headerIndex = HTTP_GetCustomHeaderIndex(request, L"Expires", 0, FALSE);
         if (headerIndex != -1)
         {
             LPHTTPHEADERW expiresHeader = &request->custHeaders[headerIndex];
@@ -4774,7 +4756,7 @@ static void HTTP_ProcessLastModified(http_request_t *request)
 
     EnterCriticalSection( &request->headers_section );
 
-    headerIndex = HTTP_GetCustomHeaderIndex(request, szLast_Modified, 0, FALSE);
+    headerIndex = HTTP_GetCustomHeaderIndex(request, L"Last-Modified", 0, FALSE);
     if (headerIndex != -1)
     {
         LPHTTPHEADERW expiresHeader = &request->custHeaders[headerIndex];
@@ -4793,12 +4775,12 @@ static void http_process_keep_alive(http_request_t *req)
 
     EnterCriticalSection( &req->headers_section );
 
-    if ((index = HTTP_GetCustomHeaderIndex(req, szConnection, 0, FALSE)) != -1)
-        req->netconn->keep_alive = !wcsicmp(req->custHeaders[index].lpszValue, szKeepAlive);
-    else if ((index = HTTP_GetCustomHeaderIndex(req, szProxy_Connection, 0, FALSE)) != -1)
-        req->netconn->keep_alive = !wcsicmp(req->custHeaders[index].lpszValue, szKeepAlive);
+    if ((index = HTTP_GetCustomHeaderIndex(req, L"Connection", 0, FALSE)) != -1)
+        req->netconn->keep_alive = !wcsicmp(req->custHeaders[index].lpszValue, L"Keep-Alive");
+    else if ((index = HTTP_GetCustomHeaderIndex(req, L"Proxy-Connection", 0, FALSE)) != -1)
+        req->netconn->keep_alive = !wcsicmp(req->custHeaders[index].lpszValue, L"Keep-Alive");
     else
-        req->netconn->keep_alive = !wcsicmp(req->version, g_szHttp1_1);
+        req->netconn->keep_alive = !wcsicmp(req->version, L"HTTP/1.1");
 
     LeaveCriticalSection( &req->headers_section );
 }
@@ -4893,11 +4875,9 @@ static char *build_ascii_request( const WCHAR *str, void *data, DWORD data_len, 
 
 static void set_content_length_header( http_request_t *request, DWORD len, DWORD flags )
 {
-    static const WCHAR fmtW[] =
-        {'C','o','n','t','e','n','t','-','L','e','n','g','t','h',':',' ','%','u','\r','\n',0};
-    WCHAR buf[ARRAY_SIZE(fmtW) + 10];
+    WCHAR buf[ARRAY_SIZE(L"Content-Length: %u\r\n") + 10];
 
-    swprintf( buf, ARRAY_SIZE(buf), fmtW, len );
+    swprintf( buf, ARRAY_SIZE(buf), L"Content-Length: %u\r\n", len );
     HTTP_HttpAddRequestHeadersW( request, buf, ~0u, flags );
 }
 
@@ -4926,12 +4906,12 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
 
     /* if the verb is NULL default to GET */
     if (!request->verb)
-        request->verb = heap_strdupW(szGET);
+        request->verb = heap_strdupW(L"GET");
 
-    HTTP_ProcessHeader(request, hostW, request->server->canon_host_port,
+    HTTP_ProcessHeader(request, L"Host", request->server->canon_host_port,
                        HTTP_ADDREQ_FLAG_ADD_IF_NEW | HTTP_ADDHDR_FLAG_REQ);
 
-    if (dwContentLength || wcscmp(request->verb, szGET))
+    if (dwContentLength || wcscmp(request->verb, L"GET"))
     {
         set_content_length_header(request, dwContentLength, HTTP_ADDREQ_FLAG_ADD_IF_NEW);
         request->bytesToWrite = dwContentLength;
@@ -4939,26 +4919,24 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
     if (request->session->appInfo->agent)
     {
         WCHAR *agent_header;
-        static const WCHAR user_agent[] = {'U','s','e','r','-','A','g','e','n','t',':',' ','%','s','\r','\n',0};
         int len;
 
-        len = lstrlenW(request->session->appInfo->agent) + lstrlenW(user_agent);
+        len = lstrlenW(request->session->appInfo->agent) + lstrlenW(L"User-Agent: %s\r\n");
         agent_header = heap_alloc(len * sizeof(WCHAR));
-        swprintf(agent_header, len, user_agent, request->session->appInfo->agent);
+        swprintf(agent_header, len, L"User-Agent: %s\r\n", request->session->appInfo->agent);
 
         HTTP_HttpAddRequestHeadersW(request, agent_header, lstrlenW(agent_header), HTTP_ADDREQ_FLAG_ADD_IF_NEW);
         heap_free(agent_header);
     }
     if (request->hdr.dwFlags & INTERNET_FLAG_PRAGMA_NOCACHE)
     {
-        static const WCHAR pragma_nocache[] = {'P','r','a','g','m','a',':',' ','n','o','-','c','a','c','h','e','\r','\n',0};
-        HTTP_HttpAddRequestHeadersW(request, pragma_nocache, lstrlenW(pragma_nocache), HTTP_ADDREQ_FLAG_ADD_IF_NEW);
+        HTTP_HttpAddRequestHeadersW(request, L"Pragma: no-cache\r\n",
+                                    lstrlenW(L"Pragma: no-cache\r\n"), HTTP_ADDREQ_FLAG_ADD_IF_NEW);
     }
-    if ((request->hdr.dwFlags & INTERNET_FLAG_NO_CACHE_WRITE) && wcscmp(request->verb, szGET))
+    if ((request->hdr.dwFlags & INTERNET_FLAG_NO_CACHE_WRITE) && wcscmp(request->verb, L"GET"))
     {
-        static const WCHAR cache_control[] = {'C','a','c','h','e','-','C','o','n','t','r','o','l',':',
-                                              ' ','n','o','-','c','a','c','h','e','\r','\n',0};
-        HTTP_HttpAddRequestHeadersW(request, cache_control, lstrlenW(cache_control), HTTP_ADDREQ_FLAG_ADD_IF_NEW);
+        HTTP_HttpAddRequestHeadersW(request, L"Cache-Control: no-cache\r\n",
+                                    lstrlenW(L"Cache-Control: no-cache\r\n"), HTTP_ADDREQ_FLAG_ADD_IF_NEW);
     }
 
     /* add the headers the caller supplied */
@@ -4983,7 +4961,7 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
             HTTPHEADERW *host;
 
             EnterCriticalSection( &request->headers_section );
-            host = HTTP_GetHeader( request, hostW );
+            host = HTTP_GetHeader(request, L"Host");
             TRACE("Going to url %s %s\n", debugstr_w(host->lpszValue), debugstr_w(request->path));
             LeaveCriticalSection( &request->headers_section );
         }
@@ -4991,11 +4969,11 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
         HTTP_FixURL(request);
         if (request->hdr.dwFlags & INTERNET_FLAG_KEEP_CONNECTION)
         {
-            HTTP_ProcessHeader(request, szConnection, szKeepAlive,
+            HTTP_ProcessHeader(request, L"Connection", L"Keep-Alive",
                                HTTP_ADDHDR_FLAG_REQ | HTTP_ADDHDR_FLAG_REPLACE | HTTP_ADDHDR_FLAG_ADD);
         }
-        HTTP_InsertAuthorization(request, request->authInfo, szAuthorization);
-        HTTP_InsertAuthorization(request, request->proxyAuthInfo, szProxy_Authorization);
+        HTTP_InsertAuthorization(request, request->authInfo, L"Authorization");
+        HTTP_InsertAuthorization(request, request->proxyAuthInfo, L"Proxy-Authorization");
 
         if (!(request->hdr.dwFlags & INTERNET_FLAG_NO_COOKIES))
             HTTP_InsertCookies(request);
@@ -5020,13 +4998,12 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
         }
         if (secure_proxy_connect)
         {
-            static const WCHAR connectW[] = {'C','O','N','N','E','C','T',0};
             const WCHAR *target = request->server->host_port;
 
-            if (HTTP_GetCustomHeaderIndex(request, szContent_Length, 0, TRUE) >= 0)
+            if (HTTP_GetCustomHeaderIndex(request, L"Content-Length", 0, TRUE) >= 0)
                 set_content_length_header(request, 0, HTTP_ADDREQ_FLAG_REPLACE);
 
-            request_header = build_request_header(request, connectW, target, g_szHttp1_1, TRUE);
+            request_header = build_request_header(request, L"CONNECT", target, L"HTTP/1.1", TRUE);
         }
         else if (request->proxy && !(request->hdr.dwFlags & INTERNET_FLAG_SECURE))
         {
@@ -5036,7 +5013,7 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
         }
         else
         {
-            if (request->proxy && HTTP_GetCustomHeaderIndex(request, szContent_Length, 0, TRUE) >= 0)
+            if (request->proxy && HTTP_GetCustomHeaderIndex(request, L"Content-Length", 0, TRUE) >= 0)
                 set_content_length_header(request, dwContentLength, HTTP_ADDREQ_FLAG_REPLACE);
 
             request_header = build_request_header(request, request->verb, request->path, request->version, TRUE);
@@ -5123,11 +5100,11 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
                     if(!new_url)
                         break;
 
-                    if (wcscmp(request->verb, szGET) && wcscmp(request->verb, szHEAD) &&
+                    if (wcscmp(request->verb, L"GET") && wcscmp(request->verb, L"HEAD") &&
                         request->status_code != HTTP_STATUS_REDIRECT_KEEP_VERB)
                     {
                         heap_free(request->verb);
-                        request->verb = heap_strdupW(szGET);
+                        request->verb = heap_strdupW(L"GET");
                     }
                     http_release_netconn(request, drain_content(request, FALSE) == ERROR_SUCCESS);
                     res = HTTP_HandleRedirect(request, new_url);
@@ -5206,7 +5183,7 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
                     http_release_netconn( request, FALSE );
                     break;
                 }
-                remove_header(request, szProxy_Authorization, TRUE);
+                remove_header(request, L"Proxy-Authorization", TRUE);
                 destroy_authinfo(request->proxyAuthInfo);
                 request->proxyAuthInfo = NULL;
                 request->contentLength = 0;
@@ -5317,11 +5294,11 @@ static DWORD HTTP_HttpEndRequestW(http_request_t *request, DWORD dwFlags, DWORD_
             if(!new_url)
                 break;
 
-            if (wcscmp(request->verb, szGET) && wcscmp(request->verb, szHEAD) &&
+            if (wcscmp(request->verb, L"GET") && wcscmp(request->verb, L"HEAD") &&
                 request->status_code != HTTP_STATUS_REDIRECT_KEEP_VERB)
             {
                 heap_free(request->verb);
-                request->verb = heap_strdupW(szGET);
+                request->verb = heap_strdupW(L"GET");
             }
             http_release_netconn(request, drain_content(request, FALSE) == ERROR_SUCCESS);
             res = HTTP_HandleRedirect(request, new_url);
@@ -5969,7 +5946,7 @@ static DWORD HTTP_GetResponseHeaders(http_request_t *request, INT *len)
         rc += buflen;
         MultiByteToWideChar( CP_ACP, 0, bufferA, buflen, buffer, MAX_REPLY_LEN );
         /* check is this a status code line? */
-        if (!wcsncmp(buffer, g_szHttp1_0, 4))
+        if (!wcsncmp(buffer, L"HTTP/1.0", 4))
         {
             /* split the version from the status code */
             status_code = wcschr( buffer, ' ' );
@@ -5997,22 +5974,22 @@ static DWORD HTTP_GetResponseHeaders(http_request_t *request, INT *len)
             heap_free(request->statusText);
 
             request->status_code = HTTP_STATUS_OK;
-            request->version = heap_strdupW(g_szHttp1_0);
-            request->statusText = heap_strdupW(szOK);
+            request->version = heap_strdupW(L"HTTP/1.0");
+            request->statusText = heap_strdupW(L"OK");
 
             goto lend;
         }
     } while (codeHundred);
 
     /* Add status code */
-    HTTP_ProcessHeader(request, szStatus, status_code,
+    HTTP_ProcessHeader(request, L"Status", status_code,
                        HTTP_ADDHDR_FLAG_REPLACE | HTTP_ADDHDR_FLAG_ADD);
 
     heap_free(request->version);
     heap_free(request->statusText);
 
     request->version = heap_strdupW(buffer);
-    request->statusText = heap_strdupW(status_text ? status_text : emptyW);
+    request->statusText = heap_strdupW(status_text ? status_text : L"");
 
     /* Restore the spaces */
     *(status_code-1) = ' ';

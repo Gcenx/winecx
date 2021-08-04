@@ -33,23 +33,18 @@
  *
  */
 
-#include "config.h"
-
 #include <string.h>
 #include <ctype.h>
 #include <sys/types.h>
 #include <stdarg.h>
 #include <stdio.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
 
 #include "windef.h"
 #include "winbase.h"
+#include "winnls.h"
 #include "winternl.h"
 #include "lzexpand.h"
 
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(file);
@@ -139,7 +134,7 @@ static INT read_header(HFILE fd,struct lzfileheader *head)
 	/* We can't directly read the lzfileheader struct due to
 	 * structure element alignment
 	 */
-	if (_lread(fd,buf,LZ_HEADER_LEN)<LZ_HEADER_LEN)
+	if (_lread(fd,buf,LZ_HEADER_LEN) != LZ_HEADER_LEN)
 		return 0;
 	memcpy(head->magic,buf,LZ_MAGIC_LEN);
 	memcpy(&(head->compressiontype),buf+LZ_MAGIC_LEN,1);
@@ -315,7 +310,7 @@ INT WINAPI GetExpandedNameW( LPWSTR in, LPWSTR out )
     char *xout = HeapAlloc( GetProcessHeap(), 0, len+3 );
     WideCharToMultiByte( CP_ACP, 0, in, -1, xin, len, NULL, NULL );
     if ((ret = GetExpandedNameA( xin, xout )) > 0)
-        MultiByteToWideChar( CP_ACP, 0, xout, -1, out, strlenW(in)+4 );
+        MultiByteToWideChar( CP_ACP, 0, xout, -1, out, lstrlenW(in)+4 );
     HeapFree( GetProcessHeap(), 0, xin );
     HeapFree( GetProcessHeap(), 0, xout );
     return ret;

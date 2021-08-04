@@ -313,25 +313,7 @@ try_again:
         state.uds.ds32.dr7 = dr7;
 #endif
     }
-    if (!thread_set_state( port, x86_DEBUG_STATE, (thread_state_t)&state, count ))
-    {
-        if (thread->context)  /* update the cached values */
-        {
-#if defined(__x86_64__) || defined(__i386_on_x86_64__)
-            if (thread->process->cpu == CPU_x86_64)
-                thread->context->debug.x86_64_regs = context->debug.x86_64_regs;
-            else
-#endif
-                thread->context->debug.i386_regs = context->debug.i386_regs;
-        }
-    }
-#if defined(__x86_64__) || defined(__i386_on_x86_64__)
-    else if (iter == 0)
-    {
-        iter = 1;
-        goto try_again;
-    }
-#endif
+    thread_set_state( port, x86_DEBUG_STATE, (thread_state_t)&state, count );
     mach_port_deallocate( mach_task_self(), port );
 #endif
 }

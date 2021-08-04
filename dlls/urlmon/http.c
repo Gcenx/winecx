@@ -65,8 +65,7 @@ static inline HttpProtocol *impl_from_IWinInetHttpInfo(IWinInetHttpInfo *iface)
     return CONTAINING_RECORD(iface, HttpProtocol, IWinInetHttpInfo_iface);
 }
 
-static const WCHAR default_headersW[] = {
-    'A','c','c','e','p','t','-','E','n','c','o','d','i','n','g',':',' ','g','z','i','p',',',' ','d','e','f','l','a','t','e',0};
+static const WCHAR default_headersW[] = L"Accept-Encoding: gzip, deflate";
 
 static LPWSTR query_http_info(HttpProtocol *This, DWORD option)
 {
@@ -304,9 +303,9 @@ static HRESULT HttpProtocol_open_request(Protocol *prot, IUri *uri, DWORD reques
     HRESULT hres;
 
     static const WCHAR wszBindVerb[BINDVERB_CUSTOM][5] =
-        {{'G','E','T',0},
-         {'P','O','S','T',0},
-         {'P','U','T',0}};
+        {L"GET",
+         L"POST",
+         L"PUT"};
 
     hres = IUri_GetPort(uri, &port);
     if(FAILED(hres))
@@ -345,8 +344,7 @@ static HRESULT HttpProtocol_open_request(Protocol *prot, IUri *uri, DWORD reques
     num = ARRAY_SIZE(accept_mimes) - 1;
     hres = IInternetBindInfo_GetBindString(bind_info, BINDSTRING_ACCEPT_MIMES, accept_mimes, num, &num);
     if(hres == INET_E_USE_DEFAULT_SETTING) {
-        static const WCHAR default_accept_mimeW[] = {'*','/','*',0};
-        static const WCHAR *default_accept_mimes[] = {default_accept_mimeW, NULL};
+        static const WCHAR *default_accept_mimes[] = {L"*/*", NULL};
 
         accept_types = default_accept_mimes;
         num = 0;
@@ -513,9 +511,6 @@ static HRESULT HttpProtocol_start_downloading(Protocol *prot)
     BOOL res;
     HRESULT hres;
 
-    static const WCHAR wszDefaultContentType[] =
-        {'t','e','x','t','/','h','t','m','l',0};
-
     if(!This->http_negotiate) {
         WARN("Expected IHttpNegotiate pointer to be non-NULL\n");
         return S_OK;
@@ -573,8 +568,7 @@ static HRESULT HttpProtocol_start_downloading(Protocol *prot)
         WARN("HttpQueryInfo failed: %d\n", GetLastError());
         IInternetProtocolSink_ReportProgress(This->base.protocol_sink,
                  (This->base.bindf & BINDF_FROMURLMON)
-                  ? BINDSTATUS_MIMETYPEAVAILABLE : BINDSTATUS_RAWMIMETYPE,
-                  wszDefaultContentType);
+                  ? BINDSTATUS_MIMETYPEAVAILABLE : BINDSTATUS_RAWMIMETYPE, L"text/html");
     }
 
     content_length = query_http_info(This, HTTP_QUERY_CONTENT_LENGTH);

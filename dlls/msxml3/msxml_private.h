@@ -40,6 +40,9 @@ typedef enum {
     MSXML6        = 60
 } MSXML_VERSION;
 
+extern const CLSID * DOMDocument_version(MSXML_VERSION v) DECLSPEC_HIDDEN;
+extern const CLSID * SchemaCache_version(MSXML_VERSION v) DECLSPEC_HIDDEN;
+
 /* typelibs */
 typedef enum tid_t {
     NULL_tid,
@@ -372,10 +375,12 @@ static inline BSTR bstr_from_xmlChar(const xmlChar *str)
     BSTR ret = NULL;
 
     if(str) {
-        DWORD len = MultiByteToWideChar(CP_UTF8, 0, (const char * HOSTPTR)str, -1, NULL, 0);
+        char *copy = heap_strdup((const char * HOSTPTR)str);
+        DWORD len = MultiByteToWideChar(CP_UTF8, 0, copy, -1, NULL, 0);
         ret = SysAllocStringLen(NULL, len-1);
         if(ret)
-            MultiByteToWideChar( CP_UTF8, 0, (const char * HOSTPTR)str, -1, ret, len);
+            MultiByteToWideChar( CP_UTF8, 0, copy, -1, ret, len);
+        heap_free(copy);
     }
     else
         ret = SysAllocStringLen(NULL, 0);
@@ -387,13 +392,22 @@ static inline xmlChar *xmlchar_from_wcharn(const WCHAR *str, int nchars, BOOL us
 {
     xmlChar *xmlstr;
     DWORD len = WideCharToMultiByte( CP_UTF8, 0, str, nchars, NULL, 0, NULL, NULL );
+    char *win32char = heap_alloc( len + 1 );
 
-    xmlstr = use_xml_alloc ? xmlMalloc( len + 1 ) : heap_alloc( len + 1 );
-    if ( xmlstr )
-    {
-        WideCharToMultiByte( CP_UTF8, 0, str, nchars, (char * HOSTPTR) xmlstr, len+1, NULL, NULL );
-        xmlstr[len] = 0;
-    }
+    if (!win32char)
+        return NULL;
+    
+    WideCharToMultiByte( CP_UTF8, 0, str, nchars, win32char, len+1, NULL, NULL );
+    win32char[len] = 0;
+    
+    if (!use_xml_alloc)
+        return (xmlChar *)win32char;
+
+    xmlstr = xmlMalloc( len + 1 );
+    if (xmlstr)
+        memcpy(xmlstr, win32char, len + 1);
+    heap_free(win32char);
+
     return xmlstr;
 }
 
@@ -505,36 +519,13 @@ extern HRESULT MXNamespaceManager_create(void**) DECLSPEC_HIDDEN;
 extern HRESULT XMLParser_create(void**) DECLSPEC_HIDDEN;
 extern HRESULT XMLView_create(void**) DECLSPEC_HIDDEN;
 
-static inline const CLSID* DOMDocument_version(MSXML_VERSION v)
-{
-    switch (v)
-    {
-    default:
-    case MSXML_DEFAULT: return &CLSID_DOMDocument;
-    case MSXML3: return &CLSID_DOMDocument30;
-    case MSXML4: return &CLSID_DOMDocument40;
-    case MSXML6: return &CLSID_DOMDocument60;
-    }
-}
-
-static inline const CLSID* SchemaCache_version(MSXML_VERSION v)
-{
-    switch (v)
-    {
-    default:
-    case MSXML_DEFAULT: return &CLSID_XMLSchemaCache;
-    case MSXML3: return &CLSID_XMLSchemaCache30;
-    case MSXML4: return &CLSID_XMLSchemaCache40;
-    case MSXML6: return &CLSID_XMLSchemaCache60;
-    }
-}
-
 typedef struct bsc_t bsc_t;
 
 HRESULT create_moniker_from_url(LPCWSTR, IMoniker**) DECLSPEC_HIDDEN;
-HRESULT create_uri(const WCHAR *, IUri **) DECLSPEC_HIDDEN;
+HRESULT create_uri(IUri *base, const WCHAR *, IUri **) DECLSPEC_HIDDEN;
 HRESULT bind_url(IMoniker*, HRESULT (*onDataAvailable)(void*,char*,DWORD), void*, bsc_t**) DECLSPEC_HIDDEN;
 HRESULT detach_bsc(bsc_t*) DECLSPEC_HIDDEN;
+IUri *get_base_uri(IUnknown *) DECLSPEC_HIDDEN;
 
 /* Error Codes - not defined anywhere in the public headers */
 #define E_XML_ELEMENT_UNDECLARED            0xC00CE00D

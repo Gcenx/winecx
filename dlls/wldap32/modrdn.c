@@ -34,7 +34,9 @@
 #include "wldap32.h"
 #include "wine/debug.h"
 
+#ifdef HAVE_LDAP
 WINE_DEFAULT_DEBUG_CHANNEL(wldap32);
+#endif
 
 /***********************************************************************
  *      ldap_modrdnA     (WLDAP32.@)
@@ -111,7 +113,7 @@ ULONG CDECL ldap_modrdnW( WLDAP32_LDAP *ld, PWCHAR dn, PWCHAR newdn )
     newdnU = strWtoU( newdn );
     if (!newdnU) goto exit;
 
-    ret = ldap_rename( ldap_get( ld ), dn ? dnU : "", newdnU, NULL, 1, NULL, NULL, &msg );
+    ret = ldap_rename( ld->ld, dn ? dnU : "", newdnU, NULL, 1, NULL, NULL, &msg );
 
     if (ret == LDAP_SUCCESS)
         ret = msg;
@@ -202,7 +204,7 @@ ULONG CDECL ldap_modrdn2W( WLDAP32_LDAP *ld, PWCHAR dn, PWCHAR newdn, INT delete
     newdnU = strWtoU( newdn );
     if (!newdnU) goto exit;
 
-    ret = ldap_rename( ldap_get( ld ), dn ? dnU : "", newdnU, NULL, delete, NULL, NULL, &msg );
+    ret = ldap_rename( ld->ld, dn ? dnU : "", newdnU, NULL, delete, NULL, NULL, &msg );
 
     if (ret == LDAP_SUCCESS)
         ret = msg;
@@ -287,7 +289,7 @@ ULONG CDECL ldap_modrdn2_sW( WLDAP32_LDAP *ld, PWCHAR dn, PWCHAR newdn, INT dele
     newdnU = strWtoU( newdn );
     if (!newdnU) goto exit;
 
-    ret = map_error( ldap_rename_s( ldap_get( ld ), dn ? dnU : "", newdnU, NULL, delete, NULL, NULL ));
+    ret = map_error( ldap_rename_s( ld->ld, dn ? dnU : "", newdnU, NULL, delete, NULL, NULL ));
 
 exit:
     strfreeU( dnU );
@@ -366,7 +368,7 @@ ULONG CDECL ldap_modrdn_sW( WLDAP32_LDAP *ld, PWCHAR dn, PWCHAR newdn )
     newdnU = strWtoU( newdn );
     if (!newdnU) goto exit;
 
-    ret = map_error( ldap_rename_s( ldap_get( ld ), dn ? dnU : "", newdnU, NULL, 1, NULL, NULL ));
+    ret = map_error( ldap_rename_s( ld->ld, dn ? dnU : "", newdnU, NULL, 1, NULL, NULL ));
 
 exit:
     strfreeU( dnU );

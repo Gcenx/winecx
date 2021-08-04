@@ -612,17 +612,24 @@ static BSTR bstr_from_xmlCharN(const xmlChar *buf, int len)
 {
     DWORD dLen;
     BSTR bstr;
+    char *copy;
 
     if (!buf)
         return NULL;
 
-    dLen = MultiByteToWideChar(CP_UTF8, 0, (const char * HOSTPTR)buf, len, NULL, 0);
+    copy = heap_alloc(len);
+    memcpy(copy, buf, len);
+    dLen = MultiByteToWideChar(CP_UTF8, 0, copy, len, NULL, 0);
     if(len != -1) dLen++;
     bstr = SysAllocStringLen(NULL, dLen-1);
     if (!bstr)
+    {
+        heap_free(copy);
         return NULL;
-    MultiByteToWideChar(CP_UTF8, 0, (const char * HOSTPTR)buf, len, bstr, dLen);
+    }
+    MultiByteToWideChar(CP_UTF8, 0, copy, len, bstr, dLen);
     if(len != -1) bstr[dLen-1] = '\0';
+    heap_free(copy);
 
     return bstr;
 }
@@ -1403,17 +1410,25 @@ static BSTR saxreader_get_unescaped_value(const xmlChar *buf, int len)
     WCHAR *dest, *ptrW, *str;
     DWORD str_len;
     BSTR bstr;
+    char *copy;
 
     if (!buf)
         return NULL;
 
-    str_len = MultiByteToWideChar(CP_UTF8, 0, (const char * HOSTPTR)buf, len, NULL, 0);
+    copy = heap_alloc(len);
+    memcpy(copy, buf, len);
+    str_len = MultiByteToWideChar(CP_UTF8, 0, copy, len, NULL, 0);
     if (len != -1) str_len++;
 
     str = heap_alloc(str_len*sizeof(WCHAR));
-    if (!str) return NULL;
+    if (!str)
+    {
+        heap_free(copy);
+        return NULL;
+    }
 
-    MultiByteToWideChar(CP_UTF8, 0, (const char * HOSTPTR)buf, len, str, str_len);
+    MultiByteToWideChar(CP_UTF8, 0, copy, len, str, str_len);
+    heap_free(copy);
     if (len != -1) str[str_len-1] = 0;
 
     ptrW = str;

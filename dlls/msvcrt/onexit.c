@@ -23,6 +23,7 @@
 #pragma makedep implib
 #endif
 
+#include <process.h>
 #include "msvcrt.h"
 #include "mtdll.h"
 
@@ -30,7 +31,7 @@
 /*********************************************************************
  *		_initialize_onexit_table (UCRTBASE.@)
  */
-int CDECL _initialize_onexit_table(MSVCRT__onexit_table_t *table)
+int __cdecl _initialize_onexit_table(_onexit_table_t *table)
 {
     if (!table)
         return -1;
@@ -44,18 +45,18 @@ int CDECL _initialize_onexit_table(MSVCRT__onexit_table_t *table)
 /*********************************************************************
  *		_register_onexit_function (UCRTBASE.@)
  */
-int CDECL _register_onexit_function(MSVCRT__onexit_table_t *table, MSVCRT__onexit_t func)
+int __cdecl _register_onexit_function(_onexit_table_t *table, _onexit_t func)
 {
     if (!table)
         return -1;
 
-    _mlock(_EXIT_LOCK1);
+    _lock(_EXIT_LOCK1);
     if (!table->_first)
     {
         table->_first = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 32 * sizeof(void *));
         if (!table->_first)
         {
-            _munlock(_EXIT_LOCK1);
+            _unlock(_EXIT_LOCK1);
             return -1;
         }
         table->_last = table->_first;
@@ -66,10 +67,10 @@ int CDECL _register_onexit_function(MSVCRT__onexit_table_t *table, MSVCRT__onexi
     if (table->_last == table->_end)
     {
         int len = table->_end - table->_first;
-        MSVCRT__onexit_t *tmp = HeapReAlloc(GetProcessHeap(), 0, table->_first, 2 * len * sizeof(void *));
+        _PVFV *tmp = HeapReAlloc(GetProcessHeap(), 0, table->_first, 2 * len * sizeof(void *));
         if (!tmp)
         {
-            _munlock(_EXIT_LOCK1);
+            _unlock(_EXIT_LOCK1);
             return -1;
         }
         table->_first = tmp;
@@ -77,9 +78,9 @@ int CDECL _register_onexit_function(MSVCRT__onexit_table_t *table, MSVCRT__onexi
         table->_last = table->_first + len;
     }
 
-    *table->_last = func;
+    *table->_last = (_PVFV)func;
     table->_last++;
-    _munlock(_EXIT_LOCK1);
+    _unlock(_EXIT_LOCK1);
     return 0;
 }
 
@@ -87,18 +88,18 @@ int CDECL _register_onexit_function(MSVCRT__onexit_table_t *table, MSVCRT__onexi
 /*********************************************************************
  *		_execute_onexit_table (UCRTBASE.@)
  */
-int CDECL _execute_onexit_table(MSVCRT__onexit_table_t *table)
+int __cdecl _execute_onexit_table(_onexit_table_t *table)
 {
-    MSVCRT__onexit_t *func;
-    MSVCRT__onexit_table_t copy;
+    _PVFV *func;
+    _onexit_table_t copy;
 
     if (!table)
         return -1;
 
-    _mlock(_EXIT_LOCK1);
+    _lock(_EXIT_LOCK1);
     if (!table->_first || table->_first >= table->_last)
     {
-        _munlock(_EXIT_LOCK1);
+        _unlock(_EXIT_LOCK1);
         return 0;
     }
     copy._first = table->_first;
@@ -106,7 +107,7 @@ int CDECL _execute_onexit_table(MSVCRT__onexit_table_t *table)
     copy._end   = table->_end;
     memset(table, 0, sizeof(*table));
     _initialize_onexit_table(table);
-    _munlock(_EXIT_LOCK1);
+    _unlock(_EXIT_LOCK1);
 
     for (func = copy._last - 1; func >= copy._first; func--)
     {

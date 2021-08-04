@@ -1,25 +1,9 @@
-# @ stub CpuFlushInstructionCache
-# @ stub CpuGetContext
-# @ stub CpuGetStackPointer
-# @ stub CpuInitializeStartupContext
-# @ stub CpuNotifyAffinityChange
-# @ stub CpuNotifyAfterFork
-# @ stub CpuNotifyBeforeFork
-# @ stub CpuNotifyDllLoad
-# @ stub CpuNotifyDllUnload
-# @ stub CpuPrepareForDebuggerAttach
-# @ stub CpuProcessDebugEvent
-# @ stub CpuProcessInit
-# @ stub CpuProcessTerm
-# @ stub CpuResetFloatingPoint
-# @ stub CpuResetToConsistentState
-# @ stub CpuSetContext
-# @ stub CpuSetInstructionPointer
-# @ stub CpuSetStackPointer
-# @ stub CpuSimulate
-# @ stub CpuSuspendLocalThread
-# @ stub CpuSuspendThread
-# @ stub CpuThreadInit
-# @ stub CpuThreadTerm
-# @ stub TurboDispatchJumpAddressEnd
-# @ stub TurboDispatchJumpAddressStart
+@ stub BTCpuGetBopCode
+@ stub BTCpuGetContext
+@ stub BTCpuProcessInit
+@ stub BTCpuResetToConsistentState
+@ stub BTCpuSetContext
+@ stub BTCpuSimulate
+@ stub BTCpuTurboThunkControl
+@ stub TurboDispatchJumpAddressEnd
+@ stub TurboDispatchJumpAddressStart

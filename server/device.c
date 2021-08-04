@@ -77,6 +77,7 @@ static const struct object_ops irp_call_ops =
     no_map_access,                    /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
+    no_get_full_name,                 /* get_full_name */
     no_lookup_name,                   /* lookup_name */
     no_link_name,                     /* link_name */
     NULL,                             /* unlink_name */
@@ -119,6 +120,7 @@ static const struct object_ops device_manager_ops =
     no_map_access,                    /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
+    no_get_full_name,                 /* get_full_name */
     no_lookup_name,                   /* lookup_name */
     no_link_name,                     /* link_name */
     NULL,                             /* unlink_name */
@@ -163,6 +165,7 @@ static const struct object_ops device_ops =
     default_fd_map_access,            /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
+    default_get_full_name,            /* get_full_name */
     no_lookup_name,                   /* lookup_name */
     directory_link_name,              /* link_name */
     default_unlink_name,              /* unlink_name */
@@ -188,6 +191,7 @@ struct device_file
 
 static void device_file_dump( struct object *obj, int verbose );
 static struct fd *device_file_get_fd( struct object *obj );
+static WCHAR *device_file_get_full_name( struct object *obj, data_size_t *len );
 static struct list *device_file_get_kernel_obj_list( struct object *obj );
 static int device_file_close_handle( struct object *obj, struct process *process, obj_handle_t handle );
 static void device_file_destroy( struct object *obj );
@@ -213,6 +217,7 @@ static const struct object_ops device_file_ops =
     default_fd_map_access,            /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
+    device_file_get_full_name,        /* get_full_name */
     no_lookup_name,                   /* lookup_name */
     no_link_name,                     /* link_name */
     NULL,                             /* unlink_name */
@@ -510,6 +515,12 @@ static struct fd *device_file_get_fd( struct object *obj )
     return (struct fd *)grab_object( file->fd );
 }
 
+static WCHAR *device_file_get_full_name( struct object *obj, data_size_t *len )
+{
+    struct device_file *file = (struct device_file *)obj;
+    return file->device->obj.ops->get_full_name( &file->device->obj, len );
+}
+
 static struct list *device_file_get_kernel_obj_list( struct object *obj )
 {
     struct device_file *file = (struct device_file *)obj;
@@ -708,6 +719,7 @@ static struct device *create_device( struct object *root, const struct unicode_s
     {
         device->unix_path = NULL;
         device->manager = manager;
+        grab_object( device );
         list_add_tail( &manager->devices, &device->entry );
         list_init( &device->kernel_object );
         list_init( &device->files );
@@ -716,11 +728,12 @@ static struct device *create_device( struct object *root, const struct unicode_s
 }
 
 struct object *create_unix_device( struct object *root, const struct unicode_str *name,
+                                   unsigned int attr, const struct security_descriptor *sd,
                                    const char *unix_path )
 {
     struct device *device;
 
-    if ((device = create_named_object( root, &device_ops, name, 0, NULL )))
+    if ((device = create_named_object( root, &device_ops, name, attr, sd )))
     {
         device->unix_path = strdup( unix_path );
         device->manager = NULL;  /* no manager, requests go straight to the Unix device */
@@ -736,6 +749,9 @@ static void delete_file( struct device_file *file )
 {
     struct irp_call *irp, *next;
 
+    /* the pending requests may be the only thing holding a reference to the file */
+    grab_object( file );
+
     /* terminate all pending requests */
     LIST_FOR_EACH_ENTRY_SAFE( irp, next, &file->requests, struct irp_call, dev_entry )
     {
@@ -745,6 +761,8 @@ static void delete_file( struct device_file *file )
         list_remove( &irp->mgr_entry );
         set_irp_result( irp, STATUS_FILE_DELETED, NULL, 0, 0 );
     }
+
+    release_object( file );
 }
 
 static void delete_device( struct device *device )
@@ -759,6 +777,7 @@ static void delete_device( struct device *device )
     unlink_named_object( &device->obj );
     list_remove( &device->entry );
     device->manager = NULL;
+    release_object( device );
 }
 
 

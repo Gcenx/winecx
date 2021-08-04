@@ -33,9 +33,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(twain);
 
-DSMENTRYPROC GPHOTO2_dsmentry;
-
 struct tagActiveDS activeDS;
+
+DSMENTRYPROC GPHOTO2_dsmentry;
 
 #ifdef HAVE_GPHOTO2
 static char* GPHOTO2_StrDup(const char* str)

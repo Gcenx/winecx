@@ -86,6 +86,13 @@ HRESULT WINAPI GetScaleFactorForMonitor(HMONITOR monitor, DEVICE_SCALE_FACTOR *s
     return S_OK;
 }
 
+DEVICE_SCALE_FACTOR WINAPI GetScaleFactorForDevice(DISPLAY_DEVICE_TYPE device_type)
+{
+    FIXME("%d\n", device_type);
+
+    return SCALE_100_PERCENT;
+}
+
 HRESULT WINAPI _IStream_Read(IStream *stream, void *dest, ULONG size)
 {
     ULONG read;
@@ -245,7 +252,7 @@ HRESULT WINAPI IUnknown_SetSite(IUnknown *obj, IUnknown *site)
 HRESULT WINAPI SetCurrentProcessExplicitAppUserModelID(const WCHAR *appid)
 {
     FIXME("%s: stub\n", debugstr_w(appid));
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 HRESULT WINAPI GetCurrentProcessExplicitAppUserModelID(const WCHAR **appid)
@@ -548,7 +555,9 @@ static HRESULT WINAPI shstream_QueryInterface(IStream *iface, REFIID riid, void 
 
     TRACE("(%p)->(%s, %p)\n", stream, debugstr_guid(riid), out);
 
-    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IStream))
+    if (IsEqualIID(riid, &IID_IUnknown) ||
+        IsEqualIID(riid, &IID_IStream) ||
+        IsEqualIID(riid, &IID_ISequentialStream))
     {
         *out = iface;
         IStream_AddRef(iface);
@@ -594,16 +603,18 @@ static HRESULT WINAPI memstream_Read(IStream *iface, void *buff, ULONG buff_size
     TRACE("(%p)->(%p, %u, %p)\n", stream, buff, buff_size, read_len);
 
     if (stream->u.mem.position >= stream->u.mem.length)
-        length = 0;
-    else
-        length = stream->u.mem.length - stream->u.mem.position;
-
-    length = buff_size > length ? length : buff_size;
-    if (length != 0) /* not at end of buffer and we want to read something */
     {
-        memmove(buff, stream->u.mem.buffer + stream->u.mem.position, length);
-        stream->u.mem.position += length; /* adjust pointer */
+        if (read_len)
+            *read_len = 0;
+        return S_FALSE;
     }
+
+    length = stream->u.mem.length - stream->u.mem.position;
+    if (buff_size < length)
+        length = buff_size;
+
+    memmove(buff, stream->u.mem.buffer + stream->u.mem.position, length);
+    stream->u.mem.position += length;
 
     if (read_len)
         *read_len = length;
@@ -686,20 +697,54 @@ static HRESULT WINAPI memstream_SetSize(IStream *iface, ULARGE_INTEGER new_size)
     return S_OK;
 }
 
-static HRESULT WINAPI shstream_CopyTo(IStream *iface, IStream *pstm, ULARGE_INTEGER size, ULARGE_INTEGER *read_len, ULARGE_INTEGER *written)
+static HRESULT WINAPI shstream_CopyTo(IStream *iface, IStream *dest, ULARGE_INTEGER size,
+        ULARGE_INTEGER *read_len, ULARGE_INTEGER *written)
 {
     struct shstream *stream = impl_from_IStream(iface);
+    ULARGE_INTEGER total_read, total_written;
+    HRESULT hr = S_OK;
+    BYTE buffer[0x400];
 
-    TRACE("(%p)\n", stream);
+    TRACE("(%p, %p, %s, %p, %p)\n", stream, dest, wine_dbgstr_longlong(size.QuadPart), read_len, written);
+
+    if (!dest)
+        return E_POINTER;
+
+    total_read.QuadPart = 0;
+    total_written.QuadPart = 0;
+
+    while (size.QuadPart > 0)
+    {
+        ULONG chunk_size = size.QuadPart >= sizeof(buffer) ? sizeof(buffer) : size.u.LowPart;
+        ULONG chunk_read, chunk_written;
+
+        hr = IStream_Read(iface, buffer, chunk_size, &chunk_read);
+        if (FAILED(hr))
+            break;
+
+        total_read.QuadPart += chunk_read;
+
+        if (chunk_read)
+        {
+            hr = IStream_Write(dest, buffer, chunk_read, &chunk_written);
+            if (FAILED(hr))
+                break;
+
+            total_written.QuadPart += chunk_written;
+        }
+
+        if (chunk_read != chunk_size)
+            size.QuadPart = 0;
+        else
+            size.QuadPart -= chunk_read;
+    }
 
     if (read_len)
-        read_len->QuadPart = 0;
-
+        read_len->QuadPart = total_read.QuadPart;
     if (written)
-        written->QuadPart = 0;
+        written->QuadPart = total_written.QuadPart;
 
-    /* TODO implement */
-    return E_NOTIMPL;
+    return hr;
 }
 
 static HRESULT WINAPI shstream_Commit(IStream *iface, DWORD flags)

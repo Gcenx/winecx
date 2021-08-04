@@ -20,6 +20,8 @@
  */
 
 #include "strmbase_private.h"
+#include "dvdmedia.h"
+#include "dxva.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(strmbase);
 
@@ -103,9 +105,42 @@ void strmbase_dump_media_type(const AM_MEDIA_TYPE *mt)
     {
         VIDEOINFOHEADER *vih = (VIDEOINFOHEADER *)mt->pbFormat;
 
-        TRACE("source %s, target %s, bitrate %u, error rate %u, %s sec/frame, ",
-                wine_dbgstr_rect(&vih->rcSource), wine_dbgstr_rect(&vih->rcTarget),
-                vih->dwBitRate, vih->dwBitErrorRate, debugstr_time(vih->AvgTimePerFrame));
+        if (!IsRectEmpty(&vih->rcSource)) TRACE("source %s, ", wine_dbgstr_rect(&vih->rcSource));
+        if (!IsRectEmpty(&vih->rcTarget)) TRACE("target %s, ", wine_dbgstr_rect(&vih->rcTarget));
+        if (vih->dwBitRate) TRACE("bitrate %u, ", vih->dwBitRate);
+        if (vih->dwBitErrorRate) TRACE("error rate %u, ", vih->dwBitErrorRate);
+        TRACE("%s sec/frame, ", debugstr_time(vih->AvgTimePerFrame));
+        TRACE("size %dx%d, %u planes, %u bpp, compression %s, image size %u",
+                vih->bmiHeader.biWidth, vih->bmiHeader.biHeight, vih->bmiHeader.biPlanes,
+                vih->bmiHeader.biBitCount, debugstr_fourcc(vih->bmiHeader.biCompression),
+                vih->bmiHeader.biSizeImage);
+        if (vih->bmiHeader.biXPelsPerMeter || vih->bmiHeader.biYPelsPerMeter)
+            TRACE(", resolution %dx%d", vih->bmiHeader.biXPelsPerMeter, vih->bmiHeader.biYPelsPerMeter);
+        if (vih->bmiHeader.biClrUsed) TRACE(", %d colours", vih->bmiHeader.biClrUsed);
+        if (vih->bmiHeader.biClrImportant) TRACE(", %d important colours", vih->bmiHeader.biClrImportant);
+        TRACE(".\n");
+    }
+    else if (IsEqualGUID(&mt->formattype, &FORMAT_VideoInfo2) && mt->cbFormat >= sizeof(VIDEOINFOHEADER2))
+    {
+        VIDEOINFOHEADER2 *vih = (VIDEOINFOHEADER2 *)mt->pbFormat;
+
+        if (!IsRectEmpty(&vih->rcSource)) TRACE("source %s, ", wine_dbgstr_rect(&vih->rcSource));
+        if (!IsRectEmpty(&vih->rcTarget)) TRACE("target %s, ", wine_dbgstr_rect(&vih->rcTarget));
+        if (vih->dwBitRate) TRACE("bitrate %u, ", vih->dwBitRate);
+        if (vih->dwBitErrorRate) TRACE("error rate %u, ", vih->dwBitErrorRate);
+        TRACE("%s sec/frame, ", debugstr_time(vih->AvgTimePerFrame));
+        if (vih->dwInterlaceFlags) TRACE("interlace flags %#x, ", vih->dwInterlaceFlags);
+        if (vih->dwCopyProtectFlags) TRACE("copy-protection flags %#x, ", vih->dwCopyProtectFlags);
+        TRACE("aspect ratio %u/%u, ", vih->dwPictAspectRatioX, vih->dwPictAspectRatioY);
+        if (vih->u.dwControlFlags) TRACE("control flags %#x, ", vih->u.dwControlFlags);
+        if (vih->u.dwControlFlags & AMCONTROL_COLORINFO_PRESENT)
+        {
+            const DXVA_ExtendedFormat *colorimetry = (const DXVA_ExtendedFormat *)&vih->u.dwControlFlags;
+
+            TRACE("chroma site %#x, range %#x, matrix %#x, lighting %#x, primaries %#x, transfer function %#x, ",
+                    colorimetry->VideoChromaSubsampling, colorimetry->NominalRange, colorimetry->VideoTransferMatrix,
+                    colorimetry->VideoLighting, colorimetry->VideoPrimaries, colorimetry->VideoTransferFunction);
+        }
         TRACE("size %dx%d, %u planes, %u bpp, compression %s, image size %u",
                 vih->bmiHeader.biWidth, vih->bmiHeader.biHeight, vih->bmiHeader.biPlanes,
                 vih->bmiHeader.biBitCount, debugstr_fourcc(vih->bmiHeader.biCompression),
@@ -168,173 +203,3 @@ void WINAPI DeleteMediaType(AM_MEDIA_TYPE * pMediaType)
     FreeMediaType(pMediaType);
     CoTaskMemFree(pMediaType);
 }
-
-typedef struct IEnumMediaTypesImpl
-{
-    IEnumMediaTypes IEnumMediaTypes_iface;
-    LONG refCount;
-    struct strmbase_pin *basePin;
-    ULONG count;
-    ULONG uIndex;
-} IEnumMediaTypesImpl;
-
-static inline IEnumMediaTypesImpl *impl_from_IEnumMediaTypes(IEnumMediaTypes *iface)
-{
-    return CONTAINING_RECORD(iface, IEnumMediaTypesImpl, IEnumMediaTypes_iface);
-}
-
-static const struct IEnumMediaTypesVtbl IEnumMediaTypesImpl_Vtbl;
-
-HRESULT enum_media_types_create(struct strmbase_pin *basePin, IEnumMediaTypes **ppEnum)
-{
-    IEnumMediaTypesImpl * pEnumMediaTypes = CoTaskMemAlloc(sizeof(IEnumMediaTypesImpl));
-
-    *ppEnum = NULL;
-
-    if (!pEnumMediaTypes)
-        return E_OUTOFMEMORY;
-
-    pEnumMediaTypes->IEnumMediaTypes_iface.lpVtbl = &IEnumMediaTypesImpl_Vtbl;
-    pEnumMediaTypes->refCount = 1;
-    pEnumMediaTypes->uIndex = 0;
-    IPin_AddRef(&basePin->IPin_iface);
-    pEnumMediaTypes->basePin = basePin;
-
-    IEnumMediaTypes_Reset(&pEnumMediaTypes->IEnumMediaTypes_iface);
-
-    *ppEnum = &pEnumMediaTypes->IEnumMediaTypes_iface;
-    return S_OK;
-}
-
-static HRESULT WINAPI IEnumMediaTypesImpl_QueryInterface(IEnumMediaTypes * iface, REFIID riid, void ** ret_iface)
-{
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(riid), ret_iface);
-
-    if (IsEqualIID(riid, &IID_IUnknown) ||
-        IsEqualIID(riid, &IID_IEnumMediaTypes))
-    {
-        IEnumMediaTypes_AddRef(iface);
-        *ret_iface = iface;
-        return S_OK;
-    }
-
-    *ret_iface = NULL;
-
-    WARN("No interface for %s\n", debugstr_guid(riid));
-
-    return E_NOINTERFACE;
-}
-
-static ULONG WINAPI IEnumMediaTypesImpl_AddRef(IEnumMediaTypes * iface)
-{
-    IEnumMediaTypesImpl *This = impl_from_IEnumMediaTypes(iface);
-    ULONG ref = InterlockedIncrement(&This->refCount);
-
-    TRACE("(%p)->(): new ref = %u\n", iface, ref);
-
-    return ref;
-}
-
-static ULONG WINAPI IEnumMediaTypesImpl_Release(IEnumMediaTypes * iface)
-{
-    IEnumMediaTypesImpl *This = impl_from_IEnumMediaTypes(iface);
-    ULONG ref = InterlockedDecrement(&This->refCount);
-
-    TRACE("(%p)->(): new ref = %u\n", iface, ref);
-
-    if (!ref)
-    {
-        IPin_Release(&This->basePin->IPin_iface);
-        CoTaskMemFree(This);
-    }
-    return ref;
-}
-
-static HRESULT WINAPI IEnumMediaTypesImpl_Next(IEnumMediaTypes *iface,
-        ULONG count, AM_MEDIA_TYPE **mts, ULONG *ret_count)
-{
-    IEnumMediaTypesImpl *enummt = impl_from_IEnumMediaTypes(iface);
-    ULONG i;
-
-    TRACE("iface %p, count %u, mts %p, ret_count %p.\n", iface, count, mts, ret_count);
-
-    for (i = 0; i < count && enummt->uIndex + i < enummt->count; i++)
-    {
-        if (!(mts[i] = CoTaskMemAlloc(sizeof(AM_MEDIA_TYPE)))
-                || FAILED(enummt->basePin->pFuncsTable->pin_get_media_type(enummt->basePin, enummt->uIndex + i, mts[i])))
-        {
-            while (i--)
-                DeleteMediaType(mts[i]);
-            *ret_count = 0;
-            return E_OUTOFMEMORY;
-        }
-
-        if (TRACE_ON(strmbase))
-        {
-            TRACE("Returning media type %u:\n", enummt->uIndex + i);
-            strmbase_dump_media_type(mts[i]);
-        }
-    }
-
-    if ((count != 1) || ret_count)
-        *ret_count = i;
-
-    enummt->uIndex += i;
-
-    return i == count ? S_OK : S_FALSE;
-}
-
-static HRESULT WINAPI IEnumMediaTypesImpl_Skip(IEnumMediaTypes *iface, ULONG count)
-{
-    IEnumMediaTypesImpl *enummt = impl_from_IEnumMediaTypes(iface);
-
-    TRACE("iface %p, count %u.\n", iface, count);
-
-    enummt->uIndex += count;
-
-    return enummt->uIndex > enummt->count ? S_FALSE : S_OK;
-}
-
-static HRESULT WINAPI IEnumMediaTypesImpl_Reset(IEnumMediaTypes * iface)
-{
-    ULONG i;
-    AM_MEDIA_TYPE amt;
-    IEnumMediaTypesImpl *This = impl_from_IEnumMediaTypes(iface);
-
-    TRACE("(%p)->()\n", iface);
-
-    i = 0;
-    while (This->basePin->pFuncsTable->pin_get_media_type(This->basePin, i, &amt) == S_OK)
-    {
-        FreeMediaType(&amt);
-        i++;
-    }
-    This->count = i;
-    This->uIndex = 0;
-
-    return S_OK;
-}
-
-static HRESULT WINAPI IEnumMediaTypesImpl_Clone(IEnumMediaTypes * iface, IEnumMediaTypes ** ppEnum)
-{
-    HRESULT hr;
-    IEnumMediaTypesImpl *This = impl_from_IEnumMediaTypes(iface);
-
-    TRACE("(%p)->(%p)\n", iface, ppEnum);
-
-    hr = enum_media_types_create(This->basePin, ppEnum);
-    if (FAILED(hr))
-        return hr;
-    return IEnumMediaTypes_Skip(*ppEnum, This->uIndex);
-}
-
-static const IEnumMediaTypesVtbl IEnumMediaTypesImpl_Vtbl =
-{
-    IEnumMediaTypesImpl_QueryInterface,
-    IEnumMediaTypesImpl_AddRef,
-    IEnumMediaTypesImpl_Release,
-    IEnumMediaTypesImpl_Next,
-    IEnumMediaTypesImpl_Skip,
-    IEnumMediaTypesImpl_Reset,
-    IEnumMediaTypesImpl_Clone
-};

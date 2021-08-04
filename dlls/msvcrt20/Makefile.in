@@ -1,5 +1,5 @@
-EXTRADEFS = -DUSE_MSVCRT_PREFIX
 MODULE    = msvcrt20.dll
+IMPORTS   = msvcrt
 
 EXTRADLLFLAGS = -mno-cygwin
 

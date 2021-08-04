@@ -2292,72 +2292,6 @@ BOOL WINAPI GUIDFromStringW(LPCWSTR idstr, CLSID *id)
 }
 
 /*************************************************************************
- *      @	[SHLWAPI.276]
- *
- * Determine if the browser is integrated into the shell, and set a registry
- * key accordingly.
- *
- * PARAMS
- *  None.
- *
- * RETURNS
- *  1, If the browser is not integrated.
- *  2, If the browser is integrated.
- *
- * NOTES
- *  The key "HKLM\Software\Microsoft\Internet Explorer\IntegratedBrowser" is
- *  either set to TRUE, or removed depending on whether the browser is deemed
- *  to be integrated.
- */
-DWORD WINAPI WhichPlatform(void)
-{
-  static const char szIntegratedBrowser[] = "IntegratedBrowser";
-  static DWORD dwState = 0;
-  HKEY hKey;
-  DWORD dwRet, dwData, dwSize;
-  HMODULE hshell32;
-
-  if (dwState)
-    return dwState;
-
-  /* If shell32 exports DllGetVersion(), the browser is integrated */
-  dwState = 1;
-  hshell32 = LoadLibraryA("shell32.dll");
-  if (hshell32)
-  {
-    FARPROC pDllGetVersion;
-    pDllGetVersion = GetProcAddress(hshell32, "DllGetVersion");
-    dwState = pDllGetVersion ? 2 : 1;
-    FreeLibrary(hshell32);
-  }
-
-  /* Set or delete the key accordingly */
-  dwRet = RegOpenKeyExA(HKEY_LOCAL_MACHINE,
-                        "Software\\Microsoft\\Internet Explorer", 0,
-                         KEY_ALL_ACCESS, &hKey);
-  if (!dwRet)
-  {
-    dwRet = RegQueryValueExA(hKey, szIntegratedBrowser, 0, 0,
-                             (LPBYTE)&dwData, &dwSize);
-
-    if (!dwRet && dwState == 1)
-    {
-      /* Value exists but browser is not integrated */
-      RegDeleteValueA(hKey, szIntegratedBrowser);
-    }
-    else if (dwRet && dwState == 2)
-    {
-      /* Browser is integrated but value does not exist */
-      dwData = TRUE;
-      RegSetValueExA(hKey, szIntegratedBrowser, 0, REG_DWORD,
-                     (LPBYTE)&dwData, sizeof(dwData));
-    }
-    RegCloseKey(hKey);
-  }
-  return dwState;
-}
-
-/*************************************************************************
  *      @	[SHLWAPI.278]
  *
  * Unicode version of SHCreateWorkerWindowA.
@@ -3438,7 +3372,7 @@ HRESULT WINAPI CLSIDFromStringWrap(LPCWSTR idstr, CLSID *id)
  */
 HRESULT WINAPI SHLoadRegUIStringW(HKEY hkey, LPCWSTR value, LPWSTR buf, DWORD size)
 {
-    DWORD type, sz = size;
+    DWORD type, sz = size * sizeof(WCHAR);
 
     if(RegQueryValueExW(hkey, value, NULL, &type, (LPBYTE)buf, &sz) != ERROR_SUCCESS)
         return E_FAIL;
@@ -3628,24 +3562,6 @@ HRESULT WINAPI SHGetInverseCMAP(LPDWORD dest, DWORD dwSize)
     }
     FIXME("(%p, %#x) stub\n", dest, dwSize);
     return 0;
-}
-
-/*************************************************************************
- *      SHIsLowMemoryMachine	[SHLWAPI.@]
- *
- * Determine if the current computer has low memory.
- *
- * PARAMS
- *  x [I] FIXME
- *
- * RETURNS
- *  TRUE if the users machine has 16 Megabytes of memory or less,
- *  FALSE otherwise.
- */
-BOOL WINAPI SHIsLowMemoryMachine (DWORD x)
-{
-  FIXME("(0x%08x) stub\n", x);
-  return FALSE;
 }
 
 /*************************************************************************
@@ -4345,33 +4261,6 @@ HRESULT WINAPI SHCreatePropertyBagOnRegKey (HKEY hKey, LPCWSTR subkey,
     DWORD grfMode, REFIID riid, void **ppv)
 {
     FIXME("%p %s %d %s %p STUB\n", hKey, debugstr_w(subkey), grfMode,
-          debugstr_guid(riid), ppv);
-
-    return E_NOTIMPL;
-}
-
-/***********************************************************************
- *             SHGetViewStatePropertyBag [SHLWAPI.515]
- *
- * Retrieves a property bag in which the view state information of a folder
- * can be stored.
- *
- * PARAMS
- *  pidl        [I] PIDL of the folder requested
- *  bag_name    [I] Name of the property bag requested
- *  flags       [I] Optional flags
- *  riid        [I] IID of requested property bag interface
- *  ppv         [O] Address to receive pointer to the new interface
- *
- * RETURNS
- *  success: S_OK
- *  failure: error code
- *
- */
-HRESULT WINAPI SHGetViewStatePropertyBag(LPCITEMIDLIST pidl, LPWSTR bag_name,
-    DWORD flags, REFIID riid, void **ppv)
-{
-    FIXME("%p %s %d %s %p STUB\n", pidl, debugstr_w(bag_name), flags,
           debugstr_guid(riid), ppv);
 
     return E_NOTIMPL;

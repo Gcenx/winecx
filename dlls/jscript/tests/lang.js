@@ -190,6 +190,59 @@ ok(testFunc1.arguments === null, "testFunc1.arguments = " + testFunc1.arguments)
 (tmp) = 3;
 ok(tmp === 3, "tmp = " + tmp);
 
+(function() {
+    /* VT_DATE handling */
+    var d, e;
+    ok(getVT(v_date(0)) === "VT_DATE", "vt v_date(0) = " + getVT(v_date(0)));
+    d = v_date(0);
+    e = Date.parse("Sat Dec 30 00:00:00 1899");
+    ok(getVT(d) === "VT_DATE", "vt v_date(0) = " + getVT(d));
+    ok(getVT(+d) === "VT_R8", "vt +v_date(0) = " + getVT(d));
+    ok(getVT(d / d) === "VT_I4", "vt v_date(0) / v_date(0) = " + getVT(d / d));
+    ok((+d) === e, "+v_date(0) = " + (+d) + " expected " + e);
+    ok(("" + d).match(/^Sat Dec 30 00:00:00 .* 1899$/) != null, "+v_date(0) = " + d);
+    ok(d != d, "date d == d");
+
+    d = v_date(2.5);
+    e = Date.parse("Mon Jan 1 12:00:00 1900");
+    ok((+d) === e, "+v_date(2.5) = " + (+d));
+    ok(("" + d).match(/^Mon Jan 1 12:00:00 .* 1900$/) != null, "+v_date(2.5) = " + d);
+
+    d = v_date(42091);
+    e = Date.parse("Sat Mar 28 00:00:00 2015");
+    ok((+d) === e, "+v_date(2015y) = " + (+d) + " expected " + e);
+    ok(("" + d).match(/^Sat Mar 28 00:00:00 .* 2015$/) != null, "+v_date(2015y) = " + d);
+    ok(d != d, "date d == d");
+})();
+
+(function() {
+    /* VT_CY handling */
+    var d;
+    todo_wine_ok(getVT(v_cy(0)) === "VT_R8", "vt v_cy(0) = " + getVT(v_cy(0)));
+    todo_wine_ok(getVT(v_cy(10000)) === "VT_R8", "vt v_cy(10000) = " + getVT(v_cy(0)));
+    d = v_cy(0);
+    todo_wine_ok(getVT(d) === "VT_R8", "vt v_cy(0) = " + getVT(d));
+    todo_wine_ok(getVT(+d) === "VT_R8", "vt +v_cy(0) = " + getVT(d));
+    ok(d == 0, "v_cy(0) != 0\n");
+    ok(d === 0, "v_cy(0) !== 0\n");
+    ok("" + d === "0", "str(v_cy(0)) = " + d);
+    ok(d === d, "date d !== d");
+
+    d = v_cy(1000);
+    ok(getVT(d) === "VT_R8", "vt v_cy(1000) = " + getVT(d));
+    ok(getVT(+d) === "VT_R8", "vt +v_cy(1000) = " + getVT(d));
+    ok(d == 0.1, "v_cy(1000) != 0, d = " + d);
+    ok(d === 0.1, "v_cy(1000) !== 0.1\n");
+    ok("" + d === "0.1", "str(v_cy(1000)) = " + d);
+    ok(d === d, "date d !== d");
+
+    d = v_cy(25000);
+    ok(getVT(d) === "VT_R8", "vt v_cy(25000) = " + getVT(d));
+    ok(getVT(+d) === "VT_R8", "vt +v_cy(25000) = " + getVT(d));
+    ok(d === 2.5, "v_cy(25000) !== 2.5\n");
+    ok("" + d === "2.5", "str(v_cy(25000)) = " + d);
+})();
+
 function testRecFunc(x) {
     ok(testRecFunc.arguments === arguments, "testRecFunc.arguments = " + testRecFunc.arguments);
     if(x) {
@@ -1186,6 +1239,37 @@ case 3:
     expect(ret, "try");
 })();
 
+(function() {
+    var e;
+    var E_FAIL = -2147467259;
+    var JS_E_SUBSCRIPT_OUT_OF_RANGE = -2146828279;
+
+    try {
+        throwInt(E_FAIL);
+    }catch(ex) {
+        e = ex;
+    }
+    ok(e.name === "Error", "e.name = " + e.name);
+    ok(e.message === "", "e.message = " + e.message);
+    ok(e.number === E_FAIL, "e.number = " + e.number);
+
+    try {
+        throwInt(JS_E_SUBSCRIPT_OUT_OF_RANGE);
+    }catch(ex) {
+        e = ex;
+    }
+    ok(e.name === "RangeError", "e.name = " + e.name);
+    ok(e.number === JS_E_SUBSCRIPT_OUT_OF_RANGE, "e.number = " + e.number);
+
+    try {
+        throwEI(JS_E_SUBSCRIPT_OUT_OF_RANGE);
+    }catch(ex) {
+        e = ex;
+    }
+    ok(e.name === "RangeError", "e.name = " + e.name);
+    ok(e.number === JS_E_SUBSCRIPT_OUT_OF_RANGE, "e.number = " + e.number);
+})();
+
 tmp = eval("1");
 ok(tmp === 1, "eval(\"1\") !== 1");
 eval("{ ok(tmp === 1, 'eval: tmp !== 1'); } tmp = 2;");
@@ -1750,6 +1834,12 @@ ok(""+str === "test", "''+str = " + str);
 
 ok((function (){return 1;})() === 1, "(function (){return 1;})() = " + (function (){return 1;})());
 
+(function() {
+    var order = "", o = {};
+    o[order += "1,", { toString: function() { order += "2,"; } }] = (order += "3");
+    ok(order === "1,2,3", "array expression order = " + order);
+})();
+
 var re = /=(\?|%3F)/g;
 ok(re.source === "=(\\?|%3F)", "re.source = " + re.source);
 
@@ -1779,6 +1869,47 @@ tmp = getVT(Object(nullDisp));
 ok(tmp === "VT_DISPATCH", "getVT(Object(nullDisp) = " + tmp);
 tmp = Object(nullDisp).toString();
 ok(tmp === "[object Object]", "Object(nullDisp).toString() = " + tmp);
+
+function testNullPrototype() {
+    this.x = 13;
+}
+tmp = new testNullPrototype();
+ok(tmp.x === 13, "tmp.x !== 13");
+ok(!("y" in tmp), "tmp has 'y' property");
+testNullPrototype.prototype.y = 10;
+ok("y" in tmp, "tmp does not have 'y' property");
+tmp = new testNullPrototype();
+ok(tmp.y === 10, "tmp.y !== 10");
+testNullPrototype.prototype = nullDisp;
+tmp = new testNullPrototype();
+ok(tmp.x === 13, "tmp.x !== 13");
+ok(!("y" in tmp), "tmp has 'y' property");
+ok(!tmp.hasOwnProperty("y"), "tmp has 'y' property");
+ok(!tmp.propertyIsEnumerable("y"), "tmp has 'y' property enumerable");
+ok(tmp.toString() == "[object Object]", "tmp.toString returned " + tmp.toString());
+testNullPrototype.prototype = null;
+tmp = new testNullPrototype();
+ok(!tmp.hasOwnProperty("y"), "tmp has 'y' property");
+ok(!tmp.propertyIsEnumerable("y"), "tmp has 'y' property enumerable");
+ok(tmp.toString() == "[object Object]", "tmp.toString returned " + tmp.toString());
+
+testNullPrototype.prototype = 42;
+tmp = new testNullPrototype();
+ok(tmp.hasOwnProperty("x"), "tmp does not have 'x' property");
+ok(!tmp.hasOwnProperty("y"), "tmp has 'y' property");
+ok(tmp.toString() == "[object Object]", "tmp.toString returned " + tmp.toString());
+
+testNullPrototype.prototype = true;
+tmp = new testNullPrototype();
+ok(tmp.hasOwnProperty("x"), "tmp does not have 'x' property");
+ok(!tmp.hasOwnProperty("y"), "tmp has 'y' property");
+ok(tmp.toString() == "[object Object]", "tmp.toString returned " + tmp.toString());
+
+testNullPrototype.prototype = "foobar";
+tmp = new testNullPrototype();
+ok(tmp.hasOwnProperty("x"), "tmp does not have 'x' property");
+ok(!tmp.hasOwnProperty("y"), "tmp has 'y' property");
+ok(tmp.toString() == "[object Object]", "tmp.toString returned " + tmp.toString());
 
 function do_test() {}
 function nosemicolon() {} nosemicolon();

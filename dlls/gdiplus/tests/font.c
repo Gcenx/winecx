@@ -30,11 +30,6 @@
 #define expectf_(expected, got, precision) ok(fabs((expected) - (got)) <= (precision), "Expected %f, got %f\n", (expected), (got))
 #define expectf(expected, got) expectf_((expected), (got), 0.001)
 
-static const WCHAR nonexistent[] = {'T','h','i','s','F','o','n','t','s','h','o','u','l','d','N','o','t','E','x','i','s','t','\0'};
-static const WCHAR MSSansSerif[] = {'M','S',' ','S','a','n','s',' ','S','e','r','i','f','\0'};
-static const WCHAR TimesNewRoman[] = {'T','i','m','e','s',' ','N','e','w',' ','R','o','m','a','n','\0'};
-static const WCHAR Tahoma[] = {'T','a','h','o','m','a',0};
-
 static void set_rect_empty(RectF *rc)
 {
     rc->X = 0.0;
@@ -74,7 +69,6 @@ static void _delete_testfontfile(const WCHAR *filename, int line)
 static void test_long_name(void)
 {
     WCHAR path[MAX_PATH];
-    static const WCHAR path_longname[] = {'w','i','n','e','_','l','o','n','g','n','a','m','e','.','t','t','f',0};
     GpStatus stat;
     GpFontCollection *fonts;
     INT num_families;
@@ -85,7 +79,7 @@ static void test_long_name(void)
     stat = GdipNewPrivateFontCollection(&fonts);
     ok(stat == Ok, "GdipNewPrivateFontCollection failed: %d\n", stat);
 
-    create_testfontfile(path_longname, 1, path);
+    create_testfontfile(L"wine_longname.ttf", 1, path);
 
     stat = GdipPrivateAddFontFile(fonts, path);
     ok(stat == Ok, "GdipPrivateAddFontFile failed: %d\n", stat);
@@ -125,11 +119,11 @@ static void test_createfont(void)
     REAL size;
     WCHAR familyname[LF_FACESIZE];
 
-    stat = GdipCreateFontFamilyFromName(nonexistent, NULL, &fontfamily);
+    stat = GdipCreateFontFamilyFromName(L"ThisFontShouldNotExist", NULL, &fontfamily);
     expect (FontFamilyNotFound, stat);
     stat = GdipDeleteFont(font);
     expect (InvalidParameter, stat);
-    stat = GdipCreateFontFamilyFromName(Tahoma, NULL, &fontfamily);
+    stat = GdipCreateFontFamilyFromName(L"Tahoma", NULL, &fontfamily);
     expect (Ok, stat);
     stat = GdipCreateFont(fontfamily, 12, FontStyleRegular, UnitPoint, &font);
     expect (Ok, stat);
@@ -141,9 +135,8 @@ static void test_createfont(void)
     expect(Ok, stat);
     stat = GdipGetFamilyName(fontfamily2, familyname, 0);
     expect(Ok, stat);
-todo_wine
     ok (fontfamily == fontfamily2, "Unexpected family instance.\n");
-    ok (lstrcmpiW(Tahoma, familyname) == 0, "Expected Tahoma, got %s\n",
+    ok (lstrcmpiW(L"Tahoma", familyname) == 0, "Expected Tahoma, got %s\n",
             wine_dbgstr_w(familyname));
     stat = GdipDeleteFontFamily(fontfamily2);
     expect(Ok, stat);
@@ -301,6 +294,56 @@ static void test_logfont(void)
     GdipDeleteFontFamily(family);
 
     GdipDeleteFont(font);
+    font = NULL;
+
+    /* The next test must be done with a font where tmHeight -
+       tmInternalLeading != tmAscent. Times New Roman is such a font,
+       so make sure we really have it before continuing. */
+    memset(&lfa, 0, sizeof(lfa));
+    lstrcpyA(lfa.lfFaceName, "Times New Roman");
+
+    stat = GdipCreateFontFromLogfontA(hdc, &lfa, &font);
+    expect(Ok, stat);
+
+    memset(&lfa2, 0, sizeof(lfa2));
+    stat = GdipGetLogFontA(font, graphics, &lfa2);
+    expect(Ok, stat);
+
+    GdipDeleteFont(font);
+    font = NULL;
+
+    if (!lstrlenA(lfa.lfFaceName) || lstrcmpA(lfa.lfFaceName, lfa2.lfFaceName))
+    {
+        skip("Times New Roman not installed\n");
+    }
+    else
+    {
+        static const struct
+        {
+            INT input;
+            REAL expected;
+        } test_sizes[] = {{12, 9.0}, {36, 32.0}, {48, 42.0}, {72, 63.0}, {144, 127.0}};
+
+        UINT i;
+
+        memset(&lfa, 0, sizeof(lfa));
+        lstrcpyA(lfa.lfFaceName, "Times New Roman");
+
+        for (i = 0; i < ARRAY_SIZE(test_sizes); ++i)
+        {
+            lfa.lfHeight = test_sizes[i].input;
+
+            stat = GdipCreateFontFromLogfontA(hdc, &lfa, &font);
+            expect(Ok, stat);
+
+            stat = GdipGetFontSize(font, &rval);
+            expect(Ok, stat);
+            expectf(test_sizes[i].expected, rval);
+
+            GdipDeleteFont(font);
+            font = NULL;
+        }
+    }
 
     GdipDeleteGraphics(graphics);
     ReleaseDC(0, hdc);
@@ -313,26 +356,26 @@ static void test_fontfamily (void)
     GpStatus stat;
 
     /* FontFamily cannot be NULL */
-    stat = GdipCreateFontFamilyFromName (Tahoma , NULL, NULL);
+    stat = GdipCreateFontFamilyFromName (L"Tahoma" , NULL, NULL);
     expect (InvalidParameter, stat);
 
     /* FontFamily must be able to actually find the family.
      * If it can't, any subsequent calls should fail.
      */
-    stat = GdipCreateFontFamilyFromName (nonexistent, NULL, &family);
+    stat = GdipCreateFontFamilyFromName (L"ThisFontShouldNotExist", NULL, &family);
     expect (FontFamilyNotFound, stat);
 
     /* Bitmap fonts are not found */
-    stat = GdipCreateFontFamilyFromName (MSSansSerif, NULL, &family);
+    stat = GdipCreateFontFamilyFromName (L"MS Sans Serif", NULL, &family);
     expect (FontFamilyNotFound, stat);
     if(stat == Ok) GdipDeleteFontFamily(family);
 
-    stat = GdipCreateFontFamilyFromName (Tahoma, NULL, &family);
+    stat = GdipCreateFontFamilyFromName (L"Tahoma", NULL, &family);
     expect (Ok, stat);
 
     stat = GdipGetFamilyName (family, itsName, LANG_NEUTRAL);
     expect (Ok, stat);
-    expect (0, lstrcmpiW(itsName, Tahoma));
+    expect (0, lstrcmpiW(itsName, L"Tahoma"));
 
     if (0)
     {
@@ -345,12 +388,11 @@ static void test_fontfamily (void)
     ZeroMemory (itsName, sizeof(itsName));
     stat = GdipCloneFontFamily(family, &clonedFontFamily);
     expect (Ok, stat);
-todo_wine
     ok (family == clonedFontFamily, "Unexpected family instance.\n");
     GdipDeleteFontFamily(family);
     stat = GdipGetFamilyName(clonedFontFamily, itsName, LANG_NEUTRAL);
     expect(Ok, stat);
-    expect(0, lstrcmpiW(itsName, Tahoma));
+    expect(0, lstrcmpiW(itsName, L"Tahoma"));
 
     GdipDeleteFontFamily(clonedFontFamily);
 }
@@ -361,7 +403,7 @@ static void test_fontfamily_properties (void)
     GpStatus stat;
     UINT16 result = 0;
 
-    stat = GdipCreateFontFamilyFromName(Tahoma, NULL, &FontFamily);
+    stat = GdipCreateFontFamilyFromName(L"Tahoma", NULL, &FontFamily);
     expect(Ok, stat);
 
     stat = GdipGetLineSpacing(FontFamily, FontStyleRegular, &result);
@@ -381,7 +423,7 @@ static void test_fontfamily_properties (void)
     ok(result == 423, "Expected 423, got %d\n", result);
     GdipDeleteFontFamily(FontFamily);
 
-    stat = GdipCreateFontFamilyFromName(TimesNewRoman, NULL, &FontFamily);
+    stat = GdipCreateFontFamilyFromName(L"Times New Roman", NULL, &FontFamily);
     if(stat == FontFamilyNotFound)
         skip("Times New Roman not installed\n");
     else
@@ -485,7 +527,7 @@ static void test_heightgivendpi(void)
     REAL height;
     Unit unit;
 
-    stat = GdipCreateFontFamilyFromName(Tahoma, NULL, &fontfamily);
+    stat = GdipCreateFontFamilyFromName(L"Tahoma", NULL, &fontfamily);
     expect(Ok, stat);
 
     stat = GdipCreateFont(fontfamily, 30, FontStyleRegular, UnitPixel, &font);
@@ -686,7 +728,7 @@ static void test_font_metrics(void)
     memset(&lf, 0, sizeof(lf));
 
     /* Tahoma,-13 */
-    lstrcpyW(lf.lfFaceName, Tahoma);
+    lstrcpyW(lf.lfFaceName, L"Tahoma");
     lf.lfHeight = -13;
     stat = GdipCreateFontFromLogfontW(hdc, &lf, &font);
     expect(Ok, stat);
@@ -727,7 +769,7 @@ static void test_font_metrics(void)
     GdipDeleteFont(font);
 
     /* Tahoma,13 */
-    lstrcpyW(lf.lfFaceName, Tahoma);
+    lstrcpyW(lf.lfFaceName, L"Tahoma");
     lf.lfHeight = 13;
     stat = GdipCreateFontFromLogfontW(hdc, &lf, &font);
     expect(Ok, stat);
@@ -767,7 +809,7 @@ static void test_font_metrics(void)
 
     GdipDeleteFont(font);
 
-    stat = GdipCreateFontFamilyFromName(Tahoma, NULL, &family);
+    stat = GdipCreateFontFamilyFromName(L"Tahoma", NULL, &family);
     expect(Ok, stat);
 
     /* Tahoma,13 */
@@ -810,52 +852,41 @@ static void test_font_metrics(void)
 
 static void test_font_substitution(void)
 {
-    WCHAR ms_shell_dlg[LF_FACESIZE];
     char fallback_font[LF_FACESIZE];
     HDC hdc;
-    HFONT hfont;
     LOGFONTA lf;
     GpStatus status;
     GpGraphics *graphics;
     GpFont *font;
     GpFontFamily *family;
-    int ret;
 
     hdc = CreateCompatibleDC(0);
     status = GdipCreateFromHDC(hdc, &graphics);
     expect(Ok, status);
 
-    hfont = GetStockObject(DEFAULT_GUI_FONT);
-    ok(hfont != 0, "GetStockObject(DEFAULT_GUI_FONT) failed\n");
-
-    memset(&lf, 0xfe, sizeof(lf));
-    ret = GetObjectA(hfont, sizeof(lf), &lf);
-    ok(ret == sizeof(lf), "GetObject failed\n");
-    ok(!lstrcmpA(lf.lfFaceName, "MS Shell Dlg"), "wrong face name %s\n", lf.lfFaceName);
-    MultiByteToWideChar(CP_ACP, 0, lf.lfFaceName, -1, ms_shell_dlg, LF_FACESIZE);
+    memset(&lf, 0, sizeof(lf));
+    lstrcpyA(lf.lfFaceName, "MS Shell Dlg");
 
     status = GdipCreateFontFromLogfontA(hdc, &lf, &font);
     expect(Ok, status);
     memset(&lf, 0xfe, sizeof(lf));
     status = GdipGetLogFontA(font, graphics, &lf);
     expect(Ok, status);
-    ok(!lstrcmpA(lf.lfFaceName, "Microsoft Sans Serif") ||
-       !lstrcmpA(lf.lfFaceName, "Tahoma"), "wrong face name %s\n", lf.lfFaceName);
+    ok(lstrcmpA(lf.lfFaceName, "MS Shell Dlg") != 0, "expected substitution of MS Shell Dlg\n");
     GdipDeleteFont(font);
 
-    status = GdipCreateFontFamilyFromName(ms_shell_dlg, NULL, &family);
+    status = GdipCreateFontFamilyFromName(L"MS Shell Dlg", NULL, &family);
     expect(Ok, status);
     status = GdipCreateFont(family, 12, FontStyleRegular, UnitPoint, &font);
     expect(Ok, status);
     memset(&lf, 0xfe, sizeof(lf));
     status = GdipGetLogFontA(font, graphics, &lf);
     expect(Ok, status);
-    ok(!lstrcmpA(lf.lfFaceName, "Microsoft Sans Serif") ||
-       !lstrcmpA(lf.lfFaceName, "Tahoma"), "wrong face name %s\n", lf.lfFaceName);
+    ok(lstrcmpA(lf.lfFaceName, "MS Shell Dlg") != 0, "expected substitution of MS Shell Dlg\n");
     GdipDeleteFont(font);
     GdipDeleteFontFamily(family);
 
-    status = GdipCreateFontFamilyFromName(nonexistent, NULL, &family);
+    status = GdipCreateFontFamilyFromName(L"ThisFontShouldNotExist", NULL, &family);
     ok(status == FontFamilyNotFound, "expected FontFamilyNotFound, got %d\n", status);
 
     /* nonexistent fonts fallback to Arial, or something else if it's missing */
@@ -915,7 +946,7 @@ todo_wine
 
 static void test_font_transform(void)
 {
-    static const WCHAR string[] = { 'A',0 };
+    static const WCHAR string[] = L"A";
     GpStatus status;
     HDC hdc;
     LOGFONTA lf;
@@ -1238,7 +1269,6 @@ static void test_GdipGetFontCollectionFamilyList(void)
     status = GdipGetFontCollectionFamilyList(collection, 1, &family2, &found);
     ok(status == Ok, "Failed to get family list, status %d.\n", status);
     ok(found == 1, "Unexpected list count %d.\n", found);
-todo_wine
     ok(family2 == family, "Unexpected family instance.\n");
 
     status = GdipDeleteFontFamily(family);
@@ -1282,6 +1312,107 @@ static void test_GdipGetFontCollectionFamilyCount(void)
     ok(status == InvalidParameter, "Unexpected status %d.\n", status);
 }
 
+static BOOL is_family_in_collection(GpFontCollection *collection, GpFontFamily *family)
+{
+    GpStatus status;
+    GpFontFamily **list;
+    int count, i;
+    BOOL found = FALSE;
+
+    status = GdipGetFontCollectionFamilyCount(collection, &count);
+    expect(Ok, status);
+
+    list = GdipAlloc(count * sizeof(GpFontFamily *));
+    status = GdipGetFontCollectionFamilyList(collection, count, list, &count);
+    expect(Ok, status);
+
+    for (i = 0; i < count; i++)
+    {
+        if (list[i] == family)
+        {
+            found = TRUE;
+            break;
+        }
+    }
+
+    GdipFree(list);
+
+    return found;
+}
+
+static void test_CloneFont(void)
+{
+    GpStatus status;
+    GpFontCollection *collection, *collection2;
+    GpFont *font, *font2;
+    GpFontFamily *family, *family2;
+    REAL height;
+    Unit unit;
+    int style;
+    BOOL ret;
+
+    status = GdipNewInstalledFontCollection(&collection);
+    expect(Ok, status);
+
+    status = GdipNewInstalledFontCollection(&collection2);
+    expect(Ok, status);
+    ok(collection == collection2, "got %p\n", collection2);
+
+    status = GdipCreateFontFamilyFromName(L"ThisFontShouldNotExist", NULL, &family);
+    expect(FontFamilyNotFound, status);
+
+    status = GdipCreateFontFamilyFromName(L"ThisFontShouldNotExist", collection, &family);
+    expect(FontFamilyNotFound, status);
+
+    status = GdipCreateFontFamilyFromName(L"Tahoma", NULL, &family);
+    expect(Ok, status);
+
+    ret = is_family_in_collection(collection, family);
+    ok(ret, "family is not in collection\n");
+
+    status = GdipCreateFont(family, 30.0f, FontStyleRegular, UnitPixel, &font);
+    expect(Ok, status);
+
+    status = GdipGetFontUnit(font, &unit);
+    expect(Ok, status);
+    ok(unit == UnitPixel, "got %u\n", unit);
+
+    status = GdipGetFontSize(font, &height);
+    expect(Ok, status);
+    ok(height == 30.0f, "got %f\n", height);
+
+    status = GdipGetFontStyle(font, &style);
+    expect(Ok, status);
+    ok(style == FontStyleRegular, "got %d\n", style);
+
+    status = GdipGetFamily(font, &family2);
+    expect(Ok, status);
+    ok(family == family2, "got %p\n", family2);
+
+    status = GdipCloneFont(font, &font2);
+    expect(Ok, status);
+
+    status = GdipGetFontUnit(font2, &unit);
+    expect(Ok, status);
+    ok(unit == UnitPixel, "got %u\n", unit);
+
+    status = GdipGetFontSize(font2, &height);
+    expect(Ok, status);
+    ok(height == 30.0f, "got %f\n", height);
+
+    status = GdipGetFontStyle(font2, &style);
+    expect(Ok, status);
+    ok(style == FontStyleRegular, "got %d\n", style);
+
+    status = GdipGetFamily(font2, &family2);
+    expect(Ok, status);
+    ok(family == family2, "got %p\n", family2);
+
+    GdipDeleteFont(font2);
+    GdipDeleteFont(font);
+    GdipDeleteFontFamily(family);
+}
+
 START_TEST(font)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
@@ -1301,6 +1432,7 @@ START_TEST(font)
 
     GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
 
+    test_CloneFont();
     test_long_name();
     test_font_transform();
     test_font_substitution();

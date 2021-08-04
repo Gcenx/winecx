@@ -3757,3 +3757,31 @@ SymbolicName=TRUST_E_NOSIGNATURE
 Language=ENU
 No Signature found in file.
 .
+MessageId=0x4001
+Severity=CoError
+Facility=Null
+SymbolicName=E_NOTIMPL
+Language=ENU
+Not implemented.
+.
+MessageId=0x1
+Severity=CoError
+Facility=Dxgi
+SymbolicName=DXGI_ERROR_INVALID_CALL
+Language=ENU
+Invalid call.
+.
+MessageId=0x22
+Severity=CoError
+Facility=Dxgi
+SymbolicName=DXGI_ERROR_NOT_CURRENTLY_AVAILABLE
+Language=ENU
+Resource is not currently available.
+.
+MessageId=0x4005
+Severity=CoError
+Facility=Null
+SymbolicName=E_FAIL
+Language=ENU
+Call failed.
+.

@@ -45,16 +45,19 @@ static BOOL refdevice = FALSE;
 static HRESULT (WINAPI *pDirectDrawCreateEx)(GUID *driver_guid,
         void **ddraw, REFIID interface_iid, IUnknown *outer);
 
+static BOOL compare_uint(unsigned int x, unsigned int y, unsigned int max_diff)
+{
+    unsigned int diff = x > y ? x - y : y - x;
+
+    return diff <= max_diff;
+}
+
 static BOOL color_match(D3DCOLOR c1, D3DCOLOR c2, BYTE max_diff)
 {
-    if (abs((c1 & 0xff) - (c2 & 0xff)) > max_diff) return FALSE;
-    c1 >>= 8; c2 >>= 8;
-    if (abs((c1 & 0xff) - (c2 & 0xff)) > max_diff) return FALSE;
-    c1 >>= 8; c2 >>= 8;
-    if (abs((c1 & 0xff) - (c2 & 0xff)) > max_diff) return FALSE;
-    c1 >>= 8; c2 >>= 8;
-    if (abs((c1 & 0xff) - (c2 & 0xff)) > max_diff) return FALSE;
-    return TRUE;
+    return compare_uint(c1 & 0xff, c2 & 0xff, max_diff)
+            && compare_uint((c1 >> 8) & 0xff, (c2 >> 8) & 0xff, max_diff)
+            && compare_uint((c1 >> 16) & 0xff, (c2 >> 16) & 0xff, max_diff)
+            && compare_uint((c1 >> 24) & 0xff, (c2 >> 24) & 0xff, max_diff);
 }
 
 static HRESULT WINAPI enum_z_fmt(DDPIXELFORMAT *fmt, void *ctx)
@@ -887,7 +890,7 @@ static DWORD D3D3_getPixelColor(IDirectDraw4 *DirectDraw, IDirectDrawSurface4 *S
     ddsd.dwHeight = 480;
     ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY;
     hr = IDirectDraw4_CreateSurface(DirectDraw, &ddsd, &surf, NULL);
-    ok(hr == DD_OK, "IDirectDraw_CreateSurface failed with %08x\n", hr);
+    ok(hr == DD_OK, "IDirectDraw4_CreateSurface failed with %08x\n", hr);
     if(!surf)
     {
         trace("cannot create helper surface\n");
@@ -999,8 +1002,8 @@ static void D3D3_ViewportClearTest(void)
     ddsd.dwFlags    = DDSD_CAPS;
     ddsd.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE | DDSCAPS_3DDEVICE;
 
-    hr = IDirectDraw_CreateSurface(DirectDraw4, &ddsd, &Primary, NULL);
-    ok(hr==DD_OK, "IDirectDraw_CreateSurface returned: %08x\n", hr);
+    hr = IDirectDraw4_CreateSurface(DirectDraw4, &ddsd, &Primary, NULL);
+    ok(hr==DD_OK, "IDirectDraw4_CreateSurface returned: %08x\n", hr);
     if(FAILED(hr)) goto out;
 
     hr = IDirectDraw4_QueryInterface(DirectDraw4, &IID_IDirect3D3, (void**)&Direct3D3);

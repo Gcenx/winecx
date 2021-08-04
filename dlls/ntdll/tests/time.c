@@ -29,9 +29,11 @@
 static VOID (WINAPI *pRtlTimeToTimeFields)( const LARGE_INTEGER *liTime, PTIME_FIELDS TimeFields) ;
 static VOID (WINAPI *pRtlTimeFieldsToTime)(  PTIME_FIELDS TimeFields,  PLARGE_INTEGER Time) ;
 static NTSTATUS (WINAPI *pNtQueryPerformanceCounter)( LARGE_INTEGER *counter, LARGE_INTEGER *frequency );
+static NTSTATUS (WINAPI *pNtQuerySystemInformation)( SYSTEM_INFORMATION_CLASS class,
+                                                     void *info, ULONG size, ULONG *ret_size );
 static NTSTATUS (WINAPI *pRtlQueryTimeZoneInformation)( RTL_TIME_ZONE_INFORMATION *);
 static NTSTATUS (WINAPI *pRtlQueryDynamicTimeZoneInformation)( RTL_DYNAMIC_TIME_ZONE_INFORMATION *);
-static ULONG (WINAPI *pNtGetTickCount)(void);
+static BOOL     (WINAPI *pRtlQueryUnbiasedInterruptTime)( ULONGLONG *time );
 
 static const int MonthLengths[2][12] =
 {
@@ -122,18 +124,19 @@ static void test_NtQueryPerformanceCounter(void)
 
 static void test_RtlQueryTimeZoneInformation(void)
 {
-    RTL_DYNAMIC_TIME_ZONE_INFORMATION tzinfo;
+    RTL_DYNAMIC_TIME_ZONE_INFORMATION tzinfo, tzinfo2;
     NTSTATUS status;
+    ULONG len;
 
     /* test RtlQueryTimeZoneInformation returns an indirect string,
        e.g. @tzres.dll,-32 (Vista or later) */
     if (!pRtlQueryTimeZoneInformation || !pRtlQueryDynamicTimeZoneInformation)
     {
-        win_skip("Time zone name tests requires Vista or later\n");
+        win_skip("Time zone name tests require Vista or later\n");
         return;
     }
 
-    memset(&tzinfo, 0, sizeof(tzinfo));
+    memset(&tzinfo, 0xcc, sizeof(tzinfo));
     status = pRtlQueryDynamicTimeZoneInformation(&tzinfo);
     ok(status == STATUS_SUCCESS,
        "RtlQueryDynamicTimeZoneInformation failed, got %08x\n", status);
@@ -144,7 +147,13 @@ static void test_RtlQueryTimeZoneInformation(void)
        "daylight time zone name isn't an indirect string, got %s\n",
        wine_dbgstr_w(tzinfo.DaylightName));
 
-    memset(&tzinfo, 0, sizeof(tzinfo));
+    memset(&tzinfo2, 0xcc, sizeof(tzinfo2));
+    status = pNtQuerySystemInformation( SystemDynamicTimeZoneInformation, &tzinfo2, sizeof(tzinfo2), &len );
+    ok( !status, "NtQuerySystemInformation failed %x\n", status );
+    ok( len == sizeof(tzinfo2), "wrong len %u\n", len );
+    ok( !memcmp( &tzinfo, &tzinfo2, sizeof(tzinfo2) ), "tz data is different\n" );
+
+    memset(&tzinfo, 0xcc, sizeof(tzinfo));
     status = pRtlQueryTimeZoneInformation((RTL_TIME_ZONE_INFORMATION *)&tzinfo);
     ok(status == STATUS_SUCCESS,
        "RtlQueryTimeZoneInformation failed, got %08x\n", status);
@@ -154,29 +163,96 @@ static void test_RtlQueryTimeZoneInformation(void)
     ok(tzinfo.DaylightName[0] == '@',
        "daylight time zone name isn't an indirect string, got %s\n",
        wine_dbgstr_w(tzinfo.DaylightName));
+
+    memset(&tzinfo, 0xcc, sizeof(tzinfo));
+    status = pRtlQueryTimeZoneInformation((RTL_TIME_ZONE_INFORMATION *)&tzinfo);
+    ok(status == STATUS_SUCCESS,
+       "RtlQueryTimeZoneInformation failed, got %08x\n", status);
+    ok(tzinfo.StandardName[0] == '@',
+       "standard time zone name isn't an indirect string, got %s\n",
+       wine_dbgstr_w(tzinfo.StandardName));
+    ok(tzinfo.DaylightName[0] == '@',
+       "daylight time zone name isn't an indirect string, got %s\n",
+       wine_dbgstr_w(tzinfo.DaylightName));
+
+    memset(&tzinfo2, 0xcc, sizeof(tzinfo2));
+    status = pNtQuerySystemInformation( SystemTimeZoneInformation, &tzinfo2,
+                                        sizeof(RTL_TIME_ZONE_INFORMATION), &len );
+    ok( !status, "NtQuerySystemInformation failed %x\n", status );
+    ok( len == sizeof(RTL_TIME_ZONE_INFORMATION), "wrong len %u\n", len );
+    ok( !memcmp( &tzinfo, &tzinfo2, sizeof(RTL_TIME_ZONE_INFORMATION) ), "tz data is different\n" );
 }
 
-static void test_NtGetTickCount(void)
+static ULONGLONG read_ksystem_time(volatile KSYSTEM_TIME *time)
 {
-#ifndef _WIN64
+    ULONGLONG high, low;
+    do
+    {
+        high = time->High1Time;
+        low = time->LowPart;
+    }
+    while (high != time->High2Time);
+    return high << 32 | low;
+}
+
+static void test_user_shared_data_time(void)
+{
     KSHARED_USER_DATA *user_shared_data = (void *)0x7ffe0000;
-    LONG diff;
-    int i;
+    ULONGLONG t1, t2, t3;
+    int i = 0;
 
-    if (!pNtGetTickCount)
+    i = 0;
+    do
     {
-        win_skip("NtGetTickCount is not available\n");
-        return;
-    }
+        t1 = GetTickCount();
+        if (user_shared_data->NtMajorVersion <= 5 && user_shared_data->NtMinorVersion <= 1)
+            t2 = (*(volatile ULONG*)&user_shared_data->TickCountLowDeprecated * (ULONG64)user_shared_data->TickCountMultiplier) >> 24;
+        else
+            t2 = (read_ksystem_time(&user_shared_data->u.TickCount) * user_shared_data->TickCountMultiplier) >> 24;
+        t3 = GetTickCount();
+    } while(t3 < t1 && i++ < 1); /* allow for wrap, but only once */
 
-    for (i = 0; i < 5; ++i)
+    ok(t1 <= t2, "USD TickCount / GetTickCount are out of order: %s %s\n",
+       wine_dbgstr_longlong(t1), wine_dbgstr_longlong(t2));
+    ok(t2 <= t3, "USD TickCount / GetTickCount are out of order: %s %s\n",
+       wine_dbgstr_longlong(t2), wine_dbgstr_longlong(t3));
+
+    i = 0;
+    do
     {
-        diff = (user_shared_data->u.TickCountQuad * user_shared_data->TickCountMultiplier) >> 24;
-        diff = pNtGetTickCount() - diff;
-        ok(diff < 32, "NtGetTickCount - TickCountQuad too high, expected < 32 got %d\n", diff);
-        Sleep(50);
+        LARGE_INTEGER system_time;
+        NtQuerySystemTime(&system_time);
+        t1 = system_time.QuadPart;
+        t2 = read_ksystem_time(&user_shared_data->SystemTime);
+        NtQuerySystemTime(&system_time);
+        t3 = system_time.QuadPart;
+    } while(t3 < t1 && i++ < 1); /* allow for wrap, but only once */
+
+    /* FIXME: not always in order, but should be close */
+    todo_wine_if(t1 > t2 && t1 - t2 < 50 * TICKSPERMSEC)
+    ok(t1 <= t2, "USD SystemTime / NtQuerySystemTime are out of order %s %s\n",
+       wine_dbgstr_longlong(t1), wine_dbgstr_longlong(t2));
+    ok(t2 <= t3, "USD SystemTime / NtQuerySystemTime are out of order %s %s\n",
+       wine_dbgstr_longlong(t2), wine_dbgstr_longlong(t3));
+
+    if (!pRtlQueryUnbiasedInterruptTime)
+        win_skip("skipping RtlQueryUnbiasedInterruptTime tests\n");
+    else
+    {
+        i = 0;
+        do
+        {
+            pRtlQueryUnbiasedInterruptTime(&t1);
+            t2 = read_ksystem_time(&user_shared_data->InterruptTime);
+            pRtlQueryUnbiasedInterruptTime(&t3);
+        } while(t3 < t1 && i++ < 1); /* allow for wrap, but only once */
+
+        ok(t1 <= t2, "USD InterruptTime / RtlQueryUnbiasedInterruptTime are out of order %s %s\n",
+           wine_dbgstr_longlong(t1), wine_dbgstr_longlong(t2));
+        ok(t2 <= t3 || broken(t2 == t3 + 82410089070) /* w864 has some weird offset on testbot */,
+           "USD InterruptTime / RtlQueryUnbiasedInterruptTime are out of order %s %s\n",
+           wine_dbgstr_longlong(t2), wine_dbgstr_longlong(t3));
     }
-#endif
 }
 
 START_TEST(time)
@@ -185,17 +261,18 @@ START_TEST(time)
     pRtlTimeToTimeFields = (void *)GetProcAddress(mod,"RtlTimeToTimeFields");
     pRtlTimeFieldsToTime = (void *)GetProcAddress(mod,"RtlTimeFieldsToTime");
     pNtQueryPerformanceCounter = (void *)GetProcAddress(mod, "NtQueryPerformanceCounter");
-    pNtGetTickCount = (void *)GetProcAddress(mod,"NtGetTickCount");
+    pNtQuerySystemInformation = (void *)GetProcAddress(mod, "NtQuerySystemInformation");
     pRtlQueryTimeZoneInformation =
         (void *)GetProcAddress(mod, "RtlQueryTimeZoneInformation");
     pRtlQueryDynamicTimeZoneInformation =
         (void *)GetProcAddress(mod, "RtlQueryDynamicTimeZoneInformation");
+    pRtlQueryUnbiasedInterruptTime = (void *)GetProcAddress(mod, "RtlQueryUnbiasedInterruptTime");
 
     if (pRtlTimeToTimeFields && pRtlTimeFieldsToTime)
         test_pRtlTimeToTimeFields();
     else
         win_skip("Required time conversion functions are not available\n");
     test_NtQueryPerformanceCounter();
-    test_NtGetTickCount();
     test_RtlQueryTimeZoneInformation();
+    test_user_shared_data_time();
 }

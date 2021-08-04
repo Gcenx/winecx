@@ -523,7 +523,6 @@ static void output_module16( DLLSPEC *spec )
         entry_point->flags = FLAG_REGISTER;
         entry_point->name = NULL;
         entry_point->link_name = xstrdup( spec->init_func );
-        entry_point->impl_name = NULL;
         entry_point->export_name = NULL;
         entry_point->u.func.nb_args = 0;
         assert( !spec->ordinals[0] );
@@ -805,7 +804,7 @@ void output_spec16_file( DLLSPEC *spec16 )
     output_stubs( spec16 );
     output_exports( spec32 );
     output_imports( spec16 );
-    if (is_undefined( "__wine_call_from_16" )) output_asm_relays16();
+    if (!strcmp( spec16->dll_name, "kernel" )) output_asm_relays16();
     if (needs_get_pc_thunk) output_get_pc_thunk();
     if (spec16->main_module)
     {

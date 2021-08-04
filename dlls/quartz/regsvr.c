@@ -158,8 +158,6 @@ static HRESULT unregister_filters(struct regsvr_filter const *list)
     HRESULT hr;
     IFilterMapper2* pFM2;
 
-    CoInitialize(NULL);
-    
     hr = CoCreateInstance(&CLSID_FilterMapper2, NULL, CLSCTX_INPROC_SERVER, &IID_IFilterMapper2, (LPVOID*)&pFM2);
 
     if (SUCCEEDED(hr)) {
@@ -168,8 +166,6 @@ static HRESULT unregister_filters(struct regsvr_filter const *list)
 	IFilterMapper2_Release(pFM2);
     }
 
-    CoUninitialize();
-    
     return hr;
 }
 
@@ -178,21 +174,9 @@ static HRESULT unregister_filters(struct regsvr_filter const *list)
  */
 
 static struct regsvr_filter const filter_list[] = {
-    {   &CLSID_NullRenderer,
-        &CLSID_LegacyAmFilterCategory,
-        {'N','u','l','l',' ','R','e','n','d','e','r','e','r',0},
-        0x200000,
-        {   {   REG_PINFLAG_B_RENDERER,
-                {   { &MEDIATYPE_NULL, &GUID_NULL },
-                    { NULL }
-                },
-            },
-            { 0xFFFFFFFF },
-        }
-    },
     {   &CLSID_VideoRenderer,
 	&CLSID_LegacyAmFilterCategory,
-	{'V','i','d','e','o',' ','R','e','n','d','e','r','e','r',0},
+	L"Video Renderer",
 	0x800000,
 	{   {   REG_PINFLAG_B_RENDERER,
 		{   { &MEDIATYPE_Video, &GUID_NULL },
@@ -204,20 +188,8 @@ static struct regsvr_filter const filter_list[] = {
     },
     {   &CLSID_VideoRendererDefault,
         &CLSID_LegacyAmFilterCategory,
-        {'V','i','d','e','o',' ','R','e','n','d','e','r','e','r',0},
-        0x800000,
-        {   {   REG_PINFLAG_B_RENDERER,
-                {   { &MEDIATYPE_Video, &GUID_NULL },
-                    { NULL }
-                },
-            },
-            { 0xFFFFFFFF },
-        }
-    },
-    {   &CLSID_VideoMixingRenderer,
-        &CLSID_LegacyAmFilterCategory,
-        {'V','i','d','e','o',' ','M','i','x','i','n','g',' ','R','e','n','d','e','r','e','r',0},
-        0x200000,
+        L"Video Renderer",
+        0x800001,
         {   {   REG_PINFLAG_B_RENDERER,
                 {   { &MEDIATYPE_Video, &GUID_NULL },
                     { NULL }
@@ -228,7 +200,7 @@ static struct regsvr_filter const filter_list[] = {
     },
     {   &CLSID_VideoMixingRenderer9,
         &CLSID_LegacyAmFilterCategory,
-        {'V','i','d','e','o',' ','M','i','x','i','n','g',' ','R','e','n','d','e','r','e','r',' ','9',0},
+        L"Video Mixing Renderer 9",
         0x200000,
         {   {   REG_PINFLAG_B_RENDERER,
                 {   { &MEDIATYPE_Video, &GUID_NULL },
@@ -238,35 +210,9 @@ static struct regsvr_filter const filter_list[] = {
             { 0xFFFFFFFF },
         }
     },
-    {   &CLSID_DSoundRender,
-        &CLSID_LegacyAmFilterCategory,
-        {'A','u','d','i','o',' ','R','e','n','d','e','r','e','r',0},
-        0x800000,
-        {   {   REG_PINFLAG_B_RENDERER,
-                {   { &MEDIATYPE_Audio, &MEDIASUBTYPE_PCM },
-/*                  { &MEDIATYPE_Audio, &MEDIASUBTYPE_IEEE_FLOAT }, */
-                    { NULL }
-                },
-            },
-            { 0xFFFFFFFF },
-        }
-    },
-    {   &CLSID_AudioRender,
-        &CLSID_LegacyAmFilterCategory,
-        {'A','u','d','i','o',' ','R','e','n','d','e','r','e','r',0},
-        0x800000,
-        {   {   REG_PINFLAG_B_RENDERER,
-                {   { &MEDIATYPE_Audio, &MEDIASUBTYPE_PCM },
-/*                  { &MEDIATYPE_Audio, &MEDIASUBTYPE_IEEE_FLOAT }, */
-                    { NULL }
-                },
-            },
-            { 0xFFFFFFFF },
-        }
-    },
     {   &CLSID_AVIDec,
 	&CLSID_LegacyAmFilterCategory,
-	{'A','V','I',' ','D','e','c','o','m','p','r','e','s','s','o','r',0},
+	L"AVI Decompressor",
 	0x5ffff0,
 	{   {   0,
 		{   { &MEDIATYPE_Video, &GUID_NULL },
@@ -283,7 +229,7 @@ static struct regsvr_filter const filter_list[] = {
     },
     {   &CLSID_AsyncReader,
 	&CLSID_LegacyAmFilterCategory,
-	{'F','i','l','e',' ','S','o','u','r','c','e',' ','(','A','s','y','n','c','.',')',0},
+	L"File Source (Async.)",
 	0x400000,
 	{   {   REG_PINFLAG_B_OUTPUT,
 		{   { &MEDIATYPE_Stream, &GUID_NULL },
@@ -295,7 +241,7 @@ static struct regsvr_filter const filter_list[] = {
     },
     {   &CLSID_ACMWrapper,
 	&CLSID_LegacyAmFilterCategory,
-	{'A','C','M',' ','W','r','a','p','p','e','r',0},
+	L"ACM Wrapper",
 	0x5ffff0,
 	{   {   0,
 		{   { &MEDIATYPE_Audio, &GUID_NULL },

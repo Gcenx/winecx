@@ -47,6 +47,7 @@ interface Property;
 interface Recordset15;
 interface Recordset20;
 interface Recordset21;
+interface ConnectionEventsVt;
 dispinterface ConnectionEvents;
 dispinterface RecordsetEvents;
 
@@ -430,12 +431,12 @@ typedef [uuid(00000574-0000-0010-8000-00aa006d2ea4)] enum CopyRecordOptionsEnum
 
 typedef [uuid(00000570-0000-0010-8000-00aa006d2ea4)] enum RecordCreateOptionsEnum
 {
-    adCreateCollection = 0x00002000,
-    adCreateStructDoc = 0x80000000,
-    adCreateNonCollection = 0x00000000,
-    adOpenIfExists = 0x02000000,
-    adCreateOverwrite = 0x04000000,
-    adFailIfNotExists = -1
+    adCreateCollection = (int) 0x00002000,
+    adCreateStructDoc = (int) 0x80000000,
+    adCreateNonCollection = (int) 0x00000000,
+    adOpenIfExists = (int) 0x02000000,
+    adCreateOverwrite = (int) 0x04000000,
+    adFailIfNotExists = (int) -1
 } RecordCreateOptionsEnum;
 
 typedef [uuid(00000571-0000-0010-8000-00aa006d2ea4)] enum RecordOpenOptionsEnum
@@ -511,6 +512,23 @@ typedef [uuid(00000531-0000-0010-8000-00aa006d2ea4)] enum EventReasonEnum
     adRsnMovePrevious = 14,
     adRsnMoveLast = 15
 } EventReasonEnum;
+
+typedef [uuid(0000051e-0000-0010-8000-00aa006d2ea4)] enum ExecuteOptionEnum
+{
+    adOptionUnspecified      =   -1,
+    adAsyncExecute           =   16,
+    adAsyncFetch             =   32,
+    adAsyncFetchNonBlocking  =   64,
+    adExecuteNoRecords       =  128,
+    adExecuteStream          = 1024,
+    [hidden] adExecuteRecord = 2048
+} ExecuteOptionEnum;
+
+typedef [uuid(00000541-0000-0010-8000-00aa006d2ea4)] enum ConnectOptionEnum
+{
+    adConnectUnspecified = -1,
+    adAsyncConnect = 0x10
+} ConnectOptionEnum;
 
 [
     uuid(00000503-0000-0010-8000-00aa006d2ea4),
@@ -1573,6 +1591,70 @@ interface _Command : Command25
     [id(0x60030014), propget]
     HRESULT NamedParameters(
         [out, retval] VARIANT_BOOL *named_parameters);
+};
+
+[
+    uuid(00000402-0000-0010-8000-00aa006d2ea4),
+    odl,
+    hidden
+]
+interface ConnectionEventsVt : IUnknown
+{
+    HRESULT InfoMessage(
+        [in] Error *error,
+        [in, out] EventStatusEnum *status,
+        [in] _Connection *connection);
+
+    HRESULT BeginTransComplete(
+        [in] LONG TransactionLevel,
+        [in] Error *error,
+        [in, out] EventStatusEnum *status,
+        [in] _Connection *connection);
+
+    HRESULT CommitTransComplete(
+        [in] Error *error,
+        [in, out] EventStatusEnum *status,
+        [in] _Connection *connection);
+
+    HRESULT RollbackTransComplete(
+        [in] Error *error,
+        [in, out] EventStatusEnum *status,
+        [in] _Connection *connection);
+
+    HRESULT WillExecute(
+        [in, out] BSTR *source,
+        [in, out] CursorTypeEnum *cursor_type,
+        [in, out] LockTypeEnum *lock_type,
+        [in, out] LONG *options,
+        [in, out] EventStatusEnum *status,
+        [in] _Command *command,
+        [in] _Recordset *record_set,
+        [in] _Connection *connection);
+
+    HRESULT ExecuteComplete(
+        [in] LONG records_affected,
+        [in] Error *error,
+        [in, out] EventStatusEnum *status,
+        [in] _Command *command,
+        [in] _Recordset *record_set,
+        [in] _Connection *connection);
+
+    HRESULT WillConnect(
+        [in, out] BSTR *string,
+        [in, out] BSTR *userid,
+        [in, out] BSTR *password,
+        [in, out] LONG *options,
+        [in, out] EventStatusEnum *status,
+        [in] _Connection *connection);
+
+    HRESULT ConnectComplete(
+        [in] Error *error,
+        [in, out] EventStatusEnum *status,
+        [in] _Connection *connection);
+
+    HRESULT Disconnect(
+        [in, out] EventStatusEnum *status,
+        [in] _Connection *connection);
 };
 
 [

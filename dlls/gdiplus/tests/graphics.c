@@ -2279,7 +2279,7 @@ static void test_GdipDrawString(void)
     GpBrush *brush;
     LOGFONTA logfont;
     HDC hdc = GetDC( hwnd );
-    static const WCHAR string[] = {'T','e','s','t',0};
+    static const WCHAR string[] = L"Test";
     static const PointF positions[4] = {{0,0}, {1,1}, {2,2}, {3,3}};
     GpMatrix *matrix;
 
@@ -3195,9 +3195,8 @@ static void test_string_functions(void)
     GpBrush *brush;
     ARGB color = 0xff000000;
     HDC hdc = GetDC( hwnd );
-    const WCHAR fontname[] = {'T','a','h','o','m','a',0};
-    const WCHAR teststring[] = {'M','M',' ','M','\n','M',0};
-    const WCHAR teststring2[] = {'j',0};
+    const WCHAR teststring[] = L"MM M\nM";
+    const WCHAR teststring2[] = L"j";
     REAL char_width, char_height;
     INT codepointsfitted, linesfilled;
     GpStringFormat *format;
@@ -3213,7 +3212,7 @@ static void test_string_functions(void)
     expect(Ok, status);
     ok(graphics != NULL, "Expected graphics to be initialized\n");
 
-    status = GdipCreateFontFamilyFromName(fontname, NULL, &family);
+    status = GdipCreateFontFamilyFromName(L"Tahoma", NULL, &family);
     expect(Ok, status);
 
     status = GdipCreateFont(family, 10.0, FontStyleRegular, UnitPixel, &font);
@@ -3744,8 +3743,7 @@ static void test_GdipMeasureString(void)
         { 200.0, 600.0, 1.0, UnitPixel },
         { 200.0, 600.0, 2.0, UnitPixel },
     };
-    static const WCHAR tahomaW[] = { 'T','a','h','o','m','a',0 };
-    static const WCHAR string[] = { '1','2','3','4','5','6','7',0 };
+    static const WCHAR string[] = L"1234567";
     GpStatus status;
     GpGraphics *graphics;
     GpFontFamily *family;
@@ -3761,7 +3759,7 @@ static void test_GdipMeasureString(void)
 
     status = GdipCreateStringFormat(0, LANG_NEUTRAL, &format);
     expect(Ok, status);
-    status = GdipCreateFontFamilyFromName(tahomaW, NULL, &family);
+    status = GdipCreateFontFamilyFromName(L"Tahoma", NULL, &family);
     expect(Ok, status);
 
     /* font size in pixels */
@@ -4259,8 +4257,7 @@ static void test_pen_thickness(void)
  */
 static void test_font_height_scaling(void)
 {
-    static const WCHAR tahomaW[] = { 'T','a','h','o','m','a',0 };
-    static const WCHAR string[] = { '1','2','3','4','5','6','7',0 };
+    static const WCHAR string[] = L"1234567";
     HDC hdc;
     GpStringFormat *format;
     CharacterRange range = { 0, 7 };
@@ -4281,7 +4278,7 @@ static void test_font_height_scaling(void)
     status = GdipCreateRegion(&region);
     expect(Ok, status);
 
-    status = GdipCreateFontFamilyFromName(tahomaW, NULL, &family);
+    status = GdipCreateFontFamilyFromName(L"Tahoma", NULL, &family);
     expect(Ok, status);
 
     hdc = CreateCompatibleDC(0);
@@ -4360,7 +4357,6 @@ static void test_font_height_scaling(void)
         /* UnitPixel = 2, UnitPoint = 3, UnitInch = 4, UnitDocument = 5, UnitMillimeter = 6 */
         for (gfx_unit = 2; gfx_unit <= 6; gfx_unit++)
         {
-            static const WCHAR doubleW[2] = { 'W','W' };
             RectF bounds_1, bounds_2;
             REAL margin, margin_y, font_height;
             int match;
@@ -4400,12 +4396,12 @@ todo_wine
             /* bounds.width of 1 glyph: [margin]+[width]+[margin] */
             set_rect_empty(&rect);
             set_rect_empty(&bounds_1);
-            status = GdipMeasureString(graphics, doubleW, 1, font, &rect, format, &bounds_1, NULL, NULL);
+            status = GdipMeasureString(graphics, L"W", 1, font, &rect, format, &bounds_1, NULL, NULL);
             expect(Ok, status);
             /* bounds.width of 2 identical glyphs: [margin]+[width]+[width]+[margin] */
             set_rect_empty(&rect);
             set_rect_empty(&bounds_2);
-            status = GdipMeasureString(graphics, doubleW, 2, font, &rect, format, &bounds_2, NULL, NULL);
+            status = GdipMeasureString(graphics, L"WW", 2, font, &rect, format, &bounds_2, NULL, NULL);
             expect(Ok, status);
 
             /* margin = [bounds.width of 1] - [bounds.width of 2] / 2*/
@@ -4447,10 +4443,10 @@ cleanup:
 
 static void test_measure_string(void)
 {
-    static const WCHAR tahomaW[] = { 'T','a','h','o','m','a',0 };
-    static const WCHAR string[] = { 'A','0','1',0 };
+    static const WCHAR string[] = L"A01";
+    static const WCHAR string2[] = L"M MM";
     HDC hdc;
-    GpStringFormat *format;
+    GpStringFormat *format, *format_no_wrap;
     CharacterRange range;
     GpRegion *region;
     GpGraphics *graphics;
@@ -4458,7 +4454,7 @@ static void test_measure_string(void)
     GpFont *font;
     GpStatus status;
     RectF bounds, rect;
-    REAL width, height, width_1, width_2;
+    REAL width, height, width_1, width_2, width_MM, width_M_M;
     REAL margin_x, margin_y, width_rgn, height_rgn;
     int lines, glyphs;
 
@@ -4469,7 +4465,7 @@ static void test_measure_string(void)
     status = GdipCreateRegion(&region);
     expect(Ok, status);
 
-    status = GdipCreateFontFamilyFromName(tahomaW, NULL, &family);
+    status = GdipCreateFontFamilyFromName(L"Tahoma", NULL, &family);
     expect(Ok, status);
 
     hdc = CreateCompatibleDC(0);
@@ -4856,6 +4852,53 @@ todo_wine
     expectf_(width_rgn, bounds.Width, 1.0);
     expectf_(height_rgn, bounds.Height, 1.0);
 
+    /* Measure "MM" */
+    rect.X = 5.0;
+    rect.Y = 5.0;
+    rect.Width = 32000.0;
+    rect.Height = 32000.0;
+    status = GdipMeasureString(graphics, string2 + 2, 2, font, &rect, NULL, &bounds, &glyphs, &lines);
+    expect(Ok, status);
+    expect(2, glyphs);
+    expect(1, lines);
+    width_MM = bounds.Width;
+
+    /* Measure "M M" */
+    rect.X = 5.0;
+    rect.Y = 5.0;
+    rect.Width = 32000.0;
+    rect.Height = 32000.0;
+    status = GdipMeasureString(graphics, string2, 3, font, &rect, NULL, &bounds, &glyphs, &lines);
+    expect(Ok, status);
+    expect(3, glyphs);
+    expect(1, lines);
+    width_M_M = bounds.Width;
+
+    /* With wrap */
+    rect.X = 5.0;
+    rect.Y = 5.0;
+    rect.Width = width_M_M;
+    rect.Height = 32000.0;
+    status = GdipMeasureString(graphics, string2, -1, font, &rect, NULL, &bounds, &glyphs, &lines);
+    expect(Ok, status);
+    expectf_(width_MM, bounds.Width, 0.1);
+    expect(4, glyphs);
+    expect(2, lines);
+
+    /* Without wrap */
+    status = GdipCreateStringFormat(StringFormatFlagsNoWrap, LANG_NEUTRAL, &format_no_wrap);
+    expect(Ok, status);
+
+    rect.X = 5.0;
+    rect.Y = 5.0;
+    rect.Width = width_M_M;
+    rect.Height = 32000.0;
+    status = GdipMeasureString(graphics, string2, -1, font, &rect, format_no_wrap, &bounds, &glyphs, &lines);
+    expect(Ok, status);
+    expectf_(width_M_M, bounds.Width, 0.1);
+    expect(3, glyphs);
+    expect(1, lines);
+
     status = GdipDeleteFont(font);
     expect(Ok, status);
 
@@ -4866,12 +4909,11 @@ todo_wine
     GdipDeleteFontFamily(family);
     GdipDeleteRegion(region);
     GdipDeleteStringFormat(format);
+    GdipDeleteStringFormat(format_no_wrap);
 }
 
 static void test_measured_extra_space(void)
 {
-    static const WCHAR tahomaW[] = { 'T','a','h','o','m','a',0 };
-    static const WCHAR string[2] = { 'W','W' };
     GpStringFormat *format;
     HDC hdc;
     GpGraphics *graphics;
@@ -4885,7 +4927,7 @@ static void test_measured_extra_space(void)
     status = GdipCreateStringFormat(0, LANG_NEUTRAL, &format);
     expect(Ok, status);
 
-    status = GdipCreateFontFamilyFromName(tahomaW, NULL, &family);
+    status = GdipCreateFontFamilyFromName(L"Tahoma", NULL, &family);
     expect(Ok, status);
     hdc = CreateCompatibleDC(0);
     status = GdipCreateFromHDC(hdc, &graphics);
@@ -4915,12 +4957,12 @@ static void test_measured_extra_space(void)
             /* bounds.width of 1 glyph: [margin]+[width]+[margin] */
             set_rect_empty(&rect);
             set_rect_empty(&bounds_1);
-            status = GdipMeasureString(graphics, string, 1, font, &rect, format, &bounds_1, NULL, NULL);
+            status = GdipMeasureString(graphics, L"W", 1, font, &rect, format, &bounds_1, NULL, NULL);
             expect(Ok, status);
             /* bounds.width of 2 identical glyphs: [margin]+[width]+[width]+[margin] */
             set_rect_empty(&rect);
             set_rect_empty(&bounds_2);
-            status = GdipMeasureString(graphics, string, 2, font, &rect, format, &bounds_2, NULL, NULL);
+            status = GdipMeasureString(graphics, L"WW", 2, font, &rect, format, &bounds_2, NULL, NULL);
             expect(Ok, status);
 
             /* margin = [bounds.width of 1] - [bounds.width of 2] / 2*/
@@ -5071,6 +5113,7 @@ static void test_clipping(void)
     GpRegion *region, *region100x100;
     GpMatrix *matrix;
     GpRectF rect;
+    GpRect recti;
     GpPointF ptf[4];
     GpUnit unit;
     HRGN hrgn;
@@ -5106,6 +5149,11 @@ static void test_clipping(void)
     expect(Ok, status);
     ok(rect.X == 100.0 && rect.Y == 100.0 && rect.Width == 100.0 && rect.Height == 100.0,
        "expected 100.0,100.0-100.0,100.0, got %.2f,%.2f-%.2f,%.2f\n", rect.X, rect.Y, rect.Width, rect.Height);
+
+    status = GdipGetClipBoundsI(graphics, &recti);
+    expect(Ok, status);
+    ok(recti.X == 100 && recti.Y == 100 && recti.Width == 100 && recti.Height == 100,
+       "expected 100,100-100,100, got %i,%i-%i,%i\n", recti.X, recti.Y, recti.Width, recti.Height);
 
     /* Clip region does not account for changes to gdi32 transform */
     SetViewportOrgEx(hdc, 10, 10, NULL);
@@ -5148,6 +5196,11 @@ static void test_clipping(void)
     expect(Ok, status);
     ok(rect.X == 45.0 && rect.Y == 20.0 && rect.Width == 50.0 && rect.Height == 25.0,
        "expected 45.0,20.0-50.0,25.0, got %.2f,%.2f-%.2f,%.2f\n", rect.X, rect.Y, rect.Width, rect.Height);
+
+    status = GdipGetClipBoundsI(graphics, &recti);
+    expect(Ok, status);
+    ok(recti.X == 45 && recti.Y == 20 && recti.Width == 50 && recti.Height == 25,
+       "expected 45,20-50,25, got %i,%i-%i,%i\n", recti.X, recti.Y, recti.Width, recti.Height);
 
     status = GdipSetEmpty(region);
     expect(Ok, status);

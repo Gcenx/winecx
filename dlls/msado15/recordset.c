@@ -23,6 +23,7 @@
 #define COBJMACROS
 #include "objbase.h"
 #include "msado15_backcompat.h"
+#include "oledb.h"
 
 #include "wine/debug.h"
 #include "wine/heap.h"
@@ -35,6 +36,7 @@ struct fields;
 struct recordset
 {
     _Recordset         Recordset_iface;
+    ADORecordsetConstruction ADORecordsetConstruction_iface;
     ISupportErrorInfo  ISupportErrorInfo_iface;
     LONG               refs;
     LONG               state;
@@ -43,6 +45,9 @@ struct recordset
     LONG               allocated;
     LONG               index;
     VARIANT           *data;
+    CursorLocationEnum cursor_location;
+    CursorTypeEnum     cursor_type;
+    IRowset           *row_set;
 };
 
 struct fields
@@ -737,6 +742,11 @@ static inline struct recordset *impl_from_Recordset( _Recordset *iface )
     return CONTAINING_RECORD( iface, struct recordset, Recordset_iface );
 }
 
+static inline struct recordset *impl_from_ADORecordsetConstruction( ADORecordsetConstruction *iface )
+{
+    return CONTAINING_RECORD( iface, struct recordset, ADORecordsetConstruction_iface );
+}
+
 static ULONG WINAPI recordset_AddRef( _Recordset *iface )
 {
     struct recordset *recordset = impl_from_Recordset( iface );
@@ -747,7 +757,13 @@ static ULONG WINAPI recordset_AddRef( _Recordset *iface )
 
 static void close_recordset( struct recordset *recordset )
 {
-    ULONG row, col, col_count = get_column_count( recordset );
+    ULONG row, col, col_count;
+
+    if ( recordset->row_set ) IRowset_Release( recordset->row_set );
+    recordset->row_set = NULL;
+
+    if (!recordset->fields) return;
+    col_count = get_column_count( recordset );
 
     recordset->fields->recordset = NULL;
     Fields_Release( &recordset->fields->Fields_iface );
@@ -780,6 +796,8 @@ static HRESULT WINAPI recordset_QueryInterface( _Recordset *iface, REFIID riid, 
     struct recordset *recordset = impl_from_Recordset( iface );
     TRACE( "%p, %s, %p\n", iface, debugstr_guid(riid), obj );
 
+    *obj = NULL;
+
     if (IsEqualIID(riid, &IID_IUnknown)    || IsEqualIID(riid, &IID_IDispatch)   ||
         IsEqualIID(riid, &IID__ADO)        || IsEqualIID(riid, &IID_Recordset15) ||
         IsEqualIID(riid, &IID_Recordset20) || IsEqualIID(riid, &IID_Recordset21) ||
@@ -790,6 +808,15 @@ static HRESULT WINAPI recordset_QueryInterface( _Recordset *iface, REFIID riid, 
     else if (IsEqualGUID( riid, &IID_ISupportErrorInfo ))
     {
         *obj = &recordset->ISupportErrorInfo_iface;
+    }
+    else if (IsEqualGUID( riid, &IID_ADORecordsetConstruction ))
+    {
+        *obj = &recordset->ADORecordsetConstruction_iface;
+    }
+    else if (IsEqualGUID( riid, &IID_IRunnableObject ))
+    {
+        TRACE("IID_IRunnableObject not supported returning NULL\n");
+        return E_NOINTERFACE;
     }
     else
     {
@@ -899,14 +926,22 @@ static HRESULT WINAPI recordset_put_CacheSize( _Recordset *iface, LONG size )
 
 static HRESULT WINAPI recordset_get_CursorType( _Recordset *iface, CursorTypeEnum *cursor_type )
 {
-    FIXME( "%p, %p\n", iface, cursor_type );
-    return E_NOTIMPL;
+    struct recordset *recordset = impl_from_Recordset( iface );
+
+    TRACE( "%p, %p\n", iface, cursor_type );
+
+    *cursor_type = recordset->cursor_type;
+    return S_OK;
 }
 
 static HRESULT WINAPI recordset_put_CursorType( _Recordset *iface, CursorTypeEnum cursor_type )
 {
-    FIXME( "%p, %d\n", iface, cursor_type );
-    return E_NOTIMPL;
+    struct recordset *recordset = impl_from_Recordset( iface );
+
+    TRACE( "%p, %d\n", iface, cursor_type );
+
+    recordset->cursor_type = cursor_type;
+    return S_OK;
 }
 
 static HRESULT WINAPI recordset_get_EOF( _Recordset *iface, VARIANT_BOOL *eof )
@@ -1229,14 +1264,24 @@ static HRESULT WINAPI recordset_CancelBatch( _Recordset *iface, AffectEnum affec
 
 static HRESULT WINAPI recordset_get_CursorLocation( _Recordset *iface, CursorLocationEnum *cursor_loc )
 {
-    FIXME( "%p, %p\n", iface, cursor_loc );
-    return E_NOTIMPL;
+    struct recordset *recordset = impl_from_Recordset( iface );
+
+    TRACE( "%p, %p\n", iface, cursor_loc );
+
+    *cursor_loc = recordset->cursor_location;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI recordset_put_CursorLocation( _Recordset *iface, CursorLocationEnum cursor_loc )
 {
-    FIXME( "%p, %u\n", iface, cursor_loc );
-    return E_NOTIMPL;
+    struct recordset *recordset = impl_from_Recordset( iface );
+
+    TRACE( "%p, %u\n", iface, cursor_loc );
+
+    recordset->cursor_location = cursor_loc;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI recordset_NextRecordset( _Recordset *iface, VARIANT *records_affected, _Recordset **record_set )
@@ -1515,6 +1560,134 @@ static const ISupportErrorInfoVtbl recordset_supporterrorinfo_vtbl =
     recordset_supporterrorinfo_InterfaceSupportsErrorInfo
 };
 
+static HRESULT WINAPI rsconstruction_QueryInterface(ADORecordsetConstruction *iface,
+    REFIID riid, void **obj)
+{
+    struct recordset *recordset = impl_from_ADORecordsetConstruction( iface );
+    return _Recordset_QueryInterface( &recordset->Recordset_iface, riid, obj );
+}
+
+static ULONG WINAPI rsconstruction_AddRef(ADORecordsetConstruction *iface)
+{
+    struct recordset *recordset = impl_from_ADORecordsetConstruction( iface );
+    return _Recordset_AddRef( &recordset->Recordset_iface );
+}
+
+static ULONG WINAPI rsconstruction_Release(ADORecordsetConstruction *iface)
+{
+    struct recordset *recordset = impl_from_ADORecordsetConstruction( iface );
+    return _Recordset_Release( &recordset->Recordset_iface );
+}
+
+static HRESULT WINAPI rsconstruction_GetTypeInfoCount(ADORecordsetConstruction *iface, UINT *pctinfo)
+{
+    struct recordset *recordset = impl_from_ADORecordsetConstruction( iface );
+    TRACE( "%p, %p\n", recordset, pctinfo );
+    *pctinfo = 1;
+    return S_OK;
+}
+
+static HRESULT WINAPI rsconstruction_GetTypeInfo(ADORecordsetConstruction *iface, UINT iTInfo,
+    LCID lcid, ITypeInfo **ppTInfo)
+{
+    struct recordset *recordset = impl_from_ADORecordsetConstruction( iface );
+    FIXME( "%p %u %u %p\n", recordset, iTInfo, lcid, ppTInfo );
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI rsconstruction_GetIDsOfNames(ADORecordsetConstruction *iface, REFIID riid,
+    LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
+{
+    struct recordset *recordset = impl_from_ADORecordsetConstruction( iface );
+    FIXME( "%p %s %p %u %u %p\n", recordset, debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId );
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI rsconstruction_Invoke(ADORecordsetConstruction *iface, DISPID dispIdMember,
+    REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult,
+    EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    struct recordset *recordset = impl_from_ADORecordsetConstruction( iface );
+    FIXME( "%p %d %s %d %d %p %p %p %p\n", recordset, dispIdMember, debugstr_guid(riid),
+          lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr );
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI rsconstruction_get_Rowset(ADORecordsetConstruction *iface, IUnknown **row_set)
+{
+    struct recordset *recordset = impl_from_ADORecordsetConstruction( iface );
+    HRESULT hr;
+
+    TRACE( "%p, %p\n", recordset, row_set );
+
+    hr = IRowset_QueryInterface(recordset->row_set, &IID_IUnknown, (void**)row_set);
+    if ( FAILED(hr) ) return E_FAIL;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI rsconstruction_put_Rowset(ADORecordsetConstruction *iface, IUnknown *unk)
+{
+    struct recordset *recordset = impl_from_ADORecordsetConstruction( iface );
+    HRESULT hr;
+    IRowset *rowset;
+
+    TRACE( "%p, %p\n", recordset, unk );
+
+    hr = IUnknown_QueryInterface(unk, &IID_IRowset, (void**)&rowset);
+    if ( FAILED(hr) ) return E_FAIL;
+
+    if ( recordset->row_set ) IRowset_Release( recordset->row_set );
+    recordset->row_set = rowset;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI rsconstruction_get_Chapter(ADORecordsetConstruction *iface, LONG *chapter)
+{
+    struct recordset *recordset = impl_from_ADORecordsetConstruction( iface );
+    FIXME( "%p, %p\n", recordset, chapter );
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI rsconstruction_put_Chapter(ADORecordsetConstruction *iface, LONG chapter)
+{
+    struct recordset *recordset = impl_from_ADORecordsetConstruction( iface );
+    FIXME( "%p, %d\n", recordset, chapter );
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI rsconstruction_get_RowPosition(ADORecordsetConstruction *iface, IUnknown **row_pos)
+{
+    struct recordset *recordset = impl_from_ADORecordsetConstruction( iface );
+    FIXME( "%p, %p\n", recordset, row_pos );
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI rsconstruction_put_RowPosition(ADORecordsetConstruction *iface, IUnknown *row_pos)
+{
+    struct recordset *recordset = impl_from_ADORecordsetConstruction( iface );
+    FIXME( "%p, %p\n", recordset, row_pos );
+    return E_NOTIMPL;
+}
+
+static const ADORecordsetConstructionVtbl rsconstruction_vtbl =
+{
+    rsconstruction_QueryInterface,
+    rsconstruction_AddRef,
+    rsconstruction_Release,
+    rsconstruction_GetTypeInfoCount,
+    rsconstruction_GetTypeInfo,
+    rsconstruction_GetIDsOfNames,
+    rsconstruction_Invoke,
+    rsconstruction_get_Rowset,
+    rsconstruction_put_Rowset,
+    rsconstruction_get_Chapter,
+    rsconstruction_put_Chapter,
+    rsconstruction_get_RowPosition,
+    rsconstruction_put_RowPosition
+};
+
 HRESULT Recordset_create( void **obj )
 {
     struct recordset *recordset;
@@ -1522,8 +1695,12 @@ HRESULT Recordset_create( void **obj )
     if (!(recordset = heap_alloc_zero( sizeof(*recordset) ))) return E_OUTOFMEMORY;
     recordset->Recordset_iface.lpVtbl = &recordset_vtbl;
     recordset->ISupportErrorInfo_iface.lpVtbl = &recordset_supporterrorinfo_vtbl;
+    recordset->ADORecordsetConstruction_iface.lpVtbl = &rsconstruction_vtbl;
     recordset->refs = 1;
     recordset->index = -1;
+    recordset->cursor_location = adUseServer;
+    recordset->cursor_type = adOpenForwardOnly;
+    recordset->row_set = NULL;
 
     *obj = &recordset->Recordset_iface;
     TRACE( "returning iface %p\n", *obj );

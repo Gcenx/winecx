@@ -1137,14 +1137,41 @@ BOOL WINAPI IsOS(DWORD);
 #define FDTF_RTLDATE            0x00000200
 #define FDTF_NOAUTOREADINGORDER 0x00000400
 
+int WINAPI SHFormatDateTimeA(const FILETIME UNALIGNED *filetime, DWORD *flags, LPSTR buffer, UINT size);
+int WINAPI SHFormatDateTimeW(const FILETIME UNALIGNED *filetime, DWORD *flags, LPWSTR buffer, UINT size);
 
 typedef struct
 {
     const IID *piid;
-    int        dwOffset;
+    DWORD dwOffset;
 } QITAB, *LPQITAB;
 
 HRESULT WINAPI QISearch(void* base, const QITAB *pqit, REFIID riid, void **ppv);
+
+#define PLATFORM_UNKNOWN     0
+#define PLATFORM_IE3         1
+#define PLATFORM_BROWSERONLY 1
+#define PLATFORM_INTEGRATED  2
+
+UINT WINAPI WhichPlatform(void);
+
+#define SHGVSPB_PERUSER          0x00000001
+#define SHGVSPB_ALLUSERS         0x00000002
+#define SHGVSPB_PERFOLDER        0x00000004
+#define SHGVSPB_ALLFOLDERS       0x00000008
+#define SHGVSPB_INHERIT          0x00000010
+#define SHGVSPB_ROAM             0x00000020
+#define SHGVSPB_NOAUTODEFAULTS   0x80000000
+#define SHGVSPB_FOLDER           (SHGVSPB_PERUSER | SHGVSPB_PERFOLDER)
+#define SHGVSPB_FOLDERNODEFAULTS (SHGVSPB_PERUSER | SHGVSPB_PERFOLDER | SHGVSPB_NOAUTODEFAULTS)
+#define SHGVSPB_USERDEFAULTS     (SHGVSPB_PERUSER | SHGVSPB_ALLFOLDERS)
+#define SHGVSPB_GLOBALDEFAULTS   (SHGVSPB_ALLUSERS | SHGVSPB_ALLFOLDERS)
+
+HRESULT WINAPI SHGetViewStatePropertyBag(PCIDLIST_ABSOLUTE pidl, PCWSTR bagname, DWORD flags, REFIID riid, void **ppv);
+
+#define ILMM_IE4 0
+
+BOOL WINAPI SHIsLowMemoryMachine(DWORD type);
 
 #include <poppack.h> 
 

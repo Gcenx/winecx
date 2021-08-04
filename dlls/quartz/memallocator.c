@@ -166,6 +166,9 @@ static HRESULT WINAPI BaseMemAllocator_SetProperties(IMemAllocator * iface, ALLO
 
     TRACE("(%p)->(%p, %p)\n", This, pRequest, pActual);
 
+    TRACE("Requested %d buffers, size %d, alignment %d, prefix %d.\n",
+            pRequest->cBuffers, pRequest->cbBuffer, pRequest->cbAlign, pRequest->cbPrefix);
+
     EnterCriticalSection(This->pCritSect);
     {
         if (!list_empty(&This->used_list))
@@ -561,7 +564,8 @@ static HRESULT WINAPI StdMediaSample2_SetTime(IMediaSample2 *iface, REFERENCE_TI
 {
     StdMediaSample2 *sample = impl_from_IMediaSample2(iface);
 
-    TRACE("iface %p, start %p, end %p.\n", iface, start, end);
+    TRACE("sample %p, start %s, end %s.\n", sample, start ? debugstr_time(*start) : "(null)",
+            end ? debugstr_time(*end) : "(null)");
 
     if (start)
     {
@@ -742,7 +746,8 @@ static HRESULT WINAPI StdMediaSample2_SetMediaTime(IMediaSample2 *iface, LONGLON
 {
     StdMediaSample2 *sample = impl_from_IMediaSample2(iface);
 
-    TRACE("sample %p, start %p, end %p.\n", iface, start, end);
+    TRACE("sample %p, start %s, end %s.\n", sample, start ? debugstr_time(*start) : "(null)",
+            end ? debugstr_time(*end) : "(null)");
 
     if (start)
     {
@@ -906,15 +911,15 @@ static void StdMemAllocator_Destroy(IMemAllocator *iface)
     DeleteCriticalSection(&This->csState);
 
     CoTaskMemFree(This);
+
+    InterlockedDecrement(&object_locks);
 }
 
-HRESULT StdMemAllocator_create(LPUNKNOWN lpUnkOuter, LPVOID * ppv)
+HRESULT mem_allocator_create(IUnknown *lpUnkOuter, IUnknown **out)
 {
     StdMemAllocator * pMemAlloc;
     HRESULT hr;
 
-    *ppv = NULL;
-    
     if (lpUnkOuter)
         return CLASS_E_NOAGGREGATION;
 
@@ -927,7 +932,7 @@ HRESULT StdMemAllocator_create(LPUNKNOWN lpUnkOuter, LPVOID * ppv)
     pMemAlloc->pMemory = NULL;
 
     if (SUCCEEDED(hr = BaseMemAllocator_Init(StdMemAllocator_Alloc, StdMemAllocator_Free, NULL, NULL, NULL, StdMemAllocator_Destroy, &pMemAlloc->csState, &pMemAlloc->base)))
-        *ppv = pMemAlloc;
+        *out = (IUnknown *)&pMemAlloc->base.IMemAllocator_iface;
     else
         CoTaskMemFree(pMemAlloc);
 

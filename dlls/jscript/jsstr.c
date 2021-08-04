@@ -299,22 +299,29 @@ jsstr_t *jsstr_null_bstr(void)
     return jsstr_addref(null_bstr_str);
 }
 
-BOOL is_null_bstr(jsstr_t *str)
+HRESULT jsstr_to_bstr(jsstr_t *str, BSTR *r)
 {
-    return str == null_bstr_str;
+    if(str == null_bstr_str) {
+        *r = NULL;
+        return S_OK;
+    }
+
+    if(!(*r = SysAllocStringLen(NULL, jsstr_length(str))))
+        return E_OUTOFMEMORY;
+
+    jsstr_flush(str, *r);
+    return S_OK;
 }
 
 BOOL init_strings(void)
 {
-    static const WCHAR NaNW[] = { 'N','a','N',0 };
-    static const WCHAR undefinedW[] = {'u','n','d','e','f','i','n','e','d',0};
     WCHAR *ptr;
 
     if(!(empty_str = jsstr_alloc_buf(0, &ptr)))
         return FALSE;
-    if(!(nan_str = jsstr_alloc(NaNW)))
+    if(!(nan_str = jsstr_alloc(L"NaN")))
         return FALSE;
-    if(!(undefined_str = jsstr_alloc(undefinedW)))
+    if(!(undefined_str = jsstr_alloc(L"undefined")))
         return FALSE;
     if(!(null_bstr_str = jsstr_alloc_buf(0, &ptr)))
         return FALSE;

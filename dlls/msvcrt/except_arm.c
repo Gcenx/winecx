@@ -19,12 +19,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #ifdef __arm__
 
+#include <setjmp.h>
 #include <stdarg.h>
+#include <fpieee.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -116,7 +115,7 @@ __ASM_GLOBAL_FUNC(MSVCRT__setjmp,
 /*******************************************************************
  *		longjmp (MSVCRT.@)
  */
-void __cdecl MSVCRT_longjmp(struct MSVCRT___JUMP_BUFFER *jmp, int retval)
+void __cdecl MSVCRT_longjmp(_JUMP_BUFFER *jmp, int retval)
 {
     EXCEPTION_RECORD rec;
 
@@ -137,10 +136,10 @@ void __cdecl MSVCRT_longjmp(struct MSVCRT___JUMP_BUFFER *jmp, int retval)
 /*********************************************************************
  *              _fpieee_flt (MSVCRT.@)
  */
-int __cdecl _fpieee_flt(ULONG exception_code, EXCEPTION_POINTERS *ep,
+int __cdecl _fpieee_flt(__msvcrt_ulong exception_code, EXCEPTION_POINTERS *ep,
         int (__cdecl *handler)(_FPIEEE_RECORD*))
 {
-    FIXME("(%x %p %p)\n", exception_code, ep, handler);
+    FIXME("(%lx %p %p)\n", exception_code, ep, handler);
     return EXCEPTION_CONTINUE_SEARCH;
 }
 

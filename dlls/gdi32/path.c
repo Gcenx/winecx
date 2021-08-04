@@ -21,17 +21,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <assert.h>
 #include <math.h>
 #include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
-#if defined(HAVE_FLOAT_H)
 #include <float.h>
-#endif
 
 #include "windef.h"
 #include "winbase.h"
@@ -2217,9 +2212,9 @@ const struct gdi_dc_funcs path_driver =
     NULL,                               /* pSetArcDirection */
     NULL,                               /* pSetBkColor */
     NULL,                               /* pSetBkMode */
+    NULL,                               /* pSetBoundsRect */
     NULL,                               /* pSetDCBrushColor */
     NULL,                               /* pSetDCPenColor */
-    NULL,                               /* pSetDIBColorTable */
     NULL,                               /* pSetDIBitsToDevice */
     NULL,                               /* pSetDeviceClipping */
     NULL,                               /* pSetDeviceGammaRamp */

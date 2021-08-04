@@ -19,9 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <assert.h>
 #include <stdarg.h>
 
@@ -39,7 +36,6 @@
 #include "dde.h"
 #include "imm.h"
 #include "ddk/imm.h"
-#include "wine/unicode.h"
 #include "wine/server.h"
 #include "user_private.h"
 #include "win.h"
@@ -284,11 +280,9 @@ static const INPUT_MESSAGE_SOURCE msg_source_unavailable = { IMDT_UNAVAILABLE, I
 
 
 /* Message class descriptor */
-static const WCHAR messageW[] = {'M','e','s','s','a','g','e',0};
-
 const struct builtin_class_descr MESSAGE_builtin_class =
 {
-    messageW,             /* name */
+    L"Message",           /* name */
     0,                    /* style */
     WINPROC_MESSAGE,      /* proc */
     0,                    /* extra */
@@ -450,7 +444,7 @@ static inline void push_data( struct packed_message *data, const void *ptr, size
 /* add a string to a packed message */
 static inline void push_string( struct packed_message *data, LPCWSTR str )
 {
-    push_data( data, str, (strlenW(str) + 1) * sizeof(WCHAR) );
+    push_data( data, str, (lstrlenW(str) + 1) * sizeof(WCHAR) );
 }
 
 /* make sure that the buffer contains a valid null-terminated Unicode string */
@@ -558,7 +552,8 @@ LRESULT WINAPI MessageWndProc( HWND hwnd, UINT message, WPARAM wParam, LPARAM lP
 static BOOL CALLBACK broadcast_message_callback( HWND hwnd, LPARAM lparam )
 {
     struct send_message_info *info = (struct send_message_info *)lparam;
-    if (!(GetWindowLongW( hwnd, GWL_STYLE ) & (WS_POPUP|WS_CAPTION))) return TRUE;
+    if ((GetWindowLongW( hwnd, GWL_STYLE ) & (WS_POPUP|WS_CHILD)) == WS_CHILD)
+        return TRUE;
     switch(info->type)
     {
     case MSG_UNICODE:
@@ -1028,7 +1023,7 @@ static size_t pack_message( HWND hwnd, UINT message, WPARAM wparam, LPARAM lpara
     case WM_DEVICECHANGE:
     {
         DEV_BROADCAST_HDR *header = (DEV_BROADCAST_HDR *)lparam;
-        push_data( data, header, header->dbch_size );
+        if ((wparam & 0x8000) && header) push_data( data, header, header->dbch_size );
         return 0;
     }
     case WM_WINE_KEYBOARD_LL_HOOK:
@@ -1129,8 +1124,8 @@ static BOOL unpack_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lpa
         {
             if (!check_string( str, size )) return FALSE;
             cs.lpszName = str;
-            size -= (strlenW(str) + 1) * sizeof(WCHAR);
-            str += strlenW(str) + 1;
+            size -= (lstrlenW(str) + 1) * sizeof(WCHAR);
+            str += lstrlenW(str) + 1;
         }
         if (ps->cs.lpszClass >> 16)
         {
@@ -1415,8 +1410,8 @@ static BOOL unpack_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lpa
         {
             if (!check_string( str, size )) return FALSE;
             mcs.szClass = str;
-            size -= (strlenW(str) + 1) * sizeof(WCHAR);
-            str += strlenW(str) + 1;
+            size -= (lstrlenW(str) + 1) * sizeof(WCHAR);
+            str += lstrlenW(str) + 1;
         }
         if (ps->mcs.szTitle >> 16)
         {
@@ -1431,6 +1426,7 @@ static BOOL unpack_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lpa
         if (!get_buffer_space( buffer, sizeof(BOOL) )) return FALSE;
         break;
     case WM_DEVICECHANGE:
+        if (!(*wparam & 0x8000)) return TRUE;
         minsize = sizeof(DEV_BROADCAST_HDR);
         break;
     case WM_WINE_KEYBOARD_LL_HOOK:
@@ -1646,7 +1642,7 @@ static void pack_reply( HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
         break;
     }
     case WM_ASKCBFORMATNAME:
-        push_data( data, (WCHAR *)lparam, (strlenW((WCHAR *)lparam) + 1) * sizeof(WCHAR) );
+        push_data( data, (WCHAR *)lparam, (lstrlenW((WCHAR *)lparam) + 1) * sizeof(WCHAR) );
         break;
     }
 }
@@ -2271,12 +2267,11 @@ static void send_parent_notify( HWND hwnd, WORD event, WORD idChild, POINT pt )
  * Tell the server we have passed the message to the app
  * (even though we may end up dropping it later on)
  */
-static void accept_hardware_message( UINT hw_id, BOOL remove )
+static void accept_hardware_message( UINT hw_id )
 {
     SERVER_START_REQ( accept_hardware_message )
     {
-        req->hw_id   = hw_id;
-        req->remove  = remove;
+        req->hw_id = hw_id;
         if (wine_server_call( req ))
             FIXME("Failed to reply to MSG_HARDWARE message. Message may not be removed from queue.\n");
     }
@@ -2284,115 +2279,14 @@ static void accept_hardware_message( UINT hw_id, BOOL remove )
 }
 
 
-static BOOL process_rawinput_message( MSG *msg, const struct hardware_msg_data *msg_data )
+static BOOL process_rawinput_message( MSG *msg, UINT hw_id, const struct hardware_msg_data *msg_data )
 {
-    struct user_thread_info *thread_info = get_user_thread_info();
-    RAWINPUT *rawinput = thread_info->rawinput;
-
-    if (!rawinput)
-    {
-        thread_info->rawinput = HeapAlloc( GetProcessHeap(), 0, sizeof(*rawinput) );
-        if (!(rawinput = thread_info->rawinput)) return FALSE;
-    }
-
-    rawinput->header.dwType = msg_data->rawinput.type;
-    if (msg_data->rawinput.type == RIM_TYPEMOUSE)
-    {
-        static const unsigned int button_flags[] =
-        {
-            0,                              /* MOUSEEVENTF_MOVE */
-            RI_MOUSE_LEFT_BUTTON_DOWN,      /* MOUSEEVENTF_LEFTDOWN */
-            RI_MOUSE_LEFT_BUTTON_UP,        /* MOUSEEVENTF_LEFTUP */
-            RI_MOUSE_RIGHT_BUTTON_DOWN,     /* MOUSEEVENTF_RIGHTDOWN */
-            RI_MOUSE_RIGHT_BUTTON_UP,       /* MOUSEEVENTF_RIGHTUP */
-            RI_MOUSE_MIDDLE_BUTTON_DOWN,    /* MOUSEEVENTF_MIDDLEDOWN */
-            RI_MOUSE_MIDDLE_BUTTON_UP,      /* MOUSEEVENTF_MIDDLEUP */
-        };
-        unsigned int i;
-
-        rawinput->header.dwSize  = FIELD_OFFSET(RAWINPUT, data) + sizeof(RAWMOUSE);
-        rawinput->header.hDevice = WINE_MOUSE_HANDLE;
-        rawinput->header.wParam  = 0;
-
-        rawinput->data.mouse.usFlags           = MOUSE_MOVE_RELATIVE;
-        rawinput->data.mouse.u.s.usButtonFlags = 0;
-        rawinput->data.mouse.u.s.usButtonData  = 0;
-        for (i = 1; i < ARRAY_SIZE(button_flags); ++i)
-        {
-            if (msg_data->flags & (1 << i))
-                rawinput->data.mouse.u.s.usButtonFlags |= button_flags[i];
-        }
-        if (msg_data->flags & MOUSEEVENTF_WHEEL)
-        {
-            rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_WHEEL;
-            rawinput->data.mouse.u.s.usButtonData   = msg_data->rawinput.mouse.data;
-        }
-        if (msg_data->flags & MOUSEEVENTF_HWHEEL)
-        {
-            rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_HORIZONTAL_WHEEL;
-            rawinput->data.mouse.u.s.usButtonData   = msg_data->rawinput.mouse.data;
-        }
-        if (msg_data->flags & MOUSEEVENTF_XDOWN)
-        {
-            if (msg_data->rawinput.mouse.data == XBUTTON1)
-                rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_BUTTON_4_DOWN;
-            else if (msg_data->rawinput.mouse.data == XBUTTON2)
-                rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_BUTTON_5_DOWN;
-        }
-        if (msg_data->flags & MOUSEEVENTF_XUP)
-        {
-            if (msg_data->rawinput.mouse.data == XBUTTON1)
-                rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_BUTTON_4_UP;
-            else if (msg_data->rawinput.mouse.data == XBUTTON2)
-                rawinput->data.mouse.u.s.usButtonFlags |= RI_MOUSE_BUTTON_5_UP;
-        }
-
-        rawinput->data.mouse.ulRawButtons       = 0;
-        rawinput->data.mouse.lLastX             = msg_data->rawinput.mouse.x;
-        rawinput->data.mouse.lLastY             = msg_data->rawinput.mouse.y;
-        rawinput->data.mouse.ulExtraInformation = msg_data->info;
-    }
-    else if (msg_data->rawinput.type == RIM_TYPEKEYBOARD)
-    {
-        rawinput->header.dwSize  = FIELD_OFFSET(RAWINPUT, data) + sizeof(RAWKEYBOARD);
-        rawinput->header.hDevice = WINE_KEYBOARD_HANDLE;
-        rawinput->header.wParam  = 0;
-
-        rawinput->data.keyboard.MakeCode = msg_data->rawinput.kbd.scan;
-        rawinput->data.keyboard.Flags    = msg_data->flags & KEYEVENTF_KEYUP ? RI_KEY_BREAK : RI_KEY_MAKE;
-        if (msg_data->flags & KEYEVENTF_EXTENDEDKEY) rawinput->data.keyboard.Flags |= RI_KEY_E0;
-        rawinput->data.keyboard.Reserved = 0;
-
-        switch (msg_data->rawinput.kbd.vkey)
-        {
-        case VK_LSHIFT:
-        case VK_RSHIFT:
-            rawinput->data.keyboard.VKey   = VK_SHIFT;
-            rawinput->data.keyboard.Flags &= ~RI_KEY_E0;
-            break;
-        case VK_LCONTROL:
-        case VK_RCONTROL:
-            rawinput->data.keyboard.VKey = VK_CONTROL;
-            break;
-        case VK_LMENU:
-        case VK_RMENU:
-            rawinput->data.keyboard.VKey = VK_MENU;
-            break;
-        default:
-            rawinput->data.keyboard.VKey = msg_data->rawinput.kbd.vkey;
-            break;
-        }
-
-        rawinput->data.keyboard.Message          = msg_data->rawinput.kbd.message;
-        rawinput->data.keyboard.ExtraInformation = msg_data->info;
-    }
-    else
-    {
-        FIXME("Unhandled rawinput type %#x.\n", msg_data->rawinput.type);
+    struct rawinput_thread_data *thread_data = rawinput_thread_data();
+    if (!rawinput_from_hardware_message( thread_data->buffer, msg_data ))
         return FALSE;
-    }
 
-    msg->lParam = (LPARAM)rawinput;
+    thread_data->hw_id = hw_id;
+    msg->lParam = (LPARAM)hw_id;
     msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
     return TRUE;
 }
@@ -2465,10 +2359,10 @@ static BOOL process_keyboard_message( MSG *msg, UINT hw_id, HWND hwnd_filter,
     {
         /* skip this message */
         HOOK_CallHooks( WH_CBT, HCBT_KEYSKIPPED, LOWORD(msg->wParam), msg->lParam, TRUE );
-        accept_hardware_message( hw_id, TRUE );
+        accept_hardware_message( hw_id );
         return FALSE;
     }
-    accept_hardware_message( hw_id, remove );
+    if (remove) accept_hardware_message( hw_id );
     msg->pt = point_phys_to_win_dpi( msg->hwnd, msg->pt );
 
     if ( remove && msg->message == WM_KEYDOWN )
@@ -2523,7 +2417,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
 
     if (!msg->hwnd || !WIN_IsCurrentThread( msg->hwnd ))
     {
-        accept_hardware_message( hw_id, TRUE );
+        accept_hardware_message( hw_id );
         return FALSE;
     }
 
@@ -2619,7 +2513,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
         hook.s.dwExtraInfo  = extra_info;
         hook.mouseData      = msg->wParam;
         HOOK_CallHooks( WH_CBT, HCBT_CLICKSKIPPED, message, (LPARAM)&hook, TRUE );
-        accept_hardware_message( hw_id, TRUE );
+        accept_hardware_message( hw_id );
         return FALSE;
     }
 
@@ -2627,11 +2521,11 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
     {
         SendMessageW( msg->hwnd, WM_SETCURSOR, (WPARAM)msg->hwnd,
                       MAKELONG( hittest, msg->message ));
-        accept_hardware_message( hw_id, TRUE );
+        accept_hardware_message( hw_id );
         return FALSE;
     }
 
-    accept_hardware_message( hw_id, remove );
+    if (remove) accept_hardware_message( hw_id );
 
     if (!remove || info.hwndCapture)
     {
@@ -2713,7 +2607,7 @@ static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardwar
     context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
 
     if (msg->message == WM_INPUT)
-        ret = process_rawinput_message( msg, msg_data );
+        ret = process_rawinput_message( msg, hw_id, msg_data );
     else if (is_keyboard_message( msg->message ))
         ret = process_keyboard_message( msg, hw_id, hwnd_filter, first, last, remove );
     else if (is_mouse_message( msg->message ))
@@ -2832,6 +2726,9 @@ static int peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags,
             break;
         case MSG_NOTIFY:
             info.flags = ISMEX_NOTIFY;
+            if (!unpack_message( info.msg.hwnd, info.msg.message, &info.msg.wParam,
+                                 &info.msg.lParam, &buffer, size ))
+                continue;
             break;
         case MSG_CALLBACK:
             info.flags = ISMEX_CALLBACK;
@@ -3134,7 +3031,7 @@ static BOOL put_message_in_queue( const struct send_message_info *info, size_t *
     }
 
     memset( &data, 0, sizeof(data) );
-    if (info->type == MSG_OTHER_PROCESS)
+    if (info->type == MSG_OTHER_PROCESS || info->type == MSG_NOTIFY)
     {
         *reply_size = pack_message( info->hwnd, info->msg, info->wparam, info->lparam, &data );
         if (data.count == -1)

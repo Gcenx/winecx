@@ -26,8 +26,6 @@
 
 #undef INITGUID
 #include <guiddef.h>
-#include "mfapi.h"
-#include "mferror.h"
 #include "mfidl.h"
 
 #include "wine/debug.h"
@@ -61,6 +59,7 @@ struct topology_node
     MF_TOPOLOGY_TYPE node_type;
     TOPOID id;
     IUnknown *object;
+    IMFMediaType *input_type; /* Only for tee nodes. */
     struct node_streams inputs;
     struct node_streams outputs;
     CRITICAL_SECTION cs;
@@ -151,7 +150,7 @@ static HRESULT WINAPI topology_QueryInterface(IMFTopology *iface, REFIID riid, v
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s %p)\n", iface, debugstr_guid(riid), out);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), out);
 
     if (IsEqualIID(riid, &IID_IMFTopology) ||
             IsEqualIID(riid, &IID_IMFAttributes) ||
@@ -175,7 +174,7 @@ static ULONG WINAPI topology_AddRef(IMFTopology *iface)
     struct topology *topology = impl_from_IMFTopology(iface);
     ULONG refcount = InterlockedIncrement(&topology->refcount);
 
-    TRACE("(%p) refcount=%u\n", iface, refcount);
+    TRACE("%p, refcount %u.\n", iface, refcount);
 
     return refcount;
 }
@@ -285,7 +284,7 @@ static HRESULT WINAPI topology_GetItem(IMFTopology *iface, REFGUID key, PROPVARI
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), value);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), value);
 
     return IMFAttributes_GetItem(topology->attributes, key, value);
 }
@@ -294,7 +293,7 @@ static HRESULT WINAPI topology_GetItemType(IMFTopology *iface, REFGUID key, MF_A
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), type);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), type);
 
     return IMFAttributes_GetItemType(topology->attributes, key, type);
 }
@@ -303,7 +302,7 @@ static HRESULT WINAPI topology_CompareItem(IMFTopology *iface, REFGUID key, REFP
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %p, %p)\n", iface, debugstr_guid(key), value, result);
+    TRACE("%p, %s, %p, %p.\n", iface, debugstr_guid(key), value, result);
 
     return IMFAttributes_CompareItem(topology->attributes, key, value, result);
 }
@@ -313,7 +312,7 @@ static HRESULT WINAPI topology_Compare(IMFTopology *iface, IMFAttributes *theirs
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%p, %d, %p)\n", iface, theirs, type, result);
+    TRACE("%p, %p, %d, %p.\n", iface, theirs, type, result);
 
     return IMFAttributes_Compare(topology->attributes, theirs, type, result);
 }
@@ -322,7 +321,7 @@ static HRESULT WINAPI topology_GetUINT32(IMFTopology *iface, REFGUID key, UINT32
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), value);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), value);
 
     return IMFAttributes_GetUINT32(topology->attributes, key, value);
 }
@@ -331,7 +330,7 @@ static HRESULT WINAPI topology_GetUINT64(IMFTopology *iface, REFGUID key, UINT64
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), value);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), value);
 
     return IMFAttributes_GetUINT64(topology->attributes, key, value);
 }
@@ -340,7 +339,7 @@ static HRESULT WINAPI topology_GetDouble(IMFTopology *iface, REFGUID key, double
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), value);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), value);
 
     return IMFAttributes_GetDouble(topology->attributes, key, value);
 }
@@ -349,7 +348,7 @@ static HRESULT WINAPI topology_GetGUID(IMFTopology *iface, REFGUID key, GUID *va
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), value);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), value);
 
     return IMFAttributes_GetGUID(topology->attributes, key, value);
 }
@@ -358,7 +357,7 @@ static HRESULT WINAPI topology_GetStringLength(IMFTopology *iface, REFGUID key, 
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), length);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), length);
 
     return IMFAttributes_GetStringLength(topology->attributes, key, length);
 }
@@ -368,7 +367,7 @@ static HRESULT WINAPI topology_GetString(IMFTopology *iface, REFGUID key, WCHAR 
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %p, %d, %p)\n", iface, debugstr_guid(key), value, size, length);
+    TRACE("%p, %s, %p, %d, %p.\n", iface, debugstr_guid(key), value, size, length);
 
     return IMFAttributes_GetString(topology->attributes, key, value, size, length);
 }
@@ -378,7 +377,7 @@ static HRESULT WINAPI topology_GetAllocatedString(IMFTopology *iface, REFGUID ke
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %p, %p)\n", iface, debugstr_guid(key), value, length);
+    TRACE("%p, %s, %p, %p.\n", iface, debugstr_guid(key), value, length);
 
     return IMFAttributes_GetAllocatedString(topology->attributes, key, value, length);
 }
@@ -387,7 +386,7 @@ static HRESULT WINAPI topology_GetBlobSize(IMFTopology *iface, REFGUID key, UINT
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), size);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), size);
 
     return IMFAttributes_GetBlobSize(topology->attributes, key, size);
 }
@@ -397,7 +396,7 @@ static HRESULT WINAPI topology_GetBlob(IMFTopology *iface, REFGUID key, UINT8 *b
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %p, %d, %p)\n", iface, debugstr_guid(key), buf, bufsize, blobsize);
+    TRACE("%p, %s, %p, %d, %p.\n", iface, debugstr_guid(key), buf, bufsize, blobsize);
 
     return IMFAttributes_GetBlob(topology->attributes, key, buf, bufsize, blobsize);
 }
@@ -406,7 +405,7 @@ static HRESULT WINAPI topology_GetAllocatedBlob(IMFTopology *iface, REFGUID key,
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %p, %p)\n", iface, debugstr_guid(key), buf, size);
+    TRACE("%p, %s, %p, %p.\n", iface, debugstr_guid(key), buf, size);
 
     return IMFAttributes_GetAllocatedBlob(topology->attributes, key, buf, size);
 }
@@ -415,7 +414,7 @@ static HRESULT WINAPI topology_GetUnknown(IMFTopology *iface, REFGUID key, REFII
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %s, %p)\n", iface, debugstr_guid(key), debugstr_guid(riid), ppv);
+    TRACE("%p, %s, %s, %p.\n", iface, debugstr_guid(key), debugstr_guid(riid), ppv);
 
     return IMFAttributes_GetUnknown(topology->attributes, key, riid, ppv);
 }
@@ -424,7 +423,7 @@ static HRESULT WINAPI topology_SetItem(IMFTopology *iface, REFGUID key, REFPROPV
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), value);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), value);
 
     return IMFAttributes_SetItem(topology->attributes, key, value);
 }
@@ -433,7 +432,7 @@ static HRESULT WINAPI topology_DeleteItem(IMFTopology *iface, REFGUID key)
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s)\n", topology, debugstr_guid(key));
+    TRACE("%p, %s.\n", topology, debugstr_guid(key));
 
     return IMFAttributes_DeleteItem(topology->attributes, key);
 }
@@ -442,7 +441,7 @@ static HRESULT WINAPI topology_DeleteAllItems(IMFTopology *iface)
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)\n", iface);
+    TRACE("%p.\n", iface);
 
     return IMFAttributes_DeleteAllItems(topology->attributes);
 }
@@ -451,7 +450,7 @@ static HRESULT WINAPI topology_SetUINT32(IMFTopology *iface, REFGUID key, UINT32
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %d)\n", iface, debugstr_guid(key), value);
+    TRACE("%p, %s, %d.\n", iface, debugstr_guid(key), value);
 
     return IMFAttributes_SetUINT32(topology->attributes, key, value);
 }
@@ -460,7 +459,7 @@ static HRESULT WINAPI topology_SetUINT64(IMFTopology *iface, REFGUID key, UINT64
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %s)\n", iface, debugstr_guid(key), wine_dbgstr_longlong(value));
+    TRACE("%p, %s, %s.\n", iface, debugstr_guid(key), wine_dbgstr_longlong(value));
 
     return IMFAttributes_SetUINT64(topology->attributes, key, value);
 }
@@ -469,7 +468,7 @@ static HRESULT WINAPI topology_SetDouble(IMFTopology *iface, REFGUID key, double
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %f)\n", iface, debugstr_guid(key), value);
+    TRACE("%p, %s, %f.\n", iface, debugstr_guid(key), value);
 
     return IMFAttributes_SetDouble(topology->attributes, key, value);
 }
@@ -478,7 +477,7 @@ static HRESULT WINAPI topology_SetGUID(IMFTopology *iface, REFGUID key, REFGUID 
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %s)\n", iface, debugstr_guid(key), debugstr_guid(value));
+    TRACE("%p, %s, %s.\n", iface, debugstr_guid(key), debugstr_guid(value));
 
     return IMFAttributes_SetGUID(topology->attributes, key, value);
 }
@@ -487,7 +486,7 @@ static HRESULT WINAPI topology_SetString(IMFTopology *iface, REFGUID key, const 
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %s)\n", iface, debugstr_guid(key), debugstr_w(value));
+    TRACE("%p, %s, %s.\n", iface, debugstr_guid(key), debugstr_w(value));
 
     return IMFAttributes_SetString(topology->attributes, key, value);
 }
@@ -496,7 +495,7 @@ static HRESULT WINAPI topology_SetBlob(IMFTopology *iface, REFGUID key, const UI
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %p, %d)\n", iface, debugstr_guid(key), buf, size);
+    TRACE("%p, %s, %p, %d.\n", iface, debugstr_guid(key), buf, size);
 
     return IMFAttributes_SetBlob(topology->attributes, key, buf, size);
 }
@@ -505,7 +504,7 @@ static HRESULT WINAPI topology_SetUnknown(IMFTopology *iface, REFGUID key, IUnkn
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), unknown);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), unknown);
 
     return IMFAttributes_SetUnknown(topology->attributes, key, unknown);
 }
@@ -514,7 +513,7 @@ static HRESULT WINAPI topology_LockStore(IMFTopology *iface)
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)\n", iface);
+    TRACE("%p.\n", iface);
 
     return IMFAttributes_LockStore(topology->attributes);
 }
@@ -523,7 +522,7 @@ static HRESULT WINAPI topology_UnlockStore(IMFTopology *iface)
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)\n", iface);
+    TRACE("%p.\n", iface);
 
     return IMFAttributes_UnlockStore(topology->attributes);
 }
@@ -532,7 +531,7 @@ static HRESULT WINAPI topology_GetCount(IMFTopology *iface, UINT32 *count)
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%p)\n", iface, count);
+    TRACE("%p, %p.\n", iface, count);
 
     return IMFAttributes_GetCount(topology->attributes, count);
 }
@@ -541,7 +540,7 @@ static HRESULT WINAPI topology_GetItemByIndex(IMFTopology *iface, UINT32 index, 
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%u, %p, %p)\n", iface, index, key, value);
+    TRACE("%p, %u, %p, %p.\n", iface, index, key, value);
 
     return IMFAttributes_GetItemByIndex(topology->attributes, index, key, value);
 }
@@ -550,7 +549,7 @@ static HRESULT WINAPI topology_CopyAllItems(IMFTopology *iface, IMFAttributes *d
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%p)\n", iface, dest);
+    TRACE("%p, %p.\n", iface, dest);
 
     return IMFAttributes_CopyAllItems(topology->attributes, dest);
 }
@@ -559,7 +558,7 @@ static HRESULT WINAPI topology_GetTopologyID(IMFTopology *iface, TOPOID *id)
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%p)\n", iface, id);
+    TRACE("%p, %p.\n", iface, id);
 
     if (!id)
         return E_POINTER;
@@ -792,7 +791,7 @@ static HRESULT WINAPI topology_GetSourceNodeCollection(IMFTopology *iface, IMFCo
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%p)\n", iface, collection);
+    TRACE("%p, %p.\n", iface, collection);
 
     return topology_get_node_collection(topology, MF_TOPOLOGY_SOURCESTREAM_NODE, collection);
 }
@@ -801,7 +800,7 @@ static HRESULT WINAPI topology_GetOutputNodeCollection(IMFTopology *iface, IMFCo
 {
     struct topology *topology = impl_from_IMFTopology(iface);
 
-    TRACE("(%p)->(%p)\n", iface, collection);
+    TRACE("%p, %p.\n", iface, collection);
 
     return topology_get_node_collection(topology, MF_TOPOLOGY_OUTPUT_NODE, collection);
 }
@@ -881,7 +880,7 @@ HRESULT WINAPI MFCreateTopology(IMFTopology **topology)
     struct topology *object;
     HRESULT hr;
 
-    TRACE("(%p)\n", topology);
+    TRACE("%p.\n", topology);
 
     if (!topology)
         return E_POINTER;
@@ -911,7 +910,7 @@ static HRESULT WINAPI topology_node_QueryInterface(IMFTopologyNode *iface, REFII
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s %p)\n", iface, debugstr_guid(riid), out);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), out);
 
     if (IsEqualIID(riid, &IID_IMFTopologyNode) ||
             IsEqualIID(riid, &IID_IMFAttributes) ||
@@ -922,7 +921,7 @@ static HRESULT WINAPI topology_node_QueryInterface(IMFTopologyNode *iface, REFII
         return S_OK;
     }
 
-    WARN("Unsupported %s.\n", debugstr_guid(riid));
+    WARN("Unsupported interface %s.\n", debugstr_guid(riid));
     *out = NULL;
 
     return E_NOINTERFACE;
@@ -933,7 +932,7 @@ static ULONG WINAPI topology_node_AddRef(IMFTopologyNode *iface)
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
     ULONG refcount = InterlockedIncrement(&node->refcount);
 
-    TRACE("(%p) refcount=%u\n", iface, refcount);
+    TRACE("%p, refcount %u.\n", iface, refcount);
 
     return refcount;
 }
@@ -944,12 +943,14 @@ static ULONG WINAPI topology_node_Release(IMFTopologyNode *iface)
     ULONG refcount = InterlockedDecrement(&node->refcount);
     unsigned int i;
 
-    TRACE("(%p) refcount=%u\n", iface, refcount);
+    TRACE("%p, refcount %u.\n", iface, refcount);
 
     if (!refcount)
     {
         if (node->object)
             IUnknown_Release(node->object);
+        if (node->input_type)
+            IMFMediaType_Release(node->input_type);
         for (i = 0; i < node->inputs.count; ++i)
         {
             if (node->inputs.streams[i].preferred_type)
@@ -974,7 +975,7 @@ static HRESULT WINAPI topology_node_GetItem(IMFTopologyNode *iface, REFGUID key,
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), value);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), value);
 
     return IMFAttributes_GetItem(node->attributes, key, value);
 }
@@ -983,7 +984,7 @@ static HRESULT WINAPI topology_node_GetItemType(IMFTopologyNode *iface, REFGUID 
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), type);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), type);
 
     return IMFAttributes_GetItemType(node->attributes, key, type);
 }
@@ -992,7 +993,7 @@ static HRESULT WINAPI topology_node_CompareItem(IMFTopologyNode *iface, REFGUID 
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %p, %p)\n", iface, debugstr_guid(key), value, result);
+    TRACE("%p, %s, %p, %p.\n", iface, debugstr_guid(key), value, result);
 
     return IMFAttributes_CompareItem(node->attributes, key, value, result);
 }
@@ -1002,7 +1003,7 @@ static HRESULT WINAPI topology_node_Compare(IMFTopologyNode *iface, IMFAttribute
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%p, %d, %p)\n", iface, theirs, type, result);
+    TRACE("%p, %p, %d, %p.\n", iface, theirs, type, result);
 
     return IMFAttributes_Compare(node->attributes, theirs, type, result);
 }
@@ -1011,7 +1012,7 @@ static HRESULT WINAPI topology_node_GetUINT32(IMFTopologyNode *iface, REFGUID ke
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), value);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), value);
 
     return IMFAttributes_GetUINT32(node->attributes, key, value);
 }
@@ -1020,7 +1021,7 @@ static HRESULT WINAPI topology_node_GetUINT64(IMFTopologyNode *iface, REFGUID ke
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), value);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), value);
 
     return IMFAttributes_GetUINT64(node->attributes, key, value);
 }
@@ -1029,7 +1030,7 @@ static HRESULT WINAPI topology_node_GetDouble(IMFTopologyNode *iface, REFGUID ke
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), value);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), value);
 
     return IMFAttributes_GetDouble(node->attributes, key, value);
 }
@@ -1038,7 +1039,7 @@ static HRESULT WINAPI topology_node_GetGUID(IMFTopologyNode *iface, REFGUID key,
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), value);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), value);
 
     return IMFAttributes_GetGUID(node->attributes, key, value);
 }
@@ -1047,7 +1048,7 @@ static HRESULT WINAPI topology_node_GetStringLength(IMFTopologyNode *iface, REFG
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), length);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), length);
 
     return IMFAttributes_GetStringLength(node->attributes, key, length);
 }
@@ -1057,7 +1058,7 @@ static HRESULT WINAPI topology_node_GetString(IMFTopologyNode *iface, REFGUID ke
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %p, %d, %p)\n", iface, debugstr_guid(key), value, size, length);
+    TRACE("%p, %s, %p, %d, %p.\n", iface, debugstr_guid(key), value, size, length);
 
     return IMFAttributes_GetString(node->attributes, key, value, size, length);
 }
@@ -1067,7 +1068,7 @@ static HRESULT WINAPI topology_node_GetAllocatedString(IMFTopologyNode *iface, R
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %p, %p)\n", iface, debugstr_guid(key), value, length);
+    TRACE("%p, %s, %p, %p.\n", iface, debugstr_guid(key), value, length);
 
     return IMFAttributes_GetAllocatedString(node->attributes, key, value, length);
 }
@@ -1076,7 +1077,7 @@ static HRESULT WINAPI topology_node_GetBlobSize(IMFTopologyNode *iface, REFGUID 
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), size);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), size);
 
     return IMFAttributes_GetBlobSize(node->attributes, key, size);
 }
@@ -1086,7 +1087,7 @@ static HRESULT WINAPI topology_node_GetBlob(IMFTopologyNode *iface, REFGUID key,
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %p, %d, %p)\n", iface, debugstr_guid(key), buf, bufsize, blobsize);
+    TRACE("%p, %s, %p, %d, %p.\n", iface, debugstr_guid(key), buf, bufsize, blobsize);
 
     return IMFAttributes_GetBlob(node->attributes, key, buf, bufsize, blobsize);
 }
@@ -1095,7 +1096,7 @@ static HRESULT WINAPI topology_node_GetAllocatedBlob(IMFTopologyNode *iface, REF
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %p, %p)\n", iface, debugstr_guid(key), buf, size);
+    TRACE("%p, %s, %p, %p.\n", iface, debugstr_guid(key), buf, size);
 
     return IMFAttributes_GetAllocatedBlob(node->attributes, key, buf, size);
 }
@@ -1104,7 +1105,7 @@ static HRESULT WINAPI topology_node_GetUnknown(IMFTopologyNode *iface, REFGUID k
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %s, %p)\n", iface, debugstr_guid(key), debugstr_guid(riid), ppv);
+    TRACE("%p, %s, %s, %p.\n", iface, debugstr_guid(key), debugstr_guid(riid), ppv);
 
     return IMFAttributes_GetUnknown(node->attributes, key, riid, ppv);
 }
@@ -1113,7 +1114,7 @@ static HRESULT WINAPI topology_node_SetItem(IMFTopologyNode *iface, REFGUID key,
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), value);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), value);
 
     return IMFAttributes_SetItem(node->attributes, key, value);
 }
@@ -1122,7 +1123,7 @@ static HRESULT WINAPI topology_node_DeleteItem(IMFTopologyNode *iface, REFGUID k
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s)\n", iface, debugstr_guid(key));
+    TRACE("%p, %s.\n", iface, debugstr_guid(key));
 
     return IMFAttributes_DeleteItem(node->attributes, key);
 }
@@ -1131,7 +1132,7 @@ static HRESULT WINAPI topology_node_DeleteAllItems(IMFTopologyNode *iface)
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)\n", iface);
+    TRACE("%p.\n", iface);
 
     return IMFAttributes_DeleteAllItems(node->attributes);
 }
@@ -1140,7 +1141,7 @@ static HRESULT WINAPI topology_node_SetUINT32(IMFTopologyNode *iface, REFGUID ke
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %d)\n", iface, debugstr_guid(key), value);
+    TRACE("%p, %s, %d.\n", iface, debugstr_guid(key), value);
 
     return IMFAttributes_SetUINT32(node->attributes, key, value);
 }
@@ -1149,7 +1150,7 @@ static HRESULT WINAPI topology_node_SetUINT64(IMFTopologyNode *iface, REFGUID ke
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %s)\n", iface, debugstr_guid(key), wine_dbgstr_longlong(value));
+    TRACE("%p, %s, %s.\n", iface, debugstr_guid(key), wine_dbgstr_longlong(value));
 
     return IMFAttributes_SetUINT64(node->attributes, key, value);
 }
@@ -1158,7 +1159,7 @@ static HRESULT WINAPI topology_node_SetDouble(IMFTopologyNode *iface, REFGUID ke
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %f)\n", iface, debugstr_guid(key), value);
+    TRACE("%p, %s, %f.\n", iface, debugstr_guid(key), value);
 
     return IMFAttributes_SetDouble(node->attributes, key, value);
 }
@@ -1167,7 +1168,7 @@ static HRESULT WINAPI topology_node_SetGUID(IMFTopologyNode *iface, REFGUID key,
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %s)\n", iface, debugstr_guid(key), debugstr_guid(value));
+    TRACE("%p, %s, %s.\n", iface, debugstr_guid(key), debugstr_guid(value));
 
     return IMFAttributes_SetGUID(node->attributes, key, value);
 }
@@ -1176,7 +1177,7 @@ static HRESULT WINAPI topology_node_SetString(IMFTopologyNode *iface, REFGUID ke
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %s)\n", iface, debugstr_guid(key), debugstr_w(value));
+    TRACE("%p, %s, %s.\n", iface, debugstr_guid(key), debugstr_w(value));
 
     return IMFAttributes_SetString(node->attributes, key, value);
 }
@@ -1185,7 +1186,7 @@ static HRESULT WINAPI topology_node_SetBlob(IMFTopologyNode *iface, REFGUID key,
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %p, %d)\n", iface, debugstr_guid(key), buf, size);
+    TRACE("%p, %s, %p, %d.\n", iface, debugstr_guid(key), buf, size);
 
     return IMFAttributes_SetBlob(node->attributes, key, buf, size);
 }
@@ -1194,7 +1195,7 @@ static HRESULT WINAPI topology_node_SetUnknown(IMFTopologyNode *iface, REFGUID k
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(key), unknown);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(key), unknown);
 
     return IMFAttributes_SetUnknown(node->attributes, key, unknown);
 }
@@ -1203,7 +1204,7 @@ static HRESULT WINAPI topology_node_LockStore(IMFTopologyNode *iface)
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)\n", iface);
+    TRACE("%p.\n", iface);
 
     return IMFAttributes_LockStore(node->attributes);
 }
@@ -1212,7 +1213,7 @@ static HRESULT WINAPI topology_node_UnlockStore(IMFTopologyNode *iface)
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)\n", iface);
+    TRACE("%p.\n", iface);
 
     return IMFAttributes_UnlockStore(node->attributes);
 }
@@ -1221,7 +1222,7 @@ static HRESULT WINAPI topology_node_GetCount(IMFTopologyNode *iface, UINT32 *cou
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%p)\n", iface, count);
+    TRACE("%p, %p.\n", iface, count);
 
     return IMFAttributes_GetCount(node->attributes, count);
 }
@@ -1230,7 +1231,7 @@ static HRESULT WINAPI topology_node_GetItemByIndex(IMFTopologyNode *iface, UINT3
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%u, %p, %p)\n", iface, index, key, value);
+    TRACE("%p, %u, %p, %p.\n", iface, index, key, value);
 
     return IMFAttributes_GetItemByIndex(node->attributes, index, key, value);
 }
@@ -1239,7 +1240,7 @@ static HRESULT WINAPI topology_node_CopyAllItems(IMFTopologyNode *iface, IMFAttr
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%p)\n", iface, dest);
+    TRACE("%p, %p.\n", iface, dest);
 
     return IMFAttributes_CopyAllItems(node->attributes, dest);
 }
@@ -1326,7 +1327,7 @@ static HRESULT WINAPI topology_node_GetNodeType(IMFTopologyNode *iface, MF_TOPOL
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%p)\n", iface, node_type);
+    TRACE("%p, %p.\n", iface, node_type);
 
     *node_type = node->node_type;
 
@@ -1337,7 +1338,7 @@ static HRESULT WINAPI topology_node_GetTopoNodeID(IMFTopologyNode *iface, TOPOID
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%p)\n", iface, id);
+    TRACE("%p, %p.\n", iface, id);
 
     *id = node->id;
 
@@ -1348,7 +1349,7 @@ static HRESULT WINAPI topology_node_SetTopoNodeID(IMFTopologyNode *iface, TOPOID
 {
     struct topology_node *node = impl_from_IMFTopologyNode(iface);
 
-    TRACE("(%p)->(%s)\n", iface, wine_dbgstr_longlong(id));
+    TRACE("%p, %s.\n", iface, wine_dbgstr_longlong(id));
 
     node->id = id;
 
@@ -1361,14 +1362,7 @@ static HRESULT WINAPI topology_node_GetInputCount(IMFTopologyNode *iface, DWORD 
 
     TRACE("%p, %p.\n", iface, count);
 
-    switch (node->node_type)
-    {
-        case MF_TOPOLOGY_TEE_NODE:
-            *count = 0;
-            break;
-        default:
-            *count = node->inputs.count;
-    }
+    *count = node->inputs.count;
 
     return S_OK;
 }
@@ -1382,6 +1376,15 @@ static HRESULT WINAPI topology_node_GetOutputCount(IMFTopologyNode *iface, DWORD
     *count = node->outputs.count;
 
     return S_OK;
+}
+
+static void topology_node_set_stream_type(struct node_stream *stream, IMFMediaType *mediatype)
+{
+    if (stream->preferred_type)
+        IMFMediaType_Release(stream->preferred_type);
+    stream->preferred_type = mediatype;
+    if (stream->preferred_type)
+        IMFMediaType_AddRef(stream->preferred_type);
 }
 
 static HRESULT topology_node_connect_output(struct topology_node *node, DWORD output_index,
@@ -1406,7 +1409,16 @@ static HRESULT topology_node_connect_output(struct topology_node *node, DWORD ou
 
     hr = topology_node_reserve_streams(&node->outputs, output_index);
     if (SUCCEEDED(hr))
+    {
+        size_t old_count = connection->inputs.count;
         hr = topology_node_reserve_streams(&connection->inputs, input_index);
+        if (SUCCEEDED(hr) && !old_count && connection->input_type)
+        {
+            topology_node_set_stream_type(connection->inputs.streams, connection->input_type);
+            IMFMediaType_Release(connection->input_type);
+            connection->input_type = NULL;
+        }
+    }
 
     if (SUCCEEDED(hr))
     {
@@ -1524,13 +1536,7 @@ static HRESULT WINAPI topology_node_SetOutputPrefType(IMFTopologyNode *iface, DW
     if (node->node_type != MF_TOPOLOGY_OUTPUT_NODE)
     {
         if (SUCCEEDED(hr = topology_node_reserve_streams(&node->outputs, index)))
-        {
-            if (node->outputs.streams[index].preferred_type)
-                IMFMediaType_Release(node->outputs.streams[index].preferred_type);
-            node->outputs.streams[index].preferred_type = mediatype;
-            if (node->outputs.streams[index].preferred_type)
-                IMFMediaType_AddRef(node->outputs.streams[index].preferred_type);
-        }
+            topology_node_set_stream_type(&node->outputs.streams[index], mediatype);
     }
     else
         hr = E_NOTIMPL;
@@ -1538,6 +1544,18 @@ static HRESULT WINAPI topology_node_SetOutputPrefType(IMFTopologyNode *iface, DW
     LeaveCriticalSection(&node->cs);
 
     return hr;
+}
+
+static HRESULT topology_node_get_pref_type(struct node_streams *streams, unsigned int index, IMFMediaType **mediatype)
+{
+    *mediatype = streams->streams[index].preferred_type;
+    if (*mediatype)
+    {
+        IMFMediaType_AddRef(*mediatype);
+        return S_OK;
+    }
+
+    return E_FAIL;
 }
 
 static HRESULT WINAPI topology_node_GetOutputPrefType(IMFTopologyNode *iface, DWORD index, IMFMediaType **mediatype)
@@ -1550,13 +1568,7 @@ static HRESULT WINAPI topology_node_GetOutputPrefType(IMFTopologyNode *iface, DW
     EnterCriticalSection(&node->cs);
 
     if (index < node->outputs.count)
-    {
-        *mediatype = node->outputs.streams[index].preferred_type;
-        if (*mediatype)
-            IMFMediaType_AddRef(*mediatype);
-        else
-            hr = E_FAIL;
-    }
+        hr = topology_node_get_pref_type(&node->outputs, index, mediatype);
     else
         hr = E_INVALIDARG;
 
@@ -1574,25 +1586,32 @@ static HRESULT WINAPI topology_node_SetInputPrefType(IMFTopologyNode *iface, DWO
 
     EnterCriticalSection(&node->cs);
 
-    if (node->node_type != MF_TOPOLOGY_SOURCESTREAM_NODE && !(index > 0 && node->node_type == MF_TOPOLOGY_TEE_NODE))
+    switch (node->node_type)
     {
-        if (SUCCEEDED(hr = topology_node_reserve_streams(&node->inputs, index)))
-        {
-            if (index >= node->inputs.count)
+        case MF_TOPOLOGY_TEE_NODE:
+            if (index)
             {
-                memset(&node->inputs.streams[node->inputs.count], 0,
-                        (index - node->inputs.count + 1) * sizeof(*node->inputs.streams));
-                node->inputs.count = index + 1;
+                hr = MF_E_INVALIDTYPE;
+                break;
             }
-            if (node->inputs.streams[index].preferred_type)
-                IMFMediaType_Release(node->inputs.streams[index].preferred_type);
-            node->inputs.streams[index].preferred_type = mediatype;
-            if (node->inputs.streams[index].preferred_type)
-                IMFMediaType_AddRef(node->inputs.streams[index].preferred_type);
-        }
+            if (node->inputs.count)
+                topology_node_set_stream_type(&node->inputs.streams[index], mediatype);
+            else
+            {
+                if (node->input_type)
+                    IMFMediaType_Release(node->input_type);
+                node->input_type = mediatype;
+                if (node->input_type)
+                    IMFMediaType_AddRef(node->input_type);
+            }
+            break;
+        case MF_TOPOLOGY_SOURCESTREAM_NODE:
+            hr = E_NOTIMPL;
+            break;
+        default:
+            if (SUCCEEDED(hr = topology_node_reserve_streams(&node->inputs, index)))
+                topology_node_set_stream_type(&node->inputs.streams[index], mediatype);
     }
-    else
-        hr = node->node_type == MF_TOPOLOGY_TEE_NODE ? MF_E_INVALIDTYPE : E_NOTIMPL;
 
     LeaveCriticalSection(&node->cs);
 
@@ -1610,11 +1629,12 @@ static HRESULT WINAPI topology_node_GetInputPrefType(IMFTopologyNode *iface, DWO
 
     if (index < node->inputs.count)
     {
-        *mediatype = node->inputs.streams[index].preferred_type;
-        if (*mediatype)
-            IMFMediaType_AddRef(*mediatype);
-        else
-            hr = E_FAIL;
+        hr = topology_node_get_pref_type(&node->inputs, index, mediatype);
+    }
+    else if (node->node_type == MF_TOPOLOGY_TEE_NODE && node->input_type)
+    {
+        *mediatype = node->input_type;
+        IMFMediaType_AddRef(*mediatype);
     }
     else
         hr = E_INVALIDARG;
@@ -1786,6 +1806,91 @@ HRESULT WINAPI MFCreateTopologyNode(MF_TOPOLOGY_TYPE node_type, IMFTopologyNode 
     return hr;
 }
 
+/***********************************************************************
+ *      MFGetTopoNodeCurrentType (mf.@)
+ */
+HRESULT WINAPI MFGetTopoNodeCurrentType(IMFTopologyNode *node, DWORD stream, BOOL output, IMFMediaType **type)
+{
+    IMFMediaTypeHandler *type_handler;
+    MF_TOPOLOGY_TYPE node_type;
+    IMFStreamSink *stream_sink;
+    IMFStreamDescriptor *sd;
+    IMFTransform *transform;
+    UINT32 primary_output;
+    IUnknown *object;
+    HRESULT hr;
+
+    TRACE("%p, %u, %d, %p.\n", node, stream, output, type);
+
+    if (FAILED(hr = IMFTopologyNode_GetNodeType(node, &node_type)))
+        return hr;
+
+    switch (node_type)
+    {
+        case MF_TOPOLOGY_OUTPUT_NODE:
+            if (FAILED(hr = IMFTopologyNode_GetObject(node, &object)))
+                return hr;
+
+            hr = IUnknown_QueryInterface(object, &IID_IMFStreamSink, (void **)&stream_sink);
+            IUnknown_Release(object);
+            if (SUCCEEDED(hr))
+            {
+                hr = IMFStreamSink_GetMediaTypeHandler(stream_sink, &type_handler);
+                IMFStreamSink_Release(stream_sink);
+
+                if (SUCCEEDED(hr))
+                {
+                    hr = IMFMediaTypeHandler_GetCurrentMediaType(type_handler, type);
+                    IMFMediaTypeHandler_Release(type_handler);
+                }
+            }
+            break;
+        case MF_TOPOLOGY_SOURCESTREAM_NODE:
+            if (FAILED(hr = IMFTopologyNode_GetUnknown(node, &MF_TOPONODE_STREAM_DESCRIPTOR, &IID_IMFStreamDescriptor,
+                    (void **)&sd)))
+            {
+                return hr;
+            }
+
+            hr = IMFStreamDescriptor_GetMediaTypeHandler(sd, &type_handler);
+            IMFStreamDescriptor_Release(sd);
+            if (SUCCEEDED(hr))
+            {
+                hr = IMFMediaTypeHandler_GetCurrentMediaType(type_handler, type);
+                IMFMediaTypeHandler_Release(type_handler);
+            }
+            break;
+        case MF_TOPOLOGY_TRANSFORM_NODE:
+            if (FAILED(hr = IMFTopologyNode_GetObject(node, &object)))
+                return hr;
+
+            hr = IUnknown_QueryInterface(object, &IID_IMFTransform, (void **)&transform);
+            IUnknown_Release(object);
+            if (SUCCEEDED(hr))
+            {
+                if (output)
+                    hr = IMFTransform_GetOutputCurrentType(transform, stream, type);
+                else
+                    hr = IMFTransform_GetInputCurrentType(transform, stream, type);
+                IMFTransform_Release(transform);
+            }
+            break;
+        case MF_TOPOLOGY_TEE_NODE:
+            if (SUCCEEDED(hr = IMFTopologyNode_GetInputPrefType(node, 0, type)))
+                break;
+
+            if (FAILED(IMFTopologyNode_GetUINT32(node, &MF_TOPONODE_PRIMARYOUTPUT, &primary_output)))
+                primary_output = 0;
+
+            hr = IMFTopologyNode_GetOutputPrefType(node, primary_output, type);
+            break;
+        default:
+            ;
+    }
+
+    return hr;
+}
+
 static HRESULT WINAPI topology_loader_QueryInterface(IMFTopoLoader *iface, REFIID riid, void **out)
 {
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), out);
@@ -1808,7 +1913,7 @@ static ULONG WINAPI topology_loader_AddRef(IMFTopoLoader *iface)
     struct topology_loader *loader = impl_from_IMFTopoLoader(iface);
     ULONG refcount = InterlockedIncrement(&loader->refcount);
 
-    TRACE("(%p) refcount=%u\n", iface, refcount);
+    TRACE("%p, refcount %u.\n", iface, refcount);
 
     return refcount;
 }
@@ -1818,7 +1923,7 @@ static ULONG WINAPI topology_loader_Release(IMFTopoLoader *iface)
     struct topology_loader *loader = impl_from_IMFTopoLoader(iface);
     ULONG refcount = InterlockedDecrement(&loader->refcount);
 
-    TRACE("(%p) refcount=%u\n", iface, refcount);
+    TRACE("%p, refcount %u.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -1828,47 +1933,677 @@ static ULONG WINAPI topology_loader_Release(IMFTopoLoader *iface)
     return refcount;
 }
 
-static HRESULT WINAPI topology_loader_Load(IMFTopoLoader *iface, IMFTopology *input_topology,
-        IMFTopology **output_topology, IMFTopology *current_topology)
+struct topoloader_context
 {
-    struct topology *topology = unsafe_impl_from_IMFTopology(input_topology);
-    IMFStreamSink *sink;
-    HRESULT hr;
-    size_t i;
+    IMFTopology *input_topology;
+    IMFTopology *output_topology;
+    unsigned int marker;
+    GUID key;
+};
 
-    FIXME("%p, %p, %p, %p.\n", iface, input_topology, output_topology, current_topology);
+static IMFTopologyNode *topology_loader_get_node_for_marker(struct topoloader_context *context, TOPOID *id)
+{
+    IMFTopologyNode *node;
+    unsigned short i = 0;
+    unsigned int value;
+
+    while (SUCCEEDED(IMFTopology_GetNode(context->output_topology, i++, &node)))
+    {
+        if (SUCCEEDED(IMFTopologyNode_GetUINT32(node, &context->key, &value)) && value == context->marker)
+        {
+            IMFTopologyNode_GetTopoNodeID(node, id);
+            return node;
+        }
+        IMFTopologyNode_Release(node);
+    }
+
+    *id = 0;
+    return NULL;
+}
+
+static HRESULT topology_loader_clone_node(struct topoloader_context *context, IMFTopologyNode *node,
+        IMFTopologyNode **ret, unsigned int marker)
+{
+    IMFTopologyNode *cloned_node;
+    MF_TOPOLOGY_TYPE node_type;
+    HRESULT hr;
+
+    if (ret) *ret = NULL;
+
+    IMFTopologyNode_GetNodeType(node, &node_type);
+
+    if (FAILED(hr = MFCreateTopologyNode(node_type, &cloned_node)))
+        return hr;
+
+    if (SUCCEEDED(hr = IMFTopologyNode_CloneFrom(cloned_node, node)))
+        hr = IMFTopologyNode_SetUINT32(cloned_node, &context->key, marker);
+
+    if (SUCCEEDED(hr))
+        hr = IMFTopology_AddNode(context->output_topology, cloned_node);
+
+    if (SUCCEEDED(hr) && ret)
+    {
+        *ret = cloned_node;
+        IMFTopologyNode_AddRef(*ret);
+    }
+
+    IMFTopologyNode_Release(cloned_node);
+
+    return hr;
+}
+
+struct transform_output_type
+{
+    IMFMediaType *type;
+    IMFTransform *transform;
+    IMFActivate *activate;
+};
+
+struct connect_context
+{
+    struct topoloader_context *context;
+    IMFTopologyNode *upstream_node;
+    IMFTopologyNode *sink;
+    IMFMediaTypeHandler *sink_handler;
+    const GUID *converter_category;
+};
+
+typedef HRESULT (*p_connect_func)(struct transform_output_type *output_type, struct connect_context *context);
+
+static void topology_loader_release_transforms(IMFActivate **activates, unsigned int count)
+{
+    unsigned int i;
+
+    for (i = 0; i < count; ++i)
+        IMFActivate_Release(activates[i]);
+    CoTaskMemFree(activates);
+}
+
+static HRESULT topology_loader_enumerate_output_types(const GUID *category, IMFMediaType *input_type,
+        p_connect_func connect_func, struct connect_context *context)
+{
+    MFT_REGISTER_TYPE_INFO mft_typeinfo;
+    IMFActivate **activates;
+    unsigned int i, count;
+    HRESULT hr;
+
+    if (FAILED(hr = IMFMediaType_GetMajorType(input_type, &mft_typeinfo.guidMajorType)))
+        return hr;
+
+    if (FAILED(hr = IMFMediaType_GetGUID(input_type, &MF_MT_SUBTYPE, &mft_typeinfo.guidSubtype)))
+        return hr;
+
+    if (FAILED(hr = MFTEnumEx(*category, MFT_ENUM_FLAG_ALL, &mft_typeinfo, NULL, &activates, &count)))
+        return hr;
+
+    hr = E_FAIL;
+
+    for (i = 0; i < count; ++i)
+    {
+        IMFTransform *transform;
+
+        if (FAILED(IMFActivate_ActivateObject(activates[i], &IID_IMFTransform, (void **)&transform)))
+        {
+            WARN("Failed to create a transform.\n");
+            continue;
+        }
+
+        if (SUCCEEDED(hr = IMFTransform_SetInputType(transform, 0, input_type, 0)))
+        {
+            struct transform_output_type output_type;
+            unsigned int output_count = 0;
+
+            output_type.transform = transform;
+            output_type.activate = activates[i];
+            while (SUCCEEDED(IMFTransform_GetOutputAvailableType(transform, 0, output_count++, &output_type.type)))
+            {
+                hr = connect_func(&output_type, context);
+                IMFMediaType_Release(output_type.type);
+                if (SUCCEEDED(hr))
+                {
+                    topology_loader_release_transforms(activates, count);
+                    return hr;
+                }
+            }
+        }
+
+        IMFActivate_ShutdownObject(activates[i]);
+    }
+
+    topology_loader_release_transforms(activates, count);
+
+    return hr;
+}
+
+static HRESULT topology_loader_create_transform(const struct transform_output_type *output_type,
+        IMFTopologyNode **node)
+{
+    HRESULT hr;
+    GUID guid;
+
+    if (FAILED(hr = MFCreateTopologyNode(MF_TOPOLOGY_TRANSFORM_NODE, node)))
+        return hr;
+
+    IMFTopologyNode_SetObject(*node, (IUnknown *)output_type->transform);
+
+    if (SUCCEEDED(IMFActivate_GetGUID(output_type->activate, &MF_TRANSFORM_CATEGORY_Attribute, &guid)) &&
+            (IsEqualGUID(&guid, &MFT_CATEGORY_AUDIO_DECODER) || IsEqualGUID(&guid, &MFT_CATEGORY_VIDEO_DECODER)))
+    {
+        IMFTopologyNode_SetUINT32(*node, &MF_TOPONODE_DECODER, 1);
+    }
+
+    if (SUCCEEDED(IMFActivate_GetGUID(output_type->activate, &MFT_TRANSFORM_CLSID_Attribute, &guid)))
+        IMFTopologyNode_SetGUID(*node, &MF_TOPONODE_TRANSFORM_OBJECTID, &guid);
+
+    return hr;
+}
+
+static HRESULT connect_to_sink(struct transform_output_type *output_type, struct connect_context *context)
+{
+    IMFTopologyNode *node;
+    HRESULT hr;
+
+    if (FAILED(IMFMediaTypeHandler_IsMediaTypeSupported(context->sink_handler, output_type->type, NULL)))
+        return MF_E_TRANSFORM_NOT_POSSIBLE_FOR_CURRENT_MEDIATYPE_COMBINATION;
+
+    if (FAILED(hr = topology_loader_create_transform(output_type, &node)))
+        return hr;
+
+    IMFTopology_AddNode(context->context->output_topology, node);
+    IMFTopologyNode_ConnectOutput(context->upstream_node, 0, node, 0);
+    IMFTopologyNode_ConnectOutput(node, 0, context->sink, 0);
+
+    IMFTopologyNode_Release(node);
+
+    hr = IMFMediaTypeHandler_SetCurrentMediaType(context->sink_handler, output_type->type);
+    if (SUCCEEDED(hr))
+        hr = IMFTransform_SetOutputType(output_type->transform, 0, output_type->type, 0);
+
+    return S_OK;
+}
+
+static HRESULT connect_to_converter(struct transform_output_type *output_type, struct connect_context *context)
+{
+    struct connect_context sink_ctx;
+    IMFTopologyNode *node;
+    HRESULT hr;
+
+    if (SUCCEEDED(connect_to_sink(output_type, context)))
+        return S_OK;
+
+    if (FAILED(hr = topology_loader_create_transform(output_type, &node)))
+        return hr;
+
+    sink_ctx = *context;
+    sink_ctx.upstream_node = node;
+
+    if (SUCCEEDED(hr = topology_loader_enumerate_output_types(context->converter_category, output_type->type,
+            connect_to_sink, &sink_ctx)))
+    {
+        hr = IMFTopology_AddNode(context->context->output_topology, node);
+    }
+    IMFTopologyNode_Release(node);
+
+    if (SUCCEEDED(hr))
+    {
+        IMFTopology_AddNode(context->context->output_topology, node);
+        IMFTopologyNode_ConnectOutput(context->upstream_node, 0, node, 0);
+
+        hr = IMFTransform_SetOutputType(output_type->transform, 0, output_type->type, 0);
+    }
+
+    return hr;
+}
+
+typedef HRESULT (*p_topology_loader_connect_func)(struct topoloader_context *context, IMFTopologyNode *upstream_node,
+        unsigned int output_index, IMFTopologyNode *downstream_node, unsigned int input_index);
+
+static HRESULT topology_loader_get_node_type_handler(IMFTopologyNode *node, IMFMediaTypeHandler **handler)
+{
+    MF_TOPOLOGY_TYPE node_type;
+    IMFStreamSink *stream_sink;
+    IMFStreamDescriptor *sd;
+    IUnknown *object;
+    HRESULT hr;
+
+    if (FAILED(hr = IMFTopologyNode_GetNodeType(node, &node_type)))
+         return hr;
+
+    switch (node_type)
+    {
+        case MF_TOPOLOGY_OUTPUT_NODE:
+            if (SUCCEEDED(hr = IMFTopologyNode_GetObject(node, (IUnknown **)&object)))
+            {
+                if (SUCCEEDED(hr = IUnknown_QueryInterface(object, &IID_IMFStreamSink, (void **)&stream_sink)))
+                {
+                    hr = IMFStreamSink_GetMediaTypeHandler(stream_sink, handler);
+                    IMFStreamSink_Release(stream_sink);
+                }
+                IUnknown_Release(object);
+            }
+            break;
+        case MF_TOPOLOGY_SOURCESTREAM_NODE:
+            if (SUCCEEDED(hr = IMFTopologyNode_GetUnknown(node, &MF_TOPONODE_STREAM_DESCRIPTOR,
+                    &IID_IMFStreamDescriptor, (void **)&sd)))
+            {
+                hr = IMFStreamDescriptor_GetMediaTypeHandler(sd, handler);
+                IMFStreamDescriptor_Release(sd);
+            }
+            break;
+        default:
+            WARN("Unexpected node type %u.\n", node_type);
+            return MF_E_UNEXPECTED;
+    }
+
+    return hr;
+}
+
+static HRESULT topology_loader_get_mft_categories(IMFMediaTypeHandler *handler, GUID *decode_cat, GUID *convert_cat)
+{
+    GUID major;
+    HRESULT hr;
+
+    if (FAILED(hr = IMFMediaTypeHandler_GetMajorType(handler, &major)))
+        return hr;
+
+    if (IsEqualGUID(&major, &MFMediaType_Audio))
+    {
+        *decode_cat = MFT_CATEGORY_AUDIO_DECODER;
+        *convert_cat = MFT_CATEGORY_AUDIO_EFFECT;
+    }
+    else if (IsEqualGUID(&major, &MFMediaType_Video))
+    {
+        *decode_cat = MFT_CATEGORY_VIDEO_DECODER;
+        *convert_cat = MFT_CATEGORY_VIDEO_EFFECT;
+    }
+    else
+    {
+        WARN("Unexpected major type %s.\n", debugstr_guid(&major));
+        return MF_E_INVALIDTYPE;
+    }
+
+    return S_OK;
+}
+
+static HRESULT topology_loader_connect_source_to_sink(struct topoloader_context *context, IMFTopologyNode *source,
+        unsigned int output_index, IMFTopologyNode *sink, unsigned int input_index)
+{
+    IMFMediaTypeHandler *source_handler = NULL, *sink_handler = NULL;
+    struct connect_context convert_ctx, sink_ctx;
+    MF_CONNECT_METHOD source_method, sink_method;
+    GUID decode_cat, convert_cat;
+    IMFMediaType *media_type;
+    HRESULT hr;
+
+    TRACE("attempting to connect %p:%u to %p:%u\n", source, output_index, sink, input_index);
+
+    if (FAILED(hr = topology_loader_get_node_type_handler(source, &source_handler)))
+        goto done;
+
+    if (FAILED(hr = topology_loader_get_node_type_handler(sink, &sink_handler)))
+        goto done;
+
+    if (FAILED(IMFTopologyNode_GetUINT32(source, &MF_TOPONODE_CONNECT_METHOD, &source_method)))
+        source_method = MF_CONNECT_DIRECT;
+    if (FAILED(IMFTopologyNode_GetUINT32(sink, &MF_TOPONODE_CONNECT_METHOD, &sink_method)))
+        sink_method = MF_CONNECT_ALLOW_DECODER;
+
+    if (FAILED(hr = topology_loader_get_mft_categories(source_handler, &decode_cat, &convert_cat)))
+        goto done;
+
+    sink_ctx.context = context;
+    sink_ctx.upstream_node = source;
+    sink_ctx.sink = sink;
+    sink_ctx.sink_handler = sink_handler;
+
+    convert_ctx = sink_ctx;
+    convert_ctx.converter_category = &convert_cat;
+
+    if (SUCCEEDED(hr = IMFMediaTypeHandler_GetCurrentMediaType(source_handler, &media_type)))
+    {
+        /* Direct connection. */
+        if (SUCCEEDED(hr = IMFMediaTypeHandler_IsMediaTypeSupported(sink_handler, media_type, NULL))
+                && SUCCEEDED(hr = IMFMediaTypeHandler_SetCurrentMediaType(sink_handler, media_type)))
+        {
+            hr = IMFTopologyNode_ConnectOutput(source, output_index, sink, input_index);
+        }
+        if (FAILED(hr) && sink_method & MF_CONNECT_ALLOW_CONVERTER)
+        {
+            hr = topology_loader_enumerate_output_types(&convert_cat, media_type, connect_to_sink, &sink_ctx);
+        }
+        if (FAILED(hr) && sink_method & MF_CONNECT_ALLOW_DECODER)
+        {
+            hr = topology_loader_enumerate_output_types(&decode_cat, media_type, connect_to_converter, &convert_ctx);
+        }
+
+        IMFMediaType_Release(media_type);
+    }
+
+done:
+    if (source_handler)
+        IMFMediaTypeHandler_Release(source_handler);
+    if (sink_handler)
+        IMFMediaTypeHandler_Release(sink_handler);
+
+    return hr;
+}
+
+static HRESULT topology_loader_resolve_branch(struct topoloader_context *context, IMFTopologyNode *upstream_node,
+        unsigned int output_index, IMFTopologyNode *downstream_node, unsigned input_index)
+{
+    static const p_topology_loader_connect_func connectors[MF_TOPOLOGY_TEE_NODE+1][MF_TOPOLOGY_TEE_NODE+1] =
+    {
+          /* OUTPUT */ { NULL },
+    /* SOURCESTREAM */ { topology_loader_connect_source_to_sink, NULL, NULL, NULL },
+       /* TRANSFORM */ { NULL },
+             /* TEE */ { NULL },
+    };
+    MF_TOPOLOGY_TYPE u_type, d_type;
+    IMFTopologyNode *node;
+    TOPOID id;
+
+    /* Downstream node might have already been cloned. */
+    IMFTopologyNode_GetTopoNodeID(downstream_node, &id);
+    if (FAILED(IMFTopology_GetNodeByID(context->output_topology, id, &node)))
+        topology_loader_clone_node(context, downstream_node, &node, context->marker + 1);
+
+    IMFTopologyNode_GetNodeType(upstream_node, &u_type);
+    IMFTopologyNode_GetNodeType(downstream_node, &d_type);
+
+    if (!connectors[u_type][d_type])
+    {
+        WARN("Unsupported branch kind %d -> %d.\n", u_type, d_type);
+        return E_FAIL;
+    }
+
+    return connectors[u_type][d_type](context, upstream_node, output_index, node, input_index);
+}
+
+static HRESULT topology_loader_resolve_nodes(struct topoloader_context *context, unsigned int *layer_size)
+{
+    IMFTopologyNode *downstream_node, *node, *orig_node;
+    unsigned int input_index, size = 0;
+    MF_TOPOLOGY_TYPE node_type;
+    HRESULT hr = S_OK;
+    TOPOID id;
+
+    while ((node = topology_loader_get_node_for_marker(context, &id)))
+    {
+        ++size;
+
+        IMFTopology_GetNodeByID(context->input_topology, id, &orig_node);
+
+        IMFTopologyNode_GetNodeType(node, &node_type);
+        switch (node_type)
+        {
+            case MF_TOPOLOGY_SOURCESTREAM_NODE:
+                if (FAILED(IMFTopologyNode_GetOutput(orig_node, 0, &downstream_node, &input_index)))
+                {
+                    IMFTopology_RemoveNode(context->output_topology, node);
+                    continue;
+                }
+
+                hr = topology_loader_resolve_branch(context, node, 0, downstream_node, input_index);
+                break;
+            case MF_TOPOLOGY_TRANSFORM_NODE:
+            case MF_TOPOLOGY_TEE_NODE:
+                FIXME("Unsupported node type %d.\n", node_type);
+                break;
+            default:
+                WARN("Unexpected node type %d.\n", node_type);
+        }
+
+        IMFTopologyNode_DeleteItem(node, &context->key);
+
+        if (FAILED(hr))
+            break;
+    }
+
+    *layer_size = size;
+
+    return hr;
+}
+
+static BOOL topology_loader_is_node_d3d_aware(IMFTopologyNode *node)
+{
+    IMFAttributes *attributes;
+    unsigned int d3d_aware = 0;
+    IUnknown *object = NULL;
+
+    if (FAILED(IMFTopologyNode_GetObject(node, &object)))
+        return FALSE;
+
+    if (SUCCEEDED(IUnknown_QueryInterface(object, &IID_IMFAttributes, (void **)&attributes)))
+    {
+        IMFAttributes_GetUINT32(attributes, &MF_SA_D3D_AWARE, &d3d_aware);
+        IMFAttributes_Release(attributes);
+    }
+
+    if (!d3d_aware)
+        d3d_aware = mf_is_sample_copier_transform(object);
+
+    IUnknown_Release(object);
+
+    return !!d3d_aware;
+}
+
+static HRESULT topology_loader_create_copier(IMFTopologyNode *upstream_node, unsigned int upstream_output,
+        IMFTopologyNode *downstream_node, unsigned int downstream_input, IMFTransform **copier)
+{
+    IMFMediaType *input_type = NULL, *output_type = NULL;
+    IMFTransform *transform;
+    HRESULT hr;
+
+    if (FAILED(hr = MFCreateSampleCopierMFT(&transform)))
+        return hr;
+
+    if (FAILED(hr = MFGetTopoNodeCurrentType(upstream_node, upstream_output, TRUE, &input_type)))
+        WARN("Failed to get upstream media type hr %#x.\n", hr);
+
+    if (SUCCEEDED(hr) && FAILED(hr = MFGetTopoNodeCurrentType(downstream_node, downstream_input, FALSE, &output_type)))
+        WARN("Failed to get downstream media type hr %#x.\n", hr);
+
+    if (SUCCEEDED(hr) && FAILED(hr = IMFTransform_SetInputType(transform, 0, input_type, 0)))
+        WARN("Input type wasn't accepted, hr %#x.\n", hr);
+
+    if (SUCCEEDED(hr) && FAILED(hr = IMFTransform_SetOutputType(transform, 0, output_type, 0)))
+        WARN("Output type wasn't accepted, hr %#x.\n", hr);
+
+    if (SUCCEEDED(hr))
+    {
+        *copier = transform;
+        IMFTransform_AddRef(*copier);
+    }
+
+    if (input_type)
+        IMFMediaType_Release(input_type);
+    if (output_type)
+        IMFMediaType_Release(output_type);
+
+    IMFTransform_Release(transform);
+
+    return hr;
+}
+
+static HRESULT topology_loader_connect_copier(struct topoloader_context *context, IMFTopologyNode *upstream_node,
+        unsigned int upstream_output, IMFTopologyNode *downstream_node, unsigned int downstream_input, IMFTransform *copier)
+{
+    IMFTopologyNode *copier_node;
+    HRESULT hr;
+
+    if (FAILED(hr = MFCreateTopologyNode(MF_TOPOLOGY_TRANSFORM_NODE, &copier_node)))
+        return hr;
+
+    IMFTopologyNode_SetObject(copier_node, (IUnknown *)copier);
+    IMFTopology_AddNode(context->output_topology, copier_node);
+    IMFTopologyNode_ConnectOutput(upstream_node, upstream_output, copier_node, 0);
+    IMFTopologyNode_ConnectOutput(copier_node, 0, downstream_node, downstream_input);
+
+    IMFTopologyNode_Release(copier_node);
+
+    return S_OK;
+}
+
+/* Right now this should be used for output nodes only. */
+static HRESULT topology_loader_connect_d3d_aware_input(struct topoloader_context *context,
+        IMFTopologyNode *node)
+{
+    IMFTopologyNode *upstream_node;
+    unsigned int upstream_output;
+    IMFStreamSink *stream_sink;
+    IMFTransform *copier = NULL;
+    HRESULT hr = S_OK;
+
+    IMFTopologyNode_GetObject(node, (IUnknown **)&stream_sink);
+
+    if (topology_loader_is_node_d3d_aware(node))
+    {
+        if (SUCCEEDED(IMFTopologyNode_GetInput(node, 0, &upstream_node, &upstream_output)))
+        {
+            if (!topology_loader_is_node_d3d_aware(upstream_node))
+            {
+                if (SUCCEEDED(hr = topology_loader_create_copier(upstream_node, upstream_output, node, 0, &copier)))
+                {
+                    hr = topology_loader_connect_copier(context, upstream_node, upstream_output, node, 0, copier);
+                    IMFTransform_Release(copier);
+                }
+            }
+            IMFTopologyNode_Release(upstream_node);
+        }
+    }
+
+    IMFStreamSink_Release(stream_sink);
+
+    return hr;
+}
+
+static void topology_loader_resolve_complete(struct topoloader_context *context)
+{
+    MF_TOPOLOGY_TYPE node_type;
+    IMFTopologyNode *node;
+    WORD i, node_count;
+
+    IMFTopology_GetNodeCount(context->output_topology, &node_count);
+
+    for (i = 0; i < node_count; ++i)
+    {
+        if (SUCCEEDED(IMFTopology_GetNode(context->output_topology, i, &node)))
+        {
+            IMFTopologyNode_GetNodeType(node, &node_type);
+
+            if (node_type == MF_TOPOLOGY_OUTPUT_NODE)
+            {
+                /* Set MF_TOPONODE_STREAMID for all outputs. */
+                if (FAILED(IMFTopologyNode_GetItem(node, &MF_TOPONODE_STREAMID, NULL)))
+                    IMFTopologyNode_SetUINT32(node, &MF_TOPONODE_STREAMID, 0);
+
+                topology_loader_connect_d3d_aware_input(context, node);
+            }
+            else if (node_type == MF_TOPOLOGY_SOURCESTREAM_NODE)
+            {
+                /* Set MF_TOPONODE_MEDIASTART for all sources. */
+                if (FAILED(IMFTopologyNode_GetItem(node, &MF_TOPONODE_MEDIASTART, NULL)))
+                    IMFTopologyNode_SetUINT64(node, &MF_TOPONODE_MEDIASTART, 0);
+            }
+
+            IMFTopologyNode_Release(node);
+        }
+    }
+}
+
+static HRESULT WINAPI topology_loader_Load(IMFTopoLoader *iface, IMFTopology *input_topology,
+        IMFTopology **ret_topology, IMFTopology *current_topology)
+{
+    struct topoloader_context context = { 0 };
+    IMFTopology *output_topology;
+    MF_TOPOLOGY_TYPE node_type;
+    unsigned int layer_size;
+    IMFTopologyNode *node;
+    unsigned short i = 0;
+    IMFStreamSink *sink;
+    IUnknown *object;
+    HRESULT hr = E_FAIL;
+
+    FIXME("%p, %p, %p, %p.\n", iface, input_topology, ret_topology, current_topology);
 
     if (current_topology)
         FIXME("Current topology instance is ignored.\n");
 
-    for (i = 0; i < topology->nodes.count; ++i)
-    {
-        struct topology_node *node = topology->nodes.nodes[i];
+    /* Basic sanity checks for input topology:
 
-        switch (node->node_type)
+       - source nodes must have stream descriptor set;
+       - sink nodes must be resolved to stream sink objects;
+    */
+    while (SUCCEEDED(IMFTopology_GetNode(input_topology, i++, &node)))
+    {
+        IMFTopologyNode_GetNodeType(node, &node_type);
+
+        switch (node_type)
         {
             case MF_TOPOLOGY_OUTPUT_NODE:
-                if (node->object)
+                if (SUCCEEDED(hr = IMFTopologyNode_GetObject(node, &object)))
                 {
                     /* Sinks must be bound beforehand. */
-                    if (FAILED(IUnknown_QueryInterface(node->object, &IID_IMFStreamSink, (void **)&sink)))
-                        return MF_E_TOPO_SINK_ACTIVATES_UNSUPPORTED;
-                    IMFStreamSink_Release(sink);
+                    if (FAILED(IUnknown_QueryInterface(object, &IID_IMFStreamSink, (void **)&sink)))
+                        hr = MF_E_TOPO_SINK_ACTIVATES_UNSUPPORTED;
+                    else if (sink)
+                        IMFStreamSink_Release(sink);
+                    IUnknown_Release(object);
                 }
                 break;
             case MF_TOPOLOGY_SOURCESTREAM_NODE:
-                if (FAILED(hr = IMFAttributes_GetItem(node->attributes, &MF_TOPONODE_STREAM_DESCRIPTOR, NULL)))
-                    return hr;
+                hr = IMFTopologyNode_GetItem(node, &MF_TOPONODE_STREAM_DESCRIPTOR, NULL);
                 break;
             default:
                 ;
         }
+
+        IMFTopologyNode_Release(node);
+        if (FAILED(hr))
+            return hr;
     }
 
-    if (FAILED(hr = MFCreateTopology(output_topology)))
+    if (FAILED(hr = MFCreateTopology(&output_topology)))
         return hr;
 
-    return IMFTopology_CloneFrom(*output_topology, input_topology);
+    context.input_topology = input_topology;
+    context.output_topology = output_topology;
+    memset(&context.key, 0xff, sizeof(context.key));
+
+    /* Clone source nodes, use initial marker value. */
+    i = 0;
+    while (SUCCEEDED(IMFTopology_GetNode(input_topology, i++, &node)))
+    {
+        IMFTopologyNode_GetNodeType(node, &node_type);
+
+        if (node_type == MF_TOPOLOGY_SOURCESTREAM_NODE)
+        {
+            if (FAILED(hr = topology_loader_clone_node(&context, node, NULL, 0)))
+                WARN("Failed to clone source node, hr %#x.\n", hr);
+        }
+
+        IMFTopologyNode_Release(node);
+    }
+
+    for (context.marker = 0;; ++context.marker)
+    {
+        if (FAILED(hr = topology_loader_resolve_nodes(&context, &layer_size)))
+        {
+            WARN("Failed to resolve for marker %u, hr %#x.\n", context.marker, hr);
+            break;
+        }
+
+        /* Reached last marker value. */
+        if (!layer_size)
+            break;
+    }
+
+    if (SUCCEEDED(hr))
+        topology_loader_resolve_complete(&context);
+
+    *ret_topology = output_topology;
+
+    return hr;
 }
 
 static const IMFTopoLoaderVtbl topologyloadervtbl =
@@ -1937,7 +2672,7 @@ static ULONG WINAPI seq_source_AddRef(IMFSequencerSource *iface)
     struct seq_source *seq_source = impl_from_IMFSequencerSource(iface);
     ULONG refcount = InterlockedIncrement(&seq_source->refcount);
 
-    TRACE("(%p) refcount=%u\n", iface, refcount);
+    TRACE("%p, refcount %u.\n", iface, refcount);
 
     return refcount;
 }
@@ -1947,7 +2682,7 @@ static ULONG WINAPI seq_source_Release(IMFSequencerSource *iface)
     struct seq_source *seq_source = impl_from_IMFSequencerSource(iface);
     ULONG refcount = InterlockedDecrement(&seq_source->refcount);
 
-    TRACE("(%p) refcount=%u\n", iface, refcount);
+    TRACE("%p, refcount %u.\n", iface, refcount);
 
     if (!refcount)
     {
@@ -1960,14 +2695,14 @@ static ULONG WINAPI seq_source_Release(IMFSequencerSource *iface)
 static HRESULT WINAPI seq_source_AppendTopology(IMFSequencerSource *iface, IMFTopology *topology,
         DWORD flags, MFSequencerElementId *id)
 {
-    FIXME("%p, %p, %x, %p\n", iface, topology, flags, id);
+    FIXME("%p, %p, %x, %p.\n", iface, topology, flags, id);
 
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI seq_source_DeleteTopology(IMFSequencerSource *iface, MFSequencerElementId id)
 {
-    FIXME("%p, %#x\n", iface, id);
+    FIXME("%p, %#x.\n", iface, id);
 
     return E_NOTIMPL;
 }
@@ -1975,7 +2710,7 @@ static HRESULT WINAPI seq_source_DeleteTopology(IMFSequencerSource *iface, MFSeq
 static HRESULT WINAPI seq_source_GetPresentationContext(IMFSequencerSource *iface,
         IMFPresentationDescriptor *descriptor, MFSequencerElementId *id, IMFTopology **topology)
 {
-    FIXME("%p, %p, %p, %p\n", iface, descriptor, id, topology);
+    FIXME("%p, %p, %p, %p.\n", iface, descriptor, id, topology);
 
     return E_NOTIMPL;
 }
@@ -1983,14 +2718,14 @@ static HRESULT WINAPI seq_source_GetPresentationContext(IMFSequencerSource *ifac
 static HRESULT WINAPI seq_source_UpdateTopology(IMFSequencerSource *iface, MFSequencerElementId id,
         IMFTopology *topology)
 {
-    FIXME("%p, %#x, %p\n", iface, id, topology);
+    FIXME("%p, %#x, %p.\n", iface, id, topology);
 
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI seq_source_UpdateTopologyFlags(IMFSequencerSource *iface, MFSequencerElementId id, DWORD flags)
 {
-    FIXME("%p, %#x, %#x\n", iface, id, flags);
+    FIXME("%p, %#x, %#x.\n", iface, id, flags);
 
     return E_NOTIMPL;
 }
@@ -2049,7 +2784,7 @@ HRESULT WINAPI MFCreateSequencerSource(IUnknown *reserved, IMFSequencerSource **
 {
     struct seq_source *object;
 
-    TRACE("(%p, %p)\n", reserved, seq_source);
+    TRACE("%p, %p.\n", reserved, seq_source);
 
     if (!seq_source)
         return E_POINTER;

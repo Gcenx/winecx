@@ -175,37 +175,32 @@ static LPWSTR msi_get_deferred_action(LPCWSTR action, LPCWSTR actiondata,
     LPWSTR deferred;
     DWORD len;
 
-    static const WCHAR format[] = {
-            '[','%','s','<','=','>','%','s','<','=','>','%','s',']','%','s',0
-    };
-
     if (!actiondata)
         return strdupW(action);
 
     len = lstrlenW(action) + lstrlenW(actiondata) +
           lstrlenW(usersid) + lstrlenW(prodcode) +
-          lstrlenW(format) - 7;
+          lstrlenW(L"[%s<=>%s<=>%s]%s") - 7;
     deferred = msi_alloc(len * sizeof(WCHAR));
 
-    swprintf(deferred, len, format, actiondata, usersid, prodcode, action);
+    swprintf(deferred, len, L"[%s<=>%s<=>%s]%s", actiondata, usersid, prodcode, action);
     return deferred;
 }
 
 static void set_deferred_action_props( MSIPACKAGE *package, const WCHAR *deferred_data )
 {
-    static const WCHAR sep[] = {'<','=','>',0};
     const WCHAR *end, *beg = deferred_data + 1;
 
-    end = wcsstr(beg, sep);
-    msi_set_property( package->db, szCustomActionData, beg, end - beg );
+    end = wcsstr(beg, L"<=>");
+    msi_set_property( package->db, L"CustomActionData", beg, end - beg );
     beg = end + 3;
 
-    end = wcsstr(beg, sep);
-    msi_set_property( package->db, szUserSID, beg, end - beg );
+    end = wcsstr(beg, L"<=>");
+    msi_set_property( package->db, L"UserSID", beg, end - beg );
     beg = end + 3;
 
     end = wcschr(beg, ']');
-    msi_set_property( package->db, szProductCode, beg, end - beg );
+    msi_set_property( package->db, L"ProductCode", beg, end - beg );
 }
 
 WCHAR *msi_create_temp_file( MSIDATABASE *db )
@@ -217,7 +212,7 @@ WCHAR *msi_create_temp_file( MSIDATABASE *db )
         WCHAR tmp[MAX_PATH];
         UINT len = ARRAY_SIZE( tmp );
 
-        if (msi_get_property( db, szTempFolder, tmp, &len ) ||
+        if (msi_get_property( db, L"TempFolder", tmp, &len ) ||
             GetFileAttributesW( tmp ) != FILE_ATTRIBUTE_DIRECTORY)
         {
             GetTempPathW( MAX_PATH, tmp );
@@ -227,7 +222,7 @@ WCHAR *msi_create_temp_file( MSIDATABASE *db )
 
     if ((ret = msi_alloc( (lstrlenW( db->tempfolder ) + 20) * sizeof(WCHAR) )))
     {
-        if (!GetTempFileNameW( db->tempfolder, szMsi, 0, ret ))
+        if (!GetTempFileNameW( db->tempfolder, L"msi", 0, ret ))
         {
             msi_free( ret );
             return NULL;
@@ -239,10 +234,6 @@ WCHAR *msi_create_temp_file( MSIDATABASE *db )
 
 static MSIBINARY *create_temp_binary(MSIPACKAGE *package, LPCWSTR source)
 {
-    static const WCHAR query[] = {
-        'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',
-        '`','B','i' ,'n','a','r','y','`',' ','W','H','E','R','E',' ',
-        '`','N','a','m','e','`',' ','=',' ','\'','%','s','\'',0};
     MSIRECORD *row;
     MSIBINARY *binary = NULL;
     HANDLE file;
@@ -253,7 +244,7 @@ static MSIBINARY *create_temp_binary(MSIPACKAGE *package, LPCWSTR source)
 
     if (!(tmpfile = msi_create_temp_file( package->db ))) return NULL;
 
-    if (!(row = MSI_QueryGetRecord( package->db, query, source ))) goto error;
+    if (!(row = MSI_QueryGetRecord( package->db, L"SELECT * FROM `Binary` WHERE `Name` = '%s'", source ))) goto error;
     if (!(binary = msi_alloc_zero( sizeof(MSIBINARY) ))) goto error;
 
     file = CreateFileW( tmpfile, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL );
@@ -473,9 +464,6 @@ static void handle_msi_break(LPCSTR target)
     DebugBreak();
 }
 
-static WCHAR ncalrpcW[] = {'n','c','a','l','r','p','c',0};
-static WCHAR endpoint_fmtW[] = {'m','s','i','%','x',0};
-
 #ifdef __i386__
 /* wrapper for apps that don't declare the thread function correctly */
 extern UINT custom_proc_wrapper( MsiCustomActionEntryPoint entry, MSIHANDLE hinst );
@@ -518,8 +506,8 @@ UINT CDECL __wine_msi_call_dll_function(DWORD client_pid, const GUID *guid)
     {
         WCHAR endpoint[12];
 
-        swprintf(endpoint, ARRAY_SIZE(endpoint), endpoint_fmtW, client_pid);
-        status = RpcStringBindingComposeW(NULL, ncalrpcW, NULL, endpoint, NULL, &binding_str);
+        swprintf(endpoint, ARRAY_SIZE(endpoint), L"msi%x", client_pid);
+        status = RpcStringBindingComposeW(NULL, (WCHAR *)L"ncalrpc", NULL, endpoint, NULL, &binding_str);
         if (status != RPC_S_OK)
         {
             ERR("RpcStringBindingCompose failed: %#x\n", status);
@@ -588,40 +576,32 @@ UINT CDECL __wine_msi_call_dll_function(DWORD client_pid, const GUID *guid)
 
 static DWORD custom_start_server(MSIPACKAGE *package, DWORD arch)
 {
-    static const WCHAR pipe_name[] = {'\\','\\','.','\\','p','i','p','e','\\','m','s','i','c','a','_','%','x','_','%','d',0};
-    static const WCHAR msiexecW[] = {'\\','m','s','i','e','x','e','c','.','e','x','e',0};
-    static const WCHAR argsW[] = {'%','s',' ','-','E','m','b','e','d','d','i','n','g',' ','%','d',0};
-
     WCHAR path[MAX_PATH], cmdline[MAX_PATH + 23];
     PROCESS_INFORMATION pi = {0};
     STARTUPINFOW si = {0};
     WCHAR buffer[24];
     void *cookie;
     HANDLE pipe;
-    BOOL wow64;
 
     if ((arch == SCS_32BIT_BINARY && package->custom_server_32_process) ||
         (arch == SCS_64BIT_BINARY && package->custom_server_64_process))
         return ERROR_SUCCESS;
 
-    swprintf(buffer, ARRAY_SIZE(buffer), pipe_name,
+    swprintf(buffer, ARRAY_SIZE(buffer), L"\\\\.\\pipe\\msica_%x_%d",
              GetCurrentProcessId(), arch == SCS_32BIT_BINARY ? 32 : 64);
     pipe = CreateNamedPipeW(buffer, PIPE_ACCESS_DUPLEX, 0, 1, sizeof(DWORD64),
         sizeof(GUID), 0, NULL);
     if (pipe == INVALID_HANDLE_VALUE)
         ERR("Failed to create custom action client pipe: %u\n", GetLastError());
 
-    if (!IsWow64Process(GetCurrentProcess(), &wow64))
-        wow64 = FALSE;
-
-    if ((sizeof(void *) == 8 || wow64) && arch == SCS_32BIT_BINARY)
-        GetSystemWow64DirectoryW(path, MAX_PATH - ARRAY_SIZE(msiexecW));
+    if ((sizeof(void *) == 8 || is_wow64) && arch == SCS_32BIT_BINARY)
+        GetSystemWow64DirectoryW(path, MAX_PATH - ARRAY_SIZE(L"\\msiexec.exe"));
     else
-        GetSystemDirectoryW(path, MAX_PATH - ARRAY_SIZE(msiexecW));
-    lstrcatW(path, msiexecW);
-    swprintf(cmdline, ARRAY_SIZE(cmdline), argsW, path, GetCurrentProcessId());
+        GetSystemDirectoryW(path, MAX_PATH - ARRAY_SIZE(L"\\msiexec.exe"));
+    lstrcatW(path, L"\\msiexec.exe");
+    swprintf(cmdline, ARRAY_SIZE(cmdline), L"%s -Embedding %d", path, GetCurrentProcessId());
 
-    if (wow64 && arch == SCS_64BIT_BINARY)
+    if (is_wow64 && arch == SCS_64BIT_BINARY)
     {
         Wow64DisableWow64FsRedirection(&cookie);
         CreateProcessW(path, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
@@ -744,8 +724,8 @@ static msi_custom_action_info *do_msidbCustomActionTypeDll(
     {
         WCHAR endpoint[12];
 
-        swprintf(endpoint, ARRAY_SIZE(endpoint), endpoint_fmtW, GetCurrentProcessId());
-        status = RpcServerUseProtseqEpW(ncalrpcW, RPC_C_PROTSEQ_MAX_REQS_DEFAULT,
+        swprintf(endpoint, ARRAY_SIZE(endpoint), L"msi%x", GetCurrentProcessId());
+        status = RpcServerUseProtseqEpW((WCHAR *)L"ncalrpc", RPC_C_PROTSEQ_MAX_REQS_DEFAULT,
             endpoint, NULL);
         if (status != RPC_S_OK)
         {
@@ -797,7 +777,6 @@ static UINT HANDLE_CustomType1( MSIPACKAGE *package, const WCHAR *source, const 
 
 static HANDLE execute_command( const WCHAR *app, WCHAR *arg, const WCHAR *dir )
 {
-    static const WCHAR dotexeW[] = {'.','e','x','e',0};
     STARTUPINFOW si;
     PROCESS_INFORMATION info;
     WCHAR *exe = NULL, *cmd = NULL, *p;
@@ -809,12 +788,12 @@ static HANDLE execute_command( const WCHAR *app, WCHAR *arg, const WCHAR *dir )
         DWORD len_exe;
 
         if (!(exe = msi_alloc( MAX_PATH * sizeof(WCHAR) ))) return INVALID_HANDLE_VALUE;
-        len_exe = SearchPathW( NULL, app, dotexeW, MAX_PATH, exe, NULL );
+        len_exe = SearchPathW( NULL, app, L".exe", MAX_PATH, exe, NULL );
         if (len_exe >= MAX_PATH)
         {
             msi_free( exe );
             if (!(exe = msi_alloc( len_exe * sizeof(WCHAR) ))) return INVALID_HANDLE_VALUE;
-            len_exe = SearchPathW( NULL, app, dotexeW, len_exe, exe, NULL );
+            len_exe = SearchPathW( NULL, app, L".exe", len_exe, exe, NULL );
         }
         if (!len_exe)
         {
@@ -876,7 +855,7 @@ static UINT HANDLE_CustomType2( MSIPACKAGE *package, const WCHAR *source, const 
     deformat_string( package, target, &arg );
     TRACE("exe %s arg %s\n", debugstr_w(binary->tmpfile), debugstr_w(arg));
 
-    handle = execute_command( binary->tmpfile, arg, szCRoot );
+    handle = execute_command( binary->tmpfile, arg, L"C:\\" );
     msi_free( arg );
     if (handle == INVALID_HANDLE_VALUE) return ERROR_SUCCESS;
     return wait_process_handle( package, type, handle, action );
@@ -913,7 +892,7 @@ static UINT HANDLE_CustomType18( MSIPACKAGE *package, const WCHAR *source, const
     deformat_string( package, target, &arg );
     TRACE("exe %s arg %s\n", debugstr_w(file->TargetPath), debugstr_w(arg));
 
-    handle = execute_command( file->TargetPath, arg, szCRoot );
+    handle = execute_command( file->TargetPath, arg, L"C:\\" );
     msi_free( arg );
     if (handle == INVALID_HANDLE_VALUE) return ERROR_SUCCESS;
     return wait_process_handle( package, type, handle, action );
@@ -922,19 +901,13 @@ static UINT HANDLE_CustomType18( MSIPACKAGE *package, const WCHAR *source, const
 static UINT HANDLE_CustomType19( MSIPACKAGE *package, const WCHAR *source, const WCHAR *target,
                                  INT type, const WCHAR *action )
 {
-    static const WCHAR query[] = {
-      'S','E','L','E','C','T',' ','`','M','e','s','s','a','g','e','`',' ',
-      'F','R','O','M',' ','`','E','r','r','o','r','`',' ',
-      'W','H','E','R','E',' ','`','E','r','r','o','r','`',' ','=',' ',
-      '%','s',0
-    };
     MSIRECORD *row = 0;
     LPWSTR deformated = NULL;
 
     deformat_string( package, target, &deformated );
 
     /* first try treat the error as a number */
-    row = MSI_QueryGetRecord( package->db, query, deformated );
+    row = MSI_QueryGetRecord( package->db, L"SELECT `Message` FROM `Error` WHERE `Error` = '%s'", deformated );
     if( row )
     {
         LPCWSTR error = MSI_RecordGetString( row, 1 );
@@ -950,16 +923,31 @@ static UINT HANDLE_CustomType19( MSIPACKAGE *package, const WCHAR *source, const
     return ERROR_INSTALL_FAILURE;
 }
 
+static WCHAR *build_msiexec_args( const WCHAR *filename, const WCHAR *params )
+{
+    UINT len_filename = lstrlenW( filename ), len_params = lstrlenW( params );
+    UINT len = ARRAY_SIZE(L"/qb /i ") - 1;
+    WCHAR *ret;
+
+    if (!(ret = msi_alloc( (len + len_filename + len_params + 4) * sizeof(WCHAR) ))) return NULL;
+    memcpy( ret, L"/qb /i ", sizeof(L"/qb /i ") );
+    ret[len++] = '"';
+    memcpy( ret + len, filename, len_filename * sizeof(WCHAR) );
+    len += len_filename;
+    ret[len++] = '"';
+    ret[len++] = ' ';
+    lstrcpyW( ret + len, params );
+    return ret;
+}
+
 static UINT HANDLE_CustomType23( MSIPACKAGE *package, const WCHAR *source, const WCHAR *target,
                                  INT type, const WCHAR *action )
 {
-    static const WCHAR msiexecW[] = {'m','s','i','e','x','e','c',0};
-    static const WCHAR paramsW[] = {'/','q','b',' ','/','i',' '};
-    WCHAR *dir, *arg, *p;
-    UINT len_src, len_dir, len_tgt, len = ARRAY_SIZE( paramsW );
+    WCHAR *dir, *filename, *args, *p;
+    UINT len_dir, len_source = lstrlenW( source );
     HANDLE handle;
 
-    if (!(dir = msi_dup_property( package->db, szOriginalDatabase ))) return ERROR_OUTOFMEMORY;
+    if (!(dir = msi_dup_property( package->db, L"OriginalDatabase" ))) return ERROR_OUTOFMEMORY;
     if (!(p = wcsrchr( dir, '\\' )) && !(p = wcsrchr( dir, '/' )))
     {
         msi_free( dir );
@@ -967,31 +955,102 @@ static UINT HANDLE_CustomType23( MSIPACKAGE *package, const WCHAR *source, const
     }
     *p = 0;
     len_dir = p - dir;
-    len_src = lstrlenW( source );
-    len_tgt = lstrlenW( target );
-    if (!(arg = msi_alloc( (len + len_dir + len_src + len_tgt + 5) * sizeof(WCHAR) )))
+    if (!(filename = msi_alloc( (len_dir + len_source + 2) * sizeof(WCHAR) )))
     {
         msi_free( dir );
         return ERROR_OUTOFMEMORY;
     }
-    memcpy( arg, paramsW, sizeof(paramsW) );
-    arg[len++] = '"';
-    memcpy( arg + len, dir, len_dir * sizeof(WCHAR) );
-    len += len_dir;
-    arg[len++] = '\\';
-    memcpy( arg + len, source, len_src * sizeof(WCHAR) );
-    len += len_src;
-    arg[len++] = '"';
-    arg[len++] = ' ';
-    lstrcpyW( arg + len, target );
+    memcpy( filename, dir, len_dir * sizeof(WCHAR) );
+    filename[len_dir++] = '\\';
+    memcpy( filename + len_dir, source, len_source * sizeof(WCHAR) );
+    filename[len_dir + len_source] = 0;
+
+    if (!(args = build_msiexec_args( filename, target )))
+    {
+        msi_free( dir );
+        return ERROR_OUTOFMEMORY;
+    }
 
     TRACE("installing %s concurrently\n", debugstr_w(source));
 
-    handle = execute_command( msiexecW, arg, dir );
+    handle = execute_command( L"msiexec", args, dir );
     msi_free( dir );
-    msi_free( arg );
+    msi_free( args );
     if (handle == INVALID_HANDLE_VALUE) return ERROR_SUCCESS;
     return wait_process_handle( package, type, handle, action );
+}
+
+static UINT write_substorage_to_file( MSIPACKAGE *package, const WCHAR *source, const WCHAR *filename )
+{
+    IStorage *src = NULL, *dst = NULL;
+    UINT r = ERROR_FUNCTION_FAILED;
+    HRESULT hr;
+
+    hr = StgCreateDocfile( filename, STGM_CREATE|STGM_TRANSACTED|STGM_WRITE|STGM_SHARE_EXCLUSIVE, 0, &dst );
+    if (FAILED( hr ))
+    {
+        WARN( "can't open destination storage %s (%08x)\n", debugstr_w(filename), hr );
+        goto done;
+    }
+
+    hr = IStorage_OpenStorage( package->db->storage, source, NULL, STGM_SHARE_EXCLUSIVE, NULL, 0, &src );
+    if (FAILED( hr ))
+    {
+        WARN( "can't open source storage %s (%08x)\n", debugstr_w(source), hr );
+        goto done;
+    }
+
+    hr = IStorage_CopyTo( src, 0, NULL, NULL, dst );
+    if (FAILED( hr ))
+    {
+        ERR( "failed to copy storage %s (%08x)\n", debugstr_w(source), hr );
+        goto done;
+    }
+
+    hr = IStorage_Commit( dst, 0 );
+    if (FAILED( hr ))
+        ERR( "failed to commit storage (%08x)\n", hr );
+    else
+        r = ERROR_SUCCESS;
+
+done:
+    if (src) IStorage_Release( src );
+    if (dst) IStorage_Release( dst );
+    return r;
+}
+
+static UINT HANDLE_CustomType7( MSIPACKAGE *package, const WCHAR *source, const WCHAR *target,
+                                INT type, const WCHAR *action )
+{
+    WCHAR *tmpfile, *args;
+    MSIBINARY *binary = NULL;
+    HANDLE handle;
+    UINT r;
+
+    if (!(tmpfile = msi_create_temp_file( package->db ))) return ERROR_FUNCTION_FAILED;
+
+    r = write_substorage_to_file( package, source, tmpfile );
+    if (r != ERROR_SUCCESS)
+        goto error;
+
+    if (!(binary = msi_alloc( sizeof(*binary) ))) goto error;
+    binary->source  = NULL;
+    binary->tmpfile = tmpfile;
+    list_add_tail( &package->binaries, &binary->entry );
+
+    if (!(args = build_msiexec_args( tmpfile, target ))) return ERROR_OUTOFMEMORY;
+
+    TRACE("installing %s concurrently\n", debugstr_w(source));
+
+    handle = execute_command( L"msiexec", args, L"C:\\" );
+    msi_free( args );
+    if (handle == INVALID_HANDLE_VALUE) return ERROR_SUCCESS;
+    return wait_process_handle( package, type, handle, action );
+
+error:
+    DeleteFileW( tmpfile );
+    msi_free( tmpfile );
+    return ERROR_FUNCTION_FAILED;
 }
 
 static UINT HANDLE_CustomType50( MSIPACKAGE *package, const WCHAR *source, const WCHAR *target,
@@ -1005,7 +1064,7 @@ static UINT HANDLE_CustomType50( MSIPACKAGE *package, const WCHAR *source, const
     deformat_string( package, target, &arg );
     TRACE("exe %s arg %s\n", debugstr_w(exe), debugstr_w(arg));
 
-    handle = execute_command( exe, arg, szCRoot );
+    handle = execute_command( exe, arg, L"C:\\" );
     msi_free( exe );
     msi_free( arg );
     if (handle == INVALID_HANDLE_VALUE) return ERROR_SUCCESS;
@@ -1123,10 +1182,6 @@ static UINT HANDLE_CustomType37_38( MSIPACKAGE *package, const WCHAR *source, co
 static UINT HANDLE_CustomType5_6( MSIPACKAGE *package, const WCHAR *source, const WCHAR *target,
                                   INT type, const WCHAR *action )
 {
-    static const WCHAR query[] = {
-        'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',
-        '`','B','i' ,'n','a','r','y','`',' ','W','H','E','R','E',' ',
-        '`','N','a','m','e','`',' ','=',' ','\'','%','s','\'',0};
     MSIRECORD *row = NULL;
     msi_custom_action_info *info;
     CHAR *buffer = NULL;
@@ -1136,7 +1191,7 @@ static UINT HANDLE_CustomType5_6( MSIPACKAGE *package, const WCHAR *source, cons
 
     TRACE("%s %s\n", debugstr_w(source), debugstr_w(target));
 
-    row = MSI_QueryGetRecord(package->db, query, source);
+    row = MSI_QueryGetRecord(package->db, L"SELECT * FROM `Binary` WHERE `Name` = '%s'", source);
     if (!row)
         return ERROR_FUNCTION_FAILED;
 
@@ -1268,8 +1323,8 @@ static BOOL action_type_matches_script( UINT type, UINT script )
 static UINT defer_custom_action( MSIPACKAGE *package, const WCHAR *action, UINT type )
 {
     WCHAR *actiondata = msi_dup_property( package->db, action );
-    WCHAR *usersid = msi_dup_property( package->db, szUserSID );
-    WCHAR *prodcode = msi_dup_property( package->db, szProductCode );
+    WCHAR *usersid = msi_dup_property( package->db, L"UserSID" );
+    WCHAR *prodcode = msi_dup_property( package->db, L"ProductCode" );
     WCHAR *deferred = msi_get_deferred_action( action, actiondata, usersid, prodcode );
 
     if (!deferred)
@@ -1304,10 +1359,6 @@ static UINT defer_custom_action( MSIPACKAGE *package, const WCHAR *action, UINT 
 
 UINT ACTION_CustomAction(MSIPACKAGE *package, const WCHAR *action)
 {
-    static const WCHAR query[] = {
-        'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',
-        '`','C','u','s','t','o','m','A','c','t','i','o','n','`',' ','W','H','E','R','E',' ',
-        '`','A','c','t','i' ,'o','n','`',' ','=',' ','\'','%','s','\'',0};
     UINT rc = ERROR_SUCCESS;
     MSIRECORD *row;
     UINT type;
@@ -1322,7 +1373,7 @@ UINT ACTION_CustomAction(MSIPACKAGE *package, const WCHAR *action)
         action = ptr + 1;
     }
 
-    row = MSI_QueryGetRecord( package->db, query, action );
+    row = MSI_QueryGetRecord( package->db, L"SELECT * FROM `CustomAction` WHERE `Action` = '%s'", action );
     if (!row)
         return ERROR_FUNCTION_NOT_CALLED;
 
@@ -1363,9 +1414,9 @@ UINT ACTION_CustomAction(MSIPACKAGE *package, const WCHAR *action)
             if (deferred_data)
                 set_deferred_action_props(package, deferred_data);
             else if (actiondata)
-                msi_set_property( package->db, szCustomActionData, actiondata, -1 );
+                msi_set_property( package->db, L"CustomActionData", actiondata, -1 );
             else
-                msi_set_property( package->db, szCustomActionData, szEmpty, -1 );
+                msi_set_property( package->db, L"CustomActionData", L"", -1 );
 
             msi_free(actiondata);
         }
@@ -1378,66 +1429,68 @@ UINT ACTION_CustomAction(MSIPACKAGE *package, const WCHAR *action)
 
     switch (type & CUSTOM_ACTION_TYPE_MASK)
     {
-        case 1: /* DLL file stored in a Binary table stream */
-            rc = HANDLE_CustomType1(package,source,target,type,action);
-            break;
-        case 2: /* EXE file stored in a Binary table stream */
-            rc = HANDLE_CustomType2(package,source,target,type,action);
-            break;
-        case 18: /*EXE file installed with package */
-            rc = HANDLE_CustomType18(package,source,target,type,action);
-            break;
-        case 19: /* Error that halts install */
-            rc = HANDLE_CustomType19(package,source,target,type,action);
-            break;
-        case 17:
-            rc = HANDLE_CustomType17(package,source,target,type,action);
-            break;
-        case 23: /* installs another package in the source tree */
-            deformat_string(package,target,&deformated);
-            rc = HANDLE_CustomType23(package,source,deformated,type,action);
-            msi_free(deformated);
-            break;
-        case 50: /*EXE file specified by a property value */
-            rc = HANDLE_CustomType50(package,source,target,type,action);
-            break;
-        case 34: /*EXE to be run in specified directory */
-            rc = HANDLE_CustomType34(package,source,target,type,action);
-            break;
-        case 35: /* Directory set with formatted text. */
-            deformat_string(package,target,&deformated);
-            MSI_SetTargetPathW(package, source, deformated);
-            msi_free(deformated);
-            break;
-        case 51: /* Property set with formatted text. */
-            if (!source)
-                break;
-
-            len = deformat_string( package, target, &deformated );
-            rc = msi_set_property( package->db, source, deformated, len );
-            if (rc == ERROR_SUCCESS && !wcscmp( source, szSourceDir ))
-                msi_reset_source_folders( package );
-            msi_free(deformated);
-            break;
-    case 37: /* JScript/VBScript text stored in target column. */
-    case 38:
-        rc = HANDLE_CustomType37_38(package,source,target,type,action);
+    case 1: /* DLL file stored in a Binary table stream */
+        rc = HANDLE_CustomType1( package, source, target, type, action );
+        break;
+    case 2: /* EXE file stored in a Binary table stream */
+        rc = HANDLE_CustomType2( package, source, target, type, action );
         break;
     case 5:
-    case 6: /* JScript/VBScript file stored in a Binary table stream. */
-        rc = HANDLE_CustomType5_6(package,source,target,type,action);
+    case 6: /* JScript/VBScript file stored in a Binary table stream */
+        rc = HANDLE_CustomType5_6( package, source, target, type, action );
         break;
-    case 21: /* JScript/VBScript file installed with the product. */
+    case 7: /* Concurrent install from substorage */
+        deformat_string( package, target, &deformated );
+        rc = HANDLE_CustomType7( package, source, target, type, action );
+        msi_free( deformated );
+        break;
+    case 17:
+        rc = HANDLE_CustomType17( package, source, target, type, action );
+        break;
+    case 18: /* EXE file installed with package */
+        rc = HANDLE_CustomType18( package, source, target, type, action );
+        break;
+    case 19: /* Error that halts install */
+        rc = HANDLE_CustomType19( package, source, target, type, action );
+        break;
+    case 21: /* JScript/VBScript file installed with the product */
     case 22:
-        rc = HANDLE_CustomType21_22(package,source,target,type,action);
+        rc = HANDLE_CustomType21_22( package, source, target, type, action );
         break;
-    case 53: /* JScript/VBScript text specified by a property value. */
+    case 23: /* Installs another package in the source tree */
+        deformat_string( package, target, &deformated );
+        rc = HANDLE_CustomType23( package, source, deformated, type, action );
+        msi_free( deformated );
+        break;
+    case 34: /* EXE to be run in specified directory */
+        rc = HANDLE_CustomType34( package, source, target, type, action );
+        break;
+    case 35: /* Directory set with formatted text */
+        deformat_string( package, target, &deformated );
+        MSI_SetTargetPathW( package, source, deformated );
+        msi_free( deformated );
+        break;
+    case 37: /* JScript/VBScript text stored in target column */
+    case 38:
+        rc = HANDLE_CustomType37_38( package, source, target, type, action );
+        break;
+    case 50: /* EXE file specified by a property value */
+        rc = HANDLE_CustomType50( package, source, target, type, action );
+        break;
+    case 51: /* Property set with formatted text */
+        if (!source) break;
+        len = deformat_string( package, target, &deformated );
+        rc = msi_set_property( package->db, source, deformated, len );
+        if (rc == ERROR_SUCCESS && !wcscmp( source, L"SourceDir" )) msi_reset_source_folders( package );
+        msi_free( deformated );
+        break;
+    case 53: /* JScript/VBScript text specified by a property value */
     case 54:
-        rc = HANDLE_CustomType53_54(package,source,target,type,action);
+        rc = HANDLE_CustomType53_54( package, source, target, type, action );
         break;
     default:
-        FIXME("unhandled action type %u (%s %s)\n", type & CUSTOM_ACTION_TYPE_MASK,
-              debugstr_w(source), debugstr_w(target));
+        FIXME( "unhandled action type %u (%s %s)\n", type & CUSTOM_ACTION_TYPE_MASK, debugstr_w(source),
+               debugstr_w(target) );
     }
 
 end:

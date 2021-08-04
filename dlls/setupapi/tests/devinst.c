@@ -31,6 +31,7 @@
 #include "devpkey.h"
 #include "setupapi.h"
 #include "cfgmgr32.h"
+#include "cguid.h"
 
 #include "wine/heap.h"
 #include "wine/test.h"
@@ -2010,6 +2011,7 @@ static void test_device_interface_key(void)
     ok(!ret, "key should exist: %u\n", ret);
 
     ret = RegSetValueA(key, NULL, REG_SZ, "test", 5);
+    ok(!ret, "RegSetValue failed: %u\n", ret);
     sz = sizeof(buffer);
     ret = RegQueryValueA(dikey, NULL, buffer, &sz);
     ok(!ret, "RegQueryValue failed: %u\n", ret);
@@ -2028,6 +2030,64 @@ static void test_device_interface_key(void)
     SetupDiRemoveDeviceInterface(set, &iface);
     SetupDiRemoveDevice(set, &devinfo);
     SetupDiDestroyDeviceInfoList(set);
+}
+
+static void test_open_device_interface_key(void)
+{
+    SP_DEVICE_INTERFACE_DATA iface;
+    SP_DEVINFO_DATA device;
+    CHAR buffer[5];
+    HDEVINFO set;
+    LSTATUS lr;
+    LONG size;
+    HKEY key;
+    BOOL ret;
+
+    set = SetupDiCreateDeviceInfoList(&guid, NULL);
+    ok(set != INVALID_HANDLE_VALUE, "Failed to create device list, error %#x\n", GetLastError());
+
+    device.cbSize = sizeof(device);
+    ret = SetupDiCreateDeviceInfoA(set, "ROOT\\LEGACY_BOGUS\\0000", &guid, NULL, NULL, 0, &device);
+    ok(ret, "Failed to create device, error %#x.\n", GetLastError());
+
+    iface.cbSize = sizeof(iface);
+    ret = SetupDiCreateDeviceInterfaceA(set, &device, &guid, NULL, 0, &iface);
+    ok(ret, "Failed to create interface, error %#x.\n", GetLastError());
+
+    /* Test open before creation */
+    key = SetupDiOpenDeviceInterfaceRegKey(set, &iface, 0, KEY_ALL_ACCESS);
+    ok(key == INVALID_HANDLE_VALUE, "Expect open interface registry key failure\n");
+
+    /* Test opened key is from SetupDiCreateDeviceInterfaceRegKey */
+    key = SetupDiCreateDeviceInterfaceRegKeyW(set, &iface, 0, KEY_ALL_ACCESS, NULL, NULL);
+    ok(key != INVALID_HANDLE_VALUE, "Failed to create interface registry key, error %#x\n", GetLastError());
+
+    lr = RegSetValueA(key, NULL, REG_SZ, "test", 5);
+    ok(!lr, "RegSetValue failed, error %#x\n", lr);
+
+    RegCloseKey(key);
+
+    key = SetupDiOpenDeviceInterfaceRegKey(set, &iface, 0, KEY_ALL_ACCESS);
+    ok(key != INVALID_HANDLE_VALUE, "Failed to open interface registry key, error %#x\n", GetLastError());
+
+    size = sizeof(buffer);
+    lr = RegQueryValueA(key, NULL, buffer, &size);
+    ok(!lr, "RegQueryValue failed, error %#x\n", lr);
+    ok(!strcmp(buffer, "test"), "got wrong data %s\n", buffer);
+
+    RegCloseKey(key);
+
+    /* Test open after removal */
+    ret = SetupDiRemoveDeviceInterface(set, &iface);
+    ok(ret, "Failed to remove device interface, error %#x.\n", GetLastError());
+
+    key = SetupDiOpenDeviceInterfaceRegKey(set, &iface, 0, KEY_ALL_ACCESS);
+    ok(key == INVALID_HANDLE_VALUE, "Expect open interface registry key failure\n");
+
+    ret = SetupDiRemoveDevice(set, &device);
+    ok(ret, "Failed to remove device, error %#x.\n", GetLastError());
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list, error %#x.\n", GetLastError());
 }
 
 static void test_device_install_params(void)
@@ -2255,13 +2315,18 @@ static void test_get_actual_section(void)
 
 static void test_driver_list(void)
 {
-    char inf_dir[MAX_PATH], inf_path[MAX_PATH], inf_path2[MAX_PATH];
+    char detail_buffer[1000];
+    SP_DRVINFO_DETAIL_DATA_A *detail = (SP_DRVINFO_DETAIL_DATA_A *)detail_buffer;
+    char short_path[MAX_PATH], inf_dir[MAX_PATH], inf_path[MAX_PATH + 10], inf_path2[MAX_PATH + 10];
     static const char hardware_id[] = "bogus_hardware_id\0";
     static const char compat_id[] = "bogus_compat_id\0";
     SP_DEVINSTALL_PARAMS_A params = {sizeof(params)};
     SP_DRVINFO_DATA_A driver = {sizeof(driver)};
     SP_DEVINFO_DATA device = {sizeof(device)};
+    DWORD size, expect_size;
+    FILETIME filetime;
     HDEVINFO set;
+    HANDLE file;
     BOOL ret;
 
     static const char inf_data[] = "[Version]\n"
@@ -2274,12 +2339,12 @@ static void test_driver_list(void)
             "mfg2_wow=mfg2_key,NT" WOWEXT "\n"
             "mfg3=mfg3_key,NT" WRONGEXT "\n"
             "[mfg1_key.nt" MYEXT "]\n"
-            "desc1=,bogus_hardware_id\n"
+            "desc1=install1,bogus_hardware_id\n"
             "desc2=,bogus_hardware_id\n"
             "desc3=,wrong_hardware_id\n"
             "desc4=,wrong_hardware_id,bogus_compat_id\n"
             "[mfg1_key.nt" WOWEXT "]\n"
-            "desc1=,bogus_hardware_id\n"
+            "desc1=install1,bogus_hardware_id\n"
             "desc2=,bogus_hardware_id\n"
             "desc3=,wrong_hardware_id\n"
             "desc4=,wrong_hardware_id,bogus_compat_id\n"
@@ -2288,7 +2353,9 @@ static void test_driver_list(void)
             "[mfg2_key.nt" WOWEXT "]\n"
             "desc5=,bogus_hardware_id\n"
             "[mfg3_key.nt" WRONGEXT "]\n"
-            "desc6=,bogus_hardware_id\n";
+            "desc6=,bogus_hardware_id\n"
+            "[install1.nt" MYEXT "]\n"
+            "[install1.nt" WRONGEXT "]\n";
 
     static const char inf_data_file1[] = "[Version]\n"
             "Signature=\"$Chicago$\"\n"
@@ -2311,8 +2378,14 @@ static void test_driver_list(void)
             "desc2=,bogus_hardware_id\n";
 
     GetTempPathA(sizeof(inf_path), inf_path);
+    GetShortPathNameA(inf_path, short_path, sizeof(short_path));
     strcat(inf_path, "setupapi_test.inf");
+    strcat(short_path, "setupapi_test.inf");
     create_file(inf_path, inf_data);
+    file = CreateFileA(inf_path, 0, 0, NULL, OPEN_EXISTING, 0, 0);
+    GetFileTime(file, NULL, NULL, &filetime);
+    CloseHandle(file);
+
     set = SetupDiCreateDeviceInfoList(NULL, NULL);
     ok(set != INVALID_HANDLE_VALUE, "Failed to create device list, error %#x.\n", GetLastError());
     ret = SetupDiCreateDeviceInfoA(set, "Root\\BOGUS\\0000", &GUID_NULL, NULL, NULL, 0, &device);
@@ -2348,6 +2421,70 @@ static void test_driver_list(void)
     ok(!strcmp(driver.MfgName, wow64 ? "mfg1_wow" : "mfg1"), "Got wrong manufacturer '%s'.\n", driver.MfgName);
     ok(!strcmp(driver.ProviderName, ""), "Got wrong provider '%s'.\n", driver.ProviderName);
 
+    expect_size = FIELD_OFFSET(SP_DRVINFO_DETAIL_DATA_A, HardwareID[sizeof("bogus_hardware_id\0")]);
+
+    ret = SetupDiGetDriverInfoDetailA(set, &device, &driver, NULL, 0, &size);
+    ok(ret || GetLastError() == ERROR_INVALID_USER_BUFFER /* Win10 1809 */,
+            "Failed to get driver details, error %#x.\n", GetLastError());
+    ok(size == expect_size, "Got size %u.\n", size);
+
+    ret = SetupDiGetDriverInfoDetailA(set, &device, &driver, NULL, sizeof(SP_DRVINFO_DETAIL_DATA_A) - 1, &size);
+    ok(!ret, "Expected failure.\n");
+    ok(GetLastError() == ERROR_INVALID_USER_BUFFER, "Got unexpected error %#x.\n", GetLastError());
+    ok(size == expect_size, "Got size %u.\n", size);
+
+    size = 0xdeadbeef;
+    ret = SetupDiGetDriverInfoDetailA(set, &device, &driver, detail, 0, &size);
+    ok(!ret, "Expected failure.\n");
+    ok(GetLastError() == ERROR_INVALID_USER_BUFFER, "Got unexpected error %#x.\n", GetLastError());
+    ok(size == 0xdeadbeef, "Got size %u.\n", size);
+
+    size = 0xdeadbeef;
+    detail->CompatIDsLength = 0xdeadbeef;
+    ret = SetupDiGetDriverInfoDetailA(set, &device, &driver, detail, sizeof(SP_DRVINFO_DETAIL_DATA_A) - 1, &size);
+    ok(!ret, "Expected failure.\n");
+    ok(GetLastError() == ERROR_INVALID_USER_BUFFER, "Got unexpected error %#x.\n", GetLastError());
+    ok(size == 0xdeadbeef, "Got size %u.\n", size);
+    ok(detail->CompatIDsLength == 0xdeadbeef, "Got wrong compat IDs length %u.\n", detail->CompatIDsLength);
+
+    memset(detail_buffer, 0xcc, sizeof(detail_buffer));
+    detail->cbSize = sizeof(*detail);
+    ret = SetupDiGetDriverInfoDetailA(set, &device, &driver, detail, sizeof(SP_DRVINFO_DETAIL_DATA_A), NULL);
+    ok(!ret, "Expected failure.\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Got unexpected error %#x.\n", GetLastError());
+    ok(detail->InfDate.dwHighDateTime == filetime.dwHighDateTime
+            && detail->InfDate.dwLowDateTime == filetime.dwLowDateTime,
+            "Expected %#x%08x, got %#x%08x.\n", filetime.dwHighDateTime, filetime.dwLowDateTime,
+            detail->InfDate.dwHighDateTime, detail->InfDate.dwLowDateTime);
+    ok(!strcmp(detail->SectionName, "install1"), "Got section name %s.\n", debugstr_a(detail->SectionName));
+    ok(!stricmp(detail->InfFileName, short_path), "Got INF file name %s.\n", debugstr_a(detail->InfFileName));
+    ok(!strcmp(detail->DrvDescription, "desc1"), "Got description %s.\n", debugstr_a(detail->DrvDescription));
+    ok(!detail->CompatIDsOffset || detail->CompatIDsOffset == sizeof("bogus_hardware_id") /* Win10 1809 */,
+            "Got wrong compat IDs offset %u.\n", detail->CompatIDsOffset);
+    ok(!detail->CompatIDsLength, "Got wrong compat IDs length %u.\n", detail->CompatIDsLength);
+    ok(!detail->HardwareID[0], "Got wrong ID list.\n");
+
+    size = 0xdeadbeef;
+    ret = SetupDiGetDriverInfoDetailA(set, &device, &driver, detail, sizeof(SP_DRVINFO_DETAIL_DATA_A), &size);
+    ok(!ret, "Expected failure.\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Got unexpected error %#x.\n", GetLastError());
+    ok(size == expect_size, "Got size %u.\n", size);
+
+    size = 0xdeadbeef;
+    ret = SetupDiGetDriverInfoDetailA(set, &device, &driver, detail, sizeof(detail_buffer), &size);
+    ok(ret, "Failed to get driver details, error %#x.\n", GetLastError());
+    ok(size == expect_size, "Got size %u.\n", size);
+    ok(detail->InfDate.dwHighDateTime == filetime.dwHighDateTime
+            && detail->InfDate.dwLowDateTime == filetime.dwLowDateTime,
+            "Expected %#x%08x, got %#x%08x.\n", filetime.dwHighDateTime, filetime.dwLowDateTime,
+            detail->InfDate.dwHighDateTime, detail->InfDate.dwLowDateTime);
+    ok(!strcmp(detail->SectionName, "install1"), "Got section name %s.\n", debugstr_a(detail->SectionName));
+    ok(!stricmp(detail->InfFileName, short_path), "Got INF file name %s.\n", debugstr_a(detail->InfFileName));
+    ok(!strcmp(detail->DrvDescription, "desc1"), "Got description %s.\n", debugstr_a(detail->DrvDescription));
+    ok(!detail->CompatIDsOffset, "Got wrong compat IDs offset %u.\n", detail->CompatIDsOffset);
+    ok(!detail->CompatIDsLength, "Got wrong compat IDs length %u.\n", detail->CompatIDsLength);
+    ok(!memcmp(detail->HardwareID, "bogus_hardware_id\0", sizeof("bogus_hardware_id\0")), "Got wrong ID list.\n");
+
     ret = SetupDiEnumDriverInfoA(set, &device, SPDIT_COMPATDRIVER, 1, &driver);
     ok(ret, "Failed to enumerate drivers, error %#x.\n", GetLastError());
     ok(driver.DriverType == SPDIT_COMPATDRIVER, "Got wrong type %#x.\n", driver.DriverType);
@@ -2361,6 +2498,19 @@ static void test_driver_list(void)
     ok(!strcmp(driver.Description, "desc4"), "Got wrong description '%s'.\n", driver.Description);
     ok(!strcmp(driver.MfgName, wow64 ? "mfg1_wow" : "mfg1"), "Got wrong manufacturer '%s'.\n", driver.MfgName);
     ok(!strcmp(driver.ProviderName, ""), "Got wrong provider '%s'.\n", driver.ProviderName);
+    ret = SetupDiGetDriverInfoDetailA(set, &device, &driver, detail, sizeof(detail_buffer), NULL);
+    ok(ret, "Failed to get driver details, error %#x.\n", GetLastError());
+    ok(detail->InfDate.dwHighDateTime == filetime.dwHighDateTime
+            && detail->InfDate.dwLowDateTime == filetime.dwLowDateTime,
+            "Expected %#x%08x, got %#x%08x.\n", filetime.dwHighDateTime, filetime.dwLowDateTime,
+            detail->InfDate.dwHighDateTime, detail->InfDate.dwLowDateTime);
+    ok(!detail->SectionName[0], "Got section name %s.\n", debugstr_a(detail->SectionName));
+    ok(!stricmp(detail->InfFileName, short_path), "Got INF file name %s.\n", debugstr_a(detail->InfFileName));
+    ok(!strcmp(detail->DrvDescription, "desc4"), "Got description %s.\n", debugstr_a(detail->DrvDescription));
+    ok(detail->CompatIDsOffset == sizeof("wrong_hardware_id"), "Got wrong compat IDs offset %u.\n", detail->CompatIDsOffset);
+    ok(detail->CompatIDsLength == sizeof("bogus_compat_id\0"), "Got wrong compat IDs length %u.\n", detail->CompatIDsLength);
+    ok(!memcmp(detail->HardwareID, "wrong_hardware_id\0bogus_compat_id\0",
+            sizeof("wrong_hardware_id\0bogus_compat_id\0")), "Got wrong ID list.\n");
 
     ret = SetupDiEnumDriverInfoA(set, &device, SPDIT_COMPATDRIVER, 3, &driver);
     ok(ret, "Failed to enumerate drivers, error %#x.\n", GetLastError());
@@ -2373,6 +2523,20 @@ static void test_driver_list(void)
     ret = SetupDiEnumDriverInfoA(set, &device, SPDIT_COMPATDRIVER, 4, &driver);
     ok(!ret, "Expected failure.\n");
     ok(GetLastError() == ERROR_NO_MORE_ITEMS, "Got unexpected error %#x.\n", GetLastError());
+
+    ret = SetupDiGetSelectedDriverA(set, &device, &driver);
+    ok(ret /* Win10 1809 */ || GetLastError() == ERROR_NO_DRIVER_SELECTED,
+            "Got unexpected error %#x.\n", GetLastError());
+
+    ret = SetupDiSelectBestCompatDrv(set, &device);
+    ok(ret, "Failed to select driver, error %#x.\n", GetLastError());
+
+    ret = SetupDiGetSelectedDriverA(set, &device, &driver);
+    ok(ret, "Failed to get selected driver, error %#x.\n", GetLastError());
+    ok(driver.DriverType == SPDIT_COMPATDRIVER, "Got wrong type %#x.\n", driver.DriverType);
+    ok(!strcmp(driver.Description, "desc1"), "Got wrong description '%s'.\n", driver.Description);
+    ok(!strcmp(driver.MfgName, wow64 ? "mfg1_wow" : "mfg1"), "Got wrong manufacturer '%s'.\n", driver.MfgName);
+    ok(!strcmp(driver.ProviderName, ""), "Got wrong provider '%s'.\n", driver.ProviderName);
 
     SetupDiDestroyDeviceInfoList(set);
     ret = DeleteFileA(inf_path);
@@ -2544,7 +2708,10 @@ static void test_class_installer(void)
     ok(*coinst_last_message == DIF_REMOVE, "Got unexpected message %#x.\n", *coinst_last_message);
     *coinst_callback_count = 0;
 
-    SetupDiDestroyDeviceInfoList(set);
+    SetLastError(0xdeadbeef);
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+    ok(!GetLastError(), "Got unexpected error %#x.\n", GetLastError());
 
     ok(*coinst_callback_count == 1, "Got %d callbacks.\n", *coinst_callback_count);
     ok(*coinst_last_message == DIF_DESTROYPRIVATEDATA, "Got unexpected message %#x.\n", *coinst_last_message);
@@ -2563,20 +2730,23 @@ static void test_class_installer(void)
 
     ret = SetupDiCallClassInstaller(DIF_ALLOW_INSTALL, set, &device);
     ok(!ret, "Expected failure.\n");
-    ok(GetLastError() == 0xdeadbeef, "Got unexpected error %#x.\n", GetLastError());
+    ok(GetLastError() == 0xdeadc0de, "Got unexpected error %#x.\n", GetLastError());
 
     ok(!device_is_registered(set, &device), "Expected device not to be registered.\n");
     ret = SetupDiCallClassInstaller(DIF_REGISTERDEVICE, set, &device);
     ok(!ret, "Expected failure.\n");
-    ok(GetLastError() == 0xdeadbeef, "Got unexpected error %#x.\n", GetLastError());
+    ok(GetLastError() == 0xdeadc0de, "Got unexpected error %#x.\n", GetLastError());
     ok(!device_is_registered(set, &device), "Expected device not to be registered.\n");
 
     ret = SetupDiCallClassInstaller(DIF_REMOVE, set, &device);
     ok(!ret, "Expected failure.\n");
-    ok(GetLastError() == 0xdeadbeef, "Got unexpected error %#x.\n", GetLastError());
+    ok(GetLastError() == 0xdeadc0de, "Got unexpected error %#x.\n", GetLastError());
     ok(!device_is_registered(set, &device), "Expected device not to be registered.\n");
 
-    SetupDiDestroyDeviceInfoList(set);
+    SetLastError(0xdeadbeef);
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+    ok(!GetLastError(), "Got unexpected error %#x.\n", GetLastError());
 
     /* Test returning ERROR_DI_DO_DEFAULT. */
 
@@ -2602,7 +2772,10 @@ static void test_class_installer(void)
     ok(ret, "Failed to call class installer, error %#x.\n", GetLastError());
     ok(!device_is_registered(set, &device), "Expected device not to be registered.\n");
 
-    SetupDiDestroyDeviceInfoList(set);
+    SetLastError(0xdeadbeef);
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+    ok(!GetLastError(), "Got unexpected error %#x.\n", GetLastError());
 
     /* The default entry point is ClassInstall(). */
 
@@ -2622,7 +2795,10 @@ static void test_class_installer(void)
     ok(*coinst_last_message == DIF_ALLOW_INSTALL, "Got unexpected message %#x.\n", *coinst_last_message);
     *coinst_callback_count = 0;
 
-    SetupDiDestroyDeviceInfoList(set);
+    SetLastError(0xdeadbeef);
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+    ok(!GetLastError(), "Got unexpected error %#x.\n", GetLastError());
 
     ok(*coinst_callback_count == 1, "Got %d callbacks.\n", *coinst_callback_count);
     ok(*coinst_last_message == DIF_DESTROYPRIVATEDATA, "Got unexpected message %#x.\n", *coinst_last_message);
@@ -2690,7 +2866,10 @@ static void test_class_coinstaller(void)
     ok(*coinst_last_message == DIF_REMOVE, "Got unexpected message %#x.\n", *coinst_last_message);
     *coinst_callback_count = 0;
 
-    SetupDiDestroyDeviceInfoList(set);
+    SetLastError(0xdeadbeef);
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+    ok(!GetLastError(), "Got unexpected error %#x.\n", GetLastError());
 
     todo_wine ok(*coinst_callback_count == 1, "Got %d callbacks.\n", *coinst_callback_count);
     todo_wine ok(*coinst_last_message == DIF_DESTROYPRIVATEDATA, "Got unexpected message %#x.\n", *coinst_last_message);
@@ -2711,15 +2890,18 @@ static void test_class_coinstaller(void)
 
     ret = SetupDiCallClassInstaller(DIF_ALLOW_INSTALL, set, &device);
     ok(!ret, "Expected failure.\n");
-    ok(GetLastError() == 0xdeadbeef, "Got unexpected error %#x.\n", GetLastError());
+    ok(GetLastError() == 0xdeadc0de, "Got unexpected error %#x.\n", GetLastError());
 
     ok(!device_is_registered(set, &device), "Expected device not to be registered.\n");
     ret = SetupDiCallClassInstaller(DIF_REGISTERDEVICE, set, &device);
     ok(!ret, "Expected failure.\n");
-    ok(GetLastError() == 0xdeadbeef, "Got unexpected error %#x.\n", GetLastError());
+    ok(GetLastError() == 0xdeadc0de, "Got unexpected error %#x.\n", GetLastError());
     ok(!device_is_registered(set, &device), "Expected device not to be registered.\n");
 
-    SetupDiDestroyDeviceInfoList(set);
+    SetLastError(0xdeadbeef);
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+    ok(!GetLastError(), "Got unexpected error %#x.\n", GetLastError());
 
     /* The default entry point is CoDeviceInstall(). */
 
@@ -2742,7 +2924,10 @@ static void test_class_coinstaller(void)
     ok(*coinst_last_message == DIF_ALLOW_INSTALL, "Got unexpected message %#x.\n", *coinst_last_message);
     *coinst_callback_count = 0;
 
-    SetupDiDestroyDeviceInfoList(set);
+    SetLastError(0xdeadbeef);
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+    ok(!GetLastError(), "Got unexpected error %#x.\n", GetLastError());
 
     ok(*coinst_callback_count == 1, "Got %d callbacks.\n", *coinst_callback_count);
     ok(*coinst_last_message == DIF_DESTROYPRIVATEDATA, "Got unexpected message %#x.\n", *coinst_last_message);
@@ -2790,7 +2975,10 @@ static void test_call_class_installer(void)
     ok(ret, "Failed to call class installer, error %#x.\n", GetLastError());
     ok(!device_is_registered(set, &device), "Expected device not to be registered.\n");
 
-    SetupDiDestroyDeviceInfoList(set);
+    SetLastError(0xdeadbeef);
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+    ok(!GetLastError(), "Got unexpected error %#x.\n", GetLastError());
 
     load_resource("coinst.dll", "C:\\windows\\system32\\winetest_coinst.dll");
 
@@ -3141,6 +3329,7 @@ START_TEST(devinst)
     test_get_inf_class();
     test_devnode();
     test_device_interface_key();
+    test_open_device_interface_key();
     test_device_install_params();
     test_driver_list();
     test_call_class_installer();

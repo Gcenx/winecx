@@ -72,7 +72,7 @@ extern "C" {
  * -- AJ
  */
 
-#ifndef __GNUC__
+#if !defined(__GNUC__) && !defined(__clang__)
 #define __attribute__(x) /* nothing */
 #endif
 
@@ -107,9 +107,9 @@ typedef struct { int reg; } __wine_jmp_buf;
 
 extern int __cdecl __attribute__ ((__nothrow__,__returns_twice__)) __wine_setjmpex( __wine_jmp_buf *buf,
                                                    EXCEPTION_REGISTRATION_RECORD *frame ) DECLSPEC_HIDDEN;
-extern void __cdecl __wine_longjmp( __wine_jmp_buf *buf, int retval ) DECLSPEC_HIDDEN DECLSPEC_NORETURN;
-extern void __cdecl __wine_rtl_unwind( EXCEPTION_REGISTRATION_RECORD* frame, EXCEPTION_RECORD *record,
-                                       void (__cdecl *target)(void) ) DECLSPEC_HIDDEN DECLSPEC_NORETURN;
+extern void DECLSPEC_NORETURN __cdecl __wine_longjmp( __wine_jmp_buf *buf, int retval ) DECLSPEC_HIDDEN;
+extern void DECLSPEC_NORETURN __cdecl __wine_rtl_unwind( EXCEPTION_REGISTRATION_RECORD* frame, EXCEPTION_RECORD *record,
+                                                         void (__cdecl *target)(void) ) DECLSPEC_HIDDEN;
 extern DWORD __cdecl __wine_exception_handler( EXCEPTION_RECORD *record,
                                                EXCEPTION_REGISTRATION_RECORD *frame,
                                                CONTEXT *context,
@@ -165,27 +165,18 @@ extern DWORD __cdecl __wine_finally_ctx_handler( EXCEPTION_RECORD *record,
                  const __WINE_FRAME * const __eptr __attribute__((unused)) = &__f; \
                  do {
 
-/* convenience handler for page fault exceptions */
-#define __EXCEPT_PAGE_FAULT \
+#define __EXCEPT_HANDLER(handler) \
              } while(0); \
              __wine_pop_frame( &__f.frame ); \
              break; \
          } else { \
-             __f.frame.Handler = __wine_exception_handler_page_fault; \
+             __f.frame.Handler = (handler); \
              if (__wine_setjmpex( &__f.jmp, &__f.frame )) { \
                  const __WINE_FRAME * const __eptr __attribute__((unused)) = &__f; \
                  do {
 
-/* convenience handler for all exceptions */
-#define __EXCEPT_ALL \
-             } while(0); \
-             __wine_pop_frame( &__f.frame ); \
-             break; \
-         } else { \
-             __f.frame.Handler = __wine_exception_handler_all; \
-             if (__wine_setjmpex( &__f.jmp, &__f.frame )) { \
-                 const __WINE_FRAME * const __eptr __attribute__((unused)) = &__f; \
-                 do {
+#define __EXCEPT_PAGE_FAULT __EXCEPT_HANDLER(__wine_exception_handler_page_fault)
+#define __EXCEPT_ALL        __EXCEPT_HANDLER(__wine_exception_handler_all)
 
 #define __ENDTRY \
                  } while (0); \

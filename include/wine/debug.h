@@ -32,6 +32,12 @@
 #include <guiddef.h>
 #endif
 
+/* 32on64 FIXME: We need this for the inline version of IsBadStringPtr, but this is a
+ * BIG change re included headers and it required at least a change in d3dcompiler to
+ * avoid a name colission with the NT type STRING. */
+#include "winternl.h"
+#include "wine/exception.h"
+
 #include <wine/winheader_enter.h>
 
 #ifdef __cplusplus
@@ -82,7 +88,7 @@ struct __wine_debug_channel
 #define __WINE_IS_DEBUG_ON(dbcl,dbch) \
   (__WINE_GET_DEBUGGING##dbcl(dbch) && (__wine_dbg_get_channel_flags(dbch) & (1 << __WINE_DBCL##dbcl)))
 
-#ifdef __GNUC__
+#if defined(__GNUC__) || defined(__clang__)
 
 #define __WINE_DPRINTF(dbcl,dbch) \
   do { if(__WINE_GET_DEBUGGING(dbcl,(dbch))) { \
@@ -93,7 +99,11 @@ struct __wine_debug_channel
 #define __WINE_DBG_LOG(args...) \
     wine_dbg_log( __dbcl, __dbch, __FUNCTION__, args); } } while(0)
 
+#if !defined(__WINE_USE_MSVCRT) || defined(__MINGW32__)
 #define __WINE_PRINTF_ATTR(fmt,args) __attribute__((format (printf,fmt,args)))
+#else
+#define __WINE_PRINTF_ATTR(fmt,args)
+#endif
 
 
 #ifdef WINE_NO_TRACE_MSGS
@@ -170,7 +180,7 @@ extern int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine
 # define __wine_dbg_va_list __builtin_va_list32
 # define __wine_dbg_va_start(list,arg) __builtin_va_start32(list,arg)
 # define __wine_dbg_va_end(list) __builtin_va_end32(list)
-#elif (defined(__x86_64__) || defined(__aarch64__)) && defined(__GNUC__) && defined(__WINE_USE_MSVCRT)
+#elif (defined(__x86_64__) || (defined(__aarch64__) && __has_attribute(ms_abi))) && defined(__GNUC__) && defined(__WINE_USE_MSVCRT)
 # define __wine_dbg_cdecl __cdecl
 # define __wine_dbg_va_list __builtin_ms_va_list
 # define __wine_dbg_va_start(list,arg) __builtin_ms_va_start(list,arg)
@@ -231,14 +241,70 @@ static inline int __wine_dbg_cdecl wine_dbg_log( enum __wine_debug_class cls,
     return ret;
 }
 
+#ifdef __i386_on_x86_64__
+#ifndef WINE32ON64_HOSTSTACK
+static LONG WINAPI badptr_handler( EXCEPTION_POINTERS *eptr )
+{
+    EXCEPTION_RECORD *rec = eptr->ExceptionRecord;
+
+    if (rec->ExceptionCode == STATUS_ACCESS_VIOLATION) return EXCEPTION_EXECUTE_HANDLER;
+    if (rec->ExceptionCode == STATUS_STACK_OVERFLOW)
+    {
+        /* restore stack guard page */
+        /* 32on64 FIXME: Does this have a chance of working on host stacks? Will there even be
+         * a guard page? If yes, can we use mprotect? */
+        /* Page size hardcoded. It only matters for 32on64 */
+        void *addr = (char *)NtCurrentTeb()->DeallocationStack + 0x1000;
+        SIZE_T size = (char *)rec - (char *)addr;
+        ULONG old_prot;
+        NtProtectVirtualMemory( GetCurrentProcess(), &addr, &size, PAGE_GUARD|PAGE_READWRITE, &old_prot );
+        return EXCEPTION_EXECUTE_HANDLER;
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
+
+static inline BOOL __wine_dbg_IsBadStringPtrA(const CHAR * HOSTPTR str,ULONGLONG max)
+{
+    if (!str) return TRUE;
+
+    /* 32on64 FIXME: Can't set up a 32 bit exception handler on a host stack */
+#ifndef WINE32ON64_HOSTSTACK
+    __TRY
+    {
+        volatile const char * HOSTPTR p = str;
+        while (p != str + max) if (!*p++) break;
+    }
+    __EXCEPT( badptr_handler )
+    {
+        return TRUE;
+    }
+    __ENDTRY
+#endif
+    return FALSE;
+}
+#else
+static inline BOOL __wine_dbg_IsBadStringPtrA(const CHAR * HOSTPTR str,ULONGLONG max)
+{
+    return IsBadStringPtrA(str, max);
+}
+#endif
+
 static inline const char *wine_dbgstr_an( const char * HOSTPTR str, int n )
 {
     static const char hex[16] = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};
     char buffer[300], * HOSTPTR dst = buffer;
 
     if (!str) return "(null)";
-    if (!((ULONGLONG)str >> 16)) return wine_dbg_sprintf( "#%04x", LOWORD(str) );
-    if (IsBadStringPtrA( str, n )) return "(invalid)";
+    /* 32on64 FIXME: The code below casts a 32 bit pointer to a 64 bit integer inside mingw
+     * and a 64 bit ptr to 64 bit in host-side hybrid clang. Maybe size_t successfully
+     * shuts up the warning...
+     * BKS: try ULONG_HOSTPTR instead, size_t causes build errors in strmbase
+     */
+    if (!((ULONG_HOSTPTR)str >> 16)) return wine_dbg_sprintf( "#%04x", LOWORD(str) );
+#ifndef WINE_UNIX_LIB
+    if (__wine_dbg_IsBadStringPtrA( str, n )) return "(invalid)";
+#endif
     if (n == -1) for (n = 0; str[n]; n++) ;
     *dst++ = '"';
     while (n-- > 0 && dst <= buffer + sizeof(buffer) - 9)
@@ -273,14 +339,43 @@ static inline const char *wine_dbgstr_an( const char * HOSTPTR str, int n )
     return __wine_dbg_strdup( buffer );
 }
 
+#ifdef __i386_on_x86_64__
+static inline BOOL __wine_dbg_IsBadStringPtrW(const WCHAR * HOSTPTR str,ULONGLONG max)
+{
+    if (!str) return TRUE;
+
+    /* 32on64 FIXME: Can't set up a 32 bit exception handler on a host stack */
+#ifndef WINE32ON64_HOSTSTACK
+    __TRY
+    {
+        volatile const WCHAR * HOSTPTR p = str;
+        while (p != str + max) if (!*p++) break;
+    }
+    __EXCEPT( badptr_handler )
+    {
+        return TRUE;
+    }
+    __ENDTRY
+#endif
+    return FALSE;
+}
+#else
+static inline BOOL __wine_dbg_IsBadStringPtrW(const WCHAR * HOSTPTR str,ULONGLONG max)
+{
+    return IsBadStringPtrW(str, max);
+}
+#endif
+
 static inline const char *wine_dbgstr_wn( const WCHAR * HOSTPTR str, int n )
 {
     static const char hex[16] = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};
     char buffer[300], * HOSTPTR dst = buffer;
 
     if (!str) return "(null)";
-    if (!((ULONGLONG)str >> 16)) return wine_dbg_sprintf( "#%04x", LOWORD(str) );
-    if (IsBadStringPtrW( str, n )) return "(invalid)";
+    if (!((ULONG_HOSTPTR)str >> 16)) return wine_dbg_sprintf( "#%04x", LOWORD(str) );
+#ifndef WINE_UNIX_LIB
+    if (__wine_dbg_IsBadStringPtrW( str, n )) return "(invalid)";
+#endif
     if (n == -1) for (n = 0; str[n]; n++) ;
     *dst++ = 'L';
     *dst++ = '"';
@@ -330,7 +425,7 @@ static inline const char *wine_dbgstr_w( const WCHAR * HOSTPTR s )
 static inline const char *wine_dbgstr_guid( const GUID * HOSTPTR id )
 {
     if (!id) return "(null)";
-    if (!((ULONGLONG)id >> 16)) return wine_dbg_sprintf( "<guid-0x%04hx>", (WORD)(ULONGLONG)id );
+    if (!((ULONG_HOSTPTR)id >> 16)) return wine_dbg_sprintf( "<guid-0x%04hx>", (WORD)(ULONG_HOSTPTR)id );
     return wine_dbg_sprintf( "{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
                              id->Data1, id->Data2, id->Data3,
                              id->Data4[0], id->Data4[1], id->Data4[2], id->Data4[3],

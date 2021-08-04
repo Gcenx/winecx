@@ -27,6 +27,10 @@
 #include "shlwapi.h"
 
 #include "strsafe.h"
+#include "winternl.h"
+#include "inaddr.h"
+#include "in6addr.h"
+#include "ip2string.h"
 
 #define URI_DISPLAY_NO_ABSOLUTE_URI         0x1
 #define URI_DISPLAY_NO_DEFAULT_PORT_AUTH    0x2
@@ -129,27 +133,6 @@ typedef struct {
 } UriBuilder;
 
 typedef struct {
-    const WCHAR *str;
-    DWORD       len;
-} h16;
-
-typedef struct {
-    /* IPv6 addresses can hold up to 8 h16 components. */
-    h16         components[8];
-    DWORD       h16_count;
-
-    /* An IPv6 can have 1 elision ("::"). */
-    const WCHAR *elision;
-
-    /* An IPv6 can contain 1 IPv4 address as the last 32bits of the address. */
-    const WCHAR *ipv4;
-    DWORD       ipv4_len;
-
-    INT         components_size;
-    INT         elision_size;
-} ipv6_address;
-
-typedef struct {
     BSTR            uri;
 
     BOOL            is_relative;
@@ -173,8 +156,7 @@ typedef struct {
     DWORD           host_len;
     Uri_HOST_TYPE   host_type;
 
-    BOOL            has_ipv6;
-    ipv6_address    ipv6_address;
+    IN6_ADDR        ipv6_address;
 
     BOOL            has_port;
     const WCHAR     *port;
@@ -198,28 +180,28 @@ static const struct {
     URL_SCHEME  scheme;
     WCHAR       scheme_name[16];
 } recognized_schemes[] = {
-    {URL_SCHEME_FTP,            {'f','t','p',0}},
-    {URL_SCHEME_HTTP,           {'h','t','t','p',0}},
-    {URL_SCHEME_GOPHER,         {'g','o','p','h','e','r',0}},
-    {URL_SCHEME_MAILTO,         {'m','a','i','l','t','o',0}},
-    {URL_SCHEME_NEWS,           {'n','e','w','s',0}},
-    {URL_SCHEME_NNTP,           {'n','n','t','p',0}},
-    {URL_SCHEME_TELNET,         {'t','e','l','n','e','t',0}},
-    {URL_SCHEME_WAIS,           {'w','a','i','s',0}},
-    {URL_SCHEME_FILE,           {'f','i','l','e',0}},
-    {URL_SCHEME_MK,             {'m','k',0}},
-    {URL_SCHEME_HTTPS,          {'h','t','t','p','s',0}},
-    {URL_SCHEME_SHELL,          {'s','h','e','l','l',0}},
-    {URL_SCHEME_SNEWS,          {'s','n','e','w','s',0}},
-    {URL_SCHEME_LOCAL,          {'l','o','c','a','l',0}},
-    {URL_SCHEME_JAVASCRIPT,     {'j','a','v','a','s','c','r','i','p','t',0}},
-    {URL_SCHEME_VBSCRIPT,       {'v','b','s','c','r','i','p','t',0}},
-    {URL_SCHEME_ABOUT,          {'a','b','o','u','t',0}},
-    {URL_SCHEME_RES,            {'r','e','s',0}},
-    {URL_SCHEME_MSSHELLROOTED,  {'m','s','-','s','h','e','l','l','-','r','o','o','t','e','d',0}},
-    {URL_SCHEME_MSSHELLIDLIST,  {'m','s','-','s','h','e','l','l','-','i','d','l','i','s','t',0}},
-    {URL_SCHEME_MSHELP,         {'h','c','p',0}},
-    {URL_SCHEME_WILDCARD,       {'*',0}}
+    {URL_SCHEME_FTP,            L"ftp"},
+    {URL_SCHEME_HTTP,           L"http"},
+    {URL_SCHEME_GOPHER,         L"gopher"},
+    {URL_SCHEME_MAILTO,         L"mailto"},
+    {URL_SCHEME_NEWS,           L"news"},
+    {URL_SCHEME_NNTP,           L"nntp"},
+    {URL_SCHEME_TELNET,         L"telnet"},
+    {URL_SCHEME_WAIS,           L"wais"},
+    {URL_SCHEME_FILE,           L"file"},
+    {URL_SCHEME_MK,             L"mk"},
+    {URL_SCHEME_HTTPS,          L"https"},
+    {URL_SCHEME_SHELL,          L"shell"},
+    {URL_SCHEME_SNEWS,          L"snews"},
+    {URL_SCHEME_LOCAL,          L"local"},
+    {URL_SCHEME_JAVASCRIPT,     L"javascript"},
+    {URL_SCHEME_VBSCRIPT,       L"vbscript"},
+    {URL_SCHEME_ABOUT,          L"about"},
+    {URL_SCHEME_RES,            L"res"},
+    {URL_SCHEME_MSSHELLROOTED,  L"ms-shell-rooted"},
+    {URL_SCHEME_MSSHELLIDLIST,  L"ms-shell-idlist"},
+    {URL_SCHEME_MSHELP,         L"hcp"},
+    {URL_SCHEME_WILDCARD,       L"*"}
 };
 
 /* List of default ports Windows recognizes. */
@@ -242,13 +224,13 @@ static const struct {
 static const struct {
     WCHAR tld_name[4];
 } recognized_tlds[] = {
-    {{'c','o','m',0}},
-    {{'e','d','u',0}},
-    {{'g','o','v',0}},
-    {{'i','n','t',0}},
-    {{'m','i','l',0}},
-    {{'n','e','t',0}},
-    {{'o','r','g',0}}
+    {L"com"},
+    {L"edu"},
+    {L"gov"},
+    {L"int"},
+    {L"mil"},
+    {L"net"},
+    {L"org"}
 };
 
 static Uri *get_uri_obj(IUri *uri)
@@ -433,31 +415,6 @@ static inline BOOL is_hierarchical_uri(const WCHAR **ptr, const parse_data *data
 
     *ptr = start;
     return FALSE;
-}
-
-/* Computes the size of the given IPv6 address.
- * Each h16 component is 16 bits. If there is an IPv4 address, it's
- * 32 bits. If there's an elision it can be 16 to 128 bits, depending
- * on the number of other components.
- *
- * Modeled after google-url's CheckIPv6ComponentsSize function
- */
-static void compute_ipv6_comps_size(ipv6_address *address) {
-    address->components_size = address->h16_count * 2;
-
-    if(address->ipv4)
-        /* IPv4 address is 4 bytes. */
-        address->components_size += 4;
-
-    if(address->elision) {
-        /* An elision can be anywhere from 2 bytes up to 16 bytes.
-         * Its size depends on the size of the h16 and IPv4 components.
-         */
-        address->elision_size = 16 - address->components_size;
-        if(address->elision_size < 2)
-            address->elision_size = 2;
-    } else
-        address->elision_size = 0;
 }
 
 /* Taken from dlls/jscript/lex.c */
@@ -694,72 +651,6 @@ static INT find_file_extension(const WCHAR *path, DWORD path_len) {
     return -1;
 }
 
-/* Computes the location where the elision should occur in the IPv6
- * address using the numerical values of each component stored in
- * 'values'. If the address shouldn't contain an elision then 'index'
- * is assigned -1 as its value. Otherwise 'index' will contain the
- * starting index (into values) where the elision should be, and 'count'
- * will contain the number of cells the elision covers.
- *
- * NOTES:
- *  Windows will expand an elision if the elision only represents one h16
- *  component of the address.
- *
- *  Ex: [1::2:3:4:5:6:7] -> [1:0:2:3:4:5:6:7]
- *
- *  If the IPv6 address contains an IPv4 address, the IPv4 address is also
- *  considered for being included as part of an elision if all its components
- *  are zeros.
- *
- *  Ex: [1:2:3:4:5:6:0.0.0.0] -> [1:2:3:4:5:6::]
- */
-static void compute_elision_location(const ipv6_address *address, const USHORT values[8],
-                                     INT *index, DWORD *count) {
-    DWORD i, max_len, cur_len;
-    INT max_index, cur_index;
-
-    max_len = cur_len = 0;
-    max_index = cur_index = -1;
-    for(i = 0; i < 8; ++i) {
-        BOOL check_ipv4 = (address->ipv4 && i == 6);
-        BOOL is_end = (check_ipv4 || i == 7);
-
-        if(check_ipv4) {
-            /* Check if the IPv4 address contains only zeros. */
-            if(values[i] == 0 && values[i+1] == 0) {
-                if(cur_index == -1)
-                    cur_index = i;
-
-                cur_len += 2;
-                ++i;
-            }
-        } else if(values[i] == 0) {
-            if(cur_index == -1)
-                cur_index = i;
-
-            ++cur_len;
-        }
-
-        if(is_end || values[i] != 0) {
-            /* We only consider it for an elision if it's
-             * more than 1 component long.
-             */
-            if(cur_len > 1 && cur_len > max_len) {
-                /* Found the new elision location. */
-                max_len = cur_len;
-                max_index = cur_index;
-            }
-
-            /* Reset the current range for the next range of zeros. */
-            cur_index = -1;
-            cur_len = 0;
-        }
-    }
-
-    *index = max_index;
-    *count = max_len;
-}
-
 /* Removes all the leading and trailing white spaces or
  * control characters from the URI and removes all control
  * characters inside of the URI string.
@@ -799,30 +690,6 @@ static BSTR pre_process_uri(LPCWSTR uri) {
     return ret;
 }
 
-/* Converts the specified IPv4 address into an uint value.
- *
- * This function assumes that the IPv4 address has already been validated.
- */
-static UINT ipv4toui(const WCHAR *ip, DWORD len) {
-    UINT ret = 0;
-    DWORD comp_value = 0;
-    const WCHAR *ptr;
-
-    for(ptr = ip; ptr < ip+len; ++ptr) {
-        if(*ptr == '.') {
-            ret <<= 8;
-            ret += comp_value;
-            comp_value = 0;
-        } else
-            comp_value = comp_value*10 + (*ptr-'0');
-    }
-
-    ret <<= 8;
-    ret += comp_value;
-
-    return ret;
-}
-
 /* Converts an IPv4 address in numerical form into its fully qualified
  * string form. This function returns the number of characters written
  * to 'dest'. If 'dest' is NULL this function will return the number of
@@ -832,8 +699,6 @@ static UINT ipv4toui(const WCHAR *ip, DWORD len) {
  * address.
  */
 static DWORD ui2ipv4(WCHAR *dest, UINT address) {
-    static const WCHAR formatW[] =
-        {'%','u','.','%','u','.','%','u','.','%','u',0};
     DWORD ret = 0;
     UCHAR digits[4];
 
@@ -844,88 +709,23 @@ static DWORD ui2ipv4(WCHAR *dest, UINT address) {
 
     if(!dest) {
         WCHAR tmp[16];
-        ret = swprintf(tmp, ARRAY_SIZE(tmp), formatW, digits[0], digits[1], digits[2], digits[3]);
+        ret = swprintf(tmp, ARRAY_SIZE(tmp), L"%u.%u.%u.%u", digits[0], digits[1], digits[2], digits[3]);
     } else
-        ret = swprintf(dest, 16, formatW, digits[0], digits[1], digits[2], digits[3]);
+        ret = swprintf(dest, 16, L"%u.%u.%u.%u", digits[0], digits[1], digits[2], digits[3]);
 
     return ret;
 }
 
 static DWORD ui2str(WCHAR *dest, UINT value) {
-    static const WCHAR formatW[] = {'%','u',0};
     DWORD ret = 0;
 
     if(!dest) {
         WCHAR tmp[11];
-        ret = swprintf(tmp, ARRAY_SIZE(tmp), formatW, value);
+        ret = swprintf(tmp, ARRAY_SIZE(tmp), L"%u", value);
     } else
-        ret = swprintf(dest, 11, formatW, value);
+        ret = swprintf(dest, 11, L"%u", value);
 
     return ret;
-}
-
-/* Converts a h16 component (from an IPv6 address) into its
- * numerical value.
- *
- * This function assumes that the h16 component has already been validated.
- */
-static USHORT h16tous(h16 component) {
-    DWORD i;
-    USHORT ret = 0;
-
-    for(i = 0; i < component.len; ++i) {
-        ret <<= 4;
-        ret += hex_to_int(component.str[i]);
-    }
-
-    return ret;
-}
-
-/* Converts an IPv6 address into its 128 bits (16 bytes) numerical value.
- *
- * This function assumes that the ipv6_address has already been validated.
- */
-static BOOL ipv6_to_number(const ipv6_address *address, USHORT number[8]) {
-    DWORD i, cur_component = 0;
-    BOOL already_passed_elision = FALSE;
-
-    for(i = 0; i < address->h16_count; ++i) {
-        if(address->elision) {
-            if(address->components[i].str > address->elision && !already_passed_elision) {
-                /* Means we just passed the elision and need to add its values to
-                 * 'number' before we do anything else.
-                 */
-                INT j;
-                for(j = 0; j < address->elision_size; j+=2)
-                    number[cur_component++] = 0;
-
-                already_passed_elision = TRUE;
-            }
-        }
-
-        number[cur_component++] = h16tous(address->components[i]);
-    }
-
-    /* Case when the elision appears after the h16 components. */
-    if(!already_passed_elision && address->elision) {
-        INT j;
-        for(j = 0; j < address->elision_size; j+=2)
-            number[cur_component++] = 0;
-    }
-
-    if(address->ipv4) {
-        UINT value = ipv4toui(address->ipv4, address->ipv4_len);
-
-        if(cur_component != 6) {
-            ERR("(%p %p): Failed sanity check with %d\n", address, number, cur_component);
-            return FALSE;
-        }
-
-        number[cur_component++] = (value >> 16) & 0xffff;
-        number[cur_component] = value & 0xffff;
-    }
-
-    return TRUE;
 }
 
 /* Checks if the characters pointed to by 'ptr' are
@@ -1167,14 +967,11 @@ static BOOL parse_scheme_type(parse_data *data) {
  * Returns TRUE if it was able to successfully parse the information.
  */
 static BOOL parse_scheme(const WCHAR **ptr, parse_data *data, DWORD flags, DWORD extras) {
-    static const WCHAR fileW[] = {'f','i','l','e',0};
-    static const WCHAR wildcardW[] = {'*',0};
-
     /* First check to see if the uri could implicitly be a file path. */
     if(is_implicit_file_path(*ptr)) {
         if(flags & Uri_CREATE_ALLOW_IMPLICIT_FILE_SCHEME) {
-            data->scheme = fileW;
-            data->scheme_len = lstrlenW(fileW);
+            data->scheme = L"file";
+            data->scheme_len = lstrlenW(L"file");
             data->has_implicit_scheme = TRUE;
 
             TRACE("(%p %p %x): URI is an implicit file path.\n", ptr, data, flags);
@@ -1193,8 +990,8 @@ static BOOL parse_scheme(const WCHAR **ptr, parse_data *data, DWORD flags, DWORD
          *      c) an invalid URI.
          */
         if(flags & Uri_CREATE_ALLOW_IMPLICIT_WILDCARD_SCHEME) {
-            data->scheme = wildcardW;
-            data->scheme_len = lstrlenW(wildcardW);
+            data->scheme = L"*";
+            data->scheme_len = lstrlenW(L"*");
             data->has_implicit_scheme = TRUE;
 
             TRACE("(%p %p %x): URI is an implicit wildcard scheme.\n", ptr, data, flags);
@@ -1342,7 +1139,7 @@ static void parse_userinfo(const WCHAR **ptr, parse_data *data, DWORD flags) {
  *
  * port = *DIGIT
  */
-static BOOL parse_port(const WCHAR **ptr, parse_data *data, DWORD flags) {
+static BOOL parse_port(const WCHAR **ptr, parse_data *data) {
     UINT port = 0;
     data->port = *ptr;
 
@@ -1368,7 +1165,7 @@ static BOOL parse_port(const WCHAR **ptr, parse_data *data, DWORD flags) {
     data->port_value = port;
     data->port_len = *ptr - data->port;
 
-    TRACE("(%p %p %x): Found port %s len=%d value=%u\n", ptr, data, flags,
+    TRACE("(%p %p): Found port %s len=%d value=%u\n", ptr, data,
         debugstr_wn(data->port, data->port_len), data->port_len, data->port_value);
     return TRUE;
 }
@@ -1387,14 +1184,13 @@ static BOOL parse_port(const WCHAR **ptr, parse_data *data, DWORD flags) {
  *          is UINT_MAX, if the value in the URI exceeds this then
  *          it is not considered an IPv4 address.
  */
-static BOOL parse_ipv4address(const WCHAR **ptr, parse_data *data, DWORD flags) {
+static BOOL parse_ipv4address(const WCHAR **ptr, parse_data *data) {
     const BOOL is_unknown = data->scheme_type == URL_SCHEME_UNKNOWN;
     data->host = *ptr;
 
     if(!check_ipv4address(ptr, FALSE)) {
         if(!check_implicit_ipv4(ptr, &data->implicit_ipv4)) {
-            TRACE("(%p %p %x): URI didn't contain anything looking like an IPv4 address.\n",
-                ptr, data, flags);
+            TRACE("(%p %p): URI didn't contain anything looking like an IPv4 address.\n", ptr, data);
             *ptr = data->host;
             data->host = NULL;
             return FALSE;
@@ -1410,7 +1206,7 @@ static BOOL parse_ipv4address(const WCHAR **ptr, parse_data *data, DWORD flags) 
      */
     if(**ptr == ':') {
         ++(*ptr);
-        if(!parse_port(ptr, data, flags)) {
+        if(!parse_port(ptr, data)) {
             *ptr = data->host;
             data->host = NULL;
             return FALSE;
@@ -1423,8 +1219,8 @@ static BOOL parse_ipv4address(const WCHAR **ptr, parse_data *data, DWORD flags) 
         return FALSE;
     }
 
-    TRACE("(%p %p %x): IPv4 address found. host=%s host_len=%d host_type=%d\n",
-        ptr, data, flags, debugstr_wn(data->host, data->host_len),
+    TRACE("(%p %p): IPv4 address found. host=%s host_len=%d host_type=%d\n",
+        ptr, data, debugstr_wn(data->host, data->host_len),
         data->host_len, data->host_type);
     return TRUE;
 }
@@ -1449,7 +1245,7 @@ static BOOL parse_ipv4address(const WCHAR **ptr, parse_data *data, DWORD flags) 
  *
  *  A reg-name CAN be empty.
  */
-static BOOL parse_reg_name(const WCHAR **ptr, parse_data *data, DWORD flags, DWORD extras) {
+static BOOL parse_reg_name(const WCHAR **ptr, parse_data *data, DWORD extras) {
     const BOOL has_start_bracket = **ptr == '[';
     const BOOL known_scheme = data->scheme_type != URL_SCHEME_UNKNOWN;
     const BOOL is_res = data->scheme_type == URL_SCHEME_RES;
@@ -1489,12 +1285,12 @@ static BOOL parse_reg_name(const WCHAR **ptr, parse_data *data, DWORD flags, DWO
                 const WCHAR *tmp = (*ptr)++;
 
                 /* Attempt to parse the port. */
-                if(!parse_port(ptr, data, flags)) {
+                if(!parse_port(ptr, data)) {
                     /* Windows expects there to be a valid port for known scheme types. */
                     if(data->scheme_type != URL_SCHEME_UNKNOWN) {
                         *ptr = data->host;
                         data->host = NULL;
-                        TRACE("(%p %p %x %x): Expected valid port\n", ptr, data, flags, extras);
+                        TRACE("(%p %p %x): Expected valid port\n", ptr, data, extras);
                         return FALSE;
                     } else
                         /* Windows gives up on trying to parse a port when it
@@ -1529,8 +1325,7 @@ static BOOL parse_reg_name(const WCHAR **ptr, parse_data *data, DWORD flags, DWO
     if(has_start_bracket) {
         /* Make sure the last character of the host wasn't a ']'. */
         if(*(*ptr-1) == ']') {
-            TRACE("(%p %p %x %x): Expected an IP literal inside of the host\n",
-                ptr, data, flags, extras);
+            TRACE("(%p %p %x): Expected an IP literal inside of the host\n", ptr, data, extras);
             *ptr = data->host;
             data->host = NULL;
             return FALSE;
@@ -1547,7 +1342,7 @@ static BOOL parse_reg_name(const WCHAR **ptr, parse_data *data, DWORD flags, DWO
     else
         data->host_type = Uri_HOST_DNS;
 
-    TRACE("(%p %p %x %x): Parsed reg-name. host=%s len=%d\n", ptr, data, flags, extras,
+    TRACE("(%p %p %x): Parsed reg-name. host=%s len=%d\n", ptr, data, extras,
         debugstr_wn(data->host, data->host_len), data->host_len);
     return TRUE;
 }
@@ -1569,155 +1364,22 @@ static BOOL parse_reg_name(const WCHAR **ptr, parse_data *data, DWORD flags, DWO
  *
  * h16         = 1*4HEXDIG
  *             ; 16 bits of address represented in hexadecimal.
- *
- * Modeled after google-url's 'DoParseIPv6' function.
  */
-static BOOL parse_ipv6address(const WCHAR **ptr, parse_data *data, DWORD flags) {
-    const WCHAR *start, *cur_start;
-    ipv6_address ip;
+static BOOL parse_ipv6address(const WCHAR **ptr, parse_data *data) {
+    const WCHAR *terminator;
 
-    start = cur_start = *ptr;
-    memset(&ip, 0, sizeof(ipv6_address));
-
-    for(;; ++(*ptr)) {
-        /* Check if we're on the last character of the host. */
-        BOOL is_end = (is_auth_delim(**ptr, data->scheme_type != URL_SCHEME_UNKNOWN)
-                        || **ptr == ']');
-
-        BOOL is_split = (**ptr == ':');
-        BOOL is_elision = (is_split && !is_end && *(*ptr+1) == ':');
-
-        /* Check if we're at the end of a component, or
-         * if we're at the end of the IPv6 address.
-         */
-        if(is_split || is_end) {
-            DWORD cur_len = 0;
-
-            cur_len = *ptr - cur_start;
-
-            /* h16 can't have a length > 4. */
-            if(cur_len > 4) {
-                *ptr = start;
-
-                TRACE("(%p %p %x): h16 component to long.\n",
-                    ptr, data, flags);
-                return FALSE;
-            }
-
-            if(cur_len == 0) {
-                /* An h16 component can't have the length of 0 unless
-                 * the elision is at the beginning of the address, or
-                 * at the end of the address.
-                 */
-                if(!((*ptr == start && is_elision) ||
-                    (is_end && (*ptr-2) == ip.elision))) {
-                    *ptr = start;
-                    TRACE("(%p %p %x): IPv6 component cannot have a length of 0.\n",
-                        ptr, data, flags);
-                    return FALSE;
-                }
-            }
-
-            if(cur_len > 0) {
-                /* An IPv6 address can have no more than 8 h16 components. */
-                if(ip.h16_count >= 8) {
-                    *ptr = start;
-                    TRACE("(%p %p %x): Not a IPv6 address, too many h16 components.\n",
-                        ptr, data, flags);
-                    return FALSE;
-                }
-
-                ip.components[ip.h16_count].str = cur_start;
-                ip.components[ip.h16_count].len = cur_len;
-
-                TRACE("(%p %p %x): Found h16 component %s, len=%d, h16_count=%d\n",
-                    ptr, data, flags, debugstr_wn(cur_start, cur_len), cur_len,
-                    ip.h16_count);
-                ++ip.h16_count;
-            }
-        }
-
-        if(is_end)
-            break;
-
-        if(is_elision) {
-            /* A IPv6 address can only have 1 elision ('::'). */
-            if(ip.elision) {
-                *ptr = start;
-
-                TRACE("(%p %p %x): IPv6 address cannot have 2 elisions.\n",
-                    ptr, data, flags);
-                return FALSE;
-            }
-
-            ip.elision = *ptr;
-            ++(*ptr);
-        }
-
-        if(is_split)
-            cur_start = *ptr+1;
-        else {
-            if(!check_ipv4address(ptr, TRUE)) {
-                if(!is_hexdigit(**ptr)) {
-                    /* Not a valid character for an IPv6 address. */
-                    *ptr = start;
-                    return FALSE;
-                }
-            } else {
-                /* Found an IPv4 address. */
-                ip.ipv4 = cur_start;
-                ip.ipv4_len = *ptr - cur_start;
-
-                TRACE("(%p %p %x): Found an attached IPv4 address %s len=%d.\n",
-                    ptr, data, flags, debugstr_wn(ip.ipv4, ip.ipv4_len),
-                    ip.ipv4_len);
-
-                /* IPv4 addresses can only appear at the end of a IPv6. */
-                break;
-            }
-        }
-    }
-
-    compute_ipv6_comps_size(&ip);
-
-    /* Make sure the IPv6 address adds up to 16 bytes. */
-    if(ip.components_size + ip.elision_size != 16) {
-        *ptr = start;
-        TRACE("(%p %p %x): Invalid IPv6 address, did not add up to 16 bytes.\n",
-            ptr, data, flags);
+    if(RtlIpv6StringToAddressW(*ptr, &terminator, &data->ipv6_address))
         return FALSE;
-    }
+    if(*terminator != ']' && !is_auth_delim(*terminator, data->scheme_type != URL_SCHEME_UNKNOWN))
+        return FALSE;
 
-    if(ip.elision_size == 2) {
-        /* For some reason on Windows if an elision that represents
-         * only one h16 component is encountered at the very begin or
-         * end of an IPv6 address, Windows does not consider it a
-         * valid IPv6 address.
-         *
-         *  Ex: [::2:3:4:5:6:7] is not valid, even though the sum
-         *      of all the components == 128bits.
-         */
-         if(ip.elision < ip.components[0].str ||
-            ip.elision > ip.components[ip.h16_count-1].str) {
-            *ptr = start;
-            TRACE("(%p %p %x): Invalid IPv6 address. Detected elision of 2 bytes at the beginning or end of the address.\n",
-                ptr, data, flags);
-            return FALSE;
-        }
-    }
-
+    *ptr = terminator;
     data->host_type = Uri_HOST_IPV6;
-    data->has_ipv6 = TRUE;
-    data->ipv6_address = ip;
-
-    TRACE("(%p %p %x): Found valid IPv6 literal %s len=%d\n",
-        ptr, data, flags, debugstr_wn(start, *ptr-start),
-        (int)(*ptr-start));
     return TRUE;
 }
 
 /*  IPvFuture  = "v" 1*HEXDIG "." 1*( unreserved / sub-delims / ":" ) */
-static BOOL parse_ipvfuture(const WCHAR **ptr, parse_data *data, DWORD flags) {
+static BOOL parse_ipvfuture(const WCHAR **ptr, parse_data *data) {
     const WCHAR *start = *ptr;
 
     /* IPvFuture has to start with a 'v' or 'V'. */
@@ -1753,14 +1415,14 @@ static BOOL parse_ipvfuture(const WCHAR **ptr, parse_data *data, DWORD flags) {
 
     data->host_type = Uri_HOST_UNKNOWN;
 
-    TRACE("(%p %p %x): Parsed IPvFuture address %s len=%d\n", ptr, data, flags,
+    TRACE("(%p %p): Parsed IPvFuture address %s len=%d\n", ptr, data,
           debugstr_wn(start, *ptr-start), (int)(*ptr-start));
 
     return TRUE;
 }
 
 /* IP-literal = "[" ( IPv6address / IPvFuture  ) "]" */
-static BOOL parse_ip_literal(const WCHAR **ptr, parse_data *data, DWORD flags, DWORD extras) {
+static BOOL parse_ip_literal(const WCHAR **ptr, parse_data *data, DWORD extras) {
     data->host = *ptr;
 
     if(**ptr != '[' && !(extras & ALLOW_BRACKETLESS_IP_LITERAL)) {
@@ -1769,8 +1431,8 @@ static BOOL parse_ip_literal(const WCHAR **ptr, parse_data *data, DWORD flags, D
     } else if(**ptr == '[')
         ++(*ptr);
 
-    if(!parse_ipv6address(ptr, data, flags)) {
-        if(extras & SKIP_IP_FUTURE_CHECK || !parse_ipvfuture(ptr, data, flags)) {
+    if(!parse_ipv6address(ptr, data)) {
+        if(extras & SKIP_IP_FUTURE_CHECK || !parse_ipvfuture(ptr, data)) {
             *ptr = data->host;
             data->host = NULL;
             return FALSE;
@@ -1795,7 +1457,7 @@ static BOOL parse_ip_literal(const WCHAR **ptr, parse_data *data, DWORD flags, D
         /* If a valid port is not found, then let it trickle down to
          * parse_reg_name.
          */
-        if(!parse_port(ptr, data, flags)) {
+        if(!parse_port(ptr, data)) {
             *ptr = data->host;
             data->host = NULL;
             return FALSE;
@@ -1810,12 +1472,11 @@ static BOOL parse_ip_literal(const WCHAR **ptr, parse_data *data, DWORD flags, D
  *
  * host = IP-literal / IPv4address / reg-name
  */
-static BOOL parse_host(const WCHAR **ptr, parse_data *data, DWORD flags, DWORD extras) {
-    if(!parse_ip_literal(ptr, data, flags, extras)) {
-        if(!parse_ipv4address(ptr, data, flags)) {
-            if(!parse_reg_name(ptr, data, flags, extras)) {
-                TRACE("(%p %p %x %x): Malformed URI, Unknown host type.\n",
-                    ptr, data, flags, extras);
+static BOOL parse_host(const WCHAR **ptr, parse_data *data, DWORD extras) {
+    if(!parse_ip_literal(ptr, data, extras)) {
+        if(!parse_ipv4address(ptr, data)) {
+            if(!parse_reg_name(ptr, data, extras)) {
+                TRACE("(%p %p %x): Malformed URI, Unknown host type.\n",  ptr, data, extras);
                 return FALSE;
             }
         }
@@ -1834,7 +1495,7 @@ static BOOL parse_authority(const WCHAR **ptr, parse_data *data, DWORD flags) {
     /* Parsing the port will happen during one of the host parsing
      * routines (if the URI has a port).
      */
-    if(!parse_host(ptr, data, flags, 0))
+    if(!parse_host(ptr, data, 0))
         return FALSE;
 
     return TRUE;
@@ -1843,7 +1504,6 @@ static BOOL parse_authority(const WCHAR **ptr, parse_data *data, DWORD flags) {
 /* Attempts to parse the path information of a hierarchical URI. */
 static BOOL parse_path_hierarchical(const WCHAR **ptr, parse_data *data, DWORD flags) {
     const WCHAR *start = *ptr;
-    static const WCHAR slash[] = {'/',0};
     const BOOL is_file = data->scheme_type == URL_SCHEME_FILE;
 
     if(is_path_delim(data->scheme_type, **ptr)) {
@@ -1852,7 +1512,7 @@ static BOOL parse_path_hierarchical(const WCHAR **ptr, parse_data *data, DWORD f
             data->path_len = 0;
         } else if(!(flags & Uri_CREATE_NO_CANONICALIZE)) {
             /* If the path component is empty, then a '/' is added. */
-            data->path = slash;
+            data->path = L"/";
             data->path_len = 1;
         }
     } else {
@@ -2305,14 +1965,12 @@ static BOOL canonicalize_userinfo(const parse_data *data, Uri *uri, DWORD flags,
  */
 static BOOL canonicalize_reg_name(const parse_data *data, Uri *uri,
                                   DWORD flags, BOOL computeOnly) {
-    static const WCHAR localhostW[] =
-            {'l','o','c','a','l','h','o','s','t',0};
     const WCHAR *ptr;
     const BOOL known_scheme = data->scheme_type != URL_SCHEME_UNKNOWN;
 
     if(data->scheme_type == URL_SCHEME_FILE &&
-       data->host_len == lstrlenW(localhostW)) {
-        if(!StrCmpNIW(data->host, localhostW, data->host_len)) {
+       data->host_len == lstrlenW(L"localhost")) {
+        if(!StrCmpNIW(data->host, L"localhost", data->host_len)) {
             uri->host_start = -1;
             uri->host_len = 0;
             uri->host_type = Uri_HOST_UNKNOWN;
@@ -2568,96 +2226,18 @@ static BOOL canonicalize_ipv6address(const parse_data *data, Uri *uri,
             memcpy(uri->canon_uri+uri->canon_len, data->host, data->host_len*sizeof(WCHAR));
         uri->canon_len += data->host_len;
     } else {
-        USHORT values[8];
-        INT elision_start;
-        DWORD i, elision_len;
+        WCHAR buffer[46];
+        ULONG size = ARRAY_SIZE(buffer);
 
-        if(!ipv6_to_number(&(data->ipv6_address), values)) {
-            TRACE("(%p %p %x %d): Failed to compute numerical value for IPv6 address.\n",
-                data, uri, flags, computeOnly);
-            return FALSE;
+        if(computeOnly) {
+            RtlIpv6AddressToStringExW(&data->ipv6_address, 0, 0, buffer, &size);
+            uri->canon_len += size + 1;
+        } else {
+            uri->canon_uri[uri->canon_len++] = '[';
+            RtlIpv6AddressToStringExW(&data->ipv6_address, 0, 0, uri->canon_uri + uri->canon_len, &size);
+            uri->canon_len += size - 1;
+            uri->canon_uri[uri->canon_len++] = ']';
         }
-
-        if(!computeOnly)
-            uri->canon_uri[uri->canon_len] = '[';
-        ++uri->canon_len;
-
-        /* Find where the elision should occur (if any). */
-        compute_elision_location(&(data->ipv6_address), values, &elision_start, &elision_len);
-
-        TRACE("%p %p %x %d): Elision starts at %d, len=%u\n", data, uri, flags,
-            computeOnly, elision_start, elision_len);
-
-        for(i = 0; i < 8; ++i) {
-            BOOL in_elision = (elision_start > -1 && i >= elision_start &&
-                               i < elision_start+elision_len);
-            BOOL do_ipv4 = (i == 6 && data->ipv6_address.ipv4 && !in_elision &&
-                            data->ipv6_address.h16_count == 0);
-
-            if(i == elision_start) {
-                if(!computeOnly) {
-                    uri->canon_uri[uri->canon_len] = ':';
-                    uri->canon_uri[uri->canon_len+1] = ':';
-                }
-                uri->canon_len += 2;
-            }
-
-            /* We can ignore the current component if we're in the elision. */
-            if(in_elision)
-                continue;
-
-            /* We only add a ':' if we're not at i == 0, or when we're at
-             * the very end of elision range since the ':' colon was handled
-             * earlier. Otherwise we would end up with ":::" after elision.
-             */
-            if(i != 0 && !(elision_start > -1 && i == elision_start+elision_len)) {
-                if(!computeOnly)
-                    uri->canon_uri[uri->canon_len] = ':';
-                ++uri->canon_len;
-            }
-
-            if(do_ipv4) {
-                UINT val;
-                DWORD len;
-
-                /* Combine the two parts of the IPv4 address values. */
-                val = values[i];
-                val <<= 16;
-                val += values[i+1];
-
-                if(!computeOnly)
-                    len = ui2ipv4(uri->canon_uri+uri->canon_len, val);
-                else
-                    len = ui2ipv4(NULL, val);
-
-                uri->canon_len += len;
-                ++i;
-            } else {
-                /* Write a regular h16 component to the URI. */
-
-                /* Short circuit for the trivial case. */
-                if(values[i] == 0) {
-                    if(!computeOnly)
-                        uri->canon_uri[uri->canon_len] = '0';
-                    ++uri->canon_len;
-                } else {
-                    static const WCHAR formatW[] = {'%','x',0};
-
-                    if(!computeOnly)
-                        uri->canon_len += swprintf(uri->canon_uri+uri->canon_len, 5,
-                                            formatW, values[i]);
-                    else {
-                        WCHAR tmp[5];
-                        uri->canon_len += swprintf(tmp, ARRAY_SIZE(tmp), formatW, values[i]);
-                    }
-                }
-            }
-        }
-
-        /* Add the closing ']'. */
-        if(!computeOnly)
-            uri->canon_uri[uri->canon_len] = ']';
-        ++uri->canon_len;
     }
 
     uri->host_len = uri->canon_len - uri->host_start;
@@ -3398,7 +2978,7 @@ static HRESULT canonicalize_uri(const parse_data *data, Uri *uri, DWORD flags) {
     uri->scheme_type = data->scheme_type;
 
     if(!canonicalize_hierpart(data, uri, flags, FALSE)) {
-        ERR("(%p %p %x): Unable to canonicalize the heirpart of the URI\n", data, uri, flags);
+        ERR("(%p %p %x): Unable to canonicalize the hierpart of the URI\n", data, uri, flags);
         return E_INVALIDARG;
     }
 
@@ -3558,8 +3138,7 @@ static HRESULT validate_scheme_name(const UriBuilder *builder, parse_data *data,
         ptr = builder->uri->canon_uri+builder->uri->scheme_start;
         expected_len = builder->uri->scheme_len;
     } else {
-        static const WCHAR nullW[] = {0};
-        ptr = nullW;
+        ptr = L"";
         expected_len = 0;
     }
 
@@ -3665,7 +3244,7 @@ static HRESULT validate_userinfo(const UriBuilder *builder, parse_data *data, DW
     return S_OK;
 }
 
-static HRESULT validate_host(const UriBuilder *builder, parse_data *data, DWORD flags) {
+static HRESULT validate_host(const UriBuilder *builder, parse_data *data) {
     const WCHAR *ptr;
     const WCHAR **pptr;
     DWORD expected_len;
@@ -3684,11 +3263,11 @@ static HRESULT validate_host(const UriBuilder *builder, parse_data *data, DWORD 
         DWORD extras = ALLOW_BRACKETLESS_IP_LITERAL|IGNORE_PORT_DELIMITER|SKIP_IP_FUTURE_CHECK;
         pptr = &ptr;
 
-        if(parse_host(pptr, data, flags, extras) && data->host_len == expected_len)
-            TRACE("(%p %p %x): Found valid host name %s len=%d type=%d.\n", builder, data, flags,
+        if(parse_host(pptr, data, extras) && data->host_len == expected_len)
+            TRACE("(%p %p): Found valid host name %s len=%d type=%d.\n", builder, data,
                 debugstr_wn(data->host, data->host_len), data->host_len, data->host_type);
         else {
-            TRACE("(%p %p %x): Invalid host name found %s.\n", builder, data, flags,
+            TRACE("(%p %p): Invalid host name found %s.\n", builder, data,
                 debugstr_wn(component, expected_len));
             return INET_E_INVALID_URL;
         }
@@ -3728,8 +3307,7 @@ static HRESULT validate_path(const UriBuilder *builder, parse_data *data, DWORD 
         ptr = builder->uri->canon_uri+builder->uri->path_start;
         expected_len = builder->uri->path_len;
     } else {
-        static const WCHAR nullW[] = {0};
-        ptr = nullW;
+        ptr = L"";
         check_len = FALSE;
         expected_len = -1;
     }
@@ -3842,7 +3420,7 @@ static HRESULT validate_components(const UriBuilder *builder, parse_data *data, 
     if(FAILED(hr))
         return hr;
 
-    hr = validate_host(builder, data, flags);
+    hr = validate_host(builder, data);
     if(FAILED(hr))
         return hr;
 
@@ -6523,9 +6101,8 @@ static HRESULT combine_uri(Uri *base, Uri *relative, DWORD flags, IUri **result,
             }
 
             if(proc_uri->host_start > -1) {
-                data.host = proc_uri->canon_uri+proc_uri->host_start;
-                data.host_len = proc_uri->host_len;
-                data.host_type = proc_uri->host_type;
+                const WCHAR *host = proc_uri->canon_uri+proc_uri->host_start;
+                parse_host(&host, &data, 0);
             }
 
             if(proc_uri->has_port) {
@@ -6543,8 +6120,7 @@ static HRESULT combine_uri(Uri *base, Uri *relative, DWORD flags, IUri **result,
                 /* Just set the path as a '/' if the base didn't have
                  * one and if it's a hierarchical URI.
                  */
-                static const WCHAR slashW[] = {'/',0};
-                data.path = slashW;
+                data.path = L"/";
                 data.path_len = 1;
             }
 

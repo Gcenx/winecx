@@ -22,6 +22,7 @@
 #define IDI_ICON1	1
 #include <windows.h>
 #include <windef.h>
+#include <winternl.h>
 #ifndef RC_INVOKED
 #include <string.h>
 #include <stdlib.h>
@@ -104,19 +105,14 @@ void WCMD_version (void);
 int  WCMD_volume (BOOL set_label, const WCHAR *args);
 void WCMD_mklink(WCHAR *args);
 
-static inline BOOL WCMD_is_console_handle(HANDLE h)
-{
-    return (((DWORD_PTR)h) & 3) == 3;
-}
 WCHAR *WCMD_fgets (WCHAR *buf, DWORD n, HANDLE stream);
 WCHAR *WCMD_parameter (WCHAR *s, int n, WCHAR **start, BOOL raw, BOOL wholecmdline);
 WCHAR *WCMD_parameter_with_delims (WCHAR *s, int n, WCHAR **start, BOOL raw,
                                    BOOL wholecmdline, const WCHAR *delims);
 WCHAR *WCMD_skip_leading_spaces (WCHAR *string);
 BOOL WCMD_keyword_ws_found(const WCHAR *keyword, int len, const WCHAR *ptr);
-void WCMD_HandleTildaModifiers(WCHAR **start, BOOL atExecute);
+void WCMD_HandleTildeModifiers(WCHAR **start, BOOL atExecute);
 
-void WCMD_splitpath(const WCHAR* path, WCHAR* drv, WCHAR* dir, WCHAR* name, WCHAR* ext);
 WCHAR *WCMD_strip_quotes(WCHAR *cmd);
 WCHAR *WCMD_LoadMessage(UINT id);
 void WCMD_strsubstW(WCHAR *start, const WCHAR* next, const WCHAR* insert, int len);
@@ -271,14 +267,6 @@ extern BOOL delayedsubst;
 #define WCMD_EXIT     46
 
 /* Some standard messages */
-extern const WCHAR newlineW[];
-extern const WCHAR spaceW[];
-extern const WCHAR nullW[];
-extern const WCHAR dotW[];
-extern const WCHAR dotdotW[];
-extern const WCHAR starW[];
-extern const WCHAR slashW[];
-extern const WCHAR equalW[];
 extern WCHAR anykey[];
 extern WCHAR version_string[];
 

@@ -46,7 +46,7 @@ struct rendertarget
 
     IDWriteFactory7 *factory;
     DWRITE_TEXT_ANTIALIAS_MODE antialiasmode;
-    FLOAT ppdip;
+    float ppdip;
     DWRITE_MATRIX m;
     SIZE size;
     HDC hdc;
@@ -61,9 +61,10 @@ struct gdiinterop
     IDWriteFactory7 *factory;
 };
 
-struct memresource_stream {
+struct memresource_stream
+{
     IDWriteFontFileStream IDWriteFontFileStream_iface;
-    LONG ref;
+    LONG refcount;
     DWORD key;
 };
 
@@ -120,11 +121,6 @@ static inline struct gdiinterop *impl_from_IDWriteGdiInterop1(IDWriteGdiInterop1
     return CONTAINING_RECORD(iface, struct gdiinterop, IDWriteGdiInterop1_iface);
 }
 
-static inline struct gdiinterop *impl_from_IDWriteFontFileLoader(IDWriteFontFileLoader *iface)
-{
-    return CONTAINING_RECORD(iface, struct gdiinterop, IDWriteFontFileLoader_iface);
-}
-
 static inline struct memresource_stream *impl_from_IDWriteFontFileStream(IDWriteFontFileStream *iface)
 {
     return CONTAINING_RECORD(iface, struct memresource_stream, IDWriteFontFileStream_iface);
@@ -149,20 +145,20 @@ static HRESULT WINAPI rendertarget_sink_QueryInterface(ID2D1SimplifiedGeometrySi
 
 static ULONG WINAPI rendertarget_sink_AddRef(ID2D1SimplifiedGeometrySink *iface)
 {
-    struct rendertarget *This = impl_from_ID2D1SimplifiedGeometrySink(iface);
-    return IDWriteBitmapRenderTarget1_AddRef(&This->IDWriteBitmapRenderTarget1_iface);
+    struct rendertarget *target = impl_from_ID2D1SimplifiedGeometrySink(iface);
+    return IDWriteBitmapRenderTarget1_AddRef(&target->IDWriteBitmapRenderTarget1_iface);
 }
 
 static ULONG WINAPI rendertarget_sink_Release(ID2D1SimplifiedGeometrySink *iface)
 {
-    struct rendertarget *This = impl_from_ID2D1SimplifiedGeometrySink(iface);
-    return IDWriteBitmapRenderTarget1_Release(&This->IDWriteBitmapRenderTarget1_iface);
+    struct rendertarget *target = impl_from_ID2D1SimplifiedGeometrySink(iface);
+    return IDWriteBitmapRenderTarget1_Release(&target->IDWriteBitmapRenderTarget1_iface);
 }
 
 static void WINAPI rendertarget_sink_SetFillMode(ID2D1SimplifiedGeometrySink *iface, D2D1_FILL_MODE mode)
 {
-    struct rendertarget *This = impl_from_ID2D1SimplifiedGeometrySink(iface);
-    SetPolyFillMode(This->hdc, mode == D2D1_FILL_MODE_ALTERNATE ? ALTERNATE : WINDING);
+    struct rendertarget *target = impl_from_ID2D1SimplifiedGeometrySink(iface);
+    SetPolyFillMode(target->hdc, mode == D2D1_FILL_MODE_ALTERNATE ? ALTERNATE : WINDING);
 }
 
 static void WINAPI rendertarget_sink_SetSegmentFlags(ID2D1SimplifiedGeometrySink *iface, D2D1_PATH_SEGMENT vertexFlags)
@@ -171,26 +167,28 @@ static void WINAPI rendertarget_sink_SetSegmentFlags(ID2D1SimplifiedGeometrySink
 
 static void WINAPI rendertarget_sink_BeginFigure(ID2D1SimplifiedGeometrySink *iface, D2D1_POINT_2F startPoint, D2D1_FIGURE_BEGIN figureBegin)
 {
-    struct rendertarget *This = impl_from_ID2D1SimplifiedGeometrySink(iface);
-    MoveToEx(This->hdc, startPoint.x, startPoint.y, NULL);
+    struct rendertarget *target = impl_from_ID2D1SimplifiedGeometrySink(iface);
+    MoveToEx(target->hdc, startPoint.x, startPoint.y, NULL);
 }
 
 static void WINAPI rendertarget_sink_AddLines(ID2D1SimplifiedGeometrySink *iface, const D2D1_POINT_2F *points, UINT32 count)
 {
-    struct rendertarget *This = impl_from_ID2D1SimplifiedGeometrySink(iface);
+    struct rendertarget *target = impl_from_ID2D1SimplifiedGeometrySink(iface);
 
-    while (count--) {
-        LineTo(This->hdc, points->x, points->y);
+    while (count--)
+    {
+        LineTo(target->hdc, points->x, points->y);
         points++;
     }
 }
 
 static void WINAPI rendertarget_sink_AddBeziers(ID2D1SimplifiedGeometrySink *iface, const D2D1_BEZIER_SEGMENT *beziers, UINT32 count)
 {
-    struct rendertarget *This = impl_from_ID2D1SimplifiedGeometrySink(iface);
+    struct rendertarget *target = impl_from_ID2D1SimplifiedGeometrySink(iface);
     POINT points[3];
 
-    while (count--) {
+    while (count--)
+    {
         points[0].x = beziers->point1.x;
         points[0].y = beziers->point1.y;
         points[1].x = beziers->point2.x;
@@ -198,15 +196,15 @@ static void WINAPI rendertarget_sink_AddBeziers(ID2D1SimplifiedGeometrySink *ifa
         points[2].x = beziers->point3.x;
         points[2].y = beziers->point3.y;
 
-        PolyBezierTo(This->hdc, points, 3);
+        PolyBezierTo(target->hdc, points, 3);
         beziers++;
     }
 }
 
 static void WINAPI rendertarget_sink_EndFigure(ID2D1SimplifiedGeometrySink *iface, D2D1_FIGURE_END figureEnd)
 {
-    struct rendertarget *This = impl_from_ID2D1SimplifiedGeometrySink(iface);
-    CloseFigure(This->hdc);
+    struct rendertarget *target = impl_from_ID2D1SimplifiedGeometrySink(iface);
+    CloseFigure(target->hdc);
 }
 
 static HRESULT WINAPI rendertarget_sink_Close(ID2D1SimplifiedGeometrySink *iface)
@@ -214,7 +212,8 @@ static HRESULT WINAPI rendertarget_sink_Close(ID2D1SimplifiedGeometrySink *iface
     return S_OK;
 }
 
-static const ID2D1SimplifiedGeometrySinkVtbl rendertargetsinkvtbl = {
+static const ID2D1SimplifiedGeometrySinkVtbl rendertargetsinkvtbl =
+{
     rendertarget_sink_QueryInterface,
     rendertarget_sink_AddRef,
     rendertarget_sink_Release,
@@ -229,9 +228,7 @@ static const ID2D1SimplifiedGeometrySinkVtbl rendertargetsinkvtbl = {
 
 static HRESULT WINAPI rendertarget_QueryInterface(IDWriteBitmapRenderTarget1 *iface, REFIID riid, void **obj)
 {
-    struct rendertarget *This = impl_from_IDWriteBitmapRenderTarget1(iface);
-
-    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), obj);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
 
     if (IsEqualIID(riid, &IID_IDWriteBitmapRenderTarget1) ||
         IsEqualIID(riid, &IID_IDWriteBitmapRenderTarget) ||
@@ -490,93 +487,101 @@ static HRESULT WINAPI rendertarget_DrawGlyphRun(IDWriteBitmapRenderTarget1 *ifac
 
 static HDC WINAPI rendertarget_GetMemoryDC(IDWriteBitmapRenderTarget1 *iface)
 {
-    struct rendertarget *This = impl_from_IDWriteBitmapRenderTarget1(iface);
-    TRACE("(%p)\n", This);
-    return This->hdc;
+    struct rendertarget *target = impl_from_IDWriteBitmapRenderTarget1(iface);
+
+    TRACE("%p.\n", iface);
+
+    return target->hdc;
 }
 
-static FLOAT WINAPI rendertarget_GetPixelsPerDip(IDWriteBitmapRenderTarget1 *iface)
+static float WINAPI rendertarget_GetPixelsPerDip(IDWriteBitmapRenderTarget1 *iface)
 {
-    struct rendertarget *This = impl_from_IDWriteBitmapRenderTarget1(iface);
-    TRACE("(%p)\n", This);
-    return This->ppdip;
+    struct rendertarget *target = impl_from_IDWriteBitmapRenderTarget1(iface);
+
+    TRACE("%p.\n", iface);
+
+    return target->ppdip;
 }
 
-static HRESULT WINAPI rendertarget_SetPixelsPerDip(IDWriteBitmapRenderTarget1 *iface, FLOAT ppdip)
+static HRESULT WINAPI rendertarget_SetPixelsPerDip(IDWriteBitmapRenderTarget1 *iface, float ppdip)
 {
-    struct rendertarget *This = impl_from_IDWriteBitmapRenderTarget1(iface);
+    struct rendertarget *target = impl_from_IDWriteBitmapRenderTarget1(iface);
 
-    TRACE("(%p)->(%.2f)\n", This, ppdip);
+    TRACE("%p, %.2f.\n", iface, ppdip);
 
     if (ppdip <= 0.0f)
         return E_INVALIDARG;
 
-    This->ppdip = ppdip;
+    target->ppdip = ppdip;
     return S_OK;
 }
 
 static HRESULT WINAPI rendertarget_GetCurrentTransform(IDWriteBitmapRenderTarget1 *iface, DWRITE_MATRIX *transform)
 {
-    struct rendertarget *This = impl_from_IDWriteBitmapRenderTarget1(iface);
+    struct rendertarget *target = impl_from_IDWriteBitmapRenderTarget1(iface);
 
-    TRACE("(%p)->(%p)\n", This, transform);
+    TRACE("%p, %p.\n", iface, transform);
 
-    *transform = This->m;
+    *transform = target->m;
     return S_OK;
 }
 
 static HRESULT WINAPI rendertarget_SetCurrentTransform(IDWriteBitmapRenderTarget1 *iface, DWRITE_MATRIX const *transform)
 {
-    struct rendertarget *This = impl_from_IDWriteBitmapRenderTarget1(iface);
+    struct rendertarget *target = impl_from_IDWriteBitmapRenderTarget1(iface);
 
-    TRACE("(%p)->(%p)\n", This, transform);
+    TRACE("%p, %p.\n", iface, transform);
 
-    This->m = transform ? *transform : identity;
+    target->m = transform ? *transform : identity;
     return S_OK;
 }
 
 static HRESULT WINAPI rendertarget_GetSize(IDWriteBitmapRenderTarget1 *iface, SIZE *size)
 {
-    struct rendertarget *This = impl_from_IDWriteBitmapRenderTarget1(iface);
+    struct rendertarget *target = impl_from_IDWriteBitmapRenderTarget1(iface);
 
-    TRACE("(%p)->(%p)\n", This, size);
-    *size = This->size;
+    TRACE("%p, %p.\n", iface, size);
+
+    *size = target->size;
     return S_OK;
 }
 
 static HRESULT WINAPI rendertarget_Resize(IDWriteBitmapRenderTarget1 *iface, UINT32 width, UINT32 height)
 {
-    struct rendertarget *This = impl_from_IDWriteBitmapRenderTarget1(iface);
+    struct rendertarget *target = impl_from_IDWriteBitmapRenderTarget1(iface);
 
-    TRACE("(%p)->(%u %u)\n", This, width, height);
+    TRACE("%p, %u, %u.\n", iface, width, height);
 
-    if (This->size.cx == width && This->size.cy == height)
+    if (target->size.cx == width && target->size.cy == height)
         return S_OK;
 
-    return create_target_dibsection(This, width, height);
+    return create_target_dibsection(target, width, height);
 }
 
 static DWRITE_TEXT_ANTIALIAS_MODE WINAPI rendertarget_GetTextAntialiasMode(IDWriteBitmapRenderTarget1 *iface)
 {
-    struct rendertarget *This = impl_from_IDWriteBitmapRenderTarget1(iface);
-    TRACE("(%p)\n", This);
-    return This->antialiasmode;
+    struct rendertarget *target = impl_from_IDWriteBitmapRenderTarget1(iface);
+
+    TRACE("%p.\n", iface);
+
+    return target->antialiasmode;
 }
 
 static HRESULT WINAPI rendertarget_SetTextAntialiasMode(IDWriteBitmapRenderTarget1 *iface, DWRITE_TEXT_ANTIALIAS_MODE mode)
 {
-    struct rendertarget *This = impl_from_IDWriteBitmapRenderTarget1(iface);
+    struct rendertarget *target = impl_from_IDWriteBitmapRenderTarget1(iface);
 
-    TRACE("(%p)->(%d)\n", This, mode);
+    TRACE("%p, %d.\n", iface, mode);
 
     if ((DWORD)mode > DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE)
         return E_INVALIDARG;
 
-    This->antialiasmode = mode;
+    target->antialiasmode = mode;
     return S_OK;
 }
 
-static const IDWriteBitmapRenderTarget1Vtbl rendertargetvtbl = {
+static const IDWriteBitmapRenderTarget1Vtbl rendertargetvtbl =
+{
     rendertarget_QueryInterface,
     rendertarget_AddRef,
     rendertarget_Release,
@@ -592,7 +597,8 @@ static const IDWriteBitmapRenderTarget1Vtbl rendertargetvtbl = {
     rendertarget_SetTextAntialiasMode
 };
 
-static HRESULT create_rendertarget(IDWriteFactory7 *factory, HDC hdc, UINT32 width, UINT32 height, IDWriteBitmapRenderTarget **ret)
+static HRESULT create_rendertarget(IDWriteFactory7 *factory, HDC hdc, UINT32 width, UINT32 height,
+        IDWriteBitmapRenderTarget **ret)
 {
     struct rendertarget *target;
     HRESULT hr;
@@ -627,9 +633,7 @@ static HRESULT create_rendertarget(IDWriteFactory7 *factory, HDC hdc, UINT32 wid
 
 static HRESULT WINAPI gdiinterop_QueryInterface(IDWriteGdiInterop1 *iface, REFIID riid, void **obj)
 {
-    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
-
-    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), obj);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
 
     if (IsEqualIID(riid, &IID_IDWriteGdiInterop1) ||
         IsEqualIID(riid, &IID_IDWriteGdiInterop) ||
@@ -676,9 +680,7 @@ static ULONG WINAPI gdiinterop_Release(IDWriteGdiInterop1 *iface)
 static HRESULT WINAPI gdiinterop_CreateFontFromLOGFONT(IDWriteGdiInterop1 *iface,
     LOGFONTW const *logfont, IDWriteFont **font)
 {
-    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
-
-    TRACE("(%p)->(%p %p)\n", This, logfont, font);
+    TRACE("%p, %p, %p.\n", iface, logfont, font);
 
     return IDWriteGdiInterop1_CreateFontFromLOGFONT(iface, logfont, NULL, font);
 }
@@ -686,12 +688,11 @@ static HRESULT WINAPI gdiinterop_CreateFontFromLOGFONT(IDWriteGdiInterop1 *iface
 static HRESULT WINAPI gdiinterop_ConvertFontToLOGFONT(IDWriteGdiInterop1 *iface,
     IDWriteFont *font, LOGFONTW *logfont, BOOL *is_systemfont)
 {
-    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
     IDWriteFontCollection *collection;
     IDWriteFontFamily *family;
     HRESULT hr;
 
-    TRACE("(%p)->(%p %p %p)\n", This, font, logfont, is_systemfont);
+    TRACE("%p, %p, %p, %p.\n", iface, font, logfont, is_systemfont);
 
     *is_systemfont = FALSE;
 
@@ -722,9 +723,7 @@ static HRESULT WINAPI gdiinterop_ConvertFontToLOGFONT(IDWriteGdiInterop1 *iface,
 static HRESULT WINAPI gdiinterop_ConvertFontFaceToLOGFONT(IDWriteGdiInterop1 *iface,
     IDWriteFontFace *fontface, LOGFONTW *logfont)
 {
-    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
-
-    TRACE("(%p)->(%p %p)\n", This, fontface, logfont);
+    TRACE("%p, %p, %p.\n", iface, fontface, logfont);
 
     memset(logfont, 0, sizeof(*logfont));
 
@@ -831,9 +830,11 @@ static HRESULT WINAPI gdiinterop_CreateFontFaceFromHdc(IDWriteGdiInterop1 *iface
 static HRESULT WINAPI gdiinterop_CreateBitmapRenderTarget(IDWriteGdiInterop1 *iface,
     HDC hdc, UINT32 width, UINT32 height, IDWriteBitmapRenderTarget **target)
 {
-    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
-    TRACE("(%p)->(%p %u %u %p)\n", This, hdc, width, height, target);
-    return create_rendertarget(This->factory, hdc, width, height, target);
+    struct gdiinterop *interop = impl_from_IDWriteGdiInterop1(iface);
+
+    TRACE("%p, %p, %u, %u, %p.\n", iface, hdc, width, height, target);
+
+    return create_rendertarget(interop->factory, hdc, width, height, target);
 }
 
 static HRESULT WINAPI gdiinterop1_CreateFontFromLOGFONT(IDWriteGdiInterop1 *iface,
@@ -887,18 +888,14 @@ done:
 static HRESULT WINAPI gdiinterop1_GetFontSignature_(IDWriteGdiInterop1 *iface, IDWriteFontFace *fontface,
     FONTSIGNATURE *fontsig)
 {
-    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
-
-    TRACE("(%p)->(%p %p)\n", This, fontface, fontsig);
+    TRACE("%p, %p, %p.\n", iface, fontface, fontsig);
 
     return get_fontsig_from_fontface(fontface, fontsig);
 }
 
 static HRESULT WINAPI gdiinterop1_GetFontSignature(IDWriteGdiInterop1 *iface, IDWriteFont *font, FONTSIGNATURE *fontsig)
 {
-    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
-
-    TRACE("(%p)->(%p %p)\n", This, font, fontsig);
+    TRACE("%p, %p, %p.\n", iface, font, fontsig);
 
     if (!font)
         return E_INVALIDARG;
@@ -909,9 +906,7 @@ static HRESULT WINAPI gdiinterop1_GetFontSignature(IDWriteGdiInterop1 *iface, ID
 static HRESULT WINAPI gdiinterop1_GetMatchingFontsByLOGFONT(IDWriteGdiInterop1 *iface, LOGFONTW const *logfont,
     IDWriteFontSet *fontset, IDWriteFontSet **subset)
 {
-    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
-
-    FIXME("(%p)->(%p %p %p): stub\n", This, logfont, fontset, subset);
+    FIXME("%p, %p, %p, %p: stub.\n", iface, logfont, fontset, subset);
 
     return E_NOTIMPL;
 }
@@ -933,9 +928,7 @@ static const struct IDWriteGdiInterop1Vtbl gdiinteropvtbl = {
 
 static HRESULT WINAPI memresourcestream_QueryInterface(IDWriteFontFileStream *iface, REFIID riid, void **out)
 {
-    struct memresource_stream *This = impl_from_IDWriteFontFileStream(iface);
-
-    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), out);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), out);
 
     if (IsEqualIID(&IID_IDWriteFontFileStream, riid) || IsEqualIID(&IID_IUnknown, riid)) {
         *out = iface;
@@ -950,39 +943,41 @@ static HRESULT WINAPI memresourcestream_QueryInterface(IDWriteFontFileStream *if
 
 static ULONG WINAPI memresourcestream_AddRef(IDWriteFontFileStream *iface)
 {
-    struct memresource_stream *This = impl_from_IDWriteFontFileStream(iface);
-    ULONG ref = InterlockedIncrement(&This->ref);
-    TRACE("(%p)->(%d)\n", This, ref);
-    return ref;
+    struct memresource_stream *stream = impl_from_IDWriteFontFileStream(iface);
+    ULONG refcount = InterlockedIncrement(&stream->refcount);
+
+    TRACE("%p, refcount %d.\n", iface, refcount);
+
+    return refcount;
 }
 
 static ULONG WINAPI memresourcestream_Release(IDWriteFontFileStream *iface)
 {
-    struct memresource_stream *This = impl_from_IDWriteFontFileStream(iface);
-    ULONG ref = InterlockedDecrement(&This->ref);
+    struct memresource_stream *stream = impl_from_IDWriteFontFileStream(iface);
+    ULONG refcount = InterlockedDecrement(&stream->refcount);
 
-    TRACE("(%p)->(%d)\n", This, ref);
+    TRACE("%p, refcount %d.\n", iface, refcount);
 
-    if (!ref)
-        heap_free(This);
+    if (!refcount)
+        heap_free(stream);
 
-    return ref;
+    return refcount;
 }
 
 static HRESULT WINAPI memresourcestream_ReadFileFragment(IDWriteFontFileStream *iface, void const **fragment_start,
     UINT64 offset, UINT64 fragment_size, void **fragment_context)
 {
-    struct memresource_stream *This = impl_from_IDWriteFontFileStream(iface);
+    struct memresource_stream *stream = impl_from_IDWriteFontFileStream(iface);
     struct font_fileinfo fileinfo;
     void *fragment;
 
-    TRACE("(%p)->(%p %s %s %p)\n", This, fragment_start, wine_dbgstr_longlong(offset),
+    TRACE("%p, %p, %s, %s, %p.\n", iface, fragment_start, wine_dbgstr_longlong(offset),
         wine_dbgstr_longlong(fragment_size), fragment_context);
 
     *fragment_context = NULL;
     *fragment_start = NULL;
 
-    if (!GetFontFileInfo(This->key, 0, &fileinfo, sizeof(fileinfo), NULL))
+    if (!GetFontFileInfo(stream->key, 0, &fileinfo, sizeof(fileinfo), NULL))
         return E_INVALIDARG;
 
     if ((offset >= fileinfo.size.QuadPart - 1) || (fragment_size > fileinfo.size.QuadPart - offset))
@@ -991,7 +986,7 @@ static HRESULT WINAPI memresourcestream_ReadFileFragment(IDWriteFontFileStream *
     if (!(fragment = heap_alloc(fragment_size)))
         return E_OUTOFMEMORY;
 
-    if (!GetFontFileData(This->key, 0, offset, fragment, fragment_size))
+    if (!GetFontFileData(stream->key, 0, offset, fragment, fragment_size))
         return E_FAIL;
 
     *fragment_start = *fragment_context = fragment;
@@ -1000,21 +995,19 @@ static HRESULT WINAPI memresourcestream_ReadFileFragment(IDWriteFontFileStream *
 
 static void WINAPI memresourcestream_ReleaseFileFragment(IDWriteFontFileStream *iface, void *fragment_context)
 {
-    struct memresource_stream *This = impl_from_IDWriteFontFileStream(iface);
-
-    TRACE("(%p)->(%p)\n", This, fragment_context);
+    TRACE("%p, %p.\n", iface, fragment_context);
 
     heap_free(fragment_context);
 }
 
 static HRESULT WINAPI memresourcestream_GetFileSize(IDWriteFontFileStream *iface, UINT64 *size)
 {
-    struct memresource_stream *This = impl_from_IDWriteFontFileStream(iface);
+    struct memresource_stream *stream = impl_from_IDWriteFontFileStream(iface);
     struct font_fileinfo fileinfo;
 
-    TRACE("(%p)->(%p)\n", This, size);
+    TRACE("%p, %p.\n", iface, size);
 
-    if (!GetFontFileInfo(This->key, 0, &fileinfo, sizeof(fileinfo), NULL))
+    if (!GetFontFileInfo(stream->key, 0, &fileinfo, sizeof(fileinfo), NULL))
         return E_INVALIDARG;
 
     *size = fileinfo.size.QuadPart;
@@ -1024,14 +1017,13 @@ static HRESULT WINAPI memresourcestream_GetFileSize(IDWriteFontFileStream *iface
 
 static HRESULT WINAPI memresourcestream_GetLastWriteTime(IDWriteFontFileStream *iface, UINT64 *last_writetime)
 {
-    struct memresource_stream *This = impl_from_IDWriteFontFileStream(iface);
-
-    TRACE("(%p)->(%p)\n", This, last_writetime);
+    TRACE("%p, %p.\n", iface, last_writetime);
 
     return E_NOTIMPL;
 }
 
-static const struct IDWriteFontFileStreamVtbl memresourcestreamvtbl = {
+static const struct IDWriteFontFileStreamVtbl memresourcestreamvtbl =
+{
     memresourcestream_QueryInterface,
     memresourcestream_AddRef,
     memresourcestream_Release,
@@ -1043,9 +1035,7 @@ static const struct IDWriteFontFileStreamVtbl memresourcestreamvtbl = {
 
 static HRESULT WINAPI memresourceloader_QueryInterface(IDWriteFontFileLoader *iface, REFIID riid, void **out)
 {
-    struct gdiinterop *This = impl_from_IDWriteFontFileLoader(iface);
-
-    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), out);
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), out);
 
     if (IsEqualIID(&IID_IDWriteFontFileLoader, riid) || IsEqualIID(&IID_IUnknown, riid)) {
         *out = iface;
@@ -1071,10 +1061,9 @@ static ULONG WINAPI memresourceloader_Release(IDWriteFontFileLoader *iface)
 static HRESULT WINAPI memresourceloader_CreateStreamFromKey(IDWriteFontFileLoader *iface, void const *key,
         UINT32 key_size, IDWriteFontFileStream **ret)
 {
-    struct gdiinterop *This = impl_from_IDWriteFontFileLoader(iface);
     struct memresource_stream *stream;
 
-    TRACE("(%p)->(%p %u %p)\n", This, key, key_size, ret);
+    TRACE("%p, %p, %u, %p.\n", iface, key, key_size, ret);
 
     *ret = NULL;
 
@@ -1085,7 +1074,7 @@ static HRESULT WINAPI memresourceloader_CreateStreamFromKey(IDWriteFontFileLoade
         return E_OUTOFMEMORY;
 
     stream->IDWriteFontFileStream_iface.lpVtbl = &memresourcestreamvtbl;
-    stream->ref = 1;
+    stream->refcount = 1;
     memcpy(&stream->key, key, sizeof(stream->key));
 
     *ret = &stream->IDWriteFontFileStream_iface;

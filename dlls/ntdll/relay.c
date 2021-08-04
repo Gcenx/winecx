@@ -19,9 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
-
 #include <assert.h>
 #include <string.h>
 #include <stdarg.h>
@@ -33,12 +30,11 @@
 #include "winternl.h"
 #include "wine/exception.h"
 #include "ntdll_misc.h"
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(relay);
 
-#if defined(__i386__) || defined(__x86_64__) || defined(__i386_on_x86_64__) || defined(__arm__) || defined(__aarch64__)
+#if defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
 
 struct relay_descr  /* descriptor for a module */
 {
@@ -93,15 +89,6 @@ static inline int strcmpAW( const char *strA, const WCHAR *strW )
     return (unsigned char)*strA - *strW;
 }
 
-/* compare an ASCII and a Unicode string without depending on the current codepage */
-static inline int strncmpiAW( const char *strA, const WCHAR *strW, int n )
-{
-    int ret = 0;
-    for ( ; n > 0; n--, strA++, strW++)
-        if ((ret = toupperW((unsigned char)*strA) - toupperW(*strW)) || !*strA) break;
-    return ret;
-}
-
 /***********************************************************************
  *           build_list
  *
@@ -113,24 +100,24 @@ static const WCHAR **build_list( const WCHAR *buffer )
     const WCHAR *p = buffer;
     const WCHAR **ret;
 
-    while ((p = strchrW( p, ';' )))
+    while ((p = wcschr( p, ';' )))
     {
         count++;
         p++;
     }
     /* allocate count+1 pointers, plus the space for a copy of the string */
     if ((ret = RtlAllocateHeap( GetProcessHeap(), 0,
-                                (count+1) * sizeof(WCHAR*) + (strlenW(buffer)+1) * sizeof(WCHAR) )))
+                                (count+1) * sizeof(WCHAR*) + (wcslen(buffer)+1) * sizeof(WCHAR) )))
     {
         WCHAR *str = (WCHAR *)(ret + count + 1);
         WCHAR *q = str;
 
-        strcpyW( str, buffer );
+        wcscpy( str, buffer );
         count = 0;
         for (;;)
         {
             ret[count++] = q;
-            if (!(q = strchrW( q, ';' ))) break;
+            if (!(q = wcschr( q, ';' ))) break;
             *q++ = 0;
         }
         ret[count++] = NULL;
@@ -180,17 +167,6 @@ static DWORD WINAPI init_debug_lists( RTL_RUN_ONCE *once, void *param, void **co
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING name;
     HANDLE root, hkey;
-    static const WCHAR configW[] = {'S','o','f','t','w','a','r','e','\\',
-                                    'W','i','n','e','\\',
-                                    'D','e','b','u','g',0};
-    static const WCHAR RelayIncludeW[] = {'R','e','l','a','y','I','n','c','l','u','d','e',0};
-    static const WCHAR RelayExcludeW[] = {'R','e','l','a','y','E','x','c','l','u','d','e',0};
-    static const WCHAR SnoopIncludeW[] = {'S','n','o','o','p','I','n','c','l','u','d','e',0};
-    static const WCHAR SnoopExcludeW[] = {'S','n','o','o','p','E','x','c','l','u','d','e',0};
-    static const WCHAR RelayFromIncludeW[] = {'R','e','l','a','y','F','r','o','m','I','n','c','l','u','d','e',0};
-    static const WCHAR RelayFromExcludeW[] = {'R','e','l','a','y','F','r','o','m','E','x','c','l','u','d','e',0};
-    static const WCHAR SnoopFromIncludeW[] = {'S','n','o','o','p','F','r','o','m','I','n','c','l','u','d','e',0};
-    static const WCHAR SnoopFromExcludeW[] = {'S','n','o','o','p','F','r','o','m','E','x','c','l','u','d','e',0};
 
     RtlOpenCurrentUser( KEY_ALL_ACCESS, &root );
     attr.Length = sizeof(attr);
@@ -199,21 +175,21 @@ static DWORD WINAPI init_debug_lists( RTL_RUN_ONCE *once, void *param, void **co
     attr.Attributes = 0;
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
-    RtlInitUnicodeString( &name, configW );
+    RtlInitUnicodeString( &name, L"Software\\Wine\\Debug" );
 
     /* @@ Wine registry key: HKCU\Software\Wine\Debug */
     if (NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr )) hkey = 0;
     NtClose( root );
     if (!hkey) return TRUE;
 
-    debug_relay_includelist = load_list( hkey, RelayIncludeW );
-    debug_relay_excludelist = load_list( hkey, RelayExcludeW );
-    debug_snoop_includelist = load_list( hkey, SnoopIncludeW );
-    debug_snoop_excludelist = load_list( hkey, SnoopExcludeW );
-    debug_from_relay_includelist = load_list( hkey, RelayFromIncludeW );
-    debug_from_relay_excludelist = load_list( hkey, RelayFromExcludeW );
-    debug_from_snoop_includelist = load_list( hkey, SnoopFromIncludeW );
-    debug_from_snoop_excludelist = load_list( hkey, SnoopFromExcludeW );
+    debug_relay_includelist = load_list( hkey, L"RelayInclude" );
+    debug_relay_excludelist = load_list( hkey, L"RelayExclude" );
+    debug_snoop_includelist = load_list( hkey, L"SnoopInclude" );
+    debug_snoop_excludelist = load_list( hkey, L"SnoopExclude" );
+    debug_from_relay_includelist = load_list( hkey, L"RelayFromInclude" );
+    debug_from_relay_excludelist = load_list( hkey, L"RelayFromExclude" );
+    debug_from_snoop_includelist = load_list( hkey, L"SnoopFromInclude" );
+    debug_from_snoop_excludelist = load_list( hkey, L"SnoopFromExclude" );
 
     NtClose( hkey );
     return TRUE;
@@ -225,18 +201,18 @@ static DWORD WINAPI init_debug_lists( RTL_RUN_ONCE *once, void *param, void **co
  *
  * Check if a given module and function is in the list.
  */
-static BOOL check_list( const char *module, int ordinal, const char *func, const WCHAR *const *list )
+static BOOL check_list( const WCHAR *module, int ordinal, const char *func, const WCHAR *const *list )
 {
     char ord_str[10];
 
     sprintf( ord_str, "%d", ordinal );
     for(; *list; list++)
     {
-        const WCHAR *p = strrchrW( *list, '.' );
+        const WCHAR *p = wcsrchr( *list, '.' );
         if (p && p > *list)  /* check module and function */
         {
             int len = p - *list;
-            if (strncmpiAW( module, *list, len-1 ) || module[len]) continue;
+            if (wcsnicmp( module, *list, len - 1 ) || module[len]) continue;
             if (p[1] == '*' && !p[2]) return TRUE;
             if (!strcmpAW( ord_str, p + 1 )) return TRUE;
             if (func && !strcmpAW( func, p + 1 )) return TRUE;
@@ -255,7 +231,7 @@ static BOOL check_list( const char *module, int ordinal, const char *func, const
  *
  * Check if a given function must be included in the relay output.
  */
-static BOOL check_relay_include( const char *module, int ordinal, const char *func )
+static BOOL check_relay_include( const WCHAR *module, int ordinal, const char *func )
 {
     if (debug_relay_excludelist && check_list( module, ordinal, func, debug_relay_excludelist ))
         return FALSE;
@@ -272,7 +248,6 @@ static BOOL check_relay_include( const char *module, int ordinal, const char *fu
  */
 static BOOL check_from_module( const WCHAR **includelist, const WCHAR **excludelist, const WCHAR *module )
 {
-    static const WCHAR dllW[] = {'.','d','l','l',0 };
     const WCHAR **listitem;
     BOOL show;
 
@@ -292,9 +267,9 @@ static BOOL check_from_module( const WCHAR **includelist, const WCHAR **excludel
     {
         int len;
 
-        if (!strcmpiW( *listitem, module )) return !show;
-        len = strlenW( *listitem );
-        if (!strncmpiW( *listitem, module, len ) && !strcmpiW( module + len, dllW ))
+        if (!wcsicmp( *listitem, module )) return !show;
+        len = wcslen( *listitem );
+        if (!wcsnicmp( *listitem, module, len ) && !wcsicmp( module + len, L".dll" ))
             return !show;
     }
     return show;
@@ -318,17 +293,17 @@ static const char *func_name( struct relay_private_data *data, unsigned int ordi
 
 static void trace_string_a( INT_PTR ptr )
 {
-    if (!IS_INTARG( ptr )) TRACE( "%08lx %s", ptr, debugstr_a( (char *)ptr ));
-    else TRACE( "%08lx", ptr );
+    if (!IS_INTARG( ptr )) TRACE( "%08Ix %s", ptr, debugstr_a( (char *)ptr ));
+    else TRACE( "%08Ix", ptr );
 }
 
 static void trace_string_w( INT_PTR ptr )
 {
-    if (!IS_INTARG( ptr )) TRACE( "%08lx %s", ptr, debugstr_w( (WCHAR *)ptr ));
-    else TRACE( "%08lx", ptr );
+    if (!IS_INTARG( ptr )) TRACE( "%08Ix %s", ptr, debugstr_w( (WCHAR *)ptr ));
+    else TRACE( "%08Ix", ptr );
 }
 
-#if defined(__i386__) || defined(__i386_on_x86_64__)
+#ifdef __i386__
 
 /***********************************************************************
  *           relay_trace_entry
@@ -405,8 +380,7 @@ DECLSPEC_HIDDEN void WINAPI relay_trace_exit( struct relay_descr *descr, unsigne
 }
 
 extern LONGLONG WINAPI relay_call( struct relay_descr *descr, unsigned int idx );
-#ifdef __i386__
-__ASM_GLOBAL_FUNC( relay_call,
+__ASM_STDCALL_FUNC( relay_call, 8,
                    "pushl %ebp\n\t"
                    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
                    __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
@@ -425,7 +399,7 @@ __ASM_GLOBAL_FUNC( relay_call,
                    "pushl %esi\n\t"
                    "pushl 12(%ebp)\n\t"
                    "pushl 8(%ebp)\n\t"
-                   "call " __ASM_NAME("relay_trace_entry") "\n\t"
+                   "call " __ASM_STDCALL("relay_trace_entry",16) "\n\t"
                    /* copy the arguments*/
                    "movzwl -16(%ebp),%ecx\n\t"  /* number of args */
                    "jecxz 1f\n\t"
@@ -452,7 +426,7 @@ __ASM_GLOBAL_FUNC( relay_call,
                    "pushl 16(%ebp)\n\t"
                    "pushl 12(%ebp)\n\t"
                    "pushl 8(%ebp)\n\t"
-                   "call " __ASM_NAME("relay_trace_exit") "\n\t"
+                   "call " __ASM_STDCALL("relay_trace_exit",20) "\n\t"
                    /* restore return value and return */
                    "leal -12(%ebp),%esp\n\t"
                    "movl %esi,%eax\n\t"
@@ -467,69 +441,6 @@ __ASM_GLOBAL_FUNC( relay_call,
                    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
                    __ASM_CFI(".cfi_same_value %ebp\n\t")
                    "ret $8" )
-#else
-__ASM_GLOBAL_FUNC32( __ASM_THUNK_NAME(relay_call),
-                     "pushl %ebp\n\t"
-                     __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                     __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
-                     "movl %esp,%ebp\n\t"
-                     __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
-                     "pushl %esi\n\t"
-                     __ASM_CFI(".cfi_rel_offset %esi,-4\n\t")
-                     "pushl %edi\n\t"
-                     __ASM_CFI(".cfi_rel_offset %edi,-8\n\t")
-                     "pushl %ecx\n\t"
-                     __ASM_CFI(".cfi_rel_offset %ecx,-12\n\t")
-                     /* trace the parameters */
-                     "pushl %eax\n\t"
-                     "pushl %esp\n\t"  /* number of args return ptr */
-                     "leal 20(%ebp),%esi\n\t"  /* stack */
-                     "pushl %esi\n\t"
-                     "pushl 12(%ebp)\n\t"
-                     "pushl 8(%ebp)\n\t"
-                     "call " __ASM_THUNK_SYMBOL("relay_trace_entry") "\n\t"
-                     /* copy the arguments*/
-                     "movzwl -16(%ebp),%ecx\n\t"  /* number of args */
-                     "jecxz 1f\n\t"
-                     "leal 0(,%ecx,4),%edx\n\t"
-                     "subl %edx,%esp\n\t"
-                     "andl $~15,%esp\n\t"
-                     "movl %esp,%edi\n\t"
-                     "cld\n\t"
-                     "rep; movsl\n\t"
-                     "testl $0x80000000,-16(%ebp)\n\t"  /* thiscall */
-                     "jz 1f\n\t"
-                     "popl %ecx\n\t"
-                     "testl $0x40000000,-16(%ebp)\n\t"  /* fastcall */
-                     "jz 1f\n\t"
-                     "popl %edx\n"
-                     /* call the entry point */
-                     "1:\tcall *%eax\n\t"
-                     "movl %eax,%esi\n\t"
-                     "movl %edx,%edi\n\t"
-                     /* trace the return value */
-                     "leal -20(%ebp),%esp\n\t"
-                     "pushl %edx\n\t"
-                     "pushl %eax\n\t"
-                     "pushl 16(%ebp)\n\t"
-                     "pushl 12(%ebp)\n\t"
-                     "pushl 8(%ebp)\n\t"
-                     "call " __ASM_THUNK_SYMBOL("relay_trace_exit") "\n\t"
-                     /* restore return value and return */
-                     "leal -12(%ebp),%esp\n\t"
-                     "movl %esi,%eax\n\t"
-                     "movl %edi,%edx\n\t"
-                     "popl %ecx\n\t"
-                     __ASM_CFI(".cfi_same_value %ecx\n\t")
-                     "popl %edi\n\t"
-                     __ASM_CFI(".cfi_same_value %edi\n\t")
-                     "popl %esi\n\t"
-                     __ASM_CFI(".cfi_same_value %esi\n\t")
-                     "popl %ebp\n\t"
-                     __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
-                     __ASM_CFI(".cfi_same_value %ebp\n\t")
-                     "ret $8" )
-#endif /* __i386__ */
 
 #elif defined(__arm__)
 
@@ -634,7 +545,6 @@ DECLSPEC_HIDDEN void WINAPI relay_trace_exit( struct relay_descr *descr, unsigne
 
 extern LONGLONG WINAPI relay_call( struct relay_descr *descr, unsigned int idx, const DWORD *stack );
 __ASM_GLOBAL_FUNC( relay_call,
-                   ".arm\n\t"
                    "push {r4-r8,lr}\n\t"
                    "sub sp, #16\n\t"
                    "mov r6, r2\n\t"
@@ -648,8 +558,9 @@ __ASM_GLOBAL_FUNC( relay_call,
                    "lsl r3, r1, #2\n\t"
                    "subs r3, #16\n\t"   /* first 4 args are in registers */
                    "ble 2f\n\t"
+                   "add r3, #7\n\t"
+                   "and r3, #~7\n"
                    "sub sp, r3\n\t"
-                   "and sp, #~7\n"
                    "add r2, r6, #16\n\t"   /* skip r0-r3 */
                    "1:\tsubs r3, r3, #4\n\t"
                    "ldr r0, [r2, r3]\n\t"
@@ -659,6 +570,7 @@ __ASM_GLOBAL_FUNC( relay_call,
 #ifndef __SOFTFP__
                    "tst r1, #0x80000000\n\t"
                    "ldm r6, {r0-r3}\n\t"
+                   "it ne\n\t"
                    "vldmdbne r6!, {s0-s15}\n\t"
 #else
                    "ldm r6, {r0-r3}\n\t"
@@ -712,13 +624,13 @@ DECLSPEC_HIDDEN void * WINAPI relay_trace_entry( struct relay_descr *descr, unsi
             break;
         case 'i': /* long */
         default:
-            TRACE( "%08lx", stack[i] );
+            TRACE( "%08zx", stack[i] );
             break;
         }
         if (!is_ret_val( arg_types[i + 1] )) TRACE( "," );
     }
     *nb_args = i;
-    TRACE( ") ret=%08lx\n", stack[-1] );
+    TRACE( ") ret=%08zx\n", stack[-1] );
     return entry_point->orig_func;
 }
 
@@ -728,7 +640,7 @@ DECLSPEC_HIDDEN void * WINAPI relay_trace_entry( struct relay_descr *descr, unsi
 DECLSPEC_HIDDEN void WINAPI relay_trace_exit( struct relay_descr *descr, unsigned int idx,
                                               INT_PTR retaddr, INT_PTR retval )
 {
-    TRACE( "\1Ret  %s() retval=%08lx ret=%08lx\n",
+    TRACE( "\1Ret  %s() retval=%08zx ret=%08zx\n",
            func_name( descr->private, LOWORD(idx) ), retval, retaddr );
 }
 
@@ -818,13 +730,13 @@ DECLSPEC_HIDDEN void * WINAPI relay_trace_entry( struct relay_descr *descr, unsi
             break;
         case 'i': /* long */
         default:
-            TRACE( "%08lx", stack[i] );
+            TRACE( "%08zx", stack[i] );
             break;
         }
         if (!is_ret_val( arg_types[i+1] )) TRACE( "," );
     }
     *nb_args = i;
-    TRACE( ") ret=%08lx\n", stack[-1] );
+    TRACE( ") ret=%08zx\n", stack[-1] );
     return entry_point->orig_func;
 }
 
@@ -834,7 +746,7 @@ DECLSPEC_HIDDEN void * WINAPI relay_trace_entry( struct relay_descr *descr, unsi
 DECLSPEC_HIDDEN void WINAPI relay_trace_exit( struct relay_descr *descr, unsigned int idx,
                                               INT_PTR retaddr, INT_PTR retval )
 {
-    TRACE( "\1Ret  %s() retval=%08lx ret=%08lx\n",
+    TRACE( "\1Ret  %s() retval=%08zx ret=%08zx\n",
            func_name( descr->private, LOWORD(idx) ), retval, retaddr );
 }
 
@@ -962,6 +874,7 @@ void RELAY_SetupDLL( HMODULE module )
     DWORD size, entry_point_rva, old_prot;
     struct relay_descr *descr;
     struct relay_private_data *data;
+    WCHAR dllnameW[sizeof(data->dllname)];
     const WORD *ordptr;
     void *func_base;
     SIZE_T func_size;
@@ -987,6 +900,7 @@ void RELAY_SetupDLL( HMODULE module )
     len = min( len, sizeof(data->dllname) - 1 );
     memcpy( data->dllname, (char *)module + exports->Name, len );
     data->dllname[len] = 0;
+    ascii_to_unicode( dllnameW, data->dllname, len + 1 );
 
     /* fetch name pointer for all entry points and store them in the private structure */
 
@@ -1008,7 +922,7 @@ void RELAY_SetupDLL( HMODULE module )
     for (i = 0; i < exports->NumberOfFunctions; i++, funcs++)
     {
         if (!descr->entry_point_offsets[i]) continue;   /* not a normal function */
-        if (!check_relay_include( data->dllname, i + exports->Base, data->entry_points[i].name ))
+        if (!check_relay_include( dllnameW, i + exports->Base, data->entry_points[i].name ))
             continue;  /* don't include this entry point */
 
         data->entry_points[i].orig_func = (char *)module + *funcs;
@@ -1099,9 +1013,14 @@ static SNOOP_RETURNENTRIES *firstrets;
  */
 static BOOL SNOOP_ShowDebugmsgSnoop(const char *module, int ordinal, const char *func)
 {
-    if (debug_snoop_excludelist && check_list( module, ordinal, func, debug_snoop_excludelist ))
+    WCHAR moduleW[40];
+    int len = strlen(module);
+
+    if (len >= ARRAY_SIZE( moduleW )) return FALSE;
+    ascii_to_unicode( moduleW, module, len + 1 );
+    if (debug_snoop_excludelist && check_list( moduleW, ordinal, func, debug_snoop_excludelist ))
         return FALSE;
-    if (debug_snoop_includelist && !check_list( module, ordinal, func, debug_snoop_includelist ))
+    if (debug_snoop_includelist && !check_list( moduleW, ordinal, func, debug_snoop_includelist ))
         return FALSE;
     return TRUE;
 }
@@ -1432,12 +1351,6 @@ void WINAPI DECLSPEC_HIDDEN __regs_SNOOP_Return( void **stack )
 
 SNOOP_WRAPPER( SNOOP_Entry )
 SNOOP_WRAPPER( SNOOP_Return )
-
-// #elif defined(__i386_on_x86_64__)
-//
-// #error "Implement this for x86_32on64?"
-// // It seems optional, but if it's relatively easy it'd be nice to have.
-// // If it's hard, just remove this #elif branch.
 
 #else  /* __i386__ */
 

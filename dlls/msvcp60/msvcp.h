@@ -16,14 +16,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "stdbool.h"
 #include "stdlib.h"
 #include "windef.h"
 #include "cxx.h"
 
 #define ALIGNED_SIZE(size, alignment) (((size)+((alignment)-1))/(alignment)*(alignment))
 
-typedef unsigned char MSVCP_bool;
-typedef SIZE_T MSVCP_size_t;
 typedef SSIZE_T streamoff;
 typedef SSIZE_T streamsize;
 #define STREAMOFF_BITS 32
@@ -33,7 +32,7 @@ void __cdecl _invalid_parameter(const wchar_t*, const wchar_t*,
         const wchar_t*, unsigned int, uintptr_t);
 BOOL __cdecl __uncaught_exception(void);
 
-extern void* (__cdecl *MSVCRT_operator_new)(MSVCP_size_t);
+extern void* (__cdecl *MSVCRT_operator_new)(size_t);
 extern void (__cdecl *MSVCRT_operator_delete)(void*);
 
 /* basic_string<char, char_traits<char>, allocator<char>> */
@@ -41,50 +40,50 @@ typedef struct
 {
     void *allocator;
     char *ptr;
-    MSVCP_size_t size;
-    MSVCP_size_t res;
+    size_t size;
+    size_t res;
 } basic_string_char;
 
 basic_string_char* __thiscall MSVCP_basic_string_char_ctor(basic_string_char*);
 basic_string_char* __thiscall MSVCP_basic_string_char_ctor_cstr(basic_string_char*, const char*);
-basic_string_char* __thiscall MSVCP_basic_string_char_ctor_cstr_len(basic_string_char*, const char*, MSVCP_size_t);
+basic_string_char* __thiscall MSVCP_basic_string_char_ctor_cstr_len(basic_string_char*, const char*, size_t);
 basic_string_char* __thiscall MSVCP_basic_string_char_copy_ctor(basic_string_char*, const basic_string_char*);
 void __thiscall MSVCP_basic_string_char_dtor(basic_string_char*);
 const char* __thiscall MSVCP_basic_string_char_c_str(const basic_string_char*);
 void __thiscall MSVCP_basic_string_char_clear(basic_string_char*);
 basic_string_char* __thiscall MSVCP_basic_string_char_append_ch(basic_string_char*, char);
-MSVCP_size_t __thiscall MSVCP_basic_string_char_length(const basic_string_char*);
-basic_string_char* __thiscall MSVCP_basic_string_char_append_len_ch(basic_string_char*, MSVCP_size_t, char);
+size_t __thiscall MSVCP_basic_string_char_length(const basic_string_char*);
+basic_string_char* __thiscall MSVCP_basic_string_char_append_len_ch(basic_string_char*, size_t, char);
 basic_string_char* __thiscall MSVCP_basic_string_char_assign(basic_string_char*, const basic_string_char*);
 
 typedef struct
 {
     void *allocator;
     wchar_t *ptr;
-    MSVCP_size_t size;
-    MSVCP_size_t res;
+    size_t size;
+    size_t res;
 } basic_string_wchar;
 
 basic_string_wchar* __thiscall MSVCP_basic_string_wchar_ctor(basic_string_wchar*);
 basic_string_wchar* __thiscall MSVCP_basic_string_wchar_ctor_cstr(basic_string_wchar*, const wchar_t*);
-basic_string_wchar* __thiscall MSVCP_basic_string_wchar_ctor_cstr_len(basic_string_wchar*, const wchar_t*, MSVCP_size_t);
+basic_string_wchar* __thiscall MSVCP_basic_string_wchar_ctor_cstr_len(basic_string_wchar*, const wchar_t*, size_t);
 void __thiscall MSVCP_basic_string_wchar_dtor(basic_string_wchar*);
 const wchar_t* __thiscall MSVCP_basic_string_wchar_c_str(const basic_string_wchar*);
 void __thiscall MSVCP_basic_string_wchar_clear(basic_string_wchar*);
 basic_string_wchar* __thiscall MSVCP_basic_string_wchar_append_ch(basic_string_wchar*, wchar_t);
-MSVCP_size_t __thiscall MSVCP_basic_string_wchar_length(const basic_string_wchar*);
+size_t __thiscall MSVCP_basic_string_wchar_length(const basic_string_wchar*);
 
-char* __thiscall MSVCP_allocator_char_allocate(void*, MSVCP_size_t);
-void __thiscall MSVCP_allocator_char_deallocate(void*, char*, MSVCP_size_t);
-MSVCP_size_t __thiscall MSVCP_allocator_char_max_size(const void*);
-wchar_t* __thiscall MSVCP_allocator_wchar_allocate(void*, MSVCP_size_t);
-void __thiscall MSVCP_allocator_wchar_deallocate(void*, wchar_t*, MSVCP_size_t);
-MSVCP_size_t __thiscall MSVCP_allocator_wchar_max_size(const void*);
+char* __thiscall MSVCP_allocator_char_allocate(void*, size_t);
+void __thiscall MSVCP_allocator_char_deallocate(void*, char*, size_t);
+size_t __thiscall MSVCP_allocator_char_max_size(const void*);
+wchar_t* __thiscall MSVCP_allocator_wchar_allocate(void*, size_t);
+void __thiscall MSVCP_allocator_wchar_deallocate(void*, wchar_t*, size_t);
+size_t __thiscall MSVCP_allocator_wchar_max_size(const void*);
 
 /* class locale::facet */
 typedef struct {
     const vtable_ptr *vtable;
-    MSVCP_size_t refs;
+    size_t refs;
 } locale_facet;
 
 typedef enum {
@@ -111,7 +110,7 @@ typedef struct {
     codecvt_base base;
 } codecvt_char;
 
-MSVCP_bool __thiscall codecvt_base_always_noconv(const codecvt_base*);
+bool __thiscall codecvt_base_always_noconv(const codecvt_base*);
 int __thiscall codecvt_char_unshift(const codecvt_char*, int*, char*, char*, char**);
 int __thiscall codecvt_char_out(const codecvt_char*, int*, const char*,
         const char*, const char**, char*, char*, char**);
@@ -147,7 +146,7 @@ typedef struct {
     _Ctypevec ctype;
 } ctype_char;
 
-MSVCP_bool __thiscall ctype_char_is_ch(const ctype_char*, short, char);
+bool __thiscall ctype_char_is_ch(const ctype_char*, short, char);
 char __thiscall ctype_char_narrow_ch(const ctype_char*, char, char);
 char __thiscall ctype_char_widen_ch(const ctype_char*, char);
 
@@ -158,7 +157,7 @@ typedef struct {
     _Cvtvec cvt;
 } ctype_wchar;
 
-MSVCP_bool __thiscall ctype_wchar_is_ch(const ctype_wchar*, short, wchar_t);
+bool __thiscall ctype_wchar_is_ch(const ctype_wchar*, short, wchar_t);
 char __thiscall ctype_wchar_narrow_ch(const ctype_wchar*, wchar_t, char);
 wchar_t __thiscall ctype_wchar_widen_ch(const ctype_wchar*, char);
 
@@ -174,7 +173,7 @@ locale* __thiscall locale_ctor_uninitialized(locale *, int);
 locale* __thiscall locale_operator_assign(locale*, const locale*);
 void __thiscall locale_dtor(locale*);
 void free_locale(void);
-locale* __thiscall locale__Addfac(locale*, locale_facet*, MSVCP_size_t, MSVCP_size_t);
+locale* __thiscall locale__Addfac(locale*, locale_facet*, size_t, size_t);
 codecvt_char* codecvt_char_use_facet(const locale*);
 codecvt_wchar* codecvt_wchar_use_facet(const locale*);
 codecvt_wchar* codecvt_short_use_facet(const locale*);
@@ -183,7 +182,7 @@ ctype_wchar* ctype_wchar_use_facet(const locale*);
 ctype_wchar* ctype_short_use_facet(const locale*);
 
 typedef struct {
-    MSVCP_size_t id;
+    size_t id;
 } locale_id;
 extern locale_id codecvt_char_id;
 extern locale_id codecvt_short_id;
@@ -296,7 +295,7 @@ typedef struct _ios_base {
     IOS_BASE_iosarray *arr;
     IOS_BASE_fnarray *calls;
     locale loc;
-    MSVCP_size_t stdstr;
+    size_t stdstr;
 } ios_base;
 
 /* class basic_streambuf<char> */
@@ -319,12 +318,12 @@ typedef struct {
 
 typedef struct {
     basic_streambuf_char *strbuf;
-    MSVCP_bool      got;
+    bool      got;
     char            val;
 } istreambuf_iterator_char;
 
 typedef struct {
-    MSVCP_bool failed;
+    bool failed;
     basic_streambuf_char *strbuf;
 } ostreambuf_iterator_char;
 
@@ -352,12 +351,12 @@ typedef struct {
 
 typedef struct {
     basic_streambuf_wchar *strbuf;
-    MSVCP_bool got;
+    bool got;
     wchar_t val;
 } istreambuf_iterator_wchar;
 
 typedef struct {
-    MSVCP_bool failed;
+    bool failed;
     basic_streambuf_wchar *strbuf;
 } ostreambuf_iterator_wchar;
 
@@ -395,7 +394,7 @@ istreambuf_iterator_char *__thiscall num_get_char_get_int64(const num_get*, istr
 istreambuf_iterator_char *__thiscall num_get_char_get_uint64(const num_get*, istreambuf_iterator_char*,
         istreambuf_iterator_char, istreambuf_iterator_char, ios_base*, int*, ULONGLONG*);
 istreambuf_iterator_char *__thiscall num_get_char_get_bool(const num_get*, istreambuf_iterator_char*,
-        istreambuf_iterator_char, istreambuf_iterator_char, ios_base*, int*, MSVCP_bool*);
+        istreambuf_iterator_char, istreambuf_iterator_char, ios_base*, int*, bool*);
 
 num_get* num_get_wchar_use_facet(const locale*);
 num_get* num_get_short_use_facet(const locale*);
@@ -420,7 +419,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_get_int64(const num_get*, is
 istreambuf_iterator_wchar *__thiscall num_get_wchar_get_uint64(const num_get*, istreambuf_iterator_wchar*,
         istreambuf_iterator_wchar, istreambuf_iterator_wchar, ios_base*, int*, ULONGLONG*);
 istreambuf_iterator_wchar *__thiscall num_get_wchar_get_bool(const num_get*, istreambuf_iterator_wchar*,
-        istreambuf_iterator_wchar, istreambuf_iterator_wchar, ios_base*, int*, MSVCP_bool*);
+        istreambuf_iterator_wchar, istreambuf_iterator_wchar, ios_base*, int*, bool*);
 
 /* class num_put<char> */
 /* class num_put<wchar> */
@@ -445,7 +444,7 @@ ostreambuf_iterator_char* __thiscall num_put_char_put_int64(const num_put*, ostr
 ostreambuf_iterator_char* __thiscall num_put_char_put_uint64(const num_put*, ostreambuf_iterator_char*,
         ostreambuf_iterator_char, ios_base*, char, unsigned __int64);
 ostreambuf_iterator_char* __thiscall num_put_char_put_bool(const num_put*, ostreambuf_iterator_char*,
-        ostreambuf_iterator_char, ios_base*, char, MSVCP_bool);
+        ostreambuf_iterator_char, ios_base*, char, bool);
 
 num_put* num_put_wchar_use_facet(const locale*);
 num_put* num_put_short_use_facet(const locale*);
@@ -464,7 +463,7 @@ ostreambuf_iterator_wchar* __thiscall num_put_wchar_put_int64(const num_put*, os
 ostreambuf_iterator_wchar* __thiscall num_put_wchar_put_uint64(const num_put*, ostreambuf_iterator_wchar*,
         ostreambuf_iterator_wchar, ios_base*, wchar_t, unsigned __int64);
 ostreambuf_iterator_wchar* __thiscall num_put_wchar_put_bool(const num_put*, ostreambuf_iterator_wchar*,
-        ostreambuf_iterator_wchar, ios_base*, wchar_t, MSVCP_bool);
+        ostreambuf_iterator_wchar, ios_base*, wchar_t, bool);
 
 void init_exception(void*);
 void init_locale(void*);

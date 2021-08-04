@@ -207,11 +207,18 @@ WINE_DEFAULT_DEBUG_CHANNEL(wldap32);
 #ifdef HAVE_LDAP
 static WLDAP32_LDAP *create_context( const char *url )
 {
-    LDAP *ld;
+    WLDAP32_LDAP *ld;
     int version = LDAP_VERSION3;
-    if (ldap_initialize( &ld, url ) != LDAP_SUCCESS) return NULL;
-    ldap_set_option( ld, LDAP_OPT_PROTOCOL_VERSION, &version );
-    return ldap_wrap( ld );
+
+    ld = heap_alloc_zero( sizeof( *ld ));
+    if (!ld) return NULL;
+    if (ldap_initialize( &ld->ld, url ) != LDAP_SUCCESS)
+    {
+        heap_free( ld );
+        return NULL;
+    }
+    ldap_set_option( ld->ld, LDAP_OPT_PROTOCOL_VERSION, &version );
+    return ld;
 }
 #endif
 
@@ -542,7 +549,7 @@ WLDAP32_LDAP * CDECL ldap_sslinitA( PCHAR hostname, ULONG portnumber, int secure
 WLDAP32_LDAP * CDECL ldap_sslinitW( PWCHAR hostname, ULONG portnumber, int secure )
 {
 #ifdef HAVE_LDAP
-    LDAP *ld = NULL;
+    WLDAP32_LDAP *ld = NULL;
     char *hostnameU = NULL, *url = NULL;
 
     TRACE( "(%s, %d, 0x%08x)\n", debugstr_w(hostname), portnumber, secure );
@@ -562,12 +569,12 @@ WLDAP32_LDAP * CDECL ldap_sslinitW( PWCHAR hostname, ULONG portnumber, int secur
         url = urlify_hostnames( "ldap://", hostnameU, portnumber );
 
     if (!url) goto exit;
-    ldap_initialize( &ld, url );
+    ldap_initialize( &ld->ld, url );
 
 exit:
     strfreeU( hostnameU );
     strfreeU( url );
-    return ldap_wrap( ld );
+    return ld;
 
 #else
     return NULL;
@@ -652,7 +659,7 @@ ULONG CDECL ldap_start_tls_sW( WLDAP32_LDAP *ld, PULONG retval, WLDAP32_LDAPMess
         if (!clientctrlsU) goto exit;
     }
 
-    ret = map_error( ldap_start_tls_s( ldap_get( ld ), serverctrlsU, clientctrlsU ));
+    ret = map_error( ldap_start_tls_s( ld->ld, serverctrlsU, clientctrlsU ));
 
 exit:
     controlarrayfreeU( serverctrlsU );

@@ -22,12 +22,12 @@
 @ stdcall HidP_GetCaps(ptr ptr)
 @ stdcall HidP_GetData(long ptr ptr ptr ptr long)
 @ stub HidP_GetExtendedAttributes
-@ stub HidP_GetLinkCollectionNodes
+@ stdcall HidP_GetLinkCollectionNodes(ptr ptr ptr)
 @ stdcall HidP_GetScaledUsageValue(long long long long ptr ptr ptr long)
 @ stdcall HidP_GetSpecificButtonCaps(long long long long ptr ptr ptr)
 @ stdcall HidP_GetSpecificValueCaps(long long long long ptr ptr ptr)
 @ stdcall HidP_GetUsageValue(long long long long ptr ptr ptr long)
-@ stub HidP_GetUsageValueArray
+@ stdcall HidP_GetUsageValueArray(long long long long ptr long ptr ptr long)
 @ stdcall HidP_GetUsages(long long long ptr ptr ptr ptr long)
 @ stdcall HidP_GetUsagesEx(long long ptr ptr ptr ptr long)
 @ stdcall HidP_GetValueCaps(long ptr ptr ptr)

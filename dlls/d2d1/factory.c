@@ -30,17 +30,25 @@ struct d2d_settings d2d_settings =
 struct d2d_factory
 {
     ID2D1Factory2 ID2D1Factory2_iface;
+    ID2D1Multithread ID2D1Multithread_iface;
     LONG refcount;
 
     ID3D10Device1 *device;
 
     float dpi_x;
     float dpi_y;
+
+    CRITICAL_SECTION cs;
 };
 
 static inline struct d2d_factory *impl_from_ID2D1Factory2(ID2D1Factory2 *iface)
 {
     return CONTAINING_RECORD(iface, struct d2d_factory, ID2D1Factory2_iface);
+}
+
+static inline struct d2d_factory *impl_from_ID2D1Multithread(ID2D1Multithread *iface)
+{
+    return CONTAINING_RECORD(iface, struct d2d_factory, ID2D1Multithread_iface);
 }
 
 static HRESULT d2d_factory_reload_sysmetrics(struct d2d_factory *factory)
@@ -63,6 +71,8 @@ static HRESULT d2d_factory_reload_sysmetrics(struct d2d_factory *factory)
 
 static HRESULT STDMETHODCALLTYPE d2d_factory_QueryInterface(ID2D1Factory2 *iface, REFIID iid, void **out)
 {
+    struct d2d_factory *factory = impl_from_ID2D1Factory2(iface);
+
     TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
 
     if ((IsEqualGUID(iid, &IID_ID2D1Factory2) && d2d_settings.max_version_factory >= 2)
@@ -72,6 +82,12 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_QueryInterface(ID2D1Factory2 *iface
     {
         ID2D1Factory2_AddRef(iface);
         *out = iface;
+        return S_OK;
+    }
+    else if (IsEqualGUID(iid, &IID_ID2D1Multithread))
+    {
+        ID2D1Factory2_AddRef(iface);
+        *out = &factory->ID2D1Multithread_iface;
         return S_OK;
     }
 
@@ -102,6 +118,7 @@ static ULONG STDMETHODCALLTYPE d2d_factory_Release(ID2D1Factory2 *iface)
     {
         if (factory->device)
             ID3D10Device1_Release(factory->device);
+        DeleteCriticalSection(&factory->cs);
         heap_free(factory);
     }
 
@@ -152,19 +169,51 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_CreateRectangleGeometry(ID2D1Factor
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_factory_CreateRoundedRectangleGeometry(ID2D1Factory2 *iface,
-        const D2D1_ROUNDED_RECT *rect, ID2D1RoundedRectangleGeometry **geometry)
+        const D2D1_ROUNDED_RECT *rounded_rect, ID2D1RoundedRectangleGeometry **geometry)
 {
-    FIXME("iface %p, rect %p, geometry %p stub!\n", iface, rect, geometry);
+    struct d2d_geometry *object;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, rounded_rect %s, geometry %p.\n", iface, debug_d2d_rounded_rect(rounded_rect), geometry);
+
+    if (!(object = heap_alloc_zero(sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    if (FAILED(hr = d2d_rounded_rectangle_geometry_init(object, (ID2D1Factory *)iface, rounded_rect)))
+    {
+        WARN("Failed to initialize rounded rectangle geometry, hr %#x.\n", hr);
+        heap_free(object);
+        return hr;
+    }
+
+    TRACE("Created rounded rectangle geometry %p.\n", object);
+    *geometry = (ID2D1RoundedRectangleGeometry *)&object->ID2D1Geometry_iface;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_factory_CreateEllipseGeometry(ID2D1Factory2 *iface,
         const D2D1_ELLIPSE *ellipse, ID2D1EllipseGeometry **geometry)
 {
-    FIXME("iface %p, ellipse %p, geometry %p stub!\n", iface, ellipse, geometry);
+    struct d2d_geometry *object;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, ellipse %s, geometry %p.\n", iface, debug_d2d_ellipse(ellipse), geometry);
+
+    if (!(object = heap_alloc_zero(sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    if (FAILED(hr = d2d_ellipse_geometry_init(object, (ID2D1Factory *)iface, ellipse)))
+    {
+        WARN("Failed to initialize ellipse geometry, hr %#x.\n", hr);
+        heap_free(object);
+        return hr;
+    }
+
+    TRACE("Created ellipse geometry %p.\n", object);
+    *geometry = (ID2D1EllipseGeometry *)&object->ID2D1Geometry_iface;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_factory_CreateGeometryGroup(ID2D1Factory2 *iface,
@@ -561,17 +610,92 @@ static const struct ID2D1Factory2Vtbl d2d_factory_vtbl =
     d2d_factory_ID2D1Factory1_CreateDevice,
 };
 
+static HRESULT STDMETHODCALLTYPE d2d_factory_mt_QueryInterface(ID2D1Multithread *iface, REFIID iid, void **out)
+{
+    struct d2d_factory *factory = impl_from_ID2D1Multithread(iface);
+    return d2d_factory_QueryInterface(&factory->ID2D1Factory2_iface, iid, out);
+}
+
+static ULONG STDMETHODCALLTYPE d2d_factory_mt_AddRef(ID2D1Multithread *iface)
+{
+    struct d2d_factory *factory = impl_from_ID2D1Multithread(iface);
+    return d2d_factory_AddRef(&factory->ID2D1Factory2_iface);
+}
+
+static ULONG STDMETHODCALLTYPE d2d_factory_mt_Release(ID2D1Multithread *iface)
+{
+    struct d2d_factory *factory = impl_from_ID2D1Multithread(iface);
+    return d2d_factory_Release(&factory->ID2D1Factory2_iface);
+}
+
+static BOOL STDMETHODCALLTYPE d2d_factory_mt_GetMultithreadProtected(ID2D1Multithread *iface)
+{
+    return TRUE;
+}
+
+static void STDMETHODCALLTYPE d2d_factory_mt_Enter(ID2D1Multithread *iface)
+{
+    struct d2d_factory *factory = impl_from_ID2D1Multithread(iface);
+
+    TRACE("%p.\n", iface);
+
+    EnterCriticalSection(&factory->cs);
+}
+
+static void STDMETHODCALLTYPE d2d_factory_mt_Leave(ID2D1Multithread *iface)
+{
+    struct d2d_factory *factory = impl_from_ID2D1Multithread(iface);
+
+    TRACE("%p.\n", iface);
+
+    LeaveCriticalSection(&factory->cs);
+}
+
+static BOOL STDMETHODCALLTYPE d2d_factory_st_GetMultithreadProtected(ID2D1Multithread *iface)
+{
+    return FALSE;
+}
+
+static void STDMETHODCALLTYPE d2d_factory_st_Enter(ID2D1Multithread *iface)
+{
+}
+
+static void STDMETHODCALLTYPE d2d_factory_st_Leave(ID2D1Multithread *iface)
+{
+}
+
+static const struct ID2D1MultithreadVtbl d2d_factory_multithread_vtbl =
+{
+    d2d_factory_mt_QueryInterface,
+    d2d_factory_mt_AddRef,
+    d2d_factory_mt_Release,
+    d2d_factory_mt_GetMultithreadProtected,
+    d2d_factory_mt_Enter,
+    d2d_factory_mt_Leave,
+};
+
+static const struct ID2D1MultithreadVtbl d2d_factory_multithread_noop_vtbl =
+{
+    d2d_factory_mt_QueryInterface,
+    d2d_factory_mt_AddRef,
+    d2d_factory_mt_Release,
+    d2d_factory_st_GetMultithreadProtected,
+    d2d_factory_st_Enter,
+    d2d_factory_st_Leave,
+};
+
 static void d2d_factory_init(struct d2d_factory *factory, D2D1_FACTORY_TYPE factory_type,
         const D2D1_FACTORY_OPTIONS *factory_options)
 {
-    if (factory_type != D2D1_FACTORY_TYPE_SINGLE_THREADED)
-        FIXME("Ignoring factory type %#x.\n", factory_type);
     if (factory_options && factory_options->debugLevel != D2D1_DEBUG_LEVEL_NONE)
         WARN("Ignoring debug level %#x.\n", factory_options->debugLevel);
 
     factory->ID2D1Factory2_iface.lpVtbl = &d2d_factory_vtbl;
+    factory->ID2D1Multithread_iface.lpVtbl = factory_type == D2D1_FACTORY_TYPE_SINGLE_THREADED ?
+            &d2d_factory_multithread_noop_vtbl : &d2d_factory_multithread_vtbl;
     factory->refcount = 1;
     d2d_factory_reload_sysmetrics(factory);
+    InitializeCriticalSection(&factory->cs);
 }
 
 HRESULT WINAPI D2D1CreateFactory(D2D1_FACTORY_TYPE factory_type, REFIID iid,
@@ -582,6 +706,12 @@ HRESULT WINAPI D2D1CreateFactory(D2D1_FACTORY_TYPE factory_type, REFIID iid,
 
     TRACE("factory_type %#x, iid %s, factory_options %p, factory %p.\n",
             factory_type, debugstr_guid(iid), factory_options, factory);
+
+    if (factory_type != D2D1_FACTORY_TYPE_SINGLE_THREADED &&
+            factory_type != D2D1_FACTORY_TYPE_MULTI_THREADED)
+    {
+        return E_INVALIDARG;
+    }
 
     if (!(object = heap_alloc_zero(sizeof(*object))))
         return E_OUTOFMEMORY;
@@ -647,6 +777,137 @@ BOOL WINAPI D2D1InvertMatrix(D2D1_MATRIX_3X2_F *matrix)
     TRACE("matrix %p.\n", matrix);
 
     return d2d_matrix_invert(matrix, &m);
+}
+
+HRESULT WINAPI D2D1CreateDevice(IDXGIDevice *dxgi_device,
+        const D2D1_CREATION_PROPERTIES *properties, ID2D1Device **device)
+{
+    D2D1_CREATION_PROPERTIES default_properties = {0};
+    D2D1_FACTORY_OPTIONS factory_options;
+    ID3D11Device *d3d_device;
+    ID2D1Factory1 *factory;
+    HRESULT hr;
+
+    TRACE("dxgi_device %p, properties %p, device %p.\n", dxgi_device, properties, device);
+
+    if (!properties)
+    {
+        if (SUCCEEDED(IDXGIDevice_QueryInterface(dxgi_device, &IID_ID3D11Device, (void **)&d3d_device)))
+        {
+            if (!(ID3D11Device_GetCreationFlags(d3d_device) & D3D11_CREATE_DEVICE_SINGLETHREADED))
+                default_properties.threadingMode = D2D1_THREADING_MODE_MULTI_THREADED;
+            ID3D11Device_Release(d3d_device);
+        }
+        properties = &default_properties;
+    }
+
+    factory_options.debugLevel = properties->debugLevel;
+    if (FAILED(hr = D2D1CreateFactory(properties->threadingMode,
+            &IID_ID2D1Factory1, &factory_options, (void **)&factory)))
+        return hr;
+
+    hr = ID2D1Factory1_CreateDevice(factory, dxgi_device, device);
+    ID2D1Factory1_Release(factory);
+    return hr;
+}
+
+void WINAPI D2D1SinCos(float angle, float *s, float *c)
+{
+    TRACE("angle %.8e, s %p, c %p.\n", angle, s, c);
+
+    *s = sinf(angle);
+    *c = cosf(angle);
+}
+
+float WINAPI D2D1Tan(float angle)
+{
+    TRACE("angle %.8e.\n", angle);
+
+    return tanf(angle);
+}
+
+float WINAPI D2D1Vec3Length(float x, float y, float z)
+{
+    TRACE("x %.8e, y %.8e, z %.8e.\n", x, y, z);
+
+    return sqrtf(x * x + y * y + z * z);
+}
+
+/* See IEC 61966-2-1:1999; also described in the EXT_texture_sRGB OpenGL
+ * extension, among others. */
+static float srgb_transfer_function(float x)
+{
+    if (x <= 0.0f)
+        return 0.0f;
+    else if (x >= 1.0f)
+        return 1.0f;
+    else if (x <= 0.0031308f)
+        return 12.92f * x;
+    else
+        return 1.055f * powf(x, 1.0f / 2.4f) - 0.055f;
+}
+
+static float srgb_inverse_transfer_function(float x)
+{
+    if (x <= 0.0f)
+        return 0.0f;
+    else if (x >= 1.0f)
+        return 1.0f;
+    else if (x <= 0.04045f)
+        return x / 12.92f;
+    else
+        return powf((x + 0.055f) / 1.055f, 2.4f);
+}
+
+D2D1_COLOR_F WINAPI D2D1ConvertColorSpace(D2D1_COLOR_SPACE src_colour_space,
+        D2D1_COLOR_SPACE dst_colour_space, const D2D1_COLOR_F *colour)
+{
+    D2D1_COLOR_F ret;
+
+    TRACE("src_colour_space %#x, dst_colour_space %#x, colour %s.\n",
+            src_colour_space, dst_colour_space, debug_d2d_color_f(colour));
+
+    if (src_colour_space == D2D1_COLOR_SPACE_CUSTOM || dst_colour_space == D2D1_COLOR_SPACE_CUSTOM)
+    {
+        ret.r = 0.0f;
+        ret.g = 0.0f;
+        ret.b = 0.0f;
+        ret.a = 0.0f;
+
+        return ret;
+    }
+
+    if (src_colour_space == dst_colour_space)
+        return *colour;
+
+    if (src_colour_space == D2D1_COLOR_SPACE_SRGB && dst_colour_space == D2D1_COLOR_SPACE_SCRGB)
+    {
+        ret.r = srgb_inverse_transfer_function(colour->r);
+        ret.g = srgb_inverse_transfer_function(colour->g);
+        ret.b = srgb_inverse_transfer_function(colour->b);
+        ret.a = colour->a;
+
+        return ret;
+    }
+
+    if (src_colour_space == D2D1_COLOR_SPACE_SCRGB && dst_colour_space == D2D1_COLOR_SPACE_SRGB)
+    {
+        ret.r = srgb_transfer_function(colour->r);
+        ret.g = srgb_transfer_function(colour->g);
+        ret.b = srgb_transfer_function(colour->b);
+        ret.a = colour->a;
+
+        return ret;
+    }
+
+    FIXME("Unhandled conversion from source colour space %#x to destination colour space %#x.\n",
+            src_colour_space, dst_colour_space);
+    ret.r = 0.0f;
+    ret.g = 0.0f;
+    ret.b = 0.0f;
+    ret.a = 0.0f;
+
+    return ret;
 }
 
 static BOOL get_config_key_dword(HKEY default_key, HKEY application_key, const char *name, DWORD *value)

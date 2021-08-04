@@ -11,6 +11,7 @@ Unit tests for data structure packing
 basetsd.h
 winnt.h
 windef.h
+
 wingdi.h
 
 %include
@@ -473,6 +474,8 @@ winnt.h
 windef.h
 winbase.h
 
+timezoneapi.h
+
 %include
 
 "windows.h"
@@ -496,6 +499,7 @@ CRITICAL_SECTION
 CRITICAL_SECTION_DEBUG
 DCB
 DEBUG_EVENT
+DYNAMIC_TIME_ZONE_INFORMATION
 ENUMRESLANGPROCA
 ENUMRESLANGPROCW
 ENUMRESNAMEPROCA
@@ -577,6 +581,7 @@ PCACTCTX_SECTION_KEYED_DATA_2600
 PCACTCTX_SECTION_KEYED_DATA_ASSEMBLY_METADATA
 PCRITICAL_SECTION
 PCRITICAL_SECTION_DEBUG
+PDYNAMIC_TIME_ZONE_INFORMATION
 PFIBER_START_ROUTINE
 !PFILETIME              # FIXME: 20040821: Mishandled by winapi_test
 PHKEY
@@ -925,6 +930,10 @@ Unit tests for data structure packing
 
 %header
 
+basetsd.h
+winnt.h
+windef.h
+
 rpc.h
 rpcdce.h
 rpcdcep.h
@@ -958,7 +967,7 @@ MALLOC_FREE_STRUCT
 MIDL_FORMAT_STRING
 MIDL_SERVER_INFO
 MIDL_STUB_DESC
-MIDL_STUB_MESSAGE: !UniquePtrCount !IsClient !Pad !uFlags2
+MIDL_STUB_MESSAGE
 MIDL_STUBLESS_PROXY_INFO
 MIDL_SYNTAX_INFO
 NDR_CCONTEXT
@@ -996,7 +1005,6 @@ PRPC_STUB_FUNCTION
 PRPC_SYNTAX_IDENTIFIER
 PSCONTEXT_QUEUE
 PXMIT_ROUTINE_QUINTUPLE
-PUUID_VECTOR
 RPC_AUTH_IDENTITY_HANDLE
 RPC_AUTH_KEY_RETRIEVAL_FN
 RPC_AUTHZ_HANDLE
@@ -1047,6 +1055,7 @@ winnt.h
 windef.h
 wtypes.h
 guiddef.h
+
 shellapi.h
 shtypes.h
 shlobj.h
@@ -1223,10 +1232,8 @@ Unit tests for data structure packing
 
 %header
 
-basetsd.h
 winnt.h
-windef.h
-wtypes.h
+
 shlwapi.h
 
 %include
@@ -1258,9 +1265,10 @@ Unit tests for data structure packing
 
 %header
 
-basetsd.h
 winnt.h
 windef.h
+guiddef.h
+
 urlmon.h
 
 %include
@@ -1318,6 +1326,7 @@ basetsd.h
 winnt.h
 windef.h
 winbase.h
+
 wingdi.h
 winuser.h
 
@@ -1591,7 +1600,7 @@ Unit tests for data structure packing
 basetsd.h
 winnt.h
 windef.h
-winbase.h
+
 wininet.h
 
 %include
@@ -1733,6 +1742,7 @@ Unit tests for data structure packing
 basetsd.h
 winnt.h
 windef.h
+
 mmsystem.h
 digitalv.h
 
@@ -1787,8 +1797,8 @@ MIXERLINEA
 MIXERLINEW
 MIXERCONTROLA
 MIXERCONTROLW
-MIXERLINECONTROLA
-MIXERLINECONTROLW
+MIXERLINECONTROLSA
+MIXERLINECONTROLSW
 MIXERCONTROLDETAILS
 MIXERCONTROLDETAILS_LISTTEXTA
 MIXERCONTROLDETAILS_LISTTEXTW

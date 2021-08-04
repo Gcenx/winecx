@@ -66,55 +66,25 @@ static HRESULT expect_hrResult;
 static IInternetProtocol *read_protocol = NULL;
 static DWORD bindf;
 
-static const WCHAR blank_url1[] = {'i','t','s',':',
-    't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
-static const WCHAR blank_url2[] = {'m','S','-','i','T','s',':',
-    't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
-static const WCHAR blank_url3[] = {'m','k',':','@','M','S','I','T','S','t','o','r','e',':',
-    't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
-static const WCHAR blank_url4[] = {'i','t','s',':',
-    't','e','s','t','.','c','h','m',':',':','b','l','a','n','k','.','h','t','m','l',0};
-static const WCHAR blank_url5[] = {'i','t','s',':',
-    't','e','s','t','.','c','h','m',':',':','\\','b','l','a','n','k','.','h','t','m','l',0};
-static const WCHAR blank_url6[] = {'i','t','s',':',
-    't','e','s','t','.','c','h','m',':',':','/','%','6','2','l','a','n','k','.','h','t','m','l',0};
-static const WCHAR blank_url7[] = {'m','k',':','@','M','S','I','T','S','t','o','r','e',':',
-    't','e','s','t','.','c','h','m',':',':','\\','b','l','a','n','k','.','h','t','m','l',0};
-static const WCHAR blank_url8[] = {'m','k',':','@','M','S','I','T','S','t','o','r','e',':',
-    't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l','/',0};
-static const WCHAR blank_url9[] = {'i','t','s',':',
-    't','e','s','t','.','c','h','m',':',':','/','d','i','r','/','.','.','/','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR blank_url1[] = L"its:test.chm::/blank.html";
+static const WCHAR blank_url2[] = L"mS-iTs:test.chm::/blank.html";
+static const WCHAR blank_url3[] = L"mk:@MSITStore:test.chm::/blank.html";
+static const WCHAR blank_url4[] = L"its:test.chm::blank.html";
+static const WCHAR blank_url5[] = L"its:test.chm::\\blank.html";
+static const WCHAR blank_url6[] = L"its:test.chm::/%62lank.html";
+static const WCHAR blank_url7[] = L"mk:@MSITStore:test.chm::\\blank.html";
+static const WCHAR blank_url8[] = L"mk:@MSITStore:test.chm::/blank.html/";
+static const WCHAR blank_url9[] = L"its:test.chm::/dir/../blank.html";
 
 static enum {
     ITS_PROTOCOL,
     MK_PROTOCOL
 } test_protocol;
 
-static const WCHAR cache_file1[] =
-    {'t','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
-static const WCHAR cache_file2[] =
-    {'t','e','s','t','.','c','h','m',':',':','\\','b','l','a','n','k','.','h','t','m','l',0};
-static const WCHAR cache_file3[] =
-    {'t','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l','/',0};
+static const WCHAR cache_file1[] = L"test.chm::/blank.html";
+static const WCHAR cache_file2[] = L"test.chm::\\blank.html";
+static const WCHAR cache_file3[] = L"test.chm::/blank.html/";
 static const WCHAR *cache_file = cache_file1;
-
-static const WCHAR *a2w(const char *str)
-{
-    static WCHAR bufs[8][128];
-    static int i;
-
-    if(!str)
-        return NULL;
-
-    i = (i+1) % 8;
-    MultiByteToWideChar(CP_ACP, 0, str, -1, bufs[i], 128);
-    return bufs[i];
-}
-
-static int strcmp_wa(const WCHAR *str1, const char *str2)
-{
-    return lstrcmpW(str1, a2w(str2));
-}
 
 static HRESULT WINAPI ProtocolSink_QueryInterface(IInternetProtocolSink *iface, REFIID riid, void **ppv)
 {
@@ -144,9 +114,6 @@ static HRESULT WINAPI ProtocolSink_Switch(IInternetProtocolSink *iface, PROTOCOL
 static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, ULONG ulStatusCode,
         LPCWSTR szStatusText)
 {
-    static const WCHAR blank_html[] = {'b','l','a','n','k','.','h','t','m','l',0};
-    static const WCHAR text_html[] = {'t','e','x','t','/','h','t','m','l',0};
-
     switch(ulStatusCode) {
     case BINDSTATUS_BEGINDOWNLOADDATA:
         CHECK_EXPECT(ReportProgress_BEGINDOWNLOADDATA);
@@ -155,13 +122,13 @@ static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, 
     case BINDSTATUS_SENDINGREQUEST:
         CHECK_EXPECT(ReportProgress_SENDINGREQUEST);
         if(test_protocol == ITS_PROTOCOL)
-            ok(!lstrcmpW(szStatusText, blank_html), "unexpected szStatusText\n");
+            ok(!lstrcmpW(szStatusText, L"blank.html"), "unexpected szStatusText\n");
         else
             ok(szStatusText == NULL, "szStatusText != NULL\n");
         break;
     case BINDSTATUS_MIMETYPEAVAILABLE:
         CHECK_EXPECT(ReportProgress_MIMETYPEAVAILABLE);
-        ok(!lstrcmpW(szStatusText, text_html), "unexpected szStatusText\n");
+        ok(!lstrcmpW(szStatusText, L"text/html"), "unexpected szStatusText\n");
         break;
     case BINDSTATUS_CACHEFILENAMEAVAILABLE:
         CHECK_EXPECT(ReportProgress_CACHEFILENAMEAVAILABLE);
@@ -456,34 +423,34 @@ static void test_protocol_url(IClassFactory *factory, LPCWSTR url, BOOL expect_m
 }
 
 static const struct {
-    const char *base_url;
-    const char *rel_url;
+    const WCHAR *base_url;
+    const WCHAR *rel_url;
     DWORD flags;
     HRESULT hres;
-    const char *combined_url;
+    const WCHAR *combined_url;
 } combine_tests[] = {
-    {"its:test.chm::/blank.html", "its:test.chm::/blank.html", 0, STG_E_INVALIDNAME, NULL},
-    {"mS-iTs:test.chm::/blank.html", "mS-iTs:test.chm::/blank.html", 0, STG_E_INVALIDNAME, NULL},
-    {"its:test.chm::/blank.html", "test.html", 0, S_OK, "its:test.chm::/test.html"},
-    {"its:test.chm::/blank.html", "test.chm::/test.html", 0, STG_E_INVALIDNAME, NULL},
-    {"its:test.chm::/blank.html", "/test.html", 0, S_OK, "its:test.chm::/test.html"},
-    {"its:test.chm::/blank.html", "te:t.html", 0, STG_E_INVALIDNAME, NULL},
-    {"its:test.chm::/blank.html", "/test.html", URL_ESCAPE_SPACES_ONLY|URL_DONT_ESCAPE_EXTRA_INFO, S_OK, "its:test.chm::/test.html"},
-    {"its:test.chm::/blank.html", "dir/test.html", 0, S_OK, "its:test.chm::/dir/test.html"},
-    {"test.html", "test.chm::/test.html", 0, 0x80041001, NULL},
-    {"its:test:.chm::/blank.html", "test.html", 0, S_OK, "its:test:.chm::/test.html"},
-    {"its:test.chm::/dir/blank.html", "test.html", 0, S_OK, "its:test.chm::/dir/test.html"},
-    {"its:test.chm::blank.html", "test.html", 0, S_OK, "its:test.chm::blank.htmltest.html"},
-    {"ms-its:test.chm::/dir/blank.html", "test.html", 0, S_OK, "ms-its:test.chm::/dir/test.html"},
-    {"mk:@MSITStore:test.chm::/dir/blank.html", "test.html", 0, S_OK, "mk:@MSITStore:test.chm::/dir/test.html"},
-    {"xxx:test.chm::/dir/blank.html", "test.html", 0, INET_E_USE_DEFAULT_PROTOCOLHANDLER, NULL},
-    {"its:test.chm::/dir/blank.html", "/test.html", 0, S_OK, "its:test.chm::/test.html"},
-    {"its:test.chm::/blank.html", "#frag", 0, S_OK, "its:test.chm::/blank.html#frag"},
-    {"its:test.chm::/blank.html#hash", "#frag", 0, S_OK, "its:test.chm::/blank.html#hash#frag"},
-    {"its:test.chm::/blank.html", "test.html#frag", 0, S_OK, "its:test.chm::/test.html#frag"},
-    {"its:test.chm::/blank.html", "/test.html#frag", 0, S_OK, "its:test.chm::/test.html#frag"},
-    {"its:test.chm::/blank.html", "?query", 0, S_OK, "its:test.chm::/?query"},
-    {"its:test.chm::/blank.html#frag/blank", "test.html", 0, S_OK, "its:test.chm::/blank.html#frag/test.html"},
+    {L"its:test.chm::/blank.html", L"its:test.chm::/blank.html", 0, STG_E_INVALIDNAME, NULL},
+    {L"mS-iTs:test.chm::/blank.html", L"mS-iTs:test.chm::/blank.html", 0, STG_E_INVALIDNAME, NULL},
+    {L"its:test.chm::/blank.html", L"test.html", 0, S_OK, L"its:test.chm::/test.html"},
+    {L"its:test.chm::/blank.html", L"test.chm::/test.html", 0, STG_E_INVALIDNAME, NULL},
+    {L"its:test.chm::/blank.html", L"/test.html", 0, S_OK, L"its:test.chm::/test.html"},
+    {L"its:test.chm::/blank.html", L"te:t.html", 0, STG_E_INVALIDNAME, NULL},
+    {L"its:test.chm::/blank.html", L"/test.html", URL_ESCAPE_SPACES_ONLY|URL_DONT_ESCAPE_EXTRA_INFO, S_OK, L"its:test.chm::/test.html"},
+    {L"its:test.chm::/blank.html", L"dir/test.html", 0, S_OK, L"its:test.chm::/dir/test.html"},
+    {L"test.html", L"test.chm::/test.html", 0, 0x80041001, NULL},
+    {L"its:test:.chm::/blank.html", L"test.html", 0, S_OK, L"its:test:.chm::/test.html"},
+    {L"its:test.chm::/dir/blank.html", L"test.html", 0, S_OK, L"its:test.chm::/dir/test.html"},
+    {L"its:test.chm::blank.html", L"test.html", 0, S_OK, L"its:test.chm::blank.htmltest.html"},
+    {L"ms-its:test.chm::/dir/blank.html", L"test.html", 0, S_OK, L"ms-its:test.chm::/dir/test.html"},
+    {L"mk:@MSITStore:test.chm::/dir/blank.html", L"test.html", 0, S_OK, L"mk:@MSITStore:test.chm::/dir/test.html"},
+    {L"xxx:test.chm::/dir/blank.html", L"test.html", 0, INET_E_USE_DEFAULT_PROTOCOLHANDLER, NULL},
+    {L"its:test.chm::/dir/blank.html", L"/test.html", 0, S_OK, L"its:test.chm::/test.html"},
+    {L"its:test.chm::/blank.html", L"#frag", 0, S_OK, L"its:test.chm::/blank.html#frag"},
+    {L"its:test.chm::/blank.html#hash", L"#frag", 0, S_OK, L"its:test.chm::/blank.html#hash#frag"},
+    {L"its:test.chm::/blank.html", L"test.html#frag", 0, S_OK, L"its:test.chm::/test.html#frag"},
+    {L"its:test.chm::/blank.html", L"/test.html#frag", 0, S_OK, L"its:test.chm::/test.html#frag"},
+    {L"its:test.chm::/blank.html", L"?query", 0, S_OK, L"its:test.chm::/?query"},
+    {L"its:test.chm::/blank.html#frag/blank", L"test.html", 0, S_OK, L"its:test.chm::/blank.html#frag/test.html"},
 };
 
 static void test_its_protocol_info(IInternetProtocol *protocol)
@@ -510,22 +477,21 @@ static void test_its_protocol_info(IInternetProtocol *protocol)
     for(i=0; i < ARRAY_SIZE(combine_tests); i++) {
         size = 0xdeadbeef;
         memset(buf, 0xfe, sizeof(buf));
-        hres = IInternetProtocolInfo_CombineUrl(info, a2w(combine_tests[i].base_url),
-                a2w(combine_tests[i].rel_url), combine_tests[i].flags, buf,
-                ARRAY_SIZE(buf), &size, 0);
+        hres = IInternetProtocolInfo_CombineUrl(info, combine_tests[i].base_url,
+                combine_tests[i].rel_url, combine_tests[i].flags, buf, ARRAY_SIZE(buf), &size, 0);
         ok(hres == combine_tests[i].hres, "[%d] CombineUrl returned %08x, expected %08x\n",
            i, hres, combine_tests[i].hres);
-        ok(size == (combine_tests[i].combined_url ? strlen(combine_tests[i].combined_url)+1
+        ok(size == (combine_tests[i].combined_url ? lstrlenW(combine_tests[i].combined_url)+1
            : 0xdeadbeef), "[%d] unexpected size=%d\n", i, size);
         if(combine_tests[i].combined_url)
-            ok(!strcmp_wa(buf, combine_tests[i].combined_url), "[%d] unexpected result: %s\n", i, wine_dbgstr_w(buf));
+            ok(!lstrcmpW(buf, combine_tests[i].combined_url), "[%d] unexpected result: %s\n", i, wine_dbgstr_w(buf));
         else
             ok(buf[0] == 0xfefe, "buf changed\n");
     }
 
     size = 0xdeadbeef;
     memset(buf, 0xfe, sizeof(buf));
-    hres = IInternetProtocolInfo_CombineUrl(info, a2w("its:test.chm::/blank.html"), a2w("test.html"), 0, buf,
+    hres = IInternetProtocolInfo_CombineUrl(info, L"its:test.chm::/blank.html", L"test.html", 0, buf,
             1, &size, 0);
     ok(hres == E_OUTOFMEMORY, "CombineUrl failed: %08x\n", hres);
     ok(size == 25, "size=%d\n", size);
@@ -542,16 +508,11 @@ static void test_its_protocol(void)
     ULONG ref;
     HRESULT hres;
 
-    static const WCHAR wrong_url1[] =
-        {'i','t','s',':','t','e','s','t','.','c','h','m',':',':','/','b','l','a','n','.','h','t','m','l',0};
-    static const WCHAR wrong_url2[] =
-        {'i','t','s',':','t','e','s','.','c','h','m',':',':','b','/','l','a','n','k','.','h','t','m','l',0};
-    static const WCHAR wrong_url3[] =
-        {'i','t','s',':','t','e','s','t','.','c','h','m','/','b','l','a','n','k','.','h','t','m','l',0};
-    static const WCHAR wrong_url4[] = {'m','k',':','@','M','S','I','T','S','t','o','r',':',
-         't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
-    static const WCHAR wrong_url5[] = {'f','i','l','e',':',
-        't','e','s','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
+    static const WCHAR wrong_url1[] = L"its:test.chm::/blan.html";
+    static const WCHAR wrong_url2[] = L"its:tes.chm::b/lank.html";
+    static const WCHAR wrong_url3[] = L"its:test.chm/blank.html";
+    static const WCHAR wrong_url4[] = L"mk:@MSITStor:test.chm::/blank.html";
+    static const WCHAR wrong_url5[] = L"file:tes.chm::/blank.html";
 
     test_protocol = ITS_PROTOCOL;
 

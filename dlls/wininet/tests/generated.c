@@ -5,10 +5,6 @@
  * Unit tests for data structure packing
  */
 
-#define WINVER 0x0501
-#define _WIN32_IE 0x0501
-#define _WIN32_WINNT 0x0501
-
 #define WINE_NOWINSOCK
 
 #include <stdarg.h>
@@ -33,7 +29,7 @@
 
 #if defined(_MSC_VER) && (_MSC_VER >= 1300) && defined(__cplusplus)
 # define _TYPE_ALIGNMENT(type) __alignof(type)
-#elif defined(__GNUC__)
+#elif defined(__GNUC__) || defined(__clang__)
 # define _TYPE_ALIGNMENT(type) __alignof__(type)
 #else
 /*
@@ -55,23 +51,23 @@
  * Test helper macros
  */
 
-#define TEST_TYPE_SIZE(type, size)             C_ASSERT(sizeof(type) == size);
+#define TEST_TYPE_SIZE(type, size)              C_ASSERT(sizeof(type) == size);
 
 #ifdef TYPE_ALIGNMENT
-# define TEST_TYPE_ALIGN(type, align)          C_ASSERT(TYPE_ALIGNMENT(type) == align);
+# define TEST_TYPE_ALIGN(type, align)           C_ASSERT(TYPE_ALIGNMENT(type) == align);
 #else
 # define TEST_TYPE_ALIGN(type, align)
 #endif
 
 #ifdef _TYPE_ALIGNMENT
-# define TEST_TARGET_ALIGN(type, align)        C_ASSERT(_TYPE_ALIGNMENT(*(type)0) == align);
-# define TEST_FIELD_ALIGN(type, field, align)  C_ASSERT(_TYPE_ALIGNMENT(((type*)0)->field) == align);
+# define TEST_TARGET_ALIGN(type, align)         C_ASSERT(_TYPE_ALIGNMENT(*(type)0) == align);
+# define TEST_FIELD_ALIGN(type, field, align)   C_ASSERT(_TYPE_ALIGNMENT(((type*)0)->field) == align);
 #else
 # define TEST_TARGET_ALIGN(type, align)
 # define TEST_FIELD_ALIGN(type, field, align)
 #endif
 
-#define TEST_FIELD_OFFSET(type, field, offset) C_ASSERT(FIELD_OFFSET(type, field) == offset);
+#define TEST_FIELD_OFFSET(type, field, offset)  C_ASSERT(FIELD_OFFSET(type, field) == offset);
 
 #define TEST_TARGET_SIZE(type, size)            TEST_TYPE_SIZE(*(type)0, size)
 #define TEST_FIELD_SIZE(type, field, size)      TEST_TYPE_SIZE((((type*)0)->field), size)
@@ -490,7 +486,7 @@ static void test_pack_GROUPID(void)
     /* GROUPID */
     TEST_TYPE_SIZE   (GROUPID, 8)
     TEST_TYPE_ALIGN  (GROUPID, 8)
-    TEST_TYPE_SIGNED(GROUPID)
+    TEST_TYPE_SIGNED (GROUPID)
 }
 
 static void test_pack_HINTERNET(void)
@@ -1727,7 +1723,7 @@ static void test_pack_GROUPID(void)
     /* GROUPID */
     TEST_TYPE_SIZE   (GROUPID, 8)
     TEST_TYPE_ALIGN  (GROUPID, 8)
-    TEST_TYPE_SIGNED(GROUPID)
+    TEST_TYPE_SIGNED (GROUPID)
 }
 
 static void test_pack_HINTERNET(void)

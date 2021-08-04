@@ -60,12 +60,15 @@ int quicken_signin_hack = 0;
  */
 static void get_cocoa_window_features(struct macdrv_win_data *data,
                                       DWORD style, DWORD ex_style,
-                                      struct macdrv_window_features* wf)
+                                      struct macdrv_window_features* wf,
+                                      const RECT *window_rect,
+                                      const RECT *client_rect)
 {
     memset(wf, 0, sizeof(*wf));
 
     if (disable_window_decorations) return;
-    if (IsRectEmpty(&data->window_rect)) return;
+    if (IsRectEmpty(window_rect)) return;
+    if (EqualRect(window_rect, client_rect)) return;
 
     /* CrossOver Hack #15388 */
     if (quicken_signin_hack)
@@ -140,7 +143,8 @@ static void get_cocoa_window_state(struct macdrv_win_data *data,
  *
  * Helper for macdrv_window_to_mac_rect and macdrv_mac_to_window_rect.
  */
-static void get_mac_rect_offset(struct macdrv_win_data *data, DWORD style, RECT *rect)
+static void get_mac_rect_offset(struct macdrv_win_data *data, DWORD style, RECT *rect,
+                                const RECT *window_rect, const RECT *client_rect)
 {
     DWORD ex_style, style_mask = 0, ex_style_mask = 0;
 
@@ -151,7 +155,7 @@ static void get_mac_rect_offset(struct macdrv_win_data *data, DWORD style, RECT 
     if (!data->shaped)
     {
         struct macdrv_window_features wf;
-        get_cocoa_window_features(data, style, ex_style, &wf);
+        get_cocoa_window_features(data, style, ex_style, &wf, window_rect, client_rect);
 
         if (wf.title_bar)
         {
@@ -177,14 +181,15 @@ static void get_mac_rect_offset(struct macdrv_win_data *data, DWORD style, RECT 
  *
  * Convert a rect from client to Mac window coordinates
  */
-static void macdrv_window_to_mac_rect(struct macdrv_win_data *data, DWORD style, RECT *rect)
+static void macdrv_window_to_mac_rect(struct macdrv_win_data *data, DWORD style, RECT *rect,
+                                      const RECT *window_rect, const RECT *client_rect)
 {
     RECT rc;
 
     if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD) return;
     if (IsRectEmpty(rect)) return;
 
-    get_mac_rect_offset(data, style, &rc);
+    get_mac_rect_offset(data, style, &rc, window_rect, client_rect);
 
     rect->left   -= rc.left;
     rect->right  -= rc.right;
@@ -208,7 +213,7 @@ static void macdrv_mac_to_window_rect(struct macdrv_win_data *data, RECT *rect)
     if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD) return;
     if (IsRectEmpty(rect)) return;
 
-    get_mac_rect_offset(data, style, &rc);
+    get_mac_rect_offset(data, style, &rc, &data->window_rect, &data->client_rect);
 
     rect->left   += rc.left;
     rect->right  += rc.right;
@@ -361,7 +366,7 @@ static void set_cocoa_window_properties(struct macdrv_win_data *data)
     owner_win = macdrv_get_cocoa_window(owner, TRUE);
     macdrv_set_cocoa_parent_window(data->cocoa_window, owner_win);
 
-    get_cocoa_window_features(data, style, ex_style, &wf);
+    get_cocoa_window_features(data, style, ex_style, &wf, &data->window_rect, &data->client_rect);
     macdrv_set_cocoa_window_features(data->cocoa_window, &wf);
 
     get_cocoa_window_state(data, style, ex_style, &state);
@@ -630,7 +635,7 @@ static void sync_window_min_max_info(HWND hwnd)
         CGSize min_size, max_size;
 
         SetRect(&min_rect, 0, 0, minmax.ptMinTrackSize.x, minmax.ptMinTrackSize.y);
-        macdrv_window_to_mac_rect(data, style, &min_rect);
+        macdrv_window_to_mac_rect(data, style, &min_rect, &data->window_rect, &data->client_rect);
         min_size = CGSizeMake(min_rect.right - min_rect.left, min_rect.bottom - min_rect.top);
 
         if (minmax.ptMaxTrackSize.x == GetSystemMetrics(SM_CXMAXTRACK) &&
@@ -639,7 +644,7 @@ static void sync_window_min_max_info(HWND hwnd)
         else
         {
             SetRect(&max_rect, 0, 0, minmax.ptMaxTrackSize.x, minmax.ptMaxTrackSize.y);
-            macdrv_window_to_mac_rect(data, style, &max_rect);
+            macdrv_window_to_mac_rect(data, style, &max_rect, &data->window_rect, &data->client_rect);
             max_size = CGSizeMake(max_rect.right - max_rect.left, max_rect.bottom - max_rect.top);
         }
 
@@ -702,9 +707,9 @@ static void create_cocoa_window(struct macdrv_win_data *data)
     ex_style = GetWindowLongW(data->hwnd, GWL_EXSTYLE);
 
     data->whole_rect = data->window_rect;
-    macdrv_window_to_mac_rect(data, style, &data->whole_rect);
+    macdrv_window_to_mac_rect(data, style, &data->whole_rect, &data->window_rect, &data->client_rect);
 
-    get_cocoa_window_features(data, style, ex_style, &wf);
+    get_cocoa_window_features(data, style, ex_style, &wf, &data->window_rect, &data->client_rect);
 
     rect = data->whole_rect;
     /* CrossOver Hack #15388 */
@@ -2169,7 +2174,7 @@ void CDECL macdrv_WindowPosChanging(HWND hwnd, HWND insert_after, UINT swp_flags
     if (!data && !(data = macdrv_create_win_data(hwnd, window_rect, client_rect))) return;
 
     *visible_rect = *window_rect;
-    macdrv_window_to_mac_rect(data, style, visible_rect);
+    macdrv_window_to_mac_rect(data, style, visible_rect, window_rect, client_rect);
     TRACE("visible_rect %s -> %s\n", wine_dbgstr_rect(window_rect),
           wine_dbgstr_rect(visible_rect));
 
@@ -2458,12 +2463,7 @@ void macdrv_window_got_focus(HWND hwnd, const macdrv_event *event)
 
     if (can_activate_window(top) && !(style & WS_MINIMIZE))
     {
-        /* simulate a mouse click on the menu to find out
-         * whether the window wants to be activated */
-        LRESULT ma = SendMessageW(top, WM_MOUSEACTIVATE,
-                                  (WPARAM)top,
-                                  MAKELONG(HTMENU, WM_LBUTTONDOWN));
-        if (ma != MA_NOACTIVATEANDEAT && ma != MA_NOACTIVATE)
+        /* CrossOver Hack #18896: don't send WM_MOUSEACTIVATE, it breaks Unity games */
         {
             TRACE("setting foreground window to %p\n", top);
             SetForegroundWindow(top);
@@ -2960,7 +2960,8 @@ BOOL query_resize_size(HWND hwnd, macdrv_query *query)
 
     if (SendMessageW(hwnd, WM_SIZING, corner, (LPARAM)&rect))
     {
-        macdrv_window_to_mac_rect(data, GetWindowLongW(hwnd, GWL_STYLE), &rect);
+        macdrv_window_to_mac_rect(data, GetWindowLongW(hwnd, GWL_STYLE), &rect,
+                                  &data->window_rect, &data->client_rect);
         query->resize_size.rect = cgrect_from_rect(rect);
         ret = TRUE;
     }

@@ -31,11 +31,12 @@
 #include "winuser.h"
 #include "wincon.h"
 #include "wine/unicode.h"
-#include "wine/library.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(winevdm);
 
+#define DOSBOX "dosbox"
 
 /*** PIF file structures ***/
 #include "pshpack1.h"
@@ -110,7 +111,7 @@ typedef struct {
  */
 static char *find_dosbox(void)
 {
-    const char *envpath = getenv( "PATH" );
+    const char * HOSTPTR envpath = getenv( "PATH" );
     struct stat st;
     char *path, *p, *buffer, *dir;
     size_t envpath_len;
@@ -119,7 +120,7 @@ static char *find_dosbox(void)
 
     envpath_len = strlen( envpath );
     path = HeapAlloc( GetProcessHeap(), 0, envpath_len + 1 );
-    buffer = HeapAlloc( GetProcessHeap(), 0, envpath_len + sizeof("/dosbox") );
+    buffer = HeapAlloc( GetProcessHeap(), 0, envpath_len + strlen(DOSBOX) + 2 );
     strcpy( path, envpath );
 
     p = path;
@@ -131,7 +132,7 @@ static char *find_dosbox(void)
         while (*p && *p != ':') p++;
         if (*p == ':') *p++ = 0;
         strcpy( buffer, dir );
-        strcat( buffer, "/dosbox" );
+        strcat( buffer, "/" DOSBOX );
         if (!stat( buffer, &st ))
         {
             HeapFree( GetProcessHeap(), 0, path );
@@ -150,11 +151,12 @@ static char *find_dosbox(void)
 static void start_dosbox( const char *appname, const char *args )
 {
     static const WCHAR cfgW[] = {'c','f','g',0};
-    const char *config_dir = wine_get_config_dir();
+    const char * HOSTPTR home = getenv( "HOME" );
+    const char * HOSTPTR prefix = getenv( "WINEPREFIX" );
     WCHAR path[MAX_PATH], config[MAX_PATH];
     HANDLE file;
     char *p, *buffer, app[MAX_PATH];
-    int i;
+    int i, len;
     int ret = 1;
     DWORD written, drives = GetLogicalDrives();
     char *dosbox = find_dosbox();
@@ -168,9 +170,10 @@ static void start_dosbox( const char *appname, const char *args )
     file = CreateFileW( config, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0 );
     if (file == INVALID_HANDLE_VALUE) return;
 
+    len = prefix ? strlen(prefix) : strlen(home) + strlen("/.wine");
     buffer = HeapAlloc( GetProcessHeap(), 0, sizeof("[autoexec]") +
                         sizeof("mount -z c") + sizeof("config -securemode") +
-                        25 * (strlen(config_dir) + sizeof("mount c /dosdevices/c:")) +
+                        25 * (len + sizeof("mount c /dosdevices/c:")) +
                         4 * strlenW( path ) +
                         6 + strlen( app ) + strlen( args ) + 20 );
     p = buffer;
@@ -182,8 +185,13 @@ static void start_dosbox( const char *appname, const char *args )
             break;
         }
     for (i = 0; i <= 25; i++)
-        if (drives & (1 << i))
-            p += sprintf( p, "mount %c %s/dosdevices/%c:\n", 'a' + i, config_dir, 'a' + i );
+    {
+        if (!(drives & (1 << i))) continue;
+        if (prefix)
+            p += sprintf( p, "mount %c %s/dosdevices/%c:\n", 'a' + i, prefix, 'a' + i );
+        else
+            p += sprintf( p, "mount %c %s/.wine/dosdevices/%c:\n", 'a' + i, home, 'a' + i );
+    }
     p += sprintf( p, "%c:\ncd ", path[0] );
     p += WideCharToMultiByte( CP_UNIXCP, 0, path + 2, -1, p, 4 * strlenW(path), NULL, NULL ) - 1;
     p += sprintf( p, "\nconfig -securemode\n" );
@@ -191,7 +199,7 @@ static void start_dosbox( const char *appname, const char *args )
     p += sprintf( p, "exit\n" );
     if (WriteFile( file, buffer, strlen(buffer), &written, NULL ) && written == strlen(buffer))
     {
-        const char *args[5];
+        const char * HOSTPTR args[5];
         char *config_file = wine_get_unix_file_name( config );
         args[0] = dosbox;
         args[1] = "-userconf";
@@ -368,17 +376,17 @@ static VOID pif_cmd( char *filename, char *cmdline)
  * Build the command line of a process from the argv array.
  * Copied from ENV_BuildCommandLine.
  */
-static char *build_command_line( char **argv )
+static char *build_command_line( char * HOSTPTR * HOSTPTR argv )
 {
     int len;
-    char *p, **arg, *cmd_line;
+    char *p, * HOSTPTR * HOSTPTR arg, *cmd_line;
 
     len = 0;
     for (arg = argv; *arg; arg++)
     {
         BOOL has_space;
         int bcount;
-        char* a;
+        char* HOSTPTR a;
 
         has_space=FALSE;
         bcount=0;
@@ -413,7 +421,7 @@ static char *build_command_line( char **argv )
     for (arg = argv; *arg; arg++)
     {
         BOOL has_space,has_quote;
-        char* a;
+        char* HOSTPTR a;
 
         /* Check for quotes and spaces in this argument */
         has_space=has_quote=FALSE;
@@ -486,7 +494,7 @@ static void usage(void)
 /***********************************************************************
  *           main
  */
-int __cdecl main( int argc, char *argv[] )
+int main( int argc, char *argv[] )
 {
     DWORD count;
     HINSTANCE16 instance;
@@ -494,23 +502,26 @@ int __cdecl main( int argc, char *argv[] )
     WORD showCmd[2];
     char buffer[MAX_PATH];
     STARTUPINFOA info;
-    char *cmdline, *appname, **first_arg;
+    char *cmdline, *appname, * HOSTPTR * HOSTPTR first_arg;
     char *p;
 
     if (!argv[1]) usage();
 
     if (!strcmp( argv[1], "--app-name" ))
     {
-        if (!(appname = argv[2])) usage();
+        if (!argv[2]) usage();
+        appname = heap_strdup(argv[2]);
         first_arg = argv + 3;
     }
     else
     {
-        if (!SearchPathA( NULL, argv[1], ".exe", sizeof(buffer), buffer, NULL ))
+        p = heap_strdup(argv[1]);
+        if (!SearchPathA( NULL, p, ".exe", sizeof(buffer), buffer, NULL ))
         {
             WINE_MESSAGE( "winevdm: unable to exec '%s': file not found\n", argv[1] );
             ExitProcess(1);
         }
+        heap_free(p);
         appname = buffer;
         first_arg = argv + 1;
     }

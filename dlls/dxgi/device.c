@@ -427,13 +427,30 @@ static HRESULT STDMETHODCALLTYPE dxgi_swapchain_factory_create_swapchain(IWineDX
 {
     struct dxgi_device *device = impl_from_IWineDXGISwapChainFactory(iface);
     struct wined3d_swapchain_desc wined3d_desc;
+    struct IDXGIOutput *containing_output;
+    struct dxgi_factory *dxgi_factory;
     struct d3d11_swapchain *object;
     HRESULT hr;
 
     TRACE("iface %p, factory %p, window %p, desc %p, fullscreen_desc %p, output %p, swapchain %p.\n",
             iface, factory, window, desc, fullscreen_desc, output, swapchain);
 
-    if (FAILED(hr = wined3d_swapchain_desc_from_dxgi(&wined3d_desc, window, desc, fullscreen_desc)))
+    if (!(dxgi_factory = unsafe_impl_from_IDXGIFactory(factory)))
+    {
+        WARN("Factory %p is not a valid dxgi factory.\n", factory);
+        return E_FAIL;
+    }
+
+    if (FAILED(hr = dxgi_get_output_from_window(&dxgi_factory->IWineDXGIFactory_iface, window, &containing_output)))
+    {
+        WARN("Failed to get output from window %p, hr %#x.\n", window, hr);
+        return hr;
+    }
+
+    hr = wined3d_swapchain_desc_from_dxgi(&wined3d_desc, containing_output, window, desc,
+            fullscreen_desc);
+    IDXGIOutput_Release(containing_output);
+    if (FAILED(hr))
         return hr;
 
     if (!(object = heap_alloc_zero(sizeof(*object))))
@@ -474,7 +491,10 @@ HRESULT dxgi_device_init(struct dxgi_device *device, struct dxgi_device_layer *l
     struct d3d11_swapchain *swapchain;
     struct dxgi_adapter *dxgi_adapter;
     struct dxgi_factory *dxgi_factory;
+    struct dxgi_output *dxgi_output;
+    struct IDXGIOutput *output;
     void *layer_base;
+    HWND window;
     HRESULT hr;
 
     if (!(dxgi_factory = unsafe_impl_from_IDXGIFactory(factory)))
@@ -519,7 +539,7 @@ HRESULT dxgi_device_init(struct dxgi_device *device, struct dxgi_device_layer *l
     IWineDXGIDeviceParent_Release(dxgi_device_parent);
 
     if (FAILED(hr = wined3d_device_create(dxgi_factory->wined3d,
-            dxgi_adapter->ordinal, WINED3D_DEVICE_TYPE_HAL, NULL, 0, 4,
+            dxgi_adapter->wined3d_adapter, WINED3D_DEVICE_TYPE_HAL, NULL, 0, 4,
             (const enum wined3d_feature_level *)feature_levels, level_count,
             wined3d_device_parent, &device->wined3d_device)))
     {
@@ -530,11 +550,25 @@ HRESULT dxgi_device_init(struct dxgi_device *device, struct dxgi_device_layer *l
         return hr;
     }
 
+    window = dxgi_factory_get_device_window(dxgi_factory);
+    if (FAILED(hr = dxgi_get_output_from_window(&dxgi_factory->IWineDXGIFactory_iface, window, &output)))
+    {
+        ERR("Failed to get output from window %p.\n", window);
+        wined3d_device_decref(device->wined3d_device);
+        IUnknown_Release(device->child_layer);
+        wined3d_private_store_cleanup(&device->private_store);
+        wined3d_mutex_unlock();
+        return hr;
+    }
+    dxgi_output = unsafe_impl_from_IDXGIOutput(output);
+
     memset(&swapchain_desc, 0, sizeof(swapchain_desc));
     swapchain_desc.swap_effect = WINED3D_SWAP_EFFECT_DISCARD;
-    swapchain_desc.device_window = dxgi_factory_get_device_window(dxgi_factory);
+    swapchain_desc.device_window = window;
     swapchain_desc.windowed = TRUE;
     swapchain_desc.flags = WINED3D_SWAPCHAIN_IMPLICIT;
+    swapchain_desc.output = dxgi_output->wined3d_output;
+    IDXGIOutput_Release(output);
 
     if (!(swapchain = heap_alloc_zero(sizeof(*swapchain))))
     {

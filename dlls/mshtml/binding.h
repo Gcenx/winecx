@@ -35,6 +35,7 @@ typedef struct {
     nsIHttpChannel         nsIHttpChannel_iface;
     nsIUploadChannel       nsIUploadChannel_iface;
     nsIHttpChannelInternal nsIHttpChannelInternal_iface;
+    nsICacheInfoChannel    nsICacheInfoChannel_iface;
 
     LONG ref;
 
@@ -153,6 +154,7 @@ HRESULT create_channelbsc(IMoniker*,const WCHAR*,BYTE*,DWORD,BOOL,nsChannelBSC**
 HRESULT channelbsc_load_stream(HTMLInnerWindow*,IMoniker*,IStream*) DECLSPEC_HIDDEN;
 void channelbsc_set_channel(nsChannelBSC*,nsChannel*,nsIStreamListener*,nsISupports*) DECLSPEC_HIDDEN;
 IUri *nsuri_get_uri(nsWineURI*) DECLSPEC_HIDDEN;
+nsresult create_onload_blocker_request(nsIRequest**) DECLSPEC_HIDDEN;
 
 HRESULT read_stream(BSCallback*,IStream*,void*,DWORD,DWORD*) DECLSPEC_HIDDEN;
 
