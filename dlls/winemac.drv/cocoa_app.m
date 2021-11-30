@@ -31,6 +31,12 @@ static NSString* const WineAppWaitQueryResponseMode = @"WineAppWaitQueryResponse
 static NSString* const WineWillShowPermissionDialogNotification = @"WineWillShowPermissionDialogNotification";
 static NSString* const WineDidShowPermissionDialogNotification = @"WineDidShowPermissionDialogNotification";
 
+// Private notifications that are reliably dispatched when a window is moved by dragging its titlebar.
+// The object of the notification is the window being dragged.
+// Available in macOS 10.12+
+static NSString* const NSWindowWillStartDraggingNotification = @"NSWindowWillStartDraggingNotification";
+static NSString* const NSWindowDidEndDraggingNotification = @"NSWindowDidEndDraggingNotification";
+
 
 int macdrv_err_on;
 
@@ -185,6 +191,15 @@ static NSString* WineLocalizedString(unsigned int stringID)
             warpRecords = [[NSMutableArray alloc] init];
 
             windowsBeingDragged = [[NSMutableSet alloc] init];
+
+            // On macOS 10.12+, use notifications to more reliably detect when windows are being dragged.
+            if ([NSProcessInfo instancesRespondToSelector:@selector(isOperatingSystemAtLeastVersion:)])
+            {
+                NSOperatingSystemVersion requiredVersion = { 10, 12, 0 };
+                useDragNotifications = [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:requiredVersion];
+            }
+            else
+                useDragNotifications = NO;
 
             if (!requests || !requestsManipQueue || !eventQueues || !eventQueuesLock ||
                 !keyWindows || !originalDisplayModes || !latentDisplayModes || !warpRecords)
@@ -1640,32 +1655,28 @@ static NSString* WineLocalizedString(unsigned int stringID)
         }
     }
 
-    - (void) handleWindowDrag:(NSEvent*)anEvent begin:(BOOL)begin
+    - (void) handleWindowDrag:(WineWindow*)window begin:(BOOL)begin
     {
-        WineWindow* window = (WineWindow*)[anEvent window];
-        if ([window isKindOfClass:[WineWindow class]])
+        macdrv_event* event;
+        int eventType;
+
+        if (begin)
         {
-            macdrv_event* event;
-            int eventType;
-
-            if (begin)
-            {
-                [windowsBeingDragged addObject:window];
-                eventType = WINDOW_DRAG_BEGIN;
-            }
-            else
-            {
-                [windowsBeingDragged removeObject:window];
-                eventType = WINDOW_DRAG_END;
-            }
-            [self updateCursorClippingState];
-
-            event = macdrv_create_event(eventType, window);
-            if (eventType == WINDOW_DRAG_BEGIN)
-                event->window_drag_begin.no_activate = [NSEvent wine_commandKeyDown];
-            [window.queue postEvent:event];
-            macdrv_release_event(event);
+            [windowsBeingDragged addObject:window];
+            eventType = WINDOW_DRAG_BEGIN;
         }
+        else
+        {
+            [windowsBeingDragged removeObject:window];
+            eventType = WINDOW_DRAG_END;
+        }
+        [self updateCursorClippingState];
+
+        event = macdrv_create_event(eventType, window);
+        if (eventType == WINDOW_DRAG_BEGIN)
+            event->window_drag_begin.no_activate = [NSEvent wine_commandKeyDown];
+        [window.queue postEvent:event];
+        macdrv_release_event(event);
     }
 
     - (void) handleMouseMove:(NSEvent*)anEvent
@@ -1831,9 +1842,6 @@ static NSString* WineLocalizedString(unsigned int stringID)
         NSEventType type = [theEvent type];
         WineWindow* windowBroughtForward = nil;
         BOOL process = FALSE;
-
-        if (type == NSEventTypeLeftMouseUp && [windowsBeingDragged count])
-            [self handleWindowDrag:theEvent begin:NO];
 
         if ([window isKindOfClass:[WineWindow class]] &&
             type == NSEventTypeLeftMouseDown &&
@@ -2190,15 +2198,17 @@ static NSString* WineLocalizedString(unsigned int stringID)
                     [window postKeyEvent:anEvent];
             }
         }
-        else if (type == NSEventTypeAppKitDefined && !quicken_signin_hack) /* CrossOver Hack #15388 */
+        else if (!useDragNotifications && type == NSEventTypeAppKitDefined &&
+                 !quicken_signin_hack) /* CrossOver Hack #15388 */
         {
+            WineWindow *window = (WineWindow *)[anEvent window];
             short subtype = [anEvent subtype];
 
             // These subtypes are not documented but they appear to mean
             // "a window is being dragged" and "a window is no longer being
             // dragged", respectively.
-            if (subtype == 20 || subtype == 21)
-                [self handleWindowDrag:anEvent begin:(subtype == 20)];
+            if ((subtype == 20 || subtype == 21) && [window isKindOfClass:[WineWindow class]])
+                [self handleWindowDrag:window begin:(subtype == 20)];
         }
 
         return ret;
@@ -2269,6 +2279,26 @@ static NSString* WineLocalizedString(unsigned int stringID)
             [windowsBeingDragged removeObject:window];
             [self updateCursorClippingState];
         }];
+
+        if (useDragNotifications) {
+            [nc addObserverForName:NSWindowWillStartDraggingNotification
+                            object:nil
+                             queue:[NSOperationQueue mainQueue]
+                        usingBlock:^(NSNotification *note){
+                NSWindow* window = [note object];
+                if ([window isKindOfClass:[WineWindow class]])
+                    [self handleWindowDrag:(WineWindow *)window begin:YES];
+            }];
+
+            [nc addObserverForName:NSWindowDidEndDraggingNotification
+                            object:nil
+                             queue:[NSOperationQueue mainQueue]
+                        usingBlock:^(NSNotification *note){
+                NSWindow* window = [note object];
+                if ([window isKindOfClass:[WineWindow class]])
+                    [self handleWindowDrag:(WineWindow *)window begin:NO];
+            }];
+        }
 
         [nc addObserver:self
                selector:@selector(keyboardSelectionDidChange)

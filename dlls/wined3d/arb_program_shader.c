@@ -4584,7 +4584,7 @@ static void find_arb_vs_compile_args(const struct wined3d_state *state,
     int i;
     WORD int_skip;
 
-    find_vs_compile_args(state, shader, context_gl->c.stream_info.swizzle_map, &args->super, &context_gl->c);
+    find_vs_compile_args(state, shader, &args->super, &context_gl->c);
 
     args->clip.boolclip_compare = 0;
     if (use_ps(state))
@@ -5749,6 +5749,13 @@ static BOOL shader_arb_has_ffp_proj_control(void *shader_priv)
 
 static void shader_arb_precompile(void *shader_priv, struct wined3d_shader *shader) {}
 
+static uint64_t shader_arb_shader_compile(struct wined3d_context *context, const struct wined3d_shader_desc *shader_desc,
+        enum wined3d_shader_type shader_type)
+{
+    ERR("Not implemented.\n");
+    return 0;
+}
+
 const struct wined3d_shader_backend_ops arb_program_shader_backend =
 {
     shader_arb_handle_instruction,
@@ -5768,6 +5775,7 @@ const struct wined3d_shader_backend_ops arb_program_shader_backend =
     shader_arb_get_caps,
     shader_arb_color_fixup_supported,
     shader_arb_has_ffp_proj_control,
+    shader_arb_shader_compile,
 };
 
 /* ARB_fragment_program fixed function pipeline replacement definitions */
@@ -6693,7 +6701,7 @@ static void fragment_prog_arbfp(struct wined3d_context *context, const struct wi
     {
         /* Find or create a shader implementing the fixed function pipeline
          * settings, then activate it. */
-        gen_ffp_frag_op(context, state, &settings, FALSE);
+        wined3d_ffp_get_fs_settings(context, state, &settings, FALSE);
         desc = (const struct arbfp_ffp_desc *)find_ffp_frag_shader(&priv->fragment_shaders, &settings);
         if (!desc)
         {
@@ -8034,7 +8042,7 @@ static DWORD arbfp_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_bl
     {
         const struct wined3d_format *fmt = src_texture->resource.format;
         alpha_test_key.color_space_low_value = 0;
-        alpha_test_key.color_space_high_value = ~(((1u << fmt->alpha_size) - 1) << fmt->alpha_offset);
+        alpha_test_key.color_space_high_value = ~(wined3d_mask_from_size(fmt->alpha_size) << fmt->alpha_offset);
         color_key = &alpha_test_key;
     }
 

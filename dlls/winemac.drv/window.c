@@ -1891,6 +1891,40 @@ void CDECL macdrv_SetWindowText(HWND hwnd, LPCWSTR text)
 }
 
 
+/* CX HACK 19364 and CX HACK 16565 */
+static BOOL is_rockstar_launcher_or_steamwebhelper(void)
+{
+    char name[MAX_PATH], *module_exe;
+    if (!GetModuleFileNameA(NULL, name, sizeof(name)))
+        return FALSE;
+
+    module_exe = strrchr(name, '\\');
+    module_exe = module_exe ? module_exe + 1 : name;
+
+    if (!strcasecmp(module_exe, "steamwebhelper.exe"))
+        return TRUE;
+
+    if (!strcasestr(name, "\\Rockstar Games\\"))
+        return FALSE;
+
+    return !strcasecmp(module_exe, "Launcher.exe") || !strcasecmp(module_exe, "SocialClubHelper.exe");
+}
+
+static BOOL needs_zorder_hack(void)
+{
+    static BOOL needs_hack, did_check = FALSE;
+
+    if (!did_check)
+    {
+        needs_hack = is_rockstar_launcher_or_steamwebhelper();
+        did_check = TRUE;
+    }
+
+    return needs_hack;
+}
+/* END HACK */
+
+
 /***********************************************************************
  *              ShowWindow   (MACDRV.@)
  */
@@ -1904,6 +1938,37 @@ UINT CDECL macdrv_ShowWindow(HWND hwnd, INT cmd, RECT *rect, UINT swp)
           hwnd, data ? data->cocoa_window : NULL, cmd, wine_dbgstr_rect(rect), swp);
 
     if (!data || !data->cocoa_window) goto done;
+
+    /* CX HACK 19364 and CX HACK 16565 */
+    /* Cross-process window hierarchy in the Rockstar Games launcher (Social Club) and Steam. */
+    if ((cmd == SW_SHOW || cmd == SW_SHOWNOACTIVATE) && needs_zorder_hack())
+    {
+        DWORD style = GetWindowLongW(hwnd, GWL_STYLE);
+        BOOL is_popup = (style & WS_POPUP) != 0;
+        BOOL was_visible = (style & WS_VISIBLE) != 0;
+
+        /* Showing a previously hidden popup? */
+        if (is_popup && !was_visible)
+        {
+            HWND owner = GetWindow(hwnd, GW_OWNER);
+            DWORD owner_pid;
+            GetWindowThreadProcessId(owner, &owner_pid);
+
+            if (owner_pid != GetCurrentProcessId())
+            {
+                /* Out-of-process owner? Bring the window to the front. */
+                if (cmd == SW_SHOW)
+                    macdrv_give_cocoa_window_focus(data->cocoa_window, TRUE);
+                else {
+                    /* Activating the steamwebhelper app will cause dropdowns to dismiss
+                     * themselves, so this just forces the window on top without focusing
+                     * the app. */
+                    macdrv_force_popup_order_front(data->cocoa_window);
+                }
+            }
+        }
+    }
+
     if (IsRectEmpty(rect)) goto done;
     if (GetWindowLongW(hwnd, GWL_STYLE) & WS_MINIMIZE)
     {
@@ -2432,10 +2497,11 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
         flags |= SWP_NOSENDCHANGING;
     if (!(flags & SWP_NOSIZE) || !(flags & SWP_NOMOVE))
     {
-        if (!event->window_frame_changed.in_resize && !being_dragged)
+        int send_sizemove = !event->window_frame_changed.in_resize && !being_dragged && !event->window_frame_changed.skip_size_move_loop;
+        if (send_sizemove)
             SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0);
         SetWindowPos(hwnd, 0, rect.left, rect.top, width, height, flags);
-        if (!event->window_frame_changed.in_resize && !being_dragged)
+        if (send_sizemove)
             SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
     }
 }

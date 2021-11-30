@@ -1435,6 +1435,13 @@ static WCHAR *detect_autoproxyconfig_url_dns(void)
         heap_free( fqdn );
         return NULL;
     }
+    /* CX HACK 19133: searching mDNS for 'wpad.local' takes 5 seconds and is a huge security risk */
+    if (!strcmp(domain, "local") && (strlen(domain) == 5))
+    {
+        heap_free( domain );
+        heap_free( fqdn );
+        return NULL;
+    }
     p = fqdn;
     while ((p = strchr( p, '.' )) && is_domain_suffix( p + 1, domain ))
     {

@@ -53,6 +53,11 @@ enum d3d10_effect_object_type
     D3D10_EOT_SAMPLE_MASK = 0xb,
 };
 
+enum d3d10_effect_object_type_flags
+{
+    D3D10_EOT_FLAG_GS_SO = 0x1,
+};
+
 enum d3d10_effect_object_operation
 {
     D3D10_EOO_VALUE = 1,
@@ -100,8 +105,9 @@ struct d3d10_effect_shader_signature
 
 struct d3d10_effect_shader_variable
 {
-    struct d3d10_effect_shader_signature input_signature;
-    struct d3d10_effect_shader_signature output_signature;
+    ID3D10ShaderReflection *reflection;
+    ID3D10Blob *input_signature;
+    ID3D10Blob *bytecode;
     union
     {
         ID3D10VertexShader *vs;
@@ -111,6 +117,8 @@ struct d3d10_effect_shader_variable
 
     unsigned int resource_count;
     struct d3d10_effect_shader_resource *resources;
+    char *stream_output_declaration;
+    unsigned int isinline : 1;
 };
 
 struct d3d10_effect_state_object_variable
@@ -154,6 +162,7 @@ struct d3d10_effect_type
     char *name;
     D3D10_SHADER_VARIABLE_TYPE basetype;
     D3D10_SHADER_VARIABLE_CLASS type_class;
+    unsigned int flags;
 
     DWORD id;
     struct wine_rb_entry entry;
@@ -192,6 +201,7 @@ struct d3d10_effect_variable
     DWORD annotation_count;
     DWORD flag;
     DWORD data_size;
+    DWORD explicit_bind_point;
     struct d3d10_effect *effect;
     struct d3d10_effect_variable *elements;
     struct d3d10_effect_variable *members;

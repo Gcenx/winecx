@@ -180,14 +180,20 @@ static DWORD get_device_index(WORD vid, WORD pid, WORD input)
 DEVICE_OBJECT* find_device_by_uid(DWORD uid)
 {
     struct pnp_device *ptr;
+    DEVICE_OBJECT *obj = NULL;
 
+    EnterCriticalSection(&device_list_cs);
     LIST_FOR_EACH_ENTRY(ptr, &pnp_devset, struct pnp_device, entry)
     {
         struct device_extension *ext = (struct device_extension *)ptr->device->DeviceExtension;
         if (ext->uid == uid)
-            return ptr->device;
+	{
+            obj = ptr->device;
+            break;
+	}
     }
-    return NULL;
+    LeaveCriticalSection(&device_list_cs);
+    return obj;
 }
 
 static WCHAR *get_instance_id(DEVICE_OBJECT *device)

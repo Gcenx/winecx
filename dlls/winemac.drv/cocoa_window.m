@@ -393,6 +393,9 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 
 @property (readonly, copy, nonatomic) NSArray* childWineWindows;
 
+/* CX HACK 16565 */
+@property (nonatomic) BOOL preventAppActivation;
+
     - (void) updateForGLSubviews;
 
     - (BOOL) becameEligibleParentOrChild;
@@ -445,6 +448,23 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     {
         return NSFocusRingTypeNone;
     }
+
+    /* CX HACK 16565 */
+    /* These two methods work together to prevent the app from being activated
+     * when a window is clicked. */
+    - (BOOL)shouldDelayWindowOrderingForEvent:(NSEvent *)event
+    {
+        return ((WineWindow *)self.window).preventAppActivation;
+    }
+
+    - (void)mouseDown:(NSEvent *)event
+    {
+        if (((WineWindow *)self.window).preventAppActivation)
+            [NSApp preventWindowOrdering];
+
+        [super mouseDown:event];
+    }
+    /* END HACK */
 
 @end
 
@@ -958,6 +978,9 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     @synthesize usePerPixelAlpha;
     @synthesize imeData, commandDone;
 
+    /* CX HACK 16565 */
+    @synthesize preventAppActivation;
+
     + (WineWindow*) createWindowWithFeatures:(const struct macdrv_window_features*)wf
                                  windowFrame:(NSRect)window_frame
                                         hwnd:(void* WIN32PTR)hwnd
@@ -1244,7 +1267,16 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         NSWindowCollectionBehavior behavior;
 
         self.disabled = state->disabled;
-        self.noActivate = state->no_activate;
+
+        if (self.noActivate != state->no_activate)
+        {
+            self.noActivate = state->no_activate;
+
+            /* CX HACK 16565 */
+            /* Don't allow no_activate windows from the Steam helper to activate the app when clicked. */
+            NSString *bundleName = [[NSBundle mainBundle] objectForInfoDictionaryKey:(NSString*)kCFBundleNameKey];
+            self.preventAppActivation = self.noActivate && [bundleName isEqualToString:@"steamwebhelper"];
+        }
 
         if (self.floating != state->floating)
         {
@@ -1778,7 +1810,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
             /* Cocoa may adjust the frame when the window is ordered onto the screen.
                Generate a frame-changed event just in case.  The back end will ignore
                it if nothing actually changed. */
-            [self windowDidResize:nil];
+            [self windowDidResize:nil skipSizeMove:TRUE];
 
             if (![self isExcludedFromWindowsMenu])
                 [NSApp addWindowsItem:self title:[self title] filename:NO];
@@ -1961,7 +1993,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
                 {
                     /* In case Cocoa adjusted the frame we tried to set, generate a frame-changed
                        event.  The back end will ignore it if nothing actually changed. */
-                    [self windowDidResize:nil];
+                    [self windowDidResize:nil skipSizeMove:TRUE];
                 }
             }
         }
@@ -2121,7 +2153,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         macdrv_release_event(event);
     }
 
-    - (void) postWindowFrameChanged:(NSRect)frame fullscreen:(BOOL)isFullscreen resizing:(BOOL)resizing
+    - (void) postWindowFrameChanged:(NSRect)frame fullscreen:(BOOL)isFullscreen resizing:(BOOL)resizing skipSizeMove:(BOOL)skipSizeMove
     {
         macdrv_event* event;
         NSUInteger style = self.styleMask;
@@ -2141,6 +2173,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         event->window_frame_changed.frame = cgrect_win_from_mac(NSRectToCGRect(frame));
         event->window_frame_changed.fullscreen = isFullscreen;
         event->window_frame_changed.in_resize = resizing;
+        event->window_frame_changed.skip_size_move_loop = skipSizeMove;
         [queue postEvent:event];
         macdrv_release_event(event);
     }
@@ -2349,7 +2382,11 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         if (quicken_signin_hack) return YES; /* CrossOver Hack #15388 */
         if (causing_becomeKeyWindow == self) return YES;
         if (self.disabled || self.noActivate) return NO;
-        return [self isKeyWindow];
+        if ([self isKeyWindow]) return YES;
+
+        // If a window's collectionBehavior says it participates in cycling,
+        // it must return YES from this method to actually be eligible.
+        return ![self isExcludedFromWindowsMenu];
     }
 
     - (BOOL) canBecomeMainWindow
@@ -2984,7 +3021,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         macdrv_release_event(event);
     }
 
-    - (void)windowDidResize:(NSNotification *)notification
+    - (void)windowDidResize:(NSNotification *)notification skipSizeMove:(BOOL)skipSizeMove
     {
         NSRect frame = self.wine_fractionalFrame;
 
@@ -3007,10 +3044,16 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 
         [self postWindowFrameChanged:frame
                           fullscreen:([self styleMask] & NSWindowStyleMaskFullScreen) != 0
-                            resizing:[self inLiveResize]];
+                            resizing:[self inLiveResize]
+                        skipSizeMove:skipSizeMove];
 
         [[[self contentView] inputContext] invalidateCharacterCoordinates];
         [self updateFullscreen];
+    }
+
+    - (void)windowDidResize:(NSNotification *)notification
+    {
+        [self windowDidResize:notification skipSizeMove:FALSE];
     }
 
     - (BOOL)windowShouldClose:(id)sender
@@ -3069,7 +3112,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     - (void) windowWillExitFullScreen:(NSNotification*)notification
     {
         exitingFullScreen = TRUE;
-        [self postWindowFrameChanged:nonFullscreenFrame fullscreen:FALSE resizing:FALSE];
+        [self postWindowFrameChanged:nonFullscreenFrame fullscreen:FALSE resizing:FALSE skipSizeMove:FALSE];
     }
 
     - (void)windowWillMiniaturize:(NSNotification *)notification
@@ -4028,5 +4071,16 @@ void macdrv_clear_ime_text(void)
         }
         if (window)
             [[window contentView] clearMarkedText];
+    });
+}
+
+/* CX HACK 16565 */
+void macdrv_force_popup_order_front(macdrv_window w)
+{
+    WineWindow* window = (WineWindow*)w;
+
+    OnMainThread(^{
+        window.level = NSPopUpMenuWindowLevel;
+        [window orderFrontRegardless];
     });
 }

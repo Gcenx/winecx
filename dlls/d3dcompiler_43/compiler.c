@@ -475,18 +475,101 @@ int wpp_parse( const char *input, FILE *output )
     }
     /* Clean if_stack, it could remain dirty on errors */
     while (pp_get_if_depth()) pp_pop_if();
+    ppy_lex_destroy();
     del_special_defines();
     del_cmdline_defines();
     pp_pop_define_state();
     return ret;
 }
 
+static HRESULT WINAPI d3dcompiler_include_from_file_open(ID3DInclude *iface, D3D_INCLUDE_TYPE include_type,
+        const char *filename, const void *parent_data, const void **data, UINT *bytes)
+{
+    char *fullpath, *buffer = NULL, current_dir[MAX_PATH + 1];
+    const char *initial_dir;
+    SIZE_T size;
+    HANDLE file;
+    ULONG read;
+    DWORD len;
+
+    if ((initial_dir = strrchr(initial_filename, '\\')))
+    {
+        len = initial_dir - initial_filename + 1;
+        initial_dir = initial_filename;
+    }
+    else
+    {
+        len = GetCurrentDirectoryA(MAX_PATH, current_dir);
+        current_dir[len] = '\\';
+        len++;
+        initial_dir = current_dir;
+    }
+    fullpath = heap_alloc(len + strlen(filename) + 1);
+    if (!fullpath)
+        return E_OUTOFMEMORY;
+    memcpy(fullpath, initial_dir, len);
+    strcpy(fullpath + len, filename);
+
+    file = CreateFileA(fullpath, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+    if (file == INVALID_HANDLE_VALUE)
+        goto error;
+
+    TRACE("Include file found at %s.\n", debugstr_a(fullpath));
+
+    size = GetFileSize(file, NULL);
+    if (size == INVALID_FILE_SIZE)
+        goto error;
+    buffer = heap_alloc(size);
+    if (!buffer)
+        goto error;
+    if (!ReadFile(file, buffer, size, &read, NULL) || read != size)
+        goto error;
+
+    *bytes = size;
+    *data = buffer;
+
+    heap_free(fullpath);
+    CloseHandle(file);
+    return S_OK;
+
+error:
+    heap_free(fullpath);
+    heap_free(buffer);
+    CloseHandle(file);
+    WARN("Returning E_FAIL.\n");
+    return E_FAIL;
+}
+
+static HRESULT WINAPI d3dcompiler_include_from_file_close(ID3DInclude *iface, const void *data)
+{
+    heap_free((void *)data);
+    return S_OK;
+}
+
+const struct ID3DIncludeVtbl d3dcompiler_include_from_file_vtbl =
+{
+    d3dcompiler_include_from_file_open,
+    d3dcompiler_include_from_file_close
+};
+
+struct d3dcompiler_include_from_file
+{
+    ID3DInclude ID3DInclude_iface;
+};
+
 static HRESULT preprocess_shader(const void *data, SIZE_T data_size, const char *filename,
         const D3D_SHADER_MACRO *defines, ID3DInclude *include, ID3DBlob **error_messages)
 {
+    struct d3dcompiler_include_from_file include_from_file;
     int ret;
     HRESULT hr = S_OK;
     const D3D_SHADER_MACRO *def = defines;
+
+    if (include == D3D_COMPILE_STANDARD_FILE_INCLUDE)
+    {
+        include_from_file.ID3DInclude_iface.lpVtbl = &d3dcompiler_include_from_file_vtbl;
+        include = &include_from_file.ID3DInclude_iface;
+    }
 
     if (def != NULL)
     {
@@ -654,263 +737,12 @@ HRESULT WINAPI D3DAssemble(const void *data, SIZE_T datasize, const char *filena
     return hr;
 }
 
-struct target_info {
-    const char *name;
-    enum shader_type type;
-    DWORD sm_major;
-    DWORD sm_minor;
-    DWORD level_major;
-    DWORD level_minor;
-    BOOL sw;
-    BOOL support;
-};
-
-/* Must be kept sorted for binary search */
-static const struct target_info targets_info[] = {
-    { "cs_4_0",            ST_UNKNOWN, 4, 0, 0, 0, FALSE, FALSE },
-    { "cs_4_1",            ST_UNKNOWN, 4, 1, 0, 0, FALSE, FALSE },
-    { "cs_5_0",            ST_UNKNOWN, 5, 0, 0, 0, FALSE, FALSE },
-    { "ds_5_0",            ST_UNKNOWN, 5, 0, 0, 0, FALSE, FALSE },
-    { "fx_2_0",            ST_UNKNOWN, 2, 0, 0, 0, FALSE, FALSE },
-    { "fx_4_0",            ST_UNKNOWN, 4, 0, 0, 0, FALSE, FALSE },
-    { "fx_4_1",            ST_UNKNOWN, 4, 1, 0, 0, FALSE, FALSE },
-    { "fx_5_0",            ST_UNKNOWN, 5, 0, 0, 0, FALSE, FALSE },
-    { "gs_4_0",            ST_UNKNOWN, 4, 0, 0, 0, FALSE, FALSE },
-    { "gs_4_1",            ST_UNKNOWN, 4, 1, 0, 0, FALSE, FALSE },
-    { "gs_5_0",            ST_UNKNOWN, 5, 0, 0, 0, FALSE, FALSE },
-    { "hs_5_0",            ST_UNKNOWN, 5, 0, 0, 0, FALSE, FALSE },
-    { "ps.1.0",            ST_PIXEL,   1, 0, 0, 0, FALSE, TRUE  },
-    { "ps.1.1",            ST_PIXEL,   1, 1, 0, 0, FALSE, FALSE },
-    { "ps.1.2",            ST_PIXEL,   1, 2, 0, 0, FALSE, FALSE },
-    { "ps.1.3",            ST_PIXEL,   1, 3, 0, 0, FALSE, FALSE },
-    { "ps.1.4",            ST_PIXEL,   1, 4, 0, 0, FALSE, FALSE },
-    { "ps.2.0",            ST_PIXEL,   2, 0, 0, 0, FALSE, TRUE  },
-    { "ps.2.a",            ST_PIXEL,   2, 1, 0, 0, FALSE, FALSE },
-    { "ps.2.b",            ST_PIXEL,   2, 2, 0, 0, FALSE, FALSE },
-    { "ps.2.sw",           ST_PIXEL,   2, 0, 0, 0, TRUE,  FALSE },
-    { "ps.3.0",            ST_PIXEL,   3, 0, 0, 0, FALSE, TRUE  },
-    { "ps_1_0",            ST_PIXEL,   1, 0, 0, 0, FALSE, TRUE  },
-    { "ps_1_1",            ST_PIXEL,   1, 1, 0, 0, FALSE, FALSE },
-    { "ps_1_2",            ST_PIXEL,   1, 2, 0, 0, FALSE, FALSE },
-    { "ps_1_3",            ST_PIXEL,   1, 3, 0, 0, FALSE, FALSE },
-    { "ps_1_4",            ST_PIXEL,   1, 4, 0, 0, FALSE, FALSE },
-    { "ps_2_0",            ST_PIXEL,   2, 0, 0, 0, FALSE, TRUE  },
-    { "ps_2_a",            ST_PIXEL,   2, 1, 0, 0, FALSE, FALSE },
-    { "ps_2_b",            ST_PIXEL,   2, 2, 0, 0, FALSE, FALSE },
-    { "ps_2_sw",           ST_PIXEL,   2, 0, 0, 0, TRUE,  FALSE },
-    { "ps_3_0",            ST_PIXEL,   3, 0, 0, 0, FALSE, TRUE  },
-    { "ps_3_sw",           ST_PIXEL,   3, 0, 0, 0, TRUE,  FALSE },
-    { "ps_4_0",            ST_PIXEL,   4, 0, 0, 0, FALSE, TRUE  },
-    { "ps_4_0_level_9_0",  ST_PIXEL,   4, 0, 9, 0, FALSE, FALSE },
-    { "ps_4_0_level_9_1",  ST_PIXEL,   4, 0, 9, 1, FALSE, FALSE },
-    { "ps_4_0_level_9_3",  ST_PIXEL,   4, 0, 9, 3, FALSE, FALSE },
-    { "ps_4_1",            ST_PIXEL,   4, 1, 0, 0, FALSE, TRUE  },
-    { "ps_5_0",            ST_PIXEL,   5, 0, 0, 0, FALSE, TRUE  },
-    { "tx_1_0",            ST_UNKNOWN, 1, 0, 0, 0, FALSE, FALSE },
-    { "vs.1.0",            ST_VERTEX,  1, 0, 0, 0, FALSE, TRUE  },
-    { "vs.1.1",            ST_VERTEX,  1, 1, 0, 0, FALSE, TRUE  },
-    { "vs.2.0",            ST_VERTEX,  2, 0, 0, 0, FALSE, TRUE  },
-    { "vs.2.a",            ST_VERTEX,  2, 1, 0, 0, FALSE, FALSE },
-    { "vs.2.sw",           ST_VERTEX,  2, 0, 0, 0, TRUE,  FALSE },
-    { "vs.3.0",            ST_VERTEX,  3, 0, 0, 0, FALSE, TRUE  },
-    { "vs.3.sw",           ST_VERTEX,  3, 0, 0, 0, TRUE,  FALSE },
-    { "vs_1_0",            ST_VERTEX,  1, 0, 0, 0, FALSE, TRUE  },
-    { "vs_1_1",            ST_VERTEX,  1, 1, 0, 0, FALSE, TRUE  },
-    { "vs_2_0",            ST_VERTEX,  2, 0, 0, 0, FALSE, TRUE  },
-    { "vs_2_a",            ST_VERTEX,  2, 1, 0, 0, FALSE, FALSE },
-    { "vs_2_sw",           ST_VERTEX,  2, 0, 0, 0, TRUE,  FALSE },
-    { "vs_3_0",            ST_VERTEX,  3, 0, 0, 0, FALSE, TRUE  },
-    { "vs_3_sw",           ST_VERTEX,  3, 0, 0, 0, TRUE,  FALSE },
-    { "vs_4_0",            ST_VERTEX,  4, 0, 0, 0, FALSE, TRUE  },
-    { "vs_4_0_level_9_0",  ST_VERTEX,  4, 0, 9, 0, FALSE, FALSE },
-    { "vs_4_0_level_9_1",  ST_VERTEX,  4, 0, 9, 1, FALSE, FALSE },
-    { "vs_4_0_level_9_3",  ST_VERTEX,  4, 0, 9, 3, FALSE, FALSE },
-    { "vs_4_1",            ST_VERTEX,  4, 1, 0, 0, FALSE, TRUE  },
-    { "vs_5_0",            ST_VERTEX,  5, 0, 0, 0, FALSE, TRUE  },
-};
-
-static const struct target_info * get_target_info(const char *target)
-{
-    LONG min = 0;
-    LONG max = ARRAY_SIZE(targets_info) - 1;
-    LONG cur;
-    int res;
-
-    while (min <= max)
-    {
-        cur = (min + max) / 2;
-        res = strcmp(target, targets_info[cur].name);
-        if (res < 0)
-            max = cur - 1;
-        else if (res > 0)
-            min = cur + 1;
-        else
-            return &targets_info[cur];
-    }
-
-    return NULL;
-}
-
-static HRESULT compile_shader(const char *preproc_shader, const char *target, const char *entrypoint,
-        ID3DBlob **shader, ID3DBlob **error_messages)
-{
-    DWORD size, major, minor;
-    char *messages = NULL;
-    HRESULT hr;
-    ID3DBlob *buffer;
-    char *pos;
-    enum shader_type shader_type;
-    const struct target_info *info;
-
-    TRACE("Preprocessed shader source: %s\n", debugstr_a(preproc_shader));
-
-    TRACE("Checking compilation target %s\n", debugstr_a(target));
-    info = get_target_info(target);
-    if (!info)
-    {
-        FIXME("Unknown compilation target %s\n", debugstr_a(target));
-        return D3DERR_INVALIDCALL;
-    }
-    else
-    {
-        if (!info->support)
-        {
-            FIXME("Compilation target %s not yet supported\n", debugstr_a(target));
-            return D3DERR_INVALIDCALL;
-        }
-        else
-        {
-            shader_type = info->type;
-            major = info->sm_major;
-            minor = info->sm_minor;
-        }
-    }
-
-    hr = parse_hlsl_shader(preproc_shader, shader_type, major, minor, entrypoint, shader, &messages);
-
-    if (messages)
-    {
-        TRACE("Compiler messages:\n");
-        TRACE("%s\n", debugstr_a(messages));
-
-        TRACE("Shader source:\n");
-        TRACE("%s\n", debugstr_a(preproc_shader));
-
-        if (error_messages)
-        {
-            const char *preproc_messages = *error_messages ? ID3D10Blob_GetBufferPointer(*error_messages) : NULL;
-            HRESULT blob_hr;
-
-            size = strlen(messages) + (preproc_messages ? strlen(preproc_messages) : 0) + 1;
-            if (FAILED(blob_hr = D3DCreateBlob(size, &buffer)))
-            {
-                HeapFree(GetProcessHeap(), 0, messages);
-                if (shader && *shader)
-                {
-                    ID3D10Blob_Release(*shader);
-                    *shader = NULL;
-                }
-                return blob_hr;
-            }
-            pos = ID3D10Blob_GetBufferPointer(buffer);
-            if (preproc_messages)
-            {
-                memcpy(pos, preproc_messages, strlen(preproc_messages) + 1);
-                pos += strlen(preproc_messages);
-            }
-            memcpy(pos, messages, strlen(messages) + 1);
-
-            if (*error_messages) ID3D10Blob_Release(*error_messages);
-            *error_messages = buffer;
-        }
-        HeapFree(GetProcessHeap(), 0, messages);
-    }
-
-    return hr;
-}
-
-static HRESULT WINAPI d3dcompiler_include_from_file_open(ID3DInclude *iface, D3D_INCLUDE_TYPE include_type,
-        const char *filename, const void *parent_data, const void **data, UINT *bytes)
-{
-    char *fullpath, *buffer = NULL, current_dir[MAX_PATH + 1];
-    const char *initial_dir;
-    SIZE_T size;
-    HANDLE file;
-    ULONG read;
-    DWORD len;
-
-    if ((initial_dir = strrchr(initial_filename, '\\')))
-    {
-        len = initial_dir - initial_filename + 1;
-        initial_dir = initial_filename;
-    }
-    else
-    {
-        len = GetCurrentDirectoryA(MAX_PATH, current_dir);
-        current_dir[len] = '\\';
-        len++;
-        initial_dir = current_dir;
-    }
-    fullpath = heap_alloc(len + strlen(filename) + 1);
-    if (!fullpath)
-        return E_OUTOFMEMORY;
-    memcpy(fullpath, initial_dir, len);
-    strcpy(fullpath + len, filename);
-
-    file = CreateFileA(fullpath, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
-    if (file == INVALID_HANDLE_VALUE)
-        goto error;
-
-    TRACE("Include file found at %s.\n", debugstr_a(fullpath));
-
-    size = GetFileSize(file, NULL);
-    if (size == INVALID_FILE_SIZE)
-        goto error;
-    buffer = heap_alloc(size);
-    if (!buffer)
-        goto error;
-    if (!ReadFile(file, buffer, size, &read, NULL) || read != size)
-        goto error;
-
-    *bytes = size;
-    *data = buffer;
-
-    heap_free(fullpath);
-    CloseHandle(file);
-    return S_OK;
-
-error:
-    heap_free(fullpath);
-    heap_free(buffer);
-    CloseHandle(file);
-    WARN("Returning E_FAIL.\n");
-    return E_FAIL;
-}
-
-static HRESULT WINAPI d3dcompiler_include_from_file_close(ID3DInclude *iface, const void *data)
-{
-    heap_free((void *)data);
-    return S_OK;
-}
-
-const struct ID3DIncludeVtbl d3dcompiler_include_from_file_vtbl =
-{
-    d3dcompiler_include_from_file_open,
-    d3dcompiler_include_from_file_close
-};
-
-struct d3dcompiler_include_from_file
-{
-    ID3DInclude ID3DInclude_iface;
-};
-
 HRESULT WINAPI D3DCompile2(const void *data, SIZE_T data_size, const char *filename,
         const D3D_SHADER_MACRO *defines, ID3DInclude *include, const char *entrypoint,
         const char *target, UINT sflags, UINT eflags, UINT secondary_flags,
         const void *secondary_data, SIZE_T secondary_data_size, ID3DBlob **shader,
         ID3DBlob **error_messages)
 {
-    struct d3dcompiler_include_from_file include_from_file;
     HRESULT hr;
 
     TRACE("data %p, data_size %lu, filename %s, defines %p, include %p, entrypoint %s, "
@@ -926,17 +758,14 @@ HRESULT WINAPI D3DCompile2(const void *data, SIZE_T data_size, const char *filen
     if (shader) *shader = NULL;
     if (error_messages) *error_messages = NULL;
 
-    if (include == D3D_COMPILE_STANDARD_FILE_INCLUDE)
-    {
-        include_from_file.ID3DInclude_iface.lpVtbl = &d3dcompiler_include_from_file_vtbl;
-        include = &include_from_file.ID3DInclude_iface;
-    }
-
     EnterCriticalSection(&wpp_mutex);
 
     hr = preprocess_shader(data, data_size, filename, defines, include, error_messages);
     if (SUCCEEDED(hr))
-        hr = compile_shader(wpp_output, target, entrypoint, shader, error_messages);
+    {
+        FIXME("HLSL shader compilation is not yet implemented.\n");
+        hr = E_NOTIMPL;
+    }
 
     HeapFree(GetProcessHeap(), 0, wpp_output);
     LeaveCriticalSection(&wpp_mutex);

@@ -96,6 +96,7 @@ SOURCES = \
 	d2d1.idl \
 	d2d1_1.idl \
 	d2d1_2.idl \
+	d2d1effects.idl \
 	d2dbasetypes.h \
 	d2derr.h \
 	d3d.h \
@@ -137,8 +138,9 @@ SOURCES = \
 	d3dvec.inl \
 	d3dx10.h \
 	d3dx10async.h \
-	d3dx10core.idl \
+	d3dx10core.h \
 	d3dx10math.h \
+	d3dx10mesh.h \
 	d3dx10tex.h \
 	d3dx11.h \
 	d3dx11async.h \

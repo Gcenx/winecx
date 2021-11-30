@@ -321,6 +321,7 @@ struct macdrv_monitor
     CGRect rc_work;
     /* StateFlags in DISPLAY_DEVICE struct */
     uint32_t state_flags;
+    unsigned int serial_no;
 };
 
 extern int macdrv_get_displays(struct macdrv_display** displays, int* count) DECLSPEC_HIDDEN;
@@ -470,6 +471,7 @@ typedef struct macdrv_event {
             CGRect  frame;
             int     fullscreen;
             int     in_resize;
+            int     skip_size_move_loop;
         }                                           window_frame_changed;
         struct {
             unsigned long   serial;
@@ -660,6 +662,9 @@ extern void macdrv_set_status_item_image(macdrv_status_item s, CGImageRef cgimag
 extern void macdrv_set_status_item_tooltip(macdrv_status_item s, CFStringRef cftip) DECLSPEC_HIDDEN;
 
 extern void macdrv_clear_ime_text(void) DECLSPEC_HIDDEN;
+
+/* CX HACK 16565 */
+extern void macdrv_force_popup_order_front(macdrv_window w) DECLSPEC_HIDDEN;
 
 /* CrossOver Hack #15388 */
 extern int quicken_signin_hack;

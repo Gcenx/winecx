@@ -179,19 +179,6 @@ static const struct wined3d_format_channels formats[] =
     {WINED3DFMT_B8G8R8X8_TYPELESS,          8,  8,  8,  0,  16,  8,  0,  0,    4,   0,     0},
 };
 
-enum wined3d_channel_type
-{
-    WINED3D_CHANNEL_TYPE_NONE,
-    WINED3D_CHANNEL_TYPE_UNORM,
-    WINED3D_CHANNEL_TYPE_SNORM,
-    WINED3D_CHANNEL_TYPE_UINT,
-    WINED3D_CHANNEL_TYPE_SINT,
-    WINED3D_CHANNEL_TYPE_FLOAT,
-    WINED3D_CHANNEL_TYPE_DEPTH,
-    WINED3D_CHANNEL_TYPE_STENCIL,
-    WINED3D_CHANNEL_TYPE_UNUSED,
-};
-
 struct wined3d_typed_format_info
 {
     enum wined3d_format_id id;
@@ -3195,7 +3182,9 @@ static void query_internal_format(struct wined3d_adapter *adapter,
     query_view_class(format);
 
     if (format->internal && format->f.flags[WINED3D_GL_RES_TYPE_RB]
-            & (WINED3DFMT_FLAG_RENDERTARGET | WINED3DFMT_FLAG_DEPTH_STENCIL))
+            & (WINED3DFMT_FLAG_RENDERTARGET | WINED3DFMT_FLAG_DEPTH_STENCIL)
+            && (gl_info->supported[ARB_FRAMEBUFFER_OBJECT] || gl_info->supported[EXT_FRAMEBUFFER_MULTISAMPLE])
+            && wined3d_settings.offscreen_rendering_mode == ORM_FBO)
     {
         if (gl_info->supported[ARB_INTERNALFORMAT_QUERY])
         {
@@ -4437,6 +4426,22 @@ const struct wined3d_format *wined3d_get_format(const struct wined3d_adapter *ad
     }
 
     return format;
+}
+
+enum wined3d_format_id wined3d_get_typed_format_id(const struct wined3d_adapter *adapter,
+        const struct wined3d_format *format, enum wined3d_channel_type channel_type)
+{
+    const struct wined3d_typed_format_info *info;
+    uint32_t i;
+
+    for (i = 0; i < ARRAY_SIZE(typed_formats); ++i)
+    {
+        info = &typed_formats[i];
+        if (info->typeless_id == format->typeless_id && map_channel_type(info->channels[0]) == channel_type)
+            return info->id;
+    }
+
+    return WINED3DFMT_UNKNOWN;
 }
 
 BOOL wined3d_format_is_depth_view(enum wined3d_format_id resource_format_id,
@@ -6185,7 +6190,7 @@ void multiply_matrix(struct wined3d_matrix *dst, const struct wined3d_matrix *sr
     *dst = tmp;
 }
 
-void gen_ffp_frag_op(const struct wined3d_context *context, const struct wined3d_state *state,
+void wined3d_ffp_get_fs_settings(const struct wined3d_context *context, const struct wined3d_state *state,
         struct ffp_frag_settings *settings, BOOL ignore_textype)
 {
 #define ARG1 0x01

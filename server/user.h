@@ -89,6 +89,8 @@ struct monitor
     rectangle_t          work_rect;        /* monitor work area rectangle */
     WCHAR                *adapter_name;    /* adapter name */
     data_size_t          adapter_name_len; /* adapter name length */
+    unsigned int         serial_no;        /* monitor serial number */
+    int                  removed;          /* monitor is removed */
 };
 
 /* user handles functions */

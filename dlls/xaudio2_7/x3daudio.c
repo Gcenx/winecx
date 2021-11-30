@@ -88,6 +88,8 @@ void CDECL X3DAudioCalculate(const X3DAUDIO_HANDLE handle,
 #endif
 {
     TRACE("%p, %p, %p, 0x%x, %p\n", handle, listener, emitter, flags, out);
+
+    #ifndef __i386_on_x86_64__
     F3DAudioCalculate(
         handle,
         (const F3DAUDIO_LISTENER*) listener,
@@ -95,5 +97,99 @@ void CDECL X3DAudioCalculate(const X3DAUDIO_HANDLE handle,
         flags,
         (F3DAUDIO_DSP_SETTINGS*) out
     );
+    #else
+    {
+        /* Since there are pointers in most of these structs, we need to
+         * marshal them to match the FAudio struct layouts, which are
+         * 64-bit. F3DAUDIO_CONE remains the same between the two. */
+
+        F3DAUDIO_LISTENER fa_listener;
+        F3DAUDIO_EMITTER fa_emitter;
+        F3DAUDIO_DSP_SETTINGS fa_out;
+        F3DAUDIO_DISTANCE_CURVE fa_VolumeCurve, fa_LFECurve,
+            fa_LPFDirectCurve, fa_LPFReverbCurve, fa_ReverbCurve;
+
+        #define MARSHAL_EMITTER_CURVE(local_curve, field_name) \
+            do { \
+                if (emitter->field_name) { \
+                    local_curve.PointCount = emitter->field_name->PointCount; \
+                    local_curve.pPoints = ADDRSPACECAST(F3DAUDIO_DISTANCE_CURVE_POINT *, emitter->field_name->pPoints); \
+                    fa_emitter.field_name = &local_curve; \
+                } \
+                else { \
+                    fa_emitter.field_name = NULL; \
+                } \
+            } while (0)
+
+        #define MARSHAL_VECTOR(dest, src) \
+            do { \
+                dest.x = src.x; \
+                dest.y = src.y; \
+                dest.z = src.z; \
+            } while (0)
+
+        MARSHAL_VECTOR(fa_listener.OrientFront, listener->OrientFront);
+        MARSHAL_VECTOR(fa_listener.OrientTop, listener->OrientTop);
+        MARSHAL_VECTOR(fa_listener.Position, listener->Position);
+        MARSHAL_VECTOR(fa_listener.Velocity, listener->Velocity);
+        fa_listener.pCone = ADDRSPACECAST(F3DAUDIO_CONE *, listener->pCone);
+
+        MARSHAL_VECTOR(fa_emitter.OrientFront, emitter->OrientFront);
+        MARSHAL_VECTOR(fa_emitter.OrientTop, emitter->OrientTop);
+        MARSHAL_VECTOR(fa_emitter.Position, emitter->Position);
+        MARSHAL_VECTOR(fa_emitter.Velocity, emitter->Velocity);
+        fa_emitter.InnerRadius = emitter->InnerRadius;
+        fa_emitter.InnerRadiusAngle = emitter->InnerRadiusAngle;
+        fa_emitter.ChannelCount = emitter->ChannelCount;
+        fa_emitter.ChannelRadius = emitter->ChannelRadius;
+        fa_emitter.CurveDistanceScaler = emitter->CurveDistanceScalar;
+        fa_emitter.DopplerScaler = emitter->DopplerScalar;
+        fa_emitter.pCone = ADDRSPACECAST(F3DAUDIO_CONE *, emitter->pCone);
+        fa_emitter.pChannelAzimuths = ADDRSPACECAST(float *, emitter->pChannelAzimuths);
+        MARSHAL_EMITTER_CURVE(fa_VolumeCurve, pVolumeCurve);
+        MARSHAL_EMITTER_CURVE(fa_LFECurve, pLFECurve);
+        MARSHAL_EMITTER_CURVE(fa_LPFDirectCurve, pLPFDirectCurve);
+        MARSHAL_EMITTER_CURVE(fa_LPFReverbCurve, pLPFReverbCurve);
+        MARSHAL_EMITTER_CURVE(fa_ReverbCurve, pReverbCurve);
+
+        fa_out.SrcChannelCount = out->SrcChannelCount;
+        fa_out.DstChannelCount = out->DstChannelCount;
+        fa_out.LPFDirectCoefficient = out->LPFDirectCoefficient;
+        fa_out.LPFReverbCoefficient = out->LPFReverbCoefficient;
+        fa_out.ReverbLevel = out->ReverbLevel;
+        fa_out.DopplerFactor = out->DopplerFactor;
+        fa_out.EmitterToListenerAngle = out->EmitterToListenerAngle;
+        fa_out.EmitterToListenerDistance = out->EmitterToListenerDistance;
+        fa_out.EmitterVelocityComponent = out->EmitterVelocityComponent;
+        fa_out.ListenerVelocityComponent = out->ListenerVelocityComponent;
+        fa_out.pMatrixCoefficients = ADDRSPACECAST(float *, out->pMatrixCoefficients);
+        fa_out.pDelayTimes = ADDRSPACECAST(float *, out->pDelayTimes);
+
+        #undef MARSHAL_EMITTER_CURVE
+        #undef MARSHAL_VECTOR
+
+        F3DAudioCalculate(
+            handle,
+            &fa_listener,
+            &fa_emitter,
+            flags,
+            &fa_out
+        );
+
+        out->SrcChannelCount = fa_out.SrcChannelCount;
+        out->DstChannelCount = fa_out.DstChannelCount;
+        out->LPFDirectCoefficient = fa_out.LPFDirectCoefficient;
+        out->LPFReverbCoefficient = fa_out.LPFReverbCoefficient;
+        out->ReverbLevel = fa_out.ReverbLevel;
+        out->DopplerFactor = fa_out.DopplerFactor;
+        out->EmitterToListenerAngle = fa_out.EmitterToListenerAngle;
+        out->EmitterToListenerDistance = fa_out.EmitterToListenerDistance;
+        out->EmitterVelocityComponent = fa_out.EmitterVelocityComponent;
+        out->ListenerVelocityComponent = fa_out.ListenerVelocityComponent;
+        /* No need to copy back pMatrixCoefficients and pDelayTimes;
+         * F3DAudioCalculate may write to those arrays, but it won't
+         * change the pointers themselves. */
+    }
+    #endif
 }
 #endif /* XAUDIO2_VER >= 8 || defined X3DAUDIO1_VER */

@@ -3766,8 +3766,8 @@ struct create_monitor_request
     struct request_header __header;
     rectangle_t   monitor_rect;
     rectangle_t   work_rect;
+    unsigned int  serial_no;
     /* VARARG(adapter,unicode_str); */
-    char __pad_44[4];
 };
 struct create_monitor_reply
 {
@@ -6428,7 +6428,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 655
+#define SERVER_PROTOCOL_VERSION 656
 
 /* ### protocol_version end ### */
 

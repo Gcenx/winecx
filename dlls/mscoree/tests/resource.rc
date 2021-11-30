@@ -28,3 +28,12 @@ comtest_exe.manifest RCDATA comtest_exe.manifest
 
 /* @makedep: comtest_dll.manifest */
 comtest_dll.manifest RCDATA comtest_dll.manifest
+
+/* @makedep: loadpaths.exe.cs */
+loadpaths.exe.cs RCDATA loadpaths.exe.cs
+
+/* @makedep: loadpaths.dll.cs */
+loadpaths.dll.cs RCDATA loadpaths.dll.cs
+
+/* @makedep: loadpaths.exe.config */
+loadpaths.exe.config RCDATA loadpaths.exe.config

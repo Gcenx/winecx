@@ -3301,6 +3301,7 @@ static void dump_create_monitor_request( const struct create_monitor_request *re
 {
     dump_rectangle( " monitor_rect=", &req->monitor_rect );
     dump_rectangle( ", work_rect=", &req->work_rect );
+    fprintf( stderr, ", serial_no=%08x", req->serial_no );
     dump_varargs_unicode_str( ", adapter=", cur_size );
 }
 

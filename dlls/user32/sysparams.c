@@ -2475,6 +2475,47 @@ BOOL WINAPI SystemParametersInfoA( UINT uiAction, UINT uiParam,
     return ret;
 }
 
+/* CX HACK 19134 */
+static BOOL is_star_trek_away_team(void)
+{
+    WCHAR name[MAX_PATH], *module_exe;
+
+    if (!GetModuleFileNameW(NULL, name, sizeof(name)))
+        return FALSE;
+
+    module_exe = wcsrchr(name, '\\');
+    module_exe = module_exe ? module_exe + 1 : name;
+
+    return !_wcsicmp(module_exe, L"Star Trek.exe");
+}
+
+static BOOL is_mac_os(void)
+{
+    const char *sysname;
+    void (CDECL *my_wine_get_host_version)(const char **sysname, const char **release);
+
+    my_wine_get_host_version = (void *)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "wine_get_host_version");
+    if (!my_wine_get_host_version)
+        return FALSE;
+
+    my_wine_get_host_version(&sysname, NULL);
+
+    return !strcmp(sysname, "Darwin");
+}
+
+static BOOL needs_mouse_hack(void)
+{
+    static BOOL needs_hack, did_check = FALSE;
+
+    if (!did_check) {
+        needs_hack = is_mac_os() && is_star_trek_away_team();
+        did_check = TRUE;
+    }
+
+    return needs_hack;
+}
+/* End hack */
+
 
 /***********************************************************************
  *		GetSystemMetrics (USER32.@)
@@ -2536,6 +2577,8 @@ INT WINAPI GetSystemMetrics( INT index )
     case SM_CYKANJIWINDOW:
         return 0;
     case SM_MOUSEPRESENT:
+        /* CX HACK 19134 */
+        if (needs_mouse_hack()) return 0;
         return 1;
     case SM_DEBUG:
         return 0;

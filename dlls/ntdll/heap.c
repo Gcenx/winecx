@@ -104,9 +104,10 @@ C_ASSERT( sizeof(ARENA_LARGE) % LARGE_ALIGNMENT == 0 );
 #define HEAP_MIN_SHRINK_SIZE  (HEAP_MIN_DATA_SIZE+sizeof(ARENA_FREE))
 /* minimum size to start allocating large blocks */
 #define HEAP_MIN_LARGE_BLOCK_SIZE  0x7f000
-/* extra size to add at the end of block for tail checking */
+/* extra size to add at the end of block to mitigate overruns and allow tail checking */
+/* CW HACK 18582: always add a tail to heap allocs to fix Rockstar Launcher installer */
 #define HEAP_TAIL_EXTRA_SIZE(flags) \
-    ((flags & HEAP_TAIL_CHECKING_ENABLED) || RUNNING_ON_VALGRIND ? ALIGNMENT : 0)
+    ALIGNMENT
 
 /* There will be a free list bucket for every arena size up to and including this value */
 #define HEAP_MAX_SMALL_FREE_LIST 0x100

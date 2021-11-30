@@ -62,45 +62,6 @@ BOOL WINAPI D3DX10CheckVersion(UINT d3dsdkvers, UINT d3dxsdkvers)
     return FALSE;
 }
 
-HRESULT WINAPI D3DX10CreateEffectFromFileA(const char *filename, const D3D10_SHADER_MACRO *defines,
-        ID3D10Include *include, const char *profile, UINT hlslflags, UINT fxflags, ID3D10Device *device,
-        ID3D10EffectPool *effectpool, ID3DX10ThreadPump *pump, ID3D10Effect **effect, ID3D10Blob **errors,
-        HRESULT *hresult)
-{
-    FIXME("filename %s, defines %p, include %p, profile %s, hlslflags %#x, fxflags %#x, "
-            "device %p, effectpool %p, pump %p, effect %p, errors %p, hresult %p\n",
-            debugstr_a(filename), defines, include, debugstr_a(profile), hlslflags, fxflags,
-            device, effectpool, pump, effect, errors, hresult);
-
-    return E_NOTIMPL;
-}
-
-HRESULT WINAPI D3DX10CreateEffectFromFileW(const WCHAR *filename, const D3D10_SHADER_MACRO *defines,
-        ID3D10Include *include, const char *profile, UINT hlslflags, UINT fxflags, ID3D10Device *device,
-        ID3D10EffectPool *effectpool, ID3DX10ThreadPump *pump, ID3D10Effect **effect, ID3D10Blob **errors,
-        HRESULT *hresult)
-{
-    FIXME("filename %s, defines %p, include %p, profile %s, hlslflags %#x, fxflags %#x, "
-            "device %p, effectpool %p, pump %p, effect %p, errors %p, hresult %p\n",
-            debugstr_w(filename), defines, include, debugstr_a(profile), hlslflags, fxflags, device,
-            effectpool, pump, effect, errors, hresult);
-
-    return E_NOTIMPL;
-}
-
-HRESULT WINAPI D3DX10CreateEffectFromMemory(const void *data, SIZE_T datasize, const char *filename,
-        const D3D10_SHADER_MACRO *defines, ID3D10Include *include, const char *profile, UINT hlslflags,
-        UINT fxflags, ID3D10Device *device, ID3D10EffectPool *effectpool, ID3DX10ThreadPump *pump,
-        ID3D10Effect **effect, ID3D10Blob **errors, HRESULT *hresult)
-{
-    FIXME("data %p, datasize %lu, filename %s, defines %p, include %p, profile %s, hlslflags %#x, fxflags %#x, "
-            "device %p, effectpool %p, pump %p, effect %p, errors %p, hresult %p\n",
-            data, datasize, debugstr_a(filename), defines, include, debugstr_a(profile), hlslflags, fxflags, device,
-            effectpool, pump, effect, errors, hresult);
-
-    return E_NOTIMPL;
-}
-
 HRESULT WINAPI D3DX10CreateEffectPoolFromMemory(const void *data, SIZE_T datasize, const char *filename,
         const D3D10_SHADER_MACRO *defines, ID3D10Include *include, const char *profile, UINT hlslflags,
         UINT fxflags, ID3D10Device *device, ID3DX10ThreadPump *pump, ID3D10EffectPool **effectpool,
@@ -199,17 +160,6 @@ HRESULT WINAPI D3DX10CreateDeviceAndSwapChain(IDXGIAdapter *adapter, D3D10_DRIVE
 
     return D3D10CreateDeviceAndSwapChain1(adapter, driver_type, swrast, flags, D3D10_FEATURE_LEVEL_10_0,
             D3D10_1_SDK_VERSION, desc, swapchain, (ID3D10Device1 **)device);
-}
-
-HRESULT WINAPI D3DX10CreateTextureFromMemory(ID3D10Device *device, const void *src_data,
-        SIZE_T src_data_size, D3DX10_IMAGE_LOAD_INFO *loadinfo, ID3DX10ThreadPump *pump,
-        ID3D10Resource **texture, HRESULT *hresult)
-{
-    FIXME("device %p, src_data %p, src_data_size %lu, loadinfo %p, pump %p, texture %p, "
-            "hresult %p, stub!\n",
-            device, src_data, src_data_size, loadinfo, pump, texture, hresult);
-
-    return E_NOTIMPL;
 }
 
 HRESULT WINAPI D3DX10FilterTexture(ID3D10Resource *texture, UINT src_level, UINT filter)

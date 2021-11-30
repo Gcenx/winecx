@@ -27,6 +27,7 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
+WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 static const DWORD pixel_states_render[] =
 {
@@ -374,6 +375,7 @@ void state_unbind_resources(struct wined3d_state *state)
     struct wined3d_shader_resource_view *srv;
     struct wined3d_vertex_declaration *decl;
     struct wined3d_blend_state *blend_state;
+    struct wined3d_rendertarget_view *rtv;
     struct wined3d_sampler *sampler;
     struct wined3d_texture *texture;
     struct wined3d_buffer *buffer;
@@ -429,9 +431,9 @@ void state_unbind_resources(struct wined3d_state *state)
 
         for (j = 0; j < MAX_CONSTANT_BUFFERS; ++j)
         {
-            if ((buffer = state->cb[i][j]))
+            if ((buffer = state->cb[i][j].buffer))
             {
-                state->cb[i][j] = NULL;
+                state->cb[i][j].buffer = NULL;
                 wined3d_buffer_decref(buffer);
             }
         }
@@ -472,6 +474,21 @@ void state_unbind_resources(struct wined3d_state *state)
     {
         state->blend_state = NULL;
         wined3d_blend_state_decref(blend_state);
+    }
+
+    for (i = 0; i < ARRAY_SIZE(state->fb.render_targets); ++i)
+    {
+        if ((rtv = state->fb.render_targets[i]))
+        {
+            state->fb.render_targets[i] = NULL;
+            wined3d_rendertarget_view_decref(rtv);
+        }
+    }
+
+    if ((rtv = state->fb.depth_stencil))
+    {
+        state->fb.depth_stencil = NULL;
+        wined3d_rendertarget_view_decref(rtv);
     }
 }
 
@@ -1187,8 +1204,7 @@ HRESULT CDECL wined3d_stateblock_set_vs_consts_f(struct wined3d_stateblock *stat
     TRACE("stateblock %p, start_idx %u, count %u, constants %p.\n",
             stateblock, start_idx, count, constants);
 
-    if (!constants || start_idx >= d3d_info->limits.vs_uniform_count
-            || count > d3d_info->limits.vs_uniform_count - start_idx)
+    if (!constants || !wined3d_bound_range(start_idx, count, d3d_info->limits.vs_uniform_count))
         return WINED3DERR_INVALIDCALL;
 
     memcpy(&stateblock->stateblock_state.vs_consts_f[start_idx], constants, count * sizeof(*constants));
@@ -1256,8 +1272,7 @@ HRESULT CDECL wined3d_stateblock_set_ps_consts_f(struct wined3d_stateblock *stat
     TRACE("stateblock %p, start_idx %u, count %u, constants %p.\n",
             stateblock, start_idx, count, constants);
 
-    if (!constants || start_idx >= d3d_info->limits.ps_uniform_count
-            || count > d3d_info->limits.ps_uniform_count - start_idx)
+    if (!constants || !wined3d_bound_range(start_idx, count, d3d_info->limits.ps_uniform_count))
         return WINED3DERR_INVALIDCALL;
 
     memcpy(&stateblock->stateblock_state.ps_consts_f[start_idx], constants, count * sizeof(*constants));
@@ -1814,8 +1829,8 @@ static void init_default_sampler_states(DWORD states[WINED3D_MAX_COMBINED_SAMPLE
 
 static void state_init_default(struct wined3d_state *state, const struct wined3d_d3d_info *d3d_info)
 {
-    unsigned int i;
     struct wined3d_matrix identity;
+    unsigned int i, j;
 
     TRACE("state %p, d3d_info %p.\n", state, d3d_info);
 
@@ -1852,12 +1867,20 @@ static void state_init_default(struct wined3d_state *state, const struct wined3d
 
     for (i = 0; i < WINED3D_MAX_STREAMS; ++i)
         state->streams[i].frequency = 1;
+
+    for (i = 0; i < WINED3D_SHADER_TYPE_COUNT; ++i)
+    {
+        for (j = 0; j < MAX_CONSTANT_BUFFERS; ++j)
+            state->cb[i][j].size = WINED3D_MAX_CONSTANT_BUFFER_SIZE * 16;
+    }
 }
 
-void state_init(struct wined3d_state *state, const struct wined3d_d3d_info *d3d_info, DWORD flags)
+void state_init(struct wined3d_state *state, const struct wined3d_d3d_info *d3d_info,
+        uint32_t flags, enum wined3d_feature_level feature_level)
 {
     unsigned int i;
 
+    state->feature_level = feature_level;
     state->flags = flags;
 
     for (i = 0; i < LIGHTMAP_SIZE; i++)
@@ -1867,6 +1890,63 @@ void state_init(struct wined3d_state *state, const struct wined3d_d3d_info *d3d_
 
     if (flags & WINED3D_STATE_INIT_DEFAULT)
         state_init_default(state, d3d_info);
+}
+
+static bool wined3d_select_feature_level(const struct wined3d_adapter *adapter,
+        const enum wined3d_feature_level *levels, unsigned int level_count,
+        enum wined3d_feature_level *selected_level)
+{
+    const struct wined3d_d3d_info *d3d_info = &adapter->d3d_info;
+    unsigned int i;
+
+    for (i = 0; i < level_count; ++i)
+    {
+        if (levels[i] && d3d_info->feature_level >= levels[i])
+        {
+            *selected_level = levels[i];
+            return true;
+        }
+    }
+
+    FIXME_(winediag)("None of the requested D3D feature levels is supported on this GPU "
+            "with the current shader backend.\n");
+    return false;
+}
+
+HRESULT CDECL wined3d_state_create(struct wined3d_device *device,
+        const enum wined3d_feature_level *levels, unsigned int level_count, struct wined3d_state **state)
+{
+    enum wined3d_feature_level feature_level;
+    struct wined3d_state *object;
+
+    TRACE("device %p, levels %p, level_count %u, state %p.\n", device, levels, level_count, state);
+
+    if (!wined3d_select_feature_level(device->adapter, levels, level_count, &feature_level))
+        return E_FAIL;
+
+    TRACE("Selected feature level %s.\n", wined3d_debug_feature_level(feature_level));
+
+    if (!(object = heap_alloc_zero(sizeof(*object))))
+        return E_OUTOFMEMORY;
+    state_init(object, &device->adapter->d3d_info, WINED3D_STATE_INIT_DEFAULT, feature_level);
+
+    *state = object;
+    return S_OK;
+}
+
+enum wined3d_feature_level CDECL wined3d_state_get_feature_level(const struct wined3d_state *state)
+{
+    TRACE("state %p.\n", state);
+
+    return state->feature_level;
+}
+
+void CDECL wined3d_state_destroy(struct wined3d_state *state)
+{
+    TRACE("state %p.\n", state);
+
+    state_cleanup(state);
+    heap_free(state);
 }
 
 static void stateblock_state_init_default(struct wined3d_stateblock_state *state,

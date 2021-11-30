@@ -4220,34 +4220,39 @@ static void test_SetParent(void)
     ok(!IsWindow(popup), "popup still exists\n");
 }
 
+typedef struct
+{
+    DWORD cs_style;
+    DWORD cs_exstyle;
+    DWORD style;
+    DWORD exstyle;
+} test_style;
+
 static LRESULT WINAPI StyleCheckProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
-    LPCREATESTRUCTA lpcs;
-    LPSTYLESTRUCT lpss;
+    CREATESTRUCTA *cs;
+    test_style *ts;
+    DWORD style;
 
     switch (msg)
     {
     case WM_NCCREATE:
     case WM_CREATE:
-        lpcs = (LPCREATESTRUCTA)lparam;
-        lpss = lpcs->lpCreateParams;
-        if (lpss)
-        {
-            if ((lpcs->dwExStyle & WS_EX_DLGMODALFRAME) ||
-                ((!(lpcs->dwExStyle & WS_EX_STATICEDGE)) &&
-                    (lpcs->style & (WS_DLGFRAME | WS_THICKFRAME))))
-                ok(lpcs->dwExStyle & WS_EX_WINDOWEDGE, "Window should have WS_EX_WINDOWEDGE style\n");
-            else
-                ok(!(lpcs->dwExStyle & WS_EX_WINDOWEDGE), "Window shouldn't have WS_EX_WINDOWEDGE style\n");
+        cs = (LPCREATESTRUCTA)lparam;
+        ts = cs->lpCreateParams;
 
-            ok((lpss->styleOld & ~WS_EX_WINDOWEDGE) == (lpcs->dwExStyle & ~WS_EX_WINDOWEDGE),
-                "Ex style (0x%08x) should match what the caller passed to CreateWindowEx (0x%08x)\n",
-                lpss->styleOld, lpcs->dwExStyle);
+        ok(ts != NULL, "lpCreateParams not set\n");
+        ok(cs->style == ts->cs_style, "style = 0x%08x, expected 0x%08x\n",
+                cs->style, ts->cs_style);
+        ok(cs->dwExStyle == ts->cs_exstyle, "exstyle = 0x%08x, expected 0x%08x\n",
+                cs->dwExStyle, ts->cs_exstyle);
 
-            ok(lpss->styleNew == lpcs->style,
-                "Style (0x%08x) should match what the caller passed to CreateWindowEx (0x%08x)\n",
-                lpss->styleNew, lpcs->style);
-        }
+        style = GetWindowLongW(hwnd, GWL_STYLE);
+        ok(style == ts->style, "style = 0x%08x, expected 0x%08x\n",
+                style, ts->style);
+        style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+        ok(style == ts->exstyle, "exstyle = 0x%08x, expected 0x%08x\n",
+                style, ts->exstyle);
         break;
     }
     return DefWindowProcA(hwnd, msg, wparam, lparam);
@@ -4279,21 +4284,29 @@ static void check_window_style(DWORD dwStyleIn, DWORD dwExStyleIn, DWORD dwStyle
 {
     DWORD dwActualStyle;
     DWORD dwActualExStyle;
-    STYLESTRUCT ss;
+    test_style ts;
     HWND hwnd;
     HWND hwndParent = NULL;
 
-    ss.styleNew = dwStyleIn;
-    ss.styleOld = dwExStyleIn;
+    ts.cs_style = dwStyleIn;
+    ts.cs_exstyle = dwExStyleIn;
+    if ((dwExStyleIn & WS_EX_DLGMODALFRAME) ||
+            ((!(dwExStyleIn & WS_EX_STATICEDGE)) &&
+             (dwStyleIn & (WS_DLGFRAME | WS_THICKFRAME))))
+        ts.cs_exstyle |= WS_EX_WINDOWEDGE;
+    else
+        ts.cs_exstyle &= ~WS_EX_WINDOWEDGE;
+    ts.style = dwStyleOut;
+    ts.exstyle = dwExStyleOut;
 
     if (dwStyleIn & WS_CHILD)
     {
-        hwndParent = CreateWindowExA(0, (LPCSTR)MAKEINTATOM(atomStyleCheckClass), NULL,
+        hwndParent = CreateWindowExA(0, "static", NULL,
             WS_OVERLAPPEDWINDOW, 0, 0, 0, 0, NULL, NULL, NULL, NULL);
     }
 
     hwnd = CreateWindowExA(dwExStyleIn, (LPCSTR)MAKEINTATOM(atomStyleCheckClass), NULL,
-                    dwStyleIn, 0, 0, 0, 0, hwndParent, NULL, NULL, &ss);
+                    dwStyleIn, 0, 0, 0, 0, hwndParent, NULL, NULL, &ts);
     assert(hwnd);
 
     flush_events( TRUE );
@@ -4331,9 +4344,7 @@ static void check_window_style(DWORD dwStyleIn, DWORD dwExStyleIn, DWORD dwStyle
     else
         dwExStyleOut = dwExStyleIn & ~WS_EX_WINDOWEDGE;
     ok(dwActualStyle == dwStyleOut, "expected style %#x, got %#x\n", dwStyleOut, dwActualStyle);
-    /* FIXME: Remove the condition below once Wine is fixed */
-    todo_wine_if (dwActualExStyle != dwExStyleOut)
-        ok(dwActualExStyle == dwExStyleOut, "expected ex_style %#x, got %#x\n", dwExStyleOut, dwActualExStyle);
+    ok(dwActualExStyle == dwExStyleOut, "expected ex_style %#x, got %#x\n", dwExStyleOut, dwActualExStyle);
 
     DestroyWindow(hwnd);
     if (hwndParent) DestroyWindow(hwndParent);
@@ -4342,48 +4353,61 @@ static void check_window_style(DWORD dwStyleIn, DWORD dwExStyleIn, DWORD dwStyle
 /* tests what window styles the window manager automatically adds */
 static void test_window_styles(void)
 {
+    static const struct
+    {
+        DWORD style_in;
+        DWORD exstyle_in;
+        DWORD style_out;
+        DWORD exstyle_out;
+    } tests[] = {
+        {0, 0, WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_WINDOWEDGE},
+        {WS_DLGFRAME, 0, WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_WINDOWEDGE},
+        {WS_THICKFRAME, 0, WS_THICKFRAME|WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_WINDOWEDGE},
+        {WS_DLGFRAME, WS_EX_STATICEDGE, WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_WINDOWEDGE|WS_EX_STATICEDGE},
+        {WS_THICKFRAME, WS_EX_STATICEDGE, WS_THICKFRAME|WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_WINDOWEDGE|WS_EX_STATICEDGE},
+        {WS_OVERLAPPEDWINDOW, 0, WS_CLIPSIBLINGS|WS_OVERLAPPEDWINDOW, WS_EX_WINDOWEDGE},
+        {WS_CHILD, 0, WS_CHILD, 0},
+        {WS_CHILD|WS_DLGFRAME, 0, WS_CHILD|WS_DLGFRAME, WS_EX_WINDOWEDGE},
+        {WS_CHILD|WS_THICKFRAME, 0, WS_CHILD|WS_THICKFRAME, WS_EX_WINDOWEDGE},
+        {WS_CHILD|WS_DLGFRAME, WS_EX_STATICEDGE, WS_CHILD|WS_DLGFRAME, WS_EX_STATICEDGE},
+        {WS_CHILD|WS_THICKFRAME, WS_EX_STATICEDGE, WS_CHILD|WS_THICKFRAME, WS_EX_STATICEDGE},
+        {WS_CHILD|WS_CAPTION, 0, WS_CHILD|WS_CAPTION, WS_EX_WINDOWEDGE},
+        {WS_CHILD|WS_CAPTION|WS_SYSMENU, 0, WS_CHILD|WS_CAPTION|WS_SYSMENU, WS_EX_WINDOWEDGE},
+        {WS_CHILD, WS_EX_WINDOWEDGE, WS_CHILD, 0},
+        {WS_CHILD, WS_EX_DLGMODALFRAME, WS_CHILD, WS_EX_WINDOWEDGE|WS_EX_DLGMODALFRAME},
+        {WS_CHILD, WS_EX_DLGMODALFRAME|WS_EX_STATICEDGE, WS_CHILD, WS_EX_STATICEDGE|WS_EX_WINDOWEDGE|WS_EX_DLGMODALFRAME},
+        {WS_CHILD|WS_POPUP, 0, WS_CHILD|WS_POPUP|WS_CLIPSIBLINGS, 0},
+        {WS_CHILD|WS_POPUP|WS_DLGFRAME, 0, WS_CHILD|WS_POPUP|WS_DLGFRAME|WS_CLIPSIBLINGS, WS_EX_WINDOWEDGE},
+        {WS_CHILD|WS_POPUP|WS_THICKFRAME, 0, WS_CHILD|WS_POPUP|WS_THICKFRAME|WS_CLIPSIBLINGS, WS_EX_WINDOWEDGE},
+        {WS_CHILD|WS_POPUP|WS_DLGFRAME, WS_EX_STATICEDGE, WS_CHILD|WS_POPUP|WS_DLGFRAME|WS_CLIPSIBLINGS, WS_EX_STATICEDGE},
+        {WS_CHILD|WS_POPUP|WS_THICKFRAME, WS_EX_STATICEDGE, WS_CHILD|WS_POPUP|WS_THICKFRAME|WS_CLIPSIBLINGS, WS_EX_STATICEDGE},
+        {WS_CHILD|WS_POPUP, WS_EX_APPWINDOW, WS_CHILD|WS_POPUP|WS_CLIPSIBLINGS, WS_EX_APPWINDOW},
+        {WS_CHILD|WS_POPUP, WS_EX_WINDOWEDGE, WS_CHILD|WS_POPUP|WS_CLIPSIBLINGS, 0},
+        {WS_CHILD, WS_EX_WINDOWEDGE, WS_CHILD, 0},
+        {0, WS_EX_TOOLWINDOW, WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_WINDOWEDGE|WS_EX_TOOLWINDOW},
+        {WS_POPUP, 0, WS_POPUP|WS_CLIPSIBLINGS, 0},
+        {WS_POPUP, WS_EX_WINDOWEDGE, WS_POPUP|WS_CLIPSIBLINGS, 0},
+        {WS_POPUP|WS_DLGFRAME, 0, WS_POPUP|WS_DLGFRAME|WS_CLIPSIBLINGS, WS_EX_WINDOWEDGE},
+        {WS_POPUP|WS_THICKFRAME, 0, WS_POPUP|WS_THICKFRAME|WS_CLIPSIBLINGS, WS_EX_WINDOWEDGE},
+        {WS_POPUP|WS_DLGFRAME, WS_EX_STATICEDGE, WS_POPUP|WS_DLGFRAME|WS_CLIPSIBLINGS, WS_EX_STATICEDGE},
+        {WS_POPUP|WS_THICKFRAME, WS_EX_STATICEDGE, WS_POPUP|WS_THICKFRAME|WS_CLIPSIBLINGS, WS_EX_STATICEDGE},
+        {WS_CAPTION, WS_EX_STATICEDGE, WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_STATICEDGE|WS_EX_WINDOWEDGE},
+        {0, WS_EX_APPWINDOW, WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_APPWINDOW|WS_EX_WINDOWEDGE},
+        {0, WS_EX_LAYERED, WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_LAYERED|WS_EX_WINDOWEDGE},
+        {0, WS_EX_LAYERED|WS_EX_TRANSPARENT, WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_WINDOWEDGE},
+        {0, WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOOLWINDOW, WS_CLIPSIBLINGS|WS_CAPTION,
+            WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOOLWINDOW|WS_EX_WINDOWEDGE},
+    };
+    int i;
+
     register_style_check_class();
 
-    check_window_style(0, 0, WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_WINDOWEDGE);
-    check_window_style(WS_DLGFRAME, 0, WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_WINDOWEDGE);
-    check_window_style(WS_THICKFRAME, 0, WS_THICKFRAME|WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_WINDOWEDGE);
-    check_window_style(WS_DLGFRAME, WS_EX_STATICEDGE, WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_WINDOWEDGE|WS_EX_STATICEDGE);
-    check_window_style(WS_THICKFRAME, WS_EX_STATICEDGE, WS_THICKFRAME|WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_WINDOWEDGE|WS_EX_STATICEDGE);
-    check_window_style(WS_OVERLAPPEDWINDOW, 0, WS_CLIPSIBLINGS|WS_OVERLAPPEDWINDOW, WS_EX_WINDOWEDGE);
-    check_window_style(WS_CHILD, 0, WS_CHILD, 0);
-    check_window_style(WS_CHILD|WS_DLGFRAME, 0, WS_CHILD|WS_DLGFRAME, WS_EX_WINDOWEDGE);
-    check_window_style(WS_CHILD|WS_THICKFRAME, 0, WS_CHILD|WS_THICKFRAME, WS_EX_WINDOWEDGE);
-    check_window_style(WS_CHILD|WS_DLGFRAME, WS_EX_STATICEDGE, WS_CHILD|WS_DLGFRAME, WS_EX_STATICEDGE);
-    check_window_style(WS_CHILD|WS_THICKFRAME, WS_EX_STATICEDGE, WS_CHILD|WS_THICKFRAME, WS_EX_STATICEDGE);
-    check_window_style(WS_CHILD|WS_CAPTION, 0, WS_CHILD|WS_CAPTION, WS_EX_WINDOWEDGE);
-    check_window_style(WS_CHILD|WS_CAPTION|WS_SYSMENU, 0, WS_CHILD|WS_CAPTION|WS_SYSMENU, WS_EX_WINDOWEDGE);
-    check_window_style(WS_CHILD, WS_EX_WINDOWEDGE, WS_CHILD, 0);
-    check_window_style(WS_CHILD, WS_EX_DLGMODALFRAME, WS_CHILD, WS_EX_WINDOWEDGE|WS_EX_DLGMODALFRAME);
-    check_window_style(WS_CHILD, WS_EX_DLGMODALFRAME|WS_EX_STATICEDGE, WS_CHILD, WS_EX_STATICEDGE|WS_EX_WINDOWEDGE|WS_EX_DLGMODALFRAME);
-    check_window_style(WS_CHILD|WS_POPUP, 0, WS_CHILD|WS_POPUP|WS_CLIPSIBLINGS, 0);
-    check_window_style(WS_CHILD|WS_POPUP|WS_DLGFRAME, 0, WS_CHILD|WS_POPUP|WS_DLGFRAME|WS_CLIPSIBLINGS, WS_EX_WINDOWEDGE);
-    check_window_style(WS_CHILD|WS_POPUP|WS_THICKFRAME, 0, WS_CHILD|WS_POPUP|WS_THICKFRAME|WS_CLIPSIBLINGS, WS_EX_WINDOWEDGE);
-    check_window_style(WS_CHILD|WS_POPUP|WS_DLGFRAME, WS_EX_STATICEDGE, WS_CHILD|WS_POPUP|WS_DLGFRAME|WS_CLIPSIBLINGS, WS_EX_STATICEDGE);
-    check_window_style(WS_CHILD|WS_POPUP|WS_THICKFRAME, WS_EX_STATICEDGE, WS_CHILD|WS_POPUP|WS_THICKFRAME|WS_CLIPSIBLINGS, WS_EX_STATICEDGE);
-    check_window_style(WS_CHILD|WS_POPUP, WS_EX_APPWINDOW, WS_CHILD|WS_POPUP|WS_CLIPSIBLINGS, WS_EX_APPWINDOW);
-    check_window_style(WS_CHILD|WS_POPUP, WS_EX_WINDOWEDGE, WS_CHILD|WS_POPUP|WS_CLIPSIBLINGS, 0);
-    check_window_style(WS_CHILD, WS_EX_WINDOWEDGE, WS_CHILD, 0);
-    check_window_style(0, WS_EX_TOOLWINDOW, WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_WINDOWEDGE|WS_EX_TOOLWINDOW);
-    check_window_style(WS_POPUP, 0, WS_POPUP|WS_CLIPSIBLINGS, 0);
-    check_window_style(WS_POPUP, WS_EX_WINDOWEDGE, WS_POPUP|WS_CLIPSIBLINGS, 0);
-    check_window_style(WS_POPUP|WS_DLGFRAME, 0, WS_POPUP|WS_DLGFRAME|WS_CLIPSIBLINGS, WS_EX_WINDOWEDGE);
-    check_window_style(WS_POPUP|WS_THICKFRAME, 0, WS_POPUP|WS_THICKFRAME|WS_CLIPSIBLINGS, WS_EX_WINDOWEDGE);
-    check_window_style(WS_POPUP|WS_DLGFRAME, WS_EX_STATICEDGE, WS_POPUP|WS_DLGFRAME|WS_CLIPSIBLINGS, WS_EX_STATICEDGE);
-    check_window_style(WS_POPUP|WS_THICKFRAME, WS_EX_STATICEDGE, WS_POPUP|WS_THICKFRAME|WS_CLIPSIBLINGS, WS_EX_STATICEDGE);
-    check_window_style(WS_CAPTION, WS_EX_STATICEDGE, WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_STATICEDGE|WS_EX_WINDOWEDGE);
-    check_window_style(0, WS_EX_APPWINDOW, WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_APPWINDOW|WS_EX_WINDOWEDGE);
-
-    if (pGetLayeredWindowAttributes)
+    for (i = 0; i < ARRAY_SIZE(tests); i++)
     {
-        check_window_style(0, WS_EX_LAYERED, WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_LAYERED|WS_EX_WINDOWEDGE);
-        check_window_style(0, WS_EX_LAYERED|WS_EX_TRANSPARENT, WS_CLIPSIBLINGS|WS_CAPTION, WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_WINDOWEDGE);
-        check_window_style(0, WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOOLWINDOW, WS_CLIPSIBLINGS|WS_CAPTION,
-                                                      WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOOLWINDOW|WS_EX_WINDOWEDGE);
+        if ((tests[i].exstyle_in & WS_EX_LAYERED) && !pGetLayeredWindowAttributes)
+            continue;
+
+        check_window_style(tests[i].style_in, tests[i].exstyle_in, tests[i].style_out, tests[i].exstyle_out);
     }
 }
 
@@ -4537,9 +4561,7 @@ static void check_dialog_style(DWORD style_in, DWORD ex_style_in, DWORD style_ou
         ex_style_out = ex_style_in | WS_EX_WINDOWEDGE;
     else
         ex_style_out = ex_style_in & ~WS_EX_WINDOWEDGE;
-    /* FIXME: Remove the condition below once Wine is fixed */
-    todo_wine_if (ex_style != ex_style_out)
-        ok(ex_style == ex_style_out, "expected ex_style %#x, got %#x\n", ex_style_out, ex_style);
+    ok(ex_style == ex_style_out, "expected ex_style %#x, got %#x\n", ex_style_out, ex_style);
 
     DestroyWindow(hwnd);
 

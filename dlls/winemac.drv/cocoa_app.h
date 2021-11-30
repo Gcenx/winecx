@@ -133,6 +133,7 @@ enum {
     BOOL beenActive;
 
     NSMutableSet* windowsBeingDragged;
+    BOOL useDragNotifications;
 
     // CrossOver Hack 10912: Mac Edit menu
     NSMutableArray* changedKeyEquivalents;

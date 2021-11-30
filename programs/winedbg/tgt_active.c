@@ -1064,6 +1064,7 @@ static BOOL tgt_process_active_write(HANDLE hProcess, void* HOSTPTR addr,
 #endif
     ret = WriteProcessMemory( hProcess, guestptr, buffer, len, &guestlen );
     *wlen = guestlen;
+    return ret;
 }
 
 static BOOL tgt_process_active_get_selector(HANDLE hThread, DWORD sel, LDT_ENTRY* le)

@@ -118,15 +118,17 @@ static void d2d_clip_stack_pop(struct d2d_clip_stack *stack)
 }
 
 static void d2d_device_context_draw(struct d2d_device_context *render_target, enum d2d_shape_type shape_type,
-        ID3D10Buffer *ib, unsigned int index_count, ID3D10Buffer *vb, unsigned int vb_stride,
-        ID3D10Buffer *vs_cb, ID3D10Buffer *ps_cb, struct d2d_brush *brush, struct d2d_brush *opacity_brush)
+        ID3D11Buffer *ib, unsigned int index_count, ID3D11Buffer *vb, unsigned int vb_stride,
+        struct d2d_brush *brush, struct d2d_brush *opacity_brush)
 {
     struct d2d_shape_resources *shape_resources = &render_target->shape_resources[shape_type];
-    ID3D10Device *device = render_target->d3d_device;
-    D3D10_RECT scissor_rect;
+    ID3DDeviceContextState *prev_state;
+    ID3D11Device1 *device = render_target->d3d_device;
+    ID3D11DeviceContext1 *context;
+    ID3D11Buffer *vs_cb = render_target->vs_cb, *ps_cb = render_target->ps_cb;
+    D3D11_RECT scissor_rect;
     unsigned int offset;
-    D3D10_VIEWPORT vp;
-    HRESULT hr;
+    D3D11_VIEWPORT vp;
 
     vp.TopLeftX = 0;
     vp.TopLeftY = 0;
@@ -135,24 +137,19 @@ static void d2d_device_context_draw(struct d2d_device_context *render_target, en
     vp.MinDepth = 0.0f;
     vp.MaxDepth = 1.0f;
 
-    if (FAILED(hr = render_target->stateblock->lpVtbl->Capture(render_target->stateblock)))
-    {
-        WARN("Failed to capture stateblock, hr %#x.\n", hr);
-        return;
-    }
+    ID3D11Device1_GetImmediateContext1(device, &context);
+    ID3D11DeviceContext1_SwapDeviceContextState(context, render_target->d3d_state, &prev_state);
 
-    ID3D10Device_ClearState(device);
-
-    ID3D10Device_IASetInputLayout(device, shape_resources->il);
-    ID3D10Device_IASetPrimitiveTopology(device, D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    ID3D10Device_IASetIndexBuffer(device, ib, DXGI_FORMAT_R16_UINT, 0);
+    ID3D11DeviceContext1_IASetInputLayout(context, shape_resources->il);
+    ID3D11DeviceContext1_IASetPrimitiveTopology(context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ID3D11DeviceContext1_IASetIndexBuffer(context, ib, DXGI_FORMAT_R16_UINT, 0);
     offset = 0;
-    ID3D10Device_IASetVertexBuffers(device, 0, 1, &vb, &vb_stride, &offset);
-    ID3D10Device_VSSetConstantBuffers(device, 0, 1, &vs_cb);
-    ID3D10Device_VSSetShader(device, shape_resources->vs);
-    ID3D10Device_PSSetConstantBuffers(device, 0, 1, &ps_cb);
-    ID3D10Device_PSSetShader(device, render_target->ps);
-    ID3D10Device_RSSetViewports(device, 1, &vp);
+    ID3D11DeviceContext1_IASetVertexBuffers(context, 0, 1, &vb, &vb_stride, &offset);
+    ID3D11DeviceContext1_VSSetConstantBuffers(context, 0, 1, &vs_cb);
+    ID3D11DeviceContext1_VSSetShader(context, shape_resources->vs, NULL, 0);
+    ID3D11DeviceContext1_PSSetConstantBuffers(context, 0, 1, &ps_cb);
+    ID3D11DeviceContext1_PSSetShader(context, render_target->ps, NULL, 0);
+    ID3D11DeviceContext1_RSSetViewports(context, 1, &vp);
     if (render_target->clip_stack.count)
     {
         const D2D1_RECT_F *clip_rect;
@@ -170,24 +167,29 @@ static void d2d_device_context_draw(struct d2d_device_context *render_target, en
         scissor_rect.right = render_target->pixel_size.width;
         scissor_rect.bottom = render_target->pixel_size.height;
     }
-    ID3D10Device_RSSetScissorRects(device, 1, &scissor_rect);
-    ID3D10Device_RSSetState(device, render_target->rs);
-    ID3D10Device_OMSetRenderTargets(device, 1, &render_target->target->rtv, NULL);
+    ID3D11DeviceContext1_RSSetScissorRects(context, 1, &scissor_rect);
+    ID3D11DeviceContext1_RSSetState(context, render_target->rs);
+    ID3D11DeviceContext1_OMSetRenderTargets(context, 1, &render_target->target->rtv, NULL);
     if (brush)
     {
-        ID3D10Device_OMSetBlendState(device, render_target->bs, NULL, D3D10_DEFAULT_SAMPLE_MASK);
-        d2d_brush_bind_resources(brush, device, 0);
+        ID3D11DeviceContext1_OMSetBlendState(context, render_target->bs, NULL, D3D11_DEFAULT_SAMPLE_MASK);
+        d2d_brush_bind_resources(brush, render_target, 0);
+    }
+    else
+    {
+        ID3D11DeviceContext1_OMSetBlendState(context, NULL, NULL, D3D11_DEFAULT_SAMPLE_MASK);
     }
     if (opacity_brush)
-        d2d_brush_bind_resources(opacity_brush, device, 1);
+        d2d_brush_bind_resources(opacity_brush, render_target, 1);
 
     if (ib)
-        ID3D10Device_DrawIndexed(device, index_count, 0, 0);
+        ID3D11DeviceContext1_DrawIndexed(context, index_count, 0, 0);
     else
-        ID3D10Device_Draw(device, index_count, 0);
+        ID3D11DeviceContext1_Draw(context, index_count, 0);
 
-    if (FAILED(hr = render_target->stateblock->lpVtbl->Apply(render_target->stateblock)))
-        WARN("Failed to apply stateblock, hr %#x.\n", hr);
+    ID3D11DeviceContext1_SwapDeviceContextState(context, prev_state, NULL);
+    ID3D11DeviceContext1_Release(context);
+    ID3DDeviceContextState_Release(prev_state);
 }
 
 static void d2d_device_context_set_error(struct d2d_device_context *context, HRESULT code)
@@ -254,27 +256,41 @@ static ULONG STDMETHODCALLTYPE d2d_device_context_inner_Release(IUnknown *iface)
 
     if (!refcount)
     {
-        unsigned int i;
+        unsigned int i, j, k;
 
         d2d_clip_stack_cleanup(&context->clip_stack);
         IDWriteRenderingParams_Release(context->default_text_rendering_params);
         if (context->text_rendering_params)
             IDWriteRenderingParams_Release(context->text_rendering_params);
         if (context->bs)
-            ID3D10BlendState_Release(context->bs);
-        ID3D10RasterizerState_Release(context->rs);
-        ID3D10Buffer_Release(context->vb);
-        ID3D10Buffer_Release(context->ib);
-        ID3D10PixelShader_Release(context->ps);
+            ID3D11BlendState_Release(context->bs);
+        ID3D11RasterizerState_Release(context->rs);
+        ID3D11Buffer_Release(context->vb);
+        ID3D11Buffer_Release(context->ib);
+        ID3D11Buffer_Release(context->ps_cb);
+        ID3D11PixelShader_Release(context->ps);
+        ID3D11Buffer_Release(context->vs_cb);
         for (i = 0; i < D2D_SHAPE_TYPE_COUNT; ++i)
         {
-            ID3D10VertexShader_Release(context->shape_resources[i].vs);
-            ID3D10InputLayout_Release(context->shape_resources[i].il);
+            ID3D11VertexShader_Release(context->shape_resources[i].vs);
+            ID3D11InputLayout_Release(context->shape_resources[i].il);
         }
-        context->stateblock->lpVtbl->Release(context->stateblock);
+        for (i = 0; i < D2D_SAMPLER_INTERPOLATION_MODE_COUNT; ++i)
+        {
+            for (j = 0; j < D2D_SAMPLER_EXTEND_MODE_COUNT; ++j)
+            {
+                for (k = 0; k < D2D_SAMPLER_EXTEND_MODE_COUNT; ++k)
+                {
+                    if (context->sampler_states[i][j][k])
+                        ID3D11SamplerState_Release(context->sampler_states[i][j][k]);
+                }
+            }
+        }
+        if (context->d3d_state)
+            ID3DDeviceContextState_Release(context->d3d_state);
         if (context->target)
             ID2D1Bitmap1_Release(&context->target->ID2D1Bitmap1_iface);
-        ID3D10Device_Release(context->d3d_device);
+        ID3D11Device1_Release(context->d3d_device);
         ID2D1Factory_Release(context->factory);
         ID2D1Device_Release(context->device);
         heap_free(context);
@@ -695,176 +711,209 @@ static void STDMETHODCALLTYPE d2d_device_context_FillEllipse(ID2D1DeviceContext 
     ID2D1EllipseGeometry_Release(geometry);
 }
 
+static HRESULT d2d_device_context_update_ps_cb(struct d2d_device_context *context,
+        struct d2d_brush *brush, struct d2d_brush *opacity_brush, BOOL outline, BOOL is_arc)
+{
+    D3D11_MAPPED_SUBRESOURCE map_desc;
+    ID3D11DeviceContext *d3d_context;
+    struct d2d_ps_cb *cb_data;
+    HRESULT hr;
+
+    ID3D11Device1_GetImmediateContext(context->d3d_device, &d3d_context);
+
+    if (FAILED(hr = ID3D11DeviceContext_Map(d3d_context, (ID3D11Resource *)context->ps_cb,
+            0, D3D11_MAP_WRITE_DISCARD, 0, &map_desc)))
+    {
+        WARN("Failed to map constant buffer, hr %#x.\n", hr);
+        ID3D11DeviceContext_Release(d3d_context);
+        return hr;
+    }
+
+    cb_data = map_desc.pData;
+    cb_data->outline = outline;
+    cb_data->is_arc = is_arc;
+    cb_data->pad[0] = 0;
+    cb_data->pad[1] = 0;
+    if (!d2d_brush_fill_cb(brush, &cb_data->colour_brush))
+        WARN("Failed to initialize colour brush buffer.\n");
+    if (!d2d_brush_fill_cb(opacity_brush, &cb_data->opacity_brush))
+        WARN("Failed to initialize opacity brush buffer.\n");
+
+    ID3D11DeviceContext_Unmap(d3d_context, (ID3D11Resource *)context->ps_cb, 0);
+    ID3D11DeviceContext_Release(d3d_context);
+
+    return hr;
+}
+
+static HRESULT d2d_device_context_update_vs_cb(struct d2d_device_context *context,
+        const D2D_MATRIX_3X2_F *geometry_transform, float stroke_width)
+{
+    D3D11_MAPPED_SUBRESOURCE map_desc;
+    ID3D11DeviceContext *d3d_context;
+    const D2D1_MATRIX_3X2_F *w;
+    struct d2d_vs_cb *cb_data;
+    float tmp_x, tmp_y;
+    HRESULT hr;
+
+    ID3D11Device1_GetImmediateContext(context->d3d_device, &d3d_context);
+
+    if (FAILED(hr = ID3D11DeviceContext_Map(d3d_context, (ID3D11Resource *)context->vs_cb,
+            0, D3D11_MAP_WRITE_DISCARD, 0, &map_desc)))
+    {
+        WARN("Failed to map constant buffer, hr %#x.\n", hr);
+        ID3D11DeviceContext_Release(d3d_context);
+        return hr;
+    }
+
+    cb_data = map_desc.pData;
+    cb_data->transform_geometry._11 = geometry_transform->_11;
+    cb_data->transform_geometry._21 = geometry_transform->_21;
+    cb_data->transform_geometry._31 = geometry_transform->_31;
+    cb_data->transform_geometry.pad0 = 0.0f;
+    cb_data->transform_geometry._12 = geometry_transform->_12;
+    cb_data->transform_geometry._22 = geometry_transform->_22;
+    cb_data->transform_geometry._32 = geometry_transform->_32;
+    cb_data->transform_geometry.stroke_width = stroke_width;
+
+    w = &context->drawing_state.transform;
+
+    tmp_x = context->desc.dpiX / 96.0f;
+    cb_data->transform_rtx.x = w->_11 * tmp_x;
+    cb_data->transform_rtx.y = w->_21 * tmp_x;
+    cb_data->transform_rtx.z = w->_31 * tmp_x;
+    cb_data->transform_rtx.w = 2.0f / context->pixel_size.width;
+
+    tmp_y = context->desc.dpiY / 96.0f;
+    cb_data->transform_rty.x = w->_12 * tmp_y;
+    cb_data->transform_rty.y = w->_22 * tmp_y;
+    cb_data->transform_rty.z = w->_32 * tmp_y;
+    cb_data->transform_rty.w = -2.0f / context->pixel_size.height;
+
+    ID3D11DeviceContext_Unmap(d3d_context, (ID3D11Resource *)context->vs_cb, 0);
+    ID3D11DeviceContext_Release(d3d_context);
+
+    return S_OK;
+}
+
 static void d2d_device_context_draw_geometry(struct d2d_device_context *render_target,
         const struct d2d_geometry *geometry, struct d2d_brush *brush, float stroke_width)
 {
-    ID3D10Buffer *ib, *vb, *vs_cb, *ps_cb_bezier, *ps_cb_arc;
-    D3D10_SUBRESOURCE_DATA buffer_data;
-    D3D10_BUFFER_DESC buffer_desc;
-    const D2D1_MATRIX_3X2_F *w;
-    float tmp_x, tmp_y;
+    D3D11_SUBRESOURCE_DATA buffer_data;
+    D3D11_BUFFER_DESC buffer_desc;
+    ID3D11Buffer *ib, *vb;
     HRESULT hr;
-    struct
+
+    if (FAILED(hr = d2d_device_context_update_vs_cb(render_target, &geometry->transform, stroke_width)))
     {
-        struct
-        {
-            float _11, _21, _31, pad0;
-            float _12, _22, _32, stroke_width;
-        } transform_geometry;
-        struct d2d_vec4 transform_rtx;
-        struct d2d_vec4 transform_rty;
-    } vs_cb_data;
+        WARN("Failed to update vs constant buffer, hr %#x.\n", hr);
+        return;
+    }
 
-    vs_cb_data.transform_geometry._11 = geometry->transform._11;
-    vs_cb_data.transform_geometry._21 = geometry->transform._21;
-    vs_cb_data.transform_geometry._31 = geometry->transform._31;
-    vs_cb_data.transform_geometry.pad0 = 0.0f;
-    vs_cb_data.transform_geometry._12 = geometry->transform._12;
-    vs_cb_data.transform_geometry._22 = geometry->transform._22;
-    vs_cb_data.transform_geometry._32 = geometry->transform._32;
-    vs_cb_data.transform_geometry.stroke_width = stroke_width;
+    if (FAILED(hr = d2d_device_context_update_ps_cb(render_target, brush, NULL, TRUE, FALSE)))
+    {
+        WARN("Failed to update ps constant buffer, hr %#x.\n", hr);
+        return;
+    }
 
-    w = &render_target->drawing_state.transform;
-
-    tmp_x = render_target->desc.dpiX / 96.0f;
-    vs_cb_data.transform_rtx.x = w->_11 * tmp_x;
-    vs_cb_data.transform_rtx.y = w->_21 * tmp_x;
-    vs_cb_data.transform_rtx.z = w->_31 * tmp_x;
-    vs_cb_data.transform_rtx.w = 2.0f / render_target->pixel_size.width;
-
-    tmp_y = render_target->desc.dpiY / 96.0f;
-    vs_cb_data.transform_rty.x = w->_12 * tmp_y;
-    vs_cb_data.transform_rty.y = w->_22 * tmp_y;
-    vs_cb_data.transform_rty.z = w->_32 * tmp_y;
-    vs_cb_data.transform_rty.w = -2.0f / render_target->pixel_size.height;
-
-    buffer_desc.ByteWidth = sizeof(vs_cb_data);
-    buffer_desc.Usage = D3D10_USAGE_DEFAULT;
-    buffer_desc.BindFlags = D3D10_BIND_CONSTANT_BUFFER;
+    buffer_desc.Usage = D3D11_USAGE_DEFAULT;
     buffer_desc.CPUAccessFlags = 0;
     buffer_desc.MiscFlags = 0;
 
-    buffer_data.pSysMem = &vs_cb_data;
     buffer_data.SysMemPitch = 0;
     buffer_data.SysMemSlicePitch = 0;
-
-    if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vs_cb)))
-    {
-        WARN("Failed to create constant buffer, hr %#x.\n", hr);
-        return;
-    }
-
-    if (FAILED(hr = d2d_brush_get_ps_cb(brush, NULL, TRUE, FALSE, render_target, &ps_cb_bezier)))
-    {
-        WARN("Failed to get ps constant buffer, hr %#x.\n", hr);
-        ID3D10Buffer_Release(vs_cb);
-        return;
-    }
-
-    if (FAILED(hr = d2d_brush_get_ps_cb(brush, NULL, TRUE, TRUE, render_target, &ps_cb_arc)))
-    {
-        WARN("Failed to get ps constant buffer, hr %#x.\n", hr);
-        ID3D10Buffer_Release(vs_cb);
-        ID3D10Buffer_Release(ps_cb_bezier);
-        return;
-    }
 
     if (geometry->outline.face_count)
     {
         buffer_desc.ByteWidth = geometry->outline.face_count * sizeof(*geometry->outline.faces);
-        buffer_desc.BindFlags = D3D10_BIND_INDEX_BUFFER;
+        buffer_desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
         buffer_data.pSysMem = geometry->outline.faces;
 
-        if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &ib)))
+        if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &ib)))
         {
             WARN("Failed to create index buffer, hr %#x.\n", hr);
-            goto done;
+            return;
         }
 
         buffer_desc.ByteWidth = geometry->outline.vertex_count * sizeof(*geometry->outline.vertices);
-        buffer_desc.BindFlags = D3D10_BIND_VERTEX_BUFFER;
+        buffer_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
         buffer_data.pSysMem = geometry->outline.vertices;
 
-        if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
+        if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
         {
             ERR("Failed to create vertex buffer, hr %#x.\n", hr);
-            ID3D10Buffer_Release(ib);
-            goto done;
+            ID3D11Buffer_Release(ib);
+            return;
         }
 
         d2d_device_context_draw(render_target, D2D_SHAPE_TYPE_OUTLINE, ib, 3 * geometry->outline.face_count, vb,
-                sizeof(*geometry->outline.vertices), vs_cb, ps_cb_bezier, brush, NULL);
+                sizeof(*geometry->outline.vertices), brush, NULL);
 
-        ID3D10Buffer_Release(vb);
-        ID3D10Buffer_Release(ib);
+        ID3D11Buffer_Release(vb);
+        ID3D11Buffer_Release(ib);
     }
 
     if (geometry->outline.bezier_face_count)
     {
         buffer_desc.ByteWidth = geometry->outline.bezier_face_count * sizeof(*geometry->outline.bezier_faces);
-        buffer_desc.BindFlags = D3D10_BIND_INDEX_BUFFER;
+        buffer_desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
         buffer_data.pSysMem = geometry->outline.bezier_faces;
 
-        if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &ib)))
+        if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &ib)))
         {
             WARN("Failed to create beziers index buffer, hr %#x.\n", hr);
-            goto done;
+            return;
         }
 
         buffer_desc.ByteWidth = geometry->outline.bezier_count * sizeof(*geometry->outline.beziers);
-        buffer_desc.BindFlags = D3D10_BIND_VERTEX_BUFFER;
+        buffer_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
         buffer_data.pSysMem = geometry->outline.beziers;
 
-        if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
+        if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
         {
             ERR("Failed to create beziers vertex buffer, hr %#x.\n", hr);
-            ID3D10Buffer_Release(ib);
-            goto done;
+            ID3D11Buffer_Release(ib);
+            return;
         }
 
         d2d_device_context_draw(render_target, D2D_SHAPE_TYPE_BEZIER_OUTLINE, ib,
                 3 * geometry->outline.bezier_face_count, vb,
-                sizeof(*geometry->outline.beziers), vs_cb, ps_cb_bezier, brush, NULL);
+                sizeof(*geometry->outline.beziers), brush, NULL);
 
-        ID3D10Buffer_Release(vb);
-        ID3D10Buffer_Release(ib);
+        ID3D11Buffer_Release(vb);
+        ID3D11Buffer_Release(ib);
     }
 
     if (geometry->outline.arc_face_count)
     {
         buffer_desc.ByteWidth = geometry->outline.arc_face_count * sizeof(*geometry->outline.arc_faces);
-        buffer_desc.BindFlags = D3D10_BIND_INDEX_BUFFER;
+        buffer_desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
         buffer_data.pSysMem = geometry->outline.arc_faces;
 
-        if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &ib)))
+        if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &ib)))
         {
             WARN("Failed to create arcs index buffer, hr %#x.\n", hr);
-            goto done;
+            return;
         }
 
         buffer_desc.ByteWidth = geometry->outline.arc_count * sizeof(*geometry->outline.arcs);
-        buffer_desc.BindFlags = D3D10_BIND_VERTEX_BUFFER;
+        buffer_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
         buffer_data.pSysMem = geometry->outline.arcs;
 
-        if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
+        if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
         {
             ERR("Failed to create arcs vertex buffer, hr %#x.\n", hr);
-            ID3D10Buffer_Release(ib);
-            goto done;
+            ID3D11Buffer_Release(ib);
+            return;
         }
 
-        d2d_device_context_draw(render_target, D2D_SHAPE_TYPE_ARC_OUTLINE, ib,
-                3 * geometry->outline.arc_face_count, vb,
-                sizeof(*geometry->outline.arcs), vs_cb, ps_cb_arc, brush, NULL);
+        if (SUCCEEDED(d2d_device_context_update_ps_cb(render_target, brush, NULL, TRUE, TRUE)))
+            d2d_device_context_draw(render_target, D2D_SHAPE_TYPE_ARC_OUTLINE, ib,
+                    3 * geometry->outline.arc_face_count, vb,
+                    sizeof(*geometry->outline.arcs), brush, NULL);
 
-        ID3D10Buffer_Release(vb);
-        ID3D10Buffer_Release(ib);
+        ID3D11Buffer_Release(vb);
+        ID3D11Buffer_Release(ib);
     }
-
-done:
-    ID3D10Buffer_Release(ps_cb_arc);
-    ID3D10Buffer_Release(ps_cb_bezier);
-    ID3D10Buffer_Release(vs_cb);
 }
 
 static void STDMETHODCALLTYPE d2d_device_context_DrawGeometry(ID2D1DeviceContext *iface,
@@ -886,147 +935,96 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawGeometry(ID2D1DeviceContext
 static void d2d_device_context_fill_geometry(struct d2d_device_context *render_target,
         const struct d2d_geometry *geometry, struct d2d_brush *brush, struct d2d_brush *opacity_brush)
 {
-    ID3D10Buffer *ib, *vb, *vs_cb, *ps_cb_bezier, *ps_cb_arc;
-    D3D10_SUBRESOURCE_DATA buffer_data;
-    D3D10_BUFFER_DESC buffer_desc;
-    D2D1_MATRIX_3X2_F *w;
-    float tmp_x, tmp_y;
+    D3D11_SUBRESOURCE_DATA buffer_data;
+    D3D11_BUFFER_DESC buffer_desc;
+    ID3D11Buffer *ib, *vb;
     HRESULT hr;
-    struct
-    {
-        struct
-        {
-            float _11, _21, _31, pad0;
-            float _12, _22, _32, pad1;
-        } transform_geometry;
-        struct d2d_vec4 transform_rtx;
-        struct d2d_vec4 transform_rty;
-    } vs_cb_data;
 
-    vs_cb_data.transform_geometry._11 = geometry->transform._11;
-    vs_cb_data.transform_geometry._21 = geometry->transform._21;
-    vs_cb_data.transform_geometry._31 = geometry->transform._31;
-    vs_cb_data.transform_geometry.pad0 = 0.0f;
-    vs_cb_data.transform_geometry._12 = geometry->transform._12;
-    vs_cb_data.transform_geometry._22 = geometry->transform._22;
-    vs_cb_data.transform_geometry._32 = geometry->transform._32;
-    vs_cb_data.transform_geometry.pad1 = 0.0f;
-
-    w = &render_target->drawing_state.transform;
-
-    tmp_x = render_target->desc.dpiX / 96.0f;
-    vs_cb_data.transform_rtx.x = w->_11 * tmp_x;
-    vs_cb_data.transform_rtx.y = w->_21 * tmp_x;
-    vs_cb_data.transform_rtx.z = w->_31 * tmp_x;
-    vs_cb_data.transform_rtx.w = 2.0f / render_target->pixel_size.width;
-
-    tmp_y = render_target->desc.dpiY / 96.0f;
-    vs_cb_data.transform_rty.x = w->_12 * tmp_y;
-    vs_cb_data.transform_rty.y = w->_22 * tmp_y;
-    vs_cb_data.transform_rty.z = w->_32 * tmp_y;
-    vs_cb_data.transform_rty.w = -2.0f / render_target->pixel_size.height;
-
-    buffer_desc.ByteWidth = sizeof(vs_cb_data);
-    buffer_desc.Usage = D3D10_USAGE_DEFAULT;
-    buffer_desc.BindFlags = D3D10_BIND_CONSTANT_BUFFER;
+    buffer_desc.Usage = D3D11_USAGE_DEFAULT;
     buffer_desc.CPUAccessFlags = 0;
     buffer_desc.MiscFlags = 0;
 
-    buffer_data.pSysMem = &vs_cb_data;
     buffer_data.SysMemPitch = 0;
     buffer_data.SysMemSlicePitch = 0;
 
-    if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vs_cb)))
+    if (FAILED(hr = d2d_device_context_update_vs_cb(render_target, &geometry->transform, 0.0f)))
     {
-        WARN("Failed to create constant buffer, hr %#x.\n", hr);
+        WARN("Failed to update vs constant buffer, hr %#x.\n", hr);
         return;
     }
 
-    if (FAILED(hr = d2d_brush_get_ps_cb(brush, opacity_brush, FALSE, FALSE, render_target, &ps_cb_bezier)))
+    if (FAILED(hr = d2d_device_context_update_ps_cb(render_target, brush, opacity_brush, FALSE, FALSE)))
     {
-        WARN("Failed to get ps constant buffer, hr %#x.\n", hr);
-        ID3D10Buffer_Release(vs_cb);
-        return;
-    }
-
-    if (FAILED(hr = d2d_brush_get_ps_cb(brush, opacity_brush, FALSE, TRUE, render_target, &ps_cb_arc)))
-    {
-        WARN("Failed to get ps constant buffer, hr %#x.\n", hr);
-        ID3D10Buffer_Release(vs_cb);
-        ID3D10Buffer_Release(ps_cb_bezier);
+        WARN("Failed to update ps constant buffer, hr %#x.\n", hr);
         return;
     }
 
     if (geometry->fill.face_count)
     {
         buffer_desc.ByteWidth = geometry->fill.face_count * sizeof(*geometry->fill.faces);
-        buffer_desc.BindFlags = D3D10_BIND_INDEX_BUFFER;
+        buffer_desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
         buffer_data.pSysMem = geometry->fill.faces;
 
-        if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &ib)))
+        if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &ib)))
         {
             WARN("Failed to create index buffer, hr %#x.\n", hr);
-            goto done;
+            return;
         }
 
         buffer_desc.ByteWidth = geometry->fill.vertex_count * sizeof(*geometry->fill.vertices);
-        buffer_desc.BindFlags = D3D10_BIND_VERTEX_BUFFER;
+        buffer_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
         buffer_data.pSysMem = geometry->fill.vertices;
 
-        if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
+        if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
         {
             ERR("Failed to create vertex buffer, hr %#x.\n", hr);
-            ID3D10Buffer_Release(ib);
-            goto done;
+            ID3D11Buffer_Release(ib);
+            return;
         }
 
         d2d_device_context_draw(render_target, D2D_SHAPE_TYPE_TRIANGLE, ib, 3 * geometry->fill.face_count, vb,
-                sizeof(*geometry->fill.vertices), vs_cb, ps_cb_bezier, brush, opacity_brush);
+                sizeof(*geometry->fill.vertices), brush, opacity_brush);
 
-        ID3D10Buffer_Release(vb);
-        ID3D10Buffer_Release(ib);
+        ID3D11Buffer_Release(vb);
+        ID3D11Buffer_Release(ib);
     }
 
     if (geometry->fill.bezier_vertex_count)
     {
         buffer_desc.ByteWidth = geometry->fill.bezier_vertex_count * sizeof(*geometry->fill.bezier_vertices);
-        buffer_desc.BindFlags = D3D10_BIND_VERTEX_BUFFER;
+        buffer_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
         buffer_data.pSysMem = geometry->fill.bezier_vertices;
 
-        if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
+        if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
         {
             ERR("Failed to create beziers vertex buffer, hr %#x.\n", hr);
-            goto done;
+            return;
         }
 
         d2d_device_context_draw(render_target, D2D_SHAPE_TYPE_CURVE, NULL, geometry->fill.bezier_vertex_count, vb,
-                sizeof(*geometry->fill.bezier_vertices), vs_cb, ps_cb_bezier, brush, opacity_brush);
+                sizeof(*geometry->fill.bezier_vertices), brush, opacity_brush);
 
-        ID3D10Buffer_Release(vb);
+        ID3D11Buffer_Release(vb);
     }
 
     if (geometry->fill.arc_vertex_count)
     {
         buffer_desc.ByteWidth = geometry->fill.arc_vertex_count * sizeof(*geometry->fill.arc_vertices);
-        buffer_desc.BindFlags = D3D10_BIND_VERTEX_BUFFER;
+        buffer_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
         buffer_data.pSysMem = geometry->fill.arc_vertices;
 
-        if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
+        if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vb)))
         {
             ERR("Failed to create arc vertex buffer, hr %#x.\n", hr);
-            goto done;
+            return;
         }
 
-        d2d_device_context_draw(render_target, D2D_SHAPE_TYPE_CURVE, NULL, geometry->fill.arc_vertex_count, vb,
-                sizeof(*geometry->fill.arc_vertices), vs_cb, ps_cb_arc, brush, opacity_brush);
+        if (SUCCEEDED(d2d_device_context_update_ps_cb(render_target, brush, opacity_brush, FALSE, TRUE)))
+            d2d_device_context_draw(render_target, D2D_SHAPE_TYPE_CURVE, NULL, geometry->fill.arc_vertex_count, vb,
+                    sizeof(*geometry->fill.arc_vertices), brush, opacity_brush);
 
-        ID3D10Buffer_Release(vb);
+        ID3D11Buffer_Release(vb);
     }
-
-done:
-    ID3D10Buffer_Release(ps_cb_arc);
-    ID3D10Buffer_Release(ps_cb_bezier);
-    ID3D10Buffer_Release(vs_cb);
 }
 
 static void STDMETHODCALLTYPE d2d_device_context_FillGeometry(ID2D1DeviceContext *iface,
@@ -1622,53 +1620,59 @@ static void STDMETHODCALLTYPE d2d_device_context_PopAxisAlignedClip(ID2D1DeviceC
 static void STDMETHODCALLTYPE d2d_device_context_Clear(ID2D1DeviceContext *iface, const D2D1_COLOR_F *colour)
 {
     struct d2d_device_context *render_target = impl_from_ID2D1DeviceContext(iface);
-    D3D10_SUBRESOURCE_DATA buffer_data;
-    struct d2d_ps_cb ps_cb_data = {0};
-    D3D10_BUFFER_DESC buffer_desc;
-    ID3D10Buffer *vs_cb, *ps_cb;
+    D3D11_MAPPED_SUBRESOURCE map_desc;
+    ID3D11DeviceContext *d3d_context;
+    struct d2d_ps_cb *ps_cb_data;
+    struct d2d_vs_cb *vs_cb_data;
     D2D1_COLOR_F *c;
     HRESULT hr;
 
-    static const struct
-    {
-        struct
-        {
-            float _11, _21, _31, pad0;
-            float _12, _22, _32, pad1;
-        } transform_geometry;
-        struct d2d_vec4 transform_rtx;
-        struct d2d_vec4 transform_rty;
-    }
-    vs_cb_data =
-    {
-        {1.0f, 0.0f, 0.0f,  0.0f,
-         0.0f, 1.0f, 0.0f,  0.0f},
-        {1.0f, 0.0f, 1.0f,  1.0f},
-        {0.0f, 1.0f, 1.0f, -1.0f},
-    };
-
     TRACE("iface %p, colour %p.\n", iface, colour);
 
-    buffer_desc.ByteWidth = sizeof(vs_cb_data);
-    buffer_desc.Usage = D3D10_USAGE_DEFAULT;
-    buffer_desc.BindFlags = D3D10_BIND_CONSTANT_BUFFER;
-    buffer_desc.CPUAccessFlags = 0;
-    buffer_desc.MiscFlags = 0;
+    ID3D11Device1_GetImmediateContext(render_target->d3d_device, &d3d_context);
 
-    buffer_data.pSysMem = &vs_cb_data;
-    buffer_data.SysMemPitch = 0;
-    buffer_data.SysMemSlicePitch = 0;
-
-    if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &vs_cb)))
+    if (FAILED(hr = ID3D11DeviceContext_Map(d3d_context, (ID3D11Resource *)render_target->vs_cb,
+            0, D3D11_MAP_WRITE_DISCARD, 0, &map_desc)))
     {
-        WARN("Failed to create constant buffer, hr %#x.\n", hr);
+        WARN("Failed to map vs constant buffer, hr %#x.\n", hr);
+        ID3D11DeviceContext_Release(d3d_context);
         return;
     }
 
-    ps_cb_data.outline = FALSE;
-    ps_cb_data.colour_brush.type = D2D_BRUSH_TYPE_SOLID;
-    ps_cb_data.colour_brush.opacity = 1.0f;
-    c = &ps_cb_data.colour_brush.u.solid.colour;
+    vs_cb_data = map_desc.pData;
+    vs_cb_data->transform_geometry._11 = 1.0f;
+    vs_cb_data->transform_geometry._21 = 0.0f;
+    vs_cb_data->transform_geometry._31 = 0.0f;
+    vs_cb_data->transform_geometry.pad0 = 0.0f;
+    vs_cb_data->transform_geometry._12 = 0.0f;
+    vs_cb_data->transform_geometry._22 = 1.0f;
+    vs_cb_data->transform_geometry._32 = 0.0f;
+    vs_cb_data->transform_geometry.stroke_width = 0.0f;
+    vs_cb_data->transform_rtx.x = 1.0f;
+    vs_cb_data->transform_rtx.y = 0.0f;
+    vs_cb_data->transform_rtx.z = 1.0f;
+    vs_cb_data->transform_rtx.w = 1.0f;
+    vs_cb_data->transform_rty.x = 0.0f;
+    vs_cb_data->transform_rty.y = 1.0f;
+    vs_cb_data->transform_rty.z = 1.0f;
+    vs_cb_data->transform_rty.w = -1.0f;
+
+    ID3D11DeviceContext_Unmap(d3d_context, (ID3D11Resource *)render_target->vs_cb, 0);
+
+    if (FAILED(hr = ID3D11DeviceContext_Map(d3d_context, (ID3D11Resource *)render_target->ps_cb,
+            0, D3D11_MAP_WRITE_DISCARD, 0, &map_desc)))
+    {
+        WARN("Failed to map ps constant buffer, hr %#x.\n", hr);
+        ID3D11DeviceContext_Release(d3d_context);
+        return;
+    }
+
+    ps_cb_data = map_desc.pData;
+    memset(ps_cb_data, 0, sizeof(*ps_cb_data));
+    ps_cb_data->colour_brush.type = D2D_BRUSH_TYPE_SOLID;
+    ps_cb_data->colour_brush.opacity = 1.0f;
+    ps_cb_data->opacity_brush.type = D2D_BRUSH_TYPE_COUNT;
+    c = &ps_cb_data->colour_brush.u.solid.colour;
     if (colour)
         *c = *colour;
     if (render_target->desc.pixelFormat.alphaMode == D2D1_ALPHA_MODE_IGNORE)
@@ -1677,23 +1681,11 @@ static void STDMETHODCALLTYPE d2d_device_context_Clear(ID2D1DeviceContext *iface
     c->g *= c->a;
     c->b *= c->a;
 
-    ps_cb_data.opacity_brush.type = D2D_BRUSH_TYPE_COUNT;
-
-    buffer_desc.ByteWidth = sizeof(ps_cb_data);
-    buffer_data.pSysMem = &ps_cb_data;
-
-    if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->d3d_device, &buffer_desc, &buffer_data, &ps_cb)))
-    {
-        WARN("Failed to create constant buffer, hr %#x.\n", hr);
-        ID3D10Buffer_Release(vs_cb);
-        return;
-    }
+    ID3D11DeviceContext_Unmap(d3d_context, (ID3D11Resource *)render_target->ps_cb, 0);
+    ID3D11DeviceContext_Release(d3d_context);
 
     d2d_device_context_draw(render_target, D2D_SHAPE_TYPE_TRIANGLE, render_target->ib, 6,
-            render_target->vb, render_target->vb_stride, vs_cb, ps_cb, NULL, NULL);
-
-    ID3D10Buffer_Release(ps_cb);
-    ID3D10Buffer_Release(vs_cb);
+            render_target->vb, render_target->vb_stride, NULL, NULL);
 }
 
 static void STDMETHODCALLTYPE d2d_device_context_BeginDraw(ID2D1DeviceContext *iface)
@@ -1792,7 +1784,7 @@ static UINT32 STDMETHODCALLTYPE d2d_device_context_GetMaximumBitmapSize(ID2D1Dev
 {
     TRACE("iface %p.\n", iface);
 
-    return D3D10_REQ_TEXTURE2D_U_OR_V_DIMENSION;
+    return D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION;
 }
 
 static BOOL STDMETHODCALLTYPE d2d_device_context_IsSupported(ID2D1DeviceContext *iface,
@@ -1897,14 +1889,21 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateBitmapFromDxgiSurface(
 static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateEffect(ID2D1DeviceContext *iface,
         REFCLSID effect_id, ID2D1Effect **effect)
 {
+    struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
     struct d2d_effect *object;
+    HRESULT hr;
 
     FIXME("iface %p, effect_id %s, effect %p stub!\n", iface, debugstr_guid(effect_id), effect);
 
     if (!(object = heap_alloc_zero(sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    d2d_effect_init(object);
+    if (FAILED(hr = d2d_effect_init(object, context->factory, effect_id)))
+    {
+        WARN("Failed to initialize effect, hr %#x.\n", hr);
+        heap_free(object);
+        return hr;
+    }
 
     TRACE("Created effect %p.\n", object);
     *effect = &object->ID2D1Effect_iface;
@@ -2022,7 +2021,7 @@ static void d2d_device_context_reset_target(struct d2d_device_context *context)
     memset(&context->desc.pixelFormat, 0, sizeof(context->desc.pixelFormat));
     memset(&context->pixel_size, 0, sizeof(context->pixel_size));
 
-    ID3D10BlendState_Release(context->bs);
+    ID3D11BlendState_Release(context->bs);
     context->bs = NULL;
 }
 
@@ -2030,7 +2029,7 @@ static void STDMETHODCALLTYPE d2d_device_context_SetTarget(ID2D1DeviceContext *i
 {
     struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
     struct d2d_bitmap *bitmap_impl;
-    D3D10_BLEND_DESC blend_desc;
+    D3D11_BLEND_DESC blend_desc;
     ID2D1Bitmap *bitmap;
     HRESULT hr;
 
@@ -2064,23 +2063,24 @@ static void STDMETHODCALLTYPE d2d_device_context_SetTarget(ID2D1DeviceContext *i
     context->target = bitmap_impl;
 
     memset(&blend_desc, 0, sizeof(blend_desc));
-    blend_desc.BlendEnable[0] = TRUE;
-    blend_desc.SrcBlend = D3D10_BLEND_ONE;
-    blend_desc.DestBlend = D3D10_BLEND_INV_SRC_ALPHA;
-    blend_desc.BlendOp = D3D10_BLEND_OP_ADD;
+    blend_desc.IndependentBlendEnable = FALSE;
+    blend_desc.RenderTarget[0].BlendEnable = TRUE;
+    blend_desc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+    blend_desc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+    blend_desc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
     if (context->desc.pixelFormat.alphaMode == D2D1_ALPHA_MODE_IGNORE)
     {
-        blend_desc.SrcBlendAlpha = D3D10_BLEND_ZERO;
-        blend_desc.DestBlendAlpha = D3D10_BLEND_ONE;
+        blend_desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ZERO;
+        blend_desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
     }
     else
     {
-        blend_desc.SrcBlendAlpha = D3D10_BLEND_ONE;
-        blend_desc.DestBlendAlpha = D3D10_BLEND_INV_SRC_ALPHA;
+        blend_desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+        blend_desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
     }
-    blend_desc.BlendOpAlpha = D3D10_BLEND_OP_ADD;
-    blend_desc.RenderTargetWriteMask[0] = D3D10_COLOR_WRITE_ENABLE_ALL;
-    if (FAILED(hr = ID3D10Device_CreateBlendState(context->d3d_device, &blend_desc, &context->bs)))
+    blend_desc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    blend_desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    if (FAILED(hr = ID3D11Device1_CreateBlendState(context->d3d_device, &blend_desc, &context->bs)))
         WARN("Failed to create blend state, hr %#x.\n", hr);
 }
 
@@ -2742,12 +2742,12 @@ static ULONG STDMETHODCALLTYPE d2d_gdi_interop_render_target_Release(ID2D1GdiInt
 
 static HRESULT d2d_device_context_get_surface(struct d2d_device_context *render_target, IDXGISurface1 **surface)
 {
-    ID3D10Resource *resource;
+    ID3D11Resource *resource;
     HRESULT hr;
 
-    ID3D10RenderTargetView_GetResource(render_target->target->rtv, &resource);
-    hr = ID3D10Resource_QueryInterface(resource, &IID_IDXGISurface1, (void **)surface);
-    ID3D10Resource_Release(resource);
+    ID3D11RenderTargetView_GetResource(render_target->target->rtv, &resource);
+    hr = ID3D11Resource_QueryInterface(resource, &IID_IDXGISurface1, (void **)surface);
+    ID3D11Resource_Release(resource);
     if (FAILED(hr))
     {
         *surface = NULL;
@@ -2809,38 +2809,37 @@ static const struct ID2D1GdiInteropRenderTargetVtbl d2d_gdi_interop_render_targe
 static HRESULT d2d_device_context_init(struct d2d_device_context *render_target, ID2D1Device *device,
         IUnknown *outer_unknown, const struct d2d_device_context_ops *ops)
 {
-    D3D10_SUBRESOURCE_DATA buffer_data;
-    D3D10_STATE_BLOCK_MASK state_mask;
+    D3D11_SUBRESOURCE_DATA buffer_data;
     struct d2d_device *device_impl;
     IDWriteFactory *dwrite_factory;
-    D3D10_RASTERIZER_DESC rs_desc;
-    D3D10_BUFFER_DESC buffer_desc;
+    D3D11_RASTERIZER_DESC rs_desc;
+    D3D11_BUFFER_DESC buffer_desc;
     unsigned int i;
     HRESULT hr;
 
-    static const D3D10_INPUT_ELEMENT_DESC il_desc_outline[] =
+    static const D3D11_INPUT_ELEMENT_DESC il_desc_outline[] =
     {
-        {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D10_INPUT_PER_VERTEX_DATA, 0},
-        {"PREV", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D10_INPUT_PER_VERTEX_DATA, 0},
-        {"NEXT", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 16, D3D10_INPUT_PER_VERTEX_DATA, 0},
+        {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"PREV", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"NEXT", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
-    static const D3D10_INPUT_ELEMENT_DESC il_desc_curve_outline[] =
+    static const D3D11_INPUT_ELEMENT_DESC il_desc_curve_outline[] =
     {
-        {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D10_INPUT_PER_VERTEX_DATA, 0},
-        {"P", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D10_INPUT_PER_VERTEX_DATA, 0},
-        {"P", 1, DXGI_FORMAT_R32G32_FLOAT, 0, 16, D3D10_INPUT_PER_VERTEX_DATA, 0},
-        {"P", 2, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D10_INPUT_PER_VERTEX_DATA, 0},
-        {"PREV", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 32, D3D10_INPUT_PER_VERTEX_DATA, 0},
-        {"NEXT", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 40, D3D10_INPUT_PER_VERTEX_DATA, 0},
+        {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"P", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"P", 1, DXGI_FORMAT_R32G32_FLOAT, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"P", 2, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"PREV", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"NEXT", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 40, D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
-    static const D3D10_INPUT_ELEMENT_DESC il_desc_triangle[] =
+    static const D3D11_INPUT_ELEMENT_DESC il_desc_triangle[] =
     {
-        {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D10_INPUT_PER_VERTEX_DATA, 0},
+        {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
-    static const D3D10_INPUT_ELEMENT_DESC il_desc_curve[] =
+    static const D3D11_INPUT_ELEMENT_DESC il_desc_curve[] =
     {
-        {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 0, D3D10_INPUT_PER_VERTEX_DATA, 0},
-        {"TEXCOORD", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 8, D3D10_INPUT_PER_VERTEX_DATA, 0},
+        {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
     static const DWORD vs_code_outline[] =
     {
@@ -3842,7 +3841,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
     static const struct shape_info
     {
         enum d2d_shape_type shape_type;
-        const D3D10_INPUT_ELEMENT_DESC *il_desc;
+        const D3D11_INPUT_ELEMENT_DESC *il_desc;
         unsigned int il_element_count;
         const void *vs_code;
         size_t vs_code_size;
@@ -3872,6 +3871,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
         { 1.0f, -1.0f},
     };
     static const UINT16 indices[] = {0, 1, 2, 2, 1, 3};
+    static const D3D_FEATURE_LEVEL feature_levels = D3D_FEATURE_LEVEL_11_0;
 
     render_target->ID2D1DeviceContext_iface.lpVtbl = &d2d_device_context_vtbl;
     render_target->ID2D1GdiInteropRenderTarget_iface.lpVtbl = &d2d_gdi_interop_render_target_vtbl;
@@ -3887,22 +3887,17 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
 
     device_impl = unsafe_impl_from_ID2D1Device(device);
     if (FAILED(hr = IDXGIDevice_QueryInterface(device_impl->dxgi_device,
-            &IID_ID3D10Device, (void **)&render_target->d3d_device)))
+            &IID_ID3D11Device1, (void **)&render_target->d3d_device)))
     {
-        WARN("Failed to get device interface, hr %#x.\n", hr);
-        ID2D1Factory_Release(render_target->factory);
-        return hr;
-    }
-
-    if (FAILED(hr = D3D10StateBlockMaskEnableAll(&state_mask)))
-    {
-        WARN("Failed to create stateblock mask, hr %#x.\n", hr);
+        WARN("Failed to query ID3D11Device1 interface, hr %#x.\n", hr);
         goto err;
     }
 
-    if (FAILED(hr = D3D10CreateStateBlock(render_target->d3d_device, &state_mask, &render_target->stateblock)))
+    if (FAILED(hr = ID3D11Device1_CreateDeviceContextState(render_target->d3d_device,
+            0, &feature_levels, 1, D3D11_SDK_VERSION, &IID_ID3D11Device1, NULL,
+            &render_target->d3d_state)))
     {
-        WARN("Failed to create stateblock, hr %#x.\n", hr);
+        WARN("Failed to create device context state, hr %#x.\n", hr);
         goto err;
     }
 
@@ -3910,15 +3905,15 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
     {
         const struct shape_info *si = &shape_info[i];
 
-        if (FAILED(hr = ID3D10Device_CreateInputLayout(render_target->d3d_device, si->il_desc, si->il_element_count,
+        if (FAILED(hr = ID3D11Device1_CreateInputLayout(render_target->d3d_device, si->il_desc, si->il_element_count,
                 si->vs_code, si->vs_code_size, &render_target->shape_resources[si->shape_type].il)))
         {
             WARN("Failed to create input layout for shape type %#x, hr %#x.\n", si->shape_type, hr);
             goto err;
         }
 
-        if (FAILED(hr = ID3D10Device_CreateVertexShader(render_target->d3d_device, si->vs_code,
-                si->vs_code_size, &render_target->shape_resources[si->shape_type].vs)))
+        if (FAILED(hr = ID3D11Device1_CreateVertexShader(render_target->d3d_device, si->vs_code,
+                si->vs_code_size, NULL, &render_target->shape_resources[si->shape_type].vs)))
         {
             WARN("Failed to create vertex shader for shape type %#x, hr %#x.\n", si->shape_type, hr);
             goto err;
@@ -3926,16 +3921,42 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
 
     }
 
-    if (FAILED(hr = ID3D10Device_CreatePixelShader(render_target->d3d_device,
-            ps_code, sizeof(ps_code), &render_target->ps)))
+    buffer_desc.ByteWidth = sizeof(struct d2d_vs_cb);
+    buffer_desc.Usage = D3D11_USAGE_DYNAMIC;
+    buffer_desc.BindFlags = D3D10_BIND_CONSTANT_BUFFER;
+    buffer_desc.CPUAccessFlags = D3D10_CPU_ACCESS_WRITE;
+    buffer_desc.MiscFlags = 0;
+
+    if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, NULL,
+            &render_target->vs_cb)))
+    {
+        WARN("Failed to create constant buffer, hr %#x.\n", hr);
+        goto err;
+    }
+
+    if (FAILED(hr = ID3D11Device1_CreatePixelShader(render_target->d3d_device,
+            ps_code, sizeof(ps_code), NULL, &render_target->ps)))
     {
         WARN("Failed to create pixel shader, hr %#x.\n", hr);
         goto err;
     }
 
+    buffer_desc.ByteWidth = sizeof(struct d2d_ps_cb);
+    buffer_desc.Usage = D3D11_USAGE_DYNAMIC;
+    buffer_desc.BindFlags = D3D10_BIND_CONSTANT_BUFFER;
+    buffer_desc.CPUAccessFlags = D3D10_CPU_ACCESS_WRITE;
+    buffer_desc.MiscFlags = 0;
+
+    if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device, &buffer_desc, NULL,
+            &render_target->ps_cb)))
+    {
+        WARN("Failed to create constant buffer, hr %#x.\n", hr);
+        goto err;
+    }
+
     buffer_desc.ByteWidth = sizeof(indices);
-    buffer_desc.Usage = D3D10_USAGE_DEFAULT;
-    buffer_desc.BindFlags = D3D10_BIND_INDEX_BUFFER;
+    buffer_desc.Usage = D3D11_USAGE_DEFAULT;
+    buffer_desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
     buffer_desc.CPUAccessFlags = 0;
     buffer_desc.MiscFlags = 0;
 
@@ -3943,7 +3964,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
     buffer_data.SysMemPitch = 0;
     buffer_data.SysMemSlicePitch = 0;
 
-    if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->d3d_device,
+    if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device,
             &buffer_desc, &buffer_data, &render_target->ib)))
     {
         WARN("Failed to create clear index buffer, hr %#x.\n", hr);
@@ -3951,19 +3972,19 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
     }
 
     buffer_desc.ByteWidth = sizeof(quad);
-    buffer_desc.BindFlags = D3D10_BIND_VERTEX_BUFFER;
+    buffer_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
     buffer_data.pSysMem = quad;
 
     render_target->vb_stride = sizeof(*quad);
-    if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->d3d_device,
+    if (FAILED(hr = ID3D11Device1_CreateBuffer(render_target->d3d_device,
             &buffer_desc, &buffer_data, &render_target->vb)))
     {
         WARN("Failed to create clear vertex buffer, hr %#x.\n", hr);
         goto err;
     }
 
-    rs_desc.FillMode = D3D10_FILL_SOLID;
-    rs_desc.CullMode = D3D10_CULL_NONE;
+    rs_desc.FillMode = D3D11_FILL_SOLID;
+    rs_desc.CullMode = D3D11_CULL_NONE;
     rs_desc.FrontCounterClockwise = FALSE;
     rs_desc.DepthBias = 0;
     rs_desc.DepthBiasClamp = 0.0f;
@@ -3972,7 +3993,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
     rs_desc.ScissorEnable = TRUE;
     rs_desc.MultisampleEnable = FALSE;
     rs_desc.AntialiasedLineEnable = FALSE;
-    if (FAILED(hr = ID3D10Device_CreateRasterizerState(render_target->d3d_device, &rs_desc, &render_target->rs)))
+    if (FAILED(hr = ID3D11Device1_CreateRasterizerState(render_target->d3d_device, &rs_desc, &render_target->rs)))
     {
         WARN("Failed to create clear rasterizer state, hr %#x.\n", hr);
         goto err;
@@ -4011,24 +4032,28 @@ err:
     if (render_target->default_text_rendering_params)
         IDWriteRenderingParams_Release(render_target->default_text_rendering_params);
     if (render_target->rs)
-        ID3D10RasterizerState_Release(render_target->rs);
+        ID3D11RasterizerState_Release(render_target->rs);
     if (render_target->vb)
-        ID3D10Buffer_Release(render_target->vb);
+        ID3D11Buffer_Release(render_target->vb);
     if (render_target->ib)
-        ID3D10Buffer_Release(render_target->ib);
+        ID3D11Buffer_Release(render_target->ib);
+    if (render_target->ps_cb)
+        ID3D11Buffer_Release(render_target->ps_cb);
     if (render_target->ps)
-        ID3D10PixelShader_Release(render_target->ps);
+        ID3D11PixelShader_Release(render_target->ps);
+    if (render_target->vs_cb)
+        ID3D11Buffer_Release(render_target->vs_cb);
     for (i = 0; i < D2D_SHAPE_TYPE_COUNT; ++i)
     {
         if (render_target->shape_resources[i].vs)
-            ID3D10VertexShader_Release(render_target->shape_resources[i].vs);
+            ID3D11VertexShader_Release(render_target->shape_resources[i].vs);
         if (render_target->shape_resources[i].il)
-            ID3D10InputLayout_Release(render_target->shape_resources[i].il);
+            ID3D11InputLayout_Release(render_target->shape_resources[i].il);
     }
-    if (render_target->stateblock)
-        render_target->stateblock->lpVtbl->Release(render_target->stateblock);
+    if (render_target->d3d_state)
+        ID3DDeviceContextState_Release(render_target->d3d_state);
     if (render_target->d3d_device)
-        ID3D10Device_Release(render_target->d3d_device);
+        ID3D11Device1_Release(render_target->d3d_device);
     ID2D1Device_Release(render_target->device);
     ID2D1Factory_Release(render_target->factory);
     return hr;

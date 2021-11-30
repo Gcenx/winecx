@@ -3506,8 +3506,8 @@ static void shader_glsl_get_sample_function(const struct wined3d_shader_context 
     if (shadow)
         ++coord_size;
     sample_function->offset_size = offset ? deriv_size : 0;
-    sample_function->coord_mask = (1u << coord_size) - 1;
-    sample_function->deriv_mask = (1u << deriv_size) - 1;
+    sample_function->coord_mask = wined3d_mask_from_size(coord_size);
+    sample_function->deriv_mask = wined3d_mask_from_size(deriv_size);
     sample_function->output_single_component = shadow && !needs_legacy_glsl_syntax(gl_info);
 }
 
@@ -4101,7 +4101,7 @@ static void shader_glsl_pow(const struct wined3d_shader_instruction *ins)
             shader_addline(buffer, "vec%u(%s == 0.0 ? 1.0 : min(pow(abs(%s), %s), ",
                     dst_size, src1_param.param_str, src0_param.param_str, src1_param.param_str);
             shader_glsl_append_imm_vec(buffer, &max_float, 1, priv->gl_info);
-            shader_addline(buffer, "));\n");
+            shader_addline(buffer, ")));\n");
         }
         else
         {
@@ -4129,6 +4129,9 @@ static void shader_glsl_pow(const struct wined3d_shader_instruction *ins)
 /* Map the opcode 1-to-1 to the GL code (arg->dst = instruction(src0, src1, ...) */
 static void shader_glsl_map2gl(const struct wined3d_shader_instruction *ins)
 {
+    const struct shader_glsl_ctx_priv *priv = ins->ctx->backend_data;
+    bool y_correction = ins->ctx->reg_maps->shader_version.type == WINED3D_SHADER_TYPE_PIXEL
+            ? priv->cur_ps_args->y_correction : false;
     struct wined3d_string_buffer *buffer = ins->ctx->buffer;
     struct glsl_src_param src_param;
     const char *instruction;
@@ -4145,9 +4148,9 @@ static void shader_glsl_map2gl(const struct wined3d_shader_instruction *ins)
         case WINED3DSIH_DSX: instruction = "dFdx"; break;
         case WINED3DSIH_DSX_COARSE: instruction = "dFdxCoarse"; break;
         case WINED3DSIH_DSX_FINE: instruction = "dFdxFine"; break;
-        case WINED3DSIH_DSY: instruction = "ycorrection.y * dFdy"; break;
-        case WINED3DSIH_DSY_COARSE: instruction = "ycorrection.y * dFdyCoarse"; break;
-        case WINED3DSIH_DSY_FINE: instruction = "ycorrection.y * dFdyFine"; break;
+        case WINED3DSIH_DSY: instruction = y_correction ? "ycorrection.y * dFdy" : "dFdy"; break;
+        case WINED3DSIH_DSY_COARSE: instruction = y_correction ? "ycorrection.y * dFdyCoarse" : "dFdyCoarse"; break;
+        case WINED3DSIH_DSY_FINE: instruction = y_correction ? "ycorrection.y * dFdyFine" : "dFdyFine"; break;
         case WINED3DSIH_FIRSTBIT_HI: instruction = "findMSB"; break;
         case WINED3DSIH_FIRSTBIT_LO: instruction = "findLSB"; break;
         case WINED3DSIH_FIRSTBIT_SHI: instruction = "findMSB"; break;
@@ -5490,7 +5493,7 @@ static void shader_glsl_atomic(const struct wined3d_shader_instruction *ins)
         }
         resource = "image";
         data_type = reg_maps->uav_resource_info[resource_idx].data_type;
-        coord_mask = (1u << resource_type_info[resource_type].coord_size) - 1;
+        coord_mask = wined3d_mask_from_size(resource_type_info[resource_type].coord_size);
         stride = reg_maps->uav_resource_info[resource_idx].stride;
     }
 
@@ -5668,7 +5671,7 @@ static void shader_glsl_ld_uav(const struct wined3d_shader_instruction *ins)
         resource_type = WINED3D_SHADER_RESOURCE_TEXTURE_2D;
     }
     data_type = reg_maps->uav_resource_info[uav_idx].data_type;
-    coord_mask = (1u << resource_type_info[resource_type].coord_size) - 1;
+    coord_mask = wined3d_mask_from_size(resource_type_info[resource_type].coord_size);
 
     write_mask = shader_glsl_append_dst_ext(ins->ctx->buffer, ins, &ins->dst[0], 0, data_type);
     shader_glsl_get_swizzle(&ins->src[1], FALSE, write_mask, dst_swizzle);
@@ -7997,25 +8000,23 @@ static GLuint shader_glsl_generate_fragment_shader(const struct wined3d_context_
         shader_glsl_append_imm_vec(buffer, &wined3d_srgb_const[1].x, 4, gl_info);
         shader_addline(buffer, ";\n");
     }
-    if (reg_maps->vpos || reg_maps->usesdsy)
+    if ((reg_maps->usesdsy && wined3d_settings.offscreen_rendering_mode != ORM_FBO)
+            || (reg_maps->vpos && !gl_info->supported[ARB_FRAGMENT_COORD_CONVENTIONS]))
     {
-        if (reg_maps->usesdsy || !gl_info->supported[ARB_FRAGMENT_COORD_CONVENTIONS])
+        ++extra_constants_needed;
+        shader_addline(buffer, "uniform vec4 ycorrection;\n");
+    }
+    if (reg_maps->vpos)
+    {
+        if (gl_info->supported[ARB_FRAGMENT_COORD_CONVENTIONS])
         {
-            ++extra_constants_needed;
-            shader_addline(buffer, "uniform vec4 ycorrection;\n");
+            if (context_gl->c.d3d_info->wined3d_creation_flags & WINED3D_PIXEL_CENTER_INTEGER)
+                shader_addline(buffer, "layout(%spixel_center_integer) in vec4 gl_FragCoord;\n",
+                        args->y_correction ? "origin_upper_left, " : "");
+            else if (args->y_correction)
+                shader_addline(buffer, "layout(origin_upper_left) in vec4 gl_FragCoord;\n");
         }
-        if (reg_maps->vpos)
-        {
-            if (gl_info->supported[ARB_FRAGMENT_COORD_CONVENTIONS])
-            {
-                if (context_gl->c.d3d_info->wined3d_creation_flags & WINED3D_PIXEL_CENTER_INTEGER)
-                    shader_addline(buffer, "layout(%spixel_center_integer) in vec4 gl_FragCoord;\n",
-                            args->render_offscreen ? "" : "origin_upper_left, ");
-                else if (!args->render_offscreen)
-                    shader_addline(buffer, "layout(origin_upper_left) in vec4 gl_FragCoord;\n");
-            }
-            shader_addline(buffer, "vec4 vpos;\n");
-        }
+        shader_addline(buffer, "vec4 vpos;\n");
     }
 
     if (args->alpha_test_func + 1 != WINED3D_CMP_ALWAYS)
@@ -10507,7 +10508,7 @@ static void set_glsl_shader_program(const struct wined3d_context_gl *context_gl,
 
         vshader = state->shader[WINED3D_SHADER_TYPE_VERTEX];
 
-        find_vs_compile_args(state, vshader, context_gl->c.stream_info.swizzle_map, &vs_compile_args, &context_gl->c);
+        find_vs_compile_args(state, vshader, &vs_compile_args, &context_gl->c);
         vs_id = find_glsl_vertex_shader(context_gl, priv, vshader, &vs_compile_args);
         vs_list = &vshader->linked_programs;
     }
@@ -10584,7 +10585,7 @@ static void set_glsl_shader_program(const struct wined3d_context_gl *context_gl,
         struct glsl_ffp_fragment_shader *ffp_shader;
         struct ffp_frag_settings settings;
 
-        gen_ffp_frag_op(&context_gl->c, state, &settings, FALSE);
+        wined3d_ffp_get_fs_settings(&context_gl->c, state, &settings, FALSE);
         ffp_shader = shader_glsl_find_ffp_fragment_shader(priv, &settings, context_gl);
         ps_id = ffp_shader->id;
         ps_list = &ffp_shader->linked_programs;
@@ -11790,6 +11791,13 @@ static BOOL shader_glsl_has_ffp_proj_control(void *shader_priv)
     return priv->ffp_proj_control;
 }
 
+static uint64_t shader_glsl_shader_compile(struct wined3d_context *context, const struct wined3d_shader_desc *shader_desc,
+        enum wined3d_shader_type shader_type)
+{
+    ERR("Not implemented.\n");
+    return 0;
+}
+
 const struct wined3d_shader_backend_ops glsl_shader_backend =
 {
     shader_glsl_handle_instruction,
@@ -11809,6 +11817,7 @@ const struct wined3d_shader_backend_ops glsl_shader_backend =
     shader_glsl_get_caps,
     shader_glsl_color_fixup_supported,
     shader_glsl_has_ffp_proj_control,
+    shader_glsl_shader_compile,
 };
 
 static void glsl_vertex_pipe_vp_enable(const struct wined3d_context *context, BOOL enable) {}
@@ -12921,8 +12930,10 @@ static void gen_yv12_read(struct wined3d_string_buffer *buffer,
      * Don't forget to clamp the y values in into the range, otherwise we'll
      * get filtering bleeding. */
 
-    /* Read odd lines from the right side (add 0.5 to the x coordinate). */
-    shader_addline(buffer, "    if (fract(floor(texcoord.y * size.y) * 0.5 + 1.0 / 6.0) >= 0.5)\n");
+    /* Read odd lines from the right side (add 0.5 to the x coordinate). Keep
+     * in mind that each line of the chroma plane corresponds to 2 lines of the
+     * resulting image. */
+    shader_addline(buffer, "    if (fract(texcoord.y * size.y * 0.25) >= 0.5)\n");
     shader_addline(buffer, "        texcoord.x += 0.5;\n");
 
     /* Clamp, keep the half pixel origin in mind. */
@@ -13515,7 +13526,7 @@ static DWORD glsl_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_bli
         const struct wined3d_format *f = src_texture->resource.format;
 
         alpha_test_key.color_space_low_value = 0;
-        alpha_test_key.color_space_high_value = ~(((1u << f->alpha_size) - 1) << f->alpha_offset);
+        alpha_test_key.color_space_high_value = ~(wined3d_mask_from_size(f->alpha_size) << f->alpha_offset);
         colour_key = &alpha_test_key;
     }
     else if (op != WINED3D_BLIT_OP_COLOR_BLIT_CKEY)

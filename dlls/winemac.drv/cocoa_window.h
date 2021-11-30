@@ -88,6 +88,9 @@
     BOOL ignore_windowDeminiaturize;
     BOOL ignore_windowResize;
     BOOL fakingClose;
+
+    /* CX HACK 16565 */
+    BOOL preventAppActivation;
 }
 
 @property (retain, readonly, nonatomic) WineEventQueue* queue;

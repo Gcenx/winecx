@@ -308,8 +308,13 @@ static BOOL send_to_cx_loader(const char * HOSTPTR loader, const RTL_USER_PROCES
     }
 
     length = 0;
-    for (elem = main_envp; *elem; elem++)
-        length += strlen(*elem) + 1;
+    for (elem = main_envp; *elem; elem++) {
+        // Skip a preexisting WINELOADER if we have a replacement
+        if (wineloader && !strncmp(*elem, "WINELOADER=", 11))
+            continue;
+        else
+            length += strlen(*elem) + 1;
+    }
     if (winedebug) length += strlen(winedebug) + 1;
     if (wineloader) length += strlen(wineloader) + 1;
 
@@ -321,6 +326,10 @@ static BOOL send_to_cx_loader(const char * HOSTPTR loader, const RTL_USER_PROCES
 
     for (elem = main_envp; *elem; elem++)
     {
+        // Skip a preexisting WINELOADER if we have a replacement
+        if (wineloader && !strncmp(*elem, "WINELOADER=", 11))
+            continue;
+
         if (!write_data(sock, *elem, strlen(*elem) + 1))
         {
             WARN("failed to write environment variable\n");

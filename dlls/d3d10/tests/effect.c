@@ -23,6 +23,8 @@
 
 #include <float.h>
 
+#define D3DERR_INVALIDCALL 0x8876086c
+
 static ID3D10Device *create_device(void)
 {
     ID3D10Device *device;
@@ -54,30 +56,30 @@ static inline HRESULT create_effect(DWORD *data, UINT flags, ID3D10Device *devic
  * test_effect_constant_buffer_type
  */
 #if 0
-cbuffer cb
+cbuffer cb : register(b1)
 {
     float   f1 : SV_POSITION;
     float   f2 : COLOR0;
 };
+
+cbuffer cb2 : register(b0)
+{
+    float   f3 : packoffset(c2);
+};
 #endif
-static DWORD fx_test_ecbt[] = {
-0x43425844, 0xc92a4732, 0xbd0d68c0, 0x877f71ee,
-0x871fc277, 0x00000001, 0x0000010a, 0x00000001,
-0x00000024, 0x30315846, 0x000000de, 0xfeff1001,
-0x00000001, 0x00000002, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000042,
-0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x66006263,
-0x74616f6c, 0x00000700, 0x00000100, 0x00000000,
-0x00000400, 0x00001000, 0x00000400, 0x00090900,
-0x00316600, 0x505f5653, 0x5449534f, 0x004e4f49,
-0x43003266, 0x524f4c4f, 0x00040030, 0x00100000,
-0x00000000, 0x00020000, 0xffff0000, 0x0000ffff,
-0x00290000, 0x000d0000, 0x002c0000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00380000,
-0x000d0000, 0x003b0000, 0x00040000, 0x00000000,
-0x00000000, 0x00000000, 0x52590000,
+static DWORD fx_test_ecbt[] =
+{
+    0x43425844, 0x7cfb8cde, 0x31ec2d95, 0x38500042, 0xa9330c67, 0x00000001, 0x00000145, 0x00000001,
+    0x00000024, 0x30315846, 0x00000119, 0xfeff1001, 0x00000002, 0x00000003, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000049, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x66006263,
+    0x74616f6c, 0x00000700, 0x00000100, 0x00000000, 0x00000400, 0x00001000, 0x00000400, 0x00090900,
+    0x00316600, 0x505f5653, 0x5449534f, 0x004e4f49, 0x43003266, 0x524f4c4f, 0x62630030, 0x33660032,
+    0x00000400, 0x00001000, 0x00000000, 0x00000200, 0x00000100, 0x00000000, 0x00002900, 0x00000d00,
+    0x00002c00, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00003800, 0x00000d00, 0x00003b00,
+    0x00000400, 0x00000000, 0x00000000, 0x00000000, 0x00004200, 0x00003000, 0x00000000, 0x00000100,
+    0x00000000, 0x00000000, 0x00004600, 0x00000d00, 0x00000000, 0x00002000, 0x00000000, 0x00000400,
+    0x00000000, 0x00000000,
 };
 
 static void test_effect_constant_buffer_type(void)
@@ -85,7 +87,10 @@ static void test_effect_constant_buffer_type(void)
     ID3D10Effect *effect;
     ID3D10EffectConstantBuffer *constantbuffer;
     ID3D10EffectType *type, *type2, *null_type;
+    D3D10_EFFECT_VARIABLE_DESC var_desc;
     D3D10_EFFECT_TYPE_DESC type_desc;
+    ID3D10EffectVariable *v;
+    D3D10_EFFECT_DESC desc;
     ID3D10Device *device;
     ULONG refcount;
     HRESULT hr;
@@ -101,7 +106,27 @@ static void test_effect_constant_buffer_type(void)
     hr = create_effect(fx_test_ecbt, 0, device, NULL, &effect);
     ok(SUCCEEDED(hr), "D3D10CreateEffectFromMemory failed (%x)\n", hr);
 
+    hr = effect->lpVtbl->GetDesc(effect, NULL);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+
+    hr = effect->lpVtbl->GetDesc(effect, &desc);
+    ok(SUCCEEDED(hr), "Failed to get effect description, hr %#x.\n", hr);
+    ok(!desc.IsChildEffect, "Unexpected IsChildEffect.\n");
+    ok(desc.ConstantBuffers == 2, "Unexpected constant buffers count %u.\n", desc.ConstantBuffers);
+    ok(desc.SharedConstantBuffers == 0, "Unexpected shared constant buffers count %u.\n",
+            desc.SharedConstantBuffers);
+    ok(desc.GlobalVariables == 3, "Unexpected global variables count %u.\n", desc.GlobalVariables);
+    ok(desc.SharedGlobalVariables == 0, "Unexpected shared global variables count %u.\n",
+            desc.SharedGlobalVariables);
+    ok(desc.Techniques == 0, "Unexpected techniques count %u.\n", desc.Techniques);
+
     constantbuffer = effect->lpVtbl->GetConstantBufferByIndex(effect, 0);
+
+    hr = constantbuffer->lpVtbl->GetDesc(constantbuffer, &var_desc);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(var_desc.Flags == D3D10_EFFECT_VARIABLE_EXPLICIT_BIND_POINT, "Unexpected variable flags %#x.\n", var_desc.Flags);
+    ok(var_desc.ExplicitBindPoint == 1, "Unexpected bind point %#x.\n", var_desc.ExplicitBindPoint);
+
     type = constantbuffer->lpVtbl->GetType(constantbuffer);
 
     hr = type->lpVtbl->GetDesc(type, &type_desc);
@@ -198,6 +223,15 @@ static void test_effect_constant_buffer_type(void)
     string = type->lpVtbl->GetMemberSemantic(type, 3);
     ok(string == NULL, "GetMemberSemantic is \"%s\", expected \"NULL\"\n", string);
 
+    constantbuffer = effect->lpVtbl->GetConstantBufferByIndex(effect, 1);
+    v = constantbuffer->lpVtbl->GetMemberByIndex(constantbuffer, 0);
+    hr = v->lpVtbl->GetDesc(v, &var_desc);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!strcmp(var_desc.Name, "f3"), "Unexpected name %s.\n", var_desc.Name);
+    ok(var_desc.Flags == D3D10_EFFECT_VARIABLE_EXPLICIT_BIND_POINT, "Unexpected variable flags %#x.\n", var_desc.Flags);
+    ok(var_desc.BufferOffset == 0x20, "Unexpected buffer offset %#x.\n", var_desc.BufferOffset);
+    ok(var_desc.ExplicitBindPoint == 0x20, "Unexpected bind point %#x.\n", var_desc.ExplicitBindPoint);
+
     effect->lpVtbl->Release(effect);
 
     refcount = ID3D10Device_Release(device);
@@ -259,6 +293,7 @@ static void test_effect_variable_type(void)
     ID3D10EffectVariable *variable;
     ID3D10EffectType *type, *type2, *type3;
     D3D10_EFFECT_TYPE_DESC type_desc;
+    D3D10_EFFECT_DESC desc;
     ID3D10Device *device;
     ULONG refcount;
     HRESULT hr;
@@ -273,6 +308,17 @@ static void test_effect_variable_type(void)
 
     hr = create_effect(fx_test_evt, 0, device, NULL, &effect);
     ok(SUCCEEDED(hr), "D3D10CreateEffectFromMemory failed (%x)\n", hr);
+
+    hr = effect->lpVtbl->GetDesc(effect, &desc);
+    ok(SUCCEEDED(hr), "Failed to get effect description, hr %#x.\n", hr);
+    ok(!desc.IsChildEffect, "Unexpected IsChildEffect.\n");
+    ok(desc.ConstantBuffers == 1, "Unexpected constant buffers count %u.\n", desc.ConstantBuffers);
+    ok(desc.SharedConstantBuffers == 0, "Unexpected shared constant buffers count %u.\n",
+            desc.SharedConstantBuffers);
+    ok(desc.GlobalVariables == 1, "Unexpected global variables count %u.\n", desc.GlobalVariables);
+    ok(desc.SharedGlobalVariables == 0, "Unexpected shared global variables count %u.\n",
+            desc.SharedGlobalVariables);
+    ok(desc.Techniques == 0, "Unexpected techniques count %u.\n", desc.Techniques);
 
     constantbuffer = effect->lpVtbl->GetConstantBufferByIndex(effect, 0);
     type = constantbuffer->lpVtbl->GetType(constantbuffer);
@@ -361,11 +407,12 @@ static void test_effect_variable_type(void)
     ok(type_desc.UnpackedSize == 0x8, "UnpackedSize is %#x, expected 0x8\n", type_desc.UnpackedSize);
     ok(type_desc.Stride == 0x10, "Stride is %x, expected 0x10\n", type_desc.Stride);
 
-    for (i = 0; i < 3; ++i)
+    for (i = 0; i < 4; ++i)
     {
         if (i == 0) type3 = type2->lpVtbl->GetMemberTypeByIndex(type2, 0);
         else if (i == 1) type3 = type2->lpVtbl->GetMemberTypeByName(type2, "f3");
-        else type3 = type2->lpVtbl->GetMemberTypeBySemantic(type2, "SV_POSITION");
+        else if (i == 2) type3 = type2->lpVtbl->GetMemberTypeBySemantic(type2, "SV_POSITION");
+        else type3 = type2->lpVtbl->GetMemberTypeBySemantic(type2, "sv_POSITION");
 
         hr = type3->lpVtbl->GetDesc(type3, &type_desc);
         ok(SUCCEEDED(hr), "GetDesc failed (%x)\n", hr);
@@ -384,7 +431,8 @@ static void test_effect_variable_type(void)
 
         if (i == 0) type3 = type2->lpVtbl->GetMemberTypeByIndex(type2, 1);
         else if (i == 1) type3 = type2->lpVtbl->GetMemberTypeByName(type2, "f4");
-        else type3 = type2->lpVtbl->GetMemberTypeBySemantic(type2, "COLOR0");
+        else if (i == 2) type3 = type2->lpVtbl->GetMemberTypeBySemantic(type2, "COLOR0");
+        else type3 = type2->lpVtbl->GetMemberTypeBySemantic(type2, "color0");
 
         hr = type3->lpVtbl->GetDesc(type3, &type_desc);
         ok(SUCCEEDED(hr), "GetDesc failed (%x)\n", hr);
@@ -492,6 +540,7 @@ static void test_effect_variable_member(void)
     ID3D10EffectConstantBuffer *constantbuffer;
     ID3D10EffectVariable *variable, *variable2, *variable3, *null_variable;
     D3D10_EFFECT_VARIABLE_DESC desc;
+    D3D10_EFFECT_DESC effect_desc;
     ID3D10Device *device;
     ULONG refcount;
     HRESULT hr;
@@ -504,6 +553,19 @@ static void test_effect_variable_member(void)
 
     hr = create_effect(fx_test_evm, 0, device, NULL, &effect);
     ok(SUCCEEDED(hr), "D3D10CreateEffectFromMemory failed (%x)\n", hr);
+
+    hr = effect->lpVtbl->GetDesc(effect, &effect_desc);
+    ok(SUCCEEDED(hr), "Failed to get effect description, hr %#x.\n", hr);
+    ok(!effect_desc.IsChildEffect, "Unexpected IsChildEffect.\n");
+    ok(effect_desc.ConstantBuffers == 1, "Unexpected constant buffers count %u.\n",
+            effect_desc.ConstantBuffers);
+    ok(effect_desc.SharedConstantBuffers == 0, "Unexpected shared constant buffers count %u.\n",
+            effect_desc.SharedConstantBuffers);
+    ok(effect_desc.GlobalVariables == 1, "Unexpected global variables count %u.\n",
+            effect_desc.GlobalVariables);
+    ok(effect_desc.SharedGlobalVariables == 0, "Unexpected shared global variables count %u.\n",
+            effect_desc.SharedGlobalVariables);
+    ok(effect_desc.Techniques == 0, "Unexpected techniques count %u.\n", effect_desc.Techniques);
 
     constantbuffer = effect->lpVtbl->GetConstantBufferByIndex(effect, 0);
     hr = constantbuffer->lpVtbl->GetDesc(constantbuffer, &desc);
@@ -606,6 +668,9 @@ static void test_effect_variable_member(void)
     variable = variable2->lpVtbl->GetMemberBySemantic(variable2, "SV_POSITION");
     ok(variable == variable3, "GetMemberBySemantic got %p, expected %p\n", variable, variable3);
 
+    variable = variable2->lpVtbl->GetMemberBySemantic(variable2, "sv_POSITION");
+    ok(variable == variable3, "GetMemberBySemantic got %p, expected %p\n", variable, variable3);
+
     variable = variable2->lpVtbl->GetMemberByIndex(variable2, 0);
     ok(variable == variable3, "GetMemberByIndex got %p, expected %p\n", variable, variable3);
 
@@ -621,6 +686,9 @@ static void test_effect_variable_member(void)
     ok(desc.ExplicitBindPoint == 0, "ExplicitBindPoint is %u, expected 0\n", desc.ExplicitBindPoint);
 
     variable = variable2->lpVtbl->GetMemberBySemantic(variable2, "COLOR0");
+    ok(variable == variable3, "GetMemberBySemantic got %p, expected %p\n", variable, variable3);
+
+    variable = variable2->lpVtbl->GetMemberBySemantic(variable2, "color0");
     ok(variable == variable3, "GetMemberBySemantic got %p, expected %p\n", variable, variable3);
 
     variable = variable2->lpVtbl->GetMemberByIndex(variable2, 1);
@@ -693,6 +761,7 @@ static void test_effect_variable_element(void)
     ID3D10EffectType *type, *type2;
     D3D10_EFFECT_VARIABLE_DESC desc;
     D3D10_EFFECT_TYPE_DESC type_desc;
+    D3D10_EFFECT_DESC effect_desc;
     ID3D10Device *device;
     ULONG refcount;
     HRESULT hr;
@@ -705,6 +774,19 @@ static void test_effect_variable_element(void)
 
     hr = create_effect(fx_test_eve, 0, device, NULL, &effect);
     ok(SUCCEEDED(hr), "D3D10CreateEffectFromMemory failed (%x)\n", hr);
+
+    hr = effect->lpVtbl->GetDesc(effect, &effect_desc);
+    ok(SUCCEEDED(hr), "Failed to get effect description, hr %#x.\n", hr);
+    ok(!effect_desc.IsChildEffect, "Unexpected IsChildEffect.\n");
+    ok(effect_desc.ConstantBuffers == 1, "Unexpected constant buffers count %u.\n",
+            effect_desc.ConstantBuffers);
+    ok(effect_desc.SharedConstantBuffers == 0, "Unexpected shared constant buffers count %u.\n",
+            effect_desc.SharedConstantBuffers);
+    ok(effect_desc.GlobalVariables == 1, "Unexpected global variables count %u.\n",
+            effect_desc.GlobalVariables);
+    ok(effect_desc.SharedGlobalVariables == 0, "Unexpected shared global variables count %u.\n",
+            effect_desc.SharedGlobalVariables);
+    ok(effect_desc.Techniques == 0, "Unexpected techniques count %u.\n", effect_desc.Techniques);
 
     constantbuffer = effect->lpVtbl->GetConstantBufferByIndex(effect, 0);
     hr = constantbuffer->lpVtbl->GetDesc(constantbuffer, &desc);
@@ -1161,7 +1243,7 @@ static void test_effect_variable_element(void)
  * test_effect_variable_type_class
  */
 #if 0
-cbuffer cb <String s = "STRING";>
+cbuffer cb <String s = "STRING"; String s2 = "STRING"; >
 {
     float f;
     vector <int, 2> i;
@@ -1174,6 +1256,7 @@ RasterizerState rast;
 SamplerState sam;
 RenderTargetView rtv;
 DepthStencilView dsv;
+Texture t0;
 Texture1D t1;
 Texture1DArray t1a;
 Texture2D t2;
@@ -1185,110 +1268,75 @@ TextureCube tq;
 GeometryShader gs[2];
 PixelShader ps;
 VertexShader vs[1];
+BlendState blend2[2];
+DepthStencilState depthstencil2[2];
+RasterizerState rast2[2];
+SamplerState sam2[2];
 #endif
-static DWORD fx_test_evtc[] = {
-0x43425844, 0xc04c50cb, 0x0afeb4ef, 0xbb93f346,
-0x97a29499, 0x00000001, 0x00000659, 0x00000001,
-0x00000024, 0x30315846, 0x0000062d, 0xfeff1001,
-0x00000001, 0x00000004, 0x00000011, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x000003d9,
-0x00000000, 0x00000008, 0x00000001, 0x00000001,
-0x00000001, 0x00000001, 0x00000001, 0x00000001,
-0x00000004, 0x00000000, 0x00000000, 0x53006263,
-0x6e697274, 0x00070067, 0x00020000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00010000,
-0x00730000, 0x49525453, 0x6600474e, 0x74616f6c,
-0x00003300, 0x00000100, 0x00000000, 0x00000400,
-0x00001000, 0x00000400, 0x00090900, 0x69006600,
-0x0032746e, 0x00000057, 0x00000001, 0x00000000,
-0x00000008, 0x00000010, 0x00000008, 0x00001112,
-0x69750069, 0x7832746e, 0x007a0033, 0x00010000,
-0x00000000, 0x00280000, 0x00300000, 0x00180000,
-0x5a1b0000, 0x00750000, 0x6c6f6f62, 0x00337832,
-0x000000a0, 0x00000001, 0x00000000, 0x0000001c,
-0x00000020, 0x00000018, 0x00001a23, 0x6c420062,
-0x53646e65, 0x65746174, 0x0000c600, 0x00000200,
-0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000200, 0x656c6200, 0x4400646e, 0x68747065,
-0x6e657453, 0x536c6963, 0x65746174, 0x0000f300,
-0x00000200, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000300, 0x70656400, 0x74736874,
-0x69636e65, 0x6152006c, 0x72657473, 0x72657a69,
-0x74617453, 0x012e0065, 0x00020000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00040000,
-0x61720000, 0x53007473, 0x6c706d61, 0x74537265,
-0x00657461, 0x0000015f, 0x00000002, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000015,
-0x006d6173, 0x646e6552, 0x61547265, 0x74656772,
-0x77656956, 0x00018c00, 0x00000200, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00001300,
-0x76747200, 0x70654400, 0x74536874, 0x69636e65,
-0x6569566c, 0x01bd0077, 0x00020000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00140000,
-0x73640000, 0x65540076, 0x72757478, 0x00443165,
-0x000001ee, 0x00000002, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x0000000a, 0x54003174,
-0x75747865, 0x44316572, 0x61727241, 0x02170079,
-0x00020000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x000b0000, 0x31740000, 0x65540061,
-0x72757478, 0x00443265, 0x00000246, 0x00000002,
-0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x0000000c, 0x54003274, 0x75747865, 0x44326572,
-0x6f00534d, 0x02000002, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x0e000000, 0x74000000,
-0x736d6432, 0x78655400, 0x65727574, 0x72414432,
-0x00796172, 0x0000029d, 0x00000002, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x0000000d,
-0x00613274, 0x74786554, 0x32657275, 0x41534d44,
-0x79617272, 0x0002cc00, 0x00000200, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000f00,
-0x64327400, 0x0061736d, 0x74786554, 0x33657275,
-0x03000044, 0x00020000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00100000, 0x33740000,
-0x78655400, 0x65727574, 0x65627543, 0x00032900,
-0x00000200, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00001100, 0x00717400, 0x6d6f6547,
-0x79727465, 0x64616853, 0x54007265, 0x02000003,
-0x02000000, 0x00000000, 0x00000000, 0x00000000,
-0x07000000, 0x67000000, 0x69500073, 0x536c6578,
-0x65646168, 0x03820072, 0x00020000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00050000,
-0x73700000, 0x72655600, 0x53786574, 0x65646168,
-0x03ad0072, 0x00020000, 0x00010000, 0x00000000,
-0x00000000, 0x00000000, 0x00060000, 0x73760000,
-0x00000400, 0x00006000, 0x00000000, 0x00000400,
-0xffffff00, 0x000001ff, 0x00002a00, 0x00000e00,
-0x00002c00, 0x00005500, 0x00003900, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00007800, 0x00005c00, 0x00000000, 0x00000400,
-0x00000000, 0x00000000, 0x00000000, 0x00009e00,
-0x00008200, 0x00000000, 0x00001000, 0x00000000,
-0x00000000, 0x00000000, 0x0000c400, 0x0000a800,
-0x00000000, 0x00004000, 0x00000000, 0x00000000,
-0x00000000, 0x0000ed00, 0x0000d100, 0x00000000,
-0xffffff00, 0x000000ff, 0x00000000, 0x00012100,
-0x00010500, 0x00000000, 0xffffff00, 0x000000ff,
-0x00000000, 0x00015a00, 0x00013e00, 0x00000000,
-0xffffff00, 0x000000ff, 0x00000000, 0x00018800,
-0x00016c00, 0x00000000, 0xffffff00, 0x000000ff,
-0x00000000, 0x0001b900, 0x00019d00, 0x00000000,
-0xffffff00, 0x000000ff, 0x0001ea00, 0x0001ce00,
-0x00000000, 0xffffff00, 0x000000ff, 0x00021400,
-0x0001f800, 0x00000000, 0xffffff00, 0x000000ff,
-0x00024200, 0x00022600, 0x00000000, 0xffffff00,
-0x000000ff, 0x00026c00, 0x00025000, 0x00000000,
-0xffffff00, 0x000000ff, 0x00029700, 0x00027b00,
-0x00000000, 0xffffff00, 0x000000ff, 0x0002c800,
-0x0002ac00, 0x00000000, 0xffffff00, 0x000000ff,
-0x0002f900, 0x0002dd00, 0x00000000, 0xffffff00,
-0x000000ff, 0x00032600, 0x00030a00, 0x00000000,
-0xffffff00, 0x000000ff, 0x00035100, 0x00033500,
-0x00000000, 0xffffff00, 0x000000ff, 0x00037f00,
-0x00036300, 0x00000000, 0xffffff00, 0x000000ff,
-0x00000000, 0x00000000, 0x0003aa00, 0x00038e00,
-0x00000000, 0xffffff00, 0x000000ff, 0x00000000,
-0x0003d600, 0x0003ba00, 0x00000000, 0xffffff00,
-0x000000ff, 0x00000000, 0x00000000,
+static DWORD fx_test_evtc[] =
+{
+    0x43425844, 0xbcafa6f1, 0x8baf9e54, 0x8e1fd2ef, 0x115ba370, 0x00000001, 0x000007a3, 0x00000001,
+    0x00000024, 0x30315846, 0x00000777, 0xfeff1001, 0x00000001, 0x00000004, 0x00000016, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000493, 0x00000000, 0x00000009, 0x00000003, 0x00000003,
+    0x00000003, 0x00000003, 0x00000001, 0x00000001, 0x00000004, 0x00000000, 0x00000000, 0x53006263,
+    0x6e697274, 0x00070067, 0x00020000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00010000,
+    0x00730000, 0x49525453, 0x7300474e, 0x6c660032, 0x0074616f, 0x00000036, 0x00000001, 0x00000000,
+    0x00000004, 0x00000010, 0x00000004, 0x00000909, 0x6e690066, 0x5a003274, 0x01000000, 0x00000000,
+    0x08000000, 0x10000000, 0x08000000, 0x12000000, 0x69000011, 0x6e697500, 0x33783274, 0x00007d00,
+    0x00000100, 0x00000000, 0x00002800, 0x00003000, 0x00001800, 0x005a1b00, 0x62007500, 0x326c6f6f,
+    0xa3003378, 0x01000000, 0x00000000, 0x1c000000, 0x20000000, 0x18000000, 0x23000000, 0x6200001a,
+    0x656c4200, 0x7453646e, 0x00657461, 0x000000c9, 0x00000002, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000002, 0x6e656c62, 0x65440064, 0x53687470, 0x636e6574, 0x74536c69, 0x00657461,
+    0x000000f6, 0x00000002, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000003, 0x74706564,
+    0x65747368, 0x6c69636e, 0x73615200, 0x69726574, 0x5372657a, 0x65746174, 0x00013100, 0x00000200,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000400, 0x73617200, 0x61530074, 0x656c706d,
+    0x61745372, 0x62006574, 0x02000001, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x15000000,
+    0x73000000, 0x52006d61, 0x65646e65, 0x72615472, 0x56746567, 0x00776569, 0x0000018f, 0x00000002,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000013, 0x00767472, 0x74706544, 0x65745368,
+    0x6c69636e, 0x77656956, 0x0001c000, 0x00000200, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00001400, 0x76736400, 0x78657400, 0x65727574, 0x0001f100, 0x00000200, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000900, 0x00307400, 0x74786554, 0x31657275, 0x02180044, 0x00020000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x000a0000, 0x31740000, 0x78655400, 0x65727574,
+    0x72414431, 0x00796172, 0x00000241, 0x00000002, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x0000000b, 0x00613174, 0x74786554, 0x32657275, 0x02700044, 0x00020000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x000c0000, 0x32740000, 0x78655400, 0x65727574, 0x534d4432, 0x00029900,
+    0x00000200, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000e00, 0x64327400, 0x5400736d,
+    0x75747865, 0x44326572, 0x61727241, 0x02c70079, 0x00020000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x000d0000, 0x32740000, 0x65540061, 0x72757478, 0x4d443265, 0x72724153, 0xf6007961,
+    0x02000002, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x0f000000, 0x74000000, 0x736d6432,
+    0x65540061, 0x72757478, 0x00443365, 0x0000032a, 0x00000002, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000010, 0x54003374, 0x75747865, 0x75436572, 0x53006562, 0x02000003, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x11000000, 0x74000000, 0x65470071, 0x74656d6f, 0x68537972,
+    0x72656461, 0x00037e00, 0x00000200, 0x00000200, 0x00000000, 0x00000000, 0x00000000, 0x00000700,
+    0x00736700, 0x65786950, 0x6168536c, 0x00726564, 0x000003ac, 0x00000002, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000005, 0x56007370, 0x65747265, 0x61685378, 0x00726564, 0x000003d7,
+    0x00000002, 0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00000006, 0xc9007376, 0x02000000,
+    0x02000000, 0x00000000, 0x00000000, 0x00000000, 0x02000000, 0x62000000, 0x646e656c, 0x00f60032,
+    0x00020000, 0x00020000, 0x00000000, 0x00000000, 0x00000000, 0x00030000, 0x65640000, 0x73687470,
+    0x636e6574, 0x00326c69, 0x00000131, 0x00000002, 0x00000002, 0x00000000, 0x00000000, 0x00000000,
+    0x00000004, 0x74736172, 0x01620032, 0x00020000, 0x00020000, 0x00000000, 0x00000000, 0x00000000,
+    0x00150000, 0x61730000, 0x0400326d, 0x60000000, 0x00000000, 0x04000000, 0xff000000, 0x02ffffff,
+    0x2a000000, 0x0e000000, 0x2c000000, 0x33000000, 0x0e000000, 0x2c000000, 0x58000000, 0x3c000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x7b000000, 0x5f000000, 0x00000000,
+    0x04000000, 0x00000000, 0x00000000, 0x00000000, 0xa1000000, 0x85000000, 0x00000000, 0x10000000,
+    0x00000000, 0x00000000, 0x00000000, 0xc7000000, 0xab000000, 0x00000000, 0x40000000, 0x00000000,
+    0x00000000, 0x00000000, 0xf0000000, 0xd4000000, 0x00000000, 0xff000000, 0x00ffffff, 0x00000000,
+    0x24000000, 0x08000001, 0x00000001, 0xff000000, 0x00ffffff, 0x00000000, 0x5d000000, 0x41000001,
+    0x00000001, 0xff000000, 0x00ffffff, 0x00000000, 0x8b000000, 0x6f000001, 0x00000001, 0xff000000,
+    0x00ffffff, 0x00000000, 0xbc000000, 0xa0000001, 0x00000001, 0xff000000, 0x00ffffff, 0xed000000,
+    0xd1000001, 0x00000001, 0xff000000, 0x00ffffff, 0x15000000, 0xf9000002, 0x00000001, 0xff000000,
+    0x00ffffff, 0x3e000000, 0x22000002, 0x00000002, 0xff000000, 0x00ffffff, 0x6c000000, 0x50000002,
+    0x00000002, 0xff000000, 0x00ffffff, 0x96000000, 0x7a000002, 0x00000002, 0xff000000, 0x00ffffff,
+    0xc1000000, 0xa5000002, 0x00000002, 0xff000000, 0x00ffffff, 0xf2000000, 0xd6000002, 0x00000002,
+    0xff000000, 0x00ffffff, 0x23000000, 0x07000003, 0x00000003, 0xff000000, 0x00ffffff, 0x50000000,
+    0x34000003, 0x00000003, 0xff000000, 0x00ffffff, 0x7b000000, 0x5f000003, 0x00000003, 0xff000000,
+    0x00ffffff, 0xa9000000, 0x8d000003, 0x00000003, 0xff000000, 0x00ffffff, 0x00000000, 0x00000000,
+    0xd4000000, 0xb8000003, 0x00000003, 0xff000000, 0x00ffffff, 0x00000000, 0x00000000, 0xe4000004,
+    0x00000003, 0xff000000, 0x00ffffff, 0x00000000, 0x1f000000, 0x03000004, 0x00000004, 0xff000000,
+    0x00ffffff, 0x00000000, 0x00000000, 0x42000000, 0x26000004, 0x00000004, 0xff000000, 0x00ffffff,
+    0x00000000, 0x00000000, 0x6c000000, 0x50000004, 0x00000004, 0xff000000, 0x00ffffff, 0x00000000,
+    0x00000000, 0x8e000000, 0x72000004, 0x00000004, 0xff000000, 0x00ffffff, 0x00000000, 0x00000000,
+    0x00000000,
 };
 
 static BOOL is_valid_check(BOOL a, BOOL b)
@@ -1366,7 +1414,7 @@ static void check_as(ID3D10EffectVariable *variable)
 
     variable2 = (ID3D10EffectVariable *)variable->lpVtbl->AsShaderResource(variable);
     is_valid = variable2->lpVtbl->IsValid(variable2);
-    ret = is_valid_check(is_valid, td.Type == D3D10_SVT_TEXTURE1D
+    ret = is_valid_check(is_valid, td.Type == D3D10_SVT_TEXTURE || td.Type == D3D10_SVT_TEXTURE1D
         || td.Type == D3D10_SVT_TEXTURE1DARRAY || td.Type == D3D10_SVT_TEXTURE2D
         || td.Type == D3D10_SVT_TEXTURE2DMS || td.Type == D3D10_SVT_TEXTURE2DARRAY
         || td.Type == D3D10_SVT_TEXTURE2DMSARRAY || td.Type == D3D10_SVT_TEXTURE3D
@@ -1382,16 +1430,19 @@ static void check_as(ID3D10EffectVariable *variable)
 
 static void test_effect_variable_type_class(void)
 {
+    ID3D10EffectStringVariable *string_var;
     ID3D10Effect *effect;
     ID3D10EffectConstantBuffer *constantbuffer, *null_buffer, *parent;
     ID3D10EffectVariable *variable;
     ID3D10EffectType *type;
     D3D10_EFFECT_VARIABLE_DESC vd;
     D3D10_EFFECT_TYPE_DESC td;
+    D3D10_EFFECT_DESC effect_desc;
     ID3D10Device *device;
     ULONG refcount;
     HRESULT hr;
     unsigned int variable_nr = 0;
+    const char *str1, *str2;
 
     if (!(device = create_device()))
     {
@@ -1401,6 +1452,19 @@ static void test_effect_variable_type_class(void)
 
     hr = create_effect(fx_test_evtc, 0, device, NULL, &effect);
     ok(SUCCEEDED(hr), "D3D10CreateEffectFromMemory failed (%x)\n", hr);
+
+    hr = effect->lpVtbl->GetDesc(effect, &effect_desc);
+    ok(SUCCEEDED(hr), "Failed to get effect description, hr %#x.\n", hr);
+    ok(!effect_desc.IsChildEffect, "Unexpected IsChildEffect.\n");
+    ok(effect_desc.ConstantBuffers == 1, "Unexpected constant buffers count %u.\n",
+            effect_desc.ConstantBuffers);
+    ok(effect_desc.SharedConstantBuffers == 0, "Unexpected shared constant buffers count %u.\n",
+            effect_desc.SharedConstantBuffers);
+    ok(effect_desc.GlobalVariables == 26, "Unexpected global variables count %u.\n",
+            effect_desc.GlobalVariables);
+    ok(effect_desc.SharedGlobalVariables == 0, "Unexpected shared global variables count %u.\n",
+            effect_desc.SharedGlobalVariables);
+    ok(effect_desc.Techniques == 0, "Unexpected techniques count %u.\n", effect_desc.Techniques);
 
     /* get the null_constantbuffer, so that we can compare it to variables->GetParentConstantBuffer */
     null_buffer = effect->lpVtbl->GetConstantBufferByIndex(effect, 1);
@@ -1413,7 +1477,7 @@ static void test_effect_variable_type_class(void)
     ok(strcmp(vd.Name, "cb") == 0, "Name is \"%s\", expected \"cb\"\n", vd.Name);
     ok(vd.Semantic == NULL, "Semantic is \"%s\", expected NULL\n", vd.Semantic);
     ok(vd.Flags == 0, "Type is %u, expected 0\n", vd.Flags);
-    ok(vd.Annotations == 1, "Elements is %u, expected 1\n", vd.Annotations);
+    ok(vd.Annotations == 2, "Unexpected Annotations %u.\n", vd.Annotations);
     ok(vd.BufferOffset == 0, "Members is %u, expected 0\n", vd.BufferOffset);
     ok(vd.ExplicitBindPoint == 0, "ExplicitBindPoint is %u, expected 0\n", vd.ExplicitBindPoint);
 
@@ -1437,7 +1501,6 @@ static void test_effect_variable_type_class(void)
     ok(td.UnpackedSize == 0x60, "UnpackedSize is %#x, expected 0x60\n", td.UnpackedSize);
     ok(td.Stride == 0x60, "Stride is %#x, expected 0x60\n", td.Stride);
 
-    /* check annotation a */
     variable = constantbuffer->lpVtbl->GetAnnotationByIndex(constantbuffer, 0);
     hr = variable->lpVtbl->GetDesc(variable, &vd);
     ok(SUCCEEDED(hr), "GetDesc failed (%x)\n", hr);
@@ -1468,6 +1531,30 @@ static void test_effect_variable_type_class(void)
     ok(td.PackedSize == 0x0, "PackedSize is %#x, expected 0x0\n", td.PackedSize);
     ok(td.UnpackedSize == 0x0, "UnpackedSize is %#x, expected 0x0\n", td.UnpackedSize);
     ok(td.Stride == 0x0, "Stride is %#x, expected 0x0\n", td.Stride);
+
+    string_var = variable->lpVtbl->AsString(variable);
+    hr = string_var->lpVtbl->GetString(string_var, NULL);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+    hr = string_var->lpVtbl->GetString(string_var, &str1);
+    ok(SUCCEEDED(hr), "GetString failed, hr %#x.\n", hr);
+    ok(!strcmp(str1, "STRING"), "Unexpected value %s.\n", str1);
+
+    variable = constantbuffer->lpVtbl->GetAnnotationByIndex(constantbuffer, 1);
+    string_var = variable->lpVtbl->AsString(variable);
+    hr = string_var->lpVtbl->GetString(string_var, &str2);
+    ok(SUCCEEDED(hr), "GetString failed, hr %#x.\n", hr);
+    ok(str2 != str1, "Unexpected string pointer.\n");
+    ok(!strcmp(str2, "STRING"), "Unexpected value %s.\n", str1);
+
+    /* Only two annotations */
+    variable = constantbuffer->lpVtbl->GetAnnotationByIndex(constantbuffer, 2);
+    string_var = variable->lpVtbl->AsString(variable);
+    hr = string_var->lpVtbl->GetString(string_var, NULL);
+    ok(hr == E_FAIL, "Unexpected hr %#x.\n", hr);
+    str1 = (void *)0xdeadbeef;
+    hr = string_var->lpVtbl->GetString(string_var, &str1);
+    ok(hr == E_FAIL, "Unexpected hr %#x.\n", hr);
+    ok(str1 == (void *)0xdeadbeef, "Unexpected pointer.\n");
 
     /* check float f */
     variable = constantbuffer->lpVtbl->GetMemberByIndex(constantbuffer, variable_nr++);
@@ -1788,6 +1875,38 @@ static void test_effect_variable_type_class(void)
     ok(td.PackedSize == 0x0, "PackedSize is %#x, expected 0x0\n", td.PackedSize);
     ok(td.UnpackedSize == 0x0, "UnpackedSize is %#x, expected 0x0\n", td.UnpackedSize);
     ok(td.Stride == 0x0, "Stride is %#x, expected 0x0\n", td.Stride);
+
+    /* check Texture t0 */
+    variable = effect->lpVtbl->GetVariableByIndex(effect, variable_nr++);
+    hr = variable->lpVtbl->GetDesc(variable, &vd);
+    ok(SUCCEEDED(hr), "Unexpected hr %#x.\n", hr);
+
+    ok(!strcmp(vd.Name, "t0"), "Unexpected Name \"%s\".\n", vd.Name);
+    ok(!vd.Semantic, "Unexpected Semantic \"%s\".\n", vd.Semantic);
+    ok(!vd.Flags, "Unexpected Flags %u.\n", vd.Flags);
+    ok(!vd.Annotations, "Unexpected Annotations %u.\n", vd.Annotations);
+    ok(!vd.BufferOffset, "Unexpected BufferOffset %u.\n", vd.BufferOffset);
+    ok(!vd.ExplicitBindPoint, "Unexpected ExplicitBindPoint %u.\n", vd.ExplicitBindPoint);
+
+    check_as(variable);
+
+    parent = variable->lpVtbl->GetParentConstantBuffer(variable);
+    ok(null_buffer == parent, "Unexpected parent %p.\n", parent);
+
+    type = variable->lpVtbl->GetType(variable);
+    hr = type->lpVtbl->GetDesc(type, &td);
+    ok(SUCCEEDED(hr), "Unexpected hr %#x.\n", hr);
+
+    ok(!strcmp(td.TypeName, "texture"), "Unexpected TypeName \"%s\".\n", td.TypeName);
+    ok(td.Class == D3D10_SVC_OBJECT, "Unexpected Class %x.\n", td.Class);
+    ok(td.Type == D3D10_SVT_TEXTURE, "Unexpected Type %x.\n", td.Type);
+    ok(!td.Elements, "Unexpected Elements %u.\n", td.Elements);
+    ok(!td.Members, "Unexpected Members %u.\n", td.Members);
+    ok(!td.Rows, "Unexpected Rows %u.\n", td.Rows);
+    ok(!td.Columns, "Unexpected Columns %u.\n", td.Columns);
+    ok(!td.PackedSize, "Unexpected PackedSize %#x.\n", td.PackedSize);
+    ok(!td.UnpackedSize, "Unexpected UnpackedSize %#x.\n", td.UnpackedSize);
+    ok(!td.Stride, "Unexpected Stride %#x.\n", td.Stride);
 
     /* check Texture1D t1 */
     variable = effect->lpVtbl->GetVariableByIndex(effect, variable_nr++);
@@ -2388,6 +2507,7 @@ static void test_effect_constant_buffer_stride(void)
     ID3D10EffectConstantBuffer *constantbuffer;
     ID3D10EffectType *type;
     D3D10_EFFECT_TYPE_DESC tdesc;
+    D3D10_EFFECT_DESC effect_desc;
     ID3D10Device *device;
     ULONG refcount;
     HRESULT hr;
@@ -2424,6 +2544,19 @@ static void test_effect_constant_buffer_stride(void)
 
     hr = create_effect(fx_test_ecbs, 0, device, NULL, &effect);
     ok(SUCCEEDED(hr), "D3D10CreateEffectFromMemory failed (%x)\n", hr);
+
+    hr = effect->lpVtbl->GetDesc(effect, &effect_desc);
+    ok(SUCCEEDED(hr), "Failed to get effect description, hr %#x.\n", hr);
+    ok(!effect_desc.IsChildEffect, "Unexpected IsChildEffect.\n");
+    ok(effect_desc.ConstantBuffers == 15, "Unexpected constant buffers count %u.\n",
+            effect_desc.ConstantBuffers);
+    ok(effect_desc.SharedConstantBuffers == 0, "Unexpected shared constant buffers count %u.\n",
+            effect_desc.SharedConstantBuffers);
+    ok(effect_desc.GlobalVariables == 36, "Unexpected global variables count %u.\n",
+            effect_desc.GlobalVariables);
+    ok(effect_desc.SharedGlobalVariables == 0, "Unexpected shared global variables count %u.\n",
+            effect_desc.SharedGlobalVariables);
+    ok(effect_desc.Techniques == 0, "Unexpected techniques count %u.\n", effect_desc.Techniques);
 
     for (i=0; i<ARRAY_SIZE(tv_ecbs); i++)
     {
@@ -2474,6 +2607,10 @@ GeometryShader g0 = NULL;
 VertexShader v[2] = { CompileShader( vs_4_0, VS() ), CompileShader( vs_4_0, VS2() ) };
 PixelShader p = CompileShader( ps_4_0, PS() );
 GeometryShader g = CompileShader( gs_4_0, GS() );
+GeometryShader g_so = ConstructGSWithSO
+(
+    CompileShader( gs_4_0, GS()), "SV_POSITION.x"
+);
 technique10 Render
 {
     pass P0 {}
@@ -2521,186 +2658,202 @@ technique10 Render
     }
 }
 #endif
-static DWORD fx_local_shader[] = {
-0x43425844, 0x95577e13, 0xab5facae, 0xd06d9eab, 0x8b127be0, 0x00000001, 0x00001652, 0x00000001,
-0x00000024, 0x30315846, 0x00001626, 0xfeff1001, 0x00000000, 0x00000000, 0x00000006, 0x00000000,
-0x00000000, 0x00000000, 0x00000001, 0x0000138a, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x0000000d, 0x00000006, 0x00000000, 0x74726556,
-0x68537865, 0x72656461, 0x00000400, 0x00000200, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000600, 0x00307600, 0x65786950, 0x6168536c, 0x00726564, 0x00000030, 0x00000002, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000005, 0x47003070, 0x656d6f65, 0x53797274, 0x65646168,
-0x005b0072, 0x00020000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00070000, 0x30670000,
-0x00000400, 0x00000200, 0x00000200, 0x00000000, 0x00000000, 0x00000000, 0x00000600, 0xb4007600,
-0x44000001, 0x02434258, 0x5f11b96d, 0x31cdd883, 0xade81d9f, 0x014d6a2d, 0xb4000000, 0x05000001,
-0x34000000, 0x8c000000, 0xc0000000, 0xf4000000, 0x38000000, 0x52000001, 0x50464544, 0x00000000,
-0x00000000, 0x00000000, 0x1c000000, 0x00000000, 0x00fffe04, 0x1c000001, 0x4d000000, 0x6f726369,
-0x74666f73, 0x29522820, 0x534c4820, 0x6853204c, 0x72656461, 0x6d6f4320, 0x656c6970, 0x2e392072,
-0x392e3632, 0x322e3235, 0x00343438, 0x49ababab, 0x2c4e4753, 0x01000000, 0x08000000, 0x20000000,
-0x00000000, 0x00000000, 0x03000000, 0x00000000, 0x0f000000, 0x5000000f, 0x5449534f, 0x004e4f49,
-0x4fababab, 0x2c4e4753, 0x01000000, 0x08000000, 0x20000000, 0x00000000, 0x01000000, 0x03000000,
-0x00000000, 0x0f000000, 0x53000000, 0x4f505f56, 0x49544953, 0x53004e4f, 0x3c524448, 0x40000000,
-0x0f000100, 0x5f000000, 0xf2030000, 0x00001010, 0x67000000, 0xf2040000, 0x00001020, 0x01000000,
-0x36000000, 0xf2050000, 0x00001020, 0x46000000, 0x0000101e, 0x3e000000, 0x53010000, 0x74544154,
-0x02000000, 0x00000000, 0x00000000, 0x02000000, 0x00000000, 0x00000000, 0x00000000, 0x01000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x01000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0xb4000000, 0x44000001, 0xa4434258,
-0x42e88ad3, 0xcc4b1ab5, 0x5f89bf37, 0x0139edfb, 0xb4000000, 0x05000001, 0x34000000, 0x8c000000,
-0xc0000000, 0xf4000000, 0x38000000, 0x52000001, 0x50464544, 0x00000000, 0x00000000, 0x00000000,
-0x1c000000, 0x00000000, 0x00fffe04, 0x1c000001, 0x4d000000, 0x6f726369, 0x74666f73, 0x29522820,
-0x534c4820, 0x6853204c, 0x72656461, 0x6d6f4320, 0x656c6970, 0x2e392072, 0x392e3632, 0x322e3235,
-0x00343438, 0x49ababab, 0x2c4e4753, 0x01000000, 0x08000000, 0x20000000, 0x00000000, 0x00000000,
-0x02000000, 0x00000000, 0x0f000000, 0x5000000f, 0x5449534f, 0x004e4f49, 0x4fababab, 0x2c4e4753,
-0x01000000, 0x08000000, 0x20000000, 0x00000000, 0x01000000, 0x03000000, 0x00000000, 0x0f000000,
-0x53000000, 0x4f505f56, 0x49544953, 0x53004e4f, 0x3c524448, 0x40000000, 0x0f000100, 0x5f000000,
-0xf2030000, 0x00001010, 0x67000000, 0xf2040000, 0x00001020, 0x01000000, 0x2b000000, 0xf2050000,
-0x00001020, 0x46000000, 0x0000101e, 0x3e000000, 0x53010000, 0x74544154, 0x02000000, 0x00000000,
-0x00000000, 0x02000000, 0x00000000, 0x00000000, 0x00000000, 0x01000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x70000000, 0x0001b000, 0x42584400, 0xf9269a43, 0xf17ba57f,
-0x6d728d8a, 0x599e9d79, 0x000001ff, 0x0001b000, 0x00000500, 0x00003400, 0x00008c00, 0x0000c000,
-0x0000f400, 0x00013400, 0x45445200, 0x00005046, 0x00000000, 0x00000000, 0x00000000, 0x00001c00,
-0xff040000, 0x000100ff, 0x00001c00, 0x63694d00, 0x6f736f72, 0x28207466, 0x48202952, 0x204c534c,
-0x64616853, 0x43207265, 0x69706d6f, 0x2072656c, 0x36322e39, 0x3235392e, 0x3438322e, 0xabab0034,
-0x475349ab, 0x00002c4e, 0x00000100, 0x00000800, 0x00002000, 0x00000000, 0x00000100, 0x00000300,
-0x00000000, 0x00000f00, 0x5f565300, 0x49534f50, 0x4e4f4954, 0x47534f00, 0x00002c4e, 0x00000100,
-0x00000800, 0x00002000, 0x00000000, 0x00000000, 0x00000300, 0x00000000, 0x00000f00, 0x5f565300,
-0x67726154, 0xab007465, 0x444853ab, 0x00003852, 0x00004000, 0x00000e00, 0x00006500, 0x1020f203,
-0x00000000, 0x00003600, 0x1020f208, 0x00000000, 0x00400200, 0x80000000, 0x8000003f, 0x0000003f,
-0x80000000, 0x00003e3f, 0x41545301, 0x00007454, 0x00000200, 0x00000000, 0x00000000, 0x00000100,
-0x00000000, 0x00000000, 0x00000000, 0x00000100, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000100,
-0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x10006700, 0x44000002, 0x5c434258, 0x7482cd04, 0xb6d82978, 0xe48192f2, 0x01eec6be,
-0x10000000, 0x05000002, 0x34000000, 0x8c000000, 0xc0000000, 0xf4000000, 0x94000000, 0x52000001,
-0x50464544, 0x00000000, 0x00000000, 0x00000000, 0x1c000000, 0x00000000, 0x00475304, 0x1c000001,
-0x4d000000, 0x6f726369, 0x74666f73, 0x29522820, 0x534c4820, 0x6853204c, 0x72656461, 0x6d6f4320,
-0x656c6970, 0x2e392072, 0x392e3632, 0x322e3235, 0x00343438, 0x49ababab, 0x2c4e4753, 0x01000000,
-0x08000000, 0x20000000, 0x00000000, 0x01000000, 0x03000000, 0x00000000, 0x0f000000, 0x5300000f,
-0x4f505f56, 0x49544953, 0x4f004e4f, 0x2c4e4753, 0x01000000, 0x08000000, 0x20000000, 0x00000000,
-0x01000000, 0x03000000, 0x00000000, 0x0f000000, 0x53000000, 0x4f505f56, 0x49544953, 0x53004e4f,
-0x98524448, 0x40000000, 0x26000200, 0x61000000, 0xf2050000, 0x03002010, 0x00000000, 0x01000000,
-0x5d000000, 0x5c010018, 0x67010028, 0xf2040000, 0x00001020, 0x01000000, 0x5e000000, 0x03020000,
-0x36000000, 0xf2060000, 0x00001020, 0x46000000, 0x0000201e, 0x00000000, 0x13000000, 0x36010000,
-0xf2060000, 0x00001020, 0x46000000, 0x0100201e, 0x00000000, 0x13000000, 0x36010000, 0xf2060000,
-0x00001020, 0x46000000, 0x0200201e, 0x00000000, 0x13000000, 0x09010000, 0x3e010000, 0x53010000,
-0x74544154, 0x08000000, 0x00000000, 0x00000000, 0x02000000, 0x00000000, 0x00000000, 0x00000000,
-0x01000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x01000000, 0x03000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x03000000, 0x05000000, 0x03000000, 0x00000000, 0x00000000, 0x00000000, 0x52000000, 0x65646e65,
-0x30500072, 0x00315000, 0x00000001, 0x00000002, 0x00000000, 0x00000001, 0x00000002, 0x00000000,
-0x00000001, 0x00000002, 0x00000000, 0x01003250, 0x02000000, 0x00000000, 0x01000000, 0x02000000,
-0x00000000, 0x01000000, 0x02000000, 0x00000000, 0x50000000, 0x01b00033, 0x58440000, 0x269a4342,
-0x7ba57ff9, 0x728d8af1, 0x9e9d796d, 0x0001ff59, 0x01b00000, 0x00050000, 0x00340000, 0x008c0000,
-0x00c00000, 0x00f40000, 0x01340000, 0x44520000, 0x00504645, 0x00000000, 0x00000000, 0x00000000,
-0x001c0000, 0x04000000, 0x0100ffff, 0x001c0000, 0x694d0000, 0x736f7263, 0x2074666f, 0x20295228,
-0x4c534c48, 0x61685320, 0x20726564, 0x706d6f43, 0x72656c69, 0x322e3920, 0x35392e36, 0x38322e32,
-0xab003434, 0x5349abab, 0x002c4e47, 0x00010000, 0x00080000, 0x00200000, 0x00000000, 0x00010000,
-0x00030000, 0x00000000, 0x000f0000, 0x56530000, 0x534f505f, 0x4f495449, 0x534f004e, 0x002c4e47,
-0x00010000, 0x00080000, 0x00200000, 0x00000000, 0x00000000, 0x00030000, 0x00000000, 0x000f0000,
-0x56530000, 0x7261545f, 0x00746567, 0x4853abab, 0x00385244, 0x00400000, 0x000e0000, 0x00650000,
-0x20f20300, 0x00000010, 0x00360000, 0x20f20800, 0x00000010, 0x40020000, 0x00000000, 0x00003f80,
-0x00003f80, 0x00000000, 0x003e3f80, 0x54530100, 0x00745441, 0x00020000, 0x00000000, 0x00000000,
-0x00010000, 0x00000000, 0x00000000, 0x00000000, 0x00010000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00010000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x083e0000, 0x00000000, 0x01b40000, 0x58440000, 0x6d024342, 0x835f11b9,
-0x9f31cdd8, 0x2dade81d, 0x00014d6a, 0x01b40000, 0x00050000, 0x00340000, 0x008c0000, 0x00c00000,
-0x00f40000, 0x01380000, 0x44520000, 0x00504645, 0x00000000, 0x00000000, 0x00000000, 0x001c0000,
-0x04000000, 0x0100fffe, 0x001c0000, 0x694d0000, 0x736f7263, 0x2074666f, 0x20295228, 0x4c534c48,
-0x61685320, 0x20726564, 0x706d6f43, 0x72656c69, 0x322e3920, 0x35392e36, 0x38322e32, 0xab003434,
-0x5349abab, 0x002c4e47, 0x00010000, 0x00080000, 0x00200000, 0x00000000, 0x00000000, 0x00030000,
-0x00000000, 0x0f0f0000, 0x4f500000, 0x49544953, 0xab004e4f, 0x534fabab, 0x002c4e47, 0x00010000,
-0x00080000, 0x00200000, 0x00000000, 0x00010000, 0x00030000, 0x00000000, 0x000f0000, 0x56530000,
-0x534f505f, 0x4f495449, 0x4853004e, 0x003c5244, 0x00400000, 0x000f0001, 0x005f0000, 0x10f20300,
-0x00000010, 0x00670000, 0x20f20400, 0x00000010, 0x00010000, 0x00360000, 0x20f20500, 0x00000010,
-0x1e460000, 0x00000010, 0x003e0000, 0x54530100, 0x00745441, 0x00020000, 0x00000000, 0x00000000,
-0x00020000, 0x00000000, 0x00000000, 0x00000000, 0x00010000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00010000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x09fa0000, 0x00000000, 0x02100000, 0x58440000, 0x045c4342, 0x787482cd,
-0xf2b6d829, 0xbee48192, 0x0001eec6, 0x02100000, 0x00050000, 0x00340000, 0x008c0000, 0x00c00000,
-0x00f40000, 0x01940000, 0x44520000, 0x00504645, 0x00000000, 0x00000000, 0x00000000, 0x001c0000,
-0x04000000, 0x01004753, 0x001c0000, 0x694d0000, 0x736f7263, 0x2074666f, 0x20295228, 0x4c534c48,
-0x61685320, 0x20726564, 0x706d6f43, 0x72656c69, 0x322e3920, 0x35392e36, 0x38322e32, 0xab003434,
-0x5349abab, 0x002c4e47, 0x00010000, 0x00080000, 0x00200000, 0x00000000, 0x00010000, 0x00030000,
-0x00000000, 0x0f0f0000, 0x56530000, 0x534f505f, 0x4f495449, 0x534f004e, 0x002c4e47, 0x00010000,
-0x00080000, 0x00200000, 0x00000000, 0x00010000, 0x00030000, 0x00000000, 0x000f0000, 0x56530000,
-0x534f505f, 0x4f495449, 0x4853004e, 0x00985244, 0x00400000, 0x00260002, 0x00610000, 0x10f20500,
-0x00030020, 0x00000000, 0x00010000, 0x185d0000, 0x285c0100, 0x00670100, 0x20f20400, 0x00000010,
-0x00010000, 0x005e0000, 0x00030200, 0x00360000, 0x20f20600, 0x00000010, 0x1e460000, 0x00000020,
-0x00000000, 0x00130000, 0x00360100, 0x20f20600, 0x00000010, 0x1e460000, 0x00010020, 0x00000000,
-0x00130000, 0x00360100, 0x20f20600, 0x00000010, 0x1e460000, 0x00020020, 0x00000000, 0x00130000,
-0x00090100, 0x003e0100, 0x54530100, 0x00745441, 0x00080000, 0x00000000, 0x00000000, 0x00020000,
-0x00000000, 0x00000000, 0x00000000, 0x00010000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00010000, 0x00030000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00030000, 0x00050000, 0x00030000, 0x00000000, 0x00000000,
-0x00000000, 0x0bba0000, 0x00000000, 0x34500000, 0x0001b000, 0x42584400, 0xf9269a43, 0xf17ba57f,
-0x6d728d8a, 0x599e9d79, 0x000001ff, 0x0001b000, 0x00000500, 0x00003400, 0x00008c00, 0x0000c000,
-0x0000f400, 0x00013400, 0x45445200, 0x00005046, 0x00000000, 0x00000000, 0x00000000, 0x00001c00,
-0xff040000, 0x000100ff, 0x00001c00, 0x63694d00, 0x6f736f72, 0x28207466, 0x48202952, 0x204c534c,
-0x64616853, 0x43207265, 0x69706d6f, 0x2072656c, 0x36322e39, 0x3235392e, 0x3438322e, 0xabab0034,
-0x475349ab, 0x00002c4e, 0x00000100, 0x00000800, 0x00002000, 0x00000000, 0x00000100, 0x00000300,
-0x00000000, 0x00000f00, 0x5f565300, 0x49534f50, 0x4e4f4954, 0x47534f00, 0x00002c4e, 0x00000100,
-0x00000800, 0x00002000, 0x00000000, 0x00000000, 0x00000300, 0x00000000, 0x00000f00, 0x5f565300,
-0x67726154, 0xab007465, 0x444853ab, 0x00003852, 0x00004000, 0x00000e00, 0x00006500, 0x1020f203,
-0x00000000, 0x00003600, 0x1020f208, 0x00000000, 0x00400200, 0x80000000, 0x8000003f, 0x0000003f,
-0x80000000, 0x00003e3f, 0x41545301, 0x00007454, 0x00000200, 0x00000000, 0x00000000, 0x00000100,
-0x00000000, 0x00000000, 0x00000000, 0x00000100, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000100,
-0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x000dd900, 0x00000000, 0x0001b400, 0x42584400, 0x8ad3a443, 0x1ab542e8, 0xbf37cc4b,
-0xedfb5f89, 0x00000139, 0x0001b400, 0x00000500, 0x00003400, 0x00008c00, 0x0000c000, 0x0000f400,
-0x00013800, 0x45445200, 0x00005046, 0x00000000, 0x00000000, 0x00000000, 0x00001c00, 0xfe040000,
-0x000100ff, 0x00001c00, 0x63694d00, 0x6f736f72, 0x28207466, 0x48202952, 0x204c534c, 0x64616853,
-0x43207265, 0x69706d6f, 0x2072656c, 0x36322e39, 0x3235392e, 0x3438322e, 0xabab0034, 0x475349ab,
-0x00002c4e, 0x00000100, 0x00000800, 0x00002000, 0x00000000, 0x00000000, 0x00000200, 0x00000000,
-0x000f0f00, 0x534f5000, 0x4f495449, 0xabab004e, 0x47534fab, 0x00002c4e, 0x00000100, 0x00000800,
-0x00002000, 0x00000000, 0x00000100, 0x00000300, 0x00000000, 0x00000f00, 0x5f565300, 0x49534f50,
-0x4e4f4954, 0x44485300, 0x00003c52, 0x01004000, 0x00000f00, 0x00005f00, 0x1010f203, 0x00000000,
-0x00006700, 0x1020f204, 0x00000000, 0x00000100, 0x00002b00, 0x1020f205, 0x00000000, 0x101e4600,
-0x00000000, 0x00003e00, 0x41545301, 0x00007454, 0x00000200, 0x00000000, 0x00000000, 0x00000200,
-0x00000000, 0x00000000, 0x00000000, 0x00000100, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x000f9500, 0x00000000, 0x00021000, 0x42584400, 0xcd045c43, 0x29787482, 0x92f2b6d8,
-0xc6bee481, 0x000001ee, 0x00021000, 0x00000500, 0x00003400, 0x00008c00, 0x0000c000, 0x0000f400,
-0x00019400, 0x45445200, 0x00005046, 0x00000000, 0x00000000, 0x00000000, 0x00001c00, 0x53040000,
-0x00010047, 0x00001c00, 0x63694d00, 0x6f736f72, 0x28207466, 0x48202952, 0x204c534c, 0x64616853,
-0x43207265, 0x69706d6f, 0x2072656c, 0x36322e39, 0x3235392e, 0x3438322e, 0xabab0034, 0x475349ab,
-0x00002c4e, 0x00000100, 0x00000800, 0x00002000, 0x00000000, 0x00000100, 0x00000300, 0x00000000,
-0x000f0f00, 0x5f565300, 0x49534f50, 0x4e4f4954, 0x47534f00, 0x00002c4e, 0x00000100, 0x00000800,
-0x00002000, 0x00000000, 0x00000100, 0x00000300, 0x00000000, 0x00000f00, 0x5f565300, 0x49534f50,
-0x4e4f4954, 0x44485300, 0x00009852, 0x02004000, 0x00002600, 0x00006100, 0x2010f205, 0x00000300,
-0x00000000, 0x00000100, 0x00185d00, 0x00285c01, 0x00006701, 0x1020f204, 0x00000000, 0x00000100,
-0x00005e00, 0x00000302, 0x00003600, 0x1020f206, 0x00000000, 0x201e4600, 0x00000000, 0x00000000,
-0x00001300, 0x00003601, 0x1020f206, 0x00000000, 0x201e4600, 0x00000100, 0x00000000, 0x00001300,
-0x00003601, 0x1020f206, 0x00000000, 0x201e4600, 0x00000200, 0x00000000, 0x00001300, 0x00000901,
-0x00003e01, 0x41545301, 0x00007454, 0x00000800, 0x00000000, 0x00000000, 0x00000200, 0x00000000,
-0x00000000, 0x00000000, 0x00000100, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000100,
-0x00000300, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
-0x00000000, 0x00000000, 0x00000300, 0x00000500, 0x00000300, 0x00000000, 0x00000000, 0x00000000,
-0x00115500, 0x00000000, 0x00355000, 0xa5003650, 0x00000000, 0x50000000, 0x00a50037, 0x00010000,
-0x002d0000, 0x00110000, 0x00000000, 0xffff0000, 0x0000ffff, 0x00000000, 0x00580000, 0x003c0000,
-0x00000000, 0xffff0000, 0x0000ffff, 0x00000000, 0x00860000, 0x006a0000, 0x00000000, 0xffff0000,
-0x0000ffff, 0x00000000, 0x00a50000, 0x00890000, 0x00000000, 0xffff0000, 0x00a7ffff, 0x025f0000,
-0x00000000, 0x04170000, 0x003c0000, 0x00000000, 0xffff0000, 0x0419ffff, 0x00000000, 0x05cd0000,
-0x006a0000, 0x00000000, 0xffff0000, 0x05cfffff, 0x00000000, 0x07e30000, 0x00080000, 0x00000000,
-0x07ea0000, 0x00000000, 0x00000000, 0x07ed0000, 0x00030000, 0x00000000, 0x00070000, 0x00000000,
-0x00010000, 0x07f00000, 0x00060000, 0x00000000, 0x00010000, 0x07fc0000, 0x00080000, 0x00000000,
-0x00010000, 0x08080000, 0x08140000, 0x00030000, 0x00000000, 0x00070000, 0x00000000, 0x00010000,
-0x08170000, 0x00060000, 0x00000000, 0x00010000, 0x08230000, 0x00080000, 0x00000000, 0x00010000,
-0x082f0000, 0x083b0000, 0x00030000, 0x00000000, 0x00070000, 0x00000000, 0x00070000, 0x09f20000,
-0x00060000, 0x00000000, 0x00070000, 0x0bb20000, 0x00080000, 0x00000000, 0x00070000, 0x0dce0000,
-0x0dd60000, 0x00030000, 0x00000000, 0x00070000, 0x00000000, 0x00070000, 0x0f8d0000, 0x00060000,
-0x00000000, 0x00070000, 0x114d0000, 0x00080000, 0x00000000, 0x00070000, 0x13690000, 0x13710000,
-0x00030000, 0x00000000, 0x00070000, 0x00000000, 0x00020000, 0x00580000, 0x00060000, 0x00000000,
-0x00020000, 0x002d0000, 0x00080000, 0x00000000, 0x00020000, 0x00860000, 0x13740000, 0x00030000,
-0x00000000, 0x00070000, 0x00000000, 0x00020000, 0x04170000, 0x00060000, 0x00000000, 0x00030000,
-0x13770000, 0x00080000, 0x00000000, 0x00020000, 0x05cd0000, 0x137f0000, 0x00030000, 0x00000000,
-0x00070000, 0x00000000, 0x00020000, 0x04170000, 0x00060000, 0x00000000, 0x00030000, 0x13820000,
-0x00080000, 0x00000000, 0x00020000, 0x05cd0000, 0x00000000,
+static DWORD fx_local_shader[] =
+{
+    0x43425844, 0x0a74ff0f, 0xea10b516, 0x8be88332, 0x2a273ca7, 0x00000001, 0x0000182d, 0x00000001,
+    0x00000024, 0x30315846, 0x00001801, 0xfeff1001, 0x00000000, 0x00000000, 0x00000007, 0x00000000,
+    0x00000000, 0x00000000, 0x00000001, 0x00001549, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x0000000e, 0x00000006, 0x00000000, 0x74726556,
+    0x68537865, 0x72656461, 0x00000400, 0x00000200, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000600, 0x00307600, 0x65786950, 0x6168536c, 0x00726564, 0x00000030, 0x00000002, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000005, 0x47003070, 0x656d6f65, 0x53797274, 0x65646168,
+    0x005b0072, 0x00020000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00070000, 0x30670000,
+    0x00000400, 0x00000200, 0x00000200, 0x00000000, 0x00000000, 0x00000000, 0x00000600, 0xa8007600,
+    0x44000001, 0x92434258, 0xa75ea3fc, 0x13affa34, 0x46be1a21, 0x0104d04a, 0xa8000000, 0x05000001,
+    0x34000000, 0x80000000, 0xb4000000, 0xe8000000, 0x2c000000, 0x52000001, 0x44464544, 0x00000000,
+    0x00000000, 0x00000000, 0x1c000000, 0x00000000, 0x00fffe04, 0x1c000001, 0x4d000000, 0x6f726369,
+    0x74666f73, 0x29522820, 0x534c4820, 0x6853204c, 0x72656461, 0x6d6f4320, 0x656c6970, 0x30312072,
+    0x4900312e, 0x2c4e4753, 0x01000000, 0x08000000, 0x20000000, 0x00000000, 0x00000000, 0x03000000,
+    0x00000000, 0x0f000000, 0x5000000f, 0x5449534f, 0x004e4f49, 0x4fababab, 0x2c4e4753, 0x01000000,
+    0x08000000, 0x20000000, 0x00000000, 0x01000000, 0x03000000, 0x00000000, 0x0f000000, 0x53000000,
+    0x4f505f56, 0x49544953, 0x53004e4f, 0x3c524448, 0x40000000, 0x0f000100, 0x5f000000, 0xf2030000,
+    0x00001010, 0x67000000, 0xf2040000, 0x00001020, 0x01000000, 0x36000000, 0xf2050000, 0x00001020,
+    0x46000000, 0x0000101e, 0x3e000000, 0x53010000, 0x74544154, 0x02000000, 0x00000000, 0x00000000,
+    0x02000000, 0x00000000, 0x00000000, 0x00000000, 0x01000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x01000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0xa8000000, 0x44000001, 0x84434258, 0xa05ac55b, 0x929a6a46, 0x4f0df40a,
+    0x01a2fea3, 0xa8000000, 0x05000001, 0x34000000, 0x80000000, 0xb4000000, 0xe8000000, 0x2c000000,
+    0x52000001, 0x44464544, 0x00000000, 0x00000000, 0x00000000, 0x1c000000, 0x00000000, 0x00fffe04,
+    0x1c000001, 0x4d000000, 0x6f726369, 0x74666f73, 0x29522820, 0x534c4820, 0x6853204c, 0x72656461,
+    0x6d6f4320, 0x656c6970, 0x30312072, 0x4900312e, 0x2c4e4753, 0x01000000, 0x08000000, 0x20000000,
+    0x00000000, 0x00000000, 0x02000000, 0x00000000, 0x0f000000, 0x5000000f, 0x5449534f, 0x004e4f49,
+    0x4fababab, 0x2c4e4753, 0x01000000, 0x08000000, 0x20000000, 0x00000000, 0x01000000, 0x03000000,
+    0x00000000, 0x0f000000, 0x53000000, 0x4f505f56, 0x49544953, 0x53004e4f, 0x3c524448, 0x40000000,
+    0x0f000100, 0x5f000000, 0xf2030000, 0x00001010, 0x67000000, 0xf2040000, 0x00001020, 0x01000000,
+    0x2b000000, 0xf2050000, 0x00001020, 0x46000000, 0x0000101e, 0x3e000000, 0x53010000, 0x74544154,
+    0x02000000, 0x00000000, 0x00000000, 0x02000000, 0x00000000, 0x00000000, 0x00000000, 0x01000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x01000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x70000000, 0x0001a400, 0x42584400,
+    0xf4813443, 0xb6605b8e, 0xc69999b8, 0xcb75f1b5, 0x000001eb, 0x0001a400, 0x00000500, 0x00003400,
+    0x00008000, 0x0000b400, 0x0000e800, 0x00012800, 0x45445200, 0x00004446, 0x00000000, 0x00000000,
+    0x00000000, 0x00001c00, 0xff040000, 0x000100ff, 0x00001c00, 0x63694d00, 0x6f736f72, 0x28207466,
+    0x48202952, 0x204c534c, 0x64616853, 0x43207265, 0x69706d6f, 0x2072656c, 0x312e3031, 0x47534900,
+    0x00002c4e, 0x00000100, 0x00000800, 0x00002000, 0x00000000, 0x00000100, 0x00000300, 0x00000000,
+    0x00000f00, 0x5f565300, 0x49534f50, 0x4e4f4954, 0x47534f00, 0x00002c4e, 0x00000100, 0x00000800,
+    0x00002000, 0x00000000, 0x00000000, 0x00000300, 0x00000000, 0x00000f00, 0x5f565300, 0x67726154,
+    0xab007465, 0x444853ab, 0x00003852, 0x00004000, 0x00000e00, 0x00006500, 0x1020f203, 0x00000000,
+    0x00003600, 0x1020f208, 0x00000000, 0x00400200, 0x80000000, 0x8000003f, 0x0000003f, 0x80000000,
+    0x00003e3f, 0x41545301, 0x00007454, 0x00000200, 0x00000000, 0x00000000, 0x00000100, 0x00000000,
+    0x00000000, 0x00000000, 0x00000100, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000100, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x04006700, 0x44000002, 0x23434258, 0x6e8e325e, 0x5f0774e8, 0xbfe636e1, 0x01d3f67a, 0x04000000,
+    0x05000002, 0x34000000, 0x80000000, 0xb4000000, 0xe8000000, 0x88000000, 0x52000001, 0x44464544,
+    0x00000000, 0x00000000, 0x00000000, 0x1c000000, 0x00000000, 0x00475304, 0x1c000001, 0x4d000000,
+    0x6f726369, 0x74666f73, 0x29522820, 0x534c4820, 0x6853204c, 0x72656461, 0x6d6f4320, 0x656c6970,
+    0x30312072, 0x4900312e, 0x2c4e4753, 0x01000000, 0x08000000, 0x20000000, 0x00000000, 0x01000000,
+    0x03000000, 0x00000000, 0x0f000000, 0x5300000f, 0x4f505f56, 0x49544953, 0x4f004e4f, 0x2c4e4753,
+    0x01000000, 0x08000000, 0x20000000, 0x00000000, 0x01000000, 0x03000000, 0x00000000, 0x0f000000,
+    0x53000000, 0x4f505f56, 0x49544953, 0x53004e4f, 0x98524448, 0x40000000, 0x26000200, 0x61000000,
+    0xf2050000, 0x03002010, 0x00000000, 0x01000000, 0x5d000000, 0x5c010018, 0x67010028, 0xf2040000,
+    0x00001020, 0x01000000, 0x5e000000, 0x03020000, 0x36000000, 0xf2060000, 0x00001020, 0x46000000,
+    0x0000201e, 0x00000000, 0x13000000, 0x36010000, 0xf2060000, 0x00001020, 0x46000000, 0x0100201e,
+    0x00000000, 0x13000000, 0x36010000, 0xf2060000, 0x00001020, 0x46000000, 0x0200201e, 0x00000000,
+    0x13000000, 0x09010000, 0x3e010000, 0x53010000, 0x74544154, 0x08000000, 0x00000000, 0x00000000,
+    0x02000000, 0x00000000, 0x00000000, 0x00000000, 0x01000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x01000000, 0x03000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x03000000, 0x05000000, 0x03000000, 0x00000000,
+    0x00000000, 0x00000000, 0x5b000000, 0x02000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x08000000, 0x67000000, 0x006f735f, 0x00000204, 0x43425844, 0x8e325e23, 0x0774e86e, 0xe636e15f,
+    0xd3f67abf, 0x00000001, 0x00000204, 0x00000005, 0x00000034, 0x00000080, 0x000000b4, 0x000000e8,
+    0x00000188, 0x46454452, 0x00000044, 0x00000000, 0x00000000, 0x00000000, 0x0000001c, 0x47530400,
+    0x00000100, 0x0000001c, 0x7263694d, 0x666f736f, 0x52282074, 0x4c482029, 0x53204c53, 0x65646168,
+    0x6f432072, 0x6c69706d, 0x31207265, 0x00312e30, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008,
+    0x00000020, 0x00000000, 0x00000001, 0x00000003, 0x00000000, 0x00000f0f, 0x505f5653, 0x5449534f,
+    0x004e4f49, 0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000001,
+    0x00000003, 0x00000000, 0x0000000f, 0x505f5653, 0x5449534f, 0x004e4f49, 0x52444853, 0x00000098,
+    0x00020040, 0x00000026, 0x05000061, 0x002010f2, 0x00000003, 0x00000000, 0x00000001, 0x0100185d,
+    0x0100285c, 0x04000067, 0x001020f2, 0x00000000, 0x00000001, 0x0200005e, 0x00000003, 0x06000036,
+    0x001020f2, 0x00000000, 0x00201e46, 0x00000000, 0x00000000, 0x01000013, 0x06000036, 0x001020f2,
+    0x00000000, 0x00201e46, 0x00000001, 0x00000000, 0x01000013, 0x06000036, 0x001020f2, 0x00000000,
+    0x00201e46, 0x00000002, 0x00000000, 0x01000013, 0x01000009, 0x0100003e, 0x54415453, 0x00000074,
+    0x00000008, 0x00000000, 0x00000000, 0x00000002, 0x00000000, 0x00000000, 0x00000000, 0x00000001,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000003, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000003,
+    0x00000005, 0x00000003, 0x00000000, 0x00000000, 0x00000000, 0x505f5653, 0x5449534f, 0x2e4e4f49,
+    0x65520078, 0x7265646e, 0x00305000, 0x01003150, 0x02000000, 0x00000000, 0x01000000, 0x02000000,
+    0x00000000, 0x01000000, 0x02000000, 0x00000000, 0x50000000, 0x00010032, 0x00020000, 0x00000000,
+    0x00010000, 0x00020000, 0x00000000, 0x00010000, 0x00020000, 0x00000000, 0x33500000, 0x0001a400,
+    0x42584400, 0xf4813443, 0xb6605b8e, 0xc69999b8, 0xcb75f1b5, 0x000001eb, 0x0001a400, 0x00000500,
+    0x00003400, 0x00008000, 0x0000b400, 0x0000e800, 0x00012800, 0x45445200, 0x00004446, 0x00000000,
+    0x00000000, 0x00000000, 0x00001c00, 0xff040000, 0x000100ff, 0x00001c00, 0x63694d00, 0x6f736f72,
+    0x28207466, 0x48202952, 0x204c534c, 0x64616853, 0x43207265, 0x69706d6f, 0x2072656c, 0x312e3031,
+    0x47534900, 0x00002c4e, 0x00000100, 0x00000800, 0x00002000, 0x00000000, 0x00000100, 0x00000300,
+    0x00000000, 0x00000f00, 0x5f565300, 0x49534f50, 0x4e4f4954, 0x47534f00, 0x00002c4e, 0x00000100,
+    0x00000800, 0x00002000, 0x00000000, 0x00000000, 0x00000300, 0x00000000, 0x00000f00, 0x5f565300,
+    0x67726154, 0xab007465, 0x444853ab, 0x00003852, 0x00004000, 0x00000e00, 0x00006500, 0x1020f203,
+    0x00000000, 0x00003600, 0x1020f208, 0x00000000, 0x00400200, 0x80000000, 0x8000003f, 0x0000003f,
+    0x80000000, 0x00003e3f, 0x41545301, 0x00007454, 0x00000200, 0x00000000, 0x00000000, 0x00000100,
+    0x00000000, 0x00000000, 0x00000000, 0x00000100, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000100,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x000a4500, 0x00000000, 0x0001a800, 0x42584400, 0xa3fc9243, 0xfa34a75e, 0x1a2113af,
+    0xd04a46be, 0x00000104, 0x0001a800, 0x00000500, 0x00003400, 0x00008000, 0x0000b400, 0x0000e800,
+    0x00012c00, 0x45445200, 0x00004446, 0x00000000, 0x00000000, 0x00000000, 0x00001c00, 0xfe040000,
+    0x000100ff, 0x00001c00, 0x63694d00, 0x6f736f72, 0x28207466, 0x48202952, 0x204c534c, 0x64616853,
+    0x43207265, 0x69706d6f, 0x2072656c, 0x312e3031, 0x47534900, 0x00002c4e, 0x00000100, 0x00000800,
+    0x00002000, 0x00000000, 0x00000000, 0x00000300, 0x00000000, 0x000f0f00, 0x534f5000, 0x4f495449,
+    0xabab004e, 0x47534fab, 0x00002c4e, 0x00000100, 0x00000800, 0x00002000, 0x00000000, 0x00000100,
+    0x00000300, 0x00000000, 0x00000f00, 0x5f565300, 0x49534f50, 0x4e4f4954, 0x44485300, 0x00003c52,
+    0x01004000, 0x00000f00, 0x00005f00, 0x1010f203, 0x00000000, 0x00006700, 0x1020f204, 0x00000000,
+    0x00000100, 0x00003600, 0x1020f205, 0x00000000, 0x101e4600, 0x00000000, 0x00003e00, 0x41545301,
+    0x00007454, 0x00000200, 0x00000000, 0x00000000, 0x00000200, 0x00000000, 0x00000000, 0x00000000,
+    0x00000100, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000100, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x000bf500, 0x00000000,
+    0x00020400, 0x42584400, 0x325e2343, 0x74e86e8e, 0x36e15f07, 0xf67abfe6, 0x000001d3, 0x00020400,
+    0x00000500, 0x00003400, 0x00008000, 0x0000b400, 0x0000e800, 0x00018800, 0x45445200, 0x00004446,
+    0x00000000, 0x00000000, 0x00000000, 0x00001c00, 0x53040000, 0x00010047, 0x00001c00, 0x63694d00,
+    0x6f736f72, 0x28207466, 0x48202952, 0x204c534c, 0x64616853, 0x43207265, 0x69706d6f, 0x2072656c,
+    0x312e3031, 0x47534900, 0x00002c4e, 0x00000100, 0x00000800, 0x00002000, 0x00000000, 0x00000100,
+    0x00000300, 0x00000000, 0x000f0f00, 0x5f565300, 0x49534f50, 0x4e4f4954, 0x47534f00, 0x00002c4e,
+    0x00000100, 0x00000800, 0x00002000, 0x00000000, 0x00000100, 0x00000300, 0x00000000, 0x00000f00,
+    0x5f565300, 0x49534f50, 0x4e4f4954, 0x44485300, 0x00009852, 0x02004000, 0x00002600, 0x00006100,
+    0x2010f205, 0x00000300, 0x00000000, 0x00000100, 0x00185d00, 0x00285c01, 0x00006701, 0x1020f204,
+    0x00000000, 0x00000100, 0x00005e00, 0x00000302, 0x00003600, 0x1020f206, 0x00000000, 0x201e4600,
+    0x00000000, 0x00000000, 0x00001300, 0x00003601, 0x1020f206, 0x00000000, 0x201e4600, 0x00000100,
+    0x00000000, 0x00001300, 0x00003601, 0x1020f206, 0x00000000, 0x201e4600, 0x00000200, 0x00000000,
+    0x00001300, 0x00000901, 0x00003e01, 0x41545301, 0x00007454, 0x00000800, 0x00000000, 0x00000000,
+    0x00000200, 0x00000000, 0x00000000, 0x00000000, 0x00000100, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000100, 0x00000300, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000300, 0x00000500, 0x00000300, 0x00000000,
+    0x00000000, 0x00000000, 0x000da900, 0x00000000, 0x00345000, 0x000001a4, 0x43425844, 0x8ef48134,
+    0xb8b6605b, 0xb5c69999, 0xebcb75f1, 0x00000001, 0x000001a4, 0x00000005, 0x00000034, 0x00000080,
+    0x000000b4, 0x000000e8, 0x00000128, 0x46454452, 0x00000044, 0x00000000, 0x00000000, 0x00000000,
+    0x0000001c, 0xffff0400, 0x00000100, 0x0000001c, 0x7263694d, 0x666f736f, 0x52282074, 0x4c482029,
+    0x53204c53, 0x65646168, 0x6f432072, 0x6c69706d, 0x31207265, 0x00312e30, 0x4e475349, 0x0000002c,
+    0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000001, 0x00000003, 0x00000000, 0x0000000f,
+    0x505f5653, 0x5449534f, 0x004e4f49, 0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020,
+    0x00000000, 0x00000000, 0x00000003, 0x00000000, 0x0000000f, 0x545f5653, 0x65677261, 0xabab0074,
+    0x52444853, 0x00000038, 0x00000040, 0x0000000e, 0x03000065, 0x001020f2, 0x00000000, 0x08000036,
+    0x001020f2, 0x00000000, 0x00004002, 0x3f800000, 0x3f800000, 0x00000000, 0x3f800000, 0x0100003e,
+    0x54415453, 0x00000074, 0x00000002, 0x00000000, 0x00000000, 0x00000001, 0x00000000, 0x00000000,
+    0x00000000, 0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000fbc,
+    0x00000000, 0x000001a8, 0x43425844, 0x5ac55b84, 0x9a6a46a0, 0x0df40a92, 0xa2fea34f, 0x00000001,
+    0x000001a8, 0x00000005, 0x00000034, 0x00000080, 0x000000b4, 0x000000e8, 0x0000012c, 0x46454452,
+    0x00000044, 0x00000000, 0x00000000, 0x00000000, 0x0000001c, 0xfffe0400, 0x00000100, 0x0000001c,
+    0x7263694d, 0x666f736f, 0x52282074, 0x4c482029, 0x53204c53, 0x65646168, 0x6f432072, 0x6c69706d,
+    0x31207265, 0x00312e30, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000,
+    0x00000000, 0x00000002, 0x00000000, 0x00000f0f, 0x49534f50, 0x4e4f4954, 0xababab00, 0x4e47534f,
+    0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000001, 0x00000003, 0x00000000,
+    0x0000000f, 0x505f5653, 0x5449534f, 0x004e4f49, 0x52444853, 0x0000003c, 0x00010040, 0x0000000f,
+    0x0300005f, 0x001010f2, 0x00000000, 0x04000067, 0x001020f2, 0x00000000, 0x00000001, 0x0500002b,
+    0x001020f2, 0x00000000, 0x00101e46, 0x00000000, 0x0100003e, 0x54415453, 0x00000074, 0x00000002,
+    0x00000000, 0x00000000, 0x00000002, 0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x0000116c, 0x00000000, 0x00000204, 0x43425844,
+    0x8e325e23, 0x0774e86e, 0xe636e15f, 0xd3f67abf, 0x00000001, 0x00000204, 0x00000005, 0x00000034,
+    0x00000080, 0x000000b4, 0x000000e8, 0x00000188, 0x46454452, 0x00000044, 0x00000000, 0x00000000,
+    0x00000000, 0x0000001c, 0x47530400, 0x00000100, 0x0000001c, 0x7263694d, 0x666f736f, 0x52282074,
+    0x4c482029, 0x53204c53, 0x65646168, 0x6f432072, 0x6c69706d, 0x31207265, 0x00312e30, 0x4e475349,
+    0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000001, 0x00000003, 0x00000000,
+    0x00000f0f, 0x505f5653, 0x5449534f, 0x004e4f49, 0x4e47534f, 0x0000002c, 0x00000001, 0x00000008,
+    0x00000020, 0x00000000, 0x00000001, 0x00000003, 0x00000000, 0x0000000f, 0x505f5653, 0x5449534f,
+    0x004e4f49, 0x52444853, 0x00000098, 0x00020040, 0x00000026, 0x05000061, 0x002010f2, 0x00000003,
+    0x00000000, 0x00000001, 0x0100185d, 0x0100285c, 0x04000067, 0x001020f2, 0x00000000, 0x00000001,
+    0x0200005e, 0x00000003, 0x06000036, 0x001020f2, 0x00000000, 0x00201e46, 0x00000000, 0x00000000,
+    0x01000013, 0x06000036, 0x001020f2, 0x00000000, 0x00201e46, 0x00000001, 0x00000000, 0x01000013,
+    0x06000036, 0x001020f2, 0x00000000, 0x00201e46, 0x00000002, 0x00000000, 0x01000013, 0x01000009,
+    0x0100003e, 0x54415453, 0x00000074, 0x00000008, 0x00000000, 0x00000000, 0x00000002, 0x00000000,
+    0x00000000, 0x00000000, 0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000001,
+    0x00000003, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000003, 0x00000005, 0x00000003, 0x00000000, 0x00000000, 0x00000000,
+    0x00001320, 0x00000000, 0x50003550, 0x00a50036, 0x00000000, 0x37500000, 0x0000a500, 0x00000100,
+    0x00002d00, 0x00001100, 0x00000000, 0xffffff00, 0x000000ff, 0x00000000, 0x00005800, 0x00003c00,
+    0x00000000, 0xffffff00, 0x000000ff, 0x00000000, 0x00008600, 0x00006a00, 0x00000000, 0xffffff00,
+    0x000000ff, 0x00000000, 0x0000a500, 0x00008900, 0x00000000, 0xffffff00, 0x0000a7ff, 0x00025300,
+    0x00000000, 0x0003ff00, 0x00003c00, 0x00000000, 0xffffff00, 0x000401ff, 0x00000000, 0x0005a900,
+    0x00006a00, 0x00000000, 0xffffff00, 0x0005abff, 0x00000000, 0x0007cf00, 0x0007b300, 0x00000000,
+    0xffffff00, 0x0007d4ff, 0x0009dc00, 0x00000000, 0x0009ea00, 0x00000800, 0x00000000, 0x0009f100,
+    0x00000000, 0x00000000, 0x0009f400, 0x00000300, 0x00000000, 0x00000700, 0x00000000, 0x00000100,
+    0x0009f700, 0x00000600, 0x00000000, 0x00000100, 0x000a0300, 0x00000800, 0x00000000, 0x00000100,
+    0x000a0f00, 0x000a1b00, 0x00000300, 0x00000000, 0x00000700, 0x00000000, 0x00000100, 0x000a1e00,
+    0x00000600, 0x00000000, 0x00000100, 0x000a2a00, 0x00000800, 0x00000000, 0x00000100, 0x000a3600,
+    0x000a4200, 0x00000300, 0x00000000, 0x00000700, 0x00000000, 0x00000700, 0x000bed00, 0x00000600,
+    0x00000000, 0x00000700, 0x000da100, 0x00000800, 0x00000000, 0x00000700, 0x000fb100, 0x000fb900,
+    0x00000300, 0x00000000, 0x00000700, 0x00000000, 0x00000700, 0x00116400, 0x00000600, 0x00000000,
+    0x00000700, 0x00131800, 0x00000800, 0x00000000, 0x00000700, 0x00152800, 0x00153000, 0x00000300,
+    0x00000000, 0x00000700, 0x00000000, 0x00000200, 0x00005800, 0x00000600, 0x00000000, 0x00000200,
+    0x00002d00, 0x00000800, 0x00000000, 0x00000200, 0x00008600, 0x00153300, 0x00000300, 0x00000000,
+    0x00000700, 0x00000000, 0x00000200, 0x0003ff00, 0x00000600, 0x00000000, 0x00000300, 0x00153600,
+    0x00000800, 0x00000000, 0x00000200, 0x0005a900, 0x00153e00, 0x00000300, 0x00000000, 0x00000700,
+    0x00000000, 0x00000200, 0x0003ff00, 0x00000600, 0x00000000, 0x00000300, 0x00154100, 0x00000800,
+    0x00000000, 0x00000200, 0x0005a900, 0x00000000,
 };
 
 static void test_effect_local_shader(void)
@@ -2715,8 +2868,11 @@ static void test_effect_local_shader(void)
     D3D10_EFFECT_VARIABLE_DESC vdesc = {0};
     ID3D10EffectType *type;
     D3D10_EFFECT_TYPE_DESC typedesc;
+    D3D10_EFFECT_DESC effect_desc;
     ID3D10EffectShaderVariable *null_shader, *null_anon_vs, *null_anon_ps, *null_anon_gs,
-        *p3_anon_vs, *p3_anon_ps, *p3_anon_gs, *p6_vs, *p6_ps, *p6_gs;
+        *p3_anon_vs, *p3_anon_ps, *p3_anon_gs, *p6_vs, *p6_ps, *p6_gs, *gs, *ps, *vs;
+    D3D10_EFFECT_SHADER_DESC shaderdesc;
+    D3D10_SIGNATURE_PARAMETER_DESC sign;
     ID3D10Device *device;
     ULONG refcount;
 
@@ -2728,6 +2884,19 @@ static void test_effect_local_shader(void)
 
     hr = create_effect(fx_local_shader, 0, device, NULL, &effect);
     ok(SUCCEEDED(hr), "D3D10CreateEffectFromMemory failed!\n");
+
+    hr = effect->lpVtbl->GetDesc(effect, &effect_desc);
+    ok(SUCCEEDED(hr), "Failed to get effect description, hr %#x.\n", hr);
+    ok(!effect_desc.IsChildEffect, "Unexpected IsChildEffect.\n");
+    ok(effect_desc.ConstantBuffers == 0, "Unexpected constant buffers count %u.\n",
+            effect_desc.ConstantBuffers);
+    ok(effect_desc.SharedConstantBuffers == 0, "Unexpected shared constant buffers count %u.\n",
+            effect_desc.SharedConstantBuffers);
+    ok(effect_desc.GlobalVariables == 7, "Unexpected global variables count %u.\n",
+            effect_desc.GlobalVariables);
+    ok(effect_desc.SharedGlobalVariables == 0, "Unexpected shared global variables count %u.\n",
+            effect_desc.SharedGlobalVariables);
+    ok(effect_desc.Techniques == 1, "Unexpected techniques count %u.\n", effect_desc.Techniques);
 
     null_technique = effect->lpVtbl->GetTechniqueByIndex(effect, 0xffffffff);
     null_pass = null_technique->lpVtbl->GetPassByIndex(null_technique, 0xffffffff);
@@ -3541,6 +3710,84 @@ if (0)
     ok(typedesc.UnpackedSize == 0x0, "UnpackedSize is %#x, expected 0x0\n", typedesc.UnpackedSize);
     ok(typedesc.Stride == 0x0, "Stride is %#x, expected 0x0\n", typedesc.Stride);
 
+    /* Geometry shader with stream output */
+    v = effect->lpVtbl->GetVariableByName(effect, "g_so");
+    gs = v->lpVtbl->AsShader(v);
+    hr = gs->lpVtbl->GetShaderDesc(gs, 0, &shaderdesc);
+    ok(hr == S_OK, "Failed to get shader description, hr %#x.\n", hr);
+    ok(!shaderdesc.IsInline, "Unexpected inline flag.\n");
+    ok(!strcmp(shaderdesc.SODecl, "SV_POSITION.x"), "Unexpected stream output declaration %s.\n",
+            shaderdesc.SODecl);
+
+    /* Signature description */
+    v = effect->lpVtbl->GetVariableByName(effect, "p");
+    ps = v->lpVtbl->AsShader(v);
+
+    hr = ps->lpVtbl->GetOutputSignatureElementDesc(ps, 0, 0, &sign);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!strcmp(sign.SemanticName, "SV_Target"), "Unexpected semantic %s.\n", sign.SemanticName);
+
+    hr = ps->lpVtbl->GetOutputSignatureElementDesc(ps, 4, 0, &sign);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!strcmp(sign.SemanticName, "SV_POSITION"), "Unexpected semantic %s.\n", sign.SemanticName);
+
+    hr = ps->lpVtbl->GetInputSignatureElementDesc(ps, 0, 0, &sign);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!strcmp(sign.SemanticName, "SV_POSITION"), "Unexpected semantic %s.\n", sign.SemanticName);
+
+    hr = ps->lpVtbl->GetInputSignatureElementDesc(ps, 4, 0, &sign);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!strcmp(sign.SemanticName, "POSITION"), "Unexpected semantic %s.\n", sign.SemanticName);
+
+    v = effect->lpVtbl->GetVariableByName(effect, "v");
+    vs = v->lpVtbl->AsShader(v);
+
+    hr = vs->lpVtbl->GetOutputSignatureElementDesc(vs, 0, 0, &sign);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!strcmp(sign.SemanticName, "SV_POSITION"), "Unexpected semantic %s.\n", sign.SemanticName);
+
+    hr = vs->lpVtbl->GetOutputSignatureElementDesc(vs, 1, 0, &sign);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!strcmp(sign.SemanticName, "SV_POSITION"), "Unexpected semantic %s.\n", sign.SemanticName);
+
+    hr = vs->lpVtbl->GetInputSignatureElementDesc(vs, 0, 0, &sign);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!strcmp(sign.SemanticName, "POSITION"), "Unexpected semantic %s.\n", sign.SemanticName);
+
+    hr = vs->lpVtbl->GetInputSignatureElementDesc(vs, 1, 0, &sign);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!strcmp(sign.SemanticName, "POSITION"), "Unexpected semantic %s.\n", sign.SemanticName);
+
+    /* NULL shader variable */
+    v = effect->lpVtbl->GetVariableByName(effect, "v0");
+    vs = v->lpVtbl->AsShader(v);
+
+    hr = vs->lpVtbl->GetOutputSignatureElementDesc(vs, 0, 0, &sign);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    hr = vs->lpVtbl->GetOutputSignatureElementDesc(vs, 1, 0, &sign);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    hr = vs->lpVtbl->GetOutputSignatureElementDesc(vs, 2, 0, &sign);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    hr = vs->lpVtbl->GetOutputSignatureElementDesc(vs, 3, 0, &sign);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!strcmp(sign.SemanticName, "SV_POSITION"), "Unexpected semantic %s.\n", sign.SemanticName);
+
+    hr = vs->lpVtbl->GetInputSignatureElementDesc(vs, 0, 0, &sign);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    hr = vs->lpVtbl->GetInputSignatureElementDesc(vs, 1, 0, &sign);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    hr = vs->lpVtbl->GetInputSignatureElementDesc(vs, 2, 0, &sign);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+
+    hr = vs->lpVtbl->GetInputSignatureElementDesc(vs, 3, 0, &sign);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!strcmp(sign.SemanticName, "POSITION"), "Unexpected semantic %s.\n", sign.SemanticName);
+
     effect->lpVtbl->Release(effect);
 
     refcount = ID3D10Device_Release(device);
@@ -3586,6 +3833,7 @@ static void test_effect_get_variable_by(void)
 {
     ID3D10Effect *effect;
     ID3D10EffectVariable *variable_by_index, *variable, *null_variable;
+    D3D10_EFFECT_DESC effect_desc;
     ID3D10Device *device;
     ULONG refcount;
     HRESULT hr;
@@ -3598,6 +3846,19 @@ static void test_effect_get_variable_by(void)
 
     hr = create_effect(fx_test_egvb, 0, device, NULL, &effect);
     ok(SUCCEEDED(hr), "D3D10CreateEffectFromMemory failed (%x)\n", hr);
+
+    hr = effect->lpVtbl->GetDesc(effect, &effect_desc);
+    ok(SUCCEEDED(hr), "Failed to get effect description, hr %#x.\n", hr);
+    ok(!effect_desc.IsChildEffect, "Unexpected IsChildEffect.\n");
+    ok(effect_desc.ConstantBuffers == 2, "Unexpected constant buffers count %u.\n",
+            effect_desc.ConstantBuffers);
+    ok(effect_desc.SharedConstantBuffers == 0, "Unexpected shared constant buffers count %u.\n",
+            effect_desc.SharedConstantBuffers);
+    ok(effect_desc.GlobalVariables == 6, "Unexpected global variables count %u.\n",
+            effect_desc.GlobalVariables);
+    ok(effect_desc.SharedGlobalVariables == 0, "Unexpected shared global variables count %u.\n",
+            effect_desc.SharedGlobalVariables);
+    ok(effect_desc.Techniques == 0, "Unexpected techniques count %u.\n", effect_desc.Techniques);
 
     /* get the null variable */
     null_variable = effect->lpVtbl->GetVariableByIndex(effect, 0xffffffff);
@@ -3625,6 +3886,9 @@ static void test_effect_get_variable_by(void)
     variable = effect->lpVtbl->GetVariableBySemantic(effect, "SV_POSITION");
     ok(variable_by_index == variable, "GetVariableBySemantic got %p, expected %p\n", variable, variable_by_index);
 
+    variable = effect->lpVtbl->GetVariableBySemantic(effect, "sv_POSITION");
+    ok(variable_by_index == variable, "GetVariableBySemantic got %p, expected %p\n", variable, variable_by_index);
+
     /* variable f2 */
     variable_by_index = effect->lpVtbl->GetVariableByIndex(effect, 1);
     ok(null_variable != variable_by_index, "GetVariableByIndex failed %p\n", variable_by_index);
@@ -3633,6 +3897,9 @@ static void test_effect_get_variable_by(void)
     ok(variable_by_index == variable, "GetVariableByName got %p, expected %p\n", variable, variable_by_index);
 
     variable = effect->lpVtbl->GetVariableBySemantic(effect, "COLOR0");
+    ok(variable_by_index == variable, "GetVariableBySemantic got %p, expected %p\n", variable, variable_by_index);
+
+    variable = effect->lpVtbl->GetVariableBySemantic(effect, "color0");
     ok(variable_by_index == variable, "GetVariableBySemantic got %p, expected %p\n", variable, variable_by_index);
 
     /* variable f3 */
@@ -3892,6 +4159,7 @@ static void test_effect_state_groups(void)
     D3D10_RASTERIZER_DESC rast_desc;
     D3D10_SAMPLER_DESC sampler_desc;
     ID3D10EffectSamplerVariable *s;
+    D3D10_EFFECT_DESC effect_desc;
     ID3D10BlendState *blend_state;
     UINT sample_mask, stencil_ref;
     ID3D10EffectBlendVariable *b;
@@ -3913,6 +4181,19 @@ static void test_effect_state_groups(void)
 
     hr = create_effect(fx_test_state_groups, 0, device, NULL, &effect);
     ok(SUCCEEDED(hr), "Failed to create effect, hr %#x.\n", hr);
+
+    hr = effect->lpVtbl->GetDesc(effect, &effect_desc);
+    ok(SUCCEEDED(hr), "Failed to get effect description, hr %#x.\n", hr);
+    ok(!effect_desc.IsChildEffect, "Unexpected IsChildEffect.\n");
+    ok(effect_desc.ConstantBuffers == 1, "Unexpected constant buffers count %u.\n",
+            effect_desc.ConstantBuffers);
+    ok(effect_desc.SharedConstantBuffers == 0, "Unexpected shared constant buffers count %u.\n",
+            effect_desc.SharedConstantBuffers);
+    ok(effect_desc.GlobalVariables == 4, "Unexpected global variables count %u.\n",
+            effect_desc.GlobalVariables);
+    ok(effect_desc.SharedGlobalVariables == 0, "Unexpected shared global variables count %u.\n",
+            effect_desc.SharedGlobalVariables);
+    ok(effect_desc.Techniques == 1, "Unexpected techniques count %u.\n", effect_desc.Techniques);
 
     v = effect->lpVtbl->GetVariableByName(effect, "sampler0");
     s = v->lpVtbl->AsSampler(v);
@@ -4099,44 +4380,30 @@ SamplerState sampler0 {};
 technique10 tech0
 {
     pass pass0
+        <string a="text";>
     {
     }
 };
 #endif
 static DWORD fx_test_state_group_defaults[] =
 {
-    0x43425844, 0x920e6905, 0x58225fcd, 0x3b65b423,
-    0x67e96b6c, 0x00000001, 0x000001f4, 0x00000001,
-    0x00000024, 0x30315846, 0x000001c8, 0xfeff1001,
-    0x00000001, 0x00000000, 0x00000004, 0x00000000,
-    0x00000000, 0x00000000, 0x00000001, 0x000000ec,
-    0x00000000, 0x00000000, 0x00000001, 0x00000001,
-    0x00000001, 0x00000001, 0x00000000, 0x00000000,
-    0x00000000, 0x00000000, 0x00000000, 0x6f6c4724,
-    0x736c6162, 0x73615200, 0x69726574, 0x5372657a,
-    0x65746174, 0x00000d00, 0x00000200, 0x00000000,
-    0x00000000, 0x00000000, 0x00000000, 0x00000400,
-    0x73617200, 0x74735f74, 0x00657461, 0x74706544,
-    0x65745368, 0x6c69636e, 0x74617453, 0x00440065,
-    0x00020000, 0x00000000, 0x00000000, 0x00000000,
-    0x00000000, 0x00030000, 0x73640000, 0x6174735f,
-    0x42006574, 0x646e656c, 0x74617453, 0x007b0065,
-    0x00020000, 0x00000000, 0x00000000, 0x00000000,
-    0x00000000, 0x00020000, 0x6c620000, 0x5f646e65,
-    0x74617473, 0x61530065, 0x656c706d, 0x61745372,
-    0xae006574, 0x02000000, 0x00000000, 0x00000000,
-    0x00000000, 0x00000000, 0x15000000, 0x73000000,
-    0x6c706d61, 0x00307265, 0x68636574, 0x61700030,
-    0x00307373, 0x00000004, 0x00000000, 0x00000000,
-    0x00000000, 0xffffffff, 0x00000000, 0x00000039,
-    0x0000001d, 0x00000000, 0xffffffff, 0x00000000,
-    0x00000000, 0x00000072, 0x00000056, 0x00000000,
-    0xffffffff, 0x00000000, 0x00000000, 0x000000a2,
-    0x00000086, 0x00000000, 0xffffffff, 0x00000000,
-    0x00000000, 0x000000d7, 0x000000bb, 0x00000000,
-    0xffffffff, 0x00000000, 0x00000000, 0x000000e0,
-    0x00000001, 0x00000000, 0x000000e6, 0x00000000,
-    0x00000000,
+    0x43425844, 0xef2bd174, 0x123794f9, 0xbea23fa0, 0x953a31dd, 0x00000001, 0x00000209, 0x00000001,
+    0x00000024, 0x30315846, 0x000001dd, 0xfeff1001, 0x00000000, 0x00000000, 0x00000004, 0x00000000,
+    0x00000000, 0x00000000, 0x00000001, 0x0000010d, 0x00000000, 0x00000000, 0x00000001, 0x00000001,
+    0x00000001, 0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x74736152,
+    0x7a697265, 0x74537265, 0x00657461, 0x00000004, 0x00000002, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000004, 0x74736172, 0x6174735f, 0x44006574, 0x68747065, 0x6e657453, 0x536c6963,
+    0x65746174, 0x00003b00, 0x00000200, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000300,
+    0x5f736400, 0x74617473, 0x6c420065, 0x53646e65, 0x65746174, 0x00007200, 0x00000200, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000200, 0x656c6200, 0x735f646e, 0x65746174, 0x6d615300,
+    0x72656c70, 0x74617453, 0x00a50065, 0x00020000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00150000, 0x61730000, 0x656c706d, 0x74003072, 0x30686365, 0x73617000, 0x53003073, 0x6e697274,
+    0x00e30067, 0x00020000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00010000, 0x00610000,
+    0x74786574, 0x00003000, 0x00001400, 0x00000000, 0xffffff00, 0x000000ff, 0x00000000, 0x00006900,
+    0x00004d00, 0x00000000, 0xffffff00, 0x000000ff, 0x00000000, 0x00009900, 0x00007d00, 0x00000000,
+    0xffffff00, 0x000000ff, 0x00000000, 0x0000ce00, 0x0000b200, 0x00000000, 0xffffff00, 0x000000ff,
+    0x00000000, 0x0000d700, 0x00000100, 0x00000000, 0x0000dd00, 0x00000000, 0x00000100, 0x00010600,
+    0x0000ea00, 0x00010800, 0x00000000,
 };
 
 static void test_effect_state_group_defaults(void)
@@ -4148,6 +4415,7 @@ static void test_effect_state_group_defaults(void)
     D3D10_RASTERIZER_DESC rast_desc;
     D3D10_SAMPLER_DESC sampler_desc;
     ID3D10EffectSamplerVariable *s;
+    D3D10_EFFECT_DESC effect_desc;
     ID3D10EffectBlendVariable *b;
     D3D10_BLEND_DESC blend_desc;
     D3D10_PASS_DESC pass_desc;
@@ -4166,6 +4434,19 @@ static void test_effect_state_group_defaults(void)
 
     hr = create_effect(fx_test_state_group_defaults, 0, device, NULL, &effect);
     ok(SUCCEEDED(hr), "Failed to create effect, hr %#x.\n", hr);
+
+    hr = effect->lpVtbl->GetDesc(effect, &effect_desc);
+    ok(SUCCEEDED(hr), "Failed to get effect description, hr %#x.\n", hr);
+    ok(!effect_desc.IsChildEffect, "Unexpected IsChildEffect.\n");
+    ok(effect_desc.ConstantBuffers == 0, "Unexpected constant buffers count %u.\n",
+            effect_desc.ConstantBuffers);
+    ok(effect_desc.SharedConstantBuffers == 0, "Unexpected shared constant buffers count %u.\n",
+            effect_desc.SharedConstantBuffers);
+    ok(effect_desc.GlobalVariables == 4, "Unexpected global variables count %u.\n",
+            effect_desc.GlobalVariables);
+    ok(effect_desc.SharedGlobalVariables == 0, "Unexpected shared global variables count %u.\n",
+            effect_desc.SharedGlobalVariables);
+    ok(effect_desc.Techniques == 1, "Unexpected techniques count %u.\n", effect_desc.Techniques);
 
     v = effect->lpVtbl->GetVariableByName(effect, "sampler0");
     s = v->lpVtbl->AsSampler(v);
@@ -4258,7 +4539,7 @@ static void test_effect_state_group_defaults(void)
     hr = pass->lpVtbl->GetDesc(pass, &pass_desc);
     ok(SUCCEEDED(hr), "Failed to get pass desc, hr %#x.\n", hr);
     ok(!strcmp(pass_desc.Name, "pass0"), "Got unexpected Name \"%s\".\n", pass_desc.Name);
-    ok(!pass_desc.Annotations, "Got unexpected Annotations %#x.\n", pass_desc.Annotations);
+    ok(pass_desc.Annotations == 1, "Got unexpected Annotations %u.\n", pass_desc.Annotations);
     ok(!pass_desc.pIAInputSignature, "Got unexpected pIAInputSignature %p.\n", pass_desc.pIAInputSignature);
     ok(pass_desc.StencilRef == 0, "Got unexpected StencilRef %#x.\n", pass_desc.StencilRef);
     ok(pass_desc.SampleMask == 0, "Got unexpected SampleMask %#x.\n", pass_desc.SampleMask);
@@ -4590,6 +4871,7 @@ static void test_effect_scalar_variable(void)
         {"b_a", D3D10_SVT_BOOL, TRUE},
     };
     D3D10_EFFECT_TYPE_DESC type_desc;
+    D3D10_EFFECT_DESC effect_desc;
     ID3D10EffectScalarVariable *s_v;
     ID3D10EffectVariable *var;
     ID3D10EffectType *type;
@@ -4607,6 +4889,19 @@ static void test_effect_scalar_variable(void)
 
     hr = create_effect(fx_test_scalar_variable, 0, device, NULL, &effect);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = effect->lpVtbl->GetDesc(effect, &effect_desc);
+    ok(SUCCEEDED(hr), "Failed to get effect description, hr %#x.\n", hr);
+    ok(!effect_desc.IsChildEffect, "Unexpected IsChildEffect.\n");
+    ok(effect_desc.ConstantBuffers == 1, "Unexpected constant buffers count %u.\n",
+            effect_desc.ConstantBuffers);
+    ok(effect_desc.SharedConstantBuffers == 0, "Unexpected shared constant buffers count %u.\n",
+            effect_desc.SharedConstantBuffers);
+    ok(effect_desc.GlobalVariables == 6, "Unexpected global variables count %u.\n",
+            effect_desc.GlobalVariables);
+    ok(effect_desc.SharedGlobalVariables == 0, "Unexpected shared global variables count %u.\n",
+            effect_desc.SharedGlobalVariables);
+    ok(effect_desc.Techniques == 0, "Unexpected techniques count %u.\n", effect_desc.Techniques);
 
     /* Check each different scalar type, make sure the variable returned is
      * valid, set it to a value, and make sure what we get back is the same
@@ -4990,6 +5285,7 @@ static void test_effect_vector_variable(void)
     };
     ID3D10EffectVectorVariable *v_var;
     D3D10_EFFECT_TYPE_DESC type_desc;
+    D3D10_EFFECT_DESC effect_desc;
     ID3D10EffectVariable *var;
     ID3D10EffectType *type;
     ID3D10Device *device;
@@ -5006,6 +5302,19 @@ static void test_effect_vector_variable(void)
 
     hr = create_effect(fx_test_vector_variable, 0, device, NULL, &effect);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = effect->lpVtbl->GetDesc(effect, &effect_desc);
+    ok(SUCCEEDED(hr), "Failed to get effect description, hr %#x.\n", hr);
+    ok(!effect_desc.IsChildEffect, "Unexpected IsChildEffect.\n");
+    ok(effect_desc.ConstantBuffers == 1, "Unexpected constant buffers count %u.\n",
+            effect_desc.ConstantBuffers);
+    ok(effect_desc.SharedConstantBuffers == 0, "Unexpected shared constant buffers count %u.\n",
+            effect_desc.SharedConstantBuffers);
+    ok(effect_desc.GlobalVariables == 6, "Unexpected global variables count %u.\n",
+            effect_desc.GlobalVariables);
+    ok(effect_desc.SharedGlobalVariables == 0, "Unexpected shared global variables count %u.\n",
+            effect_desc.SharedGlobalVariables);
+    ok(effect_desc.Techniques == 0, "Unexpected techniques count %u.\n", effect_desc.Techniques);
 
     for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
@@ -5322,6 +5631,7 @@ static void test_effect_matrix_variable(void)
     };
     ID3D10EffectMatrixVariable *m_var;
     D3D10_EFFECT_TYPE_DESC type_desc;
+    D3D10_EFFECT_DESC effect_desc;
     ID3D10EffectVariable *var;
     ID3D10EffectType *type;
     ID3D10Device *device;
@@ -5338,6 +5648,19 @@ static void test_effect_matrix_variable(void)
 
     hr = create_effect(fx_test_matrix_variable, 0, device, NULL, &effect);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = effect->lpVtbl->GetDesc(effect, &effect_desc);
+    ok(SUCCEEDED(hr), "Failed to get effect description, hr %#x.\n", hr);
+    ok(!effect_desc.IsChildEffect, "Unexpected IsChildEffect.\n");
+    ok(effect_desc.ConstantBuffers == 1, "Unexpected constant buffers count %u.\n",
+            effect_desc.ConstantBuffers);
+    ok(effect_desc.SharedConstantBuffers == 0, "Unexpected shared constant buffers count %u.\n",
+            effect_desc.SharedConstantBuffers);
+    ok(effect_desc.GlobalVariables == 5, "Unexpected global variables count %u.\n",
+            effect_desc.GlobalVariables);
+    ok(effect_desc.SharedGlobalVariables == 0, "Unexpected shared global variables count %u.\n",
+            effect_desc.SharedGlobalVariables);
+    ok(effect_desc.Techniques == 0, "Unexpected techniques count %u.\n", effect_desc.Techniques);
 
     for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
@@ -5490,6 +5813,8 @@ static void test_effect_resource_variable(void)
     ID3D10EffectShaderResourceVariable *t0, *t_a, *t_a_0;
     ID3D10EffectTechnique *technique;
     ID3D10Texture2D *tex0, *tex_a[2];
+    D3D10_EFFECT_DESC effect_desc;
+    D3D10_PASS_DESC pass_desc;
     ID3D10EffectVariable *var;
     ID3D10EffectPass *pass;
     ID3D10Device *device;
@@ -5507,9 +5832,29 @@ static void test_effect_resource_variable(void)
     hr = create_effect(fx_test_resource_variable, 0, device, NULL, &effect);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
 
+    hr = effect->lpVtbl->GetDesc(effect, &effect_desc);
+    ok(SUCCEEDED(hr), "Failed to get effect description, hr %#x.\n", hr);
+    ok(!effect_desc.IsChildEffect, "Unexpected IsChildEffect.\n");
+    ok(effect_desc.ConstantBuffers == 0, "Unexpected constant buffers count %u.\n",
+            effect_desc.ConstantBuffers);
+    ok(effect_desc.SharedConstantBuffers == 0, "Unexpected shared constant buffers count %u.\n",
+            effect_desc.SharedConstantBuffers);
+    ok(effect_desc.GlobalVariables == 2, "Unexpected global variables count %u.\n",
+            effect_desc.GlobalVariables);
+    ok(effect_desc.SharedGlobalVariables == 0, "Unexpected shared global variables count %u.\n",
+            effect_desc.SharedGlobalVariables);
+    ok(effect_desc.Techniques == 1, "Unexpected techniques count %u.\n", effect_desc.Techniques);
+
+    create_effect_texture_resource(device, &srv0, &tex0);
+
+    /* SetResource() on null resource variable. */
+    var = effect->lpVtbl->GetVariableByName(effect, "dummy name");
+    t0 = var->lpVtbl->AsShaderResource(var);
+    hr = t0->lpVtbl->SetResource(t0, srv0);
+    ok(hr == E_FAIL, "Got unexpected hr %#x.\n", hr);
+
     var = effect->lpVtbl->GetVariableByName(effect, "t0");
     t0 = get_effect_shader_resource_variable(var);
-    create_effect_texture_resource(device, &srv0, &tex0);
     hr = t0->lpVtbl->SetResource(t0, srv0);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
 
@@ -5525,6 +5870,12 @@ static void test_effect_resource_variable(void)
     ok(!!technique, "Got unexpected technique %p.\n", technique);
     pass = technique->lpVtbl->GetPassByName(technique, "p0");
     ok(!!pass, "Got unexpected pass %p.\n", pass);
+    hr = pass->lpVtbl->GetDesc(pass, &pass_desc);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!!pass_desc.pIAInputSignature, "Unexpected input signature.\n");
+    ok(pass_desc.IAInputSignatureSize == 88, "Unexpected input signature size %lu.\n",
+            pass_desc.IAInputSignatureSize);
+
     hr = pass->lpVtbl->Apply(pass, 0);
     ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
 
@@ -5588,6 +5939,281 @@ static void test_effect_resource_variable(void)
     ok(!refcount, "Device has %u references left.\n", refcount);
 }
 
+static void test_effect_optimize(void)
+{
+    D3D10_EFFECT_SHADER_DESC shaderdesc;
+    ID3D10EffectShaderVariable *gs;
+    D3D10_TECHNIQUE_DESC tech_desc;
+    ID3D10EffectTechnique *tech;
+    D3D10_PASS_DESC pass_desc;
+    ID3D10EffectVariable *v;
+    ID3D10EffectPass *pass;
+    ID3D10Effect *effect;
+    ID3D10Device *device;
+    ULONG refcount;
+    HRESULT hr;
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+
+    hr = create_effect(fx_local_shader, 0, device, NULL, &effect);
+    ok(SUCCEEDED(hr), "Failed to create an effect.\n");
+
+    tech = effect->lpVtbl->GetTechniqueByIndex(effect, 0);
+    hr = tech->lpVtbl->GetDesc(tech, &tech_desc);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!strcmp(tech_desc.Name, "Render"), "Unexpected technique name %s.\n", tech_desc.Name);
+
+    pass = tech->lpVtbl->GetPassByIndex(tech, 0);
+    hr = pass->lpVtbl->GetDesc(pass, &pass_desc);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!strcmp(pass_desc.Name, "P0"), "Unexpected pass name %s.\n", pass_desc.Name);
+
+    v = effect->lpVtbl->GetVariableByName(effect, "g_so");
+
+    gs = v->lpVtbl->AsShader(v);
+    hr = gs->lpVtbl->GetShaderDesc(gs, 0, &shaderdesc);
+    ok(hr == S_OK, "Failed to get shader description, hr %#x.\n", hr);
+    ok(!!shaderdesc.pInputSignature, "Expected input signature.\n");
+    ok(!shaderdesc.IsInline, "Unexpected inline flag.\n");
+    ok(!!shaderdesc.pBytecode, "Expected bytecode.\n");
+    ok(!!shaderdesc.BytecodeLength, "Unexpected bytecode length.\n");
+    ok(!strcmp(shaderdesc.SODecl, "SV_POSITION.x"), "Unexpected stream output declaration %s.\n", shaderdesc.SODecl);
+    ok(!!shaderdesc.NumInputSignatureEntries, "Unexpected input signature count.\n");
+    ok(!!shaderdesc.NumOutputSignatureEntries, "Unexpected output signature count.\n");
+
+    hr = effect->lpVtbl->Optimize(effect);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+
+    hr = gs->lpVtbl->GetShaderDesc(gs, 0, &shaderdesc);
+    ok(hr == S_OK, "Failed to get shader description, hr %#x.\n", hr);
+    ok(!!shaderdesc.pInputSignature, "Expected input signature.\n");
+    ok(!shaderdesc.IsInline, "Unexpected inline flag.\n");
+    ok(!shaderdesc.pBytecode, "Unexpected bytecode.\n");
+    ok(!shaderdesc.BytecodeLength, "Unexpected bytecode length.\n");
+    ok(!shaderdesc.SODecl, "Unexpected stream output declaration %p.\n", shaderdesc.SODecl);
+    ok(!shaderdesc.NumInputSignatureEntries, "Unexpected input signature count.\n");
+    ok(!shaderdesc.NumOutputSignatureEntries, "Unexpected output signature count.\n");
+
+    hr = tech->lpVtbl->GetDesc(tech, &tech_desc);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!tech_desc.Name, "Unexpected technique name %p.\n", tech_desc.Name);
+
+    hr = pass->lpVtbl->GetDesc(pass, &pass_desc);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!pass_desc.Name, "Unexpected pass name %p.\n", pass_desc.Name);
+
+    pass = tech->lpVtbl->GetPassByName(tech, "P0");
+    ok(!pass->lpVtbl->IsValid(pass), "Unexpected valid pass.\n");
+
+    tech = effect->lpVtbl->GetTechniqueByIndex(effect, 0);
+    ok(tech->lpVtbl->IsValid(tech), "Unexpected valid technique.\n");
+
+    tech = effect->lpVtbl->GetTechniqueByName(effect, "Render");
+    ok(!tech->lpVtbl->IsValid(tech), "Unexpected valid technique.\n");
+
+    effect->lpVtbl->Release(effect);
+
+    refcount = ID3D10Device_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+}
+
+static void test_effect_shader_description(void)
+{
+    D3D10_EFFECT_SHADER_DESC shaderdesc;
+    ID3D10EffectShaderVariable *s;
+    ID3D10EffectVariable *v;
+    ID3D10Effect *effect;
+    ID3D10Device *device;
+    ULONG refcount;
+    HRESULT hr;
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+
+    hr = create_effect(fx_local_shader, 0, device, NULL, &effect);
+    ok(SUCCEEDED(hr), "Failed to create an effect.\n");
+
+    v = effect->lpVtbl->GetVariableByName(effect, "v0");
+
+    /* GetShaderDesc() is indexing through all shaders in the effect.*/
+    s = v->lpVtbl->AsShader(v);
+    hr = s->lpVtbl->GetShaderDesc(s, 0, &shaderdesc);
+    ok(hr == S_OK, "Failed to get shader description, hr %#x.\n", hr);
+    ok(!shaderdesc.BytecodeLength, "Unexpected bytecode length %u.\n", shaderdesc.BytecodeLength);
+    hr = s->lpVtbl->GetShaderDesc(s, 1, &shaderdesc);
+    ok(hr == S_OK, "Failed to get shader description, hr %#x.\n", hr);
+    ok(!shaderdesc.BytecodeLength, "Unexpected bytecode length %u.\n", shaderdesc.BytecodeLength);
+    hr = s->lpVtbl->GetShaderDesc(s, 2, &shaderdesc);
+    ok(hr == S_OK, "Failed to get shader description, hr %#x.\n", hr);
+    ok(!shaderdesc.BytecodeLength, "Unexpected bytecode length %u.\n", shaderdesc.BytecodeLength);
+    hr = s->lpVtbl->GetShaderDesc(s, 3, &shaderdesc);
+    ok(hr == S_OK, "Failed to get shader description, hr %#x.\n", hr);
+    ok(shaderdesc.BytecodeLength == 424, "Unexpected bytecode length %u.\n",
+            shaderdesc.BytecodeLength);
+    hr = s->lpVtbl->GetShaderDesc(s, 4, &shaderdesc);
+    ok(hr == S_OK, "Failed to get shader description, hr %#x.\n", hr);
+    ok(shaderdesc.BytecodeLength == 424, "Unexpected bytecode length %u.\n",
+            shaderdesc.BytecodeLength);
+    hr = s->lpVtbl->GetShaderDesc(s, 5, &shaderdesc);
+    ok(hr == S_OK, "Failed to get shader description, hr %#x.\n", hr);
+    ok(shaderdesc.BytecodeLength == 420, "Unexpected bytecode length %u.\n",
+            shaderdesc.BytecodeLength);
+    hr = s->lpVtbl->GetShaderDesc(s, 6, &shaderdesc);
+    ok(hr == S_OK, "Failed to get shader description, hr %#x.\n", hr);
+    ok(shaderdesc.BytecodeLength == 516, "Unexpected bytecode length %u.\n",
+            shaderdesc.BytecodeLength);
+    ok(!shaderdesc.SODecl, "Unexpected SO declaration %p.\n", shaderdesc.SODecl);
+    hr = s->lpVtbl->GetShaderDesc(s, 7, &shaderdesc);
+    ok(hr == S_OK, "Failed to get shader description, hr %#x.\n", hr);
+    ok(shaderdesc.BytecodeLength == 516, "Unexpected bytecode length %u.\n",
+            shaderdesc.BytecodeLength);
+    ok(!strcmp(shaderdesc.SODecl, "SV_POSITION.x"), "Unexpected SO declaration %s.\n",
+            wine_dbgstr_a(shaderdesc.SODecl));
+
+    effect->lpVtbl->Release(effect);
+
+    refcount = ID3D10Device_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+}
+
+static void test_effect_shader_object(void)
+{
+    ID3D10EffectShaderVariable *s;
+    ID3D10GeometryShader *gs;
+    ID3D10EffectVariable *v;
+    ID3D10VertexShader *vs;
+    ID3D10PixelShader *ps;
+    ID3D10Effect* effect;
+    ID3D10Device *device;
+    ULONG refcount;
+    HRESULT hr;
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+
+    hr = create_effect(fx_local_shader, 0, device, NULL, &effect);
+    ok(SUCCEEDED(hr), "Failed to create an effect!\n");
+
+    v = effect->lpVtbl->GetVariableByName(effect, "v0");
+
+    s = v->lpVtbl->AsShader(v);
+
+    vs = (void *)0xdeadbeef;
+    hr = s->lpVtbl->GetVertexShader(s, 0, &vs);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!vs, "Unexpected shader object.\n");
+
+    vs = (void *)0xdeadbeef;
+    hr = s->lpVtbl->GetVertexShader(s, 1, &vs);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+    ok(!vs, "Unexpected shader object.\n");
+
+    vs = (void *)0xdeadbeef;
+    hr = s->lpVtbl->GetVertexShader(s, 2, &vs);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+    ok(!vs, "Unexpected shader object.\n");
+
+    vs = NULL;
+    hr = s->lpVtbl->GetVertexShader(s, 3, &vs);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!!vs, "Unexpected shader object.\n");
+    ID3D10VertexShader_Release(vs);
+
+    vs = NULL;
+    hr = s->lpVtbl->GetVertexShader(s, 4, &vs);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!!vs, "Unexpected shader object.\n");
+    ID3D10VertexShader_Release(vs);
+
+    ps = (void *)0xdeadbeef;
+    hr = s->lpVtbl->GetPixelShader(s, 0, &ps);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+    ok(!ps, "Unexpected shader object.\n");
+
+    ps = (void *)0xdeadbeef;
+    hr = s->lpVtbl->GetPixelShader(s, 1, &ps);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!ps, "Unexpected shader object.\n");
+
+    ps = (void *)0xdeadbeef;
+    hr = s->lpVtbl->GetPixelShader(s, 2, &ps);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+    ok(!ps, "Unexpected shader object.\n");
+
+    ps = (void *)0xdeadbeef;
+    hr = s->lpVtbl->GetPixelShader(s, 3, &ps);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+    ok(!ps, "Unexpected shader object.\n");
+
+    ps = (void *)0xdeadbeef;
+    hr = s->lpVtbl->GetPixelShader(s, 4, &ps);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+    ok(!ps, "Unexpected shader object.\n");
+
+    ps = NULL;
+    hr = s->lpVtbl->GetPixelShader(s, 5, &ps);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!!ps, "Unexpected shader object.\n");
+    ID3D10PixelShader_Release(ps);
+
+    gs = (void *)0xdeadbeef;
+    hr = s->lpVtbl->GetGeometryShader(s, 0, &gs);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+    ok(!gs, "Unexpected shader object.\n");
+
+    gs = (void *)0xdeadbeef;
+    hr = s->lpVtbl->GetGeometryShader(s, 1, &gs);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+    ok(!gs, "Unexpected shader object.\n");
+
+    gs = (void *)0xdeadbeef;
+    hr = s->lpVtbl->GetGeometryShader(s, 2, &gs);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!gs, "Unexpected shader object.\n");
+
+    gs = (void *)0xdeadbeef;
+    hr = s->lpVtbl->GetGeometryShader(s, 3, &gs);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+    ok(!gs, "Unexpected shader object.\n");
+
+    gs = (void *)0xdeadbeef;
+    hr = s->lpVtbl->GetGeometryShader(s, 4, &gs);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+    ok(!gs, "Unexpected shader object.\n");
+
+    gs = (void *)0xdeadbeef;
+    hr = s->lpVtbl->GetGeometryShader(s, 5, &gs);
+    ok(hr == D3DERR_INVALIDCALL, "Unexpected hr %#x.\n", hr);
+    ok(!gs, "Unexpected shader object.\n");
+
+    gs = NULL;
+    hr = s->lpVtbl->GetGeometryShader(s, 6, &gs);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!!gs, "Unexpected shader object.\n");
+    ID3D10GeometryShader_Release(gs);
+
+    gs = NULL;
+    hr = s->lpVtbl->GetGeometryShader(s, 7, &gs);
+    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
+    ok(!!gs, "Unexpected shader object.\n");
+    ID3D10GeometryShader_Release(gs);
+
+    effect->lpVtbl->Release(effect);
+
+    refcount = ID3D10Device_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+}
+
 START_TEST(effect)
 {
     test_effect_constant_buffer_type();
@@ -5604,4 +6230,7 @@ START_TEST(effect)
     test_effect_vector_variable();
     test_effect_matrix_variable();
     test_effect_resource_variable();
+    test_effect_optimize();
+    test_effect_shader_description();
+    test_effect_shader_object();
 }

@@ -35,7 +35,7 @@ static struct monitor *get_monitor( user_handle_t handle )
 {
     struct monitor *monitor;
 
-    if (!(monitor = get_user_object( handle, USER_MONITOR )))
+    if (!(monitor = get_user_object( handle, USER_MONITOR )) || monitor->removed)
         set_win32_error( ERROR_INVALID_MONITOR_HANDLE );
     return monitor;
 }
@@ -43,9 +43,23 @@ static struct monitor *get_monitor( user_handle_t handle )
 /* create a monitor */
 static struct monitor *create_monitor( const struct unicode_str *adapter_name,
                                        const rectangle_t *monitor_rect,
-                                       const rectangle_t *work_rect)
+                                       const rectangle_t *work_rect,
+                                       unsigned int serial_no)
 {
     struct monitor *monitor;
+
+    LIST_FOR_EACH_ENTRY( monitor, &monitor_list, struct monitor, entry )
+    {
+        if (monitor->removed && monitor->serial_no == serial_no &&
+                monitor->adapter_name_len == adapter_name->len &&
+                !memcmp(monitor->adapter_name, adapter_name->str, adapter_name->len))
+        {
+            monitor->monitor_rect = *monitor_rect;
+            monitor->work_rect = *work_rect;
+            monitor->removed = 0;
+            return monitor;
+        }
+    }
 
     if (!(monitor = mem_alloc( sizeof(*monitor) )))
         goto failed;
@@ -59,6 +73,8 @@ static struct monitor *create_monitor( const struct unicode_str *adapter_name,
 
     monitor->monitor_rect = *monitor_rect;
     monitor->work_rect = *work_rect;
+    monitor->serial_no = serial_no;
+    monitor->removed = 0;
     list_add_tail( &monitor_list, &monitor->entry );
     return monitor;
 
@@ -79,7 +95,8 @@ DECL_HANDLER(create_monitor)
     struct monitor *monitor;
 
     adapter_name = get_req_unicode_str();
-    if ((monitor = create_monitor( &adapter_name, &req->monitor_rect, &req->work_rect )))
+    if ((monitor = create_monitor( &adapter_name, &req->monitor_rect,
+                    &req->work_rect, req->serial_no )))
         reply->handle = monitor->handle;
 }
 
@@ -105,6 +122,8 @@ DECL_HANDLER(enum_monitor)
 
     LIST_FOR_EACH_ENTRY( monitor, &monitor_list, struct monitor, entry )
     {
+        if (monitor->removed)
+            continue;
         if (req->index > index++)
             continue;
 
@@ -122,9 +141,5 @@ DECL_HANDLER(destroy_monitor)
 
     if (!(monitor = get_monitor( req->handle )))
         return;
-
-    free_user_handle( monitor->handle );
-    list_remove( &monitor->entry );
-    free( monitor->adapter_name );
-    free( monitor );
+    monitor->removed = 1;
 }

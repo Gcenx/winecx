@@ -21,14 +21,49 @@
 #include <stdio.h>
 
 #include "wine/test.h"
+#include "objbase.h"
 #include "winuser.h"
 #include "wingdi.h"
 #include "imm.h"
 #include "ddk/imm.h"
 
+BOOL WINAPI ImmSetActiveContext(HWND, HIMC, BOOL);
+
 static BOOL (WINAPI *pImmAssociateContextEx)(HWND,HIMC,DWORD);
 static BOOL (WINAPI *pImmIsUIMessageA)(HWND,UINT,WPARAM,LPARAM);
 static UINT (WINAPI *pSendInput) (UINT, INPUT*, size_t);
+
+#define DEFINE_EXPECT(func) \
+    static BOOL expect_ ## func = FALSE, called_ ## func = FALSE, enabled_ ## func = FALSE
+
+#define SET_EXPECT(func) \
+        expect_ ## func = TRUE
+
+#define CHECK_EXPECT2(func) \
+    do { \
+        if (enabled_ ## func) {\
+            ok(expect_ ##func, "unexpected call " #func "\n"); \
+            called_ ## func = TRUE; \
+        } \
+    }while(0)
+
+#define CHECK_EXPECT(func) \
+    do { \
+        CHECK_EXPECT2(func); \
+        expect_ ## func = FALSE; \
+    }while(0)
+
+#define CHECK_CALLED(func) \
+    do { \
+        ok(called_ ## func, "expected " #func "\n"); \
+        expect_ ## func = called_ ## func = FALSE; \
+    }while(0)
+
+#define SET_ENABLE(func, val) \
+    enabled_ ## func = (val)
+
+DEFINE_EXPECT(WM_IME_SETCONTEXT_DEACTIVATE);
+DEFINE_EXPECT(WM_IME_SETCONTEXT_ACTIVATE);
 
 /*
  * msgspy - record and analyse message traces sent to a certain window
@@ -172,7 +207,7 @@ static void msg_spy_cleanup(void) {
 static const char wndcls[] = "winetest_imm32_wndcls";
 static enum { PHASE_UNKNOWN, FIRST_WINDOW, SECOND_WINDOW,
               CREATE_CANCEL, NCCREATE_CANCEL, IME_DISABLED } test_phase;
-static HWND hwnd;
+static HWND hwnd, child;
 
 static HWND get_ime_window(void);
 
@@ -182,6 +217,9 @@ static LRESULT WINAPI wndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     switch (msg)
     {
         case WM_IME_SETCONTEXT:
+            if (wParam) CHECK_EXPECT(WM_IME_SETCONTEXT_ACTIVATE);
+            else CHECK_EXPECT(WM_IME_SETCONTEXT_DEACTIVATE);
+            ok(lParam == ISC_SHOWUIALL || !lParam, "lParam = %lx\n", lParam);
             return TRUE;
         case WM_NCCREATE:
             default_ime_wnd = get_ime_window();
@@ -236,9 +274,28 @@ static LRESULT WINAPI wndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     return DefWindowProcA(hWnd,msg,wParam,lParam);
 }
 
+static BOOL is_ime_enabled(void)
+{
+    HIMC himc;
+    HWND wnd;
+
+    wnd = CreateWindowA("static", "static", 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    ok(wnd != NULL, "CreateWindow failed\n");
+
+    himc = ImmGetContext(wnd);
+    if (!himc)
+    {
+        DestroyWindow(wnd);
+        return FALSE;
+    }
+
+    ImmReleaseContext(wnd, himc);
+    DestroyWindow(wnd);
+    return TRUE;
+}
+
 static BOOL init(void) {
     WNDCLASSEXA wc;
-    HIMC imc;
     HMODULE hmod,huser;
 
     hmod = GetModuleHandleA("imm32.dll");
@@ -269,13 +326,9 @@ static BOOL init(void) {
     if (!hwnd)
         return FALSE;
 
-    imc = ImmGetContext(hwnd);
-    if (!imc)
-    {
-        win_skip("IME support not implemented\n");
+    child = CreateWindowA("edit", "edit", WS_CHILD | WS_VISIBLE, 0, 0, 50, 50, hwnd, 0, 0, 0);
+    if (!child)
         return FALSE;
-    }
-    ImmReleaseContext(hwnd, imc);
 
     ShowWindow(hwnd, SW_SHOWNORMAL);
     UpdateWindow(hwnd);
@@ -625,30 +678,77 @@ static void test_ImmAssociateContextEx(void)
     if (imc)
     {
         HIMC retimc, newimc;
+        HWND focus;
 
+        SET_ENABLE(WM_IME_SETCONTEXT_ACTIVATE, TRUE);
+        SET_ENABLE(WM_IME_SETCONTEXT_DEACTIVATE, TRUE);
+
+        ok(GetActiveWindow() == hwnd, "hwnd is not active\n");
         newimc = ImmCreateContext();
         ok(newimc != imc, "handles should not be the same\n");
         rc = pImmAssociateContextEx(NULL, NULL, 0);
         ok(!rc, "ImmAssociateContextEx succeeded\n");
+        SET_EXPECT(WM_IME_SETCONTEXT_DEACTIVATE);
+        SET_EXPECT(WM_IME_SETCONTEXT_ACTIVATE);
         rc = pImmAssociateContextEx(hwnd, NULL, 0);
+        CHECK_CALLED(WM_IME_SETCONTEXT_DEACTIVATE);
+        CHECK_CALLED(WM_IME_SETCONTEXT_ACTIVATE);
         ok(rc, "ImmAssociateContextEx failed\n");
         rc = pImmAssociateContextEx(NULL, imc, 0);
         ok(!rc, "ImmAssociateContextEx succeeded\n");
 
+        SET_EXPECT(WM_IME_SETCONTEXT_DEACTIVATE);
+        SET_EXPECT(WM_IME_SETCONTEXT_ACTIVATE);
         rc = pImmAssociateContextEx(hwnd, imc, 0);
+        CHECK_CALLED(WM_IME_SETCONTEXT_DEACTIVATE);
+        CHECK_CALLED(WM_IME_SETCONTEXT_ACTIVATE);
         ok(rc, "ImmAssociateContextEx failed\n");
         retimc = ImmGetContext(hwnd);
         ok(retimc == imc, "handles should be the same\n");
         ImmReleaseContext(hwnd,retimc);
 
+        rc = pImmAssociateContextEx(hwnd, imc, 0);
+        ok(rc, "ImmAssociateContextEx failed\n");
+
+        SET_EXPECT(WM_IME_SETCONTEXT_DEACTIVATE);
+        SET_EXPECT(WM_IME_SETCONTEXT_ACTIVATE);
         rc = pImmAssociateContextEx(hwnd, newimc, 0);
+        CHECK_CALLED(WM_IME_SETCONTEXT_DEACTIVATE);
+        CHECK_CALLED(WM_IME_SETCONTEXT_ACTIVATE);
         ok(rc, "ImmAssociateContextEx failed\n");
         retimc = ImmGetContext(hwnd);
         ok(retimc == newimc, "handles should be the same\n");
         ImmReleaseContext(hwnd,retimc);
 
-        rc = pImmAssociateContextEx(hwnd, NULL, IACE_DEFAULT);
+        focus = CreateWindowA("button", "button", 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        ok(focus != NULL, "CreateWindow failed\n");
+        SET_EXPECT(WM_IME_SETCONTEXT_DEACTIVATE);
+        SetFocus(focus);
+        CHECK_CALLED(WM_IME_SETCONTEXT_DEACTIVATE);
+        rc = pImmAssociateContextEx(hwnd, imc, 0);
         ok(rc, "ImmAssociateContextEx failed\n");
+        SET_EXPECT(WM_IME_SETCONTEXT_ACTIVATE);
+        DestroyWindow(focus);
+        CHECK_CALLED(WM_IME_SETCONTEXT_ACTIVATE);
+
+        SET_EXPECT(WM_IME_SETCONTEXT_DEACTIVATE);
+        SetFocus(child);
+        CHECK_CALLED(WM_IME_SETCONTEXT_DEACTIVATE);
+        rc = pImmAssociateContextEx(hwnd, newimc, 0);
+        ok(rc, "ImmAssociateContextEx failed\n");
+        SET_EXPECT(WM_IME_SETCONTEXT_ACTIVATE);
+        SetFocus(hwnd);
+        CHECK_CALLED(WM_IME_SETCONTEXT_ACTIVATE);
+
+        SET_EXPECT(WM_IME_SETCONTEXT_DEACTIVATE);
+        SET_EXPECT(WM_IME_SETCONTEXT_ACTIVATE);
+        rc = pImmAssociateContextEx(hwnd, NULL, IACE_DEFAULT);
+        CHECK_CALLED(WM_IME_SETCONTEXT_DEACTIVATE);
+        CHECK_CALLED(WM_IME_SETCONTEXT_ACTIVATE);
+        ok(rc, "ImmAssociateContextEx failed\n");
+
+        SET_ENABLE(WM_IME_SETCONTEXT_ACTIVATE, FALSE);
+        SET_ENABLE(WM_IME_SETCONTEXT_DEACTIVATE, FALSE);
     }
     ImmReleaseContext(hwnd,imc);
 }
@@ -736,6 +836,19 @@ static void test_ImmThreads(void)
 
     ok(himc != otherHimc, "Windows from other threads should have different himc\n");
     ok(otherHimc == threadinfo.himc, "Context from other thread should not change in main thread\n");
+
+    SET_ENABLE(WM_IME_SETCONTEXT_DEACTIVATE, TRUE);
+    SET_ENABLE(WM_IME_SETCONTEXT_ACTIVATE, TRUE);
+    SET_EXPECT(WM_IME_SETCONTEXT_ACTIVATE);
+    rc = ImmSetActiveContext(hwnd, otherHimc, TRUE);
+    ok(rc, "ImmSetActiveContext failed\n");
+    CHECK_CALLED(WM_IME_SETCONTEXT_ACTIVATE);
+    SET_EXPECT(WM_IME_SETCONTEXT_DEACTIVATE);
+    rc = ImmSetActiveContext(hwnd, otherHimc, FALSE);
+    ok(rc, "ImmSetActiveContext failed\n");
+    CHECK_CALLED(WM_IME_SETCONTEXT_DEACTIVATE);
+    SET_ENABLE(WM_IME_SETCONTEXT_DEACTIVATE, FALSE);
+    SET_ENABLE(WM_IME_SETCONTEXT_ACTIVATE, FALSE);
 
     h1 = ImmAssociateContext(hwnd,otherHimc);
     ok(h1 == NULL, "Should fail to be able to Associate a default context from a different thread\n");
@@ -1680,6 +1793,7 @@ static void test_InvalidIMC(void)
     CHAR buffer[1000];
     INPUTCONTEXT *ic;
     LOGFONTA lf;
+    BOOL r;
 
     memset(&lf, 0, sizeof(lf));
 
@@ -1696,6 +1810,17 @@ static void test_InvalidIMC(void)
     ok(ret == ERROR_INVALID_HANDLE, "wrong last error %08x!\n", ret);
     imc2 = ImmGetContext(hwnd);
     ok(imc1 == imc2, "imc should not changed! imc1 %p, imc2 %p\n", imc1, imc2);
+
+    SET_ENABLE(WM_IME_SETCONTEXT_DEACTIVATE, TRUE);
+    SET_ENABLE(WM_IME_SETCONTEXT_ACTIVATE, TRUE);
+    r = ImmSetActiveContext(hwnd, imc_destroy, TRUE);
+    ok(!r, "ImmSetActiveContext succeeded\n");
+    SET_EXPECT(WM_IME_SETCONTEXT_DEACTIVATE);
+    r = ImmSetActiveContext(hwnd, imc_destroy, FALSE);
+    ok(r, "ImmSetActiveContext failed\n");
+    CHECK_CALLED(WM_IME_SETCONTEXT_DEACTIVATE);
+    SET_ENABLE(WM_IME_SETCONTEXT_ACTIVATE, FALSE);
+    SET_ENABLE(WM_IME_SETCONTEXT_DEACTIVATE, FALSE);
 
     /* Test associating NULL imc, which is different from an invalid imc */
     oldimc = ImmAssociateContext(hwnd, imc_null);
@@ -2025,7 +2150,180 @@ static void test_InvalidIMC(void)
     ok(ret == ERROR_INVALID_HANDLE, "wrong last error %08x!\n", ret);
 }
 
+#define test_apttype(apttype) _test_apttype(apttype, __LINE__)
+static void _test_apttype(APTTYPE apttype, unsigned int line)
+{
+    APTTYPEQUALIFIER qualifier;
+    HRESULT hr, hr_expected;
+    APTTYPE type;
+
+    hr = CoGetApartmentType(&type, &qualifier);
+    hr_expected = (apttype == -1 ? CO_E_NOTINITIALIZED : S_OK);
+    ok_(__FILE__, line)(hr == hr_expected, "CoGetApartmentType returned %x\n", hr);
+    if (FAILED(hr))
+        return;
+
+    ok_(__FILE__, line)(type == apttype, "type %x\n", type);
+    ok_(__FILE__, line)(!qualifier, "qualifier %x\n", qualifier);
+}
+
+static DWORD WINAPI com_initialization_thread(void *arg)
+{
+    HRESULT hr;
+    BOOL r;
+
+    test_apttype(-1);
+    ImmDisableIME(GetCurrentThreadId());
+    r = ImmSetActiveContext(NULL, NULL, TRUE);
+    ok(r, "ImmSetActiveContext failed\n");
+    test_apttype(APTTYPE_MAINSTA);
+    hr = CoInitialize(NULL);
+    ok(hr == S_OK, "CoInitialize returned %x\n", hr);
+    CoUninitialize();
+    test_apttype(-1);
+
+    /* Changes IMM behavior so it no longer initialized COM */
+    r = ImmSetActiveContext(NULL, NULL, TRUE);
+    ok(r, "ImmSetActiveContext failed\n");
+    test_apttype(APTTYPE_MAINSTA);
+    hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    ok(hr == S_OK, "CoInitialize returned %x\n", hr);
+    test_apttype(APTTYPE_MTA);
+    CoUninitialize();
+    test_apttype(-1);
+    r = ImmSetActiveContext(NULL, NULL, TRUE);
+    ok(r, "ImmSetActiveContext failed\n");
+    test_apttype(-1);
+    return 0;
+}
+
+static void test_com_initialization(void)
+{
+    HANDLE thread;
+    HRESULT hr;
+    HWND wnd;
+    BOOL r;
+
+    thread = CreateThread(NULL, 0, com_initialization_thread, NULL, 0, NULL);
+    ok(thread != NULL, "CreateThread failed\n");
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+
+    test_apttype(-1);
+    r = ImmSetActiveContext(NULL, (HIMC)0xdeadbeef, TRUE);
+    ok(!r, "ImmSetActiveContext succeeded\n");
+    test_apttype(-1);
+
+    r = ImmSetActiveContext(NULL, NULL, TRUE);
+    ok(r, "ImmSetActiveContext failed\n");
+    test_apttype(APTTYPE_MAINSTA);
+
+    /* Force default IME window destruction */
+    wnd = CreateWindowA("static", "static", 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    ok(wnd != NULL, "CreateWindow failed\n");
+    DestroyWindow(wnd);
+    test_apttype(-1);
+
+    r = ImmSetActiveContext(NULL, NULL, TRUE);
+    ok(r, "ImmSetActiveContext failed\n");
+    test_apttype(APTTYPE_MAINSTA);
+    hr = CoInitialize(NULL);
+    ok(hr == S_OK, "CoInitialize returned %x\n", hr);
+    CoUninitialize();
+    test_apttype(-1);
+
+    /* Test with default IME window created */
+    wnd = CreateWindowA("static", "static", 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    ok(wnd != NULL, "CreateWindow failed\n");
+    test_apttype(-1);
+    r = ImmSetActiveContext(NULL, NULL, TRUE);
+    ok(r, "ImmSetActiveContext failed\n");
+    test_apttype(APTTYPE_MAINSTA);
+    hr = CoInitialize(NULL);
+    ok(hr == S_OK, "CoInitialize returned %x\n", hr);
+    CoUninitialize();
+    test_apttype(APTTYPE_MAINSTA);
+    DestroyWindow(wnd);
+    test_apttype(-1);
+
+    wnd = CreateWindowA("static", "static", 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    ok(wnd != NULL, "CreateWindow failed\n");
+    r = ImmSetActiveContext(NULL, NULL, TRUE);
+    CoUninitialize();
+    hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    ok(hr == S_OK, "CoInitialize returned %x\n", hr);
+    test_apttype(APTTYPE_MTA);
+    DestroyWindow(wnd);
+    test_apttype(-1);
+
+    wnd = CreateWindowA("static", "static", WS_POPUP, 0, 0, 100, 100, 0, 0, 0, 0);
+    ok(wnd != NULL, "CreateWindow failed\n");
+    ShowWindow(wnd, SW_SHOW);
+    test_apttype(APTTYPE_MAINSTA);
+    DestroyWindow(wnd);
+    test_apttype(-1);
+}
+
+static DWORD WINAPI disable_ime_thread(void *arg)
+{
+    HWND h, def;
+    MSG msg;
+    BOOL r;
+
+    h = CreateWindowA("static", "static", 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    ok(h != NULL, "CreateWindow failed\n");
+    def = ImmGetDefaultIMEWnd(h);
+    ok(def != NULL, "ImmGetDefaultIMEWnd returned NULL\n");
+
+    r = ImmDisableIME(arg ? GetCurrentThreadId() : 0);
+    ok(r, "ImmDisableIME failed\n");
+
+    if (arg)
+    {
+        def = ImmGetDefaultIMEWnd(h);
+        todo_wine ok(def != NULL, "ImmGetDefaultIMEWnd returned NULL\n");
+        while(PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
+            DispatchMessageA(&msg);
+    }
+    def = ImmGetDefaultIMEWnd(h);
+    ok(!def, "ImmGetDefaultIMEWnd returned %p\n", def);
+    return 0;
+}
+
+static void test_ImmDisableIME(void)
+{
+    HANDLE thread;
+    HWND def;
+    BOOL r;
+
+    def = ImmGetDefaultIMEWnd(hwnd);
+    ok(def != NULL, "ImmGetDefaultIMEWnd(hwnd) returned NULL\n");
+
+    thread = CreateThread(NULL, 0, disable_ime_thread, 0, 0, NULL);
+    ok(thread != NULL, "CreateThread failed\n");
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+
+    thread = CreateThread(NULL, 0, disable_ime_thread, (void*)1, 0, NULL);
+    ok(thread != NULL, "CreateThread failed\n");
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread);
+
+    r = ImmDisableIME(-1);
+    ok(r, "ImmDisableIME(-1) failed\n");
+    def = ImmGetDefaultIMEWnd(hwnd);
+    ok(!def, "ImmGetDefaultIMEWnd(hwnd) returned %p\n", def);
+}
+
 START_TEST(imm32) {
+    if (!is_ime_enabled())
+    {
+        win_skip("IME support not implemented\n");
+        return;
+    }
+
+    test_com_initialization();
+
     if (init())
     {
         test_ImmNotifyIME();
@@ -2052,6 +2350,9 @@ START_TEST(imm32) {
         if (pSendInput)
             test_ime_processkey();
         else win_skip("SendInput is not available\n");
+
+        /* there's no way of enabling IME - keep the test last */
+        test_ImmDisableIME();
     }
     cleanup();
 }

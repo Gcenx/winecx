@@ -2688,6 +2688,7 @@ enum coords_relative
 @REQ(create_monitor)
     rectangle_t   monitor_rect;   /* monitor rectangle */
     rectangle_t   work_rect;      /* monitor work area rectangle */
+    unsigned int  serial_no;      /* monitor serial number */
     VARARG(adapter,unicode_str);  /* adapter name */
 @REPLY
     user_handle_t handle;         /* handle to the monitor */

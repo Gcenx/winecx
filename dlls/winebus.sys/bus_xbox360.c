@@ -107,9 +107,9 @@ static const WCHAR busidW[] = {'X','B','O','X',0};
 
 struct platform_private {
     io_object_t object;
-    IOUSBDeviceInterface500 **dev;
+    IOUSBDeviceInterface500 * HOSTPTR * HOSTPTR dev;
 
-    IOUSBInterfaceInterface550 **interface;
+    IOUSBInterfaceInterface550 * HOSTPTR * HOSTPTR interface;
     CFRunLoopSourceRef source;
 
     BOOL started;
@@ -241,7 +241,7 @@ static int xbox_compare_platform_device(DEVICE_OBJECT *device, void * HOSTPTR pl
     return IOObjectIsEqualTo(dev2, ext->object);
 }
 
-static HRESULT get_device_string(IOUSBDeviceInterface500 **dev, UInt8 idx, WCHAR *buffer, DWORD length)
+static HRESULT get_device_string(IOUSBDeviceInterface500 * HOSTPTR * HOSTPTR dev, UInt8 idx, WCHAR *buffer, DWORD length)
 {
     UInt16 buf[64];
     IOUSBDevRequest request;
@@ -373,6 +373,7 @@ static NTSTATUS xbox_set_feature_report(DEVICE_OBJECT *device, UCHAR id, BYTE *r
     memcpy(data->data, report, length);
 
     ret = (*private->interface)->WritePipe(private->interface, 2, data, size);
+    HeapFree(GetProcessHeap(), 0, data);
     if (ret == kIOReturnSuccess)
     {
         *written = length;
@@ -475,6 +476,7 @@ static NTSTATUS open_xbox_gamepad(DEVICE_OBJECT *object)
 
     ret = (*private->dev)->CreateInterfaceIterator(private->dev, &intf, &iter);
     usbInterface = IOIteratorNext(iter);
+    IOObjectRelease(iter);
     (*private->dev)->USBDeviceClose(private->dev);
 
     if (!usbInterface)
@@ -499,17 +501,12 @@ static NTSTATUS open_xbox_gamepad(DEVICE_OBJECT *object)
 
     ret = (*private->interface)->USBInterfaceOpen(private->interface);
     if (ret != kIOReturnSuccess)
-    {
-        (*private->interface)->Release(private->interface);
         return STATUS_UNSUCCESSFUL;
-    }
 
     ret = (*private->interface)->CreateInterfaceAsyncEventSource(private->interface, &private->source);
     if (ret != kIOReturnSuccess)
-    {
-        (*private->interface)->Release(private->interface);
         return STATUS_UNSUCCESSFUL;
-    }
+
     CFRunLoopAddSource(run_loop, private->source, kCFRunLoopCommonModes);
 
     /* Turn Off LEDs */
@@ -544,7 +541,7 @@ static void process_IOService_Device(io_object_t object)
 {
     IOReturn err;
     IOCFPlugInInterface * HOSTPTR * HOSTPTR plugInInterface=NULL;
-    IOUSBDeviceInterface500 **dev=NULL;
+    IOUSBDeviceInterface500 * HOSTPTR * HOSTPTR dev=NULL;
     SInt32 score;
     HRESULT res;
     DEVICE_OBJECT *device=NULL;
@@ -561,8 +558,7 @@ static void process_IOService_Device(io_object_t object)
     if ((kIOReturnSuccess != err) || (plugInInterface == nil) )
     {
         ERR("Unable to create plug in interface for USB device");
-        IOObjectRelease(object);
-        return;
+        goto failed;
     }
 
     res = (*plugInInterface)->QueryInterface(plugInInterface, CFUUIDGetUUIDBytes(kIOUSBDeviceInterfaceID500), (LPVOID)&dev);
@@ -570,8 +566,7 @@ static void process_IOService_Device(io_object_t object)
     if (res || !dev)
     {
         ERR("Unable to create USB device with QueryInterface\n");
-        IOObjectRelease(object);
-        return;
+        goto failed;
     }
 
     (*dev)->GetLocationID(dev, &uid);
@@ -579,8 +574,7 @@ static void process_IOService_Device(io_object_t object)
     if (find_device_by_uid(uid))
     {
         WARN("Device ID 0x%04X (%d) already found. Not adding again\n", (DWORD)uid, (DWORD)uid);
-        IOObjectRelease(object);
-        return;
+        goto failed;
     }
 
     (*dev)->GetDeviceVendor(dev, &vid);
@@ -602,14 +596,13 @@ static void process_IOService_Device(io_object_t object)
     else
     {
         TRACE("Not an XBOX 360 controller\n");
-        return;
+        goto failed;
     }
 
     if (!device)
     {
         ERR("Failed to create device\n");
-        IOObjectRelease(object);
-        (*dev)->Release(dev);
+        goto failed;
     }
     else
     {
@@ -618,14 +611,17 @@ static void process_IOService_Device(io_object_t object)
         ext->dev = dev;
         res = open_xbox_gamepad(device);
         if (res != ERROR_SUCCESS)
-        {
             cleanupDevice(device);
-            IOObjectRelease(object);
-            (*dev)->Release(dev);
-        }
         else
             IoInvalidateDeviceRelations(bus_pdo, BusRelations);
     }
+    return;
+
+failed:
+    if (dev)
+        (*dev)->Release(dev);
+    IOObjectRelease(object);
+    return;
 }
 
 static void handle_IOServiceMatchingCallback(void * HOSTPTR refcon, io_iterator_t iter)

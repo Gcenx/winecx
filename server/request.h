@@ -1728,6 +1728,7 @@ C_ASSERT( FIELD_OFFSET(struct set_user_object_info_reply, old_obj_flags) == 12 )
 C_ASSERT( sizeof(struct set_user_object_info_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct create_monitor_request, monitor_rect) == 12 );
 C_ASSERT( FIELD_OFFSET(struct create_monitor_request, work_rect) == 28 );
+C_ASSERT( FIELD_OFFSET(struct create_monitor_request, serial_no) == 44 );
 C_ASSERT( sizeof(struct create_monitor_request) == 48 );
 C_ASSERT( FIELD_OFFSET(struct create_monitor_reply, handle) == 8 );
 C_ASSERT( sizeof(struct create_monitor_reply) == 16 );

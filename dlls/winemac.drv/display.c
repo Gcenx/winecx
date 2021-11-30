@@ -1725,6 +1725,7 @@ static BOOL macdrv_init_monitor(HDEVINFO devinfo, const struct macdrv_monitor *m
             req->work_rect.left = work_rect.left;
             req->work_rect.right = work_rect.right;
             req->work_rect.bottom = work_rect.bottom;
+            req->serial_no = monitor->serial_no;
             wine_server_add_data(req, bufferW, length * sizeof(WCHAR));
             status = wine_server_call(req);
         }

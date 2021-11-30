@@ -516,12 +516,40 @@ struct d3d_query *unsafe_impl_from_ID3D11Query(ID3D11Query *iface) DECLSPEC_HIDD
 struct d3d_query *unsafe_impl_from_ID3D10Query(ID3D10Query *iface) DECLSPEC_HIDDEN;
 struct d3d_query *unsafe_impl_from_ID3D11Asynchronous(ID3D11Asynchronous *iface) DECLSPEC_HIDDEN;
 
-/* ID3D11DeviceContext - immediate context */
-struct d3d11_immediate_context
+struct d3d_device_context_state_entry
+{
+    struct d3d_device *device;
+    struct wined3d_state *wined3d_state;
+};
+
+/* ID3DDeviceContextState */
+struct d3d_device_context_state
+{
+    ID3DDeviceContextState ID3DDeviceContextState_iface;
+    LONG refcount, private_refcount;
+
+    struct wined3d_private_store private_store;
+    D3D_FEATURE_LEVEL feature_level;
+    GUID emulated_interface;
+
+    struct d3d_device_context_state_entry *entries;
+    SIZE_T entries_size;
+    SIZE_T entry_count;
+
+    struct wined3d_device *wined3d_device;
+    ID3D11Device2 *device;
+};
+
+/* ID3D11DeviceContext */
+struct d3d11_device_context
 {
     ID3D11DeviceContext1 ID3D11DeviceContext1_iface;
     ID3D11Multithread ID3D11Multithread_iface;
     LONG refcount;
+
+    D3D11_DEVICE_CONTEXT_TYPE type;
+    struct wined3d_device_context *wined3d_context;
+    struct d3d_device *device;
 
     struct wined3d_private_store private_store;
 };
@@ -537,10 +565,10 @@ struct d3d_device
     IUnknown *outer_unk;
     LONG refcount;
 
-    D3D_FEATURE_LEVEL feature_level;
     BOOL d3d11_only;
 
-    struct d3d11_immediate_context immediate_context;
+    struct d3d_device_context_state *state;
+    struct d3d11_device_context immediate_context;
 
     struct wined3d_device_parent device_parent;
     struct wined3d_device *wined3d_device;
@@ -549,6 +577,20 @@ struct d3d_device
     struct wine_rb_tree depthstencil_states;
     struct wine_rb_tree rasterizer_states;
     struct wine_rb_tree sampler_states;
+
+    struct d3d_device_context_state **context_states;
+    SIZE_T context_states_size;
+    SIZE_T context_state_count;
+};
+
+struct d3d11_command_list
+{
+    ID3D11CommandList ID3D11CommandList_iface;
+    LONG refcount;
+
+    ID3D11Device2 *device;
+    struct wined3d_command_list *wined3d_list;
+    struct wined3d_private_store private_store;
 };
 
 static inline struct d3d_device *impl_from_ID3D11Device(ID3D11Device *iface)
